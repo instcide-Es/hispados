@@ -191,7 +191,7 @@ config "$XMS"
   send 'ECHO SIGUE-VIVO'
   mon quit
 } | run 60 -vga cirrus
-check "VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA]"
+check "VENTANAS [/1024 | /800 | /640 | /MODO:AxB] [/8 | /15 | /16 | /24 | /32 | /COLOR]"
 check "Hispa Ventanas: cargando el servidor DPMI (HSPDPMI)..."
 check "Instalado: clientes de 16 y de 32 bits, memoria de XMS."
 check "Ratón PS/2"; check " preparado."  # (con rueda: «Ratón PS/2 con rueda (IntelliMouse) preparado.»)

@@ -164,8 +164,8 @@ texto).
 ```
 DEVICE=A:\HISPADOS\HSPXMS.SYS        (en CONFIG.SYS)
 KEYB SP                              (en AUTOEXEC.BAT, para el teclado español)
-VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DEMO]
-         [/CONTORNO] [/486]
+VENTANAS [/1024 | /800 | /640 | /MODO:AxB[xC] | /MODO:AUTO] [/8 | /15 | /16 | /24 | /32 | /COLOR]
+         [/VGA] [/DEMO] [/CONTORNO] [/486]
 ```
 
 - Hace falta HSPXMS.SYS (si no está, lo dice y termina).
@@ -174,8 +174,16 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
   encuentra, pide que se ejecute antes.
 - Si no hay driver de ratón (INT 33h), carga HSPRATON.COM de su misma carpeta
   (queda residente); sin ratón funciona igual con el teclado.
-- Sin opciones: VESA 800×600 de 256 colores; si la tarjeta no tiene VESA 2.0
-  con marco lineal, VGA de 640×480 y 16 colores.
+- [PANTALLA] Sin opciones: la resolución de `Modo=` de VENTANAS.INI (la
+  que se elige en Configuración › Resolución) o, si no hay, la
+  **automática**: la de la pantalla (su EDID) si la tarjeta la da, o la
+  mayor que quepa en ella; si la pantalla no dice cuál es la suya, 800×600
+  como siempre. Con 256 colores si los hay. Si la tarjeta no tiene VESA 2.0
+  con marco lineal, VGA de 640×480 y 16 colores. Ver «La pantalla:
+  resolución y colores».
+- `/1024`, `/800`, `/640` y `/MODO:1440x900` (o `/MODO:1440x900x32`, con los
+  colores; `/MODO:AUTO`, la automática) piden una resolución: **mandan sobre
+  VENTANAS.INI**. Si la tarjeta no la tiene, se usa la automática.
 - `/486` pone el **escritorio de Hispa-486**: la barra de tareas abajo y el
   menú Inicio, sin la barra de arriba y con el Centro de programas cerrado
   (ver «El escritorio de Hispa-486»; también con `Escritorio=486` en
@@ -233,6 +241,95 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
   llamada sin preguntar en la pantalla; no cambia ningún otro vector de
   interrupción. Si el programa falla estando en gráficos, vuelve antes a modo
   texto para que se lea el mensaje de HSPDPMI.
+
+### La pantalla: resolución y colores
+
+[PANTALLA] Pedido de Carlos (un MacBook Air 2012, pantalla de 1440×900):
+Hispa Ventanas salía siempre en 800×600, que la pantalla amplía, y «los
+iconos ocupan 1/16 de la pantalla»: «Necesitamos un gestor de gráficos y
+otro de tamaño de iconos».
+
+**Cómo se elige el modo** (`ventanas/video16.inc`, en modo real, antes de
+entrar en modo protegido):
+
+1. `vl_listar` pide a la tarjeta (VBE 4F00h y 4F01h) sus modos y apunta en
+   `vl_tabla` las resoluciones (de 640×480 a 2560×1600, también las
+   panorámicas: 1280×800, 1366×768, 1440×900, 1920×1080... las que dé) que
+   tienen marco lineal y, de cada una, en qué colores: 256 (8 bits),
+   32.768 o 65.536 (15 o 16) y 16,7 millones (24 o 32). Hasta 32
+   resoluciones.
+2. `vl_edid` lee el **EDID** de la pantalla (VBE/DDC, 4F15h, bloque 0): la
+   resolución nativa, la del primer «detailed timing» (con la cabecera
+   `00 FF FF FF FF FF FF 00` bien; si no, como si no hubiera).
+3. La resolución: la pedida por la línea de órdenes (`/1024`, `/800`,
+   `/640`, `/MODO:AxB`); si no, `Modo=` de `[Pantalla]` en VENTANAS.INI
+   (`vid_ini` lo lee antes, con INT 21h); si no se pide ninguna o esta
+   tarjeta no la tiene (una VENTANAS.INI de otro equipo), la
+   **automática** (`vl_auto`): la nativa si la da la tarjeta y no pasa de
+   1920×1200; si no, la mayor en puntos que quepa en la nativa (y en
+   1920×1200: en un 1440×900 sin ese modo, 1280×800); **sin EDID, 800×600**
+   (o 640×480 o 1024×768): un monitor de tubo viejo puede no ver más, y
+   así no se queda la pantalla en negro.
+4. Los colores: los pedidos (`/8`... `/32` o la `xC` de `Modo=`) si esa
+   resolución los tiene (16 vale por 15 y 32 por 24, y al revés); si no,
+   256 colores (lo más rápido) o, con `/COLOR`, los más que haya.
+
+Todo lo de arriba de la capa de vídeo dibuja en una superficie de un
+octeto por punto del tamaño de la pantalla, así que nada más cambia: las
+ventanas, la barra, los menús y el fondo (la imagen se ajusta a la
+pantalla que haya) valen para cualquier tamaño. En 1440×900 la superficie
+ocupa 1,3 MB de memoria extendida y el marco lineal, 5 MB con 32 bits.
+
+**En «Juegos» (HSPEMM, modo V86)** el modo grande va igual: el marco
+lineal se pone con DPMI 0800h, que HSPDPMI hace también como cliente VCPI
+(probado en QEMU hasta 1920×1200 de 32 bits, y en el MacBook, `/800` y
+`/1024` en «Juegos»). Lo que salía pequeño en el Mac no era el V86 sino la
+elección: hasta la 0.9.27 sin opciones era siempre 800×600.
+
+**Configuración › Resolución** enseña la lista de la tarjeta (de menos a
+más puntos; «(pantalla)» la del EDID, «(ahora)» la puesta, y «Automática»),
+los colores (256, miles, millones) y **«Probar...»** (o doble clic en
+una). Cambiar de modo **no se hace en marcha**: «Probar» guarda lo
+pendiente y **vuelve a cargar Hispa Ventanas** como al volver de un juego
+(CENTRO.INI guarda las ventanas y los grupos), con
+` /MODO:1024x768x8 /PRUEBA` detrás de las opciones de siempre, solo esa vez
+(el lanzador las guarda en `lz_extra` y las pone en la cola de órdenes;
+`lz_orden` = 2 es «volver a cargar sin programa»). Con `/PRUEBA`,
+Configuración pregunta **«¿Se ve bien la pantalla?»** con «Sí, dejarla así»
+y «No, volver atrás», y cuenta 15 segundos: con «Sí» escribe `Modo=` en
+VENTANAS.INI; con «No», Esc o si nadie contesta (la pantalla no ve ese
+modo), vuelve a cargar Hispa Ventanas con ` /RESOL`: el modo de antes (que
+sigue en VENTANAS.INI o en la línea de órdenes) y Configuración abierta en
+«Resolución». Si el Bloc de notas tiene cambios sin guardar, pregunta antes.
+
+Capturas (QEMU con una pantalla de 1440×900, `tests/run_resolucion_tests.sh`):
+`docs/ventanas/resolucion_apartado.png` (el apartado),
+`resolucion_pregunta.png` (la pregunta tras «Probar» 1024×768),
+`resolucion_iconos_grandes.png`, `resolucion_iconos_pequenos.png` y
+`resolucion_escritorio486.png` / `resolucion_escritorio486_grandes.png` (el
+escritorio de Hispa-486 a 1440×900, con los iconos normales y con los
+grandes y el menú Inicio).
+
+### El tamaño de los iconos
+
+[ICONOS] Configuración › Resolución › «Tamaño de los iconos y de su texto»:
+**pequeños** (16×16), **normales** (32×32, los de siempre) o **grandes**
+(48×48). Se aplica al momento (`aj_poner(AJ_ICONOS)`, `ventanas/pantalla.inc`)
+y se guarda como `Iconos=` en VENTANAS.INI. Cambia:
+
+- los iconos de los **grupos del Centro de programas** y del propio Centro:
+  el dibujo, de un icono al siguiente (`cen_paso`: 96, 104 o 120 puntos) y
+  de una fila a la siguiente (`cen_fila`: 60, 76 o 100). Las columnas se
+  ajustan al ancho de la ventana: al ensancharla (o maximizarla en una
+  pantalla grande) caben más;
+- los **iconos del escritorio de Hispa-486** (la misma casilla);
+- el **menú Inicio** de Hispa-486: con los grandes, iconos de 32 y cada
+  orden más alta (38 puntos en vez de 22).
+
+Los dibujos son de 32×32: los grandes se amplían (cada punto a 1 o 2, sin
+difuminar: siguen nítidos) y los pequeños se reducen (de cada 2×2 el primer
+punto que no es transparente). El texto de los nombres es siempre la letra
+de 8×16 (la de todo Hispa Ventanas): partido en dos líneas si es largo.
 
 ### Cambiar el tamaño y desplazarse
 
@@ -886,10 +983,13 @@ así que no hace falta volver a entrar.
 
 **Los iconos del escritorio** (`be_*`): los accesos de los grupos con
 `Escritorio=1` en CENTRO.INI (ver «CENTRO.INI»; hasta 8) salen en el fondo,
-en columnas desde arriba a la izquierda, **grandes**: el dibujo a doble
-tamaño (64×64) y el nombre debajo en una etiqueta crema con filete marrón, a
-doble tamaño (16×32 por letra) si tiene hasta 10 letras y, si no, en negrita
-normal (hasta 20). Lo pide la prueba de uso con la biblioteca
+en columnas desde arriba a la izquierda: [ICONOS] el dibujo del tamaño de
+los iconos de Configuración (normales: 32×32) y el nombre debajo, con la
+letra normal, centrado y partido en dos líneas si es largo, en blanco con
+una sombra tinta para que se lea sobre la imagen de fondo (hasta la 0.9.27
+eran de 64×64 con el nombre a doble tamaño en una etiqueta crema: en un
+portátil de 1440×900 a 800×600 ampliado cada uno se comía la pantalla).
+Lo pide la prueba de uso con la biblioteca
 (docs/486/USABILIDAD-NAVEGADOR.md, M11): el icono **«Biblioteca»** abre el
 Navegador en su página de inicio (`Inicio=` de NAVEGA.INI).
 
@@ -898,8 +998,9 @@ Navegador en su página de inicio (`Inicio=` de NAVEGA.INI).
   otro). Si es un programa de Windows que ya está en marcha, no abre otro:
   trae su ventana delante (en el equipo de la biblioteca, un solo
   Navegador).
-- Uno está siempre **marcado** (en añil, letras blancas; al entrar, el
-  primero): sin ninguna ventana activa, **Intro** lo abre y las **flechas**
+- Uno está siempre **marcado** (al entrar, el primero), pero la marca (en
+  añil, como en los grupos) solo se ve después de un clic o de una flecha:
+  sin ninguna ventana activa, **Intro** lo abre y las **flechas**
   cambian de icono (izquierda y derecha, de columna).
 - El grupo no sale en el menú Inicio (sus accesos ya están a la vista); se
   cambia desde el Centro de programas, como los demás, y el escritorio se
@@ -1185,6 +1286,7 @@ fábrica» (pregunta antes), «Guardar» y «Cerrar».
 | Fecha y hora | La fecha con todas las letras y la hora, al segundo; seis cuadros (día, mes, año, hora, minuto, segundo) y «Poner fecha y hora» |
 | Sistema | Versión de Hispa Ventanas y de Hispa-DOS, procesador, memoria convencional, extendida y libre, pantalla, vídeo, ratón, sonido, teclado y país. Abajo, **«Tipos de archivo...»** ([ASOCIA], 0.9.22): las extensiones con el programa que las abre (de `\HISPADOS\ASOCIA.INI`), más «Añadir un tipo...» y «Volver a los de serie»; al elegir una, la lista de programas (o «Ninguno», que la quita) |
 | Red | La red local del equipo (como las «Propiedades de TCP/IP» de Windows). Una casilla **«Obtener la dirección automáticamente (DHCP)»**; al quitarla, cuatro cuadros para la **IP**, la **máscara de subred**, la **puerta de enlace** y el **servidor DNS** a mano (cada uno `a.b.c.d`, con octetos de 0 a 255; con DHCP puesto, no salen). Arriba, el estado en marcha si HSPRED está cargado: la MAC y la IP que tiene. Se guarda en `\HISPADOS\RED.INI` (no en VENTANAS.INI); los cambios se aplican al reiniciar o al recargar HSPRED (`CONFRED /RENOVAR`). Ver docs/RED.md |
+| Resolución | [PANTALLA] La **resolución** y los **colores** de la pantalla: la lista de las que da la tarjeta («Automática», y la de la pantalla marcada), los colores (256, miles o millones) y **«Probar...»**, que vuelve a cargar Hispa Ventanas en ella y pregunta «¿Se ve bien?» (sin contestar, a los 15 segundos vuelve a la de antes). [ICONOS] Debajo, el **tamaño de los iconos**: pequeños, normales o grandes, al momento. Ver «La pantalla: resolución y colores» y «El tamaño de los iconos» |
 | Escritorio | [ESTILO] Arriba, el **estilo del escritorio**: «Clásico (Centro de programas)» o «Barra de tareas con menú Inicio», que se cambia al momento (ver «El escritorio de Hispa-486»). [FONDO] Debajo, la imagen de fondo del escritorio: la que hay puesta, **«Elegir imagen...»** (un BMP, con el diálogo de abrir), **«Sin fondo»** y cómo se pone: ajustada a la pantalla (con su proporción), centrada, en mosaico, estirada (toda la pantalla, aunque se deforme) o rellenando (toda la pantalla, recortando lo que sobra). Ver «La imagen de fondo del escritorio» |
 
 Todo se aplica **al momento**. Lo de Pantalla, Ratón y Teclado se guarda en
@@ -1247,6 +1349,8 @@ ColorDibujo=3
 Salvapantallas=0
 Minutos=5
 SalvaDibujo=letrero
+Iconos=normales
+Modo=1440x900x8
 
 [Raton]
 Velocidad=2
@@ -1279,6 +1383,14 @@ Ajuste=ajustada
   `Salvapantallas` = 0/1, `Minutos` = 1-60 y `SalvaDibujo` = `letrero`
   o `lluvia` (o su número, 0 o 1; no se llama `Dibujo` porque ese es el
   del fondo y las claves no miran la sección).
+- [ICONOS] `Iconos` = `pequeños`, `normales` o `grandes` (o 0, 1, 2).
+- [PANTALLA] `Modo` = `AxB` o `AxBxC` (C: 8, 15, 16, 24 o 32 bits) o
+  `auto`. **Lo lee VENTANAS.COM al arrancar, antes de poner el modo**
+  (`vid_ini`, `ventanas/video16.inc`: aquí sí mira la sección, solo en
+  `[Pantalla]`); la línea de órdenes manda sobre él. Si la tarjeta no
+  tiene esa resolución (VENTANAS.INI de otro equipo), la automática.
+  Configuración solo lo escribe al decir «Sí» tras «Probar»; sin la clave,
+  la automática.
 - `Velocidad`: del ratón, en mitades (1 = x0,5; 2 = normal; 6 = x3).
   `DobleClic`: milisegundos como mucho entre los dos clics (165-990; se
   redondea a tics de reloj, de 55 ms). `Zurdo` = 0/1. `CtrlClic` = 1 (lo
@@ -1375,7 +1487,7 @@ devuelven algo.
 
 | Función | Qué hace |
 |---|---|
-| `vid_detectar` | (modo real) elige el modo: VESA con marco lineal a la resolución pedida, 800×600 o VGA de 16 colores |
+| `vid_detectar` | (modo real) elige el modo: [PANTALLA] la lista de la tarjeta (`vl_tabla`), el EDID, la resolución pedida o la automática, y los colores; si no hay VESA, VGA de 16 colores (ver «La pantalla: resolución y colores») |
 | `vid_abrir` | pone el modo y la paleta; si VESA falla, pasa a VGA |
 | `vid_presentar` | lleva un rectángulo de la superficie a la pantalla (EAX=x0 EBX=y0 ECX=x1 EDX=y1) |
 | `vid_cerrar` | vuelve al modo de texto anterior |
@@ -2627,6 +2739,24 @@ También se abre con doble clic en el altavoz de la barra, con el botón
 «Mezclador...» de su ventanita y con el de Configuración > Sonido.
 
 ## Pruebas
+
+- [PANTALLA] Las pruebas arrancan QEMU con `-vga std -global VGA.xres=800
+  -global VGA.yres=600` (la variable `QEMU_PANTALLA`, que se puede cambiar):
+  una pantalla de 800×600 según su EDID, para que la resolución automática
+  siga siendo 800×600 y valgan las coordenadas de siempre (sin eso, QEMU
+  dice 1280×800).
+- `tests/run_resolucion_tests.sh` ([PANTALLA], [ICONOS]): con una pantalla
+  de 1440×900 (la del MacBook), sin opciones sale en 1440×900;
+  Configuración › Resolución (la lista, la nota); «Probar» 1024×768 vuelve
+  a cargar Hispa Ventanas en ese modo y pregunta; sin contestar, a los 15
+  segundos vuelve a 1440×900 con Configuración en Resolución y sin `Modo=`;
+  «Probar» y «Sí»: `Modo=1024x768x8` y, al volver a entrar, 1024×768; `/800`
+  manda; `/MODO:AUTO`. Un `Modo=` que la tarjeta no tiene: la automática.
+  Los iconos grandes en un grupo y los pequeños desde Configuración (al
+  momento; `Iconos=pequeños`). Sin EDID, 800×600; con HSPEMM (V86),
+  1440×900 de 32 bits. Con la imagen de Hispa-486, su escritorio a
+  1440×900 con «Biblioteca» y el menú Inicio con los iconos grandes.
+  Capturas en `docs/ventanas/`.
 
 - `tests/run_fondo_tests.sh` ([FONDO]): la imagen de fondo del escritorio.
   La prueba hace sus imágenes (con `tools/mkfondo.py` las de 8 bits, y una

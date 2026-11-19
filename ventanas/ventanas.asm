@@ -2,7 +2,7 @@
 ;  VENTANAS.COM - Hispa Ventanas, etapa 3: ventanas, mensajes y programas
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  Uso:  VENTANAS [/1024] [/640] [/8] [/15] [/16] [/24] [/32] [/COLOR] [/VGA]
+;  Uso:  VENTANAS [/1024] [/800] [/640] [/MODO:AxB[xC]] [/8] [/15] [/16] [/24] [/32] [/COLOR] [/VGA]
 ;                 [/DEMO] [/CONTORNO]
 ;
 ;  El entorno gráfico propio que va encima de Hispa-DOS (docs/VENTANAS.md).
@@ -2042,10 +2042,13 @@ opciones:
 
 m_ayuda     db "Hispa Ventanas 0.3 - entorno gráfico de Hispa-DOS (etapa 3)", 13, 10
             db 13, 10
-            db "VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA]", 13, 10
-            db "         [/DEMO] [/CONTORNO] [/486]", 13, 10
+            db "VENTANAS [/1024 | /800 | /640 | /MODO:AxB] [/8 | /15 | /16 | /24 | /32 | /COLOR]", 13, 10
+            db "         [/VGA] [/DEMO] [/CONTORNO] [/486]", 13, 10
             db 13, 10
-            db "  /1024 /800 /640  resolución VESA: 1024x768, 800x600 (la normal) o 640x480", 13, 10
+            db "  /1024 /800 /640  resolución VESA: 1024x768, 800x600 o 640x480", 13, 10
+            db "  /MODO:1440x900   otra (también 1440x900x32, con los colores; o /MODO:AUTO)", 13, 10
+            db "                   Sin ninguna: la de VENTANAS.INI (Configuración, Resolución)", 13, 10
+            db "                   o la de la pantalla, si la tarjeta la da (si no, 800x600)", 13, 10
             db "  /8 ... /32       bits por punto (lo normal: 8, es decir, 256 colores)", 13, 10
             db "  /COLOR           color verdadero: el modo con más colores que haya", 13, 10
             db "  /VGA             no usar VESA: VGA de 640x480 y 16 colores", 13, 10

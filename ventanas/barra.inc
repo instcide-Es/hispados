@@ -945,6 +945,7 @@ be_pintar:
         call dc_rect
         inc ebx
         COLOR C_BLANCO
+        xor eax, eax
         call be_nombre
         jmp .sig
 .sombra:

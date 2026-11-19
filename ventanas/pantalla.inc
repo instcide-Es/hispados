@@ -75,6 +75,7 @@ ico_talla_poner:
         mov ecx, 5
         rep movsd
         call bt_mi_tallas           ; el menú Inicio de Hispa-486
+        call cen_alargar            ; el Centro, si tiene su medida de fábrica, a lo que haga falta
         call vistas_repintar        ; los grupos y el escritorio de Hispa-486
         popad
         ret

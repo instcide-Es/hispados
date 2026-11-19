@@ -118,8 +118,8 @@ ID_SDIB     equ 117                 ; las opciones: 117 letrero, 118 lluvia (119
 ; la lluvia verde: columnas de caracteres que caen
 LL_AN       equ 10                  ; ancho de cada columna, en puntos
 LL_AL       equ 16                  ; alto de cada fila (la fuente es de 8x16)
-LL_MAXC     equ 128                 ; columnas como mucho (1280 puntos)
-LL_MAXF     equ 64                  ; filas como mucho (1024 puntos)
+LL_MAXC     equ 256                 ; columnas como mucho (2560 puntos; [PANTALLA] antes 128)
+LL_MAXF     equ 128                 ; filas como mucho (2048 puntos; antes 64)
 LL_NEGRO    equ 7                   ; el último de los colores: el fondo
 INI_MAX     equ 2048
 ; tipos de las claves de VENTANAS.INI
@@ -3730,6 +3730,11 @@ preg_si:
         pop eax
 .pon:
         mov [a_modo], eax
+        mov byte [ebx+8], 1         ; (para la nota: ya es la de VENTANAS.INI,
+        test eax, eax               ;  o la automática)
+        jnz .g
+        mov byte [ebx+8], 0
+.g:
         call guardar
         cmp byte [montado], 0
         je .e
@@ -5239,7 +5244,7 @@ ll_celda:
         movzx eax, byte [esi+LL_NEGRO]
         HV dc_color
         mov esi, ebx
-        shl esi, 6                  ; (LL_MAXF = 64)
+        shl esi, 7                  ; (LL_MAXF = 128)
         add esi, edi
         add esi, ll_car
         imul eax, ebx, LL_AN
@@ -5280,7 +5285,7 @@ ll_paso:
         jge .d0
         call ll_letra               ; la cabeza, con una letra nueva
         mov ecx, ebx
-        shl ecx, 6
+        shl ecx, 7                  ; (LL_MAXF = 128)
         mov [ll_car+ecx+edi], al
 .d0:
         xor edx, edx
@@ -5365,7 +5370,7 @@ ll_marco:
         jge .ms
         call ll_letra
         mov ecx, ebx
-        shl ecx, 6
+        shl ecx, 7                  ; (LL_MAXF = 128)
         mov [ll_car+ecx+edi], al
         call ll_nivel
         call ll_celda

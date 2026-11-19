@@ -116,7 +116,8 @@ echo "-- 1) la memoria de Hispa-486 arranca a su escritorio --"
 chk $T/a1.ppm tam 800 600 px 400 572 10 "el filete de la barra de tareas" px 84 590 1 "la barra de tareas" \
   texto 26 578 8 4 negrita "Inicio" nopx 400 10 1 "sin barra arriba" \
   nobusca 0 0 500 300 1 6 "Centro de programas" \
-  texto 32 102 9 12 doble "Biblioteca" nopx 100 40 2 "el dibujo del icono «Biblioteca»"
+  texto 24 70 9 - fina "Biblioteca" nopx 64 44 2 "el dibujo del icono «Biblioteca»" \
+  nopx 30 66 12 "sin marca ni etiqueta (hasta un clic o una flecha)"
 # [FONDO] la imagen de fondo de la edición, tal cual (800x600), detrás de la barra
 # (a la derecha del icono «Biblioteca», que va encima)
 chk $T/a1.ppm bmp sistema/486/FONDO.BMP 0 0 800 600 160 20 600 500 bmp sistema/486/FONDO.BMP 0 0 800 600 0 0 800 20

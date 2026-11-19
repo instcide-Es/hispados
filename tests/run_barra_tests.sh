@@ -257,17 +257,18 @@ printf '%s\r\n' '[Centro]' 'Ventana=36,52,452,190' 'Activo=-1' 'SinRepetidos=1' 
   '[Acceso]' 'Nombre=Bloc de notas' 'Icono=bloc' 'Programa=:BLOC' \
   | iconv -f UTF-8 -t CP437 > $T/CENTRO.INI
 MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
-# Las casillas de los iconos: desde 24,24, de 176x128, en columnas de 4 (hasta
-# la barra, en y = 572). El dibujo (64x64), en x + 56, y + 4; la etiqueta, en
-# y + 74, centrada: «Biblioteca» (10 letras a doble tamaño, 160x32) en 24,98
-# (176x40, el texto en 32,102); «Bloc de notas» (13: en negrita normal) en
-# 52,226 (120x24, el texto en 60,230).
+# [ICONOS] Las casillas de los iconos (normales): desde 12,12, de 104x92, en
+# columnas de 6 (hasta la barra, en y = 572). El dibujo (32x32), en x + 36,
+# y + 16; el nombre, con la letra normal, centrado en x + 52, desde y + 58,
+# en blanco con sombra: «Biblioteca» en 24,70; «Bloc de notas», en dos
+# líneas: «Bloc de» en 36,162 y «notas» en 44,177. La marca (añil) solo
+# tras un clic o una flecha.
 RX=400; RY=300; BY=588
 { sleep 6; send 'VENTANAS /486' 10
   ir 600 400; shot d1                               # los iconos
   tecla ret; sleep 2; ir 600 400; shot d2           # Intro: el marcado («Biblioteca»: la Calculadora)
   tecla alt-f4; sleep 1.5
-  clic 112 188; sleep 2; ir 600 400; shot d3        # un clic en «Bloc de notas»
+  clic 64 136; sleep 2; ir 600 400; shot d3         # un clic en «Bloc de notas»
   tecla alt-f4; sleep 1.5; ir 600 400; shot d4      # cerrado: el escritorio, con «Bloc de notas» marcado
   tecla up; sleep 0.8; shot d5                      # flecha arriba: «Biblioteca»
   tecla ctrl-esc; sleep 1; shot d6                  # el menú Inicio, sin el grupo «Escritorio»
@@ -275,14 +276,15 @@ RX=400; RY=300; BY=588
   tecla ret; sleep 6                                # Intro: apagar
   mon quit; } | TMAX=120 run
 echo "-- los iconos del escritorio de Hispa-486 (el grupo con «Escritorio=1») --"
-chk $T/d1.ppm px 24 98 1 "el marco de la etiqueta de «Biblioteca»" \
-  texto 32 102 9 12 doble "Biblioteca" texto 60 230 0 8 negrita "Bloc de notas" \
-  nopx 100 40 2 "el dibujo de «Biblioteca» (64x64, en 80,28)" nopx 100 180 2 "el de «Bloc de notas» (en 80,156)" \
+chk $T/d1.ppm texto 24 70 9 - fina "Biblioteca" texto 36 162 9 - fina "Bloc de" texto 44 177 9 - fina "notas" \
+  nopx 20 74 12 "sin marca al entrar" \
+  nopx 64 44 2 "el dibujo de «Biblioteca» (32x32, en 48,28)" nopx 64 136 2 "el de «Bloc de notas» (en 48,120)" \
   px 40 300 2 "debajo, el fondo" px 84 590 1 "la barra de tareas"
 chk $T/d2.ppm titulo 500 60 activa "Calculadora" busca 100 574 130 582 0 8 "Calculadora"
 chk $T/d3.ppm titulo 150 90 activa "Bloc de notas - (sin nombre)" nobusca 100 574 130 582 0 8 "Calculadora"
-chk $T/d4.ppm texto 32 102 0 8 doble "Biblioteca" texto 60 230 9 12 negrita "Bloc de notas"
-chk $T/d5.ppm texto 32 102 9 12 doble "Biblioteca" texto 60 230 0 8 negrita "Bloc de notas"
+chk $T/d4.ppm texto 24 70 9 - fina "Biblioteca" nopx 20 74 12 "«Biblioteca», sin marca" \
+  texto 36 162 9 12 fina "Bloc de" texto 44 177 9 12 fina "notas"
+chk $T/d5.ppm texto 24 70 9 12 fina "Biblioteca" texto 36 162 9 - fina "Bloc de" nopx 33 170 12 "«Bloc de notas», sin marca"
 chk $T/d6.ppm busca 20 300 60 572 9 12 "Principal" nobusca 0 300 260 572 0 8 "Escritorio" \
   nobusca 0 300 260 572 0 8 "Biblioteca" busca 20 300 60 572 0 8 "Salir de Hispa Ventanas..."
 chk $T/d7.ppm titulo 212 157 activa "Salir de Hispa Ventanas" texto 358 235 0 6 fina "Apagar el equipo" \
@@ -360,7 +362,7 @@ RX=400; RY=300
   mon quit; } | TMAX=150 run
 echo "-- [ESTILO] de la barra de tareas al clásico --"
 chk $T/e1.ppm px 400 572 10 "el filete de la barra de tareas" nopx 400 10 1 "sin barra arriba" \
-  texto 32 102 9 12 doble "Biblioteca" nopx 100 180 2 "el icono de «Bloc de notas»"
+  texto 24 70 9 - fina "Biblioteca" nopx 64 136 2 "el icono de «Bloc de notas»"
 chk $T/e2.ppm titulo 124 110 activa "Configuración" busca 290 212 320 232 0 8 "Barra de tareas con menú Inicio"
 chk $T/e3.ppm px 400 10 1 "la barra de arriba" nopx 400 590 1 "sin barra de tareas" \
   titulo 124 110 activa "Configuración" \
