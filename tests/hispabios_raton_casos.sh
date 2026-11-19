@@ -89,8 +89,8 @@ fi
 
 # Los discos en efi64.asm (lo que ya hacía la de 32): las controladoras de disco
 # se ponen en marcha, la memoria USB es el 80h, un disco SATA de 64 MB el 81h
-# (D:, se lee y se escribe) y un disco fijo de 4 MB no se da a DOS.
-echo "== HispaBIOS (x64): la memoria USB (80h) y el disco de dentro (81h, D:); un disco de 4 MB no se da =="
+# (la C:, se lee y se escribe; la memoria, la X:) y un disco fijo de 4 MB no se da a DOS.
+echo "== HispaBIOS (x64): la memoria USB (80h) y el disco de dentro (81h, C:; la memoria, X:); un disco de 4 MB no se da =="
 if hb_variante discos64 "-DPRUEBA_PILA -DREGISTRO_PASOS" && command -v sfdisk > /dev/null; then
   truncate -s 64M $T/dentro64.img
   printf 'label: dos\nstart=2048, type=6, bootable\n' | sfdisk -q $T/dentro64.img > /dev/null 2>&1
@@ -100,7 +100,7 @@ if hb_variante discos64 "-DPRUEBA_PILA -DREGISTRO_PASOS" && command -v sfdisk > 
   truncate -s 4M $T/chico64.img
   HB_MEM=1G HB_MAQ="-machine q35" \
     HB_EXTRA="-drive file=$T/chico64.img,format=raw,if=none,id=c -device ide-hd,drive=c,bus=ide.0 -drive file=$T/dentro64.img,format=raw,if=none,id=e -device ide-hd,drive=e,bus=ide.1" \
-    arranca 64 $T/discos64.img discos64 "t y p e spc d shift-semicolon d e n t r o dot t x t ret w3 c o p y spc c shift-semicolon backslash c o n f i g dot s y s spc d shift-semicolon ret w4 d i r spc d shift-semicolon ret" "2 archivo"
+    arranca 64 $T/discos64.img discos64 "t y p e spc c shift-semicolon d e n t r o dot t x t ret w3 c o p y spc x shift-semicolon backslash c o n f i g dot s y s spc c shift-semicolon ret w4 d i r spc c shift-semicolon ret w3 u n i d a d e s ret" "de aqu. ha arrancado"
   S=$T/serie_discos64.txt
   L=$(hb_log discos64)
   echo "$L" | grep -q 'Controladora de disco 8086:[0-9A-F]* (clase 0106h): se pide al firmware que la ponga en marcha. Resultado 00000000' && ok "pide al firmware que ponga en marcha la controladora SATA" || ko "no conecta la controladora de disco"
@@ -110,8 +110,9 @@ if hb_variante discos64 "-DPRUEBA_PILA -DREGISTRO_PASOS" && command -v sfdisk > 
   echo "$L" | grep -q 'discos: 2$' && ok "DOS tiene dos discos" || ko "DOS no tiene dos discos"
   echo "$L" | grep -q '^Equipo: QEMU .*; BIOS .*EDK II' && ok "HISPABIOS.LOG: el equipo y su BIOS (SMBIOS)" || ko "HISPABIOS.LOG sin el equipo"
   echo "$L" | grep -q 'Memoria extendida: [0-9]* KB' && ! echo "$L" | grep -q 'Memoria extendida: 4096 KB' && ok "la memoria extendida, según el mapa ($(echo "$L" | grep -o 'Memoria extendida: [0-9]* KB'); antes, 4096 KB)" || ko "la memoria extendida no sale del mapa"
-  grep -aq 'archivo del disco de dentro' $S && ok "DOS lee D: (INT 13h del disco 81h por Block I/O)" || ko "DOS no lee D:"
-  grep -aq '2 archivo' $S && mdir -i $T/dentro64.img@@1048576 :: 2>/dev/null | grep -qi 'CONFIG *SYS' && ok "DOS escribe en D: (el archivo copiado está en la imagen)" || ko "DOS no escribe en D:"
+  grep -aq 'archivo del disco de dentro' $S && ok "DOS lee C:, el disco de dentro (INT 13h del disco 81h por Block I/O)" || ko "DOS no lee C:"
+  grep -aq '2 archivo' $S && mdir -i $T/dentro64.img@@1048576 :: 2>/dev/null | grep -qi 'CONFIG *SYS' && ok "DOS escribe en C: (el archivo copiado está en la imagen)" || ko "DOS no escribe en C:"
+  grep -aq 'X:  Memoria USB (disco 1), FAT16, 511 MB  <- de aqu' $S && grep -aq 'C:  Disco duro interno (disco 2), FAT16' $S && ok "UNIDADES: el disco de dentro es la C: y la memoria de arranque la X:" || ko "las letras no son C: (disco de dentro) y X: (memoria)"
   grep -aq 'PILA-MAL' $S && ko "llamadas al firmware con la pila sin alinear" || ok "la pila, alineada"
 else
   ko "no se ha podido preparar la prueba de los discos de efi64"

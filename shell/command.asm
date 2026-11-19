@@ -1732,7 +1732,7 @@ dir_main:
         mov ah, 0x60
         int 0x21
         jnc .tn
-        mov si, msg_baddrv
+        call sin_formato            ; [LETRAS] ¿existe pero no tiene formato?
         jmp err_puts
 .tn:
         ; carpeta (d_path) y nombre (d_spec)
@@ -4669,6 +4669,55 @@ putc:
         ret
 
 ; SI = mensaje; AX = código de error de DOS: 21 -> «no está preparada»
+; [LETRAS] (docs/UNIDADES.md) La unidad de «pattern» no se puede leer: SI = el
+; mensaje. Si la unidad existe pero no tiene formato (lo dice el núcleo, INT
+; 21h AX=3369h: una partición sin formatear, o la C: reservada para el disco
+; duro que aún no tiene partición), se dice eso y qué hacer, como MS-DOS; si
+; no, «Especificación de unidad no válida».
+sin_formato:
+        push ax
+        push bx
+        push cx
+        push dx
+        push di
+        mov dl, [pattern]
+        cmp byte [pattern+1], ':'
+        je .u
+        mov ah, 0x19
+        int 0x21
+        mov dl, al
+        add dl, 'A'
+.u:
+        and dl, 0xDF
+        push dx
+        sub dl, 'A'
+        xor bx, bx
+        push si
+        mov ax, 0x3369
+        int 0x21
+        pop si
+        pop dx
+        mov si, msg_baddrv
+        cmp bx, 'HD'
+        jne .r
+        cmp al, 6
+        jne .n6
+        mov [msg_sinpart_l], dl
+        mov si, msg_sinpart
+        jmp .r
+.n6:
+        cmp al, 2
+        jne .r
+        mov [msg_sinfmt_l], dl
+        mov si, msg_sinfmt
+.r:
+        pop di
+        pop dx
+        pop cx
+        pop bx
+        pop ax
+        ret
+
 err_puts:
         cmp ax, 21
         jne puts
@@ -7764,6 +7813,11 @@ longcmds    db "ACTUALIZAR", 0
             db 0
 msg_baddir  db "Directorio no válido", 13, 10, 0
 msg_baddrv  db "Especificación de unidad no válida", 13, 10, 0
+msg_sinpart db "No se puede leer la unidad "
+msg_sinpart_l db "C: es el disco duro del ordenador, que todavía no", 13, 10
+            db "tiene partición ni formato. Use INSTALAR (o PARTIR y después FORMATEA).", 13, 10, 0
+msg_sinfmt  db "No se puede leer la unidad "
+msg_sinfmt_l db "C: el disco no tiene formato. Use FORMATEA.", 13, 10, 0
 msg_nrdy    db "La unidad no está preparada", 13, 10, 0
 msg_nofile  db "No se encontró el archivo", 13, 10, 0
 msg_reqparam db "Falta un parámetro obligatorio", 13, 10, 0

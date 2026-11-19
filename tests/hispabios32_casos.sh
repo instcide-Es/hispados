@@ -120,11 +120,12 @@ else
 fi
 
 # El disco de dentro (la eMMC de la tableta; aquí, un disco SATA de 64 MB con
-# una partición FAT) es el segundo disco de DOS, D:. Con «arranque rápido» el
+# una partición FAT) es el segundo disco de DOS pero se lleva la C: (docs/UNIDADES.md): la
+# memoria USB de arranque pasa a la X:. Con «arranque rápido» el
 # firmware solo pone en marcha el dispositivo del que arranca: HispaBIOS le pide
 # que conecte sus controladoras de disco. Un disco fijo de 4 MB (como las
 # particiones de arranque de una eMMC) no se da a DOS.
-echo "== HispaBIOS de 32 bits: la memoria USB (80h) y el disco de dentro (81h, D:); un disco de 4 MB no se da =="
+echo "== HispaBIOS de 32 bits: la memoria USB (80h) y el disco de dentro (81h, C:; la memoria, X:); un disco de 4 MB no se da =="
 if hb_variante discos "-DREGISTRO_PASOS" 32 && command -v sfdisk > /dev/null; then
   truncate -s 64M $T/dentro.img
   printf 'label: dos\nstart=2048, type=6, bootable\n' | sfdisk -q $T/dentro.img > /dev/null 2>&1
@@ -134,7 +135,7 @@ if hb_variante discos "-DREGISTRO_PASOS" 32 && command -v sfdisk > /dev/null; th
   truncate -s 4M $T/chico.img
   HB_MEM=1G HB_MAQ="-machine q35" HB_VGA="$HB_P1280" \
     HB_EXTRA="-drive file=$T/chico.img,format=raw,if=none,id=c -device ide-hd,drive=c,bus=ide.0 -drive file=$T/dentro.img,format=raw,if=none,id=e -device ide-hd,drive=e,bus=ide.1" \
-    arranca a32 $T/discos.img discos "t y p e spc d shift-semicolon d e n t r o dot t x t ret w3 c o p y spc c shift-semicolon backslash c o n f i g dot s y s spc d shift-semicolon ret w4 d i r spc d shift-semicolon ret" "2 archivo"
+    arranca a32 $T/discos.img discos "t y p e spc c shift-semicolon d e n t r o dot t x t ret w3 c o p y spc x shift-semicolon backslash c o n f i g dot s y s spc c shift-semicolon ret w4 d i r spc c shift-semicolon ret w3 u n i d a d e s ret" "de aqu. ha arrancado"
   S=$T/serie_discos.txt
   L=$(hb_log discos)
   echo "$L" | grep -q 'Controladora de disco 8086:[0-9A-F]* (clase 0106h): se pide al firmware que la ponga en marcha. Resultado 00000000' && ok "pide al firmware que ponga en marcha la controladora SATA" || ko "no conecta la controladora de disco"
@@ -142,8 +143,9 @@ if hb_variante discos "-DREGISTRO_PASOS" 32 && command -v sfdisk > /dev/null; th
   echo "$L" | grep -q '00020000h sectores de 512 octetos (64 MB), fijo: disco 81h de DOS' && ok "el disco de dentro (64 MB) es el 81h" || ko "el disco de dentro no es el 81h"
   echo "$L" | grep -q '(4 MB), fijo: no se da a DOS' && ok "el disco fijo de 4 MB no se da a DOS" || ko "el disco de 4 MB se da a DOS"
   echo "$L" | grep -q 'discos: 2$' && ok "DOS tiene dos discos" || ko "DOS no tiene dos discos"
-  grep -aq 'archivo del disco de dentro' $S && ok "DOS lee D: (INT 13h del disco 81h por Block I/O)" || ko "DOS no lee D:"
-  grep -aq '2 archivo' $S && mdir -i $T/dentro.img@@1048576 :: 2>/dev/null | grep -qi 'CONFIG *SYS' && ok "DOS escribe en D: (el archivo copiado está en la imagen)" || ko "DOS no escribe en D:"
+  grep -aq 'archivo del disco de dentro' $S && ok "DOS lee C:, el disco de dentro (INT 13h del disco 81h por Block I/O)" || ko "DOS no lee C:"
+  grep -aq '2 archivo' $S && mdir -i $T/dentro.img@@1048576 :: 2>/dev/null | grep -qi 'CONFIG *SYS' && ok "DOS escribe en C: (el archivo copiado está en la imagen)" || ko "DOS no escribe en C:"
+  grep -aq 'X:  Memoria USB (disco 1), FAT16, 511 MB  <- de aqu' $S && grep -aq 'C:  Disco duro interno (disco 2), FAT16' $S && ok "UNIDADES: el disco de dentro es la C: y la memoria de arranque la X:" || ko "las letras no son C: (disco de dentro) y X: (memoria)"
 else
   ko "no se ha podido preparar la prueba de los discos"
 fi

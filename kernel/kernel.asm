@@ -1170,18 +1170,30 @@ drives_ext:
 ; primero libre desde la C:. Si no: los de soporte extraíble que no son
 ; HSPCD (HSPUSB: las memorias USB), de la X: hacia abajo; HSPCD (los
 ; lectores de CD/DVD), el primero libre desde la D: (o desde la letra de
-; LETRAS=CD:); el resto (HSPRAM...), el primero libre desde la D:.
+; LETRAS=CD:); el resto (HSPRAM...), el primero libre desde la D:. La C: es
+; del disco duro: solo si el equipo no tiene ninguno se da a un driver.
 ext_slot:
         mov bx, 2
         cmp byte [uni_modo], 0
         jne slot_asc
-        mov bx, 3
+        cmp byte [hd_int], 0        ; (sin disco duro, la C: está libre)
+        je .c
+        inc bx
+.c:
         call es_hspcd
         jne .nocd
         cmp byte [cd_base], 0
         je slot_asc
         mov bl, [cd_base]
+        call slot_asc
+        jnc .r
+        mov bx, 3                   ; (de ahí arriba no queda: desde la D:)
+        cmp byte [hd_int], 0
+        jne slot_asc
+        dec bx
         jmp slot_asc
+.r:
+        ret
 .nocd:
         test word [es:di+4], 0x0800
         jnz slot_desc
@@ -1343,7 +1355,7 @@ uni_scan:
         mov byte [uni_modo], 0
         jmp .next
 .i2:
-        cmp eax, 0x003A4443         ; «CD:»
+        cmp eax, 0x001A4443         ; «CD:» (los dos puntos, sin el bit 5)
         jne .i3
         mov al, [cs:si+3]
         call .letra

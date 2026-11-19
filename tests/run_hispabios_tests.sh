@@ -47,9 +47,11 @@ arranca() {
   local pid=$! i
   for i in $(seq 1 ${HB_SEG:-240}); do
     sleep 1
-    grep -aq "${HB_HASTA:-C:\\\\>}" $T/serie_$nombre.txt 2>/dev/null && break
+    grep -aqE "${HB_HASTA:-[CX]:\\\\>}" $T/serie_$nombre.txt 2>/dev/null && break
   done
-  if grep -aq 'C:\\>' $T/serie_$nombre.txt; then
+  # (con un disco de más, el de dentro, la memoria de arranque es la X: y el
+  # disco la C:; docs/UNIDADES.md)
+  if grep -aqE '[CX]:\\>' $T/serie_$nombre.txt; then
     # (una «tecla» que empieza por «w» es una espera en segundos: w8; por «m:»,
     # una orden del monitor con «+» en vez de espacios: m:mouse_move+20+10)
     for k in $teclas; do

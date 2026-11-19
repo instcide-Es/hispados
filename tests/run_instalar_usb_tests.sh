@@ -50,7 +50,9 @@ dd if=$T/usb.img bs=512 count=1 status=none | md5sum > $T/usb_mbr_antes
   send "ECHO =S1=" 1
   send "PARTIR /STATUS" 1
   send "ECHO =S2=" 3
-  send "PARTIR 1 /DEL:1" 1
+  send "PARTIR 1 /DEL:1" 3
+  send "ECHO =S2B=" 1
+  send "PARTIR 1 /DEL:1 /FORZAR" 1
   send "NO" 3
   send "ECHO =S3=" 1
   send "PARTIR" 1
@@ -66,7 +68,7 @@ dd if=$T/usb.img bs=512 count=1 status=none | md5sum > $T/usb_mbr_antes
   key $'\e' 1           # salir
   send "ECHO =S4=" 2
   send "INSTALAR" 1
-  send "S" 5            # dar formato a D: e instalar
+  send "S" 5            # dar formato a C: e instalar
   sleep 25
   send "ECHO =S5=" 1
   send "PARTIR /STATUS" 1
@@ -79,7 +81,13 @@ echo "-- PARTIR con dos discos (arrancando de la memoria) --"
 part $T/l1.txt "=S1=" "=S2=" > $T/s1
 check $T/s1 "Disco actual: 2/2  (200 MB"
 check $T/s1 "No hay particiones definidas."
-part $T/l1.txt "=S2=" "=S3=" > $T/s2
+# (la memoria de arranque no se deja partir: solo con /FORZAR, y aun así pide SI;
+# docs/UNIDADES.md)
+part $T/l1.txt "=S2=" "=S2B=" > $T/s2
+check $T/s2 "X: es la memoria USB desde la que ha arrancado Hispa-DOS: no se puede"
+checkn $T/s2 "escriba SI y pulse Intro"
+checkn $T/s2 "Partición eliminada"
+part $T/l1.txt "=S2B=" "=S3=" > $T/s2
 check $T/s2 "es la MEMORIA USB DE ARRANQUE"
 check $T/s2 "escriba SI y pulse Intro"
 check $T/s2 "No se ha cambiado nada."
@@ -93,15 +101,15 @@ check $T/s3 "Disco actual: 2/2"
 check $T/s3 "1. Crear una partición DOS primaria"
 check $T/s3 "Partición DOS primaria creada."
 check $T/s3 "Partición activa establecida."
-grep -q "PRI DOS  FAT16 .* D:" $T/s3 && ok "la partición nueva es D:" || ko "la partición nueva no sale como D:"
+grep -q "PRI DOS  FAT16 .* C:" $T/s3 && ok "la partición nueva es C: (el disco duro interno)" || ko "la partición nueva no sale como C:"
 checkn $T/s3 "¡Atención! El disco"
 echo "-- INSTALAR sin unidad --"
 part $T/l1.txt "=S4=" "=S5=" > $T/s4
-check $T/s4 "Unidad para Hispa-DOS: D: (disco 2, partición 1"
-check $T/s4 "La unidad D: no tiene formato"
+check $T/s4 "Unidad para Hispa-DOS: C: (disco 2, partición 1"
+check $T/s4 "La unidad C: no tiene formato"
 check $T/s4 "Formato completado."
-check $T/s4 "Sistema transferido a la unidad D:"
-check $T/s4 "Hispa-DOS instalado en la unidad D:"
+check $T/s4 "Sistema transferido a la unidad C:"
+check $T/s4 "Hispa-DOS instalado en la unidad C:"
 check $T/s4 "La partición 1 del disco 2 es la activa"
 check $T/s4 "Quite la memoria USB"
 part $T/l1.txt "=S5=" "=S6=" > $T/s5
@@ -139,7 +147,9 @@ for f in AUTOEXEC.BAT CONFIG.SYS; do
   [ -s $T/$f ] || ko "falta $f en el disco duro"
   if grep -qi "[ABD]:\\\\" $T/$f; then ko "$f del disco duro con otra letra que C:"; grep -i "[ABD]:\\\\" $T/$f; else ok "$f del disco duro: solo C:"; fi
 done
-grep -q "^PATH C:\\\\HISPADOS" $T/AUTOEXEC.BAT && ok "AUTOEXEC.BAT: PATH C:\\HISPADOS" || ko "AUTOEXEC.BAT sin PATH C:\\HISPADOS"
+# (los archivos de arranque de la memoria no llevan la letra: valen igual en el disco)
+grep -q "^PATH %ARRANQUE%\\\\HISPADOS" $T/AUTOEXEC.BAT && ok "AUTOEXEC.BAT: PATH %ARRANQUE%\\HISPADOS" || ko "AUTOEXEC.BAT sin PATH %ARRANQUE%\\HISPADOS"
+grep -q "^DEVICE=\\\\HISPADOS\\\\HSPXMS.SYS" $T/CONFIG.SYS && ok "CONFIG.SYS: DEVICE=\\HISPADOS\\HSPXMS.SYS (sin unidad)" || ko "CONFIG.SYS sin DEVICE=\\HISPADOS\\HSPXMS.SYS"
 
 # ------------------------------------------------------------------ 2
 {
@@ -237,8 +247,8 @@ echo "-- disco duro con una partición de otro sistema --"
 part $T/l4.txt "=C1=" "=C2=" > $T/c1
 check $T/c1 "ninguna primaria de DOS"
 check $T/c1 "No se borra nada de lo que ya hay"
-check $T/c1 "Unidad para Hispa-DOS: D: (disco 2, partición 2"
-check $T/c1 "Hispa-DOS instalado en la unidad D:"
+check $T/c1 "Unidad para Hispa-DOS: C: (disco 2, partición 2"
+check $T/c1 "Hispa-DOS instalado en la unidad C:"
 check $T/c1 "La partición 2 del disco 2 es la activa"
 check $T/c1 "Hispa-DOS esta instalado."
 python3 - $T/hdd4.img <<'EOF' > $T/t4

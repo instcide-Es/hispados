@@ -26,7 +26,7 @@ send() { sleep "${2:-1.5}"; printf '%s\r' "$1"; }
   send "S" 4                # crear la partición con todo el disco
   send "S" 6                # darle formato e instalar
   sleep 12
-  send "DIR D:\\" 2
+  send "DIR C:\\" 2
 } | timeout 60 qemu-system-i386 -display none -serial stdio -monitor none $USBDEV \
       -drive if=none,id=hd,format=raw,file=$T/hdd.img -device ide-hd,drive=hd,bootindex=1 -no-reboot > $T/log1 2>&1
 # 2) arrancar solo desde el disco duro
@@ -42,7 +42,7 @@ cp $T/hdd.img $T/hdd_antes.img
 {
   sleep 6
   send "INSTALL" 4
-  send "C" 3                # ya instalado en D:: [C] Cancelar, no se toca nada
+  send "C" 3                # ya instalado en C:: [C] Cancelar, no se toca nada
   send "INSTALL" 3
   send "N" 3                # [N] Instalación nueva (formatearía)...
   send "N" 2                # ...pero a «¿Continuar (S/N)?» se contesta que no
@@ -58,19 +58,21 @@ echo "== Hispa-DOS USB image tests =="
 check $T/l1.txt "Hispa-DOS 0.9.27 - núcleo compatible con MS-DOS 6.22"
 check $T/l1.txt "HSPXMS 0.1: gestor XMS 3.0"
 check $T/l1.txt "Bienvenido a Hispa-DOS"
-check $T/l1.txt " El volumen de la unidad C es HISPADOS"
+# (con el disco duro, la memoria de arranque es la X: y el disco la C:; docs/UNIDADES.md)
+check $T/l1.txt " El volumen de la unidad X es HISPADOS"
 check $T/l1.txt "El disco duro no tiene particiones."
 check $T/l1.txt "Partición DOS primaria creada."
 check $T/l1.txt "Sistema transferido"
 check $T/l1.txt "Hispa-DOS esta instalado."
-check $T/l1.txt " Directorio de D:\\"
+check $T/l1.txt "Unidad para Hispa-DOS: C: (disco 2, partición 1"
+check $T/l1.txt " Directorio de C:\\"
 echo "-- arranque desde el disco duro --"
 check $T/l2.txt "Hispa-DOS 0.9.27 - núcleo compatible con MS-DOS 6.22"
 check $T/l2.txt "Bienvenido a Hispa-DOS"
 check $T/l2.txt " Directorio de C:\\"
 check $T/l2.txt "HISPADOS"
 echo "-- INSTALL con el disco ya ocupado --"
-check $T/l3.txt "Unidad para Hispa-DOS: D: (disco 2, partición 1"
+check $T/l3.txt "Unidad para Hispa-DOS: C: (disco 2, partición 1"
 check $T/l3.txt "[A] Actualizar (conserva tus datos y ajustes)"
 check $T/l3.txt "Elige una opción y pulsa Intro (A/N/C): C"
 n=$(grep -cF "No se ha instalado nada." $T/l3.txt)
