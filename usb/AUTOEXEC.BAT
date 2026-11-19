@@ -4,6 +4,10 @@ PATH C:\HISPADOS
 REM CONFIG = la opción elegida en el menú de CONFIG.SYS (NORMAL, JUEGOS o PRUEBA)
 IF "%CONFIG%"=="JUEGOS" GOTO JUEGOS
 IF "%CONFIG%"=="PRUEBA" GOTO PRUEBA
+REM [SOLO-MEDIO: la opción «Instalar» (INSTALAR quita estas líneas en el
+REM disco duro, hasta la otra marca)
+IF "%CONFIG%"=="INSTALAR" GOTO INSTALAR
+REM SOLO-MEDIO]
 
 REM ---- Normal ----
 TECLADO SP
@@ -54,6 +58,15 @@ TECLADO SP
 C:\HISPADOS\DIAGNOST
 GOTO FIN
 
+REM [SOLO-MEDIO
+:INSTALAR
+REM ---- Instalar en el disco duro: el programa de instalación (pantallas
+REM como las del SETUP de MS-DOS 6.22). ----
+TECLADO SP
+C:\HISPADOS\INSTALAR /SETUP
+GOTO FIN
+REM SOLO-MEDIO]
+
 :COMUN
 REM Red por cable (docs/RED.md): primero el controlador, a mano:
 REM C:\HISPADOS\HSPRED; después, CONFRED (IPCONFIG), PING y DESCARGAR.
@@ -61,6 +74,8 @@ REM (ACTUALIZAR lo carga solo.)
 SYSINFO
 ECHO.
 ECHO Bienvenido a Hispa-DOS. Escriba AYUDA para ver las órdenes.
-IF EXIST C:\INSTALL.BAT ECHO Para instalarlo en el disco duro escriba INSTALL: le guía paso a paso
-IF EXIST C:\INSTALL.BAT ECHO y no toca esta memoria USB. Las particiones, a mano: PARTIR.
+REM [SOLO-MEDIO
+ECHO Para instalarlo en el disco duro: reinicie y elija «Instalar Hispa-DOS en
+ECHO el disco duro» en el menú de arranque (o escriba INSTALAR /SETUP).
+REM SOLO-MEDIO]
 :FIN

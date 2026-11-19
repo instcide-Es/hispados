@@ -13,10 +13,13 @@ Arrancar
 Solo probar
   Hispa-DOS arranca desde la memoria USB, que es la unidad C:.
 
-Menu de arranque: Normal o Juegos
-  Al arrancar sale un menu con dos opciones. Se elige con las flechas o
-  con el numero y se pulsa Intro; si no se toca nada, a los 5 segundos
-  arranca "Normal".
+Menu de arranque
+  Al arrancar sale primero este menu (como el de MS-DOS 6.22):
+    1. Arrancar Hispa-DOS sin instalar   (sola a los 10 segundos)
+    2. Instalar Hispa-DOS en el disco duro
+  La 2 abre el programa de instalacion (ver "Instalar en el disco duro").
+  Con la 1 sale el de siempre, con tres opciones. Se elige con las flechas
+  o con el numero; si no se toca nada, a los 5 segundos arranca "Normal".
     1. Normal  Lo de siempre: todo el hardware funciona (CD en SATA,
                sonido HD Audio, Windows).
     2. Juegos  Para los juegos de MS-DOS: memoria expandida (EMS), VCPI
@@ -33,7 +36,17 @@ Menu de arranque: Normal o Juegos
   espera: EDITAR C:\CONFIG.SYS y poner MENUDEFAULT=JUEGOS,5
 
 Instalar en el disco duro
-  Escribe INSTALL (o INSTALAR). Al arrancar desde la memoria USB, la BIOS
+  Lo mas facil: en el menu de arranque, "2. Instalar Hispa-DOS en el disco
+  duro". Sale el programa de instalacion, con pantallas azules como el de
+  MS-DOS 6.22: INTRO sigue, F1 da ayuda y F3 sale. Prepara el disco duro si
+  hace falta (avisa antes si se va a borrar algo), le da formato, copia
+  Hispa-DOS en C:\HISPADOS con una barra de progreso y, al final, pide
+  quitar la memoria y reiniciar. Tambien con la orden INSTALAR /SETUP.
+  La comprobacion del sonido se hace despues, con la opcion "Prueba del
+  equipo y del sonido" del menu de arranque.
+
+  Sin pantallas, con preguntas en modo texto (como antes):
+  escribe INSTALL (o INSTALAR). Al arrancar desde la memoria USB, la BIOS
   la pone como disco 1 (C:) y el disco duro como disco 2 (D: o la letra
   que toque). INSTALL busca el disco duro, nunca esta memoria:
     1. Si el disco duro no tiene particiones, ofrece crear una con todo

@@ -78,10 +78,11 @@ Las imágenes listas para usar están en **[Releases](https://github.com/instcid
 |---|---|
 | `hispados-disquete.img` | Disquete de arranque de 1,44 MB. En VirtualBox, VMware, 86Box o QEMU, como disquete; en un PC antiguo, grábalo en un disquete (Rufus o `dd`). |
 | `hispados-usb.zip` | Imagen de 512 MB para memoria USB (FAT16, con unos 510 MB libres para juegos y programas propios; la descarga sigue pesando alrededor de 1 MB): descomprímela y grábala con Rufus (modo DD), balenaEtcher o `dd`. Arranca en PCs con BIOS (o UEFI con CSM/Legacy) y permite instalar en el disco duro con `INSTALAR`. |
+| `hispados-cd.iso` / `hispa486-cd.iso` | CD de Hispa-386 / Hispa-486 (ISO 9660 + Joliet) para los equipos de los 90 sin arranque USB: arranca del CD (El Torito, como un disquete) o, en los que no arrancan de CD, con el disquete de arranque, que lo ve con HSPCD. Lleva lo mismo que la memoria USB ([docs/CD.md](docs/CD.md)). |
 
 **Sin instalar nada:** [hispados.es](https://hispados.es) lo arranca emulado en el navegador.
 
-**Instalar:** descarga `hispados-usb.zip` de la última versión, descomprime el `.img`, grábalo en un USB con Rufus («Imagen DD») o con `dd`, arranca desde el USB y ejecuta `INSTALAR` para dejarlo en el disco duro.
+**Instalar:** descarga `hispados-usb.zip` de la última versión, descomprime el `.img`, grábalo en un USB con Rufus («Imagen DD») o con `dd` (o graba el CD, o usa el disquete), arranca y elige **«2. Instalar Hispa-DOS en el disco duro»** en el primer menú: el programa de instalación, con pantallas azules como el de MS-DOS 6.22, lo deja en el disco duro ([docs/CD.md](docs/CD.md)). También con la orden `INSTALAR`.
 
 **Actualizar por red:** con Hispa-386 en el disco duro y la red configurada, escribe `ACTUALIZAR`: comprueba si hay versión nueva, la descarga y la instala sola, conservando tus ajustes. Ya no hace falta el USB.
 
@@ -300,6 +301,8 @@ make run      # arranca en QEMU
 make run-hdd  # arranca con un disco duro vacío de 64 MB (build/hdd.img)
 make usb      # imagen para memoria USB: build/hispados-usb.img
 make usb486   # la de Hispa-486: build/hispa486-usb.img (docs/486/HISPA-486.md)
+make cd       # imagen de CD: build/hispados-cd.iso (docs/CD.md)
+make cd486    # la de Hispa-486: build/hispa486-cd.iso
 make test     # pruebas automáticas por el puerto serie
 tests/thirdparty/fetch.sh   # (opcional) descarga programas de FreeDOS para
                             # la prueba de compatibilidad

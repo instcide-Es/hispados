@@ -1,10 +1,18 @@
 REM CONFIG.SYS de Hispa-DOS (disquete de arranque)
 REM
-REM Al arrancar sale un menú con dos configuraciones. Se elige con las
-REM flechas o con el número, e Intro; si no se toca nada, a los 5 segundos
+REM Al arrancar sale un menú: 1 arrancar sin instalar (a los 10 s, solo) y
+REM 2 instalar en el disco duro; con la 1, el de las configuraciones. Se
+REM elige con las flechas o con el número; sin tocar nada, a los 5 segundos
 REM arranca «Normal». (F5 = arranque limpio, F8 = elegir línea a línea.)
 REM La elegida queda en la variable CONFIG, que mira AUTOEXEC.BAT.
 [menu]
+REM [SOLO-MEDIO: de aquí a la otra marca, el primer menú; INSTALAR lo
+REM quita al copiar este archivo al disco duro
+SUBMENU=ARRANCAR,Arrancar Hispa-DOS sin instalar
+MENUITEM=INSTALAR,Instalar Hispa-DOS en el disco duro
+MENUDEFAULT=ARRANCAR,10
+[ARRANCAR]
+REM SOLO-MEDIO]
 MENUITEM=NORMAL,Normal
 MENUITEM=JUEGOS,Juegos (memoria expandida EMS y la mayor memoria libre)
 MENUITEM=PRUEBA,Prueba del equipo y del sonido (guarda un informe)
@@ -59,6 +67,12 @@ REM ---- Prueba del equipo y del sonido: sin controladores de sonido ni
 REM residentes, para que DIAGNOSTICO y AUDICION vean el equipo como lo deja
 REM la BIOS. Guarda un informe en \INFORMES\EQUIPOnn de esta unidad. ----
 DOS=HIGH
+
+REM [SOLO-MEDIO
+[INSTALAR]
+REM El programa de instalación (INSTALAR /SETUP, en AUTOEXEC.BAT)
+INCLUDE=NORMAL
+REM SOLO-MEDIO]
 
 [common]
 NUMLOCK=ON

@@ -13,7 +13,10 @@ if [ "$(stat -c %s "$IMG")" -gt 2949120 ]; then IMG="$IMG@@1048576"; fi
 T=$(mktemp -d)
 export MTOOLS_SKIP_CHECK=1
 mtype -i "$IMG" ::CONFIG.SYS > $T/c.sys || { rm -rf $T; exit 1; }
-sed -i "s/^MENUDEFAULT=.*/MENUDEFAULT=$BLOQUE,0\r/" $T/c.sys
+# el primer menú (arrancar sin instalar / instalar), a la 1 sin esperar; el
+# de las opciones, a la que se pida
+sed -i -e "s/^MENUDEFAULT=ARRANCAR,.*/MENUDEFAULT=ARRANCAR,0\r/" \
+       -e "/^MENUDEFAULT=ARRANCAR,/!s/^MENUDEFAULT=.*/MENUDEFAULT=$BLOQUE,0\r/" $T/c.sys
 grep -q "^MENUDEFAULT=$BLOQUE,0" $T/c.sys || { echo "sinmenu.sh: $1 no tiene MENUDEFAULT en CONFIG.SYS"; rm -rf $T; exit 1; }
 mcopy -o -i "$IMG" $T/c.sys ::CONFIG.SYS
 rm -rf $T
