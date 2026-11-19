@@ -7,19 +7,28 @@
 ;  Los movimientos se hacen con INT 15h AH=87h (servicio de la BIOS), de modo
 ;  que no necesita modo protegido propio. La memoria extendida empieza tras
 ;  la HMA (1 MB + 64 KB). UMB (10h-12h) no se implementan (las dará HSPEMM).
+;
+;  Cuánta hay: el mapa de la BIOS (INT 15h E820h) si lo tiene: los trozos
+;  libres (tipo 1) por encima de 1 MB y por debajo de 4 GB. Si la BIOS reserva
+;  algo en medio (el MacBook Air 2012 aparta 2 MB en 512 MB), ese hueco se
+;  apunta en la tabla como un bloque «de la BIOS» que nadie puede reservar,
+;  mover ni liberar: así ningún bloque XMS cae en él. Sin mapa E820, como
+;  antes: INT 15h E801h y, si tampoco, AH=88h (un solo trozo seguido).
 ; =============================================================================
         cpu 386
         bits 16
         org 0
 
 NHANDLES    equ 32
+NHOLES      equ 16                  ; huecos del mapa E820 que se saltan
+NENT        equ NHANDLES + NHOLES   ; entradas de la tabla (handles + huecos)
 HBASE       equ 0x110000            ; dirección lineal de la memoria XMS
 
 ; entrada de la tabla de handles
 H_START     equ 0                   ; KB desde HBASE (dd)
 H_SIZE      equ 4                   ; KB (dd)
 H_LOCK      equ 8                   ; contador de bloqueos
-H_USED      equ 9
+H_USED      equ 9                   ; 0 libre, 1 de un programa, 2 hueco de la BIOS
 H_LEN       equ 10
 
 header:
@@ -37,7 +46,7 @@ hma_used    db 0
 a20_global  db 0
 a20_local   dw 0
             align 2
-handles     times NHANDLES*H_LEN db 0
+handles     times NENT*H_LEN db 0
 strategy:
         mov [cs:req], bx
         mov [cs:req+2], es
@@ -261,7 +270,7 @@ largest_free:
         mov edx, [cs:total_kb]
         ; libre total = total - usado
         mov di, handles
-        mov cx, NHANDLES
+        mov cx, NENT
 .u:
         cmp byte [cs:di+H_USED], 0
         je .nu
@@ -274,7 +283,7 @@ largest_free:
         call gap_at
         mov eax, esi
         mov di, handles
-        mov cx, NHANDLES
+        mov cx, NENT
 .c:
         cmp byte [cs:di+H_USED], 0
         je .nc
@@ -304,7 +313,7 @@ gap_at:
         jae .zero
         sub esi, ebx
         mov di, handles
-        mov cx, NHANDLES
+        mov cx, NENT
 .l:
         cmp byte [cs:di+H_USED], 0
         je .n
@@ -348,7 +357,7 @@ find_gap:
         cmp esi, edx
         jae .ok
         mov di, handles
-        mov cx, NHANDLES
+        mov cx, NENT
 .c:
         cmp byte [cs:di+H_USED], 0
         je .nc
@@ -394,7 +403,7 @@ alloc_core:
         push ebx
         ; buscar un handle libre
         mov di, handles
-        mov cx, NHANDLES
+        mov cx, NENT
 .h:
         cmp byte [cs:di+H_USED], 0
         je .gothandle
@@ -431,7 +440,7 @@ alloc_core:
 check_handle:
         cmp dx, handles
         jb .bad
-        cmp dx, handles + NHANDLES*H_LEN
+        cmp dx, handles + NENT*H_LEN
         jae .bad
         mov di, dx
         sub di, handles
@@ -448,8 +457,8 @@ check_handle:
         pop ax
         jnz .bad
         mov di, dx
-        cmp byte [cs:di+H_USED], 0
-        je .bad
+        cmp byte [cs:di+H_USED], 1  ; libre o hueco de la BIOS: no vale
+        jne .bad
         clc
         ret
 .bad:
@@ -546,7 +555,7 @@ free_handles:
         push di
         push ax
         mov di, handles
-        mov ax, NHANDLES
+        mov ax, NENT
         xor cx, cx
 .l:
         cmp byte [cs:di+H_USED], 0
@@ -980,7 +989,9 @@ init:
         mov [bx+0x10], cs
         jmp .out
 .free:
-        ; tamaño de la memoria extendida (sin la HMA)
+        ; tamaño de la memoria extendida (sin la HMA): primero el mapa E820
+        call e820_map
+        jnc .measured
         mov ax, 0xE801
         int 0x15
         jc .old
@@ -1010,6 +1021,7 @@ init:
         xor eax, eax
 .pos:
         mov [cs:total_kb], eax
+.measured:
         ; enganchar INT 2Fh
         push es
         mov ax, 0x352F
@@ -1047,8 +1059,29 @@ init:
         mov ah, 9
         int 0x21
         mov eax, [total_kb]
+        sub eax, [hole_kb]          ; la que se puede usar
         call print_dec
         mov dx, msg_kb
+        mov ah, 9
+        int 0x21
+        cmp byte [nholes], 0
+        je .nh
+        mov dx, msg_tr1             ; «, en N trozos (la BIOS reserva H KB en medio)»
+        mov ah, 9
+        int 0x21
+        movzx eax, byte [nholes]
+        inc eax
+        call print_dec
+        mov dx, msg_tr2
+        mov ah, 9
+        int 0x21
+        mov eax, [hole_kb]
+        call print_dec
+        mov dx, msg_tr3
+        mov ah, 9
+        int 0x21
+.nh:
+        mov dx, msg_crlf
         mov ah, 9
         int 0x21
         pop ds
@@ -1092,4 +1125,185 @@ print_dec:
 
 msg_already db "HSPXMS: ya hay un gestor XMS instalado", 13, 10, "$"
 msg_ok      db "HSPXMS 0.1: gestor XMS 3.0, $"
-msg_kb      db " KB de memoria extendida", 13, 10, "$"
+msg_kb      db " KB de memoria extendida$"
+msg_tr1     db ", en $"
+msg_tr2     db " trozos (la BIOS reserva $"
+msg_tr3     db " KB en medio)$"
+msg_crlf    db 13, 10, "$"
+
+; ---- el mapa de memoria de la BIOS (INT 15h E820h) ----
+; -> CF = 0: total_kb (de HBASE al final del último trozo libre), los huecos
+;    en la tabla (H_USED = 2), nholes y hole_kb; CF = 1 si no hay mapa o no
+;    da nada por encima de 1 MB (se mide a la antigua). Todo en KB: el
+;    principio de cada trozo se redondea hacia arriba y el final hacia abajo.
+NRG         equ 32                  ; trozos libres que se miran
+KB_BASE     equ HBASE >> 10         ; 1088
+KB_4G       equ 0x400000            ; 4 GB en KB (lo que cabe en 32 bits)
+e820_map:
+        pushad
+        push ds
+        push es
+        push cs
+        pop ds
+        push cs
+        pop es
+        mov byte [rg_n], 0
+        mov byte [e8_cnt], 0
+        xor ebx, ebx
+.next:
+        mov eax, 0xE820
+        mov edx, 0x534D4150         ; «SMAP»
+        mov ecx, 24
+        mov di, e8buf
+        mov dword [e8buf+20], 1     ; (ACPI 3.0: «válido» si no lo rellena)
+        int 0x15
+        jc .end
+        cmp eax, 0x534D4150
+        jne .end
+        inc byte [e8_cnt]
+        cmp dword [e8buf+16], 1     ; solo la memoria libre
+        jne .cont
+        cmp ecx, 24
+        jb .att
+        test byte [e8buf+20], 1     ; ACPI 3.0: bit 0 = 0, no hacer caso
+        jz .cont
+.att:
+        cmp dword [e8buf+4], 0      ; empieza por encima de 4 GB
+        jne .cont
+        ; final en KB (hacia abajo; 4 GB como mucho)
+        mov eax, [e8buf]
+        xor edx, edx
+        add eax, [e8buf+8]
+        adc edx, [e8buf+12]
+        jnz .top
+        shr eax, 10
+        jmp .ef
+.top:
+        mov eax, KB_4G
+.ef:
+        ; principio en KB (hacia arriba), no antes de la HMA
+        mov ecx, [e8buf]
+        shr ecx, 10
+        test word [e8buf], 0x3FF
+        jz .sf
+        inc ecx
+.sf:
+        cmp ecx, KB_BASE
+        jae .sb
+        mov ecx, KB_BASE
+.sb:
+        cmp eax, ecx
+        jbe .cont
+        movzx si, byte [rg_n]
+        cmp si, NRG
+        jae .cont
+        shl si, 2
+        mov [rg_s+si], ecx
+        mov [rg_e+si], eax
+        inc byte [rg_n]
+.cont:
+        test ebx, ebx               ; la última entrada
+        jz .end
+        cmp byte [e8_cnt], 128      ; (una BIOS que no acaba nunca)
+        jb .next
+.end:
+        movzx cx, byte [rg_n]
+        test cx, cx
+        jz .none
+        ; ordenar por el principio (inserción)
+        mov si, 4
+.so:
+        movzx ax, byte [rg_n]
+        shl ax, 2
+        cmp si, ax
+        jae .sod
+        mov eax, [rg_s+si]
+        mov edx, [rg_e+si]
+        mov di, si
+.si:
+        test di, di
+        jz .sip
+        cmp [rg_s+di-4], eax
+        jbe .sip
+        mov ebx, [rg_s+di-4]
+        mov [rg_s+di], ebx
+        mov ebx, [rg_e+di-4]
+        mov [rg_e+di], ebx
+        sub di, 4
+        jmp .si
+.sip:
+        mov [rg_s+di], eax
+        mov [rg_e+di], edx
+        add si, 4
+        jmp .so
+.sod:
+        ; juntar los que se tocan; lo que queda entre ellos, huecos
+        mov byte [nholes], 0
+        mov dword [hole_kb], 0
+        mov di, handles + NHANDLES*H_LEN
+        mov edx, [rg_s]
+        mov eax, KB_BASE
+        cmp edx, eax                ; el primero no empieza en la HMA
+        jbe .f0
+        call .hole
+.f0:
+        mov ebx, [rg_e]             ; final hasta ahora
+        mov si, 4
+.mg:
+        movzx ax, byte [rg_n]
+        shl ax, 2
+        cmp si, ax
+        jae .mgd
+        mov edx, [rg_e+si]
+        cmp edx, ebx
+        jbe .mn                     ; dentro del anterior
+        mov edx, [rg_s+si]
+        cmp edx, ebx
+        jbe .ext                    ; se toca con el anterior
+        cmp byte [nholes], NHOLES   ; demasiados huecos: hasta aquí
+        jae .mgd
+        mov eax, ebx
+        call .hole
+.ext:
+        mov ebx, [rg_e+si]
+.mn:
+        add si, 4
+        jmp .mg
+.mgd:
+        sub ebx, KB_BASE
+        mov [total_kb], ebx
+        pop es
+        pop ds
+        popad
+        clc
+        ret
+.none:
+        pop es
+        pop ds
+        popad
+        stc
+        ret
+; EAX = principio del hueco, EDX = final (KB) -> entrada en DI (y DI sigue)
+.hole:
+        push eax
+        push edx
+        sub edx, eax
+        sub eax, KB_BASE
+        mov [di+H_START], eax
+        mov [di+H_SIZE], edx
+        mov byte [di+H_LOCK], 0
+        mov byte [di+H_USED], 2
+        add [hole_kb], edx
+        inc byte [nholes]
+        add di, H_LEN
+        pop edx
+        pop eax
+        ret
+
+nholes      db 0
+hole_kb     dd 0
+rg_n        db 0
+e8_cnt      db 0
+e8buf       times 24 db 0
+rg_s        times NRG dd 0
+rg_e        times NRG dd 0

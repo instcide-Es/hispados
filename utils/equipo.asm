@@ -5550,15 +5550,26 @@ sec_res:
 .xh0:
         PR "no"
 .xh1:
+        ; libre y mayor bloque en 32 bits (XMS 3.0, 88h); si no, 08h. Si la
+        ; BIOS reserva huecos en medio (mapa E820), el mayor es menor
+        mov ah, 0x88
+        xor bl, bl
+        call far [far_ent]
+        test bl, bl
+        jz .x32
         mov ah, 0x08
         xor bl, bl
         call far [far_ent]
-        push dx
-        push ax
+        movzx eax, ax
+        movzx edx, dx
+.x32:
+        push eax
+        push edx
         PR "; libre "
-        pop ax
-        pop dx
-        movzx eax, dx
+        pop eax
+        call putdec
+        PR " KB, mayor bloque "
+        pop eax
         call putdec
         PR " KB; línea A20 "
         mov ah, 0x07

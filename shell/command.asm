@@ -2694,8 +2694,11 @@ mem_summary:
         mov cl, 12
         call putnum_w
         mov si, msg_mularge
-        jmp puts
+        call puts
+        jmp mem_xms
 .noupper:
+        call .conv
+        jmp mem_xms
 .conv:
         push edx
         push ebx
@@ -2723,6 +2726,45 @@ mem_summary:
         test dh, 0x10
         jz .r
         mov si, msg_mhma
+        call puts
+.r:
+        ret
+
+; memoria extendida (XMS): la libre y el mayor bloque (si la BIOS reserva
+; huecos en medio, el mayor bloque es menor que la libre: HSPXMS los salta)
+mem_xms:
+        mov ax, 0x4300
+        int 0x2F
+        cmp al, 0x80
+        jne .r
+        push es
+        mov ax, 0x4310
+        int 0x2F
+        mov [mx_ent], bx
+        mov [mx_ent+2], es
+        pop es
+        mov ah, 0x88                ; XMS 3.0: en 32 bits
+        xor bl, bl
+        call far [mx_ent]
+        test bl, bl
+        jz .got
+        mov ah, 0x08                ; XMS 2.0: hasta 64 MB
+        call far [mx_ent]
+        movzx eax, ax
+        movzx edx, dx
+.got:
+        push eax
+        push edx
+        call crlf
+        pop eax
+        mov cl, 12
+        call putnum_w
+        mov si, msg_mxfree
+        call puts
+        pop eax
+        mov cl, 12
+        call putnum_w
+        mov si, msg_mxlarge
         call puts
 .r:
         ret
@@ -7824,6 +7866,8 @@ msg_mfree   db " bytes libres", 13, 10, 0
 msg_mutotal db " bytes de memoria superior (UMB) en total", 13, 10, 0
 msg_mularge db " bytes del mayor bloque superior libre", 13, 10, 0
 msg_mlarge  db " bytes del mayor programa ejecutable", 13, 10, 0
+msg_mxfree  db " KB libres de memoria extendida (XMS)", 13, 10, 0
+msg_mxlarge db " KB del mayor bloque de memoria extendida", 13, 10, 0
 msg_mhma    db "Hispa-DOS está cargado en la memoria alta (HMA)", 13, 10, 0
 msg_baddate db "Fecha no válida (dd-mm-aaaa)", 13, 10, 0
 msg_badtime db "Hora no válida (hh:mm[:ss])", 13, 10, 0
@@ -8181,6 +8225,7 @@ mu_free     resd 1
 mu_large    resd 1
 alias_buf   resb ALIAS_MAX
 no_auto     resb 1
+mx_ent      resd 1                  ; MEM: entrada del gestor XMS
 exit_after  resb 1
 errlvl      resb 1
 bdepth      resb 1
