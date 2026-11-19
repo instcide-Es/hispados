@@ -165,8 +165,8 @@ módulo Ventanas
     constante LADO_ABAJO = 8
     constante AGARRE = 3                        ; lo que se puede agarrar por fuera del borde
     constante ESQUINA = 14                      ; lo que mide una esquina, a lo largo del borde
-    constante ANCHO_MÍNIMO = 170
-    constante ALTO_MÍNIMO = 90
+    constante ANCHO_MÍNIMO = 200
+    constante ALTO_MÍNIMO = 140
     variable estirada: ent32 = -1
     variable est_lados: nat32
     variable est_x, est_y, est_px, est_py, est_an, est_al: ent32

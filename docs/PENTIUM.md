@@ -805,7 +805,7 @@ cerrojo: los programas dibujan a la vez que el escritorio compone.
 **Cambiar el tamaño.** El borde mide 4 puntos; para acertarle con un panel táctil
 se agarra también desde 3 puntos por fuera, y las esquinas miden 14 a lo largo.
 Mientras se arrastra, la ventana se rehace a cada paso (no hay un «marco de
-goma»): 170 x 90 lo menos, la pantalla lo más. Los cuadros (Apagar,
+goma»): 200 x 140 lo menos, la pantalla lo más. Los cuadros (Apagar,
 Configuración) no cambian de tamaño.
 
 **El fondo.** Lo que cae fuera de todas las ventanas (el tapiz), y el botón
