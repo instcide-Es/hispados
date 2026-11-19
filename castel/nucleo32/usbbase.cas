@@ -1,0 +1,91 @@
+; =============================================================================
+;  usbbase.cas - lo común del USB del núcleo de Hispa-Pentium: la ficha de un
+;  aparato (lo que una controladora necesita saber de él para hablarle), las
+;  velocidades y las esperas. Lo importan las controladoras (ehci.cas,
+;  xhci.cas), la enumeración (usb.cas) y las clases (usbhid.cas, usbalm.cas).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Usbbase
+
+    importar Tareas
+
+    ; ---- las velocidades ----
+    público constante V_BAJA = 1                ; 1,5 Mbit/s (teclados y ratones)
+    público constante V_PLENA = 2               ; 12 Mbit/s (USB 1.1)
+    público constante V_ALTA = 3                ; 480 Mbit/s (USB 2.0)
+    público constante V_SÚPER = 4               ; USB 3
+
+    ; ---- las clases de controladora ----
+    público constante HC_UHCI = 1
+    público constante HC_EHCI = 2
+    público constante HC_XHCI = 3
+
+    público constante SIN_APARATO = 0xFFFFFFFF
+    público constante MAX_EXTREMOS = 6          ; los extremos (aparte del 0) que se llevan de cada aparato
+    público constante MAX_INTERFACES = 4
+
+    ; ---- lo que da una transferencia cuando no sale ----
+    público constante T_FALLO = -1              ; no ha salido (error, o se pasó el tiempo)
+    público constante T_PARADA = -2             ; el aparato ha dicho que no (STALL)
+    público constante T_ESPERA = -3             ; (tuberías) el informe no ha llegado todavía
+
+    ; (xHCI) un anillo de transferencias: su página y por dónde va
+    público tipo Anillo = estructura
+        base: nat32
+        pos: nat32
+        ciclo: nat32
+    fin
+
+    ; un extremo (endpoint) de un aparato
+    público tipo Extremo = estructura
+        número: nat32                           ; con el bit 7 si es de entrada
+        clase: nat32                            ; 2: a granel (bulk); 3: de interrupción
+        paquete: nat32                          ; lo más que cabe en un paquete
+        intervalo: nat32                        ; cada cuánto se pregunta (de interrupción)
+        interfaz: nat32                         ; de cuál de sus interfaces es
+        alterna: nat32                          ; el testigo de alternancia (DATA0/DATA1)
+        anillo: Anillo                          ; (xHCI) su anillo de transferencias
+    fin
+
+    público tipo Interfaz = estructura
+        número: nat32
+        clase, subclase, protocolo: nat32
+    fin
+
+    público tipo Aparato = estructura
+        usado: bool
+        hc_clase: nat32                         ; de qué clase es su controladora
+        hc: nat32                               ; y cuál de ellas
+        dir: nat32                              ; su dirección USB (0: aún no la tiene)
+        ranura: nat32                           ; (xHCI) su «slot»
+        velocidad: nat32
+        paquete0: nat32                         ; el paquete máximo de su extremo 0
+        alterna0: nat32
+        puerto_raíz: nat32                      ; el puerto de la controladora del que cuelga (1...)
+        padre: nat32                            ; el concentrador del que cuelga (SIN_APARATO: de un puerto raíz)
+        puerto: nat32                           ; el puerto de ese concentrador (1...)
+        nivel: nat32                            ; cuántos concentradores tiene por encima
+        ruta: nat32                             ; (xHCI) la cadena de ruta
+        tt_dir, tt_puerto: nat32                ; el traductor: el concentrador de alta velocidad y su puerto (0: no hace falta)
+        tt_ranura: nat32                        ; (xHCI) la ranura de ese concentrador
+        es_concentrador: bool
+        puertos: nat32                          ; (concentrador) cuántos tiene
+        tiempo_tt: nat32                        ; (concentrador) lo que tarda su traductor (0 a 3)
+        fabricante, producto: nat32             ; VID y PID
+        clase: nat32                            ; la del aparato (0: la dice cada interfaz)
+        configuración: nat32
+        n_interfaces: nat32
+        interfaces: arreglo [MAX_INTERFACES] de Interfaz
+        n_extremos: nat32
+        extremos: arreglo [MAX_EXTREMOS] de Extremo
+        anillo0: Anillo                         ; (xHCI) el anillo del extremo 0
+        contexto: nat32                         ; (xHCI) su contexto de salida
+    fin
+
+    ; espera al menos «ms» milisegundos (el reloj va a 100 tics por segundo:
+    ; se redondea hacia arriba, y un tic más por el que ya iba empezado)
+    público función espera_ms(ms: nat32)
+        dormir((ms + 9) div 10 + 1)
+    fin
+
+fin Usbbase.

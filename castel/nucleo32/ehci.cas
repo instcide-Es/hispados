@@ -1,0 +1,453 @@
+; =============================================================================
+;  ehci.cas - las controladoras USB 2.0 (EHCI) del núcleo de Hispa-Pentium.
+;  Según «Enhanced Host Controller Interface Specification for USB» 1.0 (y
+;  con lo aprendido en HSPUSB, el USB de Hispa-DOS: lib/usb_ehci.inc).
+;
+;  Sus registros se ven en la memoria (registro base 0 de PCI): los de
+;  capacidades y, detrás (CAPLENGTH), los de trabajo: USBCMD 0x00, USBSTS
+;  0x04, USBINTR 0x08, FRINDEX 0x0C, CTRLDSSEGMENT 0x10, PERIODICLISTBASE
+;  0x14, ASYNCLISTADDR 0x18, CONFIGFLAG 0x40 y PORTSC 0x44 + 4 * puerto.
+;
+;  Cada controladora tiene una página con:
+;   - su lista asíncrona: dos colas (QH) en anillo, la cabecera (siempre
+;     parada) y la de trabajo. Control y «a granel» (bulk) se hacen de uno en
+;     uno y esperando: la cola de trabajo se rellena en cada transferencia
+;     con la dirección, el extremo, la velocidad y el paquete del aparato (y,
+;     si es de USB 1.x y cuelga de un concentrador de alta velocidad, con la
+;     dirección y el puerto de ese concentrador: la controladora hace
+;     entonces las «transacciones partidas» con su traductor);
+;   - tres descriptores de transferencia (qTD): control son tres (la
+;     petición, los datos y el estado); a granel, uno;
+;   - las tuberías de interrupción (teclados, ratones, concentradores): una
+;     cola, un qTD y un búfer cada una. Van en la lista periódica (otra
+;     página, 1024 tramas que apuntan todas a la cadena de tuberías), que
+;     se pone en marcha con la primera: se pregunta en la microtrama 0 de
+;     cada trama y, con traductor, se recoge en las 2, 3 y 4.
+;
+;  Los puertos son del EHCI (CONFIGFLAG = 1). Al reiniciar uno, si lo que hay
+;  no es de alta velocidad no queda habilitado: se cede a la controladora
+;  compañera (UHCI), como manda la norma.
+;  Sin interrupciones: todo se mira.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ehci
+
+    importar Pci, Paginas, Marcos, Tareas, Usbbase, Mem32
+
+    público constante MAX_EHCI = 4
+    público constante MAX_TUBOS = 8             ; las tuberías de interrupción de cada controladora
+    público constante NINGUNA = 0xFFFFFFFF
+
+    ; ---- los registros de trabajo ----
+    constante USBCMD = 0x00
+    constante USBSTS = 0x04
+    constante USBINTR = 0x08
+    constante CTRLDSSEGMENT = 0x10
+    constante PERIODICLISTBASE = 0x14
+    constante ASYNCLISTADDR = 0x18
+    constante CONFIGFLAG = 0x40
+    constante PORTSC = 0x44
+
+    constante CAMBIOS = 0x2A                    ; los bits de PORTSC que se borran escribiendo 1
+
+    ; ---- dónde está cada cosa en la página de la controladora ----
+    constante D_CABECERA = 0x000
+    constante D_TRABAJO = 0x060
+    constante D_QTD = 0x100                     ; tres, de 0x40
+    constante D_TUBOS = 0x400                   ; cada tubería, 0x100: cola, qTD (+0x80) y búfer (+0xC0)
+
+    ; ---- el testigo de un qTD ----
+    constante ACTIVO = 0x80
+    constante PARADO = 0x40
+    constante PID_SALE = 0
+    constante PID_ENTRA = 1
+    constante PID_PETICIÓN = 2
+
+    público tipo Controladora = estructura
+        hay: bool
+        pci: nat32                              ; cuál es (su número de PCI)
+        reg: nat32                              ; sus registros de trabajo, a la vista del núcleo
+        puertos: nat32
+        mem: nat32                              ; su página (dirección física, que es la que se ve)
+        lista: nat32                            ; la lista periódica (0: aún no hay tuberías)
+        primera: nat32                          ; el enlace a la primera tubería de la cadena (1: ninguna)
+        tubos: nat32
+        cedidos: nat32                          ; puertos cedidos a las compañeras
+    fin
+
+    público variable ehcis: arreglo [MAX_EHCI] de Controladora
+    público variable cuántas: nat32
+
+    función lee(c: nat32, d: nat32): nat32
+        variable r: puntero a nat32
+        r := puntero(ehcis[c].reg + d)
+        devolver valor(r)
+    fin
+
+    función pon(c: nat32, d: nat32, v: nat32)
+        variable r: puntero a nat32
+        r := puntero(ehcis[c].reg + d)
+        valor(r) := v
+    fin
+
+    ; espera (hasta «cs» centésimas) a que los bits «máscara» del registro d
+    ; valgan «igual». Falso si se pasa el tiempo.
+    función espera(c: nat32, d: nat32, máscara: nat32, igual: nat32, cs: nat32): bool
+        variable tope, vueltas: nat32
+        tope := tics + cs + 1
+        vueltas := 0
+        mientras (lee(c, d) yb máscara) <> igual hacer
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 20000000 entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; toma la controladora EHCI que está en ese sitio del bus PCI: se la
+    ; quita a la BIOS, la reinicia y la pone en marcha con su lista
+    ; asíncrona. Da su número, o NINGUNA.
+    público función prepara(pci: nat32): nat32
+        variable c, base, v, hcs, hcc, eecp, i: nat32
+        variable cap: puntero a nat32
+        variable q: puntero a nat32
+        si cuántas >= MAX_EHCI entonces devolver NINGUNA fin
+        base := pci_memoria(pci, 0)
+        si base = 0 entonces devolver NINGUNA fin
+        pci_enciende(pci)
+        v := mapear_aparato(base, 0x400)
+        si v = 0 entonces devolver NINGUNA fin
+        cap := puntero(v)
+        c := cuántas
+        ehcis[c].hay := falso
+        ehcis[c].pci := pci
+        ehcis[c].reg := v + (cap[0] yb 0xFF)
+        hcs := cap[1]
+        hcc := cap[2]
+        ehcis[c].puertos := hcs yb 0x0F
+        si ehcis[c].puertos = 0 entonces devolver NINGUNA fin
+        ; el traspaso desde la BIOS (su capacidad extendida número 1, en la
+        ; configuración PCI): «es del sistema», siempre (hay BIOS, la de los
+        ; Mac, que la usan con sus SMI sin decir que es suya); si la BIOS
+        ; dice que es suya, esperar a que la suelte; y sus SMI, apagadas
+        eecp := (hcc >> 8) yb 0xFF
+        si eecp >= 0x40 y (pci_leer(pci, eecp) yb 0xFF) = 1 entonces
+            pci_escribir8(pci, eecp + 3, 1)
+            i := tics + 100
+            mientras pci_leer(pci, eecp) yb 0x10000 <> 0 y tics < i hacer
+                espera_ms(10)
+            fin
+            pci_escribir(pci, eecp + 4, 0xE0000000)
+        fin
+        ; parar y reiniciar
+        pon(c, USBCMD, lee(c, USBCMD) yb nob 1)
+        espera(c, USBSTS, 0x1000, 0x1000, 20)
+        pon(c, USBCMD, 2)
+        si no espera(c, USBCMD, 2, 0, 60) entonces devolver NINGUNA fin
+        pon(c, USBINTR, 0)
+        si hcc yb 1 <> 0 entonces pon(c, CTRLDSSEGMENT, 0) fin
+        si ehcis[c].mem = 0 entonces ehcis[c].mem := reservar_marco() fin
+        si ehcis[c].mem = 0 entonces devolver NINGUNA fin
+        ; la cabecera (parada: nunca trabaja) y la cola de trabajo, en anillo
+        q := puntero(ehcis[c].mem + D_CABECERA)
+        q[0] := (ehcis[c].mem + D_TRABAJO) ob 2
+        q[1] := 0x8000 ob (2 << 12) ob (64 << 16)
+        q[2] := 0x40000000
+        q[4] := 1
+        q[5] := 1
+        q[6] := PARADO
+        q := puntero(ehcis[c].mem + D_TRABAJO)
+        q[0] := (ehcis[c].mem + D_CABECERA) ob 2
+        q[1] := (2 << 12) ob (64 << 16)
+        q[2] := 0x40000000
+        q[4] := 1
+        q[5] := 1
+        ehcis[c].lista := 0
+        ehcis[c].primera := 1
+        ehcis[c].tubos := 0
+        ehcis[c].cedidos := 0
+        pon(c, ASYNCLISTADDR, ehcis[c].mem + D_CABECERA)
+        pon(c, USBCMD, 0x00080021)              ; en marcha, con la lista asíncrona
+        pon(c, CONFIGFLAG, 1)                   ; los puertos, para el EHCI
+        ; corriente a los puertos, si se controla
+        si hcs yb 0x10 <> 0 entonces
+            para i desde 0 hasta ehcis[c].puertos - 1 hacer
+                pon(c, PORTSC + i * 4, (lee(c, PORTSC + i * 4) yb nob CAMBIOS) ob 0x1000)
+            fin
+        fin
+        ehcis[c].hay := cierto
+        cuántas := cuántas + 1
+        devolver c
+    fin
+
+    ; deja la controladora parada (para apagar o reiniciar el equipo)
+    público función para_(c: nat32)
+        si c >= MAX_EHCI entonces devolver fin
+        si ehcis[c].hay entonces pon(c, USBCMD, 0) fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los puertos
+    ; -------------------------------------------------------------------------
+    ; lo que hay en el puerto p (desde 1): bit 0, algo enchufado (y es
+    ; nuestro, no de la compañera); bit 1, habilitado
+    público función puerto_estado(c: nat32, p: nat32): nat32
+        variable v, r: nat32
+        v := lee(c, PORTSC + (p - 1) * 4)
+        si v yb 0x2000 <> 0 entonces devolver 0 fin
+        r := v yb 1
+        si v yb 4 <> 0 entonces r := r ob 2 fin
+        devolver r
+    fin
+
+    ; reinicia el puerto p. Da la velocidad de lo que hay (V_ALTA), o 0 si no
+    ; hay nada o no es de alta velocidad (entonces se cede a la compañera).
+    público función puerto_reinicia(c: nat32, p: nat32): nat32
+        variable d, v, i: nat32
+        d := PORTSC + (p - 1) * 4
+        v := lee(c, d)
+        si v yb 1 = 0 o v yb 0x2000 <> 0 entonces devolver 0 fin
+        pon(c, d, (v yb nob (CAMBIOS ob 4)) ob 0x100)          ; reinicio: 50 ms al menos
+        espera_ms(50)
+        pon(c, d, lee(c, d) yb nob (CAMBIOS ob 0x100))
+        espera(c, d, 0x100, 0, 10)
+        ; (hasta unos milisegundos para que quede habilitado)
+        i := 0
+        v := lee(c, d)
+        mientras v yb 4 = 0 y i < 20000 hacer
+            v := lee(c, d)
+            i := i + 1
+        fin
+        si v yb 4 <> 0 entonces
+            pon(c, d, v ob CAMBIOS)
+            espera_ms(20)                       ; (el aparato se repone del reinicio)
+            devolver V_ALTA
+        fin
+        si v yb 1 <> 0 entonces
+            ; no es de alta velocidad: a la controladora compañera
+            pon(c, d, (v yb nob CAMBIOS) ob 0x2000)
+            ehcis[c].cedidos := ehcis[c].cedidos + 1
+        fin
+        devolver 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las transferencias
+    ; -------------------------------------------------------------------------
+    ; las características de la cola q para ese aparato y ese extremo. Con
+    ; «control», es un extremo de control; con «testigo_qtd», la alternancia
+    ; la pone cada qTD.
+    función pon_cola(q: puntero a nat32, ref a: Aparato, extremo: nat32, paquete: nat32, control: bool, testigo_qtd: bool)
+        variable v: nat32
+        v := a.dir ob ((extremo yb 0x0F) << 8) ob ((paquete yb 0x7FF) << 16)
+        si a.velocidad >= V_ALTA entonces
+            v := v ob (2 << 12)
+        sino
+            si a.velocidad = V_BAJA entonces v := v ob (1 << 12) fin
+            si control entonces v := v ob 0x08000000 fin        ; control que no es de alta velocidad
+        fin
+        si testigo_qtd entonces v := v ob 0x4000 fin
+        q[1] := v
+        v := 0x40000000                         ; una transacción por microtrama
+        si a.velocidad < V_ALTA entonces
+            ; el traductor: el concentrador de alta velocidad y su puerto
+            v := v ob ((a.tt_dir yb 0x7F) << 16) ob ((a.tt_puerto yb 0x7F) << 23)
+        fin
+        q[2] := v
+    fin
+
+    ; rellena un qTD: qué es (PID), el testigo, el búfer (dirección física)
+    ; y sus octetos; enlazado con «siguiente» (1: es el último)
+    función pon_qtd(t: puntero a nat32, pid: nat32, testigo: nat32, búfer: nat32, n: nat32, siguiente: nat32)
+        variable i: nat32
+        t[0] := siguiente
+        t[1] := 1
+        t[2] := (n << 16) ob (pid << 8) ob (testigo << 31) ob 0x0C00 ob ACTIVO   ; tres intentos
+        t[3] := búfer
+        para i desde 1 hasta 4 hacer
+            t[3 + i] := (búfer yb 0xFFFFF000) + i * 0x1000
+        fin
+        para i desde 8 hasta 12 hacer t[i] := 0 fin
+    fin
+
+    ; quita de en medio una transferencia que no acaba: la cola de trabajo
+    ; sale del anillo, se espera a que la controladora lo confirme (el timbre
+    ; de avance de la lista asíncrona) y vuelve limpia
+    función aborta(c: nat32)
+        variable q: puntero a nat32
+        q := puntero(ehcis[c].mem + D_CABECERA)
+        q[0] := (ehcis[c].mem + D_CABECERA) ob 2
+        pon(c, USBCMD, lee(c, USBCMD) ob 0x40)
+        espera(c, USBSTS, 0x20, 0x20, 5)
+        pon(c, USBSTS, 0x20)
+        q := puntero(ehcis[c].mem + D_TRABAJO)
+        q[3] := 0
+        q[4] := 1
+        q[5] := 1
+        q[6] := 0
+        q := puntero(ehcis[c].mem + D_CABECERA)
+        q[0] := (ehcis[c].mem + D_TRABAJO) ob 2
+    fin
+
+    ; hace los n qTD preparados por la cola de trabajo y espera (hasta «cs»
+    ; centésimas). Da 0, T_PARADA o T_FALLO.
+    función ejecuta(c: nat32, n: nat32, cs: nat32): ent32
+        variable q, t: puntero a nat32
+        variable tope, vueltas, i, e: nat32
+        q := puntero(ehcis[c].mem + D_TRABAJO)
+        q[3] := 0
+        q[5] := 1
+        q[6] := 0                               ; ni activa ni parada
+        q[4] := ehcis[c].mem + D_QTD            ; el primer qTD: a trabajar
+        tope := tics + cs + 1
+        vueltas := 0
+        mientras cierto hacer
+            para i desde 0 hasta n - 1 hacer
+                t := puntero(ehcis[c].mem + D_QTD + i * 0x40)
+                e := t[2]
+                si e yb PARADO <> 0 entonces
+                    ; (la cola se queda parada: se limpia para la siguiente)
+                    q[4] := 1
+                    q[6] := 0
+                    si e yb 0x38 = 0 entonces devolver T_PARADA fin
+                    devolver T_FALLO
+                fin
+            fin
+            t := puntero(ehcis[c].mem + D_QTD + (n - 1) * 0x40)
+            si t[2] yb ACTIVO = 0 entonces devolver 0 fin
+            ; (si los datos han llegado cortos, la cola salta al estado: el
+            ; último puede seguir activo solo hasta que acabe)
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 100000000 entonces
+                aborta(c)
+                devolver T_FALLO
+            fin
+        fin
+        devolver T_FALLO
+    fin
+
+    ; una transferencia de control con el aparato a: la petición (8 octetos
+    ; en «petición») y, si n no es 0, n octetos de datos en «datos», que
+    ; entran o salen. Las dos direcciones son físicas. Da los octetos de
+    ; datos que han ido, T_PARADA o T_FALLO.
+    público función control(c: nat32, ref a: Aparato, petición: nat32, datos: nat32, n: nat32, entra: bool): ent32
+        variable q, t: puntero a nat32
+        variable m, i, r: ent32
+        variable base, pid: nat32
+        base := ehcis[c].mem + D_QTD
+        q := puntero(ehcis[c].mem + D_TRABAJO)
+        pon_cola(q, a, 0, a.paquete0, cierto, cierto)
+        i := 0
+        t := puntero(base)
+        si n <> 0 entonces
+            pon_qtd(t, PID_PETICIÓN, 0, petición, 8, base + 0x40)
+            t := puntero(base + 0x40)
+            pid := PID_SALE
+            si entra entonces pid := PID_ENTRA fin
+            pon_qtd(t, pid, 1, datos, n, base + 0x80)
+            t[1] := base + 0x80                 ; si llegan menos: derecho al estado
+            t := puntero(base + 0x80)
+            pid := PID_ENTRA
+            si entra entonces pid := PID_SALE fin
+            pon_qtd(t, pid, 1, 0, 0, 1)
+            m := 3
+        sino
+            pon_qtd(t, PID_PETICIÓN, 0, petición, 8, base + 0x40)
+            t := puntero(base + 0x40)
+            pon_qtd(t, PID_ENTRA, 1, 0, 0, 1)
+            m := 2
+        fin
+        r := ejecuta(c, nat32(m), 300)
+        si r <> 0 entonces devolver r fin
+        si n = 0 entonces devolver 0 fin
+        t := puntero(base + 0x40)
+        devolver ent32(n - ((t[2] >> 16) yb 0x7FFF))
+    fin
+
+    ; una transferencia a granel (bulk) con el extremo e del aparato a: n
+    ; octetos (como mucho, una página) en «datos» (dirección física), que
+    ; entran o salen según el extremo. Da los que han ido, T_PARADA o
+    ; T_FALLO. Lleva la alternancia en el extremo.
+    público función granel(c: nat32, ref a: Aparato, ref e: Extremo, datos: nat32, n: nat32, cs: nat32): ent32
+        variable q, t: puntero a nat32
+        variable r: ent32
+        variable pid: nat32
+        q := puntero(ehcis[c].mem + D_TRABAJO)
+        pon_cola(q, a, e.número, e.paquete, falso, cierto)
+        t := puntero(ehcis[c].mem + D_QTD)
+        pid := PID_SALE
+        si e.número yb 0x80 <> 0 entonces pid := PID_ENTRA fin
+        pon_qtd(t, pid, e.alterna yb 1, datos, n, 1)
+        r := ejecuta(c, 1, cs)
+        si r <> 0 entonces devolver r fin
+        e.alterna := t[2] >> 31                 ; el testigo siguiente queda en el qTD
+        devolver ent32(n - ((t[2] >> 16) yb 0x7FFF))
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las tuberías de interrupción
+    ; -------------------------------------------------------------------------
+    ; abre una tubería para el extremo de interrupción e (de entrada) del
+    ; aparato a. Da su número, o NINGUNA.
+    público función tubo_abre(c: nat32, ref a: Aparato, ref e: Extremo): nat32
+        variable q, l: puntero a nat32
+        variable i, k, b: nat32
+        si ehcis[c].tubos >= MAX_TUBOS entonces devolver NINGUNA fin
+        si ehcis[c].lista = 0 entonces
+            ; la primera: la lista periódica, vacía
+            ehcis[c].lista := reservar_marco()
+            si ehcis[c].lista = 0 entonces devolver NINGUNA fin
+            l := puntero(ehcis[c].lista)
+            para k desde 0 hasta 1023 hacer l[k] := 1 fin
+            pon(c, PERIODICLISTBASE, ehcis[c].lista)
+            pon(c, USBCMD, lee(c, USBCMD) ob 0x10)
+        fin
+        i := ehcis[c].tubos
+        b := ehcis[c].mem + D_TUBOS + i * 0x100
+        llenar(puntero(b), 0x100, 0)
+        q := puntero(b)
+        pon_cola(q, a, e.número, e.paquete, falso, falso)
+        q[2] := q[2] ob 0x01                    ; se pregunta en la microtrama 0
+        si a.velocidad < V_ALTA entonces q[2] := q[2] ob 0x1C00 fin    ; con traductor: se recoge en las 2, 3 y 4
+        q[3] := 0
+        q[4] := 1
+        q[5] := 1
+        q[6] := 0
+        ; a la cabeza de la cadena, y todas las tramas a ella
+        q[0] := ehcis[c].primera
+        ehcis[c].primera := b ob 2
+        l := puntero(ehcis[c].lista)
+        para k desde 0 hasta 1023 hacer l[k] := ehcis[c].primera fin
+        ehcis[c].tubos := i + 1
+        devolver i
+    fin
+
+    ; dónde quedan los octetos que llegan por la tubería t
+    público función tubo_datos(c: nat32, t: nat32): puntero a byte
+        devolver puntero(ehcis[c].mem + D_TUBOS + t * 0x100 + 0xC0)
+    fin
+
+    ; pide n octetos (hasta 64) por la tubería t
+    público función tubo_pide(c: nat32, t: nat32, n: nat32)
+        variable q, d: puntero a nat32
+        variable b: nat32
+        b := ehcis[c].mem + D_TUBOS + t * 0x100
+        q := puntero(b)
+        d := puntero(b + 0x80)
+        pon_qtd(d, PID_ENTRA, 0, b + 0xC0, n, 1)
+        si q[6] yb PARADO <> 0 entonces q[6] := q[6] yb 0x80000000 fin     ; parada por un error: se reanuda
+        q[4] := b + 0x80
+    fin
+
+    ; ¿ha llegado lo pedido por la tubería t? Da los octetos que han
+    ; llegado (de los n pedidos), T_ESPERA si aún no, o T_FALLO
+    público función tubo_mira(c: nat32, t: nat32, n: nat32): ent32
+        variable d: puntero a nat32
+        variable e: nat32
+        d := puntero(ehcis[c].mem + D_TUBOS + t * 0x100 + 0x80)
+        e := d[2]
+        si e yb ACTIVO <> 0 entonces devolver T_ESPERA fin
+        si e yb PARADO <> 0 entonces devolver T_FALLO fin
+        devolver ent32(n - ((e >> 16) yb 0x7FFF))
+    fin
+
+fin Ehci.

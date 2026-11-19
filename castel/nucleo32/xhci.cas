@@ -1,0 +1,677 @@
+; =============================================================================
+;  xhci.cas - las controladoras USB 3 (xHCI) del núcleo de Hispa-Pentium, las
+;  de los PC de 2012 en adelante. Según «eXtensible Host Controller Interface
+;  for USB» 1.1 (y con lo aprendido en HSPUSB, el USB de Hispa-DOS).
+;
+;  En el xHCI casi todo lo hace la controladora: da ella las direcciones, y
+;  lleva las transacciones partidas y la alternancia. El núcleo le da:
+;   - una tabla con el contexto de cada aparato (DCBAA) y, por aparato
+;     («ranura»), una página con su contexto de salida;
+;   - un anillo de órdenes (habilitar una ranura, dar dirección, configurar
+;     extremos...) y un anillo de sucesos, donde ella apunta lo que acaba;
+;   - por cada extremo en uso, un anillo de transferencias: una página con
+;     255 peticiones (TRB) y, al final, un enlace al principio.
+;  Para mandar algo se escribe en el anillo y se toca el «timbre» de la
+;  ranura; lo que pasa llega al anillo de sucesos. Sin interrupciones: el
+;  anillo de sucesos se mira. Control y «a granel» (bulk) se hacen de uno en
+;  uno y esperando; las tuberías de interrupción (teclados, ratones,
+;  concentradores) dejan pedido un informe y se mira si ha llegado.
+;
+;  Los concentradores: cada aparato lleva su «cadena de ruta» (el puerto de
+;  cada concentrador por el que se llega a él) y, si es de USB 1.x detrás de
+;  uno de alta velocidad, la ranura y el puerto de su traductor.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Xhci
+
+    importar Pci, Paginas, Marcos, Tareas, Usbbase, Mem32
+
+    público constante MAX_XHCI = 2
+    público constante MAX_TUBOS = 8
+    público constante NINGUNA = 0xFFFFFFFF
+    constante MAX_RANURAS = 32
+    constante TRBS = 256                        ; los de un anillo (el último, el enlace)
+
+    ; ---- los registros de trabajo ----
+    constante USBCMD = 0x00
+    constante USBSTS = 0x04
+    constante CRCR = 0x18
+    constante DCBAAP = 0x30
+    constante CONFIG = 0x38
+    constante PORTSC = 0x400
+
+    constante P_GUARDA = 0x0E00C200             ; los bits de PORTSC que se conservan al escribir
+    constante P_CAMBIOS = 0x00FE0000            ; los que se borran escribiendo 1
+
+    ; ---- las clases de TRB ----
+    constante TRB_NORMAL = 1
+    constante TRB_PETICIÓN = 2
+    constante TRB_DATOS = 3
+    constante TRB_ESTADO = 4
+    constante TRB_ENLACE = 6
+    constante TRB_HABILITAR = 9
+    constante TRB_DIRECCIÓN = 11
+    constante TRB_CONFIGURAR = 12
+    constante TRB_EVALUAR = 13
+    constante TRB_REPONER = 14
+    constante TRB_PARAR = 15
+    constante TRB_DESENCOLAR = 16
+    constante SUC_TRANSFERENCIA = 32
+    constante SUC_ORDEN = 33
+
+    constante BIEN = 1                          ; los códigos con que acaba algo
+    constante PARADA = 6
+    constante CORTO = 13
+
+    tipo Tubo = estructura
+        ranura, extremo: nat32                  ; de quién es (el extremo, como lo numera el xHCI)
+        anillo: Anillo
+        hecho: bool
+        código, resto: nat32
+    fin
+
+    público tipo Controladora = estructura
+        hay: bool
+        pci: nat32
+        cap: nat32                              ; sus registros de capacidades, a la vista del núcleo
+        reg: nat32                              ; los de trabajo
+        rt: nat32                               ; los de «tiempo de ejecución» (el anillo de sucesos)
+        timbres: nat32
+        puertos: nat32
+        ranuras: nat32
+        contexto: nat32                         ; lo que mide un contexto: 32 o 64 octetos
+        tabla: nat32                            ; la DCBAA (y, en 0x800, la tabla del anillo de sucesos)
+        órdenes: Anillo
+        sucesos: nat32                          ; el anillo de sucesos
+        suc_pos, suc_ciclo: nat32
+        entrada: nat32                          ; el contexto de entrada (uno para todos: de uno en uno)
+        búferes: nat32                          ; la página de los búferes de las tuberías
+        n_tubos: nat32
+        tubos: arreglo [MAX_TUBOS] de Tubo
+        ; lo último que ha acabado
+        orden_hecha: bool
+        orden_código, orden_ranura: nat32
+        tr_hecha: bool
+        tr_código, tr_resto, tr_trb, tr_ranura, tr_extremo: nat32
+    fin
+
+    público variable xhcis: arreglo [MAX_XHCI] de Controladora
+    público variable cuántas: nat32
+
+    función lee(c: nat32, d: nat32): nat32
+        variable r: puntero a nat32
+        r := puntero(xhcis[c].reg + d)
+        devolver valor(r)
+    fin
+
+    función pon(c: nat32, d: nat32, v: nat32)
+        variable r: puntero a nat32
+        r := puntero(xhcis[c].reg + d)
+        valor(r) := v
+    fin
+
+    función espera(c: nat32, d: nat32, máscara: nat32, igual: nat32, cs: nat32): bool
+        variable tope, vueltas: nat32
+        tope := tics + cs + 1
+        vueltas := 0
+        mientras (lee(c, d) yb máscara) <> igual hacer
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 20000000 entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los anillos
+    ; -------------------------------------------------------------------------
+    ; un anillo nuevo: una página, con el enlace al principio en su último TRB
+    función nuevo_anillo(ref a: Anillo): bool
+        variable t: puntero a nat32
+        si a.base = 0 entonces a.base := reservar_marco() sino llenar(puntero(a.base), 4096, 0) fin
+        si a.base = 0 entonces devolver falso fin
+        a.pos := 0
+        a.ciclo := 1
+        t := puntero(a.base + (TRBS - 1) * 16)
+        t[0] := a.base
+        t[1] := 0
+        t[2] := 0
+        t[3] := (TRB_ENLACE << 10) ob 2         ; (2: aquí cambia el ciclo)
+        devolver cierto
+    fin
+
+    ; mete un TRB en el anillo. Da su dirección (física).
+    función al_anillo(ref a: Anillo, p0: nat32, p1: nat32, p2: nat32, p3: nat32): nat32
+        variable t: puntero a nat32
+        variable d: nat32
+        d := a.base + a.pos * 16
+        t := puntero(d)
+        t[0] := p0
+        t[1] := p1
+        t[2] := p2
+        t[3] := (p3 yb 0xFFFFFFFE) ob a.ciclo
+        a.pos := a.pos + 1
+        si a.pos = TRBS - 1 entonces
+            ; el enlace, con el ciclo de ahora; y se da la vuelta
+            t := puntero(a.base + (TRBS - 1) * 16)
+            t[3] := (TRB_ENLACE << 10) ob 2 ob a.ciclo
+            a.pos := 0
+            a.ciclo := a.ciclo xob 1
+        fin
+        devolver d
+    fin
+
+    función timbre(c: nat32, ranura: nat32, cuál: nat32)
+        variable r: puntero a nat32
+        r := puntero(xhcis[c].timbres + ranura * 4)
+        valor(r) := cuál
+    fin
+
+    ; recoge lo que haya en el anillo de sucesos y lo apunta: la orden que
+    ; ha acabado, la transferencia que ha acabado, o el informe de una tubería
+    función mira_sucesos(c: nat32)
+        variable t, r: puntero a nat32
+        variable clase, i, ranura, extremo: nat32
+        variable visto, de_tubo: bool
+        visto := falso
+        mientras cierto hacer
+            t := puntero(xhcis[c].sucesos + xhcis[c].suc_pos * 16)
+            si (t[3] yb 1) <> xhcis[c].suc_ciclo entonces romper fin
+            visto := cierto
+            clase := (t[3] >> 10) yb 0x3F
+            si clase = SUC_ORDEN entonces
+                xhcis[c].orden_hecha := cierto
+                xhcis[c].orden_código := t[2] >> 24
+                xhcis[c].orden_ranura := t[3] >> 24
+            sino si clase = SUC_TRANSFERENCIA entonces
+                ranura := t[3] >> 24
+                extremo := (t[3] >> 16) yb 0x1F
+                de_tubo := falso
+                i := 0
+                mientras i < xhcis[c].n_tubos hacer
+                    si xhcis[c].tubos[i].ranura = ranura y xhcis[c].tubos[i].extremo = extremo entonces
+                        xhcis[c].tubos[i].hecho := cierto
+                        xhcis[c].tubos[i].código := t[2] >> 24
+                        xhcis[c].tubos[i].resto := t[2] yb 0xFFFFFF
+                        de_tubo := cierto
+                    fin
+                    i := i + 1
+                fin
+                si no de_tubo entonces
+                    xhcis[c].tr_hecha := cierto
+                    xhcis[c].tr_código := t[2] >> 24
+                    xhcis[c].tr_resto := t[2] yb 0xFFFFFF
+                    xhcis[c].tr_trb := t[0]
+                    xhcis[c].tr_ranura := ranura
+                    xhcis[c].tr_extremo := extremo
+                fin
+            fin
+            xhcis[c].suc_pos := xhcis[c].suc_pos + 1
+            si xhcis[c].suc_pos = TRBS entonces
+                xhcis[c].suc_pos := 0
+                xhcis[c].suc_ciclo := xhcis[c].suc_ciclo xob 1
+            fin
+        fin
+        si visto entonces
+            ; hasta dónde se ha leído (y el aviso «ocupado», borrado)
+            r := puntero(xhcis[c].rt + 0x20 + 0x18)
+            r[0] := (xhcis[c].sucesos + xhcis[c].suc_pos * 16) ob 8
+            r[1] := 0
+        fin
+    fin
+
+    ; manda una orden y espera a que acabe. Da su código (BIEN = 1), o 0 si
+    ; se pasa el tiempo. La ranura que diga queda en orden_ranura.
+    función orden(c: nat32, p0: nat32, p2: nat32, p3: nat32): nat32
+        variable tope, vueltas: nat32
+        xhcis[c].orden_hecha := falso
+        al_anillo(xhcis[c].órdenes, p0, 0, p2, p3)
+        timbre(c, 0, 0)
+        tope := tics + 300
+        vueltas := 0
+        mientras no xhcis[c].orden_hecha hacer
+            mira_sucesos(c)
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 50000000 entonces devolver 0 fin
+        fin
+        devolver xhcis[c].orden_código
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Tomar la controladora
+    ; -------------------------------------------------------------------------
+    público función prepara(pci: nat32): nat32
+        variable c, base, v, hcs1, hcs2, hcc, i, n, d, largo: nat32
+        variable cap, x, t, tabla: puntero a nat32
+        si cuántas >= MAX_XHCI entonces devolver NINGUNA fin
+        base := pci_memoria(pci, 0)
+        si base = 0 entonces devolver NINGUNA fin
+        pci_enciende(pci)
+        v := mapear_aparato(base, 0x1000)
+        si v = 0 entonces devolver NINGUNA fin
+        cap := puntero(v)
+        hcs1 := cap[1]
+        hcs2 := cap[2]
+        hcc := cap[4]
+        ; todo lo que hay que ver: los puertos, los timbres y el anillo de sucesos
+        largo := (cap[0] yb 0xFF) + PORTSC + 0x10 * (hcs1 >> 24)
+        d := (cap[5] yb 0xFFFFFFFC) + 4 * 256
+        si d > largo entonces largo := d fin
+        d := (cap[6] yb 0xFFFFFFE0) + 0x40
+        si d > largo entonces largo := d fin
+        d := (hcc >> 16) << 2
+        si d + 0x400 > largo entonces largo := d + 0x400 fin
+        si largo > 0x1000 entonces
+            si largo > 0x40000 entonces devolver NINGUNA fin
+            v := mapear_aparato(base, largo)
+            si v = 0 entonces devolver NINGUNA fin
+            cap := puntero(v)
+        fin
+        c := cuántas
+        xhcis[c].hay := falso
+        xhcis[c].pci := pci
+        xhcis[c].cap := v
+        xhcis[c].reg := v + (cap[0] yb 0xFF)
+        xhcis[c].timbres := v + (cap[5] yb 0xFFFFFFFC)
+        xhcis[c].rt := v + (cap[6] yb 0xFFFFFFE0)
+        xhcis[c].puertos := hcs1 >> 24
+        xhcis[c].ranuras := hcs1 yb 0xFF
+        si xhcis[c].ranuras > MAX_RANURAS entonces xhcis[c].ranuras := MAX_RANURAS fin
+        xhcis[c].contexto := 32
+        si hcc yb 4 <> 0 entonces xhcis[c].contexto := 64 fin
+        ; el traspaso desde la BIOS: entre las capacidades extendidas, la
+        ; número 1; «es del sistema», esperar a que la BIOS la suelte, y sus
+        ; SMI apagadas
+        d := (hcc >> 16) << 2
+        n := 0
+        mientras d <> 0 y n < 64 hacer
+            x := puntero(v + d)
+            si (x[0] yb 0xFF) = 1 entonces
+                x[0] := x[0] ob 0x01000000
+                i := tics + 100
+                mientras x[0] yb 0x00010000 <> 0 y tics < i hacer
+                    espera_ms(10)
+                fin
+                x[1] := (x[1] yb nob 0x0000E011) ob 0xE0000000
+            fin
+            si ((x[0] >> 8) yb 0xFF) = 0 entonces
+                d := 0
+            sino
+                d := d + (((x[0] >> 8) yb 0xFF) << 2)
+            fin
+            n := n + 1
+        fin
+        ; parar y reiniciar
+        pon(c, USBCMD, lee(c, USBCMD) yb nob 1)
+        espera(c, USBSTS, 1, 1, 20)
+        pon(c, USBCMD, 2)
+        si no espera(c, USBCMD, 2, 0, 100) entonces devolver NINGUNA fin
+        si no espera(c, USBSTS, 0x800, 0, 100) entonces devolver NINGUNA fin    ; (aún no está lista)
+        ; su memoria
+        si xhcis[c].tabla = 0 entonces xhcis[c].tabla := reservar_marco() fin
+        si xhcis[c].sucesos = 0 entonces xhcis[c].sucesos := reservar_marco() fin
+        si xhcis[c].entrada = 0 entonces xhcis[c].entrada := reservar_marco() fin
+        si xhcis[c].búferes = 0 entonces xhcis[c].búferes := reservar_marco() fin
+        si xhcis[c].tabla = 0 o xhcis[c].sucesos = 0 o xhcis[c].entrada = 0 o xhcis[c].búferes = 0 entonces devolver NINGUNA fin
+        si no nuevo_anillo(xhcis[c].órdenes) entonces devolver NINGUNA fin
+        tabla := puntero(xhcis[c].tabla)
+        ; las páginas «de borrador» que pida la controladora: su lista va
+        ; en la entrada 0 de la tabla
+        n := (((hcs2 >> 21) yb 0x1F) << 5) ob (hcs2 >> 27)
+        si n > 0 entonces
+            si n > 512 entonces devolver NINGUNA fin
+            d := reservar_marco()
+            si d = 0 entonces devolver NINGUNA fin
+            t := puntero(d)
+            para i desde 0 hasta n - 1 hacer
+                t[i * 2] := reservar_marco()
+                si t[i * 2] = 0 entonces devolver NINGUNA fin
+            fin
+            tabla[0] := d
+        fin
+        pon(c, CONFIG, xhcis[c].ranuras)
+        pon(c, DCBAAP, xhcis[c].tabla)
+        pon(c, DCBAAP + 4, 0)
+        pon(c, CRCR, xhcis[c].órdenes.base ob 1)
+        pon(c, CRCR + 4, 0)
+        ; el anillo de sucesos: un solo trozo, de una página
+        xhcis[c].suc_pos := 0
+        xhcis[c].suc_ciclo := 1
+        t := puntero(xhcis[c].tabla + 0x800)
+        t[0] := xhcis[c].sucesos
+        t[1] := 0
+        t[2] := TRBS
+        t[3] := 0
+        x := puntero(xhcis[c].rt + 0x20)
+        x[0] := 0                               ; sin interrupciones: se mira
+        x[2] := 1                               ; un trozo
+        x[6] := xhcis[c].sucesos                ; por dónde se va leyendo
+        x[7] := 0
+        x[4] := xhcis[c].tabla + 0x800          ; la tabla de trozos
+        x[5] := 0
+        xhcis[c].n_tubos := 0
+        pon(c, USBCMD, 1)                       ; en marcha
+        si no espera(c, USBSTS, 1, 0, 50) entonces devolver NINGUNA fin
+        ; corriente a los puertos
+        para i desde 0 hasta xhcis[c].puertos - 1 hacer
+            d := lee(c, PORTSC + i * 0x10)
+            si d yb 0x200 = 0 entonces pon(c, PORTSC + i * 0x10, (d yb P_GUARDA) ob 0x200) fin
+        fin
+        xhcis[c].hay := cierto
+        cuántas := cuántas + 1
+        devolver c
+    fin
+
+    público función para_(c: nat32)
+        si c >= MAX_XHCI entonces devolver fin
+        si xhcis[c].hay entonces pon(c, USBCMD, lee(c, USBCMD) yb nob 1) fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los puertos
+    ; -------------------------------------------------------------------------
+    ; lo que hay en el puerto p (desde 1): bit 0, algo enchufado; bit 1, habilitado
+    público función puerto_estado(c: nat32, p: nat32): nat32
+        variable v: nat32
+        v := lee(c, PORTSC + (p - 1) * 0x10)
+        devolver v yb 3
+    fin
+
+    función velocidad_de(v: nat32): nat32
+        según (v >> 10) yb 0x0F
+            caso 1: devolver V_PLENA
+            caso 2: devolver V_BAJA
+            caso 3: devolver V_ALTA
+            caso 4..7: devolver V_SÚPER
+        fin
+        devolver 0
+    fin
+
+    ; reinicia el puerto p. Da la velocidad de lo que hay, o 0 si no hay
+    ; nada o no queda habilitado.
+    público función puerto_reinicia(c: nat32, p: nat32): nat32
+        variable d, v: nat32
+        d := PORTSC + (p - 1) * 0x10
+        v := lee(c, d)
+        si v yb 1 = 0 entonces devolver 0 fin
+        ; un puerto de USB 3 ya habilitado: no hace falta reiniciarlo
+        si v yb 2 <> 0 y velocidad_de(v) = V_SÚPER entonces
+            pon(c, d, (v yb P_GUARDA) ob P_CAMBIOS)
+            devolver V_SÚPER
+        fin
+        pon(c, d, (v yb P_GUARDA) ob 0x10)
+        si no espera(c, d, 0x00200000, 0x00200000, 60) entonces devolver 0 fin
+        v := lee(c, d)
+        pon(c, d, (v yb P_GUARDA) ob P_CAMBIOS)
+        espera_ms(20)                           ; (el aparato se repone del reinicio)
+        v := lee(c, d)
+        si v yb 2 = 0 entonces devolver 0 fin
+        devolver velocidad_de(v)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los aparatos: ranura, dirección y extremos
+    ; -------------------------------------------------------------------------
+    ; el contexto número n (0: el de control; 1: la ranura; 2: el extremo 0...) del contexto de entrada
+    función de_entrada(c: nat32, n: nat32): puntero a nat32
+        devolver puntero(xhcis[c].entrada + n * xhcis[c].contexto)
+    fin
+
+    función velocidad_xhci(v: nat32): nat32
+        según v
+            caso V_BAJA: devolver 2
+            caso V_PLENA: devolver 1
+            caso V_ALTA: devolver 3
+        fin
+        devolver 4
+    fin
+
+    ; rellena el contexto de la ranura (en el de entrada) con lo del aparato;
+    ; «entradas» es el número del último extremo en uso
+    función pon_ranura(c: nat32, ref a: Aparato, entradas: nat32)
+        variable s: puntero a nat32
+        s := de_entrada(c, 1)
+        s[0] := (a.ruta yb 0xFFFFF) ob (velocidad_xhci(a.velocidad) << 20) ob (entradas << 27)
+        s[1] := a.puerto_raíz << 16
+        s[2] := 0
+        s[3] := 0
+        si a.es_concentrador entonces
+            s[0] := s[0] ob 0x04000000
+            s[1] := s[1] ob (a.puertos << 24)
+            s[2] := a.tiempo_tt << 16
+        fin
+        si a.tt_ranura <> 0 entonces s[2] := s[2] ob a.tt_ranura ob (a.tt_puerto << 8) fin
+    fin
+
+    ; un aparato nuevo, recién reiniciado su puerto: se le da una ranura, su
+    ; contexto y el anillo de su extremo 0, y la controladora le pone la
+    ; dirección. Falso si no puede ser.
+    público función nuevo_aparato(c: nat32, ref a: Aparato): bool
+        variable tabla, e, k: puntero a nat32
+        variable ranura, r: nat32
+        si orden(c, 0, 0, TRB_HABILITAR << 10) <> BIEN entonces devolver falso fin
+        ranura := xhcis[c].orden_ranura
+        si ranura = 0 o ranura > xhcis[c].ranuras entonces devolver falso fin
+        a.ranura := ranura
+        a.contexto := reservar_marco()
+        a.anillo0.base := 0
+        si a.contexto = 0 o no nuevo_anillo(a.anillo0) entonces devolver falso fin
+        tabla := puntero(xhcis[c].tabla)
+        tabla[ranura * 2] := a.contexto
+        tabla[ranura * 2 + 1] := 0
+        llenar(puntero(xhcis[c].entrada), 4096, 0)
+        k := de_entrada(c, 0)
+        k[1] := 3                               ; se dan la ranura y el extremo 0
+        pon_ranura(c, a, 1)
+        e := de_entrada(c, 2)
+        e[1] := (3 << 1) ob (4 << 3) ob (a.paquete0 << 16)     ; de control, tres intentos
+        e[2] := a.anillo0.base ob 1
+        e[3] := 0
+        e[4] := 8
+        r := orden(c, xhcis[c].entrada, 0, (TRB_DIRECCIÓN << 10) ob (ranura << 24))
+        si r <> BIEN entonces devolver falso fin
+        a.dir := ranura
+        devolver cierto
+    fin
+
+    ; el paquete máximo del extremo 0 ha resultado ser otro: se le dice
+    público función pon_paquete0(c: nat32, ref a: Aparato): bool
+        variable e, k: puntero a nat32
+        llenar(puntero(xhcis[c].entrada), 4096, 0)
+        k := de_entrada(c, 0)
+        k[1] := 2
+        e := de_entrada(c, 2)
+        e[1] := (3 << 1) ob (4 << 3) ob (a.paquete0 << 16)
+        e[2] := a.anillo0.base ob a.anillo0.ciclo
+        e[4] := 8
+        devolver orden(c, xhcis[c].entrada, 0, (TRB_EVALUAR << 10) ob (a.ranura << 24)) = BIEN
+    fin
+
+    ; cómo numera el xHCI un extremo: dos por número, el de salida y el de entrada
+    función número_xhci(extremo: nat32): nat32
+        si extremo yb 0x80 <> 0 entonces devolver (extremo yb 0x0F) * 2 + 1 fin
+        devolver (extremo yb 0x0F) * 2
+    fin
+
+    ; cada cuánto se pregunta a un extremo de interrupción, como lo quiere
+    ; el xHCI: el exponente de 2, en microtramas de 125 microsegundos
+    función intervalo_xhci(ref a: Aparato, intervalo: nat32): nat32
+        variable k, ms: nat32
+        si a.velocidad >= V_ALTA entonces
+            si intervalo = 0 entonces devolver 0 fin
+            si intervalo > 16 entonces devolver 15 fin
+            devolver intervalo - 1
+        fin
+        ; a velocidad baja o plena viene en milisegundos
+        ms := intervalo
+        si ms = 0 entonces ms := 1 fin
+        k := 3
+        mientras ms > 1 y k < 10 hacer
+            ms := ms >> 1
+            k := k + 1
+        fin
+        devolver k
+    fin
+
+    ; da a la controladora los extremos del aparato (los que ha dejado
+    ; apuntados usb.cas al leer su configuración), cada uno con su anillo; y,
+    ; si es un concentrador, se lo dice. Falso si no puede ser.
+    público función configura(c: nat32, ref a: Aparato): bool
+        variable e, k: puntero a nat32
+        variable i, n, último, clase: nat32
+        llenar(puntero(xhcis[c].entrada), 4096, 0)
+        k := de_entrada(c, 0)
+        k[1] := 1
+        último := 1
+        para i desde 1 hasta a.n_extremos hacer
+            n := número_xhci(a.extremos[i - 1].número)
+            si a.extremos[i - 1].anillo.base = 0 entonces
+                si no nuevo_anillo(a.extremos[i - 1].anillo) entonces devolver falso fin
+                k[1] := k[1] ob (nat32(1) << n)
+                e := de_entrada(c, n + 1)
+                ; la clase: 2 y 3, a granel y de interrupción de salida; 6 y 7, de entrada
+                clase := a.extremos[i - 1].clase
+                si a.extremos[i - 1].número yb 0x80 <> 0 entonces clase := clase + 4 fin
+                e[0] := 0
+                si a.extremos[i - 1].clase = 3 entonces e[0] := intervalo_xhci(a, a.extremos[i - 1].intervalo) << 16 fin
+                e[1] := (3 << 1) ob (clase << 3) ob (a.extremos[i - 1].paquete << 16)
+                e[2] := a.extremos[i - 1].anillo.base ob 1
+                e[3] := 0
+                e[4] := a.extremos[i - 1].paquete ob (a.extremos[i - 1].paquete << 16)
+                si a.extremos[i - 1].clase = 2 entonces e[4] := 1024 fin
+            fin
+            si n > último entonces último := n fin
+        fin
+        pon_ranura(c, a, último)
+        devolver orden(c, xhcis[c].entrada, 0, (TRB_CONFIGURAR << 10) ob (a.ranura << 24)) = BIEN
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las transferencias
+    ; -------------------------------------------------------------------------
+    ; deja un extremo listo para otra transferencia después de un fallo: si
+    ; se ha parado, se repone; si no, se para; y su anillo sigue desde donde
+    ; va a ir la próxima petición
+    función repone(c: nat32, ranura: nat32, extremo: nat32, ref a: Anillo, parado: bool)
+        variable de: nat32
+        de := (extremo << 16) ob (ranura << 24)
+        si parado entonces
+            orden(c, 0, 0, (TRB_REPONER << 10) ob de)
+        sino
+            orden(c, 0, 0, (TRB_PARAR << 10) ob de)
+        fin
+        orden(c, (a.base + a.pos * 16) ob a.ciclo, 0, (TRB_DESENCOLAR << 10) ob de)
+    fin
+
+    ; espera a que acabe la transferencia cuyo último TRB es «último» (y,
+    ; si lleva datos, «de_datos» es su TRB: lo que le falte por llegar queda
+    ; en «resto»). Da 0, T_PARADA o T_FALLO.
+    función espera_transferencia(c: nat32, ranura: nat32, extremo: nat32, ref a: Anillo, último: nat32, de_datos: nat32, ref resto: nat32, cs: nat32): ent32
+        variable tope, vueltas, código: nat32
+        tope := tics + cs + 1
+        vueltas := 0
+        resto := 0
+        mientras cierto hacer
+            mira_sucesos(c)
+            si xhcis[c].tr_hecha entonces
+                xhcis[c].tr_hecha := falso
+                si xhcis[c].tr_ranura = ranura y xhcis[c].tr_extremo = extremo entonces
+                    código := xhcis[c].tr_código
+                    si código <> BIEN y código <> CORTO entonces
+                        repone(c, ranura, extremo, a, código = PARADA)
+                        si código = PARADA entonces devolver T_PARADA fin
+                        devolver T_FALLO
+                    fin
+                    si xhcis[c].tr_trb = de_datos entonces resto := xhcis[c].tr_resto fin
+                    si xhcis[c].tr_trb = último entonces devolver 0 fin
+                fin
+            fin
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 100000000 entonces
+                repone(c, ranura, extremo, a, falso)
+                devolver T_FALLO
+            fin
+        fin
+        devolver T_FALLO
+    fin
+
+    ; una transferencia de control (como la de ehci.cas): la petición (8
+    ; octetos) y, si n no es 0, n octetos de datos, que entran o salen
+    público función control(c: nat32, ref a: Aparato, petición: nat32, datos: nat32, n: nat32, entra: bool): ent32
+        variable p: puntero a nat32
+        variable de_datos, último, clase, resto: nat32
+        variable r: ent32
+        p := puntero(petición)
+        clase := 0
+        si n <> 0 entonces
+            clase := 2
+            si entra entonces clase := 3 fin
+        fin
+        xhcis[c].tr_hecha := falso
+        al_anillo(a.anillo0, p[0], p[1], 8, (TRB_PETICIÓN << 10) ob 0x40 ob (clase << 16))
+        de_datos := 0
+        si n <> 0 entonces
+            clase := 0
+            si entra entonces clase := 0x10000 fin
+            de_datos := al_anillo(a.anillo0, datos, 0, n, (TRB_DATOS << 10) ob clase ob 0x24)
+        fin
+        ; el estado va al revés que los datos (y, sin datos, entra)
+        clase := 0x10000
+        si n <> 0 y entra entonces clase := 0 fin
+        último := al_anillo(a.anillo0, 0, 0, 0, (TRB_ESTADO << 10) ob clase ob 0x20)
+        timbre(c, a.ranura, 1)
+        r := espera_transferencia(c, a.ranura, 1, a.anillo0, último, de_datos, resto, 300)
+        si r <> 0 entonces devolver r fin
+        devolver ent32(n - resto)
+    fin
+
+    ; una transferencia a granel (como la de ehci.cas)
+    público función granel(c: nat32, ref a: Aparato, ref e: Extremo, datos: nat32, n: nat32, cs: nat32): ent32
+        variable último, resto, x: nat32
+        variable r: ent32
+        x := número_xhci(e.número)
+        xhcis[c].tr_hecha := falso
+        último := al_anillo(e.anillo, datos, 0, n, (TRB_NORMAL << 10) ob 0x24)
+        timbre(c, a.ranura, x)
+        r := espera_transferencia(c, a.ranura, x, e.anillo, último, último, resto, cs)
+        si r <> 0 entonces devolver r fin
+        devolver ent32(n - resto)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las tuberías de interrupción
+    ; -------------------------------------------------------------------------
+    público función tubo_abre(c: nat32, ref a: Aparato, ref e: Extremo): nat32
+        variable i: nat32
+        si xhcis[c].n_tubos >= MAX_TUBOS o e.anillo.base = 0 entonces devolver NINGUNA fin
+        i := xhcis[c].n_tubos
+        xhcis[c].tubos[i].ranura := a.ranura
+        xhcis[c].tubos[i].extremo := número_xhci(e.número)
+        xhcis[c].tubos[i].anillo.base := e.anillo.base
+        xhcis[c].tubos[i].anillo.pos := e.anillo.pos
+        xhcis[c].tubos[i].anillo.ciclo := e.anillo.ciclo
+        xhcis[c].tubos[i].hecho := falso
+        xhcis[c].n_tubos := i + 1
+        devolver i
+    fin
+
+    público función tubo_datos(c: nat32, t: nat32): puntero a byte
+        devolver puntero(xhcis[c].búferes + t * 64)
+    fin
+
+    público función tubo_pide(c: nat32, t: nat32, n: nat32)
+        xhcis[c].tubos[t].hecho := falso
+        al_anillo(xhcis[c].tubos[t].anillo, xhcis[c].búferes + t * 64, 0, n, (TRB_NORMAL << 10) ob 0x24)
+        timbre(c, xhcis[c].tubos[t].ranura, xhcis[c].tubos[t].extremo)
+    fin
+
+    público función tubo_mira(c: nat32, t: nat32, n: nat32): ent32
+        variable código: nat32
+        mira_sucesos(c)
+        si no xhcis[c].tubos[t].hecho entonces devolver T_ESPERA fin
+        código := xhcis[c].tubos[t].código
+        si código = BIEN o código = CORTO entonces devolver ent32(n - xhcis[c].tubos[t].resto) fin
+        repone(c, xhcis[c].tubos[t].ranura, xhcis[c].tubos[t].extremo, xhcis[c].tubos[t].anillo, código = PARADA)
+        devolver T_FALLO
+    fin
+
+fin Xhci.

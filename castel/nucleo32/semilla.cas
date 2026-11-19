@@ -21,6 +21,8 @@
 ;   - discos.cas: todos los discos, sean de la clase que sean;
 ;   - fat.cas: el sistema de archivos FAT12/16/32: leer y escribir;
 ;   - unidades.cas: las particiones y las letras de las unidades (C:, X:, M:);
+;   - usb.cas, con xhci.cas y ehci.cas (las controladoras), usbhid.cas (los
+;     teclados y los ratones) y usbalm.cas (las memorias): el USB;
 ;   - fecha.cas: la fecha y la hora (el reloj de la CMOS);
 ;   - usuario.cas: los programas del anillo 3 (del disco, o de los módulos
 ;     de multiboot) y su llamada al sistema, la int 0x80;
@@ -36,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usuario, Escritorio, Textos32, Mem32, Formato
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usuario, Escritorio, Textos32, Mem32, Formato
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -517,7 +519,7 @@ módulo Semilla
             imprimir("sistema de archivos: FAT%u, desde el sector %u, %u clusters de %u octetos", d)
             libres := clusters_libres(u)
             si libres <> 0xFFFFFFFF entonces imprimir1(", %u libres", libres) fin
-            imprimir3("\nsectores leídos: %u, escritos: %u; archivos abiertos: %u\n", sectores_leídos(), sectores_escritos(), cuántos_abiertos())
+            imprimir3("\nsectores leídos: %u, escritos: %u; archivos abiertos: %u\n", Discos.sectores_leídos(), Discos.sectores_escritos(), cuántos_abiertos())
         fin
         enseña_unidades()
     fin
@@ -581,6 +583,21 @@ módulo Semilla
         fin
         ; con «sindisco», ni se miran los discos de dentro del PC
         si buscar(línea_del_cargador(), "sindisco") = nulo entonces busca_internos() fin
+        ; el USB: las controladoras, lo que hay enchufado, los teclados y
+        ; ratones y las memorias (con «sinusb», se queda como lo dejó la BIOS)
+        si buscar(línea_del_cargador(), "sinusb") = nulo entonces
+            Usb.prepara()
+            si controladoras <> 0 entonces
+                Usb.enseña()
+                Usbhid.prepara()
+                enseña_descriptor()
+                si Usbalm.prepara() <> 0 entonces busca_usb() fin
+                dd[0] := teclados
+                dd[1] := ratones
+                dd[2] := Usbalm.cuántas
+                imprimir("usb: %u teclados, %u ratones, %u memorias.\n", dd)
+            fin
+        fin
         n := 0
         para d desde 0 hasta MAX_DISCOS - 1 hacer
             si discos[d].hay entonces

@@ -1,21 +1,289 @@
-; (provisional)
+; =============================================================================
+;  usbalm.cas - las memorias USB (y los discos USB) del núcleo de
+;  Hispa-Pentium: la clase «almacenamiento» (08), con órdenes SCSI (06) y el
+;  transporte «solo a granel» (50, Bulk-Only Transport).
+;
+;  Cada orden son tres pasos por los dos extremos a granel del aparato: un
+;  envoltorio de 31 octetos con la orden SCSI (CBW), los datos (si los hay)
+;  y un estado de 13 (CSW). Órdenes: INQUIRY (quién es), TEST UNIT READY,
+;  REQUEST SENSE (por qué ha fallado la anterior), READ CAPACITY (cuántos
+;  sectores), READ(10), WRITE(10) y SYNCHRONIZE CACHE. Si el aparato se
+;  atasca, se le quita la parada al extremo o, si hace falta, se reinicia
+;  la clase entera, y se repite.
+;
+;  Los datos pasan por una página del núcleo (ocho sectores por orden). De
+;  fábrica NO se escribe: solo si «escritura» es cierto (discos.cas).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
 módulo Usbalm
+
+    importar Usb, Usbbase, Marcos, Tareas, Mem32
+
     público constante MAX_MEMORIAS = 2
+    constante SECTOR = 512
+    constante POR_VEZ = 8                       ; los sectores de cada orden (una página)
+
     público tipo Memoria = estructura
         hay: bool
+        aparato: nat32                          ; cuál es (usb.cas)
+        interfaz: nat32
+        entra, sale: nat32                      ; sus dos extremos a granel
         sectores: nat32
         modelo: arreglo [41] de byte
     fin
+
     público variable memorias: arreglo [MAX_MEMORIAS] de Memoria
+    público variable cuántas: nat32
     público variable escritura: bool
-    público variable sectores_leídos, sectores_escritos: nat32
+    público variable sectores_leídos, sectores_escritos, fallos_de_disco: nat32
+
+    variable cerrojo: Cerrojo
+    variable datos: nat32                       ; la página de los datos
+    variable sobres: nat32                      ; la del envoltorio (CBW) y el estado (CSW, en 0x40)
+    variable etiqueta: nat32                    ; cada orden lleva un número, que vuelve en su estado
+    variable scsi: arreglo [16] de byte         ; la orden SCSI que se va a mandar
+
+    ; reinicia la clase: la orden propia del transporte, y fuera las paradas
+    función reinicia(m: nat32)
+        control(memorias[m].aparato, 0x21, 0xFF, 0, memorias[m].interfaz, nulo, 0)
+        quita_parada(memorias[m].aparato, memorias[m].entra)
+        quita_parada(memorias[m].aparato, memorias[m].sale)
+    fin
+
+    ; manda la orden SCSI que hay en «scsi» (de «largo» octetos) a la
+    ; memoria m, con n octetos de datos que entran o salen por la página de
+    ; datos. Cierto si la memoria dice que ha ido bien.
+    función orden(m: nat32, largo: nat32, n: nat32, entra: bool): bool
+        variable c: puntero a nat32
+        variable b: puntero a byte
+        variable r: ent32
+        variable i, a: nat32
+        a := memorias[m].aparato
+        etiqueta := etiqueta + 1
+        llenar(puntero(sobres), 0x60, 0)
+        c := puntero(sobres)
+        c[0] := 0x43425355                      ; «USBC»
+        c[1] := etiqueta
+        c[2] := n
+        b := puntero(sobres)
+        si entra entonces b[12] := 0x80 fin
+        b[14] := largo
+        para i desde 0 hasta largo - 1 hacer b[15 + i] := scsi[i] fin
+        r := granel(a, memorias[m].sale, sobres, 31, 300)
+        si r <> 31 entonces
+            reinicia(m)
+            devolver falso
+        fin
+        si n <> 0 entonces
+            si entra entonces
+                r := granel(a, memorias[m].entra, datos, n, 1000)
+                si r = T_PARADA entonces quita_parada(a, memorias[m].entra) fin
+            sino
+                r := granel(a, memorias[m].sale, datos, n, 1000)
+                si r = T_PARADA entonces quita_parada(a, memorias[m].sale) fin
+            fin
+            si r = T_FALLO entonces
+                reinicia(m)
+                devolver falso
+            fin
+        fin
+        ; el estado (si el extremo se ha parado, se le quita y se pide otra vez)
+        r := granel(a, memorias[m].entra, sobres + 0x40, 13, 1000)
+        si r = T_PARADA entonces
+            quita_parada(a, memorias[m].entra)
+            r := granel(a, memorias[m].entra, sobres + 0x40, 13, 1000)
+        fin
+        c := puntero(sobres + 0x40)
+        b := puntero(sobres + 0x40)
+        si r <> 13 o c[0] <> 0x53425355 o c[1] <> etiqueta o b[12] > 1 entonces
+            reinicia(m)
+            devolver falso
+        fin
+        devolver b[12] = 0
+    fin
+
+    función prepara_orden(código: nat32)
+        llenar(scsi, 16, 0)
+        scsi[0] := código
+    fin
+
+    ; por qué ha fallado la orden anterior (y, de paso, la memoria queda
+    ; lista para otra)
+    función pregunta_fallo(m: nat32)
+        prepara_orden(0x03)
+        scsi[4] := 18
+        orden(m, 6, 18, cierto)
+    fin
+
+    ; la orden de leer o escribir (10): desde qué sector y cuántos
+    función orden_10(código: nat32, lba: nat32, n: nat32)
+        prepara_orden(código)
+        scsi[2] := lba >> 24
+        scsi[3] := lba >> 16
+        scsi[4] := lba >> 8
+        scsi[5] := lba
+        scsi[7] := n >> 8
+        scsi[8] := n
+    fin
+
+    ; mira si esa interfaz del aparato a es una memoria y la apunta
+    función mira(a: nat32, k: nat32)
+        variable m, i, entra, sale, lista: nat32
+        variable p: puntero a byte
+        variable bien: bool
+        si cuántas >= MAX_MEMORIAS entonces devolver fin
+        ; sus dos extremos a granel
+        entra := NINGUNO
+        sale := NINGUNO
+        para i desde 1 hasta aparatos[a].n_extremos hacer
+            si aparatos[a].extremos[i - 1].interfaz = k y aparatos[a].extremos[i - 1].clase = 2 entonces
+                si aparatos[a].extremos[i - 1].número yb 0x80 <> 0 entonces
+                    si entra = NINGUNO entonces entra := i - 1 fin
+                sino
+                    si sale = NINGUNO entonces sale := i - 1 fin
+                fin
+            fin
+        fin
+        si entra = NINGUNO o sale = NINGUNO entonces devolver fin
+        m := cuántas
+        memorias[m].hay := falso
+        memorias[m].aparato := a
+        memorias[m].interfaz := aparatos[a].interfaces[k].número
+        memorias[m].entra := entra
+        memorias[m].sale := sale
+        p := puntero(datos)
+        ; quién es: el fabricante (8 letras) y el producto (16)
+        prepara_orden(0x12)
+        scsi[4] := 36
+        si no orden(m, 6, 36, cierto) entonces
+            si no orden(m, 6, 36, cierto) entonces devolver fin
+        fin
+        para i desde 0 hasta 23 hacer memorias[m].modelo[i] := p[8 + i] fin
+        i := 24
+        mientras i > 0 y (memorias[m].modelo[i - 1] = ' ' o memorias[m].modelo[i - 1] = 0) hacer i := i - 1 fin
+        memorias[m].modelo[i] := 0
+        ; ¿está lista? (una memoria recién enchufada puede tardar)
+        bien := falso
+        lista := 0
+        mientras no bien y lista < 20 hacer
+            prepara_orden(0x00)
+            bien := orden(m, 6, 0, falso)
+            si no bien entonces
+                pregunta_fallo(m)
+                espera_ms(100)
+            fin
+            lista := lista + 1
+        fin
+        ; cuántos sectores tiene, y de cuánto
+        prepara_orden(0x25)
+        si no orden(m, 10, 8, cierto) entonces
+            pregunta_fallo(m)
+            prepara_orden(0x25)
+            si no orden(m, 10, 8, cierto) entonces devolver fin
+        fin
+        si p[4] <> 0 o p[5] <> 0 o p[6] <> 2 o p[7] <> 0 entonces devolver fin       ; solo sectores de 512
+        memorias[m].sectores := (nat32(p[0]) << 24) ob (nat32(p[1]) << 16) ob (nat32(p[2]) << 8) ob p[3]
+        si memorias[m].sectores = 0xFFFFFFFF entonces devolver fin
+        memorias[m].sectores := memorias[m].sectores + 1
+        memorias[m].hay := cierto
+        cuántas := cuántas + 1
+    fin
+
+    ; busca las memorias entre los aparatos que ha enumerado usb.cas. Da
+    ; cuántas hay.
+    público función prepara(): nat32
+        variable a, k: nat32
+        si datos = 0 entonces datos := reservar_marco() fin
+        si sobres = 0 entonces sobres := reservar_marco() fin
+        si datos = 0 o sobres = 0 entonces devolver 0 fin
+        tomar(cerrojo)
+        para a desde 0 hasta MAX_APARATOS - 1 hacer
+            si aparatos[a].usado entonces
+                para k desde 1 hasta aparatos[a].n_interfaces hacer
+                    si aparatos[a].interfaces[k - 1].clase = 8 y aparatos[a].interfaces[k - 1].subclase = 6 y aparatos[a].interfaces[k - 1].protocolo = 0x50 entonces
+                        mira(a, k - 1)
+                    fin
+                fin
+            fin
+        fin
+        soltar(cerrojo)
+        devolver cuántas
+    fin
+
+    ; trae n sectores de la memoria s, desde el sector lba, a destino
     público función leer_sectores(s: nat32, lba: nat32, n: nat32, destino: puntero a byte): bool
-        devolver falso
+        variable k, intentos: nat32
+        variable bien: bool
+        si s >= MAX_MEMORIAS entonces devolver falso fin
+        si no memorias[s].hay o lba >= memorias[s].sectores o n > memorias[s].sectores - lba entonces devolver falso fin
+        tomar(cerrojo)
+        bien := cierto
+        mientras bien y n > 0 hacer
+            k := n
+            si k > POR_VEZ entonces k := POR_VEZ fin
+            intentos := 0
+            bien := falso
+            mientras no bien y intentos < 3 hacer
+                orden_10(0x28, lba, k)
+                bien := orden(s, 10, k * SECTOR, cierto)
+                si no bien entonces pregunta_fallo(s) fin
+                intentos := intentos + 1
+            fin
+            si bien entonces
+                copiar_memoria(destino, puntero(datos), k * SECTOR)
+                destino := destino + k * SECTOR
+                sectores_leídos := sectores_leídos + k
+                lba := lba + k
+                n := n - k
+            fin
+        fin
+        si no bien entonces fallos_de_disco := fallos_de_disco + 1 fin
+        soltar(cerrojo)
+        devolver bien
     fin
+
+    ; lleva n sectores de origen a la memoria s, desde el sector lba
     público función escribir_sectores(s: nat32, lba: nat32, n: nat32, origen: puntero a byte): bool
-        devolver falso
+        variable k, intentos: nat32
+        variable bien: bool
+        si s >= MAX_MEMORIAS o no escritura entonces devolver falso fin        ; (sin permiso, ni una orden de escribir)
+        si no memorias[s].hay o lba >= memorias[s].sectores o n > memorias[s].sectores - lba entonces devolver falso fin
+        tomar(cerrojo)
+        bien := cierto
+        mientras bien y n > 0 hacer
+            k := n
+            si k > POR_VEZ entonces k := POR_VEZ fin
+            intentos := 0
+            bien := falso
+            mientras no bien y intentos < 3 hacer
+                copiar_memoria(puntero(datos), origen, k * SECTOR)
+                orden_10(0x2A, lba, k)
+                bien := orden(s, 10, k * SECTOR, falso)
+                si no bien entonces pregunta_fallo(s) fin
+                intentos := intentos + 1
+            fin
+            si bien entonces
+                origen := origen + k * SECTOR
+                sectores_escritos := sectores_escritos + k
+                lba := lba + k
+                n := n - k
+            fin
+        fin
+        si no bien entonces fallos_de_disco := fallos_de_disco + 1 fin
+        soltar(cerrojo)
+        devolver bien
     fin
+
+    ; le dice a la memoria s que guarde de verdad lo que tenga pendiente
+    ; (hay memorias que no conocen la orden: no es un fallo)
     público función asentar(s: nat32): bool
-        devolver falso
+        si s >= MAX_MEMORIAS o no escritura entonces devolver falso fin
+        si no memorias[s].hay entonces devolver falso fin
+        tomar(cerrojo)
+        prepara_orden(0x35)
+        si no orden(s, 10, 0, falso) entonces pregunta_fallo(s) fin
+        soltar(cerrojo)
+        devolver cierto
     fin
+
 fin Usbalm.

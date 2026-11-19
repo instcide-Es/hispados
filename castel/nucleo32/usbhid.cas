@@ -1,0 +1,384 @@
+; =============================================================================
+;  usbhid.cas - los teclados y los ratones USB del núcleo de Hispa-Pentium
+;  (la clase HID, 03), también los paneles táctiles que se presentan como un
+;  ratón (el de los MacBook).
+;
+;  El teclado, con el «protocolo de arranque»: cada informe son ocho octetos
+;  (los modificadores —Mayús, Control, Alt...— y hasta seis teclas
+;  pulsadas). Comparando cada informe con el anterior se sabe qué se ha
+;  pulsado y qué se ha soltado, y eso se le da a consola.cas con los mismos
+;  códigos que da un teclado PS/2: así el teclado español, los acentos,
+;  Ctrl+C y todo lo demás son los mismos. La repetición de una tecla que se
+;  deja pulsada (que en un teclado PS/2 la hace el propio teclado) se hace
+;  aquí.
+;
+;  El ratón, con el protocolo de arranque si lo tiene (los botones y lo que
+;  se ha movido, en los tres primeros octetos); si no, se lee su descriptor
+;  de informe y se busca en él dónde van los botones y los ejes X e Y
+;  (relativos), con su identificador de informe si lo lleva.
+;
+;  Una tarea del núcleo mira cada centésima de segundo si ha llegado algún
+;  informe (las tuberías de interrupción de usb.cas).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Usbhid
+
+    importar Usb, Usbbase, Consola, Raton, Tareas, Formato
+
+    constante MAX_HID = 4
+    constante REPITE_TRAS = 50                  ; centésimas hasta que una tecla empieza a repetirse
+    constante REPITE_CADA = 4                   ; y cada cuántas se repite
+
+    tipo Hid = estructura
+        usado: bool
+        teclado: bool                           ; si no, es un ratón
+        aparato: nat32
+        tubo: nat32
+        largo: nat32                            ; los octetos que se piden cada vez
+        anterior: arreglo [8] de byte           ; (teclado) el informe de antes
+        cambiada: bool                          ; (teclado de Apple europeo) dos teclas van cambiadas
+        ; (ratón) dónde va cada cosa en el informe, en bits
+        con_id: bool                            ; el informe empieza por su identificador
+        id: nat32
+        botones_bit: nat32
+        x_bit, y_bit, eje_bits: nat32
+    fin
+
+    público variable teclados, ratones: nat32   ; los que hay
+    público variable informes: nat32            ; los que han llegado
+    variable hids: arreglo [MAX_HID] de Hid
+    variable n_hids: nat32
+    variable descriptor: arreglo [512] de byte  ; un descriptor de informe
+    variable descriptor_largo: nat32
+    ; lo que se sabe del último ratón sin protocolo de arranque (para enseñarlo)
+    público variable ratón_por_descriptor: bool
+    variable repite, repite_cuándo: nat32       ; la tecla que se repite (su código) y el tic en que toca
+
+    ; el código de rastreo (el de un teclado PS/2) de cada tecla USB, por su
+    ; «uso»; con el bit 7, lleva 0xE0 delante. 0: no se usa.
+    variable de_uso: arreglo [105] de byte = "\0\0\0\0\x1E\x30\x2E\x20\x12\x21\x22\x23\x17\x24\x25\x26\x32\x31\x18\x19\x10\x13\x1F\x14\x16\x2F\x11\x2D\x15\x2C\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x1C\x01\x0E\x0F\x39\x0C\x0D\x1A\x1B\x2B\x2B\x27\x28\x29\x33\x34\x35\x3A\x3B\x3C\x3D\x3E\x3F\x40\x41\x42\x43\x44\x57\x58\xB7\x46\0\xD2\xC7\xC9\xD3\xCF\xD1\xCD\xCB\xD0\xC8\x45\xB5\x37\x4A\x4E\x9C\x4F\x50\x51\x4B\x4C\x4D\x47\x48\x49\x52\x53\x56\xDD"
+    ; los modificadores (un bit cada uno): Control, Mayús, Alt y el logo, los de la izquierda y los de la derecha
+    variable de_modificador: arreglo [9] de byte = "\x1D\x2A\x38\xDB\x9D\x36\xB8\xDC"
+    ; los teclados de Apple con la distribución europea (ISO): en ellos la
+    ; tecla de la izquierda del 1 y la de al lado de Mayús dan los usos
+    ; cambiados (los productos 05AC:xxxx de esta lista)
+    variable apple_iso: arreglo [15] de byte = "\x24\x31\x37\x40\x43\x46\x4A\x4D\x53\x5A\x63\x73\x91\x1B"   ; (todos son 05AC:02xx)
+
+    ; -------------------------------------------------------------------------
+    ;  El teclado
+    ; -------------------------------------------------------------------------
+    ; manda a la consola el código de una tecla (con «suelta», al soltarla)
+    función tecla(código: nat32, suelta: bool)
+        si código = 0 entonces devolver fin
+        si código yb 0x80 <> 0 entonces tecla_de_fuera(0xE0) fin
+        si suelta entonces
+            tecla_de_fuera((código yb 0x7F) ob 0x80)
+        sino
+            tecla_de_fuera(código yb 0x7F)
+        fin
+    fin
+
+    función código_de(ref h: Hid, uso: nat32): nat32
+        si h.cambiada entonces
+            si uso = 0x35 entonces
+                uso := 0x64
+            sino si uso = 0x64 entonces
+                uso := 0x35
+            fin
+        fin
+        si uso > 0x65 entonces devolver 0 fin
+        devolver de_uso[uso]
+    fin
+
+    función está(p: puntero a byte, uso: nat32): bool
+        variable i: nat32
+        para i desde 2 hasta 7 hacer
+            si p[i] = uso entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; un informe de teclado: lo que ha cambiado desde el anterior
+    función informe_teclado(ref h: Hid, p: puntero a byte)
+        variable i, antes, ahora_: nat32
+        si p[2] = 1 y p[3] = 1 entonces devolver fin       ; (demasiadas teclas a la vez: no dice cuáles)
+        ; los modificadores
+        antes := h.anterior[0]
+        ahora_ := p[0]
+        para i desde 0 hasta 7 hacer
+            si (antes xob ahora_) yb (nat32(1) << i) <> 0 entonces
+                tecla(de_modificador[i], ahora_ yb (nat32(1) << i) = 0)
+            fin
+        fin
+        ; las teclas que se han soltado y las que se han pulsado
+        para i desde 2 hasta 7 hacer
+            si h.anterior[i] > 3 y no está(p, h.anterior[i]) entonces
+                tecla(código_de(h, h.anterior[i]), cierto)
+                si repite = código_de(h, h.anterior[i]) entonces repite := 0 fin
+            fin
+        fin
+        para i desde 2 hasta 7 hacer
+            si p[i] > 3 y no está(h.anterior, p[i]) entonces
+                tecla(código_de(h, p[i]), falso)
+                repite := código_de(h, p[i])
+                repite_cuándo := tics + REPITE_TRAS
+            fin
+        fin
+        para i desde 0 hasta 7 hacer h.anterior[i] := p[i] fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El ratón
+    ; -------------------------------------------------------------------------
+    ; n bits del informe, desde el bit «desde_bit», como un número con signo
+    función campo(p: puntero a byte, desde_bit: nat32, n: nat32): ent32
+        variable v, i: nat32
+        v := 0
+        para i desde 0 hasta n - 1 hacer
+            si p[(desde_bit + i) >> 3] yb (nat32(1) << ((desde_bit + i) yb 7)) <> 0 entonces v := v ob (nat32(1) << i) fin
+        fin
+        si n < 32 y v yb (nat32(1) << (n - 1)) <> 0 entonces v := v ob (0xFFFFFFFF << n) fin
+        devolver ent32(v)
+    fin
+
+    función informe_ratón(ref h: Hid, p: puntero a byte, n: nat32)
+        variable b: nat32
+        variable dx, dy: ent32
+        si h.con_id entonces
+            si p[0] <> h.id entonces devolver fin
+            p := p + 1
+            n := n - 1
+        fin
+        si (h.y_bit + h.eje_bits + 7) >> 3 > n o (h.x_bit + h.eje_bits + 7) >> 3 > n entonces devolver fin
+        b := nat32(campo(p, h.botones_bit, 3)) yb 7
+        dx := campo(p, h.x_bit, h.eje_bits)
+        dy := campo(p, h.y_bit, h.eje_bits)
+        ratón_de_fuera(dx, dy, b)
+    fin
+
+    ; busca en el descriptor de informe (ya leído) el primer informe que
+    ; lleve los ejes X e Y relativos, y dónde van en él los botones y los
+    ; ejes. Falso si no lo hay.
+    función mira_descriptor(ref h: Hid): bool
+        variable d, cabeza, largo, clase, etiqueta_, dato, k: nat32
+        variable página, tamaño_, cuenta, id, bit, n_usos, uso_mín: nat32
+        variable usos: arreglo [8] de nat32
+        variable hay_botones, con_id: bool
+        variable botones_bit: nat32
+        d := 0
+        página := 0
+        tamaño_ := 0
+        cuenta := 0
+        id := 0
+        bit := 0
+        n_usos := 0
+        uso_mín := 0
+        hay_botones := falso
+        con_id := falso
+        botones_bit := 0
+        mientras d < descriptor_largo hacer
+            cabeza := descriptor[d]
+            largo := cabeza yb 3
+            si largo = 3 entonces largo := 4 fin
+            clase := (cabeza >> 2) yb 3
+            etiqueta_ := cabeza >> 4
+            si cabeza = 0xFE o d + 1 + largo > descriptor_largo entonces devolver falso fin
+            dato := 0
+            para k desde 1 hasta largo hacer
+                dato := dato ob (nat32(descriptor[d + k]) << ((k - 1) * 8))
+            fin
+            si clase = 1 entonces
+                ; los que valen hasta que se cambien
+                según etiqueta_
+                    caso 0: página := dato
+                    caso 7: tamaño_ := dato
+                    caso 9: cuenta := dato
+                    caso 8:
+                        ; otro informe: se empieza a contar de nuevo
+                        id := dato
+                        con_id := cierto
+                        bit := 0
+                        hay_botones := falso
+                fin
+            sino si clase = 2 entonces
+                ; los de la entrada que viene
+                si etiqueta_ = 0 y n_usos < 8 entonces
+                    usos[n_usos] := dato
+                    n_usos := n_usos + 1
+                sino si etiqueta_ = 1 entonces
+                    uso_mín := dato
+                fin
+            sino si clase = 0 entonces
+                si etiqueta_ = 8 entonces
+                    ; una entrada: «cuenta» campos de «tamaño_» bits
+                    si dato yb 1 = 0 entonces
+                        si página = 9 y no hay_botones entonces
+                            hay_botones := cierto
+                            botones_bit := bit
+                        sino si página = 1 y dato yb 4 <> 0 entonces
+                            ; ejes relativos: ¿están X (0x30) e Y (0x31)?
+                            h.x_bit := 0xFFFF
+                            h.y_bit := 0xFFFF
+                            para k desde 0 hasta cuenta - 1 hacer
+                                si k < n_usos entonces
+                                    si usos[k] = 0x30 entonces h.x_bit := bit + k * tamaño_ fin
+                                    si usos[k] = 0x31 entonces h.y_bit := bit + k * tamaño_ fin
+                                sino si n_usos = 0 entonces
+                                    si uso_mín + k = 0x30 entonces h.x_bit := bit + k * tamaño_ fin
+                                    si uso_mín + k = 0x31 entonces h.y_bit := bit + k * tamaño_ fin
+                                fin
+                            fin
+                            si h.x_bit <> 0xFFFF y h.y_bit <> 0xFFFF y tamaño_ >= 2 y tamaño_ <= 16 entonces
+                                h.eje_bits := tamaño_
+                                h.con_id := con_id
+                                h.id := id
+                                h.botones_bit := botones_bit
+                                si no hay_botones entonces h.botones_bit := 0 fin
+                                devolver cierto
+                            fin
+                        fin
+                    fin
+                    bit := bit + cuenta * tamaño_
+                fin
+                ; (después de una entrada, una salida o una colección, los usos se olvidan)
+                n_usos := 0
+                uso_mín := 0
+            fin
+            d := d + 1 + largo
+        fin
+        devolver falso
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Buscar los que hay, y la tarea que los atiende
+    ; -------------------------------------------------------------------------
+    función es_apple_iso(producto: nat32): bool
+        variable i: nat32
+        si (producto >> 8) <> 2 entonces devolver falso fin
+        para i desde 0 hasta 13 hacer
+            si apple_iso[i] = (producto yb 0xFF) entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; esa interfaz (la k) del aparato a es un teclado o un ratón: se prepara
+    función mira(a: nat32, k: nat32)
+        variable i, e, interfaz, n: nat32
+        variable r: ent32
+        variable arranque: bool
+        si n_hids >= MAX_HID entonces devolver fin
+        ; su extremo de interrupción de entrada
+        e := NINGUNO
+        para i desde 1 hasta aparatos[a].n_extremos hacer
+            si aparatos[a].extremos[i - 1].interfaz = k y aparatos[a].extremos[i - 1].clase = 3 y aparatos[a].extremos[i - 1].número yb 0x80 <> 0 y e = NINGUNO entonces
+                e := i - 1
+            fin
+        fin
+        si e = NINGUNO entonces devolver fin
+        interfaz := aparatos[a].interfaces[k].número
+        n := n_hids
+        hids[n].usado := falso
+        hids[n].aparato := a
+        hids[n].teclado := aparatos[a].interfaces[k].protocolo = 1
+        hids[n].largo := aparatos[a].extremos[e].paquete
+        si hids[n].largo > 64 entonces hids[n].largo := 64 fin
+        hids[n].cambiada := aparatos[a].fabricante = 0x05AC y es_apple_iso(aparatos[a].producto)
+        hids[n].con_id := falso
+        ; el protocolo de arranque (si la interfaz dice tenerlo), y que no
+        ; repita el informe si no cambia nada
+        arranque := falso
+        si aparatos[a].interfaces[k].subclase = 1 entonces
+            r := control(a, 0x21, 0x0B, 0, interfaz, nulo, 0)
+            arranque := r >= 0
+        fin
+        control(a, 0x21, 0x0A, 0, interfaz, nulo, 0)
+        si hids[n].teclado entonces
+            si hids[n].largo > 8 entonces hids[n].largo := 8 fin
+            teclados := teclados + 1
+        sino
+            ; un ratón de arranque: botones, X e Y, un octeto cada uno
+            hids[n].botones_bit := 0
+            hids[n].x_bit := 8
+            hids[n].y_bit := 16
+            hids[n].eje_bits := 8
+            si no arranque entonces
+                ; sin protocolo de arranque: lo que diga su descriptor de informe
+                r := control(a, 0x81, PIDE_DESCRIPTOR, 0x2200, interfaz, descriptor, 512)
+                descriptor_largo := 0
+                si r > 0 entonces descriptor_largo := nat32(r) fin
+                ratón_por_descriptor := cierto
+                si no mira_descriptor(hids[n]) entonces devolver fin
+            fin
+            ratones := ratones + 1
+            hay_ratón_usb := cierto
+        fin
+        hids[n].tubo := tubo_abre(a, e)
+        si hids[n].tubo = NINGUNO entonces devolver fin
+        hids[n].usado := cierto
+        n_hids := n + 1
+        tubo_pide(hids[n].tubo, hids[n].largo)
+    fin
+
+    ; la tarea que recoge los informes: cada centésima mira las tuberías
+    función atiende(nada: nat32)
+        variable i: nat32
+        variable r: ent32
+        mientras cierto hacer
+            para i desde 0 hasta MAX_HID - 1 hacer
+                si hids[i].usado entonces
+                    r := tubo_mira(hids[i].tubo, hids[i].largo)
+                    si r <> T_ESPERA entonces
+                        si r > 0 entonces
+                            informes := informes + 1
+                            si hids[i].teclado entonces
+                                si r >= 8 entonces informe_teclado(hids[i], tubo_datos(hids[i].tubo)) fin
+                            sino
+                                informe_ratón(hids[i], tubo_datos(hids[i].tubo), nat32(r))
+                            fin
+                        fin
+                        tubo_pide(hids[i].tubo, hids[i].largo)
+                    fin
+                fin
+            fin
+            ; la tecla que sigue pulsada se repite
+            si repite <> 0 y tics >= repite_cuándo entonces
+                tecla(repite, falso)
+                repite_cuándo := tics + REPITE_CADA
+            fin
+            dormir(1)
+        fin
+    fin
+
+    ; busca los teclados y los ratones entre los aparatos que ha enumerado
+    ; usb.cas, y pone en marcha la tarea que los atiende. Da cuántos hay.
+    público función prepara(): nat32
+        variable a, k: nat32
+        para a desde 0 hasta MAX_APARATOS - 1 hacer
+            si aparatos[a].usado entonces
+                para k desde 1 hasta aparatos[a].n_interfaces hacer
+                    si aparatos[a].interfaces[k - 1].clase = 3 y (aparatos[a].interfaces[k - 1].protocolo = 1 o aparatos[a].interfaces[k - 1].protocolo = 2) entonces
+                        mira(a, k - 1)
+                    fin
+                fin
+            fin
+        fin
+        si n_hids <> 0 entonces crear_tarea("usb", nat32(dirección(atiende)), 0) fin
+        devolver n_hids
+    fin
+
+    ; lo que da el descriptor de informe del último ratón sin protocolo de
+    ; arranque (un panel táctil): sus octetos, para apuntarlos
+    público función enseña_descriptor()
+        variable i: nat32
+        si no ratón_por_descriptor entonces devolver fin
+        imprimir1("usb: un ratón (o un panel) sin protocolo de arranque; su descriptor de informe, %u octetos:", descriptor_largo)
+        i := 0
+        mientras i < descriptor_largo y i < 160 hacer
+            si i mod 24 = 0 entonces escribir("\n  ") fin
+            imprimir1("%02X ", descriptor[i])
+            i := i + 1
+        fin
+        escribir("\n")
+    fin
+
+fin Usbhid.

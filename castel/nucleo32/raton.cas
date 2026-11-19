@@ -25,6 +25,7 @@ módulo Raton
     fin
 
     público variable hay_ratón: bool
+    público variable hay_ratón_usb: bool        ; hay un ratón USB (lo dice usbhid.cas)
     público variable ratón_x, ratón_y: ent32    ; dónde está la flecha
     público variable ratón_botones: nat32       ; los que están pulsados
     público variable paquetes: nat32            ; los movimientos que han llegado
@@ -62,6 +63,37 @@ módulo Raton
         devolver espera_leer()
     fin
 
+    ; el ratón se ha movido (dx a la derecha, dy hacia abajo) y sus botones
+    ; están así: lo diga el ratón PS/2 o uno USB. Con las interrupciones
+    ; tapadas.
+    función movido(dx: ent32, dy: ent32, botones: nat32)
+        paquetes := paquetes + 1
+        ratón_x := ratón_x + dx
+        ratón_y := ratón_y + dy
+        si ratón_x < 0 entonces ratón_x := 0 fin
+        si ratón_y < 0 entonces ratón_y := 0 fin
+        si ratón_x >= ancho entonces ratón_x := ancho - 1 fin
+        si ratón_y >= alto entonces ratón_y := alto - 1 fin
+        si botones <> ratón_botones entonces
+            ratón_botones := botones
+            si cola_ent - cola_sal < COLA entonces
+                cola[cola_ent mod COLA].x := ratón_x
+                cola[cola_ent mod COLA].ye := ratón_y
+                cola[cola_ent mod COLA].botones := ratón_botones
+                cola_ent := cola_ent + 1
+            fin
+        fin
+    fin
+
+    ; lo mismo, desde un ratón USB (usbhid.cas)
+    público función ratón_de_fuera(dx: ent32, dy: ent32, botones: nat32)
+        variable b: nat32
+        si ancho = 0 entonces devolver fin      ; (aún no hay escritorio)
+        b := sin_interrupciones()
+        movido(dx, dy, botones)
+        reponer(b)
+    fin
+
     interrupción función ratón()
         variable e, d, b: nat32
         variable dx, dy: ent32
@@ -75,28 +107,15 @@ módulo Raton
             fin
             si cuántos = 3 entonces
                 cuántos := 0
-                paquetes := paquetes + 1
                 b := trozo[0]
                 si b yb 0xC0 = 0 entonces               ; (si se ha desbordado, no vale)
                     dx := ent32(trozo[1])
                     si b yb 0x10 <> 0 entonces dx := dx - 256 fin
                     dy := ent32(trozo[2])
                     si b yb 0x20 <> 0 entonces dy := dy - 256 fin
-                    ratón_x := ratón_x + dx
-                    ratón_y := ratón_y - dy
-                    si ratón_x < 0 entonces ratón_x := 0 fin
-                    si ratón_y < 0 entonces ratón_y := 0 fin
-                    si ratón_x >= ancho entonces ratón_x := ancho - 1 fin
-                    si ratón_y >= alto entonces ratón_y := alto - 1 fin
-                    si b yb 7 <> ratón_botones entonces
-                        ratón_botones := b yb 7
-                        si cola_ent - cola_sal < COLA entonces
-                            cola[cola_ent mod COLA].x := ratón_x
-                            cola[cola_ent mod COLA].ye := ratón_y
-                            cola[cola_ent mod COLA].botones := ratón_botones
-                            cola_ent := cola_ent + 1
-                        fin
-                    fin
+                    movido(dx, 0 - dy, b yb 7)
+                sino
+                    paquetes := paquetes + 1
                 fin
             fin
         fin
@@ -142,6 +161,12 @@ módulo Raton
         alto := al
         ratón_x := an div 2
         ratón_y := al div 2
+        ; sin controlador de teclado y ratón PS/2 (un Mac, un PC «sin
+        ; legado»: su puerto lee 0xFF): solo puede haber ratón USB
+        si meter_puerto(ESTADO) = 0xFF entonces
+            hay_ratón := hay_ratón_usb
+            devolver hay_ratón
+        fin
         b := sin_interrupciones()
         ; la segunda boca del 8042, encendida, y con su interrupción
         espera_escribir()
@@ -158,8 +183,8 @@ módulo Raton
         fin
         r := al_ratón(0xF6)                     ; como de fábrica
         si r = 0xFA entonces r := al_ratón(0xF4) fin    ; y que cuente lo que se mueve
-        hay_ratón := r = 0xFA
-        si hay_ratón entonces
+        hay_ratón := r = 0xFA o hay_ratón_usb
+        si r = 0xFA entonces
             cuántos := 0
             pon_puerta(0x2C, nat32(dirección(ratón)), PUERTA_NÚCLEO)
             ; se destapan la IRQ 12 y la 2 (por donde llega el segundo 8259)

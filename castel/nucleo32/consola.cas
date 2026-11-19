@@ -160,10 +160,13 @@ módulo Consola
 
     ; cada tecla, de su código a su letra, a la cola; y si alguien estaba
     ; esperando, se le despierta
-    interrupción función teclado()
-        variable código, c: nat32
+    ; un código de rastreo del teclado (los del teclado PS/2, «juego 1»: la
+    ; tecla al pulsarla y, con el bit 7, al soltarla; 0xE0 delante de las
+    ; teclas añadidas): lo dé el teclado PS/2 o uno USB (usbhid.cas, que
+    ; los traduce). Con las interrupciones tapadas.
+    función llega_código(código: nat32)
+        variable c: nat32
         variable era_extendida: bool
-        código := meter_puerto(TECLADO)
         era_extendida := extendida
         extendida := código = 0xE0
         si código = 0xE0 entonces
@@ -235,11 +238,23 @@ módulo Consola
                 llega(c)
             fin
         fin
-        sacar_puerto(PIC1, FIN_INT)
         si esperando_tecla <> nulo y no desviado entonces
             despertar_tarea(esperando_tecla)
             esperando_tecla := nulo
         fin
+    fin
+
+    interrupción función teclado()
+        llega_código(meter_puerto(TECLADO))
+        sacar_puerto(PIC1, FIN_INT)
+    fin
+
+    ; un código de rastreo que llega de un teclado USB (usbhid.cas)
+    público función tecla_de_fuera(código: nat32)
+        variable b: nat32
+        b := sin_interrupciones()
+        llega_código(código)
+        reponer(b)
     fin
 
     ; las teclas de cambio que están pulsadas ahora (MOD_MAYÚS, MOD_CONTROL)
