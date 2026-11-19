@@ -1007,6 +1007,8 @@ módulo Fat
         variable i, r: nat32
         si no montado entonces devolver SIN_DISCO fin
         si modo > PARA_AÑADIR entonces devolver MAL fin
+        ; sin permiso para escribir en el disco (ata.cas), todo es de solo lectura
+        si modo <> PARA_LEER y no escritura entonces devolver PROTEGIDO fin
         tomar(cerrojo)
         i := 0
         mientras i < MAX_ABIERTOS y abiertos[i].usado hacer i := i + 1 fin
@@ -1266,6 +1268,7 @@ módulo Fat
         variable nombre: puntero a byte
         variable n, r: nat32
         si no montado entonces devolver SIN_DISCO fin
+        si no escritura entonces devolver PROTEGIDO fin
         tomar(cerrojo)
         r := camina(ruta, d, nombre, n)
         si r = ES_RAÍZ entonces
@@ -1301,6 +1304,7 @@ módulo Fat
         variable once: arreglo [11] de byte
         variable c: puntero a Cruda
         si no montado entonces devolver SIN_DISCO fin
+        si no escritura entonces devolver PROTEGIDO fin
         tomar(cerrojo)
         r := camina(vieja, d, nombre, n)
         si r = ES_RAÍZ entonces r := PROTEGIDO fin
@@ -1365,6 +1369,7 @@ módulo Fat
         variable once: arreglo [11] de byte
         variable e: puntero a Cruda
         si no montado entonces devolver SIN_DISCO fin
+        si no escritura entonces devolver PROTEGIDO fin
         tomar(cerrojo)
         r := camina(ruta, d, nombre, n)
         si r = ES_RAÍZ entonces r := YA_EXISTE fin
@@ -1426,6 +1431,7 @@ módulo Fat
         variable nombre: puntero a byte
         variable n, r, i, cl: nat32
         si no montado entonces devolver SIN_DISCO fin
+        si no escritura entonces devolver PROTEGIDO fin
         tomar(cerrojo)
         r := camina(ruta, d, nombre, n)
         si r = ES_RAÍZ entonces

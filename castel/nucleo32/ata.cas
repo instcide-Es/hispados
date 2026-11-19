@@ -53,6 +53,10 @@ módulo Ata
     público variable sectores_leídos: nat32
     público variable sectores_escritos: nat32
     público variable fallos_de_disco: nat32
+    ; ¿se puede escribir en los discos? De fábrica, NO: en un PC de verdad el
+    ; disco del canal primario es el del dueño, con sus cosas. Solo si el
+    ; cargador se lo dice al núcleo («escritura» en su línea) se escribe.
+    público variable escritura: bool
 
     variable cerrojo: Cerrojo
     variable identidad: arreglo [256] de nat16
@@ -224,7 +228,7 @@ módulo Ata
     público función escribir_sectores(u: nat32, lba: nat32, n: nat32, origen: puntero a byte): bool
         variable k, i: nat32
         variable bien: bool
-        si u >= DISCOS entonces devolver falso fin
+        si u >= DISCOS o no escritura entonces devolver falso fin      ; (sin permiso, ni una orden de escribir al disco)
         si no discos[u].hay o lba >= discos[u].sectores o n > discos[u].sectores - lba entonces devolver falso fin
         tomar(cerrojo)
         bien := cierto
@@ -267,7 +271,7 @@ módulo Ata
     ; le dice al disco u que pase a la superficie lo que tenga guardado
     público función asentar(u: nat32): bool
         variable bien: bool
-        si u >= DISCOS entonces devolver falso fin
+        si u >= DISCOS o no escritura entonces devolver falso fin      ; (sin permiso, ni una orden de escribir al disco)
         si no discos[u].hay entonces devolver falso fin
         tomar(cerrojo)
         bien := espera_libre()
