@@ -7814,8 +7814,9 @@ longcmds    db "ACTUALIZAR", 0
 msg_baddir  db "Directorio no válido", 13, 10, 0
 msg_baddrv  db "Especificación de unidad no válida", 13, 10, 0
 msg_sinpart db "No se puede leer la unidad "
-msg_sinpart_l db "C: es el disco duro del ordenador, que todavía no", 13, 10
-            db "tiene partición ni formato. Use INSTALAR (o PARTIR y después FORMATEA).", 13, 10, 0
+msg_sinpart_l db "C: es el disco duro del ordenador, pero no tiene ninguna", 13, 10
+            db "partición que Hispa-DOS sepa leer: está vacío, o tiene otro sistema", 13, 10
+            db "(Windows, Linux...). UNIDADES dice qué es cada letra; INSTALAR, para instalar.", 13, 10, 0
 msg_sinfmt  db "No se puede leer la unidad "
 msg_sinfmt_l db "C: el disco no tiene formato. Use FORMATEA.", 13, 10, 0
 msg_nrdy    db "La unidad no está preparada", 13, 10, 0
