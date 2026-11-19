@@ -220,6 +220,7 @@ módulo UOrdenes
         escribir("  CD [carpeta]    cambia de carpeta de trabajo (CD .. sube una)\n")
         escribir("  PATH [carpetas] dónde se buscan los programas (PATH C:\\;C:\\UTIL)\n")
         escribir("  ECHO texto      escribe el texto          PAUSE        espera una tecla\n")
+        escribir("  ESCRITORIO      pone en marcha el escritorio (el entorno gráfico)\n")
         escribir("  SALIR           acaba el intérprete de órdenes\n")
         escribir("Cualquier otro nombre es un programa del disco (PROGRAMA o PROGRAMA.BIN) o un\n")
         escribir("archivo de órdenes (.BAT), con lo que se escriba detrás como sus argumentos.\n")
@@ -784,6 +785,17 @@ módulo UOrdenes
             orden_ver()
         sino si iguales(mayús, "CLS") entonces
             borrar_pantalla()
+        sino si iguales(mayús, "ESCRITORIO") entonces
+            ; el entorno gráfico: si arranca, este intérprete (el de la
+            ; pantalla de texto) acaba; allí hay otro, en la ventana «Consola»
+            si dato(DATO_ESCRITORIO) = 1 entonces
+                escribir("El escritorio ya está en marcha.\n")
+            sino si escritorio() entonces
+                escribir("El escritorio está en marcha.\n")
+                acabar := cierto
+            sino
+                escribir("No se puede poner en marcha el escritorio (no hay modo gráfico).\n")
+            fin
         sino si iguales(mayús, "MEM") entonces
             orden_mem()
         sino si iguales(mayús, "FECHA") o iguales(mayús, "HORA") entonces

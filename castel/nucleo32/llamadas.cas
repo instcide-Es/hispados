@@ -2,7 +2,8 @@
 ;  llamadas.cas - las llamadas al sistema de Hispa-Pentium, para los programas
 ;  del anillo 3 («modelo usuario»): el teclado, los archivos del disco (leer,
 ;  escribir, crear, borrar, las carpetas), lanzar otros programas y
-;  esperarlos, los argumentos, la memoria. Cada función es
+;  esperarlos, los argumentos, la memoria; y las ventanas del escritorio
+;  (hacer una, dibujar en ella, sus sucesos) y los terminales. Cada función es
 ;  una «int 0x80» con su número (los de nucleo32/usuario.cas). escribir() y
 ;  salir() son del lenguaje y ya van por ahí.
 ;  Lo que no puede ser da un número de PRIMER_ERROR para arriba: se mira con
@@ -65,7 +66,7 @@ módulo Llamadas
     público constante DATO_MARCOS_LIBRES = 0    ; los marcos de 4 K libres
     público constante DATO_MARCOS = 1           ; los que hay
     público constante DATO_MIS_PÁGINAS = 2      ; las páginas de este programa
-    público constante DATO_VERSIÓN = 3          ; 0x0003 es la 0.3
+    público constante DATO_VERSIÓN = 3          ; 0x0004 es la 0.4
     público constante DATO_TAREAS = 4
     público constante DATO_FAT = 5              ; 12, 16 o 32 (0 si no hay disco)
     público constante DATO_CLUSTER = 6          ; los octetos de un cluster del disco
@@ -73,6 +74,50 @@ módulo Llamadas
     público constante DATO_CLUSTERS = 8
     público constante DATO_HZ = 9               ; los tics por segundo
     público constante DATO_FECHA = 10           ; la fecha (arriba) y la hora (abajo), como las guarda la FAT
+    público constante DATO_ANCHO_PANTALLA = 11  ; el ancho de la pantalla gráfica (0 si no hay)
+    público constante DATO_ALTO_PANTALLA = 12
+    público constante DATO_ESCRITORIO = 13      ; 1 si el escritorio está en marcha
+
+    público constante SIGUE = 0xFFFFFF00        ; lo que da acabada() si la tarea no ha acabado
+
+    ; ---- las ventanas: los sucesos (lo que da suceso()) ----
+    público constante EV_TECLA = 1              ; a: la tecla (como las da tecla())
+    público constante EV_RATÓN_BAJA = 2         ; a, b: dónde (dentro de la ventana); c: los botones pulsados
+    público constante EV_RATÓN_SUBE = 3
+    público constante EV_RATÓN_MUEVE = 4
+    público constante EV_CERRAR = 5             ; se ha pulsado el botón de cerrar
+    público constante EV_TAMAÑO = 6             ; a, b: el ancho y el alto nuevos (hay que volver a pintar todo)
+    público constante EV_FOCO = 7               ; a: 1 si pasa a ser la ventana activa, 0 si deja de serlo
+    público constante EV_SALE = 9               ; el ratón ya no está encima
+    público constante BOTÓN_IZQUIERDO = 1
+    público constante BOTÓN_DERECHO = 2
+    público constante ANCHO_LETRA = 8           ; lo que mide cada letra del texto
+    público constante ALTO_LETRA = 16
+
+    público tipo Suceso = estructura
+        clase, a, b, c: nat32
+    fin
+
+    ; lo que se le pide dibujar al núcleo (la llamada 34)
+    tipo Orden = estructura
+        op: nat32
+        x, ye, ancho, alto: ent32
+        tinta, tinta2: nat32
+        datos: puntero a byte
+        n: ent32
+    fin
+    constante OP_RECTÁNGULO = 1
+    constante OP_DEGRADADO = 2
+    constante OP_MARCO = 3
+    constante OP_LÍNEA = 4
+    constante OP_TEXTO = 5
+    constante OP_TEXTO_FONDO = 6
+    constante OP_MAPA = 7
+    constante OP_DESPLAZAR = 8
+    constante OP_REDONDEADO = 9
+    constante OP_NEGRITA = 10
+    constante OP_DISQUETE = 11
+    variable ord: Orden
 
     ; una entrada de una carpeta (32 octetos)
     público tipo Entrada = estructura
@@ -448,6 +493,148 @@ módulo Llamadas
     ; devuelve los n últimos octetos pedidos con más_memoria()
     público función menos_memoria(n: nat32): bool
         devolver llamada(17, 0 - n, 0, 0) < PRIMER_ERROR
+    fin
+
+    ; ¿ha acabado la tarea (una que se ha lanzado)? Sin esperarla: da su
+    ; código de salida si ha acabado (y queda recogida), o SIGUE
+    público función acabada(tarea: nat32): nat32
+        devolver llamada(11, tarea, 1, 0)
+    fin
+
+    ; ---- el escritorio y las ventanas ----
+    ; pone en marcha el escritorio (el entorno gráfico): cierto si queda en marcha
+    público función escritorio(): bool
+        devolver llamada(38, 0, 0, 0) = 1
+    fin
+
+    ; una ventana nueva con ese nombre en el título, de ese ancho y ese alto
+    ; por dentro: da su número, o un error (no hay escritorio, no hay memoria)
+    público función ventana(nombre: puntero a byte, ancho: nat32, alto: nat32): nat32
+        devolver llamada(32, nat32(nombre), ancho, alto)
+    fin
+
+    público función cerrar_ventana(v: nat32)
+        llamada(33, v, 0, 0)
+    fin
+
+    ; cambia el nombre del título de la ventana
+    público función título(v: nat32, nombre: puntero a byte)
+        llamada(36, v, nat32(nombre), 0)
+    fin
+
+    ; el suceso siguiente de la ventana (una tecla, el ratón, cerrar...):
+    ; cierto si lo hay. Con «espera», se queda hasta que llegue uno.
+    público función suceso(v: nat32, ref s: Suceso, espera: bool): bool
+        si espera entonces devolver llamada(35, v, nat32(dirección(s)), 1) = 1 fin
+        devolver llamada(35, v, nat32(dirección(s)), 0) = 1
+    fin
+
+    función dibuja(v: nat32, op: nat32, x: ent32, yy: ent32, ancho: ent32, alto: ent32, tinta: nat32, tinta2: nat32)
+        ord.op := op
+        ord.x := x
+        ord.ye := yy
+        ord.ancho := ancho
+        ord.alto := alto
+        ord.tinta := tinta
+        ord.tinta2 := tinta2
+        llamada(34, v, nat32(dirección(ord)), 0)
+    fin
+
+    ; un rectángulo lleno de un color (0xRRGGBB); las medidas, en puntos,
+    ; desde la esquina de arriba a la izquierda de lo de dentro de la ventana
+    público función rectángulo(v: nat32, x: ent32, yy: ent32, ancho: ent32, alto: ent32, tinta: nat32)
+        dibuja(v, OP_RECTÁNGULO, x, yy, ancho, alto, tinta, 0)
+    fin
+
+    ; de un color arriba a otro abajo
+    público función degradado(v: nat32, x: ent32, yy: ent32, ancho: ent32, alto: ent32, arriba: nat32, abajo: nat32)
+        dibuja(v, OP_DEGRADADO, x, yy, ancho, alto, arriba, abajo)
+    fin
+
+    ; lo mismo, con las esquinas redondas
+    público función redondeado(v: nat32, x: ent32, yy: ent32, ancho: ent32, alto: ent32, radio: ent32, arriba: nat32, abajo: nat32)
+        ord.n := radio
+        dibuja(v, OP_REDONDEADO, x, yy, ancho, alto, arriba, abajo)
+    fin
+
+    ; el borde de un rectángulo
+    público función marco(v: nat32, x: ent32, yy: ent32, ancho: ent32, alto: ent32, tinta: nat32)
+        dibuja(v, OP_MARCO, x, yy, ancho, alto, tinta, 0)
+    fin
+
+    público función línea(v: nat32, x1: ent32, y1: ent32, x2: ent32, y2: ent32, tinta: nat32)
+        dibuja(v, OP_LÍNEA, x1, y1, x2, y2, tinta, 0)
+    fin
+
+    ; n letras (de la página 437), solo sus puntos
+    público función texto_n(v: nat32, x: ent32, yy: ent32, t: puntero a byte, n: nat32, tinta: nat32)
+        ord.datos := t
+        ord.n := ent32(n)
+        dibuja(v, OP_TEXTO, x, yy, 0, 0, tinta, 0)
+    fin
+
+    ; un texto acabado en 0
+    público función texto(v: nat32, x: ent32, yy: ent32, t: puntero a byte, tinta: nat32)
+        variable n: nat32
+        n := 0
+        mientras t[n] <> 0 hacer n := n + 1 fin
+        texto_n(v, x, yy, t, n, tinta)
+    fin
+
+    ; en negrita
+    público función texto_negrita(v: nat32, x: ent32, yy: ent32, t: puntero a byte, tinta: nat32)
+        variable n: nat32
+        n := 0
+        mientras t[n] <> 0 hacer n := n + 1 fin
+        ord.datos := t
+        ord.n := ent32(n)
+        dibuja(v, OP_NEGRITA, x, yy, 0, 0, tinta, 0)
+    fin
+
+    ; n letras sobre un fondo de color (tapa lo que había)
+    público función texto_fondo(v: nat32, x: ent32, yy: ent32, t: puntero a byte, n: nat32, tinta: nat32, fondo: nat32)
+        ord.datos := t
+        ord.n := ent32(n)
+        dibuja(v, OP_TEXTO_FONDO, x, yy, 0, 0, tinta, fondo)
+    fin
+
+    ; un dibujo de ancho x alto puntos de 32 bits (0xRRGGBB cada uno)
+    público función mapa(v: nat32, x: ent32, yy: ent32, ancho: ent32, alto: ent32, puntos: puntero a nat32)
+        ord.datos := puntero(puntos)
+        dibuja(v, OP_MAPA, x, yy, ancho, alto, 0, 0)
+    fin
+
+    ; lo que hay en el rectángulo sube n puntos (para pasar las líneas de un texto)
+    público función desplazar(v: nat32, x: ent32, yy: ent32, ancho: ent32, alto: ent32, n: ent32)
+        ord.n := n
+        dibuja(v, OP_DESPLAZAR, x, yy, ancho, alto, 0, 0)
+    fin
+
+    ; el disquete de la casa, de ese lado
+    público función disquete(v: nat32, x: ent32, yy: ent32, lado: ent32)
+        dibuja(v, OP_DISQUETE, x, yy, lado, lado, 0, 0)
+    fin
+
+    ; ---- los terminales (para un programa que tiene a otros dentro de su ventana) ----
+    ; hace un terminal: los programas que se lancen desde ahora escriben en
+    ; él y leen sus teclas de él. Falso si no quedan.
+    público función hacer_terminal(): bool
+        devolver llamada(37, 0, 0, 0) < PRIMER_ERROR
+    fin
+
+    ; lo que han escrito los programas de dentro: hasta «cabe» octetos. Da cuántos.
+    público función leer_terminal(destino: puntero a byte, cabe: nat32): nat32
+        devolver llamada(37, 1, nat32(destino), cabe)
+    fin
+
+    ; una tecla para los programas de dentro
+    público función teclear(c: nat32)
+        llamada(37, 2, c, 0)
+    fin
+
+    ; Ctrl+C para los programas de dentro
+    público función cortar_terminal()
+        llamada(37, 3, 0, 0)
     fin
 
 fin Llamadas.

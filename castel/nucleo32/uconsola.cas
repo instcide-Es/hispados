@@ -1,0 +1,173 @@
+; =============================================================================
+;  uconsola.cas - la «Consola» del escritorio de Hispa-Pentium (CONSOLA.BIN en
+;  el disco): un programa del anillo 3 que abre una ventana de 80 x 25 letras
+;  y tiene dentro al intérprete de órdenes (ORDENES.BIN) y a lo que este
+;  lance. Hace un terminal (terminal.cas): lo que escriben los de dentro lo
+;  lee de él y lo pinta en su ventana, letra a letra, como una pantalla de
+;  texto (avance de línea, retroceso, borrar la pantalla, subir las líneas
+;  al llegar abajo); y las teclas que llegan a la ventana se las da a ellos.
+;  Ctrl+C acaba el programa que corra dentro. Al salir del intérprete
+;  (SALIR), o al cerrar la ventana, se acaba.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UConsola
+
+    modelo usuario
+
+    importar Llamadas
+
+    constante COLUMNAS = 80
+    constante FILAS = 25
+    constante MARGEN = 4
+    constante FONDO = 0x0C1626
+    constante TINTA = 0xD6E2F0
+    constante CURSOR = 0x6FE08A
+
+    variable v: nat32
+    variable letras: arreglo [COLUMNAS * FILAS] de byte     ; lo que hay en la pantalla
+    variable cx, cy: ent32                      ; dónde va el cursor
+    variable tramo_x, tramo_n: ent32            ; las letras seguidas que faltan por pintar en la fila del cursor
+    variable trozo: arreglo [512] de byte
+    variable ancho, alto: ent32
+
+    ; pinta las letras de la fila del cursor que estaban esperando
+    función pinta_tramo()
+        si tramo_n > 0 entonces
+            texto_fondo(v, MARGEN + tramo_x * ANCHO_LETRA, MARGEN + cy * ALTO_LETRA, dirección(letras[cy * COLUMNAS + tramo_x]), nat32(tramo_n), TINTA, FONDO)
+        fin
+        tramo_n := 0
+    fin
+
+    función pinta_cursor(visible: bool)
+        si visible entonces
+            rectángulo(v, MARGEN + cx * ANCHO_LETRA, MARGEN + cy * ALTO_LETRA + 13, ANCHO_LETRA, 2, CURSOR)
+        sino
+            texto_fondo(v, MARGEN + cx * ANCHO_LETRA, MARGEN + cy * ALTO_LETRA, dirección(letras[cy * COLUMNAS + cx]), 1, TINTA, FONDO)
+        fin
+    fin
+
+    función borra_todo()
+        variable i: nat32
+        para i desde 0 hasta COLUMNAS * FILAS - 1 hacer letras[i] := ' ' fin
+        rectángulo(v, 0, 0, ancho, alto, FONDO)
+        cx := 0
+        cy := 0
+        tramo_n := 0
+    fin
+
+    ; la pantalla entera otra vez (ha cambiado el tamaño de la ventana)
+    función pinta_todo()
+        variable f: ent32
+        rectángulo(v, 0, 0, ancho, alto, FONDO)
+        para f desde 0 hasta FILAS - 1 hacer
+            texto_fondo(v, MARGEN, MARGEN + f * ALTO_LETRA, dirección(letras[f * COLUMNAS]), COLUMNAS, TINTA, FONDO)
+        fin
+        pinta_cursor(cierto)
+    fin
+
+    ; a la línea siguiente; si era la última, todo sube una
+    función baja_línea()
+        variable i: nat32
+        pinta_tramo()
+        cx := 0
+        si cy < FILAS - 1 entonces
+            cy := cy + 1
+            devolver
+        fin
+        para i desde 0 hasta COLUMNAS * (FILAS - 1) - 1 hacer letras[i] := letras[i + COLUMNAS] fin
+        para i desde COLUMNAS * (FILAS - 1) hasta COLUMNAS * FILAS - 1 hacer letras[i] := ' ' fin
+        desplazar(v, MARGEN, MARGEN, COLUMNAS * ANCHO_LETRA, FILAS * ALTO_LETRA, ALTO_LETRA)
+        rectángulo(v, MARGEN, MARGEN + (FILAS - 1) * ALTO_LETRA, COLUMNAS * ANCHO_LETRA, ALTO_LETRA, FONDO)
+    fin
+
+    función pon_letra(c: byte)
+        letras[cy * COLUMNAS + cx] := c
+        si tramo_n = 0 entonces tramo_x := cx fin
+        tramo_n := tramo_n + 1
+        cx := cx + 1
+        si cx = COLUMNAS entonces baja_línea() fin
+    fin
+
+    ; lo que han escrito los de dentro: n octetos
+    función escribe(p: puntero a byte, n: nat32)
+        variable i: nat32
+        variable c: byte
+        pinta_cursor(falso)
+        i := 0
+        mientras i < n hacer
+            c := p[i]
+            si c = '\n' entonces
+                baja_línea()
+            sino si c = '\r' entonces
+                pinta_tramo()
+                cx := 0
+            sino si c = 8 entonces
+                pinta_tramo()
+                si cx > 0 entonces cx := cx - 1 fin
+            sino si c = 12 entonces
+                borra_todo()
+            sino si c = '\t' entonces
+                pon_letra(' ')
+                mientras cx mod 8 <> 0 hacer pon_letra(' ') fin
+            sino
+                pon_letra(c)
+            fin
+            i := i + 1
+        fin
+        pinta_tramo()
+        pinta_cursor(cierto)
+    fin
+
+    función principal(): byte
+        variable s: Suceso
+        variable hijo, n, c: nat32
+        variable algo: bool
+        ancho := COLUMNAS * ANCHO_LETRA + 2 * MARGEN
+        alto := FILAS * ALTO_LETRA + 2 * MARGEN
+        v := ventana("Consola", nat32(ancho), nat32(alto))
+        si es_error(v) entonces
+            escribir("consola: no hay escritorio (o no hay memoria para la ventana)\n")
+            devolver 1
+        fin
+        borra_todo()
+        si no hacer_terminal() entonces
+            texto(v, MARGEN, MARGEN, "No quedan terminales libres.", TINTA)
+            dormir(300)
+            devolver 1
+        fin
+        hijo := lanzar("\\ORDENES.BIN", nulo)
+        si es_error(hijo) entonces
+            texto(v, MARGEN, MARGEN, "No se puede lanzar ORDENES.BIN:", TINTA)
+            texto(v, MARGEN, MARGEN + ALTO_LETRA, texto_error(hijo), TINTA)
+            mientras suceso(v, s, cierto) y s.clase <> EV_CERRAR hacer fin
+            devolver 1
+        fin
+        mientras cierto hacer
+            algo := falso
+            mientras suceso(v, s, falso) hacer
+                algo := cierto
+                si s.clase = EV_TECLA entonces
+                    si s.a = CTRL_C entonces cortar_terminal() sino teclear(s.a) fin
+                sino si s.clase = EV_CERRAR entonces
+                    devolver 0                  ; (el núcleo acaba a los de dentro)
+                sino si s.clase = EV_TAMAÑO entonces
+                    ancho := ent32(s.a)
+                    alto := ent32(s.b)
+                    pinta_todo()
+                fin
+            fin
+            n := leer_terminal(trozo, 512)
+            si n > 0 entonces
+                algo := cierto
+                escribe(trozo, n)
+            sino
+                ; sin nada que leer: ¿ha acabado el intérprete?
+                c := acabada(hijo)
+                si c <> SIGUE entonces devolver 0 fin
+            fin
+            si no algo entonces dormir(1) fin
+        fin
+        devolver 0
+    fin
+
+fin UConsola.

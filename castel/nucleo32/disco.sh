@@ -3,7 +3,8 @@
 # nucleo32/disco.sh IMAGEN [12|16|32|mbr]
 # Hace la imagen de un disco duro FAT para Hispa-Pentium, con el intérprete de
 # órdenes (ORDENES.BIN), los programas de usuario de ejemplo (HOLA.BIN, PRUEBA.BIN,
-# ECO.BIN, MALO.BIN, CLI.BIN, ESCRIBE.BIN, BUCLE.BIN), unos archivos de órdenes
+# ECO.BIN, MALO.BIN, CLI.BIN, ESCRIBE.BIN, BUCLE.BIN), los del escritorio
+# (BLOC.BIN, el Bloc de notas, y CONSOLA.BIN, la Consola), unos archivos de órdenes
 # (LOTE.BAT, SINFIN.BAT, VISTO.BAT) y unos archivos de texto (LEEME.TXT, la
 # carpeta TEXTOS y la carpeta LARGOS, con nombres largos). Sin más: FAT16 (16 MB). Con 12, FAT12 (4 MB); con 32, FAT32 (40 MB);
 # con mbr, un disco con tabla de particiones y la FAT16 en su primera
@@ -18,7 +19,7 @@ CLASE=${2:-16}
 T=$(mktemp -d)
 trap 'rm -rf $T' EXIT
 # los programas: cada uno, con su nombre en el disco
-for p in uordenes:ORDENES uhola:HOLA ueco:ECO umalo:MALO ucli:CLI uprueba:PRUEBA uescribe:ESCRIBE ubucle:BUCLE; do
+for p in uordenes:ORDENES uhola:HOLA ueco:ECO umalo:MALO ucli:CLI uprueba:PRUEBA uescribe:ESCRIBE ubucle:BUCLE ubloc:BLOC uconsola:CONSOLA; do
   f=${p%%:*}; N=${p##*:}
   python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $T/$f.asm > /dev/null
   nasm -f bin $T/$f.asm -o $T/$N.BIN
@@ -49,7 +50,7 @@ esac
 export MTOOLS_SKIP_CHECK=1
 mcopy -i $V $T/ORDENES.BIN $T/HOLA.BIN $T/ECO.BIN $T/MALO.BIN $T/CLI.BIN $T/PRUEBA.BIN $T/LEEME.TXT $T/NOPROG.BIN "$T/nombre bien largo.txt" ::
 mmd -i $V ::TEXTOS ::VACIA ::LARGOS
-mcopy -i $V $T/ESCRIBE.BIN $T/BUCLE.BIN $T/LOTE.BAT $T/SINFIN.BAT $T/VISTO.BAT ::
+mcopy -i $V $T/ESCRIBE.BIN $T/BUCLE.BIN $T/LOTE.BAT $T/SINFIN.BAT $T/VISTO.BAT $T/BLOC.BIN $T/CONSOLA.BIN ::
 mcopy -i $V "$T/cancion_del_pirata.txt" "$T/Año nuevo.txt" ::LARGOS/
 mcopy -i $V $T/LARGO.TXT $T/PIRATA.TXT ::TEXTOS/
 mcopy -i $V $T/ECO.BIN ::TEXTOS/ECO2.BIN

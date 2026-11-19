@@ -13,6 +13,13 @@
 # de usuario (uhola.cas, umalo.cas y ucli.cas), que se le dan como módulos de multiboot
 # (-initrd). Con MODULOS="a.bin,b.bin", esos módulos (MODULOS= para ninguno).
 # Con MEMORIA=n, n MB (32 si no se dice).
+# Para el escritorio (ARRANQUE=escritorio, o la orden «escritorio»), el ratón y
+# las capturas: «:raton X Y» lleva la flecha a ese punto de la pantalla;
+# «:clic X Y» pulsa allí el botón izquierdo; «:doble X Y», dos veces;
+# «:arrastra X1 Y1 X2 Y2» lo lleva pulsado de un sitio a otro; «:escribe
+# texto» lo teclea sin Intro; «:pausa S» espera S segundos; «:captura NOMBRE»
+# deja la pantalla en $CAPTURAS/NOMBRE.ppm (CAPTURAS: una carpeta; /tmp si no
+# se dice). La flecha empieza en el centro (PANTALLA=800x600 si no se dice).
 # Con DISCO=imagen, esa imagen como disco duro IDE (el maestro del canal
 # primario): la hace nucleo32/disco.sh, con el intérprete de órdenes y los
 # programas. Lo que se escriba en el disco no llega a la imagen (se queda en
@@ -85,16 +92,42 @@ for f in range(25):
     print('|' + bytes(d[f * 160:(f + 1) * 160:2]).decode('cp437').rstrip())
 PY
 }
+# el ratón: la flecha, de donde está (RX, RY) a un punto, a pasos cortos
+PANTALLA=${PANTALLA:-800x600}
+RX=$((${PANTALLA%x*} / 2)); RY=$((${PANTALLA#*x} / 2))
+ir() {
+  local dx=$(($1 - RX)) dy=$(($2 - RY)) sx sy
+  while [ $dx -ne 0 ] || [ $dy -ne 0 ]; do
+    sx=$dx; [ $sx -gt 50 ] && sx=50; [ $sx -lt -50 ] && sx=-50
+    sy=$dy; [ $sy -gt 50 ] && sy=50; [ $sy -lt -50 ] && sy=-50
+    mon "mouse_move $sx $sy" 0.05
+    dx=$((dx - sx)); dy=$((dy - sy))
+  done
+  RX=$1; RY=$2; sleep 0.25
+}
 n=0
-for orden in "$@"; do
+ORDENES=("$@")
+for orden in "${ORDENES[@]}"; do
   n=$((n + 1))
   # la pantalla, por si se quiere mirar (VER=1): antes de la última orden
-  [ -n "${VER:-}" ] && [ $n = $# ] && pantalla
+  [ -n "${VER:-}" ] && [ $n = ${#ORDENES[@]} ] && pantalla
   if [ "$orden" = ":espera" ]; then sleep 1.5; continue; fi
   if [ "${orden:0:7}" = ":tecla " ]; then
     for k in ${orden:7}; do mon "sendkey $k"; done
     sleep 0.3; continue
   fi
+  case "$orden" in
+    ":pausa "*) sleep ${orden:7}; continue ;;
+    ":raton "*) set -- ${orden:7}; ir $1 $2; continue ;;
+    ":clic "*) set -- ${orden:6}; ir $1 $2; mon "mouse_button 1" 0.2; mon "mouse_button 0" 0.4; continue ;;
+    ":doble "*) set -- ${orden:7}; ir $1 $2; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.1; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.5; continue ;;
+    ":arrastra "*) set -- ${orden:10}; ir $1 $2; mon "mouse_button 1" 0.25; ir $3 $4; mon "mouse_button 0" 0.4; continue ;;
+    ":captura "*) sleep 0.4; mon "screendump ${CAPTURAS:-/tmp}/${orden:9}.ppm" 0.5; continue ;;
+    ":escribe "*)
+      t=${orden:9}
+      for ((j = 0; j < ${#t}; j++)); do for k in $(tecla "${t:$j:1}"); do mon "sendkey $k"; done; done
+      sleep 0.3; continue ;;
+  esac
   for ((j = 0; j < ${#orden}; j++)); do for k in $(tecla "${orden:$j:1}"); do mon "sendkey $k"; done; done
   mon "sendkey ret" 0.4
 done
