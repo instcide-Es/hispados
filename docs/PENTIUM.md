@@ -1155,13 +1155,13 @@ absolutos); las luces del teclado; los discos USB con sectores que no sean de 51
 quita el teclado y el ratón PS/2, como en un Mac: sección 12. **Lo que QEMU no
 puede probar**: las transacciones partidas del EHCI (no tiene concentrador de
 alta velocidad), que son justo el camino del teclado y el panel del MacBook;
-están hechas según la norma y como las hace HSPUSB (que en ese Mac sí va), pero
-hasta que no se prueben en el equipo no se sabe.
+están hechas según la norma y como las hace HSPUSB, pero hasta que no se prueben
+en el equipo no se sabe.
 
 ## 12. Las pruebas
 
-`castel/pruebas.sh` (la parte 8; `SOLO=32 ./pruebas.sh` hace solo esa y la de los
-errores) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
+`castel/pruebas.sh` (las partes 8 y 9; `SOLO=32 ./pruebas.sh` hace solo esas y la
+de los errores; `SOLO=06`, solo la 9, lo de la 0.6) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
 teclado, el reloj corre y la división por cero llega a su excepción; que el mapa de
 memoria da los marcos; que la **paginación está activa** con la identidad; que un
 **fallo de página se atiende** en la zona a la demanda; que el **montón no pierde**
@@ -1244,8 +1244,8 @@ en los dos: el sitio para pedir el modo gráfico, sección 11. En la de la 0.5, 
 sitio para los textos en CASTEL: más abajo.)
 
 **Sin disco, y sin permiso** (la tanda de la 0.4): con los programas como módulos
-de multiboot y sin disco, `ordenes` lanza el intérprete que venga, `DIR` enseña los
-módulos, `TYPE` los lee, los programas se lanzan por su nombre, y crear, borrar o
+de multiboot y sin disco (la unidad en memoria, que desde la 0.6 es `M:`), `ordenes`
+lanza el intérprete que venga, `DIR` enseña los módulos, `TYPE` los lee, los programas se lanzan por su nombre, y crear, borrar o
 hacer carpetas se niega («es de solo lectura»); con un disco y sin `escritura`,
 todo lo que escribe se niega y **la imagen queda idéntica octeto a octeto**; con
 `sindisco`, los discos ni se miran.
@@ -1291,6 +1291,53 @@ pone GRUB por la cabecera de esa copia del núcleo) y que el menú trae las
 entradas nuevas («a la medida de la pantalla», con `gfxpayload=auto`; los modos
 de vídeo de la BIOS).
 
+**La 0.6** (la parte 9 de `pruebas.sh`), todo en QEMU:
+
+- **AHCI** (`-device ahci` con un disco `ide-hd`): la controladora se encuentra,
+  IDENTIFY dice el disco y la FAT se monta encima; se leen una carpeta, un
+  archivo de varios clusters (su suma, la de verdad) y programas; **escribiendo**
+  (FAT32 y la FAT16 de una partición): el programa `ESCRIBE.BIN` entero (crear,
+  escribir a trozos, cortar, alargar, 70 archivos en una carpeta, borrarlo todo:
+  quedan los mismos clusters libres) y órdenes del intérprete, y después
+  **`fsck.fat` da el disco por sano** y `mtools` ve lo escrito; **sin permiso**,
+  la imagen queda idéntica octeto a octeto; y un disco con tabla **GPT** (hecha
+  con `parted`), cuya partición se encuentra y se monta.
+- **Dos discos a la vez** (el IDE, `C:`, y el SATA, `D:`): las rutas con letra
+  (`DIR D:\TEXTOS`, `COPY C:\... D:\...`, lanzar un programa de la otra unidad),
+  `D:` para cambiar de unidad (con su carpeta de trabajo y su petición), la
+  unidad que no hay, y que de una a otra no se cambia de nombre; los dos discos
+  quedan sanos y lo copiado es igual octeto a octeto.
+- **El USB sin teclado ni ratón PS/2** (`-machine pc,i8042=off`: lo que se teclea
+  por el monitor de QEMU llega por el teclado USB), con el **xHCI** y con el
+  **EHCI**: las líneas de la enumeración (teclado, ratón, memoria); el **teclado
+  español** entero por USB (eñe, acentos y diéresis con tecla muerta, `¿?`),
+  **Ctrl+C** con un programa que da vueltas y las **flechas** (la historia); la
+  **memoria USB como unidad X:**: leerla (el archivo de varios clusters, los
+  programas) y **escribirla** (`ESCRIBE.BIN` entero y `COPY`), con `fsck.fat` y
+  `mtools` después.
+- **Un concentrador** (el de QEMU es de USB 1.1) en el xHCI, con el teclado, el
+  ratón y la memoria detrás; **un EHCI con dos UHCI compañeras**, con el teclado
+  y el ratón de USB 1.1 (se ceden a ellas y se enumeran allí) y la memoria en el
+  EHCI; y **una UHCI sola** con la memoria en ella (leer y escribir a velocidad
+  plena).
+- **`escritura=usb unidad=X`** con un disco IDE y una memoria USB: en la memoria
+  se escribe y se copia; en el disco de dentro, no («es de solo lectura»), y su
+  imagen queda **idéntica octeto a octeto**. Y **`sinusb`**: ni una línea de USB.
+- **El escritorio sin teclado ni ratón PS/2**: el **ratón USB** abre el menú
+  Inicio y lanza el Bloc de notas; el **teclado USB** escribe en él; F2 guarda, y
+  lo guardado está luego **en la imagen de la memoria USB**; **Mi equipo** enseña
+  `C:` (el SATA de dentro, de solo lectura) y `X:` (la memoria USB), y se entra
+  en `X:`.
+- **La memoria USB con GRUB** (`usb.sh`), arrancada como tal de un xHCI y de un
+  EHCI, sin 8042: GRUB carga el núcleo con la BIOS llevando el USB, el núcleo se
+  lo quita, lee él la memoria (`X:`, la del sistema, con `M:` al lado), se lanza
+  el Bloc de notas con el ratón USB, se teclea, se guarda, y en la imagen quedan
+  `NOTAS.TXT` y **`ARRANQUE.TXT`** (el registro del arranque), con la FAT sana.
+
+Lo que **no se puede probar en QEMU**: las transacciones partidas del EHCI (el
+teclado y el panel de un MacBook: sección 11), el traspaso de verdad desde la
+BIOS de cada equipo, y los discos SATA de verdad.
+
 Los disquetes de las pruebas de los dos compiladores y los dos ensambladores van
 ahora en **tres tandas** (la semilla de Hispa-Pentium en una y sus programas en
 otra): el ensamblador de la semilla pasa de 600 K y ya no cabía con lo demás. Y a
@@ -1320,15 +1367,24 @@ y la memoria USB con GRUB (sección 11). Y en la del 19/11 a mediodía (la 0.5,
 después de la primera prueba en un PC de verdad): los **menús del botón
 secundario**, **seleccionar, cortar, copiar y pegar** con el portapapeles del
 sistema, los **iconos del tapiz**, **Mi equipo**, las ventanas que **cambian de
-tamaño**, la **barra de menús** y el escritorio **a la medida de la pantalla**. Lo
-siguiente:
+tamaño**, la **barra de menús** y el escritorio **a la medida de la pantalla**. Y
+en la del 19/11 por la tarde (la 0.6): los **discos SATA (AHCI)**, la **capa de
+discos** con su permiso de escritura, la **FAT con varios volúmenes**, las
+**unidades con letra** y el **USB** (xHCI, EHCI y UHCI; teclado, ratón,
+concentradores y memorias). Lo siguiente:
 
-0. **El escritorio, más** (lo que falta, al final de la sección 10) y **los PC de
-   verdad**: **guardar en la memoria USB** (el plan, al final de la sección 11:
-   EHCI y almacenamiento USB, y con ellos leer de la propia memoria); la **medida
-   del panel** cuando la BIOS no la da por VBE (sección 11); teclado y ratón
-   **USB** (los que no tienen PS/2 ni lo imita su BIOS); los discos **SATA
-   (AHCI)**; apagar de verdad (ACPI).
+0. **Instalar Hispa-Pentium en el disco duro** (para eso era la 0.6: el núcleo ya
+   ve el disco de dentro y la memoria de arranque): un **instalador** que haga la
+   partición (o use una que ya haya), la **formatee** en FAT, copie el sistema
+   desde `X:` y deje un **cargador** en el disco (GRUB, o uno propio). Antes:
+   formatear y hacer particiones desde el núcleo, y las particiones lógicas.
+   Y **los PC de verdad**: probar la 0.6 en el Mac de 2012 (el teclado y el panel
+   por el EHCI con transacciones partidas), en el Toshiba y en el HP Mini; la
+   **medida del panel** cuando la BIOS no la da por VBE (sección 11); **enchufar
+   y desenchufar** el USB en marcha; las controladoras OHCI; **LBA de 48 bits**
+   en el IDE (discos de más de 128 GB en modo IDE) y el canal IDE secundario;
+   apagar de verdad (ACPI). Y **el escritorio, más** (lo que falta, al final de
+   la sección 10).
 
 1. **El intérprete, más**: `IF`, `GOTO`, `FOR`, `CALL` y variables en los `.BAT`;
    la redirección de la entrada (`<`) y las tuberías (`|`); `COPY CON`, `MOVE`,
@@ -1341,10 +1397,9 @@ siguiente:
 3. **Páginas compartidas o copiadas al escribir**, cuando haya procesos que se
    dupliquen; y cargar los programas a la demanda (hoy se leen enteros).
 4. **El disco, mejor**: una caché de sectores de verdad (hoy, uno de datos y uno de
-   FAT: escribir un archivo grande va sector a sector), leer y escribir varios
-   sectores de una vez, la interrupción del disco en vez de mirar el estado, el
-   canal secundario, LBA de 48 bits, y discos SATA (AHCI) y USB, que es lo que
-   llevan los PC de la gama XP en adelante.
+   FAT: escribir un archivo grande va sector a sector, y con una memoria USB cada
+   sector son tres transferencias), leer y escribir varios sectores de una vez, y
+   la interrupción del disco (y las del USB) en vez de mirar el estado.
 5. **El teclado, más**: las luces (Bloq Mayús, Bloq Num), el teclado numérico con
    Bloq Num, la repetición a medida, y otras distribuciones cargadas de un archivo.
    Una consola con otra página de códigos (la 850, para `Á Í Ó Ú`) pide cambiar

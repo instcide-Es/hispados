@@ -1482,10 +1482,10 @@ miracap "el teclado USB escribe en el Bloc de notas (con eñe y «¡»), y F2 gu
 saca $N/eu.img NOTAS.TXT $N/notas.txt
 if [ "$(iconv -f CP437 -t UTF-8 $N/notas.txt 2> /dev/null)" = "Guardado en la memoria USB: ¡señor!" ] && sano $N/eu.img; then ok "y lo guardado está en la memoria USB (la unidad del sistema, X:), que queda sana"
 else ko "lo guardado con el Bloc de notas no está en la memoria USB"; fi
-miracap "Mi equipo enseña las unidades con su letra: C: (el disco SATA de dentro, de solo lectura) y X: (la memoria USB)" m3 negrita 154 167 162 175 "Las unidades de este equipo" \
-  negrita 220 204 228 212 "Unidad C:" texto 220 222 228 230 "disco duro (SATA), FAT32" texto 220 238 228 246 "39 MB, 39 MB libres (de solo lectura)" \
-  negrita 220 264 228 272 "Unidad X:" texto 220 282 228 290 "memoria USB, FAT16"
-miracap "y dos clics en X: enseñan lo que hay en la memoria (con lo recién guardado)" m4 negrita 178 167 186 175 "X:\\" texto 180 216 188 224 "ORDENES.BIN"
+miracap "Mi equipo enseña las unidades con su letra: C: (el disco SATA de dentro, de solo lectura) y X: (la memoria USB)" m3 negrita 126 141 134 149 "Las unidades de este equipo" \
+  negrita 192 178 200 186 "Unidad C:" texto 192 196 200 204 "disco duro (SATA), FAT32" texto 192 212 200 220 "39 MB, 39 MB libres (de solo lectura)" \
+  negrita 192 238 200 246 "Unidad X:" texto 192 256 200 264 "memoria USB, FAT16"
+miracap "y dos clics en X: enseñan lo que hay en la memoria (con lo recién guardado)" m4 negrita 150 141 158 149 "X:\\" texto 152 190 160 198 "ORDENES.BIN"
 fi   # los discos de prueba
 
 # 11. la memoria USB con GRUB, como la arranca un PC: el núcleo la lee él (X:)

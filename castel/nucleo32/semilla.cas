@@ -568,6 +568,25 @@ módulo Semilla
         devolver p[longitud(nombre)]
     fin
 
+    ; lo apuntado en el registro del arranque, a ARRANQUE.TXT, en la unidad
+    ; del sistema
+    función guarda_registro()
+        variable m: nat32
+        m := abrir_archivo(del_sistema, "\\ARRANQUE.TXT", PARA_CREAR)
+        si m < PRIMER_ERROR entonces
+            escribir_archivo(m, registro, registro_largo)
+            cerrar_archivo(m)
+        fin
+    fin
+
+    ; una tarea que, al medio minuto de arrancar, apunta cómo van los
+    ; teclados y los ratones USB (si llegan sus informes) y lo guarda
+    función registro_luego(nada: nat32)
+        dormir(30 * HZ)
+        enseña_estado()
+        guarda_registro()
+    fin
+
     ; los discos y las unidades: los de dentro (IDE y SATA), las memorias
     ; USB y lo que haya traído el cargador. Dice lo que encuentra.
     función busca_discos()
@@ -641,11 +660,9 @@ módulo Semilla
         ; unidad del sistema (si se puede escribir en ella)
         si buscar(línea_del_cargador(), "registro") <> nulo y del_sistema <> NINGUNA entonces
             si escribible(del_sistema) y tiene_sistema(del_sistema) entonces
-                d := abrir_archivo(del_sistema, "\\ARRANQUE.TXT", PARA_CREAR)
-                si d < PRIMER_ERROR entonces
-                    escribir_archivo(d, registro, registro_largo)
-                    cerrar_archivo(d)
-                fin
+                guarda_registro()
+                ; y, al medio minuto, otra vez, con cómo van el teclado y el ratón
+                si teclados + ratones <> 0 entonces crear_tarea("registro", nat32(dirección(registro_luego)), 0) fin
             fin
         fin
     fin
@@ -698,7 +715,7 @@ módulo Semilla
                 escribir("órdenes: ayuda hora memoria mapa paginas monton tareas programas ejecutar N\n")
                 escribir("         toca turnos dormir estropear teclas fallo cero apagar\n")
                 escribir("         disco dir [CARPETA] lanzar PROGRAMA.BIN [ARGUMENTOS] ordenes\n")
-                escribir("         teclado es, teclado us, escritorio\n")
+                escribir("         teclado es, teclado us, escritorio, usb\n")
             sino si es("hora") entonces
                 escribir("llevo ", tics div HZ, " segundos y ", tics mod HZ, " centésimas encendido\n")
             sino si es("memoria") entonces
@@ -739,6 +756,9 @@ módulo Semilla
             sino si es("teclado es") entonces
                 pon_teclado(cierto)
                 escribir("teclado: el español\n")
+            sino si es("usb") entonces
+                Usb.enseña()
+                enseña_estado()
             sino si es("escritorio") entonces
                 si arranca() = 0 entonces escribir("no se puede poner en marcha el escritorio\n") fin
             sino si es("fallo") entonces

@@ -217,6 +217,10 @@ módulo Ehci
             v := lee(c, d)
             i := i + 1
         fin
+        si v yb 4 = 0 entonces
+            espera_ms(10)
+            v := lee(c, d)
+        fin
         si v yb 4 <> 0 entonces
             pon(c, d, v ob CAMBIOS)
             espera_ms(20)                       ; (el aparato se repone del reinicio)

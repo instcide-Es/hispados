@@ -56,7 +56,10 @@ escribir con formato).
 - `nucleo32/` — **Hispa-Pentium**: el núcleo (`semilla.cas` y sus módulos: `cpu`, `multiboot`,
   `marcos`, `paginas`, `monton`, `tareas`, `consola`, `ata`, `fat`, `fecha`, `usuario`; y, desde la
   0.4, el entorno gráfico: `video`, `grafico`, `letra`, `raton`, `ventanas`, `terminal` y
-  `escritorio`; y `emergente`, los menús, desde la 0.5), el módulo de
+  `escritorio`; y `emergente`, los menús, desde la 0.5; y, desde la 0.6, los discos y el USB
+  de los PC de verdad: `pci`, `ahci` (SATA), `discos`, `unidades` (las letras: C:, X:, M:),
+  `usbbase`, `xhci`, `ehci`, `uhci`, `usb`, `usbhid` (teclado y ratón), `usbalm` (memorias) y
+  `registro`), el módulo de
   las llamadas al sistema para los programas (`llamadas.cas`), el intérprete de órdenes
   (`uordenes.cas`) y los demás programas de usuario (`uhola.cas`, `ueco.cas`, `umalo.cas`,
   `ucli.cas`, `uprueba.cas`, `uescribe.cas`, `ubucle.cas`; y los del escritorio: `ubloc.cas`, el
@@ -80,7 +83,8 @@ escribir con formato).
   diecinueve minutos (`SIN_ARRANQUE=1 ./pruebas.sh` se salta el arranque; `SOLO=32 ./pruebas.sh`, solo los
   errores y lo de 32 bits, con el núcleo de Hispa-Pentium, su disco —también escribiendo en
   él—, su intérprete de órdenes y su teclado: unos diez minutos, casi todo en teclear las
-  órdenes tecla a tecla). Con `AZAR=3 ./pruebas.sh`, además, tres programas de
+  órdenes tecla a tecla; `SOLO=06 ./pruebas.sh`, solo lo de la 0.6: los discos SATA, las
+  unidades y el USB). Con `AZAR=3 ./pruebas.sh`, además, tres programas de
   cuentas al azar de 16 bits (`azar.py`, unas 380 cuentas cada uno) y tres de 32 bits
   (`azar32.py`, unas 200), comparadas con lo que tienen que dar.
 - `ejemplos/` — los programas de ejemplo; `ejemplos/esperado/` — lo que tiene que escribir
@@ -297,6 +301,7 @@ Punteros lejanos como tipo y copiar arreglos y estructuras enteros. Ver CASTEL.m
    anillo 3, disco con FAT (se lee y se escribe), un intérprete de órdenes en el anillo 3
    con sus archivos .BAT, Ctrl+C y el teclado español y, desde la 0.4, un **escritorio**
    (ventanas, ratón, barra de tareas, menú Inicio, Bloc de notas y Consola), todo en Castel
-   ([../docs/PENTIUM.md](../docs/PENTIUM.md)); lo siguiente, probarlo en PC de verdad
-   (teclado y ratón USB, discos SATA), crear nombres largos, tuberías y una caché de disco
-   de verdad.
+   ([../docs/PENTIUM.md](../docs/PENTIUM.md)); y, desde la 0.6, los discos SATA (AHCI), las
+   unidades con letra y el USB (xHCI, EHCI y UHCI: teclado, ratón, concentradores y
+   memorias). Lo siguiente, **instalarlo en el disco duro**; y crear nombres largos, tuberías
+   y una caché de disco de verdad.

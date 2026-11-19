@@ -363,7 +363,10 @@ falta enlazar con otras cosas; de momento no hace falta.
   Hispa-Pentium, son 64 K (`compilador/base.cas`): el núcleo ya no cabía. Es una
   tabla del compilador, no del lenguaje: lo que saca no cambia.
 - **El núcleo de Hispa-Pentium**: desde la 0.4 tiene su entorno gráfico (el
-  escritorio, PENTIUM.md §10; con menús, portapapeles e iconos desde la 0.5),
+  escritorio, PENTIUM.md §10; con menús, portapapeles e iconos desde la 0.5) y,
+  desde la 0.6, los discos SATA y el USB de los PC de verdad (PENTIUM.md §7 y
+  §11: doce módulos más, unas 4.000 líneas, con las estructuras que quieren
+  las controladoras escritas como `puntero a nat32` sobre páginas del núcleo),
   escrito también en Castel sin tocar el lenguaje.
   Ha crecido desde la semilla (PENTIUM.md) y ya
   lee y escribe discos FAT, carga los programas del disco y tiene su intérprete de

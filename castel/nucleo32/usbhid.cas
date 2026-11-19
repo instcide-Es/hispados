@@ -46,6 +46,9 @@ módulo Usbhid
 
     público variable teclados, ratones: nat32   ; los que hay
     público variable informes: nat32            ; los que han llegado
+    público variable fallos_tubo: nat32         ; las veces que una tubería ha dado un fallo
+    variable último_ratón: arreglo [8] de byte  ; el último informe de un ratón, tal cual
+    variable último_largo: nat32
     variable hids: arreglo [MAX_HID] de Hid
     variable n_hids: nat32
     variable descriptor: arreglo [512] de byte  ; un descriptor de informe
@@ -321,6 +324,14 @@ módulo Usbhid
         tubo_pide(hids[n].tubo, hids[n].largo)
     fin
 
+    función guarda_último(p: puntero a byte, n: nat32)
+        variable i: nat32
+        último_largo := n
+        para i desde 0 hasta 7 hacer
+            si i < n entonces último_ratón[i] := p[i] sino último_ratón[i] := 0 fin
+        fin
+    fin
+
     ; la tarea que recoge los informes: cada centésima mira las tuberías
     función atiende(nada: nat32)
         variable i: nat32
@@ -335,8 +346,11 @@ módulo Usbhid
                             si hids[i].teclado entonces
                                 si r >= 8 entonces informe_teclado(hids[i], tubo_datos(hids[i].tubo)) fin
                             sino
+                                guarda_último(tubo_datos(hids[i].tubo), nat32(r))
                                 informe_ratón(hids[i], tubo_datos(hids[i].tubo), nat32(r))
                             fin
+                        sino si r < 0 entonces
+                            fallos_tubo := fallos_tubo + 1
                         fin
                         tubo_pide(hids[i].tubo, hids[i].largo)
                     fin
@@ -379,6 +393,26 @@ módulo Usbhid
             si i mod 24 = 0 entonces apunta0("\n  ") fin
             apunta1("%02X ", descriptor[i])
             i := i + 1
+        fin
+        apunta0("\n")
+    fin
+
+    ; cómo van los teclados y los ratones: cuántos informes han llegado,
+    ; cuántos fallos han dado las tuberías, y el último informe de un ratón
+    público función enseña_estado()
+        variable i: nat32
+        variable d: arreglo [4] de nat32
+        d[0] := tics div 100
+        d[1] := informes
+        d[2] := fallos_tubo
+        apunta("usb: a los %u s: %u informes de teclados y ratones, %u fallos de sus tuberías", d)
+        si último_largo <> 0 entonces
+            apunta1("; el último de un ratón, %u octetos:", último_largo)
+            i := 0
+            mientras i < último_largo y i < 8 hacer
+                apunta1(" %02X", último_ratón[i])
+                i := i + 1
+            fin
         fin
         apunta0("\n")
     fin

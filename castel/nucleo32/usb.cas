@@ -479,7 +479,7 @@ módulo Usb
         fin
         si controladoras <> 0 entonces
             ; un rato para que los puertos vean lo que tienen enchufado
-            espera_ms(150)
+            espera_ms(300)
             c := 0
             mientras c < Xhci.cuántas hacer
                 mira_puertos(HC_XHCI, c, xhcis[c].puertos)
