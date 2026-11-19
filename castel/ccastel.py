@@ -4691,6 +4691,9 @@ C_multiboot:
     dd _datos_fin
     dd _vacio_fin
     dd C_arranque
+; sitio para pedirle al cargador un modo gráfico (clase, ancho, alto y bits
+; por punto): a cero y sin su bandera, no se pide (nucleo32/modo_grafico.py)
+    dd 0, 0, 0, 0
 ; la tabla de descriptores: código (0x08) y datos (0x10), planos, de 4 GB
 C_gdt:
     dd 0, 0
