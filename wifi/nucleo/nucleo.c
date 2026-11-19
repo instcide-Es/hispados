@@ -118,6 +118,38 @@ static void lista_pci(void)
 		}
 }
 
+/* Para el registro: ¿ha dejado el firmware puesta la protección de DMA de
+ * Intel (VT-d)? Con ella, la tarjeta no puede leer ni escribir la memoria
+ * (los paquetes van por DMA): la radio se enciende pero no se oye ninguna
+ * red. Pasó con el sonido del MacBook Air 2017 (lib/vtd.inc: de ahí salen
+ * los registros). Solo mira; no cambia nada. */
+static void mira_vtd(void)
+{
+	u32 id = hl_pci_lee(0, 0, 0), mch, *m, *u, bar, i;
+	static const u16 donde[2] = { 0x5400, 0x5410 };	/* GFXVTBAR y VTDPVC0BAR */
+
+	if ((id & 0xffff) != 0x8086 || (hl_pci_lee(0, 0, 8) >> 16) != 0x0600)
+		return;
+	mch = hl_pci_lee(0, 0, 0x48);
+	if (hl_pci_lee(0, 0, 0x4c) || !(mch & 1) || (mch & 0x7ffe) || (mch & ~0x7fffu) < 0x100000)
+		return;		/* sin MCHBAR de 32 KB: equipo de antes de 2011, sin estos registros */
+	m = hl_virt(mch & ~0x7fffu);
+	for (i = 0; i < 2; i++) {
+		bar = m[donde[i] / 4];
+		if (!(bar & 1) || m[donde[i] / 4 + 1] || (bar & ~0xfffu) < 0x100000)
+			continue;
+		u = hl_virt(bar & ~0xfffu);
+		if (u[0] < 0x10 || u[0] > 0x7f || u[2] == 0xffffffff || !(u[2] & 0x1f00))
+			continue;
+		hl_log(2, "VT-d: unidad %s en %08X, versión %u.%u: traducción de DMA %s%s\n",
+		       i ? "de los aparatos" : "de la gráfica", bar & ~0xfffu, u[0] >> 4, u[0] & 15,
+		       (u[0x1c / 4] & 0x80000000) ? "ENCENDIDA" : "apagada",
+		       ((u[2] & 0x60) && (u[0x64 / 4] & 1)) ? ", regiones protegidas PUESTAS" : "");
+		if (i && (u[0x1c / 4] & 0x80000000))
+			hl_log(0, "VT-d: el firmware ha dejado cerrada la DMA: la tarjeta no podrá recibir ni enviar (mande este registro)\n");
+	}
+}
+
 static int inicia(struct ll_inicio *p)
 {
 	u32 fin_nucleo = ((u32)_fin_bss + 4095) & ~4095u, tope, t, u, pk;
@@ -146,6 +178,18 @@ static int inicia(struct ll_inicio *p)
 	hl_log(2, "HSPWIFI: núcleo Wi-Fi de Hispa-486, versión %d.%02d (%s)\n", LL_VERSION / 100, LL_VERSION % 100, __DATE__);
 	hl_log(2, "Memoria: bloque de %u KB en %08X; núcleo %u KB, montón %u KB\n",
 	       p->tam >> 10, p->base, fin_nucleo >> 10, (p->tam - tope) >> 10);
+#ifndef ANFITRION
+	if (hl_pantalla) {
+		/* ¿llega a la pantalla lo que se pinta con /PANTALLA? */
+		volatile u16 *v = hl_virt(0xB8000 + 3998);
+		u16 era = *v, a, b;
+		*v = 0x075a; a = *v;
+		*v = 0x07a5; b = *v;
+		*v = era;
+		hl_log(2, "Pantalla (/PANTALLA): la memoria de vídeo de texto (B8000) %s\n",
+		       a == 0x075a && b == 0x07a5 ? "guarda lo escrito" : "NO guarda lo escrito: no se verá nada");
+	}
+#endif
 	if (r < 0) {
 		hl_log(0, "este procesador no tiene contador de tiempo (TSC) o no se puede medir (%d)\n", r);
 		return -21;
@@ -168,6 +212,7 @@ static int inicia(struct ll_inicio *p)
 	hl_fw_pon(0, "brcm/bcm43xx-0.fw", (const u8 *)p->fw_des[0], p->fw_tam[0]);
 	hl_fw_pon(1, "brcm/bcm43xx_hdr-0.fw", (const u8 *)p->fw_des[1], p->fw_tam[1]);
 	lista_pci();
+	mira_vtd();
 	for (r = 1, t = 0; t < ARRAY_SIZE(conductores) && r == 1; t++) {
 		r = conductores[t].busca();
 		if (r == 0) {
@@ -227,7 +272,19 @@ static int enciende(void)
 	return 0;
 }
 
+static int llamada(u32 fn, u32 dir);
+
 int nucleo_llamada(u32 fn, u32 dir)
+{
+	/* (el puerto CF8h, como estaba: ver hl_pci_dir en base.c) */
+	u32 cf8 = hl_pci_dir();
+	int r = llamada(fn, dir);
+
+	hl_pci_dir_pon(cf8);
+	return r;
+}
+
+static int llamada(u32 fn, u32 dir)
 {
 	u32 *p;
 

@@ -157,6 +157,7 @@ xms         dd 0                    ; la entrada del gestor XMS
 xms_h       dw 0                    ; el bloque del núcleo
 en_nucleo   db 0                    ; dentro de una llamada al núcleo
 en_sondeo   db 0                    ; repartiendo lo recibido
+n_sondeos   dw 0                    ; sondeos hechos desde el reloj y el teclado
 a20_puesta  db 0
 quedan      db 0
 rx_len      dw 0
@@ -354,6 +355,7 @@ sondeo_int:
         cmp byte [cs:en_nucleo], 0
         jne .no
         mov byte [cs:en_sondeo], 1
+        inc word [cs:n_sondeos]
         push ds
         push cs
         pop ds
@@ -988,6 +990,30 @@ resident_end:
 ;  Instalación (se descarta)
 ; =============================================================================
         section .init
+; el registro del arranque paso a paso (ver paso_abre)
+PB_TAM      equ 240
+%macro PASO 1+
+        jmp short %%f
+%%t     db %1, 0
+%%f:
+        push si
+        mov si, %%t
+        call paso_abre
+        call puts
+        call paso_cierra
+        pop si
+%endmacro
+; un trozo de texto dentro de una línea abierta
+%macro PT 1+
+        jmp short %%f
+%%t     db %1, 0
+%%f:
+        push si
+        mov si, %%t
+        call puts
+        pop si
+%endmacro
+
 init:
         cld
         call parse
@@ -1093,6 +1119,24 @@ init:
         mov si, msg_quitada
         call puts
 .sq:
+        ; ¿se apuntan los pasos? (con /V, /PANTALLA o /REG)
+        test byte [opciones], 2 | 4
+        jnz .ps
+        cmp byte [reg_ruta], 0
+        je .nps
+.ps:
+        mov byte [pasos_si], 1
+.nps:
+        call paso_abre
+        PT "empieza (opciones "
+        mov al, [opciones]
+        call hex2
+        PT "h, estado del procesador "
+        smsw ax
+        call hex16
+        PT "h)"
+        call paso_video
+        call paso_cierra
         ; modo V86: no se puede pasar a modo protegido por nuestra cuenta
         smsw ax
         mov si, msg_v86
@@ -1110,6 +1154,20 @@ init:
         mov [xms+2], es
         push cs
         pop es
+        call paso_abre
+        PT "gestor de memoria extendida (XMS) en "
+        mov ax, [xms+2]
+        call hex16
+        mov al, ':'
+        call putc
+        mov ax, [xms]
+        call hex16
+        PT "; libre, en KB: "
+        mov ah, 0x08
+        call far [xms]
+        movzx eax, dx
+        call putdec
+        call paso_cierra
         ; el vector del packet driver
         call pick_vector
         mov si, msg_novec
@@ -1142,6 +1200,18 @@ init:
         mov si, msg_badbin
         jmp fin_mal
 .cab:
+        call paso_abre
+        PT "núcleo HSPWIFI.BIN abierto: "
+        mov eax, [tbuf+8]
+        call putdec
+        PT " octetos, "
+        mov eax, [tbuf+12]
+        call putdec
+        PT " de memoria; packet driver en INT "
+        mov al, [pkt_vec]
+        call hex2
+        PT "h"
+        call paso_cierra
         ; la memoria: el bloque entero
         mov ah, 0x09                ; pedir bloque
         mov dx, BLOQUE_KB + 64      ; (y 64 KB para alinear: ver abajo)
@@ -1169,6 +1239,18 @@ init:
         add [bloque], eax
         mov ah, 0x03                ; A20 abierta (global)
         call far [xms]
+        call paso_abre
+        PT "bloque de memoria extendida "
+        mov ax, [xms_h]
+        call hex16
+        PT "h: el núcleo irá en "
+        mov eax, [bloque]
+        call hex32
+        PT "h; A20 abierta (puerto 92h="
+        in al, 0x92
+        call hex2
+        PT "h). Se copia el núcleo..."
+        call paso_cierra
         ; copiar el núcleo al bloque
         mov bx, [fh]
         xor cx, cx
@@ -1221,6 +1303,15 @@ init:
         mov [p_ini+16], eax
         mov [p_ini+20], eax
 .sin_fw:
+        call paso_abre
+        PT "núcleo copiado; microcódigo: "
+        mov eax, [p_ini+16]
+        call putdec
+        PT " y "
+        mov eax, [p_ini+20]
+        call putdec
+        PT " octetos"
+        call paso_cierra
         ; la tabla de segmentos
         mov eax, [bloque]
         mov [gdt+8+2], ax
@@ -1259,26 +1350,32 @@ init:
         mov dx, cs
         shl edx, 4
         add edx, p_ini
+        PASO "se pasa a modo protegido de 32 bits: llamada 1 de 3 al núcleo (buscar la tarjeta)..."
         mov eax, LL_INICIA
         call nuc
+        call paso_vuelta
         push eax
         call vuelca_registro
         pop eax
         test eax, eax
         jnz .falla
         ; paso 2: leer el bus interno de la tarjeta y montar el controlador
+        PASO "llamada 2 de 3 al núcleo (despertar la tarjeta y montar el controlador)..."
         mov eax, LL_MONTA
         xor edx, edx
         call nuc
+        call paso_vuelta
         push eax
         call vuelca_registro
         pop eax
         test eax, eax
         jnz .falla
         ; paso 3: encender la radio
+        PASO "llamada 3 de 3 al núcleo (encender la radio)..."
         mov eax, LL_ENCIENDE
         xor edx, edx
         call nuc
+        call paso_vuelta
         push eax
         call vuelca_registro
         pop eax
@@ -1293,6 +1390,7 @@ init:
         add edx, pet
         mov eax, LL_MAC
         call nuc
+        PASO "radio en marcha y dirección MAC leída; ahora, el mensaje de la tarjeta y los vectores"
         test byte [opciones], 1
         jz .nom
         mov si, n_sim
@@ -1352,10 +1450,12 @@ init:
         mov ax, 0x2508
         mov dx, int08
         int 0x21
+        call prueba_residente
         ; soltar el entorno y quedarse
         mov es, [0x2C]
         mov ah, 0x49
         int 0x21
+        PASO "arranque terminado: HSPWIFI se queda residente y se vuelve al DOS"
         mov dx, resident_end + 15
         shr dx, 4
         mov [res_paras], dx
@@ -1846,6 +1946,8 @@ vec_free:
         ret
 
 putc:
+        cmp byte [pb_on], 0
+        jne .buf
         push ax
         push dx
         mov dl, al
@@ -1853,6 +1955,296 @@ putc:
         int 0x21
         pop dx
         pop ax
+        ret
+.buf:
+        push bx
+        mov bx, [pb_n]
+        cmp bx, PB_TAM - 2
+        jae .x
+        mov [pb_buf+bx], al
+        inc word [pb_n]
+.x:
+        pop bx
+        ret
+
+; =============================================================================
+;  El arranque, paso a paso (para saber dónde se para si el equipo se cuelga).
+;  Cada paso es una línea «HSPWIFI paso: ...»: sale por la pantalla con /V o
+;  /PANTALLA y va al archivo de /REG, que se abre, se escribe y se CIERRA en
+;  cada línea (y se vacían los búferes del disco): lo último que haya en el
+;  archivo es lo último que se hizo.
+;    PASO "texto"              una línea entera
+;    call paso_abre ... (puts, hex2, hex16, hex32, putdec) ... call paso_cierra
+; =============================================================================
+paso_abre:
+        mov word [pb_n], 0
+        mov byte [pb_on], 1
+        push si
+        mov si, pb_pre
+        call puts
+        pop si
+        ret
+
+paso_cierra:
+        push ax
+        mov al, 13
+        call putc
+        mov al, 10
+        call putc
+        pop ax
+        mov byte [pb_on], 0
+        pushf
+        pushad
+        push ds
+        push es
+        push cs
+        pop ds
+        cld
+        test byte [opciones], 2 | 4 ; /V o /PANTALLA: a la pantalla
+        jz .arch
+        mov dx, pb_buf
+        mov cx, [pb_n]
+        mov bx, 1
+        mov ah, 0x40
+        int 0x21
+.arch:
+        cmp byte [reg_ruta], 0
+        je .fin
+        mov dx, reg_ruta
+        mov ax, 0x3D02
+        int 0x21
+        jnc .ab
+        mov dx, reg_ruta
+        xor cx, cx
+        mov ah, 0x3C
+        int 0x21
+        jc .fin
+.ab:
+        mov bx, ax
+        xor cx, cx
+        xor dx, dx
+        mov ax, 0x4202
+        int 0x21
+        mov dx, pb_buf
+        mov cx, [pb_n]
+        mov ah, 0x40
+        int 0x21
+        mov ah, 0x68                ; al disco ya
+        int 0x21
+        mov ah, 0x3E
+        int 0x21
+        mov ah, 0x0D                ; y los búferes del DOS
+        int 0x21
+.fin:
+        pop es
+        pop ds
+        popad
+        popf
+        ret
+
+hex32:
+        push eax
+        shr eax, 16
+        call hex16
+        pop eax
+hex16:
+        push ax
+        mov al, ah
+        call hex2
+        pop ax
+        jmp hex2
+
+; tras una llamada al núcleo: EAX = el resultado (se conserva)
+paso_vuelta:
+        call paso_abre
+        PT "de vuelta en modo real; resultado "
+        push eax
+        test eax, eax
+        jns .p
+        push ax
+        mov al, '-'
+        call putc
+        pop ax
+        neg eax
+.p:
+        call putdec
+        pop eax
+        call paso_video
+        call paso_cierra
+        ret
+
+; Con los vectores ya puestos (el sondeo de la tarjeta va con el reloj) y
+; antes de quedarse residente, dos comprobaciones que quedan en el registro
+; (solo si se apuntan los pasos): que el reloj sigue andando con el sondeo
+; dentro, y que se puede leer del disco mientras tanto (el controlador del
+; disco puede ser HSPUSB, que trabaja en modo «irreal»: ver nuc).
+prueba_residente:
+        cmp byte [pasos_si], 0
+        je .r
+        PASO "vectores puestos: packet driver, INT 2Fh, INT 16h e INT 08h. Se esperan 6 tics del reloj con el sondeo en marcha..."
+        push es
+        xor ax, ax
+        mov es, ax
+        sti
+        mov bx, [es:0x46C]
+        mov ecx, 0x30000000         ; tope, por si el reloj no anduviera
+.t:
+        mov ax, [es:0x46C]
+        sub ax, bx
+        cmp ax, 6
+        jae .tf
+        dec ecx
+        jnz .t
+.tf:
+        pop es
+        call paso_abre
+        PT "reloj: "
+        movzx eax, ax
+        call putdec
+        PT " tics y "
+        movzx eax, word [n_sondeos]
+        call putdec
+        PT " sondeos de la tarjeta"
+        call paso_video
+        call paso_cierra
+        PASO "se lee HSPWIFI.BIN del disco con el sondeo en marcha..."
+        mov dword [x_tam], 0
+        mov dx, ruta_bin
+        mov ax, 0x3D00
+        int 0x21
+        jc .nd
+        mov bx, ax
+.l:
+        mov dx, tbuf
+        mov cx, TBUF
+        mov ah, 0x3F
+        int 0x21
+        jc .lf
+        test ax, ax
+        jz .lf
+        movzx eax, ax
+        add [x_tam], eax
+        jmp .l
+.lf:
+        mov ah, 0x3E
+        int 0x21
+.nd:
+        call paso_abre
+        PT "disco leído: "
+        mov eax, [x_tam]
+        call putdec
+        PT " octetos; "
+        movzx eax, word [n_sondeos]
+        call putdec
+        PT " sondeos"
+        call paso_cierra
+.r:
+        ret
+
+; El estado del vídeo, dentro de una línea abierta: el modo, la página y si
+; la memoria de la pantalla de texto (B800:0) guarda lo que se le escribe (se
+; prueba en su última casilla y se deja como estaba). Si un paso dejara la
+; pantalla sin pintar, aquí se ve cuál (y el archivo lo cuenta aunque en la
+; pantalla ya no salga nada).
+paso_video:
+        cmp byte [pasos_si], 0      ; (solo si los pasos se apuntan)
+        jne .si
+        ret
+.si:
+        pushf
+        pushad
+        push es
+        PT " [vídeo: modo "
+        xor ax, ax
+        mov es, ax
+        mov al, [es:0x449]
+        call hex2
+        PT "h pág. "
+        mov al, [es:0x462]
+        call hex2
+        PT ", B800 "
+        mov ax, 0xB800
+        mov es, ax
+        cli
+        mov bx, [es:3998]
+        mov word [es:3998], 0x075A
+        mov cx, [es:3998]
+        mov word [es:3998], 0x07A5
+        mov dx, [es:3998]
+        mov [es:3998], bx
+        cmp cx, 0x075A
+        jne .mal
+        cmp dx, 0x07A5
+        jne .mal
+        PT "bien"
+        jmp .pci
+.mal:
+        PT "NO GUARDA lo escrito (lee "
+        mov ax, cx
+        call hex16
+        PT ")"
+.pci:
+        ; la orden PCI de la gráfica integrada (00:02.0) y de quien esté en
+        ; 00:01.0 (el puente de una gráfica aparte), por si alguien las toca
+        PT ", PCI 00:02.0 orden "
+        mov dx, 0xCF8
+        in eax, dx
+        mov esi, eax
+        mov eax, 0x80001004
+        out dx, eax
+        mov dx, 0xCFC
+        in eax, dx
+        call hex16
+        mov dx, 0xCF8
+        mov eax, esi
+        out dx, eax
+        PT ", 3CCh="
+        mov dx, 0x3CC
+        in al, dx
+        call hex2
+        ; columnas x filas, dónde empieza la página (datos de la BIOS) y
+        ; desde dónde pinta la tarjeta (registros 0Ch y 0Dh del CRTC)
+        PT ", "
+        xor ax, ax
+        mov es, ax
+        movzx eax, word [es:0x44A]
+        call putdec
+        mov al, 'x'
+        call putc
+        movzx eax, byte [es:0x484]
+        inc ax
+        call putdec
+        PT ", página en "
+        mov ax, [es:0x44E]
+        call hex16
+        PT ", CRTC "
+        mov dx, [es:0x463]
+        cmp dx, 0x3D4
+        jne .nc
+        cli
+        in al, dx
+        mov bl, al                  ; (el índice que hubiera)
+        mov al, 0x0C
+        out dx, al
+        inc dx
+        in al, dx
+        mov ah, al
+        dec dx
+        mov al, 0x0D
+        out dx, al
+        inc dx
+        in al, dx
+        dec dx
+        push ax
+        mov al, bl
+        out dx, al
+        pop ax
+        call hex16
+.nc:
+        PT "]"
+        pop es
+        popad
+        popf
         ret
 
 puts:
@@ -1935,6 +2327,11 @@ RP_TAM      equ TBUF
 %include "redpref.inc"
 o_v         db 0
 o_int       db 0
+pasos_si    db 0                    ; se apuntan los pasos (/V, /PANTALLA o /REG)
+pb_on       db 0                    ; putc escribe en la línea del paso
+pb_n        dw 0
+pb_pre      db "HSPWIFI paso: ", 0
+pb_buf      times PB_TAM db 0
 fh          dw 0
 reg_fh      dw 0
 x_des       dd 0

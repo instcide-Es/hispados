@@ -370,20 +370,31 @@ static void pinta(char c)
 {
 #ifndef ANFITRION
 	/* la última línea de la pantalla de texto, subiendo las demás: se ve
-	 * aunque el equipo se quede colgado dentro del núcleo */
-	u16 *v = hl_virt(0xB8000);
-	int i;
+	 * aunque el equipo se quede colgado dentro del núcleo. Las columnas,
+	 * las filas y dónde empieza la página que se ve, de los datos de la
+	 * BIOS (40:4A, 40:84 y 40:4E): no siempre es 80x25 desde B800:0 */
+	const u8 *bda = hl_virt(0x400);
+	int cols = bda[0x4a] | bda[0x4b] << 8, filas = bda[0x84] + 1;
+	int des = bda[0x4e] | bda[0x4f] << 8, i;
+	u16 *v;
 
-	if (c == '\n' || col >= 80) {
-		for (i = 0; i < 80 * 24; i++)
-			v[i] = v[i + 80];
-		for (i = 80 * 24; i < 80 * 25; i++)
+	if (cols < 40 || cols > 132)
+		cols = 80;
+	if (filas < 25 || filas > 60)
+		filas = 25;
+	if (des + cols * filas * 2 > 0x8000)
+		des = 0;
+	v = hl_virt(0xB8000 + des);
+	if (c == '\n' || col >= cols) {
+		for (i = 0; i < cols * (filas - 1); i++)
+			v[i] = v[i + cols];
+		for (i = cols * (filas - 1); i < cols * filas; i++)
 			v[i] = 0x0720;
 		col = 0;
 		if (c == '\n')
 			return;
 	}
-	v[80 * 24 + col++] = 0x0700 | (u8)c;
+	v[cols * (filas - 1) + col++] = 0x0700 | (u8)c;
 #endif
 }
 
@@ -853,6 +864,18 @@ void kfree_skb(struct sk_buff *s)
 u32 hl_skb_vivos(void) { return skb_vivos; }
 
 /* ------------------------------------------------------------------- PCI */
+/* El registro de dirección de la configuración PCI (puerto CF8h). El núcleo
+ * se llama también desde el reloj (INT 08h): puede haber interrumpido a otro
+ * programa entre que puso la dirección y leyó o escribió el dato (puerto
+ * CFCh). Se guarda al entrar en cada llamada y se repone al salir; si no, el
+ * dato del otro iría a parar a un registro de la tarjeta Wi-Fi (o al revés). */
+#ifndef ANFITRION
+u32 hl_pci_dir(void) { return inl(0xcf8); }
+void hl_pci_dir_pon(u32 v) { outl(v, 0xcf8); }
+#else
+u32 hl_pci_dir(void) { return 0; }
+void hl_pci_dir_pon(u32 v) { }
+#endif
 #ifndef HL_SIMULA_ES
 static u32 pci_dir(struct pci_dev *d, int w)
 {
