@@ -170,6 +170,7 @@ módulo Fat
     variable libres: nat32 = 0xFFFFFFFF         ; los clusters libres (NINGUNO: aún no se han contado)
     variable pista: nat32                       ; por dónde se busca el siguiente cluster libre
     variable info_sucio: bool                   ; hay que poner al día el sector de información (FAT32)
+    variable sin_contar: bool                   ; los clusters libres, solo si se saben sin leer la FAT entera
     variable serie: nat32
 
     variable cerrojo: Cerrojo
@@ -367,6 +368,9 @@ módulo Fat
                 devolver
             fin
         fin
+        ; (contarlos en una FAT32 grande es leerla entera: quien solo quiere
+        ; enseñarlo puede pedir que no se haga)
+        si sin_contar entonces devolver fin
         n := 0
         para c desde 2 hasta clusters + 1 hacer
             si fat_de(c) = 0 entonces n := n + 1 fin
@@ -1575,6 +1579,23 @@ módulo Fat
         si b.octetos_sector <> SECTOR o b.reservados = 0 o b.fats = 0 entonces devolver falso fin
         s := b.sectores_cluster
         devolver s <> 0 y s yb (s - 1) = 0
+    fin
+
+    ; los clusters libres del volumen, si se saben sin tardar: en una FAT32
+    ; grande cuyo sector de información no lo dice, NINGUNO (no se cuenta)
+    público función clusters_libres_pronto(v: nat32): nat32
+        variable n: nat32
+        si v >= VOLÚMENES entonces devolver NINGUNO fin
+        si no volúmenes[v].montado entonces devolver NINGUNO fin
+        tomar(cerrojo)
+        elige(v)
+        fallo := falso
+        sin_contar := clase = 32 y clusters > 300000
+        cuenta_libres()
+        sin_contar := falso
+        n := libres
+        soltar(cerrojo)
+        devolver n
     fin
 
     ; ¿se puede escribir en el volumen v? (lo dice su disco: discos.cas)

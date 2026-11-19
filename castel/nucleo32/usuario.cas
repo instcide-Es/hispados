@@ -728,7 +728,7 @@ módulo Usuario
                         i.medio := discos[d].clase
                         si escribible(u) entonces i.solo_lectura := 0 fin
                         i.total_k := volúmenes[u].clusters * volúmenes[u].sectores_cluster div 2
-                        k := clusters_libres(u)
+                        k := clusters_libres_pronto(u)
                         si k = 0xFFFFFFFF entonces i.libre_k := k sino i.libre_k := k * volúmenes[u].sectores_cluster div 2 fin
                         copiar_memoria(dirección(i.nombre[0]), dirección(discos[d].modelo[0]), 40)
                         copiar_memoria(dirección(i.etiqueta[0]), dirección(volúmenes[u].etiqueta[0]), 12)

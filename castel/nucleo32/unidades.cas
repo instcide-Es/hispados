@@ -11,8 +11,9 @@
 ;  volumen número n de fat.cas (la de memoria no tiene volumen).
 ;
 ;  «La unidad del sistema» es de la que se cargan los programas cuando no se
-;  dice otra: la que diga el cargador («unidad=X» en su línea) si está; si
-;  no, la primera que haya: C:, luego X:, luego M:.
+;  dice otra: la que diga el cargador («unidad=X» en su línea) si está y
+;  lleva el sistema (ORDENES.BIN); si no, la primera que lo lleve (C:... y
+;  luego X:...); si no, M:.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Unidades
@@ -165,14 +166,28 @@ módulo Unidades
         devolver cierto
     fin
 
-    ; elige la unidad del sistema: la de la letra pedida (0: ninguna pedida)
-    ; si está; si no, C:, luego la primera memoria USB, luego la de memoria
+    ; elige la unidad del sistema: la de la letra pedida (0: ninguna
+    ; pedida) si está y tiene el sistema; si no, la primera que lo tenga
+    ; (C:, D:... y luego X:...); si no, la de memoria; y si no, la primera
+    ; que haya. (Así, el disco de dentro de un PC, que puede tener una
+    ; partición FAT con otras cosas, no pasa por unidad del sistema.)
     público función elige_sistema(pedida: nat32)
-        variable u: nat32
+        variable u, letra: nat32
         del_sistema := NINGUNA
-        si pedida <> 0 entonces del_sistema := por_letra(pedida) fin
-        si del_sistema = NINGUNA entonces del_sistema := por_letra('C') fin
-        si del_sistema = NINGUNA entonces del_sistema := por_letra('X') fin
+        si pedida <> 0 entonces
+            u := por_letra(pedida)
+            si u <> NINGUNA entonces
+                si unidades[u].clase = U_MEMORIA o tiene_sistema(u) entonces del_sistema := u fin
+            fin
+        fin
+        si del_sistema = NINGUNA entonces
+            para letra desde 'A' hasta 'Z' hacer
+                u := por_letra(letra)
+                si u <> NINGUNA y del_sistema = NINGUNA entonces
+                    si tiene_sistema(u) entonces del_sistema := u fin
+                fin
+            fin
+        fin
         si del_sistema = NINGUNA entonces del_sistema := por_letra('M') fin
         si del_sistema = NINGUNA entonces
             para u desde 0 hasta MAX_UNIDADES - 1 hacer

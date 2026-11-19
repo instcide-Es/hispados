@@ -532,10 +532,14 @@ FAT se reconoce por su primer sector). Cada volumen FAT que aparece **se monta**
 Mi equipo lo enseña como disco que no se puede leer. No se miran todavía las
 particiones lógicas (las de dentro de una extendida).
 
+![Mi equipo, con el disco SATA de dentro (C:, de solo lectura) y la memoria USB (X:)](pentium/mi-equipo-unidades.png)
+
 **La unidad del sistema** es de la que se cargan los programas cuando no se dice
 otra (el intérprete, el Bloc de notas...): la que diga el cargador
-(**`unidad=X`**) si está; si no, la primera que haya: `C:`, luego `X:`, luego
-`M:`. Cada tarea tiene **su unidad y su carpeta de trabajo** (las hereda de quien
+(**`unidad=X`**) si está y lleva el sistema (`ORDENES.BIN` en su raíz); si no,
+la primera que lo lleve (`C:`, `D:`... y luego `X:`...); si no, `M:`. (Así, el
+disco de dentro de un PC, que puede tener una partición FAT con otras cosas
+—la de arranque EFI, por ejemplo—, no pasa por unidad del sistema.) Cada tarea tiene **su unidad y su carpeta de trabajo** (las hereda de quien
 la lanza); una ruta puede llevar la letra delante (`X:\CARTAS\UNA.TXT`), y sin
 ella es de la unidad de trabajo. (Al cambiar de unidad se va a su raíz: no se
 guarda una carpeta de trabajo por unidad, como hace el DOS.)
@@ -568,20 +572,26 @@ los volúmenes FAT que tengan y dice lo que hay, una línea por disco y otra con
 las unidades:
 
 ```
-usb: controladora EHCI 8086:27CC, 8 puertos
-usb: aparato 0, 0951:1666, velocidad alta, en el puerto 3; almacenamiento
-usb: 0 teclados, 0 ratones, 1 memorias.
-disco 0: TOSHIBA MK1665GSX, 152627 MB, sin FAT (SATA).
-disco 1: Kingston DataTraveler 3.0, 14999 MB, FAT16 (USB).
+usb: controladora EHCI 8086:24CD, 6 puertos
+usb: aparato 0, 0627:0001, velocidad alta, en el puerto 1 (EHCI); teclado
+usb: aparato 1, 0627:0001, velocidad alta, en el puerto 2 (EHCI); ratón
+usb: aparato 2, 46F4:0001, velocidad alta, en el puerto 3 (EHCI); almacenamiento
+usb: 1 teclados, 1 ratones, 1 memorias.
+disco 0: QEMU HARDDISK, 40 MB, FAT32 (SATA).
+disco 1: QEMU    QEMU HARDDISK, 16 MB, FAT16 (USB).
 los discos de dentro son de solo lectura (para escribir en ellos: «escritura» en la línea del cargador).
-unidades: M: (en memoria) X: (disco 1, USB, FAT16); la del sistema, X:
+unidades: C: (disco 0, SATA, FAT32) X: (disco 1, USB, FAT16); la del sistema, X:
 ```
 
-(Eso es lo que se espera en el Toshiba NB250 con la memoria USB de prueba; en
-QEMU, lo mismo con sus discos de imagen. Con **`registro`** en la línea del
-cargador, esas líneas quedan además en **`ARRANQUE.TXT`**, en la unidad del
-sistema, si es la memoria de arranque y se puede escribir en ella: en un PC de
-verdad con el escritorio en marcha la pantalla de texto no se ve.)
+(Eso es QEMU con un disco SATA, un EHCI con teclado, ratón y memoria, y
+`escritura=usb unidad=X` en la línea del núcleo. Un disco sin ninguna partición
+FAT sale como «sin FAT». Con **`registro`** en la línea del cargador, esas
+líneas quedan además en **`ARRANQUE.TXT`**, en la unidad del sistema, si es la
+memoria de arranque y se puede escribir en ella: en un PC de verdad con el
+escritorio en marcha la pantalla de texto no se ve. Al medio minuto se le añade
+una línea con cómo van el teclado y el ratón USB: cuántos informes han llegado,
+cuántos fallos han dado sus tuberías y el último informe de un ratón, octeto a
+octeto. Lo mismo dice la orden `usb` de la consola del núcleo.)
 
 **La unidad en memoria (M:).** Si el cargador ha traído archivos como **módulos
 de multiboot** (un PC arrancado de una memoria USB con GRUB: sección 11), esos
@@ -718,8 +728,9 @@ dentro. (El intérprete de órdenes de verdad es el de la sección 8.)
 | `tareas` | las tareas, con su estado, su anillo, sus turnos y sus tics |
 | `programas` | los módulos que ha traído el cargador |
 | `ejecutar N` | ejecuta el módulo N en el anillo 3 y espera a que acabe; dice su código y los marcos libres antes y después |
-| `disco` | los discos del canal primario (modelo, sectores) y el sistema de archivos (qué FAT, dónde empieza, clusters, los libres; sectores leídos y escritos, y archivos abiertos) |
-| `dir [CARPETA]` | las entradas de una carpeta del disco |
+| `disco` | los discos (modelo, sectores, y si es IDE, SATA o USB), el sistema de archivos de la unidad del sistema (qué FAT, dónde empieza, clusters, los libres; sectores leídos y escritos, y archivos abiertos) y las unidades con su letra |
+| `usb` | las controladoras USB y los aparatos enumerados, y cómo van el teclado y el ratón (informes que han llegado, fallos de sus tuberías) |
+| `dir [CARPETA]` | las entradas de una carpeta de la unidad del sistema |
 | `lanzar PROGRAMA.BIN [ARGUMENTOS]` | carga el programa del disco, lo ejecuta en el anillo 3 con sus argumentos y espera a que acabe |
 | `ordenes` | lanza el intérprete de órdenes (`ORDENES.BIN`) |
 | `teclas` | las teclas pulsadas |
@@ -750,6 +761,10 @@ y la que usa Hispa-DOS (y Castel para sus textos):
   en marcha (sección 5).
 - El de EE. UU. sigue estando: `teclado us` en esta consola, `TECLADO US` en el
   intérprete, o `teclado=us` en lo que se le dice al núcleo al arrancar.
+- **Un teclado USB es el mismo teclado** (desde la 0.6): `usbhid.cas` traduce lo
+  que dice el teclado USB a los códigos que daría uno PS/2 y se los da a
+  `consola.cas`, que no distingue. Puede haber los dos a la vez (el de un
+  portátil y uno enchufado).
 
 ---
 
@@ -885,7 +900,10 @@ recorta a los bordes del lienzo. Las filas se llenan y se copian con `rep stosd`
 **El ratón** (`raton.cas`): el PS/2, por la segunda boca del 8042 y la IRQ 12. La
 interrupción lleva la cuenta de dónde está la flecha y apunta cada cambio de botón
 en una cola, con el sitio donde fue (un clic no se pierde aunque se tarde en
-atenderlo).
+atenderlo). Desde la 0.6, **un ratón USB** (o un panel táctil que se presente como
+ratón) hace lo mismo: `usbhid.cas` le da a `raton.cas` cada movimiento y cada
+cambio de botón (sección 11). Si no hay 8042 (un Mac, un PC «sin legado»: su
+puerto lee `0xFF`), el PS/2 ni se intenta.
 
 **El gestor de ventanas** (`ventanas.cas`), en el núcleo. Cada ventana tiene **su
 propio lienzo**, con el marco pintado y lo de dentro, donde dibuja su dueño: así,
@@ -1013,7 +1031,8 @@ memoria y se arranca de ella. (Necesita ser root, `parted`, `dosfstools` y
   hacen de **unidad M: en memoria** (sección 7). Si no hay X:, la del sistema es
   ella, y entonces no se puede guardar nada (el Bloc de notas lo dice).
 - **`registro`**: lo que el núcleo encuentra al arrancar (los discos, las
-  controladoras USB y cada aparato, las unidades) queda en **`X:\ARRANQUE.TXT`**.
+  controladoras USB y cada aparato, las unidades) queda en **`X:\ARRANQUE.TXT`**
+  y, al medio minuto, cómo van el teclado y el ratón USB (sección 7).
   Es para poder verlo luego desde otro equipo: con el escritorio en marcha no se
   ve la pantalla de texto del núcleo. (La última entrada, la consola del núcleo
   en modo texto, lo enseña en la pantalla.)
@@ -1064,9 +1083,11 @@ memoria y se arranca de ella. (Necesita ser root, `parted`, `dosfstools` y
 - **Probado en un PC de verdad** (19/11/2026): un **Toshiba NB250** (Atom N455,
   pantalla de 1024 x 600, panel táctil Synaptics PS/2), con la 0.4 a 800 x 600:
   arranca deprisa, el escritorio sale bien, y el ratón (botón principal y
-  movimiento) y el teclado van. Lo que se espera en otros: que vaya donde haya
-  teclado y ratón PS/2 (o que la BIOS los imite: los portátiles con panel táctil
-  PS/2) y una VBE con modos de 32, 24 o 16 bits.
+  movimiento) y el teclado van. Y un **MacBook Air de 2012** (sin 8042: el
+  teclado y el panel son USB), con la 0.5: el escritorio se ve, pero ni el
+  teclado ni el panel responden; para él (y para todos los PC sin teclado ni
+  ratón PS/2) es el USB de la 0.6, que **en un PC de verdad está por probar**.
+  Hace falta, además, una VBE con modos de 32, 24 o 16 bits.
 - **Sin GRUB**, otro camino para más adelante: un cargador propio de 16 bits que
   pida el modo a la VBE (`int 10h`, `4F02h`) antes de pasar a modo protegido y
   deje al núcleo la misma información.
