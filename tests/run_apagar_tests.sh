@@ -24,7 +24,9 @@
 #    (VENTANAS.INI) y CENTRO.INI están en la memoria después de «Apagar el
 #    equipo», y fsck.fat la da por sana; APAGAR desde DOS igual (con UEFI,
 #    por ResetSystem del firmware); con CENTRO.INI de solo lectura, Hispa
-#    Ventanas avisa antes de apagar («Cancelar» se queda, «Aceptar» apaga).
+#    Ventanas avisa antes de apagar («Cancelar» se queda, «Aceptar» apaga);
+#    un cambio de Configuración hecho justo antes de «Apagar» (sin esperar a
+#    que se guarde solo a los 3 s) también está: WM_ENDSESSION.
 # Deja capturas en build/apagar_*.png.
 # Shutdown / restart test.
 set -u
@@ -384,14 +386,19 @@ if [ -f "$U486" ]; then
     cp "$U486" $T/u.img; tests/tools/sinmenu.sh $T/u.img > /dev/null
     [ $hc = xhci ] && O=$UXHCI || O=$UEHCI
     uarranca "$O"
-    uescritorio $hc
-    tecla ctrl-esc; sleep 1; tecla right; sleep 1; tecla down ret; sleep 4   # Inicio > Principal > Configuración
+    uescritorio $hc 12
+    tecla ctrl-esc; sleep 1; tecla right; sleep 1; tecla down ret; sleep 6   # Inicio > Principal > Configuración
     clic 544 258; clic 575 317               # Pantalla: dibujo «damero», fondo granate
     ir 16 320; sleep 4                       # (se guarda solo a los 3 s)
-    usalir
-    shot u1
+    # el color del dibujo, granate, y enseguida Salir > Apagar (Configuración
+    # no ha llegado a guardarlo sola: se lo pide Hispa Ventanas al salir,
+    # con WM_ENDSESSION)
+    ir 575 367; mon "mouse_button 1" 0.1; date +%s%N > $T/tc; mon "mouse_button 0" 0.1
+    mon "sendkey ctrl-esc" 0.25; mon "sendkey up" 0.12; mon "sendkey ret" 0.35
     date +%s%N > $T/t0; tecla ret            # Intro: «Apagar el equipo»
+    rapido=$(( ($(cat $T/t0) - $(cat $T/tc)) / 1000000 ))
     if termina 40; then ok "$hc: QEMU se apaga solo ($(segundos) s)"; else ko "$hc: no se ha apagado"; fi
+    [ "$rapido" -lt 1000 ] && ok "$hc: Apagar menos de 1 s después del cambio ($rapido ms)" || ko "$hc: Apagar $rapido ms después del cambio (debía ser menos de 1 s)"
     if [ "$(cat $T/seg)" -ge 2000 ]; then ok "$hc: con la espera para que la memoria acabe (2 s o más)"
     else ko "$hc: se ha apagado sin esperar a la memoria ($(segundos) s)"; fi
     cierra; uconsola
@@ -399,6 +406,7 @@ if [ -f "$U486" ]; then
     uini VENTANAS.INI
     utiene $hc "Dibujo=damero" "VENTANAS.INI con el dibujo elegido"
     utiene $hc "ColorFondo=13" "VENTANAS.INI con el color elegido"
+    utiene $hc "ColorDibujo=13" "VENTANAS.INI con el cambio hecho justo antes de apagar ($rapido ms antes: WM_ENDSESSION)"
     utiene $hc "Escritorio=486" "VENTANAS.INI conserva lo de Hispa-486"
     uini CENTRO.INI
     if grep -q '^; Hispa Ventanas - Centro de programas' $T/ini.txt && grep -qx '\[Centro\]' $T/ini.txt; then

@@ -219,7 +219,11 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
   con el cuadro aún en pantalla, antes de dejar el encargo (y al salir ya no
   se repite): si no se puede escribir (la memoria USB protegida, quitada o
   que no responde) lo dice —«No se ha podido guardar el Centro de programas
-  (CENTRO.INI)… ¿Apagar igualmente?»— y con «Cancelar» se queda. APAGAR y
+  (CENTRO.INI)… ¿Apagar igualmente?»— y con «Cancelar» se queda. Antes
+  de eso (y al «Volver a Hispa-DOS») pone WM_ENDSESSION (ECX=1) a las
+  ventanas de primer nivel de los programas y les da unas vueltas para que
+  guarden ya lo pendiente: Configuración escribe al momento en VENTANAS.INI
+  un cambio que aún no había guardado (lo hace sola a los 3 s). APAGAR y
   REINICIAR, por su parte, paran HSPACPI, vacían los búferes de DOS, la
   caché y lo del firmware UEFI y esperan (más con una memoria USB) **antes**
   de tocar ACPI, APM o el firmware: al poner el modo ACPI muchas BIOS dejan

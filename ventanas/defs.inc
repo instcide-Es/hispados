@@ -22,6 +22,10 @@ WM_GETTEXT      equ 0x000D
 WM_PAINT        equ 0x000F
 WM_CLOSE        equ 0x0010
 WM_QUIT         equ 0x0012
+WM_ENDSESSION   equ 0x0016          ; [APAGAR-USB] se sale de Hispa Ventanas (ECX=1): guardar ya
+                                    ; lo pendiente (lo envía apa_fin_sesion a las ventanas de
+                                    ; primer nivel de cada tarea antes de apagar, reiniciar o
+                                    ; volver a Hispa-DOS); el programa sigue abierto
 WM_KEYDOWN      equ 0x0100
 WM_CHAR         equ 0x0102
 WM_COMMAND      equ 0x0111

@@ -834,6 +834,8 @@ cfg_proc:
         je .tecla
         cmp eax, WM_CLOSE
         je .cerrar
+        cmp eax, WM_ENDSESSION      ; [APAGAR-USB] se sale de Hispa Ventanas:
+        je .fin_sesion              ; lo pendiente, a VENTANAS.INI ya
         cmp eax, WM_MONTAR
         je .montar
         cmp eax, WM_APARTADO
@@ -861,6 +863,13 @@ cfg_proc:
         xor ecx, ecx
         xor edx, edx
         HV msg_poner
+        jmp .hecho
+.fin_sesion:
+        cmp byte [cambiado], 0
+        je .fs1
+        call guardar
+.fs1:
+        call red_guardar            ; [RED] y RED.INI, si procede
         jmp .hecho
 .cerrar:
         cmp byte [cambiado], 0

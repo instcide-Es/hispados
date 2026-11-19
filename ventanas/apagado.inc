@@ -135,6 +135,7 @@ apa_dialogo:
 ; lanzador o sin INFO.COM, se sale sin más, como antes.
 apa_volver:
         pushad
+        call apa_fin_sesion         ; [APAGAR-USB] que los programas guarden ya
         mov byte [salir], 1
         cmp word [lz_seg], 0
         je .x
@@ -215,7 +216,9 @@ apa_encargo:
         cmp eax, ID_ACEPTAR
         jne .x
 .poner:
-        ; [APAGAR-USB] CENTRO.INI, ya (y comprobado), antes de dejar el encargo
+        ; [APAGAR-USB] que los programas guarden ya lo pendiente (Configuración:
+        ; VENTANAS.INI) y CENTRO.INI, ya (y comprobado), antes del encargo
+        call apa_fin_sesion
         cmp byte [op_demo], 0
         jne .guardado
         call cfg_guardar
@@ -252,6 +255,43 @@ apa_encargo:
         mov eax, DM_ACEPTAR
         call dlg_mensaje
 .x:
+        popad
+        ret
+
+; [APAGAR-USB] Antes de salir (apagar, reiniciar o volver a Hispa-DOS): a
+; cada ventana de primer nivel de los programas (no las del sistema) se le
+; pone WM_ENDSESSION (ECX=1, como en Windows) y se dan unas vueltas a las
+; tareas para que lo atiendan: así guardan ya lo que tenían pendiente
+; (Configuración guarda a los 3 s de un cambio; con esto, al momento). Se
+; llama desde una tarea (el cuadro «Salir» o la que pide reiniciar).
+APA_VUELTAS equ 6
+apa_fin_sesion:
+        pushad
+        mov ebp, [ven_tabla]
+        mov edx, MAX_VEN
+        mov ebx, [tar_tabla]        ; (la tarea del sistema)
+.v:
+        cmp dword [ebp+V_USO], 1
+        jne .s
+        cmp dword [ebp+V_PADRE], 0
+        jne .s
+        cmp [ebp+V_TAREA], ebx
+        je .s
+        push edx
+        mov eax, WM_ENDSESSION
+        mov ecx, 1
+        xor edx, edx
+        call msg_poner
+        pop edx
+.s:
+        add ebp, V_TAM
+        dec edx
+        jnz .v
+        mov ecx, APA_VUELTAS
+.c:
+        call tar_ceder
+        dec ecx
+        jnz .c
         popad
         ret
 
