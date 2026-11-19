@@ -506,7 +506,16 @@ pan_foco:
         mov [pp_visto], eax
         jmp .x
 .sale:
-        mov ecx, [pp_len]           ; sale: si se ha copiado algo, al del sistema
+        call pp_exportar
+.x:
+        popad
+        ret
+
+; si en el portapapeles de Ventanas hay algo nuevo, al del sistema (al salir
+; de la ventana, y al acabar el programa)
+pp_exportar:
+        pushad
+        mov ecx, [pp_len]
         test ecx, ecx
         jz .x
         cmp dword [pp_buf], 0

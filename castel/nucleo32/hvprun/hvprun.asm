@@ -169,6 +169,7 @@ arranque:
         mov eax, [hvp_tarea_p]
         cmp dword [eax+T_USO], 1    ; ¿ha acabado el programa?
         je .bucle
+        call pp_exportar            ; (lo que haya copiado, para los demás)
         xor ebx, ebx
         jmp pent_salir
 .sin_escritorio:
