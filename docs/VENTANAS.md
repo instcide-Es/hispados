@@ -215,7 +215,15 @@ VENTANAS [/1024 | /800 | /640] [/8 | /15 | /16 | /24 | /32 | /COLOR] [/VGA] [/DE
   «volver», vuelve a modo texto y termina; el lanzador quita HSPDPMI de la
   memoria y ejecuta el programa, que escribe en el disco lo pendiente y
   reinicia o apaga (si el Bloc de notas tiene cambios sin guardar, pregunta
-  antes). Si falta el programa, lo dice y no sale.
+  antes). Si falta el programa, lo dice y no sale. CENTRO.INI se guarda
+  con el cuadro aún en pantalla, antes de dejar el encargo (y al salir ya no
+  se repite): si no se puede escribir (la memoria USB protegida, quitada o
+  que no responde) lo dice —«No se ha podido guardar el Centro de programas
+  (CENTRO.INI)… ¿Apagar igualmente?»— y con «Cancelar» se queda. APAGAR y
+  REINICIAR, por su parte, paran HSPACPI, vacían los búferes de DOS, la
+  caché y lo del firmware UEFI y esperan (más con una memoria USB) **antes**
+  de tocar ACPI, APM o el firmware: al poner el modo ACPI muchas BIOS dejan
+  de dar la memoria USB por INT 13h.
 - Al salir deja el modo de texto, el ratón y la memoria como estaban. Mientras
   está el entorno gráfico, un error crítico de disco (INT 24h) hace fallar la
   llamada sin preguntar en la pantalla; no cambia ningún otro vector de
@@ -2722,8 +2730,11 @@ También se abre con doble clic en el altavoz de la barra, con el botón
 - `tests/run_apagar_tests.sh` (con APAGAR y REINICIAR): el cuadro «Salir»
   (captura), Esc, Alt+F4 en el escritorio, las flechas, «Volver a
   Hispa-DOS», y «Apagar el equipo» (-M pc y -M q35) y «Reiniciar el equipo»
-  (-M q35), que terminan QEMU con CENTRO.INI ya guardado. Capturas en
-  `build/apagar_*.png`.
+  (-M q35), que terminan QEMU con CENTRO.INI ya guardado; arrancando de
+  una memoria USB (SeaBIOS con xHCI y EHCI, OVMF de 64 y 32 bits con
+  HispaBIOS), lo cambiado en Configuración y CENTRO.INI están en la memoria
+  tras «Apagar el equipo» y `fsck.fat` la da por sana; con CENTRO.INI de
+  solo lectura, el aviso antes de apagar. Capturas en `build/apagar_*.png`.
 - `tests/run_tamano_tests.sh` ([TAMAÑO]): con HSPRATON por la vía directa
   (rueda) y un CENTRO.INI con un grupo de 14 accesos: el grupo sale
   alargado y con la barra; el cursor cambia de forma en un borde (agarrado

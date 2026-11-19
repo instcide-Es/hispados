@@ -11,7 +11,8 @@
 ;
 ;    cfg_cargar     lee CENTRO.INI (o pone lo de omisión y lo crea)
 ;    cfg_guardar    lo escribe si ha cambiado algo (también dónde están las
-;                   ventanas de los grupos y cuáles están abiertas)
+;                   ventanas de los grupos y cuáles están abiertas);
+;                   [APAGAR] cfg_fallo = 1 si no se ha podido escribir
 ;    gr_nuevo       -> EAX=grupo nuevo (0 si no caben más), EDX=su número
 ;    ac_nuevo       DL=número de grupo -> EAX=acceso nuevo (0 si no caben)
 ;    gr_num         EAX=grupo -> EAX=su número
@@ -1187,6 +1188,7 @@ pon_clave_cad:
 
 cfg_guardar:
         pushad
+        mov byte [cfg_fallo], 0     ; [APAGAR] cfg_fallo = 1 si no se ha podido escribir
         cmp dword [cfg_buf], 0
         je .x
         call cfg_capturar
@@ -1351,15 +1353,21 @@ cfg_guardar:
         mov esi, cfg_ruta
         call dos_crear
         pop esi
-        jc .x
+        jc .mal
         mov ebx, eax
         call dos_escribir
         pushf
-        call dos_cerrar
+        call dos_cerrar             ; (al cerrar se escribe lo último: también
+        jc .malc                    ; puede fallar)
         popf
-        jc .x
+        jc .mal
         mov [cfg_len], ecx
         mov [cfg_suma], edx
+        jmp .x
+.malc:
+        popf
+.mal:
+        mov byte [cfg_fallo], 1
 .x:
         popad
         ret

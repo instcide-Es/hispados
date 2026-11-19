@@ -20,6 +20,12 @@
 ;  salir, deja el encargo al lanzador (ventanas.asm) sin «volver», vuelve a
 ;  modo texto y termina; el lanzador quita HSPDPMI de la memoria y ejecuta
 ;  el programa, que escribe los búferes del disco y apaga o reinicia.
+;  [APAGAR-USB] CENTRO.INI se guarda aquí mismo, con el cuadro todavía en
+;  pantalla y ANTES de dejar el encargo (y al salir ya no se repite): si no
+;  se puede escribir (la memoria USB protegida, quitada o que no responde),
+;  se dice y se pregunta si se apaga o se reinicia igualmente; con
+;  «Cancelar» se queda en Hispa Ventanas. Así nada se escribe después de que
+;  APAGAR haya vaciado los búferes y tocado ACPI.
 ;
 ;    apa_pedir    (sistema: el escritorio, Alt+F4) abre el cuadro en una
 ;                 tarea propia (si no está ya abierto)
@@ -47,6 +53,12 @@ apa_no_esta db "No se encuentra el programa que lo hace", 10
             db "en la carpeta de Hispa Ventanas:", 10, 0
 apa_bloc    db "El Bloc de notas tiene cambios sin guardar", 10
             db "y se perderán. ¿Continuar?", 0
+apa_nog_apa db "No se ha podido guardar el Centro de programas", 10
+            db "(CENTRO.INI) en el disco: se perderán sus cambios.", 10
+            db "¿Apagar igualmente?", 0
+apa_nog_rei db "No se ha podido guardar el Centro de programas", 10
+            db "(CENTRO.INI) en el disco: se perderán sus cambios.", 10
+            db "¿Reiniciar igualmente?", 0
 apa_abierto dd 0
 apa_ruta    times 100 db 0
 apa_aviso   times 160 db 0
@@ -203,6 +215,25 @@ apa_encargo:
         cmp eax, ID_ACEPTAR
         jne .x
 .poner:
+        ; [APAGAR-USB] CENTRO.INI, ya (y comprobado), antes de dejar el encargo
+        cmp byte [op_demo], 0
+        jne .guardado
+        call cfg_guardar
+        cmp byte [cfg_fallo], 0
+        je .guardado
+        mov esi, apa_nog_apa
+        mov eax, [esp+4]            ; (el ESI que se dio: qué programa)
+        cmp eax, apa_n_apagar
+        je .nog
+        mov esi, apa_nog_rei
+.nog:
+        mov edi, apa_tit
+        mov eax, DM_ACEPTAR_CANCELAR
+        call dlg_mensaje
+        cmp eax, ID_ACEPTAR
+        jne .x
+.guardado:
+        mov byte [cfg_hecho], 1     ; (al salir no se vuelve a escribir)
         movzx edx, word [lz_seg]    ; el encargo, a la memoria del lanzador
         shl edx, 4
         add edx, [cero]

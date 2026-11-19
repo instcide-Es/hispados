@@ -1479,6 +1479,8 @@ principal:
 %ifdef CON_PROGRAMAS
         cmp byte [op_demo], 0
         jne .sincfg
+        cmp byte [cfg_hecho], 0     ; [APAGAR-USB] ya guardado para apagar o reiniciar
+        jne .sincfg
         call cfg_guardar            ; grupos abiertos y posiciones, a CENTRO.INI
 .sincfg:
 %endif

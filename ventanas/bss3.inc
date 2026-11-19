@@ -54,6 +54,8 @@ ac_tabla    resd 1                  ; los accesos directos (MAX_AC de AC_TAM)
 cfg_buf     resd 1                  ; el texto de CENTRO.INI
 cfg_len     resd 1                  ; largo y suma de lo que hay en el disco
 cfg_suma    resd 1
+cfg_fallo   resd 1                  ; [APAGAR] 1: la última vez no se pudo escribir CENTRO.INI
+cfg_hecho   resd 1                  ; [APAGAR] 1: ya guardado para el encargo (al salir no se repite)
 cfg_secc    resd 1
 cfg_grupo   resd 1
 cfg_base    resd 1
