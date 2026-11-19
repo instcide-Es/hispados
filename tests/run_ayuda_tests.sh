@@ -33,7 +33,7 @@ check "solo salen programas:"
 check "CONFRED (IPCONFIG) [/RENOVAR | /LIBERAR]"
 check "DESCARGAR [http://]servidor[:puerto]/ruta [archivo]"
 check "PING nombre|dirección [/N:n] [/T]"
-n=$(grep -c "Hispa-DOS versión 0.9.27 (compatible con MS-DOS 6.22)" $T/log.txt)
+n=$(grep -c "Hispa-DOS versión 0.9.28 (compatible con MS-DOS 6.22)" $T/log.txt)
 if [ "$n" -ge 2 ]; then echo "  OK   Versión (con tilde) y /ver"; else echo "  FAIL Versión y /ver ($n)"; fail=1; fi
 n=$(grep -c "AYUDA de Hispa-DOS. Escriba AYUDA y un tema:" $T/log.txt)
 if [ "$n" -ge 2 ]; then echo "  OK   /? solo muestra la ayuda"; else echo "  FAIL /? solo ($n)"; fail=1; fi
