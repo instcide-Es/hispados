@@ -48,6 +48,7 @@ DISCOS (nombre español / nombre clásico)
   REVISAR / CHKDSK        revisa un disco y arregla sus errores
   ETIQUETA / LABEL        pone nombre a un disco
   VOLUMEN / VOL           dice el nombre de un disco
+  UNIDADES                qué es cada letra (disco duro, CD, memoria USB)
 
 [ORDENADOR]
 EL ORDENADOR (nombre español / nombre clásico)
