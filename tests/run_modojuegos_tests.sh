@@ -360,8 +360,9 @@ c_juegos() {
   check "HSPEMM 0.1: EMS 4.0 y VCPI"
   check "Controlador xHCI en "
   nocheck "No funciona"
-  # (C: es la memoria USB vista por la BIOS, que ya no la atiende; D:, el CD)
-  check "Disco USB: 32 MB en la unidad E:"
+  # (C: es la memoria USB vista por la BIOS, que ya no la atiende; D:, el CD; la
+  # memoria que lleva HSPUSB, la X:: docs/UNIDADES.md)
+  check "Disco USB: 32 MB en la unidad X:"
   check "Teclado USB preparado."
   check "Ratón USB preparado."
   check "Mando USB preparado: 045E:028E, 6 ejes y 11 botones (tipo Xbox 360)."
@@ -372,7 +373,7 @@ c_juegos() {
   check "EMS test OK"
   # la memoria USB: leer, escribir y volver a leer
   check "Hola desde la memoria USB"
-  check " El volumen de la unidad E es USBJUEGO"
+  check " El volumen de la unidad X es USBJUEGO"
   if cmp -s <(mtype -i $T/usb.img ::EDITAR.COM 2>/dev/null) $B/EDIT.COM; then ok "EDITAR.COM copiado intacto a la memoria USB"; else ko "copia de EDITAR.COM a la memoria USB"; fi
   if cmp -s <(mtype -i $T/f.img ::VUELTA.COM 2>/dev/null) $B/EDIT.COM; then ok "y leído intacto de vuelta"; else ko "lectura de vuelta de la memoria USB"; fi
   if fsck.fat -n $T/usb.img > $T/fsck 2>&1; then ok "fsck.fat de la memoria USB"; else ko "fsck.fat"; cat $T/fsck; fi
@@ -430,10 +431,10 @@ if quiere juegos; then
     orden 'MEM'
     orden 'SET'
     orden 'BIN\EMSTEST'
-    orden 'TYPE E:\HOLA.TXT'
-    orden 'COPY A:\HISPADOS\EDITAR.COM E:\'
-    orden 'COPY E:\EDITAR.COM A:\VUELTA.COM'
-    orden 'DIR E:'
+    orden 'TYPE X:\HOLA.TXT'
+    orden 'COPY A:\HISPADOS\EDITAR.COM X:\'
+    orden 'COPY X:\EDITAR.COM A:\VUELTA.COM'
+    orden 'DIR X:'
     # el teclado USB (QMP): una orden entera
     n=$(veces "$P")
     $Q type vga0 "ECHO Teclado USB va" key vga0 ret
@@ -465,7 +466,7 @@ fi
 # ---- umb: HSPUSB en la memoria superior ----
 c_umb() {
   check "HSPEMM 0.1: VCPI"
-  check "Disco USB: 32 MB en la unidad D:"
+  check "Disco USB: 32 MB en la unidad X:"
   check "Teclado USB preparado."
   check "Hola desde la memoria USB"
   if cmp -s <(mtype -i $T/usb.img ::EDITAR.COM 2>/dev/null) $B/EDIT.COM; then ok "EDITAR.COM copiado intacto a la memoria USB"; else ko "copia de EDITAR.COM a la memoria USB"; fi
@@ -488,9 +489,9 @@ if quiere umb; then
   espera "$P"
   orden 'MEM'
   orden 'MEM /C'
-  orden 'TYPE D:\HOLA.TXT'
-  orden 'COPY A:\HISPADOS\EDITAR.COM D:\'
-  orden 'COPY D:\EDITAR.COM A:\VUELTA.COM'
+  orden 'TYPE X:\HOLA.TXT'
+  orden 'COPY A:\HISPADOS\EDITAR.COM X:\'
+  orden 'COPY X:\EDITAR.COM A:\VUELTA.COM'
   n=$(veces "$P")
   $Q type vga0 "ECHO Teclado USB va" key vga0 ret
   espera "$P" $((n + 1))
@@ -500,7 +501,7 @@ fi
 # ---- scratch: las páginas de trabajo del xHCI (XMS) en modo V86 ----
 c_scratch() {
   check "HSPEMM 0.1: EMS 4.0 y VCPI"
-  check "Disco USB: 32 MB en la unidad D:"
+  check "Disco USB: 32 MB en la unidad X:"
   check "Hola desde la memoria USB"
   if cmp -s <(mtype -i $T/usb.img ::EDITAR.COM 2>/dev/null) $B/EDIT.COM; then ok "EDITAR.COM copiado intacto a la memoria USB"; else ko "copia de EDITAR.COM a la memoria USB"; fi
   check "XMS test OK"
@@ -514,8 +515,8 @@ if quiere scratch; then
     mkstick
     arranca -device qemu-xhci,id=xhci -drive if=none,id=u,format=raw,file=$T/usb.img -device usb-storage,bus=xhci.0,drive=u
     espera "$P"
-    orden 'TYPE D:\HOLA.TXT'
-    orden 'COPY A:\HISPADOS\EDITAR.COM D:\'
+    orden 'TYPE X:\HOLA.TXT'
+    orden 'COPY A:\HISPADOS\EDITAR.COM X:\'
     orden 'A:\BIN\XMSTEST'
     fin c_scratch
   else
@@ -529,7 +530,7 @@ c_pequeno() {
   check "HSPEMM 0.1: VCPI"
   n=$(veces_txt "HSPUSB 0.2 - USB nativo de Hispa-DOS (UHCI, OHCI, EHCI y xHCI)")
   if [ "$n" = 1 ]; then ok "HSPUSB se presenta una sola vez"; else ko "HSPUSB se presenta $n veces"; fi
-  check "Disco USB: 32 MB en la unidad D:"
+  check "Disco USB: 32 MB en la unidad X:"
   check "Hola desde la memoria USB"
   n=$(veces_txt "HSPSND 0.1 - controlador de sonido de Hispa-DOS")
   if [ "$n" = 1 ]; then ok "HSPSND se presenta una sola vez"; else ko "HSPSND se presenta $n veces"; fi
@@ -564,7 +565,7 @@ if quiere pequeno; then
       -device qemu-xhci,id=xhci -drive if=none,id=u,format=raw,file=$T/usb.img -device usb-storage,bus=xhci.0,drive=u
   espera "$P"
   orden 'MEM'
-  orden 'TYPE D:\HOLA.TXT'
+  orden 'TYPE X:\HOLA.TXT'
   orden 'LH A:\HISPADOS\HSPSND /VOL:80'
   orden 'SET'
   orden 'MEM /C'

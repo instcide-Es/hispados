@@ -1192,9 +1192,29 @@ pon_clave_cad:
 ; se instala en la C:. Para que el mismo CENTRO.INI valga en los dos sitios,
 ; las rutas de los accesos (Programa= y Carpeta=) pueden ir sin unidad
 ; («\HISPADOS\PROGS\PLUMA.HVP»): al leerlo se les pone la de Hispa Ventanas
-; y, cuando esa unidad no es la C:, al guardarlo se les quita otra vez.
+; y, cuando esa unidad es la memoria USB de arranque y no es la C: (lo dice
+; el núcleo: INT 21h AX=3368h), al guardarlo se les quita otra vez. Desde un
+; disquete o desde el disco duro se guardan con su unidad, como siempre.
 cfg_rutas_letra:
         pushad
+        mov byte [cfg_sinletra], 0
+        xor ebx, ebx
+        xor ecx, ecx
+        mov eax, 0x3368
+        int 0x21
+        cmp bx, 'HD'
+        jne .nousb
+        test cl, 1                  ; ¿se arrancó de una memoria USB?
+        jz .nousb
+        cmp dl, 3                   ; ¿y es la C:?
+        je .nousb
+        add dl, 'A' - 1
+        mov al, [dir_propia]
+        and al, 0xDF
+        cmp al, dl                  ; ¿Hispa Ventanas está en ella?
+        jne .nousb
+        mov byte [cfg_sinletra], 1
+.nousb:
         mov ebp, [ac_tabla]
         mov ecx, MAX_AC
 .a:
@@ -1243,14 +1263,14 @@ cfg_rutas_letra:
         ret
 
 ; como pon_clave_cad, para una ruta: sin la unidad si es la de Hispa Ventanas
-; y no es la C:
+; y esa es la memoria USB de arranque (cfg_sinletra)
 pon_clave_ruta:
         call pon_clave
         mov esi, edx
+        cmp byte [cfg_sinletra], 0
+        je .p
         mov al, [dir_propia]
         and al, 0xDF
-        cmp al, 'C'
-        je .p
         mov ah, [esi]
         and ah, 0xDF
         cmp al, ah
@@ -1263,6 +1283,8 @@ pon_clave_ruta:
 .p:
         call pon_cad
         jmp pon_nl
+
+cfg_sinletra db 0
 
 cfg_guardar:
         pushad

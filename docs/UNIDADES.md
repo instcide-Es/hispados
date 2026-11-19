@@ -129,8 +129,10 @@ Como la memoria USB puede ser la X: (o la C:), sus archivos no dicen «C:»:
 - `COMSPEC` y el `PATH` inicial llevan la unidad de arranque de verdad.
 - **CENTRO.INI** (Hispa Ventanas): `Programa=` y `Carpeta=` pueden ir sin
   unidad (`Programa=\HISPADOS\PROGS\PLUMA.HVP`); Hispa Ventanas les pone la
-  suya al leerlo y, si no está en la C:, las guarda otra vez sin ella. Así el
-  mismo archivo vale en la memoria y, una vez instalado, en el disco duro.
+  suya al leerlo y, si está en la memoria USB de arranque y esta no es la C:,
+  las guarda otra vez sin ella. Así el mismo archivo vale en la memoria y,
+  una vez instalado, en el disco duro. (Desde un disquete o desde el disco
+  duro se guardan con su unidad, como siempre.)
 
 En el repositorio, `usb/CONFIG.SYS` y `usb/AUTOEXEC.BAT` siguen escritos con
 `C:\`; `tools/mkusb.py` (función `sin_letra`) los cambia al hacer la imagen, y
