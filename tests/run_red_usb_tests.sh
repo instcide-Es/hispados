@@ -280,9 +280,9 @@ t_todo() {
   orden "HSPRED"
   orden "CONFRED"
   orden "PING 10.0.2.2 /N:3"
-  orden 'MOSTRAR D:\HOLA.TXT'
-  orden "DESCARGAR $U/PRUEBA.BIN D:\\PRUEBA.BIN" 900
-  orden 'COPIAR D:\PRUEBA.BIN A:\COPIA.BIN' 900
+  orden 'MOSTRAR X:\HOLA.TXT'
+  orden "DESCARGAR $U/PRUEBA.BIN X:\\PRUEBA.BIN" 900
+  orden 'COPIAR X:\PRUEBA.BIN A:\COPIA.BIN' 900
   orden "PING 10.0.2.2 /N:2"
   orden "HSPRED /INFO"
   orden "ECHO fin-de-la-prueba"
@@ -293,13 +293,13 @@ c_todo() {
   check "03/01/02 -> ratón"
   check "08/06/50 -> disco"
   if grep -qF -- ".2 $ECM" $T/log.txt; then ok "detrás del concentrador: .2 $ECM"; else ko "detrás del concentrador: .2 $ECM"; fi
-  check "Disco USB: 32 MB en la unidad D:"
+  check "Disco USB: 32 MB en la unidad X:"
   check "Teclado USB preparado."
   check "Adaptador de red USB preparado (CDC-ECM), MAC $MAC: cargue HSPRED."
   check "Dirección IP  . . . . : 10.0.2.15"
   check "Paquetes: enviados = 3, recibidos = 3, perdidos = 0"
   check "Hola desde la memoria USB"
-  check "Guardado en D:\\PRUEBA.BIN (150.000 octetos)."
+  check "Guardado en X:\\PRUEBA.BIN (150.000 octetos)."
   rm -f $T/a.bin $T/b.bin
   mcopy -i $T/usb.img ::PRUEBA.BIN $T/a.bin 2>/dev/null
   if cmp -s $T/a.bin $W/www/PRUEBA.BIN; then ok "PRUEBA.BIN descargado a la memoria USB, igual que en el servidor"; else ko "PRUEBA.BIN de la memoria USB distinto o no está"; fi
@@ -492,7 +492,7 @@ c_tecladoehci() {
   check "      5.1.1 $ECM"
   check "  1 HS 0627:0001 03/01/01 -> teclado"
   check "USB: teclado por EHCI 8086:24CD, ratón por xHCI 1B36:000D."
-  check "Disco USB: 32 MB en la unidad D:"
+  check "Disco USB: 32 MB en la unidad X:"
   check "Adaptador de red USB preparado (CDC-ECM), MAC $MAC: cargue HSPRED."
   llega antesdelared "antes de cargar HSPRED"
   check "Dirección IP  . . . . : 10.0.2.15"

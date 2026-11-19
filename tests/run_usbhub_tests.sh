@@ -1,5 +1,6 @@
 #!/bin/bash
 # Prueba de los concentradores USB (hubs) con HSPUSB.SYS y del arranque desde
+# (La memoria USB que lleva HSPUSB es la X:; docs/UNIDADES.md.)
 # una memoria USB servida por la BIOS:
 #  1) teclado, ratón y memoria detrás de un concentrador: se teclea por el
 #     teclado USB, se mueve el ratón USB y se lee y escribe la memoria;
@@ -53,9 +54,9 @@ qemu-system-i386 -display none -serial file:$T/log -monitor none -parallel none 
 QP=$!
 sleep 10
 $Q type vga0 "VER" key vga0 ret wait 1 \
-   type vga0 "MOSTRAR D:\\HOLA.TXT" key vga0 ret wait 2 \
-   type vga0 "COPIAR A:\\HISPADOS\\EDITAR.COM D:\\" key vga0 ret wait 4 \
-   type vga0 "CREARDIR D:\\NUEVA" key vga0 ret wait 2 \
+   type vga0 "MOSTRAR X:\\HOLA.TXT" key vga0 ret wait 2 \
+   type vga0 "COPIAR A:\\HISPADOS\\EDITAR.COM X:\\" key vga0 ret wait 4 \
+   type vga0 "CREARDIR X:\\NUEVA" key vga0 ret wait 2 \
    type vga0 "A:\\HISPADOS\\HSPRATON" key vga0 ret wait 2 \
    type vga0 "BIN\\MOUSETST" key vga0 ret wait 2 \
    move - 40 0 wait 1 move - 0 24 wait 1 \
@@ -64,7 +65,7 @@ $Q type vga0 "VER" key vga0 ret wait 1 \
 kill $QP 2>/dev/null; wait $QP 2>/dev/null
 tolog
 echo "== Hispa-DOS concentrador USB: teclado, ratón y memoria =="
-check "Disco USB: 32 MB en la unidad D:"
+check "Disco USB: 32 MB en la unidad X:"
 check "Teclado USB preparado."
 check "Ratón USB preparado."
 check "A:\\>VER"
@@ -87,7 +88,7 @@ floppy "/F /INFO"
 mkstick $T/usb.img USBDOS
 {
   sleep 26
-  for c in "MOSTRAR D:\\HOLA.TXT" "COPIAR A:\\HISPADOS\\*.COM D:\\" "LISTAR D:\\"; do
+  for c in "MOSTRAR X:\\HOLA.TXT" "COPIAR A:\\HISPADOS\\*.COM X:\\" "LISTAR X:\\"; do
     printf '%s\r' "$c"; sleep 4
   done
   sleep 2
@@ -110,11 +111,11 @@ check "      5.2.1 FS 0627:0001 03/01/01 -> teclado"
 check "      5.2.3 FS 0627:0001 03/01/02 -> ratón"
 check "      5.2.4 FS 46F4:0001 08/06/50 -> disco"
 check "    5.4 FS 0627:0001 03/00/00 -> sin uso"
-check "Disco USB: 32 MB en la unidad D:"
+check "Disco USB: 32 MB en la unidad X:"
 check "Teclado USB preparado."
 check "Ratón USB preparado."
 check "Hola desde la memoria USBDOS"
-check "El volumen de la unidad D es USBDOS"
+check "El volumen de la unidad X es USBDOS"
 if fsck.fat -n $T/usb.img > $T/fsck 2>&1; then ok "fsck.fat de la memoria"; else ko "fsck.fat"; cat $T/fsck; fi
 if cmp -s <(mtype -i $T/usb.img ::EDITAR.COM) build/EDIT.COM; then ok "EDITAR.COM copiado intacto"; else ko "copia de EDITAR.COM"; fi
 show
@@ -153,22 +154,22 @@ qemu-system-i386 -display none -serial file:$T/log -monitor unix:$T/mon,server,n
   -drive file=$T/f.img,format=raw,if=floppy -boot a -no-reboot &
 QP=$!
 sleep 9
-typ "DIR D:"; sleep 2
+typ "DIR X:"; sleep 2
 mon "device_del m1"; sleep 2
-typ "DIR D:"; sleep 3
+typ "DIR X:"; sleep 3
 printf 'sendkey d\n' | socat - UNIX-CONNECT:$T/mon >/dev/null 2>&1; sleep 1   # «Descartar»
 mon "drive_add 0 if=none,id=u2,format=raw,file=$T/DOS.img"
 mon "device_add usb-storage,bus=xhci.0,port=1.3,drive=u2,id=m2"; sleep 3
-typ "DIR D:"; sleep 3
-typ "TYPE D:HOLA.TXT"; sleep 2
-typ "MD D:\\NUEVA"; sleep 3
+typ "DIR X:"; sleep 3
+typ "TYPE X:HOLA.TXT"; sleep 2
+typ "MD X:\\NUEVA"; sleep 3
 kill $QP 2>/dev/null; wait $QP 2>/dev/null
 tolog
 echo "== Hispa-DOS concentrador USB: quitar y poner la memoria =="
 if grep -q "usb_xhci_xfer_error" $T/trace; then ok "la petición rechazada (STALL) ha pasado por el xHCI"; else ko "no ha habido STALL"; fi
-check "El volumen de la unidad D es MEMUNO"
+check "El volumen de la unidad X es MEMUNO"
 check "La unidad no está preparada"
-check "El volumen de la unidad D es MEMDOS"
+check "El volumen de la unidad X es MEMDOS"
 check "Hola desde la memoria MEMDOS"
 if mdir -i $T/DOS.img ::NUEVA > /dev/null 2>&1; then ok "carpeta NUEVA creada en la segunda memoria"; else ko "carpeta NUEVA en la segunda memoria"; fi
 if mdir -i $T/UNO.img ::NUEVA > /dev/null 2>&1; then ko "NUEVA en la memoria equivocada"; else ok "la primera memoria no tiene NUEVA"; fi

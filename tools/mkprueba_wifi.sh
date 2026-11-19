@@ -56,6 +56,9 @@ mcopy -o -i "$P" $T/CONFIG.SYS $T/AUTOEXEC.BAT $T/PRUWIFI.BAT $T/PASO2.BAT $T/WI
 # (PASO2 se escribe sin ruta: que esté también en el PATH)
 mcopy -o -i "$P" $T/PASO2.BAT ::HISPADOS/PASO2.BAT
 rm -f "$D/hispados-usb-wifi.zip"
+# [LETRAS] los guiones y las instrucciones de esta imagen dicen «C:\»: las
+# letras, como siempre (la memoria es la C: aunque haya disco duro)
+tools/letras_clasico.sh "$IMG"
 (cd $T && zip -q -9 "$OLDPWD/$D/hispados-usb-wifi.zip" hispados-usb.img) 2>/dev/null || \
   (cd $T && zip -q -9 "$(cd "$OLDPWD" && realpath "$D")/hispados-usb-wifi.zip" hispados-usb.img)
 txt usb/prueba-wifi/LEEME.TXT "$D/LEEME.TXT"

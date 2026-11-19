@@ -40,7 +40,7 @@ Comodines * y ?: COPIAR *.TXT A: copia todos los .TXT al disquete.
 
 [DISCOS]
 DISCOS (nombre español / nombre clásico)
-  A:, C:, D:...           cambia de unidad
+  A:, C:, D:...           cambia de unidad (UNIDADES: qué es cada letra)
   PARTIR / FDISK          particiones del disco duro
   FORMATEA / FORMAT       da formato a un disco (borra lo que tenga)
   SISTEMA / SYS           deja un disco de arranque
@@ -48,7 +48,6 @@ DISCOS (nombre español / nombre clásico)
   REVISAR / CHKDSK        revisa un disco y arregla sus errores
   ETIQUETA / LABEL        pone nombre a un disco
   VOLUMEN / VOL           dice el nombre de un disco
-  UNIDADES                qué es cada letra (disco duro, CD, memoria USB)
 
 [ORDENADOR]
 EL ORDENADOR (nombre español / nombre clásico)

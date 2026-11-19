@@ -77,7 +77,7 @@ echo "== ACTUALIZAR instalador por red (bajar e instalar en el sitio) =="
       -drive file=$HDD,format=raw,if=ide,index=1 -boot c > $T/l1 2>&1
 txt $T/l1
 part $T/l1.txt "=INST=" "=FIN1=" > $T/s1
-check $T/s1 "Hispa-DOS instalado en la unidad D:"
+check $T/s1 "Hispa-DOS instalado en la unidad C:"
 if mdos ::HISPADOS/VENTANAS.COM > /dev/null; then ok "el disco quedó con \\HISPADOS instalado"; else ko "no se instaló Hispa-DOS en el disco"; fi
 
 # ------------------------------------------------------------------ 2

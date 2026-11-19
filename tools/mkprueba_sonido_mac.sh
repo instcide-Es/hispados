@@ -34,6 +34,9 @@ done
 txt usb/prueba-sonido-mac2017/LEEME.TXT $T/LEEME-SM.TXT
 mcopy -o -i "$P" $T/LEEME-SM.TXT ::
 [ ! -e "$D/hispados-usb-sonido-mac2017.zip" ] || mv -f "$D/hispados-usb-sonido-mac2017.zip" "$D/hispados-usb-sonido-mac2017.zip.ant"
+# [LETRAS] los guiones y las instrucciones de esta imagen dicen «C:\»: las
+# letras, como siempre (la memoria es la C: aunque haya disco duro)
+tools/letras_clasico.sh "$IMG"
 (cd $T && zip -q -9 "$D/hispados-usb-sonido-mac2017.zip" hispados-usb.img)
 txt usb/prueba-sonido-mac2017/LEEME.TXT "$D/LEEME.TXT"
 ls -l "$D" "$D/sueltos"

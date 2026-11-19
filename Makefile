@@ -1062,6 +1062,7 @@ test: $(TEST_DEPS)
 	tests/run_sbvga_tests.sh $(IMG)
 	tests/run_usb_tests.sh
 	tests/run_instalar_usb_tests.sh
+	tests/run_letras_tests.sh
 	tests/run_imagen486_tests.sh
 	tests/run_actualizar_disco_tests.sh
 	tests/run_actualizar_instala_tests.sh

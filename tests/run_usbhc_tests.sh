@@ -1,5 +1,6 @@
 #!/bin/bash
 # Pruebas de HSPUSB con cada clase de controladora USB (docs/USB.md). QEMU
+# (La memoria USB que lleva HSPUSB es la X:; docs/UNIDADES.md.)
 # tiene las cuatro:
 #   uhci      piix3-usb-uhci (USB 1.x de Intel: puertos de E/S)
 #   ohci      pci-ohci (USB 1.x de los demás)
@@ -105,9 +106,9 @@ c_disco() {
   check "$CUENTA"
   check "$LINEA"
   check "08/06/50 -> disco"
-  check "Disco USB: 32 MB en la unidad D:"
+  check "Disco USB: 32 MB en la unidad X:"
   check "Hola desde la memoria USB"
-  check " Directorio de D:\\HISPA"
+  check " Directorio de X:\\HISPA"
   check "EDITAR   COM"
   check "TECLADO  COM"
   if fsck.fat -n $T/usb.img > $T/fsck 2>&1; then ok "fsck.fat de la memoria USB"; else ko "fsck.fat"; cat $T/fsck; fi
@@ -120,18 +121,18 @@ disco() {  # nombre, bus, opciones de QEMU de la controladora
   local bus=$2; shift 2
   # (la pausa de /INFO: 15 s)
   arranca "$@" $(STICK $bus)
-  orden 'MOSTRAR D:\HOLA.TXT'
-  orden 'CREARDIR D:\HISPA'
-  orden 'COPIAR A:\HISPADOS\*.COM D:\HISPA'
-  orden 'COPIAR A:\README.TXT D:\'
-  orden 'BORRAR D:\HOLA.TXT'
-  orden 'LISTAR D:\HISPA'
+  orden 'MOSTRAR X:\HOLA.TXT'
+  orden 'CREARDIR X:\HISPA'
+  orden 'COPIAR A:\HISPADOS\*.COM X:\HISPA'
+  orden 'COPIAR A:\README.TXT X:\'
+  orden 'BORRAR X:\HOLA.TXT'
+  orden 'LISTAR X:\HISPA'
   fin c_disco
 }
 
 # ---- B) teclado, ratón, memoria y mando ----
 c_todo() {
-  check "Disco USB: 32 MB en la unidad D:"
+  check "Disco USB: 32 MB en la unidad X:"
   check "Teclado USB preparado."
   check "Ratón USB preparado."
   check "Mando USB preparado: 054C:09CC, 6 ejes y 14 botones."
@@ -170,10 +171,10 @@ todo() {  # nombre, opciones de QEMU (controladora y aparatos)
   n=$(veces 'A:\>')
   $Q type vga0 "ECHO Hola" key vga0 ret wait 1 key vga0 up key vga0 ret
   espera 'A:\>' $((n + 2))
-  orden 'MOSTRAR D:\HOLA.TXT'
-  orden 'COPIAR A:\HISPADOS\EDITAR.COM D:\'
-  orden 'CREARDIR D:\NUEVA'
-  orden 'LISTAR D:\'
+  orden 'MOSTRAR X:\HOLA.TXT'
+  orden 'COPIAR A:\HISPADOS\EDITAR.COM X:\'
+  orden 'CREARDIR X:\NUEVA'
+  orden 'LISTAR X:\'
   orden 'A:\HISPADOS\HSPRATON'
   n=$(veces 'A:\>')
   printf 'BIN\\MOUSETST\r' >&3
@@ -190,7 +191,7 @@ todo() {  # nombre, opciones de QEMU (controladora y aparatos)
 # ---- C) en modo V86 (HSPEMM) y cargado en la memoria superior ----
 c_v86() {
   check "HSPEMM"
-  check "Disco USB: 32 MB en la unidad D:"
+  check "Disco USB: 32 MB en la unidad X:"
   check "Teclado USB preparado."
   check "Hola desde la memoria USB"
   check "A:\\>ECHO Teclado USB va"
@@ -210,9 +211,9 @@ v86() {  # nombre, opciones de QEMU
   Q="python3 tests/tools/qmp.py $T/qmp"
   arranca -m 32 -net none -qmp unix:$T/qmp,server,nowait -vga none -device VGA,id=vga0 "$@"
   orden 'MEM /C'
-  orden 'TYPE D:\HOLA.TXT'
-  orden 'COPY A:\HISPADOS\EDITAR.COM D:\'
-  orden 'COPY D:\EDITAR.COM A:\VUELTA.COM'
+  orden 'TYPE X:\HOLA.TXT'
+  orden 'COPY A:\HISPADOS\EDITAR.COM X:\'
+  orden 'COPY X:\EDITAR.COM A:\VUELTA.COM'
   n=$(veces 'A:\>')
   $Q type vga0 "ECHO Teclado USB va" key vga0 ret
   espera 'A:\>' $((n + 1))
@@ -288,9 +289,9 @@ fi
 # ---- aparcar: una UHCI que se queda sin nada y vuelve a hacer falta ----
 c_aparcar() {
   check "Teclado USB preparado."
-  check "El volumen de la unidad D es MEMUNO"
+  check "El volumen de la unidad X es MEMUNO"
   check "La unidad no está preparada"
-  check "El volumen de la unidad D es MEMDOS"
+  check "El volumen de la unidad X es MEMDOS"
   check "Hola desde la memoria MEMDOS"
   if mdir -i $T/DOS.img ::NUEVA > /dev/null 2>&1; then ok "carpeta NUEVA creada en la segunda memoria"; else ko "carpeta NUEVA en la segunda memoria"; fi
   for n in UNO DOS; do
@@ -316,18 +317,18 @@ if quiere aparcar; then
   QP=$!
   exec 3> $T/in
   espera 'A:\>'
-  orden 'DIR D:'
+  orden 'DIR X:'
   mon "device_del m1"; sleep 2
   n=$(veces 'A:\>')
-  printf 'DIR D:\r' >&3
+  printf 'DIR X:\r' >&3
   espera "no est"; sleep 1
   printf 'd' >&3                       # «Descartar»
   espera 'A:\>' $((n + 1))
   mon "drive_add 0 if=none,id=u2,format=raw,file=$T/DOS.img"
   mon "device_add usb-storage,bus=hb.0,port=2,drive=u2,id=m2"; sleep 3
-  orden 'DIR D:'
-  orden 'TYPE D:HOLA.TXT'
-  orden 'MD D:\NUEVA'
+  orden 'DIR X:'
+  orden 'TYPE X:HOLA.TXT'
+  orden 'MD X:\NUEVA'
   fin c_aparcar
 fi
 exit $fail

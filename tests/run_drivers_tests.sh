@@ -1,5 +1,6 @@
 #!/bin/bash
 # Casos límite de los drivers (revisión de noviembre):
+# (La memoria USB que lleva HSPUSB es la X:; docs/UNIDADES.md.)
 #  1) HSPUSB y HSPCD no cambian FS/GS del programa que lee (usan el modo irreal);
 #  2) HSPUSB monta una memoria con FAT32 sin particiones (como MS-DOS 7.1)
 #     en vez de dar al núcleo un BPB imposible;
@@ -31,14 +32,14 @@ mcopy -o -i $T/f.img $T/FSGS.COM ::BIN/FSGS.COM
 printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 mkstick
-{ sleep 7; printf 'A:\\BIN\\FSGS D:\\HOLA.TXT\r'; sleep 3; } |
+{ sleep 7; printf 'A:\\BIN\\FSGS X:\\HOLA.TXT\r'; sleep 3; } |
   timeout 20 qemu-system-i386 -display none -serial stdio -monitor none \
     -device qemu-xhci,id=xhci -drive if=none,id=u,format=raw,file=$T/usb.img \
     -device usb-storage,bus=xhci.0,drive=u \
     -drive file=$T/f.img,format=raw,if=floppy -boot a -no-reboot > $T/log 2>&1
 conv
 echo "== Hispa-DOS drivers: FS y GS tras leer de la memoria USB =="
-check "Disco USB: 32 MB en la unidad D:"
+check "Disco USB: 32 MB en la unidad X:"
 check "FS y GS conservados"
 show
 
@@ -65,7 +66,7 @@ printf 'DEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n' > $T/CONFIG.SYS
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 dd if=/dev/zero of=$T/usb.img bs=1M count=64 status=none
 mkfs.fat -F 32 -n FAT32 $T/usb.img > /dev/null
-{ sleep 7; printf 'ECHO sigue-vivo\r'; sleep 1; printf 'LISTAR D:\\\r'; sleep 2; printf 'ECHO y-sigue\r'; sleep 1; } |
+{ sleep 7; printf 'ECHO sigue-vivo\r'; sleep 1; printf 'LISTAR X:\\\r'; sleep 2; printf 'ECHO y-sigue\r'; sleep 1; } |
   timeout 20 qemu-system-i386 -display none -serial stdio -monitor none \
     -device qemu-xhci,id=xhci -drive if=none,id=u,format=raw,file=$T/usb.img \
     -device usb-storage,bus=xhci.0,drive=u \
@@ -76,7 +77,7 @@ echo "== Hispa-DOS drivers: memoria USB con FAT32 =="
 # se monta: el núcleo lee el sector de arranque de FAT32 por el driver)
 checkn "El disco USB no tiene un sistema de archivos FAT"
 check "Disco USB: 64 MB en la unidad"
-check "El volumen de la unidad D es FAT32"
+check "El volumen de la unidad X es FAT32"
 if grep -q "^sigue-vivo" $T/log.txt && grep -q "^y-sigue" $T/log.txt; then echo "  OK   el sistema sigue en marcha"; else echo "  FAIL el sistema no sigue en marcha"; fail=1; fi
 show
 
@@ -108,7 +109,7 @@ if nasm -f bin -i build/gen/lib/ -i lib/ -DFORCE_SCRATCH=37 -o $T/HSPUSB.SYS $T/
     fi
     mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
     mkstick
-    { sleep 7; printf 'COPIAR D:\\HOLA.TXT A:\\\r'; sleep 3; printf 'A:\\BIN\\XMSTEST\r'; sleep 3; } |
+    { sleep 7; printf 'COPIAR X:\\HOLA.TXT A:\\\r'; sleep 3; printf 'A:\\BIN\\XMSTEST\r'; sleep 3; } |
       timeout 22 qemu-system-i386 -display none -serial stdio -monitor none \
         -device qemu-xhci,id=xhci -drive if=none,id=u,format=raw,file=$T/usb.img \
         -device usb-storage,bus=xhci.0,drive=u \
@@ -116,7 +117,7 @@ if nasm -f bin -i build/gen/lib/ -i lib/ -DFORCE_SCRATCH=37 -o $T/HSPUSB.SYS $T/
     conv
     echo "== Hispa-DOS drivers: HSPUSB con 37 páginas de trabajo, $XMS HSPXMS =="
     if [ $XMS = con ]; then
-      check "Disco USB: 32 MB en la unidad D:"
+      check "Disco USB: 32 MB en la unidad X:"
       if cmp -s <(mtype -i $T/f.img ::HOLA.TXT 2>/dev/null) $T/HOLA.TXT; then echo "  OK   fichero leído intacto"; else echo "  FAIL fichero leído"; fail=1; fi
       # 37 + 2 páginas + 4 KB de alineación = 160 KB bloqueados
       check "XMS test OK"
@@ -139,7 +140,7 @@ for DEV in usb ahci hda; do
     printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPUSB.SYS /F\r\n' > $T/CONFIG.SYS
     mkstick
     QDEV="-device qemu-xhci,id=xhci -drive if=none,id=u,format=raw,file=$T/usb.img -device usb-storage,bus=xhci.0,drive=u"
-    SRC='D:\HOLA.TXT'; REF=$T/HOLA.TXT; DST=HOLA.TXT
+    SRC='X:\HOLA.TXT'; REF=$T/HOLA.TXT; DST=HOLA.TXT
   elif [ $DEV = ahci ]; then
     printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDEVICE=A:\\HISPADOS\\HSPCD.SYS\r\n' > $T/CONFIG.SYS
     QDEV="-device ahci,id=ahci -drive if=none,id=cd,file=$T/cd.iso,media=cdrom -device ide-cd,bus=ahci.0,drive=cd"

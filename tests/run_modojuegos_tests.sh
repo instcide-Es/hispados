@@ -650,8 +650,8 @@ if quiere usbu; then
     cfail=0
     P='C:\>'
     echo "== Hispa-DOS modo juegos (imagen USB, HSPUSB /U) =="
-    MTOOLS_SKIP_CHECK=1 mtype -i $T/usbboot.img@@1048576 ::CONFIG.SYS | sed 's/^DEVICEHIGH=C:\\HISPADOS\\HSPUSB.SYS/& \/U/' > $T/CONFIG.SYS
-    grep -q '^DEVICEHIGH=C:\\HISPADOS\\HSPUSB.SYS /U' $T/CONFIG.SYS || { echo "  FAIL no está la línea de HSPUSB en [juegos]"; cfail=1; }
+    MTOOLS_SKIP_CHECK=1 mtype -i $T/usbboot.img@@1048576 ::CONFIG.SYS | sed 's/^DEVICEHIGH=\\HISPADOS\\HSPUSB.SYS/& \/U/' > $T/CONFIG.SYS
+    grep -q '^DEVICEHIGH=\\HISPADOS\\HSPUSB.SYS /U' $T/CONFIG.SYS || { echo "  FAIL no está la línea de HSPUSB en [juegos]"; cfail=1; }
     MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/usbboot.img@@1048576 $T/CONFIG.SYS ::CONFIG.SYS
     # sin TECLADO SP: las teclas de QEMU son las del teclado americano
     MTOOLS_SKIP_CHECK=1 mtype -i $T/usbboot.img@@1048576 ::AUTOEXEC.BAT | grep -a -v 'TECLADO SP' > $T/AUTOEXEC.BAT
