@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Registro, Usuario, Escritorio, Textos32, Mem32, Formato
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -700,6 +700,9 @@ módulo Semilla
         busca_discos()
         ; si el cargador lo pide («ordenes» en su línea), el intérprete de
         ; órdenes del anillo 3, ya
+        ; un sistema instalado en el disco: sus ajustes (\\HISPA\\HISPA.INI: el
+        ; teclado, el nombre del usuario); lo que diga el cargador manda
+        lee_ajustes()
         si buscar(línea_del_cargador(), "teclado=us") <> nulo entonces pon_teclado(falso) fin
         ; o el escritorio (el entorno gráfico): esta consola se queda esperando
         ; (las teclas son de las ventanas; lo que diga el núcleo sale por el

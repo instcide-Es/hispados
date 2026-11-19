@@ -58,11 +58,21 @@
 #      escritorio, un concentrador, la memoria USB como unidad X: (leer,
 #      escribir, fsck.fat), «sinusb», Mi equipo con sus unidades, y la
 #      memoria USB con GRUB arrancada como tal (el núcleo la lee él).
+#  10. Hispa-Pentium 0.7: instalarlo en el disco duro. El programa INSTALAR
+#      (pantalla azul, en modo texto) con discos SATA e IDE en blanco, con
+#      una partición de otro sistema y espacio sin usar (no se toca lo que
+#      hay), llenos (borrar pide dos confirmaciones), con tabla GPT y de los
+#      de antes (la partición en el sector 63); la FAT32 que escribe (la mira
+#      fsck.fat) y lo que copia; que sin «instalar» el núcleo no deja; y, de
+#      verdad: arrancar la memoria USB (xHCI y EHCI), instalar, arrancar
+#      SOLO del disco (GRUB en el MBR), el asistente del primer arranque,
+#      HISPA.INI y el saludo del menú Inicio; la memoria USB, intacta.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
 #   SOLO=32 ./pruebas.sh          la primera, la octava y la novena (lo de 32 bits)
 #   SOLO=06 ./pruebas.sh          la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
+#   SOLO=07 ./pruebas.sh          la primera y la décima (instalar en el disco: la 0.7)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
@@ -75,7 +85,7 @@ set -u
 AQUI=$(dirname "$(readlink -f "$0")")
 H=$AQUI/../h8086
 # los programas de usuario de Hispa-Pentium (usuario.cas y llamadas.cas son módulos)
-USU="$AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas $AQUI/nucleo32/uequipo.cas"
+USU="$AQUI/nucleo32/uinstala.cas $AQUI/nucleo32/uasiste.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas $AQUI/nucleo32/uequipo.cas"
 T=$(mktemp -d)
 QPID=
 acaba() { [ -n "$QPID" ] && kill $QPID 2>/dev/null; [ -n "${VER:-}" ] && { rm -rf /tmp/castel-pruebas; cp -r $T /tmp/castel-pruebas; }; rm -rf $T; }
@@ -125,7 +135,7 @@ fi
 
 # SOLO=32: solo la primera parte, la octava y la novena (los 32 bits);
 # SOLO=06: solo la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
-if [ "${SOLO:-}" != 32 ] && [ "${SOLO:-}" != 06 ]; then
+if [ "${SOLO:-}" != 32 ] && [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ]; then
 # -------------------------------------------------------- 2. compilar todo
 echo "== Castel: los ejemplos compilan =="
 EJEMPLOS=
@@ -683,7 +693,7 @@ fi
 echo "== Castel de 32 bits: «modelo núcleo» (QEMU -kernel) y «modelo hispa32» (HW32) =="
 P=$T/p32
 mkdir $P
-if [ "${SOLO:-}" != 06 ]; then
+if [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ]; then
 # los ejemplos de 16 bits que no tocan el DOS, compilados como núcleo de 32
 # bits: tienen que escribir lo mismo
 MISMOS="arreglos bucles cuenta estruct mezcla nivel pares pruebas refs saltos saludo textos modulos"
@@ -1309,7 +1319,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
 else
   echo "  (sin root o sin grub-install para PC no se prueba la memoria USB con GRUB)"
 fi
-fi   # SOLO=06
+fi   # SOLO=06, SOLO=07
 
 # ------------------------------------------------- 9. Hispa-Pentium 0.6
 # Los discos SATA (AHCI), las unidades con letra (varias a la vez) y el USB
@@ -1317,10 +1327,11 @@ fi   # SOLO=06
 # controladora AHCI (-device ahci), las de USB (qemu-xhci, usb-ehci, las UHCI) y sus
 # aparatos; con -machine pc,i8042=off no hay teclado ni ratón PS/2, como en
 # un Mac, y lo que se teclea por el monitor llega por el teclado USB.
-echo "== Hispa-Pentium 0.6: los discos SATA (AHCI), las unidades con letra, el permiso de escritura por disco =="
 G=$P/graf
 N=$P/n06
 mkdir -p $G $N
+if [ "${SOLO:-}" != 07 ]; then
+echo "== Hispa-Pentium 0.6: los discos SATA (AHCI), las unidades con letra, el permiso de escritura por disco =="
 hechos=1
 for c in 16 32 mbr; do
   [ -f $P/d$c.img ] || $AQUI/nucleo32/disco.sh $P/d$c.img $c > $P/disco$c.txt 2>&1 || { hechos=0; ko "no se puede hacer el disco de prueba ($c)"; }
@@ -1555,6 +1566,313 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
   else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba la memoria USB con GRUB)"
+fi
+fi   # SOLO=07
+
+# ------------------------------------------------- 10. Hispa-Pentium 0.7
+# Instalar en el disco duro: el programa INSTALAR (uinstala.cas), el arranque
+# del disco (GRUB en el MBR y en el hueco de delante de la partición) y el
+# asistente del primer arranque (uasiste.cas). Lo que se instala (el núcleo,
+# los programas, BOOT.IMG y CORE.IMG) sale de la memoria USB que hace usb.sh.
+echo "== Hispa-Pentium 0.7: instalar en el disco duro (INSTALAR), arrancar de él y el asistente del primer arranque =="
+if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/grub/i386-pc ] && command -v parted > /dev/null; then
+Z=$P/n07
+K=$Z/kit
+mkdir -p $Z $K
+[ -f $G/usb.img ] || $AQUI/nucleo32/usb.sh $G/usb.img > $G/usb.txt 2>&1
+if [ -f $G/usb.img ]; then
+INST=
+for f in ESCRIT8.BIN:NUCLEO.BIN INSTALAR.BIN ASISTE.BIN ORDENES.BIN BLOC.BIN CONSOLA.BIN EQUIPO.BIN HOLA.BIN LEEMEDIS.TXT:LEEME.TXT MANUAL.TXT BOOT.IMG CORE.IMG; do
+  mcopy -n -i $G/usb.img@@1M ::${f%%:*} $K/${f##*:} > /dev/null 2>&1
+  INST=$INST${INST:+,}$K/${f##*:}
+done
+mcopy -n -i $G/usb.img@@1M ::SEMILLA.BIN $K/SEMILLA.BIN > /dev/null 2>&1
+# instala con el núcleo arrancado por QEMU (-kernel) y lo que se instala como
+# módulos (la unidad M:, como con la entrada de la memoria USB): el disco
+# (SATA; con IDE=1, IDE), el nombre de lo que sale y las teclas
+instala() {
+  local d=$1 n=$2; shift 2
+  if [ -n "${IDE:-}" ]; then
+    CAPTURAS=$Z ESCRIBE=1 DISCO=$d MODULOS=$INST ARRANQUE="instalar unidad=M" $AQUI/nucleo32/probar.sh $K/SEMILLA.BIN ":pausa 1" "$@" > $Z/$n.sal 2>&1
+  else
+    CAPTURAS=$Z ESCRIBE=1 SATA=$d MODULOS=$INST ARRANQUE="instalar unidad=M" $AQUI/nucleo32/probar.sh $K/SEMILLA.BIN ":pausa 1" "$@" > $Z/$n.sal 2>&1
+  fi
+  S=$Z/$n.sal
+}
+# la partición (desde ese sector) de un disco, a $Z/vol.img, y ¿está sana?
+volumen() { dd if=$1 of=$Z/vol.img bs=512 skip=$2 conv=sparse status=none; fsck.fat -n $Z/vol.img > $Z/fsck.txt 2>&1; }
+# ¿está en el volumen ($Z/vol.img) el sistema, igual que el que se instala, y el disco arrancable?
+instalado() {
+  local f bien=1
+  for f in NUCLEO.BIN INSTALAR.BIN ASISTE.BIN ORDENES.BIN BLOC.BIN CONSOLA.BIN EQUIPO.BIN HOLA.BIN LEEME.TXT MANUAL.TXT BOOT.IMG CORE.IMG; do
+    rm -f $Z/f.bin; mcopy -n -i $Z/vol.img ::HISPA/$f $Z/f.bin > /dev/null 2>&1; cmp -s $Z/f.bin $K/$f || { bien=0; echo "distinto: $f" >> $Z/fsck.txt; }
+  done
+  rm -f $Z/f.bin; mcopy -n -i $Z/vol.img ::LEEME.TXT $Z/f.bin > /dev/null 2>&1; cmp -s $Z/f.bin $K/LEEME.TXT || { bien=0; echo "distinto: LEEME.TXT de la raíz" >> $Z/fsck.txt; }
+  # el arranque: el primer sector de GRUB en el MBR (sus 440 octetos) y el resto desde el sector 1
+  cmp -s -n 440 $1 $K/BOOT.IMG || { bien=0; echo "el MBR no lleva BOOT.IMG" >> $Z/fsck.txt; }
+  cmp -s <(dd if=$1 bs=512 skip=1 status=none | head -c $(stat -c %s $K/CORE.IMG)) $K/CORE.IMG || { bien=0; echo "CORE.IMG no está desde el sector 1" >> $Z/fsck.txt; }
+  [ $bien = 1 ]
+}
+tabla() { parted -s $1 unit s print 2> /dev/null | sed -n '/^Partition Table/p; /^ *[0-9]/p' | tr -s ' ' | sed 's/ *$//' > $Z/tabla.txt; }
+
+# 1. un disco SATA en blanco: la bienvenida, la ayuda, elegir el disco, instalar
+truncate -s 300M $Z/blanco.img
+instala $Z/blanco.img blanco ":texto i1" ":tecla f1" ":texto i2" ":tecla ret" ":tecla ret" ":texto i3" ":tecla ret" ":texto i4" ":tecla ret" ":pausa 5" ":texto i5" ":tecla ret"
+if grep -q "Instalación de Hispa-Pentium 0.7" $Z/i1.txt && grep -q "Bienvenido a la instalación de Hispa-Pentium" $Z/i1.txt && grep -q "INTRO=Continuar   F1=Ayuda   F3=Salir" $Z/i1.txt \
+  && grep -q "La memoria USB de arranque no se toca" $Z/i1.txt && grep -q "^|   Ayuda$" $Z/i2.txt && grep -q "hay que confirmarlo dos veces" $Z/i2.txt; then
+  ok "INSTALAR: la pantalla azul de bienvenida (el título, el pie con INTRO=Continuar, F1=Ayuda y F3=Salir) y la ayuda (F1)"
+else ko "INSTALAR: la bienvenida o la ayuda no salen como deben:"; sed 's/^/        /' $Z/i1.txt | head -8; fi
+if grep -q "Elija el disco donde instalar Hispa-Pentium" $Z/i3.txt && grep -q "Disco 1   SATA  QEMU HARDDISK  *300 MB" $Z/i3.txt && grep -q "(en blanco: sin particiones)" $Z/i3.txt \
+  && grep -q "Todo listo para instalar" $Z/i4.txt && grep -q "Partición:  una nueva de 299 MB (el disco está en blanco)" $Z/i4.txt && grep -q "INTRO=Instalar   ESC=Volver   F3=Salir" $Z/i4.txt \
+  && grep -q "Hispa-Pentium está instalado" $Z/i5.txt && grep -q "Quite ahora la memoria USB y pulse INTRO para reiniciar" $Z/i5.txt; then
+  ok "INSTALAR: elegir el disco (con su tamaño y lo que tiene), la pantalla de «todo listo» y la del final"
+else ko "INSTALAR: las pantallas de elegir el disco, «todo listo» o el final no salen como deben:"; sed 's/^/        /' $Z/i3.txt | head -10; fi
+mira "INSTALAR en un disco SATA en blanco: la partición, el formato FAT32, la copia a \\HISPA y el arranque; y reinicia" \
+  "^instalar: disco 0, SATA, 300 MB, se puede: 1$" "^instalar: partición 1, desde el sector 2048, 612352 sectores$" \
+  "^instalar: FAT32 con clusters de 4096 octetos, [0-9]* clusters, [0-9]* sectores por FAT$" "^instalar: copiado NUCLEO.BIN ([0-9]* octetos)$" \
+  "^instalar: copiado LEEME.TXT a la raíz" "^instalar: Dejando el disco arrancable\.\.\.$" "^instalar: terminado$" "^reiniciar$"
+tabla $Z/blanco.img
+if volumen $Z/blanco.img 2048 && instalado $Z/blanco.img && grep -q "^Partition Table: msdos" $Z/tabla.txt && [ "$(grep -c '^ [0-9]' $Z/tabla.txt)" = 1 ] \
+  && grep -q "^ 1 2048s 614399s 612352s primary fat32 boot, lba" $Z/tabla.txt; then
+  ok "el disco instalado: una partición FAT32 arrancable en el MBR, sana para fsck.fat, con el sistema en \\HISPA igual que el original y GRUB en el MBR y en el hueco de delante"
+else ko "el disco instalado no queda bien:"; cat $Z/tabla.txt $Z/fsck.txt | sed 's/^/        /' | head -8; fi
+rm -f $Z/cfg.txt; mcopy -n -i $Z/vol.img ::HISPA/GRUB.CFG $Z/cfg.txt > /dev/null 2>&1
+if grep -q "^set modo=800x600x32,800x600,auto$" $Z/cfg.txt && grep -q "multiboot /HISPA/NUCLEO.BIN escritorio escritura$" $Z/cfg.txt && grep -q "module /HISPA/ORDENES.BIN ORDENES.BIN" $Z/cfg.txt \
+  && ! grep -q chainloader $Z/cfg.txt && ! grep -q "INSTALAR.BIN" $Z/cfg.txt; then
+  ok "el menú de arranque del disco (\\HISPA\\GRUB.CFG): el escritorio, el modo texto y el de emergencia con los programas como módulos"
+else ko "\\HISPA\\GRUB.CFG no es el que tiene que ser:"; sed 's/^/        /' $Z/cfg.txt | head -8; fi
+
+# 2. un disco con la partición de otro sistema y espacio sin usar: salir con
+# F3 y no confirmar el borrado no tocan nada; se instala en lo libre
+truncate -s 300M $Z/otro.img
+parted -s $Z/otro.img mklabel msdos mkpart primary ntfs 1MiB 101MiB set 1 boot on
+dd if=/dev/urandom of=$Z/otro.img bs=1M seek=1 count=100 conv=notrunc status=none
+cp $Z/otro.img $Z/otro0.img
+instala $Z/otro.img otro1 ":tecla ret" ":texto o1" ":tecla ret" ":texto o2" ":tecla down" ":tecla ret" ":texto o3" ":tecla s" ":texto o4" ":escribe BORRA" ":tecla ret" ":texto o5" \
+  ":tecla down" ":tecla ret" ":tecla n" ":tecla f3" ":texto o6" ":tecla n" ":tecla f3" ":tecla s"
+if grep -q "partición 1: NTFS o exFAT (Windows)  *100 MB" $Z/o1.txt && grep -q "espacio sin usar:  *199 MB" $Z/o1.txt \
+  && grep -q "Tiene 199 MB sin usar: se puede instalar ahí sin tocar lo que hay" $Z/o2.txt && grep -q "Instalar en el espacio sin usar (no se toca lo que hay)" $Z/o2.txt \
+  && grep -q "Borrar el disco entero e instalar (se pierde TODO lo que tiene)" $Z/o2.txt; then
+  ok "un disco con otro sistema: se enseñan su partición (NTFS) y el espacio sin usar, y se ofrece instalar ahí o borrar el disco"
+else ko "un disco con otro sistema: no se enseña bien lo que tiene:"; sed 's/^/        /' $Z/o1.txt | sed -n 5,12p; fi
+if grep -q "ATENCION: se va a BORRAR TODO lo que hay en este disco" $Z/o3.txt && grep -q "S=Sí, borrar el disco   ESC=Volver (no se toca nada)" $Z/o3.txt \
+  && grep -q "Borrar el disco entero: segunda confirmación" $Z/o4.txt && grep -q "escriba la palabra BORRAR y pulse INTRO" $Z/o4.txt \
+  && grep -q "Dónde instalar Hispa-Pentium en este disco" $Z/o5.txt && grep -q "^instalar: no se borra$" $S && grep -q "¿Salir de la instalación y reiniciar el equipo?  (S/N)" $Z/o6.txt \
+  && grep -q "^instalar: se sale$" $S && ! grep -q "^instalar: partición" $S && cmp -s $Z/otro.img $Z/otro0.img; then
+  ok "borrar el disco pide dos confirmaciones (una S y escribir BORRAR): con la palabra mal escrita, con N y saliendo con F3, el disco queda idéntico octeto a octeto"
+else ko "las confirmaciones de borrar no van (o el disco ha cambiado sin confirmarlo):"; sed 's/^/        /' $Z/o5.txt | sed -n 4,10p; fi
+instala $Z/otro.img otro2 ":tecla ret" ":tecla ret" ":tecla ret" ":texto o7" ":tecla ret" ":pausa 5" ":texto o8" ":tecla ret"
+tabla $Z/otro.img
+if grep -q "una nueva de 199 MB en el espacio sin usar; lo demás no se toca" $Z/o7.txt && grep -q "hay en el disco (su partición 1)" $Z/o7.txt && grep -q "^instalar: partición 2, desde el sector 206848, 407552 sectores$" $S \
+  && grep -q "El sistema que ya había en el disco sigue en su sitio" $Z/o8.txt && cmp -s <(dd if=$Z/otro.img bs=1M skip=1 count=100 status=none) <(dd if=$Z/otro0.img bs=1M skip=1 count=100 status=none) \
+  && grep -q "^ 1 2048s 206847s 204800s primary$" $Z/tabla.txt && grep -q "^ 2 206848s 614399s 407552s primary fat32 boot, lba" $Z/tabla.txt \
+  && volumen $Z/otro.img 206848 && instalado $Z/otro.img; then
+  ok "instalar en el espacio sin usar: la partición del otro sistema queda idéntica octeto a octeto, la nueva (la 2) es la arrancable, y está sana y con el sistema"
+else ko "instalar en el espacio sin usar no va (o toca lo que había):"; cat $Z/tabla.txt $Z/fsck.txt | sed 's/^/        /' | head -8; fi
+rm -f $Z/cfg.txt $Z/mbr.ant; mcopy -n -i $Z/vol.img ::HISPA/GRUB.CFG $Z/cfg.txt > /dev/null 2>&1; mcopy -n -i $Z/vol.img ::HISPA/MBR.ANT $Z/mbr.ant > /dev/null 2>&1
+if grep -q "^set timeout=8$" $Z/cfg.txt && grep -q 'El sistema que ya estaba en el disco (particion 1)' $Z/cfg.txt && grep -q "set root=(hd0,msdos1)" $Z/cfg.txt && grep -q "chainloader +1" $Z/cfg.txt \
+  && cmp -s -n 512 $Z/mbr.ant $Z/otro0.img; then
+  ok "el menú de arranque lleva una entrada para el sistema que ya había, y el primer sector de antes queda guardado (\\HISPA\\MBR.ANT)"
+else ko "el menú de arranque no lleva el otro sistema, o no se guarda el primer sector de antes:"; sed 's/^/        /' $Z/cfg.txt | tail -6; fi
+
+# 3. un disco lleno (sin espacio sin usar): solo se puede borrar, con sus dos confirmaciones
+truncate -s 200M $Z/lleno.img
+parted -s $Z/lleno.img mklabel msdos mkpart primary ext2 1MiB 100%
+dd if=/dev/urandom of=$Z/lleno.img bs=1M seek=1 count=20 conv=notrunc status=none
+instala $Z/lleno.img lleno ":tecla ret" ":tecla ret" ":texto l1" ":tecla ret" ":tecla s" ":escribe borrar" ":tecla ret" ":texto l2" ":tecla ret" ":pausa 5" ":texto l3" ":tecla ret"
+tabla $Z/lleno.img
+if grep -q "No tiene bastante espacio sin usar" $Z/l1.txt && ! grep -q "Instalar en el espacio sin usar" $Z/l1.txt && grep -q "una nueva de 199 MB, BORRANDO todo lo que tiene el disco" $Z/l2.txt \
+  && grep -q "^instalar: confirmar borrar (2)$" $S && grep -q "^instalar: FAT32 con clusters de 512 octetos, " $S && grep -q "Hispa-Pentium está instalado" $Z/l3.txt && [ "$(grep -c '^ [0-9]' $Z/tabla.txt)" = 1 ] && grep -q "^ 1 2048s 409599s 407552s primary fat32 boot, lba" $Z/tabla.txt \
+  && volumen $Z/lleno.img 2048 && instalado $Z/lleno.img; then
+  ok "un disco lleno: no se ofrece el espacio sin usar; confirmado dos veces (S y BORRAR), se borra entero y queda instalado y sano (199 MB: FAT32 con clusters de 512 octetos)"
+else ko "borrar un disco lleno e instalar no va:"; cat $Z/tabla.txt $Z/fsck.txt | sed 's/^/        /' | head -8; sed 's/^/        /' $Z/l1.txt | sed -n 6,14p; fi
+
+# 4. un disco de los de antes (la partición empieza en el sector 63: no hay
+# hueco para el arranque) y uno con tabla GPT: solo borrándolos
+truncate -s 200M $Z/viejo.img
+printf 'label: dos\n63,80M,7\n' | sfdisk -q $Z/viejo.img > /dev/null 2>&1
+cp $Z/viejo.img $Z/viejo0.img
+instala $Z/viejo.img viejo ":tecla ret" ":tecla ret" ":texto v1" ":tecla f3" ":tecla s"
+if grep -q "su primera partición empieza demasiado" $Z/v1.txt && ! grep -q "Instalar en el espacio sin usar" $Z/v1.txt && cmp -s $Z/viejo.img $Z/viejo0.img; then
+  ok "un disco de los de antes (la partición en el sector 63): se dice que no hay sitio para el arranque sin borrar, y no se toca"
+else ko "el disco con la partición en el sector 63 no se trata bien:"; sed 's/^/        /' $Z/v1.txt | sed -n 6,14p; fi
+truncate -s 200M $Z/gpt.img
+parted -s $Z/gpt.img mklabel gpt mkpart datos ntfs 1MiB 60MiB mkpart linux ext4 60MiB 120MiB
+instala $Z/gpt.img gpt ":tecla ret" ":texto g1" ":tecla ret" ":texto g2" ":tecla ret" ":tecla s" ":escribe BORRAR" ":tecla ret" ":tecla ret" ":pausa 5" ":texto g3" ":tecla ret"
+tabla $Z/gpt.img
+if grep -q "partición 1: NTFS o exFAT (Windows)  *59 MB" $Z/g1.txt && grep -q "partición 2: Linux  *60 MB" $Z/g1.txt && grep -q "Usa una tabla de particiones GPT" $Z/g2.txt \
+  && ! grep -q "Instalar en el espacio sin usar" $Z/g2.txt && grep -q "Hispa-Pentium está instalado" $Z/g3.txt && grep -q "^Partition Table: msdos" $Z/tabla.txt \
+  && volumen $Z/gpt.img 2048 && instalado $Z/gpt.img; then
+  ok "un disco con tabla GPT: se leen sus particiones; solo se instala borrándolo entero (queda con tabla MBR, sin rastro de la GPT), sano y con el sistema"
+else ko "el disco con tabla GPT no se trata bien:"; cat $Z/tabla.txt $Z/fsck.txt | sed 's/^/        /' | head -8; sed 's/^/        /' $Z/g2.txt | sed -n 6,14p; fi
+
+# 5. un disco IDE (el canal de siempre), de 2 GB: la FAT32 con clusters de 4 K
+truncate -s 2G $Z/ide.img
+IDE=1 instala $Z/ide.img ide ":tecla ret" ":texto d1" ":tecla ret" ":tecla ret" ":pausa 9" ":texto d2" ":tecla ret"
+if grep -q "Disco 1   IDE   QEMU HARDDISK  *2048 MB" $Z/d1.txt && grep -q "^instalar: FAT32 con clusters de 4096 octetos, [0-9]* clusters, [0-9]* sectores por FAT$" $S \
+  && grep -q "Hispa-Pentium está instalado" $Z/d2.txt && volumen $Z/ide.img 2048 && instalado $Z/ide.img; then
+  ok "un disco IDE de 2 GB: instalado, con su FAT32 de clusters de 4 K sana y el sistema dentro"
+else ko "instalar en un disco IDE de 2 GB no va:"; sed 's/^/        /' $Z/fsck.txt | head -6; tail -4 $S | sed 's/^/        /'; fi
+
+# 6. sin «instalar» en la línea del cargador, el núcleo no deja escribir en
+# los discos sector a sector: INSTALAR no encuentra dónde, aunque haya «escritura»
+truncate -s 100M $Z/sin.img
+dd if=/dev/urandom of=$Z/sin.img bs=1M count=1 conv=notrunc status=none
+cp $Z/sin.img $Z/sin0.img
+CAPTURAS=$Z ESCRIBE=1 SATA=$Z/sin.img MODULOS=$INST ARRANQUE="ordenes escritura unidad=M" $AQUI/nucleo32/probar.sh $K/SEMILLA.BIN ":pausa 1" instalar ":tecla ret" ":texto n1" ":tecla f3" > $Z/sin.sal 2>&1
+S=$Z/sin.sal
+if grep -q "^instalar: disco 0, SATA, 100 MB, se puede: 0$" $S && grep -q "No se ha encontrado ningún disco duro en este equipo" $Z/n1.txt && cmp -s $Z/sin.img $Z/sin0.img; then
+  ok "sin «instalar» en la línea del cargador (aunque haya «escritura»), INSTALAR no puede tocar ningún disco: el núcleo no le deja"
+else ko "sin «instalar» en la línea del cargador, INSTALAR ve discos donde escribir:"; sed 's/^/        /' $Z/n1.txt | sed -n 4,12p; fi
+
+# 7. de verdad: la memoria USB arrancada como tal (GRUB), su entrada «Instalar
+# Hispa-Pentium en el disco duro», un disco SATA en blanco de 2 GB; luego, SOLO
+# el disco: GRUB desde su MBR, el escritorio y el asistente del primer arranque
+monz() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$Z/mon > /dev/null 2>&1; sleep "${2:-0.25}"; }
+teclas() { local k; for k in "$@"; do monz "sendkey $k" 0.12; done; }
+textoz() {     # la pantalla de texto, a $Z/$1.txt
+  monz "pmemsave 0xb8000 4000 \"$Z/scr.bin\"" 0.3
+  python3 -I -c "
+import sys
+d = open(sys.argv[1], 'rb').read()
+for f in range(25):
+    print('|' + bytes(d[f * 160:(f + 1) * 160:2]).decode('cp437').rstrip())" $Z/scr.bin > $Z/$1.txt 2> /dev/null
+}
+espera_a() {   # espera (hasta $2 segundos) a que salga esa línea por el puerto serie ($3)
+  local i
+  for ((i = 0; i < $2 * 2; i++)); do grep -qa -- "$1" $3 2> /dev/null && return 0; sleep 0.5; done
+  return 1
+}
+espera_menu() {    # espera (hasta 15 s) a que el menú de GRUB esté en la pantalla, con ese texto; queda en $Z/$2.txt
+  local i
+  for ((i = 0; i < 40; i++)); do textoz $2; grep -q -- "$1" $Z/$2.txt && return 0; sleep 0.1; done
+  return 1
+}
+desde_disco() {    # arranca solo del disco $1 (SATA); lo que sale, a $2
+  rm -f $Z/mon
+  qemu-system-i386 -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$2 -no-reboot -rtc base=localtime \
+    -device ahci,id=sata -drive id=dsata,file=$1,format=raw,if=none -device ide-hd,drive=dsata,bus=sata.0,bootindex=1 > /dev/null 2>&1 &
+  QPID=$!
+  for ((i = 0; i < 40; i++)); do [ -S $Z/mon ] && break; sleep 0.1; done
+}
+for hc in xhci ehci; do
+  case $hc in xhci) dev="qemu-xhci,id=u"; que="xHCI" ;; ehci) dev="usb-ehci,id=u"; que="EHCI" ;; esac
+  cp $G/usb.img $Z/u$hc.img
+  rm -f $Z/d$hc.img; truncate -s 2G $Z/d$hc.img
+  rm -f $Z/mon
+  qemu-system-i386 -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$Z/i$hc.sal -no-reboot -rtc base=localtime -device $dev \
+    -drive file=$Z/u$hc.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1 \
+    -device ahci,id=sata -drive id=dsata,file=$Z/d$hc.img,format=raw,if=none -device ide-hd,drive=dsata,bus=sata.0,bootindex=2 > /dev/null 2>&1 &
+  QPID=$!
+  for ((i = 0; i < 40; i++)); do [ -S $Z/mon ] && break; sleep 0.1; done
+  espera_menu "Instalar Hispa-Pentium" m$hc; teclas down down down down down down down down down; textoz m2$hc; teclas ret
+  espera_a "^instalar: bienvenida" 40 $Z/i$hc.sal; sleep 0.5
+  [ $hc = xhci ] && [ -n "${CAPTURAS_A:-}" ] && monz "screendump $G/i1-bienvenida.ppm" 0.5
+  teclas ret; sleep 1; textoz u1$hc
+  [ $hc = xhci ] && [ -n "${CAPTURAS_A:-}" ] && monz "screendump $G/i2-discos.ppm" 0.5
+  teclas ret; sleep 1
+  [ $hc = xhci ] && [ -n "${CAPTURAS_A:-}" ] && monz "screendump $G/i3-listo.ppm" 0.5
+  teclas ret
+  espera_a "^instalar: terminado" 60 $Z/i$hc.sal; sleep 0.5; textoz u2$hc
+  [ $hc = xhci ] && [ -n "${CAPTURAS_A:-}" ] && monz "screendump $G/i4-final.ppm" 0.5
+  teclas ret; sleep 1.5
+  kill -0 $QPID 2> /dev/null && monz quit 0.5
+  wait $QPID 2> /dev/null; QPID=
+  tr -d '\r' < $Z/i$hc.sal | iconv -f CP437 -t UTF-8 > $Z/i$hc.txt
+  S=$Z/i$hc.txt
+  if grep -q "Instalar Hispa-Pentium 0.7 en el disco duro" $Z/m$hc.txt && grep -q "^| │\*Instalar Hispa-Pentium 0.7 en el disco duro" $Z/m2$hc.txt; then
+    ok "$que: el menú de la memoria USB trae la entrada «Instalar Hispa-Pentium 0.7 en el disco duro» (la última)"
+  else ko "$que: el menú de la memoria USB no trae la entrada de instalar:"; sed 's/^/        /' $Z/m2$hc.txt | head -14; fi
+  mira "$que: arrancando de la memoria USB con «instalar», el núcleo lanza INSTALAR con lo que trae el cargador (la unidad M:) y se instala en el disco SATA" \
+    "^usb: controladora $que " "^disco 0: QEMU HARDDISK, 2048 MB, sin FAT (SATA)\.$" "la del sistema, M:$" "^lanzo INSTALAR.BIN del disco" \
+    "^instalar: disco 0, SATA, 2048 MB, se puede: 1$" "^instalar: disco 1, USB, 64 MB, se puede: 0$" "^instalar: partición 1, desde el sector 2048, 4192256 sectores$" \
+    "^instalar: copiado CORE.IMG" "^instalar: terminado$" "^reiniciar$"
+  if grep -q "Disco 1   SATA  QEMU HARDDISK  *2048 MB" $Z/u1$hc.txt && grep -q "Memoria USB  QEMU    QEMU HARDDISK  *64 MB  (no se toca)" $Z/u1$hc.txt \
+    && [ "$(grep -c '^|    Disco ' $Z/u1$hc.txt)" = 1 ] && grep -q "Hispa-Pentium está instalado" $Z/u2$hc.txt && cmp -s $Z/u$hc.img $G/usb.img; then
+    ok "$que: la memoria USB de arranque no se ofrece como disco (se enseña: «no se toca») y, después de instalar, está idéntica octeto a octeto"
+  else ko "$que: la memoria USB de arranque se ofrece como disco, o ha cambiado al instalar:"; sed 's/^/        /' $Z/u1$hc.txt | sed -n 5,12p; fi
+  if volumen $Z/d$hc.img 2048 && instalado $Z/d$hc.img; then ok "$que: el disco de 2 GB queda con su FAT32 sana (fsck.fat), el sistema en \\HISPA y el arranque puesto"
+  else ko "$que: el disco instalado desde la memoria USB no queda bien:"; sed 's/^/        /' $Z/fsck.txt | head -6; fi
+  # SOLO el disco: el primer arranque
+  desde_disco $Z/d$hc.img $Z/a$hc.sal
+  espera_menu "Hispa-Pentium: el interprete" a0$hc
+  espera_a "asistente: el primer arranque" 50 $Z/a$hc.sal; sleep 1.5
+  monz "screendump $G/a1$hc.ppm" 0.6
+  if [ $hc = xhci ]; then
+    # el nombre, el del equipo, la hora (las 07:45), el teclado como está y la pantalla a 1024 x 600
+    teclas shift-c a r l o s tab backspace backspace backspace backspace backspace shift-t o s h i b a tab tab backspace backspace backspace backspace backspace 0 7 shift-dot 4 5 tab tab right
+    monz "screendump $G/a2$hc.ppm" 0.6
+    teclas ret; sleep 2
+    monz "screendump $G/a3$hc.ppm" 0.6
+    teclas ret; sleep 1
+    monz "mouse_move -360 285" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 1
+    monz "screendump $G/a4$hc.ppm" 0.6
+  else
+    # con el ratón: clic en «de EE. UU.», se teclea el nombre (con el teclado de EE. UU. ya puesto) y clic en Aceptar
+    monz "mouse_move 30 12" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 0.6
+    monz "mouse_move -100 -136" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 0.6
+    teclas shift-a n a shift-semicolon
+    monz "screendump $G/a2$hc.ppm" 0.6
+    monz "mouse_move 150 266" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 2
+    monz "screendump $G/a3$hc.ppm" 0.6
+  fi
+  monz quit 0.5; wait $QPID 2> /dev/null; QPID=
+  tr -d '\r' < $Z/a$hc.sal | iconv -f CP437 -t UTF-8 > $Z/a$hc.txt
+  S=$Z/a$hc.txt
+  if grep -q "GNU GRUB" $Z/a0$hc.txt && grep -q "^| │\*Hispa-Pentium  " $Z/a0$hc.txt && grep -q "Hispa-Pentium: el interprete de ordenes (modo texto)" $Z/a0$hc.txt; then
+    ok "$que: SOLO con el disco (sin la memoria USB), la BIOS arranca GRUB desde su MBR y sale el menú de \\HISPA\\GRUB.CFG"
+  else ko "$que: el disco instalado no arranca solo (no sale su menú):"; sed 's/^/        /' $Z/a0$hc.txt | head -8; fi
+  mira "$que: el primer arranque desde el disco: el núcleo lo lee (C:, FAT32), el escritorio a 800 x 600 y el asistente (de \\HISPA)" \
+    "^disco 0: QEMU HARDDISK, 2048 MB, FAT32 (SATA)\.$" "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)" \
+    "^escritorio: lanzo .HISPA.ASISTE.BIN" "asistente: el primer arranque$"
+  miracap "$que: el asistente del primer arranque, en su ventana: el nombre, el equipo, la fecha y la hora, el teclado y la pantalla" a1$hc \
+    negrita 114 64 122 72 "Bienvenido a Hispa-Pentium" texto 112 164 120 172 "Su nombre:" texto 290 198 298 206 "HISPA" texto 112 266 120 274 "Hora (horas:minutos):" \
+    texto 292 334 300 342 "800 x 600" negrita 454 427 462 435 "Aceptar"
+  volumen $Z/d$hc.img 2048; sano=$?
+  rm -f $Z/ini.txt $Z/cfg.txt; mcopy -n -i $Z/vol.img ::HISPA/HISPA.INI $Z/ini.txt > /dev/null 2>&1; mcopy -n -i $Z/vol.img ::HISPA/GRUB.CFG $Z/cfg.txt > /dev/null 2>&1
+  if [ $hc = xhci ]; then
+    miracap "el asistente, con el teclado: el nombre, el equipo, la hora y la pantalla (Tab de casilla en casilla; la flecha cambia la medida)" a2$hc \
+      texto 290 164 298 172 "Carlos" texto 290 198 298 206 "Toshiba" texto 290 266 298 274 "07:45" texto 292 334 300 342 "1024 x 600"
+    miracap "al aceptar: «Todo listo», con el saludo; y el reloj de la barra ya marca la hora puesta (el reloj del PC)" a3$hc \
+      negrita 154 98 162 106 "Todo listo" negrita 112 176 120 184 "¡Hola, Carlos!" negrita 454 427 462 435 "Empezar" negrita 740 570 760 584 "07:45"
+    miracap "el menú Inicio saluda con el nombre («Hola, Carlos») y dice la versión; LEEME.TXT, en los documentos" a4$hc \
+      negrita 54 194 62 202 "Hola, Carlos" texto 54 212 62 220 "Hispa-Pentium, versión 0.7" texto 208 279 216 287 "LEEME.TXT"
+    if grep -q "^asistente: guardado HISPA.INI (Carlos, Toshiba)$" $S && [ "$(tr -d '\r' < $Z/ini.txt | tr '\n' '|')" = "[hispa]|usuario=Carlos|equipo=Toshiba|teclado=es|modo=1024x600|" ] \
+      && grep -q "^set modo=1024x600x32,1024x600,auto$" $Z/cfg.txt && [ "$(grep -c '^set modo=' $Z/cfg.txt)" = 1 ] && [ $sano = 0 ]; then
+      ok "lo guardado: C:\\HISPA\\HISPA.INI (usuario, equipo, teclado y modo) y la medida de la pantalla en el menú de arranque (GRUB.CFG); el disco, sano"
+    else ko "el asistente no deja bien HISPA.INI o GRUB.CFG:"; cat $Z/ini.txt | sed 's/^/        /'; grep "set modo" $Z/cfg.txt | sed 's/^/        /'; sed 's/^/        /' $Z/fsck.txt | head -4; fi
+    # el segundo arranque: ya sin asistente, a 1024 x 600 y con el saludo
+    desde_disco $Z/d$hc.img $Z/b$hc.sal
+    espera_a "escritorio: en marcha" 50 $Z/b$hc.sal; sleep 3
+    monz "mouse_move -472 285" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 1
+    monz "screendump $G/b1$hc.ppm" 0.6
+    monz quit 0.5; wait $QPID 2> /dev/null; QPID=
+    tr -d '\r' < $Z/b$hc.sal | iconv -f CP437 -t UTF-8 > $Z/b$hc.txt
+    S=$Z/b$hc.txt
+    if grep -q "^escritorio: en marcha, 1024 x 600 con 32 bits por punto" $S && ! grep -q "ASISTE.BIN" $S && cap $G/b1$hc.ppm tam 1024 600 negrita 54 194 62 202 "Hola, Carlos"; then
+      ok "el segundo arranque: sin asistente, el escritorio a 1024 x 600 (la medida elegida, puesta por GRUB) y el menú Inicio con el saludo"
+    else ko "el segundo arranque no sale como se dejó:"; grep "escritorio" $S | sed 's/^/        /' | head -4; sed 's/^/        /' $G/cap.txt | head -4; fi
+  else
+    miracap "el asistente, con el ratón: clic en «de EE. UU.» cambia el teclado en el momento (la tecla de la eñe da «:»), y clic en Aceptar" a2$hc \
+      texto 290 164 298 172 "Ana:"
+    miracap "y queda «Todo listo» con su saludo" a3$hc negrita 154 98 162 106 "Todo listo" negrita 112 176 120 184 "¡Hola, Ana:!"
+    if grep -q "^asistente: guardado HISPA.INI (Ana:, HISPA)$" $S && grep -q "^teclado=us" $Z/ini.txt && grep -q "^modo=800x600" $Z/ini.txt && grep -q "^set modo=800x600x32,800x600,auto$" $Z/cfg.txt; then
+      ok "lo guardado con el ratón: el teclado de EE. UU. y la pantalla como estaba"
+    else ko "el asistente, con el ratón, no guarda lo elegido:"; cat $Z/ini.txt | sed 's/^/        /'; fi
+    # la segunda entrada del menú del disco: el intérprete de órdenes, en modo texto, con el teclado guardado
+    desde_disco $Z/d$hc.img $Z/b$hc.sal
+    espera_menu "Hispa-Pentium: el interprete" b0$hc; teclas down ret
+    espera_a "lanzo ORDENES.BIN" 40 $Z/b$hc.sal; sleep 1
+    teclas v e r ret d i r spc backslash h i s p a backslash h i s p a dot i n i ret; sleep 1.5; textoz b1$hc
+    monz quit 0.5; wait $QPID 2> /dev/null; QPID=
+    if grep -q "Hispa-Pentium 0.7: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
+      ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
+    else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -8; fi
+  fi
+done
+else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
+else
+  echo "  (sin root o sin grub-install para PC no se prueba la instalación en el disco)"
 fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 

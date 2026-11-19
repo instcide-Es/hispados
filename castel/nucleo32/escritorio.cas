@@ -1243,7 +1243,7 @@ módulo Escritorio
         soltar_consola()
         ; un sistema instalado en el disco: sus ajustes (HISPA.INI); si aún
         ; no los tiene, es su primer arranque: el asistente
-        si instalado() entonces
+        si instalado() y no hay_ajustes entonces
             si no lee_ajustes() entonces lanza("\\HISPA\\ASISTE.BIN", nulo) fin
         fin
         devolver 1
