@@ -276,12 +276,14 @@ módulo Ventanas
             fin
         fin
         flecha_pintada := cierto
+        volcar(flecha_x, flecha_y, FLECHA_ANCHO, FLECHA_ALTO)
     fin
 
     ; quita la flecha: lo que había debajo está en el doble búfer
     función borra_flecha()
         si flecha_pintada entonces
             copiar_lienzo(pantalla, flecha_x, flecha_y, trasero, flecha_x, flecha_y, FLECHA_ANCHO, FLECHA_ALTO)
+            volcar(flecha_x, flecha_y, FLECHA_ANCHO, FLECHA_ALTO)
         fin
         flecha_pintada := falso
     fin
@@ -303,6 +305,7 @@ módulo Ventanas
                 k := k + 1
             fin
             copiar_lienzo(pantalla, x, yy, trasero, x, yy, an, al)
+            volcar(x, yy, an, al)
             composiciones := composiciones + 1
         fin
         sucios := 0

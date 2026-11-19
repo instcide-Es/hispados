@@ -12,6 +12,12 @@
 ;  En un PC de verdad sin esa tarjeta el modo lo tiene que poner el cargador
 ;  (PENTIUM.md lo cuenta).
 ;
+;  Se dibuja siempre con 32 bits por punto. Si el modo que hay es de 24 o de
+;  16 (hay tarjetas que no dan otro), «pantalla» es un lienzo de 32 bits en
+;  la memoria del núcleo, y volcar() pasa a la pantalla de verdad lo que se
+;  ha tocado, punto a punto. Con 32 bits, «pantalla» es la de verdad y
+;  volcar() no hace nada.
+;
 ;  La memoria de la pantalla está muy por encima de la RAM: se pone en la
 ;  zona de los gráficos del núcleo (paginas.cas, GRÁFICOS_INICIO), cuyas
 ;  tablas ven todos los espacios de direcciones.
@@ -19,7 +25,7 @@
 ; =============================================================================
 módulo Video
 
-    importar Cpu, Multiboot, Paginas, Grafico
+    importar Cpu, Multiboot, Paginas, Monton, Grafico
 
     constante VBE_ÍNDICE = 0x1CE
     constante VBE_DATO = 0x1CF
@@ -34,6 +40,9 @@ módulo Video
     público variable pantalla: Lienzo           ; la pantalla de verdad
     público variable pantalla_física: nat32     ; dónde está su memoria (dirección física)
     público variable por_bochs: bool            ; el modo lo ha puesto la VBE de Bochs (no el cargador)
+    público variable bits_pantalla: nat32       ; los bits por punto del modo (32, 24 o 16)
+    variable real: nat32                        ; la pantalla de verdad (si no es de 32 bits)
+    variable octetos_fila: nat32                ; de una fila a la siguiente, en ella
 
     función vbe_pon(índice: nat32, dato: nat32)
         ensamblador
@@ -98,17 +107,88 @@ módulo Video
         devolver cierto
     fin
 
-    ; pone un modo gráfico de 32 bits por punto, de ese ancho y ese alto si
-    ; se puede elegir. Falso si no hay manera (y dice por qué).
-    público función pon_modo(ancho: nat32, alto: nat32): bool
+    ; n puntos de 32 bits, a 24 (tres octetos cada uno)
+    función fila_a_24(destino: nat32, origen: puntero a nat32, n: nat32)
+        ensamblador
+            mov edi, {destino}
+            mov esi, {origen}
+            mov ecx, {n}
+        .otro:
+            mov eax, [esi]
+            mov [edi], ax
+            shr eax, 16
+            mov [edi+2], al
+            add esi, 4
+            add edi, 3
+            dec ecx
+            jnz .otro
+        fin
+    fin
+
+    ; n puntos de 32 bits, a 16 (5 de rojo, 6 de verde, 5 de azul)
+    función fila_a_16(destino: nat32, origen: puntero a nat32, n: nat32)
+        ensamblador
+            mov edi, {destino}
+            mov esi, {origen}
+            mov ecx, {n}
+        .otro:
+            mov eax, [esi]
+            mov edx, eax
+            mov ebx, eax
+            shr eax, 8
+            and eax, 0xF800
+            shr edx, 5
+            and edx, 0x07E0
+            shr ebx, 3
+            and ebx, 0x001F
+            or eax, edx
+            or eax, ebx
+            mov [edi], ax
+            add esi, 4
+            add edi, 2
+            dec ecx
+            jnz .otro
+        fin
+    fin
+
+    ; lo que se ha dibujado en ese rectángulo de «pantalla», a la pantalla de
+    ; verdad (con 32 bits por punto ya está en ella: nada)
+    público función volcar(x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable j: ent32
+        si bits_pantalla = 32 o no hay_pantalla entonces devolver fin
+        si x < 0 entonces
+            an := an + x
+            x := 0
+        fin
+        si yy < 0 entonces
+            al := al + yy
+            yy := 0
+        fin
+        si x + an > pantalla.ancho entonces an := pantalla.ancho - x fin
+        si yy + al > pantalla.alto entonces al := pantalla.alto - yy fin
+        si an <= 0 o al <= 0 entonces devolver fin
+        para j desde yy hasta yy + al - 1 hacer
+            si bits_pantalla = 24 entonces
+                fila_a_24(real + nat32(j) * octetos_fila + nat32(x) * 3, pantalla.puntos + (j * pantalla.ancho + x), nat32(an))
+            sino
+                fila_a_16(real + nat32(j) * octetos_fila + nat32(x) * 2, pantalla.puntos + (j * pantalla.ancho + x), nat32(an))
+            fin
+        fin
+    fin
+
+    ; pone un modo gráfico (de 32 bits por punto si se puede elegir), de ese
+    ; ancho y ese alto. «bits_pedidos», para probar: 24 o 16 con la VBE de
+    ; Bochs (0: lo normal). Falso si no hay manera (y dice por qué).
+    público función pon_modo(ancho: nat32, alto: nat32, bits_pedidos: nat32): bool
         variable base, fila, an, al, bits, id: nat32
+        variable m: puntero a byte
         si hay_pantalla entonces devolver cierto fin
+        si bits_pedidos <> 24 y bits_pedidos <> 16 entonces bits_pedidos := 32 fin
         si pantalla_del_cargador(base, fila, an, al, bits) entonces
-            si bits <> 32 o fila yb 3 <> 0 entonces
-                escribir("pantalla: el cargador ha puesto un modo de ", bits, " bits por punto, y tiene que ser de 32\n")
+            si bits <> 32 y bits <> 24 y bits <> 16 entonces
+                escribir("pantalla: el cargador ha puesto un modo de ", bits, " bits por punto, y tiene que ser de 32, 24 o 16\n")
                 devolver falso
             fin
-            fila := fila div 4
         sino
             id := vbe_lee(VBE_ID)
             si id < 0xB0C0 o id > 0xB0CF entonces
@@ -118,25 +198,40 @@ módulo Video
             vbe_pon(VBE_ACTIVAR, 0)
             vbe_pon(VBE_ANCHO, ancho)
             vbe_pon(VBE_ALTO, alto)
-            vbe_pon(VBE_BITS, 32)
+            vbe_pon(VBE_BITS, bits_pedidos)
             vbe_pon(VBE_ACTIVAR, VBE_ENCENDIDO)
-            si vbe_lee(VBE_ANCHO) <> ancho o vbe_lee(VBE_ALTO) <> alto o vbe_lee(VBE_BITS) <> 32 entonces
+            si vbe_lee(VBE_ANCHO) <> ancho o vbe_lee(VBE_ALTO) <> alto o vbe_lee(VBE_BITS) <> bits_pedidos entonces
                 vbe_pon(VBE_ACTIVAR, 0)
-                escribir("pantalla: la tarjeta no da ", ancho, "x", alto, " con 32 bits por punto\n")
+                escribir("pantalla: la tarjeta no da ", ancho, "x", alto, " con ", bits_pedidos, " bits por punto\n")
                 devolver falso
             fin
             base := memoria_bochs()
             an := ancho
             al := alto
-            fila := ancho
+            bits := bits_pedidos
+            fila := ancho * (bits div 8)
             por_bochs := cierto
         fin
-        si no a_la_vista(base, fila * al * 4) entonces
+        si no a_la_vista(base, fila * al) entonces
             escribir("pantalla: no se puede poner a la vista la memoria de la pantalla\n")
             devolver falso
         fin
         pantalla_física := base
-        pon_lienzo(pantalla, puntero(GRÁFICOS_INICIO + (base yb 0xFFF)), fila, an, al)
+        bits_pantalla := bits
+        si bits = 32 y fila yb 3 = 0 entonces
+            pon_lienzo(pantalla, puntero(GRÁFICOS_INICIO + (base yb 0xFFF)), fila div 4, an, al)
+        sino
+            ; no es de 32 bits: se dibuja en un lienzo aparte, y volcar() lo pasa
+            si bits = 32 entonces bits_pantalla := 24 fin     ; (no pasa: una fila de 32 bits siempre es múltiplo de 4)
+            m := reservar(an * al * 4)
+            si m = nulo entonces
+                escribir("pantalla: no hay memoria para el lienzo de la pantalla\n")
+                devolver falso
+            fin
+            real := GRÁFICOS_INICIO + (base yb 0xFFF)
+            octetos_fila := fila
+            pon_lienzo(pantalla, puntero(m), an, an, al)
+        fin
         hay_pantalla := cierto
         devolver cierto
     fin

@@ -124,7 +124,8 @@ módulo Escritorio
         variable x, yy, desde_y: ent32
         variable p: puntero a nat32
         para x desde 0 hasta tapiz.ancho - 1 hacer
-            desde_y := línea_base - ola(x + fase, largo, alza)
+            ; (la cresta, en pico hacia arriba: olas, no lomas)
+            desde_y := línea_base - alza + ola(x + fase, largo, alza)
             si desde_y < 0 entonces desde_y := 0 fin
             p := tapiz.puntos + (desde_y * ent32(tapiz.salto) + x)
             yy := desde_y
@@ -146,10 +147,10 @@ módulo Escritorio
             si no:
                 ; «Olas»: del azul de arriba al verde de abajo, en cuatro olas
                 degradado(tapiz, 0, 0, an, al, 0x154C9C, 0x2F8FD2)
-                pinta_ola(al * 52 div 100, an * 70 div 100, an * 20 div 100, al * 9 div 100, 0x2FA7C9, 90)
-                pinta_ola(al * 66 div 100, an * 55 div 100, an * 48 div 100, al * 8 div 100, 0x33B5A6, 110)
-                pinta_ola(al * 80 div 100, an * 85 div 100, an * 5 div 100, al * 10 div 100, 0x46C282, 120)
-                pinta_ola(al * 93 div 100, an * 60 div 100, an * 33 div 100, al * 7 div 100, 0x7ED46A, 130)
+                pinta_ola(al * 50 div 100, an * 46 div 100, an * 20 div 100, al * 7 div 100, 0x2A9FD4, 80)
+                pinta_ola(al * 64 div 100, an * 38 div 100, an * 9 div 100, al * 7 div 100, 0x2CB3C6, 100)
+                pinta_ola(al * 79 div 100, an * 54 div 100, an * 31 div 100, al * 8 div 100, 0x36C0AE, 115)
+                pinta_ola(al * 93 div 100, an * 42 div 100, an * 2 div 100, al * 7 div 100, 0x58D09A, 130)
         fin
         ; la firma: el disquete y el nombre, abajo a la derecha
         disquete(tapiz, an - 226, al - ALTO_BARRA - 74, 56)
@@ -348,6 +349,23 @@ módulo Escritorio
         variable m, r, n, i: nat32
         variable e: Entrada
         n_documentos := 0
+        si unidad_en_memoria() entonces
+            ; sin disco: los .TXT que ha traído el cargador
+            i := 0
+            mientras i < módulos() y n_documentos < MAX_DOCUMENTOS hacer
+                n := 0
+                mientras n < 12 y módulo_nombre(i)[n] <> 0 y módulo_nombre(i)[n] <> ' ' hacer
+                    documentos[n_documentos][n] := mayúscula(módulo_nombre(i)[n])
+                    n := n + 1
+                fin
+                documentos[n_documentos][n] := 0
+                si n > 4 y documentos[n_documentos][n - 4] = '.' y documentos[n_documentos][n - 3] = 'T' y documentos[n_documentos][n - 2] = 'X' y documentos[n_documentos][n - 1] = 'T' entonces
+                    n_documentos := n_documentos + 1
+                fin
+                i := i + 1
+            fin
+            devolver
+        fin
         si no montado entonces devolver fin
         m := abrir_archivo("\\", PARA_LEER)
         si m >= PRIMER_ERROR entonces devolver fin
@@ -563,7 +581,8 @@ módulo Escritorio
         rectángulo(valor(l), 14, 66, 432, 1, 0xA9C6EC)
         d[0] := nat32(pantalla.ancho)
         d[1] := nat32(pantalla.alto)
-        formatear(renglón, 96, "Pantalla:  %u x %u, 32 bits por punto", d)
+        d[2] := bits_pantalla
+        formatear(renglón, 96, "Pantalla:  %u x %u, %u bits por punto", d)
         texto(valor(l), 20, 78, renglón, TINTA)
         d[0] := (límite + 0xFFFFF) div 0x100000
         d[1] := marcos_libres() * 4 div 1024
@@ -638,6 +657,7 @@ módulo Escritorio
         si reiniciar entonces t := "Reiniciando el equipo..." sino t := "Ya puede apagar el equipo." fin
         texto_negrita(pantalla, (pantalla.ancho - ancho_texto(t)) div 2, pantalla.alto div 2, t, BLANCO)
         texto(pantalla, (pantalla.ancho - 13 * 8) div 2, pantalla.alto div 2 + 28, "Hispa-Pentium", 0xBFDCFA)
+        volcar(0, 0, pantalla.ancho, pantalla.alto)
         si reiniciar entonces
             escribir("escritorio: reiniciar\n")
             ensamblador
@@ -808,10 +828,14 @@ módulo Escritorio
     ; ventanas, el tapiz, la barra y el menú, y su tarea. Da 1 si queda en
     ; marcha (o ya lo estaba); 0 si no se puede (y dice por qué).
     público función arranca(): nat32
-        variable an, al: nat32
+        variable an, al, bits: nat32
         variable p, q: puntero a byte
         variable t: puntero a Tarea
+        variable d: arreglo [5] de nat32
         si escritorio_en_marcha entonces devolver 1 fin
+        bits := 0
+        p := buscar(línea_del_cargador(), "bits=")
+        si p <> nulo entonces bits := número_tras(p + 5, q) fin
         an := 800
         al := 600
         p := buscar(línea_del_cargador(), "modo=")
@@ -825,7 +849,7 @@ módulo Escritorio
         fin
         p := buscar(línea_del_cargador(), "tapiz=")
         si p <> nulo entonces fondo := número_tras(p + 6, q) mod 3 fin
-        si no pon_modo(an, al) entonces devolver 0 fin
+        si no pon_modo(an, al, bits) entonces devolver 0 fin
         si no prepara_ventanas() entonces
             escribir("escritorio: no hay memoria para la pantalla\n")
             devolver 0
@@ -853,7 +877,12 @@ módulo Escritorio
         desviado := cierto
         escritorio_en_marcha := cierto
         tomar_consola()
-        imprimir3("escritorio: en marcha, %u x %u, tapiz %u\n", nat32(pantalla.ancho), nat32(pantalla.alto), fondo)
+        d[0] := nat32(pantalla.ancho)
+        d[1] := nat32(pantalla.alto)
+        d[2] := bits_pantalla
+        si por_bochs entonces d[3] := nat32("lo ha puesto el núcleo, por la VBE de Bochs/QEMU") sino d[3] := nat32("lo ha dejado puesto el cargador") fin
+        d[4] := fondo
+        imprimir("escritorio: en marcha, %u x %u con %u bits por punto (el modo %s), tapiz %u\n", d)
         soltar_consola()
         devolver 1
     fin
