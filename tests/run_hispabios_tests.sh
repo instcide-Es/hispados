@@ -87,8 +87,10 @@ hb_reloj() { echo "$L" | grep -q "$1" && ok "$2" || ko "$3"; }
 
 # HB_SOLO=32: solo las pruebas de la parte de 32 bits (tests/hispabios32_casos.sh);
 # HB_SOLO=raton: solo las del ratón y los discos de efi64 (tests/hispabios_raton_casos.sh)
+# HB_SOLO=teclado: solo las del teclado USB del firmware (tests/hispabios_teclado_casos.sh)
 if [ "${HB_SOLO:-}" = 32 ]; then . tests/hispabios32_casos.sh; exit $fail; fi
 if [ "${HB_SOLO:-}" = raton ]; then . tests/hispabios_raton_casos.sh; exit $fail; fi
+if [ "${HB_SOLO:-}" = teclado ]; then . tests/hispabios_teclado_casos.sh; exit $fail; fi
 
 for arq in 64 32; do
   echo "== HispaBIOS: arranque por UEFI de $arq bits (sin CSM) =="
@@ -415,5 +417,8 @@ fi
 
 # ---- El ratón con UEFI (0.5) y los discos de efi64.asm ----
 . tests/hispabios_raton_casos.sh
+
+# ---- El teclado USB del firmware y los tics de su reloj (0.6: MEDION S2217) ----
+. tests/hispabios_teclado_casos.sh
 
 exit $fail
