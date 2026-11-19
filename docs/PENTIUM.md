@@ -1375,12 +1375,11 @@ donde CASTEL deja su archivo temporal y la salida (en A:, los fuentes: solo los
 módulos del núcleo en la segunda tanda, y los programas con los dos módulos que
 usan en la tercera). Lo que sacan los dos compiladores sigue siendo lo mismo.
 
-Con todo, `pruebas.sh` tiene ahora **320 comprobaciones** (eran 281; unos
-veinticuatro minutos en el VPS). La última pasada entera (19/11/2026) dio 319 bien
-y 1 mal: un punto mal elegido en una comprobación nueva (caía en la raya del
-cursor), que se corrigió; después, `SOLO=32 ./pruebas.sh` (lo de Hispa-Pentium y
-los errores) da **239 bien, 0 mal**, y CASTEL y `ccastel.py` siguen sacando el
-mismo ensamblador para el núcleo tal como ha quedado.
+Con todo, `pruebas.sh` tiene ahora **369 comprobaciones** (eran 320; unos treinta
+y cinco minutos en el VPS). La última pasada entera (19/11/2026, con la 0.6) dio
+**369 bien, 0 mal**; `SOLO=06 ./pruebas.sh` (los errores y la parte 9, lo de la
+0.6) son unos ocho minutos, y `SOLO=16`, lo que no arranca el núcleo (de la parte
+1 a la 7, con los dos compiladores y los dos ensambladores), otros siete.
 
 ## 13. Por dónde seguir
 
