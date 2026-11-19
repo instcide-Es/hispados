@@ -30,6 +30,9 @@ desde el 19/11, **disco duro (ATA) con FAT12/16/32**, programas que se cargan de
 **intérprete de órdenes en el anillo 3** (DIR, TYPE, VER, CLS, MEM, AYUDA y lanzar programas);
 y ese mismo día, **escribir en el disco** (COPY, DEL, REN, MD, RD, `>` y `>>`), CD, PATH,
 archivos .BAT, la historia de la línea, Ctrl+C, el **teclado español** y los nombres largos.
+Y, desde la 0.4, **un escritorio** (el primer entorno gráfico: modo de 32 bits, ratón,
+ventanas, barra de tareas con «Inicio», menú Inicio, un Bloc de notas y una Consola), también
+en Castel.
 Para él hay una **biblioteca de 32 bits** en Castel (`biblioteca32/`: textos, memoria y
 escribir con formato).
 
@@ -50,13 +53,19 @@ escribir con formato).
 - `biblioteca32/` — la de **32 bits**: `textos32.cas`, `mem32.cas` y `formato.cas` (un
   `printf` sencillo) (CASTEL32.md §7).
 - `nucleo32/` — **Hispa-Pentium**: el núcleo (`semilla.cas` y sus módulos: `cpu`, `multiboot`,
-  `marcos`, `paginas`, `monton`, `tareas`, `consola`, `ata`, `fat`, `fecha`, `usuario`), el módulo de
+  `marcos`, `paginas`, `monton`, `tareas`, `consola`, `ata`, `fat`, `fecha`, `usuario`; y, desde la
+  0.4, el entorno gráfico: `video`, `grafico`, `letra`, `raton`, `ventanas`, `terminal` y
+  `escritorio`), el módulo de
   las llamadas al sistema para los programas (`llamadas.cas`), el intérprete de órdenes
   (`uordenes.cas`) y los demás programas de usuario (`uhola.cas`, `ueco.cas`, `umalo.cas`,
-  `ucli.cas`, `uprueba.cas`, `uescribe.cas`, `ubucle.cas`); `disco.sh`, que hace la imagen de un
+  `ucli.cas`, `uprueba.cas`, `uescribe.cas`, `ubucle.cas`; y los del escritorio: `ubloc.cas`, el
+  Bloc de notas, y `uconsola.cas`, la Consola); `disco.sh`, que hace la imagen de un
   disco FAT con todos ellos; `probar.sh`, que arranca el núcleo en QEMU (con ese disco) y le
-  teclea órdenes (en el teclado español), y `pantalla.py`, que deja lo que sale como se ve en
-  la pantalla ([../docs/PENTIUM.md](../docs/PENTIUM.md)).
+  teclea órdenes (en el teclado español) y, en el escritorio, le mueve el ratón y saca
+  capturas; `pantalla.py`, que deja lo que sale como se ve en la pantalla; `mira_captura.py`,
+  que mira las capturas del escritorio; `hazletra.py`, que hace `letra.cas`; `usb.sh`, que
+  hace una memoria USB con GRUB para probarlo en un PC, y `modo_grafico.py`, que hace la
+  copia del núcleo que le pide a GRUB el modo gráfico ([../docs/PENTIUM.md](../docs/PENTIUM.md)).
 - `ejemplos32/` — ejemplos de 32 bits (`plano.cas`, `biblio32.cas`, `hola32.cas`).
 - `compilar.sh ENTRADA.cas [SALIDA.COM] [-I CARPETA]` — compila (con `ccastel.py`) a
   `.asm` y ensambla (con NASM) a `NOMBRE.COM`, o a `NOMBRE.EXE` si el programa es de
@@ -284,6 +293,8 @@ Punteros lejanos como tipo y copiar arreglos y estructuras enteros. Ver CASTEL.m
    pruebas comparan los dos).
 3. **Hispa-Pentium**: el núcleo de la gama XP, en Castel. Ya tiene paginación, tareas,
    anillo 3, disco con FAT (se lee y se escribe), un intérprete de órdenes en el anillo 3
-   con sus archivos .BAT, Ctrl+C y el teclado español
-   ([../docs/PENTIUM.md](../docs/PENTIUM.md)); lo siguiente, crear nombres largos, tuberías
-   y una caché de disco de verdad.
+   con sus archivos .BAT, Ctrl+C y el teclado español y, desde la 0.4, un **escritorio**
+   (ventanas, ratón, barra de tareas, menú Inicio, Bloc de notas y Consola), todo en Castel
+   ([../docs/PENTIUM.md](../docs/PENTIUM.md)); lo siguiente, probarlo en PC de verdad
+   (teclado y ratón USB, discos SATA), crear nombres largos, tuberías y una caché de disco
+   de verdad.
