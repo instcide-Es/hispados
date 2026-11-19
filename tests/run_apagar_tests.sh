@@ -18,7 +18,13 @@
 #  - Hispa Ventanas: el botón «Salir» abre el cuadro (captura), Esc lo
 #    cancela, Alt+F4 en el escritorio lo abre, «Volver a Hispa-DOS» vuelve al
 #    indicador; «Reiniciar el equipo» y «Apagar el equipo» (-M pc y -M q35)
-#    guardan CENTRO.INI, quitan HSPDPMI y reinician o apagan.
+#    guardan CENTRO.INI, quitan HSPDPMI y reinician o apagan;
+#  - [APAGAR-USB] arrancando de una memoria USB (SeaBIOS con xHCI y con EHCI;
+#    OVMF de 64 y de 32 bits con HispaBIOS): lo cambiado en Configuración
+#    (VENTANAS.INI) y CENTRO.INI están en la memoria después de «Apagar el
+#    equipo», y fsck.fat la da por sana; APAGAR desde DOS igual (con UEFI,
+#    por ResetSystem del firmware); con CENTRO.INI de solo lectura, Hispa
+#    Ventanas avisa antes de apagar («Cancelar» se queda, «Aceptar» apaga).
 # Deja capturas en build/apagar_*.png.
 # Shutdown / restart test.
 set -u
@@ -108,7 +114,7 @@ orden 'APAGAR /INFO' 3; orden 'REINICIAR /INFO' 3
 orden 'ECHO FIN-INFO'; espera '^FIN-INFO' 20
 cierra
 check "Apaga el equipo."
-check "APAGAR [/INFO] [/NOACPI] [/NOAPM] [/SOLO:método]"
+check "APAGAR [/INFO] [/NOUEFI] [/NOACPI] [/NOAPM] [/SOLO:método]"
 check "Reinicia el equipo."
 check "REINICIAR [/INFO] [/NOACPI | /SOLO:método]"
 check "APAGAR y REINICIAR (apagar o reiniciar el equipo)" "AYUDA: APAGAR y REINICIAR en la lista"
@@ -329,6 +335,149 @@ check "Reiniciando el equipo..."
 check "  registro de reinicio de ACPI" "q35: reinicia con el RESET_REG"
 if mtype -i $T/f.img ::HISPADOS/CENTRO.INI 2>/dev/null | grep -q 'Centro'; then ok "q35: CENTRO.INI guardado antes de reiniciar"
 else ko "q35: CENTRO.INI no se ha guardado"; fi
+
+# ---------------------------------------------------------------------------
+# [APAGAR-USB] Arrancando de una memoria USB (la BIOS la da por INT 13h: así
+# arrancan los portátiles de Carlos): lo que se cambia en Configuración y lo
+# que guarda Hispa Ventanas tiene que estar en la memoria después de «Apagar
+# el equipo», con la FAT sana (fsck.fat). Con SeaBIOS (xHCI y EHCI) y con
+# OVMF + HispaBIOS (UEFI de 64 y de 32 bits: apaga con ResetSystem).
+# Y si CENTRO.INI no se puede escribir, se dice antes de apagar.
+U486=${USB486:-$B/hispa486-usb.img}
+U386=${USB386:-$B/hispados-usb.img}
+UOFF=1048576                                # la partición empieza en el sector 2048
+# uarranca "opciones de QEMU" [qemu]: la memoria USB es $T/u.img
+uarranca() {
+  : > $T/log; rm -f $T/in $T/mon $T/rc; mkfifo $T/in
+  ( timeout 150 ${2:-qemu-system-i386} -display none -serial stdio -monitor unix:$T/mon,server,nowait \
+      -parallel none -m 64 $1 < $T/in > $T/log 2>&1
+    echo $? > $T/rc ) &
+  QP=$!
+  exec 3> $T/in
+}
+UXHCI="-device qemu-xhci,id=hc -drive if=none,id=u,format=raw,file=$T/u.img -device usb-storage,bus=hc.0,drive=u,bootindex=0"
+UEHCI="-device usb-ehci,id=hc -drive if=none,id=u,format=raw,file=$T/u.img -device usb-storage,bus=hc.0,drive=u,bootindex=0"
+uovmf() {   # 64 o 32: el firmware UEFI (OVMF) en $T
+  local c=/usr/share/OVMF/OVMF_CODE_4M.fd v=/usr/share/OVMF/OVMF_VARS_4M.fd
+  [ $1 = 32 ] && { c=/usr/share/OVMF/OVMF32_CODE_4M.fd; v=/usr/share/OVMF/OVMF32_VARS_4M.fd; }
+  [ -f $c ] || return 1
+  cp $v $T/vars.fd
+  echo "-smp 2 -drive if=pflash,format=raw,readonly=on,file=$c -drive if=pflash,format=raw,file=$T/vars.fd -drive file=$T/u.img,format=raw,if=none,id=u -device qemu-xhci -device usb-storage,drive=u,bootindex=1"
+}
+uini() { mtype -i $T/u.img@@$UOFF "::HISPADOS/$1" 2>/dev/null | tr -d '\r' | iconv -f CP437 -t UTF-8 -c > $T/ini.txt; }
+utiene() { if grep -qxF -- "$2" $T/ini.txt; then ok "$1: $3"; else ko "$1: $3 (falta «$2»)"; fi; }
+ufsck() {
+  dd if=$T/u.img of=$T/part.img bs=512 skip=$((UOFF / 512)) status=none
+  if fsck.fat -n $T/part.img > $T/fsck.txt 2>&1; then ok "$1: la memoria USB sin errores (fsck.fat)"
+  else ko "$1: fsck.fat encuentra errores en la memoria USB"; cat $T/fsck.txt; fi
+  rm -f $T/part.img
+}
+# el escritorio de Hispa-486 (arranca solo): espera a que esté
+uescritorio() { espera 'Instalado: clientes' 90 || ko "$1: no llega a Hispa Ventanas"; sleep ${2:-8}; RX=400; RY=300; }
+# «Salir de Hispa Ventanas...» del menú Inicio: el cuadro, con «Apagar» primero
+usalir() { tecla ctrl-esc; sleep 1; tecla up; sleep 0.4; tecla ret; sleep 2; }
+uconsola() { tr -d '\r' < $T/log | iconv -f CP437 -t UTF-8 -c | grep -v '^audio:' > $T/log.txt; }
+
+if [ -f "$U486" ]; then
+  for hc in xhci ehci; do
+    echo "== Desde una memoria USB ($hc, SeaBIOS): Configuración y «Apagar el equipo» en Hispa-486 =="
+    cp "$U486" $T/u.img; tests/tools/sinmenu.sh $T/u.img > /dev/null
+    [ $hc = xhci ] && O=$UXHCI || O=$UEHCI
+    uarranca "$O"
+    uescritorio $hc
+    tecla ctrl-esc; sleep 1; tecla right; sleep 1; tecla down ret; sleep 4   # Inicio > Principal > Configuración
+    clic 544 258; clic 575 317               # Pantalla: dibujo «damero», fondo granate
+    ir 16 320; sleep 4                       # (se guarda solo a los 3 s)
+    usalir
+    shot u1
+    date +%s%N > $T/t0; tecla ret            # Intro: «Apagar el equipo»
+    if termina 40; then ok "$hc: QEMU se apaga solo ($(segundos) s)"; else ko "$hc: no se ha apagado"; fi
+    if [ "$(cat $T/seg)" -ge 2000 ]; then ok "$hc: con la espera para que la memoria acabe (2 s o más)"
+    else ko "$hc: se ha apagado sin esperar a la memoria ($(segundos) s)"; fi
+    cierra; uconsola
+    check "Escribiendo en el disco lo que queda pendiente..." "$hc: APAGAR vacía los búferes"
+    uini VENTANAS.INI
+    utiene $hc "Dibujo=damero" "VENTANAS.INI con el dibujo elegido"
+    utiene $hc "ColorFondo=13" "VENTANAS.INI con el color elegido"
+    utiene $hc "Escritorio=486" "VENTANAS.INI conserva lo de Hispa-486"
+    uini CENTRO.INI
+    if grep -q '^; Hispa Ventanas - Centro de programas' $T/ini.txt && grep -qx '\[Centro\]' $T/ini.txt; then
+      ok "$hc: CENTRO.INI escrito por Hispa Ventanas al salir"; else ko "$hc: CENTRO.INI no se ha escrito"; fi
+    ufsck $hc
+  done
+
+  echo "== Desde una memoria USB: CENTRO.INI que no se puede escribir: se avisa antes de apagar =="
+  cp "$U486" $T/u.img; tests/tools/sinmenu.sh $T/u.img > /dev/null
+  mattrib -i $T/u.img@@$UOFF +r ::HISPADOS/CENTRO.INI
+  uarranca "$UXHCI"
+  uescritorio "solo lectura"
+  usalir; tecla ret; sleep 2                 # «Apagar el equipo»: no se puede guardar
+  shot u2
+  tecla esc; sleep 5                         # Cancelar: se queda en Hispa Ventanas
+  shot u3
+  if [ -f $T/rc ]; then ko "solo lectura: con «Cancelar» se ha apagado igual"; else ok "solo lectura: con «Cancelar» sigue en Hispa Ventanas"; fi
+  usalir; tecla ret; sleep 2
+  date +%s%N > $T/t0; tecla ret              # «Aceptar»: apagar igualmente
+  if termina 40; then ok "solo lectura: «Aceptar» apaga ($(segundos) s)"; else ko "solo lectura: «Aceptar» no apaga"; fi
+  cierra; uconsola
+  chk $T/u2.ppm busca 100 100 700 500 0 8 "No se ha podido guardar el Centro de programas" \
+    busca 100 100 700 500 0 8 "¿Apagar igualmente?"
+  chk $T/u3.ppm nobusca 100 100 700 500 0 8 "No se ha podido guardar el Centro de programas" \
+    texto 26 578 8 4 negrita "Inicio"
+  if [ "$(grep -c 'Escribiendo en el disco lo que queda pendiente' $T/log.txt)" = 1 ]; then
+    ok "solo lectura: APAGAR una sola vez (la segunda)"; else ko "solo lectura: APAGAR no ha ido una vez"; fi
+  ufsck "solo lectura"
+  muestra u2 noguarda
+else
+  echo "  (no hay $U486: «make usb486»; se salta la memoria USB de Hispa-486)"
+fi
+
+for arq in 64 32; do
+  [ -f "$U386" ] || break
+  O=$(uovmf $arq) || { echo "  (sin OVMF de $arq bits: se salta)"; continue; }
+  Q=qemu-system-x86_64; [ $arq = 32 ] && Q=qemu-system-i386
+  echo "== Desde una memoria USB (UEFI de $arq bits, HispaBIOS): APAGAR desde DOS =="
+  cp "$U386" $T/u.img; tests/tools/sinmenu.sh $T/u.img > /dev/null
+  printf '@ECHO OFF\r\nCOPY C:\\HISPADOS\\EQUIPO.COM C:\\COPIA.COM\r\nECHO escrito justo antes de apagar> C:\\ANTES.TXT\r\nAPAGAR\r\n' > $T/GUARDA.BAT
+  mcopy -o -i $T/u.img@@$UOFF $T/GUARDA.BAT ::GUARDA.BAT
+  uarranca "$O" $Q
+  espera 'C:\\>' 120 || ko "uefi$arq: no llega a C:\\>"
+  sleep 1
+  orden 'APAGAR /INFO' 3
+  orden 'GUARDA'
+  if termina 30; then ok "uefi$arq: QEMU se apaga solo ($(segundos) s)"; else ko "uefi$arq: no se ha apagado"; fi
+  cierra; uconsola
+  check "HispaBIOS (equipo UEFI): sí" "uefi$arq: APAGAR ve HispaBIOS"
+  check "Para apagar: el firmware UEFI (ResetSystem); si no apaga, ACPI (S5)" "uefi$arq: apaga primero con el firmware"
+  mcopy -o -i $T/u.img@@$UOFF ::COPIA.COM $T/copia.com 2>/dev/null
+  if cmp -s $T/copia.com $B/EQUIPO.COM; then ok "uefi$arq: COPIA.COM entera en la memoria"; else ko "uefi$arq: COPIA.COM no está entera"; fi
+  if [ "$(mtype -i $T/u.img@@$UOFF ::ANTES.TXT 2>/dev/null | tr -d '\r')" = "escrito justo antes de apagar" ]; then
+    ok "uefi$arq: ANTES.TXT en la memoria"; else ko "uefi$arq: ANTES.TXT no está en la memoria"; fi
+  ufsck uefi$arq
+done
+
+if [ -f "$U486" ] && O=$(uovmf 64); then
+  echo "== Desde una memoria USB (UEFI de 64 bits, HispaBIOS): Configuración y «Apagar el equipo» en Hispa-486 =="
+  cp "$U486" $T/u.img; tests/tools/sinmenu.sh $T/u.img > /dev/null
+  uarranca "$O" qemu-system-x86_64
+  uescritorio uefi 10
+  # (con el ratón: las teclas con Ctrl o Alt no llegan por el teclado del
+  # firmware de QEMU) Inicio > Configuración; Inicio > Salir > Apagar
+  clic 26 586; sleep 1; clic 120 456; sleep 4
+  clic 544 258; clic 575 317; ir 16 320; sleep 4
+  clic 26 586; sleep 1; clic 120 552; sleep 2
+  date +%s%N > $T/t0; clic 420 243
+  if termina 40; then ok "uefi: Hispa Ventanas > Apagar el equipo: QEMU se apaga solo ($(segundos) s)"
+  else ko "uefi: Hispa Ventanas > Apagar el equipo: no se ha apagado"; fi
+  cierra; uconsola
+  uini VENTANAS.INI
+  utiene uefi "Dibujo=damero" "VENTANAS.INI con el dibujo elegido"
+  utiene uefi "ColorFondo=13" "VENTANAS.INI con el color elegido"
+  uini CENTRO.INI
+  if grep -q '^; Hispa Ventanas - Centro de programas' $T/ini.txt; then ok "uefi: CENTRO.INI escrito por Hispa Ventanas"
+  else ko "uefi: CENTRO.INI no se ha escrito"; fi
+  ufsck uefi
+fi
 
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then echo "--- registro de la última sesión ---"; cat $T/log.txt; fi
 rm -rf $T
