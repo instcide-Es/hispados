@@ -13,7 +13,15 @@
 #     «Configuración de red...» abre Configuración en el apartado «Red».
 #  2.ª sesión, red por cable (una e1000 con HSPRED y CONFRED): el icono de los
 #     dos nodos; la ventanita con el enlace, la IP y la puerta de enlace.
-#  3.ª sesión, sin red: el icono hueco con el aspa; la ventanita lo dice.
+#     «Usar: Wi-Fi» sin tarjeta Wi-Fi: lo dice.
+#  3.ª sesión, sin red y con Wi-Fi (HAYWIFI=SI): el icono hueco con el aspa;
+#     la ventanita dice que no hay red y ofrece el Wi-Fi; «Usar: Wi-Fi» pide
+#     reiniciar; «No» lo deja para el próximo arranque.
+#  4.ª sesión, cable sin enlace (set_link off) y con Wi-Fi: «no hay cable
+#     enchufado», ofrece el Wi-Fi; «Usar: Wi-Fi» pide reiniciar; «Sí» reinicia
+#     de verdad y RED.INI dice Preferir=WIFI.
+#  En la 1.ª, además: «Usar: Cable» con el Wi-Fi cargado pide reiniciar
+#  (Esc: no), y «Automático» se guarda sin preguntar.
 # Dos QEMU a la vez como mucho. Deja capturas en build/wifi_ventana_*.png
 # (GUARDAR=carpeta: también allí).
 set -u
@@ -76,20 +84,23 @@ mkimg() {   # mkimg S: la imagen con sitio para el núcleo del Wi-Fi (400 KB)
   mcopy -o -i $T/$1.img $B/HSPWIFI.COM $B/WIFI.COM $B/HSPWIFI.BIN ::HISPADOS/
 }
 # En 800x600 sin batería: el altavoz en x = 732, el icono de red en 692..708,
-# y = 576..590 (la barra, de 572 a 599). La ventanita del Wi-Fi: 364x283 en
-# 348,281 (su zona en 350,306); la lista en 358,350 (filas de 18 desde 352);
-# la contraseña en 454,469; los botones en y = 500 (Buscar 358, Conectar
-# 436, Desconectar 530, Olvidar 640) y «Configuración de red...» en 358,532.
-# La de cable y la de sin red: 320 de ancho en 392 (zona en 394), encima de
-# la barra.
+# y = 576..590 (la barra, de 572 a 599). La ventanita del Wi-Fi: 364x311 en
+# 348,253 (su zona en 350,278); la lista en 358,322 (filas de 18 desde 324);
+# la contraseña en 454,441; los botones en y = 472 (Buscar 358, Conectar
+# 436, Desconectar 530, Olvidar 640), «Usar:» en y = 504 (Automático 404,
+# Cable 512, Wi-Fi 582) y «Configuración de red...» en 358,532.
+# La de cable (320x177) y la de sin red (320x159): en 392 (zona en 394),
+# encima de la barra; «Usar:» también en y = 504 (Automático 448, Cable
+# 556, Wi-Fi 626).
 IX=700; IY=585                  # el icono de red
-FILA() { echo $(( 352 + $1 * 18 + 9 )); }
-BY=512                          # los botones de abajo...
+FILA() { echo $(( 324 + $1 * 18 + 9 )); }
+BY=484                          # los botones de abajo...
+UY=514                          # ...«Usar:»...
 CONF_Y=544                      # ...y «Configuración de red...»
 
 echo "== Hispa Ventanas: el icono de red y su ventanita (Wi-Fi, cable y sin red) =="
-mkimg w; mkimg c; mkimg n
-RX[w]=400; RY[w]=300; RX[c]=400; RY[c]=300; RX[n]=400; RY[n]=300
+mkimg w; mkimg c; mkimg n; mkimg r
+RX[w]=400; RY[w]=300; RX[c]=400; RY[c]=300; RX[n]=400; RY[n]=300; RX[r]=400; RY[r]=300
 # ---- 1.ª: Wi-Fi (radio simulada) ----
 { sleep 7; send 'HSPWIFI /SIMULA' 6
   send 'VENTANAS /486' 12
@@ -109,6 +120,9 @@ RX[w]=400; RY[w]=300; RX[c]=400; RY[c]=300; RX[n]=400; RY[n]=300
   clic w 580 $BY; sleep 3; ir w 300 200; shot w b2   # «Desconectar»
   clic w 380 $(FILA 1); clic w 480 $BY; sleep 10; ir w 300 200; shot w b3   # «Conectar»: la clave guardada
   clic w 670 $BY; sleep 3; ir w 300 200; shot w b4   # «Olvidar»
+  clic w 540 $UY; sleep 2; ir w 300 200; shot w e1   # «Usar: Cable»: hay que reiniciar
+  tecla w esc; sleep 1.5; shot w e2             # «No» (Esc): para el próximo arranque
+  clic w 440 $UY; sleep 2; ir w 300 200; shot w e3   # «Automático»: sin preguntar
   clic w 450 $CONF_Y; sleep 4; ir w 300 200; shot w b5   # «Configuración de red...»
   tecla w alt-f4; sleep 1.5
   salir w
@@ -122,70 +136,117 @@ P1=$!
   send 'VENTANAS /486' 12
   ir c 300 200; shot c c1
   clic c $IX $IY; sleep 2; ir c 300 200; shot c c2
+  clic c 660 $UY; sleep 2; ir c 300 200; shot c c3   # «Usar: Wi-Fi» sin tarjeta Wi-Fi
   tecla c esc; sleep 1
   salir c
   send 'ECHO fin-de-la-prueba' 1
   mon c quit; } | qemu c 110 -netdev user,id=n0 -device e1000,netdev=n0 &
 P2=$!
 wait $P1 $P2
-# ---- 3.ª: sin red ----
+# HAYWIFI=SI: como si hubiera tarjeta Wi-Fi (QEMU no tiene ninguna de las admitidas)
+for s in n r; do
+  mtype -i $T/$s.img ::HISPADOS/RED.INI > $T/RED.INI; printf 'HAYWIFI=SI\r\n' >> $T/RED.INI
+  mcopy -o -i $T/$s.img $T/RED.INI ::HISPADOS/RED.INI
+done
+# ---- 3.ª: sin red (con Wi-Fi) ----
 { sleep 7; send 'VENTANAS /486' 12
   ir n 300 200; shot n d1
   clic n $IX $IY; sleep 2; ir n 300 200; shot n d2
+  clic n 660 $UY; sleep 2; ir n 300 200; shot n d3   # «Usar: Wi-Fi»: hay que reiniciar
+  tecla n esc; sleep 1.5; shot n d4             # «No»
   tecla n esc; sleep 1
   salir n
+  send 'TYPE A:\HISPADOS\RED.INI' 3
   send 'ECHO fin-de-la-prueba' 1
-  mon n quit; } | qemu n 80 -net none
+  mon n quit; } | qemu n 80 -net none &
+P1=$!
+# ---- 4.ª: cable sin enlace (con Wi-Fi); «Sí» reinicia (sin -no-reboot) ----
+{ sleep 4; mon r "set_link n0 off" 1; sleep 2
+  send 'HSPRED' 5
+  send 'VENTANAS /486' 12
+  clic r $IX $IY; sleep 2; ir r 300 200; shot r f1
+  clic r 660 $UY; sleep 2; ir r 300 200; shot r f2   # «Usar: Wi-Fi»: hay que reiniciar
+  tecla r ret; sleep 14                         # «Sí»: reinicia
+  send 'ECHO tras-reiniciar' 1
+  send 'TYPE A:\HISPADOS\RED.INI' 3
+  send 'ECHO fin-de-la-prueba' 1
+  mon r quit; } | { rm -f $T/r.mon
+  timeout 90 qemu-system-i386 -display none -serial stdio -monitor unix:$T/r.mon,server,nowait \
+    -parallel none -m 32 -drive file=$T/r.img,format=raw,if=floppy,index=0 -boot a \
+    -netdev user,id=n0 -device e1000,netdev=n0 > $T/r.raw 2>&1
+  tr -d '\r' < $T/r.raw | iconv -f CP437 -t UTF-8 -c > $T/r.txt; } &
+P2=$!
+wait $P1 $P2
 
 # (los colores: 0 tinta, 5 terracota clara, 6 arena, 7 arena oscura, 8 crema,
 # 9 blanco, 12 añil. El icono: las rayitas en x = 691..705 con el fondo en
 # y = 589, la 4.ª en 703..705; el aspa del Wi-Fi en 691,575; los nodos del
 # cable en 692,576 y 700,581, y su aspa en 701,574)
-L1="texto 360 312 0 8 negrita"   # la 1.ª línea de la ventanita del Wi-Fi
+L1="texto 360 284 0 8 negrita"   # la 1.ª línea de la ventanita del Wi-Fi
 echo "-- Wi-Fi: el icono sin conectar y la ventanita, que busca sola --"
 chk $T/a1.ppm px 703 583 6 "rayitas huecas" nopx 704 583 8 "ninguna llena" px 691 575 5 "el aspa (sin conectar)"
-chk $T/a2.ppm $L1 "Wi-Fi: sin conectar" busca 355 325 370 340 0 8 "Elija una red y pulse «Conectar»." \
-  texto 366 353 9 12 fina "Vecina vieja" texto 366 371 0 9 fina "HispaPrueba" texto 366 389 0 9 fina "Vecina abierta" \
-  busca 590 350 600 362 9 12 "no admitida" busca 590 368 600 380 0 9 "WPA2" busca 590 386 600 398 0 9 "abierta" \
-  px 571 383 0 "la señal, en rayitas" px 582 375 0 "la 4.ª rayita (señal -47 dBm)"
+chk $T/a2.ppm $L1 "Wi-Fi: sin conectar" busca 355 297 370 312 0 8 "Elija una red y pulse «Conectar»." \
+  texto 366 325 9 12 fina "Vecina vieja" texto 366 343 0 9 fina "HispaPrueba" texto 366 361 0 9 fina "Vecina abierta" \
+  busca 590 322 600 334 9 12 "no admitida" busca 590 340 600 352 0 9 "WPA2" busca 590 358 600 370 0 9 "abierta" \
+  px 571 355 0 "la señal, en rayitas" px 582 347 0 "la 4.ª rayita (señal -47 dBm)"
 echo "-- Conectar: pide la contraseña, la enseña en asteriscos, dice por qué no conecta --"
-chk $T/a3.ppm busca 355 325 370 340 0 8 "Escriba la contraseña de la red." texto 366 371 9 12 fina "HispaPrueba"
-chk $T/a4.ppm texto 459 472 0 9 fina "**************" nopx 583 476 0 "15 asteriscos, ni uno más"
-chk $T/a5.ppm $L1 "Wi-Fi: sin conectar" busca 355 325 370 340 0 8 "No conecta: la contraseña no es esa." \
-  nobusca 455 470 470 480 0 9 "*"
+chk $T/a3.ppm busca 355 297 370 312 0 8 "Escriba la contraseña de la red." texto 366 343 9 12 fina "HispaPrueba"
+chk $T/a4.ppm texto 459 444 0 9 fina "**************" nopx 583 448 0 "15 asteriscos, ni uno más"
+chk $T/a5.ppm $L1 "Wi-Fi: sin conectar" busca 355 297 370 312 0 8 "No conecta: la contraseña no es esa." \
+  nobusca 455 442 470 452 0 9 "*"
 echo "-- con la buena: conectado, la señal y el icono --"
-chk $T/a6.ppm $L1 "Conectado a «HispaPrueba»" busca 355 325 370 340 0 8 "Señal -47 dBm, sin IP: falta CONFRED" \
-  texto 366 371 9 12 negrita "HispaPrueba" px 704 583 8 "el icono: cuatro rayitas llenas" nopx 691 575 5 "sin el aspa"
+chk $T/a6.ppm $L1 "Conectado a «HispaPrueba»" busca 355 297 370 312 0 8 "Señal -47 dBm, sin IP: falta CONFRED" \
+  texto 366 343 9 12 negrita "HispaPrueba" px 704 583 8 "el icono: cuatro rayitas llenas" nopx 691 575 5 "sin el aspa"
 chk $T/a7.ppm px 704 583 8 "cerrada la ventanita, el icono sigue lleno" px 692 589 8 "la 1.ª rayita"
 check w "WIFI=HispaPrueba"
 if grep -Eq "^WIFICLAVE=[0-9a-f]{64}$" $T/w.txt; then ok "RED.INI guarda la clave preparada (64 cifras)"; else ko "WIFICLAVE= en RED.INI"; fi
 checkn w "clave de prueba"
 checkn w "otra clave mala"
 echo "-- otra vez: desconectar, conectar con la clave guardada, olvidar --"
-chk $T/b1.ppm $L1 "Conectado a «HispaPrueba»" texto 366 371 9 12 negrita "HispaPrueba"
-chk $T/b2.ppm $L1 "Wi-Fi: sin conectar" busca 355 325 370 340 0 8 "Desconectado." px 691 575 5 "el icono: el aspa"
+chk $T/b1.ppm $L1 "Conectado a «HispaPrueba»" texto 366 343 9 12 negrita "HispaPrueba"
+chk $T/b2.ppm $L1 "Wi-Fi: sin conectar" busca 355 297 370 312 0 8 "Desconectado." px 691 575 5 "el icono: el aspa"
 chk $T/b3.ppm $L1 "Conectado a «HispaPrueba»" px 704 583 8 "el icono: lleno"
-chk $T/b4.ppm $L1 "Wi-Fi: sin conectar" busca 355 325 370 340 0 8 "Red olvidada (quitada de RED.INI)."
+chk $T/b4.ppm $L1 "Wi-Fi: sin conectar" busca 355 297 370 312 0 8 "Red olvidada (quitada de RED.INI)."
+echo "-- «Usar:»: Cable con el Wi-Fi cargado pide reiniciar; Automático, sin preguntar --"
+chk $T/a2.ppm busca 355 500 370 515 0 8 "Usar:" busca 400 500 430 515 0 8 "Automático"
+chk $T/e1.ppm busca 0 0 800 600 0 8 "Hace falta reiniciar para usar el cable." busca 0 0 800 600 0 8 "¿Reiniciar ahora?"
+chk $T/e2.ppm busca 355 297 370 312 0 8 "Cambiará la próxima vez que arranque." nobusca 0 0 800 600 0 8 "¿Reiniciar ahora?"
+chk $T/e3.ppm busca 355 297 370 312 0 8 "Guardado: al arrancar elegirá solo."
+check w "Preferir=AUTO"
 chk $T/b5.ppm busca 0 0 800 560 0 8 "Estado de la red:" busca 0 0 800 560 0 8 "Wi-Fi cargado (HSPWIFI)."
 n=$(sed -n '/tras-conectar/,$p' $T/w.txt | grep -c "^WIFI")
 if [ "$n" -eq 0 ]; then ok "tras «Olvidar» (y cerrar Configuración), RED.INI ya no lleva la red"; else ko "RED.INI sigue con $n líneas WIFI"; fi
 check w "fin-de-la-prueba"
 echo "-- cable: los dos nodos; el enlace, la IP y la puerta de enlace --"
 chk $T/c1.ppm px 694 578 8 "nodos llenos" nopx 701 574 5 "sin aspa"
-chk $T/c2.ppm texto 404 446 0 8 negrita "Red por cable" busca 395 460 420 490 0 8 "Enlace: conectado" \
-  busca 395 480 420 500 0 8 "Dirección IP: 10.0.2.15" busca 395 495 420 520 0 8 "Puerta de enlace: 10.0.2.2"
+chk $T/c2.ppm texto 404 420 0 8 negrita "Red por cable" busca 395 434 420 464 0 8 "Enlace: conectado" \
+  busca 395 454 420 474 0 8 "Dirección IP: 10.0.2.15" busca 395 469 420 494 0 8 "Puerta de enlace: 10.0.2.2"
+chk $T/c3.ppm busca 395 468 420 494 0 8 "Este equipo no tiene Wi-Fi."
 check c "fin-de-la-prueba"
 echo "-- sin red: los nodos huecos con el aspa; la ventanita lo dice --"
 chk $T/d1.ppm px 692 576 7 "nodos huecos" nopx 694 578 8 "sin rellenar" px 701 574 5 "el aspa"
-chk $T/d2.ppm busca 395 470 420 500 0 8 "No hay controlador de red cargado:"
+chk $T/d2.ppm busca 395 444 420 474 0 8 "No hay ninguna red en marcha."
+chk $T/d2.ppm busca 395 462 420 492 0 8 "Para usar el Wi-Fi, elija «Wi-Fi»."
+echo "-- sin red, con Wi-Fi: «Usar: Wi-Fi» pide reiniciar; «No» --"
+chk $T/d3.ppm busca 0 0 800 600 0 8 "Hace falta reiniciar para usar el Wi-Fi."
+chk $T/d4.ppm busca 395 462 420 492 0 8 "Cambiará la próxima vez que arranque."
+check n "Preferir=WIFI"
 check n "fin-de-la-prueba"
+echo "-- cable sin enlace, con Wi-Fi: lo dice, ofrece el Wi-Fi; «Sí» reinicia --"
+chk $T/f1.ppm texto 404 420 0 8 negrita "Red por cable" busca 395 434 420 464 0 8 "Enlace: no hay cable enchufado" \
+  busca 395 468 420 494 0 8 "Para usar el Wi-Fi, elija «Wi-Fi»."
+chk $T/f2.ppm busca 0 0 800 600 0 8 "Hace falta reiniciar para usar el Wi-Fi."
+n=$(grep -c "Ejecutando AUTOEXEC.BAT" $T/r.txt)
+if [ "$n" -ge 2 ]; then ok "«Sí»: el equipo se ha reiniciado ($n arranques)"; else ko "«Sí» no ha reiniciado ($n arranques)"; fi
+if sed -n '/tras-reiniciar/,$p' $T/r.txt | grep -q "^Preferir=WIFI"; then ok "tras reiniciar, RED.INI dice Preferir=WIFI"; else ko "RED.INI sin Preferir=WIFI tras reiniciar"; fi
+check r "fin-de-la-prueba"
 
 for f in $T/*.ppm; do
   n=$(basename $f .ppm)
   if command -v convert > /dev/null; then convert $f $B/wifi_ventana_$n.png; else cp $f $B/wifi_ventana_$n.ppm; fi
   [ -n "${GUARDAR:-}" ] && cp $B/wifi_ventana_$n.* "$GUARDAR"/
 done
-for s in w c n; do cp $T/$s.txt $B/wifi_ventana_$s.txt 2>/dev/null; done
+for s in w c n r; do cp $T/$s.txt $B/wifi_ventana_$s.txt 2>/dev/null; done
 echo "(capturas en $B/wifi_ventana_*)"
 if [ $fail -eq 0 ]; then echo "Icono de red: todas las pruebas pasan"; else echo "Icono de red: HAY FALLOS"; fi
 exit $fail

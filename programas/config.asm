@@ -686,6 +686,10 @@ red_claves  dd kr_dhcp, a_dhcp, 0
             ; orden WIFI, docs/WIFI.md): no se enseñan, pero se conservan
             dd kr_wclave, r_wclave_txt, 3
             dd kr_wifi, r_wifi_txt, 3
+            ; Preferir= (cable o Wi-Fi: la ventanita de la red de Hispa-486,
+            ; docs/RED.md «Cable o Wi-Fi») y HAYWIFI= (pruebas): se conservan
+            dd kr_pref, r_pref_txt, 3
+            dd kr_hay, r_hay_txt, 3
             dd 0
 kr_dhcp     db "DHCP", 0
 kr_ip       db "IP", 0
@@ -697,6 +701,10 @@ kr_dns      db "DNS", 0
 kr_act      db "ACTUALIZAR", 0
 kr_wifi     db "WIFI", 0
 kr_wclave   db "WIFICLAVE", 0
+kr_pref     db "PREFERIR", 0
+kr_hay      db "HAYWIFI", 0
+k_pref      db "Preferir=", 0
+k_hay       db "HAYWIFI=", 0
 k_wifi      db "WIFI=", 0
 k_wclave    db "WIFICLAVE=", 0
 
@@ -3296,6 +3304,8 @@ red_ini_leer:
 .wifi:
         mov byte [r_wifi_txt], 0
         mov byte [r_wclave_txt], 0
+        mov byte [r_pref_txt], 0
+        mov byte [r_hay_txt], 0
         mov esi, red_ruta
         mov edi, red_buf
         mov ecx, RED_BUFSZ
@@ -3518,6 +3528,22 @@ red_escribir_ini:
         call hvl_cad
         call .crlf
 .wr2:
+        cmp byte [r_pref_txt], 0    ; Preferir= y HAYWIFI=, tal cual estaban
+        je .wr3
+        mov esi, k_pref
+        call hvl_cad
+        mov esi, r_pref_txt
+        call hvl_cad
+        call .crlf
+.wr3:
+        cmp byte [r_hay_txt], 0
+        je .wr4
+        mov esi, k_hay
+        call hvl_cad
+        mov esi, r_hay_txt
+        call hvl_cad
+        call .crlf
+.wr4:
         mov ecx, edi
         mov edx, red_buf
         sub ecx, edx
@@ -5016,6 +5042,8 @@ r_gw_txt    resb 20
 r_dns_txt   resb 20
 r_act_txt   resb 100                ; ACTUALIZAR= (se conserva)
 r_wifi_txt  resb 68                 ; WIFI= (se conserva)
+r_pref_txt  resb 68                 ; Preferir= (se conserva)
+r_hay_txt   resb 68                 ; HAYWIFI= (se conserva)
 r_wclave_txt resb 68                ; WIFICLAVE= (se conserva)
 red_mac     resb 6
             alignb 4

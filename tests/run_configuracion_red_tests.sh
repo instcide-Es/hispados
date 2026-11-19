@@ -129,7 +129,8 @@ cp "$IMG" $T/f.img
 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 printf '%s\r\n' '; a mano' 'DHCP=NO' 'IP=10.0.0.5' 'MASCARA=255.0.0.0' 'PUERTA=10.0.0.1' \
   'DNS=10.0.0.1' 'ACTUALIZAR=http://ejemplo/ultima.txt' \
-  'WIFI=Red de casa 2' 'WIFICLAVE=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' > $T/RED.INI
+  'WIFI=Red de casa 2' 'WIFICLAVE=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' \
+  'Preferir=WIFI' > $T/RED.INI
 mcopy -o -i $T/f.img $T/RED.INI ::HISPADOS/RED.INI
 RX=400; RY=300
 { sleep 6
@@ -156,6 +157,8 @@ checkn "HSPDPMI: excepción"
 red "DHCP=SI"; red "ACTUALIZAR=http://ejemplo/ultima.txt"
 # [WIFI] la red inalámbrica guardada por la orden WIFI se conserva (docs/WIFI.md)
 red "WIFI=Red de casa 2"; red "WIFICLAVE=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+# y Preferir= (cable o Wi-Fi: la ventanita de la red, docs/RED.md)
+red "Preferir=WIFI"
 redn "IP="; redn "MASCARA="; redn "PUERTA="; redn "DNS="
 muestra b0 vuelta_manual; muestra b1 vuelta_dhcp
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/Ejecutando/,$p' $T/log.txt; cat $T/red.txt; fi

@@ -21,7 +21,11 @@
 ;      rayitas, seguridad), la contraseña (con asteriscos), «Buscar»,
 ;      «Conectar», «Desconectar», «Olvidar»;
 ;    - con HSPRED: el enlace, la dirección IP y la puerta de enlace;
-;    - y siempre «Configuración de red...» (Configuración › Red).
+;    - sin controlador del Wi-Fi y con tarjeta Wi-Fi, que se puede usar;
+;    - y siempre «Usar: Automático / Cable / Wi-Fi» (Preferir= de RED.INI, que
+;      leen HSPRED /AUTO y HSPWIFI /AUTO al arrancar: lib/redpref.inc; si
+;      hace falta otro controlador, ofrece reiniciar) y «Configuración de
+;      red...» (Configuración › Red).
 ;  Habla con HSPWIFI por su interrupción (INT 2Fh AX=DC01h: CX = función del
 ;  núcleo, DS:SI = la petición; las funciones, en wifi/nucleo/llamadas.h), lo
 ;  mismo que la orden WIFI: no hace falta nada nuevo en el controlador. La
@@ -79,6 +83,9 @@ WF_ID_CONECTAR equ 31
 WF_ID_DESCON equ 32
 WF_ID_OLVIDAR equ 33
 WF_ID_CONFIG equ 34
+WF_ID_AUTO  equ 37                  ; «Usar:» Automático, Cable y Wi-Fi (37 + Preferir)
+WF_ID_CABLE equ 38
+WF_ID_WIFI  equ 39
 WF_LIS_X    equ 8
 WF_LIS_Y    equ 44
 WF_LIS_AN   equ 344
@@ -89,6 +96,12 @@ c_wflis     dd wfl_proc
             db C_BLANCO, CB_FOCO, 0, 0
 c_wfcla     dd wfc_proc
             db C_BLANCO, CB_FOCO, 0, 0
+; «Usar:» y sus tres opciones, en la fila Y
+%macro WF_USAR 1
+        PLANTILLA c_boton, wf_t_oauto, E_HIJA | E_TABULA | BS_OPCION, 54, %1, 104, 20, WF_ID_AUTO
+        PLANTILLA c_boton, wf_t_ocable, E_HIJA | E_TABULA | BS_OPCION, 162, %1, 66, 20, WF_ID_CABLE
+        PLANTILLA c_boton, wf_t_owifi, E_HIJA | E_TABULA | BS_OPCION, 232, %1, 70, 20, WF_ID_WIFI
+%endmacro
 wf_h_wifi:
         PLANTILLA c_wflis, 0, E_HIJA | E_TABULA, WF_LIS_X, WF_LIS_Y, WF_LIS_AN, WF_FILAS * WF_FILA + 4, 35
         PLANTILLA c_wfcla, 0, E_HIJA | E_TABULA, 104, 163, 248, 22, 36
@@ -96,18 +109,23 @@ wf_h_wifi:
         PLANTILLA c_boton, wf_t_conectar, E_HIJA | E_TABULA | BS_DEFECTO, 86, 194, 88, 24, WF_ID_CONECTAR
         PLANTILLA c_boton, wf_t_descon, E_HIJA | E_TABULA, 180, 194, 104, 24, WF_ID_DESCON
         PLANTILLA c_boton, wf_t_olvidar, E_HIJA | E_TABULA, 290, 194, 62, 24, WF_ID_OLVIDAR
-        PLANTILLA c_boton, wf_t_config, E_HIJA | E_TABULA, 8, 226, 200, 24, WF_ID_CONFIG
+        WF_USAR 226
+        PLANTILLA c_boton, wf_t_config, E_HIJA | E_TABULA, 8, 254, 200, 24, WF_ID_CONFIG
         dd 0
 wf_h_cable:
-        PLANTILLA c_boton, wf_t_config, E_HIJA | E_TABULA, 10, 92, 200, 24, WF_ID_CONFIG
+        WF_USAR 92
+        PLANTILLA c_boton, wf_t_config, E_HIJA | E_TABULA, 10, 118, 200, 24, WF_ID_CONFIG
         dd 0
 wf_h_nada:
-        PLANTILLA c_boton, wf_t_config, E_HIJA | E_TABULA, 10, 74, 200, 24, WF_ID_CONFIG
+        WF_USAR 74
+        PLANTILLA c_boton, wf_t_config, E_HIJA | E_TABULA, 10, 100, 200, 24, WF_ID_CONFIG
         dd 0
-; ancho, alto y controles de la ventanita en cada caso (sin red, cable, Wi-Fi)
-wf_medidas  dd 320, 133, wf_h_nada
-            dd 320, 151, wf_h_cable
-            dd 364, 283, wf_h_wifi
+; ancho, alto, controles y fila de «Usar:» de la ventanita en cada caso (sin
+; red, cable, Wi-Fi)
+WF_MED      equ 16
+wf_medidas  dd 320, 159, wf_h_nada, 74
+            dd 320, 177, wf_h_cable, 92
+            dd 364, 311, wf_h_wifi, 226
 
 wf_t_tit    db "Red", 0
 wf_t_buscar db "Buscar", 0
@@ -117,14 +135,26 @@ wf_t_olvidar db "Olvidar", 0
 wf_t_config db "Configuración de red...", 0
 wf_t_clave  db "Contraseña:", 0
 wf_t_sinred db "Sin red", 0
-wf_t_sinred2 db "No hay controlador de red cargado:", 0
-wf_t_sinred3 db "HSPRED (cable) o HSPWIFI (Wi-Fi).", 0
+wf_t_sinred2 db "No hay ninguna red en marcha.", 0
+wf_t_sinred3 db "Enchufe el cable y reinicie el equipo.", 0
+wf_t_ofrece db "Para usar el Wi-Fi, elija «Wi-Fi».", 0
+wf_t_usar   db "Usar:", 0
+wf_t_oauto  db "Automático", 0
+wf_t_ocable db "Cable", 0
+wf_t_owifi  db "Wi-Fi", 0
+wf_p_wifi   db "Hace falta reiniciar para usar el Wi-Fi.", 10, "¿Reiniciar ahora?", 0
+wf_p_cable  db "Hace falta reiniciar para usar el cable.", 10, "¿Reiniciar ahora?", 0
+wf_m_auto   db "Guardado: al arrancar elegirá solo.", 0
+wf_m_ucable db "Ya se está usando el cable.", 0
+wf_m_uwifi  db "Ya se está usando el Wi-Fi.", 0
+wf_m_nowifi db "Este equipo no tiene Wi-Fi.", 0
+wf_m_luego  db "Cambiará la próxima vez que arranque.", 0
 wf_t_cable  db "Red por cable", 0
 wf_t_otro   db "Hay un controlador de red (packet driver),", 0
 wf_t_otro2  db "pero no da el enlace ni la dirección.", 0
 wf_t_enl    db "Enlace: ", 0
 wf_t_enl1   db "conectado", 0
-wf_t_enl0   db "no hay (¿está el cable?)", 0
+wf_t_enl0   db "no hay cable enchufado", 0
 wf_t_enlx   db "no se sabe", 0
 wf_t_ip     db "Dirección IP: ", 0
 wf_t_noip   db "todavía sin dirección", 0
@@ -162,6 +192,18 @@ wf_f9       db "Se ha perdido la señal.", 0
 wf_f10      db "No conecta: no contesta a tiempo.", 0
 wf_k_wifi   db "WIFI", 0
 wf_k_clave  db "WIFICLAVE", 0
+wf_k_pref   db "PREFERIR", 0
+wf_k_hay    db "HAYWIFI", 0
+wf_k_claves dd wf_k_clave, wf_k_wifi, wf_k_pref, wf_k_hay   ; 2, 1, 3, 4
+wf_k_num    db 2, 1, 3, 4
+wf_v_pref   dd wf_t_pauto, wf_t_pcable, wf_t_pwifi
+wf_t_preferir db "Preferir=", 0
+wf_t_pauto  db "AUTO", 0
+wf_t_pcable db "CABLE", 0
+wf_t_pwifi  db "WIFI", 0
+; las tarjetas Wi-Fi que sabe usar HSPWIFI (las mismas que HSPWIFI /AUTO)
+wf_ids:
+%include "wifi_ids.inc"
 wf_k_ruta   db "A:\HISPADOS\RED.INI", 0
 
 ; =============================================================================
@@ -797,24 +839,32 @@ wf_ini_leer:
         ret
 
 ; (interna) ESI = principio de una línea de wf_ini -> EAX = 1 si es WIFI=,
-; 2 si WIFICLAVE=, 0 otra; EBX = donde empieza el valor
+; 2 si WIFICLAVE=, 3 si PREFERIR=, 4 si HAYWIFI=, 0 otra; EBX = donde empieza
+; el valor
 wf_ini_clave:
+        push ecx
+        push edx
         push esi
         push edi
-        mov edi, wf_k_clave
+        xor edx, edx
+.k:
+        mov esi, [esp+4]            ; (la ESI de la entrada)
+        mov edi, [wf_k_claves + edx*4]
         call .cmp
-        mov eax, 2
-        jnc .r
-        mov esi, [esp+4]
-        mov edi, wf_k_wifi
-        call .cmp
-        mov eax, 1
-        jnc .r
+        jnc .si
+        inc edx
+        cmp edx, 4
+        jb .k
         xor eax, eax
+        jmp .r
+.si:
+        movzx eax, byte [wf_k_num + edx]
 .r:
         mov ebx, esi
         pop edi
         pop esi
+        pop edx
+        pop ecx
         ret
 .cmp:
         mov al, [esi]
@@ -967,8 +1017,17 @@ wf_ini_guardar:
 .ef:
         mov ecx, ebx
         sub ecx, esi
-        test edx, edx
-        jnz .sig                    ; las del Wi-Fi no se copian
+        cmp byte [wf_ini_que], 0
+        jne .q1
+        cmp edx, 1
+        je .sig                     ; las del Wi-Fi no se copian
+        cmp edx, 2
+        je .sig
+        jmp .copia
+.q1:
+        cmp edx, 3                  ; (Preferir=) la de antes, tampoco
+        je .sig
+.copia:
         rep movsb
 .sig:
         mov esi, ebx
@@ -981,6 +1040,17 @@ wf_ini_guardar:
         mov ax, 0x0A0D
         stosw
 .nuevas:
+        cmp byte [wf_ini_que], 0
+        je .nwifi
+        mov esi, wf_t_preferir      ; Preferir=AUTO, CABLE o WIFI
+        call pon_cad
+        movzx eax, byte [wf_pref]
+        mov esi, [wf_v_pref + eax*4]
+        call pon_cad
+        mov ax, 0x0A0D
+        stosw
+        jmp .escribe
+.nwifi:
         movzx ecx, byte [wf_ssid_n]
         jecxz .escribe
         mov eax, 'WIFI'
@@ -1035,6 +1105,191 @@ wf_ini_guardar:
         add al, 'a' - '9' - 1
 .d:
         stosb
+        ret
+
+; (interna) Preferir= y HAYWIFI= de RED.INI -> [wf_pref] (0 AUTO, 1 CABLE,
+; 2 WIFI; la última que haya); [wf_haywifi] = 1 si hay tarjeta Wi-Fi de las
+; de HSPWIFI (o HAYWIFI=SI, para las pruebas)
+wf_pref_leer:
+        pushad
+        mov byte [wf_pref], 0
+        mov byte [wf_haywifi], 0
+        call wf_ini_leer
+        mov esi, wf_ini
+        mov ebp, esi
+        add ebp, [wf_ini_n]
+.linea:
+        cmp esi, ebp
+        jae .fin
+        call wf_ini_clave
+        mov dl, [ebx]               ; la primera letra del valor
+        and dl, 0xDF
+        cmp eax, 3
+        jne .h
+        xor al, al
+        cmp dl, 'C'
+        jne .p1
+        mov al, 1
+.p1:
+        cmp dl, 'W'
+        jne .p2
+        mov al, 2
+.p2:
+        mov [wf_pref], al
+        jmp .salta
+.h:
+        cmp eax, 4
+        jne .salta
+        cmp dl, 'S'
+        jne .salta
+        mov byte [wf_haywifi], 1
+.salta:
+        cmp esi, ebp
+        jae .fin
+        lodsb
+        cmp al, 10
+        jne .salta
+        jmp .linea
+.fin:
+        call wf_pci_wifi
+        jc .x
+        mov byte [wf_haywifi], 1
+.x:
+        popad
+        ret
+
+; (interna) ¿hay en el PCI una tarjeta de wf_ids? (la BIOS del PCI, INT 1Ah
+; AX=B102h) CF=0 sí
+wf_pci_wifi:
+        pushad
+        xor eax, eax
+        mov [rmcs+0x00], eax
+        mov [rmcs+0x04], eax
+        mov [rmcs+0x10], eax
+        mov [rmcs+0x14], eax
+        mov dword [rmcs+0x1C], 0xB101
+        mov bl, 0x1A
+        call rm_int
+        test byte [rmcs+0x20], 1
+        jnz .no
+        cmp byte [rmcs+0x1D], 0
+        jne .no
+        cmp dword [rmcs+0x14], 0x20494350   ; «PCI »
+        jne .no
+        mov esi, wf_ids
+.otra:
+        movzx eax, word [esi]       ; fabricante (0: se acabó)
+        test eax, eax
+        jz .no
+        mov [rmcs+0x14], eax
+        movzx eax, word [esi+2]     ; aparato
+        mov [rmcs+0x18], eax
+        mov dword [rmcs+0x04], 0    ; el primero que haya
+        mov dword [rmcs+0x1C], 0xB102
+        push esi
+        mov bl, 0x1A
+        call rm_int
+        pop esi
+        test byte [rmcs+0x20], 1
+        jnz .sig
+        cmp byte [rmcs+0x1D], 0
+        je .si
+.sig:
+        add esi, 4
+        jmp .otra
+.si:
+        mov dword [rmcs+0x04], 0
+        popad
+        clc
+        ret
+.no:
+        mov dword [rmcs+0x04], 0
+        popad
+        stc
+        ret
+
+; (interna) «Usar:» ECX = WF_ID_AUTO, WF_ID_CABLE o WF_ID_WIFI: lo guarda en
+; RED.INI (Preferir=) y, si hace falta otro controlador (no se puede cambiar
+; con Hispa Ventanas abierto: HSPRED y HSPWIFI solo se ponen al arrancar),
+; ofrece reiniciar
+wf_usar:
+        pushad
+        movzx eax, cx
+        sub eax, WF_ID_AUTO
+        mov dword [wf_msg], 0
+        cmp al, [wf_pref]
+        je .ya
+        mov [wf_pref], al
+        mov byte [wf_ini_que], 1
+        call wf_ini_guardar
+        mov byte [wf_ini_que], 0
+        cmp dword [wf_msg], 0
+        jne .x                      ; (no se ha podido guardar: lo dice)
+.ya:
+        mov bl, [wf_modo]
+        cmp al, 1
+        je .cable
+        cmp al, 2
+        je .wifi
+        ; Automático: al arrancar, el cable si tiene enlace; si no, el Wi-Fi
+        cmp byte [wf_haywifi], 0
+        je .auto
+        cmp bl, 0
+        je .p_wifi                  ; sin red, y hay Wi-Fi
+        cmp bl, 1
+        jne .auto
+        cmp byte [wf_enlace], 0
+        je .p_wifi                  ; cable sin enlace, y hay Wi-Fi
+.auto:
+        mov dword [wf_msg], wf_m_auto
+        jmp .x
+.cable:
+        mov dword [wf_msg], wf_m_ucable
+        cmp bl, 1
+        je .x
+        mov dword [wf_msg], 0
+        mov esi, wf_p_cable
+        jmp .pide
+.wifi:
+        mov dword [wf_msg], wf_m_uwifi
+        cmp bl, 2
+        je .x
+        mov dword [wf_msg], wf_m_nowifi
+        cmp byte [wf_haywifi], 0
+        je .x
+        mov dword [wf_msg], 0
+.p_wifi:
+        mov esi, wf_p_wifi
+.pide:
+        mov [wf_preg], esi          ; la pregunta, en su tarea (es un cuadro modal)
+        mov eax, wf_tarea_reini
+        call tar_crear
+.x:
+        popad
+        ret
+
+; (tarea) «Hace falta reiniciar... ¿Reiniciar ahora?»: Sí reinicia como
+; «Reiniciar» del cuadro «Salir» (apa_encargo, REINICIA.COM); No lo deja
+; para la próxima vez que arranque
+wf_tarea_reini:
+        xor ebp, ebp
+        mov esi, [wf_preg]
+        mov edi, wf_t_tit
+        mov eax, DM_SI_NO
+        call dlg_mensaje
+        cmp eax, ID_SI
+        jne .no
+        mov esi, apa_n_reini
+        call apa_encargo
+        ret
+.no:
+        mov dword [wf_msg], wf_m_luego
+        mov dword [wf_tic], 0
+        mov ebp, [wf_ven]
+        test ebp, ebp
+        jz .r
+        call ven_invalidar
+.r:
         ret
 
 ; =============================================================================
@@ -1194,7 +1449,7 @@ wf_alternar:
 .abrir:
         call wf_leer
         movzx eax, byte [wf_modo]
-        imul eax, 12
+        imul eax, WF_MED
         lea edi, [wf_medidas + eax]
         sub esp, P_TAM
         mov esi, esp
@@ -1242,10 +1497,20 @@ wf_proc:
 .crear:
         mov [wf_ven], ebp
         movzx eax, byte [wf_modo]
-        imul eax, 12
+        imul eax, WF_MED
         mov esi, [wf_medidas + eax + 8]
         call ven_lista
         mov dword [wf_msg], 0
+        call wf_pref_leer           ; «Usar:», marcada la de RED.INI
+        movzx ecx, byte [wf_pref]
+        add ecx, WF_ID_AUTO
+        call ven_hija_id
+        push ebp
+        mov ebp, eax
+        mov eax, BM_PONER_MARCA
+        mov ecx, 1
+        call msg_enviar
+        pop ebp
         cmp byte [wf_modo], 2
         jne .nada
         mov ecx, 35
@@ -1269,6 +1534,13 @@ wf_proc:
         call ven_destruir
         jmp .nada
 .orden:
+        cmp cx, WF_ID_AUTO          ; «Usar:»
+        jb .o0
+        cmp cx, WF_ID_WIFI
+        ja .o0
+        call wf_usar
+        jmp .rep
+.o0:
         cmp cx, WF_ID_CONFIG
         jne .o1
         call ven_destruir           ; Configuración › Red (el 7.º apartado)
@@ -1372,6 +1644,13 @@ wf_texto:
 wf_pintar:
         call dc_pintar
         COLOR C_TINTA
+        movzx eax, byte [wf_modo]   ; «Usar:», delante de sus opciones
+        imul eax, WF_MED
+        mov ebx, [wf_medidas + eax + 12]
+        add ebx, 3
+        mov eax, 10
+        mov esi, wf_t_usar
+        call dc_texto
         mov byte [gdi_negrita], 1
         mov edi, wf_txt
         movzx eax, byte [wf_modo]
@@ -1387,7 +1666,14 @@ wf_pintar:
         mov esi, wf_t_sinred2
         mov ebx, 30
         call dc_texto
+        mov esi, [wf_msg]           ; el aviso; si no, qué se puede hacer
+        test esi, esi
+        jnz .n3
+        mov esi, wf_t_ofrece
+        cmp byte [wf_haywifi], 0
+        jne .n3
         mov esi, wf_t_sinred3
+.n3:
         mov ebx, 48
         call dc_texto
         jmp .f
@@ -1405,7 +1691,7 @@ wf_pintar:
         mov esi, wf_t_otro2
         mov ebx, 48
         call dc_texto
-        jmp .f
+        jmp .c3
 .hspred:
         mov esi, wf_t_enl
         call pon_cad
@@ -1437,6 +1723,25 @@ wf_pintar:
         mov eax, 10
         mov ebx, 48
         call wf_texto
+.c3:
+        ; la 3.ª línea: el aviso; sin cable y con Wi-Fi, que se puede usar;
+        ; si no, la puerta de enlace
+        mov esi, [wf_msg]
+        test esi, esi
+        jnz .c3t
+        cmp byte [wf_enlace], 0
+        jne .c3g
+        cmp byte [wf_haywifi], 0
+        je .c3g
+        mov esi, wf_t_ofrece
+.c3t:
+        mov eax, 10
+        mov ebx, 66
+        call dc_texto
+        jmp .f
+.c3g:
+        cmp byte [wf_hspred], 0
+        je .f
         test byte [wf_cfg], 1
         jz .f
         mov edi, wf_txt

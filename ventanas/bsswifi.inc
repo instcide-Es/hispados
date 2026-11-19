@@ -15,12 +15,16 @@ wf_firma    resd 1                  ; lo que se ve (si cambia, se repinta)
 wf_clave_n  resd 1                  ; letras de la contraseña escrita
 wf_ini_n    resd 1                  ; octetos de RED.INI leídos
 wf_nv       resd 1                  ; (wf_rayitas) cuántas llenas
+wf_preg     resd 1                  ; la pregunta de reiniciar (wf_tarea_reini)
 wf_modo     resb 1                  ; 0 sin red, 1 cable, 2 Wi-Fi (HSPWIFI)
 wf_hspred   resb 1                  ; (cable) contesta a INT 2Fh AH=DAh: hay datos
 wf_enlace   resb 1                  ; (cable) 0 sin enlace, 1 con enlace, FFh no se sabe
 wf_fase     resb 1                  ; WF_F_*: lo que está haciendo la ventanita
 wf_con_clave resb 1                 ; la red que se conecta lleva clave (WPA2)
 wf_ssid_n   resb 1
+wf_pref     resb 1                  ; «Usar:» (Preferir= de RED.INI): 0 AUTO, 1 CABLE, 2 WIFI
+wf_haywifi  resb 1                  ; hay tarjeta Wi-Fi de las de HSPWIFI
+wf_ini_que  resb 1                  ; wf_ini_guardar: 0 la red Wi-Fi, 1 Preferir=
 wf_c_lleno  resb 1                  ; (wf_rayitas) los colores
 wf_c_hueco  resb 1
 wf_cfg      resb 32                 ; la configuración IP compartida (INT 2Fh DA00h)
