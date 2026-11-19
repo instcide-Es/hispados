@@ -27,7 +27,9 @@ excepciones; marcos físicos con el mapa de memoria de multiboot; **paginación*
 de página atendido; un montón con comprobación; **tareas** con el reloj repartiendo el
 procesador; **programas del anillo 3** (el `modelo usuario`) con su llamada al sistema; y,
 desde el 19/11, **disco duro (ATA) con FAT12/16/32**, programas que se cargan del disco y un
-**intérprete de órdenes en el anillo 3** (DIR, TYPE, VER, CLS, MEM, AYUDA y lanzar programas).
+**intérprete de órdenes en el anillo 3** (DIR, TYPE, VER, CLS, MEM, AYUDA y lanzar programas);
+y ese mismo día, **escribir en el disco** (COPY, DEL, REN, MD, RD, `>` y `>>`), CD, PATH,
+archivos .BAT, la historia de la línea, Ctrl+C, el **teclado español** y los nombres largos.
 Para él hay una **biblioteca de 32 bits** en Castel (`biblioteca32/`: textos, memoria y
 escribir con formato).
 
@@ -48,12 +50,13 @@ escribir con formato).
 - `biblioteca32/` — la de **32 bits**: `textos32.cas`, `mem32.cas` y `formato.cas` (un
   `printf` sencillo) (CASTEL32.md §7).
 - `nucleo32/` — **Hispa-Pentium**: el núcleo (`semilla.cas` y sus módulos: `cpu`, `multiboot`,
-  `marcos`, `paginas`, `monton`, `tareas`, `consola`, `ata`, `fat`, `usuario`), el módulo de
+  `marcos`, `paginas`, `monton`, `tareas`, `consola`, `ata`, `fat`, `fecha`, `usuario`), el módulo de
   las llamadas al sistema para los programas (`llamadas.cas`), el intérprete de órdenes
   (`uordenes.cas`) y los demás programas de usuario (`uhola.cas`, `ueco.cas`, `umalo.cas`,
-  `ucli.cas`, `uprueba.cas`); `disco.sh`, que hace la imagen de un disco FAT con todos ellos, y
-  `probar.sh`, que arranca el núcleo en QEMU (con ese disco) y le teclea órdenes
-  ([../docs/PENTIUM.md](../docs/PENTIUM.md)).
+  `ucli.cas`, `uprueba.cas`, `uescribe.cas`, `ubucle.cas`); `disco.sh`, que hace la imagen de un
+  disco FAT con todos ellos; `probar.sh`, que arranca el núcleo en QEMU (con ese disco) y le
+  teclea órdenes (en el teclado español), y `pantalla.py`, que deja lo que sale como se ve en
+  la pantalla ([../docs/PENTIUM.md](../docs/PENTIUM.md)).
 - `ejemplos32/` — ejemplos de 32 bits (`plano.cas`, `biblio32.cas`, `hola32.cas`).
 - `compilar.sh ENTRADA.cas [SALIDA.COM] [-I CARPETA]` — compila (con `ccastel.py`) a
   `.asm` y ensambla (con NASM) a `NOMBRE.COM`, o a `NOMBRE.EXE` si el programa es de
@@ -62,9 +65,11 @@ escribir con formato).
   lo que escribe.
 - `pruebas.sh` — **todas las pruebas** (errores, ejemplos, MAS contra MAS, CONTAR y NUMERA,
   el ensamblador propio contra NASM, el compilador en Castel contra `ccastel.py` y el
-  arranque en tres pasos). Tarda unos cinco minutos (`SIN_ARRANQUE=1 ./pruebas.sh` se salta
-  el arranque; `SOLO=32 ./pruebas.sh`, solo los errores y lo de 32 bits, con el núcleo de
-  Hispa-Pentium, su disco y su intérprete de órdenes: unos dos minutos y medio). Con `AZAR=3 ./pruebas.sh`, además, tres programas de
+  arranque en tres pasos, y lo de 32 bits con Hispa-Pentium). Tarda unos trece minutos y
+  medio (`SIN_ARRANQUE=1 ./pruebas.sh` se salta el arranque; `SOLO=32 ./pruebas.sh`, solo los
+  errores y lo de 32 bits, con el núcleo de Hispa-Pentium, su disco —también escribiendo en
+  él—, su intérprete de órdenes y su teclado: unos diez minutos, casi todo en teclear las
+  órdenes tecla a tecla). Con `AZAR=3 ./pruebas.sh`, además, tres programas de
   cuentas al azar de 16 bits (`azar.py`, unas 380 cuentas cada uno) y tres de 32 bits
   (`azar32.py`, unas 200), comparadas con lo que tienen que dar.
 - `ejemplos/` — los programas de ejemplo; `ejemplos/esperado/` — lo que tiene que escribir
@@ -278,6 +283,7 @@ Punteros lejanos como tipo y copiar arreglos y estructuras enteros. Ver CASTEL.m
    `compilador/` (y, mientras se quiera conservar la etapa 0, también en `ccastel.py`: las
    pruebas comparan los dos).
 3. **Hispa-Pentium**: el núcleo de la gama XP, en Castel. Ya tiene paginación, tareas,
-   anillo 3, disco con FAT (de solo lectura) y un intérprete de órdenes en el anillo 3
-   ([../docs/PENTIUM.md](../docs/PENTIUM.md)); lo siguiente, escribir en el disco, Ctrl+C y
-   una pila que crece.
+   anillo 3, disco con FAT (se lee y se escribe), un intérprete de órdenes en el anillo 3
+   con sus archivos .BAT, Ctrl+C y el teclado español
+   ([../docs/PENTIUM.md](../docs/PENTIUM.md)); lo siguiente, crear nombres largos, tuberías
+   y una caché de disco de verdad.

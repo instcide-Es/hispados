@@ -1,7 +1,7 @@
 # Hispa-Pentium — el núcleo de la gama XP, escrito en Castel
 
-*18/11/2026. Hispa-Pentium es el miembro de la familia Hispa-DOS para los PC de
-2000 en adelante (la gama de Windows XP, [ROADMAP](ROADMAP.md)): un **núcleo propio
+*18/11/2026; puesto al día el 19/11/2026. Hispa-Pentium es el miembro de la
+familia Hispa-DOS para los PC de 2000 en adelante (la gama de Windows XP, [ROADMAP](ROADMAP.md)): un **núcleo propio
 de 32 bits, sin DOS por debajo**, con memoria virtual, escrito en
 [Castel](../castel/README.md). Esta nota cuenta lo que hay hecho: la semilla de la
 Fase 5 de Castel (IDT, reloj, teclado, excepciones) ha crecido hasta tener memoria
@@ -10,7 +10,12 @@ anillo 3; y, desde la noche del 18 al 19/11, **disco duro (ATA) y sistema de
 archivos (FAT12/16/32)**, programas que **se cargan del disco**, más llamadas al
 sistema (teclado, archivos, lanzar y esperar programas, memoria que crece) y un
 **intérprete de órdenes en el anillo 3** (DIR, TYPE, VER, CLS, MEM, AYUDA y lanzar
-programas por su nombre). Todo está en `castel/nucleo32/`.*
+programas por su nombre). En la tanda del 19/11 de madrugada: **se escribe en el
+disco** (crear, escribir, alargar, cortar y borrar archivos; carpetas; COPY, DEL,
+REN, MD, RD y la redirección `>` y `>>`), el intérprete tiene **carpeta de trabajo
+(CD), PATH, archivos .BAT, historia de la línea y Ctrl+C**, el **teclado es el
+español** (acentos con tecla muerta, ñ, ç, ¿ ¡) y se leen los **nombres largos**
+(VFAT). Todo está en `castel/nucleo32/`.*
 
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 
@@ -24,18 +29,24 @@ Con un disco (lo normal desde ahora):
 cd castel
 nucleo32/disco.sh /dev/shm/pentium.img            # un disco FAT16 con el intérprete y los programas
 DISCO=/dev/shm/pentium.img ARRANQUE=ordenes MODULOS= nucleo32/probar.sh "" dir "type leeme.txt" "eco hola y adios" malo mem salir apagar
+ESCRIBE=1 DISCO=/dev/shm/pentium.img ARRANQUE=ordenes MODULOS= nucleo32/probar.sh "" "md cartas" "echo hola > cartas\\una.txt" "dir cartas" salir apagar
+fsck.fat -n /dev/shm/pentium.img                  # el disco, visto desde fuera: sano
 ```
 
 `nucleo32/disco.sh IMAGEN [12|16|32|mbr]` hace la imagen de un disco duro con
 `mkfs.fat` y `mtools`: FAT16 (16 MB) si no se dice otra cosa, FAT12 (4 MB), FAT32
 (40 MB) o un disco con tabla de particiones y la FAT16 en la primera. Dentro van
 `ORDENES.BIN` (el intérprete de órdenes), `HOLA.BIN`, `ECO.BIN`, `MALO.BIN`,
-`CLI.BIN`, `PRUEBA.BIN`, `LEEME.TXT` y la carpeta `TEXTOS`.
+`CLI.BIN`, `PRUEBA.BIN`, `ESCRIBE.BIN`, `BUCLE.BIN`, tres archivos de órdenes
+(`LOTE.BAT`, `SINFIN.BAT`, `VISTO.BAT`), `LEEME.TXT` y las carpetas `TEXTOS` y
+`LARGOS` (esta, con nombres largos).
 
 `nucleo32/probar.sh` compila el núcleo (`semilla.cas` con sus módulos), arranca
-QEMU con `-kernel SEMILLA.BIN`, con la imagen de `DISCO=` como disco IDE (no se
-escribe en ella) y le teclea las órdenes por el monitor de QEMU (como un teclado
-de verdad). Lo que se escribe sale por la pantalla y por el puerto serie, y el
+QEMU con `-kernel SEMILLA.BIN`, con la imagen de `DISCO=` como disco IDE y le
+teclea las órdenes por el monitor de QEMU (como un teclado de verdad: el español,
+tecla a tecla, con sus acentos; `:tecla ctrl-c` o `:tecla up ret` pulsan esas
+teclas tal cual). **Lo que se escribe en el disco no llega a la imagen** (se queda
+en una copia de QEMU) **salvo con `ESCRIBE=1`**. Lo que se escribe sale por la pantalla y por el puerto serie, y el
 script lo enseña con el código con que acaba el núcleo. Con `ARRANQUE=ordenes`
 (lo que QEMU pasa con `-append`), el núcleo lanza el intérprete de órdenes nada
 más arrancar; sin eso, se queda en su consola (la del núcleo, sección 9), y el
@@ -50,67 +61,80 @@ luego 2, `quit`; o tecleando `salir` y `apagar`):
 cd castel
 nucleo32/disco.sh /dev/shm/pentium.img
 ./compilar.sh nucleo32/semilla.cas /dev/shm/SEMILLA.BIN
-qemu-system-i386 -kernel /dev/shm/SEMILLA.BIN -append ordenes -m 32 -display curses \
+qemu-system-i386 -kernel /dev/shm/SEMILLA.BIN -append ordenes -m 32 -display curses -rtc base=localtime \
   -drive file=/dev/shm/pentium.img,format=raw,if=ide,index=0 -device isa-debug-exit,iobase=0xf4,iosize=0x04
 ```
 
-(El teclado es el de EE. UU.: la barra `\` está donde la `ç`, y el punto y el
-guion donde siempre. En un PC con escritorio, sin `-display curses` sale la
-ventana de QEMU.) Sin QEMU: `SEMILLA.BIN` lo arranca cualquier cargador multiboot
+(Así **sí se escribe en la imagen**: lo que se cree o se borre queda en
+`/dev/shm/pentium.img`, y se puede mirar luego con `mdir -i /dev/shm/pentium.img ::`
+o comprobar con `fsck.fat -n`. El teclado es el español. **Ojo con `-display
+curses`**: ahí QEMU no recibe teclas, sino las letras que le manda el terminal, y
+las convierte en teclas de un teclado de EE. UU.: hay que arrancar con
+`-append "ordenes teclado=us"` (probado: van todas las letras y signos del ASCII,
+con su `\` y su `>`; no la eñe ni los acentos). Con `-k es` QEMU las convierte al
+teclado español y la eñe sale, pero no sabe dar las de Alt Gr ni las vocales con
+acento. Para ver el teclado español entero, la ventana de QEMU en un PC con
+escritorio (sin `-display curses`) o un PC de verdad: ahí cada tecla llega como
+es.) Sin QEMU: `SEMILLA.BIN` lo arranca cualquier cargador multiboot
 (GRUB: `multiboot /SEMILLA.BIN ordenes`), y el disco es el primero del canal IDE
 primario.
 
 ```
 Hispa-Pentium (semilla), un núcleo de 32 bits escrito en Castel
-memoria: 32 MB, 7866 marcos libres; paginación activa; 0 programas de usuario.
+memoria: 32 MB, 7862 marcos libres; paginación activa; 0 programas de usuario.
 disco 0: QEMU HARDDISK, 16 MB, FAT16.
 lanzo ORDENES.BIN del disco (la tarea 3, en el anillo 3)
 
 Hispa-Pentium: intérprete de órdenes (un programa del anillo 3, la tarea 3).
 Escriba AYUDA para ver las órdenes.
-C:\>dir
- Directorio de C:\
+C:\>md cartas
+C:\>cd cartas
+C:\CARTAS>echo Querida señora: ¿qué tal está? > maría.txt
+C:\CARTAS>type \leeme.txt >> maría.txt
+C:\CARTAS>copy maría.txt copia.txt
+        1 archivo(s) copiado(s).
+C:\CARTAS>ren copia.txt otra.txt
+C:\CARTAS>dir
+ Directorio de C:\CARTAS
 
-ORDENES  BIN        5888  19/11/2026  00:11
-HOLA     BIN         760  19/11/2026  00:11
-ECO      BIN         480  19/11/2026  00:11
-MALO     BIN         280  19/11/2026  00:11
-CLI      BIN         208  19/11/2026  00:11
-PRUEBA   BIN        6392  19/11/2026  00:11
-LEEME    TXT         118  19/11/2026  00:11
-NOPROG   BIN          24  19/11/2026  00:11
-NOMBRE~1 TXT          32  19/11/2026  00:11
-TEXTOS        <DIR>       19/11/2026  00:11
-VACIA         <DIR>       19/11/2026  00:11
-       9 archivos         14182 octetos
-       2 carpetas      16670720 octetos libres
-C:\>type leeme.txt
-Hispa-Pentium: un núcleo de 32 bits escrito en Castel.
-Este archivo está en un disco FAT y lo enseña la orden TYPE.
-C:\>eco hola y adios
-hola y adios
+.             <DIR>       19/11/2026  03:23
+..            <DIR>       19/11/2026  03:23
+MARIA    TXT         150  19/11/2026  03:23
+OTRA     TXT         150  19/11/2026  03:23
+       2 archivos           300 octetos
+       2 carpetas      16631808 octetos libres
+C:\CARTAS>del otra.txt
+C:\CARTAS>cd ..
+C:\>lote uno dos
+lote: empiezo con uno y dos (y el 100%)
+desde el lote
 (ECO.BIN ha acabado con el código 3)
-C:\>malo
-soy un programa malo: voy a leer la memoria del núcleo
-he leído 
-*** excepción 14: fallo de página en 0x00100000 (lectura, anillo 3, protección) en 0x40000052, en el anillo 3
-*** se acaba la tarea 5 (MALO.BIN)
-(MALO.BIN ha acabado con el código 255)
-C:\>mem
-Memoria: 32640 K en total, 31428 K libres (7857 marcos de 4 K).
-Este intérprete ocupa 12 K. Tareas en marcha: 3.
+lote: una línea
+lote: y otra
+
+Pulse una tecla para seguir . . . 
+lote: fin
+C:\>bucle
+bucle: doy vueltas sin fin (Ctrl+C para acabar)
+^C
 C:\>salir
 Hasta luego.
-ORDENES.BIN ha acabado con el código 0; marcos libres: 7866 antes y 7866 después
+ORDENES.BIN ha acabado con el código 0; marcos libres: 7862 antes y 7862 después
 ```
+
+(Lo de arriba sale de `ESCRIBE=1 DISCO=/dev/shm/pentium.img ARRANQUE=ordenes MODULOS=
+nucleo32/probar.sh "" "md cartas" "cd cartas" "echo Querida señora: ¿qué tal está? >
+maría.txt" ... "lote uno dos" ":tecla spc" bucle :espera ":tecla ctrl-c" salir
+apagar`; después, `fsck.fat -n /dev/shm/pentium.img` da el disco por sano y `mdir -i
+/dev/shm/pentium.img ::CARTAS` enseña `MARIA.TXT`.)
 
 ---
 
 ## 2. Las piezas
 
-El núcleo son unas 3.550 líneas de Castel en once módulos (más la biblioteca de 32
+El núcleo son unas 5.350 líneas de Castel en doce módulos (más la biblioteca de 32
 bits, `castel/biblioteca32/`: Textos32, Mem32 y Formato, CASTEL32.md §7). Sale un
-binario de unos 31 K.
+binario de unos 47 K.
 
 | Módulo | Qué hace |
 |---|---|
@@ -120,9 +144,10 @@ binario de unos 31 K.
 | `paginas.cas` (Paginas) | La **paginación**: directorio y tablas de páginas, `mapear`, `desmapear`, `traducir`; el directorio del núcleo (la identidad) y uno por programa (`nuevo_espacio`, `soltar_espacio`); la **zona a la demanda**; y `usuario_puede`, para que la llamada al sistema no toque lo que no es del programa. |
 | `monton.cas` (Monton) | El **montón del núcleo**: `reservar` y `liberar`, con cabecera, pie, relleno y comprobación (sección 4). |
 | `tareas.cas` (Tareas) | Las **tareas**: fichas, colas, el **reloj que cambia de tarea**, `ceder`, `dormir`, `bloquear`/`despertar_tarea`, `terminar` y `esperar`; los **cerrojos** (`tomar`, `soltar`) y las tareas huérfanas (sección 5). |
-| `consola.cas` (Consola) | El **teclado** (IRQ 1, su cola de letras, `leer_tecla`) y la **pantalla**, cada uno con su cerrojo: `escribir_trozo` (una ristra entera sin que se cuele otra tarea), `borrar_pantalla` (sección 5). |
-| `ata.cas` (Ata) | Los **discos duros ATA** del canal primario, en PIO y con LBA de 28 bits: `identificar` (IDENTIFY: modelo y sectores) y `leer_sectores` (sección 7). |
-| `fat.cas` (Fat) | El **sistema de archivos FAT12/16/32**, de solo lectura: montar (disco entero o primera partición FAT), abrir por la ruta, leer, las entradas de una carpeta, los clusters libres (sección 7). |
+| `consola.cas` (Consola) | El **teclado** (IRQ 1: el español, con teclas muertas, Alt Gr y Bloq Mayús; su cola de letras, `leer_tecla`; Ctrl+C) y la **pantalla**, cada uno con su cerrojo: `escribir_trozo` (una ristra entera sin que se cuele otra tarea), `borrar_pantalla` (secciones 5 y 9). |
+| `ata.cas` (Ata) | Los **discos duros ATA** del canal primario, en PIO y con LBA de 28 bits: `identificar` (IDENTIFY: modelo y sectores), `leer_sectores`, `escribir_sectores` y `asentar` (sección 7). |
+| `fat.cas` (Fat) | El **sistema de archivos FAT12/16/32**, para leer y escribir: montar (disco entero o primera partición FAT), abrir por la ruta, leer, escribir, cortar, borrar, cambiar de nombre, hacer y borrar carpetas, los nombres largos, los clusters libres (sección 7). |
+| `fecha.cas` (Fecha) | La **fecha y la hora** del reloj de pila del PC (la CMOS), como las guarda la FAT. |
 | `usuario.cas` (Usuario) | Los **programas del anillo 3**: los carga **del disco** (o de los módulos de multiboot) en su espacio de direcciones y atiende la **llamada al sistema** (`int 0x80`, sección 6). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
 
@@ -130,12 +155,14 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 
 | Archivo | En el disco | Qué es |
 |---|---|---|
-| `llamadas.cas` (Llamadas) | — | El **módulo de las llamadas al sistema** para los programas: `tecla`, `leer_línea`, `abrir`, `leer`, `cerrar`, `entrada`, `lanzar`, `esperar`, `argumentos`, `dato`, `más_memoria`... Un programa lo importa y no escribe ni una `int 0x80`. |
+| `llamadas.cas` (Llamadas) | — | El **módulo de las llamadas al sistema** para los programas: `tecla`, `leer_línea` (con su historia), `abrir`, `crear`, `leer`, `escribir_archivo`, `mover`, `cortar`, `cerrar`, `borrar`, `renombrar`, `crear_carpeta`, `cambiar_carpeta`, `redirigir`, `entrada`, `lanzar`, `esperar`, `argumentos`, `dato`, `más_memoria`... Un programa lo importa y no escribe ni una `int 0x80`. |
 | `uordenes.cas` | `ORDENES.BIN` | El **intérprete de órdenes** (sección 8). |
 | `uhola.cas` | `HOLA.BIN` | Escribe, suma, duerme, pide su número de tarea y prueba que la llamada al sistema no le deja enseñar la memoria del núcleo. |
 | `ueco.cas` | `ECO.BIN` | Enseña sus argumentos (y acaba con cuántas palabras eran). |
 | `umalo.cas`, `ucli.cas` | `MALO.BIN`, `CLI.BIN` | Los que hacen lo que no deben: leer la memoria del núcleo y hacer `cli`. |
 | `uprueba.cas` | `PRUEBA.BIN` | Prueba las llamadas al sistema desde dentro: la memoria que crece, leer un archivo a trozos, abrir de más, punteros que no son suyos, lanzar y esperar, escribir dos a la vez. |
+| `uescribe.cas` | `ESCRIBE.BIN` | Prueba **escribir en el disco** desde dentro: crear, escribir a trozos, leer de vuelta, escribir en medio, cortar, alargar con hueco, añadir; lo que no se puede; las carpetas; con `lleno`, llena el disco y lo vacía. |
+| `ubucle.cas` | `BUCLE.BIN` | El que no acaba nunca (da vueltas, duerme, espera teclas o escribe sin parar): para probar **Ctrl+C**. |
 
 ---
 
@@ -229,12 +256,26 @@ la pila del núcleo de la tarea que corre.
 - **La consola con su cerrojo** (`consola.cas`): la llamada al sistema `escribir`
   saca su ristra entera con el cerrojo de la pantalla tomado, así que dos
   programas que escriben a la vez no se mezclan las letras (las pruebas lanzan dos
-  que escriben 120 líneas cada uno sin parar: salen las 240 enteras). Lo que
+  que escriben 120 líneas cada uno sin parar: salen las 240 enteras). La tecla de
+  retroceso mueve el cursor un sitio atrás (también en la pantalla). Lo que
   escribe el núcleo con `escribir()` va directo, sin cerrojo (una excepción
   siempre puede decir lo suyo); una tarea del núcleo que quiere una línea entera la
   envuelve en `tomar_consola()` y `soltar_consola()` (antes tapaba las
   interrupciones). Leer el teclado también va con cerrojo: si varias tareas leen,
   esperan en fila.
+- **Ctrl+C acaba los programas en marcha.** Cuando el teclado lo ve, marca los
+  programas del anillo 3 (menos los que han dicho que lo atienden ellos: un
+  intérprete de órdenes) para acabar, y despierta a los que dormían o esperaban
+  una tecla o a otro programa. **Una tarea solo se acaba cuando no está a medias
+  de nada del núcleo**: al entrar o al salir de una llamada al sistema, o cuando
+  el reloj la pilla corriendo en el anillo 3 (así se para también un programa que
+  da vueltas sin llamar nunca al sistema). Se le cierran sus archivos (lo escrito
+  queda en el disco), sale `^C` y acaba con el código 254; quien la esperaba
+  sigue. A los que lo atienden ellos les llega como una tecla (el 3) si no había
+  nadie a quien acabar, y se les apunta para que puedan preguntarlo (`hubo_corte`).
+- **La carpeta de trabajo** es de cada tarea (un texto en su ficha: «» la raíz, o
+  `\UNA\OTRA`); la hereda de quien la lanza, igual que **adónde va lo que
+  escribe** (a la pantalla, o a un archivo: la redirección).
 
 ## 6. El anillo 3
 
@@ -258,8 +299,8 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 3 | dormir EBX tics | `dormir` | 0 |
 | 4 | los tics desde que arrancó | `tics` | |
 | 5 | el número de la tarea | `mi_tarea` | |
-| 6 | **leer una tecla** (EBX = 0: la espera; 1: solo si la hay) | `tecla`, `tecla_si_hay`, `leer_línea` | la letra, o 0 |
-| 7 | **abrir** el archivo o la carpeta de nombre EBX | `abrir` | su manejador |
+| 6 | **leer una tecla** (EBX = 0: la espera; 1: solo si la hay) | `tecla`, `tecla_si_hay`, `leer_línea` | la letra (página 437); 0x100 + su código si no es letra (las flechas...); o 0 |
+| 7 | **abrir** el archivo o la carpeta de nombre EBX, del modo ECX (0 leer; 1 leer y escribir; 2 crearlo o dejarlo vacío; 3 escribir al final, creándolo si no está) | `abrir`, `abrir_para`, `crear` | su manejador |
 | 8 | **leer** del archivo EBX, a ECX, hasta EDX octetos | `leer` | los leídos (0: el final) |
 | 9 | **cerrar** el archivo EBX | `cerrar` | |
 | 10 | **lanzar** el programa de nombre EBX con los argumentos ECX | `lanzar` | el número de su tarea |
@@ -270,11 +311,39 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 15 | un dato del sistema (marcos libres y totales, páginas del programa, versión, tareas, la FAT, los clusters libres...) | `dato` | |
 | 16 | borrar la pantalla | `borrar_pantalla` | |
 | 17 | **mover el final de la memoria** del programa EBX octetos (con signo) | `más_memoria`, `menos_memoria` | el final de antes |
+| 18 | **escribir** en el archivo EBX, desde ECX, EDX octetos | `escribir_archivo` | los escritos (menos si se llena el disco) |
+| 19 | **mover la posición** del archivo EBX a ECX octetos (con signo) del principio (EDX = 0), de donde está (1) o del final (2) | `mover` | la posición nueva |
+| 20 | **cortar** el archivo EBX en su posición (o alargarlo con ceros hasta ella) | `cortar` | 0 |
+| 21 | **borrar** el archivo de nombre EBX | `borrar` | 0 |
+| 22 | **cambiar el nombre** EBX por el nombre ECX (un archivo, también a otra carpeta) | `renombrar` | 0 |
+| 23 | **hacer la carpeta** de nombre EBX | `crear_carpeta` | 0 |
+| 24 | **borrar la carpeta** de nombre EBX (vacía) | `borrar_carpeta` | 0 |
+| 25 | la **carpeta de trabajo** pasa a ser la de nombre EBX | `cambiar_carpeta` | 0 |
+| 26 | la carpeta de trabajo, a EBX (caben ECX) | `carpeta_actual` | su largo |
+| 27 | **redirigir**: lo que escriba el programa (y los que lance) va al archivo EBX, abierto para escribir (0xFFFFFFFF: otra vez a la pantalla) | `redirigir` | 0 |
+| 28 | la entrada siguiente de la carpeta EBX, a ECX, y su **nombre largo**, a EDX (256 octetos) | `entrada_larga` | 1, o 0 si no hay más |
+| 29 | **Ctrl+C**: lo atiende el programa (EBX = 1) o lo acaba (0) | `atender_corte` | 0 |
+| 30 | ¿se ha pulsado Ctrl+C desde la última vez que se preguntó? | `hubo_corte` | 1 o 0 |
+| 31 | el teclado: el español (EBX = 1) o el de EE. UU. (0); con otra cosa, solo dice cuál hay | `poner_teclado`, `teclado_español` | 1 o 0 |
 
 - **Los errores** son números de `0xFFFFFFF0` para arriba (`es_error(r)`): no
   existe (`NO_HAY`), no hay disco, demasiados archivos abiertos, el manejador no
-  vale o el disco falla, no es un programa, no hay memoria, no vale lo pedido.
-  `texto_error(e)` lo dice en español.
+  vale o el disco falla, no es un programa, no hay memoria, no vale lo pedido; y
+  los de escribir: no queda sitio (`DISCO_LLENO`), ya existe, está en uso, es de
+  solo lectura, la carpeta no está vacía, el nombre no vale, es una carpeta, no
+  es una carpeta. `texto_error(e)` lo dice en español.
+- **Los nombres de archivo** que no empiezan por una barra se entienden **desde la
+  carpeta de trabajo** de la tarea; `.` y `..` valen en cualquier sitio de la ruta
+  (los resuelve el núcleo antes de ir al disco). `C:` delante se admite.
+- **Un archivo abierto para escribir es de uno solo**: mientras tanto no se puede
+  abrir otra vez (ni para leer), ni borrar, ni cambiar de nombre («está en uso»).
+  Varios pueden leer el mismo a la vez. Si la tarea acaba (o la acaban) sin
+  cerrarlo, el núcleo lo cierra por ella y lo escrito queda.
+- **La redirección** (27) es del núcleo: lo que la tarea escribe con `escribir` va
+  al archivo en vez de a la pantalla, con los **finales de línea del DOS** (un
+  avance de línea suelto sale como retorno de carro y avance). La heredan los
+  programas que lance; lo que dice el núcleo de ellos (una excepción, `^C`) sigue
+  saliendo por la pantalla.
 - **Lo que el programa da como dirección se comprueba** antes de tocarlo, página a
   página: tiene que ser suyo (y, para leer del disco en él, escribible). Un nombre
   de archivo se copia al núcleo mirando cada página por la que pasa. La memoria del
@@ -321,16 +390,15 @@ sectores tiene (un lector de CD, ATAPI, se reconoce por su firma y se deja).
 de una vez) y trae cada sector de palabra en palabra por el puerto de datos. No
 usa la interrupción del disco (se le dice que no la dé): mira el estado hasta que
 el dato está, con un tope de vueltas por si el disco no contesta. Un cerrojo hace
-que las tareas usen el canal de una en una. Solo lee.
+que las tareas usen el canal de una en una.
 
-**La FAT** (`fat.cas`), de solo lectura:
+**La FAT** (`fat.cas`). Leer:
 
 - **FAT12, FAT16 y FAT32**, según el número de clusters (como manda la norma).
   El volumen puede ser el **disco entero** o la **primera partición FAT** de la
   tabla de particiones del MBR (clases 01, 04, 06, 0B, 0C, 0E).
 - **Rutas** con `\` o `/`, con carpetas (`TEXTOS\PIRATA.TXT`), sin distinguir
-  mayúsculas; `C:` delante se admite. **Nombres de 8+3**: las entradas de nombre
-  largo se saltan y queda el nombre corto (`NOMBRE~1.TXT`).
+  mayúsculas; `C:` delante se admite. Nombres de 8+3, y los largos (abajo).
 - Un archivo o una carpeta abiertos son un **manejador**; de un archivo se leen
   octetos (siguiendo su cadena de clusters por la FAT; en FAT12, con las entradas
   de 12 bits a caballo entre dos sectores); de una carpeta, sus entradas una a una
@@ -343,15 +411,61 @@ que las tareas usen el canal de una en una. Solo lee.
   su sector de información.
 
 Al arrancar, el núcleo identifica los discos y monta el primero si es FAT (lo dice
-en una línea). **No se escribe** en el disco todavía (ni en el controlador ni en
-la FAT).
+en una línea).
+
+**Escribir** (desde el 19/11):
+
+- **El controlador** (`escribir_sectores`): la orden de escribir (hasta 255
+  sectores de una vez), cada sector de palabra en palabra al puerto de datos,
+  esperando a que el disco lo pida y, al final, a que lo haya tomado. `asentar`
+  manda FLUSH CACHE (que el disco pase a la superficie lo que tenga guardado).
+- **Los archivos**: un archivo se abre para leer, para leer y escribir, para
+  crearlo (si ya estaba, queda vacío) o para añadir al final. Al escribir más allá
+  de su final **crece**: se le dan clusters libres (se buscan en la FAT desde donde
+  se dio el último) y se enlazan a su cadena. La posición se puede **mover** a
+  cualquier sitio, también más allá del final: al escribir ahí, lo de en medio
+  queda **a cero**. **Cortar** deja el archivo con el tamaño de su posición y
+  suelta los clusters que sobran. **Borrar** suelta toda su cadena y tacha su
+  entrada (y los trozos de su nombre largo).
+- **Las carpetas**: una entrada nueva va al primer hueco de su carpeta (una
+  tachada, o el final); si no queda sitio, la carpeta **crece** un cluster (a cero).
+  La raíz de FAT12/16, que es fija, no crece: se llena. Una **carpeta nueva** lleva
+  su cluster a cero con sus entradas `.` y `..`. Solo se borra una carpeta
+  **vacía**, que no esté abierta ni sea la de trabajo de nadie. **Cambiar el
+  nombre** es cambiarlo en su entrada; un archivo, además, puede pasar a otra
+  carpeta (una carpeta no: habría que cambiar su `..`).
+- **Las dos copias de la FAT** se escriben siempre (todas las que diga el
+  volumen; una FAT32 que solo lleva una al día, esa). En **FAT32**, el **sector de
+  información** lleva la cuenta de clusters libres y por dónde buscar el
+  siguiente: se pone al día al cerrar un archivo, al borrar y al tocar carpetas.
+  (En FAT12, las entradas de 12 bits a caballo entre dos sectores se escriben
+  igual que se leen.)
+- **La fecha y la hora** de lo que se crea o se escribe son las del reloj del PC
+  (`fecha.cas`); al escribir se marca además el atributo «por archivar».
+- **Nombres**: al crear, **8+3** (en mayúsculas, sin las letras que la FAT no
+  admite; la ñ y la ç valen; `CON`, `PRN`, `AUX`, `NUL`, `COM1`... no, que son
+  de los dispositivos del DOS). No se crean nombres largos.
+- **Cuándo llega al disco**: los datos, en el momento (cada sector se escribe
+  según se llena; no hay nada esperando en la memoria más que el sector de la FAT
+  que se está tocando, que se escribe al acabar cada llamada). La **entrada del
+  archivo** (su tamaño y su primer cluster) se pone al día **al cerrarlo** (o al
+  cortarlo), como en el DOS: si se apaga con un archivo a medio escribir, quedan
+  clusters sueltos que `fsck` recoge, pero nada cruzado.
+
+**Los nombres largos (VFAT)**, al leer: los trozos de nombre largo que van delante
+de una entrada se juntan (comprobando su número y la suma del nombre corto) y se
+pasan de Unicode a la página 437 (lo que no está en ella sale como `_`). `DIR` los
+enseña a la derecha, y un archivo o una carpeta se puede **abrir por su nombre
+largo** (sin distinguir mayúsculas) igual que por el corto. Al borrar o cambiar de
+nombre, los trozos se tachan con la entrada (que no queden sueltos).
 
 ## 8. El intérprete de órdenes
 
 `uordenes.cas` (`ORDENES.BIN` en el disco): **un programa del anillo 3**, escrito
 en Castel con `modelo usuario`, que no toca nada del núcleo: todo lo hace por las
-llamadas al sistema. Lee una línea del teclado (con su retroceso) y hace lo que
-dice; las órdenes valen en mayúsculas o en minúsculas.
+llamadas al sistema. Lee una línea del teclado y hace lo que dice; las órdenes
+valen en mayúsculas o en minúsculas. La petición de órdenes enseña la carpeta de
+trabajo (`C:\TEXTOS>`).
 
 | Orden | Qué hace |
 |---|---|
@@ -359,10 +473,43 @@ dice; las órdenes valen en mayúsculas o en minúsculas.
 | `VER` | la versión del sistema |
 | `CLS` | borra la pantalla |
 | `MEM` | la memoria que hay, la libre, lo que ocupa el intérprete y las tareas |
-| `DIR [carpeta]` | los archivos de una carpeta (la raíz si no se dice): nombre, tamaño, fecha y hora; cuántos son, lo que ocupan y lo que queda libre |
+| `FECHA` | la fecha y la hora del reloj del PC |
+| `TECLADO [ES\|US]` | el teclado: el español o el de EE. UU. (sin nada, dice cuál hay) |
+| `DIR [carpeta]` | los archivos de una carpeta (la de trabajo si no se dice): nombre, tamaño, fecha, hora y, si lo tiene, su nombre largo; cuántos son, lo que ocupan y lo que queda libre. Con comodines, los que casen: `DIR *.TXT`, `DIR TEXTOS\P*` |
 | `TYPE archivo` | enseña un archivo de texto |
+| `COPY origen destino` | copia un archivo en otro, o a una carpeta; con comodines, varios a una carpeta (`COPY \TEXTOS\*.TXT .`). Sin destino, a la carpeta de trabajo |
+| `DEL archivo` | borra un archivo, o los que casen (`DEL *.BAK`) |
+| `REN viejo nuevo` | cambia el nombre de un archivo o de una carpeta; si el nuevo lleva carpeta (`REN A.TXT OTRA\A.TXT`), el archivo se mueve a ella |
+| `MD carpeta`, `RD carpeta` | hace una carpeta; borra una carpeta vacía |
+| `CD [carpeta]` | cambia de carpeta de trabajo (`CD ..` sube una, `CD \` va a la raíz; también `CD..` y `CD\`); sin nada, dice cuál es |
+| `PATH [carpetas]` | las carpetas donde se buscan los programas, separadas con `;` (de fábrica, `C:\`); `PATH ;` lo deja vacío; sin nada, lo enseña |
+| `ECHO texto` | escribe el texto (`ECHO.`, una línea en blanco; `ECHO OFF` y `ECHO ON`, en los archivos de órdenes) |
+| `REM ...` | un comentario |
+| `PAUSE` | «Pulse una tecla para seguir . . .» y la espera |
 | `SALIR` | acaba el intérprete (se vuelve a la consola del núcleo) |
-| cualquier otro nombre | **un programa del disco**: `HOLA` o `HOLA.BIN`, también de una carpeta (`TEXTOS\ECO2`); lo que siga son sus argumentos. Se lanza y se le espera; si acaba con un código distinto de 0, se dice. Si no existe: «Orden o nombre de programa desconocido». |
+| cualquier otro nombre | **un programa** (`HOLA` o `HOLA.BIN`) o **un archivo de órdenes** (`LOTE` o `LOTE.BAT`): se busca en la carpeta de trabajo y luego en las del PATH (con una carpeta delante, `TEXTOS\ECO2`, solo ahí); lo que siga son sus argumentos. Un programa se lanza y se le espera; si acaba con un código distinto de 0, se dice. Si no existe: «Orden o nombre de programa desconocido». |
+
+(`DEL`, `REN`, `MD`, `RD`, `CD`, `COPY`, `PAUSE` y `SALIR` también valen como
+`ERASE`/`BORRAR`, `RENAME`, `MKDIR`, `RMDIR`, `CHDIR`, `COPIAR`, `PAUSA` y `EXIT`.)
+
+- **La redirección**: detrás de cualquier orden, `> archivo` manda al archivo lo
+  que escriba (creándolo, o vaciándolo si estaba), y `>> archivo` lo añade al
+  final: `DIR > LISTA.TXT`, `ECHO otra línea >> NOTAS.TXT`, `HOLA > SALIDA.TXT`
+  (también lo que escribe un programa, y los que este lance). El archivo queda
+  con los finales de línea del DOS. No hay `<` ni tuberías.
+- **Los archivos de órdenes (.BAT)**: una orden por línea, las mismas que se
+  teclean. Cada línea se enseña antes de hacerla, salvo con `ECHO OFF` o si
+  empieza por `@`. `%1` a `%9` son los argumentos (`%0`, el nombre; `%%`, un `%`).
+  Un archivo de órdenes que llama a otro pasa a él (no vuelve). No hay `IF`,
+  `GOTO`, `FOR` ni variables.
+- **La línea se corrige** con Retroceso y Supr, moviéndose con las flechas, Inicio
+  y Fin; Esc la borra. **La historia**: las flechas de arriba y abajo traen las
+  ocho últimas líneas. (Está en `leer_línea`, de `llamadas.cas`: la tiene cualquier
+  programa que lea líneas.)
+- **Ctrl+C** acaba el programa que corre (sale `^C` y vuelve la petición de
+  órdenes) y, si lo había lanzado un archivo de órdenes, también el archivo. Sin
+  programa en marcha, deja la línea que se estaba escribiendo. En `PAUSE`, acaba
+  el archivo de órdenes.
 
 Si el programa lanzado hace lo que no debe, el núcleo lo acaba, lo dice, y el
 intérprete sigue con su petición de órdenes.
@@ -387,16 +534,37 @@ dentro. (El intérprete de órdenes de verdad es el de la sección 8.)
 | `tareas` | las tareas, con su estado, su anillo, sus turnos y sus tics |
 | `programas` | los módulos que ha traído el cargador |
 | `ejecutar N` | ejecuta el módulo N en el anillo 3 y espera a que acabe; dice su código y los marcos libres antes y después |
-| `disco` | los discos del canal primario (modelo, sectores) y el sistema de archivos (qué FAT, dónde empieza, clusters, los libres; sectores leídos y archivos abiertos) |
+| `disco` | los discos del canal primario (modelo, sectores) y el sistema de archivos (qué FAT, dónde empieza, clusters, los libres; sectores leídos y escritos, y archivos abiertos) |
 | `dir [CARPETA]` | las entradas de una carpeta del disco |
 | `lanzar PROGRAMA.BIN [ARGUMENTOS]` | carga el programa del disco, lo ejecuta en el anillo 3 con sus argumentos y espera a que acabe |
 | `ordenes` | lanza el intérprete de órdenes (`ORDENES.BIN`) |
 | `teclas` | las teclas pulsadas |
+| `teclado es`, `teclado us` | el teclado: el español (el de fábrica) o el de EE. UU. |
 | `fallo` | lee donde no hay nada: el fallo de página del núcleo, que lo para (código 14) |
 | `cero` | divide por cero (código 9) |
 | `apagar` | acaba (código 5) |
 
-(El teclado es el de EE. UU., sin acentos: por eso las órdenes se escriben sin ellos.)
+(Las órdenes de esta consola se escriben sin acentos, como cuando el teclado era
+el de EE. UU.)
+
+### El teclado
+
+Es **el español** (`consola.cas`), con las letras de la **página 437**, la del PC
+y la que usa Hispa-DOS (y Castel para sus textos):
+
+- `ñ Ñ ç Ç ¿ ¡ º ª ·` y los signos donde están en un teclado español (`-` y `_`
+  junto a Mayús, `'` y `?` junto al 0, `<` y `>` junto a la Z...).
+- **Los acentos, con tecla muerta**: `´` y luego la vocal da `á é í ó ú`; igual
+  `` ` `` (`à è ì ò ù`), `^` (`â ê î ô û`) y `¨` (`ä ë ï ö ü`). El acento y un
+  espacio dan el acento solo; con otra letra, el acento y la letra. La 437 no
+  tiene `Á Í Ó Ú` (sí `É`, `Ü`, `Ä`, `Ö`): salen sin acento, como en Hispa-DOS.
+- **Alt Gr**: `\ | @ # ~ ¬ [ ] { }`. **Bloq Mayús**, para las letras (también ñ y ç).
+- Las flechas, Inicio, Fin, Supr, RePág, AvPág, Insert y F1 a F10 llegan a los
+  programas como `0x100` más su código (`TECLA_ARRIBA`...).
+- **Ctrl** con una letra da su número de control; **Ctrl+C** acaba los programas
+  en marcha (sección 5).
+- El de EE. UU. sigue estando: `teclado us` en esta consola, `TECLADO US` en el
+  intérprete, o `teclado=us` en lo que se le dice al núcleo al arrancar.
 
 ---
 
@@ -437,38 +605,87 @@ ningún archivo abierto, solo las dos tareas del núcleo). Y lo mismo, en corto,
 **FAT12, FAT32 y un disco con tabla de particiones**; el arranque directo al
 intérprete (`-append ordenes`); y el núcleo sin disco.
 
+**Escribiendo en el disco** (cada prueba, en una copia de la imagen, con
+`ESCRIBE=1`; luego la miran desde fuera `fsck.fat` y `mtools`), con **FAT16, FAT12,
+FAT32 y la FAT16 de una partición**: desde dentro de un programa (`ESCRIBE.BIN`),
+crear un archivo y escribirlo a trozos de 777 octetos, leerlo de vuelta igual,
+escribir en medio, **cortarlo** (los clusters que sobran quedan libres),
+**alargarlo dejando un hueco** (que se lee a cero), **añadir al final**, crear
+encima y borrar; lo que no se puede (abrir dos veces para escribir, borrar o
+renombrar lo abierto, nombres que no valen, carpetas que no están); **carpetas**:
+hacerlas, entrar, meter 70 archivos (la carpeta crece), mover un archivo a otra,
+cambiar nombres, vaciarlas y borrarlas, y que al final quedan **los mismos
+clusters libres**. Con las órdenes: `ECHO ... >` y `>>`, `COPY` (uno, y varios con
+comodines), `MD`, `CD`, `REN`, `DEL`, `RD`, un programa y `DIR` redirigidos a un
+archivo, y lo que tienen que decir cuando no puede ser. En FAT12, además, **llenar
+el disco** hasta el último cluster y vaciarlo. Después, que **`fsck.fat` da el
+disco por sano** (las dos FAT iguales, el sector de información de FAT32 con su
+cuenta, ningún cluster suelto), que **`mtools` ve lo mismo** (lo creado con sus
+finales de línea, lo copiado igual que el original octeto a octeto, lo renombrado
+y lo borrado), y que **al volver a arrancar** el núcleo lee lo que escribió.
+
+**El intérprete**: `CD` y la carpeta de trabajo (en la petición, en las rutas, en
+lo que se crea, heredada por los programas), carpetas dentro de carpetas, `PATH`
+(con él, sin él y con varias carpetas), un **archivo .BAT** (sus líneas, `ECHO`,
+`REM`, `PAUSE`, `%1`, programas y redirección dentro; `ECHO OFF` y `@`), la
+**historia** y la corrección de la línea (lo que queda en la pantalla, deshaciendo
+los retrocesos: `nucleo32/pantalla.py`), `FECHA` (la del reloj del PC). **Ctrl+C**
+con un programa que da vueltas sin llamar al sistema, uno que duerme, uno que
+espera teclas, uno lanzado desde un .BAT (que también se acaba), uno que escribía
+en un archivo (queda cerrado, con su tamaño, y el disco sano), en `PAUSE`, sin
+programa en marcha, y desde la consola del núcleo; y que después no quedan
+archivos abiertos, ni tareas, ni memoria sin devolver.
+
+**El teclado español**: una línea con todas sus letras y signos (`ñ ç ¿ ¡ º ª`,
+los cuatro acentos con su tecla muerta, Alt Gr, Bloq Mayús) tecleada tecla a
+tecla y mandada a un archivo, que se compara **octeto a octeto** con lo que tiene
+que ser en la página 437; el cambio al de EE. UU. y vuelta. **Los nombres
+largos**: `DIR` los enseña (también con eñe), se abre por ellos, y al renombrar o
+borrar no quedan trozos sueltos (lo mira `fsck.fat`).
+
 Además, como con todo lo de Castel: **CASTEL** (el compilador escrito en Castel,
 dentro de Hispa-8086) saca el **mismo ensamblador** que `ccastel.py` para el núcleo
 (con sus módulos nuevos), el intérprete de órdenes y los demás programas de
 usuario, y **ENSAMBLA** da el **mismo binario que NASM**. (El lenguaje no se ha
 tocado; de los compiladores, solo el arranque de `modelo usuario`, en los dos: ya
-no pone la pila, que es del núcleo.)
+no pone la pila, que es del núcleo. En la tanda del 19/11 de madrugada, ni eso:
+los compiladores no se han tocado.)
+
+Con todo, `pruebas.sh` entero da **240 bien, 0 mal** (19/11/2026; unos trece
+minutos y medio en el VPS).
 
 ## 11. Por dónde seguir
 
-Hecho en esta tanda (18-19/11/2026): el disco (ATA) y la FAT, cargar programas del
+Hecho en la tanda del 18-19/11/2026: el disco (ATA) y la FAT, cargar programas del
 disco, las llamadas al sistema nuevas, la consola con cerrojo, el intérprete de
 órdenes del anillo 3, la memoria del usuario que crece (`más_memoria`) y la pila
-que crece sola. Lo siguiente:
+que crece sola. Y en la del 19/11 de madrugada: **escribir en el disco** (ATA y
+FAT12/16/32, con `COPY`, `DEL`, `REN`, `MD`, `RD` y la redirección), el
+intérprete con **`CD`, `PATH`, archivos `.BAT`, historia y Ctrl+C**, el **teclado
+español** y los **nombres largos** al leer. Lo siguiente:
 
-1. **Escribir en el disco**: la orden de escribir sectores en `ata.cas`, y en la
-   FAT crear, escribir, alargar y borrar archivos y carpetas (con las dos copias de
-   la FAT y, en FAT32, su sector de información). Con eso, las órdenes `COPY`,
-   `DEL`, `REN`, `MD`, `RD` y la redirección (`>`).
-2. **El intérprete de órdenes**: `CD` y una carpeta de trabajo por tarea (hoy las
-   rutas son siempre desde la raíz), `PATH`, archivos de órdenes (`.BAT`), la
-   historia de la línea, y **Ctrl+C** para acabar el programa que corre (hoy un
-   programa que no acaba nunca se queda con el teclado: no hay cómo pararlo).
+1. **El intérprete, más**: `IF`, `GOTO`, `FOR`, `CALL` y variables en los `.BAT`;
+   la redirección de la entrada (`<`) y las tuberías (`|`); `COPY CON`, `MOVE`,
+   `XCOPY`, `ATTRIB`; comillas para los nombres con espacios; `NUL`, `CON` y
+   `PRN` como nombres de dispositivo.
+2. **La FAT, más**: **crear nombres largos** (hoy se leen y se abre por ellos,
+   pero lo nuevo es de 8+3); mover carpetas de una carpeta a otra; los atributos
+   (`ATTRIB`); la marca de «volumen sin cerrar bien» y revisar el disco al
+   arrancar; formatear.
 3. **Páginas compartidas o copiadas al escribir**, cuando haya procesos que se
    dupliquen; y cargar los programas a la demanda (hoy se leen enteros).
 4. **El disco, mejor**: una caché de sectores de verdad (hoy, uno de datos y uno de
-   FAT), leer varios sectores de una vez, la interrupción del disco en vez de mirar
-   el estado, el canal secundario, LBA de 48 bits, y discos SATA (AHCI) y USB, que
-   es lo que llevan los PC de la gama XP en adelante.
-5. **Nombres largos** (VFAT) al leer carpetas, y el teclado en español (hoy es el
-   de EE. UU., sin acentos ni eñe).
+   FAT: escribir un archivo grande va sector a sector), leer y escribir varios
+   sectores de una vez, la interrupción del disco en vez de mirar el estado, el
+   canal secundario, LBA de 48 bits, y discos SATA (AHCI) y USB, que es lo que
+   llevan los PC de la gama XP en adelante.
+5. **El teclado, más**: las luces (Bloq Mayús, Bloq Num), el teclado numérico con
+   Bloq Num, la repetición a medida, y otras distribuciones cargadas de un archivo.
+   Una consola con otra página de códigos (la 850, para `Á Í Ó Ú`) pide cambiar
+   también la letra de la pantalla.
 6. **Prioridades y un planificador mejor**, semáforos y colas de mensajes entre
-   tareas (los cerrojos ya están).
+   tareas (los cerrojos ya están). Programas en segundo plano de verdad (hoy
+   Ctrl+C acaba todos los que no lo atienden).
 7. **El lenguaje**: llamar a funciones por su dirección, sumar a un arreglo como a
    un puntero y funciones de interrupción públicas (CASTEL32.md §10), que hoy se
    rodean a mano.

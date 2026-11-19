@@ -42,8 +42,9 @@ módulo Programa
   un binario plano con su cabecera): corre en el **anillo 3**, en su propio espacio
   de direcciones, a partir de `0x40000000`. Lo carga el núcleo (del disco, o de los
   módulos de multiboot) y habla con él por la **llamada al sistema** (`int 0x80`):
-  `escribir` va por ella, y `salir` también; lo demás (el teclado, los archivos,
-  lanzar otros programas, pedir memoria) lo da el módulo `Llamadas`
+  `escribir` va por ella, y `salir` también; lo demás (el teclado, los archivos
+  —leer, escribir, crear, borrar, las carpetas—, lanzar otros programas, pedir
+  memoria) lo da el módulo `Llamadas`
   (`nucleo32/llamadas.cas`), que se importa. `nucleo32/uordenes.cas` (el intérprete
   de órdenes de Hispa-Pentium), `uhola.cas`, `ueco.cas`... son de este modelo.
 
@@ -321,7 +322,8 @@ falta enlazar con otras cosas; de momento no hace falta.
   usuario como módulos de multiboot (`-initrd`) y, con `DISCO=imagen`, un disco
   duro IDE (lo hace **`nucleo32/disco.sh`**, con FAT y los programas dentro):
   sirve para ver el reloj, el teclado, las excepciones, la memoria, las tareas, el
-  anillo 3, el disco y el intérprete de órdenes.
+  anillo 3, el disco y el intérprete de órdenes. (Teclea en el teclado español,
+  que es el del núcleo; con `ESCRIBE=1`, lo que se escriba queda en la imagen.)
 - `pruebas.sh` (parte 8) comprueba: los ejemplos de 16 bits sin DOS, compilados
   como núcleos de 32 bits, escriben lo mismo; los de `ejemplos32/` (núcleos en
   QEMU y programas Hispa32 con HW32) dan su salida esperada y su código; cuentas
@@ -349,6 +351,9 @@ falta enlazar con otras cosas; de momento no hace falta.
   módulo pone en la IDT las suyas.
 - **ELF32** de salida, si algún día hay que enlazar con código de fuera.
 - **El núcleo de Hispa-Pentium**: ha crecido desde la semilla (PENTIUM.md) y ya
-  lee discos FAT, carga los programas del disco y tiene su intérprete de órdenes
-  en el anillo 3, todo sin tocar el lenguaje; de los compiladores, solo el
-  arranque de `modelo usuario` (la pila ya la pone el núcleo: sección 8).
+  lee y escribe discos FAT, carga los programas del disco y tiene su intérprete de
+  órdenes en el anillo 3 (con archivos .BAT, Ctrl+C y el teclado español), todo
+  sin tocar el lenguaje; de los compiladores, solo el arranque de `modelo usuario`
+  (la pila ya la pone el núcleo: sección 8). Lo que más se ha echado de menos al
+  escribirlo: llamar a una función por su dirección (el reloj llama así, con dos
+  líneas de ensamblador, a quien acaba una tarea cortada con Ctrl+C).
