@@ -844,7 +844,7 @@ S=$P/ordenes.sal
 mira "el intérprete de órdenes es un programa del anillo 3 cargado del disco, y lee el teclado por la llamada al sistema" \
   "^lanzo ORDENES.BIN del disco (la tarea [0-9]*, en el anillo 3)" "^Hispa-Pentium: intérprete de órdenes (un programa del anillo 3" \
   "^C:.>ayuda$" "^Las órdenes de Hispa-Pentium:" "^  TYPE archivo "
-mira "VER y MEM" "^Hispa-Pentium 0\.6: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
+mira "VER y MEM" "^Hispa-Pentium 0\.7: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
   "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 3\.$"
 mira "DIR: la raíz y una carpeta, con sus tamaños, sus fechas y lo que queda libre" "^ Directorio de C:.$" "^LEEME    TXT  *118  [0-9/]*  [0-9:]*$" \
   "^TEXTOS  *<DIR>  " "^ *17 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
@@ -911,7 +911,7 @@ DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" ver salir
 S=$P/arranque.sal
 mira "si el cargador se lo dice (-append ordenes), el núcleo arranca con el intérprete de órdenes (y sin módulos de multiboot: todo del disco)" \
   "^memoria: 32 MB, [0-9]* marcos libres; paginación activa; 0 programas de usuario" \
-  "^C:.>ver$" "^Hispa-Pentium 0\.6" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
+  "^C:.>ver$" "^Hispa-Pentium 0\.7" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
 MODULOS= $AQUI/nucleo32/probar.sh "" disco dir ordenes apagar > $P/sindisco.sal 2>&1
 S=$P/sindisco.sal
 mira "sin disco (y sin nada que traiga el cargador), el núcleo lo dice y sigue" "^disco 0: no hay" "^sistema de archivos: no hay" "^no puedo lanzar ORDENES.BIN: no hay disco" "^\[código 5\]"
@@ -1008,7 +1008,7 @@ else ko "ECHO OFF o la @ no callan lo que deben (o callan de más)"; grep -n "lo
 # la historia: lo que queda en la pantalla, quitando lo que borra cada retroceso
 python3 -I $AQUI/nucleo32/pantalla.py < $S > $P/historia.txt
 if [ "$(grep -c '^C:.>eco primera$' $P/historia.txt)" = 2 ] && [ "$(grep -c '^primera$' $S)" = 2 ] && grep -q '^C:.>zco prixeray$' $P/historia.txt \
-    && grep -q "^Orden o nombre de programa desconocido: zco " $S && grep -q '^C:.>ver$' $P/historia.txt && grep -q "^Hispa-Pentium 0\.6" $S; then
+    && grep -q "^Orden o nombre de programa desconocido: zco " $S && grep -q '^C:.>ver$' $P/historia.txt && grep -q "^Hispa-Pentium 0\.7" $S; then
   ok "la historia de la línea: la flecha de arriba trae las órdenes de antes; se corrigen con las flechas, Retroceso, Supr, Inicio y Fin; Esc borra la línea"
 else ko "la historia o la corrección de la línea no van:"; grep -n "primera\|zco\|ver" $P/historia.txt | sed 's/^/        /' | head; fi
 mira "FECHA: la fecha y la hora del reloj del PC" "^Hoy es $(date +%d/%m/%Y) y son las [0-2][0-9]:[0-5][0-9]:[0-5][0-9]\.$"

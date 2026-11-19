@@ -1229,6 +1229,8 @@ instalaciones de siempre: fondo azul, el título arriba y, abajo, las teclas
    Linux, extendida, EFI...— y su tamaño; las de una tabla GPT también) y su
    **espacio sin usar**. Las **memorias USB** salen debajo, con un «no se toca»:
    **no se ofrecen nunca** (y el núcleo, además, no deja: más abajo).
+
+   ![Elegir el disco: sus particiones y su espacio sin usar](pentium/instalar-discos.png)
 3. **Dónde.** Según lo que tenga el disco:
    - **en blanco** (su primer sector, a cero): se usa entero, sin más preguntas
      que la confirmación del final;
@@ -1257,6 +1259,8 @@ instalaciones de siempre: fondo azul, el título arriba y, abajo, las teclas
      el disco, por si acaso. Los archivos van seguidos, uno detrás de otro;
    - **el arranque**: lo último, para que si algo falla antes el disco siga
      arrancando como arrancaba.
+
+   ![La barra, dando formato](pentium/instalar-progreso.png)
 6. **El final**: quitar la memoria USB e INTRO para reiniciar.
 
 ![Instalado](pentium/instalar-final.png)
