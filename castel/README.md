@@ -32,7 +32,8 @@ y ese mismo día, **escribir en el disco** (COPY, DEL, REN, MD, RD, `>` y `>>`),
 archivos .BAT, la historia de la línea, Ctrl+C, el **teclado español** y los nombres largos.
 Y, desde la 0.4, **un escritorio** (el primer entorno gráfico: modo de 32 bits, ratón,
 ventanas, barra de tareas con «Inicio», menú Inicio, un Bloc de notas y una Consola), también
-en Castel.
+en Castel; y, desde la 0.5, con los menús del botón secundario, seleccionar, cortar, copiar y
+pegar, iconos en el tapiz, «Mi equipo» y ventanas que cambian de tamaño.
 Para él hay una **biblioteca de 32 bits** en Castel (`biblioteca32/`: textos, memoria y
 escribir con formato).
 
@@ -55,11 +56,12 @@ escribir con formato).
 - `nucleo32/` — **Hispa-Pentium**: el núcleo (`semilla.cas` y sus módulos: `cpu`, `multiboot`,
   `marcos`, `paginas`, `monton`, `tareas`, `consola`, `ata`, `fat`, `fecha`, `usuario`; y, desde la
   0.4, el entorno gráfico: `video`, `grafico`, `letra`, `raton`, `ventanas`, `terminal` y
-  `escritorio`), el módulo de
+  `escritorio`; y `emergente`, los menús, desde la 0.5), el módulo de
   las llamadas al sistema para los programas (`llamadas.cas`), el intérprete de órdenes
   (`uordenes.cas`) y los demás programas de usuario (`uhola.cas`, `ueco.cas`, `umalo.cas`,
   `ucli.cas`, `uprueba.cas`, `uescribe.cas`, `ubucle.cas`; y los del escritorio: `ubloc.cas`, el
-  Bloc de notas, y `uconsola.cas`, la Consola); `disco.sh`, que hace la imagen de un
+  Bloc de notas, `uconsola.cas`, la Consola, y `uequipo.cas`, Mi equipo, con `barramenu.cas`, la
+  barra de menús de sus ventanas); `disco.sh`, que hace la imagen de un
   disco FAT con todos ellos; `probar.sh`, que arranca el núcleo en QEMU (con ese disco) y le
   teclea órdenes (en el teclado español) y, en el escritorio, le mueve el ratón y saca
   capturas; `pantalla.py`, que deja lo que sale como se ve en la pantalla; `mira_captura.py`,

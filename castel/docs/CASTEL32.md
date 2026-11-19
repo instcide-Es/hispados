@@ -358,8 +358,13 @@ falta enlazar con otras cosas; de momento no hace falta.
 - **Tablas de datos grandes**: un bloque `ensamblador` no puede pasar de 6000
   octetos en CASTEL (la letra del entorno gráfico de Hispa-Pentium va en cuatro
   bloques seguidos), y un arreglo con valor inicial, de unos 4000.
+- **El sitio de CASTEL para los textos** (los nombres y los textos entre
+  comillas de todo el programa, con sus módulos): eran 40 K y, desde la 0.5 de
+  Hispa-Pentium, son 64 K (`compilador/base.cas`): el núcleo ya no cabía. Es una
+  tabla del compilador, no del lenguaje: lo que saca no cambia.
 - **El núcleo de Hispa-Pentium**: desde la 0.4 tiene su entorno gráfico (el
-  escritorio, PENTIUM.md §10), escrito también en Castel sin tocar el lenguaje.
+  escritorio, PENTIUM.md §10; con menús, portapapeles e iconos desde la 0.5),
+  escrito también en Castel sin tocar el lenguaje.
   Ha crecido desde la semilla (PENTIUM.md) y ya
   lee y escribe discos FAT, carga los programas del disco y tiene su intérprete de
   órdenes en el anillo 3 (con archivos .BAT, Ctrl+C y el teclado español), todo

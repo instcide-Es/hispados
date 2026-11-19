@@ -1,6 +1,6 @@
 # Hispa-Pentium — el núcleo de la gama XP, escrito en Castel
 
-*18/11/2026; puesto al día el 19/11/2026 (la 0.4, con el escritorio). Hispa-Pentium es el miembro de la
+*18/11/2026; puesto al día el 19/11/2026 (la 0.5: el escritorio, con sus menús, sus iconos y su portapapeles). Hispa-Pentium es el miembro de la
 familia Hispa-DOS para los PC de 2000 en adelante (la gama de Windows XP, [ROADMAP](ROADMAP.md)): un **núcleo propio
 de 32 bits, sin DOS por debajo**, con memoria virtual, escrito en
 [Castel](../castel/README.md). Esta nota cuenta lo que hay hecho: la semilla de la
@@ -22,7 +22,13 @@ de tareas con el botón «Inicio», menú Inicio de dos columnas, reloj, un Bloc
 notas y una Consola con el intérprete de órdenes dentro: sección 10); y lo que
 hace falta para probarlo en **PC de verdad** (sección 11): una memoria USB con
 GRUB, los programas del cargador como **unidad en memoria** cuando no hay disco, y
-**no escribir en el disco del PC** si no se pide. Todo está en `castel/nucleo32/`.*
+**no escribir en el disco del PC** si no se pide. Y en la del 19/11 a mediodía (la
+**0.5**, después de la primera prueba en un PC de verdad, un Toshiba NB250): el
+**botón secundario** del ratón con sus menús, **seleccionar, cortar, copiar y
+pegar** con un portapapeles del sistema, **iconos en el tapiz**, «Mi equipo»,
+ventanas que **cambian de tamaño** por el borde, **barra de menús** en las ventanas
+y el escritorio **a la medida de la pantalla** (1024 x 600 y los demás). Todo está
+en `castel/nucleo32/`.*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -160,9 +166,9 @@ apagar`; después, `fsck.fat -n /dev/shm/pentium.img` da el disco por sano y `md
 
 ## 2. Las piezas
 
-El núcleo son unas 9.000 líneas de Castel en diecinueve módulos (más la biblioteca
+El núcleo son unas 10.000 líneas de Castel en veinte módulos (más la biblioteca
 de 32 bits, `castel/biblioteca32/`: Textos32, Mem32 y Formato, CASTEL32.md §7). Sale
-un binario de unos 88 K (casi la mitad, el entorno gráfico).
+un binario de unos 100 K (la mitad, el entorno gráfico).
 
 | Módulo | Qué hace |
 |---|---|
@@ -180,17 +186,20 @@ un binario de unos 88 K (casi la mitad, el entorno gráfico).
 | `video.cas` (Video) | El **modo gráfico**: el que haya dejado el cargador (multiboot) o el de la **VBE de Bochs/QEMU**; la memoria de la pantalla, a la vista del núcleo; y, si el modo no es de 32 bits, el volcado a 24 o a 16 (sección 10). |
 | `grafico.cas` (Grafico), `letra.cas` (Letra) | **Dibujar**: los lienzos; rectángulos, degradados, esquinas redondas, líneas, círculos, el disquete de la casa, texto con la **letra de 8x16** (la de Hispa Ventanas, hecha por `hazletra.py`) y copiar de un lienzo a otro. |
 | `raton.cas` (Raton) | El **ratón PS/2** (IRQ 12): dónde está la flecha y la cola de clics. |
-| `ventanas.cas` (Ventanas) | El **gestor de ventanas**: un lienzo por ventana, el marco, el orden, componer solo lo que cambia con doble búfer, la flecha, y repartir el ratón y las teclas. |
+| `ventanas.cas` (Ventanas) | El **gestor de ventanas**: un lienzo por ventana, el marco, el orden, componer solo lo que cambia con doble búfer, la flecha (y sus formas), mover y **cambiar de tamaño**, y repartir el ratón y las teclas. |
+| `emergente.cas` (Emergente) | Los **menús emergentes**: el del botón secundario y el que cuelga de una barra de menús. |
 | `terminal.cas` (Terminal) | Los **terminales**: dos tubos para que una ventana tenga dentro al intérprete de órdenes y a sus programas. |
-| `escritorio.cas` (Escritorio) | El **escritorio**: el tapiz, la barra de tareas, el menú Inicio, el reloj, los cuadros de apagar y de configuración, y la tarea que lo mueve todo. |
+| `escritorio.cas` (Escritorio) | El **escritorio**: el tapiz y sus **iconos**, la barra de tareas, el menú Inicio, el reloj, los cuadros (apagar, configuración, «Acerca de»), los menús del botón secundario, y la tarea que lo mueve todo. |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
 
 Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 
 | Archivo | En el disco | Qué es |
 |---|---|---|
-| `llamadas.cas` (Llamadas) | — | El **módulo de las llamadas al sistema** para los programas: `tecla`, `leer_línea` (con su historia), `abrir`, `crear`, `leer`, `escribir_archivo`, `mover`, `cortar`, `cerrar`, `borrar`, `renombrar`, `crear_carpeta`, `cambiar_carpeta`, `redirigir`, `entrada`, `lanzar`, `esperar`, `argumentos`, `dato`, `más_memoria`...; y las **ventanas** (`ventana`, `suceso`, `rectángulo`, `degradado`, `texto`, `mapa`...) y los terminales. Un programa lo importa y no escribe ni una `int 0x80`. |
+| `llamadas.cas` (Llamadas) | — | El **módulo de las llamadas al sistema** para los programas: `tecla`, `leer_línea` (con su historia), `abrir`, `crear`, `leer`, `escribir_archivo`, `mover`, `cortar`, `cerrar`, `borrar`, `renombrar`, `crear_carpeta`, `cambiar_carpeta`, `redirigir`, `entrada`, `lanzar`, `esperar`, `argumentos`, `dato`, `más_memoria`...; y las **ventanas** (`ventana`, `suceso`, `rectángulo`, `degradado`, `texto`, `mapa`...), los **menús** (`menú`), el **portapapeles** (`al_portapapeles`, `del_portapapeles`) y los terminales. Un programa lo importa y no escribe ni una `int 0x80`. |
+| `barramenu.cas` (Barramenu) | — | La **barra de menús** de una ventana (Archivo, Edición, Ayuda): pintarla, saber qué rótulo se ha pulsado y abrir su menú. |
 | `ubloc.cas` | `BLOC.BIN` | El **Bloc de notas** del escritorio (sección 10). |
+| `uequipo.cas` | `EQUIPO.BIN` | **Mi equipo**: las unidades y lo que hay en ellas (sección 10). |
 | `uconsola.cas` | `CONSOLA.BIN` | La **Consola** del escritorio: el intérprete de órdenes dentro de una ventana (sección 10). |
 | `uordenes.cas` | `ORDENES.BIN` | El **intérprete de órdenes** (sección 8). |
 | `uhola.cas` | `HOLA.BIN` | Escribe, suma, duerme, pide su número de tarea y prueba que la llamada al sistema no le deja enseñar la memoria del núcleo. |
@@ -369,6 +378,9 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 36 | cambiar el nombre (EBX: la ventana; ECX: el nombre) | `título` | 0 |
 | 37 | **los terminales** (sección 10): EBX = 0, hacer uno; 1, leer lo que han escrito los de dentro (a ECX, hasta EDX octetos); 2, una tecla para ellos (ECX); 3, Ctrl+C | `hacer_terminal`, `leer_terminal`, `teclear`, `cortar_terminal` | |
 | 38 | **poner en marcha el escritorio** | `escritorio` | 1 o 0 |
+| 39 | **un menú emergente** para la ventana EBX, como dice lo de ECX (dónde, las opciones separadas por «\|», las que salen en gris y una etiqueta): lo elegido llega luego como el suceso «menú» | `menú` | 0 |
+| 40 | **el portapapeles**: EBX = 0, guardar los EDX octetos de ECX; 1, copiar lo que hay a ECX (hasta EDX); 2, cuánto hay | `al_portapapeles`, `del_portapapeles`, `en_portapapeles` | los octetos |
+| 41 | **lanzar un programa y soltarlo** (EBX: el nombre; ECX: sus argumentos): no hay que esperarlo | `lanzar_suelto` | su tarea |
 
 (La 11, con ECX = 1, no se queda esperando: da `SIGUE` si la tarea no ha acabado
 —`acabada`—. La 15 da además el ancho y el alto de la pantalla gráfica y si el
@@ -636,52 +648,98 @@ y la que usa Hispa-DOS (y Castel para sus textos):
 
 ## 10. El entorno gráfico: el escritorio
 
-El primer entorno gráfico de Hispa-Pentium (la 0.4): un escritorio con la
-comodidad de los de principios de los 2000, **de diseño propio**. No lleva nada de
-nadie: ni logotipos, ni fondos, ni iconos, ni los colores de otro sistema. La
-paleta es la de la casa para esta gama (**azules y verdes**, con las esquinas
-redondas), el logo es el **disquete de Hispa-DOS** y la letra es la de 8x16 de
-Hispa Ventanas (diseño propio, con sus tildes y su eñe).
+El entorno gráfico de Hispa-Pentium (desde la 0.4; con menús, iconos y
+portapapeles desde la 0.5): un escritorio con la comodidad de los de principios
+de los 2000, **de diseño propio**. No lleva nada de nadie: ni logotipos, ni
+fondos, ni iconos, ni los colores de otro sistema. La paleta es la de la casa para
+esta gama (**azules y verdes**, con las esquinas redondas), el logo es el
+**disquete de Hispa-DOS** y la letra es la de 8x16 de Hispa Ventanas (diseño
+propio, con sus tildes y su eñe).
 
 | | |
 |---|---|
-| ![El menú Inicio](pentium/escritorio-inicio.png) | ![El Bloc de notas y la Consola](pentium/escritorio-ventanas.png) |
+| ![El tapiz, con sus iconos y el menú del botón secundario](pentium/escritorio-iconos.png) | ![El menú Inicio](pentium/escritorio-inicio.png) |
+| ![El Bloc de notas: seleccionar, y el menú de cortar, copiar y pegar](pentium/escritorio-seleccion.png) | ![Mi equipo y la Consola, con su barra de menús](pentium/escritorio-ventanas.png) |
+| ![El menú de una ventana, en su título](pentium/escritorio-menu-ventana.png) | ![A 1024 x 600, la medida de la pantalla de un netbook](pentium/escritorio-1024x600.png) |
 | ![Configuración](pentium/escritorio-configuracion.png) | ![Apagar el equipo](pentium/escritorio-apagar.png) |
 
 ### Lo que se ve
 
 - **El tapiz**: tres a elegir («Olas», «Azul» y «Verde»), con el disquete y el
   nombre abajo a la derecha.
+- **Los iconos del tapiz**: «Mi equipo», «Bloc de notas» y «Consola», con su
+  rótulo en letra normal. Un clic lo elige (el rótulo queda sobre azul); **dos
+  clics lo abren**; se llevan a otro sitio **arrastrándolos**.
 - **La barra de tareas**, abajo: el botón **«Inicio»** (verde, redondeado), un
   **botón por cada ventana abierta** (pulsarlo la trae delante; si ya lo estaba, la
   minimiza; si estaba minimizada, la recupera) y, a la derecha, la **bandeja con el
   reloj** (el de la CMOS; se pone al día cada minuto).
 - **El menú Inicio**, de dos columnas: a la izquierda, en blanco, los **Programas**
-  (Bloc de notas, Consola); a la derecha, en azul muy claro, los **Documentos** (los
-  `.TXT` de la raíz del disco: se abren con el Bloc de notas) y **Configuración**;
-  y abajo, **«Apagar el equipo»**. Se abre con el botón o con la **tecla del logo**;
-  la opción bajo el ratón se resalta; con las flechas, Intro y Esc también se anda
-  por él; un clic fuera lo cierra.
+  (Bloc de notas, Consola, Mi equipo); a la derecha, en azul muy claro, los
+  **Documentos** (los `.TXT` de la raíz del disco: se abren con el Bloc de notas) y
+  **Configuración**; y abajo, **«Apagar el equipo»**. Se abre con el botón o con la
+  **tecla del logo**; la opción bajo el ratón se resalta; con las flechas, Intro y
+  Esc también se anda por él; un clic fuera lo cierra.
 - **Las ventanas**: la barra de título azul con degradado y las esquinas de arriba
   redondeadas, el disquete, el nombre y **tres botones** (minimizar, maximizar o
   volver al tamaño de antes, y cerrar, este en el naranja del disquete), un borde y
   una sombra suave. Se **mueven** arrastrando el título, pasan **delante** al
-  pulsarlas, y **dos clics en el título** las maximizan. La ventana activa lleva el
-  título de azul vivo; las demás, de azul gris.
+  pulsarlas, y **dos clics en el título** las maximizan. **Cambian de tamaño
+  arrastrando el borde o una esquina**: encima de ellos la flecha cambia de forma
+  (de lado a lado, de arriba abajo o en diagonal), y se agarran también un poco
+  por fuera. La ventana activa lleva el título de azul vivo; las demás, de azul
+  gris.
+- **El botón secundario del ratón** saca un menú, según dónde:
+  - en el **tapiz**: Configuración, Cambiar el tapiz (pasa al siguiente),
+    Organizar iconos (cada uno a su sitio) y Acerca de Hispa-Pentium;
+  - en el **título de una ventana**, o en **su botón de la barra de tareas**:
+    Restaurar, Mover, Minimizar, Maximizar y Cerrar (en gris, lo que en ese
+    momento no toca). «Mover» lleva la flecha al título y la ventana la sigue
+    hasta el clic siguiente (o Intro, o Esc);
+  - en un **icono** del tapiz o en un programa o documento del **menú Inicio**:
+    Abrir;
+  - en el **Bloc de notas**: Cortar, Copiar, Pegar y Seleccionar todo; en la
+    **Consola**: Copiar y Pegar; en **Mi equipo**: Abrir.
+
+  En los menús, la opción bajo el ratón se resalta; un clic la elige; las flechas,
+  Intro y Esc valen; un clic fuera lo cierra.
+- **La barra de menús de las ventanas** (Archivo, Edición, Ayuda...), en el Bloc
+  de notas, la Consola y Mi equipo: pulsar un rótulo abre su menú; pulsarlo otra
+  vez lo cierra.
+- **Seleccionar texto** (en el Bloc de notas y en la Consola): **arrastrando** el
+  ratón; con **dos clics**, la palabra; con **tres**, la línea; con **Mayús y un
+  clic**, hasta ahí; y, en el Bloc, con **Mayús y las flechas** (o Inicio, Fin,
+  Re Pág, Av Pág). Lo seleccionado se ve en blanco sobre azul.
+- **El portapapeles del sistema**: lo que se corta o se copia en un programa se
+  pega en cualquier otro (del Bloc a la Consola, y al revés). Es un texto.
 - **«Apagar el equipo»**: Apagar, Reiniciar o Cancelar. Apagar deja la pantalla de
   «Ya puede apagar el equipo» (en QEMU, además, lo apaga).
 - **Configuración**: lo que hay (la pantalla, la memoria, las tareas), el teclado
-  (español o de EE. UU.) y el tapiz.
+  (español o de EE. UU.) y el tapiz. **Acerca de Hispa-Pentium**: la versión y la
+  licencia.
 - **El Bloc de notas** (`BLOC.BIN`, `ubloc.cas`): escribir un texto con el teclado
   español y **guardarlo en el disco** («Guardar», F2 o Ctrl+S; en la página 437 y
-  con los finales de línea del DOS). Las flechas, Inicio, Fin, Supr, Retroceso; un
-  clic pone el cursor; las líneas largas siguen debajo. Abre `NOTAS.TXT`, o el
-  archivo que se le diga (los documentos del menú). Si se cierra con cambios sin
-  guardar, avisa.
+  con los finales de línea del DOS). Las flechas, Inicio, Fin, Re Pág, Av Pág,
+  Supr, Retroceso; un clic pone el cursor; las líneas largas siguen debajo.
+  **Cortar, Copiar, Pegar y Seleccionar todo** (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A, el
+  menú Edición o el del botón secundario); lo que se teclea sustituye a lo
+  seleccionado. Menús: Archivo (Nuevo, Guardar, Salir), Edición y Ayuda. Abre
+  `NOTAS.TXT`, o el archivo que se le diga (los documentos del menú). Si se cierra
+  con cambios sin guardar, avisa.
 - **La Consola** (`CONSOLA.BIN`, `uconsola.cas`): una ventana de 80 x 25 letras con
   el **intérprete de órdenes dentro** (el mismo `ORDENES.BIN`, sin tocarle una
   línea), y lo que este lance. Ctrl+C acaba el programa que corra; `SALIR` cierra
-  la ventana.
+  la ventana. Lo que hay en la pantalla **se selecciona con el ratón y se copia**
+  (el menú Edición, el del botón secundario, o Ctrl+C si hay algo seleccionado);
+  **Pegar** teclea lo del portapapeles. Lo seleccionado se suelta en cuanto se
+  escribe algo en la pantalla. Menús: Archivo (Cerrar), Edición (Copiar, Pegar,
+  Seleccionar todo) y Ayuda (las órdenes: teclea `AYUDA`).
+- **Mi equipo** (`EQUIPO.BIN`, `uequipo.cas`): **las unidades** del equipo (de
+  momento, una: C:, el disco FAT, con lo que mide y lo que le queda; o, sin disco,
+  lo que ha traído el cargador, en memoria). Con dos clics se entra: sus carpetas
+  y sus archivos, con su tamaño. Dos clics en una carpeta entran en ella; en «..»,
+  se vuelve; un texto (`.TXT`, `.BAT`) lo abre el Bloc de notas; un programa
+  (`.BIN`) se lanza. Las flechas, Intro y Retroceso también valen.
 
 ### Cómo está hecho
 
@@ -695,12 +753,14 @@ Hispa Ventanas (diseño propio, con sus tildes y su eñe).
    esa tarjeta (`0x1CE`, el índice; `0x1CF`, el dato), y busca la memoria de la
    pantalla en la primera zona de su dispositivo PCI (`1234:1111`).
 
-800 x 600 si no se dice otra cosa (`modo=1024x768` en la línea del cargador). La
-memoria de la pantalla se pone en la zona de los gráficos del núcleo (sección 3).
-**Todo se dibuja con 32 bits por punto**; si el modo que hay es de 24 o de 16 (hay
-tarjetas que no dan otro), se dibuja en un lienzo de 32 bits aparte y `volcar()`
-pasa a la pantalla de verdad lo que se ha tocado. (`bits=24` o `bits=16` en la
-línea del cargador lo fuerzan con la VBE de Bochs, para probarlo.)
+800 x 600 si no se dice otra cosa (`modo=1024x600` en la línea del cargador: el
+que sea, de 640 x 480 a 1600 x 1200). El escritorio se acomoda a la medida que
+haya: la del cargador manda. La memoria de la pantalla se pone en la zona de los
+gráficos del núcleo (sección 3). **Todo se dibuja con 32 bits por punto**; si el
+modo que hay es de 24 o de 16 (hay tarjetas que no dan otro), se dibuja en un
+lienzo de 32 bits aparte y `volcar()` pasa a la pantalla de verdad lo que se ha
+tocado. (`bits=24` o `bits=16` en la línea del cargador lo fuerzan con la VBE de
+Bochs, para probarlo.)
 
 **Dibujar** (`grafico.cas`), en Castel. Un **lienzo** es un rectángulo de puntos
 (`0x00RRGGBB`) en la memoria, con su ancho, su alto y los puntos que hay de una
@@ -729,18 +789,48 @@ sin marco y siempre delante).
 
 Una tarea del núcleo, **`escritorio`**, da el **pulso** cien veces por segundo:
 recoge los clics y lo que se ha movido el ratón, y las teclas, y los reparte.
-Mover, traer delante, minimizar, maximizar y cerrar lo hace el gestor; lo demás va
-a la **cola de sucesos** de la ventana que toca (una tecla a la activa; un clic,
-donde cae), y su dueño los recoge. Al maximizar, la ventana cambia de lienzo y su
-dueño recibe «tamaño» para volver a pintar. Con el escritorio en marcha **las
+Mover, cambiar de tamaño, traer delante, minimizar, maximizar y cerrar lo hace el
+gestor; lo demás va a la **cola de sucesos** de la ventana que toca (una tecla a
+la activa; un clic, donde cae), y su dueño los recoge. Con cada clic van **los
+botones** pulsados, las **teclas de cambio** (Mayús, Control) y **las veces
+seguidas** que se ha pulsado ahí (1; 2, el doble clic; 3, el triple: mismo sitio y
+menos de medio segundo); con cada flecha del teclado, si venía con Mayús. Al
+cambiar el tamaño (o al maximizar), la ventana cambia de lienzo: se le copia lo
+que tenía, para que no parpadee, y su dueño recibe «tamaño» para volver a pintar
+(si llegan varios seguidos, vale con el último). Con el escritorio en marcha **las
 teclas son suyas**: quien lea de la consola de texto se queda esperando, y Ctrl+C
 es una tecla más (cada Consola tiene el suyo). Todo lo de las ventanas va con un
 cerrojo: los programas dibujan a la vez que el escritorio compone.
 
+**Cambiar el tamaño.** El borde mide 4 puntos; para acertarle con un panel táctil
+se agarra también desde 3 puntos por fuera, y las esquinas miden 14 a lo largo.
+Mientras se arrastra, la ventana se rehace a cada paso (no hay un «marco de
+goma»): 170 x 90 lo menos, la pantalla lo más. Los cuadros (Apagar,
+Configuración) no cambian de tamaño.
+
+**El fondo.** Lo que cae fuera de todas las ventanas (el tapiz), y el botón
+secundario en un título, van a una ventana que no se ve, la **«del fondo»**, que
+es del escritorio: ahí atiende los iconos y pone sus menús. **Los iconos** se
+pintan en el propio tapiz; de cada uno se guarda lo que tapa, para quitarlo de ahí
+al moverlo o al elegirlo.
+
+**Los menús emergentes** (`emergente.cas`). Solo hay uno abierto a la vez: una
+ventana del núcleo, sin marco y por delante de todo. Las opciones se dan en un
+texto, separadas por «|» («-» es una raya), con un bit por cada una que sale en
+gris. Lo abre el escritorio para los suyos, o un programa por la llamada 39 para
+una ventana suya: al cerrarse, a esa ventana le llega el suceso **«menú»** con la
+opción elegida (o «ninguna») y la etiqueta que dio. La **barra de menús** de una
+ventana la pinta el propio programa (`barramenu.cas`), y cada rótulo abre debajo
+un menú de estos.
+
+**El portapapeles** está en el núcleo (`usuario.cas`, la llamada 40): un texto de
+hasta 64 K, en la página 437 y con sus líneas acabadas en `\n`; el último que se
+ha copiado en cualquier programa.
+
 **Los programas** abren su ventana y dibujan por las **llamadas al sistema** 32 a
-36 (sección 6): `ventana`, `rectángulo`, `degradado`, `texto`, `mapa`, `suceso`...
-de `llamadas.cas`. Al acabar un programa (o si el núcleo lo acaba), sus ventanas se
-cierran solas.
+41 (sección 6): `ventana`, `rectángulo`, `degradado`, `texto`, `mapa`, `suceso`,
+`menú`, `al_portapapeles`... de `llamadas.cas`. Al acabar un programa (o si el
+núcleo lo acaba), sus ventanas se cierran solas.
 
 ```
 importar Llamadas
@@ -748,13 +838,19 @@ importar Llamadas
 v := ventana("Hola", 300, 120)
 degradado(v, 0, 0, 300, 120, 0xEAF3FE, 0xC4DCF8)
 texto_negrita(v, 20, 20, "¡Hola, escritorio!", 0x14294A)
-mientras suceso(v, s, cierto) y s.clase <> EV_CERRAR hacer fin
+mientras suceso(v, s, cierto) y s.clase <> EV_CERRAR hacer
+    ; el botón secundario: un menú; lo elegido llega luego (EV_MENÚ: s.a, la opción)
+    si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_DERECHO <> 0 entonces
+        menú(v, ent32(s.a), ent32(s.b), "Saludar|-|Salir", 0, 1)
+    fin
+fin
 ```
 
 **Los terminales** (`terminal.cas`). Para que la Consola tenga dentro al intérprete
 de órdenes sin tocarlo: un terminal son **dos tubos**. El programa que lo hace (la
 Consola) lee por uno lo que escriben los de dentro y lo pinta, letra a letra, como
-una pantalla de texto; y mete por el otro las teclas que llegan a su ventana. Los
+una pantalla de texto; y mete por el otro las teclas que llegan a su ventana (lo
+que se pega también entra por ahí, poco a poco: en el tubo caben 256 teclas). Los
 programas que lanza **heredan el terminal**: su `escribir` va al tubo en vez de a
 la pantalla y su `tecla` sale de él, y no se enteran. Ctrl+C en un terminal acaba
 los programas de dentro (menos los que lo atienden ellos); al cerrar la ventana, se
@@ -765,10 +861,13 @@ excepción) sale por el **puerto serie**, como siempre.
 
 ### Lo que falta
 
-Cambiar el tamaño de una ventana arrastrando su borde; los iconos en el tapiz; más
-programas (un explorador de archivos, lo primero); menús dentro de las ventanas;
-copiar y pegar; letras de otros tamaños y de ancho variable; la rueda del ratón y
-el doble clic con su ajuste; y que el tapiz pueda ser una imagen del disco.
+Hacer carpetas y cambiar nombres desde Mi equipo (y «Nueva carpeta» en el tapiz);
+iconos del tapiz para los documentos; la barra de desplazamiento y la **rueda del
+ratón** (el panel táctil la imita, pero el ratón se enciende como PS/2 sencillo);
+que la Consola cambie sus filas y columnas con la ventana, y guarde lo que ha
+pasado hacia arriba; menús que se abren con Alt y submenús; letras de otros
+tamaños y de ancho variable; el ajuste del doble clic; y que el tapiz pueda ser
+una imagen del disco.
 
 ## 11. En un PC de verdad: GRUB y la memoria USB
 
@@ -777,19 +876,23 @@ arranque BIOS con GRUB) para probar Hispa-Pentium en un PC: se graba tal cual en
 memoria y se arranca de ella. (Necesita ser root, `parted`, `dosfstools` y
 `grub-pc-bin`.) El menú de GRUB:
 
-| Entrada | Qué arranca |
-|---|---|
-| el escritorio (800 x 600) | `ESCRIT8.BIN escritorio sindisco` |
-| el escritorio (1024 x 768) | `ESCRIT10.BIN escritorio sindisco` |
-| el intérprete de órdenes (modo texto) | `SEMILLA.BIN ordenes sindisco` |
-| la consola del núcleo (modo texto) | `SEMILLA.BIN sindisco` |
+| Entrada | Qué arranca | El modo |
+|---|---|---|
+| el escritorio (800 x 600) | `ESCRIT8.BIN escritorio sindisco` | el de su cabecera |
+| el escritorio **a la medida de la pantalla** | `ESCRIT8.BIN escritorio sindisco` | `set gfxpayload=auto`: el que el panel dice que prefiere |
+| el escritorio (1024 x 600) | `ESCRIT6.BIN escritorio sindisco` | el de su cabecera |
+| el escritorio (1366 x 768) | `ESCRIT13.BIN escritorio sindisco` | el de su cabecera |
+| el escritorio (1024 x 768) | `ESCRIT10.BIN escritorio sindisco` | el de su cabecera |
+| ver los modos de vídeo que da la BIOS | la orden `videoinfo` de GRUB | — |
+| el intérprete de órdenes (modo texto) | `SEMILLA.BIN ordenes sindisco` | texto |
+| la consola del núcleo (modo texto) | `SEMILLA.BIN sindisco` | texto |
 
 - **Los programas vienen como módulos.** El núcleo no sabe leer todavía una
   memoria USB (ni un disco SATA), y en casi todos los portátiles no hay IDE
   clásico: GRUB carga con el núcleo `ORDENES.BIN`, `BLOC.BIN`, `CONSOLA.BIN`,
-  `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN` y `LEEME.TXT`, y hacen de
-  **unidad C: en memoria** (sección 7). No se puede guardar nada: el Bloc de notas
-  lo dice («es de solo lectura»).
+  `EQUIPO.BIN`, `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN` y `LEEME.TXT`, y
+  hacen de **unidad C: en memoria** (sección 7). No se puede guardar nada: el Bloc
+  de notas lo dice («es de solo lectura»).
 - **`sindisco`**: el núcleo ni mira los discos del PC. Y aunque los mirara, **no
   escribe en ellos** sin `escritura` (sección 7).
 - **El modo gráfico, de GRUB.** En un PC de verdad no está la tarjeta de QEMU: el
@@ -798,19 +901,98 @@ memoria y se arranca de ella. (Necesita ser root, `parted`, `dosfstools` y
   el núcleo lo pide en su **cabecera** (la bandera de vídeo y el ancho, el alto y
   los bits que prefiere). El compilador de Castel deja en la cabecera el sitio
   para ello, a cero (CASTEL32.md §8), y **`nucleo32/modo_grafico.py NUCLEO.BIN
-  SALIDA.BIN [ANCHO ALTO [BITS]]`** hace una copia del núcleo que lo pide:
-  `ESCRIT8.BIN` y `ESCRIT10.BIN` son eso. GRUB pone el modo (o el que más se le
-  parezca) y le dice al núcleo dónde está la memoria de la pantalla; el escritorio
-  arranca en él. El núcleo sin tocar (`SEMILLA.BIN`) pide lo de siempre, modo
-  texto: con él van QEMU con `-kernel` y las dos entradas de texto.
+  SALIDA.BIN [ANCHO ALTO [BITS]]`** hace una copia del núcleo que lo pide: los
+  `ESCRIT*.BIN` son eso. GRUB pone el modo y le dice al núcleo dónde está la
+  memoria de la pantalla; el escritorio arranca en él, **con la medida que le
+  den**. El núcleo sin tocar (`SEMILLA.BIN`) pide lo de siempre, modo texto: con él
+  van QEMU con `-kernel` y las dos entradas de texto.
+- **La medida de la pantalla.** Al cargar el núcleo, GRUB apunta lo que pide su
+  cabecera en su variable `gfxpayload`, así: `ANCHOxALTOxBITS,ANCHOxALTO,auto`. Si
+  la BIOS no tiene ese modo, prueba el mismo con otros bits y, si tampoco,
+  **`auto`**: el que la pantalla dice que prefiere (GRUB se lo pregunta al panel:
+  su EDID), y si no lo sabe, el que le parece (800 x 600, en lo probado). La
+  entrada «a la medida de la pantalla» pone `gfxpayload=auto` después de cargar
+  el núcleo: lo que diga el panel. En las dos, GRUB solo puede poner **modos que
+  la BIOS dé por VBE**.
+- **Si la BIOS no da el modo del panel.** Pasa: hay BIOS de portátil (las de los
+  Intel de los netbooks, sobre todo) que por VBE solo dan los modos «de siempre»
+  (640 x 480, 800 x 600, 1024 x 768) y no el de su propio panel (1024 x 600,
+  1366 x 768). La entrada **«Ver los modos de vídeo que da la BIOS»** lo dice:
+  enseña la lista (página a página: una tecla para seguir) y, al final, el que
+  prefiere el panel. Entonces:
+  1. si el modo del panel **está en la lista**, van las entradas «a la medida» y
+     la de su tamaño;
+  2. si **no está**, GRUB pone otro y el escritorio sale en él: a 800 x 600 se ve
+     bien (el panel lo estira, o lo deja con bandas a los lados); a 1024 x 768 en
+     un panel de 600 de alto, aplastado;
+  3. el arreglo de verdad, **para más adelante**: que el núcleo ponga él la
+     medida del panel hablando con la tarjeta, sin la BIOS. En las Intel (GMA)
+     no hace falta un controlador entero: la BIOS ya ha dejado el panel encendido
+     con sus tiempos, y basta con apagar el «ajuste al panel», decirle al plano y
+     a la tubería la medida nueva (los registros `PIPESRC`, `DSPSIZE`,
+     `DSPSTRIDE` y `PFIT_CONTROL`) y leer la medida del panel de sus tiempos. Es
+     lo que hacían en su día los parches de «resolución» para estas tarjetas.
 - **Probado en QEMU** arrancando la imagen como una memoria USB (`-device qemu-xhci
-  -device usb-storage`): GRUB, el modo de 800 x 600 puesto por él y el escritorio
-  con sus programas. **En un PC de verdad, todavía no** (19/11/2026): lo que se
-  espera es que vaya donde haya teclado y ratón PS/2 (o que la BIOS los imite: los
-  portátiles con panel táctil PS/2) y una VBE con modos de 32, 24 o 16 bits.
+  -device usb-storage`): GRUB, el modo puesto por él (800 x 600 y 1024 x 600; el
+  de 1366 x 768 no lo tiene la BIOS de QEMU, y sale el que GRUB elige: así se
+  prueba también ese camino) y el escritorio con sus programas.
+- **Probado en un PC de verdad** (19/11/2026): un **Toshiba NB250** (Atom N455,
+  pantalla de 1024 x 600, panel táctil Synaptics PS/2), con la 0.4 a 800 x 600:
+  arranca deprisa, el escritorio sale bien, y el ratón (botón principal y
+  movimiento) y el teclado van. Lo que se espera en otros: que vaya donde haya
+  teclado y ratón PS/2 (o que la BIOS los imite: los portátiles con panel táctil
+  PS/2) y una VBE con modos de 32, 24 o 16 bits.
 - **Sin GRUB**, otro camino para más adelante: un cargador propio de 16 bits que
   pida el modo a la VBE (`int 10h`, `4F02h`) antes de pasar a modo protegido y
   deje al núcleo la misma información.
+
+### Guardar en la memoria USB: el plan (sin hacer)
+
+Arrancando de la memoria USB **no se puede guardar nada**: el núcleo no tiene
+controlador de USB, y lo que ve como C: son copias en memoria de lo que cargó
+GRUB. Para escribir en la propia memoria (y, de paso, leer de ella en vez de
+depender de los módulos) hace falta, por este orden:
+
+1. **Encontrar el controlador USB** en el bus PCI (clase 0x0C, subclase 0x03) y
+   saber de cuál es: **UHCI** (interfaz 0x00; USB 1.1, por puertos: los Intel
+   hasta el ICH), **OHCI** (0x10; USB 1.1, por memoria), **EHCI** (0x20; USB 2.0)
+   o **xHCI** (0x30; USB 3). Un PC como el NB250 tiene EHCI con UHCI de
+   compañeros; los de 2012 en adelante, xHCI. Lo primero, **quitarle el
+   controlador a la BIOS** (el «traspaso» de EHCI y xHCI; en UHCI, apagar la
+   imitación de teclado en el registro `LEGSUP`): hasta entonces la BIOS imita
+   con él el teclado y el ratón PS/2, y al quitárselo **se pierden** si son USB
+   (en el NB250 no: son PS/2 de verdad).
+2. **EHCI primero** (es lo que llevan los equipos de esta gama, y una memoria
+   USB 2.0 enchufada a un puerto trasero cae en él): reiniciarlo, la lista
+   asíncrona con sus cabezas de cola (QH) y sus descriptores de transferencia
+   (qTD), y el estado de los puertos (encender, reiniciar el puerto, ver la
+   velocidad). Las memorias de velocidad «alta» van directas por EHCI; lo de
+   velocidad baja y completa (teclados, ratones) va a los UHCI compañeros o por
+   un concentrador, y queda para después.
+3. **Enumerar el dispositivo**: transferencias de control al punto 0 (dar
+   dirección, leer el descriptor del dispositivo y el de configuración, poner la
+   configuración) y quedarse con el que sea de la clase **almacenamiento**
+   (0x08), subclase SCSI (0x06), protocolo **«solo en bloque»** (0x50), con sus
+   dos puntos de bloque (uno de entrada y uno de salida).
+4. **El almacenamiento**: cada orden es un envoltorio de 31 octetos (CBW), los
+   datos y un estado de 13 (CSW). Órdenes SCSI: `INQUIRY`, `TEST UNIT READY`,
+   `READ CAPACITY (10)`, `READ (10)` y `WRITE (10)`; `REQUEST SENSE` cuando una
+   falla, y el reinicio de la clase si se atasca.
+5. **Enchufarlo a la FAT**: hoy `fat.cas` llama a `ata.cas` directamente; hay
+   que meter en medio una **tabla de discos** (leer sectores, escribir sectores,
+   asentar, cuántos hay) para que la FAT no sepa si debajo hay un ATA o una
+   memoria USB. Y montar su primera partición (la imagen de `usb.sh` lleva tabla
+   de particiones, que la FAT ya sabe leer).
+6. **Después**: UHCI y OHCI (con ellos, teclados y ratones USB, que es lo que
+   de verdad les falta a los PC sin PS/2), xHCI (los PC de 2012 en adelante: más
+   largo, con sus anillos de transferencias y sus contextos), los
+   concentradores, y enchufar y desenchufar en marcha.
+
+Cómo probarlo sin riesgo: QEMU da los cuatro controladores (`-device
+piix3-usb-uhci`, `-device usb-ehci`, `-device qemu-xhci`) con una memoria de
+imagen (`-device usb-storage`), que luego miran `fsck.fat` y `mtools`, como ya se
+hace con los discos; y en el PC de verdad, **con una memoria que no tenga nada
+que perder** y, como con los discos, sin escribir si no se pide (`escritura`).
 
 ## 12. Las pruebas
 
@@ -894,7 +1076,8 @@ usuario, y **ENSAMBLA** da el **mismo binario que NASM**. (El lenguaje no se ha
 tocado; de los compiladores, solo el arranque de `modelo usuario`, en los dos: ya
 no pone la pila, que es del núcleo. En la tanda del 19/11 de madrugada, ni eso. En
 la de la 0.4, cuatro palabras a cero en la cabecera multiboot de `modelo núcleo`,
-en los dos: el sitio para pedir el modo gráfico, sección 11.)
+en los dos: el sitio para pedir el modo gráfico, sección 11. En la de la 0.5, más
+sitio para los textos en CASTEL: más abajo.)
 
 **Sin disco, y sin permiso** (la tanda de la 0.4): con los programas como módulos
 de multiboot y sin disco, `ordenes` lanza el intérprete que venga, `DIR` enseña los
@@ -923,9 +1106,34 @@ por punto; que sin tarjeta gráfica que valga se dice y la consola sigue; que
 QEMU como tal (el modo, puesto por GRUB; los programas, de los módulos). Las
 capturas se quedan en una carpeta con `CAPTURAS_A=carpeta ./pruebas.sh`.
 
+**La 0.5**, en tres sesiones más (el botón secundario, `mouse_button 2`; el triple
+clic; Mayús con un clic, con la tecla sujeta desde el monitor): los **iconos** del
+tapiz y su menú, con «Cambiar el tapiz»; abrir el Bloc de notas con dos clics en
+su icono; en él, **seleccionar** una palabra con dos clics (se mira el azul de lo
+seleccionado punto a punto), el menú del botón secundario, **Cortar**, **Ctrl+V**,
+Mayús con las flechas, **Ctrl+C**, la línea entera con tres clics, teclear encima
+de lo seleccionado, Mayús con un clic, arrastrar, y el menú **Edición** de la
+barra; **cambiar el tamaño** de la ventana por su esquina (y que el programa
+repinta); «Abrir» con el botón secundario en el menú Inicio; y que lo copiado en
+el Bloc **se pega en la Consola** (el portapapeles es del sistema). En la Consola:
+seleccionar con dos clics y copiar con Ctrl+C, y pegarlo en el Bloc; el **menú de
+la ventana** en su título (Maximizar, Cerrar) y en su botón de la barra de tareas
+(Restaurar); estirarla. **Mi equipo**: las unidades, entrar en C:, y abrir un
+texto con el Bloc de notas. «Acerca de Hispa-Pentium». Y a **1024 x 600**: el
+escritorio a esa medida, llevar un icono a otro sitio y «Organizar iconos»,
+Configuración diciendo la medida, y **«Mover»** desde el menú de una ventana. De
+la memoria USB, además: la entrada de **1024 x 600** arrancada en QEMU (el modo lo
+pone GRUB por la cabecera de esa copia del núcleo) y que el menú trae las
+entradas nuevas («a la medida de la pantalla», con `gfxpayload=auto`; los modos
+de vídeo de la BIOS).
+
 Los disquetes de las pruebas de los dos compiladores y los dos ensambladores van
-ahora en **dos tandas** (lo de Hispa-Pentium, aparte): el ensamblador de la semilla
-pasa de medio mega y ya no cabía con lo demás.
+ahora en **tres tandas** (la semilla de Hispa-Pentium en una y sus programas en
+otra): el ensamblador de la semilla pasa de 600 K y ya no cabía con lo demás. Y a
+CASTEL, el compilador escrito en Castel, se le ha subido **el sitio para los
+textos** de un programa de 40 a 64 K (`compilador/base.cas`): el núcleo, con el
+escritorio de la 0.5, ya no le cabía («demasiados textos»). Es el único cambio en
+los compiladores de esta tanda; lo que sacan no cambia.
 
 Con todo, `pruebas.sh` entero da **281 bien, 0 mal** (19/11/2026; unos diecinueve
 minutos en el VPS).
@@ -940,12 +1148,19 @@ FAT12/16/32, con `COPY`, `DEL`, `REN`, `MD`, `RD` y la redirección), el
 intérprete con **`CD`, `PATH`, archivos `.BAT`, historia y Ctrl+C**, el **teclado
 español** y los **nombres largos** al leer. Y en la del 19/11 por la mañana (la
 0.4): **el escritorio** (sección 10), la unidad en memoria, el permiso de escritura
-y la memoria USB con GRUB (sección 11). Lo siguiente:
+y la memoria USB con GRUB (sección 11). Y en la del 19/11 a mediodía (la 0.5,
+después de la primera prueba en un PC de verdad): los **menús del botón
+secundario**, **seleccionar, cortar, copiar y pegar** con el portapapeles del
+sistema, los **iconos del tapiz**, **Mi equipo**, las ventanas que **cambian de
+tamaño**, la **barra de menús** y el escritorio **a la medida de la pantalla**. Lo
+siguiente:
 
 0. **El escritorio, más** (lo que falta, al final de la sección 10) y **los PC de
-   verdad**: probar la memoria USB en los portátiles; teclado y ratón **USB** (los
-   que no tienen PS/2 ni lo imita su BIOS); leer la propia memoria USB y los discos
-   **SATA (AHCI)**, para no depender de los módulos; apagar de verdad (ACPI).
+   verdad**: **guardar en la memoria USB** (el plan, al final de la sección 11:
+   EHCI y almacenamiento USB, y con ellos leer de la propia memoria); la **medida
+   del panel** cuando la BIOS no la da por VBE (sección 11); teclado y ratón
+   **USB** (los que no tienen PS/2 ni lo imita su BIOS); los discos **SATA
+   (AHCI)**; apagar de verdad (ACPI).
 
 1. **El intérprete, más**: `IF`, `GOTO`, `FOR`, `CALL` y variables en los `.BAT`;
    la redirección de la entrada (`<`) y las tuberías (`|`); `COPY CON`, `MOVE`,
