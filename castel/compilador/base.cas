@@ -225,7 +225,7 @@ módulo Base
 
     ; ---- los bloques de memoria lejana ----
     constante PARRAFOS_AT = 0x0A00              ; 40 K de nombres
-    constante PARRAFOS_CAD = 0x0A00             ; 40 K de textos
+    constante PARRAFOS_CAD = 0x1000             ; 64 K de textos (el núcleo de Hispa-Pentium pasa de 40)
     constante PARRAFOS_AR = 0x2000              ; 128 K de árbol
     constante CUBOS_AT = 1024
     constante CUBOS_CAD = 512
