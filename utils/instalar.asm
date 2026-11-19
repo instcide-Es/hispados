@@ -40,11 +40,28 @@
 ;  corta de la prueba de sonido) guarda lo que suena en el SONIDO.INI del
 ;  disco instalado (unidad:\HISPADOS\SONIDO.INI, con su informe SONIDO.TXT
 ;  al lado); así HSPSND lo usa desde el primer arranque. /NOSONIDO no la hace.
+;  [CD] El origen: la unidad de arranque, salvo que se diga otra con
+;  /ORIGEN:x: o que, arrancando de disquete, haya un CD de Hispa-DOS puesto
+;  (una unidad con \HISPADOS\HISPACD.INI): entonces se copia todo del CD y
+;  no se piden los disquetes «Instalación 2», «Oficina», «Hispa-486» ni
+;  «Internet» (el CD lo trae todo).
+;  [SETUP] INSTALAR /SETUP: el programa de instalación con pantallas, como el
+;  SETUP de MS-DOS 6.22 (pantalla azul, INTRO=Continuar, F1=Ayuda, F3=Salir):
+;  bienvenida, el disco duro (prepararlo entero si no tiene sitio, avisando
+;  de que se borra), formato, la carpeta C:\HISPADOS, la copia con barra de
+;  progreso, los demás disquetes si se instala desde disquetes y, al final,
+;  reiniciar. Lo lanza la opción «Instalar Hispa-DOS en el disco duro» del
+;  primer menú de arranque del disquete, la memoria USB y el CD. Por debajo
+;  hace lo mismo que INSTALAR: PARTIR (/SITUACION, /BORRARTODO, /INSTALAR
+;  /SI, /ARRANQUE), FORMATEA y SISTEMA. Sin la comprobación del sonido (se
+;  hace después con la opción «Prueba» del menú de arranque).
 ;  Nivel de error: 0 instalado, 1-5 error, 6 cancelado por el usuario.
 ; =============================================================================
         cpu 386
         bits 16
         org 0x100
+
+%include "version.inc"          ; VER_STR (la cabecera del programa de instalación)
 
 start:
         mov sp, stack_top
@@ -92,6 +109,33 @@ start:
         jne .op
         mov eax, [si]
         and eax, 0xDFDFDFDF
+        cmp eax, 'SETU'             ; [SETUP] /SETUP
+        jne .noset
+        mov al, [si+4]
+        and al, 0xDF
+        cmp al, 'P'
+        jne .op
+        mov byte [setup], 1
+        mov byte [nosnd], 1
+        add si, 5
+        jmp .op
+.noset:
+        cmp eax, 'ORIG'             ; [CD] /ORIGEN:x:
+        jne .noori
+        mov eax, [si+4]
+        and eax, 0x00DFDFDF
+        cmp eax, 'EN:' & 0xFFFFFF
+        jne .op
+        mov al, [si+7]
+        and al, 0xDF
+        cmp al, 'A'
+        jb usage
+        cmp al, 'Z'
+        ja usage
+        mov [origen], al
+        add si, 8
+        jmp .op
+.noori:
         cmp eax, 'NOSO'
         jne .op
         mov eax, [si+4]
@@ -102,21 +146,27 @@ start:
         add si, 8
         jmp .op
 .ope:
-        ; unidad de origen: la de arranque
+        ; unidad de origen: la de arranque (o el CD, o /ORIGEN:x:)
         mov ax, 0x3305
         int 0x21
         add dl, 'A' - 1
+        mov [arranque], dl
         mov [src], dl
-        mov [sys_path], dl
-        mov [part_path], dl
-        mov [fmt_path], dl
+        call elige_origen
+        call pon_origen
+        cmp byte [setup], 0
+        jne setup_main
         cmp byte [guided], 0
         je .chk
         call guided_pick
 .chk:
         mov dl, [src]
         cmp dl, [dst]
+        je .same
+        mov dl, [arranque]
+        cmp dl, [dst]
         jne .ok
+.same:
         mov si, msg_same
         call puts
         mov ax, 0x4C01
@@ -225,7 +275,15 @@ start:
         je .fmt                     ; VENTANAS.INI y su CENTRO.INI
         call ed_guardar
 .fmt:
-        ; 1) sistema: SYS unidad:
+instala_comun:
+        ; 1) sistema: SYS origen: unidad:
+        cmp byte [setup], 0
+        je .sys
+        mov si, sc_copia
+        mov bx, pie_espera
+        mov dx, ay_copia
+        call pantalla
+.sys:
         mov dx, sys_path
         mov bx, sys_tail
         call run
@@ -234,13 +292,132 @@ start:
         jz .copy
 .syserr:
         mov si, msg_syserr
+        cmp byte [setup], 0
+        jne s_error
         call puts
         mov ax, 0x4C03
         int 0x21
 .copy:
         ; 2) archivos
+        cmp byte [setup], 0
+        je .copy_n
+        mov bx, copia_todo          ; [SETUP] con la barra de progreso
+        call con_progreso
+        jmp .copied
+.copy_n:
         mov si, msg_copying
         call puts
+        call copia_todo
+        jmp .copied
+
+.copied:
+        cmp word [nfailed], 0
+        je .allok
+        ; alguno no se ha copiado (disco lleno...): no decir que está instalado
+        mov si, msg_fail
+        cmp byte [setup], 0
+        je .fail_n
+        mov si, sc_fallo
+        jmp s_error
+.fail_n:
+        call puts
+        movzx eax, word [nfailed]
+        call putnum
+        mov si, msg_fail2
+        call puts
+        mov ax, 0x4C04
+        int 0x21
+.allok:
+        cmp byte [setup], 0
+        jne .after_msg
+        cmp byte [updmode], 0
+        jne .updmsg
+        mov si, msg_done
+        call puts
+        movzx eax, word [ncopied]
+        call putnum
+        mov si, msg_done2
+        call puts
+        jmp .after_msg
+.updmsg:
+        ; ACTUALIZAR: qué se cambió y qué se conservó
+        mov si, msg_updone
+        call puts
+        movzx eax, word [ncopied]
+        call putnum
+        mov si, msg_updone2
+        call puts
+        mov si, msg_updkept
+        call puts
+        movzx eax, word [nkept]
+        call putnum
+        mov si, msg_updkept2
+        call puts
+        cmp byte [bak_auto], 0
+        je .nba
+        mov si, msg_bak_a
+        call puts
+.nba:
+        cmp byte [bak_conf], 0
+        je .after_msg
+        mov si, msg_bak_c
+        call puts
+.after_msg:
+        ; 3) disco duro: la partición, activa, y el MBR si no tiene (solo en
+        ; instalación nueva; ACTUALIZAR no toca la tabla de particiones)
+        cmp byte [updmode], 0
+        jne .snd
+        ; (PARTIR /ARRANQUE:X:; en el disco de arranque pide escribir SI)
+        cmp byte [fixed], 0
+        je .snd
+        mov dx, part_path
+        mov bx, arr_tail
+        call run
+        jc .arrerr
+        test al, al
+        jz .snd
+.arrerr:
+        mov si, msg_arrerr
+        cmp byte [setup], 0
+        jne s_error
+        call puts
+        mov ax, 0x4C05
+        int 0x21
+.snd:
+        ; 4) la comprobación del sonido, con el disco recién instalado. En
+        ; ACTUALIZAR no se re-sondea: se conserva el SONIDO.INI del usuario
+        cmp byte [updmode], 0
+        jne .end
+        cmp byte [nosnd], 0
+        jne .end
+        call sound_check
+.end:
+        call instal2                ; [0.9.24] el disquete «Instalación 2», si hace falta
+        call oficina                ; [0.9.22] el disquete «Oficina», si hace falta
+        call disq486                ; [HISPA-486] y el disquete «Hispa-486», si se quiere
+        call disqinet               ; [INTERNET] y, en Hispa-486, el disquete «Internet»
+        cmp byte [setup], 0
+        jne setup_fin
+        cmp byte [updmode], 0
+        jne .end_upd
+        mov si, msg_boot
+        call puts
+        cmp byte [guided], 0
+        je .e2
+        mov si, msg_reboot
+        call puts
+.e2:
+        mov ax, 0x4C00
+        int 0x21
+.end_upd:
+        mov si, msg_updboot
+        call puts
+        mov ax, 0x4C00
+        int 0x21
+
+; [SETUP] todo lo que se copia del origen (dos veces en SETUP: una para
+; contar y otra para copiar)
+copia_todo:
         ; el sistema: \HISPADOS entero. En ACTUALIZAR se conservan los
         ; *.INI y *.REC que ya existan (datos y ajustes del usuario)
         mov al, [updmode]
@@ -298,98 +475,7 @@ start:
         mov si, s_leeme
         mov di, s_root
         call copy_set
-        cmp word [nfailed], 0
-        je .allok
-        ; alguno no se ha copiado (disco lleno...): no decir que está instalado
-        mov si, msg_fail
-        call puts
-        movzx eax, word [nfailed]
-        call putnum
-        mov si, msg_fail2
-        call puts
-        mov ax, 0x4C04
-        int 0x21
-.allok:
-        cmp byte [updmode], 0
-        jne .updmsg
-        mov si, msg_done
-        call puts
-        movzx eax, word [ncopied]
-        call putnum
-        mov si, msg_done2
-        call puts
-        jmp .after_msg
-.updmsg:
-        ; ACTUALIZAR: qué se cambió y qué se conservó
-        mov si, msg_updone
-        call puts
-        movzx eax, word [ncopied]
-        call putnum
-        mov si, msg_updone2
-        call puts
-        mov si, msg_updkept
-        call puts
-        movzx eax, word [nkept]
-        call putnum
-        mov si, msg_updkept2
-        call puts
-        cmp byte [bak_auto], 0
-        je .nba
-        mov si, msg_bak_a
-        call puts
-.nba:
-        cmp byte [bak_conf], 0
-        je .after_msg
-        mov si, msg_bak_c
-        call puts
-.after_msg:
-        ; 3) disco duro: la partición, activa, y el MBR si no tiene (solo en
-        ; instalación nueva; ACTUALIZAR no toca la tabla de particiones)
-        cmp byte [updmode], 0
-        jne .snd
-        ; (PARTIR /ARRANQUE:X:; en el disco de arranque pide escribir SI)
-        cmp byte [fixed], 0
-        je .snd
-        mov dx, part_path
-        mov bx, arr_tail
-        call run
-        jc .arrerr
-        test al, al
-        jz .snd
-.arrerr:
-        mov si, msg_arrerr
-        call puts
-        mov ax, 0x4C05
-        int 0x21
-.snd:
-        ; 4) la comprobación del sonido, con el disco recién instalado. En
-        ; ACTUALIZAR no se re-sondea: se conserva el SONIDO.INI del usuario
-        cmp byte [updmode], 0
-        jne .end
-        cmp byte [nosnd], 0
-        jne .end
-        call sound_check
-.end:
-        call instal2                ; [0.9.24] el disquete «Instalación 2», si hace falta
-        call oficina                ; [0.9.22] el disquete «Oficina», si hace falta
-        call disq486                ; [HISPA-486] y el disquete «Hispa-486», si se quiere
-        call disqinet               ; [INTERNET] y, en Hispa-486, el disquete «Internet»
-        cmp byte [updmode], 0
-        jne .end_upd
-        mov si, msg_boot
-        call puts
-        cmp byte [guided], 0
-        je .e2
-        mov si, msg_reboot
-        call puts
-.e2:
-        mov ax, 0x4C00
-        int 0x21
-.end_upd:
-        mov si, msg_updboot
-        call puts
-        mov ax, 0x4C00
-        int 0x21
+        ret
 
 cancel:
         mov si, msg_nothing
@@ -414,6 +500,11 @@ set_dst:
         mov [msg_upd_drv], al
         mov [msg_updone_d], al
         mov [msg_asknew_drv], al
+        mov [sc_d1], al             ; [SETUP]
+        mov [sc_d2], al
+        mov [sc_d3], al
+        mov [sc_d4], al
+        mov [sc_d5], al
         ret
 
 ; sin unidad: PARTIR /INSTALAR elige el disco duro (nunca el de arranque),
@@ -462,6 +553,40 @@ drv_params:
 ; DX = programa, BX = su cola de órdenes -> AL = su nivel de error; CF si no
 ; se ha podido ejecutar
 run:
+        cmp byte [setup], 0         ; [SETUP] lo que escriben, a NUL (la
+        je run_tal                  ; pantalla es la del programa)
+        push dx
+        push bx
+        mov ah, 0x45
+        mov bx, 1
+        int 0x21
+        mov [so_guarda], ax
+        mov dx, s_nul
+        mov ax, 0x3D01
+        int 0x21
+        jc .sin
+        mov bx, ax
+        mov cx, 1
+        mov ah, 0x46
+        int 0x21
+        mov ah, 0x3E
+        int 0x21
+.sin:
+        pop bx
+        pop dx
+        call run_tal
+        pushf
+        push ax
+        mov bx, [so_guarda]
+        mov cx, 1
+        mov ah, 0x46
+        int 0x21
+        mov ah, 0x3E
+        int 0x21
+        pop ax
+        popf
+        ret
+run_tal:
         mov word [pblock], 0
         mov [pblock+2], bx
         mov [pblock+4], cs
@@ -504,25 +629,21 @@ instal2:
         ret
 .pregunta:
         mov si, msg_i2_preg
-        call puts
-        call ask_yes
-        jc .r
+        mov bx, sd_i2
         mov dx, i2_ruta             ; ¿es el de Instalación 2?
-        mov ax, 0x3D00
-        int 0x21
-        jnc .es
-        mov si, msg_i2_no
-        call puts
-        jmp .pregunta
-.es:
-        mov bx, ax
-        mov ah, 0x3E
-        int 0x21
+        mov di, msg_i2_no
+        call pide_disco
+        jc .r
         mov word [ncopied], 0
         mov word [nfailed], 0
         mov byte [keep], 0
         mov byte [keepdata], 0
         mov byte [fix], 0
+        mov bx, .copia
+        call copia_disco
+        jnc .msg
+        ret
+.copia:
         mov si, s_hsp
         mov di, s_hdir
         call make_dir
@@ -530,7 +651,8 @@ instal2:
         mov si, s_hspp              ; [GLIFOS] y su \HISPADOS\PROGS (si lo trae)
         mov di, s_hpdir
         call make_dir
-        call copy_set
+        jmp copy_set
+.msg:
         mov si, msg_i2_hecho
         call puts
         movzx eax, word [ncopied]
@@ -570,29 +692,26 @@ oficina:
         ret
 .pregunta:
         mov si, msg_of_preg
-        call puts
-        call ask_yes
-        jc .r
+        mov bx, sd_of
         mov dx, of_ruta             ; ¿es el de Oficina?
-        mov ax, 0x3D00
-        int 0x21
-        jnc .es
-        mov si, msg_of_no
-        call puts
-        jmp .pregunta
-.es:
-        mov bx, ax
-        mov ah, 0x3E
-        int 0x21
+        mov di, msg_of_no
+        call pide_disco
+        jc .r
         mov word [ncopied], 0
         mov word [nfailed], 0
         mov byte [keep], 0
         mov byte [keepdata], 0
         mov byte [fix], 0
+        mov bx, .copia
+        call copia_disco
+        jnc .msg
+        ret
+.copia:
         mov si, s_hspp
         mov di, s_hpdir
         call make_dir
-        call copy_set
+        jmp copy_set
+.msg:
         mov si, msg_of_hecho
         call puts
         movzx eax, word [ncopied]
@@ -626,16 +745,11 @@ disq486:
         jnc .r
 .pregunta:
         mov si, msg_d4_preg
-        call puts
-        call ask_yes
-        jc .r
+        mov bx, sd_d4
         mov dx, d4_ruta             ; ¿es el de Hispa-486?
-        call existe
-        jnc .es
-        mov si, msg_d4_no
-        call puts
-        jmp .pregunta
-.es:
+        mov di, msg_d4_no
+        call pide_disco
+        jc .r
         mov al, [dst]               ; un Hispa-386 que pasa a Hispa-486: sus
         mov [ed_ruta], al           ; VENTANAS.INI y CENTRO.INI, a .ANT
         mov dx, ed_ruta
@@ -649,6 +763,11 @@ disq486:
         mov byte [fix], 0
         mov al, [updmode]
         mov [keepdata], al
+        mov bx, .copia
+        call copia_disco
+        jnc .msg
+        ret
+.copia:
         mov si, s_hsp
         mov di, s_hdir
         call make_dir
@@ -663,6 +782,8 @@ disq486:
         call copy_set
         mov byte [fix], 0
 .sinauto:
+        ret
+.msg:
         mov si, msg_d4_hecho
         call puts
         movzx eax, word [ncopied]
@@ -748,33 +869,37 @@ disqinet:
         mov [di_ruta], al
 .pregunta:
         mov si, msg_di_preg
-        call puts
-        call ask_yes
-        jc .r
+        mov bx, sd_di
         mov dx, di_ruta             ; ¿es el disquete «Internet»?
-        call existe
-        jnc .es
-        mov si, msg_di_no
-        call puts
-        jmp .pregunta
-.es:
+        mov di, msg_di_no
+        call pide_disco
+        jc .r
         mov word [ncopied], 0
         mov word [nfailed], 0
         mov byte [keep], 0
         mov byte [fix], 0
         mov al, [updmode]           ; al actualizar, su NAVEGA.INI se conserva
         mov [keepdata], al
+        mov bx, .copia
+        call copia_disco
+        mov byte [keepdata], 0
+        jnc .msg
+        ret
+.copia:
         mov di, s_indir
         call make_dir
         mov si, s_di_exe
         call copy_set
+        mov di, s_indir
         mov si, s_di_dll
         call copy_set
+        mov di, s_indir
         mov si, s_di_ini
         call copy_set
+        mov di, s_indir
         mov si, s_di_txt
-        call copy_set
-        mov byte [keepdata], 0
+        jmp copy_set
+.msg:
         mov si, msg_di_hecho
         call puts
         movzx eax, word [ncopied]
@@ -923,6 +1048,769 @@ usage:
         call puts
         mov ax, 0x4C01
         int 0x21
+
+; =============================================================================
+;  [CD] El origen de la instalación
+; =============================================================================
+; /ORIGEN:x: o, arrancando de disquete, el CD de Hispa-DOS (una unidad con
+; \HISPADOS\HISPACD.INI) -> [src]. Mientras se busca, los errores de unidad
+; (un lector sin disco...) fallan sin preguntar (INT 24h propia).
+elige_origen:
+        mov al, [origen]
+        test al, al
+        jz .cd
+        mov [src], al
+        ret
+.cd:
+        mov al, [arranque]
+        and al, 0xDF
+        cmp al, 'B'
+        ja .r
+        call i24_pon
+        mov al, 'C'
+.l:
+        mov [cd_ruta], al
+        push ax
+        mov dx, cd_ruta
+        call existe
+        pop ax
+        jnc .si
+        inc al
+        cmp al, 'Z'
+        jbe .l
+        jmp .q
+.si:
+        mov [src], al
+        mov byte [desde_cd], 1
+.q:
+        call i24_quita
+.r:
+        ret
+
+; [src] -> las rutas de los programas que se usan del origen
+pon_origen:
+        mov dl, [src]
+        mov [sys_path], dl
+        mov [sys_src], dl
+        mov [part_path], dl
+        mov [fmt_path], dl
+        ret
+
+; [SETUP] tras cambiar las particiones el núcleo reparte otra vez las letras
+; (el CD, que era C: con el disco vacío, pasa a D:): volver a buscar el CD
+rebusca_cd:
+        cmp byte [desde_cd], 0
+        je .r
+        call elige_origen.cd
+        call pon_origen
+.r:
+        ret
+
+; INT 24h: «fallar» sin preguntar (AL = 3)
+i24_fallar:
+        mov al, 3
+        iret
+i24_pon:
+        push es
+        mov ax, 0x3524
+        int 0x21
+        mov [i24_viejo], bx
+        mov [i24_viejo+2], es
+        pop es
+        mov dx, i24_fallar
+        mov ax, 0x2524
+        int 0x21
+        ret
+i24_quita:
+        push ds
+        lds dx, [i24_viejo]
+        mov ax, 0x2524
+        int 0x21
+        pop ds
+        ret
+
+; =============================================================================
+;  [SETUP] INSTALAR /SETUP: el programa de instalación con pantallas
+; =============================================================================
+setup_main:
+        call i24_pon                ; (un disquete que falta no pregunta)
+        mov ah, 0x01                ; sin cursor
+        mov cx, 0x2000
+        int 0x10
+        ; la edición del origen (Hispa-486 si trae EDICION.INI)
+        mov al, [src]
+        mov [ed_ruta], al
+        mov dx, ed_ruta
+        call existe
+        jc .e386
+        mov si, s_ed486
+        mov di, cab_ed
+        call strcpy_s
+.e386:
+        ; 1) bienvenida
+        mov si, sc_bienv
+        mov bx, pie_bienv
+        mov dx, ay_bienv
+        call pantalla
+.b:
+        call tecla_s
+        cmp al, 13
+        jne .b
+        ; 2) el disco duro: ¿cómo está?
+.disco:
+        mov dx, part_path
+        mov bx, situ_tail
+        call run
+        jc .nopart
+        cmp al, 'C'
+        jae .letra
+        cmp al, 2
+        je .vacio
+        cmp al, 3
+        je .sitio
+        cmp al, 4
+        je .lleno
+        ; 1 (u otro): sin disco duro
+        mov si, sc_sindisco
+        mov bx, pie_salir
+        mov dx, ay_disco
+        call pantalla
+.sd:
+        call tecla_s
+        cmp al, 13
+        jne .sd
+        jmp s_salir
+.nopart:
+        mov si, sc_nopart
+        jmp s_error
+.vacio:
+        mov si, sc_vacio
+        mov bx, pie_intro
+        mov dx, ay_disco
+        call pantalla
+.v:
+        call tecla_s
+        cmp al, 13
+        jne .v
+        jmp .crear
+.sitio:
+        mov si, sc_sitio
+        mov bx, pie_sitio
+        mov dx, ay_disco
+        call pantalla
+.st:
+        call tecla_s
+        cmp al, 13
+        je .crear
+        and al, 0xDF
+        cmp al, 'B'
+        jne .st
+        jmp .borrar
+.lleno:
+        mov si, sc_lleno
+        mov bx, pie_lleno
+        mov dx, ay_disco
+        call pantalla
+.ll:
+        call tecla_s
+        and al, 0xDF
+        cmp al, 'B'
+        jne .ll
+.borrar:
+        mov si, sc_borrar
+        mov bx, pie_borrar
+        mov dx, ay_disco
+        call pantalla
+.bo:
+        call tecla_s
+        cmp al, 27
+        je .disco
+        and al, 0xDF
+        cmp al, 'S'
+        jne .bo
+        mov si, sc_preparando
+        mov bx, pie_espera
+        mov dx, ay_disco
+        call pantalla
+        mov dx, part_path
+        mov bx, borr_tail
+        call run
+        jc .nopart
+        push ax
+        call rebusca_cd
+        pop ax
+        test al, al
+        jz .crear2
+        mov si, sc_parterr
+        jmp s_error
+.crear:
+        mov si, sc_preparando
+        mov bx, pie_espera
+        mov dx, ay_disco
+        call pantalla
+.crear2:
+        mov dx, part_path
+        mov bx, inst_si_tail
+        call run
+        jc .nopart
+        push ax
+        call rebusca_cd
+        pop ax
+        cmp al, 'C'
+        jb .parterr
+        cmp al, 'Z'
+        ja .parterr
+        mov byte [s_formatear], 1   ; partición nueva: formato sin preguntar más
+        call set_dst
+        call drv_params
+        jnc .carpeta
+        ; el núcleo no ve aún la unidad: reiniciar y volver a empezar
+        mov si, sc_reinicio
+        mov bx, pie_reinicio
+        mov dx, ay_disco
+        call pantalla
+.ri:
+        call tecla_s
+        cmp al, 13
+        jne .ri
+        jmp reinicia
+.parterr:
+        mov si, sc_parterr
+        jmp s_error
+.letra:
+        call set_dst
+        call drv_params
+        jnc .ex
+        mov si, sc_parterr
+        jmp s_error
+.ex:
+        ; ¿tiene formato?
+        mov dl, [dst]
+        sub dl, 'A' - 1
+        mov ah, 0x36
+        int 0x21
+        cmp ax, 0xFFFF
+        jne .confmt
+        mov si, sc_sinfmt
+        mov bx, pie_intro
+        mov dx, ay_formato
+        call pantalla
+.sf:
+        call tecla_s
+        cmp al, 13
+        jne .sf
+        mov byte [s_formatear], 1
+        jmp .carpeta
+.confmt:
+        call detect_hispados
+        jc .sinhsp
+        ; ya tiene Hispa-DOS: Actualizar o Nueva
+        mov si, sc_yahay
+        mov bx, pie_yahay
+        mov dx, ay_actualizar
+        call pantalla
+.yh:
+        call tecla_s
+        and al, 0xDF
+        cmp al, 'N'
+        je .nueva
+        cmp al, 'A'
+        jne .yh
+        mov byte [updmode], 1
+        ; [HISPA-486] las ediciones del disco y del origen
+        call ed_mirar
+        cmp byte [ed_dst], 0
+        je .edc
+        cmp byte [ed_src], 0
+        jne .carpeta
+        mov al, [src]
+        and al, 0xDF
+        cmp al, 'B'
+        jbe .carpeta                ; (desde disquetes, el de Hispa-486 se pide)
+        mov si, sc_edbaja
+        jmp s_error
+.edc:
+        cmp byte [ed_src], 0
+        je .carpeta
+        mov byte [ed_pasar], 1
+        jmp .carpeta
+.nueva:
+        mov byte [s_formatear], 1
+        jmp .carpeta
+.sinhsp:
+        mov si, sc_conserva
+        mov bx, pie_intro
+        mov dx, ay_disco
+        call pantalla
+.cs:
+        call tecla_s
+        cmp al, 13
+        jne .cs
+        ; 3) la carpeta de destino
+.carpeta:
+        mov si, sc_carpeta
+        mov bx, pie_intro
+        mov dx, ay_carpeta
+        call pantalla
+        mov al, [src]               ; de dónde se copia
+        mov [sc_orig_d], al
+        mov dx, 0x1104
+        mov si, sc_orig
+        call txt_at
+        cmp byte [desde_cd], 0
+        je .ca
+        mov si, sc_orig_cd
+        call txt_at_aqui
+.ca:
+        call tecla_s
+        cmp al, 13
+        jne .ca
+        ; 4) el formato
+        cmp byte [s_formatear], 0
+        je .sinf
+        mov si, sc_formato
+        mov bx, pie_espera
+        mov dx, ay_formato
+        call pantalla
+        mov dx, fmt_path
+        mov bx, fmt_tail
+        call run
+        jc .fmterr
+        test al, al
+        jnz .fmterr
+        mov dl, [dst]
+        sub dl, 'A' - 1
+        mov ah, 0x36
+        int 0x21
+        cmp ax, 0xFFFF
+        jne .sinf
+.fmterr:
+        mov si, sc_fmterr
+        jmp s_error
+.sinf:
+        cmp byte [updmode], 0
+        je instala_comun
+        call backup_user_cfg        ; ACTUALIZAR: los suyos, como .ANT
+        cmp byte [ed_pasar], 0
+        je instala_comun
+        call ed_guardar
+        jmp instala_comun
+
+; el final: instalado; quitar el medio y reiniciar
+setup_fin:
+        mov si, sc_fin
+        cmp byte [updmode], 0
+        je .n
+        mov si, sc_finupd
+.n:
+        mov bx, pie_fin
+        mov dx, ay_fin
+        call pantalla
+.t:
+        call tecla_s
+        cmp al, 13
+        jne .t
+reinicia:
+        call i24_quita
+        mov ah, 0x0D                ; que no quede nada sin escribir
+        int 0x21
+        mov ax, 0x0003
+        int 0x10
+        mov al, 0xFE                ; reinicio por el controlador del teclado
+        out 0x64, al
+        mov cx, 0xFFFF
+.e:
+        loop .e
+        jmp 0xFFFF:0x0000
+
+; SI = texto del error: pantalla de error y salir (nivel 2)
+s_error:
+        mov bx, pie_salir
+        mov dx, ay_error
+        call pantalla
+.t:
+        call tecla_s
+        cmp al, 13
+        jne .t
+        mov byte [s_nivel], 2
+        jmp s_salir_ya
+
+; F3: ¿salir? (INTRO = seguir; F3 = salir)
+s_pregunta_salir:
+        push word [p_cuerpo]
+        push word [p_pie]
+        push word [p_ayuda]
+        mov si, sc_salir
+        mov bx, pie_salir2
+        mov dx, ay_bienv
+        call pantalla
+.t:
+        call tecla_raw
+        cmp ax, 0x3D00
+        je s_salir
+        cmp al, 13
+        jne .t
+        pop dx
+        pop bx
+        pop si
+        jmp pantalla                ; la que había
+
+s_salir:
+        mov byte [s_nivel], 6
+s_salir_ya:
+        call i24_quita
+        mov ax, 0x0003
+        int 0x10
+        mov si, msg_s_salido
+        call puts
+        mov al, [arranque]
+        and al, 0xDF
+        cmp al, 'B'
+        ja .x
+        mov si, msg_of_vuelve2
+        call puts
+.x:
+        mov ah, 0x4C
+        mov al, [s_nivel]
+        int 0x21
+
+; tecla -> AX (AL = carácter; si es 0, AH = código de la tecla especial)
+tecla_raw:
+        mov ah, 0x07
+        int 0x21
+        xor ah, ah
+        test al, al
+        jnz .r
+        mov ah, 0x07
+        int 0x21
+        mov ah, al
+        xor al, al
+.r:
+        ret
+
+; tecla de una pantalla: F1 enseña la ayuda, F3 pregunta si salir; las
+; demás -> AX
+tecla_s:
+        call tecla_raw
+        cmp ax, 0x3B00              ; F1
+        je .ayuda
+        cmp ax, 0x3D00              ; F3
+        jne .r
+        call s_pregunta_salir
+        jmp tecla_s
+.ayuda:
+        push word [p_cuerpo]
+        push word [p_pie]
+        push word [p_ayuda]
+        mov si, [p_ayuda]
+        mov bx, pie_ayuda
+        mov dx, ay_bienv
+        call pantalla
+.a:
+        call tecla_raw
+        cmp al, 13
+        je .v
+        cmp al, 27
+        jne .a
+.v:
+        pop dx
+        pop bx
+        pop si
+        call pantalla
+        jmp tecla_s
+.r:
+        ret
+
+; SI = cuerpo, BX = pie, DX = ayuda: pintar la pantalla del programa
+pantalla:
+        mov [p_cuerpo], si
+        mov [p_pie], bx
+        mov [p_ayuda], dx
+        mov ax, 0x0600              ; toda azul
+        mov bh, 0x1F
+        xor cx, cx
+        mov dx, 0x184F
+        int 0x10
+        mov ax, 0x0600              ; el pie, en gris
+        mov bh, 0x70
+        mov cx, 0x1800
+        mov dx, 0x184F
+        int 0x10
+        xor dx, dx
+        mov si, s_nl
+        call txt_at
+        mov dx, 0x0102
+        mov si, s_cab
+        call txt_at
+        mov dx, 0x0202
+        mov si, s_raya
+        call txt_at
+        mov dx, 0x0404
+        mov si, [p_cuerpo]
+        call txt_at
+        mov si, s_nl                ; (por el puerto serie: el pie, aparte)
+        call txt_at_aqui
+        mov dx, 0x1802
+        mov si, [p_pie]
+        call txt_at
+        ret
+
+; DH = fila, DL = columna, SI = texto (10 = línea siguiente en la misma
+; columna; 1 = esa línea en amarillo, un aviso)
+txt_at:
+        mov [t_fila], dh
+        mov [t_col], dl
+        call cur_pon
+.l:
+        lodsb
+        test al, al
+        jz .r
+        cmp al, 10
+        je .nl
+        cmp al, 1
+        je .am
+        mov dl, al
+        mov ah, 0x02
+        int 0x21
+        jmp .l
+.nl:
+        mov dl, 13                  ; (por el puerto serie, una línea nueva)
+        mov ah, 0x02
+        int 0x21
+        mov dl, 10
+        int 0x21
+        inc byte [t_fila]
+        mov dh, [t_fila]
+        mov dl, [t_col]
+        call cur_pon
+        jmp .l
+.am:
+        mov ax, 0x0600
+        mov bh, 0x1E
+        mov ch, [t_fila]
+        mov cl, [t_col]
+        mov dh, ch
+        mov dl, 77
+        int 0x10
+        jmp .l
+.r:
+        ret
+cur_pon:
+        mov ah, 0x02
+        xor bh, bh
+        int 0x10
+        ret
+
+; BX = rutina de copia: en SETUP, contar, la pantalla con la barra y copiar
+; (CF = 1: no hace falta decir nada más); si no, solo copiar (CF = 0)
+copia_disco:
+        cmp byte [setup], 0
+        jne .s
+        call bx
+        clc
+        ret
+.s:
+        call con_progreso
+        stc
+        ret
+con_progreso:
+        mov [prog_rut], bx
+        mov byte [solo_contar], 1
+        mov word [ntotal], 0
+        call bx
+        mov byte [solo_contar], 0
+        mov word [nhechos], 0
+        mov byte [barra_n], 0xFF
+        mov si, sc_copia
+        mov bx, pie_espera
+        mov dx, ay_copia
+        call pantalla
+        mov ax, 0x0600              ; la barra, en amarillo
+        mov bh, 0x1E
+        mov cx, 0x0C0A
+        mov dx, 0x0C45
+        int 0x10
+        mov dx, 0x0C0A              ; la barra vacía
+        mov si, s_barra0
+        call txt_at
+        mov word [cs_aviso], aviso_archivo
+        call [prog_rut]
+        mov word [cs_aviso], 0
+        mov ax, [ncopied]
+        add [ncop_total], ax
+        ret
+
+; antes de cada archivo: la barra y su nombre (path_s)
+aviso_archivo:
+        pushad
+        mov ax, [nhechos]
+        inc ax
+        mov [nhechos], ax
+        mov cx, [ntotal]
+        cmp ax, cx
+        jbe .ok
+        mov ax, cx
+.ok:
+        mov bx, 60                  ; trozos llenos = hechos * 60 / total
+        mul bx
+        test cx, cx
+        jz .lleno
+        div cx
+        jmp .n
+.lleno:
+        mov ax, 60
+.n:
+        cmp al, [barra_n]
+        je .nombre
+        mov [barra_n], al
+        movzx cx, al
+        push cx
+        mov dx, 0x0C0A
+        call cur_pon
+        pop cx
+        jcxz .pc
+.b:
+        mov dl, 0xDB
+        mov ah, 0x02
+        int 0x21
+        loop .b
+.pc:
+        mov dx, 0x0C47              ; el tanto por ciento
+        call cur_pon
+        movzx ax, byte [barra_n]
+        imul ax, ax, 100
+        mov bl, 60
+        div bl
+        movzx ax, al
+        call num3
+        mov si, s_pc
+        call txt_at_aqui
+.nombre:
+        mov dx, 0x0E0A              ; «Copiando: \HISPADOS\EDITAR.COM»
+        mov si, s_copiando
+        call txt_at
+        mov si, path_s+2
+        xor cx, cx
+.c:
+        lodsb
+        test al, al
+        jz .pad
+        mov dl, al
+        mov ah, 0x02
+        int 0x21
+        inc cx
+        jmp .c
+.pad:
+        cmp cx, 48
+        jae .fin
+        mov dl, ' '
+        mov ah, 0x02
+        int 0x21
+        inc cx
+        jmp .pad
+.fin:
+        mov dl, 13                  ; (por el puerto serie, una línea nueva)
+        mov ah, 0x02
+        int 0x21
+        popad
+        ret
+; AX (0-999) -> tres cifras, con espacios delante, donde está el cursor
+num3:
+        mov bx, 10
+        xor dx, dx
+        div bx
+        add dl, '0'
+        mov [n3+2], dl
+        xor dx, dx
+        div bx
+        add dl, '0'
+        mov [n3+1], dl
+        xor dx, dx
+        div bx
+        add dl, '0'
+        mov [n3], dl
+        cmp byte [n3], '0'
+        jne .p
+        mov byte [n3], ' '
+        cmp byte [n3+1], '0'
+        jne .p
+        mov byte [n3+1], ' '
+.p:
+        mov si, n3
+        jmp txt_at_aqui
+; SI = texto, donde está el cursor
+txt_at_aqui:
+        lodsb
+        test al, al
+        jz .r
+        mov dl, al
+        mov ah, 0x02
+        int 0x21
+        jmp txt_at_aqui
+.r:
+        ret
+
+; SI <- DI (ASCIIZ)
+strcpy_s:
+        lodsb
+        mov [di], al
+        inc di
+        test al, al
+        jnz strcpy_s
+        ret
+
+; [SETUP] pedir un disquete. SI = pregunta (sin SETUP), BX = pantalla (en
+; SETUP), DX = archivo que lo distingue, DI = «ese no es» -> CF = 1 si no se
+; quiere (N, o ESC en SETUP)
+pide_disco:
+        mov [pd_preg], si
+        mov [pd_pant], bx
+        mov [pd_ruta], dx
+        mov [pd_malo], di
+        mov byte [pd_err], 0
+.p:
+        cmp byte [setup], 0
+        jne .s
+        mov si, [pd_preg]
+        call puts
+        call ask_yes
+        jc .r
+        jmp .mira
+.s:
+        mov al, [src]
+        mov [sd_letra1], al
+        mov [sd_letra2], al
+        mov si, [pd_pant]
+        mov bx, pie_disco
+        mov dx, ay_disquete
+        call pantalla
+        cmp byte [pd_err], 0
+        je .t
+        mov dx, 0x1204
+        mov si, sc_noesdisco
+        call txt_at
+.t:
+        call tecla_s
+        cmp al, 27
+        je .no
+        cmp al, 13
+        jne .t
+.mira:
+        mov dx, [pd_ruta]
+        call existe
+        jnc .r
+        cmp byte [setup], 0
+        jne .malo
+        mov si, [pd_malo]
+        call puts
+        jmp .p
+.malo:
+        mov byte [pd_err], 1
+        jmp .p
+.no:
+        stc
+.r:
+        ret
 
 ; El motor de copia de arbol (make_dir, copy_set, dest_exists, is_user_data,
 ; copy_file, fix_drive, strcpy) y sus datos (src, dst, keep, keepdata, fix,
@@ -1103,7 +1991,8 @@ fmt_tail    db fmt_te - fmt_tail - 1, " "
 fmt_drv     db "C: /V:HISPADOS /AUTOTEST"
 fmt_te      db 13
 sys_path    db "A:\HISPADOS\SISTEMA.COM", 0
-sys_tail    db 3, " "
+sys_tail    db 7, " "
+sys_src     db "A:\ "                ; [CD] el origen (KERNEL.SYS y COMMAND.COM)
 tail_drv    db "C:", 13
 s_root      db "\", 0
 s_hdir      db "\HISPADOS\", 0
@@ -1238,6 +2127,240 @@ msg_updkept db "Conservados tus datos y ajustes: ", 0
 msg_updkept2 db " archivos (*.INI, *.REC); tus carpetas quedan intactas.", 13, 10, 0
 msg_updboot db "Actualización terminada. Quita el USB (o el disquete) y reinicia el", 13, 10
             db "ordenador.", 13, 10, 0
+
+; ---- [CD] y [SETUP]: datos ----
+setup       db 0                ; 1: INSTALAR /SETUP
+origen      db 0                ; /ORIGEN:x:
+arranque    db 0                ; la unidad de arranque
+desde_cd    db 0                ; el origen es el CD de Hispa-DOS
+cd_ruta     db "C:\HISPADOS\HISPACD.INI", 0
+i24_viejo   dd 0
+so_guarda   dw 0
+s_nul       db "NUL", 0
+s_formatear db 0
+s_nivel     db 6
+situ_tail db situ_tail_f - situ_tail - 1, " /SITUACION"
+situ_tail_f db 13
+borr_tail db borr_tail_f - borr_tail - 1, " /BORRARTODO"
+borr_tail_f db 13
+inst_si_tail db inst_si_tail_f - inst_si_tail - 1, " /INSTALAR /SI"
+inst_si_tail_f db 13
+p_cuerpo    dw 0
+p_pie       dw 0
+p_ayuda     dw 0
+t_fila      db 0
+t_col       db 0
+prog_rut    dw 0
+nhechos     dw 0
+ncop_total  dw 0
+barra_n     db 0
+n3          db "000", 0
+pd_preg     dw 0
+pd_pant     dw 0
+pd_ruta     dw 0
+pd_malo     dw 0
+pd_err      db 0
+s_cab       db "Programa de instalación de Hispa-DOS ", VER_STR, " - "
+cab_ed      db "Hispa-386", 0
+s_ed486     db "Hispa-486", 0
+s_raya      times 76 db 0xCD
+s_nl        db 13, 10, 0
+s_barra0    times 60 db 0xB0
+            db "   0 %", 0
+s_pc        db " %", 0
+s_copiando  db "Copiando: ", 0
+
+; --- los pies (las teclas de cada pantalla) ---
+pie_bienv   db "INTRO=Continuar   F1=Ayuda   F3=Salir", 0
+pie_intro   equ pie_bienv
+pie_salir   db "INTRO=Salir", 0
+pie_salir2  db "F3=Salir del programa de instalación   INTRO=Seguir instalando", 0
+pie_sitio   db "INTRO=Usar el sitio libre   B=Borrar todo el disco   F1=Ayuda   F3=Salir", 0
+pie_lleno   db "B=Borrar todo el disco   F1=Ayuda   F3=Salir", 0
+pie_borrar  db "S=Sí, borrar todo el disco   ESC=Volver atrás   F3=Salir", 0
+pie_espera  db "Espere, por favor...", 0
+pie_reinicio db "INTRO=Reiniciar el ordenador", 0
+pie_yahay   db "A=Actualizar   N=Instalación nueva   F1=Ayuda   F3=Salir", 0
+pie_disco   db "INTRO=Continuar   ESC=Seguir sin este disco   F1=Ayuda   F3=Salir", 0
+pie_fin     db "INTRO=Reiniciar el ordenador", 0
+pie_ayuda   db "INTRO o ESC=Volver", 0
+
+; --- las pantallas ---
+sc_bienv    db "Bienvenido al programa de instalación de Hispa-DOS.", 10, 10
+            db "Este programa instala Hispa-DOS en el disco duro de este ordenador:", 10
+            db "el sistema, Hispa Ventanas, los programas, la oficina y los juegos.", 10
+            db "Después, el ordenador arrancará solo desde el disco duro.", 10, 10
+            db "  - Para instalar Hispa-DOS ahora, pulse INTRO.", 10, 10
+            db "  - Para saber más antes de seguir, pulse F1.", 10, 10
+            db "  - Para salir sin instalar nada, pulse F3.", 0
+sc_sindisco db "No se ha encontrado ningún disco duro donde instalar Hispa-DOS.", 10, 10
+            db "Compruebe que el disco duro está bien conectado y que la BIOS del", 10
+            db "ordenador lo ve. Hispa-DOS se puede seguir usando sin instalar,", 10
+            db "desde este disquete, memoria USB o CD.", 10, 10
+            db "Pulse INTRO para salir del programa de instalación.", 0
+sc_nopart   db "No se encuentra el programa PARTIR (\HISPADOS\PARTIR.COM) en la", 10
+            db "unidad de origen. No se ha instalado nada.", 0
+sc_vacio    db "El disco duro de este ordenador está vacío: todavía no está preparado", 10
+            db "para guardar archivos (no tiene ninguna partición).", 10, 10
+            db "El programa lo va a preparar entero para Hispa-DOS (hasta 2 GB) y", 10
+            db "después le dará formato.", 10, 10
+            db "  - Para preparar el disco duro, pulse INTRO.", 10, 10
+            db "  - Para salir sin tocar nada, pulse F3.", 0
+sc_sitio    db "El disco duro ya tiene partes (particiones) de otro sistema, pero le", 10
+            db "queda sitio libre.", 10, 10
+            db "  - Para instalar Hispa-DOS en el sitio libre, pulse INTRO. Lo que", 10
+            db "    ya tiene el disco no se toca.", 10, 10
+            db "  - Para borrar todo el disco y usarlo entero para Hispa-DOS, pulse B.", 10
+            db 1, "    Atención: con B se pierde todo lo que tenga el disco duro.", 10, 10
+            db "  - Para salir sin tocar nada, pulse F3.", 0
+sc_lleno    db "El disco duro no tiene sitio para Hispa-DOS: está ocupado entero por", 10
+            db "partes (particiones) de otro sistema.", 10, 10
+            db "Para instalar Hispa-DOS hay que borrar todo el disco duro.", 10
+            db 1, "Atención: se perderá todo lo que tenga.", 10, 10
+            db "  - Para borrar todo el disco y seguir, pulse B.", 10, 10
+            db "  - Para salir sin tocar nada, pulse F3.", 0
+sc_borrar   db 1, "Se va a BORRAR TODO EL DISCO DURO.", 10, 10
+            db "Todo lo que tenga (otros sistemas, programas, documentos...) se", 10
+            db "perderá y no se podrá recuperar.", 10, 10
+            db "  - Si está seguro, pulse S.", 10, 10
+            db "  - Para volver atrás sin tocar nada, pulse ESC.", 0
+sc_preparando db "Preparando el disco duro para Hispa-DOS...", 0
+sc_parterr  db "No se ha podido preparar el disco duro. No se ha instalado nada.", 10, 10
+            db "Puede hacerlo a mano con la orden PARTIR y volver a empezar.", 0
+sc_reinicio db "El disco duro ya está preparado, pero hay que reiniciar el ordenador", 10
+            db "para seguir.", 10, 10
+            db "Deje puesto el disquete, la memoria USB o el CD. Al volver a salir", 10
+            db "el menú de arranque, elija otra vez", 10
+            db "«Instalar Hispa-DOS en el disco duro».", 10, 10
+            db "Pulse INTRO para reiniciar el ordenador.", 0
+sc_sinfmt   db "La unidad "
+sc_d1       db "C: del disco duro no tiene formato: todavía no puede guardar", 10
+            db "archivos. El programa le dará formato.", 10, 10
+            db 1, "Atención: al dar formato se borra lo que tenga la unidad.", 10, 10
+            db "  - Para dar formato y seguir, pulse INTRO.", 10, 10
+            db "  - Para salir sin tocar nada, pulse F3.", 0
+sc_yahay    db "La unidad "
+sc_d2       db "C: ya tiene Hispa-DOS instalado.", 10, 10
+            db "  - Para actualizarlo, pulse A. Se cambian los programas del sistema", 10
+            db "    por los nuevos y se conservan sus datos y ajustes; no se borra", 10
+            db "    nada.", 10, 10
+            db "  - Para una instalación nueva, pulse N. Se da formato a la unidad:", 10
+            db 1, "    se borra TODO lo que tenga, también sus datos y ajustes.", 10, 10
+            db "  - Para salir sin tocar nada, pulse F3.", 0
+sc_edbaja   db "Esa unidad tiene Hispa-486 y este medio es de Hispa-386: para", 10
+            db "actualizarla, use el de Hispa-486. Con una instalación nueva (N) se", 10
+            db "puede poner Hispa-386 (se borra todo). No se ha instalado nada.", 0
+sc_conserva db "Hispa-DOS se va a instalar en la unidad "
+sc_d3       db "C: del disco duro.", 10, 10
+            db "Lo que ya tiene la unidad se conserva: solo se ponen los archivos de", 10
+            db "Hispa-DOS.", 10, 10
+            db "  - Para seguir, pulse INTRO.", 10, 10
+            db "  - Para salir sin tocar nada, pulse F3.", 0
+sc_carpeta  db "Hispa-DOS se instalará en esta carpeta del disco duro:", 10, 10
+            db "        "
+sc_d4       db "C:\HISPADOS", 10, 10
+            db "Los programas de 32 bits de Hispa-486 van en \HISPA32 y la", 10
+            db "configuración (CONFIG.SYS y AUTOEXEC.BAT), en la raíz de la unidad.", 10, 10
+            db "  - Para empezar a copiar los archivos, pulse INTRO.", 10, 10
+            db "  - Para salir sin tocar nada, pulse F3.", 0
+sc_orig     db "Se copia desde la unidad "
+sc_orig_d   db "A:", 0
+sc_orig_cd  db " (el CD de Hispa-DOS)", 0
+sc_formato  db "Dando formato a la unidad "
+sc_d5       db "C:...", 0
+sc_fmterr   db "No se ha podido dar formato a la unidad. No se ha instalado nada.", 0
+sc_copia    db "Copiando los archivos de Hispa-DOS en el disco duro.", 10, 10
+            db "Espere, por favor: tarda unos minutos.", 0
+sc_fallo    db "Algunos archivos no se han podido copiar (¿el disco duro está", 10
+            db "lleno?). La instalación no está completa.", 0
+sc_salir    db "Hispa-DOS no está instalado del todo.", 10, 10
+            db "Si sale ahora, el disco duro no podrá arrancar Hispa-DOS. Puede", 10
+            db "volver a empezar más tarde eligiendo «Instalar Hispa-DOS en el disco", 10
+            db "duro» en el menú de arranque, o con la orden INSTALAR /SETUP.", 10, 10
+            db "  - Para seguir instalando, pulse INTRO.", 10, 10
+            db "  - Para salir del programa de instalación, pulse F3.", 0
+sc_noesdisco db 1, "Ese no es el disco pedido. Ponga el que se pide y pulse INTRO.", 0
+sd_i2       db "Inserte el disco rotulado", 10, 10
+            db "        Hispa-DOS - Instalación 2", 10, 10
+            db "en la unidad "
+sd_letra1   db "A: y pulse INTRO.", 10, 10
+            db "Trae los programas de Windows de consola (HW32) y los tipos de letra", 10
+            db "grandes de la oficina. Sin él, se pueden copiar después.", 0
+sd_of       db "Inserte el disco rotulado", 10, 10
+            db "        Hispa-DOS - Oficina", 10, 10
+            db "en la unidad "
+sd_letra2   db "A: y pulse INTRO.", 10, 10
+            db "Trae la oficina: Pluma, Cuentas, Facturas, Datos, el Lector de PDF,", 10
+            db "Publicaciones y Presentaciones.", 0
+sd_d4       db "Para instalar Hispa-486 (el escritorio con el menú Inicio y los", 10
+            db "programas Hispa32), inserte el disco rotulado", 10, 10
+            db "        Hispa-DOS - Hispa-486", 10, 10
+            db "en la unidad de disquete y pulse INTRO.", 10, 10
+            db "Para quedarse con Hispa-386, pulse ESC.", 0
+sd_di       db "Para instalar el Navegador (páginas web), inserte el disco rotulado", 10, 10
+            db "        Hispa-DOS - Internet", 10, 10
+            db "en la unidad de disquete y pulse INTRO.", 10, 10
+            db "Sin él, pulse ESC (se puede copiar después).", 0
+sc_fin      db "Hispa-DOS está instalado en el disco duro.", 10, 10
+            db "Saque el disquete, el CD o la memoria USB y pulse INTRO para", 10
+            db "reiniciar el ordenador: arrancará Hispa-DOS desde el disco duro.", 10, 10
+            db "Para comprobar el sonido, elija en el menú de arranque la opción", 10
+            db "«Prueba del equipo y del sonido».", 0
+sc_finupd   db "Hispa-DOS está actualizado en el disco duro. Sus datos y ajustes se", 10
+            db "han conservado (los CONFIG.SYS y AUTOEXEC.BAT anteriores quedan como", 10
+            db "CONFIG.ANT y AUTOEXEC.ANT).", 10, 10
+            db "Saque el disquete, el CD o la memoria USB y pulse INTRO para", 10
+            db "reiniciar el ordenador.", 0
+msg_s_salido db "Se ha salido del programa de instalación. Para volver a empezar:", 13, 10
+            db "INSTALAR /SETUP", 13, 10, 0
+msg_of_vuelve2 db "Si ha cambiado el disquete, vuelva a poner el de arranque.", 13, 10, 0
+
+; --- la ayuda (F1) de cada paso ---
+ay_bienv    db "Ayuda del programa de instalación", 10, 10
+            db "El programa va paso a paso: mira el disco duro, lo prepara si hace", 10
+            db "falta (avisando antes si se va a borrar algo), le da formato, copia", 10
+            db "los archivos y deja el disco listo para arrancar.", 10, 10
+            db "En cada pantalla, abajo, están las teclas que se pueden usar:", 10
+            db "  INTRO  sigue con el paso siguiente", 10
+            db "  F1     enseña esta ayuda", 10
+            db "  F3     sale del programa (pregunta antes)", 10, 10
+            db "Hispa-DOS también se puede usar sin instalar: en el menú de arranque,", 10
+            db "«Arrancar Hispa-DOS sin instalar».", 0
+ay_disco    db "Ayuda: el disco duro", 10, 10
+            db "Para guardar archivos, un disco duro se divide en partes llamadas", 10
+            db "particiones. Hispa-DOS necesita una partición de DOS (FAT).", 10, 10
+            db "Si el disco está vacío, el programa hace una con todo el disco. Si", 10
+            db "tiene particiones de otros sistemas y queda sitio, puede usar ese", 10
+            db "sitio sin tocar lo demás. Si no queda sitio, hay que borrar todo el", 10
+            db "disco: el programa lo pregunta dos veces antes de hacerlo.", 10, 10
+            db "Para hacerlo a mano, salga con F3 y use la orden PARTIR.", 0
+ay_formato  db "Ayuda: el formato", 10, 10
+            db "Dar formato prepara la unidad para guardar archivos de Hispa-DOS.", 10
+            db "Se borra todo lo que tuviera la unidad.", 0
+ay_actualizar db "Ayuda: actualizar o instalar de nuevo", 10, 10
+            db "Actualizar (A) cambia los programas del sistema por los de este", 10
+            db "medio y conserva sus datos y ajustes (*.INI, *.REC) y sus carpetas.", 10
+            db "Es lo normal para pasar a una versión nueva.", 10, 10
+            db "La instalación nueva (N) da formato a la unidad y lo pone todo como", 10
+            db "recién instalado: se borra todo lo que tenga.", 0
+ay_carpeta  db "Ayuda: la carpeta", 10, 10
+            db "Todo Hispa-DOS va en la carpeta \HISPADOS (como \DOS en MS-DOS), y", 10
+            db "esa carpeta va en el camino de búsqueda (PATH): las órdenes se", 10
+            db "encuentran desde cualquier carpeta.", 0
+ay_copia    db "Ayuda: la copia", 10, 10
+            db "Se copian los archivos de Hispa-DOS al disco duro.", 0
+ay_disquete db "Ayuda: los disquetes", 10, 10
+            db "Desde disquetes, Hispa-DOS viene en varios discos. El programa los", 10
+            db "pide uno a uno: ponga el que dice en la unidad y pulse INTRO. Si no", 10
+            db "lo tiene, ESC sigue sin él (sus archivos se pueden copiar después con", 10
+            db "XCOPIAR A:\HISPADOS C:\HISPADOS /S).", 0
+ay_fin      db "Ayuda: el final", 10, 10
+            db "Hispa-DOS ya está en el disco duro. Si el ordenador vuelve a arrancar", 10
+            db "desde el disquete, la memoria USB o el CD, sáquelo, o cambie en la", 10
+            db "BIOS el orden de arranque para que el disco duro vaya primero.", 0
+ay_error    db "Ayuda", 10, 10
+            db "Algo no ha ido bien. Lo que pone la pantalla dice qué ha pasado y", 10
+            db "cómo seguir.", 0
 
         section .bss
 pblock      resb 14

@@ -20,7 +20,15 @@
 ;    [keep]=1      respetar CUALQUIER fichero que ya exista en el destino
 ;    [keepdata]=1  respetar solo *.INI y *.REC que ya existan (actualizar)
 ;    [fix]=1       en el contenido copiado, cambiar las letras de unidad A:/B:/
-;                  origen/destino por C: (para CONFIG.SYS y AUTOEXEC.BAT)
+;                  origen/destino por C: (para CONFIG.SYS y AUTOEXEC.BAT) y
+;                  quitar las lineas que solo valen en el medio de instalacion
+;                  (de una con "[SOLO-MEDIO" a una con "SOLO-MEDIO]": el
+;                  primer menu del disquete, la memoria USB o el CD, con
+;                  «Instalar Hispa-DOS en el disco duro»)
+;    [solo_contar]=1  no copiar nada: solo contar en [ntotal] los ficheros
+;                  que se copiarian (para la barra de progreso de SETUP)
+;    [cs_aviso]    si no es 0, se llama antes de cada fichero (path_s y
+;                  path_d ya puestos; debe conservar los registros y la DTA)
 ;  Resultados:  [ncopied] copiados, [nfailed] fallidos, [nkept] conservados.
 ;
 ;  Este fichero NO lleva acentos ni enies en cadenas: se incluye sin pasar por
@@ -109,6 +117,11 @@ copy_set:
         int 0x21
         jc .r
 .f:
+        cmp byte [solo_contar], 0   ; [SETUP] solo contar
+        je .real
+        inc word [ntotal]
+        jmp .next
+.real:
         ; origen = sdir + nombre ; destino = unidad + carpeta + nombre
         mov si, sdir
         mov di, path_s
@@ -124,6 +137,10 @@ copy_set:
         call strcpy
         mov si, dta + 0x1E
         call strcpy
+        cmp word [cs_aviso], 0      ; [SETUP] el nombre y la barra
+        je .noav
+        call [cs_aviso]
+.noav:
         ; respetar el que ya existe?
         cmp byte [keep], 0
         jne .chk_exist          ; keep: respetar cualquier archivo que exista
@@ -229,6 +246,7 @@ strcpy:
 
 ; path_s -> path_d
 copy_file:
+        mov byte [en_medio], 0
         mov dx, path_d
         mov ax, 0x4301
         xor cx, cx
@@ -257,6 +275,7 @@ copy_file:
         cmp byte [fix], 0
         je .w
         call fix_drive
+        call quita_medio
 .w:
         mov bx, [hd]
         mov dx, buf
@@ -342,6 +361,107 @@ fix_drive:
         pop si
         pop cx
         ret
+
+; [SETUP] en buf (CX bytes): quitar las lineas desde una que lleve
+; "[SOLO-MEDIO" hasta una que lleve "SOLO-MEDIO]" (las dos incluidas) -> CX =
+; los bytes que quedan. CONFIG.SYS y AUTOEXEC.BAT caben en una sola lectura
+; (BUFSZ); [en_medio] sigue de una lectura a la siguiente.
+quita_medio:
+        push ax
+        push bx
+        push dx
+        push si
+        push di
+        push es
+        push ds
+        pop es
+        cld
+        mov si, buf
+        mov di, buf
+        mov bx, buf
+        add bx, cx
+.linea:
+        cmp si, bx
+        jae .fin
+        mov dx, si                  ; DX = principio de la linea
+.busca:
+        cmp si, bx
+        jae .fl
+        lodsb
+        cmp al, 10
+        jne .busca
+.fl:
+        call marca_medio            ; -> AL: 1 empieza, 2 acaba, 0 nada
+        cmp al, 1
+        jne .no1
+        mov byte [en_medio], 1
+        jmp .linea
+.no1:
+        cmp al, 2
+        jne .no2
+        mov byte [en_medio], 0
+        jmp .linea
+.no2:
+        cmp byte [en_medio], 0
+        jne .linea                  ; dentro de la zona: fuera
+        push si
+        mov cx, si
+        sub cx, dx
+        mov si, dx
+        rep movsb
+        pop si
+        jmp .linea
+.fin:
+        mov cx, di
+        sub cx, buf
+        pop es
+        pop di
+        pop si
+        pop dx
+        pop bx
+        pop ax
+        ret
+; la linea [DX, SI) -> AL = 1 si lleva "[SOLO-MEDIO", 2 si "SOLO-MEDIO]"
+marca_medio:
+        push bx
+        push di
+        mov di, dx
+.l:
+        mov bx, si
+        sub bx, di
+        cmp bx, 11
+        jb .no
+        push si
+        push di
+        mov si, s_medio
+        mov cx, 10
+        repe cmpsb
+        pop di
+        pop si
+        jne .n
+        mov al, 1
+        cmp di, dx
+        je .t
+        cmp byte [di-1], '['
+        je .r
+.t:
+        mov al, 2
+        cmp byte [di+10], ']'
+        je .r
+.n:
+        inc di
+        jmp .l
+.no:
+        xor al, al
+.r:
+        pop di
+        pop bx
+        ret
+s_medio     db "SOLO-MEDIO"
+en_medio    db 0
+solo_contar db 0
+ntotal      dw 0
+cs_aviso    dw 0
 
 ; ---- datos compartidos (inicializados: fiables sin poner a cero la .bss) ----
 ; Se emiten en la seccion donde se incluye el fichero (la de codigo/datos del
