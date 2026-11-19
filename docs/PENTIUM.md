@@ -1367,6 +1367,14 @@ textos** de un programa de 40 a 64 K (`compilador/base.cas`): el núcleo, con el
 escritorio de la 0.5, ya no le cabía («demasiados textos»). Es el único cambio en
 los compiladores de esta tanda; lo que sacan no cambia.
 
+Con la 0.6 el núcleo ha crecido otra vez (el ensamblador de la semilla pasa de
+900 K), y a CASTEL se le han subido tres tablas más: **48 módulos** por programa
+(eran 24), **48 K para los nombres** (eran 40) y **160 K para el árbol** (eran
+128). Sus tandas de Hispa-Pentium llevan ahora en B: un disquete de **2,88 MB**,
+donde CASTEL deja su archivo temporal y la salida (en A:, los fuentes: solo los
+módulos del núcleo en la segunda tanda, y los programas con los dos módulos que
+usan en la tercera). Lo que sacan los dos compiladores sigue siendo lo mismo.
+
 Con todo, `pruebas.sh` tiene ahora **320 comprobaciones** (eran 281; unos
 veinticuatro minutos en el VPS). La última pasada entera (19/11/2026) dio 319 bien
 y 1 mal: un punto mal elegido en una comprobación nueva (caía en la raya del

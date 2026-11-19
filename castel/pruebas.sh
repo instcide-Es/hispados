@@ -63,6 +63,7 @@
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
 #   SOLO=32 ./pruebas.sh          la primera, la octava y la novena (lo de 32 bits)
 #   SOLO=06 ./pruebas.sh          la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
+#   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
 #                                 de 16 bits (azar.py) y otros tres de 32
@@ -522,7 +523,7 @@ else
   # los dos módulos que usan: todos juntos ya no caben con lo demás)
   for f in $AQUI/nucleo32/*.cas; do
     case "$(basename $f .cas)" in
-      unidades|usb|usbalm|usbbase|usbhid|usuario) [ $tanda = 2 ] || continue ;;
+      uhci|unidades|usb|usbalm|usbbase|usbhid|usuario) [ $tanda = 2 ] || continue ;;
       u[a-z]*|llamadas|barramenu) [ $tanda = 3 ] || continue ;;
       *) [ $tanda = 2 ] || continue ;;
     esac
@@ -531,15 +532,21 @@ else
   if [ $tanda = 2 ]; then LOTE="$AQUI/nucleo32/semilla.cas"; else LOTE="$USU"; fi
 fi
 mcopy -i $T/c.img $A/CASTEL.EXE ::
-mformat -C -f 1440 -i $T/cb.img ::
+# (lo de Hispa-Pentium, con B: de 2,88 MB y desde B:: ahí deja CASTEL su
+# archivo temporal, que con el núcleo de la 0.6 —900 K de ensamblador— ya no
+# cabe en A: con los fuentes, ni con la salida en un disquete de 1,44)
+if [ $tanda = 1 ]; then mformat -C -f 1440 -i $T/cb.img ::; else mformat -C -f 2880 -i $T/cb.img ::; fi
 { printf '@ECO OFF\r\n'
+  [ $tanda = 1 ] || printf 'B:\r\n'
   for f in $LOTE; do
     n=$(basename $f .cas); N=$(echo $n | tr a-z A-Z)
     todo=; [ $n = toda ] && todo=--todo
     mcopy -o -i $T/c.img $f ::$N.CAS
     python3 -I $AQUI/ccastel.py $todo $f -o $A/ref/$N.ASM -I $AQUI/ejemplos/partes > /dev/null 2>&1
-    printf 'CASTEL %s.CAS -o B:%s.ASM -I BIB -I PARTES -I BIB32 %s > B:%s.SAL\r\n' $N $N "$todo" $N
+    if [ $tanda = 1 ]; then printf 'CASTEL %s.CAS -o B:%s.ASM -I BIB -I PARTES -I BIB32 %s > B:%s.SAL\r\n' $N $N "$todo" $N
+    else printf 'A:\\CASTEL A:\\%s.CAS -o B:%s.ASM -I A:\\BIB32 > B:%s.SAL\r\n' $N $N $N; fi
   done
+  [ $tanda = 1 ] || printf 'A:\r\n'
   if [ $tanda = 1 ]; then
     i=0
     for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
@@ -665,6 +672,12 @@ if [ -n "${AZAR:-}" ]; then
 fi
 
 fi   # SOLO=32
+
+# SOLO=16: hasta aquí (lo de 16 bits, los dos compiladores y los dos ensambladores)
+if [ "${SOLO:-}" = 16 ]; then
+  echo "== $nok bien, $fail mal =="
+  exit $((fail > 0))
+fi
 
 # ------------------------------------------------- 8. Castel de 32 bits
 echo "== Castel de 32 bits: «modelo núcleo» (QEMU -kernel) y «modelo hispa32» (HW32) =="

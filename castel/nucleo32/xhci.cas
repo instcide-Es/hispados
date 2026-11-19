@@ -260,6 +260,9 @@ módulo Xhci
         si d > largo entonces largo := d fin
         d := (hcc >> 16) << 2
         si d + 0x400 > largo entonces largo := d + 0x400 fin
+        ; (y las capacidades extendidas, que van encadenadas detrás: 64 K, lo
+        ; que mide el sitio de un xHCI de verdad, por lo menos)
+        si largo < 0x10000 entonces largo := 0x10000 fin
         si largo > 0x1000 entonces
             si largo > 0x40000 entonces devolver NINGUNA fin
             v := mapear_aparato(base, largo)

@@ -361,7 +361,17 @@ falta enlazar con otras cosas; de momento no hace falta.
 - **El sitio de CASTEL para los textos** (los nombres y los textos entre
   comillas de todo el programa, con sus módulos): eran 40 K y, desde la 0.5 de
   Hispa-Pentium, son 64 K (`compilador/base.cas`): el núcleo ya no cabía. Es una
-  tabla del compilador, no del lenguaje: lo que saca no cambia.
+  tabla del compilador, no del lenguaje: lo que saca no cambia. Con la 0.6
+  (doce módulos más: los discos y el USB) han crecido otras tres: **48 módulos**
+  por programa (eran 24; el núcleo, con los de la biblioteca, tiene 35), **48 K
+  para los nombres** (eran 40) y **160 K para el árbol** (eran 128: lo
+  declarado en todos los módulos se queda en él mientras se compila). Con eso
+  CASTEL usa 272 K para sus tablas, casi todo lo que deja libre Hispa-8086 en
+  640 K: el siguiente estirón del núcleo pedirá otra cosa (soltar del árbol lo
+  que ya no hace falta, o compilar por módulos). Y su **archivo temporal** (el
+  código de todas las funciones, que se lee dos veces) pasa de 800 K con el
+  núcleo: ya no cabe en un disquete de 1,44 MB con los fuentes o con la salida;
+  las pruebas lo ponen, con la salida, en uno de 2,88.
 - **El núcleo de Hispa-Pentium**: desde la 0.4 tiene su entorno gráfico (el
   escritorio, PENTIUM.md §10; con menús, portapapeles e iconos desde la 0.5) y,
   desde la 0.6, los discos SATA y el USB de los PC de verdad (PENTIUM.md §7 y
