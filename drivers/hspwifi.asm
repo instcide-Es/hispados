@@ -92,6 +92,7 @@ SEL_C32     equ 0x08                ; código de 32 bits, base = el bloque
 SEL_D32     equ 0x10                ; datos de 32 bits, base = el bloque
 SEL_C16     equ 0x18                ; código de 16 bits, base = este segmento
 SEL_D16     equ 0x20                ; datos de 16 bits (para volver a modo real)
+SEL_D4G     equ 0x28                ; datos de 16 bits con límite de 4 GB (ver nuc)
 
 start:
         jmp init
@@ -178,7 +179,7 @@ vuelta_rm   dw nuc.rm               ; salto lejano de vuelta a modo real
             dw 0                    ; (este segmento: lo pone la instalación)
 bloque      dd 0                    ; dirección física del bloque
 pila32      dd 0
-gdtr        dw 5 * 8 - 1
+gdtr        dw 6 * 8 - 1
             dd 0
 idtr        dw 32 * 8 - 1
             dd 0
@@ -192,6 +193,7 @@ gdt         dq 0
             dq 0x00CF92000000FFFF   ; datos de 32 bits
             dq 0x00009A000000FFFF   ; código de 16 bits
             dq 0x000092000000FFFF   ; datos de 16 bits
+            dq 0x008F92000000FFFF   ; datos de 16 bits, base 0 y límite de 4 GB
 
 ; =============================================================================
 ;  Llamar al núcleo: EAX = función, EDX = dirección lineal de la petición
@@ -248,13 +250,23 @@ nuc:
         mov ss, cx
         mov esp, [cs:pila32]
         o32 call far [cs:entrada32]
-        ; de vuelta (código de 16 bits, modo protegido): EAX = resultado
+        ; de vuelta (código de 16 bits, modo protegido): EAX = resultado.
+        ; DS, ES, FS y GS se dejan con el límite de 4 GB, no con el de 64 KB:
+        ; esta llamada puede venir del reloj (INT 08h) y haber interrumpido a
+        ; un programa en modo «irreal» (HSPUSB, HSPSND, HSPRED con la e1000:
+        ; leen los registros de su aparato, por encima de 1 MB, con FS). El
+        ; límite no se guarda con el registro de segmento: si aquí se dejara
+        ; en 64 KB, al volver su siguiente lectura daría la excepción 13 y el
+        ; equipo se quedaría colgado (MacBook Air 2012: HSPUSB lleva el
+        ; teclado y la memoria de arranque). Con 4 GB, a quien no usa el modo
+        ; «irreal» le da igual. La pila sí, con 64 KB.
         mov cx, SEL_D16
+        mov ss, cx
+        mov cx, SEL_D4G
         mov ds, cx
         mov es, cx
         mov fs, cx
         mov gs, cx
-        mov ss, cx
         mov ecx, cr0
         and cl, 0xFE
         mov cr0, ecx
