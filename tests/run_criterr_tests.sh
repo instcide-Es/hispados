@@ -2,12 +2,17 @@
 # Prueba del error crítico (INT 24h): «¿Anular, Reintentar, Ignorar,
 # Descartar?» con la disquetera B: vacía y con un disquete protegido contra
 # escritura.
+# Y que no sale cuando no toca: al volver a mirar los discos (INT 21h
+# AH=0Dh: APAGAR, REINICIAR, FORMAT...) con un disco duro sin medio (el lector
+# de tarjetas vacío de un MacBook Air; aquí, DISCO81.COM).
 # Critical error (INT 24h) test.
 set -u
 cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
 T=$(mktemp -d)
 cp "$IMG" $T/f.img
+nasm -f bin -o $T/DISCO81.COM tests/progs/disco81.asm && nasm -f bin -o $T/D0D.COM tests/progs/d0d.asm && \
+  mcopy -o -i $T/f.img $T/DISCO81.COM $T/D0D.COM :: || echo "  FAIL no se pueden poner DISCO81.COM y D0D.COM"
 dd if=/dev/zero of=$T/b.img bs=1k count=1440 status=none
 mformat -i $T/b.img -f 1440 -v DATOSB ::
 printf 'Hola desde B\r\n' > $T/HOLA.TXT; mcopy -i $T/b.img $T/HOLA.TXT ::HOLA.TXT
@@ -48,6 +53,11 @@ mon "change fb $T/ro.img raw read-only"; sleep 1
 typ "DIR B:"; sleep 3
 typ "COPIAR A:\\README.TXT B:"; sleep 3
 key d; sleep 2
+# 5) un disco duro sin medio y la función 0Dh: sin aviso
+mon "eject -f fb"; sleep 1
+typ "A:\\DISCO81"; sleep 3
+typ "A:\\D0D"; sleep 4
+typ "ECHO tras la 0D"; sleep 2
 kill $QP 2>/dev/null; wait $QP 2>/dev/null
 tr -d '\r' < $T/log | iconv -f CP437 -t UTF-8 > $T/log.txt
 fail=0
@@ -63,6 +73,10 @@ check "El volumen de la unidad B es DATOSB"
 check "La unidad no está preparada"
 check "sigue vivo"
 check "Error al escribir en la unidad B: el disco está protegido contra escritura"
+check "disco-de-mentira-puesto"
+check "funcion-0D-hecha"
+check "tras la 0D"
+if grep -q "no se encuentra el sector" $T/log.txt; then ko "al mirar los discos (0Dh) sale el aviso por el disco sin medio"; else ok "al mirar los discos (0Dh) no hay aviso por el disco sin medio"; fi
 if cmp -s $T/ro.img $T/ro.orig; then ok "el disquete protegido no ha cambiado"; else ko "el disquete protegido ha cambiado"; fi
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/>DIR B:/,$p' $T/log.txt; fi
 rm -rf $T

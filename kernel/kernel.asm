@@ -465,6 +465,16 @@ check_ext:
 drives_scan:
         pushad
         push es
+        ; Sin aviso de error crítico mientras se miran los discos: un disco
+        ; sin medio (el lector de tarjetas vacío de un MacBook Air, que la
+        ; BIOS cuenta como disco 81h) da error al leer su sector 0, y eso no
+        ; es un fallo: no hay unidad y ya está. Al arrancar no se preguntaba
+        ; (se está fuera de INT 21h), pero al volver a mirar con la función
+        ; 0Dh (APAGAR, REINICIAR, FORMAT, PARTIR...) salía «Error al leer la
+        ; unidad C: no se encuentra el sector» con la letra de otra unidad.
+        mov al, [crit_off]
+        push ax
+        mov byte [crit_off], 1
         push ds
         pop es
         mov di, drv_tab
@@ -710,6 +720,8 @@ drives_scan:
         mov al, [ndrives]
         mov [bios_nd], al
         call append_ext
+        pop ax
+        mov [crit_off], al
         pop es
         popad
         ret
