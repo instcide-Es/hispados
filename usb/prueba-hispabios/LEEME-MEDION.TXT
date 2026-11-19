@@ -1,0 +1,44 @@
+PRUEBA DE HISPABIOS 0.6 - MEDION S2217: EL TECLADO
+Imagen del @FECHA@ a las @HORA@ (version @VERSION@)
+==================================================
+
+Que pasaba: el teclado de la base iba en el menu de arranque y dejaba
+de ir despues (en C:\>, con F8, en la pregunta de DIAGNOSTICO). En ese
+equipo el teclado es USB y lo lleva el firmware, que solo lo atiende
+cuando anda su propio reloj; con DOS en marcha ese reloj no le llegaba.
+Esta imagen se lo da en cada consulta. Solo esta probada en emulador.
+
+QUE HACER (5 minutos)
+---------------------
+1. Descomprima el .zip y grabe hispados-usb.img en la memoria USB
+   entera (Rufus en modo DD, balenaEtcher o dd).
+2. Arranque el Medion desde la memoria y deje pasar el menu (o elija
+   con las flechas). Antes de llegar a C:\> sale sola una prueba:
+       TECLAPRU: prueba del teclado. Pulse teclas ... 20 segundos
+   Pulse unas cuantas letras: deben ir saliendo. Acaba sola aunque no
+   llegue ninguna, y guarda el resultado.
+3. En C:\> pruebe a escribir:  DIR  y luego  HBLOG
+   Diga si el teclado va bien, va a ratos (con retraso, letras
+   perdidas o repetidas) o no va.
+4. Suba al FTP, a informes (carpeta Medion), de la raiz de la memoria:
+       HISPABIOS.LOG   (DOS lo ensena como HISPAB~1.LOG)
+       HBLOG.TXT
+       TECLAPRU.TXT
+
+SI EL TECLADO SIGUE SIN IR: DOS PRUEBAS MAS (suba los tres archivos
+de cada una, con otro nombre o en otra carpeta)
+---------------------------------------------------------------
+A. MODO SEGURO: reinicie y, en cuanto salga "HispaBIOS 0.6", vaya
+   pulsando la tecla S hasta que salga MODO SEGURO. En ese modo se
+   pregunta al teclado sin parar, como hacia la version vieja: va mas
+   lento, pero dice si el fallo es el reloj del firmware.
+B. TECLADO USB DE FUERA: apague, enchufe un teclado USB normal (en el
+   USB de la base o con un adaptador en el micro-USB) ANTES de
+   encender, y arranque igual. Pruebe los dos teclados.
+
+Notas
+-----
+- No se escribe nada en el disco de dentro del Medion; solo esos tres
+  archivos en la memoria USB. No llevan nada personal.
+- Si la imagen sale tumbada: Ctrl+Alt+G en C:\> (o la tecla G al
+  arrancar) le da un cuarto de vuelta, y queda guardado.
