@@ -1207,7 +1207,7 @@ init:
         PT " octetos, "
         mov eax, [tbuf+12]
         call putdec
-        PT " de memoria; packet driver en INT "
+        PT " de memoria; controlador de paquetes en INT "
         mov al, [pkt_vec]
         call hex2
         PT "h"
@@ -2081,7 +2081,7 @@ paso_vuelta:
 prueba_residente:
         cmp byte [pasos_si], 0
         je .r
-        PASO "vectores puestos: packet driver, INT 2Fh, INT 16h e INT 08h. Se esperan 6 tics del reloj con el sondeo en marcha..."
+        PASO "vectores puestos: controlador de paquetes, INT 2Fh, INT 16h e INT 08h. Se esperan 6 tics del reloj con el sondeo en marcha..."
         push es
         xor ax, ax
         mov es, ax
