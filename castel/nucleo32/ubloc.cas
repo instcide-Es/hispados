@@ -38,6 +38,7 @@ módulo UBloc
     variable rótulo: arreglo [96] de byte
     variable aviso: arreglo [96] de byte
     variable cambiado, cerrando: bool
+    variable aviso_malo: bool                   ; el aviso es de algo que ha ido mal
     variable trozo: arreglo [512] de byte
 
     ; -------------------------------------------------------------------------
@@ -113,7 +114,7 @@ módulo UBloc
         degradado(v, 0, alto - PIE, ancho, PIE, 0xE6EFFB, 0xCADDF6)
         rectángulo(v, 0, alto - PIE, ancho, 1, 0x9DBBE4)
         si aviso[0] <> 0 entonces
-            texto(v, MARGEN, alto - PIE + 4, aviso, 0xB8441A)
+            si aviso_malo entonces texto(v, MARGEN, alto - PIE + 4, aviso, 0xB8441A) sino texto(v, MARGEN, alto - PIE + 4, aviso, 0x1F7532) fin
             devolver
         fin
         sitio(cursor, lin, col)
@@ -160,7 +161,8 @@ módulo UBloc
             col := col + 1
             i := i + 1
         fin
-        rectángulo(v, MARGEN + ccol * ANCHO_LETRA, BARRA + 4 + (clin - primera) * ALTO_LETRA, 2, ALTO_LETRA, 0x2468C8)
+        ; el cursor: una raya entre dos letras
+        rectángulo(v, MARGEN + ccol * ANCHO_LETRA - 1, BARRA + 4 + (clin - primera) * ALTO_LETRA, 1, ALTO_LETRA, 0x2468C8)
     fin
 
     función pinta_todo()
@@ -207,6 +209,7 @@ módulo UBloc
     función guarda()
         variable m, i, k, r, total: nat32
         variable d: arreglo [2] de nat32
+        aviso_malo := cierto
         m := crear(nombre)
         si es_error(m) entonces
             d[0] := nat32(texto_error(m))
@@ -244,6 +247,7 @@ módulo UBloc
         fin
         cambiado := falso
         cerrando := falso
+        aviso_malo := falso
         d[0] := nat32(dirección(nombre[0]))
         d[1] := total
         formatear(aviso, 96, "Guardado en %s (%u octetos).", d)
@@ -369,6 +373,7 @@ módulo UBloc
             sino si s.clase = EV_CERRAR entonces
                 si no cambiado o cerrando entonces devolver 0 fin
                 cerrando := cierto
+                aviso_malo := cierto
                 Textos32.copiar(aviso, "Hay cambios sin guardar: F2 guarda; cerrar otra vez, sale.")
                 pinta_pie()
             fin
