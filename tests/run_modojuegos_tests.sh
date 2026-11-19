@@ -63,6 +63,9 @@ orden() {
 caso() {  # nombre imagen
   T=$(mktemp -d)
   cp "$2" $T/f.img
+  # el primer menú del disquete de uso (arrancar sin instalar / instalar),
+  # sin esperar: sale el de las opciones, como antes
+  case "$2" in "$DISQ"|"$USBIMG") tests/tools/sinmenu.sh $T/f.img ARRANCAR ;; esac
   cfail=0
   P='A:\>'
   echo "== Hispa-DOS modo juegos ($1) =="
@@ -605,6 +608,7 @@ if quiere usb; then
   if [ ! -f $USBIMG ] || [ ! -f $DISQ ]; then falta usb "$USBIMG o $DISQ (make usb)"; else
     T=$(mktemp -d)
     cp $USBIMG $T/usbboot.img
+    tests/tools/sinmenu.sh $T/usbboot.img ARRANCAR    # (el primer menú, sin esperar)
     cfail=0
     P='C:\>'
     echo "== Hispa-DOS modo juegos (imagen USB) =="
@@ -642,6 +646,7 @@ if quiere usbu; then
   if [ ! -f $USBIMG ]; then falta usbu "$USBIMG (make usb)"; else
     T=$(mktemp -d)
     cp $USBIMG $T/usbboot.img
+    tests/tools/sinmenu.sh $T/usbboot.img ARRANCAR    # (el primer menú, sin esperar)
     cfail=0
     P='C:\>'
     echo "== Hispa-DOS modo juegos (imagen USB, HSPUSB /U) =="

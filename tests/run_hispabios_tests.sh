@@ -119,7 +119,7 @@ done
 echo "== HispaBIOS: la opción «Juegos» (HSPEMM no se instala) =="
 cp --sparse=always $USB $T/j.img
 mcopy -o -i $T/j.img@@1048576 ::CONFIG.SYS $T/cfg.sys
-sed -i 's/^MENUDEFAULT=NORMAL,[0-9]*/MENUDEFAULT=JUEGOS,1/I' $T/cfg.sys
+sed -i -e 's/^MENUDEFAULT=ARRANCAR,[0-9]*/MENUDEFAULT=ARRANCAR,0/I' -e 's/^MENUDEFAULT=NORMAL,[0-9]*/MENUDEFAULT=JUEGOS,1/I' $T/cfg.sys
 mcopy -o -i $T/j.img@@1048576 $T/cfg.sys ::CONFIG.SYS
 if arranca 64 $T/j.img juegos "d i r ret" "bytes libres"; then
   S=$T/serie_juegos.txt

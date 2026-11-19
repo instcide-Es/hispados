@@ -79,6 +79,7 @@ caso() {
   cfail=0
   echo "== Hispa-DOS memoria para juegos ($1) =="
   cp $DISQ $T/f.img
+  tests/tools/sinmenu.sh $T/f.img ARRANCAR    # (el primer menú, sin esperar)
   if [ -n "$2" ]; then
     mtype -i $T/f.img ::CONFIG.SYS | sed "s/^DEVICE=A:\\\\HISPADOS\\\\HSPEMM.SYS/& $2/" | grep -a -v "${3:-NADA_QUE_QUITAR}" > $T/CONFIG.SYS
     grep -q "^DEVICE=A:.HISPADOS.HSPEMM.SYS $2" $T/CONFIG.SYS || ko "no está la línea de HSPEMM en CONFIG.SYS"
