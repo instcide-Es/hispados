@@ -12,7 +12,9 @@
 ;  queda libre. Con dos clics (o Intro) se entra: salen sus carpetas y sus
 ;  archivos. Dos clics en una carpeta entran en ella; en «..», se vuelve; en
 ;  un texto (.TXT, .BAT), lo abre el Bloc de notas; en un programa (.BIN), lo
-;  lanza. Las flechas, Re Pág, Av Pág, Intro y Retroceso también valen. El
+;  lanza; un programa de Hispa Ventanas (.HVP) y los documentos de la oficina
+;  (.PLU, de Pluma; .HOJ, de Cuentas; las imágenes, con Mirador) los abre
+;  HVPRUN.BIN. Las flechas, Re Pág, Av Pág, Intro y Retroceso también valen. El
 ;  botón secundario saca «Abrir». Arriba, la barra de menús.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
@@ -49,6 +51,7 @@ módulo UEquipo
     variable aviso: arreglo [100] de byte
     variable renglón: arreglo [120] de byte
     variable otra: arreglo [MAX_RUTA + 16] de byte
+    variable con_args: arreglo [MAX_RUTA + 48] de byte  ; lo que se le da a HVPRUN
     variable menús: arreglo [20] de byte = "Archivo|Ver|Ayuda"
     variable menú_abierto: ent32 = -1
     constante MAX_UNIDADES = 8
@@ -315,6 +318,28 @@ módulo UEquipo
         concatenar(otra, nombres[elegida])
     fin
 
+    ; abre lo elegido (en «otra») con HVPRUN: es un .HVP (hvp = nulo) o un
+    ; documento de ese programa de la oficina
+    función con_hvprun(hvp: puntero a byte)
+        variable r: nat32
+        con_args[0] := 0
+        si hvp <> nulo entonces
+            Textos32.copiar(con_args, hvp)
+            concatenar(con_args, " ")
+        fin
+        concatenar(con_args, otra)
+        r := lanzar_suelto("\\HVPRUN.BIN", con_args)
+        si es_error(r) entonces
+            Textos32.copiar(aviso, "No se puede abrir con HVPRUN: ")
+            concatenar(aviso, texto_error(r))
+        fin
+    fin
+
+    ; ¿es una imagen de las que enseña Mirador?
+    función es_imagen(n: puntero a byte): bool
+        devolver acaba_en(n, "BMP") o acaba_en(n, "PCX") o acaba_en(n, "GIF") o acaba_en(n, "PNG") o acaba_en(n, "JPG") o acaba_en(n, "TGA") o acaba_en(n, "ICO") o acaba_en(n, "PPM")
+    fin
+
     ; abre lo elegido: una unidad, una carpeta, un texto o un programa
     función abre()
         variable r: nat32
@@ -346,6 +371,14 @@ módulo UEquipo
                 Textos32.copiar(aviso, "No se puede lanzar: ")
                 concatenar(aviso, texto_error(r))
             fin
+        sino si acaba_en(nombres[elegida], "HVP") entonces
+            con_hvprun(nulo)
+        sino si acaba_en(nombres[elegida], "PLU") entonces
+            con_hvprun("\\OFICINA\\PLUMA.HVP")
+        sino si acaba_en(nombres[elegida], "HOJ") entonces
+            con_hvprun("\\OFICINA\\CUENTAS.HVP")
+        sino si es_imagen(nombres[elegida]) entonces
+            con_hvprun("\\OFICINA\\MIRADOR.HVP")
         sino
             Textos32.copiar(aviso, "No hay con qué abrir esa clase de archivo.")
         fin
