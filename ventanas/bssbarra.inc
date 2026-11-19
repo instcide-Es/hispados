@@ -44,12 +44,7 @@ be_sel      resd 1                  ; el marcado (el de Intro)
 be_tic      resd 1                  ; cuándo se abrió uno (para no abrirlo dos veces)
 be_sx       resd 1                  ; (al pintar) la casilla,
 be_sy       resd 1
-be_w        resd 1                  ;   la etiqueta
-be_h        resd 1
-be_cnt      resd 1                  ;   y sus letras
-be_ty       resd 1                  ; (be_texto2) la y
 be_acc      resd BE_MAX             ; los accesos
-be_dob      resb 1                  ; la etiqueta, a doble tamaño
+be_marca    resb 1                  ; [ICONOS] 1: se ve la marca (tras un clic o una flecha)
 be_hecho    resb 1                  ; (be_tecla) la tecla era suya
-bt_ico64    resb BE_ICO * BE_ICO    ; un icono a doble tamaño
 bt_buf      resb BT_BUF             ; VENTANAS.INI, para buscar «Escritorio=486»

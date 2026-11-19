@@ -21,6 +21,19 @@ vid_bits    resb 1                  ; 4, 8, 15, 16, 24 o 32
 vid_octetos resb 1                  ; octetos por punto en la pantalla
 vid_masc    resb 6                  ; tamaño y posición de rojo, verde y azul
 vbe_info    resb 512
+; [PANTALLA] la lista de resoluciones de la tarjeta y el EDID (video16.inc);
+; Configuración la lee entera con aj_leer(AJ_PANTALLA), en este orden (defs.inc)
+            alignb 4
+vl_n        resw 1                  ; +0 resoluciones en vl_tabla
+edid_an     resw 1                  ; +2 la nativa de la pantalla (0: sin EDID)
+edid_al     resw 1                  ; +4
+vl_elegida  resw 1                  ; +6 la puesta (su ficha en vl_tabla; 0 en la VGA)
+vl_origen   resb 1                  ; +8 0 automática, 1 VENTANAS.INI, 2 línea de órdenes, 3 a prueba
+vl_autosi   resb 1                  ; +9 1: la ha elegido vl_auto (no se pidió o no la había)
+op_res      resb 1                  ; +10 1: se ha pedido una (línea de órdenes o VENTANAS.INI)
+op_prueba   resb 1                  ; +11 1: /PRUEBA («Probar» de Configuración), 2: /RESOL (se ha vuelto)
+vl_tabla    resb VL_MAX * VL_TAM    ; +12
+vi_ini      resb 1                  ; (al leer «Modo=») 1: de VENTANAS.INI
 modo_info   resb 256
 ; ---- dibujo ----
 sup_ptr     resd 1                  ; la superficie, como puntero cercano

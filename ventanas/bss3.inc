@@ -67,6 +67,8 @@ vis_cols    resd 1
 vis_alto    resd 1
 vis_n       resd 1
 vis_nom     resd 1
+vis_forzar2 resb 1                  ; [ICONOS] 1: vis_partir parte en dos líneas aunque no sea un grupo
+            alignb 4
 vis_t1      resd 1                  ; [0.9.22] el nombre en una o dos líneas (vis_partir)
 vis_n1      resd 1
 vis_t2      resd 1

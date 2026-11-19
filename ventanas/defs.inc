@@ -309,6 +309,22 @@ AJ_CONTORNO     equ 14
 ; [CONTEXTO] (se lee y se cambia) 1: Ctrl+clic izquierdo hace de botón derecho
 ; (lo normal; para los Mac y los touchpads de un botón), 0: no
 AJ_CTRL_DER     equ 15
+; [PANTALLA] (se lee) -> EAX=puntero a lo que ha visto video16.inc: vl_n (dw,
+; resoluciones), edid_an y edid_al (dw, la nativa de la pantalla; 0 sin
+; EDID), vl_elegida (dw: la puesta, puntero de 16 bits a su ficha; 0 en la
+; VGA), vl_origen (db: 0 automática, 1 VENTANAS.INI, 2 línea de órdenes, 3 a
+; prueba), vl_autosi (db: 1 la ha elegido sola), op_res, op_prueba (db) y,
+; desde +12, las fichas (16 octetos: ancho dw, alto dw, colores dw (bits 0
+; 8, 1 15, 2 16, 3 24, 4 32) y los 5 modos dw)
+AJ_PANTALLA     equ 16
+; [PANTALLA] (se pone) EDX=opciones de más (« /MODO:AxBxC /PRUEBA») o 0:
+; vuelve a cargar Hispa Ventanas -> EAX=0 sí, 1 sin lanzador, 2 cancelado
+AJ_REINICIAR    equ 17
+; [ICONOS] (se lee y se cambia) 0 pequeños, 1 normales, 2 grandes
+AJ_ICONOS       equ 18
+; [PANTALLA] (se lee) 1: se ha arrancado con /PRUEBA (hay que preguntar);
+; 2: con /RESOL (se ha vuelto al modo de antes: Configuración, en Resolución)
+AJ_PRUEBA       equ 19
 
 ; ---- [ARCHIVOS] el Administrador de archivos (archapi.inc) ----
 ; el bloque de registros de rm_interrup (ESI): lo que se da y lo que vuelve

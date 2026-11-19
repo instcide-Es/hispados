@@ -24,8 +24,8 @@
 ;  acceso (velocidad, LOADFIX, sonido) están en accesos.inc (jd_*).
 ; =============================================================================
 
-CEN_PASO    equ 104                 ; de un icono al siguiente
-CEN_FILA    equ 76                  ; de una fila de iconos a la siguiente
+; [ICONOS] de un icono al siguiente (cen_paso) y de una fila a la siguiente
+; (cen_fila): según el tamaño de los iconos (ico_talla, en ajustes.inc)
 INT_N       equ 4
 BP_MAXDIR   equ 64                  ; subcarpetas que mira «Buscar programas»
 BP_MAXCAND  equ 40
@@ -284,7 +284,7 @@ cen_alargar:
         dec eax
         xor edx, edx
         div dword [vis_cols]        ; filas de iconos
-        imul eax, eax, CEN_FILA
+        imul eax, [cen_fila]
         add eax, 48                 ; y la pista, como en vt_pista_y
         sub eax, [vis_alto]
         jle .x                      ; ya cabe todo
@@ -360,7 +360,7 @@ grupo_abrir:
         dec eax
         xor edx, edx
         div dword [vis_cols]
-        imul eax, eax, CEN_FILA
+        imul eax, [cen_fila]
         add eax, 18                 ; [0.9.22] (la última fila puede llevar un
         sub eax, [vis_alto]         ;  nombre en dos líneas: «Administrador…»)
         jle .x
@@ -403,8 +403,7 @@ vista_cols:
         xor eax, eax
 .a:
         xor edx, edx
-        mov ecx, CEN_PASO
-        div ecx
+        div dword [cen_paso]
         test eax, eax
         jnz .b
         inc eax
@@ -497,8 +496,7 @@ vista_en:
         sub eax, 12
         js .no
         xor edx, edx
-        mov ecx, CEN_PASO
-        div ecx
+        div dword [cen_paso]
         cmp eax, [vis_cols]
         jae .no
         mov esi, eax
@@ -506,8 +504,7 @@ vista_en:
         js .no
         mov eax, ebx
         xor edx, edx
-        mov ecx, CEN_FILA
-        div ecx
+        div dword [cen_fila]
         imul eax, [vis_cols]
         add eax, esi
         mov ecx, eax
@@ -825,15 +822,19 @@ vista_pintar:
         mov eax, edi
         xor edx, edx
         div dword [vis_cols]        ; EAX=fila EDX=columna
-        imul eax, CEN_FILA
+        imul eax, [cen_fila]
         sub eax, [ebp+V_D2]         ; [TAMAÑO] lo desplazado
         mov [vis_y], eax
-        imul edx, CEN_PASO
+        imul edx, [cen_paso]
         add edx, 12
         mov [vis_x], edx
-        lea ebx, [eax+16]
-        lea eax, [edx+(CEN_PASO-32)/2]
-        call dc_icono
+        mov ebx, eax                ; [ICONOS] el dibujo, del tamaño puesto
+        add ebx, [cen_icoy]
+        mov eax, [cen_paso]
+        sub eax, [ico_px]
+        shr eax, 1
+        add eax, edx
+        call dc_icono_t
         call jd_marca_falta         ; (un aspa si su programa ya no está)
         ; [0.9.22] el nombre, centrado: hasta 12 letras en una línea; si es
         ; más largo, en un grupo se parte por un espacio en dos líneas («Bloc
@@ -846,7 +847,7 @@ vista_pintar:
         call cad_largo
         call vis_partir
         mov ebx, [vis_y]
-        add ebx, 58
+        add ebx, [cen_etqy]
         COLOR C_TINTA
         cmp edi, [ebp+V_D0]
         jne .i3
@@ -863,7 +864,12 @@ vista_pintar:
         shr eax, 1
         neg eax
         add eax, [vis_x]
-        add eax, CEN_PASO / 2 - 4
+        add eax, -4
+        push edx
+        mov edx, [cen_paso]
+        shr edx, 1
+        add eax, edx
+        pop edx
         mov edx, 18
         cmp dword [vis_n2], 0
         je .m2
@@ -925,8 +931,11 @@ vis_partir:
         mov dword [vis_n2], 0
         cmp eax, 12
         jbe .uno
+        cmp byte [vis_forzar2], 0   ; [ICONOS] (los del escritorio de Hispa-486)
+        jne .dos
         cmp dword [ebp+V_ID], 0
         je .uno
+.dos:
         mov ecx, 12                 ; el último espacio en las 13 primeras:
 .a:                                 ; la primera línea, de 12 letras o menos
         cmp byte [esi+ecx], ' '
@@ -998,7 +1007,9 @@ vis_linea:
         shr eax, 1
         neg eax
         add eax, [vis_x]
-        add eax, CEN_PASO / 2
+        mov edx, [cen_paso]
+        shr edx, 1
+        add eax, edx
         cmp ecx, 12
         ja .l7
         call dc_texto_n

@@ -1086,7 +1086,6 @@ barra_pintar:
 ;  La barra en las vistas de iconos del Centro (el Centro y cada grupo).
 ;  V_D1 = la barra (hija, id 999), V_D2 = lo desplazado (en puntos)
 ; =============================================================================
-VT_LINEA    equ CEN_FILA / 2
 vt_plant:
         PLANTILLA c_barra, 0, E_HIJA | E_OCULTA, 0, 0, BD_AN, 3 * BD_AN, 999
 
@@ -1100,7 +1099,8 @@ vt_crear:
         jz .x
         mov ebp, eax
         mov eax, BDM_LINEA
-        mov ecx, VT_LINEA
+        mov ecx, [cen_fila]         ; [ICONOS] media fila
+        shr ecx, 1
         call msg_enviar
 .x:
         popad
@@ -1170,8 +1170,7 @@ vt_contenido:
         xor eax, eax
 .a:
         xor edx, edx
-        mov ecx, CEN_PASO
-        div ecx
+        div dword [cen_paso]
         test eax, eax
         jnz .b
         inc eax
@@ -1188,7 +1187,7 @@ vt_contenido:
         lea eax, [ecx+ebx-1]
         xor edx, edx
         div ebx
-        imul eax, CEN_FILA
+        imul eax, [cen_fila]
         add eax, 8
         cmp dword [ebp+V_ID], 0
         jne .x
@@ -1285,11 +1284,11 @@ vista_ver:
         mov eax, [ebp+V_D0]
         xor edx, edx
         div dword [vis_cols]
-        imul eax, CEN_FILA          ; arriba del icono
+        imul eax, [cen_fila]        ; arriba del icono
         mov ecx, [ebp+V_D2]
         cmp eax, ecx
         jl .pon
-        add eax, CEN_FILA
+        add eax, [cen_fila]
         sub eax, [vis_alto]
         cmp eax, ecx
         jle .x
@@ -1342,8 +1341,7 @@ vt_tecla:
         push eax
         mov eax, [vis_alto]         ; filas de una página (al menos una)
         xor edx, edx
-        mov ebx, CEN_FILA
-        div ebx
+        div dword [cen_fila]
         test eax, eax
         jnz .p1
         inc eax
@@ -1385,7 +1383,7 @@ vt_pista_y:
         dec eax
         xor edx, edx
         div dword [vis_cols]
-        imul eax, CEN_FILA
+        imul eax, [cen_fila]
         add eax, 48
         cmp eax, [vis_alto]
         jge .a

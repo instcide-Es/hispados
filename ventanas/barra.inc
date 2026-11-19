@@ -64,25 +64,24 @@ BT_DESP     equ SALIR_AN + 12 - 8   ; lo que se corre la bandeja al no haber «S
 INI_MAX      equ MAX_GR + 8          ; órdenes del menú Inicio
 INI_SMAX      equ MAX_AC              ; programas de un submenú
 MI_CAB      equ 26                  ; la cabecera del menú
-MI_H        equ 22                  ; una orden (icono de 16 y aire)
+; [ICONOS] el alto de una orden (mi_h: 22, con un icono de 16 y aire; 38 con
+; los iconos grandes, de 32), en bt_mi_tallas
 MI_SEP      equ 8                   ; una raya
 INI_P_CERRAR equ 1                  ; lo pendiente: cerrar el menú,
 INI_P_ORDEN equ 2                   ;   una orden del menú,
 INI_P_PROG  equ 3                   ;   un programa del submenú
 ; los iconos del escritorio de Hispa-486 (los accesos de los grupos con
 ; «Escritorio=1»): en columnas desde arriba a la izquierda, cada uno en una
-; casilla de BE_AN x BE_AL, con el dibujo a doble tamaño (64x64) y el nombre
-; debajo, en una etiqueta crema: a doble tamaño si tiene hasta BE_GRANDE
-; letras y, si no, en negrita normal (hasta BE_LETRAS)
+; casilla con el dibujo y el nombre debajo.
+; [ICONOS] Desde la 0.9.28 el dibujo y la casilla van con el tamaño de los
+; iconos de Configuración (los mismos de los grupos del Centro: ico_px,
+; cen_paso, cen_fila) y el nombre con la letra normal: antes eran 64x64 con
+; el nombre a doble tamaño en una etiqueta, y en un portátil de 1440x900 a
+; 800x600 ampliado cada icono se comía la pantalla.
 BE_MAX      equ 8                   ; iconos, como mucho
-BE_X0       equ 24                  ; la primera casilla
-BE_Y0       equ 24
-BE_AN       equ 176
-BE_AL       equ 128
-BE_ICO      equ 64                  ; el dibujo
-BE_ETQ      equ 4 + BE_ICO + 6      ; donde empieza la etiqueta (desde la casilla)
-BE_GRANDE   equ 10
-BE_LETRAS   equ 20
+BE_X0       equ 12                  ; la primera casilla
+BE_Y0       equ 12
+BE_ALMAS    equ 16                  ; la casilla: el ancho de cen_paso y el alto de cen_fila y esto
 BE_ESPERA   equ 18                  ; tics (1 s) en los que otro clic no abre otra vez
 
 c_barra_t   dd bt_proc
@@ -633,8 +632,12 @@ bt_esc_proc:
         js .nada
         mov ecx, eax
         cmp ecx, [be_sel]
-        je .p1
+        jne .p0
+        cmp byte [be_marca], 0
+        jne .p1
+.p0:
         mov [be_sel], ecx
+        mov byte [be_marca], 1      ; [ICONOS] desde ahora se ve la marca
         call bt_esc_inv
 .p1:
         call be_lanzar
@@ -725,7 +728,8 @@ be_filas:
         xor eax, eax
 .a:
         xor edx, edx
-        mov ecx, BE_AL
+        mov ecx, [cen_fila]
+        add ecx, BE_ALMAS
         div ecx
         test eax, eax
         jnz .x
@@ -743,9 +747,11 @@ be_pos:
         mov eax, ecx
         xor edx, edx
         div ebx                     ; EAX=columna EDX=fila
-        imul eax, BE_AN
+        imul eax, [cen_paso]
         add eax, BE_X0
-        imul edx, BE_AL
+        mov ebx, [cen_fila]
+        add ebx, BE_ALMAS
+        imul edx, ebx
         add edx, BE_Y0
         mov ebx, edx
         pop edx
@@ -767,14 +773,22 @@ be_en:
         call be_pos
         mov edx, esi
         sub edx, eax
-        sub edx, 8
+        sub edx, 4
         js .s
-        cmp edx, BE_AN - 16
+        push eax
+        mov eax, [cen_paso]
+        sub eax, 8
+        cmp edx, eax
+        pop eax
         jae .s
         mov edx, edi
         sub edx, ebx
         js .s
-        cmp edx, BE_AL - 8
+        push eax
+        mov eax, [cen_fila]
+        add eax, BE_ALMAS - 4
+        cmp edx, eax
+        pop eax
         jae .s
         mov eax, ecx
         jmp .x
@@ -853,7 +867,12 @@ be_lanzar:
         jnz .v
         jmp .x
 
-; (interna, con el escritorio en un dc_pintar) los iconos
+; (interna, con el escritorio en un dc_pintar) los iconos: [ICONOS] el
+; dibujo del tamaño puesto en Configuración (ico_px) y el nombre debajo, con
+; la letra normal, centrado y partido en dos líneas si es largo (como en los
+; grupos del Centro: vis_partir, vis_linea), en blanco con sombra para que
+; se lea sobre la imagen de fondo; la marca (anil) solo en el marcado y solo
+; después de un clic o de una flecha (be_marca)
 be_pintar:
         pushad
         call be_lista
@@ -865,15 +884,16 @@ be_pintar:
         dec eax
         mov [be_sel], eax
 .s0:
+        mov byte [vis_forzar2], 1   ; (dos líneas, como en un grupo)
         xor edi, edi
 .i:
         cmp edi, [be_n]
-        jae .x
+        jae .fin
         mov ecx, edi
         call be_pos
         mov [be_sx], eax
         mov [be_sy], ebx
-        ; el dibujo, a doble tamaño
+        mov [vis_x], eax            ; (para vis_linea)
         mov ebx, [be_acc+edi*4]
         movzx eax, byte [ebx+AC_ICONO]
         cmp eax, ICO_N
@@ -882,177 +902,86 @@ be_pintar:
 .ia:
         mov esi, [ico_tabla+eax*8]
         call hvp_icono              ; (un .HVP trae el suyo)
-        call be_ico64
-        mov eax, [be_sx]
-        add eax, (BE_AN - BE_ICO) / 2
+        mov eax, [cen_paso]
+        sub eax, [ico_px]
+        shr eax, 1
+        add eax, [be_sx]
         mov ebx, [be_sy]
-        add ebx, 4
-        mov esi, bt_ico64
-        mov ecx, BE_ICO
-        mov edx, BE_ICO
-        call dc_copiar_clave
-        ; la etiqueta con el nombre: a doble tamaño o, si es largo, normal
+        add ebx, [cen_icoy]
+        call dc_icono_t
         mov ebx, [be_acc+edi*4]
         lea esi, [ebx+AC_NOMBRE]
         call cad_largo
-        mov ecx, eax
-        mov byte [be_dob], 1
-        mov eax, ecx
-        shl eax, 4
-        mov edx, 32
-        cmp ecx, BE_GRANDE
-        jbe .t1
-        mov byte [be_dob], 0
-        cmp ecx, BE_LETRAS
-        jbe .t0
-        mov ecx, BE_LETRAS
-.t0:
-        mov eax, ecx
-        shl eax, 3
-        mov edx, 16
-.t1:
-        mov [be_cnt], ecx
-        add eax, 16                 ; EAX, EDX = la etiqueta
-        add edx, 8
-        mov [be_w], eax
-        mov [be_h], edx
+        call vis_partir
+        mov ebx, [be_sy]
+        add ebx, [cen_etqy]
+        cmp byte [be_marca], 0
+        je .sombra
+        cmp edi, [be_sel]
+        jne .sombra
+        mov ecx, [vis_n1]           ; la marca: como la de los grupos
+        call vis_ancho
+        mov edx, eax
+        mov ecx, [vis_n2]
+        call vis_ancho
+        cmp eax, edx
+        jae .m1
+        mov eax, edx
+.m1:
+        lea ecx, [eax+8]
         shr eax, 1
         neg eax
         add eax, [be_sx]
-        add eax, BE_AN / 2
-        mov ebx, [be_sy]
-        add ebx, BE_ETQ
-        mov ecx, [be_w]
-        mov edx, [be_h]
-        COLOR C_CREMA
-        cmp edi, [be_sel]
-        jne .c1
-        COLOR C_ANIL                ; el marcado (el de Intro)
-.c1:
+        mov edx, [cen_paso]
+        shr edx, 1
+        lea eax, [eax+edx-4]
+        mov edx, 18
+        cmp dword [vis_n2], 0
+        je .m2
+        add edx, VIS_RENGLON
+.m2:
+        COLOR C_ANIL
+        dec ebx
         call dc_rect
-        COLOR C_MARRON
-        call dc_marco
-        add eax, 8
-        add ebx, 4
-        mov ecx, [be_cnt]
-        COLOR C_TINTA
-        cmp edi, [be_sel]
-        jne .c2
+        inc ebx
         COLOR C_BLANCO
-.c2:
-        cmp byte [be_dob], 0
-        je .n
-        call be_texto2
+        call be_nombre
         jmp .sig
-.n:
-        mov byte [gdi_negrita], 1
-        call dc_texto_n
-        mov byte [gdi_negrita], 0
+.sombra:
+        COLOR C_TINTA               ; la sombra, un punto abajo a la derecha
+        mov eax, 1
+        call be_nombre
+        COLOR C_BLANCO
+        xor eax, eax
+        call be_nombre
 .sig:
         inc edi
         jmp .i
+.fin:
+        mov byte [vis_forzar2], 0
 .x:
         popad
         ret
 
-; (interna) ESI=icono de 32x32 (a 4 bits por punto, como los lee dc_icono)
-; -> bt_ico64: a 64x64, un punto por cada cuatro (el 3, transparente: CLAVE)
-be_ico64:
+; (interna) el nombre partido por vis_partir, a la altura EBX, corrido EAX
+; puntos a la derecha y abajo, con el color puesto
+be_nombre:
         pushad
-        mov edi, bt_ico64
-        mov edx, 32
-.f:
-        mov ecx, 16
-.c:
-        lodsb
-        mov ah, al
-        and al, 0x0F
-        cmp al, 3
-        jne .c1
-        mov al, CLAVE
-.c1:
-        mov [edi], al
-        mov [edi+1], al
-        mov al, ah
-        shr al, 4
-        cmp al, 3
-        jne .c2
-        mov al, CLAVE
-.c2:
-        mov [edi+2], al
-        mov [edi+3], al
-        add edi, 4
-        dec ecx
-        jnz .c
-        push esi                    ; la fila, otra vez debajo
-        lea esi, [edi-BE_ICO]
-        mov ecx, BE_ICO / 4
-        rep movsd
-        pop esi
-        dec edx
-        jnz .f
-        popad
-        ret
-
-; (interna) ESI=texto ECX=letras EAX=x EBX=y: con la fuente de 8x16 a doble
-; tamaño (cada punto, 2x2; los tramos seguidos de una fila, de una vez), con
-; el color puesto
-be_texto2:
-        pushad
-        mov [be_ty], ebx
-.ch:
+        mov edx, [vis_x]
+        push edx
+        add [vis_x], eax
+        add ebx, eax
+        mov esi, [vis_t1]
+        mov ecx, [vis_n1]
+        call vis_linea
+        mov ecx, [vis_n2]
         test ecx, ecx
         jz .x
-        push ecx
-        push esi
-        movzx edi, byte [esi]
-        shl edi, 4
-        add edi, fuente8x16
-        xor esi, esi                ; ESI = la fila
-.fila:
-        mov dl, [edi+esi]
-        xor ecx, ecx                ; ECX = la columna
-.col:
-        cmp ecx, 8
-        jae .fs
-        mov dh, dl
-        shl dh, cl
-        test dh, 0x80
-        jnz .tramo
-        inc ecx
-        jmp .col
-.tramo:
-        mov ebx, ecx                ; EBX = donde empieza
-.t2:
-        inc ecx
-        cmp ecx, 8
-        jae .t3
-        mov dh, dl
-        shl dh, cl
-        test dh, 0x80
-        jnz .t2
-.t3:
-        pushad
-        sub ecx, ebx
-        add ecx, ecx
-        lea eax, [eax+ebx*2]
-        mov ebx, [be_ty]
-        lea ebx, [ebx+esi*2]
-        mov edx, 2
-        call dc_rect
-        popad
-        jmp .col
-.fs:
-        inc esi
-        cmp esi, 16
-        jb .fila
-        pop esi
-        pop ecx
-        inc esi
-        dec ecx
-        add eax, 16
-        jmp .ch
+        add ebx, VIS_RENGLON
+        mov esi, [vis_t2]
+        call vis_linea
 .x:
+        pop dword [vis_x]
         popad
         ret
 
@@ -1105,6 +1034,11 @@ be_tecla:
         sub ecx, edx
 .pon:
         mov byte [be_hecho], 1
+        cmp byte [be_marca], 0      ; [ICONOS] la primera flecha enseña la marca
+        jne .pon2
+        mov byte [be_marca], 1
+        mov ecx, [be_sel]
+.pon2:
         test ecx, ecx
         js .x
         cmp ecx, [be_n]
@@ -1645,6 +1579,29 @@ bt_icono16:
         pop ecx
         ret
 
+; [ICONOS] (ico_talla_poner) el menú Inicio con los iconos grandes: de 32 y
+; cada orden más alta; con los normales y los pequeños, de 16, como siempre
+bt_mi_tallas:
+        mov dword [mi_h], 22
+        mov dword [mi_ico], 16
+        mov dword [mi_txy], 0
+        cmp dword [ico_talla], 2
+        jne .x
+        mov dword [mi_h], 38
+        mov dword [mi_ico], 32
+        mov dword [mi_txy], 8
+.x:
+        ret
+mi_h        dd 22
+mi_ico      dd 16
+mi_txy      dd 0
+
+; (interna) ESI=icono EAX=x EBX=y: en el menú Inicio, del tamaño de mi_ico
+bt_icono_mi:
+        cmp dword [mi_ico], 32
+        je dc_icono
+        jmp bt_icono16
+
 ; (interna) un rombo pequeño (la marca de Hispa Ventanas) con el centro en
 ; EAX, EBX, del color puesto
 bt_rombo:
@@ -1909,7 +1866,7 @@ ini_abrir:
         add ebx, MI_SEP
         jmp .m2
 .m1:
-        add ebx, MI_H
+        add ebx, [mi_h]
         call ini_texto
         call cad_largo
         cmp eax, edi
@@ -1920,7 +1877,8 @@ ini_abrir:
         jmp .m
 .mf:
         add ebx, 2 + 2              ; (y el filete de la emergente)
-        lea ecx, [edi*8 + 6 + 16 + 6 + 20 + 2]
+        lea ecx, [edi*8 + 6 + 6 + 20 + 2]
+        add ecx, [mi_ico]           ; [ICONOS]
         lea eax, [ecx-2]
         mov [mi_an], eax
         sub esp, P_TAM
@@ -2017,13 +1975,14 @@ ini_sub_abrir:
         inc edi
 .hay:
         mov byte [ms_mas], 0
-        lea eax, [ebp*8 + 6 + 16 + 6 + 8]
+        lea eax, [ebp*8 + 6 + 6 + 8]
+        add eax, [mi_ico]           ; [ICONOS]
         mov [ms_colan], eax
         ; filas que caben de arriba abajo y columnas que hacen falta
         mov eax, [area_y1]
         sub eax, SOMBRA + 8
         xor edx, edx
-        mov ecx, MI_H
+        mov ecx, [mi_h]
         div ecx
         test eax, eax
         jnz .f1
@@ -2057,7 +2016,7 @@ ini_sub_abrir:
         div ecx
         mov [ms_filas], eax
         mov ebx, eax
-        imul ebx, MI_H
+        imul ebx, [mi_h]
         add ebx, 4 + 2              ; EBX=alto
         imul ecx, [ms_colan]
         add ecx, 2                  ; ECX=ancho
@@ -2129,7 +2088,7 @@ ini_orden_en:
         mov eax, [mi_y+ecx*4]
         cmp ebx, eax
         jl .s
-        add eax, MI_H
+        add eax, [mi_h]
         cmp ebx, eax
         jl .si
 .s:
@@ -2158,7 +2117,7 @@ ini_prog_en:
         mov eax, ebx
         xor edx, edx
         push ebx
-        mov ebx, MI_H
+        mov ebx, [mi_h]
         div ebx
         pop ebx
         cmp eax, [ms_filas]
@@ -2373,7 +2332,7 @@ ini_pintar:
         mov eax, 2
         mov ecx, [mi_an]
         sub ecx, 4
-        mov edx, MI_H
+        mov edx, [mi_h]
         call dc_rect
 .o2:
         pop edx
@@ -2381,14 +2340,16 @@ ini_pintar:
         mov esi, edx
         mov eax, 6
         add ebx, 3
-        call bt_icono16
+        call bt_icono_mi            ; [ICONOS] de 16 o, con los grandes, de 32
         pop esi
         COLOR C_TINTA
         cmp edi, [mi_sel]
         jne .o3
         COLOR C_BLANCO
 .o3:
-        mov eax, 6 + 16 + 6
+        mov eax, [mi_ico]
+        add eax, 6 + 6
+        add ebx, [mi_txy]
         call dc_texto
         cmp byte [mi_tipo+edi], 1
         jne .o9
@@ -2437,7 +2398,7 @@ sub_pintar:
         xor edx, edx
         div dword [ms_filas]        ; EAX=columna EDX=fila
         imul eax, [ms_colan]
-        imul edx, MI_H
+        imul edx, [mi_h]
         lea ebx, [edx+2]
         mov ecx, edi
         push eax
@@ -2459,7 +2420,7 @@ sub_pintar:
         add eax, 2
         mov ecx, [ms_colan]
         sub ecx, 4
-        mov edx, MI_H
+        mov edx, [mi_h]
         call dc_rect
         pop edx
         pop eax
@@ -2481,7 +2442,7 @@ sub_pintar:
         pop ebx
         add eax, 6
         add ebx, 3
-        call bt_icono16
+        call bt_icono_mi            ; [ICONOS]
         sub eax, 6
         sub ebx, 3
         pop esi
@@ -2498,8 +2459,10 @@ sub_pintar:
         jne .o6
         COLOR C_BLANCO
 .o6:
-        add eax, 6 + 16 + 6
+        add eax, [mi_ico]
+        add eax, 6 + 6
         add ebx, 3
+        add ebx, [mi_txy]
         call dc_texto
         inc edi
         jmp .o

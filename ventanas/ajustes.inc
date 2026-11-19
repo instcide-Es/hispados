@@ -27,6 +27,8 @@ aj_rat_doble dd 8
 tn_config   db "CONFIG.HVP", 0
 
 aj_leer:
+        cmp eax, AJ_PANTALLA        ; [PANTALLA] [ICONOS] (pantalla.inc)
+        jae aj_pan_leer
         cmp eax, AJ_CONTORNO        ; [TAMAÑO]
         je .cont
         cmp eax, AJ_CTRL_DER        ; [CONTEXTO]
@@ -56,6 +58,8 @@ aj_leer:
         ret
 
 aj_poner:
+        cmp eax, AJ_PANTALLA        ; [PANTALLA] [ICONOS] (pantalla.inc)
+        jae aj_pan_poner
         cmp eax, AJ_CTRL_DER        ; [CONTEXTO]
         je ctx_aj_poner
         cmp eax, AJ_CONTORNO        ; [TAMAÑO]

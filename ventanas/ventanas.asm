@@ -98,7 +98,8 @@ inicio:
 ;  frenado (lz_vel_red).
 ; =============================================================================
 lz_firma    db "HVLZ"
-lz_orden    db 0                    ; 1: hay un encargo (lo pone la parte gráfica)
+lz_orden    db 0                    ; 1: hay un encargo (lo pone la parte gráfica);
+                                    ; [PANTALLA] 2: volver a cargar Hispa Ventanas
 lz_band     db 0                    ; bit 0 volver a Hispa Ventanas, bit 1 esperar una tecla,
                                     ; bit 2 va con VELOCIDAD (al volver se mira que no
                                     ; quede frenando), bit 3 cargar antes HSPSND /SB
@@ -121,6 +122,8 @@ lz_param    times 128 db 0          ;   parámetros (hasta 126 letras: con VELOC
 lz_dir      times 68 db 0           ;   y carpeta de trabajo
 lz_ruta     times 80 db 0           ; VENTANAS.COM, con su carpeta
 lz_cola     times 48 db 0           ; la cola de órdenes de la parte gráfica
+lz_extra    times 32 db 0           ; [PANTALLA] opciones de más para la próxima vez
+                                    ; (« /MODO:1440x900x8 /PRUEBA»), acabadas en 0
 lz_dir0     times 68 db 0           ; la carpeta en la que se estaba
 lz_aux      times 80 db 0
 lz_n_raton  db "HSPRATON.COM", 0
@@ -622,6 +625,24 @@ lz_ciclo:
         mov di, 0x80
         mov cx, 48
         rep movsb
+        cmp byte [lz_extra], 0      ; [PANTALLA] opciones de más, solo esta vez
+        je .sinextra
+        movzx di, byte [0x80]
+        add di, 0x81
+        mov si, lz_extra
+.ex:
+        lodsb
+        test al, al
+        jz .exf
+        stosb
+        jmp .ex
+.exf:
+        mov byte [di], 13
+        mov ax, di
+        sub ax, 0x81
+        mov [0x80], al
+        mov byte [lz_extra], 0
+.sinextra:
         mov dx, lz_ruta
         call lz_exec
         pushf
@@ -636,6 +657,11 @@ lz_ciclo:
         int 0x21
         cmp al, 0xFE
         jne .fin
+        cmp byte [lz_orden], 2      ; [PANTALLA] volver a cargar Hispa Ventanas
+        jne .o1                     ; (con lz_extra: «Probar» un modo)
+        mov byte [lz_orden], 0
+        jmp lz_ciclo
+.o1:
         cmp byte [lz_orden], 1
         jne .fin
         mov byte [lz_orden], 0
@@ -956,9 +982,27 @@ grafico:
         je .obat
         cmp al, 10                  ; [TECLADO] (pruebas: equipo lento)
         je .olento
+        cmp al, 12                  ; [PANTALLA] /MODO:AxB[xC] o /MODO:AUTO
+        je .omodo
+        cmp al, 13                  ; [PANTALLA] /PRUEBA (interna: «Probar» de Configuración)
+        je .oprueba
         cmp al, 11                  ; [BARRA] /486: el escritorio de Hispa-486
         jne .ayuda
         mov byte [op_486], 1
+        jmp .arg
+.omodo:
+        lodsb                       ; «:» o «=»
+        cmp al, 13
+        je .argfin
+        mov byte [vi_ini], 0
+        mov byte [vl_origen], 2
+        call vid_modo_texto
+        jmp .arg
+.oprueba:
+        mov [op_prueba], dl         ; 1 /PRUEBA, 2 /RESOL
+        cmp dl, 1
+        jne .arg
+        mov byte [vl_origen], 3
         jmp .arg
 .olento:
         mov byte [op_lento], 1
@@ -1007,6 +1051,15 @@ grafico:
         jmp .arg
 .oancho:
         mov [op_ancho], dx
+        mov byte [op_res], 1        ; [PANTALLA] la pedida (manda sobre VENTANAS.INI)
+        mov byte [vl_origen], 2
+        mov word [op_alto], 768
+        cmp dx, 1024
+        je .arg
+        mov word [op_alto], 600
+        cmp dx, 800
+        je .arg
+        mov word [op_alto], 480
         jmp .arg
 .obpp:
         mov [op_bpp], dl
@@ -1067,6 +1120,7 @@ grafico:
         mov ah, 0x0F
         int 0x10
         mov [modo_ant], al
+        call vid_ini                ; [PANTALLA] «Modo=» de VENTANAS.INI
         call vid_detectar
         jnc .video
         mov dx, m_novideo
@@ -1930,7 +1984,6 @@ exc_instalar:
 %include "volumen.inc"
 %include "bloc.inc"
 %include "calc.inc"
-%include "reloj.inc"
 %include "api.inc"
 %include "modulos.inc"
 %include "ajustes.inc"              ; [Configuración]
@@ -1975,6 +2028,12 @@ opciones:
         dw 0
         db 5, "LENTO", 10           ; [TECLADO] (oculta, pruebas): como en un equipo lento
         dw 0
+        db 4, "MODO", 12            ; [PANTALLA] /MODO:1440x900[x32] o /MODO:AUTO
+        dw 0
+        db 6, "PRUEBA", 13          ; [PANTALLA] (interna) el modo se está probando
+        dw 1
+        db 5, "RESOL", 13           ; [PANTALLA] (interna) se ha vuelto al de antes:
+        dw 2                        ; Configuración, abierta en «Resolución»
         db 1, "@", 7                ; (interna: la pone el lanzador)
         dw 0
         db 1, "?", 4
@@ -2016,7 +2075,7 @@ n_hspraton  db "HSPRATON.COM", 0
 cola_vacia  db 0, 13
             align 2
 exec_blq    dw 0, cola_vacia, 0, 0x5C, 0, 0x6C, 0
-op_ancho    dw 800
+op_ancho    dw 0                    ; [PANTALLA] 0: la automática (video16.inc)
 op_bpp      db 0
 son_esperar db 0
 
@@ -2116,6 +2175,8 @@ alto_ini:
 %include "win32x.inc"               ; [HISPA-486]   USER32 de más, COMDLG32, ADVAPI32, SHELL32
 %include "win32n.inc"               ; [NAVEGADOR] WinExec (lo demás, en la fase 3d)
 %include "win32dx.inc"              ; [DX] fase 5: lo que piden DDRAW, DSOUND, DINPUT y WINMM
+%include "reloj.inc"                ; (en la parte alta desde [PANTALLA]: abajo no cabía más)
+%include "pantalla.inc"             ; [PANTALLA] [ICONOS] la resolución y el tamaño de los iconos
 %endif
         align 16
 fin_archivo:

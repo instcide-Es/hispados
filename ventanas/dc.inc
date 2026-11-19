@@ -470,6 +470,22 @@ dc_linea:
 ; (el icono está a 4 bits por punto, el de la izquierda en los bajos, y el
 ; color 3 es el transparente: lo deja así tools/icopack.py al compilar)
 dc_icono:
+        call ico_decod
+        push ecx
+        push edx
+        push esi
+        mov ecx, 32
+        mov edx, 32
+        mov esi, ico_tmp
+        call dc_copiar_clave
+        pop esi
+        pop edx
+        pop ecx
+        ret
+
+; ESI=icono (4 bits por punto) -> ico_tmp: 32x32, un octeto por punto (el
+; transparente, CLAVE)
+ico_decod:
         pushad
         mov edi, ico_tmp
         mov ecx, 16 * 32
@@ -492,16 +508,6 @@ dc_icono:
         dec ecx
         jnz .c
         popad
-        push ecx
-        push edx
-        push esi
-        mov ecx, 32
-        mov edx, 32
-        mov esi, ico_tmp
-        call dc_copiar_clave
-        pop esi
-        pop edx
-        pop ecx
         ret
 
 ; ---- añadidos a la capa de dibujo ----

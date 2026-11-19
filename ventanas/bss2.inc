@@ -29,6 +29,7 @@ dc_oy       resd 1
 reg         resb REG_MAX * 16
 reg2        resb REG_MAX * 16
 ico_tmp     resb 32 * 32
+ico_tmp2    resb 64 * 64            ; [ICONOS] el icono, de otro tamaño (dc_icono_t)
 ; ---- gestor ----
 ven_tabla   resd 1
 n_orden     resd 1

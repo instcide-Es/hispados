@@ -1179,11 +1179,17 @@ ctx_vista:
         mov eax, [ebp+V_D0]
         xor edx, edx
         div dword [vis_cols]
-        imul eax, CEN_FILA
+        imul eax, [cen_fila]
         sub eax, [ebp+V_D2]
-        add eax, 44
-        imul edx, CEN_PASO
-        add edx, 12 + CEN_PASO / 2
+        add eax, [cen_etqy]         ; [ICONOS] (44 con los normales)
+        sub eax, 14
+        imul edx, [cen_paso]
+        add edx, 12
+        push eax
+        mov eax, [cen_paso]
+        shr eax, 1
+        add edx, eax
+        pop eax
         push eax
         push edx
         call ven_cli
