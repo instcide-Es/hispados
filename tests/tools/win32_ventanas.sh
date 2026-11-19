@@ -45,6 +45,9 @@ imagen() {
   printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
   MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   MTOOLS_SKIP_CHECK=1 mdel -i $T/f.img ::HISPADOS/HISPA.WAV 2>/dev/null   # (sitio: aquí no suena)
+  # (más sitio: con HSPSND y AUDICION de VT-d, FASMW, 160 KB, ya no cabía; los
+  # emuladores de juegos no se usan en estas pruebas)
+  MTOOLS_SKIP_CHECK=1 mdel -i $T/f.img ::HISPADOS/JUEGOS/SMS/BUZO.SMS ::HISPADOS/JUEGOS/HISPASMS.HVP 2>/dev/null
   for f in HW32.COM MSVCRT.DLL; do
     MTOOLS_SKIP_CHECK=1 mcopy -o -i $T/f.img $B/$f ::HISPADOS/$f || ko "no cabe $f en el disco"
   done
