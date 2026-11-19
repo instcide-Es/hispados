@@ -1,0 +1,32 @@
+PRUEBA DEL WI-FI EN EL MACBOOK AIR 2012 - Hispa-486
+===================================================
+Imagen del @FECHA@ a las @HORA@ (@VERSION@)
+
+Que se ha arreglado: el Wi-Fi mira la tarjeta en cada tic del reloj, y al
+hacerlo le estropeaba el trabajo a HSPUSB (que en el Mac lleva el teclado,
+el panel tactil y esta memoria USB). Por eso el equipo se quedaba colgado
+al poco de arrancar el Wi-Fi, y la pantalla de Hispa Ventanas, negra. El
+mismo fallo estaba en HSPACPI (la bateria) y tambien esta arreglado.
+La tarjeta del Mac si funcionaba: su registro llegaba hasta "radio en
+marcha".
+
+QUE HACER
+1. Grabe hispa486-usb-wifi-mac2012.zip en la memoria USB (Rufus, "Imagen
+   DD") y arranque el Mac por "Windows", como la otra vez.
+2. No toque nada: a los 20 segundos arranca sola la opcion "PRUEBA DEL
+   WI-FI (Mac 2012)". Saldran muchas lineas que empiezan por "HSPWIFI
+   paso:" y, al final, la lista de las redes Wi-Fi.
+3. Si sale la lista de redes: escriba  WIFI CONECTAR n  (n = el numero de
+   su red; le pide la contrasena) y, cuando diga "Conectado", escriba
+   PASO2  (prueba Internet).
+4. Para acabar, escriba  VENTANAS  y mire si el escritorio se ve y
+   responde. Para salir y apagar: APAGAR.
+
+SI SE QUEDA PARADO O LA PANTALLA NO PINTA
+- Espere un minuto, hagale una FOTO a la pantalla y apague con el boton.
+- Aunque no se vea nada, pruebe antes a escribir a ciegas  PASO2  e INTRO
+  y espere otro minuto: si el equipo seguia vivo, queda apuntado.
+
+QUE SUBIR AL FTP (carpeta prueba-wifi-mac2012)
+- El archivo WIFI.LOG de la memoria USB (esta en la raiz).
+- La foto de la pantalla, si se quedo parado, y decir si Ventanas se vio.

@@ -330,6 +330,23 @@ controlador alinea sus anillos de DMA (a 4 y 8 KB) por el puntero y la
 tarjeta los quiere alineados por la dirección física, así que las dos tienen
 que coincidir en los bits bajos.
 
+Al volver, **DS, ES, FS y GS se dejan con el límite de 4 GB**, no con el de
+64 KB del modo real de libro. La llamada puede venir del reloj y haber
+interrumpido a un controlador en modo «irreal» (`HSPUSB`, `HSPSND`, `HSPRED`
+con la e1000: leen los registros de su aparato, por encima de 1 MB, con FS).
+El límite de un segmento no vuelve al restaurar el registro: con 64 KB, la
+siguiente lectura del interrumpido da la excepción 13 una y otra vez y el
+equipo se queda colgado. Pasaba en el **MacBook Air 2012**, donde `HSPUSB`
+lleva el teclado, el panel táctil y la memoria de arranque: se colgaba al
+poco de quedarse `HSPWIFI` residente (o la pantalla de Hispa Ventanas se
+quedaba negra, a medio cargar). En el HP Mini y el Toshiba el USB lo lleva la
+BIOS y no se veía. QEMU sin KVM no comprueba los límites: la prueba
+(`tests/progs/irreal2.asm`) va con KVM.
+
+El núcleo guarda el **registro de dirección del PCI (puerto CF8h)** al entrar
+en cada llamada y lo repone al salir, por lo mismo: puede haber interrumpido
+a otro entre que puso la dirección y usó el dato.
+
 La tarjeta **no usa su interrupción** (se apaga en el PCI, bit 10 de la
 orden): compartir una línea de IRQ con el USB sin controlar quién la atiende
 puede colgar el equipo. El residente mira la tarjeta en cada tic del reloj
@@ -379,6 +396,22 @@ escribe en el archivo de `/REG:` (si el siguiente se cuelga, queda escrito
 hasta dónde se llegó): 1, buscar la tarjeta en el PCI (solo mira); 2,
 despertarla, leer sus núcleos y su SPROM y montar el controlador; 3, cargar
 el microcódigo y encender la radio.
+
+Además, el residente apunta **su arranque paso a paso** (líneas «HSPWIFI
+paso: ...»): salen por la pantalla con `/V` o `/PANTALLA` y van al archivo de
+`/REG:`, que se abre, se escribe y se **cierra en cada línea** (y se vacían
+los búferes del disco): lo último que haya en el archivo es lo último que se
+hizo. Van desde antes de pedir la memoria (el gestor XMS, el archivo del
+núcleo, el bloque y su dirección, la A20, la copia, cada ida y vuelta al modo
+protegido con su resultado) hasta después de engancharse: con los vectores ya
+puestos espera 6 tics del reloj (cuenta los sondeos de la tarjeta), lee
+`HSPWIFI.BIN` entero del disco con el sondeo en marcha y solo entonces dice
+«arranque terminado». En las líneas de ida y vuelta va el estado del vídeo
+(modo, página, si la memoria de texto B800 guarda lo que se le escribe, la
+orden PCI de la gráfica): si un paso dejara la pantalla sin pintar, el
+archivo dice cuál aunque en la pantalla ya no salga nada. El núcleo apunta
+también si hay **VT-d** con la traducción de DMA encendida (el firmware de un
+Mac puede dejarla así: la radio se encendería pero no se oiría nada).
 
 Si dentro del núcleo salta una **excepción del procesador**, no se cuelga el
 equipo: se apunta en el registro (vector, EIP), el Wi-Fi queda parado y lo
@@ -455,6 +488,11 @@ tiene).
    hueco de `WIFI`); `WIFI /AUTO` lo carga callado; sin tarjeta, «Este equipo
    no tiene una tarjeta Wi-Fi...»; con HSPRED y enlace, el texto de
    `HSPWIFI` («La red va por el cable...»).
+8. **El arranque paso a paso** en el archivo de `/REG:` (en orden con el
+   registro del núcleo, el reloj andando y el disco leído con el sondeo en
+   marcha) y, **con KVM**, que el sondeo desde el reloj no le quita el modo
+   «irreal» al programa interrumpido (`tests/progs/irreal2.asm`: sin el
+   arreglo, excepción 13).
 
 `tests/run_wifi_ventana_tests.sh` (en `make test`): el icono y la ventanita
 de Hispa Ventanas en QEMU, con `HSPWIFI /SIMULA` (sin conectar, la lista,
@@ -503,6 +541,23 @@ Qué mirar primero si falla, por orden:
 | ve redes pero «no contesta a la autenticación» | no emite, o emite mal (potencia, velocidad de gestión) |
 | asocia pero «el acuerdo de claves no termina» | la contraseña, o las tramas de datos (cifrado, acuses) |
 | conecta pero `CONFRED` no consigue dirección | la clave de grupo o la recepción de difusión |
+
+### MacBook Air 2012 (A1466), BCM43224 de Apple (106B:00E9)
+
+Arrancado por el CSM de Apple («Windows»). El registro llegaba entero hasta
+«PASO 3 de 3 hecho: radio en marcha» (chip 43224 rev. 1, SPROM rev. 8, país
+«X3», MAC de Apple, microcódigo 610.812): la tarjeta va igual que la del HP
+Mini. El país «X3» no cambia nada (se usan las normas comunes) y las
+«cadenas tx 3 rx 3» son una máscara: dos antenas, como en el HP Mini. El
+equipo se colgaba después, ya residente: el modo «irreal» de `HSPUSB` (ver
+«El residente»). `tools/mkprueba_wifi_mac2012.sh carpeta` hace la imagen de
+prueba a partir de `build/hispa486-usb.img` (`usb/prueba-wifi-mac2012/`):
+una opción de menú que carga lo de «Normal» y lanza `PRUWIFI.BAT`, que no
+borra la pantalla y lo apunta todo en `C:\WIFI.LOG` (también que `HSPWIFI`
+ha vuelto y lo que dice `WIFI REDES`, por si la pantalla no pintara).
+
+Pendiente de saber en ese equipo: por qué con `/PANTALLA` no se vio nada (el
+registro nuevo lleva el estado del vídeo en cada paso).
 
 ## Lo que sigue
 

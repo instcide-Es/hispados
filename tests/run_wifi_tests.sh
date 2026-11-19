@@ -20,6 +20,9 @@
 #  7. QEMU, WIFI sin HSPWIFI cargado: lo carga él (HAYWIFI=SI y el núcleo de
 #     pruebas) y sigue con la orden; el residente queda donde quedaría
 #     cargándolo a mano (MEM /F igual: WIFI no deja su hueco debajo).
+#  8. El arranque paso a paso en el registro (/REG) y, si hay KVM, que el
+#     sondeo desde el reloj no le quita el modo «irreal» a quien interrumpe
+#     (HSPUSB en un MacBook: tests/progs/irreal2.asm).
 # Dos QEMU a la vez como mucho. Wi-Fi tests without the hardware.
 set -u
 cd "$(dirname "$0")/.."
@@ -136,6 +139,16 @@ check clog "PASO 3 de 3 hecho: radio en marcha"
 # (la base del núcleo, alineada a 64 KB: si no, los anillos de DMA quedan mal)
 if grep -Eq "Memoria: bloque de 2048 KB en [0-9A-F]{4}0000;" $T/clog.txt; then ok "la base del núcleo está alineada a 64 KB"; else ko "base del núcleo sin alinear"; fi
 check clog "ESTADO: el montón está entero"
+# el arranque paso a paso (cada línea, con el archivo cerrado después)
+check clog "HSPWIFI paso: empieza (opciones 00h"
+check clog "HSPWIFI paso: se pasa a modo protegido de 32 bits: llamada 1 de 3 al núcleo"
+check clog "HSPWIFI paso: de vuelta en modo real; resultado 0 [vídeo: modo 03h pág. 00, B800 bien"
+check clog "HSPWIFI paso: llamada 3 de 3 al núcleo (encender la radio)..."
+check clog "HSPWIFI paso: vectores puestos"
+if grep -Eq "HSPWIFI paso: reloj: 6 tics y [1-9][0-9]* sondeos de la tarjeta" $T/clog.txt; then ok "el reloj sigue andando con el sondeo dentro"; else ko "paso del reloj con el sondeo"; fi
+if grep -Eq "HSPWIFI paso: disco leído: [1-9][0-9]{5} octetos" $T/clog.txt; then ok "se lee del disco con el sondeo en marcha"; else ko "paso de la lectura del disco"; fi
+check clog "HSPWIFI paso: arranque terminado: HSPWIFI se queda residente y se vuelve al DOS"
+if [ "$(grep -n 'PASO 3 de 3 hecho' $T/clog.txt | cut -d: -f1)" -lt "$(grep -n 'HSPWIFI paso: vectores puestos' $T/clog.txt | cut -d: -f1)" ] 2>/dev/null; then ok "los pasos del residente y el registro del núcleo van en orden"; else ko "orden de los pasos en el registro"; fi
 checkn clog "MEMORIA:"
 checkn clog "EXCEPCI"
 check chip "fin-de-la-prueba"
@@ -284,6 +297,32 @@ check c3 "HSPWIFI 0.1: controlador Wi-Fi de Hispa-486"
 check c3 "Conectado a «HispaPrueba»"
 checkn c3 "Cargando el controlador Wi-Fi"
 check carga "fin-de-la-prueba"
+echo "== Wi-Fi con KVM: el sondeo desde el reloj no rompe el modo «irreal» de otro programa =="
+# HSPWIFI sondea la tarjeta en cada tic: pasa a modo protegido y vuelve. Si
+# volviera con los segmentos con límite de 64 KB, el controlador en modo
+# «irreal» al que ha interrumpido (HSPUSB con el teclado y el disco de un
+# MacBook, HSPSND) daría la excepción 13 sin fin: equipo colgado (MacBook Air
+# 2012). QEMU sin KVM no comprueba los límites: solo se prueba si hay KVM.
+if [ -w /dev/kvm ] && qemu-system-i386 -accel kvm -display none -monitor none -S -daemonize -pidfile $T/kvm.pid 2>/dev/null; then
+  kill "$(cat $T/kvm.pid)" 2>/dev/null
+  nasm -f bin -o $T/IRREAL2.COM tests/progs/irreal2.asm || ko "no se puede ensamblar IRREAL2.COM"
+  mkimg irreal HSPWIFI.BIN "$XMS"
+  mcopy -o -i $T/irreal.img $T/IRREAL2.COM ::IRREAL2.COM
+  { sleep 7
+    for c in '5|IRREAL2' '6|HSPWIFI /SIMULA' '1|ECHO =I1=' '6|IRREAL2' '2|HSPWIFI /U' '2|ECHO fin-de-la-prueba'; do
+      printf '%s\r' "${c#*|}"; sleep "${c%%|*}"
+    done
+  } | timeout 60 qemu-system-i386 -accel kvm -display none -serial stdio -monitor none -parallel none \
+        -m 32 -drive file=$T/irreal.img,format=raw,if=floppy -boot a -no-reboot > $T/irreal.raw 2>&1
+  tr -d '\r' < $T/irreal.raw | iconv -f CP437 -t UTF-8 -c > $T/irreal.txt
+  check irreal "Tarjeta Wi-Fi simulado (pruebas)"
+  sed -n '/=I1=/,$p' $T/irreal.txt > $T/irreal2.txt
+  check irreal2 "IRREAL-BIEN: el limite de 4 GB sigue puesto"
+  checkn irreal "IRREAL-ROTO"
+  check irreal "fin-de-la-prueba"
+else
+  echo "  (sin KVM: se salta; QEMU sin KVM no comprueba los límites de los segmentos)"
+fi
 
 if [ $fail -eq 0 ]; then echo "Wi-Fi: todas las pruebas pasan"; else echo "Wi-Fi: HAY FALLOS"; fi
 exit $fail
