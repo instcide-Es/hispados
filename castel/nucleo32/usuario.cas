@@ -226,6 +226,149 @@ módulo Usuario
         devolver 0
     fin
 
+    ; -------------------------------------------------------------------------
+    ;  La unidad en memoria: sin disco, los módulos del cargador hacen de C:
+    ; -------------------------------------------------------------------------
+    ; Si no hay disco FAT (un PC sin disco IDE, arrancado de una memoria USB
+    ; con GRUB), los programas y archivos que el cargador ha traído como
+    ; módulos se ven como los archivos de la raíz de una unidad de solo
+    ; lectura: se abren, se leen, salen en DIR y se lanzan por su nombre.
+    constante MOD_BASE = 0x4D00                 ; sus manejadores: de aquí en adelante
+    constante MOD_ABIERTOS = 8
+    constante MOD_RAÍZ = 0xFFFFFF00             ; «el módulo» que es la carpeta raíz
+    tipo Abierto_mod = estructura
+        usado: bool
+        dueño, cuál, pos: nat32
+    fin
+    variable mod_abiertos: arreglo [MOD_ABIERTOS] de Abierto_mod
+
+    público función unidad_en_memoria(): bool
+        devolver no montado y módulos() > 0
+    fin
+
+    ; el nombre de archivo del módulo i (hasta el primer espacio, en
+    ; mayúsculas), a «destino» (13 octetos)
+    función nombre_de_módulo(i: nat32, destino: puntero a byte)
+        variable t: puntero a byte
+        variable n: nat32
+        t := módulo_nombre(i)
+        n := 0
+        mientras n < 12 y t[n] <> 0 y t[n] <> ' ' hacer
+            destino[n] := mayús(t[n])
+            n := n + 1
+        fin
+        destino[n] := 0
+    fin
+
+    ; el módulo que se llama como dice la ruta («\NOMBRE.EXT», o sin barra):
+    ; su número, MOD_RAÍZ si es la raíz, o NO_HAY
+    función busca_módulo(ruta: puntero a byte): nat32
+        variable p: puntero a byte
+        variable nombre: arreglo [13] de byte
+        variable i, k: nat32
+        p := ruta
+        si p[0] <> 0 y p[1] = ':' entonces p := p + 2 fin
+        mientras es_barra(valor(p)) hacer p := p + 1 fin
+        si valor(p) = 0 entonces devolver MOD_RAÍZ fin
+        i := 0
+        mientras i < módulos() hacer
+            nombre_de_módulo(i, nombre)
+            k := 0
+            mientras p[k] <> 0 y mayús(p[k]) = nombre[k] hacer k := k + 1 fin
+            si p[k] = 0 y nombre[k] = 0 entonces devolver i fin
+            i := i + 1
+        fin
+        devolver NO_HAY
+    fin
+
+    función abrir_módulo(ruta: puntero a byte, modo: nat32): nat32
+        variable c, i: nat32
+        si modo <> PARA_LEER entonces devolver PROTEGIDO fin
+        c := busca_módulo(ruta)
+        si c = NO_HAY entonces devolver NO_HAY fin
+        i := 0
+        mientras i < MOD_ABIERTOS y mod_abiertos[i].usado hacer i := i + 1 fin
+        si i = MOD_ABIERTOS entonces devolver LLENO fin
+        mod_abiertos[i].usado := cierto
+        mod_abiertos[i].dueño := actual.id
+        mod_abiertos[i].cuál := c
+        mod_abiertos[i].pos := 0
+        devolver MOD_BASE + i
+    fin
+
+    ; ¿es el manejador de un módulo abierto por la tarea que corre?
+    función es_de_módulo(m: nat32): bool
+        si m < MOD_BASE o m >= MOD_BASE + MOD_ABIERTOS entonces devolver falso fin
+        devolver mod_abiertos[m - MOD_BASE].usado y mod_abiertos[m - MOD_BASE].dueño = actual.id
+    fin
+
+    función tamaño_módulo(m: nat32): nat32
+        variable c: nat32
+        c := mod_abiertos[m - MOD_BASE].cuál
+        si c = MOD_RAÍZ entonces devolver 0 fin
+        devolver módulo_final(c) - módulo_inicio(c)
+    fin
+
+    función leer_módulo(m: nat32, destino: puntero a byte, n: nat32): nat32
+        variable c, pos, queda: nat32
+        c := mod_abiertos[m - MOD_BASE].cuál
+        si c = MOD_RAÍZ entonces devolver MAL fin
+        pos := mod_abiertos[m - MOD_BASE].pos
+        queda := tamaño_módulo(m) - pos
+        si n > queda entonces n := queda fin
+        si n > 0 entonces copiar_memoria(destino, puntero(módulo_inicio(c) + pos), n) fin
+        mod_abiertos[m - MOD_BASE].pos := pos + n
+        devolver n
+    fin
+
+    función mover_módulo(m: nat32, cuánto: nat32, origen: nat32): nat32
+        variable pos: nat32
+        según origen
+            caso 0: pos := cuánto
+            caso 1: pos := mod_abiertos[m - MOD_BASE].pos + cuánto
+            caso 2: pos := tamaño_módulo(m) + cuánto
+            si no: devolver NO_VALE
+        fin
+        si pos > tamaño_módulo(m) entonces pos := tamaño_módulo(m) fin
+        mod_abiertos[m - MOD_BASE].pos := pos
+        devolver pos
+    fin
+
+    ; la entrada siguiente de la raíz de la unidad en memoria: 1, o 0 si no
+    ; hay más («largo», si no es nulo: su nombre largo, que es el mismo)
+    función entrada_módulo(m: nat32, e: puntero a Entrada, largo: puntero a byte): nat32
+        variable i, k, f, h: nat32
+        si mod_abiertos[m - MOD_BASE].cuál <> MOD_RAÍZ entonces devolver 0 fin
+        i := mod_abiertos[m - MOD_BASE].pos
+        si i >= módulos() entonces devolver 0 fin
+        nombre_de_módulo(i, e.nombre)
+        e.atributos := 1                        ; de solo lectura
+        e.reservado := 0
+        e.tamaño := módulo_final(i) - módulo_inicio(i)
+        ahora(f, h)
+        e.fecha := f
+        e.hora := h
+        e.cluster := 0
+        e.libre := 0
+        si largo <> nulo entonces
+            k := 0
+            mientras e.nombre[k] <> 0 hacer
+                largo[k] := e.nombre[k]
+                k := k + 1
+            fin
+            largo[k] := 0
+        fin
+        mod_abiertos[m - MOD_BASE].pos := i + 1
+        devolver 1
+    fin
+
+    función cerrar_módulos_de(dueño: nat32)
+        variable i: nat32
+        para i desde 0 hasta MOD_ABIERTOS - 1 hacer
+            si mod_abiertos[i].usado y mod_abiertos[i].dueño = dueño entonces mod_abiertos[i].usado := falso fin
+        fin
+    fin
+
     ; lo que escribe un programa cuya salida va a un archivo: cada final de
     ; línea, como los del DOS (retorno de carro y avance). Da los octetos
     ; tomados; si el archivo ya no está, la salida vuelve a la pantalla.
@@ -374,11 +517,17 @@ módulo Usuario
                 devolver 0
             caso 7:
                 si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
+                si unidad_en_memoria() entonces devolver abrir_módulo(ruta, b) fin
                 devolver abrir_archivo(ruta, b)
             caso 8:
                 si no puede(b, c, cierto) entonces devolver NO_VALE fin
+                si es_de_módulo(a) entonces devolver leer_módulo(a, puntero(b), c) fin
                 devolver leer_archivo(a, puntero(b), c)
             caso 9:
+                si es_de_módulo(a) entonces
+                    mod_abiertos[a - MOD_BASE].usado := falso
+                    devolver 0
+                fin
                 devolver cerrar_archivo(a)
             caso 10:
                 si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
@@ -394,11 +543,14 @@ módulo Usuario
                 devolver esperar(t)
             caso 12:
                 si no puede(b, tamaño(Entrada), cierto) entonces devolver NO_VALE fin
+                si es_de_módulo(a) entonces devolver entrada_módulo(a, puntero(b), nulo) fin
                 devolver leer_entrada(a, puntero(b))
             caso 28:
                 si no puede(b, tamaño(Entrada), cierto) o no puede(c, MAX_LARGO, cierto) entonces devolver NO_VALE fin
+                si es_de_módulo(a) entonces devolver entrada_módulo(a, puntero(b), puntero(c)) fin
                 devolver leer_entrada_larga(a, puntero(b), puntero(c), MAX_LARGO)
             caso 13:
+                si es_de_módulo(a) entonces devolver tamaño_módulo(a) fin
                 devolver tamaño_archivo(a)
             caso 14:
                 r := 0
@@ -426,24 +578,21 @@ módulo Usuario
                 si no puede(b, c, falso) entonces devolver NO_VALE fin
                 devolver escribir_archivo(a, puntero(b), c)
             caso 19:
+                si es_de_módulo(a) entonces devolver mover_módulo(a, b, c) fin
                 devolver mover_archivo(a, b, c)
             caso 20:
                 devolver cortar_archivo(a)
-            caso 21:
-                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
-                devolver borrar_archivo(ruta)
-            caso 22:
-                si no ruta_de_usuario(a, ruta) o no ruta_de_usuario(b, ruta2) entonces devolver NO_VALE fin
-                devolver renombrar(ruta, ruta2)
-            caso 23:
-                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
-                devolver crear_carpeta(ruta)
-            caso 24:
-                si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
-                si es_carpeta_de_alguien(ruta) entonces devolver EN_USO fin
-                devolver borrar_carpeta(ruta)
+            caso 21..24:
+                ; (en la unidad en memoria no se borra ni se crea nada)
+                si unidad_en_memoria() entonces devolver PROTEGIDO fin
+                devolver atender_carpetas(n, a, b)
             caso 25:
                 si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
+                si unidad_en_memoria() entonces
+                    si busca_módulo(ruta) <> MOD_RAÍZ entonces devolver NO_CARPETA fin
+                    actual.carpeta[0] := 0
+                    devolver 0
+                fin
                 devolver cambiar_carpeta(ruta)
             caso 26:
                 si b = 0 o no puede(a, b, cierto) entonces devolver NO_VALE fin
@@ -489,6 +638,21 @@ módulo Usuario
                 devolver atender_ventanas(n, a, b, c)
         fin
         devolver NO_VALE
+    fin
+
+    ; borrar, cambiar de nombre y las carpetas (21 a 24)
+    función atender_carpetas(n: nat32, a: nat32, b: nat32): nat32
+        variable ruta, ruta2: arreglo [MAX_RUTA] de byte
+        si no ruta_de_usuario(a, ruta) entonces devolver NO_VALE fin
+        según n
+            caso 21: devolver borrar_archivo(ruta)
+            caso 22:
+                si no ruta_de_usuario(b, ruta2) entonces devolver NO_VALE fin
+                devolver renombrar(ruta, ruta2)
+            caso 23: devolver crear_carpeta(ruta)
+        fin
+        si es_carpeta_de_alguien(ruta) entonces devolver EN_USO fin
+        devolver borrar_carpeta(ruta)
     fin
 
     ; las llamadas del entorno gráfico (32 a 39)
@@ -583,6 +747,7 @@ módulo Usuario
     ; lo que deja una tarea al acabar: sus archivos, sus ventanas y su terminal
     función recoge_lo_suyo()
         cerrar_todos(actual.id)
+        cerrar_módulos_de(actual.id)
         cerrar_ventanas_de(actual.id)
         soltar_terminales_de(actual.id)
     fin
@@ -759,6 +924,15 @@ módulo Usuario
         variable m, largo, leídos: nat32
         variable imagen, nombre, p: puntero a byte
         variable t: puntero a Tarea
+        ; sin disco: de los módulos del cargador (la unidad en memoria)
+        si unidad_en_memoria() entonces
+            m := busca_módulo(ruta)
+            si m >= MOD_RAÍZ entonces
+                error := NO_HAY
+                devolver nulo
+            fin
+            devolver cargar_imagen(módulo_nombre(m), módulo_inicio(m), módulo_final(m) - módulo_inicio(m), args, error)
+        fin
         m := abrir_archivo(ruta, PARA_LEER)
         si m >= PRIMER_ERROR entonces
             error := m
