@@ -52,7 +52,11 @@ INITRD=()
 [ $# -gt 0 ] || set -- ayuda apagar
 INSTANTANEA=on; [ -n "${ESCRIBE:-}" ] && INSTANTANEA=off
 [ -n "${DISCO:-}" ] && INITRD+=(-drive "file=$DISCO,format=raw,if=ide,index=0,snapshot=$INSTANTANEA")
+# con un disco (una imagen), se deja escribir en él; con SOLO_LECTURA=1, no
+# (como en un PC de verdad, donde hay que pedirlo: «escritura»)
+[ -n "${DISCO:-}" ] && [ -z "${SOLO_LECTURA:-}" ] && ARRANQUE="${ARRANQUE:+$ARRANQUE }escritura"
 [ -n "${ARRANQUE:-}" ] && INITRD+=(-append "$ARRANQUE")
+[ -n "${VGA:-}" ] && INITRD+=(-vga "$VGA")        # (VGA=none: un PC sin tarjeta gráfica que valga)
 qemu-system-i386 -kernel "$BIN" "${INITRD[@]}" -display none -monitor unix:$T/mon,server,nowait \
   -serial file:$T/sal -device isa-debug-exit,iobase=0xf4,iosize=0x04 -no-reboot -rtc base=localtime -m ${MEMORIA:-32} > /dev/null 2>&1 &
 QPID=$!

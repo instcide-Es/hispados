@@ -549,8 +549,16 @@ módulo Semilla
         permitir_interrupciones()
         imprimir3("memoria: %u MB, %u marcos libres; paginación activa; %u programas de usuario.\n",
                   (límite + 0xFFFFF) div 0x100000, marcos_libres(), módulos())
-        si identificar() > 0 y montar(0) entonces
+        ; en los discos solo se escribe si el cargador lo dice («escritura»):
+        ; en un PC de verdad, el disco es el del dueño
+        escritura := buscar(línea_del_cargador(), "escritura") <> nulo
+        ; con «sindisco», ni se miran los discos del PC (para arrancar de una
+        ; memoria USB sin tocar para nada el disco de dentro)
+        si buscar(línea_del_cargador(), "sindisco") = nulo y identificar() > 0 y montar(0) entonces
             imprimir3("disco 0: %s, %u MB, FAT%u.\n", nat32(dirección(discos[0].modelo[0])), discos[0].sectores div 2048, clase)
+            si no escritura entonces escribir("el disco es de solo lectura (para escribir en él: «escritura» en la línea del cargador).\n") fin
+        sino si unidad_en_memoria() entonces
+            imprimir1("sin disco: los %u archivos que ha traído el cargador hacen de unidad C: (en memoria, de solo lectura).\n", módulos())
         fin
         ; si el cargador lo pide («ordenes» en su línea), el intérprete de
         ; órdenes del anillo 3, ya
