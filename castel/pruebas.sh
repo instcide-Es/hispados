@@ -50,10 +50,19 @@
 #      cortar y borrar archivos, las carpetas, COPY, DEL, REN, MD, RD y la
 #      redirección; CD y la carpeta de trabajo, PATH, los archivos .BAT, la
 #      historia de la línea y Ctrl+C; el teclado español y los nombres largos.
+#   9. Hispa-Pentium 0.6: los discos SATA (AHCI: leer y escribir por DMA,
+#      con FAT32, particiones MBR y GPT), dos discos a la vez con su letra
+#      (C:, D:) y las rutas con letra, el permiso de escritura por disco
+#      («escritura», «escritura=usb»); y el USB (xHCI, EHCI y UHCI) sin teclado ni
+#      ratón PS/2: el teclado USB (el español), el ratón USB en el
+#      escritorio, un concentrador, la memoria USB como unidad X: (leer,
+#      escribir, fsck.fat), «sinusb», Mi equipo con sus unidades, y la
+#      memoria USB con GRUB arrancada como tal (el núcleo la lee él).
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
-#   SOLO=32 ./pruebas.sh          la primera y la octava (lo de 32 bits)
+#   SOLO=32 ./pruebas.sh          la primera, la octava y la novena (lo de 32 bits)
+#   SOLO=06 ./pruebas.sh          la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
 #                                 de 16 bits (azar.py) y otros tres de 32
@@ -74,6 +83,27 @@ fail=0
 nok=0
 ok() { echo "  OK   $1"; nok=$((nok + 1)); }
 ko() { echo "  FAIL $1"; fail=$((fail + 1)); }
+# (los ayudantes de las partes 8 y 9, aquí arriba: valen para las dos)
+mira() {       # lo que se prueba, y las líneas que tienen que salir (expresiones de grep)
+  local que=$1 l; shift
+  for l in "$@"; do
+    if ! grep -q -- "$l" $S; then ko "$que: falta «$l»"; sed 's/^/        /' $S | grep -v '^ *$' | head -60 | tail -20; return; fi
+  done
+  ok "$que"
+}
+# ¿está sano el volumen de esa imagen (según fsck.fat)? Con un segundo argumento, el volumen empieza en ese sector
+sano() {
+  local v=$1
+  if [ -n "${2:-}" ]; then v=$P/vol.img; dd if=$1 of=$v bs=512 skip=$2 status=none; fi
+  fsck.fat -n $v > $P/fsck.txt 2>&1
+}
+# un archivo de la imagen, a un archivo de aquí (falla si no está)
+saca() { rm -f $3; mcopy -n -i $1 "::$2" $3 > /dev/null 2>&1; }
+cap() { python3 -I $AQUI/nucleo32/mira_captura.py "$@" > $G/cap.txt 2>&1; }
+miracap() {    # lo que se prueba, la captura y sus comprobaciones
+  local que=$1 c=$2; shift 2
+  if [ -f $G/$c.ppm ] && cap $G/$c.ppm "$@"; then ok "$que"; else ko "$que:"; sed 's/^/        /' $G/cap.txt | head -6; [ -f $G/$c.ppm ] || echo "        (no hay captura $c)"; fi
+}
 
 # ---------------------------------------------------------------- 1. errores
 echo "== Castel: los errores se dicen en español, con línea y columna =="
@@ -92,8 +122,9 @@ if [ "${SOLO:-}" = errores ]; then
   exit $((fail > 0))
 fi
 
-# SOLO=32: solo la primera parte y la octava (los 32 bits)
-if [ "${SOLO:-}" != 32 ]; then
+# SOLO=32: solo la primera parte, la octava y la novena (los 32 bits);
+# SOLO=06: solo la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
+if [ "${SOLO:-}" != 32 ] && [ "${SOLO:-}" != 06 ]; then
 # -------------------------------------------------------- 2. compilar todo
 echo "== Castel: los ejemplos compilan =="
 EJEMPLOS=
@@ -487,7 +518,16 @@ if [ $tanda = 1 ]; then
   for f in $AQUI/ejemplos/partes/*.cas; do mcopy -i $T/c.img $f ::PARTES/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
   LOTE="$(echo $AQUI/ejemplos/*.cas) $AQUI/ensamblador/ensambla.cas $T/ens/toda.cas $A/azar16.cas $A/azar32.cas $(echo $AQUI/ejemplos32/*.cas) $A/azar32p.cas"
 else
-  for f in $AQUI/nucleo32/*.cas; do mcopy -i $T/c.img $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+  # (en la segunda, los módulos del núcleo; en la tercera, los programas y
+  # los dos módulos que usan: todos juntos ya no caben con lo demás)
+  for f in $AQUI/nucleo32/*.cas; do
+    case "$(basename $f .cas)" in
+      unidades|usb|usbalm|usbbase|usbhid|usuario) [ $tanda = 2 ] || continue ;;
+      u[a-z]*|llamadas|barramenu) [ $tanda = 3 ] || continue ;;
+      *) [ $tanda = 2 ] || continue ;;
+    esac
+    mcopy -i $T/c.img $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS
+  done
   if [ $tanda = 2 ]; then LOTE="$AQUI/nucleo32/semilla.cas"; else LOTE="$USU"; fi
 fi
 mcopy -i $T/c.img $A/CASTEL.EXE ::
@@ -630,6 +670,7 @@ fi   # SOLO=32
 echo "== Castel de 32 bits: «modelo núcleo» (QEMU -kernel) y «modelo hispa32» (HW32) =="
 P=$T/p32
 mkdir $P
+if [ "${SOLO:-}" != 06 ]; then
 # los ejemplos de 16 bits que no tocan el DOS, compilados como núcleo de 32
 # bits: tienen que escribir lo mismo
 MISMOS="arreglos bucles cuenta estruct mezcla nivel pares pruebas refs saltos saludo textos modulos"
@@ -710,13 +751,6 @@ else ko "la división por cero no llega a la excepción"; sed 's/^/        /' $P
 $AQUI/nucleo32/probar.sh "" memoria paginas toca monton estropear turnos dormir tareas programas \
   "ejecutar 0" "ejecutar 1" "ejecutar 2" memoria apagar > $P/pentium.sal 2>&1
 S=$P/pentium.sal
-mira() {       # lo que se prueba, y las líneas que tienen que salir (expresiones de grep)
-  local que=$1 l; shift
-  for l in "$@"; do
-    if ! grep -q -- "$l" $S; then ko "$que: falta «$l»"; sed 's/^/        /' $S | grep -v '^ *$' | head -60 | tail -20; return; fi
-  done
-  ok "$que"
-}
 mira "la memoria: el mapa de multiboot da los marcos de 4 K (mapa de bits)" "^memoria: 32 MB, [0-9]* marcos libres; paginación activa; 3 programas de usuario" \
   "^marcos: [0-9]* libres de 8160 "
 mira "la paginación está encendida (CR0.PG), con la identidad para el núcleo" "^paginación: activa (CR0 = 0x8" "^  identidad: de 0 a 0x01FDFFFF, 8160 páginas en 8 tablas"
@@ -787,7 +821,7 @@ S=$P/ordenes.sal
 mira "el intérprete de órdenes es un programa del anillo 3 cargado del disco, y lee el teclado por la llamada al sistema" \
   "^lanzo ORDENES.BIN del disco (la tarea [0-9]*, en el anillo 3)" "^Hispa-Pentium: intérprete de órdenes (un programa del anillo 3" \
   "^C:.>ayuda$" "^Las órdenes de Hispa-Pentium:" "^  TYPE archivo "
-mira "VER y MEM" "^Hispa-Pentium 0\.5: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
+mira "VER y MEM" "^Hispa-Pentium 0\.6: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
   "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 3\.$"
 mira "DIR: la raíz y una carpeta, con sus tamaños, sus fechas y lo que queda libre" "^ Directorio de C:.$" "^LEEME    TXT  *118  [0-9/]*  [0-9:]*$" \
   "^TEXTOS  *<DIR>  " "^ *17 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
@@ -854,7 +888,7 @@ DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" ver salir
 S=$P/arranque.sal
 mira "si el cargador se lo dice (-append ordenes), el núcleo arranca con el intérprete de órdenes (y sin módulos de multiboot: todo del disco)" \
   "^memoria: 32 MB, [0-9]* marcos libres; paginación activa; 0 programas de usuario" \
-  "^C:.>ver$" "^Hispa-Pentium 0\.5" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
+  "^C:.>ver$" "^Hispa-Pentium 0\.6" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
 MODULOS= $AQUI/nucleo32/probar.sh "" disco dir ordenes apagar > $P/sindisco.sal 2>&1
 S=$P/sindisco.sal
 mira "sin disco (y sin nada que traiga el cargador), el núcleo lo dice y sigue" "^disco 0: no hay" "^sistema de archivos: no hay" "^no puedo lanzar ORDENES.BIN: no hay disco" "^\[código 5\]"
@@ -863,14 +897,6 @@ mira "sin disco (y sin nada que traiga el cargador), el núcleo lo dice y sigue"
 # (cada prueba escribe en una copia del disco, con ESCRIBE=1; luego la miran fsck.fat y mtools)
 echo "== Hispa-Pentium escribe en el disco: ATA, FAT12/16/32, COPY, DEL, REN, MD, RD y la redirección =="
 export MTOOLS_SKIP_CHECK=1
-# ¿está sano el volumen de esa imagen (según fsck.fat)? Con un segundo argumento, el volumen empieza en ese sector
-sano() {
-  local v=$1
-  if [ -n "${2:-}" ]; then v=$P/vol.img; dd if=$1 of=$v bs=512 skip=$2 status=none; fi
-  fsck.fat -n $v > $P/fsck.txt 2>&1
-}
-# un archivo de la imagen, a un archivo de aquí (falla si no está)
-saca() { rm -f $3; mcopy -n -i $1 "::$2" $3 > /dev/null 2>&1; }
 for c in 16 12 32 mbr; do
   case $c in 12) que="FAT12" ;; 16) que="FAT16" ;; 32) que="FAT32" ;; mbr) que="FAT16 en una partición" ;; esac
   I=$P/w$c.img; cp $P/d$c.img $I
@@ -959,7 +985,7 @@ else ko "ECHO OFF o la @ no callan lo que deben (o callan de más)"; grep -n "lo
 # la historia: lo que queda en la pantalla, quitando lo que borra cada retroceso
 python3 -I $AQUI/nucleo32/pantalla.py < $S > $P/historia.txt
 if [ "$(grep -c '^C:.>eco primera$' $P/historia.txt)" = 2 ] && [ "$(grep -c '^primera$' $S)" = 2 ] && grep -q '^C:.>zco prixeray$' $P/historia.txt \
-    && grep -q "^Orden o nombre de programa desconocido: zco " $S && grep -q '^C:.>ver$' $P/historia.txt && grep -q "^Hispa-Pentium 0\.5" $S; then
+    && grep -q "^Orden o nombre de programa desconocido: zco " $S && grep -q '^C:.>ver$' $P/historia.txt && grep -q "^Hispa-Pentium 0\.6" $S; then
   ok "la historia de la línea: la flecha de arriba trae las órdenes de antes; se corrigen con las flechas, Retroceso, Supr, Inicio y Fin; Esc borra la línea"
 else ko "la historia o la corrección de la línea no van:"; grep -n "primera\|zco\|ver" $P/historia.txt | sed 's/^/        /' | head; fi
 mira "FECHA: la fecha y la hora del reloj del PC" "^Hoy es $(date +%d/%m/%Y) y son las [0-2][0-9]:[0-5][0-9]:[0-5][0-9]\.$"
@@ -1016,7 +1042,7 @@ else ko "los nombres largos no quedan bien al renombrar o borrar:"; sed 's/^/   
 fi
 
 # ---- sin disco (la unidad en memoria), el permiso de escritura y el escritorio ----
-echo "== Hispa-Pentium: sin disco, los módulos del cargador hacen de unidad C:; en el disco no se escribe sin permiso =="
+echo "== Hispa-Pentium: sin disco, los módulos del cargador hacen de unidad M:; en el disco no se escribe sin permiso =="
 G=$P/graf
 mkdir -p $G $G/mod
 for p in uordenes:ORDENES uhola:HOLA ueco:ECO; do
@@ -1026,8 +1052,8 @@ printf 'un texto que ha venido con el cargador\r\n' > $G/mod/LEEME.TXT
 MODULOS="$G/mod/ORDENES.BIN,$G/mod/HOLA.BIN,$G/mod/ECO.BIN,$G/mod/LEEME.TXT" ARRANQUE=ordenes $AQUI/nucleo32/probar.sh "" dir "type leeme.txt" "eco uno dos" hola \
   "echo x > a.txt" "del leeme.txt" "md c" "cd nada" nada salir "lanzar eco.bin desde la consola" apagar > $G/mem.sal 2>&1
 S=$G/mem.sal
-mira "sin disco, lo que trae el cargador (los módulos de multiboot) hace de unidad C: en memoria: «ordenes» lanza el ORDENES.BIN que venga" \
-  "^sin disco: los 4 archivos que ha traído el cargador hacen de unidad C: (en memoria, de solo lectura)" "^Hispa-Pentium: intérprete de órdenes"
+mira "sin disco, lo que trae el cargador (los módulos de multiboot) hace de unidad M: en memoria: «ordenes» lanza el ORDENES.BIN que venga" \
+  "^sin disco: los 4 archivos que ha traído el cargador hacen de unidad M: (en memoria, de solo lectura)" "^Hispa-Pentium: intérprete de órdenes"
 mira "la unidad en memoria: DIR enseña los módulos, TYPE los lee y los programas se lanzan por su nombre" \
   "^ORDENES  BIN  *[0-9]* " "^LEEME    TXT  *40 " "^ *4 archivos  *[0-9]* octetos$" "^un texto que ha venido con el cargador$" "^uno dos$" \
   "^1 + 2 + ... + 1000 = 500500" "^(HOLA.BIN ha acabado con el código 3)" "^Orden o nombre de programa desconocido: nada "
@@ -1056,11 +1082,6 @@ if ! grep -q "^disco 0: QEMU" $S && grep -q "^disco 0: no hay" $S && grep -q "^ 
 else ko "«sindisco» no deja los discos sin mirar:"; sed 's/^/        /' $S | head -12; fi
 
 echo "== Hispa-Pentium: el escritorio (modo gráfico, ratón, ventanas, barra de tareas, menú Inicio, iconos, Bloc de notas, Consola y Mi equipo) =="
-cap() { python3 -I $AQUI/nucleo32/mira_captura.py "$@" > $G/cap.txt 2>&1; }
-miracap() {    # lo que se prueba, la captura y sus comprobaciones
-  local que=$1 c=$2; shift 2
-  if [ -f $G/$c.ppm ] && cap $G/$c.ppm "$@"; then ok "$que"; else ko "$que:"; sed 's/^/        /' $G/cap.txt | head -6; [ -f $G/$c.ppm ] || echo "        (no hay captura $c)"; fi
-}
 cp $P/d16.img $G/e.img
 hora1=$(date +%H:%M); hora2=$(date -d "+1 minute" +%H:%M)
 CAPTURAS=$G ESCRIBE=1 DISCO=$G/e.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":captura e1" \
@@ -1100,11 +1121,11 @@ mira "el menú lanza la Consola" "^escritorio: lanzo .CONSOLA.BIN (la tarea [0-9
 miracap "la Consola: el intérprete de órdenes dentro de una ventana (un terminal): órdenes, un programa, Ctrl+C y la versión" e9 \
   negrita 140 90 152 98 Consola texto 120 116 132 520 "C:\\>eco hola desde la ventana" texto 120 116 132 520 "hola desde la ventana" \
   texto 120 116 132 520 "bucle: doy vueltas sin fin (Ctrl+C para acabar)" texto 120 116 132 520 "^C" \
-  texto 120 116 132 520 "Hispa-Pentium 0.5: un núcleo de 32 bits escrito en Castel." texto 290 572 300 580 Consola
+  texto 120 116 132 520 "Hispa-Pentium 0.6: un núcleo de 32 bits escrito en Castel." texto 290 572 300 580 Consola
 miracap "SALIR acaba el intérprete y la Consola se cierra (su ventana y su botón)" e10 notexto 130 80 160 100 Consola notexto 280 570 310 582 Consola \
   negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas"
 miracap "Configuración: lo que hay (pantalla, memoria), el teclado y el tapiz" e11 negrita 196 126 206 136 "Configuración" \
-  negrita 240 160 256 170 "Hispa-Pentium 0.5" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
+  negrita 240 160 256 170 "Hispa-Pentium 0.6" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
 miracap "el tapiz se cambia desde Configuración (a «Verde»), y se repinta todo el escritorio" e12 rgb 10 10 1F6B52 negrita 30 570 46 580 Inicio \
   negrita 196 126 206 136 "Configuración"
 miracap "el botón de cerrar acaba el Bloc de notas (sin cambios pendientes): ni ventana ni botón en la barra" e13 \
@@ -1182,7 +1203,7 @@ miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 178 16
   texto 180 196 188 204 ".."
 miracap "y dos clics en un texto lo abren con el Bloc de notas" b11 negrita 198 142 206 150 "\\LEEME.TXT - Bloc de notas" \
   texto 178 224 186 232 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
-miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.5" \
+miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.6" \
   texto 196 294 204 302 "Copyright (C) 2026 Carlos Sanz y contribuidores."
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
@@ -1244,7 +1265,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas como módulos y sin mirar los discos" \
-      "^memoria: 64 MB, .* 9 programas de usuario" "^sin disco: los 9 archivos que ha traído el cargador hacen de unidad C:" \
+      "^memoria: 64 MB, .* 9 programas de usuario" "^sin disco: los 9 archivos que ha traído el cargador hacen de unidad M:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
@@ -1270,6 +1291,236 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
       && [ "$(grep -c "^  multiboot /ESCRIT" $G/grub.cfg)" = 5 ] && grep -q "multiboot /ESCRIT13.BIN" $G/grub.cfg; then
       ok "el menú de GRUB: el escritorio a 800 x 600, «a la medida de la pantalla» (gfxpayload=auto), a 1024 x 600, 1366 x 768 y 1024 x 768, y los modos de vídeo de la BIOS (videoinfo)"
     else ko "el menú de GRUB de la memoria USB no trae las entradas nuevas"; fi
+  else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
+else
+  echo "  (sin root o sin grub-install para PC no se prueba la memoria USB con GRUB)"
+fi
+fi   # SOLO=06
+
+# ------------------------------------------------- 9. Hispa-Pentium 0.6
+# Los discos SATA (AHCI), las unidades con letra (varias a la vez) y el USB
+# (xHCI, EHCI y UHCI): teclado, ratón, concentradores y memorias. QEMU da la
+# controladora AHCI (-device ahci), las de USB (qemu-xhci, usb-ehci, las UHCI) y sus
+# aparatos; con -machine pc,i8042=off no hay teclado ni ratón PS/2, como en
+# un Mac, y lo que se teclea por el monitor llega por el teclado USB.
+echo "== Hispa-Pentium 0.6: los discos SATA (AHCI), las unidades con letra, el permiso de escritura por disco =="
+G=$P/graf
+N=$P/n06
+mkdir -p $G $N
+hechos=1
+for c in 16 32 mbr; do
+  [ -f $P/d$c.img ] || $AQUI/nucleo32/disco.sh $P/d$c.img $c > $P/disco$c.txt 2>&1 || { hechos=0; ko "no se puede hacer el disco de prueba ($c)"; }
+done
+if [ $hechos = 1 ]; then
+suma=$(python3 -c "print(sum(sum(('linea %03d de un archivo de varios clusters\r\n' % i).encode()) for i in range(1, 401)))")
+# 1. un disco SATA: leer
+SATA=$P/d16.img MODULOS= $AQUI/nucleo32/probar.sh "" disco "dir textos" "lanzar prueba.bin" :espera "lanzar textos\\eco2.bin hola" apagar > $N/sata.sal 2>&1
+S=$N/sata.sal
+mira "AHCI: la controladora SATA se encuentra en el bus PCI, IDENTIFY dice el disco, y la FAT se monta encima (C:)" \
+  "^disco 0: QEMU HARDDISK, 16 MB, FAT16 (SATA)\.$" "^disco 0: QEMU HARDDISK, 32768 sectores (16 MB), LBA, SATA" \
+  "^sistema de archivos: FAT16, desde el sector 0, " "^unidades: C: (disco 0, SATA, FAT16); la del sistema, C:"
+mira "AHCI: se leen sectores por DMA: una carpeta, un archivo de varios clusters (su suma, la de verdad) y programas" "^LARGO.TXT  *17600$" \
+  "^archivo: TEXTOS.LARGO.TXT mide 17600 octetos; leídos 17600 a trozos de 777, 400 líneas, suma $suma$" \
+  "^hijos: los dos ruidosos han acabado, con los códigos 9 y 9$" "^prueba.bin ha acabado con el código 7" "^hola$" "^eco2.bin ha acabado con el código 1"
+# 2. escribir en él (FAT32 y la FAT16 de una partición), y que quede sano
+for c in 32 mbr; do
+  case $c in 32) que="FAT32" ;; mbr) que="FAT16 en una partición" ;; esac
+  I=$N/s$c.img; cp $P/d$c.img $I
+  M=$I; s0=; [ $c = mbr ] && { M=$I@@32256; s0=63; }
+  ESCRIBE=1 SATA=$I MODULOS= $AQUI/nucleo32/probar.sh "" ordenes escribe "echo Querida señora: ¿qué tal está? > maría.txt" "copy textos\\largo.txt copia.txt" \
+    "md obra" "copy *.bat obra" "del obra\\lote.bat" salir disco apagar > $N/sataw$c.sal 2>&1
+  S=$N/sataw$c.sal
+  mira "AHCI, $que: se escribe por DMA: un programa crea, escribe, corta, alarga y borra archivos y carpetas, y todo queda como estaba" \
+    "^escribir: leído de vuelta: 10000 octetos, 0 distintos; no se deja escribir si se abrió para leer: cierto$" \
+    "^carpetas: 70 archivos en PD: 70 hechos; la carpeta tiene 72 entradas" "^escribe: todo queda como estaba (los mismos clusters libres): cierto$" \
+    "^ *3 archivo(s) copiado(s)\.$" "; archivos abiertos: 0$" "^\[código 5\]"
+  if sano $I $s0; then ok "AHCI, $que: fsck.fat da el disco por sano ($(tail -1 $P/fsck.txt | sed 's/^[^:]*: //'))"
+  else ko "AHCI, $que: fsck.fat encuentra el disco mal:"; sed 's/^/        /' $P/fsck.txt | head -12; fi
+  saca $M TEXTOS/LARGO.TXT $N/largo.txt; saca $M COPIA.TXT $N/copia.txt; saca $M MARIA.TXT $N/maria.txt
+  if cmp -s $N/largo.txt $N/copia.txt && [ "$(iconv -f CP437 -t UTF-8 $N/maria.txt | tr -d '\r')" = "Querida señora: ¿qué tal está?" ] \
+    && MTOOLS_SKIP_CHECK=1 mdir -i $M ::OBRA 2> /dev/null | grep -q "^SINFIN  *BAT" && ! MTOOLS_SKIP_CHECK=1 mdir -i $M ::OBRA 2> /dev/null | grep -q "^LOTE "; then
+    ok "AHCI, $que: mtools ve lo escrito: lo copiado, igual que el original; lo tecleado, con sus letras; lo borrado, borrado"
+  else ko "AHCI, $que: lo escrito no está bien en el disco"; fi
+done
+# 3. sin permiso no se escribe ni un sector
+cp $P/d16.img $N/sl.img
+SOLO_LECTURA=1 ESCRIBE=1 SATA=$N/sl.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "echo hola > nuevo.txt" "del leeme.txt" "md cosas" \
+  "type leeme.txt" hola salir apagar > $N/sl.sal 2>&1
+S=$N/sl.sal
+mira "AHCI: sin «escritura» en la línea del cargador, el disco SATA es de solo lectura" \
+  "^el disco es de solo lectura (para escribir en él: «escritura» en la línea del cargador)" "^No puedo escribir en nuevo.txt: es de solo lectura\.$" \
+  "^No puedo borrar leeme.txt: es de solo lectura\.$" "^Este archivo está en un disco FAT" "^1 + 2 + ... + 1000 = 500500"
+if cmp -s $P/d16.img $N/sl.img; then ok "AHCI: y la imagen queda idéntica, octeto a octeto: no se ha escrito ni un sector"
+else ko "AHCI: sin permiso de escritura, el disco ha cambiado"; fi
+# 4. un disco con tabla de particiones GPT (la de los discos de ahora)
+if command -v parted > /dev/null; then
+  truncate -s 20M $N/gpt.img
+  parted -s $N/gpt.img mklabel gpt mkpart datos 2048s 34815s > /dev/null 2>&1
+  dd if=$P/d16.img of=$N/gpt.img bs=512 seek=2048 conv=notrunc status=none
+  SATA=$N/gpt.img MODULOS= $AQUI/nucleo32/probar.sh "" disco "dir textos" "lanzar hola.bin" apagar > $N/gpt.sal 2>&1
+  S=$N/gpt.sal
+  mira "un disco con tabla de particiones GPT: se encuentra su partición y la FAT se monta en ella" \
+    "^disco 0: QEMU HARDDISK, 20 MB, FAT16 (SATA)\.$" "^sistema de archivos: FAT16, desde el sector 2048, " "^PIRATA.TXT  *110$" "^hola.bin ha acabado con el código 3"
+else
+  echo "  (sin parted no se prueba la tabla de particiones GPT)"
+fi
+# 5. dos discos a la vez: el IDE (C:) y el SATA (D:)
+cp $P/d16.img $N/c.img; cp $P/d32.img $N/d.img
+ESCRIBE=1 DISCO=$N/c.img SATA=$N/d.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "dir d:\\textos" "copy c:\\textos\\pirata.txt d:\\poema.txt" \
+  "d:" "type poema.txt" "md nueva" "cd nueva" "copy c:\\leeme.txt" "dir" "c:" "type d:\\nueva\\leeme.txt" "z:" "ren leeme.txt d:\\otro.txt" \
+  "d:\\textos\\eco2 desde la otra" salir disco apagar > $N/dos.sal 2>&1
+S=$N/dos.sal
+mira "dos discos a la vez, cada uno con su letra: C: (el IDE) y D: (el SATA), y la FAT con dos volúmenes montados" \
+  "^disco 0: QEMU HARDDISK, 16 MB, FAT16\.$" "^disco 1: QEMU HARDDISK, 40 MB, FAT32 (SATA)\.$" \
+  "^unidades: C: (disco 0, IDE, FAT16) D: (disco 1, SATA, FAT32); la del sistema, C:"
+mira "las rutas con la letra de la unidad: DIR, COPY de una a otra, TYPE y lanzar un programa de la otra unidad" \
+  "^ Directorio de D:.TEXTOS$" "^ *1 archivo(s) copiado(s)\.$" "^un velero bergantín\.$" "^Este archivo está en un disco FAT" "^desde la otra$"
+mira "«D:» cambia de unidad (la petición lo dice), con su carpeta de trabajo; una unidad que no hay, se dice; y de una a otra no se cambia de nombre" \
+  "^D:.>type poema.txt$" "^D:.NUEVA>dir$" "^ Directorio de D:.NUEVA$" "^C:.>type d:.nueva.leeme.txt$" "^No hay unidad Z:\.$" \
+  "^No puedo llamar d:.otro.txt a leeme.txt: "
+if sano $N/c.img && sano $N/d.img; then ok "los dos discos quedan sanos (fsck.fat)"; else ko "con dos discos, alguno queda mal:"; sed 's/^/        /' $P/fsck.txt | head -8; fi
+saca $N/d.img POEMA.TXT $N/poema.txt; saca $N/c.img TEXTOS/PIRATA.TXT $N/pirata.txt; saca $N/d.img NUEVA/LEEME.TXT $N/leeme2.txt; saca $N/c.img LEEME.TXT $N/leeme1.txt
+if cmp -s $N/poema.txt $N/pirata.txt && cmp -s $N/leeme1.txt $N/leeme2.txt; then ok "lo copiado de C: a D: es igual que el original, octeto a octeto"
+else ko "lo copiado de un disco a otro no es igual"; fi
+
+echo "== Hispa-Pentium 0.6: el USB (xHCI, EHCI y UHCI): teclado, ratón, concentradores y memorias; sin teclado ni ratón PS/2 =="
+# 6. xHCI y EHCI, sin 8042: el teclado USB (el español, con sus acentos) y la memoria USB (X:), en la que se escribe
+for hc in xhci ehci; do
+  case $hc in xhci) dev="qemu-xhci,id=u"; que="xHCI" ;; ehci) dev="usb-ehci,id=u"; que="EHCI" ;; esac
+  cp $P/d16.img $N/u$hc.img
+  ESCRIBE=1 MODULOS= MAQUINA=pc,i8042=off ARRANQUE="ordenes escritura" QEMU_MAS="-device $dev -device usb-kbd,bus=u.0 -device usb-mouse,bus=u.0 -drive id=mu,file=$N/u$hc.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu" \
+    $AQUI/nucleo32/probar.sh "" "dir textos" "echo Querida señora: ¿qué tal está? El pingüino > maría.txt" "type maría.txt" \
+    bucle :espera ":tecla ctrl-c" ":tecla up ret" :espera ":tecla ctrl-c" "copy textos\\largo.txt copia.txt" prueba :espera escribe salir disco apagar > $N/usb$hc.sal 2>&1
+  S=$N/usb$hc.sal
+  mira "$que: la controladora se toma, se enumeran los aparatos (teclado, ratón y memoria) y la memoria es la unidad X:" \
+    "^usb: controladora $que " "($que); teclado$" "($que); ratón$" "($que); almacenamiento$" "^usb: 1 teclados, 1 ratones, 1 memorias\.$" \
+    "^disco 0: QEMU    QEMU HARDDISK, 16 MB, FAT16 (USB)\.$" "^unidades: X: (disco 0, USB, FAT16); la del sistema, X:"
+  mira "$que, sin teclado PS/2: el teclado USB es el español (eñe, acentos y diéresis con tecla muerta, ¿?), con Ctrl+C y las flechas" \
+    "^X:.>echo Querida señora: ¿qué tal está? El pingüino > maría.txt$" "^Querida señora: ¿qué tal está? El pingüino$" "^X:.>prueba$" \
+    "^bucle: doy vueltas sin fin" "^\^C$"
+  if [ "$(grep -c '^bucle: doy vueltas sin fin' $S)" = 2 ]; then ok "$que: las flechas del teclado USB traen la orden de antes (la historia)"
+  else ko "$que: las flechas del teclado USB no traen la orden de antes"; fi
+  mira "$que: la memoria USB se lee (un archivo de varios clusters, programas) y se escribe (almacenamiento: solo a granel, SCSI)" \
+    "^archivo: TEXTOS.LARGO.TXT mide 17600 octetos; leídos 17600 a trozos de 777, 400 líneas, suma $suma$" \
+    "^escribir: leído de vuelta: 10000 octetos, 0 distintos; no se deja escribir si se abrió para leer: cierto$" \
+    "^carpetas: 70 archivos en PD: 70 hechos; la carpeta tiene 72 entradas" "^escribe: todo queda como estaba (los mismos clusters libres): cierto$" \
+    "; archivos abiertos: 0$" "^\[código 5\]"
+  if sano $N/u$hc.img; then ok "$que: la memoria USB queda sana (fsck.fat: $(tail -1 $P/fsck.txt | sed 's/^[^:]*: //'))"
+  else ko "$que: fsck.fat encuentra mal la memoria USB:"; sed 's/^/        /' $P/fsck.txt | head -12; fi
+  saca $N/u$hc.img TEXTOS/LARGO.TXT $N/largo.txt; saca $N/u$hc.img COPIA.TXT $N/copia.txt; saca $N/u$hc.img MARIA.TXT $N/maria.txt
+  if cmp -s $N/largo.txt $N/copia.txt && [ "$(iconv -f CP437 -t UTF-8 $N/maria.txt | tr -d '\r')" = "Querida señora: ¿qué tal está? El pingüino" ]; then
+    ok "$que: mtools ve en la memoria lo copiado (igual que el original) y lo tecleado (con sus letras)"
+  else ko "$que: lo escrito en la memoria USB no está bien"; fi
+done
+# 7. detrás de un concentrador (aparatos de USB 1.1), con el xHCI
+ESCRIBE=1 MODULOS= MAQUINA=pc,i8042=off QEMU_MAS="-device qemu-xhci,id=u -device usb-hub,bus=u.0,port=1 -device usb-kbd,bus=u.0,port=1.1 -device usb-mouse,bus=u.0,port=1.2 -drive id=mu,file=$P/d16.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,port=1.3,drive=mu" \
+  $AQUI/nucleo32/probar.sh "" "lanzar prueba.bin" :espera "lanzar hola.bin" apagar > $N/hub.sal 2>&1
+S=$N/hub.sal
+mira "un concentrador USB: se enciende, se reinician sus puertos y se enumera lo que cuelga de él (teclado, ratón y memoria, a velocidad plena)" \
+  ": concentrador de 8 puertos$" "velocidad plena, en el puerto 1 del concentrador 0; teclado$" "en el puerto 2 del concentrador 0; ratón$" \
+  "en el puerto 3 del concentrador 0; almacenamiento$" "^usb: 1 teclados, 1 ratones, 1 memorias\.$"
+mira "y detrás del concentrador van el teclado (se teclea por él) y la memoria (se leen sus archivos y sus programas)" \
+  "^archivo: TEXTOS.LARGO.TXT mide 17600 octetos; leídos 17600 a trozos de 777, 400 líneas, suma $suma$" "^hola.bin ha acabado con el código 3" "^\[código 5\]"
+# 7 bis. un EHCI con sus compañeras UHCI (los PC de 2002 a 2010): el teclado y el ratón, de USB 1.1, se ceden a ellas; la memoria va por el EHCI
+cp $P/d16.img $N/comp.img
+ESCRIBE=1 MODULOS= MAQUINA=pc,i8042=off ARRANQUE="ordenes escritura" QEMU_MAS="-device ich9-usb-ehci1,id=u -device ich9-usb-uhci1,masterbus=u.0,firstport=0 -device ich9-usb-uhci2,masterbus=u.0,firstport=2 -device usb-kbd,bus=u.0,port=1,usb_version=1 -device usb-mouse,bus=u.0,port=3,usb_version=1 -drive id=mu,file=$N/comp.img,format=raw,if=none -device usb-storage,bus=u.0,port=2,drive=mu" \
+  $AQUI/nucleo32/probar.sh "" "copy textos\\largo.txt copia.txt" "echo El pingüino de la señora > a.txt" "type a.txt" prueba :espera salir disco apagar > $N/comp.sal 2>&1
+S=$N/comp.sal
+mira "un EHCI con dos UHCI compañeras: lo que no es de alta velocidad (el teclado y el ratón) se cede a ellas y se enumera allí; la memoria, por el EHCI" \
+  "^usb: controladora EHCI 8086:293A, 6 puertos (2 cedidos a las compañeras: aparatos de USB 1.x)$" "^usb: controladora UHCI 8086:2934, 2 puertos$" \
+  "velocidad alta, en el puerto 2 (EHCI); almacenamiento$" "velocidad plena, en el puerto 1 (UHCI); teclado$" "velocidad plena, en el puerto 1 (UHCI); ratón$" \
+  "^usb: 1 teclados, 1 ratones, 1 memorias\.$"
+mira "UHCI: el teclado USB (se teclea por él, sin teclado PS/2), con sus letras" "^X:.>echo El pingüino de la señora > a.txt$" "^El pingüino de la señora$" \
+  "^archivo: TEXTOS.LARGO.TXT mide 17600 octetos; leídos 17600 a trozos de 777, 400 líneas, suma $suma$" "; archivos abiertos: 0$" "^\[código 5\]"
+saca $N/comp.img TEXTOS/LARGO.TXT $N/largo.txt; saca $N/comp.img COPIA.TXT $N/copia.txt
+if sano $N/comp.img && cmp -s $N/largo.txt $N/copia.txt; then ok "y la memoria queda sana, con lo copiado igual que el original"
+else ko "con el EHCI y sus compañeras, la memoria no queda bien"; fi
+# 7 ter. una UHCI sola (un PC de antes), con la memoria en ella (a velocidad plena): leer y escribir
+cp $P/d16.img $N/uhci.img
+ESCRIBE=1 MODULOS= ARRANQUE="ordenes escritura" QEMU_MAS="-device piix3-usb-uhci,id=u -drive id=mu,file=$N/uhci.img,format=raw,if=none -device usb-storage,bus=u.0,port=1,drive=mu" \
+  $AQUI/nucleo32/probar.sh "" "copy textos\\largo.txt copia.txt" escribe :espera :espera :espera :espera :espera :espera :espera :espera salir disco apagar > $N/uhci.sal 2>&1
+S=$N/uhci.sal
+mira "UHCI: una memoria USB a velocidad plena (cada paquete, un TD; la alternancia, llevada aquí): se lee y se escribe" \
+  "^usb: controladora UHCI 8086:7020, 2 puertos$" "velocidad plena, en el puerto 1 (UHCI); almacenamiento$" "^ *1 archivo(s) copiado(s)\.$" \
+  "^escribir: leído de vuelta: 10000 octetos, 0 distintos; no se deja escribir si se abrió para leer: cierto$" \
+  "^escribe: todo queda como estaba (los mismos clusters libres): cierto$" "; archivos abiertos: 0$" "^\[código 5\]"
+saca $N/uhci.img TEXTOS/LARGO.TXT $N/largo.txt; saca $N/uhci.img COPIA.TXT $N/copia.txt
+if sano $N/uhci.img && cmp -s $N/largo.txt $N/copia.txt; then ok "UHCI: la memoria queda sana (fsck.fat), con lo copiado igual que el original"
+else ko "UHCI: la memoria no queda bien:"; sed 's/^/        /' $P/fsck.txt | head -8; fi
+# 8. el permiso solo para las memorias USB: en el disco de dentro no se escribe
+cp $P/d16.img $N/pc.img; cp $P/d16.img $N/pu.img
+SOLO_LECTURA=1 ESCRIBE=1 DISCO=$N/pc.img MODULOS= ARRANQUE="ordenes escritura=usb unidad=X" QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$N/pu.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu" \
+  $AQUI/nucleo32/probar.sh "" "echo en la memoria > nuevo.txt" "type nuevo.txt" "echo en el disco > c:\\nuevo.txt" "del c:\\leeme.txt" "copy c:\\leeme.txt" \
+  "dir c:\\textos" salir disco apagar > $N/perm.sal 2>&1
+S=$N/perm.sal
+mira "«escritura=usb unidad=X»: la unidad del sistema es la memoria USB y en ella se escribe; el disco de dentro se ve (C:), pero es de solo lectura" \
+  "^los discos de dentro son de solo lectura" "^unidades: C: (disco 0, IDE, FAT16) X: (disco 1, USB, FAT16); la del sistema, X:" \
+  "^X:.>type nuevo.txt$" "^en la memoria$" "^No puedo escribir en c:.nuevo.txt: es de solo lectura\.$" "^No puedo borrar c:.leeme.txt: es de solo lectura\.$" \
+  "^ *1 archivo(s) copiado(s)\.$" "^ Directorio de C:.TEXTOS$"
+saca $N/pu.img NUEVO.TXT $N/nuevo.txt; saca $N/pu.img LEEME.TXT $N/leeme2.txt; saca $N/pc.img LEEME.TXT $N/leeme1.txt
+if cmp -s $P/d16.img $N/pc.img && [ "$(tr -d '\r' < $N/nuevo.txt)" = "en la memoria" ] && cmp -s $N/leeme1.txt $N/leeme2.txt && sano $N/pu.img; then
+  ok "y así es: la imagen del disco de dentro queda idéntica octeto a octeto, y lo escrito y lo copiado están en la memoria USB (sana)"
+else ko "con «escritura=usb», o el disco de dentro ha cambiado o la memoria no tiene lo escrito"; fi
+# 9. «sinusb»: el USB ni se toca
+MODULOS= QEMU_MAS="-device qemu-xhci,id=u -drive id=mu,file=$P/d16.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" ARRANQUE=sinusb \
+  $AQUI/nucleo32/probar.sh "" disco apagar > $N/sinusb.sal 2>&1
+S=$N/sinusb.sal
+if ! grep -q "^usb:" $S && grep -q "^disco 0: no hay" $S && grep -q "^\[código 5\]" $S; then ok "con «sinusb» el núcleo ni toca el USB (se teclea por el teclado PS/2, y la memoria no se ve)"
+else ko "«sinusb» no deja el USB sin tocar:"; sed 's/^/        /' $S | head -8; fi
+# 10. el escritorio, sin teclado ni ratón PS/2: el ratón y el teclado USB, guardar en la memoria, y Mi equipo con sus unidades
+cp $P/d16.img $N/eu.img
+CAPTURAS=$G ESCRIBE=1 MODULOS= MAQUINA=pc,i8042=off SOLO_LECTURA=1 SATA=$P/d32.img ARRANQUE="escritorio escritura=usb unidad=X" \
+  QEMU_MAS="-device usb-ehci,id=u -device usb-kbd,bus=u.0 -device usb-mouse,bus=u.0 -drive id=mu,file=$N/eu.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu" \
+  $AQUI/nucleo32/probar.sh "" ":pausa 2" ":clic 40 585" ":captura m1" ":clic 80 293" ":pausa 2" ":escribe Guardado en la memoria USB: ¡señor!" ":tecla f2" ":pausa 1" ":captura m2" \
+  ":clic 578 76" ":pausa 1" ":doble 62 30" ":pausa 2" ":captura m3" ":doble 300 290" ":pausa 1" ":captura m4" > $N/escusb.sal 2>&1
+S=$N/escusb.sal
+mira "el escritorio en un PC sin teclado ni ratón PS/2 (como un Mac): arranca con el ratón y el teclado USB" \
+  "^usb: 1 teclados, 1 ratones, 1 memorias\.$" "^escritorio: en marcha, 800 x 600" "escritorio: lanzo .BLOC.BIN" "^bloc: guardado NOTAS.TXT, 35 octetos"
+miracap "el ratón USB mueve la flecha y pulsa: el menú Inicio se abre con un clic" m1 negrita 36 280 50 290 "Bloc de notas" negrita 170 532 182 542 "Apagar el equipo"
+miracap "el teclado USB escribe en el Bloc de notas (con eñe y «¡»), y F2 guarda" m2 texto 94 146 102 156 "Guardado en la memoria USB: ¡señor!" \
+  texto 94 428 104 448 "Guardado en NOTAS.TXT (35 octetos)."
+saca $N/eu.img NOTAS.TXT $N/notas.txt
+if [ "$(iconv -f CP437 -t UTF-8 $N/notas.txt 2> /dev/null)" = "Guardado en la memoria USB: ¡señor!" ] && sano $N/eu.img; then ok "y lo guardado está en la memoria USB (la unidad del sistema, X:), que queda sana"
+else ko "lo guardado con el Bloc de notas no está en la memoria USB"; fi
+miracap "Mi equipo enseña las unidades con su letra: C: (el disco SATA de dentro, de solo lectura) y X: (la memoria USB)" m3 negrita 154 167 162 175 "Las unidades de este equipo" \
+  negrita 220 204 228 212 "Unidad C:" texto 220 222 228 230 "disco duro (SATA), FAT32" texto 220 238 228 246 "39 MB, 39 MB libres (de solo lectura)" \
+  negrita 220 264 228 272 "Unidad X:" texto 220 282 228 290 "memoria USB, FAT16"
+miracap "y dos clics en X: enseñan lo que hay en la memoria (con lo recién guardado)" m4 negrita 178 167 186 175 "X:\\" texto 180 216 188 224 "ORDENES.BIN"
+fi   # los discos de prueba
+
+# 11. la memoria USB con GRUB, como la arranca un PC: el núcleo la lee él (X:)
+if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/grub/i386-pc ] && command -v parted > /dev/null; then
+  [ -f $G/usb.img ] || $AQUI/nucleo32/usb.sh $G/usb.img > $G/usb.txt 2>&1
+  if [ -f $G/usb.img ]; then
+    for hc in xhci ehci; do
+      case $hc in xhci) dev="qemu-xhci,id=u"; que="xHCI" ;; ehci) dev="usb-ehci,id=u"; que="EHCI" ;; esac
+      cp $G/usb.img $N/g$hc.img
+      rm -f $G/monu
+      qemu-system-i386 -m 64 -machine pc,i8042=off -display none -monitor unix:$G/monu,server,nowait -serial file:$N/g$hc.sal -no-reboot -device $dev \
+        -drive file=$N/g$hc.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1 -device usb-kbd,bus=u.0 -device usb-mouse,bus=u.0 > /dev/null 2>&1 &
+      QPID=$!
+      monu() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$G/monu > /dev/null 2>&1; sleep "${2:-0.3}"; }
+      for ((i = 0; i < 40; i++)); do [ -S $G/monu ] && break; sleep 0.1; done
+      sleep 6; monu "sendkey ret" 14
+      monu "mouse_move -360 285" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 0.8
+      monu "mouse_move 40 -292" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 2.5
+      for k in h o l a spc u s b; do monu "sendkey $k" 0.1; done
+      monu "sendkey f2" 1.5
+      monu "screendump $G/g$hc.ppm" 0.6
+      monu quit 0.5; wait $QPID 2> /dev/null; QPID=
+      tr -d '\r' < $N/g$hc.sal | iconv -f CP437 -t UTF-8 > $N/g$hc.txt
+      S=$N/g$hc.txt
+      mira "la memoria USB con GRUB, arrancada de un $que sin teclado PS/2: el núcleo le quita el USB a la BIOS y lee él la memoria (X:, la del sistema)" \
+        "^usb: controladora $que " "^usb: 1 teclados, 1 ratones, 1 memorias\.$" "^disco 0: QEMU    QEMU HARDDISK, 64 MB, FAT16 (USB)\.$" \
+        "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)" \
+        "escritorio: lanzo .BLOC.BIN" "^bloc: guardado NOTAS.TXT, 8 octetos"
+      dd if=$N/g$hc.img of=$N/g$hc.vol bs=1M skip=1 status=none
+      saca $N/g$hc.vol NOTAS.TXT $N/notas.txt; saca $N/g$hc.vol ARRANQUE.TXT $N/arranque.txt
+      if cap $G/g$hc.ppm texto 94 146 102 156 "hola usb" && [ "$(cat $N/notas.txt 2> /dev/null)" = "hola usb" ] && grep -q "^usb: 1 teclados, 1 ratones, 1 memorias" $N/arranque.txt && grep -q "la del sistema, X:" $N/arranque.txt \
+        && fsck.fat -n $N/g$hc.vol > $P/fsck.txt 2>&1; then
+        ok "$que: lo tecleado con el teclado USB y guardado con el Bloc de notas está en la memoria (sana), con el registro del arranque (ARRANQUE.TXT)"
+      else ko "$que: en la memoria USB de arranque no queda lo guardado, o no queda sana:"; sed 's/^/        /' $P/fsck.txt | head -6; fi
+    done
   else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba la memoria USB con GRUB)"

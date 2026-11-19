@@ -1,0 +1,391 @@
+; =============================================================================
+;  uhci.cas - las controladoras USB 1.1 de Intel (UHCI) del núcleo de
+;  Hispa-Pentium: las «compañeras» de un EHCI (a ellas van a parar los
+;  teclados y ratones enchufados a un PC de 2002 a 2010: el Toshiba NB250 y
+;  el HP Mini tienen cuatro) y las únicas de los PC de antes. Según
+;  «Universal Host Controller Interface Design Guide» 1.1.
+;
+;  Sus registros son puertos de E/S (el registro base 4 de PCI): USBCMD
+;  0x00, USBSTS 0x02, USBINTR 0x04, FRNUM 0x06, FLBASEADD 0x08, SOFMOD 0x0C y
+;  un PORTSC por puerto desde 0x10.
+;
+;  La controladora recorre mil veces por segundo una lista de 1024 tramas;
+;  aquí todas apuntan a lo mismo: la cadena de las tuberías de interrupción
+;  (una cola, QH, con un descriptor de transferencia, TD, cada una) y, al
+;  final, la cola de trabajo, por la que van control y «a granel» de uno en
+;  uno y esperando. En el UHCI cada paquete es un TD, y la alternancia
+;  (DATA0/DATA1) la lleva quien lo programa.
+;  Sin interrupciones: todo se mira.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Uhci
+
+    importar Pci, Marcos, Tareas, Usbbase, Mem32
+
+    público constante MAX_UHCI = 6
+    público constante MAX_TUBOS = 8
+    público constante NINGUNA = 0xFFFFFFFF
+
+    constante USBCMD = 0x00
+    constante USBSTS = 0x02
+    constante USBINTR = 0x04
+    constante FRNUM = 0x06
+    constante FLBASEADD = 0x08
+    constante SOFMOD = 0x0C
+    constante PORTSC = 0x10
+
+    ; ---- dónde está cada cosa en la página de la controladora ----
+    constante D_TRABAJO = 0x000                 ; la cola de trabajo
+    constante D_COLAS = 0x010                   ; las de las tuberías, de 0x10
+    constante D_TD_TUBOS = 0x100                ; sus TD, de 0x20
+    constante D_BÚFERES = 0x200                 ; sus búferes, de 0x40
+    constante D_TD = 0x400                      ; los TD de la transferencia en marcha, de 0x20
+    constante MAX_TD = 96
+
+    constante ACTIVO = 0x00800000
+    constante PARADO = 0x00400000
+    constante FALLOS = 0x00760000               ; parado, búfer, de más, tiempo o bits (el NAK no es un fallo)
+    constante PID_PETICIÓN = 0x2D
+    constante PID_ENTRA = 0x69
+    constante PID_SALE = 0xE1
+
+    público tipo Controladora = estructura
+        hay: bool
+        pci: nat32
+        base: nat32                             ; sus puertos de E/S
+        puertos: nat32
+        mem: nat32                              ; su página (dirección física, que es la que se ve)
+        lista: nat32                            ; la lista de tramas
+        primera: nat32                          ; el enlace a la primera cola de la cadena
+        tubos: nat32
+        alternas: arreglo [MAX_TUBOS] de nat32  ; el testigo de cada tubería
+    fin
+
+    público variable uhcis: arreglo [MAX_UHCI] de Controladora
+    público variable cuántas: nat32
+
+    función entra16(puerto: nat32): nat32
+        ensamblador
+            mov edx, {puerto}
+            xor eax, eax
+            in ax, dx
+        fin
+    fin
+
+    función saca16(puerto: nat32, v: nat32)
+        ensamblador
+            mov edx, {puerto}
+            mov eax, {v}
+            out dx, ax
+        fin
+    fin
+
+    función saca32(puerto: nat32, v: nat32)
+        ensamblador
+            mov edx, {puerto}
+            mov eax, {v}
+            out dx, eax
+        fin
+    fin
+
+    ; toma la controladora UHCI que está en ese sitio del bus PCI. Da su
+    ; número, o NINGUNA.
+    público función prepara(pci: nat32): nat32
+        variable c, base, i, v: nat32
+        variable q, l: puntero a nat32
+        si cuántas >= MAX_UHCI entonces devolver NINGUNA fin
+        base := pci_puertos(pci, 4)
+        si base = 0 entonces devolver NINGUNA fin
+        c := cuántas
+        uhcis[c].hay := falso
+        uhcis[c].pci := pci
+        uhcis[c].base := base
+        ; que la BIOS deje de imitar con ella un teclado y un ratón PS/2: sus
+        ; avisos pendientes, borrados, y sus SMI, apagadas (registro LEGSUP)
+        pci_escribir16(pci, 0xC0, 0x8F00)
+        pci_enciende(pci)
+        ; reinicio del bus (50 ms) y de la controladora
+        saca16(base + USBCMD, 0x0004)
+        espera_ms(50)
+        saca16(base + USBCMD, 0)
+        espera_ms(10)
+        saca16(base + USBCMD, 0x0002)
+        i := 0
+        mientras entra16(base + USBCMD) yb 2 <> 0 y i < 100000 hacer i := i + 1 fin
+        saca16(base + USBINTR, 0)
+        saca16(base + USBSTS, 0x3F)
+        ; cuántos puertos tiene: su bit 7 lee siempre 1 (y no todo a unos)
+        uhcis[c].puertos := 0
+        i := 0
+        mientras i < 8 hacer
+            v := entra16(base + PORTSC + i * 2)
+            si v yb 0x80 = 0 o v = 0xFFFF entonces romper fin
+            i := i + 1
+        fin
+        uhcis[c].puertos := i
+        si i = 0 entonces devolver NINGUNA fin
+        si uhcis[c].mem = 0 entonces uhcis[c].mem := reservar_marco() fin
+        si uhcis[c].lista = 0 entonces uhcis[c].lista := reservar_marco() fin
+        si uhcis[c].mem = 0 o uhcis[c].lista = 0 entonces devolver NINGUNA fin
+        ; la cola de trabajo, sola en la cadena; y todas las tramas, a ella
+        q := puntero(uhcis[c].mem + D_TRABAJO)
+        q[0] := 1
+        q[1] := 1
+        uhcis[c].primera := (uhcis[c].mem + D_TRABAJO) ob 2
+        uhcis[c].tubos := 0
+        l := puntero(uhcis[c].lista)
+        para i desde 0 hasta 1023 hacer l[i] := uhcis[c].primera fin
+        saca16(base + FRNUM, 0)
+        saca32(base + FLBASEADD, uhcis[c].lista)
+        saca16(base + USBCMD, 0x00C1)           ; en marcha (paquetes de 64, «configurada»)
+        uhcis[c].hay := cierto
+        cuántas := cuántas + 1
+        devolver c
+    fin
+
+    público función para_(c: nat32)
+        si c >= MAX_UHCI entonces devolver fin
+        si uhcis[c].hay entonces saca16(uhcis[c].base + USBCMD, 0) fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los puertos
+    ; -------------------------------------------------------------------------
+    ; lo que hay en el puerto p (desde 1): bit 0, algo enchufado; bit 1, habilitado
+    público función puerto_estado(c: nat32, p: nat32): nat32
+        variable v, r: nat32
+        v := entra16(uhcis[c].base + PORTSC + (p - 1) * 2)
+        r := v yb 1
+        si v yb 4 <> 0 entonces r := r ob 2 fin
+        devolver r
+    fin
+
+    ; reinicia el puerto p y lo habilita. Da la velocidad de lo que hay
+    ; (V_BAJA o V_PLENA), o 0 si no hay nada o no queda habilitado.
+    público función puerto_reinicia(c: nat32, p: nat32): nat32
+        variable d, v, i: nat32
+        d := uhcis[c].base + PORTSC + (p - 1) * 2
+        si entra16(d) yb 1 = 0 entonces devolver 0 fin
+        saca16(d, 0x0200)
+        espera_ms(50)
+        saca16(d, 0)
+        espera_ms(10)
+        i := 0
+        mientras i < 10 hacer
+            saca16(d, 0x000E)                   ; habilitar (y los avisos de cambio, borrados)
+            espera_ms(10)
+            v := entra16(d)
+            si v yb 1 = 0 entonces devolver 0 fin
+            si v yb 4 <> 0 entonces
+                espera_ms(20)
+                si v yb 0x100 <> 0 entonces devolver V_BAJA fin
+                devolver V_PLENA
+            fin
+            i := i + 1
+        fin
+        devolver 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las transferencias
+    ; -------------------------------------------------------------------------
+    ; rellena el TD número i de la transferencia en marcha: qué es (PID), el
+    ; testigo, el búfer y sus octetos; enlazado con el siguiente («último»:
+    ; no hay más)
+    función pon_td(c: nat32, i: nat32, ref a: Aparato, extremo: nat32, pid: nat32, testigo: nat32, búfer: nat32, n: nat32, último: bool)
+        variable t: puntero a nat32
+        variable e: nat32
+        t := puntero(uhcis[c].mem + D_TD + i * 0x20)
+        si último entonces
+            t[0] := 1
+        sino
+            t[0] := (uhcis[c].mem + D_TD + (i + 1) * 0x20) ob 4      ; (4: el siguiente, en la misma trama)
+        fin
+        e := ACTIVO ob 0x18000000               ; tres intentos
+        si a.velocidad = V_BAJA entonces e := e ob 0x04000000 fin
+        si pid = PID_ENTRA entonces e := e ob 0x20000000 fin        ; si llega menos, se para ahí
+        t[1] := e
+        t[2] := pid ob (a.dir << 8) ob ((extremo yb 0x0F) << 15) ob (testigo << 19) ob (((n - 1) yb 0x7FF) << 21)
+        t[3] := búfer
+    fin
+
+    ; hace los n TD preparados por la cola de trabajo y espera (hasta «cs»
+    ; centésimas). El TD número «estado» (NINGUNA: no hay) es el del estado
+    ; de una transferencia de control: si los datos llegan cortos, se salta
+    ; a él. Da 0, T_PARADA o T_FALLO; en «hechos», los octetos que han ido
+    ; en los TD de datos (los que hay entre «primero_datos» y «estado»).
+    función ejecuta(c: nat32, n: nat32, primero_datos: nat32, estado: nat32, cs: nat32, ref hechos: nat32): ent32
+        variable q, t: puntero a nat32
+        variable tope, vueltas, i, e, tope_datos: nat32
+        variable corto, acabado: bool
+        q := puntero(uhcis[c].mem + D_TRABAJO)
+        q[1] := uhcis[c].mem + D_TD
+        tope := tics + cs + 1
+        vueltas := 0
+        corto := falso
+        tope_datos := estado
+        si tope_datos = NINGUNA entonces tope_datos := n fin
+        mientras cierto hacer
+            acabado := cierto
+            hechos := 0
+            i := 0
+            mientras i < n hacer
+                t := puntero(uhcis[c].mem + D_TD + i * 0x20)
+                e := t[1]
+                si e yb ACTIVO <> 0 entonces
+                    acabado := falso
+                    romper
+                fin
+                si e yb FALLOS <> 0 entonces
+                    q[1] := 1
+                    si e yb PARADO <> 0 y e yb 0x00360000 = 0 entonces devolver T_PARADA fin
+                    devolver T_FALLO
+                fin
+                si i >= primero_datos y i < tope_datos entonces
+                    hechos := hechos + ((e + 1) yb 0x7FF)
+                    ; ¿ha llegado menos de lo pedido? Ahí acaban los datos
+                    si ((e + 1) yb 0x7FF) < (((t[2] >> 21) + 1) yb 0x7FF) entonces
+                        si estado = NINGUNA entonces
+                            q[1] := 1
+                            devolver 0
+                        fin
+                        si no corto entonces
+                            corto := cierto
+                            q[1] := uhcis[c].mem + D_TD + estado * 0x20
+                        fin
+                        i := estado - 1
+                    fin
+                fin
+                i := i + 1
+            fin
+            si acabado entonces
+                q[1] := 1
+                devolver 0
+            fin
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 100000000 entonces
+                ; no acaba: fuera de la cola, y un par de tramas para que la
+                ; controladora deje de mirarla
+                q[1] := 1
+                espera_ms(2)
+                devolver T_FALLO
+            fin
+        fin
+        devolver T_FALLO
+    fin
+
+    ; una transferencia de control (como la de ehci.cas)
+    público función control(c: nat32, ref a: Aparato, petición: nat32, datos: nat32, n: nat32, entra: bool): ent32
+        variable i, k, pid, testigo, queda, hechos: nat32
+        variable r: ent32
+        pon_td(c, 0, a, 0, PID_PETICIÓN, 0, petición, 8, falso)
+        i := 1
+        pid := PID_SALE
+        si entra entonces pid := PID_ENTRA fin
+        testigo := 1
+        queda := n
+        mientras queda > 0 hacer
+            si i >= MAX_TD - 1 entonces devolver T_FALLO fin
+            k := queda
+            si k > a.paquete0 entonces k := a.paquete0 fin
+            pon_td(c, i, a, 0, pid, testigo, datos + (n - queda), k, falso)
+            testigo := testigo xob 1
+            queda := queda - k
+            i := i + 1
+        fin
+        ; el estado: al revés que los datos (y, sin datos, entra), sin octetos
+        pid := PID_ENTRA
+        si n <> 0 y entra entonces pid := PID_SALE fin
+        pon_td(c, i, a, 0, pid, 1, 0, 0, cierto)
+        r := ejecuta(c, i + 1, 1, i, 100, hechos)
+        si r <> 0 entonces devolver r fin
+        devolver ent32(hechos)
+    fin
+
+    ; una transferencia a granel (como la de ehci.cas): en tandas de hasta
+    ; MAX_TD paquetes
+    público función granel(c: nat32, ref a: Aparato, ref e: Extremo, datos: nat32, n: nat32, cs: nat32): ent32
+        variable i, k, pid, queda, hechos, total, pedidos: nat32
+        variable r: ent32
+        pid := PID_SALE
+        si e.número yb 0x80 <> 0 entonces pid := PID_ENTRA fin
+        si e.paquete = 0 entonces devolver T_FALLO fin
+        total := 0
+        queda := n
+        mientras queda > 0 hacer
+            i := 0
+            pedidos := 0
+            mientras queda > 0 y i < MAX_TD hacer
+                k := queda
+                si k > e.paquete entonces k := e.paquete fin
+                pon_td(c, i, a, e.número, pid, (e.alterna + i) yb 1, datos + (n - queda), k, queda = k o i = MAX_TD - 1)
+                queda := queda - k
+                pedidos := pedidos + k
+                i := i + 1
+            fin
+            r := ejecuta(c, i, 0, NINGUNA, cs, hechos)
+            si r <> 0 entonces devolver r fin
+            ; el testigo sigue por donde se haya quedado (un paquete por TD hecho)
+            e.alterna := (e.alterna + (hechos + e.paquete - 1) div e.paquete) yb 1
+            si hechos = 0 entonces e.alterna := e.alterna xob 1 fin    ; (un paquete vacío también cuenta)
+            total := total + hechos
+            si hechos < pedidos entonces devolver ent32(total) fin     ; ha llegado menos: se acabó
+        fin
+        devolver ent32(total)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las tuberías de interrupción
+    ; -------------------------------------------------------------------------
+    público función tubo_abre(c: nat32, ref a: Aparato, ref e: Extremo): nat32
+        variable q, l, t: puntero a nat32
+        variable i, k, b: nat32
+        si uhcis[c].tubos >= MAX_TUBOS entonces devolver NINGUNA fin
+        i := uhcis[c].tubos
+        b := uhcis[c].mem + D_COLAS + i * 0x10
+        ; lo que no cambia de su TD: a quién se pregunta (el testigo y el
+        ; largo se ponen al pedir)
+        t := puntero(uhcis[c].mem + D_TD_TUBOS + i * 0x20)
+        t[0] := 1
+        t[1] := 0
+        t[2] := PID_ENTRA ob (a.dir << 8) ob ((e.número yb 0x0F) << 15)
+        t[3] := uhcis[c].mem + D_BÚFERES + i * 0x40
+        t[4] := 0
+        si a.velocidad = V_BAJA entonces t[4] := 0x04000000 fin
+        uhcis[c].alternas[i] := 0
+        q := puntero(b)
+        q[1] := 1
+        ; a la cabeza de la cadena, y todas las tramas a ella
+        q[0] := uhcis[c].primera
+        uhcis[c].primera := b ob 2
+        l := puntero(uhcis[c].lista)
+        para k desde 0 hasta 1023 hacer l[k] := uhcis[c].primera fin
+        uhcis[c].tubos := i + 1
+        devolver i
+    fin
+
+    público función tubo_datos(c: nat32, t: nat32): puntero a byte
+        devolver puntero(uhcis[c].mem + D_BÚFERES + t * 0x40)
+    fin
+
+    público función tubo_pide(c: nat32, t: nat32, n: nat32)
+        variable q, d: puntero a nat32
+        d := puntero(uhcis[c].mem + D_TD_TUBOS + t * 0x20)
+        q := puntero(uhcis[c].mem + D_COLAS + t * 0x10)
+        d[2] := (d[2] yb 0x0007FFFF) ob (uhcis[c].alternas[t] << 19) ob (((n - 1) yb 0x7FF) << 21)
+        d[1] := ACTIVO ob 0x18000000 ob d[4]
+        q[1] := uhcis[c].mem + D_TD_TUBOS + t * 0x20
+    fin
+
+    público función tubo_mira(c: nat32, t: nat32, n: nat32): ent32
+        variable d: puntero a nat32
+        variable e: nat32
+        d := puntero(uhcis[c].mem + D_TD_TUBOS + t * 0x20)
+        e := d[1]
+        si e yb ACTIVO <> 0 entonces devolver T_ESPERA fin
+        si e yb FALLOS <> 0 entonces devolver T_FALLO fin
+        uhcis[c].alternas[t] := uhcis[c].alternas[t] xob 1
+        devolver ent32((e + 1) yb 0x7FF)
+    fin
+
+fin Uhci.

@@ -23,9 +23,9 @@
 ; =============================================================================
 módulo Usbhid
 
-    importar Usb, Usbbase, Consola, Raton, Tareas, Formato
+    importar Usb, Usbbase, Consola, Raton, Tareas, Registro
 
-    constante MAX_HID = 4
+    constante MAX_HID = 6
     constante REPITE_TRAS = 50                  ; centésimas hasta que una tecla empieza a repetirse
     constante REPITE_CADA = 4                   ; y cada cuántas se repite
 
@@ -293,7 +293,9 @@ módulo Usbhid
         fin
         control(a, 0x21, 0x0A, 0, interfaz, nulo, 0)
         si hids[n].teclado entonces
-            si hids[n].largo > 8 entonces hids[n].largo := 8 fin
+            ; (se pide el paquete entero: hay teclados que mandan algún octeto
+            ; más detrás de los ocho de siempre)
+            si hids[n].largo < 8 entonces hids[n].largo := 8 fin
             teclados := teclados + 1
         sino
             ; un ratón de arranque: botones, X e Y, un octeto cada uno
@@ -371,14 +373,14 @@ módulo Usbhid
     público función enseña_descriptor()
         variable i: nat32
         si no ratón_por_descriptor entonces devolver fin
-        imprimir1("usb: un ratón (o un panel) sin protocolo de arranque; su descriptor de informe, %u octetos:", descriptor_largo)
+        apunta1("usb: un ratón (o un panel) sin protocolo de arranque; su descriptor de informe, %u octetos:", descriptor_largo)
         i := 0
         mientras i < descriptor_largo y i < 160 hacer
-            si i mod 24 = 0 entonces escribir("\n  ") fin
-            imprimir1("%02X ", descriptor[i])
+            si i mod 24 = 0 entonces apunta0("\n  ") fin
+            apunta1("%02X ", descriptor[i])
             i := i + 1
         fin
-        escribir("\n")
+        apunta0("\n")
     fin
 
 fin Usbhid.

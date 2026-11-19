@@ -4,10 +4,15 @@
 # Hace la imagen de una memoria USB (64 MB, FAT16, arranque BIOS con GRUB) con
 # Hispa-Pentium, para probarlo en un PC de verdad: se graba tal cual en la
 # memoria (dd, Rufus en modo «imagen DD», balenaEtcher...) y se arranca de ella.
-# GRUB carga el núcleo por multiboot y, como módulos, los programas (el
-# intérprete de órdenes, el Bloc de notas, la Consola...) y un LEEME.TXT: el
-# núcleo no sabe leer todavía una memoria USB, así que esos módulos hacen de
-# unidad C: en memoria, de solo lectura (usuario.cas). Las entradas del menú:
+# GRUB carga el núcleo por multiboot. Desde la 0.6 el núcleo lee él la
+# memoria USB (xHCI y EHCI): es su unidad X:, la del sistema («unidad=X»), y
+# en ella se puede guardar («escritura=usb»: solo en las memorias USB; en los
+# discos de dentro del PC NO se escribe, aunque se ven: C:). Por si el USB de
+# un equipo no se deja, GRUB carga también, como módulos, los programas (el
+# intérprete de órdenes, el Bloc de notas, la Consola...) y un LEEME.TXT:
+# hacen de unidad M:, en memoria y de solo lectura (usuario.cas), que es la
+# del sistema si no hay X:. Con «registro», lo que el núcleo encuentra al
+# arrancar (discos, USB) queda en X:\ARRANQUE.TXT. Las entradas del menú:
 #   - el escritorio a 800x600 (el de siempre);
 #   - el escritorio «a la medida de la pantalla»: GRUB pone el modo que el
 #     panel dice que prefiere (lo lee de su EDID): «set gfxpayload=auto»;
@@ -16,9 +21,10 @@
 #     BIOS no lo da por VBE, GRUB pone el preferido o el que más se parezca);
 #   - los modos de vídeo que da la BIOS de ese equipo (la orden «videoinfo»
 #     de GRUB), para saber cuáles se pueden pedir;
-#   - el intérprete de órdenes y la consola del núcleo, en modo texto.
-# Todas llevan «sindisco»: el núcleo ni mira los discos del PC. (Sin eso
-# tampoco escribiría en ellos: hace falta «escritura» en la línea del núcleo.)
+#   - el escritorio «como en la 0.5»: sin tocar el USB ni mirar los discos
+#     («sinusb sindisco»), por si con lo nuevo un equipo no arranca;
+#   - el intérprete de órdenes y la consola del núcleo, en modo texto (la
+#     consola enseña en la pantalla lo que encuentra: discos y USB).
 # Necesita ser root (losetup, mount), python3, nasm, parted, dosfstools y
 # grub-pc-bin (grub-install --target=i386-pc).
 set -eu
@@ -43,7 +49,7 @@ for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO uhola:HOLA 
   MODULOS="$MODULOS  module /$N.BIN $N.BIN
 "
 done
-printf 'Hispa-Pentium: un n\xa3cleo de 32 bits escrito en Castel.\r\nEste archivo ha venido con el cargador: est\xa0 en la memoria, no en un disco.\r\n' > $W/f/LEEME.TXT
+printf 'Hispa-Pentium 0.6: un n\xa3cleo de 32 bits escrito en Castel.\r\nEste archivo est\xa0 en la memoria USB de arranque (la unidad X:) y, por si\r\nel USB no se deja, ha venido tambi\x82n con el cargador (la unidad M:).\r\n' > $W/f/LEEME.TXT
 MODULOS="$MODULOS  module /LEEME.TXT LEEME.TXT
 "
 IMG=$W/usb.img
@@ -66,11 +72,13 @@ G
     [ -n "${4:-}" ] && printf '  set gfxpayload=%s\n' "$4"
     printf '  boot\n}\n'
   }
-  entrada "Hispa-Pentium 0.5: el escritorio (800 x 600)" ESCRIT8.BIN "escritorio sindisco"
-  entrada "Hispa-Pentium 0.5: el escritorio a la medida de la pantalla" ESCRIT8.BIN "escritorio sindisco" "auto"
-  entrada "Hispa-Pentium 0.5: el escritorio (1024 x 600)" ESCRIT6.BIN "escritorio sindisco"
-  entrada "Hispa-Pentium 0.5: el escritorio (1366 x 768)" ESCRIT13.BIN "escritorio sindisco"
-  entrada "Hispa-Pentium 0.5: el escritorio (1024 x 768)" ESCRIT10.BIN "escritorio sindisco"
+  N="escritura=usb unidad=X registro"
+  entrada "Hispa-Pentium 0.6: el escritorio (800 x 600)" ESCRIT8.BIN "escritorio $N"
+  entrada "Hispa-Pentium 0.6: el escritorio a la medida de la pantalla" ESCRIT8.BIN "escritorio $N" "auto"
+  entrada "Hispa-Pentium 0.6: el escritorio (1024 x 600)" ESCRIT6.BIN "escritorio $N"
+  entrada "Hispa-Pentium 0.6: el escritorio (1366 x 768)" ESCRIT13.BIN "escritorio $N"
+  entrada "Hispa-Pentium 0.6: el escritorio (1024 x 768)" ESCRIT10.BIN "escritorio $N"
+  entrada "Hispa-Pentium 0.6: el escritorio SIN tocar el USB ni los discos (como la 0.5)" ESCRIT8.BIN "escritorio sindisco sinusb"
   cat <<'G'
 menuentry "Ver los modos de video que da la BIOS de este equipo" {
   insmod videoinfo
@@ -81,8 +89,8 @@ menuentry "Ver los modos de video que da la BIOS de este equipo" {
   read nada
 }
 G
-  entrada "Hispa-Pentium 0.5: el interprete de ordenes (modo texto)" SEMILLA.BIN "ordenes sindisco"
-  entrada "Hispa-Pentium 0.5: la consola del nucleo (modo texto)" SEMILLA.BIN "sindisco"
+  entrada "Hispa-Pentium 0.6: el interprete de ordenes (modo texto)" SEMILLA.BIN "ordenes $N"
+  entrada "Hispa-Pentium 0.6: la consola del nucleo (modo texto): dice los discos y el USB que encuentra" SEMILLA.BIN "$N"
 } > $W/m/boot/grub/grub.cfg
 grub-install --target=i386-pc --boot-directory=$W/m/boot --modules="part_msdos fat multiboot all_video videoinfo read echo" $L > $W/grub.txt 2>&1 || { cat $W/grub.txt; exit 1; }
 sync

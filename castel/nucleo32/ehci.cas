@@ -356,7 +356,7 @@ módulo Ehci
             pon_qtd(t, PID_ENTRA, 1, 0, 0, 1)
             m := 2
         fin
-        r := ejecuta(c, nat32(m), 300)
+        r := ejecuta(c, nat32(m), 100)
         si r <> 0 entonces devolver r fin
         si n = 0 entonces devolver 0 fin
         t := puntero(base + 0x40)

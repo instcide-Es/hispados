@@ -1,0 +1,61 @@
+; =============================================================================
+;  registro.cas - el registro del arranque del núcleo de Hispa-Pentium: lo
+;  que el núcleo va diciendo de los discos y del USB al arrancar se escribe
+;  (en la pantalla de texto y en el puerto serie, como todo) y además se
+;  apunta aquí, para poder guardarlo luego en un archivo: en un PC de verdad
+;  con el escritorio en marcha la pantalla de texto no se ve, y así lo que
+;  ha encontrado el núcleo queda en ARRANQUE.TXT, en la memoria USB (con
+;  «registro» en la línea del cargador: semilla.cas).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Registro
+
+    importar Formato
+
+    público constante CABE_REGISTRO = 8000
+    público variable registro: arreglo [CABE_REGISTRO] de byte   ; con los finales de línea del DOS
+    público variable registro_largo: nat32
+    variable renglón: arreglo [240] de byte
+    variable datos: arreglo [4] de nat32
+
+    ; escribe un texto y lo apunta
+    público función apunta0(t: puntero a byte)
+        variable i: nat32
+        escribir(t)
+        i := 0
+        mientras t[i] <> 0 y registro_largo + 2 < CABE_REGISTRO hacer
+            si t[i] = '\n' entonces
+                registro[registro_largo] := '\r'
+                registro_largo := registro_largo + 1
+            fin
+            registro[registro_largo] := t[i]
+            registro_largo := registro_largo + 1
+            i := i + 1
+        fin
+    fin
+
+    ; lo mismo, con formato (como imprimir, de Formato)
+    público función apunta(plantilla: puntero a byte, d: puntero a nat32)
+        formatear(renglón, 240, plantilla, d)
+        apunta0(renglón)
+    fin
+
+    público función apunta1(plantilla: puntero a byte, a: nat32)
+        datos[0] := a
+        apunta(plantilla, datos)
+    fin
+
+    público función apunta2(plantilla: puntero a byte, a: nat32, b: nat32)
+        datos[0] := a
+        datos[1] := b
+        apunta(plantilla, datos)
+    fin
+
+    público función apunta3(plantilla: puntero a byte, a: nat32, b: nat32, c: nat32)
+        datos[0] := a
+        datos[1] := b
+        datos[2] := c
+        apunta(plantilla, datos)
+    fin
+
+fin Registro.

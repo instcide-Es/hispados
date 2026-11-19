@@ -1,6 +1,6 @@
 # Hispa-Pentium — el núcleo de la gama XP, escrito en Castel
 
-*18/11/2026; puesto al día el 19/11/2026 (la 0.5: el escritorio, con sus menús, sus iconos y su portapapeles). Hispa-Pentium es el miembro de la
+*18/11/2026; puesto al día el 19/11/2026 (la 0.6: los discos SATA, las unidades con letra y el USB). Hispa-Pentium es el miembro de la
 familia Hispa-DOS para los PC de 2000 en adelante (la gama de Windows XP, [ROADMAP](ROADMAP.md)): un **núcleo propio
 de 32 bits, sin DOS por debajo**, con memoria virtual, escrito en
 [Castel](../castel/README.md). Esta nota cuenta lo que hay hecho: la semilla de la
@@ -27,8 +27,14 @@ GRUB, los programas del cargador como **unidad en memoria** cuando no hay disco,
 **botón secundario** del ratón con sus menús, **seleccionar, cortar, copiar y
 pegar** con un portapapeles del sistema, **iconos en el tapiz**, «Mi equipo»,
 ventanas que **cambian de tamaño** por el borde, **barra de menús** en las ventanas
-y el escritorio **a la medida de la pantalla** (1024 x 600 y los demás). Todo está
-en `castel/nucleo32/`.*
+y el escritorio **a la medida de la pantalla** (1024 x 600 y los demás). Y en la
+del 19/11 por la tarde (la **0.6**, el primer paso para poder **instalarlo en el
+disco duro**: que el núcleo vea los discos y el USB de los PC de verdad): los
+**discos SATA (AHCI)**, una **capa de discos** con el permiso de escritura disco a
+disco, la **FAT con varios volúmenes a la vez**, las **unidades con letra** (C: el
+disco de dentro, X: la memoria USB de arranque, M: lo que trae el cargador) y el
+**USB** (xHCI, EHCI y UHCI): **teclado, ratón y panel táctil**, **concentradores**
+y **memorias** (secciones 7 y 11). Todo está en `castel/nucleo32/`.*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -166,9 +172,10 @@ apagar`; después, `fsck.fat -n /dev/shm/pentium.img` da el disco por sano y `md
 
 ## 2. Las piezas
 
-El núcleo son unas 10.000 líneas de Castel en veinte módulos (más la biblioteca
-de 32 bits, `castel/biblioteca32/`: Textos32, Mem32 y Formato, CASTEL32.md §7). Sale
-un binario de unos 100 K (la mitad, el entorno gráfico).
+El núcleo son unas 14.500 líneas de Castel en treinta y dos módulos (más la
+biblioteca de 32 bits, `castel/biblioteca32/`: Textos32, Mem32 y Formato,
+CASTEL32.md §7). Sale un binario de unos 135 K (un tercio, el entorno gráfico; una
+cuarta parte, los discos y el USB).
 
 | Módulo | Qué hace |
 |---|---|
@@ -178,14 +185,22 @@ un binario de unos 100 K (la mitad, el entorno gráfico).
 | `paginas.cas` (Paginas) | La **paginación**: directorio y tablas de páginas, `mapear`, `desmapear`, `traducir`; el directorio del núcleo (la identidad) y uno por programa (`nuevo_espacio`, `soltar_espacio`); la **zona a la demanda**; y `usuario_puede`, para que la llamada al sistema no toque lo que no es del programa. |
 | `monton.cas` (Monton) | El **montón del núcleo**: `reservar` y `liberar`, con cabecera, pie, relleno y comprobación (sección 4). |
 | `tareas.cas` (Tareas) | Las **tareas**: fichas, colas, el **reloj que cambia de tarea**, `ceder`, `dormir`, `bloquear`/`despertar_tarea`, `terminar` y `esperar`; los **cerrojos** (`tomar`, `soltar`) y las tareas huérfanas (sección 5). |
-| `consola.cas` (Consola) | El **teclado** (IRQ 1: el español, con teclas muertas, Alt Gr y Bloq Mayús; su cola de letras, `leer_tecla`; Ctrl+C) y la **pantalla**, cada uno con su cerrojo: `escribir_trozo` (una ristra entera sin que se cuele otra tarea), `borrar_pantalla` (secciones 5 y 9). |
-| `ata.cas` (Ata) | Los **discos duros ATA** del canal primario, en PIO y con LBA de 28 bits: `identificar` (IDENTIFY: modelo y sectores), `leer_sectores`, `escribir_sectores` y `asentar` (sección 7). |
-| `fat.cas` (Fat) | El **sistema de archivos FAT12/16/32**, para leer y escribir: montar (disco entero o primera partición FAT), abrir por la ruta, leer, escribir, cortar, borrar, cambiar de nombre, hacer y borrar carpetas, los nombres largos, los clusters libres (sección 7). |
+| `consola.cas` (Consola) | El **teclado** (el PS/2, por la IRQ 1, o uno USB: el español, con teclas muertas, Alt Gr y Bloq Mayús; su cola de letras, `leer_tecla`; Ctrl+C) y la **pantalla**, cada uno con su cerrojo: `escribir_trozo` (una ristra entera sin que se cuele otra tarea), `borrar_pantalla` (secciones 5 y 9). |
+| `pci.cas` (Pci) | El **bus PCI**: leer y escribir la configuración de cada aparato (puertos `0xCF8` y `0xCFC`) y buscar los de una clase (la controladora SATA, las de USB), también detrás de los puentes. |
+| `ata.cas` (Ata) | Los **discos duros ATA** del canal IDE primario, en PIO y con LBA de 28 bits: `identificar` (IDENTIFY: modelo y sectores), `leer_sectores`, `escribir_sectores` y `asentar` (sección 7). |
+| `ahci.cas` (Ahci) | Los **discos SATA** de una controladora **AHCI**: los puertos, IDENTIFY, leer y escribir por **DMA** con **LBA de 48 bits** (sección 7). |
+| `discos.cas` (Discos) | **Los discos, sean de la clase que sean** (IDE, SATA, USB): una tabla, y leer, escribir y asentar sin saber qué hay debajo. Lleva el **permiso de escritura** de cada disco. |
+| `fat.cas` (Fat) | El **sistema de archivos FAT12/16/32**, para leer y escribir, con **varios volúmenes montados a la vez**: abrir por la ruta, leer, escribir, cortar, borrar, cambiar de nombre, hacer y borrar carpetas, los nombres largos, los clusters libres (sección 7). |
+| `unidades.cas` (Unidades) | **Las unidades y sus letras**: mira las particiones de cada disco (tabla del **MBR** y **GPT**), monta cada volumen FAT y le da su letra (C:, D:... los de dentro; X:, Y:, Z: las memorias USB; M: la unidad en memoria); y cuál es la **unidad del sistema**. |
+| `usbbase.cas`, `xhci.cas`, `ehci.cas`, `uhci.cas`, `usb.cas` | **El USB** (sección 11): las controladoras **xHCI** (USB 3), **EHCI** (USB 2.0) y **UHCI** (USB 1.1), quitárselas a la BIOS, y **enumerar** lo que hay enchufado, también detrás de **concentradores**. |
+| `usbhid.cas` (Usbhid) | Los **teclados y ratones USB** (y los paneles táctiles que se presentan como ratón): le dan a `consola.cas` y a `raton.cas` lo mismo que los PS/2. |
+| `usbalm.cas` (Usbalm) | Las **memorias USB** (almacenamiento «solo a granel», órdenes SCSI): un disco más para `discos.cas`. |
+| `registro.cas` (Registro) | El **registro del arranque**: lo que el núcleo dice de los discos y del USB, apuntado para guardarlo en `ARRANQUE.TXT`. |
 | `fecha.cas` (Fecha) | La **fecha y la hora** del reloj de pila del PC (la CMOS), como las guarda la FAT. |
 | `usuario.cas` (Usuario) | Los **programas del anillo 3**: los carga **del disco** (o de los módulos de multiboot) en su espacio de direcciones y atiende la **llamada al sistema** (`int 0x80`, sección 6). |
 | `video.cas` (Video) | El **modo gráfico**: el que haya dejado el cargador (multiboot) o el de la **VBE de Bochs/QEMU**; la memoria de la pantalla, a la vista del núcleo; y, si el modo no es de 32 bits, el volcado a 24 o a 16 (sección 10). |
 | `grafico.cas` (Grafico), `letra.cas` (Letra) | **Dibujar**: los lienzos; rectángulos, degradados, esquinas redondas, líneas, círculos, el disquete de la casa, texto con la **letra de 8x16** (la de Hispa Ventanas, hecha por `hazletra.py`) y copiar de un lienzo a otro. |
-| `raton.cas` (Raton) | El **ratón PS/2** (IRQ 12): dónde está la flecha y la cola de clics. |
+| `raton.cas` (Raton) | El **ratón** (el PS/2, por la IRQ 12, o uno USB): dónde está la flecha y la cola de clics. |
 | `ventanas.cas` (Ventanas) | El **gestor de ventanas**: un lienzo por ventana, el marco, el orden, componer solo lo que cambia con doble búfer, la flecha (y sus formas), mover y **cambiar de tamaño**, y repartir el ratón y las teclas. |
 | `emergente.cas` (Emergente) | Los **menús emergentes**: el del botón secundario y el que cuelga de una barra de menús. |
 | `terminal.cas` (Terminal) | Los **terminales**: dos tubos para que una ventana tenga dentro al intérprete de órdenes y a sus programas. |
@@ -199,7 +214,7 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `llamadas.cas` (Llamadas) | — | El **módulo de las llamadas al sistema** para los programas: `tecla`, `leer_línea` (con su historia), `abrir`, `crear`, `leer`, `escribir_archivo`, `mover`, `cortar`, `cerrar`, `borrar`, `renombrar`, `crear_carpeta`, `cambiar_carpeta`, `redirigir`, `entrada`, `lanzar`, `esperar`, `argumentos`, `dato`, `más_memoria`...; y las **ventanas** (`ventana`, `suceso`, `rectángulo`, `degradado`, `texto`, `mapa`...), los **menús** (`menú`), el **portapapeles** (`al_portapapeles`, `del_portapapeles`) y los terminales. Un programa lo importa y no escribe ni una `int 0x80`. |
 | `barramenu.cas` (Barramenu) | — | La **barra de menús** de una ventana (Archivo, Edición, Ayuda): pintarla, saber qué rótulo se ha pulsado y abrir su menú. |
 | `ubloc.cas` | `BLOC.BIN` | El **Bloc de notas** del escritorio (sección 10). |
-| `uequipo.cas` | `EQUIPO.BIN` | **Mi equipo**: las unidades y lo que hay en ellas (sección 10). |
+| `uequipo.cas` | `EQUIPO.BIN` | **Mi equipo**: las unidades (con su letra, de qué son y lo que cabe en ellas) y lo que hay dentro (sección 10). |
 | `uconsola.cas` | `CONSOLA.BIN` | La **Consola** del escritorio: el intérprete de órdenes dentro de una ventana (sección 10). |
 | `uordenes.cas` | `ORDENES.BIN` | El **intérprete de órdenes** (sección 8). |
 | `uhola.cas` | `HOLA.BIN` | Escribe, suma, duerme, pide su número de tarea y prueba que la llamada al sistema no le deja enseñar la memoria del núcleo. |
@@ -222,6 +237,7 @@ Las direcciones (lo mismo en todos los espacios, menos la parte del usuario):
 | `0xC0000000` | `0xC3FFFFFF` | **el montón del núcleo** (hasta 64 MB: de él salen los lienzos de las ventanas, el doble búfer y el tapiz). |
 | `0xD0000000` | `0xD03FFFFF` | **la zona a la demanda** (4 MB): vacía; el fallo de página pone un marco donde se toque. |
 | `0xE0000000` | `0xE0FFFFFF` | **la pantalla gráfica** (16 MB): la memoria de la tarjeta, que está muy por encima de la RAM, puesta aquí cuando se entra en un modo gráfico. Sus tablas están hechas desde el arranque: la ven todos los espacios de direcciones. |
+| `0xE8000000` | `0xE83FFFFF` | **los registros de los aparatos** (4 MB): los de la controladora AHCI y los de las de USB, que también están por encima de la RAM (`mapear_aparato`, sin caché). Su tabla, hecha desde el arranque. |
 
 - Los marcos salen del **mapa de memoria de multiboot**; sin él, de la memoria
   alta que diga el cargador. Con QEMU y 32 MB: 8160 marcos, unos 7835 libres al
@@ -440,25 +456,102 @@ Los registros de datos (DS, ES...) llevan siempre el selector de datos del usuar
 plano: el anillo 0 lo puede usar, y así pasar a una tarea del anillo 3 no obliga a
 tocarlos. Solo la pila del núcleo usa el del anillo 0.
 
-## 7. El disco y los archivos
+## 7. Los discos, las unidades y los archivos
 
-**El controlador ATA** (`ata.cas`): el canal IDE primario (puertos `0x1F0`-`0x1F7`
-y `0x3F6`), sus dos discos, en **PIO** y con **LBA de 28 bits** (hasta 128 GB).
-`identificar()` manda IDENTIFY a cada uno: si contesta, guarda su modelo y cuántos
-sectores tiene (un lector de CD, ATAPI, se reconoce por su firma y se deja). 
-`leer_sectores(disco, lba, n, destino)` manda la orden de leer (hasta 255 sectores
-de una vez) y trae cada sector de palabra en palabra por el puerto de datos. No
-usa la interrupción del disco (se le dice que no la dé): mira el estado hasta que
-el dato está, con un tope de vueltas por si el disco no contesta. Un cerrojo hace
-que las tareas usen el canal de una en una.
+**Los discos**, de tres clases, cada una con su controlador:
+
+- **IDE** (`ata.cas`): el canal IDE primario (puertos `0x1F0`-`0x1F7` y `0x3F6`),
+  sus dos discos, en **PIO** y con **LBA de 28 bits** (hasta 128 GB).
+  `identificar()` manda IDENTIFY a cada uno: si contesta, guarda su modelo y
+  cuántos sectores tiene (un lector de CD, ATAPI, se reconoce por su firma y se
+  deja). `leer_sectores(disco, lba, n, destino)` manda la orden de leer (hasta 255
+  sectores de una vez) y trae cada sector de palabra en palabra por el puerto de
+  datos. No usa la interrupción del disco (se le dice que no la dé): mira el
+  estado hasta que el dato está, con un tope de vueltas por si el disco no
+  contesta. Es lo que llevan los PC de antes y los de después puestos en modo
+  «IDE» (el HP Mini 5103).
+- **SATA** (`ahci.cas`, desde la 0.6): una controladora **AHCI** (PCI clase 01,
+  subclase 06, interfaz 01: la busca `pci.cas`). Sus registros están en la
+  memoria (el registro base número 5), muy por encima de la RAM: se ponen a la
+  vista del núcleo en la zona de los aparatos (sección 3). Se le pide a la BIOS
+  que la suelte (si la norma lo prevé en esa controladora), se la pone en modo
+  AHCI y **no se reinicia** (los discos ya giran: los arrancó la BIOS). A cada
+  puerto con un disco (enlace hecho y firma de disco: un lector de CD se deja)
+  se le da una página con su **lista de órdenes** (32 cabeceras; se usa una), el
+  sitio de los **FIS** que contesta el disco y la **tabla de la orden** (el FIS
+  de la orden y la lista de trozos de memoria, PRD); se para el puerto, se le
+  dan sus tablas y se vuelve a poner en marcha. Órdenes: IDENTIFY, **READ DMA
+  EXT** y **WRITE DMA EXT** (LBA de 48 bits; las de 28 si el disco es de los de
+  antes) y FLUSH CACHE. Los datos van por **DMA**: el disco los deja (o los
+  toma) él solo en una página del núcleo, ocho sectores por orden, y de ahí se
+  copian adonde se piden. Sin interrupciones: se mira el puerto hasta que la
+  orden sale de la lista (o el disco da un error: entonces se para y se
+  arranca el puerto, para que valga la siguiente). Los sectores se cuentan en
+  32 bits: hasta 2 TB. Es lo que llevan el Toshiba NB250 (8086:27C1) y casi
+  todos los PC de 2008 en adelante.
+- **USB** (`usbalm.cas`, desde la 0.6): las memorias USB (sección 11).
+
+**Una sola tabla de discos** (`discos.cas`): quien lee o escribe sectores (la FAT,
+las particiones) lo hace por `leer_sectores(d, lba, n, destino)`,
+`escribir_sectores` y `asentar`, con el número del disco en esa tabla, y no sabe
+si debajo hay un IDE, un SATA o una memoria USB. Cada controlador tiene su
+cerrojo: las tareas usan cada uno de uno en uno.
+
+**En los discos no se escribe si no se pide.** En un PC de verdad, el disco de
+dentro es el del dueño, con sus cosas. Así que, de fábrica, **todos los discos
+son de solo lectura**: los controladores no mandan ni una orden de escribir, y
+crear, escribir, borrar, cambiar de nombre o hacer carpetas da «es de solo
+lectura». El permiso se lleva **disco a disco** (`discos.cas`), y lo da el
+cargador en la línea del núcleo:
+
+| En la línea del cargador | Dónde se puede escribir |
+|---|---|
+| (nada) | en ningún disco |
+| **`escritura=usb`** | solo en las **memorias USB** (los discos de dentro se ven, pero no se tocan): lo que lleva la memoria USB de prueba (sección 11) |
+| **`escritura`** | en todos (`-append "ordenes escritura"`; `probar.sh` lo dice él solo cuando se le da una imagen de disco; con `SOLO_LECTURA=1`, no) |
+
+Hay dos cerrojos, uno detrás de otro: `discos.cas` no pasa una escritura a un
+disco sin permiso, y cada controlador se niega por su cuenta si no se le ha dicho
+que puede. Con **`sindisco`** el núcleo ni mira los discos de dentro (ni IDE ni
+SATA); con **`sinusb`**, ni toca el USB.
+
+**Las unidades y sus letras** (`unidades.cas`), como en Hispa-DOS:
+
+| Letra | Qué es |
+|---|---|
+| `C:`, `D:`... | los volúmenes FAT de los **discos de dentro** (IDE y SATA), por orden |
+| `X:`, `Y:`, `Z:` | los de las **memorias USB**: `X:` es la memoria de arranque (si hay varias, la que lleva `ORDENES.BIN`) |
+| `M:` | la **unidad en memoria**: los archivos que ha traído el cargador (abajo) |
+
+De cada disco se miran sus **particiones**: si el disco entero es un volumen FAT
+(sin tabla), vale; si no, la tabla del **MBR** (las cuatro primarias, de las
+clases 01, 04, 06, 0B, 0C, 0E y EF) o, si es un disco de los de ahora, la **GPT**
+(su cabecera, en el sector 1, y sus entradas: se prueba cada partición, que la
+FAT se reconoce por su primer sector). Cada volumen FAT que aparece **se monta**
+(hasta 7 a la vez) y recibe su letra. Un disco sin ninguno se dice («sin FAT») y
+Mi equipo lo enseña como disco que no se puede leer. No se miran todavía las
+particiones lógicas (las de dentro de una extendida).
+
+**La unidad del sistema** es de la que se cargan los programas cuando no se dice
+otra (el intérprete, el Bloc de notas...): la que diga el cargador
+(**`unidad=X`**) si está; si no, la primera que haya: `C:`, luego `X:`, luego
+`M:`. Cada tarea tiene **su unidad y su carpeta de trabajo** (las hereda de quien
+la lanza); una ruta puede llevar la letra delante (`X:\CARTAS\UNA.TXT`), y sin
+ella es de la unidad de trabajo. (Al cambiar de unidad se va a su raíz: no se
+guarda una carpeta de trabajo por unidad, como hace el DOS.)
 
 **La FAT** (`fat.cas`). Leer:
 
 - **FAT12, FAT16 y FAT32**, según el número de clusters (como manda la norma).
-  El volumen puede ser el **disco entero** o la **primera partición FAT** de la
-  tabla de particiones del MBR (clases 01, 04, 06, 0B, 0C, 0E).
+  Un volumen es un **disco entero** o **una partición** (los reparte
+  `unidades.cas`, arriba), y puede haber **varios montados a la vez**: lo de
+  cada uno (dónde empieza, su clase, sus FAT, sus clusters libres...) está en
+  su ficha, y las funciones trabajan con uno, «el que está en uso»; al pasar
+  de uno a otro, lo que quedara por escribir del primero va a su disco. Un
+  cerrojo para todos: las tareas entran en la FAT de una en una.
 - **Rutas** con `\` o `/`, con carpetas (`TEXTOS\PIRATA.TXT`), sin distinguir
-  mayúsculas; `C:` delante se admite. Nombres de 8+3, y los largos (abajo).
+  mayúsculas (la letra de la unidad la quita antes `usuario.cas`, que es quien
+  sabe de unidades). Nombres de 8+3, y los largos (abajo).
 - Un archivo o una carpeta abiertos son un **manejador**; de un archivo se leen
   octetos (siguiendo su cadena de clusters por la FAT; en FAT12, con las entradas
   de 12 bits a caballo entre dos sectores); de una carpeta, sus entradas una a una
@@ -470,31 +563,42 @@ que las tareas usen el canal de una en una.
 - Los **clusters libres**: en FAT12/16 se cuentan en la FAT; en FAT32, lo que diga
   su sector de información.
 
-Al arrancar, el núcleo identifica los discos y monta el primero si es FAT (lo dice
-en una línea). Con `sindisco` en la línea del cargador, ni los mira.
+Al arrancar, el núcleo busca los discos (los de dentro y las memorias USB), monta
+los volúmenes FAT que tengan y dice lo que hay, una línea por disco y otra con
+las unidades:
 
-**En el disco no se escribe si no se pide.** En un PC de verdad, el disco del canal
-IDE primario es el del dueño, con sus cosas. Así que, de fábrica, el disco es **de
-solo lectura**: el controlador no manda ni una orden de escribir, y crear, escribir,
-borrar, cambiar de nombre o hacer carpetas da «es de solo lectura». Solo si el
-cargador se lo dice al núcleo (**`escritura`** en su línea: `-append "ordenes
-escritura"`, o en la entrada de GRUB) se escribe. (`probar.sh` lo dice él solo
-cuando se le da una imagen de disco; con `SOLO_LECTURA=1`, no.)
+```
+usb: controladora EHCI 8086:27CC, 8 puertos
+usb: aparato 0, 0951:1666, velocidad alta, en el puerto 3; almacenamiento
+usb: 0 teclados, 0 ratones, 1 memorias.
+disco 0: TOSHIBA MK1665GSX, 152627 MB, sin FAT (SATA).
+disco 1: Kingston DataTraveler 3.0, 14999 MB, FAT16 (USB).
+los discos de dentro son de solo lectura (para escribir en ellos: «escritura» en la línea del cargador).
+unidades: M: (en memoria) X: (disco 1, USB, FAT16); la del sistema, X:
+```
 
-**Sin disco: la unidad en memoria.** Si no hay disco FAT (un PC sin IDE, arrancado
-de una memoria USB con GRUB: sección 11) pero el cargador ha traído archivos como
-**módulos de multiboot**, esos módulos hacen de **unidad C: en memoria, de solo
-lectura**: `DIR` los enseña, `TYPE` los lee, los programas se lanzan por su nombre
-(también `ordenes` desde la consola del núcleo, y el Bloc de notas y la Consola
-desde el escritorio) y un programa los abre y los lee como archivos. No tiene
-carpetas, y no se puede crear ni borrar nada en ella (`usuario.cas`).
+(Eso es lo que se espera en el Toshiba NB250 con la memoria USB de prueba; en
+QEMU, lo mismo con sus discos de imagen. Con **`registro`** en la línea del
+cargador, esas líneas quedan además en **`ARRANQUE.TXT`**, en la unidad del
+sistema, si es la memoria de arranque y se puede escribir en ella: en un PC de
+verdad con el escritorio en marcha la pantalla de texto no se ve.)
+
+**La unidad en memoria (M:).** Si el cargador ha traído archivos como **módulos
+de multiboot** (un PC arrancado de una memoria USB con GRUB: sección 11), esos
+módulos hacen de **unidad M:, en memoria y de solo lectura**: `DIR` los enseña,
+`TYPE` los lee, los programas se lanzan por su nombre y un programa los abre y
+los lee como archivos. No tiene carpetas, y no se puede crear ni borrar nada en
+ella (`usuario.cas`). Es la **unidad del sistema** cuando no hay otra: un PC sin
+disco FAT cuyo USB no se deja (o arrancado con `sinusb sindisco`), que así tiene
+al menos el intérprete, el Bloc de notas y la Consola.
 
 **Escribir** (desde el 19/11):
 
-- **El controlador** (`escribir_sectores`): la orden de escribir (hasta 255
-  sectores de una vez), cada sector de palabra en palabra al puerto de datos,
-  esperando a que el disco lo pida y, al final, a que lo haya tomado. `asentar`
-  manda FLUSH CACHE (que el disco pase a la superficie lo que tenga guardado).
+- **El controlador** (`escribir_sectores`): en el IDE, la orden de escribir
+  (hasta 255 sectores de una vez), cada sector de palabra en palabra al puerto
+  de datos, esperando a que el disco lo pida y, al final, a que lo haya tomado;
+  en el SATA, WRITE DMA EXT; en una memoria USB, WRITE(10). `asentar` manda
+  FLUSH CACHE (que el disco pase a la superficie lo que tenga guardado).
 - **Los archivos**: un archivo se abre para leer, para leer y escribir, para
   crearlo (si ya estaba, queda vacío) o para añadir al final. Al escribir más allá
   de su final **crece**: se le dan clusters libres (se buscan en la FAT desde donde
@@ -540,8 +644,11 @@ nombre, los trozos se tachan con la entrada (que no queden sueltos).
 `uordenes.cas` (`ORDENES.BIN` en el disco): **un programa del anillo 3**, escrito
 en Castel con `modelo usuario`, que no toca nada del núcleo: todo lo hace por las
 llamadas al sistema. Lee una línea del teclado y hace lo que dice; las órdenes
-valen en mayúsculas o en minúsculas. La petición de órdenes enseña la carpeta de
-trabajo (`C:\TEXTOS>`).
+valen en mayúsculas o en minúsculas. La petición de órdenes enseña la unidad y la
+carpeta de trabajo (`C:\TEXTOS>`, o `X:\>` arrancando de la memoria USB). **`X:`**
+(una letra y dos puntos) cambia de unidad; las rutas pueden llevar la letra
+delante (`COPY C:\LEEME.TXT X:\`, `DIR D:\TEXTOS`), y `CD X:\CARTAS` cambia a la
+vez de unidad y de carpeta.
 
 | Orden | Qué hace |
 |---|---|
@@ -734,11 +841,14 @@ propio, con sus tildes y su eñe).
   **Pegar** teclea lo del portapapeles. Lo seleccionado se suelta en cuanto se
   escribe algo en la pantalla. Menús: Archivo (Cerrar), Edición (Copiar, Pegar,
   Seleccionar todo) y Ayuda (las órdenes: teclea `AYUDA`).
-- **Mi equipo** (`EQUIPO.BIN`, `uequipo.cas`): **las unidades** del equipo (de
-  momento, una: C:, el disco FAT, con lo que mide y lo que le queda; o, sin disco,
-  lo que ha traído el cargador, en memoria). Con dos clics se entra: sus carpetas
-  y sus archivos, con su tamaño. Dos clics en una carpeta entran en ella; en «..»,
-  se vuelve; un texto (`.TXT`, `.BAT`) lo abre el Bloc de notas; un programa
+- **Mi equipo** (`EQUIPO.BIN`, `uequipo.cas`): **las unidades** del equipo, una
+  debajo de otra, cada una con su letra y su nombre, de qué es («disco duro
+  (SATA)», «memoria USB», «en memoria»), su FAT, lo que mide, lo que le queda y
+  si es de solo lectura; y, detrás, los discos en los que no hay nada que se
+  pueda leer («sin ninguna partición FAT»: el disco de un PC con Windows en
+  NTFS, por ejemplo). Con dos clics se entra en una unidad: sus carpetas y sus
+  archivos, con su tamaño. Dos clics en una carpeta entran en ella; en «..», se
+  vuelve; un texto (`.TXT`, `.BAT`) lo abre el Bloc de notas; un programa
   (`.BIN`) se lanza. Las flechas, Intro y Retroceso también valen.
 
 ### Cómo está hecho
@@ -869,32 +979,47 @@ pasado hacia arriba; menús que se abren con Alt y submenús; letras de otros
 tamaños y de ancho variable; el ajuste del doble clic; y que el tapiz pueda ser
 una imagen del disco.
 
-## 11. En un PC de verdad: GRUB y la memoria USB
+## 11. En un PC de verdad: GRUB, la memoria USB y el USB
 
 `nucleo32/usb.sh IMAGEN` hace la imagen de una **memoria USB** (64 MB, FAT16,
 arranque BIOS con GRUB) para probar Hispa-Pentium en un PC: se graba tal cual en la
 memoria y se arranca de ella. (Necesita ser root, `parted`, `dosfstools` y
-`grub-pc-bin`.) El menú de GRUB:
+`grub-pc-bin`.) El menú de GRUB (la 0.6):
 
 | Entrada | Qué arranca | El modo |
 |---|---|---|
-| el escritorio (800 x 600) | `ESCRIT8.BIN escritorio sindisco` | el de su cabecera |
-| el escritorio **a la medida de la pantalla** | `ESCRIT8.BIN escritorio sindisco` | `set gfxpayload=auto`: el que el panel dice que prefiere |
-| el escritorio (1024 x 600) | `ESCRIT6.BIN escritorio sindisco` | el de su cabecera |
-| el escritorio (1366 x 768) | `ESCRIT13.BIN escritorio sindisco` | el de su cabecera |
-| el escritorio (1024 x 768) | `ESCRIT10.BIN escritorio sindisco` | el de su cabecera |
+| el escritorio (800 x 600) | `ESCRIT8.BIN escritorio escritura=usb unidad=X registro` | el de su cabecera |
+| el escritorio **a la medida de la pantalla** | lo mismo | `set gfxpayload=auto`: el que el panel dice que prefiere |
+| el escritorio (1024 x 600) | `ESCRIT6.BIN` con lo mismo | el de su cabecera |
+| el escritorio (1366 x 768) | `ESCRIT13.BIN` con lo mismo | el de su cabecera |
+| el escritorio (1024 x 768) | `ESCRIT10.BIN` con lo mismo | el de su cabecera |
+| el escritorio **sin tocar el USB ni los discos** (como la 0.5) | `ESCRIT8.BIN escritorio sindisco sinusb` | el de su cabecera |
 | ver los modos de vídeo que da la BIOS | la orden `videoinfo` de GRUB | — |
-| el intérprete de órdenes (modo texto) | `SEMILLA.BIN ordenes sindisco` | texto |
-| la consola del núcleo (modo texto) | `SEMILLA.BIN sindisco` | texto |
+| el intérprete de órdenes (modo texto) | `SEMILLA.BIN ordenes escritura=usb unidad=X registro` | texto |
+| la consola del núcleo (modo texto) | `SEMILLA.BIN escritura=usb unidad=X registro` | texto |
 
-- **Los programas vienen como módulos.** El núcleo no sabe leer todavía una
-  memoria USB (ni un disco SATA), y en casi todos los portátiles no hay IDE
-  clásico: GRUB carga con el núcleo `ORDENES.BIN`, `BLOC.BIN`, `CONSOLA.BIN`,
-  `EQUIPO.BIN`, `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN` y `LEEME.TXT`, y
-  hacen de **unidad C: en memoria** (sección 7). No se puede guardar nada: el Bloc
-  de notas lo dice («es de solo lectura»).
-- **`sindisco`**: el núcleo ni mira los discos del PC. Y aunque los mirara, **no
-  escribe en ellos** sin `escritura` (sección 7).
+- **La memoria de arranque es la unidad X:**, la del sistema (`unidad=X`): desde
+  la 0.6 el núcleo la lee él, con su USB (más abajo). De ella se cargan el
+  intérprete, el Bloc de notas, la Consola y Mi equipo, y **en ella se puede
+  guardar** (`escritura=usb`): el Bloc de notas deja ahí sus textos.
+- **Los discos de dentro del PC se ven, pero no se tocan**: el núcleo busca los
+  IDE y los SATA y monta sus volúmenes FAT como `C:`, `D:`... de **solo
+  lectura** (`escritura=usb` da permiso solo a las memorias USB: sección 7). Mi
+  equipo los enseña; un disco sin FAT (NTFS, ext4...) sale como disco que no se
+  puede leer.
+- **Los programas vienen también como módulos**, por si el USB de un equipo no
+  se deja: GRUB carga con el núcleo `ORDENES.BIN`, `BLOC.BIN`, `CONSOLA.BIN`,
+  `EQUIPO.BIN`, `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN` y `LEEME.TXT`, que
+  hacen de **unidad M: en memoria** (sección 7). Si no hay X:, la del sistema es
+  ella, y entonces no se puede guardar nada (el Bloc de notas lo dice).
+- **`registro`**: lo que el núcleo encuentra al arrancar (los discos, las
+  controladoras USB y cada aparato, las unidades) queda en **`X:\ARRANQUE.TXT`**.
+  Es para poder verlo luego desde otro equipo: con el escritorio en marcha no se
+  ve la pantalla de texto del núcleo. (La última entrada, la consola del núcleo
+  en modo texto, lo enseña en la pantalla.)
+- **Si con lo nuevo un equipo no arranca** (se queda parado al tomar el USB, o
+  al mirar los discos), la entrada «sin tocar el USB ni los discos» arranca como
+  la 0.5: `sinusb` y `sindisco`, con los programas de la unidad M:.
 - **El modo gráfico, de GRUB.** En un PC de verdad no está la tarjeta de QEMU: el
   modo lo tiene que poner el cargador antes de entrar en el núcleo (con la VBE de
   la BIOS, que desde el modo protegido ya no se puede llamar). Multiboot lo prevé:
@@ -946,53 +1071,92 @@ memoria y se arranca de ella. (Necesita ser root, `parted`, `dosfstools` y
   pida el modo a la VBE (`int 10h`, `4F02h`) antes de pasar a modo protegido y
   deje al núcleo la misma información.
 
-### Guardar en la memoria USB: el plan (sin hacer)
+### El USB
 
-Arrancando de la memoria USB **no se puede guardar nada**: el núcleo no tiene
-controlador de USB, y lo que ve como C: son copias en memoria de lo que cargó
-GRUB. Para escribir en la propia memoria (y, de paso, leer de ella en vez de
-depender de los módulos) hace falta, por este orden:
+Desde la 0.6 el núcleo tiene su USB, escrito en Castel (con lo aprendido en
+HSPUSB, el USB de Hispa-DOS, que está en ensamblador de 16 bits: `drivers/hspusb.asm`
+y `docs/USB.md`). Todo se hace **al arrancar** y **sin interrupciones** (las
+controladoras se miran):
 
-1. **Encontrar el controlador USB** en el bus PCI (clase 0x0C, subclase 0x03) y
-   saber de cuál es: **UHCI** (interfaz 0x00; USB 1.1, por puertos: los Intel
-   hasta el ICH), **OHCI** (0x10; USB 1.1, por memoria), **EHCI** (0x20; USB 2.0)
-   o **xHCI** (0x30; USB 3). Un PC como el NB250 tiene EHCI con UHCI de
-   compañeros; los de 2012 en adelante, xHCI. Lo primero, **quitarle el
-   controlador a la BIOS** (el «traspaso» de EHCI y xHCI; en UHCI, apagar la
-   imitación de teclado en el registro `LEGSUP`): hasta entonces la BIOS imita
-   con él el teclado y el ratón PS/2, y al quitárselo **se pierden** si son USB
-   (en el NB250 no: son PS/2 de verdad).
-2. **EHCI primero** (es lo que llevan los equipos de esta gama, y una memoria
-   USB 2.0 enchufada a un puerto trasero cae en él): reiniciarlo, la lista
-   asíncrona con sus cabezas de cola (QH) y sus descriptores de transferencia
-   (qTD), y el estado de los puertos (encender, reiniciar el puerto, ver la
-   velocidad). Las memorias de velocidad «alta» van directas por EHCI; lo de
-   velocidad baja y completa (teclados, ratones) va a los UHCI compañeros o por
-   un concentrador, y queda para después.
-3. **Enumerar el dispositivo**: transferencias de control al punto 0 (dar
-   dirección, leer el descriptor del dispositivo y el de configuración, poner la
-   configuración) y quedarse con el que sea de la clase **almacenamiento**
-   (0x08), subclase SCSI (0x06), protocolo **«solo en bloque»** (0x50), con sus
-   dos puntos de bloque (uno de entrada y uno de salida).
-4. **El almacenamiento**: cada orden es un envoltorio de 31 octetos (CBW), los
-   datos y un estado de 13 (CSW). Órdenes SCSI: `INQUIRY`, `TEST UNIT READY`,
-   `READ CAPACITY (10)`, `READ (10)` y `WRITE (10)`; `REQUEST SENSE` cuando una
-   falla, y el reinicio de la clase si se atasca.
-5. **Enchufarlo a la FAT**: hoy `fat.cas` llama a `ata.cas` directamente; hay
-   que meter en medio una **tabla de discos** (leer sectores, escribir sectores,
-   asentar, cuántos hay) para que la FAT no sepa si debajo hay un ATA o una
-   memoria USB. Y montar su primera partición (la imagen de `usb.sh` lleva tabla
-   de particiones, que la FAT ya sabe leer).
-6. **Después**: UHCI y OHCI (con ellos, teclados y ratones USB, que es lo que
-   de verdad les falta a los PC sin PS/2), xHCI (los PC de 2012 en adelante: más
-   largo, con sus anillos de transferencias y sus contextos), los
-   concentradores, y enchufar y desenchufar en marcha.
+1. **Las controladoras** (`usb.cas`): se buscan en el bus PCI (clase 0x0C,
+   subclase 0x03) las **xHCI** (interfaz 0x30), las **EHCI** (0x20) y las
+   **UHCI** (0x00), por ese orden, se le
+   **quitan a la BIOS** (el «traspaso»: «es del sistema», esperar a que la suelte
+   y apagar sus SMI; en el EHCI se hace siempre, que hay BIOS —la de los Mac— que
+   lo usan sin decir que es suyo), se reinician y se ponen en marcha. Hasta
+   entonces la BIOS imitaba con ellas un teclado PS/2; desde entonces, el teclado
+   y el ratón USB los lleva el núcleo.
+2. **xHCI** (`xhci.cas`), el de los PC de 2012 en adelante: la tabla de contextos
+   (con las páginas «de borrador» que pida la controladora), el anillo de órdenes
+   y el de sucesos; por cada aparato, su ranura, su contexto y un anillo de
+   transferencias por extremo. La controladora da ella las direcciones y lleva
+   las transacciones partidas; el núcleo le dice de cada aparato su velocidad, su
+   **cadena de ruta** (por qué puerto de cada concentrador se llega a él) y, si
+   es de USB 1.x detrás de un concentrador de alta velocidad, su traductor.
+   Contextos de 32 o de 64 octetos, puertos de USB 2 y de USB 3.
+3. **EHCI** (`ehci.cas`), el de los equipos de 2002 a 2012: la lista asíncrona
+   (una cola de trabajo para control y «a granel», que se rellena en cada
+   transferencia) y la **lista periódica** con las tuberías de interrupción. Los
+   aparatos de USB 1.x **detrás de un concentrador de alta velocidad** (el
+   teclado y el panel de un MacBook cuelgan así de su EHCI) van con
+   **transacciones partidas**: la cola lleva la dirección y el puerto del
+   concentrador y, en las tuberías, se pregunta en la microtrama 0 y se recoge
+   en las 2, 3 y 4. Lo que hay en un puerto de la controladora y no es de alta
+   velocidad se cede a la controladora compañera (UHCI), como manda la norma.
+   **UHCI** (`uhci.cas`), las compañeras de un EHCI (a ellas van a parar los
+   teclados y ratones enchufados a un PC de 2002 a 2010: el Toshiba NB250 y el
+   HP Mini tienen cuatro) y las únicas de los PC de antes: sus registros son
+   puertos de E/S; la lista de 1024 tramas apunta toda a la cadena de las
+   tuberías de interrupción y, detrás, a la cola de trabajo. Cada paquete es
+   un descriptor (TD), y la alternancia la lleva el núcleo; si los datos llegan
+   cortos, se salta al estado a mano. A la BIOS se le quita apagando su
+   imitación de teclado (el registro `LEGSUP`).
+4. **Enumerar** (`usb.cas`): a cada aparato se le reinicia el puerto, se le da
+   dirección, se leen sus descriptores (quién es, sus interfaces y sus extremos)
+   y se le pone su configuración. Un **concentrador** se enciende puerto a puerto
+   y se sigue por lo que cuelgue de él (hasta cinco en fila). Lo que no se deja
+   se apunta (en qué paso se quedó) y se dice.
+5. **Teclado** (`usbhid.cas`): el protocolo de arranque (ocho octetos: los
+   modificadores y hasta seis teclas). Comparando cada informe con el anterior
+   se sabe qué se ha pulsado y qué se ha soltado, y eso se le da a `consola.cas`
+   **con los mismos códigos que da un teclado PS/2**: el teclado español, los
+   acentos con tecla muerta, Alt Gr, Ctrl+C y las flechas son los mismos. La
+   repetición de la tecla que se deja pulsada se hace aquí (medio segundo, y
+   luego 25 por segundo). En los teclados de Apple con distribución europea se
+   deshace el cambio de dos teclas (la de la izquierda del 1 y la de al lado de
+   Mayús), como hacen los demás sistemas.
+6. **Ratón y panel táctil**: el protocolo de arranque si la interfaz lo tiene
+   (botones, X e Y en los tres primeros octetos); si no, se lee su **descriptor
+   de informe** y se busca en él dónde van los botones y los ejes X e Y
+   relativos, con su identificador de informe (y, al arrancar, se dicen los
+   octetos de ese descriptor, para tenerlos). El panel de un MacBook, recién
+   encendido, es un ratón de estos (movimiento y el clic físico; tocar para
+   pulsar y los gestos son de su modo multitáctil, que no se usa). Una tarea del
+   núcleo mira las tuberías cada centésima de segundo.
+7. **Memorias** (`usbalm.cas`): la clase «almacenamiento» con el transporte
+   «solo a granel» y órdenes SCSI. Cada orden es un envoltorio de 31 octetos
+   (CBW), los datos y un estado de 13 (CSW): `INQUIRY`, `TEST UNIT READY`,
+   `READ CAPACITY (10)`, `READ (10)`, `WRITE (10)` y `SYNCHRONIZE CACHE`;
+   `REQUEST SENSE` cuando una falla, quitar la parada del extremo y el reinicio
+   de la clase si se atasca. Ocho sectores por orden. La memoria es un disco
+   más de `discos.cas`, y su FAT, la unidad `X:`.
 
-Cómo probarlo sin riesgo: QEMU da los cuatro controladores (`-device
-piix3-usb-uhci`, `-device usb-ehci`, `-device qemu-xhci`) con una memoria de
-imagen (`-device usb-storage`), que luego miran `fsck.fat` y `mtools`, como ya se
-hace con los discos; y en el PC de verdad, **con una memoria que no tenga nada
-que perder** y, como con los discos, sin escribir si no se pide (`escritura`).
+**Lo que no hace** (todavía): las controladoras **OHCI** (las de USB 1.1 que no
+son de Intel ni de VIA: las compañeras de los EHCI de NVIDIA, SiS y de algunos
+AMD); **enchufar y desenchufar en marcha** (solo se ve lo que hay al
+arrancar); pasar al xHCI los puertos que los Intel de las series 7 a 9 dejan en
+el EHCI (no hace falta: van por el EHCI con su concentrador); las tabletas (ejes
+absolutos); las luces del teclado; los discos USB con sectores que no sean de 512.
+
+**Probado en QEMU**, que tiene las tres controladoras (`-device qemu-xhci`,
+`-device usb-ehci`, `-device piix3-usb-uhci`, y un EHCI con sus UHCI compañeras:
+`ich9-usb-ehci1` e `ich9-usb-uhci1`), teclado, ratón, concentrador (de USB 1.1) y memoria
+(`usb-kbd`, `usb-mouse`, `usb-hub`, `usb-storage`), y con `-machine pc,i8042=off`
+quita el teclado y el ratón PS/2, como en un Mac: sección 12. **Lo que QEMU no
+puede probar**: las transacciones partidas del EHCI (no tiene concentrador de
+alta velocidad), que son justo el camino del teclado y el panel del MacBook;
+están hechas según la norma y como las hace HSPUSB (que en ese Mac sí va), pero
+hasta que no se prueben en el equipo no se sabe.
 
 ## 12. Las pruebas
 

@@ -619,7 +619,7 @@ módulo Xhci
         si n <> 0 y entra entonces clase := 0 fin
         último := al_anillo(a.anillo0, 0, 0, 0, (TRB_ESTADO << 10) ob clase ob 0x20)
         timbre(c, a.ranura, 1)
-        r := espera_transferencia(c, a.ranura, 1, a.anillo0, último, de_datos, resto, 300)
+        r := espera_transferencia(c, a.ranura, 1, a.anillo0, último, de_datos, resto, 100)
         si r <> 0 entonces devolver r fin
         devolver ent32(n - resto)
     fin

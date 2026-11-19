@@ -181,6 +181,37 @@ módulo Unidades
         fin
     fin
 
+    ; ¿tiene esa unidad (un volumen FAT) el intérprete de órdenes en su raíz?
+    ; (así se reconoce la memoria de arranque)
+    público función tiene_sistema(u: nat32): bool
+        variable m: nat32
+        si u >= MAX_UNIDADES entonces devolver falso fin
+        si no unidades[u].hay o unidades[u].clase <> U_FAT entonces devolver falso fin
+        m := abrir_archivo(u, "\\ORDENES.BIN", PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        cerrar_archivo(m)
+        devolver cierto
+    fin
+
+    ; la memoria USB de arranque es X:: si hay varias memorias y la que lleva
+    ; el sistema no es la primera, se cambian las letras
+    público función arranque_a_x()
+        variable x, u, letra: nat32
+        x := por_letra('X')
+        si x = NINGUNA entonces devolver fin
+        si tiene_sistema(x) entonces devolver fin
+        para letra desde 'Y' hasta 'Z' hacer
+            u := por_letra(letra)
+            si u <> NINGUNA entonces
+                si tiene_sistema(u) entonces
+                    unidades[u].letra := 'X'
+                    unidades[x].letra := letra
+                    devolver
+                fin
+            fin
+        fin
+    fin
+
     ; ¿es de solo lectura la unidad u?
     público función protegida(u: nat32): bool
         si u >= MAX_UNIDADES entonces devolver cierto fin

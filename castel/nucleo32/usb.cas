@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  usb.cas - el USB del núcleo de Hispa-Pentium: buscar las controladoras
-;  (xHCI y EHCI: xhci.cas y ehci.cas), quitárselas a la BIOS, y enumerar lo
+;  (xHCI, EHCI y UHCI: xhci.cas, ehci.cas y uhci.cas), quitárselas a la BIOS, y enumerar lo
 ;  que hay enchufado, también detrás de concentradores: a cada aparato se le
 ;  da dirección, se leen sus descriptores (quién es, sus interfaces y sus
 ;  extremos) y se le pone su configuración. Quedan apuntados en «aparatos»;
@@ -18,7 +18,7 @@
 ; =============================================================================
 módulo Usb
 
-    importar Pci, Marcos, Tareas, Usbbase, Ehci, Xhci, Mem32, Formato
+    importar Pci, Marcos, Tareas, Usbbase, Ehci, Xhci, Uhci, Mem32, Registro
 
     público constante MAX_APARATOS = 16
     público constante MAX_TUBOS = 12
@@ -46,6 +46,14 @@ módulo Usb
     variable cerrojo: Cerrojo
     variable página: nat32                      ; para la petición (los 8 primeros octetos) y sus datos (desde 0x400)
     variable siguiente_dir: nat32 = 1           ; la dirección que se da al próximo aparato (EHCI)
+    ; los aparatos que no se han dejado enumerar: dónde estaban y en qué
+    ; paso se quedaron (para decirlo)
+    constante MAX_FALLOS = 8
+    tipo Fallo = estructura
+        hc_clase, puerto_raíz, padre, puerto, velocidad, punto: nat32
+    fin
+    variable fallos: arreglo [MAX_FALLOS] de Fallo
+    público variable n_fallos: nat32
     constante DATOS = 0x400
     constante MAX_DATOS = 1024
 
@@ -72,8 +80,10 @@ módulo Usb
         mientras r = T_FALLO y intentos < 3 hacer
             si a.hc_clase = HC_XHCI entonces
                 r := Xhci.control(a.hc, a, página, página + DATOS, n, pide yb 0x80 <> 0)
-            sino
+            sino si a.hc_clase = HC_EHCI entonces
                 r := Ehci.control(a.hc, a, página, página + DATOS, n, pide yb 0x80 <> 0)
+            sino
+                r := Uhci.control(a.hc, a, página, página + DATOS, n, pide yb 0x80 <> 0)
             fin
             intentos := intentos + 1
         fin
@@ -107,8 +117,10 @@ módulo Usb
         tomar(cerrojo)
         si aparatos[i].hc_clase = HC_XHCI entonces
             r := Xhci.granel(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e], datos, n, cs)
-        sino
+        sino si aparatos[i].hc_clase = HC_EHCI entonces
             r := Ehci.granel(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e], datos, n, cs)
+        sino
+            r := Uhci.granel(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e], datos, n, cs)
         fin
         soltar(cerrojo)
         devolver r
@@ -134,8 +146,10 @@ módulo Usb
         tomar(cerrojo)
         si aparatos[i].hc_clase = HC_XHCI entonces
             s := Xhci.tubo_abre(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e])
-        sino
+        sino si aparatos[i].hc_clase = HC_EHCI entonces
             s := Ehci.tubo_abre(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e])
+        sino
+            s := Uhci.tubo_abre(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e])
         fin
         t := NINGUNO
         si s <> 0xFFFFFFFF entonces
@@ -156,8 +170,10 @@ módulo Usb
         tomar(cerrojo)
         si aparatos[i].hc_clase = HC_XHCI entonces
             Xhci.tubo_pide(aparatos[i].hc, tubos[t].suyo, n)
-        sino
+        sino si aparatos[i].hc_clase = HC_EHCI entonces
             Ehci.tubo_pide(aparatos[i].hc, tubos[t].suyo, n)
+        sino
+            Uhci.tubo_pide(aparatos[i].hc, tubos[t].suyo, n)
         fin
         soltar(cerrojo)
     fin
@@ -172,8 +188,10 @@ módulo Usb
         tomar(cerrojo)
         si aparatos[i].hc_clase = HC_XHCI entonces
             r := Xhci.tubo_mira(aparatos[i].hc, tubos[t].suyo, n)
-        sino
+        sino si aparatos[i].hc_clase = HC_EHCI entonces
             r := Ehci.tubo_mira(aparatos[i].hc, tubos[t].suyo, n)
+        sino
+            r := Uhci.tubo_mira(aparatos[i].hc, tubos[t].suyo, n)
         fin
         soltar(cerrojo)
         devolver r
@@ -185,7 +203,8 @@ módulo Usb
         si t >= n_tubos entonces devolver nulo fin
         i := tubos[t].aparato
         si aparatos[i].hc_clase = HC_XHCI entonces devolver Xhci.tubo_datos(aparatos[i].hc, tubos[t].suyo) fin
-        devolver Ehci.tubo_datos(aparatos[i].hc, tubos[t].suyo)
+        si aparatos[i].hc_clase = HC_EHCI entonces devolver Ehci.tubo_datos(aparatos[i].hc, tubos[t].suyo) fin
+        devolver Uhci.tubo_datos(aparatos[i].hc, tubos[t].suyo)
     fin
 
     ; -------------------------------------------------------------------------
@@ -237,6 +256,22 @@ módulo Usb
             fin
             d := d + p[d]
         fin
+    fin
+
+    ; el aparato de la ficha i no se deja enumerar: se apunta en qué paso
+    ; (1: la dirección; 2 y 3: su descriptor; 4 y 5: su configuración; 6:
+    ; los extremos; 7: ponerle la configuración). Da NINGUNO.
+    función no_se_deja(i: nat32, punto: nat32): nat32
+        si n_fallos < MAX_FALLOS entonces
+            fallos[n_fallos].hc_clase := aparatos[i].hc_clase
+            fallos[n_fallos].puerto_raíz := aparatos[i].puerto_raíz
+            fallos[n_fallos].padre := aparatos[i].padre
+            fallos[n_fallos].puerto := aparatos[i].puerto
+            fallos[n_fallos].velocidad := aparatos[i].velocidad
+            fallos[n_fallos].punto := punto
+            n_fallos := n_fallos + 1
+        fin
+        devolver NINGUNO
     fin
 
     ; una ficha libre para un aparato nuevo (NINGUNO: no quedan)
@@ -292,42 +327,42 @@ módulo Usb
         p := puntero(página + DATOS)
         ; la dirección
         si hc_clase = HC_XHCI entonces
-            si no Xhci.nuevo_aparato(hc, aparatos[i]) entonces devolver NINGUNO fin
+            si no Xhci.nuevo_aparato(hc, aparatos[i]) entonces devolver no_se_deja(i, 1) fin
         sino
             si siguiente_dir > 127 entonces devolver NINGUNO fin
             r := haz_control(aparatos[i], 0x00, PON_DIRECCIÓN, siguiente_dir, 0, 0)
-            si r < 0 entonces devolver NINGUNO fin
+            si r < 0 entonces devolver no_se_deja(i, 1) fin
             aparatos[i].dir := siguiente_dir
             siguiente_dir := siguiente_dir + 1
             espera_ms(10)
         fin
         ; lo primero de su descriptor: el paquete máximo de su extremo 0
         r := haz_control(aparatos[i], 0x80, PIDE_DESCRIPTOR, 0x0100, 0, 8)
-        si r < 8 entonces devolver NINGUNO fin
+        si r < 8 entonces devolver no_se_deja(i, 2) fin
         si velocidad < V_SÚPER y p[7] <> aparatos[i].paquete0 y (p[7] = 8 o p[7] = 16 o p[7] = 32 o p[7] = 64) entonces
             aparatos[i].paquete0 := p[7]
             si hc_clase = HC_XHCI entonces
-                si no Xhci.pon_paquete0(hc, aparatos[i]) entonces devolver NINGUNO fin
+                si no Xhci.pon_paquete0(hc, aparatos[i]) entonces devolver no_se_deja(i, 2) fin
             fin
         fin
         r := haz_control(aparatos[i], 0x80, PIDE_DESCRIPTOR, 0x0100, 0, 18)
-        si r < 18 entonces devolver NINGUNO fin
+        si r < 18 entonces devolver no_se_deja(i, 3) fin
         aparatos[i].clase := p[4]
         aparatos[i].fabricante := dato16(dirección(p[8]))
         aparatos[i].producto := dato16(dirección(p[10]))
         ; su configuración (la primera): cuánto mide, y entera
         r := haz_control(aparatos[i], 0x80, PIDE_DESCRIPTOR, 0x0200, 0, 9)
-        si r < 9 entonces devolver NINGUNO fin
+        si r < 9 entonces devolver no_se_deja(i, 4) fin
         largo := dato16(dirección(p[2]))
         si largo > MAX_DATOS entonces largo := MAX_DATOS fin
         r := haz_control(aparatos[i], 0x80, PIDE_DESCRIPTOR, 0x0200, 0, largo)
-        si r < 9 entonces devolver NINGUNO fin
+        si r < 9 entonces devolver no_se_deja(i, 5) fin
         lee_configuración(aparatos[i], nat32(r))
         si hc_clase = HC_XHCI entonces
-            si no Xhci.configura(hc, aparatos[i]) entonces devolver NINGUNO fin
+            si no Xhci.configura(hc, aparatos[i]) entonces devolver no_se_deja(i, 6) fin
         fin
         r := haz_control(aparatos[i], 0x00, PON_CONFIGURACIÓN, aparatos[i].configuración, 0, 0)
-        si r < 0 entonces devolver NINGUNO fin
+        si r < 0 entonces devolver no_se_deja(i, 7) fin
         aparatos[i].usado := cierto
         n_aparatos := n_aparatos + 1
         si aparatos[i].clase = 9 o (aparatos[i].n_interfaces > 0 y aparatos[i].interfaces[0].clase = 9) entonces
@@ -403,9 +438,17 @@ módulo Usb
     función mira_puertos(hc_clase: nat32, hc: nat32, puertos: nat32)
         variable p, v, e: nat32
         para p desde 1 hasta puertos hacer
-            si hc_clase = HC_XHCI entonces e := Xhci.puerto_estado(hc, p) sino e := Ehci.puerto_estado(hc, p) fin
+            según hc_clase
+                caso HC_XHCI: e := Xhci.puerto_estado(hc, p)
+                caso HC_EHCI: e := Ehci.puerto_estado(hc, p)
+                si no: e := Uhci.puerto_estado(hc, p)
+            fin
             si e yb 1 <> 0 entonces
-                si hc_clase = HC_XHCI entonces v := Xhci.puerto_reinicia(hc, p) sino v := Ehci.puerto_reinicia(hc, p) fin
+                según hc_clase
+                    caso HC_XHCI: v := Xhci.puerto_reinicia(hc, p)
+                    caso HC_EHCI: v := Ehci.puerto_reinicia(hc, p)
+                    si no: v := Uhci.puerto_reinicia(hc, p)
+                fin
                 si v <> 0 entonces enumera(hc_clase, hc, p, SIN_APARATO, 0, v) fin
             fin
         fin
@@ -418,7 +461,7 @@ módulo Usb
         si página = 0 entonces página := reservar_marco() fin
         si página = 0 entonces devolver 0 fin
         tomar(cerrojo)
-        ; primero las xHCI y luego las EHCI
+        ; primero las xHCI, luego las EHCI y, al final, sus compañeras (UHCI)
         a := pci_busca(0x0C0330, 0xFFFFFF, NO_HAY_PCI)
         mientras a <> NO_HAY_PCI hacer
             si Xhci.prepara(a) <> 0xFFFFFFFF entonces controladoras := controladoras + 1 fin
@@ -428,6 +471,11 @@ módulo Usb
         mientras a <> NO_HAY_PCI hacer
             si Ehci.prepara(a) <> 0xFFFFFFFF entonces controladoras := controladoras + 1 fin
             a := pci_busca(0x0C0320, 0xFFFFFF, a)
+        fin
+        a := pci_busca(0x0C0300, 0xFFFFFF, NO_HAY_PCI)
+        mientras a <> NO_HAY_PCI hacer
+            si Uhci.prepara(a) <> 0xFFFFFFFF entonces controladoras := controladoras + 1 fin
+            a := pci_busca(0x0C0300, 0xFFFFFF, a)
         fin
         si controladoras <> 0 entonces
             ; un rato para que los puertos vean lo que tienen enchufado
@@ -442,6 +490,13 @@ módulo Usb
                 mira_puertos(HC_EHCI, c, ehcis[c].puertos)
                 c := c + 1
             fin
+            ; (lo que los EHCI han cedido aparece ahora en los puertos de las compañeras)
+            si Uhci.cuántas <> 0 entonces espera_ms(150) fin
+            c := 0
+            mientras c < Uhci.cuántas hacer
+                mira_puertos(HC_UHCI, c, uhcis[c].puertos)
+                c := c + 1
+            fin
         fin
         soltar(cerrojo)
         devolver n_aparatos
@@ -452,6 +507,15 @@ módulo Usb
         variable c: nat32
         para c desde 0 hasta MAX_XHCI - 1 hacer Xhci.para_(c) fin
         para c desde 0 hasta MAX_EHCI - 1 hacer Ehci.para_(c) fin
+        para c desde 0 hasta MAX_UHCI - 1 hacer Uhci.para_(c) fin
+    fin
+
+    función nombre_hc(clase: nat32): puntero a byte
+        según clase
+            caso HC_XHCI: devolver "xHCI"
+            caso HC_EHCI: devolver "EHCI"
+        fin
+        devolver "UHCI"
     fin
 
     función nombre_velocidad(v: nat32): puntero a byte
@@ -472,7 +536,7 @@ módulo Usb
             d[0] := pci_leer(xhcis[c].pci, 0) yb 0xFFFF
             d[1] := pci_leer(xhcis[c].pci, 0) >> 16
             d[2] := xhcis[c].puertos
-            imprimir("usb: controladora xHCI %04X:%04X, %u puertos\n", d)
+            apunta("usb: controladora xHCI %04X:%04X, %u puertos\n", d)
             c := c + 1
         fin
         c := 0
@@ -480,9 +544,17 @@ módulo Usb
             d[0] := pci_leer(ehcis[c].pci, 0) yb 0xFFFF
             d[1] := pci_leer(ehcis[c].pci, 0) >> 16
             d[2] := ehcis[c].puertos
-            imprimir("usb: controladora EHCI %04X:%04X, %u puertos", d)
-            si ehcis[c].cedidos <> 0 entonces imprimir1(" (%u cedidos a las compañeras: aparatos de USB 1.x)", ehcis[c].cedidos) fin
-            escribir("\n")
+            apunta("usb: controladora EHCI %04X:%04X, %u puertos", d)
+            si ehcis[c].cedidos <> 0 entonces apunta1(" (%u cedidos a las compañeras: aparatos de USB 1.x)", ehcis[c].cedidos) fin
+            apunta0("\n")
+            c := c + 1
+        fin
+        c := 0
+        mientras c < Uhci.cuántas hacer
+            d[0] := pci_leer(uhcis[c].pci, 0) yb 0xFFFF
+            d[1] := pci_leer(uhcis[c].pci, 0) >> 16
+            d[2] := uhcis[c].puertos
+            apunta("usb: controladora UHCI %04X:%04X, %u puertos\n", d)
             c := c + 1
         fin
         para i desde 0 hasta MAX_APARATOS - 1 hacer
@@ -491,29 +563,39 @@ módulo Usb
                 d[1] := aparatos[i].fabricante
                 d[2] := aparatos[i].producto
                 d[3] := nat32(nombre_velocidad(aparatos[i].velocidad))
-                imprimir("usb: aparato %u, %04X:%04X, velocidad %s", d)
+                apunta("usb: aparato %u, %04X:%04X, velocidad %s", d)
                 si aparatos[i].padre <> SIN_APARATO entonces
-                    imprimir2(", en el puerto %u del concentrador %u", aparatos[i].puerto, aparatos[i].padre)
+                    apunta2(", en el puerto %u del concentrador %u", aparatos[i].puerto, aparatos[i].padre)
                 sino
-                    imprimir1(", en el puerto %u", aparatos[i].puerto_raíz)
+                    apunta2(", en el puerto %u (%s)", aparatos[i].puerto_raíz, nat32(nombre_hc(aparatos[i].hc_clase)))
                 fin
-                si aparatos[i].es_concentrador entonces imprimir1(": concentrador de %u puertos", aparatos[i].puertos) fin
+                si aparatos[i].es_concentrador entonces apunta1(": concentrador de %u puertos", aparatos[i].puertos) fin
                 para k desde 1 hasta aparatos[i].n_interfaces hacer
                     d[0] := aparatos[i].interfaces[k - 1].clase
                     d[1] := aparatos[i].interfaces[k - 1].subclase
                     d[2] := aparatos[i].interfaces[k - 1].protocolo
                     si d[0] = 3 y d[2] = 1 entonces
-                        escribir("; teclado")
+                        apunta0("; teclado")
                     sino si d[0] = 3 y d[2] = 2 entonces
-                        escribir("; ratón")
+                        apunta0("; ratón")
                     sino si d[0] = 8 entonces
-                        escribir("; almacenamiento")
+                        apunta0("; almacenamiento")
                     sino si d[0] <> 9 entonces
-                        imprimir("; interfaz %02X/%02X/%02X", d)
+                        apunta("; interfaz %02X/%02X/%02X", d)
                     fin
                 fin
-                escribir("\n")
+                apunta0("\n")
             fin
+        fin
+        para i desde 1 hasta n_fallos hacer
+            d[0] := fallos[i - 1].puerto_raíz
+            d[1] := nat32(nombre_velocidad(fallos[i - 1].velocidad))
+            d[2] := fallos[i - 1].punto
+            apunta("usb: lo que hay en el puerto %u (velocidad %s) no se deja enumerar (paso %u)", d)
+            si fallos[i - 1].padre <> SIN_APARATO entonces
+                apunta2(": puerto %u del concentrador %u", fallos[i - 1].puerto, fallos[i - 1].padre)
+            fin
+            apunta0("\n")
         fin
     fin
 

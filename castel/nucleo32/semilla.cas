@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usuario, Escritorio, Textos32, Mem32, Formato
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Registro, Usuario, Escritorio, Textos32, Mem32, Formato
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -471,25 +471,25 @@ módulo Semilla
     función enseña_unidades()
         variable u, letra: nat32
         variable d: arreglo [4] de nat32
-        escribir("unidades:")
+        apunta0("unidades:")
         para letra desde 'A' hasta 'Z' hacer
             u := por_letra(letra)
             si u <> NINGUNA entonces
                 d[0] := letra
                 si unidades[u].clase = U_MEMORIA entonces
-                    imprimir(" %c: (en memoria)", d)
+                    apunta(" %c: (en memoria)", d)
                 sino
                     d[1] := unidades[u].disco
                     d[2] := nat32(nombre_de_clase(discos[unidades[u].disco].clase))
                     d[3] := volúmenes[u].clase
-                    imprimir(" %c: (disco %u, %s, FAT%u)", d)
+                    apunta(" %c: (disco %u, %s, FAT%u)", d)
                 fin
             fin
         fin
         si del_sistema = NINGUNA entonces
-            escribir(" ninguna\n")
+            apunta0(" ninguna\n")
         sino
-            imprimir1("; la del sistema, %c:\n", unidades[del_sistema].letra)
+            apunta1("; la del sistema, %c:\n", unidades[del_sistema].letra)
         fin
     fin
 
@@ -595,7 +595,7 @@ módulo Semilla
                 dd[0] := teclados
                 dd[1] := ratones
                 dd[2] := Usbalm.cuántas
-                imprimir("usb: %u teclados, %u ratones, %u memorias.\n", dd)
+                apunta("usb: %u teclados, %u ratones, %u memorias.\n", dd)
             fin
         fin
         n := 0
@@ -605,16 +605,16 @@ módulo Semilla
                 dd[0] := d
                 dd[1] := nat32(dirección(discos[d].modelo[0]))
                 dd[2] := discos[d].sectores div 2048
-                imprimir("disco %u: %s, %u MB", dd)
-                si unidades_de(d) = 0 entonces escribir(", sin FAT") fin
+                apunta("disco %u: %s, %u MB", dd)
+                si unidades_de(d) = 0 entonces apunta0(", sin FAT") fin
                 para u desde 0 hasta MAX_UNIDADES - 1 hacer
                     si unidades[u].hay y unidades[u].clase = U_FAT y unidades[u].disco = d entonces
-                        imprimir1(", FAT%u", volúmenes[u].clase)
+                        apunta1(", FAT%u", volúmenes[u].clase)
                         si no escribible(u) entonces n := n + 1 fin
                     fin
                 fin
-                si discos[d].clase <> DE_ATA entonces imprimir1(" (%s)", nat32(nombre_de_clase(discos[d].clase))) fin
-                escribir(".\n")
+                si discos[d].clase <> DE_ATA entonces apunta1(" (%s)", nat32(nombre_de_clase(discos[d].clase))) fin
+                apunta0(".\n")
             fin
         fin
         si n <> 0 entonces
@@ -624,6 +624,7 @@ módulo Semilla
                 escribir("el disco es de solo lectura (para escribir en él: «escritura» en la línea del cargador).\n")
             fin
         fin
+        arranque_a_x()
         monta_memoria()
         pedida := 0
         si buscar(línea_del_cargador(), "unidad=") <> nulo entonces pedida := opción("unidad=") fin
@@ -636,6 +637,17 @@ módulo Semilla
             si unidades[u].hay entonces n := n + 1 fin
         fin
         si n > 1 entonces enseña_unidades() fin
+        ; con «registro», lo dicho hasta aquí queda en ARRANQUE.TXT, en la
+        ; unidad del sistema (si se puede escribir en ella)
+        si buscar(línea_del_cargador(), "registro") <> nulo y del_sistema <> NINGUNA entonces
+            si escribible(del_sistema) y tiene_sistema(del_sistema) entonces
+                d := abrir_archivo(del_sistema, "\\ARRANQUE.TXT", PARA_CREAR)
+                si d < PRIMER_ERROR entonces
+                    escribir_archivo(d, registro, registro_largo)
+                    cerrar_archivo(d)
+                fin
+            fin
+        fin
     fin
 
     función principal(): byte
