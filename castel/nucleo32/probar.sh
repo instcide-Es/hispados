@@ -5,17 +5,22 @@
 # teclea las órdenes que se digan (por el monitor de QEMU: «sendkey», como un
 # teclado de verdad) y enseña lo que escribe por el puerto serie y su código
 # de salida. Sin órdenes: «ayuda» y «apagar». Una orden «:espera» se queda
-# un segundo y medio sin teclear (para que corra el reloj).
+# un segundo y medio sin teclear (para que corra el reloj); «:tecla up ret» o
+# «:tecla ctrl-c» pulsa esas teclas tal cual (con los nombres de «sendkey»),
+# sin el Intro del final. El teclado es el español: cada letra de una orden se
+# teclea con la tecla (o las teclas: á es el acento y la a) que la da en él.
 # Sin NUCLEO.BIN (o si no existe), compila antes semilla.cas y los programas
 # de usuario (uhola.cas, umalo.cas y ucli.cas), que se le dan como módulos de multiboot
 # (-initrd). Con MODULOS="a.bin,b.bin", esos módulos (MODULOS= para ninguno).
 # Con MEMORIA=n, n MB (32 si no se dice).
 # Con DISCO=imagen, esa imagen como disco duro IDE (el maestro del canal
-# primario; no se escribe en ella): la hace nucleo32/disco.sh, con el
-# intérprete de órdenes y los programas. Con ARRANQUE="texto", lo que se le
+# primario): la hace nucleo32/disco.sh, con el intérprete de órdenes y los
+# programas. Lo que se escriba en el disco no llega a la imagen (se queda en
+# una copia de QEMU), salvo con ESCRIBE=1. Con ARRANQUE="texto", lo que se le
 # dice al núcleo al arrancar (ARRANQUE=ordenes: lanza el intérprete de órdenes).
 # Necesita python3, nasm, qemu-system-i386 y socat.
 set -u
+export LC_ALL=C.UTF-8
 AQUI=$(dirname "$(readlink -f "$0")")
 T=$(mktemp -d)
 QPID=
@@ -38,17 +43,33 @@ fi
 INITRD=()
 [ -n "${MODULOS:-}" ] && INITRD=(-initrd "$MODULOS")
 [ $# -gt 0 ] || set -- ayuda apagar
-[ -n "${DISCO:-}" ] && INITRD+=(-drive "file=$DISCO,format=raw,if=ide,index=0,snapshot=on")
+INSTANTANEA=on; [ -n "${ESCRIBE:-}" ] && INSTANTANEA=off
+[ -n "${DISCO:-}" ] && INITRD+=(-drive "file=$DISCO,format=raw,if=ide,index=0,snapshot=$INSTANTANEA")
 [ -n "${ARRANQUE:-}" ] && INITRD+=(-append "$ARRANQUE")
 qemu-system-i386 -kernel "$BIN" "${INITRD[@]}" -display none -monitor unix:$T/mon,server,nowait \
-  -serial file:$T/sal -device isa-debug-exit,iobase=0xf4,iosize=0x04 -no-reboot -m ${MEMORIA:-32} > /dev/null 2>&1 &
+  -serial file:$T/sal -device isa-debug-exit,iobase=0xf4,iosize=0x04 -no-reboot -rtc base=localtime -m ${MEMORIA:-32} > /dev/null 2>&1 &
 QPID=$!
 mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; sleep "${2:-0.08}"; }
-# la tecla de cada letra, como la llama «sendkey»
+# las teclas de cada letra en el teclado español, como las llama «sendkey»
+# (alt_r es Alt Gr; los acentos son teclas muertas: primero el acento)
 tecla() {
   case "$1" in
-    ' ') echo spc ;; '-') echo minus ;; '.') echo dot ;; ',') echo comma ;; '_') echo shift-minus ;;
-    "\\") echo backslash ;; '/') echo slash ;; '?') echo shift-slash ;; ':') echo shift-semicolon ;;
+    ' ') echo spc ;; '-') echo slash ;; '_') echo shift-slash ;; '.') echo dot ;; ':') echo shift-dot ;;
+    ',') echo comma ;; ';') echo shift-comma ;; "\\") echo alt_r-grave_accent ;; '/') echo shift-7 ;;
+    '?') echo shift-minus ;; "'") echo minus ;; '¡') echo equal ;; '¿') echo shift-equal ;;
+    '<') echo less ;; '>') echo shift-less ;; '*') echo shift-bracket_right ;; '+') echo bracket_right ;;
+    '!') echo shift-1 ;; '"') echo shift-2 ;; '$') echo shift-4 ;; '%') echo shift-5 ;; '&') echo shift-6 ;;
+    '(') echo shift-8 ;; ')') echo shift-9 ;; '=') echo shift-0 ;;
+    '|') echo alt_r-1 ;; '@') echo alt_r-2 ;; '#') echo alt_r-3 ;; '~') echo alt_r-4 ;;
+    '[') echo alt_r-bracket_left ;; ']') echo alt_r-bracket_right ;; '{') echo alt_r-apostrophe ;; '}') echo alt_r-backslash ;;
+    'ñ') echo semicolon ;; 'Ñ') echo shift-semicolon ;; 'ç') echo backslash ;; 'Ç') echo shift-backslash ;;
+    'º') echo grave_accent ;; 'ª') echo shift-grave_accent ;;
+    'á') echo apostrophe a ;; 'é') echo apostrophe e ;; 'í') echo apostrophe i ;; 'ó') echo apostrophe o ;; 'ú') echo apostrophe u ;;
+    'Á') echo apostrophe shift-a ;; 'É') echo apostrophe shift-e ;; 'Í') echo apostrophe shift-i ;; 'Ó') echo apostrophe shift-o ;; 'Ú') echo apostrophe shift-u ;;
+    'à') echo bracket_left a ;; 'è') echo bracket_left e ;; 'ò') echo bracket_left o ;;
+    'â') echo shift-bracket_left a ;; 'ê') echo shift-bracket_left e ;; 'ô') echo shift-bracket_left o ;;
+    'ü') echo shift-apostrophe u ;; 'Ü') echo shift-apostrophe shift-u ;; 'ï') echo shift-apostrophe i ;;
+    '^') echo shift-bracket_left spc ;; '`') echo bracket_left spc ;;
     [A-Z]) echo "shift-$(echo $1 | tr A-Z a-z)" ;;
     *) echo "$1" ;;
   esac
@@ -70,7 +91,11 @@ for orden in "$@"; do
   # la pantalla, por si se quiere mirar (VER=1): antes de la última orden
   [ -n "${VER:-}" ] && [ $n = $# ] && pantalla
   if [ "$orden" = ":espera" ]; then sleep 1.5; continue; fi
-  for ((j = 0; j < ${#orden}; j++)); do mon "sendkey $(tecla "${orden:$j:1}")"; done
+  if [ "${orden:0:7}" = ":tecla " ]; then
+    for k in ${orden:7}; do mon "sendkey $k"; done
+    sleep 0.3; continue
+  fi
+  for ((j = 0; j < ${#orden}; j++)); do for k in $(tecla "${orden:$j:1}"); do mon "sendkey $k"; done; done
   mon "sendkey ret" 0.4
 done
 for ((i = 0; i < 50; i++)); do kill -0 $QPID 2>/dev/null || break; sleep 0.1; done
