@@ -678,6 +678,8 @@ módulo Usuario
                 devolver 0
             caso 32..41:
                 devolver atender_ventanas(n, a, b, c)
+            caso 80:
+                devolver atender_ventanas(n, a, b, c)
             caso 42:
                 ; la unidad de trabajo: cambiarla (a: su letra; 0: solo
                 ; preguntar). Da la letra de la que queda.
@@ -935,6 +937,19 @@ módulo Usuario
                 si t = nulo entonces devolver r fin
                 t.padre := 0
                 devolver t.id
+            caso 80:
+                ; colocar la ventana a (suya) con su esquina en (b, c) de la
+                ; pantalla; con b = 0xFFFFFFFF, en el centro
+                si no es_de(a, actual.id) entonces devolver NO_VALE fin
+                si b = 0xFFFFFFFF entonces
+                    centrar_ventana(a)
+                    devolver 0
+                fin
+                x := ent32(b)
+                yy := ent32(c)
+                si x < -4096 o x > 4096 o yy < -4096 o yy > 4096 entonces devolver NO_VALE fin
+                mover_ventana(a, x, yy)
+                devolver 0
         fin
         devolver NO_VALE
     fin
