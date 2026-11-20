@@ -324,7 +324,13 @@ FN(f_inserta) {
   USA; NODO(0, p); NODO(1, n);
   ref = argc > 2 ? nodo_de(a[2]) : NULL;
   if (ref && (dom_node *)NI(ref)->padre != p) ref = NULL;
+#ifdef PERFIL
+  { extern unsigned long long pf_dom; unsigned long long t0; __asm__ volatile("rdtsc" : "=A"(t0));
   e = dom_node_insert_before(p, n, ref, &r);
+  { unsigned long long t1; __asm__ volatile("rdtsc" : "=A"(t1)); pf_dom += t1 - t0; } }
+#else
+  e = dom_node_insert_before(p, n, ref, &r);
+#endif
   if (r) dom_node_unref(r);
   if (e == DOM_HIERARCHY_REQUEST_ERR) return JS_ThrowTypeError(c, "HierarchyRequestError: ese nodo no puede ir ahí");
   if (e != DOM_NO_ERR) return JS_ThrowTypeError(c, "no se ha podido insertar el nodo (%d)", (int)e);
@@ -446,7 +452,13 @@ FN(f_pon_atr) {
     char *s2 = sin_transform(dom_string_data(v));
     if (s2) { dom_string *v2 = NULL; dom_string_create((const uint8_t *)s2, strlen(s2), &v2); free(s2); if (v2) { dom_string_unref(v); v = v2; } }
   }
+#ifdef PERFIL
+  { extern unsigned long long pf_dom2; unsigned long long t0; __asm__ volatile("rdtsc" : "=A"(t0));
   dom_element_set_attribute(n, nom, v);
+  { unsigned long long t1; __asm__ volatile("rdtsc" : "=A"(t1)); pf_dom2 += t1 - t0; } }
+#else
+  dom_element_set_attribute(n, nom, v);
+#endif
   sincroniza(n, nm, 0);
   dom_string_unref(nom); dom_string_unref(v);
   ensucia();
@@ -699,9 +711,11 @@ FN(f_prototipos) {
 FN(f_escucha) { USA; (void)a; return JS_UNDEFINED; }
 /* ¿no se ve? (no tiene caja: él o alguno de arriba con display: none, o
  * fuera del árbol; con las cajas de la última maqueta) */
+static void al_dia(void);
 FN(f_oculto) {
   USA; NODO(0, n);
   if (!conectado(n)) return JS_TRUE;
+  al_dia();
   if (!H->html || !H->html->layout) return JS_FALSE;
   return JS_NewBool(c, box_for_node(n) == NULL);
 }
@@ -1013,6 +1027,11 @@ FN(f_registro) {
   return JS_UNDEFINED;
 }
 
+/* las medidas piden las cajas al día: si el árbol ha cambiado en este turno,
+ * se rehacen ya (como un navegador de los grandes cuando se lee offsetHeight) */
+static void al_dia(void) {
+  if (H->sucio && H->html && rehaz_listo(H->html)) { H->sucio = 0; rehaz_cajas(H->html); }
+}
 /* ---- las medidas de verdad (surf.js): la caja de NetSurf de un elemento,
  * [x, y, ancho, alto] del borde para fuera, en la página ---- */
 FN(f_caja) {
@@ -1020,6 +1039,7 @@ FN(f_caja) {
   int x, y;
   JSValue r;
   USA; NODO(0, n);
+  al_dia();
   if (!conectado(n) || !H->html || !H->html->layout || !(b = box_for_node(n))) return JS_NULL;
   box_coords(b, &x, &y);
   r = JS_NewArray(c);
@@ -1041,6 +1061,7 @@ FN(f_estilo) {
   const css_computed_style *s;
   JSValue r = JS_NULL;
   USA; NODO(0, n);
+  al_dia();
   if (!conectado(n) || !H->html || !H->html->layout || !(b = box_for_node(n)) || !(s = b->style)) return JS_NULL;
   if (!(p = JS_ToCString(c, a[1]))) return JS_EXCEPTION;
   if (!strcmp(p, "display")) {
@@ -1085,6 +1106,7 @@ FN(f_ve_a) { int x = 0, y = 0; USA; JS_ToInt32(c, &x, a[0]); JS_ToInt32(c, &y, a
 FN(f_alto_pagina) {
   int w = 0, h = 0;
   USA; (void)a;
+  al_dia();
   if (H->html && H->html->layout) { w = H->html->layout->descendant_x1; h = H->html->layout->descendant_y1; }
   return JS_NewInt32(c, h > 0 ? h : 0);
   (void)w;
@@ -1278,6 +1300,10 @@ FN(f_pide) {
 }
 FN(f_cancela) { USA; (void)a; return JS_UNDEFINED; }
 
+#ifdef PERFIL
+static void perfil_dice(void);
+static inline unsigned long long rdtsc(void) { unsigned long long x; __asm__ volatile("rdtsc" : "=A"(x)); return x; }
+#endif
 static const JSCFunctionListEntry funciones_n[] = {
   JS_CFUNC_DEF("es", 1, f_es), JS_CFUNC_DEF("tipo", 1, f_tipo), JS_CFUNC_DEF("padre", 1, f_padre),
   JS_CFUNC_DEF("hijo", 1, f_hijo), JS_CFUNC_DEF("ult", 1, f_ult), JS_CFUNC_DEF("sig", 1, f_sig), JS_CFUNC_DEF("ant", 1, f_ant),
@@ -1484,6 +1510,9 @@ static void ejecuta(const char *codigo, u32 n, const char *nombre, u32 clave, u3
   if (JS_IsException(f)) excepcion();
   JS_FreeValue(cx, f);
   if (!--H->nivel) fin_turno();
+#ifdef PERFIL
+  perfil_dice();
+#endif
   if (n > 20000) regf("[tiempo] ", "%.200s: %u KB, %u ms%s", nombre, n / 1024, GetTickCount() - t0, k ? " (ya compilado)" : "");
 }
 
@@ -1567,6 +1596,27 @@ nserror js_newheap(int timeout, jsheap **heap) {
 }
 void js_destroyheap(jsheap *heap) { free(heap); }
 
+#ifdef PERFIL
+#define NF (int)(sizeof funciones_n / sizeof funciones_n[0])
+static unsigned long long pf_t[128]; static unsigned pf_n[128];
+static JSValue perfil(JSContext *c, JSValueConst este, int argc, JSValueConst *a, int k) {
+  unsigned long long t0 = rdtsc();
+  JSValue r = funciones_n[k].u.func.cfunc.generic(c, este, argc, a);
+  pf_t[k] += rdtsc() - t0; pf_n[k]++;
+  return r;
+}
+static void perfil_pon(JSValue nobj) {
+  int k;
+  for (k = 0; k < NF; k++)
+    JS_SetPropertyStr(cx, nobj, funciones_n[k].name, JS_NewCFunctionMagic(cx, perfil, funciones_n[k].name, funciones_n[k].u.func.length, JS_CFUNC_generic_magic, k));
+}
+unsigned long long pf_dom, pf_dom2;
+static void perfil_dice(void) {
+  int k;
+  regf("[perfil] ", "libdom: insert_before %u Mciclos, set_attribute %u Mciclos", (unsigned)(pf_dom >> 20), (unsigned)(pf_dom2 >> 20)); pf_dom = pf_dom2 = 0;
+  for (k = 0; k < NF; k++) if (pf_n[k]) { regf("[perfil] ", "%s: %u veces, %u Mciclos", funciones_n[k].name, pf_n[k], (unsigned)(pf_t[k] >> 20)); pf_n[k] = 0; pf_t[k] = 0; }
+}
+#endif
 /* el preludio con su N; luego surf.js */
 static int prepara(struct jsthread *t) {
   JSValue g, nobj, f, r;
@@ -1574,6 +1624,9 @@ static int prepara(struct jsthread *t) {
   g = JS_GetGlobalObject(cx);
   nobj = JS_NewObject(cx);
   JS_SetPropertyFunctionList(cx, nobj, funciones_n, sizeof funciones_n / sizeof funciones_n[0]);
+#ifdef PERFIL
+  perfil_pon(nobj);
+#endif
   t->nivel++;
   reinicia_tope();
   f = JS_ReadObject(cx, preludio_bc, n_preludio_bc, JS_READ_OBJ_BYTECODE);

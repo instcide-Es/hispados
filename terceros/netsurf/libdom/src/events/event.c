@@ -256,7 +256,9 @@ dom_exception _dom_event_init(dom_event *evt, dom_string *type,
 	evt->cancelable = cancelable;
 	evt->is_initialised = true;
 
-	evt->timestamp = time(NULL);
+	/* [HISPA] sin la hora: time() pregunta a DOS (un cambio de modo) en
+	 * cada evento de libdom, y JavaScript hace cientos (nadie la lee) */
+	evt->timestamp = 0;
 
 	return DOM_NO_ERR;
 }

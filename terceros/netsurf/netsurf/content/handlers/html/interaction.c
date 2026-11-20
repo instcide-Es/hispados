@@ -674,6 +674,7 @@ get_mouse_action_node(html_content *html,
 		      struct mouse_action_state *man)
 {
 	struct box *box;
+	struct box *hispa_encima = NULL;	/* [HISPA] */
 	int box_x = 0;
 	int box_y = 0;
 
@@ -692,6 +693,18 @@ get_mouse_action_node(html_content *html,
 	box_y = box->margin[TOP];
 
 	do {
+		/* [HISPA] lo que va por encima (un menú desplegable, con
+		 * z-index): si se ha dado en él, lo de después no cuenta */
+		if (hispa_encima != NULL) {
+			struct box *b;
+			for (b = box; b != NULL && b != hispa_encima; b = b->parent)
+				;
+			if (b == NULL)
+				goto next_box;
+		} else if (box_hispa_encima(box)) {
+			hispa_encima = box;
+		}
+
 		/* skip hidden boxes */
 		if ((box->style != NULL) &&
 		    (css_computed_visibility(box->style) ==
@@ -1332,6 +1345,8 @@ mouse_action_drag_none(html_content *html,
 	struct content *c = (struct content *)html;
 	union content_msg_data msg_data;
 	lwc_string *path;
+	nsurl *hispa_url = NULL;	/* [HISPA] JavaScript */
+	char *hispa_dest = NULL;
 
 	/**
 	 * computed state
@@ -1404,6 +1419,12 @@ mouse_action_drag_none(html_content *html,
 	    html->jsthread != NULL && mas.node != NULL) {
 		dom_node *nodo = dom_node_ref(mas.node);
 		bool cancela;
+		/* (lo de las cajas que se usa luego, copiado: JavaScript puede
+		 * hacer que se rehagan, w32/surf/rehaz.c) */
+		if (mas.link.url != NULL)
+			hispa_url = mas.link.url = nsurl_ref(mas.link.url);
+		if (mas.link.target != NULL)
+			hispa_dest = (char *)(mas.link.target = strdup(mas.link.target));
 		if (mouse & BROWSER_MOUSE_PRESS_1) {
 			guion_evento(html->jsthread, nodo, "mousedown", NULL);
 		} else {
@@ -1465,6 +1486,11 @@ mouse_action_drag_none(html_content *html,
 		res = NSERROR_OK;
 		break;
 	}
+
+	/* [HISPA] las copias de antes de JavaScript */
+	if (hispa_url != NULL)
+		nsurl_unref(hispa_url);
+	free(hispa_dest);
 
 	return res;
 }

@@ -39,7 +39,12 @@ void rehaz_pide(struct html_content *c);        /* cuando se pueda (al acabar el
 void rehaz_olvida(struct html_content *c);      /* la página se va */
 void rehaz_suelta_nodo(dom_node *n);            /* un nodo sale del árbol: sus cajas, olvidadas */
 struct form_control *html_forms_hispa_ctl(dom_node *n);   /* (forms.c [HISPA]) */
-bool rehaz_listo(struct html_content *c);       /* ¿hay cajas y no se están haciendo? */
+bool rehaz_listo(struct html_content *c);
+/* lo que va por encima: position absolute o fixed con z-index > 0 (redraw.c
+ * lo pinta al final, interaction.c le da los clics) */
+struct box;
+bool box_hispa_encima(const struct box *b);
+int box_hispa_z(const struct box *b);       /* ¿hay cajas y no se están haciendo? */
 
 /* guion.c, para los ganchos [HISPA] de NetSurf */
 struct jsthread;

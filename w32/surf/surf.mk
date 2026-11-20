@@ -18,8 +18,9 @@ SURF_NSCF = -Iw32/surf -Iw32/surf/ns -I$(SURF_T)/netsurf -I$(SURF_T)/netsurf/inc
   -DNETSURF_BUILTIN_VERBOSE_FILTER=\"\" '-DNETSURF_UA_FORMAT_STRING="HispaSurf/0.1 (%s; NetSurf %d.%d)"'
 # (SURF_REGISTRO=INFO para ver en NS.LOG lo que hace NetSurf: ver NAVEGADOR2.md)
 SURF_REGISTRO ?= WARNING
+SURF_PERFIL ?=
 SURF_UA = '-DHTTP_AGENTE="HispaSurf/0.1 (NetSurf 3.11; Hispa-DOS 486)"'
-surf_cf = $(if $(filter w32/surf/guion.c,$1),$(SURF_NSCF) -Iterceros/quickjs -I$(B)/surf,$(if $(filter $(SURF_T)/netsurf/% w32/surf/%,$1),$(SURF_NSCF),$(if $(filter $(SURF_T)/libdom/%,$1),-I$(SURF_T)/libdom/src \
+surf_cf = $(if $(filter w32/surf/guion.c,$1),$(SURF_NSCF) -Iterceros/quickjs -I$(B)/surf $(SURF_PERFIL),$(if $(filter $(SURF_T)/netsurf/% w32/surf/%,$1),$(SURF_NSCF),$(if $(filter $(SURF_T)/libdom/%,$1),-I$(SURF_T)/libdom/src \
   -I$(SURF_T)/libdom/bindings,$(if $(filter $(SURF_T)/libnsgif/%,$1),-I$(SURF_T)/libnsgif/src -DNSGIF_NAME=libnsgif,-I$(SURF_T)/$(word 3,$(subst /, ,$1))/src))))
 $(B)/surf/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -46,16 +47,25 @@ SURF_RECURSOS = $(SURF_T)/netsurf/resources/default.css $(SURF_T)/netsurf/resour
   $(SURF_T)/netsurf/resources/adblock.css $(SURF_T)/netsurf/resources/internal.css w32/surf/recursos/MESSAGES w32/surf/recursos/inicio.htm
 SURF_FUENTES = $(wildcard terceros/dejavu/*.TTF)
 # El disquete «Internet 2»: el Navegador completo (va a \HISPADOS\INTERNET,
-# junto a lo del disquete «Internet», que trae las DLL)
-$(B)/internet2.img: $(B)/NAVEGA2.EXE $(SURF_RECURSOS) $(SURF_FUENTES) w32/surf/NAVEGA2.INI w32/surf/LEEME.TXT
+# junto a lo del disquete «Internet», que trae las DLL, también HSPJS.DLL, el
+# JavaScript); y el «Internet 3», sus letras (con el JavaScript, el programa ya
+# no cabe en uno con ellas: docs/486/NAVEGADOR2.md)
+$(B)/internet2.img: $(B)/NAVEGA2.EXE $(SURF_RECURSOS) w32/surf/NAVEGA2.INI w32/surf/LEEME.TXT
 	rm -f $@
 	dd if=/dev/zero of=$@ bs=1474560 count=1 2>/dev/null
 	MTOOLS_SKIP_CHECK=1 mformat -i $@ -f 1440 -v INTERNET2 ::
 	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/NAVEGA2.EXE w32/surf/NAVEGA2.INI ::
-	MTOOLS_SKIP_CHECK=1 mmd -i $@ ::RECURSOS ::FUENTES
+	MTOOLS_SKIP_CHECK=1 mmd -i $@ ::RECURSOS
 	for f in $(SURF_RECURSOS); do MTOOLS_SKIP_CHECK=1 mcopy -i $@ $$f ::RECURSOS/ || exit 1; done
-	for f in $(SURF_FUENTES); do MTOOLS_SKIP_CHECK=1 mcopy -i $@ $$f ::FUENTES/ || exit 1; done
 	iconv -f UTF-8 -t CP437 w32/surf/LEEME.TXT | sed 's/$$/\r/' > $(B)/internet2_leeme.txt
 	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/internet2_leeme.txt ::LEEME.TXT
-internet2: $(B)/internet2.img
+$(B)/internet3.img: $(SURF_FUENTES) w32/surf/LEEME.TXT
+	rm -f $@
+	dd if=/dev/zero of=$@ bs=1474560 count=1 2>/dev/null
+	MTOOLS_SKIP_CHECK=1 mformat -i $@ -f 1440 -v INTERNET3 ::
+	MTOOLS_SKIP_CHECK=1 mmd -i $@ ::FUENTES
+	for f in $(SURF_FUENTES); do MTOOLS_SKIP_CHECK=1 mcopy -i $@ $$f ::FUENTES/ || exit 1; done
+	iconv -f UTF-8 -t CP437 w32/surf/LEEME.TXT | sed 's/$$/\r/' > $(B)/internet3_leeme.txt
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/internet3_leeme.txt ::LEEME.TXT
+internet2: $(B)/internet2.img $(B)/internet3.img
 surf: $(B)/NAVEGA2.EXE

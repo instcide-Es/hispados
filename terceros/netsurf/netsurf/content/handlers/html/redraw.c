@@ -59,6 +59,7 @@
 #include "html/box.h"
 #include "html/box_inspect.h"
 #include "html/box_manipulate.h"
+#include "guion.h"	/* [HISPA] JavaScript: lo que va por encima */
 #include "html/font.h"
 #include "html/form_internal.h"
 #include "html/private.h"
@@ -1228,6 +1229,11 @@ static bool html_redraw_box_children(const html_content *html, struct box *box,
  * x, y, clip_[xy][01] are in target coordinates.
  */
 
+/* [HISPA] lo que va por encima, para el final (ver html_redraw) */
+#define HISPA_ENCIMA 32
+static struct { struct box *box; int x, y; colour fondo; } hispa_encima[HISPA_ENCIMA];
+static int hispa_n_encima, hispa_pintando_encima;
+
 bool html_redraw_box(const html_content *html, struct box *box,
 		int x_parent, int y_parent,
 		const struct rect *clip, const float scale,
@@ -1252,6 +1258,18 @@ bool html_redraw_box(const html_content *html, struct box *box,
 
 	if (html_redraw_printing && (box->flags & PRINTED))
 		return true;
+
+	/* [HISPA] lo que va por encima (z-index: un menú desplegable, una
+	 * ventana de Bootstrap), al final: html_redraw */
+	if (!hispa_pintando_encima && box_hispa_encima(box) &&
+			hispa_n_encima < HISPA_ENCIMA) {
+		hispa_encima[hispa_n_encima].box = box;
+		hispa_encima[hispa_n_encima].x = x_parent;
+		hispa_encima[hispa_n_encima].y = y_parent;
+		hispa_encima[hispa_n_encima].fondo = current_background_color;
+		hispa_n_encima++;
+		return true;
+	}
 
 	if (box->style != NULL) {
 		overflow_x = css_computed_overflow_x(box->style);
@@ -1979,8 +1997,31 @@ bool html_redraw(struct content *c, struct content_redraw_data *data,
 
 		result &= (ctx->plot->rectangle(ctx, &pstyle_fill_bg, clip) == NSERROR_OK);
 
+		hispa_n_encima = 0;
 		result &= html_redraw_box(html, box, data->x, data->y, clip,
 				data->scale, pstyle_fill_bg.fill_colour, ctx);
+
+		/* [HISPA] lo que va por encima, de menos a más z-index */
+		if (hispa_n_encima > 0) {
+			int k, j, n = hispa_n_encima;
+			hispa_pintando_encima = 1;
+			for (k = 1; k < n; k++)
+				for (j = k; j > 0 && box_hispa_z(hispa_encima[j - 1].box) >
+						box_hispa_z(hispa_encima[j].box); j--) {
+					typeof(hispa_encima[0]) t = hispa_encima[j];
+					hispa_encima[j] = hispa_encima[j - 1];
+					hispa_encima[j - 1] = t;
+				}
+			for (k = 0; k < n; k++) {
+				ctx->plot->clip(ctx, clip);
+				result &= html_redraw_box(html, hispa_encima[k].box,
+						hispa_encima[k].x, hispa_encima[k].y,
+						clip, data->scale,
+						hispa_encima[k].fondo, ctx);
+			}
+			hispa_pintando_encima = 0;
+			hispa_n_encima = 0;
+		}
 	}
 
 	if (select) {

@@ -107,3 +107,17 @@ void rehaz_cajas(html_content *c) {
   t_rehechas += GetTickCount() - t0;
   surf_reg("cajas otra vez (JavaScript): %u ms (%u veces, %u ms en total)", GetTickCount() - t0, n_rehechas, t_rehechas);
 }
+
+/* lo que va por encima (ver guion.h) */
+int box_hispa_z(const struct box *b) {
+  css_fixed z = 0;
+  if (!b->style || css_computed_z_index(b->style, &z) != CSS_Z_INDEX_SET) return 0;
+  return FIXTOINT(z);
+}
+bool box_hispa_encima(const struct box *b) {
+  uint8_t p;
+  if (!b->style) return false;
+  p = css_computed_position(b->style);
+  if (p != CSS_POSITION_ABSOLUTE && p != CSS_POSITION_FIXED) return false;
+  return box_hispa_z(b) > 0;
+}
