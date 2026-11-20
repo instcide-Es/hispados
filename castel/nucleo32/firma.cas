@@ -1,0 +1,551 @@
+; =============================================================================
+;  firma.cas - comprobar una firma Ed25519 (RFC 8032), en Castel, para los
+;  programas del anillo 3 de Hispa-Pentium: PAQUETES la usa para saber que el
+;  catálogo de los paquetes (CATALOGO.TXT, que lleva el SHA-256 de cada
+;  paquete) lo ha hecho quien tiene la clave privada del sistema, aunque haya
+;  llegado por HTTP sin cifrar. Solo comprueba (no firma): la clave privada no
+;  está nunca en el equipo.
+;
+;  Lleva su SHA-512 (FIPS 180-4, con los números de 64 bits hechos de dos de
+;  32) y las cuentas de la curva: los números módulo 2^255 - 19 van en 32
+;  trozos de 8 bits, cada uno en un ent32, para que todas las cuentas quepan
+;  en 32 bits sin multiplicación de 64 (es el mismo camino que TweetNaCl, de
+;  dominio público, con trozos de 8 bits en vez de 16).
+;
+;    verifica(firma, mensaje, octetos, clave): bool
+;        firma: 64 octetos (R y S); clave: la pública, 32 octetos.
+;
+;  No hace falta que vaya en tiempo constante: no hay nada secreto.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Firma
+
+    ; ---------------------------------------------------------------------
+    ;  SHA-512
+    ; ---------------------------------------------------------------------
+    variable k: arreglo [160] de nat32 = (
+        0x428A2F98, 0xD728AE22, 0x71374491, 0x23EF65CD, 0xB5C0FBCF, 0xEC4D3B2F, 0xE9B5DBA5, 0x8189DBBC,
+        0x3956C25B, 0xF348B538, 0x59F111F1, 0xB605D019, 0x923F82A4, 0xAF194F9B, 0xAB1C5ED5, 0xDA6D8118,
+        0xD807AA98, 0xA3030242, 0x12835B01, 0x45706FBE, 0x243185BE, 0x4EE4B28C, 0x550C7DC3, 0xD5FFB4E2,
+        0x72BE5D74, 0xF27B896F, 0x80DEB1FE, 0x3B1696B1, 0x9BDC06A7, 0x25C71235, 0xC19BF174, 0xCF692694,
+        0xE49B69C1, 0x9EF14AD2, 0xEFBE4786, 0x384F25E3, 0x0FC19DC6, 0x8B8CD5B5, 0x240CA1CC, 0x77AC9C65,
+        0x2DE92C6F, 0x592B0275, 0x4A7484AA, 0x6EA6E483, 0x5CB0A9DC, 0xBD41FBD4, 0x76F988DA, 0x831153B5,
+        0x983E5152, 0xEE66DFAB, 0xA831C66D, 0x2DB43210, 0xB00327C8, 0x98FB213F, 0xBF597FC7, 0xBEEF0EE4,
+        0xC6E00BF3, 0x3DA88FC2, 0xD5A79147, 0x930AA725, 0x06CA6351, 0xE003826F, 0x14292967, 0x0A0E6E70,
+        0x27B70A85, 0x46D22FFC, 0x2E1B2138, 0x5C26C926, 0x4D2C6DFC, 0x5AC42AED, 0x53380D13, 0x9D95B3DF,
+        0x650A7354, 0x8BAF63DE, 0x766A0ABB, 0x3C77B2A8, 0x81C2C92E, 0x47EDAEE6, 0x92722C85, 0x1482353B,
+        0xA2BFE8A1, 0x4CF10364, 0xA81A664B, 0xBC423001, 0xC24B8B70, 0xD0F89791, 0xC76C51A3, 0x0654BE30,
+        0xD192E819, 0xD6EF5218, 0xD6990624, 0x5565A910, 0xF40E3585, 0x5771202A, 0x106AA070, 0x32BBD1B8,
+        0x19A4C116, 0xB8D2D0C8, 0x1E376C08, 0x5141AB53, 0x2748774C, 0xDF8EEB99, 0x34B0BCB5, 0xE19B48A8,
+        0x391C0CB3, 0xC5C95A63, 0x4ED8AA4A, 0xE3418ACB, 0x5B9CCA4F, 0x7763E373, 0x682E6FF3, 0xD6B2B8A3,
+        0x748F82EE, 0x5DEFB2FC, 0x78A5636F, 0x43172F60, 0x84C87814, 0xA1F0AB72, 0x8CC70208, 0x1A6439EC,
+        0x90BEFFFA, 0x23631E28, 0xA4506CEB, 0xDE82BDE9, 0xBEF9A3F7, 0xB2C67915, 0xC67178F2, 0xE372532B,
+        0xCA273ECE, 0xEA26619C, 0xD186B8C7, 0x21C0C207, 0xEADA7DD6, 0xCDE0EB1E, 0xF57D4F7F, 0xEE6ED178,
+        0x06F067AA, 0x72176FBA, 0x0A637DC5, 0xA2C898A6, 0x113F9804, 0xBEF90DAE, 0x1B710B35, 0x131C471B,
+        0x28DB77F5, 0x23047D84, 0x32CAAB7B, 0x40C72493, 0x3C9EBE0A, 0x15C9BEBC, 0x431D67C4, 0x9C100D4C,
+        0x4CC5D4BE, 0xCB3E42B6, 0x597F299C, 0xFC657E2A, 0x5FCB6FAB, 0x3AD6FAEC, 0x6C44198C, 0x4A475817)
+
+    ; los números de 64 bits van en dos: la parte alta (_a) y la baja (_b)
+    variable h_a, h_b: arreglo [8] de nat32     ; el resumen, según va
+    variable w_a, w_b: arreglo [80] de nat32
+    variable v_a, v_b: arreglo [8] de nat32     ; a, b, c... h de cada vuelta
+    variable bloque: arreglo [128] de byte
+    variable en_bloque: nat32
+    variable total: nat32                       ; los octetos (hasta 512 MB: los bits caben en 32)
+    variable ra, rb: nat32                      ; lo que da rota() y corre()
+
+    ; (ra, rb) := (a, b) girado n bits a la derecha (n de 1 a 63, no 32)
+    función rota(a: nat32, b: nat32, n: nat32)
+        si n < 32 entonces
+            ra := (a >> n) ob (b << (32 - n))
+            rb := (b >> n) ob (a << (32 - n))
+        sino
+            n := n - 32
+            ra := (b >> n) ob (a << (32 - n))
+            rb := (a >> n) ob (b << (32 - n))
+        fin
+    fin
+
+    ; (ra, rb) := (a, b) corrido n bits a la derecha (n de 1 a 31)
+    función corre(a: nat32, b: nat32, n: nat32)
+        ra := a >> n
+        rb := (b >> n) ob (a << (32 - n))
+    fin
+
+    ; (a, b) := (a, b) + (c, d)
+    función suma(ref a: nat32, ref b: nat32, c: nat32, d: nat32)
+        variable x: nat32
+        x := b + d
+        a := a + c
+        si x < b entonces a := a + 1 fin
+        b := x
+    fin
+
+    función lee32(p: puntero a byte): nat32
+        devolver (nat32(p[0]) << 24) ob (nat32(p[1]) << 16) ob (nat32(p[2]) << 8) ob nat32(p[3])
+    fin
+
+    función comprime(p: puntero a byte)
+        variable i, j, s_a, s_b, t_a, t_b, x_a, x_b: nat32
+        para i desde 0 hasta 15 hacer
+            w_a[i] := lee32(p + i * 8)
+            w_b[i] := lee32(p + i * 8 + 4)
+        fin
+        para i desde 16 hasta 79 hacer
+            ; σ1(w[i-2]) + w[i-7] + σ0(w[i-15]) + w[i-16]
+            rota(w_a[i - 2], w_b[i - 2], 19)
+            s_a := ra
+            s_b := rb
+            rota(w_a[i - 2], w_b[i - 2], 61)
+            s_a := s_a xob ra
+            s_b := s_b xob rb
+            corre(w_a[i - 2], w_b[i - 2], 6)
+            s_a := s_a xob ra
+            s_b := s_b xob rb
+            suma(s_a, s_b, w_a[i - 7], w_b[i - 7])
+            rota(w_a[i - 15], w_b[i - 15], 1)
+            t_a := ra
+            t_b := rb
+            rota(w_a[i - 15], w_b[i - 15], 8)
+            t_a := t_a xob ra
+            t_b := t_b xob rb
+            corre(w_a[i - 15], w_b[i - 15], 7)
+            t_a := t_a xob ra
+            t_b := t_b xob rb
+            suma(s_a, s_b, t_a, t_b)
+            suma(s_a, s_b, w_a[i - 16], w_b[i - 16])
+            w_a[i] := s_a
+            w_b[i] := s_b
+        fin
+        para i desde 0 hasta 7 hacer
+            v_a[i] := h_a[i]
+            v_b[i] := h_b[i]
+        fin
+        para i desde 0 hasta 79 hacer
+            ; t1 = h + Σ1(e) + ch(e, f, g) + k[i] + w[i]
+            rota(v_a[4], v_b[4], 14)
+            s_a := ra
+            s_b := rb
+            rota(v_a[4], v_b[4], 18)
+            s_a := s_a xob ra
+            s_b := s_b xob rb
+            rota(v_a[4], v_b[4], 41)
+            s_a := s_a xob ra
+            s_b := s_b xob rb
+            t_a := v_a[7]
+            t_b := v_b[7]
+            suma(t_a, t_b, s_a, s_b)
+            x_a := (v_a[4] yb v_a[5]) xob ((nob v_a[4]) yb v_a[6])
+            x_b := (v_b[4] yb v_b[5]) xob ((nob v_b[4]) yb v_b[6])
+            suma(t_a, t_b, x_a, x_b)
+            suma(t_a, t_b, k[i * 2], k[i * 2 + 1])
+            suma(t_a, t_b, w_a[i], w_b[i])
+            ; t2 = Σ0(a) + maj(a, b, c)
+            rota(v_a[0], v_b[0], 28)
+            s_a := ra
+            s_b := rb
+            rota(v_a[0], v_b[0], 34)
+            s_a := s_a xob ra
+            s_b := s_b xob rb
+            rota(v_a[0], v_b[0], 39)
+            s_a := s_a xob ra
+            s_b := s_b xob rb
+            x_a := (v_a[0] yb v_a[1]) xob (v_a[0] yb v_a[2]) xob (v_a[1] yb v_a[2])
+            x_b := (v_b[0] yb v_b[1]) xob (v_b[0] yb v_b[2]) xob (v_b[1] yb v_b[2])
+            suma(s_a, s_b, x_a, x_b)
+            para j desde 7 hasta 1 paso -1 hacer
+                v_a[j] := v_a[j - 1]
+                v_b[j] := v_b[j - 1]
+            fin
+            ; (e = d + t1; a = t1 + t2)
+            suma(v_a[4], v_b[4], t_a, t_b)
+            v_a[0] := t_a
+            v_b[0] := t_b
+            suma(v_a[0], v_b[0], s_a, s_b)
+        fin
+        para i desde 0 hasta 7 hacer suma(h_a[i], h_b[i], v_a[i], v_b[i]) fin
+    fin
+
+    público función sha512_empezar()
+        h_a[0] := 0x6A09E667
+        h_b[0] := 0xF3BCC908
+        h_a[1] := 0xBB67AE85
+        h_b[1] := 0x84CAA73B
+        h_a[2] := 0x3C6EF372
+        h_b[2] := 0xFE94F82B
+        h_a[3] := 0xA54FF53A
+        h_b[3] := 0x5F1D36F1
+        h_a[4] := 0x510E527F
+        h_b[4] := 0xADE682D1
+        h_a[5] := 0x9B05688C
+        h_b[5] := 0x2B3E6C1F
+        h_a[6] := 0x1F83D9AB
+        h_b[6] := 0xFB41BD6B
+        h_a[7] := 0x5BE0CD19
+        h_b[7] := 0x137E2179
+        en_bloque := 0
+        total := 0
+    fin
+
+    público función sha512_añadir(p: puntero a byte, n: nat32)
+        total := total + n
+        mientras n > 0 hacer
+            si en_bloque = 0 y n >= 128 entonces
+                comprime(p)
+                p := p + 128
+                n := n - 128
+            sino
+                bloque[en_bloque] := valor(p)
+                en_bloque := en_bloque + 1
+                p := p + 1
+                n := n - 1
+                si en_bloque = 128 entonces
+                    comprime(dirección(bloque[0]))
+                    en_bloque := 0
+                fin
+            fin
+        fin
+    fin
+
+    ; los 64 octetos del resumen, a «salida»
+    público función sha512_acabar(salida: puntero a byte)
+        variable i, bits: nat32
+        bits := total << 3
+        bloque[en_bloque] := 0x80
+        en_bloque := en_bloque + 1
+        si en_bloque > 112 entonces
+            mientras en_bloque < 128 hacer
+                bloque[en_bloque] := 0
+                en_bloque := en_bloque + 1
+            fin
+            comprime(dirección(bloque[0]))
+            en_bloque := 0
+        fin
+        mientras en_bloque < 128 hacer
+            bloque[en_bloque] := 0
+            en_bloque := en_bloque + 1
+        fin
+        bloque[123] := byte(total >> 29)
+        bloque[124] := byte(bits >> 24)
+        bloque[125] := byte(bits >> 16)
+        bloque[126] := byte(bits >> 8)
+        bloque[127] := byte(bits)
+        comprime(dirección(bloque[0]))
+        en_bloque := 0
+        para i desde 0 hasta 7 hacer
+            salida[i * 8] := byte(h_a[i] >> 24)
+            salida[i * 8 + 1] := byte(h_a[i] >> 16)
+            salida[i * 8 + 2] := byte(h_a[i] >> 8)
+            salida[i * 8 + 3] := byte(h_a[i])
+            salida[i * 8 + 4] := byte(h_b[i] >> 24)
+            salida[i * 8 + 5] := byte(h_b[i] >> 16)
+            salida[i * 8 + 6] := byte(h_b[i] >> 8)
+            salida[i * 8 + 7] := byte(h_b[i])
+        fin
+    fin
+
+    ; ---------------------------------------------------------------------
+    ;  Los números módulo p = 2^255 - 19: 32 trozos de 8 bits (con signo,
+    ;  y algo más grandes mientras se cuenta)
+    ; ---------------------------------------------------------------------
+    variable c_d: arreglo [32] de byte = (
+        0xA3, 0x78, 0x59, 0x13, 0xCA, 0x4D, 0xEB, 0x75, 0xAB, 0xD8, 0x41, 0x41, 0x4D, 0x0A, 0x70, 0x00,
+        0x98, 0xE8, 0x79, 0x77, 0x79, 0x40, 0xC7, 0x8C, 0x73, 0xFE, 0x6F, 0x2B, 0xEE, 0x6C, 0x03, 0x52)
+    variable c_d2: arreglo [32] de byte = (
+        0x59, 0xF1, 0xB2, 0x26, 0x94, 0x9B, 0xD6, 0xEB, 0x56, 0xB1, 0x83, 0x82, 0x9A, 0x14, 0xE0, 0x00,
+        0x30, 0xD1, 0xF3, 0xEE, 0xF2, 0x80, 0x8E, 0x19, 0xE7, 0xFC, 0xDF, 0x56, 0xDC, 0xD9, 0x06, 0x24)
+    variable c_i: arreglo [32] de byte = (
+        0xB0, 0xA0, 0x0E, 0x4A, 0x27, 0x1B, 0xEE, 0xC4, 0x78, 0xE4, 0x2F, 0xAD, 0x06, 0x18, 0x43, 0x2F,
+        0xA7, 0xD7, 0xFB, 0x3D, 0x99, 0x00, 0x4D, 0x2B, 0x0B, 0xDF, 0xC1, 0x4F, 0x80, 0x24, 0x83, 0x2B)
+    variable c_bx: arreglo [32] de byte = (
+        0x1A, 0xD5, 0x25, 0x8F, 0x60, 0x2D, 0x56, 0xC9, 0xB2, 0xA7, 0x25, 0x95, 0x60, 0xC7, 0x2C, 0x69,
+        0x5C, 0xDC, 0xD6, 0xFD, 0x31, 0xE2, 0xA4, 0xC0, 0xFE, 0x53, 0x6E, 0xCD, 0xD3, 0x36, 0x69, 0x21)
+    variable c_by: arreglo [32] de byte = (
+        0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+        0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66)
+    variable c_bt: arreglo [32] de byte = (
+        0xA3, 0xDD, 0xB7, 0xA5, 0xB3, 0x8A, 0xDE, 0x6D, 0xF5, 0x52, 0x51, 0x77, 0x80, 0x9F, 0xF0, 0x20,
+        0x7D, 0xE3, 0xAB, 0x64, 0x8E, 0x4E, 0xEA, 0x66, 0x65, 0x76, 0x8B, 0xD7, 0x0F, 0x5F, 0x87, 0x67)
+    ; el orden del grupo, L = 2^252 + 27742317777372353535851937790883648493
+    variable c_l: arreglo [32] de ent32 = (
+        0xED, 0xD3, 0xF5, 0x5C, 0x1A, 0x63, 0x12, 0x58, 0xD6, 0x9C, 0xF7, 0xA2, 0xDE, 0xF9, 0xDE, 0x14,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10)
+
+    variable n_d, n_d2, n_i, cero, uno: arreglo [32] de ent32
+    variable base: arreglo [128] de ent32       ; el punto B (X, Y, Z, T)
+
+    función de_octetos(z: puntero a ent32, p: puntero a byte)
+        variable i: nat32
+        para i desde 0 hasta 31 hacer z[i] := ent32(p[i]) fin
+    fin
+
+    función copia(z: puntero a ent32, a: puntero a ent32)
+        variable i: nat32
+        para i desde 0 hasta 31 hacer z[i] := a[i] fin
+    fin
+
+    ; los acarreos: cada trozo, a 8 bits (lo que pasa de 2^256 vale 38)
+    función acarrea(z: puntero a ent32)
+        variable i: nat32
+        variable c: ent32
+        para i desde 0 hasta 30 hacer
+            c := z[i] >> 8
+            z[i] := z[i] - (c << 8)
+            z[i + 1] := z[i + 1] + c
+        fin
+        c := z[31] >> 8
+        z[31] := z[31] - (c << 8)
+        z[0] := z[0] + 38 * c
+    fin
+
+    función suma_c(z: puntero a ent32, a: puntero a ent32, b: puntero a ent32)
+        variable i: nat32
+        para i desde 0 hasta 31 hacer z[i] := a[i] + b[i] fin
+        acarrea(z)
+    fin
+
+    función resta_c(z: puntero a ent32, a: puntero a ent32, b: puntero a ent32)
+        variable i: nat32
+        para i desde 0 hasta 31 hacer z[i] := a[i] - b[i] fin
+        acarrea(z)
+    fin
+
+    ; o := a * b (o puede ser a o b)
+    función mul_c(z: puntero a ent32, a: puntero a ent32, b: puntero a ent32)
+        variable t: arreglo [63] de ent32
+        variable i, j: nat32
+        variable x: ent32
+        variable q: puntero a ent32
+        para i desde 0 hasta 62 hacer t[i] := 0 fin
+        para i desde 0 hasta 31 hacer
+            x := a[i]
+            si x <> 0 entonces
+                q := dirección(t[i])
+                para j desde 0 hasta 31 hacer q[j] := q[j] + x * b[j] fin
+            fin
+        fin
+        para i desde 0 hasta 30 hacer t[i] := t[i] + 38 * t[i + 32] fin
+        para i desde 0 hasta 31 hacer z[i] := t[i] fin
+        acarrea(z)
+        acarrea(z)
+    fin
+
+    ; los 32 octetos del número, del todo reducido
+    función empaqueta(r: puntero a byte, n: puntero a ent32)
+        variable t, m: arreglo [32] de ent32
+        variable i, vuelta: nat32
+        variable b: ent32
+        copia(dirección(t[0]), n)
+        acarrea(dirección(t[0]))
+        acarrea(dirección(t[0]))
+        acarrea(dirección(t[0]))
+        para vuelta desde 0 hasta 1 hacer
+            m[0] := t[0] - 0xED
+            para i desde 1 hasta 30 hacer
+                m[i] := t[i] - 0xFF - ((m[i - 1] >> 8) yb 1)
+                m[i - 1] := m[i - 1] yb 0xFF
+            fin
+            m[31] := t[31] - 0x7F - ((m[30] >> 8) yb 1)
+            b := (m[31] >> 8) yb 1
+            m[30] := m[30] yb 0xFF
+            si b = 0 entonces copia(dirección(t[0]), dirección(m[0])) fin
+        fin
+        para i desde 0 hasta 31 hacer r[i] := byte(t[i] yb 0xFF) fin
+    fin
+
+    función distintos(a: puntero a ent32, b: puntero a ent32): bool
+        variable x, w: arreglo [32] de byte
+        variable i: nat32
+        empaqueta(dirección(x[0]), a)
+        empaqueta(dirección(w[0]), b)
+        para i desde 0 hasta 31 hacer
+            si x[i] <> w[i] entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    función paridad(a: puntero a ent32): nat32
+        variable x: arreglo [32] de byte
+        empaqueta(dirección(x[0]), a)
+        devolver nat32(x[0]) yb 1
+    fin
+
+    ; o := 1 / i (i elevado a p - 2)
+    función inversa(z: puntero a ent32, i: puntero a ent32)
+        variable c: arreglo [32] de ent32
+        variable a: nat32
+        copia(dirección(c[0]), i)
+        para a desde 253 hasta 0 paso -1 hacer
+            mul_c(dirección(c[0]), dirección(c[0]), dirección(c[0]))
+            si a <> 2 y a <> 4 entonces mul_c(dirección(c[0]), dirección(c[0]), i) fin
+        fin
+        copia(z, dirección(c[0]))
+    fin
+
+    ; o := i elevado a (p - 5) / 8
+    función potencia(z: puntero a ent32, i: puntero a ent32)
+        variable c: arreglo [32] de ent32
+        variable a: nat32
+        copia(dirección(c[0]), i)
+        para a desde 250 hasta 0 paso -1 hacer
+            mul_c(dirección(c[0]), dirección(c[0]), dirección(c[0]))
+            si a <> 1 entonces mul_c(dirección(c[0]), dirección(c[0]), i) fin
+        fin
+        copia(z, dirección(c[0]))
+    fin
+
+    ; ---------------------------------------------------------------------
+    ;  Los puntos de la curva: X, Y, Z, T (128 ent32: cuatro números)
+    ; ---------------------------------------------------------------------
+    ; p := p + q (q puede ser p)
+    función suma_p(p: puntero a ent32, q: puntero a ent32)
+        variable a, b, c, d, t, e, f, g, h: arreglo [32] de ent32
+        resta_c(dirección(a[0]), p + 32, p)
+        resta_c(dirección(t[0]), q + 32, q)
+        mul_c(dirección(a[0]), dirección(a[0]), dirección(t[0]))
+        suma_c(dirección(b[0]), p, p + 32)
+        suma_c(dirección(t[0]), q, q + 32)
+        mul_c(dirección(b[0]), dirección(b[0]), dirección(t[0]))
+        mul_c(dirección(c[0]), p + 96, q + 96)
+        mul_c(dirección(c[0]), dirección(c[0]), dirección(n_d2[0]))
+        mul_c(dirección(d[0]), p + 64, q + 64)
+        suma_c(dirección(d[0]), dirección(d[0]), dirección(d[0]))
+        resta_c(dirección(e[0]), dirección(b[0]), dirección(a[0]))
+        resta_c(dirección(f[0]), dirección(d[0]), dirección(c[0]))
+        suma_c(dirección(g[0]), dirección(d[0]), dirección(c[0]))
+        suma_c(dirección(h[0]), dirección(b[0]), dirección(a[0]))
+        mul_c(p, dirección(e[0]), dirección(f[0]))
+        mul_c(p + 32, dirección(h[0]), dirección(g[0]))
+        mul_c(p + 64, dirección(g[0]), dirección(f[0]))
+        mul_c(p + 96, dirección(e[0]), dirección(h[0]))
+    fin
+
+    ; o := s · q (s: 32 octetos; o no puede ser q)
+    función por_escalar(z: puntero a ent32, q: puntero a ent32, s: puntero a byte)
+        variable i: nat32
+        copia(z, dirección(cero[0]))
+        copia(z + 32, dirección(uno[0]))
+        copia(z + 64, dirección(uno[0]))
+        copia(z + 96, dirección(cero[0]))
+        para i desde 255 hasta 0 paso -1 hacer
+            suma_p(z, z)
+            si (nat32(s[i >> 3]) >> (i yb 7)) yb 1 = 1 entonces suma_p(z, q) fin
+        fin
+    fin
+
+    ; los 32 octetos de un punto (Y, con el signo de X en el bit de arriba)
+    función empaqueta_p(r: puntero a byte, p: puntero a ent32)
+        variable zi, tx, ty: arreglo [32] de ent32
+        inversa(dirección(zi[0]), p + 64)
+        mul_c(dirección(tx[0]), p, dirección(zi[0]))
+        mul_c(dirección(ty[0]), p + 32, dirección(zi[0]))
+        empaqueta(r, dirección(ty[0]))
+        r[31] := r[31] xob byte(paridad(dirección(tx[0])) << 7)
+    fin
+
+    ; el punto -A de los 32 octetos de A (la clave pública); falso si no es de la curva
+    función desempaqueta_neg(r: puntero a ent32, p: puntero a byte): bool
+        variable t, chk, num, den, den2, den4, den6: arreglo [32] de ent32
+        copia(r + 64, dirección(uno[0]))
+        de_octetos(r + 32, p)
+        r[63] := r[63] yb 0x7F
+        mul_c(dirección(num[0]), r + 32, r + 32)
+        mul_c(dirección(den[0]), dirección(num[0]), dirección(n_d[0]))
+        resta_c(dirección(num[0]), dirección(num[0]), r + 64)
+        suma_c(dirección(den[0]), r + 64, dirección(den[0]))
+        mul_c(dirección(den2[0]), dirección(den[0]), dirección(den[0]))
+        mul_c(dirección(den4[0]), dirección(den2[0]), dirección(den2[0]))
+        mul_c(dirección(den6[0]), dirección(den4[0]), dirección(den2[0]))
+        mul_c(dirección(t[0]), dirección(den6[0]), dirección(num[0]))
+        mul_c(dirección(t[0]), dirección(t[0]), dirección(den[0]))
+        potencia(dirección(t[0]), dirección(t[0]))
+        mul_c(dirección(t[0]), dirección(t[0]), dirección(num[0]))
+        mul_c(dirección(t[0]), dirección(t[0]), dirección(den[0]))
+        mul_c(dirección(t[0]), dirección(t[0]), dirección(den[0]))
+        mul_c(r, dirección(t[0]), dirección(den[0]))
+        mul_c(dirección(chk[0]), r, r)
+        mul_c(dirección(chk[0]), dirección(chk[0]), dirección(den[0]))
+        si distintos(dirección(chk[0]), dirección(num[0])) entonces mul_c(r, r, dirección(n_i[0])) fin
+        mul_c(dirección(chk[0]), r, r)
+        mul_c(dirección(chk[0]), dirección(chk[0]), dirección(den[0]))
+        si distintos(dirección(chk[0]), dirección(num[0])) entonces devolver falso fin
+        si paridad(r) = nat32(p[31]) >> 7 entonces resta_c(r, dirección(cero[0]), r) fin
+        mul_c(r + 96, r, r + 32)
+        devolver cierto
+    fin
+
+    ; r := x módulo L (x: 64 números de 8 bits, que se gastan)
+    función módulo_l(r: puntero a byte, x: puntero a ent32)
+        variable i, j: nat32
+        variable c: ent32
+        para i desde 63 hasta 32 paso -1 hacer
+            c := 0
+            j := i - 32
+            mientras j < i - 12 hacer
+                x[j] := x[j] + c - 16 * x[i] * c_l[j - (i - 32)]
+                c := (x[j] + 128) >> 8
+                x[j] := x[j] - (c << 8)
+                j := j + 1
+            fin
+            x[j] := x[j] + c
+            x[i] := 0
+        fin
+        c := 0
+        para j desde 0 hasta 31 hacer
+            x[j] := x[j] + c - (x[31] >> 4) * c_l[j]
+            c := x[j] >> 8
+            x[j] := x[j] yb 255
+        fin
+        para j desde 0 hasta 31 hacer x[j] := x[j] - c * c_l[j] fin
+        para i desde 0 hasta 31 hacer
+            si i < 31 entonces x[i + 1] := x[i + 1] + (x[i] >> 8) fin
+            r[i] := byte(x[i] yb 255)
+        fin
+    fin
+
+    variable preparado: bool
+
+    función prepara()
+        si preparado entonces devolver fin
+        de_octetos(dirección(n_d[0]), dirección(c_d[0]))
+        de_octetos(dirección(n_d2[0]), dirección(c_d2[0]))
+        de_octetos(dirección(n_i[0]), dirección(c_i[0]))
+        uno[0] := 1
+        de_octetos(dirección(base[0]), dirección(c_bx[0]))
+        de_octetos(dirección(base[32]), dirección(c_by[0]))
+        copia(dirección(base[64]), dirección(uno[0]))
+        de_octetos(dirección(base[96]), dirección(c_bt[0]))
+        preparado := cierto
+    fin
+
+    ; ¿es «firma» (64 octetos) la de los «n» octetos de «mensaje» con la
+    ; clave pública «clave» (32 octetos)?
+    público función verifica(firma: puntero a byte, mensaje: puntero a byte, n: nat32, clave: puntero a byte): bool
+        variable q, p, s: arreglo [128] de ent32
+        variable hh: arreglo [64] de byte
+        variable x: arreglo [64] de ent32
+        variable h, r: arreglo [32] de byte
+        variable i: nat32
+        prepara()
+        ; S tiene que ser menor que L (si no, la misma firma tendría otras formas)
+        si firma[63] yb 0xE0 <> 0 entonces devolver falso fin
+        si no desempaqueta_neg(dirección(q[0]), clave) entonces devolver falso fin
+        sha512_empezar()
+        sha512_añadir(firma, 32)
+        sha512_añadir(clave, 32)
+        sha512_añadir(mensaje, n)
+        sha512_acabar(dirección(hh[0]))
+        para i desde 0 hasta 63 hacer x[i] := ent32(hh[i]) fin
+        módulo_l(dirección(h[0]), dirección(x[0]))
+        ; [h](-A) + [S]B tiene que dar R
+        por_escalar(dirección(p[0]), dirección(q[0]), dirección(h[0]))
+        por_escalar(dirección(s[0]), dirección(base[0]), firma + 32)
+        suma_p(dirección(p[0]), dirección(s[0]))
+        empaqueta_p(dirección(r[0]), dirección(p[0]))
+        para i desde 0 hasta 31 hacer
+            si r[i] <> firma[i] entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+fin Firma.
