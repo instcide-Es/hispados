@@ -1,0 +1,106 @@
+; =============================================================================
+;  uipconf.cas - IPCONFIG.BIN: cómo está la red de Hispa-Pentium (la tarjeta,
+;  su MAC, el enlace, la IP, la máscara, la puerta de enlace y el DNS).
+;    IPCONFIG            lo de siempre (si aún se está pidiendo la IP, espera
+;                        unos segundos a que llegue)
+;    IPCONFIG /RENOVAR   pide la IP otra vez (DHCP) y la enseña
+;    IPCONFIG /TODO      además, lo que ha apuntado el servicio de red (para
+;                        mandarlo si algo no va: IPCONFIG /TODO > RED.TXT)
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Uipconf
+
+    modelo usuario
+
+    importar Llamadas, Redes, Textos32, Formato
+
+    variable info: Info_red
+    variable args: arreglo [128] de byte
+    variable t: arreglo [32] de byte
+    variable reg: arreglo [8192] de byte
+
+    función ip(rótulo: puntero a byte, v: nat32)
+        ip_a_texto(v, t)
+        imprimir2("%s%s\n", nat32(rótulo), nat32(dirección(t[0])))
+    fin
+
+    función qué_estado(e: nat32): puntero a byte
+        según nat16(e)
+            caso RED_SIN_TARJETA: devolver "sin tarjeta de red"
+            caso RED_SIN_CABLE: devolver "sin cable (la tarjeta no tiene enlace)"
+            caso RED_BUSCANDO: devolver "pidiendo la IP (DHCP)"
+            caso RED_CONECTADA: devolver "conectada"
+        fin
+        devolver "sin servicio de red"
+    fin
+
+    función principal(): byte
+        variable r, i, n, a: nat32
+        variable todo, renueva: bool
+        argumentos(args, 128)
+        a_mayúsculas(args)
+        todo := buscar(args, "/TODO") <> nulo o buscar(args, "/ALL") <> nulo
+        renueva := buscar(args, "/RENOVAR") <> nulo o buscar(args, "/RENEW") <> nulo
+        si buscar(args, "/?") <> nulo entonces
+            escribir("IPCONFIG [/RENOVAR] [/TODO]: cómo está la red.\n")
+            escribir("  /RENOVAR  pide la IP otra vez (DHCP)\n")
+            escribir("  /TODO     y lo que ha apuntado el servicio de red\n")
+            devolver 0
+        fin
+        si renueva entonces
+            r := renovar()
+            si es_error_red(r) entonces
+                imprimir1("No se puede pedir la IP: %s.\n", nat32(texto_error_red(r)))
+                devolver 1
+            fin
+            escribir("Pidiendo la IP otra vez...\n")
+            dormir(50)
+        fin
+        r := estado_red(info)
+        ; si está pidiendo la IP (o el cable acaba de dar enlace), unos segundos
+        i := 0
+        mientras r = 0 y (info.estado = RED_BUSCANDO o (info.estado = RED_SIN_CABLE y i < 30)) y i < 100 hacer
+            si i = 0 entonces escribir("Esperando a la IP...\n") fin
+            dormir(10)
+            r := estado_red(info)
+            i := i + 1
+        fin
+        escribir("\nConfiguración de la red de Hispa-Pentium\n\n")
+        si es_error_red(r) entonces
+            imprimir1("  %s.\n", nat32(texto_error_red(r)))
+            devolver 1
+        fin
+        si info.estado = RED_SIN_TARJETA entonces
+            escribir("  No hay ninguna tarjeta de red que Hispa-Pentium sepa llevar\n")
+            escribir("  (las que lleva: Intel PRO/1000, Realtek RTL8139 y Marvell Yukon 88E8059).\n")
+        sino
+            imprimir4("  Tarjeta . . . . . . . : %s (%04X:%04X, IRQ %u)\n", nat32(dirección(info.tarjeta[0])), info.id_pci yb 0xFFFF, info.id_pci >> 16, info.irq)
+            imprimir3("  En el bus PCI  . . . : %02X:%02X.%u\n", (info.pci >> 16) yb 0xFF, (info.pci >> 11) yb 31, (info.pci >> 8) yb 7)
+            imprimir3("  MAC . . . . . . . . . : %02X:%02X:%02X:", info.mac[0], info.mac[1], info.mac[2])
+            imprimir3("%02X:%02X:%02X\n", info.mac[3], info.mac[4], info.mac[5])
+            si info.velocidad <> 0 entonces imprimir1("  Enlace  . . . . . . . : sí, a %u Mbit/s\n", info.velocidad) sino escribir("  Enlace  . . . . . . . : no (¿está enchufado el cable?)\n") fin
+        fin
+        imprimir1("  Estado  . . . . . . . : %s\n", nat32(qué_estado(info.estado)))
+        si info.ip <> 0 entonces
+            ip("  Dirección IP  . . . . : ", info.ip)
+            ip("  Máscara de subred . . : ", info.máscara)
+            ip("  Puerta de enlace  . . : ", info.puerta)
+            ip("  Servidor DNS  . . . . : ", info.dns)
+            si info.servidor <> 0 entonces
+                ip_a_texto(info.servidor, t)
+                imprimir3("  DHCP  . . . . . . . . : de %s, %u s (hace %u s)\n", nat32(dirección(t[0])), info.concesión, info.hace)
+            fin
+        fin
+        si info.estado <> RED_SIN_TARJETA entonces imprimir3("  Tramas  . . . . . . . : %u recibidas, %u enviadas, %u con error\n", info.recibidas, info.enviadas, info.errores) fin
+        si todo entonces
+            escribir("\nLo que ha apuntado el servicio de red:\n")
+            n := registro_red(reg, 8191)
+            si es_error_red(n) entonces n := 0 fin
+            reg[n] := 0
+            escribir(reg)
+        fin
+        si info.estado = RED_CONECTADA entonces devolver 0 fin
+        devolver 1
+    fin
+
+fin Uipconf.

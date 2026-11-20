@@ -221,6 +221,7 @@ módulo UOrdenes
         escribir("  PATH [carpetas] dónde se buscan los programas (PATH C:\\;C:\\UTIL)\n")
         escribir("  ECHO texto      escribe el texto          PAUSE        espera una tecla\n")
         escribir("  ESCRITORIO      pone en marcha el escritorio (el entorno gráfico)\n")
+        escribir("  IPCONFIG, PING, DESCARGAR  la red (IPCONFIG /?, PING, DESCARGAR /?)\n")
         escribir("  SALIR           acaba el intérprete de órdenes\n")
         escribir("Cualquier otro nombre es un programa del disco (PROGRAMA o PROGRAMA.BIN) o un\n")
         escribir("archivo de órdenes (.BAT), con lo que se escriba detrás como sus argumentos.\n")
@@ -633,6 +634,28 @@ módulo UOrdenes
         devolver 0
     fin
 
+    ; busca «orden» en la carpeta de trabajo y, si es un nombre suelto, en
+    ; las carpetas del PATH (como busca_en)
+    función busca(punto: bool, suelto: bool): nat32
+        variable i, k, clase: nat32
+        clase := busca_en("", punto)
+        i := 0
+        mientras clase = 0 y suelto y camino[i] <> 0 hacer
+            k := 0
+            mientras camino[i] <> 0 y camino[i] <> ';' hacer
+                si k < LÍNEA - 1 entonces
+                    carpeta[k] := camino[i]
+                    k := k + 1
+                fin
+                i := i + 1
+            fin
+            carpeta[k] := 0
+            si camino[i] = ';' entonces i := i + 1 fin
+            si k > 0 entonces clase := busca_en(carpeta, punto) fin
+        fin
+        devolver clase
+    fin
+
     ; lanza el programa (o el archivo de órdenes) «orden», buscándolo en la
     ; carpeta de trabajo y en las del PATH, con esos argumentos; a un
     ; programa se le espera
@@ -651,21 +674,12 @@ módulo UOrdenes
             fin
             i := i + 1
         fin
-        clase := busca_en("", punto)
-        ; si no está aquí y es un nombre suelto, en las carpetas del PATH
-        i := 0
-        mientras clase = 0 y suelto y camino[i] <> 0 hacer
-            k := 0
-            mientras camino[i] <> 0 y camino[i] <> ';' hacer
-                si k < LÍNEA - 1 entonces
-                    carpeta[k] := camino[i]
-                    k := k + 1
-                fin
-                i := i + 1
-            fin
-            carpeta[k] := 0
-            si camino[i] = ';' entonces i := i + 1 fin
-            si k > 0 entonces clase := busca_en(carpeta, punto) fin
+        clase := busca(punto, suelto)
+        ; un nombre de más de ocho letras (DESCARGAR), con las ocho primeras
+        ; (DESCARGA.BIN), como hacía el DOS
+        si clase = 0 y no punto y suelto y longitud(orden) > 8 entonces
+            orden[8] := 0
+            clase := busca(punto, suelto)
         fin
         si clase = 0 entonces
             imprimir1("Orden o nombre de programa desconocido: %s (escriba AYUDA).\n", nat32(dirección(orden[0])))

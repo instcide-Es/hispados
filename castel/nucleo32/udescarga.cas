@@ -1,0 +1,455 @@
+; =============================================================================
+;  udescarga.cas - DESCARGA.BIN (la orden DESCARGAR): baja un archivo de la
+;  red por HTTP/1.1 (sin cifrar) y lo guarda en el disco.
+;    DESCARGAR http://servidor[:puerto]/camino [archivo]
+;  Sin archivo, se llama como lo último del camino (en 8+3: «ultima.txt» es
+;  ULTIMA.TXT; «/» es INDEX.HTM). Con «-» como archivo, sale en la pantalla.
+;  Sigue las redirecciones (hasta cinco), entiende «Content-Length» y los
+;  trozos («Transfer-Encoding: chunked»). HTTPS, todavía no.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Udescarga
+
+    modelo usuario
+
+    importar Llamadas, Redes, Textos32, Formato, Mem32
+
+    constante CABE = 8192
+    constante ESPERA = 3000                     ; tics (30 s) sin que llegue nada: se deja
+
+    variable args: arreglo [600] de byte
+    variable url: arreglo [512] de byte
+    variable nombre: arreglo [256] de byte      ; el del servidor
+    variable camino: arreglo [512] de byte
+    variable archivo: arreglo [128] de byte
+    variable línea: arreglo [1024] de byte
+    variable ubicación: arreglo [512] de byte
+    variable petición: arreglo [1200] de byte
+    variable buf: arreglo [CABE] de byte
+    variable bn, bi: nat32
+    variable puerto, sock, error_red: nat32
+    variable cerrada, a_pantalla: bool
+    variable salida: nat32
+    variable escritos, próximo_punto: nat32
+
+    ; ---- la URL ----
+    ; http://nombre[:puerto][/camino]. Falso si no vale (o es https)
+    función parte_url(u: puntero a byte): bool
+        variable i, k: nat32
+        variable p: puntero a byte
+        p := u
+        si empieza_por_sin_caja(p, "https://") entonces
+            escribir("DESCARGAR: HTTPS (con cifrado) todavía no lo sabe hacer Hispa-Pentium; solo http://.\n")
+            devolver falso
+        fin
+        si empieza_por_sin_caja(p, "http://") entonces p := p + 7 fin
+        i := 0
+        mientras p[i] <> 0 y p[i] <> '/' y p[i] <> ':' y p[i] <> '?' y i < 255 hacer
+            nombre[i] := p[i]
+            i := i + 1
+        fin
+        nombre[i] := 0
+        si i = 0 entonces devolver falso fin
+        puerto := 80
+        si p[i] = ':' entonces
+            i := i + 1
+            puerto := 0
+            mientras p[i] >= '0' y p[i] <= '9' hacer
+                puerto := puerto * 10 + (p[i] - '0')
+                i := i + 1
+            fin
+            si puerto = 0 o puerto > 65535 entonces devolver falso fin
+        fin
+        k := 0
+        si p[i] <> '/' entonces
+            camino[0] := '/'
+            k := 1
+        fin
+        mientras p[i] <> 0 y k < 510 hacer
+            camino[k] := p[i]
+            i := i + 1
+            k := k + 1
+        fin
+        camino[k] := 0
+        devolver cierto
+    fin
+
+    función empieza_por_sin_caja(t: puntero a byte, principio: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras principio[i] <> 0 hacer
+            si minúscula(t[i]) <> minúscula(principio[i]) entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; el nombre del archivo, de lo último del camino, en 8+3
+    función nombre_de_archivo()
+        variable i, ini, fin_n, punto, k, e: nat32
+        variable c: byte
+        ini := 0
+        fin_n := 0
+        mientras camino[fin_n] <> 0 y camino[fin_n] <> '?' y camino[fin_n] <> '#' hacer
+            si camino[fin_n] = '/' entonces ini := fin_n + 1 fin
+            fin_n := fin_n + 1
+        fin
+        punto := fin_n
+        para i desde ini hasta fin_n hacer
+            si i < fin_n y camino[i] = '.' entonces punto := i fin
+        fin
+        k := 0
+        i := ini
+        mientras i < punto y k < 8 hacer
+            c := mayúscula(camino[i])
+            si es_letra(c) o es_cifra(c) o c = '_' o c = '-' entonces
+                archivo[k] := c
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        si k = 0 entonces
+            copiar(archivo, "INDEX.HTM")
+            devolver
+        fin
+        e := 0
+        si punto < fin_n entonces
+            archivo[k] := '.'
+            i := punto + 1
+            mientras i < fin_n y e < 3 hacer
+                c := mayúscula(camino[i])
+                si es_letra(c) o es_cifra(c) entonces
+                    archivo[k + 1 + e] := c
+                    e := e + 1
+                fin
+                i := i + 1
+            fin
+            si e = 0 entonces archivo[k] := 0 sino archivo[k + 1 + e] := 0 fin
+        sino
+            archivo[k] := 0
+        fin
+    fin
+
+    ; ---- leer de la conexión ----
+    función llena(): bool
+        variable r: nat32
+        si cerrada entonces devolver falso fin
+        r := recibir(sock, buf, CABE, ESPERA)
+        si es_error_red(r) entonces
+            error_red := r
+            cerrada := cierto
+            devolver falso
+        fin
+        si r = 0 entonces
+            cerrada := cierto
+            devolver falso
+        fin
+        bn := r
+        bi := 0
+        devolver cierto
+    fin
+
+    función lee_octeto(ref c: byte): bool
+        si bi >= bn y no llena() entonces devolver falso fin
+        c := buf[bi]
+        bi := bi + 1
+        devolver cierto
+    fin
+
+    ; una línea (sin el retorno de carro ni el avance)
+    función lee_línea(): bool
+        variable c: byte
+        variable n: nat32
+        n := 0
+        mientras cierto hacer
+            si no lee_octeto(c) entonces
+                línea[n] := 0
+                devolver n > 0
+            fin
+            si c = '\n' entonces romper fin
+            si c <> '\r' y n < 1022 entonces
+                línea[n] := c
+                n := n + 1
+            fin
+        fin
+        línea[n] := 0
+        devolver cierto
+    fin
+
+    ; ---- escribir lo que llega ----
+    función guarda(p: puntero a byte, n: nat32): bool
+        variable r: nat32
+        si n = 0 entonces devolver cierto fin
+        si a_pantalla entonces
+            escribir_trozo(p, n)
+        sino
+            r := escribir_archivo(salida, p, n)
+            si r <> n entonces
+                si es_error(r) entonces imprimir1("\nDESCARGAR: no se puede escribir: %s.\n", nat32(texto_error(r))) sino escribir("\nDESCARGAR: no queda sitio en el disco.\n") fin
+                devolver falso
+            fin
+        fin
+        escritos := escritos + n
+        si no a_pantalla y escritos >= próximo_punto entonces
+            escribir(".")
+            próximo_punto := próximo_punto + 32768
+        fin
+        devolver cierto
+    fin
+
+    ; pasa «n» octetos de la conexión al archivo (0xFFFFFFFF: hasta que se cierre)
+    función copia(n: nat32): bool
+        variable k: nat32
+        mientras n > 0 hacer
+            si bi >= bn entonces
+                si no llena() entonces devolver n = 0xFFFFFFFF y error_red = 0 fin
+            fin
+            k := bn - bi
+            si n <> 0xFFFFFFFF y k > n entonces k := n fin
+            si no guarda(dirección(buf[bi]), k) entonces devolver falso fin
+            bi := bi + k
+            si n <> 0xFFFFFFFF entonces n := n - k fin
+        fin
+        devolver cierto
+    fin
+
+    función hex(t: puntero a byte, ref n: nat32): bool
+        variable i: nat32
+        variable c: byte
+        n := 0
+        i := 0
+        mientras cierto hacer
+            c := minúscula(t[i])
+            si c >= '0' y c <= '9' entonces
+                n := n * 16 + (c - '0')
+            sino si c >= 'a' y c <= 'f' entonces
+                n := n * 16 + (c - 'a' + 10)
+            sino
+                romper
+            fin
+            i := i + 1
+        fin
+        devolver i > 0
+    fin
+
+    ; lo de detrás de «Nombre:» en la línea, si es esa cabecera
+    función cabecera(nom: puntero a byte): puntero a byte
+        variable p: puntero a byte
+        si no empieza_por_sin_caja(línea, nom) entonces devolver nulo fin
+        p := dirección(línea[longitud(nom)])
+        mientras valor(p) = ' ' o valor(p) = '\t' hacer p := p + 1 fin
+        devolver p
+    fin
+
+    ; ---- una descarga: da el código del servidor (0 si no ha podido ser) ----
+    función una(): nat32
+        variable ip, r, código, largo: nat32
+        variable p: puntero a byte
+        variable trozos, con_largo: bool
+        variable d: arreglo [4] de nat32
+        variable t: arreglo [20] de byte
+        r := resolver(nombre, ip)
+        si es_error_red(r) entonces
+            imprimir2("DESCARGAR: no se encuentra %s: %s.\n", nat32(dirección(nombre[0])), nat32(texto_error_red(r)))
+            devolver 0
+        fin
+        ip_a_texto(ip, t)
+        imprimir3("Conectando con %s (%s), puerto %u... ", nat32(dirección(nombre[0])), nat32(dirección(t[0])), puerto)
+        sock := conectar(ip, puerto, ESPERA_NORMAL)
+        si es_error_red(sock) entonces
+            imprimir1("\nDESCARGAR: %s.\n", nat32(texto_error_red(sock)))
+            devolver 0
+        fin
+        escribir("conectado.\n")
+        d[0] := nat32(dirección(camino[0]))
+        d[1] := nat32(dirección(nombre[0]))
+        formatear(petición, 1200, "GET %s HTTP/1.1\r\nHost: %s", d)
+        si puerto <> 80 entonces
+            formatear(línea, 16, ":%u", puntero(dirección(puerto)))
+            concatenar(petición, línea)
+        fin
+        concatenar(petición, "\r\nUser-Agent: Hispa-Pentium/0.8 DESCARGAR\r\nAccept: */*\r\nConnection: close\r\n\r\n")
+        r := enviar_texto(sock, petición)
+        si es_error_red(r) entonces
+            imprimir1("DESCARGAR: %s.\n", nat32(texto_error_red(r)))
+            cerrar_conexión(sock)
+            devolver 0
+        fin
+        bn := 0
+        bi := 0
+        cerrada := falso
+        error_red := 0
+        ; la línea de estado («HTTP/1.1 200 OK»); las de 1xx se saltan
+        código := 100
+        mientras código >= 100 y código < 200 hacer
+            si no lee_línea() entonces
+                escribir("DESCARGAR: el servidor no ha contestado.\n")
+                cerrar_conexión(sock)
+                devolver 0
+            fin
+            p := buscar_car(línea, ' ')
+            código := 0
+            si p <> nulo entonces texto_a_natural_hasta(p + 1, código) fin
+            si código >= 100 y código < 200 entonces
+                mientras lee_línea() y línea[0] <> 0 hacer fin
+            fin
+        fin
+        si código = 0 entonces
+            imprimir1("DESCARGAR: no es una respuesta de HTTP: %s\n", nat32(dirección(línea[0])))
+            cerrar_conexión(sock)
+            devolver 0
+        fin
+        imprimir1("El servidor dice: %s\n", nat32(dirección(línea[0])))
+        ; las cabeceras
+        trozos := falso
+        con_largo := falso
+        largo := 0
+        ubicación[0] := 0
+        mientras lee_línea() hacer
+            si línea[0] = 0 entonces romper fin
+            p := cabecera("content-length:")
+            si p <> nulo entonces con_largo := texto_a_natural_hasta(p, largo) fin
+            p := cabecera("transfer-encoding:")
+            si p <> nulo y buscar_sin_caja(p, "chunked") entonces trozos := cierto fin
+            p := cabecera("location:")
+            si p <> nulo entonces copiar_hasta(ubicación, p, 512) fin
+        fin
+        si código >= 300 y código < 400 y ubicación[0] <> 0 entonces
+            cerrar_conexión(sock)
+            devolver código
+        fin
+        si código <> 200 entonces
+            cerrar_conexión(sock)
+            devolver código
+        fin
+        ; el archivo
+        si no a_pantalla entonces
+            salida := crear(archivo)
+            si es_error(salida) entonces
+                imprimir2("DESCARGAR: no se puede crear %s: %s.\n", nat32(dirección(archivo[0])), nat32(texto_error(salida)))
+                cerrar_conexión(sock)
+                devolver 0
+            fin
+            si con_largo entonces imprimir2("Guardando %s (%u octetos)", nat32(dirección(archivo[0])), largo) sino imprimir1("Guardando %s", nat32(dirección(archivo[0]))) fin
+        fin
+        escritos := 0
+        próximo_punto := 32768
+        si trozos entonces
+            mientras cierto hacer
+                si no lee_línea() o no hex(línea, largo) entonces
+                    r := 0
+                    romper
+                fin
+                si largo = 0 entonces
+                    mientras lee_línea() y línea[0] <> 0 hacer fin
+                    r := 1
+                    romper
+                fin
+                si no copia(largo) entonces
+                    r := 0
+                    romper
+                fin
+                lee_línea()
+            fin
+        sino si con_largo entonces
+            r := 0
+            si copia(largo) entonces r := 1 fin
+        sino
+            r := 0
+            si copia(0xFFFFFFFF) entonces r := 1 fin
+        fin
+        si no a_pantalla entonces
+            cerrar(salida)
+            escribir("\n")
+        fin
+        cerrar_conexión(sock)
+        si r = 0 entonces
+            si error_red <> 0 entonces
+                imprimir1("DESCARGAR: %s (a medias).\n", nat32(texto_error_red(error_red)))
+            sino
+                escribir("DESCARGAR: la conexión se ha cerrado antes de acabar.\n")
+            fin
+            devolver 0
+        fin
+        devolver código
+    fin
+
+    ; como texto_a_natural, pero se para en lo que no sea una cifra
+    función texto_a_natural_hasta(t: puntero a byte, ref n: nat32): bool
+        variable i: nat32
+        n := 0
+        i := 0
+        mientras t[i] >= '0' y t[i] <= '9' hacer
+            n := n * 10 + (t[i] - '0')
+            i := i + 1
+        fin
+        devolver i > 0
+    fin
+
+    función buscar_sin_caja(t: puntero a byte, trozo: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras t[i] <> 0 hacer
+            si empieza_por_sin_caja(dirección(t[i]), trozo) entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    función principal(): byte
+        variable vueltas, código, empezó, s: nat32
+        variable dado: bool
+        variable pal: arreglo [128] de byte
+        variable d: arreglo [4] de nat32
+        argumentos(args, 600)
+        si no palabra(args, 0, url, 512) o iguales(url, "/?") entonces
+            escribir("Uso: DESCARGAR http://servidor[:puerto]/camino [archivo]\n")
+            escribir("  Baja ese archivo por HTTP y lo guarda (con «-» como archivo, a la pantalla).\n")
+            devolver 1
+        fin
+        dado := palabra(args, 1, pal, 128)
+        a_pantalla := dado y iguales(pal, "-")
+        empezó := tics()
+        vueltas := 0
+        mientras cierto hacer
+            si no parte_url(url) entonces
+                si no empieza_por_sin_caja(url, "https://") entonces imprimir1("DESCARGAR: la dirección no vale: %s\n", nat32(dirección(url[0]))) fin
+                devolver 1
+            fin
+            si dado entonces copiar_hasta(archivo, pal, 128) sino nombre_de_archivo() fin
+            código := una()
+            si código = 0 entonces devolver 1 fin
+            si código >= 300 y código < 400 y ubicación[0] <> 0 y vueltas < 5 entonces
+                vueltas := vueltas + 1
+                imprimir1("Redirigido a %s\n", nat32(dirección(ubicación[0])))
+                si ubicación[0] = '/' entonces
+                    ; (en el mismo servidor)
+                    d[0] := nat32(dirección(nombre[0]))
+                    d[1] := puerto
+                    d[2] := nat32(dirección(ubicación[0]))
+                    formatear(url, 512, "http://%s:%u%s", d)
+                sino
+                    copiar_hasta(url, ubicación, 512)
+                fin
+                seguir
+            fin
+            romper
+        fin
+        si código <> 200 entonces
+            imprimir1("DESCARGAR: no se ha bajado nada (el servidor ha dicho %u).\n", código)
+            devolver 1
+        fin
+        s := tics() - empezó
+        si s = 0 entonces s := 1 fin
+        si no a_pantalla entonces
+            d[0] := nat32(dirección(archivo[0]))
+            d[1] := escritos
+            d[2] := s div 100
+            d[3] := (s mod 100) div 10
+            imprimir("Hecho: %s, %u octetos en %u,%u s", d)
+            imprimir1(" (%u K/s).\n", ((escritos div 1024) * 100) div s)
+        fin
+        devolver 0
+    fin
+
+fin Udescarga.
