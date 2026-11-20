@@ -26,7 +26,9 @@
 ;
 ;  Mapa de memoria: el núcleo se carga en 0070:0000 y ahí se queda, con sus
 ;  variables, su pila y la copia de la FAT detrás; el programa que se ejecuta
-;  va justo después, hasta el final de la memoria convencional.
+;  va justo después, hasta el final de la memoria convencional. Lo que solo
+;  hace falta al arrancar (inicio.inc, config.inc...) va en el archivo detrás
+;  de lo residente y no se queda en memoria: ver inicio.inc.
 ; =============================================================================
         cpu 8086
         bits 16
@@ -60,10 +62,10 @@ CPU_486     equ 5
 ; pasar de 0070:0000, que es donde nos deja el sector de arranque, a
 ; 006F:0010, que es el mismo sitio.
 entrada:
-        mov ax, cs
-        dec ax
+        mov ax, cs                  ; (el arranque está detrás de lo residente:
+        add ax, TXT_TAM / 16        ; ver «El arranque», más abajo)
         push ax
-        mov ax, inicio
+        xor ax, ax
         push ax
         retf
 ; Todas las interrupciones del sistema entran por aquí, por «el puente», que
@@ -232,7 +234,6 @@ b_f_cierra:
         retf
             align 2
 b_punteros  dw int20, 0, int21, 0, int25, 0, int26, 0, int27, 0, int2f, 0, xms_entra, 0, int15, 0
-b_gdt       times 48 db 0           ; la tabla que pide INT 15h/87h
 b_quiere    db 0                    ; A20 tiene que estar abierta
 ; para el banco de pruebas: «HCFG:» y un octeto con lo que vale sin decir nada
 ; en CONFIG.SYS (bit 0: DOS=ALTO; bit 1: PROCESADOR=8086)
@@ -241,114 +242,17 @@ cfg_inicial db 0
 seg_bajo    dw 0                    ; el segmento del puente (el de la memoria baja)
 ; Con el núcleo en la HMA, la BIOS no siempre llega por encima del mega
 ; (SeaBIOS, por ejemplo, no lee el disco duro en FFFF:xxxx): cada sector que
-; lee o escribe el núcleo pasa por aquí abajo (disco.inc, bios_bajo)
-            align 2
-b_buf       times 512 db 0
+; lee o escribe el núcleo pasa por la memoria baja, por un sector que hay
+; justo aquí detrás (B_BUF), con la tabla de INT 15h/87h delante (B_GDT). No
+; van en el archivo: con el núcleo arriba, este sitio queda libre (y abajo,
+; la tabla va con las variables y el sector no hace falta)
+            align 16
 bajo_fin:
+B_GDT       equ bajo_fin
+B_BUF       equ bajo_fin + 48
+BAJO_TOPE   equ B_BUF + 512         ; con el núcleo arriba, lo que ocupa abajo
 
-inicio:
-        cli
-        mov ax, cs
-        mov ds, ax
-        mov es, ax
-        mov ss, ax
-        mov sp, pila_fin
-        sti
-        cld
-        mov di, bss_ini             ; las variables, a cero
-        mov cx, fichas + N_ARCH * H_TAM_F - bss_ini
-        xor al, al
-        rep stosb
-        mov [arr_bios], dl          ; de dónde se ha arrancado
-        mov [seg_bajo], cs          ; (el del puente: el núcleo puede subir)
-        mov word [buf_lba], 0xFFFF
-        mov word [fat_lba], 0xFFFF
-        mov byte [n_arch], N_ARCH
-        mov byte [cache_mete], 1
-        mov word [fecha_xt], 0x0021 ; (sin reloj: 1 de enero de 1980)
-        call disp_ini
-        call cpu_detecta
-        int 0x12                    ; la memoria convencional, en K
-        mov [mem_kb], ax
-        ; los vectores del sistema: INT 20h (terminar) e INT 21h
-        xor ax, ax
-        mov es, ax
-        mov word [es:0x20*4], b_int20
-        mov [es:0x20*4+2], cs
-        mov word [es:0x21*4], b_int21
-        mov [es:0x21*4+2], cs
-        mov word [es:0x25*4], b_int25
-        mov [es:0x25*4+2], cs
-        mov word [es:0x26*4], b_int26
-        mov [es:0x26*4+2], cs
-        mov word [es:0x27*4], b_int27
-        mov [es:0x27*4+2], cs
-        ; [REINICIO-SILENCIO] INT 15h (el aviso de tecla, AH=4Fh): con
-        ; Ctrl+Alt+Supr, el sonido callado antes de que la BIOS reinicie
-        cli
-        mov ax, [es:0x15*4]
-        mov [ant15], ax
-        mov ax, [es:0x15*4+2]
-        mov [ant15+2], ax
-        mov word [es:0x15*4], b_int15
-        mov [es:0x15*4+2], cs
-        sti
-        mov bx, b_punteros          ; el puente: de momento, el núcleo está aquí
-        mov cx, N_PUENTES
-.pt:
-        mov [bx+2], cs
-        add bx, 4
-        loop .pt
-        mov [bajo_seg], cs
-        mov word [p_esta], b_f_esta
-        mov [p_esta+2], cs
-        mov word [p_abre], b_f_abre
-        mov [p_abre+2], cs
-        mov word [p_cierra], b_f_cierra
-        mov [p_cierra+2], cs
-        mov word [p_mueve], b_mueve
-        mov [p_mueve+2], cs
-        mov al, [cfg_inicial]
-        mov ah, al
-        and al, 1
-        mov [dos_alto], al
-        shr ah, 1
-        and ah, 1
-        mov [como_8086], ah
-        push cs
-        pop es
-        mov [dta_seg], cs           ; las búsquedas, por ahora, a lo nuestro
-        mov word [dta_off], dta_int
-        ; las unidades. Arrancando de un disquete, ese es A: y la unidad de
-        ; trabajo; arrancando del disco duro, A: es la primera disquetera y
-        ; se trabaja en C:
-        mov al, [arr_bios]
-        test al, al
-        js .duro
-        mov [u_bios], al
-        call disco_ini
-        call unidades_ini
-        jmp short .unidades
-.duro:
-        call unidades_ini
-        cmp byte [u_hay+2], 0
-        je .unidades
-        mov al, 2
-        mov [unidad_def], al
-        call unidad_pon
-        mov byte [ent_nucleo.u1], 'C'   ; (PATH y COMSPEC, en C:)
-        mov byte [ent_nucleo.u2], 'C'
-.unidades:
-        mov si, m_titulo
-        call pon_cad
-        call config_lee             ; CONFIG.SYS: FILES=, BUFFERS=, DEVICE=...
-        ; dónde va el programa: detrás de todo lo del núcleo, que acaba en la
-        ; tabla de archivos abiertos, la reserva de sectores y los
-        ; controladores cargados (config_lee deja dicho dónde)
-        mov ax, [cf_tope]
-        mov [mem_seg], ax           ; ahí empieza la memoria que se reparte
-        call mem_ini
-        mov byte [primera], 1
+%include "inicio.inc"          ; el arranque (va en su sección: ver allí)
 
 ; lanza el intérprete de órdenes (\COMMAND.COM); al arrancar, con «/P». Si
 ; termina, se lanza otra vez; si no está, no hay nada que hacer
@@ -1602,6 +1506,7 @@ int15:
 .sigue:
         jmp far [cs:ant15]
 
+        section .init               ; (solo al arrancar: inicio.inc)
 ; reconoce el procesador -> [cpu_tipo]. Cada prueba solo usa lo que ya se sabe
 ; que el procesador tiene
 cpu_detecta:
@@ -1667,6 +1572,8 @@ cpu_detecta:
         mov [cpu_tipo], bl
         ret
 
+        section .text
+
 %include "dispositivos.inc"
 %include "disco.inc"
 %include "archivos.inc"
@@ -1677,10 +1584,20 @@ cpu_detecta:
 ; =============================================================================
 ;  Los textos del núcleo (página 437)
 ; =============================================================================
-m_titulo    db 10, "Hispa-8086 0.12 - de la familia Hispa-DOS", 10
-            db "Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.", 10, 10, 0
 m_sin_command db "Falta COMMAND.COM: no se puede seguir.", 10, 0
 m_sin_shell db "No se puede lanzar el intérprete de SHELL=: se usa COMMAND.COM.", 10, 0
+
+; el arranque llama a las rutinas de aquí con esto (inicio.inc, «K»): una
+; llamada lejana que acaba en una cercana
+lejos:
+        call [cs:lej_rut]
+        retf
+
+; aquí acaba lo que se queda en memoria; detrás, en el archivo, va el
+; arranque, que se copia a lo alto de la memoria y se olvida al acabar
+            align 16, db 0
+txt_fin:
+TXT_TAM     equ txt_fin - entrada
 
 ; =============================================================================
 ;  Las variables (no van en el archivo: el núcleo las pone a cero al arrancar)
@@ -1847,6 +1764,10 @@ unidad_def  resb 1                  ; la de trabajo
 rn_uni      resb 1
             alignb 2
 fat_lba     resw 1                  ; el sector que hay en `fat`
+lej_rut     resw 1                  ; (lejos: la rutina que se llama)
+b_gdtp      resw 1                  ; donde están B_GDT y B_BUF (en el segmento
+b_bufp      resw 1                  ; del puente): abajo, la tabla es esta
+gdt_bss     resb 48
             resb PILA_TAM
 pila_fin:
 bss_fin:
@@ -1854,3 +1775,6 @@ bss_fin:
 ; la memoria que se reparte (hasta bss_fin se pone a cero al arrancar; lo que
 ; crezca lo pone a cero config_lee)
 fichas      resb N_ARCH * H_TAM_F
+
+        section .init
+ini_fin:

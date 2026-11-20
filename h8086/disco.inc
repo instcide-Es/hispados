@@ -339,8 +339,8 @@ disco_es:
         pop bx
         ret
 
-; con el núcleo en la HMA, un sector por la BIOS pasando por b_buf, en la
-; memoria baja (en el puente): hay BIOS que no leen ni escriben por encima del
+; con el núcleo en la HMA, un sector por la BIOS pasando por B_BUF, en la
+; memoria baja (detrás del puente): hay BIOS que no leen ni escriben por encima del
 ; mega. Como INT 13h: [op13] = 2 leer o 3 escribir, CX y DX como para la BIOS,
 ; ES:BX = el sector de verdad. Devuelve CF y AH como la BIOS. Conserva BX, CX,
 ; SI, DI y ES
@@ -357,15 +357,15 @@ bios_bajo:
         mov si, bx
         mov ax, es
         mov es, [seg_bajo]
-        mov ds, ax                  ; DS:SI = el sector, ES:DI = b_buf
-        mov di, b_buf
+        mov di, [b_bufp]            ; DS:SI = el sector, ES:DI = B_BUF
+        mov ds, ax
         mov cx, 256
         rep movsw
         pop cx
         pop ds
 .va:
         mov es, [seg_bajo]
-        mov bx, b_buf
+        mov bx, [b_bufp]
         mov ah, [op13]
         mov al, 1
         int 0x13
@@ -376,7 +376,7 @@ bios_bajo:
         jne .bien
         push ds                     ; leer: de abajo, a su sitio
         mov di, bx
-        mov si, b_buf
+        mov si, [b_bufp]
         mov ds, [seg_bajo]
         mov cx, 256
         rep movsw
@@ -736,24 +736,9 @@ unidad_pon:
         mov di, ax
         ret
 
-; mira qué unidades hay además de la de arranque: un segundo disquete (B:) y
-; la primera partición FAT del primer disco duro (C:)
-unidades_ini:
-        mov byte [u_hay], 1
-        mov byte [u_hay+1], 1
-        int 0x11                    ; ¿dos disqueteras?
-        test al, 1
-        jz .una
-        and al, 0xC0
-        jz .una
-        mov byte [u_guardadas + U_TAM + (u_bios - u_ini)], 1
-        jmp short .duro
-.una:
-        mov byte [una_disq], 1      ; una sola: B: es la misma, con otro
-.duro:                              ; disquete (ver disco_es)
-; (y también sola: cuando PARTIR o FORMATEA han cambiado el disco duro)
 ; busca la primera partición FAT del primer disco duro: si la hay y tiene
-; formato, existe C:. Entra y sale con A: como unidad cargada
+; formato, existe C:. Entra y sale con A: como unidad cargada. Al arrancar
+; (inicio.inc) y cuando PARTIR o FORMATEA han cambiado el disco duro
 duro_ini:
         mov byte [u_hay+2], 0
         push es

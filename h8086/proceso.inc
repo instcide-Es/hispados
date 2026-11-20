@@ -37,22 +37,8 @@ PSP_ENT     equ 0x2C                ; dw: su entorno
 PSP_PILA    equ 0x2E                ; dd: la pila de él mientras espera a un hijo
 PSP_DTA     equ 0x38                ; dd: la zona de búsquedas de quien lo lanzó
 
-; ---- la memoria ----
-; todo lo que hay detrás del núcleo, un solo bloque libre
-mem_ini:
-        push es
-        mov ax, [mem_seg]
-        mov es, ax
-        mov byte [es:MCB_TIPO], 'Z'
-        mov word [es:MCB_DUENO], 0
-        mov bx, [mem_kb]
-        mov cl, 6
-        shl bx, cl
-        sub bx, ax
-        dec bx
-        mov [es:MCB_TAM], bx
-        pop es
-        ret
+; ---- la memoria ---- (al arrancar, todo lo que hay detrás del núcleo es un
+; solo bloque libre: lo pone inicio.inc)
 ; (interna) al bloque de la cabecera ES se le juntan los libres que le siguen
 mem_junta:
         push ax

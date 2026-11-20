@@ -52,7 +52,9 @@ XE_LARGO    equ 0xA7                ; el largo no vale
 XE_SIN_BLOQ equ 0xAA                ; no estaba bloqueado
 XE_BLOQ     equ 0xAB                ; está bloqueado
 
-; ¿hay un 286 con memoria extendida? Entonces hay gestor: [xms_hay]
+; ¿hay un 286 con memoria extendida? Entonces hay gestor: [xms_hay]. Esto y
+; alto_sube solo se usan al arrancar (en su sección: ver inicio.inc)
+        section .init
 xms_ini:
         cmp byte [cpu_tipo], CPU_286
         jb .x
@@ -81,7 +83,7 @@ xms_ini:
         mov [ant2f+2], ax
         cli
         mov word [es:0x2F*4], b_int2f
-        mov [es:0x2F*4+2], cs
+        mov [es:0x2F*4+2], ds
         sti
         pop es
 .x:
@@ -103,7 +105,7 @@ alto_sube:
         jnz .va
         mov byte [b_quiere], 0      ; no se abre: nos quedamos abajo
         mov si, m_sin_a20
-        jmp pon_cad
+        jmp ipon_cad
 .va:
         push di
         mov cx, di
@@ -124,17 +126,17 @@ alto_sube:
         mov ss, ax
         mov ds, ax
         sti
-        push ax
-        mov ax, .arriba
-        push ax
-        retf
-.arriba:
+        mov [cs:i_lejos+2], ax      ; (el arranque sigue donde está, en lo alto
+        mov [cs:i_interp+2], ax     ; de la memoria; lo que llama, arriba)
         mov byte [alto], 1
-        call disp_ini               ; (la cadena de dispositivos, con su sitio nuevo)
+        mov word [b_gdtp], B_GDT    ; los dos, en el sitio que queda libre abajo
+        mov word [b_bufp], B_BUF
+        call k_disp_ini             ; (la cadena de dispositivos, con su sitio nuevo)
 .x:
-        push cs
+        push ds
         pop es
         ret
+        section .text
 
 ; ---- INT 2Fh: ¿hay gestor de memoria extendida? ----
 int2f:
@@ -708,20 +710,20 @@ x_copia:
         ; la tabla que quiere la BIOS: seis descriptores; el tercero dice de
         ; dónde y el cuarto, adónde
         mov es, [bajo_seg]
-        mov di, b_gdt
+        mov di, [b_gdtp]
         push cx
         mov cx, 24
         xor ax, ax
         rep stosw
         pop cx
-        mov di, b_gdt + 0x10
+        sub di, 0x30 - 0x10
         mov si, x_org
         call .descriptor
-        mov di, b_gdt + 0x18
+        add di, 8
         mov si, x_dst
         call .descriptor
         shr cx, 1                   ; en palabras
-        mov si, b_gdt
+        mov si, [b_gdtp]
         mov ah, 0x87
         call far [p_mueve]
         push cs
@@ -753,4 +755,6 @@ x_copia:
         mov [es:di+7], ah
         ret
 
+        section .init
 m_sin_a20   db "No se puede abrir la puerta A20: el sistema se queda en la memoria baja.", 10, 0
+        section .text

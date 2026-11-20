@@ -29,7 +29,12 @@
 ;      (órdenes 1 y 2): vale para discos fijos, como uno en memoria.
 ;  Por eso CONFIG.SYS se lee dos veces: primero todo lo demás, que decide lo
 ;  que miden la tabla y la reserva, y luego los DEVICE=, que van detrás.
+;
+;  Todo esto solo se usa al arrancar: va en la sección del arranque (ver
+;  inicio.inc), con CS distinto del núcleo: las rutinas del núcleo se llaman
+;  con k_, y los textos de aquí se leen con CS:.
 ; =============================================================================
+        section .init
 config_lee:
         mov byte [cf_files], N_ARCH
         mov byte [cf_bufs], BUF_DEF
@@ -38,11 +43,11 @@ config_lee:
         mov si, t_config
         mov di, ruta
 .c:
-        lodsb
+        cs lodsb
         stosb
         test al, al
         jnz .c
-        call abre_ruta
+        call k_abre_ruta
         mov word [cf_ficha], 0
         jc .medidas                 ; no hay CONFIG.SYS: lo de siempre
         mov [cf_ficha], bx
@@ -84,7 +89,7 @@ config_lee:
         call alto_sube              ; (con DOS=ALTO, a la memoria alta)
         cmp byte [alto], 0
         je .abajo
-        mov di, bajo_fin            ; arriba: abajo solo queda el puente
+        mov di, BAJO_TOPE           ; arriba: abajo solo queda el puente
 .abajo:
         add di, 15                  ; y detrás, los controladores
         mov cl, 4
@@ -102,7 +107,7 @@ config_lee:
         mov word [bx+H_CCLU], 0
         call config_pasada
         mov bx, [cf_ficha]
-        call h_cierra
+        call k_h_cierra
 .x:
         ret
 
@@ -115,12 +120,12 @@ config_pasada:
 .car:
         push cx                     ; un octeto del archivo
         push di
-        mov [es_seg], cs
+        mov [es_seg], ds
         mov word [es_off], red_car
         mov byte [es_op], 0
         mov bx, [cf_ficha]
         mov cx, 1
-        call h_es
+        call k_h_es
         pop di
         pop cx
         jc .eof
@@ -217,7 +222,7 @@ config_linea:
         call cf_igual
         jne .mal
         mov al, [si]
-        call mayus
+        call k_mayus
         mov ah, 1
         cmp al, 'A'
         je .d1
@@ -279,10 +284,10 @@ config_linea:
         ret
 .mal:
         mov si, m_cf_no
-        call pon_cad
+        call ipon_cad
         mov si, linea
-        call pon_cad
-        jmp pon_nl
+        call k_pon_cad
+        jmp k_pon_nl
 
 ; el número de SI -> AX (hasta 999); SI queda detrás
 cf_numero:
@@ -318,15 +323,15 @@ config_device:
         loop .r
 .rf:
         mov byte [di], 0
-        call abre_ruta
+        call k_abre_ruta
         jnc .abierto
 .no_carga:
         mov si, m_cf_dev
 .dice:
-        call pon_cad
+        call ipon_cad
         mov si, linea
-        call pon_cad
-        jmp pon_nl
+        call k_pon_cad
+        jmp k_pon_nl
 .abierto:
         ; tiene que caber: menos de 64 K y dejando sitio a los programas
         cmp word [bx+H_TAM+2], 0
@@ -343,7 +348,7 @@ config_device:
         cmp ax, dx
         jb .cabe
 .grande:
-        call h_cierra
+        call k_h_cierra
         jmp .no_carga
 .cabe:
         mov ax, [cf_tope]
@@ -352,17 +357,17 @@ config_device:
         mov byte [es_op], 0
         mov cx, [bx+H_TAM]
         push bx
-        call h_es
+        call k_h_es
         pop bx
         pushf
-        call h_cierra
+        call k_h_cierra
         popf
         jc .no_carga
         xor si, si                  ; SI = la cabecera (puede haber varias)
 .cab:
         mov es, [cf_tope]
         push word [es:si+D_SIG]     ; (la siguiente del archivo, antes de
-        push cs                     ; enlazar esta)
+        push ds                     ; enlazar esta)
         pop es
         ; la orden 0, iniciar: le decimos dónde está su línea y qué unidad
         ; le tocaría; nos dice hasta dónde se queda y, si es de bloque,
@@ -375,12 +380,12 @@ config_device:
         mov [pet+P_DONDE+2], ax
         mov ax, [cf_arg]
         mov [pet+18], ax
-        mov [pet+20], cs
+        mov [pet+20], ds
         mov al, [cf_uni]
         mov [pet+22], al
         mov ax, si
         mov dx, [cf_tope]
-        call dev_llama
+        call k_dev_llama
         mov ax, [pet+P_DONDE]       ; hasta dónde se queda: si no pasa de
         add ax, 15                  ; donde empieza, es que no se instala
         mov cl, 4
@@ -422,7 +427,7 @@ config_device:
         jae .sig
         push cx
         push es
-        push cs
+        push ds
         pop es
         mov ah, U_TAM
         mul ah
@@ -455,7 +460,7 @@ config_device:
         inc dx
         loop .u
 .sig:
-        push cs
+        push ds
         pop es
         pop si                      ; ¿hay otra cabecera en el archivo?
         cmp si, 0xFFFF
@@ -481,11 +486,11 @@ cf_clave:
         push bx
         mov bx, si
 .c:
-        mov ah, [di]
+        mov ah, [cs:di]
         test ah, ah
         jz .x                       ; (ZF=1)
         mov al, [si]
-        call mayus
+        call k_mayus
         inc si
         inc di
         cmp al, ah
@@ -518,3 +523,4 @@ t_procesador db "PROCESADOR", 0
 m_cf_dev    db "CONFIG.SYS: no se puede cargar el controlador: ", 0
 m_cf_dev2   db "CONFIG.SYS: el controlador no se ha instalado: ", 0
 m_cf_no     db "CONFIG.SYS: no se entiende esta línea: ", 0
+        section .text
