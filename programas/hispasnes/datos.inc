@@ -341,3 +341,7 @@ env_sig     resd 32                 ; (la envolvente: cuándo le toca a cada vel
 env_vista   resd 32
 env_res     resb 32
 pant_t      resb 256 + 512          ; (el mosaico: la línea de un fondo, aparte)
+fr_esi1     resd 1                  ; (la alta resolución: los dos dibujos)
+fr_esi2     resd 1
+fl_hires    resb 1
+            alignb 4

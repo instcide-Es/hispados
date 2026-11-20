@@ -106,16 +106,18 @@ marca actividad).
 | Memoria y cartuchos | LoROM, HiROM y ExHiROM (la cabecera se busca en los tres sitios y se queda la que más pinta tiene: suma, modo, vector, título); ROM de tamaños que no son potencia de 2 (con su espejo); la RAM del cartucho de 2 a 128 KB (con espejos también la pequeña); la RAM de 128 KB y su puerto ($2180-$2183); la ROM rápida (MEMSEL: 6 ciclos del reloj en vez de 8) |
 | DMA y HDMA | Los 8 canales, los 8 modos, de A a B y de B a A, con el tiempo que para al procesador; HDMA directo e indirecto, con repetición |
 | CPU de la consola | NMI con su bandera ($4210), IRQ por H, por V y por H+V ($4207-$420A, $4211), el borrado vertical y horizontal ($4212), multiplicar y dividir ($4202-$4206), los mandos leídos solos ($4218-$421F) y uno a uno ($4016/$4017), los contadores de línea y punto ($2137, $213C, $213D) |
-| Imagen (PPU) | Los modos 0 a 7: fondos de 2, 4 y 8 bits por punto, dibujos de 8x8 y 16x16, volteados, prioridades, el fondo 3 delante en el modo 1, mapas de 32x32 a 64x64, el desplazamiento por columnas (modos 2, 4 y 6), el color directo; el **modo 7** (girar y escalar, con sus tres formas de lo de fuera, volteado y EXTBG); los 128 objetos (8x8 a 64x64, las dos tablas de dibujos, x negativa, 32 por línea, la rotación de prioridad); las dos ventanas con sus cuatro lógicas, la pantalla principal y la secundaria, la **suma y la resta de colores** (y a la mitad), el color fijo, recortar a negro y el brillo; la VRAM con su avance y su recolocación de direcciones, la CGRAM y la OAM con sus «latch». Línea a línea: lo que el programa cambia en el borrado horizontal (HDMA) se ve en la línea siguiente |
+| Imagen (PPU) | Los modos 0 a 7: fondos de 2, 4 y 8 bits por punto, dibujos de 8x8 y 16x16, volteados, prioridades, el fondo 3 delante en el modo 1, mapas de 32x32 a 64x64, el desplazamiento por columnas (modos 2 y 4), el color directo, la alta resolución de los modos 5 y 6 (aproximada: ver abajo); el **modo 7** (girar y escalar, con sus tres formas de lo de fuera, volteado y EXTBG); los 128 objetos (8x8 a 64x64, las dos tablas de dibujos, x negativa, 32 por línea, la rotación de prioridad); las dos ventanas con sus cuatro lógicas, la pantalla principal y la secundaria, la **suma y la resta de colores** (y a la mitad), el color fijo, recortar a negro y el brillo; la VRAM con su avance y su recolocación de direcciones, la CGRAM y la OAM con sus «latch». Línea a línea: lo que el programa cambia en el borrado horizontal (HDMA) se ve en la línea siguiente |
 | Sonido (SPC700) | Todas las instrucciones con sus ciclos (**pasa las pruebas de un solo paso** del SPC700), los tres temporizadores, los cuatro puertos, el arranque (propio) y la RAM de debajo |
 | Sonido (DSP) | Las 8 voces con muestras BRR (los cuatro filtros, la vuelta), ADSR y GAIN (con su tabla de velocidades), el tono con su modulación, el ruido, el eco con su filtro de 8 coeficientes y su realimentación, el volumen; 32.000 muestras por segundo en estéreo, que se pasan a la frecuencia de la tarjeta (48.000 en estéreo con HD Audio y AC'97, 22.050 con la Sound Blaster 16) |
 
 **Sin hacer** (pendiente):
 - los **chips especiales** de algunos cartuchos (GSU, SA-1, DSP-1 a 4,
   S-DD1, SPC7110, CX4, ST010/018, S-RTC, OBC1): se avisa al abrirlos;
-- los modos de alta resolución (5 y 6, y el «pseudo-hires»): se pintan a 256
-  de ancho tomando un dibujo de 8 por cada entrada del mapa (se ven, pero no
-  bien); el entrelazado; el mosaico del modo 7 (el de los fondos de los
+- los modos de alta resolución (5 y 6) se pintan a 256 de ancho tomando uno
+  de cada dos puntos de los 512 (la forma está bien, pero se pierde la mitad
+  del detalle: el texto fino se lee mal); sin el «pseudo-hires» (la pantalla
+  secundaria en los puntos impares) y sin el desplazamiento por columnas del
+  modo 6; el entrelazado; el mosaico del modo 7 (el de los fondos de los
   modos 0 a 6 sí está); las 239 líneas («overscan»: se enseñan las 224 de
   arriba);
 - lo que pasa a mitad de una línea (se pinta la línea entera de una vez), el
@@ -261,8 +263,8 @@ de `nucleo32/usb.sh` lleva `\JUEGOS\HISPASNS.HVP` y `\JUEGOS\PRUEBA.SFC`
 - Probarlo en equipos de verdad (un Pentium II, el HP Mini, el Toshiba) y con
   cartuchos volcados de verdad.
 - Los chips especiales, empezando por el DSP-1 (el más usado) y el SA-1.
-- Los modos de alta resolución bien hechos, el mosaico del modo 7 y el
-  entrelazado.
+- Los modos de alta resolución con sus 512 puntos (la imagen de 512 de ancho
+  en la ventana al doble), el mosaico del modo 7 y el entrelazado.
 - La curva de paso entre muestras del DSP y su contador global.
 - Guardar el estado de la consola en cualquier momento.
 - Sonido en HVPRUN (cuando Hispa-Pentium lo tenga).

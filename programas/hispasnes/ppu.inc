@@ -1099,14 +1099,21 @@ fondo_linea:
         jz .n4
         mov byte [fl_dir], 1
 .n4:
+        ; ¿alta resolución? (modos 5 y 6)
+        mov byte [fl_hires], 0
+        mov eax, [modo]
+        cmp eax, 5
+        jb .h0
+        cmp eax, 6
+        ja .h0
+        mov byte [fl_hires], 1
+.h0:
         ; ¿desplazamiento por columnas? (modos 2, 4 y 6, fondos 1 y 2)
         mov byte [fl_opt], 0
         mov eax, [modo]
         cmp eax, 2
         je .o1
         cmp eax, 4
-        je .o1
-        cmp eax, 6
         jne .o2
 .o1:
         cmp ebx, 2
@@ -1314,6 +1321,8 @@ fondo_rapido:
         and eax, 0x3FF
         cmp dword [fl_16], 0        ; 16x16: +1 la mitad de la derecha, +16
         je .t8                      ; la de abajo (al revés si está volteado)
+        cmp byte [fl_hires], 0      ; (en alta resolución, la de la derecha
+        jne .t16h                   ;  va siempre: es el segundo de la pareja)
         mov edx, [fr_tx]
         and edx, 1
         test ebp, 0x4000
@@ -1321,6 +1330,7 @@ fondo_rapido:
         xor edx, 1
 .t16a:
         add eax, edx
+.t16h:
         mov edx, [fr_mitad]
         test ebp, 0x8000
         jz .t16b
@@ -1329,6 +1339,8 @@ fondo_rapido:
         shl edx, 4
         add eax, edx
 .t8:
+        cmp byte [fl_hires], 0
+        jne near .hires
         mov ecx, [cap_bpp]
         cmp ecx, 4
         je .b4
@@ -1447,12 +1459,135 @@ fondo_rapido:
         PUNTO_FR 5, 2
         PUNTO_FR 6, 1
         PUNTO_FR 7, 0
+.hires:
+        ; alta resolución (modos 5 y 6): cada entrada son dos dibujos de 8
+        ; (16 puntos de 512); a 256 de ancho, uno de cada dos
+        push eax
+        call fr_dib
+        mov [fr_esi1], esi
+        pop eax
+        inc eax
+        call fr_dib
+        mov [fr_esi2], esi
+        mov eax, ebp                ; la paleta
+        cmp dword [cap_bpp], 4
+        je .hp4
+        shr eax, 8
+        and eax, 0x1C
+        jmp .hp
+.hp4:
+        shr eax, 6
+        and eax, 0x70
+.hp:
+        add eax, [fl_palb]
+        mov bl, al
+        mov eax, [fr_fila]
+        test ebp, 0x8000
+        jz .hv
+        mov eax, [fr_filav]
+.hv:
+        shl eax, 3
+        add [fr_esi1], eax
+        add [fr_esi2], eax
+        mov dl, [fr_z0]
+        test ebp, 0x2000
+        jz .hz
+        mov dl, [fr_z1]
+.hz:
+        mov dh, [fr_capa]
+        mov edi, [fl_x]
+        mov ecx, [fl_cz]
+        test ebp, 0x4000
+        mov ebp, [fl_mask]
+        jnz near .hvolt
+        test ebp, ebp
+        jnz near .hmasc
+        mov esi, [fr_esi1]
+        PUNTO_FR 0, 0
+        PUNTO_FR 1, 2
+        PUNTO_FR 2, 4
+        PUNTO_FR 3, 6
+        mov esi, [fr_esi2]
+        PUNTO_FR 4, 0
+        PUNTO_FR 5, 2
+        PUNTO_FR 6, 4
+        PUNTO_FR 7, 6
+        jmp .sig
+.hmasc:
+        mov esi, [fr_esi1]
+        PUNTO_FRM 0, 0
+        PUNTO_FRM 1, 2
+        PUNTO_FRM 2, 4
+        PUNTO_FRM 3, 6
+        mov esi, [fr_esi2]
+        PUNTO_FRM 4, 0
+        PUNTO_FRM 5, 2
+        PUNTO_FRM 6, 4
+        PUNTO_FRM 7, 6
+        jmp .sig
+.hvolt:
+        test ebp, ebp
+        jnz near .hvmasc
+        mov esi, [fr_esi2]
+        PUNTO_FR 0, 7
+        PUNTO_FR 1, 5
+        PUNTO_FR 2, 3
+        PUNTO_FR 3, 1
+        mov esi, [fr_esi1]
+        PUNTO_FR 4, 7
+        PUNTO_FR 5, 5
+        PUNTO_FR 6, 3
+        PUNTO_FR 7, 1
+        jmp .sig
+.hvmasc:
+        mov esi, [fr_esi2]
+        PUNTO_FRM 0, 7
+        PUNTO_FRM 1, 5
+        PUNTO_FRM 2, 3
+        PUNTO_FRM 3, 1
+        mov esi, [fr_esi1]
+        PUNTO_FRM 4, 7
+        PUNTO_FRM 5, 5
+        PUNTO_FRM 6, 3
+        PUNTO_FRM 7, 1
 .sig:
         add dword [fl_x], 8
         inc dword [fr_tx]
         cmp dword [fl_x], 256
         jl .col
         popad
+        ret
+
+; (interna) EAX = número de dibujo del fondo -> ESI = sus 64 puntos en la
+; caché de su número de bits (gasta ECX)
+fr_dib:
+        push eax
+        mov ecx, [cap_bpp]
+        cmp ecx, 4
+        je .b4
+        ja .b8
+        shl eax, 3
+        add eax, [fl_dib]
+        and eax, 0x7FFF
+        shr eax, 3
+        call dib2
+        pop eax
+        ret
+.b4:
+        shl eax, 4
+        add eax, [fl_dib]
+        and eax, 0x7FFF
+        shr eax, 4
+        call dib4
+        pop eax
+        ret
+.b8:
+        shl eax, 5
+        add eax, [fl_dib]
+        and eax, 0x7FFF
+        shr eax, 5
+        call dib8
+        pop eax
         ret
 
 ; (interna) el fondo [cap_n] en la pantalla [fl_cz], con la máscara
