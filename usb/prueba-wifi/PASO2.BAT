@@ -13,7 +13,7 @@ C:\HISPADOS\PING 8.8.8.8 /N:3 >> C:\WIFI.LOG
 C:\HISPADOS\PING hispados.es /N:4
 C:\HISPADOS\PING hispados.es /N:4 >> C:\WIFI.LOG
 ECHO ======== DESCARGAR ======== >> C:\WIFI.LOG
-C:\HISPADOS\DESCARGA http://actualiza.clicgest.es/versiones.txt C:\VERSION.TXT >> C:\WIFI.LOG
+C:\HISPADOS\DESCARGA http://actualiza.hispados.es/versiones.txt C:\VERSION.TXT >> C:\WIFI.LOG
 ECHO ======== registro del controlador ======== >> C:\WIFI.LOG
 C:\HISPADOS\WIFI REGISTRO C:\WIFI.LOG
 ECHO.

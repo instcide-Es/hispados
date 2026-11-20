@@ -2394,7 +2394,7 @@ else ko "después del corte el disco no vuelve a como estaba:"; diff <(lista_de 
 # 7. el gancho de la red: con /DESDE=http://..., PAQUETES lanza DESCARGA
 # (aquí, uno de mentira) para el catálogo y cada paquete; sin DESCARGA, lo dice
 cp $Q/sis.img $Q/s7.img
-paq $Q/s7.img red "paquetes instala letras /desde=http://prueba/" ":pausa 2" "del \\hispa\\descarga.bin" "paquetes catalogo /desde=http://actualiza.clicgest.es/pentium/"
+paq $Q/s7.img red "paquetes instala letras /desde=http://prueba/" ":pausa 2" "del \\hispa\\descarga.bin" "paquetes catalogo /desde=http://actualiza.hispados.es/pentium/"
 mira "el gancho de la red: con /DESDE=http://..., el catálogo y los paquetes los trae DESCARGA (DESCARGA.BIN, la orden de la red) a C:\\HISPA\\PAQUETES\\BAJADAS, y se instalan igual" \
   "^Trayendo http://prueba/CATALOGO\.TXT\.\.\.$" "^descarga (de prueba): http://prueba/LETRAS11\.HPQ -> C:.HISPA.PAQUETES.BAJADAS.LETRAS11\.HPQ$" "^  instalado letras 1\.1$" \
   "^paquetes: para traer http://actualiza\.clicgest\.es/pentium/CATALOGO\.TXT de Internet hace falta la red (el programa DESCARGA),$"
@@ -2474,16 +2474,16 @@ else ko "lo descargado no es igual que lo del servidor, o el disco no queda sano
 # la RTL8139, y el DNS de QEMU (que pregunta al de esta máquina)
 cp $R/d.img $R/r.img
 ESCRIBE=1 DISCO=$R/r.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-netdev user,id=n0 -device rtl8139,netdev=n0" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 2" \
-  "descargar $U/grande.bin" ":pausa 5" "ping -n 1 nombre.que.no.existe.invalid" ":pausa 4" "ping -n 1 actualiza.clicgest.es" ":pausa 4" "apagar" > $R/rtl.sal 2>&1
+  "descargar $U/grande.bin" ":pausa 5" "ping -n 1 nombre.que.no.existe.invalid" ":pausa 4" "ping -n 1 actualiza.hispados.es" ":pausa 4" "apagar" > $R/rtl.sal 2>&1
 tr -d '\r' < $R/rtl.sal > $R/rtl.txt
 S=$R/rtl.txt
 mira "la Realtek RTL8139: IPCONFIG y DESCARGAR" "^  Tarjeta . . . . . . . : Realtek RTL8139 (10EC:8139, IRQ [0-9]*)$" "^  Enlace  . . . . . . . : sí, a 100 Mbit/s$" \
   "^  Dirección IP  . . . . : 10.0.2.15$" "^Hecho: GRANDE.BIN, 409600 octetos"
 if saca $R/r.img GRANDE.BIN $R/x.bin && cmp -s $R/x.bin $R/srv/grande.bin; then ok "con la RTL8139, lo descargado es igual octeto a octeto"; else ko "con la RTL8139, lo descargado no es igual"; fi
 # (el DNS de QEMU le pregunta al de esta máquina: si esta no sale a la red, no se prueba)
-if getent hosts actualiza.clicgest.es > /dev/null 2>&1; then
+if getent hosts actualiza.hispados.es > /dev/null 2>&1; then
   mira "el DNS (el de QEMU, que pregunta al de esta máquina): un nombre que no existe se dice; uno que sí, se resuelve" \
-    "^PING: no se encuentra nombre.que.no.existe.invalid: ese nombre no existe\.$" "^Haciendo ping a actualiza.clicgest.es \[$(getent hosts actualiza.clicgest.es | awk '{print $1}' | head -1)\] con 32 octetos de datos:$"
+    "^PING: no se encuentra nombre.que.no.existe.invalid: ese nombre no existe\.$" "^Haciendo ping a actualiza.hispados.es \[$(getent hosts actualiza.hispados.es | awk '{print $1}' | head -1)\] con 32 octetos de datos:$"
 else echo "  (esta máquina no resuelve nombres: no se prueba el DNS)"; fi
 # sin tarjeta, y con «sinred»
 DISCO=$R/d.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 2" "ping 10.0.2.2" ":pausa 2" "apagar" > $R/sin.sal 2>&1

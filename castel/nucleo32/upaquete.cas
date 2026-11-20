@@ -28,7 +28,7 @@
 ;  De dónde salen los paquetes: lo que diga /DESDE=, o la primera línea de
 ;  C:\HISPA\PAQUETES\ORIGEN.TXT, o la carpeta \PAQUETES de una unidad que
 ;  tenga CATALOGO.TXT (primero las memorias USB), o, si no, Internet:
-;  http://actualiza.clicgest.es/pentium/ (por el gancho de la red, más abajo).
+;  http://actualiza.hispados.es/pentium/ (por el gancho de la red, más abajo).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UPaquetes
@@ -45,7 +45,7 @@ módulo UPaquetes
     constante TROZO = 32768
     constante RUTA = 160
     constante NINGUNO = 0xFFFFFFFF
-    constante URL_POR_DEFECTO = "http://actualiza.clicgest.es/pentium/"
+    constante URL_POR_DEFECTO = "http://actualiza.hispados.es/pentium/"
 
     ; ---------------------------------------------------------------------
     ;  EL GANCHO DE LA RED. Para traer los paquetes de Internet, PAQUETES no

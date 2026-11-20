@@ -198,7 +198,7 @@ módulo Redes
         devolver pide(O_REGISTRO, 0, 0, 0, 0, destino, 0, cabe)
     fin
 
-    ; de un nombre («actualiza.clicgest.es», o «10.0.2.2»), su IP. Da 0, o un error
+    ; de un nombre («actualiza.hispados.es», o «10.0.2.2»), su IP. Da 0, o un error
     público función resolver(nombre: puntero a byte, ref ip: nat32): nat32
         variable r: nat32
         si texto_a_ip(nombre, ip) entonces devolver 0 fin

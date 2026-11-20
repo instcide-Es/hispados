@@ -390,7 +390,7 @@ Se aceptan *pull requests*. Normas importantes:
 
 A [ClicGest](https://clicgest.es/), que presta su servidor al proyecto: en él se
 compila y se prueba Hispa-DOS, sirve las actualizaciones por la red
-(`ACTUALIZAR`, en actualiza.clicgest.es) y la web [hispados.es](https://hispados.es/).
+(`ACTUALIZAR`, en actualiza.hispados.es) y la web [hispados.es](https://hispados.es/).
 
 ## Licencia
 
