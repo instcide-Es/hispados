@@ -2465,6 +2465,30 @@ if sano $Q/s8.img && sin_restos $Q/s8.img && [ "$(mdir -/ -b -i $Q/s8.img ::HISP
   ok "lo hecho desde la ventana, desde fuera: el disco sano, letras instalado, saludo quitado y sin restos (tampoco VENTANA.TXT)"
 else ko "lo hecho desde la ventana no queda bien en el disco:"; lista_de $Q/s8.img | sed 's/^/        /' | head -12; fi
 
+# 9. los accesos de los paquetes (accesos.cas; clicgest-pentium, 20/11): un
+# .MNU en \HISPA\MENU con su icono .ICP (tools/hpicono.py, de un PNG) sale en
+# el menú Inicio, debajo de Mi equipo, y en el tapiz; elegirlo lanza el programa
+A9=$Q/acc
+mkdir -p $A9
+python3 - $A9/rojo.png <<'PY'
+import struct, sys, zlib
+filas = b''.join(b'\0' + b''.join(bytes((200, 40, 40, 255)) if 4 <= x < 28 and 4 <= y < 28 else bytes(4) for x in range(32)) for y in range(32))
+def tr(t, d): return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+open(sys.argv[1], 'wb').write(b'\x89PNG\r\n\x1a\n' + tr(b'IHDR', struct.pack('>IIBBBBB', 32, 32, 8, 6, 0, 0, 0)) + tr(b'IDAT', zlib.compress(filas)) + tr(b'IEND', b''))
+PY
+if python3 -I $AQUI/../tools/hpicono.py $A9/rojo.png $A9/SALUDO.ICP && [ "$(stat -c %s $A9/SALUDO.ICP)" = 4108 ]; then
+  ok "tools/hpicono.py: de un PNG de 32 x 32 (RGBA), el .ICP (HPIC, 32, 32 y los puntos)"
+else ko "tools/hpicono.py no hace el .ICP"; fi
+$AQUI/nucleo32/disco.sh $A9/d.img 16 > /dev/null 2>&1
+printf 'nombre=Saludo\r\nprograma=\\HOLA.BIN\r\nicono=\\HISPA\\MENU\\SALUDO.ICP\r\nescritorio=si\r\n' > $A9/SALUDO.MNU
+mmd -i $A9/d.img ::HISPA ::HISPA/MENU 2> /dev/null
+mcopy -i $A9/d.img $A9/SALUDO.MNU $A9/SALUDO.ICP ::HISPA/MENU/
+CAPTURAS=$G DISCO=$A9/d.img MODULOS= ARRANQUE=escritorio $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":captura ac0" ":clic 40 585" ":pausa 1" ":captura ac1" ":clic 80 363" ":pausa 2" > $A9/sal.txt 2>&1
+miracap "un acceso de un paquete (\\HISPA\\MENU\\SALUDO.MNU): su icono (el .ICP, rojo) y su nombre en el tapiz, debajo de los de siempre" ac0 texto 30 270 60 295 Saludo rgb 64 259 C82828
+miracap "y en el menú Inicio, debajo de Mi equipo (con el icono a la mitad)" ac1 negrita 30 310 60 330 "Mi equipo" negrita 30 345 60 370 Saludo
+S=$A9/sal.txt
+mira "elegirlo en el menú lanza su programa (programa=\\HOLA.BIN)" "escritorio: lanzo .HOLA.BIN"
+
 # 9. la firma (Ed25519, firma.cas): el catálogo de prueba va firmado con la
 # clave de prueba (la que lleva este PAQUETES); PAQUETES FIRMA la comprueba;
 # lo de Internet sin firma, o con el catálogo cambiado, no se usa
