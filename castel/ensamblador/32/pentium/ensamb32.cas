@@ -1,0 +1,27 @@
+; =============================================================================
+;  ensamb32.cas - ENSAMB32: ENSAMBLA, el ensamblador propio de Castel, como
+;  programa del anillo 3 de Hispa-Pentium («modelo usuario»), en 32 bits y con
+;  la memoria plana. El mismo de ensambla.cas (el de 16 bits), módulo a módulo
+;  (Montador): solo cambian el modelo y lo del sistema, que se importa ANTES
+;  que nada para que sea lo que valga (Lejos, Archivos y Argumentos de
+;  biblioteca32/pentium). Con la memoria de sobra, el resumen de la primera
+;  pasada puede llegar casi a 1 MB (en 16 bits, 192 K).
+;
+;      ENSAMB32 ENTRADA.ASM [SALIDA]
+;
+;  Se compila (desde castel/) con:
+;      ccastel.py ensamblador/32/pentium/ensamb32.cas -I biblioteca32/pentium
+;                 -I ensamblador -I nucleo32
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ensamb32
+
+    modelo usuario
+
+    importar Lejos, Archivos, Argumentos, Montador
+
+    función principal(): byte
+        devolver ensamblar(0xF000)
+    fin
+
+fin Ensamb32.

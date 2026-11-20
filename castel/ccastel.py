@@ -4843,14 +4843,28 @@ C_arranque:
     mov [C_salida], eax
 """,
     'hispa32_imp': r"""
-; lo que se importa de KERNEL32
+; lo que se importa de KERNEL32: lo que usa el arranque (GetStdHandle,
+; WriteFile y ExitProcess) y lo que hace falta para archivos, argumentos y
+; memoria (biblioteca32/hw32): un bloque «ensamblador» llama a cualquiera
+; con «call [C_nombre]»
     align 4, db 0
 P_imp:
     dd P_ilt-0x400000, 0, 0, P_dll-0x400000, P_iat-0x400000
     dd 0, 0, 0, 0, 0
 P_imp_fin:
 P_ilt:
-    dd P_h1-0x400000, P_h2-0x400000, P_h3-0x400000, 0
+    dd P_h1-0x400000
+    dd P_h2-0x400000
+    dd P_h3-0x400000
+    dd P_h4-0x400000
+    dd P_h5-0x400000
+    dd P_h6-0x400000
+    dd P_h7-0x400000
+    dd P_h8-0x400000
+    dd P_h9-0x400000
+    dd P_h10-0x400000
+    dd P_h11-0x400000
+    dd 0
 P_iat:
 C_GetStdHandle:
     dd P_h1-0x400000
@@ -4858,6 +4872,22 @@ C_WriteFile:
     dd P_h2-0x400000
 C_ExitProcess:
     dd P_h3-0x400000
+C_ReadFile:
+    dd P_h4-0x400000
+C_CreateFileA:
+    dd P_h5-0x400000
+C_CloseHandle:
+    dd P_h6-0x400000
+C_SetFilePointer:
+    dd P_h7-0x400000
+C_DeleteFileA:
+    dd P_h8-0x400000
+C_GetCommandLineA:
+    dd P_h9-0x400000
+C_GetModuleFileNameA:
+    dd P_h10-0x400000
+C_VirtualAlloc:
+    dd P_h11-0x400000
     dd 0
 C_salida:
     dd 0
@@ -4877,6 +4907,38 @@ P_h2:
 P_h3:
     dw 0
     db 'ExitProcess', 0
+    align 2, db 0
+P_h4:
+    dw 0
+    db 'ReadFile', 0
+    align 2, db 0
+P_h5:
+    dw 0
+    db 'CreateFileA', 0
+    align 2, db 0
+P_h6:
+    dw 0
+    db 'CloseHandle', 0
+    align 2, db 0
+P_h7:
+    dw 0
+    db 'SetFilePointer', 0
+    align 2, db 0
+P_h8:
+    dw 0
+    db 'DeleteFileA', 0
+    align 2, db 0
+P_h9:
+    dw 0
+    db 'GetCommandLineA', 0
+    align 2, db 0
+P_h10:
+    dw 0
+    db 'GetModuleFileNameA', 0
+    align 2, db 0
+P_h11:
+    dw 0
+    db 'VirtualAlloc', 0
     align 512, db 0
 P_arch_fin:
 """,

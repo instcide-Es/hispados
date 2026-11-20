@@ -1,0 +1,28 @@
+; =============================================================================
+;  castelw.cas - CASTELW: el compilador de Castel escrito en Castel, como
+;  programa Win32 de consola («modelo hispa32») que corre con HW32 en
+;  Hispa-386 e Hispa-486 (encima de Hispa-DOS y HSPDPMI): 32 bits y la memoria
+;  plana de megas, igual que CASTEL32 en Hispa-Pentium (CASTEL32.md §11).
+;  El mismo compilador, módulo a módulo (Mando y los suyos); solo cambian el
+;  modelo y lo del sistema, que se importa ANTES que nada para que sea lo que
+;  valga: Lejos, Archivos y Argumentos de biblioteca32/hw32, con KERNEL32.
+;
+;      HW32 CASTELW.EXE ENTRADA.CAS [-o SALIDA.ASM] [-I CARPETA]... [--todo] [--gasto]
+;
+;  Busca los módulos, además, en la carpeta de CASTELW.EXE (como CASTEL).
+;  Se compila (desde castel/) con:
+;      ccastel.py compilador/32/hw32/castelw.cas -I compilador/32
+;                 -I biblioteca32/hw32 -I compilador
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Castelw
+
+    modelo hispa32
+
+    importar Medidas, Lejos, Archivos, Argumentos, Mando
+
+    función principal(): byte
+        devolver mandar()
+    fin
+
+fin Castelw.
