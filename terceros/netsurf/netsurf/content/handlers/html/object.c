@@ -166,6 +166,42 @@ html_object_callback(hlcache_handle *object,
 
 	box = o->box;
 
+	/* [HISPA] JavaScript: un objeto que se ha quedado sin caja al rehacer
+	 * las cajas (w32/surf/rehaz.c): solo se cuenta que ha llegado */
+	if (box == NULL) {
+		switch (event->type) {
+		case CONTENT_MSG_DONE:
+			c->base.active--;
+			break;
+		case CONTENT_MSG_ERROR:
+			hlcache_handle_release(object);
+			o->content = NULL;
+			c->base.active--;
+			break;
+		case CONTENT_MSG_GETTHREAD:
+			*(event->data.jsthread) = NULL;
+			break;
+		case CONTENT_MSG_GETDIMS:
+			*(event->data.getdims.viewport_width) =
+					content__get_width(&c->base);
+			*(event->data.getdims.viewport_height) =
+					content__get_height(&c->base);
+			break;
+		default:
+			break;
+		}
+		if (c->base.status == CONTENT_STATUS_READY &&
+		    c->base.active == 0 &&
+		    (event->type == CONTENT_MSG_DONE ||
+		     event->type == CONTENT_MSG_ERROR)) {
+			content__reformat(&c->base, false,
+					c->base.available_width,
+					c->base.available_height);
+			content_set_done(&c->base);
+		}
+		return NSERROR_OK;
+	}
+
 	switch (event->type) {
 	case CONTENT_MSG_LOADING:
 		if (c->base.status != CONTENT_STATUS_LOADING && c->bw != NULL)
@@ -721,6 +757,34 @@ html_fetch_object(html_content *c,
 	/* If we've already been aborted, don't bother attempting the fetch */
 	if (c->aborted)
 		return true;
+
+	/* [HISPA] JavaScript: al rehacer las cajas (w32/surf/rehaz.c), el
+	 * objeto que ya se pidió para la misma dirección (sin caja) se vuelve a
+	 * usar: no se pide otra vez */
+	if (box != NULL) {
+		for (object = c->object_list; object != NULL;
+		     object = object->next) {
+			bool igual = false;
+			if (object->box != NULL || object->content == NULL ||
+			    object->background != background)
+				continue;
+			igual = nsurl_compare(hlcache_handle_get_url(
+					object->content), url, NSURL_COMPLETE);
+			if (!igual)
+				continue;
+			object->box = box;
+			switch (content_get_status(object->content)) {
+			case CONTENT_STATUS_READY:
+			case CONTENT_STATUS_DONE:
+				html_object_done(box, object->content,
+						background);
+				break;
+			default:
+				break;
+			}
+			return true;
+		}
+	}
 
 	child.charset = c->encoding;
 	child.quirks = c->base.quirks;

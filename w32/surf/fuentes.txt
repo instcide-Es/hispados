@@ -516,7 +516,10 @@ terceros/netsurf/netsurf/content/handlers/image/ico.c
 terceros/netsurf/netsurf/content/handlers/image/image.c
 terceros/netsurf/netsurf/content/handlers/image/image_cache.c
 terceros/netsurf/netsurf/content/handlers/javascript/fetcher.c
-terceros/netsurf/netsurf/content/handlers/javascript/none/none.c
+terceros/netsurf/netsurf/content/handlers/javascript/content.c
+w32/surf/guion.c
+w32/surf/selector.c
+w32/surf/rehaz.c
 terceros/netsurf/netsurf/content/handlers/text/textplain.c
 terceros/netsurf/netsurf/content/hlcache.c
 terceros/netsurf/netsurf/content/llcache.c

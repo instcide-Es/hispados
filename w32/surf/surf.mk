@@ -19,20 +19,27 @@ SURF_NSCF = -Iw32/surf -Iw32/surf/ns -I$(SURF_T)/netsurf -I$(SURF_T)/netsurf/inc
 # (SURF_REGISTRO=INFO para ver en NS.LOG lo que hace NetSurf: ver NAVEGADOR2.md)
 SURF_REGISTRO ?= WARNING
 SURF_UA = '-DHTTP_AGENTE="HispaSurf/0.1 (NetSurf 3.11; Hispa-DOS 486)"'
-surf_cf = $(if $(filter $(SURF_T)/netsurf/% w32/surf/%,$1),$(SURF_NSCF),$(if $(filter $(SURF_T)/libdom/%,$1),-I$(SURF_T)/libdom/src \
-  -I$(SURF_T)/libdom/bindings,$(if $(filter $(SURF_T)/libnsgif/%,$1),-I$(SURF_T)/libnsgif/src -DNSGIF_NAME=libnsgif,-I$(SURF_T)/$(word 3,$(subst /, ,$1))/src)))
+surf_cf = $(if $(filter w32/surf/guion.c,$1),$(SURF_NSCF) -Iterceros/quickjs -I$(B)/surf,$(if $(filter $(SURF_T)/netsurf/% w32/surf/%,$1),$(SURF_NSCF),$(if $(filter $(SURF_T)/libdom/%,$1),-I$(SURF_T)/libdom/src \
+  -I$(SURF_T)/libdom/bindings,$(if $(filter $(SURF_T)/libnsgif/%,$1),-I$(SURF_T)/libnsgif/src -DNSGIF_NAME=libnsgif,-I$(SURF_T)/$(word 3,$(subst /, ,$1))/src))))
 $(B)/surf/%.o: %.c
 	@mkdir -p $(dir $@)
 	@nice -n 19 gcc $(SURF_CF) $(call surf_cf,$<) -c $< -o $@
+# [JS] el preludio (w32/navega/dom.js, el del Navegador propio) y surf.js, como
+# texto dentro del programa; guion.c los compila al arrancar
+$(B)/surf/surf_js.h: w32/navega/dom.js w32/surf/surf.js
+	@mkdir -p $(B)/surf
+	python3 -c "import sys; f = lambda n, a: 'static const char %s[] = {' % n + ','.join(str(b) for b in open(a, 'rb').read()) + ',0};'; print(f('dom_js', sys.argv[1])); print(f('surf_js', sys.argv[2]))" $^ > $@
+$(B)/surf/w32/surf/guion.o: $(B)/surf/surf_js.h w32/surf/guion.h terceros/quickjs/quickjs.h
+$(B)/surf/w32/surf/selector.o $(B)/surf/w32/surf/rehaz.o: w32/surf/guion.h
 $(B)/surf/http.o: w32/navega/http.c w32/navega/nav.h w32/surf/surf.mk | $(B)
 	@mkdir -p $(B)/surf
 	$(CC32) -march=i486 $(SURF_UA) -c $< -o $@
 $(B)/surf/red_http.o: w32/surf/red_http.c w32/surf/rh.h w32/navega/nav.h w32/surf/surf.mk | $(B)
 	@mkdir -p $(B)/surf
 	$(CC32) -march=i486 $(SURF_UA) -c $< -o $@
-$(B)/NAVEGA2.EXE: $(SURF_OBJ) $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL ventanas/win32.inc tools/elf2pe.py
+$(B)/NAVEGA2.EXE: $(SURF_OBJ) $(B)/HSPJS.DLL $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL ventanas/win32.inc tools/elf2pe.py
 	ld -m elf_i386 -r --gc-sections -e inicio_prog -o $(B)/surf/todo.o $(SURF_OBJ)
-	python3 tools/elf2pe.py --gui --pila 0x40000 -e inicio_prog -o $@ -l $(B)/HSPTLS.DLL -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL -t ventanas/win32.inc $(B)/surf/todo.o
+	python3 tools/elf2pe.py --gui --pila 0x40000 -e inicio_prog -o $@ -l $(B)/HSPJS.DLL -l $(B)/HSPTLS.DLL -l $(B)/WSOCK32.DLL -l $(B)/MSVCRT.DLL -t ventanas/win32.inc $(B)/surf/todo.o
 # lo que va junto al programa: los recursos (las hojas de estilo de NetSurf, sus
 # textos y la página de inicio) y las letras (DejaVu, recortadas: terceros/dejavu)
 SURF_RECURSOS = $(SURF_T)/netsurf/resources/default.css $(SURF_T)/netsurf/resources/quirks.css \

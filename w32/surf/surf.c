@@ -523,6 +523,17 @@ static void v_consola(struct gui_window *g, browser_window_console_source src, c
   (void)g; (void)src; (void)m; (void)n; (void)f;
 }
 
+/* [JS] lo que pide guion.c a la ventana */
+HANDLE surf_ventana(void) { return vent; }
+void surf_desp(int *x, int *y) { *x = actual ? actual->sx : 0; *y = actual ? actual->sy : 0; }
+void surf_ve_a(int x, int y) { desplaza_a(x, y); }
+void surf_pon_dir(const char *u8) {
+  if (foco_dir) return;
+  a_1252(u8, dir, sizeof dir);
+  n_dir = strlen(dir); dir_cur = n_dir; dir_desp = 0;
+  repinta_barras();
+}
+
 static struct gui_window_table tabla_ventana = {
   .create = v_crea, .destroy = v_destruye, .invalidate = v_invalida, .get_scroll = v_da_desp,
   .set_scroll = v_pon_desp, .get_dimensions = v_medidas, .event = v_suceso,
@@ -817,7 +828,7 @@ static int WINAPI proc(HANDLE h, u32 m, u32 w, u32 l) {
 static nserror opciones(struct nsoption_s *d) {
   (void)d;
   nsoption_set_bool(core_select_menu, true);
-  nsoption_set_bool(enable_javascript, false);
+  nsoption_set_bool(enable_javascript, true);     /* [JS] guion.c (QuickJS, HSPJS.DLL) */
   nsoption_set_int(memory_cache_size, 1024 * 1024);   /* (1 MB: en 16 MB de memoria cuenta) */
   nsoption_set_int(max_fetchers, 8);
   nsoption_set_int(max_fetchers_per_host, 4);

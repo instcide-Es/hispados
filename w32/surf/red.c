@@ -35,6 +35,9 @@ typedef struct Pedido {
   int con_cab;              /* ya se le han dado las cabeceras */
   int abortado, en_uso;
   int de_golpe;             /* HTML: el cuerpo entero de una vez (ver cabeceras) */
+  red_js_cb js;             /* [JS] una petición de fetch o XMLHttpRequest (sin padre de NetSurf) */
+  void *js_ctx;
+  char *metodo;
 } Pedido;
 
 static Pedido *cola, *activo;
@@ -143,18 +146,21 @@ static void r_libera(void *v) {
   if (p == activo) activo = NULL;
   quita_de_cola(p);
   if (p->r) rh_suelta(p->r);
-  nsurl_unref(p->url);
+  if (p->url) nsurl_unref(p->url);
   free(p->cuerpo);
   free(p->cab);
+  free(p->metodo);
   free(p);
 }
 
-static void manda(Pedido *p, fetch_msg *m) { fetch_send_callback(m, p->padre); }
+/* (a una de JavaScript no se le manda nada de NetSurf: solo el final) */
+static void manda(Pedido *p, fetch_msg *m) { if (!p->js) fetch_send_callback(m, p->padre); }
 
 /* da por acabado el pedido activo (NetSurf llama a r_libera) */
 static void acaba(Pedido *p) {
   activo = NULL;
   if (p->r) { rh_suelta(p->r); p->r = NULL; }
+  if (p->js) { r_libera(p); return; }
   fetch_remove_from_queues(p->padre);
   fetch_free(p->padre);
 }
@@ -224,6 +230,7 @@ static void r_sondea2(void) {
   /* los de la cola que NetSurf ya no quiere */
   for (p = cola; p; p = q) {
     q = p->sig;
+    if (p->abortado && p->js) { r_libera(p); continue; }
     if (p->abortado) { quita_de_cola(p); fetch_remove_from_queues(p->padre); fetch_free(p->padre); }
   }
   if (activo && activo->abortado) acaba(activo);
@@ -236,7 +243,8 @@ static void r_sondea2(void) {
     u = strdup(nsurl_access(p->url));
     if (u) { char *h = strchr(u, '#'); if (h) *h = 0; }
     surf_reg("pide %s", u ? u : "?");
-    p->r = u ? rh_nueva(u, p->post, p->cuerpo, p->n_cuerpo, p->tipo[0] ? p->tipo : NULL, p->cab, 0, 8u << 20) : NULL;
+    p->r = u ? rh_nueva(u, p->post, p->cuerpo, p->n_cuerpo, p->tipo[0] ? p->tipo : NULL, p->cab, p->js != NULL, 8u << 20) : NULL;
+    if (p->r && p->metodo) rh_metodo(p->r, p->metodo);
     free(u);
     if (!p->r) {
       fetch_msg m;
@@ -258,6 +266,17 @@ static void r_sondea2(void) {
   if (!p) return;
   for (vueltas = 0; vueltas < 4 && activo == p; vueltas++) {
     k = rh_avanza(p->r);
+    if (p->js) {                        /* [JS] entera, y luego a quien la pidió */
+      if (k == 0) continue;
+      if (k > 0) {
+        unsigned n;
+        const unsigned char *d = rh_datos(p->r, &n);
+        const char *c = rh_cabeceras(p->r);
+        p->js(p->js_ctx, rh_estado(p->r), c, d, n, NULL);
+      } else p->js(p->js_ctx, 0, "", NULL, 0, rh_error(p->r));
+      if (activo == p) acaba(p);
+      return;
+    }
     if (k < 0) {
       fetch_msg m;
       m.type = FETCH_ERROR;
@@ -291,6 +310,46 @@ static void r_sondea2(void) {
       return;
     }
   }
+}
+
+/* [JS] fetch y XMLHttpRequest: a la misma cola que lo de NetSurf (una
+ * petición cada vez, por la misma conexión); se sondea con el planificador
+ * mientras haya alguna */
+static int js_sondeando;
+static void js_sondea(void *x) {
+  Pedido *p;
+  int hay = 0;
+  (void)x;
+  r_sondea(NULL);
+  for (p = cola; p; p = p->sig) if (p->js) hay = 1;
+  if (activo && activo->js) hay = 1;
+  if (hay) framebuffer_schedule(10, js_sondea, NULL);
+  else js_sondeando = 0;
+}
+int red_js_pide(const char *url, const char *metodo, const char *cuerpo, unsigned n_cuerpo, const char *cab,
+                red_js_cb cb, void *ctx) {
+  Pedido *p = calloc(1, sizeof *p), **q;
+  if (!p) return 0;
+  if (nsurl_create(url, &p->url) != NSERROR_OK) { free(p); return 0; }
+  p->js = cb; p->js_ctx = ctx;
+  if (metodo && strcmp(metodo, "GET") && strcmp(metodo, "POST")) p->metodo = strdup(metodo);
+  if (cuerpo) {
+    p->post = 1;
+    p->cuerpo = malloc(n_cuerpo + 1);
+    if (p->cuerpo) { memcpy(p->cuerpo, cuerpo, n_cuerpo); p->n_cuerpo = n_cuerpo; }
+  }
+  p->cab = strdup(cab ? cab : "");
+  for (q = &cola; *q; q = &(*q)->sig) ;
+  *q = p;
+  p->en_uso = 1;
+  if (!js_sondeando) { js_sondeando = 1; framebuffer_schedule(0, js_sondea, NULL); }
+  return 1;
+}
+/* las de quien se va (la página): sin avisarle */
+void red_js_cancela(void *ctx) {
+  Pedido *p;
+  for (p = cola; p; p = p->sig) if (p->js && p->js_ctx == ctx) p->abortado = 1;
+  if (activo && activo->js && activo->js_ctx == ctx) { activo->abortado = 1; }
 }
 
 static int r_fdset(lwc_string *e, fd_set *a, fd_set *b, fd_set *c) { (void)e; (void)a; (void)b; (void)c; return -1; }

@@ -61,6 +61,8 @@ struct box_construct_ctx {
 	box_construct_complete_cb cb;	/**< Callback to invoke on completion */
 
 	int *bctx;			/**< talloc context */
+
+	bool ya;			/**< [HISPA] JavaScript: de una vez (dom_to_box_ya) */
 };
 
 /**
@@ -1320,7 +1322,7 @@ static void convert_xml_to_box(struct box_construct_ctx *ctx)
 			free(ctx);
 			return;
 		}
-	} while (++num_processed < max_processed_before_yield);
+	} while (ctx->ya || ++num_processed < max_processed_before_yield);	/* [HISPA] */
 
 	/* More work to do: schedule a continuation */
 	guit->misc->schedule(0, (void *)convert_xml_to_box, ctx);
@@ -1356,10 +1358,43 @@ dom_to_box(dom_node *n,
 	ctx->root_box = NULL;
 	ctx->cb = cb;
 	ctx->bctx = c->bctx;
+	ctx->ya = false;
 
 	*box_conversion_context = ctx;
 
 	return guit->misc->schedule(0, (void *)convert_xml_to_box, ctx);
+}
+
+
+/* [HISPA] JavaScript (w32/surf/rehaz.c): las cajas otra vez desde el
+ * árbol, de una vez y sin el planificador; deja c->layout (o NULL) */
+static void dom_to_box_ya_hecho(html_content *c, bool bien)
+{
+	if (!bien)
+		c->layout = NULL;
+}
+nserror dom_to_box_ya(dom_node *n, html_content *c)
+{
+	struct box_construct_ctx *ctx;
+
+	if (c->bctx == NULL) {
+		c->bctx = talloc_zero(0, int);
+		if (c->bctx == NULL) {
+			return NSERROR_NOMEM;
+		}
+	}
+	ctx = malloc(sizeof(*ctx));
+	if (ctx == NULL) {
+		return NSERROR_NOMEM;
+	}
+	ctx->content = c;
+	ctx->n = dom_node_ref(n);
+	ctx->root_box = NULL;
+	ctx->cb = dom_to_box_ya_hecho;
+	ctx->bctx = c->bctx;
+	ctx->ya = true;
+	convert_xml_to_box(ctx);	/* (lo suelta él) */
+	return NSERROR_OK;
 }
 
 

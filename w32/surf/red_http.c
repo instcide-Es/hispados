@@ -73,11 +73,16 @@ const char *rh_error(void *v) { RH *r = v; return r->err[0] ? r->err : "Error de
 int rh_cifrada(void *v) { RH *r = v; return r->p.u.seguro; }
 void rh_suelta(void *v) {
   RH *r = v;
-  char *c = (char *)r->p.js_cab;
+  char *c = (char *)r->p.js_cab, *m = (char *)r->p.js_metodo;
   http_suelta(&r->p);
   free(c);
+  free(m);
   free(r);
 }
+/* [JS] lo de fetch: otro método, y document.cookie */
+void rh_metodo(void *v, const char *metodo) { RH *r = v; r->p.js_metodo = copia(metodo); }
+char *rh_galletas_de(const char *url) { return http_galletas(url); }
+void rh_pon_galleta(const char *url, const char *linea) { http_pon_galleta(url, linea); }
 void rh_inicia(const char *idioma) {
   int k;
   for (k = 0; idioma && idioma[k] && k < 30; k++) http_idioma[k] = idioma[k];
