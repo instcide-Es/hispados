@@ -1,0 +1,19 @@
+name: Idea o mejora
+description: Algo que le falta a Hispa-DOS, o que podría hacerse mejor.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: La idea
+      description: Qué te gustaría y para qué te serviría.
+    validations:
+      required: true
+  - type: dropdown
+    id: ayuda
+    attributes:
+      label: ¿Te animas a hacerlo tú?
+      options:
+        - No, solo la propongo
+        - Me gustaría, con algo de ayuda
+        - Sí, preparo una pull request

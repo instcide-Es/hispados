@@ -1,0 +1,37 @@
+name: Fallo
+description: Algo no funciona como debería (en un emulador, en el navegador o en un equipo).
+title: "[Fallo] "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Versión de Hispa-DOS
+      placeholder: "0.9.28"
+    validations:
+      required: true
+  - type: input
+    id: donde
+    attributes:
+      label: Dónde
+      description: Emulador y versión, hispados.es o equipo real.
+      placeholder: "QEMU 8.2, 86Box con un 486DX2, hispados.es en Firefox..."
+    validations:
+      required: true
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Cómo reproducirlo
+      placeholder: |
+        1. Arrancar desde el disquete
+        2. Escribir `DIR /S C:\`
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: esperado
+    attributes:
+      label: Qué esperabas y qué pasó
+      description: Si es un programa o juego de DOS, dinos cuál y si va en MS-DOS.
+    validations:
+      required: true
