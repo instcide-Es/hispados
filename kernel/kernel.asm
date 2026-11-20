@@ -262,7 +262,7 @@ ISO_DL          equ 13              ; extensión, tamaño, unidad, último uso
 %assign HOFF HOFF + %2
 %endmacro
 HMA_SIG         equ 0x21534F44      ; primeros octetos de la HMA con el DOS dentro
-INIT_ORG        equ 0xF480          ; .init, al arrancar (por debajo de BOOT_TMP)
+INIT_ORG        equ 0xF380          ; .init, al arrancar (ver «Reparto de KSEG al arrancar»)
         section .low
 start:
         jmp short .go
@@ -314,15 +314,18 @@ start:
         hlt
         jmp .vh
 .cpu_ok:
-        ; pila propia por encima de la imagen y copia del sector de arranque
-        ; (DS:SI) fuera del sitio adonde va a subir el código
-        mov ax, KSEG
+        ; copia del sector de arranque (DS:SI) y pila provisional fuera del
+        ; segmento del núcleo (BOOT_SEG, ver «Reparto de KSEG al arrancar»):
+        ; así lo alto de KSEG queda entero para .init
+        mov ax, BOOT_SEG
         mov es, ax
         mov ss, ax
-        xor sp, sp
-        mov di, BOOT_TMP
+        mov sp, BOOT_SP
+        xor di, di
         mov cx, 256
         rep movsw
+        mov ax, KSEG
+        mov es, ax
         mov ds, ax
         ; el código de arranque (.init), a su sitio: en el fichero está
         ; donde va a caer el código al subir
@@ -349,14 +352,20 @@ start:
         mov cx, (hbss_end - hbss_start) / 2
         rep stosw
         mov dword [img_start], HMA_SIG
-        mov si, BOOT_TMP
+        mov ax, BOOT_SEG
+        mov ds, ax
+        xor si, si
         mov di, bootsec
         mov cx, 256
         rep movsw
+        mov ax, KSEG
+        mov ds, ax
+        mov ss, ax
         mov sp, kstack_top
         sti
         jmp kinit
-BOOT_TMP        equ 0xFC00
+BOOT_SEG        equ 0x2000          ; copia provisional del sector de arranque
+BOOT_SP         equ 0x0400          ;   y pila, en 2000:0000-03FF (fuera de KSEG)
 
         section .text
 text_start:
@@ -2764,10 +2773,8 @@ mn_curf     dw 0
 mn_name     times MN_MAX dw 0
 mn_text     times MN_MAX dw 0
 mn_type     times MN_MAX db 0
-init_end:
-        section .text
 
-; ---- menú F8 ----
+; ---- menú F8 (solo al arrancar: en .init) ----
 boot_menu:
         ; líneas de CONFIG.SYS que se muestran (ni vacías, ni REM, ni secciones)
         xor cx, cx                  ; elementos
@@ -3339,6 +3346,8 @@ bm_drvdesc:
 .gen:
         mov si, d_device
         ret
+init_end:
+        section .text
 
 ; una línea de CONFIG.SYS en cfgl
 config_line:
@@ -16469,6 +16478,7 @@ bm_off      resw MAXIT
 bm_line     resw MAXIT
 cfgbuf      resb CFG_MAX
             alignb 16
+ibss_end:
 
 ; datos «altos»: van detrás del código, en su segmento (CS:)
 HRES_LEN    equ (NLOCKS*LK_LEN + SET_MAX + INST_MAX + HIST_N*HIST_LEN + 15) & ~15
@@ -16484,14 +16494,33 @@ hbss_start  equ text_end
         HRES hist_buf, HIST_N*HIST_LEN
 %assign HOFF (HOFF + 15) & ~15
 hbss_end    equ text_end + HOFF
-        ; todo tiene que caber por debajo de la copia provisional del
-        ; sector de arranque (BOOT_TMP) al arrancar
         section .low
 low_end:
-        times -(((low_end - start) + (bss_end - bss_start) + CFG_MAX + 1024 + (text_end - text_start) + (hbss_end - hbss_start) + 64) > BOOT_TMP) db 0
-        ; .init va por encima de todo eso y por debajo de BOOT_TMP
-        times -(((low_end - start) + (bss_end - bss_start) + CFG_MAX + 1024 + (text_end - text_start) + (hbss_end - hbss_start) + 64) > INIT_ORG) db 0
-        times -((init_end - init_start) > (BOOT_TMP - INIT_ORG)) db 0
+; Reparto de KSEG al arrancar (antes de repartir la memoria, con todo el
+; código todavía en KSEG):
+;   0000 .low | .bss | .ibss (img_start) | .text | HRES (hasta hbss_end = IMG_END)
+;   ... hueco (MARGEN_IMG) ...
+;   INIT_ORG .init (init_start - init_end) ... hueco (MARGEN_INIT) ... 10000h
+; La copia provisional del sector de arranque y la pila de los primeros
+; pasos van fuera de KSEG (BOOT_SEG:0000-03FF), así que .init llega hasta el
+; final del segmento. Lo que se mueve de la parte residente a .init (solo lo
+; que se usa antes de mem_init: el menú de CONFIG.SYS, el menú F8) no cambia
+; la suma: solo deja más memoria libre después. Medido el 20/11/2026 (letras
+; de unidad + reinicio sin ruido + menú F8 en .init):
+;   IMG_END = F1D0h, .init = 0B75h (2.933 octetos)
+;   MARGEN_IMG  = INIT_ORG - (IMG_END + 64)  = 368 octetos
+;   MARGEN_INIT = 10000h - (INIT_ORG + .init) = 267 octetos
+; Si una de las dos comprobaciones falla, se puede mover INIT_ORG (en
+; múltiplos de 16) mientras la otra tenga sitio; si no lo tiene ninguna, hay
+; que adelgazar el núcleo de verdad.
+IMG_END     equ (((low_end - start) + 15) & ~15) + (bss_end - bss_start) + (ibss_end - img_start) + (hbss_end - text_start)
+        ; la imagen, con 64 octetos de holgura, por debajo de .init
+        times -((IMG_END + 64) > INIT_ORG) db 0
+        ; .init, entero dentro de KSEG
+        times -((INIT_ORG + (init_end - init_start)) > 0x10000) db 0
+        ; el fichero (cargado en KSEG:0: .low, .text y .init) no llega a la
+        ; copia de BOOT_SEG
+        times -((KSEG * 16 + (((low_end - start) + 15) & ~15) + (text_end - text_start) + 16 + (init_end - init_start)) > BOOT_SEG * 16) db 0
         ; los trozos de entrada (código) tienen que caber en la primera
         ; página de 4 KB (hasta KSEG:0900h) y los datos que cambian sin parar
         ; (la SDA, y detrás .bss) tienen que empezar en la siguiente
