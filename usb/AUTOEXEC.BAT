@@ -1,6 +1,11 @@
 @ECHO OFF
 PROMPT $P$G
 PATH C:\HISPADOS
+REM Windows 3.1x: su programa de instalación no toca un CONFIG.SYS con menú
+REM y deja sus cambios en \WINDOWS\CONFIG.WIN y AUTOEXEC.WIN. WINCONF los
+REM pone (con la opción «Windows» en el menú, sin los emuladores de
+REM Hispa-DOS) y reinicia; si ya están, no hace nada. Guía: docs/WINDOWS.md.
+IF EXIST C:\WINDOWS\WIN.COM C:\HISPADOS\WINCONF /AUTO
 REM CONFIG = la opción elegida en el menú de CONFIG.SYS (NORMAL, JUEGOS o PRUEBA)
 IF "%CONFIG%"=="JUEGOS" GOTO JUEGOS
 IF "%CONFIG%"=="PRUEBA" GOTO PRUEBA

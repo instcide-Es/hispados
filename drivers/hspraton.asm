@@ -159,6 +159,7 @@ c_kbd       dw 0                    ; IRQ 12 con un byte que era del teclado
 c_rst       dw 0                    ; reinicios del dispositivo (AA 00)
 i_abs       db 0                    ; [RUEDA] el touchpad, en modo absoluto
 i_bid       db 0                    ; [RUEDA] identificador por la BIOS (C204h) tras 200, 100, 80
+c_win       dw 0                    ; [WINDOWS] veces que Windows se ha llevado el ratón
 INFO_LEN    equ $ - info
 
 H_CTR0      equ 0x0001
@@ -810,11 +811,176 @@ bios_sinc:
         ret
 
 ; -----------------------------------------------------------------------------
+;  [WINDOWS] INT 2Fh AX=1605h / 1606h: Windows 3.x arranca / termina (en modo
+;  386 mejorado y en modo estándar, DX bit 0 = 1, igual). Su controlador
+;  MOUSE.DRV («Microsoft o IBM PS/2») usa el ratón de la BIOS: INT 15h C207h
+;  (su rutina), C200h (activarlo) y la IRQ 12 que atiende la BIOS. Como hacía
+;  el MOUSE.COM de Microsoft, al arrancar Windows se le devuelve todo a la
+;  BIOS (INT 74h, el dispositivo reiniciado con paquetes de 3 bytes) y al
+;  terminar se recupera tal como estaba al cargar (vía directa con la rueda,
+;  o la rutina de la vía BIOS). Se mira después de los demás (pueden decir que
+;  Windows no arranque: CX distinto de 0) y solo si CX = 0.
+; -----------------------------------------------------------------------------
+int2f:
+        cmp ax, 0x1605
+        je .ini
+        cmp ax, 0x1606
+        je .fin
+        jmp far [cs:old2f]
+.ini:
+        pushf
+        call far [cs:old2f]
+        test cx, cx                 ; alguien ha dicho que no: nada
+        jnz .r
+        cmp byte [cs:i_via], 0
+        je .r
+        cmp byte [cs:w_win], 0
+        jne .r
+        pusha
+        push ds
+        push es
+        push cs
+        pop ds
+        mov byte [w_win], 1
+        inc word [c_win]
+        call suelta
+        pop es
+        pop ds
+        popa
+.r:
+        iret
+.fin:
+        pushf
+        call far [cs:old2f]
+        cmp byte [cs:w_win], 0
+        je .r
+        pusha
+        push ds
+        push es
+        push cs
+        pop ds
+        sti
+        cld
+        mov byte [w_win], 0
+        call retoma
+        pop es
+        pop ds
+        popa
+        iret
+
+; dejar el ratón a la BIOS
+suelta:
+        cmp byte [i_via], 2
+        jne .bios
+        cli
+        xor ax, ax
+        mov es, ax
+        cmp word [es:0x74*4], irq12 ; INT 74h, si sigue siendo nuestra, a la
+        jne .v                      ; BIOS (si no, irq12 la sigue pasando)
+        mov ax, cs
+        cmp [es:0x74*4+2], ax
+        jne .v
+        mov eax, [old74]
+        mov [es:0x74*4], eax
+.v:
+        mov byte [pk_n], 0
+        mov byte [ack_wait], 0
+        sti
+        ; el dispositivo, como lo quiere la BIOS: reiniciado (sale del modo
+        ; IntelliMouse y del absoluto del touchpad), paquetes de 3 bytes
+        mov byte [s_abs], 0
+        mov byte [pk_len], 3
+        mov ax, 0xC205
+        mov bh, 3
+        int 0x15
+        ret
+.bios:
+        mov ax, 0xC200              ; parado hasta que Windows ponga su rutina
+        xor bh, bh
+        int 0x15
+        ret
+
+; volver a tomar el ratón tras Windows, con las funciones de la BIOS (lo de
+; la carga, dir_init, no es residente: ocuparía 1,5 KB más). Lo que haya
+; dejado su MOUSE.DRV en la BIOS (su rutina ya no existe) se cambia por la
+; nuestra; se reinicia el ratón y, si era un IntelliMouse, se le pone en el
+; modo de la rueda (frecuencias 200, 100 y 80: ya se sabe que lo es); se
+; activa y, por la vía directa, la IRQ 12 vuelve a ser nuestra. Un touchpad
+; en modo absoluto (/BORDE) vuelve como ratón normal, sin el borde.
+retoma:
+        mov ax, 0xC200
+        xor bh, bh
+        int 0x15
+        mov byte [s_abs], 0
+        mov byte [pk_len], 3
+        mov ax, 0xC205              ; reiniciar (paquetes de 3 bytes)
+        mov bh, 3
+        int 0x15
+        push cs                     ; (después de C205h: hay BIOS que con
+        pop es                      ; ella olvidan la rutina)
+        mov bx, ps2_cb
+        mov ax, 0xC207
+        int 0x15
+        cmp byte [i_via], 2
+        jne .res
+        cmp byte [i_dev], 3         ; (el touchpad, como ratón normal)
+        jne .im
+        mov byte [i_dev], 1
+        mov byte [w_hay], 0
+.im:
+        cmp byte [i_dev], 2         ; IntelliMouse: el modo de la rueda
+        jne .res
+        mov bh, 6
+        call .rate
+        mov bh, 5
+        call .rate
+        mov bh, 4
+        call .rate
+        mov byte [pk_len], 4
+        mov bh, 5                   ; y 100 paquetes por segundo
+        call .rate
+.res:
+        mov ax, 0xC203              ; 4 puntos por milímetro
+        mov bh, 2
+        int 0x15
+        mov ax, 0xC200              ; activar
+        mov bh, 1
+        int 0x15
+        cmp byte [i_via], 2
+        jne .r
+        cli                         ; la IRQ 12, nuestra
+        xor ax, ax
+        mov es, ax
+        mov eax, [es:0x74*4]
+        cmp ax, irq12               ; (si ya fuera la nuestra, no se guarda)
+        je .ya
+        mov [old74], eax
+.ya:
+        mov word [es:0x74*4], irq12
+        mov [es:0x74*4+2], cs
+        mov byte [pk_n], 0
+        in al, 0xA1                 ; (abierta)
+        and al, 0xEF
+        out 0xA1, al
+        sti
+.r:
+        ret
+.rate:
+        mov ax, 0xC202
+        int 0x15
+        ret
+old2f       dd 0
+w_win       db 0                    ; 1 = Windows tiene el ratón
+; -----------------------------------------------------------------------------
 ;  IRQ 12 (INT 74h) en la vía directa. Solo se lee del puerto 60h lo que el
 ;  8042 marca como del auxiliar (bit 5 del estado): lo demás es del teclado
 ;  (o una tecla que inyecta HSPUSB con D2h) y lo recogerá INT 09h.
 ; -----------------------------------------------------------------------------
 irq12:
+        cmp byte [cs:w_win], 0      ; [WINDOWS] el ratón es de Windows (y de
+        je .mio                     ; la BIOS): si alguien nos ha dejado aquí,
+        jmp far [cs:old74]          ; la IRQ 12 sigue a la BIOS
+.mio:
         pusha
         push ds
         push es
@@ -1381,6 +1547,13 @@ init:
         int 0x21
         mov dx, int10
         mov ax, 0x2510
+        int 0x21
+        mov ax, 0x352F              ; [WINDOWS] INT 2Fh: Windows arranca/termina
+        int 0x21
+        mov [old2f], bx
+        mov [old2f+2], es
+        mov dx, int2f
+        mov ax, 0x252F
         int 0x21
         call reset_all
         ; liberar el entorno y quedar residente
