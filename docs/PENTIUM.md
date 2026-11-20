@@ -2403,11 +2403,11 @@ núcleo con sitio: de sus tablas usa 2.644 párrafos de 3.072 para los nombres,
 Con la 0.8 (todo junto) tampoco: el núcleo gana `usbcal.cas`, `red.cas` y
 `energia.cas` (CASTEL los sigue compilando igual que `ccastel.py`, en la segunda
 tanda), pero sus tablas, sí: el núcleo entero ya no le cabía («demasiados
-nombres»: 3.075 párrafos de 3.072). Ahora tiene **52 K para los nombres**,
-**168 K para el árbol** y **60 K para lo declarado** (más ya no cabe en lo que
-deja libre Hispa-8086), y con la semilla usa 3.075 de 3.328 párrafos de
-nombres, 3.171 de 4.096 de textos, 10.153 de 10.752, lo más, de árbol y 3.400
-de 3.840 de lo declarado: poco margen (castel/docs/CASTEL32.md). PAQUETES, su ventana y
+nombres»: 3.075 párrafos de 3.072). Más memoria no le queda en Hispa-8086,
+así que se ha repartido la misma: **52 K para los nombres** (eran 48) y **60 K
+para los textos** (eran 64). Con la semilla usa 3.075 de 3.328 párrafos de
+nombres, 3.171 de 3.840 de textos, 10.153 de 10.240, lo más, de árbol y 3.400
+de 3.584 de lo declarado: casi sin margen (castel/docs/CASTEL32.md). PAQUETES, su ventana y
 `sha256.cas` van con los demás programas, en la tercera; y la red son programas
 del anillo 3 aparte, que van en una **cuarta tanda** (en A:, `RED.BIN` con sus
 seis módulos e IPCONFIG, PING y DESCARGAR; en B:, lo que sale), lo mismo para

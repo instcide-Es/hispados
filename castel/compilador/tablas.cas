@@ -83,7 +83,7 @@ módulo Tablas
     público constante FM_VISTO = 8
     público constante FM_ATIENDE = 16           ; atiende una interrupción (32 bits)
 
-    constante PARRAFOS_SIM = 0x0F00             ; 60 K (el núcleo de la 0.8, todo junto, usa 53 de 56)
+    constante PARRAFOS_SIM = 0x0E00             ; 56 K
     constante CUBOS_SIM = 1024
     público variable seg_sim: nat16
     variable libre_sim: nat16
