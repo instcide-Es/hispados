@@ -15,7 +15,13 @@
 ; Un .COM recibe del DOS toda la memoria libre: la primera vez que se pide
 ; un bloque, el programa se queda con sus 64 K y devuelve el resto. (Un
 ; programa de «modelo grande» ya solo tiene lo suyo.)
+; Un segmento es de tipo Segmento (aquí, un nat16). Los programas que se
+; compilan también en 32 bits (CASTEL32) lo usan para sus segmentos: allí,
+; con la memoria «por párrafos» (CASTEL32.md §5), es un nat32 y los bloques
+; se piden al sistema que toque (biblioteca32/pentium, biblioteca32/hw32).
 módulo Lejos
+
+    público tipo Segmento = nat16
 
     variable encogido: bool
 
@@ -33,8 +39,8 @@ módulo Lejos
 
     ; pide un bloque de tantos párrafos (0x1000 son 64 K). Devuelve su
     ; segmento, o 0 si no hay tanta memoria seguida
-    público función pedir(párrafos: nat16): nat16
-        variable seg: nat16
+    público función pedir(párrafos: nat16): Segmento
+        variable seg: Segmento
         seg := interrupción(0x21, ah: 0x48, bx: párrafos)
         si no acarreo() entonces devolver seg fin
         si encogido o seg_datos() <> seg_código() entonces devolver 0 fin
@@ -56,12 +62,12 @@ módulo Lejos
         devolver 0xFFFF
     fin
 
-    público función devolver_bloque(seg: nat16)
+    público función devolver_bloque(seg: Segmento)
         interrupción(0x21, ah: 0x49, es: seg)
     fin
 
     ; pone a cero las primeras «palabras» palabras de un bloque
-    público función borrar_bloque(seg: nat16, palabras: nat16)
+    público función borrar_bloque(seg: Segmento, palabras: nat16)
         variable i: nat16
         i := 0
         mientras palabras > 0 hacer

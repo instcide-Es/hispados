@@ -1,0 +1,42 @@
+; =============================================================================
+;  medidas.cas - el tamaño de las tablas del compilador de Castel escrito en
+;  Castel, en su versión de 16 bits (CASTEL.EXE, que corre en Hispa-8086 con
+;  640 K: todas sus tablas juntas tienen que caber en lo que deja libre).
+;  La de 32 bits (CASTEL32, con la memoria plana de megas) está en
+;  compilador/32/medidas.cas, con las mismas constantes y otros números: la
+;  importa primero su programa (compilador/32/pentium/castel32.cas o
+;  compilador/32/hw32/castelw.cas), y así es la que vale (CASTEL32.md §11).
+;  Son tablas del compilador, no del lenguaje: lo que sale no cambia.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Medidas
+
+    ; ---- Base: los nombres, los textos y el árbol (en párrafos de 16 octetos) ----
+    público constante PARRAFOS_AT = 0x0D00      ; 52 K de nombres (el núcleo de Hispa-Pentium 0.6 pasa de 40; el de la 0.8, todo junto, de 48)
+    público constante PARRAFOS_CAD = 0x0F00     ; 60 K de textos (el núcleo de Hispa-Pentium pasa de 40; el de la 0.8 usa 50: los 4 K que faltaban a los nombres)
+    público constante PARRAFOS_AR = 0x2800      ; 160 K de árbol (lo declarado en los 35 módulos del núcleo de Hispa-Pentium 0.6 no cabía en 128)
+    público constante CUBOS_AT = 1024
+    público constante CUBOS_CAD = 512
+    público constante MÓDULOS = 48              ; por programa (el núcleo de Hispa-Pentium 0.6 tiene 35, con los de la biblioteca)
+
+    ; ---- Tablas: los tipos, lo declarado, los datos, las locales, los puentes ----
+    público constante PARRAFOS_TIP = 0x600      ; 24 K
+    público constante PARRAFOS_SIM = 0x0E00     ; 56 K
+    público constante CUBOS_SIM = 1024
+    público constante PARRAFOS_ORD = 0x400      ; 16 K: 4096 datos y 4096 etiquetas
+    público constante LOCALES = 160             ; variables y parámetros de una función
+    público constante PUENTES = 700             ; del modelo grande
+
+    ; ---- Salida: el ensamblador de una función, mientras se genera ----
+    público constante PARRAFOS_LIN = 0x0C00     ; 48 K de texto por función
+    público constante TEXTO_FUNCIÓN = 0xBE00
+    público constante LÍNEAS_FUNCIÓN = 4000
+    público constante NOMBRE_TEMPORAL = "CASTEL.$$$"
+
+    ; ---- Lexico y Sintactico ----
+    público constante LARGO_TEXTO = 2000        ; un texto entre comillas
+    público constante LARGO_LIN_ASM = 500       ; una línea de un bloque «ensamblador»
+    público constante LARGO_ASM = 6000          ; un bloque «ensamblador» entero
+    público constante VENTANA = 1024            ; piezas a la vista (una potencia de 2)
+
+fin Medidas.

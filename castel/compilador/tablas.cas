@@ -31,7 +31,7 @@
 ; =============================================================================
 módulo Tablas
 
-    importar Base, Textos, Lejos
+    importar Medidas, Base, Textos, Lejos
 
     ; ---- los tipos ----
     público constante TK_NAT8 = 1
@@ -59,8 +59,7 @@ módulo Tablas
     público constante T_PUNT_U = 10             ; puntero «universal»: nulo y puntero(n)
     público constante T_TEXTO = 11              ; puntero a byte: un texto escrito
 
-    constante PARRAFOS_TIP = 0x600              ; 24 K
-    público variable seg_tip: nat16
+    público variable seg_tip: Segmento
     variable tip_abajo, tip_arriba: nat16
     público variable tip_temporal: bool         ; los tipos nuevos, ¿son de la función en curso?
 
@@ -83,9 +82,7 @@ módulo Tablas
     público constante FM_VISTO = 8
     público constante FM_ATIENDE = 16           ; atiende una interrupción (32 bits)
 
-    constante PARRAFOS_SIM = 0x0E00             ; 56 K
-    constante CUBOS_SIM = 1024
-    público variable seg_sim: nat16
+    público variable seg_sim: Segmento
     variable libre_sim: nat16
     variable cubos_sim: arreglo [CUBOS_SIM] de nat16
 
@@ -100,7 +97,7 @@ módulo Tablas
     público variable amb_mod: arreglo [MAX_MODULOS] de byte
 
     ; ---- las variables de la función que se genera ----
-    público constante MAX_LOCALES = 160
+    público constante MAX_LOCALES = LOCALES
     variable loc_n: nat16
     variable loc_nombre: arreglo [MAX_LOCALES] de nat16
     variable loc_tipo: arreglo [MAX_LOCALES] de nat16
@@ -129,15 +126,14 @@ módulo Tablas
 
     ; ---- los textos con etiqueta (T_n), en el orden en que la reciben, y las
     ;      globales con valor inicial: los «datos» del programa, por orden ----
-    constante PARRAFOS_ORD = 0x400              ; 16 K: 4096 datos y 4096 etiquetas
-    constante MAX_DATOS = 4090
-    variable seg_ord: nat16
+    constante MAX_DATOS = PARRAFOS_ORD * 4 - 6  ; (PARRAFOS_ORD, de Medidas: la mitad, los datos; la otra, las etiquetas)
+    variable seg_ord: Segmento
     público variable n_datos: nat16
     público variable n_cadenas: nat16
     público constante DATO_GLOBAL = 0x8000      ; en la lista de datos: es una global (y no un texto)
 
     ; ---- los puentes del modelo grande ----
-    público constante MAX_PUENTES = 700
+    público constante MAX_PUENTES = PUENTES
     público variable n_puentes: nat16
     variable pu_seg: arreglo [MAX_PUENTES] de byte
     variable pu_func: arreglo [MAX_PUENTES] de nat16
@@ -149,7 +145,8 @@ módulo Tablas
     ;  Tipos
     ; -------------------------------------------------------------------------
     público función tip_nuevo(k: byte, tam: nat16): nat16
-        variable r, s, i: nat16
+        variable r, i: nat16
+        variable s: Segmento
         si tip_arriba - tip_abajo < 2 entonces
             m("no hay memoria: demasiados tipos")
             falla_sin_más()
@@ -238,7 +235,8 @@ módulo Tablas
 
     ; añade un campo a una estructura (al final de los que tiene)
     público función t_campo_nuevo(t: nat16, a: nat16, off: nat16, tipo_: nat16)
-        variable c, s, u: nat16
+        variable c, u: nat16
+        variable s: Segmento
         c := tip_nuevo(0, 0)
         s := seg_tip + c
         poner_palabra(s, 2, a)
@@ -337,7 +335,8 @@ módulo Tablas
 
     ; lo que el módulo m declara con ese nombre (aunque aún no se haya llegado a ello), o 0
     público función sim_propio(m_: nat16, a: nat16): nat16
-        variable r, s: nat16
+        variable r: nat16
+        variable s: Segmento
         r := cubos_sim[cubo_de(m_, a)]
         mientras r <> 0 hacer
             s := seg_sim + r
@@ -348,7 +347,8 @@ módulo Tablas
     fin
 
     función sim_párrafos(n: nat16): nat16
-        variable r, s, i: nat16
+        variable r, i: nat16
+        variable s: Segmento
         r := libre_sim
         si PARRAFOS_SIM - libre_sim <= n entonces
             m("no hay memoria: demasiados nombres declarados")
@@ -364,7 +364,8 @@ módulo Tablas
 
     ; apunta que el módulo m declara ese nombre (si no estaba ya); devuelve su entrada
     público función sim_alta(m_: nat16, a: nat16): nat16
-        variable r, s, h: nat16
+        variable r, h: nat16
+        variable s: Segmento
         r := sim_propio(m_, a)
         si r <> 0 entonces devolver r fin
         r := sim_párrafos(1)
@@ -770,7 +771,7 @@ módulo Tablas
             falla_sin_más()
         fin
         tx_pon_etiqueta(tx, n)
-        poner_palabra(seg_ord + 0x200, n * 2, tx)
+        poner_palabra(seg_ord + PARRAFOS_ORD div 2, n * 2, tx)
         dato_nuevo(tx)
         devolver n
     fin
@@ -778,7 +779,7 @@ módulo Tablas
     ; el texto que lleva la etiqueta T_n, o 0
     público función texto_de_etiqueta(n: nat16): nat16
         si n = 0 o n > n_cadenas entonces devolver 0 fin
-        devolver leer_palabra(seg_ord + 0x200, n * 2)
+        devolver leer_palabra(seg_ord + PARRAFOS_ORD div 2, n * 2)
     fin
 
     ; el puente desde ese segmento a esa función lejana (lo crea si no está): su número

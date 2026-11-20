@@ -15,7 +15,7 @@
 ; =============================================================================
 módulo Programa
 
-    importar Base, Tablas, Cuentas, Tipos, Salida, Expr, Sent, Lexico, Sintactico, Apoyo, Textos, Archivos
+    importar Medidas, Base, Tablas, Cuentas, Tipos, Salida, Expr, Sent, Lexico, Sintactico, Apoyo, Textos, Archivos
 
     constante MAX_LN = 320
     constante N_R = 7
@@ -1337,11 +1337,24 @@ módulo Programa
         borrar(NOMBRE_TEMPORAL)
         escribir("ccastel: ", entrada, " -> ", salida, "  (", líneas_sal, " líneas de ensamblador)\r\n")
         si con_gasto entonces
-            escribir("  gasto, en párrafos de 16 octetos: nombres ", gasto_nombres(), ", textos ", gasto_textos())
-            escribir(", árbol ", gasto_árbol(), " (lo más, ", más_árbol, "), tipos ", gasto_tipos(), ", declarados ", gasto_declarados(), "\r\n")
+            escribir("  gasto de las tablas, de lo que hay (en párrafos de 16 octetos; los módulos, uno a uno):\r\n")
+            escribe_gasto("nombres", gasto_nombres(), PARRAFOS_AT)
+            escribe_gasto("textos", gasto_textos(), PARRAFOS_CAD)
+            escribe_gasto("árbol (lo más)", más_árbol, PARRAFOS_AR)
+            escribe_gasto("tipos", gasto_tipos(), PARRAFOS_TIP)
+            escribe_gasto("declarados", gasto_declarados(), PARRAFOS_SIM)
+            escribe_gasto("módulos", n_modulos, MAX_MODULOS)
             escribir("  la función mayor: ", más_líneas, " líneas y ", más_texto, " octetos de ensamblador; ")
             escribir(n_cadenas, " textos con etiqueta, ", n_datos, " datos y ", n_puentes, " puentes\r\n")
         fin
+    fin
+
+    ; una línea del gasto: cuánto de cuánto, y el tanto por ciento
+    función escribe_gasto(qué: puntero a byte, n: nat16, hay: nat16)
+        variable i: nat16
+        escribir("    ", qué)
+        para i desde longitud(qué) hasta 15 hacer escribir_car(' ') fin
+        escribir(n, " de ", hay, " (", nat32(n) * 100 div hay, " %)\r\n")
     fin
 
 fin Programa.

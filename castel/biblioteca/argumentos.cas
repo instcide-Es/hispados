@@ -3,7 +3,8 @@
 ; El DOS deja la línea de órdenes en el prefijo del programa (PSP): en 80h,
 ; cuántas letras tiene; desde 81h, las letras, acabadas en un retorno de
 ; carro. Aquí se parte en argumentos: palabras separadas por espacios o
-; tabuladores.
+; tabuladores. Y ruta_del_programa() dice de qué archivo se ha cargado el
+; programa (el DOS lo deja detrás de su entorno).
 ;
 ;   importar Argumentos
 ;   ...
@@ -74,6 +75,41 @@ módulo Argumentos
         fin
         destino[i] := 0
         devolver cierto
+    fin
+
+    ; la ruta del archivo del programa (como «A:\CASTEL.EXE»), en destino, donde
+    ; caben «cabe» octetos con el 0: el DOS (desde la 3.0) la deja detrás del
+    ; entorno del programa, cuyo segmento está en 2Ch del prefijo. Da falso si
+    ; no la encuentra (o no cabe).
+    público función ruta_del_programa(destino: puntero a byte, cabe: nat16): bool
+        variable p: puntero a nat16
+        variable seg, i, n: nat16
+        valor(destino) := 0
+        p := puntero(0x2C)
+        seg := valor(p)
+        si seg = 0 o cabe = 0 entonces devolver falso fin
+        i := 0
+        mientras leer_byte(seg, i) <> 0 hacer
+            mientras leer_byte(seg, i) <> 0 hacer
+                i := i + 1
+                si i > 30000 entonces devolver falso fin
+            fin
+            i := i + 1
+        fin
+        si leer_palabra(seg, i + 1) <> 1 entonces devolver falso fin
+        i := i + 3
+        n := 0
+        mientras leer_byte(seg, i) <> 0 hacer
+            si n + 1 >= cabe entonces
+                destino[0] := 0
+                devolver falso
+            fin
+            destino[n] := leer_byte(seg, i)
+            n := n + 1
+            i := i + 1
+        fin
+        destino[n] := 0
+        devolver n > 0
     fin
 
 fin Argumentos.

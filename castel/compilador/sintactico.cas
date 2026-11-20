@@ -30,16 +30,16 @@
 ; =============================================================================
 módulo Sintactico
 
-    importar Base, Lexico, Textos, Archivos
+    importar Medidas, Base, Lexico, Textos, Archivos, Lejos, Argumentos
 
-    constante VENTANA = 1024                    ; piezas a la vista (una potencia de 2)
+    ; (VENTANA, las piezas a la vista, de Medidas)
     constante MAX_CONSTS = 64                   ; constantes declaradas dentro de una función
     constante MAX_CARPETAS = 6
     constante NINGUNO = 0xFFFF
 
     ; una pieza de la ventana (16 octetos, en seg_pz + número): 0 clase,
     ; 2 val (4), 6 val2, 8 línea, 10 columna, 12 dónde empieza en el archivo (4)
-    variable seg_pz: nat16
+    variable seg_pz: Segmento
     variable pp: nat16                          ; la pieza por la que va el análisis
     variable prod: nat16                        ; cuántas ha dado ya el léxico
     variable hay_marca: bool                    ; hay que poder volver a marca_pp
@@ -65,7 +65,7 @@ módulo Sintactico
     ;  Las piezas
     ; -------------------------------------------------------------------------
     función trae()
-        variable s: nat16
+        variable s: Segmento
         sig_pieza(pz)
         si hay_marca y prod - marca_pp >= VENTANA - 4 entonces
             m("la lista de valores es demasiado larga para el compilador")
@@ -84,7 +84,7 @@ módulo Sintactico
     fin
 
     ; dónde está (su segmento) la pieza que hay d más allá de la que toca
-    función ranura(d: nat16): nat16
+    función ranura(d: nat16): Segmento
         mientras prod - pp <= d hacer
             trae()
         fin
@@ -144,7 +144,7 @@ módulo Sintactico
 
     ; lo mismo, diciendo además qué pieza está
     función está()
-        variable s: nat16
+        variable s: Segmento
         s := ranura(0)
         m(" (está ")
         según leer_byte(s, 0)
@@ -531,7 +531,8 @@ módulo Sintactico
     fin
 
     función función_(): nat16
-        variable f, f2, p, último, marca, s, i, n: nat16
+        variable f, f2, p, último, marca, i, n: nat16
+        variable s: Segmento
         f := nudo_aquí(K_FUNC)
         come_pal(P_FUNCION)
         pon_a(f, come_id("el nombre de la función"))
@@ -786,7 +787,8 @@ módulo Sintactico
     fin
 
     función ensamblador_(): nat16
-        variable s, r: nat16
+        variable s: nat16
+        variable r: Segmento
         s := nudo_aquí(K_ASM)
         come_pal(P_ENSAMBLADOR)
         si no es_cl(T_ASM, 0) entonces
@@ -983,7 +985,8 @@ módulo Sintactico
     fin
 
     función primario(): nat16
-        variable n, s, nombre: nat16
+        variable n, nombre: nat16
+        variable s: Segmento
         variable cl: byte
         s := ranura(0)
         cl := leer_byte(s, 0)
@@ -1118,34 +1121,12 @@ módulo Sintactico
         destino[n] := 0
     fin
 
-    ; la carpeta del propio compilador: el DOS deja la ruta del programa detrás
-    ; de su entorno (el segmento del entorno está en 2Ch del prefijo)
+    ; la carpeta del propio compilador (la de su programa: Argumentos la sabe
+    ; según el sistema; vacía si no se sabe)
     función carpeta_propia(destino: puntero a byte)
-        variable p: puntero a nat16
-        variable seg, i, n: nat16
         variable ruta: arreglo [MAX_RUTA] de byte
         destino[0] := 0
-        p := puntero(0x2C)
-        seg := valor(p)
-        si seg = 0 entonces devolver fin
-        i := 0
-        mientras leer_byte(seg, i) <> 0 hacer
-            mientras leer_byte(seg, i) <> 0 hacer
-                i := i + 1
-                si i > 30000 entonces devolver fin
-            fin
-            i := i + 1
-        fin
-        si leer_palabra(seg, i + 1) <> 1 entonces devolver fin
-        i := i + 3
-        n := 0
-        mientras leer_byte(seg, i) <> 0 y n < MAX_RUTA - 1 hacer
-            ruta[n] := leer_byte(seg, i)
-            n := n + 1
-            i := i + 1
-        fin
-        ruta[n] := 0
-        carpeta_de(ruta, destino)
+        si ruta_del_programa(ruta, MAX_RUTA) entonces carpeta_de(ruta, destino) fin
     fin
 
     ; el nombre del archivo de un módulo, en DOS: ARGUMENT.CAS

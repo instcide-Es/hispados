@@ -29,7 +29,7 @@
 ; =============================================================================
 módulo Base
 
-    importar Textos, Archivos, Lejos
+    importar Medidas, Textos, Archivos, Lejos
 
     ; ---- las clases de pieza (token) ----
     público constante T_NL = 1
@@ -224,12 +224,8 @@ módulo Base
     público constante M_ATIENDE = 32            ; K_FUNC: atiende una interrupción («interrupción función»)
 
     ; ---- los bloques de memoria lejana ----
-    constante PARRAFOS_AT = 0x0D00              ; 52 K de nombres (el núcleo de Hispa-Pentium 0.6 pasa de 40; el de la 0.8, todo junto, de 48)
-    constante PARRAFOS_CAD = 0x0F00             ; 60 K de textos (el núcleo de Hispa-Pentium pasa de 40; el de la 0.8 usa 50: los 4 K que faltaban a los nombres)
-    constante PARRAFOS_AR = 0x2800              ; 160 K de árbol (lo declarado en los 35 módulos del núcleo de Hispa-Pentium 0.6 no cabía en 128)
-    constante CUBOS_AT = 1024
-    constante CUBOS_CAD = 512
-    público variable seg_at, seg_cad, seg_ar: nat16
+    ; (cuántos: PARRAFOS_AT, PARRAFOS_CAD y PARRAFOS_AR, de Medidas)
+    público variable seg_at, seg_cad, seg_ar: Segmento
     variable libre_at, libre_cad, libre_ar: nat16
     variable cubos_at: arreglo [CUBOS_AT] de nat16
     variable cubos_cad: arreglo [CUBOS_CAD] de nat16
@@ -241,7 +237,7 @@ módulo Base
     público variable a_núcleo, a_hispa32, a_usuario, a_interrupción: nat16
 
     ; ---- los módulos: el programa (el último) y los que importa, cada uno detrás de los suyos ----
-    público constante MAX_MODULOS = 48           ; (el núcleo de Hispa-Pentium 0.6 tiene 35, con los de la biblioteca)
+    público constante MAX_MODULOS = MÓDULOS      ; (de Medidas)
     público constante MAX_RUTA = 64
     público variable n_modulos: nat16
     público variable mod_nombre: arreglo [MAX_MODULOS] de nat16         ; el átomo
@@ -315,7 +311,8 @@ módulo Base
 
     ; el átomo de ese nombre si ya está; si no, 0
     público función busca_átomo(p: puntero a byte, n: nat16): nat16
-        variable r, s, i: nat16
+        variable r, i: nat16
+        variable s: Segmento
         r := cubos_at[dispersa(p, n) yb (CUBOS_AT - 1)]
         mientras r <> 0 hacer
             s := seg_at + r
@@ -333,7 +330,8 @@ módulo Base
 
     ; el átomo de ese nombre (de n letras, n < 250); lo crea si no estaba
     público función átomo(p: puntero a byte, n: nat16): nat16
-        variable r, s, h, i: nat16
+        variable r, h, i: nat16
+        variable s: Segmento
         r := busca_átomo(p, n)
         si r <> 0 entonces devolver r fin
         r := libre_at
@@ -372,7 +370,8 @@ módulo Base
 
     ; copia el nombre (acabado en 0) en destino; devuelve su largo
     público función at_texto(a: nat16, destino: puntero a byte): nat16
-        variable s, n, i: nat16
+        variable n, i: nat16
+        variable s: Segmento
         s := seg_at + a
         n := leer_byte(s, 2)
         i := 0
@@ -394,7 +393,8 @@ módulo Base
     ; -------------------------------------------------------------------------
     ; guarda (si no estaba) un texto de n octetos; devuelve su referencia
     público función texto(p: puntero a byte, n: nat16): nat16
-        variable r, s, h, i: nat16
+        variable r, h, i: nat16
+        variable s: Segmento
         h := dispersa(p, n) yb (CUBOS_CAD - 1)
         r := cubos_cad[h]
         mientras r <> 0 hacer
@@ -455,7 +455,8 @@ módulo Base
     ; -------------------------------------------------------------------------
     ; un nudo nuevo de esa clase, con su posición y todo lo demás a cero
     público función nudo(k: byte, lin: nat16, col: nat16): nat16
-        variable r, s: nat16
+        variable r: nat16
+        variable s: Segmento
         r := libre_ar
         si r >= PARRAFOS_AR - 1 entonces sin_memoria("la función es demasiado grande (el árbol no cabe)") fin
         libre_ar := r + 1
@@ -750,8 +751,8 @@ módulo Base
     fin
 
     ; pide un bloque de memoria lejana; si no hay, lo dice y acaba
-    público función bloque(párrafos: nat16): nat16
-        variable s: nat16
+    público función bloque(párrafos: nat16): Segmento
+        variable s: Segmento
         s := pedir(párrafos)
         si s = 0 entonces sin_memoria("no queda memoria libre para las tablas del compilador") fin
         devolver s
