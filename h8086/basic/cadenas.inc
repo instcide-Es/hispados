@@ -274,13 +274,7 @@ recoge_cadenas:
 .fin:
         mov ax, [v_rc_cima]
         mov [v_cads], ax
-        pop di
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_di
 
 ; mira todos los descriptores vivos y se queda con el de dirección más alta
 ; por debajo de v_rc_lim (y dentro del espacio de cadenas)

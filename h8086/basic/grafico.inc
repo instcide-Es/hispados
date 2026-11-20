@@ -160,10 +160,7 @@ pon_car_color:
         xor bh, bh
         mov bl, [v_attr]
         int 0x10
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_cx
 
 ; =============================================================================
 ;  Los puntos
@@ -199,11 +196,7 @@ punto:
 .x:
         pop es
         pop di
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_dx
 ; el color del punto (CX, DX): AL (0 fuera de la pantalla)
 lee_punto:
         push bx
@@ -425,8 +418,7 @@ sent_line_graf:
         mov cx, [v_g_x1]
         call recta_v
         mov cx, [v_g_x2]
-        call recta_v
-        ret
+        jmp recta_v
 .llena:
         mov ax, [v_g_y1]
         mov bx, [v_g_y2]
@@ -472,11 +464,7 @@ recta_h:
         inc cx
         cmp cx, bx
         jle .c
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_dx
 ; una vertical de v_g_y1 a v_g_y2 en CX
 recta_v:
         push ax
@@ -554,13 +542,7 @@ recta:
         add dx, [v_g_sy]
         jmp .b
 .fin:
-        pop di
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_di
 
 ; ---- CIRCLE (x,y), r [, color] (la elipse con el aspecto de la pantalla:
 ; en SCREEN 1, 5/6; en SCREEN 2, 5/12) ----
@@ -674,13 +656,7 @@ cuatro_rectas:
         call recta
         dec bx
         jnz .q
-        pop di
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_di
 
 ; los cuatro puntos (x0±CX, y0±AX) (los que se salen, punto los descarta)
 cuatro_puntos:
@@ -706,12 +682,7 @@ cuatro_puntos:
         mov cx, [v_g_x1]
         add cx, si
         call punto
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_si
 ; la raíz entera de DX:AX (hasta 2^32): AX
 raiz32:
         push bx

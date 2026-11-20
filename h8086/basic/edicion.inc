@@ -300,8 +300,7 @@ sent_edit:
         jne .lista
         jmp ordenes                 ; (sin «Ok»: lo siguiente es esa línea)
 .lista:
-        call lista_linea
-        ret
+        jmp lista_linea
 .no:
         mov al, 8
         jmp error

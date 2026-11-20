@@ -388,11 +388,7 @@ vacia_salida:
         jne .lleno
         mov word [v_sal_n], 0
 .x:
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_dx
 .lleno:
         mov bx, [v_sal_h]
         mov word [v_sal_h], 0
