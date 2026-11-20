@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 # nucleo32/actualiza.sh CARPETA CLAVE_PRIVADA
 # Hace lo que se publica en el servidor de las actualizaciones de
-# Hispa-Pentium (http://actualiza.clicgest.es/pentium/): en CARPETA, los
+# Hispa-Pentium (http://actualiza.hispados.es/pentium/): en CARPETA, los
 # paquetes del sistema (.HPQ: los mismos que van en la memoria USB y en el
 # CD, hechos de lo que se instala), su CATALOGO.TXT y la firma del catálogo,
 # CATALOGO.FIR (Ed25519, con CLAVE_PRIVADA: tools/hpq.py). PAQUETES no usa

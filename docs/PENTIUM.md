@@ -58,7 +58,7 @@ de verdad** (ACPI, S5), reiniciar por la FADT y la **batería en la bandeja**
 con su recuadro de ayuda, con el núcleo ACPI de Hispa-DOS (ACPICA) como
 servicio del anillo 3, `ACPI.BIN` (sección 11). En la bandeja caben a la vez,
 de izquierda a derecha, la memoria USB, la red, la pila y el reloj. Todo está
-en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`). Y la tarde del 20/11: las **actualizaciones por Internet** (`actualiza.clicgest.es/pentium/`), con el catálogo **firmado** (Ed25519, en Castel), la ventana con su barra, el aviso al arrancar y el **núcleo nuevo con vuelta sola al de antes** si no arranca (sección 13); y el **CD (o DVD) de instalación**, que vale para VirtualBox (sección 12).*
+en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`). Y la tarde del 20/11: las **actualizaciones por Internet** (`actualiza.hispados.es/pentium/`), con el catálogo **firmado** (Ed25519, en Castel), la ventana con su barra, el aviso al arrancar y el **núcleo nuevo con vuelta sola al de antes** si no arranca (sección 13); y el **CD (o DVD) de instalación**, que vale para VirtualBox (sección 12).*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -1959,7 +1959,7 @@ haya red, a `actualiza.hispados.es/pentium/`).
 
 ### Por Internet (la tarde del 20/11)
 
-**El servidor.** `http://actualiza.clicgest.es/pentium/` (el VPS sirve
+**El servidor.** `http://actualiza.hispados.es/pentium/` (el VPS sirve
 `/www/hispados` con ese nombre; la carpeta `pentium` va al lado de los `.paq` de
 Hispa-DOS): los `.HPQ`, su `CATALOGO.TXT` y la firma, `CATALOGO.FIR`. Lo hace
 **`nucleo32/actualiza.sh CARPETA CLAVE_PRIVADA`** (los mismos paquetes que van

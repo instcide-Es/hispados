@@ -2422,7 +2422,7 @@ cp $Q/sis.img $Q/s7.img
 paq $Q/s7.img red "paquetes instala letras /desde=http://prueba/" ":pausa 2" "del \\hispa\\descarga.bin" "paquetes catalogo /desde=http://actualiza.hispados.es/pentium/"
 mira "el gancho de la red: con /DESDE=http://..., el catálogo y los paquetes los trae DESCARGA (DESCARGA.BIN, la orden de la red) a C:\\HISPA\\PAQUETES\\BAJADAS, y se instalan igual" \
   "^Trayendo http://prueba/CATALOGO\.TXT\.\.\.$" "^descarga (de prueba): http://prueba/LETRAS11\.HPQ -> C:.HISPA.PAQUETES.BAJADAS.LETRAS11\.HPQ$" "^  instalado letras 1\.1$" \
-  "^paquetes: para traer http://actualiza\.clicgest\.es/pentium/CATALOGO\.TXT de Internet hace falta la red (el programa DESCARGA),$"
+  "^paquetes: para traer http://actualiza\.hispados\.es/pentium/CATALOGO\.TXT de Internet hace falta la red (el programa DESCARGA),$"
 if sano $Q/s7.img && sin_restos $Q/s7.img && igual_en $Q/s7.img DOCS/LETRAS/B.TXT $F/B11.TXT && igual_en $Q/s7.img HISPA/PAQUETES/BAJADAS/LETRAS11.HPQ $F/paq/LETRAS11.HPQ; then
   ok "y en el disco: sano, con lo instalado y lo traído (en BAJADAS) igual que lo de la memoria octeto a octeto"
 else ko "lo traído por el gancho de la red no queda bien en el disco:"; lista_de $Q/s7.img | sed 's/^/        /' | head -14; fi

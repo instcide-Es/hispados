@@ -107,7 +107,7 @@ PROGRAMAS Y ACTUALIZACIONES (PAQUETES)
   que se puede instalar; PAQUETES INSTALA nombre (o X.HPQ) lo instala con
   lo que necesite; PAQUETES ACTUALIZA lo pone al día; PAQUETES QUITA nombre
   lo quita. Los paquetes se buscan en la carpeta \PAQUETES de una memoria
-  USB, si la hay, y si no, en Internet (http://actualiza.clicgest.es/
+  USB, si la hay, y si no, en Internet (http://actualiza.hispados.es/
   pentium/): lo de Internet solo se usa si lleva la firma de Hispa-Pentium.
   Si se va la luz a mitad, la próxima vez se deshace lo que quedó a medias.
   Si se pone al día el núcleo, hay que reiniciar; si el nuevo no llegara a
