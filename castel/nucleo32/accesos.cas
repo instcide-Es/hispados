@@ -6,10 +6,10 @@
 ;  líneas con CR LF) en \HISPA\MENU (o en \MENU, en un sistema sin instalar)
 ;  que se llama como quiera, acabado en .MNU:
 ;
-;      nombre=ClicGest
-;      programa=\HISPA\CLICGEST.BIN
+;      nombre=Agenda
+;      programa=\HISPA\AGENDA.BIN
 ;      argumentos=
-;      icono=\HISPA\MENU\CLICGEST.ICP
+;      icono=\HISPA\MENU\AGENDA.ICP
 ;      escritorio=si
 ;
 ;  «nombre» y «programa» hacen falta; lo demás no. El icono es un .ICP: la

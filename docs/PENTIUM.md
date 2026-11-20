@@ -1072,10 +1072,10 @@ con ventana deja, además, un archivo de texto `NOMBRE.MNU` en `\HISPA\MENU`
 (o en `\MENU`, en un sistema sin instalar), en la página 437 y con CR LF:
 
 ```
-nombre=ClicGest
-programa=\HISPA\CLICGEST.BIN
+nombre=Agenda
+programa=\HISPA\AGENDA.BIN
 argumentos=
-icono=\HISPA\MENU\CLICGEST.ICP
+icono=\HISPA\MENU\AGENDA.ICP
 escritorio=si
 ```
 

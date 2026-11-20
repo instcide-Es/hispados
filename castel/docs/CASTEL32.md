@@ -283,8 +283,8 @@ Una pieza que no está es `NINGUNA`, y preguntar por ella no falla. Para escribi
 `json_empezar(sitio, cabe)`, `json_abre`, `json_clave`, `json_pon_texto` (de la
 página 437 a UTF-8, escapado), `json_pon_número`, `json_cierra`... y los atajos
 `json_campo_texto("email", correo)`. Y dos sueltas: `a_utf8(letra, destino)` y
-`de_unicode(código)`. `ejemplos32/json32.cas` la prueba (y es lo que usa el
-programa de ClicGest para Hispa-Pentium para hablar con su API).
+`de_unicode(código)`. `ejemplos32/json32.cas` la prueba (y es lo que usan los
+programas que hablan con una API web).
 
 ---
 
