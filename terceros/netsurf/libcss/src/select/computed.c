@@ -1204,6 +1204,28 @@ css_error css__compute_absolute_values(const css_computed_style *parent,
 	css_hint psize, size, ex_size;
 	css_error error;
 
+	/* [HISPA] font-weight: bolder y lighter, según el del padre (CSS
+	 * Fonts 4, la tabla de los pesos relativos): Bootstrap pone
+	 * «b, strong { font-weight: bolder }» y se quedaba en normal */
+	{
+		uint8_t w = get_font_weight(style);
+		if (w == CSS_FONT_WEIGHT_BOLDER || w == CSS_FONT_WEIGHT_LIGHTER) {
+			int p = 400;
+			uint8_t pw = parent != NULL ? get_font_weight(parent) :
+					CSS_FONT_WEIGHT_NORMAL;
+			if (pw == CSS_FONT_WEIGHT_BOLD)
+				p = 700;
+			else if (pw >= CSS_FONT_WEIGHT_100 &&
+					pw <= CSS_FONT_WEIGHT_900)
+				p = (pw - CSS_FONT_WEIGHT_100 + 1) * 100;
+			if (w == CSS_FONT_WEIGHT_BOLDER)
+				p = p < 350 ? 400 : p < 550 ? 700 : 900;
+			else
+				p = p < 550 ? 100 : p < 750 ? 400 : 700;
+			set_font_weight(style, CSS_FONT_WEIGHT_100 + p / 100 - 1);
+		}
+	}
+
 	/* Get reference font-size for relative sizes. */
 	if (parent != NULL) {
 		psize.status = get_font_size(parent,

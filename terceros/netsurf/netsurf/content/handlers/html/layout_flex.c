@@ -317,6 +317,11 @@ static inline bool layout_flex__base_and_main_sizes(
 
 	if (ctx->horizontal) {
 		item->base_size = min(item->base_size, available_width);
+#ifdef nshispa
+		/* [HISPA] con un ancho dado, ese (el mínimo del contenido lleva
+		 * los márgenes y, si son negativos, lo ensanchaba) */
+		if (b->width == AUTO)
+#endif
 		item->base_size = max(item->base_size, content_min_width);
 	}
 
@@ -1192,6 +1197,17 @@ bool layout_flex(struct box *flex, int available_width,
 			flex->height = min_height;
 		}
 	}
+
+#ifdef nshispa
+	/* [HISPA] más alta por min-height (los botones de 44-48 px): las
+	 * líneas otra vez, con ese alto (align-items: center los centra) */
+	if (ctx->horizontal && ctx->available_cross == AUTO &&
+			flex->height != AUTO &&
+			flex->height > ctx->cross_size && ctx->line.count > 0) {
+		ctx->available_cross = flex->height;
+		layout_flex__place_lines(ctx);
+	}
+#endif
 
 	success = true;
 

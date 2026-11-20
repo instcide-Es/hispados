@@ -64,6 +64,16 @@
 #include "html/private.h"
 #include "html/layout.h"
 
+/* [HISPA] la línea de base del texto, con las medidas de la letra (en el
+ * centro de la línea, como Chrome); NetSurf la ponía a 3/4 del alto (los
+ * iconos de letra salían cortados por arriba) */
+#ifdef nshispa
+int letra_base(const plot_font_style_t *s, int alto); /* w32/surf/letra.c */
+#define TEXTO_BASE(fs, h, sc) ((int)(letra_base((fs), (h)) * (sc)))
+#else
+#define TEXTO_BASE(fs, h, sc) ((int)((h) * 0.75 * (sc)))
+#endif
+
 
 bool html_redraw_debug = false;
 
@@ -250,7 +260,7 @@ text_redraw(const char *utf8_text,
 			    (ctx->plot->text(ctx,
 					     &plot_fstyle,
 					     x,
-					     y + (int)(height * 0.75 * scale),
+					     y + TEXTO_BASE(fstyle, height, scale),
 					     utf8_text,
 					     start_idx) != NSERROR_OK))
 				return false;
@@ -296,7 +306,7 @@ text_redraw(const char *utf8_text,
 			    (ctx->plot->text(ctx,
 					     &fstyle_hback,
 					     x,
-					     y + (int)(height * 0.75 * scale),
+					     y + TEXTO_BASE(fstyle, height, scale),
 					     utf8_text,
 					     endtxt_idx) != NSERROR_OK)) {
 				return false;
@@ -321,7 +331,7 @@ text_redraw(const char *utf8_text,
 					res = ctx->plot->text(ctx,
 							      &plot_fstyle,
 							      x,
-							      y + (int)(height * 0.75 * scale),
+							      y + TEXTO_BASE(fstyle, height, scale),
 							      utf8_text,
 							      utf8_len);
 					if (res != NSERROR_OK) {
@@ -341,7 +351,7 @@ text_redraw(const char *utf8_text,
 		res = ctx->plot->text(ctx,
 				      &plot_fstyle,
 				      x,
-				      y + (int) (height * 0.75 * scale),
+				      y + TEXTO_BASE(fstyle, height, scale),
 				      utf8_text,
 				      utf8_len);
 		if (res != NSERROR_OK) {
@@ -938,6 +948,63 @@ static void hispa_redondo(const html_content *html, struct box *box,
 				*fondo_actual = fondo;
 		}
 	}
+}
+#endif
+
+
+#ifdef nshispa
+/**
+ * [HISPA] Una casilla (checkbox) con estilo propio (con esquinas redondas,
+ * como .form-check-input de Bootstrap): blanca con su borde o, marcada,
+ * azul (o su fondo, si no es blanco) con la marca en blanco.
+ */
+static bool hispa_casilla(const html_content *html, struct box *box,
+		int x0, int y0, int x1, int y1, const struct rect *r,
+		const struct redraw_context *ctx)
+{
+	int radio[4], ancho[4], k, w, h;
+	css_color bg;
+	colour fondo = 0xffffff, borde;
+	plot_style_t pen = {
+		.stroke_type = PLOT_OP_TYPE_SOLID,
+		.stroke_colour = 0xffffff,
+		.stroke_width = 2 * PLOT_STYLE_SCALE,
+	};
+	struct rect l;
+
+	radio[0] = hispa_radio(html, box, css_computed_border_top_left_radius,
+			x1 - x0);
+	if (radio[0] <= 0)
+		return false;
+	for (k = 1; k < 4; k++)
+		radio[k] = radio[0];
+	for (k = 0; k < 4; k++)
+		ancho[k] = box->border[k].width;
+	borde = nscss_color_to_ns(box->border[TOP].c);
+	css_computed_background_color(box->style, &bg);
+	if (box->gadget->selected) {
+		fondo = nscss_color_is_transparent(bg) ||
+				nscss_color_to_ns(bg) == 0xffffff ?
+				0xfd6e0d : nscss_color_to_ns(bg);
+		borde = fondo;
+	}
+	if (!knockout_plot_hispa_vacia(ctx) ||
+			!redondo_caja(x0, y0, x1, y1, radio, fondo, true, ancho,
+			borde, ancho[TOP] > 0))
+		return false;
+	if (!box->gadget->selected)
+		return true;
+	/* la marca: dos trazos */
+	w = x1 - x0;
+	h = y1 - y0;
+	l.x0 = x0 + w * 26 / 100; l.y0 = y0 + h * 52 / 100;
+	l.x1 = x0 + w * 43 / 100; l.y1 = y0 + h * 68 / 100;
+	ctx->plot->line(ctx, &pen, &l);
+	l.x0 = l.x1; l.y0 = l.y1;
+	l.x1 = x0 + w * 74 / 100; l.y1 = y0 + h * 33 / 100;
+	ctx->plot->line(ctx, &pen, &l);
+	(void) r;
+	return true;
 }
 #endif
 
@@ -1990,6 +2057,15 @@ bool html_redraw_box(const html_content *html, struct box *box,
 				y + padding_top, &r, ctx);
 
 	} else if (box->gadget && box->gadget->type == GADGET_CHECKBOX) {
+#ifdef nshispa
+		/* [HISPA] una casilla con estilo (Bootstrap: esquinas redondas):
+		 * como Chrome, en vez del dibujo de NetSurf */
+		if (scale == 1.0f && hispa_casilla(html, box,
+				x - border_left, y - border_top,
+				x + padding_width + border_right,
+				y + padding_height + border_bottom, &r, ctx)) {
+		} else
+#endif
 		if (!html_redraw_checkbox(x + padding_left, y + padding_top,
 				width, height, box->gadget->selected, ctx))
 			return false;
@@ -2011,6 +2087,41 @@ bool html_redraw_box(const html_content *html, struct box *box,
 			box->gadget->type == GADGET_TEXTBOX)) {
 		textarea_redraw(box->gadget->data.text.ta, x, y,
 				current_background_color, scale, &r, ctx);
+#ifdef nshispa
+		/* [HISPA] el texto de ayuda (placeholder) con el campo vacío */
+		if (textarea_get_text(box->gadget->data.text.ta, NULL, 0) <= 1 &&
+				box->gadget->node != NULL && scale == 1.0f) {
+			dom_string *ph = NULL, *nombre = NULL;
+			if (dom_string_create((const uint8_t *) "placeholder", 11,
+					&nombre) == DOM_NO_ERR) {
+				if (dom_element_get_attribute(box->gadget->node,
+						nombre, &ph) == DOM_NO_ERR &&
+						ph != NULL) {
+					plot_font_style_t fs;
+					int alto;
+					font_plot_style_from_css(
+							&html->unit_len_ctx,
+							box->style, &fs);
+					alto = box->gadget->type ==
+						GADGET_TEXTAREA ?
+						fs.size * 96 / 72 /
+						PLOT_STYLE_SCALE * 3 / 2 :
+						height;
+					fs.foreground = 0x7d756c;
+					fs.background = current_background_color;
+					if (dom_string_byte_length(ph) > 0)
+						ctx->plot->text(ctx, &fs,
+							x + padding_left,
+							y + padding_top +
+							letra_base(&fs, alto),
+							dom_string_data(ph),
+							dom_string_byte_length(ph));
+					dom_string_unref(ph);
+				}
+				dom_string_unref(nombre);
+			}
+		}
+#endif
 
 	} else if (box->text) {
 		if (!html_redraw_text_box(html, box, x, y, &r, scale,

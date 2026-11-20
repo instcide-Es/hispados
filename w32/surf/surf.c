@@ -49,6 +49,7 @@
 #include "surf.h"
 #include "rh.h"
 #include "cssvar.h"
+#include "woff.h"
 
 /* ---- lo justo de USER32, GDI32 y KERNEL32 ---- */
 #define WINAPI __attribute__((stdcall))
@@ -896,6 +897,8 @@ void inicio_prog(void) {
     muere(b);
   }
   rh_inicia(idioma);
+  snprintf(b, sizeof b, "%s\\RECURSOS", surf_carpeta);
+  woff_carpeta(b);      /* (BROTLI.DIC, para las letras WOFF2 de la web) */
   snprintf(galletas, sizeof galletas, "%s\\SURFGAL.TXT", surf_carpeta);
   rh_galletas_carga(galletas);
 

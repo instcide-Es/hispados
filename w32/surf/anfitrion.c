@@ -46,6 +46,7 @@
 #include "html/html_save.h"
 
 #include "netsurf/browser.h"
+#include "woff.h"
 #include "surf.h"
 #include "rh.h"
 
@@ -179,6 +180,10 @@ int main(int argc, char **argv) {
   browser_set_dpi(96);
   if (netsurf_init(NULL) != NSERROR_OK) { fprintf(stderr, "netsurf_init\n"); return 1; }
   rh_inicia("es");
+  {
+    char r[PATH_MAX];
+    if (realpath(recursos, r)) woff_carpeta(r);
+  }
 
   if (dir[0] == '/') { snprintf(b, sizeof b, "file://%s", dir); dir = b; }
   else if (!strstr(dir, ":")) {

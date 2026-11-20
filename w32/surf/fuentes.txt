@@ -613,3 +613,4 @@ terceros/brotli/c/dec/decode.c
 terceros/brotli/c/dec/huffman.c
 terceros/brotli/c/dec/state.c
 w32/surf/redondo.c
+w32/surf/webletra.c
