@@ -2448,7 +2448,7 @@ miracap "y «Quitarlo», con saludo elegido (sigue elegido aunque la lista cambi
 miracap "«Buscar novedades» trae el catálogo otra vez (y su firma, buena)" pq4 \
   texto 112 415 116 419 "La firma del catálogo es buena" negrita 112 203 116 207 choque
 miracap "maximizada, la ventana se pone a su medida: la lista, los mensajes y los botones, al ancho y al alto de la pantalla, y lo que no cabe, cortado" pq5 \
-  negrita 52 32 60 38 "Programas y actualizaciones" negrita 660 50 700 58 "(firma buena)" negrita 36 512 44 522 Actualizarlo
+  negrita 52 32 60 38 "Programas y actualizaciones" negrita 660 50 700 58 "(firma buena)" negrita 182 512 190 522 Quitarlo
 if sano $Q/s8.img && sin_restos $Q/s8.img && [ "$(mdir -/ -b -i $Q/s8.img ::HISPA/PAQUETES 2> /dev/null | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI ::/HISPA/PAQUETES/LETRAS.PQI " ]; then
   ok "lo hecho desde la ventana, desde fuera: el disco sano, letras instalado, saludo quitado y sin restos (tampoco VENTANA.TXT)"
 else ko "lo hecho desde la ventana no queda bien en el disco:"; lista_de $Q/s8.img | sed 's/^/        /' | head -12; fi
@@ -2491,7 +2491,7 @@ cp $F/NUC07.BIN $Q/NUCLEO.BIN
 mcopy -i $Q/s10.img $Q/GRUB.CFG $Q/NUCLEO.BIN ::HISPA/
 paq $Q/s10.img nucleo 'paquetes instala x:\paquetes\base09.hpq' ":pausa 3" "paquetes lista" 'paquetes instala x:\paquetes\base091.hpq' ":pausa 3"
 mira "PAQUETES con un núcleo nuevo (\\HISPA\\NUCLEO.BIN): lo instala y pide reiniciar; si no arrancara, vuelve el de antes" \
-  "^  instalado base 0\.9$" "^reiniciar|Reinicie para usar el núcleo nuevo; si no arrancara, vuelve el de antes\.$" "^  base      0\.9 " "^  instalado base 0\.9\.1$"
+  "^  instalado base 0\.9$" "^reiniciar|Reinicie para usar el núcleo nuevo; si no arranca, vuelve el de antes\.$" "^  base      0\.9 " "^  instalado base 0\.9\.1$"
 saca $Q/s10.img HISPA/GRUB.CFG $Q/grub10.cfg; saca $Q/s10.img HISPA/GRUBENV $Q/grubenv10
 if sano $Q/s10.img && sin_restos $Q/s10.img && igual_en $Q/s10.img HISPA/NUCLEO.BIN $F/NUC091.BIN && igual_en $Q/s10.img HISPA/NUCLEO.ANT $F/NUC09.BIN \
   && [ "$(stat -c %s $Q/grubenv10)" = 1024 ] && head -c 33 $Q/grubenv10 | grep -q '^nuevo=1$' && [ "$(grep -c -- '--id anterior' $Q/grub10.cfg)" = 1 ] \
@@ -2821,7 +2821,7 @@ miracap "el aviso de la bandeja: una ventanita abajo a la derecha, «Hay una act
 miracap "«Verlas» abre «Programas y actualizaciones»: base, con la 0.9 nueva, y el catálogo de Internet con su firma buena" u2 \
   negrita 112 140 116 340 base negrita 300 140 310 340 "0.9 (nueva)" texto 140 105 160 113 "Los paquetes, de http://10.0.2.2:" negrita 300 107 700 113 "(firma buena)"
 miracap "«Actualizar todo»: con el núcleo nuevo, «Reiniciar ahora» o «Más tarde»" u3 negrita 150 456 260 462 "Reiniciar ahora" negrita 400 456 520 462 "Más tarde" \
-  texto 112 390 116 420 "Reinicie para usar el núcleo nuevo; si no arrancara, vuelve el de antes."
+  texto 112 390 116 420 "Reinicie para usar el núcleo nuevo; si no arranca, vuelve el de antes."
 miracap "tras reiniciar, el aviso: el núcleo nuevo ha arrancado bien" u4 texto 400 480 600 500 "El núcleo nuevo ha arrancado bien."
 mcopy -n -i $V/sata.img@@1M ::HISPA/GRUBENV $V/grubenv1 > /dev/null 2>&1; mcopy -n -i $V/sata.img@@1M ::HISPA/NUCLEO.ANT $V/ant1 > /dev/null 2>&1
 mcopy -n -i $V/sata.img@@1M ::HISPA/PAQUETES/BASE.PQI $V/base1.pqi > /dev/null 2>&1
