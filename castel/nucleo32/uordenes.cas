@@ -894,6 +894,14 @@ módulo UOrdenes
         variable p: puntero a byte
         atender_corte(cierto)
         camino[0] := unidad(0)                  ; el PATH de fábrica: la raíz de la unidad de trabajo
+        ; (y, en el sistema instalado, su carpeta \HISPA: los programas que
+        ; pone PAQUETES se lanzan por su nombre desde cualquier sitio)
+        Textos32.copiar(carpeta, camino)
+        concatenar(carpeta, "HISPA")
+        si es_carpeta(carpeta) entonces
+            concatenar(camino, ";")
+            concatenar(camino, carpeta)
+        fin
         escribir("\nHispa-Pentium: intérprete de órdenes (un programa del anillo 3, la tarea ", mi_tarea(), ").\n")
         escribir("Escriba AYUDA para ver las órdenes.\n")
         mientras no acabar hacer
