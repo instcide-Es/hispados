@@ -75,7 +75,9 @@ Versión 0.11.
   prefijo (PSP), sus parámetros y su entorno. Un programa puede lanzar otro;
   al terminar se cierran sus archivos y se suelta su memoria.
 - **El intérprete de órdenes es un programa aparte**, COMMAND.COM
-  (9,6 K), con las órdenes de MS-DOS 3.3 en español y con su nombre
+  (11 K en el disco; mientras corre un programa, solo deja en memoria unos
+  4 K: la parte transitoria, como en MS-DOS, se suelta y se vuelve a leer
+  si el programa la pisa), con las órdenes de MS-DOS 3.3 en español y con su nombre
   clásico (ver «Las órdenes»), variables de entorno, ruta de búsqueda
   (`PATH`) e indicador configurable.
 - **Archivos por lotes** (.BAT) con ECO, REM, PAUSA, %0 a %9, **SI** (IF),
@@ -285,10 +287,13 @@ se pone en medio.
 | 0.9 | | | unos 30 K: 17 del núcleo (con 4 sectores de reserva) y 13 del intérprete |
 | Hoy (0.10), sin 286 o con `DOS=BAJO` | | | quedan 618.768 octetos libres de 640 K (unos 35 K ocupados: núcleo con el gestor de memoria extendida, la reserva de sectores e intérprete) |
 | Hoy (0.10), `DOS=ALTO` en un 286 con más de un mega | | | quedan 638.000 octetos libres (el núcleo sube a la HMA: 19.232 octetos más que abajo) |
+| A dieta (20/11/2026, ver [ADELGAZAR-8086.md](../ADELGAZAR-8086.md)), un 8086 | | | **22,5 K**: 18.064 octetos el núcleo y 4.416 el intérprete mientras corre un programa; quedan 630.048 libres |
+| A dieta, un 286 con `DOS=ALTO` | | | **5,5 K** abajo (el puente y el intérprete); quedan 647.056 libres |
 
 Reglas: el intérprete de órdenes tiene una parte que se puede pisar y volver
-a cargar (como COMMAND.COM); los búferes de disco se piden según la memoria
-que haya; nada que no se use ocupa sitio.
+a cargar (como COMMAND.COM: hecho); los búferes de disco se piden según la
+memoria que haya; nada que no se use ocupa sitio (el arranque del núcleo se
+olvida al acabar, y el gestor de memoria extendida no se carga en un 8086).
 
 ### 6. Disquetes: el sistema base cabe en 360 K
 
@@ -550,7 +555,9 @@ pasa a su rutina de estrategia y luego a la de interrupción
   va en la extendida (hasta 4.000 K): se lo pide al gestor XMS del núcleo y
   mueve cada sector con su función de mover, y en la memoria convencional
   solo deja el controlador (unos 400 octetos). Sin memoria extendida, `/E`
-  lo dice y no se instala. Es 1,1 K de controlador
+  lo dice y no se instala. Sin `/E`, el disco va justo detrás de lo
+  residente del controlador (416 octetos): lo que solo sirve para arrancar
+  se pisa. Es 1,2 K de controlador
   (`h8086/ordenes/discoram.asm`, comentado para que sirva de modelo).
 
 ## La reserva de sectores (BUFFERS=)
@@ -764,8 +771,9 @@ total), la memoria libre para los programas que dice MEMORIA:
 
 | | octetos libres |
 |---|---|
-| núcleo abajo (`DOS=BAJO`, o un 8086, o `PROCESADOR=8086`) | 618.768 |
-| núcleo en la HMA (`DOS=ALTO`) | 638.000 (19.232 más) |
+| núcleo abajo en un 8086 (o con `PROCESADOR=8086`: sin gestor) | 630.048 |
+| núcleo abajo en un 286 (`DOS=BAJO`: con el gestor) | 628.864 |
+| núcleo en la HMA (`DOS=ALTO`) | 647.056 (18.192 más) |
 | con `FILES=20` y `BUFFERS=10`, núcleo abajo | unos 600 K |
 | un DISCORAM `/E` de 1.000 K | cuesta 400 octetos de memoria convencional; el resto sale de la extendida |
 
@@ -777,8 +785,9 @@ total), la memoria libre para los programas que dice MEMORIA:
    subir el núcleo (que necesita A20 antes de que se carguen los
    controladores). Y lo útil es que la memoria esté ahí sin saber poner
    un `DEVICE=`: en un 286 con memoria extendida el gestor está siempre;
-   `DOS=ALTO` es lo único que se pide. Lo que se paga: en un 8086 esos 1,4 K
-   de código están en el núcleo sin servir para nada.
+   `DOS=ALTO` es lo único que se pide. En un 8086 no se paga nada: el
+   gestor va aparte en el archivo (`.xms`) y solo se copia a la memoria si
+   hay un 286 con memoria extendida (ver ADELGAZAR-8086.md).
 2. **Ni una instrucción de 286.** Mover memoria por encima del mega pide
    entrar en modo protegido, y en un 286 no hay manera limpia de volver: hay
    que reiniciar el procesador por el 8042 y recogerlo, y cada BIOS lo hace
@@ -872,14 +881,15 @@ partes (veintiuna) y tarda unos TIEMPO minutos;
 |---|---|
 | `h8086/arranque.asm` | el sector de arranque (FAT12 y FAT16, disquete y disco duro) |
 | `h8086/mbr.asm` | el sector de particiones del disco duro |
-| `h8086/nucleo.asm` | el núcleo: arranque, el puente, INT 21h, consola, el equipo |
+| `h8086/nucleo.asm` | el núcleo: el puente, INT 21h, consola, el equipo |
+| `h8086/inicio.inc` | el arranque del núcleo: se copia a lo alto de la memoria y se olvida al acabar |
 | `h8086/alta.inc` | en un 286: el gestor de memoria extendida (XMS 2.0) y la subida a la HMA |
 | `h8086/config.inc` | CONFIG.SYS, y cargar los controladores (DEVICE=) |
 | `h8086/dispositivos.inc` | la cadena de dispositivos: NUL, CON, AUX, PRN; las peticiones |
 | `h8086/disco.inc` | sectores (también INT 25h y 26h), FAT, unidades, directorios, rutas y archivos abiertos |
 | `h8086/archivos.inc` | las funciones de archivos y directorios de INT 21h |
 | `h8086/proceso.inc` | la memoria por bloques y los programas (.COM, .EXE, lanzar, terminar) |
-| `h8086/command.asm` | el intérprete de órdenes: COMMAND.COM |
+| `h8086/command.asm` | el intérprete de órdenes: COMMAND.COM (la parte residente y la transitoria) |
 | `h8086/ordenes/pasar.asm` | PASAR: archivos por el puerto serie (XMODEM) |
 | `h8086/ordenes/formatea.asm` | FORMATEA: dar formato a disquetes y al disco duro |
 | `h8086/ordenes/sistema.asm` | SISTEMA: dejar un disco de arranque |
@@ -894,6 +904,7 @@ partes (veintiuna) y tarda unos TIEMPO minutos;
 | `h8086/prueba/arch.asm` | la prueba de la interfaz de archivos, en doce pasos |
 | `h8086/prueba/exe.asm` | un .EXE hecho a mano: reubicación, memoria y lanzar otro programa |
 | `h8086/prueba/n8.asm` | prueba de INT 25h/26h y de FILES= |
+| `h8086/prueba/mide.asm`, `pisa.asm` | lo que ocupan el núcleo y el intérprete, y un programa que pisa la parte transitoria |
 | `h8086/prueba/BUCLE.BAT`, `SUB.BAT`, `SUB2.BAT` | los lotes de la prueba de FOR, LLAMAR y DESPLAZAR |
 | `h8086/prueba/cuenta.asm`, `saludo.asm` | la cuenta de sectores leídos y un controlador de carácter, para la prueba |
 | `h8086/prueba/partes_09.sh`, `partes_10.sh` | las partes de la prueba que llegaron con la 0.9 y con la 0.10 |
