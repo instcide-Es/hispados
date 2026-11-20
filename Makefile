@@ -1156,6 +1156,7 @@ test: $(TEST_DEPS)
 	tests/run_sbjuego_tests.sh $(IMG)
 	tests/run_bootfat12_tests.sh
 	tests/run_mouse_tests.sh $(IMG)
+	tests/run_winconf_tests.sh $(IMG)
 	tests/run_compat_tests.sh
 	tests/run_ventanas_tests.sh $(IMG)
 	DOSHIGH=1 tests/run_ventanas_tests.sh $(IMG)
