@@ -90,7 +90,9 @@ teclea las órdenes por el monitor de QEMU (como un teclado de verdad: el españ
 tecla a tecla, con sus acentos; `:tecla ctrl-c` o `:tecla up ret` pulsan esas
 teclas tal cual; y, para el escritorio, `:clic X Y`, `:doble X Y`, `:arrastra X1 Y1
 X2 Y2`, `:raton X Y`, `:escribe texto`, `:pausa S` y `:captura NOMBRE`, que deja
-la pantalla en `$CAPTURAS/NOMBRE.ppm`). **Lo que se escribe en el disco no llega a la imagen** (se queda
+la pantalla en `$CAPTURAS/NOMBRE.ppm`; y `:monitor ORDEN`, que le da esa orden al
+monitor de QEMU: `device_add` y `device_del`, para enchufar y quitar aparatos USB
+en marcha, sección 11). **Lo que se escribe en el disco no llega a la imagen** (se queda
 en una copia de QEMU) **salvo con `ESCRIBE=1`**. Lo que se escribe sale por la pantalla y por el puerto serie, y el
 script lo enseña con el código con que acaba el núcleo. Con `ARRANQUE=ordenes`
 (lo que QEMU pasa con `-append`), el núcleo lanza el intérprete de órdenes nada
@@ -196,10 +198,11 @@ cuarta parte, los discos y el USB).
 | `ahci.cas` (Ahci) | Los **discos SATA** de una controladora **AHCI**: los puertos, IDENTIFY, leer y escribir por **DMA** con **LBA de 48 bits** (sección 7). |
 | `discos.cas` (Discos) | **Los discos, sean de la clase que sean** (IDE, SATA, USB): una tabla, y leer, escribir y asentar sin saber qué hay debajo. Lleva el **permiso de escritura** de cada disco. |
 | `fat.cas` (Fat) | El **sistema de archivos FAT12/16/32**, para leer y escribir, con **varios volúmenes montados a la vez**: abrir por la ruta, leer, escribir, cortar, borrar, cambiar de nombre, hacer y borrar carpetas, los nombres largos, los clusters libres (sección 7). |
-| `unidades.cas` (Unidades) | **Las unidades y sus letras**: mira las particiones de cada disco (tabla del **MBR** y **GPT**), monta cada volumen FAT y le da su letra (C:, D:... los de dentro; X:, Y:, Z: las memorias USB; M: la unidad en memoria); y cuál es la **unidad del sistema**. |
+| `unidades.cas` (Unidades) | **Las unidades y sus letras**: mira las particiones de cada disco (tabla del **MBR** y **GPT**), monta cada volumen FAT y le da su letra (C:, D:... los de dentro; X:, W:, V:... las memorias USB; M: la unidad en memoria); y cuál es la **unidad del sistema**. |
 | `usbbase.cas`, `xhci.cas`, `ehci.cas`, `uhci.cas`, `usb.cas` | **El USB** (sección 11): las controladoras **xHCI** (USB 3), **EHCI** (USB 2.0) y **UHCI** (USB 1.1), quitárselas a la BIOS, y **enumerar** lo que hay enchufado, también detrás de **concentradores**. |
 | `usbhid.cas` (Usbhid) | Los **teclados y ratones USB** (y los paneles táctiles que se presentan como ratón): le dan a `consola.cas` y a `raton.cas` lo mismo que los PS/2. |
 | `usbalm.cas` (Usbalm) | Las **memorias USB** (almacenamiento «solo a granel», órdenes SCSI): un disco más para `discos.cas`. |
+| `usbcal.cas` (Usbcal) | **El USB en caliente** (desde la 0.8, sección 11): la tarea que mira los puertos y atiende lo que se enchufa y se desenchufa en marcha, y «quitar con seguridad». |
 | `registro.cas` (Registro) | El **registro del arranque**: lo que el núcleo dice de los discos y del USB, apuntado para guardarlo en `ARRANQUE.TXT`. |
 | `fecha.cas` (Fecha) | La **fecha y la hora** del reloj de pila del PC (la CMOS), como las guarda la FAT; y **ponerlo en hora**. |
 | `ajustes.cas` (Ajustes) | Los **ajustes de un sistema instalado** (`\HISPA\HISPA.INI`): el nombre del usuario y del equipo y el teclado (sección 12). |
@@ -416,6 +419,8 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 66 | **reiniciar** el equipo | `reiniciar` | (no vuelve) |
 | 67 | **poner en hora el reloj del PC**: la fecha (EBX) y la hora (ECX), como las guarda la FAT | `poner_reloj` | 0 |
 | 68 | **los ajustes** (`HISPA.INI`): EBX = 0, leerlos otra vez; 1, el nombre del usuario, a ECX; 2, ¿está el sistema instalado en el disco?; 3, el nombre del equipo | `releer_ajustes`, `nombre_usuario`, `sistema_instalado`, `nombre_equipo` | |
+| 130 | **quitar con seguridad** la memoria USB de la unidad de letra EBX (desde la 0.8): lo pendiente se escribe, la memoria se para y sus unidades dejan de estar | `quitar_memoria` | 0 (`QUITADA`), ya se puede quitar; 1, no hay tal unidad; 2, no es una memoria USB; 3 (`ES_DEL_SISTEMA`), el sistema corre desde ella |
+| 131 | las veces que han **aparecido o desaparecido unidades** (además, a las ventanas de los programas les llega `EV_UNIDADES`) | `cambios_unidades` | ese número |
 | 80 | **colocar la ventana** EBX (suya) con su esquina en (ECX, EDX) de la pantalla; con ECX = 0xFFFFFFFF, en el centro (encima de la barra de tareas). La usa HVPRUN (sección 10, «La oficina de Hispa-386») | — | 0 |
 
 (La 11, con ECX = 1, no se queda esperando: da `SIGUE` si la tarea no ha acabado
@@ -541,7 +546,7 @@ SATA); con **`sinusb`**, ni toca el USB.
 | Letra | Qué es |
 |---|---|
 | `C:`, `D:`... | los volúmenes FAT de los **discos de dentro** (IDE y SATA), por orden |
-| `X:`, `Y:`, `Z:` | los de las **memorias USB**: `X:` es la memoria de arranque (si hay varias, la que lleva `ORDENES.BIN`) |
+| `X:`, `W:`, `V:`... | los de las **memorias USB**, de la X: hacia abajo, como en Hispa-DOS: `X:` es la memoria de arranque (si hay varias, la que lleva `ORDENES.BIN`); las que se enchufan en marcha, la primera libre desde la `W:` (sección 11) |
 | `M:` | la **unidad en memoria**: los archivos que ha traído el cargador (abajo) |
 
 De cada disco se miran sus **particiones**: si el disco entero es un volumen FAT
@@ -1189,8 +1194,9 @@ memoria y se arranca de ella. (Necesita ser root, `parted`, `dosfstools` y
 
 Desde la 0.6 el núcleo tiene su USB, escrito en Castel (con lo aprendido en
 HSPUSB, el USB de Hispa-DOS, que está en ensamblador de 16 bits: `drivers/hspusb.asm`
-y `docs/USB.md`). Todo se hace **al arrancar** y **sin interrupciones** (las
-controladoras se miran):
+y `docs/USB.md`). Lo enchufado se enumera **al arrancar** y **sin interrupciones** (las
+controladoras se miran); lo que se enchufa y se desenchufa después, desde la
+0.8, lo atiende `usbcal.cas` (más abajo, «El USB en caliente»):
 
 1. **Las controladoras** (`usb.cas`): se buscan en el bus PCI (clase 0x0C,
    subclase 0x03) las **xHCI** (interfaz 0x30), las **EHCI** (0x20) y las
@@ -1255,10 +1261,65 @@ controladoras se miran):
    de la clase si se atasca. Ocho sectores por orden. La memoria es un disco
    más de `discos.cas`, y su FAT, la unidad `X:`.
 
+### El USB en caliente (desde la 0.8)
+
+Lo que se enchufa y se desenchufa con el equipo en marcha lo atiende
+`usbcal.cas`: una tarea del núcleo, **`usb-caliente`**, mira **cada medio
+segundo** los puertos de las controladoras (sus registros: el aviso de «ha
+cambiado lo enchufado», que se borra al mirarlo) y **cada segundo** los de los
+concentradores (la petición de su estado). Sin interrupciones, como lo demás.
+
+- **Se enchufa algo**: se esperan 100 ms a que se asiente, se reinicia el
+  puerto y se enumera como al arrancar (un EHCI cede a su compañera lo que no
+  es de alta velocidad, y es ella la que lo ve). Un **teclado** o un **ratón**
+  funcionan al momento (la tarea que los atiende se pone en marcha con el
+  primero); un **concentrador**, con todo lo que lleve colgado; una
+  **memoria** es un disco más y cada volumen FAT suyo, una unidad con **la
+  primera letra libre desde la W: hacia abajo**. Las direcciones USB, las
+  fichas de los aparatos, las tuberías y los sitios en las tablas de discos y
+  unidades se reutilizan.
+- **Se desenchufa algo**: el aparato (y lo que cuelgue de él) queda **marcado
+  como ido** y lo que se le esté pidiendo falla en el acto, sin esperar a que
+  se pase el tiempo. Un teclado **suelta las teclas** que tenía pulsadas (y
+  deja de repetir) y un ratón, sus botones: nada se queda apretado. Las
+  unidades de una memoria dejan de estar; **los archivos abiertos en ellas dan
+  error** («el disco falla») hasta que el programa los cierre, y el programa
+  sigue; quien trabajaba en esa unidad pasa a la del sistema. Luego se quita:
+  sus tuberías salen de la lista periódica (EHCI, UHCI), en el xHCI se
+  deshabilita su ranura y se sueltan las páginas de su contexto y sus anillos,
+  y su dirección queda libre. Si se va **la memoria del sistema**, la unidad
+  del sistema pasa a ser M: (los programas que trajo GRUB); si vuelve, vuelve
+  a ser X:.
+- **Quitar con seguridad** (la llamada 130): **en Mi equipo** (botón
+  secundario sobre la unidad: «Abrir | Quitar con seguridad»), **en la bandeja
+  del escritorio** (el icono de la memoria, que sale con una enchufada: un clic,
+  y «Quitar con seguridad W:» por cada una) y con la orden **`quitar W`** de la
+  consola del núcleo. Lo pendiente va a la memoria (las entradas de los
+  archivos abiertos para escribir, la FAT y, en FAT32, la cuenta de libres), se
+  le dice que lo asiente (SYNCHRONIZE CACHE) y que se pare (START STOP UNIT), y
+  sus unidades dejan de estar: «**Ya puede quitar la memoria W:**». **La memoria
+  de la que corre el sistema no se deja quitar**: «X: es la memoria del sistema:
+  no se puede quitar» (en Mi equipo, la opción sale en gris).
+- **Los avisos**: cada cosa se dice por el puerto serie (`usb: se enchufa el
+  aparato 2, ...`, `usb: aviso: Memoria USB conectada: W:`) y, con el
+  escritorio, en un **globo** encima de la bandeja que se va solo a los seis
+  segundos (o con un clic). **Mi equipo se pone al día solo**: a las ventanas de
+  los programas les llega `EV_UNIDADES` cuando aparece o desaparece una unidad.
+
+![Una memoria USB recién enchufada: el globo, el icono de la bandeja y Mi equipo al día](pentium/usb-caliente.png)
+
+**Probado en QEMU** con el monitor (`device_add usb-storage`, `usb-kbd`,
+`usb-mouse`, `usb-hub` y `device_del`), en xHCI y EHCI y con un teclado de USB
+1.1 que pasa a la UHCI compañera (`pruebas.sh`, parte 11: `SOLO=08`): la
+memoria enchufada se lee; escrita y quitada con seguridad, `fsck.fat` la da por
+sana; quitada a lo bruto con un archivo abierto (`PRUEBA abierto W:\HOLA.TXT`),
+el programa ve los errores y sigue; un concentrador con un teclado y un ratón
+detrás, enchufado y quitado entero; y en el escritorio, un ratón que llega
+abre Mi equipo. **En un PC de verdad, por probar** (el HP Mini y el Toshiba).
+
 **Lo que no hace** (todavía): las controladoras **OHCI** (las de USB 1.1 que no
 son de Intel ni de VIA: las compañeras de los EHCI de NVIDIA, SiS y de algunos
-AMD); **enchufar y desenchufar en marcha** (solo se ve lo que hay al
-arrancar); pasar al xHCI los puertos que los Intel de las series 7 a 9 dejan en
+AMD); pasar al xHCI los puertos que los Intel de las series 7 a 9 dejan en
 el EHCI (no hace falta: van por el EHCI con su concentrador); las tabletas (ejes
 absolutos); las luces del teclado; los discos USB con sectores que no sean de 512.
 
