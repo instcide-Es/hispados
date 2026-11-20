@@ -179,8 +179,8 @@ grep -qx 'Nombre=Internet' $T/cen.txt && grep -qx 'Programa=C:\\HISPADOS\\INTERN
   && ok "CENTRO.INI: el grupo «Internet» con el Navegador" || ko "CENTRO.INI sin el grupo Internet"
 grep -qx 'Escritorio=1' $T/cen.txt && grep -qx 'Nombre=Biblioteca' $T/cen.txt \
   && ok "CENTRO.INI: el grupo del escritorio con «Biblioteca»" || ko "CENTRO.INI sin el icono «Biblioteca»"
-hd ::HISPADOS/INTERNET/NAVEGA.INI | grep -qx 'Inicio=https://clicgest.es/biblioteca' \
-  && ok "NAVEGA.INI: empieza en la biblioteca de ClicGest" || ko "NAVEGA.INI sin Inicio=https://clicgest.es/biblioteca"
+hd ::HISPADOS/INTERNET/NAVEGA.INI | grep -qx 'Inicio=https://www.google.es/' \
+  && ok "NAVEGA.INI: empieza en Google" || ko "NAVEGA.INI sin Inicio=https://www.google.es/"
 hd ::AUTOEXEC.BAT > $T/aut.txt
 grep -qx 'C:\\HISPADOS\\VENTANAS' $T/aut.txt && ok "AUTOEXEC.BAT: arranca el escritorio" || ko "AUTOEXEC.BAT sin C:\\HISPADOS\\VENTANAS"
 red_auto() {   # red_auto archivo: las tres líneas de la red, en orden y antes del escritorio
@@ -383,6 +383,9 @@ for i in 1 2 3 4 5 6 7 8 9 10; do grep -q listo $T/srv.log 2> /dev/null && break
 cp $T/usb0.img $T/usb.img
 printf 'Inicio=http://10.0.2.2:%d/\r\nIdioma=es\r\n' $P9 > $T/NAVEGA.INI
 mcopy -o -i $T/usb.img@@1048576 $T/NAVEGA.INI ::HISPADOS/INTERNET/NAVEGA.INI
+# el icono «Biblioteca» abre su dirección (Parametros= de CENTRO.INI): aquí, el servidor de la prueba
+mtype -i $T/usb.img@@1048576 ::HISPADOS/CENTRO.INI | sed "s|^Parametros=https://clicgest.es/biblioteca|Parametros=http://10.0.2.2:$P9/|" > $T/CENTRO.INI
+grep -q "Parametros=http://10.0.2.2:$P9/" $T/CENTRO.INI && mcopy -o -i $T/usb.img@@1048576 $T/CENTRO.INI ::HISPADOS/CENTRO.INI || ko "CENTRO.INI sin Parametros= en «Biblioteca»"
 { sleep 24; shot r1
   tecla ctrl-esc; sleep 1.2; tecla down down down down down down; sleep 0.4; tecla right; sleep 1.2; shot r2   # «Internet»
   tecla ret; sleep 15; shot r3                      # el Navegador, con la página
