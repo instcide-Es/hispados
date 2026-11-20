@@ -7,6 +7,8 @@
 
 **Pruébalo sin instalar nada, en el navegador (también en el móvil): [hispados.es](https://hispados.es).**
 
+**¿Te animas a echar una mano?** No hace falta saber ensamblador: probarlo en un PC viejo y contarnos cómo ha ido ya ayuda muchísimo. Mira [cómo colaborar](CONTRIBUTING.md) y, si te gusta, dale una ⭐.
+
 Cada sistema de la familia se llama por el **procesador mínimo** que necesita. Van del ordenador más antiguo al más moderno: busca el procesador de tu equipo y mira cuál le toca.
 
 | | Para qué ordenadores | Estado | En este repositorio |
@@ -379,7 +381,14 @@ docs/      hoja de ruta y documentación técnica
 
 ## Contribuir
 
-Se aceptan *pull requests*. Normas importantes:
+**Se busca gente.** Hispa-DOS lo hace hoy muy poca gente y hay sitio para todos:
+
+- **Probar en equipos reales** (lo que más falta): arranca la memoria USB o el disquete, ejecuta `DIAGNOSTICO` y [abre un informe](https://github.com/instcide-Es/hispados/issues/new/choose). Vale igual si todo funciona.
+- **Contar qué juegos y programas de DOS van** y cuáles no.
+- **Programar**: las *issues* [`good first issue`](https://github.com/instcide-Es/hispados/labels/good%20first%20issue) son para empezar.
+- **Documentación y traducciones**, y difundirlo en foros de retroinformática.
+
+Todo está explicado en **[CONTRIBUTING.md](CONTRIBUTING.md)**. Normas importantes:
 
 - **No copiar código de Microsoft** (ni del MS-DOS publicado por Microsoft ni de desensamblados). Todo se implementa a partir de documentación pública.
 - Cada función nueva de INT 21h debe ir acompañada de una comprobación en `tests/`.
@@ -412,6 +421,6 @@ make && make run     # build the floppy image and boot it in QEMU
 make test            # automated end-to-end test over the serial port
 ```
 
-Contributions are welcome. Please never submit Microsoft code or disassembly. Copyright (C) 2026 Carlos Sanz y contribuidores. Licensed under GPL-2.0-or-later.
+**Contributions are very welcome**, especially testing on real hardware (run `DIAGNOSTICO` and [open a report](https://github.com/instcide-Es/hispados/issues/new/choose)); see [CONTRIBUTING.md](CONTRIBUTING.md#english). Please never submit Microsoft code or disassembly. Copyright (C) 2026 Carlos Sanz y contribuidores. Licensed under GPL-2.0-or-later.
 
 Thanks to [ClicGest](https://clicgest.es/), which lends its server to the project: building and testing, the network updates (`ACTUALIZAR`) and the hispados.es website.

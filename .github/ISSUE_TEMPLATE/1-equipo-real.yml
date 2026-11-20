@@ -1,0 +1,62 @@
+name: Informe de un equipo real
+description: Has arrancado Hispa-DOS en un PC de verdad. Sirve igual si todo ha ido bien.
+title: "[Equipo] "
+labels: ["hardware"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ¡Gracias! Probar en equipos reales es lo que más ayuda ahora mismo.
+        Si puedes, ejecuta `DIAGNOSTICO` y adjunta (en un .zip) la carpeta `\INFORMES\EQUIPOnn` que crea en la unidad de arranque.
+  - type: input
+    id: equipo
+    attributes:
+      label: Equipo
+      description: Marca y modelo, o placa base y procesador.
+      placeholder: "IBM PS/2 Model 70, 386DX a 25 MHz, 6 MB"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versión de Hispa-DOS
+      description: La que sale al arrancar (o la orden `VER`).
+      placeholder: "0.9.28"
+    validations:
+      required: true
+  - type: dropdown
+    id: medio
+    attributes:
+      label: Desde dónde arrancaste
+      options:
+        - Memoria USB
+        - Disquete
+        - CD
+        - Disco duro (instalado)
+    validations:
+      required: true
+  - type: checkboxes
+    id: funciona
+    attributes:
+      label: Qué funciona
+      description: Marca lo que has probado y va bien.
+      options:
+        - label: Arranca hasta el símbolo del sistema
+        - label: Teclado
+        - label: Ratón
+        - label: Hispa Ventanas
+        - label: Sonido
+        - label: Red / Internet
+        - label: USB (memorias, teclado, ratón, mandos)
+        - label: Instalar en el disco duro
+        - label: Apagar y reiniciar
+  - type: textarea
+    id: fallos
+    attributes:
+      label: Qué ha fallado
+      description: Qué hiciste, qué esperabas y qué pasó. Una foto de la pantalla ayuda mucho.
+  - type: textarea
+    id: informe
+    attributes:
+      label: Informe de DIAGNOSTICO
+      description: Arrastra aquí el .zip con `\INFORMES\EQUIPOnn`, o pega la salida de `EQUIPO`.

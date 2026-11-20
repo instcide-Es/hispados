@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Probar Hispa-DOS en el navegador
+    url: https://hispados.es
+    about: Arráncalo emulado, sin instalar nada (también en el móvil).
+  - name: Guía para colaborar
+    url: https://github.com/instcide-Es/hispados/blob/hispados-0.9/CONTRIBUTING.md
+    about: Cómo preparar el entorno, las normas y por dónde empezar.
