@@ -25,6 +25,7 @@
 #     función 10h de HSPSND, la única que llega en modo V86);
 #   - APAGAR (se para al apagarse);
 #   - Hispa-8086: SOUND de Hispa-BASIC sonando, con HDAVIVO, y Ctrl+Alt+Supr
+#     (solo la puerta del altavoz: un 8086 no tiene tarjeta de sonido)
 #     (con el núcleo abajo y en la memoria alta, DOS=ALTO);
 #  y con el reinicio de verdad (sin parar): el altavoz y la tarjeta suenan
 #  antes (grabación -audiodev wav), el equipo vuelve a arrancar y después
@@ -50,7 +51,7 @@ estado() {
   printf 'info status\ni /b 0x61\n' | socat - UNIX-CONNECT:$T/mon 2>/dev/null | tr -d '\r' > $T/mon.txt
   grep -v '^audio:' $T/err > $T/err.txt 2>/dev/null
 }
-mira() {   # $1 = flujo (1 si estaba sonando), $2 = parada (1: se paró al reiniciar)
+mira() {   # $1 = flujo (1 si estaba sonando), $2 = parada (1: se paró al reiniciar), $3 = 0: sin mirar el códec
   if [ "${2:-1}" = 1 ]; then
     if grep -qa "VM status: paused (shutdown)" $T/mon.txt; then ok "parado en el reinicio"; else ko "no se ha reiniciado (o no se ha parado)"; fi
   fi
@@ -59,6 +60,7 @@ mira() {   # $1 = flujo (1 si estaba sonando), $2 = parada (1: se paró al reini
   if [ "$1" = 1 ]; then
     if grep -a hda_audio_running $T/err.txt | tail -1 | grep -q "run 0"; then ok "el flujo de HD Audio, parado"; else ko "el flujo sigue en marcha"; fi
   fi
+  [ "${3:-1}" = 0 ] && return
   local w
   for w in "verb 0x300, payload 0xb080|amplificadores en silencio" "nid 3 (out), verb 0x707, payload 0x0|el pin sin salida" \
            "nid 3 (out), verb 0x70c, payload 0x0|EAPD apagado" "nid 1 (func), verb 0x705, payload 0x3|el códec en D3"; do
@@ -201,7 +203,9 @@ PY
   fi
   h86 $IMG86 'hdavivo#basic#SOUND 440, 300'
   grep -qF "SOUND 440, 300" $T/scr.txt && ok "SOUND sonando" || ko "no se ha llegado a SOUND"
-  mira 0
+  # Hispa-8086 solo cierra la puerta del altavoz (un 8086 no tiene tarjeta
+  # de sonido; b0c640b): el códec no se mira
+  mira 0 1 0
   rm -rf $T
   [ $MODO = alto ] && rm -f $IMG86
 done

@@ -262,7 +262,7 @@ ISO_DL          equ 13              ; extensión, tamaño, unidad, último uso
 %assign HOFF HOFF + %2
 %endmacro
 HMA_SIG         equ 0x21534F44      ; primeros octetos de la HMA con el DOS dentro
-INIT_ORG        equ 0xF380          ; .init, al arrancar (ver «Reparto de KSEG al arrancar»)
+INIT_ORG        equ 0xEFC0          ; .init, al arrancar (ver «Reparto de KSEG al arrancar»)
         section .low
 start:
         jmp short .go
@@ -1228,223 +1228,6 @@ es_hspcd:
 .r:
         ret
 
-; elegir la unidad de arranque como unidad actual
-boot_select:
-        mov al, [boot_drive]
-        cmp al, 0x80
-        jae .hd
-        movzx bx, al
-        cmp bx, 1
-        jbe .fl
-        xor bx, bx
-.fl:
-        mov ax, bx
-        imul bx, bx, DRV_LEN
-        add bx, drv_tab
-        test byte [bx+D_FLAGS], DF_EXISTS
-        jnz .set
-        mov byte [bx+D_FLAGS], DF_EXISTS
-        mov [bx+D_BIOS], al
-        mov word [bx+D_SPT], 18
-        mov word [bx+D_HEADS], 2
-        mov dword [bx+D_SIZE], 2880
-        jmp .set
-.hd:
-        mov ecx, [bootsec+0x1C]
-        mov bx, drv_tab + 2*DRV_LEN
-        mov ah, 2
-.find:
-        cmp ah, [ndrives]
-        jae .first
-        cmp [bx+D_BIOS], al
-        jne .nx
-        cmp [bx+D_START], ecx
-        je .found
-.nx:
-        add bx, DRV_LEN
-        inc ah
-        jmp .find
-.first:
-        mov ah, 2
-.found:
-        mov al, ah
-.set:
-        mov [cur_drive], al
-        mov [boot_letter], al
-        add al, 'A'
-        mov [shell_path], al
-        mov [env_l1], al
-        mov [env_l2], al
-        sub al, 'A'
-        jmp select_drive
-
-; (Lo que sigue hasta select_raw solo se usa al arrancar: va junto, al
-; principio del código, para que las páginas vecinas -datos por delante-
-; no compartan página con código que se ejecuta a menudo: un emulador
-; como QEMU, y también los procesadores, penalizan escribir en una página
-; de la que se está ejecutando código.)
-; -----------------------------------------------------------------------------
-;  CONFIG.SYS
-; -----------------------------------------------------------------------------
-config_load:
-        mov word [cur_psp], 8
-        mov al, [cur_drive]
-        add al, 'A'
-        mov [cfg_path], al
-        push ds
-        pop es
-        mov byte [cfgbuf], 0
-        mov si, cfg_path
-        call open_path
-        jc .choose
-        mov byte [di+SFT_REF], 0
-        cmp byte [di+SFT_TYPE], T_FILE
-        jne .choose
-        mov bx, cfgbuf
-        mov cx, CFG_MAX - 1
-        call file_read
-        mov bx, ax
-        mov byte [cfgbuf+bx], 0
-.choose:
-        mov byte [bm_want], 0
-        mov bx, s_menu              ; ¿CONFIG.SYS con menú ([menu])?
-        call blk_find
-        jc .plain
-        mov byte [boot_clean], 0
-        mov byte [boot_noauto], 0
-        call cfg_switches
-        call cfg_menu               ; elegir y dejar solo las líneas elegidas
-        jmp .f8
-.plain:
-        call boot_choice            ; F5 / F8
-.f8:
-        cmp byte [boot_clean], 0
-        jne .scan
-        cmp byte [bm_want], 0
-        je .scan
-        call boot_menu              ; F8: el menú paso a paso
-.scan:
-        call uni_scan               ; LETRAS=
-        jmp dos_scan                ; DOS=HIGH
-
-; [LETRAS] LETRAS= en CONFIG.SYS, con una o varias de estas, entre comas:
-;   CLASICO  las letras como siempre (MS-DOS: seguidas desde la C: en el
-;            orden de la BIOS, el disco de arranque el primero)
-;   INTERNO  el reparto normal (el disco duro interno es la C:)
-;   CD:R     el primer lector de CD/DVD, la R: (si está ocupada, la siguiente)
-;   USB:U    las memorias USB, desde la U: hacia abajo
-; Las letras se vuelven a repartir aquí mismo, antes de cargar nada.
-uni_scan:
-        cmp byte [boot_clean], 0
-        jne .r
-        xor bx, bx
-        mov si, cfgbuf
-.line:
-        cmp byte [cs:si], 0
-        je .r
-        inc bx
-        call .skip
-        cmp bx, MAXCL
-        jae .on
-        cmp byte [cs:cfg_dis+bx], 0
-        jne .eol
-.on:
-        mov eax, [cs:si]
-        and eax, 0xDFDFDFDF
-        cmp eax, 'LETR'
-        jne .eol
-        mov ax, [cs:si+4]
-        and ax, 0xDFDF
-        cmp ax, 'AS'
-        jne .eol
-        add si, 6
-        call .skip
-        cmp byte [cs:si], '='
-        jne .eol
-        inc si
-.item:
-        call .skip
-        mov eax, [cs:si]
-        and eax, 0x00DFDFDF
-        cmp eax, 'CLA'
-        jne .i1
-        mov byte [uni_modo], 1
-        jmp .next
-.i1:
-        cmp eax, 'INT'
-        jne .i2
-        mov byte [uni_modo], 0
-        jmp .next
-.i2:
-        cmp eax, 0x001A4443         ; «CD:» (los dos puntos, sin el bit 5)
-        jne .i3
-        mov al, [cs:si+3]
-        call .letra
-        jc .next
-        mov [cd_base], al
-        jmp .next
-.i3:
-        cmp eax, 'USB'
-        jne .next
-        cmp byte [cs:si+3], ':'
-        jne .next
-        mov al, [cs:si+4]
-        call .letra
-        jc .next
-        mov [usb_base], al
-.next:
-        mov al, [cs:si]
-        cmp al, ','
-        je .comma
-        cmp al, ' '
-        jb .redo
-        inc si
-        jmp .next
-.comma:
-        inc si
-        jmp .item
-.redo:
-        push bx
-        push si
-        call drives_scan
-        call boot_select
-        pop si
-        pop bx
-.eol:
-        mov al, [cs:si]
-        test al, al
-        jz .r
-        inc si
-        cmp al, 10
-        jne .eol
-        jmp .line
-.r:
-        ret
-; AL = letra -> AL = número de unidad (de la D: a la X:); CF si no vale
-.letra:
-        and al, 0xDF
-        sub al, 'A'
-        cmp al, 3
-        jb .lno
-        cmp al, NDRV - 1
-        ja .lno
-        clc
-        ret
-.lno:
-        stc
-        ret
-.skip:
-        mov al, [cs:si]
-        cmp al, ' '
-        je .s1
-        cmp al, 9
-        jne .sr
-.s1:
-        inc si
-        jmp .skip
-.sr:
-        ret
-
 config_run:
         mov byte [lastdrive], 5
         cmp byte [boot_clean], 0
@@ -1517,95 +1300,6 @@ config_run:
 ; pueden cerrarla, cada entrada desde fuera (a20_gate) lo comprueba y la
 ; vuelve a abrir. Lo mismo al volver de un controlador de dispositivo, de
 ; INT 13h, INT 23h, INT 24h e INT 28h, que se llaman desde abajo.
-
-; buscar DOS=HIGH entre las líneas activas de CONFIG.SYS -> dos_want
-dos_scan:
-        mov byte [dos_want], 0
-        mov byte [dos_umb], 0
-%ifdef FORCEHIGH
-        ; (pruebas: como si todos los CONFIG.SYS llevaran DOS=HIGH)
-        mov byte [dos_want], 1
-        ret
-%endif
-%ifdef TRACE
-        ret                         ; (la traza de INT 2Fh llama al código)
-%endif
-        cmp byte [boot_clean], 0
-        jne .r
-        xor bx, bx                  ; línea
-        mov si, cfgbuf
-.line:
-        cmp byte [cs:si], 0
-        je .r
-        inc bx
-        call .skip
-        cmp bx, MAXCL
-        jae .on
-        cmp byte [cs:cfg_dis+bx], 0
-        jne .eol
-.on:
-        mov eax, [cs:si]
-        and eax, 0x00DFDFDF
-        cmp eax, 'DOS'
-        jne .eol
-        add si, 3
-        call .skip
-        cmp byte [cs:si], '='
-        jne .eol
-        inc si
-.arg:
-        call .skip
-        mov eax, [cs:si]
-        and eax, 0xDFDFDFDF
-        cmp eax, 'HIGH'
-        jne .nh
-        mov byte [dos_want], 1
-.nh:
-        and eax, 0x00FFFFFF
-        cmp eax, 'UMB'              ; DOS=UMB, DOS=HIGH,UMB (NOUMB: nada)
-        jne .nu
-        mov byte [dos_umb], 1
-.nu:
-        cmp eax, 'LOW'
-        jne .next
-        mov al, [cs:si+3]
-        cmp al, ','
-        je .lo
-        cmp al, ' '
-        ja .next
-.lo:
-        mov byte [dos_want], 0
-.next:
-        mov al, [cs:si]
-        cmp al, ','
-        je .comma
-        cmp al, ' '
-        jb .eol
-        inc si
-        jmp .next
-.comma:
-        inc si
-        jmp .arg
-.eol:
-        mov al, [cs:si]
-        test al, al
-        jz .r
-        inc si
-        cmp al, 10
-        jne .eol
-        jmp .line
-.r:
-        ret
-.skip:
-        cmp byte [cs:si], ' '
-        je .s
-        cmp byte [cs:si], 9
-        jne .sr
-.s:
-        inc si
-        jmp .skip
-.sr:
-        ret
 
 ; copiar el código y sus datos a ES:DI y seguir corriendo allí, con CS = DX
 ; (DX:img_start = ES:DI). CF=1 si la copia no queda igual (no se cambia).
@@ -1854,6 +1548,317 @@ MAXCL       equ 160                 ; líneas de CONFIG.SYS que se pueden desact
 MAXIT       equ 16                  ; elementos visibles del menú
 BOOT_WAIT   equ 27                  ; ~1,5 s
 
+        section .init
+; ---- solo al arrancar (antes de mem_init): en .init ----
+init_start:
+; elegir la unidad de arranque como unidad actual
+boot_select:
+        mov al, [boot_drive]
+        cmp al, 0x80
+        jae .hd
+        movzx bx, al
+        cmp bx, 1
+        jbe .fl
+        xor bx, bx
+.fl:
+        mov ax, bx
+        imul bx, bx, DRV_LEN
+        add bx, drv_tab
+        test byte [bx+D_FLAGS], DF_EXISTS
+        jnz .set
+        mov byte [bx+D_FLAGS], DF_EXISTS
+        mov [bx+D_BIOS], al
+        mov word [bx+D_SPT], 18
+        mov word [bx+D_HEADS], 2
+        mov dword [bx+D_SIZE], 2880
+        jmp .set
+.hd:
+        mov ecx, [bootsec+0x1C]
+        mov bx, drv_tab + 2*DRV_LEN
+        mov ah, 2
+.find:
+        cmp ah, [ndrives]
+        jae .first
+        cmp [bx+D_BIOS], al
+        jne .nx
+        cmp [bx+D_START], ecx
+        je .found
+.nx:
+        add bx, DRV_LEN
+        inc ah
+        jmp .find
+.first:
+        mov ah, 2
+.found:
+        mov al, ah
+.set:
+        mov [cur_drive], al
+        mov [boot_letter], al
+        add al, 'A'
+        mov [shell_path], al
+        mov [env_l1], al
+        mov [env_l2], al
+        sub al, 'A'
+        jmp select_drive
+
+; (Lo que sigue hasta select_raw solo se usa al arrancar: va junto, al
+; principio del código, para que las páginas vecinas -datos por delante-
+; no compartan página con código que se ejecuta a menudo: un emulador
+; como QEMU, y también los procesadores, penalizan escribir en una página
+; de la que se está ejecutando código.)
+; -----------------------------------------------------------------------------
+;  CONFIG.SYS
+; -----------------------------------------------------------------------------
+config_load:
+        mov word [cur_psp], 8
+        mov al, [cur_drive]
+        add al, 'A'
+        mov [cfg_path], al
+        push ds
+        pop es
+        mov byte [cfgbuf], 0
+        mov si, cfg_path
+        call open_path
+        jc .choose
+        mov byte [di+SFT_REF], 0
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .choose
+        mov bx, cfgbuf
+        mov cx, CFG_MAX - 1
+        call file_read
+        mov bx, ax
+        mov byte [cfgbuf+bx], 0
+.choose:
+        mov byte [bm_want], 0
+        mov bx, s_menu              ; ¿CONFIG.SYS con menú ([menu])?
+        call blk_find
+        jc .plain
+        mov byte [boot_clean], 0
+        mov byte [boot_noauto], 0
+        call cfg_switches
+        call cfg_menu               ; elegir y dejar solo las líneas elegidas
+        jmp .f8
+.plain:
+        call boot_choice            ; F5 / F8
+.f8:
+        cmp byte [boot_clean], 0
+        jne .scan
+        cmp byte [bm_want], 0
+        je .scan
+        call boot_menu              ; F8: el menú paso a paso
+.scan:
+        call uni_scan               ; LETRAS=
+        jmp dos_scan                ; DOS=HIGH
+
+; [LETRAS] LETRAS= en CONFIG.SYS, con una o varias de estas, entre comas:
+;   CLASICO  las letras como siempre (MS-DOS: seguidas desde la C: en el
+;            orden de la BIOS, el disco de arranque el primero)
+;   INTERNO  el reparto normal (el disco duro interno es la C:)
+;   CD:R     el primer lector de CD/DVD, la R: (si está ocupada, la siguiente)
+;   USB:U    las memorias USB, desde la U: hacia abajo
+; Las letras se vuelven a repartir aquí mismo, antes de cargar nada.
+uni_scan:
+        cmp byte [boot_clean], 0
+        jne .r
+        xor bx, bx
+        mov si, cfgbuf
+.line:
+        cmp byte [cs:si], 0
+        je .r
+        inc bx
+        call .skip
+        cmp bx, MAXCL
+        jae .on
+        cmp byte [cs:cfg_dis+bx], 0
+        jne .eol
+.on:
+        mov eax, [cs:si]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'LETR'
+        jne .eol
+        mov ax, [cs:si+4]
+        and ax, 0xDFDF
+        cmp ax, 'AS'
+        jne .eol
+        add si, 6
+        call .skip
+        cmp byte [cs:si], '='
+        jne .eol
+        inc si
+.item:
+        call .skip
+        mov eax, [cs:si]
+        and eax, 0x00DFDFDF
+        cmp eax, 'CLA'
+        jne .i1
+        mov byte [uni_modo], 1
+        jmp .next
+.i1:
+        cmp eax, 'INT'
+        jne .i2
+        mov byte [uni_modo], 0
+        jmp .next
+.i2:
+        cmp eax, 0x001A4443         ; «CD:» (los dos puntos, sin el bit 5)
+        jne .i3
+        mov al, [cs:si+3]
+        call .letra
+        jc .next
+        mov [cd_base], al
+        jmp .next
+.i3:
+        cmp eax, 'USB'
+        jne .next
+        cmp byte [cs:si+3], ':'
+        jne .next
+        mov al, [cs:si+4]
+        call .letra
+        jc .next
+        mov [usb_base], al
+.next:
+        mov al, [cs:si]
+        cmp al, ','
+        je .comma
+        cmp al, ' '
+        jb .redo
+        inc si
+        jmp .next
+.comma:
+        inc si
+        jmp .item
+.redo:
+        push bx
+        push si
+        call drives_scan
+        call boot_select
+        pop si
+        pop bx
+.eol:
+        mov al, [cs:si]
+        test al, al
+        jz .r
+        inc si
+        cmp al, 10
+        jne .eol
+        jmp .line
+.r:
+        ret
+; AL = letra -> AL = número de unidad (de la D: a la X:); CF si no vale
+.letra:
+        and al, 0xDF
+        sub al, 'A'
+        cmp al, 3
+        jb .lno
+        cmp al, NDRV - 1
+        ja .lno
+        clc
+        ret
+.lno:
+        stc
+        ret
+.skip:
+        mov al, [cs:si]
+        cmp al, ' '
+        je .s1
+        cmp al, 9
+        jne .sr
+.s1:
+        inc si
+        jmp .skip
+.sr:
+        ret
+
+
+; buscar DOS=HIGH entre las líneas activas de CONFIG.SYS -> dos_want
+dos_scan:
+        mov byte [dos_want], 0
+        mov byte [dos_umb], 0
+%ifdef FORCEHIGH
+        ; (pruebas: como si todos los CONFIG.SYS llevaran DOS=HIGH)
+        mov byte [dos_want], 1
+        ret
+%endif
+%ifdef TRACE
+        ret                         ; (la traza de INT 2Fh llama al código)
+%endif
+        cmp byte [boot_clean], 0
+        jne .r
+        xor bx, bx                  ; línea
+        mov si, cfgbuf
+.line:
+        cmp byte [cs:si], 0
+        je .r
+        inc bx
+        call .skip
+        cmp bx, MAXCL
+        jae .on
+        cmp byte [cs:cfg_dis+bx], 0
+        jne .eol
+.on:
+        mov eax, [cs:si]
+        and eax, 0x00DFDFDF
+        cmp eax, 'DOS'
+        jne .eol
+        add si, 3
+        call .skip
+        cmp byte [cs:si], '='
+        jne .eol
+        inc si
+.arg:
+        call .skip
+        mov eax, [cs:si]
+        and eax, 0xDFDFDFDF
+        cmp eax, 'HIGH'
+        jne .nh
+        mov byte [dos_want], 1
+.nh:
+        and eax, 0x00FFFFFF
+        cmp eax, 'UMB'              ; DOS=UMB, DOS=HIGH,UMB (NOUMB: nada)
+        jne .nu
+        mov byte [dos_umb], 1
+.nu:
+        cmp eax, 'LOW'
+        jne .next
+        mov al, [cs:si+3]
+        cmp al, ','
+        je .lo
+        cmp al, ' '
+        ja .next
+.lo:
+        mov byte [dos_want], 0
+.next:
+        mov al, [cs:si]
+        cmp al, ','
+        je .comma
+        cmp al, ' '
+        jb .eol
+        inc si
+        jmp .next
+.comma:
+        inc si
+        jmp .arg
+.eol:
+        mov al, [cs:si]
+        test al, al
+        jz .r
+        inc si
+        cmp al, 10
+        jne .eol
+        jmp .line
+.r:
+        ret
+.skip:
+        cmp byte [cs:si], ' '
+        je .s
+        cmp byte [cs:si], 9
+        jne .sr
+.s:
+        inc si
+        jmp .skip
+.sr:
+        ret
+
+
 boot_choice:
         mov byte [boot_clean], 0
         mov byte [boot_noauto], 0
@@ -2001,8 +2006,6 @@ CFG_TMPSEG  equ 0x3000              ; 4 KB de paso: memoria todavía sin dueño
 MN_MAX      equ 9
 MN_ROW      equ 4                   ; fila de la primera opción
 
-        section .init
-init_start:
 ; AL: ¿acaba un nombre de bloque? (ZF = 1)
 mn_term:
         test al, al
@@ -16504,12 +16507,13 @@ low_end:
 ; La copia provisional del sector de arranque y la pila de los primeros
 ; pasos van fuera de KSEG (BOOT_SEG:0000-03FF), así que .init llega hasta el
 ; final del segmento. Lo que se mueve de la parte residente a .init (solo lo
-; que se usa antes de mem_init: el menú de CONFIG.SYS, el menú F8) no cambia
-; la suma: solo deja más memoria libre después. Medido el 20/11/2026 (letras
-; de unidad + reinicio sin ruido + menú F8 en .init):
-;   IMG_END = F1D0h, .init = 0B75h (2.933 octetos)
-;   MARGEN_IMG  = INIT_ORG - (IMG_END + 64)  = 368 octetos
-;   MARGEN_INIT = 10000h - (INIT_ORG + .init) = 267 octetos
+; que se usa antes de mem_init: boot_select, config_load, LETRAS=, DOS=,
+; F5/F8, el menú de CONFIG.SYS y el menú F8) no cambia la suma: solo deja
+; más memoria libre después (y con DOS=HIGH, más HMA). Medido el 20/11/2026
+; (letras de unidad + reinicio sin ruido + todo eso en .init):
+;   IMG_END = EE20h, .init = 0F28h (3.880 octetos)
+;   MARGEN_IMG  = INIT_ORG - (IMG_END + 64)  = 352 octetos
+;   MARGEN_INIT = 10000h - (INIT_ORG + .init) = 280 octetos
 ; Si una de las dos comprobaciones falla, se puede mover INIT_ORG (en
 ; múltiplos de 16) mientras la otra tenga sitio; si no lo tiene ninguna, hay
 ; que adelgazar el núcleo de verdad.
