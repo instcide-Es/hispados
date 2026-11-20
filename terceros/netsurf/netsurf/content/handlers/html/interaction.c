@@ -1333,6 +1333,29 @@ default_mouse_action(html_content *html,
 
 
 /**
+ * [HISPA] JavaScript: el elemento en el que se ha dado. Si es un texto (que
+ * en NetSurf no tiene nodo), el elemento en línea más de dentro que lo
+ * envuelve (el <a> de un enlace, no el <li> de alrededor)
+ */
+static dom_node *hispa_nodo_texto(struct mouse_action_state *mas)
+{
+	struct box *t = mas->text.box != NULL ? mas->text.box : mas->link.box;
+	struct box *b, *pila[32];
+	int n = 0;
+	if (t == NULL || t->node != NULL || t->parent == NULL)
+		return mas->node;
+	for (b = t->parent->children; b != NULL && b != t; b = b->next) {
+		if (b->type == BOX_INLINE && n < 32)
+			pila[n++] = b;
+		else if (b->type == BOX_INLINE_END && n > 0)
+			n--;
+	}
+	if (b == t && n > 0 && pila[n - 1]->node != NULL)
+		return pila[n - 1]->node;
+	return mas->node;
+}
+
+/**
  * handle non dragging mouse actions
  */
 static nserror
@@ -1417,7 +1440,7 @@ mouse_action_drag_none(html_content *html,
 	 * preventDefault(), no se sigue el enlace ni se envía el formulario */
 	if ((mouse & (BROWSER_MOUSE_PRESS_1 | BROWSER_MOUSE_CLICK_1)) &&
 	    html->jsthread != NULL && mas.node != NULL) {
-		dom_node *nodo = dom_node_ref(mas.node);
+		dom_node *nodo = dom_node_ref(hispa_nodo_texto(&mas));
 		bool cancela;
 		/* (lo de las cajas que se usa luego, copiado: JavaScript puede
 		 * hacer que se rehagan, w32/surf/rehaz.c) */

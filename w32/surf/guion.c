@@ -1245,6 +1245,8 @@ static void pet_suelta(Pet *p) {
   free(p->metodo); free(p->url); free(p->cab); free(p->cuerpo); free(p);
 }
 static void llega(void *ctx, int estado, const char *cab, const unsigned char *datos, unsigned n, const char *error);
+typedef struct { Pet *p; int estado; char *cab, *datos, *err; unsigned n; } Espera;
+static void espera_tic(void *x);
 static int pet_lanza(Pet *p) {
   return red_js_pide(p->url, p->metodo, p->cuerpo, p->n_cuerpo, p->cab, llega, p);
 }
@@ -1273,8 +1275,27 @@ static void llega(void *ctx, int estado, const char *cab, const unsigned char *d
       } else if (b) nsurl_unref(b);
     }
   }
+  if (!t->cerrado && t->html && t->html->box_conversion_context) {
+    /* NetSurf está haciendo las cajas (a trozos, con el planificador): ahora
+     * no se puede tocar el árbol; la respuesta, guardada, un poco después */
+    Espera *e = calloc(1, sizeof *e);
+    if (e && (e->datos = malloc(n + 1)) && (e->cab = strdup(cab ? cab : "")) && (e->err = strdup(error ? error : ""))) {
+      memcpy(e->datos, datos ? (const char *)datos : "", n);
+      e->n = n; e->estado = estado; e->p = p;
+      framebuffer_schedule(50, espera_tic, e);
+      return;
+    }
+    if (e) { free(e->datos); free(e->cab); free(e); }
+  }
   if (!t->cerrado) llama_llega(t, p->id, estado, p->url, cab, datos, n, error);
   pet_suelta(p);
+}
+static void espera_tic(void *x) {
+  Espera *e = x;
+  Pet *q;
+  for (q = pets; q && q != e->p; q = q->sig) ;     /* (¿sigue la página?) */
+  if (q) llega(e->p, e->estado, e->cab, (const unsigned char *)e->datos, e->n, e->err[0] ? e->err : NULL);
+  free(e->datos); free(e->cab); free(e->err); free(e);
 }
 FN(f_pide) {
   int id = 0;
@@ -1419,6 +1440,7 @@ static struct form *forma_de(html_content *h, dom_node *n) {
 static void diferido_tic(void *p) {
   struct jsthread *t = p;
   Diferido *d;
+  if (t->html && t->html->box_conversion_context) { framebuffer_schedule(50, diferido_tic, t); return; }
   while (!t->cerrado && (d = t->dif)) {
     t->dif = d->sig;
     if (d->que == D_IR && t->bw && d->texto) {
