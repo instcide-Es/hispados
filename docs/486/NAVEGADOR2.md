@@ -320,6 +320,25 @@ Con 24-32 MB va todo. Ver «Lo que falta».
   en un Pentium 133, 6-10 s. El apretón de manos de TLS (HSPTLS, con la
   conexión que se guarda) va aparte, como en el Navegador propio.
 
+### Medidas con el pintado nuevo (20/11/2026)
+
+En QEMU (32 MB, 800×600), por orden en la misma ventana
+(`tools/surf_capturas.sh`):
+
+| Página | Tiempo | Memoria en uso (KB) | Lo más (KB) |
+|---|---|---|---|
+| https://clicgest.es/ (la primera: Bootstrap, las dos letras de la web, una página de 20.000 puntos de alto) | 14,3 s | 9.001 | 11.238 |
+| /login | 1,0 s | 9.219 | 11.325 |
+| /demo → panel | 3,4 s | 7.656 | 11.325 |
+| la biblioteca | 3,4 s | 8.270 | 11.325 |
+| el catálogo | 4,6 s | 8.720 | 11.325 |
+
+Las letras de la web se quedan en memoria: Bootstrap Icons (WOFF, 176 KB
+bajado) son 478 KB en TTF; Plus Jakarta Sans (WOFF2, 27 KB), 61 KB (una
+sola para todos los pesos). Al decodificar un WOFF2 grande (Brotli) el pico
+es de ~1,3 MB más, un momento. El programa crece 72 KB (Brotli y WOFF 40 KB;
+grid, letras, esquinas y lo demás, 32 KB). Con 16 MB sigue justo: ver abajo.
+
 ## Lo que falta (el plan)
 
 1. **JavaScript (fase 5).** NetSurf trae sus enlaces con JavaScript hechos
