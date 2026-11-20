@@ -356,9 +356,10 @@ módulo Energia
     fin
 
     ; ---- la pila de la bandeja (escritorio.cas) ----
-    ; ¿hay que enseñarla? (el equipo declara batería y ya se ha leído)
+    ; ¿hay que enseñarla? (el equipo declara batería, ya se ha leído y el
+    ; servicio sigue en marcha: si no, lo último leído ya no vale)
     público función hay_pila(): bool
-        devolver hay_energía y energía.fase = FASE_LISTO
+        devolver hay_energía y energía.fase = FASE_LISTO y servicio_acpi_vivo()
     fin
 
     ; el rayo de «con cable», de dos puntos de grueso
