@@ -2662,7 +2662,12 @@ de la bandeja al arrancar, «Verlas», «Actualizar todo» con un núcleo nuevo,
 núcleo que se queda en `hlt`, reiniciar a mano: GRUB elige solo el de antes,
 el sistema lo dice y `GRUBENV` queda en `nuevo=4`.
 
-Con todo, `pruebas.sh` tenía **508 comprobaciones** (423 hasta la 0.7;
+Con la firma, el núcleo nuevo y el CD, la pasada entera del 20/11 por la tarde (rama
+`pentium-dvd`, con CASTEL32 ya dentro) dio **541 bien, 0 mal**; tras los
+arreglos de la ventana y el paso a `actualiza.hispados.es`, `SOLO=08` (de la 11
+a la 14 y la 16) dio **156 bien, 0 mal**.
+
+Antes, `pruebas.sh` tenía **508 comprobaciones** (423 hasta la 0.7;
 de la 0.8, los paquetes, el USB en caliente, la red, apagar de verdad y la
 batería, y las del AHCI del ICH7). La memoria USB trae ahora **16 programas**
 como módulos (eran 9: PAQUETES y ACTUALIZ, RED, IPCONFIG, PING y DESCARGA, y
