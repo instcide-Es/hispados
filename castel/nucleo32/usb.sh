@@ -56,7 +56,7 @@ python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT10.BIN 1024 768 32 
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT6.BIN 1024 600 32 > /dev/null
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT13.BIN 1366 768 32 > /dev/null
 MODULOS=
-for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE uinstala:INSTALAR uasiste:ASISTE; do
+for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO upaquete:PAQUETES uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE uinstala:INSTALAR uasiste:ASISTE; do
   f=${p%%:*}; N=${p##*:}
   python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $W/$f.asm > /dev/null
   nasm -f bin $W/$f.asm -o $W/f/$N.BIN
@@ -88,8 +88,6 @@ for f in $W/of/*.HVP $W/of/*.DAT; do
 "
   printf '%s=OFICINA\r\n' $n >> $W/i/CARPETAS.TXT
 done
-INSTALA="$INSTALA  module /INSTALA/CARPETAS.TXT CARPETAS.TXT
-"
 iconv -f UTF-8 -t CP437 > $W/i/LEEME.TXT <<'L'
 Hispa-Pentium 0.7, instalado en el disco duro.
 
@@ -119,6 +117,14 @@ LA CONSOLA (el intérprete de órdenes)
   MEM, FECHA, CLS... Un programa se lanza por su nombre. C:, X: cambian de
   unidad (X: es una memoria USB). Hay archivos de órdenes (.BAT).
 
+PROGRAMAS Y ACTUALIZACIONES (PAQUETES)
+  PAQUETES LISTA dice lo instalado; PAQUETES CATALOGO, lo que se puede
+  instalar; PAQUETES INSTALA nombre (o X.HPQ) lo instala con lo que
+  necesite; PAQUETES ACTUALIZA lo pone al día; PAQUETES QUITA nombre lo
+  quita. Los paquetes se buscan en la carpeta \PAQUETES de la memoria USB
+  (o donde diga /DESDE=). Si se va la luz a mitad, la próxima vez se
+  deshace lo que quedó a medias.
+
 LAS UNIDADES
   C:, D:...  los discos de dentro del equipo (con formato FAT)
   X:, Y:     las memorias USB
@@ -131,6 +137,7 @@ LA CARPETA \HISPA
   HISPA.INI    los ajustes: usuario, equipo, teclado (es o us) y modo
   GRUB.CFG     el menú de arranque. La línea «set modo=» es la medida de la
                pantalla (por ejemplo 1024x768x32, o auto)
+  PAQUETES     lo instalado (un .PQI por paquete): no tocar a mano
   ASISTE.BIN   el asistente del primer arranque: si se borra HISPA.INI,
                vuelve a salir al arrancar
   MBR.ANT      el primer sector que tenía el disco antes de instalar
@@ -153,6 +160,22 @@ cp /usr/lib/grub/i386-pc/boot.img $W/i/BOOT.IMG
 # dice la BIOS si no es un disco; el resto de GRUB, desde el sector 1)
 printf '\x90\x90' | dd of=$W/i/BOOT.IMG bs=1 seek=102 conv=notrunc status=none
 [ $(stat -c %s $W/i/CORE.IMG) -le 1000000 ] || { echo "usb.sh: CORE.IMG no cabe en el hueco de arranque"; exit 1; }
+# los paquetes del sistema (tools/hpq.py: base, bloc, consola, equipo,
+# ejemplos, paquetes, hvprun y oficina), hechos de lo mismo que se instala:
+# van en \PAQUETES de la memoria, con su CATALOGO.TXT (PAQUETES los encuentra
+# ahí); y sus registros (.PQI), con lo que se instala: INSTALAR los deja en
+# C:\HISPA\PAQUETES (lo dice CARPETAS.TXT), y así PAQUETES sabe luego qué hay
+python3 -I $AQUI/../../tools/hpq.py sistema $W/paq $W/i $W/f $W/of > /dev/null
+mkdir $W/i/PAQUETES
+for f in $W/paq/PQI/*.PQI; do
+  n=$(basename $f)
+  cp $f $W/i/PAQUETES/
+  INSTALA="$INSTALA  module /INSTALA/PAQUETES/$n $n
+"
+done
+cat $W/paq/PQI/CARPETAS.TXT >> $W/i/CARPETAS.TXT
+INSTALA="$INSTALA  module /INSTALA/CARPETAS.TXT CARPETAS.TXT
+"
 printf 'Hispa-Pentium 0.7: un n\xa3cleo de 32 bits escrito en Castel.\r\nEste archivo est\xa0 en la memoria USB de arranque (la unidad X:) y, por si\r\nel USB no se deja, ha venido tambi\x82n con el cargador (la unidad M:).\r\n' > $W/f/LEEME.TXT
 MODULOS="$MODULOS  module /LEEME.TXT LEEME.TXT
 "
@@ -169,7 +192,9 @@ cp $W/f/* $W/m/
 # lo que solo es para instalar (los textos del sistema instalado, lo que va a
 # otra carpeta y el arranque del disco), en \INSTALA
 mkdir $W/m/INSTALA
-cp $W/i/* $W/m/INSTALA/
+cp -r $W/i/* $W/m/INSTALA/
+mkdir $W/m/PAQUETES
+cp $W/paq/*.HPQ $W/paq/CATALOGO.TXT $W/m/PAQUETES/
 # la oficina de Hispa-386 (Facturas, Pluma, Cuentas, Mirador: programas de
 # Hispa Ventanas) y su ejecutor, HVPRUN.BIN: el menú Inicio los abre de ahí
 # (ya están hechos, más arriba, para la entrada de instalar)

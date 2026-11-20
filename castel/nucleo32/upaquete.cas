@@ -50,8 +50,9 @@ módulo UPaquetes
     ; ---------------------------------------------------------------------
     ;  EL GANCHO DE LA RED. Para traer los paquetes de Internet, PAQUETES no
     ;  sabe de TCP/IP: se lo pide a otro. Con LLAMADA_DESCARGAR = 0 (lo de
-    ;  ahora), lanza el programa DESCARGAR.BIN con dos argumentos, «URL
-    ;  DESTINO», lo espera, y vale si acaba con el código 0 y DESTINO está.
+    ;  ahora), lanza el programa DESCARGA.BIN (la orden DESCARGAR: su nombre
+    ;  no cabe en 8+3) con dos argumentos, «URL DESTINO», lo espera, y vale
+    ;  si acaba con el código 0 y DESTINO está.
     ;  Si el núcleo da la descarga como llamada al sistema, se pone aquí su
     ;  número y se llama con EBX = la URL y ECX = el archivo de destino (dos
     ;  textos acabados en 0); un error es lo de siempre (es_error). Lo
@@ -634,16 +635,16 @@ módulo UPaquetes
         fin
         une(a, url, " ")
         concatenar(a, destino)
-        t := lanzar("DESCARGAR.BIN", a)
+        t := lanzar("DESCARGA.BIN", a)
         si es_error(t) entonces
-            imprimir1("paquetes: para traer %s de Internet hace falta la red (el programa DESCARGAR),\n", pt(url))
+            imprimir1("paquetes: para traer %s de Internet hace falta la red (el programa DESCARGA),\n", pt(url))
             escribir("  y este sistema aún no la tiene. Use una carpeta o una memoria USB con los paquetes:\n")
             escribir("  PAQUETES ... /DESDE=X:\\PAQUETES (o ponga la carpeta en C:\\HISPA\\PAQUETES\\ORIGEN.TXT).\n")
             devolver falso
         fin
         r := esperar(t)
         si r <> 0 o no existe(destino) entonces
-            imprimir2("paquetes: no se ha podido traer %s (DESCARGAR acaba con el código %u)\n", pt(url), r)
+            imprimir2("paquetes: no se ha podido traer %s (DESCARGA acaba con el código %u)\n", pt(url), r)
             devolver falso
         fin
         devolver cierto

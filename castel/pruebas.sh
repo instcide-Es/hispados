@@ -80,6 +80,7 @@
 #   SOLO=32 ./pruebas.sh          la primera, la octava y la novena (lo de 32 bits)
 #   SOLO=06 ./pruebas.sh          la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
 #   SOLO=07 ./pruebas.sh          la primera y la décima (instalar en el disco: la 0.7)
+#   SOLO=08 ./pruebas.sh          la primera y la undécima (los paquetes: PAQUETES y tools/hpq.py)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
@@ -92,7 +93,7 @@ set -u
 AQUI=$(dirname "$(readlink -f "$0")")
 H=$AQUI/../h8086
 # los programas de usuario de Hispa-Pentium (usuario.cas y llamadas.cas son módulos)
-USU="$AQUI/nucleo32/uinstala.cas $AQUI/nucleo32/uasiste.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas $AQUI/nucleo32/uequipo.cas"
+USU="$AQUI/nucleo32/uinstala.cas $AQUI/nucleo32/uasiste.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas $AQUI/nucleo32/uequipo.cas $AQUI/nucleo32/upaquete.cas"
 T=$(mktemp -d)
 QPID=
 acaba() { [ -n "$QPID" ] && kill $QPID 2>/dev/null; [ -n "${VER:-}" ] && { rm -rf /tmp/castel-pruebas; cp -r $T /tmp/castel-pruebas; }; rm -rf $T; }
@@ -142,7 +143,7 @@ fi
 
 # SOLO=32: solo la primera parte, la octava y la novena (los 32 bits);
 # SOLO=06: solo la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
-if [ "${SOLO:-}" != 32 ] && [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ]; then
+if [ "${SOLO:-}" != 32 ] && [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ] && [ "${SOLO:-}" != 08 ]; then
 # -------------------------------------------------------- 2. compilar todo
 echo "== Castel: los ejemplos compilan =="
 EJEMPLOS=
@@ -541,7 +542,7 @@ else
   for f in $AQUI/nucleo32/*.cas; do
     case "$(basename $f .cas)" in
       uhci|unidades|usb|usbalm|usbbase|usbhid|usuario) [ $tanda = 2 ] || continue ;;
-      u[a-z]*|llamadas|barramenu) [ $tanda = 3 ] || continue ;;
+      u[a-z]*|llamadas|barramenu|sha256) [ $tanda = 3 ] || continue ;;
       *) [ $tanda = 2 ] || continue ;;
     esac
     mcopy -i $T/c.img $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS
@@ -700,7 +701,7 @@ fi
 echo "== Castel de 32 bits: «modelo núcleo» (QEMU -kernel) y «modelo hispa32» (HW32) =="
 P=$T/p32
 mkdir $P
-if [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ]; then
+if [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ] && [ "${SOLO:-}" != 08 ]; then
 # los ejemplos de 16 bits que no tocan el DOS, compilados como núcleo de 32
 # bits: tienen que escribir lo mismo
 MISMOS="arreglos bucles cuenta estruct mezcla nivel pares pruebas refs saltos saludo textos modulos"
@@ -1337,7 +1338,7 @@ fi   # SOLO=06, SOLO=07
 G=$P/graf
 N=$P/n06
 mkdir -p $G $N
-if [ "${SOLO:-}" != 07 ]; then
+if [ "${SOLO:-}" != 07 ] && [ "${SOLO:-}" != 08 ]; then
 echo "== Hispa-Pentium 0.6: los discos SATA (AHCI), las unidades con letra, el permiso de escritura por disco =="
 hechos=1
 for c in 16 32 mbr; do
@@ -1634,6 +1635,7 @@ fi   # SOLO=07
 # del disco (GRUB en el MBR y en el hueco de delante de la partición) y el
 # asistente del primer arranque (uasiste.cas). Lo que se instala (el núcleo,
 # los programas, BOOT.IMG y CORE.IMG) sale de la memoria USB que hace usb.sh.
+if [ "${SOLO:-}" != 08 ]; then
 echo "== Hispa-Pentium 0.7: instalar en el disco duro (INSTALAR), arrancar de él y el asistente del primer arranque =="
 if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/grub/i386-pc ] && command -v parted > /dev/null; then
 Z=$P/n07
@@ -1649,8 +1651,10 @@ done
 mcopy -n -i $G/usb.img@@1M ::SEMILLA.BIN $K/SEMILLA.BIN > /dev/null 2>&1
 # (y dos archivos para otra carpeta, como los de la oficina: CARPETAS.TXT
 # dice adónde va cada uno, y él no se instala)
-head -c 3000 /dev/urandom > $K/UNO.DAT; printf 'el dos\r\n' > $K/DOS.TXT; printf 'UNO.DAT=COSAS\r\ndos.txt=cosas\r\n' > $K/CARPETAS.TXT
-INST=$INST,$K/UNO.DAT,$K/DOS.TXT,$K/CARPETAS.TXT
+head -c 3000 /dev/urandom > $K/UNO.DAT; printf 'el dos\r\n' > $K/DOS.TXT; printf 'UNO.DAT=COSAS\r\ndos.txt=cosas\r\nBLOC.PQI=HISPA\\PAQUETES\r\n' > $K/CARPETAS.TXT
+# (y el registro de un paquete, que va dentro de \HISPA: a \HISPA\PAQUETES)
+mcopy -n -i $G/usb.img@@1M ::INSTALA/PAQUETES/BLOC.PQI $K/BLOC.PQI > /dev/null 2>&1
+INST=$INST,$K/UNO.DAT,$K/DOS.TXT,$K/BLOC.PQI,$K/CARPETAS.TXT
 # instala con el núcleo arrancado por QEMU (-kernel) y lo que se instala como
 # módulos (la unidad M:, como con la entrada de la memoria USB): el disco
 # (SATA; con IDE=1, IDE), el nombre de lo que sale y las teclas
@@ -1684,7 +1688,8 @@ instalado() {
     for f in UNO.DAT DOS.TXT; do
       rm -f $Z/f.bin; mcopy -n -i $Z/vol.img ::COSAS/$f $Z/f.bin > /dev/null 2>&1; cmp -s $Z/f.bin $K/$f || { bien=0; echo "distinto: COSAS/$f" >> $Z/fsck.txt; }
     done
-    mdir -i $Z/vol.img ::HISPA 2> /dev/null | grep -q "^UNO \|^DOS \|^CARPETAS" && { bien=0; echo "en HISPA hay lo que no toca" >> $Z/fsck.txt; }
+    mdir -i $Z/vol.img ::HISPA 2> /dev/null | grep -q "^UNO \|^DOS \|^CARPETAS\|^BLOC  *PQI" && { bien=0; echo "en HISPA hay lo que no toca" >> $Z/fsck.txt; }
+    rm -f $Z/f.bin; mcopy -n -i $Z/vol.img ::HISPA/PAQUETES/BLOC.PQI $Z/f.bin > /dev/null 2>&1; cmp -s $Z/f.bin $K/BLOC.PQI || { bien=0; echo "distinto: HISPA/PAQUETES/BLOC.PQI" >> $Z/fsck.txt; }
   fi
   # el arranque: el primer sector de GRUB en el MBR (sus 440 octetos) y el resto desde el sector 1
   cmp -s -n 440 $1 $K/BOOT.IMG || { bien=0; echo "el MBR no lleva BOOT.IMG" >> $Z/fsck.txt; }
@@ -1714,9 +1719,10 @@ if volumen $Z/blanco.img 2048 && instalado $Z/blanco.img && grep -q "^Partition 
   && grep -q "^ 1 2048s 614399s 612352s primary fat32 boot, lba" $Z/tabla.txt; then
   ok "el disco instalado: una partición FAT32 arrancable en el MBR, sana para fsck.fat, con el sistema en \\HISPA igual que el original y GRUB en el MBR y en el hueco de delante"
 else ko "el disco instalado no queda bien:"; cat $Z/tabla.txt $Z/fsck.txt | sed 's/^/        /' | head -8; fi
-if grep -q "^instalar: copiado UNO.DAT (3000 octetos) a .COSAS$" $S && grep -q "^instalar: copiado DOS.TXT (8 octetos) a .COSAS$" $S && grep -q "^instalar: 14 archivos que instalar$" $S \
-  && [ "$(mdir -b -i $Z/vol.img ::COSAS 2> /dev/null | tr '\n' ' ')" = "::/COSAS/UNO.DAT ::/COSAS/DOS.TXT " ]; then
-  ok "lo que dice CARPETAS.TXT («ARCHIVO.EXT=CARPETA») va a su carpeta de la raíz (C:\\COSAS: así irá la oficina a C:\\OFICINA) y no a \\HISPA; CARPETAS.TXT no se instala"
+if grep -q "^instalar: copiado UNO.DAT (3000 octetos) a .COSAS$" $S && grep -q "^instalar: copiado DOS.TXT (8 octetos) a .COSAS$" $S && grep -q "^instalar: 15 archivos que instalar$" $S \
+  && [ "$(mdir -b -i $Z/vol.img ::COSAS 2> /dev/null | tr '\n' ' ')" = "::/COSAS/UNO.DAT ::/COSAS/DOS.TXT " ] \
+  && grep -q "^instalar: copiado BLOC.PQI ([0-9]* octetos) a .HISPA.PAQUETES$" $S && [ "$(mdir -b -i $Z/vol.img ::HISPA/PAQUETES 2> /dev/null | tr '\n' ' ')" = "::/HISPA/PAQUETES/BLOC.PQI " ]; then
+  ok "lo que dice CARPETAS.TXT («ARCHIVO.EXT=CARPETA») va a su carpeta de la raíz (C:\\COSAS: así irá la oficina a C:\\OFICINA) y no a \\HISPA, y «HISPA\\PAQUETES», dentro de \\HISPA (los registros de lo instalado); CARPETAS.TXT no se instala"
 else ko "lo de CARPETAS.TXT no va a su carpeta:"; mdir -i $Z/vol.img :: 2>&1 | sed 's/^/        /' | head -8; grep "archivos que\|COSAS" $S | sed 's/^/        /' | head -4; fi
 rm -f $Z/cfg.txt; mcopy -n -i $Z/vol.img ::HISPA/GRUB.CFG $Z/cfg.txt > /dev/null 2>&1
 if grep -q "^set modo=800x600x32,800x600,auto$" $Z/cfg.txt && grep -q "multiboot /HISPA/NUCLEO.BIN escritorio escritura$" $Z/cfg.txt && grep -q "module /HISPA/ORDENES.BIN ORDENES.BIN" $Z/cfg.txt \
@@ -1888,6 +1894,13 @@ for hc in xhci ehci; do
   else ko "$que: la memoria USB de arranque se ofrece como disco, o ha cambiado al instalar:"; sed 's/^/        /' $Z/u1$hc.txt | sed -n 5,12p; fi
   if volumen $Z/d$hc.img 2048 && instalado $Z/d$hc.img usb; then ok "$que: el disco de 2 GB queda con su FAT32 sana (fsck.fat), el sistema en \\HISPA y el arranque puesto"
   else ko "$que: el disco instalado desde la memoria USB no queda bien:"; sed 's/^/        /' $Z/fsck.txt | head -6; fi
+  # lo instalado, apuntado para PAQUETES: los registros de los paquetes del sistema, en \HISPA\PAQUETES
+  rm -rf $Z/pqi $Z/pqu; mkdir $Z/pqi $Z/pqu
+  mcopy -n -i $Z/vol.img '::HISPA/PAQUETES/*' $Z/pqi/ > /dev/null 2>&1; mcopy -n -i $G/usb.img@@1M '::INSTALA/PAQUETES/*' $Z/pqu/ > /dev/null 2>&1
+  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
+    && mcopy -n -i $Z/vol.img ::HISPA/PAQUETES.BIN $Z/f.bin > /dev/null 2>&1; then
+    ok "$que: INSTALAR apunta lo que instala: los registros de los 8 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
+  else ko "$que: lo instalado no queda apuntado en C:\\HISPA\\PAQUETES:"; ls $Z/pqi | sed 's/^/        /' | head -10; fi
   # SOLO el disco: el primer arranque
   desde_disco $Z/d$hc.img $Z/a$hc.sal
   espera_menu "Hispa-Pentium: el interprete" a0$hc
@@ -1959,10 +1972,17 @@ for hc in xhci ehci; do
     espera_menu "Hispa-Pentium: el interprete" b0$hc; teclas down ret
     espera_a "lanzo ORDENES.BIN" 40 $Z/b$hc.sal; sleep 1
     teclas v e r ret d i r spc backslash h i s p a backslash h i s p a dot i n i ret; sleep 1.5; textoz b1$hc
+    # y PAQUETES, en el sistema instalado: lo instalado, y que sus archivos son los que se instalaron
+    teclas c l s ret p a q u e t e s spc l i s t a ret p a q u e t e s spc c o m p r u e b a ret
+    espera_a "^Los archivos de los\|no est.n como se instalaron" 60 $Z/b$hc.sal; sleep 0.5; textoz b2$hc
     monz quit 0.5; wait $QPID 2> /dev/null; QPID=
     if grep -q "Hispa-Pentium 0.7: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -8; fi
+    if grep -q "^|  base      0.7     El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|8 paquetes\.$" $Z/b2$hc.txt \
+      && grep -q "^|Los archivos de los 8 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
+      ok "PAQUETES en el sistema recién instalado: LISTA dice los 8 paquetes del sistema (base, oficina...) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
+    else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -12; fi
     # la oficina, en el disco instalado: el grupo «Oficina» del menú Inicio
     # (Facturas, con C:\\HISPA\\HVPRUN.BIN) y Mi equipo abriendo Cuentas de C:\\OFICINA
     desde_disco $Z/d$hc.img $Z/c$hc.sal
@@ -1996,6 +2016,194 @@ else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba la instalación en el disco)"
 fi
+fi   # SOLO=08
+# ------------------------------------------------- 11. Hispa-Pentium 0.8: los paquetes
+# El programa PAQUETES (upaquete.cas) en un sistema «instalado» (un disco SATA
+# con C:\HISPA y su base de lo instalado, C:\HISPA\PAQUETES) y una memoria USB
+# (X:) con paquetes .HPQ y su CATALOGO.TXT, hechos con tools/hpq.py: instalar
+# con dependencias (de un archivo y por su nombre), actualizar, lo que no
+# vale (una suma mala, un conflicto, quitar lo que otro necesita), quitar,
+# comprobar lo instalado, un corte a mitad (se deshace al volver) y el gancho
+# de la red (con un DESCARGA de mentira). Después de cada paso, fsck.fat y
+# mtools miran el disco desde fuera.
+if [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ]; then
+echo "== Hispa-Pentium 0.8: los paquetes (PAQUETES, .HPQ): instalar con dependencias, actualizar, quitar, deshacer un corte =="
+Q=$P/n08
+mkdir -p $Q/f/paq
+HPQ="python3 -I $AQUI/../tools/hpq.py"
+export MTOOLS_SKIP_CHECK=1
+hechos=1
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $Q/semilla.asm > /dev/null 2>&1 && nasm -f bin $Q/semilla.asm -o $Q/SEMILLA.BIN || hechos=0
+for p in uordenes:ORDENES upaquete:PAQUETES uhola:HOLA; do
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/${p%%:*}.cas -o $Q/${p%%:*}.asm > /dev/null 2>&1 && nasm -f bin $Q/${p%%:*}.asm -o $Q/f/${p##*:}.BIN || hechos=0
+done
+# un DESCARGA de mentira, para el gancho de la red: «DESCARGA http://prueba/ARCHIVO
+# DESTINO» copia X:\PAQUETES\ARCHIVO a DESTINO (el de verdad lo trae por HTTP)
+cat > $Q/udescar.cas <<'CAS'
+módulo UDescar
+    modelo usuario
+    importar Llamadas, Textos32
+    variable a: arreglo [400] de byte
+    variable url: arreglo [200] de byte
+    variable destino: arreglo [200] de byte
+    variable origen: arreglo [200] de byte
+    variable trozo: arreglo [4096] de byte
+    función principal(): byte
+        variable m, s, n: nat32
+        argumentos(a, 400)
+        si no palabra(a, 0, url, 200) o no palabra(a, 1, destino, 200) entonces devolver 2 fin
+        si no empieza_por(url, "http://prueba/") entonces devolver 3 fin
+        copiar(origen, "X:\\PAQUETES\\")
+        concatenar(origen, dirección(url[14]))
+        m := abrir(origen)
+        si es_error(m) entonces devolver 4 fin
+        s := crear(destino)
+        si es_error(s) entonces devolver 5 fin
+        n := leer(m, trozo, 4096)
+        mientras no es_error(n) y n > 0 hacer
+            escribir_archivo(s, trozo, n)
+            n := leer(m, trozo, 4096)
+        fin
+        cerrar(s)
+        cerrar(m)
+        escribir("descarga (de prueba): ", url, " -> ", destino, "\n")
+        devolver 0
+    fin
+fin UDescar.
+CAS
+python3 -I $AQUI/ccastel.py $Q/udescar.cas -o $Q/udescar.asm -I $AQUI/nucleo32 > /dev/null 2>&1 && nasm -f bin $Q/udescar.asm -o $Q/f/DESCARGA.BIN || hechos=0
+# los paquetes de prueba: letras (1.0 y 1.1), saludo (1.0, que necesita
+# letras >= 1.0, base y el núcleo; 2.0, que necesita letras >= 1.1, cambia
+# un archivo, trae otro y deja de traer el grande), choque (no puede estar con
+# saludo) y malo (con un octeto cambiado: su suma no es la suya)
+F=$Q/f
+printf 'letras A\r\n' > $F/A.TXT; printf 'letras B (1.0)\r\n' > $F/B.TXT; printf 'letras B (1.1)\r\n' > $F/B11.TXT
+printf 'saludo, la 2\r\n' > $F/S2.TXT; head -c 70000 /dev/urandom > $F/GRANDE.DAT
+( cd $F
+  $HPQ crea BASE.HPQ --nombre base --version 0.7 --descripcion 'El sistema base (de prueba)' ORDENES.BIN='\HISPA\ORDENES.BIN' PAQUETES.BIN='\HISPA\PAQUETES.BIN' DESCARGA.BIN='\HISPA\DESCARGA.BIN'
+  $HPQ registro BASE.HPQ BASE.PQI
+  $HPQ crea paq/LETRAS1.HPQ --nombre letras --version 1.0 --descripcion 'Unas letras' A.TXT='\DOCS\LETRAS\A.TXT' B.TXT='\DOCS\LETRAS\B.TXT'
+  $HPQ crea paq/LETRAS11.HPQ --nombre letras --version 1.1 --descripcion 'Unas letras, mejores' A.TXT='\DOCS\LETRAS\A.TXT' B11.TXT='\DOCS\LETRAS\B.TXT'
+  $HPQ crea paq/SALUDO1.HPQ --nombre saludo --version 1.0 --descripcion 'Un programa que saluda' --necesita 'letras >= 1.0, base >= 0.7, nucleo >= 0.7' HOLA.BIN='\HISPA\SALUDO.BIN' GRANDE.DAT='\HISPA\SALUDO.DAT'
+  $HPQ crea paq/SALUDO2.HPQ --nombre saludo --version 2.0 --descripcion 'Un programa que saluda (la 2)' --necesita 'letras >= 1.1, nucleo >= 0.7' HOLA.BIN='\HISPA\SALUDO.BIN' S2.TXT='\HISPA\SALUDO.TXT'
+  $HPQ crea paq/CHOQUE.HPQ --nombre choque --version 1.0 --descripcion 'No puede estar con saludo' --choca 'saludo' A.TXT='\CHOQUE.TXT'
+  $HPQ catalogo paq
+  $HPQ crea paq/MALO.HPQ --nombre malo --version 1.0 --descripcion 'Estropeado' A.TXT='\MALO1.TXT' GRANDE.DAT='\MALO2.DAT'
+  python3 -I -c "
+d = bytearray(open('paq/MALO.HPQ', 'rb').read()); d[-5000] ^= 1; open('paq/MALO.HPQ', 'wb').write(d)"
+  $HPQ registro paq/SALUDO1.HPQ SALUDO1.PQI; $HPQ registro paq/SALUDO2.HPQ SALUDO2.PQI ) > $Q/hpq.txt 2>&1 || hechos=0
+# el disco del sistema (FAT32, con C:\HISPA y lo instalado: base 0.7) y la memoria USB
+mkfs.fat -F 32 -s 1 -n HISPA -C $Q/sis.img 65536 > /dev/null && mmd -i $Q/sis.img ::HISPA ::HISPA/PAQUETES \
+  && mcopy -i $Q/sis.img $F/ORDENES.BIN $F/PAQUETES.BIN $F/DESCARGA.BIN ::HISPA/ && mcopy -i $Q/sis.img $F/BASE.PQI ::HISPA/PAQUETES/ || hechos=0
+mkfs.fat -F 16 -n MEMORIA -C $Q/usb.img 16384 > /dev/null && mmd -i $Q/usb.img ::PAQUETES && mcopy -i $Q/usb.img $F/paq/* ::PAQUETES/ || hechos=0
+if [ $hechos = 1 ] && $HPQ mira $F/paq/SALUDO1.HPQ > $Q/mira.txt && ! $HPQ mira $F/paq/MALO.HPQ > $Q/mira2.txt && grep -q '^paquete=saludo 2.0 SALUDO2.HPQ 1[0-9]* [0-9a-f]\{64\} Un programa que saluda (la 2)' $F/paq/CATALOGO.TXT \
+  && grep -q 'MALO2.DAT  *70000  MAL' $Q/mira2.txt && head -1 $F/BASE.PQI | grep -q '^HPQ 1'; then
+  ok "tools/hpq.py: hace los paquetes (crea), su catálogo (CATALOGO.TXT, con el tamaño y el SHA-256 de cada .HPQ), los registros (.PQI) y mira las sumas (la de MALO.HPQ, mal)"
+else ko "tools/hpq.py no hace bien los paquetes de prueba:"; tail -4 $Q/hpq.txt | sed 's/^/        /'; fi
+# PAQUETES en el sistema del disco $1, con la memoria USB: lo que sale, a $Q/$2.sal (y en $S)
+paq() {
+  local d=$1 n=$2; shift 2
+  ESCRIBE=1 SATA=$d MEMORIA=64 MODULOS= ARRANQUE=ordenes QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/usb.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
+    $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 2" "$@" ":pausa 1" > $Q/$n.sal 2>&1
+  S=$Q/$n.sal
+}
+# lo que hay en el disco: la lista entera de mdir y fsck.fat; sin restos de una instalación
+lista_de() { mdir -/ -b -i $1 :: 2> /dev/null | sort; }
+sin_restos() { ! lista_de $1 | grep -q 'HPQ[0-9]*\.\(NUE\|VIE\)\|DIARIO\.TXT\|HECHO\.TXT'; }
+igual_en() { rm -f $Q/x.bin; mcopy -n -i $1 "::$2" $Q/x.bin > /dev/null 2>&1 && cmp -s $Q/x.bin $3; }
+
+# 1. lo instalado, el catálogo de la memoria USB (lo encuentra solo: X:\PAQUETES)
+# e instalar un archivo de paquete de la memoria, con lo que necesita (del catálogo)
+cp $Q/sis.img $Q/s1.img
+paq $Q/s1.img uno "paquetes lista" "paquetes catalogo" 'paquetes instala x:\paquetes\saludo1.hpq' ":pausa 3" "paquetes lista" saludo
+mira "PAQUETES LISTA: lo apuntado en C:\\HISPA\\PAQUETES (base 0.7); CATALOGO: lo de la memoria USB (X:\\PAQUETES, que encuentra solo), cada uno con su versión más nueva" \
+  "^  base      0.7     El sistema base (de prueba)$" "^1 paquetes\.$" "^Paquetes que hay en X:.PAQUETES.:$" "^  letras    1\.1  *Unas letras, mejores$" \
+  "^  saludo    2\.0  *Un programa que saluda (la 2)$"
+mira "PAQUETES INSTALA X:\\PAQUETES\\SALUDO1.HPQ: antes, lo que necesita (letras, la más nueva del catálogo; base y el núcleo ya están), comprobando las sumas de todo; y el programa nuevo se lanza por su nombre (PATH con C:\\HISPA)" \
+  "^Se va a instalar: letras 1\.1, saludo 1\.0$" "^Las sumas (SHA-256) de todos los archivos están bien\.$" "^  instalado letras 1\.1$" "^  instalado saludo 1\.0$" "^Hecho\.$" \
+  "^  saludo    1\.0     Un programa que saluda$" "^3 paquetes\.$" "^hola desde el anillo 3" "^(C:.HISPA.SALUDO.BIN ha acabado con el código 3)$"
+if sano $Q/s1.img && sin_restos $Q/s1.img && igual_en $Q/s1.img HISPA/SALUDO.BIN $F/HOLA.BIN && igual_en $Q/s1.img HISPA/SALUDO.DAT $F/GRANDE.DAT \
+  && igual_en $Q/s1.img DOCS/LETRAS/A.TXT $F/A.TXT && igual_en $Q/s1.img DOCS/LETRAS/B.TXT $F/B11.TXT && igual_en $Q/s1.img HISPA/PAQUETES/SALUDO.PQI $F/SALUDO1.PQI; then
+  ok "lo instalado, desde fuera: fsck.fat da el disco por sano, los archivos son los del paquete octeto a octeto (también en carpetas nuevas: C:\\DOCS\\LETRAS), el registro es la cabecera del paquete y no quedan restos (ni HPQ*.NUE, ni .VIE, ni el diario)"
+else ko "lo instalado no queda bien en el disco:"; lista_de $Q/s1.img | sed 's/^/        /' | head -14; tail -3 $P/fsck.txt | sed 's/^/        /'; fi
+
+# 2. por su nombre, del catálogo (la versión más nueva, con lo que necesita)
+cp $Q/sis.img $Q/s5.img
+paq $Q/s5.img nombre "paquetes instala saludo" ":pausa 2" "paquetes instala saludo"
+mira "PAQUETES INSTALA saludo: del catálogo, la versión más nueva (2.0), con lo que necesita delante (letras 1.1); y otra vez: ya está" \
+  "^Se va a instalar: letras 1\.1, saludo 2\.0$" "^  instalado saludo 2\.0$" "^paquetes: saludo ya está instalado (la 2\.0); para una más nueva: PAQUETES ACTUALIZA$"
+if sano $Q/s5.img && sin_restos $Q/s5.img && igual_en $Q/s5.img HISPA/SALUDO.TXT $F/S2.TXT && igual_en $Q/s5.img DOCS/LETRAS/B.TXT $F/B11.TXT; then
+  ok "y en el disco: sano, con los dos paquetes octeto a octeto y sin restos"
+else ko "instalar por su nombre no deja bien el disco:"; lista_de $Q/s5.img | sed 's/^/        /' | head -14; fi
+
+# 3. actualizar: saludo 1.0 -> 2.0 (cambia un archivo, trae otro, deja de traer el grande)
+cp $Q/s1.img $Q/s2.img
+paq $Q/s2.img actualiza "paquetes catalogo" "paquetes actualiza" ":pausa 2" "paquetes actualiza" "paquetes comprueba"
+mira "PAQUETES ACTUALIZA: el catálogo dice lo que es más nuevo; se pone saludo 2.0 en lugar de la 1.0, y luego todo está al día; COMPRUEBA: los archivos instalados siguen iguales" \
+  "^  saludo    2\.0     (nuevo; tiene la 1\.0)    Un programa que saluda (la 2)$" "^  letras    1\.1     (instalado)              Unas letras, mejores$" \
+  "^Se va a instalar: saludo 2\.0 (en lugar de la 1\.0)$" "^  instalado saludo 2\.0$" "^Todo está al día\.$" "^Los archivos de los 3 paquetes instalados están como se instalaron\.$"
+if sano $Q/s2.img && sin_restos $Q/s2.img && igual_en $Q/s2.img HISPA/SALUDO.TXT $F/S2.TXT && ! igual_en $Q/s2.img HISPA/SALUDO.DAT $F/GRANDE.DAT \
+  && igual_en $Q/s2.img HISPA/PAQUETES/SALUDO.PQI $F/SALUDO2.PQI && igual_en $Q/s2.img HISPA/SALUDO.BIN $F/HOLA.BIN; then
+  ok "lo actualizado, desde fuera: el disco sano, lo de la 2.0 en su sitio, el archivo que la 2.0 ya no trae (SALUDO.DAT) quitado y el registro, el de la 2.0"
+else ko "lo actualizado no queda bien en el disco:"; lista_de $Q/s2.img | sed 's/^/        /' | head -14; tail -3 $P/fsck.txt | sed 's/^/        /'; fi
+
+# 4. lo que no vale no toca nada: una suma mala, un conflicto, quitar lo que
+# otro necesita; y COMPRUEBA ve un archivo cambiado (la imagen, idéntica)
+cp $Q/s1.img $Q/s4.img
+printf 'cambiado a mano\r\n' > $Q/cambiado.txt; mcopy -o -i $Q/s4.img $Q/cambiado.txt ::DOCS/LETRAS/A.TXT
+cp $Q/s4.img $Q/s40.img
+paq $Q/s4.img malo 'paquetes instala x:\paquetes\malo.hpq' "paquetes instala choque" "paquetes quita letras" 'paquetes mira x:\paquetes\malo.hpq' "paquetes comprueba" "paquetes quita nadie" "paquetes instala nadie"
+mira "una suma mala (MALO.HPQ, un octeto cambiado): se ve antes de copiar nada, y no se instala nada; MIRA dice lo mismo" \
+  "^paquetes: X:.paquetes.malo\.hpq: la suma de .MALO2\.DAT no es la suya: el paquete está estropeado$" "^No se instala nada: el disco queda como estaba\.$" \
+  "^  .MALO2\.DAT  *70000 octetos$"
+mira "lo que choca (choque no puede estar con saludo), quitar lo que otro necesita (letras, que necesita saludo) y lo que no hay: se dice, y no se hace" \
+  "^paquetes: choque no puede estar con saludo, que está instalado: quítelo antes (PAQUETES QUITA saludo)$" "^paquetes: letras no se quita: lo necesita saludo (quite antes saludo, o /FORZAR)$" \
+  "^paquetes: nadie no está instalado$" "^paquetes: hace falta nadie y no está en el catálogo$"
+if grep -q "^  letras: C:.DOCS.LETRAS.A\.TXT ha cambiado$" $S && grep -q "^1 archivos no están como se instalaron" $S && cmp -s $Q/s4.img $Q/s40.img; then
+  ok "COMPRUEBA ve el archivo cambiado a mano (su SHA-256 no es el apuntado); y con todo lo que no valía, el disco queda idéntico octeto a octeto"
+else ko "COMPRUEBA no ve el archivo cambiado, o lo que no valía ha tocado el disco:"; grep "cambiado\|como se instalaron" $S | sed 's/^/        /'; fi
+
+# 5. quitar (saludo, y luego letras, que ya nadie necesita): el disco, como al principio
+cp $Q/s2.img $Q/s3.img
+paq $Q/s3.img quita "paquetes quita saludo letras" "paquetes lista" "dir \\docs"
+mira "PAQUETES QUITA saludo letras: quita sus archivos, sus registros y las carpetas que se quedan vacías (C:\\DOCS\\LETRAS y C:\\DOCS)" \
+  "^  quitado saludo 2\.0$" "^  quitado letras 1\.1$" "^Hecho\.$" "^1 paquetes\.$" "^No puedo abrir .docs: no existe\.$"
+sano $Q/sis.img; antes=$(grep -o '[0-9]*/[0-9]* clusters' $P/fsck.txt)
+if sano $Q/s3.img && [ "$(grep -o '[0-9]*/[0-9]* clusters' $P/fsck.txt)" = "$antes" ] && [ "$(lista_de $Q/s3.img)" = "$(lista_de $Q/sis.img)" ]; then
+  ok "lo quitado, desde fuera: el disco sano, con los mismos archivos y carpetas que antes de instalar nada y los mismos clusters ocupados ($antes)"
+else ko "después de quitarlo todo el disco no queda como al principio:"; diff <(lista_de $Q/s3.img) <(lista_de $Q/sis.img) | sed 's/^/        /' | head -8; fi
+
+# 6. un corte a mitad (como si se fuera la luz): actualizar saludo y pararse
+# tras el cuarto cambio (/CORTE=4: lo de antes apartado, lo nuevo a medio
+# poner); QEMU se apaga ahí. Al volver, PAQUETES lo deshace
+cp $Q/s1.img $Q/s6.img
+paq $Q/s6.img corte "paquetes actualiza /corte=4" ":pausa 2"
+cp $Q/s6.img $Q/s6corte.img
+if grep -q "^paquetes: corte de prueba" $S && lista_de $Q/s6.img | grep -q "DIARIO\.TXT" && lista_de $Q/s6.img | grep -q "HPQ00000\.VIE" && ! lista_de $Q/s6.img | grep -q "SALUDO\.PQI"; then
+  ok "un corte a mitad de actualizar (QEMU apagado tras el cuarto cambio): quedan el diario (C:\\HISPA\\PAQUETES\\DIARIO.TXT), lo de antes apartado (HPQ*.VIE) y lo nuevo a medias"
+else ko "el corte a mitad no deja lo que se esperaba:"; lista_de $Q/s6.img | sed 's/^/        /' | head -14; fi
+paq $Q/s6.img vuelta "paquetes lista"
+mira "al volver, PAQUETES ve el diario y lo deshace: saludo sigue en la 1.0" \
+  "^paquetes: saludo 2\.0 se quedó a medias (¿se fue la luz?): se ha deshecho y todo está como antes$" "^  saludo    1\.0     Un programa que saluda$"
+if sano $Q/s6.img && [ "$(lista_de $Q/s6.img)" = "$(lista_de $Q/s1.img)" ] && igual_en $Q/s6.img HISPA/SALUDO.DAT $F/GRANDE.DAT && igual_en $Q/s6.img HISPA/SALUDO.BIN $F/HOLA.BIN \
+  && igual_en $Q/s6.img HISPA/PAQUETES/SALUDO.PQI $F/SALUDO1.PQI && ! lista_de $Q/s6.img | grep -q "SALUDO\.TXT"; then
+  ok "lo deshecho, desde fuera: fsck.fat da el disco por sano y está como antes del corte (los mismos archivos, iguales octeto a octeto; sin restos)"
+else ko "después del corte el disco no vuelve a como estaba:"; diff <(lista_de $Q/s6.img) <(lista_de $Q/s1.img) | sed 's/^/        /' | head -8; tail -3 $P/fsck.txt | sed 's/^/        /'; fi
+
+# 7. el gancho de la red: con /DESDE=http://..., PAQUETES lanza DESCARGA
+# (aquí, uno de mentira) para el catálogo y cada paquete; sin DESCARGA, lo dice
+cp $Q/sis.img $Q/s7.img
+paq $Q/s7.img red "paquetes instala letras /desde=http://prueba/" ":pausa 2" "del \\hispa\\descarga.bin" "paquetes catalogo /desde=http://actualiza.clicgest.es/pentium/"
+mira "el gancho de la red: con /DESDE=http://..., el catálogo y los paquetes los trae DESCARGA (DESCARGA.BIN, la orden de la red) a C:\\HISPA\\PAQUETES\\BAJADAS, y se instalan igual" \
+  "^Trayendo http://prueba/CATALOGO\.TXT\.\.\.$" "^descarga (de prueba): http://prueba/LETRAS11\.HPQ -> C:.HISPA.PAQUETES.BAJADAS.LETRAS11\.HPQ$" "^  instalado letras 1\.1$" \
+  "^paquetes: para traer http://actualiza\.clicgest\.es/pentium/CATALOGO\.TXT de Internet hace falta la red (el programa DESCARGA),$"
+if sano $Q/s7.img && sin_restos $Q/s7.img && igual_en $Q/s7.img DOCS/LETRAS/B.TXT $F/B11.TXT && igual_en $Q/s7.img HISPA/PAQUETES/BAJADAS/LETRAS11.HPQ $F/paq/LETRAS11.HPQ; then
+  ok "y en el disco: sano, con lo instalado y lo traído (en BAJADAS) igual que lo de la memoria octeto a octeto"
+else ko "lo traído por el gancho de la red no queda bien en el disco:"; lista_de $Q/s7.img | sed 's/^/        /' | head -14; fi
+else
+  echo "  (SOLO=$SOLO: sin los paquetes)"
+fi
+
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 echo "== $nok bien, $fail mal =="
