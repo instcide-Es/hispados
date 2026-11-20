@@ -56,6 +56,7 @@ módulo Xhci
     constante TRB_REPONER = 14
     constante TRB_PARAR = 15
     constante TRB_DESENCOLAR = 16
+    constante TRB_DESHABILITAR = 10
     constante SUC_TRANSFERENCIA = 32
     constante SUC_ORDEN = 33
 
@@ -168,7 +169,8 @@ módulo Xhci
 
     ; recoge lo que haya en el anillo de sucesos y lo apunta: la orden que
     ; ha acabado, la transferencia que ha acabado, o el informe de una tubería
-    función mira_sucesos(c: nat32)
+    ; (los cambios de los puertos se miran en sus registros: aquí se tiran)
+    público función mira_sucesos(c: nat32)
         variable t, r: puntero a nat32
         variable clase, i, ranura, extremo: nat32
         variable visto, de_tubo: bool
@@ -188,7 +190,7 @@ módulo Xhci
                 de_tubo := falso
                 i := 0
                 mientras i < xhcis[c].n_tubos hacer
-                    si xhcis[c].tubos[i].ranura = ranura y xhcis[c].tubos[i].extremo = extremo entonces
+                    si ranura <> 0 y xhcis[c].tubos[i].ranura = ranura y xhcis[c].tubos[i].extremo = extremo entonces
                         xhcis[c].tubos[i].hecho := cierto
                         xhcis[c].tubos[i].código := t[2] >> 24
                         xhcis[c].tubos[i].resto := t[2] yb 0xFFFFFF
@@ -379,6 +381,17 @@ módulo Xhci
         devolver v yb 3
     fin
 
+    ; ¿ha cambiado lo enchufado en el puerto p desde la última vez? (los
+    ; avisos de cambio del puerto quedan borrados)
+    público función puerto_cambio(c: nat32, p: nat32): bool
+        variable d, v: nat32
+        d := PORTSC + (p - 1) * 0x10
+        v := lee(c, d)
+        si v yb P_CAMBIOS = 0 entonces devolver falso fin
+        pon(c, d, (v yb P_GUARDA) ob (v yb P_CAMBIOS))
+        devolver v yb 0x20000 <> 0
+    fin
+
     función velocidad_de(v: nat32): nat32
         según (v >> 10) yb 0x0F
             caso 1: devolver V_PLENA
@@ -548,6 +561,29 @@ módulo Xhci
         devolver orden(c, xhcis[c].entrada, 0, (TRB_CONFIGURAR << 10) ob (a.ranura << 24)) = BIEN
     fin
 
+    ; el aparato a se ha ido (o no se ha dejado enumerar): se deshabilita su
+    ; ranura y se sueltan las páginas de su contexto y de sus anillos
+    público función quita_aparato(c: nat32, ref a: Aparato)
+        variable tabla: puntero a nat32
+        variable i: nat32
+        si a.ranura = 0 o a.ranura > xhcis[c].ranuras entonces devolver fin
+        para i desde 1 hasta xhcis[c].n_tubos hacer
+            si xhcis[c].tubos[i - 1].ranura = a.ranura entonces xhcis[c].tubos[i - 1].ranura := 0 fin
+        fin
+        orden(c, 0, 0, (TRB_DESHABILITAR << 10) ob (a.ranura << 24))
+        tabla := puntero(xhcis[c].tabla)
+        tabla[a.ranura * 2] := 0
+        si a.contexto <> 0 entonces soltar_marco(a.contexto) fin
+        si a.anillo0.base <> 0 entonces soltar_marco(a.anillo0.base) fin
+        para i desde 1 hasta a.n_extremos hacer
+            si a.extremos[i - 1].anillo.base <> 0 entonces soltar_marco(a.extremos[i - 1].anillo.base) fin
+            a.extremos[i - 1].anillo.base := 0
+        fin
+        a.contexto := 0
+        a.anillo0.base := 0
+        a.ranura := 0
+    fin
+
     ; -------------------------------------------------------------------------
     ;  Las transferencias
     ; -------------------------------------------------------------------------
@@ -568,12 +604,15 @@ módulo Xhci
     ; espera a que acabe la transferencia cuyo último TRB es «último» (y,
     ; si lleva datos, «de_datos» es su TRB: lo que le falte por llegar queda
     ; en «resto»). Da 0, T_PARADA o T_FALLO.
-    función espera_transferencia(c: nat32, ranura: nat32, extremo: nat32, ref a: Anillo, último: nat32, de_datos: nat32, ref resto: nat32, cs: nat32): ent32
-        variable tope, vueltas, código: nat32
+    función espera_transferencia(c: nat32, ref ap: Aparato, extremo: nat32, ref a: Anillo, último: nat32, de_datos: nat32, ref resto: nat32, cs: nat32): ent32
+        variable tope, vueltas, código, ranura: nat32
         tope := tics + cs + 1
         vueltas := 0
         resto := 0
+        ranura := ap.ranura
         mientras cierto hacer
+            ; (desenchufado: no va a acabar; la ranura se deshabilita luego)
+            si ap.ido entonces devolver T_FALLO fin
             mira_sucesos(c)
             si xhcis[c].tr_hecha entonces
                 xhcis[c].tr_hecha := falso
@@ -622,7 +661,7 @@ módulo Xhci
         si n <> 0 y entra entonces clase := 0 fin
         último := al_anillo(a.anillo0, 0, 0, 0, (TRB_ESTADO << 10) ob clase ob 0x20)
         timbre(c, a.ranura, 1)
-        r := espera_transferencia(c, a.ranura, 1, a.anillo0, último, de_datos, resto, 100)
+        r := espera_transferencia(c, a, 1, a.anillo0, último, de_datos, resto, 100)
         si r <> 0 entonces devolver r fin
         devolver ent32(n - resto)
     fin
@@ -635,7 +674,7 @@ módulo Xhci
         xhcis[c].tr_hecha := falso
         último := al_anillo(e.anillo, datos, 0, n, (TRB_NORMAL << 10) ob 0x24)
         timbre(c, a.ranura, x)
-        r := espera_transferencia(c, a.ranura, x, e.anillo, último, último, resto, cs)
+        r := espera_transferencia(c, a, x, e.anillo, último, último, resto, cs)
         si r <> 0 entonces devolver r fin
         devolver ent32(n - resto)
     fin
@@ -645,16 +684,24 @@ módulo Xhci
     ; -------------------------------------------------------------------------
     público función tubo_abre(c: nat32, ref a: Aparato, ref e: Extremo): nat32
         variable i: nat32
-        si xhcis[c].n_tubos >= MAX_TUBOS o e.anillo.base = 0 entonces devolver NINGUNA fin
-        i := xhcis[c].n_tubos
+        si e.anillo.base = 0 entonces devolver NINGUNA fin
+        ; (el sitio de una que ya se ha cerrado, o uno nuevo)
+        i := 0
+        mientras i < xhcis[c].n_tubos y xhcis[c].tubos[i].ranura <> 0 hacer i := i + 1 fin
+        si i >= MAX_TUBOS entonces devolver NINGUNA fin
         xhcis[c].tubos[i].ranura := a.ranura
         xhcis[c].tubos[i].extremo := número_xhci(e.número)
         xhcis[c].tubos[i].anillo.base := e.anillo.base
         xhcis[c].tubos[i].anillo.pos := e.anillo.pos
         xhcis[c].tubos[i].anillo.ciclo := e.anillo.ciclo
         xhcis[c].tubos[i].hecho := falso
-        xhcis[c].n_tubos := i + 1
+        si i = xhcis[c].n_tubos entonces xhcis[c].n_tubos := i + 1 fin
         devolver i
+    fin
+
+    ; la tubería t ya no se usa (su aparato se ha ido)
+    público función tubo_cierra(c: nat32, t: nat32)
+        si t < MAX_TUBOS entonces xhcis[c].tubos[t].ranura := 0 fin
     fin
 
     público función tubo_datos(c: nat32, t: nat32): puntero a byte

@@ -149,6 +149,35 @@ módulo Marcos
         devolver 0
     fin
 
+    ; «n» marcos seguidos (para lo que un aparato lee o escribe por su cuenta,
+    ; DMA: el anillo de recepción de una tarjeta de red), ya a cero: la
+    ; dirección física del primero (0 si no hay tantos seguidos). Se buscan
+    ; desde los 16 MB para no gastar los de abajo.
+    público función reservar_seguidos(n: nat32): nat32
+        variable m, k, b: nat32
+        si n = 0 entonces devolver 0 fin
+        si n = 1 entonces devolver reservar_marco() fin
+        b := sin_interrupciones()
+        m := 0x1000000 div MARCO
+        k := 0
+        mientras (m + k) * MARCO < límite y m + k < MAX_MARCOS hacer
+            si ocupado(m + k) entonces
+                m := m + k + 1
+                k := 0
+            sino
+                k := k + 1
+                si k = n entonces
+                    para k desde 0 hasta n - 1 hacer tapa(m + k) fin
+                    reponer(b)
+                    llenar(puntero(m * MARCO), n * MARCO, 0)
+                    devolver m * MARCO
+                fin
+            fin
+        fin
+        reponer(b)
+        devolver 0
+    fin
+
     ; devuelve un marco. Da falso (y no hace nada) si ya estaba libre o no es
     ; un marco: así no se cuenta dos veces
     público función soltar_marco(dir: nat32): bool

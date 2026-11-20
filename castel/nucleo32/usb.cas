@@ -11,7 +11,10 @@
 ;  control(), granel() y las tuberías de interrupción. Un cerrojo hace que
 ;  las tareas hablen por el USB de una en una.
 ;
-;  Todo se hace al arrancar: lo que se enchufe después no se ve (todavía).
+;  Al arrancar se enumera lo que hay enchufado; lo que se enchufa y se
+;  desenchufa después lo atiende usbcal.cas (con enchufa_raíz,
+;  enchufa_concentrador y quita, de aquí). Un aparato que se ha ido queda
+;  marcado («ido») antes de quitarlo: lo que se le pida falla en el acto.
 ;  Con «sinusb» en la línea del cargador no se toca nada: el USB se queda
 ;  como lo dejó la BIOS.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -34,6 +37,7 @@ módulo Usb
     público constante PON_CONFIGURACIÓN = 9
 
     tipo Tubo = estructura
+        usado: bool
         aparato: nat32
         suyo: nat32                             ; su número para su controladora
     fin
@@ -45,7 +49,7 @@ módulo Usb
     variable n_tubos: nat32
     variable cerrojo: Cerrojo
     variable página: nat32                      ; para la petición (los 8 primeros octetos) y sus datos (desde 0x400)
-    variable siguiente_dir: nat32 = 1           ; la dirección que se da al próximo aparato (EHCI)
+    variable direcciones: arreglo [4] de nat32  ; las direcciones USB dadas (EHCI y UHCI): un bit cada una
     ; los aparatos que no se han dejado enumerar: dónde estaban y en qué
     ; paso se quedaron (para decirlo)
     constante MAX_FALLOS = 8
@@ -97,7 +101,7 @@ módulo Usb
     público función control(i: nat32, pide: nat32, petición: nat32, valor_: nat32, índice: nat32, datos: puntero a byte, n: nat32): ent32
         variable r: ent32
         si i >= MAX_APARATOS o n > MAX_DATOS entonces devolver T_FALLO fin
-        si no aparatos[i].usado entonces devolver T_FALLO fin
+        si no aparatos[i].usado o aparatos[i].ido entonces devolver T_FALLO fin
         tomar(cerrojo)
         si n <> 0 y pide yb 0x80 = 0 entonces copiar_memoria(puntero(página + DATOS), datos, n) fin
         r := haz_control(aparatos[i], pide, petición, valor_, índice, n)
@@ -113,7 +117,7 @@ módulo Usb
     público función granel(i: nat32, e: nat32, datos: nat32, n: nat32, cs: nat32): ent32
         variable r: ent32
         si i >= MAX_APARATOS entonces devolver T_FALLO fin
-        si no aparatos[i].usado o e >= aparatos[i].n_extremos entonces devolver T_FALLO fin
+        si no aparatos[i].usado o aparatos[i].ido o e >= aparatos[i].n_extremos entonces devolver T_FALLO fin
         tomar(cerrojo)
         si aparatos[i].hc_clase = HC_XHCI entonces
             r := Xhci.granel(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e], datos, n, cs)
@@ -130,7 +134,7 @@ módulo Usb
     ; (y la alternancia vuelve a empezar)
     público función quita_parada(i: nat32, e: nat32)
         si i >= MAX_APARATOS entonces devolver fin
-        si no aparatos[i].usado o e >= aparatos[i].n_extremos entonces devolver fin
+        si no aparatos[i].usado o aparatos[i].ido o e >= aparatos[i].n_extremos entonces devolver fin
         tomar(cerrojo)
         haz_control(aparatos[i], 0x02, QUITA_CARACTERÍSTICA, 0, aparatos[i].extremos[e].número, 0)
         aparatos[i].extremos[e].alterna := 0
@@ -141,8 +145,8 @@ módulo Usb
     ; su número, o NINGUNO.
     público función tubo_abre(i: nat32, e: nat32): nat32
         variable t, s: nat32
-        si i >= MAX_APARATOS o n_tubos >= MAX_TUBOS entonces devolver NINGUNO fin
-        si no aparatos[i].usado o e >= aparatos[i].n_extremos entonces devolver NINGUNO fin
+        si i >= MAX_APARATOS entonces devolver NINGUNO fin
+        si no aparatos[i].usado o aparatos[i].ido o e >= aparatos[i].n_extremos entonces devolver NINGUNO fin
         tomar(cerrojo)
         si aparatos[i].hc_clase = HC_XHCI entonces
             s := Xhci.tubo_abre(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e])
@@ -151,12 +155,17 @@ módulo Usb
         sino
             s := Uhci.tubo_abre(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e])
         fin
-        t := NINGUNO
-        si s <> 0xFFFFFFFF entonces
-            t := n_tubos
+        t := 0
+        mientras t < n_tubos y tubos[t].usado hacer t := t + 1 fin
+        si t >= MAX_TUBOS entonces t := NINGUNO fin
+        si s <> 0xFFFFFFFF y t <> NINGUNO entonces
+            tubos[t].usado := cierto
             tubos[t].aparato := i
             tubos[t].suyo := s
-            n_tubos := t + 1
+            si t = n_tubos entonces n_tubos := t + 1 fin
+        sino si s <> 0xFFFFFFFF entonces
+            cierra_suyo(i, s)
+            t := NINGUNO
         fin
         soltar(cerrojo)
         devolver t
@@ -166,7 +175,9 @@ módulo Usb
     público función tubo_pide(t: nat32, n: nat32)
         variable i: nat32
         si t >= n_tubos entonces devolver fin
+        si no tubos[t].usado entonces devolver fin
         i := tubos[t].aparato
+        si aparatos[i].ido entonces devolver fin
         tomar(cerrojo)
         si aparatos[i].hc_clase = HC_XHCI entonces
             Xhci.tubo_pide(aparatos[i].hc, tubos[t].suyo, n)
@@ -184,7 +195,9 @@ módulo Usb
         variable i: nat32
         variable r: ent32
         si t >= n_tubos entonces devolver T_FALLO fin
+        si no tubos[t].usado entonces devolver T_FALLO fin
         i := tubos[t].aparato
+        si aparatos[i].ido entonces devolver T_FALLO fin
         tomar(cerrojo)
         si aparatos[i].hc_clase = HC_XHCI entonces
             r := Xhci.tubo_mira(aparatos[i].hc, tubos[t].suyo, n)
@@ -205,6 +218,33 @@ módulo Usb
         si aparatos[i].hc_clase = HC_XHCI entonces devolver Xhci.tubo_datos(aparatos[i].hc, tubos[t].suyo) fin
         si aparatos[i].hc_clase = HC_EHCI entonces devolver Ehci.tubo_datos(aparatos[i].hc, tubos[t].suyo) fin
         devolver Uhci.tubo_datos(aparatos[i].hc, tubos[t].suyo)
+    fin
+
+    ; cierra la tubería número s de la controladora del aparato i
+    función cierra_suyo(i: nat32, s: nat32)
+        si aparatos[i].hc_clase = HC_XHCI entonces
+            Xhci.tubo_cierra(aparatos[i].hc, s)
+        sino si aparatos[i].hc_clase = HC_EHCI entonces
+            Ehci.tubo_cierra(aparatos[i].hc, s)
+        sino
+            Uhci.tubo_cierra(aparatos[i].hc, s)
+        fin
+    fin
+
+    ; una dirección USB libre (de 1 a 127), o 0 si no queda ninguna
+    función toma_dir(): nat32
+        variable d: nat32
+        para d desde 1 hasta 127 hacer
+            si direcciones[d >> 5] yb (nat32(1) << (d yb 31)) = 0 entonces
+                direcciones[d >> 5] := direcciones[d >> 5] ob (nat32(1) << (d yb 31))
+                devolver d
+            fin
+        fin
+        devolver 0
+    fin
+
+    función suelta_dir(d: nat32)
+        si d <> 0 y d < 128 entonces direcciones[d >> 5] := direcciones[d >> 5] yb nob (nat32(1) << (d yb 31)) fin
     fin
 
     ; -------------------------------------------------------------------------
@@ -262,6 +302,13 @@ módulo Usb
     ; (1: la dirección; 2 y 3: su descriptor; 4 y 5: su configuración; 6:
     ; los extremos; 7: ponerle la configuración). Da NINGUNO.
     función no_se_deja(i: nat32, punto: nat32): nat32
+        ; (lo que se le haya dado, se suelta: la ranura del xHCI, la dirección)
+        si aparatos[i].hc_clase = HC_XHCI entonces
+            Xhci.quita_aparato(aparatos[i].hc, aparatos[i])
+        sino
+            suelta_dir(aparatos[i].dir)
+        fin
+        aparatos[i].dir := 0
         si n_fallos < MAX_FALLOS entonces
             fallos[n_fallos].hc_clase := aparatos[i].hc_clase
             fallos[n_fallos].puerto_raíz := aparatos[i].puerto_raíz
@@ -329,11 +376,14 @@ módulo Usb
         si hc_clase = HC_XHCI entonces
             si no Xhci.nuevo_aparato(hc, aparatos[i]) entonces devolver no_se_deja(i, 1) fin
         sino
-            si siguiente_dir > 127 entonces devolver NINGUNO fin
-            r := haz_control(aparatos[i], 0x00, PON_DIRECCIÓN, siguiente_dir, 0, 0)
-            si r < 0 entonces devolver no_se_deja(i, 1) fin
-            aparatos[i].dir := siguiente_dir
-            siguiente_dir := siguiente_dir + 1
+            largo := toma_dir()
+            si largo = 0 entonces devolver NINGUNO fin
+            r := haz_control(aparatos[i], 0x00, PON_DIRECCIÓN, largo, 0, 0)
+            si r < 0 entonces
+                suelta_dir(largo)
+                devolver no_se_deja(i, 1)
+            fin
+            aparatos[i].dir := largo
             espera_ms(10)
         fin
         ; lo primero de su descriptor: el paquete máximo de su extremo 0
@@ -376,7 +426,7 @@ módulo Usb
     función concentrador(i: nat32)
         variable p: puntero a byte
         variable r: ent32
-        variable puerto, estado, clase, espera, v, vueltas: nat32
+        variable puerto, clase, espera: nat32
         p := puntero(página + DATOS)
         clase := 0x2900
         si aparatos[i].velocidad = V_SÚPER entonces clase := 0x2A00 fin
@@ -402,36 +452,42 @@ módulo Usb
         espera_ms(espera + 50)
         para puerto desde 1 hasta aparatos[i].puertos hacer
             r := haz_control(aparatos[i], 0xA3, PIDE_ESTADO, 0, puerto, 4)
-            si r >= 4 y p[0] yb 1 <> 0 entonces
-                ; hay algo: reiniciar el puerto y esperar a que acabe
-                haz_control(aparatos[i], 0x23, QUITA_CARACTERÍSTICA, 16, puerto, 0)
-                haz_control(aparatos[i], 0x23, PON_CARACTERÍSTICA, 4, puerto, 0)
-                estado := 0
-                vueltas := 0
-                mientras vueltas < 20 hacer
-                    espera_ms(20)
-                    r := haz_control(aparatos[i], 0xA3, PIDE_ESTADO, 0, puerto, 4)
-                    si r >= 4 entonces
-                        estado := dato16(p)
-                        si p[2] yb 0x10 <> 0 entonces vueltas := 100 fin
-                    fin
-                    vueltas := vueltas + 1
-                fin
-                haz_control(aparatos[i], 0x23, QUITA_CARACTERÍSTICA, 20, puerto, 0)
-                espera_ms(20)
-                si vueltas >= 100 y estado yb 2 <> 0 entonces
-                    v := V_PLENA
-                    si aparatos[i].velocidad = V_SÚPER entonces
-                        v := V_SÚPER
-                    sino si estado yb 0x200 <> 0 entonces
-                        v := V_BAJA
-                    sino si estado yb 0x400 <> 0 entonces
-                        v := V_ALTA
-                    fin
-                    enumera(aparatos[i].hc_clase, aparatos[i].hc, aparatos[i].puerto_raíz, i, puerto, v)
-                fin
-            fin
+            si r >= 4 y p[0] yb 1 <> 0 entonces puerto_de_concentrador(i, puerto) fin
         fin
+    fin
+
+    ; hay algo en ese puerto del concentrador i: reiniciar el puerto, esperar
+    ; a que acabe y enumerarlo. Da su número, o NINGUNO.
+    función puerto_de_concentrador(i: nat32, puerto: nat32): nat32
+        variable p: puntero a byte
+        variable r: ent32
+        variable estado, v, vueltas: nat32
+        p := puntero(página + DATOS)
+        haz_control(aparatos[i], 0x23, QUITA_CARACTERÍSTICA, 16, puerto, 0)
+        haz_control(aparatos[i], 0x23, PON_CARACTERÍSTICA, 4, puerto, 0)
+        estado := 0
+        vueltas := 0
+        mientras vueltas < 20 hacer
+            espera_ms(20)
+            r := haz_control(aparatos[i], 0xA3, PIDE_ESTADO, 0, puerto, 4)
+            si r >= 4 entonces
+                estado := dato16(p)
+                si p[2] yb 0x10 <> 0 entonces vueltas := 100 fin
+            fin
+            vueltas := vueltas + 1
+        fin
+        haz_control(aparatos[i], 0x23, QUITA_CARACTERÍSTICA, 20, puerto, 0)
+        espera_ms(20)
+        si vueltas < 100 o estado yb 2 = 0 entonces devolver NINGUNO fin
+        v := V_PLENA
+        si aparatos[i].velocidad = V_SÚPER entonces
+            v := V_SÚPER
+        sino si estado yb 0x200 <> 0 entonces
+            v := V_BAJA
+        sino si estado yb 0x400 <> 0 entonces
+            v := V_ALTA
+        fin
+        devolver enumera(aparatos[i].hc_clase, aparatos[i].hc, aparatos[i].puerto_raíz, i, puerto, v)
     fin
 
     ; enumera lo que hay en los puertos de una controladora
@@ -502,6 +558,158 @@ módulo Usb
         devolver n_aparatos
     fin
 
+    ; -------------------------------------------------------------------------
+    ;  Enchufar y desenchufar en marcha (lo pide usbcal.cas)
+    ; -------------------------------------------------------------------------
+    ; lo que hay en el puerto p de una controladora (bit 0: algo enchufado),
+    ; sin el cerrojo: solo se miran sus registros
+    público función estado_raíz(hc_clase: nat32, hc: nat32, p: nat32): nat32
+        según hc_clase
+            caso HC_XHCI: devolver Xhci.puerto_estado(hc, p)
+            caso HC_EHCI: devolver Ehci.puerto_estado(hc, p)
+        fin
+        devolver Uhci.puerto_estado(hc, p)
+    fin
+
+    ; ¿se ha enchufado o desenchufado algo en ese puerto desde la última
+    ; vez? (el aviso queda borrado)
+    público función cambio_raíz(hc_clase: nat32, hc: nat32, p: nat32): bool
+        según hc_clase
+            caso HC_XHCI: devolver Xhci.puerto_cambio(hc, p)
+            caso HC_EHCI: devolver Ehci.puerto_cambio(hc, p)
+        fin
+        devolver Uhci.puerto_cambio(hc, p)
+    fin
+
+    ; el aparato que cuelga de ese puerto de la controladora (NINGUNO: ninguno)
+    público función en_raíz(hc_clase: nat32, hc: nat32, p: nat32): nat32
+        variable i: nat32
+        para i desde 0 hasta MAX_APARATOS - 1 hacer
+            si aparatos[i].usado y aparatos[i].padre = SIN_APARATO y aparatos[i].hc_clase = hc_clase y aparatos[i].hc = hc y aparatos[i].puerto_raíz = p entonces devolver i fin
+        fin
+        devolver NINGUNO
+    fin
+
+    ; el que cuelga de ese puerto del concentrador c (NINGUNO: ninguno)
+    público función en_concentrador(c: nat32, p: nat32): nat32
+        variable i: nat32
+        para i desde 0 hasta MAX_APARATOS - 1 hacer
+            si aparatos[i].usado y aparatos[i].padre = c y aparatos[i].puerto = p entonces devolver i fin
+        fin
+        devolver NINGUNO
+    fin
+
+    ; se ha enchufado algo en el puerto p de una controladora: se reinicia
+    ; el puerto y se enumera. Da su número, o NINGUNO (también si un EHCI lo
+    ; cede a su compañera: allí se verá).
+    público función enchufa_raíz(hc_clase: nat32, hc: nat32, p: nat32): nat32
+        variable v, r: nat32
+        si página = 0 entonces devolver NINGUNO fin
+        tomar(cerrojo)
+        según hc_clase
+            caso HC_XHCI: v := Xhci.puerto_reinicia(hc, p)
+            caso HC_EHCI: v := Ehci.puerto_reinicia(hc, p)
+            si no: v := Uhci.puerto_reinicia(hc, p)
+        fin
+        r := NINGUNO
+        si v <> 0 entonces r := enumera(hc_clase, hc, p, SIN_APARATO, 0, v) fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; cómo está el puerto p del concentrador c: bit 0, algo enchufado; y en
+    ; «cambio», si se ha enchufado o desenchufado algo desde la última vez
+    ; (los avisos de cambio quedan borrados). 0 si no contesta.
+    público función estado_concentrador(c: nat32, p: nat32, ref cambio: bool): nat32
+        variable d: puntero a byte
+        variable r: ent32
+        variable e: nat32
+        cambio := falso
+        si c >= MAX_APARATOS entonces devolver 0 fin
+        si no aparatos[c].usado o aparatos[c].ido o no aparatos[c].es_concentrador entonces devolver 0 fin
+        tomar(cerrojo)
+        d := puntero(página + DATOS)
+        e := 0
+        r := haz_control(aparatos[c], 0xA3, PIDE_ESTADO, 0, p, 4)
+        si r >= 4 entonces
+            e := dato16(d)
+            cambio := d[2] yb 1 <> 0
+            ; los avisos: el de enchufar (16), habilitar (17), suspender (18), el de corriente de más (19) y el de reinicio (20)
+            si d[2] yb 1 <> 0 entonces haz_control(aparatos[c], 0x23, QUITA_CARACTERÍSTICA, 16, p, 0) fin
+            si d[2] yb 2 <> 0 entonces haz_control(aparatos[c], 0x23, QUITA_CARACTERÍSTICA, 17, p, 0) fin
+            si d[2] yb 8 <> 0 entonces haz_control(aparatos[c], 0x23, QUITA_CARACTERÍSTICA, 19, p, 0) fin
+        fin
+        soltar(cerrojo)
+        devolver e
+    fin
+
+    ; se ha enchufado algo en el puerto p del concentrador c: se enumera. Da
+    ; su número, o NINGUNO.
+    público función enchufa_concentrador(c: nat32, p: nat32): nat32
+        variable r: nat32
+        si c >= MAX_APARATOS entonces devolver NINGUNO fin
+        si no aparatos[c].usado o aparatos[c].ido entonces devolver NINGUNO fin
+        tomar(cerrojo)
+        r := puerto_de_concentrador(c, p)
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; ¿es j el aparato i, o cuelga de él (de un concentrador suyo)?
+    público función cuelga_de(j: nat32, i: nat32): bool
+        variable n: nat32
+        n := 0
+        mientras j < MAX_APARATOS y n <= MAX_NIVEL hacer
+            si j = i entonces devolver cierto fin
+            j := aparatos[j].padre
+            n := n + 1
+        fin
+        devolver falso
+    fin
+
+    ; el aparato i (y lo que cuelgue de él) se ha desenchufado: queda
+    ; marcado, y lo que se le esté pidiendo falla en el acto. (Sin el
+    ; cerrojo: puede tenerlo una transferencia que se ha quedado esperando.)
+    público función marca_ido(i: nat32)
+        variable j: nat32
+        para j desde 0 hasta MAX_APARATOS - 1 hacer
+            si aparatos[j].usado y cuelga_de(j, i) entonces aparatos[j].ido := cierto fin
+        fin
+    fin
+
+    ; quita el aparato i (ya marcado: marca_ido) y lo que cuelgue de él: sus
+    ; tuberías se cierran, la controladora lo olvida (en el xHCI, su ranura
+    ; y sus páginas) y su dirección y su ficha quedan libres
+    público función quita(i: nat32)
+        variable j: nat32
+        si i >= MAX_APARATOS entonces devolver fin
+        si no aparatos[i].usado entonces devolver fin
+        tomar(cerrojo)
+        para j desde 0 hasta MAX_APARATOS - 1 hacer
+            si aparatos[j].usado y j <> i y cuelga_de(j, i) entonces quita_uno(j) fin
+        fin
+        quita_uno(i)
+        soltar(cerrojo)
+    fin
+
+    función quita_uno(i: nat32)
+        variable t: nat32
+        para t desde 1 hasta n_tubos hacer
+            si tubos[t - 1].usado y tubos[t - 1].aparato = i entonces
+                cierra_suyo(i, tubos[t - 1].suyo)
+                tubos[t - 1].usado := falso
+            fin
+        fin
+        si aparatos[i].hc_clase = HC_XHCI entonces
+            Xhci.quita_aparato(aparatos[i].hc, aparatos[i])
+        sino
+            suelta_dir(aparatos[i].dir)
+        fin
+        aparatos[i].usado := falso
+        aparatos[i].ido := falso
+        si n_aparatos > 0 entonces n_aparatos := n_aparatos - 1 fin
+    fin
+
     ; deja paradas las controladoras (antes de apagar o reiniciar)
     público función para_todo()
         variable c: nat32
@@ -527,9 +735,42 @@ módulo Usb
         devolver "súper"
     fin
 
+    ; dice quién es el aparato i, en una línea que empieza por «usb: », «que» y su número
+    público función enseña_aparato(i: nat32, que: puntero a byte)
+        variable k: nat32
+        variable d: arreglo [4] de nat32
+        d[0] := nat32(que)
+        d[1] := i
+        d[2] := aparatos[i].fabricante
+        d[3] := aparatos[i].producto
+        apunta("usb: %s %u, %04X:%04X", d)
+        apunta1(", velocidad %s", nat32(nombre_velocidad(aparatos[i].velocidad)))
+        si aparatos[i].padre <> SIN_APARATO entonces
+            apunta2(", en el puerto %u del concentrador %u", aparatos[i].puerto, aparatos[i].padre)
+        sino
+            apunta2(", en el puerto %u (%s)", aparatos[i].puerto_raíz, nat32(nombre_hc(aparatos[i].hc_clase)))
+        fin
+        si aparatos[i].es_concentrador entonces apunta1(": concentrador de %u puertos", aparatos[i].puertos) fin
+        para k desde 1 hasta aparatos[i].n_interfaces hacer
+            d[0] := aparatos[i].interfaces[k - 1].clase
+            d[1] := aparatos[i].interfaces[k - 1].subclase
+            d[2] := aparatos[i].interfaces[k - 1].protocolo
+            si d[0] = 3 y d[2] = 1 entonces
+                apunta0("; teclado")
+            sino si d[0] = 3 y d[2] = 2 entonces
+                apunta0("; ratón")
+            sino si d[0] = 8 entonces
+                apunta0("; almacenamiento")
+            sino si d[0] <> 9 entonces
+                apunta("; interfaz %02X/%02X/%02X", d)
+            fin
+        fin
+        apunta0("\n")
+    fin
+
     ; dice las controladoras y los aparatos que hay, uno por línea
     público función enseña()
-        variable c, i, k: nat32
+        variable c, i: nat32
         variable d: arreglo [4] de nat32
         c := 0
         mientras c < Xhci.cuántas hacer
@@ -558,34 +799,7 @@ módulo Usb
             c := c + 1
         fin
         para i desde 0 hasta MAX_APARATOS - 1 hacer
-            si aparatos[i].usado entonces
-                d[0] := i
-                d[1] := aparatos[i].fabricante
-                d[2] := aparatos[i].producto
-                d[3] := nat32(nombre_velocidad(aparatos[i].velocidad))
-                apunta("usb: aparato %u, %04X:%04X, velocidad %s", d)
-                si aparatos[i].padre <> SIN_APARATO entonces
-                    apunta2(", en el puerto %u del concentrador %u", aparatos[i].puerto, aparatos[i].padre)
-                sino
-                    apunta2(", en el puerto %u (%s)", aparatos[i].puerto_raíz, nat32(nombre_hc(aparatos[i].hc_clase)))
-                fin
-                si aparatos[i].es_concentrador entonces apunta1(": concentrador de %u puertos", aparatos[i].puertos) fin
-                para k desde 1 hasta aparatos[i].n_interfaces hacer
-                    d[0] := aparatos[i].interfaces[k - 1].clase
-                    d[1] := aparatos[i].interfaces[k - 1].subclase
-                    d[2] := aparatos[i].interfaces[k - 1].protocolo
-                    si d[0] = 3 y d[2] = 1 entonces
-                        apunta0("; teclado")
-                    sino si d[0] = 3 y d[2] = 2 entonces
-                        apunta0("; ratón")
-                    sino si d[0] = 8 entonces
-                        apunta0("; almacenamiento")
-                    sino si d[0] <> 9 entonces
-                        apunta("; interfaz %02X/%02X/%02X", d)
-                    fin
-                fin
-                apunta0("\n")
-            fin
+            si aparatos[i].usado entonces enseña_aparato(i, "aparato") fin
         fin
         para i desde 1 hasta n_fallos hacer
             d[0] := fallos[i - 1].puerto_raíz

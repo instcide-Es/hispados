@@ -1,0 +1,274 @@
+; =============================================================================
+;  redes.cas - la red para los programas de Hispa-Pentium («modelo usuario»):
+;  lo que se le pide al servicio de red (RED.BIN, ured.cas) por la llamada 90
+;  del núcleo (red.cas). Cómo está la red, de un nombre su IP (DNS), un ping,
+;  las conexiones TCP (conectar, enviar, recibir, cerrar) y los puertos UDP.
+;  Si el servicio no está en marcha, el núcleo lo pone la primera vez.
+;  Las IP van como en la red: el primer octeto, el de abajo («10.0.2.2» es
+;  0x0202000A); texto_a_ip e ip_a_texto las pasan a texto y de texto.
+;  Lo que no puede ser da un número de PRIMER_ERROR_RED para arriba (los de
+;  aquí y los del núcleo): se mira con es_error_red y se dice con
+;  texto_error_red.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Redes
+
+    importar Textos32, Formato
+
+    ; ---- los errores ----
+    público constante SIN_RED = 0xFFFFFFEF      ; no hay servicio de red (no está RED.BIN, o «sinred»)
+    público constante SIN_TARJETA = 0xFFFFFFEE  ; no hay tarjeta de red que se sepa llevar
+    público constante SIN_CABLE = 0xFFFFFFED    ; la tarjeta no tiene enlace (el cable)
+    público constante SIN_IP = 0xFFFFFFEC       ; todavía no hay IP (DHCP)
+    público constante TIEMPO = 0xFFFFFFEB       ; no ha contestado a tiempo
+    público constante RECHAZADA = 0xFFFFFFEA    ; no hay nadie en ese puerto
+    público constante NO_RESUELVE = 0xFFFFFFE9  ; ese nombre no existe (DNS)
+    público constante CORTADA_RED = 0xFFFFFFE8  ; la conexión se ha cortado
+    público constante NO_CONEXIÓN = 0xFFFFFFE7  ; esa conexión no existe (o no quedan)
+    público constante INALCANZABLE = 0xFFFFFFE6
+    público constante PRIMER_ERROR_RED = 0xFFFFFFE0
+
+    ; ---- cómo está (Info_red.estado, y estado_rápido) ----
+    público constante RED_NADA = 0
+    público constante RED_SIN_TARJETA = 1
+    público constante RED_SIN_CABLE = 2
+    público constante RED_BUSCANDO = 3
+    público constante RED_CONECTADA = 4
+
+    público constante ESPERA_NORMAL = 1000      ; tics (10 s)
+
+    ; ---- las órdenes (rbase.cas) ----
+    constante O_ESTADO = 1
+    constante O_RESOLVER = 2
+    constante O_PING = 3
+    constante O_CONECTAR = 4
+    constante O_ENVIAR = 5
+    constante O_RECIBIR = 6
+    constante O_CERRAR = 7
+    constante O_UDP = 8
+    constante O_UDP_ENVIAR = 9
+    constante O_RENOVAR = 10
+    constante O_REGISTRO = 11
+    constante MAX_DATOS = 8192
+
+    ; lo que dice el servicio de la red (es el de rbase.cas)
+    público tipo Info_red = estructura
+        estado: nat32
+        mac: arreglo [8] de byte
+        ip, máscara, puerta, dns, servidor: nat32
+        concesión: nat32                        ; los segundos que dura la IP (DHCP)
+        hace: nat32                             ; los segundos que hace que se dio
+        velocidad: nat32                        ; Mbit/s (0: no se sabe)
+        recibidas, enviadas, errores: nat32     ; tramas
+        tarjeta: arreglo [48] de byte           ; su nombre
+        pci: nat32                              ; bus, aparato y función
+        id_pci: nat32                           ; fabricante (abajo) y modelo (arriba)
+        irq: nat32                              ; 0: sin interrupción
+    fin
+
+    variable cab: arreglo [8] de nat32
+
+    función llamada(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        ensamblador
+            mov eax, {n}
+            mov ebx, {a}
+            mov ecx, {b}
+            mov edx, {c}
+            int 0x80
+        fin
+    fin
+
+    ; un pedido: la orden, cuatro datos, los octetos que van (largo) y dónde
+    ; dejar los que vuelvan (caben «cabe»; en el mismo sitio)
+    función pide(orden: nat32, a: nat32, b: nat32, c: nat32, d: nat32, datos: puntero a byte, largo: nat32, cabe: nat32): nat32
+        cab[0] := orden
+        cab[1] := a
+        cab[2] := b
+        cab[3] := c
+        cab[4] := d
+        cab[5] := 0
+        cab[6] := 0
+        cab[7] := largo
+        devolver llamada(90, nat32(dirección(cab[0])), nat32(datos), cabe)
+    fin
+
+    ; si la red aún se está poniendo en marcha (el enlace, la IP), espera a
+    ; que lo esté: hasta 10 s (sin enlace, hasta 6: la tarjeta acaba de
+    ; arrancar y lo está negociando, o no hay cable)
+    función espera_red()
+        variable ip, e, i: nat32
+        i := 0
+        mientras i < 100 hacer
+            e := estado_rápido(ip)
+            si e <> RED_BUSCANDO y e <> RED_SIN_CABLE entonces devolver fin
+            si e = RED_SIN_CABLE y i >= 60 entonces devolver fin
+            llamada(3, 10, 0, 0)
+            i := i + 1
+        fin
+    fin
+
+    ; un pedido que necesita la red puesta: si aún no lo está, se espera y
+    ; se vuelve a pedir
+    función pide_con_red(orden: nat32, a: nat32, b: nat32, c: nat32, d: nat32, datos: puntero a byte, largo: nat32, cabe: nat32): nat32
+        variable r: nat32
+        r := pide(orden, a, b, c, d, datos, largo, cabe)
+        si r = SIN_IP o r = SIN_CABLE entonces
+            espera_red()
+            r := pide(orden, a, b, c, d, datos, largo, cabe)
+        fin
+        devolver r
+    fin
+
+    público función es_error_red(r: nat32): bool
+        devolver r >= PRIMER_ERROR_RED
+    fin
+
+    público función texto_error_red(e: nat32): puntero a byte
+        según nat16(e yb 0xFFFF)
+            caso 0xFFEF: devolver "no hay servicio de red (falta RED.BIN o se arrancó con «sinred»)"
+            caso 0xFFEE: devolver "no hay ninguna tarjeta de red que Hispa-Pentium sepa llevar"
+            caso 0xFFED: devolver "la tarjeta de red no tiene enlace (¿está enchufado el cable?)"
+            caso 0xFFEC: devolver "todavía no hay IP (nadie ha contestado por DHCP)"
+            caso 0xFFEB: devolver "no ha contestado a tiempo"
+            caso 0xFFEA: devolver "no hay nadie en ese puerto (conexión rechazada)"
+            caso 0xFFE9: devolver "ese nombre no existe"
+            caso 0xFFE8: devolver "la conexión se ha cortado"
+            caso 0xFFE7: devolver "esa conexión no existe (o no quedan)"
+            caso 0xFFE6: devolver "no se llega"
+            caso 0xFFF9: devolver "no puede ser"
+            caso 0xFFFA: devolver "no hay memoria"
+        fin
+        devolver "no puede ser"
+    fin
+
+    ; ---- las IP, en texto ----
+    público función ip_a_texto(ip: nat32, destino: puntero a byte)
+        variable d: arreglo [4] de nat32
+        d[0] := ip yb 0xFF
+        d[1] := (ip >> 8) yb 0xFF
+        d[2] := (ip >> 16) yb 0xFF
+        d[3] := ip >> 24
+        formatear(destino, 16, "%u.%u.%u.%u", d)
+    fin
+
+    ; «a.b.c.d» -> la IP (falso si no lo es)
+    público función texto_a_ip(t: puntero a byte, ref ip: nat32): bool
+        variable i, n, v, cifras: nat32
+        i := 0
+        ip := 0
+        para n desde 0 hasta 3 hacer
+            v := 0
+            cifras := 0
+            mientras t[i] >= '0' y t[i] <= '9' hacer
+                v := v * 10 + (t[i] - '0')
+                i := i + 1
+                cifras := cifras + 1
+                si cifras > 3 entonces devolver falso fin
+            fin
+            si cifras = 0 o v > 255 entonces devolver falso fin
+            ip := ip ob (v << (n * 8))
+            si n < 3 entonces
+                si t[i] <> '.' entonces devolver falso fin
+                i := i + 1
+            fin
+        fin
+        devolver t[i] = 0
+    fin
+
+    ; ---- lo que hay ----
+    ; cómo está la red (Info_red). Da 0, o un error (SIN_RED...)
+    público función estado_red(ref info: Info_red): nat32
+        devolver pide(O_ESTADO, 0, 0, 0, 0, puntero(dirección(info)), 0, tamaño(Info_red))
+    fin
+
+    ; cómo está, sin preguntar al servicio (lo que sabe el núcleo): RED_...
+    ; y, en «ip», la IP
+    público función estado_rápido(ref ip: nat32): nat32
+        devolver llamada(97, nat32(dirección(ip)), 0, 0)
+    fin
+
+    ; pedir la IP otra vez (DHCP); el estado dirá cuándo la hay
+    público función renovar(): nat32
+        devolver pide(O_RENOVAR, 0, 0, 0, 0, nulo, 0, 0)
+    fin
+
+    ; lo que ha apuntado el servicio de red (lo último, hasta «cabe»): su largo
+    público función registro_red(destino: puntero a byte, cabe: nat32): nat32
+        si cabe > MAX_DATOS entonces cabe := MAX_DATOS fin
+        devolver pide(O_REGISTRO, 0, 0, 0, 0, destino, 0, cabe)
+    fin
+
+    ; de un nombre («actualiza.clicgest.es», o «10.0.2.2»), su IP. Da 0, o un error
+    público función resolver(nombre: puntero a byte, ref ip: nat32): nat32
+        variable r: nat32
+        si texto_a_ip(nombre, ip) entonces devolver 0 fin
+        r := pide_con_red(O_RESOLVER, 0, 0, 0, 0, nombre, longitud(nombre), 0)
+        si r = 0 entonces ip := cab[1] fin
+        devolver r
+    fin
+
+    ; un ping (eco de ICMP) a «ip», con «octetos» octetos de datos: lo que
+    ; ha tardado en volver (en microsegundos), o un error (TIEMPO...); en
+    ; «ttl», el TTL de la respuesta
+    público función ping(ip: nat32, número: nat32, espera: nat32, octetos: nat32, ref ttl: nat32): nat32
+        variable r: nat32
+        r := pide_con_red(O_PING, ip, número, espera, octetos, nulo, 0, 0)
+        ttl := cab[2]
+        devolver r
+    fin
+
+    ; ---- TCP ----
+    ; una conexión con «ip», a su «puerto»: su número, o un error
+    público función conectar(ip: nat32, puerto: nat32, espera: nat32): nat32
+        devolver pide_con_red(O_CONECTAR, ip, puerto, espera, 0, nulo, 0, 0)
+    fin
+
+    ; manda los n octetos de p (todos, aunque haya que esperar): n, o un error
+    público función enviar(s: nat32, p: puntero a byte, n: nat32): nat32
+        variable hecho, r, trozo: nat32
+        hecho := 0
+        mientras hecho < n hacer
+            trozo := n - hecho
+            si trozo > MAX_DATOS entonces trozo := MAX_DATOS fin
+            r := pide(O_ENVIAR, s, 0, 0, 0, p + hecho, trozo, 0)
+            si es_error_red(r) entonces devolver r fin
+            hecho := hecho + r
+        fin
+        devolver n
+    fin
+
+    público función enviar_texto(s: nat32, t: puntero a byte): nat32
+        devolver enviar(s, t, longitud(t))
+    fin
+
+    ; lo que haya llegado (hasta «cabe» octetos, a p; si no hay nada, espera
+    ; hasta «espera» tics): cuántos; 0 si la otra punta ha cerrado; o un error
+    público función recibir(s: nat32, p: puntero a byte, cabe: nat32, espera: nat32): nat32
+        si cabe > MAX_DATOS entonces cabe := MAX_DATOS fin
+        devolver pide(O_RECIBIR, s, espera, 0, 0, p, 0, cabe)
+    fin
+
+    público función cerrar_conexión(s: nat32): nat32
+        devolver pide(O_CERRAR, s, 0, 0, 0, nulo, 0, 0)
+    fin
+
+    ; ---- UDP ----
+    público función udp_abrir(puerto: nat32): nat32
+        devolver pide(O_UDP, puerto, 0, 0, 0, nulo, 0, 0)
+    fin
+
+    público función udp_enviar(s: nat32, ip: nat32, puerto: nat32, p: puntero a byte, n: nat32): nat32
+        devolver pide(O_UDP_ENVIAR, s, ip, puerto, 0, p, n, 0)
+    fin
+
+    ; lo que llegue: cuántos octetos; en «ip» y «puerto», de quién
+    público función udp_recibir(s: nat32, p: puntero a byte, cabe: nat32, espera: nat32, ref ip: nat32, ref puerto: nat32): nat32
+        variable r: nat32
+        si cabe > MAX_DATOS entonces cabe := MAX_DATOS fin
+        r := pide(O_RECIBIR, s, espera, 0, 0, p, 0, cabe)
+        ip := cab[1]
+        puerto := cab[2]
+        devolver r
+    fin
+
+fin Redes.

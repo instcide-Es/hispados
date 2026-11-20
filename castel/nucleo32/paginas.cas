@@ -28,6 +28,7 @@ módulo Paginas
     público constante PRESENTE = 1
     público constante ESCRIBIR = 2
     público constante USUARIO = 4
+    público constante AJENO = 0x200             ; (bit libre de la entrada) el marco no es del programa: memoria del equipo que se le deja ver (energia.cas); al acabar, no vuelve a los libres
     constante DIRECCIÓN = 0xFFFFF000
 
     público constante PÁGINA = 4096
@@ -230,7 +231,7 @@ módulo Paginas
             si de[i] yb PRESENTE <> 0 entonces
                 tabla := puntero(de[i] yb DIRECCIÓN)
                 para j desde 0 hasta 1023 hacer
-                    si tabla[j] yb PRESENTE <> 0 entonces
+                    si tabla[j] yb PRESENTE <> 0 y tabla[j] yb AJENO = 0 entonces
                         si soltar_marco(tabla[j] yb DIRECCIÓN) entonces n := n + 1 fin
                     fin
                 fin

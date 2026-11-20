@@ -375,7 +375,20 @@ falta enlazar con otras cosas; de momento no hace falta.
   el disco) no se ha tocado nada: lo nuevo son dos programas del anillo 3
   aparte y un módulo corto en el núcleo, que usa 2.644 párrafos de 3.072 para
   los nombres, 2.809 de 4.096 para los textos y 8.718 de 10.240, lo más, para
-  el árbol (`CASTEL ... --gasto`). Un programa no puede declarar un arreglo de
+  el árbol (`CASTEL ... --gasto`). Con la 0.8 (la red) tampoco: la red es un
+  programa del anillo 3 aparte (`RED.BIN`, con seis módulos suyos) y el
+  núcleo solo gana un módulo corto (`red.cas`); las pruebas compilan la red en
+  una cuarta tanda de disquetes. Con la 0.8 entera (el USB en caliente, la
+  red y apagar de verdad juntos, más el AHCI del ICH7) el núcleo ya no cabía:
+  3.075 párrafos de nombres (eran 3.072), 10.153 del árbol (de 10.240) y
+  3.400 de lo declarado (de 3.584). Más sitio para todo ya no cabe en lo que
+  deja libre Hispa-8086 (con más tablas, CASTEL no arranca: «no queda memoria
+  libre para las tablas del compilador»), así que se han repartido los mismos
+  K: **52 K para los nombres** (eran 48) y **60 K para los textos** (eran 64;
+  el núcleo usa 50). Queda muy poco margen (nombres al 92 %, árbol al 99 %,
+  declarados al 95 %, textos al 83 %): el siguiente estirón del núcleo pedirá
+  ya lo de soltar del árbol lo que no
+  haga falta o compilar por módulos. Un programa no puede declarar un arreglo de
   más de 64 K: lo que haga falta mayor se pide con `más_memoria`.
 - **El núcleo de Hispa-Pentium**: desde la 0.4 tiene su entorno gráfico (el
   escritorio, PENTIUM.md §10; con menús, portapapeles e iconos desde la 0.5) y,

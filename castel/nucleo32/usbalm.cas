@@ -13,13 +13,16 @@
 ;
 ;  Los datos pasan por una página del núcleo (ocho sectores por orden). De
 ;  fábrica NO se escribe: solo si «escritura» es cierto (discos.cas).
+;  Las que se enchufan en marcha llegan por nueva(); las que se van, por
+;  se_va() (y lo que estuvieran haciendo falla en el acto); expulsa() es el
+;  final de «quitar con seguridad» (usbcal.cas).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Usbalm
 
     importar Usb, Usbbase, Marcos, Tareas, Mem32
 
-    público constante MAX_MEMORIAS = 2
+    público constante MAX_MEMORIAS = 4
     constante SECTOR = 512
     constante POR_VEZ = 8                       ; los sectores de cada orden (una página)
 
@@ -42,6 +45,7 @@ módulo Usbalm
     variable sobres: nat32                      ; la del envoltorio (CBW) y el estado (CSW, en 0x40)
     variable etiqueta: nat32                    ; cada orden lleva un número, que vuelve en su estado
     variable scsi: arreglo [16] de byte         ; la orden SCSI que se va a mandar
+    variable encontrada: nat32                  ; la última que ha apuntado mira()
 
     ; reinicia la clase: la orden propia del transporte, y fuera las paradas
     función reinicia(m: nat32)
@@ -131,7 +135,10 @@ módulo Usbalm
         variable m, i, entra, sale, lista: nat32
         variable p: puntero a byte
         variable bien: bool
-        si cuántas >= MAX_MEMORIAS entonces devolver fin
+        ; un sitio libre
+        m := 0
+        mientras m < MAX_MEMORIAS y memorias[m].hay hacer m := m + 1 fin
+        si m >= MAX_MEMORIAS entonces devolver fin
         ; sus dos extremos a granel
         entra := NINGUNO
         sale := NINGUNO
@@ -145,7 +152,6 @@ módulo Usbalm
             fin
         fin
         si entra = NINGUNO o sale = NINGUNO entonces devolver fin
-        m := cuántas
         memorias[m].hay := falso
         memorias[m].aparato := a
         memorias[m].interfaz := aparatos[a].interfaces[k].número
@@ -187,6 +193,7 @@ módulo Usbalm
         memorias[m].sectores := memorias[m].sectores + 1
         memorias[m].hay := cierto
         cuántas := cuántas + 1
+        encontrada := m
     fin
 
     ; busca las memorias entre los aparatos que ha enumerado usb.cas. Da
@@ -210,6 +217,58 @@ módulo Usbalm
         devolver cuántas
     fin
 
+    ; el aparato a se acaba de enchufar: si es una memoria, se apunta como
+    ; las del arranque. Da su número, o NINGUNO.
+    público función nueva(a: nat32): nat32
+        variable k: nat32
+        si datos = 0 o sobres = 0 entonces devolver NINGUNO fin
+        tomar(cerrojo)
+        encontrada := NINGUNO
+        para k desde 1 hasta aparatos[a].n_interfaces hacer
+            si encontrada = NINGUNO y aparatos[a].interfaces[k - 1].clase = 8 y aparatos[a].interfaces[k - 1].subclase = 6 y aparatos[a].interfaces[k - 1].protocolo = 0x50 entonces
+                mira(a, k - 1)
+            fin
+        fin
+        soltar(cerrojo)
+        devolver encontrada
+    fin
+
+    ; el aparato a se ha desenchufado: su memoria (si es una) deja de estar,
+    ; ya (sin el cerrojo: lo que se le esté pidiendo acaba en un fallo). Da
+    ; su número, o NINGUNO.
+    público función se_va(a: nat32): nat32
+        variable m: nat32
+        para m desde 0 hasta MAX_MEMORIAS - 1 hacer
+            si memorias[m].hay y memorias[m].aparato = a entonces
+                memorias[m].hay := falso
+                memorias[m].aparato := NINGUNO
+                cuántas := cuántas - 1
+                devolver m
+            fin
+        fin
+        devolver NINGUNO
+    fin
+
+    ; el final de «quitar con seguridad»: que guarde lo que tenga pendiente
+    ; (SYNCHRONIZE CACHE), que se pare y «expulse» el medio (START STOP UNIT),
+    ; y la memoria s deja de usarse (el aparato sigue enchufado)
+    público función expulsa(s: nat32)
+        si s >= MAX_MEMORIAS entonces devolver fin
+        si no memorias[s].hay entonces devolver fin
+        tomar(cerrojo)
+        si escritura entonces
+            prepara_orden(0x35)
+            si no orden(s, 10, 0, falso) entonces pregunta_fallo(s) fin
+        fin
+        prepara_orden(0x1B)
+        scsi[4] := 2
+        si no orden(s, 6, 0, falso) entonces pregunta_fallo(s) fin
+        memorias[s].hay := falso
+        memorias[s].aparato := NINGUNO
+        cuántas := cuántas - 1
+        soltar(cerrojo)
+    fin
+
     ; trae n sectores de la memoria s, desde el sector lba, a destino
     público función leer_sectores(s: nat32, lba: nat32, n: nat32, destino: puntero a byte): bool
         variable k, intentos: nat32
@@ -223,7 +282,7 @@ módulo Usbalm
             si k > POR_VEZ entonces k := POR_VEZ fin
             intentos := 0
             bien := falso
-            mientras no bien y intentos < 3 hacer
+            mientras no bien y intentos < 3 y memorias[s].hay hacer
                 orden_10(0x28, lba, k)
                 bien := orden(s, 10, k * SECTOR, cierto)
                 si no bien entonces pregunta_fallo(s) fin
@@ -255,7 +314,7 @@ módulo Usbalm
             si k > POR_VEZ entonces k := POR_VEZ fin
             intentos := 0
             bien := falso
-            mientras no bien y intentos < 3 hacer
+            mientras no bien y intentos < 3 y memorias[s].hay hacer
                 copiar_memoria(puntero(datos), origen, k * SECTOR)
                 orden_10(0x2A, lba, k)
                 bien := orden(s, 10, k * SECTOR, falso)

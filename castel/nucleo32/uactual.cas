@@ -1,0 +1,399 @@
+; =============================================================================
+;  uactual.cas - «Programas y actualizaciones», del escritorio de
+;  Hispa-Pentium (ACTUALIZ.BIN en el disco): la ventana de PAQUETES. Enseña
+;  lo instalado y lo que hay en el catálogo (la versión de cada uno, y si hay
+;  una más nueva), y con sus botones instala (o pone al día) el elegido, lo
+;  quita, o actualiza todo. No sabe de paquetes: se lo pide a PAQUETES.BIN
+;  («PAQUETES ESTADO», «PAQUETES INSTALA nombre»...), con lo que escribe
+;  mandado a un archivo (C:\HISPA\PAQUETES\VENTANA.TXT), que luego lee: las
+;  dependencias, las sumas y el todo o nada son los de PAQUETES.
+;  Con el teclado: las flechas eligen, Intro instala (o actualiza) el
+;  elegido, Supr lo quita, F5 vuelve a mirar.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UActual
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Mem32, Formato
+
+    constante ANCHO = 600
+    constante ALTO = 420
+    constante MAX_PAQ = 64
+    constante SALIDA = 16384
+    constante CABEZA = 48
+    constante LISTA_Y = 78                      ; el primer renglón
+    constante RENGLÓN = 20
+    constante CABEN = 10                        ; los renglones que se ven
+    constante AVISO_Y = 296                     ; las líneas de lo que ha dicho PAQUETES
+    constante BOTÓN_Y = 368
+    constante BOTÓN_ALTO = 30
+    constante PAPEL = 0xFFFFFF
+    constante TINTA = 0x14294A
+    constante SUAVE = 0x5A7396
+    constante ELEGIDO = 0xCFE3FB
+    constante VERDE = 0x1E8A4C
+    constante TECLA_F5 = 0x13F
+
+    variable v: nat32
+    variable n: nat32
+    variable nombres: arreglo [MAX_PAQ] de arreglo [12] de byte
+    variable instalada: arreglo [MAX_PAQ] de arreglo [16] de byte
+    variable disponible: arreglo [MAX_PAQ] de arreglo [16] de byte
+    variable descs: arreglo [MAX_PAQ] de arreglo [64] de byte
+    variable origen: arreglo [120] de byte
+    variable elegido, primero: ent32
+    variable avisos: arreglo [3] de arreglo [76] de byte
+    variable salida: arreglo [SALIDA + 1] de byte
+    variable archivo: arreglo [64] de byte      ; C:\HISPA\PAQUETES\VENTANA.TXT
+    variable órdenes: arreglo [80] de byte
+
+    función colocar(ventana_: nat32)
+        ensamblador
+            mov eax, 80
+            mov ebx, {ventana_}
+            mov ecx, 0xFFFFFFFF
+            mov edx, 0
+            int 0x80
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  PAQUETES, por debajo
+    ; -------------------------------------------------------------------------
+    ; lanza «PAQUETES args» con lo que escriba mandado a VENTANA.TXT, lo
+    ; espera, y deja lo escrito en «salida»: da su código de salida
+    función paquetes(args: puntero a byte): nat32
+        variable m, t, c, k, r: nat32
+        m := crear(archivo)
+        si es_error(m) entonces
+            Textos32.copiar(salida, "No se puede escribir en C:\\HISPA\\PAQUETES.")
+            devolver 1
+        fin
+        redirigir(m)
+        t := lanzar("PAQUETES.BIN", args)
+        c := 255
+        si no es_error(t) entonces c := esperar(t) fin
+        redirigir(SIN_SALIDA)
+        cerrar(m)
+        salida[0] := 0
+        si es_error(t) entonces
+            Textos32.copiar(salida, "No está PAQUETES.BIN (el paquete «paquetes»).")
+            devolver 1
+        fin
+        m := abrir(archivo)
+        si no es_error(m) entonces
+            k := 0
+            mientras k < SALIDA hacer
+                r := leer(m, dirección(salida[k]), SALIDA - k)
+                si es_error(r) o r = 0 entonces romper fin
+                k := k + r
+            fin
+            salida[k] := 0
+            cerrar(m)
+        fin
+        borrar(archivo)
+        devolver c
+    fin
+
+    ; el trozo número i de una línea «a|b|c», a destino
+    función trozo(l: puntero a byte, i: nat32, destino: puntero a byte, cabe: nat32)
+        variable k: nat32
+        mientras i > 0 y valor(l) <> 0 hacer
+            si valor(l) = '|' entonces i := i - 1 fin
+            l := l + 1
+        fin
+        k := 0
+        mientras valor(l) <> 0 y valor(l) <> '|' y valor(l) <> '\r' y valor(l) <> '\n' y k + 1 < cabe hacer
+            destino[k] := valor(l)
+            k := k + 1
+            l := l + 1
+        fin
+        destino[k] := 0
+    fin
+
+    ; las líneas de «salida», de una en una (dónde empieza la siguiente)
+    función siguiente_línea(p: puntero a byte): puntero a byte
+        mientras valor(p) <> 0 y valor(p) <> '\n' hacer p := p + 1 fin
+        si valor(p) = '\n' entonces p := p + 1 fin
+        devolver p
+    fin
+
+    ; las últimas líneas de lo que ha dicho PAQUETES (las que no están en blanco), a los avisos
+    función avisos_de_salida()
+        variable p, q: puntero a byte
+        variable i: nat32
+        para i desde 0 hasta 2 hacer avisos[i][0] := 0 fin
+        p := salida
+        mientras valor(p) <> 0 hacer
+            q := siguiente_línea(p)
+            si valor(p) <> '\r' y valor(p) <> '\n' y no empieza_por(p, "p|") y no empieza_por(p, "origen|") entonces
+                Textos32.copiar(avisos[0], avisos[1])
+                Textos32.copiar(avisos[1], avisos[2])
+                trozo(p, 0, avisos[2], 76)
+                ; (sin «paquetes: » delante: ya se sabe quién lo dice)
+                si empieza_por(avisos[2], "paquetes: ") entonces Textos32.copiar(avisos[2], dirección(avisos[2][10])) fin
+            fin
+            p := q
+        fin
+    fin
+
+    ; lo que hay: «PAQUETES ESTADO»
+    función mira()
+        variable p: puntero a byte
+        variable x: arreglo [8] de byte
+        variable antes: arreglo [12] de byte
+        variable i: nat32
+        ; (lo elegido sigue elegido, aunque cambie de sitio en la lista)
+        antes[0] := 0
+        si n > 0 y elegido >= 0 y elegido < ent32(n) entonces Textos32.copiar(antes, nombres[elegido]) fin
+        paquetes("estado")
+        n := 0
+        origen[0] := 0
+        p := salida
+        mientras valor(p) <> 0 hacer
+            trozo(p, 0, x, 8)
+            si iguales(x, "origen") entonces
+                trozo(p, 1, origen, 120)
+            sino si iguales(x, "p") y n < MAX_PAQ entonces
+                trozo(p, 1, nombres[n], 12)
+                trozo(p, 2, instalada[n], 16)
+                trozo(p, 3, disponible[n], 16)
+                trozo(p, 4, descs[n], 64)
+                n := n + 1
+            fin
+            p := siguiente_línea(p)
+        fin
+        para i desde 1 hasta n hacer
+            si antes[0] <> 0 y iguales(nombres[i - 1], antes) entonces elegido := ent32(i) - 1 fin
+        fin
+        si elegido >= ent32(n) entonces elegido := ent32(n) - 1 fin
+        si elegido < 0 entonces elegido := 0 fin
+        si elegido < primero entonces primero := elegido fin
+        si elegido >= primero + CABEN entonces primero := elegido - CABEN + 1 fin
+    fin
+
+    ; ¿es la disponible más nueva que la instalada? (las dos, números con puntos)
+    función más_nueva(a: puntero a byte, b: puntero a byte): bool
+        variable va, vb: nat32
+        mientras valor(a) <> 0 o valor(b) <> 0 hacer
+            va := 0
+            mientras es_cifra(valor(a)) hacer
+                va := va * 10 + valor(a) - '0'
+                a := a + 1
+            fin
+            vb := 0
+            mientras es_cifra(valor(b)) hacer
+                vb := vb * 10 + valor(b) - '0'
+                b := b + 1
+            fin
+            si va <> vb entonces devolver va > vb fin
+            si valor(a) <> 0 entonces a := a + 1 fin
+            si valor(b) <> 0 entonces b := b + 1 fin
+        fin
+        devolver falso
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Pintar
+    ; -------------------------------------------------------------------------
+    función botón(x: ent32, an: ent32, t: puntero a byte, activo: bool)
+        variable c: nat32
+        redondeado(v, x, BOTÓN_Y, an, BOTÓN_ALTO, 5, 0x6F87A8, 0x6F87A8)
+        redondeado(v, x + 1, BOTÓN_Y + 1, an - 2, BOTÓN_ALTO - 2, 4, 0xFDFEFF, 0xD9E6F6)
+        c := TINTA
+        si no activo entonces c := 0xA0AEC2 fin
+        texto_negrita(v, x + (an - ent32(longitud(t)) * 8) div 2, BOTÓN_Y + 7, t, c)
+    fin
+
+    ; (dónde están: x y ancho)
+    constante B1_X = 14
+    constante B1_AN = 170
+    constante B2_X = 196
+    constante B2_AN = 130
+    constante B3_X = 338
+    constante B3_AN = 170
+
+    función pinta()
+        variable i, yy: ent32
+        variable t: arreglo [40] de byte
+        variable nuevo: bool
+        ; la cabeza
+        degradado(v, 0, 0, ANCHO, CABEZA, 0xF4F8FE, 0xD3E3F8)
+        rectángulo(v, 0, CABEZA - 1, ANCHO, 1, 0x9DBBE4)
+        ; (una caja: un paquete)
+        redondeado(v, 14, 10, 28, 26, 3, 0x9A6A1E, 0x9A6A1E)
+        redondeado(v, 15, 11, 26, 24, 2, 0xF2C46C, 0xD69A3A)
+        rectángulo(v, 26, 11, 4, 24, 0xB9822F)
+        texto_negrita(v, 52, 7, "Programas y actualizaciones", TINTA)
+        si origen[0] <> 0 entonces
+            Textos32.copiar(t, "Los paquetes, de ")
+            texto(v, 52, 26, t, SUAVE)
+            texto(v, 52 + 17 * 8, 26, origen, SUAVE)
+        fin
+        ; la lista
+        rectángulo(v, 0, CABEZA, ANCHO, AVISO_Y - CABEZA - 8, PAPEL)
+        texto_negrita(v, 14, CABEZA + 6, "Programa", SUAVE)
+        texto_negrita(v, 110, CABEZA + 6, "Instalado", SUAVE)
+        texto_negrita(v, 206, CABEZA + 6, "Hay", SUAVE)
+        texto_negrita(v, 302, CABEZA + 6, "Qué es", SUAVE)
+        rectángulo(v, 10, LISTA_Y - 3, ANCHO - 20, 1, 0xC9D8EC)
+        si n = 0 entonces
+            texto(v, 14, LISTA_Y + 4, "No hay ningún paquete instalado ni catálogo a la vista.", SUAVE)
+        fin
+        i := primero
+        mientras i < ent32(n) y i < primero + CABEN hacer
+            yy := LISTA_Y + (i - primero) * RENGLÓN
+            si i = elegido entonces rectángulo(v, 8, yy, ANCHO - 16, RENGLÓN, ELEGIDO) fin
+            texto_negrita(v, 14, yy + 2, nombres[i], TINTA)
+            si instalada[i][0] = 0 entonces
+                texto(v, 110, yy + 2, "(no)", SUAVE)
+            sino
+                texto(v, 110, yy + 2, instalada[i], TINTA)
+            fin
+            nuevo := disponible[i][0] <> 0 y (instalada[i][0] = 0 o más_nueva(disponible[i], instalada[i]))
+            si nuevo y instalada[i][0] <> 0 entonces
+                Textos32.copiar(t, disponible[i])
+                concatenar(t, " (nueva)")
+                texto_negrita(v, 206, yy + 2, t, VERDE)
+            sino
+                texto(v, 206, yy + 2, disponible[i], TINTA)
+            fin
+            texto(v, 302, yy + 2, descs[i], TINTA)
+            i := i + 1
+        fin
+        ; lo que ha dicho PAQUETES
+        rectángulo(v, 0, AVISO_Y - 8, ANCHO, ALTO - AVISO_Y + 8, 0xEEF3FA)
+        rectángulo(v, 0, AVISO_Y - 8, ANCHO, 1, 0x9DBBE4)
+        para i desde 0 hasta 2 hacer texto(v, 14, AVISO_Y + i * 18, avisos[i], TINTA) fin
+        ; los botones
+        nuevo := falso
+        si n > 0 entonces nuevo := instalada[elegido][0] = 0 o (disponible[elegido][0] <> 0 y más_nueva(disponible[elegido], instalada[elegido])) fin
+        si n > 0 y instalada[elegido][0] <> 0 entonces
+            botón(B1_X, B1_AN, "Actualizarlo", nuevo)
+        sino
+            botón(B1_X, B1_AN, "Instalarlo", n > 0)
+        fin
+        botón(B2_X, B2_AN, "Quitarlo", n > 0 y instalada[elegido][0] <> 0)
+        botón(B3_X, B3_AN, "Actualizar todo", cierto)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Hacer
+    ; -------------------------------------------------------------------------
+    función haz(qué: puntero a byte, con_nombre: bool)
+        Textos32.copiar(órdenes, qué)
+        si con_nombre entonces
+            concatenar(órdenes, " ")
+            concatenar(órdenes, nombres[elegido])
+        fin
+        Textos32.copiar(avisos[0], "")
+        Textos32.copiar(avisos[1], "")
+        Textos32.copiar(avisos[2], "Un momento...")
+        pinta()
+        paquetes(órdenes)
+        avisos_de_salida()
+        Textos32.copiar(salida, "")
+        ; (lo que ha dicho, a salvo: mirar otra vez lo pisa)
+        mira_sin_avisos()
+        pinta()
+    fin
+
+    función mira_sin_avisos()
+        variable a: arreglo [3] de arreglo [76] de byte
+        variable i: nat32
+        para i desde 0 hasta 2 hacer Textos32.copiar(a[i], avisos[i]) fin
+        mira()
+        para i desde 0 hasta 2 hacer Textos32.copiar(avisos[i], a[i]) fin
+    fin
+
+    función instala_elegido()
+        si n = 0 entonces devolver fin
+        si instalada[elegido][0] = 0 entonces
+            haz("instala", cierto)
+        sino si disponible[elegido][0] <> 0 y más_nueva(disponible[elegido], instalada[elegido]) entonces
+            haz("actualiza", cierto)
+        sino
+            Textos32.copiar(avisos[0], "")
+            Textos32.copiar(avisos[1], "")
+            Textos32.copiar(avisos[2], "Ya está instalado y al día.")
+            pinta()
+        fin
+    fin
+
+    función quita_elegido()
+        si n > 0 y instalada[elegido][0] <> 0 entonces haz("quita", cierto) fin
+    fin
+
+    función elige(i: ent32)
+        si i < 0 o i >= ent32(n) entonces devolver fin
+        elegido := i
+        si elegido < primero entonces primero := elegido fin
+        si elegido >= primero + CABEN entonces primero := elegido - CABEN + 1 fin
+        pinta()
+    fin
+
+    función clic(x: ent32, yy: ent32)
+        si yy >= BOTÓN_Y y yy < BOTÓN_Y + BOTÓN_ALTO entonces
+            si x >= B1_X y x < B1_X + B1_AN entonces instala_elegido() fin
+            si x >= B2_X y x < B2_X + B2_AN entonces quita_elegido() fin
+            si x >= B3_X y x < B3_X + B3_AN entonces haz("actualiza", falso) fin
+            devolver
+        fin
+        si yy >= LISTA_Y y yy < LISTA_Y + CABEN * RENGLÓN entonces
+            elige(primero + (yy - LISTA_Y) div RENGLÓN)
+        fin
+    fin
+
+    función principal(): byte
+        variable s: Suceso
+        variable u: Info_unidad
+        variable i: nat32
+        variable sis: byte
+        v := ventana("Programas y actualizaciones", ANCHO, ALTO)
+        si es_error(v) entonces
+            escribir("actualiz: no hay escritorio (o no hay memoria para la ventana)\n")
+            devolver 1
+        fin
+        colocar(v)
+        sis := 'C'
+        i := 0
+        mientras info_unidad(i, u) hacer
+            si u.del_sistema = 1 entonces sis := u.letra fin
+            i := i + 1
+        fin
+        archivo[0] := sis
+        archivo[1] := 0
+        concatenar(archivo, ":\\HISPA\\PAQUETES\\VENTANA.TXT")
+        Textos32.copiar(avisos[2], "Mirando lo instalado y el catálogo...")
+        pinta()
+        mira()
+        ; (si PAQUETES ha dicho algo más que la lista, se enseña: que no hay catálogo...)
+        avisos_de_salida()
+        pinta()
+        mientras suceso(v, s, cierto) hacer
+            si s.clase = EV_TECLA entonces
+                si s.a = TECLA_ARRIBA entonces
+                    elige(elegido - 1)
+                sino si s.a = TECLA_ABAJO entonces
+                    elige(elegido + 1)
+                sino si s.a = '\n' entonces
+                    instala_elegido()
+                sino si s.a = TECLA_SUPR entonces
+                    quita_elegido()
+                sino si s.a = TECLA_F5 entonces
+                    mira_sin_avisos()
+                    pinta()
+                fin
+            sino si s.clase = EV_RATÓN_BAJA entonces
+                clic(ent32(s.a), ent32(s.b))
+            sino si s.clase = EV_TAMAÑO entonces
+                pinta()
+            sino si s.clase = EV_CERRAR entonces
+                devolver 0
+            fin
+        fin
+        devolver 0
+    fin
+
+fin UActual.

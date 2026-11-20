@@ -54,6 +54,7 @@ módulo Usbbase
 
     público tipo Aparato = estructura
         usado: bool
+        ido: bool                               ; se ha desenchufado: lo que se le pida falla en el acto (usbcal.cas)
         hc_clase: nat32                         ; de qué clase es su controladora
         hc: nat32                               ; y cuál de ellas
         dir: nat32                              ; su dirección USB (0: aún no la tiene)

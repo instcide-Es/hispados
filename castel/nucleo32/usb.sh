@@ -9,7 +9,8 @@
 # en ella se puede guardar («escritura=usb»: solo en las memorias USB; en los
 # discos de dentro del PC NO se escribe, aunque se ven: C:). Por si el USB de
 # un equipo no se deja, GRUB carga también, como módulos, los programas (el
-# intérprete de órdenes, el Bloc de notas, la Consola...) y un LEEME.TXT:
+# intérprete de órdenes, el Bloc de notas, la Consola, el servicio de red
+# RED.BIN y sus programas IPCONFIG, PING y DESCARGAR...) y un LEEME.TXT:
 # hacen de unidad M:, en memoria y de solo lectura (usuario.cas), que es la
 # del sistema si no hay X:. Con «registro», lo que el núcleo encuentra al
 # arrancar (discos, USB) queda en X:\ARRANQUE.TXT. Las entradas del menú:
@@ -22,7 +23,9 @@
 #   - los modos de vídeo que da la BIOS de ese equipo (la orden «videoinfo»
 #     de GRUB), para saber cuáles se pueden pedir;
 #   - el escritorio «como en la 0.5»: sin tocar el USB ni mirar los discos
-#     («sinusb sindisco»), por si con lo nuevo un equipo no arranca;
+#     ni poner en marcha la red ni el servicio de ACPI («sinusb sindisco
+#     sinred sinacpi»), por si con lo
+#     nuevo un equipo no arranca;
 #   - el intérprete de órdenes y la consola del núcleo, en modo texto (la
 #     consola enseña en la pantalla lo que encuentra: discos y USB);
 #   - desde la 0.7, «Instalar Hispa-Pentium en el disco duro»: el núcleo en
@@ -39,6 +42,8 @@
 #     la carpeta \INSTALA de la memoria. Con ellos van la oficina
 #     (nucleo32/hvprun): HVPRUN.BIN y lo de \OFICINA, con
 #     CARPETAS.TXT, que le dice a INSTALAR lo que va a C:\OFICINA.
+#   - y el servicio de ACPI, ACPI.BIN (acpi/pentium/hacer.sh): apagar de
+#     verdad y la batería; con «registro», lo suyo queda en X:\ACPI.TXT.
 # Necesita ser root (losetup, mount), python3, nasm, parted, dosfstools y
 # grub-pc-bin (grub-install --target=i386-pc).
 set -eu
@@ -56,7 +61,7 @@ python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT10.BIN 1024 768 32 
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT6.BIN 1024 600 32 > /dev/null
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT13.BIN 1366 768 32 > /dev/null
 MODULOS=
-for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE uinstala:INSTALAR uasiste:ASISTE; do
+for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO upaquete:PAQUETES uactual:ACTUALIZ uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uinstala:INSTALAR uasiste:ASISTE; do
   f=${p%%:*}; N=${p##*:}
   python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $W/$f.asm > /dev/null
   nasm -f bin $W/$f.asm -o $W/f/$N.BIN
@@ -65,6 +70,11 @@ for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO uhola:HOLA 
   MODULOS="$MODULOS  module /$N.BIN $N.BIN
 "
 done
+# el servicio de ACPI (acpi/pentium/: apagar de verdad y la batería), un
+# programa más: va en la raíz, como módulo y, al instalar, a \HISPA
+bash $AQUI/../../acpi/pentium/hacer.sh $W/f/ACPI.BIN
+MODULOS="$MODULOS  module /ACPI.BIN ACPI.BIN
+"
 # lo que se instala en el disco: el núcleo (con el nombre que tendrá allí), los
 # programas, los textos del sistema instalado y el arranque del disco
 INSTALA="  module /ESCRIT8.BIN NUCLEO.BIN
@@ -88,10 +98,8 @@ for f in $W/of/*.HVP $W/of/*.DAT; do
 "
   printf '%s=OFICINA\r\n' $n >> $W/i/CARPETAS.TXT
 done
-INSTALA="$INSTALA  module /INSTALA/CARPETAS.TXT CARPETAS.TXT
-"
 iconv -f UTF-8 -t CP437 > $W/i/LEEME.TXT <<'L'
-Hispa-Pentium 0.7, instalado en el disco duro.
+Hispa-Pentium 0.8, instalado en el disco duro.
 
 El sistema está en la carpeta \HISPA de esta unidad (C:): el núcleo
 (NUCLEO.BIN), los programas (ORDENES.BIN, BLOC.BIN, CONSOLA.BIN, EQUIPO.BIN...),
@@ -99,7 +107,7 @@ sus ajustes (HISPA.INI) y el menú de arranque (GRUB.CFG).
 En MANUAL.TXT, en esa carpeta, hay un resumen de lo que se puede hacer.
 L
 iconv -f UTF-8 -t CP437 > $W/i/MANUAL.TXT <<'L'
-HISPA-PENTIUM 0.7 - RESUMEN
+HISPA-PENTIUM 0.8 - RESUMEN
 
 Hispa-Pentium es un sistema de 32 bits escrito en Castel, de la familia
 Hispa-DOS. Este es el sistema instalado en el disco duro.
@@ -113,11 +121,30 @@ EL ESCRITORIO
   del ratón abre un menú en casi todas partes.
   El Bloc de notas guarda con F2. Cortar, copiar y pegar: Ctrl+X, Ctrl+C y
   Ctrl+V (el portapapeles es de todo el sistema).
+  En los portátiles, la bandeja enseña la batería: con el puntero quieto
+  encima, lo que queda, si está enchufado y la salud de la batería.
+
+LA RED (por cable)
+  Con el cable enchufado, el sistema pide la IP solo (DHCP) y el icono de la
+  bandeja (abajo a la derecha) se pone verde. En la Consola:
+    IPCONFIG               cómo está la red (IPCONFIG /TODO: con detalle)
+    PING nombre            si contesta ese equipo (PING 8.8.8.8)
+    DESCARGAR http://...   baja un archivo (solo http://; https, aún no)
+  Las tarjetas que lleva: Intel PRO/1000, Realtek RTL8139 y Marvell Yukon
+  88E8059. El Wi-Fi, todavía no.
 
 LA CONSOLA (el intérprete de órdenes)
   AYUDA dice las órdenes: DIR, TYPE, COPY, DEL, REN, MD, CD, RD, PATH, VER,
   MEM, FECHA, CLS... Un programa se lanza por su nombre. C:, X: cambian de
   unidad (X: es una memoria USB). Hay archivos de órdenes (.BAT).
+
+PROGRAMAS Y ACTUALIZACIONES (PAQUETES)
+  PAQUETES LISTA dice lo instalado; PAQUETES CATALOGO, lo que se puede
+  instalar; PAQUETES INSTALA nombre (o X.HPQ) lo instala con lo que
+  necesite; PAQUETES ACTUALIZA lo pone al día; PAQUETES QUITA nombre lo
+  quita. Los paquetes se buscan en la carpeta \PAQUETES de la memoria USB
+  (o donde diga /DESDE=). Si se va la luz a mitad, la próxima vez se
+  deshace lo que quedó a medias.
 
 LAS UNIDADES
   C:, D:...  los discos de dentro del equipo (con formato FAT)
@@ -128,9 +155,12 @@ LAS UNIDADES
 LA CARPETA \HISPA
   NUCLEO.BIN   el núcleo
   *.BIN        los programas
+  ACPI.BIN     el servicio de ACPI: apagar de verdad y la batería de los
+               portátiles (sin él, «Apagar» solo dice que ya se puede)
   HISPA.INI    los ajustes: usuario, equipo, teclado (es o us) y modo
   GRUB.CFG     el menú de arranque. La línea «set modo=» es la medida de la
                pantalla (por ejemplo 1024x768x32, o auto)
+  PAQUETES     lo instalado (un .PQI por paquete): no tocar a mano
   ASISTE.BIN   el asistente del primer arranque: si se borra HISPA.INI,
                vuelve a salir al arrancar
   MBR.ANT      el primer sector que tenía el disco antes de instalar
@@ -153,7 +183,23 @@ cp /usr/lib/grub/i386-pc/boot.img $W/i/BOOT.IMG
 # dice la BIOS si no es un disco; el resto de GRUB, desde el sector 1)
 printf '\x90\x90' | dd of=$W/i/BOOT.IMG bs=1 seek=102 conv=notrunc status=none
 [ $(stat -c %s $W/i/CORE.IMG) -le 1000000 ] || { echo "usb.sh: CORE.IMG no cabe en el hueco de arranque"; exit 1; }
-printf 'Hispa-Pentium 0.7: un n\xa3cleo de 32 bits escrito en Castel.\r\nEste archivo est\xa0 en la memoria USB de arranque (la unidad X:) y, por si\r\nel USB no se deja, ha venido tambi\x82n con el cargador (la unidad M:).\r\n' > $W/f/LEEME.TXT
+# los paquetes del sistema (tools/hpq.py: base, bloc, consola, equipo, red,
+# ejemplos, paquetes, hvprun y oficina), hechos de lo mismo que se instala:
+# van en \PAQUETES de la memoria, con su CATALOGO.TXT (PAQUETES los encuentra
+# ahí); y sus registros (.PQI), con lo que se instala: INSTALAR los deja en
+# C:\HISPA\PAQUETES (lo dice CARPETAS.TXT), y así PAQUETES sabe luego qué hay
+python3 -I $AQUI/../../tools/hpq.py sistema $W/paq $W/i $W/f $W/of > /dev/null
+mkdir $W/i/PAQUETES
+for f in $W/paq/PQI/*.PQI; do
+  n=$(basename $f)
+  cp $f $W/i/PAQUETES/
+  INSTALA="$INSTALA  module /INSTALA/PAQUETES/$n $n
+"
+done
+cat $W/paq/PQI/CARPETAS.TXT >> $W/i/CARPETAS.TXT
+INSTALA="$INSTALA  module /INSTALA/CARPETAS.TXT CARPETAS.TXT
+"
+printf 'Hispa-Pentium 0.8: un n\xa3cleo de 32 bits escrito en Castel.\r\nEste archivo est\xa0 en la memoria USB de arranque (la unidad X:) y, por si\r\nel USB no se deja, ha venido tambi\x82n con el cargador (la unidad M:).\r\n' > $W/f/LEEME.TXT
 MODULOS="$MODULOS  module /LEEME.TXT LEEME.TXT
 "
 IMG=$W/usb.img
@@ -169,7 +215,9 @@ cp $W/f/* $W/m/
 # lo que solo es para instalar (los textos del sistema instalado, lo que va a
 # otra carpeta y el arranque del disco), en \INSTALA
 mkdir $W/m/INSTALA
-cp $W/i/* $W/m/INSTALA/
+cp -r $W/i/* $W/m/INSTALA/
+mkdir $W/m/PAQUETES
+cp $W/paq/*.HPQ $W/paq/CATALOGO.TXT $W/m/PAQUETES/
 # la oficina de Hispa-386 (Facturas, Pluma, Cuentas, Mirador: programas de
 # Hispa Ventanas) y su ejecutor, HVPRUN.BIN: el menú Inicio los abre de ahí
 # (ya están hechos, más arriba, para la entrada de instalar)
@@ -190,12 +238,12 @@ G
     printf '  boot\n}\n'
   }
   N="escritura=usb unidad=X registro"
-  entrada "Hispa-Pentium 0.7: el escritorio (800 x 600)" ESCRIT8.BIN "escritorio $N"
-  entrada "Hispa-Pentium 0.7: el escritorio a la medida de la pantalla" ESCRIT8.BIN "escritorio $N" "auto"
-  entrada "Hispa-Pentium 0.7: el escritorio (1024 x 600)" ESCRIT6.BIN "escritorio $N"
-  entrada "Hispa-Pentium 0.7: el escritorio (1366 x 768)" ESCRIT13.BIN "escritorio $N"
-  entrada "Hispa-Pentium 0.7: el escritorio (1024 x 768)" ESCRIT10.BIN "escritorio $N"
-  entrada "Hispa-Pentium 0.7: el escritorio SIN tocar el USB ni los discos (como la 0.5)" ESCRIT8.BIN "escritorio sindisco sinusb"
+  entrada "Hispa-Pentium 0.8: el escritorio (800 x 600)" ESCRIT8.BIN "escritorio $N"
+  entrada "Hispa-Pentium 0.8: el escritorio a la medida de la pantalla" ESCRIT8.BIN "escritorio $N" "auto"
+  entrada "Hispa-Pentium 0.8: el escritorio (1024 x 600)" ESCRIT6.BIN "escritorio $N"
+  entrada "Hispa-Pentium 0.8: el escritorio (1366 x 768)" ESCRIT13.BIN "escritorio $N"
+  entrada "Hispa-Pentium 0.8: el escritorio (1024 x 768)" ESCRIT10.BIN "escritorio $N"
+  entrada "Hispa-Pentium 0.8: el escritorio SIN tocar el USB, los discos, la red ni ACPI (como la 0.5)" ESCRIT8.BIN "escritorio sindisco sinusb sinred sinacpi"
   cat <<'G'
 menuentry "Ver los modos de video que da la BIOS de este equipo" {
   insmod videoinfo
@@ -206,9 +254,9 @@ menuentry "Ver los modos de video que da la BIOS de este equipo" {
   read nada
 }
 G
-  entrada "Hispa-Pentium 0.7: el interprete de ordenes (modo texto)" SEMILLA.BIN "ordenes $N"
-  entrada "Hispa-Pentium 0.7: la consola del nucleo (modo texto): dice los discos y el USB que encuentra" SEMILLA.BIN "$N"
-  printf 'menuentry "Instalar Hispa-Pentium 0.7 en el disco duro" {\n  multiboot /SEMILLA.BIN instalar unidad=M\n%s  boot\n}\n' "$INSTALA"
+  entrada "Hispa-Pentium 0.8: el interprete de ordenes (modo texto)" SEMILLA.BIN "ordenes $N"
+  entrada "Hispa-Pentium 0.8: la consola del nucleo (modo texto): dice los discos y el USB que encuentra" SEMILLA.BIN "$N"
+  printf 'menuentry "Instalar Hispa-Pentium 0.8 en el disco duro" {\n  multiboot /SEMILLA.BIN instalar unidad=M\n%s  boot\n}\n' "$INSTALA"
 } > $W/m/boot/grub/grub.cfg
 grub-install --target=i386-pc --boot-directory=$W/m/boot --modules="part_msdos fat multiboot all_video videoinfo read echo" $L > $W/grub.txt 2>&1 || { cat $W/grub.txt; exit 1; }
 sync

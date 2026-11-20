@@ -1,0 +1,356 @@
+; =============================================================================
+;  usbcal.cas - el USB «en caliente» del núcleo de Hispa-Pentium: lo que se
+;  enchufa y se desenchufa con el equipo en marcha.
+;
+;  Una tarea del núcleo, «usb-caliente», mira cada medio segundo los
+;  puertos de las controladoras (xHCI, EHCI y UHCI: sus registros, sin
+;  interrupciones) y, cada segundo, los de los concentradores (con la
+;  petición de su estado). Cuando en un puerto se enchufa algo, se espera a
+;  que se asiente (100 ms), se reinicia el puerto y se enumera (usb.cas),
+;  y se les da a sus clases: un teclado o un ratón (usbhid.cas) funcionan
+;  al momento; una memoria (usbalm.cas) es un disco más (discos.cas) y sus
+;  volúmenes FAT, unidades nuevas con la primera letra libre de la W: hacia
+;  abajo (unidades.cas). Cuando algo se desenchufa, se le marca («ido»: lo
+;  que se le esté pidiendo falla en el acto), se sueltan sus teclas y sus
+;  botones, sus unidades dejan de estar (los archivos abiertos en ellas dan
+;  error, y el programa sigue) y se quita: sus tuberías, su ranura del
+;  xHCI, sus páginas y su dirección.
+;
+;  «Quitar con seguridad» (quitar(), por la llamada al sistema 130, desde
+;  Mi equipo y la bandeja del escritorio, o con la orden «quitar» de la
+;  consola del núcleo): lo pendiente de escribir va a la memoria, se le
+;  dice que lo asiente y que se pare, y sus unidades dejan de estar; ya se
+;  puede quitar. La memoria de la que corre el sistema no se deja quitar.
+;
+;  Lo que pasa se dice por el puerto serie y queda como aviso para el
+;  escritorio (saca_aviso: el globo de la bandeja); a las ventanas de los
+;  programas les llega EV_UNIDADES cuando aparece o desaparece una unidad.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Usbcal
+
+    importar Tareas, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Discos, Fat, Unidades, Ventanas, Registro, Textos32, Formato
+
+    ; ---- lo que da quitar() ----
+    público constante Q_BIEN = 0                ; ya se puede quitar
+    público constante Q_NO_HAY = 1              ; no hay tal unidad
+    público constante Q_NO_USB = 2              ; no es de una memoria USB
+    público constante Q_SISTEMA = 3             ; el sistema corre desde ella
+
+    constante CADA = 50                         ; cada cuántos tics se miran los puertos (medio segundo)
+    constante MAX_AVISOS = 4
+    constante LARGO_AVISO = 80
+
+    público variable enchufados, desenchufados: nat32
+    variable cerrojo: Cerrojo                   ; de uno en uno: enchufar, desenchufar, quitar
+    variable en_marcha: bool
+    variable avisos: arreglo [MAX_AVISOS] de arreglo [LARGO_AVISO] de byte
+    variable av_ent, av_sal: nat32
+    variable cerrojo_avisos: Cerrojo
+    variable texto: arreglo [LARGO_AVISO] de byte
+    variable letras: arreglo [8] de byte
+
+    ; -------------------------------------------------------------------------
+    ;  Los avisos
+    ; -------------------------------------------------------------------------
+    ; un aviso: se dice (y se apunta en el registro) y queda para el escritorio
+    función avisa(t: puntero a byte)
+        apunta1("usb: aviso: %s\n", nat32(t))
+        tomar(cerrojo_avisos)
+        si av_ent - av_sal < MAX_AVISOS entonces
+            copiar_hasta(avisos[av_ent mod MAX_AVISOS], t, LARGO_AVISO)
+            av_ent := av_ent + 1
+        fin
+        soltar(cerrojo_avisos)
+    fin
+
+    ; el aviso más antiguo que quede, a destino (lo saca el escritorio).
+    ; Falso si no hay ninguno.
+    público función saca_aviso(destino: puntero a byte, cabe: nat32): bool
+        variable hay: bool
+        hay := falso
+        tomar(cerrojo_avisos)
+        si av_ent <> av_sal entonces
+            copiar_hasta(destino, avisos[av_sal mod MAX_AVISOS], cabe)
+            av_sal := av_sal + 1
+            hay := cierto
+        fin
+        soltar(cerrojo_avisos)
+        devolver hay
+    fin
+
+    ; «Memoria USB conectada: W:» (o «W: y V:», con las letras que hay en
+    ; «letras»; antes de la primera, lo que diga «antes»)
+    función con_letras(t: puntero a byte, antes: puntero a byte, n: nat32)
+        variable i: nat32
+        variable d: arreglo [1] de nat32
+        copiar_hasta(texto, t, LARGO_AVISO)
+        i := 0
+        mientras i < n y i < 4 hacer
+            si i = 0 entonces
+                concatenar(texto, antes)
+            sino si i = n - 1 entonces
+                concatenar(texto, " y ")
+            sino
+                concatenar(texto, ", ")
+            fin
+            d[0] := letras[i]
+            formatear(dirección(texto[longitud(texto)]), 4, "%c:", d)
+            i := i + 1
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que llega y lo que se va
+    ; -------------------------------------------------------------------------
+    ; la memoria USB número m (de usbalm.cas) acaba de llegar: su disco y sus
+    ; unidades
+    función memoria_nueva(m: nat32)
+        variable d, n, u: nat32
+        d := añade_usb(m)
+        si d = 0xFFFFFFFF entonces
+            avisa("Memoria USB conectada, pero no caben más discos")
+            devolver
+        fin
+        n := monta_caliente(d)
+        apunta3("disco %u: %s, %u MB (USB), recién enchufado", d, nat32(dirección(discos[d].modelo[0])), discos[d].sectores div 2048)
+        n := 0
+        para u desde 0 hasta MAX_UNIDADES - 2 hacer
+            si unidades[u].hay y unidades[u].clase = U_FAT y unidades[u].disco = d entonces
+                apunta2(", %c: (FAT%u)", unidades[u].letra, volúmenes[u].clase)
+                si n < 4 entonces letras[n] := unidades[u].letra fin
+                n := n + 1
+            fin
+        fin
+        apunta0(".\n")
+        si n = 0 entonces
+            avisa("Memoria USB conectada, pero sin FAT: no se puede leer")
+        sino
+            con_letras("Memoria USB conectada", ": ", n)
+            avisa(texto)
+        fin
+        a_todas(EV_UNIDADES)
+    fin
+
+    ; la memoria número m se ha desenchufado: sus unidades y su disco dejan
+    ; de estar (si no se había quitado ya con seguridad)
+    función memoria_ida(m: nat32)
+        variable d, n: nat32
+        d := de_memoria(m)
+        si d = 0xFFFFFFFF entonces devolver fin
+        n := quita_disco(d, falso, letras)
+        olvida_disco(d)
+        apunta1("disco %u: se ha desenchufado.\n", d)
+        si n = 0 entonces
+            avisa("Memoria USB desconectada")
+        sino
+            con_letras("Memoria USB desconectada sin «quitar con seguridad»", ": ", n)
+            avisa(texto)
+        fin
+        a_todas(EV_UNIDADES)
+    fin
+
+    ; acaba de enumerarse el aparato a (y, si es un concentrador, lo que
+    ; cuelga de él): a sus clases
+    función ha_llegado(a: nat32)
+        variable j, m: nat32
+        para j desde 0 hasta MAX_APARATOS - 1 hacer
+            si aparatos[j].usado y cuelga_de(j, a) entonces
+                enchufados := enchufados + 1
+                enseña_aparato(j, "se enchufa el aparato")
+                si Usbhid.nuevo(j) <> 0 entonces
+                    apunta2("usb: %u teclados, %u ratones.\n", teclados, ratones)
+                fin
+                m := Usbalm.nueva(j)
+                si m <> NINGUNO entonces memoria_nueva(m) fin
+            fin
+        fin
+    fin
+
+    ; el aparato a se ha desenchufado (y lo que colgara de él)
+    función se_ha_ido(a: nat32)
+        variable j, m: nat32
+        marca_ido(a)
+        para j desde 0 hasta MAX_APARATOS - 1 hacer
+            si aparatos[j].usado y cuelga_de(j, a) entonces
+                desenchufados := desenchufados + 1
+                apunta1("usb: se desenchufa el aparato %u\n", j)
+                Usbhid.se_va(j)
+                m := Usbalm.se_va(j)
+                si m <> NINGUNO entonces memoria_ida(m) fin
+            fin
+        fin
+        quita(a)
+    fin
+
+    ; mira un puerto: «e», lo que hay (bit 0: algo enchufado); «cambio», si
+    ; se ha enchufado o desenchufado algo; «a», el aparato que había en él.
+    ; Da cierto si ahora hay que enumerar lo que hay.
+    función mira(e: nat32, cambio: bool, a: nat32): bool
+        si a <> NINGUNO y (e yb 1 = 0 o cambio) entonces se_ha_ido(a) fin
+        devolver cambio y e yb 1 <> 0
+    fin
+
+    función mira_controladora(hc_clase: nat32, hc: nat32, puertos: nat32)
+        variable p, a: nat32
+        variable cambio: bool
+        para p desde 1 hasta puertos hacer
+            cambio := cambio_raíz(hc_clase, hc, p)
+            si mira(estado_raíz(hc_clase, hc, p), cambio, en_raíz(hc_clase, hc, p)) entonces
+                espera_ms(100)                  ; (que se asiente)
+                si estado_raíz(hc_clase, hc, p) yb 1 <> 0 entonces
+                    a := enchufa_raíz(hc_clase, hc, p)
+                    si a <> NINGUNO entonces
+                        ha_llegado(a)
+                    sino si estado_raíz(hc_clase, hc, p) yb 1 <> 0 entonces
+                        apunta1("usb: lo enchufado en el puerto %u no se deja enumerar\n", p)
+                    fin
+                fin
+            fin
+        fin
+    fin
+
+    función mira_concentradores()
+        variable c, p, a, e: nat32
+        variable cambio: bool
+        para c desde 0 hasta MAX_APARATOS - 1 hacer
+            si aparatos[c].usado y aparatos[c].es_concentrador y no aparatos[c].ido entonces
+                para p desde 1 hasta aparatos[c].puertos hacer
+                    e := estado_concentrador(c, p, cambio)
+                    si aparatos[c].usado y mira(e, cambio, en_concentrador(c, p)) entonces
+                        espera_ms(100)
+                        a := enchufa_concentrador(c, p)
+                        si a <> NINGUNO entonces
+                            ha_llegado(a)
+                        sino
+                            apunta2("usb: lo enchufado en el puerto %u del concentrador %u no se deja enumerar\n", p, c)
+                        fin
+                    fin
+                fin
+            fin
+        fin
+    fin
+
+    ; la tarea: cada medio segundo, los puertos de las controladoras; cada
+    ; segundo, los de los concentradores
+    función atiende(nada: nat32)
+        variable c, n: nat32
+        n := 0
+        mientras cierto hacer
+            dormir(CADA)
+            tomar(cerrojo)
+            c := 0
+            mientras c < Xhci.cuántas hacer
+                mira_controladora(HC_XHCI, c, xhcis[c].puertos)
+                c := c + 1
+            fin
+            c := 0
+            mientras c < Ehci.cuántas hacer
+                mira_controladora(HC_EHCI, c, ehcis[c].puertos)
+                c := c + 1
+            fin
+            c := 0
+            mientras c < Uhci.cuántas hacer
+                mira_controladora(HC_UHCI, c, uhcis[c].puertos)
+                c := c + 1
+            fin
+            si n yb 1 = 1 entonces mira_concentradores() fin
+            soltar(cerrojo)
+            n := n + 1
+        fin
+    fin
+
+    ; pone en marcha la tarea (después de enumerar lo del arranque)
+    público función prepara()
+        si en_marcha o controladoras = 0 entonces devolver fin
+        si crear_tarea("usb-caliente", nat32(dirección(atiende)), 0) <> nulo entonces en_marcha := cierto fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Quitar con seguridad
+    ; -------------------------------------------------------------------------
+    ; ¿corre el sistema desde el disco d? (alguna de sus unidades es la del sistema)
+    función del_sistema_en(d: nat32): bool
+        devolver del_sistema < MAX_UNIDADES y unidades[del_sistema].hay y unidades[del_sistema].clase = U_FAT y unidades[del_sistema].disco = d
+    fin
+
+    ; el disco de la memoria USB de esa unidad (0xFFFFFFFF: no es una)
+    función disco_usb(u: nat32): nat32
+        si u >= MAX_UNIDADES entonces devolver 0xFFFFFFFF fin
+        si no unidades[u].hay o unidades[u].clase <> U_FAT entonces devolver 0xFFFFFFFF fin
+        si discos[unidades[u].disco].clase <> DE_USB entonces devolver 0xFFFFFFFF fin
+        devolver unidades[u].disco
+    fin
+
+    ; ¿se puede quitar con seguridad la unidad u? (una memoria USB desde la
+    ; que no corre el sistema)
+    público función quitable(u: nat32): bool
+        variable d: nat32
+        d := disco_usb(u)
+        devolver d <> 0xFFFFFFFF y no del_sistema_en(d)
+    fin
+
+    ; las letras de las unidades de las memorias USB, a «l» (hasta 7,
+    ; acabadas en 0). Da cuántas.
+    público función letras_usb(l: puntero a byte): nat32
+        variable letra, u, n: nat32
+        n := 0
+        para letra desde 'A' hasta 'Z' hacer
+            u := por_letra(letra)
+            si u <> Unidades.NINGUNA y n < 7 entonces
+                si disco_usb(u) <> 0xFFFFFFFF entonces
+                    l[n] := letra
+                    n := n + 1
+                fin
+            fin
+        fin
+        l[n] := 0
+        devolver n
+    fin
+
+    función quita_seguro(letra: nat32): nat32
+        variable u, d, m, n: nat32
+        variable dd: arreglo [1] de nat32
+        si letra >= 'a' y letra <= 'z' entonces letra := letra - 32 fin
+        dd[0] := letra
+        u := por_letra(letra)
+        si u = Unidades.NINGUNA entonces
+            formatear(texto, LARGO_AVISO, "No hay unidad %c:", dd)
+            avisa(texto)
+            devolver Q_NO_HAY
+        fin
+        d := disco_usb(u)
+        si d = 0xFFFFFFFF entonces
+            formatear(texto, LARGO_AVISO, "%c: no es una memoria USB: no se quita", dd)
+            avisa(texto)
+            devolver Q_NO_USB
+        fin
+        si del_sistema_en(d) entonces
+            formatear(texto, LARGO_AVISO, "%c: es la memoria del sistema: no se puede quitar", dd)
+            avisa(texto)
+            devolver Q_SISTEMA
+        fin
+        m := discos[d].cuál
+        n := quita_disco(d, cierto, letras)
+        expulsa(m)
+        olvida_disco(d)
+        apunta1("disco %u: quitado con seguridad.\n", d)
+        con_letras("Ya puede quitar la memoria", " ", n)
+        avisa(texto)
+        a_todas(EV_UNIDADES)
+        devolver Q_BIEN
+    fin
+
+    ; «quitar con seguridad» la memoria USB de la unidad de esa letra (y las
+    ; demás unidades de esa memoria): lo pendiente se escribe y se asienta,
+    ; la memoria se para y sus unidades dejan de estar. Da Q_BIEN, Q_NO_HAY,
+    ; Q_NO_USB o Q_SISTEMA (y lo deja dicho en un aviso).
+    público función quitar(letra: nat32): nat32
+        variable r: nat32
+        tomar(cerrojo)
+        r := quita_seguro(letra)
+        soltar(cerrojo)
+        devolver r
+    fin
+
+fin Usbcal.

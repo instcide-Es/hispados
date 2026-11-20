@@ -92,7 +92,9 @@ módulo Instala
     constante A_OTRA = 2
     constante MAX_OTRAS = 4
     variable destinos: arreglo [MAX_ARCHIVOS] de byte
-    variable otras: arreglo [MAX_OTRAS] de arreglo [13] de byte   ; sus nombres
+    variable otras: arreglo [MAX_OTRAS] de arreglo [16] de byte   ; sus nombres («OFICINA», o «HISPA\PAQUETES»)
+    variable otras_en_hispa: arreglo [MAX_OTRAS] de bool         ; va dentro de \HISPA (no en la raíz)
+    variable hispa_cluster: nat32               ; el primer cluster de la carpeta HISPA
     variable otras_dir: arreglo [MAX_OTRAS] de puntero a byte    ; lo que llevan dentro (memoria pedida al núcleo)
     variable otras_n: arreglo [MAX_OTRAS] de nat32
     variable otras_cluster: arreglo [MAX_OTRAS] de nat32
@@ -144,7 +146,7 @@ módulo Instala
     función pantalla(título: puntero a byte)
         variable f: nat32
         para f desde 0 hasta 23 hacer letras_en(0, f, AZUL, ' ', 80) fin
-        pon(2, 1, BLANCO, "Instalación de Hispa-Pentium 0.7")
+        pon(2, 1, BLANCO, "Instalación de Hispa-Pentium 0.8")
         letras_en(0, 2, BLANCO, 0xCD, 80)
         si título[0] <> 0 entonces pon(3, 4, BLANCO, título) fin
         cursor_en(0, 25)
@@ -1057,7 +1059,7 @@ módulo Instala
         cfg_más("set default=0\n")
         cfg_más("menuentry \"Hispa-Pentium\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio escritura\n  set gfxpayload=$modo\n  boot\n}\n")
         cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n  multiboot /HISPA/NUCLEO.BIN ordenes escritura\n  set gfxpayload=text\n  boot\n}\n")
-        cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos ni el USB (800 x 600)\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb\n")
+        cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos, el USB, la red ni ACPI (800 x 600)\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi\n")
         para i desde 1 hasta n_archivos hacer
             si destinos[i - 1] = A_HISPA y ((acaba_en(nombres[i - 1], "BIN") y no iguales(nombres[i - 1], "NUCLEO.BIN") y no iguales(nombres[i - 1], "INSTALAR.BIN") y no iguales(nombres[i - 1], "ASISTE.BIN")) o iguales(nombres[i - 1], "LEEME.TXT")) entonces
                 cfg_más("  module /HISPA/")
@@ -1080,10 +1082,12 @@ módulo Instala
     ;  Los archivos que se instalan
     ; -------------------------------------------------------------------------
     ; adónde va ese archivo: a \HISPA, o a la carpeta que diga CARPETAS.TXT
-    ; (una línea «ARCHIVO.EXT=CARPETA»; la carpeta, de hasta 8 letras)
+    ; (una línea «ARCHIVO.EXT=CARPETA»; la carpeta, de hasta 8 letras, en la
+    ; raíz; o «HISPA\CARPETA», dentro de \HISPA: los registros de lo
+    ; instalado, que van a \HISPA\PAQUETES)
     función destino_de(nombre: puntero a byte): nat32
         variable i, j, k: nat32
-        variable cuál: arreglo [13] de byte
+        variable cuál: arreglo [16] de byte
         i := 0
         mientras mapa[i] <> 0 hacer
             j := 0
@@ -1091,13 +1095,19 @@ módulo Instala
             si nombre[j] = 0 y mapa[i + j] = '=' entonces
                 i := i + j + 1
                 j := 0
-                mientras mapa[i] > ' ' y j < 8 hacer
+                mientras mapa[i] > ' ' y j < 15 hacer
                     cuál[j] := mayúscula(mapa[i])
                     j := j + 1
                     i := i + 1
                 fin
                 cuál[j] := 0
                 si j = 0 o iguales(cuál, "HISPA") entonces devolver A_HISPA fin
+                ; (de más de 8 letras, solo «HISPA\CARPETA»)
+                si empieza_por(cuál, "HISPA\\") entonces
+                    si j = 6 o j > 14 entonces devolver A_HISPA fin
+                sino si j > 8 entonces
+                    devolver A_HISPA
+                fin
                 para k desde 1 hasta n_otras hacer
                     si iguales(otras[k - 1], cuál) entonces devolver A_OTRA + k - 1 fin
                 fin
@@ -1105,6 +1115,7 @@ módulo Instala
                 otras_dir[n_otras] := más_memoria(32768)
                 si otras_dir[n_otras] = nulo entonces devolver A_HISPA fin
                 Textos32.copiar(otras[n_otras], cuál)
+                otras_en_hispa[n_otras] := empieza_por(cuál, "HISPA\\")
                 n_otras := n_otras + 1
                 devolver A_OTRA + n_otras - 1
             fin
@@ -1254,20 +1265,27 @@ módulo Instala
         llenar(carpeta, 32768, 0)
         pon_entrada(raíz, "HISPA      ", cierto, 0x08, 0, 0)            ; el nombre del volumen
         k := da_clusters(carpeta_clusters)
+        hispa_cluster := k
         pon_entrada(dirección(raíz[32]), "HISPA      ", cierto, 0x10, k, 0)
         raíz_n := 2
         pon_entrada(carpeta, ".          ", cierto, 0x10, k, 0)
         pon_entrada(dirección(carpeta[32]), "..         ", cierto, 0x10, 0, 0)
         carpeta_n := 2
-        ; las otras carpetas (las de CARPETAS.TXT), en la raíz
+        ; las otras carpetas (las de CARPETAS.TXT), en la raíz (o en \HISPA)
         para i desde 1 hasta n_otras hacer
             llenar(otras_dir[i - 1], 32768, 0)
             k := da_clusters(carpeta_clusters)
             otras_cluster[i - 1] := k
-            pon_entrada(dirección(raíz[raíz_n * 32]), otras[i - 1], falso, 0x10, k, 0)
-            raíz_n := raíz_n + 1
+            si otras_en_hispa[i - 1] entonces
+                pon_entrada(dirección(carpeta[carpeta_n * 32]), dirección(otras[i - 1][6]), falso, 0x10, k, 0)
+                carpeta_n := carpeta_n + 1
+                pon_entrada(otras_dir[i - 1] + 32, "..         ", cierto, 0x10, hispa_cluster, 0)
+            sino
+                pon_entrada(dirección(raíz[raíz_n * 32]), otras[i - 1], falso, 0x10, k, 0)
+                raíz_n := raíz_n + 1
+                pon_entrada(otras_dir[i - 1] + 32, "..         ", cierto, 0x10, 0, 0)
+            fin
             pon_entrada(otras_dir[i - 1], ".          ", cierto, 0x10, k, 0)
-            pon_entrada(otras_dir[i - 1] + 32, "..         ", cierto, 0x10, 0, 0)
             otras_n[i - 1] := 2
         fin
         dd[0] := por_cluster * 512

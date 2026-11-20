@@ -12,7 +12,7 @@ módulo Registro
 
     importar Formato
 
-    público constante CABE_REGISTRO = 8000
+    público constante CABE_REGISTRO = 12000
     público variable registro: arreglo [CABE_REGISTRO] de byte   ; con los finales de línea del DOS
     público variable registro_largo: nat32
     variable renglón: arreglo [240] de byte
@@ -22,6 +22,21 @@ módulo Registro
     público función apunta0(t: puntero a byte)
         variable i: nat32
         escribir(t)
+        i := 0
+        mientras t[i] <> 0 y registro_largo + 2 < CABE_REGISTRO hacer
+            si t[i] = '\n' entonces
+                registro[registro_largo] := '\r'
+                registro_largo := registro_largo + 1
+            fin
+            registro[registro_largo] := t[i]
+            registro_largo := registro_largo + 1
+            i := i + 1
+        fin
+    fin
+
+    ; lo apunta sin escribirlo (lo que solo interesa en el registro)
+    público función apunta_solo(t: puntero a byte)
+        variable i: nat32
         i := 0
         mientras t[i] <> 0 y registro_largo + 2 < CABE_REGISTRO hacer
             si t[i] = '\n' entonces
