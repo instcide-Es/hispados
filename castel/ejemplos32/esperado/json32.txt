@@ -1,0 +1,10 @@
+piezas: 35
+ok: cierto
+obras: 2
+7 [El <A0>rbol "de" la ciencia] [P<A1>o Baroja] n=-12 x nulo: cierto
+8 [Ni<A4>os <F4><B6><0A> "ya"] [] n=0 x nulo: cierto
+data.obras.1.l.2.0 = 3; vac: 0; no está: cierto
+{"email":"a<C3><A1>b\"c","n":-45,"l":[1,false,null],"c":true}
+vuelto a leer: a<A0>b"c
+mal: falta una coma o el cierre
+mal: sobra algo detrás del documento

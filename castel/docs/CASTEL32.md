@@ -271,6 +271,21 @@ n := formatear(línea, 80, "%5u marcos libres", datos)      ; datos: arreglo de 
 cabe); `imprimir(plantilla, datos)` lo escribe; `imprimir1` a `imprimir4`, con uno
 a cuatro datos sueltos. `ejemplos32/biblio32.cas` prueba las tres.
 
+**`Json`** (`json.cas`, desde el 20/11/2026): leer y escribir JSON. `json_leer(texto,
+largo)` trocea un documento entero en **piezas** (objetos, listas, textos, números,
+`true`, `false`, `null`; sin copiar nada: cada pieza dice dónde está en el texto),
+en la memoria que se le da antes con `json_memoria(sitio, cuántas)`. Luego se
+pregunta con `json_campo(objeto, "clave")`, `json_elemento(lista, i)`,
+`json_cuántos`, `json_ruta(pieza, "data.obras.0.titulo")`, `json_texto` (en la
+página 437 de la casa, con los escapes y el UTF-8 hechos; lo que no está en ella,
+«?»), `json_número`, `json_verdad`, `json_nulo` y sus atajos `json_texto_campo`...
+Una pieza que no está es `NINGUNA`, y preguntar por ella no falla. Para escribir:
+`json_empezar(sitio, cabe)`, `json_abre`, `json_clave`, `json_pon_texto` (de la
+página 437 a UTF-8, escapado), `json_pon_número`, `json_cierra`... y los atajos
+`json_campo_texto("email", correo)`. Y dos sueltas: `a_utf8(letra, destino)` y
+`de_unicode(código)`. `ejemplos32/json32.cas` la prueba (y es lo que usa el
+programa de ClicGest para Hispa-Pentium para hablar con su API).
+
 ---
 
 ## 8. El arranque y el enlazado
