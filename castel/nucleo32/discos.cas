@@ -46,17 +46,21 @@ módulo Discos
     público variable cuántos_discos: nat32
     variable el_permiso: nat32
 
-    función añade(clase: nat32, cuál: nat32, sectores: nat32, modelo: puntero a byte)
+    ; apunta un disco en un sitio libre de la tabla. Da su número, o
+    ; 0xFFFFFFFF si no cabe.
+    función añade(clase: nat32, cuál: nat32, sectores: nat32, modelo: puntero a byte): nat32
         variable d: nat32
-        si cuántos_discos >= MAX_DISCOS entonces devolver fin
-        d := cuántos_discos
+        d := 0
+        mientras d < MAX_DISCOS y discos[d].hay hacer d := d + 1 fin
+        si d >= MAX_DISCOS entonces devolver 0xFFFFFFFF fin
         discos[d].hay := cierto
         discos[d].clase := clase
         discos[d].cuál := cuál
         discos[d].sectores := sectores
         discos[d].escribible := falso
         copiar_hasta(discos[d].modelo, modelo, 41)
-        cuántos_discos := d + 1
+        cuántos_discos := cuántos_discos + 1
+        devolver d
     fin
 
     función reparte_permiso()
@@ -107,6 +111,34 @@ módulo Discos
         fin
         reparte_permiso()
         devolver cuántos_discos - n
+    fin
+
+    ; la memoria USB número m (de usbalm.cas) se acaba de enchufar: un disco
+    ; más (con el permiso que le toque). Da su número, o 0xFFFFFFFF.
+    público función añade_usb(m: nat32): nat32
+        variable d: nat32
+        si m >= MAX_MEMORIAS entonces devolver 0xFFFFFFFF fin
+        d := añade(DE_USB, m, memorias[m].sectores, dirección(memorias[m].modelo[0]))
+        reparte_permiso()
+        devolver d
+    fin
+
+    ; el disco de la memoria USB número m (0xFFFFFFFF: no lo hay)
+    público función de_memoria(m: nat32): nat32
+        variable d: nat32
+        para d desde 0 hasta MAX_DISCOS - 1 hacer
+            si discos[d].hay y discos[d].clase = DE_USB y discos[d].cuál = m entonces devolver d fin
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    ; el disco d ya no está (una memoria USB que se ha ido)
+    público función olvida_disco(d: nat32)
+        si d >= MAX_DISCOS entonces devolver fin
+        si no discos[d].hay entonces devolver fin
+        discos[d].hay := falso
+        discos[d].escribible := falso
+        cuántos_discos := cuántos_discos - 1
     fin
 
     función vale(d: nat32, lba: nat32, n: nat32): bool

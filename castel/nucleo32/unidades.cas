@@ -2,7 +2,9 @@
 ;  unidades.cas - las unidades de Hispa-Pentium, con sus letras, como en
 ;  Hispa-DOS:
 ;     C: D: ...   los volúmenes FAT de los discos de dentro (IDE y SATA);
-;     X: Y: Z:    los de las memorias USB (X: es la memoria de arranque);
+;     X: W: V:... los de las memorias USB, de la X: hacia abajo (X: es la
+;                 memoria de arranque; las que se enchufan en marcha, desde
+;                 la W:, la primera libre hacia abajo);
 ;     M:          la unidad en memoria: los archivos que ha traído el
 ;                 cargador (los módulos de multiboot), de solo lectura.
 ;  Aquí se miran las particiones de cada disco (la tabla del MBR, y la GPT
@@ -15,11 +17,14 @@
 ;  lleva el sistema (ORDENES.BIN, en su raíz o en \HISPA); si no, la primera
 ;  que lo lleve (C:... y luego X:...); si no, M:. Un sistema INSTALADO en el
 ;  disco (por el programa INSTALAR) lo lleva en la carpeta \HISPA.
+;  Si la unidad del sistema se va (una memoria USB que se desenchufa), pasa
+;  a serlo M: (o la primera con el sistema); y si vuelve, vuelve a ser X:.
+;  «cambios» sube cada vez que aparece o desaparece una unidad.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Unidades
 
-    importar Discos, Fat, Multiboot
+    importar Discos, Fat, Multiboot, Tareas
 
     público constante MAX_UNIDADES = 8          ; (las de fat.cas: VOLÚMENES)
     público constante NINGUNA = 0xFFFFFFFF
@@ -38,7 +43,9 @@ módulo Unidades
     público variable del_sistema: nat32 = 0xFFFFFFFF    ; la unidad del sistema (NINGUNA: no hay ninguna)
     variable sector: arreglo [512] de byte
     variable letra_interna: nat32 = 'C'
-    variable letra_usb: nat32 = 'X'
+    variable en_caliente: bool                  ; montando una memoria enchufada en marcha (desde la W:)
+    variable sistema_ido: bool                  ; la unidad del sistema se ha desenchufado
+    público variable cambios: nat32             ; sube cada vez que aparece o desaparece una unidad
 
     ; la unidad que lleva esa letra (en mayúscula o minúscula), o NINGUNA
     público función por_letra(letra: nat32): nat32
@@ -61,24 +68,42 @@ módulo Unidades
 
     ; prueba a montar lo que haya en el disco d desde el sector «inicio»
     función prueba(d: nat32, inicio: nat32, partición: nat32): bool
-        variable u: nat32
+        variable u, l: nat32
         u := libre()
         si u = NINGUNA entonces devolver falso fin
-        si discos[d].clase = DE_USB y letra_usb > 'Z' entonces devolver falso fin
+        l := 0
+        si discos[d].clase = DE_USB entonces
+            l := letra_usb()
+            si l = 0 entonces devolver falso fin
+        fin
         si discos[d].clase <> DE_USB y letra_interna >= 'M' entonces devolver falso fin
         si no montar(u, d, inicio) entonces devolver falso fin
         unidades[u].hay := cierto
         unidades[u].clase := U_FAT
         unidades[u].disco := d
         unidades[u].partición := partición
+        cambios := cambios + 1
         si discos[d].clase = DE_USB entonces
-            unidades[u].letra := letra_usb
-            letra_usb := letra_usb + 1
+            unidades[u].letra := l
         sino
             unidades[u].letra := letra_interna
             letra_interna := letra_interna + 1
         fin
         devolver cierto
+    fin
+
+    ; la letra para una memoria USB: al arrancar, la X: si está libre; si
+    ; no (o enchufada en marcha), la primera libre de la W: hacia abajo
+    ; (hasta la N:). 0: no queda ninguna.
+    función letra_usb(): nat32
+        variable l: nat32
+        si no en_caliente y por_letra('X') = NINGUNA entonces devolver 'X' fin
+        l := 'W'
+        mientras l >= 'N' hacer
+            si por_letra(l) = NINGUNA entonces devolver l fin
+            l := l - 1
+        fin
+        devolver 0
     fin
 
     función palabra32(p: puntero a byte): nat32
@@ -247,7 +272,7 @@ módulo Unidades
         x := por_letra('X')
         si x = NINGUNA entonces devolver fin
         si tiene_sistema(x) entonces devolver fin
-        para letra desde 'Y' hasta 'Z' hacer
+        para letra desde 'N' hasta 'W' hacer
             u := por_letra(letra)
             si u <> NINGUNA entonces
                 si tiene_sistema(u) entonces
@@ -264,6 +289,64 @@ módulo Unidades
         si u >= MAX_UNIDADES entonces devolver cierto fin
         si no unidades[u].hay o unidades[u].clase <> U_FAT entonces devolver cierto fin
         devolver no escribible(u)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las memorias USB que se enchufan y se desenchufan en marcha
+    ; -------------------------------------------------------------------------
+    ; el disco d (una memoria USB recién enchufada): se montan sus volúmenes
+    ; FAT, con las letras de la W: hacia abajo. Si es la memoria del sistema
+    ; que se había ido, vuelve a ser X: y la del sistema. Da cuántas.
+    público función monta_caliente(d: nat32): nat32
+        variable n, u: nat32
+        en_caliente := cierto
+        n := monta_disco(d)
+        en_caliente := falso
+        si sistema_ido y por_letra('X') = NINGUNA entonces
+            para u desde 0 hasta MAX_UNIDADES - 2 hacer
+                si unidades[u].hay y unidades[u].clase = U_FAT y unidades[u].disco = d y sistema_ido entonces
+                    si tiene_sistema(u) entonces
+                        unidades[u].letra := 'X'
+                        del_sistema := u
+                        sistema_ido := falso
+                    fin
+                fin
+            fin
+        fin
+        devolver n
+    fin
+
+    ; las unidades del disco d dejan de estar (se ha desenchufado; o, con
+    ; «guardar», se va a quitar con seguridad: antes, lo pendiente va al
+    ; disco). Los archivos abiertos en ellas dan error desde ya; los
+    ; programas que trabajaban en ellas pasan a la unidad del sistema. Deja
+    ; en «letras» las suyas (hasta 4, acabadas en 0: caben en 5 octetos). Da
+    ; cuántas eran.
+    público función quita_disco(d: nat32, guardar: bool, letras: puntero a byte): nat32
+        variable u, n, t: nat32
+        n := 0
+        para u desde 0 hasta MAX_UNIDADES - 2 hacer
+            si unidades[u].hay y unidades[u].clase = U_FAT y unidades[u].disco = d entonces
+                si guardar entonces retirar(u) sino desmontar(u) fin
+                unidades[u].hay := falso
+                cambios := cambios + 1
+                si n < 4 entonces letras[n] := unidades[u].letra fin
+                n := n + 1
+                para t desde 0 hasta MAX_TAREAS - 1 hacer
+                    si tareas[t].estado <> Tareas.LIBRE y tareas[t].unidad = u + 1 entonces
+                        tareas[t].unidad := 0
+                        tareas[t].carpeta[0] := 0
+                    fin
+                fin
+                si u = del_sistema entonces
+                    ; la del sistema se ha ido: la que lo tenga, o la de memoria
+                    sistema_ido := cierto
+                    elige_sistema(0)
+                fin
+            fin
+        fin
+        si n < 4 entonces letras[n] := 0 sino letras[4] := 0 fin
+        devolver n
     fin
 
 fin Unidades.
