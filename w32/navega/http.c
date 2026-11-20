@@ -650,6 +650,9 @@ int http_avanza(Pet *p) {
     con.usada = 1; con.t = NULL; con.puerto = p->u.puerto; con.seguro = p->u.seguro;
     strcpy(con.servidor, p->u.servidor);
     ioctlsocket(con.s, 0x8004667Eu, &uno);
+#ifdef HISPA_PENTIUM
+    { extern int red_pentium_seguro; red_pentium_seguro = p->u.seguro; }   /* [PENTIUM] la cifrada la hace TLS.BIN entera */
+#endif
     connect(con.s, &a, sizeof a);
     p->t0 = GetTickCount();
     p->fase = H_CONECTA;
