@@ -53,8 +53,8 @@ módulo Asiste
     variable aviso: arreglo [80] de byte
     variable hecho: bool                        ; ya se ha guardado: la pantalla del final
     variable fecha_tocada: bool
-    variable texto_cfg: arreglo [4200] de byte
-    variable nuevo_cfg: arreglo [4300] de byte
+    variable texto_cfg: arreglo [8300] de byte
+    variable nuevo_cfg: arreglo [8400] de byte
     variable ini: arreglo [200] de byte
     variable dd: arreglo [6] de nat32
     variable ln: arreglo [100] de byte
@@ -284,8 +284,8 @@ módulo Asiste
         m := abrir("\\HISPA\\GRUB.CFG")
         si es_error(m) entonces devolver falso fin
         n := 0
-        mientras n < 4096 hacer
-            k := leer(m, dirección(texto_cfg[n]), 4096 - n)
+        mientras n < 8192 hacer
+            k := leer(m, dirección(texto_cfg[n]), 8192 - n)
             si es_error(k) o k = 0 entonces romper fin
             n := n + k
         fin

@@ -113,6 +113,7 @@ módulo Instala
     variable fecha, hora: nat32
     variable hecho, por_hacer: nat32            ; (la barra) los sectores escritos y los que hay que escribir
     variable cfg: arreglo [4096] de byte        ; GRUB.CFG
+    variable es_cd: bool                        ; se instala desde el CD (MEDIO.TXT), no de la memoria USB
     variable ln: arreglo [200] de byte
     variable dd: arreglo [6] de nat32
 
@@ -220,9 +221,9 @@ módulo Instala
     función ayuda()
         pantalla("Ayuda")
         pon(3, 6, AZUL, "Este programa instala Hispa-Pentium en un disco duro de este equipo,")
-        pon(3, 7, AZUL, "para arrancarlo luego sin la memoria USB.")
+        si es_cd entonces pon(3, 7, AZUL, "para arrancarlo luego sin el CD.") sino pon(3, 7, AZUL, "para arrancarlo luego sin la memoria USB.") fin
         pon(3, 9, AZUL, "\x07 Solo se ofrecen los discos de dentro del equipo (IDE y SATA). La")
-        pon(3, 10, AZUL, "  memoria USB de arranque no se toca nunca.")
+        si es_cd entonces pon(3, 10, AZUL, "  memorias USB no se tocan nunca.") sino pon(3, 10, AZUL, "  memoria USB de arranque no se toca nunca.") fin
         pon(3, 11, AZUL, "\x07 Si el disco tiene espacio sin usar (sin partición), Hispa-Pentium se")
         pon(3, 12, AZUL, "  puede instalar ahí, en una partición nueva, sin tocar lo que hay.")
         pon(3, 13, AZUL, "\x07 Si no, se puede borrar el disco entero: se pierde TODO lo que tiene,")
@@ -457,12 +458,12 @@ módulo Instala
         mientras cierto hacer
             pantalla("Bienvenido a la instalación de Hispa-Pentium")
             pon(3, 6, AZUL, "Este programa instala Hispa-Pentium en el disco duro de este equipo,")
-            pon(3, 7, AZUL, "para que arranque de él, sin la memoria USB.")
+            si es_cd entonces pon(3, 7, AZUL, "para que arranque de él, sin el CD.") sino pon(3, 7, AZUL, "para que arranque de él, sin la memoria USB.") fin
             pon(5, 10, AZUL, "\x07  Para instalar Hispa-Pentium ahora, pulse INTRO.")
             pon(5, 12, AZUL, "\x07  Para saber antes lo que va a hacer, pulse F1.")
             pon(5, 14, AZUL, "\x07  Para salir sin instalar nada, pulse F3.")
             pon(3, 18, AMARILLO, "No se escribe nada en ningún disco hasta que usted lo confirme.")
-            pon(3, 19, AMARILLO, "La memoria USB de arranque no se toca.")
+            si es_cd entonces pon(3, 19, AMARILLO, "Las memorias USB no se tocan.") sino pon(3, 19, AMARILLO, "La memoria USB de arranque no se toca.") fin
             pie("INTRO=Continuar   F1=Ayuda   F3=Salir")
             al_serie("instalar: bienvenida\n")
             c := tecla()
@@ -482,7 +483,7 @@ módulo Instala
             recuadro(8, 8, ROJO)
             pon(11, 10, ROJO, "No se ha encontrado ningún disco duro en este equipo")
             pon(11, 11, ROJO, "(IDE o SATA) en el que se pueda instalar.")
-            pon(11, 13, ROJO, "(Solo se instala arrancando de la memoria USB con su")
+            si es_cd entonces pon(11, 13, ROJO, "(Solo se instala arrancando del CD con su") sino pon(11, 13, ROJO, "(Solo se instala arrancando de la memoria USB con su") fin
             pon(11, 14, ROJO, "entrada «Instalar Hispa-Pentium en el disco duro».)")
         fin
         para k desde 1 hasta n_candidatos hacer
@@ -1146,6 +1147,8 @@ módulo Instala
                     hay_mapa := cierto
                     seguir
                 fin
+                ; (MEDIO.TXT tampoco: dice de dónde se instala, el CD o la memoria USB)
+                si iguales(nombres[n_archivos], "MEDIO.TXT") entonces seguir fin
                 si iguales(nombres[n_archivos], "NUCLEO.BIN") entonces hay_núcleo := cierto fin
                 si iguales(nombres[n_archivos], "ORDENES.BIN") entonces hay_órdenes := cierto fin
                 si iguales(nombres[n_archivos], "BOOT.IMG") entonces hay_boot := cierto fin
@@ -1371,7 +1374,7 @@ módulo Instala
         pantalla("Hispa-Pentium está instalado")
         pon(3, 7, AZUL, "El sistema está en el disco duro, en la carpeta \\HISPA, y el disco")
         pon(3, 8, AZUL, "arranca ya con Hispa-Pentium.")
-        pon(3, 11, BLANCO, "Quite ahora la memoria USB y pulse INTRO para reiniciar el equipo.")
+        si es_cd entonces pon(3, 11, BLANCO, "Saque ahora el CD (o el DVD) y pulse INTRO para reiniciar el equipo.") sino pon(3, 11, BLANCO, "Quite ahora la memoria USB y pulse INTRO para reiniciar el equipo.") fin
         pon(3, 14, AZUL, "En el primer arranque, un asistente le preguntará su nombre, la fecha")
         pon(3, 15, AZUL, "y la hora, el teclado y la medida de la pantalla.")
         si otra <> 0 entonces
@@ -1395,6 +1398,13 @@ módulo Instala
             escribir("INSTALAR: no hay memoria.\n")
             devolver 1
         fin
+        ; ¿del CD? (lo dice MEDIO.TXT, que trae el cargador del CD: «CD»)
+        i := abrir("MEDIO.TXT")
+        si no es_error(i) entonces
+            es_cd := leer(i, trozo, 16) = 4 y trozo[0] = 'C' y trozo[1] = 'D'
+            cerrar(i)
+        fin
+        si es_cd entonces registra("instalar: desde el CD\n") fin
         bienvenida()
         busca_archivos()
         busca_discos()

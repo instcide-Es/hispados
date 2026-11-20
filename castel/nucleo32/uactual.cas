@@ -8,7 +8,20 @@
 ;  mandado a un archivo (C:\HISPA\PAQUETES\VENTANA.TXT), que luego lee: las
 ;  dependencias, las sumas y el todo o nada son los de PAQUETES.
 ;  Con el teclado: las flechas eligen, Intro instala (o actualiza) el
-;  elegido, Supr lo quita, F5 vuelve a mirar.
+;  elegido, Supr lo quita, F5 busca novedades (vuelve a traer el catálogo).
+;  Mientras PAQUETES trabaja, la ventana no se queda parada: enseña lo que
+;  hace con una barra (lo que escribe PAQUETES /AVANCE en AVANCE.TXT; al
+;  bajar un paquete, DESCARGA lo pone al día cada 16 K). Si se ha cambiado el
+;  núcleo, ofrece reiniciar.
+;
+;  ACTUALIZ /BANDEJA: lo lanza el escritorio al arrancar un sistema instalado.
+;  Primero, el arranque: si GRUBENV dice que el núcleo nuevo ha arrancado
+;  (nuevo=2), lo da por bueno (nuevo=0); si dice que no llegó a arrancar y
+;  GRUB ha vuelto al de antes (3), lo cuenta una vez (4). Luego espera a la
+;  red (hasta 90 s; sin red, nada) y mira en silencio si hay
+;  actualizaciones (PAQUETES ESTADO). Solo si las hay (o hay algo que contar
+;  del arranque) saca una ventanita abajo a la derecha, encima de la
+;  bandeja, que se va sola al medio minuto: «Verlas» abre esta ventana.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UActual
@@ -34,6 +47,9 @@ módulo UActual
     constante ELEGIDO = 0xCFE3FB
     constante VERDE = 0x1E8A4C
     constante TECLA_F5 = 0x13F
+    constante BARRA_Y = 318                     ; la barra del avance
+    constante BARRA_AN = 572
+    constante RED_CONECTADA = 4                 ; (lo que da la llamada 97: redes.cas)
 
     variable v: nat32
     variable n: nat32
@@ -46,7 +62,12 @@ módulo UActual
     variable avisos: arreglo [3] de arreglo [76] de byte
     variable salida: arreglo [SALIDA + 1] de byte
     variable archivo: arreglo [64] de byte      ; C:\HISPA\PAQUETES\VENTANA.TXT
-    variable órdenes: arreglo [80] de byte
+    variable fich_avance: arreglo [64] de byte  ; C:\HISPA\PAQUETES\AVANCE.TXT
+    variable órdenes: arreglo [96] de byte
+    variable sis: byte
+    variable firmado, ocupado, reiniciar_: bool
+    variable av_hecho, av_total: nat32
+    variable av_texto: arreglo [80] de byte
 
     función colocar(ventana_: nat32)
         ensamblador
@@ -65,16 +86,40 @@ módulo UActual
     ; espera, y deja lo escrito en «salida»: da su código de salida
     función paquetes(args: puntero a byte): nat32
         variable m, t, c, k, r: nat32
+        variable s: Suceso
+        variable a: arreglo [120] de byte
         m := crear(archivo)
         si es_error(m) entonces
             Textos32.copiar(salida, "No se puede escribir en C:\\HISPA\\PAQUETES.")
             devolver 1
         fin
+        Textos32.copiar(a, args)
+        si fich_avance[0] <> 0 entonces concatenar(a, " /AVANCE") fin
+        si fich_avance[0] <> 0 entonces borrar(fich_avance) fin
+        av_hecho := 0
+        av_total := 0
+        Textos32.copiar(av_texto, "Un momento...")
         redirigir(m)
-        t := lanzar("PAQUETES.BIN", args)
+        t := lanzar("PAQUETES.BIN", a)
         c := 255
-        si no es_error(t) entonces c := esperar(t) fin
+        si no es_error(t) y v = 0 entonces c := esperar(t) fin
+        si no es_error(t) y v <> 0 entonces
+            ; mientras trabaja, la barra (y la ventana se sigue pintando)
+            ocupado := cierto
+            c := SIGUE
+            mientras c = SIGUE hacer
+                lee_avance()
+                pinta_avance()
+                mientras suceso(v, s, falso) hacer
+                    si s.clase = EV_TAMAÑO entonces pinta() fin
+                fin
+                dormir(15)
+                c := acabada(t)
+            fin
+            ocupado := falso
+        fin
         redirigir(SIN_SALIDA)
+        si fich_avance[0] <> 0 entonces borrar(fich_avance) fin
         cerrar(m)
         salida[0] := 0
         si es_error(t) entonces
@@ -127,7 +172,12 @@ módulo UActual
         p := salida
         mientras valor(p) <> 0 hacer
             q := siguiente_línea(p)
-            si valor(p) <> '\r' y valor(p) <> '\n' y no empieza_por(p, "p|") y no empieza_por(p, "origen|") entonces
+            si empieza_por(p, "reiniciar|") entonces
+                reiniciar_ := cierto
+                p := p + 10
+            fin
+            ; (lo que dice DESCARGA de cada archivo, no: solo lo de PAQUETES)
+            si valor(p) <> '\r' y valor(p) <> '\n' y no empieza_por(p, "p|") y no empieza_por(p, "origen|") y no empieza_por(p, "Trayendo ") y no empieza_por(p, "Guardando ") y no empieza_por(p, "Hecho: ") y no empieza_por(p, "El servidor dice") entonces
                 Textos32.copiar(avisos[0], avisos[1])
                 Textos32.copiar(avisos[1], avisos[2])
                 trozo(p, 0, avisos[2], 76)
@@ -155,6 +205,8 @@ módulo UActual
             trozo(p, 0, x, 8)
             si iguales(x, "origen") entonces
                 trozo(p, 1, origen, 120)
+                trozo(p, 2, x, 8)
+                firmado := iguales(x, "firmado")
             sino si iguales(x, "p") y n < MAX_PAQ entonces
                 trozo(p, 1, nombres[n], 12)
                 trozo(p, 2, instalada[n], 16)
@@ -208,11 +260,13 @@ módulo UActual
 
     ; (dónde están: x y ancho)
     constante B1_X = 14
-    constante B1_AN = 170
-    constante B2_X = 196
-    constante B2_AN = 130
-    constante B3_X = 338
-    constante B3_AN = 170
+    constante B1_AN = 140
+    constante B2_X = 162
+    constante B2_AN = 104
+    constante B3_X = 274
+    constante B3_AN = 140
+    constante B4_X = 422
+    constante B4_AN = 164
 
     función pinta()
         variable i, yy: ent32
@@ -230,13 +284,14 @@ módulo UActual
             Textos32.copiar(t, "Los paquetes, de ")
             texto(v, 52, 26, t, SUAVE)
             texto(v, 52 + 17 * 8, 26, origen, SUAVE)
+            si firmado entonces texto_negrita(v, 52 + (17 + ent32(longitud(origen)) + 1) * 8, 26, "(firma buena)", VERDE) fin
         fin
         ; la lista
         rectángulo(v, 0, CABEZA, ANCHO, AVISO_Y - CABEZA - 8, PAPEL)
         texto_negrita(v, 14, CABEZA + 6, "Programa", SUAVE)
         texto_negrita(v, 110, CABEZA + 6, "Instalado", SUAVE)
         texto_negrita(v, 206, CABEZA + 6, "Hay", SUAVE)
-        texto_negrita(v, 302, CABEZA + 6, "Qué es", SUAVE)
+        texto_negrita(v, 322, CABEZA + 6, "Qué es", SUAVE)
         rectángulo(v, 10, LISTA_Y - 3, ANCHO - 20, 1, 0xC9D8EC)
         si n = 0 entonces
             texto(v, 14, LISTA_Y + 4, "No hay ningún paquete instalado ni catálogo a la vista.", SUAVE)
@@ -259,13 +314,27 @@ módulo UActual
             sino
                 texto(v, 206, yy + 2, disponible[i], TINTA)
             fin
-            texto(v, 302, yy + 2, descs[i], TINTA)
+            texto(v, 322, yy + 2, descs[i], TINTA)
             i := i + 1
         fin
         ; lo que ha dicho PAQUETES
         rectángulo(v, 0, AVISO_Y - 8, ANCHO, ALTO - AVISO_Y + 8, 0xEEF3FA)
         rectángulo(v, 0, AVISO_Y - 8, ANCHO, 1, 0x9DBBE4)
+        si ocupado entonces
+            pinta_avance()
+            botón(B1_X, B1_AN, "Instalarlo", falso)
+            botón(B2_X, B2_AN, "Quitarlo", falso)
+            botón(B3_X, B3_AN, "Actualizar todo", falso)
+            botón(B4_X, B4_AN, "Buscar novedades", falso)
+            devolver
+        fin
         para i desde 0 hasta 2 hacer texto(v, 14, AVISO_Y + i * 18, avisos[i], TINTA) fin
+        si reiniciar_ entonces
+            ; el núcleo nuevo: reiniciar ahora o más tarde
+            botón(B1_X, B1_AN + B2_AN + 8, "Reiniciar ahora", cierto)
+            botón(B3_X, B3_AN + B4_AN + 8, "Más tarde", cierto)
+            devolver
+        fin
         ; los botones
         nuevo := falso
         si n > 0 entonces nuevo := instalada[elegido][0] = 0 o (disponible[elegido][0] <> 0 y más_nueva(disponible[elegido], instalada[elegido])) fin
@@ -276,7 +345,69 @@ módulo UActual
         fin
         botón(B2_X, B2_AN, "Quitarlo", n > 0 y instalada[elegido][0] <> 0)
         botón(B3_X, B3_AN, "Actualizar todo", cierto)
+        botón(B4_X, B4_AN, "Buscar novedades", cierto)
     fin
+
+    ; lo que dice AVANCE.TXT («hecho total texto»), si se deja leer
+    función lee_avance()
+        variable m, k: nat32
+        variable x: arreglo [120] de byte
+        variable w: arreglo [16] de byte
+        m := abrir(fich_avance)
+        si es_error(m) entonces devolver fin
+        k := leer(m, x, 119)
+        cerrar(m)
+        si es_error(k) o k < 5 entonces devolver fin
+        x[k] := 0
+        si no palabra(x, 0, w, 16) o no texto_a_natural(w, av_hecho) entonces devolver fin
+        si no palabra(x, 1, w, 16) o no texto_a_natural(w, av_total) entonces av_total := 0 fin
+        trozo(tras_dos(x), 0, av_texto, 80)
+    fin
+
+    función tras_dos(t: puntero a byte): puntero a byte
+        variable n: nat32
+        n := 0
+        mientras valor(t) <> 0 y n < 2 hacer
+            si valor(t) = ' ' entonces n := n + 1 fin
+            t := t + 1
+        fin
+        devolver t
+    fin
+
+    ; el avance: lo que se hace y la barra (sin total: una franja que corre)
+    función pinta_avance()
+        variable an, x, p: ent32
+        variable t: arreglo [120] de byte
+        variable d: arreglo [3] de nat32
+        rectángulo(v, 0, AVISO_Y - 7, ANCHO, BOTÓN_Y - AVISO_Y, 0xEEF3FA)
+        Textos32.copiar(t, av_texto)
+        si av_total > 0 y empieza_por(av_texto, "Bajando") entonces
+            d[0] := nat32(dirección(av_texto[0]))
+            d[1] := av_hecho div 1024
+            d[2] := av_total div 1024
+            formatear(t, 120, "%s: %u K de %u K", d)
+        sino si av_total > 0 entonces
+            d[0] := nat32(dirección(av_texto[0]))
+            d[1] := av_hecho + 1
+            d[2] := av_total
+            si d[1] > d[2] entonces d[1] := d[2] fin
+            formatear(t, 120, "%s (%u de %u)", d)
+        fin
+        texto(v, 14, AVISO_Y, t, TINTA)
+        redondeado(v, 14, BARRA_Y, BARRA_AN, 18, 4, 0x8FA6C4, 0x8FA6C4)
+        redondeado(v, 15, BARRA_Y + 1, BARRA_AN - 2, 16, 3, 0xFFFFFF, 0xE9EFF7)
+        si av_total > 0 entonces
+            si av_hecho > av_total entonces av_hecho := av_total fin
+            an := ent32(((BARRA_AN - 4) * (av_hecho div 16)) div ((av_total div 16) + 1))
+            si an > 4 entonces degradado(v, 16, BARRA_Y + 2, an, 14, 0x7CC77A, 0x2E9A3C) fin
+        sino
+            p := ent32((tics() div 3) mod 100)
+            x := 16 + ((BARRA_AN - 4 - 120) * p) div 100
+            degradado(v, x, BARRA_Y + 2, 120, 14, 0x9CD0FF, 0x3C8BE0)
+        fin
+    fin
+
+
 
     ; -------------------------------------------------------------------------
     ;  Hacer
@@ -290,6 +421,7 @@ módulo UActual
         Textos32.copiar(avisos[0], "")
         Textos32.copiar(avisos[1], "")
         Textos32.copiar(avisos[2], "Un momento...")
+        ocupado := cierto
         pinta()
         paquetes(órdenes)
         avisos_de_salida()
@@ -333,11 +465,38 @@ módulo UActual
         pinta()
     fin
 
+    ; buscar novedades: el catálogo, otra vez (de Internet, si es de ahí)
+    función novedades()
+        Textos32.copiar(avisos[0], "")
+        Textos32.copiar(avisos[1], "")
+        Textos32.copiar(avisos[2], "")
+        ocupado := cierto
+        pinta()
+        mira()
+        avisos_de_salida()
+        si avisos[2][0] = 0 entonces Textos32.copiar(avisos[2], "Mirado: la lista está al día.") fin
+        pinta()
+    fin
+
     función clic(x: ent32, yy: ent32)
+        si yy >= BOTÓN_Y y yy < BOTÓN_Y + BOTÓN_ALTO y reiniciar_ entonces
+            si x >= B1_X y x < B2_X + B2_AN entonces
+                Textos32.copiar(avisos[2], "Reiniciando el equipo...")
+                pinta()
+                reiniciar()
+            fin
+            si x >= B3_X y x < B4_X + B4_AN entonces
+                reiniciar_ := falso
+                Textos32.copiar(avisos[2], "El núcleo nuevo se usará la próxima vez que arranque el equipo.")
+                pinta()
+            fin
+            devolver
+        fin
         si yy >= BOTÓN_Y y yy < BOTÓN_Y + BOTÓN_ALTO entonces
             si x >= B1_X y x < B1_X + B1_AN entonces instala_elegido() fin
             si x >= B2_X y x < B2_X + B2_AN entonces quita_elegido() fin
             si x >= B3_X y x < B3_X + B3_AN entonces haz("actualiza", falso) fin
+            si x >= B4_X y x < B4_X + B4_AN entonces novedades() fin
             devolver
         fin
         si yy >= LISTA_Y y yy < LISTA_Y + CABEN * RENGLÓN entonces
@@ -345,17 +504,153 @@ módulo UActual
         fin
     fin
 
+    ; -------------------------------------------------------------------------
+    ;  ACTUALIZ /BANDEJA: al arrancar, sin molestar
+    ; -------------------------------------------------------------------------
+    ; cómo está la red (la llamada 97: RED_NADA si aún no hay servicio)
+    función cómo_red(): nat32
+        ensamblador
+            mov eax, 97
+            xor ebx, ebx
+            int 0x80
+        fin
+    fin
+
+    función colocar_en(ventana_: nat32, x: nat32, yy: nat32)
+        ensamblador
+            mov eax, 80
+            mov ebx, {ventana_}
+            mov ecx, {x}
+            mov edx, {yy}
+            int 0x80
+        fin
+    fin
+
+    ; el arranque tras cambiar el núcleo (GRUBENV, que GRUB lee y escribe):
+    ; da lo que hay que contar (o nulo)
+    función mira_arranque(): puntero a byte
+        variable m, k: nat32
+        variable r: arreglo [40] de byte
+        variable e: arreglo [1100] de byte
+        variable nuevo: byte
+        r[0] := sis
+        r[1] := 0
+        concatenar(r, ":\\HISPA\\GRUBENV")
+        m := abrir(r)
+        si es_error(m) entonces devolver nulo fin
+        k := leer(m, e, 1024)
+        cerrar(m)
+        si es_error(k) o k < 1024 entonces devolver nulo fin
+        e[1024] := 0
+        si buscar(e, "\nnuevo=2\n") <> nulo entonces
+            nuevo := '0'
+        sino si buscar(e, "\nnuevo=3\n") <> nulo entonces
+            nuevo := '4'
+        sino
+            devolver nulo
+        fin
+        ; (lo mismo, con el número nuevo, y del mismo tamaño: 1024 octetos)
+        llenar(e, 1024, '#')
+        Textos32.copiar(e, "# GRUB Environment Block\nnuevo=0\n")
+        e[longitud(e)] := '#'
+        e[31] := nuevo
+        m := crear(r)
+        si no es_error(m) entonces
+            escribir_archivo(m, e, 1024)
+            cerrar(m)
+        fin
+        si nuevo = '0' entonces devolver "El núcleo nuevo ha arrancado bien." fin
+        devolver "El nuevo no llegó a arrancar: se usa el de antes."
+    fin
+
+    función bandeja(): byte
+        variable i, c, nuevas, límite, x, yy: nat32
+        variable s: Suceso
+        variable cuento: puntero a byte
+        variable t: arreglo [80] de byte
+        variable d: arreglo [1] de nat32
+        variable p: puntero a byte
+        cuento := mira_arranque()
+        ; la red: hasta 90 s (el servicio se pone en marcha con el escritorio)
+        nuevas := 0
+        i := 0
+        mientras i < 90 y cómo_red() <> RED_CONECTADA hacer
+            dormir(dato(DATO_HZ))
+            i := i + 1
+        fin
+        si cómo_red() = RED_CONECTADA entonces
+            ; (a su propio archivo: la ventana puede estar abierta a la vez)
+            archivo[longitud(archivo) - 11] := 0
+            concatenar(archivo, "BANDEJA.TXT")
+            fich_avance[0] := 0
+            paquetes("estado")
+            p := salida
+            mientras valor(p) <> 0 hacer
+                trozo(p, 0, t, 8)
+                si iguales(t, "p") entonces
+                    trozo(p, 2, instalada[0], 16)
+                    trozo(p, 3, disponible[0], 16)
+                    si instalada[0][0] <> 0 y disponible[0][0] <> 0 y más_nueva(disponible[0], instalada[0]) entonces nuevas := nuevas + 1 fin
+                fin
+                p := siguiente_línea(p)
+            fin
+        fin
+        si nuevas = 0 y cuento = nulo entonces devolver 0 fin
+        ; la ventanita, abajo a la derecha, encima de la bandeja
+        v := ventana("Actualizaciones", 420, 92)
+        si es_error(v) entonces devolver 0 fin
+        x := dato(DATO_ANCHO_PANTALLA)
+        yy := dato(DATO_ALTO_PANTALLA)
+        si x > 450 y yy > 200 entonces colocar_en(v, x - 440, yy - 34 - 136) fin
+        degradado(v, 0, 0, 420, 92, 0xFFFDF2, 0xF1EACB)
+        redondeado(v, 14, 12, 28, 26, 3, 0x9A6A1E, 0x9A6A1E)
+        redondeado(v, 15, 13, 26, 24, 2, 0xF2C46C, 0xD69A3A)
+        rectángulo(v, 26, 13, 4, 24, 0xB9822F)
+        si nuevas > 0 entonces
+            d[0] := nuevas
+            si nuevas = 1 entonces Textos32.copiar(t, "Hay una actualización.") sino formatear(t, 80, "Hay %u actualizaciones.", d) fin
+            texto_negrita(v, 54, 10, t, TINTA)
+            si cuento <> nulo entonces texto(v, 54, 30, cuento, SUAVE) sino texto(v, 54, 30, "Para este equipo, firmadas.", SUAVE) fin
+            redondeado(v, 54, 54, 120, 28, 5, 0x6F87A8, 0x6F87A8)
+            redondeado(v, 55, 55, 118, 26, 4, 0xFDFEFF, 0xD9E6F6)
+            texto_negrita(v, 54 + (120 - 48) div 2, 60, "Verlas", TINTA)
+        sino
+            Textos32.copiar(t, "El núcleo de Hispa-Pentium")
+            texto_negrita(v, 54, 10, t, TINTA)
+            texto(v, 54, 30, cuento, TINTA)
+        fin
+        redondeado(v, 184, 54, 120, 28, 5, 0x6F87A8, 0x6F87A8)
+        redondeado(v, 185, 55, 118, 26, 4, 0xFDFEFF, 0xD9E6F6)
+        si nuevas > 0 entonces texto_negrita(v, 184 + (120 - 64) div 2, 60, "Ahora no", TINTA) sino texto_negrita(v, 184 + (120 - 56) div 2, 60, "Aceptar", TINTA) fin
+        escribir("actualiz: aviso en la bandeja: ", t)
+        si cuento <> nulo entonces escribir(" ", cuento) fin
+        escribir("\n")
+        límite := tics() + 45 * dato(DATO_HZ)
+        mientras tics() < límite hacer
+            si suceso(v, s, falso) entonces
+                si s.clase = EV_CERRAR entonces romper fin
+                si s.clase = EV_TECLA y s.a = 27 entonces romper fin
+                si s.clase = EV_RATÓN_BAJA y ent32(s.b) >= 54 y ent32(s.b) < 82 entonces
+                    si nuevas > 0 y ent32(s.a) >= 54 y ent32(s.a) < 174 entonces
+                        cerrar_ventana(v)
+                        lanzar_suelto("\\HISPA\\ACTUALIZ.BIN", "")
+                        devolver 0
+                    fin
+                    si ent32(s.a) >= 184 y ent32(s.a) < 304 entonces romper fin
+                fin
+            sino
+                dormir(10)
+            fin
+        fin
+        cerrar_ventana(v)
+        devolver 0
+    fin
+
     función principal(): byte
         variable s: Suceso
         variable u: Info_unidad
         variable i: nat32
-        variable sis: byte
-        v := ventana("Programas y actualizaciones", ANCHO, ALTO)
-        si es_error(v) entonces
-            escribir("actualiz: no hay escritorio (o no hay memoria para la ventana)\n")
-            devolver 1
-        fin
-        colocar(v)
+        variable a: arreglo [64] de byte
         sis := 'C'
         i := 0
         mientras info_unidad(i, u) hacer
@@ -365,7 +660,19 @@ módulo UActual
         archivo[0] := sis
         archivo[1] := 0
         concatenar(archivo, ":\\HISPA\\PAQUETES\\VENTANA.TXT")
+        fich_avance[0] := sis
+        fich_avance[1] := 0
+        concatenar(fich_avance, ":\\HISPA\\PAQUETES\\AVANCE.TXT")
+        argumentos(a, 64)
+        si buscar(a, "/BANDEJA") <> nulo o buscar(a, "/bandeja") <> nulo entonces devolver bandeja() fin
+        v := ventana("Programas y actualizaciones", ANCHO, ALTO)
+        si es_error(v) entonces
+            escribir("actualiz: no hay escritorio (o no hay memoria para la ventana)\n")
+            devolver 1
+        fin
+        colocar(v)
         Textos32.copiar(avisos[2], "Mirando lo instalado y el catálogo...")
+        ocupado := cierto
         pinta()
         mira()
         ; (si PAQUETES ha dicho algo más que la lista, se enseña: que no hay catálogo...)
@@ -382,8 +689,7 @@ módulo UActual
                 sino si s.a = TECLA_SUPR entonces
                     quita_elegido()
                 sino si s.a = TECLA_F5 entonces
-                    mira_sin_avisos()
-                    pinta()
+                    novedades()
                 fin
             sino si s.clase = EV_RATÓN_BAJA entonces
                 clic(ent32(s.a), ent32(s.b))

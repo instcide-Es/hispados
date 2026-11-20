@@ -6,6 +6,9 @@
 ;  ULTIMA.TXT; «/» es INDEX.HTM). Con «-» como archivo, sale en la pantalla.
 ;  Sigue las redirecciones (hasta cinco), entiende «Content-Length» y los
 ;  trozos («Transfer-Encoding: chunked»). HTTPS, todavía no.
+;  Con /AVANCE=ARCHIVO, cada 16 K reescribe en ARCHIVO una línea «llevados
+;  total Bajando nombre» (total: 0 si el servidor no lo dice): así enseña la
+;  barra la ventana de «Programas y actualizaciones» (PAQUETES se lo pide).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Udescarg
@@ -31,6 +34,8 @@ módulo Udescarg
     variable cerrada, a_pantalla: bool
     variable salida: nat32
     variable escritos, próximo_punto: nat32
+    variable avance: arreglo [128] de byte      ; /AVANCE=archivo (o nada)
+    variable total_, próximo_avance: nat32
 
     ; ---- la URL ----
     ; http://nombre[:puerto][/camino]. Falso si no vale (o es https)
@@ -190,11 +195,29 @@ módulo Udescarg
             fin
         fin
         escritos := escritos + n
+        si avance[0] <> 0 y escritos >= próximo_avance entonces
+            di_avance()
+            próximo_avance := próximo_avance + 16384
+        fin
         si no a_pantalla y escritos >= próximo_punto entonces
             escribir(".")
             próximo_punto := próximo_punto + 32768
         fin
         devolver cierto
+    fin
+
+    función di_avance()
+        variable m: nat32
+        variable d: arreglo [3] de nat32
+        variable x: arreglo [200] de byte
+        d[0] := escritos
+        d[1] := total_
+        d[2] := nat32(dirección(archivo[0]))
+        formatear(x, 200, "%u %u Bajando %s\r\n", d)
+        m := crear(avance)
+        si es_error(m) entonces devolver fin
+        escribir_archivo(m, x, longitud(x))
+        cerrar(m)
     fin
 
     ; pasa «n» octetos de la conexión al archivo (0xFFFFFFFF: hasta que se cierre)
@@ -334,6 +357,10 @@ módulo Udescarg
         fin
         escritos := 0
         próximo_punto := 32768
+        total_ := 0
+        si con_largo entonces total_ := largo fin
+        próximo_avance := 16384
+        si avance[0] <> 0 entonces di_avance() fin
         si trozos entonces
             mientras cierto hacer
                 si no lee_línea() o no hex(línea, largo) entonces
@@ -396,12 +423,52 @@ módulo Udescarg
         devolver falso
     fin
 
+    ; t sin su palabra número n (las demás, en su orden)
+    función tras_palabra(t: puntero a byte, n: nat32): puntero a byte
+        variable i, k, w: nat32
+        variable x: arreglo [600] de byte
+        k := 0
+        w := 0
+        i := 0
+        mientras t[i] <> 0 hacer
+            mientras t[i] = ' ' hacer i := i + 1 fin
+            si t[i] = 0 entonces romper fin
+            si w <> n entonces
+                si k > 0 entonces
+                    x[k] := ' '
+                    k := k + 1
+                fin
+                mientras t[i] <> 0 y t[i] <> ' ' hacer
+                    x[k] := t[i]
+                    k := k + 1
+                    i := i + 1
+                fin
+            sino
+                mientras t[i] <> 0 y t[i] <> ' ' hacer i := i + 1 fin
+            fin
+            w := w + 1
+        fin
+        x[k] := 0
+        Textos32.copiar(línea, x)
+        devolver línea
+    fin
+
     función principal(): byte
         variable vueltas, código, empezó, s: nat32
         variable dado: bool
         variable pal: arreglo [128] de byte
         variable d: arreglo [4] de nat32
         argumentos(args, 600)
+        ; /AVANCE=archivo, donde esté; lo demás, en su orden
+        s := 0
+        mientras palabra(args, s, pal, 128) hacer
+            si empieza_por_sin_caja(pal, "/AVANCE=") entonces
+                copiar_hasta(avance, dirección(pal[8]), 128)
+                Textos32.copiar(args, tras_palabra(args, s))
+            sino
+                s := s + 1
+            fin
+        fin
         si no palabra(args, 0, url, 512) o iguales(url, "/?") entonces
             escribir("Uso: DESCARGAR http://servidor[:puerto]/camino [archivo]\n")
             escribir("  Baja ese archivo por HTTP y lo guarda (con «-» como archivo, a la pantalla).\n")
