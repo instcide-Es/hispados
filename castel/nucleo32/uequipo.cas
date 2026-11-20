@@ -15,7 +15,10 @@
 ;  lanza; un programa de Hispa Ventanas (.HVP) y los documentos de la oficina
 ;  (.PLU, de Pluma; .HOJ, de Cuentas; las imágenes, con Mirador) los abre
 ;  HVPRUN.BIN. Las flechas, Re Pág, Av Pág, Intro y Retroceso también valen. El
-;  botón secundario saca «Abrir». Arriba, la barra de menús.
+;  botón secundario saca «Abrir» (y, en una unidad, «Quitar con seguridad»: la
+;  de una memoria USB, desde la 0.8). Arriba, la barra de menús. Cuando se
+;  enchufa o se quita una memoria USB, la lista se pone al día sola (le llega
+;  EV_UNIDADES).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UEquipo
@@ -38,6 +41,7 @@ módulo UEquipo
     constante M_VER = 1
     constante M_AYUDA = 2
     constante M_CONTEXTO = 100
+    constante M_UNIDAD = 101                    ; el del botón secundario en una unidad
 
     variable v: nat32
     variable ancho, alto: ent32
@@ -164,6 +168,49 @@ módulo UEquipo
         mientras n_unidades < MAX_UNIDADES y info_unidad(nat32(n_unidades), us[n_unidades]) hacer
             n_unidades := n_unidades + 1
         fin
+    fin
+
+    ; las unidades han cambiado (se ha enchufado o quitado una memoria USB):
+    ; se leen otra vez; si la que se estaba viendo ya no está, a la lista
+    función unidades_cambiadas()
+        variable i: ent32
+        variable sigue: bool
+        variable d: arreglo [1] de nat32
+        lee_unidades()
+        si elegida >= n_unidades entonces elegida := n_unidades - 1 fin
+        si elegida < 0 entonces elegida := 0 fin
+        si no dentro entonces devolver fin
+        sigue := falso
+        i := 0
+        mientras i < n_unidades hacer
+            si us[i].letra = letra entonces sigue := cierto fin
+            i := i + 1
+        fin
+        si no sigue entonces
+            dentro := falso
+            elegida := 0
+            d[0] := letra
+            formatear(aviso, 100, "La unidad %c: ya no está (se ha quitado la memoria).", d)
+        fin
+    fin
+
+    ; «Quitar con seguridad» la memoria de la unidad elegida
+    función quita_elegida()
+        variable r: nat32
+        variable d: arreglo [1] de nat32
+        si dentro o elegida < 0 o elegida >= n_unidades entonces devolver fin
+        d[0] := us[elegida].letra
+        r := quitar_memoria(us[elegida].letra)
+        si r = QUITADA entonces
+            formatear(aviso, 100, "Ya puede quitar la memoria %c:.", d)
+        sino si r = ES_DEL_SISTEMA entonces
+            formatear(aviso, 100, "%c: es la memoria del sistema: no se puede quitar.", d)
+        sino
+            formatear(aviso, 100, "%c: no es una memoria USB que se pueda quitar.", d)
+        fin
+        lee_unidades()
+        si elegida >= n_unidades entonces elegida := n_unidades - 1 fin
+        si elegida < 0 entonces elegida := 0 fin
     fin
 
     ; de qué es la unidad: «disco duro (SATA)», «memoria USB»...
@@ -451,6 +498,8 @@ módulo UEquipo
             abre()
         sino si cuál = M_CONTEXTO entonces
             abre()
+        sino si cuál = M_UNIDAD entonces
+            si opción = 0 entonces abre() sino quita_elegida() fin
         sino si cuál = M_VER entonces
             según opción
                 caso 0:
@@ -513,7 +562,13 @@ módulo UEquipo
                         elegida := k
                         si s.c yb BOTÓN_DERECHO <> 0 entonces
                             pinta_todo()
-                            menú(v, ent32(s.a), ent32(s.b), "Abrir", 0, M_CONTEXTO)
+                            si dentro entonces
+                                menú(v, ent32(s.a), ent32(s.b), "Abrir", 0, M_CONTEXTO)
+                            sino si us[elegida].quitable <> 0 entonces
+                                menú(v, ent32(s.a), ent32(s.b), "Abrir|Quitar con seguridad", 0, M_UNIDAD)
+                            sino
+                                menú(v, ent32(s.a), ent32(s.b), "Abrir|Quitar con seguridad", 2, M_UNIDAD)
+                            fin
                         sino
                             si veces(s.c) = 2 entonces abre() fin
                             pinta_todo()
@@ -522,6 +577,9 @@ módulo UEquipo
                 fin
             sino si s.clase = EV_MENÚ entonces
                 si elegido(s.b, s.a) entonces devolver 0 fin
+            sino si s.clase = EV_UNIDADES entonces
+                unidades_cambiadas()
+                pinta_todo()
             sino si s.clase = EV_TAMAÑO entonces
                 ancho := ent32(s.a)
                 alto := ent32(s.b)
