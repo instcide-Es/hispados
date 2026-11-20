@@ -112,7 +112,11 @@ static struct gui_file_table tabla_archivos = {
   .mkpath = a_mkpath, .basename = a_basename, .nsurl_to_path = a_nsurl_a_ruta,
   .path_to_nsurl = a_ruta_a_nsurl, .mkdir_all = a_mkdir_todo,
 };
+#ifdef SURF_ANFITRION
+struct gui_file_table *surf_tabla_archivos = NULL;   /* (en el anfitrión, las rutas de siempre) */
+#else
 struct gui_file_table *surf_tabla_archivos = &tabla_archivos;
+#endif
 
 /* los recursos de NetSurf (default.css...) van en la carpeta RECURSOS junto
  * al programa; los nombres largos, en 8+3 */
@@ -123,7 +127,7 @@ char *surf_recurso(const char *n) {
   struct stat sb;
   unsigned k;
   for (k = 0; k < sizeof largo / sizeof largo[0]; k++) if (!strcmp(n, largo[k][0])) n = largo[k][1];
-  snprintf(b, sizeof b, "%s\\RECURSOS\\%s", surf_carpeta, n);
+  snprintf(b, sizeof b, "%s" SURF_SEP "RECURSOS" SURF_SEP "%s", surf_carpeta, n);
   if (stat(b, &sb) != 0) return NULL;
   return strdup(b);
 }

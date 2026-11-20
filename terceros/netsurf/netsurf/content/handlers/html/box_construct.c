@@ -110,8 +110,13 @@ static const box_type box_map[] = {
 	BOX_NONE,            /* CSS_DISPLAY_NONE */
 	BOX_FLEX,            /* CSS_DISPLAY_FLEX */
 	BOX_INLINE_FLEX,     /* CSS_DISPLAY_INLINE_FLEX */
+#ifdef nshispa
+	BOX_FLEX,            /* CSS_DISPLAY_GRID [HISPA]: layout_grid.c */
+	BOX_INLINE_FLEX,     /* CSS_DISPLAY_INLINE_GRID */
+#else
 	BOX_BLOCK,           /* CSS_DISPLAY_GRID */
 	BOX_INLINE_BLOCK,    /* CSS_DISPLAY_INLINE_GRID */
+#endif
 };
 
 
@@ -299,6 +304,23 @@ box_get_style(html_content *c,
 }
 
 
+#ifdef nshispa
+/* [HISPA] ¿el pseudoelemento tiene texto (content: "...")? */
+static bool hispa_hay_texto(const css_computed_style *style)
+{
+	const css_computed_content_item *c_item;
+	if (style == NULL || css_computed_content(style, &c_item) !=
+			CSS_CONTENT_SET || c_item == NULL)
+		return false;
+	for (; c_item->type != CSS_COMPUTED_CONTENT_NONE; c_item++)
+		if (c_item->type == CSS_COMPUTED_CONTENT_STRING &&
+				c_item->data.string != NULL &&
+				lwc_string_length(c_item->data.string) > 0)
+			return true;
+	return false;
+}
+#endif
+
 /**
  * Construct the box required for a generated element.
  *
@@ -355,6 +377,101 @@ box_construct_generate(dom_node *n,
 	}
 }
 
+
+
+#ifdef nshispa
+/**
+ * [HISPA] ::before y ::after con texto (content: "..."), en línea o
+ * inline-block, para cualquier caja: los iconos de letra (Bootstrap Icons:
+ * .bi::before { content: "\f67f"; display: inline-block }). El texto va
+ * donde iría el primer (o el último) hijo en línea del elemento: si el
+ * elemento va en línea, a su lado en su contenedor de línea; si es un
+ * bloque, en su (último) contenedor de línea. Devuelve false si no hay
+ * texto (entonces, lo de NetSurf: un bloque vacío, el «clearfix»).
+ */
+static bool hispa_generado(dom_node *n, html_content *content,
+		struct box *box, const css_computed_style *style,
+		struct box *ic)
+{
+	const css_computed_content_item *c_item;
+	char texto[128];
+	size_t l = 0;
+	uint8_t display;
+	struct box *t, *gen;
+
+	if (style == NULL || css_computed_content(style, &c_item) !=
+			CSS_CONTENT_SET || c_item == NULL)
+		return false;
+	for (; c_item->type != CSS_COMPUTED_CONTENT_NONE; c_item++) {
+		if (c_item->type == CSS_COMPUTED_CONTENT_STRING &&
+				c_item->data.string != NULL) {
+			size_t m = lwc_string_length(c_item->data.string);
+			if (l + m < sizeof texto) {
+				memcpy(texto + l,
+					lwc_string_data(c_item->data.string), m);
+				l += m;
+			}
+		}
+	}
+	if (l == 0)
+		return false;
+	display = ns_computed_display(style, box_is_root(n));
+	if (display == CSS_DISPLAY_NONE)
+		return true;
+	if (box->type != BOX_INLINE) {
+		if (box->type != BOX_BLOCK && box->type != BOX_INLINE_BLOCK &&
+				box->type != BOX_FLEX &&
+				box->type != BOX_INLINE_FLEX &&
+				box->type != BOX_TABLE_CELL)
+			return true;
+		if (box->last != NULL &&
+				box->last->type == BOX_INLINE_CONTAINER) {
+			ic = box->last;
+		} else {
+			ic = box_create(NULL, NULL, false, NULL, NULL, NULL,
+					NULL, content->bctx);
+			if (ic == NULL)
+				return true;
+			ic->type = BOX_INLINE_CONTAINER;
+			box_add_child(box, ic);
+		}
+	}
+	if (ic == NULL)
+		return true;
+
+	t = box_create(NULL, (css_computed_style *) style, false, box->href,
+			box->target, NULL, NULL, content->bctx);
+	if (t == NULL)
+		return true;
+	t->type = BOX_TEXT;
+	t->text = talloc_strndup(content->bctx, texto, l);
+	t->length = l;
+	if (t->text == NULL)
+		return true;
+
+	if (display == CSS_DISPLAY_INLINE) {
+		box_add_child(ic, t);
+		return true;
+	}
+	/* inline-block (y lo demás, como inline-block) */
+	gen = box_create(NULL, (css_computed_style *) style, false, box->href,
+			box->target, NULL, NULL, content->bctx);
+	if (gen == NULL)
+		return true;
+	gen->type = BOX_INLINE_BLOCK;
+	{
+		struct box *gic = box_create(NULL, NULL, false, NULL, NULL,
+				NULL, NULL, content->bctx);
+		if (gic == NULL)
+			return true;
+		gic->type = BOX_INLINE_CONTAINER;
+		box_add_child(gic, t);
+		box_add_child(gen, gic);
+	}
+	box_add_child(ic, gen);
+	return true;
+}
+#endif
 
 /**
  * Construct a list marker box
@@ -587,6 +704,15 @@ box_construct_element(struct box_construct_ctx *ctx, bool *convert_children)
 		 * inline container as if they were not absolutely positioned.
 		 * Layout expects and handles this. */
 		box->type = box_map[CSS_DISPLAY_INLINE_BLOCK];
+#ifdef nshispa
+		/* [HISPA] dentro de un flex, un bloque (no es un elemento flex:
+		 * .visually-hidden de Bootstrap ocupaba su sitio y su hueco) */
+		if (props.containing_block != NULL &&
+				(props.containing_block->type == BOX_FLEX ||
+				 props.containing_block->type ==
+				 BOX_INLINE_FLEX))
+			box->type = BOX_BLOCK;
+#endif
 	} else if (props.node_is_root) {
 		/* Special case for root element: force it to BLOCK, or the
 		 * rest of the layout will break. */
@@ -606,6 +732,17 @@ box_construct_element(struct box_construct_ctx *ctx, bool *convert_children)
 			case BOX_INLINE_BLOCK:
 				box->type = BOX_BLOCK;
 				break;
+#ifdef nshispa
+			/* [HISPA] y los elementos en línea (<i>, <a>, <span>):
+			 * un elemento flex es un bloque (CSS Flexbox 4); si no,
+			 * iban dentro de un bloque anónimo y perdían su ancho,
+			 * su relleno y su fondo */
+			case BOX_INLINE:
+				if (!(box->flags & IS_REPLACED) &&
+						box->gadget == NULL)
+					box->type = BOX_BLOCK;
+				break;
+#endif
 			default:
 				break;
 			}
@@ -619,8 +756,30 @@ box_construct_element(struct box_construct_ctx *ctx, bool *convert_children)
 		return false;
 	}
 
+#ifdef nshispa
+	/* [HISPA] los campos y botones (sus tipos los pone
+	 * convert_special_elements) dentro de un flex, también bloques: si no,
+	 * no son elementos flex (el campo de .input-group no se estiraba) */
+	if (!props.node_is_root && props.containing_block != NULL &&
+			(props.containing_block->type == BOX_FLEX ||
+			 props.containing_block->type == BOX_INLINE_FLEX) &&
+			box->gadget != NULL && box->type == BOX_INLINE_BLOCK &&
+			css_computed_position(box->style) !=
+			CSS_POSITION_ABSOLUTE &&
+			css_computed_position(box->style) !=
+			CSS_POSITION_FIXED) {
+		box->type = BOX_BLOCK;
+	}
+#endif
+
 	/* Handle the :before pseudo element */
-	if (!(box->flags & IS_REPLACED)) {
+	if (!(box->flags & IS_REPLACED)
+#ifdef nshispa
+			/* [HISPA] con texto, al final (hispa_generado) */
+			&& !hispa_hay_texto(box->styles->styles[
+					CSS_PSEUDO_ELEMENT_BEFORE])
+#endif
+			) {
 		box_construct_generate(ctx->n, ctx->content, box,
 				box->styles->styles[CSS_PSEUDO_ELEMENT_BEFORE]);
 	}
@@ -757,6 +916,14 @@ box_construct_element(struct box_construct_ctx *ctx, bool *convert_children)
 		}
 	}
 
+#ifdef nshispa
+	/* [HISPA] ::before con texto */
+	if (!(box->flags & IS_REPLACED))
+		hispa_generado(ctx->n, ctx->content, box,
+				box->styles->styles[CSS_PSEUDO_ELEMENT_BEFORE],
+				props.inline_container);
+#endif
+
 	return true;
 }
 
@@ -783,6 +950,15 @@ static void box_construct_element_after(dom_node *n, html_content *content)
 		struct box *inline_end;
 		bool has_children;
 		dom_exception err;
+
+#ifdef nshispa
+		/* [HISPA] ::after con texto, antes del final del elemento */
+		if (box->type == BOX_INLINE && props.inline_container != NULL)
+			hispa_generado(n, content, box,
+					box->styles->styles[
+					CSS_PSEUDO_ELEMENT_AFTER],
+					props.inline_container);
+#endif
 
 		err = dom_node_has_child_nodes(n, &has_children);
 		if (err != DOM_NO_ERR)
@@ -823,6 +999,12 @@ static void box_construct_element_after(dom_node *n, html_content *content)
 		}
 	} else if (!(box->flags & IS_REPLACED)) {
 		/* Handle the :after pseudo element */
+#ifdef nshispa
+		/* [HISPA] con texto: hispa_generado */
+		if (!hispa_generado(n, content, box,
+				box->styles->styles[CSS_PSEUDO_ELEMENT_AFTER],
+				NULL))
+#endif
 		box_construct_generate(n, content, box,
 				box->styles->styles[CSS_PSEUDO_ELEMENT_AFTER]);
 	}

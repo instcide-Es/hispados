@@ -115,7 +115,7 @@ def fin_ies(y0, y1):
         if hueco > 5: return x - hueco
         x += 1
     return 999
-a, b = fin_ies(136, 152), fin_ies(172, 188)
+a, b = fin_ies(141, 160), fin_ies(179, 198)   # (con 96 ppp desde el 20/11)
 print('  (las «i»: hasta x=%d la normal, x=%d la monoespaciada)' % (a, b))
 sys.exit(0 if a + 20 < b else 1)
 EOP

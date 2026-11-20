@@ -65,6 +65,16 @@
 #include "html/private.h"
 #include "html/layout.h"
 
+/* [HISPA] la línea de base del texto, con las medidas de la letra (en el
+ * centro de la línea, como Chrome); NetSurf la ponía a 3/4 del alto (los
+ * iconos de letra salían cortados por arriba) */
+#ifdef nshispa
+int letra_base(const plot_font_style_t *s, int alto); /* w32/surf/letra.c */
+#define TEXTO_BASE(fs, h, sc) ((int)(letra_base((fs), (h)) * (sc)))
+#else
+#define TEXTO_BASE(fs, h, sc) ((int)((h) * 0.75 * (sc)))
+#endif
+
 
 bool html_redraw_debug = false;
 
@@ -251,7 +261,7 @@ text_redraw(const char *utf8_text,
 			    (ctx->plot->text(ctx,
 					     &plot_fstyle,
 					     x,
-					     y + (int)(height * 0.75 * scale),
+					     y + TEXTO_BASE(fstyle, height, scale),
 					     utf8_text,
 					     start_idx) != NSERROR_OK))
 				return false;
@@ -297,7 +307,7 @@ text_redraw(const char *utf8_text,
 			    (ctx->plot->text(ctx,
 					     &fstyle_hback,
 					     x,
-					     y + (int)(height * 0.75 * scale),
+					     y + TEXTO_BASE(fstyle, height, scale),
 					     utf8_text,
 					     endtxt_idx) != NSERROR_OK)) {
 				return false;
@@ -322,7 +332,7 @@ text_redraw(const char *utf8_text,
 					res = ctx->plot->text(ctx,
 							      &plot_fstyle,
 							      x,
-							      y + (int)(height * 0.75 * scale),
+							      y + TEXTO_BASE(fstyle, height, scale),
 							      utf8_text,
 							      utf8_len);
 					if (res != NSERROR_OK) {
@@ -342,7 +352,7 @@ text_redraw(const char *utf8_text,
 		res = ctx->plot->text(ctx,
 				      &plot_fstyle,
 				      x,
-				      y + (int) (height * 0.75 * scale),
+				      y + TEXTO_BASE(fstyle, height, scale),
 				      utf8_text,
 				      utf8_len);
 		if (res != NSERROR_OK) {
@@ -805,6 +815,210 @@ static bool html_redraw_background(int x, int y, struct box *box, float scale,
 }
 
 
+
+#ifdef nshispa
+#include "redondo.h"
+#include "desktop/knockout.h"
+
+/* [HISPA] un radio de esquina en puntos (los % del ancho de la caja) */
+static int hispa_radio(const html_content *html, const struct box *box,
+		uint8_t (*f)(const css_computed_style *, css_fixed *,
+				css_unit *), int ancho)
+{
+	css_fixed v = 0;
+	css_unit u = CSS_UNIT_PX;
+	if (f(box->style, &v, &u) != CSS_BORDER_RADIUS_SET || v <= 0)
+		return 0;
+	if (u == CSS_UNIT_PCT)
+		return FIXTOINT(FDIV(v * ancho, F_100));
+	return FIXTOINT(css_unit_len2device_px(box->style, &html->unit_len_ctx,
+			v, u));
+}
+
+static int hispa_px(const html_content *html, const struct box *box,
+		css_fixed v, css_unit u)
+{
+	if (u == CSS_UNIT_PCT)
+		return 0;
+	return FIXTOINT(css_unit_len2device_px(box->style, &html->unit_len_ctx,
+			v, u));
+}
+
+/**
+ * [HISPA] La sombra (box-shadow) y, con esquinas redondas (border-radius),
+ * el fondo de color y el borde liso de la caja: w32/surf/redondo.c.
+ * x0..y1: el borde de fuera de la caja; clip: el recorte del padre (la
+ * sombra va fuera de la caja); r: el de la caja. Dice si ya ha pintado el
+ * fondo y los bordes.
+ */
+static void hispa_redondo(const html_content *html, struct box *box,
+		int x0, int y0, int x1, int y1, const struct rect *clip,
+		const struct rect *r, const struct redraw_context *ctx,
+		colour *fondo_actual, bool *fondo_hecho, bool *bordes_hechos)
+{
+	int radio[4], ancho[4], k;
+	bool redondo = false;
+	css_fixed l[4];
+	css_unit u[4];
+	css_color c;
+	uint8_t t;
+
+	*fondo_hecho = *bordes_hechos = false;
+	if (box->style == NULL)
+		return;
+	radio[0] = hispa_radio(html, box, css_computed_border_top_left_radius,
+			x1 - x0);
+	radio[1] = hispa_radio(html, box, css_computed_border_top_right_radius,
+			x1 - x0);
+	radio[2] = hispa_radio(html, box,
+			css_computed_border_bottom_right_radius, x1 - x0);
+	radio[3] = hispa_radio(html, box,
+			css_computed_border_bottom_left_radius, x1 - x0);
+	for (k = 0; k < 4; k++)
+		if (radio[k] > 0)
+			redondo = true;
+
+	/* la sombra, fuera de la caja (con el recorte del padre) */
+	t = css_computed_box_shadow(box->style, &l[0], &u[0], &l[1], &u[1],
+			&l[2], &u[2], &l[3], &u[3], &c);
+	if (t == CSS_BOX_SHADOW_SET && (c >> 24) != 0) {
+		struct rect cr = *clip;
+		if (ctx->plot->clip(ctx, &cr) == NSERROR_OK &&
+				knockout_plot_hispa_vacia(ctx)) {
+			redondo_sombra(x0, y0, x1, y1, radio,
+					hispa_px(html, box, l[0], u[0]),
+					hispa_px(html, box, l[1], u[1]),
+					hispa_px(html, box, l[2], u[2]),
+					hispa_px(html, box, l[3], u[3]),
+					nscss_color_to_ns(c),
+					(int)((c >> 24) * 256 / 255));
+			ctx->plot->clip(ctx, r);
+		}
+	}
+
+	/* el fondo (de color; con imagen, el de NetSurf); con transparencia
+	 * (rgba(...)), también sin esquinas redondas: NetSurf lo pinta opaco */
+	{
+		css_color bg;
+		bool con_fondo = false, con_borde = true;
+		colour fondo = 0, borde = 0;
+		int alfa_fondo = 256, alfa_borde = 256;
+		if (html_redraw_find_bg_box(box) == box &&
+				box->background == NULL) {
+			css_computed_background_color(box->style, &bg);
+			if (!nscss_color_is_transparent(bg)) {
+				con_fondo = true;
+				fondo = nscss_color_to_ns(bg);
+				alfa_fondo = (int)((bg >> 24) * 256 / 255);
+			}
+		} else if (html_redraw_find_bg_box(box) != NULL) {
+			return;
+		}
+		if (box->border[TOP].width > 0 &&
+				(box->border[TOP].c >> 24) < 0xff)
+			alfa_borde = (int)((box->border[TOP].c >> 24) * 256 / 255);
+		if (!redondo && alfa_fondo == 256 && alfa_borde == 256)
+			return;
+		if (!redondo) {
+			/* (sin esquinas: el borde con transparencia, de NetSurf) */
+			for (k = 0; k < 4; k++)
+				radio[k] = 0;
+		}
+		/* el borde: liso, del mismo color en los cuatro lados */
+		for (k = 0; k < 4; k++) {
+			ancho[k] = box->border[k].width;
+			if (ancho[k] > 0 &&
+					box->border[k].style !=
+					CSS_BORDER_STYLE_SOLID)
+				con_borde = false;
+			if (ancho[k] > 0 && box->border[k].c !=
+					box->border[TOP].c)
+				con_borde = false;
+		}
+		if (ancho[0] + ancho[1] + ancho[2] + ancho[3] == 0)
+			con_borde = false;
+		if (con_borde) {
+			for (k = 0; k < 4; k++)
+				if (ancho[k] > 0)
+					borde = nscss_color_to_ns(
+							box->border[k].c);
+			if (nscss_color_is_transparent(box->border[TOP].c) &&
+					ancho[TOP] > 0)
+				con_borde = false;
+		}
+		if (!con_fondo && !con_borde) {
+			*fondo_hecho = true;
+			return;
+		}
+		if (knockout_plot_hispa_vacia(ctx) &&
+				redondo_caja(x0, y0, x1, y1, radio, fondo, con_fondo,
+				ancho, borde, con_borde, alfa_fondo, alfa_borde)) {
+			*fondo_hecho = true;
+			*bordes_hechos = con_borde;
+			if (con_fondo)
+				*fondo_actual = fondo;
+		}
+	}
+}
+#endif
+
+
+#ifdef nshispa
+/**
+ * [HISPA] Una casilla (checkbox) con estilo propio (con esquinas redondas,
+ * como .form-check-input de Bootstrap): blanca con su borde o, marcada,
+ * azul (o su fondo, si no es blanco) con la marca en blanco.
+ */
+static bool hispa_casilla(const html_content *html, struct box *box,
+		int x0, int y0, int x1, int y1, const struct rect *r,
+		const struct redraw_context *ctx)
+{
+	int radio[4], ancho[4], k, w, h;
+	css_color bg;
+	colour fondo = 0xffffff, borde;
+	plot_style_t pen = {
+		.stroke_type = PLOT_OP_TYPE_SOLID,
+		.stroke_colour = 0xffffff,
+		.stroke_width = 2 * PLOT_STYLE_SCALE,
+	};
+	struct rect l;
+
+	radio[0] = hispa_radio(html, box, css_computed_border_top_left_radius,
+			x1 - x0);
+	if (radio[0] <= 0)
+		return false;
+	for (k = 1; k < 4; k++)
+		radio[k] = radio[0];
+	for (k = 0; k < 4; k++)
+		ancho[k] = box->border[k].width;
+	borde = nscss_color_to_ns(box->border[TOP].c);
+	css_computed_background_color(box->style, &bg);
+	if (box->gadget->selected) {
+		fondo = nscss_color_is_transparent(bg) ||
+				nscss_color_to_ns(bg) == 0xffffff ?
+				0xfd6e0d : nscss_color_to_ns(bg);
+		borde = fondo;
+	}
+	if (!knockout_plot_hispa_vacia(ctx) ||
+			!redondo_caja(x0, y0, x1, y1, radio, fondo, true, ancho,
+			borde, ancho[TOP] > 0, 256, 256))
+		return false;
+	if (!box->gadget->selected)
+		return true;
+	/* la marca: dos trazos */
+	w = x1 - x0;
+	h = y1 - y0;
+	l.x0 = x0 + w * 26 / 100; l.y0 = y0 + h * 52 / 100;
+	l.x1 = x0 + w * 43 / 100; l.y1 = y0 + h * 68 / 100;
+	ctx->plot->line(ctx, &pen, &l);
+	l.x0 = l.x1; l.y0 = l.y1;
+	l.x1 = x0 + w * 74 / 100; l.y1 = y0 + h * 33 / 100;
+	ctx->plot->line(ctx, &pen, &l);
+	(void) r;
+	return true;
+}
+#endif
+
 /**
  * Plot an inline's background and/or background image.
  *
@@ -1255,6 +1469,10 @@ bool html_redraw_box(const html_content *html, struct box *box,
 	dom_exception exc;
 	dom_html_element_type tag_type;
 
+	/* [HISPA] ya pintados por redondo.c */
+	bool hispa_fondo_hecho = false;
+	bool hispa_bordes_hechos = false;
+
 
 	if (html_redraw_printing && (box->flags & PRINTED))
 		return true;
@@ -1482,6 +1700,24 @@ bool html_redraw_box(const html_content *html, struct box *box,
 			return false;
 	}
 
+#ifdef nshispa
+	/* [HISPA] la sombra y las esquinas redondas (w32/surf/redondo.c) */
+	if (box->style && box->parent && scale == 1.0f &&
+			(box->type == BOX_BLOCK ||
+			 box->type == BOX_INLINE_BLOCK ||
+			 box->type == BOX_FLEX ||
+			 box->type == BOX_INLINE_FLEX ||
+			 box->type == BOX_TABLE_CELL ||
+			 box->type == BOX_TABLE || box->object ||
+			 (box->type == BOX_INLINE && box->gadget))) {
+		hispa_redondo(html, box, x - border_left, y - border_top,
+				x + padding_width + border_right,
+				y + padding_height + border_bottom, clip, &r,
+				ctx, &current_background_color,
+				&hispa_fondo_hecho, &hispa_bordes_hechos);
+	}
+#endif
+
 	/* background colour and image for block level content and replaced
 	 * inlines */
 
@@ -1491,7 +1727,7 @@ bool html_redraw_box(const html_content *html, struct box *box,
 	* its background rendered. Otherwise filter out linebreaks,
 	* optimize away non-differing inlines, only plot background
 	* for BOX_TEXT it's in an inline */
-	if (bg_box && bg_box->type != BOX_BR &&
+	if (bg_box && !hispa_fondo_hecho && bg_box->type != BOX_BR &&
 			bg_box->type != BOX_TEXT &&
 			bg_box->type != BOX_INLINE_END &&
 			(bg_box->type != BOX_INLINE || bg_box->object ||
@@ -1542,7 +1778,7 @@ bool html_redraw_box(const html_content *html, struct box *box,
 	}
 
 	/* borders for block level content and replaced inlines */
-	if (box->style &&
+	if (box->style && !hispa_bordes_hechos &&
 	    box->type != BOX_TEXT &&
 	    box->type != BOX_INLINE_END &&
 	    (box->type != BOX_INLINE || box->object ||
@@ -1849,6 +2085,15 @@ bool html_redraw_box(const html_content *html, struct box *box,
 				y + padding_top, &r, ctx);
 
 	} else if (box->gadget && box->gadget->type == GADGET_CHECKBOX) {
+#ifdef nshispa
+		/* [HISPA] una casilla con estilo (Bootstrap: esquinas redondas):
+		 * como Chrome, en vez del dibujo de NetSurf */
+		if (scale == 1.0f && hispa_casilla(html, box,
+				x - border_left, y - border_top,
+				x + padding_width + border_right,
+				y + padding_height + border_bottom, &r, ctx)) {
+		} else
+#endif
 		if (!html_redraw_checkbox(x + padding_left, y + padding_top,
 				width, height, box->gadget->selected, ctx))
 			return false;
@@ -1870,6 +2115,41 @@ bool html_redraw_box(const html_content *html, struct box *box,
 			box->gadget->type == GADGET_TEXTBOX)) {
 		textarea_redraw(box->gadget->data.text.ta, x, y,
 				current_background_color, scale, &r, ctx);
+#ifdef nshispa
+		/* [HISPA] el texto de ayuda (placeholder) con el campo vacío */
+		if (textarea_get_text(box->gadget->data.text.ta, NULL, 0) <= 1 &&
+				box->gadget->node != NULL && scale == 1.0f) {
+			dom_string *ph = NULL, *nombre = NULL;
+			if (dom_string_create((const uint8_t *) "placeholder", 11,
+					&nombre) == DOM_NO_ERR) {
+				if (dom_element_get_attribute(box->gadget->node,
+						nombre, &ph) == DOM_NO_ERR &&
+						ph != NULL) {
+					plot_font_style_t fs;
+					int alto;
+					font_plot_style_from_css(
+							&html->unit_len_ctx,
+							box->style, &fs);
+					alto = box->gadget->type ==
+						GADGET_TEXTAREA ?
+						fs.size * 96 / 72 /
+						PLOT_STYLE_SCALE * 3 / 2 :
+						height;
+					fs.foreground = 0x7d756c;
+					fs.background = current_background_color;
+					if (dom_string_byte_length(ph) > 0)
+						ctx->plot->text(ctx, &fs,
+							x + padding_left,
+							y + padding_top +
+							letra_base(&fs, alto),
+							dom_string_data(ph),
+							dom_string_byte_length(ph));
+					dom_string_unref(ph);
+				}
+				dom_string_unref(nombre);
+			}
+		}
+#endif
 
 	} else if (box->text) {
 		if (!html_redraw_text_box(html, box, x, y, &r, scale,

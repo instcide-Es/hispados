@@ -40,6 +40,12 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
+/* [WOFF] el zlib de stb_image, también para las letras WOFF 1.0 (woff.c):
+   descomprime il bytes de i en o (hasta ol); da los bytes sacados o -1 */
+int surf_zlib_descomprime(char *o, int ol, const char *i, int il) {
+  return stbi_zlib_decode_buffer(o, ol, i, il);
+}
+
 static nserror im_crea(const content_handler *h, lwc_string *tipo, const struct http_parameter *par,
                        llcache_handle *ll, const char *cs, bool quirks, struct content **c) {
   struct content *n = calloc(1, sizeof(struct content));

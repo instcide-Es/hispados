@@ -153,6 +153,7 @@ terceros/netsurf/libcss/src/parse/properties/opacity.c
 terceros/netsurf/libcss/src/parse/properties/outline.c
 terceros/netsurf/libcss/src/parse/properties/overflow.c
 terceros/netsurf/libcss/src/parse/properties/padding.c
+terceros/netsurf/libcss/src/parse/properties/hispa.c
 terceros/netsurf/libcss/src/parse/properties/pause.c
 terceros/netsurf/libcss/src/parse/properties/play_during.c
 terceros/netsurf/libcss/src/parse/properties/properties.c
@@ -259,6 +260,7 @@ terceros/netsurf/libcss/src/select/properties/padding_bottom.c
 terceros/netsurf/libcss/src/select/properties/padding_left.c
 terceros/netsurf/libcss/src/select/properties/padding_right.c
 terceros/netsurf/libcss/src/select/properties/padding_top.c
+terceros/netsurf/libcss/src/select/properties/hispa.c
 terceros/netsurf/libcss/src/select/properties/page_break_after.c
 terceros/netsurf/libcss/src/select/properties/page_break_before.c
 terceros/netsurf/libcss/src/select/properties/page_break_inside.c
@@ -504,6 +506,7 @@ terceros/netsurf/netsurf/content/handlers/html/imagemap.c
 terceros/netsurf/netsurf/content/handlers/html/interaction.c
 terceros/netsurf/netsurf/content/handlers/html/layout.c
 terceros/netsurf/netsurf/content/handlers/html/layout_flex.c
+terceros/netsurf/netsurf/content/handlers/html/layout_grid.c
 terceros/netsurf/netsurf/content/handlers/html/object.c
 terceros/netsurf/netsurf/content/handlers/html/redraw.c
 terceros/netsurf/netsurf/content/handlers/html/redraw_border.c
@@ -601,3 +604,16 @@ w32/surf/red.c
 w32/surf/surf.c
 w32/surf/cssvar.c
 w32/surf/memoria.c
+w32/surf/woff.c
+terceros/brotli/c/common/constants.c
+terceros/brotli/c/common/context.c
+terceros/brotli/c/common/dictionary.c
+terceros/brotli/c/common/platform.c
+terceros/brotli/c/common/shared_dictionary.c
+terceros/brotli/c/common/transform.c
+terceros/brotli/c/dec/bit_reader.c
+terceros/brotli/c/dec/decode.c
+terceros/brotli/c/dec/huffman.c
+terceros/brotli/c/dec/state.c
+w32/surf/redondo.c
+w32/surf/webletra.c

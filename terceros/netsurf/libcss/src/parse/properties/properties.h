@@ -465,6 +465,38 @@ css_error css__parse_z_index(css_language *c,
 		css_style *result);
 
 /** Mapping from property bytecode index to bytecode unit class mask. */
+/* [HISPA] gap, esquinas redondas, sombra y grid (hispa.c) */
+css_error css__parse_row_gap(css_language *c,
+		const parserutils_vector *vector, int32_t *ctx,
+		css_style *result);
+css_error css__parse_gap(css_language *c,
+		const parserutils_vector *vector, int32_t *ctx,
+		css_style *result);
+css_error css__parse_border_radius(css_language *c,
+		const parserutils_vector *vector, int32_t *ctx,
+		css_style *result);
+css_error css__parse_border_top_left_radius(css_language *c,
+		const parserutils_vector *vector, int32_t *ctx,
+		css_style *result);
+css_error css__parse_border_top_right_radius(css_language *c,
+		const parserutils_vector *vector, int32_t *ctx,
+		css_style *result);
+css_error css__parse_border_bottom_right_radius(css_language *c,
+		const parserutils_vector *vector, int32_t *ctx,
+		css_style *result);
+css_error css__parse_border_bottom_left_radius(css_language *c,
+		const parserutils_vector *vector, int32_t *ctx,
+		css_style *result);
+css_error css__parse_box_shadow(css_language *c,
+		const parserutils_vector *vector, int32_t *ctx,
+		css_style *result);
+css_error css__parse_grid_template_columns(css_language *c,
+		const parserutils_vector *vector, int32_t *ctx,
+		css_style *result);
+css_error css__parse_grid_column(css_language *c,
+		const parserutils_vector *vector, int32_t *ctx,
+		css_style *result);
+
 extern const uint32_t property_unit_mask[CSS_N_PROPERTIES];
 
 #define UNIT_MASK_AZIMUTH               (UNIT_ANGLE)
@@ -551,6 +583,8 @@ extern const uint32_t property_unit_mask[CSS_N_PROPERTIES];
 #define UNIT_MASK_WIDTH                 (UNIT_LENGTH | UNIT_PCT)
 #define UNIT_MASK_WORD_SPACING          (UNIT_LENGTH)
 #define UNIT_MASK_Z_INDEX               (0)
+/* [HISPA] */
+#define UNIT_MASK_BORDER_RADIUS         (UNIT_LENGTH | UNIT_PCT)
 #define UNIT_MASK_OPACITY               (0)
 #define UNIT_MASK_FILL_OPACITY          (0)
 #define UNIT_MASK_STROKE_OPACITY        (0)

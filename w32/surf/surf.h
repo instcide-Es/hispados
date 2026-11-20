@@ -11,6 +11,12 @@
 /* cómo se presenta a los servidores: NO «HispaNavegador» (a ese, ClicGest le
  * da la web ligera), sino uno propio: así le dan la web normal */
 #define SURF_VERSION "0.1"
+/* el separador de las rutas (en el anfitrión, para las pruebas: anfitrion.c, «/») */
+#ifdef SURF_ANFITRION
+#define SURF_SEP "/"
+#else
+#define SURF_SEP "\\"
+#endif
 #define SURF_AGENTE "HispaSurf/" SURF_VERSION " (Hispa-486; NetSurf 3.11)"
 
 /* ns/plot.c (los dibujos de NetSurf framebuffer, GPL-2.0) */

@@ -17,6 +17,9 @@ Sale en el menú Inicio, grupo Internet: «Navegador completo».
 
 Necesita un 486 o mejor y 16 MB de memoria (mejor 32 MB).
 
+Carga las letras de las páginas (TTF, WOFF y WOFF2: los iconos de letra y
+las letras de la web) y las esquinas redondas, las sombras, gap y grid.
+
 F6: escribir la dirección.  F5: recargar.  Esc: parar.  Rueda: mover.
 Lo que dicen las páginas por su consola (y sus errores) queda en SURFJS.LOG;
 localStorage, en NAVEGA2.ALM.
@@ -24,5 +27,6 @@ localStorage, en NAVEGA2.ALM.
 NetSurf (c) The NetSurf Developers, GPL-2.0; sus bibliotecas, MIT; QuickJS
 (el JavaScript, en HSPJS.DLL) (c) Fabrice Bellard y Charlie Gordon, MIT;
 letras DejaVu (licencia libre de Bitstream Vera); stb_image y stb_truetype,
-dominio público. Lo demás: Copyright (C) 2026 Carlos Sanz y contribuidores,
+dominio público; el decodificador Brotli (para WOFF2) y su diccionario,
+BROTLI.DIC, (c) Google, licencia MIT. Lo demás: Copyright (C) 2026 Carlos Sanz y contribuidores,
 GPL-2.0 o posterior.

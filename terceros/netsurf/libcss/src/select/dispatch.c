@@ -522,5 +522,38 @@ struct prop_table prop_dispatch[CSS_N_PROPERTIES] = {
 	{
 		PROPERTY_FUNCS(stroke_opacity),
 		1,
+	},
+	/* [HISPA] (properties/hispa.c) */
+	{
+		PROPERTY_FUNCS(row_gap),
+		0,
+	},
+	{
+		PROPERTY_FUNCS(border_top_left_radius),
+		0,
+	},
+	{
+		PROPERTY_FUNCS(border_top_right_radius),
+		0,
+	},
+	{
+		PROPERTY_FUNCS(border_bottom_right_radius),
+		0,
+	},
+	{
+		PROPERTY_FUNCS(border_bottom_left_radius),
+		0,
+	},
+	{
+		PROPERTY_FUNCS(box_shadow),
+		0,
+	},
+	{
+		PROPERTY_FUNCS(grid_template_columns),
+		0,
+	},
+	{
+		PROPERTY_FUNCS(grid_column),
+		0,
 	}
 };

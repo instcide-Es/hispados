@@ -34,7 +34,11 @@
 #include "guion.h"
 
 typedef unsigned int u32;
+#ifdef SURF_ANFITRION
+static u32 GetTickCount(void) { return 0; }
+#else
 u32 __attribute__((stdcall)) GetTickCount(void);
+#endif
 
 /* box_construct.c [HISPA]: las cajas de una vez, sin el planificador */
 nserror dom_to_box_ya(dom_node *n, html_content *c);

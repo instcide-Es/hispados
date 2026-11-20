@@ -453,6 +453,32 @@ static inline bool box_has_percentage_max_width(struct box *b)
 	return ((type == CSS_MAX_WIDTH_SET) && (unit == CSS_UNIT_PCT));
 }
 
+
+#ifdef nshispa
+/**
+ * [HISPA] El espacio en blanco que va detrás de un inline-block (entre dos
+ * botones: «<a class=btn>A</a> <a class=btn>B</a>»): NetSurf no lo ponía.
+ * Con la letra del bloque que lo contiene.
+ */
+static int hispa_espacio_tras(struct box *b,
+		const struct gui_layout_table *font_func,
+		const html_content *content)
+{
+	plot_font_style_t fs;
+	const css_computed_style *st;
+	if (b->space == 0 || b->next == NULL)
+		return 0;
+	if (b->space == UNKNOWN_WIDTH) {
+		st = (b->parent && b->parent->parent &&
+				b->parent->parent->style) ?
+				b->parent->parent->style : b->style;
+		font_plot_style_from_css(&content->unit_len_ctx, st, &fs);
+		font_func->width(&fs, " ", 1, &b->space);
+	}
+	return b->space;
+}
+#endif
+
 /**
  * Calculate minimum and maximum width of a line.
  *
@@ -532,6 +558,9 @@ layout_minmax_line(struct box *first,
 			if (min < b->min_width)
 				min = b->min_width;
 			max += b->max_width;
+#ifdef nshispa
+			max += hispa_espacio_tras(b, font_func, content);
+#endif
 
 			if (b->flags & HAS_HEIGHT)
 				*line_has_height = true;
@@ -960,6 +989,22 @@ static void layout_minmax_block(
 			max = html_get_box_tree(block->object)->max_width;
 		} else {
 			min = max = content_get_width(block->object);
+#ifdef nshispa
+			/* [HISPA] con el alto dado y el ancho «auto», el ancho
+			 * en proporción (el logotipo de clicgest.es: height:
+			 * 30px; width: auto, salía con su ancho de origen) */
+			if (wtype == CSS_WIDTH_AUTO && htype == CSS_HEIGHT_SET &&
+					hunit != CSS_UNIT_PCT &&
+					content_get_height(block->object) > 0) {
+				int h = FIXTOINT(css_unit_len2device_px(
+						block->style,
+						&content->unit_len_ctx,
+						height, hunit));
+				min = max = content_get_width(block->object) *
+						h / content_get_height(
+						block->object);
+			}
+#endif
 		}
 
 		block->flags |= HAS_HEIGHT;
@@ -968,6 +1013,12 @@ static void layout_minmax_block(
 		 * content? */
 		block->flags |= HAS_HEIGHT;
 	} else {
+		/* [HISPA] el hueco entre elementos flex (gap) y cuántos hay */
+		int n_dentro = 0;
+		int gap = lh__box_is_flex_container(block) ?
+				lh__gap(&content->unit_len_ctx, block,
+				!lh__flex_main_is_horizontal(block), AUTO) : 0;
+
 		/* recurse through children */
 		for (child = block->children; child; child = child->next) {
 			switch (child->type) {
@@ -1014,16 +1065,31 @@ static void layout_minmax_block(
 			}
 
 			if (lh__box_is_flex_container(block) &&
+			    lh__box_is_grid(block)) {
+				/* [HISPA] rejilla: ver layout_grid_minmax() */
+				n_dentro++;
+				if (min < child->min_width)
+					min = child->min_width;
+				if (max < child->max_width)
+					max = child->max_width;
+
+			} else if (lh__box_is_flex_container(block) &&
 			    lh__flex_main_is_horizontal(block)) {
 				if (block->style != NULL &&
 				    css_computed_flex_wrap(block->style) ==
 						CSS_FLEX_WRAP_NOWRAP) {
 					min += child->min_width;
+					/* [HISPA] y el hueco (gap) */
+					if (n_dentro > 0)
+						min += gap;
 				} else {
 					if (min < child->min_width)
 						min = child->min_width;
 				}
 				max += child->max_width;
+				if (n_dentro > 0)
+					max += gap;
+				n_dentro++;
 
 			} else {
 				if (min < child->min_width)
@@ -1035,6 +1101,11 @@ static void layout_minmax_block(
 			if (child_has_height)
 				block->flags |= HAS_HEIGHT;
 		}
+
+		/* [HISPA] la rejilla: con sus columnas */
+		if (lh__box_is_flex_container(block) && lh__box_is_grid(block))
+			layout_grid_minmax(block, &content->unit_len_ctx,
+					n_dentro, &min, &max);
 	}
 
 	if (max < min) {
@@ -1187,6 +1258,11 @@ layout_next_margin_block(const css_unit_ctx *unit_len_ctx,
 			/* Check whether box is the box current margin collapses
 			 * to */
 			if (box->flags & MAKE_HEIGHT ||
+					/* [HISPA] una caja flex (o rejilla) con
+					 * algo dentro no es vacía: el margen de
+					 * la siguiente no la atraviesa */
+					(box->type == BOX_FLEX &&
+					 box->children != NULL) ||
 					box->border[TOP].width ||
 					box->padding[TOP] ||
 					(box->style &&
@@ -2243,6 +2319,11 @@ static bool layout_apply_minmax_height(
 				h = FIXTOINT(css_unit_len2device_px(
 						box->style, unit_len_ctx,
 						value, unit));
+				/* [HISPA] con box-sizing: border-box */
+				layout_handle_box_sizing(unit_len_ctx, box,
+						containing_block ?
+						containing_block->width : 0,
+						false, &h);
 				if (h < box->height) {
 					box->height = h;
 					updated = true;
@@ -2274,6 +2355,12 @@ static bool layout_apply_minmax_height(
 				h = FIXTOINT(css_unit_len2device_px(
 						box->style, unit_len_ctx,
 						value, unit));
+				/* [HISPA] con box-sizing: border-box (min-height:
+				 * 48px de los campos y botones de ClicGest) */
+				layout_handle_box_sizing(unit_len_ctx, box,
+						containing_block ?
+						containing_block->width : 0,
+						false, &h);
 				if (h > box->height) {
 					box->height = h;
 					updated = true;
@@ -2710,6 +2797,165 @@ static int line_height(
 }
 
 
+
+#ifdef nshispa
+int letra_base(const plot_font_style_t *s, int alto); /* w32/surf/letra.c */
+
+/* [HISPA] la línea de base de una caja en línea con texto (desde su arriba) */
+static int hispa_base_texto(const html_content *content, struct box *d)
+{
+	plot_font_style_t fs;
+	font_plot_style_from_css(&content->unit_len_ctx, d->style, &fs);
+	return letra_base(&fs, d->height);
+}
+
+/* [HISPA] la de un inline-block (desde su margen de arriba): la de su primer
+ * texto; sin texto, su borde de abajo */
+static int hispa_base_ib(const html_content *content, struct box *d)
+{
+	int arriba = d->margin[TOP] + d->border[TOP].width + d->padding[TOP];
+	struct box *c = d->children;
+	while (c != NULL && c->type != BOX_INLINE_CONTAINER)
+		c = (c->type == BOX_BLOCK && c->children) ? c->children : c->next;
+	if (c != NULL) {
+		struct box *t;
+		for (t = c->children; t != NULL; t = t->next)
+			if (t->type == BOX_TEXT && t->style != NULL)
+				return arriba + c->y + t->y +
+						hispa_base_texto(content, t);
+	}
+	return d->margin[TOP] + d->border[TOP].width + d->padding[TOP] +
+			d->height + d->padding[BOTTOM] +
+			d->border[BOTTOM].width + d->margin[BOTTOM];
+}
+
+/**
+ * [HISPA] Si la línea lleva inline-blocks (botones, iconos de letra...),
+ * todo a la misma línea de base (CSS 10.8), con vertical-align: <longitud>;
+ * NetSurf los dejaba arriba. Cambia las y y el alto de la línea.
+ */
+static void hispa_alinea_linea(const html_content *content, struct box *first,
+		struct box *b, int y, int *used_height)
+{
+	struct box *d;
+	int lb = 0, alto = 0, hay = 0;
+	css_fixed value;
+	css_unit unit;
+	/* (el texto que va con el estilo del bloque: en la línea de base) */
+	const css_computed_style *bloque = first->parent->parent->style;
+
+	for (d = first; d != b; d = d->next) {
+		enum css_vertical_align_e va;
+		if (d->style == NULL)
+			continue;
+		value = 0;
+		unit = CSS_UNIT_PX;
+		va = css_computed_vertical_align(d->style, &value, &unit);
+		if ((d->type == BOX_INLINE_BLOCK ||
+				d->type == BOX_INLINE_FLEX) &&
+				css_computed_position(d->style) !=
+				CSS_POSITION_ABSOLUTE &&
+				css_computed_position(d->style) !=
+				CSS_POSITION_FIXED) {
+			int v = 0;
+			if (va == CSS_VERTICAL_ALIGN_SET && unit != CSS_UNIT_PCT)
+				v = FIXTOINT(css_unit_len2device_px(d->style,
+						&content->unit_len_ctx,
+						value, unit));
+			else if (va == CSS_VERTICAL_ALIGN_MIDDLE) {
+				/* que quepa por encima de la base */
+				int xh = FIXTOINT(css_unit_len2device_px(
+						bloque, &content->unit_len_ctx,
+						INTTOFIX(1), CSS_UNIT_EX));
+				int fuera = d->margin[TOP] +
+					d->border[TOP].width + d->padding[TOP] +
+					d->height + d->padding[BOTTOM] +
+					d->border[BOTTOM].width +
+					d->margin[BOTTOM];
+				hay = 1;
+				if (lb < xh / 2 + fuera / 2)
+					lb = xh / 2 + fuera / 2;
+				continue;
+			} else if (va != CSS_VERTICAL_ALIGN_BASELINE &&
+					va != CSS_VERTICAL_ALIGN_SET)
+				return;    /* (otras alineaciones: como NetSurf) */
+			hay = 1;
+			if (lb < hispa_base_ib(content, d) + v)
+				lb = hispa_base_ib(content, d) + v;
+		} else if (d->type == BOX_TEXT ||
+				(d->type == BOX_INLINE && d->inline_end &&
+				 lh__box_is_replace(d) == false)) {
+			if (va != CSS_VERTICAL_ALIGN_BASELINE &&
+					!(d->type == BOX_TEXT && d->style == bloque))
+				return;
+			if (lb < hispa_base_texto(content, d))
+				lb = hispa_base_texto(content, d);
+		}
+	}
+	if (!hay)
+		return;
+	for (d = first; d != b; d = d->next) {
+		int arriba, h;
+		if (d->style == NULL)
+			continue;
+		if ((d->type == BOX_INLINE_BLOCK ||
+				d->type == BOX_INLINE_FLEX) &&
+				css_computed_position(d->style) !=
+				CSS_POSITION_ABSOLUTE &&
+				css_computed_position(d->style) !=
+				CSS_POSITION_FIXED) {
+			int v = 0, fuera = d->margin[TOP] +
+					d->border[TOP].width + d->padding[TOP] +
+					d->height + d->padding[BOTTOM] +
+					d->border[BOTTOM].width + d->margin[BOTTOM];
+			enum css_vertical_align_e va;
+			value = 0;
+			unit = CSS_UNIT_PX;
+			va = css_computed_vertical_align(d->style, &value,
+					&unit);
+			if (va == CSS_VERTICAL_ALIGN_SET && unit != CSS_UNIT_PCT)
+				v = FIXTOINT(css_unit_len2device_px(d->style,
+						&content->unit_len_ctx,
+						value, unit));
+			if (va == CSS_VERTICAL_ALIGN_MIDDLE) {
+				/* el centro, a media x por encima de la base */
+				int xh = FIXTOINT(css_unit_len2device_px(
+						bloque, &content->unit_len_ctx,
+						INTTOFIX(1), CSS_UNIT_EX));
+				arriba = lb - xh / 2 - fuera / 2;
+				if (arriba < 0) {
+					/* no cabe arriba: baja la línea */
+					lb -= arriba;
+					arriba = 0;
+				}
+			} else
+				arriba = lb - v - hispa_base_ib(content, d);
+			d->y = y + arriba + d->margin[TOP] +
+					d->border[TOP].width;
+			h = arriba + d->margin[TOP] + d->border[TOP].width +
+					d->padding[TOP] + d->height +
+					d->padding[BOTTOM] +
+					d->border[BOTTOM].width +
+					d->margin[BOTTOM];
+		} else if (d->type == BOX_TEXT ||
+				(d->type == BOX_INLINE && d->inline_end &&
+				 lh__box_is_replace(d) == false) ||
+				d->type == BOX_INLINE_END) {
+			struct box *ref = d->type == BOX_INLINE_END ?
+					d->inline_end : d;
+			arriba = lb - hispa_base_texto(content, ref);
+			d->y = y - d->padding[TOP] + arriba;
+			h = arriba + d->height;
+		} else {
+			h = d->y - y + d->height;
+		}
+		if (alto < h)
+			alto = h;
+	}
+	*used_height = alto;
+}
+#endif
+
 /**
  * Position a line of boxes in inline formatting context.
  *
@@ -2839,6 +3085,9 @@ layout_line(struct box *first,
 					b->border[RIGHT].width +
 					b->margin[RIGHT];
 			space_after = 0;
+#ifdef nshispa
+			space_after = hispa_espacio_tras(b, font_func, content);
+#endif
 			continue;
 		}
 
@@ -3067,6 +3316,12 @@ layout_line(struct box *first,
 			if (b->object || b->flags & REPLACE_DIM ||
 					b->flags & IFRAME)
 				space_after = 0;
+#ifdef nshispa
+			else if (b->type == BOX_INLINE_BLOCK ||
+					b->type == BOX_INLINE_FLEX)
+				space_after = hispa_espacio_tras(b, font_func,
+						content);
+#endif
 			else if (b->text || b->type == BOX_INLINE_END) {
 				if (b->space == UNKNOWN_WIDTH) {
 					font_plot_style_from_css(
@@ -3389,7 +3644,10 @@ layout_line(struct box *first,
 				used_height = d->height;
 			}
 		} else if ((d->type == BOX_INLINE) ||
-				d->type == BOX_INLINE_BLOCK) {
+				d->type == BOX_INLINE_BLOCK ||
+				/* [HISPA] y los inline-flex (la línea
+				 * se quedaba sin alto) */
+				d->type == BOX_INLINE_FLEX) {
 			/* replaced inlines and inline-blocks */
 			d->x += x0;
 			d->y = *y + d->border[TOP].width + d->margin[TOP];
@@ -3435,6 +3693,10 @@ layout_line(struct box *first,
 			}
 		}
 	}
+
+#ifdef nshispa
+	hispa_alinea_linea(content, first, b, *y, &used_height);
+#endif
 
 	/* handle clearance for br */
 	if (br_box && css_computed_clear(br_box->style) != CSS_CLEAR_NONE) {
@@ -3997,6 +4259,7 @@ bool layout_block_context(
 			cy = y;
 	}
 
+	int hispa_alto = cy - block->padding[TOP]; /* [HISPA] */
 	if (block->height == AUTO) {
 		block->height = cy - block->padding[TOP];
 		if (block->type == BOX_BLOCK)
@@ -4008,6 +4271,21 @@ bool layout_block_context(
 		/* Block is in normal flow */
 		layout_apply_minmax_height(&content->unit_len_ctx, block, NULL);
 	}
+
+#ifdef nshispa
+	/* [HISPA] lo de dentro de un botón, en el centro (como Chrome, si el
+	 * botón es más alto que su texto: min-height) */
+	if (block->gadget != NULL && hispa_alto >= 0 &&
+			block->height > hispa_alto &&
+			(block->gadget->type == GADGET_SUBMIT ||
+			 block->gadget->type == GADGET_BUTTON ||
+			 block->gadget->type == GADGET_RESET)) {
+		struct box *c;
+		int dy = (block->height - hispa_alto) / 2;
+		for (c = block->children; c != NULL; c = c->next)
+			c->y += dy;
+	}
+#endif
 
 	if (block->gadget &&
 			(block->gadget->type == GADGET_TEXTAREA ||

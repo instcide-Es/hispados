@@ -45,9 +45,11 @@
 #include "utils/file.h"
 #include "desktop/browser_history.h"
 
+#include "netsurf/browser.h"
 #include "surf.h"
 #include "rh.h"
 #include "cssvar.h"
+#include "woff.h"
 
 /* ---- lo justo de USER32, GDI32 y KERNEL32 ---- */
 #define WINAPI __attribute__((stdcall))
@@ -897,12 +899,17 @@ void inicio_prog(void) {
   messages_add_from_file(b);
   snprintf(b, sizeof b, "%s\\FUENTES", surf_carpeta);
   if (!letra_inicia(b)) muere("No se encuentran las letras (FUENTES\\SANS.TTF junto al programa).");
+  /* 96 puntos por pulgada, como Chrome: con los 90 de NetSurf, 16px de CSS
+   * eran 15 puntos en las cajas y 17 en las letras (letra.c) */
+  browser_set_dpi(96);
   e = netsurf_init(NULL);
   if (e != NSERROR_OK) {
     snprintf(b, sizeof b, "NetSurf no ha podido empezar: %s", messages_get_errorcode(e));
     muere(b);
   }
   rh_inicia(idioma);
+  snprintf(b, sizeof b, "%s\\RECURSOS", surf_carpeta);
+  woff_carpeta(b);      /* (BROTLI.DIC, para las letras WOFF2 de la web) */
   snprintf(galletas, sizeof galletas, "%s\\SURFGAL.TXT", surf_carpeta);
   rh_galletas_carga(galletas);
 

@@ -20,8 +20,12 @@ SURF_NSCF = -Iw32/surf -Iw32/surf/ns -I$(SURF_T)/netsurf -I$(SURF_T)/netsurf/inc
 SURF_REGISTRO ?= WARNING
 SURF_PERFIL ?=
 SURF_UA = '-DHTTP_AGENTE="HispaSurf/0.1 (NetSurf 3.11; Hispa-DOS 486)"'
-surf_cf = $(if $(filter w32/surf/guion.c,$1),$(SURF_NSCF) -Iterceros/quickjs -I$(B)/surf $(SURF_PERFIL),$(if $(filter $(SURF_T)/netsurf/% w32/surf/%,$1),$(SURF_NSCF),$(if $(filter $(SURF_T)/libdom/%,$1),-I$(SURF_T)/libdom/src \
-  -I$(SURF_T)/libdom/bindings,$(if $(filter $(SURF_T)/libnsgif/%,$1),-I$(SURF_T)/libnsgif/src -DNSGIF_NAME=libnsgif,-I$(SURF_T)/$(word 3,$(subst /, ,$1))/src))))
+# [WOFF] Brotli (terceros/brotli, solo el descompresor) para las letras WOFF2 de
+# w32/surf/woff.c; su diccionario no va en el EXE: RECURSOS\BROTLI.DIC
+SURF_BRCF = -Iterceros/brotli/c/include -DBROTLI_EXTERNAL_DICTIONARY_DATA
+surf_cf = $(if $(filter terceros/brotli/%,$1),$(SURF_BRCF),$(if $(filter w32/surf/guion.c,$1),$(SURF_NSCF) -Iterceros/quickjs -I$(B)/surf $(SURF_PERFIL),$(if $(filter $(SURF_T)/netsurf/% w32/surf/%,$1),$(SURF_NSCF),$(if $(filter $(SURF_T)/libdom/%,$1),-I$(SURF_T)/libdom/src \
+  -I$(SURF_T)/libdom/bindings,$(if $(filter $(SURF_T)/libnsgif/%,$1),-I$(SURF_T)/libnsgif/src -DNSGIF_NAME=libnsgif,-I$(SURF_T)/$(word 3,$(subst /, ,$1))/src))))) \
+  $(if $(filter w32/surf/woff.c,$1),$(SURF_BRCF))
 $(B)/surf/%.o: %.c
 	@mkdir -p $(dir $@)
 	@nice -n 19 gcc $(SURF_CF) $(call surf_cf,$<) -c $< -o $@
@@ -44,12 +48,14 @@ $(B)/NAVEGA2.EXE: $(SURF_OBJ) $(B)/HSPJS.DLL $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(
 # lo que va junto al programa: los recursos (las hojas de estilo de NetSurf, sus
 # textos y la página de inicio) y las letras (DejaVu, recortadas: terceros/dejavu)
 SURF_RECURSOS = $(SURF_T)/netsurf/resources/default.css $(SURF_T)/netsurf/resources/quirks.css \
-  $(SURF_T)/netsurf/resources/adblock.css $(SURF_T)/netsurf/resources/internal.css w32/surf/recursos/MESSAGES w32/surf/recursos/inicio.htm
+  $(SURF_T)/netsurf/resources/adblock.css $(SURF_T)/netsurf/resources/internal.css w32/surf/recursos/MESSAGES w32/surf/recursos/inicio.htm \
+  w32/surf/recursos/BROTLI.DIC
 SURF_FUENTES = $(wildcard terceros/dejavu/*.TTF)
-# El disquete «Internet 2»: el Navegador completo (va a \HISPADOS\INTERNET,
-# junto a lo del disquete «Internet», que trae las DLL, también HSPJS.DLL, el
-# JavaScript); y el «Internet 3», sus letras (con el JavaScript, el programa ya
-# no cabe en uno con ellas: docs/486/NAVEGADOR2.md)
+# Los disquetes «Internet 2» (el Navegador completo y sus recursos) e
+# «Internet 3» (sus letras: con las letras de la web, el diccionario de
+# Brotli y el JavaScript ya no cabía todo en uno). Los dos van a
+# \HISPADOS\INTERNET, junto a lo del disquete «Internet», que trae las DLL
+# (también HSPJS.DLL, el JavaScript).
 $(B)/internet2.img: $(B)/NAVEGA2.EXE $(SURF_RECURSOS) w32/surf/NAVEGA2.INI w32/surf/LEEME.TXT
 	rm -f $@
 	dd if=/dev/zero of=$@ bs=1474560 count=1 2>/dev/null
@@ -69,3 +75,20 @@ $(B)/internet3.img: $(SURF_FUENTES) w32/surf/LEEME.TXT
 	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/internet3_leeme.txt ::LEEME.TXT
 internet2: $(B)/internet2.img $(B)/internet3.img
 surf: $(B)/NAVEGA2.EXE
+
+# El Navegador completo en el anfitrión (Linux, sin ventana: w32/surf/anfitrion.c,
+# la red con curl: anfitrion_rh.c): pinta una página en un PPM, para probar el
+# pintado y la maquetación sin QEMU (tests/run_surf_pintado_tests.sh,
+# tools/surf_compara.sh). `make surfppm`
+SURF_ANF_SRC = $(filter-out w32/surf/surf.c w32/surf/apoyo.c w32/surf/memoria.c w32/surf/guion.c %/css_property_parser_gen.c,$(SURF_SRC)) w32/surf/anfitrion.c w32/surf/anfitrion_rh.c \
+  w32/surf/guion_nada.c $(SURF_T)/netsurf/content/handlers/javascript/none/none.c
+SURF_ANF_OBJ = $(patsubst %.c,$(B)/anf/%.o,$(SURF_ANF_SRC))
+SURF_ANF_CF = -O1 -g -std=gnu99 -w -D_GNU_SOURCE -DSURF_ANFITRION -fno-common $(foreach l,$(SURF_LIBS),-I$(SURF_T)/$(l)/include) \
+  -DNDEBUG -D_ALIGNED="__attribute__((aligned))"
+$(B)/anf/%.o: %.c
+	@mkdir -p $(dir $@)
+	@nice -n 19 gcc $(SURF_ANF_CF) $(call surf_cf,$<) -c $< -o $@
+$(B)/anf/surfppm: $(SURF_ANF_OBJ) $(SURF_RECURSOS)
+	gcc -o $@ $(SURF_ANF_OBJ) -lm -lz
+	mkdir -p $(B)/anf/RECURSOS && cp $(SURF_RECURSOS) $(B)/anf/RECURSOS/
+surfppm: $(B)/anf/surfppm

@@ -440,6 +440,29 @@ void css__make_style_important(css_style *style)
 					offset++; /* z index */
 				break;
 
+			/* [HISPA] gap, esquinas redondas, sombra y grid */
+			case CSS_PROP_ROW_GAP:
+			case CSS_PROP_BORDER_TOP_LEFT_RADIUS:
+			case CSS_PROP_BORDER_TOP_RIGHT_RADIUS:
+			case CSS_PROP_BORDER_BOTTOM_RIGHT_RADIUS:
+			case CSS_PROP_BORDER_BOTTOM_LEFT_RADIUS:
+				assert(ROW_GAP_SET ==
+				       (enum op_row_gap)BORDER_RADIUS_SET);
+				if (value == ROW_GAP_SET)
+					offset += 2; /* length + units */
+				break;
+
+			case CSS_PROP_BOX_SHADOW:
+				if (value != BOX_SHADOW_NONE)
+					offset += 9; /* 4 x (length + units) + colour */
+				break;
+
+			case CSS_PROP_GRID_TEMPLATE_COLUMNS:
+			case CSS_PROP_GRID_COLUMN:
+				if (value == GRID_COLUMN_SET)
+					offset++; /* string */
+				break;
+
 			default:
 				break;
 			}

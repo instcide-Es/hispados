@@ -44,4 +44,7 @@ bool knockout_plot_end(const struct redraw_context *ctx);
 
 extern const struct plotter_table knockout_plotters;
 
+/* [HISPA] pinta ya lo que espera (si ctx es el de knockout) */
+bool knockout_plot_hispa_vacia(const struct redraw_context *ctx);
+
 #endif
