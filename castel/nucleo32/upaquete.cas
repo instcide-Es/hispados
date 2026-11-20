@@ -1,0 +1,1807 @@
+; =============================================================================
+;  upaquete.cas - PAQUETES.BIN: instalar, actualizar y quitar paquetes en el
+;  Hispa-Pentium instalado en el disco. Un programa del anillo 3, en Castel.
+;
+;    PAQUETES LISTA                    lo instalado
+;    PAQUETES CATALOGO                 lo que hay para instalar (y lo que es más nuevo)
+;    PAQUETES INSTALA nombre|X.HPQ...  instala (con lo que necesite, en orden)
+;    PAQUETES ACTUALIZA [nombre...]    pone al día lo instalado (todo, o eso)
+;    PAQUETES QUITA nombre...          lo quita (si nadie lo necesita)
+;    PAQUETES MIRA X.HPQ               lo que lleva un paquete, y si está sano
+;    PAQUETES COMPRUEBA                si los archivos instalados siguen iguales
+;    /DESDE=carpeta o /DESDE=http://...  de dónde se traen los paquetes
+;    /FORZAR                           quitar aunque lo necesite otro; poner
+;                                      una versión más vieja o la misma
+;
+;  Un paquete (.HPQ, tools/hpq.py) es una cabecera de texto (nombre, versión,
+;  descripción, lo que necesita, con lo que choca y sus archivos, cada uno
+;  con su destino, su tamaño y su SHA-256) y, detrás, los archivos. Lo
+;  instalado se apunta en C:\HISPA\PAQUETES\NOMBRE.PQI (la cabecera tal cual).
+;  Antes de copiar nada se comprueban las sumas de todos los archivos; los
+;  archivos nuevos se escriben primero aparte (HPQnnnnn.NUE) y luego se
+;  cambian por los de antes, que se guardan (HPQnnnnn.VIE) hasta el final. Lo
+;  que se va a hacer se apunta antes en C:\HISPA\PAQUETES\DIARIO.TXT: si se
+;  va la luz a mitad, la próxima vez que se usa PAQUETES se deshace y todo
+;  queda como estaba. Cuando ya está todo cambiado, el diario pasa a
+;  HECHO.TXT (desde ahí ya no se deshace: se acaba de limpiar).
+;
+;  De dónde salen los paquetes: lo que diga /DESDE=, o la primera línea de
+;  C:\HISPA\PAQUETES\ORIGEN.TXT, o la carpeta \PAQUETES de una unidad que
+;  tenga CATALOGO.TXT (primero las memorias USB), o, si no, Internet:
+;  http://actualiza.clicgest.es/pentium/ (por el gancho de la red, más abajo).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UPaquetes
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Mem32, Formato, Sha256
+
+    constante MAX_PAQ = 64                      ; paquetes instalados, en el catálogo o en un plan
+    constante MAX_ARCH = 64                     ; archivos de un paquete
+    constante MAX_PASOS = 160                   ; lo que hace una instalación
+    constante MAX_CAB = 16384                   ; lo más que mide una cabecera
+    constante MAX_CATÁLOGO = 65536
+    constante TROZO = 32768
+    constante RUTA = 160
+    constante NINGUNO = 0xFFFFFFFF
+    constante URL_POR_DEFECTO = "http://actualiza.clicgest.es/pentium/"
+
+    ; ---------------------------------------------------------------------
+    ;  EL GANCHO DE LA RED. Para traer los paquetes de Internet, PAQUETES no
+    ;  sabe de TCP/IP: se lo pide a otro. Con LLAMADA_DESCARGAR = 0 (lo de
+    ;  ahora), lanza el programa DESCARGAR.BIN con dos argumentos, «URL
+    ;  DESTINO», lo espera, y vale si acaba con el código 0 y DESTINO está.
+    ;  Si el núcleo da la descarga como llamada al sistema, se pone aquí su
+    ;  número y se llama con EBX = la URL y ECX = el archivo de destino (dos
+    ;  textos acabados en 0); un error es lo de siempre (es_error). Lo
+    ;  traído se deja en C:\HISPA\PAQUETES\BAJADAS.
+    ; ---------------------------------------------------------------------
+    constante LLAMADA_DESCARGAR = 0
+
+    constante P_CARPETA = 1                     ; una carpeta que hay que hacer
+    constante P_NUEVO = 2                       ; un archivo que se pone (nuevo, o en lugar del de antes)
+    constante P_BORRA = 3                       ; un archivo que se quita
+
+    tipo Archivo = estructura
+        destino: arreglo [84] de byte           ; con la letra: «C:\HISPA\BLOC.BIN»
+        tamaño: nat32
+        sha: arreglo [68] de byte
+    fin
+
+    tipo Paso = estructura
+        clase: nat32
+        existía: nat32                          ; 1 si el destino ya estaba
+        origen_: nat32                           ; dónde empiezan sus datos en el paquete (NINGUNO: el registro)
+        tamaño: nat32
+        sha: arreglo [68] de byte
+        destino: arreglo [84] de byte
+    fin
+
+    variable args: arreglo [260] de byte
+    variable palabra_: arreglo [RUTA] de byte
+    variable buf: puntero a byte                ; TROZO octetos
+    variable sis: byte                          ; la letra de la unidad del sistema
+    variable base: arreglo [40] de byte         ; «C:\HISPA\PAQUETES»
+    variable versión_núcleo: arreglo [16] de byte
+    variable forzar: bool
+    variable corte: nat32                       ; (las pruebas) pararse tras ese cambio, como si se fuera la luz
+    variable cambios: nat32
+
+    ; ---- lo instalado ----
+    variable ins_n: nat32
+    variable ins_nombre: arreglo [MAX_PAQ] de arreglo [12] de byte
+    variable ins_versión: arreglo [MAX_PAQ] de arreglo [16] de byte
+    variable ins_cab: arreglo [MAX_PAQ] de puntero a byte
+
+    ; ---- de dónde y el catálogo ----
+    variable origen: arreglo [RUTA] de byte     ; una carpeta («X:\PAQUETES\») o una URL («http://.../»)
+    variable es_red: bool
+    variable cat: puntero a byte                ; CATALOGO.TXT entero
+    variable cat_n: nat32
+    variable cat_mirado, hay_catálogo: bool
+    variable cat_nombre: arreglo [MAX_PAQ] de arreglo [12] de byte
+    variable cat_versión: arreglo [MAX_PAQ] de arreglo [16] de byte
+    variable cat_archivo: arreglo [MAX_PAQ] de arreglo [16] de byte
+    variable cat_tamaño: arreglo [MAX_PAQ] de nat32
+    variable cat_sha: arreglo [MAX_PAQ] de arreglo [68] de byte
+    variable cat_desc: arreglo [MAX_PAQ] de puntero a byte
+
+    ; ---- lo que se va a instalar ----
+    variable plan_n, orden_n: nat32
+    variable plan_ruta: arreglo [MAX_PAQ] de arreglo [RUTA] de byte
+    variable plan_cab: arreglo [MAX_PAQ] de puntero a byte
+    variable plan_largo: arreglo [MAX_PAQ] de nat32
+    variable plan_cat: arreglo [MAX_PAQ] de nat32
+    variable plan_nombre: arreglo [MAX_PAQ] de arreglo [12] de byte
+    variable plan_versión: arreglo [MAX_PAQ] de arreglo [16] de byte
+    variable orden: arreglo [MAX_PAQ] de nat32  ; en qué orden (lo que se necesita, antes)
+
+    ; ---- una instalación (o una desinstalación) ----
+    variable nuevos: arreglo [MAX_ARCH] de Archivo
+    variable viejos: arreglo [MAX_ARCH] de Archivo
+    variable pasos: arreglo [MAX_PASOS] de Paso
+    variable n_pasos: nat32
+    variable txn_nombre: arreglo [40] de byte   ; «oficina 1.0»
+    variable txn_paquete: arreglo [RUTA] de byte
+    variable txn_cab: puntero a byte
+    variable txn_largo: nat32
+    variable diario: arreglo [48] de byte
+    variable hecho: arreglo [48] de byte
+
+    ; -------------------------------------------------------------------------
+    ;  Lo de siempre
+    ; -------------------------------------------------------------------------
+    función pt(t: puntero a byte): nat32
+        devolver nat32(t)
+    fin
+
+    función une(destino: puntero a byte, a: puntero a byte, b: puntero a byte)
+        Textos32.copiar(destino, a)
+        concatenar(destino, b)
+    fin
+
+    función mal(t: puntero a byte): bool
+        escribir("paquetes: ", t, "\n")
+        devolver falso
+    fin
+
+    función existe(ruta: puntero a byte): bool
+        variable m: nat32
+        m := abrir(ruta)
+        si es_error(m) entonces devolver falso fin
+        cerrar(m)
+        devolver cierto
+    fin
+
+    función acaba_en(t: puntero a byte, fin_: puntero a byte): bool
+        variable a, b: nat32
+        a := longitud(t)
+        b := longitud(fin_)
+        si a < b entonces devolver falso fin
+        devolver iguales_sin_caja(t + (a - b), fin_)
+    fin
+
+    ; escribe t y, detrás, los espacios que falten hasta «ancho»
+    función columna(t: puntero a byte, ancho: nat32)
+        variable n: nat32
+        escribir(t)
+        n := longitud(t)
+        mientras n < ancho hacer
+            escribir(" ")
+            n := n + 1
+        fin
+    fin
+
+    función escribe_todo(m: nat32, p: puntero a byte, n: nat32): bool
+        variable r: nat32
+        si n = 0 entonces devolver cierto fin
+        r := escribir_archivo(m, p, n)
+        devolver r = n
+    fin
+
+    función lee_todo(m: nat32, p: puntero a byte, n: nat32): bool
+        variable k, r: nat32
+        k := 0
+        mientras k < n hacer
+            r := leer(m, p + k, n - k)
+            si es_error(r) o r = 0 entonces devolver falso fin
+            k := k + r
+        fin
+        devolver cierto
+    fin
+
+    ; la línea que empieza en p (sin su fin de línea), a destino; da dónde
+    ; empieza la siguiente
+    función línea(p: puntero a byte, destino: puntero a byte, cabe: nat32): puntero a byte
+        variable i: nat32
+        i := 0
+        mientras valor(p) <> 0 y valor(p) <> '\n' hacer
+            si valor(p) <> '\r' y i + 1 < cabe entonces
+                destino[i] := valor(p)
+                i := i + 1
+            fin
+            p := p + 1
+        fin
+        destino[i] := 0
+        si valor(p) = '\n' entonces p := p + 1 fin
+        devolver p
+    fin
+
+    ; lo que va detrás de «clave=» en una cabecera (o falso si no está)
+    función campo(cab: puntero a byte, clave: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+        variable p: puntero a byte
+        variable n: nat32
+        variable x: arreglo [256] de byte
+        n := longitud(clave)
+        p := cab
+        mientras valor(p) <> 0 hacer
+            p := línea(p, x, 256)
+            si empieza_por(x, clave) y x[n] = '=' entonces
+                copiar_hasta(destino, dirección(x[n + 1]), cabe)
+                devolver cierto
+            fin
+        fin
+        destino[0] := 0
+        devolver falso
+    fin
+
+    ; la carpeta de una ruta, a destino («C:\OFICINA\PLUMA.HVP» da «C:\OFICINA»)
+    función carpeta_de(ruta: puntero a byte, destino: puntero a byte)
+        variable i, u: nat32
+        Textos32.copiar(destino, ruta)
+        u := 0
+        i := 0
+        mientras destino[i] <> 0 hacer
+            si destino[i] = '\\' entonces u := i fin
+            i := i + 1
+        fin
+        destino[u] := 0
+    fin
+
+    ; el nombre del archivo temporal del paso i: en la carpeta de su destino,
+    ; «HPQnnnnn.NUE» (lo nuevo) o «HPQnnnnn.VIE» (lo de antes)
+    función temporal(i: nat32, ext: puntero a byte, destino: puntero a byte)
+        variable t: arreglo [20] de byte
+        variable d: arreglo [2] de nat32
+        carpeta_de(pasos[i].destino, destino)
+        d[0] := i
+        d[1] := pt(ext)
+        formatear(t, 20, "\\HPQ%05u.%s", d)
+        concatenar(destino, t)
+    fin
+
+    ; la ruta de un archivo de la base (C:\HISPA\PAQUETES\...)
+    función en_base(nombre: puntero a byte, destino: puntero a byte)
+        une(destino, base, "\\")
+        concatenar(destino, nombre)
+    fin
+
+    ; una ruta entera, con su letra: «A.HPQ» desde la carpeta de trabajo, «\X\A.HPQ»...
+    función absoluta(t: puntero a byte, salida: puntero a byte)
+        variable aquí: arreglo [RUTA] de byte
+        si t[0] <> 0 y t[1] = ':' entonces
+            copiar_hasta(salida, t, RUTA)
+            salida[0] := mayúscula(salida[0])
+            devolver
+        fin
+        salida[0] := unidad(0)
+        salida[1] := ':'
+        salida[2] := 0
+        si t[0] <> '\\' entonces
+            carpeta_actual(aquí, RUTA)
+            concatenar(salida, aquí)
+            si longitud(aquí) > 1 entonces concatenar(salida, "\\") fin
+        fin
+        concatenar(salida, t)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las versiones y las listas («base >= 0.7, nucleo»)
+    ; -------------------------------------------------------------------------
+    ; -1, 0 o 1 según a sea más vieja, igual o más nueva que b (0.10 > 0.9)
+    función compara(a: puntero a byte, b: puntero a byte): ent32
+        variable va, vb: nat32
+        mientras valor(a) <> 0 o valor(b) <> 0 hacer
+            va := 0
+            mientras es_cifra(valor(a)) hacer
+                va := va * 10 + valor(a) - '0'
+                a := a + 1
+            fin
+            vb := 0
+            mientras es_cifra(valor(b)) hacer
+                vb := vb * 10 + valor(b) - '0'
+                b := b + 1
+            fin
+            si va < vb entonces devolver -1 fin
+            si va > vb entonces devolver 1 fin
+            si valor(a) <> 0 entonces a := a + 1 fin
+            si valor(b) <> 0 entonces b := b + 1 fin
+        fin
+        devolver 0
+    fin
+
+    ; los operadores: 0, cualquier versión; 1 >=; 2 <=; 3 =; 4 >; 5 <
+    función cumple(v: puntero a byte, op: nat32, w: puntero a byte): bool
+        variable c: ent32
+        si op = 0 entonces devolver cierto fin
+        c := compara(v, w)
+        si op = 1 entonces devolver c >= 0 fin
+        si op = 2 entonces devolver c <= 0 fin
+        si op = 3 entonces devolver c = 0 fin
+        si op = 4 entonces devolver c > 0 fin
+        devolver c < 0
+    fin
+
+    función texto_op(op: nat32): puntero a byte
+        si op = 1 entonces devolver " >= " fin
+        si op = 2 entonces devolver " <= " fin
+        si op = 3 entonces devolver " = " fin
+        si op = 4 entonces devolver " > " fin
+        si op = 5 entonces devolver " < " fin
+        devolver ""
+    fin
+
+    función es_de_nombre(c: byte): bool
+        devolver (c >= 'a' y c <= 'z') o (c >= 'A' y c <= 'Z') o es_cifra(c) o c = '-' o c = '_'
+    fin
+
+    ; el requisito número n de una lista: su nombre, su operador y su versión
+    función requisito(t: puntero a byte, n: nat32, nombre: puntero a byte, ref op: nat32, versión: puntero a byte): bool
+        variable i: nat32
+        mientras n > 0 hacer
+            mientras valor(t) <> 0 y valor(t) <> ',' hacer t := t + 1 fin
+            si valor(t) = 0 entonces devolver falso fin
+            t := t + 1
+            n := n - 1
+        fin
+        t := saltar_espacios(t)
+        i := 0
+        mientras es_de_nombre(valor(t)) y i < 8 hacer
+            nombre[i] := minúscula(valor(t))
+            i := i + 1
+            t := t + 1
+        fin
+        nombre[i] := 0
+        versión[0] := 0
+        op := 0
+        si i = 0 entonces devolver falso fin
+        t := saltar_espacios(t)
+        si valor(t) = '>' y t[1] = '=' entonces
+            op := 1
+            t := t + 2
+        sino si valor(t) = '<' y t[1] = '=' entonces
+            op := 2
+            t := t + 2
+        sino si valor(t) = '=' entonces
+            op := 3
+            t := t + 1
+            si valor(t) = '=' entonces t := t + 1 fin
+        sino si valor(t) = '>' entonces
+            op := 4
+            t := t + 1
+        sino si valor(t) = '<' entonces
+            op := 5
+            t := t + 1
+        fin
+        t := saltar_espacios(t)
+        i := 0
+        mientras (es_cifra(valor(t)) o valor(t) = '.') y i < 15 hacer
+            versión[i] := valor(t)
+            i := i + 1
+            t := t + 1
+        fin
+        versión[i] := 0
+        si op <> 0 y i = 0 entonces op := 0 fin
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las cabeceras
+    ; -------------------------------------------------------------------------
+    ; lee la cabecera de un paquete (o de un registro .PQI): da una copia,
+    ; acabada en 0, y en «largo» dónde empiezan los datos; nulo si no lo es
+    función lee_cabecera(ruta: puntero a byte, ref largo: nat32): puntero a byte
+        variable m, n, k, i: nat32
+        variable p: puntero a byte
+        m := abrir(ruta)
+        si es_error(m) entonces devolver nulo fin
+        n := 0
+        mientras n < MAX_CAB hacer
+            k := leer(m, buf + n, MAX_CAB - n)
+            si es_error(k) o k = 0 entonces romper fin
+            n := n + k
+        fin
+        cerrar(m)
+        si n < 8 o comparar_memoria(buf, "HPQ 1", 5) <> 0 o (buf[5] <> '\r' y buf[5] <> '\n') entonces devolver nulo fin
+        largo := 0
+        i := 5
+        mientras i + 4 < n y largo = 0 hacer
+            si buf[i] = '\n' y buf[i + 1] = 'f' y buf[i + 2] = 'i' y buf[i + 3] = 'n' entonces
+                si buf[i + 4] = '\n' entonces
+                    largo := i + 5
+                sino si i + 5 < n y buf[i + 4] = '\r' y buf[i + 5] = '\n' entonces
+                    largo := i + 6
+                fin
+            fin
+            i := i + 1
+        fin
+        si largo = 0 entonces devolver nulo fin
+        p := más_memoria(largo + 1)
+        si p = nulo entonces devolver nulo fin
+        copiar_memoria(p, buf, largo)
+        p[largo] := 0
+        devolver p
+    fin
+
+    ; los archivos de una cabecera, a «lista» (con la letra del sistema delante)
+    función lee_archivos(cab: puntero a byte, lista: puntero a Archivo): nat32
+        variable p: puntero a byte
+        variable n, t: nat32
+        variable x: arreglo [256] de byte
+        variable w: arreglo [84] de byte
+        n := 0
+        p := cab
+        mientras valor(p) <> 0 y n < MAX_ARCH hacer
+            p := línea(p, x, 256)
+            si empieza_por(x, "archivo=") entonces
+                palabra(dirección(x[8]), 0, w, 80)
+                lista[n].destino[0] := sis
+                lista[n].destino[1] := ':'
+                Textos32.copiar(dirección(lista[n].destino[2]), w)
+                palabra(dirección(x[8]), 1, w, 84)
+                si no texto_a_natural(w, t) entonces t := NINGUNO fin
+                lista[n].tamaño := t
+                palabra(dirección(x[8]), 2, dirección(lista[n].sha[0]), 68)
+                n := n + 1
+            fin
+        fin
+        devolver n
+    fin
+
+    ; ¿es buena la cabecera? (su nombre, su versión y sus archivos)
+    función valida(cab: puntero a byte, ruta: puntero a byte): bool
+        variable n, i, j: nat32
+        variable x: arreglo [64] de byte
+        variable bien: bool
+        bien := campo(cab, "nombre", x, 64) y x[0] <> 0 y longitud(x) <= 8
+        i := 0
+        mientras bien y x[i] <> 0 hacer
+            si no es_de_nombre(x[i]) entonces bien := falso fin
+            i := i + 1
+        fin
+        bien := bien y campo(cab, "version", x, 64) y es_cifra(x[0])
+        si no bien entonces
+            imprimir1("paquetes: %s no es un paquete que valga (su nombre o su versión)\n", pt(ruta))
+            devolver falso
+        fin
+        n := lee_archivos(cab, nuevos)
+        para i desde 1 hasta n hacer
+            bien := nuevos[i - 1].destino[2] = '\\' y nuevos[i - 1].tamaño <> NINGUNO y longitud(nuevos[i - 1].sha) = 64
+            bien := bien y no empieza_por(dirección(nuevos[i - 1].destino[2]), "\\HISPA\\PAQUETES\\")
+            Textos32.copiar(x, dirección(nuevos[i - 1].destino[2]))
+            a_mayúsculas(x)
+            bien := bien y no empieza_por(x, "\\HISPA\\PAQUETES\\") y buscar(x, "..") = nulo
+            si no bien entonces
+                imprimir2("paquetes: %s: el archivo %s no vale\n", pt(ruta), pt(nuevos[i - 1].destino))
+                devolver falso
+            fin
+            para j desde 1 hasta i - 1 hacer
+                si iguales_sin_caja(nuevos[i - 1].destino, nuevos[j - 1].destino) entonces
+                    imprimir2("paquetes: %s: el archivo %s sale dos veces\n", pt(ruta), pt(nuevos[i - 1].destino))
+                    devolver falso
+                fin
+            fin
+        fin
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo instalado (C:\HISPA\PAQUETES\*.PQI)
+    ; -------------------------------------------------------------------------
+    función carga_instalados()
+        variable m, largo: nat32
+        variable e: Entrada
+        variable r: arreglo [RUTA] de byte
+        variable cab: puntero a byte
+        ins_n := 0
+        m := abrir(base)
+        si es_error(m) entonces devolver fin
+        mientras ins_n < MAX_PAQ y entrada(m, e) hacer
+            si e.atributos yb CARPETA = 0 y acaba_en(e.nombre, ".PQI") entonces
+                en_base(e.nombre, r)
+                cab := lee_cabecera(r, largo)
+                si cab <> nulo y campo(cab, "nombre", ins_nombre[ins_n], 12) entonces
+                    campo(cab, "version", ins_versión[ins_n], 16)
+                    ins_cab[ins_n] := cab
+                    ins_n := ins_n + 1
+                sino
+                    imprimir1("paquetes: el registro %s no se puede leer (no cuenta)\n", pt(r))
+                fin
+            fin
+        fin
+        cerrar(m)
+    fin
+
+    función instalado(nombre: puntero a byte): nat32
+        variable i: nat32
+        para i desde 1 hasta ins_n hacer
+            si iguales(ins_nombre[i - 1], nombre) entonces devolver i - 1 fin
+        fin
+        devolver NINGUNO
+    fin
+
+    ; la versión instalada de ese paquete (el «nucleo», si no es un paquete, es el que está en marcha)
+    función versión_instalada(nombre: puntero a byte, destino: puntero a byte): bool
+        variable i: nat32
+        i := instalado(nombre)
+        si i <> NINGUNO entonces
+            Textos32.copiar(destino, ins_versión[i])
+            devolver cierto
+        fin
+        si iguales(nombre, "nucleo") entonces
+            Textos32.copiar(destino, versión_núcleo)
+            devolver cierto
+        fin
+        destino[0] := 0
+        devolver falso
+    fin
+
+    ; apunta (o cambia) en la lista de lo instalado lo que se acaba de instalar
+    función apunta_instalado(nombre: puntero a byte, versión: puntero a byte, cab: puntero a byte)
+        variable i: nat32
+        i := instalado(nombre)
+        si i = NINGUNO entonces
+            si ins_n >= MAX_PAQ entonces devolver fin
+            i := ins_n
+            ins_n := ins_n + 1
+        fin
+        Textos32.copiar(ins_nombre[i], nombre)
+        Textos32.copiar(ins_versión[i], versión)
+        ins_cab[i] := cab
+    fin
+
+    función olvida_instalado(nombre: puntero a byte)
+        variable i, j: nat32
+        i := instalado(nombre)
+        si i = NINGUNO entonces devolver fin
+        para j desde i + 1 hasta ins_n - 1 hacer
+            Textos32.copiar(ins_nombre[j - 1], ins_nombre[j])
+            Textos32.copiar(ins_versión[j - 1], ins_versión[j])
+            ins_cab[j - 1] := ins_cab[j]
+        fin
+        ins_n := ins_n - 1
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  De dónde: una carpeta, o Internet (por el gancho de la red)
+    ; -------------------------------------------------------------------------
+    función pon_origen(t: puntero a byte)
+        variable n: nat32
+        copiar_hasta(origen, t, RUTA - 2)
+        es_red := empieza_por(origen, "http://") o empieza_por(origen, "HTTP://") o empieza_por(origen, "https://")
+        n := longitud(origen)
+        si es_red entonces
+            si n > 0 y origen[n - 1] <> '/' entonces concatenar(origen, "/") fin
+        sino
+            si n > 0 y origen[n - 1] <> '\\' entonces concatenar(origen, "\\") fin
+        fin
+    fin
+
+    función busca_origen()
+        variable vuelta, i, n, m: nat32
+        variable u: Info_unidad
+        variable r: arreglo [RUTA] de byte
+        variable x: arreglo [RUTA] de byte
+        si origen[0] <> 0 entonces devolver fin
+        ; lo que diga ORIGEN.TXT
+        en_base("ORIGEN.TXT", r)
+        m := abrir(r)
+        si no es_error(m) entonces
+            n := leer(m, buf, RUTA - 1)
+            cerrar(m)
+            si no es_error(n) entonces
+                buf[n] := 0
+                línea(buf, x, RUTA)
+                si x[0] <> 0 entonces
+                    pon_origen(saltar_espacios(x))
+                    devolver
+                fin
+            fin
+        fin
+        ; la carpeta \PAQUETES de una unidad, con su catálogo: primero las memorias USB
+        para vuelta desde 0 hasta 1 hacer
+            i := 0
+            mientras info_unidad(i, u) hacer
+                si u.letra <> 0 y ((vuelta = 0 y u.medio = MEDIO_USB) o (vuelta = 1 y u.medio <> MEDIO_USB)) entonces
+                    r[0] := u.letra
+                    r[1] := 0
+                    concatenar(r, ":\\PAQUETES\\CATALOGO.TXT")
+                    si existe(r) entonces
+                        r[12] := 0
+                        pon_origen(r)
+                        devolver
+                    fin
+                fin
+                i := i + 1
+            fin
+        fin
+        pon_origen(URL_POR_DEFECTO)
+    fin
+
+    función llamada_red(n: nat32, url: puntero a byte, destino: puntero a byte): nat32
+        ensamblador
+            mov eax, {n}
+            mov ebx, {url}
+            mov ecx, {destino}
+            int 0x80
+        fin
+    fin
+
+    ; trae de Internet la URL al archivo «destino» (el gancho de la red)
+    función descarga(url: puntero a byte, destino: puntero a byte): bool
+        variable r, t: nat32
+        variable a: arreglo [RUTA * 2 + 4] de byte
+        imprimir1("Trayendo %s...\n", pt(url))
+        borrar(destino)
+        si LLAMADA_DESCARGAR <> 0 entonces
+            r := llamada_red(LLAMADA_DESCARGAR, url, destino)
+            si es_error(r) o no existe(destino) entonces
+                imprimir2("paquetes: no se ha podido traer %s (%s)\n", pt(url), pt(texto_error(r)))
+                devolver falso
+            fin
+            devolver cierto
+        fin
+        une(a, url, " ")
+        concatenar(a, destino)
+        t := lanzar("DESCARGAR.BIN", a)
+        si es_error(t) entonces
+            imprimir1("paquetes: para traer %s de Internet hace falta la red (el programa DESCARGAR),\n", pt(url))
+            escribir("  y este sistema aún no la tiene. Use una carpeta o una memoria USB con los paquetes:\n")
+            escribir("  PAQUETES ... /DESDE=X:\\PAQUETES (o ponga la carpeta en C:\\HISPA\\PAQUETES\\ORIGEN.TXT).\n")
+            devolver falso
+        fin
+        r := esperar(t)
+        si r <> 0 o no existe(destino) entonces
+            imprimir2("paquetes: no se ha podido traer %s (DESCARGAR acaba con el código %u)\n", pt(url), r)
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+    ; el archivo «nombre» del origen: da en «destino» dónde está (en la
+    ; carpeta, o traído de Internet a C:\HISPA\PAQUETES\BAJADAS)
+    función trae(nombre: puntero a byte, destino: puntero a byte): bool
+        variable url: arreglo [RUTA * 2] de byte
+        busca_origen()
+        si no es_red entonces
+            une(destino, origen, nombre)
+            si existe(destino) entonces devolver cierto fin
+            imprimir2("paquetes: no está %s en %s\n", pt(nombre), pt(origen))
+            devolver falso
+        fin
+        en_base("BAJADAS", destino)
+        crear_carpeta(destino)
+        concatenar(destino, "\\")
+        concatenar(destino, nombre)
+        une(url, origen, nombre)
+        devolver descarga(url, destino)
+    fin
+
+    ; salta n palabras de t: dónde empieza lo demás
+    función tras_palabras(t: puntero a byte, n: nat32): puntero a byte
+        t := saltar_espacios(t)
+        mientras n > 0 hacer
+            mientras valor(t) <> 0 y no es_espacio(valor(t)) hacer t := t + 1 fin
+            t := saltar_espacios(t)
+            n := n - 1
+        fin
+        devolver t
+    fin
+
+    ; CATALOGO.TXT: «paquete=nombre versión ARCHIVO.HPQ octetos sha256 descripción»
+    función carga_catálogo(): bool
+        variable m, n, k, t: nat32
+        variable p, l: puntero a byte
+        variable r: arreglo [RUTA] de byte
+        variable w: arreglo [24] de byte
+        si cat_mirado entonces devolver hay_catálogo fin
+        cat_mirado := cierto
+        si no trae("CATALOGO.TXT", r) entonces devolver falso fin
+        m := abrir(r)
+        si es_error(m) entonces devolver falso fin
+        n := 0
+        mientras n < MAX_CATÁLOGO hacer
+            k := leer(m, cat + n, MAX_CATÁLOGO - n)
+            si es_error(k) o k = 0 entonces romper fin
+            n := n + k
+        fin
+        cerrar(m)
+        cat[n] := 0
+        si no empieza_por(cat, "HPQ-CATALOGO 1") entonces
+            imprimir1("paquetes: %s no es un catálogo de paquetes\n", pt(r))
+            devolver falso
+        fin
+        ; cada línea, un texto aparte (los fines de línea, a 0)
+        para k desde 1 hasta n hacer
+            si cat[k - 1] = '\r' o cat[k - 1] = '\n' entonces cat[k - 1] := 0 fin
+        fin
+        cat_n := 0
+        p := cat
+        mientras p < cat + n y cat_n < MAX_PAQ hacer
+            l := p
+            mientras valor(p) <> 0 hacer p := p + 1 fin
+            p := p + 1
+            si empieza_por(l, "paquete=") entonces
+                l := l + 8
+                palabra(l, 0, cat_nombre[cat_n], 12)
+                palabra(l, 1, cat_versión[cat_n], 16)
+                palabra(l, 2, cat_archivo[cat_n], 16)
+                palabra(l, 3, w, 24)
+                si no texto_a_natural(w, t) entonces t := 0 fin
+                cat_tamaño[cat_n] := t
+                palabra(l, 4, cat_sha[cat_n], 68)
+                cat_desc[cat_n] := tras_palabras(l, 5)
+                si cat_nombre[cat_n][0] <> 0 y cat_archivo[cat_n][0] <> 0 entonces cat_n := cat_n + 1 fin
+            fin
+        fin
+        hay_catálogo := cierto
+        devolver cierto
+    fin
+
+    ; la versión más nueva de ese paquete en el catálogo que cumpla (op, versión)
+    función mejor_del_catálogo(nombre: puntero a byte, op: nat32, versión: puntero a byte): nat32
+        variable i, mejor: nat32
+        mejor := NINGUNO
+        para i desde 1 hasta cat_n hacer
+            si iguales(cat_nombre[i - 1], nombre) y cumple(cat_versión[i - 1], op, versión) entonces
+                si mejor = NINGUNO entonces
+                    mejor := i - 1
+                sino si compara(cat_versión[i - 1], cat_versión[mejor]) > 0 entonces
+                    mejor := i - 1
+                fin
+            fin
+        fin
+        devolver mejor
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El plan: lo que hay que instalar, con lo que necesita delante
+    ; -------------------------------------------------------------------------
+    función en_plan(nombre: puntero a byte): nat32
+        variable i: nat32
+        para i desde 1 hasta plan_n hacer
+            si iguales(plan_nombre[i - 1], nombre) entonces devolver i - 1 fin
+        fin
+        devolver NINGUNO
+    fin
+
+    función planea(nombre: puntero a byte, op: nat32, versión: puntero a byte, nivel: nat32): bool
+        variable i, c, largo: nat32
+        variable v: arreglo [16] de byte
+        variable r: arreglo [RUTA] de byte
+        variable cab: puntero a byte
+        variable d: arreglo [4] de nat32
+        si nivel > 16 entonces devolver mal("demasiadas dependencias, una detrás de otra (¿en círculo?)") fin
+        d[0] := pt(nombre)
+        d[1] := pt(texto_op(op))
+        d[2] := pt(versión)
+        i := en_plan(nombre)
+        si i <> NINGUNO entonces
+            si cumple(plan_versión[i], op, versión) entonces devolver cierto fin
+            d[3] := pt(plan_versión[i])
+            imprimir("paquetes: hace falta %s%s%s, y lo que se va a instalar es la %s\n", dirección(d[0]))
+            devolver falso
+        fin
+        si versión_instalada(nombre, v) y cumple(v, op, versión) entonces devolver cierto fin
+        si iguales(nombre, "nucleo") entonces
+            d[3] := pt(versión_núcleo)
+            imprimir("paquetes: hace falta el núcleo%s%s (el que está en marcha es el %s):\n", dirección(d[1]))
+            escribir("  actualice antes el paquete «base» y vuelva a arrancar el equipo.\n")
+            devolver falso
+        fin
+        si no carga_catálogo() entonces
+            imprimir("paquetes: hace falta %s%s%s y no hay un catálogo donde buscarlo\n", dirección(d[0]))
+            devolver falso
+        fin
+        c := mejor_del_catálogo(nombre, op, versión)
+        si c = NINGUNO entonces
+            imprimir("paquetes: hace falta %s%s%s y no está en el catálogo\n", dirección(d[0]))
+            devolver falso
+        fin
+        si no trae(cat_archivo[c], r) entonces devolver falso fin
+        cab := lee_cabecera(r, largo)
+        si cab = nulo entonces
+            imprimir1("paquetes: %s no es un paquete\n", pt(r))
+            devolver falso
+        fin
+        devolver añade(r, cab, largo, c, nivel)
+    fin
+
+    ; mete en el plan el paquete de esa cabecera (y, antes, lo que necesite)
+    función añade(r: puntero a byte, cab: puntero a byte, largo: nat32, c: nat32, nivel: nat32): bool
+        variable i, k, op: nat32
+        variable lista: arreglo [256] de byte
+        variable n: arreglo [12] de byte
+        variable v: arreglo [16] de byte
+        si no valida(cab, r) entonces devolver falso fin
+        si plan_n >= MAX_PAQ entonces devolver mal("demasiados paquetes de una vez") fin
+        i := plan_n
+        plan_n := plan_n + 1
+        copiar_hasta(plan_ruta[i], r, RUTA)
+        plan_cab[i] := cab
+        plan_largo[i] := largo
+        plan_cat[i] := c
+        campo(cab, "nombre", plan_nombre[i], 12)
+        campo(cab, "version", plan_versión[i], 16)
+        si c <> NINGUNO entonces
+            si no iguales(plan_nombre[i], cat_nombre[c]) o compara(plan_versión[i], cat_versión[c]) <> 0 entonces
+                imprimir1("paquetes: %s no es lo que dice el catálogo (otro nombre u otra versión)\n", pt(r))
+                devolver falso
+            fin
+        fin
+        campo(cab, "necesita", lista, 256)
+        k := 0
+        mientras requisito(lista, k, n, op, v) hacer
+            si no iguales(n, plan_nombre[i]) entonces
+                si no planea(n, op, v, nivel + 1) entonces devolver falso fin
+            fin
+            k := k + 1
+        fin
+        orden[orden_n] := i
+        orden_n := orden_n + 1
+        devolver cierto
+    fin
+
+    ; ¿choca algo del plan con lo instalado, o con otra cosa del plan? ¿pisa
+    ; un archivo de otro paquete?
+    función comprueba_plan(): bool
+        variable i, j, k, op, a, b, nn, nv, w: nat32
+        variable lista: arreglo [256] de byte
+        variable n: arreglo [12] de byte
+        variable v: arreglo [16] de byte
+        variable vi: arreglo [16] de byte
+        variable d: arreglo [4] de nat32
+        para i desde 1 hasta plan_n hacer
+            ; con lo que choca él
+            campo(plan_cab[i - 1], "choca", lista, 256)
+            k := 0
+            mientras requisito(lista, k, n, op, v) hacer
+                w := en_plan(n)
+                d[0] := pt(plan_nombre[i - 1])
+                d[1] := pt(n)
+                d[2] := pt(n)
+                si w <> NINGUNO y w <> i - 1 entonces
+                    si cumple(plan_versión[w], op, v) entonces
+                        imprimir("paquetes: %s no puede estar con %s, y se iban a instalar los dos\n", dirección(d[0]))
+                        devolver falso
+                    fin
+                sino si w = NINGUNO y versión_instalada(n, vi) entonces
+                    si cumple(vi, op, v) entonces
+                        imprimir("paquetes: %s no puede estar con %s, que está instalado: quítelo antes (PAQUETES QUITA %s)\n", dirección(d[0]))
+                        devolver falso
+                    fin
+                fin
+                k := k + 1
+            fin
+            ; los instalados que chocan con él
+            para j desde 1 hasta ins_n hacer
+                si en_plan(ins_nombre[j - 1]) = NINGUNO entonces
+                    campo(ins_cab[j - 1], "choca", lista, 256)
+                    k := 0
+                    mientras requisito(lista, k, n, op, v) hacer
+                        si iguales(n, plan_nombre[i - 1]) y cumple(plan_versión[i - 1], op, v) entonces
+                            d[0] := pt(ins_nombre[j - 1])
+                            d[1] := pt(plan_nombre[i - 1])
+                            d[2] := pt(ins_nombre[j - 1])
+                            imprimir("paquetes: %s (instalado) no puede estar con %s: quite antes %s\n", dirección(d[0]))
+                            devolver falso
+                        fin
+                        k := k + 1
+                    fin
+                fin
+            fin
+            ; que no pise los archivos de otro
+            nn := lee_archivos(plan_cab[i - 1], nuevos)
+            para j desde 1 hasta ins_n + plan_n hacer
+                nv := 0
+                si j <= ins_n entonces
+                    si en_plan(ins_nombre[j - 1]) = NINGUNO entonces
+                        nv := lee_archivos(ins_cab[j - 1], viejos)
+                        d[2] := pt(ins_nombre[j - 1])
+                    fin
+                sino si j - ins_n <> i entonces
+                    nv := lee_archivos(plan_cab[j - ins_n - 1], viejos)
+                    d[2] := pt(plan_nombre[j - ins_n - 1])
+                fin
+                para a desde 1 hasta nn hacer
+                    para b desde 1 hasta nv hacer
+                        si iguales_sin_caja(nuevos[a - 1].destino, viejos[b - 1].destino) entonces
+                            d[0] := pt(plan_nombre[i - 1])
+                            d[1] := pt(nuevos[a - 1].destino)
+                            imprimir("paquetes: %s trae %s, que es del paquete %s\n", dirección(d[0]))
+                            devolver falso
+                        fin
+                    fin
+                fin
+            fin
+        fin
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las sumas
+    ; -------------------------------------------------------------------------
+    ; el SHA-256 de los n octetos siguientes del archivo m, a «salida»
+    función resume(m: nat32, n: nat32, salida: puntero a byte): bool
+        variable k: nat32
+        Sha256.empezar()
+        mientras n > 0 hacer
+            k := n
+            si k > TROZO entonces k := TROZO fin
+            si no lee_todo(m, buf, k) entonces devolver falso fin
+            Sha256.añadir(buf, k)
+            n := n - k
+        fin
+        Sha256.acabar(salida)
+        devolver cierto
+    fin
+
+    ; comprueba un paquete del plan: lo que mide, su suma (la del catálogo) y
+    ; la de cada uno de sus archivos
+    función verifica(i: nat32): bool
+        variable m, total, n, a, c: nat32
+        variable s: arreglo [68] de byte
+        variable bien: bool
+        m := abrir(plan_ruta[i])
+        si es_error(m) entonces
+            imprimir1("paquetes: no se puede leer %s\n", pt(plan_ruta[i]))
+            devolver falso
+        fin
+        total := largo_de(m)
+        c := plan_cat[i]
+        bien := cierto
+        si c <> NINGUNO entonces
+            bien := total = cat_tamaño[c] y resume(m, total, s) y iguales(s, cat_sha[c])
+            si no bien entonces
+                imprimir1("paquetes: %s no es el del catálogo (no mide lo mismo o su suma no es la suya)\n", pt(plan_ruta[i]))
+            fin
+            mover(m, 0, DESDE_INICIO)
+        fin
+        n := lee_archivos(plan_cab[i], nuevos)
+        a := plan_largo[i]
+        para c desde 1 hasta n hacer a := a + nuevos[c - 1].tamaño fin
+        si bien y a <> total entonces
+            imprimir3("paquetes: %s está cortado o le sobra algo (mide %u y tenía que medir %u)\n", pt(plan_ruta[i]), total, a)
+            bien := falso
+        fin
+        si bien entonces mover(m, plan_largo[i], DESDE_INICIO) fin
+        para c desde 1 hasta n hacer
+            si bien entonces
+                si no resume(m, nuevos[c - 1].tamaño, s) o no iguales(s, nuevos[c - 1].sha) entonces
+                    imprimir2("paquetes: %s: la suma de %s no es la suya: el paquete está estropeado\n", pt(plan_ruta[i]), pt(dirección(nuevos[c - 1].destino[2])))
+                    bien := falso
+                fin
+            fin
+        fin
+        cerrar(m)
+        devolver bien
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Una instalación: los pasos, el diario, cambiar y deshacer
+    ; -------------------------------------------------------------------------
+    función pon_paso(clase: nat32, destino: puntero a byte): nat32
+        variable i: nat32
+        si n_pasos >= MAX_PASOS entonces devolver NINGUNO fin
+        i := n_pasos
+        n_pasos := n_pasos + 1
+        pasos[i].clase := clase
+        pasos[i].existía := 0
+        si existe(destino) entonces pasos[i].existía := 1 fin
+        pasos[i].origen_ := NINGUNO
+        pasos[i].tamaño := 0
+        pasos[i].sha[0] := 0
+        copiar_hasta(pasos[i].destino, destino, 84)
+        devolver i
+    fin
+
+    ; las carpetas que faltan para ese archivo (de fuera adentro)
+    función pon_carpetas(destino: puntero a byte)
+        variable i, j: nat32
+        variable c: arreglo [84] de byte
+        variable ya: bool
+        i := 3
+        mientras destino[i] <> 0 hacer
+            si destino[i] = '\\' entonces
+                copiar_hasta(c, destino, i + 1)
+                si no existe(c) entonces
+                    ya := falso
+                    para j desde 1 hasta n_pasos hacer
+                        si pasos[j - 1].clase = P_CARPETA y iguales_sin_caja(pasos[j - 1].destino, c) entonces ya := cierto fin
+                    fin
+                    si no ya entonces pon_paso(P_CARPETA, c) fin
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; lo que hay que hacer para instalar el paquete número i del plan
+    función pasos_de_instalar(i: nat32): bool
+        variable n, a, b, off, j, nv, k: nat32
+        variable r: arreglo [RUTA] de byte
+        variable x: arreglo [16] de byte
+        variable está: bool
+        n_pasos := 0
+        n := lee_archivos(plan_cab[i], nuevos)
+        para a desde 1 hasta n hacer pon_carpetas(nuevos[a - 1].destino) fin
+        off := plan_largo[i]
+        para a desde 1 hasta n hacer
+            k := pon_paso(P_NUEVO, nuevos[a - 1].destino)
+            si k = NINGUNO entonces devolver mal("el paquete tiene demasiados archivos") fin
+            pasos[k].origen_ := off
+            pasos[k].tamaño := nuevos[a - 1].tamaño
+            Textos32.copiar(pasos[k].sha, nuevos[a - 1].sha)
+            off := off + nuevos[a - 1].tamaño
+        fin
+        ; el registro, el último de lo nuevo
+        Textos32.copiar(x, plan_nombre[i])
+        a_mayúsculas(x)
+        concatenar(x, ".PQI")
+        en_base(x, r)
+        k := pon_paso(P_NUEVO, r)
+        si k = NINGUNO entonces devolver mal("el paquete tiene demasiados archivos") fin
+        pasos[k].tamaño := plan_largo[i]
+        ; lo de la versión de antes que la nueva ya no lleva
+        j := instalado(plan_nombre[i])
+        si j <> NINGUNO entonces
+            nv := lee_archivos(ins_cab[j], viejos)
+            para b desde 1 hasta nv hacer
+                está := falso
+                para a desde 1 hasta n hacer
+                    si iguales_sin_caja(nuevos[a - 1].destino, viejos[b - 1].destino) entonces está := cierto fin
+                fin
+                si no está y existe(viejos[b - 1].destino) entonces
+                    si pon_paso(P_BORRA, viejos[b - 1].destino) = NINGUNO entonces devolver mal("el paquete tiene demasiados archivos") fin
+                fin
+            fin
+        fin
+        txn_cab := plan_cab[i]
+        txn_largo := plan_largo[i]
+        copiar_hasta(txn_paquete, plan_ruta[i], RUTA)
+        une(txn_nombre, plan_nombre[i], " ")
+        concatenar(txn_nombre, plan_versión[i])
+        devolver cierto
+    fin
+
+    ; lo que hay que hacer para quitar el paquete instalado número j
+    función pasos_de_quitar(j: nat32): bool
+        variable nv, b: nat32
+        variable r: arreglo [RUTA] de byte
+        variable x: arreglo [16] de byte
+        n_pasos := 0
+        nv := lee_archivos(ins_cab[j], viejos)
+        para b desde 1 hasta nv hacer
+            si existe(viejos[b - 1].destino) entonces pon_paso(P_BORRA, viejos[b - 1].destino) fin
+        fin
+        Textos32.copiar(x, ins_nombre[j])
+        a_mayúsculas(x)
+        concatenar(x, ".PQI")
+        en_base(x, r)
+        pon_paso(P_BORRA, r)
+        txn_cab := nulo
+        txn_largo := 0
+        txn_paquete[0] := 0
+        une(txn_nombre, ins_nombre[j], " ")
+        concatenar(txn_nombre, ins_versión[j])
+        devolver cierto
+    fin
+
+    ; ¿cabe? (lo nuevo entero: lo de antes no se suelta hasta el final)
+    función hay_sitio(): bool
+        variable i, k: nat32
+        variable u: Info_unidad
+        k := 64
+        para i desde 1 hasta n_pasos hacer
+            si pasos[i - 1].clase = P_NUEVO entonces k := k + pasos[i - 1].tamaño div 1024 + 4 fin
+        fin
+        i := 0
+        mientras info_unidad(i, u) hacer
+            si u.letra = sis entonces
+                si u.libre_k <> 0xFFFFFFFF y u.libre_k < k entonces
+                    imprimir2("paquetes: no cabe en el disco: hacen falta %u K y quedan %u K\n", k, u.libre_k)
+                    devolver falso
+                fin
+                devolver cierto
+            fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; el diario: «HPQ-DIARIO 1», el paquete y un paso por línea, en orden
+    ; (c=carpeta; n=existía destino; b=destino)
+    función escribe_diario(): bool
+        variable m, i: nat32
+        variable bien: bool
+        variable x: arreglo [8] de byte
+        m := crear(diario)
+        si es_error(m) entonces devolver falso fin
+        bien := escribe_todo(m, "HPQ-DIARIO 1\r\npaquete=", longitud("HPQ-DIARIO 1\r\npaquete=")) y escribe_todo(m, txn_nombre, longitud(txn_nombre)) y escribe_todo(m, "\r\n", 2)
+        para i desde 1 hasta n_pasos hacer
+            si pasos[i - 1].clase = P_CARPETA entonces
+                bien := bien y escribe_todo(m, "c=", 2)
+            sino si pasos[i - 1].clase = P_NUEVO entonces
+                x[0] := 'n'
+                x[1] := '='
+                x[2] := '0' + pasos[i - 1].existía
+                x[3] := ' '
+                bien := bien y escribe_todo(m, x, 4)
+            sino
+                bien := bien y escribe_todo(m, "b=", 2)
+            fin
+            bien := bien y escribe_todo(m, pasos[i - 1].destino, longitud(pasos[i - 1].destino)) y escribe_todo(m, "\r\n", 2)
+        fin
+        cerrar(m)
+        devolver bien
+    fin
+
+    ; lee un diario (DIARIO.TXT o HECHO.TXT) a la lista de pasos
+    función lee_diario(ruta: puntero a byte): bool
+        variable m, n, k, i: nat32
+        variable p: puntero a byte
+        variable x: arreglo [128] de byte
+        m := abrir(ruta)
+        si es_error(m) entonces devolver falso fin
+        n := 0
+        mientras n < TROZO - 1 hacer
+            k := leer(m, buf + n, TROZO - 1 - n)
+            si es_error(k) o k = 0 entonces romper fin
+            n := n + k
+        fin
+        cerrar(m)
+        buf[n] := 0
+        n_pasos := 0
+        txn_nombre[0] := 0
+        p := buf
+        mientras valor(p) <> 0 y n_pasos < MAX_PASOS hacer
+            p := línea(p, x, 128)
+            si empieza_por(x, "paquete=") entonces
+                copiar_hasta(txn_nombre, dirección(x[8]), 40)
+            sino si x[1] = '=' y (x[0] = 'c' o x[0] = 'b' o (x[0] = 'n' y x[3] = ' ')) entonces
+                i := n_pasos
+                n_pasos := n_pasos + 1
+                pasos[i].existía := 0
+                si x[0] = 'c' entonces
+                    pasos[i].clase := P_CARPETA
+                    copiar_hasta(pasos[i].destino, dirección(x[2]), 84)
+                sino si x[0] = 'b' entonces
+                    pasos[i].clase := P_BORRA
+                    copiar_hasta(pasos[i].destino, dirección(x[2]), 84)
+                sino
+                    pasos[i].clase := P_NUEVO
+                    si x[2] = '1' entonces pasos[i].existía := 1 fin
+                    copiar_hasta(pasos[i].destino, dirección(x[4]), 84)
+                fin
+            fin
+        fin
+        devolver cierto
+    fin
+
+    ; (las pruebas) «/CORTE=n»: tras el cambio número n, quieto, como si se fuera la luz
+    función un_cambio()
+        cambios := cambios + 1
+        si corte <> 0 y cambios = corte entonces
+            escribir("paquetes: corte de prueba (como si se fuera la luz a mitad)\n")
+            mientras cierto hacer dormir(100) fin
+        fin
+    fin
+
+    ; escribe lo nuevo del paso i en su archivo temporal (HPQnnnnn.NUE),
+    ; comprobando otra vez su suma
+    función escribe_temporal(i: nat32, mp: nat32): bool
+        variable s, queda, k: nat32
+        variable t: arreglo [RUTA] de byte
+        variable h: arreglo [68] de byte
+        variable bien: bool
+        temporal(i, "NUE", t)
+        s := crear(t)
+        si es_error(s) entonces devolver falso fin
+        si pasos[i].origen_ = NINGUNO entonces
+            bien := escribe_todo(s, txn_cab, txn_largo)
+        sino
+            bien := not_error(mover(mp, ent32(pasos[i].origen_), DESDE_INICIO))
+            Sha256.empezar()
+            queda := pasos[i].tamaño
+            mientras bien y queda > 0 hacer
+                k := queda
+                si k > TROZO entonces k := TROZO fin
+                bien := lee_todo(mp, buf, k)
+                si bien entonces
+                    Sha256.añadir(buf, k)
+                    bien := escribe_todo(s, buf, k)
+                fin
+                queda := queda - k
+            fin
+            Sha256.acabar(h)
+            bien := bien y iguales(h, pasos[i].sha)
+        fin
+        cerrar(s)
+        devolver bien
+    fin
+
+    función not_error(r: nat32): bool
+        devolver no es_error(r)
+    fin
+
+    ; hace las carpetas, escribe lo nuevo aparte y lo cambia por lo de antes
+    función cambia(): bool
+        variable i, mp, r: nat32
+        variable t: arreglo [RUTA] de byte
+        variable v: arreglo [RUTA] de byte
+        variable bien: bool
+        para i desde 1 hasta n_pasos hacer
+            si pasos[i - 1].clase = P_CARPETA entonces
+                r := crear_carpeta(pasos[i - 1].destino)
+                si es_error(r) entonces
+                    imprimir2("paquetes: no se puede hacer la carpeta %s (%s)\n", pt(pasos[i - 1].destino), pt(texto_error(r)))
+                    devolver falso
+                fin
+            fin
+        fin
+        mp := NINGUNO
+        si txn_paquete[0] <> 0 entonces
+            mp := abrir(txn_paquete)
+            si es_error(mp) entonces
+                imprimir1("paquetes: no se puede leer %s\n", pt(txn_paquete))
+                devolver falso
+            fin
+        fin
+        bien := cierto
+        para i desde 1 hasta n_pasos hacer
+            si bien y pasos[i - 1].clase = P_NUEVO entonces
+                si no escribe_temporal(i - 1, mp) entonces
+                    imprimir1("paquetes: no se puede escribir %s (¿está lleno el disco?)\n", pt(pasos[i - 1].destino))
+                    bien := falso
+                fin
+            fin
+        fin
+        si mp <> NINGUNO entonces cerrar(mp) fin
+        si no bien entonces devolver falso fin
+        ; cambiar: lo de antes, a su HPQnnnnn.VIE; lo nuevo, a su sitio
+        para i desde 1 hasta n_pasos hacer
+            si pasos[i - 1].clase = P_NUEVO entonces
+                temporal(i - 1, "NUE", t)
+                si pasos[i - 1].existía = 1 entonces
+                    temporal(i - 1, "VIE", v)
+                    borrar(v)
+                    r := renombrar(pasos[i - 1].destino, v)
+                    si es_error(r) entonces
+                        imprimir2("paquetes: no se puede apartar %s (%s)\n", pt(pasos[i - 1].destino), pt(texto_error(r)))
+                        devolver falso
+                    fin
+                    un_cambio()
+                fin
+                r := renombrar(t, pasos[i - 1].destino)
+                si es_error(r) entonces
+                    imprimir2("paquetes: no se puede poner %s (%s)\n", pt(pasos[i - 1].destino), pt(texto_error(r)))
+                    devolver falso
+                fin
+                un_cambio()
+            fin
+        fin
+        para i desde 1 hasta n_pasos hacer
+            si pasos[i - 1].clase = P_BORRA entonces
+                temporal(i - 1, "VIE", v)
+                borrar(v)
+                r := renombrar(pasos[i - 1].destino, v)
+                si es_error(r) entonces
+                    imprimir2("paquetes: no se puede quitar %s (%s)\n", pt(pasos[i - 1].destino), pt(texto_error(r)))
+                    devolver falso
+                fin
+                un_cambio()
+            fin
+        fin
+        devolver cierto
+    fin
+
+    ; deja todo como estaba antes de la instalación (de atrás adelante)
+    función deshaz()
+        variable i: nat32
+        variable t: arreglo [RUTA] de byte
+        variable v: arreglo [RUTA] de byte
+        para i desde n_pasos hasta 1 paso -1 hacer
+            si pasos[i - 1].clase = P_CARPETA entonces
+                borrar_carpeta(pasos[i - 1].destino)
+            sino
+                temporal(i - 1, "NUE", t)
+                temporal(i - 1, "VIE", v)
+                si existe(v) entonces
+                    ; lo de antes estaba apartado: vuelve a su sitio
+                    si existe(pasos[i - 1].destino) entonces borrar(pasos[i - 1].destino) fin
+                    renombrar(v, pasos[i - 1].destino)
+                sino si pasos[i - 1].clase = P_NUEVO y pasos[i - 1].existía = 0 y no existe(t) entonces
+                    ; uno nuevo que ya estaba puesto: fuera
+                    borrar(pasos[i - 1].destino)
+                fin
+                si existe(t) entonces borrar(t) fin
+            fin
+        fin
+    fin
+
+    ; quita las carpetas que se hayan quedado vacías al quitar ese archivo
+    ; (menos la raíz, \HISPA y la base)
+    función quita_carpetas(ruta: puntero a byte)
+        variable c: arreglo [RUTA] de byte
+        variable r: nat32
+        carpeta_de(ruta, c)
+        mientras longitud(c) > 2 hacer
+            si iguales_sin_caja(dirección(c[2]), "\\HISPA") o iguales_sin_caja(c, base) entonces devolver fin
+            r := borrar_carpeta(c)
+            si es_error(r) entonces devolver fin
+            carpeta_de(c, c)
+        fin
+    fin
+
+    ; ya está todo cambiado: fuera lo de antes y el diario
+    función limpia()
+        variable i: nat32
+        variable v: arreglo [RUTA] de byte
+        para i desde 1 hasta n_pasos hacer
+            si pasos[i - 1].clase = P_BORRA o (pasos[i - 1].clase = P_NUEVO y pasos[i - 1].existía = 1) entonces
+                temporal(i - 1, "VIE", v)
+                borrar(v)
+            fin
+        fin
+        para i desde 1 hasta n_pasos hacer
+            si pasos[i - 1].clase = P_BORRA entonces quita_carpetas(pasos[i - 1].destino) fin
+        fin
+        borrar(hecho)
+    fin
+
+    ; hace los pasos, de modo que o se hace todo o no se hace nada
+    función ejecuta(): bool
+        si no hay_sitio() entonces devolver falso fin
+        borrar(hecho)
+        si no escribe_diario() entonces
+            borrar(diario)
+            devolver mal("no se puede escribir en C:\\HISPA\\PAQUETES (¿se ha arrancado con «escritura»?)")
+        fin
+        si no cambia() entonces
+            deshaz()
+            borrar(diario)
+            imprimir1("paquetes: %s no se ha podido poner: todo queda como estaba\n", pt(txn_nombre))
+            devolver falso
+        fin
+        si es_error(renombrar(diario, hecho)) entonces
+            deshaz()
+            borrar(diario)
+            devolver mal("no se puede acabar (el diario): todo queda como estaba")
+        fin
+        limpia()
+        devolver cierto
+    fin
+
+    ; si la última vez se quedó algo a medias (se fue la luz), se deshace (o,
+    ; si ya estaba todo cambiado, se acaba de limpiar)
+    función recupera()
+        si existe(hecho) y lee_diario(hecho) entonces
+            limpia()
+            imprimir1("paquetes: se ha acabado de limpiar lo de %s, que estaba puesto\n", pt(txn_nombre))
+        fin
+        si existe(diario) y lee_diario(diario) entonces
+            deshaz()
+            borrar(diario)
+            imprimir1("paquetes: %s se quedó a medias (¿se fue la luz?): se ha deshecho y todo está como antes\n", pt(txn_nombre))
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las órdenes
+    ; -------------------------------------------------------------------------
+    función ayuda()
+        escribir("PAQUETES ", "1.0", ": instalar, actualizar y quitar programas en Hispa-Pentium.\n")
+        escribir("  PAQUETES LISTA                lo que está instalado\n")
+        escribir("  PAQUETES CATALOGO             lo que se puede instalar\n")
+        escribir("  PAQUETES INSTALA nombre       instala un paquete (y lo que necesite)\n")
+        escribir("  PAQUETES INSTALA X.HPQ        instala ese archivo de paquete\n")
+        escribir("  PAQUETES ACTUALIZA [nombre]   pone al día lo instalado\n")
+        escribir("  PAQUETES QUITA nombre         lo quita\n")
+        escribir("  PAQUETES MIRA X.HPQ           lo que lleva un paquete, y si está sano\n")
+        escribir("  PAQUETES COMPRUEBA            si lo instalado sigue igual\n")
+        escribir("  /DESDE=X:\\PAQUETES            de dónde se traen (también una dirección http://)\n")
+        escribir("  /FORZAR                       quitar aunque otro lo necesite; poner una versión igual o más vieja\n")
+    fin
+
+    función di_lista()
+        variable i: nat32
+        variable d: arreglo [200] de byte
+        si ins_n = 0 entonces
+            imprimir1("No hay ningún paquete apuntado en %s.\n", pt(base))
+            devolver
+        fin
+        imprimir1("Paquetes instalados (%s):\n", pt(base))
+        para i desde 1 hasta ins_n hacer
+            escribir("  ")
+            columna(ins_nombre[i - 1], 10)
+            columna(ins_versión[i - 1], 8)
+            campo(ins_cab[i - 1], "descripcion", d, 200)
+            escribir(d, "\n")
+        fin
+        imprimir1("%u paquetes.\n", ins_n)
+    fin
+
+    función di_catálogo()
+        variable i, j: nat32
+        variable st: arreglo [40] de byte
+        variable más: bool
+        si no carga_catálogo() entonces devolver fin
+        imprimir1("Paquetes que hay en %s:\n", pt(origen))
+        para i desde 1 hasta cat_n hacer
+            ; (de cada uno, solo el más nuevo)
+            más := falso
+            para j desde 1 hasta cat_n hacer
+                si iguales(cat_nombre[j - 1], cat_nombre[i - 1]) y compara(cat_versión[j - 1], cat_versión[i - 1]) > 0 entonces más := cierto fin
+            fin
+            si no más entonces
+                escribir("  ")
+                columna(cat_nombre[i - 1], 10)
+                columna(cat_versión[i - 1], 8)
+                j := instalado(cat_nombre[i - 1])
+                st[0] := 0
+                si j <> NINGUNO entonces
+                    si compara(cat_versión[i - 1], ins_versión[j]) > 0 entonces
+                        une(st, "(nuevo; tiene la ", ins_versión[j])
+                        concatenar(st, ")")
+                    sino
+                        Textos32.copiar(st, "(instalado)")
+                    fin
+                fin
+                columna(st, 25)
+                escribir(cat_desc[i - 1], "\n")
+            fin
+        fin
+    fin
+
+    ; hace el plan: comprueba que todo cabe junto, las sumas de todo, y
+    ; luego instala uno a uno (lo que se necesita, antes)
+    función hace_plan(): bool
+        variable i, k, j: nat32
+        si orden_n = 0 entonces
+            escribir("No hay nada que instalar.\n")
+            devolver cierto
+        fin
+        escribir("Se va a instalar:")
+        para i desde 1 hasta orden_n hacer
+            k := orden[i - 1]
+            escribir(" ", plan_nombre[k], " ", plan_versión[k])
+            j := instalado(plan_nombre[k])
+            si j <> NINGUNO entonces escribir(" (en lugar de la ", ins_versión[j], ")") fin
+            si i < orden_n entonces escribir(",") fin
+        fin
+        escribir("\n")
+        si no comprueba_plan() entonces
+            escribir("No se instala nada.\n")
+            devolver falso
+        fin
+        para i desde 1 hasta orden_n hacer
+            k := orden[i - 1]
+            si no verifica(k) entonces
+                escribir("No se instala nada: el disco queda como estaba.\n")
+                devolver falso
+            fin
+        fin
+        escribir("Las sumas (SHA-256) de todos los archivos están bien.\n")
+        para i desde 1 hasta orden_n hacer
+            k := orden[i - 1]
+            si no pasos_de_instalar(k) entonces devolver falso fin
+            si no ejecuta() entonces
+                si i > 1 entonces escribir("(lo de antes en la lista sí ha quedado instalado)\n") fin
+                devolver falso
+            fin
+            apunta_instalado(plan_nombre[k], plan_versión[k], plan_cab[k])
+            imprimir2("  instalado %s %s\n", pt(plan_nombre[k]), pt(plan_versión[k]))
+        fin
+        escribir("Hecho.\n")
+        devolver cierto
+    fin
+
+    función a_minúsculas(t: puntero a byte)
+        mientras valor(t) <> 0 hacer
+            valor(t) := minúscula(valor(t))
+            t := t + 1
+        fin
+    fin
+
+    ; ¿es un archivo (X.HPQ, con carpeta o con letra) y no un nombre?
+    función es_archivo(t: puntero a byte): bool
+        devolver acaba_en(t, ".HPQ") o buscar_car(t, '\\') <> nulo o buscar_car(t, ':') <> nulo
+    fin
+
+    función instala(): bool
+        variable k, largo, j: nat32
+        variable r: arreglo [RUTA] de byte
+        variable c: arreglo [RUTA] de byte
+        variable v: arreglo [16] de byte
+        variable n: arreglo [12] de byte
+        variable cab: puntero a byte
+        variable alguno: bool
+        alguno := falso
+        k := 1
+        mientras palabra(args, k, palabra_, RUTA) hacer
+            k := k + 1
+            si palabra_[0] = '/' entonces seguir fin
+            alguno := cierto
+            si es_archivo(palabra_) entonces
+                absoluta(palabra_, r)
+                cab := lee_cabecera(r, largo)
+                si cab = nulo entonces
+                    imprimir1("paquetes: %s no es un paquete (o no está)\n", pt(r))
+                    devolver falso
+                fin
+                ; (lo que necesite, del catálogo de su carpeta si lo tiene)
+                si origen[0] = 0 entonces
+                    carpeta_de(r, c)
+                    concatenar(c, "\\CATALOGO.TXT")
+                    si existe(c) entonces
+                        carpeta_de(r, c)
+                        pon_origen(c)
+                    fin
+                fin
+                campo(cab, "nombre", n, 12)
+                campo(cab, "version", v, 16)
+                j := instalado(n)
+                si j <> NINGUNO y compara(v, ins_versión[j]) <= 0 y no forzar entonces
+                    imprimir2("paquetes: %s ya está instalado (la %s): para ponerlo otra vez, /FORZAR\n", pt(n), pt(ins_versión[j]))
+                sino si no añade(r, cab, largo, NINGUNO, 0) entonces
+                    devolver falso
+                fin
+            sino
+                a_minúsculas(palabra_)
+                j := instalado(palabra_)
+                si j <> NINGUNO entonces
+                    imprimir2("paquetes: %s ya está instalado (la %s); para una más nueva: PAQUETES ACTUALIZA\n", pt(palabra_), pt(ins_versión[j]))
+                sino si no planea(palabra_, 0, "", 0) entonces
+                    devolver falso
+                fin
+            fin
+        fin
+        si no alguno entonces devolver mal("¿qué paquete? PAQUETES INSTALA nombre (o X.HPQ)") fin
+        devolver hace_plan()
+    fin
+
+    función actualiza(): bool
+        variable k, i, c: nat32
+        variable alguno: bool
+        si no carga_catálogo() entonces devolver falso fin
+        alguno := falso
+        k := 1
+        mientras palabra(args, k, palabra_, RUTA) hacer
+            k := k + 1
+            si palabra_[0] = '/' entonces seguir fin
+            alguno := cierto
+            a_minúsculas(palabra_)
+            i := instalado(palabra_)
+            si i = NINGUNO entonces
+                imprimir1("paquetes: %s no está instalado\n", pt(palabra_))
+                devolver falso
+            fin
+            c := mejor_del_catálogo(palabra_, 0, "")
+            si c <> NINGUNO y compara(cat_versión[c], ins_versión[i]) > 0 entonces
+                si no planea(palabra_, 1, cat_versión[c], 0) entonces devolver falso fin
+            fin
+        fin
+        si no alguno entonces
+            para i desde 1 hasta ins_n hacer
+                c := mejor_del_catálogo(ins_nombre[i - 1], 0, "")
+                si c <> NINGUNO y compara(cat_versión[c], ins_versión[i - 1]) > 0 entonces
+                    si no planea(ins_nombre[i - 1], 1, cat_versión[c], 0) entonces devolver falso fin
+                fin
+            fin
+        fin
+        si orden_n = 0 entonces
+            escribir("Todo está al día.\n")
+            devolver cierto
+        fin
+        devolver hace_plan()
+    fin
+
+    función quita(): bool
+        variable k, i, j, q, op: nat32
+        variable lista: arreglo [256] de byte
+        variable n: arreglo [12] de byte
+        variable v: arreglo [16] de byte
+        variable alguno: bool
+        alguno := falso
+        k := 1
+        mientras palabra(args, k, palabra_, RUTA) hacer
+            k := k + 1
+            si palabra_[0] = '/' entonces seguir fin
+            alguno := cierto
+            a_minúsculas(palabra_)
+            j := instalado(palabra_)
+            si j = NINGUNO entonces
+                imprimir1("paquetes: %s no está instalado\n", pt(palabra_))
+                devolver falso
+            fin
+            ; ¿lo necesita otro?
+            si no forzar entonces
+                para i desde 1 hasta ins_n hacer
+                    si i - 1 <> j entonces
+                        campo(ins_cab[i - 1], "necesita", lista, 256)
+                        q := 0
+                        mientras requisito(lista, q, n, op, v) hacer
+                            si iguales(n, palabra_) entonces
+                                imprimir3("paquetes: %s no se quita: lo necesita %s (quite antes %s, o /FORZAR)\n", pt(palabra_), pt(ins_nombre[i - 1]), pt(ins_nombre[i - 1]))
+                                devolver falso
+                            fin
+                            q := q + 1
+                        fin
+                    fin
+                fin
+            fin
+            si no pasos_de_quitar(j) entonces devolver falso fin
+            si no ejecuta() entonces devolver falso fin
+            imprimir1("  quitado %s\n", pt(txn_nombre))
+            olvida_instalado(palabra_)
+        fin
+        si no alguno entonces devolver mal("¿qué paquete? PAQUETES QUITA nombre") fin
+        escribir("Hecho.\n")
+        devolver cierto
+    fin
+
+    función mira(): bool
+        variable largo, n, a: nat32
+        variable r: arreglo [RUTA] de byte
+        variable x: arreglo [256] de byte
+        variable cab: puntero a byte
+        si no palabra(args, 1, palabra_, RUTA) entonces devolver mal("¿qué paquete? PAQUETES MIRA X.HPQ") fin
+        absoluta(palabra_, r)
+        cab := lee_cabecera(r, largo)
+        si cab = nulo entonces
+            imprimir1("paquetes: %s no es un paquete (o no está)\n", pt(r))
+            devolver falso
+        fin
+        si no valida(cab, r) entonces devolver falso fin
+        campo(cab, "nombre", x, 256)
+        escribir(r, ": ", x)
+        campo(cab, "version", x, 256)
+        escribir(" ", x, "\n")
+        campo(cab, "descripcion", x, 256)
+        escribir("  ", x, "\n")
+        campo(cab, "necesita", x, 256)
+        si x[0] = 0 entonces Textos32.copiar(x, "(nada)") fin
+        escribir("  necesita: ", x, "\n")
+        campo(cab, "choca", x, 256)
+        si x[0] <> 0 entonces escribir("  choca con: ", x, "\n") fin
+        si campo(cab, "firma", x, 256) y x[0] <> 0 entonces escribir("  lleva firma (esta versión de PAQUETES aún no la comprueba)\n") fin
+        n := lee_archivos(cab, nuevos)
+        para a desde 1 hasta n hacer
+            escribir("  ")
+            columna(dirección(nuevos[a - 1].destino[2]), 28)
+            escribir(nuevos[a - 1].tamaño, " octetos\n")
+        fin
+        plan_n := 1
+        copiar_hasta(plan_ruta[0], r, RUTA)
+        plan_cab[0] := cab
+        plan_largo[0] := largo
+        plan_cat[0] := NINGUNO
+        si verifica(0) entonces
+            escribir("Está sano: las sumas (SHA-256) de sus archivos están bien.\n")
+            devolver cierto
+        fin
+        devolver falso
+    fin
+
+    función comprueba(): bool
+        variable i, a, n, m, malos: nat32
+        variable s: arreglo [68] de byte
+        malos := 0
+        para i desde 1 hasta ins_n hacer
+            n := lee_archivos(ins_cab[i - 1], viejos)
+            para a desde 1 hasta n hacer
+                m := abrir(viejos[a - 1].destino)
+                si es_error(m) entonces
+                    imprimir2("  %s: falta %s\n", pt(ins_nombre[i - 1]), pt(viejos[a - 1].destino))
+                    malos := malos + 1
+                sino
+                    si largo_de(m) <> viejos[a - 1].tamaño o no resume(m, viejos[a - 1].tamaño, s) o no iguales(s, viejos[a - 1].sha) entonces
+                        imprimir2("  %s: %s ha cambiado\n", pt(ins_nombre[i - 1]), pt(viejos[a - 1].destino))
+                        malos := malos + 1
+                    fin
+                    cerrar(m)
+                fin
+            fin
+        fin
+        si malos = 0 entonces
+            imprimir1("Los archivos de los %u paquetes instalados están como se instalaron.\n", ins_n)
+            devolver cierto
+        fin
+        imprimir1("%u archivos no están como se instalaron (PAQUETES INSTALA X.HPQ /FORZAR los vuelve a poner).\n", malos)
+        devolver falso
+    fin
+
+    ; -------------------------------------------------------------------------
+    función principal(): byte
+        variable i, v: nat32
+        variable u: Info_unidad
+        variable orden_: arreglo [16] de byte
+        variable r: arreglo [RUTA] de byte
+        variable bien: bool
+        buf := más_memoria(TROZO)
+        cat := más_memoria(MAX_CATÁLOGO + 4)
+        si buf = nulo o cat = nulo entonces
+            escribir("paquetes: no hay memoria\n")
+            devolver 1
+        fin
+        argumentos(args, 256)
+        ; las opciones
+        i := 0
+        mientras palabra(args, i, palabra_, RUTA) hacer
+            si iguales_sin_caja(palabra_, "/FORZAR") entonces forzar := cierto fin
+            si empieza_por(palabra_, "/CORTE=") o empieza_por(palabra_, "/corte=") entonces
+                texto_a_natural(dirección(palabra_[7]), corte)
+            fin
+            si longitud(palabra_) > 7 y (empieza_por(palabra_, "/DESDE=") o empieza_por(palabra_, "/desde=")) entonces
+                absoluta(dirección(palabra_[7]), r)
+                si empieza_por(dirección(palabra_[7]), "http") o empieza_por(dirección(palabra_[7]), "HTTP") entonces Textos32.copiar(r, dirección(palabra_[7])) fin
+                pon_origen(r)
+            fin
+            i := i + 1
+        fin
+        ; la orden: la primera palabra que no es una opción
+        orden_[0] := 0
+        i := 0
+        mientras palabra(args, i, palabra_, RUTA) hacer
+            si palabra_[0] <> '/' entonces
+                copiar_hasta(orden_, palabra_, 16)
+                romper
+            fin
+            i := i + 1
+        fin
+        ; (las palabras de después de la orden, desde la 1: la orden, primero)
+        si i > 0 entonces
+            ; quita las opciones de delante, para que la orden sea la palabra 0
+            Textos32.copiar(args, tras_palabras(args, i))
+        fin
+        a_minúsculas(orden_)
+        si orden_[0] = 0 o iguales(orden_, "ayuda") o iguales(orden_, "?") entonces
+            ayuda()
+            devolver 0
+        fin
+        ; la unidad del sistema, con \HISPA
+        sis := 0
+        i := 0
+        mientras info_unidad(i, u) hacer
+            si u.del_sistema = 1 entonces sis := u.letra fin
+            i := i + 1
+        fin
+        v := dato(DATO_VERSIÓN)
+        r[0] := 0
+        natural_a_texto(v >> 8, versión_núcleo)
+        concatenar(versión_núcleo, ".")
+        natural_a_texto(v yb 0xFF, r)
+        concatenar(versión_núcleo, r)
+        si iguales(orden_, "mira") entonces
+            si sis = 0 entonces sis := 'C' fin
+            si mira() entonces devolver 0 fin
+            devolver 1
+        fin
+        r[0] := sis
+        r[1] := 0
+        concatenar(r, ":\\HISPA")
+        si sis = 0 o sis = 'M' o no existe(r) entonces
+            escribir("paquetes: Hispa-Pentium no está instalado en esta unidad (falta \\HISPA): PAQUETES es\n")
+            escribir("  para el sistema instalado en el disco duro (INSTALAR).\n")
+            devolver 1
+        fin
+        Textos32.copiar(base, r)
+        concatenar(base, "\\PAQUETES")
+        en_base("DIARIO.TXT", diario)
+        en_base("HECHO.TXT", hecho)
+        si no existe(base) entonces crear_carpeta(base) fin
+        recupera()
+        carga_instalados()
+        bien := cierto
+        si iguales(orden_, "lista") entonces
+            di_lista()
+        sino si iguales(orden_, "catalogo") o iguales(orden_, "catálogo") entonces
+            di_catálogo()
+        sino si iguales(orden_, "instala") entonces
+            bien := instala()
+        sino si iguales(orden_, "actualiza") entonces
+            bien := actualiza()
+        sino si iguales(orden_, "quita") entonces
+            bien := quita()
+        sino si iguales(orden_, "comprueba") entonces
+            bien := comprueba()
+        sino
+            imprimir1("paquetes: no sé qué es «%s» (PAQUETES AYUDA)\n", pt(orden_))
+            bien := falso
+        fin
+        si bien entonces devolver 0 fin
+        devolver 1
+    fin
+
+fin UPaquetes.

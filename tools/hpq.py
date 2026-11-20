@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# =============================================================================
+#  Hispa-Pentium - tools/hpq.py: hacer paquetes .HPQ y su catálogo
+#  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+#
+#  Un paquete .HPQ es lo que instala, actualiza y quita el programa PAQUETES
+#  de Hispa-Pentium (castel/nucleo32/upaquete.cas). Formato (docs/PENTIUM.md,
+#  sección 15):
+#
+#    una cabecera de texto (página 437, líneas acabadas en CR LF):
+#        HPQ 1
+#        nombre=oficina                 (hasta 8 letras: a-z, 0-9, «-» y «_»)
+#        version=1.0                    (números separados por puntos)
+#        descripcion=La oficina de Hispa-386
+#        necesita=hvprun >= 0.7, nucleo >= 0.7     (puede ir vacío)
+#        choca=                         (los que no pueden estar a la vez)
+#        archivo=\OFICINA\PLUMA.HVP 45678 <SHA-256 en 64 cifras hex>
+#        ...                            (uno por archivo, en el orden de los datos)
+#        fin
+#    y, detrás, los archivos tal cual, uno detrás de otro, en ese orden.
+#
+#  Los operadores de «necesita» y «choca»: >=, <=, =, >, < (o nada: cualquier
+#  versión). «nucleo» es el núcleo que está en marcha (su versión la da él).
+#  Las líneas que PAQUETES no conoce se dejan pasar (para lo que venga luego:
+#  «firma=», por ejemplo, está reservada para la firma del paquete).
+#
+#  El catálogo (CATALOGO.TXT, al lado de los paquetes):
+#        HPQ-CATALOGO 1
+#        paquete=<nombre> <versión> <ARCHIVO.HPQ> <octetos> <SHA-256 del .HPQ> <descripción>
+#
+#  Lo instalado, en C:\HISPA\PAQUETES\<NOMBRE>.PQI: la cabecera del paquete,
+#  tal cual (con «registro» se saca de un .HPQ: así lo apunta INSTALAR).
+#
+#  Uso:
+#    hpq.py crea SALIDA.HPQ --nombre N --version V [--descripcion D]
+#               [--necesita "a >= 1, b"] [--choca "c"] ORIGEN=\DESTINO ...
+#    hpq.py catalogo CARPETA          (CATALOGO.TXT con los .HPQ de la carpeta)
+#    hpq.py mira PAQUETE.HPQ          (lo que lleva, y comprueba sus sumas)
+#    hpq.py registro PAQUETE.HPQ SALIDA.PQI
+#    hpq.py sistema SALIDA CARPETA...  (los paquetes del sistema, con sus
+#               registros .PQI, el catálogo y CARPETAS.TXT para INSTALAR, de
+#               los archivos ya hechos que haya en esas carpetas: usb.sh)
+# =============================================================================
+
+import hashlib
+import os
+import re
+import sys
+
+MAGIA = 'HPQ 1'
+MAGIA_CATALOGO = 'HPQ-CATALOGO 1'
+NOMBRE = re.compile(r'^[a-z0-9_-]{1,8}$')
+VERSION = re.compile(r'^[0-9]+(\.[0-9]+)*$')
+TROZO_83 = re.compile(r'^[A-Z0-9_$~!#%&@^(){}\'`-]{1,8}(\.[A-Z0-9_$~!#%&@^(){}\'`-]{1,3})?$')
+LISTA = re.compile(r'^\s*([a-z0-9_-]{1,8})\s*(?:(>=|<=|=|>|<)\s*([0-9]+(?:\.[0-9]+)*))?\s*$')
+MAX_ARCHIVOS = 64
+MAX_CABECERA = 16384
+
+# Los paquetes del sistema (hpq.py sistema): nombre, versión, descripción,
+# lo que necesita y sus archivos (el archivo hecho y adónde va en el disco)
+VERSION_SISTEMA = '0.7'
+SISTEMA = [
+    ('base', VERSION_SISTEMA, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
+        ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
+        ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'),
+        ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
+        ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
+    ('bloc', VERSION_SISTEMA, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
+    ('consola', VERSION_SISTEMA, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
+    ('equipo', VERSION_SISTEMA, 'Mi equipo: las unidades, las carpetas y los archivos', 'base >= 0.7', [('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN')]),
+    ('ejemplos', VERSION_SISTEMA, 'Programas de ejemplo: HOLA, ECO, PRUEBA y BUCLE', 'base >= 0.7', [
+        ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
+        ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN')]),
+    ('paquetes', '1.0', 'Programas y actualizaciones: instalar, actualizar y quitar paquetes', 'base >= 0.7, nucleo >= 0.7', [
+        ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN')]),
+    ('hvprun', VERSION_SISTEMA, 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio', 'base >= 0.7', [
+        ('HVPRUN.BIN', r'\HISPA\HVPRUN.BIN')]),
+    ('oficina', '1.0', 'La oficina de Hispa-386: Facturas, Pluma, Cuentas y Mirador', 'hvprun >= 0.7', [
+        ('FACTURAS.HVP', r'\OFICINA\FACTURAS.HVP'), ('PLUMA.HVP', r'\OFICINA\PLUMA.HVP'),
+        ('CUENTAS.HVP', r'\OFICINA\CUENTAS.HVP'), ('MIRADOR.HVP', r'\OFICINA\MIRADOR.HVP'),
+        ('TIPOS.DAT', r'\OFICINA\TIPOS.DAT'), ('DICCIO.DAT', r'\OFICINA\DICCIO.DAT')]),
+]
+
+
+def falla(texto):
+    sys.stderr.write('hpq: %s\n' % texto)
+    sys.exit(1)
+
+
+def a437(t):
+    try:
+        return t.encode('cp437')
+    except UnicodeEncodeError:
+        falla('«%s» lleva letras que no están en la página 437' % t)
+
+
+def comprueba_lista(t, que):
+    t = t.strip()
+    if not t:
+        return ''
+    trozos = [x.strip() for x in t.split(',')]
+    for x in trozos:
+        m = LISTA.match(x)
+        if not m:
+            falla('«%s» (en %s) no vale: «nombre», o «nombre >= 1.2»' % (x, que))
+    return ', '.join(trozos)
+
+
+def comprueba_destino(d):
+    if not d.startswith('\\') or d.endswith('\\'):
+        falla('el destino «%s» tiene que ser una ruta entera: \\CARPETA\\ARCHIVO.EXT' % d)
+    trozos = d[1:].split('\\')
+    for t in trozos:
+        if not TROZO_83.match(t):
+            falla('el destino «%s» no es de nombres 8+3 en mayúsculas' % d)
+    if d.upper().startswith('\\HISPA\\PAQUETES\\'):
+        falla('\\HISPA\\PAQUETES es la base de datos de lo instalado: ahí no va un archivo de un paquete')
+    if len(d) > 79:
+        falla('el destino «%s» es demasiado largo' % d)
+    return d
+
+
+def sha(datos):
+    return hashlib.sha256(datos).hexdigest()
+
+
+def cabecera(nombre, version, descripcion, necesita, choca, archivos):
+    """archivos: [(destino, datos)]. Da la cabecera (en octetos)."""
+    if not NOMBRE.match(nombre):
+        falla('el nombre «%s» no vale (hasta 8 letras: a-z, 0-9, - y _)' % nombre)
+    if not VERSION.match(version):
+        falla('la versión «%s» no vale (números separados por puntos)' % version)
+    if len(archivos) > MAX_ARCHIVOS:
+        falla('demasiados archivos en un paquete (hasta %d)' % MAX_ARCHIVOS)
+    vistos = set()
+    lineas = [MAGIA, 'nombre=' + nombre, 'version=' + version,
+              'descripcion=' + descripcion.replace('\n', ' ')[:200],
+              'necesita=' + comprueba_lista(necesita, 'necesita'),
+              'choca=' + comprueba_lista(choca, 'choca')]
+    for d, datos in archivos:
+        comprueba_destino(d)
+        if d.upper() in vistos:
+            falla('el destino «%s» sale dos veces' % d)
+        vistos.add(d.upper())
+        lineas.append('archivo=%s %d %s' % (d, len(datos), sha(datos)))
+    lineas.append('fin')
+    c = b''.join(a437(x) + b'\r\n' for x in lineas)
+    if len(c) > MAX_CABECERA:
+        falla('la cabecera no cabe en %d octetos' % MAX_CABECERA)
+    return c
+
+
+def haz_paquete(salida, nombre, version, descripcion, necesita, choca, archivos):
+    c = cabecera(nombre, version, descripcion, necesita, choca, archivos)
+    with open(salida, 'wb') as f:
+        f.write(c)
+        for _, datos in archivos:
+            f.write(datos)
+    return c
+
+
+def lee_paquete(ruta):
+    """Da (campos, archivos [(destino, tamaño, sha)], largo de la cabecera, datos)."""
+    datos = open(ruta, 'rb').read()
+    fin = datos.find(b'\r\nfin\r\n')
+    if not datos.startswith(MAGIA.encode() + b'\r\n') or fin < 0:
+        falla('%s no es un paquete .HPQ' % ruta)
+    largo = fin + 7
+    campos = {}
+    archivos = []
+    for linea in datos[:fin].decode('cp437').split('\r\n')[1:]:
+        k, _, v = linea.partition('=')
+        if k == 'archivo':
+            d, t, s = v.split(' ')
+            archivos.append((d, int(t), s))
+        else:
+            campos[k] = v
+    return campos, archivos, largo, datos
+
+
+def mira(ruta):
+    campos, archivos, largo, datos = lee_paquete(ruta)
+    print('%s: %s %s — %s' % (os.path.basename(ruta), campos.get('nombre'), campos.get('version'), campos.get('descripcion')))
+    print('  necesita: %s' % (campos.get('necesita') or '(nada)'))
+    print('  choca:    %s' % (campos.get('choca') or '(nada)'))
+    malos = 0
+    p = largo
+    for d, t, s in archivos:
+        bien = sha(datos[p:p + t]) == s and p + t <= len(datos)
+        malos += not bien
+        print('  %-30s %9d  %s' % (d, t, 'bien' if bien else 'MAL (la suma no es la suya)'))
+        p += t
+    if p != len(datos):
+        print('  el paquete mide %d octetos y tenía que medir %d' % (len(datos), p))
+        malos += 1
+    return 1 if malos else 0
+
+
+def catalogo(carpeta):
+    filas = []
+    for n in sorted(os.listdir(carpeta)):
+        if not n.upper().endswith('.HPQ'):
+            continue
+        ruta = os.path.join(carpeta, n)
+        campos, _, _, datos = lee_paquete(ruta)
+        if n != n.upper() or not TROZO_83.match(n):
+            falla('el paquete %s tiene que llamarse en 8+3 y en mayúsculas' % n)
+        filas.append('paquete=%s %s %s %d %s %s' % (campos['nombre'], campos['version'], n, len(datos), sha(datos),
+                                                    campos.get('descripcion', '')))
+    with open(os.path.join(carpeta, 'CATALOGO.TXT'), 'wb') as f:
+        f.write(a437(MAGIA_CATALOGO) + b'\r\n')
+        for x in filas:
+            f.write(a437(x) + b'\r\n')
+    return len(filas)
+
+
+def busca(nombre, carpetas):
+    for c in carpetas:
+        r = os.path.join(c, nombre)
+        if os.path.isfile(r):
+            return r
+    falla('no está %s en %s' % (nombre, ', '.join(carpetas)))
+
+
+def sistema(salida, carpetas):
+    """Los paquetes del sistema en SALIDA (con CATALOGO.TXT) y sus registros
+    en SALIDA/PQI (con el CARPETAS.TXT que manda cada uno a \\HISPA\\PAQUETES)."""
+    os.makedirs(os.path.join(salida, 'PQI'), exist_ok=True)
+    mapa = []
+    for nombre, version, descripcion, necesita, archivos in SISTEMA:
+        lista = [(d, open(busca(o, carpetas), 'rb').read()) for o, d in archivos]
+        N = nombre.upper()
+        c = haz_paquete(os.path.join(salida, N + '.HPQ'), nombre, version, descripcion, necesita, '', lista)
+        with open(os.path.join(salida, 'PQI', N + '.PQI'), 'wb') as f:
+            f.write(c)
+        mapa.append('%s.PQI=HISPA\\PAQUETES' % N)
+    with open(os.path.join(salida, 'PQI', 'CARPETAS.TXT'), 'wb') as f:
+        f.write(''.join(x + '\r\n' for x in mapa).encode())
+    return catalogo(salida)
+
+
+def principal(a):
+    if len(a) < 2:
+        print(__doc__ if __doc__ else 'uso: hpq.py crea|catalogo|mira|registro|sistema ...')
+        sys.stderr.write('uso: hpq.py crea|catalogo|mira|registro|sistema ... (mire la cabecera de tools/hpq.py)\n')
+        return 2
+    orden = a[1]
+    if orden == 'crea':
+        salida = a[2]
+        op = {'--nombre': None, '--version': None, '--descripcion': '', '--necesita': '', '--choca': ''}
+        archivos = []
+        i = 3
+        while i < len(a):
+            if a[i] in op:
+                op[a[i]] = a[i + 1]
+                i += 2
+                continue
+            o, sep, d = a[i].partition('=')
+            if not sep:
+                falla('«%s»: los archivos se dicen así: ORIGEN=\\DESTINO' % a[i])
+            archivos.append((d, open(o, 'rb').read()))
+            i += 1
+        if not op['--nombre'] or not op['--version']:
+            falla('faltan --nombre y --version')
+        haz_paquete(salida, op['--nombre'], op['--version'], op['--descripcion'], op['--necesita'], op['--choca'], archivos)
+        print('hpq: %s (%s %s, %d archivos, %d octetos)' % (salida, op['--nombre'], op['--version'], len(archivos), os.path.getsize(salida)))
+        return 0
+    if orden == 'catalogo':
+        n = catalogo(a[2])
+        print('hpq: %s con %d paquetes' % (os.path.join(a[2], 'CATALOGO.TXT'), n))
+        return 0
+    if orden == 'mira':
+        return mira(a[2])
+    if orden == 'registro':
+        _, _, largo, datos = lee_paquete(a[2])
+        with open(a[3], 'wb') as f:
+            f.write(datos[:largo])
+        return 0
+    if orden == 'sistema':
+        n = sistema(a[2], a[3:])
+        print('hpq: %d paquetes del sistema en %s (con CATALOGO.TXT y sus registros en PQI)' % (n, a[2]))
+        return 0
+    falla('no sé qué es «%s»: crea, catalogo, mira, registro o sistema' % orden)
+
+
+if __name__ == '__main__':
+    sys.exit(principal(sys.argv))
