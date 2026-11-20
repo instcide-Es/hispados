@@ -108,6 +108,12 @@ $(B)/XMS.COM: prueba/xms.asm | $(B)
 $(B)/CUENTA.COM: prueba/cuenta.asm | $(B)
 	$(CP437) $< $(B)/gen/cuenta.asm && $(NASM) -f bin -o $@ $(B)/gen/cuenta.asm
 
+$(B)/MIDE.COM: prueba/mide.asm | $(B)
+	$(CP437) $< $(B)/gen/mide.asm && $(NASM) -f bin -o $@ $(B)/gen/mide.asm
+
+$(B)/PISA.COM: prueba/pisa.asm | $(B)
+	$(CP437) $< $(B)/gen/pisa.asm && $(NASM) -f bin -o $@ $(B)/gen/pisa.asm
+
 $(B)/SALUDO.SYS: prueba/saludo.asm | $(B)
 	$(CP437) $< $(B)/gen/saludo.asm && $(NASM) -f bin -o $@ $(B)/gen/saludo.asm
 
@@ -129,7 +135,7 @@ $(B)/hispa8086-%.img: $(B)/arranque.bin $(ARCHIVOS) pon_arranque.py
 	$(call DISQUETE,$*)
 
 # lo que solo hace falta para probar (la prueba lo copia a sus disquetes)
-PRUEBAS = $(B)/N8.COM $(B)/CUENTA.COM $(B)/SALUDO.SYS $(B)/XMS.COM
+PRUEBAS = $(B)/N8.COM $(B)/CUENTA.COM $(B)/SALUDO.SYS $(B)/XMS.COM $(B)/MIDE.COM $(B)/PISA.COM
 
 # Hispa-BASIC (docs/8086/BASIC.md): varios fuentes; se ensambla desde la
 # carpeta de los ya pasados a la página 437, como el núcleo
