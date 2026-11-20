@@ -2853,9 +2853,10 @@ a la 14 y la 16) dio **156 bien, 0 mal**.
 
 Antes, `pruebas.sh` tenía **508 comprobaciones** (423 hasta la 0.7;
 de la 0.8, los paquetes, el USB en caliente, la red, apagar de verdad y la
-batería, y las del AHCI del ICH7). La memoria USB trae ahora **16 programas**
-como módulos (eran 9: PAQUETES y ACTUALIZ, RED, IPCONFIG, PING y DESCARGA, y
-ACPI.BIN), y 9 paquetes del sistema (con «red»). Algo más de una hora
+batería, y las del AHCI del ICH7). La memoria USB trae ahora **18 programas**
+como módulos (eran 9: PAQUETES y ACTUALIZ, RED, IPCONFIG, PING y DESCARGA,
+ACPI.BIN y, desde el 20/11, TLS.BIN y HTTPS), y 10 paquetes del sistema (con
+«red» y «tls»). Algo más de una hora
 en el VPS. La última pasada entera (20/11/2026, con las cinco ramas juntas,
 el arreglo del AHCI del ICH7 y las tablas de CASTEL repartidas) dio **508
 bien, 0 mal**, y los dos compiladores sacan lo mismo en los 52 programas y
