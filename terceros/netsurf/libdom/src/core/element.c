@@ -1676,6 +1676,17 @@ dom_exception _dom_element_set_attr(struct dom_element *element,
 		if (err != DOM_NO_ERR)
 			return err;
 
+		/* [HISPA] JavaScript: si cambia «class», también la lista de
+		 * clases que mira libcss (antes solo se hacía al crear el
+		 * atributo: className = ... no cambiaba el estilo) */
+		if (namespace == NULL &&
+				dom_string_isequal(name, doc->class_string)) {
+			err = _dom_element_create_classes(element,
+					dom_string_data(value));
+			if (err != DOM_NO_ERR)
+				return err;
+		}
+
 		success = true;
 		err = _dom_dispatch_subtree_modified_event(doc,
 				(dom_event_target *) e, &success);

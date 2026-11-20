@@ -273,6 +273,28 @@ static const char *busca_grad(const char *v, size_t l) {
   for (k = 0; k + 9 <= l; k++) if (!memcmp(v + k, "gradient(", 9)) return v + k;
   return NULL;
 }
+/* la regla tiene «background-clip: text» (el texto pintado con el degradado:
+ * «todo en uno» de clicgest.es): el degradado, al color del texto */
+static int fondo_texto;
+/* ¿es un color casi transparente? (rgba(..., .15), #rrggbbaa, transparent):
+ * los brillos de los degradados; NetSurf pinta sin transparencia y salían
+ * manchas de color */
+static int casi_transparente(const char *c, size_t l) {
+  if (l >= 11 && !strncmp(c, "transparent", 11)) return 1;
+  if (l == 9 && c[0] == '#') { int a = (int)strtol(c + 7, NULL, 16); return a < 0x80; }
+  if (l >= 4 && !strncmp(c, "rgba", 4)) {
+    const char *u = c + l;
+    while (u > c && u[-1] != ',' && u[-1] != '/') u--;
+    if (u > c) { double a = strtod(u, NULL); if (strchr(u, '%')) a /= 100; return a < 0.5; }
+  }
+  if (l >= 4 && !strncmp(c, "rgb(", 4) && memchr(c, '/', l)) {
+    const char *u = memchr(c, '/', l) + 1;
+    double a = strtod(u, NULL);
+    if (memchr(u, '%', c + l - u)) a /= 100;
+    return a < 0.5;
+  }
+  return 0;
+}
 /* escribe en x el valor sin degradados; 0 si no queda nada que valga */
 static int sin_degradado(Txt *x, const char *n, size_t ln, const char *v, size_t l) {
   Txt r = { 0 };
@@ -302,7 +324,8 @@ static int sin_degradado(Txt *x, const char *n, size_t ln, const char *v, size_t
     if (m && !(ln == 16)) { tx_pon(x, n, ln); tx_cad(x, ":"); tx_pon(x, t, m); tx_cad(x, ";"); free(r.t); return 1; }
   }
   free(r.t);
-  if (color) { tx_cad(x, "background-color:"); tx_pon(x, color, lc); tx_cad(x, ";"); return 1; }
+  if (color && fondo_texto) { tx_cad(x, "color:"); tx_pon(x, color, lc); tx_cad(x, ";"); return 1; }
+  if (color && !casi_transparente(color, lc)) { tx_cad(x, "background-color:"); tx_pon(x, color, lc); tx_cad(x, ";"); return 1; }
   return 0;
 }
 static int strstr_n(const char *v, size_t l, const char *b) {
@@ -314,11 +337,21 @@ static int strstr_n(const char *v, size_t l, const char *b) {
 static void pon_decl(Txt *x, const char *n, size_t ln, const char *v, size_t lv) {
   v = recorta(v, &lv);
   if (!lv) return;                              /* (una variable vacía: «--bs-btn-font-family: ;») */
+  /* con el degradado en el texto, el color transparente no (ver fondo_texto) */
+  if (fondo_texto && ((ln == 5 && !memcmp(n, "color", 5)) || (ln == 23 && !memcmp(n, "-webkit-text-fill-color", 23))) &&
+      lv >= 11 && !memcmp(v, "transparent", 11)) return;
   if (es_fondo(n, ln) && busca_grad(v, lv)) { sin_degradado(x, n, ln, v, lv); return; }
   tx_pon(x, n, ln); tx_cad(x, ":"); tx_pon(x, v, lv); tx_cad(x, ";");
   /* lo que se esconde fuera de la pantalla moviéndolo (el menú lateral
    * «off-canvas»: transform: translateX(-100%)): NetSurf no mueve, así que
    * se quedaba encima de la página; se esconde */
+  /* un brillo de adorno (filter: blur() grande: los «blobs» de colores de
+   * clicgest.es): sin desenfoque salía un círculo de color; se esconde */
+  if (ln == 6 && !memcmp(n, "filter", 6) && lv > 5 && strstr_n(v, lv, "blur(")) {
+    const char *b = v;
+    while (b + 5 <= v + lv && memcmp(b, "blur(", 5)) b++;
+    if (atoi(b + 5) >= 16) tx_cad(x, "visibility:hidden;");
+  }
   if (ln == 9 && !memcmp(n, "transform", 9) &&
       (strstr_n(v, lv, "translateX(-100%") || strstr_n(v, lv, "translate(-100%") || strstr_n(v, lv, "translate3d(-100%")))
     tx_cad(x, "visibility:hidden;");
@@ -392,6 +425,14 @@ static void escribe(Txt *x, Item *lista, Item *todas) {
     if (i->tipo == I_GRUPO) { tx_pon(x, i->a, i->la); tx_cad(x, "{\n"); escribe(x, i->hijos, todas); tx_cad(x, "}\n"); continue; }
     tx_pon(x, i->a, i->la);
     tx_cad(x, "{");
+    fondo_texto = 0;
+    for (k = 0; k < i->nd; k++) {
+      Decl *e = &i->d[k];
+      size_t lv = e->lv;
+      const char *v = recorta(e->v, &lv);
+      if (((e->ln == 15 && !memcmp(e->n, "background-clip", 15)) || (e->ln == 23 && !memcmp(e->n, "-webkit-background-clip", 23))) &&
+          lv >= 4 && !memcmp(v, "text", 4)) fondo_texto = 1;
+    }
     for (k = 0; k < i->nd; k++) {
       Decl *e = &i->d[k];
       if (e->ln > 2 && e->n[0] == '-' && e->n[1] == '-') continue;   /* (las variables, libcss no las quiere) */
@@ -403,6 +444,7 @@ static void escribe(Txt *x, Item *lista, Item *todas) {
       }
     }
     tx_cad(x, "}\n");
+    fondo_texto = 0;
   }
   /* las reglas añadidas: las que usan variables que pone otra regla */
   for (i = lista; i; i = i->sig) {

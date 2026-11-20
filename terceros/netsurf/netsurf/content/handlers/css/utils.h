@@ -36,11 +36,21 @@ static inline uint8_t ns_computed_display(
 	uint8_t value = css_computed_display(style, root);
 
 	switch (value) {
+#ifdef nshispa
+	/* [HISPA] las rejillas van como cajas flex (BOX_FLEX): layout_flex()
+	 * las maqueta con layout_grid() (html/layout_grid.c) */
+	case CSS_DISPLAY_GRID:
+		return CSS_DISPLAY_FLEX;
+
+	case CSS_DISPLAY_INLINE_GRID:
+		return CSS_DISPLAY_INLINE_FLEX;
+#else
 	case CSS_DISPLAY_GRID:
 		return CSS_DISPLAY_BLOCK;
 
 	case CSS_DISPLAY_INLINE_GRID:
 		return CSS_DISPLAY_INLINE_BLOCK;
+#endif
 
 	default:
 		break;
@@ -59,11 +69,21 @@ static inline uint8_t ns_computed_display_static(
 	uint8_t value = css_computed_display_static(style);
 
 	switch (value) {
+#ifdef nshispa
+	/* [HISPA] las rejillas van como cajas flex (BOX_FLEX): layout_flex()
+	 * las maqueta con layout_grid() (html/layout_grid.c) */
+	case CSS_DISPLAY_GRID:
+		return CSS_DISPLAY_FLEX;
+
+	case CSS_DISPLAY_INLINE_GRID:
+		return CSS_DISPLAY_INLINE_FLEX;
+#else
 	case CSS_DISPLAY_GRID:
 		return CSS_DISPLAY_BLOCK;
 
 	case CSS_DISPLAY_INLINE_GRID:
 		return CSS_DISPLAY_INLINE_BLOCK;
+#endif
 
 	default:
 		break;

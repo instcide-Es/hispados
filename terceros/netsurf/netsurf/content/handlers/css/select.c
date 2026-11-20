@@ -208,6 +208,19 @@ css_stylesheet *nscss_create_inline_style(const uint8_t *data, size_t len,
 	return sheet;
 }
 
+/* [HISPA] JavaScript (w32/surf/rehaz.c): los datos de libcss de un nodo
+ * (su filtro de Bloom, lo de sus antepasados), fuera: al rehacer las cajas
+ * tras cambiar una clase, se calculan otra vez */
+void nscss_hispa_olvida(dom_node *n)
+{
+	void *datos = NULL;
+	if (dom_node_get_user_data(n, corestring_dom___ns_key_libcss_node_data,
+			&datos) == DOM_NO_ERR && datos != NULL) {
+		css_libcss_node_data_handler(&selection_handler,
+				CSS_NODE_MODIFIED, NULL, n, NULL, datos);
+	}
+}
+
 /* Handler for libcss_node_data, stored as libdom node user data */
 static void nscss_dom_user_data_handler(dom_node_operation operation,
 		dom_string *key, void *data, struct dom_node *src,

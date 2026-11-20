@@ -994,6 +994,15 @@ bool knockout_plot_start(const struct redraw_context *ctx,
 
 
 /* exported functions documented in desktop/knockout.h */
+/* [HISPA] pinta ya lo que espera (antes de pintar directamente en el búfer:
+ * las esquinas redondas y las sombras de w32/surf/redondo.c) */
+bool knockout_plot_hispa_vacia(const struct redraw_context *ctx)
+{
+	if (ctx->plot != &knockout_plotters)
+		return true;
+	return knockout_plot_flush(ctx) == NSERROR_OK;
+}
+
 bool knockout_plot_end(const struct redraw_context *ctx)
 {
 	/* only output when we've finished any nesting */

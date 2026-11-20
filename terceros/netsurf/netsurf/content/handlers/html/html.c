@@ -57,6 +57,9 @@
 #include "javascript/js.h"
 #include "desktop/gui_internal.h"
 
+#ifdef nshispa
+#include "webletra.h" /* [HISPA] */
+#endif
 #include "html/html.h"
 #include "html/private.h"
 #include "html/dom_event.h"
@@ -815,6 +818,13 @@ bool html_can_begin_conversion(html_content *htmlc)
 {
 	unsigned int i;
 
+#ifdef nshispa
+	/* [HISPA] con todo lo demás ya aquí, las letras de la web que usa
+	 * (w32/surf/webletra.c): las pide y espera */
+	if (htmlc->base.active == 0 && webletra_pide(htmlc))
+		return false;
+#endif
+
 	/* Cannot begin conversion if we're still fetching stuff */
 	if (htmlc->base.active != 0)
 		return false;
@@ -897,6 +907,11 @@ html_begin_conversion(html_content *htmlc)
 	/* fire a simple event that bubbles named DOMContentLoaded at
 	 * the Document.
 	 */
+	/* [HISPA] JavaScript (w32/surf/guion.c) */
+	if (htmlc->jsthread != NULL) {
+		js_fire_event(htmlc->jsthread, "DOMContentLoaded",
+			      htmlc->document, NULL);
+	}
 
 	/* get encoding */
 	if (htmlc->encoding == NULL) {
@@ -1205,6 +1220,10 @@ static void html_destroy(struct content *c)
 	struct form *f, *g;
 
 	NSLOG(netsurf, INFO, "content %p", c);
+
+#ifdef nshispa
+	webletra_olvida(html); /* [HISPA] */
+#endif
 
 	/* If we're still converting a layout, cancel it */
 	if (html->box_conversion_context != NULL) {

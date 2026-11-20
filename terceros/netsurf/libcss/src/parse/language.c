@@ -1312,6 +1312,10 @@ css_error parsePseudo(css_language *c, const parserutils_vector *vector,
 		{ DISABLED, CSS_SELECTOR_PSEUDO_CLASS },
 		{ CHECKED, CSS_SELECTOR_PSEUDO_CLASS },
 		{ NOT, CSS_SELECTOR_PSEUDO_CLASS },
+		/* [HISPA] :focus-within, :focus-visible (Bootstrap: con ellas,
+		 * sin entenderlas, se perdía la regla entera de .visually-hidden) */
+		{ FOCUS_WITHIN, CSS_SELECTOR_PSEUDO_CLASS },
+		{ FOCUS_VISIBLE, CSS_SELECTOR_PSEUDO_CLASS },
 
 		{ FIRST_LINE, CSS_SELECTOR_PSEUDO_ELEMENT },
 		{ FIRST_LETTER, CSS_SELECTOR_PSEUDO_ELEMENT },

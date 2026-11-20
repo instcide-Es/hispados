@@ -158,7 +158,19 @@ const css_prop_handler property_handlers[LAST_PROP + 1 - FIRST_PROP] =
 	css__parse_width,
 	css__parse_word_spacing,
 	css__parse_writing_mode,
-	css__parse_z_index
+	css__parse_z_index,
+	/* [HISPA] (hispa.c) */
+	css__parse_row_gap,
+	css__parse_gap,
+	css__parse_gap,
+	css__parse_border_radius,
+	css__parse_border_top_left_radius,
+	css__parse_border_top_right_radius,
+	css__parse_border_bottom_right_radius,
+	css__parse_border_bottom_left_radius,
+	css__parse_box_shadow,
+	css__parse_grid_template_columns,
+	css__parse_grid_column
 };
 
 /** Mapping from property bytecode index to bytecode unit class mask. */
@@ -262,6 +274,15 @@ const uint32_t property_unit_mask[CSS_N_PROPERTIES] = {
 	[CSS_PROP_WIDTH]                 = UNIT_MASK_WIDTH,
 	[CSS_PROP_WORD_SPACING]          = UNIT_MASK_WORD_SPACING,
 	[CSS_PROP_Z_INDEX]               = UNIT_MASK_Z_INDEX,
+	/* [HISPA] */
+	[CSS_PROP_ROW_GAP]               = UNIT_MASK_COLUMN_GAP,
+	[CSS_PROP_BORDER_TOP_LEFT_RADIUS]     = UNIT_MASK_BORDER_RADIUS,
+	[CSS_PROP_BORDER_TOP_RIGHT_RADIUS]    = UNIT_MASK_BORDER_RADIUS,
+	[CSS_PROP_BORDER_BOTTOM_RIGHT_RADIUS] = UNIT_MASK_BORDER_RADIUS,
+	[CSS_PROP_BORDER_BOTTOM_LEFT_RADIUS]  = UNIT_MASK_BORDER_RADIUS,
+	[CSS_PROP_BOX_SHADOW]            = UNIT_LENGTH,
+	[CSS_PROP_GRID_TEMPLATE_COLUMNS] = 0,
+	[CSS_PROP_GRID_COLUMN]           = 0,
 	[CSS_PROP_OPACITY]               = UNIT_MASK_OPACITY,
 	[CSS_PROP_FILL_OPACITY]          = UNIT_MASK_FILL_OPACITY,
 	[CSS_PROP_STROKE_OPACITY]        = UNIT_MASK_STROKE_OPACITY,
