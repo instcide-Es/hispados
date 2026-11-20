@@ -165,6 +165,27 @@ módulo Ahci
         devolver cierto
     fin
 
+    ; espera (hasta «cs» centésimas) a que el puerto p tenga enlace (SSTS.DET
+    ; = 3). Como Linux (sata_link_debounce): si no se ve nada enchufado
+    ; (DET = 0) durante 15 centésimas seguidas, el puerto está vacío y no se
+    ; espera más (un disco contesta al COMRESET en unos milisegundos, aunque
+    ; tarde luego en girar). Así una controladora con puertos vacíos no
+    ; retrasa el arranque un segundo por puerto.
+    función espera_enlace(p: nat32, cs: nat32): bool
+        variable tope, vacío_desde, vueltas, d: nat32
+        tope := tics + cs + 1
+        vacío_desde := tics
+        vueltas := 0
+        mientras cierto hacer
+            d := lee(del_puerto(p, P_SSTS)) yb 0x0F
+            si d = 3 entonces devolver cierto fin
+            si d <> 0 entonces vacío_desde := tics fin
+            vueltas := vueltas + 1
+            si tics > tope o tics - vacío_desde >= 15 o vueltas > 40000000 entonces devolver falso fin
+        fin
+        devolver falso
+    fin
+
     ; se queda «cs» centésimas sin hacer nada
     función pausa(cs: nat32)
         variable tope, vueltas: nat32
@@ -263,7 +284,7 @@ módulo Ahci
         pon(del_puerto(p, P_SCTL), c ob 0x301)
         pausa(2)                                                ; (la norma: 1 ms al menos)
         pon(del_puerto(p, P_SCTL), c ob 0x300)
-        espera(del_puerto(p, P_SSTS), 0x0F, 3, 100)
+        espera_enlace(p, 100)
         pon(del_puerto(p, P_SERR), 0xFFFFFFFF)
         devolver (lee(del_puerto(p, P_SSTS)) yb 0x0F) = 3
     fin
@@ -290,7 +311,7 @@ módulo Ahci
         variable s, i, t, firma: nat32
         variable id: puntero a nat16
         di("ahci: puerto %u: SSTS %08X, CMD %08X, TFD %08X, SIG %08X\n", p, lee(del_puerto(p, P_SSTS)), lee(del_puerto(p, P_CMD)), lee(del_puerto(p, P_TFD)), lee(del_puerto(p, P_SIG)))
-        si enciende_puerto(p) entonces espera(del_puerto(p, P_SSTS), 0x0F, 3, 100) fin
+        si enciende_puerto(p) entonces espera_enlace(p, 100) fin
         si a_fondo entonces
             si no para_puerto(p) entonces
                 di("ahci: puerto %u: no se para (CMD %08X)\n", p, lee(del_puerto(p, P_CMD)), 0, 0, 0)
