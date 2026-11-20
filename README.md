@@ -61,7 +61,7 @@ Hispa-DOS es la primera pieza de **Rescoldo**, la familia de programas libres en
 **Hispa-DOS es la familia de sistemas operativos** con DOS por debajo, uno para cada clase de ordenador, con el nombre del **procesador mínimo** que necesita:
 
 - **Hispa-8086** — 8086, 8088, V20, 80186 y 286: un núcleo de 16 bits propio, en marcha (versión 0.7.1, en [`h8086/`](h8086/); se desarrolla en la rama [`hispa-8086`](https://github.com/instcide-Es/hispados/tree/hispa-8086)). Ya arranca, maneja archivos y directorios en disquetes y disco duro, ejecuta .COM, .EXE y lotes, y pasa archivos por el puerto serie. Probado con las ROM originales del IBM PC, del XT y del AT.
-- **Hispa-386** — 386 o superior: **este repositorio** (rama `hispados-0.9`). Trae su escritorio con ventanas, **Hispa Ventanas**, con sus grupos de programas: Accesorios (Bloc de notas, Calculadora, Reloj, Sistema, Pintura, Terminal, Teclado), **Productividad** (Pluma, Cuentas y Facturas), Juegos (con los emuladores Hispa-Nes e Hispa-System) y Sonido.
+- **Hispa-386** — 386 o superior: **este repositorio** (rama `hispados-0.9`). Trae su escritorio con ventanas, **Hispa Ventanas**, con sus grupos de programas: Accesorios (Bloc de notas, Calculadora, Reloj, Sistema, Pintura, Terminal, Teclado), **Productividad** (Pluma, Cuentas y Facturas), Juegos (con los emuladores Hispa-Nes, Hispa-System e Hispa-Snes) y Sonido.
 - **Hispa-486** — reservado, más adelante: lo de mediados a finales de los 90 (DirectX, navegador web, menú de inicio). El nombre definitivo será el del procesador mínimo con el que vaya bien de verdad.
 
 Después vendrá un núcleo nuevo, sin DOS, con la tecnología de los años 2000 (nombre por decidir). Y aparte:

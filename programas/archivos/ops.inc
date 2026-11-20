@@ -1735,6 +1735,9 @@ o_abrir:
         call largo
         cmp byte [esi+eax-3], 'N'
         je .c1
+        mov ebx, n_hispasns         ; [HISPA-SNES] .SFC y .SMC (acaban en C)
+        cmp byte [esi+eax-1], 'C'
+        je .c1
         mov ebx, n_hispasms
 .c1:
         mov esi, d_hisp
