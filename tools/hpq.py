@@ -76,27 +76,31 @@ MAX_CABECERA = 16384
 
 # Los paquetes del sistema (hpq.py sistema): nombre, versión, descripción,
 # lo que necesita y sus archivos (el archivo hecho y adónde va en el disco)
-VERSION_SISTEMA = '0.8'
+# (la 0.8.1, 20/11/2026: HTTPS —la llamada 99 del núcleo y el paquete tls— y
+# cambiar la resolución desde Configuración; solo suben los paquetes que han
+# cambiado: base, red y tls. Los demás siguen en la 0.8, la del CD)
+VERSION_SISTEMA = '0.8.1'
+VERSION_08 = '0.8'
 SISTEMA = [
     ('base', VERSION_SISTEMA, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
-    ('bloc', VERSION_SISTEMA, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
-    ('consola', VERSION_SISTEMA, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
-    ('equipo', VERSION_SISTEMA, 'Mi equipo: las unidades, las carpetas y los archivos', 'base >= 0.7', [('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN')]),
-    ('ejemplos', VERSION_SISTEMA, 'Programas de ejemplo: HOLA, ECO, PRUEBA y BUCLE', 'base >= 0.7', [
+    ('bloc', VERSION_08, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
+    ('consola', VERSION_08, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
+    ('equipo', VERSION_08, 'Mi equipo: las unidades, las carpetas y los archivos', 'base >= 0.7', [('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN')]),
+    ('ejemplos', VERSION_08, 'Programas de ejemplo: HOLA, ECO, PRUEBA y BUCLE', 'base >= 0.7', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
         ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN')]),
     ('paquetes', '1.0', 'Programas y actualizaciones: PAQUETES y su ventana', 'base >= 0.7, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN')]),
-    ('red', VERSION_SISTEMA, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= 0.8', [
+    ('red', VERSION_SISTEMA, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= 0.8.1', [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
-    ('tls', VERSION_SISTEMA, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8, red >= 0.8', [
+    ('tls', VERSION_SISTEMA, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
         ('TLS.BIN', r'\HISPA\TLS.BIN'), ('HTTPS.BIN', r'\HISPA\HTTPS.BIN')]),
-    ('hvprun', VERSION_SISTEMA, 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio', 'base >= 0.7', [
+    ('hvprun', VERSION_08, 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio', 'base >= 0.7', [
         ('HVPRUN.BIN', r'\HISPA\HVPRUN.BIN')]),
     ('oficina', '1.0', 'La oficina de Hispa-386: Facturas, Pluma, Cuentas y Mirador', 'hvprun >= 0.7', [
         ('FACTURAS.HVP', r'\OFICINA\FACTURAS.HVP'), ('PLUMA.HVP', r'\OFICINA\PLUMA.HVP'),
