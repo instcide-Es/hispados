@@ -1516,6 +1516,23 @@ s_ahora:
 
 ; EBX = temporizador (0-2), EAX = ahora: lo pone al día (conserva todo)
 tim_ajusta:
+        push edx                    ; (lo corriente: no ha pasado ni un paso
+        push ecx                    ;  desde la última vez, y no hay nada que
+        imul edx, ebx, S_TIM_TAM    ;  hacer)
+        mov ecx, eax
+        sub ecx, [s_tim+edx+TI_ULT]
+        cmp ebx, 2
+        je .t2
+        cmp ecx, 128
+        jmp .t
+.t2:
+        cmp ecx, 16
+.t:
+        pop ecx
+        pop edx
+        jae .paso
+        ret
+.paso:
         pushad
         mov ebp, ebx
         imul ebx, S_TIM_TAM

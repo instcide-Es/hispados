@@ -311,3 +311,32 @@ pag_tipo    resb 2048
             alignb 16
 wram        resb 0x20000 + 16
 sram        resb 0x20000 + 16
+; (los colores de la línea)
+pc_suma     resd 1
+pc_clip     resb 2
+pc_prev     resb 2
+pc_b15      resb 1
+            alignb 4
+w_clave     resd 3                  ; (las ventanas de la línea anterior)
+w_usa       resd 1
+w_inv1      resd 1
+w_inv2      resd 1
+fr_fila     resd 1                  ; (fondo_rapido)
+fr_filav    resd 1
+fr_izq      resd 1
+fr_der      resd 1
+fr_tx       resd 1
+fr_z0       resb 1
+fr_z1       resb 1
+fr_capa     resb 1
+            alignb 4
+w1          resb 256
+w2          resb 256
+fr_mitad    resd 1
+oam_sucia   resb 1                  ; (hay que rehacer ob_tab)
+            alignb 4
+ob_tab      resd 128 * 4
+pc_capas    resb 8
+env_sig     resd 32                 ; (la envolvente: cuándo le toca a cada velocidad)
+env_vista   resd 32
+env_res     resb 32

@@ -17,6 +17,9 @@
 ;  biblioteca de C):  nasm -f bin -i programas/hispasnes/ -o snesnativo ...
 ; =============================================================================
         bits 32
+%ifdef MAPA
+        [map symbols build/snesnativo.map]
+%endif
 BASE        equ 0x08048000
         org BASE
         section .text
@@ -522,8 +525,15 @@ rom_modo:
         mov dword [rom], rom_buf
         mov [rom_tam], eax
         call cart_cargar
-        ; cuántos cuadros
+        ; cuántos cuadros («v600»: sin la imagen en 15 bits, para medir lo
+        ; mismo que hace HISPASNS.HVP)
         mov esi, [ebp+12]
+        mov byte [ppu_15], 1
+        cmp byte [esi], 'v'
+        jne .n15
+        mov byte [ppu_15], 0
+        inc esi
+.n15:
         call num
         mov [ncuadros], eax
         ; el guion
@@ -546,7 +556,6 @@ rom_modo:
         call crea
         mov [fd_son], eax
 .ss:
-        mov byte [ppu_15], 1
         mov dword [snd_hz_sal], 32000
         mov byte [snd_estereo], 1
         call ppu_tablas

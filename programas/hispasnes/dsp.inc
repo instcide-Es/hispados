@@ -57,6 +57,12 @@ dsp_reiniciar:
         mov [eco_pos], eax
         mov [eco_i], eax
         mov dword [ruido], 0x4000
+        mov edi, env_sig                    ; (cuándo le toca a cada velocidad)
+        mov ecx, 32 * 2
+        rep stosd
+        mov edi, env_res
+        mov ecx, 32 / 4
+        rep stosd
         mov byte [dsp_reg+0x6C], 0xE0   ; FLG: reinicio, silencio, sin eco
         popad
         ret
@@ -464,23 +470,29 @@ voz_siguiente:
 ; (interna) EAX = velocidad (0-31) -> CF=1 si en esta muestra le toca (la
 ; tabla de periodos de la consola, en muestras)
 env_toca:
-        push edx
         and eax, 31
         jz .no
-        movzx eax, word [env_periodos+eax*2]
+        push edx
         mov edx, [dsp_cuenta]
-        push eax
-        mov eax, edx
-        xor edx, edx
-        div dword [esp]
-        add esp, 4
-        test edx, edx
-        jnz .no
+        cmp [env_vista+eax*4], edx  ; (ya mirada en esta muestra: lo mismo)
+        je .ya
+        mov [env_vista+eax*4], edx
+        mov byte [env_res+eax], 0
+        cmp edx, [env_sig+eax*4]    ; ¿le toca? (desde cuándo le tocaba)
+        jb .ya
+        mov byte [env_res+eax], 1
+        push ecx
+        movzx ecx, word [env_periodos+eax*2]
+        add ecx, edx                ; la siguiente, un periodo después
+        mov [env_sig+eax*4], ecx
+        pop ecx
+.ya:
+        cmp byte [env_res+eax], 1
         pop edx
+        jne .no
         stc
         ret
 .no:
-        pop edx
         clc
         ret
         align 2

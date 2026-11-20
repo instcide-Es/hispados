@@ -51,6 +51,7 @@ ppu_reiniciar:
         rep stosd
         mov byte [inidisp], 0x80
         mov dword [vram_paso], 1
+        mov byte [oam_sucia], 1
         call ppu_brillo
         popad
         ret
@@ -111,6 +112,7 @@ ppu_escribe:
         jmp .x
 .obsel:
         mov [obsel], al
+        mov byte [oam_sucia], 1
         mov ecx, eax                ; la base de los dibujos de los objetos
         and ecx, 7
         shl ecx, 13
@@ -163,6 +165,7 @@ ppu_escribe:
         and ecx, 0x21F
         mov [oam+ecx], al
 .oam_sig:
+        mov byte [oam_sucia], 1
         inc dword [oam_dir]
         and dword [oam_dir], 0x3FF
         jmp .x
@@ -850,49 +853,88 @@ z_grupo     db  0, 1, 2, 2, 2, 2, 2, 3
 
 ; ---- las ventanas de la línea: una máscara por capa (1 = tapada) ----
 ; [vmask_m+capa] / [vmask_s+capa]: puntero a la máscara de la pantalla
-; principal / secundaria (0 si la capa no se tapa); col_dentro: la ventana
-; del color (1 = dentro)
+; principal / secundaria (0 si la capa no se tapa); hay_colv: la del color
+; (vmasc+5*256: 1 = dentro). Las máscaras se rehacen solo si han cambiado
+; los registros de las ventanas desde la línea anterior (w_clave)
 ventanas_linea:
         pushad
         xor eax, eax
         mov edi, vmask_m
         mov ecx, 12
         rep stosd
+        ; ¿alguna capa usa ventana? (si no, nada)
+        mov eax, [wsel]
+        and eax, 0x00AAAAAA
+        jnz .hay
         mov byte [hay_colv], 0
-        mov ebx, 0
-.c:
-        call ventana_capa           ; -> CF=1 si la capa usa alguna ventana
-        jnc .s
-        movzx eax, byte [tmw]
-        bt eax, ebx
-        jnc .s1
-        mov eax, ebx
-        shl eax, 8
-        add eax, vmasc
-        mov [vmask_m+ebx*4], eax
-.s1:
-        movzx eax, byte [tsw]
-        bt eax, ebx
-        jnc .s
-        mov eax, ebx
-        shl eax, 8
-        add eax, vmasc
-        mov [vmask_s+ebx*4], eax
-.s:
-        inc ebx
-        cmp ebx, 5
-        jb .c
-        mov ebx, 5                  ; la ventana del color
-        call ventana_capa
-        jnc .x
-        mov byte [hay_colv], 1
-.x:
+        mov byte [w_usa], 0
         popad
         ret
-; EBX = capa (0-3 fondos, 4 objetos, 5 color): su máscara en vmasc+capa*256
-; (1 = dentro de la ventana, con la lógica); CF=1 si usa alguna
-ventana_capa:
+.hay:
+        mov eax, [wh]               ; la clave: los bordes, las selecciones y
+        mov edx, [wsel]             ; las lógicas
+        and edx, 0x00FFFFFF
+        movzx ecx, word [wlog]
+        cmp eax, [w_clave]
+        jne .rehace
+        cmp edx, [w_clave+4]
+        jne .rehace
+        cmp ecx, [w_clave+8]
+        je .pon
+.rehace:
+        mov [w_clave], eax
+        mov [w_clave+4], edx
+        mov [w_clave+8], ecx
+        call ventanas_rehace
+.pon:
+        mov byte [hay_colv], 0
+        xor ebx, ebx
+.c:
+        bt dword [w_usa], ebx
+        jnc .s
+        mov eax, ebx
+        shl eax, 8
+        add eax, vmasc
+        cmp ebx, 5
+        je .col
+        movzx edx, byte [tmw]
+        bt edx, ebx
+        jnc .s1
+        mov [vmask_m+ebx*4], eax
+.s1:
+        movzx edx, byte [tsw]
+        bt edx, ebx
+        jnc .s
+        mov [vmask_s+ebx*4], eax
+        jmp .s
+.col:
+        mov byte [hay_colv], 1
+.s:
+        inc ebx
+        cmp ebx, 6
+        jb .c
+        popad
+        ret
+
+; (interna) las dos ventanas (w1, w2: 1 = dentro) y la máscara de cada capa
+; con su lógica, de cuatro en cuatro puntos; w_usa: las capas que usan alguna
+ventanas_rehace:
         pushad
+        xor eax, eax
+        mov edi, w1
+        mov ecx, 512 / 4
+        rep stosd
+        movzx ecx, byte [wh]
+        movzx edx, byte [wh+1]
+        mov edi, w1
+        call .tramo
+        movzx ecx, byte [wh+2]
+        movzx edx, byte [wh+3]
+        mov edi, w2
+        call .tramo
+        mov byte [w_usa], 0
+        xor ebx, ebx
+.capa:
         mov eax, ebx
         shr eax, 1
         movzx edx, byte [wsel+eax]  ; los 4 bits de esta capa
@@ -901,16 +943,15 @@ ventana_capa:
         shr edx, 4
 .a:
         and edx, 0x0F
-        test edx, 0x0A              ; ¿alguna puesta?
-        jz near .no
+        test edx, 0x0A
+        jz near .sig
+        bts dword [w_usa], ebx
         ; la lógica (2 bits)
         cmp ebx, 4
         jae .lo
-        movzx ecx, byte [wlog]
-        push ecx
+        movzx eax, byte [wlog]
         mov ecx, ebx
         shl ecx, 1
-        pop eax
         shr eax, cl
         jmp .l1
 .lo:
@@ -921,82 +962,76 @@ ventana_capa:
 .l1:
         and eax, 3
         mov [w_logica], al
+        ; las inversiones (01010101h en cada octeto, o 0)
+        xor eax, eax
+        test edx, 1
+        jz .i1
+        mov eax, 0x01010101
+.i1:
+        mov [w_inv1], eax
+        xor eax, eax
+        test edx, 4
+        jz .i2
+        mov eax, 0x01010101
+.i2:
+        mov [w_inv2], eax
         mov edi, ebx
         shl edi, 8
         add edi, vmasc
-        xor ecx, ecx                ; ECX = x
+        xor ecx, ecx
 .p:
-        ; la ventana 1
-        xor esi, esi
-        test edx, 2
-        jz .w2
-        cmp cl, [wh]
-        jb .f1
-        cmp cl, [wh+1]
-        ja .f1
-        inc esi
-.f1:
-        test edx, 1
-        jz .w2
-        xor esi, 1
-.w2:
-        xor ebp, ebp
-        test edx, 8
-        jz .comb
-        cmp cl, [wh+2]
-        jb .f2
-        cmp cl, [wh+3]
-        ja .f2
-        inc ebp
-.f2:
-        test edx, 4
-        jz .comb
-        xor ebp, 1
-.comb:
-        mov eax, edx
-        and eax, 0x0A
-        cmp eax, 0x0A
-        je .dos
-        test edx, 2                 ; solo una
-        jnz .es1
-        mov eax, ebp
-        jmp .pon
-.es1:
-        mov eax, esi
-        jmp .pon
-.dos:
+        mov eax, [w1+ecx*4]
+        xor eax, [w_inv1]
+        mov esi, [w2+ecx*4]
+        xor esi, [w_inv2]
+        test edx, 8                 ; ¿la 2?
+        jz .solo1
+        test edx, 2                 ; ¿la 1?
+        jz .solo2
+        mov ebp, eax
         mov al, [w_logica]
         cmp al, 1
         jb .or
         je .and
-        cmp al, 2
-        je .xor
-        mov eax, esi                ; XNOR
-        xor eax, ebp
-        xor eax, 1
+        mov eax, ebp
+        xor eax, esi
+        cmp byte [w_logica], 2
+        je .pon
+        xor eax, 0x01010101         ; XNOR
         jmp .pon
 .or:
-        mov eax, esi
-        or eax, ebp
+        mov eax, ebp
+        or eax, esi
         jmp .pon
 .and:
-        mov eax, esi
-        and eax, ebp
+        mov eax, ebp
+        and eax, esi
         jmp .pon
-.xor:
+.solo2:
         mov eax, esi
-        xor eax, ebp
+.solo1:
 .pon:
-        mov [edi+ecx], al
+        mov [edi+ecx*4], eax
         inc ecx
-        cmp ecx, 256
+        cmp ecx, 64
         jb .p
+.sig:
+        inc ebx
+        cmp ebx, 6
+        jb .capa
         popad
-        stc
         ret
-.no:
-        popad
-        clc
+; ECX = izquierda, EDX = derecha: unos de una a otra en EDI (si izq <= der)
+.tramo:
+        cmp ecx, edx
+        ja .t9
+        sub edx, ecx
+        inc edx
+        add edi, ecx
+        mov ecx, edx
+        mov al, 1
+        rep stosb
+.t9:
         ret
 
 ; =============================================================================
@@ -1100,9 +1135,267 @@ fondo_linea:
         popad
         ret
 
-; (interna) el fondo [cap_n] en la pantalla [fl_cz]/[fl_cc], con la máscara
+; un punto de fondo_rapido: %1 = su sitio en la pantalla (desde EDI), %2 = de
+; dónde sale en la fila del dibujo (ESI); DL = la altura, DH = la capa, BL =
+; la paleta, ECX = la pantalla
+%macro PUNTO_FR 2
+        lea eax, [edi+%1]
+        cmp eax, 256
+        jae %%n
+        movzx eax, byte [esi+%2]
+        test al, al
+        jz %%n
+        cmp dl, [ecx+edi+%1]
+        jbe %%n
+        add al, bl
+        mov ah, dh
+        mov [ecx+edi+%1], dl
+        mov [ecx+256+edi*2+%1*2], ax
+%%n:
+%endmacro
+%macro PUNTO_FRM 2                  ; (lo mismo, con la máscara en EBP)
+        lea eax, [edi+%1]
+        cmp eax, 256
+        jae %%n
+        movzx eax, byte [esi+%2]
+        test al, al
+        jz %%n
+        cmp dl, [ecx+edi+%1]
+        jbe %%n
+        cmp byte [ebp+edi+%1], 0
+        jne %%n
+        add al, bl
+        mov ah, dh
+        mov [ecx+edi+%1], dl
+        mov [ecx+256+edi*2+%1*2], ax
+%%n:
+%endmacro
+; (interna) lo de siempre (sin desplazamiento por columnas): de 8 en 8
+; puntos, todo aquí dentro, sin llamar a nada por cada dibujo
+fondo_rapido:
+        pushad
+        mov ebx, [cap_n]
+        ; la fila del fondo y la del dibujo
+        movzx eax, word [bg_vofs+ebx*2]
+        add eax, [lin_y]
+        and eax, 0x3FF
+        mov edx, eax
+        and edx, 7
+        mov [fr_fila], edx
+        mov [fr_filav], edx
+        xor dword [fr_filav], 7     ; (la de los volteados)
+        shr eax, 3                  ; la fila de dibujos
+        mov edx, eax                ; (con los de 16x16: la mitad de abajo)
+        and edx, 1
+        mov [fr_mitad], edx
+        cmp dword [fl_16], 0
+        je .f0
+        shr eax, 1
+.f0:
+        mov edx, eax
+        and edx, 31
+        shl edx, 5
+        add edx, [fl_mapa]
+        test eax, 32
+        jz .f1
+        test byte [fl_sc], 2
+        jz .f1
+        add edx, 0x400
+        test byte [fl_sc], 1
+        jz .f1
+        add edx, 0x400
+.f1:
+        mov [fr_izq], edx           ; la fila en el mapa de la izquierda
+        test byte [fl_sc], 1
+        jz .f2
+        add edx, 0x400
+.f2:
+        mov [fr_der], edx           ;   y en el de la derecha
+        movzx eax, word [bg_hofs+ebx*2]
+        mov edx, eax
+        and edx, 7
+        neg edx
+        mov [fl_x], edx
+        shr eax, 3
+        mov [fr_tx], eax            ; (en columnas de 8)
+        mov dl, [fl_z0]             ; (las alturas, en octetos)
+        mov [fr_z0], dl
+        mov dl, [fl_z1]
+        mov [fr_z1], dl
+        mov dh, CAPA_DIR
+        cmp byte [fl_dir], 0
+        jne .cd
+        mov dh, bl
+.cd:
+        mov [fr_capa], dh
+.col:
+        ; la entrada del mapa
+        mov eax, [fr_tx]
+        cmp dword [fl_16], 0
+        je .m0
+        shr eax, 1
+.m0:
+        and eax, 63
+        mov edx, [fr_izq]
+        test eax, 32
+        jz .m1
+        mov edx, [fr_der]
+.m1:
+        and eax, 31
+        add eax, edx
+        and eax, 0x7FFF
+        movzx ebp, word [vram+eax*2]   ; EBP = la entrada
+        ; el dibujo (en la caché de su número de bits)
+        mov eax, ebp
+        and eax, 0x3FF
+        cmp dword [fl_16], 0        ; 16x16: +1 la mitad de la derecha, +16
+        je .t8                      ; la de abajo (al revés si está volteado)
+        mov edx, [fr_tx]
+        and edx, 1
+        test ebp, 0x4000
+        jz .t16a
+        xor edx, 1
+.t16a:
+        add eax, edx
+        mov edx, [fr_mitad]
+        test ebp, 0x8000
+        jz .t16b
+        xor edx, 1
+.t16b:
+        shl edx, 4
+        add eax, edx
+.t8:
+        mov ecx, [cap_bpp]
+        cmp ecx, 4
+        je .b4
+        ja .b8
+        shl eax, 3
+        add eax, [fl_dib]
+        and eax, 0x7FFF
+        shr eax, 3
+        mov esi, eax
+        shl esi, 6
+        add esi, cache2
+        cmp byte [sucio2+eax], 0
+        je .b2a
+        call dib2
+.b2a:
+        mov eax, ebp
+        shr eax, 8
+        and eax, 0x1C               ; la paleta * 4
+        jmp .pal
+.b4:
+        shl eax, 4
+        add eax, [fl_dib]
+        and eax, 0x7FFF
+        shr eax, 4
+        mov esi, eax
+        shl esi, 6
+        add esi, cache4
+        cmp byte [sucio4+eax], 0
+        je .b4a
+        call dib4
+.b4a:
+        mov eax, ebp
+        shr eax, 6
+        and eax, 0x70               ; la paleta * 16
+        jmp .pal
+.b8:
+        shl eax, 5
+        add eax, [fl_dib]
+        and eax, 0x7FFF
+        shr eax, 5
+        mov esi, eax
+        shl esi, 6
+        add esi, cache8
+        cmp byte [sucio8+eax], 0
+        je .b8a
+        call dib8
+.b8a:
+        xor eax, eax
+.pal:
+        add eax, [fl_palb]
+        cmp byte [fl_dir], 0
+        je .pd
+        xor eax, eax
+.pd:
+        mov bl, al                  ; BL = lo que se suma a cada color
+        ; la fila (volteada de arriba a abajo si toca)
+        mov eax, [fr_fila]
+        test ebp, 0x8000
+        jz .v
+        mov eax, [fr_filav]
+.v:
+        lea esi, [esi+eax*8]
+        mov eax, [esi]
+        or eax, [esi+4]
+        jz near .sig                ; (toda la fila transparente)
+        mov dl, [fr_z0]
+        test ebp, 0x2000
+        jz .z
+        mov dl, [fr_z1]
+.z:
+        mov dh, [fr_capa]
+        mov edi, [fl_x]
+        mov ecx, [fl_cz]
+        test ebp, 0x4000
+        mov ebp, [fl_mask]          ; (EBP: ahora, la máscara)
+        jnz near .volteado
+        test ebp, ebp
+        jnz near .masc
+        PUNTO_FR 0, 0
+        PUNTO_FR 1, 1
+        PUNTO_FR 2, 2
+        PUNTO_FR 3, 3
+        PUNTO_FR 4, 4
+        PUNTO_FR 5, 5
+        PUNTO_FR 6, 6
+        PUNTO_FR 7, 7
+        jmp .sig
+.masc:
+        PUNTO_FRM 0, 0
+        PUNTO_FRM 1, 1
+        PUNTO_FRM 2, 2
+        PUNTO_FRM 3, 3
+        PUNTO_FRM 4, 4
+        PUNTO_FRM 5, 5
+        PUNTO_FRM 6, 6
+        PUNTO_FRM 7, 7
+        jmp .sig
+.vmasc:
+        PUNTO_FRM 0, 7
+        PUNTO_FRM 1, 6
+        PUNTO_FRM 2, 5
+        PUNTO_FRM 3, 4
+        PUNTO_FRM 4, 3
+        PUNTO_FRM 5, 2
+        PUNTO_FRM 6, 1
+        PUNTO_FRM 7, 0
+        jmp .sig
+.volteado:
+        test ebp, ebp
+        jnz near .vmasc
+        PUNTO_FR 0, 7
+        PUNTO_FR 1, 6
+        PUNTO_FR 2, 5
+        PUNTO_FR 3, 4
+        PUNTO_FR 4, 3
+        PUNTO_FR 5, 2
+        PUNTO_FR 6, 1
+        PUNTO_FR 7, 0
+.sig:
+        add dword [fl_x], 8
+        inc dword [fr_tx]
+        cmp dword [fl_x], 256
+        jl .col
+        popad
+        ret
+
+; (interna) el fondo [cap_n] en la pantalla [fl_cz], con la máscara
 ; [fl_mask] (0: sin ella)
 fondo_pinta:
+        cmp byte [fl_opt], 0        ; lo de siempre: el camino rápido
+        je fondo_rapido
         pushad
         mov ebx, [cap_n]
         movzx eax, word [bg_hofs+ebx*2]
@@ -1639,19 +1932,24 @@ objetos_linea:
         and ecx, 0x7F
 .r:
         mov [ob_prim], ecx
+        cmp byte [oam_sucia], 0     ; la tabla de los 128, al día
+        je .t
+        call obj_tabla
+.t:
         mov ebp, 128
 .busca:
-        call obj_datos              ; ECX = el objeto -> ob_*
+        mov edx, ecx                ; (de la tabla: x, y, ancho, alto)
+        shl edx, 4
         mov eax, [ob_y]
-        sub eax, [ob_oy]
+        sub eax, [ob_tab+edx+4]
         and eax, 0xFF
-        cmp eax, [ob_al]
+        cmp eax, [ob_tab+edx+12]
         jae .no
         ; ¿y en x?
-        mov eax, [ob_ox]
+        mov eax, [ob_tab+edx]
         cmp eax, 256
         jge .no
-        add eax, [ob_an]
+        add eax, [ob_tab+edx+8]
         jle .no
         cmp ebx, 32
         jb .cabe
@@ -1710,6 +2008,30 @@ objetos_linea:
         mov [fl_mask], eax
         call obj_mezcla
 .x:
+        popad
+        ret
+
+; (interna) la tabla de los objetos (ob_tab: x, y, ancho y alto de cada
+; uno), otra vez: después de escribir en la OAM o en OBSEL
+obj_tabla:
+        pushad
+        mov byte [oam_sucia], 0
+        xor ecx, ecx
+.o:
+        call obj_datos
+        mov edx, ecx
+        shl edx, 4
+        mov eax, [ob_ox]
+        mov [ob_tab+edx], eax
+        mov eax, [ob_oy]
+        mov [ob_tab+edx+4], eax
+        mov eax, [ob_an]
+        mov [ob_tab+edx+8], eax
+        mov eax, [ob_al]
+        mov [ob_tab+edx+12], eax
+        inc ecx
+        cmp ecx, 128
+        jb .o
         popad
         ret
 
@@ -1904,6 +2226,13 @@ obj_mezcla:
 ; =============================================================================
 ;  Los colores de la línea: cm (y cs) -> la fila de la imagen
 ; =============================================================================
+;  Los colores de la línea: pant_m (y pant_s) -> la fila de la imagen
+; =============================================================================
+; Lo de toda la línea se decide antes: qué capas suman ([pc_suma], un bit
+; por capa), y si la ventana del color recorta a negro o impide la suma
+; (pc_clip y pc_prev: dos octetos, fuera y dentro de la ventana). Los puntos
+; que no suman ni se recortan salen de cg_host (ya con el brillo); los demás
+; se suman con los tres componentes a la vez (en una palabra de 15 bits).
 ppu_colores:
         pushad
         mov eax, [lin_y]
@@ -1911,16 +2240,49 @@ ppu_colores:
         mov edi, eax
         shl edi, 8
         add edi, imagen
+        mov [pc_dest], edi
         shl eax, 9
         add eax, imagen15
         mov [pc_dest15], eax
-        ; ¿sin suma de colores ni recorte? lo rápido
-        test byte [cgadsub], 0x3F
-        jnz .lento
-        test byte [cgwsel], 0xC0
-        jnz .lento
+        ; las capas que suman (el color directo, con el fondo 1)
+        movzx eax, byte [cgadsub]
+        and al, 0x3F
+        test al, 1
+        jz .s1
+        or al, 0x40
+.s1:
+        mov [pc_suma], eax
+        ; el recorte y la suma impedida: (fuera, dentro) para cada modo
+        movzx eax, byte [cgwsel]
+        shr eax, 6
+        mov ax, [vmodo_tab+eax*2]
+        mov [pc_clip], ax
+        movzx eax, byte [cgwsel]
+        shr eax, 4
+        and eax, 3
+        mov ax, [vmodo_tab+eax*2]
+        mov [pc_prev], ax
+        cmp byte [hay_colv], 0      ; (sin ventana del color: todo está fuera)
+        jne .s2
+        mov al, [pc_clip]
+        mov [pc_clip+1], al
+        mov al, [pc_prev]
+        mov [pc_prev+1], al
+        cmp byte [pc_prev], 0       ; impedida en toda la línea: nada suma
+        je .s2
+        mov dword [pc_suma], 0
+.s2:
+        movzx eax, byte [inidisp]
+        and eax, 0x0F
+        cmp eax, 15
+        sete [pc_b15]
+        ; ¿lo rápido? (ni suma ni recorte en toda la línea)
         cmp byte [ppu_15], 0
-        jne .lento
+        jne .general
+        cmp dword [pc_suma], 0
+        jne .general
+        cmp word [pc_clip], 0
+        jne .general
         mov esi, pant_m+256
         xor ecx, ecx
 .r:
@@ -1945,49 +2307,109 @@ ppu_colores:
         jb .r
         popad
         ret
-.lento:
-        mov [pc_dest], edi
+.general:
+        ; sin la ventana del color (lo más corriente) y sin recortar: qué capas
+        ; suman, en una tabla, y lo demás de cg_host
+        cmp byte [ppu_15], 0
+        jne .todo
+        cmp byte [hay_colv], 0
+        jne .todo
+        cmp byte [pc_clip], 0
+        jne .todo
+        xor ebx, ebx
+.tc:
+        bt dword [pc_suma], ebx
+        setc byte [pc_capas+ebx]
+        inc ebx
+        cmp ebx, 8
+        jb .tc
+        xor ecx, ecx
+        xor edx, edx                ; (fuera de la ventana: para .suma)
+.q:
+        movzx eax, word [pant_m+256+ecx*2]
+        movzx ebx, ah
+        cmp byte [pc_capas+ebx], 0
+        jne .qs
+        cmp ebx, CAPA_DIR
+        je .qd
+        movzx eax, al
+        mov al, [cg_host+eax]
+        mov [edi+ecx], al
+        inc ecx
+        cmp ecx, 256
+        jb .q
+        popad
+        ret
+.qd:
+        call color_de
+        jmp .qp
+.qs:
+        call pc_suma_punto
+.qp:
+        cmp byte [pc_b15], 0
+        jne .qb
+        call brillo15
+.qb:
+        mov al, [lut15+eax]
+        mov [edi+ecx], al
+        inc ecx
+        cmp ecx, 256
+        jb .q
+        popad
+        ret
+.todo:
         xor ecx, ecx
 .p:
-        ; el color de la principal (15 bits, sin el brillo)
         movzx eax, word [pant_m+256+ecx*2]
         movzx ebx, ah               ; EBX = la capa
+        xor edx, edx                ; EDX = dentro de la ventana del color
+        cmp byte [hay_colv], 0
+        je .w
+        mov dl, [vmasc+5*256+ecx]
+.w:
+        ; ¿suma esta capa? ¿se recorta?
+        mov ebp, [pc_suma]
+        cmp byte [pc_prev+edx], 0
+        je .w1
+        xor ebp, ebp
+.w1:
+        bt ebp, ebx
+        jc .suma
+        cmp byte [pc_clip+edx], 0
+        jne .negro
+        cmp ebx, CAPA_DIR
+        je .dir
+        cmp byte [ppu_15], 0        ; (ni suma ni recorte: el de siempre)
+        jne .dir
+        movzx eax, al
+        mov al, [cg_host+eax]
+        mov esi, [pc_dest]
+        mov [esi+ecx], al
+        jmp .sig
+.negro:
+        xor eax, eax
+        jmp .pon
+.dir:
+        call color_de
+        jmp .pon
+.suma:
+        call pc_suma_punto
+        jmp .pon
+; (interna) el punto ECX de la principal (EAX = su palabra, EBX = su capa,
+; EDX = dentro de la ventana del color) con lo que se le suma -> EAX
+pc_suma_punto:
         call color_de
         mov [pc_c1], eax
-        ; la ventana del color
-        xor edx, edx
-        cmp byte [hay_colv], 0
-        je .cw
-        mov dl, [vmasc+5*256+ecx]
-.cw:
-        ; ¿a negro? (CGWSEL 7-6: nunca, fuera, dentro, siempre)
-        movzx eax, byte [cgwsel]
-        shr eax, 6
-        call ventana_modo           ; -> CF=1 si toca
-        mov byte [pc_negro], 0
-        jnc .n1
-        mov dword [pc_c1], 0
-        mov byte [pc_negro], 1
-.n1:
-        ; ¿suma? (CGWSEL 5-4: impedirla nunca, fuera, dentro, siempre)
-        movzx eax, byte [cgwsel]
-        shr eax, 4
-        and eax, 3
-        call ventana_modo
-        jc .sin
-        ; la capa tiene que sumar
-        mov eax, ebx
-        cmp eax, CAPA_OBJ0
-        je .sin
-        cmp eax, CAPA_DIR
-        jne .cs
-        xor eax, eax
-.cs:
-        movzx edx, byte [cgadsub]
-        bt edx, eax
-        jnc .sin
-        ; lo que se suma: la secundaria o el color fijo
         mov byte [pc_mitad], 1
+        test byte [cgadsub], 0x40
+        jnz .m0
+        mov byte [pc_mitad], 0
+.m0:
+        cmp byte [pc_clip+edx], 0
+        je .m1
+        mov dword [pc_c1], 0        ; (a negro: y sin la mitad)
+        mov byte [pc_mitad], 0
+.m1:
         mov eax, [fijo15]
         test byte [cgwsel], 2
         jz .fijo
@@ -2005,57 +2427,29 @@ ppu_colores:
         pop ebx
 .fijo:
         mov [pc_c2], eax
-        cmp byte [pc_negro], 0      ; (con la principal a negro, sin mitad)
-        je .m1
-        mov byte [pc_mitad], 0
-.m1:
-        test byte [cgadsub], 0x40
-        jnz .m2
-        mov byte [pc_mitad], 0
-.m2:
-        call suma_colores           ; -> EAX
-        jmp .pon
-.sin:
-        mov eax, [pc_c1]
-.pon:
+        jmp suma_colores
+ppu_colores.pon:
+        cmp byte [pc_b15], 0
+        jne ppu_colores.b15
         call brillo15
+ppu_colores.b15:
         cmp byte [ppu_15], 0
-        jne .p15
-        mov edx, [pc_dest]
+        jne ppu_colores.p15
+        mov esi, [pc_dest]
         mov al, [lut15+eax]
-        mov [edx+ecx], al
-        jmp .p2
-.p15:
-        mov edx, [pc_dest15]
-        mov [edx+ecx*2], ax
-.p2:
+        mov [esi+ecx], al
+        jmp ppu_colores.sig
+ppu_colores.p15:
+        mov esi, [pc_dest15]
+        mov [esi+ecx*2], ax
+ppu_colores.sig:
         inc ecx
         cmp ecx, 256
-        jb .p
+        jb ppu_colores.p
         popad
         ret
-
-; EAX = el modo de una ventana (0 nunca, 1 fuera, 2 dentro, 3 siempre), DL
-; = 1 si el punto está dentro -> CF=1 si se aplica
-ventana_modo:
-        and eax, 3
-        jz .no
-        cmp eax, 3
-        je .si
-        cmp eax, 2
-        je .dentro
-        test dl, dl                 ; fuera
-        jz .si
-        jmp .no
-.dentro:
-        test dl, dl
-        jnz .si
-.no:
-        clc
-        ret
-.si:
-        stc
-        ret
+; (fuera, dentro) de la ventana para cada modo: nunca, fuera, dentro, siempre
+vmodo_tab   db 0, 0,  1, 0,  0, 1,  1, 1
 
 ; EAX = palabra de cm/cs (color | capa << 8), EBX = la capa -> EAX = 15 bits
 color_de:
@@ -2087,48 +2481,85 @@ color_directo:
         ret
 
 ; [pc_c1] y [pc_c2]: suma o resta (CGADSUB bit 7), a la mitad si [pc_mitad]
+; -> EAX. Los tres componentes a la vez: en la suma, los acarreos que salen
+; de cada uno (bits 5, 10 y 15) dicen cuáles se pasan de 31; en la resta,
+; cada componente va con un bit de guarda delante (separados en 32 bits)
 suma_colores:
         push ebx
-        push ecx
         push edx
-        push esi
-        xor esi, esi                ; ESI = el resultado
-        xor ecx, ecx                ; CL = el desplazamiento del componente
-.c:
         mov eax, [pc_c1]
-        shr eax, cl
-        and eax, 0x1F
-        mov edx, [pc_c2]
-        shr edx, cl
-        and edx, 0x1F
+        mov ebx, [pc_c2]
         test byte [cgadsub], 0x80
         jnz .resta
-        add eax, edx
         cmp byte [pc_mitad], 0
-        je .s1
-        shr eax, 1
-.s1:
-        cmp eax, 31
-        jbe .pon
-        mov eax, 31
-        jmp .pon
-.resta:
-        sub eax, edx
-        jns .r1
-        xor eax, eax
-.r1:
-        cmp byte [pc_mitad], 0
-        je .pon
-        shr eax, 1
-.pon:
-        shl eax, cl
-        or esi, eax
-        add ecx, 5
-        cmp ecx, 15
-        jb .c
-        mov eax, esi
-        pop esi
+        jne .media
+        lea edx, [eax+ebx]          ; la suma, con el tope de 31
+        xor eax, ebx
+        xor eax, edx
+        and eax, 0x8420             ; los acarreos de cada componente
+        sub edx, eax
+        mov ebx, eax
+        shr ebx, 5
+        sub eax, ebx                ; (los componentes pasados: 11111)
+        or eax, edx
+        and eax, 0x7FFF
         pop edx
-        pop ecx
         pop ebx
+        ret
+.media:
+        mov edx, eax                ; (a + b) / 2 sin pasarse
+        xor edx, ebx
+        and edx, 0x7BDE
+        shr edx, 1
+        and eax, ebx
+        add eax, edx
+        pop edx
+        pop ebx
+        ret
+.resta:
+        call .separa
+        mov edx, eax
+        mov eax, ebx
+        call .separa
+        mov ebx, eax                ; EDX = a, EBX = b, separados
+        or edx, (1 << 5) | (1 << 16) | (1 << 27)
+        sub edx, ebx
+        mov eax, edx
+        and eax, (1 << 5) | (1 << 16) | (1 << 27)
+        mov ebx, eax
+        shr ebx, 5
+        sub eax, ebx                ; (los que no se han pasado de 0: 11111)
+        and eax, edx
+        cmp byte [pc_mitad], 0
+        je .junta
+        shr eax, 1
+        and eax, 0x0F | (0x0F << 11) | (0x0F << 22)
+.junta:
+        mov edx, eax                ; y otra vez en 15 bits
+        and edx, 0x1F
+        mov ebx, eax
+        shr ebx, 6
+        and ebx, 0x3E0
+        or edx, ebx
+        shr eax, 12
+        and eax, 0x7C00
+        or eax, edx
+        pop edx
+        pop ebx
+        ret
+; EAX = 15 bits -> EAX con los componentes en los bits 0, 11 y 22
+.separa:
+        push edx
+        mov edx, eax
+        and edx, 0x1F
+        push edx
+        mov edx, eax
+        and edx, 0x3E0
+        shl edx, 6
+        or [esp], edx
+        and eax, 0x7C00
+        shl eax, 12
+        or eax, [esp]
+        add esp, 4
+        pop edx
         ret
