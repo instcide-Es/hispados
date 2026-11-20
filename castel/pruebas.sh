@@ -91,6 +91,12 @@
 #      COMPRUEBA, un corte a mitad que se deshace al volver, el gancho de la red
 #      (con un DESCARGA de mentira) y la ventana «Programas y actualizaciones»;
 #      fsck.fat y mtools miran el disco después de cada paso.
+#  13. Hispa-Pentium 0.8: la red. El servicio de red (RED.BIN) con la e1000
+#      y la RTL8139 de QEMU (-netdev user): DHCP, IPCONFIG, PING, el DNS,
+#      DESCARGAR contra un servidor HTTP de aquí (nucleo32/servidor_prueba.py:
+#      con largo, en trozos, hasta que se cierra, redirección, 404) con lo
+#      descargado igual octeto a octeto, Ctrl+C, sin tarjeta, «sinred», y el
+#      icono de la red en el escritorio.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
@@ -100,6 +106,7 @@
 #   SOLO=08 ./pruebas.sh          la primera y las de la 0.8 (de la undécima a la decimocuarta)
 #   SOLO=caliente ./pruebas.sh    la primera y la undécima (el USB en caliente)
 #   SOLO=paquetes ./pruebas.sh    la primera y la duodécima (los paquetes: PAQUETES y tools/hpq.py)
+#   SOLO=red ./pruebas.sh         la primera y la decimotercera (la red)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
@@ -113,6 +120,9 @@ AQUI=$(dirname "$(readlink -f "$0")")
 H=$AQUI/../h8086
 # los programas de usuario de Hispa-Pentium (usuario.cas y llamadas.cas son módulos)
 USU="$AQUI/nucleo32/uinstala.cas $AQUI/nucleo32/uasiste.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas $AQUI/nucleo32/uequipo.cas $AQUI/nucleo32/upaquete.cas $AQUI/nucleo32/uactual.cas"
+# y los de la red (la 0.8): el servicio, RED.BIN, y sus programas (con sus
+# módulos: rbase, rtarjeta, ryukon, rpila, rtcp y redes); van en su tanda
+RED_USU="$AQUI/nucleo32/ured.cas $AQUI/nucleo32/uipconf.cas $AQUI/nucleo32/uping.cas $AQUI/nucleo32/udescarg.cas"
 T=$(mktemp -d)
 QPID=
 acaba() { [ -n "$QPID" ] && kill $QPID 2>/dev/null; [ -n "${VER:-}" ] && { rm -rf /tmp/castel-pruebas; cp -r $T /tmp/castel-pruebas; }; rm -rf $T; }
@@ -465,7 +475,7 @@ cp $AQUI/ensamblador/formas.asm $T/ens/formas.asm
 # de Hispa-Pentium y unas cuentas al azar (CASTEL32.md)
 cp $AQUI/ensamblador/formas32.asm $T/ens/formas32.asm
 python3 -I $AQUI/azar32.py 9 150 $T/ens/az32p.cas $T/ens/az32p.esp plano
-for f in $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $USU $T/ens/az32p.cas; do
+for f in $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $USU $RED_USU $T/ens/az32p.cas; do
   python3 -I $AQUI/ccastel.py $f -o $T/ens/$(basename $f .cas).asm > /dev/null 2>&1 || ko "$(basename $f) no compila"
 done
 rm -f $T/ens/az32p.cas $T/ens/az32p.esp
@@ -488,10 +498,11 @@ else ko "ensambla.py no da lo mismo que NASM en:$distintos"; fi
 # Hispa-Pentium, que con el entorno gráfico pasa de 600 K; el tercero, sus
 # programas de usuario)
 NUC=" $(for f in $USU; do basename $f .cas; done | tr '\n' ' ')"
-# en qué tanda va cada uno: 2, la semilla; 3, sus programas; 1, lo demás
-tanda_de() { case "$1" in semilla) echo 2 ;; *) case "$NUC" in *" $1 "*) echo 3 ;; *) echo 1 ;; esac ;; esac; }
+NRED=" $(for f in $RED_USU; do basename $f .cas; done | tr '\n' ' ')"
+# en qué tanda va cada uno: 2, la semilla; 3, sus programas; 4, los de la red; 1, lo demás
+tanda_de() { case "$1" in semilla) echo 2 ;; *) case "$NUC" in *" $1 "*) echo 3 ;; *) case "$NRED" in *" $1 "*) echo 4 ;; *) echo 1 ;; esac ;; esac ;; esac; }
 mkdir $T/ens/sal
-for tanda in 1 2 3; do
+for tanda in 1 2 3 4; do
 cp $H/build/hispa8086-1440.img $T/e.img
 { printf '@ECO OFF\r\n'
   for f in $T/ens/*.asm; do
@@ -552,7 +563,7 @@ python3 -I $AQUI/azar32.py 8 40 $A/azar32p.cas $A/azar32p.esp plano
 # tercera, lo de Hispa-Pentium, que con el entorno gráfico ya no cabe con lo
 # demás: los fuentes del núcleo en A: y, en B:, el ensamblador de la semilla,
 # de más de 600 K (la segunda), o el de sus programas de usuario (la tercera))
-for tanda in 1 2 3; do
+for tanda in 1 2 3 4; do
 cp $H/build/hispa8086-1440.img $T/c.img
 mmd -i $T/c.img ::BIB ::PARTES ::BIB32
 for f in $AQUI/biblioteca32/*.cas; do mcopy -i $T/c.img $f ::BIB32/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
@@ -565,13 +576,15 @@ else
   # los dos módulos que usan: todos juntos ya no caben con lo demás)
   for f in $AQUI/nucleo32/*.cas; do
     case "$(basename $f .cas)" in
+      ured|uipconf|uping|udescarg|rbase|rtarjeta|ryukon|rpila|rtcp|redes) [ $tanda = 4 ] || continue ;;
+      llamadas) [ $tanda = 3 ] || [ $tanda = 4 ] || continue ;;
       uhci|unidades|usb|usbalm|usbbase|usbcal|usbhid|usuario) [ $tanda = 2 ] || continue ;;
-      u[a-z]*|llamadas|barramenu|sha256) [ $tanda = 3 ] || continue ;;
+      u[a-z]*|barramenu|sha256) [ $tanda = 3 ] || continue ;;
       *) [ $tanda = 2 ] || continue ;;
     esac
     mcopy -i $T/c.img $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS
   done
-  if [ $tanda = 2 ]; then LOTE="$AQUI/nucleo32/semilla.cas"; else LOTE="$USU"; fi
+  if [ $tanda = 2 ]; then LOTE="$AQUI/nucleo32/semilla.cas"; elif [ $tanda = 3 ]; then LOTE="$USU"; else LOTE="$RED_USU"; fi
 fi
 mcopy -i $T/c.img $A/CASTEL.EXE ::
 # (lo de Hispa-Pentium, con B: de 2,88 MB y desde B:: ahí deja CASTEL su
@@ -876,7 +889,7 @@ S=$P/ordenes.sal
 mira "el intérprete de órdenes es un programa del anillo 3 cargado del disco, y lee el teclado por la llamada al sistema" \
   "^lanzo ORDENES.BIN del disco (la tarea [0-9]*, en el anillo 3)" "^Hispa-Pentium: intérprete de órdenes (un programa del anillo 3" \
   "^C:.>ayuda$" "^Las órdenes de Hispa-Pentium:" "^  TYPE archivo "
-mira "VER y MEM" "^Hispa-Pentium 0\.7: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
+mira "VER y MEM" "^Hispa-Pentium 0\.8: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
   "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 3\.$"
 mira "DIR: la raíz y una carpeta, con sus tamaños, sus fechas y lo que queda libre" "^ Directorio de C:.$" "^LEEME    TXT  *118  [0-9/]*  [0-9:]*$" \
   "^TEXTOS  *<DIR>  " "^ *17 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
@@ -943,7 +956,7 @@ DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" ver salir
 S=$P/arranque.sal
 mira "si el cargador se lo dice (-append ordenes), el núcleo arranca con el intérprete de órdenes (y sin módulos de multiboot: todo del disco)" \
   "^memoria: 32 MB, [0-9]* marcos libres; paginación activa; 0 programas de usuario" \
-  "^C:.>ver$" "^Hispa-Pentium 0\.7" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
+  "^C:.>ver$" "^Hispa-Pentium 0\.8" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
 MODULOS= $AQUI/nucleo32/probar.sh "" disco dir ordenes apagar > $P/sindisco.sal 2>&1
 S=$P/sindisco.sal
 mira "sin disco (y sin nada que traiga el cargador), el núcleo lo dice y sigue" "^disco 0: no hay" "^sistema de archivos: no hay" "^no puedo lanzar ORDENES.BIN: no hay disco" "^\[código 5\]"
@@ -1040,7 +1053,7 @@ else ko "ECHO OFF o la @ no callan lo que deben (o callan de más)"; grep -n "lo
 # la historia: lo que queda en la pantalla, quitando lo que borra cada retroceso
 python3 -I $AQUI/nucleo32/pantalla.py < $S > $P/historia.txt
 if [ "$(grep -c '^C:.>eco primera$' $P/historia.txt)" = 2 ] && [ "$(grep -c '^primera$' $S)" = 2 ] && grep -q '^C:.>zco prixeray$' $P/historia.txt \
-    && grep -q "^Orden o nombre de programa desconocido: zco " $S && grep -q '^C:.>ver$' $P/historia.txt && grep -q "^Hispa-Pentium 0\.7" $S; then
+    && grep -q "^Orden o nombre de programa desconocido: zco " $S && grep -q '^C:.>ver$' $P/historia.txt && grep -q "^Hispa-Pentium 0\.8" $S; then
   ok "la historia de la línea: la flecha de arriba trae las órdenes de antes; se corrigen con las flechas, Retroceso, Supr, Inicio y Fin; Esc borra la línea"
 else ko "la historia o la corrección de la línea no van:"; grep -n "primera\|zco\|ver" $P/historia.txt | sed 's/^/        /' | head; fi
 mira "FECHA: la fecha y la hora del reloj del PC" "^Hoy es $(date +%d/%m/%Y) y son las [0-2][0-9]:[0-5][0-9]:[0-5][0-9]\.$"
@@ -1176,11 +1189,11 @@ mira "el menú lanza la Consola" "^escritorio: lanzo .CONSOLA.BIN (la tarea [0-9
 miracap "la Consola: el intérprete de órdenes dentro de una ventana (un terminal): órdenes, un programa, Ctrl+C y la versión" e9 \
   negrita 140 90 152 98 Consola texto 120 116 132 520 "C:\\>eco hola desde la ventana" texto 120 116 132 520 "hola desde la ventana" \
   texto 120 116 132 520 "bucle: doy vueltas sin fin (Ctrl+C para acabar)" texto 120 116 132 520 "^C" \
-  texto 120 116 132 520 "Hispa-Pentium 0.7: un núcleo de 32 bits escrito en Castel." texto 290 572 300 580 Consola
+  texto 120 116 132 520 "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel." texto 290 572 300 580 Consola
 miracap "SALIR acaba el intérprete y la Consola se cierra (su ventana y su botón)" e10 notexto 130 80 160 100 Consola notexto 280 570 310 582 Consola \
   negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas"
 miracap "Configuración: lo que hay (pantalla, memoria), el teclado y el tapiz" e11 negrita 196 126 206 136 "Configuración" \
-  negrita 240 160 256 170 "Hispa-Pentium 0.7" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
+  negrita 240 160 256 170 "Hispa-Pentium 0.8" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
 miracap "el tapiz se cambia desde Configuración (a «Verde»), y se repinta todo el escritorio" e12 rgb 10 10 1F6B52 negrita 30 570 46 580 Inicio \
   negrita 196 126 206 136 "Configuración"
 miracap "el botón de cerrar acaba el Bloc de notas (sin cambios pendientes): ni ventana ni botón en la barra" e13 \
@@ -1258,7 +1271,7 @@ miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 178 16
   texto 180 196 188 204 ".."
 miracap "y dos clics en un texto lo abren con el Bloc de notas" b11 negrita 198 142 206 150 "\\LEEME.TXT - Bloc de notas" \
   texto 178 224 186 232 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
-miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.7" \
+miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.8" \
   texto 196 294 204 302 "Copyright (C) 2026 Carlos Sanz y contribuidores."
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
@@ -1306,7 +1319,7 @@ else ko "modo_grafico.py no deja bien la cabecera multiboot: $(tail -1 $G/mg.txt
 if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/grub/i386-pc ] && command -v parted > /dev/null; then
   if $AQUI/nucleo32/usb.sh $G/usb.img > $G/usb.txt 2>&1; then
     rm -f $G/monu
-    qemu-system-i386 -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb.sal -no-reboot -device qemu-xhci \
+    qemu-system-i386 -nic none -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb.sal -no-reboot -device qemu-xhci \
       -drive file=$G/usb.img,format=raw,if=none,id=u,snapshot=on -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
     QPID=$!
     monu() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$G/monu > /dev/null 2>&1; sleep "${2:-0.3}"; }
@@ -1320,7 +1333,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 11 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 15 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
@@ -1329,7 +1342,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     else ko "en la memoria USB, el Bloc de notas no se lanza desde el menú:"; sed 's/^/        /' $G/cap.txt | head -3; fi
     # la entrada de 1024 x 600 (la tercera): el modo lo pide la cabecera de ESCRIT6.BIN
     rm -f $G/monu
-    qemu-system-i386 -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb6.sal -no-reboot -device qemu-xhci \
+    qemu-system-i386 -nic none -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb6.sal -no-reboot -device qemu-xhci \
       -drive file=$G/usb.img,format=raw,if=none,id=u,snapshot=on -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
     QPID=$!
     for ((i = 0; i < 40; i++)); do [ -S $G/monu ] && break; sleep 0.1; done
@@ -1344,7 +1357,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     MTOOLS_SKIP_CHECK=1 mtype -i $G/usb.img@@1M ::/boot/grub/grub.cfg > $G/grub.cfg 2> /dev/null
     if grep -q "a la medida de la pantalla" $G/grub.cfg && grep -q "^  set gfxpayload=auto$" $G/grub.cfg && grep -q "^  videoinfo$" $G/grub.cfg \
       && [ "$(grep -c "^  multiboot /ESCRIT" $G/grub.cfg)" = 6 ] && grep -q "multiboot /ESCRIT13.BIN" $G/grub.cfg \
-      && [ "$(grep -c "escritura=usb unidad=X registro" $G/grub.cfg)" = 7 ] && grep -q "multiboot /ESCRIT8.BIN escritorio sindisco sinusb$" $G/grub.cfg; then
+      && [ "$(grep -c "escritura=usb unidad=X registro" $G/grub.cfg)" = 7 ] && grep -q "multiboot /ESCRIT8.BIN escritorio sindisco sinusb sinred$" $G/grub.cfg; then
       ok "el menú de GRUB: el escritorio a 800 x 600, «a la medida de la pantalla» (gfxpayload=auto), a 1024 x 600, 1366 x 768 y 1024 x 768, uno sin tocar el USB ni los discos, y los modos de vídeo de la BIOS (videoinfo); las demás, con «escritura=usb unidad=X registro»"
     else ko "el menú de GRUB de la memoria USB no trae las entradas nuevas"; fi
   else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
@@ -1567,7 +1580,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
       case $hc in xhci) dev="qemu-xhci,id=u"; que="xHCI" ;; ehci) dev="usb-ehci,id=u"; que="EHCI" ;; esac
       cp $G/usb.img $N/g$hc.img
       rm -f $G/monu
-      qemu-system-i386 -m 64 -machine pc,i8042=off -display none -monitor unix:$G/monu,server,nowait -serial file:$N/g$hc.sal -no-reboot -device $dev \
+      qemu-system-i386 -nic none -m 64 -machine pc,i8042=off -display none -monitor unix:$G/monu,server,nowait -serial file:$N/g$hc.sal -no-reboot -device $dev \
         -drive file=$N/g$hc.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1 -device usb-kbd,bus=u.0 -device usb-mouse,bus=u.0 > /dev/null 2>&1 &
       QPID=$!
       monu() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$G/monu > /dev/null 2>&1; sleep "${2:-0.3}"; }
@@ -1595,7 +1608,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     # la sexta entrada, «sin tocar el USB ni los discos»: como la 0.5 (con el
     # teclado y el ratón PS/2, y los programas de la unidad en memoria)
     rm -f $G/monu
-    qemu-system-i386 -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$N/gsin.sal -no-reboot -device qemu-xhci \
+    qemu-system-i386 -nic none -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$N/gsin.sal -no-reboot -device qemu-xhci \
       -drive file=$G/usb.img,format=raw,if=none,id=u,snapshot=on -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
     QPID=$!
     for ((i = 0; i < 40; i++)); do [ -S $G/monu ] && break; sleep 0.1; done
@@ -1605,9 +1618,9 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 11 archivos que ha traído el cargador hacen de unidad M:" $S \
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 15 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
-      ok "la entrada «sin tocar el USB ni los discos»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
+      ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
   else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
 else
@@ -1739,7 +1752,7 @@ tabla() { parted -s $1 unit s print 2> /dev/null | sed -n '/^Partition Table/p; 
 # 1. un disco SATA en blanco: la bienvenida, la ayuda, elegir el disco, instalar
 truncate -s 300M $Z/blanco.img
 instala $Z/blanco.img blanco ":texto i1" ":tecla f1" ":texto i2" ":tecla ret" ":tecla ret" ":texto i3" ":tecla ret" ":texto i4" ":tecla ret" ":pausa 5" ":texto i5" ":tecla ret"
-if grep -q "Instalación de Hispa-Pentium 0.7" $Z/i1.txt && grep -q "Bienvenido a la instalación de Hispa-Pentium" $Z/i1.txt && grep -q "INTRO=Continuar   F1=Ayuda   F3=Salir" $Z/i1.txt \
+if grep -q "Instalación de Hispa-Pentium 0.8" $Z/i1.txt && grep -q "Bienvenido a la instalación de Hispa-Pentium" $Z/i1.txt && grep -q "INTRO=Continuar   F1=Ayuda   F3=Salir" $Z/i1.txt \
   && grep -q "La memoria USB de arranque no se toca" $Z/i1.txt && grep -q "^|   Ayuda$" $Z/i2.txt && grep -q "hay que confirmarlo dos veces" $Z/i2.txt; then
   ok "INSTALAR: la pantalla azul de bienvenida (el título, el pie con INTRO=Continuar, F1=Ayuda y F3=Salir) y la ayuda (F1)"
 else ko "INSTALAR: la bienvenida o la ayuda no salen como deben:"; sed 's/^/        /' $Z/i1.txt | head -8; fi
@@ -1889,7 +1902,7 @@ espera_menu() {    # espera (hasta 15 s) a que el menú de GRUB esté en la pant
 }
 desde_disco() {    # arranca solo del disco $1 (SATA); lo que sale, a $2
   rm -f $Z/mon
-  qemu-system-i386 -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$2 -no-reboot -rtc base=localtime \
+  qemu-system-i386 -nic none -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$2 -no-reboot -rtc base=localtime \
     -device ahci,id=sata -drive id=dsata,file=$1,format=raw,if=none -device ide-hd,drive=dsata,bus=sata.0,bootindex=1 > /dev/null 2>&1 &
   QPID=$!
   for ((i = 0; i < 40; i++)); do [ -S $Z/mon ] && break; sleep 0.1; done
@@ -1899,7 +1912,7 @@ for hc in xhci ehci; do
   cp $G/usb.img $Z/u$hc.img
   rm -f $Z/d$hc.img; truncate -s 2G $Z/d$hc.img
   rm -f $Z/mon
-  qemu-system-i386 -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$Z/i$hc.sal -no-reboot -rtc base=localtime -device $dev \
+  qemu-system-i386 -nic none -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$Z/i$hc.sal -no-reboot -rtc base=localtime -device $dev \
     -drive file=$Z/u$hc.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1 \
     -device ahci,id=sata -drive id=dsata,file=$Z/d$hc.img,format=raw,if=none -device ide-hd,drive=dsata,bus=sata.0,bootindex=2 > /dev/null 2>&1 &
   QPID=$!
@@ -1919,8 +1932,8 @@ for hc in xhci ehci; do
   wait $QPID 2> /dev/null; QPID=
   tr -d '\r' < $Z/i$hc.sal | iconv -f CP437 -t UTF-8 > $Z/i$hc.txt
   S=$Z/i$hc.txt
-  if grep -q "Instalar Hispa-Pentium 0.7 en el disco duro" $Z/m$hc.txt && grep -q "^| │\*Instalar Hispa-Pentium 0.7 en el disco duro" $Z/m2$hc.txt; then
-    ok "$que: el menú de la memoria USB trae la entrada «Instalar Hispa-Pentium 0.7 en el disco duro» (la última)"
+  if grep -q "Instalar Hispa-Pentium 0.8 en el disco duro" $Z/m$hc.txt && grep -q "^| │\*Instalar Hispa-Pentium 0.8 en el disco duro" $Z/m2$hc.txt; then
+    ok "$que: el menú de la memoria USB trae la entrada «Instalar Hispa-Pentium 0.8 en el disco duro» (la última)"
   else ko "$que: el menú de la memoria USB no trae la entrada de instalar:"; sed 's/^/        /' $Z/m2$hc.txt | head -14; fi
   mira "$que: arrancando de la memoria USB con «instalar», el núcleo lanza INSTALAR con lo que trae el cargador (la unidad M:) y se instala en el disco SATA" \
     "^usb: controladora $que " "^disco 0: QEMU HARDDISK, 2048 MB, sin FAT (SATA)\.$" "la del sistema, M:$" "^lanzo INSTALAR.BIN del disco" \
@@ -1982,7 +1995,7 @@ for hc in xhci ehci; do
     miracap "al aceptar: «Todo listo», con el saludo; y el reloj de la barra ya marca la hora puesta (el reloj del PC)" a3$hc \
       negrita 154 98 162 106 "Todo listo" negrita 112 176 120 184 "¡Hola, Carlos!" negrita 454 427 462 435 "Empezar" negrita 740 570 760 584 "07:45"
     miracap "el menú Inicio saluda con el nombre («Hola, Carlos») y dice la versión; LEEME.TXT, en los documentos" a4$hc \
-      negrita 54 194 62 202 "Hola, Carlos" texto 54 212 62 220 "Hispa-Pentium, versión 0.7" texto 208 279 216 287 "LEEME.TXT"
+      negrita 54 194 62 202 "Hola, Carlos" texto 54 212 62 220 "Hispa-Pentium, versión 0.8" texto 208 279 216 287 "LEEME.TXT"
     if grep -q "^asistente: guardado HISPA.INI (Carlos, Toshiba)$" $S && [ "$(tr -d '\r' < $Z/ini.txt | tr '\n' '|')" = "[hispa]|usuario=Carlos|equipo=Toshiba|teclado=es|modo=1024x600|" ] \
       && grep -q "^set modo=1024x600x32,1024x600,auto$" $Z/cfg.txt && [ "$(grep -c '^set modo=' $Z/cfg.txt)" = 1 ] && [ $sano = 0 ]; then
       ok "lo guardado: C:\\HISPA\\HISPA.INI (usuario, equipo, teclado y modo) y la medida de la pantalla en el menú de arranque (GRUB.CFG); el disco, sano"
@@ -2014,12 +2027,12 @@ for hc in xhci ehci; do
     teclas c l s ret p a q u e t e s spc l i s t a ret p a q u e t e s spc c o m p r u e b a ret
     espera_a "^Los archivos de los\|no est.n como se instalaron" 60 $Z/b$hc.sal; sleep 0.5; textoz b2$hc
     monz quit 0.5; wait $QPID 2> /dev/null; QPID=
-    if grep -q "Hispa-Pentium 0.7: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
+    if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -8; fi
-    if grep -q "^|  base      0.7     El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|8 paquetes\.$" $Z/b2$hc.txt \
-      && grep -q "^|Los archivos de los 8 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
-      ok "PAQUETES en el sistema recién instalado: LISTA dice los 8 paquetes del sistema (base, oficina...) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
+    if grep -q "^|  base      0.8     El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|9 paquetes\.$" $Z/b2$hc.txt \
+      && grep -q "^|Los archivos de los 9 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
+      ok "PAQUETES en el sistema recién instalado: LISTA dice los 9 paquetes del sistema (base, oficina...) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -12; fi
     # la oficina, en el disco instalado: el grupo «Oficina» del menú Inicio
     # (Facturas, con C:\\HISPA\\HVPRUN.BIN) y Mi equipo abriendo Cuentas de C:\\OFICINA
@@ -2364,6 +2377,88 @@ else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin los paquetes)"
 fi
 
+# ------------------------------------------------- 13. Hispa-Pentium 0.8: la red
+# La red: el servicio de red (RED.BIN, en el anillo 3) con las tarjetas que
+# da QEMU (-netdev user: DHCP, la puerta 10.0.2.2, que es esta máquina, y el
+# DNS 10.0.2.3), IPCONFIG, PING y DESCARGAR contra un servidor HTTP de aquí
+# (nucleo32/servidor_prueba.py), y el icono de la red en el escritorio.
+if parte08 red; then
+echo "== Hispa-Pentium 0.8: la red (el servicio de red, IPCONFIG, PING, DESCARGAR y el icono) =="
+R=$P/n08r
+mkdir -p $R/srv $G
+python3 -I $AQUI/nucleo32/servidor_prueba.py $R/srv > $R/srv.txt 2>&1 &
+SPID=$!
+for _ in $(seq 50); do [ -s $R/srv/puerto ] && break; sleep 0.1; done
+U=http://10.0.2.2:$(cat $R/srv/puerto 2> /dev/null)
+if $AQUI/nucleo32/disco.sh $R/d.img 16 red > $R/disco.txt 2>&1; then
+# la e1000 (la de QEMU por omisión, la 82540EM)
+cp $R/d.img $R/e.img
+ESCRIBE=1 DISCO=$R/e.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 2" "ping -n 3 10.0.2.2" ":pausa 3" \
+  "descargar $U/grande.bin" ":pausa 5" "descargar $U/trozos.bin" ":pausa 4" "descargar $U/cierra.bin" ":pausa 3" "descargar $U/redirige -" ":pausa 3" \
+  "descargar $U/nohay" ":pausa 2" "descargar $U/ultima.txt c:\\textos\\otra.txt" ":pausa 2" "descargar https://10.0.2.2/" "descargar" \
+  "descargar $U/lento.bin" ":pausa 3" ":tecla ctrl-c" ":pausa 2" "ipconfig /todo" ":pausa 2" "mem" "apagar" > $R/e1000.sal 2>&1
+tr -d '\r' < $R/e1000.sal > $R/e1000.txt
+S=$R/e1000.txt
+mira "el servicio de red se pone en marcha solo (la primera vez que se pide algo), encuentra la e1000 y pide la IP por DHCP" \
+  "^red: Hispa-Pentium 0.8: el servicio de red (RED.BIN)$" "^red: tarjeta 8086:100E en el bus PCI 00:03$" "^red: enlace: sí (1000 Mbit/s)$" \
+  "^red: DHCP: IP 10.0.2.15, máscara 255.255.255.0, puerta 10.0.2.2, DNS 10.0.2.3$"
+mira "IPCONFIG: la tarjeta, su MAC, el enlace, la IP, la máscara, la puerta de enlace, el DNS y el servidor de DHCP" \
+  "^  Tarjeta . . . . . . . : Intel PRO/1000 (e1000) (8086:100E, IRQ [0-9]*)$" "^  MAC . . . . . . . . . : 52:54:00:12:34:56$" "^  Enlace  . . . . . . . : sí, a 1000 Mbit/s$" \
+  "^  Estado  . . . . . . . : conectada$" "^  Dirección IP  . . . . : 10.0.2.15$" "^  Máscara de subred . . : 255.255.255.0$" "^  Puerta de enlace  . . : 10.0.2.2$" \
+  "^  Servidor DNS  . . . . : 10.0.2.3$" "^  DHCP  . . . . . . . . : de 10.0.2.2, 86400 s"
+mira "PING a la puerta de enlace: tres respuestas y ninguna perdida" "^Haciendo ping a 10.0.2.2 con 32 octetos de datos:$" \
+  "^Respuesta desde 10.0.2.2: octetos=32 tiempo[<=][0-9]* ms TTL=[0-9]*$" "^    Paquetes: enviados = 3, recibidos = 3, perdidos = 0 (0% perdidos)$"
+[ "$(grep -c "^Respuesta desde 10.0.2.2" $S)" = 3 ] || ko "PING: no son tres respuestas"
+mira "DESCARGAR: con Content-Length, en trozos (chunked), hasta que se cierra, una redirección (302), un 404 y a otra carpeta" \
+  "^Guardando GRANDE.BIN (409600 octetos)\.*$" "^Hecho: GRANDE.BIN, 409600 octetos en [0-9]*,[0-9] s" "^Hecho: TROZOS.BIN, 150001 octetos" "^Hecho: CIERRA.BIN, 70000 octetos" \
+  "^Redirigido a /ultima.txt$" "^version=0.8$" "^DESCARGAR: no se ha bajado nada (el servidor ha dicho 404)\.$" "^Hecho: c:.textos.otra.txt, 41 octetos" \
+  "^DESCARGAR: HTTPS (con cifrado) todavía no lo sabe hacer Hispa-Pentium; solo http://\.$" "^Uso: DESCARGAR http://servidor\[:puerto\]/camino \[archivo\]$"
+mira "Ctrl+C en medio de una descarga que no llega: el programa acaba, y la red sigue (IPCONFIG /TODO, con lo que ha apuntado el servicio)" \
+  "^Guardando LENTO.BIN (1000000 octetos)^C$" "^Lo que ha apuntado el servicio de red:$" "^red: DHCP: IP 10.0.2.15" "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 4\.$"
+iguales=1
+for f in GRANDE.BIN:grande.bin TROZOS.BIN:trozos.bin CIERRA.BIN:cierra.bin TEXTOS/OTRA.TXT:ultima.txt; do
+  saca $R/e.img ${f%%:*} $R/x.bin && cmp -s $R/x.bin $R/srv/${f##*:} || { iguales=0; echo "        ${f%%:*} no es igual"; }
+done
+sano $R/e.img
+if [ $iguales = 1 ] && grep -q "^$R/e.img: [0-9]* files" $P/fsck.txt; then ok "lo descargado, en el disco, es igual octeto a octeto que lo del servidor (los cuatro archivos), y el disco queda sano"
+else ko "lo descargado no es igual que lo del servidor, o el disco no queda sano"; sed 's/^/        /' $P/fsck.txt | head -4; fi
+# la RTL8139, y el DNS de QEMU (que pregunta al de esta máquina)
+cp $R/d.img $R/r.img
+ESCRIBE=1 DISCO=$R/r.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-netdev user,id=n0 -device rtl8139,netdev=n0" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 2" \
+  "descargar $U/grande.bin" ":pausa 5" "ping -n 1 nombre.que.no.existe.invalid" ":pausa 4" "ping -n 1 actualiza.clicgest.es" ":pausa 4" "apagar" > $R/rtl.sal 2>&1
+tr -d '\r' < $R/rtl.sal > $R/rtl.txt
+S=$R/rtl.txt
+mira "la Realtek RTL8139: IPCONFIG y DESCARGAR" "^  Tarjeta . . . . . . . : Realtek RTL8139 (10EC:8139, IRQ [0-9]*)$" "^  Enlace  . . . . . . . : sí, a 100 Mbit/s$" \
+  "^  Dirección IP  . . . . : 10.0.2.15$" "^Hecho: GRANDE.BIN, 409600 octetos"
+if saca $R/r.img GRANDE.BIN $R/x.bin && cmp -s $R/x.bin $R/srv/grande.bin; then ok "con la RTL8139, lo descargado es igual octeto a octeto"; else ko "con la RTL8139, lo descargado no es igual"; fi
+# (el DNS de QEMU le pregunta al de esta máquina: si esta no sale a la red, no se prueba)
+if getent hosts actualiza.clicgest.es > /dev/null 2>&1; then
+  mira "el DNS (el de QEMU, que pregunta al de esta máquina): un nombre que no existe se dice; uno que sí, se resuelve" \
+    "^PING: no se encuentra nombre.que.no.existe.invalid: ese nombre no existe\.$" "^Haciendo ping a actualiza.clicgest.es \[$(getent hosts actualiza.clicgest.es | awk '{print $1}' | head -1)\] con 32 octetos de datos:$"
+else echo "  (esta máquina no resuelve nombres: no se prueba el DNS)"; fi
+# sin tarjeta, y con «sinred»
+DISCO=$R/d.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 2" "ping 10.0.2.2" ":pausa 2" "apagar" > $R/sin.sal 2>&1
+tr -d '\r' < $R/sin.sal > $R/sin.txt
+S=$R/sin.txt
+mira "sin tarjeta de red: el servicio lo dice, y PING también" "^red: no hay ninguna tarjeta de red que se sepa llevar$" \
+  "^  No hay ninguna tarjeta de red que Hispa-Pentium sepa llevar$" "^PING: no se encuentra\|^Error: no hay ninguna tarjeta de red que Hispa-Pentium sepa llevar\.$"
+DISCO=$R/d.img ARRANQUE="ordenes sinred" MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 1" "apagar" > $R/sinred.sal 2>&1
+tr -d '\r' < $R/sinred.sal > $R/sinred.txt
+S=$R/sinred.txt
+if grep -q "^  no hay servicio de red (falta RED.BIN o se arrancó con «sinred»)\.$" $S && ! grep -q "^red:" $S; then ok "con «sinred», ni se pone en marcha el servicio de red (y IPCONFIG lo dice)"
+else ko "con «sinred» se pone en marcha la red:"; sed 's/^/        /' $S | tail -6; fi
+# el escritorio: el servicio, en marcha al arrancar (hay tarjeta), y su icono
+CAPTURAS=$G DISCO=$R/d.img ARRANQUE=escritorio MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ":pausa 5" ":captura r1" ":clic 720 583" ":pausa 1" ":captura r2" > $R/esc.sal 2>&1
+S=$R/esc.sal
+mira "el escritorio pone en marcha el servicio de red (hay una tarjeta) y, con un clic en su icono, dice cómo está" \
+  "^red: Hispa-Pentium 0.8: el servicio de red (RED.BIN)$" "^escritorio: aviso: La red: conectada, con la IP 10.0.2.15\.$"
+miracap "el icono de la red en la bandeja, con la luz verde (conectada), a la izquierda del reloj" r1 rgb 729 587 2ECC40 rgb 725 582 8FDCFF
+miracap "y el aviso de la red, al pulsarlo" r2 texto 230 255 260 280 "La red: conectada, con la IP 10.0.2.15."
+else ko "no se puede hacer el disco de prueba de la red: $(tail -1 $R/disco.txt)"; fi
+kill $SPID 2> /dev/null; wait $SPID 2> /dev/null
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin la red)"
+fi   # la red
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 echo "== $nok bien, $fail mal =="

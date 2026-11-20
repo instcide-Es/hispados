@@ -1,0 +1,218 @@
+; =============================================================================
+;  ured.cas - RED.BIN, el servicio de red de Hispa-Pentium: un programa del
+;  anillo 3 que lleva la tarjeta de red (rtarjeta.cas, ryukon.cas) y la pila
+;  TCP/IP (rpila.cas: Ethernet, ARP, IPv4, ICMP, UDP, DHCP y DNS; rtcp.cas:
+;  TCP), y atiende lo que le piden los programas por medio del núcleo
+;  (red.cas: la llamada 90; los programas usan redes.cas).
+;  Lo pone en marcha el núcleo: al arrancar el escritorio, si hay una tarjeta
+;  de red; con «conred» en la línea del cargador; o la primera vez que un
+;  programa pide algo a la red. No escribe nada en la pantalla: lo que pasa
+;  lo apunta (IPCONFIG /TODO lo enseña) y lo manda por el puerto serie.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ured
+
+    modelo usuario
+
+    importar Llamadas, Rbase, Rtarjeta, Rpila, Rtcp, Mem32, Textos32
+
+    ; lo que dice el icono (red.cas)
+    constante RED_SIN_TARJETA = 1
+    constante RED_SIN_CABLE = 2
+    constante RED_BUSCANDO = 3
+    constante RED_CONECTADA = 4
+
+    variable pedido: arreglo [64 + MAX_DATOS] de byte
+    variable trama: arreglo [1536] de byte
+    variable nombre: arreglo [256] de byte
+    variable info: Info_red
+    variable enlace: bool
+    variable estado_dicho, ip_dicha: nat32
+
+    ; lo que falta para usar la red (0: nada)
+    función falta(): nat32
+        si tarjeta = T_NINGUNA entonces devolver SIN_TARJETA fin
+        si no enlace entonces devolver SIN_CABLE fin
+        si mi_ip = 0 entonces devolver SIN_IP fin
+        devolver 0
+    fin
+
+    función cómo_está(): nat32
+        si tarjeta = T_NINGUNA entonces devolver RED_SIN_TARJETA fin
+        si no enlace entonces devolver RED_SIN_CABLE fin
+        si mi_ip = 0 entonces devolver RED_BUSCANDO fin
+        devolver RED_CONECTADA
+    fin
+
+    función dilo()
+        variable e, a: nat32
+        e := cómo_está()
+        si e <> estado_dicho o mi_ip <> ip_dicha entonces
+            a := 0xFFFFFFFF
+            si tarjeta <> T_NINGUNA entonces a := pci_tarjeta fin
+            decir_estado(e, mi_ip, a)
+            estado_dicho := e
+            ip_dicha := mi_ip
+        fin
+    fin
+
+    función mira_enlace()
+        variable e: bool
+        si tarjeta = T_NINGUNA entonces devolver fin
+        e := hay_enlace()
+        si e = enlace entonces devolver fin
+        enlace := e
+        si e entonces
+            apunta4("enlace: sí (%u Mbit/s)", velocidad(), 0, 0, 0)
+            dhcp_empezar()
+        sino
+            apunta("enlace: no (¿el cable?)")
+            dhcp_parar()
+            pila_sin_cable()
+            tcp_sin_red(SIN_CABLE)
+        fin
+    fin
+
+    función llena_info()
+        llenar(puntero(dirección(info)), tamaño(Info_red), 0)
+        info.estado := cómo_está()
+        copiar_memoria(dirección(info.mac[0]), mac, 6)
+        info.ip := mi_ip
+        info.máscara := máscara
+        info.puerta := puerta
+        info.dns := dns
+        info.servidor := servidor
+        info.concesión := concesión
+        si mi_ip <> 0 entonces info.hace := (ahora() - dada_en) div 100 fin
+        si enlace entonces info.velocidad := velocidad() fin
+        info.recibidas := recibidas
+        info.enviadas := enviadas
+        info.errores := errores
+        copiar_hasta(dirección(info.tarjeta[0]), nombre_tarjeta, 48)
+        info.pci := pci_tarjeta
+        info.id_pci := id_tarjeta
+        info.irq := irq_tarjeta
+    fin
+
+    función atiende(p: puntero a Pedido_red, datos: puntero a byte)
+        variable h, s, orden, f, n, r: nat32
+        h := p.hueco
+        s := p.serie
+        orden := p.cab[0]
+        si orden = AVISO_ACABÓ entonces
+            tcp_acabó(p.tarea)
+            udp_acabó(p.tarea)
+            devolver
+        fin
+        f := falta()
+        según nat16(orden)
+            caso O_ESTADO:
+                llena_info()
+                contestar(h, s, 0, 0, 0, puntero(dirección(info)), tamaño(Info_red))
+            caso O_REGISTRO:
+                n := registro_largo
+                si n > p.cabe entonces n := p.cabe fin
+                contestar(h, s, n, 0, 0, dirección(registro[registro_largo - n]), n)
+            caso O_RENOVAR:
+                si tarjeta = T_NINGUNA entonces
+                    contestar(h, s, SIN_TARJETA, 0, 0, nulo, 0)
+                sino si no enlace entonces
+                    contestar(h, s, SIN_CABLE, 0, 0, nulo, 0)
+                sino
+                    dhcp_empezar()
+                    contestar(h, s, 0, 0, 0, nulo, 0)
+                fin
+            caso O_RESOLVER:
+                si f <> 0 entonces
+                    contestar(h, s, f, 0, 0, nulo, 0)
+                sino
+                    n := p.largo
+                    si n > 255 entonces n := 255 fin
+                    copiar_memoria(dirección(nombre[0]), datos, n)
+                    nombre[n] := 0
+                    r := p.cab[2]
+                    si r = 0 entonces r := 500 fin
+                    resolver(h, s, dirección(nombre[0]), r)
+                fin
+            caso O_PING:
+                si f <> 0 entonces contestar(h, s, f, 0, 0, nulo, 0) sino hacer_ping(h, s, p.cab[1], p.cab[2], p.cab[3], p.cab[4]) fin
+            caso O_CONECTAR:
+                si f <> 0 entonces contestar(h, s, f, 0, 0, nulo, 0) sino conectar(p.tarea, h, s, p.cab[1], p.cab[2], p.cab[3]) fin
+            caso O_ENVIAR:
+                si es_tcp(p.cab[1]) entonces
+                    Rtcp.enviar(p.cab[1], p.tarea, h, s, datos, p.largo)
+                sino
+                    contestar(h, s, NO_CONEXIÓN, 0, 0, nulo, 0)
+                fin
+            caso O_RECIBIR:
+                si es_tcp(p.cab[1]) entonces
+                    Rtcp.recibir(p.cab[1], p.tarea, h, s, p.cab[2], p.cabe)
+                sino
+                    udp_recibir(p.cab[1], p.tarea, h, s, p.cab[2], p.cabe)
+                fin
+            caso O_CERRAR:
+                si es_tcp(p.cab[1]) entonces r := Rtcp.cerrar(p.cab[1], p.tarea) sino r := udp_cerrar(p.cab[1], p.tarea) fin
+                contestar(h, s, r, 0, 0, nulo, 0)
+            caso O_UDP:
+                si tarjeta = T_NINGUNA entonces
+                    contestar(h, s, SIN_TARJETA, 0, 0, nulo, 0)
+                sino
+                    contestar(h, s, udp_abrir(p.tarea, p.cab[1]), 0, 0, nulo, 0)
+                fin
+            caso O_UDP_ENVIAR:
+                si tarjeta = T_NINGUNA o no enlace entonces
+                    contestar(h, s, f, 0, 0, nulo, 0)
+                sino
+                    contestar(h, s, udp_mandar(p.cab[1], p.tarea, p.cab[2], p.cab[3], datos, p.largo), 0, 0, nulo, 0)
+                fin
+            si no:
+                contestar(h, s, NO_VALE_RED, 0, 0, nulo, 0)
+        fin
+    fin
+
+    función principal()
+        variable p: puntero a Pedido_red
+        variable n, k, espera, tic_visto, enlace_visto: nat32
+        atender_corte(cierto)
+        si apuntarse() <> 0 entonces salir(1) fin
+        apunta("Hispa-Pentium 0.8: el servicio de red (RED.BIN)")
+        si no buscar_tarjeta() entonces
+            apunta("no hay ninguna tarjeta de red que se sepa llevar")
+        fin
+        enlace := falso
+        estado_dicho := 0xFFFFFFFF
+        mira_enlace()
+        dilo()
+        p := puntero(dirección(pedido[0]))
+        espera := 1
+        tic_visto := ahora()
+        enlace_visto := ahora()
+        mientras cierto hacer
+            si tarjeta <> T_NINGUNA entonces
+                atender_tarjeta()
+                k := 0
+                mientras k < 64 hacer
+                    n := recibir_trama(dirección(trama[0]))
+                    si n = 0 entonces romper fin
+                    si Rpila.entrada(dirección(trama[0]), n) = ENTRA_TCP entonces tcp_entra(ent_ip, ent_datos, ent_largo) fin
+                    k := k + 1
+                fin
+            fin
+            si ahora() <> tic_visto entonces
+                tic_visto := ahora()
+                pila_tic()
+                tcp_tic()
+                si ahora() - enlace_visto >= 25 entonces
+                    enlace_visto := ahora()
+                    mira_enlace()
+                fin
+                dilo()
+            fin
+            ; sin tarjeta, se espera mucho (no hay nada que mirar)
+            espera := 1
+            si tarjeta = T_NINGUNA entonces espera := 100 fin
+            si siguiente_pedido(dirección(pedido[0]), espera) entonces atiende(p, dirección(pedido[64])) fin
+        fin
+    fin
+
+fin Ured.

@@ -39,7 +39,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -147,6 +147,8 @@ módulo Escritorio
     variable n_botones: nat32
     variable ancho_botón: ent32
     variable cambios_vistos: nat32
+    variable red_vista: nat32                   ; (los cambios de la red que ya pinta el icono)
+    constante ICONO_RED = 24                    ; lo que se ensancha la bandeja con el icono de la red
     variable minuto_visto: nat32 = 0xFFFFFFFF
     variable segundo_visto: nat32
     variable fondo: nat32                       ; el tapiz: 0, 1 o 2
@@ -475,6 +477,64 @@ módulo Escritorio
     ; -------------------------------------------------------------------------
     ;  La barra de tareas
     ; -------------------------------------------------------------------------
+    ; lo que mide la bandeja: el reloj y, a su izquierda, un hueco por cada
+    ; icono que haya (de izquierda a derecha: las memorias USB, si hay alguna
+    ; enchufada, y la red, si hay servicio de red)
+    función hueco_usb(): ent32
+        si n_usb > 0 entonces devolver ICONO_USB fin
+        devolver 0
+    fin
+
+    función hueco_red(): ent32
+        si estado_red <> RED_NADA entonces devolver ICONO_RED fin
+        devolver 0
+    fin
+
+    función ancho_bandeja(): ent32
+        devolver BANDEJA_ANCHO + hueco_usb() + hueco_red()
+    fin
+
+    ; el icono de la red: una pantalla con su pie y, abajo a la derecha, una
+    ; luz (verde: conectada; ámbar: pidiendo la IP; roja: sin cable; gris:
+    ; sin tarjeta)
+    función pinta_icono_red(ref l: Lienzo, x: ent32, yy: ent32)
+        variable luz, pantalla_c: nat32
+        luz := 0x9AA8B8
+        pantalla_c := 0xB8C4D0
+        según nat16(estado_red)
+            caso RED_CONECTADA:
+                luz := 0x2ECC40
+                pantalla_c := 0x8FDCFF
+            caso RED_BUSCANDO: luz := 0xFFB000
+            caso RED_SIN_CABLE: luz := 0xE53935
+        fin
+        rectángulo(l, x, yy, 15, 11, 0x14336A)
+        rectángulo(l, x + 1, yy + 1, 13, 9, pantalla_c)
+        rectángulo(l, x + 2, yy + 2, 5, 2, BLANCO)
+        rectángulo(l, x + 6, yy + 11, 3, 2, 0x14336A)
+        rectángulo(l, x + 3, yy + 13, 9, 2, 0x14336A)
+        círculo(l, x + 14, yy + 12, 4, 0x14336A)
+        círculo(l, x + 14, yy + 12, 3, luz)
+    fin
+
+    ; con un clic en el icono de la red: cómo está
+    función dice_red()
+        variable t: arreglo [80] de byte
+        variable d: arreglo [4] de nat32
+        según nat16(estado_red)
+            caso RED_CONECTADA:
+                d[0] := ip_red yb 0xFF
+                d[1] := (ip_red >> 8) yb 0xFF
+                d[2] := (ip_red >> 16) yb 0xFF
+                d[3] := ip_red >> 24
+                formatear(t, 80, "La red: conectada, con la IP %u.%u.%u.%u.", d)
+                aviso(t)
+            caso RED_BUSCANDO: aviso("La red: hay cable; pidiendo la IP (DHCP)...")
+            caso RED_SIN_CABLE: aviso("La red: la tarjeta no tiene enlace (¿el cable?).")
+            si no: aviso("La red: no hay tarjeta de red que se sepa llevar.")
+        fin
+    fin
+
     función pinta_barra()
         variable l: puntero a Lienzo
         variable an, x, caben, n: ent32
@@ -498,14 +558,16 @@ módulo Escritorio
         disquete(valor(l), 7, 5, 24)
         texto_negrita(valor(l), 39, 10, "Inicio", 0x1B5E2A)
         texto_negrita(valor(l), 38, 9, "Inicio", BLANCO)
-        ; la bandeja, con el reloj (y, si hay memorias USB, su icono)
+        ; la bandeja, con el reloj y, a su izquierda, los iconos que haya (de
+        ; izquierda a derecha: las memorias USB y la red)
         n_usb := letras_usb(usb_letras)
-        bandeja := BANDEJA_ANCHO
-        si n_usb > 0 entonces bandeja := BANDEJA_ANCHO + ICONO_USB fin
+        bandeja := ancho_bandeja()
         degradado(valor(l), an - bandeja, 2, bandeja, ALTO_BARRA - 2, BANDEJA_ARRIBA, BANDEJA_ABAJO)
         rectángulo(valor(l), an - bandeja, 2, 1, ALTO_BARRA - 2, 0x1A56AC)
         rectángulo(valor(l), an - bandeja + 1, 2, 1, ALTO_BARRA - 2, 0x9AD4FF)
         si n_usb > 0 entonces icono_memoria(valor(l), an - bandeja + 8, 6) fin
+        si hueco_red() > 0 entonces pinta_icono_red(valor(l), an - bandeja + hueco_usb() + 7, 9) fin
+        red_vista := cambios_red
         ahora(f, h)
         d[0] := h >> 11
         d[1] := (h >> 5) yb 63
@@ -669,11 +731,11 @@ módulo Escritorio
             concatenar(saludo, Ajustes.usuario)
             texto_negrita(valor(l), 59, 13, saludo, 0x123F85)
             texto_negrita(valor(l), 58, 12, saludo, BLANCO)
-            texto(valor(l), 58, 30, "Hispa-Pentium, versión 0.7", 0xD3E7FD)
+            texto(valor(l), 58, 30, "Hispa-Pentium, versión 0.8", 0xD3E7FD)
         sino
             texto_negrita(valor(l), 59, 13, "Hispa-Pentium", 0x123F85)
             texto_negrita(valor(l), 58, 12, "Hispa-Pentium", BLANCO)
-            texto(valor(l), 58, 30, "el escritorio, versión 0.7", 0xD3E7FD)
+            texto(valor(l), 58, 30, "el escritorio, versión 0.8", 0xD3E7FD)
         fin
         rectángulo(valor(l), 1, MENÚ_CABEZA, MENÚ_ANCHO - 2, 2, NARANJA)
         ; las dos columnas
@@ -913,7 +975,7 @@ módulo Escritorio
         fin
         degradado(valor(l), 0, 0, 440, 214, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 16, 14, 64)
-        texto_negrita(valor(l), 96, 16, "Hispa-Pentium 0.7", TINTA)
+        texto_negrita(valor(l), 96, 16, "Hispa-Pentium 0.8", TINTA)
         texto(valor(l), 96, 38, "Un núcleo de 32 bits, sin DOS debajo,", TINTA)
         texto(valor(l), 96, 56, "escrito en Castel, con su escritorio.", TINTA)
         texto(valor(l), 96, 74, "De la familia de Hispa-DOS.", TINTA_SUAVE)
@@ -932,7 +994,7 @@ módulo Escritorio
         quita_pulsadores(v_config)
         degradado(valor(l), 0, 0, 460, 280, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 14, 10, 48)
-        texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.7", TINTA)
+        texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.8", TINTA)
         texto(valor(l), 74, 34, "un núcleo de 32 bits escrito en Castel", TINTA_SUAVE)
         rectángulo(valor(l), 14, 66, 432, 1, 0xA9C6EC)
         d[0] := nat32(pantalla.ancho)
@@ -1166,9 +1228,12 @@ módulo Escritorio
                 si ent32(e.a) < INICIO_ANCHO entonces
                     ; «Inicio»: abre el menú (si no se acaba de cerrar con este mismo clic)
                     si no menú_abierto y tics - menú_cerrado_en > 3 entonces abre_menú() fin
-                sino si n_usb > 0 y ent32(e.a) >= pantalla.ancho - bandeja y ent32(e.a) < pantalla.ancho - BANDEJA_ANCHO entonces
+                sino si n_usb > 0 y ent32(e.a) >= pantalla.ancho - bandeja y ent32(e.a) < pantalla.ancho - bandeja + ICONO_USB entonces
                     ; el icono de las memorias USB
                     menú_usb(ent32(e.a))
+                sino si hueco_red() > 0 y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() y ent32(e.a) < pantalla.ancho - bandeja + hueco_usb() + ICONO_RED entonces
+                    ; el icono de la red
+                    dice_red()
                 sino si ent32(e.a) >= BOTONES_X y ancho_botón > 0 entonces
                     n := (ent32(e.a) - BOTONES_X) div ancho_botón
                     si n < ent32(n_botones) entonces
@@ -1288,7 +1353,7 @@ módulo Escritorio
             atiende_cuadro(v_aviso)
             atiende_cuadro(v_acerca)
             atiende_globo()
-            si Ventanas.cambios <> cambios_vistos entonces pinta_barra() fin
+            si Ventanas.cambios <> cambios_vistos o cambios_red <> red_vista entonces pinta_barra() fin
             ; cada segundo: el reloj (si ha cambiado el minuto) y las tareas acabadas
             si tics div HZ <> segundo_visto entonces
                 segundo_visto := tics div HZ

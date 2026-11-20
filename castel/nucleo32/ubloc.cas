@@ -637,7 +637,7 @@ módulo UBloc
             fin
         sino si cuál = M_AYUDA entonces
             aviso_malo := falso
-            Textos32.copiar(aviso, "Bloc de notas de Hispa-Pentium 0.7: un programa escrito en Castel.")
+            Textos32.copiar(aviso, "Bloc de notas de Hispa-Pentium 0.8: un programa escrito en Castel.")
         fin
         pinta_texto()
         pinta_pie()

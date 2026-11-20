@@ -1,0 +1,873 @@
+; =============================================================================
+;  rpila.cas - la pila TCP/IP del servicio de red de Hispa-Pentium (RED.BIN),
+;  menos TCP (rtcp.cas): Ethernet, ARP, IPv4, ICMP (contestar a los ping y
+;  hacerlos), UDP (los puertos de los programas), DHCP (pedir la IP, la
+;  máscara, la puerta y el DNS) y DNS (de un nombre, su IP).
+;  Las IP se guardan como van en la red: el primer octeto, el de abajo
+;  («10.0.2.15» es 0x0F02000A).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Rpila
+
+    importar Rbase, Rtarjeta, Llamadas, Mem32, Textos32
+
+    público constante ENTRA_NADA = 0
+    público constante ENTRA_TCP = 6             ; un segmento TCP para nosotros: ent_ip, ent_datos, ent_largo
+    constante DIFUSIÓN = 0xFFFFFFFF
+
+    ; ---- la configuración ----
+    público variable mi_ip, máscara, puerta, dns, servidor: nat32
+    público variable concesión, dada_en: nat32  ; (segundos; en tics, cuándo)
+    público variable con_dhcp: bool
+    público variable ent_ip: nat32              ; de quien viene lo que ha entrado (TCP)
+    público variable ent_datos: puntero a byte
+    público variable ent_largo: nat32
+
+    variable trama: arreglo [1536] de byte      ; la que se está haciendo para enviar
+    variable ip_id: nat32
+
+    ; =========================================================================
+    ;  Ethernet y ARP
+    ; =========================================================================
+    constante MAX_ARP = 16
+    tipo Vecino = estructura
+        ip: nat32
+        mac: arreglo [6] de byte
+        hay: bool
+        cuándo: nat32                           ; (tics) cuándo se supo; o cuándo se preguntó
+    fin
+    variable vecinos: arreglo [MAX_ARP] de Vecino
+    variable siguiente_vecino: nat32
+
+    ; las tramas que esperan a saber la MAC de su destino
+    constante MAX_COLA = 4
+    variable cola_ip: arreglo [MAX_COLA] de nat32
+    variable cola_largo: arreglo [MAX_COLA] de nat32
+    variable cola_cuándo: arreglo [MAX_COLA] de nat32
+    variable cola: arreglo [MAX_COLA] de arreglo [1536] de byte
+
+    función es_difusión(p: puntero a byte): bool
+        devolver p[0] = 0xFF y p[1] = 0xFF y p[2] = 0xFF y p[3] = 0xFF y p[4] = 0xFF y p[5] = 0xFF
+    fin
+
+    ; manda la trama (ya hecha, con los 14 de Ethernet) a la MAC de destino
+    función a_la_red(t: puntero a byte, n: nat32, destino: puntero a byte)
+        copiar_memoria(t, destino, 6)
+        copiar_memoria(t + 6, mac, 6)
+        enviar_trama(t, n)
+    fin
+
+    función busca_vecino(ip: nat32): nat32
+        variable i: nat32
+        para i desde 0 hasta MAX_ARP - 1 hacer
+            si vecinos[i].hay y vecinos[i].ip = ip entonces devolver i fin
+        fin
+        devolver MAX_ARP
+    fin
+
+    función apunta_vecino(ip: nat32, m: puntero a byte)
+        variable i, k: nat32
+        i := busca_vecino(ip)
+        si i = MAX_ARP entonces
+            i := siguiente_vecino
+            siguiente_vecino := (siguiente_vecino + 1) mod MAX_ARP
+        fin
+        vecinos[i].ip := ip
+        copiar_memoria(dirección(vecinos[i].mac[0]), m, 6)
+        vecinos[i].hay := cierto
+        vecinos[i].cuándo := ahora()
+        ; lo que esperaba a este vecino, ya
+        para k desde 0 hasta MAX_COLA - 1 hacer
+            si cola_largo[k] <> 0 y cola_ip[k] = ip entonces
+                a_la_red(dirección(cola[k][0]), cola_largo[k], m)
+                cola_largo[k] := 0
+            fin
+        fin
+    fin
+
+    función arp(operación: nat32, ip_destino: nat32, mac_destino: puntero a byte)
+        variable t: arreglo [64] de byte
+        llenar(dirección(t[0]), 64, 0)
+        pon16(dirección(t[12]), 0x0806)
+        pon16(dirección(t[14]), 1)              ; Ethernet
+        pon16(dirección(t[16]), 0x0800)         ; IPv4
+        t[18] := 6
+        t[19] := 4
+        pon16(dirección(t[20]), operación)
+        copiar_memoria(dirección(t[22]), mac, 6)
+        pon_ip(dirección(t[28]), mi_ip)
+        si operación = 2 entonces copiar_memoria(dirección(t[32]), mac_destino, 6) fin
+        pon_ip(dirección(t[38]), ip_destino)
+        si operación = 1 entonces
+            llenar(dirección(t[0]), 6, 0xFF)
+            copiar_memoria(dirección(t[6]), mac, 6)
+            enviar_trama(dirección(t[0]), 60)
+        sino
+            a_la_red(dirección(t[0]), 60, mac_destino)
+        fin
+    fin
+
+    función entra_arp(p: puntero a byte, n: nat32)
+        variable op, ip_de, ip_a: nat32
+        si n < 28 o lee16(p) <> 1 o lee16(p + 2) <> 0x0800 entonces devolver fin
+        op := lee16(p + 6)
+        ip_de := lee_ip(p + 14)
+        ip_a := lee_ip(p + 24)
+        si ip_de <> 0 y (busca_vecino(ip_de) < MAX_ARP o ip_a = mi_ip) entonces apunta_vecino(ip_de, p + 8) fin
+        si op = 1 y mi_ip <> 0 y ip_a = mi_ip entonces arp(2, ip_de, p + 8) fin
+    fin
+
+    ; la IP a la que hay que mandar para llegar a «ip» (ella misma, o la puerta)
+    función siguiente_salto(ip: nat32): nat32
+        si ip = DIFUSIÓN o (ip yb máscara) = (mi_ip yb máscara) o puerta = 0 entonces devolver ip fin
+        devolver puerta
+    fin
+
+    ; =========================================================================
+    ;  IPv4
+    ; =========================================================================
+    ; manda un paquete IP con lo que hay en «datos» (n octetos) para «destino»
+    ; con el protocolo «proto». Falso si no se puede (aún sin IP...)
+    público función ip_enviar(destino: nat32, proto: nat32, datos: puntero a byte, n: nat32): bool
+        variable h: puntero a byte
+        variable salto, i, k: nat32
+        si n > 1480 entonces devolver falso fin
+        llenar(dirección(trama[0]), 34, 0)
+        pon16(dirección(trama[12]), 0x0800)
+        h := dirección(trama[14])
+        h[0] := 0x45
+        pon16(h + 2, 20 + n)
+        ip_id := ip_id + 1
+        pon16(h + 4, ip_id)
+        pon16(h + 6, 0x4000)                    ; no partir
+        h[8] := 64
+        h[9] := byte(proto)
+        pon_ip(h + 12, mi_ip)
+        pon_ip(h + 16, destino)
+        pon16(h + 10, suma_ip(h, 20))
+        copiar_memoria(dirección(trama[34]), datos, n)
+        si destino = DIFUSIÓN o destino = (mi_ip ob nob máscara) entonces
+            llenar(dirección(trama[0]), 6, 0xFF)
+            copiar_memoria(dirección(trama[6]), mac, 6)
+            devolver enviar_trama(dirección(trama[0]), 34 + n)
+        fin
+        salto := siguiente_salto(destino)
+        i := busca_vecino(salto)
+        si i < MAX_ARP entonces
+            a_la_red(dirección(trama[0]), 34 + n, dirección(vecinos[i].mac[0]))
+            devolver cierto
+        fin
+        ; a esperar a que conteste por ARP (en la cola; si está llena, la más vieja fuera)
+        k := 0
+        para i desde 0 hasta MAX_COLA - 1 hacer
+            si cola_largo[i] = 0 entonces k := i fin
+        fin
+        si cola_largo[k] <> 0 entonces
+            para i desde 0 hasta MAX_COLA - 1 hacer
+                si cola_cuándo[i] < cola_cuándo[k] entonces k := i fin
+            fin
+        fin
+        copiar_memoria(dirección(cola[k][0]), dirección(trama[0]), 34 + n)
+        cola_largo[k] := 34 + n
+        cola_ip[k] := salto
+        cola_cuándo[k] := ahora()
+        arp(1, salto, nulo)
+        devolver cierto
+    fin
+
+    ; lo que ha llegado de la red. Da ENTRA_TCP si es TCP para nosotros (y
+    ; entonces ent_ip, ent_datos y ent_largo dicen lo que es)
+    público función entrada(p: puntero a byte, n: nat32): nat32
+        variable h: puntero a byte
+        variable hl, total, proto, de, a: nat32
+        si n < 14 entonces devolver ENTRA_NADA fin
+        según nat16(lee16(p + 12))
+            caso 0x0806:
+                entra_arp(p + 14, n - 14)
+                devolver ENTRA_NADA
+            caso 0x0800:
+                ; (abajo)
+            si no:
+                devolver ENTRA_NADA
+        fin
+        h := p + 14
+        si n < 34 o h[0] >> 4 <> 4 entonces devolver ENTRA_NADA fin
+        hl := (nat32(h[0]) yb 15) * 4
+        total := lee16(h + 2)
+        si hl < 20 o total < hl o total > n - 14 entonces devolver ENTRA_NADA fin
+        si suma_ip(h, hl) <> 0 entonces devolver ENTRA_NADA fin
+        ; (los trozos de un paquete partido, no)
+        si lee16(h + 6) yb 0x3FFF <> 0 entonces devolver ENTRA_NADA fin
+        proto := h[9]
+        de := lee_ip(h + 12)
+        a := lee_ip(h + 16)
+        si a <> mi_ip y a <> DIFUSIÓN y a <> (mi_ip ob nob máscara) y no (mi_ip = 0 y proto = 17) entonces devolver ENTRA_NADA fin
+        según nat16(proto)
+            caso 1: entra_icmp(de, h + hl, total - hl, h[8])
+            caso 17: entra_udp(de, h + hl, total - hl)
+            caso 6:
+                si a <> mi_ip entonces devolver ENTRA_NADA fin
+                ent_ip := de
+                ent_datos := h + hl
+                ent_largo := total - hl
+                devolver ENTRA_TCP
+        fin
+        devolver ENTRA_NADA
+    fin
+
+    ; =========================================================================
+    ;  ICMP: contestar a los ping, y hacerlos
+    ; =========================================================================
+    constante MAX_PING = 8
+    tipo Ping = estructura
+        hueco, serie, ip, número, salió, límite: nat32
+        usado: bool
+    fin
+    variable pings: arreglo [MAX_PING] de Ping
+    variable icmp: arreglo [1480] de byte
+
+    función entra_icmp(de: nat32, p: puntero a byte, n: nat32, ttl: nat32)
+        variable i, t: nat32
+        si n < 8 o suma_ip(p, n) <> 0 entonces devolver fin
+        si p[0] = 8 y n <= 1480 entonces
+            ; un ping para nosotros: la misma cosa, de vuelta
+            copiar_memoria(dirección(icmp[0]), p, n)
+            icmp[0] := 0
+            icmp[2] := 0
+            icmp[3] := 0
+            pon16(dirección(icmp[2]), suma_ip(dirección(icmp[0]), n))
+            ip_enviar(de, 1, dirección(icmp[0]), n)
+            devolver
+        fin
+        si p[0] = 0 y lee16(p + 4) = 0x4850 entonces
+            para i desde 0 hasta MAX_PING - 1 hacer
+                si pings[i].usado y pings[i].ip = de y pings[i].número = lee16(p + 6) entonces
+                    t := ahora_us() - pings[i].salió
+                    contestar(pings[i].hueco, pings[i].serie, t, 0, ttl, nulo, 0)
+                    pings[i].usado := falso
+                fin
+            fin
+        fin
+    fin
+
+    ; un ping (un eco de ICMP) a «ip»: la contestación, cuando llegue (o TIEMPO)
+    público función hacer_ping(hueco: nat32, serie: nat32, ip: nat32, número: nat32, espera: nat32, octetos: nat32)
+        variable i, k: nat32
+        si octetos > 1400 entonces octetos := 1400 fin
+        k := MAX_PING
+        para i desde 0 hasta MAX_PING - 1 hacer
+            si no pings[i].usado entonces k := i fin
+        fin
+        si k = MAX_PING entonces
+            contestar(hueco, serie, NO_CONEXIÓN, 0, 0, nulo, 0)
+            devolver
+        fin
+        icmp[0] := 8
+        icmp[1] := 0
+        pon16(dirección(icmp[2]), 0)
+        pon16(dirección(icmp[4]), 0x4850)       ; «HP»
+        pon16(dirección(icmp[6]), número)
+        i := 0
+        mientras i < octetos hacer
+            icmp[8 + i] := byte('a' + i mod 23)
+            i := i + 1
+        fin
+        pon16(dirección(icmp[2]), suma_ip(dirección(icmp[0]), 8 + octetos))
+        pings[k].hueco := hueco
+        pings[k].serie := serie
+        pings[k].ip := ip
+        pings[k].número := número yb 0xFFFF
+        pings[k].límite := ahora() + espera
+        pings[k].usado := cierto
+        pings[k].salió := ahora_us()
+        si no ip_enviar(ip, 1, dirección(icmp[0]), 8 + octetos) entonces
+            pings[k].usado := falso
+            contestar(hueco, serie, SIN_IP, 0, 0, nulo, 0)
+        fin
+    fin
+
+    ; =========================================================================
+    ;  UDP
+    ; =========================================================================
+    constante MAX_UDP = 8
+    público constante PRIMER_UDP = 100          ; (el número de una conexión UDP: 100 + su sitio)
+    constante COLA_UDP = 8192
+    tipo Puerto_udp = estructura
+        usado: bool
+        dueño, puerto: nat32
+        cola: puntero a byte                    ; lo que ha llegado: [IP, puerto, largo, octetos...]
+        metidos, sacados, n: nat32              ; (octetos de la cola: por dónde se mete y se saca, y cuántos hay)
+        p_hueco, p_serie, p_límite, p_cabe: nat32   ; quien espera a que llegue algo
+        esperando: bool
+    fin
+    variable udps: arreglo [MAX_UDP] de Puerto_udp
+    variable udp: arreglo [1480] de byte
+    variable puerto_libre: nat32
+
+    público función udp_enviar(destino: nat32, de_puerto: nat32, a_puerto: nat32, datos: puntero a byte, n: nat32): bool
+        variable s: nat32
+        variable ps: arreglo [12] de byte
+        si n > 1472 entonces devolver falso fin
+        pon16(dirección(udp[0]), de_puerto)
+        pon16(dirección(udp[2]), a_puerto)
+        pon16(dirección(udp[4]), 8 + n)
+        pon16(dirección(udp[6]), 0)
+        copiar_memoria(dirección(udp[8]), datos, n)
+        ; la suma, con la pseudocabecera
+        pon_ip(dirección(ps[0]), mi_ip)
+        pon_ip(dirección(ps[4]), destino)
+        ps[8] := 0
+        ps[9] := 17
+        pon16(dirección(ps[10]), 8 + n)
+        s := cierra_suma(suma_parcial(dirección(udp[0]), 8 + n, suma_parcial(dirección(ps[0]), 12, 0)))
+        si s = 0 entonces s := 0xFFFF fin
+        pon16(dirección(udp[6]), s)
+        devolver ip_enviar(destino, 17, dirección(udp[0]), 8 + n)
+    fin
+
+    función saca_de_cola(u: puntero a Puerto_udp, destino: puntero a byte, n: nat32)
+        variable i: nat32
+        i := 0
+        mientras i < n hacer
+            destino[i] := u.cola[u.sacados]
+            u.sacados := (u.sacados + 1) mod COLA_UDP
+            i := i + 1
+        fin
+        u.n := u.n - n
+    fin
+
+    ; da lo primero de la cola a quien esperaba
+    función udp_entrega(u: puntero a Puerto_udp)
+        variable cab: arreglo [12] de byte
+        variable ip, puerto, largo, dado: nat32
+        si no u.esperando o u.n = 0 entonces devolver fin
+        saca_de_cola(u, dirección(cab[0]), 12)
+        ip := lee_ip(dirección(cab[0]))
+        puerto := lee32(dirección(cab[4]))
+        largo := lee32(dirección(cab[8]))
+        saca_de_cola(u, dirección(udp[0]), largo)
+        dado := largo
+        si dado > u.p_cabe entonces dado := u.p_cabe fin
+        contestar(u.p_hueco, u.p_serie, dado, ip, puerto, dirección(udp[0]), dado)
+        u.esperando := falso
+    fin
+
+    función entra_udp(de: nat32, p: puntero a byte, n: nat32)
+        variable a, largo, i, k: nat32
+        variable u: puntero a Puerto_udp
+        variable cab: arreglo [12] de byte
+        si n < 8 entonces devolver fin
+        a := lee16(p + 2)
+        largo := lee16(p + 4)
+        si largo < 8 o largo > n entonces devolver fin
+        si a = 68 entonces
+            entra_dhcp(p + 8, largo - 8)
+            devolver
+        fin
+        si de = dns y lee16(p) = 53 y a >= 0xC000 y a < 0xC100 entonces
+            entra_dns(p + 8, largo - 8)
+            devolver
+        fin
+        para i desde 0 hasta MAX_UDP - 1 hacer
+            u := dirección(udps[i])
+            si u.usado y u.puerto = a entonces
+                largo := largo - 8
+                si u.n + largo + 12 > COLA_UDP entonces devolver fin     ; (no cabe: fuera)
+                pon_ip(dirección(cab[0]), de)
+                pon32(dirección(cab[4]), lee16(p))
+                pon32(dirección(cab[8]), largo)
+                para k desde 0 hasta 11 hacer
+                    u.cola[u.metidos] := cab[k]
+                    u.metidos := (u.metidos + 1) mod COLA_UDP
+                fin
+                k := 0
+                mientras k < largo hacer
+                    u.cola[u.metidos] := p[8 + k]
+                    u.metidos := (u.metidos + 1) mod COLA_UDP
+                    k := k + 1
+                fin
+                u.n := u.n + largo + 12
+                udp_entrega(u)
+                devolver
+            fin
+        fin
+    fin
+
+    público función udp_abrir(dueño: nat32, puerto: nat32): nat32
+        variable i: nat32
+        variable u: puntero a Puerto_udp
+        si puerto = 0 entonces
+            puerto_libre := puerto_libre + 1
+            si puerto_libre < 50000 o puerto_libre > 60000 entonces puerto_libre := 50000 + (ahora() yb 1023) fin
+            puerto := puerto_libre
+        fin
+        para i desde 0 hasta MAX_UDP - 1 hacer
+            si udps[i].usado y udps[i].puerto = puerto entonces devolver NO_VALE_RED fin
+        fin
+        para i desde 0 hasta MAX_UDP - 1 hacer
+            u := dirección(udps[i])
+            si no u.usado entonces
+                si u.cola = nulo entonces
+                    u.cola := más_memoria(COLA_UDP)
+                    si u.cola = nulo entonces devolver NO_CONEXIÓN fin
+                fin
+                u.usado := cierto
+                u.dueño := dueño
+                u.puerto := puerto
+                u.metidos := 0
+                u.sacados := 0
+                u.n := 0
+                u.esperando := falso
+                devolver PRIMER_UDP + i
+            fin
+        fin
+        devolver NO_CONEXIÓN
+    fin
+
+    función udp_de(s: nat32, dueño: nat32): puntero a Puerto_udp
+        si s < PRIMER_UDP o s >= PRIMER_UDP + MAX_UDP entonces devolver nulo fin
+        si no udps[s - PRIMER_UDP].usado o udps[s - PRIMER_UDP].dueño <> dueño entonces devolver nulo fin
+        devolver dirección(udps[s - PRIMER_UDP])
+    fin
+
+    público función udp_mandar(s: nat32, dueño: nat32, ip: nat32, puerto: nat32, datos: puntero a byte, n: nat32): nat32
+        variable u: puntero a Puerto_udp
+        u := udp_de(s, dueño)
+        si u = nulo entonces devolver NO_CONEXIÓN fin
+        si mi_ip = 0 y ip <> DIFUSIÓN entonces devolver SIN_IP fin
+        si no udp_enviar(ip, u.puerto, puerto, datos, n) entonces devolver NO_VALE_RED fin
+        devolver n
+    fin
+
+    público función udp_recibir(s: nat32, dueño: nat32, hueco: nat32, serie: nat32, espera: nat32, cabe: nat32)
+        variable u: puntero a Puerto_udp
+        u := udp_de(s, dueño)
+        si u = nulo entonces
+            contestar(hueco, serie, NO_CONEXIÓN, 0, 0, nulo, 0)
+            devolver
+        fin
+        u.p_hueco := hueco
+        u.p_serie := serie
+        u.p_cabe := cabe
+        u.p_límite := ahora() + espera
+        u.esperando := cierto
+        udp_entrega(u)
+    fin
+
+    público función udp_cerrar(s: nat32, dueño: nat32): nat32
+        variable u: puntero a Puerto_udp
+        u := udp_de(s, dueño)
+        si u = nulo entonces devolver NO_CONEXIÓN fin
+        si u.esperando entonces contestar(u.p_hueco, u.p_serie, CORTADA_RED, 0, 0, nulo, 0) fin
+        u.usado := falso
+        u.esperando := falso
+        devolver 0
+    fin
+
+    ; lo de una tarea que ha acabado, cerrado
+    público función udp_acabó(dueño: nat32)
+        variable i: nat32
+        para i desde 0 hasta MAX_UDP - 1 hacer
+            si udps[i].usado y udps[i].dueño = dueño entonces
+                udps[i].usado := falso
+                udps[i].esperando := falso
+            fin
+        fin
+    fin
+
+    ; =========================================================================
+    ;  DHCP
+    ; =========================================================================
+    público constante D_PARADO = 0
+    público constante D_BUSCANDO = 1            ; DISCOVER mandado
+    público constante D_PIDIENDO = 2            ; REQUEST mandado
+    público constante D_HECHO = 3
+    público variable dhcp_estado: nat32
+    variable dhcp_xid, dhcp_próximo, dhcp_intentos, dhcp_ofrecida, dhcp_servidor: nat32
+    variable dhcp: arreglo [548] de byte
+
+    función dhcp_mensaje(clase_m: nat32): nat32
+        variable n: nat32
+        llenar(dirección(dhcp[0]), 548, 0)
+        dhcp[0] := 1
+        dhcp[1] := 1
+        dhcp[2] := 6
+        pon32(dirección(dhcp[4]), dhcp_xid)
+        pon16(dirección(dhcp[10]), 0x8000)      ; que contesten a todos (aún no hay IP)
+        copiar_memoria(dirección(dhcp[28]), mac, 6)
+        pon32(dirección(dhcp[236]), 0x63825363)
+        n := 240
+        dhcp[n] := 53
+        dhcp[n + 1] := 1
+        dhcp[n + 2] := byte(clase_m)
+        n := n + 3
+        dhcp[n] := 61                           ; quién soy: la MAC
+        dhcp[n + 1] := 7
+        dhcp[n + 2] := 1
+        copiar_memoria(dirección(dhcp[n + 3]), mac, 6)
+        n := n + 9
+        dhcp[n] := 12                           ; el nombre del equipo
+        dhcp[n + 1] := 13
+        copiar_memoria(dirección(dhcp[n + 2]), "hispa-pentium", 13)
+        n := n + 15
+        dhcp[n] := 55                           ; lo que se pide
+        dhcp[n + 1] := 5
+        dhcp[n + 2] := 1
+        dhcp[n + 3] := 3
+        dhcp[n + 4] := 6
+        dhcp[n + 5] := 51
+        dhcp[n + 6] := 54
+        n := n + 7
+        devolver n
+    fin
+
+    función dhcp_manda(clase_m: nat32)
+        variable n: nat32
+        n := dhcp_mensaje(clase_m)
+        si clase_m = 3 entonces
+            dhcp[n] := 50
+            dhcp[n + 1] := 4
+            pon_ip(dirección(dhcp[n + 2]), dhcp_ofrecida)
+            n := n + 6
+            si dhcp_servidor <> 0 entonces
+                dhcp[n] := 54
+                dhcp[n + 1] := 4
+                pon_ip(dirección(dhcp[n + 2]), dhcp_servidor)
+                n := n + 6
+            fin
+        fin
+        dhcp[n] := 255
+        n := n + 1
+        si n < 300 entonces n := 300 fin
+        udp_enviar(DIFUSIÓN, 68, 67, dirección(dhcp[0]), n)
+    fin
+
+    ; pide la IP desde el principio
+    público función dhcp_empezar()
+        dhcp_xid := (ahora() * 2654435761) xob lee32(dirección(mac[2]))
+        dhcp_estado := D_BUSCANDO
+        dhcp_intentos := 0
+        dhcp_servidor := 0
+        dhcp_ofrecida := 0
+        mi_ip := 0
+        con_dhcp := cierto
+        dhcp_manda(1)
+        dhcp_próximo := ahora() + 200
+        apunta("DHCP: pidiendo la IP")
+    fin
+
+    función entra_dhcp(p: puntero a byte, n: nat32)
+        variable i, clase_m, op, largo, ofrecida, srv, m, r, d, c: nat32
+        si n < 240 o p[0] <> 2 o lee32(p + 4) <> dhcp_xid o lee32(p + 236) <> 0x63825363 entonces devolver fin
+        si comparar_memoria(p + 28, mac, 6) <> 0 entonces devolver fin
+        ofrecida := lee_ip(p + 16)
+        clase_m := 0
+        srv := 0
+        m := 0
+        r := 0
+        d := 0
+        c := 0
+        i := 240
+        mientras i < n hacer
+            op := p[i]
+            si op = 255 entonces romper fin
+            si op = 0 entonces
+                i := i + 1
+                seguir
+            fin
+            si i + 1 >= n entonces romper fin
+            largo := p[i + 1]
+            si i + 2 + largo > n entonces romper fin
+            según nat16(op)
+                caso 53: clase_m := p[i + 2]
+                caso 54: si largo >= 4 entonces srv := lee_ip(p + i + 2) fin
+                caso 1: si largo >= 4 entonces m := lee_ip(p + i + 2) fin
+                caso 3: si largo >= 4 entonces r := lee_ip(p + i + 2) fin
+                caso 6: si largo >= 4 entonces d := lee_ip(p + i + 2) fin
+                caso 51: si largo >= 4 entonces c := lee32(p + i + 2) fin
+            fin
+            i := i + 2 + largo
+        fin
+        si clase_m = 2 y dhcp_estado = D_BUSCANDO entonces
+            ; una oferta: se pide
+            dhcp_ofrecida := ofrecida
+            dhcp_servidor := srv
+            dhcp_estado := D_PIDIENDO
+            dhcp_intentos := 0
+            dhcp_manda(3)
+            dhcp_próximo := ahora() + 200
+        sino si clase_m = 5 y (dhcp_estado = D_PIDIENDO o dhcp_estado = D_HECHO) entonces
+            mi_ip := ofrecida
+            máscara := m
+            si máscara = 0 entonces máscara := 0x00FFFFFF fin
+            puerta := r
+            dns := d
+            si dns = 0 entonces dns := puerta fin
+            servidor := srv
+            concesión := c
+            dada_en := ahora()
+            dhcp_estado := D_HECHO
+            ; renovarla a la mitad (pero no antes de un minuto ni después de un día)
+            si c = 0 o c > 172800 entonces c := 172800 fin
+            si c < 120 entonces c := 120 fin
+            dhcp_próximo := ahora() + (c div 2) * 100
+            apunta_ip()
+            ; que la red sepa quién somos (y quien la tenga ya, que conteste)
+            arp(1, mi_ip, nulo)
+            si puerta <> 0 entonces arp(1, puerta, nulo) fin
+        sino si clase_m = 6 entonces
+            apunta("DHCP: el servidor ha dicho que no (NAK): otra vez desde el principio")
+            dhcp_empezar()
+        fin
+    fin
+
+    función apunta_ip()
+        variable a, b, c, d: arreglo [16] de byte
+        ip_texto(mi_ip, a)
+        ip_texto(máscara, b)
+        ip_texto(puerta, c)
+        ip_texto(dns, d)
+        apunta4("DHCP: IP %s, máscara %s, puerta %s, DNS %s", nat32(dirección(a[0])), nat32(dirección(b[0])), nat32(dirección(c[0])), nat32(dirección(d[0])))
+    fin
+
+    ; lo del DHCP que toca con el tiempo
+    función dhcp_tic()
+        variable espera: nat32
+        si dhcp_estado = D_PARADO o ahora() < dhcp_próximo entonces devolver fin
+        según nat16(dhcp_estado)
+            caso D_BUSCANDO:
+                dhcp_intentos := dhcp_intentos + 1
+                dhcp_manda(1)
+            caso D_PIDIENDO:
+                dhcp_intentos := dhcp_intentos + 1
+                si dhcp_intentos > 4 entonces
+                    dhcp_empezar()
+                    devolver
+                fin
+                dhcp_manda(3)
+            caso D_HECHO:
+                ; renovar: se pide la misma
+                dhcp_ofrecida := mi_ip
+                dhcp_estado := D_PIDIENDO
+                dhcp_intentos := 0
+                dhcp_manda(3)
+        fin
+        espera := 200 << dhcp_intentos
+        si dhcp_intentos > 3 entonces espera := 1600 fin
+        dhcp_próximo := ahora() + espera
+    fin
+
+    público función dhcp_parar()
+        dhcp_estado := D_PARADO
+        mi_ip := 0
+    fin
+
+    ; =========================================================================
+    ;  DNS
+    ; =========================================================================
+    constante MAX_DNS = 8
+    tipo Pregunta = estructura
+        usado: bool
+        hueco, serie, id, límite, próximo, intentos: nat32
+        nombre: arreglo [128] de byte
+    fin
+    variable preguntas: arreglo [MAX_DNS] de Pregunta
+    variable dns_id: nat32
+    variable dnsm: arreglo [300] de byte
+    ; lo ya sabido
+    tipo Sabido = estructura
+        nombre: arreglo [64] de byte
+        ip, caduca: nat32
+    fin
+    variable sabidos: arreglo [MAX_DNS] de Sabido
+    variable siguiente_sabido: nat32
+
+    función dns_manda(q: puntero a Pregunta)
+        variable n, i, k, l: nat32
+        llenar(dirección(dnsm[0]), 300, 0)
+        pon16(dirección(dnsm[0]), q.id)
+        pon16(dirección(dnsm[2]), 0x0100)       ; que lo busque él (RD)
+        pon16(dirección(dnsm[4]), 1)
+        n := 12
+        i := 0
+        mientras q.nombre[i] <> 0 y n < 280 hacer
+            ; una etiqueta: hasta el punto
+            k := i
+            mientras q.nombre[k] <> 0 y q.nombre[k] <> '.' hacer k := k + 1 fin
+            l := k - i
+            si l > 63 entonces l := 63 fin
+            si l > 0 entonces
+                dnsm[n] := byte(l)
+                copiar_memoria(dirección(dnsm[n + 1]), dirección(q.nombre[i]), l)
+                n := n + 1 + l
+            fin
+            i := k
+            si q.nombre[i] = '.' entonces i := i + 1 fin
+        fin
+        dnsm[n] := 0
+        n := n + 1
+        pon16(dirección(dnsm[n]), 1)            ; A
+        pon16(dirección(dnsm[n + 2]), 1)        ; IN
+        n := n + 4
+        udp_enviar(dns, 0xC000 + (q.id yb 0xFF), 53, dirección(dnsm[0]), n)
+        q.intentos := q.intentos + 1
+        q.próximo := ahora() + 150
+    fin
+
+    público función resolver(hueco: nat32, serie: nat32, nombre: puntero a byte, espera: nat32)
+        variable i, k: nat32
+        variable q: puntero a Pregunta
+        si mi_ip = 0 o dns = 0 entonces
+            contestar(hueco, serie, SIN_IP, 0, 0, nulo, 0)
+            devolver
+        fin
+        para i desde 0 hasta MAX_DNS - 1 hacer
+            si sabidos[i].ip <> 0 y ahora() < sabidos[i].caduca y iguales_sin_caja(dirección(sabidos[i].nombre[0]), nombre) entonces
+                contestar(hueco, serie, 0, sabidos[i].ip, 0, nulo, 0)
+                devolver
+            fin
+        fin
+        k := MAX_DNS
+        para i desde 0 hasta MAX_DNS - 1 hacer
+            si no preguntas[i].usado entonces k := i fin
+        fin
+        si k = MAX_DNS entonces
+            contestar(hueco, serie, NO_CONEXIÓN, 0, 0, nulo, 0)
+            devolver
+        fin
+        q := dirección(preguntas[k])
+        q.usado := cierto
+        q.hueco := hueco
+        q.serie := serie
+        dns_id := dns_id + 1
+        q.id := ((ahora() yb 0xFF) << 8) ob ((dns_id * 8 + k) yb 0xFF)
+        q.límite := ahora() + espera
+        q.intentos := 0
+        copiar_hasta(dirección(q.nombre[0]), nombre, 128)
+        dns_manda(q)
+    fin
+
+    ; salta un nombre (con sus etiquetas o un puntero de compresión)
+    función salta_nombre(p: puntero a byte, i: nat32, n: nat32): nat32
+        mientras i < n hacer
+            si p[i] = 0 entonces devolver i + 1 fin
+            si p[i] yb 0xC0 = 0xC0 entonces devolver i + 2 fin
+            i := i + 1 + p[i]
+        fin
+        devolver n
+    fin
+
+    función entra_dns(p: puntero a byte, n: nat32)
+        variable i, k, id, preguntas_n, respuestas, clase_m, largo, ip: nat32
+        variable q: puntero a Pregunta
+        si n < 12 entonces devolver fin
+        id := lee16(p)
+        q := nulo
+        para k desde 0 hasta MAX_DNS - 1 hacer
+            si preguntas[k].usado y preguntas[k].id = id entonces q := dirección(preguntas[k]) fin
+        fin
+        si q = nulo entonces devolver fin
+        si lee16(p + 2) yb 0x8000 = 0 entonces devolver fin
+        si lee16(p + 2) yb 15 = 3 entonces
+            contestar(q.hueco, q.serie, NO_RESUELVE, 0, 0, nulo, 0)
+            q.usado := falso
+            devolver
+        fin
+        preguntas_n := lee16(p + 4)
+        respuestas := lee16(p + 6)
+        i := 12
+        mientras preguntas_n > 0 y i < n hacer
+            i := salta_nombre(p, i, n) + 4
+            preguntas_n := preguntas_n - 1
+        fin
+        ip := 0
+        mientras respuestas > 0 y i + 10 <= n hacer
+            i := salta_nombre(p, i, n)
+            si i + 10 > n entonces romper fin
+            clase_m := lee16(p + i)
+            largo := lee16(p + i + 8)
+            i := i + 10
+            si clase_m = 1 y largo = 4 y i + 4 <= n y ip = 0 entonces ip := lee_ip(p + i) fin
+            i := i + largo
+            respuestas := respuestas - 1
+        fin
+        si ip = 0 entonces
+            contestar(q.hueco, q.serie, NO_RESUELVE, 0, 0, nulo, 0)
+        sino
+            contestar(q.hueco, q.serie, 0, ip, 0, nulo, 0)
+            k := siguiente_sabido
+            siguiente_sabido := (siguiente_sabido + 1) mod MAX_DNS
+            copiar_hasta(dirección(sabidos[k].nombre[0]), dirección(q.nombre[0]), 64)
+            sabidos[k].ip := ip
+            sabidos[k].caduca := ahora() + 30000       ; (cinco minutos)
+        fin
+        q.usado := falso
+    fin
+
+    ; =========================================================================
+    ;  Lo que toca con el tiempo, y lo de una tarea que acaba
+    ; =========================================================================
+    público función pila_tic()
+        variable i, t: nat32
+        t := ahora()
+        dhcp_tic()
+        para i desde 0 hasta MAX_PING - 1 hacer
+            si pings[i].usado y t >= pings[i].límite entonces
+                contestar(pings[i].hueco, pings[i].serie, TIEMPO, 0, 0, nulo, 0)
+                pings[i].usado := falso
+            fin
+        fin
+        para i desde 0 hasta MAX_DNS - 1 hacer
+            si preguntas[i].usado entonces
+                si t >= preguntas[i].límite entonces
+                    contestar(preguntas[i].hueco, preguntas[i].serie, TIEMPO, 0, 0, nulo, 0)
+                    preguntas[i].usado := falso
+                sino si t >= preguntas[i].próximo y preguntas[i].intentos < 4 entonces
+                    dns_manda(dirección(preguntas[i]))
+                fin
+            fin
+        fin
+        para i desde 0 hasta MAX_UDP - 1 hacer
+            si udps[i].usado y udps[i].esperando y t >= udps[i].p_límite entonces
+                contestar(udps[i].p_hueco, udps[i].p_serie, TIEMPO, 0, 0, nulo, 0)
+                udps[i].esperando := falso
+            fin
+        fin
+        ; lo que esperaba a un vecino que no contesta (2 s), fuera; y lo que no
+        ; se sabe (un vecino de hace más de 10 minutos), preguntarlo otra vez
+        para i desde 0 hasta MAX_COLA - 1 hacer
+            si cola_largo[i] <> 0 y t - cola_cuándo[i] > 200 entonces cola_largo[i] := 0 fin
+        fin
+        para i desde 0 hasta MAX_ARP - 1 hacer
+            si vecinos[i].hay y t - vecinos[i].cuándo > 60000 entonces vecinos[i].hay := falso fin
+        fin
+    fin
+
+    ; ¿hay algo en marcha que pida mirar el tiempo a menudo?
+    público función pila_ocupada(): bool
+        variable i: nat32
+        si dhcp_estado = D_BUSCANDO o dhcp_estado = D_PIDIENDO entonces devolver cierto fin
+        para i desde 0 hasta MAX_PING - 1 hacer
+            si pings[i].usado entonces devolver cierto fin
+        fin
+        para i desde 0 hasta MAX_DNS - 1 hacer
+            si preguntas[i].usado entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; cuando no hay cable: lo pendiente, con SIN_CABLE
+    público función pila_sin_cable()
+        variable i: nat32
+        para i desde 0 hasta MAX_PING - 1 hacer
+            si pings[i].usado entonces contestar(pings[i].hueco, pings[i].serie, SIN_CABLE, 0, 0, nulo, 0) fin
+            pings[i].usado := falso
+        fin
+        para i desde 0 hasta MAX_DNS - 1 hacer
+            si preguntas[i].usado entonces contestar(preguntas[i].hueco, preguntas[i].serie, SIN_CABLE, 0, 0, nulo, 0) fin
+            preguntas[i].usado := falso
+        fin
+        para i desde 0 hasta MAX_ARP - 1 hacer vecinos[i].hay := falso fin
+    fin
+
+fin Rpila.

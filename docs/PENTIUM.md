@@ -1,6 +1,8 @@
 # Hispa-Pentium — el núcleo de la gama XP, escrito en Castel
 
 *18/11/2026; puesto al día el 20/11/2026 (la 0.8: los paquetes y las actualizaciones). Hispa-Pentium es el miembro de la
+
+*18/11/2026; puesto al día el 20/11/2026 (la 0.8: la red). Hispa-Pentium es el miembro de la
 familia Hispa-DOS para los PC de 2000 en adelante (la gama de Windows XP, [ROADMAP](ROADMAP.md)): un **núcleo propio
 de 32 bits, sin DOS por debajo**, con memoria virtual, escrito en
 [Castel](../castel/README.md). Esta nota cuenta lo que hay hecho: la semilla de la
@@ -46,6 +48,13 @@ sumas SHA-256, hechos con `tools/hpq.py`; el programa **PAQUETES**, que instala
 lo que deje a medias un corte de luz), y su ventana **«Programas y
 actualizaciones»**; INSTALAR deja apuntado lo que instala. Todo está en
 `castel/nucleo32/`.*
+
+pantalla: `HISPA.INI`). Y en la del 20/11 (la **0.8**): **la red por cable**
+(sección 13): un **servicio de red** en el anillo 3 (`RED.BIN`) con las
+tarjetas Intel PRO/1000, Realtek RTL8139 y Marvell Yukon 88E8059 (la del HP
+Mini) y una pila TCP/IP propia (ARP, IPv4, ICMP, UDP, TCP, DHCP y DNS), los
+programas **IPCONFIG**, **PING** y **DESCARGAR** (HTTP) y el **icono de la
+red** en la bandeja. Todo está en `castel/nucleo32/`.*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -220,6 +229,7 @@ cuarta parte, los discos y el USB).
 | `emergente.cas` (Emergente) | Los **menús emergentes**: el del botón secundario y el que cuelga de una barra de menús. |
 | `terminal.cas` (Terminal) | Los **terminales**: dos tubos para que una ventana tenga dentro al intérprete de órdenes y a sus programas. |
 | `escritorio.cas` (Escritorio) | El **escritorio**: el tapiz y sus **iconos**, la barra de tareas, el menú Inicio, el reloj, los cuadros (apagar, configuración, «Acerca de»), los menús del botón secundario, y la tarea que lo mueve todo. |
+| `red.cas` (Red) | **La red**, lo que pone el núcleo (sección 13): el cartero entre los programas y el servicio de red (`RED.BIN`), y lo que solo el servicio puede pedir: los puertos, memoria física seguida para el DMA, los registros de la tarjeta y su interrupción. |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
 
 Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
@@ -242,6 +252,9 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `umalo.cas`, `ucli.cas` | `MALO.BIN`, `CLI.BIN` | Los que hacen lo que no deben: leer la memoria del núcleo y hacer `cli`. |
 | `uprueba.cas` | `PRUEBA.BIN` | Prueba las llamadas al sistema desde dentro: la memoria que crece, leer un archivo a trozos, abrir de más, punteros que no son suyos, lanzar y esperar, escribir dos a la vez. |
 | `uescribe.cas` | `ESCRIBE.BIN` | Prueba **escribir en el disco** desde dentro: crear, escribir a trozos, leer de vuelta, escribir en medio, cortar, alargar con hueco, añadir; lo que no se puede; las carpetas; con `lleno`, llena el disco y lo vacía. |
+| `redes.cas` (Redes) | — | La **red para los programas** (sección 13): `estado_red`, `resolver`, `ping`, `conectar`, `enviar`, `recibir`, los puertos UDP... |
+| `ured.cas` con `rbase.cas`, `rtarjeta.cas`, `ryukon.cas`, `rpila.cas` y `rtcp.cas` | `RED.BIN` | El **servicio de red**: las tarjetas y la pila TCP/IP (sección 13). |
+| `uipconf.cas`, `uping.cas`, `udescarg.cas` | `IPCONFIG.BIN`, `PING.BIN`, `DESCARGA.BIN` | **IPCONFIG**, **PING** y **DESCARGAR** (sección 13). |
 | `ubucle.cas` | `BUCLE.BIN` | El que no acaba nunca (da vueltas, duerme, espera teclas o escribe sin parar): para probar **Ctrl+C**. |
 
 ---
@@ -431,6 +444,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 130 | **quitar con seguridad** la memoria USB de la unidad de letra EBX (desde la 0.8): lo pendiente se escribe, la memoria se para y sus unidades dejan de estar | `quitar_memoria` | 0 (`QUITADA`), ya se puede quitar; 1, no hay tal unidad; 2, no es una memoria USB; 3 (`ES_DEL_SISTEMA`), el sistema corre desde ella |
 | 131 | las veces que han **aparecido o desaparecido unidades** (además, a las ventanas de los programas les llega `EV_UNIDADES`) | `cambios_unidades` | ese número |
 | 80 | **colocar la ventana** EBX (suya) con su esquina en (ECX, EDX) de la pantalla; con ECX = 0xFFFFFFFF, en el centro (encima de la barra de tareas). La usa HVPRUN (sección 10, «La oficina de Hispa-386») | — | 0 |
+| 90-98 | **la red**: pedir al servicio de red (90) y lo del propio servicio (91 a 96, 98); cómo está (97). Las cuenta la sección 13 | `redes.cas` | |
 
 (La 11, con ECX = 1, no se queda esperando: da `SIGUE` si la tarea no ha acabado
 —`acabada`—. La 15 da además el ancho y el alto de la pantalla gráfica y si el
@@ -1729,6 +1743,201 @@ trae lo de Internet por el gancho.
 `castel/pruebas.sh` (las partes 8, 9, 10 y 11; `SOLO=32 ./pruebas.sh` hace solo esas y la
 de los errores; `SOLO=06`, solo la 9, lo de la 0.6; `SOLO=07`, solo la 10, instalar en el disco;
 `SOLO=08`, solo la 11, los paquetes) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
+
+## 13. La red (la 0.8)
+
+*20/11/2026.* La base para que un Hispa-Pentium instalado (el HP Mini 5103 de
+Carlos, el primero) sea un equipo útil: **la red por cable**. Con el cable
+enchufado, el sistema pide la IP solo (DHCP), el icono de la bandeja se pone
+verde y, en la Consola, `IPCONFIG`, `PING` y `DESCARGAR http://...`.
+
+### Cómo está repartida: un servicio del anillo 3
+
+La red de verdad **no está en el núcleo**: es un programa del anillo 3, el
+**servicio de red** (`RED.BIN`, `ured.cas`), con los controladores de las
+tarjetas y la pila TCP/IP enteros, escritos en Castel. Así el núcleo apenas
+crece (un módulo de 500 líneas, `red.cas`, y nueve llamadas; CASTEL, el
+compilador escrito en Castel, está cerca de los límites de sus tablas con el
+núcleo) y un fallo de la red acaba con el servicio, no con el sistema.
+
+```
+  PING, IPCONFIG, DESCARGAR...  (redes.cas)
+        │  llamada 90: un pedido (cabecera de 8 palabras + hasta 8 K)
+        ▼
+  el núcleo (red.cas): cartero; espera la respuesta
+        │  llamadas 92 (el pedido siguiente) y 93 (contestar)
+        ▼
+  RED.BIN, el servicio de red (anillo 3, con IOPL 3)
+     ured.cas    el bucle: la tarjeta, el tiempo, los pedidos
+     rtcp.cas    TCP
+     rpila.cas   Ethernet, ARP, IPv4, ICMP, UDP, DHCP, DNS
+     rtarjeta.cas  las tarjetas (e1000, RTL8139) y lo común
+     ryukon.cas  la Marvell Yukon 88E8059 (HP Mini 5103)
+     rbase.cas   puertos, PCI, el registro, orden de red, sumas
+        │  puertos de E/S (IOPL 3), registros (llamada 95), DMA (94), IRQ (98)
+        ▼
+  la tarjeta de red
+```
+
+**Lo que pone el núcleo** (`red.cas`, módulo `Red`; las llamadas, de la 90 a la
+98: otra sesión usa de la 110 en adelante):
+
+| EAX | Quién | Qué | Devuelve |
+|---|---|---|---|
+| 90 | un programa | **pedir a la red**: EBX, la cabecera (ocho palabras: la orden, sus datos y, en la octava, cuántos octetos van; la respuesta se escribe encima); ECX, los octetos (los que van y donde se dejan los que vuelven); EDX, cuántos caben. El programa espera (bloqueado) hasta que el servicio conteste. Si no hay servicio, el núcleo lo pone en marcha (una vez) y vuelve a pedir | la primera palabra de la respuesta (`SIN_RED` si no hay servicio) |
+| 91 | el servicio | **apuntarse como servicio de red** (solo uno, y solo un programa que se llame `RED.BIN`): el núcleo le pone **IOPL 3** en las banderas que repondrá `iretd` (los puertos de E/S, y `cli`/`sti` para el bus PCI) | 0, o `EN_USO` |
+| 92 | el servicio | **el pedido siguiente**, a EBX (`Pedido_red`: el hueco, su número de serie, la tarea, cuánto cabe en la respuesta, cuántos octetos trae, la cabecera; detrás, los octetos: caben 64 + 8.192); con ECX tics de espera si no hay ninguno (dormido; un pedido nuevo o la interrupción de la tarjeta lo despiertan antes). También los **avisos**: una tarea que había usado la red ha acabado (la orden `0xFFFF`) | 1, o 0 si no hay |
+| 93 | el servicio | **contestar** al hueco EBX con la `Respuesta_red` de ECX (la serie, dónde están los octetos y la cabecera). Si el programa ya no espera (Ctrl+C), la serie no cuadra y se tira | 0 |
+| 94 | el servicio | **EBX páginas seguidas de memoria física** (hasta 16, a cero, desde los 16 MB: `reservar_seguidos` de `marcos.cas`) a su vista, en `0xA0000000` y siguientes; su dirección física, a ECX | dónde se ven |
+| 95 | el servicio | **los registros de un aparato** (de la dirección física EBX, ECX octetos; solo por encima de la memoria de verdad) a su vista, sin caché | dónde se ven |
+| 96 | el servicio | **cómo está la red** (EBX: `RED_SIN_TARJETA`, `RED_SIN_CABLE`, `RED_BUSCANDO`, `RED_CONECTADA`), su IP (ECX) y el aparato PCI que hace DMA (EDX) | 0 |
+| 97 | cualquiera | cómo está la red (lo que dijo el servicio con la 96) y, a EBX, la IP | `RED_...` (`RED_NADA`: no hay servicio) |
+| 98 | el servicio | **la interrupción de su tarjeta** (EBX: 3, 5, 7, 9, 10 u 11; 0: ninguna): cuando llega, el núcleo **tapa esa línea** en el 8259, despierta al servicio y la destapa en su siguiente llamada 92 (el servicio ya ha visto la causa en la tarjeta) | 0 |
+
+Si el servicio se acaba (o lo acaban), el núcleo **apaga el DMA de su tarjeta**
+(el bit 2 de la orden PCI) antes de que su memoria vuelva a los marcos libres,
+quita los registros de su vista, tapa su interrupción y contesta `SIN_RED` a
+los que esperaban.
+
+**Cuándo se pone en marcha el servicio**: al arrancar el escritorio, si hay una
+tarjeta de red PCI (clase 02h: por el icono de la bandeja); con `conred` en la
+línea del cargador, siempre; y, si no, la primera vez que un programa pide algo
+a la red. Con **`sinred`** no se pone nunca (el arranque de emergencia de la
+memoria USB y del disco instalado lo lleva). El núcleo lo carga de la unidad
+del sistema (`\RED.BIN`, o `\HISPA\RED.BIN` en un sistema instalado), sin
+terminal ni archivo de salida: no escribe en la pantalla; lo que pasa lo
+**apunta** (6.000 octetos en su memoria, que `IPCONFIG /TODO` enseña) y lo
+manda por el puerto serie (`red: ...`, lo que leen las pruebas). Si dice que
+no hay tarjeta, sigue en marcha para contestarlo (y no se relanza).
+
+### Las tarjetas
+
+| Tarjeta | PCI | Cómo |
+|---|---|---|
+| Intel PRO/1000 (la familia 8254x, «e1000»: la 82540EM de QEMU y VirtualBox; y la 82574L) | `8086:100E` y otras 30 | registros en memoria (BAR0, 128 K); 32 descriptores de recepción con búferes de 2 K y 8 de envío; la MAC de `RAL`/`RAH` (o de la EEPROM). **Probada en QEMU.** |
+| Realtek RTL8139 (y la D-Link DFE-538TX) | `10EC:8139`, `1186:1300` | por los puertos; anillo de recepción de 8 K (con WRAP) y cuatro búferes de envío. **Probada en QEMU.** |
+| Marvell Yukon 2 «Optima» 88E8059 (la del HP Mini 5103; y la 88E8079) | `11AB:4381`, `11AB:4382` | pasada de la de Hispa-DOS (`drivers/hspred.asm`, docs/RED.md «Marvell Yukon 88E8059»): el mismo orden de registros y los mismos valores, por memoria; tres anillos (estado, recepción, envío) en páginas propias. **Sin probar en el equipo**: QEMU no la emula (y la de Hispa-DOS tampoco se ha probado aún allí). Cada paso de su puesta en marcha se apunta. |
+
+Antes de nada, la tarjeta pasa a **D0** (el estado de energía de trabajar) por
+su capacidad PCI de gestión de energía, por si otro sistema la dejó dormida
+al reiniciar. El enlace se mira cada cuarto de segundo: al llegar, se pide la
+IP; al irse, lo pendiente acaba con `SIN_CABLE`. La Yukon no espera a la
+autonegociación al arrancar (tarda de 2 a 4 s): lo hace su `yk_atender`.
+
+La pila es común: **Ethernet**; **ARP** (16 vecinos; lo que espera a que
+conteste uno, en una cola de 4 tramas; se contesta a quien pregunta por
+nuestra IP); **IPv4** (sin trocear: lo partido se tira; la suma de la cabecera
+se comprueba); **ICMP** (se contesta a los ping; y los hace, con el tiempo en
+microsegundos: los tics y lo que lleva contado el 8253); **UDP** (8 puertos
+para los programas, con su cola de 8 K); **DHCP** (DISCOVER, OFFER, REQUEST,
+ACK, con el nombre `hispa-pentium`; se renueva a la mitad de la concesión; si
+dicen que no, otra vez); **DNS** (la pregunta A, con reintentos, siguiendo los
+CNAME de la respuesta; 8 nombres sabidos durante 5 minutos); y **TCP**
+(`rtcp.cas`): 8 conexiones salientes, con 16 K de lo que se envía y 32 K de lo
+que llega; el MSS (1.460) en el SYN; la ventana que se anuncia es lo libre de
+lo recibido y se avisa cuando se abre; lo enviado se guarda hasta que llega su
+ACK y, si no llega a tiempo, se manda otra vez desde ahí, cada vez esperando el
+doble (de 1 a 32 s; a los 8 intentos, cortada); con la ventana de la otra punta
+cerrada, un octeto de vez en cuando para preguntar; lo desordenado se tira (se
+repite el ACK); FIN en los dos sentidos, RST a lo que no es de ninguna
+conexión. Sin escuchar en un puerto (de momento solo se conecta), sin
+reensamblar desordenado ni retransmisión rápida.
+
+### Los programas
+
+Un programa usa la red con el módulo **`Redes`** (`redes.cas`): `estado_red`
+(un `Info_red`: la tarjeta, la MAC, el enlace, la IP, la máscara, la puerta, el
+DNS, el servidor y la concesión, las tramas), `resolver` (un nombre, o
+«10.0.2.2» tal cual), `ping`, `conectar`, `enviar` (todo, aunque haya que
+esperar), `recibir` (con su espera; 0 cuando la otra punta cierra),
+`cerrar_conexión`, `udp_abrir`, `udp_enviar`, `udp_recibir`, `renovar`,
+`registro_red`, y `ip_a_texto`/`texto_a_ip`. Si la red aún se está poniendo en
+marcha (el enlace, la IP), espera hasta 10 s antes de dar el error. Los errores
+(`SIN_TARJETA`, `SIN_CABLE`, `SIN_IP`, `TIEMPO`, `RECHAZADA`, `NO_RESUELVE`,
+`CORTADA_RED`...) van de `0xFFFFFFE0` a `0xFFFFFFEF`, por debajo de los del
+núcleo: `es_error_red` mira los dos, y `texto_error_red` los dice.
+
+| Orden | En el disco | Qué |
+|---|---|---|
+| `IPCONFIG [/RENOVAR] [/TODO]` | `IPCONFIG.BIN` (`uipconf.cas`) | cómo está la red (si aún se pide la IP, espera); `/RENOVAR`, otra vez DHCP; `/TODO`, además lo apuntado por el servicio (para mandarlo si algo no va: `IPCONFIG /TODO > RED.TXT`) |
+| `PING nombre [-n veces] [-l octetos] [-t]` | `PING.BIN` (`uping.cas`) | como el de siempre, con su resumen; Ctrl+C para (`-t`) y dice el resumen |
+| `DESCARGAR http://servidor[:puerto]/camino [archivo]` | `DESCARGA.BIN` (`udescarg.cas`) | HTTP/1.1 sin cifrar: `Content-Length`, en trozos (`chunked`) o hasta que se cierre; hasta 5 redirecciones; el archivo, con el nombre de lo último del camino en 8+3 (o el que se diga; `-`: a la pantalla); un punto cada 32 K y, al final, cuánto y en cuánto tiempo |
+
+El intérprete de órdenes, con un nombre de más de ocho letras que no
+encuentra, prueba con las ocho primeras (como el DOS): `DESCARGAR` es
+`DESCARGA.BIN`.
+
+**El icono de la red** está en la bandeja, a la izquierda del reloj, mientras
+haya servicio: una pantallita con una luz verde (conectada), ámbar (pidiendo
+la IP), roja (sin cable) o gris (sin tarjeta). Con un clic, un aviso dice
+cómo está y la IP. Se repinta cuando el servicio dice que algo ha cambiado (la
+llamada 96 sube `cambios_red`).
+
+### Probarlo
+
+En QEMU, con `-netdev user` (QEMU hace de router: DHCP, la puerta `10.0.2.2`,
+que es la máquina donde corre QEMU, y el DNS `10.0.2.3`, que pregunta al de
+ella):
+
+```
+castel/nucleo32/disco.sh /tmp/d.img 16 red
+QEMU_MAS="-nic user,model=e1000" ESCRIBE=1 DISCO=/tmp/d.img ARRANQUE=ordenes \
+  castel/nucleo32/probar.sh "" ipconfig ":pausa 3" "ping 10.0.2.2" ":pausa 5"
+```
+
+(con `-netdev user,id=n0 -device rtl8139,netdev=n0`, la RTL8139). `probar.sh`
+pone `-nic none` si no se le da una tarjeta: si no, QEMU pone una e1000 y el
+escritorio pondría en marcha el servicio. Para descargar, un servidor HTTP en
+esta máquina se ve en `10.0.2.2` (`nucleo32/servidor_prueba.py`, el de las
+pruebas). En el VPS sale a internet: `ping actualiza.clicgest.es` y
+`descargar http://actualiza.clicgest.es/ultima.txt -` también van.
+
+### El Wi-Fi, más adelante
+
+El Wi-Fi de Hispa-486 (`wifi/`: la gestión 802.11 y WPA2 propias, en C, y el
+controlador `brcmsmac` de Linux para la Broadcom BCM43224 del HP Mini, con su
+microcódigo; docs/WIFI.md) es C y son decenas de miles de líneas: no se va a
+pasar a Castel. Cómo encajaría: **un segundo servicio, `WIFI.BIN`**, compilado
+de esos mismos fuentes con `gcc -m32 -ffreestanding` como binario plano con la
+cabecera `HPU3` (lo que hace `HVPRUN` en NASM: CASTEL32.md §8), con un `compat/`
+nuevo que en vez de las llamadas del residente de Hispa-486 use las del servicio
+(91 con su propio nombre, 94 para el DMA, 95 para los registros, 98 para la
+interrupción). La radio da tramas 802.3 (el `nucleo/` ya traduce de 802.11),
+así que la pila de `RED.BIN` no cambia: le basta **una tarjeta más**,
+`T_WIFI`, cuyas `enviar_trama`/`recibir_trama` pasan las tramas entre los dos
+servicios por un tubo del núcleo (dos llamadas nuevas, a partir de la 99), y
+`hay_enlace` es «asociada y con la clave puesta». La red elegida y su clave,
+en `\HISPA\RED.INI` (como `RED.INI` de Hispa-486); un programa `WIFI` para
+buscar redes y conectarse, y el icono diría la intensidad.
+
+### HTTPS, más adelante
+
+`DESCARGAR` solo sabe `http://`. Para HTTPS, lo que ya tiene el proyecto es
+**HSPTLS** (`w32/tls/hsptls.c` con BearSSL 0.6, TLS 1.2 con ECDHE y la cadena
+de certificados comprobada; `w32/https.c`; docs/RED.md, «HSPTLS.DLL»): C de
+32 bits sin memoria dinámica, hecho para máquinas pequeñas. Lo más corto: un
+programa del anillo 3 en C (con el mismo arreglo de `gcc -m32` y la cabecera
+`HPU3` que el Wi-Fi) que enlace `hsptls.c` y BearSSL y hable con `RED.BIN` por
+la llamada 90 igual que `redes.cas` (son ocho palabras y un `int 0x80`): un
+`DESCARGAR` que entienda `https://`, o mejor un **servicio TLS** al que
+`DESCARGAR` y los demás le pidan una conexión cifrada como le piden una TCP a
+`RED.BIN`. Lo que hace falta además: la hora buena (para las fechas de los
+certificados: el reloj del PC, o NTP por UDP) y sitio para la caché de
+certificados (`\HISPA\HSPTLS.CCH`). Pasar BearSSL a Castel (las curvas, AES,
+ChaCha20, SHA-2, RSA, X.509) sería mucho más largo.
+
+### Lo que falta
+
+Escuchar en un puerto (un servidor), reensamblar lo que llega desordenado y la
+retransmisión rápida; IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
+la vez; el Wi-Fi y HTTPS (arriba); más tarjetas (la RTL8168 del Toshiba NB250,
+la PCnet, NE2000: Hispa-DOS ya las lleva); y, encima de esto, las
+**actualizaciones** por la red y un navegador.
+
+## 14. Las pruebas
+
+`castel/pruebas.sh` (las partes 8, 9 y 10; `SOLO=32 ./pruebas.sh` hace solo esas y la
+de los errores; `SOLO=06`, solo la 9, lo de la 0.6; `SOLO=07`, solo la 10, instalar en el disco; `SOLO=08`, solo la 11, la red) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
 teclado, el reloj corre y la división por cero llega a su excepción; que el mapa de
 memoria da los marcos; que la **paginación está activa** con la identidad; que un
 **fallo de página se atiende** en la zona a la demanda; que el **montón no pierde**
@@ -1980,6 +2189,36 @@ capturas. Después de cada paso, `fsck.fat` da el disco por sano, `mtools`
 compara lo instalado octeto a octeto y no quedan restos (`HPQ*.NUE`, `.VIE`,
 el diario).
 
+**La 0.8** (la parte 11 de `pruebas.sh`: la red; `SOLO=08 ./pruebas.sh`,
+la primera y la undécima, unos cinco minutos), con un servidor HTTP de esta
+máquina (`nucleo32/servidor_prueba.py`, que QEMU deja ver en `10.0.2.2`) y un
+disco hecho con `disco.sh ... red`:
+
+- **La e1000**: el servicio se pone en marcha solo (la primera vez que se pide
+  algo), encuentra la tarjeta y pide la IP por **DHCP**; **IPCONFIG** dice la
+  tarjeta, la MAC, el enlace, la IP, la máscara, la puerta, el DNS y el
+  servidor; **PING** a la puerta, tres respuestas; **DESCARGAR** con
+  `Content-Length` (400 K), en trozos (`chunked`, con trozos de todos los
+  tamaños), hasta que se cierra (HTTP/1.0), una redirección 302, un 404, a otra
+  carpeta, `https://` (se dice que aún no) y sin nada; **Ctrl+C** en medio de
+  una descarga que no llega (el programa acaba y la red sigue: `IPCONFIG
+  /TODO` y `MEM`); y, desde fuera, que **lo descargado es igual octeto a
+  octeto** que lo del servidor (los cuatro archivos) y el disco queda sano.
+- **La RTL8139**: IPCONFIG y DESCARGAR, igual octeto a octeto. El **DNS** (el
+  de QEMU, que pregunta al de esta máquina): un nombre que no existe se dice y
+  uno de verdad (`actualiza.clicgest.es`) se resuelve (si esta máquina no sale
+  a la red, no se prueba).
+- **Sin tarjeta** (el servicio lo dice, y PING también) y con **`sinred`** (ni se
+  pone en marcha).
+- **El escritorio** pone en marcha el servicio (hay tarjeta), el **icono**
+  está en la bandeja con la luz verde, y un clic en él da el aviso con la IP.
+
+Además, a mano, la memoria USB de `usb.sh` arrancada en QEMU con una e1000:
+GRUB, el escritorio, el servicio en marcha y el icono en verde; y, en el VPS,
+`ping actualiza.clicgest.es` y `descargar http://actualiza.clicgest.es/ultima.txt -`.
+Lo que **no se prueba**: la Yukon (QEMU no la tiene), y TCP con pérdidas (la
+red de QEMU no pierde nada: las retransmisiones solo se han visto en papel).
+
 Lo que **no se puede probar en QEMU**: las transacciones partidas del EHCI (el
 teclado y el panel de un MacBook: sección 11), el traspaso de verdad desde la
 BIOS de cada equipo, y los discos SATA de verdad.
@@ -1999,6 +2238,11 @@ Con la 0.6 el núcleo ha crecido otra vez (el ensamblador de la semilla pasa de
 donde CASTEL deja su archivo temporal y la salida (en A:, los fuentes: solo los
 módulos del núcleo en la segunda tanda, y los programas con los dos módulos que
 usan en la tercera). Lo que sacan los dos compiladores sigue siendo lo mismo.
+
+Con la 0.8 tampoco: el núcleo solo gana `red.cas` (y CASTEL lo sigue
+compilando igual que `ccastel.py`); la red son programas del anillo 3 aparte,
+que van en una **cuarta tanda** (en A:, `RED.BIN` con sus seis módulos e
+IPCONFIG, PING y DESCARGAR; en B:, lo que sale), lo mismo para ENSAMBLA.
 
 Con la 0.7 no ha hecho falta tocar los compiladores: lo de instalar son dos
 programas del anillo 3 aparte (INSTALAR y el asistente), y el núcleo solo ha
@@ -2028,6 +2272,22 @@ oficina), unos diez, y `SOLO=16`, lo que no arranca el núcleo (de la parte 1 a
 la 7, con los dos compiladores y los dos ensambladores), otros siete.
 
 ## 15. Por dónde seguir
+
+Con todo, `pruebas.sh` tiene ahora **437 comprobaciones** (423 con la 0.7 y
+14 de la red). La última pasada entera (20/11/2026, con la 0.8) dio **432 bien
+y 5 mal**: las cinco, expectativas que aún decían «0.7» o los 9 módulos de la
+memoria USB (ahora 13); arregladas, `SOLO=32` (la primera, la octava y la
+novena, donde estaban) dio 342 bien, 0 mal, y `SOLO=08` (la red), 68 bien, 0
+mal. Unos cincuenta minutos en el VPS.
+
+## 15. Por dónde seguir
+
+Hecho en la del 20/11 (la 0.8): **la red por cable** (sección 13). Lo
+siguiente de la red, allí mismo («Lo que falta», el Wi-Fi y HTTPS); y, para
+que el HP Mini sea un equipo útil, encima de ella: **las actualizaciones** por
+la red (como ACTUALIZAR de Hispa-DOS: un `versiones.txt` y un paquete en
+`actualiza.clicgest.es`), **los controladores** que faltan, el **Explorador** y
+**las dependencias** entre paquetes.
 
 Hecho en la tanda del 18-19/11/2026: el disco (ATA) y la FAT, cargar programas del
 disco, las llamadas al sistema nuevas, la consola con cerrojo, el intérprete de

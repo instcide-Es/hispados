@@ -146,7 +146,7 @@ módulo Instala
     función pantalla(título: puntero a byte)
         variable f: nat32
         para f desde 0 hasta 23 hacer letras_en(0, f, AZUL, ' ', 80) fin
-        pon(2, 1, BLANCO, "Instalación de Hispa-Pentium 0.7")
+        pon(2, 1, BLANCO, "Instalación de Hispa-Pentium 0.8")
         letras_en(0, 2, BLANCO, 0xCD, 80)
         si título[0] <> 0 entonces pon(3, 4, BLANCO, título) fin
         cursor_en(0, 25)
@@ -1059,7 +1059,7 @@ módulo Instala
         cfg_más("set default=0\n")
         cfg_más("menuentry \"Hispa-Pentium\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio escritura\n  set gfxpayload=$modo\n  boot\n}\n")
         cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n  multiboot /HISPA/NUCLEO.BIN ordenes escritura\n  set gfxpayload=text\n  boot\n}\n")
-        cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos ni el USB (800 x 600)\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb\n")
+        cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos, el USB ni la red (800 x 600)\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred\n")
         para i desde 1 hasta n_archivos hacer
             si destinos[i - 1] = A_HISPA y ((acaba_en(nombres[i - 1], "BIN") y no iguales(nombres[i - 1], "NUCLEO.BIN") y no iguales(nombres[i - 1], "INSTALAR.BIN") y no iguales(nombres[i - 1], "ASISTE.BIN")) o iguales(nombres[i - 1], "LEEME.TXT")) entonces
                 cfg_más("  module /HISPA/")

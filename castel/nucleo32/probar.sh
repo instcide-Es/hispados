@@ -66,11 +66,16 @@ INSTANTANEA=on; [ -n "${ESCRIBE:-}" ] && INSTANTANEA=off
 # con SATA=imagen, esa imagen como disco SATA de una controladora AHCI (con
 # ESCRIBE=1, lo que se escriba llega a ella); con MAQUINA=..., esa máquina de
 # QEMU (MAQUINA=pc,i8042=off: un PC sin teclado ni ratón PS/2, como un Mac);
-# con QEMU_MAS="...", lo que se quiera añadir (controladoras y aparatos USB)
+# con QEMU_MAS="...", lo que se quiera añadir (controladoras y aparatos USB, la
+# tarjeta de red)
 [ -n "${SATA:-}" ] && INITRD+=(-device ahci,id=sata -drive "id=dsata,file=$SATA,format=raw,if=none,snapshot=$INSTANTANEA" -device ide-hd,drive=dsata,bus=sata.0)
 [ -n "${MAQUINA:-}" ] && INITRD+=(-machine "$MAQUINA")
 # shellcheck disable=SC2206
 [ -n "${QEMU_MAS:-}" ] && INITRD+=($QEMU_MAS)
+# sin tarjeta de red, salvo que se dé una en QEMU_MAS («-nic user,model=e1000»,
+# «-netdev user,id=n0 -device rtl8139,netdev=n0»): QEMU pone una e1000 si no
+# se dice nada, y con ella el escritorio pondría en marcha el servicio de red
+case " ${QEMU_MAS:-} " in *" -nic "*|*" -netdev "*) ;; *) INITRD+=(-nic none) ;; esac
 qemu-system-i386 -kernel "$BIN" "${INITRD[@]}" -display none -monitor unix:$T/mon,server,nowait \
   -serial file:$T/sal -device isa-debug-exit,iobase=0xf4,iosize=0x04 -no-reboot -rtc base=localtime -m ${MEMORIA:-32} > /dev/null 2>&1 &
 QPID=$!

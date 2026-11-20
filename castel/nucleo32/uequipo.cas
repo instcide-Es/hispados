@@ -512,7 +512,7 @@ módulo UEquipo
                     si dentro entonces lee_carpeta() fin
             fin
         sino
-            Textos32.copiar(aviso, "Mi equipo, de Hispa-Pentium 0.7: las unidades y sus archivos.")
+            Textos32.copiar(aviso, "Mi equipo, de Hispa-Pentium 0.8: las unidades y sus archivos.")
         fin
         pinta_todo()
         devolver falso
