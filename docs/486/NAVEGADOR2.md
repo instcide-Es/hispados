@@ -26,7 +26,7 @@ disquete «Internet») para la biblioteca en un 486 lento, el completo
 | JavaScript | sí (QuickJS, HSPJS.DLL) | sí (QuickJS, la misma HSPJS.DLL, sobre el DOM de libdom: ver «JavaScript») |
 | ClicGest | modo ligero (User-Agent `HispaNavegador`) | la web normal (User-Agent `HispaSurf`) |
 | Memoria | 1-3 MB | 8-15 MB (ver «Medidas») |
-| Tamaño | 300 KB | 1,14 MB + 208 KB de letras (dos disquetes) |
+| Tamaño | 300 KB | 1,27 MB + 208 KB de letras (dos disquetes; el JavaScript, en HSPJS.DLL del disquete «Internet») |
 
 ## Cómo se maneja
 
@@ -70,19 +70,19 @@ formato que las del Navegador propio).
 En los disquetes «Internet 2» y «Internet 3» (`make internet2`:
 `build/internet2.img` y `build/internet3.img`), que se copian **enteros** en
 `C:\HISPADOS\INTERNET`, junto a lo del disquete «Internet» (que trae
-MSVCRT.DLL, WSOCK32.DLL y HSPTLS.DLL). Desde el 20/11/2026 son dos (con las
+MSVCRT.DLL, WSOCK32.DLL, HSPTLS.DLL y HSPJS.DLL, el JavaScript). Desde el 20/11/2026 son dos (con las
 letras de la web ya no cabía en uno): «Internet 2», el programa y `RECURSOS`;
 «Internet 3», las letras (`FUENTES`).
 
 | | |
 |---|---|
-| `NAVEGA2.EXE` | el programa (1.142 KB) |
+| `NAVEGA2.EXE` | el programa (1.270 KB; con el JavaScript, el preludio `dom.js` + `surf.js` va dentro como texto: 75 KB) |
 | `NAVEGA2.INI` | sus opciones |
 | `RECURSOS\` | las hojas de estilo de NetSurf (`default.css`, `quirks.css`, `adblock.css`, `internal.css`), sus textos en español (`MESSAGES`), la página de inicio y `BROTLI.DIC` (el diccionario de Brotli para las letras WOFF2, comprimido: 58 KB) |
 | `FUENTES\` (disquete «Internet 3») | las letras: DejaVu Sans, Sans negrita, Serif, Serif negrita, Mono y Mono negrita, recortadas a las letras de Europa occidental (208 KB; `terceros/dejavu`) |
 | `LEEME.TXT` | cómo se instala |
 
-Le quedan 184 KB libres a «Internet 2» y 1,2 MB a «Internet 3». Hispa Ventanas pone solo, al arrancar,
+Le quedan 56 KB libres a «Internet 2» (con el JavaScript) y 1,2 MB a «Internet 3». Hispa Ventanas pone solo, al arrancar,
 el acceso **«Navegador completo»** en el grupo **Internet** del menú Inicio
 (si encuentra `INTERNET\NAVEGA2.EXE`; una vez: la clave `Internet2` de
 `[Centro]` en CENTRO.INI; si se borra, no vuelve).
@@ -340,11 +340,11 @@ medidas de las cajas.
   rehace el campo con su texto.
 
 En ClicGest (la demostración, 20/11/2026, QEMU): el «Ver» de la contraseña
-del inicio de sesión (`20_js_login_ver.png`), los botones `.js-only`, el
-menú lateral plegable, «Herramientas» de socios (el menú de Bootstrap,
-encima de la lista: `21_js_socios_herramientas.png`), el catálogo de la
-biblioteca y su buscador (un formulario corriente), las pestañas y los menús
-de Bootstrap; sin errores de JavaScript en `SURFJS.LOG` en las páginas
+del inicio de sesión (`navegador2/20_js_login_ver.png`), los botones
+`.js-only`, «Herramientas» de socios (el menú de Bootstrap, encima de la
+lista: `21_js_socios_herramientas.png`), el catálogo de la biblioteca y su
+buscador (`22_js_biblioteca_buscar.png`); la página de la prueba, con su menú
+(`23_js_prueba_menu.png`); sin errores de JavaScript en `SURFJS.LOG` en las páginas
 probadas (panel, catálogo, socios).
 
 Lo que no hay o es distinto:
@@ -352,9 +352,10 @@ Lo que no hay o es distinto:
 - Los **globos de ayuda** de Bootstrap (`tooltip`): `matchMedia('(hover:
   none)')` dice que no hay ratón que pase por encima (como en el Navegador
   propio) y ClicGest no los arranca (ni baja Bootstrap para ellos).
-- Las **ventanas** de Bootstrap (`modal`) se abren, pero NetSurf no tiene
-  `opacity` (el fondo oscuro sale negro entero) ni `position: fixed` de
-  verdad (la ventana va arriba de la página).
+- Las **ventanas** de Bootstrap (`modal`, `offcanvas`: «Columnas...» de
+  socios) se abren, pero NetSurf no tiene `opacity`, `transform` ni
+  `position: fixed` de verdad: salen arriba de la página o cortadas por la
+  izquierda.
 - `<details>`, `mouseover`, arrastrar, `canvas`, los `iframe` con JavaScript.
 
 ### Cómo está hecho
