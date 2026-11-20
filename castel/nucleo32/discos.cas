@@ -164,6 +164,11 @@ módulo Discos
         devolver discos[d].hay y discos[d].escribible
     fin
 
+    ; lo que ha visto ahci.cas al buscar la controladora y sus discos
+    público función informe_ahci(): puntero a byte
+        devolver dirección(Ahci.informe[0])
+    fin
+
     ; cómo se llama la clase de un disco, para enseñarla
     público función nombre_de_clase(clase: nat32): puntero a byte
         según clase
