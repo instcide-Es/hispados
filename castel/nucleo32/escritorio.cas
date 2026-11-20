@@ -2321,6 +2321,7 @@ módulo Escritorio
             devolver 0
         fin
         si no prepara_ratón(pantalla.ancho, pantalla.alto) entonces escribir("escritorio: no hay ratón PS/2 (se sigue, con el teclado)\n") fin
+        si hay_rueda entonces escribir("escritorio: el ratón PS/2 tiene rueda\n") fin       ; (NAVEGADOR)
         alto_barra := ALTO_BARRA
         ; (los avisos del USB de antes de que hubiera escritorio, fuera)
         mientras saca_aviso(texto_globo, 80) hacer fin

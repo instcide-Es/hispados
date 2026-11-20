@@ -773,8 +773,13 @@ static void pon_titulo(void)
 {
   char b[260], c[200];
   const char *t = actual && actual->titulo[0] ? actual->titulo : "";
-  snprintf(b, sizeof b, "%s%sNavegador", t, *t ? " - " : "");
-  frontal_utf8_a_437(b, strlen(b), c, 120);
+  int n;
+  /* (en el título caben 63 letras: el núcleo, MAX_TÍTULO) */
+  n = frontal_utf8_a_437(t, strlen(t), c, sizeof c);
+  if (n > 48) { c[45] = 0; strcat(c, "..."); }
+  snprintf(b, sizeof b, "%s%sNavegador", c, *c ? " - " : "");
+  memcpy(c, b, 63);
+  c[63] = 0;
   if (vent) sc(SC_TITULO, vent, (u32)c, 0);
 }
 static void dir_de(const char *u8)
@@ -1405,6 +1410,11 @@ static void tecla(u32 k, u32 con_mayus)
   if (k == T_F5 || k == 18) { boton(B_RECARGA); return; }         /* F5, Ctrl+R */
   if (k == 20) { nueva_pestana(inicio, 1); return; }               /* Ctrl+T */
   if (k == 23) { cierra_pestana(indice(actual)); return; }         /* Ctrl+W */
+  if ((k == T_CTRL_TAB || k == T_CTRL_MAYUS_TAB) && n_pest > 1) {    /* Ctrl+Tab, Ctrl+Mayús+Tab (con el núcleo de controles-erp) */
+    int i = indice(actual) + (k == T_CTRL_TAB ? 1 : n_pest - 1);
+    a_pestana(pest[i % n_pest]);
+    return;
+  }
   if (k == 27 && cargando() && !foco_dir) { browser_window_stop(actual->bw); return; }
   if (k < 0x100) u = de437((u8)k);
   if (foco_dir) { tecla_dir(k, u); return; }
@@ -1482,7 +1492,7 @@ static void atiende(struct suceso *s)
   case EV_RATON_SUBE: mods_raton = s->c & (CON_MAYUS | CON_CONTROL); suelta(x, y); break;
   case EV_RATON_MUEVE: mueve(x, y, s->c); break;
   case EV_SALE: if (sobre >= 0 || sobre_desp) { sobre = -1; sobre_desp = 0; pinta_barra(); pinta_desp(); } break;
-  case EV_RUEDA: rueda((int8_t)(s->c & 0xFF), x, y, s->c & (CON_MAYUS | CON_CONTROL)); break;
+  case EV_RUEDA: surf_reg("rueda %d", (int8_t)(s->c & 0xFF)); rueda((int8_t)(s->c & 0xFF), x, y, s->c & (CON_MAYUS | CON_CONTROL)); break;
   case EV_MENU: elegido(s->b, s->a); break;
   }
 }

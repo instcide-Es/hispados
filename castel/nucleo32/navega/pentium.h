@@ -147,6 +147,8 @@ struct pide_menu {
 #define T_F5 0x13F
 #define T_F6 0x140
 #define T_MAYUS_TAB 0x10F
+#define T_CTRL_TAB 0x110		/* (del núcleo de la rama controles-erp: las pestañas) */
+#define T_CTRL_MAYUS_TAB 0x111
 #define T_LOGO 0x15B
 
 /* ---- la red (redes.cas): las órdenes y los errores ---- */

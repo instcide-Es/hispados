@@ -133,7 +133,7 @@ módulo Usuario
     público variable al_escritorio: nat32
     público variable escritorio_en_marcha: bool
 
-    constante MAX_PROGRAMA = 0x200000           ; lo más que mide un programa en el disco
+    constante MAX_PROGRAMA = 0x800000           ; lo más que mide un programa en el disco (8 MB desde la 0.8.2: el Navegador)
     constante MAX_RUTA = 128
     constante MAX_ARGS = 128
 

@@ -161,6 +161,12 @@ módulo Usbhid
         dx := campo(p, h.x_bit, h.eje_bits)
         dy := campo(p, h.y_bit, h.eje_bits)
         ratón_de_fuera(dx, dy, b)
+        ; (NAVEGADOR) la rueda: con el protocolo de arranque (X e Y de 8 bits
+        ; detrás de los botones), la mayoría la manda en el cuarto octeto
+        si h.x_bit = 8 y h.y_bit = 16 y h.eje_bits = 8 y n >= 4 entonces
+            dx := campo(p, 24, 8)
+            si dx <> 0 y dx > -16 y dx < 16 entonces ruedado(dx) fin
+        fin
     fin
 
     ; busca en el descriptor de informe (ya leído) el primer informe que

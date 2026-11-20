@@ -66,6 +66,8 @@ módulo Tareas
         matar: bool                             ; hay que acabarla (Ctrl+C) en cuanto vuelva al anillo 3
         corte: bool                             ; se ha pulsado Ctrl+C (para las que lo atienden)
         terminal: nat32                         ; el terminal por el que escribe y lee (terminal.cas), o 0: la consola
+        x87: arreglo [108] de byte              ; (NAVEGADOR) su coma flotante, guardada (fnsave) mientras la usa otra
+        x87_usado: bool                         ; (NAVEGADOR) la ha usado alguna vez
     fin
 
     público tipo Cola = estructura
@@ -90,6 +92,13 @@ módulo Tareas
     variable siguiente_id: nat32
     público variable tics: nat32
     público variable cambios: nat32             ; las veces que ha cambiado de tarea
+    ; (NAVEGADOR, 21/11) la coma flotante (el x87): la de quién está ahora en
+    ; el procesador. Al cambiar de tarea no se guarda: se enciende CR0.TS y,
+    ; si la nueva la usa, la excepción 7 (sin_x87) guarda la de esta y pone la
+    ; suya (o una a estrenar). Así cada programa tiene la suya (el Navegador
+    ; y QuickJS cuentan con doble precisión, HVPRUN con lo suyo) y lo que no
+    ; usa coma flotante (casi todo, y el núcleo) no paga nada.
+    público variable dueño_x87: puntero a Tarea
     variable pantalla: puntero a nat16 = puntero(0xB8000)
     público variable sin_segundos: bool         ; no se enseñan los segundos (la pantalla es de un programa: INSTALAR)
     ; la función (sin argumentos) que acaba la tarea que corre cuando se la
@@ -196,9 +205,57 @@ módulo Tareas
         t.turnos := t.turnos + 1
         si t <> actual entonces cambios := cambios + 1 fin
         actual := t
+        ; (NAVEGADOR) el x87: si no es el suyo, que avise al usarlo
+        si t = dueño_x87 entonces quita_ts() sino pon_ts() fin
         pon_pila_núcleo(t.pila_tope)
         si leer_cr3() <> t.cr3 entonces poner_cr3(t.cr3) fin
         devolver t.marco
+    fin
+
+    ; (NAVEGADOR) CR0.TS: con ella encendida, la primera instrucción de coma
+    ; flotante da la excepción 7; clts la apaga
+    función pon_ts()
+        ensamblador
+            mov eax, cr0
+            or eax, 8
+            mov cr0, eax
+        fin
+    fin
+
+    función quita_ts()
+        ensamblador
+            db 0x0F, 0x06                       ; clts
+        fin
+    fin
+
+    ; (NAVEGADOR) la excepción 7: la tarea que corre usa la coma flotante y
+    ; la que está en el procesador es de otra (o de nadie): se guarda la de
+    ; aquella (fnsave) y se pone la suya (frstor) o, la primera vez, una a
+    ; estrenar (fninit). Con las interrupciones tapadas (puerta del núcleo)
+    interrupción función sin_x87()
+        variable p: nat32
+        quita_ts()
+        si dueño_x87 = actual entonces devolver fin
+        si dueño_x87 <> nulo entonces
+            p := nat32(dirección(dueño_x87.x87[0]))
+            ensamblador
+                mov eax, {p}
+                db 0xDD, 0x30                   ; fnsave [eax]
+            fin
+        fin
+        si actual.x87_usado entonces
+            p := nat32(dirección(actual.x87[0]))
+            ensamblador
+                mov eax, {p}
+                db 0xDD, 0x20                   ; frstor [eax]
+            fin
+        sino
+            ensamblador
+                db 0xDB, 0xE3                   ; fninit
+            fin
+            actual.x87_usado := cierto
+        fin
+        dueño_x87 := actual
     fin
 
     ; el reloj: cuenta el tic, despierta a las dormidas a las que les toca,
@@ -312,6 +369,8 @@ módulo Tareas
         t.sig := nulo
         t.esperador := nulo
         t.código := 0
+        t.x87_usado := falso                    ; (NAVEGADOR)
+        si dueño_x87 = t entonces dueño_x87 := nulo fin
         t.turnos := 0
         t.tics_usados := 0
         t.usuario := falso
@@ -435,6 +494,16 @@ módulo Tareas
         crear_marco_ocioso()
         pon_puerta(0x20, nat32(dirección(reloj)), PUERTA_NÚCLEO)
         pon_puerta(0x30, nat32(dirección(cambio)), PUERTA_NÚCLEO)
+        ; (NAVEGADOR) la coma flotante: el x87 de verdad (CR0.EM apagada, MP
+        ; encendida), de nadie aún, y la excepción 7 para repartirlo
+        dueño_x87 := nulo
+        ensamblador
+            mov eax, cr0
+            and eax, 0xFFFFFFFB
+            or eax, 0x0000000A
+            mov cr0, eax
+        fin
+        pon_puerta(7, nat32(dirección(sin_x87)), PUERTA_NÚCLEO)
     fin
 
     función crear_marco_ocioso()
@@ -533,6 +602,7 @@ módulo Tareas
             t.args := nulo
         fin
         si t.usuario entonces soltar_espacio(t.cr3) fin
+        si dueño_x87 = t entonces dueño_x87 := nulo fin     ; (NAVEGADOR)
         t.estado := LIBRE
         reponer(b)
         devolver c

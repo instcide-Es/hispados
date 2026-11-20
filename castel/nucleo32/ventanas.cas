@@ -65,6 +65,7 @@ módulo Ventanas
     público constante EV_MENÚ = 10              ; se ha cerrado el menú que pidió: a, la opción elegida (desde 0; SIN_ELEGIR si ninguna); b, su etiqueta
     público constante EV_MENÚ_VENTANA = 11      ; (a la del fondo) el botón secundario en el título de la ventana a, en el punto (b, c) de la pantalla
     público constante EV_UNIDADES = 12          ; (a todas) ha aparecido o desaparecido una unidad (una memoria USB)
+    público constante EV_RUEDA = 13             ; (NAVEGADOR) la rueda del ratón: a, b, dónde; c, los pasos (con signo, en el octeto bajo: arriba, positivos) y las teclas de cambio
     público constante SIN_ELEGIR = 0xFFFFFFFF
     ; en «c» de los sucesos del ratón: abajo, los botones; luego las teclas de
     ; cambio (c >> 8: 1, Mayús; 2, Control) y las veces seguidas (c >> 16: 1, 2 o 3)
@@ -1374,8 +1375,8 @@ módulo Ventanas
     ; -------------------------------------------------------------------------
     público función pulso()
         variable c: Clic
-        variable x, yy: ent32
-        variable k, i, m: nat32
+        variable x, yy, vr, nr: ent32
+        variable k, i, m, lr: nat32
         tomar(cerrojo)
         ; los botones del ratón, cada cambio donde fue
         mientras saca_clic(c) hacer
@@ -1394,6 +1395,17 @@ módulo Ventanas
             flecha_x := x
             flecha_y := yy
             pinta_flecha()
+        fin
+        ; (NAVEGADOR) la rueda: a la ventana de debajo de la flecha
+        nr := saca_rueda()
+        si nr <> 0 entonces
+            si nr > 127 entonces nr := 127 fin
+            si nr < -127 entonces nr := -127 fin
+            lr := 0
+            vr := ventana_o_borde(x, yy, lr)
+            si vr >= 0 y lr = 0 y está_dentro(vr, x, yy) entonces
+                pon_evento(vr, EV_RUEDA, nat32(dentro_x(vr, x)), nat32(dentro_y(vr, yy)), (nat32(nr) yb 0xFF) ob (modificadores() << DESPLAZA_CAMBIO))
+            fin
         fin
         ; las teclas: la del logo, a la barra de tareas; las demás, al menú
         ; que esté abierto o a la ventana activa (en «b», si venía con Mayús)

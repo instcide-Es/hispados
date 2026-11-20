@@ -92,5 +92,10 @@ $(O)/NAVEGA.BIN: $(O)/entrada.o $(SURF_OBJ) $(O)/crt.o $(O)/qjs.o $(AQUI)/pentiu
 	ld -m elf_i386 --no-warn-rwx-segments -z noexecstack --gc-sections -T $(AQUI)/pentium.ld -Map $(O)/navega.map -o $(O)/navega.elf \
 	  $(O)/entrada.o $(SURF_OBJ) $(O)/crt.o $(O)/qjs.o
 	objcopy -O binary $(O)/navega.elf $@
+# X87.BIN: la prueba de que cada programa tiene su x87 (prueba_x87.c, castel/pruebas.sh)
+$(O)/X87.BIN: $(O)/entrada.o $(AQUI)/prueba_x87.c $(AQUI)/pentium.h $(AQUI)/pentium.ld
+	$(CC32) -Wall -c $(AQUI)/prueba_x87.c -o $(O)/prueba_x87.o
+	ld -m elf_i386 --no-warn-rwx-segments -z noexecstack --gc-sections -T $(AQUI)/pentium.ld -o $(O)/x87.elf $(O)/entrada.o $(O)/prueba_x87.o
+	objcopy -O binary $(O)/x87.elf $@
 navega: $(O)/NAVEGA.BIN
 .PHONY: navega

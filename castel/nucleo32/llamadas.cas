@@ -129,6 +129,7 @@ módulo Llamadas
     público constante EV_FOCO = 7               ; a: 1 si pasa a ser la ventana activa, 0 si deja de serlo
     público constante EV_SALE = 9               ; el ratón ya no está encima
     público constante EV_UNIDADES = 12          ; ha aparecido o desaparecido una unidad (una memoria USB): hay que mirarlas otra vez
+    público constante EV_RUEDA = 13             ; (NAVEGADOR) la rueda del ratón: a, b, dónde; c, los pasos (con signo, en el octeto bajo: arriba, positivos), con CON_MAYÚS y CON_CONTROL
     público constante EV_MENÚ = 10              ; se ha cerrado el menú que se pidió: a, la opción elegida (desde 0; SIN_ELEGIR si ninguna); b, su etiqueta
     público constante SIN_ELEGIR = 0xFFFFFFFF
     público constante BOTÓN_IZQUIERDO = 1       ; en «c» de los sucesos del ratón: los botones pulsados...
