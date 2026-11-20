@@ -39,6 +39,8 @@
 #     la carpeta \INSTALA de la memoria. Con ellos van la oficina
 #     (nucleo32/hvprun): HVPRUN.BIN y lo de \OFICINA, con
 #     CARPETAS.TXT, que le dice a INSTALAR lo que va a C:\OFICINA.
+#   - y el servicio de ACPI, ACPI.BIN (acpi/pentium/hacer.sh): apagar de
+#     verdad y la batería; con «registro», lo suyo queda en X:\ACPI.TXT.
 # Necesita ser root (losetup, mount), python3, nasm, parted, dosfstools y
 # grub-pc-bin (grub-install --target=i386-pc).
 set -eu
@@ -65,6 +67,11 @@ for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO uhola:HOLA 
   MODULOS="$MODULOS  module /$N.BIN $N.BIN
 "
 done
+# el servicio de ACPI (acpi/pentium/: apagar de verdad y la batería), un
+# programa más: va en la raíz, como módulo y, al instalar, a \HISPA
+bash $AQUI/../../acpi/pentium/hacer.sh $W/f/ACPI.BIN
+MODULOS="$MODULOS  module /ACPI.BIN ACPI.BIN
+"
 # lo que se instala en el disco: el núcleo (con el nombre que tendrá allí), los
 # programas, los textos del sistema instalado y el arranque del disco
 INSTALA="  module /ESCRIT8.BIN NUCLEO.BIN
@@ -113,6 +120,8 @@ EL ESCRITORIO
   del ratón abre un menú en casi todas partes.
   El Bloc de notas guarda con F2. Cortar, copiar y pegar: Ctrl+X, Ctrl+C y
   Ctrl+V (el portapapeles es de todo el sistema).
+  En los portátiles, la bandeja enseña la batería: con el puntero quieto
+  encima, lo que queda, si está enchufado y la salud de la batería.
 
 LA CONSOLA (el intérprete de órdenes)
   AYUDA dice las órdenes: DIR, TYPE, COPY, DEL, REN, MD, CD, RD, PATH, VER,
@@ -128,6 +137,8 @@ LAS UNIDADES
 LA CARPETA \HISPA
   NUCLEO.BIN   el núcleo
   *.BIN        los programas
+  ACPI.BIN     el servicio de ACPI: apagar de verdad y la batería de los
+               portátiles (sin él, «Apagar» solo dice que ya se puede)
   HISPA.INI    los ajustes: usuario, equipo, teclado (es o us) y modo
   GRUB.CFG     el menú de arranque. La línea «set modo=» es la medida de la
                pantalla (por ejemplo 1024x768x32, o auto)

@@ -22,6 +22,8 @@
 # texto» lo teclea sin Intro; «:pausa S» espera S segundos; «:captura NOMBRE»
 # deja la pantalla en $CAPTURAS/NOMBRE.ppm (CAPTURAS: una carpeta; /tmp si no
 # se dice). La flecha empieza en el centro (PANTALLA=800x600 si no se dice).
+# «:monitor ORDEN» le da esa orden al monitor de QEMU (como «o /b 0x70 0x60»:
+# escribir en un puerto; con QEMU_MAS="-S", antes de arrancar, y «cont»).
 # «:texto NOMBRE» deja la pantalla de texto (sus 25 líneas) en
 # $CAPTURAS/NOMBRE.txt (para el programa que instala, que la pinta entera).
 # Con DISCO=imagen, esa imagen como disco duro IDE (el maestro del canal
@@ -134,6 +136,7 @@ for orden in "${ORDENES[@]}"; do
   fi
   case "$orden" in
     ":pausa "*) sleep ${orden:7}; continue ;;
+    ":monitor "*) mon "${orden:9}" 0.2; continue ;;
     ":raton "*) set -- ${orden:7}; ir $1 $2; continue ;;
     ":clic "*) set -- ${orden:6}; ir $1 $2; mon "mouse_button 1" 0.2; mon "mouse_button 0" 0.4; continue ;;
     ":doble "*) set -- ${orden:7}; ir $1 $2; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.1; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.5; continue ;;
