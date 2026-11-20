@@ -212,7 +212,7 @@ checkx $T/auto.txt "REM Nota: una=C:\\X"
 # disquete casi lleno: cabe el sistema pero no toda la carpeta \HISPADOS
 L=$T/l.img
 dd if=/dev/zero of=$L bs=1k count=1440 status=none; mformat -i $L -f 1440 ::
-head -c $(( 1457664 - 62 * 1024 )) /dev/zero > $T/RELLENO.BIN
+head -c $(( 1457664 - 72 * 1024 )) /dev/zero > $T/RELLENO.BIN   # (sitio para KERNEL.SYS + COMMAND.COM, ~63 K en la 0.9.29, pero no para \HISPADOS)
 mcopy -i $L $T/RELLENO.BIN ::RELLENO.BIN
 run $T/log7 $L "" 10 "INSTALAR B:" "IF ERRORLEVEL 4 ECHO nivel-incompleto" "ECHO =M1="
 check $T/log7 "La instalación NO está completa"
