@@ -105,9 +105,11 @@ printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
 # de Hispa-System con esos parámetros
 disco() {
   cp "$IMG" $T/f.img
-  # sitio para las tres copias de la ROM de 64 K (el disquete de la 0.9.22
-  # deja 183 K libres): fuera el sonido de bienvenida, que aquí no se usa
-  mdel -i $T/f.img ::HISPADOS/HISPA.WAV > /dev/null 2>&1
+  # sitio para las tres copias de la ROM de 64 K y BUZO.SAV (32 K): con las
+  # letras de unidad el disquete deja unos 224 K libres y no cabía entera
+  # (se quedaba en 30 K): fuera el sonido de bienvenida y Audición, que aquí
+  # no se usan
+  mdel -i $T/f.img ::HISPADOS/HISPA.WAV ::HISPADOS/AUDICION.COM > /dev/null 2>&1
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   mcopy -o -i $T/f.img $B/VDPTEST.SMS ::VDPTEST.SMS
   # los cartuchos van en \HISPADOS\JUEGOS\SMS: allí también VDPTEST.SMS y
@@ -368,7 +370,7 @@ pasos)
   if [ "$(xxd -l 6 -p $T/b.sav 2> /dev/null)" = "42555a000010" ] && [ "$(stat -c %s $T/b.sav)" = 32768 ]; then
     ok "BUZO.SAV: 32 KB con la mejor puntuación (10) al cerrar la ventana"
   else
-    ko "BUZO.SAV: $(xxd -l 8 -p $T/b.sav 2>&1)"
+    ko "BUZO.SAV: $(xxd -l 8 -p $T/b.sav 2>&1), $(stat -c %s $T/b.sav 2>&1) octetos"
   fi
   hs pantalla $T/p10.ppm 144 75 2 $(esperada b_titulo2) "al abrirlo otra vez, el título con la mejor puntuación (de BUZO.SAV)"
   chk $T/p11.ppm titulo 222 150 activa "Abrir ROM (.SMS)" \

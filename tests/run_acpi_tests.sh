@@ -124,6 +124,9 @@ run() {
   mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
   # (sitio para HSPACPI.BIN y su BATERIA.LOG: el disquete va casi lleno)
   mdel -i $T/f.img ::HISPADOS/JUEGOS/SMS/BUZO.SMS 2>/dev/null
+  # (el disquete de las pruebas va casi lleno y HSPACPI.BIN ocupa 146 KB: se
+  # hace sitio quitando lo que aquí no se usa)
+  mdel -i $T/f.img ::HISPADOS/INSTALAR.COM ::HISPADOS/PARTIR.COM ::HISPADOS/FORMATEA.COM 2> /dev/null
   mcopy -o -i $T/f.img $B/HSPACPI.COM $B/HSPACPI.BIN $B/CMOSW.COM ::HISPADOS/
   rm -f $T/mon
   { sleep 6

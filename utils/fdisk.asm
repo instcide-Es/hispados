@@ -27,6 +27,9 @@
 ;                         sale con el nivel de error = código ASCII de la letra
 ;                         de la unidad (67 = C:...); 0 si no se hace nada, 1 si
 ;                         no se puede
+;  PARTIR ... /FORZAR    dejar cambiar también la memoria USB de la que se ha
+;                        arrancado (sin ella PARTIR se niega: es fácil
+;                        borrarla por error). Aun así pide escribir SI.
 ;  PARTIR ... /PASOS     escribir cada llamada a la BIOS antes de hacerla
 ;                        (para ver en qué paso se para un equipo)
 ;  PARTIR ... /SINMODELO  no preguntar el modelo a los discos (si al leerlo
@@ -164,6 +167,8 @@ start:
         cmp dword [di], 'ARRA'
         je .o_arr
         cmp dword [di], 'SINM'
+        je .arg
+        cmp dword [di], 'FORZ'          ; (ya leída en prescan)
         je .arg
         cmp dword [di], 'PASO'          ; (ya leída en prescan)
         je .arg
@@ -602,6 +607,17 @@ find_boot:
         call edd_info
         cmp byte [iface], IF_USB
         je .isusb
+        ; [LETRAS] o lo dice el núcleo (la imagen para memorias USB lleva
+        ; su marca en el sector de arranque)
+        xor bx, bx
+        xor cx, cx
+        mov ax, 0x3368
+        int 0x21
+        cmp bx, 'HD'
+        jne .nok
+        test cl, 1
+        jnz .isusb
+.nok:
         mov al, [bootltr]
         add al, 'A'
         mov [s_instbat], al
@@ -638,8 +654,32 @@ other_disk:
 .r:
         ret
 
-; /INSTALAR sin disco: el disco duro que no es el de arranque; CF si no hay
+; /INSTALAR sin disco: el disco duro interno (nunca el de arranque); CF si no hay
 inst_pick_disk:
+        ; [LETRAS] el disco duro interno que dice el núcleo (INT 21h AX=3368h,
+        ; docs/UNIDADES.md), si no es el de arranque: arrancando de disquete
+        ; o de CD con una memoria USB puesta, la BIOS puede dar la memoria
+        ; como primer disco, y no es ahí donde se instala
+        push dx
+        xor bx, bx
+        xor cx, cx
+        mov ax, 0x3368
+        int 0x21
+        pop dx
+        cmp bx, 'HD'
+        jne .viejo
+        cmp ch, 0x80
+        jb .viejo
+        cmp ch, [bootdisk]
+        je .viejo
+        mov al, ch
+        sub al, 0x80
+        cmp al, [ndisks]
+        jae .viejo
+        mov [disk], ch
+        clc
+        ret
+.viejo:
         mov byte [disk], 0x80
         cmp byte [bootdisk], 0
         je .ok
@@ -1155,8 +1195,13 @@ prescan:
         call opt_word
         pop si
         cmp dword [optbuf], 'SINM'
-        jne .p
+        jne .pf
         mov byte [nomodel], 1
+        jmp .l
+.pf:
+        cmp dword [optbuf], 'FORZ'      ; /FORZAR: también la memoria de arranque
+        jne .p
+        mov byte [forzar], 1
         jmp .l
 .p:
         cmp dword [optbuf], 'PASO'      ; /PASOS: cada llamada a la BIOS, a la vista
@@ -1637,6 +1682,20 @@ guard:
         mov al, [disk]
         cmp al, [bootdisk]
         jne .ok
+        ; [LETRAS] la memoria USB de arranque no se toca (solo con /FORZAR)
+        cmp byte [bootusb], 0
+        je .ask
+        cmp byte [forzar], 0
+        jne .ask
+        call crlf
+        mov al, [bootltr]
+        add al, 'A'
+        mov [msg_g_no], al
+        mov si, msg_g_no
+        call puts
+        stc
+        ret
+.ask:
         call crlf
         mov si, msg_g1
         call puts
@@ -2836,7 +2895,11 @@ first_dos_prim:
         jc .n
         mov [req_part], cl
         mov [slot], si
+        mov eax, [si+8]
+        call kletter
+        jnc .kl
         mov al, [pletter]
+.kl:
         clc
         ret
 .n:
@@ -3049,6 +3112,55 @@ c_arr:
 ;  Letras de unidad (como las da el núcleo: primero las primarias de cada
 ;  disco y después las lógicas de cada disco)
 ; -----------------------------------------------------------------------------
+; [LETRAS] EAX = primer sector (absoluto) de una partición del disco actual
+; -> AL = la letra que le ha dado el núcleo («-» si ninguna), CF=0. Las
+; letras ya no van siempre seguidas (docs/UNIDADES.md): se preguntan al
+; núcleo (INT 21h AX=3369h). CF=1 si el núcleo no tiene esa función.
+kletter:
+        push bx
+        push cx
+        push dx
+        push si
+        push di
+        mov [kl_start], eax
+        mov dl, 2
+.l:
+        xor bx, bx
+        mov ax, 0x3369
+        push dx
+        int 0x21
+        pop dx
+        cmp bx, 'HD'
+        jne .no
+        cmp al, 2
+        jne .n
+        cmp cl, [disk]
+        jne .n
+        cmp di, [kl_start]
+        jne .n
+        cmp si, [kl_start+2]
+        jne .n
+        mov al, dl
+        add al, 'A'
+        jmp .ok
+.n:
+        inc dl
+        cmp dl, 26
+        jb .l
+        mov al, '-'
+.ok:
+        clc
+        jmp .r
+.no:
+        stc
+.r:
+        pop di
+        pop si
+        pop dx
+        pop cx
+        pop bx
+        ret
+
 ; -> [pletter] = letra de la primera primaria DOS del disco actual,
 ;    [lletter] = la de su primera unidad lógica
 calc_letters:
@@ -3224,9 +3336,15 @@ show_table:
         mov al, [si+4]
         call is_dos
         jc .nodrv
+        mov eax, [si+8]
+        call kletter
+        jnc .kl
+        mov al, [letter]
+.kl:
+        push ax
         mov si, msg_sp4
         call puts
-        mov al, [letter]
+        pop ax
         call putc
         mov al, ':'
         call putc
@@ -3319,9 +3437,18 @@ show_table:
         mov al, [log_type+bx]
         call is_dos
         jc .lnl
+        push bx
+        shl bx, 2
+        mov eax, [log_start+bx]
+        pop bx
+        call kletter
+        jnc .lkl
+        mov al, [letter]
+.lkl:
+        push ax
         mov si, msg_sp4
         call puts
-        mov al, [letter]
+        pop ax
         call putc
         mov al, ':'
         call putc
@@ -3487,6 +3614,9 @@ msg_g_usb   db " es la MEMORIA USB DE ARRANQUE: desde ella funciona", 13, 10
 msg_g_hd    db " es el DISCO DE ARRANQUE: desde él funciona Hispa-DOS", 13, 10
             db "ahora mismo. Si lo cambia puede perder lo que tiene y dejar de arrancar.", 13, 10
             db "Para cambiarlo de todos modos escriba SI y pulse Intro: ", 0
+msg_g_no    db "X: es la memoria USB desde la que ha arrancado Hispa-DOS: no se puede", 13, 10
+            db "partir ni formatear (se quedaría sin sistema a medias). El disco duro del", 13, 10
+            db "ordenador es otro (opción 5 o PARTIR n). Quien sepa lo que hace: /FORZAR.", 13, 10, 0
 msg_slow    db "(Leyendo el modelo de los discos; Esc lo salta)", 13, 10, 0
 msg_untouched db "No se ha cambiado nada.", 13, 10, 0
 msg_noother db "No hay ningún disco duro aparte del de arranque: no hay dónde instalar.", 13, 10, 0
@@ -3538,6 +3668,8 @@ bootdisk    resb 1
 bootusb     resb 1
 bootltr     resb 1
 arr_letter  resb 1
+forzar      resb 1
+kl_start    resd 1
 iface       resb 1
 dpte_ok     resb 1
 at_dev      resb 1

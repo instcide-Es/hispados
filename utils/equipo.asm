@@ -4948,6 +4948,107 @@ vendors:
         VEN 0x1AEC, "Wolfson"
         dw 0
 
+; [LETRAS] Qué es cada letra de unidad, como la orden UNIDADES: lo dice el
+; núcleo (INT 21h AX=3368h y 3369h, propias de Hispa-DOS; docs/UNIDADES.md)
+letras_lst:
+        xor bx, bx
+        xor cx, cx
+        mov ax, 0x3368
+        int 0x21
+        cmp bx, 'HD'
+        jne .r
+        push cx
+        PR "Reparto de las letras: "
+        pop cx
+        test cl, 2
+        jz .cla
+        PR "normal (C: el disco interno, memorias USB desde la X:)", NL
+        jmp .l0
+.cla:
+        PR "el de MS-DOS (LETRAS=CLASICO)", NL
+.l0:
+        mov byte [lt_drv], 0
+.l:
+        mov dl, [lt_drv]
+        xor bx, bx
+        mov ax, 0x3369
+        int 0x21
+        test al, al
+        jz .n
+        mov [lt_tipo], ax
+        mov [lt_disco], cx
+        mov [lt_mb], dx
+        PR "  "
+        mov al, [lt_drv]
+        add al, 'A'
+        call putc
+        PR ": "
+        mov al, [lt_tipo]
+        cmp al, 1
+        jne .t3
+        PR "disquete"
+        jmp .arr
+.t3:
+        cmp al, 3
+        jne .t4
+        PR "lector de CD/DVD (HSPCD)"
+        jmp .arr
+.t4:
+        cmp al, 4
+        jne .t5
+        PR "memoria USB (HSPUSB)"
+        jmp .arr
+.t5:
+        cmp al, 5
+        jne .t2
+        PR "unidad de un controlador"
+        jmp .arr
+.t2:
+        test byte [lt_tipo+1], 4
+        jz .ni
+        PR "memoria USB"
+        jmp .dk
+.ni:
+        test byte [lt_tipo+1], 2
+        jz .no
+        PR "disco duro interno"
+        jmp .dk
+.no:
+        PR "disco duro"
+.dk:
+        PR ", disco "
+        mov al, [lt_disco]
+        call hex2
+        PR "h"
+        cmp byte [lt_tipo], 6
+        jne .pt
+        PR ": RESERVADA, sin partición de DOS"
+        jmp .arr
+.pt:
+        PR ", tipo "
+        mov al, [lt_disco+1]
+        call hex2
+        PR "h, "
+        movzx eax, word [lt_mb]
+        call putdec
+        PR " MB"
+.arr:
+        test byte [lt_tipo+1], 1
+        jz .nl
+        PR "  <- arranque"
+.nl:
+        call crlf
+.n:
+        inc byte [lt_drv]
+        cmp byte [lt_drv], 26
+        jb .l
+.r:
+        ret
+lt_drv      db 0
+lt_tipo     dw 0
+lt_disco    dw 0
+lt_mb       dw 0
+
 ; =============================================================================
 ;  DISQUETERAS Y DISCOS
 ; =============================================================================
@@ -4966,6 +5067,7 @@ sec_discos:
         add al, 'A'
         call putc
         PR ":", NL
+        call letras_lst             ; [LETRAS] qué es cada letra
         ; ---- disqueteras ----
         int 0x11
         push ax

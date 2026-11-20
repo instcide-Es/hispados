@@ -273,7 +273,7 @@ if [ -f $B/hispados-usb.img ]; then
   check $R "01F0h maestro: QEMU HARDDISK" "identificación ATA del disco"
   check $R "clase 0C0310: USB OHCI"
   check $R "==== TYPE C:\\CONFIG.SYS ===="
-  check $R "DEVICE=C:\\HISPADOS\\HSPUSB.SYS"
+  check $R "DEVICE=\\HISPADOS\\HSPUSB.SYS"
   tam ATA1F0_0.BIN 512
   tam EDD80.BIN 74
   tam PCI/00_00_0.BIN 256

@@ -10,7 +10,7 @@
 #      JUEGOS\MIO.TXT y un fichero suelto en la raíz. Además se estropean a
 #      propósito VENTANAS.COM y ACTUALIZ.COM (se ponen «viejos»), para ver que
 #      la actualización SÍ los sustituye por los del origen.
-#   3) Se arranca otra vez desde el USB y se ejecuta «INSTALAR D:» hacia ese
+#   3) Se arranca otra vez desde el USB y se ejecuta «INSTALAR C:» hacia ese
 #      disco: como ya hay Hispa-DOS, sale el menú y se elige [A] Actualizar.
 #   4) Se comprueba que:
 #      - los binarios del sistema están y son los del origen (KERNEL.SYS,
@@ -67,7 +67,7 @@ echo "== ACTUALIZAR en el sitio (INSTALAR sobre un disco con Hispa-DOS) =="
   key $'\e' 1           # salir
   send "ECHO =INST=" 2
   send "INSTALAR" 1
-  send "S" 5            # dar formato a D: e instalar
+  send "S" 5            # dar formato a C: e instalar
   sleep 28
   send "ECHO =FIN1=" 1
 } | $QEMU -drive file=$T/usb.img,format=raw,if=ide,index=0 \
@@ -75,7 +75,7 @@ echo "== ACTUALIZAR en el sitio (INSTALAR sobre un disco con Hispa-DOS) =="
 txt $T/l1
 echo "-- 1) instalación nueva en el disco duro --"
 part $T/l1.txt "=INST=" "=FIN1=" > $T/s1
-check $T/s1 "Hispa-DOS instalado en la unidad D:"
+check $T/s1 "Hispa-DOS instalado en la unidad C:"
 check $T/s1 "Quite la memoria USB"
 if mdos ::HISPADOS/VENTANAS.COM > /dev/null; then ok "el disco quedó con \\HISPADOS instalado"; else ko "no se instaló Hispa-DOS en el disco"; fi
 
@@ -101,7 +101,7 @@ if mdos ::HISPADOS/RED.INI | grep -qF "192.168.77.77"; then ok "RED.INI del usua
 {
   sleep 8
   send "ECHO =ACT=" 1
-  send "INSTALAR D:" 2
+  send "INSTALAR C:" 2
   send "A" 3           # [A] Actualizar
   send "S" 4           # ¿Continuar? Sí
   sleep 26
@@ -109,14 +109,14 @@ if mdos ::HISPADOS/RED.INI | grep -qF "192.168.77.77"; then ok "RED.INI del usua
 } | $QEMU -drive file=$T/usb.img,format=raw,if=ide,index=0 \
       -drive file=$HDD,format=raw,if=ide,index=1 -boot c > $T/l3 2>&1
 txt $T/l3
-echo "-- 3) INSTALAR D: en modo ACTUALIZAR --"
+echo "-- 3) INSTALAR C: en modo ACTUALIZAR --"
 part $T/l3.txt "=ACT=" "=FIN3=" > $T/s3
 check $T/s3 "ya tiene Hispa-DOS instalado"
 check $T/s3 "[A] Actualizar"
-check $T/s3 "Se va a ACTUALIZAR Hispa-DOS en la unidad D:"
+check $T/s3 "Se va a ACTUALIZAR Hispa-DOS en la unidad C:"
 check $T/s3 "no se formatea nada"
 check $T/s3 "guardado como CONFIG.ANT"
-check $T/s3 "Hispa-DOS actualizado en la unidad D:"
+check $T/s3 "Hispa-DOS actualizado en la unidad C:"
 check $T/s3 "Conservados tus datos y ajustes:"
 check $T/s3 "Quita el USB"
 checkn $T/s3 "Formato completado."

@@ -31,6 +31,9 @@ mcopy -o -i "$IMG" $B/HSPRED.COM ::HISPADOS/HSPRED.COM
 mcopy -o -i "$IMG" $B/PING.COM ::HISPADOS/PING.COM
 mkdir -p "$DEST"
 rm -f "$DEST/hispados-usb-cable.zip"
+# [LETRAS] los guiones y las instrucciones de esta imagen dicen «C:\»: las
+# letras, como siempre (la memoria es la C: aunque haya disco duro)
+tools/letras_clasico.sh "$T/hispados-usb-cable.img"
 (cd $T && zip -q -9 "$DEST/hispados-usb-cable.zip" hispados-usb-cable.img)
 # el LEEME del FTP se lee en Windows: UTF-8 con marca y finales de línea de DOS
 { printf '\xef\xbb\xbf'; sed 's/\r$//; s/$/\r/' tools/prueba-cable/LEEME.TXT; } > "$DEST/LEEME.TXT"

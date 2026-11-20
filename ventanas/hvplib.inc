@@ -18,7 +18,7 @@
 ;                   la misma ruta con esa extensión (el archivo de datos)
 ;    hvl_leer       ESI=ruta EDI=búfer ECX=tamaño -> EAX=octetos leídos (0 si
 ;                   no está); detrás deja un 0
-;    hvl_escribir   ESI=ruta EDX=datos ECX=octetos -> CF=1 si no se puede
+;    hvl_escribir   ESI=ruta EDX=datos ECX=octetos -> CF=1 si no se puede (o no cabe entero)
 ; =============================================================================
 
 hvl_clases:
@@ -190,6 +190,11 @@ hvl_escribir:
         mov ebx, eax
         mov esi, edx
         HV dos_escribir
+        jc .e
+        cmp eax, ecx                ; disco lleno: DOS escribe menos sin CF
+        je .e                       ; (igual: CF=0)
+        stc
+.e:
         pushf
         HV dos_cerrar
         popf

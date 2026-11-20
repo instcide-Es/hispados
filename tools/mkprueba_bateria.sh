@@ -55,6 +55,9 @@ mcopy -o -i "$P" $T/CONFIG.SYS $T/AUTOEXEC.BAT $T/PRUBAT.BAT $T/PASOSBAT.BAT $T/
 # (COMPLETO se escribe sin ruta: que esté también en el PATH)
 mcopy -o -i "$P" $T/COMPLETO.BAT $T/PASOSBAT.BAT ::HISPADOS/
 [ ! -e "$D/hispados-usb-bateria.zip" ] || mv -f "$D/hispados-usb-bateria.zip" "$D/hispados-usb-bateria.zip.ant"
+# [LETRAS] los guiones y las instrucciones de esta imagen dicen «C:\»: las
+# letras, como siempre (la memoria es la C: aunque haya disco duro)
+tools/letras_clasico.sh "$IMG"
 (cd $T && zip -q -9 "$D/hispados-usb-bateria.zip" hispa486-usb.img)
 txt usb/prueba-bateria/LEEME.TXT "$D/LEEME.TXT"
 cp $B/HSPACPI.COM $B/HSPACPI.BIN $T/PRUBAT.BAT $T/PASOSBAT.BAT $T/COMPLETO.BAT "$D/sueltos/"

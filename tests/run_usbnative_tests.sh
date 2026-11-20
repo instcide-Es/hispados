@@ -1,5 +1,6 @@
 #!/bin/bash
 # Prueba del USB nativo (HSPUSB.SYS): controlador xHCI de QEMU con una memoria
+# (La memoria USB que lleva HSPUSB es la X:; docs/UNIDADES.md.)
 # USB (FAT16 sin particiones y, en otra pasada, con tabla de particiones).
 # Se lee, se escribe y después se comprueba la memoria con fsck.fat y mtools.
 # Native USB test: read and write a USB stick through our own xHCI driver.
@@ -30,8 +31,8 @@ EOF
   mcopy -i $T/usb.img@@$OFF $T/HOLA.TXT ::HOLA.TXT
   {
     sleep 7
-    for c in "MOSTRAR D:\\HOLA.TXT" "CREARDIR D:\\HISPA" "COPIAR A:\\HISPADOS\\*.COM D:\\HISPA" \
-             "COPIAR A:\\README.TXT D:\\" "BORRAR D:\\HOLA.TXT" "LISTAR D:\\HISPA"; do
+    for c in "MOSTRAR X:\\HOLA.TXT" "CREARDIR X:\\HISPA" "COPIAR A:\\HISPADOS\\*.COM X:\\HISPA" \
+             "COPIAR A:\\README.TXT X:\\" "BORRAR X:\\HOLA.TXT" "LISTAR X:\\HISPA"; do
       printf '%s\r' "$c"; sleep 3
     done
     sleep 2
@@ -41,8 +42,8 @@ EOF
         -drive file=$T/f.img,format=raw,if=floppy -boot a -no-reboot > $T/log 2>&1
   tr -d '\r' < $T/log | iconv -f CP437 -t UTF-8 > $T/log.txt
   echo "== Hispa-DOS native USB tests ($KIND) =="
-  for want in "HSPUSB 0.2 - USB nativo de Hispa-DOS (UHCI, OHCI, EHCI y xHCI)" "Disco USB: 32 MB en la unidad D:" \
-              "Hola desde la memoria USB" " Directorio de D:\\HISPA" "EDITAR   COM" "TECLADO  COM"; do
+  for want in "HSPUSB 0.2 - USB nativo de Hispa-DOS (UHCI, OHCI, EHCI y xHCI)" "Disco USB: 32 MB en la unidad X:" \
+              "Hola desde la memoria USB" " Directorio de X:\\HISPA" "EDITAR   COM" "TECLADO  COM"; do
     if grep -qF -- "$want" $T/log.txt; then echo "  OK   $want"; else echo "  FAIL $want"; fail=1; fi
   done
   P=$T/part.img

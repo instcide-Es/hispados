@@ -35,21 +35,21 @@ qemu-system-i386 -display none -serial file:$T/log -monitor unix:$T/mon,server,n
   -drive file=$T/f.img,format=raw,if=floppy -boot a -no-reboot ${QTRACE:-} &
 QP=$!
 sleep 8
-typ "DIR D:"; sleep 2
+typ "DIR X:"; sleep 2
 mon "device_del m1"; sleep 2
-typ "DIR D:"; sleep 2
+typ "DIR X:"; sleep 2
 printf 'sendkey d\n' | socat - UNIX-CONNECT:$T/mon >/dev/null 2>&1; sleep 1   # «Descartar»
 mon "drive_add 0 if=none,id=u2,format=raw,file=$T/DOS.img"
 mon "device_add usb-storage,bus=xhci.0,drive=u2,id=m2"; sleep 3
-typ "DIR D:"; sleep 3
-typ "TYPE D:DOS.TXT"; sleep 2
-typ "COPIAR A:\\HISPADOS\\EDITAR.COM D:"; sleep 3
+typ "DIR X:"; sleep 3
+typ "TYPE X:DOS.TXT"; sleep 2
+typ "COPIAR A:\\HISPADOS\\EDITAR.COM X:"; sleep 3
 mon "device_del m2"; sleep 1
 mon "drive_add 0 if=none,id=u3,format=raw,file=$T/TRES.img"
 mon "device_add usb-storage,bus=xhci.0,drive=u3,id=m3"; sleep 3
-typ "DIR D:"; sleep 3
-typ "TYPE D:TRES.TXT"; sleep 2
-typ "MD D:\\NUEVA"; sleep 2
+typ "DIR X:"; sleep 3
+typ "TYPE X:TRES.TXT"; sleep 2
+typ "MD X:\\NUEVA"; sleep 2
 kill $QP 2>/dev/null; wait $QP 2>/dev/null
 tr -d '\r' < $T/log | iconv -f CP437 -t UTF-8 > $T/log.txt
 fail=0
@@ -57,11 +57,11 @@ check() { if grep -qF -- "$1" $T/log.txt; then echo "  OK   $1"; else echo "  FA
 ok() { echo "  OK   $1"; }
 ko() { echo "  FAIL $1"; fail=1; }
 echo "== Hispa-DOS cambio de memoria USB =="
-check "El volumen de la unidad D es MEMUNO"
+check "El volumen de la unidad X es MEMUNO"
 check "La unidad no está preparada"
-check "El volumen de la unidad D es MEMDOS"
+check "El volumen de la unidad X es MEMDOS"
 check "Memoria DOS"
-check "El volumen de la unidad D es MEMTRES"
+check "El volumen de la unidad X es MEMTRES"
 check "Memoria TRES"
 if cmp -s <(mtype -i $T/DOS.img ::EDITAR.COM) build/EDIT.COM; then ok "EDITAR.COM copiado a la memoria DOS"; else ko "EDITAR.COM en la memoria DOS"; fi
 if mdir -i $T/TRES.img ::NUEVA > /dev/null 2>&1; then ok "carpeta NUEVA creada en la memoria TRES"; else ko "carpeta NUEVA en la memoria TRES"; fi
@@ -70,6 +70,6 @@ if cmp -s $T/UNO.img $T/UNO.orig; then ok "la memoria UNO sigue intacta"; else k
 for n in UNO DOS TRES; do
   if fsck.fat -n $T/$n.img > /dev/null 2>&1; then ok "fsck.fat memoria $n"; else ko "fsck.fat memoria $n"; fi
 done
-if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/A:\\>DIR D:/,$p' $T/log.txt; fi
+if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/A:\\>DIR X:/,$p' $T/log.txt; fi
 rm -rf $T
 exit $fail

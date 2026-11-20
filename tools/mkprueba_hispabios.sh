@@ -72,10 +72,13 @@ if [ "${2:-}" = medion ]; then
   nasm -f bin -o $T/TECLAPRU.COM tests/progs/teclapru.asm
   mcopy -o -i "$P" $T/TECLAPRU.COM ::TECLAPRU.COM
   mcopy -o -i "$P" ::AUTOEXEC.BAT $T/AUTOEXEC.BAT
-  grep -q '^PATH C:\\HISPADOS' $T/AUTOEXEC.BAT || { echo "AUTOEXEC.BAT sin la linea de PATH"; exit 1; }
-  sed -i 's/^PATH C:\\HISPADOS\r$/&\nC:\\TECLAPRU\r\nC:\\HISPADOS\\HBLOG > NUL\r/' $T/AUTOEXEC.BAT
+  grep -q '^PATH %ARRANQUE%\\HISPADOS' $T/AUTOEXEC.BAT || { echo "AUTOEXEC.BAT sin la linea de PATH"; exit 1; }
+  sed -i 's/^PATH %ARRANQUE%\\HISPADOS\r$/&\nC:\\TECLAPRU\r\nC:\\HISPADOS\\HBLOG > NUL\r/' $T/AUTOEXEC.BAT
   mcopy -o -i "$P" $T/AUTOEXEC.BAT ::AUTOEXEC.BAT
 fi
+# [LETRAS] los guiones y las instrucciones de esta imagen dicen «C:\»: las
+# letras, como siempre (la memoria es la C: aunque haya disco duro)
+tools/letras_clasico.sh "$IMG"
 [ ! -e "$D/$Z" ] || mv -f "$D/$Z" "$D/$Z.ant"
 (cd $T && zip -q -9 "$D/$Z" hispados-usb.img)
 cp $T/BOOTIA32.EFI "$D/sueltos/"

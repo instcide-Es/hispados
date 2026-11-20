@@ -553,6 +553,7 @@ cfg_cargar:
         call cfg_sumar
         mov [cfg_suma], eax
         call cfg_leer
+        call cfg_rutas_letra        ; [LETRAS] las rutas sin unidad: la propia
         mov eax, [gr_tabla]         ; sin ningún grupo no vale
         mov ecx, MAX_GR
 .g:
@@ -1186,6 +1187,105 @@ pon_clave_cad:
         call pon_cad
         jmp pon_nl
 
+; [LETRAS] La unidad de Hispa Ventanas no siempre es la C:: la memoria USB de
+; arranque es la X: si el equipo tiene disco duro (docs/UNIDADES.md), y luego
+; se instala en la C:. Para que el mismo CENTRO.INI valga en los dos sitios,
+; las rutas de los accesos (Programa= y Carpeta=) pueden ir sin unidad
+; («\HISPADOS\PROGS\PLUMA.HVP»): al leerlo se les pone la de Hispa Ventanas
+; y, cuando esa unidad es la memoria USB de arranque y no es la C: (lo dice
+; el núcleo: INT 21h AX=3368h), al guardarlo se les quita otra vez. Desde un
+; disquete o desde el disco duro se guardan con su unidad, como siempre.
+cfg_rutas_letra:
+        pushad
+        mov byte [cfg_sinletra], 0
+        xor ebx, ebx
+        xor ecx, ecx
+        mov eax, 0x3368
+        int 0x21
+        cmp bx, 'HD'
+        jne .nousb
+        test cl, 1                  ; ¿se arrancó de una memoria USB?
+        jz .nousb
+        cmp dl, 3                   ; ¿y es la C:?
+        je .nousb
+        add dl, 'A' - 1
+        mov al, [dir_propia]
+        and al, 0xDF
+        cmp al, dl                  ; ¿Hispa Ventanas está en ella?
+        jne .nousb
+        mov byte [cfg_sinletra], 1
+.nousb:
+        mov ebp, [ac_tabla]
+        mov ecx, MAX_AC
+.a:
+        cmp byte [ebp+AC_USO], 0
+        je .s
+        lea edi, [ebp+AC_PROG]
+        mov edx, 79
+        call .una
+        lea edi, [ebp+AC_DIR]
+        mov edx, 67
+        call .una
+.s:
+        add ebp, AC_TAM
+        dec ecx
+        jnz .a
+        popad
+        ret
+; EDI = ruta, EDX = lo que cabe: si empieza por «\» (y no es «\\»), con unidad
+.una:
+        cmp byte [edi], '\'
+        jne .r
+        cmp byte [edi+1], '\'
+        je .r
+        cmp byte [dir_propia+1], ':'
+        jne .r
+        xor eax, eax
+.l:
+        cmp byte [edi+eax], 0
+        je .lf
+        inc eax
+        jmp .l
+.lf:
+        add eax, 2
+        cmp eax, edx
+        ja .r
+.m:
+        mov bl, [edi+eax-2]         ; (de atrás adelante, con el cero)
+        mov [edi+eax], bl
+        dec eax
+        cmp eax, 2
+        jae .m
+        mov al, [dir_propia]
+        mov ah, ':'
+        mov [edi], ax
+.r:
+        ret
+
+; como pon_clave_cad, para una ruta: sin la unidad si es la de Hispa Ventanas
+; y esa es la memoria USB de arranque (cfg_sinletra)
+pon_clave_ruta:
+        call pon_clave
+        mov esi, edx
+        cmp byte [cfg_sinletra], 0
+        je .p
+        mov al, [dir_propia]
+        and al, 0xDF
+        mov ah, [esi]
+        and ah, 0xDF
+        cmp al, ah
+        jne .p
+        cmp word [esi+1], ':\'
+        jne .p
+        cmp byte [dir_propia+1], ':'
+        jne .p
+        add esi, 2
+.p:
+        call pon_cad
+        jmp pon_nl
+
+cfg_sinletra db 0
+
 cfg_guardar:
         pushad
         mov byte [cfg_fallo], 0     ; [APAGAR] cfg_fallo = 1 si no se ha podido escribir
@@ -1311,10 +1411,10 @@ cfg_guardar:
         call pon_clave_cad
         mov esi, k_programa
         lea edx, [ebp+AC_PROG]
-        call pon_clave_cad
+        call pon_clave_ruta
         mov esi, k_carpeta
         lea edx, [ebp+AC_DIR]
-        call pon_clave_cad
+        call pon_clave_ruta
         mov esi, k_parametros
         lea edx, [ebp+AC_PARAM]
         call pon_clave_cad

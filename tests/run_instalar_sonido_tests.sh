@@ -10,7 +10,7 @@
 #            que sí; C:\HISPADOS\SONIDO.INI con la sección de este equipo y
 #            C:\HISPADOS\SONIDO.TXT, sin el volcado en pantalla; el disquete,
 #            sin SONIDO.INI
-#   usb      lo mismo desde la memoria USB (el disco duro es D:), con un
+#   usb      lo mismo desde la memoria USB (el disco duro es C:), con un
 #            SONIDO.INI de otro equipo en la memoria: en el disco quedan las
 #            dos secciones y la memoria queda como estaba
 #   arranque si y usb: arrancar solo desde el disco instalado; HSPSND dice
@@ -129,11 +129,11 @@ PREC="PARTIR /PRI|FORMATEA C: /V:DESTINO /AUTOTEST"
 nuevo si "$DISQ"; bash tests/tools/sinmenu.sh $T/si/f.img NORMAL || ko "si: sinmenu.sh"
 lote; instala si "default=S" "$PREC" "INSTALAR C:" -- $EQ $HDA \
   -drive file=$T/si/f.img,format=raw,if=floppy -drive file=$T/si/hdd.img,format=raw,if=ide -boot a &
-# ---- usb: desde la memoria USB (el disco duro es D:) ----
+# ---- usb: desde la memoria USB (la memoria es la X: y el disco duro la C:) ----
 nuevo usb "$USBIMG"; bash tests/tools/sinmenu.sh $T/usb/f.img NORMAL || ko "usb: sinmenu.sh"
 mcopy -o -i $T/usb/f.img@@1048576 $T/otro.ini ::HISPADOS/SONIDO.INI
 USBDEV="-device qemu-xhci,id=xhci -drive if=none,id=usbd,format=raw,file=$T/usb/f.img -device usb-storage,bus=xhci.0,drive=usbd,bootindex=0"
-lote; instala usb "default=S" "PARTIR 2 /PRI|FORMATEA D: /V:DESTINO /AUTOTEST" "INSTALAR D:" -- $EQ $HDA $USBDEV \
+lote; instala usb "default=S" "PARTIR 2 /PRI|FORMATEA C: /V:DESTINO /AUTOTEST" "INSTALAR C:" -- $EQ $HDA $USBDEV \
   -drive if=none,id=hd,format=raw,file=$T/usb/hdd.img -device ide-hd,drive=hd,bootindex=1 &
 # ---- esc: Esc en la primera pregunta (con un SONIDO.INI en el disquete) ----
 nuevo esc "$IMG"; mcopy -o -i $T/esc/f.img $T/otro.ini ::HISPADOS/SONIDO.INI
@@ -152,7 +152,7 @@ wait
 for c in si usb; do
   echo "== INSTALAR con la comprobación del sonido ($c) =="
   L=$T/$c/log.txt
-  [ $c = si ] && D=C || D=D
+  D=C        # (desde la memoria USB también: el disco duro es la C: y la memoria la X:)
   has $L "Hispa-DOS instalado en la unidad $D: (" "$c: "
   has $L "Por último, la comprobación del sonido" "$c: "
   has $L "Vamos a comprobar que su equipo suena. Pulse S si oye el sonido," "$c: "

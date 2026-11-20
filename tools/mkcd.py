@@ -75,7 +75,13 @@ def autoexec_cd(edicion):
 
 def raiz_disco(txt):
     """CONFIG.SYS y AUTOEXEC.BAT de la raíz del CD (los que INSTALAR copia al
-    disco duro): con C:, la letra que tendrá el disco al arrancar desde él."""
+    disco duro): con C:, la letra que tendrá el disco al arrancar desde él.
+    [LETRAS] Los de la imagen USB vienen sin la letra (\\HISPADOS en
+    CONFIG.SYS y %ARRANQUE%\\ en AUTOEXEC.BAT, tools/mkusb.py): del CD no se
+    arranca con ellos (para eso está el disquete ARRANQUE.IMG), así que aquí
+    se les pone la C: del disco duro."""
+    txt = txt.replace('%ARRANQUE%\\', 'C:\\')
+    txt = re.sub(r'(?<![A-Za-z0-9:\\])\\HISPADOS\\', r'C:\\HISPADOS\\', txt)
     return LETRA.sub(r'C:\\', txt)
 
 def mkarranque(edicion, out, d):

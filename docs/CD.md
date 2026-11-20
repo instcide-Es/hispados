@@ -28,6 +28,10 @@ CD («grabar imagen»).
   (la unidad que tiene `\HISPADOS\HISPACD.INI`), lo guarda en la variable
   `CD` y lo usa todo de allí: `PATH` con `%CD%:\HISPADOS` y los
   controladores de AUTOEXEC.BAT (ratón, sonido, mandos...).
+- Las letras (docs/UNIDADES.md): si el equipo tiene disco duro, la C: es
+  suya (aunque esté vacío, sin partición) y el CD es la D: (o la primera
+  libre detrás de las particiones); sin disco duro, el CD es la C:. Una
+  memoria USB que lleve HSPUSB sale en la X:.
 - `ARRANQUE.IMG` también se puede grabar en un disquete de verdad: es un
   disquete de arranque para usar el CD en los equipos que no arrancan de CD.
 
@@ -85,6 +89,10 @@ Los pasos:
    - Si tras partir el núcleo no ve la unidad nueva, pide reiniciar (y
      volver a elegir «Instalar»). Con Hispa-DOS no suele hacer falta: PARTIR
      hace que el núcleo reparta las letras otra vez sin reiniciar.
+   - El disco es el **disco duro interno** (el que el núcleo tiene por
+     tal: la C:), nunca el medio del que se ha arrancado: arrancando de la
+     memoria USB (que es la X:), la memoria no se toca; si no hay más disco
+     que ella, dice que no hay disco duro donde instalar.
 
    ![El disco vacío](cd/setup-2-disco.png)
 
@@ -117,7 +125,8 @@ memoria USB) sigue como antes, con preguntas en modo texto.
 
 ## De dónde copia INSTALAR
 
-- Por omisión, de la unidad de arranque.
+- Por omisión, de la unidad de arranque (la de verdad, INT 21h AX=3305h:
+  la X: si es la memoria USB y el equipo tiene disco duro).
 - **Arrancando de disquete** (el de siempre o el del CD), si hay un CD de
   Hispa-DOS puesto (una unidad con `\HISPADOS\HISPACD.INI`), **copia todo
   del CD** y no pide los disquetes *Instalación 2*, *Oficina*, *Hispa-486*
@@ -148,8 +157,8 @@ los 90 (`-cpu 486`/`pentium`, 16 MB, sin USB):
 - `disquetes`: la opción 2 desde el disquete de arranque sin CD: pide
   *Instalación 2* y *Oficina* (con el de arranque puesto dice «Ese no es el
   disco pedido») y, con ESC al de *Hispa-486*, queda Hispa-386;
-- `usb`: la opción 2 desde la memoria USB a un disco duro vacío (el 2.º
-  disco): CONFIG.SYS con C: y la memoria sin tocar;
+- `usb`: la opción 2 desde la memoria USB (la X:) a un disco duro vacío (el
+  2.º disco, la C:): CONFIG.SYS sin letras y la memoria sin tocar;
 - `486`: el CD de Hispa-486 arranca el escritorio (Pentium, 16 MB).
 
 ![Hispa Ventanas desde el CD de Hispa-386](cd/cd-ventanas.png)

@@ -85,8 +85,11 @@ cuenta "S7 OK" 4 "último ajuste sin sitio: error 8 y BX = mayor bloque"
 checkn "FALLO"
 l1=$(libre 1); l2=$(libre 2); l3=$(libre 3); l4=$(libre 4)
 # (575 KB hasta la 0.9.25; FAT32 en el núcleo, como MS-DOS 7.1, ocupa unos
-# 2,5 KB más de memoria convencional sin DOS=HIGH: desde entonces, 572)
-if [ "${l1:-0}" -ge 572 ]; then ok "un programa recibe $l1 KB (el intérprete solo deja ~2 KB abajo)"; else ko "un programa recibe ${l1:-?} KB (se esperaban 572 o más)"; fi
+# 2,5 KB más de memoria convencional sin DOS=HIGH: desde entonces, 572. Con
+# las letras hasta la X: -la memoria USB; docs/UNIDADES.md- la tabla de
+# unidades pasa de 16 a 24 y, con su código, son otros 2 KB sin DOS=HIGH
+# (1,2 KB con el núcleo en la HMA): 570)
+if [ "${l1:-0}" -ge 570 ]; then ok "un programa recibe $l1 KB (el intérprete solo deja ~2 KB abajo)"; else ko "un programa recibe ${l1:-?} KB (se esperaban 570 o más)"; fi
 if [ "${l2:-0}" -ge $(( ${l1:-0} - 6 )) ] && [ "${l2:-0}" -lt "${l1:-0}" ]; then ok "con un residente cargado: $l2 KB"; else ko "con un residente cargado: ${l2:-?} KB"; fi
 if [ "${l3:-0}" -ge $(( ${l2:-0} - 8 )) ]; then ok "desde un intérprete anidado: $l3 KB"; else ko "desde un intérprete anidado: ${l3:-?} KB"; fi
 if [ "${l4:-0}" -eq "${l2:-1}" ]; then ok "desde un lote: $l4 KB, lo mismo"; else ko "desde un lote: ${l4:-?} KB (antes $l2)"; fi
@@ -100,7 +103,7 @@ check "Comando o nombre de archivo incorrecto"
 check "EXEPILA OK"
 check "COMMAND   Datos"
 m1=$(mayor 1); m2=$(mayor 2)
-if [ "${m1:-0}" -ge $((572 * 1024)) ]; then ok "MEM cuenta como libre el cuerpo del intérprete: $m1 bytes"; else ko "MEM: mayor programa ejecutable ${m1:-?}"; fi
+if [ "${m1:-0}" -ge $((570 * 1024)) ]; then ok "MEM cuenta como libre el cuerpo del intérprete: $m1 bytes"; else ko "MEM: mayor programa ejecutable ${m1:-?}"; fi
 if [ "${m2:-0}" -ge $(( ${m1:-0} - 6 * 1024 )) ] && [ "${m2:-0}" -lt "${m1:-0}" ]; then ok "al final solo falta lo del residente: $m2 bytes"; else ko "memoria al final: ${m2:-?} (al principio ${m1:-?})"; fi
 check "Versión de DOS notificada: 6.22"
 checkn "Sistema detenido"
@@ -182,7 +185,7 @@ prepara ''
 cuenta "S3 OK" 2 "sin XMS: las estrategias van igual"
 checkn "FALLO"
 l1=$(libre 1)
-if [ "${l1:-0}" -ge 527 ] && [ "${l1:-0}" -lt 572 ]; then ok "sin XMS el intérprete se queda entero abajo: $l1 KB"; else ko "sin XMS: ${l1:-?} KB"; fi
+if [ "${l1:-0}" -ge 525 ] && [ "${l1:-0}" -lt 570 ]; then ok "sin XMS el intérprete se queda entero abajo: $l1 KB"; else ko "sin XMS: ${l1:-?} KB"; fi
 check "SIGUE-EL-LOTE dos"
 check "FIN-DEL-LOTE"
 checkn "COMMAND   Datos"

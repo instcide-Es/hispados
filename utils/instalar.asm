@@ -136,6 +136,11 @@ start:
         add si, 8
         jmp .op
 .noori:
+        cmp eax, 'FORZ'             ; [LETRAS] /FORZAR: también en la memoria
+        jne .nfz                    ; USB de la que se ha arrancado
+        mov byte [forzar], 1
+        jmp .op
+.nfz:
         cmp eax, 'NOSO'
         jne .op
         mov eax, [si+4]
@@ -154,6 +159,28 @@ start:
         mov [src], dl
         call elige_origen
         call pon_origen
+        ; [LETRAS] (docs/UNIDADES.md) lo que dice el núcleo del arranque
+        xor bx, bx
+        xor cx, cx
+        mov ax, 0x3368
+        int 0x21
+        cmp bx, 'HD'
+        je .hd
+        xor cx, cx
+        xor dx, dx
+.hd:
+        mov [k_flags], cl
+        mov [k_disk], dh
+        ; INSTALAR C: con la C: reservada (el disco duro aún no tiene
+        ; partición): como INSTALAR a secas, que la crea
+        test cl, 4
+        jz .nres
+        cmp byte [guided], 0
+        jne .nres
+        cmp byte [dst], 'C'
+        jne .nres
+        mov byte [guided], 1
+.nres:
         cmp byte [setup], 0
         jne setup_main
         cmp byte [guided], 0
@@ -165,9 +192,30 @@ start:
         je .same
         mov dl, [arranque]
         cmp dl, [dst]
-        jne .ok
+        jne .ok0
 .same:
         mov si, msg_same
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+.ok0:
+        ; otra partición de la memoria USB de arranque: tampoco (/FORZAR)
+        test byte [k_flags], 1
+        jz .ok
+        cmp byte [forzar], 0
+        jne .ok
+        mov dl, [dst]
+        sub dl, 'A'
+        xor bx, bx
+        mov ax, 0x3369
+        int 0x21
+        cmp al, 2
+        jne .ok
+        cmp cl, [k_disk]
+        jne .ok
+        mov al, [dst]
+        mov [msg_esarr], al
+        mov si, msg_esarr
         call puts
         mov ax, 0x4C01
         int 0x21
@@ -1098,7 +1146,8 @@ pon_origen:
         ret
 
 ; [SETUP] tras cambiar las particiones el núcleo reparte otra vez las letras
-; (el CD, que era C: con el disco vacío, pasa a D:): volver a buscar el CD
+; (con el reparto clásico, LETRAS=CLASICO, el CD que era C: con el disco
+; vacío pasa a D:; con el normal no se mueve): volver a buscar el CD
 rebusca_cd:
         cmp byte [desde_cd], 0
         je .r
@@ -1263,6 +1312,8 @@ setup_main:
         ja .parterr
         mov byte [s_formatear], 1   ; partición nueva: formato sin preguntar más
         call set_dst
+        call dst_prohibido          ; [LETRAS] nunca el medio de arranque
+        jc .esarr
         call drv_params
         jnc .carpeta
         ; el núcleo no ve aún la unidad: reiniciar y volver a empezar
@@ -1278,8 +1329,13 @@ setup_main:
 .parterr:
         mov si, sc_parterr
         jmp s_error
+.esarr:
+        mov si, sc_esarr
+        jmp s_error
 .letra:
         call set_dst
+        call dst_prohibido          ; [LETRAS] nunca el medio de arranque
+        jc .esarr
         call drv_params
         jnc .ex
         mov si, sc_parterr
@@ -1396,6 +1452,34 @@ setup_main:
         je instala_comun
         call ed_guardar
         jmp instala_comun
+
+; [LETRAS] ¿el destino [dst] es el origen, la unidad de arranque u otra
+; partición de la memoria USB de la que se ha arrancado? -> CF=1: ahí no se
+; instala (el programa de instalación no admite /FORZAR)
+dst_prohibido:
+        mov dl, [dst]
+        cmp dl, [src]
+        je .si
+        cmp dl, [arranque]
+        je .si
+        test byte [k_flags], 1
+        jz .no
+        sub dl, 'A'
+        xor bx, bx
+        mov ax, 0x3369
+        int 0x21
+        cmp bx, 'HD'
+        jne .no
+        cmp al, 2
+        jne .no
+        cmp cl, [k_disk]
+        je .si
+.no:
+        clc
+        ret
+.si:
+        stc
+        ret
 
 ; el final: instalado; quitar el medio y reiniciar
 setup_fin:
@@ -1955,6 +2039,11 @@ puts:
         ret
 
 nosnd       db 0
+forzar      db 0
+k_flags     db 0
+k_disk      db 0
+msg_esarr   db "X: está en la memoria USB desde la que ha arrancado Hispa-DOS: ahí no se", 13, 10
+            db "instala (ni se parte ni se formatea). (Quien sepa lo que hace: /FORZAR.)", 13, 10, 0
 aud_path    db "C:\HISPADOS\AUDICION.COM", 0
 aud_tail    db aud_te - aud_tail - 1, " /RAPIDA "
 aud_d1      db "C:\HISPADOS /INI:"
@@ -2228,6 +2317,11 @@ sc_borrar   db 1, "Se va a BORRAR TODO EL DISCO DURO.", 10, 10
 sc_preparando db "Preparando el disco duro para Hispa-DOS...", 0
 sc_parterr  db "No se ha podido preparar el disco duro. No se ha instalado nada.", 10, 10
             db "Puede hacerlo a mano con la orden PARTIR y volver a empezar.", 0
+sc_esarr    db "El único disco donde se podría instalar es el mismo desde el que ha", 10
+            db "arrancado Hispa-DOS (la memoria USB o el disco de arranque): ahí no", 10
+            db "se instala. No se ha tocado nada.", 10, 10
+            db "Si el ordenador tiene disco duro, compruebe en la BIOS que está", 10
+            db "activado.", 0
 sc_reinicio db "El disco duro ya está preparado, pero hay que reiniciar el ordenador", 10
             db "para seguir.", 10, 10
             db "Deje puesto el disquete, la memoria USB o el CD. Al volver a salir", 10

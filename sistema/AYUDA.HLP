@@ -40,7 +40,7 @@ Comodines * y ?: COPIAR *.TXT A: copia todos los .TXT al disquete.
 
 [DISCOS]
 DISCOS (nombre español / nombre clásico)
-  A:, C:, D:...           cambia de unidad
+  A:, C:, D:...           cambia de unidad (UNIDADES: qué es cada letra)
   PARTIR / FDISK          particiones del disco duro
   FORMATEA / FORMAT       da formato a un disco (borra lo que tenga)
   SISTEMA / SYS           deja un disco de arranque

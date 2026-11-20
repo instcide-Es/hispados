@@ -73,7 +73,9 @@ send() { printf '%s\r' "$1"; sleep "${2:-1.5}"; }
 chk() { python3 -I tests/tools/ventanas_check.py "$@" || fail=1; }
 txt() { tr -d '\r' < $1 | iconv -f CP437 -t UTF-8 -c > $1.txt; }
 # lo que hay en el disco duro (la partición, por mtools)
-hd() { mtype -i $T/hdd.img@@$OFF "$@" 2>/dev/null | tr -d '\r' | iconv -f CP437 -t UTF-8 -c; }
+# (los archivos de la memoria no llevan la letra, docs/UNIDADES.md: AUTOEXEC.BAT
+# dice %ARRANQUE% y CENTRO.INI va sin unidad; aquí se leen como en la C:)
+hd() { mtype -i $T/hdd.img@@$OFF "$@" 2>/dev/null | tr -d '\r' | iconv -f CP437 -t UTF-8 -c | sed -e 's/%ARRANQUE%/C:/g' -e 's/^\(Programa\|Carpeta\)=\\/\1=C:\\/'; }
 hdtiene() { if mdir -i $T/hdd.img@@$OFF "::$1" > /dev/null 2>&1; then ok "en el disco duro: $1"; else ko "falta en el disco duro: $1"; fi; }
 hdnotiene() { if mdir -i $T/hdd.img@@$OFF "::$1" > /dev/null 2>&1; then ko "(no debe estar) $1"; else ok "no está: $1"; fi; }
 # máquina N TIEMPO opciones-de-QEMU... (lo que se teclea, por la entrada)
@@ -150,7 +152,7 @@ cp $T/usb0.img $T/usb.img
   send 'ECHO =I2=' 2
   mon quit; } | maquina 2 150 $USBD $HDD -boot c
 echo "-- 2) INSTALL de Hispa-486 en un disco duro vacío --"
-check $T/l2.txt "Hispa-DOS instalado en la unidad D:"
+check $T/l2.txt "Hispa-DOS instalado en la unidad C:"
 check $T/l2.txt "Hispa-DOS esta instalado."
 checkn $T/l2.txt "Hispa-486 (el escritorio con el menú Inicio"     # (el disquete: aquí no)
 for f in HISPA32/CALC32.EXE HISPA32/HOLA32.EXE HISPA32/CTL32.EXE HISPA32/MENU32.EXE HISPA32/AVISO32.EXE HISPA32/NAVES.EXE \
@@ -233,7 +235,7 @@ mcopy -o -i $T/hdd.img@@$OFF $T/v4.ini ::HISPADOS/VENTANAS.INI
 actualiza 4 $T/usb0.img 22
 echo "-- 4) actualizar un Hispa-486 con la memoria de Hispa-486 --"
 check $T/l4.txt "ya tiene Hispa-DOS instalado."
-check $T/l4.txt "Hispa-DOS actualizado en la unidad D:"
+check $T/l4.txt "Hispa-DOS actualizado en la unidad C:"
 checkn $T/l4.txt "pasa a Hispa-486"
 hd ::HISPADOS/VENTANAS.INI > $T/ven.txt
 grep -qx 'Dibujo=liso' $T/ven.txt && ok "VENTANAS.INI del usuario conservado" || ko "VENTANAS.INI del usuario perdido"
@@ -256,7 +258,7 @@ echo "-- 5) actualizar un Hispa-386 con la memoria de Hispa-486: pasa a Hispa-48
 check $T/l5.txt "Esa unidad tiene Hispa-386 y este origen es de Hispa-486"
 check $T/l5.txt "Tu VENTANAS.INI anterior se ha guardado como VENTANAS.ANT."
 check $T/l5.txt "Tu CENTRO.INI anterior se ha guardado como CENTRO.ANT."
-check $T/l5.txt "Hispa-DOS actualizado en la unidad D:"
+check $T/l5.txt "Hispa-DOS actualizado en la unidad C:"
 hd ::HISPADOS/VENTANAS.ANT | grep -qx 'Dibujo=liso' && ok "VENTANAS.ANT: el del usuario" || ko "VENTANAS.ANT"
 hd ::HISPADOS/CENTRO.ANT | grep -qx 'Nombre=Lo mio' && ok "CENTRO.ANT: el del usuario" || ko "CENTRO.ANT"
 hd ::HISPADOS/VENTANAS.INI | grep -qx 'Escritorio=486' && ok "VENTANAS.INI: el de Hispa-486" || ko "VENTANAS.INI sin Escritorio=486"
@@ -408,7 +410,7 @@ check $T/l9.txt "Dirección IP  . . . . : 10.0.2.15"
 [ -n "${GUARDAR:-}" ] && for f in $T/r[0-9].ppm; do cp $f "$GUARDAR"/i486_$(basename $f); done 2>/dev/null
 
 # Hispa-386 no cambia: su AUTOEXEC.BAT sigue con la red a mano y sin el Navegador
-mtype -i "$USB386"@@1048576 ::AUTOEXEC.BAT | tr -d '\r' > $T/a386.txt
+mtype -i "$USB386"@@1048576 ::AUTOEXEC.BAT | tr -d '\r' | sed 's/%ARRANQUE%/C:/g' > $T/a386.txt
 grep -qx 'REM C:\\HISPADOS\\HSPRED /AUTO' $T/a386.txt && ! grep -qi '^C:\\HISPADOS\\HSPWIFI' $T/a386.txt \
   && ok "Hispa-386: el AUTOEXEC.BAT de siempre (la red a mano)" || ko "Hispa-386: el AUTOEXEC.BAT ha cambiado"
 if mdir -i "$USB386"@@1048576 ::HISPADOS/INTERNET > /dev/null 2>&1; then ko "Hispa-386 con \\HISPADOS\\INTERNET"
