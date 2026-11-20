@@ -299,6 +299,7 @@ g_windows() {  # [opción de HSPRATON]
   sleep 1; mon "sendkey ret"
   sleep 4
   send "BIN\\MOUSETST" 2
+  sleep 1; mon "mouse_move 0 0 2"
   gestos
   send "A:\\HISPADOS\\HSPRATON /INFO" 2
   sleep 1
@@ -314,6 +315,10 @@ t_windows() {  # opción de HSPRATON, «En uso» esperado
   # y al salir, HSPRATON vuelve a ir (INT 33h) como al cargar
   check_gestos
   check "$2"
+  # la rueda, otra vez (solo la vía directa la da)
+  if [ -z "${1:-}" ]; then
+    if grep -qE "^Pasos de la rueda: -?[1-9]" $T/log.txt; then echo "  OK   la rueda vuelve tras Windows"; else echo "  FAIL la rueda no vuelve tras Windows"; cfail=1; fi
+  fi
   fin
 }
 

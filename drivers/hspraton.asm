@@ -861,8 +861,8 @@ int2f:
         pop ds
         sti
         cld
-        mov byte [w_win], 0         ; (antes: el FAh de la activación ya llega
-        call retoma                 ; por nuestra IRQ 12)
+        mov byte [w_win], 0
+        call retoma
         pop es
         pop ds
         popa
@@ -900,52 +900,77 @@ suelta:
         int 0x15
         ret
 
-; volver a tomar el ratón tras Windows: lo que haya dejado su MOUSE.DRV en la
-; BIOS (su rutina ya no existe) se quita poniendo la nuestra
+; volver a tomar el ratón tras Windows, con las funciones de la BIOS (lo de
+; la carga, dir_init, no es residente: ocuparía 1,5 KB más). Lo que haya
+; dejado su MOUSE.DRV en la BIOS (su rutina ya no existe) se cambia por la
+; nuestra; se reinicia el ratón y, si era un IntelliMouse, se le pone en el
+; modo de la rueda (frecuencias 200, 100 y 80: ya se sabe que lo es); se
+; activa y, por la vía directa, la IRQ 12 vuelve a ser nuestra. Un touchpad
+; en modo absoluto (/BORDE) vuelve como ratón normal, sin el borde.
 retoma:
         mov ax, 0xC200
         xor bh, bh
         int 0x15
-        push cs
-        pop es
+        mov byte [s_abs], 0
+        mov byte [pk_len], 3
+        mov ax, 0xC205              ; reiniciar (paquetes de 3 bytes)
+        mov bh, 3
+        int 0x15
+        push cs                     ; (después de C205h: hay BIOS que con
+        pop es                      ; ella olvidan la rutina)
         mov bx, ps2_cb
         mov ax, 0xC207
         int 0x15
         cmp byte [i_via], 2
-        jne bios_rearm
-        mov byte [w_hay], 0
-        mov byte [i_dev], 0
-        mov byte [ctr_set], 0
-        call dir_init               ; (guarda en old74 la INT 74h de ahora)
-        jc .nodir
-        call bios_sinc
-        ret
-.nodir:
-        mov byte [i_via], 1         ; no va: por la BIOS (sin rueda)
+        jne .res
+        cmp byte [i_dev], 3         ; (el touchpad, como ratón normal)
+        jne .im
         mov byte [i_dev], 1
         mov byte [w_hay], 0
-; la vía BIOS, otra vez: reiniciar, resolución, nuestra rutina, activar
-bios_rearm:
-        mov byte [pk_len], 3
-        mov byte [s_abs], 0
-        mov ax, 0xC205
-        mov bh, 3
-        int 0x15
-        mov ax, 0xC203
+.im:
+        cmp byte [i_dev], 2         ; IntelliMouse: el modo de la rueda
+        jne .res
+        mov bh, 6
+        call .rate
+        mov bh, 5
+        call .rate
+        mov bh, 4
+        call .rate
+        mov byte [pk_len], 4
+        mov bh, 5                   ; y 100 paquetes por segundo
+        call .rate
+.res:
+        mov ax, 0xC203              ; 4 puntos por milímetro
         mov bh, 2
         int 0x15
-        push cs
-        pop es
-        mov bx, ps2_cb
-        mov ax, 0xC207
-        int 0x15
-        mov ax, 0xC200
+        mov ax, 0xC200              ; activar
         mov bh, 1
+        int 0x15
+        cmp byte [i_via], 2
+        jne .r
+        cli                         ; la IRQ 12, nuestra
+        xor ax, ax
+        mov es, ax
+        mov eax, [es:0x74*4]
+        cmp ax, irq12               ; (si ya fuera la nuestra, no se guarda)
+        je .ya
+        mov [old74], eax
+.ya:
+        mov word [es:0x74*4], irq12
+        mov [es:0x74*4+2], cs
+        mov byte [pk_n], 0
+        in al, 0xA1                 ; (abierta)
+        and al, 0xEF
+        out 0xA1, al
+        sti
+.r:
+        ret
+.rate:
+        mov ax, 0xC202
         int 0x15
         ret
 old2f       dd 0
 w_win       db 0                    ; 1 = Windows tiene el ratón
-
 ; -----------------------------------------------------------------------------
 ;  IRQ 12 (INT 74h) en la vía directa. Solo se lee del puerto 60h lo que el
 ;  8042 marca como del auxiliar (bit 5 del estado): lo demás es del teclado
@@ -1285,18 +1310,512 @@ int10:
 .old:
         jmp far [cs:old10]
 
+syn_ini:
+;  [RUEDA] (lo último de lo residente: solo se queda si el touchpad está en
+;  modo absoluto) Paquete de 6 bytes del touchpad Synaptics en modo absoluto (sin
+;  modo W; «Synaptics PS/2 TouchPad Interfacing Guide»): byte 0 = 1 0 dedo
+;  x 0 gesto der izq; X de 13 bits (byte 3 bit 4, byte 1 bits 0-3, byte 4),
+;  Y de 13 bits hacia arriba (byte 3 bit 5, byte 1 bits 4-7, byte 5). El
+;  toque corto (gesto) lo reconoce el touchpad: cuenta como botón izquierdo.
+;  Un dedo que empieza en el borde derecho es la rueda: SYN_PASO unidades
+;  por paso; si no, mueve el puntero (1/8: unos 7 puntos por milímetro).
+SYN_BORDE   equ 5150                ; X desde donde empieza el borde derecho
+SYN_PASO    equ 100                 ; unidades del borde por paso de rueda
+syn_pkt:
+        mov si, pk_buf
+        mov bl, [si]
+        mov al, bl
+        shr al, 2                   ; el gesto (toque): botón izquierdo
+        or bl, al
+        and bx, 3
+        mov ah, [si+3]
+        mov al, [si+1]
+        mov ch, ah                  ; CX = X
+        and ch, 0x10
+        mov cl, al
+        and cl, 0x0F
+        or ch, cl
+        mov cl, [si+4]
+        shr al, 4                   ; DX = Y
+        shr ah, 1
+        and ah, 0x10
+        or ah, al
+        mov al, [si+5]
+        xchg ax, dx
+        xor ax, ax
+        test byte [si], 0x20        ; ¿dedo?
+        jz .suelto
+        cmp [s_toque], al
+        jne .sigue
+        inc ax                      ; empieza: 1 puntero, 2 en el borde
+        cmp cx, SYN_BORDE
+        jb .z
+        inc ax
+.z:
+        mov [s_x], cx
+        mov [s_y], dx
+.suelto:
+        mov [s_toque], al
+        xor ax, ax
+        mov [s_acc], ax
+        mov [s_rx], ax
+        mov [s_ry], ax
+        jmp .quieto
+.sigue:
+        sub cx, [s_x]               ; lo movido desde el anterior
+        add [s_x], cx
+        sub dx, [s_y]
+        add [s_y], dx
+        cmp byte [s_toque], 2
+        je .borde
+        mov si, s_rx
+        call .octavo
+        xchg cx, dx
+        inc si
+        inc si
+        call .octavo
+        xchg cx, dx
+        neg dx
+        jmp .mov
+.borde:
+        sub [s_acc], dx             ; hacia abajo: positivo (como la rueda)
+        mov ax, [s_acc]
+        cwd
+        mov si, SYN_PASO
+        idiv si
+        mov [s_acc], dx
+        mov [whd], al
+.quieto:
+        xor cx, cx
+        xor dx, dx
+.mov:
+        mov [mickd], dx
+        jmp motion
+; CX = CX/8, con lo que sobra guardado en [SI]
+.octavo:
+        add cx, [si]
+        mov ax, cx
+        and ax, 7
+        mov [si], ax
+        sar cx, 3
+        ret
+s_toque     db 0                    ; 0 sin dedo, 1 mueve el puntero, 2 en el borde: rueda
+s_x         dw 0                    ; dónde estaba el dedo
+s_y         dw 0
+s_rx        dw 0                    ; lo que sobra de dividir el movimiento
+s_ry        dw 0
+s_acc       dw 0                    ; lo recorrido por el borde (unidades del touchpad)
+
+resident_end:
+
 ; =============================================================================
-;  [WINDOWS] Lo que sigue (la vía directa y sus ayudas) es residente: al salir
-;  Windows (INT 2Fh AX=1606h) se vuelve a poner el ratón como al cargar.
+;  Instalación
 ; =============================================================================
-; opciones que también mira la vía directa
+init:
+        cld
+        mov si, msg_title
+        call puts
+        call parse
+        jnc .pok
+        mov si, msg_usage
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+.pok:
+        cmp byte [o_help], 0
+        je .nohelp
+        mov si, msg_usage
+        call puts
+        mov ax, 0x4C00
+        int 0x21
+.nohelp:
+        ; ¿ya instalado?
+        mov ax, 0x48D2
+        xor bx, bx
+        mov es, bx
+        cmp dword [es:0x33*4], 0
+        je .new
+        int 0x33
+        cmp ax, 0x5253
+        jne .new
+        cmp byte [o_info], 0
+        je .alr
+        ; /INFO con el driver cargado: sus datos y sus contadores
+        xor bx, bx
+        mov ax, 0x48D3
+        int 0x33
+        test bx, bx
+        jz .alr
+        push ds
+        push es
+        pop ds
+        mov si, bx
+        push cs
+        pop es
+        mov di, info
+        mov cx, INFO_LEN
+        cld
+        rep movsb
+        pop ds
+        call show_info
+.alr:
+        mov si, msg_already
+        call puts
+        mov ax, 0x4C01
+        int 0x21
+.new:
+        sti
+        cld
+        int 0x11
+        shr al, 2
+        and al, 1
+        mov [i_eq], al
+        in al, 0x64
+        mov [i_st64], al
+        cmp byte [o_via], 2
+        je .dir
+        call bios_init
+        jc .nob
+        ; [RUEDA] un touchpad Synaptics por la BIOS solo da movimiento: sin
+        ; /BIOS (ni /SINBORDE o /SIMPLE), por la vía directa, para el borde
+        cmp byte [o_via], 0
+        jne .ready
+        cmp byte [o_noborde], 0
+        jne .rueda
+        test word [i_have], H_SYN
+        jz .rueda
+        cmp byte [i_syn+1], 0x47
+        jne .rueda
+        jmp .adir
+.rueda:
+        ; [RUEDA] un IntelliMouse (ratón PS/2 con rueda) por la BIOS solo da
+        ; paquetes de 3 bytes, sin la rueda: sin /BIOS (ni /SIMPLE), si
+        ; bios_init lo ha reconocido, por la vía directa (paquetes de 4); si
+        ; no va, vuelve a la BIOS (ya sin rueda)
+        ; Si la BIOS no ha sabido decirlo (C204h falla o da algo que no es
+        ; un identificador de ratón: la de QEMU da AAh), se prueba la vía
+        ; directa, que lo pregunta ella; y si ahí tampoco es un
+        ; IntelliMouse, de vuelta a la BIOS (d_rueda)
+        cmp byte [o_via], 0
+        jne .ready
+        cmp byte [b_probado], 0
+        je .ready
+        test word [i_have], H_BID
+        jz .duda
+        cmp byte [i_bid], 3
+        je .adir
+        cmp byte [i_bid], 4
+        jbe .ready                  ; 0 o 4: un ratón sin rueda (o sin la de 3)
+.duda:
+        mov byte [d_rueda], 1
+.adir:
+        mov ax, 0xC200              ; la BIOS lo deja parado
+        xor bh, bh
+        int 0x15
+        mov byte [i_via], 0
+        mov byte [d_estricto], 1    ; (la BIOS iba: sin la IRQ 12, no vale)
+        call dir_init
+        mov byte [d_estricto], 0
+        mov byte [d_rueda], 0
+        jc .vbios
+        call bios_sinc
+        jmp .ready
+.vbios:
+        call bios_init              ; no va: otra vez por la BIOS
+        jmp .ready
+.nob:
+        cmp byte [o_via], 1
+        je .ready
+.dir:
+        call dir_init
+.ready:
+        cmp byte [o_info], 0
+        je .noinfo
+        call show_info
+.noinfo:
+        call report
+        mov ax, 0x3533
+        int 0x21
+        mov [old33], bx
+        mov [old33+2], es
+        mov ax, 0x3510
+        int 0x21
+        mov [old10], bx
+        mov [old10+2], es
+        mov dx, int33
+        mov ax, 0x2533
+        int 0x21
+        mov dx, int10
+        mov ax, 0x2510
+        int 0x21
+        mov ax, 0x352F              ; [WINDOWS] INT 2Fh: Windows arranca/termina
+        int 0x21
+        mov [old2f], bx
+        mov [old2f+2], es
+        mov dx, int2f
+        mov ax, 0x252F
+        int 0x21
+        call reset_all
+        ; liberar el entorno y quedar residente
+        mov es, [0x2C]
+        mov ah, 0x49
+        int 0x21
+        mov dx, resident_end + 15
+        cmp byte [s_abs], 0         ; [RUEDA] sin modo absoluto, sin syn_pkt
+        jne .tam
+        mov dx, syn_ini + 15
+.tam:
+        shr dx, 4
+        mov ax, 0x3100
+        int 0x21
+
+; -----------------------------------------------------------------------------
+;  Opciones de la línea de órdenes. CF = 1 si alguna no se entiende.
+; -----------------------------------------------------------------------------
+parse:
+        mov si, 0x81
+.l:
+        lodsb
+        cmp al, ' '
+        je .l
+        cmp al, 9
+        je .l
+        cmp al, 13
+        je .ok
+        test al, al
+        jz .ok
+        cmp al, '/'
+        je .opt
+        cmp al, '-'
+        je .opt
+.bad:
+        stc
+        ret
+.ok:
+        clc
+        ret
+.opt:
+        mov di, opts
+.t:
+        cmp byte [di], 0
+        je .bad
+        push si
+.c:
+        mov ah, [di]
+        test ah, ah
+        jz .end
+        lodsb
+        cmp al, 'a'
+        jb .u
+        cmp al, 'z'
+        ja .u
+        sub al, 32
+.u:
+        inc di
+        cmp al, ah
+        je .c
+.sk:
+        cmp byte [di], 0
+        je .next
+        inc di
+        jmp .sk
+.end:
+        mov al, [si]                ; tras la opción: fin, espacio u otra
+        cmp al, ' '
+        je .hit
+        cmp al, 9
+        je .hit
+        cmp al, 13
+        je .hit
+        cmp al, '/'
+        je .hit
+        test al, al
+        jz .hit
+.next:
+        pop si
+        add di, 2
+        jmp .t
+.hit:
+        pop ax
+        mov al, [di+1]
+        cmp al, 1
+        jne .h2
+        mov byte [o_info], 1
+.h2:
+        cmp al, 2
+        jne .h3
+        mov byte [o_via], 1
+.h3:
+        cmp al, 3
+        jne .h4
+        mov byte [o_via], 2
+.h4:
+        cmp al, 4
+        jne .h5
+        mov byte [o_simple], 1
+.h5:
+        cmp al, 5
+        jne .h6
+        mov byte [o_help], 1
+.h6:
+        cmp al, 6
+        jne .h7
+        mov byte [o_noborde], 1
+.h7:
+        cmp al, 7
+        jne .h8
+        mov byte [o_synpr], 1
+        mov byte [o_noborde], 0     ; (las pruebas: con el borde)
+        jmp .l
+.h8:
+        cmp al, 8
+        jne .l
+        mov byte [o_noborde], 0     ; [RUEDA] /BORDE: el borde del touchpad, rueda
+        jmp .l
+
+opts        db "INFO", 0, 1
+            db "BIOS", 0, 2
+            db "DIRECTO", 0, 3
+            db "DIRECTA", 0, 3
+            db "SIMPLE", 0, 4
+            db "?", 0, 5
+            db "SINBORDE", 0, 6
+            db "SYNPRUEBA", 0, 7
+            db "BORDE", 0, 8
+            db 0
 o_info      db 0
+o_via       db 0                    ; 0 automática, 1 BIOS, 2 directa
 o_simple    db 0
+o_help      db 0
 o_noborde   db 1                    ; [RUEDA] sin el borde salvo con /BORDE (18/11/2026:
                                     ; hasta probarlo en un touchpad de verdad)
 o_synpr     db 0                    ; [RUEDA] /SYNPRUEBA (las pruebas)
 d_estricto  db 0                    ; [RUEDA] dir_init al dejar la BIOS: sin IRQ 12 es un fallo
 d_rueda     db 0                    ; [RUEDA] y solo si es un IntelliMouse (la BIOS no lo sabía)
+b_probado   db 0                    ; [RUEDA] bios_init ya ha preguntado por la rueda
+
+; -----------------------------------------------------------------------------
+;  Vía BIOS (INT 15h C2xxh). CF = 0 si el ratón queda activado.
+;  No se mira el bit de INT 11h (hay BIOS que no lo ponen) y se reintenta: en
+;  máquinas reales la primera orden al ratón falla a menudo (AH = 04h).
+; -----------------------------------------------------------------------------
+bios_init:
+        or word [i_have], H_BIOS
+        call aux_quiet
+        mov byte [i_biosstep], 0x05
+        mov byte [tries], 3
+.rst:
+        mov ax, 0xC205              ; inicializar, paquetes de 3 bytes
+        mov bh, 3
+        int 0x15
+        jnc .rok
+        mov [i_biosah], ah
+        dec byte [tries]
+        jnz .rst
+        stc
+        ret
+.rok:
+        cmp byte [o_simple], 0
+        jne .conf
+        ; ¿touchpad Synaptics? Cuatro «resolución 0» y una petición de estado:
+        ; un Synaptics contesta con su identificación (47h en el centro)
+        mov byte [tries], 4
+.s1:
+        mov ax, 0xC203
+        mov bh, 0
+        int 0x15
+        jc .conf
+        dec byte [tries]
+        jnz .s1
+        mov ax, 0xC206
+        mov bh, 0
+        int 0x15
+        jc .conf
+        mov [i_syn], bl
+        mov [i_syn+1], cl
+        mov [i_syn+2], dl
+        or word [i_have], H_SYN
+.conf:
+        ; [RUEDA] ¿IntelliMouse? Solo sin /BIOS (si no, no se usaría) y una
+        ; vez (si la vía directa no va y se vuelve aquí, ya no): frecuencias
+        ; 200, 100 y 80 (C202h, BH = 6, 5, 4) y el identificador (C204h). Un
+        ; IntelliMouse contesta 3 y desde ahí manda paquetes de 4 bytes, que
+        ; la BIOS no entiende: se reinicia (C205h) para que vuelva a los de 3
+        ; mientras no se cambia de vía.
+        cmp byte [o_simple], 0
+        jne .conf2
+        cmp byte [o_via], 0
+        jne .conf2
+        cmp byte [b_probado], 0
+        jne .conf2
+        mov byte [b_probado], 1
+        mov ax, 0xC202
+        mov bh, 6
+        int 0x15
+        jc .conf2
+        mov ax, 0xC202
+        mov bh, 5
+        int 0x15
+        jc .conf2
+        mov ax, 0xC202
+        mov bh, 4
+        int 0x15
+        jc .conf2
+        mov byte [tries], 3         ; (alguna BIOS da antes un byte que se
+.bid:                               ; quedó: el AAh del reinicio. Un
+        mov ax, 0xC204              ; identificador de ratón es 0, 3 o 4)
+        int 0x15
+        jc .conf2
+        mov [i_bid], bh
+        or word [i_have], H_BID
+        cmp bh, 4
+        jbe .bidok
+        dec byte [tries]
+        jnz .bid
+.bidok:
+        cmp bh, 3
+        jne .conf2
+        mov ax, 0xC205
+        mov bh, 3
+        int 0x15
+.conf2:
+        mov ax, 0xC203              ; resolución: 4 puntos/mm
+        mov bh, 2
+        int 0x15
+        mov byte [i_biosstep], 0x07
+        push cs
+        pop es
+        mov bx, ps2_cb
+        mov ax, 0xC207
+        int 0x15
+        jc .fail
+        mov byte [i_biosstep], 0x00
+        mov byte [tries], 3
+.ren:
+        mov ax, 0xC200              ; activar
+        mov bh, 1
+        int 0x15
+        jnc .eok
+        mov [i_biosah], ah
+        dec byte [tries]
+        jnz .ren
+        ; no se activa: quitar nuestra rutina
+        xor bx, bx
+        mov es, bx
+        mov ax, 0xC207
+        int 0x15
+        stc
+        ret
+.fail:
+        mov [i_biosah], ah
+        stc
+        ret
+.eok:
+        mov byte [i_biosstep], 0xFF
+        mov byte [i_via], 1
+        call set_dev
+        clc
+        ret
 
 ; qué dispositivo es, por lo que contestó
 set_dev:
@@ -1941,507 +2460,6 @@ kbd_on:
         mov al, 0xAE
         out 0x64, al
         call k_wait_in
-        ret
-
-
-syn_ini:
-;  [RUEDA] (lo último de lo residente: solo se queda si el touchpad está en
-;  modo absoluto) Paquete de 6 bytes del touchpad Synaptics en modo absoluto (sin
-;  modo W; «Synaptics PS/2 TouchPad Interfacing Guide»): byte 0 = 1 0 dedo
-;  x 0 gesto der izq; X de 13 bits (byte 3 bit 4, byte 1 bits 0-3, byte 4),
-;  Y de 13 bits hacia arriba (byte 3 bit 5, byte 1 bits 4-7, byte 5). El
-;  toque corto (gesto) lo reconoce el touchpad: cuenta como botón izquierdo.
-;  Un dedo que empieza en el borde derecho es la rueda: SYN_PASO unidades
-;  por paso; si no, mueve el puntero (1/8: unos 7 puntos por milímetro).
-SYN_BORDE   equ 5150                ; X desde donde empieza el borde derecho
-SYN_PASO    equ 100                 ; unidades del borde por paso de rueda
-syn_pkt:
-        mov si, pk_buf
-        mov bl, [si]
-        mov al, bl
-        shr al, 2                   ; el gesto (toque): botón izquierdo
-        or bl, al
-        and bx, 3
-        mov ah, [si+3]
-        mov al, [si+1]
-        mov ch, ah                  ; CX = X
-        and ch, 0x10
-        mov cl, al
-        and cl, 0x0F
-        or ch, cl
-        mov cl, [si+4]
-        shr al, 4                   ; DX = Y
-        shr ah, 1
-        and ah, 0x10
-        or ah, al
-        mov al, [si+5]
-        xchg ax, dx
-        xor ax, ax
-        test byte [si], 0x20        ; ¿dedo?
-        jz .suelto
-        cmp [s_toque], al
-        jne .sigue
-        inc ax                      ; empieza: 1 puntero, 2 en el borde
-        cmp cx, SYN_BORDE
-        jb .z
-        inc ax
-.z:
-        mov [s_x], cx
-        mov [s_y], dx
-.suelto:
-        mov [s_toque], al
-        xor ax, ax
-        mov [s_acc], ax
-        mov [s_rx], ax
-        mov [s_ry], ax
-        jmp .quieto
-.sigue:
-        sub cx, [s_x]               ; lo movido desde el anterior
-        add [s_x], cx
-        sub dx, [s_y]
-        add [s_y], dx
-        cmp byte [s_toque], 2
-        je .borde
-        mov si, s_rx
-        call .octavo
-        xchg cx, dx
-        inc si
-        inc si
-        call .octavo
-        xchg cx, dx
-        neg dx
-        jmp .mov
-.borde:
-        sub [s_acc], dx             ; hacia abajo: positivo (como la rueda)
-        mov ax, [s_acc]
-        cwd
-        mov si, SYN_PASO
-        idiv si
-        mov [s_acc], dx
-        mov [whd], al
-.quieto:
-        xor cx, cx
-        xor dx, dx
-.mov:
-        mov [mickd], dx
-        jmp motion
-; CX = CX/8, con lo que sobra guardado en [SI]
-.octavo:
-        add cx, [si]
-        mov ax, cx
-        and ax, 7
-        mov [si], ax
-        sar cx, 3
-        ret
-s_toque     db 0                    ; 0 sin dedo, 1 mueve el puntero, 2 en el borde: rueda
-s_x         dw 0                    ; dónde estaba el dedo
-s_y         dw 0
-s_rx        dw 0                    ; lo que sobra de dividir el movimiento
-s_ry        dw 0
-s_acc       dw 0                    ; lo recorrido por el borde (unidades del touchpad)
-
-resident_end:
-
-; =============================================================================
-;  Instalación
-; =============================================================================
-init:
-        cld
-        mov si, msg_title
-        call puts
-        call parse
-        jnc .pok
-        mov si, msg_usage
-        call puts
-        mov ax, 0x4C01
-        int 0x21
-.pok:
-        cmp byte [o_help], 0
-        je .nohelp
-        mov si, msg_usage
-        call puts
-        mov ax, 0x4C00
-        int 0x21
-.nohelp:
-        ; ¿ya instalado?
-        mov ax, 0x48D2
-        xor bx, bx
-        mov es, bx
-        cmp dword [es:0x33*4], 0
-        je .new
-        int 0x33
-        cmp ax, 0x5253
-        jne .new
-        cmp byte [o_info], 0
-        je .alr
-        ; /INFO con el driver cargado: sus datos y sus contadores
-        xor bx, bx
-        mov ax, 0x48D3
-        int 0x33
-        test bx, bx
-        jz .alr
-        push ds
-        push es
-        pop ds
-        mov si, bx
-        push cs
-        pop es
-        mov di, info
-        mov cx, INFO_LEN
-        cld
-        rep movsb
-        pop ds
-        call show_info
-.alr:
-        mov si, msg_already
-        call puts
-        mov ax, 0x4C01
-        int 0x21
-.new:
-        sti
-        cld
-        int 0x11
-        shr al, 2
-        and al, 1
-        mov [i_eq], al
-        in al, 0x64
-        mov [i_st64], al
-        cmp byte [o_via], 2
-        je .dir
-        call bios_init
-        jc .nob
-        ; [RUEDA] un touchpad Synaptics por la BIOS solo da movimiento: sin
-        ; /BIOS (ni /SINBORDE o /SIMPLE), por la vía directa, para el borde
-        cmp byte [o_via], 0
-        jne .ready
-        cmp byte [o_noborde], 0
-        jne .rueda
-        test word [i_have], H_SYN
-        jz .rueda
-        cmp byte [i_syn+1], 0x47
-        jne .rueda
-        jmp .adir
-.rueda:
-        ; [RUEDA] un IntelliMouse (ratón PS/2 con rueda) por la BIOS solo da
-        ; paquetes de 3 bytes, sin la rueda: sin /BIOS (ni /SIMPLE), si
-        ; bios_init lo ha reconocido, por la vía directa (paquetes de 4); si
-        ; no va, vuelve a la BIOS (ya sin rueda)
-        ; Si la BIOS no ha sabido decirlo (C204h falla o da algo que no es
-        ; un identificador de ratón: la de QEMU da AAh), se prueba la vía
-        ; directa, que lo pregunta ella; y si ahí tampoco es un
-        ; IntelliMouse, de vuelta a la BIOS (d_rueda)
-        cmp byte [o_via], 0
-        jne .ready
-        cmp byte [b_probado], 0
-        je .ready
-        test word [i_have], H_BID
-        jz .duda
-        cmp byte [i_bid], 3
-        je .adir
-        cmp byte [i_bid], 4
-        jbe .ready                  ; 0 o 4: un ratón sin rueda (o sin la de 3)
-.duda:
-        mov byte [d_rueda], 1
-.adir:
-        mov ax, 0xC200              ; la BIOS lo deja parado
-        xor bh, bh
-        int 0x15
-        mov byte [i_via], 0
-        mov byte [d_estricto], 1    ; (la BIOS iba: sin la IRQ 12, no vale)
-        call dir_init
-        mov byte [d_estricto], 0
-        mov byte [d_rueda], 0
-        jc .vbios
-        call bios_sinc
-        jmp .ready
-.vbios:
-        call bios_init              ; no va: otra vez por la BIOS
-        jmp .ready
-.nob:
-        cmp byte [o_via], 1
-        je .ready
-.dir:
-        call dir_init
-.ready:
-        cmp byte [o_info], 0
-        je .noinfo
-        call show_info
-.noinfo:
-        call report
-        mov ax, 0x3533
-        int 0x21
-        mov [old33], bx
-        mov [old33+2], es
-        mov ax, 0x3510
-        int 0x21
-        mov [old10], bx
-        mov [old10+2], es
-        mov dx, int33
-        mov ax, 0x2533
-        int 0x21
-        mov dx, int10
-        mov ax, 0x2510
-        int 0x21
-        mov ax, 0x352F              ; [WINDOWS] INT 2Fh: Windows arranca/termina
-        int 0x21
-        mov [old2f], bx
-        mov [old2f+2], es
-        mov dx, int2f
-        mov ax, 0x252F
-        int 0x21
-        call reset_all
-        ; liberar el entorno y quedar residente
-        mov es, [0x2C]
-        mov ah, 0x49
-        int 0x21
-        mov dx, resident_end + 15
-        cmp byte [s_abs], 0         ; [RUEDA] sin modo absoluto, sin syn_pkt
-        jne .tam
-        mov dx, syn_ini + 15
-.tam:
-        shr dx, 4
-        mov ax, 0x3100
-        int 0x21
-
-; -----------------------------------------------------------------------------
-;  Opciones de la línea de órdenes. CF = 1 si alguna no se entiende.
-; -----------------------------------------------------------------------------
-parse:
-        mov si, 0x81
-.l:
-        lodsb
-        cmp al, ' '
-        je .l
-        cmp al, 9
-        je .l
-        cmp al, 13
-        je .ok
-        test al, al
-        jz .ok
-        cmp al, '/'
-        je .opt
-        cmp al, '-'
-        je .opt
-.bad:
-        stc
-        ret
-.ok:
-        clc
-        ret
-.opt:
-        mov di, opts
-.t:
-        cmp byte [di], 0
-        je .bad
-        push si
-.c:
-        mov ah, [di]
-        test ah, ah
-        jz .end
-        lodsb
-        cmp al, 'a'
-        jb .u
-        cmp al, 'z'
-        ja .u
-        sub al, 32
-.u:
-        inc di
-        cmp al, ah
-        je .c
-.sk:
-        cmp byte [di], 0
-        je .next
-        inc di
-        jmp .sk
-.end:
-        mov al, [si]                ; tras la opción: fin, espacio u otra
-        cmp al, ' '
-        je .hit
-        cmp al, 9
-        je .hit
-        cmp al, 13
-        je .hit
-        cmp al, '/'
-        je .hit
-        test al, al
-        jz .hit
-.next:
-        pop si
-        add di, 2
-        jmp .t
-.hit:
-        pop ax
-        mov al, [di+1]
-        cmp al, 1
-        jne .h2
-        mov byte [o_info], 1
-.h2:
-        cmp al, 2
-        jne .h3
-        mov byte [o_via], 1
-.h3:
-        cmp al, 3
-        jne .h4
-        mov byte [o_via], 2
-.h4:
-        cmp al, 4
-        jne .h5
-        mov byte [o_simple], 1
-.h5:
-        cmp al, 5
-        jne .h6
-        mov byte [o_help], 1
-.h6:
-        cmp al, 6
-        jne .h7
-        mov byte [o_noborde], 1
-.h7:
-        cmp al, 7
-        jne .h8
-        mov byte [o_synpr], 1
-        mov byte [o_noborde], 0     ; (las pruebas: con el borde)
-        jmp .l
-.h8:
-        cmp al, 8
-        jne .l
-        mov byte [o_noborde], 0     ; [RUEDA] /BORDE: el borde del touchpad, rueda
-        jmp .l
-
-opts        db "INFO", 0, 1
-            db "BIOS", 0, 2
-            db "DIRECTO", 0, 3
-            db "DIRECTA", 0, 3
-            db "SIMPLE", 0, 4
-            db "?", 0, 5
-            db "SINBORDE", 0, 6
-            db "SYNPRUEBA", 0, 7
-            db "BORDE", 0, 8
-            db 0
-o_via       db 0                    ; 0 automática, 1 BIOS, 2 directa
-o_help      db 0
-b_probado   db 0                    ; [RUEDA] bios_init ya ha preguntado por la rueda
-
-; -----------------------------------------------------------------------------
-;  Vía BIOS (INT 15h C2xxh). CF = 0 si el ratón queda activado.
-;  No se mira el bit de INT 11h (hay BIOS que no lo ponen) y se reintenta: en
-;  máquinas reales la primera orden al ratón falla a menudo (AH = 04h).
-; -----------------------------------------------------------------------------
-bios_init:
-        or word [i_have], H_BIOS
-        call aux_quiet
-        mov byte [i_biosstep], 0x05
-        mov byte [tries], 3
-.rst:
-        mov ax, 0xC205              ; inicializar, paquetes de 3 bytes
-        mov bh, 3
-        int 0x15
-        jnc .rok
-        mov [i_biosah], ah
-        dec byte [tries]
-        jnz .rst
-        stc
-        ret
-.rok:
-        cmp byte [o_simple], 0
-        jne .conf
-        ; ¿touchpad Synaptics? Cuatro «resolución 0» y una petición de estado:
-        ; un Synaptics contesta con su identificación (47h en el centro)
-        mov byte [tries], 4
-.s1:
-        mov ax, 0xC203
-        mov bh, 0
-        int 0x15
-        jc .conf
-        dec byte [tries]
-        jnz .s1
-        mov ax, 0xC206
-        mov bh, 0
-        int 0x15
-        jc .conf
-        mov [i_syn], bl
-        mov [i_syn+1], cl
-        mov [i_syn+2], dl
-        or word [i_have], H_SYN
-.conf:
-        ; [RUEDA] ¿IntelliMouse? Solo sin /BIOS (si no, no se usaría) y una
-        ; vez (si la vía directa no va y se vuelve aquí, ya no): frecuencias
-        ; 200, 100 y 80 (C202h, BH = 6, 5, 4) y el identificador (C204h). Un
-        ; IntelliMouse contesta 3 y desde ahí manda paquetes de 4 bytes, que
-        ; la BIOS no entiende: se reinicia (C205h) para que vuelva a los de 3
-        ; mientras no se cambia de vía.
-        cmp byte [o_simple], 0
-        jne .conf2
-        cmp byte [o_via], 0
-        jne .conf2
-        cmp byte [b_probado], 0
-        jne .conf2
-        mov byte [b_probado], 1
-        mov ax, 0xC202
-        mov bh, 6
-        int 0x15
-        jc .conf2
-        mov ax, 0xC202
-        mov bh, 5
-        int 0x15
-        jc .conf2
-        mov ax, 0xC202
-        mov bh, 4
-        int 0x15
-        jc .conf2
-        mov byte [tries], 3         ; (alguna BIOS da antes un byte que se
-.bid:                               ; quedó: el AAh del reinicio. Un
-        mov ax, 0xC204              ; identificador de ratón es 0, 3 o 4)
-        int 0x15
-        jc .conf2
-        mov [i_bid], bh
-        or word [i_have], H_BID
-        cmp bh, 4
-        jbe .bidok
-        dec byte [tries]
-        jnz .bid
-.bidok:
-        cmp bh, 3
-        jne .conf2
-        mov ax, 0xC205
-        mov bh, 3
-        int 0x15
-.conf2:
-        mov ax, 0xC203              ; resolución: 4 puntos/mm
-        mov bh, 2
-        int 0x15
-        mov byte [i_biosstep], 0x07
-        push cs
-        pop es
-        mov bx, ps2_cb
-        mov ax, 0xC207
-        int 0x15
-        jc .fail
-        mov byte [i_biosstep], 0x00
-        mov byte [tries], 3
-.ren:
-        mov ax, 0xC200              ; activar
-        mov bh, 1
-        int 0x15
-        jnc .eok
-        mov [i_biosah], ah
-        dec byte [tries]
-        jnz .ren
-        ; no se activa: quitar nuestra rutina
-        xor bx, bx
-        mov es, bx
-        mov ax, 0xC207
-        int 0x15
-        stc
-        ret
-.fail:
-        mov [i_biosah], ah
-        stc
-        ret
-.eok:
-        mov byte [i_biosstep], 0xFF
-        mov byte [i_via], 1
-        call set_dev
-        clc
         ret
 
 ; -----------------------------------------------------------------------------

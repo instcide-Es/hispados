@@ -124,11 +124,16 @@ Como hacía el `MOUSE.COM` de Microsoft, HSPRATON escucha INT 2Fh:
   paquetes de 3 bytes, fuera del modo IntelliMouse y del absoluto del
   touchpad). Por la vía BIOS, el ratón se para (C200h) hasta que Windows
   pone su rutina.
-- **AX=1606h** (Windows termina): lo recupera como al cargar. Quita la rutina
-  que dejó Windows en la BIOS (ya no existe) poniendo la nuestra y, por la
-  vía directa, vuelve a hacer lo de la carga (`dir_init`, que por eso es
-  residente: reinicio, rueda, IRQ 12); si no va, se queda por la BIOS sin
-  rueda.
+- **AX=1606h** (Windows termina): lo recupera con las funciones de la BIOS
+  (lo de la carga, `dir_init`, no se queda residente: serían 1,5 KB más, y
+  con eso los bloques de DMA de HSPSND cruzaban una frontera de 64 KB y
+  ocupaban 16 KB más de memoria convencional). Quita la rutina que dejó
+  Windows en la BIOS (ya no existe) poniendo la nuestra (después de C205h:
+  hay BIOS que con C205h la olvidan), reinicia el ratón y, si era un
+  IntelliMouse, lo pone en el modo de la rueda (frecuencias 200, 100 y 80
+  con C202h); lo activa (C200h) y, por la vía directa, la IRQ 12 vuelve a
+  ser nuestra con paquetes de 4 bytes. Un touchpad en modo absoluto
+  (`/BORDE`) vuelve como ratón normal, sin el borde.
 
 Probado con el disco de Carlos (Trabajo en Grupo 3.11, `mouse=*vmd`): el
 puntero se mueve y pulsa en Windows, dos veces seguidas, y al salir
@@ -136,7 +141,8 @@ puntero se mueve y pulsa en Windows, dos veces seguidas, y al salir
 paquetes contando. Prueba automática: `tests/run_mouse_tests.sh ... windows`
 con `WINSIM.COM` (`tests/progs/winsim.asm`), que hace lo de Windows: 1605h,
 el ratón por la BIOS (cuenta los paquetes de los `mouse_move` del monitor),
-lo deja como Windows y 1606h; después MOUSETST comprueba INT 33h.
+lo deja como Windows y 1606h; después MOUSETST comprueba INT 33h y la
+rueda.
 
 Dentro de una sesión MS-DOS de Windows, INT 33h de HSPRATON responde pero no
 recibe movimiento (el ratón es de Windows).
