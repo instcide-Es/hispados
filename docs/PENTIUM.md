@@ -39,7 +39,10 @@ y **memorias** (secciones 7 y 11). Y en la del 19/11 por la noche (la **0.7**):
 pantalla azul (elegir el disco, hacer la partición, darle formato FAT32, copiar
 el sistema a `C:\HISPA`), el **arranque desde el disco** (GRUB en el MBR) y el
 **asistente del primer arranque** (el nombre, la fecha y la hora, el teclado, la
-pantalla: `HISPA.INI`). Todo está en `castel/nucleo32/`.*
+pantalla: `HISPA.INI`). Y el 20/11, **apagar de verdad** (ACPI, S5), reiniciar
+por la FADT y la **batería en la bandeja** con su recuadro de ayuda, con el
+núcleo ACPI de Hispa-DOS (ACPICA) como servicio del anillo 3, `ACPI.BIN`
+(sección 11). Todo está en `castel/nucleo32/` (y el servicio, en `acpi/pentium/`).*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -211,6 +214,7 @@ cuarta parte, los discos y el USB).
 | `emergente.cas` (Emergente) | Los **menús emergentes**: el del botón secundario y el que cuelga de una barra de menús. |
 | `terminal.cas` (Terminal) | Los **terminales**: dos tubos para que una ventana tenga dentro al intérprete de órdenes y a sus programas. |
 | `escritorio.cas` (Escritorio) | El **escritorio**: el tapiz y sus **iconos**, la barra de tareas, el menú Inicio, el reloj, los cuadros (apagar, configuración, «Acerca de»), los menús del botón secundario, y la tarea que lo mueve todo. |
+| `energia.cas` (Energia) | **Apagar de verdad, reiniciar y la batería**: las llamadas del servicio de ACPI (`ACPI.BIN`, un programa del anillo 3 con ACPICA) y la 154; apagar por ACPI (S5) y reiniciar (FADT, 8042, CF9h); la pila de la bandeja y su recuadro de ayuda (sección 11). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
 
 Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
@@ -417,6 +421,8 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 67 | **poner en hora el reloj del PC**: la fecha (EBX) y la hora (ECX), como las guarda la FAT | `poner_reloj` | 0 |
 | 68 | **los ajustes** (`HISPA.INI`): EBX = 0, leerlos otra vez; 1, el nombre del usuario, a ECX; 2, ¿está el sistema instalado en el disco?; 3, el nombre del equipo | `releer_ajustes`, `nombre_usuario`, `sistema_instalado`, `nombre_equipo` | |
 | 80 | **colocar la ventana** EBX (suya) con su esquina en (ECX, EDX) de la pantalla; con ECX = 0xFFFFFFFF, en el centro (encima de la barra de tareas). La usa HVPRUN (sección 10, «La oficina de Hispa-386») | — | 0 |
+| 150-153 | **solo el servicio de ACPI** (`ACPI.BIN`): puertos, memoria física, configuración PCI, y dar la batería y esperar órdenes (sección 11, «Apagar de verdad y la batería») | — | |
+| 154 | **la batería**: lo último que ha leído el servicio de ACPI (una `Energía`, `energia.cas`) a EBX | — | 1, o 0 si no hay servicio |
 
 (La 11, con ECX = 1, no se queda esperando: da `SIGUE` si la tarea no ha acabado
 —`acabada`—. La 15 da además el ancho y el alto de la pantalla gráfica y si el
@@ -1272,6 +1278,125 @@ alta velocidad), que son justo el camino del teclado y el panel del MacBook;
 están hechas según la norma y como las hace HSPUSB, pero hasta que no se prueben
 en el equipo no se sabe.
 
+### Apagar de verdad y la batería (ACPI)
+
+*20/11/2026.* Hasta aquí, «Apagar el equipo» solo decía «Ya puede apagar el
+equipo» (en QEMU, su puerto de pruebas). Ahora **apaga de verdad** (ACPI, el
+estado S5), **reinicia** por el camino que diga el equipo y, en los portátiles,
+la **bandeja enseña la batería**. Todo eso sale del mismo trabajo que ya había
+para Hispa-DOS ([ACPI.md](ACPI.md)): el núcleo de C de `HSPACPI` con
+**ACPICA** dentro, sin tocar una línea de lo que lee la batería.
+
+**Un servicio aparte, en el anillo 3.** ACPI no cabe en un núcleo en Castel (y
+no hace falta): las tablas del equipo son un programa en AML que hay que
+ejecutar, con su intérprete (ACPICA, 150 K de C). Lo lleva **`ACPI.BIN`**, un
+programa del anillo 3 como los demás (cabecera `HPU3`, enlazado para
+`0x40000000`), hecho con **los mismos objetos** de `build/acpi/` que
+`HSPACPI.BIN` (`acpi/pentium/hacer.sh`; el Makefile los compila): cambian solo
+la entrada (`acpi/pentium/entrada.asm`), la «máquina» (`maquina.c`: puertos,
+memoria, PCI y reloj) y el bucle (`servicio.c`). Si el AML de un equipo hace
+algo raro, lo que cae es ese programa, no el núcleo. El núcleo lo lanza al
+arrancar (`semilla.cas`, `arranca_acpi`) si está en la unidad del sistema
+(`\ACPI.BIN`; en un sistema instalado, `\HISPA\ACPI.BIN`), con la línea del
+cargador como argumentos; `sinacpi` en ella no lo lanza, y con `instalar`
+tampoco. Si no está, todo es como antes.
+
+**Lo que puede y los demás no** (`energia.cas`, llamadas 150 a 154). Un
+programa del anillo 3 no puede tocar puertos ni memoria física; el servicio
+se lo pide al núcleo, y **solo él**: el núcleo apunta su tarea al lanzarlo, y a
+cualquier otra le contesta «no vale» (el mismo `ACPI.BIN` lanzado a mano desde
+el intérprete lo dice y acaba).
+
+| EAX | Qué | Devuelve |
+|---|---|---|
+| 150 | un **puerto**: EBX el puerto, ECX el valor, EDX los octetos (1, 2, 4) y 0x100 para escribir | lo leído |
+| 151 | **la memoria física** desde EBX, ECX octetos, a la vista del servicio: en su zona de `0xB0000000`, sin caché. Esas páginas llevan la marca **`AJENO`** (`paginas.cas`): al acabar el programa sus marcos **no** vuelven a los libres (son del equipo: las tablas ACPI, registros) | dónde |
+| 152 | la **configuración PCI**: EBX la dirección (como en CF8h; los bits 0-1, el octeto), ECX, EDX como en la 150; dirección y dato de una vez, con las interrupciones tapadas: el núcleo también usa CF8h/CFCh (lo que ACPICA escribe en CF8h se guarda en `maquina.c` y va con el acceso a CFCh) | lo leído |
+| 153 | el servicio da lo último leído (EBX: una `Energía`, la `struct pe_energia` de `acpi/pentium/pentium.h`) y espera como mucho ECX tics a que el núcleo le mande algo (la orden se mira cada décima de segundo) | la orden: 0, 1 apagar, 2 reiniciar |
+| 154 | (cualquier programa) **la batería**: la `Energía` a EBX | 1, o 0 si no hay servicio |
+
+La memoria física que pide se apunta en `maquina.c` y se vuelve a usar (el
+núcleo no la quita hasta que el programa acaba); en QEMU son 152 K. El reloj
+sale del contador del procesador (RDTSC se puede leer en el anillo 3), medido
+al empezar contra los tics del núcleo; una espera de más de 20 ms duerme. El
+núcleo de C sigue con su «tarea» (`nucleo.c`, con su pila): el bucle de
+`servicio.c` la deja correr y duerme entre paso y paso, y solo entre lecturas
+(`tarea_quieta()`) usa ACPICA desde fuera (para apagar). Lee **igual que
+HSPACPI en el modo mínimo** (docs/ACPI.md, «Los dos modos»): no se pasa el
+equipo a modo ACPI ni se usa la SCI mientras está encendido, `_REG` del
+controlador embebido, `PWUP` antes de cada lectura en el HP Mini y **sin
+`_PSR`** (apagaría su tarjeta de red), el ritmo y las dos baterías del ThinkPad
+A275, la salud (`_BIF`/`_BIX`). Una lectura cada 10 s (`acpicada=N` en la
+línea del cargador). Lo que apunta (lo que en Hispa-DOS es `BATERIA.LOG`) sale
+por el **puerto serie** y, con `registro` en la línea del cargador (las
+entradas de la memoria USB lo llevan), también a **`\ACPI.TXT`** de la unidad
+del sistema (con la memoria USB, `X:\ACPI.TXT`).
+
+**Apagar, en orden** (`escritorio.cas`, `apaga`; `energia.cas`):
+
+1. **Avisar a los programas**: a cada ventana de un programa, «cerrar» (como el
+   botón de la ventana), y hasta 2 s para que se cierren, sin dejar de mover
+   el escritorio. Si alguno no se cierra (el Bloc de notas con cambios sin
+   guardar avisa y se queda), **no se apaga**: un aviso lo dice («Hay un
+   programa sin cerrar: ¿algo sin guardar?»); al pedirlo **otra vez**, se le
+   cierra (como el Bloc al cerrar otra vez).
+2. La pantalla del final («Apagando el equipo...»), y los programas que
+   queden (sin ventana) se acaban: sus archivos se cierran y lo escrito queda.
+3. **Vaciar los discos** (`asentar` de cada uno).
+4. **ACPI**: se le manda «apagar» al servicio, que, con su tarea quieta, hace
+   lo de ACPICA: `AcpiEnterSleepStatePrep(5)` (`\_S5`, `_PTS(5)`, `_SST`),
+   el **modo ACPI** si el equipo no está en él (`SMI_CMD` ← `ACPI_ENABLE`,
+   como `APAGAR` de Hispa-DOS: hay BIOS que si no, no apagan) y
+   `AcpiEnterSleepState(5)`: `SLP_TYP` y luego `SLP_EN` en `PM1a_CNT` (y
+   `PM1b_CNT`). Si el equipo sigue encendido, lo dice; a los 15 s (o si el
+   servicio no está), **el núcleo lo intenta él** con lo que el servicio le
+   dio al arrancar (`PM1a_CNT`, `\_S5`, `SMI_CMD`; si ACPICA no ha podido con
+   `\_S5`, el servicio lo busca a mano en la DSDT, como `APAGAR`).
+5. Si nada de eso apaga: en QEMU, su puerto de pruebas (el código 5); en un PC
+   de verdad, el aviso de siempre, «Ya puede apagar el equipo». **APM no**: es
+   de modo real o de un modo protegido de 16 bits de la BIOS, y los equipos
+   que lo tienen (antes de 2008) casi siempre tienen también ACPI.
+
+**Reiniciar**: lo mismo hasta vaciar los discos; se avisa al servicio (le dice
+al controlador embebido que lo deja, `_REG (3, 0)`, y ya no toca ACPI) y luego,
+como `REINICIAR` de Hispa-DOS, lo que funcione primero: el **registro de
+reinicio de la FADT** (en E/S, en memoria o en la configuración PCI, si la FADT
+lo trae), el **controlador del teclado** (FEh al 64h), el puerto **CF9h** (02h
+y 06h) y un **triple fallo**. La llamada 66 (la que usan INSTALAR y el
+asistente) va por aquí también.
+
+**La batería en la bandeja** (`energia.cas`, `pinta_pila` y `ayuda_pila`).
+Si el equipo declara batería (en un sobremesa no hay pila, ni sin ACPI), la
+bandeja crece y, a la izquierda del reloj, sale **la pila** con lo que queda
+(verde; ámbar por debajo del 25 %, rojo del 10 %), un **rayo** si está
+enchufado, un aspa si no hay batería puesta, y el **porcentaje**. Con el
+puntero **quieto medio segundo** encima sale, encima de la barra y centrado en
+el puntero, el **recuadro de ayuda**, crema, como en Hispa-486
+([VENTANAS.md](VENTANAS.md), «[AYUDA]»):
+
+- sin cable: «Batería: 73 % · quedan 2 h 10 min» (los minutos, si el equipo
+  los da); con cable: «Enchufado · cargando: 73 %» o «Enchufado · cargada
+  (100 %)»; sin batería puesta, «Sin batería puesta · enchufado»;
+- la **salud**: «Salud: 68 % (guarda 5.000 de 7.350 mAh de cuando era nueva)»
+  (con dos baterías, «entre las 2 guardan ... de cuando eran nuevas»);
+- los **ciclos de carga**, si el equipo los da (`_BIX`): «312 ciclos de carga»
+  («312 y 45» con dos);
+- por debajo del 50 % de salud, en terracota: «La batería está gastada: dura
+  menos de la mitad que nueva».
+
+Se va al sacar el puntero de la pila o al pulsar un botón (y no vuelve hasta
+salir y entrar); mientras se ve, se pone al día solo (al enchufar, cambia sin
+mover el puntero). Es una ventana sin marco «encima», del núcleo, que no toma
+el foco.
+
+**Lo que no se puede probar en QEMU**: el controlador embebido de verdad (el
+del HP Mini y el del Toshiba, con sus tiempos), las llamadas a la BIOS (SMI)
+de sus métodos y que la BIOS de cada uno apague con `SLP_EN`. Las pruebas
+(sección 13) usan la batería de mentira de las de Hispa-DOS
+(`tests/acpi/bateria-qemu.aml`, con `-acpitable`), y apagan y reinician QEMU
+con PIIX4 (`pc`) y con ICH9 (`q35`). Para el equipo: la imagen
+`hispa-pentium-usb-0.8-acpi.zip`, con su LEEME.
+
 ## 12. Instalarlo en el disco duro
 
 Desde la **0.7**, Hispa-Pentium se instala en el disco duro del PC y arranca de
@@ -1753,7 +1878,8 @@ arranque. Lo siguiente:
    **medida del panel** cuando la BIOS no la da por VBE (sección 11); **enchufar
    y desenchufar** el USB en marcha; las controladoras OHCI; **LBA de 48 bits**
    en el IDE (discos de más de 128 GB en modo IDE) y el canal IDE secundario;
-   apagar de verdad (ACPI). Y **el escritorio, más** (lo que falta, al final de
+   apagar de verdad (ACPI: hecho el 20/11, sección 11; falta probarlo en el HP
+   Mini, el Toshiba y el ThinkPad A275). Y **el escritorio, más** (lo que falta, al final de
    la sección 10).
 
 1. **El intérprete, más**: `IF`, `GOTO`, `FOR`, `CALL` y variables en los `.BAT`;
