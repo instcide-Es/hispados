@@ -1,0 +1,660 @@
+; =============================================================================
+;  rtcp.cas - TCP en el servicio de red de Hispa-Pentium (RED.BIN): las
+;  conexiones que abren los programas (O_CONECTAR), con lo que se envía
+;  guardado hasta que la otra punta dice que le ha llegado (y se manda otra
+;  vez si no lo dice a tiempo, cada vez esperando el doble) y lo que llega,
+;  en orden, hasta que el programa lo recoge. La ventana que se anuncia es lo
+;  que queda libre de lo recibido; la de la otra punta manda en lo que se
+;  envía. Lo que llega desordenado se tira (la otra punta lo vuelve a
+;  mandar). Sin escuchar en un puerto (de momento solo se conecta).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Rtcp
+
+    importar Rbase, Rpila, Llamadas, Mem32
+
+    constante MAX_CONEX = 8
+    constante CABE_TX = 16384
+    constante CABE_RX = 32768
+    constante RTO_INICIAL = 100                 ; tics (1 s)
+    constante RTO_MÁXIMO = 3200
+    constante MAX_INTENTOS = 8
+
+    ; los estados
+    constante CERRADA = 0
+    constante SYN_ENVIADO = 1
+    constante ESTABLECIDA = 2
+    constante FIN_ESPERA_1 = 3
+    constante FIN_ESPERA_2 = 4
+    constante CIERRE_ESPERA = 5                 ; la otra punta ha cerrado; nosotros, aún no
+    constante CERRANDO = 6
+    constante ÚLTIMO_ACK = 7
+    constante TIEMPO_ESPERA = 8
+    constante ROTA = 9                          ; cortada (RST, o sin contestar): el programa aún no la ha cerrado
+
+    ; lo que espera el programa
+    constante P_NADA = 0
+    constante P_CONECTAR = 1
+    constante P_RECIBIR = 2
+    constante P_ENVIAR = 3
+
+    constante F_FIN = 0x01
+    constante F_SYN = 0x02
+    constante F_RST = 0x04
+    constante F_PSH = 0x08
+    constante F_ACK = 0x10
+
+    tipo Conexión = estructura
+        estado: nat32
+        usada, suelta: bool                     ; suelta: el programa ya la ha cerrado
+        dueño: nat32
+        ip, puerto_l, puerto_r: nat32
+        snd_una, snd_nxt, snd_wnd, iss: nat32
+        rcv_nxt: nat32
+        mss: nat32
+        rto, reloj, intentos: nat32             ; reloj: el tic en que hay que volver a mandar (0: nada)
+        límite: nat32                           ; (TIEMPO_ESPERA, FIN_ESPERA_2, o la conexión que no acaba)
+        tx: puntero a byte
+        tx_ini, tx_n: nat32                     ; lo que se ha enviado y no ha llegado, y lo que está por enviar
+        rx: puntero a byte
+        rx_ini, rx_n: nat32
+        fin_recibido, cerrar: bool
+        fin_enviado: bool
+        error: nat32
+        ventana_dicha: nat32
+        p_clase, p_hueco, p_serie, p_límite, p_cabe: nat32
+    fin
+    variable conex: arreglo [MAX_CONEX] de Conexión
+    variable seg: arreglo [1500] de byte
+    variable sale: arreglo [1480] de byte
+    variable puerto_libre: nat32
+
+    ; ---- ayudantes ----
+    función mín(a: nat32, b: nat32): nat32
+        si a < b entonces devolver a fin
+        devolver b
+    fin
+
+    ; ¿a <= b en los números de secuencia (que dan la vuelta)?
+    función antes_o_igual(a: nat32, b: nat32): bool
+        devolver (b - a) < 0x80000000
+    fin
+
+    función libre_rx(c: puntero a Conexión): nat32
+        devolver CABE_RX - c.rx_n
+    fin
+
+    función ventana(c: puntero a Conexión): nat32
+        devolver mín(libre_rx(c), 65535)
+    fin
+
+    función contesta_pendiente(c: puntero a Conexión, r: nat32, d: puntero a byte, n: nat32)
+        si c.p_clase = P_NADA entonces devolver fin
+        contestar(c.p_hueco, c.p_serie, r, 0, 0, d, n)
+        c.p_clase := P_NADA
+    fin
+
+    función libera(c: puntero a Conexión)
+        c.usada := falso
+        c.estado := CERRADA
+        c.p_clase := P_NADA
+    fin
+
+    ; ---- mandar un segmento ----
+    ; con «n» octetos de lo guardado para enviar, desde «a_partir» (contando
+    ; desde snd_una)
+    función manda(c: puntero a Conexión, señal: nat32, secuencia: nat32, a_partir: nat32, n: nat32)
+        variable h, i, s, k: nat32
+        variable ps: arreglo [12] de byte
+        h := 20
+        llenar(dirección(seg[0]), 24, 0)
+        si señal yb F_SYN <> 0 entonces
+            ; el MSS: lo más que nos cabe en un segmento
+            seg[20] := 2
+            seg[21] := 4
+            pon16(dirección(seg[22]), 1460)
+            h := 24
+        fin
+        pon16(dirección(seg[0]), c.puerto_l)
+        pon16(dirección(seg[2]), c.puerto_r)
+        pon32(dirección(seg[4]), secuencia)
+        si señal yb F_ACK <> 0 entonces pon32(dirección(seg[8]), c.rcv_nxt) fin
+        seg[12] := byte((h div 4) << 4)
+        seg[13] := byte(señal)
+        c.ventana_dicha := ventana(c)
+        pon16(dirección(seg[14]), c.ventana_dicha)
+        k := (c.tx_ini + a_partir) mod CABE_TX
+        i := 0
+        mientras i < n hacer
+            seg[h + i] := c.tx[k]
+            k := k + 1
+            si k = CABE_TX entonces k := 0 fin
+            i := i + 1
+        fin
+        pon_ip(dirección(ps[0]), mi_ip)
+        pon_ip(dirección(ps[4]), c.ip)
+        ps[8] := 0
+        ps[9] := 6
+        pon16(dirección(ps[10]), h + n)
+        s := cierra_suma(suma_parcial(dirección(seg[0]), h + n, suma_parcial(dirección(ps[0]), 12, 0)))
+        pon16(dirección(seg[16]), s)
+        ip_enviar(c.ip, 6, dirección(seg[0]), h + n)
+    fin
+
+    función manda_ack(c: puntero a Conexión)
+        manda(c, F_ACK, c.snd_nxt, 0, 0)
+    fin
+
+    ; un RST para lo que llega y no es de ninguna conexión
+    función manda_rst(ip: nat32, p: puntero a byte, n: nat32)
+        variable señal, s, sq, ak, datos: nat32
+        variable ps: arreglo [12] de byte
+        señal := p[13]
+        si señal yb F_RST <> 0 entonces devolver fin
+        datos := n - (nat32(p[12]) >> 4) * 4
+        llenar(dirección(seg[0]), 20, 0)
+        pon16(dirección(seg[0]), lee16(p + 2))
+        pon16(dirección(seg[2]), lee16(p))
+        si señal yb F_ACK <> 0 entonces
+            sq := lee32(p + 8)
+            ak := 0
+            seg[13] := F_RST
+        sino
+            sq := 0
+            ak := lee32(p + 4) + datos
+            si señal yb F_SYN <> 0 entonces ak := ak + 1 fin
+            si señal yb F_FIN <> 0 entonces ak := ak + 1 fin
+            seg[13] := F_RST ob F_ACK
+        fin
+        pon32(dirección(seg[4]), sq)
+        pon32(dirección(seg[8]), ak)
+        seg[12] := 0x50
+        pon_ip(dirección(ps[0]), mi_ip)
+        pon_ip(dirección(ps[4]), ip)
+        ps[8] := 0
+        ps[9] := 6
+        pon16(dirección(ps[10]), 20)
+        s := cierra_suma(suma_parcial(dirección(seg[0]), 20, suma_parcial(dirección(ps[0]), 12, 0)))
+        pon16(dirección(seg[16]), s)
+        ip_enviar(ip, 6, dirección(seg[0]), 20)
+    fin
+
+    ; manda lo que se pueda de lo guardado (y el FIN, si toca)
+    función sale_lo_que_haya(c: puntero a Conexión)
+        variable vuelo, sin_enviar, cabe, n: nat32
+        si c.estado <> ESTABLECIDA y c.estado <> CIERRE_ESPERA y c.estado <> FIN_ESPERA_1 y c.estado <> ÚLTIMO_ACK y c.estado <> CERRANDO entonces devolver fin
+        mientras cierto hacer
+            vuelo := c.snd_nxt - c.snd_una
+            si c.fin_enviado entonces vuelo := vuelo - 1 fin
+            si vuelo > c.tx_n entonces romper fin
+            sin_enviar := c.tx_n - vuelo
+            si sin_enviar = 0 entonces romper fin
+            cabe := mín(c.snd_wnd, CABE_TX)
+            si vuelo >= cabe entonces romper fin
+            n := mín(mín(sin_enviar, cabe - vuelo), c.mss)
+            si n = 0 entonces romper fin
+            manda(c, F_ACK ob F_PSH, c.snd_nxt, vuelo, n)
+            c.snd_nxt := c.snd_nxt + n
+            si c.reloj = 0 entonces c.reloj := ahora() + c.rto fin
+        fin
+        ; todo enviado y el programa ha cerrado: el FIN
+        si c.cerrar y no c.fin_enviado y (c.snd_nxt - c.snd_una) = c.tx_n entonces
+            manda(c, F_FIN ob F_ACK, c.snd_nxt, 0, 0)
+            c.snd_nxt := c.snd_nxt + 1
+            c.fin_enviado := cierto
+            si c.estado = ESTABLECIDA entonces c.estado := FIN_ESPERA_1 fin
+            si c.estado = CIERRE_ESPERA entonces c.estado := ÚLTIMO_ACK fin
+            si c.reloj = 0 entonces c.reloj := ahora() + c.rto fin
+        fin
+        ; con la ventana cerrada y algo por enviar, que se pregunte (el reloj)
+        si c.reloj = 0 y c.tx_n > 0 entonces c.reloj := ahora() + c.rto fin
+    fin
+
+    ; ---- abrir ----
+    público función conectar(dueño: nat32, hueco: nat32, serie: nat32, ip: nat32, puerto: nat32, espera: nat32)
+        variable i, k: nat32
+        variable c: puntero a Conexión
+        si mi_ip = 0 entonces
+            contestar(hueco, serie, SIN_IP, 0, 0, nulo, 0)
+            devolver
+        fin
+        k := MAX_CONEX
+        para i desde 0 hasta MAX_CONEX - 1 hacer
+            si no conex[i].usada entonces k := i fin
+        fin
+        si k = MAX_CONEX entonces
+            contestar(hueco, serie, NO_CONEXIÓN, 0, 0, nulo, 0)
+            devolver
+        fin
+        c := dirección(conex[k])
+        si c.tx = nulo entonces
+            c.tx := más_memoria(CABE_TX)
+            c.rx := más_memoria(CABE_RX)
+            si c.tx = nulo o c.rx = nulo entonces
+                contestar(hueco, serie, NO_CONEXIÓN, 0, 0, nulo, 0)
+                devolver
+            fin
+        fin
+        c.usada := cierto
+        c.suelta := falso
+        c.dueño := dueño
+        c.ip := ip
+        puerto_libre := puerto_libre + 1
+        si puerto_libre < 49152 o puerto_libre > 65000 entonces puerto_libre := 49152 + ((ahora() * 7) yb 4095) fin
+        c.puerto_l := puerto_libre
+        c.puerto_r := puerto
+        c.iss := ahora() * 64000 + puerto_libre * 1000003
+        c.snd_una := c.iss
+        c.snd_nxt := c.iss + 1
+        c.snd_wnd := 1
+        c.rcv_nxt := 0
+        c.mss := 536
+        c.rto := RTO_INICIAL
+        c.intentos := 0
+        c.tx_ini := 0
+        c.tx_n := 0
+        c.rx_ini := 0
+        c.rx_n := 0
+        c.fin_recibido := falso
+        c.fin_enviado := falso
+        c.cerrar := falso
+        c.error := 0
+        c.estado := SYN_ENVIADO
+        c.p_clase := P_CONECTAR
+        c.p_hueco := hueco
+        c.p_serie := serie
+        c.p_límite := ahora() + espera
+        manda(c, F_SYN, c.iss, 0, 0)
+        c.reloj := ahora() + c.rto
+    fin
+
+    función conexión_de(s: nat32, dueño: nat32): puntero a Conexión
+        si s < 1 o s > MAX_CONEX entonces devolver nulo fin
+        si no conex[s - 1].usada o conex[s - 1].suelta o conex[s - 1].dueño <> dueño entonces devolver nulo fin
+        devolver dirección(conex[s - 1])
+    fin
+
+    ; ¿es una conexión TCP (y no UDP) de ese programa?
+    público función es_tcp(s: nat32): bool
+        devolver s >= 1 y s <= MAX_CONEX
+    fin
+
+    ; ---- enviar ----
+    público función enviar(s: nat32, dueño: nat32, hueco: nat32, serie: nat32, d: puntero a byte, n: nat32)
+        variable c: puntero a Conexión
+        variable cabe, i, k: nat32
+        c := conexión_de(s, dueño)
+        si c = nulo entonces
+            contestar(hueco, serie, NO_CONEXIÓN, 0, 0, nulo, 0)
+            devolver
+        fin
+        si c.estado = ROTA entonces
+            contestar(hueco, serie, c.error, 0, 0, nulo, 0)
+            devolver
+        fin
+        si c.estado <> ESTABLECIDA y c.estado <> CIERRE_ESPERA o c.cerrar entonces
+            contestar(hueco, serie, CORTADA_RED, 0, 0, nulo, 0)
+            devolver
+        fin
+        cabe := CABE_TX - c.tx_n
+        si cabe = 0 entonces
+            ; a esperar a que haya sitio (y entonces se contesta 0: que lo mande otra vez)
+            c.p_clase := P_ENVIAR
+            c.p_hueco := hueco
+            c.p_serie := serie
+            c.p_límite := ahora() + 6000
+            devolver
+        fin
+        n := mín(n, cabe)
+        k := (c.tx_ini + c.tx_n) mod CABE_TX
+        i := 0
+        mientras i < n hacer
+            c.tx[k] := d[i]
+            k := k + 1
+            si k = CABE_TX entonces k := 0 fin
+            i := i + 1
+        fin
+        c.tx_n := c.tx_n + n
+        contestar(hueco, serie, n, 0, 0, nulo, 0)
+        sale_lo_que_haya(c)
+    fin
+
+    ; ---- recibir ----
+    ; da lo que haya (hasta cabe) al que espera
+    función entrega(c: puntero a Conexión)
+        variable n, i, antes: nat32
+        si c.p_clase <> P_RECIBIR entonces devolver fin
+        si c.rx_n = 0 entonces
+            si c.fin_recibido entonces contesta_pendiente(c, 0, nulo, 0) fin
+            si c.estado = ROTA entonces contesta_pendiente(c, c.error, nulo, 0) fin
+            devolver
+        fin
+        n := mín(c.rx_n, c.p_cabe)
+        si n > 1480 entonces
+            ; (de un trozo seguido del anillo, para no copiar dos veces)
+            n := mín(n, CABE_RX - c.rx_ini)
+            contestar(c.p_hueco, c.p_serie, n, 0, 0, c.rx + c.rx_ini, n)
+        sino
+            para i desde 0 hasta n - 1 hacer sale[i] := c.rx[(c.rx_ini + i) mod CABE_RX] fin
+            contestar(c.p_hueco, c.p_serie, n, 0, 0, dirección(sale[0]), n)
+        fin
+        c.p_clase := P_NADA
+        antes := ventana(c)
+        c.rx_ini := (c.rx_ini + n) mod CABE_RX
+        c.rx_n := c.rx_n - n
+        ; si la ventana que se dijo era pequeña y ahora hay sitio, que lo sepa
+        si c.ventana_dicha < c.mss * 2 y ventana(c) >= c.mss * 2 y (c.estado = ESTABLECIDA o c.estado = FIN_ESPERA_1 o c.estado = FIN_ESPERA_2) entonces manda_ack(c) fin
+    fin
+
+    público función recibir(s: nat32, dueño: nat32, hueco: nat32, serie: nat32, espera: nat32, cabe: nat32)
+        variable c: puntero a Conexión
+        c := conexión_de(s, dueño)
+        si c = nulo entonces
+            contestar(hueco, serie, NO_CONEXIÓN, 0, 0, nulo, 0)
+            devolver
+        fin
+        si cabe = 0 entonces
+            contestar(hueco, serie, NO_VALE_RED, 0, 0, nulo, 0)
+            devolver
+        fin
+        c.p_clase := P_RECIBIR
+        c.p_hueco := hueco
+        c.p_serie := serie
+        c.p_cabe := cabe
+        c.p_límite := ahora() + espera
+        entrega(c)
+    fin
+
+    ; ---- cerrar ----
+    público función cerrar(s: nat32, dueño: nat32): nat32
+        variable c: puntero a Conexión
+        c := conexión_de(s, dueño)
+        si c = nulo entonces devolver NO_CONEXIÓN fin
+        contesta_pendiente(c, CORTADA_RED, nulo, 0)
+        c.suelta := cierto
+        c.límite := ahora() + 6000                  ; (en un minuto, acabe como acabe, fuera)
+        según nat16(c.estado)
+            caso ESTABLECIDA, CIERRE_ESPERA:
+                c.cerrar := cierto
+                sale_lo_que_haya(c)
+            caso SYN_ENVIADO, ROTA, CERRADA:
+                libera(c)
+        fin
+        devolver 0
+    fin
+
+    ; lo de un programa que ha acabado: sus conexiones, cortadas (RST)
+    público función tcp_acabó(dueño: nat32)
+        variable i: nat32
+        variable c: puntero a Conexión
+        para i desde 0 hasta MAX_CONEX - 1 hacer
+            c := dirección(conex[i])
+            si c.usada y no c.suelta y c.dueño = dueño entonces
+                si c.estado <> SYN_ENVIADO y c.estado <> ROTA y c.estado <> CERRADA entonces manda(c, F_RST ob F_ACK, c.snd_nxt, 0, 0) fin
+                libera(c)
+            fin
+        fin
+    fin
+
+    función rompe(c: puntero a Conexión, e: nat32)
+        si c.suelta entonces
+            libera(c)
+            devolver
+        fin
+        c.estado := ROTA
+        c.error := e
+        c.reloj := 0
+        si c.p_clase = P_RECIBIR y c.rx_n > 0 entonces
+            entrega(c)
+            devolver
+        fin
+        contesta_pendiente(c, e, nulo, 0)
+    fin
+
+    ; ---- lo que llega ----
+    público función tcp_entra(ip: nat32, p: puntero a byte, n: nat32)
+        variable i, pl, pr, sq, ak, señal, hl, datos, ven, k, acked, op, ol, recortar: nat32
+        variable c: puntero a Conexión
+        variable ps: arreglo [12] de byte
+        si n < 20 entonces devolver fin
+        ; la suma, con la pseudocabecera
+        pon_ip(dirección(ps[0]), ip)
+        pon_ip(dirección(ps[4]), mi_ip)
+        ps[8] := 0
+        ps[9] := 6
+        pon16(dirección(ps[10]), n)
+        si cierra_suma(suma_parcial(p, n, suma_parcial(dirección(ps[0]), 12, 0))) <> 0 entonces devolver fin
+        pr := lee16(p)
+        pl := lee16(p + 2)
+        sq := lee32(p + 4)
+        ak := lee32(p + 8)
+        hl := (nat32(p[12]) >> 4) * 4
+        señal := p[13]
+        ven := lee16(p + 14)
+        si hl < 20 o hl > n entonces devolver fin
+        datos := n - hl
+        c := nulo
+        para i desde 0 hasta MAX_CONEX - 1 hacer
+            si conex[i].usada y conex[i].estado <> CERRADA y conex[i].ip = ip y conex[i].puerto_l = pl y conex[i].puerto_r = pr entonces c := dirección(conex[i]) fin
+        fin
+        si c = nulo o c.estado = ROTA entonces
+            manda_rst(ip, p, n)
+            devolver
+        fin
+        ; ---- SYN_ENVIADO: esperando el SYN+ACK ----
+        si c.estado = SYN_ENVIADO entonces
+            si señal yb F_ACK <> 0 y ak <> c.iss + 1 entonces
+                manda_rst(ip, p, n)
+                devolver
+            fin
+            si señal yb F_RST <> 0 entonces
+                si señal yb F_ACK <> 0 entonces
+                    contesta_pendiente(c, RECHAZADA, nulo, 0)
+                    libera(c)
+                fin
+                devolver
+            fin
+            si señal yb F_SYN <> 0 y señal yb F_ACK <> 0 entonces
+                c.rcv_nxt := sq + 1
+                c.snd_una := ak
+                c.snd_wnd := ven
+                ; el MSS que dice la otra punta
+                i := 20
+                mientras i < hl hacer
+                    op := p[i]
+                    si op = 0 entonces romper fin
+                    si op = 1 entonces
+                        i := i + 1
+                        seguir
+                    fin
+                    si i + 1 >= hl entonces romper fin
+                    ol := p[i + 1]
+                    si ol < 2 entonces romper fin
+                    si op = 2 y ol = 4 entonces c.mss := mín(lee16(p + i + 2), 1460) fin
+                    i := i + ol
+                fin
+                si c.mss < 64 entonces c.mss := 536 fin
+                c.estado := ESTABLECIDA
+                c.reloj := 0
+                c.intentos := 0
+                c.rto := RTO_INICIAL
+                manda_ack(c)
+                contesta_pendiente(c, nat32((nat32(c) - nat32(dirección(conex[0]))) div tamaño(Conexión)) + 1, nulo, 0)
+            fin
+            devolver
+        fin
+        ; ---- las demás: ¿cae dentro de lo que se espera? ----
+        si señal yb F_RST <> 0 entonces
+            si sq = c.rcv_nxt o (antes_o_igual(c.rcv_nxt, sq) y antes_o_igual(sq, c.rcv_nxt + ventana(c))) entonces rompe(c, CORTADA_RED) fin
+            devolver
+        fin
+        si señal yb F_SYN <> 0 entonces
+            ; (un SYN repetido: el ACK que se perdió)
+            manda_ack(c)
+            devolver
+        fin
+        si señal yb F_ACK = 0 entonces devolver fin
+        ; lo que confirma
+        si antes_o_igual(ak, c.snd_nxt) y no antes_o_igual(ak, c.snd_una) entonces
+            acked := ak - c.snd_una
+            si c.fin_enviado y ak = c.snd_nxt entonces
+                ; (el FIN ocupa un número: no es un octeto guardado)
+                acked := acked - 1
+            fin
+            si acked > c.tx_n entonces acked := c.tx_n fin
+            c.tx_ini := (c.tx_ini + acked) mod CABE_TX
+            c.tx_n := c.tx_n - acked
+            c.snd_una := ak
+            c.intentos := 0
+            c.rto := RTO_INICIAL
+            si c.snd_una = c.snd_nxt entonces c.reloj := 0 sino c.reloj := ahora() + c.rto fin
+            ; quien esperaba sitio para enviar, que vuelva a probar
+            si c.p_clase = P_ENVIAR entonces contesta_pendiente(c, 0, nulo, 0) fin
+            si c.fin_enviado y ak = c.snd_nxt entonces
+                según nat16(c.estado)
+                    caso FIN_ESPERA_1: c.estado := FIN_ESPERA_2
+                    caso CERRANDO:
+                        c.estado := TIEMPO_ESPERA
+                        c.límite := ahora() + 200
+                    caso ÚLTIMO_ACK:
+                        libera(c)
+                        devolver
+                fin
+            fin
+        fin
+        si antes_o_igual(c.snd_una, ak) entonces c.snd_wnd := ven fin
+        ; los datos: solo los que tocan (lo que ya se tenía, recortado)
+        recortar := 0
+        si datos > 0 o señal yb F_FIN <> 0 entonces
+            si sq <> c.rcv_nxt entonces
+                si antes_o_igual(sq, c.rcv_nxt) y antes_o_igual(c.rcv_nxt, sq + datos) y c.rcv_nxt <> sq + datos entonces
+                    recortar := c.rcv_nxt - sq
+                sino
+                    ; desordenado, o repetido: que diga otra vez por dónde vamos
+                    manda_ack(c)
+                    sale_lo_que_haya(c)
+                    devolver
+                fin
+            fin
+        fin
+        si datos > recortar entonces
+            datos := datos - recortar
+            si c.estado = ESTABLECIDA o c.estado = FIN_ESPERA_1 o c.estado = FIN_ESPERA_2 entonces
+                k := mín(datos, libre_rx(c))
+                i := 0
+                mientras i < k hacer
+                    c.rx[(c.rx_ini + c.rx_n + i) mod CABE_RX] := p[hl + recortar + i]
+                    i := i + 1
+                fin
+                c.rx_n := c.rx_n + k
+                c.rcv_nxt := c.rcv_nxt + k
+                si k < datos entonces señal := señal yb nob nat32(F_FIN) fin     ; (si no cabía todo, el FIN tampoco)
+            fin
+            entrega(c)
+        fin
+        si señal yb F_FIN <> 0 y no c.fin_recibido entonces
+            c.rcv_nxt := c.rcv_nxt + 1
+            c.fin_recibido := cierto
+            según nat16(c.estado)
+                caso ESTABLECIDA: c.estado := CIERRE_ESPERA
+                caso FIN_ESPERA_1: c.estado := CERRANDO
+                caso FIN_ESPERA_2:
+                    c.estado := TIEMPO_ESPERA
+                    c.límite := ahora() + 200
+            fin
+            entrega(c)
+        fin
+        si datos > 0 o señal yb F_FIN <> 0 entonces manda_ack(c) fin
+        sale_lo_que_haya(c)
+    fin
+
+    ; ---- lo que toca con el tiempo ----
+    público función tcp_tic()
+        variable i, t, vuelo: nat32
+        variable c: puntero a Conexión
+        t := ahora()
+        para i desde 0 hasta MAX_CONEX - 1 hacer
+            c := dirección(conex[i])
+            si c.usada entonces
+                ; lo que espera el programa, a su hora
+                si c.p_clase <> P_NADA y t >= c.p_límite entonces
+                    si c.p_clase = P_CONECTAR entonces
+                        contesta_pendiente(c, TIEMPO, nulo, 0)
+                        libera(c)
+                        seguir
+                    fin
+                    contesta_pendiente(c, TIEMPO, nulo, 0)
+                fin
+                si c.estado = TIEMPO_ESPERA y t >= c.límite entonces
+                    si c.suelta entonces libera(c) sino c.estado := CERRADA fin
+                    seguir
+                fin
+                si c.suelta y t >= c.límite entonces
+                    libera(c)
+                    seguir
+                fin
+                ; volver a mandar
+                si c.reloj <> 0 y t >= c.reloj entonces
+                    c.intentos := c.intentos + 1
+                    si c.intentos > MAX_INTENTOS entonces
+                        si c.estado = SYN_ENVIADO entonces
+                            contesta_pendiente(c, TIEMPO, nulo, 0)
+                            libera(c)
+                        sino
+                            manda(c, F_RST ob F_ACK, c.snd_nxt, 0, 0)
+                            rompe(c, CORTADA_RED)
+                        fin
+                        seguir
+                    fin
+                    c.rto := mín(c.rto * 2, RTO_MÁXIMO)
+                    c.reloj := t + c.rto
+                    si c.estado = SYN_ENVIADO entonces
+                        manda(c, F_SYN, c.iss, 0, 0)
+                    sino
+                        vuelo := c.snd_nxt - c.snd_una
+                        si vuelo = 0 y c.tx_n > 0 entonces
+                            ; la ventana estaba cerrada: un octeto, para preguntar
+                            manda(c, F_ACK, c.snd_una, 0, 1)
+                        sino
+                            ; desde lo último que llegó, otra vez
+                            c.snd_nxt := c.snd_una
+                            si c.fin_enviado entonces
+                                c.fin_enviado := falso
+                                si c.estado = FIN_ESPERA_1 entonces c.estado := ESTABLECIDA fin
+                                si c.estado = ÚLTIMO_ACK entonces c.estado := CIERRE_ESPERA fin
+                                si c.estado = CERRANDO entonces c.estado := CIERRE_ESPERA fin
+                            fin
+                            sale_lo_que_haya(c)
+                        fin
+                    fin
+                fin
+            fin
+        fin
+    fin
+
+    público función tcp_ocupado(): bool
+        variable i: nat32
+        para i desde 0 hasta MAX_CONEX - 1 hacer
+            si conex[i].usada entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; sin cable o sin IP: todas, cortadas
+    público función tcp_sin_red(e: nat32)
+        variable i: nat32
+        para i desde 0 hasta MAX_CONEX - 1 hacer
+            si conex[i].usada entonces rompe(dirección(conex[i]), e) fin
+        fin
+    fin
+
+    público función conexiones_abiertas(): nat32
+        variable i, n: nat32
+        n := 0
+        para i desde 0 hasta MAX_CONEX - 1 hacer
+            si conex[i].usada entonces n := n + 1 fin
+        fin
+        devolver n
+    fin
+
+fin Rtcp.

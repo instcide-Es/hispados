@@ -1,0 +1,521 @@
+; =============================================================================
+;  red.cas - lo que el núcleo de Hispa-Pentium pone para la red. La red de
+;  verdad (los controladores de las tarjetas y la pila TCP/IP) es un programa
+;  del anillo 3, el SERVICIO DE RED (RED.BIN, ured.cas); el núcleo solo hace
+;  de cartero entre él y los programas que usan la red, y le da lo que un
+;  programa normal no tiene: los puertos de E/S, memoria física seguida para
+;  que la tarjeta lea y escriba (DMA) y los registros de la tarjeta a la vista.
+;
+;  Un programa pide algo a la red (llamada 90) con una cabecera de ocho
+;  palabras (la orden y sus datos; la octava, cuántos octetos van detrás) y,
+;  si hace falta, unos octetos (hasta MAX_DATOS): el núcleo los copia, se los
+;  pasa al servicio y deja al programa esperando hasta que el servicio
+;  conteste (otra cabecera y otros octetos, que el núcleo le copia a él). Con
+;  Ctrl+C el programa deja de esperar: lo que conteste luego el servicio se
+;  tira (cada pedido lleva su número de serie). Cuando acaba un programa que
+;  ha usado la red, se le avisa al servicio (para que cierre lo suyo).
+;
+;  Las llamadas (de la 90 a la 98: la 110 y las siguientes son de otra cosa):
+;    90  pedir a la red: EBX, la cabecera (8 palabras: se lee y se escribe
+;        la respuesta encima); ECX, los octetos (los que salen y donde se
+;        dejan los que vuelven); EDX, cuántos caben allí  -> la primera
+;        palabra de la respuesta (SIN_RED: no hay servicio)
+;    91  (el servicio) apuntarse como servicio de red: le da los puertos
+;        (IOPL 3). Solo un programa a la vez, y solo RED.BIN
+;    92  (el servicio) el pedido siguiente, a EBX (Pedido_red y los
+;        octetos detrás: caben 64 + MAX_DATOS); con ECX tics de espera si no
+;        hay ninguno                                   -> 1, o 0 si no hay
+;    93  (el servicio) contestar: EBX, el hueco; ECX, la Respuesta_red
+;    94  (el servicio) EBX páginas seguidas de memoria física (hasta 16), a
+;        su vista; a ECX, su dirección física          -> dónde se ven
+;    95  (el servicio) los registros de un aparato a su vista: EBX, la
+;        dirección física; ECX, cuántos octetos        -> dónde se ven
+;    96  (el servicio) cómo está la red (EBX: RED_...), su IP (ECX) y el
+;        aparato PCI que hace DMA (EDX; 0xFFFFFFFF: ninguno), para el icono
+;        del escritorio y para pararlo si el servicio se acaba
+;    97  cómo está la red: a EBX (si no es 0), la IP   -> RED_...
+;    98  (el servicio) la línea de interrupción de su tarjeta (EBX, de 1 a
+;        15; 0: ninguna): cuando llega, se tapa y el servicio se despierta;
+;        se destapa en su próxima llamada 92
+;
+;  Si el servicio se acaba (o lo acaban), el núcleo apaga el DMA de su
+;  tarjeta antes de devolver su memoria, quita los registros de su vista y
+;  contesta SIN_RED a los que esperaban.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Red
+
+    importar Tareas, Paginas, Marcos, Monton, Mem32, Cpu, Pci, Textos32
+
+    ; ---- lo que dice la llamada 97 (y pone el servicio con la 96) ----
+    público constante RED_NADA = 0              ; no hay servicio de red
+    público constante RED_SIN_TARJETA = 1       ; no hay ninguna tarjeta que se sepa llevar
+    público constante RED_SIN_CABLE = 2         ; la tarjeta no tiene enlace
+    público constante RED_BUSCANDO = 3          ; con enlace, pidiendo la IP (DHCP)
+    público constante RED_CONECTADA = 4         ; con IP
+
+    público constante SIN_RED = 0xFFFFFFEF      ; no hay servicio de red
+    constante NO_VALE = 0xFFFFFFF9
+    constante EN_USO = 0xFFFFFFF6
+    constante SIN_MEMORIA = 0xFFFFFFFA
+
+    público constante MAX_DATOS = 8192          ; lo más que va en un pedido o en una respuesta
+    constante MAX_HUECOS = 16
+    constante H_LIBRE = 0
+    constante H_PEDIDO = 1                      ; esperando a que el servicio lo coja
+    constante H_EN_SERVICIO = 2                 ; lo tiene el servicio
+    constante H_RESPONDIDO = 3
+    constante AVISO_ACABÓ = 0xFFFF              ; (la orden de un aviso: ha acabado la tarea tal)
+    constante ZONA_INICIO = 0xA0000000          ; donde ve el servicio la memoria de DMA y los registros
+    constante ZONA_FINAL = 0xB0000000
+    constante MAX_TROZOS = 8
+
+    tipo Hueco = estructura
+        estado: nat32
+        tarea: puntero a Tarea
+        id, serie, cabe, largo: nat32
+        cab: arreglo [8] de nat32
+        datos: puntero a byte                   ; (del montón: MAX_DATOS)
+    fin
+
+    ; lo que recibe el servicio (la llamada 92); detrás, los octetos
+    tipo Pedido_red = estructura
+        hueco, serie, tarea, cabe, largo: nat32
+        relleno: arreglo [3] de nat32
+        cab: arreglo [8] de nat32
+    fin
+    ; lo que da el servicio al contestar (la llamada 93)
+    tipo Respuesta_red = estructura
+        serie: nat32
+        datos: nat32                            ; dónde están los octetos (cab[7] de ellos)
+        cab: arreglo [8] de nat32
+    fin
+
+    variable huecos: arreglo [MAX_HUECOS] de Hueco
+    variable serie: nat32
+    variable usaron: arreglo [MAX_TAREAS] de nat32      ; las tareas que han usado la red
+    variable avisos: arreglo [MAX_TAREAS] de nat32      ; las que han acabado, para decírselo al servicio
+    variable n_avisos: nat32
+
+    público variable servicio: puntero a Tarea          ; nulo: no hay
+    variable servicio_id: nat32
+    variable servicio_espera: bool
+    público variable estado_red: nat32
+    público variable ip_red: nat32                       ; (como va en la red: el primer octeto, abajo)
+    público variable cambios_red: nat32                  ; sube cuando cambia (el escritorio repinta el icono)
+    público variable apagada: bool                       ; «sinred» en la línea del cargador
+    público variable sin_tarjeta: bool                   ; el servicio ya dijo que no hay tarjeta: no se vuelve a lanzar
+    variable aparato: nat32
+    variable zona: nat32
+    variable trozo_v, trozo_n: arreglo [MAX_TROZOS] de nat32   ; los registros puestos a la vista (para quitarlos)
+    variable n_trozos: nat32
+    variable irq_red: nat32
+    público variable irqs_red: nat32
+
+    ; ---- ayudantes ----
+    público función hay_servicio(): bool
+        devolver servicio <> nulo y servicio.id = servicio_id y servicio.estado <> ACABADA y servicio.estado <> LIBRE
+    fin
+
+    función es_servicio(): bool
+        devolver hay_servicio() y servicio = actual
+    fin
+
+    ; ¿puede el programa leer (o escribir) ahí? (si cae en su pila, sin
+    ; estrenar, antes se le ponen esas páginas; como en usuario.cas)
+    función puede(inicio: nat32, n: nat32, para_escribir: bool): bool
+        variable p: nat32
+        si n > 0 y inicio >= PILA_INICIO y inicio < PILA_FINAL y inicio + n > inicio y inicio + n <= PILA_FINAL entonces
+            p := inicio yb 0xFFFFF000
+            mientras p < inicio + n hacer
+                si banderas_de(actual.cr3, p) = 0 y no atender_pila(actual.cr3, p, actual.esp_usuario) entonces devolver falso fin
+                p := p + PÁGINA
+            fin
+        fin
+        devolver usuario_puede(actual.cr3, inicio, n, para_escribir)
+    fin
+
+    función despierta_servicio()
+        si servicio_espera y hay_servicio() entonces despertar_dormida(servicio) fin
+    fin
+
+    función apunta_uso(id: nat32)
+        variable i, libre: nat32
+        libre := MAX_TAREAS
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            si usaron[i] = id entonces devolver fin
+            si usaron[i] = 0 y libre = MAX_TAREAS entonces libre := i fin
+        fin
+        si libre < MAX_TAREAS entonces usaron[libre] := id fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Pedir (los programas) y contestar (el servicio)
+    ; -------------------------------------------------------------------------
+    función pedir(a: nat32, b: nat32, c: nat32): nat32
+        variable cab: puntero a nat32
+        variable h: puntero a Hueco
+        variable i, largo, bi, r: nat32
+        si no hay_servicio() entonces devolver SIN_RED fin
+        si es_servicio() entonces devolver NO_VALE fin
+        si no puede(a, 32, cierto) entonces devolver NO_VALE fin
+        cab := puntero(a)
+        largo := cab[7]
+        si largo > MAX_DATOS o c > 0x10000000 entonces devolver NO_VALE fin
+        si largo > 0 y no puede(b, largo, falso) entonces devolver NO_VALE fin
+        si c > 0 y no puede(b, c, cierto) entonces devolver NO_VALE fin
+        h := nulo
+        para i desde 0 hasta MAX_HUECOS - 1 hacer
+            si h = nulo y huecos[i].estado = H_LIBRE entonces h := dirección(huecos[i]) fin
+        fin
+        si h = nulo entonces devolver SIN_MEMORIA fin
+        si h.datos = nulo entonces
+            h.datos := reservar(MAX_DATOS)
+            si h.datos = nulo entonces devolver SIN_MEMORIA fin
+        fin
+        para i desde 0 hasta 7 hacer h.cab[i] := cab[i] fin
+        si largo > 0 entonces copiar_memoria(h.datos, puntero(b), largo) fin
+        h.largo := largo
+        h.cabe := c
+        si h.cabe > MAX_DATOS entonces h.cabe := MAX_DATOS fin
+        h.tarea := actual
+        h.id := actual.id
+        apunta_uso(actual.id)
+        bi := sin_interrupciones()
+        serie := serie + 1
+        h.serie := serie
+        h.estado := H_PEDIDO
+        despierta_servicio()
+        mientras h.estado <> H_RESPONDIDO hacer
+            si actual.matar o no hay_servicio() entonces
+                ; (con Ctrl+C: lo que conteste el servicio se tirará, por la serie)
+                h.estado := H_LIBRE
+                reponer(bi)
+                devolver SIN_RED
+            fin
+            bloquear()
+        fin
+        reponer(bi)
+        para i desde 0 hasta 7 hacer cab[i] := h.cab[i] fin
+        largo := h.cab[7]
+        si largo > h.cabe entonces largo := h.cabe fin
+        cab[7] := largo
+        si largo > 0 entonces copiar_memoria(puntero(b), h.datos, largo) fin
+        r := h.cab[0]
+        h.estado := H_LIBRE
+        devolver r
+    fin
+
+    ; el servicio coge el pedido siguiente (o un aviso)
+    función siguiente(a: nat32, espera: nat32): nat32
+        variable p: puntero a Pedido_red
+        variable h: puntero a Hueco
+        variable i, bi, vueltas: nat32
+        si no es_servicio() entonces devolver NO_VALE fin
+        si no puede(a, tamaño(Pedido_red) + MAX_DATOS, cierto) entonces devolver NO_VALE fin
+        p := puntero(a)
+        ; la interrupción de la tarjeta, otra vez destapada
+        si irq_red <> 0 entonces destapa_irq(irq_red) fin
+        vueltas := 0
+        mientras vueltas < 2 hacer
+            bi := sin_interrupciones()
+            si n_avisos > 0 entonces
+                n_avisos := n_avisos - 1
+                p.hueco := 0xFFFFFFFF
+                p.serie := 0
+                p.tarea := avisos[n_avisos]
+                p.cabe := 0
+                p.largo := 0
+                para i desde 0 hasta 7 hacer p.cab[i] := 0 fin
+                p.cab[0] := AVISO_ACABÓ
+                reponer(bi)
+                devolver 1
+            fin
+            para i desde 0 hasta MAX_HUECOS - 1 hacer
+                h := dirección(huecos[i])
+                si h.estado = H_PEDIDO entonces
+                    h.estado := H_EN_SERVICIO
+                    reponer(bi)
+                    p.hueco := i
+                    p.serie := h.serie
+                    p.tarea := h.id
+                    p.cabe := h.cabe
+                    p.largo := h.largo
+                    para i desde 0 hasta 7 hacer p.cab[i] := h.cab[i] fin
+                    si h.largo > 0 entonces copiar_memoria(puntero(a + tamaño(Pedido_red)), h.datos, h.largo) fin
+                    devolver 1
+                fin
+            fin
+            si espera = 0 o vueltas = 1 entonces
+                reponer(bi)
+                devolver 0
+            fin
+            servicio_espera := cierto
+            dormir(espera)
+            servicio_espera := falso
+            reponer(bi)
+            vueltas := vueltas + 1
+        fin
+        devolver 0
+    fin
+
+    función contestar(hu: nat32, a: nat32): nat32
+        variable r: puntero a Respuesta_red
+        variable h: puntero a Hueco
+        variable i, largo, bi: nat32
+        si no es_servicio() o hu >= MAX_HUECOS entonces devolver NO_VALE fin
+        si no puede(a, tamaño(Respuesta_red), falso) entonces devolver NO_VALE fin
+        r := puntero(a)
+        h := dirección(huecos[hu])
+        ; (si el programa se ha ido, el hueco ya es de otro, o de nadie)
+        si h.estado <> H_EN_SERVICIO o h.serie <> r.serie entonces devolver NO_VALE fin
+        largo := r.cab[7]
+        si largo > h.cabe entonces largo := h.cabe fin
+        si largo > 0 y no puede(r.datos, largo, falso) entonces devolver NO_VALE fin
+        si largo > 0 entonces copiar_memoria(h.datos, puntero(r.datos), largo) fin
+        para i desde 0 hasta 7 hacer h.cab[i] := r.cab[i] fin
+        h.cab[7] := largo
+        bi := sin_interrupciones()
+        h.estado := H_RESPONDIDO
+        despertar_tarea(h.tarea)
+        reponer(bi)
+        devolver 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que solo puede el servicio
+    ; -------------------------------------------------------------------------
+    función apuntarse(): nat32
+        variable p: puntero a nat32
+        si hay_servicio() entonces
+            si servicio = actual entonces devolver 0 fin
+            devolver EN_USO
+        fin
+        si no iguales_sin_caja(actual.nombre, "RED.BIN") entonces devolver NO_VALE fin
+        servicio := actual
+        servicio_id := actual.id
+        zona := ZONA_INICIO
+        n_trozos := 0
+        aparato := 0xFFFFFFFF
+        irq_red := 0
+        estado_red := RED_SIN_TARJETA
+        cambios_red := cambios_red + 1
+        sin_tarjeta := falso
+        ; los puertos: IOPL 3 en las banderas que repondrá «iretd" al volver
+        ; al anillo 3 (lo apilado por el procesador, arriba de su pila del núcleo)
+        p := puntero(actual.pila_tope - 12)
+        valor(p) := valor(p) ob 0x3000
+        devolver 0
+    fin
+
+    función memoria_dma(n: nat32, física: nat32): nat32
+        variable m, i, v: nat32
+        variable f: puntero a nat32
+        si n = 0 o n > 16 entonces devolver NO_VALE fin
+        si zona + n * PÁGINA > ZONA_FINAL entonces devolver SIN_MEMORIA fin
+        si no puede(física, 4, cierto) entonces devolver NO_VALE fin
+        m := reservar_seguidos(n)
+        si m = 0 entonces devolver SIN_MEMORIA fin
+        para i desde 0 hasta n - 1 hacer
+            si no mapear(actual.cr3, zona + i * PÁGINA, m + i * PÁGINA, ESCRIBIR ob USUARIO) entonces
+                ; (lo puesto se devolverá con su espacio de direcciones; lo que no, aquí)
+                mientras i < n hacer
+                    soltar_marco(m + i * PÁGINA)
+                    i := i + 1
+                fin
+                devolver SIN_MEMORIA
+            fin
+        fin
+        v := zona
+        zona := zona + n * PÁGINA
+        f := puntero(física)
+        valor(f) := m
+        devolver v
+    fin
+
+    función registros(física: nat32, octetos: nat32): nat32
+        variable d, n, i, v: nat32
+        d := física yb (PÁGINA - 1)
+        n := (d + octetos + PÁGINA - 1) div PÁGINA
+        si octetos = 0 o n > 64 o n_trozos >= MAX_TROZOS entonces devolver NO_VALE fin
+        si zona + n * PÁGINA > ZONA_FINAL entonces devolver SIN_MEMORIA fin
+        ; (solo lo que no es memoria de verdad: los registros de un aparato)
+        si física < límite entonces devolver NO_VALE fin
+        para i desde 0 hasta n - 1 hacer
+            si no mapear(actual.cr3, zona + i * PÁGINA, (física yb 0xFFFFF000) + i * PÁGINA, ESCRIBIR ob USUARIO ob 0x18) entonces devolver SIN_MEMORIA fin   ; (0x18: sin caché)
+        fin
+        trozo_v[n_trozos] := zona
+        trozo_n[n_trozos] := n
+        n_trozos := n_trozos + 1
+        v := zona + d
+        zona := zona + n * PÁGINA
+        devolver v
+    fin
+
+    ; ---- la interrupción de la tarjeta: se tapa y despierta al servicio ----
+    función tapa_irq(n: nat32)
+        si n < 8 entonces
+            sacar_puerto(0x21, meter_puerto(0x21) ob byte(1 << n))
+        sino
+            sacar_puerto(0xA1, meter_puerto(0xA1) ob byte(1 << (n - 8)))
+        fin
+    fin
+
+    función destapa_irq(n: nat32)
+        variable b: nat32
+        b := sin_interrupciones()
+        si n < 8 entonces
+            sacar_puerto(0x21, meter_puerto(0x21) yb byte(nob (1 << n)))
+        sino
+            sacar_puerto(0xA1, meter_puerto(0xA1) yb byte(nob (1 << (n - 8))))
+            sacar_puerto(0x21, meter_puerto(0x21) yb 0xFB)      ; (y la del esclavo, la 2)
+        fin
+        reponer(b)
+    fin
+
+    función llegó_irq()
+        irqs_red := irqs_red + 1
+        si irq_red <> 0 entonces tapa_irq(irq_red) fin
+        si irq_red >= 8 entonces sacar_puerto(0xA0, 0x20) fin
+        sacar_puerto(0x20, 0x20)
+        despierta_servicio()
+    fin
+
+    ; una puerta por cada línea que puede tener una tarjeta PCI (las demás,
+    ; del reloj, el teclado, el ratón y los discos, no se dan)
+    interrupción función irq3()
+        llegó_irq()
+    fin
+    interrupción función irq5()
+        llegó_irq()
+    fin
+    interrupción función irq7()
+        llegó_irq()
+    fin
+    interrupción función irq9()
+        llegó_irq()
+    fin
+    interrupción función irq10()
+        llegó_irq()
+    fin
+    interrupción función irq11()
+        llegó_irq()
+    fin
+
+    función pon_irq(n: nat32): nat32
+        variable r: nat32
+        si irq_red <> 0 entonces
+            tapa_irq(irq_red)
+            irq_red := 0
+        fin
+        si n = 0 entonces devolver 0 fin
+        r := 0
+        según nat16(n)
+            caso 3: r := nat32(dirección(irq3))
+            caso 5: r := nat32(dirección(irq5))
+            caso 7: r := nat32(dirección(irq7))
+            caso 9: r := nat32(dirección(irq9))
+            caso 10: r := nat32(dirección(irq10))
+            caso 11: r := nat32(dirección(irq11))
+        fin
+        si r = 0 entonces devolver NO_VALE fin
+        pon_puerta(0x20 + n, r, PUERTA_NÚCLEO)
+        irq_red := n
+        destapa_irq(n)
+        devolver 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Cuando acaba una tarea (la llama usuario.cas, en recoge_lo_suyo)
+    ; -------------------------------------------------------------------------
+    público función acabó(t: puntero a Tarea)
+        variable i, j, bi: nat32
+        si hay_servicio() y servicio = t entonces
+            ; la tarjeta deja de leer y escribir en la memoria (que va a volver
+            ; a los marcos libres) y su interrupción, tapada
+            si irq_red <> 0 entonces
+                tapa_irq(irq_red)
+                irq_red := 0
+            fin
+            si aparato <> 0xFFFFFFFF entonces pci_escribir16(aparato, PCI_ORDEN, pci_leer16(aparato, PCI_ORDEN) yb 0xFFFB) fin
+            ; los registros, fuera de su vista (no son marcos que devolver)
+            para i desde 0 hasta MAX_TROZOS - 1 hacer
+                si i < n_trozos entonces
+                    para j desde 0 hasta trozo_n[i] - 1 hacer desmapear(t.cr3, trozo_v[i] + j * PÁGINA) fin
+                fin
+            fin
+            n_trozos := 0
+            bi := sin_interrupciones()
+            servicio := nulo
+            si estado_red = RED_SIN_TARJETA entonces sin_tarjeta := cierto fin
+            estado_red := RED_NADA
+            ip_red := 0
+            cambios_red := cambios_red + 1
+            n_avisos := 0
+            ; los que esperaban, con SIN_RED
+            para i desde 0 hasta MAX_HUECOS - 1 hacer
+                si huecos[i].estado = H_PEDIDO o huecos[i].estado = H_EN_SERVICIO entonces
+                    huecos[i].cab[0] := SIN_RED
+                    huecos[i].cab[7] := 0
+                    huecos[i].estado := H_RESPONDIDO
+                    despertar_tarea(huecos[i].tarea)
+                fin
+            fin
+            para i desde 0 hasta MAX_TAREAS - 1 hacer usaron[i] := 0 fin
+            reponer(bi)
+            devolver
+        fin
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            si usaron[i] = t.id entonces
+                usaron[i] := 0
+                bi := sin_interrupciones()
+                si n_avisos < MAX_TAREAS entonces
+                    avisos[n_avisos] := t.id
+                    n_avisos := n_avisos + 1
+                fin
+                despierta_servicio()
+                reponer(bi)
+            fin
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las llamadas (usuario.cas manda aquí de la 90 a la 98)
+    ; -------------------------------------------------------------------------
+    público función atender_red(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        variable p: puntero a nat32
+        si apagada entonces devolver SIN_RED fin
+        según nat16(n)
+            caso 90: devolver pedir(a, b, c)
+            caso 91: devolver apuntarse()
+            caso 92: devolver siguiente(a, b)
+            caso 93: devolver contestar(a, b)
+            caso 94:
+                si no es_servicio() entonces devolver NO_VALE fin
+                devolver memoria_dma(a, b)
+            caso 95:
+                si no es_servicio() entonces devolver NO_VALE fin
+                devolver registros(a, b)
+            caso 96:
+                si no es_servicio() entonces devolver NO_VALE fin
+                si estado_red <> a o ip_red <> b entonces cambios_red := cambios_red + 1 fin
+                estado_red := a
+                ip_red := b
+                aparato := c
+                devolver 0
+            caso 97:
+                si a <> 0 entonces
+                    si no puede(a, 4, cierto) entonces devolver NO_VALE fin
+                    p := puntero(a)
+                    valor(p) := ip_red
+                fin
+                si no hay_servicio() entonces devolver RED_NADA fin
+                devolver estado_red
+            caso 98:
+                si no es_servicio() entonces devolver NO_VALE fin
+                devolver pon_irq(a)
+        fin
+        devolver NO_VALE
+    fin
+
+fin Red.

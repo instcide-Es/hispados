@@ -7,7 +7,10 @@
 ;   - el tapiz (tres a elegir: «Olas», «Azul» y «Verde»), con el disquete;
 ;   - la barra de tareas, abajo: el botón «Inicio» (verde, redondeado), un
 ;     botón por cada ventana abierta (pulsarlo la trae delante, la minimiza o
-;     la recupera) y, a la derecha, la bandeja con el reloj (el de la CMOS);
+;     la recupera) y, a la derecha, la bandeja con el reloj (el de la CMOS)
+;     y, en los portátiles, la batería (energia.cas, con el servicio de
+;     ACPI): la pila con lo que queda y, con el puntero quieto encima medio
+;     segundo, su recuadro de ayuda (lo que queda, el cable, la salud);
 ;   - el menú Inicio, de dos columnas: a la izquierda (en blanco) los
 ;     programas; a la derecha (en azul muy claro) los documentos del disco
 ;     (los .TXT de la raíz: se abren con el Bloc de notas) y la
@@ -19,7 +22,11 @@
 ;   - los menús del botón secundario (emergente.cas): el del tapiz, el de
 ;     una ventana (en su título o en su botón de la barra de tareas:
 ;     Restaurar, Mover, Minimizar, Maximizar, Cerrar) y «Abrir» en un icono
-;     o en una opción del menú Inicio.
+;     o en una opción del menú Inicio;
+;   - el USB en caliente (desde la 0.8, usbcal.cas): con una memoria USB
+;     enchufada, su icono en la bandeja (un clic: «Quitar con seguridad»
+;     cada una), y los avisos de lo que se enchufa y se quita, en un globo
+;     encima de la bandeja que se va solo a los pocos segundos.
 ;
 ;  Todo son ventanas del gestor (ventanas.cas): la barra y el menú, sin
 ;  marco y por delante de las demás; los cuadros, con él. Una tarea del
@@ -35,11 +42,13 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
-    constante BANDEJA_ANCHO = 68
+    constante BANDEJA_ANCHO = 68                ; la bandeja con el reloj (con una memoria USB, más ancha: su icono)
+    constante ICONO_USB = 26
+    constante GLOBO_AL = 58
     constante BOTONES_X = 108
     constante BOTÓN_MÁXIMO = 160
     constante MENÚ_ANCHO = 330
@@ -80,6 +89,7 @@ módulo Escritorio
     constante AM_APAGAR = 24
     constante AM_EQUIPO = 25
     constante AM_OFICINA = 26                   ; un programa de la oficina (dato: cuál)
+    constante AM_PROGRAMAS = 27                 ; «Programas y actualizaciones» (ACTUALIZ.BIN)
     constante N_OFICINA = 4                     ; los que hay: Facturas, Pluma, Cuentas y Mirador
     constante AC_CERRAR_ACERCA = 11
     constante AC_ACERCA = 12
@@ -91,6 +101,7 @@ módulo Escritorio
     constante ME_VENTANA = 2                    ; el de una ventana (menú_dato: cuál)
     constante ME_INICIO = 3                     ; «Abrir» en una opción del menú Inicio
     constante ME_ICONO = 4                      ; «Abrir» en un icono del tapiz
+    constante ME_USB = 5                        ; el del icono de las memorias USB de la bandeja
 
     tipo Opción = estructura                    ; una opción del menú Inicio
         x, ye, an, al: ent32
@@ -139,6 +150,8 @@ módulo Escritorio
     variable n_botones: nat32
     variable ancho_botón: ent32
     variable cambios_vistos: nat32
+    variable red_vista: nat32                   ; (los cambios de la red que ya pinta el icono)
+    constante ICONO_RED = 24                    ; lo que se ensancha la bandeja con el icono de la red
     variable minuto_visto: nat32 = 0xFFFFFFFF
     variable segundo_visto: nat32
     variable fondo: nat32                       ; el tapiz: 0, 1 o 2
@@ -146,6 +159,21 @@ módulo Escritorio
     variable saludo: arreglo [40] de byte       ; «Hola, » y el nombre del usuario (el menú Inicio)
     variable renglón: arreglo [96] de byte
     público variable lanzados: nat32            ; los programas que ha lanzado el escritorio
+    ; ---- el USB: el icono de la bandeja y el globo de los avisos ----
+    variable bandeja: ent32 = 68                ; lo que mide ahora la bandeja
+    variable usb_letras: arreglo [8] de byte    ; las unidades de las memorias USB
+    variable n_usb: nat32
+    variable unidades_vistas: nat32
+    variable v_globo: nat32
+    variable globo_hasta: nat32
+    variable texto_globo: arreglo [80] de byte
+    ; el recuadro de ayuda de la pila de la bandeja
+    variable v_ayuda: nat32
+    variable ayuda_quieto: nat32                ; los tics que lleva el puntero quieto encima
+    variable ayuda_x, ayuda_y: ent32            ; dónde estaba el puntero
+    variable ayuda_tapada: bool                 ; se ha pulsado un botón: no vuelve hasta salir y entrar
+    variable ayuda_vista, energía_vista: nat32  ; (cambios_energía de lo que se ve)
+    variable apagar_otra_vez: bool              ; la última vez no se cerró un programa: ahora se le cierra
 
     ; -------------------------------------------------------------------------
     ;  El tapiz
@@ -444,9 +472,84 @@ módulo Escritorio
         devolver 0
     fin
 
+    ; una memoria USB (14 x 22): el conector arriba y el cuerpo azul
+    función icono_memoria(ref l: Lienzo, x: ent32, yy: ent32)
+        rectángulo(l, x + 3, yy, 8, 7, 0x6F87A8)
+        rectángulo(l, x + 4, yy + 1, 6, 6, 0xE4ECF7)
+        rectángulo(l, x + 5, yy + 2, 1, 2, 0x6F87A8)
+        rectángulo(l, x + 8, yy + 2, 1, 2, 0x6F87A8)
+        redondeado(l, x, yy + 6, 14, 16, 3, 0x14408A, 0x14408A, TODAS)
+        redondeado(l, x + 1, yy + 7, 12, 14, 2, 0x5DA8F5, 0x2463C2, TODAS)
+        rectángulo(l, x + 4, yy + 11, 6, 1, BLANCO)
+        rectángulo(l, x + 4, yy + 14, 6, 1, BLANCO)
+    fin
+
     ; -------------------------------------------------------------------------
     ;  La barra de tareas
     ; -------------------------------------------------------------------------
+    ; lo que mide la bandeja: el reloj y, a su izquierda, un hueco por cada
+    ; icono que haya (de izquierda a derecha: las memorias USB, si hay alguna
+    ; enchufada; la red, si hay servicio de red, y la pila, si hay batería)
+    función hueco_usb(): ent32
+        si n_usb > 0 entonces devolver ICONO_USB fin
+        devolver 0
+    fin
+
+    función hueco_red(): ent32
+        si estado_red <> RED_NADA entonces devolver ICONO_RED fin
+        devolver 0
+    fin
+
+    función hueco_pila(): ent32
+        si hay_pila() entonces devolver ANCHO_PILA fin
+        devolver 0
+    fin
+
+    función ancho_bandeja(): ent32
+        devolver BANDEJA_ANCHO + hueco_usb() + hueco_red() + hueco_pila()
+    fin
+
+    ; el icono de la red: una pantalla con su pie y, abajo a la derecha, una
+    ; luz (verde: conectada; ámbar: pidiendo la IP; roja: sin cable; gris:
+    ; sin tarjeta)
+    función pinta_icono_red(ref l: Lienzo, x: ent32, yy: ent32)
+        variable luz, pantalla_c: nat32
+        luz := 0x9AA8B8
+        pantalla_c := 0xB8C4D0
+        según nat16(estado_red)
+            caso RED_CONECTADA:
+                luz := 0x2ECC40
+                pantalla_c := 0x8FDCFF
+            caso RED_BUSCANDO: luz := 0xFFB000
+            caso RED_SIN_CABLE: luz := 0xE53935
+        fin
+        rectángulo(l, x, yy, 15, 11, 0x14336A)
+        rectángulo(l, x + 1, yy + 1, 13, 9, pantalla_c)
+        rectángulo(l, x + 2, yy + 2, 5, 2, BLANCO)
+        rectángulo(l, x + 6, yy + 11, 3, 2, 0x14336A)
+        rectángulo(l, x + 3, yy + 13, 9, 2, 0x14336A)
+        círculo(l, x + 14, yy + 12, 4, 0x14336A)
+        círculo(l, x + 14, yy + 12, 3, luz)
+    fin
+
+    ; con un clic en el icono de la red: cómo está
+    función dice_red()
+        variable t: arreglo [80] de byte
+        variable d: arreglo [4] de nat32
+        según nat16(estado_red)
+            caso RED_CONECTADA:
+                d[0] := ip_red yb 0xFF
+                d[1] := (ip_red >> 8) yb 0xFF
+                d[2] := (ip_red >> 16) yb 0xFF
+                d[3] := ip_red >> 24
+                formatear(t, 80, "La red: conectada, con la IP %u.%u.%u.%u.", d)
+                aviso(t)
+            caso RED_BUSCANDO: aviso("La red: hay cable; pidiendo la IP (DHCP)...")
+            caso RED_SIN_CABLE: aviso("La red: la tarjeta no tiene enlace (¿el cable?).")
+            si no: aviso("La red: no hay tarjeta de red que se sepa llevar.")
+        fin
+    fin
+
     función pinta_barra()
         variable l: puntero a Lienzo
         variable an, x, caben, n: ent32
@@ -457,6 +560,7 @@ módulo Escritorio
         l := lienzo_de(v_barra)
         si l = nulo entonces devolver fin
         an := l.ancho
+        energía_vista := cambios_energía
         degradado(valor(l), 0, 0, an, ALTO_BARRA, BARRA_ARRIBA, BARRA_ABAJO)
         rectángulo(valor(l), 0, 0, an, 1, 0x8FC4FA)
         rectángulo(valor(l), 0, 1, an, 1, 0x62A8F2)
@@ -470,10 +574,17 @@ módulo Escritorio
         disquete(valor(l), 7, 5, 24)
         texto_negrita(valor(l), 39, 10, "Inicio", 0x1B5E2A)
         texto_negrita(valor(l), 38, 9, "Inicio", BLANCO)
-        ; la bandeja, con el reloj
-        degradado(valor(l), an - BANDEJA_ANCHO, 2, BANDEJA_ANCHO, ALTO_BARRA - 2, BANDEJA_ARRIBA, BANDEJA_ABAJO)
-        rectángulo(valor(l), an - BANDEJA_ANCHO, 2, 1, ALTO_BARRA - 2, 0x1A56AC)
-        rectángulo(valor(l), an - BANDEJA_ANCHO + 1, 2, 1, ALTO_BARRA - 2, 0x9AD4FF)
+        ; la bandeja, con el reloj y, a su izquierda, los iconos que haya (de
+        ; izquierda a derecha: las memorias USB, la red y la pila)
+        n_usb := letras_usb(usb_letras)
+        bandeja := ancho_bandeja()
+        degradado(valor(l), an - bandeja, 2, bandeja, ALTO_BARRA - 2, BANDEJA_ARRIBA, BANDEJA_ABAJO)
+        rectángulo(valor(l), an - bandeja, 2, 1, ALTO_BARRA - 2, 0x1A56AC)
+        rectángulo(valor(l), an - bandeja + 1, 2, 1, ALTO_BARRA - 2, 0x9AD4FF)
+        si n_usb > 0 entonces icono_memoria(valor(l), an - bandeja + 8, 6) fin
+        si hueco_red() > 0 entonces pinta_icono_red(valor(l), an - bandeja + hueco_usb() + 7, 9) fin
+        si hay_pila() entonces pinta_pila(valor(l), an - bandeja + hueco_usb() + hueco_red() + 8, 0) fin
+        red_vista := cambios_red
         ahora(f, h)
         d[0] := h >> 11
         d[1] := (h >> 5) yb 63
@@ -490,7 +601,7 @@ módulo Escritorio
             fin
         fin
         si n_botones > 0 entonces
-            ancho_botón := (an - BOTONES_X - BANDEJA_ANCHO - 6) div ent32(n_botones)
+            ancho_botón := (an - BOTONES_X - bandeja - 6) div ent32(n_botones)
             si ancho_botón > BOTÓN_MÁXIMO entonces ancho_botón := BOTÓN_MÁXIMO fin
             i := 0
             mientras i < n_botones hacer
@@ -637,11 +748,11 @@ módulo Escritorio
             concatenar(saludo, Ajustes.usuario)
             texto_negrita(valor(l), 59, 13, saludo, 0x123F85)
             texto_negrita(valor(l), 58, 12, saludo, BLANCO)
-            texto(valor(l), 58, 30, "Hispa-Pentium, versión 0.7", 0xD3E7FD)
+            texto(valor(l), 58, 30, "Hispa-Pentium, versión 0.8", 0xD3E7FD)
         sino
             texto_negrita(valor(l), 59, 13, "Hispa-Pentium", 0x123F85)
             texto_negrita(valor(l), 58, 12, "Hispa-Pentium", BLANCO)
-            texto(valor(l), 58, 30, "el escritorio, versión 0.7", 0xD3E7FD)
+            texto(valor(l), 58, 30, "el escritorio, versión 0.8", 0xD3E7FD)
         fin
         rectángulo(valor(l), 1, MENÚ_CABEZA, MENÚ_ANCHO - 2, 2, NARANJA)
         ; las dos columnas
@@ -694,6 +805,11 @@ módulo Escritorio
             fin
         fin
         yy := MENÚ_ALTO - MENÚ_PIE - ALTO_OPCIÓN - 6
+        ; (encima de Configuración, «Actualizar»: los programas y las actualizaciones)
+        pinta_opción_de(valor(l), MENÚ_COLUMNA + 2, yy - 37, MENÚ_ANCHO - MENÚ_COLUMNA - 4, 30, "Actualizar", AM_PROGRAMAS, 0, cierto)
+        redondeado(valor(l), MENÚ_COLUMNA + 13, yy - 31, 18, 17, 2, 0x9A6A1E, 0x9A6A1E, TODAS)
+        redondeado(valor(l), MENÚ_COLUMNA + 14, yy - 30, 16, 15, 1, 0xF2C46C, 0xD69A3A, TODAS)
+        rectángulo(valor(l), MENÚ_COLUMNA + 21, yy - 30, 2, 15, 0xB9822F)
         rectángulo(valor(l), MENÚ_COLUMNA + 10, yy - 5, MENÚ_ANCHO - MENÚ_COLUMNA - 22, 1, 0xA9C6EC)
         pinta_opción(valor(l), MENÚ_COLUMNA + 2, yy, MENÚ_ANCHO - MENÚ_COLUMNA - 4, "Configuración", AM_CONFIG, 0, cierto)
         si elegida >= 0 y opciones[elegida].acción = AM_CONFIG entonces
@@ -781,6 +897,68 @@ módulo Escritorio
         escribir("escritorio: aviso: ", t, "\n")
     fin
 
+    ; el globo de los avisos del USB, encima de la bandeja: se va solo a los
+    ; pocos segundos (o con un clic)
+    función cierra_globo()
+        si v_globo = 0 entonces devolver fin
+        cerrar_ventana(v_globo, 0)
+        v_globo := 0
+    fin
+
+    función globo(t: puntero a byte)
+        variable l: puntero a Lienzo
+        variable an: ent32
+        cierra_globo()
+        an := ancho_texto(t) + 60
+        si an < 220 entonces an := 220 fin
+        si an > pantalla.ancho - 8 entonces an := pantalla.ancho - 8 fin
+        v_globo := crear_ventana("aviso", pantalla.ancho - an - 4, pantalla.alto - ALTO_BARRA - GLOBO_AL - 4, an, GLOBO_AL, SIN_MARCO ob ENCIMA, 0)
+        l := lienzo_de(v_globo)
+        si l = nulo entonces
+            v_globo := 0
+            devolver
+        fin
+        rectángulo(valor(l), 0, 0, an, GLOBO_AL, 0x1A56AC)
+        redondeado(valor(l), 1, 1, an - 2, GLOBO_AL - 2, 6, 0xFFFDF2, 0xF1EACB, TODAS)
+        icono_memoria(valor(l), 15, 17)
+        texto_negrita(valor(l), 44, 9, "USB", TINTA)
+        texto(valor(l), 44, 30, t, TINTA)
+        repintada(v_globo, 0, 0, an, GLOBO_AL)
+        globo_hasta := tics + 6 * HZ
+        escribir("escritorio: globo: ", t, "\n")
+    fin
+
+    ; el icono de las memorias USB de la bandeja: un menú con «Quitar con
+    ; seguridad» para cada una (en gris, la del sistema)
+    función menú_usb(x: ent32)
+        variable i, grises: nat32
+        variable d: arreglo [1] de nat32
+        renglón[0] := 0
+        grises := 0
+        i := 0
+        mientras i < n_usb y i < 3 hacer
+            si i > 0 entonces concatenar(renglón, "|") fin
+            d[0] := usb_letras[i]
+            formatear(dirección(renglón[longitud(renglón)]), 30, "Quitar con seguridad %c:", d)
+            si no quitable(Unidades.por_letra(usb_letras[i])) entonces grises := grises ob (nat32(1) << i) fin
+            i := i + 1
+        fin
+        si i > 0 entonces abrir_emergente(x, pantalla.alto - ALTO_BARRA, renglón, grises, 0, ME_USB) fin
+    fin
+
+    función atiende_globo()
+        variable e: Evento
+        mientras v_globo <> 0 y saca_evento(v_globo, 0, e) hacer
+            si e.clase = EV_RATÓN_BAJA entonces cierra_globo() fin
+        fin
+        si v_globo <> 0 y tics >= globo_hasta entonces cierra_globo() fin
+        si saca_aviso(texto_globo, 80) entonces globo(texto_globo) fin
+        si Unidades.cambios <> unidades_vistas entonces
+            unidades_vistas := Unidades.cambios
+            pinta_barra()
+        fin
+    fin
+
     función abre_apagar()
         variable l: puntero a Lienzo
         si v_apagar <> 0 entonces
@@ -814,7 +992,7 @@ módulo Escritorio
         fin
         degradado(valor(l), 0, 0, 440, 214, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 16, 14, 64)
-        texto_negrita(valor(l), 96, 16, "Hispa-Pentium 0.7", TINTA)
+        texto_negrita(valor(l), 96, 16, "Hispa-Pentium 0.8", TINTA)
         texto(valor(l), 96, 38, "Un núcleo de 32 bits, sin DOS debajo,", TINTA)
         texto(valor(l), 96, 56, "escrito en Castel, con su escritorio.", TINTA)
         texto(valor(l), 96, 74, "De la familia de Hispa-DOS.", TINTA_SUAVE)
@@ -833,7 +1011,7 @@ módulo Escritorio
         quita_pulsadores(v_config)
         degradado(valor(l), 0, 0, 460, 280, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 14, 10, 48)
-        texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.7", TINTA)
+        texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.8", TINTA)
         texto(valor(l), 74, 34, "un núcleo de 32 bits escrito en Castel", TINTA_SUAVE)
         rectángulo(valor(l), 14, 66, 432, 1, 0xA9C6EC)
         d[0] := nat32(pantalla.ancho)
@@ -904,30 +1082,65 @@ módulo Escritorio
         soltar_consola()
     fin
 
-    ; la pantalla del final, y se apaga (en QEMU; un PC de verdad, sin ACPI
-    ; todavía, se queda con el aviso: ya se puede apagar)
+    ; avisa a los programas (a sus ventanas: «cerrar») y espera, como mucho
+    ; dos segundos, a que se cierren, sin dejar de mover el escritorio (por
+    ; si alguno dice algo). Falso si alguno no se ha cerrado (el Bloc de
+    ; notas con cambios sin guardar avisa y se queda): entonces no se apaga,
+    ; y si se vuelve a pedir, se le cierra (como el Bloc al cerrar otra vez).
+    función cierra_programas(): bool
+        variable i, k: nat32
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].dueño <> 0 entonces pedir_cierre(ventanas[i].id) fin
+        fin
+        k := 0
+        mientras k < 200 y programas_con_ventana() hacer
+            pulso()
+            dormir(1)
+            k := k + 1
+        fin
+        si programas_con_ventana() y no apagar_otra_vez entonces
+            apagar_otra_vez := cierto
+            aviso("Hay un programa sin cerrar: ¿algo sin guardar?")
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+    función programas_con_ventana(): bool
+        variable i: nat32
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].dueño <> 0 entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; apagar o reiniciar, por este orden: avisar a los programas (y esperar a
+    ; que se cierren), la pantalla del final, acabar los que queden (sus
+    ; archivos se cierran: lo escrito queda), vaciar los discos y, ya, ACPI
+    ; (energia.cas: el servicio de ACPI entra en S5; reiniciar, por el
+    ; registro de la FADT, el teclado o CF9h). Sin ACPI: en QEMU (se sabe por
+    ; su tarjeta), su puerto de pruebas, con el código 5; en un PC de verdad,
+    ; el aviso de «ya puede apagar», y parado.
     función apaga(reiniciar: bool)
         variable t: puntero a byte
+        si no cierra_programas() entonces devolver fin
+        quita_ayuda()
         desviado := falso
         degradado(pantalla, 0, 0, pantalla.ancho, pantalla.alto, 0x123E7E, 0x1F6FC4)
         disquete(pantalla, pantalla.ancho div 2 - 48, pantalla.alto div 2 - 120, 96)
-        si reiniciar entonces t := "Reiniciando el equipo..." sino t := "Ya puede apagar el equipo." fin
+        si reiniciar entonces t := "Reiniciando el equipo..." sino t := "Apagando el equipo..." fin
         texto_negrita(pantalla, (pantalla.ancho - ancho_texto(t)) div 2, pantalla.alto div 2, t, BLANCO)
         texto(pantalla, (pantalla.ancho - 13 * 8) div 2, pantalla.alto div 2 + 28, "Hispa-Pentium", 0xBFDCFA)
         volcar(0, 0, pantalla.ancho, pantalla.alto)
+        acabar_programas(200)
+        recoger_huérfanas()
+        vaciar_discos()
         si reiniciar entonces
             escribir("escritorio: reiniciar\n")
-            ensamblador
-                cli
-                mov al, 0xFE
-                out 0x64, al
-            fin
-        sino
-            escribir("escritorio: apagar\n")
+            reiniciar_equipo()
         fin
-        ; apagar: en QEMU (se sabe por su tarjeta), su puerto de pruebas, con
-        ; el código 5, y si no está, el de su ACPI. En un PC de verdad no se
-        ; toca ningún puerto: parado, con el aviso en la pantalla
+        escribir("escritorio: apagar\n")
+        apagar_por_acpi()
         si hay_bochs() entonces
             ensamblador
                 cli
@@ -939,11 +1152,122 @@ módulo Escritorio
                 out dx, ax
             fin
         fin
+        ; no se ha podido: el aviso de siempre
+        degradado(pantalla, 0, pantalla.alto div 2 - 4, pantalla.ancho, 24, 0x18519F, 0x1A58A8)
+        t := "Ya puede apagar el equipo."
+        texto_negrita(pantalla, (pantalla.ancho - ancho_texto(t)) div 2, pantalla.alto div 2, t, BLANCO)
+        volcar(0, 0, pantalla.ancho, pantalla.alto)
         ensamblador
             cli
         .parado:
             hlt
             jmp .parado
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El recuadro de ayuda de la pila (como el de Hispa-486)
+    ; -------------------------------------------------------------------------
+    función quita_ayuda()
+        si v_ayuda <> 0 entonces
+            cerrar_ventana(v_ayuda, 0)
+            v_ayuda := 0
+        fin
+    fin
+
+    ; encima de la barra y centrado en el puntero (sin salirse), crema, con
+    ; las líneas de ayuda_pila (energia.cas)
+    función pon_ayuda()
+        variable texto_a: arreglo [256] de byte
+        variable línea_a: arreglo [96] de byte
+        variable colores: arreglo [6] de nat32
+        variable n, i, j, k: nat32
+        variable an, al, x, yy, w: ent32
+        variable l: puntero a Lienzo
+        n := ayuda_pila(texto_a, colores)
+        si n = 0 entonces devolver fin
+        ; lo ancho de la línea más larga
+        an := 0
+        i := 0
+        para k desde 1 hasta n hacer
+            j := 0
+            mientras texto_a[i] <> 0 y texto_a[i] <> '\n' hacer
+                si j < 95 entonces
+                    línea_a[j] := texto_a[i]
+                    j := j + 1
+                fin
+                i := i + 1
+            fin
+            línea_a[j] := 0
+            si texto_a[i] = '\n' entonces i := i + 1 fin
+            w := ancho_texto(línea_a)
+            si w > an entonces an := w fin
+        fin
+        an := an + 16
+        al := ent32(n) * 18 + 8
+        x := ratón_x - an div 2
+        si x > pantalla.ancho - an - 2 entonces x := pantalla.ancho - an - 2 fin
+        si x < 2 entonces x := 2 fin
+        yy := pantalla.alto - ALTO_BARRA - al - 4
+        v_ayuda := crear_ventana("ayuda", x, yy, an, al, SIN_MARCO ob ENCIMA, 0)
+        l := lienzo_de(v_ayuda)
+        si l = nulo entonces
+            quita_ayuda()
+            devolver
+        fin
+        rectángulo(valor(l), 0, 0, an, al, 0xFFF8E1)
+        marco(valor(l), 0, 0, an, al, 0x9C8452)
+        i := 0
+        para k desde 1 hasta n hacer
+            j := 0
+            mientras texto_a[i] <> 0 y texto_a[i] <> '\n' hacer
+                si j < 95 entonces
+                    línea_a[j] := texto_a[i]
+                    j := j + 1
+                fin
+                i := i + 1
+            fin
+            línea_a[j] := 0
+            si texto_a[i] = '\n' entonces i := i + 1 fin
+            texto(valor(l), 8, 5 + ent32(k - 1) * 18, línea_a, colores[k - 1])
+        fin
+        repintada(v_ayuda, 0, 0, an, al)
+        ayuda_vista := cambios_energía
+    fin
+
+    ; cada tic: con el puntero quieto medio segundo sobre la pila sale el
+    ; recuadro; se va al salir de ella o al pulsar un botón (y no vuelve
+    ; hasta salir y entrar otra vez); mientras se ve, se pone al día
+    función vigila_ayuda()
+        variable x0: ent32
+        si no hay_pila() o v_barra = 0 o menú_abierto entonces
+            quita_ayuda()
+            devolver
+        fin
+        x0 := pantalla.ancho - ancho_bandeja() + hueco_usb() + hueco_red() + 4
+        si ratón_x < x0 o ratón_x >= x0 + ANCHO_PILA o ratón_y < pantalla.alto - ALTO_BARRA entonces
+            quita_ayuda()
+            ayuda_tapada := falso
+            ayuda_quieto := 0
+            devolver
+        fin
+        si ratón_botones <> 0 entonces
+            quita_ayuda()
+            ayuda_tapada := cierto
+            devolver
+        fin
+        si ayuda_tapada entonces devolver fin
+        si v_ayuda = 0 entonces
+            si ratón_x <> ayuda_x o ratón_y <> ayuda_y entonces
+                ayuda_x := ratón_x
+                ayuda_y := ratón_y
+                ayuda_quieto := 0
+            fin
+            ayuda_quieto := ayuda_quieto + 1
+            si ayuda_quieto >= 50 entonces pon_ayuda() fin
+        sino si ayuda_vista <> cambios_energía entonces
+            quita_ayuda()
+            pon_ayuda()
         fin
     fin
 
@@ -955,6 +1279,7 @@ módulo Escritorio
             caso AM_CONFIG: abre_config()
             caso AM_APAGAR: abre_apagar()
             caso AM_EQUIPO: lanza("\\EQUIPO.BIN", nulo)
+            caso AM_PROGRAMAS: lanza("\\ACTUALIZ.BIN", nulo)
             caso AM_OFICINA: lanza("\\HVPRUN.BIN", de_oficina(dato, cierto))
             caso AC_ACERCA: abre_acerca()
             caso AC_CERRAR_ACERCA: cierra_cuadro(v_acerca)
@@ -1066,6 +1391,12 @@ módulo Escritorio
                 si ent32(e.a) < INICIO_ANCHO entonces
                     ; «Inicio»: abre el menú (si no se acaba de cerrar con este mismo clic)
                     si no menú_abierto y tics - menú_cerrado_en > 3 entonces abre_menú() fin
+                sino si n_usb > 0 y ent32(e.a) >= pantalla.ancho - bandeja y ent32(e.a) < pantalla.ancho - bandeja + ICONO_USB entonces
+                    ; el icono de las memorias USB
+                    menú_usb(ent32(e.a))
+                sino si hueco_red() > 0 y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() y ent32(e.a) < pantalla.ancho - bandeja + hueco_usb() + ICONO_RED entonces
+                    ; el icono de la red
+                    dice_red()
                 sino si ent32(e.a) >= BOTONES_X y ancho_botón > 0 entonces
                     n := (ent32(e.a) - BOTONES_X) div ancho_botón
                     si n < ent32(n_botones) entonces
@@ -1148,6 +1479,8 @@ módulo Escritorio
                 si opción = 0 entonces haz(menú_acción, menú_dato) fin
             caso ME_ICONO:
                 si opción = 0 y menú_dato < n_iconos entonces haz(iconos[menú_dato].acción, 0) fin
+            caso ME_USB:
+                si opción < n_usb y opción < 3 entonces quitar(usb_letras[opción]) fin
         fin
     fin
 
@@ -1182,7 +1515,9 @@ módulo Escritorio
             atiende_cuadro(v_config)
             atiende_cuadro(v_aviso)
             atiende_cuadro(v_acerca)
-            si Ventanas.cambios <> cambios_vistos entonces pinta_barra() fin
+            atiende_globo()
+            vigila_ayuda()
+            si Ventanas.cambios <> cambios_vistos o cambios_red <> red_vista o cambios_energía <> energía_vista entonces pinta_barra() fin
             ; cada segundo: el reloj (si ha cambiado el minuto) y las tareas acabadas
             si tics div HZ <> segundo_visto entonces
                 segundo_visto := tics div HZ
@@ -1252,6 +1587,9 @@ módulo Escritorio
         fin
         si no prepara_ratón(pantalla.ancho, pantalla.alto) entonces escribir("escritorio: no hay ratón PS/2 (se sigue, con el teclado)\n") fin
         alto_barra := ALTO_BARRA
+        ; (los avisos del USB de antes de que hubiera escritorio, fuera)
+        mientras saca_aviso(texto_globo, 80) hacer fin
+        unidades_vistas := Unidades.cambios
         pinta_tapiz()
         v_barra := crear_ventana("barra", 0, pantalla.alto - ALTO_BARRA, pantalla.ancho, ALTO_BARRA, SIN_MARCO ob ENCIMA, 0)
         v_menú := crear_ventana("menú", 0, pantalla.alto - ALTO_BARRA - MENÚ_ALTO, MENÚ_ANCHO, MENÚ_ALTO, SIN_MARCO ob ENCIMA ob OCULTA ob REDONDA, 0)

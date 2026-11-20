@@ -1,6 +1,8 @@
 # Hispa-Pentium — el núcleo de la gama XP, escrito en Castel
 
-*18/11/2026; puesto al día el 19/11/2026 (la 0.7: instalarlo en el disco duro). Hispa-Pentium es el miembro de la
+*18/11/2026; puesto al día el 20/11/2026 (la 0.8, todo junto: el disco SATA del ICH7, el USB en caliente, los paquetes, la red y apagar de verdad con la batería). Hispa-Pentium es el miembro de la
+
+*18/11/2026; puesto al día el 20/11/2026 (la 0.8: la red). Hispa-Pentium es el miembro de la
 familia Hispa-DOS para los PC de 2000 en adelante (la gama de Windows XP, [ROADMAP](ROADMAP.md)): un **núcleo propio
 de 32 bits, sin DOS por debajo**, con memoria virtual, escrito en
 [Castel](../castel/README.md). Esta nota cuenta lo que hay hecho: la semilla de la
@@ -39,7 +41,24 @@ y **memorias** (secciones 7 y 11). Y en la del 19/11 por la noche (la **0.7**):
 pantalla azul (elegir el disco, hacer la partición, darle formato FAT32, copiar
 el sistema a `C:\HISPA`), el **arranque desde el disco** (GRUB en el MBR) y el
 **asistente del primer arranque** (el nombre, la fecha y la hora, el teclado, la
-pantalla: `HISPA.INI`). Todo está en `castel/nucleo32/`.*
+pantalla: `HISPA.INI`). Y en la del 20/11 (la **0.8**, cinco ramas juntas en una): el **disco SATA**
+más robusto en las Intel ICH7 (el Toshiba NB250: sección 7); el **USB en
+caliente** (memorias, teclados, ratones y concentradores que se enchufan y se
+quitan en marcha, con «quitar con seguridad»: sección 11); **los paquetes y las
+actualizaciones** (sección 13): paquetes `.HPQ` con sus dependencias y sus
+sumas SHA-256, hechos con `tools/hpq.py`; el programa **PAQUETES**, que instala
+(con lo que haga falta, en orden), actualiza y quita, o todo o nada (y deshace
+lo que deje a medias un corte de luz), y su ventana **«Programas y
+actualizaciones»**; INSTALAR deja apuntado lo que instala; **la red por cable** (sección 14): un
+**servicio de red** en el anillo 3 (`RED.BIN`) con las tarjetas Intel PRO/1000,
+Realtek RTL8139 y Marvell Yukon 88E8059 (la del HP Mini) y una pila TCP/IP
+propia (ARP, IPv4, ICMP, UDP, TCP, DHCP y DNS), los programas **IPCONFIG**,
+**PING** y **DESCARGAR** (HTTP) y el icono de la red en la bandeja; y **apagar
+de verdad** (ACPI, S5), reiniciar por la FADT y la **batería en la bandeja**
+con su recuadro de ayuda, con el núcleo ACPI de Hispa-DOS (ACPICA) como
+servicio del anillo 3, `ACPI.BIN` (sección 11). En la bandeja caben a la vez,
+de izquierda a derecha, la memoria USB, la red, la pila y el reloj. Todo está
+en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`).*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -90,7 +109,9 @@ teclea las órdenes por el monitor de QEMU (como un teclado de verdad: el españ
 tecla a tecla, con sus acentos; `:tecla ctrl-c` o `:tecla up ret` pulsan esas
 teclas tal cual; y, para el escritorio, `:clic X Y`, `:doble X Y`, `:arrastra X1 Y1
 X2 Y2`, `:raton X Y`, `:escribe texto`, `:pausa S` y `:captura NOMBRE`, que deja
-la pantalla en `$CAPTURAS/NOMBRE.ppm`). **Lo que se escribe en el disco no llega a la imagen** (se queda
+la pantalla en `$CAPTURAS/NOMBRE.ppm`; y `:monitor ORDEN`, que le da esa orden al
+monitor de QEMU: `device_add` y `device_del`, para enchufar y quitar aparatos USB
+en marcha, sección 11). **Lo que se escribe en el disco no llega a la imagen** (se queda
 en una copia de QEMU) **salvo con `ESCRIBE=1`**. Lo que se escribe sale por la pantalla y por el puerto serie, y el
 script lo enseña con el código con que acaba el núcleo. Con `ARRANQUE=ordenes`
 (lo que QEMU pasa con `-append`), el núcleo lanza el intérprete de órdenes nada
@@ -196,10 +217,11 @@ cuarta parte, los discos y el USB).
 | `ahci.cas` (Ahci) | Los **discos SATA** de una controladora **AHCI**: los puertos, IDENTIFY, leer y escribir por **DMA** con **LBA de 48 bits** (sección 7). |
 | `discos.cas` (Discos) | **Los discos, sean de la clase que sean** (IDE, SATA, USB): una tabla, y leer, escribir y asentar sin saber qué hay debajo. Lleva el **permiso de escritura** de cada disco. |
 | `fat.cas` (Fat) | El **sistema de archivos FAT12/16/32**, para leer y escribir, con **varios volúmenes montados a la vez**: abrir por la ruta, leer, escribir, cortar, borrar, cambiar de nombre, hacer y borrar carpetas, los nombres largos, los clusters libres (sección 7). |
-| `unidades.cas` (Unidades) | **Las unidades y sus letras**: mira las particiones de cada disco (tabla del **MBR** y **GPT**), monta cada volumen FAT y le da su letra (C:, D:... los de dentro; X:, Y:, Z: las memorias USB; M: la unidad en memoria); y cuál es la **unidad del sistema**. |
+| `unidades.cas` (Unidades) | **Las unidades y sus letras**: mira las particiones de cada disco (tabla del **MBR** y **GPT**), monta cada volumen FAT y le da su letra (C:, D:... los de dentro; X:, W:, V:... las memorias USB; M: la unidad en memoria); y cuál es la **unidad del sistema**. |
 | `usbbase.cas`, `xhci.cas`, `ehci.cas`, `uhci.cas`, `usb.cas` | **El USB** (sección 11): las controladoras **xHCI** (USB 3), **EHCI** (USB 2.0) y **UHCI** (USB 1.1), quitárselas a la BIOS, y **enumerar** lo que hay enchufado, también detrás de **concentradores**. |
 | `usbhid.cas` (Usbhid) | Los **teclados y ratones USB** (y los paneles táctiles que se presentan como ratón): le dan a `consola.cas` y a `raton.cas` lo mismo que los PS/2. |
 | `usbalm.cas` (Usbalm) | Las **memorias USB** (almacenamiento «solo a granel», órdenes SCSI): un disco más para `discos.cas`. |
+| `usbcal.cas` (Usbcal) | **El USB en caliente** (desde la 0.8, sección 11): la tarea que mira los puertos y atiende lo que se enchufa y se desenchufa en marcha, y «quitar con seguridad». |
 | `registro.cas` (Registro) | El **registro del arranque**: lo que el núcleo dice de los discos y del USB, apuntado para guardarlo en `ARRANQUE.TXT`. |
 | `fecha.cas` (Fecha) | La **fecha y la hora** del reloj de pila del PC (la CMOS), como las guarda la FAT; y **ponerlo en hora**. |
 | `ajustes.cas` (Ajustes) | Los **ajustes de un sistema instalado** (`\HISPA\HISPA.INI`): el nombre del usuario y del equipo y el teclado (sección 12). |
@@ -211,6 +233,9 @@ cuarta parte, los discos y el USB).
 | `emergente.cas` (Emergente) | Los **menús emergentes**: el del botón secundario y el que cuelga de una barra de menús. |
 | `terminal.cas` (Terminal) | Los **terminales**: dos tubos para que una ventana tenga dentro al intérprete de órdenes y a sus programas. |
 | `escritorio.cas` (Escritorio) | El **escritorio**: el tapiz y sus **iconos**, la barra de tareas, el menú Inicio, el reloj, los cuadros (apagar, configuración, «Acerca de»), los menús del botón secundario, y la tarea que lo mueve todo. |
+| `red.cas` (Red) | **La red**, lo que pone el núcleo (sección 14): el cartero entre los programas y el servicio de red (`RED.BIN`), y lo que solo el servicio puede pedir: los puertos, memoria física seguida para el DMA, los registros de la tarjeta y su interrupción. |
+
+| `energia.cas` (Energia) | **Apagar de verdad, reiniciar y la batería**: las llamadas del servicio de ACPI (`ACPI.BIN`, un programa del anillo 3 con ACPICA) y la 154; apagar por ACPI (S5) y reiniciar (FADT, 8042, CF9h); la pila de la bandeja y su recuadro de ayuda (sección 11). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
 
 Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
@@ -219,7 +244,10 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 |---|---|---|
 | `llamadas.cas` (Llamadas) | — | El **módulo de las llamadas al sistema** para los programas: `tecla`, `leer_línea` (con su historia), `abrir`, `crear`, `leer`, `escribir_archivo`, `mover`, `cortar`, `cerrar`, `borrar`, `renombrar`, `crear_carpeta`, `cambiar_carpeta`, `redirigir`, `entrada`, `lanzar`, `esperar`, `argumentos`, `dato`, `más_memoria`...; y las **ventanas** (`ventana`, `suceso`, `rectángulo`, `degradado`, `texto`, `mapa`...), los **menús** (`menú`), el **portapapeles** (`al_portapapeles`, `del_portapapeles`) y los terminales. Un programa lo importa y no escribe ni una `int 0x80`. |
 | `barramenu.cas` (Barramenu) | — | La **barra de menús** de una ventana (Archivo, Edición, Ayuda): pintarla, saber qué rótulo se ha pulsado y abrir su menú. |
+| `sha256.cas` (Sha256) | — | El resumen **SHA-256** (FIPS 180-4): `empezar`, `añadir`, `acabar` (sección 13). |
 | `uinstala.cas` | `INSTALAR.BIN` | **INSTALAR**: instala el sistema en el disco duro, en pantalla azul (sección 12). |
+| `upaquete.cas` | `PAQUETES.BIN` | **PAQUETES**: instala, actualiza y quita paquetes `.HPQ`, con sus dependencias, sus sumas y deshaciendo lo que quede a medias (sección 13). |
+| `uactual.cas` | `ACTUALIZ.BIN` | La ventana **«Programas y actualizaciones»** del escritorio: la de PAQUETES (sección 13). |
 | `uasiste.cas` | `ASISTE.BIN` | El **asistente del primer arranque** de un sistema instalado (sección 12). |
 | `ubloc.cas` | `BLOC.BIN` | El **Bloc de notas** del escritorio (sección 10). |
 | `uequipo.cas` | `EQUIPO.BIN` | **Mi equipo**: las unidades (con su letra, de qué son y lo que cabe en ellas) y lo que hay dentro (sección 10). |
@@ -230,6 +258,9 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `umalo.cas`, `ucli.cas` | `MALO.BIN`, `CLI.BIN` | Los que hacen lo que no deben: leer la memoria del núcleo y hacer `cli`. |
 | `uprueba.cas` | `PRUEBA.BIN` | Prueba las llamadas al sistema desde dentro: la memoria que crece, leer un archivo a trozos, abrir de más, punteros que no son suyos, lanzar y esperar, escribir dos a la vez. |
 | `uescribe.cas` | `ESCRIBE.BIN` | Prueba **escribir en el disco** desde dentro: crear, escribir a trozos, leer de vuelta, escribir en medio, cortar, alargar con hueco, añadir; lo que no se puede; las carpetas; con `lleno`, llena el disco y lo vacía. |
+| `redes.cas` (Redes) | — | La **red para los programas** (sección 14): `estado_red`, `resolver`, `ping`, `conectar`, `enviar`, `recibir`, los puertos UDP... |
+| `ured.cas` con `rbase.cas`, `rtarjeta.cas`, `ryukon.cas`, `rpila.cas` y `rtcp.cas` | `RED.BIN` | El **servicio de red**: las tarjetas y la pila TCP/IP (sección 14). |
+| `uipconf.cas`, `uping.cas`, `udescarg.cas` | `IPCONFIG.BIN`, `PING.BIN`, `DESCARGA.BIN` | **IPCONFIG**, **PING** y **DESCARGAR** (sección 14). |
 | `ubucle.cas` | `BUCLE.BIN` | El que no acaba nunca (da vueltas, duerme, espera teclas o escribe sin parar): para probar **Ctrl+C**. |
 
 ---
@@ -416,7 +447,13 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 66 | **reiniciar** el equipo | `reiniciar` | (no vuelve) |
 | 67 | **poner en hora el reloj del PC**: la fecha (EBX) y la hora (ECX), como las guarda la FAT | `poner_reloj` | 0 |
 | 68 | **los ajustes** (`HISPA.INI`): EBX = 0, leerlos otra vez; 1, el nombre del usuario, a ECX; 2, ¿está el sistema instalado en el disco?; 3, el nombre del equipo | `releer_ajustes`, `nombre_usuario`, `sistema_instalado`, `nombre_equipo` | |
+| 130 | **quitar con seguridad** la memoria USB de la unidad de letra EBX (desde la 0.8): lo pendiente se escribe, la memoria se para y sus unidades dejan de estar | `quitar_memoria` | 0 (`QUITADA`), ya se puede quitar; 1, no hay tal unidad; 2, no es una memoria USB; 3 (`ES_DEL_SISTEMA`), el sistema corre desde ella |
+| 131 | las veces que han **aparecido o desaparecido unidades** (además, a las ventanas de los programas les llega `EV_UNIDADES`) | `cambios_unidades` | ese número |
 | 80 | **colocar la ventana** EBX (suya) con su esquina en (ECX, EDX) de la pantalla; con ECX = 0xFFFFFFFF, en el centro (encima de la barra de tareas). La usa HVPRUN (sección 10, «La oficina de Hispa-386») | — | 0 |
+| 90-98 | **la red**: pedir al servicio de red (90) y lo del propio servicio (91 a 96, 98); cómo está (97). Las cuenta la sección 14 | `redes.cas` | |
+
+| 150-153 | **solo el servicio de ACPI** (`ACPI.BIN`): puertos, memoria física, configuración PCI, y dar la batería y esperar órdenes (sección 11, «Apagar de verdad y la batería») | — | |
+| 154 | **la batería**: lo último que ha leído el servicio de ACPI (una `Energía`, `energia.cas`) a EBX | — | 1, o 0 si no hay servicio |
 
 (La 11, con ECX = 1, no se queda esperando: da `SIGUE` si la tarea no ha acabado
 —`acabada`—. La 15 da además el ancho y el alto de la pantalla gráfica y si el
@@ -509,6 +546,37 @@ tocarlos. Solo la pila del núcleo usa el del anillo 0.
   arranca el puerto, para que valga la siguiente). Los sectores se cuentan en
   32 bits: hasta 2 TB. Es lo que llevan el Toshiba NB250 (8086:27C1) y casi
   todos los PC de 2008 en adelante.
+  **Desde la 0.8**, el arranque de los puertos es como el de Linux y el de
+  la norma (AHCI 1.3, 10.1.2), porque la 0.7 no veía el disco del Toshiba
+  NB250 (ICH7-M, 8086:27C1). El modo AHCI (GHC.AE) lo primero; CAP2 y BOHC
+  solo con AHCI 1.2 o más (el ICH7 es 1.1); si PI viene a 0, los puertos que
+  dice CAP.NP; en el ICH6 y el ICH7, los puertos se encienden también en el
+  registro PCS del PCI (0x92); cada puerto con corriente (POD), girando
+  (SUD), con el enlace despierto y **sin el ahorro de energía del enlace**
+  (ALPE y ASP a 0). Luego, por cada puerto con enlace: **parar** ST y FRE (y
+  esperar CR y FR a 0), darle sus tablas (CLB, FB), **FRE = 1**, limpiar SERR
+  e IS y **solo entonces mirar TFD**: TFD sale del FIS que manda el disco, y
+  con FRE = 0 ese FIS se pierde. Si el disco sigue **ocupado** (BSY o DRQ) al
+  medio segundo, un **COMRESET del puerto con FRE = 1** (SCTL.DET = 1, 20 ms,
+  DET = 0, el enlace otra vez y hasta 3 s a que TFD quede sin BSY y llegue
+  la firma), SERR limpio, **ST = 1** e IDENTIFY. Es lo que le pasaba al
+  NB250 (el registro de Carlos del 20/11: enlace hecho, SSTS 123, firma de
+  disco 101h, pero TFD en 80h para siempre e IDENTIFY sin acabar): el FIS del
+  COMRESET de la BIOS se había perdido. Si así no sale ningún disco, la
+  **segunda vuelta**: COMRESET de cada puerto y hasta 10 s a que el disco
+  gire; antes, en las demás controladoras, se reinicia la controladora
+  entera (GHC.HR), pero **en el ICH6 y el ICH7 no**: en el NB250 deja todos
+  los puertos sin enlace. Un puerto en el que no se ve nada enchufado
+  (SSTS.DET = 0) durante 0,15 s seguidos está vacío y no se le espera más
+  (`espera_enlace`): sin eso, una controladora con puertos vacíos y sin
+  discos (la ICH9 de QEMU `q35`) retrasaba el arranque casi 6 s. Lo que ve
+  (la controladora, CAP, GHC, PI, VS y, por puerto, SSTS, CMD, TFD y la
+  firma, y **SSTS, TFD, SERR, CMD y SIG tras FRE=1, tras el COMRESET y tras
+  ST=1**) queda en `ARRANQUE.TXT` y lo enseña la orden `disco` de la consola
+  del núcleo. En QEMU (que manda el FIS al poner FRE) esos caminos se prueban
+  con `ahci=ocupado` (el disco, como si siguiera ocupado tras FRE = 1),
+  `ahci=ich7` (la segunda vuelta sin GHC.HR), `ahci=reinicio`, `ahci=pi0` y
+  `ahci=desalineada`; lo del NB250 de verdad, solo en el NB250.
 - **USB** (`usbalm.cas`, desde la 0.6): las memorias USB (sección 11).
 
 **Una sola tabla de discos** (`discos.cas`): quien lee o escribe sectores (la FAT,
@@ -541,7 +609,7 @@ SATA); con **`sinusb`**, ni toca el USB.
 | Letra | Qué es |
 |---|---|
 | `C:`, `D:`... | los volúmenes FAT de los **discos de dentro** (IDE y SATA), por orden |
-| `X:`, `Y:`, `Z:` | los de las **memorias USB**: `X:` es la memoria de arranque (si hay varias, la que lleva `ORDENES.BIN`) |
+| `X:`, `W:`, `V:`... | los de las **memorias USB**, de la X: hacia abajo, como en Hispa-DOS: `X:` es la memoria de arranque (si hay varias, la que lleva `ORDENES.BIN`); las que se enchufan en marcha, la primera libre desde la `W:` (sección 11) |
 | `M:` | la **unidad en memoria**: los archivos que ha traído el cargador (abajo) |
 
 De cada disco se miran sus **particiones**: si el disco entero es un volumen FAT
@@ -1189,8 +1257,9 @@ memoria y se arranca de ella. (Necesita ser root, `parted`, `dosfstools` y
 
 Desde la 0.6 el núcleo tiene su USB, escrito en Castel (con lo aprendido en
 HSPUSB, el USB de Hispa-DOS, que está en ensamblador de 16 bits: `drivers/hspusb.asm`
-y `docs/USB.md`). Todo se hace **al arrancar** y **sin interrupciones** (las
-controladoras se miran):
+y `docs/USB.md`). Lo enchufado se enumera **al arrancar** y **sin interrupciones** (las
+controladoras se miran); lo que se enchufa y se desenchufa después, desde la
+0.8, lo atiende `usbcal.cas` (más abajo, «El USB en caliente»):
 
 1. **Las controladoras** (`usb.cas`): se buscan en el bus PCI (clase 0x0C,
    subclase 0x03) las **xHCI** (interfaz 0x30), las **EHCI** (0x20) y las
@@ -1255,10 +1324,65 @@ controladoras se miran):
    de la clase si se atasca. Ocho sectores por orden. La memoria es un disco
    más de `discos.cas`, y su FAT, la unidad `X:`.
 
+### El USB en caliente (desde la 0.8)
+
+Lo que se enchufa y se desenchufa con el equipo en marcha lo atiende
+`usbcal.cas`: una tarea del núcleo, **`usb-caliente`**, mira **cada medio
+segundo** los puertos de las controladoras (sus registros: el aviso de «ha
+cambiado lo enchufado», que se borra al mirarlo) y **cada segundo** los de los
+concentradores (la petición de su estado). Sin interrupciones, como lo demás.
+
+- **Se enchufa algo**: se esperan 100 ms a que se asiente, se reinicia el
+  puerto y se enumera como al arrancar (un EHCI cede a su compañera lo que no
+  es de alta velocidad, y es ella la que lo ve). Un **teclado** o un **ratón**
+  funcionan al momento (la tarea que los atiende se pone en marcha con el
+  primero); un **concentrador**, con todo lo que lleve colgado; una
+  **memoria** es un disco más y cada volumen FAT suyo, una unidad con **la
+  primera letra libre desde la W: hacia abajo**. Las direcciones USB, las
+  fichas de los aparatos, las tuberías y los sitios en las tablas de discos y
+  unidades se reutilizan.
+- **Se desenchufa algo**: el aparato (y lo que cuelgue de él) queda **marcado
+  como ido** y lo que se le esté pidiendo falla en el acto, sin esperar a que
+  se pase el tiempo. Un teclado **suelta las teclas** que tenía pulsadas (y
+  deja de repetir) y un ratón, sus botones: nada se queda apretado. Las
+  unidades de una memoria dejan de estar; **los archivos abiertos en ellas dan
+  error** («el disco falla») hasta que el programa los cierre, y el programa
+  sigue; quien trabajaba en esa unidad pasa a la del sistema. Luego se quita:
+  sus tuberías salen de la lista periódica (EHCI, UHCI), en el xHCI se
+  deshabilita su ranura y se sueltan las páginas de su contexto y sus anillos,
+  y su dirección queda libre. Si se va **la memoria del sistema**, la unidad
+  del sistema pasa a ser M: (los programas que trajo GRUB); si vuelve, vuelve
+  a ser X:.
+- **Quitar con seguridad** (la llamada 130): **en Mi equipo** (botón
+  secundario sobre la unidad: «Abrir | Quitar con seguridad»), **en la bandeja
+  del escritorio** (el icono de la memoria, que sale con una enchufada: un clic,
+  y «Quitar con seguridad W:» por cada una) y con la orden **`quitar W`** de la
+  consola del núcleo. Lo pendiente va a la memoria (las entradas de los
+  archivos abiertos para escribir, la FAT y, en FAT32, la cuenta de libres), se
+  le dice que lo asiente (SYNCHRONIZE CACHE) y que se pare (START STOP UNIT), y
+  sus unidades dejan de estar: «**Ya puede quitar la memoria W:**». **La memoria
+  de la que corre el sistema no se deja quitar**: «X: es la memoria del sistema:
+  no se puede quitar» (en Mi equipo, la opción sale en gris).
+- **Los avisos**: cada cosa se dice por el puerto serie (`usb: se enchufa el
+  aparato 2, ...`, `usb: aviso: Memoria USB conectada: W:`) y, con el
+  escritorio, en un **globo** encima de la bandeja que se va solo a los seis
+  segundos (o con un clic). **Mi equipo se pone al día solo**: a las ventanas de
+  los programas les llega `EV_UNIDADES` cuando aparece o desaparece una unidad.
+
+![Una memoria USB recién enchufada: el globo, el icono de la bandeja y Mi equipo al día](pentium/usb-caliente.png)
+
+**Probado en QEMU** con el monitor (`device_add usb-storage`, `usb-kbd`,
+`usb-mouse`, `usb-hub` y `device_del`), en xHCI y EHCI y con un teclado de USB
+1.1 que pasa a la UHCI compañera (`pruebas.sh`, parte 11: `SOLO=caliente`): la
+memoria enchufada se lee; escrita y quitada con seguridad, `fsck.fat` la da por
+sana; quitada a lo bruto con un archivo abierto (`PRUEBA abierto W:\HOLA.TXT`),
+el programa ve los errores y sigue; un concentrador con un teclado y un ratón
+detrás, enchufado y quitado entero; y en el escritorio, un ratón que llega
+abre Mi equipo. **En un PC de verdad, por probar** (el HP Mini y el Toshiba).
+
 **Lo que no hace** (todavía): las controladoras **OHCI** (las de USB 1.1 que no
 son de Intel ni de VIA: las compañeras de los EHCI de NVIDIA, SiS y de algunos
-AMD); **enchufar y desenchufar en marcha** (solo se ve lo que hay al
-arrancar); pasar al xHCI los puertos que los Intel de las series 7 a 9 dejan en
+AMD); pasar al xHCI los puertos que los Intel de las series 7 a 9 dejan en
 el EHCI (no hace falta: van por el EHCI con su concentrador); las tabletas (ejes
 absolutos); las luces del teclado; los discos USB con sectores que no sean de 512.
 
@@ -1266,11 +1390,130 @@ absolutos); las luces del teclado; los discos USB con sectores que no sean de 51
 `-device usb-ehci`, `-device piix3-usb-uhci`, y un EHCI con sus UHCI compañeras:
 `ich9-usb-ehci1` e `ich9-usb-uhci1`), teclado, ratón, concentrador (de USB 1.1) y memoria
 (`usb-kbd`, `usb-mouse`, `usb-hub`, `usb-storage`), y con `-machine pc,i8042=off`
-quita el teclado y el ratón PS/2, como en un Mac: sección 13. **Lo que QEMU no
+quita el teclado y el ratón PS/2, como en un Mac: sección 14. **Lo que QEMU no
 puede probar**: las transacciones partidas del EHCI (no tiene concentrador de
 alta velocidad), que son justo el camino del teclado y el panel del MacBook;
 están hechas según la norma y como las hace HSPUSB, pero hasta que no se prueben
 en el equipo no se sabe.
+
+### Apagar de verdad y la batería (ACPI)
+
+*20/11/2026.* Hasta aquí, «Apagar el equipo» solo decía «Ya puede apagar el
+equipo» (en QEMU, su puerto de pruebas). Ahora **apaga de verdad** (ACPI, el
+estado S5), **reinicia** por el camino que diga el equipo y, en los portátiles,
+la **bandeja enseña la batería**. Todo eso sale del mismo trabajo que ya había
+para Hispa-DOS ([ACPI.md](ACPI.md)): el núcleo de C de `HSPACPI` con
+**ACPICA** dentro, sin tocar una línea de lo que lee la batería.
+
+**Un servicio aparte, en el anillo 3.** ACPI no cabe en un núcleo en Castel (y
+no hace falta): las tablas del equipo son un programa en AML que hay que
+ejecutar, con su intérprete (ACPICA, 150 K de C). Lo lleva **`ACPI.BIN`**, un
+programa del anillo 3 como los demás (cabecera `HPU3`, enlazado para
+`0x40000000`), hecho con **los mismos objetos** de `build/acpi/` que
+`HSPACPI.BIN` (`acpi/pentium/hacer.sh`; el Makefile los compila): cambian solo
+la entrada (`acpi/pentium/entrada.asm`), la «máquina» (`maquina.c`: puertos,
+memoria, PCI y reloj) y el bucle (`servicio.c`). Si el AML de un equipo hace
+algo raro, lo que cae es ese programa, no el núcleo. El núcleo lo lanza al
+arrancar (`semilla.cas`, `arranca_acpi`) si está en la unidad del sistema
+(`\ACPI.BIN`; en un sistema instalado, `\HISPA\ACPI.BIN`), con la línea del
+cargador como argumentos; `sinacpi` en ella no lo lanza, y con `instalar`
+tampoco. Si no está, todo es como antes.
+
+**Lo que puede y los demás no** (`energia.cas`, llamadas 150 a 154). Un
+programa del anillo 3 no puede tocar puertos ni memoria física; el servicio
+se lo pide al núcleo, y **solo él**: el núcleo apunta su tarea al lanzarlo, y a
+cualquier otra le contesta «no vale» (el mismo `ACPI.BIN` lanzado a mano desde
+el intérprete lo dice y acaba).
+
+| EAX | Qué | Devuelve |
+|---|---|---|
+| 150 | un **puerto**: EBX el puerto, ECX el valor, EDX los octetos (1, 2, 4) y 0x100 para escribir | lo leído |
+| 151 | **la memoria física** desde EBX, ECX octetos, a la vista del servicio: en su zona de `0xB0000000`, sin caché. Esas páginas llevan la marca **`AJENO`** (`paginas.cas`): al acabar el programa sus marcos **no** vuelven a los libres (son del equipo: las tablas ACPI, registros) | dónde |
+| 152 | la **configuración PCI**: EBX la dirección (como en CF8h; los bits 0-1, el octeto), ECX, EDX como en la 150; dirección y dato de una vez, con las interrupciones tapadas: el núcleo también usa CF8h/CFCh (lo que ACPICA escribe en CF8h se guarda en `maquina.c` y va con el acceso a CFCh) | lo leído |
+| 153 | el servicio da lo último leído (EBX: una `Energía`, la `struct pe_energia` de `acpi/pentium/pentium.h`) y espera como mucho ECX tics a que el núcleo le mande algo (la orden se mira cada décima de segundo) | la orden: 0, 1 apagar, 2 reiniciar |
+| 154 | (cualquier programa) **la batería**: la `Energía` a EBX | 1, o 0 si no hay servicio |
+
+La memoria física que pide se apunta en `maquina.c` y se vuelve a usar (el
+núcleo no la quita hasta que el programa acaba); en QEMU son 152 K. El reloj
+sale del contador del procesador (RDTSC se puede leer en el anillo 3), medido
+al empezar contra los tics del núcleo; una espera de más de 20 ms duerme. El
+núcleo de C sigue con su «tarea» (`nucleo.c`, con su pila): el bucle de
+`servicio.c` la deja correr y duerme entre paso y paso, y solo entre lecturas
+(`tarea_quieta()`) usa ACPICA desde fuera (para apagar). Lee **igual que
+HSPACPI en el modo mínimo** (docs/ACPI.md, «Los dos modos»): no se pasa el
+equipo a modo ACPI ni se usa la SCI mientras está encendido, `_REG` del
+controlador embebido, `PWUP` antes de cada lectura en el HP Mini y **sin
+`_PSR`** (apagaría su tarjeta de red), el ritmo y las dos baterías del ThinkPad
+A275, la salud (`_BIF`/`_BIX`). Una lectura cada 10 s (`acpicada=N` en la
+línea del cargador). Lo que apunta (lo que en Hispa-DOS es `BATERIA.LOG`) sale
+por el **puerto serie** y, con `registro` en la línea del cargador (las
+entradas de la memoria USB lo llevan), también a **`\ACPI.TXT`** de la unidad
+del sistema (con la memoria USB, `X:\ACPI.TXT`).
+
+**Apagar, en orden** (`escritorio.cas`, `apaga`; `energia.cas`):
+
+1. **Avisar a los programas**: a cada ventana de un programa, «cerrar» (como el
+   botón de la ventana), y hasta 2 s para que se cierren, sin dejar de mover
+   el escritorio. Si alguno no se cierra (el Bloc de notas con cambios sin
+   guardar avisa y se queda), **no se apaga**: un aviso lo dice («Hay un
+   programa sin cerrar: ¿algo sin guardar?»); al pedirlo **otra vez**, se le
+   cierra (como el Bloc al cerrar otra vez).
+2. La pantalla del final («Apagando el equipo...»), y los programas que
+   queden (sin ventana) se acaban: sus archivos se cierran y lo escrito queda.
+3. **Vaciar los discos** (`asentar` de cada uno).
+4. **ACPI**: se le manda «apagar» al servicio, que, con su tarea quieta, hace
+   lo de ACPICA: `AcpiEnterSleepStatePrep(5)` (`\_S5`, `_PTS(5)`, `_SST`),
+   el **modo ACPI** si el equipo no está en él (`SMI_CMD` ← `ACPI_ENABLE`,
+   como `APAGAR` de Hispa-DOS: hay BIOS que si no, no apagan) y
+   `AcpiEnterSleepState(5)`: `SLP_TYP` y luego `SLP_EN` en `PM1a_CNT` (y
+   `PM1b_CNT`). Si el equipo sigue encendido, lo dice; a los 15 s (o si el
+   servicio no está), **el núcleo lo intenta él** con lo que el servicio le
+   dio al arrancar (`PM1a_CNT`, `\_S5`, `SMI_CMD`; si ACPICA no ha podido con
+   `\_S5`, el servicio lo busca a mano en la DSDT, como `APAGAR`).
+5. Si nada de eso apaga: en QEMU, su puerto de pruebas (el código 5); en un PC
+   de verdad, el aviso de siempre, «Ya puede apagar el equipo». **APM no**: es
+   de modo real o de un modo protegido de 16 bits de la BIOS, y los equipos
+   que lo tienen (antes de 2008) casi siempre tienen también ACPI.
+
+**Reiniciar**: lo mismo hasta vaciar los discos; se avisa al servicio (le dice
+al controlador embebido que lo deja, `_REG (3, 0)`, y ya no toca ACPI) y luego,
+como `REINICIAR` de Hispa-DOS, lo que funcione primero: el **registro de
+reinicio de la FADT** (en E/S, en memoria o en la configuración PCI, si la FADT
+lo trae), el **controlador del teclado** (FEh al 64h), el puerto **CF9h** (02h
+y 06h) y un **triple fallo**. La llamada 66 (la que usan INSTALAR y el
+asistente) va por aquí también.
+
+**La batería en la bandeja** (`energia.cas`, `pinta_pila` y `ayuda_pila`).
+Si el equipo declara batería (en un sobremesa no hay pila, ni sin ACPI), la
+bandeja crece y, a la izquierda del reloj, sale **la pila** con lo que queda
+(verde; ámbar por debajo del 25 %, rojo del 10 %), un **rayo** si está
+enchufado, un aspa si no hay batería puesta, y el **porcentaje**. Con el
+puntero **quieto medio segundo** encima sale, encima de la barra y centrado en
+el puntero, el **recuadro de ayuda**, crema, como en Hispa-486
+([VENTANAS.md](VENTANAS.md), «[AYUDA]»):
+
+- sin cable: «Batería: 73 % · quedan 2 h 10 min» (los minutos, si el equipo
+  los da); con cable: «Enchufado · cargando: 73 %» o «Enchufado · cargada
+  (100 %)»; sin batería puesta, «Sin batería puesta · enchufado»;
+- la **salud**: «Salud: 68 % (guarda 5.000 de 7.350 mAh de cuando era nueva)»
+  (con dos baterías, «entre las 2 guardan ... de cuando eran nuevas»);
+- los **ciclos de carga**, si el equipo los da (`_BIX`): «312 ciclos de carga»
+  («312 y 45» con dos);
+- por debajo del 50 % de salud, en terracota: «La batería está gastada: dura
+  menos de la mitad que nueva».
+
+Se va al sacar el puntero de la pila o al pulsar un botón (y no vuelve hasta
+salir y entrar); mientras se ve, se pone al día solo (al enchufar, cambia sin
+mover el puntero). Es una ventana sin marco «encima», del núcleo, que no toma
+el foco.
+
+**Lo que no se puede probar en QEMU**: el controlador embebido de verdad (el
+del HP Mini y el del Toshiba, con sus tiempos), las llamadas a la BIOS (SMI)
+de sus métodos y que la BIOS de cada uno apague con `SLP_EN`. Las pruebas
+(sección 15, la parte 14 de `pruebas.sh`) usan la batería de mentira de las de Hispa-DOS
+(`tests/acpi/bateria-qemu.aml`, con `-acpitable`), y apagan y reinician QEMU
+con PIIX4 (`pc`) y con ICH9 (`q35`). Para el equipo: la imagen
+`hispa-pentium-usb-0.8-hp-mini.zip` (o `-toshiba`, la misma), con todo lo de la 0.8 y su LEEME.
 
 ## 12. Instalarlo en el disco duro
 
@@ -1459,10 +1702,397 @@ qemu-system-i386 -m 64 -rtc base=localtime \
   -device ahci,id=sata -drive id=d,file=/dev/shm/disco.img,format=raw,if=none -device ide-hd,drive=d,bus=sata.0
 ```
 
-## 13. Las pruebas
+## 13. Los paquetes y las actualizaciones
 
-`castel/pruebas.sh` (las partes 8, 9 y 10; `SOLO=32 ./pruebas.sh` hace solo esas y la
-de los errores; `SOLO=06`, solo la 9, lo de la 0.6; `SOLO=07`, solo la 10, instalar en el disco) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
+Desde la **0.8** (20/11/2026), lo instalado en el disco se puede **poner al día,
+añadir y quitar** sin volver a instalar el sistema: por **paquetes** (archivos
+`.HPQ`), que maneja el programa **PAQUETES** (`upaquete.cas`, `PAQUETES.BIN`,
+del anillo 3, en Castel) y que se hacen en el VPS con **`tools/hpq.py`**. De
+momento los paquetes se traen de una carpeta (la de la memoria USB, la de otro
+disco...); cuando el núcleo tenga red, de Internet (más abajo: «el gancho de la
+red»). (El número de versión del sistema —el núcleo, el escritorio, INSTALAR—
+sigue en 0.7: lo cambia quien publique la 0.8.)
+
+### El paquete (.HPQ)
+
+Un archivo con dos partes: **una cabecera de texto** (página 437, líneas con CR
+LF) y, detrás, **los archivos tal cual**, uno detrás de otro, en el orden de la
+cabecera:
+
+```
+HPQ 1
+nombre=oficina
+version=1.0
+descripcion=La oficina de Hispa-386: Facturas, Pluma, Cuentas y Mirador
+necesita=hvprun >= 0.7
+choca=
+archivo=\OFICINA\FACTURAS.HVP 172610 4c1d...e9 (su SHA-256, en 64 cifras)
+archivo=\OFICINA\PLUMA.HVP 128402 90ab...17
+...
+fin
+```
+
+- **`nombre`**: hasta 8 letras (`a-z`, cifras, `-`, `_`): es también el nombre de
+  su registro (`OFICINA.PQI`). **`version`**: números con puntos, que se comparan
+  número a número (la 0.10 es más nueva que la 0.9).
+- **`necesita`** (las **dependencias**) y **`choca`** (los **conflictos**): una
+  lista separada por comas, cada uno con su versión si hace falta: `base >= 0.7,
+  nucleo >= 0.8, hvprun` (con `>=`, `<=`, `=`, `>` y `<`; sin nada, cualquier
+  versión). **`nucleo`** es el núcleo **que está en marcha** (su versión la da la
+  llamada 15): un programa que use llamadas nuevas lo pide así.
+- **`archivo`**: adónde va (una ruta entera de la unidad del sistema, en 8+3:
+  `\HISPA\BLOC.BIN`, `\OFICINA\PLUMA.HVP`; no en `\HISPA\PAQUETES`, que es la base
+  de lo instalado), lo que mide y su **SHA-256**.
+- Lo que PAQUETES no conoce lo deja pasar: así caben cosas nuevas sin cambiar de
+  formato. **`firma=`** queda reservada para firmar el paquete; esta versión de
+  PAQUETES dice que la lleva, pero aún no la comprueba (la cadena de confianza de
+  hoy es el catálogo, que lleva el SHA-256 de cada paquete entero: más abajo).
+
+El **SHA-256** está escrito en Castel (`nucleo32/sha256.cas`, el módulo `Sha256`:
+`empezar`, `añadir` y `acabar`, de FIPS 180-4), para los programas del anillo 3.
+
+### El catálogo (CATALOGO.TXT)
+
+Al lado de los paquetes, uno por línea (puede haber varias versiones del mismo):
+
+```
+HPQ-CATALOGO 1
+paquete=oficina 1.0 OFICINA.HPQ 798859 0d4f...a2 La oficina de Hispa-386: ...
+```
+
+El nombre, la versión, el archivo, **lo que mide y el SHA-256 del paquete
+entero** (cabecera incluida) y la descripción. Un paquete que se trae por el
+catálogo tiene que medir eso y dar esa suma, además de las de sus archivos.
+
+### Lo instalado: C:\HISPA\PAQUETES
+
+Un **registro por paquete**, `NOMBRE.PQI`: **la cabecera de su paquete, tal
+cual** (qué es, qué versión, qué necesita, qué archivos dejó y sus sumas). Con eso
+se actualiza (lo que la versión nueva ya no trae se quita), se quita limpiamente
+y se comprueba. Además, si hacen falta: `DIARIO.TXT` y `HECHO.TXT` (una
+instalación a medias, abajo), `ORIGEN.TXT` (de dónde traer los paquetes, si no se
+quiere que lo busque) y `BAJADAS` (lo traído de Internet).
+
+**INSTALAR deja apuntado lo que instala**: `usb.sh` hace con `hpq.py` los
+paquetes del sistema y sus registros, que van con lo que se instala (en la
+memoria, en `\INSTALA\PAQUETES`), y `CARPETAS.TXT` los manda a
+`HISPA\PAQUETES` (desde la 0.8, `CARPETAS.TXT` admite también una carpeta
+**dentro de `\HISPA`**: `ARCHIVO.EXT=HISPA\CARPETA`). Así, en un sistema recién
+instalado, `PAQUETES LISTA` ya dice los ocho paquetes del sistema y `PAQUETES
+COMPRUEBA` los encuentra iguales.
+
+### El programa PAQUETES
+
+En el intérprete de órdenes (o en la Consola del escritorio):
+
+| Orden | Qué hace |
+|---|---|
+| `PAQUETES LISTA` | lo instalado: nombre, versión y descripción |
+| `PAQUETES CATALOGO` | lo que hay para instalar (la versión más nueva de cada uno), y si está instalado o hay una más nueva |
+| `PAQUETES INSTALA nombre...` | lo instala del catálogo (la versión más nueva), **con lo que necesite, antes y en orden** |
+| `PAQUETES INSTALA X:\PAQUETES\A.HPQ` | instala ese archivo (lo que necesite, del catálogo de su carpeta, si lo tiene, o del de siempre) |
+| `PAQUETES ACTUALIZA [nombre...]` | pone al día todo lo instalado (o eso): lo que tenga una versión más nueva en el catálogo |
+| `PAQUETES QUITA nombre...` | lo quita: sus archivos, su registro y las carpetas que se queden vacías; no, si otro lo necesita |
+| `PAQUETES MIRA A.HPQ` | lo que lleva un paquete, y si está sano |
+| `PAQUETES COMPRUEBA` | si los archivos instalados siguen como se instalaron (su SHA-256) |
+| `PAQUETES ESTADO` | lo instalado y lo del catálogo, una línea por paquete, para otro programa (la ventana) |
+| `/DESDE=carpeta` o `/DESDE=http://...` | de dónde traer los paquetes |
+| `/FORZAR` | quitar aunque otro lo necesite; poner una versión igual o más vieja que la instalada |
+
+**De dónde.** Lo que diga `/DESDE=`; si no, la primera línea de
+`C:\HISPA\PAQUETES\ORIGEN.TXT`; si no, la carpeta **`\PAQUETES`** de la primera
+unidad que tenga un `CATALOGO.TXT` (primero las memorias USB: la de arranque de
+la 0.8 lleva todos los paquetes del sistema); y si no, Internet:
+`http://actualiza.clicgest.es/pentium/`.
+
+**Antes de tocar nada**, PAQUETES hace el plan entero: lo que se pide y lo que
+necesita (la versión más nueva del catálogo que cumpla, si lo instalado no
+cumple; las dependencias se siguen hasta 16 niveles, y una en círculo no se
+repite), y mira que **nada choque** (con lo instalado o entre sí, en los dos
+sentidos) y que **ningún archivo sea de otro paquete**. Luego **comprueba las
+sumas** de todos los paquetes del plan (el paquete entero contra el catálogo, y
+cada archivo contra su cabecera): con una sola mala, no se instala nada y el
+disco queda igual. Y también **mira que quepa**.
+
+**O todo o nada** (cada paquete): lo que se va a hacer se apunta antes en
+**`DIARIO.TXT`** (las carpetas que hay que hacer, los archivos que se ponen
+—diciendo si ya estaban— y los que se quitan); los archivos nuevos se escriben
+**aparte**, en la carpeta de su destino (`HPQnnnnn.NUE`), volviendo a comprobar
+su suma; y solo entonces se cambian: lo de antes se **aparta** (`HPQnnnnn.VIE`) y
+lo nuevo se pone en su sitio, cambiando nombres. El registro (`NOMBRE.PQI`) es el
+último. Con todo cambiado, el diario pasa a **`HECHO.TXT`**: desde ahí ya no se
+deshace; se borra lo apartado, las carpetas vacías, y el diario. Si algo falla a
+mitad (el disco lleno, un archivo que no se deja), se deshace en el momento. Y
+si **se va la luz** a mitad, la próxima vez que se use PAQUETES (cualquier orden)
+ve el diario y **lo deshace**: lo apartado vuelve a su sitio, lo nuevo se borra,
+y lo dice. (Si se va mientras se escribe un `.NUE`, quedan clusters sueltos que
+`fsck` recoge, como con cualquier archivo a medio escribir: lo instalado sigue
+entero.) Cuando hay que instalar varios paquetes, cada uno es su propio todo o
+nada, en orden: si falla el tercero, los dos primeros (lo que necesitaba) quedan
+instalados, y se dice.
+
+**El gancho de la red.** PAQUETES no sabe de TCP/IP: para traer de Internet el
+catálogo y cada paquete, a `C:\HISPA\PAQUETES\BAJADAS`, lanza el programa
+**`DESCARGA.BIN`** (la orden de descargar de la red: su nombre tiene que caber en
+8+3) con dos argumentos, **`URL DESTINO`**, lo espera, y vale si acaba con el
+código 0 y el archivo está. Si no está, lo dice («hace falta la red»). Si la red
+diera la descarga como **llamada al sistema** en vez de como programa, basta con
+poner su número en `LLAMADA_DESCARGAR` (`upaquete.cas`): se llama con EBX = la
+URL y ECX = el archivo de destino, y un error es lo de siempre. Lo traído se
+comprueba igual (el SHA-256 del catálogo y los de los archivos). Las pruebas lo
+ejercitan con un `DESCARGA` de mentira que copia de la memoria USB.
+
+### La ventana: «Programas y actualizaciones»
+
+![Programas y actualizaciones](pentium/actualizaciones.png)
+
+En el menú Inicio, **«Actualizar»** (encima de Configuración) abre
+`ACTUALIZ.BIN` (`uactual.cas`): la lista de lo instalado y de lo que hay en el
+catálogo, con la versión instalada, la que hay (en verde si es más nueva) y lo
+que es; y tres botones: **Instalarlo** (o **Actualizarlo**, si ya está y hay una
+más nueva), **Quitarlo** y **Actualizar todo**. Con el teclado: las flechas
+eligen, Intro instala, Supr quita, F5 vuelve a mirar. La ventana no sabe de
+paquetes: lanza PAQUETES (`PAQUETES ESTADO`, una línea por paquete fácil de
+leer: `p|nombre|instalada|la del catálogo|descripción`; `PAQUETES INSTALA
+nombre`...) con lo que escribe mandado a un archivo (`VENTANA.TXT`, en la base,
+que luego borra), y enseña abajo las últimas líneas de lo que ha dicho: las
+dependencias, las sumas y el todo o nada son los de PAQUETES.
+
+**El intérprete encuentra lo instalado**: en un sistema instalado, el `PATH` de
+fábrica de ORDENES lleva además `C:\HISPA` (`C:\;C:\HISPA`), así que un programa
+que trae un paquete se lanza por su nombre desde cualquier carpeta.
+
+### tools/hpq.py
+
+```
+python3 tools/hpq.py crea SALIDA.HPQ --nombre bloc --version 0.8 --descripcion "El Bloc de notas" \
+        --necesita "base >= 0.7" BLOC.BIN='\HISPA\BLOC.BIN'
+python3 tools/hpq.py catalogo CARPETA        # CATALOGO.TXT con los .HPQ de la carpeta
+python3 tools/hpq.py mira A.HPQ              # lo que lleva, y sus sumas
+python3 tools/hpq.py registro A.HPQ A.PQI    # su registro (la cabecera)
+python3 tools/hpq.py sistema SALIDA CARPETA...   # los paquetes del sistema (lo usa usb.sh)
+```
+
+**Los paquetes del sistema** (`hpq.py sistema`, de lo mismo que se instala):
+
+| Paquete | Versión | Lleva | Necesita |
+|---|---|---|---|
+| `base` | 0.7 | `NUCLEO.BIN`, `ORDENES.BIN`, `ASISTE.BIN`, `INSTALAR.BIN`, `LEEME.TXT` (en `\HISPA` y en la raíz), `MANUAL.TXT`, `BOOT.IMG`, `CORE.IMG` | — |
+| `bloc` | 0.7 | `BLOC.BIN` | base >= 0.7 |
+| `consola` | 0.7 | `CONSOLA.BIN` | base >= 0.7 |
+| `equipo` | 0.7 | `EQUIPO.BIN` (Mi equipo) | base >= 0.7 |
+| `ejemplos` | 0.7 | `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN` | base >= 0.7 |
+| `paquetes` | 1.0 | `PAQUETES.BIN`, `ACTUALIZ.BIN` (su ventana) | base >= 0.7, nucleo >= 0.7 |
+| `hvprun` | 0.7 | `HVPRUN.BIN` | base >= 0.7 |
+| `oficina` | 1.0 | `\OFICINA\`: `FACTURAS.HVP`, `PLUMA.HVP`, `CUENTAS.HVP`, `MIRADOR.HVP`, `TIPOS.DAT`, `DICCIO.DAT` | hvprun >= 0.7 |
+
+(`GRUB.CFG`, `HISPA.INI` y `MBR.ANT` no son de ningún paquete: son de este equipo.)
+Para publicar una actualización: hacer el paquete con su versión nueva, ponerlo
+con los demás, `hpq.py catalogo` y subir la carpeta (a la memoria USB o, cuando
+haya red, a `actualiza.clicgest.es/pentium/`).
+
+**Lo que falta**: comprobar la **firma** (del catálogo, que lleva las sumas de
+todo; con una clave pública dentro del sistema); actualizar el núcleo y pedir
+reiniciar (hoy se pone el archivo, y vale en el arranque siguiente); que la
+ventana deje elegir el origen y enseñe el avance; y la red (sección 14), que
+trae lo de Internet por el gancho.
+
+## 14. La red por cable (la 0.8)
+
+*20/11/2026.* La base para que un Hispa-Pentium instalado (el HP Mini 5103 de
+Carlos, el primero) sea un equipo útil: **la red por cable**. Con el cable
+enchufado, el sistema pide la IP solo (DHCP), el icono de la bandeja se pone
+verde y, en la Consola, `IPCONFIG`, `PING` y `DESCARGAR http://...`.
+
+### Cómo está repartida: un servicio del anillo 3
+
+La red de verdad **no está en el núcleo**: es un programa del anillo 3, el
+**servicio de red** (`RED.BIN`, `ured.cas`), con los controladores de las
+tarjetas y la pila TCP/IP enteros, escritos en Castel. Así el núcleo apenas
+crece (un módulo de 500 líneas, `red.cas`, y nueve llamadas; CASTEL, el
+compilador escrito en Castel, está cerca de los límites de sus tablas con el
+núcleo) y un fallo de la red acaba con el servicio, no con el sistema.
+
+```
+  PING, IPCONFIG, DESCARGAR...  (redes.cas)
+        │  llamada 90: un pedido (cabecera de 8 palabras + hasta 8 K)
+        ▼
+  el núcleo (red.cas): cartero; espera la respuesta
+        │  llamadas 92 (el pedido siguiente) y 93 (contestar)
+        ▼
+  RED.BIN, el servicio de red (anillo 3, con IOPL 3)
+     ured.cas    el bucle: la tarjeta, el tiempo, los pedidos
+     rtcp.cas    TCP
+     rpila.cas   Ethernet, ARP, IPv4, ICMP, UDP, DHCP, DNS
+     rtarjeta.cas  las tarjetas (e1000, RTL8139) y lo común
+     ryukon.cas  la Marvell Yukon 88E8059 (HP Mini 5103)
+     rbase.cas   puertos, PCI, el registro, orden de red, sumas
+        │  puertos de E/S (IOPL 3), registros (llamada 95), DMA (94), IRQ (98)
+        ▼
+  la tarjeta de red
+```
+
+**Lo que pone el núcleo** (`red.cas`, módulo `Red`; las llamadas, de la 90 a la
+98: otra sesión usa de la 110 en adelante):
+
+| EAX | Quién | Qué | Devuelve |
+|---|---|---|---|
+| 90 | un programa | **pedir a la red**: EBX, la cabecera (ocho palabras: la orden, sus datos y, en la octava, cuántos octetos van; la respuesta se escribe encima); ECX, los octetos (los que van y donde se dejan los que vuelven); EDX, cuántos caben. El programa espera (bloqueado) hasta que el servicio conteste. Si no hay servicio, el núcleo lo pone en marcha (una vez) y vuelve a pedir | la primera palabra de la respuesta (`SIN_RED` si no hay servicio) |
+| 91 | el servicio | **apuntarse como servicio de red** (solo uno, y solo un programa que se llame `RED.BIN`): el núcleo le pone **IOPL 3** en las banderas que repondrá `iretd` (los puertos de E/S, y `cli`/`sti` para el bus PCI) | 0, o `EN_USO` |
+| 92 | el servicio | **el pedido siguiente**, a EBX (`Pedido_red`: el hueco, su número de serie, la tarea, cuánto cabe en la respuesta, cuántos octetos trae, la cabecera; detrás, los octetos: caben 64 + 8.192); con ECX tics de espera si no hay ninguno (dormido; un pedido nuevo o la interrupción de la tarjeta lo despiertan antes). También los **avisos**: una tarea que había usado la red ha acabado (la orden `0xFFFF`) | 1, o 0 si no hay |
+| 93 | el servicio | **contestar** al hueco EBX con la `Respuesta_red` de ECX (la serie, dónde están los octetos y la cabecera). Si el programa ya no espera (Ctrl+C), la serie no cuadra y se tira | 0 |
+| 94 | el servicio | **EBX páginas seguidas de memoria física** (hasta 16, a cero, desde los 16 MB: `reservar_seguidos` de `marcos.cas`) a su vista, en `0xA0000000` y siguientes; su dirección física, a ECX | dónde se ven |
+| 95 | el servicio | **los registros de un aparato** (de la dirección física EBX, ECX octetos; solo por encima de la memoria de verdad) a su vista, sin caché | dónde se ven |
+| 96 | el servicio | **cómo está la red** (EBX: `RED_SIN_TARJETA`, `RED_SIN_CABLE`, `RED_BUSCANDO`, `RED_CONECTADA`), su IP (ECX) y el aparato PCI que hace DMA (EDX) | 0 |
+| 97 | cualquiera | cómo está la red (lo que dijo el servicio con la 96) y, a EBX, la IP | `RED_...` (`RED_NADA`: no hay servicio) |
+| 98 | el servicio | **la interrupción de su tarjeta** (EBX: 3, 5, 7, 9, 10 u 11; 0: ninguna): cuando llega, el núcleo **tapa esa línea** en el 8259, despierta al servicio y la destapa en su siguiente llamada 92 (el servicio ya ha visto la causa en la tarjeta) | 0 |
+
+Si el servicio se acaba (o lo acaban), el núcleo **apaga el DMA de su tarjeta**
+(el bit 2 de la orden PCI) antes de que su memoria vuelva a los marcos libres,
+quita los registros de su vista, tapa su interrupción y contesta `SIN_RED` a
+los que esperaban.
+
+**Cuándo se pone en marcha el servicio**: al arrancar el escritorio, si hay una
+tarjeta de red PCI (clase 02h: por el icono de la bandeja); con `conred` en la
+línea del cargador, siempre; y, si no, la primera vez que un programa pide algo
+a la red. Con **`sinred`** no se pone nunca (el arranque de emergencia de la
+memoria USB y del disco instalado lo lleva). El núcleo lo carga de la unidad
+del sistema (`\RED.BIN`, o `\HISPA\RED.BIN` en un sistema instalado), sin
+terminal ni archivo de salida: no escribe en la pantalla; lo que pasa lo
+**apunta** (6.000 octetos en su memoria, que `IPCONFIG /TODO` enseña) y lo
+manda por el puerto serie (`red: ...`, lo que leen las pruebas). Si dice que
+no hay tarjeta, sigue en marcha para contestarlo (y no se relanza).
+
+### Las tarjetas
+
+| Tarjeta | PCI | Cómo |
+|---|---|---|
+| Intel PRO/1000 (la familia 8254x, «e1000»: la 82540EM de QEMU y VirtualBox; y la 82574L) | `8086:100E` y otras 30 | registros en memoria (BAR0, 128 K); 32 descriptores de recepción con búferes de 2 K y 8 de envío; la MAC de `RAL`/`RAH` (o de la EEPROM). **Probada en QEMU.** |
+| Realtek RTL8139 (y la D-Link DFE-538TX) | `10EC:8139`, `1186:1300` | por los puertos; anillo de recepción de 8 K (con WRAP) y cuatro búferes de envío. **Probada en QEMU.** |
+| Marvell Yukon 2 «Optima» 88E8059 (la del HP Mini 5103; y la 88E8079) | `11AB:4381`, `11AB:4382` | pasada de la de Hispa-DOS (`drivers/hspred.asm`, docs/RED.md «Marvell Yukon 88E8059»): el mismo orden de registros y los mismos valores, por memoria; tres anillos (estado, recepción, envío) en páginas propias. **Sin probar en el equipo**: QEMU no la emula (y la de Hispa-DOS tampoco se ha probado aún allí). Cada paso de su puesta en marcha se apunta. |
+
+Antes de nada, la tarjeta pasa a **D0** (el estado de energía de trabajar) por
+su capacidad PCI de gestión de energía, por si otro sistema la dejó dormida
+al reiniciar. El enlace se mira cada cuarto de segundo: al llegar, se pide la
+IP; al irse, lo pendiente acaba con `SIN_CABLE`. La Yukon no espera a la
+autonegociación al arrancar (tarda de 2 a 4 s): lo hace su `yk_atender`.
+
+La pila es común: **Ethernet**; **ARP** (16 vecinos; lo que espera a que
+conteste uno, en una cola de 4 tramas; se contesta a quien pregunta por
+nuestra IP); **IPv4** (sin trocear: lo partido se tira; la suma de la cabecera
+se comprueba); **ICMP** (se contesta a los ping; y los hace, con el tiempo en
+microsegundos: los tics y lo que lleva contado el 8253); **UDP** (8 puertos
+para los programas, con su cola de 8 K); **DHCP** (DISCOVER, OFFER, REQUEST,
+ACK, con el nombre `hispa-pentium`; se renueva a la mitad de la concesión; si
+dicen que no, otra vez); **DNS** (la pregunta A, con reintentos, siguiendo los
+CNAME de la respuesta; 8 nombres sabidos durante 5 minutos); y **TCP**
+(`rtcp.cas`): 8 conexiones salientes, con 16 K de lo que se envía y 32 K de lo
+que llega; el MSS (1.460) en el SYN; la ventana que se anuncia es lo libre de
+lo recibido y se avisa cuando se abre; lo enviado se guarda hasta que llega su
+ACK y, si no llega a tiempo, se manda otra vez desde ahí, cada vez esperando el
+doble (de 1 a 32 s; a los 8 intentos, cortada); con la ventana de la otra punta
+cerrada, un octeto de vez en cuando para preguntar; lo desordenado se tira (se
+repite el ACK); FIN en los dos sentidos, RST a lo que no es de ninguna
+conexión. Sin escuchar en un puerto (de momento solo se conecta), sin
+reensamblar desordenado ni retransmisión rápida.
+
+### Los programas
+
+Un programa usa la red con el módulo **`Redes`** (`redes.cas`): `estado_red`
+(un `Info_red`: la tarjeta, la MAC, el enlace, la IP, la máscara, la puerta, el
+DNS, el servidor y la concesión, las tramas), `resolver` (un nombre, o
+«10.0.2.2» tal cual), `ping`, `conectar`, `enviar` (todo, aunque haya que
+esperar), `recibir` (con su espera; 0 cuando la otra punta cierra),
+`cerrar_conexión`, `udp_abrir`, `udp_enviar`, `udp_recibir`, `renovar`,
+`registro_red`, y `ip_a_texto`/`texto_a_ip`. Si la red aún se está poniendo en
+marcha (el enlace, la IP), espera hasta 10 s antes de dar el error. Los errores
+(`SIN_TARJETA`, `SIN_CABLE`, `SIN_IP`, `TIEMPO`, `RECHAZADA`, `NO_RESUELVE`,
+`CORTADA_RED`...) van de `0xFFFFFFE0` a `0xFFFFFFEF`, por debajo de los del
+núcleo: `es_error_red` mira los dos, y `texto_error_red` los dice.
+
+| Orden | En el disco | Qué |
+|---|---|---|
+| `IPCONFIG [/RENOVAR] [/TODO]` | `IPCONFIG.BIN` (`uipconf.cas`) | cómo está la red (si aún se pide la IP, espera); `/RENOVAR`, otra vez DHCP; `/TODO`, además lo apuntado por el servicio (para mandarlo si algo no va: `IPCONFIG /TODO > RED.TXT`) |
+| `PING nombre [-n veces] [-l octetos] [-t]` | `PING.BIN` (`uping.cas`) | como el de siempre, con su resumen; Ctrl+C para (`-t`) y dice el resumen |
+| `DESCARGAR http://servidor[:puerto]/camino [archivo]` | `DESCARGA.BIN` (`udescarg.cas`) | HTTP/1.1 sin cifrar: `Content-Length`, en trozos (`chunked`) o hasta que se cierre; hasta 5 redirecciones; el archivo, con el nombre de lo último del camino en 8+3 (o el que se diga; `-`: a la pantalla); un punto cada 32 K y, al final, cuánto y en cuánto tiempo |
+
+El intérprete de órdenes, con un nombre de más de ocho letras que no
+encuentra, prueba con las ocho primeras (como el DOS): `DESCARGAR` es
+`DESCARGA.BIN`.
+
+**El icono de la red** está en la bandeja, a la izquierda del reloj, mientras
+haya servicio: una pantallita con una luz verde (conectada), ámbar (pidiendo
+la IP), roja (sin cable) o gris (sin tarjeta). Con un clic, un aviso dice
+cómo está y la IP. Se repinta cuando el servicio dice que algo ha cambiado (la
+llamada 96 sube `cambios_red`).
+
+### Probarlo
+
+En QEMU, con `-netdev user` (QEMU hace de router: DHCP, la puerta `10.0.2.2`,
+que es la máquina donde corre QEMU, y el DNS `10.0.2.3`, que pregunta al de
+ella):
+
+```
+castel/nucleo32/disco.sh /tmp/d.img 16 red
+QEMU_MAS="-nic user,model=e1000" ESCRIBE=1 DISCO=/tmp/d.img ARRANQUE=ordenes \
+  castel/nucleo32/probar.sh "" ipconfig ":pausa 3" "ping 10.0.2.2" ":pausa 5"
+```
+
+(con `-netdev user,id=n0 -device rtl8139,netdev=n0`, la RTL8139). `probar.sh`
+pone `-nic none` si no se le da una tarjeta: si no, QEMU pone una e1000 y el
+escritorio pondría en marcha el servicio. Para descargar, un servidor HTTP en
+esta máquina se ve en `10.0.2.2` (`nucleo32/servidor_prueba.py`, el de las
+pruebas). En el VPS sale a internet: `ping actualiza.clicgest.es` y
+`descargar http://actualiza.clicgest.es/ultima.txt -` también van.
+
+### El Wi-Fi, más adelante
+
+El Wi-Fi de Hispa-486 (`wifi/`: la gestión 802.11 y WPA2 propias, en C, y el
+controlador `brcmsmac` de Linux para la Broadcom BCM43224 del HP Mini, con su
+microcódigo; docs/WIFI.md) es C y son decenas de miles de líneas: no se va a
+pasar a Castel. Cómo encajaría: **un segundo servicio, `WIFI.BIN`**, compilado
+de esos mismos fuentes con `gcc -m32 -ffreestanding` como binario plano con la
+cabecera `HPU3` (lo que hace `HVPRUN` en NASM: CASTEL32.md §8), con un `compat/`
+nuevo que en vez de las llamadas del residente de Hispa-486 use las del servicio
+(91 con su propio nombre, 94 para el DMA, 95 para los registros, 98 para la
+interrupción). La radio da tramas 802.3 (el `nucleo/` ya traduce de 802.11),
+así que la pila de `RED.BIN` no cambia: le basta **una tarjeta más**,
+`T_WIFI`, cuyas `enviar_trama`/`recibir_trama` pasan las tramas entre los dos
+servicios por un tubo del núcleo (dos llamadas nuevas, a partir de la 99), y
+`hay_enlace` es «asociada y con la clave puesta». La red elegida y su clave,
+en `\HISPA\RED.INI` (como `RED.INI` de Hispa-486); un programa `WIFI` para
+buscar redes y conectarse, y el icono diría la intensidad.
+
+### HTTPS, más adelante
+
+`DESCARGAR` solo sabe `http://`. Para HTTPS, lo que ya tiene el proyecto es
+**HSPTLS** (`w32/tls/hsptls.c` con BearSSL 0.6, TLS 1.2 con ECDHE y la cadena
+de certificados comprobada; `w32/https.c`; docs/RED.md, «HSPTLS.DLL»): C de
+32 bits sin memoria dinámica, hecho para máquinas pequeñas. Lo más corto: un
+programa del anillo 3 en C (con el mismo arreglo de `gcc -m32` y la cabecera
+`HPU3` que el Wi-Fi) que enlace `hsptls.c` y BearSSL y hable con `RED.BIN` por
+la llamada 90 igual que `redes.cas` (son ocho palabras y un `int 0x80`): un
+`DESCARGAR` que entienda `https://`, o mejor un **servicio TLS** al que
+`DESCARGAR` y los demás le pidan una conexión cifrada como le piden una TCP a
+`RED.BIN`. Lo que hace falta además: la hora buena (para las fechas de los
+certificados: el reloj del PC, o NTP por UDP) y sitio para la caché de
+certificados (`\HISPA\HSPTLS.CCH`). Pasar BearSSL a Castel (las curvas, AES,
+ChaCha20, SHA-2, RSA, X.509) sería mucho más largo.
+
+### Lo que falta
+
+Escuchar en un puerto (un servidor), reensamblar lo que llega desordenado y la
+retransmisión rápida; IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
+la vez; el Wi-Fi y HTTPS (arriba); más tarjetas (la RTL8168 del Toshiba NB250,
+la PCnet, NE2000: Hispa-DOS ya las lleva); y, encima de esto, las
+**actualizaciones** por la red y un navegador.
+
+## 15. Las pruebas
+
+`castel/pruebas.sh` (las partes 8 a 14; `SOLO=32 ./pruebas.sh` hace solo esas y la
+de los errores; `SOLO=06`, solo la 9, lo de la 0.6; `SOLO=07`, solo la 10, instalar en el disco;
+`SOLO=08`, las de la 0.8, de la 11 a la 14; y `SOLO=caliente`, `SOLO=paquetes`, `SOLO=red` o
+`SOLO=acpi`, solo una de ellas) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
 teclado, el reloj corre y la división por cero llega a su excepción; que el mapa de
 memoria da los marcos; que la **paginación está activa** con la identidad; que un
 **fallo de página se atiende** en la zona a la demanda; que el **montón no pierde**
@@ -1682,6 +2312,68 @@ del disco arranca el intérprete, con el teclado guardado; y **la oficina, en el
 disco instalado**: el menú Inicio abre Facturas (con `C:\HISPA\HVPRUN.BIN`) y
 Mi equipo entra en `C:\OFICINA` y abre Cuentas.
 
+Y en la instalación de verdad, desde la 0.8: **INSTALAR deja los registros** de
+los ocho paquetes del sistema en `C:\HISPA\PAQUETES` (iguales a los de la
+memoria), y en el sistema instalado `PAQUETES LISTA` los dice y `PAQUETES
+COMPRUEBA` encuentra todos sus archivos como se instalaron (su SHA-256). En la
+instalación con el núcleo de `-kernel`, un registro de prueba va a
+`\HISPA\PAQUETES` por `CARPETAS.TXT` («HISPA\PAQUETES»).
+
+**La 0.8: los paquetes** (la parte 12 de `pruebas.sh`, `SOLO=paquetes`), en QEMU, con
+un disco SATA «instalado» (FAT32, con `C:\HISPA` y lo instalado: `base`) y una
+memoria USB con paquetes de prueba hechos con `tools/hpq.py` (letras 1.0 y 1.1,
+saludo 1.0 y 2.0 —que necesitan letras, base y el núcleo—, choque —que choca
+con saludo— y malo —con un octeto cambiado—): `hpq.py` hace los paquetes, el
+catálogo y los registros, y ve la suma mala; `PAQUETES LISTA` y `CATALOGO` (la
+memoria USB, encontrada sola); **instalar un archivo de la memoria con lo que
+necesita** (letras antes, la versión más nueva del catálogo) y lanzar el
+programa nuevo por su nombre; **instalar por el nombre** (la versión más nueva);
+**actualizar** (la 1.0 a la 2.0: un archivo cambia, otro llega y el que ya no va
+se quita) y que después todo está al día; **una suma mala**, **un conflicto**,
+**quitar lo que otro necesita** y lo que no hay: se dice y **el disco queda
+idéntico octeto a octeto**; `COMPRUEBA` ve un archivo cambiado a mano;
+**quitar** (con las carpetas que quedan vacías): el disco vuelve a tener los
+mismos archivos y los mismos clusters que al principio; **un corte a mitad**
+(`/CORTE=4`: tras el cuarto cambio de nombre se queda quieto y QEMU se apaga):
+quedan el diario y lo apartado, y **al volver PAQUETES lo deshace** y el disco
+está como antes del corte; **el gancho de la red** con un `DESCARGA` de mentira
+(`/DESDE=http://...`: el catálogo y el paquete se traen a `BAJADAS` y se
+instalan) y sin él («hace falta la red»); y **la ventana** desde el menú Inicio
+(«Actualizar»): la lista, Instalarlo (con lo que necesita) y Quitarlo, con
+capturas. Después de cada paso, `fsck.fat` da el disco por sano, `mtools`
+compara lo instalado octeto a octeto y no quedan restos (`HPQ*.NUE`, `.VIE`,
+el diario).
+
+**La 0.8: la red** (la parte 13 de `pruebas.sh`; `SOLO=red ./pruebas.sh`,
+la primera y la decimotercera, unos cinco minutos), con un servidor HTTP de esta
+máquina (`nucleo32/servidor_prueba.py`, que QEMU deja ver en `10.0.2.2`) y un
+disco hecho con `disco.sh ... red`:
+
+- **La e1000**: el servicio se pone en marcha solo (la primera vez que se pide
+  algo), encuentra la tarjeta y pide la IP por **DHCP**; **IPCONFIG** dice la
+  tarjeta, la MAC, el enlace, la IP, la máscara, la puerta, el DNS y el
+  servidor; **PING** a la puerta, tres respuestas; **DESCARGAR** con
+  `Content-Length` (400 K), en trozos (`chunked`, con trozos de todos los
+  tamaños), hasta que se cierra (HTTP/1.0), una redirección 302, un 404, a otra
+  carpeta, `https://` (se dice que aún no) y sin nada; **Ctrl+C** en medio de
+  una descarga que no llega (el programa acaba y la red sigue: `IPCONFIG
+  /TODO` y `MEM`); y, desde fuera, que **lo descargado es igual octeto a
+  octeto** que lo del servidor (los cuatro archivos) y el disco queda sano.
+- **La RTL8139**: IPCONFIG y DESCARGAR, igual octeto a octeto. El **DNS** (el
+  de QEMU, que pregunta al de esta máquina): un nombre que no existe se dice y
+  uno de verdad (`actualiza.clicgest.es`) se resuelve (si esta máquina no sale
+  a la red, no se prueba).
+- **Sin tarjeta** (el servicio lo dice, y PING también) y con **`sinred`** (ni se
+  pone en marcha).
+- **El escritorio** pone en marcha el servicio (hay tarjeta), el **icono**
+  está en la bandeja con la luz verde, y un clic en él da el aviso con la IP.
+
+Además, a mano, la memoria USB de `usb.sh` arrancada en QEMU con una e1000:
+GRUB, el escritorio, el servicio en marcha y el icono en verde; y, en el VPS,
+`ping actualiza.clicgest.es` y `descargar http://actualiza.clicgest.es/ultima.txt -`.
+Lo que **no se prueba**: la Yukon (QEMU no la tiene), y TCP con pérdidas (la
+red de QEMU no pierde nada: las retransmisiones solo se han visto en papel).
+
 Lo que **no se puede probar en QEMU**: las transacciones partidas del EHCI (el
 teclado y el panel de un MacBook: sección 11), el traspaso de verdad desde la
 BIOS de cada equipo, y los discos SATA de verdad.
@@ -1708,7 +2400,47 @@ crecido en un módulo corto (`ajustes.cas`) y nueve llamadas. CASTEL compila el
 núcleo con sitio: de sus tablas usa 2.644 párrafos de 3.072 para los nombres,
 2.809 de 4.096 para los textos y 8.718 de 10.240, lo más, para el árbol.
 
-Con todo, `pruebas.sh` tiene ahora **423 comprobaciones** (369 con la 0.6, 13 de
+Con la 0.8 (todo junto) tampoco: el núcleo gana `usbcal.cas`, `red.cas` y
+`energia.cas` (CASTEL los sigue compilando igual que `ccastel.py`, en la segunda
+tanda), pero sus tablas, sí: el núcleo entero ya no le cabía («demasiados
+nombres»: 3.075 párrafos de 3.072). Más memoria no le queda en Hispa-8086,
+así que se ha repartido la misma: **52 K para los nombres** (eran 48) y **60 K
+para los textos** (eran 64). Con la semilla usa 3.075 de 3.328 párrafos de
+nombres, 3.171 de 3.840 de textos, 10.153 de 10.240, lo más, de árbol y 3.400
+de 3.584 de lo declarado: casi sin margen (castel/docs/CASTEL32.md). PAQUETES, su ventana y
+`sha256.cas` van con los demás programas, en la tercera; y la red son programas
+del anillo 3 aparte, que van en una **cuarta tanda** (en A:, `RED.BIN` con sus
+seis módulos e IPCONFIG, PING y DESCARGAR; en B:, lo que sale), lo mismo para
+ENSAMBLA.
+
+**La 0.8: apagar de verdad y la batería** (sección 11; la parte 14 de
+`pruebas.sh`: **20 comprobaciones**, `SOLO=acpi ./pruebas.sh`, los errores y
+esa parte: unos tres minutos). Con la batería de
+mentira de las pruebas de Hispa-DOS (`tests/acpi/bateria-qemu.aml`, cargada
+con `-acpitable`; la CMOS que lee se cambia por el monitor de QEMU con la
+máquina parada un momento, orden `:monitor` de `probar.sh`): que el núcleo
+lanza el servicio y este lee las tablas y la batería; la pila en la bandeja,
+su recuadro (sin cable, con los minutos, la salud y los ciclos), que se pone
+al día al enchufar, que un clic lo quita, la batería gastada; «Apagar» con el
+Bloc de notas sin guardar (no se apaga y se dice) y otra vez (se apaga por
+ACPI: QEMU termina); reiniciar con PIIX4 (por el teclado) y con ICH9 (`q35`:
+apagar y reiniciar por el registro de la FADT); sin ACPI (`-no-acpi`: lo de
+antes); un sobremesa (sin pila, y apaga por ACPI); y que un programa
+cualquiera no puede usar las llamadas del servicio.
+
+Con todo, `pruebas.sh` tiene ahora **508 comprobaciones** (423 hasta la 0.7;
+de la 0.8, los paquetes, el USB en caliente, la red, apagar de verdad y la
+batería, y las del AHCI del ICH7). La memoria USB trae ahora **16 programas**
+como módulos (eran 9: PAQUETES y ACTUALIZ, RED, IPCONFIG, PING y DESCARGA, y
+ACPI.BIN), y 9 paquetes del sistema (con «red»). Algo más de una hora
+en el VPS. La última pasada entera (20/11/2026, con las cinco ramas juntas,
+el arreglo del AHCI del ICH7 y las tablas de CASTEL repartidas) dio **508
+bien, 0 mal**, y los dos compiladores sacan lo mismo en los 52 programas y
+dicen igual los 54 errores. `SOLO=08` (las cuatro partes de la 0.8)
+son unos doce minutos; `SOLO=caliente`, `SOLO=paquetes`, `SOLO=red` y
+`SOLO=acpi`, cada una sola, de tres a cinco.
+
+Hasta la 0.7, `pruebas.sh` tenía **423 comprobaciones** (369 con la 0.6, 13 de
 la oficina de Hispa-386 dentro y 41 de instalar en el disco, dos de ellas de la
 oficina en el disco instalado; unos cuarenta y cinco minutos en el VPS). La
 última pasada entera (19-20/11/2026, con la 0.7 y la oficina juntas) dio **423
@@ -1717,7 +2449,18 @@ disco) son unos cinco minutos; `SOLO=06` (la parte 9, lo de la 0.6 y la
 oficina), unos diez, y `SOLO=16`, lo que no arranca el núcleo (de la parte 1 a
 la 7, con los dos compiladores y los dos ensambladores), otros siete.
 
-## 14. Por dónde seguir
+## 16. Por dónde seguir
+
+Hecho en la del 20/11 (la 0.8, cinco ramas juntas en `pentium-08`): el AHCI
+del ICH7 (sección 7), el USB en caliente y apagar de verdad con la batería
+(sección 11), los paquetes (sección 13) y **la red por cable** (sección 14).
+Lo primero, **probarlo todo junto en el HP Mini y en el Toshiba** (la imagen
+`hispa-pentium-usb-0.8-*.zip` de `Pruebas/Pendientes/<equipo>/Pentium-0.8-todo`,
+con su LEEME): el disco SATA del NB250 con el arreglo del FIS, la Yukon del
+HP Mini y que ACPI apague de verdad en los dos. Luego, lo de la red, allí mismo
+(«Lo que falta», el Wi-Fi y HTTPS); y, encima de ella: **las actualizaciones** por
+la red (el gancho de PAQUETES ya está: falta la firma del catálogo),
+**los controladores** que faltan y el **Explorador**.
 
 Hecho en la tanda del 18-19/11/2026: el disco (ATA) y la FAT, cargar programas del
 disco, las llamadas al sistema nuevas, la consola con cerrojo, el intérprete de
@@ -1753,7 +2496,8 @@ arranque. Lo siguiente:
    **medida del panel** cuando la BIOS no la da por VBE (sección 11); **enchufar
    y desenchufar** el USB en marcha; las controladoras OHCI; **LBA de 48 bits**
    en el IDE (discos de más de 128 GB en modo IDE) y el canal IDE secundario;
-   apagar de verdad (ACPI). Y **el escritorio, más** (lo que falta, al final de
+   apagar de verdad (ACPI: hecho el 20/11, sección 11; falta probarlo en el HP
+   Mini, el Toshiba y el ThinkPad A275). Y **el escritorio, más** (lo que falta, al final de
    la sección 10).
 
 1. **El intérprete, más**: `IF`, `GOTO`, `FOR`, `CALL` y variables en los `.BAT`;

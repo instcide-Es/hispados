@@ -50,6 +50,7 @@ HEADS, SPT = 255, 63
 HVPSIS = ('CONFIG.HVP',)            # [Configuración] .HVP que van en \HISPADOS y no en JUEGOS
 NESROMS = ('HISPA1.NES',)           # los juegos propios de Hispa-Nes (NESROMS del Makefile), en JUEGOS\NES
 SMSROMS = ('BUZO.SMS',)             # y los de Hispa-System (SMSROMS del Makefile), en JUEGOS\SMS
+SNESROMS = ('PRUEBA.SFC',)          # [HISPA-SNES] y la ROM nuestra de Hispa-Snes (SNESROMS), en JUEGOS\SNES
 MDROMS = ('PRUEBA.MD',)             # y la ROM propia de Hispa-Drive (MDROMS del Makefile), en JUEGOS\MD
 SONS = ('HISPA.WAV', 'CAMPANA.WAV')  # el sonido de prueba y la campanita (SONS del Makefile)
 
@@ -275,6 +276,10 @@ def main(edicion='386'):
         cp(os.path.join(B, f), 'HISPADOS/JUEGOS/NES/' + f)
     for f in SMSROMS:
         cp(os.path.join(B, f), 'HISPADOS/JUEGOS/SMS/' + f)
+    md('HISPADOS/JUEGOS/SNES')          # [HISPA-SNES]
+    for f in SNESROMS:
+        if os.path.exists(os.path.join(B, f)):
+            cp(os.path.join(B, f), 'HISPADOS/JUEGOS/SNES/' + f)
     md('HISPADOS/JUEGOS/MD')
     for f in MDROMS:
         cp(os.path.join(B, f), 'HISPADOS/JUEGOS/MD/' + f)

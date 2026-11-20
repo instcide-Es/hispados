@@ -224,8 +224,8 @@ módulo Base
     público constante M_ATIENDE = 32            ; K_FUNC: atiende una interrupción («interrupción función»)
 
     ; ---- los bloques de memoria lejana ----
-    constante PARRAFOS_AT = 0x0C00              ; 48 K de nombres (el núcleo de Hispa-Pentium 0.6 pasa de 40)
-    constante PARRAFOS_CAD = 0x1000             ; 64 K de textos (el núcleo de Hispa-Pentium pasa de 40)
+    constante PARRAFOS_AT = 0x0D00              ; 52 K de nombres (el núcleo de Hispa-Pentium 0.6 pasa de 40; el de la 0.8, todo junto, de 48)
+    constante PARRAFOS_CAD = 0x0F00             ; 60 K de textos (el núcleo de Hispa-Pentium pasa de 40; el de la 0.8 usa 50: los 4 K que faltaban a los nombres)
     constante PARRAFOS_AR = 0x2800              ; 160 K de árbol (lo declarado en los 35 módulos del núcleo de Hispa-Pentium 0.6 no cabía en 128)
     constante CUBOS_AT = 1024
     constante CUBOS_CAD = 512

@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -467,6 +467,15 @@ módulo Semilla
         lanza(palabra1, args)
     fin
 
+    ; «quitar W»: quitar con seguridad la memoria USB de la unidad W:
+    función orden_quitar()
+        si no palabra(línea, 1, palabra1, 40) entonces
+            escribir("¿qué unidad? (quitar W: quitar con seguridad la memoria USB de la unidad W:)\n")
+            devolver
+        fin
+        Usbcal.quitar(palabra1[0])
+    fin
+
     ; lo que se dice de cada unidad: su letra, de dónde es y su FAT
     función enseña_unidades()
         variable u, letra: nat32
@@ -508,6 +517,7 @@ módulo Semilla
                 imprimir1("disco %u: no hay\n", u)
             fin
         fin
+        escribir(informe_ahci())
         u := del_sistema
         si u = NINGUNA o unidades[u].clase <> U_FAT entonces
             escribir("sistema de archivos: no hay (la unidad del sistema no es un disco con FAT)\n")
@@ -621,6 +631,8 @@ módulo Semilla
                 dd[1] := ratones
                 dd[2] := Usbalm.cuántas
                 apunta("usb: %u teclados, %u ratones, %u memorias.\n", dd)
+                ; y lo que se enchufe y se desenchufe a partir de ahora
+                Usbcal.prepara()
             fin
         fin
         n := 0
@@ -673,6 +685,19 @@ módulo Semilla
         fin
     fin
 
+    ; el servicio de ACPI (ACPI.BIN, energia.cas): apagar de verdad y la
+    ; batería. Si no está en la unidad del sistema, no pasa nada: se apaga
+    ; como antes. Se le da la línea del cargador: con «registro», el suyo va
+    ; a \ACPI.TXT; «acpicada=N», una lectura cada N segundos (10 si no).
+    función arranca_acpi()
+        variable t: puntero a Tarea
+        variable e: nat32
+        t := cargar_archivo("\\ACPI.BIN", línea_del_cargador(), e)
+        si t = nulo entonces devolver fin
+        pon_servicio_acpi(t)
+        imprimir1("acpi: el servicio de ACPI (ACPI.BIN) en marcha, la tarea %u\n", t.id)
+    fin
+
     función principal(): byte
         variable malo: puntero a nat32
         prepara_gdt()
@@ -704,9 +729,20 @@ módulo Semilla
         ; teclado, el nombre del usuario); lo que diga el cargador manda
         lee_ajustes()
         si buscar(línea_del_cargador(), "teclado=us") <> nulo entonces pon_teclado(falso) fin
+        si buscar(línea_del_cargador(), "sinacpi") = nulo y buscar(línea_del_cargador(), "instalar") = nulo entonces arranca_acpi() fin
         ; o el escritorio (el entorno gráfico): esta consola se queda esperando
         ; (las teclas son de las ventanas; lo que diga el núcleo sale por el
         ; puerto serie)
+        ; la red (el servicio de red, RED.BIN: red.cas): con «sinred», nunca;
+        ; con «conred», ya; con el escritorio, ya si hay una tarjeta de red
+        ; (por el icono de la bandeja); si no, cuando un programa la pida
+        si buscar(línea_del_cargador(), "sinred") <> nulo entonces
+            apagada := cierto
+        sino si buscar(línea_del_cargador(), "conred") <> nulo entonces
+            lanza_red()
+        sino si buscar(línea_del_cargador(), "escritorio") <> nulo y buscar(línea_del_cargador(), "instalar") = nulo y pci_busca(0x020000, 0xFF0000, NO_HAY_PCI) <> NO_HAY_PCI entonces
+            lanza_red()
+        fin
         si buscar(línea_del_cargador(), "instalar") <> nulo entonces
             ; el programa que instala el sistema en el disco duro (la
             ; pantalla es suya: esta consola espera a que acabe)
@@ -728,7 +764,7 @@ módulo Semilla
                 escribir("órdenes: ayuda hora memoria mapa paginas monton tareas programas ejecutar N\n")
                 escribir("         toca turnos dormir estropear teclas fallo cero apagar\n")
                 escribir("         disco dir [CARPETA] lanzar PROGRAMA.BIN [ARGUMENTOS] ordenes\n")
-                escribir("         teclado es, teclado us, escritorio, usb\n")
+                escribir("         teclado es, teclado us, escritorio, usb, quitar UNIDAD\n")
             sino si es("hora") entonces
                 escribir("llevo ", tics div HZ, " segundos y ", tics mod HZ, " centésimas encendido\n")
             sino si es("memoria") entonces
@@ -772,6 +808,8 @@ módulo Semilla
             sino si es("usb") entonces
                 Usb.enseña()
                 enseña_estado()
+            sino si iguales(palabra1, "quitar") entonces
+                orden_quitar()
             sino si es("escritorio") entonces
                 si arranca() = 0 entonces escribir("no se puede poner en marcha el escritorio\n") fin
             sino si es("fallo") entonces

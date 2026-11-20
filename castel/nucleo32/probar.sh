@@ -19,9 +19,13 @@
 # «:triple X Y», tres; «:clicd X Y», el botón derecho (el secundario);
 # «:mayusclic X Y», el izquierdo con Mayús pulsada;
 # «:arrastra X1 Y1 X2 Y2» lo lleva pulsado de un sitio a otro; «:escribe
-# texto» lo teclea sin Intro; «:pausa S» espera S segundos; «:captura NOMBRE»
+# texto» lo teclea sin Intro; «:pausa S» espera S segundos; «:monitor ORDEN»
+# le da esa orden al monitor de QEMU (device_add, device_del...: enchufar y
+# desenchufar en marcha); «:captura NOMBRE»
 # deja la pantalla en $CAPTURAS/NOMBRE.ppm (CAPTURAS: una carpeta; /tmp si no
 # se dice). La flecha empieza en el centro (PANTALLA=800x600 si no se dice).
+# «:monitor ORDEN» le da esa orden al monitor de QEMU (como «o /b 0x70 0x60»:
+# escribir en un puerto; con QEMU_MAS="-S", antes de arrancar, y «cont»).
 # «:texto NOMBRE» deja la pantalla de texto (sus 25 líneas) en
 # $CAPTURAS/NOMBRE.txt (para el programa que instala, que la pinta entera).
 # Con DISCO=imagen, esa imagen como disco duro IDE (el maestro del canal
@@ -64,11 +68,16 @@ INSTANTANEA=on; [ -n "${ESCRIBE:-}" ] && INSTANTANEA=off
 # con SATA=imagen, esa imagen como disco SATA de una controladora AHCI (con
 # ESCRIBE=1, lo que se escriba llega a ella); con MAQUINA=..., esa máquina de
 # QEMU (MAQUINA=pc,i8042=off: un PC sin teclado ni ratón PS/2, como un Mac);
-# con QEMU_MAS="...", lo que se quiera añadir (controladoras y aparatos USB)
+# con QEMU_MAS="...", lo que se quiera añadir (controladoras y aparatos USB, la
+# tarjeta de red)
 [ -n "${SATA:-}" ] && INITRD+=(-device ahci,id=sata -drive "id=dsata,file=$SATA,format=raw,if=none,snapshot=$INSTANTANEA" -device ide-hd,drive=dsata,bus=sata.0)
 [ -n "${MAQUINA:-}" ] && INITRD+=(-machine "$MAQUINA")
 # shellcheck disable=SC2206
 [ -n "${QEMU_MAS:-}" ] && INITRD+=($QEMU_MAS)
+# sin tarjeta de red, salvo que se dé una en QEMU_MAS («-nic user,model=e1000»,
+# «-netdev user,id=n0 -device rtl8139,netdev=n0»): QEMU pone una e1000 si no
+# se dice nada, y con ella el escritorio pondría en marcha el servicio de red
+case " ${QEMU_MAS:-} " in *" -nic "*|*" -netdev "*) ;; *) INITRD+=(-nic none) ;; esac
 qemu-system-i386 -kernel "$BIN" "${INITRD[@]}" -display none -monitor unix:$T/mon,server,nowait \
   -serial file:$T/sal -device isa-debug-exit,iobase=0xf4,iosize=0x04 -no-reboot -rtc base=localtime -m ${MEMORIA:-32} > /dev/null 2>&1 &
 QPID=$!
@@ -134,6 +143,7 @@ for orden in "${ORDENES[@]}"; do
   fi
   case "$orden" in
     ":pausa "*) sleep ${orden:7}; continue ;;
+    ":monitor "*) mon "${orden:9}" 0.3; continue ;;
     ":raton "*) set -- ${orden:7}; ir $1 $2; continue ;;
     ":clic "*) set -- ${orden:6}; ir $1 $2; mon "mouse_button 1" 0.2; mon "mouse_button 0" 0.4; continue ;;
     ":doble "*) set -- ${orden:7}; ir $1 $2; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.1; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.5; continue ;;

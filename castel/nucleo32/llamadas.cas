@@ -82,7 +82,8 @@ módulo Llamadas
         del_sistema: nat32                      ; 1: es la unidad del sistema
         nombre: arreglo [41] de byte            ; el modelo del disco
         etiqueta: arreglo [12] de byte          ; el nombre del volumen
-        relleno: arreglo [3] de byte
+        quitable: byte                          ; 1: una memoria USB que se puede quitar con seguridad (130)
+        relleno: arreglo [2] de byte
     fin
 
     ; ---- lo que se sabe de un disco: info_disco(n, ...) ----
@@ -103,7 +104,7 @@ módulo Llamadas
     público constante DATO_MARCOS_LIBRES = 0    ; los marcos de 4 K libres
     público constante DATO_MARCOS = 1           ; los que hay
     público constante DATO_MIS_PÁGINAS = 2      ; las páginas de este programa
-    público constante DATO_VERSIÓN = 3          ; 0x0007 es la 0.7
+    público constante DATO_VERSIÓN = 3          ; 0x0008 es la 0.8
     público constante DATO_TAREAS = 4
     público constante DATO_FAT = 5              ; 12, 16 o 32 (0 si no hay disco)
     público constante DATO_CLUSTER = 6          ; los octetos de un cluster del disco
@@ -126,6 +127,7 @@ módulo Llamadas
     público constante EV_TAMAÑO = 6             ; a, b: el ancho y el alto nuevos (hay que volver a pintar todo)
     público constante EV_FOCO = 7               ; a: 1 si pasa a ser la ventana activa, 0 si deja de serlo
     público constante EV_SALE = 9               ; el ratón ya no está encima
+    público constante EV_UNIDADES = 12          ; ha aparecido o desaparecido una unidad (una memoria USB): hay que mirarlas otra vez
     público constante EV_MENÚ = 10              ; se ha cerrado el menú que se pidió: a, la opción elegida (desde 0; SIN_ELEGIR si ninguna); b, su etiqueta
     público constante SIN_ELEGIR = 0xFFFFFFFF
     público constante BOTÓN_IZQUIERDO = 1       ; en «c» de los sucesos del ratón: los botones pulsados...
@@ -827,6 +829,23 @@ módulo Llamadas
     ; ¿está el sistema instalado en el disco (y no arrancado de la memoria USB)?
     público función sistema_instalado(): bool
         devolver llamada(68, 2, 0, 0) = 1
+    fin
+
+    ; ---- el USB en caliente (desde la 0.8) ----
+    público constante QUITADA = 0               ; lo que da quitar_memoria(): ya se puede quitar
+    público constante NO_HAY_UNIDAD = 1
+    público constante NO_ES_USB = 2
+    público constante ES_DEL_SISTEMA = 3        ; el sistema corre desde ella: no se quita
+
+    ; quitar con seguridad la memoria USB de esa unidad (su letra): lo
+    ; pendiente se escribe y la memoria se para
+    público función quitar_memoria(letra: nat32): nat32
+        devolver llamada(130, letra, 0, 0)
+    fin
+
+    ; las veces que han aparecido o desaparecido unidades
+    público función cambios_unidades(): nat32
+        devolver llamada(131, 0, 0, 0)
     fin
 
 fin Llamadas.

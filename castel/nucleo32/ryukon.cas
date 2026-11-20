@@ -1,0 +1,575 @@
+; =============================================================================
+;  ryukon.cas - la Marvell Yukon 2 «Optima» 88E8059 (la tarjeta de cable del
+;  HP Mini 5103; y la «Optima 2», 88E8079) para el servicio de red de
+;  Hispa-Pentium (RED.BIN, rtarjeta.cas).
+;
+;  Pasada de la de Hispa-DOS (drivers/hspred.asm, sección .yukon y yk_init:
+;  el mismo orden de registros y los mismos valores; ver docs/RED.md,
+;  «Marvell Yukon 88E8059»). Marvell no publicó la documentación de esta
+;  familia: lo que se sabe sale de leer sky2 de Linux. Solo el camino de la
+;  Optima (identificador de chip BCh; la Optima 2, BEh, sigue el mismo).
+;  QEMU no la emula: SIN PROBAR en un equipo de verdad. Cada paso de la
+;  puesta en marcha se apunta en el registro del servicio (IPCONFIG /TODO)
+;  para poder ver dónde se queda.
+;
+;  Registros (16 KB, BAR0) por memoria. El MAC («GMAC») está en 2800h y el
+;  PHY se lee por él (SMI). Tres anillos de «elementos de lista» de 8
+;  octetos (dirección, longitud, control y código; el bit 7 del código dice
+;  que el elemento vale), cada uno en su página:
+;   - estado (64): lo escribe la tarjeta (trama recibida con su longitud y su
+;     estado, hasta dónde ha enviado);
+;   - recepción (16): cada elemento, uno de los 4 búferes libres;
+;   - envío (16): las tramas que salen (un búfer: cada envío espera a que la
+;     tarjeta lo haya leído).
+;  Aquí no hay rutina de interrupción: el servicio llama a yk_atender y a
+;  yk_recibir en cada vuelta (cada tic, o cuando la interrupción de la
+;  tarjeta lo despierta: red.cas, llamada 98).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ryukon
+
+    importar Rbase, Mem32
+
+    constante NST = 64
+    constante NRX = 16
+    constante NTX = 16
+    constante RXLEN = 1520
+    ; dónde va cada cosa en la memoria de DMA (6 páginas seguidas)
+    constante P_ST = 0x0000
+    constante P_RX = 0x1000
+    constante P_TX = 0x2000
+    constante P_BUF = 0x3000                    ; los 4 de recepción, cada 2 K
+    constante P_TXB = 0x5000                    ; el de envío
+
+    variable base: nat32                        ; dónde se ven los registros
+    variable dma: puntero a byte
+    variable dma_f: nat32
+    variable chip, rev: nat32
+    variable lnk, spd, up, run: bool
+    variable velo: nat32                        ; 1: 10, 2: 100, 3: 1000
+    variable rx_nxt, st_i, rx_put, tx_prd, txdn: nat32
+    variable phst: nat32
+    variable txto, malas, vueltas: nat32
+    variable pci_a: nat32
+
+    ; ---- los registros ----
+    función r8(d: nat32): nat32
+        variable p: puntero a byte
+        p := puntero(base + d)
+        devolver valor(p)
+    fin
+    función r16(d: nat32): nat32
+        variable p: puntero a nat16
+        p := puntero(base + d)
+        devolver valor(p)
+    fin
+    función r32(d: nat32): nat32
+        variable p: puntero a nat32
+        p := puntero(base + d)
+        devolver valor(p)
+    fin
+    función w8(d: nat32, v: nat32)
+        variable p: puntero a byte
+        p := puntero(base + d)
+        valor(p) := byte(v)
+    fin
+    función w16(d: nat32, v: nat32)
+        variable p: puntero a nat16
+        p := puntero(base + d)
+        valor(p) := nat16(v)
+    fin
+    función w32(d: nat32, v: nat32)
+        variable p: puntero a nat32
+        p := puntero(base + d)
+        valor(p) := v
+    fin
+
+    ; ---- el PHY, por el MAC (SMI; el PHY es el 0) ----
+    ; el registro n (0xFFFF si no contesta)
+    función phy_r(n: nat32): nat32
+        variable i: nat32
+        w16(0x2880, (n << 6) ob 0x20)           ; GM_SMI_CTRL: leer
+        para i desde 1 hasta 5000 hacer
+            si r16(0x2880) yb 0x10 <> 0 entonces devolver r16(0x2884) fin     ; GM_SMI_DATA
+            espera_us(2)
+        fin
+        devolver 0xFFFF
+    fin
+
+    función phy_w(n: nat32, v: nat32)
+        variable i: nat32
+        w16(0x2884, v)
+        w16(0x2880, n << 6)
+        para i desde 1 hasta 5000 hacer
+            si r16(0x2880) yb 0x08 = 0 entonces devolver fin       ; ocupado
+            espera_us(2)
+        fin
+    fin
+
+    ; ---- el enlace: lo que diga el PHY (registro 17), y el MAC detrás ----
+    función mira_enlace()
+        variable v, s: nat32
+        phy_r(19)                               ; las causas del PHY: se borran al leerlas
+        v := phy_r(17)
+        si v = 0xFFFF entonces devolver fin
+        si v <> phst entonces apunta4("yukon: PHY 17=%04X (enlace %u, velocidad %u)", v, (v >> 10) yb 1, (v >> 14) yb 3, 0) fin
+        phst := v
+        si v yb 0x0C00 = 0x0C00 entonces
+            ; enlace, y velocidad y dúplex resueltos
+            velo := (v >> 14) + 1
+            lnk := cierto
+            si no run o up entonces devolver fin
+            ; el hueco entre tramas, según la velocidad; y a enviar y recibir
+            ; (la velocidad y el dúplex los copia el MAC del PHY él solo)
+            s := (r16(0x2818) yb 0xFFE0) ob 0x18        ; GM_SERIAL_MODE
+            si velo = 3 entonces s := s ob 0x06 fin
+            w16(0x2818, s)
+            w16(0x2804, r16(0x2804) ob 0x1800)          ; GM_GP_CTRL: TX_ENA y RX_ENA
+            w8(0x0C3C, 0x16)                            ; la luz del enlace
+            up := cierto
+            apunta4("yukon: enlace a %u Mbit/s; el MAC envía y recibe", yk_velocidad(), 0, 0, 0)
+        sino
+            lnk := falso
+            si no up entonces devolver fin
+            w16(0x2804, r16(0x2804) yb 0xE7FF)
+            w8(0x0C3C, 0x01)
+            up := falso
+            apunta("yukon: sin enlace; el MAC, parado")
+        fin
+    fin
+
+    ; ---- los anillos ----
+    ; el búfer rx_nxt, al siguiente elemento libre de recepción
+    función rx_añade()
+        variable e: puntero a nat32
+        e := puntero(dma + P_RX + rx_put * 8)
+        e[0] := dma_f + P_BUF + rx_nxt * 2048
+        e[1] := 0xC1000000 ob RXLEN             ; OP_PACKET, vale
+        rx_put := (rx_put + 1) yb (NRX - 1)
+        rx_nxt := (rx_nxt + 1) yb 3
+    fin
+
+    ; mira el anillo de estado (sin quitar nada) por si dice ya hasta dónde
+    ; ha enviado (para la espera de yk_enviar)
+    función mira_envío()
+        variable i, put, n: nat32
+        variable e: puntero a byte
+        put := r16(0x0E9C)
+        i := st_i
+        n := 0
+        mientras i <> put y n < NST hacer
+            e := dma + P_ST + i * 8
+            si e[7] yb 0x80 = 0 entonces devolver fin
+            si e[7] = 0xE8 entonces txdn := (nat32(e[0]) ob (nat32(e[1]) << 8)) yb 0x0FFF fin
+            i := (i + 1) yb (NST - 1)
+            n := n + 1
+        fin
+    fin
+
+    ; ---- la capacidad PCI «cuál»: su sitio en la configuración (0 si no está) ----
+    función capacidad(cuál: nat32): nat32
+        variable p, n, v: nat32
+        p := (pci_leer(pci_a, 0x34) yb 0xFF) yb 0xFC
+        n := 0
+        mientras p <> 0 y n < 48 hacer
+            v := pci_leer(pci_a, p) >> ((p yb 3) * 8)
+            si v yb 0xFF = cuál entonces devolver p fin
+            p := ((v >> 8) yb 0xFF) yb 0xFC
+            n := n + 1
+        fin
+        devolver 0
+    fin
+
+    ; el identificador del chip (antes, los relojes encendidos y fuera el
+    ; reinicio, como hace sky2_init)
+    función prueba(): nat32
+        w32(0x1C80, 0)                          ; PCI_DEV_REG3 (por la ventana de la configuración PCI, 1C00h)
+        w8(0x0004, 0x02)                        ; B0_CTST: CS_RST_CLR
+        devolver r8(0x011B)                     ; B2_CHIP_ID
+    fin
+
+    ; ---- arrancar: la unidad de estado, las colas, los anillos y las interrupciones ----
+    función arranca()
+        variable i: nat32
+        variable e: puntero a nat32
+        ; (yk_t_st1)
+        w32(0x0E80, 0x01)                       ; STAT_CTRL: reinicio de la unidad de estado
+        w32(0x0E80, 0x02)
+        w32(0x0E88, dma_f + P_ST)               ; STAT_LIST_ADDR_LO
+        ; (yk_t_st2)
+        w32(0x0E8C, 0)                          ; STAT_LIST_ADDR_HI
+        w16(0x0E84, NST - 1)                    ; STAT_LAST_IDX
+        w16(0x0E98, 10)                         ; STAT_TX_IDX_TH
+        w8(0x0EAC, 16)                          ; STAT_FIFO_WM
+        w8(0x0EAD, 16)                          ; STAT_FIFO_ISR_WM
+        w32(0x0EC0, 125 * 1000)                 ; temporizadores (reloj de 125 MHz): envío, 1 ms;
+        w32(0x0ED0, 125 * 20)                   ; interrupción, 20 us;
+        w32(0x0EB0, 125 * 100)                  ; nivel, 100 us
+        w32(0x0E80, 0x08)                       ; en marcha
+        w8(0x0EC8, 0x04)
+        w8(0x0EB8, 0x04)
+        w8(0x0ED8, 0x04)
+        ; cola de envío (Q_XA1, 680h): BMU y unidad de precarga (6D0h)
+        w32(0x06B4, 0x0016)                     ; Q_CSR: fuera el reinicio
+        w32(0x06B4, 0x0D28)                     ; en marcha
+        w32(0x06B4, 0x0080)                     ; y su FIFO
+        w32(0x06C0, 0x0600)                     ; Q_WM
+        w32(0x06D0, 0x01)                       ; precarga: reinicio
+        w32(0x06D0, 0x02)
+        w32(0x06DC, 0)                          ; dirección de la lista (alta)
+        w32(0x06D8, dma_f + P_TX)               ; lista de envío
+        ; (yk_t_st3)
+        w16(0x06D4, NTX - 1)                    ; último índice
+        w32(0x06D0, 0x08)                       ; en marcha
+        w32(0x0C48, 0x01000000)                 ; sin quitar la etiqueta VLAN al recibir
+        w32(0x0D48, 0x01000000)                 ; ni ponerla al enviar
+        ; cola de recepción (Q_R1, 400h) y su unidad de precarga (450h)
+        w32(0x0434, 0x0016)
+        w32(0x0434, 0x0D28)
+        w32(0x0434, 0x0080)
+        w32(0x0440, 0x0600)
+        w32(0x0440, 0x0080)                     ; Q_WM para PCI Express
+        w32(0x0450, 0x01)
+        w32(0x0450, 0x02)
+        w32(0x045C, 0)
+        w32(0x0458, dma_f + P_RX)               ; lista de recepción
+        ; (yk_t_st4)
+        w16(0x0454, NRX - 1)
+        w32(0x0450, 0x08)
+        w32(0x0434, 0x4000)                     ; sin el resumen RSS en el anillo de estado
+        w16(0x0C54, (RXLEN - 8) div 4)          ; cortar las tramas más largas que el búfer
+        w32(0x0C48, 0x08000000)                 ; (si no, la recepción se cuelga)
+        st_i := 0
+        rx_put := 0
+        rx_nxt := 0
+        up := falso
+        para i desde 1 hasta 4 hacer rx_añade() fin       ; los cuatro búferes, a la tarjeta
+        w16(0x0464, rx_put)
+        ; envío: el primer elemento dice la parte alta de las direcciones (0)
+        e := puntero(dma + P_TX)
+        e[0] := 0
+        e[1] := 0xA1000000                      ; OP_ADDR64, vale
+        tx_prd := 1
+        txdn := 1
+        run := cierto
+        w32(0x000C, 0x40000010)                 ; B0_IMSK: el anillo de estado y el PHY
+        r32(0x000C)
+        r32(0x0028)                             ; B0_Y2_SP_LISR (por si se quedó tapada)
+        mira_enlace()
+        apunta("yukon: anillos en marcha")
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que usa rtarjeta.cas
+    ; -------------------------------------------------------------------------
+    público función yk_iniciar(a: nat32, mac: puntero a byte): bool
+        variable bar, v, n, cap, i: nat32
+        variable p: puntero a nat32
+        pci_a := a
+        lnk := falso
+        up := falso
+        run := falso
+        phst := 0xFFFFFFFF
+        bar := pci_leer(a, 0x10)
+        apunta4("yukon: BAR0 %08X BAR1 %08X BAR2 %08X", bar, pci_leer(a, 0x14), pci_leer(a, 0x18), 0)
+        si bar yb 1 <> 0 o bar yb 0xFFFFFFF0 = 0 entonces
+            apunta("yukon: sus registros no están en la memoria")
+            devolver falso
+        fin
+        si bar yb 6 = 4 y pci_leer(a, 0x14) <> 0 entonces
+            apunta("yukon: sus registros están por encima de los 4 GB")
+            devolver falso
+        fin
+        p := registros(bar yb 0xFFFFFFF0, 0x4000)
+        si p = nulo entonces
+            apunta("yukon: no se pueden ver sus registros")
+            devolver falso
+        fin
+        base := nat32(p)
+        chip := prueba()
+        rev := r8(0x011A) >> 4                  ; B2_MAC_CFG: la revisión, arriba
+        apunta4("yukon: chip %02X, revisión %u", chip, rev, 0, 0)
+        si chip < 0xB3 o chip > 0xBE entonces
+            apunta("yukon: no contesta un chip de la familia Yukon 2")
+            devolver falso
+        fin
+        ; solo la Optima (BCh) y la Optima 2 (BEh)
+        si chip <> 0xBC y chip <> 0xBE entonces
+            apunta("yukon: es de la familia, pero no una Optima: no se sabe llevar")
+            devolver falso
+        fin
+        ; ---- reinicio (sky2_reset; yk_t_rst1) ----
+        w8(0x0E68, 0x08)                        ; B28_Y2_ASF_STAT_CMD: ASF en reinicio
+        w16(0x0004, 0x1000)                     ; B0_CTST: ASF desactivado
+        w8(0x0004, 0x01)                        ; reinicio por programa
+        w8(0x0004, 0x02)
+        w8(0x0158, 0x02)                        ; B2_TST_CTRL1: escribir en la configuración PCI
+        w16(0x1C06, r16(0x1C06) ob 0xF900)      ; estado PCI: quitar los errores apuntados
+        ; (yk_t_rst2)
+        w8(0x0004, 0x08)                        ; fuera el reinicio maestro
+        w32(0x1D04, 0xFFFFFFFF)                 ; errores de PCI Express (AER), borrados
+        w8(0x0007, 0xA6)                        ; B0_POWER_CTRL: alimentación de VCC
+        w32(0x0120, 0x01)                       ; B2_Y2_CLK_CTRL: sin dividir el reloj
+        w8(0x011D, 0x00)                        ; B2_Y2_CLK_GATE
+        w32(0x1C80, 0)                          ; PCI_DEV_REG3: todos los relojes
+        ; encendido (sky2_power_on), con el «control de energía avanzado»
+        w32(0x1C84, r32(0x1C84) yb 0x0000F000)  ; PCI_DEV_REG4: solo quedan los bits de ASPM
+        w32(0x1C88, r32(0x1C88) yb 0x18000000)  ; PCI_DEV_REG5
+        ; (yk_t_rst3)
+        w32(0x1C94, 0)                          ; PCI_CFG_REG_1
+        w16(0x0004, 0x8000)                     ; B0_CTST: Y2_HW_WOL_ON
+        ; B2_GP_IO: la errata de la carrera del estado (dev. 4.107)
+        w32(0x015C, r32(0x015C) ob 0x2000)
+        r32(0x015C)
+        ; (yk_t_rst4)
+        w16(0x0004, 0x0200)                     ; luz de «controlador cargado»
+        w8(0x0158, 0x01)                        ; configuración PCI, otra vez protegida
+        w8(0x0F10, 0x01)                        ; GMAC_LINK_CTRL: reinicio del enlace
+        w8(0x0F10, 0x02)
+        apunta("yukon: reiniciada")
+        ; lo propio de la Optima: el temporizador de detección de enlace del
+        ; PHY (y, en la revisión 0, que el PHY de PCI Express no se apague)
+        n := 3                                  ; 0,4 s
+        si chip = 0xBC y rev = 0 entonces
+            w32(0x0170, 0x00800080)             ; Y2_PEX_PHY_DATA: registro 80h, bit 7
+            w32(0x0170, 0x40080000)             ; y el de depuración 8 (bit 12 a cero)
+            n := 10                             ; 1,1 s
+        fin
+        w8(0x0158, 0x02)                        ; B2_TST_CTRL1: se puede escribir en la configuración PCI
+        w16(0x1D68, (n << 4) ob 1)              ; PSM_CONFIG_REG4 (y reinicio de la detección)
+        ; si la gestión de energía (PSM) estaba en marcha, el control del
+        ; enlace PCI Express vuelve a como lo guardó
+        v := r16(0x1D64)                        ; PSM_CONFIG_REG3
+        si v yb 3 <> 0 entonces
+            cap := capacidad(0x10)              ; la de PCI Express
+            si cap <> 0 entonces w16(0x1C00 + cap + 0x10, v) fin
+            apunta4("yukon: PSM_CONFIG_REG3 %04X, PCI Express en %02X", v, cap, 0, 0)
+        fin
+        ; (yk_t_rst5)
+        w8(0x0158, 0x01)
+        w32(0x0170, 0x40080000)                 ; PHY de PCI Express: gestión de energía
+        w32(0x0168, 0x01)                       ; B2_I2C_IRQ: ruido de I2C
+        w8(0x0138, 0x02)                        ; B2_TI_CTRL: temporizador parado
+        w8(0x0138, 0x01)
+        w32(0x0E08, 0x01)                       ; B28_DPT_CTRL: sin sondeo de descriptores
+        w8(0x0E18, 0x02)                        ; GMAC_TI_ST_CTRL: sin marca de tiempo
+        w8(0x0E18, 0x01)
+        w8(0x0210, 0x02)                        ; TXA_CTRL: árbitro de envío
+        w8(0x01A0, 0x02)                        ; B3_RI_CTRL: interfaz de RAM
+        para i desde 0 hasta 11 hacer w8(0x0190 + i, 36) fin      ; y sus doce plazos
+        w32(0x000C, 0)                          ; B0_IMSK: sin interrupciones (hasta arrancar)
+        w32(0x0014, 0)                          ; B0_HWE_IMSK: ni las de error de hardware
+        w8(0x0F0C, 0)                           ; GMAC_IRQ_MSK: ni las del MAC
+        w16(0x2834, 0)                          ; filtro de multidifusión, vacío
+        w16(0x2838, 0)
+        w16(0x283C, 0)
+        w16(0x2840, 0)
+        ; la MAC (la carga el chip de su memoria al salir del reinicio)
+        para i desde 0 hasta 5 hacer mac[i] := byte(r8(0x0100 + i)) fin      ; B2_MAC_1
+        ; ---- MAC y PHY (sky2_mac_init; yk_t_mac1) ----
+        w8(0x0F04, 0x01)                        ; GPHY_CTRL: reinicio del PHY
+        w8(0x0F04, 0x02)
+        w8(0x0F00, 0x02)                        ; GMAC_CTRL: fuera el reinicio del MAC
+        r16(0x0F08)                             ; GMAC_IRQ_SRC (se borra al leerlo)
+        ; el PHY, encendido (PCI_DEV_REG1, bit 26) y fuera de su reinicio
+        w8(0x0158, 0x02)
+        w32(0x1C40, r32(0x1C40) yb nob nat32(0x04000000))
+        w8(0x0158, 0x01)
+        r32(0x1C40)
+        w8(0x0F04, 0x02)                        ; GPHY_CTRL
+        ; ---- el PHY (sky2_phy_init) ----
+        apunta4("yukon: PHY 02=%04X 03=%04X", phy_r(2), phy_r(3), 0, 0)
+        phy_w(20, (phy_r(20) yb nob nat32(0x0F70)) ob 0x0170)    ; control ampliado: reloj de 25 MHz hacia el MAC
+        phy_w(16, (phy_r(16) yb nob nat32(0x0300)) ob 0x0060)    ; sin detección de energía; cruce de pares automático
+        w16(0x2804, 0x2012)                     ; GM_GP_CTRL: sin control de flujo; la velocidad y el dúplex, los del PHY
+        phy_w(9, 0x0300)                        ; 1000BASE-T: dúplex completo y medio
+        phy_w(4, 0x01E1)                        ; se anuncia 10 y 100, completo y medio (sin pausa)
+        phy_w(0, 0x9200)                        ; reinicio del PHY y autonegociación
+        si chip = 0xBC y rev = 0 entonces
+            ; Optima revisión 0: arreglo de la terminación (RDAC) del PHY
+            phy_w(22, 0x00FF)
+            phy_w(24, 0x2800)
+            phy_w(23, 0x2001)
+            phy_w(22, 0)
+        fin
+        phy_w(18, 0x6C00)                       ; interrupciones del PHY: autonegociación y cambios de enlace
+        ; contadores del MAC a cero (se borran al leerlos en este modo)
+        v := r16(0x2888)                        ; GM_PHY_ADDR
+        w16(0x2888, v ob 0x20)
+        i := 0x2900
+        mientras i <= 0x2A5C hacer
+            r16(i)
+            i := i + 4
+        fin
+        w16(0x2888, v)
+        ; la dirección, en el MAC (las dos: la de las tramas y la de pausa)
+        para i desde 0 hasta 2 hacer
+            w16(0x281C + i * 4, nat32(mac[i * 2]) ob (nat32(mac[i * 2 + 1]) << 8))      ; GM_SRC_ADDR_1L
+            w16(0x2828 + i * 4, nat32(mac[i * 2]) ob (nat32(mac[i * 2 + 1]) << 8))      ; GM_SRC_ADDR_2L
+        fin
+        ; (yk_t_mac2)
+        w16(0x2808, 0x1000)                     ; GM_TX_CTRL: umbral de colisiones
+        w16(0x280C, 0xA000)                     ; GM_RX_CTRL: las tramas para esta dirección, sin el CRC
+        w16(0x2810, 0xFFFF)                     ; GM_TX_FLOW_CTRL
+        w16(0x2814, 0xD7C4)                     ; GM_TX_PARAM
+        w16(0x2818, 0x221E)                     ; GM_SERIAL_MODE
+        w16(0x2850, 0)                          ; sin interrupciones de los contadores
+        w16(0x2854, 0)
+        w16(0x2858, 0)
+        w8(0x0C48, 0x02)                        ; RX_GMF_CTRL_T: FIFO de recepción
+        w32(0x0C48, 0x88)                       ; en marcha, tirando las tramas malas
+        w16(0x0C4C, 0x187B)                     ; RX_GMF_FL_MSK: cuáles son malas
+        w16(0x0C50, 0x0B)                       ; RX_GMF_FL_THR
+        w8(0x0D48, 0x02)                        ; TX_GMF_CTRL_T: FIFO de envío
+        w16(0x0D48, 0x08)
+        w16(0x0C58, 128)                        ; umbrales de pausa (sin búfer RAM)
+        w16(0x0C5A, 96)
+        w32(0x0D48, 0x40000000)                 ; guardar la trama entera antes de enviarla
+        w8(0x0F00, 0x04)                        ; GMAC_CTRL: sin pausa
+        v := r8(0x011C)                         ; B2_E_0: el búfer RAM (las Optima no lo tienen)
+        si v <> 0 entonces apunta4("yukon: (!) búfer RAM: %02X", v, 0, 0, 0) fin
+        apunta("yukon: MAC y PHY puestos (la autonegociación tarda de 2 a 4 s)")
+        ; ---- la memoria de los anillos y los búferes ----
+        dma := memoria_dma(6, dma_f)
+        si dma = nulo entonces
+            apunta("yukon: no hay memoria para los anillos")
+            devolver falso
+        fin
+        apunta4("yukon: anillos en %08X", dma_f, 0, 0, 0)
+        arranca()
+        devolver cierto
+    fin
+
+    público función yk_enviar(p: puntero a byte, n: nat32): bool
+        variable e: puntero a nat32
+        variable i: nat32
+        si no up entonces
+            mira_enlace()                       ; ¿acaba de llegar el enlace?
+            si no up entonces devolver falso fin
+        fin
+        copiar_memoria(dma + P_TXB, p, n)
+        si n < 60 entonces
+            llenar(dma + P_TXB + n, 60 - n, 0)
+            n := 60
+        fin
+        e := puntero(dma + P_TX + tx_prd * 8)
+        e[0] := dma_f + P_TXB
+        e[1] := n ob 0xC1800000                 ; fin de trama; OP_PACKET, vale
+        tx_prd := (tx_prd + 1) yb (NTX - 1)
+        w16(0x06E4, tx_prd)                     ; índice «put» del envío
+        ; esperar a que la tarjeta la haya leído (el búfer es uno solo): su
+        ; índice «hecho» (Q_DONE) o el que da por el anillo de estado
+        para i desde 1 hasta 60000 hacer
+            si r16(0x06A4) = tx_prd entonces devolver cierto fin
+            si i yb 63 = 0 entonces mira_envío() fin
+            si txdn = tx_prd entonces devolver cierto fin
+            espera_us(2)
+        fin
+        txto := txto + 1                        ; sin confirmar (se cuenta y se sigue)
+        si txto < 4 entonces apunta4("yukon: (!) envío sin confirmar (Q_DONE %04X, put %04X)", r16(0x06A4), tx_prd, 0, 0) fin
+        devolver cierto
+    fin
+
+    ; la trama siguiente del anillo de estado: su largo; 0 si no hay;
+    ; 0xFFFFFFFF si había una que no valía (que se mire la siguiente)
+    público función yk_recibir(destino: puntero a byte): nat32
+        variable put, s, n, l, k: nat32
+        variable e: puntero a byte
+        variable codigo: byte
+        si not_run() entonces devolver 0 fin
+        k := 0
+        mientras k < NST hacer
+            k := k + 1
+            put := r16(0x0E9C)                  ; STAT_PUT_IDX
+            si put = st_i entonces devolver 0 fin
+            e := dma + P_ST + st_i * 8
+            codigo := e[7]
+            si codigo yb 0x80 = 0 entonces
+                ; (todavía no vale) la interrupción de estado, vista
+                w32(0x0E80, 0x10)
+                devolver 0
+            fin
+            e[7] := 0
+            st_i := (st_i + 1) yb (NST - 1)
+            s := nat32(e[0]) ob (nat32(e[1]) << 8) ob (nat32(e[2]) << 16) ob (nat32(e[3]) << 24)
+            l := nat32(e[4]) ob (nat32(e[5]) << 8)
+            si st_i = put entonces w32(0x0E80, 0x10) fin       ; STAT_CTRL: interrupción de estado vista
+            si codigo = 0xE8 entonces
+                txdn := s yb 0x0FFF             ; OP_TXINDEXLE: hasta dónde ha enviado
+            sino si codigo = 0xE0 entonces
+                ; OP_RXSTAT: una trama, en el búfer rx_nxt (la tarjeta los llena
+                ; en el orden en que se le dieron), que luego se le vuelve a dar
+                n := 0xFFFFFFFF
+                si s yb 0x187B <> 0 entonces
+                    malas := malas + 1          ; algún error (CRC, larga, corta, FIFO...)
+                sino si s yb 0x100 <> 0 entonces
+                    si (s >> 16) yb 0x7FFF = l y l >= 14 y l <= 1518 entonces
+                        copiar_memoria(destino, dma + P_BUF + rx_nxt * 2048, l)
+                        n := l
+                    sino
+                        malas := malas + 1      ; (si no coinciden, llegó cortada)
+                    fin
+                fin
+                rx_añade()
+                w16(0x0464, rx_put)             ; índice «put» de la recepción
+                devolver n
+            fin
+        fin
+        devolver 0
+    fin
+
+    función not_run(): bool
+        devolver no run o base = 0
+    fin
+
+    ; las causas de interrupción, vistas (así deja de pedirla), y el enlace
+    público función yk_atender()
+        variable v, c: nat32
+        si not_run() entonces devolver fin
+        v := r32(0x001C)                        ; B0_Y2_SP_ISRC2: al leerlo, deja de pedir interrupción
+        si v = 0 o v = 0xFFFFFFFF entonces
+            w32(0x002C, 2)                      ; B0_Y2_SP_ICR
+        sino
+            c := r32(0x0024)                    ; B0_Y2_SP_EISR: las causas
+            si c yb 0x10 <> 0 entonces mira_enlace() fin       ; el PHY: ha cambiado el enlace
+            r32(0x0028)                         ; B0_Y2_SP_LISR: puede volver a pedirla
+        fin
+        ; (por si la del PHY no llega: sin enlace, se mira cada medio segundo)
+        vueltas := vueltas + 1
+        si no up y vueltas >= 50 entonces
+            vueltas := 0
+            mira_enlace()
+        fin
+    fin
+
+    público función yk_enlace(): bool
+        devolver lnk
+    fin
+
+    público función yk_velocidad(): nat32
+        si no lnk entonces devolver 0 fin
+        si velo = 1 entonces devolver 10 fin
+        si velo = 2 entonces devolver 100 fin
+        si velo = 3 entonces devolver 1000 fin
+        devolver 0
+    fin
+
+    ; parar (antes de soltar la memoria): sin interrupciones ni DMA
+    público función yk_parar()
+        si base = 0 entonces devolver fin
+        w32(0x000C, 0)                          ; B0_IMSK
+        w16(0x2804, 0x2012)                     ; GM_GP_CTRL: sin enviar ni recibir
+        w8(0x0C3C, 0x01)                        ; luz del enlace
+        w32(0x06B4, 0x0200)                     ; envío: parar
+        w32(0x0434, 0x0011)                     ; recepción: BMU y FIFO en reinicio
+        w32(0x0450, 0x01)                       ; y su precarga
+        w32(0x06B4, 0x0011)
+        w32(0x06D0, 0x01)
+        w32(0x0E80, 0x01)                       ; unidad de estado
+        w16(0x0004, 0x0100)                     ; B0_CTST: luz de «controlador cargado»
+        w8(0x0004, 0x01)                        ; y el chip entero, en reinicio
+        run := falso
+        up := falso
+    fin
+
+fin Ryukon.

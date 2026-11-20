@@ -1,0 +1,338 @@
+; =============================================================================
+;  rbase.cas - lo de base del servicio de red de Hispa-Pentium (RED.BIN,
+;  ured.cas): las llamadas al sistema que solo puede hacer el servicio (red.cas
+;  las cuenta), los puertos de E/S de 8, 16 y 32 bits, el bus PCI visto desde
+;  el anillo 3, el registro de lo que pasa (en la memoria y por el puerto
+;  serie), el orden de los octetos de la red y la suma de comprobación de IP.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Rbase
+
+    importar Llamadas, Formato, Mem32
+
+    ; ---- las órdenes de un pedido (la primera palabra de su cabecera) ----
+    público constante O_ESTADO = 1              ; cómo está la red: un Info_red
+    público constante O_RESOLVER = 2            ; el nombre (en los octetos) -> su IP en cab[1]
+    público constante O_PING = 3                ; cab[1] IP, cab[2] número, cab[3] espera (tics), cab[4] octetos -> el tiempo (µs) y en cab[2] el TTL
+    público constante O_CONECTAR = 4            ; TCP: cab[1] IP, cab[2] puerto, cab[3] espera -> el número de la conexión
+    público constante O_ENVIAR = 5              ; cab[1] conexión; los octetos -> los que se han quedado
+    público constante O_RECIBIR = 6             ; cab[1] conexión, cab[2] espera -> los recibidos (0: la otra punta ha cerrado); de UDP, en cab[1] y cab[2] la IP y el puerto de quien los manda
+    público constante O_CERRAR = 7              ; cab[1] conexión
+    público constante O_UDP = 8                 ; abrir un puerto UDP: cab[1] el puerto (0: uno cualquiera) -> la conexión
+    público constante O_UDP_ENVIAR = 9          ; cab[1] conexión, cab[2] IP, cab[3] puerto; los octetos
+    público constante O_RENOVAR = 10            ; pedir la IP otra vez (DHCP)
+    público constante O_REGISTRO = 11           ; lo que ha apuntado el servicio -> los octetos
+    público constante AVISO_ACABÓ = 0xFFFF      ; (del núcleo) ha acabado la tarea cab... (la del pedido)
+
+    ; ---- los errores (los de red.cas y los de aquí; los del núcleo, de 0xFFFFFFF0 para arriba) ----
+    público constante SIN_RED = 0xFFFFFFEF      ; no hay servicio de red
+    público constante SIN_TARJETA = 0xFFFFFFEE  ; no hay tarjeta de red que se sepa llevar
+    público constante SIN_CABLE = 0xFFFFFFED    ; la tarjeta no tiene enlace (el cable)
+    público constante SIN_IP = 0xFFFFFFEC       ; todavía no hay IP (DHCP)
+    público constante TIEMPO = 0xFFFFFFEB       ; no ha contestado a tiempo
+    público constante RECHAZADA = 0xFFFFFFEA    ; la otra punta no quiere (no hay nadie en ese puerto)
+    público constante NO_RESUELVE = 0xFFFFFFE9  ; ese nombre no existe (DNS)
+    público constante CORTADA_RED = 0xFFFFFFE8  ; la conexión se ha cortado
+    público constante NO_CONEXIÓN = 0xFFFFFFE7  ; esa conexión no existe (o no quedan)
+    público constante INALCANZABLE = 0xFFFFFFE6 ; no se llega (nadie contesta por esa IP en la red)
+    público constante NO_VALE_RED = 0xFFFFFFF9  ; (el NO_VALE del núcleo)
+
+    ; ---- lo que contesta O_ESTADO (es el mismo tipo de redes.cas) ----
+    público tipo Info_red = estructura
+        estado: nat32                           ; RED_... de red.cas
+        mac: arreglo [8] de byte
+        ip, máscara, puerta, dns, servidor: nat32   ; (como van en la red)
+        concesión: nat32                        ; los segundos que dura la IP (DHCP); 0: puesta a mano
+        hace: nat32                             ; los segundos que hace que se dio
+        velocidad: nat32                        ; Mbit/s (0: no se sabe)
+        recibidas, enviadas, errores: nat32     ; tramas
+        tarjeta: arreglo [48] de byte           ; su nombre
+        pci: nat32                              ; dónde está (bus, aparato, función: como pci.cas)
+        id_pci: nat32                           ; fabricante (abajo) y modelo (arriba)
+        irq: nat32                              ; 0: sin interrupción (se mira cada tic)
+    fin
+
+    público tipo Pedido_red = estructura
+        hueco, serie, tarea, cabe, largo: nat32
+        relleno: arreglo [3] de nat32
+        cab: arreglo [8] de nat32
+    fin
+    público tipo Respuesta_red = estructura
+        serie: nat32
+        datos: nat32
+        cab: arreglo [8] de nat32
+    fin
+    público constante MAX_DATOS = 8192
+
+    ; ---- las llamadas del servicio (red.cas) ----
+    función llamada(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        ensamblador
+            mov eax, {n}
+            mov ebx, {a}
+            mov ecx, {b}
+            mov edx, {c}
+            int 0x80
+        fin
+    fin
+
+    público función apuntarse(): nat32
+        devolver llamada(91, 0, 0, 0)
+    fin
+
+    público función siguiente_pedido(p: puntero a byte, espera: nat32): bool
+        devolver llamada(92, nat32(p), espera, 0) = 1
+    fin
+
+    ; contesta el pedido (su hueco y su serie) con «r» y los n octetos de d;
+    ; con otras dos palabras de respuesta (cab[1] y cab[2])
+    público función contestar(hueco: nat32, serie: nat32, r: nat32, uno: nat32, dos: nat32, d: puntero a byte, n: nat32)
+        variable resp: Respuesta_red
+        variable i: nat32
+        si hueco = 0xFFFFFFFF entonces devolver fin
+        resp.serie := serie
+        resp.datos := nat32(d)
+        para i desde 0 hasta 7 hacer resp.cab[i] := 0 fin
+        resp.cab[0] := r
+        resp.cab[1] := uno
+        resp.cab[2] := dos
+        resp.cab[7] := n
+        llamada(93, hueco, nat32(dirección(resp)), 0)
+    fin
+
+    ; n páginas seguidas de memoria física: dónde se ven, y en «física» su dirección
+    público función memoria_dma(n: nat32, ref física: nat32): puntero a byte
+        variable r: nat32
+        r := llamada(94, n, nat32(dirección(física)), 0)
+        si r >= 0xFFFFFFE0 entonces devolver nulo fin
+        devolver puntero(r)
+    fin
+
+    ; los registros de un aparato, a la vista: dónde se ven (nulo si no se puede)
+    público función registros(física: nat32, octetos: nat32): puntero a nat32
+        variable r: nat32
+        r := llamada(95, física, octetos, 0)
+        si r >= 0xFFFFFFE0 entonces devolver nulo fin
+        devolver puntero(r)
+    fin
+
+    público función decir_estado(estado: nat32, ip: nat32, aparato: nat32)
+        llamada(96, estado, ip, aparato)
+    fin
+
+    público función pon_irq(n: nat32): bool
+        devolver llamada(98, n, 0, 0) = 0
+    fin
+
+    ; ---- los puertos (con IOPL 3, que da red.cas al apuntarse) ----
+    público función entra8(p: nat32): nat32
+        ensamblador
+            mov edx, {p}
+            xor eax, eax
+            in al, dx
+        fin
+    fin
+    público función entra16(p: nat32): nat32
+        ensamblador
+            mov edx, {p}
+            xor eax, eax
+            in ax, dx
+        fin
+    fin
+    público función entra32(p: nat32): nat32
+        ensamblador
+            mov edx, {p}
+            in eax, dx
+        fin
+    fin
+    público función sale8(p: nat32, v: nat32)
+        ensamblador
+            mov edx, {p}
+            mov eax, {v}
+            out dx, al
+        fin
+    fin
+    público función sale16(p: nat32, v: nat32)
+        ensamblador
+            mov edx, {p}
+            mov eax, {v}
+            out dx, ax
+        fin
+    fin
+    público función sale32(p: nat32, v: nat32)
+        ensamblador
+            mov edx, {p}
+            mov eax, {v}
+            out dx, eax
+        fin
+    fin
+
+    ; esperar unos microsegundos (cada lectura del puerto 0x80 tarda uno)
+    público función espera_us(n: nat32)
+        variable i: nat32
+        para i desde 1 hasta n hacer entra8(0x80) fin
+    fin
+
+    ; ---- el bus PCI (los dos puertos, sin que el reloj se cuele en medio) ----
+    público función pci_leer(a: nat32, reg: nat32): nat32
+        ensamblador
+            mov eax, {a}
+            mov ecx, {reg}
+            and ecx, 0xFC
+            or eax, ecx
+            or eax, 0x80000000
+            mov edx, 0xCF8
+            cli
+            out dx, eax
+            mov edx, 0xCFC
+            in eax, dx
+            sti
+        fin
+    fin
+    público función pci_escribir(a: nat32, reg: nat32, v: nat32)
+        ensamblador
+            mov eax, {a}
+            mov ecx, {reg}
+            and ecx, 0xFC
+            or eax, ecx
+            or eax, 0x80000000
+            mov edx, 0xCF8
+            cli
+            out dx, eax
+            mov edx, 0xCFC
+            mov eax, {v}
+            out dx, eax
+            sti
+        fin
+    fin
+    público función pci_leer16(a: nat32, reg: nat32): nat32
+        devolver (pci_leer(a, reg) >> ((reg yb 2) * 8)) yb 0xFFFF
+    fin
+    público función pci_escribir16(a: nat32, reg: nat32, v: nat32)
+        variable w, s: nat32
+        s := (reg yb 2) * 8
+        w := pci_leer(a, reg)
+        w := (w yb nob (nat32(0xFFFF) << s)) ob ((v yb 0xFFFF) << s)
+        pci_escribir(a, reg, w)
+    fin
+
+    ; ---- el registro: en la memoria (O_REGISTRO lo da) y por el puerto serie ----
+    constante CABE_REG = 6000
+    público variable registro: arreglo [CABE_REG] de byte
+    público variable registro_largo: nat32
+    variable renglón: arreglo [160] de byte
+
+    público función apunta(t: puntero a byte)
+        variable n: nat32
+        n := 0
+        mientras t[n] <> 0 hacer n := n + 1 fin
+        si registro_largo + n + 2 > CABE_REG entonces
+            ; (lo más viejo, fuera: se queda la segunda mitad)
+            copiar_memoria(dirección(registro[0]), dirección(registro[CABE_REG div 2]), registro_largo - CABE_REG div 2)
+            registro_largo := registro_largo - CABE_REG div 2
+        fin
+        copiar_memoria(dirección(registro[registro_largo]), t, n)
+        registro_largo := registro_largo + n
+        registro[registro_largo] := '\n'
+        registro_largo := registro_largo + 1
+        al_serie("red: ")
+        al_serie(t)
+        al_serie("\n")
+    fin
+
+    público función apunta4(plantilla: puntero a byte, a: nat32, b: nat32, c: nat32, d: nat32)
+        variable datos: arreglo [4] de nat32
+        datos[0] := a
+        datos[1] := b
+        datos[2] := c
+        datos[3] := d
+        formatear(renglón, 160, plantilla, datos)
+        apunta(renglón)
+    fin
+
+    ; una IP (como va en la red) en texto: «10.0.2.15»
+    público función ip_texto(ip: nat32, destino: puntero a byte)
+        variable d: arreglo [4] de nat32
+        d[0] := ip yb 0xFF
+        d[1] := (ip >> 8) yb 0xFF
+        d[2] := (ip >> 16) yb 0xFF
+        d[3] := ip >> 24
+        formatear(destino, 16, "%u.%u.%u.%u", d)
+    fin
+
+    ; ---- el orden de la red (el octeto alto primero) ----
+    público función lee16(p: puntero a byte): nat32
+        devolver (nat32(p[0]) << 8) ob p[1]
+    fin
+    público función lee32(p: puntero a byte): nat32
+        devolver (nat32(p[0]) << 24) ob (nat32(p[1]) << 16) ob (nat32(p[2]) << 8) ob p[3]
+    fin
+    público función pon16(p: puntero a byte, v: nat32)
+        p[0] := byte(v >> 8)
+        p[1] := byte(v)
+    fin
+    público función pon32(p: puntero a byte, v: nat32)
+        p[0] := byte(v >> 24)
+        p[1] := byte(v >> 16)
+        p[2] := byte(v >> 8)
+        p[3] := byte(v)
+    fin
+    ; una IP tal como va en la red (los cuatro octetos, el primero abajo)
+    público función lee_ip(p: puntero a byte): nat32
+        devolver nat32(p[0]) ob (nat32(p[1]) << 8) ob (nat32(p[2]) << 16) ob (nat32(p[3]) << 24)
+    fin
+    público función pon_ip(p: puntero a byte, ip: nat32)
+        p[0] := byte(ip)
+        p[1] := byte(ip >> 8)
+        p[2] := byte(ip >> 16)
+        p[3] := byte(ip >> 24)
+    fin
+
+    ; la suma de comprobación de IP (el complemento a uno de la suma de las
+    ; palabras de 16 bits), empezando por «suma»: para seguir sumando, se
+    ; le pasa lo que dio suma_parcial
+    público función suma_parcial(p: puntero a byte, n: nat32, suma: nat32): nat32
+        variable i: nat32
+        i := 0
+        mientras i + 1 < n hacer
+            suma := suma + ((nat32(p[i]) << 8) ob p[i + 1])
+            i := i + 2
+        fin
+        si i < n entonces suma := suma + (nat32(p[i]) << 8) fin
+        devolver suma
+    fin
+    público función cierra_suma(suma: nat32): nat32
+        mientras suma >> 16 <> 0 hacer suma := (suma yb 0xFFFF) + (suma >> 16) fin
+        devolver (nob suma) yb 0xFFFF
+    fin
+    público función suma_ip(p: puntero a byte, n: nat32): nat32
+        devolver cierra_suma(suma_parcial(p, n, 0))
+    fin
+
+    ; ---- el tiempo ----
+    público función ahora(): nat32
+        devolver tics()
+    fin
+
+    ; en microsegundos (los tics y, dentro del tic, lo que lleva contado el
+    ; reloj 8253, que baja de 11931 a 0 en cada uno)
+    público función ahora_us(): nat32
+        variable t1, t2, c: nat32
+        mientras cierto hacer
+            t1 := tics()
+            ensamblador
+                cli
+            fin
+            sale8(0x43, 0)
+            c := entra8(0x40)
+            c := c ob (entra8(0x40) << 8)
+            ensamblador
+                sti
+            fin
+            t2 := tics()
+            si t1 = t2 entonces romper fin
+        fin
+        si c > 11931 entonces c := 11931 fin
+        devolver t1 * 10000 + ((11931 - c) * 838) div 1000
+    fin
+
+fin Rbase.

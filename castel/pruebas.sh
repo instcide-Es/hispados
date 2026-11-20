@@ -74,12 +74,45 @@
 #      HISPA.INI y el saludo del menú Inicio; la memoria USB, intacta.
 #      Y la oficina en el disco instalado (C:\OFICINA y C:\HISPA\HVPRUN.BIN):
 #      desde el menú Inicio y desde Mi equipo.
+#  11. El USB en caliente (usbcal.cas): con el monitor de QEMU (device_add y
+#      device_del), en xHCI y EHCI (y un teclado por las UHCI compañeras):
+#      una memoria que se enchufa sale como W: y se lee; escribir y «quitar
+#      con seguridad» la deja sana (fsck.fat); quitarla a lo bruto con un
+#      archivo abierto no cuelga nada (el programa ve errores y sigue);
+#      teclados, ratones y un concentrador enchufados y quitados en marcha;
+#      la memoria del sistema no se deja quitar; y en el escritorio, el
+#      globo de los avisos, el icono de la bandeja con su menú y Mi equipo,
+#      que se pone al día solo y tiene «Quitar con seguridad».
+#  12. Hispa-Pentium 0.8: los paquetes. tools/hpq.py (paquetes .HPQ, su
+#      catálogo y los registros); el programa PAQUETES en un disco
+#      «instalado», con una memoria USB de paquetes: instalar con
+#      dependencias (de un archivo y por su nombre), actualizar, una suma mala,
+#      un conflicto, quitar lo que otro necesita (el disco, idéntico), quitar,
+#      COMPRUEBA, un corte a mitad que se deshace al volver, el gancho de la red
+#      (con un DESCARGA de mentira) y la ventana «Programas y actualizaciones»;
+#      fsck.fat y mtools miran el disco después de cada paso.
+#  13. Hispa-Pentium 0.8: la red. El servicio de red (RED.BIN) con la e1000
+#      y la RTL8139 de QEMU (-netdev user): DHCP, IPCONFIG, PING, el DNS,
+#      DESCARGAR contra un servidor HTTP de aquí (nucleo32/servidor_prueba.py:
+#      con largo, en trozos, hasta que se cierra, redirección, 404) con lo
+#      descargado igual octeto a octeto, Ctrl+C, sin tarjeta, «sinred», y el
+#      icono de la red en el escritorio.
+#  14. Hispa-Pentium 0.8: apagar de verdad y la batería. El servicio de ACPI
+#      (ACPI.BIN, acpi/pentium/: HSPACPI con ACPICA en el anillo 3) con la
+#      batería de mentira de las pruebas de Hispa-DOS (-acpitable): la pila
+#      de la bandeja y su recuadro de ayuda, apagar (S5) y reiniciar en
+#      orden con PIIX4 y con ICH9, «sinacpi» y las llamadas 150 a 153.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
 #   SOLO=32 ./pruebas.sh          la primera, la octava y la novena (lo de 32 bits)
 #   SOLO=06 ./pruebas.sh          la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
 #   SOLO=07 ./pruebas.sh          la primera y la décima (instalar en el disco: la 0.7)
+#   SOLO=08 ./pruebas.sh          la primera y las de la 0.8 (de la undécima a la decimocuarta)
+#   SOLO=caliente ./pruebas.sh    la primera y la undécima (el USB en caliente)
+#   SOLO=paquetes ./pruebas.sh    la primera y la duodécima (los paquetes: PAQUETES y tools/hpq.py)
+#   SOLO=red ./pruebas.sh         la primera y la decimotercera (la red)
+#   SOLO=acpi ./pruebas.sh        la primera y la decimocuarta (apagar de verdad y la batería: ACPI.BIN)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
@@ -92,7 +125,10 @@ set -u
 AQUI=$(dirname "$(readlink -f "$0")")
 H=$AQUI/../h8086
 # los programas de usuario de Hispa-Pentium (usuario.cas y llamadas.cas son módulos)
-USU="$AQUI/nucleo32/uinstala.cas $AQUI/nucleo32/uasiste.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas $AQUI/nucleo32/uequipo.cas"
+USU="$AQUI/nucleo32/uinstala.cas $AQUI/nucleo32/uasiste.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas $AQUI/nucleo32/uequipo.cas $AQUI/nucleo32/upaquete.cas $AQUI/nucleo32/uactual.cas"
+# y los de la red (la 0.8): el servicio, RED.BIN, y sus programas (con sus
+# módulos: rbase, rtarjeta, ryukon, rpila, rtcp y redes); van en su tanda
+RED_USU="$AQUI/nucleo32/ured.cas $AQUI/nucleo32/uipconf.cas $AQUI/nucleo32/uping.cas $AQUI/nucleo32/udescarg.cas"
 T=$(mktemp -d)
 QPID=
 acaba() { [ -n "$QPID" ] && kill $QPID 2>/dev/null; [ -n "${VER:-}" ] && { rm -rf /tmp/castel-pruebas; cp -r $T /tmp/castel-pruebas; }; rm -rf $T; }
@@ -135,6 +171,11 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
   dicho=$(head -1 $T/err.txt | sed 's/^.*\.cas://')
   if [ "$dicho" = "$esperado" ]; then ok "$n: $dicho"; else ko "$n: dice «$dicho» y se esperaba «$esperado»"; fi
 done
+# SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
+# SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
+case "${SOLO:-}" in caliente|paquetes|red|acpi) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
+
 if [ "${SOLO:-}" = errores ]; then
   echo "== $nok bien, $fail mal =="
   exit $((fail > 0))
@@ -142,7 +183,7 @@ fi
 
 # SOLO=32: solo la primera parte, la octava y la novena (los 32 bits);
 # SOLO=06: solo la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
-if [ "${SOLO:-}" != 32 ] && [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ]; then
+if [ "${SOLO:-}" != 32 ] && [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ] && [ "${SOLO:-}" != 08 ]; then
 # -------------------------------------------------------- 2. compilar todo
 echo "== Castel: los ejemplos compilan =="
 EJEMPLOS=
@@ -440,7 +481,7 @@ cp $AQUI/ensamblador/formas.asm $T/ens/formas.asm
 # de Hispa-Pentium y unas cuentas al azar (CASTEL32.md)
 cp $AQUI/ensamblador/formas32.asm $T/ens/formas32.asm
 python3 -I $AQUI/azar32.py 9 150 $T/ens/az32p.cas $T/ens/az32p.esp plano
-for f in $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $USU $T/ens/az32p.cas; do
+for f in $AQUI/ejemplos32/*.cas $AQUI/nucleo32/semilla.cas $USU $RED_USU $T/ens/az32p.cas; do
   python3 -I $AQUI/ccastel.py $f -o $T/ens/$(basename $f .cas).asm > /dev/null 2>&1 || ko "$(basename $f) no compila"
 done
 rm -f $T/ens/az32p.cas $T/ens/az32p.esp
@@ -463,10 +504,11 @@ else ko "ensambla.py no da lo mismo que NASM en:$distintos"; fi
 # Hispa-Pentium, que con el entorno gráfico pasa de 600 K; el tercero, sus
 # programas de usuario)
 NUC=" $(for f in $USU; do basename $f .cas; done | tr '\n' ' ')"
-# en qué tanda va cada uno: 2, la semilla; 3, sus programas; 1, lo demás
-tanda_de() { case "$1" in semilla) echo 2 ;; *) case "$NUC" in *" $1 "*) echo 3 ;; *) echo 1 ;; esac ;; esac; }
+NRED=" $(for f in $RED_USU; do basename $f .cas; done | tr '\n' ' ')"
+# en qué tanda va cada uno: 2, la semilla; 3, sus programas; 4, los de la red; 1, lo demás
+tanda_de() { case "$1" in semilla) echo 2 ;; *) case "$NUC" in *" $1 "*) echo 3 ;; *) case "$NRED" in *" $1 "*) echo 4 ;; *) echo 1 ;; esac ;; esac ;; esac; }
 mkdir $T/ens/sal
-for tanda in 1 2 3; do
+for tanda in 1 2 3 4; do
 cp $H/build/hispa8086-1440.img $T/e.img
 { printf '@ECO OFF\r\n'
   for f in $T/ens/*.asm; do
@@ -527,7 +569,7 @@ python3 -I $AQUI/azar32.py 8 40 $A/azar32p.cas $A/azar32p.esp plano
 # tercera, lo de Hispa-Pentium, que con el entorno gráfico ya no cabe con lo
 # demás: los fuentes del núcleo en A: y, en B:, el ensamblador de la semilla,
 # de más de 600 K (la segunda), o el de sus programas de usuario (la tercera))
-for tanda in 1 2 3; do
+for tanda in 1 2 3 4; do
 cp $H/build/hispa8086-1440.img $T/c.img
 mmd -i $T/c.img ::BIB ::PARTES ::BIB32
 for f in $AQUI/biblioteca32/*.cas; do mcopy -i $T/c.img $f ::BIB32/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
@@ -540,13 +582,15 @@ else
   # los dos módulos que usan: todos juntos ya no caben con lo demás)
   for f in $AQUI/nucleo32/*.cas; do
     case "$(basename $f .cas)" in
-      uhci|unidades|usb|usbalm|usbbase|usbhid|usuario) [ $tanda = 2 ] || continue ;;
-      u[a-z]*|llamadas|barramenu) [ $tanda = 3 ] || continue ;;
+      ured|uipconf|uping|udescarg|rbase|rtarjeta|ryukon|rpila|rtcp|redes) [ $tanda = 4 ] || continue ;;
+      llamadas) [ $tanda = 3 ] || [ $tanda = 4 ] || continue ;;
+      uhci|unidades|usb|usbalm|usbbase|usbcal|usbhid|usuario) [ $tanda = 2 ] || continue ;;
+      u[a-z]*|barramenu|sha256) [ $tanda = 3 ] || continue ;;
       *) [ $tanda = 2 ] || continue ;;
     esac
     mcopy -i $T/c.img $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS
   done
-  if [ $tanda = 2 ]; then LOTE="$AQUI/nucleo32/semilla.cas"; else LOTE="$USU"; fi
+  if [ $tanda = 2 ]; then LOTE="$AQUI/nucleo32/semilla.cas"; elif [ $tanda = 3 ]; then LOTE="$USU"; else LOTE="$RED_USU"; fi
 fi
 mcopy -i $T/c.img $A/CASTEL.EXE ::
 # (lo de Hispa-Pentium, con B: de 2,88 MB y desde B:: ahí deja CASTEL su
@@ -700,7 +744,7 @@ fi
 echo "== Castel de 32 bits: «modelo núcleo» (QEMU -kernel) y «modelo hispa32» (HW32) =="
 P=$T/p32
 mkdir $P
-if [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ]; then
+if [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ] && [ "${SOLO:-}" != 08 ]; then
 # los ejemplos de 16 bits que no tocan el DOS, compilados como núcleo de 32
 # bits: tienen que escribir lo mismo
 MISMOS="arreglos bucles cuenta estruct mezcla nivel pares pruebas refs saltos saludo textos modulos"
@@ -851,7 +895,7 @@ S=$P/ordenes.sal
 mira "el intérprete de órdenes es un programa del anillo 3 cargado del disco, y lee el teclado por la llamada al sistema" \
   "^lanzo ORDENES.BIN del disco (la tarea [0-9]*, en el anillo 3)" "^Hispa-Pentium: intérprete de órdenes (un programa del anillo 3" \
   "^C:.>ayuda$" "^Las órdenes de Hispa-Pentium:" "^  TYPE archivo "
-mira "VER y MEM" "^Hispa-Pentium 0\.7: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
+mira "VER y MEM" "^Hispa-Pentium 0\.8: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
   "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 3\.$"
 mira "DIR: la raíz y una carpeta, con sus tamaños, sus fechas y lo que queda libre" "^ Directorio de C:.$" "^LEEME    TXT  *118  [0-9/]*  [0-9:]*$" \
   "^TEXTOS  *<DIR>  " "^ *17 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
@@ -918,7 +962,7 @@ DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" ver salir
 S=$P/arranque.sal
 mira "si el cargador se lo dice (-append ordenes), el núcleo arranca con el intérprete de órdenes (y sin módulos de multiboot: todo del disco)" \
   "^memoria: 32 MB, [0-9]* marcos libres; paginación activa; 0 programas de usuario" \
-  "^C:.>ver$" "^Hispa-Pentium 0\.7" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
+  "^C:.>ver$" "^Hispa-Pentium 0\.8" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
 MODULOS= $AQUI/nucleo32/probar.sh "" disco dir ordenes apagar > $P/sindisco.sal 2>&1
 S=$P/sindisco.sal
 mira "sin disco (y sin nada que traiga el cargador), el núcleo lo dice y sigue" "^disco 0: no hay" "^sistema de archivos: no hay" "^no puedo lanzar ORDENES.BIN: no hay disco" "^\[código 5\]"
@@ -1015,7 +1059,7 @@ else ko "ECHO OFF o la @ no callan lo que deben (o callan de más)"; grep -n "lo
 # la historia: lo que queda en la pantalla, quitando lo que borra cada retroceso
 python3 -I $AQUI/nucleo32/pantalla.py < $S > $P/historia.txt
 if [ "$(grep -c '^C:.>eco primera$' $P/historia.txt)" = 2 ] && [ "$(grep -c '^primera$' $S)" = 2 ] && grep -q '^C:.>zco prixeray$' $P/historia.txt \
-    && grep -q "^Orden o nombre de programa desconocido: zco " $S && grep -q '^C:.>ver$' $P/historia.txt && grep -q "^Hispa-Pentium 0\.7" $S; then
+    && grep -q "^Orden o nombre de programa desconocido: zco " $S && grep -q '^C:.>ver$' $P/historia.txt && grep -q "^Hispa-Pentium 0\.8" $S; then
   ok "la historia de la línea: la flecha de arriba trae las órdenes de antes; se corrigen con las flechas, Retroceso, Supr, Inicio y Fin; Esc borra la línea"
 else ko "la historia o la corrección de la línea no van:"; grep -n "primera\|zco\|ver" $P/historia.txt | sed 's/^/        /' | head; fi
 mira "FECHA: la fecha y la hora del reloj del PC" "^Hoy es $(date +%d/%m/%Y) y son las [0-2][0-9]:[0-5][0-9]:[0-5][0-9]\.$"
@@ -1151,11 +1195,11 @@ mira "el menú lanza la Consola" "^escritorio: lanzo .CONSOLA.BIN (la tarea [0-9
 miracap "la Consola: el intérprete de órdenes dentro de una ventana (un terminal): órdenes, un programa, Ctrl+C y la versión" e9 \
   negrita 140 90 152 98 Consola texto 120 116 132 520 "C:\\>eco hola desde la ventana" texto 120 116 132 520 "hola desde la ventana" \
   texto 120 116 132 520 "bucle: doy vueltas sin fin (Ctrl+C para acabar)" texto 120 116 132 520 "^C" \
-  texto 120 116 132 520 "Hispa-Pentium 0.7: un núcleo de 32 bits escrito en Castel." texto 290 572 300 580 Consola
+  texto 120 116 132 520 "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel." texto 290 572 300 580 Consola
 miracap "SALIR acaba el intérprete y la Consola se cierra (su ventana y su botón)" e10 notexto 130 80 160 100 Consola notexto 280 570 310 582 Consola \
   negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas"
 miracap "Configuración: lo que hay (pantalla, memoria), el teclado y el tapiz" e11 negrita 196 126 206 136 "Configuración" \
-  negrita 240 160 256 170 "Hispa-Pentium 0.7" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
+  negrita 240 160 256 170 "Hispa-Pentium 0.8" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
 miracap "el tapiz se cambia desde Configuración (a «Verde»), y se repinta todo el escritorio" e12 rgb 10 10 1F6B52 negrita 30 570 46 580 Inicio \
   negrita 196 126 206 136 "Configuración"
 miracap "el botón de cerrar acaba el Bloc de notas (sin cambios pendientes): ni ventana ni botón en la barra" e13 \
@@ -1233,7 +1277,7 @@ miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 178 16
   texto 180 196 188 204 ".."
 miracap "y dos clics en un texto lo abren con el Bloc de notas" b11 negrita 198 142 206 150 "\\LEEME.TXT - Bloc de notas" \
   texto 178 224 186 232 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
-miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.7" \
+miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.8" \
   texto 196 294 204 302 "Copyright (C) 2026 Carlos Sanz y contribuidores."
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
@@ -1281,7 +1325,7 @@ else ko "modo_grafico.py no deja bien la cabecera multiboot: $(tail -1 $G/mg.txt
 if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/grub/i386-pc ] && command -v parted > /dev/null; then
   if $AQUI/nucleo32/usb.sh $G/usb.img > $G/usb.txt 2>&1; then
     rm -f $G/monu
-    qemu-system-i386 -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb.sal -no-reboot -device qemu-xhci \
+    qemu-system-i386 -nic none -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb.sal -no-reboot -device qemu-xhci \
       -drive file=$G/usb.img,format=raw,if=none,id=u,snapshot=on -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
     QPID=$!
     monu() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$G/monu > /dev/null 2>&1; sleep "${2:-0.3}"; }
@@ -1295,7 +1339,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 9 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 16 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
@@ -1304,7 +1348,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     else ko "en la memoria USB, el Bloc de notas no se lanza desde el menú:"; sed 's/^/        /' $G/cap.txt | head -3; fi
     # la entrada de 1024 x 600 (la tercera): el modo lo pide la cabecera de ESCRIT6.BIN
     rm -f $G/monu
-    qemu-system-i386 -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb6.sal -no-reboot -device qemu-xhci \
+    qemu-system-i386 -nic none -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb6.sal -no-reboot -device qemu-xhci \
       -drive file=$G/usb.img,format=raw,if=none,id=u,snapshot=on -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
     QPID=$!
     for ((i = 0; i < 40; i++)); do [ -S $G/monu ] && break; sleep 0.1; done
@@ -1319,7 +1363,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     MTOOLS_SKIP_CHECK=1 mtype -i $G/usb.img@@1M ::/boot/grub/grub.cfg > $G/grub.cfg 2> /dev/null
     if grep -q "a la medida de la pantalla" $G/grub.cfg && grep -q "^  set gfxpayload=auto$" $G/grub.cfg && grep -q "^  videoinfo$" $G/grub.cfg \
       && [ "$(grep -c "^  multiboot /ESCRIT" $G/grub.cfg)" = 6 ] && grep -q "multiboot /ESCRIT13.BIN" $G/grub.cfg \
-      && [ "$(grep -c "escritura=usb unidad=X registro" $G/grub.cfg)" = 7 ] && grep -q "multiboot /ESCRIT8.BIN escritorio sindisco sinusb$" $G/grub.cfg; then
+      && [ "$(grep -c "escritura=usb unidad=X registro" $G/grub.cfg)" = 7 ] && grep -q "multiboot /ESCRIT8.BIN escritorio sindisco sinusb sinred sinacpi$" $G/grub.cfg; then
       ok "el menú de GRUB: el escritorio a 800 x 600, «a la medida de la pantalla» (gfxpayload=auto), a 1024 x 600, 1366 x 768 y 1024 x 768, uno sin tocar el USB ni los discos, y los modos de vídeo de la BIOS (videoinfo); las demás, con «escritura=usb unidad=X registro»"
     else ko "el menú de GRUB de la memoria USB no trae las entradas nuevas"; fi
   else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
@@ -1337,7 +1381,7 @@ fi   # SOLO=06, SOLO=07
 G=$P/graf
 N=$P/n06
 mkdir -p $G $N
-if [ "${SOLO:-}" != 07 ]; then
+if [ "${SOLO:-}" != 07 ] && [ "${SOLO:-}" != 08 ]; then
 echo "== Hispa-Pentium 0.6: los discos SATA (AHCI), las unidades con letra, el permiso de escritura por disco =="
 hechos=1
 for c in 16 32 mbr; do
@@ -1354,6 +1398,39 @@ mira "AHCI: la controladora SATA se encuentra en el bus PCI, IDENTIFY dice el di
 mira "AHCI: se leen sectores por DMA: una carpeta, un archivo de varios clusters (su suma, la de verdad) y programas" "^LARGO.TXT  *17600$" \
   "^archivo: TEXTOS.LARGO.TXT mide 17600 octetos; leídos 17600 a trozos de 777, 400 líneas, suma $suma$" \
   "^hijos: los dos ruidosos han acabado, con los códigos 9 y 9$" "^prueba.bin ha acabado con el código 7" "^hola$" "^eco2.bin ha acabado con el código 1"
+# 1b. lo que ahci.cas apunta para un PC de verdad (la orden «disco» y ARRANQUE.TXT), y
+# los caminos de las averías que en QEMU no se dan: PI a 0 (se miran los puertos de CAP),
+# unos registros que no empiezan en una página (la ABAR del ICH7 va a 1 KB) y la segunda
+# vuelta, reiniciando la controladora y cada puerto (COMRESET), si a la primera no sale el disco
+S=$N/sata.sal
+mira "AHCI: la orden «disco» dice lo que se ha visto: la controladora, CAP/PI/VS y cada puerto (SSTS, TFD, firma)" \
+  "^ahci: controladora 00:0[0-9A-F]\.0, 8086:2922, orden 0107, ABAR " "^ahci: CAP [0-9A-F]*, GHC 80000000, PI 0000003F, VS 00010000" \
+  "^ahci: puerto 0: SSTS 00000113, CMD [0-9A-F]*, TFD 00000050, SIG 00000101$" "^ahci: puerto 0: disco QEMU HARDDISK, 16 MB$"
+ARRANQUE="ahci=pi0 ahci=desalineada ahci=reinicio" SATA=$P/d16.img MODULOS= $AQUI/nucleo32/probar.sh "" disco "dir" apagar > $N/sataav.sal 2>&1
+S=$N/sataav.sal
+mira "AHCI, averías: con PI a 0, con los registros a media página y reiniciando la controladora (GHC.HR y COMRESET), el disco sale igual" \
+  "^ahci: prueba de la base desalineada ([0-9A-F]*100): bien$" "^ahci: PI vale 0: se miran los puertos que dice CAP (0000003F)$" \
+  "^ahci: ningún disco: se reinicia la controladora$" "^ahci: puerto 0: SSTS 00000113, CMD [0-9A-F]*, TFD 0000007F, SIG FFFFFFFF$" \
+  "^ahci: puerto 0: disco QEMU HARDDISK, 16 MB$" "^disco 0: QEMU HARDDISK, 16 MB, FAT16 (SATA)\.$" "^LEEME.TXT  *118$"
+# 1c. el orden de la norma (AHCI 1.3, 10.1.2), lo que no le salía al ICH7 del
+# Toshiba: FRE = 1 antes de mirar TFD y, si el disco sigue ocupado, el COMRESET
+# con FRE = 1 y luego ST = 1 («ahci=ocupado»: como si TFD siguiera en 80h); y la
+# segunda vuelta del ICH6/ICH7 («ahci=ich7»), sin GHC.HR: solo el COMRESET de cada puerto
+ARRANQUE="ahci=ocupado" SATA=$P/d16.img MODULOS= $AQUI/nucleo32/probar.sh "" disco "dir" apagar > $N/sataoc.sal 2>&1
+S=$N/sataoc.sal
+l1=$(grep -n "^ahci: puerto 0: tras FRE=1: SSTS 00000113, TFD [0-9A-F]*, SERR 00000000, CMD [0-9A-F]*, SIG 00000101$" $S | head -1 | cut -d: -f1)
+l2=$(grep -n "^ahci: puerto 0: tras COMRESET: SSTS 00000113, TFD [0-9A-F]*, SERR 00000000" $S | head -1 | cut -d: -f1)
+l3=$(grep -n "^ahci: puerto 0: tras ST=1: SSTS 00000113, TFD [0-9A-F]*, SERR 00000000, CMD [0-9A-F]*[13579BDF], SIG 00000101$" $S | head -1 | cut -d: -f1)
+if [ -n "$l1" ] && [ -n "$l2" ] && [ -n "$l3" ] && [ "$l1" -lt "$l2" ] && [ "$l2" -lt "$l3" ] && grep -q "^ahci: puerto 0: disco QEMU HARDDISK, 16 MB$" $S \
+  && grep -q "^LEEME.TXT  *118$" $S && ! grep -q "se reinicia la controladora" $S; then
+  ok "AHCI, el orden de la norma: FRE=1 antes de mirar TFD; con el disco ocupado, COMRESET (con FRE=1) y luego ST=1; cada paso, apuntado (SSTS, TFD, SERR); el disco sale y se lee"
+else ko "AHCI: el orden FRE=1, COMRESET, ST=1 no sale así ($l1, $l2, $l3):"; grep "^ahci: puerto 0" $S | sed 's/^/        /' | head -6; fi
+ARRANQUE="ahci=reinicio ahci=ich7" SATA=$P/d16.img MODULOS= $AQUI/nucleo32/probar.sh "" disco "dir" apagar > $N/sataich7.sal 2>&1
+S=$N/sataich7.sal
+if grep -q "^ahci: ningún disco: COMRESET de cada puerto (en el ICH6/ICH7, sin reiniciar la controladora)$" $S && ! grep -q "se reinicia la controladora\|^ahci: reiniciada" $S \
+  && grep -q "^ahci: puerto 0: tras COMRESET: SSTS 00000113" $S && grep -q "^ahci: puerto 0: disco QEMU HARDDISK, 16 MB$" $S && grep -q "^LEEME.TXT  *118$" $S; then
+  ok "AHCI, la segunda vuelta en un ICH6/ICH7: sin GHC.HR (que en el Toshiba deja los puertos sin enlace), solo el COMRESET de cada puerto; el disco sale"
+else ko "AHCI: la segunda vuelta del ICH7 no va como debe:"; grep "^ahci:" $S | sed 's/^/        /' | head -8; fi
 # 2. escribir en él (FAT32 y la FAT16 de una partición), y que quede sano
 for c in 32 mbr; do
   case $c in 32) que="FAT32" ;; mbr) que="FAT16 en una partición" ;; esac
@@ -1528,7 +1605,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
       case $hc in xhci) dev="qemu-xhci,id=u"; que="xHCI" ;; ehci) dev="usb-ehci,id=u"; que="EHCI" ;; esac
       cp $G/usb.img $N/g$hc.img
       rm -f $G/monu
-      qemu-system-i386 -m 64 -machine pc,i8042=off -display none -monitor unix:$G/monu,server,nowait -serial file:$N/g$hc.sal -no-reboot -device $dev \
+      qemu-system-i386 -nic none -m 64 -machine pc,i8042=off -display none -monitor unix:$G/monu,server,nowait -serial file:$N/g$hc.sal -no-reboot -device $dev \
         -drive file=$N/g$hc.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1 -device usb-kbd,bus=u.0 -device usb-mouse,bus=u.0 > /dev/null 2>&1 &
       QPID=$!
       monu() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$G/monu > /dev/null 2>&1; sleep "${2:-0.3}"; }
@@ -1556,7 +1633,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     # la sexta entrada, «sin tocar el USB ni los discos»: como la 0.5 (con el
     # teclado y el ratón PS/2, y los programas de la unidad en memoria)
     rm -f $G/monu
-    qemu-system-i386 -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$N/gsin.sal -no-reboot -device qemu-xhci \
+    qemu-system-i386 -nic none -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$N/gsin.sal -no-reboot -device qemu-xhci \
       -drive file=$G/usb.img,format=raw,if=none,id=u,snapshot=on -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
     QPID=$!
     for ((i = 0; i < 40; i++)); do [ -S $G/monu ] && break; sleep 0.1; done
@@ -1566,9 +1643,9 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 9 archivos que ha traído el cargador hacen de unidad M:" $S \
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 16 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
-      ok "la entrada «sin tocar el USB ni los discos»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
+      ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
   else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
 else
@@ -1634,6 +1711,7 @@ fi   # SOLO=07
 # del disco (GRUB en el MBR y en el hueco de delante de la partición) y el
 # asistente del primer arranque (uasiste.cas). Lo que se instala (el núcleo,
 # los programas, BOOT.IMG y CORE.IMG) sale de la memoria USB que hace usb.sh.
+if [ "${SOLO:-}" != 08 ]; then
 echo "== Hispa-Pentium 0.7: instalar en el disco duro (INSTALAR), arrancar de él y el asistente del primer arranque =="
 if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/grub/i386-pc ] && command -v parted > /dev/null; then
 Z=$P/n07
@@ -1649,8 +1727,10 @@ done
 mcopy -n -i $G/usb.img@@1M ::SEMILLA.BIN $K/SEMILLA.BIN > /dev/null 2>&1
 # (y dos archivos para otra carpeta, como los de la oficina: CARPETAS.TXT
 # dice adónde va cada uno, y él no se instala)
-head -c 3000 /dev/urandom > $K/UNO.DAT; printf 'el dos\r\n' > $K/DOS.TXT; printf 'UNO.DAT=COSAS\r\ndos.txt=cosas\r\n' > $K/CARPETAS.TXT
-INST=$INST,$K/UNO.DAT,$K/DOS.TXT,$K/CARPETAS.TXT
+head -c 3000 /dev/urandom > $K/UNO.DAT; printf 'el dos\r\n' > $K/DOS.TXT; printf 'UNO.DAT=COSAS\r\ndos.txt=cosas\r\nBLOC.PQI=HISPA\\PAQUETES\r\n' > $K/CARPETAS.TXT
+# (y el registro de un paquete, que va dentro de \HISPA: a \HISPA\PAQUETES)
+mcopy -n -i $G/usb.img@@1M ::INSTALA/PAQUETES/BLOC.PQI $K/BLOC.PQI > /dev/null 2>&1
+INST=$INST,$K/UNO.DAT,$K/DOS.TXT,$K/BLOC.PQI,$K/CARPETAS.TXT
 # instala con el núcleo arrancado por QEMU (-kernel) y lo que se instala como
 # módulos (la unidad M:, como con la entrada de la memoria USB): el disco
 # (SATA; con IDE=1, IDE), el nombre de lo que sale y las teclas
@@ -1684,7 +1764,8 @@ instalado() {
     for f in UNO.DAT DOS.TXT; do
       rm -f $Z/f.bin; mcopy -n -i $Z/vol.img ::COSAS/$f $Z/f.bin > /dev/null 2>&1; cmp -s $Z/f.bin $K/$f || { bien=0; echo "distinto: COSAS/$f" >> $Z/fsck.txt; }
     done
-    mdir -i $Z/vol.img ::HISPA 2> /dev/null | grep -q "^UNO \|^DOS \|^CARPETAS" && { bien=0; echo "en HISPA hay lo que no toca" >> $Z/fsck.txt; }
+    mdir -i $Z/vol.img ::HISPA 2> /dev/null | grep -q "^UNO \|^DOS \|^CARPETAS\|^BLOC  *PQI" && { bien=0; echo "en HISPA hay lo que no toca" >> $Z/fsck.txt; }
+    rm -f $Z/f.bin; mcopy -n -i $Z/vol.img ::HISPA/PAQUETES/BLOC.PQI $Z/f.bin > /dev/null 2>&1; cmp -s $Z/f.bin $K/BLOC.PQI || { bien=0; echo "distinto: HISPA/PAQUETES/BLOC.PQI" >> $Z/fsck.txt; }
   fi
   # el arranque: el primer sector de GRUB en el MBR (sus 440 octetos) y el resto desde el sector 1
   cmp -s -n 440 $1 $K/BOOT.IMG || { bien=0; echo "el MBR no lleva BOOT.IMG" >> $Z/fsck.txt; }
@@ -1696,7 +1777,7 @@ tabla() { parted -s $1 unit s print 2> /dev/null | sed -n '/^Partition Table/p; 
 # 1. un disco SATA en blanco: la bienvenida, la ayuda, elegir el disco, instalar
 truncate -s 300M $Z/blanco.img
 instala $Z/blanco.img blanco ":texto i1" ":tecla f1" ":texto i2" ":tecla ret" ":tecla ret" ":texto i3" ":tecla ret" ":texto i4" ":tecla ret" ":pausa 5" ":texto i5" ":tecla ret"
-if grep -q "Instalación de Hispa-Pentium 0.7" $Z/i1.txt && grep -q "Bienvenido a la instalación de Hispa-Pentium" $Z/i1.txt && grep -q "INTRO=Continuar   F1=Ayuda   F3=Salir" $Z/i1.txt \
+if grep -q "Instalación de Hispa-Pentium 0.8" $Z/i1.txt && grep -q "Bienvenido a la instalación de Hispa-Pentium" $Z/i1.txt && grep -q "INTRO=Continuar   F1=Ayuda   F3=Salir" $Z/i1.txt \
   && grep -q "La memoria USB de arranque no se toca" $Z/i1.txt && grep -q "^|   Ayuda$" $Z/i2.txt && grep -q "hay que confirmarlo dos veces" $Z/i2.txt; then
   ok "INSTALAR: la pantalla azul de bienvenida (el título, el pie con INTRO=Continuar, F1=Ayuda y F3=Salir) y la ayuda (F1)"
 else ko "INSTALAR: la bienvenida o la ayuda no salen como deben:"; sed 's/^/        /' $Z/i1.txt | head -8; fi
@@ -1714,9 +1795,10 @@ if volumen $Z/blanco.img 2048 && instalado $Z/blanco.img && grep -q "^Partition 
   && grep -q "^ 1 2048s 614399s 612352s primary fat32 boot, lba" $Z/tabla.txt; then
   ok "el disco instalado: una partición FAT32 arrancable en el MBR, sana para fsck.fat, con el sistema en \\HISPA igual que el original y GRUB en el MBR y en el hueco de delante"
 else ko "el disco instalado no queda bien:"; cat $Z/tabla.txt $Z/fsck.txt | sed 's/^/        /' | head -8; fi
-if grep -q "^instalar: copiado UNO.DAT (3000 octetos) a .COSAS$" $S && grep -q "^instalar: copiado DOS.TXT (8 octetos) a .COSAS$" $S && grep -q "^instalar: 14 archivos que instalar$" $S \
-  && [ "$(mdir -b -i $Z/vol.img ::COSAS 2> /dev/null | tr '\n' ' ')" = "::/COSAS/UNO.DAT ::/COSAS/DOS.TXT " ]; then
-  ok "lo que dice CARPETAS.TXT («ARCHIVO.EXT=CARPETA») va a su carpeta de la raíz (C:\\COSAS: así irá la oficina a C:\\OFICINA) y no a \\HISPA; CARPETAS.TXT no se instala"
+if grep -q "^instalar: copiado UNO.DAT (3000 octetos) a .COSAS$" $S && grep -q "^instalar: copiado DOS.TXT (8 octetos) a .COSAS$" $S && grep -q "^instalar: 15 archivos que instalar$" $S \
+  && [ "$(mdir -b -i $Z/vol.img ::COSAS 2> /dev/null | tr '\n' ' ')" = "::/COSAS/UNO.DAT ::/COSAS/DOS.TXT " ] \
+  && grep -q "^instalar: copiado BLOC.PQI ([0-9]* octetos) a .HISPA.PAQUETES$" $S && [ "$(mdir -b -i $Z/vol.img ::HISPA/PAQUETES 2> /dev/null | tr '\n' ' ')" = "::/HISPA/PAQUETES/BLOC.PQI " ]; then
+  ok "lo que dice CARPETAS.TXT («ARCHIVO.EXT=CARPETA») va a su carpeta de la raíz (C:\\COSAS: así irá la oficina a C:\\OFICINA) y no a \\HISPA, y «HISPA\\PAQUETES», dentro de \\HISPA (los registros de lo instalado); CARPETAS.TXT no se instala"
 else ko "lo de CARPETAS.TXT no va a su carpeta:"; mdir -i $Z/vol.img :: 2>&1 | sed 's/^/        /' | head -8; grep "archivos que\|COSAS" $S | sed 's/^/        /' | head -4; fi
 rm -f $Z/cfg.txt; mcopy -n -i $Z/vol.img ::HISPA/GRUB.CFG $Z/cfg.txt > /dev/null 2>&1
 if grep -q "^set modo=800x600x32,800x600,auto$" $Z/cfg.txt && grep -q "multiboot /HISPA/NUCLEO.BIN escritorio escritura$" $Z/cfg.txt && grep -q "module /HISPA/ORDENES.BIN ORDENES.BIN" $Z/cfg.txt \
@@ -1845,7 +1927,7 @@ espera_menu() {    # espera (hasta 15 s) a que el menú de GRUB esté en la pant
 }
 desde_disco() {    # arranca solo del disco $1 (SATA); lo que sale, a $2
   rm -f $Z/mon
-  qemu-system-i386 -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$2 -no-reboot -rtc base=localtime \
+  qemu-system-i386 -nic none -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$2 -no-reboot -rtc base=localtime \
     -device ahci,id=sata -drive id=dsata,file=$1,format=raw,if=none -device ide-hd,drive=dsata,bus=sata.0,bootindex=1 > /dev/null 2>&1 &
   QPID=$!
   for ((i = 0; i < 40; i++)); do [ -S $Z/mon ] && break; sleep 0.1; done
@@ -1855,7 +1937,7 @@ for hc in xhci ehci; do
   cp $G/usb.img $Z/u$hc.img
   rm -f $Z/d$hc.img; truncate -s 2G $Z/d$hc.img
   rm -f $Z/mon
-  qemu-system-i386 -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$Z/i$hc.sal -no-reboot -rtc base=localtime -device $dev \
+  qemu-system-i386 -nic none -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$Z/i$hc.sal -no-reboot -rtc base=localtime -device $dev \
     -drive file=$Z/u$hc.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1 \
     -device ahci,id=sata -drive id=dsata,file=$Z/d$hc.img,format=raw,if=none -device ide-hd,drive=dsata,bus=sata.0,bootindex=2 > /dev/null 2>&1 &
   QPID=$!
@@ -1875,8 +1957,8 @@ for hc in xhci ehci; do
   wait $QPID 2> /dev/null; QPID=
   tr -d '\r' < $Z/i$hc.sal | iconv -f CP437 -t UTF-8 > $Z/i$hc.txt
   S=$Z/i$hc.txt
-  if grep -q "Instalar Hispa-Pentium 0.7 en el disco duro" $Z/m$hc.txt && grep -q "^| │\*Instalar Hispa-Pentium 0.7 en el disco duro" $Z/m2$hc.txt; then
-    ok "$que: el menú de la memoria USB trae la entrada «Instalar Hispa-Pentium 0.7 en el disco duro» (la última)"
+  if grep -q "Instalar Hispa-Pentium 0.8 en el disco duro" $Z/m$hc.txt && grep -q "^| │\*Instalar Hispa-Pentium 0.8 en el disco duro" $Z/m2$hc.txt; then
+    ok "$que: el menú de la memoria USB trae la entrada «Instalar Hispa-Pentium 0.8 en el disco duro» (la última)"
   else ko "$que: el menú de la memoria USB no trae la entrada de instalar:"; sed 's/^/        /' $Z/m2$hc.txt | head -14; fi
   mira "$que: arrancando de la memoria USB con «instalar», el núcleo lanza INSTALAR con lo que trae el cargador (la unidad M:) y se instala en el disco SATA" \
     "^usb: controladora $que " "^disco 0: QEMU HARDDISK, 2048 MB, sin FAT (SATA)\.$" "la del sistema, M:$" "^lanzo INSTALAR.BIN del disco" \
@@ -1888,6 +1970,13 @@ for hc in xhci ehci; do
   else ko "$que: la memoria USB de arranque se ofrece como disco, o ha cambiado al instalar:"; sed 's/^/        /' $Z/u1$hc.txt | sed -n 5,12p; fi
   if volumen $Z/d$hc.img 2048 && instalado $Z/d$hc.img usb; then ok "$que: el disco de 2 GB queda con su FAT32 sana (fsck.fat), el sistema en \\HISPA y el arranque puesto"
   else ko "$que: el disco instalado desde la memoria USB no queda bien:"; sed 's/^/        /' $Z/fsck.txt | head -6; fi
+  # lo instalado, apuntado para PAQUETES: los registros de los paquetes del sistema, en \HISPA\PAQUETES
+  rm -rf $Z/pqi $Z/pqu; mkdir $Z/pqi $Z/pqu
+  mcopy -n -i $Z/vol.img '::HISPA/PAQUETES/*' $Z/pqi/ > /dev/null 2>&1; mcopy -n -i $G/usb.img@@1M '::INSTALA/PAQUETES/*' $Z/pqu/ > /dev/null 2>&1
+  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
+    && mcopy -n -i $Z/vol.img ::HISPA/PAQUETES.BIN $Z/f.bin > /dev/null 2>&1; then
+    ok "$que: INSTALAR apunta lo que instala: los registros de los 9 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
+  else ko "$que: lo instalado no queda apuntado en C:\\HISPA\\PAQUETES:"; ls $Z/pqi | sed 's/^/        /' | head -10; fi
   # SOLO el disco: el primer arranque
   desde_disco $Z/d$hc.img $Z/a$hc.sal
   espera_menu "Hispa-Pentium: el interprete" a0$hc
@@ -1931,7 +2020,7 @@ for hc in xhci ehci; do
     miracap "al aceptar: «Todo listo», con el saludo; y el reloj de la barra ya marca la hora puesta (el reloj del PC)" a3$hc \
       negrita 154 98 162 106 "Todo listo" negrita 112 176 120 184 "¡Hola, Carlos!" negrita 454 427 462 435 "Empezar" negrita 740 570 760 584 "07:45"
     miracap "el menú Inicio saluda con el nombre («Hola, Carlos») y dice la versión; LEEME.TXT, en los documentos" a4$hc \
-      negrita 54 194 62 202 "Hola, Carlos" texto 54 212 62 220 "Hispa-Pentium, versión 0.7" texto 208 279 216 287 "LEEME.TXT"
+      negrita 54 194 62 202 "Hola, Carlos" texto 54 212 62 220 "Hispa-Pentium, versión 0.8" texto 208 279 216 287 "LEEME.TXT"
     if grep -q "^asistente: guardado HISPA.INI (Carlos, Toshiba)$" $S && [ "$(tr -d '\r' < $Z/ini.txt | tr '\n' '|')" = "[hispa]|usuario=Carlos|equipo=Toshiba|teclado=es|modo=1024x600|" ] \
       && grep -q "^set modo=1024x600x32,1024x600,auto$" $Z/cfg.txt && [ "$(grep -c '^set modo=' $Z/cfg.txt)" = 1 ] && [ $sano = 0 ]; then
       ok "lo guardado: C:\\HISPA\\HISPA.INI (usuario, equipo, teclado y modo) y la medida de la pantalla en el menú de arranque (GRUB.CFG); el disco, sano"
@@ -1959,10 +2048,17 @@ for hc in xhci ehci; do
     espera_menu "Hispa-Pentium: el interprete" b0$hc; teclas down ret
     espera_a "lanzo ORDENES.BIN" 40 $Z/b$hc.sal; sleep 1
     teclas v e r ret d i r spc backslash h i s p a backslash h i s p a dot i n i ret; sleep 1.5; textoz b1$hc
+    # y PAQUETES, en el sistema instalado: lo instalado, y que sus archivos son los que se instalaron
+    teclas c l s ret p a q u e t e s spc l i s t a ret p a q u e t e s spc c o m p r u e b a ret
+    espera_a "^Los archivos de los\|no est.n como se instalaron" 60 $Z/b$hc.sal; sleep 0.5; textoz b2$hc
     monz quit 0.5; wait $QPID 2> /dev/null; QPID=
-    if grep -q "Hispa-Pentium 0.7: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
+    if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -8; fi
+    if grep -q "^|  base      0.8     El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|9 paquetes\.$" $Z/b2$hc.txt \
+      && grep -q "^|Los archivos de los 9 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
+      ok "PAQUETES en el sistema recién instalado: LISTA dice los 9 paquetes del sistema (base, oficina...) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
+    else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -12; fi
     # la oficina, en el disco instalado: el grupo «Oficina» del menú Inicio
     # (Facturas, con C:\\HISPA\\HVPRUN.BIN) y Mi equipo abriendo Cuentas de C:\\OFICINA
     desde_disco $Z/d$hc.img $Z/c$hc.sal
@@ -1996,6 +2092,500 @@ else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba la instalación en el disco)"
 fi
+fi   # SOLO=08
+
+# ------------------------------------------------- 11. El USB en caliente
+# Lo que se enchufa y se desenchufa con el equipo en marcha (usbcal.cas),
+# por el monitor de QEMU: «:monitor drive_add ...» y «:monitor device_add
+# usb-storage...» enchufan una memoria; «:monitor device_del ...», la quitan.
+if parte08 caliente; then
+echo "== Hispa-Pentium 0.8: el USB en caliente (enchufar y quitar memorias, teclados, ratones y concentradores en marcha) =="
+Q=$P/n08
+mkdir -p $Q $G
+[ -f $P/d16.img ] || $AQUI/nucleo32/disco.sh $P/d16.img 16 > $P/disco16.txt 2>&1
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $Q/semilla.asm > /dev/null 2>&1 && nasm -f bin $Q/semilla.asm -o $Q/SEMILLA.BIN
+# una memoria con un texto, y otras vacías (FAT16, 16 MB)
+memoria() { rm -f $1; dd if=/dev/zero of=$1 bs=1M count=16 status=none; mkfs.fat -F 16 -n ${2:-MEMORIA} $1 > /dev/null; }
+memoria $Q/m1.img MEMORIA1
+printf 'hola desde la memoria enchufada\r\n' > $Q/HOLA.TXT
+MTOOLS_SKIP_CHECK=1 mcopy -i $Q/m1.img $Q/HOLA.TXT ::HOLA.TXT
+# 1 y 2. en xHCI y en EHCI, con el intérprete de órdenes (del disco IDE) y sin
+# teclado ni ratón PS/2: un teclado que llega (y se va, y vuelve); una
+# memoria que se lee y que se quita a lo bruto con un archivo abierto (PRUEBA
+# abierto); otra, que se escribe y se quita con seguridad; y en el xHCI, un
+# concentrador con un teclado y un ratón detrás, que se quita entero
+for hc in xhci ehci; do
+  case $hc in xhci) dev="qemu-xhci,id=u"; que="xHCI" ;; ehci) dev="usb-ehci,id=u"; que="EHCI" ;; esac
+  cp $P/d16.img $Q/c$hc.img; cp $Q/m1.img $Q/a$hc.img; memoria $Q/b$hc.img MEMORIA2
+  CONC=(":pausa 0.1")
+  [ $hc = xhci ] && CONC=(":monitor device_del k1" ":pausa 2" ":monitor device_add usb-hub,bus=u.0,port=3,id=h1" ":pausa 2" ":monitor device_add usb-kbd,bus=u.0,port=3.1,id=k2" \
+    ":monitor device_add usb-mouse,bus=u.0,port=3.2,id=r2" ":pausa 3" "eco dos" ":monitor device_del h1" ":pausa 2" ":monitor device_add usb-kbd,bus=u.0,id=k1" ":pausa 2")
+  ESCRIBE=1 DISCO=$Q/c$hc.img MODULOS= MAQUINA=pc,i8042=off ARRANQUE=ordenes QEMU_MAS="-device $dev" \
+    $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 1" ":monitor device_add usb-kbd,bus=u.0,id=k1" ":pausa 2" "eco uno" \
+    ":monitor drive_add 0 if=none,id=ma,file=$Q/a$hc.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=ma,id=mema" ":pausa 3" \
+    "type w:\\hola.txt" "prueba abierto w:\\hola.txt" ":pausa 1" ":monitor device_del mema" ":pausa 2" ":tecla ret" ":pausa 1" "dir w:" \
+    "${CONC[@]}" ":monitor drive_add 0 if=none,id=mb,file=$Q/b$hc.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=mb,id=memb" ":pausa 3" \
+    "copy textos\\largo.txt w:\\largo.txt" "md w:\\nueva" "copy leeme.txt w:\\nueva\\leeme.txt" "eco tres" salir "quitar w" "disco" \
+    ":monitor device_del memb" ":pausa 2" usb apagar > $Q/$hc.sal 2>&1
+  S=$Q/$hc.sal
+  mira "$que: un teclado USB enchufado con el intérprete en marcha teclea al momento" \
+    "usb: se enchufa el aparato 0, 0627:0001, velocidad [a-z]*, en el puerto [0-9] ($que); teclado$" "eco uno$" "^uno$"
+  mira "$que: una memoria enchufada en marcha sale como W: (y el aviso) y se lee" \
+    "($que); almacenamiento$" "^disco 1: QEMU    QEMU HARDDISK, 16 MB (USB), recién enchufado, W: (FAT16)\.$" "usb: aviso: Memoria USB conectada: W:$" \
+    "^hola desde la memoria enchufada$"
+  mira "$que: quitada a lo bruto con un archivo abierto: el programa ve errores y sigue, y la unidad ya no está" \
+    "^abierto: leídos 16 octetos; pulse una tecla$" "usb: aviso: Memoria USB desconectada sin «quitar con seguridad»: W:$" "^abierto: al leer otra vez: el disco falla$" \
+    "^abierto: al escribir: el disco falla$" "^abierto: al abrirlo otra vez: no hay disco" "^abierto: sigo en marcha, y acabo$" "^No puedo abrir w:: no hay disco"
+  if [ $hc = xhci ]; then
+    mira "$que: un concentrador enchufado en marcha, con un teclado y un ratón detrás: el teclado teclea; y al quitarlo se va todo, y otro teclado vuelve a ir" \
+      "usb: se desenchufa el aparato 0$" ": concentrador de 8 puertos$" "en el puerto 1 del concentrador [0-9]*; teclado$" "en el puerto 2 del concentrador [0-9]*; ratón$" \
+      "usb: 1 teclados, 1 ratones\.$" "^dos$" "usb: 1 teclados, 0 ratones\.$" "^tres$"
+  else
+    mira "$que: el teclado sigue tecleando después de quitar y enchufar memorias" "^tres$"
+  fi
+  mira "$que: la otra memoria (W: otra vez) se escribe y se quita con seguridad: «Ya puede quitar la memoria W:»" \
+    "^ *1 archivo(s) copiado(s)\.$" "^> quitar w$" "^disco 1: quitado con seguridad\.$" "usb: aviso: Ya puede quitar la memoria W:$"
+  saca $Q/b$hc.img LARGO.TXT $Q/largo$hc.txt; saca $Q/b$hc.img NUEVA/LEEME.TXT $Q/leeme$hc.txt
+  if sano $Q/b$hc.img && sano $Q/a$hc.img && [ "$(wc -c < $Q/largo$hc.txt 2> /dev/null)" = 17600 ] && [ -s $Q/leeme$hc.txt ] && [ "$(grep -c "sin «quitar con seguridad»" $S)" = 1 ]; then
+    ok "$que: lo escrito está en la memoria quitada con seguridad, y las dos quedan sanas (fsck.fat)"
+  else ko "$que: la memoria quitada con seguridad no queda bien:"; sed 's/^/        /' $P/fsck.txt | head -6; fi
+done
+# 3. un teclado de USB 1.1 enchufado en un EHCI con compañeras: va a la UHCI
+cp $P/d16.img $Q/cu.img
+ESCRIBE=1 DISCO=$Q/cu.img MODULOS= MAQUINA=pc,i8042=off ARRANQUE=ordenes QEMU_MAS="-device ich9-usb-ehci1,id=u -device ich9-usb-uhci1,masterbus=u.0,firstport=0 -device ich9-usb-uhci2,masterbus=u.0,firstport=2" \
+  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 1" ":monitor device_add usb-kbd,bus=u.0,port=1,usb_version=1,id=k1" ":pausa 3" "eco uno" \
+  ":monitor device_del k1" ":pausa 2" ":monitor device_add usb-kbd,bus=u.0,port=3,usb_version=1,id=k2" ":pausa 3" "eco dos" salir apagar > $Q/uhci.sal 2>&1
+S=$Q/uhci.sal
+mira "UHCI: un teclado de USB 1.1 enchufado en marcha en un puerto del EHCI pasa a su compañera y teclea; quitado y enchufado en otro, también" \
+  "usb: se enchufa el aparato 0, 0627:0001, velocidad plena, en el puerto 1 (UHCI); teclado$" "^uno$" "usb: se desenchufa el aparato 0$" "^dos$"
+# 4. la memoria del sistema (X:, de la que se ha arrancado) no se deja quitar
+cp $P/d16.img $Q/x.img
+ESCRIBE=1 MODULOS= ARRANQUE="escritura=usb unidad=X" QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/x.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu" \
+  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN "quitar x" "quitar c" "disco" apagar > $Q/x.sal 2>&1
+S=$Q/x.sal
+mira "la memoria del sistema (X:) no se deja quitar con seguridad: lo dice, y sigue montada" \
+  "usb: aviso: X: es la memoria del sistema: no se puede quitar$" "usb: aviso: No hay unidad C:$" "^unidades: X: (disco 0, USB, FAT16); la del sistema, X:$"
+# 5. en el escritorio (EHCI, con el teclado USB y sin ratón): un ratón que
+# llega abre Mi equipo; una memoria que llega sale en Mi equipo (que se pone
+# al día solo), en el globo de los avisos y en la bandeja; «Quitar con
+# seguridad» desde Mi equipo (botón secundario en la unidad) y desde la bandeja
+cp $P/d16.img $Q/ce.img; cp $Q/m1.img $Q/ea.img; memoria $Q/eb.img MEMORIA3
+CAPTURAS=$G ESCRIBE=1 DISCO=$Q/ce.img MODULOS= MAQUINA=pc,i8042=off ARRANQUE="escritorio escritura" QEMU_MAS="-device usb-ehci,id=u -device usb-kbd,bus=u.0" \
+  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":monitor device_add usb-mouse,bus=u.0,id=r1" ":pausa 2" ":doble 62 30" ":pausa 2" \
+  ":monitor drive_add 0 if=none,id=ma,file=$Q/ea.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=ma,id=mema" ":pausa 2.5" ":captura u1" \
+  ":clicd 300 240" ":pausa 0.5" ":captura u2" ":clic 360 281" ":pausa 1.5" ":captura u3" ":monitor device_del mema" ":pausa 2" \
+  ":monitor drive_add 0 if=none,id=mb,file=$Q/eb.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=mb,id=memb" ":pausa 2.5" ":raton 600 450" ":pausa 6" \
+  ":clic 720 583" ":pausa 0.5" ":captura u4" ":clic 680 549" ":pausa 1.5" ":captura u5" ":monitor device_del memb" ":pausa 2" > $Q/escritorio.sal 2>&1
+S=$Q/escritorio.sal
+mira "escritorio: un ratón USB enchufado en marcha mueve la flecha y abre Mi equipo con dos clics" \
+  "usb: se enchufa el aparato 1, 0627:0001, velocidad alta, en el puerto 2 (EHCI); ratón$" "^escritorio: lanzo .EQUIPO.BIN"
+miracap "escritorio: la memoria que llega sale en el globo de los avisos, en la bandeja (su icono) y en Mi equipo, que se pone al día solo" u1 \
+  texto 570 532 590 548 "Memoria USB conectada: W:" negrita 570 510 590 526 "USB" negrita 160 210 175 225 "Unidad W:" rgb 721 585 2463C2 40
+miracap "escritorio: Mi equipo, botón secundario en la memoria: «Abrir» y «Quitar con seguridad»" u2 texto 305 270 320 290 "Quitar con seguridad"
+miracap "escritorio: quitada con seguridad desde Mi equipo: el globo «Ya puede quitar la memoria W:», y en Mi equipo ya no está" u3 \
+  texto 540 532 600 548 "Ya puede quitar la memoria W:" texto 90 392 110 410 "Ya puede quitar la memoria W:." notexto 150 140 200 400 "Unidad W:"
+miracap "escritorio: el icono de la bandeja saca «Quitar con seguridad W:» de la otra memoria" u4 texto 580 535 600 560 "Quitar con seguridad W:"
+mira "escritorio: y desde la bandeja también se quita con seguridad; las dos memorias quedan sanas" \
+  "^escritorio: globo: Ya puede quitar la memoria W:$" "^disco 1: quitado con seguridad\.$"
+if [ "$(grep -c "^escritorio: globo: Ya puede quitar la memoria W:$" $S)" = 2 ] && ! grep -q "sin «quitar con seguridad»" $S && sano $Q/ea.img && sano $Q/eb.img; then
+  ok "escritorio: las dos memorias se han quitado con seguridad (ninguna «a lo bruto») y quedan sanas (fsck.fat)"
+else ko "escritorio: las memorias no se han quitado con seguridad, o no quedan sanas:"; grep "globo\|aviso" $S | sed 's/^/        /' | head -8; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin el USB en caliente)"
+fi   # el USB en caliente
+
+# ------------------------------------------------- 12. Hispa-Pentium 0.8: los paquetes
+# El programa PAQUETES (upaquete.cas) en un sistema «instalado» (un disco SATA
+# con C:\HISPA y su base de lo instalado, C:\HISPA\PAQUETES) y una memoria USB
+# (X:) con paquetes .HPQ y su CATALOGO.TXT, hechos con tools/hpq.py: instalar
+# con dependencias (de un archivo y por su nombre), actualizar, lo que no
+# vale (una suma mala, un conflicto, quitar lo que otro necesita), quitar,
+# comprobar lo instalado, un corte a mitad (se deshace al volver) y el gancho
+# de la red (con un DESCARGA de mentira). Después de cada paso, fsck.fat y
+# mtools miran el disco desde fuera.
+if parte08 paquetes; then
+echo "== Hispa-Pentium 0.8: los paquetes (PAQUETES, .HPQ): instalar con dependencias, actualizar, quitar, deshacer un corte =="
+Q=$P/n08p
+mkdir -p $Q/f/paq
+HPQ="python3 -I $AQUI/../tools/hpq.py"
+export MTOOLS_SKIP_CHECK=1
+hechos=1
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $Q/semilla.asm > /dev/null 2>&1 && nasm -f bin $Q/semilla.asm -o $Q/SEMILLA.BIN || hechos=0
+for p in uordenes:ORDENES upaquete:PAQUETES uactual:ACTUALIZ uhola:HOLA; do
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/${p%%:*}.cas -o $Q/${p%%:*}.asm > /dev/null 2>&1 && nasm -f bin $Q/${p%%:*}.asm -o $Q/f/${p##*:}.BIN || hechos=0
+done
+# un DESCARGA de mentira, para el gancho de la red: «DESCARGA http://prueba/ARCHIVO
+# DESTINO» copia X:\PAQUETES\ARCHIVO a DESTINO (el de verdad lo trae por HTTP)
+cat > $Q/udescar.cas <<'CAS'
+módulo UDescar
+    modelo usuario
+    importar Llamadas, Textos32
+    variable a: arreglo [400] de byte
+    variable url: arreglo [200] de byte
+    variable destino: arreglo [200] de byte
+    variable origen: arreglo [200] de byte
+    variable trozo: arreglo [4096] de byte
+    función principal(): byte
+        variable m, s, n: nat32
+        argumentos(a, 400)
+        si no palabra(a, 0, url, 200) o no palabra(a, 1, destino, 200) entonces devolver 2 fin
+        si no empieza_por(url, "http://prueba/") entonces devolver 3 fin
+        copiar(origen, "X:\\PAQUETES\\")
+        concatenar(origen, dirección(url[14]))
+        m := abrir(origen)
+        si es_error(m) entonces devolver 4 fin
+        s := crear(destino)
+        si es_error(s) entonces devolver 5 fin
+        n := leer(m, trozo, 4096)
+        mientras no es_error(n) y n > 0 hacer
+            escribir_archivo(s, trozo, n)
+            n := leer(m, trozo, 4096)
+        fin
+        cerrar(s)
+        cerrar(m)
+        escribir("descarga (de prueba): ", url, " -> ", destino, "\n")
+        devolver 0
+    fin
+fin UDescar.
+CAS
+python3 -I $AQUI/ccastel.py $Q/udescar.cas -o $Q/udescar.asm -I $AQUI/nucleo32 > /dev/null 2>&1 && nasm -f bin $Q/udescar.asm -o $Q/f/DESCARGA.BIN || hechos=0
+# los paquetes de prueba: letras (1.0 y 1.1), saludo (1.0, que necesita
+# letras >= 1.0, base y el núcleo; 2.0, que necesita letras >= 1.1, cambia
+# un archivo, trae otro y deja de traer el grande), choque (no puede estar con
+# saludo) y malo (con un octeto cambiado: su suma no es la suya)
+F=$Q/f
+printf 'letras A\r\n' > $F/A.TXT; printf 'letras B (1.0)\r\n' > $F/B.TXT; printf 'letras B (1.1)\r\n' > $F/B11.TXT
+printf 'saludo, la 2\r\n' > $F/S2.TXT; head -c 70000 /dev/urandom > $F/GRANDE.DAT
+( cd $F
+  $HPQ crea BASE.HPQ --nombre base --version 0.7 --descripcion 'El sistema base (de prueba)' ORDENES.BIN='\HISPA\ORDENES.BIN' PAQUETES.BIN='\HISPA\PAQUETES.BIN' DESCARGA.BIN='\HISPA\DESCARGA.BIN'
+  $HPQ registro BASE.HPQ BASE.PQI
+  $HPQ crea paq/LETRAS1.HPQ --nombre letras --version 1.0 --descripcion 'Unas letras' A.TXT='\DOCS\LETRAS\A.TXT' B.TXT='\DOCS\LETRAS\B.TXT'
+  $HPQ crea paq/LETRAS11.HPQ --nombre letras --version 1.1 --descripcion 'Unas letras, mejores' A.TXT='\DOCS\LETRAS\A.TXT' B11.TXT='\DOCS\LETRAS\B.TXT'
+  $HPQ crea paq/SALUDO1.HPQ --nombre saludo --version 1.0 --descripcion 'Un programa que saluda' --necesita 'letras >= 1.0, base >= 0.7, nucleo >= 0.7' HOLA.BIN='\HISPA\SALUDO.BIN' GRANDE.DAT='\HISPA\SALUDO.DAT'
+  $HPQ crea paq/SALUDO2.HPQ --nombre saludo --version 2.0 --descripcion 'Un programa que saluda (la 2)' --necesita 'letras >= 1.1, nucleo >= 0.7' HOLA.BIN='\HISPA\SALUDO.BIN' S2.TXT='\HISPA\SALUDO.TXT'
+  $HPQ crea paq/CHOQUE.HPQ --nombre choque --version 1.0 --descripcion 'No puede estar con saludo' --choca 'saludo' A.TXT='\CHOQUE.TXT'
+  $HPQ catalogo paq
+  $HPQ crea paq/MALO.HPQ --nombre malo --version 1.0 --descripcion 'Estropeado' A.TXT='\MALO1.TXT' GRANDE.DAT='\MALO2.DAT'
+  python3 -I -c "
+d = bytearray(open('paq/MALO.HPQ', 'rb').read()); d[-5000] ^= 1; open('paq/MALO.HPQ', 'wb').write(d)"
+  $HPQ registro paq/SALUDO1.HPQ SALUDO1.PQI; $HPQ registro paq/SALUDO2.HPQ SALUDO2.PQI ) > $Q/hpq.txt 2>&1 || hechos=0
+# el disco del sistema (FAT32, con C:\HISPA y lo instalado: base 0.7) y la memoria USB
+mkfs.fat -F 32 -s 1 -n HISPA -C $Q/sis.img 65536 > /dev/null && mmd -i $Q/sis.img ::HISPA ::HISPA/PAQUETES \
+  && mcopy -i $Q/sis.img $F/ORDENES.BIN $F/PAQUETES.BIN $F/DESCARGA.BIN ::HISPA/ && mcopy -i $Q/sis.img $F/BASE.PQI ::HISPA/PAQUETES/ || hechos=0
+mkfs.fat -F 16 -n MEMORIA -C $Q/usb.img 16384 > /dev/null && mmd -i $Q/usb.img ::PAQUETES && mcopy -i $Q/usb.img $F/paq/* ::PAQUETES/ || hechos=0
+if [ $hechos = 1 ] && $HPQ mira $F/paq/SALUDO1.HPQ > $Q/mira.txt && ! $HPQ mira $F/paq/MALO.HPQ > $Q/mira2.txt && grep -q '^paquete=saludo 2.0 SALUDO2.HPQ 1[0-9]* [0-9a-f]\{64\} Un programa que saluda (la 2)' $F/paq/CATALOGO.TXT \
+  && grep -q 'MALO2.DAT  *70000  MAL' $Q/mira2.txt && head -1 $F/BASE.PQI | grep -q '^HPQ 1'; then
+  ok "tools/hpq.py: hace los paquetes (crea), su catálogo (CATALOGO.TXT, con el tamaño y el SHA-256 de cada .HPQ), los registros (.PQI) y mira las sumas (la de MALO.HPQ, mal)"
+else ko "tools/hpq.py no hace bien los paquetes de prueba:"; tail -4 $Q/hpq.txt | sed 's/^/        /'; fi
+# PAQUETES en el sistema del disco $1, con la memoria USB: lo que sale, a $Q/$2.sal (y en $S)
+paq() {
+  local d=$1 n=$2; shift 2
+  ESCRIBE=1 SATA=$d MEMORIA=64 MODULOS= ARRANQUE=ordenes QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/usb.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
+    $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 2" "$@" ":pausa 1" > $Q/$n.sal 2>&1
+  S=$Q/$n.sal
+}
+# lo que hay en el disco: la lista entera de mdir y fsck.fat; sin restos de una instalación
+lista_de() { mdir -/ -b -i $1 :: 2> /dev/null | sort; }
+sin_restos() { ! lista_de $1 | grep -q 'HPQ[0-9]*\.\(NUE\|VIE\)\|DIARIO\.TXT\|HECHO\.TXT'; }
+igual_en() { rm -f $Q/x.bin; mcopy -n -i $1 "::$2" $Q/x.bin > /dev/null 2>&1 && cmp -s $Q/x.bin $3; }
+
+# 1. lo instalado, el catálogo de la memoria USB (lo encuentra solo: X:\PAQUETES)
+# e instalar un archivo de paquete de la memoria, con lo que necesita (del catálogo)
+cp $Q/sis.img $Q/s1.img
+paq $Q/s1.img uno "paquetes lista" "paquetes catalogo" 'paquetes instala x:\paquetes\saludo1.hpq' ":pausa 3" "paquetes lista" saludo
+mira "PAQUETES LISTA: lo apuntado en C:\\HISPA\\PAQUETES (base 0.7); CATALOGO: lo de la memoria USB (X:\\PAQUETES, que encuentra solo), cada uno con su versión más nueva" \
+  "^  base      0.7     El sistema base (de prueba)$" "^1 paquetes\.$" "^Paquetes que hay en X:.PAQUETES.:$" "^  letras    1\.1  *Unas letras, mejores$" \
+  "^  saludo    2\.0  *Un programa que saluda (la 2)$"
+mira "PAQUETES INSTALA X:\\PAQUETES\\SALUDO1.HPQ: antes, lo que necesita (letras, la más nueva del catálogo; base y el núcleo ya están), comprobando las sumas de todo; y el programa nuevo se lanza por su nombre (PATH con C:\\HISPA)" \
+  "^Se va a instalar: letras 1\.1, saludo 1\.0$" "^Las sumas (SHA-256) de todos los archivos están bien\.$" "^  instalado letras 1\.1$" "^  instalado saludo 1\.0$" "^Hecho\.$" \
+  "^  saludo    1\.0     Un programa que saluda$" "^3 paquetes\.$" "^hola desde el anillo 3" "^(C:.HISPA.SALUDO.BIN ha acabado con el código 3)$"
+if sano $Q/s1.img && sin_restos $Q/s1.img && igual_en $Q/s1.img HISPA/SALUDO.BIN $F/HOLA.BIN && igual_en $Q/s1.img HISPA/SALUDO.DAT $F/GRANDE.DAT \
+  && igual_en $Q/s1.img DOCS/LETRAS/A.TXT $F/A.TXT && igual_en $Q/s1.img DOCS/LETRAS/B.TXT $F/B11.TXT && igual_en $Q/s1.img HISPA/PAQUETES/SALUDO.PQI $F/SALUDO1.PQI; then
+  ok "lo instalado, desde fuera: fsck.fat da el disco por sano, los archivos son los del paquete octeto a octeto (también en carpetas nuevas: C:\\DOCS\\LETRAS), el registro es la cabecera del paquete y no quedan restos (ni HPQ*.NUE, ni .VIE, ni el diario)"
+else ko "lo instalado no queda bien en el disco:"; lista_de $Q/s1.img | sed 's/^/        /' | head -14; tail -3 $P/fsck.txt | sed 's/^/        /'; fi
+
+# 2. por su nombre, del catálogo (la versión más nueva, con lo que necesita)
+cp $Q/sis.img $Q/s5.img
+paq $Q/s5.img nombre "paquetes instala saludo" ":pausa 2" "paquetes instala saludo"
+mira "PAQUETES INSTALA saludo: del catálogo, la versión más nueva (2.0), con lo que necesita delante (letras 1.1); y otra vez: ya está" \
+  "^Se va a instalar: letras 1\.1, saludo 2\.0$" "^  instalado saludo 2\.0$" "^paquetes: saludo ya está instalado (la 2\.0); para una más nueva: PAQUETES ACTUALIZA$"
+if sano $Q/s5.img && sin_restos $Q/s5.img && igual_en $Q/s5.img HISPA/SALUDO.TXT $F/S2.TXT && igual_en $Q/s5.img DOCS/LETRAS/B.TXT $F/B11.TXT; then
+  ok "y en el disco: sano, con los dos paquetes octeto a octeto y sin restos"
+else ko "instalar por su nombre no deja bien el disco:"; lista_de $Q/s5.img | sed 's/^/        /' | head -14; fi
+
+# 3. actualizar: saludo 1.0 -> 2.0 (cambia un archivo, trae otro, deja de traer el grande)
+cp $Q/s1.img $Q/s2.img
+paq $Q/s2.img actualiza "paquetes catalogo" "paquetes actualiza" ":pausa 2" "paquetes actualiza" "paquetes comprueba"
+mira "PAQUETES ACTUALIZA: el catálogo dice lo que es más nuevo; se pone saludo 2.0 en lugar de la 1.0, y luego todo está al día; COMPRUEBA: los archivos instalados siguen iguales" \
+  "^  saludo    2\.0     (nuevo; tiene la 1\.0)    Un programa que saluda (la 2)$" "^  letras    1\.1     (instalado)              Unas letras, mejores$" \
+  "^Se va a instalar: saludo 2\.0 (en lugar de la 1\.0)$" "^  instalado saludo 2\.0$" "^Todo está al día\.$" "^Los archivos de los 3 paquetes instalados están como se instalaron\.$"
+if sano $Q/s2.img && sin_restos $Q/s2.img && igual_en $Q/s2.img HISPA/SALUDO.TXT $F/S2.TXT && ! igual_en $Q/s2.img HISPA/SALUDO.DAT $F/GRANDE.DAT \
+  && igual_en $Q/s2.img HISPA/PAQUETES/SALUDO.PQI $F/SALUDO2.PQI && igual_en $Q/s2.img HISPA/SALUDO.BIN $F/HOLA.BIN; then
+  ok "lo actualizado, desde fuera: el disco sano, lo de la 2.0 en su sitio, el archivo que la 2.0 ya no trae (SALUDO.DAT) quitado y el registro, el de la 2.0"
+else ko "lo actualizado no queda bien en el disco:"; lista_de $Q/s2.img | sed 's/^/        /' | head -14; tail -3 $P/fsck.txt | sed 's/^/        /'; fi
+
+# 4. lo que no vale no toca nada: una suma mala, un conflicto, quitar lo que
+# otro necesita; y COMPRUEBA ve un archivo cambiado (la imagen, idéntica)
+cp $Q/s1.img $Q/s4.img
+printf 'cambiado a mano\r\n' > $Q/cambiado.txt; mcopy -o -i $Q/s4.img $Q/cambiado.txt ::DOCS/LETRAS/A.TXT
+cp $Q/s4.img $Q/s40.img
+paq $Q/s4.img malo 'paquetes instala x:\paquetes\malo.hpq' "paquetes instala choque" "paquetes quita letras" 'paquetes mira x:\paquetes\malo.hpq' "paquetes comprueba" "paquetes quita nadie" "paquetes instala nadie"
+mira "una suma mala (MALO.HPQ, un octeto cambiado): se ve antes de copiar nada, y no se instala nada; MIRA dice lo mismo" \
+  "^paquetes: X:.paquetes.malo\.hpq: la suma de .MALO2\.DAT no es la suya: el paquete está estropeado$" "^No se instala nada: el disco queda como estaba\.$" \
+  "^  .MALO2\.DAT  *70000 octetos$"
+mira "lo que choca (choque no puede estar con saludo), quitar lo que otro necesita (letras, que necesita saludo) y lo que no hay: se dice, y no se hace" \
+  "^paquetes: choque no puede estar con saludo, que está instalado: quítelo antes (PAQUETES QUITA saludo)$" "^paquetes: letras no se quita: lo necesita saludo (quite antes saludo, o /FORZAR)$" \
+  "^paquetes: nadie no está instalado$" "^paquetes: hace falta nadie y no está en el catálogo$"
+if grep -q "^  letras: C:.DOCS.LETRAS.A\.TXT ha cambiado$" $S && grep -q "^1 archivos no están como se instalaron" $S && cmp -s $Q/s4.img $Q/s40.img; then
+  ok "COMPRUEBA ve el archivo cambiado a mano (su SHA-256 no es el apuntado); y con todo lo que no valía, el disco queda idéntico octeto a octeto"
+else ko "COMPRUEBA no ve el archivo cambiado, o lo que no valía ha tocado el disco:"; grep "cambiado\|como se instalaron" $S | sed 's/^/        /'; fi
+
+# 5. quitar (saludo, y luego letras, que ya nadie necesita): el disco, como al principio
+cp $Q/s2.img $Q/s3.img
+paq $Q/s3.img quita "paquetes quita saludo letras" "paquetes lista" "dir \\docs"
+mira "PAQUETES QUITA saludo letras: quita sus archivos, sus registros y las carpetas que se quedan vacías (C:\\DOCS\\LETRAS y C:\\DOCS)" \
+  "^  quitado saludo 2\.0$" "^  quitado letras 1\.1$" "^Hecho\.$" "^1 paquetes\.$" "^No puedo abrir .docs: no existe\.$"
+sano $Q/sis.img; antes=$(grep -o '[0-9]*/[0-9]* clusters' $P/fsck.txt)
+if sano $Q/s3.img && [ "$(grep -o '[0-9]*/[0-9]* clusters' $P/fsck.txt)" = "$antes" ] && [ "$(lista_de $Q/s3.img)" = "$(lista_de $Q/sis.img)" ]; then
+  ok "lo quitado, desde fuera: el disco sano, con los mismos archivos y carpetas que antes de instalar nada y los mismos clusters ocupados ($antes)"
+else ko "después de quitarlo todo el disco no queda como al principio:"; diff <(lista_de $Q/s3.img) <(lista_de $Q/sis.img) | sed 's/^/        /' | head -8; fi
+
+# 6. un corte a mitad (como si se fuera la luz): actualizar saludo y pararse
+# tras el cuarto cambio (/CORTE=4: lo de antes apartado, lo nuevo a medio
+# poner); QEMU se apaga ahí. Al volver, PAQUETES lo deshace
+cp $Q/s1.img $Q/s6.img
+paq $Q/s6.img corte "paquetes actualiza /corte=4" ":pausa 2"
+cp $Q/s6.img $Q/s6corte.img
+if grep -q "^paquetes: corte de prueba" $S && lista_de $Q/s6.img | grep -q "DIARIO\.TXT" && lista_de $Q/s6.img | grep -q "HPQ00000\.VIE" && ! lista_de $Q/s6.img | grep -q "SALUDO\.PQI"; then
+  ok "un corte a mitad de actualizar (QEMU apagado tras el cuarto cambio): quedan el diario (C:\\HISPA\\PAQUETES\\DIARIO.TXT), lo de antes apartado (HPQ*.VIE) y lo nuevo a medias"
+else ko "el corte a mitad no deja lo que se esperaba:"; lista_de $Q/s6.img | sed 's/^/        /' | head -14; fi
+paq $Q/s6.img vuelta "paquetes lista"
+mira "al volver, PAQUETES ve el diario y lo deshace: saludo sigue en la 1.0" \
+  "^paquetes: saludo 2\.0 se quedó a medias (¿se fue la luz?): se ha deshecho y todo está como antes$" "^  saludo    1\.0     Un programa que saluda$"
+if sano $Q/s6.img && [ "$(lista_de $Q/s6.img)" = "$(lista_de $Q/s1.img)" ] && igual_en $Q/s6.img HISPA/SALUDO.DAT $F/GRANDE.DAT && igual_en $Q/s6.img HISPA/SALUDO.BIN $F/HOLA.BIN \
+  && igual_en $Q/s6.img HISPA/PAQUETES/SALUDO.PQI $F/SALUDO1.PQI && ! lista_de $Q/s6.img | grep -q "SALUDO\.TXT"; then
+  ok "lo deshecho, desde fuera: fsck.fat da el disco por sano y está como antes del corte (los mismos archivos, iguales octeto a octeto; sin restos)"
+else ko "después del corte el disco no vuelve a como estaba:"; diff <(lista_de $Q/s6.img) <(lista_de $Q/s1.img) | sed 's/^/        /' | head -8; tail -3 $P/fsck.txt | sed 's/^/        /'; fi
+
+# 7. el gancho de la red: con /DESDE=http://..., PAQUETES lanza DESCARGA
+# (aquí, uno de mentira) para el catálogo y cada paquete; sin DESCARGA, lo dice
+cp $Q/sis.img $Q/s7.img
+paq $Q/s7.img red "paquetes instala letras /desde=http://prueba/" ":pausa 2" "del \\hispa\\descarga.bin" "paquetes catalogo /desde=http://actualiza.clicgest.es/pentium/"
+mira "el gancho de la red: con /DESDE=http://..., el catálogo y los paquetes los trae DESCARGA (DESCARGA.BIN, la orden de la red) a C:\\HISPA\\PAQUETES\\BAJADAS, y se instalan igual" \
+  "^Trayendo http://prueba/CATALOGO\.TXT\.\.\.$" "^descarga (de prueba): http://prueba/LETRAS11\.HPQ -> C:.HISPA.PAQUETES.BAJADAS.LETRAS11\.HPQ$" "^  instalado letras 1\.1$" \
+  "^paquetes: para traer http://actualiza\.clicgest\.es/pentium/CATALOGO\.TXT de Internet hace falta la red (el programa DESCARGA),$"
+if sano $Q/s7.img && sin_restos $Q/s7.img && igual_en $Q/s7.img DOCS/LETRAS/B.TXT $F/B11.TXT && igual_en $Q/s7.img HISPA/PAQUETES/BAJADAS/LETRAS11.HPQ $F/paq/LETRAS11.HPQ; then
+  ok "y en el disco: sano, con lo instalado y lo traído (en BAJADAS) igual que lo de la memoria octeto a octeto"
+else ko "lo traído por el gancho de la red no queda bien en el disco:"; lista_de $Q/s7.img | sed 's/^/        /' | head -14; fi
+
+# 8. la ventana «Programas y actualizaciones» (ACTUALIZ.BIN), desde el menú
+# Inicio («Actualizar»): la lista, instalar (con lo que necesita) y quitar con
+# sus botones; por debajo, PAQUETES
+cp $Q/sis.img $Q/s8.img
+printf '[hispa]\r\nusuario=Ana\r\nequipo=PRUEBA\r\nteclado=es\r\nmodo=800x600\r\n' > $Q/HISPA.INI
+mcopy -i $Q/s8.img $F/ACTUALIZ.BIN $Q/HISPA.INI ::HISPA/
+CAPTURAS=$G ESCRIBE=1 SATA=$Q/s8.img MEMORIA=64 MODULOS= ARRANQUE=escritorio QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/usb.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
+  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":clic 40 585" ":captura pq0" ":clic 250 466" ":pausa 4" ":captura pq1" ":clic 200 236" ":clic 199 471" ":pausa 5" ":captura pq2" \
+  ":clic 200 216" ":clic 399 471" ":pausa 4" ":captura pq3" > $Q/ventana.sal 2>&1
+miracap "el menú Inicio trae «Actualizar» (encima de Configuración): abre la ventana «Programas y actualizaciones»" pq0 negrita 210 452 214 456 Actualizar
+miracap "la ventana: lo instalado (base 0.7) y lo del catálogo de la memoria USB (choque, letras, saludo: «(no)» instalados), cada uno con su versión y lo que es" pq1 \
+  negrita 150 90 154 94 "Programas y actualizaciones" texto 150 109 154 113 'Los paquetes, de X:\PAQUETES\' negrita 112 163 116 167 base \
+  texto 208 183 212 187 "(no)" negrita 112 223 116 227 saludo texto 304 223 308 227 "2.0" negrita 149 458 153 462 Actualizarlo
+miracap "con el botón «Instalarlo», saludo (y antes letras, que lo necesita): lo que dice PAQUETES sale abajo" pq2 \
+  texto 112 397 116 401 "  instalado saludo 2.0" texto 112 415 116 419 "Hecho." negrita 112 183 116 187 letras texto 208 183 212 187 "1.1"
+miracap "y «Quitarlo», con saludo elegido (sigue elegido aunque la lista cambie de orden): se quita" pq3 \
+  texto 112 397 116 401 "  quitado saludo 2.0" negrita 112 203 116 207 choque
+if sano $Q/s8.img && sin_restos $Q/s8.img && [ "$(mdir -/ -b -i $Q/s8.img ::HISPA/PAQUETES 2> /dev/null | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI ::/HISPA/PAQUETES/LETRAS.PQI " ]; then
+  ok "lo hecho desde la ventana, desde fuera: el disco sano, letras instalado, saludo quitado y sin restos (tampoco VENTANA.TXT)"
+else ko "lo hecho desde la ventana no queda bien en el disco:"; lista_de $Q/s8.img | sed 's/^/        /' | head -12; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin los paquetes)"
+fi
+
+# ------------------------------------------------- 13. Hispa-Pentium 0.8: la red
+# La red: el servicio de red (RED.BIN, en el anillo 3) con las tarjetas que
+# da QEMU (-netdev user: DHCP, la puerta 10.0.2.2, que es esta máquina, y el
+# DNS 10.0.2.3), IPCONFIG, PING y DESCARGAR contra un servidor HTTP de aquí
+# (nucleo32/servidor_prueba.py), y el icono de la red en el escritorio.
+if parte08 red; then
+echo "== Hispa-Pentium 0.8: la red (el servicio de red, IPCONFIG, PING, DESCARGAR y el icono) =="
+R=$P/n08r
+mkdir -p $R/srv $G
+python3 -I $AQUI/nucleo32/servidor_prueba.py $R/srv > $R/srv.txt 2>&1 &
+SPID=$!
+for _ in $(seq 50); do [ -s $R/srv/puerto ] && break; sleep 0.1; done
+U=http://10.0.2.2:$(cat $R/srv/puerto 2> /dev/null)
+if $AQUI/nucleo32/disco.sh $R/d.img 16 red > $R/disco.txt 2>&1; then
+# la e1000 (la de QEMU por omisión, la 82540EM)
+cp $R/d.img $R/e.img
+ESCRIBE=1 DISCO=$R/e.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 2" "ping -n 3 10.0.2.2" ":pausa 3" \
+  "descargar $U/grande.bin" ":pausa 5" "descargar $U/trozos.bin" ":pausa 4" "descargar $U/cierra.bin" ":pausa 3" "descargar $U/redirige -" ":pausa 3" \
+  "descargar $U/nohay" ":pausa 2" "descargar $U/ultima.txt c:\\textos\\otra.txt" ":pausa 2" "descargar https://10.0.2.2/" "descargar" \
+  "descargar $U/lento.bin" ":pausa 3" ":tecla ctrl-c" ":pausa 2" "ipconfig /todo" ":pausa 2" "mem" "apagar" > $R/e1000.sal 2>&1
+tr -d '\r' < $R/e1000.sal > $R/e1000.txt
+S=$R/e1000.txt
+mira "el servicio de red se pone en marcha solo (la primera vez que se pide algo), encuentra la e1000 y pide la IP por DHCP" \
+  "^red: Hispa-Pentium 0.8: el servicio de red (RED.BIN)$" "^red: tarjeta 8086:100E en el bus PCI 00:03$" "^red: enlace: sí (1000 Mbit/s)$" \
+  "^red: DHCP: IP 10.0.2.15, máscara 255.255.255.0, puerta 10.0.2.2, DNS 10.0.2.3$"
+mira "IPCONFIG: la tarjeta, su MAC, el enlace, la IP, la máscara, la puerta de enlace, el DNS y el servidor de DHCP" \
+  "^  Tarjeta . . . . . . . : Intel PRO/1000 (e1000) (8086:100E, IRQ [0-9]*)$" "^  MAC . . . . . . . . . : 52:54:00:12:34:56$" "^  Enlace  . . . . . . . : sí, a 1000 Mbit/s$" \
+  "^  Estado  . . . . . . . : conectada$" "^  Dirección IP  . . . . : 10.0.2.15$" "^  Máscara de subred . . : 255.255.255.0$" "^  Puerta de enlace  . . : 10.0.2.2$" \
+  "^  Servidor DNS  . . . . : 10.0.2.3$" "^  DHCP  . . . . . . . . : de 10.0.2.2, 86400 s"
+mira "PING a la puerta de enlace: tres respuestas y ninguna perdida" "^Haciendo ping a 10.0.2.2 con 32 octetos de datos:$" \
+  "^Respuesta desde 10.0.2.2: octetos=32 tiempo[<=][0-9]* ms TTL=[0-9]*$" "^    Paquetes: enviados = 3, recibidos = 3, perdidos = 0 (0% perdidos)$"
+[ "$(grep -c "^Respuesta desde 10.0.2.2" $S)" = 3 ] || ko "PING: no son tres respuestas"
+mira "DESCARGAR: con Content-Length, en trozos (chunked), hasta que se cierra, una redirección (302), un 404 y a otra carpeta" \
+  "^Guardando GRANDE.BIN (409600 octetos)\.*$" "^Hecho: GRANDE.BIN, 409600 octetos en [0-9]*,[0-9] s" "^Hecho: TROZOS.BIN, 150001 octetos" "^Hecho: CIERRA.BIN, 70000 octetos" \
+  "^Redirigido a /ultima.txt$" "^version=0.8$" "^DESCARGAR: no se ha bajado nada (el servidor ha dicho 404)\.$" "^Hecho: c:.textos.otra.txt, 41 octetos" \
+  "^DESCARGAR: HTTPS (con cifrado) todavía no lo sabe hacer Hispa-Pentium; solo http://\.$" "^Uso: DESCARGAR http://servidor\[:puerto\]/camino \[archivo\]$"
+mira "Ctrl+C en medio de una descarga que no llega: el programa acaba, y la red sigue (IPCONFIG /TODO, con lo que ha apuntado el servicio)" \
+  "^Guardando LENTO.BIN (1000000 octetos)^C$" "^Lo que ha apuntado el servicio de red:$" "^red: DHCP: IP 10.0.2.15" "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 4\.$"
+iguales=1
+for f in GRANDE.BIN:grande.bin TROZOS.BIN:trozos.bin CIERRA.BIN:cierra.bin TEXTOS/OTRA.TXT:ultima.txt; do
+  saca $R/e.img ${f%%:*} $R/x.bin && cmp -s $R/x.bin $R/srv/${f##*:} || { iguales=0; echo "        ${f%%:*} no es igual"; }
+done
+sano $R/e.img
+if [ $iguales = 1 ] && grep -q "^$R/e.img: [0-9]* files" $P/fsck.txt; then ok "lo descargado, en el disco, es igual octeto a octeto que lo del servidor (los cuatro archivos), y el disco queda sano"
+else ko "lo descargado no es igual que lo del servidor, o el disco no queda sano"; sed 's/^/        /' $P/fsck.txt | head -4; fi
+# la RTL8139, y el DNS de QEMU (que pregunta al de esta máquina)
+cp $R/d.img $R/r.img
+ESCRIBE=1 DISCO=$R/r.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-netdev user,id=n0 -device rtl8139,netdev=n0" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 2" \
+  "descargar $U/grande.bin" ":pausa 5" "ping -n 1 nombre.que.no.existe.invalid" ":pausa 4" "ping -n 1 actualiza.clicgest.es" ":pausa 4" "apagar" > $R/rtl.sal 2>&1
+tr -d '\r' < $R/rtl.sal > $R/rtl.txt
+S=$R/rtl.txt
+mira "la Realtek RTL8139: IPCONFIG y DESCARGAR" "^  Tarjeta . . . . . . . : Realtek RTL8139 (10EC:8139, IRQ [0-9]*)$" "^  Enlace  . . . . . . . : sí, a 100 Mbit/s$" \
+  "^  Dirección IP  . . . . : 10.0.2.15$" "^Hecho: GRANDE.BIN, 409600 octetos"
+if saca $R/r.img GRANDE.BIN $R/x.bin && cmp -s $R/x.bin $R/srv/grande.bin; then ok "con la RTL8139, lo descargado es igual octeto a octeto"; else ko "con la RTL8139, lo descargado no es igual"; fi
+# (el DNS de QEMU le pregunta al de esta máquina: si esta no sale a la red, no se prueba)
+if getent hosts actualiza.clicgest.es > /dev/null 2>&1; then
+  mira "el DNS (el de QEMU, que pregunta al de esta máquina): un nombre que no existe se dice; uno que sí, se resuelve" \
+    "^PING: no se encuentra nombre.que.no.existe.invalid: ese nombre no existe\.$" "^Haciendo ping a actualiza.clicgest.es \[$(getent hosts actualiza.clicgest.es | awk '{print $1}' | head -1)\] con 32 octetos de datos:$"
+else echo "  (esta máquina no resuelve nombres: no se prueba el DNS)"; fi
+# sin tarjeta, y con «sinred»
+DISCO=$R/d.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 2" "ping 10.0.2.2" ":pausa 2" "apagar" > $R/sin.sal 2>&1
+tr -d '\r' < $R/sin.sal > $R/sin.txt
+S=$R/sin.txt
+mira "sin tarjeta de red: el servicio lo dice, y PING también" "^red: no hay ninguna tarjeta de red que se sepa llevar$" \
+  "^  No hay ninguna tarjeta de red que Hispa-Pentium sepa llevar$" "^PING: no se encuentra\|^Error: no hay ninguna tarjeta de red que Hispa-Pentium sepa llevar\.$"
+DISCO=$R/d.img ARRANQUE="ordenes sinred" MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 1" "apagar" > $R/sinred.sal 2>&1
+tr -d '\r' < $R/sinred.sal > $R/sinred.txt
+S=$R/sinred.txt
+if grep -q "^  no hay servicio de red (falta RED.BIN o se arrancó con «sinred»)\.$" $S && ! grep -q "^red:" $S; then ok "con «sinred», ni se pone en marcha el servicio de red (y IPCONFIG lo dice)"
+else ko "con «sinred» se pone en marcha la red:"; sed 's/^/        /' $S | tail -6; fi
+# el escritorio: el servicio, en marcha al arrancar (hay tarjeta), y su icono
+CAPTURAS=$G DISCO=$R/d.img ARRANQUE=escritorio MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ":pausa 5" ":captura r1" ":clic 720 583" ":pausa 1" ":captura r2" > $R/esc.sal 2>&1
+S=$R/esc.sal
+mira "el escritorio pone en marcha el servicio de red (hay una tarjeta) y, con un clic en su icono, dice cómo está" \
+  "^red: Hispa-Pentium 0.8: el servicio de red (RED.BIN)$" "^escritorio: aviso: La red: conectada, con la IP 10.0.2.15\.$"
+miracap "el icono de la red en la bandeja, con la luz verde (conectada), a la izquierda del reloj" r1 rgb 729 587 2ECC40 rgb 725 582 8FDCFF
+miracap "y el aviso de la red, al pulsarlo" r2 texto 230 255 260 280 "La red: conectada, con la IP 10.0.2.15."
+else ko "no se puede hacer el disco de prueba de la red: $(tail -1 $R/disco.txt)"; fi
+kill $SPID 2> /dev/null; wait $SPID 2> /dev/null
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin la red)"
+fi   # la red
+
+# ------------------------------------- 14. Hispa-Pentium 0.8: apagar de verdad y la batería
+# El servicio de ACPI, ACPI.BIN (acpi/pentium/: el núcleo de C de HSPACPI
+# de Hispa-DOS, con ACPICA, como programa del anillo 3), y energia.cas. En
+# QEMU, que tiene ACPI (PIIX4 con «pc», ICH9 con «q35») pero no batería, la
+# SSDT de las pruebas de Hispa-DOS (tests/acpi/bateria-qemu.aml, con
+# -acpitable) declara una batería que lee su nivel de la CMOS: 60h el nivel
+# (de 0 a 100), 61h bit 0 con cable y bit 1 puesta, 62h la salud en %. La
+# CMOS se escribe por el monitor de QEMU («o /b 0x70 0x60»), con la máquina
+# parada (-S) antes de arrancar y luego en marcha. Apagar de verdad: QEMU
+# termina (ACPI S5) sin pasar por su puerto de pruebas (el código 5).
+if parte08 acpi; then
+echo "== Hispa-Pentium 0.8: apagar de verdad y la batería (el servicio de ACPI, ACPI.BIN) =="
+Y=$P/acpi
+mkdir -p $Y $G
+if bash $AQUI/../acpi/pentium/hacer.sh $Y/ACPI.BIN > $Y/hacer.txt 2>&1; then
+  ok "acpi/pentium/hacer.sh: ACPI.BIN, el núcleo de HSPACPI (ACPICA) como programa del anillo 3 ($(stat -c %s $Y/ACPI.BIN) octetos)"
+else ko "acpi/pentium/hacer.sh no hace ACPI.BIN: $(tail -1 $Y/hacer.txt)"; fi
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $Y/semilla.asm > /dev/null && nasm -f bin $Y/semilla.asm -o $Y/SEMILLA.BIN
+for u in ubloc:BLOC uconsola:CONSOLA uordenes:ORDENES uhola:HOLA; do
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/${u%%:*}.cas -o $Y/${u%%:*}.asm > /dev/null && nasm -f bin $Y/${u%%:*}.asm -o $Y/${u##*:}.BIN
+done
+SSDT="-acpitable file=$AQUI/../tests/acpi/bateria-qemu.aml"
+# la CMOS de la batería: cmosq REGISTRO VALOR (órdenes del monitor para probar.sh)
+cmosq() { echo ":monitor o /b 0x70 0x$1"; echo ":monitor o /b 0x71 0x$2"; }
+mapfile -t PUESTA < <(cmosq 60 37; cmosq 61 02; cmosq 62 00)
+# (con la máquina en marcha, parada un momento: que ni el núcleo, que lee
+# su reloj de la CMOS, ni el servicio cambien el registro entre las dos)
+mapfile -t ENCHUFA < <(echo ":monitor stop"; cmosq 61 03; echo ":monitor cont")
+mapfile -t GASTADA < <(echo ":monitor stop"; cmosq 62 28; echo ":monitor cont")
+# 1. el escritorio con la batería al 55 %, sin cable: la pila y su recuadro;
+# luego enchufada (cargando) y gastada; y «Apagar» apaga (QEMU termina)
+CAPTURAS=$G MODULOS=$Y/ACPI.BIN,$Y/BLOC.BIN ARRANQUE="escritorio acpicada=1" QEMU_MAS="-S $SSDT" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN \
+  "${PUESTA[@]}" ":monitor cont" ":pausa 5" ":captura a1" ":raton 690 585" ":pausa 1.5" ":captura a2" \
+  "${ENCHUFA[@]}" ":pausa 3" ":captura a3" ":clic 690 585" ":pausa 1" ":captura a4" ":raton 400 300" \
+  "${GASTADA[@]}" ":pausa 3" ":raton 690 585" ":pausa 1.5" ":captura a5" ":raton 400 300" \
+  ":clic 40 585" ":clic 80 293" ":pausa 2" ":escribe sin guardar" ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 3" ":captura a6" \
+  ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 4" > $Y/apagar.sal 2>&1
+S=$Y/apagar.sal
+mira "el núcleo lanza el servicio de ACPI al arrancar, y este lee las tablas de QEMU y la batería de la SSDT de prueba (_BIF, _BIX, _BST)" \
+  "^acpi: el servicio de ACPI (ACPI.BIN) en marcha, la tarea [0-9]*" "^ACPI: SSDT .*HISPA  BATPRUEB" "^Batería 1: ._SB_.HBAT" \
+  "^Lectura 1: 55 % (2750 de 5000 mAh), sin cable, descargando, quedan 165 min"
+mira "y le da al núcleo lo que hace falta para apagar (PM1a_CNT de PIIX4 y \\_S5) y reiniciar" \
+  "^ACPI: para apagar: PM1a_CNT 604h, PM1b_CNT 0h, ._S5 0, 0; SMI_CMD B2h, ACPI_ENABLE F1h"
+miracap "la bandeja enseña la pila con lo que queda (verde) y el porcentaje, al lado del reloj" a1 negrita 700 570 712 580 "55%" \
+  rgb 680 580 3FAE49 rgb 695 580 EAF3FD
+miracap "con el puntero quieto medio segundo encima, el recuadro de ayuda: lo que queda y los minutos, la salud y los ciclos de carga" a2 \
+  texto 300 500 790 560 "Batería: 55 % · quedan 2 h 45 min" texto 300 500 790 560 "Salud: 68 % (guarda 5.000 de 7.350 mAh de cuando era nueva)" \
+  texto 300 500 790 560 "312 ciclos de carga" rgb 790 520 FFF8E1
+miracap "al enchufar el cargador (con el recuadro abierto), se pone al día solo: «cargando» y el rayo en la pila" a3 \
+  texto 300 500 790 560 "Enchufado · cargando: 55 %" rgb 690 578 FFD43B
+miracap "un clic en la pila quita el recuadro" a4 notexto 300 500 790 560 "Enchufado"
+miracap "con la batería gastada (la salud al 40 %), el aviso en terracota" a5 texto 300 480 790 560 "Salud: 40 % (guarda 5.000 de 12.500 mAh de cuando era nueva)" \
+  texto 300 480 790 560 "La batería está gastada: dura menos de la mitad que nueva"
+miracap "«Apagar» con el Bloc de notas sin guardar: el Bloc avisa, no se apaga y el escritorio lo dice" a6 \
+  texto 100 100 700 500 "Hay un programa sin cerrar: ¿algo sin guardar?"
+mira "«Apagar» otra vez: se cierran los programas, se vacían los discos y el servicio apaga por ACPI (S5: _PTS, el modo ACPI, SLP_EN) y QEMU termina" \
+  "^escritorio: apagar" "^energía: apagar (S5) por el servicio de ACPI" "^ACPI: preparar S5 (._S5, _PTS, _SST): AE_OK" \
+  "^ACPI: modo ACPI (SMI_CMD B2h <- F1h): AE_OK" "^\[código 0\]"
+if ! grep -q "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $S; then ok "ni una excepción del núcleo ni un error de ACPICA en toda la sesión"
+else ko "hay excepciones o errores de ACPICA:"; grep "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $S | head -4 | sed 's/^/        /'; fi
+# 2. reiniciar (con -no-reboot, QEMU termina al reiniciarse): con PIIX4 la
+# FADT no trae registro de reinicio: el teclado
+MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="$SSDT" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":clic 40 585" ":clic 230 545" \
+  ":clic 400 327" ":pausa 3" > $Y/reiniciar.sal 2>&1
+S=$Y/reiniciar.sal
+mira "«Reiniciar»: el servicio avisa al controlador embebido (_REG 3, 0) y el núcleo reinicia (PIIX4: por el teclado)" \
+  "^escritorio: reiniciar" "^ACPI: el núcleo va a reiniciar el equipo" "^energía: reiniciar por el teclado (8042)" "^\[código 0\]"
+# 3. con ICH9 (q35): apagar y reiniciar (aquí la FADT sí trae el registro de reinicio: CF9h)
+for q in 275:apagar 400:reiniciar; do
+  MAQUINA=q35 MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="$SSDT" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":clic 40 585" \
+    ":clic 230 545" ":clic ${q%%:*} 327" ":pausa 3" > $Y/q35${q##*:}.sal 2>&1
+done
+S=$Y/q35apagar.sal
+mira "ICH9 (QEMU q35): «Apagar» apaga por ACPI (SMI_CMD B2h <- 02h) y QEMU termina" "^ACPI: modo ACPI (SMI_CMD B2h <- 2h): AE_OK" "^\[código 0\]"
+S=$Y/q35reiniciar.sal
+mira "ICH9: «Reiniciar» por el registro de reinicio de la FADT (E/S CF9h <- 0Fh)" \
+  "^ACPI: para reiniciar: el registro de la FADT (E/S CF9h) <- Fh" "^energía: reiniciar por el registro de la FADT" "^\[código 0\]"
+# 4. sin ACPI (-no-acpi): el servicio lo dice, no hay pila y «Apagar» es lo de antes (en QEMU, su puerto de pruebas)
+CAPTURAS=$G MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="-no-acpi" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":captura a7" \
+  ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 2" > $Y/sinacpi.sal 2>&1
+S=$Y/sinacpi.sal
+mira "sin ACPI: el servicio lo dice y «Apagar» hace lo de antes (en QEMU, el código 5 de su puerto de pruebas)" \
+  "^ACPI: el equipo no tiene ACPI" "escritorio: apagar" "^energía: el equipo no se ha apagado" "^\[código 5\]"
+miracap "sin ACPI no hay pila en la bandeja (solo el reloj)" a7 notexto 670 570 740 590 "%" nrgb 695 580 EAF3FD
+# 5. un sobremesa (ACPI sin batería): ni pila; apagar, por ACPI
+CAPTURAS=$G MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":captura a8" \
+  ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 3" > $Y/sobremesa.sal 2>&1
+S=$Y/sobremesa.sal
+mira "un sobremesa (ACPI sin batería): el servicio lo dice, y apaga por ACPI" "^El equipo no declara baterías" "^energía: apagar (S5) por el servicio de ACPI" "^\[código 0\]"
+miracap "y en la bandeja no hay pila" a8 notexto 670 570 740 590 "%"
+# 6. las llamadas del servicio no son para cualquiera: el mismo ACPI.BIN,
+# lanzado a mano desde el intérprete, no puede (y lo dice)
+MODULOS=$Y/ACPI.BIN,$Y/ORDENES.BIN ARRANQUE="ordenes sinacpi" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 2" "acpi" ":pausa 3" "salir" apagar > $Y/mano.sal 2>&1
+S=$Y/mano.sal
+mira "un programa cualquiera no puede usar las llamadas del servicio (150 a 153): ACPI.BIN lanzado a mano lo dice y acaba" \
+  "^ACPI.BIN: es el servicio de ACPI; lo lanza el núcleo al arrancar"
+if ! grep -q "^acpi: el servicio" $S; then ok "«sinacpi» en la línea del cargador: el núcleo no lanza el servicio"
+else ko "con «sinacpi» el núcleo lanza el servicio"; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin apagar de verdad ni la batería)"
+fi   # apagar de verdad y la batería
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 echo "== $nok bien, $fail mal =="

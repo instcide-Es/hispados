@@ -483,6 +483,18 @@ módulo Tareas
         reponer(b)
     fin
 
+    ; si la tarea t duerme, se despierta ya (sin esperar a su tic)
+    público función despertar_dormida(t: puntero a Tarea)
+        variable b: nat32
+        b := sin_interrupciones()
+        si t.estado = DORMIDA entonces
+            quitar(dormidas, t)
+            t.estado := LISTA
+            meter(listas, t)
+        fin
+        reponer(b)
+    fin
+
     ; la tarea que corre acaba, con ese código. No vuelve.
     público función terminar(código: nat32)
         variable b, i: nat32

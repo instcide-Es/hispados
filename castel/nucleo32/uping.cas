@@ -1,0 +1,105 @@
+; =============================================================================
+;  uping.cas - PING.BIN: ¿contesta ese equipo? Le manda ecos de ICMP y dice
+;  lo que tardan en volver, como el PING de siempre.
+;    PING nombre-o-IP [-n veces] [-l octetos] [-t]
+;  Sin -n, cuatro; -t, sin parar (hasta Ctrl+C). Al acabar, el resumen.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Uping
+
+    modelo usuario
+
+    importar Llamadas, Redes, Textos32, Formato
+
+    variable args: arreglo [160] de byte
+    variable pal: arreglo [128] de byte
+    variable destino: arreglo [128] de byte
+    variable t: arreglo [32] de byte
+
+    función principal(): byte
+        variable ip, r, i, n, octetos, enviados, recibidos, mín, máx, suma, ms, ttl, empezó, num: nat32
+        variable siempre: bool
+        argumentos(args, 160)
+        n := 4
+        octetos := 32
+        siempre := falso
+        destino[0] := 0
+        i := 0
+        mientras palabra(args, i, pal, 128) hacer
+            si iguales_sin_caja(pal, "-n") o iguales_sin_caja(pal, "/n") entonces
+                i := i + 1
+                si palabra(args, i, pal, 128) entonces texto_a_natural(pal, n) fin
+            sino si iguales_sin_caja(pal, "-l") o iguales_sin_caja(pal, "/l") entonces
+                i := i + 1
+                si palabra(args, i, pal, 128) entonces texto_a_natural(pal, octetos) fin
+            sino si iguales_sin_caja(pal, "-t") o iguales_sin_caja(pal, "/t") entonces
+                siempre := cierto
+            sino
+                copiar_hasta(destino, pal, 128)
+            fin
+            i := i + 1
+        fin
+        si destino[0] = 0 entonces
+            escribir("Uso: PING nombre-o-IP [-n veces] [-l octetos] [-t]\n")
+            devolver 1
+        fin
+        si octetos > 1400 entonces octetos := 1400 fin
+        r := resolver(destino, ip)
+        si es_error_red(r) entonces
+            imprimir2("PING: no se encuentra %s: %s.\n", nat32(dirección(destino[0])), nat32(texto_error_red(r)))
+            devolver 1
+        fin
+        ip_a_texto(ip, t)
+        si iguales(destino, t) entonces
+            imprimir2("\nHaciendo ping a %s con %u octetos de datos:\n", nat32(dirección(t[0])), octetos)
+        sino
+            imprimir3("\nHaciendo ping a %s [%s] con %u octetos de datos:\n", nat32(dirección(destino[0])), nat32(dirección(t[0])), octetos)
+        fin
+        atender_corte(cierto)
+        enviados := 0
+        recibidos := 0
+        mín := 0xFFFFFFFF
+        máx := 0
+        suma := 0
+        num := 1
+        mientras (siempre o enviados < n) y no hubo_corte() hacer
+            empezó := tics()
+            enviados := enviados + 1
+            r := ping(ip, num, 100, octetos, ttl)
+            num := num + 1
+            si es_error_red(r) entonces
+                si r = TIEMPO entonces
+                    escribir("Tiempo de espera agotado para esta solicitud.\n")
+                sino
+                    imprimir1("Error: %s.\n", nat32(texto_error_red(r)))
+                fin
+            sino
+                recibidos := recibidos + 1
+                ms := (r + 500) div 1000
+                si ms < mín entonces mín := ms fin
+                si ms > máx entonces máx := ms fin
+                suma := suma + ms
+                si r < 1000 entonces
+                    imprimir3("Respuesta desde %s: octetos=%u tiempo<1 ms TTL=%u\n", nat32(dirección(t[0])), octetos, ttl)
+                sino
+                    imprimir4("Respuesta desde %s: octetos=%u tiempo=%u ms TTL=%u\n", nat32(dirección(t[0])), octetos, ms, ttl)
+                fin
+            fin
+            ; uno por segundo
+            si siempre o enviados < n entonces
+                mientras tics() - empezó < 100 y no hubo_corte() hacer dormir(5) fin
+            fin
+        fin
+        imprimir1("\nEstadísticas de ping para %s:\n", nat32(dirección(t[0])))
+        r := 0
+        si enviados > 0 entonces r := ((enviados - recibidos) * 100) div enviados fin
+        imprimir4("    Paquetes: enviados = %u, recibidos = %u, perdidos = %u (%u%% perdidos)\n", enviados, recibidos, enviados - recibidos, r)
+        si recibidos > 0 entonces
+            escribir("Tiempos aproximados de ida y vuelta, en milisegundos:\n")
+            imprimir3("    Mínimo = %u ms, Máximo = %u ms, Media = %u ms\n", mín, máx, suma div recibidos)
+            devolver 0
+        fin
+        devolver 1
+    fin
+
+fin Uping.

@@ -18,12 +18,15 @@
 ;  (relativos), con su identificador de informe si lo lleva.
 ;
 ;  Una tarea del núcleo mira cada centésima de segundo si ha llegado algún
-;  informe (las tuberías de interrupción de usb.cas).
+;  informe (las tuberías de interrupción de usb.cas). Los que se enchufan en
+;  marcha llegan por nuevo() y los que se van, por se_va() (usbcal.cas): al
+;  irse un teclado se sueltan las teclas que tenía pulsadas, y al irse un
+;  ratón, sus botones.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Usbhid
 
-    importar Usb, Usbbase, Consola, Raton, Tareas, Registro
+    importar Usb, Usbbase, Consola, Raton, Tareas, Registro, Mem32
 
     constante MAX_HID = 6
     constante REPITE_TRAS = 50                  ; centésimas hasta que una tecla empieza a repetirse
@@ -50,7 +53,8 @@ módulo Usbhid
     variable último_ratón: arreglo [8] de byte  ; el último informe de un ratón, tal cual
     variable último_largo: nat32
     variable hids: arreglo [MAX_HID] de Hid
-    variable n_hids: nat32
+    variable n_hids: nat32                      ; los que hay (en «hids», donde haya sitio)
+    variable en_marcha: bool                    ; la tarea que los atiende
     variable descriptor: arreglo [512] de byte  ; un descriptor de informe
     variable descriptor_largo: nat32
     ; lo que se sabe del último ratón sin protocolo de arranque (para enseñarlo)
@@ -269,7 +273,10 @@ módulo Usbhid
         variable i, e, interfaz, n: nat32
         variable r: ent32
         variable arranque: bool
-        si n_hids >= MAX_HID entonces devolver fin
+        ; un sitio libre
+        n := 0
+        mientras n < MAX_HID y hids[n].usado hacer n := n + 1 fin
+        si n >= MAX_HID entonces devolver fin
         ; su extremo de interrupción de entrada
         e := NINGUNO
         para i desde 1 hasta aparatos[a].n_extremos hacer
@@ -279,8 +286,7 @@ módulo Usbhid
         fin
         si e = NINGUNO entonces devolver fin
         interfaz := aparatos[a].interfaces[k].número
-        n := n_hids
-        hids[n].usado := falso
+        llenar(puntero(nat32(dirección(hids[n]))), tamaño(Hid), 0)
         hids[n].aparato := a
         hids[n].teclado := aparatos[a].interfaces[k].protocolo = 1
         hids[n].largo := aparatos[a].extremos[e].paquete
@@ -318,10 +324,13 @@ módulo Usbhid
             hay_ratón_usb := cierto
         fin
         hids[n].tubo := tubo_abre(a, e)
-        si hids[n].tubo = NINGUNO entonces devolver fin
-        hids[n].usado := cierto
-        n_hids := n + 1
+        si hids[n].tubo = NINGUNO entonces
+            si hids[n].teclado entonces teclados := teclados - 1 sino ratones := ratones - 1 fin
+            devolver
+        fin
         tubo_pide(hids[n].tubo, hids[n].largo)
+        hids[n].usado := cierto
+        n_hids := n_hids + 1
     fin
 
     función guarda_último(p: puntero a byte, n: nat32)
@@ -378,8 +387,54 @@ módulo Usbhid
                 fin
             fin
         fin
-        si n_hids <> 0 entonces crear_tarea("usb", nat32(dirección(atiende)), 0) fin
+        pon_en_marcha()
         devolver n_hids
+    fin
+
+    función pon_en_marcha()
+        si n_hids = 0 o en_marcha entonces devolver fin
+        si crear_tarea("usb", nat32(dirección(atiende)), 0) <> nulo entonces en_marcha := cierto fin
+    fin
+
+    ; el aparato a se acaba de enchufar: si es un teclado o un ratón (o
+    ; varios), se prepara como los del arranque. Da cuántos.
+    público función nuevo(a: nat32): nat32
+        variable k, n: nat32
+        n := n_hids
+        para k desde 1 hasta aparatos[a].n_interfaces hacer
+            si aparatos[a].interfaces[k - 1].clase = 3 y (aparatos[a].interfaces[k - 1].protocolo = 1 o aparatos[a].interfaces[k - 1].protocolo = 2) entonces
+                mira(a, k - 1)
+            fin
+        fin
+        pon_en_marcha()
+        devolver n_hids - n
+    fin
+
+    ; el aparato a se ha desenchufado: sus teclados y ratones dejan de
+    ; atenderse; lo que tuvieran pulsado se suelta (que no se quede una tecla
+    ; ni un botón apretados para siempre)
+    público función se_va(a: nat32)
+        variable i, k, b: nat32
+        para i desde 0 hasta MAX_HID - 1 hacer
+            si hids[i].usado y hids[i].aparato = a entonces
+                hids[i].usado := falso
+                n_hids := n_hids - 1
+                dormir(2)                       ; (por si la tarea estaba con él)
+                si hids[i].teclado entonces
+                    para b desde 0 hasta 7 hacer
+                        si hids[i].anterior[0] yb (nat32(1) << b) <> 0 entonces tecla(de_modificador[b], cierto) fin
+                    fin
+                    para k desde 2 hasta 7 hacer
+                        si hids[i].anterior[k] > 3 entonces tecla(código_de(hids[i], hids[i].anterior[k]), cierto) fin
+                    fin
+                    repite := 0
+                    teclados := teclados - 1
+                sino
+                    ratón_de_fuera(0, 0, 0)
+                    ratones := ratones - 1
+                fin
+            fin
+        fin
     fin
 
     ; lo que da el descriptor de informe del último ratón sin protocolo de

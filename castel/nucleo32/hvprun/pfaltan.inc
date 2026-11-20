@@ -129,6 +129,8 @@ tj_dc_nombre db "Entre en la carpeta (doble clic) y pulse Aceptar.", 0
 
 ; ---- lo de la interfaz que aquí no hay (CF=1: no se puede) ----
 aj_leer:
+        cmp eax, 20                 ; [HISPA-SNES] 20: el reloj fino
+        je p_reloj_fino
         xor eax, eax
         ret
 aj_poner:

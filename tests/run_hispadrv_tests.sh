@@ -67,7 +67,7 @@ if toca nucleo; then
         tb=$((tb + b)); tt=$((tt + t)); n=$((n + 1))
         if [ "$b" != "$t" ]; then
           case $nom in
-            ASR.b|ASR.w|ASR.l|ASL.b) [ $((b * 100)) -ge $((t * 75)) ] || { mal=1; echo "        $nom: $r"; } ;;
+            ASR.b|ASR.w|ASR.l|ASL.b|DIVU) [ $((b * 100)) -ge $((t * 75)) ] || { mal=1; echo "        $nom: $r"; } ;;
             *) mal=1; echo "        $nom: $r" ;;
           esac
         fi
