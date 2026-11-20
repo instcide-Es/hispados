@@ -20,6 +20,7 @@ static int en_tarea, tarea_muerta, tarea_hecha;
 static u64 despierta_us;
 int tarea_prisa;
 static int descansando;
+static int acabada;		/* bateria_tarea ha vuelto (sin ACPI, o sin baterías) */
 
 struct ll_inicio ini;
 struct ll_apm apm;
@@ -31,6 +32,7 @@ extern char _fin_bss[];
 static void tarea_entra(void)
 {
 	bateria_tarea();
+	acabada = 1;
 	for (;;)
 		tarea_duerme(60000);
 }
@@ -49,6 +51,7 @@ static void tarea_crea(void)
 	esp_tarea = (u32)p;
 	tarea_hecha = 1;
 	tarea_muerta = 0;
+	acabada = 0;
 	despierta_us = 0;
 }
 
@@ -61,6 +64,14 @@ void tarea_duerme(u32 ms)
 	}
 	despierta_us = mq_ahora_us() + (u64)ms * 1000;
 	tarea_cambia(&esp_tarea, esp_llamada);
+}
+
+/* ¿está la tarea fuera de los métodos del equipo? (entre lecturas, o ya
+ * sin nada que hacer): entonces se puede usar ACPICA desde fuera de ella
+ * (Hispa-Pentium: apagar, en acpi/pentium/servicio.c) */
+int tarea_quieta(void)
+{
+	return !tarea_hecha || tarea_muerta || descansando || acabada;
 }
 
 /* el descanso entre lecturas: LL_AHORA lo corta (-> 1) */
@@ -112,7 +123,12 @@ void apm_publica(void)
 
 int nucleo_llamada(u32 f, u32 dir_pet)
 {
+#ifdef HISPA_PENTIUM
+	/* (en Hispa-Pentium, ACPI.BIN: la petición está en la memoria del propio programa) */
+	u32 *pet = (u32 *)dir_pet;
+#else
 	u32 *pet = dir_pet ? mq_mapa(dir_pet, 16) : 0;
+#endif
 
 	switch (f) {
 	case LL_INICIA:
