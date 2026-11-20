@@ -81,6 +81,7 @@
 #   SOLO=06 ./pruebas.sh          la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
 #   SOLO=07 ./pruebas.sh          la primera y la décima (instalar en el disco: la 0.7)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
+#   SOLO=acpi ./pruebas.sh        la primera y la undécima (apagar de verdad y la batería: ACPI.BIN)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
 #                                 de 16 bits (azar.py) y otros tres de 32
@@ -142,7 +143,7 @@ fi
 
 # SOLO=32: solo la primera parte, la octava y la novena (los 32 bits);
 # SOLO=06: solo la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
-if [ "${SOLO:-}" != 32 ] && [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ]; then
+if [ "${SOLO:-}" != 32 ] && [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ] && [ "${SOLO:-}" != acpi ]; then
 # -------------------------------------------------------- 2. compilar todo
 echo "== Castel: los ejemplos compilan =="
 EJEMPLOS=
@@ -700,7 +701,7 @@ fi
 echo "== Castel de 32 bits: «modelo núcleo» (QEMU -kernel) y «modelo hispa32» (HW32) =="
 P=$T/p32
 mkdir $P
-if [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ]; then
+if [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ] && [ "${SOLO:-}" != acpi ]; then
 # los ejemplos de 16 bits que no tocan el DOS, compilados como núcleo de 32
 # bits: tienen que escribir lo mismo
 MISMOS="arreglos bucles cuenta estruct mezcla nivel pares pruebas refs saltos saludo textos modulos"
@@ -1337,7 +1338,7 @@ fi   # SOLO=06, SOLO=07
 G=$P/graf
 N=$P/n06
 mkdir -p $G $N
-if [ "${SOLO:-}" != 07 ]; then
+if [ "${SOLO:-}" != 07 ] && [ "${SOLO:-}" != acpi ]; then
 echo "== Hispa-Pentium 0.6: los discos SATA (AHCI), las unidades con letra, el permiso de escritura por disco =="
 hechos=1
 for c in 16 32 mbr; do
@@ -1634,6 +1635,7 @@ fi   # SOLO=07
 # del disco (GRUB en el MBR y en el hueco de delante de la partición) y el
 # asistente del primer arranque (uasiste.cas). Lo que se instala (el núcleo,
 # los programas, BOOT.IMG y CORE.IMG) sale de la memoria USB que hace usb.sh.
+if [ "${SOLO:-}" != acpi ]; then
 echo "== Hispa-Pentium 0.7: instalar en el disco duro (INSTALAR), arrancar de él y el asistente del primer arranque =="
 if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/grub/i386-pc ] && command -v parted > /dev/null; then
 Z=$P/n07
@@ -1996,6 +1998,105 @@ else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba la instalación en el disco)"
 fi
+fi   # SOLO=acpi
+
+# ------------------------------------- 11. Apagar de verdad y la batería
+# El servicio de ACPI, ACPI.BIN (acpi/pentium/: el núcleo de C de HSPACPI
+# de Hispa-DOS, con ACPICA, como programa del anillo 3), y energia.cas. En
+# QEMU, que tiene ACPI (PIIX4 con «pc», ICH9 con «q35») pero no batería, la
+# SSDT de las pruebas de Hispa-DOS (tests/acpi/bateria-qemu.aml, con
+# -acpitable) declara una batería que lee su nivel de la CMOS: 60h el nivel
+# (de 0 a 100), 61h bit 0 con cable y bit 1 puesta, 62h la salud en %. La
+# CMOS se escribe por el monitor de QEMU («o /b 0x70 0x60»), con la máquina
+# parada (-S) antes de arrancar y luego en marcha. Apagar de verdad: QEMU
+# termina (ACPI S5) sin pasar por su puerto de pruebas (el código 5).
+echo "== Hispa-Pentium: apagar de verdad y la batería (el servicio de ACPI, ACPI.BIN) =="
+Y=$P/acpi
+mkdir -p $Y $G
+if bash $AQUI/../acpi/pentium/hacer.sh $Y/ACPI.BIN > $Y/hacer.txt 2>&1; then
+  ok "acpi/pentium/hacer.sh: ACPI.BIN, el núcleo de HSPACPI (ACPICA) como programa del anillo 3 ($(stat -c %s $Y/ACPI.BIN) octetos)"
+else ko "acpi/pentium/hacer.sh no hace ACPI.BIN: $(tail -1 $Y/hacer.txt)"; fi
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $Y/semilla.asm > /dev/null && nasm -f bin $Y/semilla.asm -o $Y/SEMILLA.BIN
+for u in ubloc:BLOC uconsola:CONSOLA uordenes:ORDENES uhola:HOLA; do
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/${u%%:*}.cas -o $Y/${u%%:*}.asm > /dev/null && nasm -f bin $Y/${u%%:*}.asm -o $Y/${u##*:}.BIN
+done
+SSDT="-acpitable file=$AQUI/../tests/acpi/bateria-qemu.aml"
+# la CMOS de la batería: cmosq REGISTRO VALOR (órdenes del monitor para probar.sh)
+cmosq() { echo ":monitor o /b 0x70 0x$1"; echo ":monitor o /b 0x71 0x$2"; }
+mapfile -t PUESTA < <(cmosq 60 37; cmosq 61 02; cmosq 62 00)
+# (con la máquina en marcha, parada un momento: que ni el núcleo, que lee
+# su reloj de la CMOS, ni el servicio cambien el registro entre las dos)
+mapfile -t ENCHUFA < <(echo ":monitor stop"; cmosq 61 03; echo ":monitor cont")
+mapfile -t GASTADA < <(echo ":monitor stop"; cmosq 62 28; echo ":monitor cont")
+# 1. el escritorio con la batería al 55 %, sin cable: la pila y su recuadro;
+# luego enchufada (cargando) y gastada; y «Apagar» apaga (QEMU termina)
+CAPTURAS=$G MODULOS=$Y/ACPI.BIN,$Y/BLOC.BIN ARRANQUE="escritorio acpicada=1" QEMU_MAS="-S $SSDT" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN \
+  "${PUESTA[@]}" ":monitor cont" ":pausa 5" ":captura a1" ":raton 690 585" ":pausa 1.5" ":captura a2" \
+  "${ENCHUFA[@]}" ":pausa 3" ":captura a3" ":clic 690 585" ":pausa 1" ":captura a4" ":raton 400 300" \
+  "${GASTADA[@]}" ":pausa 3" ":raton 690 585" ":pausa 1.5" ":captura a5" ":raton 400 300" \
+  ":clic 40 585" ":clic 80 293" ":pausa 2" ":escribe sin guardar" ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 3" ":captura a6" \
+  ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 4" > $Y/apagar.sal 2>&1
+S=$Y/apagar.sal
+mira "el núcleo lanza el servicio de ACPI al arrancar, y este lee las tablas de QEMU y la batería de la SSDT de prueba (_BIF, _BIX, _BST)" \
+  "^acpi: el servicio de ACPI (ACPI.BIN) en marcha, la tarea [0-9]*" "^ACPI: SSDT .*HISPA  BATPRUEB" "^Batería 1: ._SB_.HBAT" \
+  "^Lectura 1: 55 % (2750 de 5000 mAh), sin cable, descargando, quedan 165 min"
+mira "y le da al núcleo lo que hace falta para apagar (PM1a_CNT de PIIX4 y \\_S5) y reiniciar" \
+  "^ACPI: para apagar: PM1a_CNT 604h, PM1b_CNT 0h, ._S5 0, 0; SMI_CMD B2h, ACPI_ENABLE F1h"
+miracap "la bandeja enseña la pila con lo que queda (verde) y el porcentaje, al lado del reloj" a1 negrita 700 570 712 580 "55%" \
+  rgb 680 580 3FAE49 rgb 695 580 EAF3FD
+miracap "con el puntero quieto medio segundo encima, el recuadro de ayuda: lo que queda y los minutos, la salud y los ciclos de carga" a2 \
+  texto 300 500 790 560 "Batería: 55 % · quedan 2 h 45 min" texto 300 500 790 560 "Salud: 68 % (guarda 5.000 de 7.350 mAh de cuando era nueva)" \
+  texto 300 500 790 560 "312 ciclos de carga" rgb 790 520 FFF8E1
+miracap "al enchufar el cargador (con el recuadro abierto), se pone al día solo: «cargando» y el rayo en la pila" a3 \
+  texto 300 500 790 560 "Enchufado · cargando: 55 %" rgb 690 578 FFD43B
+miracap "un clic en la pila quita el recuadro" a4 notexto 300 500 790 560 "Enchufado"
+miracap "con la batería gastada (la salud al 40 %), el aviso en terracota" a5 texto 300 480 790 560 "Salud: 40 % (guarda 5.000 de 12.500 mAh de cuando era nueva)" \
+  texto 300 480 790 560 "La batería está gastada: dura menos de la mitad que nueva"
+miracap "«Apagar» con el Bloc de notas sin guardar: el Bloc avisa, no se apaga y el escritorio lo dice" a6 \
+  texto 100 100 700 500 "Hay un programa sin cerrar: ¿algo sin guardar?"
+mira "«Apagar» otra vez: se cierran los programas, se vacían los discos y el servicio apaga por ACPI (S5: _PTS, el modo ACPI, SLP_EN) y QEMU termina" \
+  "^escritorio: apagar" "^energía: apagar (S5) por el servicio de ACPI" "^ACPI: preparar S5 (._S5, _PTS, _SST): AE_OK" \
+  "^ACPI: modo ACPI (SMI_CMD B2h <- F1h): AE_OK" "^\[código 0\]"
+if ! grep -q "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $S; then ok "ni una excepción del núcleo ni un error de ACPICA en toda la sesión"
+else ko "hay excepciones o errores de ACPICA:"; grep "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $S | head -4 | sed 's/^/        /'; fi
+# 2. reiniciar (con -no-reboot, QEMU termina al reiniciarse): con PIIX4 la
+# FADT no trae registro de reinicio: el teclado
+MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="$SSDT" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":clic 40 585" ":clic 230 545" \
+  ":clic 400 327" ":pausa 3" > $Y/reiniciar.sal 2>&1
+S=$Y/reiniciar.sal
+mira "«Reiniciar»: el servicio avisa al controlador embebido (_REG 3, 0) y el núcleo reinicia (PIIX4: por el teclado)" \
+  "^escritorio: reiniciar" "^ACPI: el núcleo va a reiniciar el equipo" "^energía: reiniciar por el teclado (8042)" "^\[código 0\]"
+# 3. con ICH9 (q35): apagar y reiniciar (aquí la FADT sí trae el registro de reinicio: CF9h)
+for q in 275:apagar 400:reiniciar; do
+  MAQUINA=q35 MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="$SSDT" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":clic 40 585" \
+    ":clic 230 545" ":clic ${q%%:*} 327" ":pausa 3" > $Y/q35${q##*:}.sal 2>&1
+done
+S=$Y/q35apagar.sal
+mira "ICH9 (QEMU q35): «Apagar» apaga por ACPI (SMI_CMD B2h <- 02h) y QEMU termina" "^ACPI: modo ACPI (SMI_CMD B2h <- 2h): AE_OK" "^\[código 0\]"
+S=$Y/q35reiniciar.sal
+mira "ICH9: «Reiniciar» por el registro de reinicio de la FADT (E/S CF9h <- 0Fh)" \
+  "^ACPI: para reiniciar: el registro de la FADT (E/S CF9h) <- Fh" "^energía: reiniciar por el registro de la FADT" "^\[código 0\]"
+# 4. sin ACPI (-no-acpi): el servicio lo dice, no hay pila y «Apagar» es lo de antes (en QEMU, su puerto de pruebas)
+CAPTURAS=$G MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="-no-acpi" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":captura a7" \
+  ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 2" > $Y/sinacpi.sal 2>&1
+S=$Y/sinacpi.sal
+mira "sin ACPI: el servicio lo dice y «Apagar» hace lo de antes (en QEMU, el código 5 de su puerto de pruebas)" \
+  "^ACPI: el equipo no tiene ACPI" "escritorio: apagar" "^energía: el equipo no se ha apagado" "^\[código 5\]"
+miracap "sin ACPI no hay pila en la bandeja (solo el reloj)" a7 notexto 670 570 740 590 "%" nrgb 695 580 EAF3FD
+# 5. un sobremesa (ACPI sin batería): ni pila; apagar, por ACPI
+CAPTURAS=$G MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":captura a8" \
+  ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 3" > $Y/sobremesa.sal 2>&1
+S=$Y/sobremesa.sal
+mira "un sobremesa (ACPI sin batería): el servicio lo dice, y apaga por ACPI" "^El equipo no declara baterías" "^energía: apagar (S5) por el servicio de ACPI" "^\[código 0\]"
+miracap "y en la bandeja no hay pila" a8 notexto 670 570 740 590 "%"
+# 6. las llamadas del servicio no son para cualquiera: el mismo ACPI.BIN,
+# lanzado a mano desde el intérprete, no puede (y lo dice)
+MODULOS=$Y/ACPI.BIN,$Y/ORDENES.BIN ARRANQUE="ordenes sinacpi" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 2" "acpi" ":pausa 3" "salir" apagar > $Y/mano.sal 2>&1
+S=$Y/mano.sal
+mira "un programa cualquiera no puede usar las llamadas del servicio (150 a 153): ACPI.BIN lanzado a mano lo dice y acaba" \
+  "^ACPI.BIN: es el servicio de ACPI; lo lanza el núcleo al arrancar"
+if ! grep -q "^acpi: el servicio" $S; then ok "«sinacpi» en la línea del cargador: el núcleo no lanza el servicio"
+else ko "con «sinacpi» el núcleo lanza el servicio"; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 echo "== $nok bien, $fail mal =="
