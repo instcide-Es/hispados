@@ -5,7 +5,7 @@
 # (la carpeta nucleo32), $W (una carpeta de trabajo con f/ e i/ ya hechas)
 # y $MEDIO («usb» o «cd»). Deja:
 #   $W/f     el núcleo (SEMILLA.BIN y sus copias ESCRIT*.BIN que piden el modo
-#            gráfico), los programas, ACPI.BIN y LEEME.TXT
+#            gráfico), los programas, ACPI.BIN, TLS.BIN y LEEME.TXT
 #   $W/i     lo que solo vale para instalar: los textos del sistema instalado,
 #            BOOT.IMG, CORE.IMG, CARPETAS.TXT y los registros de los paquetes
 #            (PAQUETES/*.PQI)
@@ -20,7 +20,7 @@ python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT10.BIN 1024 768 32 
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT6.BIN 1024 600 32 > /dev/null
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT13.BIN 1366 768 32 > /dev/null
 MODULOS=
-for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO upaquete:PAQUETES uactual:ACTUALIZ uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uinstala:INSTALAR uasiste:ASISTE; do
+for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO upaquete:PAQUETES uactual:ACTUALIZ uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uhttps:HTTPS uinstala:INSTALAR uasiste:ASISTE; do
   f=${p%%:*}; N=${p##*:}
   python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $W/$f.asm > /dev/null
   nasm -f bin $W/$f.asm -o $W/f/$N.BIN
@@ -33,6 +33,11 @@ done
 # programa más: va en la raíz, como módulo y, al instalar, a \HISPA
 bash $AQUI/../../acpi/pentium/hacer.sh $W/f/ACPI.BIN
 MODULOS="$MODULOS  module /ACPI.BIN ACPI.BIN
+"
+# (TLS) el servicio TLS (nucleo32/tls/: BearSSL, HTTPS), igual: en la raíz,
+# como módulo y, al instalar, a \HISPA
+bash $AQUI/tls/hacer.sh $W/f/TLS.BIN
+MODULOS="$MODULOS  module /TLS.BIN TLS.BIN
 "
 # lo que se instala en el disco: el núcleo (con el nombre que tendrá allí), los
 # programas, los textos del sistema instalado y el arranque del disco
@@ -88,7 +93,10 @@ LA RED (por cable)
   bandeja (abajo a la derecha) se pone verde. En la Consola:
     IPCONFIG               cómo está la red (IPCONFIG /TODO: con detalle)
     PING nombre            si contesta ese equipo (PING 8.8.8.8)
-    DESCARGAR http://...   baja un archivo (solo http://; https, aún no)
+    DESCARGAR http[s]://...  baja un archivo (https: cifrado, con el
+                           certificado del servidor comprobado)
+    HTTPS dirección        pide una página y la enseña (HTTPS /ESTADO: la
+                           fecha que usa y las autoridades de confianza)
   Las tarjetas que lleva: Intel PRO/1000, Realtek RTL8139 y Marvell Yukon
   88E8059. El Wi-Fi, todavía no.
 
@@ -124,6 +132,10 @@ LA CARPETA \HISPA
   *.BIN        los programas
   ACPI.BIN     el servicio de ACPI: apagar de verdad y la batería de los
                portátiles (sin él, «Apagar» solo dice que ya se puede)
+  TLS.BIN      el servicio TLS: las conexiones cifradas (https). Con el
+               reloj del PC mal, pide la hora a actualiza.hispados.es;
+               TLS.CCH y TLS.SEM son suyos. Más autoridades: los .CER de
+               la carpeta \HISPA\RAICES
   HISPA.INI    los ajustes: usuario, equipo, teclado (es o us) y modo
   GRUB.CFG     el menú de arranque. La línea «set modo=» es la medida de la
                pantalla (por ejemplo 1024x768x32, o auto)
@@ -153,7 +165,7 @@ cp /usr/lib/grub/i386-pc/boot.img $W/i/BOOT.IMG
 printf '\x90\x90' | dd of=$W/i/BOOT.IMG bs=1 seek=102 conv=notrunc status=none
 [ $(stat -c %s $W/i/CORE.IMG) -le 1000000 ] || { echo "usb.sh: CORE.IMG no cabe en el hueco de arranque"; exit 1; }
 # los paquetes del sistema (tools/hpq.py: base, bloc, consola, equipo, red,
-# ejemplos, paquetes, hvprun y oficina), hechos de lo mismo que se instala:
+# tls, ejemplos, paquetes, hvprun y oficina), hechos de lo mismo que se instala:
 # van en \PAQUETES de la memoria, con su CATALOGO.TXT (PAQUETES los encuentra
 # ahí); y sus registros (.PQI), con lo que se instala: INSTALAR los deja en
 # C:\HISPA\PAQUETES (lo dice CARPETAS.TXT), y así PAQUETES sabe luego qué hay

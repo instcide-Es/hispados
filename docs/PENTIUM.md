@@ -2435,9 +2435,10 @@ conoce nadie) y uno HTTP para la cabecera `Date`; `RELOJ=2001-01-01` en
 https://clicgest.es/ y https://hispados.es/ en QEMU es igual octeto a octeto que
 lo que baja `curl`.
 
-**Para un sistema instalado** hace falta llevar `TLS.BIN` (y `HTTPS.BIN`) en
-`\HISPA`: un paquete `tls` en `tools/hpq.py` (lo del CD y el actualizador lo
-lleva otra rama).
+**En el sistema**: `TLS.BIN` y `HTTPS.BIN` van en la memoria USB y en el CD
+(`nucleo32/sistema.sh`: en la raíz, como módulos, y a `\HISPA` al instalar) y
+son el paquete **`tls`** de `tools/hpq.py` (necesita `base` y `red`), con los
+demás del sistema en el catálogo firmado de `actualiza.sh`.
 
 ### Lo que falta
 
