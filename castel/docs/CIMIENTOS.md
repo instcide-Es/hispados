@@ -213,6 +213,21 @@ la elijo: hace el primer compilador abordable.
   del apartado 4, hemos acabado con las dos: el compilador sigue sacando texto (A), y el
   ensamblador es nuestro (B).)*
 - **Fase 5 — Saltar a 32 bits:** con el lenguaje ya sólido, empezar el SO de los 90.
+  *(Hecha desde el 18/11/2026: CASTEL32.md, y Hispa-Pentium escrito entero en Castel.)*
+- **Fase 6 — El compilador, también de 32 bits (CASTEL32):** *(hecha el 20/11/2026,
+  CASTEL32.md §11).* Castel nació para el 386 en adelante, pero su compilador
+  escrito en Castel seguía siendo un programa de 16 bits para Hispa-8086 (por cómo
+  se llegó: el autohospedaje fue antes que los 32 bits), y con el núcleo de
+  Hispa-Pentium 0.8 sus tablas ya no daban más de sí en 640 K. **Decisión:** el
+  compilador que manda es **CASTEL32**, los mismos fuentes compilados para 32 bits
+  con la memoria plana: en Hispa-Pentium es un programa del anillo 3 (CASTEL32.BIN,
+  con ENSAMB32.BIN) y en Hispa-386/486 un programa PE para HW32 (CASTELW.EXE, con
+  ENSAMBW.EXE). Hispa-Pentium se compila a sí mismo dentro (el núcleo entero sale
+  idéntico) y CASTEL32 llega al punto fijo en tres pasos dentro de Hispa-Pentium y
+  dentro de Hispa-DOS. El CASTEL de 16 bits sigue (se compila a sí mismo en
+  Hispa-8086 y compila lo de 16 bits), pero **ningún límite del núcleo depende ya
+  de él**. Y el compilador queda preparado para más partes de atrás: la de x86-64
+  para Hispa-64 es la siguiente (CASTEL32.md §12).
 
 Cada fase es un hito pequeño y comprobable, al estilo de cómo venimos haciendo Hispa-DOS.
 

@@ -1,0 +1,5 @@
+pantalla: 1824
+suma: 37470
+palabras: 48879 1981
+la misma, de otra forma: 1981
+y por el puntero: 21

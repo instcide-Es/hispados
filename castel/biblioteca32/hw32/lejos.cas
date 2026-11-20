@@ -1,0 +1,54 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; lejos.cas (HW32) - la memoria «lejana» de biblioteca/lejos.cas para los
+; programas Win32 de consola («modelo hispa32») que corren con HW32 en
+; Hispa-386 e Hispa-486: la misma forma de usarla, con la memoria plana. Un
+; bloque se pide con VirtualAlloc (que HW32 saca de HSPDPMI) y lo que se da es
+; su PÁRRAFO (su dirección entre 16), un Segmento de 32 bits: se lee y se
+; escribe con leer_byte, poner_byte, leer_palabra y poner_palabra, que en 32
+; bits son la memoria «por párrafos» (CASTEL32.md §5).
+módulo Lejos
+
+    público tipo Segmento = nat32
+
+    función virtual_alloc(n: nat32): nat32
+        ensamblador
+            push 4                      ; PAGE_READWRITE
+            push 0x3000                 ; MEM_COMMIT | MEM_RESERVE
+            push dword {n}
+            push 0
+            call [C_VirtualAlloc]
+        fin
+    fin
+
+    ; pide un bloque de tantos párrafos (0x1000 son 64 K). Devuelve su
+    ; párrafo, o 0 si no hay tanta memoria. Viene a cero.
+    público función pedir(párrafos: nat16): Segmento
+        variable d: nat32
+        si párrafos = 0 entonces devolver 0 fin
+        d := virtual_alloc(nat32(párrafos) * 16 + 16)
+        si d = 0 entonces devolver 0 fin
+        devolver (d + 15) >> 4
+    fin
+
+    ; cuántos párrafos tiene el mayor bloque que se puede pedir ahora (HW32
+    ; no lo dice: lo más que cabe en un nat16)
+    público función mayor_bloque(): nat16
+        devolver 0xFFFF
+    fin
+
+    ; (los bloques se quedan para el programa hasta que acaba)
+    público función devolver_bloque(seg: Segmento)
+    fin
+
+    ; pone a cero las primeras «palabras» palabras de un bloque
+    público función borrar_bloque(seg: Segmento, palabras: nat16)
+        variable i: nat32
+        i := 0
+        mientras palabras > 0 hacer
+            poner_palabra(seg, i, 0)
+            i := i + 2
+            palabras := palabras - 1
+        fin
+    fin
+
+fin Lejos.

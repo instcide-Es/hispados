@@ -1,0 +1,24 @@
+; =============================================================================
+;  ensambw.cas - ENSAMBW: ENSAMBLA, el ensamblador propio de Castel, como
+;  programa Win32 de consola («modelo hispa32») para HW32 (Hispa-386 e
+;  Hispa-486), en 32 bits y con la memoria plana. El mismo de ensambla.cas,
+;  módulo a módulo (Montador): solo cambian el modelo y lo del sistema, que se
+;  importa ANTES que nada (Lejos, Archivos y Argumentos de biblioteca32/hw32).
+;
+;      HW32 ENSAMBW.EXE ENTRADA.ASM [SALIDA]
+;
+;  Se compila (desde castel/) con:
+;      ccastel.py ensamblador/32/hw32/ensambw.cas -I biblioteca32/hw32 -I ensamblador
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ensambw
+
+    modelo hispa32
+
+    importar Lejos, Archivos, Argumentos, Montador
+
+    función principal(): byte
+        devolver ensamblar(0xF000)
+    fin
+
+fin Ensambw.

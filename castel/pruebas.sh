@@ -102,7 +102,17 @@
 #      batería de mentira de las pruebas de Hispa-DOS (-acpitable): la pila
 #      de la bandeja y su recuadro de ayuda, apagar (S5) y reiniciar en
 #      orden con PIIX4 y con ICH9, «sinacpi» y las llamadas 150 a 153.
-#  15. Hispa-Pentium 0.8: el CD y las actualizaciones por Internet. El CD
+#  15. CASTEL32 (pruebas32.sh): el compilador escrito en Castel, de 32 bits.
+#      Con corre32, en Linux: el mismo ensamblador que ccastel.py en todos los
+#      programas (y los mismos errores), ENSAMB32 igual que NASM y el arranque
+#      en tres pasos. Dentro de Hispa-Pentium (QEMU): el núcleo entero y sus
+#      programas compilados y ensamblados ahí, idénticos, con las tablas lejos
+#      del tope (--gasto), y CASTEL32 compilándose a sí mismo hasta el punto
+#      fijo. Y con HW32 en Hispa-DOS (Hispa-386/486), CASTELW, también hasta
+#      el punto fijo. (Desde el 20/11 el núcleo de Hispa-Pentium ya no lo
+#      compila CASTEL de 16 bits en las partes 5 y 6: lo hacen CASTEL32 y
+#      ENSAMB32 aquí; CASTEL.md y CASTEL32.md §11.)
+#  16. Hispa-Pentium 0.8: el CD y las actualizaciones por Internet. El CD
 #      (nucleo32/cd.sh: ISO con El Torito sin emulación y GRUB), en QEMU
 #      como lo pone VirtualBox: «pc» con IDE (PIIX), USB OHCI y la e1000
 #      82540EM, y «q35» con SATA (AHCI, el CD también); arrancar sin
@@ -112,7 +122,8 @@
 #      el núcleo, reiniciar, que arranque el nuevo; y con un núcleo que se
 #      cuelga, que GRUB vuelva solo al de antes.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
-# (y para la parte 15, grub-mkrescue y xorriso; y python3-cryptography). El disquete de
+# (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
+# xorriso y python3-cryptography). El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
 #   SOLO=32 ./pruebas.sh          la primera, la octava y la novena (lo de 32 bits)
@@ -123,8 +134,9 @@
 #   SOLO=paquetes ./pruebas.sh    la primera y la duodécima (los paquetes: PAQUETES y tools/hpq.py)
 #   SOLO=red ./pruebas.sh         la primera y la decimotercera (la red)
 #   SOLO=acpi ./pruebas.sh        la primera y la decimocuarta (apagar de verdad y la batería: ACPI.BIN)
-#   SOLO=cd ./pruebas.sh          la primera y la decimoquinta (el CD y las actualizaciones por Internet)
+#   SOLO=cd ./pruebas.sh          la primera y la decimosexta (el CD y las actualizaciones por Internet)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
+#   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
 #                                 de 16 bits (azar.py) y otros tres de 32
@@ -170,6 +182,8 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
   if [ -f $G/$c.ppm ] && cap $G/$c.ppm "$@"; then ok "$que"; else ko "$que:"; sed 's/^/        /' $G/cap.txt | head -6; [ -f $G/$c.ppm ] || echo "        (no hay captura $c)"; fi
 }
 
+. $AQUI/pruebas32.sh               # la parte 15 (CASTEL32), como la función parte15
+
 # ---------------------------------------------------------------- 1. errores
 echo "== Castel: los errores se dicen en español, con línea y columna =="
 for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
@@ -188,6 +202,11 @@ case "${SOLO:-}" in caliente|paquetes|red|acpi|cd) SOLO08=$SOLO; SOLO=08 ;; *) S
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
+  echo "== $nok bien, $fail mal =="
+  exit $((fail > 0))
+fi
+if [ "${SOLO:-}" = castel32 ]; then
+  parte15
   echo "== $nok bien, $fail mal =="
   exit $((fail > 0))
 fi
@@ -510,16 +529,16 @@ for f in $T/ens/*.asm; do
 done
 if [ -z "$distintos" ]; then ok "ensambla.py: los $iguales archivos (ejemplos de 16 y de 32 bits, biblioteca entera, formas y ENSAMBLA), iguales que con NASM"
 else ko "ensambla.py no da lo mismo que NASM en:$distintos"; fi
-# ENSAMBLA, dentro de Hispa-8086: los ensambla todos (también a sí mismo)
-# (en tres disquetes: en uno no caben ya todos; el segundo, la semilla de
-# Hispa-Pentium, que con el entorno gráfico pasa de 600 K; el tercero, sus
-# programas de usuario)
+# ENSAMBLA, dentro de Hispa-8086: los ensambla todos (también a sí mismo),
+# menos el núcleo de Hispa-Pentium y sus programas: esos, desde el 20/11, los
+# ensambla ENSAMB32 dentro de Hispa-Pentium (la parte 15); el ENSAMBLA de 16
+# bits ya no manda en el núcleo (CASTEL32.md §11)
 NUC=" $(for f in $USU; do basename $f .cas; done | tr '\n' ' ')"
 NRED=" $(for f in $RED_USU; do basename $f .cas; done | tr '\n' ' ')"
 # en qué tanda va cada uno: 2, la semilla; 3, sus programas; 4, los de la red; 1, lo demás
 tanda_de() { case "$1" in semilla) echo 2 ;; *) case "$NUC" in *" $1 "*) echo 3 ;; *) case "$NRED" in *" $1 "*) echo 4 ;; *) echo 1 ;; esac ;; esac ;; esac; }
 mkdir $T/ens/sal
-for tanda in 1 2 3 4; do
+for tanda in 1; do
 cp $H/build/hispa8086-1440.img $T/e.img
 { printf '@ECO OFF\r\n'
   for f in $T/ens/*.asm; do
@@ -553,6 +572,7 @@ distintos=
 for f in $T/ens/*.asm; do
   n=$(basename $f .asm)
   N=$(echo $n | tr a-z A-Z)
+  [ "$(tanda_de $n)" = 1 ] || continue
   if cmp -s $T/ens/nasm/$n.bin $T/ens/sal/$N.BIN; then iguales=$((iguales + 1)); else distintos="$distintos $n"; fi
 done
 if [ -z "$distintos" ]; then ok "ENSAMBLA (en Castel, dentro de Hispa-8086): los $iguales archivos, iguales que con NASM (él mismo incluido)"
@@ -580,13 +600,17 @@ python3 -I $AQUI/azar32.py 8 40 $A/azar32p.cas $A/azar32p.esp plano
 # tercera, lo de Hispa-Pentium, que con el entorno gráfico ya no cabe con lo
 # demás: los fuentes del núcleo en A: y, en B:, el ensamblador de la semilla,
 # de más de 600 K (la segunda), o el de sus programas de usuario (la tercera))
-for tanda in 1 2 3 4; do
+# (el núcleo de Hispa-Pentium y sus programas, desde el 20/11, los compila
+# CASTEL32 en la parte 15: las tablas del CASTEL de 16 bits, en 640 K, ya no
+# dan para él; las tandas 2, 3 y 4 de antes eran eso)
+for tanda in 1; do
 cp $H/build/hispa8086-1440.img $T/c.img
 mmd -i $T/c.img ::BIB ::PARTES ::BIB32
 for f in $AQUI/biblioteca32/*.cas; do mcopy -i $T/c.img $f ::BIB32/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
 if [ $tanda = 1 ]; then
   for f in $AQUI/biblioteca/*.cas; do mcopy -i $T/c.img $f ::BIB/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
   for f in $AQUI/ejemplos/partes/*.cas; do mcopy -i $T/c.img $f ::PARTES/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
+  mcopy -i $T/c.img $AQUI/ensamblador/montador.cas ::MONTADOR.CAS
   LOTE="$(echo $AQUI/ejemplos/*.cas) $AQUI/ensamblador/ensambla.cas $T/ens/toda.cas $A/azar16.cas $A/azar32.cas $(echo $AQUI/ejemplos32/*.cas) $A/azar32p.cas"
 else
   # (en la segunda, los módulos del núcleo; en la tercera, los programas y
@@ -596,7 +620,7 @@ else
       ured|uipconf|uping|udescarg|rbase|rtarjeta|ryukon|rpila|rtcp|redes) [ $tanda = 4 ] || continue ;;
       llamadas) [ $tanda = 3 ] || [ $tanda = 4 ] || continue ;;
       uhci|unidades|usb|usbalm|usbbase|usbcal|usbhid|usuario) [ $tanda = 2 ] || continue ;;
-      u[a-z]*|barramenu|sha256) [ $tanda = 3 ] || continue ;;
+      u[a-z]*|barramenu|sha256|firma|clave) [ $tanda = 3 ] || continue ;;
       *) [ $tanda = 2 ] || continue ;;
     esac
     mcopy -i $T/c.img $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS
@@ -653,7 +677,7 @@ for f in $A/ref/*.ASM; do
   N=$(basename $f .ASM)
   if cmp -s $f $A/sal/$N.ASM; then iguales=$((iguales + 1)); else distintos="$distintos $N"; fi
 done
-if [ -z "$distintos" ]; then ok "CASTEL: el mismo ensamblador que ccastel.py en los $iguales programas (ejemplos de 16 y de 32 bits, biblioteca entera, ENSAMBLA, la semilla con sus módulos, los programas de usuario y tres de cuentas al azar)"
+if [ -z "$distintos" ]; then ok "CASTEL: el mismo ensamblador que ccastel.py en los $iguales programas (ejemplos de 16 y de 32 bits, biblioteca entera, ENSAMBLA y tres de cuentas al azar)"
 else ko "CASTEL no saca el mismo ensamblador que ccastel.py en:$distintos"; fi
 iguales=0
 distintos=
@@ -2660,7 +2684,7 @@ else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin apagar de verdad ni la batería)"
 fi   # apagar de verdad y la batería
 
-# ------------------------------- 15. Hispa-Pentium 0.8: el CD y las actualizaciones por Internet
+# ------------------------------- 16. Hispa-Pentium 0.8: el CD y las actualizaciones por Internet
 # El CD (cd.sh) en QEMU como lo pone VirtualBox, instalar desde él y, en el
 # sistema instalado, actualizar por la red (el núcleo también) con un
 # servidor HTTP de aquí (servidor_prueba.py con RAIZ) y un catálogo firmado
@@ -2823,6 +2847,9 @@ else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el CD)"
 fi   # el CD
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
+
+# ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
+[ -z "${SOLO:-}" ] && parte15
 
 echo "== $nok bien, $fail mal =="
 exit $((fail > 0))

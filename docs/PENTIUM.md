@@ -2274,6 +2274,24 @@ la vez; el Wi-Fi y HTTPS (arriba); más tarjetas (la RTL8168 del Toshiba NB250,
 la PCnet, NE2000: Hispa-DOS ya las lleva); y, encima de esto, un navegador.
 (Las **actualizaciones** por la red ya van: sección 13.)
 
+## 14 bis. Hispa-Pentium se compila a sí mismo (CASTEL32)
+
+*20/11/2026.* El núcleo y sus programas se pueden compilar **dentro de
+Hispa-Pentium**: el compilador de Castel escrito en Castel, compilado para 32 bits,
+es un programa del anillo 3 más (**CASTEL32.BIN**, con su ensamblador
+**ENSAMB32.BIN**; [CASTEL32.md](../castel/docs/CASTEL32.md) §11). Con los fuentes
+en el disco:
+
+```
+C:\NUC>\CASTEL32 SEMILLA.CAS -o \S\SEMILLA.ASM -I \BIB32 --gasto
+C:\>ENSAMB32 S\SEMILLA.ASM S\NUCLEO.BIN
+```
+
+sale el mismo NUCLEO.BIN, octeto a octeto, que con ccastel.py y NASM (en QEMU, unos
+8 s compilar y 3 ensamblar; el núcleo con sus 19 programas, 21 y 7). Y CASTEL32 se
+compila a sí mismo dentro, hasta el punto fijo. Lo comprueba `castel/pruebas.sh`
+en su parte 15 (`SOLO=castel32`).
+
 ## 15. Las pruebas
 
 `castel/pruebas.sh` (las partes 8 a 14; `SOLO=32 ./pruebas.sh` hace solo esas y la

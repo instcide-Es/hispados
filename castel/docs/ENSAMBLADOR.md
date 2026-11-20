@@ -11,7 +11,8 @@ que tienen que dar siempre lo mismo:
 | | Qué es |
 |---|---|
 | `ensambla.py` | La referencia, en Python: `python3 -I ensambla.py ENTRADA.asm [-o SALIDA]` |
-| `ensamblador/ensambla.cas` | **ENSAMBLA**, el de verdad: el anterior pasado a Castel, función por función. Corre en Hispa-8086: `ENSAMBLA ENTRADA.ASM [SALIDA]` (sin SALIDA, `ENTRADA.COM`, o `.EXE` si el programa es de «modelo grande») |
+| `ensamblador/ensambla.cas` | **ENSAMBLA**, el de verdad: el anterior pasado a Castel, función por función (por dentro, el módulo `Montador`, `montador.cas`). Corre en Hispa-8086: `ENSAMBLA ENTRADA.ASM [SALIDA]` (sin SALIDA, `ENTRADA.COM`, o `.EXE` si el programa es de «modelo grande») |
+| `ensamblador/32/pentium/ensamb32.cas`, `ensamblador/32/hw32/ensambw.cas` | **ENSAMB32** y **ENSAMBW**: el mismo Montador compilado para 32 bits, para Hispa-Pentium y para HW32 (CASTEL32.md §11). Ensamblan el núcleo de Hispa-Pentium en unos 3 s dentro de él |
 
 `pruebas.sh` ensambla con NASM, con `ensambla.py` y con ENSAMBLA (dentro de Hispa-8086) los
 ejemplos, la biblioteca entera, `ensamblador/formas.asm` (una muestra de cada forma de

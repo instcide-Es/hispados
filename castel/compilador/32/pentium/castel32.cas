@@ -1,0 +1,29 @@
+; =============================================================================
+;  castel32.cas - CASTEL32: el compilador de Castel escrito en Castel, como
+;  programa del anillo 3 de Hispa-Pentium («modelo usuario»): 32 bits y la
+;  memoria plana de megas, de modo que sus tablas ya no están al límite
+;  (CASTEL32.md §11). El mismo compilador que castel.cas (el de 16 bits, para
+;  Hispa-8086), módulo a módulo (Mando y los suyos); solo cambian el modelo,
+;  las medidas de las tablas (../medidas.cas) y lo del sistema, que se
+;  importa ANTES que nada para que sea lo que valga: Lejos, Archivos y
+;  Argumentos de biblioteca32/pentium, con las llamadas al sistema del
+;  núcleo (nucleo32/llamadas.cas).
+;
+;      CASTEL32 ENTRADA.CAS [-o SALIDA.ASM] [-I CARPETA]... [--todo] [--gasto]
+;
+;  Se compila (desde castel/) con:
+;      ccastel.py compilador/32/pentium/castel32.cas -I compilador/32
+;                 -I biblioteca32/pentium -I compilador -I nucleo32
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Castel32
+
+    modelo usuario
+
+    importar Medidas, Lejos, Archivos, Argumentos, Mando
+
+    función principal(): byte
+        devolver mandar()
+    fin
+
+fin Castel32.

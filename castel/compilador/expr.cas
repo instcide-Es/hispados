@@ -2003,6 +2003,44 @@ módulo Expr
         devolver cierto
     fin
 
+    ; la memoria «por párrafos» (CASTEL32.md §5): el octeto (o la palabra) de la
+    ; dirección párrafo * 16 + desplazamiento, con los dos de 32 bits
+    función párrafos32(i: byte, a0: nat16, a1: nat16, a2: nat16)
+        variable v: N64
+        variable d: arreglo [TXT] de byte
+        variable tt: puntero a byte
+        si i = I_LEER_BYTE o i = I_PONER_BYTE entonces tt := "byte" sino tt := "word" fin
+        si const(a1, v) y v.alto = 0 y v.bajo < 0x10000 entonces
+            gen_expr(a0)
+            em("shl eax, 4")
+            copiar(d, "eax")
+            si v.bajo <> 0 entonces
+                d[3] := '+'
+                natural_a_texto(v.bajo, dirección(d[4]))
+            fin
+        sino
+            dos32p(a1, a0)                      ; desplazamiento -> EAX, párrafo -> ECX
+            em("shl ecx, 4")
+            em("add eax, ecx")
+            copiar(d, "eax")
+        fin
+        si i = I_LEER_BYTE o i = I_LEER_PALABRA entonces
+            ini()
+            l("movzx eax, ")
+            l(tt)
+            l(" [")
+            l(d)
+            l("]")
+            cruda()
+            devolver
+        fin
+        em("push eax")
+        gen_expr(a2)
+        em("pop ebx")
+        d[1] := 'b'
+        si i = I_PONER_BYTE entonces em3("mov [", d, "], al") sino em3("mov [", d, "], ax") fin
+    fin
+
     función dos32p(a: nat16, b: nat16)
         variable t: arreglo [TXT] de byte
         si opnd32p(b, t) >= 0 entonces
@@ -2312,6 +2350,7 @@ módulo Expr
                 dos32p(a1, a0)                  ; dato -> EAX, puerto -> ECX
                 em("mov edx, ecx")
                 em("out dx, al")
+            caso I_LEER_BYTE, I_LEER_PALABRA, I_PONER_BYTE, I_PONER_PALABRA: párrafos32(i, a0, a1, a2)
             caso I_DIRECCION:
                 lugar(a0, t)
                 em3("lea eax, [", t, "]")
