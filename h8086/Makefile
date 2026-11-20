@@ -51,7 +51,12 @@ $(B)/mbr.bin: mbr.asm | $(B)
 $(B)/gen/util.inc: ordenes/util.inc | $(B)
 	$(CP437) $< $@
 
-$(B)/FORMATEA.COM $(B)/SISTEMA.COM $(B)/PARTIR.COM: $(B)/gen/util.inc $(B)/arranque.bin $(B)/mbr.bin
+$(B)/FORMATEA.COM $(B)/SISTEMA.COM $(B)/PARTIR.COM: $(B)/gen/util.inc $(B)/arranque.bin $(B)/mbr.bin $(B)/gen/sectores.inc
+
+# lo que ocupan de verdad los dos sectores (sin los ceros del final): las
+# órdenes solo llevan eso, y el resto lo ponen a cero al empezar
+$(B)/gen/sectores.inc: $(B)/arranque.bin $(B)/mbr.bin
+	python3 -c "import sys; m = open(sys.argv[1], 'rb').read(); a = open(sys.argv[2], 'rb').read()[:510]; print('MBR_COD equ %d' % len(m.rstrip(bytes(1)))); print('ARR_COD equ %d' % len(a.rstrip(bytes(1))))" $(B)/mbr.bin $(B)/arranque.bin > $@
 
 $(B)/FORMATEA.COM: ordenes/formatea.asm | $(B)
 	$(CP437) $< $(B)/gen/formatea.asm && cd $(B)/gen && $(NASM) -f bin -o ../FORMATEA.COM formatea.asm
