@@ -1894,7 +1894,7 @@ haya red, a `actualiza.clicgest.es/pentium/`).
 **Lo que falta**: comprobar la **firma** (del catálogo, que lleva las sumas de
 todo; con una clave pública dentro del sistema); actualizar el núcleo y pedir
 reiniciar (hoy se pone el archivo, y vale en el arranque siguiente); que la
-ventana deje elegir el origen y enseñe el avance; y la red (otra rama), que
+ventana deje elegir el origen y enseñe el avance; y la red (sección 14), que
 trae lo de Internet por el gancho.
 
 ## 14. La red por cable (la 0.8)
@@ -2394,38 +2394,28 @@ donde CASTEL deja su archivo temporal y la salida (en A:, los fuentes: solo los
 módulos del núcleo en la segunda tanda, y los programas con los dos módulos que
 usan en la tercera). Lo que sacan los dos compiladores sigue siendo lo mismo.
 
-Con la 0.8 tampoco: el núcleo solo gana `red.cas` (y CASTEL lo sigue
-compilando igual que `ccastel.py`); la red son programas del anillo 3 aparte,
-que van en una **cuarta tanda** (en A:, `RED.BIN` con sus seis módulos e
-IPCONFIG, PING y DESCARGAR; en B:, lo que sale), lo mismo para ENSAMBLA.
-
 Con la 0.7 no ha hecho falta tocar los compiladores: lo de instalar son dos
 programas del anillo 3 aparte (INSTALAR y el asistente), y el núcleo solo ha
 crecido en un módulo corto (`ajustes.cas`) y nueve llamadas. CASTEL compila el
 núcleo con sitio: de sus tablas usa 2.644 párrafos de 3.072 para los nombres,
 2.809 de 4.096 para los textos y 8.718 de 10.240, lo más, para el árbol.
 
-Con todo, `pruebas.sh` tiene ahora **444 comprobaciones** (369 con la 0.6, 13 de
-la oficina de Hispa-386 dentro, 41 de instalar en el disco, dos de ellas de la
-oficina en el disco instalado, y 21 del USB en caliente; unos cincuenta minutos
-en el VPS). La última pasada entera (20/11/2026, con el USB en caliente) dio
-**444 bien, 0 mal**; `SOLO=08` (los errores y la parte 11, el USB en caliente)
-son unos cuatro minutos; `SOLO=07 ./pruebas.sh` (los errores y la parte 10, instalar en el
+Con la 0.8 (todo junto) tampoco: el núcleo gana `usbcal.cas`, `red.cas` y
+`energia.cas` (CASTEL los sigue compilando igual que `ccastel.py`, en la segunda
+tanda), pero sus tablas, sí: el núcleo entero ya no le cabía («demasiados
+nombres»: 3.075 párrafos de 3.072). Ahora tiene **52 K para los nombres**,
+**168 K para el árbol** y **60 K para lo declarado** (más ya no cabe en lo que
+deja libre Hispa-8086), y con la semilla usa 3.075 de 3.328 párrafos de
+nombres, 3.171 de 4.096 de textos, 10.153 de 10.752, lo más, de árbol y 3.400
+de 3.840 de lo declarado: poco margen (castel/docs/CASTEL32.md). PAQUETES, su ventana y
+`sha256.cas` van con los demás programas, en la tercera; y la red son programas
+del anillo 3 aparte, que van en una **cuarta tanda** (en A:, `RED.BIN` con sus
+seis módulos e IPCONFIG, PING y DESCARGAR; en B:, lo que sale), lo mismo para
+ENSAMBLA.
 
-Con todo, `pruebas.sh` tiene ahora **449 comprobaciones** (369 con la 0.6, 13 de
-la oficina de Hispa-386 dentro, 43 de instalar en el disco —dos de ellas de la
-oficina y dos de los registros de paquetes en el disco instalado— y 24 de los
-paquetes; unos cincuenta minutos en el VPS). La última pasada entera
-(20/11/2026, con los paquetes) dio 446 bien y 3 mal, que eran cuentas de las
-pruebas (los 11 programas que trae ahora la memoria USB, y dónde se pinta un
-botón): corregidas, `SOLO=32` (las partes 1, 8, 9, 10 y 11) da **368 bien, 0
-mal**, y lo demás (de la 2 a la 7, los dos compiladores con PAQUETES, su ventana
-y SHA-256 dentro) estaba bien en la pasada entera; `SOLO=08` (los paquetes) son
-unos cuatro minutos; `SOLO=07 ./pruebas.sh` (los errores y la parte 10, instalar en el
-
-Con el servicio de ACPI (20/11/2026, sección 11, «Apagar de verdad y la
-batería») hay una parte más, la **11**: **20 comprobaciones** (`SOLO=acpi
-./pruebas.sh`, los errores y esa parte: unos tres minutos). Con la batería de
+**La 0.8: apagar de verdad y la batería** (sección 11; la parte 14 de
+`pruebas.sh`: **20 comprobaciones**, `SOLO=acpi ./pruebas.sh`, los errores y
+esa parte: unos tres minutos). Con la batería de
 mentira de las pruebas de Hispa-DOS (`tests/acpi/bateria-qemu.aml`, cargada
 con `-acpitable`; la CMOS que lee se cambia por el monitor de QEMU con la
 máquina parada un momento, orden `:monitor` de `probar.sh`): que el núcleo
@@ -2436,13 +2426,16 @@ Bloc de notas sin guardar (no se apaga y se dice) y otra vez (se apaga por
 ACPI: QEMU termina); reiniciar con PIIX4 (por el teclado) y con ICH9 (`q35`:
 apagar y reiniciar por el registro de la FADT); sin ACPI (`-no-acpi`: lo de
 antes); un sobremesa (sin pila, y apaga por ACPI); y que un programa
-cualquiera no puede usar las llamadas del servicio. Con ACPI.BIN en la
-memoria USB, sus programas de usuario como módulos son 10 (eran 9). La pasada
-entera del 20/11 dio **437 bien y 1 mal**: la imagen USB de la parte 8 no se
-pudo hacer en ese momento (`losetup` compartido con otras sesiones); repetida
-esa parte (`SOLO=32`), bien (y en esa repetición la hora del asistente, por
-el minuto que cambia con el VPS cargado, salió mal una vez; con `SOLO=07`,
-115 bien y 0 mal). En total, **443 comprobaciones**.
+cualquiera no puede usar las llamadas del servicio.
+
+Con todo, `pruebas.sh` tiene ahora **CUENTA_TOTAL comprobaciones** (423 hasta la 0.7;
+de la 0.8, los paquetes, el USB en caliente, la red, apagar de verdad y la
+batería, y las del AHCI del ICH7). La memoria USB trae ahora **16 programas**
+como módulos (eran 9: PAQUETES y ACTUALIZ, RED, IPCONFIG, PING y DESCARGA, y
+ACPI.BIN), y 9 paquetes del sistema (con «red»). Unos cincuenta y cinco
+minutos en el VPS. RESULTADO_PASADA `SOLO=08` (las cuatro partes de la 0.8)
+son unos doce minutos; `SOLO=caliente`, `SOLO=paquetes`, `SOLO=red` y
+`SOLO=acpi`, cada una sola, de tres a cinco.
 
 Hasta la 0.7, `pruebas.sh` tenía **423 comprobaciones** (369 con la 0.6, 13 de
 la oficina de Hispa-386 dentro y 41 de instalar en el disco, dos de ellas de la
@@ -2453,23 +2446,18 @@ disco) son unos cinco minutos; `SOLO=06` (la parte 9, lo de la 0.6 y la
 oficina), unos diez, y `SOLO=16`, lo que no arranca el núcleo (de la parte 1 a
 la 7, con los dos compiladores y los dos ensambladores), otros siete.
 
-## 15. Por dónde seguir
+## 16. Por dónde seguir
 
-Con todo, `pruebas.sh` tiene ahora **437 comprobaciones** (423 con la 0.7 y
-14 de la red). La última pasada entera (20/11/2026, con la 0.8) dio **432 bien
-y 5 mal**: las cinco, expectativas que aún decían «0.7» o los 9 módulos de la
-memoria USB (ahora 13); arregladas, `SOLO=32` (la primera, la octava y la
-novena, donde estaban) dio 342 bien, 0 mal, y `SOLO=08` (la red), 68 bien, 0
-mal. Unos cincuenta minutos en el VPS.
-
-## 15. Por dónde seguir
-
-Hecho en la del 20/11 (la 0.8): **la red por cable** (sección 13). Lo
-siguiente de la red, allí mismo («Lo que falta», el Wi-Fi y HTTPS); y, para
-que el HP Mini sea un equipo útil, encima de ella: **las actualizaciones** por
-la red (como ACTUALIZAR de Hispa-DOS: un `versiones.txt` y un paquete en
-`actualiza.clicgest.es`), **los controladores** que faltan, el **Explorador** y
-**las dependencias** entre paquetes.
+Hecho en la del 20/11 (la 0.8, cinco ramas juntas en `pentium-08`): el AHCI
+del ICH7 (sección 7), el USB en caliente y apagar de verdad con la batería
+(sección 11), los paquetes (sección 13) y **la red por cable** (sección 14).
+Lo primero, **probarlo todo junto en el HP Mini y en el Toshiba** (la imagen
+`hispa-pentium-usb-0.8-*.zip` de `Pruebas/Pendientes/<equipo>/Pentium-0.8-todo`,
+con su LEEME): el disco SATA del NB250 con el arreglo del FIS, la Yukon del
+HP Mini y que ACPI apague de verdad en los dos. Luego, lo de la red, allí mismo
+(«Lo que falta», el Wi-Fi y HTTPS); y, encima de ella: **las actualizaciones** por
+la red (el gancho de PAQUETES ya está: falta la firma del catálogo),
+**los controladores** que faltan y el **Explorador**.
 
 Hecho en la tanda del 18-19/11/2026: el disco (ATA) y la FAT, cargar programas del
 disco, las llamadas al sistema nuevas, la consola con cerrojo, el intérprete de
