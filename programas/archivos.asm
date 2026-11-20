@@ -363,7 +363,8 @@ tab_ext     db "COM", TI_PROG, "EXE", TI_PROG, "BAT", TI_ORD
             db "ASM", TI_TEXTO, "INC", TI_TEXTO, "DIZ", TI_TEXTO, "NFO", TI_TEXTO
             db "LST", TI_TEXTO, "CSV", TI_TEXTO, "ME", 0, TI_TEXTO, "1ST", TI_TEXTO
             db "MD", 0, TI_TEXTO, "BMP", TI_IMAGEN, "WAV", TI_SONIDO
-            db "NES", TI_CART, "SMS", TI_CART, "HVP", TI_MOD, 0
+            db "NES", TI_CART, "SMS", TI_CART, "HVP", TI_MOD
+            db "SFC", TI_CART, "SMC", TI_CART, 0        ; [HISPA-SNES]
             align 4
 nom_tipos   dd t_ti0, t_ti1, t_ti2, t_ti3, t_ti4, t_ti5, t_ti6, t_ti7, t_ti8
 t_ti0       db "Carpeta", 0
@@ -504,6 +505,7 @@ n_pintura   db "PINTURA.HVP", 0
 n_sonidos   db "SONIDOS.HVP", 0
 n_hispanes  db "JUEGOS\HISPANES.HVP", 0
 n_hispasms  db "JUEGOS\HISPASMS.HVP", 0
+n_hispasns  db "JUEGOS\HISPASNS.HVP", 0       ; [HISPA-SNES]
 t_param_r   db " /R", 0
 
 ; =============================================================================

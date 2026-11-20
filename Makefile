@@ -697,6 +697,37 @@ $(B)/VDPTEST.SMS: tests/hispasms/vdptest.s sms/comun/letras.s tools/asmz80.py | 
 $(B)/TMSTEST.SMS: tests/hispasms/tmstest.s sms/comun/letras.s tools/asmz80.py | $(B)
 	python3 tools/asmz80.py $< $@
 smsprogs: $(B)/smsnativo $(B)/smsnativo_t $(B)/VDPTEST.SMS $(B)/TMSTEST.SMS
+# [HISPA-SNES] Hispa-Snes (docs/HISPASNES.md): el emulador de la consola de
+# 16 bits de 1990, con sus piezas en programas/hispasnes/. No cabe en el
+# disquete de arranque: va solo en las imágenes USB y en los .PAQ (HVPJ, los
+# juegos que van solo ahí; mkusb.py copia todos los .HVP de build/), con la
+# carpeta de sus cartuchos, \HISPADOS\JUEGOS\SNES, y PRUEBA.SFC (una ROM
+# nuestra, la de la prueba de la imagen). Sus ROM de prueba se ensamblan con
+# tools/asm816.py (65C816 y SPC700); el núcleo, como programa de Linux, es
+# snesnativo (tests/run_hispasnes_tests.sh)
+$(B)/HISPASNS.HVP: programas/hispasnes.asm $(wildcard programas/hispasnes/*.inc) lib/emufull.inc $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+HVPJ = $(B)/HISPASNS.HVP
+SNESROMS = $(B)/PRUEBA.SFC
+SNESDEP = $(wildcard tests/hispasnes/*.s) sms/comun/letras.s tools/asm816.py
+$(B)/PRUEBA.SFC: tests/hispasnes/demo.s $(SNESDEP) | $(B)
+	python3 tools/asm816.py $< $@
+$(B)/PPU1.SFC: tests/hispasnes/ppu1.s $(SNESDEP) | $(B)
+	python3 tools/asm816.py $< $@
+$(B)/PPU2.SFC: tests/hispasnes/ppu2.s $(SNESDEP) | $(B)
+	python3 tools/asm816.py $< $@
+$(B)/PPU3.SFC: tests/hispasnes/ppu3.s $(SNESDEP) | $(B)
+	python3 tools/asm816.py $< $@
+$(B)/PPU4.SFC: tests/hispasnes/ppu4.s $(SNESDEP) | $(B)
+	python3 tools/asm816.py $< $@
+$(B)/BUSTEST.SFC: tests/hispasnes/bustest.s $(SNESDEP) | $(B)
+	python3 tools/asm816.py $< $@
+$(B)/SPCTEST.SFC: tests/hispasnes/spctest.s $(SNESDEP) | $(B)
+	python3 tools/asm816.py $< $@
+SNESNAT = tests/hispasnes/snesnativo.asm $(wildcard programas/hispasnes/*.inc)
+$(B)/snesnativo: $(SNESNAT) | $(B)
+	$(NASM) -f bin -i programas/hispasnes/ -o $@ $< && chmod +x $@
+snesprogs: $(B)/snesnativo $(B)/PPU1.SFC $(B)/PPU2.SFC $(B)/PPU3.SFC $(B)/PPU4.SFC $(B)/BUSTEST.SFC $(B)/SPCTEST.SFC $(SNESROMS)
 # [Configuración] los programas de Hispa Ventanas que no son juegos van en
 # \HISPADOS, al lado de VENTANAS.COM (HVPSIS): Configuración (CONFIG.HVP)
 HVPSIS = $(B)/CONFIG.HVP
@@ -927,7 +958,7 @@ $(B)/BOOTIA32.EFI: $(HBEFI32) hispabios/pe.inc $(HBBIOS32) $(B)/FUENTE16.BIN
 	$(NASM) -f bin -I hispabios/ -I $(B)/ -o $@ hispabios/efi32.asm
 hispabios: $(HBEFI)
 
-usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(wildcard usb/* floppy/*)
+usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(wildcard usb/* floppy/*)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py
 
 # [HISPA-486] la imagen USB de Hispa-486 (build/hispa486-usb.img) y su disquete
@@ -939,7 +970,7 @@ usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSD
 # «Internet») y la red puesta sola al arrancar (HSPRED y HSPWIFI /AUTO). Todo por tools/mkusb.py (docs/486/HISPA-486.md, «La
 # imagen»). Hacen falta gcc -m32 (los programas en C) y mtools.
 H32EXE = $(B)/WINCALC.EXE $(B)/WINHOLA.EXE $(B)/WINCTL.EXE $(B)/WINMENU.EXE $(B)/WINGUI.EXE $(B)/NAVES.EXE
-usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(DXDLL) $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
+usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(DXDLL) $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py 486
 
 # [CD] las imágenes de CD (docs/CD.md): lo mismo que la imagen USB de cada
@@ -1036,7 +1067,7 @@ $(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
 # Lo que necesitan las pruebas (también lo usa tools/pruebas_pc.sh).
-TEST_DEPS = $(IMG) usb usb486 cd cd486 nucprogs emmprogs joyprogs nesprogs smsprogs $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM $(B)/VTDON.COM $(B)/PITIDO.COM $(B)/HDAVIVO.COM
+TEST_DEPS = $(IMG) usb usb486 cd cd486 nucprogs emmprogs joyprogs nesprogs smsprogs snesprogs $(HVPJ) $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM $(B)/VTDON.COM $(B)/PITIDO.COM $(B)/HDAVIVO.COM
 
 para-pruebas: $(TEST_DEPS)
 
@@ -1189,6 +1220,7 @@ test: $(TEST_DEPS)
 	tests/run_archivos_tests.sh $(IMG)
 	tests/run_hispanes_tests.sh $(IMG)
 	tests/run_hispasms_tests.sh $(IMG)
+	tests/run_hispasnes_tests.sh $(IMG)
 	tests/run_red_tests.sh $(IMG)
 	tests/run_yukon_tests.sh
 	tests/run_red32_tests.sh $(IMG)
