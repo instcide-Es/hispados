@@ -1945,11 +1945,16 @@ crecido en un módulo corto (`ajustes.cas`) y nueve llamadas. CASTEL compila el
 núcleo con sitio: de sus tablas usa 2.644 párrafos de 3.072 para los nombres,
 2.809 de 4.096 para los textos y 8.718 de 10.240, lo más, para el árbol.
 
-Con todo, `pruebas.sh` tiene ahora **423 comprobaciones** (369 con la 0.6, 13 de
-la oficina de Hispa-386 dentro y 41 de instalar en el disco, dos de ellas de la
-oficina en el disco instalado; unos cuarenta y cinco minutos en el VPS). La
-última pasada entera (19-20/11/2026, con la 0.7 y la oficina juntas) dio **423
-bien, 0 mal**; `SOLO=07 ./pruebas.sh` (los errores y la parte 10, instalar en el
+Con todo, `pruebas.sh` tiene ahora **449 comprobaciones** (369 con la 0.6, 13 de
+la oficina de Hispa-386 dentro, 43 de instalar en el disco —dos de ellas de la
+oficina y dos de los registros de paquetes en el disco instalado— y 24 de los
+paquetes; unos cincuenta minutos en el VPS). La última pasada entera
+(20/11/2026, con los paquetes) dio 446 bien y 3 mal, que eran cuentas de las
+pruebas (los 11 programas que trae ahora la memoria USB, y dónde se pinta un
+botón): corregidas, `SOLO=32` (las partes 1, 8, 9, 10 y 11) da **368 bien, 0
+mal**, y lo demás (de la 2 a la 7, los dos compiladores con PAQUETES, su ventana
+y SHA-256 dentro) estaba bien en la pasada entera; `SOLO=08` (los paquetes) son
+unos cuatro minutos; `SOLO=07 ./pruebas.sh` (los errores y la parte 10, instalar en el
 disco) son unos cinco minutos; `SOLO=06` (la parte 9, lo de la 0.6 y la
 oficina), unos diez, y `SOLO=16`, lo que no arranca el núcleo (de la parte 1 a
 la 7, con los dos compiladores y los dos ensambladores), otros siete.
