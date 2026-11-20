@@ -11,7 +11,8 @@
 ;  Sin tamaño, 64 K; sin /E, de 16 a 512. El disco recibe la letra siguiente a las que
 ;  hay (D:), ya con formato (FAT12, 64 entradas en la raíz) y vacío; lo que se
 ;  guarde en él se pierde al apagar. La memoria que ocupa se le quita a los
-;  programas: en un PC de 256 K, un disco de 64 K ya es mucho.
+;  programas: en un PC de 256 K, un disco de 64 K ya es mucho. Lo que solo
+;  hace falta al arrancar (desde «inicia») no se queda: el disco va encima.
 ;
 ;  Es también el ejemplo de cómo se hace un controlador para Hispa-8086, que
 ;  es como se hacen para MS-DOS: una cabecera, la rutina de «estrategia» (que
@@ -193,6 +194,14 @@ fin:
         pop bx
         pop ax
         retf
+; (al arrancar, sin /E) el formato, preparado en DS:0, baja a ES:0 (CX
+; palabras), al principio del disco, encima de lo que solo servía para
+; arrancar; por eso esto va aquí arriba
+baja_formato:
+        xor si, si
+        xor di, di
+        rep movsw
+        jmp fin
 
 xms         dd 0                    ; el gestor de memoria extendida
 asa         dw 0                    ; nuestro bloque
@@ -293,13 +302,13 @@ inicia:
         mov cl, 9
         shr ax, cl
         mov [b_spf], ax
-        ; dónde va el disco (detrás de todo esto) y dónde acaba
+        ; dónde se prepara el formato: detrás de todo esto
         mov ax, final + 15
         mov cl, 4
         shr ax, cl
         mov dx, cs
         add ax, dx
-        mov [datos_seg], ax
+        mov [forma_seg], ax
         cmp byte [extendida], 0
         je .baja
         ; en memoria extendida: ¿hay gestor? Se le pide el bloque
@@ -337,6 +346,12 @@ inicia:
         int 0x21
         jmp fin
 .baja:
+        mov ax, residente_e + 15    ; el disco, justo detrás de lo que se queda
+        mov cl, 4
+        shr ax, cl
+        mov dx, cs
+        add ax, dx
+        mov [datos_seg], ax
         mov dx, [b_tot]
         mov cl, 5
         shl dx, cl
@@ -365,7 +380,7 @@ inicia:
         ; el formato: arranque (con las medidas), FAT y raíz, a cero; los dos
         ; primeros grupos de la FAT, que no existen; y la etiqueta
         push es
-        mov es, [datos_seg]
+        mov es, [forma_seg]
         mov cx, [b_spf]
         add cx, 5                   ; (el de arranque y los 4 de la raíz)
         xchg ch, cl                 ; x 256 palabras
@@ -406,7 +421,7 @@ inicia:
         mov word [mv_len+2], 0
         mov word [mv_org], 0
         mov word [mv_org_off], 0
-        mov ax, [datos_seg]
+        mov ax, [forma_seg]
         mov [mv_org_off+2], ax
         mov ax, [asa]
         mov [mv_dst], ax
@@ -445,9 +460,19 @@ inicia:
         lea dx, [si+1]
         mov ah, 9
         int 0x21
+        cmp byte [extendida], 0
+        jne .x
+        mov cx, [b_spf]             ; sin /E: el formato, a su sitio
+        add cx, 5
+        xchg ch, cl
+        mov es, [datos_seg]
+        mov ds, [forma_seg]
+        jmp baja_formato
+.x:
         jmp fin
 
 m_k         dw 0
+forma_seg   dw 0                    ; donde se prepara el formato
 m_oem       db "DISCORAM"
 m_etiqueta  db "DISCO RAM  ", 0x08
 m_sin_ext   db "DISCORAM: no hay memoria extendida para ese disco (/E).", 13, 10, "$"
