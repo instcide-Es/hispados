@@ -2855,6 +2855,8 @@ Bochs): `PANTALLA.ENV` y `GRUB.CFG`, «Reiniciar ahora», la prueba al arrancar 
 «Mantener», y otra medida que no se da por buena y que GRUB deshace al
 reiniciar a lo bruto; e instalado con `-vga std`: «Mantener» guardada; y con `-vga
 vmware`, 1200 x 800 (que su BIOS no da) puesta por el núcleo al arrancar.
+Con ella, `SOLO=32` (rama `pentium-pantalla`, 20/11 por la noche) dio **479 bien,
+0 mal**.
 
 Con la firma, el núcleo nuevo y el CD, la pasada entera del 20/11 por la tarde (rama
 `pentium-dvd`, con CASTEL32 ya dentro) dio **541 bien, 0 mal**; tras los
