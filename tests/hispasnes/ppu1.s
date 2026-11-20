@@ -1,6 +1,8 @@
 ; =============================================================================
 ;  PPU1: modo 0 con texto en el fondo 1, para ver que todo arranca
 ; =============================================================================
+TIPO = 0
+SRAM = 0
         .include "comun.s"
         .org $008800
 principal:
@@ -48,6 +50,7 @@ principal:
         lda #$0F
         sta $2100               ; encendida, brillo 15
 @fin:   bra @fin
-nmi:    rti
+nmi:
+irq:    rti
 t_hola: .asciiz "HISPA-SNES: PRUEBA 1"
 t_dos:  .asciiz "MODO 0, FONDO 1"

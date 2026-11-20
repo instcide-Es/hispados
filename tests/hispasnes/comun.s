@@ -5,7 +5,8 @@
 ;  consola a cero, copiar a la VRAM con DMA (vram_dma), las letras propias
 ;  (las de sms/comun/letras.s, en 2 bits) y escribir texto (texto).
 ;  Cada prueba define «principal» (lo que hace, en modo nativo, A de 8 bits
-;  e índices de 16) y «nmi» (o usa nmi_nada).
+;  e índices de 16), «nmi» e «irq» (o rti); y antes de incluir esto,
+;  TIPO y SRAM (la cabecera: 0 y 0 sin RAM; 2 y n con 1<<n KB con pila).
 ; =============================================================================
         .lorom
         .rom 64
@@ -101,8 +102,8 @@ letras:
 fin_letras:
 
         .org $00FFC0
-        .cabecera "HISPA SNES PRUEBA", $20, $00, $07, $00
+        .cabecera "HISPA SNES PRUEBA", $20, TIPO, $07, SRAM
         .org $00FFE4
-        .word nmi_nada, nmi_nada, nmi_nada, nmi, nmi_nada, nmi_nada
+        .word nmi_nada, nmi_nada, nmi_nada, nmi, nmi_nada, irq
         .org $00FFF4
         .word nmi_nada, nmi_nada, nmi_nada, nmi_nada, reset, nmi_nada

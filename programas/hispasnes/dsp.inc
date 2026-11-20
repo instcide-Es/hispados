@@ -18,21 +18,21 @@
 ;                   pide la ventana ([snd_hz_sal]: 0 = ninguna), en snd_sal
 ;                   (16 bits con signo; estéreo o no según [snd_estereo])
 ; =============================================================================
-V_TAM       equ 96                  ; lo de cada voz (dsp_voz + 96*voz)
-V_DIR       equ 0                   ;   dd el bloque BRR de ahora
-V_POS       equ 4                   ;   dd la muestra del bloque (0-15)
-V_CNT       equ 8                   ;   dd lo que lleva el tono (12 bits)
-V_ENV       equ 12                  ;   dd la envolvente (0-7FFh)
-V_ECNT      equ 16                  ;   dd la cuenta de la envolvente
-V_H0        equ 20                  ;   dd la muestra de antes y la de ahora
-V_H1        equ 24
-V_P1        equ 28                  ;   dd las dos anteriores del filtro BRR
-V_P2        equ 32
-V_SAL       equ 36                  ;   dd lo último que ha sacado
-V_MODO      equ 40                  ;   db 0 callada, 1 ataque, 2 caída,
-V_FIN       equ 41                  ;      3 sostenida, 4 suelta
-V_BUCLE     equ 42                  ;   db el bloque acaba / vuelve
-V_DEC       equ 48                  ;   dw x 16 las muestras del bloque
+VZ_TAM       equ 96                  ; lo de cada voz (dsp_voz + 96*voz)
+VZ_DIR       equ 0                   ;   dd el bloque BRR de ahora
+VZ_POS       equ 4                   ;   dd la muestra del bloque (0-15)
+VZ_CNT       equ 8                   ;   dd lo que lleva el tono (12 bits)
+VZ_ENV       equ 12                  ;   dd la envolvente (0-7FFh)
+VZ_ECNT      equ 16                  ;   dd la cuenta de la envolvente
+VZ_H0        equ 20                  ;   dd la muestra de antes y la de ahora
+VZ_H1        equ 24
+VZ_P1        equ 28                  ;   dd las dos anteriores del filtro BRR
+VZ_P2        equ 32
+VZ_SAL       equ 36                  ;   dd lo último que ha sacado
+VZ_MODO      equ 40                  ;   db 0 callada, 1 ataque, 2 caída,
+VZ_FIN       equ 41                  ;      3 sostenida, 4 suelta
+VZ_BUCLE     equ 42                  ;   db el bloque acaba / vuelve
+VZ_DEC       equ 48                  ;   dw x 16 las muestras del bloque
 MODO_NADA   equ 0
 MODO_ATAQUE equ 1
 MODO_CAIDA  equ 2
@@ -47,7 +47,7 @@ dsp_reiniciar:
         mov ecx, 128 / 4
         rep stosd
         mov edi, dsp_voz
-        mov ecx, V_TAM * 8 / 4
+        mov ecx, VZ_TAM * 8 / 4
         rep stosd
         mov edi, eco_hist
         mov ecx, 16
@@ -90,7 +90,7 @@ dsp_escribe:
 ; (interna) ECX = la voz: empieza (KON)
 voz_empieza:
         pushad
-        imul edi, ecx, V_TAM
+        imul edi, ecx, VZ_TAM
         add edi, dsp_voz
         mov eax, ecx
         shl eax, 4
@@ -100,41 +100,41 @@ voz_empieza:
         lea eax, [eax+edx*4]
         and eax, 0xFFFF
         movzx eax, word [aram+eax]          ; la dirección del principio
-        mov [edi+V_DIR], eax
+        mov [edi+VZ_DIR], eax
         xor eax, eax
-        mov [edi+V_POS], eax
-        mov [edi+V_CNT], eax
-        mov [edi+V_ENV], eax
-        mov [edi+V_ECNT], eax
-        mov [edi+V_H0], eax
-        mov [edi+V_H1], eax
-        mov [edi+V_P1], eax
-        mov [edi+V_P2], eax
-        mov byte [edi+V_MODO], MODO_ATAQUE
+        mov [edi+VZ_POS], eax
+        mov [edi+VZ_CNT], eax
+        mov [edi+VZ_ENV], eax
+        mov [edi+VZ_ECNT], eax
+        mov [edi+VZ_H0], eax
+        mov [edi+VZ_H1], eax
+        mov [edi+VZ_P1], eax
+        mov [edi+VZ_P2], eax
+        mov byte [edi+VZ_MODO], MODO_ATAQUE
         btr dword [dsp_reg+0x7C], ecx       ; (ENDX)
         call brr_bloque
         popad
         ret
 
-; (interna) EDI = la voz: descodifica el bloque BRR de [V_DIR]
+; (interna) EDI = la voz: descodifica el bloque BRR de [VZ_DIR]
 brr_bloque:
         pushad
-        mov esi, [edi+V_DIR]
+        mov esi, [edi+VZ_DIR]
         and esi, 0xFFFF
         movzx eax, byte [aram+esi]          ; la cabecera
         mov edx, eax
         and dl, 1
-        mov [edi+V_FIN], dl
+        mov [edi+VZ_FIN], dl
         mov edx, eax
         shr dl, 1
         and dl, 1
-        mov [edi+V_BUCLE], dl
+        mov [edi+VZ_BUCLE], dl
         mov ecx, eax
         shr ecx, 4                          ; CL = el desplazamiento
         shr eax, 2
         and eax, 3
         mov [brr_filtro], eax
-        lea ebx, [edi+V_DEC]
+        lea ebx, [edi+VZ_DEC]
         mov ebp, 16
         xor edx, edx                        ; (la mitad: alta o baja)
 .m:
@@ -164,8 +164,8 @@ brr_bloque:
 .filtro:
         push ecx
         push edx
-        mov ecx, [edi+V_P1]
-        mov edx, [edi+V_P2]
+        mov ecx, [edi+VZ_P1]
+        mov edx, [edi+VZ_P2]
         cmp dword [brr_filtro], 1
         jb .f9
         je .f1
@@ -215,9 +215,9 @@ brr_bloque:
 .c2:
         shl eax, 17
         sar eax, 17
-        push dword [edi+V_P1]
-        pop dword [edi+V_P2]
-        mov [edi+V_P1], eax
+        push dword [edi+VZ_P1]
+        pop dword [edi+VZ_P2]
+        mov [edi+VZ_P1], eax
         mov [ebx], ax
         add ebx, 2
         inc edx
@@ -270,7 +270,7 @@ dsp_muestra:
         xor ecx, ecx                        ; ECX = la voz
         mov edi, dsp_voz
 .voz:
-        cmp byte [edi+V_MODO], MODO_NADA
+        cmp byte [edi+VZ_MODO], MODO_NADA
         je near .sig
         mov ebx, ecx
         shl ebx, 4                          ; EBX = sus registros
@@ -278,12 +278,12 @@ dsp_muestra:
         movzx eax, byte [dsp_reg+0x5C]
         bt eax, ecx
         jnc .k1
-        mov byte [edi+V_MODO], MODO_SUELTA
+        mov byte [edi+VZ_MODO], MODO_SUELTA
 .k1:
         test byte [dsp_reg+0x6C], 0x80      ; FLG: el reinicio, todas fuera
         jz .k2
-        mov byte [edi+V_MODO], MODO_SUELTA
-        mov dword [edi+V_ENV], 0
+        mov byte [edi+VZ_MODO], MODO_SUELTA
+        mov dword [edi+VZ_ENV], 0
 .k2:
         ; la muestra: el ruido o la recta entre la de antes y la de ahora
         movzx eax, byte [dsp_reg+0x3D]      ; NON
@@ -295,15 +295,15 @@ dsp_muestra:
         sar eax, 1
         jmp .env
 .int:
-        mov eax, [edi+V_H1]
-        sub eax, [edi+V_H0]
-        imul eax, [edi+V_CNT]
+        mov eax, [edi+VZ_H1]
+        sub eax, [edi+VZ_H0]
+        imul eax, [edi+VZ_CNT]
         sar eax, 12
-        add eax, [edi+V_H0]
+        add eax, [edi+VZ_H0]
 .env:
-        imul eax, [edi+V_ENV]
+        imul eax, [edi+VZ_ENV]
         sar eax, 11
-        mov [edi+V_SAL], eax
+        mov [edi+VZ_SAL], eax
         mov edx, eax
         sar edx, 7
         mov [dsp_reg+ebx+9], dl             ; OUTX
@@ -327,7 +327,7 @@ dsp_muestra:
 .e2:
         ; la envolvente
         call voz_envolvente
-        mov eax, [edi+V_ENV]
+        mov eax, [edi+VZ_ENV]
         shr eax, 4
         mov [dsp_reg+ebx+8], al             ; ENVX
         ; el tono (con la modulación de la voz de antes)
@@ -338,7 +338,7 @@ dsp_muestra:
         movzx edx, byte [dsp_reg+0x2D]      ; PMON
         bt edx, ecx
         jnc .t1
-        mov edx, [edi+V_SAL-V_TAM]
+        mov edx, [edi+VZ_SAL-VZ_TAM]
         sar edx, 5
         imul edx, eax
         sar edx, 10
@@ -350,7 +350,7 @@ dsp_muestra:
         jbe .t1
         mov eax, 0x3FFF
 .t1:
-        add eax, [edi+V_CNT]
+        add eax, [edi+VZ_CNT]
 .avanza:
         cmp eax, 0x1000
         jb .t2
@@ -358,13 +358,13 @@ dsp_muestra:
         push eax
         call voz_siguiente
         pop eax
-        cmp byte [edi+V_MODO], MODO_NADA
+        cmp byte [edi+VZ_MODO], MODO_NADA
         je .t2
         jmp .avanza
 .t2:
-        mov [edi+V_CNT], eax
+        mov [edi+VZ_CNT], eax
 .sig:
-        add edi, V_TAM
+        add edi, VZ_TAM
         inc ecx
         cmp ecx, 8
         jb .voz
@@ -418,23 +418,23 @@ dsp_muestra:
 voz_siguiente:
         push eax
         push edx
-        mov eax, [edi+V_H1]
-        mov [edi+V_H0], eax
-        mov edx, [edi+V_POS]
-        movsx eax, word [edi+V_DEC+edx*2]
-        mov [edi+V_H1], eax
+        mov eax, [edi+VZ_H1]
+        mov [edi+VZ_H0], eax
+        mov edx, [edi+VZ_POS]
+        movsx eax, word [edi+VZ_DEC+edx*2]
+        mov [edi+VZ_H1], eax
         inc edx
         cmp edx, 16
         jb .x
         xor edx, edx
-        cmp byte [edi+V_FIN], 0
+        cmp byte [edi+VZ_FIN], 0
         je .otro
         bts dword [dsp_reg+0x7C], ecx       ; ENDX
-        cmp byte [edi+V_BUCLE], 0
+        cmp byte [edi+VZ_BUCLE], 0
         jne .vuelve
-        mov byte [edi+V_MODO], MODO_NADA    ; (sin vuelta: se calla)
-        mov dword [edi+V_ENV], 0
-        mov [edi+V_POS], edx
+        mov byte [edi+VZ_MODO], MODO_NADA    ; (sin vuelta: se calla)
+        mov dword [edi+VZ_ENV], 0
+        mov [edi+VZ_POS], edx
         jmp .y
 .vuelve:
         push ecx
@@ -446,16 +446,16 @@ voz_siguiente:
         lea eax, [eax+ecx*4+2]
         and eax, 0xFFFF
         movzx eax, word [aram+eax]          ; la dirección de la vuelta
-        mov [edi+V_DIR], eax
+        mov [edi+VZ_DIR], eax
         pop ecx
         jmp .dec
 .otro:
-        add dword [edi+V_DIR], 9
-        and dword [edi+V_DIR], 0xFFFF
+        add dword [edi+VZ_DIR], 9
+        and dword [edi+VZ_DIR], 0xFFFF
 .dec:
         call brr_bloque
 .x:
-        mov [edi+V_POS], edx
+        mov [edi+VZ_POS], edx
 .y:
         pop edx
         pop eax
@@ -490,14 +490,14 @@ env_periodos dw 0, 2048, 1536, 1280, 1024, 768, 640, 512, 384, 320, 256, 192, 16
 ; (interna) EDI = la voz, EBX = sus registros: la envolvente, un paso
 voz_envolvente:
         pushad
-        mov edx, [edi+V_ENV]
-        movzx eax, byte [edi+V_MODO]
+        mov edx, [edi+VZ_ENV]
+        movzx eax, byte [edi+VZ_MODO]
         cmp eax, MODO_SUELTA
         jne .a
         sub edx, 8                          ; suelta: -8 en cada muestra
         jg .pon
         xor edx, edx
-        mov byte [edi+V_MODO], MODO_NADA
+        mov byte [edi+VZ_MODO], MODO_NADA
         jmp .pon
 .a:
         movzx esi, byte [dsp_reg+ebx+5]     ; ADSR1
@@ -520,7 +520,7 @@ voz_envolvente:
         cmp edx, 0x7FF
         jb .pon
         mov edx, 0x7FF
-        mov byte [edi+V_MODO], MODO_CAIDA
+        mov byte [edi+VZ_MODO], MODO_CAIDA
         jmp .pon
 .d:
         cmp eax, MODO_CAIDA
@@ -539,7 +539,7 @@ voz_envolvente:
         shl eax, 8
         cmp edx, eax
         ja .pon
-        mov byte [edi+V_MODO], MODO_SOST
+        mov byte [edi+VZ_MODO], MODO_SOST
         jmp .pon
 .s:
         movzx eax, byte [dsp_reg+ebx+6]     ; sostenida: baja con SR
@@ -591,7 +591,7 @@ voz_envolvente:
         jbe .pon
         mov edx, 0x7FF
 .pon:
-        mov [edi+V_ENV], edx
+        mov [edi+VZ_ENV], edx
         popad
         ret
 .baja:                                      ; la bajada exponencial

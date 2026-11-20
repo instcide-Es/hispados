@@ -388,7 +388,7 @@ class Asm:
         elif d == '.org':
             self.pc = self.valor(resto, l, True)
         elif d == '.base':
-            self.fis = self.fisica(self.pc)
+            self.fis = self.fisica_de(self.pc)
             self.pc_fuera = self.pc
             self.cpu_fuera = self.cpu
             self.base = True
@@ -450,9 +450,11 @@ class Asm:
             raise Error('no se conoce %s' % d)
 
     def fisica_de(self, pc):
+        # (la del 65C816, aunque esté en .cpu spc700: para .base y .endbase)
         b, self.base = self.base, None
+        c, self.cpu = self.cpu, '65816'
         f = self.fisica(pc)
-        self.base = b
+        self.base, self.cpu = b, c
         return f
 
     def avanza(self):
@@ -598,8 +600,8 @@ class Asm:
                 t = 1
         for i in list(range(t, 3)) + list(range(t - 1, -1, -1)):
             if nom[i] and nom[i] in modos:
-                if i < t and suf:
-                    continue
+                if i < t and (suf or t == 2):
+                    continue            # (nunca se corta una dirección larga)
                 return nom[i]
         raise Error('%s: modo no válido' % mn)
 

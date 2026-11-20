@@ -37,6 +37,7 @@ snes_reiniciar:
         mov edi, bus_regs
         mov ecx, BUS_REGS_TAM / 4
         rep stosd
+        mov byte [wrio], 0xFF       ; (el puerto de E/S empieza todo a 1)
         mov edi, dma_reg
         mov ecx, 8 * 16 / 4
         mov eax, 0xFFFFFFFF         ; (los del DMA empiezan a FFh)

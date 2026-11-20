@@ -1419,6 +1419,7 @@ spc_io_escribe:
         call s_ahora
         call tim_ajusta
         imul ebx, S_TIM_TAM
+        mov eax, [esp+4]            ; (el dato)
         mov [s_tim+ebx+TI_OBJ], al
         pop ebx
         jmp .x
@@ -1434,6 +1435,7 @@ spc_io_escribe:
         call s_ahora
         call dsp_hasta
         movzx edx, byte [s_dsp_dir]
+        mov eax, [esp]              ; (el dato)
         call dsp_escribe
         jmp .x
 .puerto:
