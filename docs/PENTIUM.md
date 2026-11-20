@@ -1992,6 +1992,29 @@ paquetes se traen de una carpeta (la de la memoria USB, la de otro disco...) o,
 desde la tarde del 20/11, **de Internet**, con el catálogo **firmado**
 (Ed25519): más abajo, «Por Internet», «La firma» y «El núcleo nuevo».
 
+### La 0.8.1: la primera actualización de verdad
+
+*20/11/2026, por la noche.* Lo que cambia desde el CD 0.8 llega por el
+actualizador como **0.8.1**: solo suben los paquetes cuyo contenido ha cambiado
+(comparados archivo a archivo con los del CD): **`base`** (el núcleo con la
+llamada 99 del servicio TLS, cambiar la resolución desde Configuración, los
+accesos de los paquetes en el menú Inicio y Mayús+Tab; y su MANUAL.TXT),
+**`red`** (IPCONFIG, PING y DESCARGAR, que ya sabe `https://`) y el nuevo
+**`tls`** (`TLS.BIN` y `HTTPS.BIN`, sección 14). Los demás siguen en la 0.8
+(`VERSION_08` en `tools/hpq.py`). `tls` y `red` necesitan `base >= 0.8.1`; el
+programa **ClicGest** (paquete `clicgest`, de su propio repositorio) necesita
+`base`, `red` y `tls` 0.8.1. El núcleo sigue diciendo «versión 0.8» (los textos
+de VER y del menú Inicio no cambian: lo que se instala lo dicen los paquetes).
+
+Probado a mano en QEMU (un «q35» como el VirtualBox de Carlos): el sistema
+instalado del CD 0.8 (el mismo `.iso`), con el catálogo firmado de verdad en un
+servidor de aquí, avisa «Hay 2 actualizaciones», las pone, reinicia con el
+núcleo nuevo («El núcleo nuevo ha arrancado bien»; el de antes, en
+`NUCLEO.ANT`), instala `clicgest` (y con él `tls`) desde «Programas y
+actualizaciones», ClicGest sale en el menú Inicio y, al entrar con una cuenta
+que no existe, habla TLS 1.2 con clicgest.es (la cadena comprobada) y dice «El
+correo o la contraseña no son correctos» (el 401 de su API).
+
 ### El paquete (.HPQ)
 
 Un archivo con dos partes: **una cabecera de texto** (página 437, líneas con CR
