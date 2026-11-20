@@ -1,0 +1,502 @@
+; =============================================================================
+;  rtarjeta.cas - las tarjetas de red del servicio de red de Hispa-Pentium
+;  (RED.BIN): buscarlas en el bus PCI y, la que haya, ponerla en marcha y
+;  darle a la pila TCP/IP (rpila.cas) lo mismo sea cual sea: enviar una trama
+;  de Ethernet, recoger la que haya llegado, si hay enlace, su MAC.
+;  Las que sabe llevar:
+;    - Intel PRO/1000 (la familia 8254x, «e1000»: la 82540EM de QEMU y
+;      VirtualBox; y la 82574L, «e1000e», con los mismos descriptores)
+;    - Realtek RTL8139 (la de QEMU con «-device rtl8139»)
+;    - Marvell Yukon 2 «Optima» 88E8059 (la del HP Mini 5103): ryukon.cas
+;  Cada una con sus anillos de descriptores y sus búferes en memoria física
+;  seguida (la llamada 94), los registros a la vista (la 95) o por los
+;  puertos, y su interrupción (la 98: si llega, despierta al servicio).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Rtarjeta
+
+    importar Rbase, Ryukon, Mem32, Textos32, Formato
+
+    público constante T_NINGUNA = 0
+    público constante T_E1000 = 1
+    público constante T_RTL8139 = 2
+    público constante T_YUKON = 3
+    público constante MAX_TRAMA = 1518
+
+    público variable tarjeta: nat32
+    público variable mac: arreglo [8] de byte
+    público variable nombre_tarjeta: arreglo [48] de byte
+    público variable pci_tarjeta, id_tarjeta, irq_tarjeta: nat32
+    público variable recibidas, enviadas, errores: nat32
+    variable usa_irq: bool
+
+    ; =========================================================================
+    ;  Intel PRO/1000 («e1000»)
+    ; =========================================================================
+    constante E_CTRL = 0x0000
+    constante E_STATUS = 0x0008
+    constante E_EERD = 0x0014
+    constante E_ICR = 0x00C0
+    constante E_IMS = 0x00D0
+    constante E_IMC = 0x00D8
+    constante E_RCTL = 0x0100
+    constante E_TCTL = 0x0400
+    constante E_TIPG = 0x0410
+    constante E_RDBAL = 0x2800
+    constante E_RDBAH = 0x2804
+    constante E_RDLEN = 0x2808
+    constante E_RDH = 0x2810
+    constante E_RDT = 0x2818
+    constante E_TDBAL = 0x3800
+    constante E_TDBAH = 0x3804
+    constante E_TDLEN = 0x3808
+    constante E_TDH = 0x3810
+    constante E_TDT = 0x3818
+    constante E_MTA = 0x5200
+    constante E_RAL = 0x5400
+    constante E_RAH = 0x5404
+    constante E_NRX = 32
+    constante E_NTX = 8
+    constante E_BUF = 2048
+
+    variable e_reg: puntero a nat32
+    variable e_desc: puntero a byte             ; los dos anillos (en una página: recepción y, a 2 K, envío)
+    variable e_desc_f: nat32
+    variable e_rx: puntero a byte               ; los búferes de recepción (32 de 2 K)
+    variable e_rx_f: nat32
+    variable e_tx: puntero a byte               ; los de envío (8 de 2 K)
+    variable e_tx_f: nat32
+    variable e_rx_i, e_tx_i: nat32
+
+    función e_lee(r: nat32): nat32
+        devolver e_reg[r div 4]
+    fin
+    función e_pon(r: nat32, v: nat32)
+        e_reg[r div 4] := v
+    fin
+
+    ; la palabra n del EEPROM (para la MAC, si los registros están a cero)
+    función e_eeprom(n: nat32): nat32
+        variable i, v: nat32
+        e_pon(E_EERD, (n << 8) ob 1)
+        para i desde 1 hasta 10000 hacer
+            v := e_lee(E_EERD)
+            si v yb 0x10 <> 0 entonces devolver v >> 16 fin
+        fin
+        ; (las 82541 y siguientes: la dirección desde el bit 2 y «hecho» en el 1)
+        e_pon(E_EERD, (n << 2) ob 1)
+        para i desde 1 hasta 10000 hacer
+            v := e_lee(E_EERD)
+            si v yb 2 <> 0 entonces devolver v >> 16 fin
+        fin
+        devolver 0
+    fin
+
+    función e_iniciar(a: nat32): bool
+        variable bar, i, v: nat32
+        variable d: puntero a nat32
+        bar := pci_leer(a, 0x10)
+        si bar yb 1 <> 0 entonces
+            apunta("e1000: sus registros no están en la memoria")
+            devolver falso
+        fin
+        e_reg := registros(bar yb 0xFFFFFFF0, 0x20000)
+        si e_reg = nulo entonces
+            apunta("e1000: no se pueden ver sus registros")
+            devolver falso
+        fin
+        ; reinicio (y que no interrumpa mientras)
+        e_pon(E_IMC, 0xFFFFFFFF)
+        e_pon(E_CTRL, e_lee(E_CTRL) ob 0x04000000)
+        espera_us(10000)
+        para i desde 1 hasta 1000 hacer
+            si e_lee(E_CTRL) yb 0x04000000 = 0 entonces romper fin
+            espera_us(100)
+        fin
+        e_pon(E_IMC, 0xFFFFFFFF)
+        e_lee(E_ICR)
+        ; el enlace: arriba, con la velocidad que negocie
+        e_pon(E_CTRL, (e_lee(E_CTRL) ob 0x60) yb nob nat32(0x80000088))     ; SLU y ASDE; sin PHY_RST, ILOS ni el reinicio del enlace
+        ; la MAC
+        v := e_lee(E_RAL)
+        si v = 0 o v = 0xFFFFFFFF entonces
+            v := e_eeprom(0) ob (e_eeprom(1) << 16)
+            e_pon(E_RAL, v)
+            e_pon(E_RAH, e_eeprom(2) ob 0x80000000)
+        fin
+        mac[0] := byte(v)
+        mac[1] := byte(v >> 8)
+        mac[2] := byte(v >> 16)
+        mac[3] := byte(v >> 24)
+        v := e_lee(E_RAH)
+        mac[4] := byte(v)
+        mac[5] := byte(v >> 8)
+        e_pon(E_RAH, e_lee(E_RAH) ob 0x80000000)          ; (la dirección vale)
+        para i desde 0 hasta 127 hacer e_pon(E_MTA + i * 4, 0) fin
+        ; la memoria: los anillos y los búferes
+        e_desc := memoria_dma(1, e_desc_f)
+        e_rx := memoria_dma(16, e_rx_f)
+        e_tx := memoria_dma(4, e_tx_f)
+        si e_desc = nulo o e_rx = nulo o e_tx = nulo entonces
+            apunta("e1000: no hay memoria para los anillos")
+            devolver falso
+        fin
+        ; recepción
+        para i desde 0 hasta E_NRX - 1 hacer
+            d := puntero(e_desc + i * 16)
+            d[0] := e_rx_f + i * E_BUF
+            d[1] := 0
+            d[2] := 0
+            d[3] := 0
+        fin
+        e_pon(E_RDBAL, e_desc_f)
+        e_pon(E_RDBAH, 0)
+        e_pon(E_RDLEN, E_NRX * 16)
+        e_pon(E_RDH, 0)
+        e_pon(E_RDT, E_NRX - 1)
+        e_rx_i := 0
+        ; RCTL: EN, BAM (las de difusión), 2 K por búfer, sin el CRC (SECRC)
+        e_pon(E_RCTL, 0x00000002 ob 0x00008000 ob 0x04000000)
+        ; envío
+        para i desde 0 hasta E_NTX - 1 hacer
+            d := puntero(e_desc + 2048 + i * 16)
+            d[0] := e_tx_f + i * E_BUF
+            d[1] := 0
+            d[2] := 0
+            d[3] := 1                           ; (status: DD, «hecho»: libre)
+        fin
+        e_pon(E_TDBAL, e_desc_f + 2048)
+        e_pon(E_TDBAH, 0)
+        e_pon(E_TDLEN, E_NTX * 16)
+        e_pon(E_TDH, 0)
+        e_pon(E_TDT, 0)
+        e_tx_i := 0
+        e_pon(E_TIPG, 0x0060200A)
+        ; TCTL: EN, PSP, CT = 0x0F, COLD = 0x40
+        e_pon(E_TCTL, 0x00000002 ob 0x00000008 ob (0x0F << 4) ob (0x40 << 12))
+        ; las interrupciones: trama recibida, enlace, sin búferes
+        e_pon(E_IMS, 0x80 ob 0x04 ob 0x40 ob 0x10)
+        devolver cierto
+    fin
+
+    función e_enviar(p: puntero a byte, n: nat32): bool
+        variable d: puntero a byte
+        variable i: nat32
+        d := e_desc + 2048 + e_tx_i * 16
+        ; ¿lo ha soltado ya la tarjeta? (status, el octeto 12: DD)
+        i := 0
+        mientras d[12] yb 1 = 0 hacer
+            i := i + 1
+            si i > 100000 entonces
+                errores := errores + 1
+                devolver falso
+            fin
+        fin
+        copiar_memoria(e_tx + e_tx_i * E_BUF, p, n)
+        si n < 60 entonces
+            llenar(e_tx + e_tx_i * E_BUF + n, 60 - n, 0)
+            n := 60
+        fin
+        d[8] := byte(n)
+        d[9] := byte(n >> 8)
+        d[10] := 0
+        d[11] := 0x0B                           ; EOP, IFCS, RS
+        d[12] := 0
+        e_tx_i := (e_tx_i + 1) mod E_NTX
+        e_pon(E_TDT, e_tx_i)
+        devolver cierto
+    fin
+
+    función e_recibir(destino: puntero a byte): nat32
+        variable d: puntero a byte
+        variable n, e: nat32
+        d := e_desc + e_rx_i * 16
+        si d[12] yb 1 = 0 entonces devolver 0 fin
+        n := nat32(d[8]) ob (nat32(d[9]) << 8)
+        e := d[13]
+        si d[12] yb 2 = 0 o e <> 0 o n > MAX_TRAMA entonces
+            errores := errores + 1
+            n := 0
+        sino
+            copiar_memoria(destino, e_rx + e_rx_i * E_BUF, n)
+        fin
+        d[12] := 0
+        e_pon(E_RDT, e_rx_i)
+        e_rx_i := (e_rx_i + 1) mod E_NRX
+        si n = 0 entonces devolver 0xFFFFFFFF fin           ; (había una, mala: que se mire la siguiente)
+        devolver n
+    fin
+
+    ; =========================================================================
+    ;  Realtek RTL8139
+    ; =========================================================================
+    constante R_TSD0 = 0x10
+    constante R_TSAD0 = 0x20
+    constante R_RBSTART = 0x30
+    constante R_CR = 0x37
+    constante R_CAPR = 0x38
+    constante R_IMR = 0x3C
+    constante R_ISR = 0x3E
+    constante R_TCR = 0x40
+    constante R_RCR = 0x44
+    constante R_CONFIG1 = 0x52
+    constante R_MSR = 0x58
+    constante R_ANILLO = 8192
+
+    variable r_io: nat32
+    variable r_rx: puntero a byte               ; el anillo de recepción (8 K + 16 + 1.500)
+    variable r_rx_f: nat32
+    variable r_tx: puntero a byte               ; los cuatro búferes de envío (de 2 K)
+    variable r_tx_f: nat32
+    variable r_pos, r_tx_i: nat32
+
+    función r_iniciar(a: nat32): bool
+        variable bar, i: nat32
+        bar := pci_leer(a, 0x10)
+        si bar yb 1 = 0 entonces
+            apunta("rtl8139: sin puertos")
+            devolver falso
+        fin
+        r_io := bar yb 0xFFFC
+        sale8(r_io + R_CONFIG1, 0)
+        sale8(r_io + R_CR, 0x10)
+        para i desde 1 hasta 1000 hacer
+            si entra8(r_io + R_CR) yb 0x10 = 0 entonces romper fin
+            espera_us(100)
+        fin
+        para i desde 0 hasta 5 hacer mac[i] := byte(entra8(r_io + i)) fin
+        r_rx := memoria_dma(3, r_rx_f)
+        r_tx := memoria_dma(2, r_tx_f)
+        si r_rx = nulo o r_tx = nulo entonces
+            apunta("rtl8139: no hay memoria para los búferes")
+            devolver falso
+        fin
+        sale32(r_io + R_RBSTART, r_rx_f)
+        r_pos := 0
+        r_tx_i := 0
+        sale16(r_io + R_IMR, 0x0005 ob 0x0010 ob 0x0040 ob 0x2000)     ; ROK, TOK, RXOVW, FOVW, LenChg
+        sale16(r_io + R_ISR, 0xFFFF)
+        sale8(r_io + R_CR, 0x0C)                ; RE y TE
+        ; RCR: AB, AM, APM; WRAP; anillo de 8 K; sin límite de DMA
+        sale32(r_io + R_RCR, 0x0E ob 0x80 ob (7 << 8) ob (7 << 13))
+        sale32(r_io + R_TCR, 6 << 8)            ; (el DMA de envío, 1024 octetos)
+        devolver cierto
+    fin
+
+    función r_enviar(p: puntero a byte, n: nat32): bool
+        variable s, i: nat32
+        ; el búfer que toca: libre si OWN (bit 13) está puesto (o si no se ha usado nunca)
+        i := 0
+        mientras cierto hacer
+            s := entra32(r_io + R_TSD0 + r_tx_i * 4)
+            si s yb 0x2000 <> 0 o s = 0 entonces romper fin
+            i := i + 1
+            si i > 100000 entonces
+                errores := errores + 1
+                devolver falso
+            fin
+        fin
+        copiar_memoria(r_tx + r_tx_i * 2048, p, n)
+        si n < 60 entonces
+            llenar(r_tx + r_tx_i * 2048 + n, 60 - n, 0)
+            n := 60
+        fin
+        sale32(r_io + R_TSAD0 + r_tx_i * 4, r_tx_f + r_tx_i * 2048)
+        sale32(r_io + R_TSD0 + r_tx_i * 4, n)
+        r_tx_i := (r_tx_i + 1) yb 3
+        devolver cierto
+    fin
+
+    función r_recibir(destino: puntero a byte): nat32
+        variable estado, n, i: nat32
+        sale16(r_io + R_ISR, entra16(r_io + R_ISR))      ; (lo que ha pasado, visto)
+        si entra8(r_io + R_CR) yb 1 <> 0 entonces devolver 0 fin    ; BUFE: no hay nada
+        estado := nat32(r_rx[r_pos]) ob (nat32(r_rx[r_pos + 1]) << 8)
+        n := nat32(r_rx[r_pos + 2]) ob (nat32(r_rx[r_pos + 3]) << 8)
+        si estado yb 1 = 0 o n < 64 o n > MAX_TRAMA + 4 entonces
+            ; una trama mala: la recepción, otra vez desde el principio
+            errores := errores + 1
+            sale8(r_io + R_CR, 0x04)
+            sale8(r_io + R_CR, 0x0C)
+            sale32(r_io + R_RBSTART, r_rx_f)
+            sale32(r_io + R_RCR, 0x0E ob 0x80 ob (7 << 8) ob (7 << 13))
+            r_pos := 0
+            sale16(r_io + R_CAPR, nat32(0x10000) - 16)
+            devolver 0
+        fin
+        ; (sin los 4 del CRC; con WRAP la trama sigue de corrido aunque pase del final)
+        i := n - 4
+        copiar_memoria(destino, r_rx + r_pos + 4, i)
+        r_pos := (r_pos + n + 4 + 3) yb nob nat32(3)
+        si r_pos >= R_ANILLO entonces r_pos := r_pos - R_ANILLO fin
+        sale16(r_io + R_CAPR, (r_pos - 16) yb 0xFFFF)
+        devolver i
+    fin
+
+    ; =========================================================================
+    ;  Lo de todas
+    ; =========================================================================
+    ; el nombre de la tarjeta, si es una de las que se llevan (0: no)
+    función clase_de(id: nat32): nat32
+        variable v, d: nat32
+        v := id yb 0xFFFF
+        d := id >> 16
+        si v = 0x8086 entonces
+            según nat16(d)
+                caso 0x100E, 0x100F, 0x1004, 0x1008, 0x1009, 0x100C, 0x100D, 0x1010, 0x1011, 0x1012, 0x1015, 0x1016, 0x1017, 0x1019, 0x101A, 0x101D, 0x101E:
+                    devolver T_E1000
+                caso 0x1026, 0x1027, 0x1028, 0x1075, 0x1076, 0x1077, 0x1078, 0x1079, 0x107A, 0x107B, 0x107C, 0x10B5, 0x10D3:
+                    devolver T_E1000
+            fin
+        fin
+        si v = 0x10EC y (d = 0x8139 o d = 0x8138) entonces devolver T_RTL8139 fin
+        si v = 0x1186 y d = 0x1300 entonces devolver T_RTL8139 fin      ; (D-Link DFE-538TX)
+        si v = 0x11AB y (d = 0x4381 o d = 0x4382) entonces devolver T_YUKON fin
+        devolver T_NINGUNA
+    fin
+
+    ; busca la tarjeta en el bus PCI y la pone en marcha. Falso si no hay
+    ; ninguna que se sepa llevar (o no arranca).
+    público función buscar_tarjeta(): bool
+        variable bus, ap, fu, a, id, c, cab, orden: nat32
+        variable ok: bool
+        tarjeta := T_NINGUNA
+        para bus desde 0 hasta 31 hacer
+            para ap desde 0 hasta 31 hacer
+                para fu desde 0 hasta 7 hacer
+                    a := (bus << 16) ob (ap << 11) ob (fu << 8)
+                    id := pci_leer(a, 0)
+                    si id = 0xFFFFFFFF o id = 0 entonces
+                        si fu = 0 entonces romper fin
+                        seguir
+                    fin
+                    c := clase_de(id)
+                    si (pci_leer(a, 8) >> 16) = 0x0200 y c = T_NINGUNA entonces
+                        apunta4("tarjeta de red que no se sabe llevar: %04X:%04X en %02X:%02X", id yb 0xFFFF, id >> 16, bus, ap)
+                    fin
+                    si c <> T_NINGUNA y tarjeta = T_NINGUNA entonces
+                        pci_tarjeta := a
+                        id_tarjeta := id
+                        irq_tarjeta := pci_leer(a, 0x3C) yb 0xFF
+                        ; que atienda (en la memoria y en los puertos), que mande en el bus
+                        ; (DMA) y que pueda interrumpir
+                        orden := pci_leer16(a, 4)
+                        pci_escribir16(a, 4, (orden ob 7) yb nob nat32(0x400))
+                        apunta4("tarjeta %04X:%04X en el bus PCI %02X:%02X", id yb 0xFFFF, id >> 16, bus, ap)
+                        apunta4("  función %u, IRQ %u", fu, irq_tarjeta, 0, 0)
+                        apunta4("  memoria %08X, puertos %08X", pci_leer(a, 0x10), pci_leer(a, 0x14), 0, 0)
+                        según nat16(c)
+                            caso T_E1000:
+                                copiar(nombre_tarjeta, "Intel PRO/1000 (e1000)")
+                                ok := e_iniciar(a)
+                            caso T_RTL8139:
+                                copiar(nombre_tarjeta, "Realtek RTL8139")
+                                ok := r_iniciar(a)
+                            caso T_YUKON:
+                                copiar(nombre_tarjeta, "Marvell Yukon 88E8059")
+                                si id >> 16 = 0x4382 entonces copiar(nombre_tarjeta, "Marvell Yukon 88E8079") fin
+                                ok := yk_iniciar(a, mac)
+                        fin
+                        si ok entonces
+                            tarjeta := c
+                        sino
+                            apunta("  no se ha podido poner en marcha")
+                        fin
+                    fin
+                    si fu = 0 y pci_leer(a, 0x0C) yb 0x00800000 = 0 entonces romper fin
+                fin
+            fin
+        fin
+        si tarjeta = T_NINGUNA entonces devolver falso fin
+        apunta4("MAC %02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3])
+        apunta4("MAC ...:%02X:%02X", mac[4], mac[5], 0, 0)
+        ; la interrupción: si el núcleo la puede dar, se usa; si no, se mira cada tic
+        usa_irq := falso
+        si irq_tarjeta >= 3 y irq_tarjeta <= 11 entonces usa_irq := pon_irq(irq_tarjeta) fin
+        si no usa_irq entonces irq_tarjeta := 0 fin
+        devolver cierto
+    fin
+
+    público función enviar_trama(p: puntero a byte, n: nat32): bool
+        variable ok: bool
+        si n > MAX_TRAMA - 4 entonces devolver falso fin
+        ok := falso
+        según nat16(tarjeta)
+            caso T_E1000: ok := e_enviar(p, n)
+            caso T_RTL8139: ok := r_enviar(p, n)
+            caso T_YUKON: ok := yk_enviar(p, n)
+        fin
+        si ok entonces enviadas := enviadas + 1 fin
+        devolver ok
+    fin
+
+    ; la trama que haya llegado, a «destino» (caben MAX_TRAMA): su largo; 0 si
+    ; no hay ninguna
+    público función recibir_trama(destino: puntero a byte): nat32
+        variable n: nat32
+        mientras cierto hacer
+            n := 0
+            según nat16(tarjeta)
+                caso T_E1000: n := e_recibir(destino)
+                caso T_RTL8139: n := r_recibir(destino)
+                caso T_YUKON: n := yk_recibir(destino)
+            fin
+            si n <> 0xFFFFFFFF entonces romper fin
+        fin
+        si n > 0 entonces recibidas := recibidas + 1 fin
+        devolver n
+    fin
+
+    ; lo que haya que hacer cada vez que se mira la tarjeta (la interrupción,
+    ; vista: así deja de pedirla)
+    público función atender_tarjeta()
+        según nat16(tarjeta)
+            caso T_E1000: e_lee(E_ICR)
+            caso T_RTL8139: sale16(r_io + R_ISR, entra16(r_io + R_ISR))
+            caso T_YUKON: yk_atender()
+        fin
+    fin
+
+    público función hay_enlace(): bool
+        según nat16(tarjeta)
+            caso T_E1000: devolver e_lee(E_STATUS) yb 2 <> 0
+            caso T_RTL8139: devolver entra8(r_io + R_MSR) yb 4 = 0
+            caso T_YUKON: devolver yk_enlace()
+        fin
+        devolver falso
+    fin
+
+    ; Mbit/s (0 si no se sabe)
+    público función velocidad(): nat32
+        variable s: nat32
+        según nat16(tarjeta)
+            caso T_E1000:
+                s := (e_lee(E_STATUS) >> 6) yb 3
+                si s = 0 entonces devolver 10 fin
+                si s = 1 entonces devolver 100 fin
+                devolver 1000
+            caso T_RTL8139:
+                si entra8(r_io + R_MSR) yb 8 <> 0 entonces devolver 10 fin
+                devolver 100
+            caso T_YUKON: devolver yk_velocidad()
+        fin
+        devolver 0
+    fin
+
+    ; para la tarjeta (antes de acabar el servicio)
+    público función parar_tarjeta()
+        según nat16(tarjeta)
+            caso T_E1000:
+                e_pon(E_IMC, 0xFFFFFFFF)
+                e_pon(E_RCTL, 0)
+                e_pon(E_TCTL, 0)
+            caso T_RTL8139:
+                sale16(r_io + R_IMR, 0)
+                sale8(r_io + R_CR, 0)
+            caso T_YUKON: yk_parar()
+        fin
+        pon_irq(0)
+        tarjeta := T_NINGUNA
+    fin
+
+fin Rtarjeta.
