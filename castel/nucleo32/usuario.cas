@@ -66,6 +66,9 @@
 ;   68  los ajustes (HISPA.INI): EBX = 0, leerlos otra vez; 1, el nombre
 ;       del usuario a ECX (caben EDX); 2, ¿está el sistema instalado en el
 ;       disco?; 3, el nombre del equipo a ECX
+;   150 a 154: apagar de verdad, reiniciar y la batería (energia.cas): las
+;       150 a 153 solo para el servicio de ACPI (ACPI.BIN); la 154, la
+;       batería, para todos
 ;
 ;  Los nombres de archivo que no empiezan por una barra se entienden desde la
 ;  carpeta de trabajo de la tarea (la hereda de quien la lanza); «.» y «..»
@@ -88,7 +91,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Energia
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -735,6 +738,8 @@ módulo Usuario
                 devolver info_unidad(a, puntero(b))
             caso 60..68:
                 devolver atender_instalar(n, a, b, c)
+            caso 150..154:
+                devolver atender_energía(n, a, b, c)
         fin
         devolver NO_VALE
     fin
@@ -857,14 +862,7 @@ módulo Usuario
                 tomar_consola()
                 escribir("reiniciar\n")
                 soltar_consola()
-                ensamblador
-                    cli
-                    mov al, 0xFE
-                    out 0x64, al
-                .quieto:
-                    hlt
-                    jmp .quieto
-                fin
+                reiniciar_equipo()
             caso 67:
                 pon_reloj(a, b)
                 devolver 0

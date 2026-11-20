@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Energia
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -673,6 +673,19 @@ módulo Semilla
         fin
     fin
 
+    ; el servicio de ACPI (ACPI.BIN, energia.cas): apagar de verdad y la
+    ; batería. Si no está en la unidad del sistema, no pasa nada: se apaga
+    ; como antes. Se le da la línea del cargador: con «registro», el suyo va
+    ; a \ACPI.TXT; «acpicada=N», una lectura cada N segundos (10 si no).
+    función arranca_acpi()
+        variable t: puntero a Tarea
+        variable e: nat32
+        t := cargar_archivo("\\ACPI.BIN", línea_del_cargador(), e)
+        si t = nulo entonces devolver fin
+        pon_servicio_acpi(t)
+        imprimir1("acpi: el servicio de ACPI (ACPI.BIN) en marcha, la tarea %u\n", t.id)
+    fin
+
     función principal(): byte
         variable malo: puntero a nat32
         prepara_gdt()
@@ -704,6 +717,7 @@ módulo Semilla
         ; teclado, el nombre del usuario); lo que diga el cargador manda
         lee_ajustes()
         si buscar(línea_del_cargador(), "teclado=us") <> nulo entonces pon_teclado(falso) fin
+        si buscar(línea_del_cargador(), "sinacpi") = nulo y buscar(línea_del_cargador(), "instalar") = nulo entonces arranca_acpi() fin
         ; o el escritorio (el entorno gráfico): esta consola se queda esperando
         ; (las teclas son de las ventanas; lo que diga el núcleo sale por el
         ; puerto serie)

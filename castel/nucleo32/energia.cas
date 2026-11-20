@@ -1,0 +1,490 @@
+; =============================================================================
+;  energia.cas - apagar de verdad, reiniciar y la batería en Hispa-Pentium
+;  (docs/PENTIUM.md, «Apagar de verdad y la batería»).
+;
+;  ACPI (las tablas del equipo, el AML de sus métodos, el controlador
+;  embebido) no está en el núcleo: lo lleva un programa del anillo 3,
+;  ACPI.BIN (acpi/pentium/), con dentro el mismo núcleo de C de HSPACPI de
+;  Hispa-DOS (ACPICA). El núcleo lo lanza al arrancar (semilla.cas) y apunta
+;  aquí cuál es su tarea: SOLO esa tarea puede usar las llamadas 150 a 152
+;  (los puertos, la memoria física y la configuración PCI), que los demás
+;  programas no tienen. Las llamadas:
+;
+;   150  un puerto: EBX el puerto, ECX el valor, EDX los octetos (1, 2 o 4),
+;        con 0x100 para escribir                     -> lo leído
+;   151  la memoria física desde EBX, ECX octetos, a la vista del programa
+;        (sin caché, en su zona de 0xB0000000; no se quita hasta que acaba,
+;        y al acabar esos marcos NO vuelven a los libres: no son suyos)
+;                                                    -> dónde (0 si no cabe)
+;   152  la configuración PCI: EBX la dirección (como en CF8h; los bits 0
+;        y 1, el octeto), ECX el valor, EDX los octetos (con 0x100 para
+;        escribir), de una vez y con las interrupciones tapadas (el núcleo
+;        también usa CF8h y CFCh)                    -> lo leído
+;   153  el servicio da lo último leído (EBX: una Energía) y espera, como
+;        mucho ECX tics, a que el núcleo le mande algo  -> la orden (0 nada,
+;        1 apagar, 2 reiniciar)
+;   154  (cualquier programa) la batería: la Energía, a EBX -> 1, o 0 si no
+;        hay servicio
+;
+;  Apagar (apagar_por_acpi), con los programas ya avisados y los discos
+;  vaciados (lo hace quien llama: escritorio.cas): se le manda «apagar» al
+;  servicio, que entra en S5 con ACPICA (\_S5, _PTS, el modo ACPI si hace
+;  falta, SLP_TYP y SLP_EN). Si a los 15 s el equipo sigue encendido (o el
+;  servicio no está), el núcleo lo intenta él con lo que el servicio le dio
+;  al arrancar (PM1a_CNT, \_S5). Reiniciar (reiniciar_equipo): se avisa al
+;  servicio (que le dice al controlador embebido que lo deja: _REG 3, 0) y
+;  luego, como REINICIAR de Hispa-DOS: el registro de reinicio de la FADT, el
+;  controlador del teclado (FEh al 64h), el puerto CF9h y un triple fallo.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Energia
+
+    importar Cpu, Tareas, Paginas, Discos, Mem32, Textos32, Formato, Grafico
+
+    constante NO_VALE = 0xFFFFFFF9              ; (el de usuario.cas)
+    constante ESCRIBE = 0x100
+    constante VENTANA_INICIO = 0xB0000000       ; donde se le pone al servicio la memoria física
+    constante VENTANA_FINAL = 0xBF000000
+    público constante ORDEN_APAGAR = 1
+    público constante ORDEN_REINICIAR = 2
+    constante RESP_PARADO = 1
+    constante RESP_FALLO = 2
+    público constante FASE_LISTO = 1            ; hay lecturas de la batería
+    público constante ANCHO_PILA = 64           ; lo que ocupa la pila en la bandeja
+
+    ; lo que da el servicio (la misma estructura que pe_energia en
+    ; acpi/pentium/pentium.h: si cambia una, la otra)
+    público tipo Energía = estructura
+        versión, fase, nbat, pct, ca, cargando, minutos, estado, lecturas: nat32
+        salud_pct, salud_n, unidad, diseño, llena, ciclos1, ciclos2: nat32
+        s5, pm1a_cnt, pm1b_cnt, slp_typa, slp_typb, smi_cmd, acpi_enable: nat32
+        reset_esp, reset_dir, reset_valor, respuesta, reservado: nat32
+    fin
+
+    público variable energía: Energía           ; lo último que ha dado el servicio
+    público variable hay_energía: bool
+    público variable cambios_energía: nat32     ; sube cuando cambia lo que se ve de la batería
+    variable servicio: nat32                    ; la tarea de ACPI.BIN (0: no hay)
+    variable orden: nat32
+    variable ventana: nat32                     ; lo siguiente libre de su zona
+    variable vistas: nat32
+    variable idt_nula: arreglo [2] de nat32     ; (para el triple fallo)
+
+    ; ---- el servicio ----
+    público función pon_servicio_acpi(t: puntero a Tarea)
+        servicio := t.id
+        ventana := VENTANA_INICIO
+        orden := 0
+        t.padre := 0                            ; nadie lo espera: si acaba, lo recoge el núcleo
+    fin
+
+    público función servicio_acpi(): nat32
+        devolver servicio
+    fin
+
+    público función servicio_acpi_vivo(): bool
+        variable t: puntero a Tarea
+        si servicio = 0 entonces devolver falso fin
+        t := tarea_de(servicio)
+        devolver t <> nulo y t.estado <> ACABADA
+    fin
+
+    ; ---- los puertos ----
+    público función lee_puerto(p: nat32, n: nat32): nat32
+        ensamblador
+            mov edx, {p}
+            xor eax, eax
+            mov ecx, {n}
+            cmp ecx, 1
+            jne .no8
+            in al, dx
+            jmp .fin
+        .no8:
+            cmp ecx, 2
+            jne .no16
+            in ax, dx
+            jmp .fin
+        .no16:
+            in eax, dx
+        .fin:
+        fin
+    fin
+
+    público función escribe_puerto(p: nat32, n: nat32, v: nat32)
+        ensamblador
+            mov edx, {p}
+            mov eax, {v}
+            mov ecx, {n}
+            cmp ecx, 1
+            jne .no8
+            out dx, al
+            jmp .fin
+        .no8:
+            cmp ecx, 2
+            jne .no16
+            out dx, ax
+            jmp .fin
+        .no16:
+            out dx, eax
+        .fin:
+        fin
+    fin
+
+    ; la configuración PCI, de una vez (dirección y dato sin que se cuele nadie)
+    función pci_es(d: nat32, v: nat32, modo: nat32): nat32
+        variable b, r, n: nat32
+        n := modo yb 7
+        si n <> 1 y n <> 2 y n <> 4 entonces devolver 0xFFFFFFFF fin
+        b := sin_interrupciones()
+        escribe_puerto(0xCF8, 4, 0x80000000 ob (d yb 0x00FFFFFC))
+        r := 0
+        si modo yb ESCRIBE <> 0 entonces
+            escribe_puerto(0xCFC + (d yb 3), n, v)
+        sino
+            r := lee_puerto(0xCFC + (d yb 3), n)
+        fin
+        reponer(b)
+        devolver r
+    fin
+
+    ; la memoria física [f, f + n), a la vista del servicio
+    función pon_física(f: nat32, n: nat32): nat32
+        variable v, d, k: nat32
+        d := f yb (PÁGINA - 1)
+        n := redondear(d + n, PÁGINA)
+        si n = 0 o n > 0x1000000 o ventana + n > VENTANA_FINAL o ventana + n < ventana entonces devolver 0 fin
+        k := 0
+        mientras k < n hacer
+            si no mapear(actual.cr3, ventana + k, (f yb 0xFFFFF000) + k, ESCRIBIR ob USUARIO ob 0x10 ob AJENO) entonces devolver 0 fin
+            k := k + PÁGINA
+        fin
+        v := ventana + d
+        ventana := ventana + n
+        devolver v
+    fin
+
+    ; las llamadas 150 a 154 (usuario.cas)
+    público función atender_energía(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        si n = 154 entonces
+            si no hay_energía o no usuario_puede(actual.cr3, a, tamaño(Energía), cierto) entonces devolver 0 fin
+            copiar_memoria(puntero(a), puntero(dirección(energía)), tamaño(Energía))
+            devolver 1
+        fin
+        si servicio = 0 o actual.id <> servicio entonces devolver NO_VALE fin
+        según n
+            caso 150:
+                si c yb ESCRIBE <> 0 entonces
+                    escribe_puerto(a yb 0xFFFF, c yb 7, b)
+                    devolver 0
+                fin
+                devolver lee_puerto(a yb 0xFFFF, c yb 7)
+            caso 151: devolver pon_física(a, b)
+            caso 152: devolver pci_es(a, b, c)
+            caso 153:
+                si a <> 0 entonces
+                    si no usuario_puede(actual.cr3, a, tamaño(Energía), falso) entonces devolver NO_VALE fin
+                    copiar_memoria(puntero(dirección(energía)), puntero(a), tamaño(Energía))
+                    si no hay_energía o energía.lecturas <> vistas entonces
+                        vistas := energía.lecturas
+                        cambios_energía := cambios_energía + 1
+                    fin
+                    hay_energía := cierto
+                fin
+                ; (la orden se mira cada décima de segundo)
+                mientras b > 0 y orden = 0 hacer
+                    si b > 10 entonces
+                        dormir(10)
+                        b := b - 10
+                    sino
+                        dormir(b)
+                        b := 0
+                    fin
+                fin
+                devolver orden
+        fin
+        devolver NO_VALE
+    fin
+
+    ; ---- apagar y reiniciar ----
+    ; acaba los programas del anillo 3 (menos el servicio) y espera, como
+    ; mucho «tics», a que lo estén: sus archivos se cierran (lo escrito queda)
+    público función acabar_programas(tics: nat32)
+        variable i, n: nat32
+        variable t: puntero a Tarea
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            t := dirección(tareas[i])
+            si t.estado <> LIBRE y t.estado <> ACABADA y t.usuario y t.id <> servicio entonces acabar_tarea(t) fin
+        fin
+        mientras tics > 0 hacer
+            n := 0
+            para i desde 0 hasta MAX_TAREAS - 1 hacer
+                t := dirección(tareas[i])
+                si t.estado <> LIBRE y t.estado <> ACABADA y t.usuario y t.id <> servicio entonces n := n + 1 fin
+            fin
+            si n = 0 entonces devolver fin
+            dormir(1)
+            tics := tics - 1
+        fin
+    fin
+
+    ; lo que los discos tengan guardado, a su superficie
+    público función vaciar_discos()
+        variable k: nat32
+        para k desde 0 hasta MAX_DISCOS - 1 hacer asentar(k) fin
+    fin
+
+    ; los programas del anillo 3 que siguen en marcha (sin contar el servicio)
+    público función programas_vivos(): nat32
+        variable i, n: nat32
+        variable t: puntero a Tarea
+        n := 0
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            t := dirección(tareas[i])
+            si t.estado <> LIBRE y t.estado <> ACABADA y t.usuario y t.id <> servicio entonces n := n + 1 fin
+        fin
+        devolver n
+    fin
+
+    ; S5 sin el servicio, con lo que dio al arrancar: el modo ACPI si hace
+    ; falta (SMI_CMD <- ACPI_ENABLE, hasta 3 s) y SLP_TYP, y luego SLP_EN, en
+    ; PM1a_CNT (y PM1b_CNT)
+    función s5_propio()
+        variable v, i: nat32
+        v := lee_puerto(energía.pm1a_cnt, 2)
+        si v yb 1 = 0 y energía.smi_cmd <> 0 y energía.acpi_enable <> 0 entonces
+            escribe_puerto(energía.smi_cmd, 1, energía.acpi_enable)
+            i := 0
+            mientras i < 300 y lee_puerto(energía.pm1a_cnt, 2) yb 1 = 0 hacer
+                dormir(1)
+                i := i + 1
+            fin
+        fin
+        v := lee_puerto(energía.pm1a_cnt, 2) yb nob 0x3C00
+        escribe_puerto(energía.pm1a_cnt, 2, v ob ((energía.slp_typa yb 7) << 10))
+        si energía.pm1b_cnt <> 0 entonces
+            escribe_puerto(energía.pm1b_cnt, 2, (lee_puerto(energía.pm1b_cnt, 2) yb nob 0x3C00) ob ((energía.slp_typb yb 7) << 10))
+        fin
+        escribe_puerto(energía.pm1a_cnt, 2, v ob ((energía.slp_typa yb 7) << 10) ob 0x2000)
+        si energía.pm1b_cnt <> 0 entonces
+            escribe_puerto(energía.pm1b_cnt, 2, (lee_puerto(energía.pm1b_cnt, 2) yb nob 0x3C00) ob ((energía.slp_typb yb 7) << 10) ob 0x2000)
+        fin
+        dormir(300)
+    fin
+
+    ; apaga el equipo por ACPI. Si vuelve, no ha podido (no hay ACPI, o el
+    ; equipo no se deja): quien llama pone el aviso de «ya puede apagar».
+    público función apagar_por_acpi()
+        variable i: nat32
+        si servicio_acpi_vivo() y hay_energía y energía.s5 = 1 entonces
+            escribir("energía: apagar (S5) por el servicio de ACPI\n")
+            orden := ORDEN_APAGAR
+            i := 0
+            mientras i < 1500 y servicio_acpi_vivo() y energía.respuesta <> RESP_FALLO hacer
+                dormir(1)
+                i := i + 1
+            fin
+        fin
+        si hay_energía y energía.s5 = 1 y energía.pm1a_cnt <> 0 entonces
+            escribir("energía: apagar (S5) desde el núcleo\n")
+            s5_propio()
+        fin
+        escribir("energía: el equipo no se ha apagado\n")
+    fin
+
+    ; reinicia el equipo. No vuelve.
+    público función reiniciar_equipo()
+        variable i, m: nat32
+        variable p: puntero a byte
+        si servicio_acpi_vivo() y hay_energía entonces
+            orden := ORDEN_REINICIAR
+            i := 0
+            mientras i < 200 y servicio_acpi_vivo() y energía.respuesta <> RESP_PARADO hacer
+                dormir(1)
+                i := i + 1
+            fin
+        fin
+        ; 1. el registro de reinicio de la FADT
+        si hay_energía y energía.reset_esp <= 2 entonces
+            escribir("energía: reiniciar por el registro de la FADT\n")
+            según energía.reset_esp
+                caso 0:
+                    m := mapear_aparato(energía.reset_dir, 1)
+                    si m <> 0 entonces
+                        p := puntero(m)
+                        p[0] := byte(energía.reset_valor)
+                    fin
+                caso 1: escribe_puerto(energía.reset_dir, 1, energía.reset_valor)
+                caso 2: pci_es(energía.reset_dir, energía.reset_valor, 1 ob ESCRIBE)
+            fin
+            dormir(50)
+        fin
+        ; 2. el controlador del teclado
+        escribir("energía: reiniciar por el teclado (8042)\n")
+        i := 0
+        mientras i < 100000 y lee_puerto(0x64, 1) yb 2 <> 0 hacer i := i + 1 fin
+        escribe_puerto(0x64, 1, 0xFE)
+        dormir(50)
+        ; 3. el puerto CF9h del chipset
+        escribir("energía: reiniciar por el puerto CF9h\n")
+        escribe_puerto(0xCF9, 1, 2)
+        dormir(1)
+        escribe_puerto(0xCF9, 1, 6)
+        dormir(50)
+        ; 4. un triple fallo
+        ensamblador
+            cli
+            lidt {idt_nula}
+            int 3
+        .quieto:
+            hlt
+            jmp .quieto
+        fin
+    fin
+
+    ; ---- la pila de la bandeja (escritorio.cas) ----
+    ; ¿hay que enseñarla? (el equipo declara batería y ya se ha leído)
+    público función hay_pila(): bool
+        devolver hay_energía y energía.fase = FASE_LISTO
+    fin
+
+    ; el rayo de «con cable», de dos puntos de grueso
+    función rayo(ref l: Lienzo, x: ent32, yy: ent32, c: nat32)
+        línea(l, x + 14, yy + 12, x + 9, yy + 18, c)
+        línea(l, x + 15, yy + 12, x + 10, yy + 18, c)
+        línea(l, x + 9, yy + 18, x + 15, yy + 18, c)
+        línea(l, x + 15, yy + 18, x + 11, yy + 22, c)
+        línea(l, x + 16, yy + 18, x + 12, yy + 22, c)
+    fin
+
+    ; la pila en (x, yy) de la barra: el dibujo con lo que queda y, detrás,
+    ; el porcentaje
+    público función pinta_pila(ref l: Lienzo, x: ent32, yy: ent32)
+        variable c: nat32
+        variable an: ent32
+        variable t: arreglo [8] de byte
+        variable d: arreglo [1] de nat32
+        marco(l, x, yy + 11, 24, 13, 0x123F85)
+        rectángulo(l, x + 1, yy + 12, 22, 11, 0xEAF3FD)
+        rectángulo(l, x + 24, yy + 15, 3, 7, 0x123F85)
+        si energía.nbat = 0 entonces
+            ; sin batería puesta: un aspa
+            línea(l, x + 7, yy + 13, x + 16, yy + 21, 0xC0392B)
+            línea(l, x + 16, yy + 13, x + 7, yy + 21, 0xC0392B)
+            copiar_hasta(t, "--", 8)
+        sino
+            c := 0x3FAE49
+            si energía.pct <= 100 entonces
+                si energía.pct < 25 entonces c := 0xF0A030 fin
+                si energía.pct < 10 entonces c := 0xD64532 fin
+                an := ent32(energía.pct * 20 div 100)
+                si an < 1 entonces an := 1 fin
+                rectángulo(l, x + 2, yy + 13, an, 9, c)
+                d[0] := energía.pct
+                formatear(t, 8, "%u%%", d)
+            sino
+                copiar_hasta(t, "?", 8)
+            fin
+            si energía.ca = 1 entonces
+                ; con cable: un rayo amarillo con su borde
+                rayo(l, x + 1, yy, 0x123F85)
+                rayo(l, x - 1, yy, 0x123F85)
+                rayo(l, x, yy + 1, 0x123F85)
+                rayo(l, x, yy, 0xFFD43B)
+            fin
+        fin
+        texto_negrita(l, x + 31, yy + 10, t, 0x1E5CA8)
+        texto_negrita(l, x + 30, yy + 9, t, 0xFFFFFF)
+    fin
+
+    ; n con un punto cada tres cifras (5.000), al final de destino
+    función miles(destino: puntero a byte, n: nat32)
+        variable c: arreglo [12] de byte
+        variable i, k: nat32
+        natural_a_texto(n, c)
+        k := longitud(c)
+        i := 0
+        mientras i < k hacer
+            si i > 0 y (k - i) mod 3 = 0 entonces añadir_car(destino, '.') fin
+            añadir_car(destino, c[i])
+            i := i + 1
+        fin
+    fin
+
+    ; el recuadro de ayuda de la pila (como el de Hispa-486, docs/VENTANAS.md
+    ; «[AYUDA]»): las líneas, separadas por «\n», a destino (caben «cabe»,
+    ; hasta 256), y el color de cada una a colores. Da cuántas.
+    público función ayuda_pila(destino: puntero a byte, colores: puntero a nat32): nat32
+        variable n, h, m: nat32
+        variable d: arreglo [3] de nat32
+        variable u: puntero a byte
+        destino[0] := 0
+        n := 0
+        si energía.unidad = 1 entonces u := "mAh" sino u := "mWh" fin
+        ; 1. lo que queda, y si está enchufado
+        si energía.nbat = 0 entonces
+            concatenar(destino, "Sin batería puesta")
+            si energía.ca = 1 entonces concatenar(destino, " · enchufado") fin
+        sino si energía.pct > 100 entonces
+            concatenar(destino, "Batería: no se sabe cuánto queda")
+        sino si energía.ca = 1 entonces
+            d[0] := energía.pct
+            si energía.cargando = 1 entonces
+                formatear(destino, 64, "Enchufado · cargando: %u %%", d)
+            sino
+                formatear(destino, 64, "Enchufado · cargada (%u %%)", d)
+            fin
+        sino
+            d[0] := energía.pct
+            formatear(destino, 64, "Batería: %u %%", d)
+            si energía.minutos <> 0xFFFF entonces
+                h := energía.minutos div 60
+                m := energía.minutos mod 60
+                concatenar(destino, " · quedan ")
+                d[0] := h
+                d[1] := m
+                si h > 0 entonces formatear(dirección(destino[longitud(destino)]), 24, "%u h %u min", d)
+                sino formatear(dirección(destino[longitud(destino)]), 24, "%u min", dirección(d[1])) fin
+            fin
+        fin
+        colores[n] := 0x14294A
+        n := n + 1
+        ; 2. la salud (lo que guarda llena frente a lo que guardaba nueva)
+        si energía.nbat > 0 y energía.salud_pct <= 100 y energía.salud_n > 0 entonces
+            d[0] := energía.salud_pct
+            concatenar(destino, "\n")
+            formatear(dirección(destino[longitud(destino)]), 24, "Salud: %u %% (", d)
+            si energía.salud_n > 1 entonces
+                d[0] := energía.salud_n
+                formatear(dirección(destino[longitud(destino)]), 24, "entre las %u guardan ", d)
+            sino
+                concatenar(destino, "guarda ")
+            fin
+            miles(destino, energía.llena)
+            concatenar(destino, " de ")
+            miles(destino, energía.diseño)
+            concatenar(destino, " ")
+            concatenar(destino, u)
+            si energía.salud_n > 1 entonces concatenar(destino, " de cuando eran nuevas)") sino concatenar(destino, " de cuando era nueva)") fin
+            colores[n] := 0x14294A
+            n := n + 1
+            ; 3. los ciclos de carga (solo si el equipo los da: _BIX)
+            si energía.ciclos1 <> 0xFFFF entonces
+                concatenar(destino, "\n")
+                d[0] := energía.ciclos1
+                d[1] := energía.ciclos2
+                si energía.ciclos2 <> 0xFFFF entonces formatear(dirección(destino[longitud(destino)]), 40, "%u y %u ciclos de carga", d)
+                sino formatear(dirección(destino[longitud(destino)]), 40, "%u ciclos de carga", d) fin
+                colores[n] := 0x5A7396
+                n := n + 1
+            fin
+            ; 4. gastada: por debajo de la mitad
+            si energía.salud_pct < 50 entonces
+                concatenar(destino, "\nLa batería está gastada: dura menos de la mitad que nueva")
+                colores[n] := 0xB5502D
+                n := n + 1
+            fin
+        fin
+        devolver n
+    fin
+
+fin Energia.
