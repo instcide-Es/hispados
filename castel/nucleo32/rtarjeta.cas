@@ -15,7 +15,7 @@
 ; =============================================================================
 módulo Rtarjeta
 
-    importar Rbase, Ryukon, Mem32, Textos32, Formato
+    importar Rbase, Ryukon, Mem32, Textos32, Formato, Llamadas
 
     público constante T_NINGUNA = 0
     público constante T_E1000 = 1
@@ -355,6 +355,29 @@ módulo Rtarjeta
         devolver T_NINGUNA
     fin
 
+    ; el aparato «a», en el estado de energía D0 (el de trabajar): por su
+    ; capacidad de gestión de energía (la 01h), los bits 1:0 de su control
+    función pon_d0(a: nat32)
+        variable p, n, v: nat32
+        si pci_leer16(a, 6) yb 0x10 = 0 entonces devolver fin
+        p := pci_leer(a, 0x34) yb 0xFC
+        n := 0
+        mientras p <> 0 y n < 48 hacer
+            v := pci_leer(a, p)
+            si v yb 0xFF = 1 entonces
+                v := pci_leer(a, p + 4)
+                si v yb 3 <> 0 entonces
+                    apunta4("  estaba en D%u: a D0", v yb 3, 0, 0, 0)
+                    pci_escribir(a, p + 4, v yb nob nat32(3))
+                    dormir(11)
+                fin
+                devolver
+            fin
+            p := (v >> 8) yb 0xFC
+            n := n + 1
+        fin
+    fin
+
     ; busca la tarjeta en el bus PCI y la pone en marcha. Falso si no hay
     ; ninguna que se sepa llevar (o no arranca).
     público función buscar_tarjeta(): bool
@@ -380,6 +403,9 @@ módulo Rtarjeta
                         irq_tarjeta := pci_leer(a, 0x3C) yb 0xFF
                         ; que atienda (en la memoria y en los puertos), que mande en el bus
                         ; (DMA) y que pueda interrumpir
+                        ; despierta (D0), por si la dejó dormida (D3) otro sistema
+                        ; al reiniciar: entonces sus registros dan FF
+                        pon_d0(a)
                         orden := pci_leer16(a, 4)
                         pci_escribir16(a, 4, (orden ob 7) yb nob nat32(0x400))
                         apunta4("tarjeta %04X:%04X en el bus PCI %02X:%02X", id yb 0xFFFF, id >> 16, bus, ap)
