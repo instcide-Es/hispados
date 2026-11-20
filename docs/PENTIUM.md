@@ -58,7 +58,7 @@ de verdad** (ACPI, S5), reiniciar por la FADT y la **batería en la bandeja**
 con su recuadro de ayuda, con el núcleo ACPI de Hispa-DOS (ACPICA) como
 servicio del anillo 3, `ACPI.BIN` (sección 11). En la bandeja caben a la vez,
 de izquierda a derecha, la memoria USB, la red, la pila y el reloj. Todo está
-en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`).*
+en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`). Y la tarde del 20/11: las **actualizaciones por Internet** (`actualiza.hispados.es/pentium/`), con el catálogo **firmado** (Ed25519, en Castel), la ventana con su barra, el aviso al arrancar y el **núcleo nuevo con vuelta sola al de antes** si no arranca (sección 13); y el **CD (o DVD) de instalación**, que vale para VirtualBox (sección 12).*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -1704,16 +1704,82 @@ qemu-system-i386 -m 64 -rtc base=localtime \
   -device ahci,id=sata -drive id=d,file=/dev/shm/disco.img,format=raw,if=none -device ide-hd,drive=d,bus=sata.0
 ```
 
+### El CD (o DVD) de instalación, y VirtualBox (20/11)
+
+**`nucleo32/cd.sh IMAGEN.ISO [CLAVE_PRIVADA]`** hace el **CD de Hispa-Pentium**:
+una ISO 9660 (unos 8 MB) que arranca **por la BIOS con El Torito «sin
+emulación»** (`grub-mkrescue` con solo `i386-pc`, y `xorriso`; no hace falta
+ser root). La misma imagen vale **grabada en un CD o en un DVD**, en un PC de
+verdad, y en **VirtualBox** o QEMU como unidad óptica; y, como es híbrida,
+grabada tal cual en una memoria USB también arranca.
+
+**Por qué no hace falta ATAPI ni ISO 9660 en el núcleo.** GRUB lee el CD por
+la BIOS y **carga en la memoria** todo lo que hace falta, como módulos: el
+núcleo lo ve como la **unidad M:** (en memoria, de solo lectura), la misma de
+la memoria USB cuando su USB no se deja (sección 7). Así vale cualquier unidad
+de CD (IDE, SATA, USB) sin un controlador más, y el núcleo no crece; y el
+programa INSTALAR copia de M: al disco como siempre. (Un controlador ATAPI y
+la ISO 9660 solo servirían para leer el CD *después* de arrancar: para
+instalar, no hacen falta.) Lo común con la memoria USB (compilar todo, el
+núcleo y sus copias que piden el modo, los programas, ACPI, la oficina, los
+textos, `BOOT.IMG`/`CORE.IMG`, los paquetes del sistema y las listas de
+módulos) está en **`nucleo32/sistema.sh`**, que leen `usb.sh`, `cd.sh` y
+`actualiza.sh`.
+
+El menú de GRUB del CD (10 s):
+
+| Entrada | Qué arranca |
+|---|---|
+| **Arrancar Hispa-Pentium 0.8 sin instalar** (la de por omisión) | `ESCRIT8.BIN escritorio unidad=M`, con los programas como módulos: el escritorio a 800 x 600; los discos se ven pero no se tocan |
+| **Instalar Hispa-Pentium 0.8 en el disco duro** | `SEMILLA.BIN instalar unidad=M` con todo lo que se instala y **`MEDIO.TXT`** («CD»), que le dice a INSTALAR que es el CD: «sin el CD», «Saque ahora el CD (o el DVD)» (no lo instala) |
+| sin instalar, a la medida de la pantalla | `gfxpayload=auto` |
+| sin instalar, sin USB, discos, red ni ACPI | por si un equipo no arranca |
+| el intérprete de órdenes (modo texto) | `SEMILLA.BIN ordenes unidad=M` |
+| los modos de vídeo de la BIOS | `videoinfo` |
+| arrancar del disco duro | `chainloader +1` del primer disco (si se ha dejado el CD puesto) |
+
+En el CD van también, en `\PAQUETES`, los paquetes del sistema con su catálogo
+(con `CLAVE_PRIVADA`, firmado).
+
+**Sin UEFI**: el núcleo usa la pantalla de texto (INSTALAR) y el modo que pone
+GRUB por la VBE, que con UEFI no están, y el disco instalado arranca por la
+BIOS. En VirtualBox, «Habilitar EFI» tiene que estar quitado (lo está, para
+«Other»).
+
+**VirtualBox**, lo que trae de serie y cómo va:
+
+| Pieza | En VirtualBox | Hispa-Pentium |
+|---|---|---|
+| el disco | SATA AHCI (ICH9) o IDE (PIIX3/PIIX4) | los dos (`ahci.cas`, `ata.cas`); el CD en AHCI (ATAPI) se ve y no se toca |
+| el CD/DVD | en el mismo SATA o en el IDE secundario | lo lee GRUB por la BIOS |
+| la red | Intel PRO/1000 MT Desktop (82540EM, `8086:100E`) | la e1000 de `RED.BIN` (ya estaba en la lista) |
+| el USB | OHCI (USB 1.1), con la tableta USB si se elige | OHCI no lo lleva: se deja quieto; teclado y ratón, por PS/2 (el ratón «PS/2» de VirtualBox) |
+| la gráfica | VMSVGA o VBoxVGA, con VBE | el modo lo pone GRUB por la VBE |
+| ACPI | sí | `ACPI.BIN`: apagar de verdad |
+
+**Probado en QEMU imitando a VirtualBox** (parte 15 de las pruebas): `-machine
+pc` con el disco IDE, `-device pci-ohci` con una `usb-tablet` y la e1000
+(`-nic user,model=e1000`): arranca sin instalar, con la red; instala en el disco
+IDE y el disco arranca solo. `-machine q35` (ICH9: el disco y el CD en AHCI):
+instala en el disco SATA y arranca. El LEEME de la carpeta del CD cuenta paso a
+paso cómo hacer la máquina en VirtualBox.
+
+```
+castel/nucleo32/cd.sh /tmp/cd.iso
+truncate -s 2G /tmp/d.img
+qemu-system-i386 -machine q35 -m 256 -nic user,model=e1000 -cdrom /tmp/cd.iso \
+  -drive file=/tmp/d.img,format=raw,if=none,id=d -device ide-hd,drive=d,bus=ide.0 -boot d
+```
+
 ## 13. Los paquetes y las actualizaciones
 
 Desde la **0.8** (20/11/2026), lo instalado en el disco se puede **poner al día,
 añadir y quitar** sin volver a instalar el sistema: por **paquetes** (archivos
 `.HPQ`), que maneja el programa **PAQUETES** (`upaquete.cas`, `PAQUETES.BIN`,
-del anillo 3, en Castel) y que se hacen en el VPS con **`tools/hpq.py`**. De
-momento los paquetes se traen de una carpeta (la de la memoria USB, la de otro
-disco...); cuando el núcleo tenga red, de Internet (más abajo: «el gancho de la
-red»). (El número de versión del sistema —el núcleo, el escritorio, INSTALAR—
-sigue en 0.7: lo cambia quien publique la 0.8.)
+del anillo 3, en Castel) y que se hacen en el VPS con **`tools/hpq.py`**. Los
+paquetes se traen de una carpeta (la de la memoria USB, la de otro disco...) o,
+desde la tarde del 20/11, **de Internet**, con el catálogo **firmado**
+(Ed25519): más abajo, «Por Internet», «La firma» y «El núcleo nuevo».
 
 ### El paquete (.HPQ)
 
@@ -1746,9 +1812,8 @@ fin
   `\HISPA\BLOC.BIN`, `\OFICINA\PLUMA.HVP`; no en `\HISPA\PAQUETES`, que es la base
   de lo instalado), lo que mide y su **SHA-256**.
 - Lo que PAQUETES no conoce lo deja pasar: así caben cosas nuevas sin cambiar de
-  formato. **`firma=`** queda reservada para firmar el paquete; esta versión de
-  PAQUETES dice que la lleva, pero aún no la comprueba (la cadena de confianza de
-  hoy es el catálogo, que lleva el SHA-256 de cada paquete entero: más abajo).
+  formato. Lo que se firma es el **catálogo**, que lleva el SHA-256 de cada
+  paquete entero (más abajo, «La firma»): el paquete no lleva firma propia.
 
 El **SHA-256** está escrito en Castel (`nucleo32/sha256.cas`, el módulo `Sha256`:
 `empezar`, `añadir` y `acabar`, de FIPS 180-4), para los programas del anillo 3.
@@ -1833,7 +1898,8 @@ entero.) Cuando hay que instalar varios paquetes, cada uno es su propio todo o
 nada, en orden: si falla el tercero, los dos primeros (lo que necesitaba) quedan
 instalados, y se dice.
 
-**El gancho de la red.** PAQUETES no sabe de TCP/IP: para traer de Internet el
+**El gancho de la red** (cómo era; hoy lo hace `DESCARGA.BIN`, el de verdad:
+«Por Internet», abajo). PAQUETES no sabe de TCP/IP: para traer de Internet el
 catálogo y cada paquete, a `C:\HISPA\PAQUETES\BAJADAS`, lanza el programa
 **`DESCARGA.BIN`** (la orden de descargar de la red: su nombre tiene que caber en
 8+3) con dos argumentos, **`URL DESTINO`**, lo espera, y vale si acaba con el
@@ -1893,11 +1959,140 @@ Para publicar una actualización: hacer el paquete con su versión nueva, ponerl
 con los demás, `hpq.py catalogo` y subir la carpeta (a la memoria USB o, cuando
 haya red, a `actualiza.hispados.es/pentium/`).
 
-**Lo que falta**: comprobar la **firma** (del catálogo, que lleva las sumas de
-todo; con una clave pública dentro del sistema); actualizar el núcleo y pedir
-reiniciar (hoy se pone el archivo, y vale en el arranque siguiente); que la
-ventana deje elegir el origen y enseñe el avance; y la red (sección 14), que
-trae lo de Internet por el gancho.
+### Por Internet (la tarde del 20/11)
+
+**El servidor.** `http://actualiza.hispados.es/pentium/` (el VPS sirve
+`/www/hispados` con ese nombre; la carpeta `pentium` va al lado de los `.paq` de
+Hispa-DOS): los `.HPQ`, su `CATALOGO.TXT` y la firma, `CATALOGO.FIR`. Lo hace
+**`nucleo32/actualiza.sh CARPETA CLAVE_PRIVADA`** (los mismos paquetes que van
+en la memoria USB y en el CD, hechos de lo que se instala, y el catálogo
+firmado; al acabar comprueba la firma con la clave pública del sistema). Para
+publicar una versión nueva: subir su número en `tools/hpq.py` (`SISTEMA`), hacer
+`actualiza.sh` otra vez y copiar **la carpeta entera** (los paquetes y el
+catálogo van juntos: si no, las sumas no cuadran y no se instala).
+
+**De dónde.** Igual que antes (`/DESDE=`, `ORIGEN.TXT`, la carpeta `\PAQUETES` de
+una unidad con catálogo, primero las memorias USB) y, si no, Internet. Lo trae
+**`DESCARGA.BIN`** (la orden DESCARGAR de la sección 14) a
+`C:\HISPA\PAQUETES\BAJADAS`: el catálogo, su firma y cada paquete, cada vez
+(«Buscar novedades» es eso: traer el catálogo otra vez).
+
+### La firma
+
+Todo va por **HTTP sin cifrar**, así que cualquiera en el camino podría
+cambiar lo que llega. Por eso el catálogo va **firmado con Ed25519** (RFC 8032):
+el catálogo lleva el tamaño y el SHA-256 de cada paquete, y cada paquete los de
+sus archivos, así que con firmar el catálogo queda atado todo.
+
+- **`CATALOGO.FIR`**, al lado del catálogo: una línea, `ed25519 ` y las 128
+  cifras hexadecimales de la firma de `CATALOGO.TXT` tal cual (octeto a octeto).
+- **La clave pública va dentro del sistema**: `nucleo32/clave.cas` (el módulo
+  `Clave`: sus 32 octetos y su huella, las 16 primeras cifras, que PAQUETES
+  dice al comprobar). **La privada no está en el repositorio**: en el VPS, en
+  `/root/.claude/Secretos/hispa-pentium-firma.key` (permisos 600). Sin ella no
+  se puede publicar nada que un Hispa-Pentium acepte de Internet.
+- **Comprobarla**: `nucleo32/firma.cas` (el módulo `Firma`, en Castel: unas 600
+  líneas, de dominio público el camino —el de TweetNaCl— y GPL lo escrito). Lleva
+  su **SHA-512** (los números de 64 bits hechos de dos de 32) y las cuentas de la
+  curva con los números módulo 2^255 − 19 en **32 trozos de 8 bits**, cada uno en
+  un `ent32`: así ninguna cuenta pasa de 32 bits (Castel no tiene números de 64)
+  y no hace falta ensamblador. Comprueba que S < 2^253 y que la clave es un punto
+  de la curva. Tarda unos **0,25 s** en QEMU (24-30 tics).
+- **Cuándo**: lo traído **de Internet** tiene que llevar firma, y buena: si no
+  la trae («el catálogo de Internet no trae su firma») o no es buena («la firma
+  del catálogo NO es buena: no se usa nada de él»), no se usa **nada** del
+  catálogo. De **una carpeta**, si trae `CATALOGO.FIR` se comprueba igual (y con
+  una mala, nada); sin ella se usa, como antes (la ha puesto ahí quien maneja el
+  equipo). `PAQUETES ESTADO` dice `origen|...|firmado` y la ventana pone
+  «(firma buena)» al lado del origen.
+- **`PAQUETES FIRMA ARCHIVO`**: si `ARCHIVO.FIR` (el mismo nombre, con `.FIR`)
+  es su firma buena, con la clave del sistema.
+- **`tools/hpq.py`**: `clave PRIVADA` (una nueva: la privada al archivo, 600, y
+  dice la pública), `publica PRIVADA [clave.cas]` (y el módulo de Castel),
+  `firma CARPETA PRIVADA`, `catalogo CARPETA --clave PRIVADA` (hace el catálogo y
+  lo firma) y `comprueba CARPETA PUBLICA`. Usa el módulo `cryptography` de Python.
+- **Cambiar de clave** (si la privada se perdiera o se supiera): una nueva con
+  `hpq.py clave`, `hpq.py publica ... clave.cas`, y sacar un `paquetes` nuevo
+  firmado aún con la vieja (que lleva ya la clave nueva); luego, todo con la
+  nueva.
+
+### El núcleo nuevo, y volver al de antes
+
+Cuando un paquete cambia **`\HISPA\NUCLEO.BIN`** (el `base`):
+
+1. El de antes **no se borra**: queda en **`\HISPA\NUCLEO.ANT`** (el de justo
+   antes de la última actualización).
+2. PAQUETES escribe **`\HISPA\GRUBENV`** (el «bloque de entorno» de GRUB: 1.024
+   octetos, texto y `#` hasta el final) con **`nuevo=1`**, y, si `GRUB.CFG` aún
+   no la tiene, le añade al final la entrada **«Hispa-Pentium con el núcleo de
+   antes»** (`--id anterior`, `NUCLEO.ANT`) y unas líneas que leen y escriben
+   `GRUBENV` (`load_env`, `save_env`: el `CORE.IMG` de la 0.8 lleva `loadenv`):
+
+   | `nuevo=` | Qué hace GRUB al arrancar |
+   |---|---|
+   | 1 | lo pasa a **2** y arranca el núcleo nuevo, como siempre |
+   | 2 | (el nuevo no llegó a decir que arrancó) lo pasa a **3** y arranca **el de antes** |
+   | 3 o 4 | sigue arrancando el de antes |
+   | 0 | lo de siempre |
+
+3. PAQUETES dice `reiniciar|...` y la ventana ofrece **«Reiniciar ahora»** o
+   **«Más tarde»** (la llamada 66, que vacía los discos antes).
+4. Al arrancar el escritorio de un sistema instalado, **`ACTUALIZ /BANDEJA`**
+   mira `GRUBENV`: con `nuevo=2`, el núcleo nuevo ha arrancado: lo pone a **0** y
+   lo dice («El núcleo nuevo ha arrancado bien»); con `nuevo=3`, GRUB ha vuelto
+   al de antes: lo pone a **4** (para decirlo una sola vez) y lo dice («El nuevo
+   no llegó a arrancar: se usa el de antes»).
+
+Así, un núcleo nuevo que se cuelga, o que reinicia, o que no llega al
+escritorio: **al reiniciar (aunque sea a mano), GRUB arranca solo el de antes**.
+Probado en QEMU con un núcleo que se queda en `hlt` (parte 15 de las pruebas).
+Se sigue con el de antes hasta que se instale otro núcleo (`PAQUETES INSTALA
+... /FORZAR`, o uno más nuevo). En un disco instalado con la 0.7 (su `CORE.IMG`
+sin `loadenv`), GRUB dice que no conoce `load_env` y sigue: la entrada del de
+antes está igual en el menú, pero hay que elegirla a mano.
+
+### El aviso de la bandeja
+
+Al arrancar el escritorio de un sistema instalado (con `HISPA.INI`: no en el
+primer arranque, que es el del asistente), el núcleo lanza, si está,
+**`\HISPA\ACTUALIZ.BIN /BANDEJA`** (lo único nuevo en el núcleo: tres líneas
+en `escritorio.cas`). Sin molestar: lo de `GRUBENV` (arriba); luego espera a
+la red (hasta 90 s; sin red, se acaba sin decir nada), hace `PAQUETES ESTADO`
+a su archivo (`BANDEJA.TXT`) y, **solo si hay algo más nuevo** que lo
+instalado (o algo que contar del núcleo), saca una **ventanita abajo a la
+derecha, encima de la bandeja**: «Hay N actualizaciones», con **«Verlas»** (abre
+la ventana) y **«Ahora no»**; se va sola a los 45 s. (Un icono propio en la
+bandeja, como el de la red, pediría más núcleo: la ventanita es un programa
+del anillo 3.)
+
+![El aviso de la bandeja](pentium/actualiza-bandeja.png)
+
+### La ventana, con su barra
+
+«Programas y actualizaciones» lanza PAQUETES **sin quedarse parada**
+(`acabada`, cada 15 tics) y con **`/AVANCE`**: PAQUETES escribe en
+`C:\HISPA\PAQUETES\AVANCE.TXT` una línea `hecho total texto` («Comprobando
+la firma del catálogo», «Bajando BASE.HPQ», «Comprobando base», «Instalando
+base»), y `DESCARGA /AVANCE=archivo` la pone al día cada 16 K mientras baja un
+paquete (con lo que dice `Content-Length`): la ventana la lee y pinta la
+**barra** (sin total, una franja que corre). Botones: **Instalarlo**
+(o Actualizarlo), **Quitarlo**, **Actualizar todo** y **Buscar novedades**
+(F5). Abajo, lo que dice PAQUETES (sin lo que dice DESCARGA de cada archivo).
+**A la medida de la ventana**: al cambiarla de tamaño o maximizarla, la lista,
+los mensajes, la barra y los botones se recolocan a su ancho y su alto (la
+lista enseña más renglones), y lo que no cabe se corta con «...» (antes, con
+la ventana maximizada, las descripciones y los mensajes se salían de su
+recuadro: lo vio Carlos con la red de verdad, 20/11). Si el servidor aún no
+tiene nada publicado (el catálogo da 404: `DESCARGA` acaba entonces con el
+código 4), PAQUETES lo dice en llano: «Todavía no hay actualizaciones
+publicadas en el servidor.»
+
+![La ventana, con lo nuevo de Internet](pentium/actualiza-ventana.png)
+
+**Lo que falta**: HTTPS (sección 14); buscar novedades cada cierto tiempo (hoy,
+al arrancar y al pulsar); que la ventana deje elegir el origen; las
+diferencias (hoy se baja el paquete entero); y una firma por paquete, para
+los que se instalan sueltos de una carpeta.
 
 ## 14. La red por cable (la 0.8)
 
@@ -2250,8 +2445,8 @@ Escuchar en un puerto (un servidor), reensamblar lo que llega desordenado y la
 retransmisión rápida; IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
 la vez; el Wi-Fi (arriba); TLS 1.3 (BearSSL no lo tiene), gzip en `Https` y la
 hora por NTP; más tarjetas (la RTL8168 del Toshiba NB250,
-la PCnet, NE2000: Hispa-DOS ya las lleva); y, encima de esto, las
-**actualizaciones** por la red y un navegador.
+la PCnet, NE2000: Hispa-DOS ya las lleva); y, encima de esto, un navegador.
+(Las **actualizaciones** por la red ya van: sección 13.)
 
 ## 14 bis. Hispa-Pentium se compila a sí mismo (CASTEL32)
 
@@ -2629,7 +2824,33 @@ apagar y reiniciar por el registro de la FADT); sin ACPI (`-no-acpi`: lo de
 antes); un sobremesa (sin pila, y apaga por ACPI); y que un programa
 cualquiera no puede usar las llamadas del servicio.
 
-Con todo, `pruebas.sh` tiene ahora **508 comprobaciones** (423 hasta la 0.7;
+**La 0.8: la firma, el núcleo nuevo y el CD** (la tarde del 20/11). En la
+parte 12 (`SOLO=paquetes`), PAQUETES se compila con una **clave de prueba**
+(`hpq.py clave`, en la carpeta de la prueba; su `clave.cas` al lado de una
+copia de `upaquete.cas`, que el compilador encuentra antes que el de
+`nucleo32`) y el catálogo de prueba va firmado: `hpq.py` firma y comprueba;
+`PAQUETES FIRMA` dice buena y mala; de Internet, firmado, se usa; cambiado
+una letra, o sin `CATALOGO.FIR`, no se usa nada (tampoco de la carpeta que
+trae la firma mala); un `base` que cambia `NUCLEO.BIN` deja `NUCLEO.ANT`,
+`GRUBENV` (1.024 octetos, `nuevo=1`) y la entrada del de antes en `GRUB.CFG`
+una sola vez, y pide reiniciar; y la ventana, con «Buscar novedades» y «(firma
+buena)». La **parte 16** (`SOLO=cd`, unos ocho minutos) hace el CD con
+`cd.sh` (El Torito sin emulación, menos de 650 MB) y, en QEMU como VirtualBox:
+arranca sin instalar en un `pc` con IDE, OHCI con su tableta y la e1000 (con
+la red); instala en el disco IDE y en el SATA de un `q35` (con el CD en AHCI)
+y los dos discos arrancan (el asistente); y en el del `q35`, con un servidor
+HTTP de aquí (`servidor_prueba.py` con RAIZ) y un catálogo firmado: el aviso
+de la bandeja al arrancar, «Verlas», «Actualizar todo» con un núcleo nuevo,
+«Reiniciar ahora», «El núcleo nuevo ha arrancado bien» (`nuevo=0`); y con un
+núcleo que se queda en `hlt`, reiniciar a mano: GRUB elige solo el de antes,
+el sistema lo dice y `GRUBENV` queda en `nuevo=4`.
+
+Con la firma, el núcleo nuevo y el CD, la pasada entera del 20/11 por la tarde (rama
+`pentium-dvd`, con CASTEL32 ya dentro) dio **541 bien, 0 mal**; tras los
+arreglos de la ventana y el paso a `actualiza.hispados.es`, `SOLO=08` (de la 11
+a la 14 y la 16) dio **156 bien, 0 mal**.
+
+Antes, `pruebas.sh` tenía **508 comprobaciones** (423 hasta la 0.7;
 de la 0.8, los paquetes, el USB en caliente, la red, apagar de verdad y la
 batería, y las del AHCI del ICH7). La memoria USB trae ahora **16 programas**
 como módulos (eran 9: PAQUETES y ACTUALIZ, RED, IPCONFIG, PING y DESCARGA, y
