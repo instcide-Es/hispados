@@ -63,7 +63,7 @@ VERSION_SISTEMA = '0.8'
 SISTEMA = [
     ('base', VERSION_SISTEMA, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
-        ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'),
+        ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
     ('bloc', VERSION_SISTEMA, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),

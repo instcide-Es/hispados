@@ -315,6 +315,16 @@ quien la haga, en `usb/prueba-bateria/LEEME.TXT`.
 - Con ACPICA dentro se puede hacer más: la tapa, el botón de encendido, la
   temperatura. No se ha hecho nada de eso.
 
+## En Hispa-Pentium
+
+El mismo núcleo de C (y los mismos objetos de `build/acpi/`) corre también en
+Hispa-Pentium, como programa del anillo 3: `ACPI.BIN` (`acpi/pentium/`), que
+además apaga el equipo (S5) y deja al núcleo reiniciar por la FADT. Lo cuenta
+[PENTIUM.md](PENTIUM.md), sección 11, «Apagar de verdad y la batería». Del
+código común solo cambia `nucleo.c`: `tarea_quieta()` (¿está la tarea entre
+lecturas?) y, con `-DHISPA_PENTIUM`, que la petición de `LL_INICIA` está en la
+memoria del propio programa.
+
 ## De quién es cada cosa
 
 `acpi/acpica/` es ACPICA R2025_04_04 de Intel (licencia triple; aquí, bajo

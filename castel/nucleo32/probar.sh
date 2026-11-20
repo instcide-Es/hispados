@@ -24,6 +24,8 @@
 # desenchufar en marcha); «:captura NOMBRE»
 # deja la pantalla en $CAPTURAS/NOMBRE.ppm (CAPTURAS: una carpeta; /tmp si no
 # se dice). La flecha empieza en el centro (PANTALLA=800x600 si no se dice).
+# «:monitor ORDEN» le da esa orden al monitor de QEMU (como «o /b 0x70 0x60»:
+# escribir en un puerto; con QEMU_MAS="-S", antes de arrancar, y «cont»).
 # «:texto NOMBRE» deja la pantalla de texto (sus 25 líneas) en
 # $CAPTURAS/NOMBRE.txt (para el programa que instala, que la pinta entera).
 # Con DISCO=imagen, esa imagen como disco duro IDE (el maestro del canal

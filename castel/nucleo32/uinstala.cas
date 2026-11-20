@@ -1059,7 +1059,7 @@ módulo Instala
         cfg_más("set default=0\n")
         cfg_más("menuentry \"Hispa-Pentium\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio escritura\n  set gfxpayload=$modo\n  boot\n}\n")
         cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n  multiboot /HISPA/NUCLEO.BIN ordenes escritura\n  set gfxpayload=text\n  boot\n}\n")
-        cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos, el USB ni la red (800 x 600)\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred\n")
+        cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos, el USB, la red ni ACPI (800 x 600)\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi\n")
         para i desde 1 hasta n_archivos hacer
             si destinos[i - 1] = A_HISPA y ((acaba_en(nombres[i - 1], "BIN") y no iguales(nombres[i - 1], "NUCLEO.BIN") y no iguales(nombres[i - 1], "INSTALAR.BIN") y no iguales(nombres[i - 1], "ASISTE.BIN")) o iguales(nombres[i - 1], "LEEME.TXT")) entonces
                 cfg_más("  module /HISPA/")

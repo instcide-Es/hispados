@@ -74,6 +74,9 @@
 ;       desde ella (no se quita)
 ;  131  las veces que han aparecido o desaparecido unidades (para saber si
 ;       hay que mirarlas otra vez; a las ventanas les llega EV_UNIDADES)
+;   150 a 154: apagar de verdad, reiniciar y la batería (energia.cas): las
+;       150 a 153 solo para el servicio de ACPI (ACPI.BIN); la 154, la
+;       batería, para todos
 ;
 ;  Los nombres de archivo que no empiezan por una barra se entienden desde la
 ;  carpeta de trabajo de la tarea (la hereda de quien la lanza); «.» y «..»
@@ -96,7 +99,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Red
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Red, Energia
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -754,6 +757,8 @@ módulo Usuario
                 ; vuelve a pedir
                 si r = SIN_RED y n = 90 y lanza_red() entonces r := atender_red(n, a, b, c) fin
                 devolver r
+            caso 150..154:
+                devolver atender_energía(n, a, b, c)
         fin
         devolver NO_VALE
     fin
@@ -902,18 +907,11 @@ módulo Usuario
                 si no escribir_sectores(a, pd.lba, pd.n, puntero(pd.datos)) entonces devolver MAL fin
                 devolver 0
             caso 66:
-                para k desde 0 hasta MAX_DISCOS - 1 hacer asentar(k) fin
+                vaciar_discos()
                 tomar_consola()
                 escribir("reiniciar\n")
                 soltar_consola()
-                ensamblador
-                    cli
-                    mov al, 0xFE
-                    out 0x64, al
-                .quieto:
-                    hlt
-                    jmp .quieto
-                fin
+                reiniciar_equipo()
             caso 67:
                 pon_reloj(a, b)
                 devolver 0

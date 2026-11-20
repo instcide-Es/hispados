@@ -23,7 +23,8 @@
 #   - los modos de vídeo que da la BIOS de ese equipo (la orden «videoinfo»
 #     de GRUB), para saber cuáles se pueden pedir;
 #   - el escritorio «como en la 0.5»: sin tocar el USB ni mirar los discos
-#     ni poner en marcha la red («sinusb sindisco sinred»), por si con lo
+#     ni poner en marcha la red ni el servicio de ACPI («sinusb sindisco
+#     sinred sinacpi»), por si con lo
 #     nuevo un equipo no arranca;
 #   - el intérprete de órdenes y la consola del núcleo, en modo texto (la
 #     consola enseña en la pantalla lo que encuentra: discos y USB);
@@ -41,6 +42,8 @@
 #     la carpeta \INSTALA de la memoria. Con ellos van la oficina
 #     (nucleo32/hvprun): HVPRUN.BIN y lo de \OFICINA, con
 #     CARPETAS.TXT, que le dice a INSTALAR lo que va a C:\OFICINA.
+#   - y el servicio de ACPI, ACPI.BIN (acpi/pentium/hacer.sh): apagar de
+#     verdad y la batería; con «registro», lo suyo queda en X:\ACPI.TXT.
 # Necesita ser root (losetup, mount), python3, nasm, parted, dosfstools y
 # grub-pc-bin (grub-install --target=i386-pc).
 set -eu
@@ -67,6 +70,11 @@ for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO upaquete:PA
   MODULOS="$MODULOS  module /$N.BIN $N.BIN
 "
 done
+# el servicio de ACPI (acpi/pentium/: apagar de verdad y la batería), un
+# programa más: va en la raíz, como módulo y, al instalar, a \HISPA
+bash $AQUI/../../acpi/pentium/hacer.sh $W/f/ACPI.BIN
+MODULOS="$MODULOS  module /ACPI.BIN ACPI.BIN
+"
 # lo que se instala en el disco: el núcleo (con el nombre que tendrá allí), los
 # programas, los textos del sistema instalado y el arranque del disco
 INSTALA="  module /ESCRIT8.BIN NUCLEO.BIN
@@ -113,6 +121,8 @@ EL ESCRITORIO
   del ratón abre un menú en casi todas partes.
   El Bloc de notas guarda con F2. Cortar, copiar y pegar: Ctrl+X, Ctrl+C y
   Ctrl+V (el portapapeles es de todo el sistema).
+  En los portátiles, la bandeja enseña la batería: con el puntero quieto
+  encima, lo que queda, si está enchufado y la salud de la batería.
 
 LA RED (por cable)
   Con el cable enchufado, el sistema pide la IP solo (DHCP) y el icono de la
@@ -145,6 +155,8 @@ LAS UNIDADES
 LA CARPETA \HISPA
   NUCLEO.BIN   el núcleo
   *.BIN        los programas
+  ACPI.BIN     el servicio de ACPI: apagar de verdad y la batería de los
+               portátiles (sin él, «Apagar» solo dice que ya se puede)
   HISPA.INI    los ajustes: usuario, equipo, teclado (es o us) y modo
   GRUB.CFG     el menú de arranque. La línea «set modo=» es la medida de la
                pantalla (por ejemplo 1024x768x32, o auto)
@@ -231,7 +243,7 @@ G
   entrada "Hispa-Pentium 0.8: el escritorio (1024 x 600)" ESCRIT6.BIN "escritorio $N"
   entrada "Hispa-Pentium 0.8: el escritorio (1366 x 768)" ESCRIT13.BIN "escritorio $N"
   entrada "Hispa-Pentium 0.8: el escritorio (1024 x 768)" ESCRIT10.BIN "escritorio $N"
-  entrada "Hispa-Pentium 0.8: el escritorio SIN tocar el USB, los discos ni la red (como la 0.5)" ESCRIT8.BIN "escritorio sindisco sinusb sinred"
+  entrada "Hispa-Pentium 0.8: el escritorio SIN tocar el USB, los discos, la red ni ACPI (como la 0.5)" ESCRIT8.BIN "escritorio sindisco sinusb sinred sinacpi"
   cat <<'G'
 menuentry "Ver los modos de video que da la BIOS de este equipo" {
   insmod videoinfo
