@@ -6,6 +6,8 @@
 ;  ULTIMA.TXT; «/» es INDEX.HTM). Con «-» como archivo, sale en la pantalla.
 ;  Sigue las redirecciones (hasta cinco), entiende «Content-Length» y los
 ;  trozos («Transfer-Encoding: chunked»). HTTPS, todavía no.
+;  Acaba con 0 si lo ha bajado; 4 si el servidor dice que no lo tiene (404);
+;  1 con cualquier otro fallo.
 ;  Con /AVANCE=ARCHIVO, cada 16 K reescribe en ARCHIVO una línea «llevados
 ;  total Bajando nombre» (total: 0 si el servidor no lo dice): así enseña la
 ;  barra la ventana de «Programas y actualizaciones» (PAQUETES se lo pide).
@@ -504,6 +506,8 @@ módulo Udescarg
         fin
         si código <> 200 entonces
             imprimir1("DESCARGAR: no se ha bajado nada (el servidor ha dicho %u).\n", código)
+            ; (404: no está en el servidor; PAQUETES lo dice en llano)
+            si código = 404 entonces devolver 4 fin
             devolver 1
         fin
         s := tics() - empezó

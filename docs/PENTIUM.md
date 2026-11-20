@@ -2076,6 +2076,14 @@ paquete (con lo que dice `Content-Length`): la ventana la lee y pinta la
 **barra** (sin total, una franja que corre). Botones: **Instalarlo**
 (o Actualizarlo), **Quitarlo**, **Actualizar todo** y **Buscar novedades**
 (F5). Abajo, lo que dice PAQUETES (sin lo que dice DESCARGA de cada archivo).
+**A la medida de la ventana**: al cambiarla de tamaño o maximizarla, la lista,
+los mensajes, la barra y los botones se recolocan a su ancho y su alto (la
+lista enseña más renglones), y lo que no cabe se corta con «...» (antes, con
+la ventana maximizada, las descripciones y los mensajes se salían de su
+recuadro: lo vio Carlos con la red de verdad, 20/11). Si el servidor aún no
+tiene nada publicado (el catálogo da 404: `DESCARGA` acaba entonces con el
+código 4), PAQUETES lo dice en llano: «Todavía no hay actualizaciones
+publicadas en el servidor.»
 
 ![La ventana, con lo nuevo de Internet](pentium/actualiza-ventana.png)
 

@@ -30,16 +30,14 @@ módulo UActual
 
     importar Llamadas, Textos32, Mem32, Formato
 
-    constante ANCHO = 600
-    constante ALTO = 420
+    constante ANCHO_INICIAL = 600
+    constante ALTO_INICIAL = 420
     constante MAX_PAQ = 64
     constante SALIDA = 16384
     constante CABEZA = 48
     constante LISTA_Y = 78                      ; el primer renglón
     constante RENGLÓN = 20
-    constante CABEN = 10                        ; los renglones que se ven
-    constante AVISO_Y = 296                     ; las líneas de lo que ha dicho PAQUETES
-    constante BOTÓN_Y = 368
+    ; (lo de abajo depende del alto de la ventana: medidas())
     constante BOTÓN_ALTO = 30
     constante PAPEL = 0xFFFFFF
     constante TINTA = 0x14294A
@@ -47,8 +45,6 @@ módulo UActual
     constante ELEGIDO = 0xCFE3FB
     constante VERDE = 0x1E8A4C
     constante TECLA_F5 = 0x13F
-    constante BARRA_Y = 318                     ; la barra del avance
-    constante BARRA_AN = 572
     constante RED_CONECTADA = 4                 ; (lo que da la llamada 97: redes.cas)
 
     variable v: nat32
@@ -56,10 +52,14 @@ módulo UActual
     variable nombres: arreglo [MAX_PAQ] de arreglo [12] de byte
     variable instalada: arreglo [MAX_PAQ] de arreglo [16] de byte
     variable disponible: arreglo [MAX_PAQ] de arreglo [16] de byte
-    variable descs: arreglo [MAX_PAQ] de arreglo [64] de byte
+    variable descs: arreglo [MAX_PAQ] de arreglo [128] de byte
     variable origen: arreglo [120] de byte
     variable elegido, primero: ent32
-    variable avisos: arreglo [3] de arreglo [76] de byte
+    variable avisos: arreglo [3] de arreglo [160] de byte
+    ; las medidas, a la de la ventana (cambia al cambiarla de tamaño o maximizarla)
+    variable w_an, w_al: ent32
+    variable caben: ent32                       ; los renglones que se ven
+    variable aviso_y, botón_y, barra_y, barra_an: ent32
     variable salida: arreglo [SALIDA + 1] de byte
     variable archivo: arreglo [64] de byte      ; C:\HISPA\PAQUETES\VENTANA.TXT
     variable fich_avance: arreglo [64] de byte  ; C:\HISPA\PAQUETES\AVANCE.TXT
@@ -111,7 +111,10 @@ módulo UActual
                 lee_avance()
                 pinta_avance()
                 mientras suceso(v, s, falso) hacer
-                    si s.clase = EV_TAMAÑO entonces pinta() fin
+                    si s.clase = EV_TAMAÑO entonces
+                        medidas(ent32(s.a), ent32(s.b))
+                        pinta()
+                    fin
                 fin
                 dormir(15)
                 c := acabada(t)
@@ -177,10 +180,10 @@ módulo UActual
                 p := p + 10
             fin
             ; (lo que dice DESCARGA de cada archivo, no: solo lo de PAQUETES)
-            si valor(p) <> '\r' y valor(p) <> '\n' y no empieza_por(p, "p|") y no empieza_por(p, "origen|") y no empieza_por(p, "Trayendo ") y no empieza_por(p, "Guardando ") y no empieza_por(p, "Hecho: ") y no empieza_por(p, "El servidor dice") entonces
+            si valor(p) <> '\r' y valor(p) <> '\n' y no empieza_por(p, "p|") y no empieza_por(p, "origen|") y no empieza_por(p, "Trayendo ") y no empieza_por(p, "Guardando ") y no empieza_por(p, "Hecho: ") y no empieza_por(p, "El servidor dice") y no empieza_por(p, "Conectando ") y no empieza_por(p, "DESCARGAR:") y no empieza_por(p, "Redirigido") entonces
                 Textos32.copiar(avisos[0], avisos[1])
                 Textos32.copiar(avisos[1], avisos[2])
-                trozo(p, 0, avisos[2], 76)
+                trozo(p, 0, avisos[2], 160)
                 ; (sin «paquetes: » delante: ya se sabe quién lo dice)
                 si empieza_por(avisos[2], "paquetes: ") entonces Textos32.copiar(avisos[2], dirección(avisos[2][10])) fin
             fin
@@ -211,7 +214,7 @@ módulo UActual
                 trozo(p, 1, nombres[n], 12)
                 trozo(p, 2, instalada[n], 16)
                 trozo(p, 3, disponible[n], 16)
-                trozo(p, 4, descs[n], 64)
+                trozo(p, 4, descs[n], 128)
                 n := n + 1
             fin
             p := siguiente_línea(p)
@@ -222,7 +225,7 @@ módulo UActual
         si elegido >= ent32(n) entonces elegido := ent32(n) - 1 fin
         si elegido < 0 entonces elegido := 0 fin
         si elegido < primero entonces primero := elegido fin
-        si elegido >= primero + CABEN entonces primero := elegido - CABEN + 1 fin
+        si elegido >= primero + caben entonces primero := elegido - caben + 1 fin
     fin
 
     ; ¿es la disponible más nueva que la instalada? (las dos, números con puntos)
@@ -251,11 +254,11 @@ módulo UActual
     ; -------------------------------------------------------------------------
     función botón(x: ent32, an: ent32, t: puntero a byte, activo: bool)
         variable c: nat32
-        redondeado(v, x, BOTÓN_Y, an, BOTÓN_ALTO, 5, 0x6F87A8, 0x6F87A8)
-        redondeado(v, x + 1, BOTÓN_Y + 1, an - 2, BOTÓN_ALTO - 2, 4, 0xFDFEFF, 0xD9E6F6)
+        redondeado(v, x, botón_y, an, BOTÓN_ALTO, 5, 0x6F87A8, 0x6F87A8)
+        redondeado(v, x + 1, botón_y + 1, an - 2, BOTÓN_ALTO - 2, 4, 0xFDFEFF, 0xD9E6F6)
         c := TINTA
         si no activo entonces c := 0xA0AEC2 fin
-        texto_negrita(v, x + (an - ent32(longitud(t)) * 8) div 2, BOTÓN_Y + 7, t, c)
+        texto_negrita(v, x + (an - ent32(longitud(t)) * 8) div 2, botón_y + 7, t, c)
     fin
 
     ; (dónde están: x y ancho)
@@ -268,13 +271,44 @@ módulo UActual
     constante B4_X = 422
     constante B4_AN = 164
 
+    ; las medidas de lo de dentro, a las de la ventana (como poco, las de al abrirla)
+    función medidas(an: ent32, al: ent32)
+        si an < ANCHO_INICIAL entonces an := ANCHO_INICIAL fin
+        si al < ALTO_INICIAL entonces al := ALTO_INICIAL fin
+        w_an := an
+        w_al := al
+        botón_y := al - 52
+        aviso_y := al - 124
+        barra_y := aviso_y + 22
+        barra_an := an - 28
+        caben := (aviso_y - 8 - LISTA_Y) div RENGLÓN
+        si elegido >= primero + caben entonces primero := elegido - caben + 1 fin
+    fin
+
+    ; un texto que no pasa de «máx» puntos de ancho: si no cabe, cortado y con «...»
+    función texto_en(x: ent32, yy: ent32, t: puntero a byte, máx: ent32, tinta: nat32, negrita: bool)
+        variable c: arreglo [200] de byte
+        variable n, k: ent32
+        n := máx div 8
+        si n < 4 entonces devolver fin
+        si n > 190 entonces n := 190 fin
+        k := ent32(longitud(t))
+        si k <= n entonces
+            Textos32.copiar(c, t)
+        sino
+            copiar_hasta(c, t, nat32(n - 2))
+            concatenar(c, "...")
+        fin
+        si negrita entonces texto_negrita(v, x, yy, c, tinta) sino texto(v, x, yy, c, tinta) fin
+    fin
+
     función pinta()
         variable i, yy: ent32
         variable t: arreglo [40] de byte
         variable nuevo: bool
         ; la cabeza
-        degradado(v, 0, 0, ANCHO, CABEZA, 0xF4F8FE, 0xD3E3F8)
-        rectángulo(v, 0, CABEZA - 1, ANCHO, 1, 0x9DBBE4)
+        degradado(v, 0, 0, w_an, CABEZA, 0xF4F8FE, 0xD3E3F8)
+        rectángulo(v, 0, CABEZA - 1, w_an, 1, 0x9DBBE4)
         ; (una caja: un paquete)
         redondeado(v, 14, 10, 28, 26, 3, 0x9A6A1E, 0x9A6A1E)
         redondeado(v, 15, 11, 26, 24, 2, 0xF2C46C, 0xD69A3A)
@@ -283,23 +317,27 @@ módulo UActual
         si origen[0] <> 0 entonces
             Textos32.copiar(t, "Los paquetes, de ")
             texto(v, 52, 26, t, SUAVE)
-            texto(v, 52 + 17 * 8, 26, origen, SUAVE)
-            si firmado entonces texto_negrita(v, 52 + (17 + ent32(longitud(origen)) + 1) * 8, 26, "(firma buena)", VERDE) fin
+            si firmado entonces
+                texto_en(52 + 17 * 8, 26, origen, w_an - 52 - 17 * 8 - 126, SUAVE, falso)
+                texto_negrita(v, w_an - 118, 26, "(firma buena)", VERDE)
+            sino
+                texto_en(52 + 17 * 8, 26, origen, w_an - 52 - 17 * 8 - 14, SUAVE, falso)
+            fin
         fin
         ; la lista
-        rectángulo(v, 0, CABEZA, ANCHO, AVISO_Y - CABEZA - 8, PAPEL)
+        rectángulo(v, 0, CABEZA, w_an, aviso_y - CABEZA - 8, PAPEL)
         texto_negrita(v, 14, CABEZA + 6, "Programa", SUAVE)
         texto_negrita(v, 110, CABEZA + 6, "Instalado", SUAVE)
         texto_negrita(v, 206, CABEZA + 6, "Hay", SUAVE)
         texto_negrita(v, 322, CABEZA + 6, "Qué es", SUAVE)
-        rectángulo(v, 10, LISTA_Y - 3, ANCHO - 20, 1, 0xC9D8EC)
+        rectángulo(v, 10, LISTA_Y - 3, w_an - 20, 1, 0xC9D8EC)
         si n = 0 entonces
             texto(v, 14, LISTA_Y + 4, "No hay ningún paquete instalado ni catálogo a la vista.", SUAVE)
         fin
         i := primero
-        mientras i < ent32(n) y i < primero + CABEN hacer
+        mientras i < ent32(n) y i < primero + caben hacer
             yy := LISTA_Y + (i - primero) * RENGLÓN
-            si i = elegido entonces rectángulo(v, 8, yy, ANCHO - 16, RENGLÓN, ELEGIDO) fin
+            si i = elegido entonces rectángulo(v, 8, yy, w_an - 16, RENGLÓN, ELEGIDO) fin
             texto_negrita(v, 14, yy + 2, nombres[i], TINTA)
             si instalada[i][0] = 0 entonces
                 texto(v, 110, yy + 2, "(no)", SUAVE)
@@ -314,12 +352,12 @@ módulo UActual
             sino
                 texto(v, 206, yy + 2, disponible[i], TINTA)
             fin
-            texto(v, 322, yy + 2, descs[i], TINTA)
+            texto_en(322, yy + 2, descs[i], w_an - 322 - 12, TINTA, falso)
             i := i + 1
         fin
         ; lo que ha dicho PAQUETES
-        rectángulo(v, 0, AVISO_Y - 8, ANCHO, ALTO - AVISO_Y + 8, 0xEEF3FA)
-        rectángulo(v, 0, AVISO_Y - 8, ANCHO, 1, 0x9DBBE4)
+        rectángulo(v, 0, aviso_y - 8, w_an, w_al - aviso_y + 8, 0xEEF3FA)
+        rectángulo(v, 0, aviso_y - 8, w_an, 1, 0x9DBBE4)
         si ocupado entonces
             pinta_avance()
             botón(B1_X, B1_AN, "Instalarlo", falso)
@@ -328,7 +366,7 @@ módulo UActual
             botón(B4_X, B4_AN, "Buscar novedades", falso)
             devolver
         fin
-        para i desde 0 hasta 2 hacer texto(v, 14, AVISO_Y + i * 18, avisos[i], TINTA) fin
+        para i desde 0 hasta 2 hacer texto_en(14, aviso_y + i * 18, avisos[i], w_an - 28, TINTA, falso) fin
         si reiniciar_ entonces
             ; el núcleo nuevo: reiniciar ahora o más tarde
             botón(B1_X, B1_AN + B2_AN + 8, "Reiniciar ahora", cierto)
@@ -379,7 +417,7 @@ módulo UActual
         variable an, x, p: ent32
         variable t: arreglo [120] de byte
         variable d: arreglo [3] de nat32
-        rectángulo(v, 0, AVISO_Y - 7, ANCHO, BOTÓN_Y - AVISO_Y, 0xEEF3FA)
+        rectángulo(v, 0, aviso_y - 7, w_an, botón_y - aviso_y, 0xEEF3FA)
         Textos32.copiar(t, av_texto)
         si av_total > 0 y empieza_por(av_texto, "Bajando") entonces
             d[0] := nat32(dirección(av_texto[0]))
@@ -393,17 +431,17 @@ módulo UActual
             si d[1] > d[2] entonces d[1] := d[2] fin
             formatear(t, 120, "%s (%u de %u)", d)
         fin
-        texto(v, 14, AVISO_Y, t, TINTA)
-        redondeado(v, 14, BARRA_Y, BARRA_AN, 18, 4, 0x8FA6C4, 0x8FA6C4)
-        redondeado(v, 15, BARRA_Y + 1, BARRA_AN - 2, 16, 3, 0xFFFFFF, 0xE9EFF7)
+        texto_en(14, aviso_y, t, w_an - 28, TINTA, falso)
+        redondeado(v, 14, barra_y, barra_an, 18, 4, 0x8FA6C4, 0x8FA6C4)
+        redondeado(v, 15, barra_y + 1, barra_an - 2, 16, 3, 0xFFFFFF, 0xE9EFF7)
         si av_total > 0 entonces
             si av_hecho > av_total entonces av_hecho := av_total fin
-            an := ent32(((BARRA_AN - 4) * (av_hecho div 16)) div ((av_total div 16) + 1))
-            si an > 4 entonces degradado(v, 16, BARRA_Y + 2, an, 14, 0x7CC77A, 0x2E9A3C) fin
+            an := ent32(((barra_an - 4) * (av_hecho div 16)) div ((av_total div 16) + 1))
+            si an > 4 entonces degradado(v, 16, barra_y + 2, an, 14, 0x7CC77A, 0x2E9A3C) fin
         sino
             p := ent32((tics() div 3) mod 100)
-            x := 16 + ((BARRA_AN - 4 - 120) * p) div 100
-            degradado(v, x, BARRA_Y + 2, 120, 14, 0x9CD0FF, 0x3C8BE0)
+            x := 16 + ((barra_an - 4 - 120) * p) div 100
+            degradado(v, x, barra_y + 2, 120, 14, 0x9CD0FF, 0x3C8BE0)
         fin
     fin
 
@@ -432,7 +470,7 @@ módulo UActual
     fin
 
     función mira_sin_avisos()
-        variable a: arreglo [3] de arreglo [76] de byte
+        variable a: arreglo [3] de arreglo [160] de byte
         variable i: nat32
         para i desde 0 hasta 2 hacer Textos32.copiar(a[i], avisos[i]) fin
         mira()
@@ -461,7 +499,7 @@ módulo UActual
         si i < 0 o i >= ent32(n) entonces devolver fin
         elegido := i
         si elegido < primero entonces primero := elegido fin
-        si elegido >= primero + CABEN entonces primero := elegido - CABEN + 1 fin
+        si elegido >= primero + caben entonces primero := elegido - caben + 1 fin
         pinta()
     fin
 
@@ -479,7 +517,7 @@ módulo UActual
     fin
 
     función clic(x: ent32, yy: ent32)
-        si yy >= BOTÓN_Y y yy < BOTÓN_Y + BOTÓN_ALTO y reiniciar_ entonces
+        si yy >= botón_y y yy < botón_y + BOTÓN_ALTO y reiniciar_ entonces
             si x >= B1_X y x < B2_X + B2_AN entonces
                 Textos32.copiar(avisos[2], "Reiniciando el equipo...")
                 pinta()
@@ -492,14 +530,14 @@ módulo UActual
             fin
             devolver
         fin
-        si yy >= BOTÓN_Y y yy < BOTÓN_Y + BOTÓN_ALTO entonces
+        si yy >= botón_y y yy < botón_y + BOTÓN_ALTO entonces
             si x >= B1_X y x < B1_X + B1_AN entonces instala_elegido() fin
             si x >= B2_X y x < B2_X + B2_AN entonces quita_elegido() fin
             si x >= B3_X y x < B3_X + B3_AN entonces haz("actualiza", falso) fin
             si x >= B4_X y x < B4_X + B4_AN entonces novedades() fin
             devolver
         fin
-        si yy >= LISTA_Y y yy < LISTA_Y + CABEN * RENGLÓN entonces
+        si yy >= LISTA_Y y yy < LISTA_Y + caben * RENGLÓN entonces
             elige(primero + (yy - LISTA_Y) div RENGLÓN)
         fin
     fin
@@ -665,7 +703,8 @@ módulo UActual
         concatenar(fich_avance, ":\\HISPA\\PAQUETES\\AVANCE.TXT")
         argumentos(a, 64)
         si buscar(a, "/BANDEJA") <> nulo o buscar(a, "/bandeja") <> nulo entonces devolver bandeja() fin
-        v := ventana("Programas y actualizaciones", ANCHO, ALTO)
+        medidas(ANCHO_INICIAL, ALTO_INICIAL)
+        v := ventana("Programas y actualizaciones", ANCHO_INICIAL, ALTO_INICIAL)
         si es_error(v) entonces
             escribir("actualiz: no hay escritorio (o no hay memoria para la ventana)\n")
             devolver 1
@@ -694,6 +733,7 @@ módulo UActual
             sino si s.clase = EV_RATÓN_BAJA entonces
                 clic(ent32(s.a), ent32(s.b))
             sino si s.clase = EV_TAMAÑO entonces
+                medidas(ent32(s.a), ent32(s.b))
                 pinta()
             sino si s.clase = EV_CERRAR entonces
                 devolver 0

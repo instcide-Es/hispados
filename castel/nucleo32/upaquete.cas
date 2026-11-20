@@ -670,6 +670,15 @@ módulo UPaquetes
             devolver falso
         fin
         r := esperar(t)
+        si r = 4 entonces
+            ; (el servidor dice que no lo tiene: 404)
+            si acaba_en(url, "CATALOGO.TXT") entonces
+                escribir("Todavía no hay actualizaciones publicadas en el servidor.\n")
+            sino
+                imprimir1("paquetes: el servidor no tiene %s (¿se está publicando una versión nueva? Pruebe más tarde)\n", pt(url))
+            fin
+            devolver falso
+        fin
         si r <> 0 o no existe(destino) entonces
             imprimir2("paquetes: no se ha podido traer %s (DESCARGA acaba con el código %u)\n", pt(url), r)
             devolver falso

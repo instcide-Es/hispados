@@ -2435,18 +2435,20 @@ printf '[hispa]\r\nusuario=Ana\r\nequipo=PRUEBA\r\nteclado=es\r\nmodo=800x600\r\
 mcopy -i $Q/s8.img $F/ACTUALIZ.BIN $Q/HISPA.INI ::HISPA/
 CAPTURAS=$G ESCRIBE=1 SATA=$Q/s8.img MEMORIA=64 MODULOS= ARRANQUE=escritorio QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/usb.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
   $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":clic 40 585" ":captura pq0" ":clic 250 466" ":pausa 4" ":captura pq1" ":clic 200 236" ":clic 199 471" ":pausa 5" ":captura pq2" \
-  ":clic 200 216" ":clic 310 471" ":pausa 4" ":captura pq3" ":clic 600 471" ":pausa 4" ":captura pq4" > $Q/ventana.sal 2>&1
+  ":clic 200 216" ":clic 310 471" ":pausa 4" ":captura pq3" ":clic 600 471" ":pausa 4" ":captura pq4" ":clic 661 71" ":pausa 3" ":captura pq5" > $Q/ventana.sal 2>&1
 miracap "el menú Inicio trae «Actualizar» (encima de Configuración): abre la ventana «Programas y actualizaciones»" pq0 negrita 210 452 214 456 Actualizar
 miracap "la ventana: lo instalado (base 0.7) y lo del catálogo de la memoria USB, con su firma buena (choque, letras, saludo: «(no)» instalados), cada uno con su versión y lo que es; y el botón «Buscar novedades»" pq1 \
   negrita 150 90 154 94 "Programas y actualizaciones" texto 150 109 154 113 'Los paquetes, de X:\PAQUETES\' negrita 112 163 116 167 base \
   texto 208 183 212 187 "(no)" negrita 112 223 116 227 saludo texto 304 223 308 227 "2.0" negrita 132 458 136 462 Actualizarlo \
-  negrita 536 456 540 462 "Buscar novedades" negrita 388 107 394 113 "(firma buena)"
+  negrita 536 456 540 462 "Buscar novedades" negrita 576 107 584 113 "(firma buena)"
 miracap "con el botón «Instalarlo», saludo (y antes letras, que lo necesita): lo que dice PAQUETES sale abajo" pq2 \
   texto 112 397 116 401 "  instalado saludo 2.0" texto 112 415 116 419 "Hecho." negrita 112 183 116 187 letras texto 208 183 212 187 "1.1"
 miracap "y «Quitarlo», con saludo elegido (sigue elegido aunque la lista cambie de orden): se quita" pq3 \
   texto 112 397 116 401 "  quitado saludo 2.0" negrita 112 203 116 207 choque
 miracap "«Buscar novedades» trae el catálogo otra vez (y su firma, buena)" pq4 \
   texto 112 415 116 419 "La firma del catálogo es buena" negrita 112 203 116 207 choque
+miracap "maximizada, la ventana se pone a su medida: la lista, los mensajes y los botones, al ancho y al alto de la pantalla, y lo que no cabe, cortado" pq5 \
+  negrita 52 32 60 38 "Programas y actualizaciones" negrita 660 50 700 58 "(firma buena)" negrita 36 512 44 522 Actualizarlo
 if sano $Q/s8.img && sin_restos $Q/s8.img && [ "$(mdir -/ -b -i $Q/s8.img ::HISPA/PAQUETES 2> /dev/null | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI ::/HISPA/PAQUETES/LETRAS.PQI " ]; then
   ok "lo hecho desde la ventana, desde fuera: el disco sano, letras instalado, saludo quitado y sin restos (tampoco VENTANA.TXT)"
 else ko "lo hecho desde la ventana no queda bien en el disco:"; lista_de $Q/s8.img | sed 's/^/        /' | head -12; fi
@@ -2465,15 +2467,16 @@ cp $F/paq/* $Q/u2/; sed -i 's/Unas letras, mejores/Unas letras, peores/' $Q/u2/C
 cp $F/paq/* $Q/u3/; rm $Q/u3/CATALOGO.FIR
 for u in 2 3; do mkfs.fat -F 16 -n MEMORIA -C $Q/usb$u.img 16384 > /dev/null && mmd -i $Q/usb$u.img ::PAQUETES && mcopy -i $Q/usb$u.img $Q/u$u/* ::PAQUETES/; done
 cp $Q/sis.img $Q/s9.img
-paq $Q/s9.img firma 'paquetes firma x:\paquetes\catalogo.txt' ":pausa 3" 'paquetes firma x:\paquetes\letras1.hpq' "paquetes catalogo /desde=http://prueba/" ":pausa 3"
+paq $Q/s9.img firma 'paquetes firma x:\paquetes\catalogo.txt' ":pausa 3" 'paquetes firma x:\paquetes\letras1.hpq' "paquetes catalogo /desde=http://prueba/" ":pausa 3" "paquetes catalogo /desde=http://prueba/nada/" ":pausa 2"
 USB_IMG=$Q/usb2.img paq $Q/s9.img firma2 'paquetes firma x:\paquetes\catalogo.txt' ":pausa 3" "paquetes instala letras /desde=http://prueba/" ":pausa 3" "paquetes catalogo" ":pausa 3"
 USB_IMG=$Q/usb3.img paq $Q/s9.img firma3 "paquetes instala letras /desde=http://prueba/" ":pausa 2" "paquetes catalogo" ":pausa 2"
 cat $Q/firma2.sal $Q/firma3.sal >> $Q/firma.sal; S=$Q/firma.sal
-mira "la firma (Ed25519, en Castel): PAQUETES FIRMA dice si es buena; el catálogo de Internet firmado se usa (y lo dice); cambiado una letra, o sin su CATALOGO.FIR, no se usa nada de él; de una carpeta, sin firma, sí" \
+mira "la firma (Ed25519, en Castel): PAQUETES FIRMA dice si es buena; el catálogo de Internet firmado se usa (y lo dice); cambiado una letra, o sin su CATALOGO.FIR, no se usa nada de él; de una carpeta, sin firma, sí; y si el servidor aún no tiene catálogo (404), lo dice en llano" \
   "^La firma de X:.paquetes.catalogo\.txt es buena (la clave [0-9a-f]\{16\}; [0-9]* tics)\.$" "^paquetes: no está su firma (X:.paquetes.letras1\.FIR), o no se entiende$" \
   "^La firma del catálogo es buena (la clave [0-9a-f]\{16\}; [0-9]* tics)\.$" "^  letras    1\.1  *Unas letras, mejores$" \
   "^La firma de X:.paquetes.catalogo\.txt NO es buena\.$" "^paquetes: la firma del catálogo NO es buena: no se usa nada de él$" \
-  "^paquetes: el catálogo de Internet no trae su firma (CATALOGO.FIR): no se usa$" "^  letras    1\.1  *Unas letras, mejores$"
+  "^paquetes: el catálogo de Internet no trae su firma (CATALOGO.FIR): no se usa$" "^  letras    1\.1  *Unas letras, mejores$" \
+  "^Todavía no hay actualizaciones publicadas en el servidor\.$"
 if [ "$(grep -c '^paquetes: la firma del catálogo NO es buena' $S)" = 2 ] && ! grep -q '^  instalado' $S && sano $Q/s9.img && [ "$(mdir -/ -b -i $Q/s9.img ::HISPA/PAQUETES 2> /dev/null | grep -v BAJADAS | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI " ]; then
   ok "y con la firma mala, nada: ni de Internet ni de la carpeta (que trae CATALOGO.FIR); el disco sano, con lo de antes"
 else ko "con la firma mala se ha usado algo:"; lista_de $Q/s9.img | sed 's/^/        /' | head -10; fi
