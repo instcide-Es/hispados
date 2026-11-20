@@ -97,7 +97,7 @@ static void limita(Forma *f) {
 }
 
 bool redondo_caja(int x0, int y0, int x1, int y1, const int radio[4], colour fondo, bool con_fondo,
-                  const int ancho[4], colour borde, bool con_borde) {
+                  const int ancho[4], colour borde, bool con_borde, int alfa_fondo, int alfa_borde) {
   Forma fuera, dentro;
   int x, y, k, cx0, cx1, cy0, cy1;
   if (!prepara() || x1 <= x0 || y1 <= y0) return false;
@@ -127,13 +127,13 @@ bool redondo_caja(int x0, int y0, int x1, int y1, const int radio[4], colour fon
         a_fuera = 256;
         a_dentro = (x >= dentro.x0 && x < dentro.x1 && y >= dentro.y0 && y < dentro.y1) ? 256 : 0;
       }
-      if (con_fondo) mezcla(x, y, fondo, a_dentro);
+      if (con_fondo) mezcla(x, y, fondo, a_dentro * alfa_fondo >> 8);
       if (con_borde) {
         /* el borde: lo de fuera que no es de dentro (sobre el fondo) */
         int a = a_fuera - a_dentro;
-        if (a > 0) mezcla(x, y, borde, a);
+        if (a > 0) mezcla(x, y, borde, a * alfa_borde >> 8);
       } else if (con_fondo && a_fuera > a_dentro) {
-        mezcla(x, y, fondo, a_fuera - a_dentro);
+        mezcla(x, y, fondo, (a_fuera - a_dentro) * alfa_fondo >> 8);
       }
     }
   }

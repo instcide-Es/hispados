@@ -989,6 +989,22 @@ static void layout_minmax_block(
 			max = html_get_box_tree(block->object)->max_width;
 		} else {
 			min = max = content_get_width(block->object);
+#ifdef nshispa
+			/* [HISPA] con el alto dado y el ancho «auto», el ancho
+			 * en proporción (el logotipo de clicgest.es: height:
+			 * 30px; width: auto, salía con su ancho de origen) */
+			if (wtype == CSS_WIDTH_AUTO && htype == CSS_HEIGHT_SET &&
+					hunit != CSS_UNIT_PCT &&
+					content_get_height(block->object) > 0) {
+				int h = FIXTOINT(css_unit_len2device_px(
+						block->style,
+						&content->unit_len_ctx,
+						height, hunit));
+				min = max = content_get_width(block->object) *
+						h / content_get_height(
+						block->object);
+			}
+#endif
 		}
 
 		block->flags |= HAS_HEIGHT;
@@ -2835,7 +2851,8 @@ static void hispa_alinea_linea(const html_content *content, struct box *first,
 		value = 0;
 		unit = CSS_UNIT_PX;
 		va = css_computed_vertical_align(d->style, &value, &unit);
-		if (d->type == BOX_INLINE_BLOCK &&
+		if ((d->type == BOX_INLINE_BLOCK ||
+				d->type == BOX_INLINE_FLEX) &&
 				css_computed_position(d->style) !=
 				CSS_POSITION_ABSOLUTE &&
 				css_computed_position(d->style) !=
@@ -2881,7 +2898,8 @@ static void hispa_alinea_linea(const html_content *content, struct box *first,
 		int arriba, h;
 		if (d->style == NULL)
 			continue;
-		if (d->type == BOX_INLINE_BLOCK &&
+		if ((d->type == BOX_INLINE_BLOCK ||
+				d->type == BOX_INLINE_FLEX) &&
 				css_computed_position(d->style) !=
 				CSS_POSITION_ABSOLUTE &&
 				css_computed_position(d->style) !=
@@ -3626,7 +3644,10 @@ layout_line(struct box *first,
 				used_height = d->height;
 			}
 		} else if ((d->type == BOX_INLINE) ||
-				d->type == BOX_INLINE_BLOCK) {
+				d->type == BOX_INLINE_BLOCK ||
+				/* [HISPA] y los inline-flex (la línea
+				 * se quedaba sin alto) */
+				d->type == BOX_INLINE_FLEX) {
 			/* replaced inlines and inline-blocks */
 			d->x += x0;
 			d->y = *y + d->border[TOP].width + d->margin[TOP];

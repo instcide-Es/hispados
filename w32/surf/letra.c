@@ -40,7 +40,7 @@ static const char *const t_archivo[T_N] = {
 #define WEB_N 16
 #define WEB_MAX (2560u << 10)
 #define T_TOT (T_N + WEB_N)
-#define NEGRITA 0x80          /* (en el número de tipo: negrita hecha aquí) */
+#define NEGRITA 0xC0          /* (en el número de tipo: negrita hecha aquí, de 1 a 3 puntos más ancha) */
 static struct {
   unsigned char *datos; stbtt_fontinfo f; int bien; int asc, desc, salto;
   char familia[48]; int peso, cursiva, peso_real, propio; size_t tam;
@@ -103,6 +103,7 @@ void letra_fin(void) {
 
 /* el tipo para un estilo de NetSurf (si no está, el más parecido que haya) */
 /* la letra de la web que pide el estilo (por su familia), o -1 */
+static int px_de(const plot_font_style_t *s);
 static int tipo_web(const plot_font_style_t *s) {
   int cursiva = (s->flags & (FONTF_ITALIC | FONTF_OBLIQUE)) != 0, k, mejor = -1, d_mejor = 1 << 30;
   lwc_string *const *f;
@@ -121,7 +122,13 @@ static int tipo_web(const plot_font_style_t *s) {
   }
   if (mejor < 0) return -1;
   /* sin negrita de verdad (una letra variable o solo la normal): se hace */
-  if (s->weight >= 600 && tipo[mejor].peso_real < 550) mejor |= NEGRITA;
+  if (s->weight >= 600 && tipo[mejor].peso_real < 550) {
+    /* tanto más gruesa cuanto más grande y más pesada (a 16 px, 1 punto) */
+    int e = (px_de(s) * (s->weight - tipo[mejor].peso_real) + 2000) / 4000;
+    if (e < 1) e = 1;
+    if (e > 3) e = 3;
+    mejor |= e << 6;
+  }
   return mejor;
 }
 
@@ -155,7 +162,7 @@ static Glifo *glifo_de(int t, int px, uint32_t c) {
   Glifo *g = &glifo[h];
   stbtt_fontinfo *f;
   float esc;
-  int av, lsb, i, x0, y0, x1, y1, neg = t & NEGRITA, tt = t, ti = t & ~NEGRITA;
+  int av, lsb, i, x0, y0, x1, y1, neg = (t & NEGRITA) >> 6, tt = t, ti = t & ~NEGRITA;
   if (g->usada && g->letra == c && g->px == px && g->t == t) return g;
   if (!tipo[ti].bien) return NULL;
   f = &tipo[ti].f;
@@ -173,24 +180,25 @@ static Glifo *glifo_de(int t, int px, uint32_t c) {
   g->avance = (int)(av * esc * 65536.0f + 0.5f);
   stbtt_GetGlyphBitmapBox(f, i, esc, esc, &x0, &y0, &x1, &y1);
   if (x1 > x0 && y1 > y0 && c > ' ') {
-    int w = x1 - x0 + (neg ? 1 : 0), hh = y1 - y0;
+    int w = x1 - x0 + neg, hh = y1 - y0;
     g->gris = malloc(w * hh);
     if (g->gris) {
       stbtt_MakeGlyphBitmap(f, g->gris, x1 - x0, hh, w, esc, esc, i);
       if (neg) {
-        /* negrita hecha aquí: cada punto, con el de su izquierda */
-        int yy, xx;
+        /* negrita hecha aquí: cada punto, con los «neg» de su izquierda */
+        int yy, xx, k;
         for (yy = 0; yy < hh; yy++) {
           unsigned char *r = g->gris + yy * w;
-          r[w - 1] = 0;
-          for (xx = w - 1; xx > 0; xx--) if (r[xx - 1] > r[xx]) r[xx] = r[xx - 1];
+          for (xx = w - neg; xx < w; xx++) r[xx] = 0;
+          for (k = 0; k < neg; k++)
+            for (xx = w - 1; xx > 0; xx--) if (r[xx - 1] > r[xx]) r[xx] = r[xx - 1];
         }
       }
       g->x0 = x0; g->y0 = y0; g->w = w; g->h = hh;
       gris_total += g->w * g->h;
     }
   }
-  if (neg && c > ' ') g->avance += 65536;
+  if (neg && c > ' ') g->avance += neg * 65536;
   /* si la memoria de los dibujos se llena, se vacía entera (se rehace sola) */
   if (gris_total > GRIS_MAX) {
     int k;

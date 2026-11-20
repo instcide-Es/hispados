@@ -895,23 +895,33 @@ static void hispa_redondo(const html_content *html, struct box *box,
 		}
 	}
 
-	if (!redondo)
-		return;
-
-	/* el fondo (de color; con imagen, el de NetSurf) */
+	/* el fondo (de color; con imagen, el de NetSurf); con transparencia
+	 * (rgba(...)), también sin esquinas redondas: NetSurf lo pinta opaco */
 	{
 		css_color bg;
 		bool con_fondo = false, con_borde = true;
 		colour fondo = 0, borde = 0;
+		int alfa_fondo = 256, alfa_borde = 256;
 		if (html_redraw_find_bg_box(box) == box &&
 				box->background == NULL) {
 			css_computed_background_color(box->style, &bg);
 			if (!nscss_color_is_transparent(bg)) {
 				con_fondo = true;
 				fondo = nscss_color_to_ns(bg);
+				alfa_fondo = (int)((bg >> 24) * 256 / 255);
 			}
 		} else if (html_redraw_find_bg_box(box) != NULL) {
 			return;
+		}
+		if (box->border[TOP].width > 0 &&
+				(box->border[TOP].c >> 24) < 0xff)
+			alfa_borde = (int)((box->border[TOP].c >> 24) * 256 / 255);
+		if (!redondo && alfa_fondo == 256 && alfa_borde == 256)
+			return;
+		if (!redondo) {
+			/* (sin esquinas: el borde con transparencia, de NetSurf) */
+			for (k = 0; k < 4; k++)
+				radio[k] = 0;
 		}
 		/* el borde: liso, del mismo color en los cuatro lados */
 		for (k = 0; k < 4; k++) {
@@ -941,7 +951,7 @@ static void hispa_redondo(const html_content *html, struct box *box,
 		}
 		if (knockout_plot_hispa_vacia(ctx) &&
 				redondo_caja(x0, y0, x1, y1, radio, fondo, con_fondo,
-				ancho, borde, con_borde)) {
+				ancho, borde, con_borde, alfa_fondo, alfa_borde)) {
 			*fondo_hecho = true;
 			*bordes_hechos = con_borde;
 			if (con_fondo)
@@ -990,7 +1000,7 @@ static bool hispa_casilla(const html_content *html, struct box *box,
 	}
 	if (!knockout_plot_hispa_vacia(ctx) ||
 			!redondo_caja(x0, y0, x1, y1, radio, fondo, true, ancho,
-			borde, ancho[TOP] > 0))
+			borde, ancho[TOP] > 0, 256, 256))
 		return false;
 	if (!box->gadget->selected)
 		return true;
