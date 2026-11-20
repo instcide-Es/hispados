@@ -886,12 +886,6 @@ módulo Tipos
         fin
         i := at_interna(nm)
         si plano entonces
-            si i = I_LEER_BYTE o i = I_LEER_PALABRA o i = I_PONER_BYTE o i = I_PONER_PALABRA entonces
-                m("en 32 bits no hay memoria lejana: ")
-                m_at(nm)
-                m("() no está (la memoria es plana: se usa un puntero, como puntero(0xB8000))")
-                falla(nlin(e), ncol(e))
-            fin
             si i = I_INTERRUPCION o (i >= I_ACARREO y i <= I_REG_ES) entonces
                 m_at(nm)
                 m("() es del modo real (BIOS y DOS): en 32 bits no está (se usa un bloque «ensamblador»)")

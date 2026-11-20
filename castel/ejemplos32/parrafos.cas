@@ -1,0 +1,36 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; parrafos.cas - la memoria «por párrafos» en 32 bits (CASTEL32.md §5):
+; leer_byte(p, d) es el octeto de la dirección p * 16 + d, como en el modo
+; real, pero con los dos números de 32 bits. Lo usan los programas que vienen
+; de 16 bits (el compilador CASTEL32 guarda así sus tablas).
+; código de salida: 42
+módulo Parrafos
+    modelo núcleo
+
+    variable zona: arreglo [600] de byte
+
+    función principal(): byte
+        variable p, i, suma: nat32
+        variable antes: nat16
+        ; la memoria de la pantalla de texto, como en el modo real: B800:0000
+        ; (la primera letra, aún en blanco: un espacio gris sobre negro)
+        antes := leer_palabra(0xB800, 0)
+        ; un párrafo de la zona (redondeado hacia arriba)
+        p := (nat32(dirección(zona)) + 15) >> 4
+        para i desde 0 hasta 299 hacer
+            poner_byte(p, i, byte(i * 7))
+        fin
+        poner_palabra(p, 300, 0xBEEF)
+        poner_palabra(p + 19, 2, 1981)          ; el párrafo 19 más allá: p * 16 + 306
+        suma := 0
+        para i desde 0 hasta 299 hacer
+            suma := suma + leer_byte(p, i)
+        fin
+        escribir("pantalla: ", antes, "\n")
+        escribir("suma: ", suma, "\n")
+        escribir("palabras: ", leer_palabra(p, 300), " ", leer_palabra(p, 306), "\n")
+        escribir("la misma, de otra forma: ", leer_palabra(p + 18, 18), "\n")
+        escribir("y por el puntero: ", zona[(p << 4) - nat32(dirección(zona)) + 3], "\n")
+        devolver 42
+    fin
+fin Parrafos.

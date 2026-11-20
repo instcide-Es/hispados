@@ -1798,9 +1798,6 @@ class Generador:
         nm = e.nombre
         if self.es_var(nm):
             self.error(f"«{nm}» es una variable, no una función", e.pos)
-        if self.plano and nm in ('leer_byte', 'leer_palabra', 'poner_byte', 'poner_palabra'):
-            self.error(f"en 32 bits no hay memoria lejana: {nm}() no está (la memoria es plana:"
-                       " se usa un puntero, como puntero(0xB8000))", e.pos)
         if self.plano and (nm == 'interrupción' or nm in SALIDAS_INT):
             self.error(f"{nm}() es del modo real (BIOS y DOS): en 32 bits no está"
                        " (se usa un bloque «ensamblador»)", e.pos)
@@ -4106,6 +4103,28 @@ class Generador32(Generador):
             self.dos(args[1], args[0])          # dato -> EAX, puerto -> ECX
             self.em('mov edx, ecx')
             self.em('out dx, al')
+            return
+        # la memoria «por párrafos» (CASTEL32.md §5): el octeto (o la palabra)
+        # de la dirección párrafo * 16 + desplazamiento, con los dos de 32 bits
+        if nm in ('leer_byte', 'leer_palabra', 'poner_byte', 'poner_palabra'):
+            tt = 'byte' if nm in ('leer_byte', 'poner_byte') else 'word'
+            c = self.const(args[1])
+            if c is not None and 0 <= c < 0x10000:
+                self.gen_expr(args[0])
+                self.em('shl eax, 4')
+                donde = f'eax+{c}' if c else 'eax'
+            else:
+                self.dos(args[1], args[0])      # desplazamiento -> EAX, párrafo -> ECX
+                self.em('shl ecx, 4')
+                self.em('add eax, ecx')
+                donde = 'eax'
+            if nm.startswith('leer'):
+                self.em(f'movzx eax, {tt} [{donde}]')
+                return
+            self.em('push eax')
+            self.gen_expr(args[2])
+            self.em('pop ebx')
+            self.em(f"mov [{donde.replace('eax', 'ebx')}], {'al' if tt == 'byte' else 'ax'}")
             return
         if nm == 'dirección':
             self.em(f'lea eax, [{self.lugar(args[0])}]')
