@@ -232,6 +232,14 @@ mkdir -p $W/m/JUEGOS $W/sn
 python3 -I $RAIZ/tools/mkhvp.py $RAIZ/programas/hispasnes.asm $W/sn/HISPASNS.HVP > /dev/null
 python3 -I $RAIZ/tools/asm816.py $RAIZ/tests/hispasnes/demo.s $W/sn/PRUEBA.SFC
 cp $W/sn/HISPASNS.HVP $W/sn/PRUEBA.SFC $W/m/JUEGOS/
+# [HISPA-DRIVE] y el de la de 1988 (docs/HISPADRIVE.md), con su ROM de
+# prueba (PRUEBA.MD, la ya ensamblada: tests/hispadrv/), igual
+mkdir -p $W/md
+python3 -I $RAIZ/tools/gen68k.py $RAIZ/build/gen/hispadrv/m68k_gen.inc 2> /dev/null || { mkdir -p $RAIZ/build/gen/hispadrv; python3 -I $RAIZ/tools/gen68k.py $RAIZ/build/gen/hispadrv/m68k_gen.inc 2> /dev/null; }
+python3 -I $RAIZ/tools/genym.py $RAIZ/build/gen/hispadrv/ym_tablas.inc
+python3 -I $RAIZ/tools/mkhvp.py $RAIZ/programas/hispadrv.asm $RAIZ/build/HISPADRV.HVP > /dev/null
+cp $RAIZ/build/HISPADRV.HVP $W/m/JUEGOS/
+cp $RAIZ/tests/hispadrv/PRUEBA.MD $W/m/JUEGOS/
 mkdir -p $W/m/boot/grub
 { cat <<'G'
 set timeout=8

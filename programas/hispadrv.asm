@@ -32,8 +32,8 @@
 ;  esperar nunca) y los archivos (la ROM y la partida guardada, .SRM).
 ;
 ;  Corre también en Hispa-Pentium, con HVPRUN (docs/PENTIUM.md): lo nota
-;  porque la interfaz de Ventanas está allí en 40000000h; entonces el reloj
-;  es el del núcleo (int 80h, la 4) y no hay HSPJOY ni sonido.
+;  como Hispa-Snes (aj_leer AJ_TXT_VERSION da 0); entonces el reloj es el
+;  fino de HVPRUN (aj_leer 20) y no hay puertos, HSPJOY ni sonido.
 ;
 ;  Teclas: flechas = cruceta, Z/X/C = A/B/C, A/S/D = X/Y/Z, Intro = Start,
 ;  M = Mode; P pone o quita la pausa del emulador y F2 reinicia. Mandos (si
@@ -59,7 +59,8 @@ JUEGO_AL    equ 224
 FULL_MAX    equ 3                   ; escala entera máxima (la medida de «pant»)
 TICS_SEG    equ 1193182             ; tics del reloj (el contador 8254) por segundo
 TICS_CUADRO equ 19913               ; y por cuadro (59,92 por segundo)
-TICS_PAL    equ 24006               ; (en PAL: 49,70 por segundo)
+TICS_PAL    equ 24006
+AJ_RELOJ    equ 20                  ; (HVPRUN) aj_leer: el reloj fino               ; (en PAL: 49,70 por segundo)
 ROM_MAX     equ 4 * 1024 * 1024 + 512
 ROM_MENOS   equ 512                 ; una ROM más pequeña no es de la consola
 SRAM_TAM    equ 0x10000             ; la RAM del cartucho: 64 KB
@@ -245,9 +246,12 @@ tec_bot     dw B_A, B_B, B_C, B_X, B_Y, B_Z, B_START, B_MODE
 ;  La entrada: EBX=base ESI=ruta del módulo EDI=parámetros
 ; =============================================================================
 entrada:
-        ; ¿en Hispa-Pentium (HVPRUN)? Allí la interfaz está en 40000000h
-        cmp dword [hv_api], 0x40000000
-        setae byte [pentium]
+        ; ¿Hispa Ventanas o HVPRUN (Hispa-Pentium)? Como Hispa-Snes: HVPRUN
+        ; no tiene texto de versión
+        mov eax, AJ_TXT_VERSION
+        HV aj_leer
+        test eax, eax
+        setz [pentium]
         push edi
         mov edi, ruta_log           ; HISPADRV.LOG, al lado del módulo
         mov eax, 'LOG'
@@ -1466,24 +1470,13 @@ reloj:
         pop ebx
         ret
 .pent:
-        cmp dword [pent_hz], 0
-        jne .ph
-        mov eax, 15                 ; (la primera vez: cuántos por segundo)
-        mov ebx, 9
-        int 0x80
+        mov eax, AJ_RELOJ           ; el reloj fino de HVPRUN (aj_leer 20, en
+        HV aj_leer                  ; tics del 8254, como el de aquí)
         test eax, eax
-        jnz .ph0
-        mov eax, 100
-.ph0:
-        mov ecx, eax                ; (tics del 8254 por cada uno del núcleo)
-        mov eax, TICS_SEG
-        xor edx, edx
-        div ecx
-        mov [pent_hz], eax
-.ph:
-        mov eax, 4
-        int 0x80
-        imul eax, [pent_hz]         ; (da la vuelta: solo valen las diferencias)
+        jnz .p1
+        HV tics                     ; (un HVPRUN de antes: los de la BIOS)
+        shl eax, 16
+.p1:
         pop edx
         pop ecx
         pop ebx
@@ -2430,7 +2423,6 @@ snd_i       resd 1
 snd_ult     resd 1
 snd_fin     resd 4
 sram_seg    resd 1
-pent_hz     resd 1                  ; (Hispa-Pentium) tics del 8254 por tic del núcleo
 msg         resb M_TAM
 rmcs        resb 52
 desc        resb 8
