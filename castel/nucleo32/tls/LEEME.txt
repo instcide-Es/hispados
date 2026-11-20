@@ -1,0 +1,20 @@
+TLS.BIN - el servicio TLS de Hispa-Pentium (docs/PENTIUM.md, «HTTPS: el
+servicio TLS»): las conexiones cifradas (TLS 1.2 de cliente) para los
+programas de Castel (redes.cas: conectar_seguro; biblioteca32/https.cas).
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+  tls.c              el servicio: los pedidos (llamadas 91 a 93 y 99 del núcleo),
+                     las conexiones, la hora, las autoridades, la memoria de cadenas
+  tls.h              las llamadas, las órdenes y los errores (los de redes.cas)
+  libc.c             memcpy, memset... y formatear (sin biblioteca del sistema)
+  entrada.asm        la cabecera HPU3 y la entrada (como ACPI.BIN)
+  pentium.ld         enlazado para 0x40000000
+  hacer.sh SALIDA    lo compila todo (gcc -m32, nasm, ld, objcopy)
+  servidor_https.py  los servidores HTTPS de las pruebas (castel/pruebas.sh, 13 bis)
+
+Lleva dentro, de terceros:
+  - BearSSL 0.6, de Thomas Pornin (https://bearssl.org/), licencia MIT:
+    terceros/bearssl/LICENSE.txt. Copyright (c) 2016 Thomas Pornin
+    <pornin@bolet.org>. Se reparte con ese aviso.
+  - Los certificados de las autoridades raíz de w32/tls/raices (lo público de
+    cada una: su nombre y su clave), en w32/tls/anclas.h.

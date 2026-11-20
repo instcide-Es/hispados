@@ -13,6 +13,8 @@
 # la oficina de Hispa-386 (FACTURAS.HVP, PLUMA.HVP, CUENTAS.HVP, MIRADOR.HVP):
 # nucleo32/hvprun/hacer.sh. Con «red», también el servicio de red (RED.BIN) y
 # sus programas: IPCONFIG.BIN, PING.BIN y DESCARGA.BIN (la orden DESCARGAR).
+# Con «tls» (y «red»), también el servicio TLS (TLS.BIN, nucleo32/tls/hacer.sh:
+# necesita gcc con -m32) y HTTPS.BIN (la orden HTTPS).
 # La imagen se le da a QEMU como disco IDE: DISCO=IMAGEN nucleo32/probar.sh ...
 # Necesita python3, nasm, mkfs.fat (dosfstools) y mtools.
 set -e
@@ -22,8 +24,9 @@ IMG=${1:?uso: disco.sh IMAGEN [12|16|32|mbr]}
 CLASE=${2:-16}
 OFICINA=
 RED=
+TLS=
 for o in "${@:3}"; do
-  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; esac
+  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; esac
 done
 T=$(mktemp -d)
 trap 'rm -rf $T' EXIT
@@ -70,6 +73,13 @@ if [ "$RED" = red ]; then
     nasm -f bin $T/$f.asm -o $T/$N.BIN
   done
   mcopy -i $V $T/RED.BIN $T/IPCONFIG.BIN $T/PING.BIN $T/DESCARGA.BIN ::
+  # (TLS) el servicio TLS y la orden HTTPS
+  if [ "$TLS" = tls ]; then
+    bash $AQUI/tls/hacer.sh $T/TLS.BIN
+    python3 -I $AQUI/../ccastel.py $AQUI/uhttps.cas -o $T/uhttps.asm > /dev/null
+    nasm -f bin $T/uhttps.asm -o $T/HTTPS.BIN
+    mcopy -i $V $T/TLS.BIN $T/HTTPS.BIN ::
+  fi
 fi
 if [ "$OFICINA" = oficina ]; then
   bash $AQUI/hvprun/hacer.sh $T/of > /dev/null

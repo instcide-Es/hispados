@@ -13,7 +13,9 @@ los archivos que sirve, para compararlos con lo descargado:
   /ultima.txt    un texto corto
   /redirige      302, a /ultima.txt
   /lento.bin     dice que son 1.000.000 y manda 2.000; luego, nada (para Ctrl+C)
-  lo demás       404
+  lo demás       404, o, con RAIZ (un segundo argumento), el archivo de
+                 RAIZ con ese camino (las actualizaciones: /pentium/...);
+                 los pedidos de esos, uno por línea, en CARPETA/pedidos
 
 Lo pone en marcha pruebas.sh (parte 11) y lo para por su PID.
 """
@@ -25,6 +27,7 @@ import sys
 import time
 
 CARPETA = sys.argv[1]
+RAIZ = sys.argv[2] if len(sys.argv) > 2 else None
 rnd = random.Random(20261120)
 ARCHIVOS = {
     'grande.bin': bytes(rnd.getrandbits(8) for _ in range(409600)),
@@ -75,6 +78,14 @@ class Atiende(http.server.BaseHTTPRequestHandler):
             self.wfile.write(bytes(2000))
             self.wfile.flush()
             time.sleep(60)
+        elif RAIZ and '..' not in c and os.path.isfile(os.path.join(RAIZ, c)):
+            d = open(os.path.join(RAIZ, c), 'rb').read()
+            with open(os.path.join(CARPETA, 'pedidos'), 'a') as f:
+                f.write(c + '\n')
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(d)))
+            self.end_headers()
+            self.wfile.write(d)
         elif c in ARCHIVOS:
             d = ARCHIVOS[c]
             self.send_response(200)

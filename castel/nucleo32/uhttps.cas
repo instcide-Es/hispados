@@ -1,0 +1,131 @@
+; =============================================================================
+;  uhttps.cas - HTTPS.BIN (la orden HTTPS): pide una o varias direcciones con
+;  la biblioteca Https (biblioteca32/https.cas) y enseña lo que contestan;
+;  para probar el servicio TLS (TLS.BIN) y la biblioteca, como un curl
+;  pequeño. Las direcciones van seguidas por la misma conexión si son del
+;  mismo servidor (keep-alive), con las galletas que vaya poniendo.
+;    HTTPS [-X MÉTODO] [-d DATOS] [-H Cabecera:valor] [-i] [-o ARCHIVO] dirección...
+;    HTTPS /ESTADO      cómo está el servicio TLS (la fecha, las autoridades...)
+;    HTTPS /TODO        lo que ha apuntado el servicio TLS
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Uhttps
+
+    modelo usuario
+
+    importar Llamadas, Redes, Https, Textos32, Formato, Mem32
+
+    constante CABE = 65000
+
+    variable args: arreglo [1024] de byte
+    variable pal: arreglo [512] de byte
+    variable método: arreglo [16] de byte
+    variable datos: arreglo [512] de byte
+    variable cabeceras: arreglo [512] de byte
+    variable archivo: arreglo [128] de byte
+    variable cuerpo: arreglo [CABE] de byte
+    variable info: arreglo [100] de byte
+    variable r: Respuesta_https
+
+    función principal(): byte
+        variable i, c, n, m, ms, marcas, malas: nat32
+        variable ver_cab, hay_datos: bool
+        variable d: arreglo [4] de nat32
+        argumentos(args, 1024)
+        si no palabra(args, 0, pal, 512) o iguales(pal, "/?") entonces
+            escribir("Uso: HTTPS [-X MÉTODO] [-d DATOS] [-H Cabecera:valor] [-i] [-o ARCHIVO] dirección...\n")
+            escribir("     HTTPS /ESTADO   cómo está el servicio TLS;   HTTPS /TODO   lo que ha apuntado\n")
+            devolver 1
+        fin
+        si iguales_sin_caja(pal, "/ESTADO") entonces
+            n := estado_tls(cuerpo, 4096)
+            si es_error_red(n) entonces
+                imprimir1("HTTPS: %s.\n", nat32(texto_error_red(n)))
+                devolver 1
+            fin
+            escribir_trozo(cuerpo, n)
+            devolver 0
+        fin
+        si iguales_sin_caja(pal, "/TODO") entonces
+            n := registro_tls(cuerpo, 8192)
+            si es_error_red(n) entonces
+                imprimir1("HTTPS: %s.\n", nat32(texto_error_red(n)))
+                devolver 1
+            fin
+            escribir_trozo(cuerpo, n)
+            devolver 0
+        fin
+        copiar(método, "GET")
+        cabeceras[0] := 0
+        hay_datos := falso
+        ver_cab := falso
+        archivo[0] := 0
+        malas := 0
+        i := 0
+        mientras palabra(args, i, pal, 512) hacer
+            i := i + 1
+            si iguales(pal, "-X") entonces
+                palabra(args, i, método, 16)
+                i := i + 1
+            sino si iguales(pal, "-d") entonces
+                palabra(args, i, datos, 512)
+                hay_datos := cierto
+                si iguales(método, "GET") entonces copiar(método, "POST") fin
+                i := i + 1
+            sino si iguales(pal, "-H") entonces
+                palabra(args, i, pal, 512)
+                concatenar(cabeceras, pal)
+                concatenar(cabeceras, "\r\n")
+                i := i + 1
+            sino si iguales(pal, "-i") entonces
+                ver_cab := cierto
+            sino si iguales(pal, "-o") entonces
+                palabra(args, i, archivo, 128)
+                i := i + 1
+            sino
+                ; una dirección
+                si hay_datos entonces
+                    si buscar(cabeceras, "Content-Type") = nulo y buscar(cabeceras, "content-type") = nulo entonces concatenar(cabeceras, "Content-Type: application/x-www-form-urlencoded\r\n") fin
+                    c := https_pedir(método, pal, cabeceras, datos, longitud(datos), cuerpo, CABE - 1, r)
+                sino
+                    c := https_pedir(método, pal, cabeceras, nulo, 0, cuerpo, CABE - 1, r)
+                fin
+                si r.error <> 0 entonces
+                    imprimir2("HTTPS: %s: %s.\n", nat32(dirección(pal[0])), nat32(https_texto_error(r.error)))
+                    malas := malas + 1
+                sino
+                    d[0] := nat32(dirección(r.url[0]))
+                    d[1] := r.código
+                    d[2] := r.total
+                    d[3] := r.redirigida
+                    imprimir("== %s: %u, %u octetos (redirecciones: %u)\n", d)
+                    si ver_cab entonces
+                        escribir_cabeceras()
+                    fin
+                    si archivo[0] <> 0 entonces
+                        m := crear(archivo)
+                        si es_error(m) entonces
+                            imprimir2("HTTPS: no se puede crear %s: %s.\n", nat32(dirección(archivo[0])), nat32(texto_error(m)))
+                        sino
+                            escribir_archivo(m, cuerpo, r.largo)
+                            cerrar(m)
+                        fin
+                    sino
+                        escribir_trozo(cuerpo, r.largo)
+                        si r.largo > 0 y cuerpo[r.largo - 1] <> '\n' entonces escribir("\n") fin
+                    fin
+                fin
+            fin
+        fin
+        devolver nat8(malas)
+    fin
+
+    ; las cabeceras de la respuesta que suele querer ver quien prueba
+    función escribir_cabeceras()
+        variable t: arreglo [200] de byte
+        si https_cabecera("Content-Type", t, 200) entonces imprimir1("Content-Type: %s\n", nat32(dirección(t[0]))) fin
+        si https_cabecera("Set-Cookie", t, 200) entonces imprimir1("Set-Cookie: %s\n", nat32(dirección(t[0]))) fin
+        si https_cabecera("Location", t, 200) entonces imprimir1("Location: %s\n", nat32(dirección(t[0]))) fin
+    fin
+
+fin Uhttps.

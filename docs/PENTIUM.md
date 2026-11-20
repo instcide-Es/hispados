@@ -58,7 +58,7 @@ de verdad** (ACPI, S5), reiniciar por la FADT y la **batería en la bandeja**
 con su recuadro de ayuda, con el núcleo ACPI de Hispa-DOS (ACPICA) como
 servicio del anillo 3, `ACPI.BIN` (sección 11). En la bandeja caben a la vez,
 de izquierda a derecha, la memoria USB, la red, la pila y el reloj. Todo está
-en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`).*
+en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`). Y la tarde del 20/11: las **actualizaciones por Internet** (`actualiza.hispados.es/pentium/`), con el catálogo **firmado** (Ed25519, en Castel), la ventana con su barra, el aviso al arrancar y el **núcleo nuevo con vuelta sola al de antes** si no arranca (sección 13); y el **CD (o DVD) de instalación**, que vale para VirtualBox (sección 12).*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -233,7 +233,7 @@ cuarta parte, los discos y el USB).
 | `emergente.cas` (Emergente) | Los **menús emergentes**: el del botón secundario y el que cuelga de una barra de menús. |
 | `terminal.cas` (Terminal) | Los **terminales**: dos tubos para que una ventana tenga dentro al intérprete de órdenes y a sus programas. |
 | `escritorio.cas` (Escritorio) | El **escritorio**: el tapiz y sus **iconos**, la barra de tareas, el menú Inicio, el reloj, los cuadros (apagar, configuración, «Acerca de»), los menús del botón secundario, y la tarea que lo mueve todo. |
-| `red.cas` (Red) | **La red**, lo que pone el núcleo (sección 14): el cartero entre los programas y el servicio de red (`RED.BIN`), y lo que solo el servicio puede pedir: los puertos, memoria física seguida para el DMA, los registros de la tarjeta y su interrupción. |
+| `red.cas` (Red) | **La red**, lo que pone el núcleo (sección 14): el cartero entre los programas y el servicio de red (`RED.BIN`) —y el servicio TLS (`TLS.BIN`), con la llamada 99—, y lo que solo el servicio de red puede pedir: los puertos, memoria física seguida para el DMA, los registros de la tarjeta y su interrupción. |
 
 | `energia.cas` (Energia) | **Apagar de verdad, reiniciar y la batería**: las llamadas del servicio de ACPI (`ACPI.BIN`, un programa del anillo 3 con ACPICA) y la 154; apagar por ACPI (S5) y reiniciar (FADT, 8042, CF9h); la pila de la bandeja y su recuadro de ayuda (sección 11). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
@@ -260,6 +260,8 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `uescribe.cas` | `ESCRIBE.BIN` | Prueba **escribir en el disco** desde dentro: crear, escribir a trozos, leer de vuelta, escribir en medio, cortar, alargar con hueco, añadir; lo que no se puede; las carpetas; con `lleno`, llena el disco y lo vacía. |
 | `redes.cas` (Redes) | — | La **red para los programas** (sección 14): `estado_red`, `resolver`, `ping`, `conectar`, `enviar`, `recibir`, los puertos UDP... |
 | `ured.cas` con `rbase.cas`, `rtarjeta.cas`, `ryukon.cas`, `rpila.cas` y `rtcp.cas` | `RED.BIN` | El **servicio de red**: las tarjetas y la pila TCP/IP (sección 14). |
+| `tls/tls.c` con BearSSL (en C: `tls/hacer.sh`) | `TLS.BIN` | El **servicio TLS**: las conexiones cifradas, HTTPS (sección 14). |
+| `uhttps.cas` (con `biblioteca32/https.cas`) | `HTTPS.BIN` | La orden **HTTPS**: pedir direcciones con la biblioteca `Https` (sección 14). |
 | `uipconf.cas`, `uping.cas`, `udescarg.cas` | `IPCONFIG.BIN`, `PING.BIN`, `DESCARGA.BIN` | **IPCONFIG**, **PING** y **DESCARGAR** (sección 14). |
 | `ubucle.cas` | `BUCLE.BIN` | El que no acaba nunca (da vueltas, duerme, espera teclas o escribe sin parar): para probar **Ctrl+C**. |
 
@@ -1729,16 +1731,82 @@ qemu-system-i386 -m 64 -rtc base=localtime \
   -device ahci,id=sata -drive id=d,file=/dev/shm/disco.img,format=raw,if=none -device ide-hd,drive=d,bus=sata.0
 ```
 
+### El CD (o DVD) de instalación, y VirtualBox (20/11)
+
+**`nucleo32/cd.sh IMAGEN.ISO [CLAVE_PRIVADA]`** hace el **CD de Hispa-Pentium**:
+una ISO 9660 (unos 8 MB) que arranca **por la BIOS con El Torito «sin
+emulación»** (`grub-mkrescue` con solo `i386-pc`, y `xorriso`; no hace falta
+ser root). La misma imagen vale **grabada en un CD o en un DVD**, en un PC de
+verdad, y en **VirtualBox** o QEMU como unidad óptica; y, como es híbrida,
+grabada tal cual en una memoria USB también arranca.
+
+**Por qué no hace falta ATAPI ni ISO 9660 en el núcleo.** GRUB lee el CD por
+la BIOS y **carga en la memoria** todo lo que hace falta, como módulos: el
+núcleo lo ve como la **unidad M:** (en memoria, de solo lectura), la misma de
+la memoria USB cuando su USB no se deja (sección 7). Así vale cualquier unidad
+de CD (IDE, SATA, USB) sin un controlador más, y el núcleo no crece; y el
+programa INSTALAR copia de M: al disco como siempre. (Un controlador ATAPI y
+la ISO 9660 solo servirían para leer el CD *después* de arrancar: para
+instalar, no hacen falta.) Lo común con la memoria USB (compilar todo, el
+núcleo y sus copias que piden el modo, los programas, ACPI, la oficina, los
+textos, `BOOT.IMG`/`CORE.IMG`, los paquetes del sistema y las listas de
+módulos) está en **`nucleo32/sistema.sh`**, que leen `usb.sh`, `cd.sh` y
+`actualiza.sh`.
+
+El menú de GRUB del CD (10 s):
+
+| Entrada | Qué arranca |
+|---|---|
+| **Arrancar Hispa-Pentium 0.8 sin instalar** (la de por omisión) | `ESCRIT8.BIN escritorio unidad=M`, con los programas como módulos: el escritorio a 800 x 600; los discos se ven pero no se tocan |
+| **Instalar Hispa-Pentium 0.8 en el disco duro** | `SEMILLA.BIN instalar unidad=M` con todo lo que se instala y **`MEDIO.TXT`** («CD»), que le dice a INSTALAR que es el CD: «sin el CD», «Saque ahora el CD (o el DVD)» (no lo instala) |
+| sin instalar, a la medida de la pantalla | `gfxpayload=auto` |
+| sin instalar, sin USB, discos, red ni ACPI | por si un equipo no arranca |
+| el intérprete de órdenes (modo texto) | `SEMILLA.BIN ordenes unidad=M` |
+| los modos de vídeo de la BIOS | `videoinfo` |
+| arrancar del disco duro | `chainloader +1` del primer disco (si se ha dejado el CD puesto) |
+
+En el CD van también, en `\PAQUETES`, los paquetes del sistema con su catálogo
+(con `CLAVE_PRIVADA`, firmado).
+
+**Sin UEFI**: el núcleo usa la pantalla de texto (INSTALAR) y el modo que pone
+GRUB por la VBE, que con UEFI no están, y el disco instalado arranca por la
+BIOS. En VirtualBox, «Habilitar EFI» tiene que estar quitado (lo está, para
+«Other»).
+
+**VirtualBox**, lo que trae de serie y cómo va:
+
+| Pieza | En VirtualBox | Hispa-Pentium |
+|---|---|---|
+| el disco | SATA AHCI (ICH9) o IDE (PIIX3/PIIX4) | los dos (`ahci.cas`, `ata.cas`); el CD en AHCI (ATAPI) se ve y no se toca |
+| el CD/DVD | en el mismo SATA o en el IDE secundario | lo lee GRUB por la BIOS |
+| la red | Intel PRO/1000 MT Desktop (82540EM, `8086:100E`) | la e1000 de `RED.BIN` (ya estaba en la lista) |
+| el USB | OHCI (USB 1.1), con la tableta USB si se elige | OHCI no lo lleva: se deja quieto; teclado y ratón, por PS/2 (el ratón «PS/2» de VirtualBox) |
+| la gráfica | VMSVGA o VBoxVGA, con VBE | el modo lo pone GRUB por la VBE |
+| ACPI | sí | `ACPI.BIN`: apagar de verdad |
+
+**Probado en QEMU imitando a VirtualBox** (parte 15 de las pruebas): `-machine
+pc` con el disco IDE, `-device pci-ohci` con una `usb-tablet` y la e1000
+(`-nic user,model=e1000`): arranca sin instalar, con la red; instala en el disco
+IDE y el disco arranca solo. `-machine q35` (ICH9: el disco y el CD en AHCI):
+instala en el disco SATA y arranca. El LEEME de la carpeta del CD cuenta paso a
+paso cómo hacer la máquina en VirtualBox.
+
+```
+castel/nucleo32/cd.sh /tmp/cd.iso
+truncate -s 2G /tmp/d.img
+qemu-system-i386 -machine q35 -m 256 -nic user,model=e1000 -cdrom /tmp/cd.iso \
+  -drive file=/tmp/d.img,format=raw,if=none,id=d -device ide-hd,drive=d,bus=ide.0 -boot d
+```
+
 ## 13. Los paquetes y las actualizaciones
 
 Desde la **0.8** (20/11/2026), lo instalado en el disco se puede **poner al día,
 añadir y quitar** sin volver a instalar el sistema: por **paquetes** (archivos
 `.HPQ`), que maneja el programa **PAQUETES** (`upaquete.cas`, `PAQUETES.BIN`,
-del anillo 3, en Castel) y que se hacen en el VPS con **`tools/hpq.py`**. De
-momento los paquetes se traen de una carpeta (la de la memoria USB, la de otro
-disco...); cuando el núcleo tenga red, de Internet (más abajo: «el gancho de la
-red»). (El número de versión del sistema —el núcleo, el escritorio, INSTALAR—
-sigue en 0.7: lo cambia quien publique la 0.8.)
+del anillo 3, en Castel) y que se hacen en el VPS con **`tools/hpq.py`**. Los
+paquetes se traen de una carpeta (la de la memoria USB, la de otro disco...) o,
+desde la tarde del 20/11, **de Internet**, con el catálogo **firmado**
+(Ed25519): más abajo, «Por Internet», «La firma» y «El núcleo nuevo».
 
 ### El paquete (.HPQ)
 
@@ -1771,9 +1839,8 @@ fin
   `\HISPA\BLOC.BIN`, `\OFICINA\PLUMA.HVP`; no en `\HISPA\PAQUETES`, que es la base
   de lo instalado), lo que mide y su **SHA-256**.
 - Lo que PAQUETES no conoce lo deja pasar: así caben cosas nuevas sin cambiar de
-  formato. **`firma=`** queda reservada para firmar el paquete; esta versión de
-  PAQUETES dice que la lleva, pero aún no la comprueba (la cadena de confianza de
-  hoy es el catálogo, que lleva el SHA-256 de cada paquete entero: más abajo).
+  formato. Lo que se firma es el **catálogo**, que lleva el SHA-256 de cada
+  paquete entero (más abajo, «La firma»): el paquete no lleva firma propia.
 
 El **SHA-256** está escrito en Castel (`nucleo32/sha256.cas`, el módulo `Sha256`:
 `empezar`, `añadir` y `acabar`, de FIPS 180-4), para los programas del anillo 3.
@@ -1858,7 +1925,8 @@ entero.) Cuando hay que instalar varios paquetes, cada uno es su propio todo o
 nada, en orden: si falla el tercero, los dos primeros (lo que necesitaba) quedan
 instalados, y se dice.
 
-**El gancho de la red.** PAQUETES no sabe de TCP/IP: para traer de Internet el
+**El gancho de la red** (cómo era; hoy lo hace `DESCARGA.BIN`, el de verdad:
+«Por Internet», abajo). PAQUETES no sabe de TCP/IP: para traer de Internet el
 catálogo y cada paquete, a `C:\HISPA\PAQUETES\BAJADAS`, lanza el programa
 **`DESCARGA.BIN`** (la orden de descargar de la red: su nombre tiene que caber en
 8+3) con dos argumentos, **`URL DESTINO`**, lo espera, y vale si acaba con el
@@ -1918,11 +1986,140 @@ Para publicar una actualización: hacer el paquete con su versión nueva, ponerl
 con los demás, `hpq.py catalogo` y subir la carpeta (a la memoria USB o, cuando
 haya red, a `actualiza.hispados.es/pentium/`).
 
-**Lo que falta**: comprobar la **firma** (del catálogo, que lleva las sumas de
-todo; con una clave pública dentro del sistema); actualizar el núcleo y pedir
-reiniciar (hoy se pone el archivo, y vale en el arranque siguiente); que la
-ventana deje elegir el origen y enseñe el avance; y la red (sección 14), que
-trae lo de Internet por el gancho.
+### Por Internet (la tarde del 20/11)
+
+**El servidor.** `http://actualiza.hispados.es/pentium/` (el VPS sirve
+`/www/hispados` con ese nombre; la carpeta `pentium` va al lado de los `.paq` de
+Hispa-DOS): los `.HPQ`, su `CATALOGO.TXT` y la firma, `CATALOGO.FIR`. Lo hace
+**`nucleo32/actualiza.sh CARPETA CLAVE_PRIVADA`** (los mismos paquetes que van
+en la memoria USB y en el CD, hechos de lo que se instala, y el catálogo
+firmado; al acabar comprueba la firma con la clave pública del sistema). Para
+publicar una versión nueva: subir su número en `tools/hpq.py` (`SISTEMA`), hacer
+`actualiza.sh` otra vez y copiar **la carpeta entera** (los paquetes y el
+catálogo van juntos: si no, las sumas no cuadran y no se instala).
+
+**De dónde.** Igual que antes (`/DESDE=`, `ORIGEN.TXT`, la carpeta `\PAQUETES` de
+una unidad con catálogo, primero las memorias USB) y, si no, Internet. Lo trae
+**`DESCARGA.BIN`** (la orden DESCARGAR de la sección 14) a
+`C:\HISPA\PAQUETES\BAJADAS`: el catálogo, su firma y cada paquete, cada vez
+(«Buscar novedades» es eso: traer el catálogo otra vez).
+
+### La firma
+
+Todo va por **HTTP sin cifrar**, así que cualquiera en el camino podría
+cambiar lo que llega. Por eso el catálogo va **firmado con Ed25519** (RFC 8032):
+el catálogo lleva el tamaño y el SHA-256 de cada paquete, y cada paquete los de
+sus archivos, así que con firmar el catálogo queda atado todo.
+
+- **`CATALOGO.FIR`**, al lado del catálogo: una línea, `ed25519 ` y las 128
+  cifras hexadecimales de la firma de `CATALOGO.TXT` tal cual (octeto a octeto).
+- **La clave pública va dentro del sistema**: `nucleo32/clave.cas` (el módulo
+  `Clave`: sus 32 octetos y su huella, las 16 primeras cifras, que PAQUETES
+  dice al comprobar). **La privada no está en el repositorio**: en el VPS, en
+  `/root/.claude/Secretos/hispa-pentium-firma.key` (permisos 600). Sin ella no
+  se puede publicar nada que un Hispa-Pentium acepte de Internet.
+- **Comprobarla**: `nucleo32/firma.cas` (el módulo `Firma`, en Castel: unas 600
+  líneas, de dominio público el camino —el de TweetNaCl— y GPL lo escrito). Lleva
+  su **SHA-512** (los números de 64 bits hechos de dos de 32) y las cuentas de la
+  curva con los números módulo 2^255 − 19 en **32 trozos de 8 bits**, cada uno en
+  un `ent32`: así ninguna cuenta pasa de 32 bits (Castel no tiene números de 64)
+  y no hace falta ensamblador. Comprueba que S < 2^253 y que la clave es un punto
+  de la curva. Tarda unos **0,25 s** en QEMU (24-30 tics).
+- **Cuándo**: lo traído **de Internet** tiene que llevar firma, y buena: si no
+  la trae («el catálogo de Internet no trae su firma») o no es buena («la firma
+  del catálogo NO es buena: no se usa nada de él»), no se usa **nada** del
+  catálogo. De **una carpeta**, si trae `CATALOGO.FIR` se comprueba igual (y con
+  una mala, nada); sin ella se usa, como antes (la ha puesto ahí quien maneja el
+  equipo). `PAQUETES ESTADO` dice `origen|...|firmado` y la ventana pone
+  «(firma buena)» al lado del origen.
+- **`PAQUETES FIRMA ARCHIVO`**: si `ARCHIVO.FIR` (el mismo nombre, con `.FIR`)
+  es su firma buena, con la clave del sistema.
+- **`tools/hpq.py`**: `clave PRIVADA` (una nueva: la privada al archivo, 600, y
+  dice la pública), `publica PRIVADA [clave.cas]` (y el módulo de Castel),
+  `firma CARPETA PRIVADA`, `catalogo CARPETA --clave PRIVADA` (hace el catálogo y
+  lo firma) y `comprueba CARPETA PUBLICA`. Usa el módulo `cryptography` de Python.
+- **Cambiar de clave** (si la privada se perdiera o se supiera): una nueva con
+  `hpq.py clave`, `hpq.py publica ... clave.cas`, y sacar un `paquetes` nuevo
+  firmado aún con la vieja (que lleva ya la clave nueva); luego, todo con la
+  nueva.
+
+### El núcleo nuevo, y volver al de antes
+
+Cuando un paquete cambia **`\HISPA\NUCLEO.BIN`** (el `base`):
+
+1. El de antes **no se borra**: queda en **`\HISPA\NUCLEO.ANT`** (el de justo
+   antes de la última actualización).
+2. PAQUETES escribe **`\HISPA\GRUBENV`** (el «bloque de entorno» de GRUB: 1.024
+   octetos, texto y `#` hasta el final) con **`nuevo=1`**, y, si `GRUB.CFG` aún
+   no la tiene, le añade al final la entrada **«Hispa-Pentium con el núcleo de
+   antes»** (`--id anterior`, `NUCLEO.ANT`) y unas líneas que leen y escriben
+   `GRUBENV` (`load_env`, `save_env`: el `CORE.IMG` de la 0.8 lleva `loadenv`):
+
+   | `nuevo=` | Qué hace GRUB al arrancar |
+   |---|---|
+   | 1 | lo pasa a **2** y arranca el núcleo nuevo, como siempre |
+   | 2 | (el nuevo no llegó a decir que arrancó) lo pasa a **3** y arranca **el de antes** |
+   | 3 o 4 | sigue arrancando el de antes |
+   | 0 | lo de siempre |
+
+3. PAQUETES dice `reiniciar|...` y la ventana ofrece **«Reiniciar ahora»** o
+   **«Más tarde»** (la llamada 66, que vacía los discos antes).
+4. Al arrancar el escritorio de un sistema instalado, **`ACTUALIZ /BANDEJA`**
+   mira `GRUBENV`: con `nuevo=2`, el núcleo nuevo ha arrancado: lo pone a **0** y
+   lo dice («El núcleo nuevo ha arrancado bien»); con `nuevo=3`, GRUB ha vuelto
+   al de antes: lo pone a **4** (para decirlo una sola vez) y lo dice («El nuevo
+   no llegó a arrancar: se usa el de antes»).
+
+Así, un núcleo nuevo que se cuelga, o que reinicia, o que no llega al
+escritorio: **al reiniciar (aunque sea a mano), GRUB arranca solo el de antes**.
+Probado en QEMU con un núcleo que se queda en `hlt` (parte 15 de las pruebas).
+Se sigue con el de antes hasta que se instale otro núcleo (`PAQUETES INSTALA
+... /FORZAR`, o uno más nuevo). En un disco instalado con la 0.7 (su `CORE.IMG`
+sin `loadenv`), GRUB dice que no conoce `load_env` y sigue: la entrada del de
+antes está igual en el menú, pero hay que elegirla a mano.
+
+### El aviso de la bandeja
+
+Al arrancar el escritorio de un sistema instalado (con `HISPA.INI`: no en el
+primer arranque, que es el del asistente), el núcleo lanza, si está,
+**`\HISPA\ACTUALIZ.BIN /BANDEJA`** (lo único nuevo en el núcleo: tres líneas
+en `escritorio.cas`). Sin molestar: lo de `GRUBENV` (arriba); luego espera a
+la red (hasta 90 s; sin red, se acaba sin decir nada), hace `PAQUETES ESTADO`
+a su archivo (`BANDEJA.TXT`) y, **solo si hay algo más nuevo** que lo
+instalado (o algo que contar del núcleo), saca una **ventanita abajo a la
+derecha, encima de la bandeja**: «Hay N actualizaciones», con **«Verlas»** (abre
+la ventana) y **«Ahora no»**; se va sola a los 45 s. (Un icono propio en la
+bandeja, como el de la red, pediría más núcleo: la ventanita es un programa
+del anillo 3.)
+
+![El aviso de la bandeja](pentium/actualiza-bandeja.png)
+
+### La ventana, con su barra
+
+«Programas y actualizaciones» lanza PAQUETES **sin quedarse parada**
+(`acabada`, cada 15 tics) y con **`/AVANCE`**: PAQUETES escribe en
+`C:\HISPA\PAQUETES\AVANCE.TXT` una línea `hecho total texto` («Comprobando
+la firma del catálogo», «Bajando BASE.HPQ», «Comprobando base», «Instalando
+base»), y `DESCARGA /AVANCE=archivo` la pone al día cada 16 K mientras baja un
+paquete (con lo que dice `Content-Length`): la ventana la lee y pinta la
+**barra** (sin total, una franja que corre). Botones: **Instalarlo**
+(o Actualizarlo), **Quitarlo**, **Actualizar todo** y **Buscar novedades**
+(F5). Abajo, lo que dice PAQUETES (sin lo que dice DESCARGA de cada archivo).
+**A la medida de la ventana**: al cambiarla de tamaño o maximizarla, la lista,
+los mensajes, la barra y los botones se recolocan a su ancho y su alto (la
+lista enseña más renglones), y lo que no cabe se corta con «...» (antes, con
+la ventana maximizada, las descripciones y los mensajes se salían de su
+recuadro: lo vio Carlos con la red de verdad, 20/11). Si el servidor aún no
+tiene nada publicado (el catálogo da 404: `DESCARGA` acaba entonces con el
+código 4), PAQUETES lo dice en llano: «Todavía no hay actualizaciones
+publicadas en el servidor.»
+
+![La ventana, con lo nuevo de Internet](pentium/actualiza-ventana.png)
+
+**Lo que falta**: HTTPS (sección 14); buscar novedades cada cierto tiempo (hoy,
+al arrancar y al pulsar); que la ventana deje elegir el origen; las
+diferencias (hoy se baja el paquete entero); y una firma por paquete, para
+los que se instalan sueltos de una carpeta.
 
 ## 14. La red por cable (la 0.8)
 
@@ -1973,6 +2170,7 @@ núcleo) y un fallo de la red acaba con el servicio, no con el sistema.
 | 96 | el servicio | **cómo está la red** (EBX: `RED_SIN_TARJETA`, `RED_SIN_CABLE`, `RED_BUSCANDO`, `RED_CONECTADA`), su IP (ECX) y el aparato PCI que hace DMA (EDX) | 0 |
 | 97 | cualquiera | cómo está la red (lo que dijo el servicio con la 96) y, a EBX, la IP | `RED_...` (`RED_NADA`: no hay servicio) |
 | 98 | el servicio | **la interrupción de su tarjeta** (EBX: 3, 5, 7, 9, 10 u 11; 0: ninguna): cuando llega, el núcleo **tapa esa línea** en el 8259, despierta al servicio y la destapa en su siguiente llamada 92 (el servicio ya ha visto la causa en la tarjeta) | 0 |
+| 99 | un programa | **pedir al servicio TLS** (`TLS.BIN`): como la 90, pero el pedido va al servicio de las conexiones cifradas (más abajo, «HTTPS: el servicio TLS»). Si no está en marcha, el núcleo lo pone (una vez) | la primera palabra de la respuesta (`SIN_TLS`, `0xFFFFFFE3`, si no hay servicio) |
 
 Si el servicio se acaba (o lo acaban), el núcleo **apaga el DMA de su tarjeta**
 (el bit 2 de la orden PCI) antes de que su memoria vuelva a los marcos libres,
@@ -2041,7 +2239,8 @@ núcleo: `es_error_red` mira los dos, y `texto_error_red` los dice.
 |---|---|---|
 | `IPCONFIG [/RENOVAR] [/TODO]` | `IPCONFIG.BIN` (`uipconf.cas`) | cómo está la red (si aún se pide la IP, espera); `/RENOVAR`, otra vez DHCP; `/TODO`, además lo apuntado por el servicio (para mandarlo si algo no va: `IPCONFIG /TODO > RED.TXT`) |
 | `PING nombre [-n veces] [-l octetos] [-t]` | `PING.BIN` (`uping.cas`) | como el de siempre, con su resumen; Ctrl+C para (`-t`) y dice el resumen |
-| `DESCARGAR http://servidor[:puerto]/camino [archivo]` | `DESCARGA.BIN` (`udescarg.cas`) | HTTP/1.1 sin cifrar: `Content-Length`, en trozos (`chunked`) o hasta que se cierre; hasta 5 redirecciones; el archivo, con el nombre de lo último del camino en 8+3 (o el que se diga; `-`: a la pantalla); un punto cada 32 K y, al final, cuánto y en cuánto tiempo |
+| `DESCARGAR http[s]://servidor[:puerto]/camino [archivo]` | `DESCARGA.BIN` (`udescarg.cas`) | HTTP/1.1, sin cifrar o (desde el 20/11, con `https://`) cifrado con el servicio TLS: `Content-Length`, en trozos (`chunked`) o hasta que se cierre; hasta 5 redirecciones; el archivo, con el nombre de lo último del camino en 8+3 (o el que se diga; `-`: a la pantalla); un punto cada 32 K y, al final, cuánto y en cuánto tiempo. Si el certificado no vale, no baja nada y dice por qué |
+| `HTTPS [-X MÉTODO] [-d DATOS] [-H Cabecera:valor] [-i] [-o ARCHIVO] dirección...` | `HTTPS.BIN` (`uhttps.cas`) | un curl pequeño con la biblioteca `Https`: varias direcciones seguidas, por la misma conexión y con las galletas; `HTTPS /ESTADO` (la fecha que usa el servicio TLS, las autoridades) y `HTTPS /TODO` (lo que ha apuntado) |
 
 El intérprete de órdenes, con un nombre de más de ocho letras que no
 encuentra, prueba con las ocho primeras (como el DOS): `DESCARGAR` es
@@ -2090,29 +2289,192 @@ servicios por un tubo del núcleo (dos llamadas nuevas, a partir de la 99), y
 en `\HISPA\RED.INI` (como `RED.INI` de Hispa-486); un programa `WIFI` para
 buscar redes y conectarse, y el icono diría la intensidad.
 
-### HTTPS, más adelante
+### HTTPS: el servicio TLS (`TLS.BIN`)
 
-`DESCARGAR` solo sabe `http://`. Para HTTPS, lo que ya tiene el proyecto es
-**HSPTLS** (`w32/tls/hsptls.c` con BearSSL 0.6, TLS 1.2 con ECDHE y la cadena
-de certificados comprobada; `w32/https.c`; docs/RED.md, «HSPTLS.DLL»): C de
-32 bits sin memoria dinámica, hecho para máquinas pequeñas. Lo más corto: un
-programa del anillo 3 en C (con el mismo arreglo de `gcc -m32` y la cabecera
-`HPU3` que el Wi-Fi) que enlace `hsptls.c` y BearSSL y hable con `RED.BIN` por
-la llamada 90 igual que `redes.cas` (son ocho palabras y un `int 0x80`): un
-`DESCARGAR` que entienda `https://`, o mejor un **servicio TLS** al que
-`DESCARGAR` y los demás le pidan una conexión cifrada como le piden una TCP a
-`RED.BIN`. Lo que hace falta además: la hora buena (para las fechas de los
-certificados: el reloj del PC, o NTP por UDP) y sitio para la caché de
-certificados (`\HISPA\HSPTLS.CCH`). Pasar BearSSL a Castel (las curvas, AES,
-ChaCha20, SHA-2, RSA, X.509) sería mucho más largo.
+*20/11/2026.* Para que los programas de Castel (el primero, ClicGest, que solo
+va por HTTPS) hablen con un servidor de hoy: **TLS 1.2 de cliente**, con el
+certificado del servidor comprobado hasta una autoridad raíz de confianza, SNI
+y la fecha buena. Es lo de **HSPTLS** de Hispa-486 (`w32/tls/hsptls.c`,
+docs/RED.md «HSPTLS.DLL»), pasado a este sistema: **BearSSL 0.6** (Thomas
+Pornin, licencia MIT, `terceros/bearssl`: los mismos fuentes, sin cambiar
+nada) compilado en C para el anillo 3, como `ACPI.BIN` con ACPICA.
+
+**Un servicio aparte, no dentro de `RED.BIN`.** `RED.BIN` es Castel (lo compila
+CASTEL32) y BearSSL es C: no se pueden enlazar juntos sin un enlazador que el
+sistema no tiene. Y así un fallo del cifrado acaba con `TLS.BIN`, no con la
+red, y lo que no usa HTTPS no paga sus 140 K. El precio es un salto más (el
+programa → `TLS.BIN` → `RED.BIN`): nada al lado del apretón de manos.
+
+```
+  DESCARGAR, HTTPS, ClicGest...  (redes.cas: conectar_seguro, enviar, recibir...;
+        │                         biblioteca32/https.cas: Https)
+        │  llamada 99: un pedido, como la 90
+        ▼
+  el núcleo (red.cas): cartero de los dos servicios (cada hueco sabe a cuál va)
+        │  llamadas 92 y 93
+        ▼
+  TLS.BIN, el servicio TLS (anillo 3; nucleo32/tls/: tls.c, libc.c, entrada.asm)
+     BearSSL 0.6: TLS 1.2, X.509, ECDHE, ECDSA, RSA, ChaCha20-Poly1305, AES-GCM
+        │  llamada 90: las conexiones TCP, como cualquier programa
+        ▼
+  RED.BIN, el servicio de red
+```
+
+Lo cambiado en el núcleo es poco y va marcado con «(TLS)»: en `red.cas`, cada
+hueco lleva su destino (el de red o el TLS), un segundo servicio (`TLS.BIN` se
+apunta con la 91, sin puertos ni DMA; coge sus pedidos con la 92 y contesta con
+la 93) y los avisos de las tareas que acaban, para los dos; en `usuario.cas`, la
+99 y `lanza_tls` (como `lanza_red`).
+
+**Para los programas** (`redes.cas`), una conexión cifrada es como una TCP:
+
+```
+s := conectar_seguro("clicgest.es", 443, ESPERA_NORMAL)   ; resuelve, conecta, apretón de manos
+si es_error_red(s) entonces escribir(texto_error_red(s)) ... fin
+enviar(s, pedido, n)                 ; como siempre: enviar, enviar_texto, recibir, cerrar_conexión
+n := recibir(s, búfer, 8192, 1000)   ; 0: el servidor ha cerrado
+cerrar_conexión(s)
+```
+
+El número de una conexión cifrada va de `0x1000` en adelante (`es_segura(s)`):
+`enviar`, `recibir` y `cerrar_conexión` lo ven y van a la 99 en vez de a la 90.
+Además: `info_segura(s, texto, cabe, ms, marcas)` («TLS 1.2, ECDHE-ECDSA,
+ChaCha20-Poly1305», lo que tardó el apretón y si se reanudó o la cadena ya
+estaba comprobada), `estado_tls(texto, cabe)` y `registro_tls`. Los errores
+nuevos: `TLS_CERTIFICADO` (`0xFFFFFFE5`: el certificado no vale), `TLS_FALLO`
+(`E4`: la conexión segura no se ha podido hacer), `SIN_TLS` (`E3`: falta
+`TLS.BIN`) y `TLS_SIN_HORA` (`E2`); para los tres de TLS, `texto_error_red` da
+**el texto de `TLS.BIN`, en español y con el detalle**: «el certificado es de
+otro sitio, no de 10.0.2.2», «el certificado de X no lo firma ninguna autoridad
+conocida», «el certificado de X ha caducado o aún no vale (con la fecha
+01/06/2050, del reloj del PC); compruebe la fecha del equipo», «el reloj del
+equipo no está en hora y no se ha podido preguntar la hora a
+actualiza.hispados.es: sin la fecha no se pueden comprobar los certificados»...
+
+**La biblioteca `Https`** (`castel/biblioteca32/https.cas`; importa `Redes`, así
+que un programa de fuera de `nucleo32/` se compila con `-I castel/nucleo32`):
+
+| Función | Qué |
+|---|---|
+| `https_get(url, destino, cabe, r)` | GET: el cuerpo, a `destino` (acaba en 0 si cabe); da el código (200...) o un error |
+| `https_post(url, clase, cuerpo, n, destino, cabe, r)` | POST con `Content-Type: clase` |
+| `https_pedir(método, url, cabeceras, cuerpo, n, destino, cabe, r)` | cualquier método, con cabeceras propias (`"X-Uno: 1\r\nX-Dos: 2\r\n"`) |
+| `https_abrir(...)` y `https_leer(trozo, cabe)` | lo mismo, pero el cuerpo a trozos (para lo grande); `https_cerrar()` si no se lee entero |
+| `https_cabecera(nombre, destino, cabe)` | una cabecera de la última respuesta |
+| `https_galleta(nombre, destino, cabe)`, `https_borrar_galletas()` | las galletas guardadas |
+| `https_texto_error(e)` | el error, en español |
+
+`r` es un `Respuesta_https`: `código`, `error`, `largo` (lo dejado en
+`destino`), `total` (lo que traía), `redirigida`, `url` (la final) y
+`contenido` (el `Content-Type`). Sigue hasta 5 redirecciones (con 303, y 301/302
+tras un POST, pasa a GET; `sin_redirecciones := cierto` para no seguirlas);
+entiende `Content-Length`, los trozos (`chunked`) y «hasta que se cierre»;
+guarda las galletas (`Set-Cookie`: 16, con `Domain`, `Path`, `Secure` y
+`Max-Age=0`; `Expires` no se mira: son de sesión; `sin_galletas := cierto`) y
+las devuelve a ese servidor; y **deja la conexión abierta** (keep-alive) para
+el pedido siguiente al mismo servidor, que así no repite el apretón de manos (si
+el servidor la ha cerrado entretanto, lo intenta otra vez con una nueva). **Sin
+gzip**: no se manda `Accept-Encoding` y los servidores mandan el cuerpo tal
+cual (descomprimir costaría un inflado en Castel; no es barato).
+
+**Dentro de `TLS.BIN`** (`nucleo32/tls/tls.c`):
+
+- *El perfil* (el de HSPTLS): solo **TLS 1.2** —BearSSL 0.6 no tiene TLS 1.3, y
+  clicgest.es e hispados.es (nginx) aceptan 1.2—; intercambio ECDHE (Curve25519,
+  P-256, P-384), certificado del servidor ECDSA o RSA, y ChaCha20-Poly1305 o
+  AES-GCM. Con **SNI**. Reanuda sesiones (4 servidores): la segunda conexión a
+  clicgest.es no hace ni el intercambio de claves.
+- *Las autoridades raíz*: las 20 de HSPTLS (`w32/tls/anclas.h`, hecho de
+  `w32/tls/raices/*.pem` con `tools/mkanclas.sh`: ISRG Root X1, X2, **YE** y
+  **YR** —la cadena de clicgest.es y de hispados.es acaba en ISRG Root YE—,
+  DigiCert, GlobalSign, Sectigo, Amazon, Google...) y los `*.CER` (X.509 en DER,
+  de autoridad) que haya en `\HISPA\RAICES` y en `\RAICES` de la unidad del
+  sistema: así se añade una (las pruebas ponen ahí la suya).
+- *La memoria de certificados* (la de HSPTLS): una cadena ya comprobada para un
+  servidor (su resumen SHA-256 con el nombre) vale una semana sin volver a
+  comprobar sus firmas; en la memoria del servicio y en `TLS.CCH`.
+- *El azar*: no hay generador del sistema; se junta el contador de ciclos (TSC)
+  cada vez que llega algo de la red, los tics y la fecha, y una semilla que se
+  guarda de una vez para otra (`TLS.SEM`).
+- *Sin hilos*: un bucle que atiende los pedidos y, de cada conexión, mueve los
+  registros entre BearSSL y `RED.BIN`; lo que espera un programa (el apretón,
+  lo que tiene que llegar) se contesta cuando está, y mientras tanto se atiende
+  a los demás (8 conexiones a la vez; la memoria de cada una se pide al
+  núcleo, llamada 17, la primera vez que hace falta).
+- Lo que pasa lo **apunta** (`tls: ...` por el puerto serie; `HTTPS /TODO`).
+
+`TLS.CCH`, `TLS.SEM` y `TLS.INI` van en `\HISPA` de la unidad del sistema (o en
+su raíz si no hay `\HISPA`).
+
+**La hora.** Para mirar las fechas de un certificado hace falta saber qué día
+es. `TLS.BIN` usa **el reloj del PC** (la CMOS, por la llamada 15) si es
+creíble: no antes del día en que se hizo ese `TLS.BIN` (lo pone `hacer.sh`:
+el del último cambio de `tls.c`) ni 30 años después. Si no lo es (la pila del
+reloj gastada: el HP Mini o el Toshiba arrancan en el 2000 o el 2009), pide la
+hora por **HTTP sin cifrar** a `actualiza.hispados.es` (o al servidor que diga
+una línea `hora=servidor[:puerto]` de `TLS.INI`) y toma la de su cabecera
+`Date`. **Es un riesgo, y se apunta**: quien pueda cambiar esa respuesta (en la
+red de en medio) puede hacer pasar por bueno un certificado caducado o aún no
+válido —no uno falso: la firma y el nombre se siguen comprobando—. Lo mejor es
+poner el reloj en hora (el asistente del primer arranque, llamada 67). Si
+tampoco hay respuesta, no hay conexión: `TLS_SIN_HORA`.
+
+**Lo que cuesta.** Medido en QEMU con `-icount shift=0` (el contador de ciclos
+cuenta entonces instrucciones: es lo que `TLS.BIN` apunta como «M ciclos» de
+BearSSL), con `-O2 -march=i586`:
+
+| | Instrucciones (BearSSL) | Pentium a 133 MHz (estimado) |
+|---|---|---|
+| **Apretón de manos con clicgest.es, la primera vez** (la cadena: dos firmas ECDSA P-384; más P-256 y X25519) | **201 M** | **unos 3 s** (de 2,3 a 3,8) |
+| El mismo con hispados.es | 211 M | unos 3 s |
+| **Con la cadena ya comprobada** (`TLS.CCH`) | **25 M** | **unos 0,35 s** |
+| **Sesión reanudada** (la segunda conexión al mismo servidor) | **menos de 1 M** | **menos de 10 ms** (más la ida y vuelta por la red) |
+| Con el certificado de prueba (P-256) / RSA 2048 | 42 M / 30 M | 0,5 s / 0,35 s |
+| Descifrar los datos: ChaCha20-Poly1305 (clicgest.es) | 94 por octeto | unos 0,9 MB/s |
+| Descifrar los datos: AES-256-GCM (el servidor de prueba) | 239 por octeto | unos 0,3 MB/s |
+
+La estimación, como la de HSPTLS para el 486 (docs/RED.md): unos 1,5 ciclos
+por instrucción corriente en un Pentium (P5, con las dos tuberías a medias) y 10
+por multiplicación de 32×32 bits (`MUL`), que son el 5 % de las instrucciones
+de un apretón (las cuentas de HSPTLS); el margen, de 1,2 a 2 ciclos por
+instrucción. Con keep-alive y la reanudación, lo normal de un programa como
+ClicGest es pagar el apretón entero una vez por arranque (y ni eso con
+`TLS.CCH`): luego, cada pedido, lo que tarde el servidor.
+
+**La memoria.** `TLS.BIN` mide 102 K en el disco (BearSSL entero, las
+autoridades y el servicio) y 37 K de variables; **cada conexión cifrada, 37 K**
+más (los búferes de TLS: 16 K de lo que llega, 4 K de lo que sale, la cadena y
+el estado de BearSSL), además de los 48 K de la conexión TCP de `RED.BIN`.
+
+**Probarlo** (`castel/pruebas.sh`, parte 13 bis: `SOLO=tls`):
+
+```
+castel/nucleo32/disco.sh /tmp/d.img 16 red tls       # con TLS.BIN y HTTPS.BIN (hacer.sh: gcc -m32)
+QEMU_MAS="-nic user,model=e1000" ESCRIBE=1 DISCO=/tmp/d.img ARRANQUE=ordenes \
+  castel/nucleo32/probar.sh "" ":pausa 2" "descargar https://clicgest.es/ clic.htm" ":pausa 10" "https /estado"
+```
+
+Sin internet, `nucleo32/tls/servidor_https.py` hace una raíz de prueba
+(`RAIZ.CER`, que se copia a `\RAICES\PRUEBA.CER` del disco) y cuatro servidores
+HTTPS para «10.0.2.2» (ECDSA, RSA, uno de otro nombre y uno de una raíz que no
+conoce nadie) y uno HTTP para la cabecera `Date`; `RELOJ=2001-01-01` en
+`probar.sh` pone el reloj del PC donde se quiera. Lo descargado de
+https://clicgest.es/ y https://hispados.es/ en QEMU es igual octeto a octeto que
+lo que baja `curl`.
+
+**En el sistema**: `TLS.BIN` y `HTTPS.BIN` van en la memoria USB y en el CD
+(`nucleo32/sistema.sh`: en la raíz, como módulos, y a `\HISPA` al instalar) y
+son el paquete **`tls`** de `tools/hpq.py` (necesita `base` y `red`), con los
+demás del sistema en el catálogo firmado de `actualiza.sh`.
 
 ### Lo que falta
 
 Escuchar en un puerto (un servidor), reensamblar lo que llega desordenado y la
 retransmisión rápida; IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
-la vez; el Wi-Fi y HTTPS (arriba); más tarjetas (la RTL8168 del Toshiba NB250,
-la PCnet, NE2000: Hispa-DOS ya las lleva); y, encima de esto, las
-**actualizaciones** por la red y un navegador.
+la vez; el Wi-Fi (arriba); TLS 1.3 (BearSSL no lo tiene), gzip en `Https` y la
+hora por NTP; más tarjetas (la RTL8168 del Toshiba NB250,
+la PCnet, NE2000: Hispa-DOS ya las lleva); y, encima de esto, un navegador.
+(Las **actualizaciones** por la red ya van: sección 13.)
 
 ## 14 bis. Hispa-Pentium se compila a sí mismo (CASTEL32)
 
@@ -2136,8 +2498,8 @@ en su parte 15 (`SOLO=castel32`).
 
 `castel/pruebas.sh` (las partes 8 a 14; `SOLO=32 ./pruebas.sh` hace solo esas y la
 de los errores; `SOLO=06`, solo la 9, lo de la 0.6; `SOLO=07`, solo la 10, instalar en el disco;
-`SOLO=08`, las de la 0.8, de la 11 a la 14; y `SOLO=caliente`, `SOLO=paquetes`, `SOLO=red` o
-`SOLO=acpi`, solo una de ellas) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
+`SOLO=08`, las de la 0.8, de la 11 a la 14; y `SOLO=caliente`, `SOLO=paquetes`, `SOLO=red`,
+`SOLO=tls` o `SOLO=acpi`, solo una de ellas) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
 teclado, el reloj corre y la división por cero llega a su excepción; que el mapa de
 memoria da los marcos; que la **paginación está activa** con la identidad; que un
 **fallo de página se atiende** en la zona a la demanda; que el **montón no pierde**
@@ -2400,7 +2762,7 @@ disco hecho con `disco.sh ... red`:
   servidor; **PING** a la puerta, tres respuestas; **DESCARGAR** con
   `Content-Length` (400 K), en trozos (`chunked`, con trozos de todos los
   tamaños), hasta que se cierra (HTTP/1.0), una redirección 302, un 404, a otra
-  carpeta, `https://` (se dice que aún no) y sin nada; **Ctrl+C** en medio de
+  carpeta, `https://` sin `TLS.BIN` en el disco (se dice que falta) y sin nada; **Ctrl+C** en medio de
   una descarga que no llega (el programa acaba y la red sigue: `IPCONFIG
   /TODO` y `MEM`); y, desde fuera, que **lo descargado es igual octeto a
   octeto** que lo del servidor (los cuatro archivos) y el disco queda sano.
@@ -2458,6 +2820,23 @@ del anillo 3 aparte, que van en una **cuarta tanda** (en A:, `RED.BIN` con sus
 seis módulos e IPCONFIG, PING y DESCARGAR; en B:, lo que sale), lo mismo para
 ENSAMBLA.
 
+**La 0.8: HTTPS** (sección 14, «HTTPS: el servicio TLS»; la parte 13 bis de
+`pruebas.sh`: **14 comprobaciones**, `SOLO=tls ./pruebas.sh`, unos tres
+minutos y medio), con los servidores de `nucleo32/tls/servidor_https.py` y un
+disco hecho con `disco.sh ... red tls`, con la raíz de prueba en `\RAICES`:
+`TLS.BIN` se hace (`hacer.sh`) y se pone en marcha solo; **DESCARGAR
+https://** con un certificado ECDSA y con uno RSA, con largo y en trozos, igual
+octeto a octeto; la orden **HTTPS** (la biblioteca `Https`): las galletas
+vuelven en el pedido siguiente por la misma conexión (un solo apretón de
+manos), un POST con su cuerpo y una cabecera propia, una redirección en el
+mismo servidor y otra a otro; los certificados que **no valen** (otro nombre,
+una raíz desconocida y, con el reloj en el 2050, caducado), cada uno con su
+texto; `HTTPS /ESTADO`; `TLS.CCH` guardado y usado al arrancar otra vez; **la
+hora** con el reloj del PC en el 2001 (de la cabecera `Date`, avisado como
+riesgo) y sin servidor de la hora (no hay conexión, y se dice). Si esta máquina
+sale a internet, también **https://clicgest.es/ y https://hispados.es/**,
+iguales octeto a octeto que con `curl`, con la hora de actualiza.hispados.es.
+
 **La 0.8: apagar de verdad y la batería** (sección 11; la parte 14 de
 `pruebas.sh`: **20 comprobaciones**, `SOLO=acpi ./pruebas.sh`, los errores y
 esa parte: unos tres minutos). Con la batería de
@@ -2473,7 +2852,33 @@ apagar y reiniciar por el registro de la FADT); sin ACPI (`-no-acpi`: lo de
 antes); un sobremesa (sin pila, y apaga por ACPI); y que un programa
 cualquiera no puede usar las llamadas del servicio.
 
-Con todo, `pruebas.sh` tiene ahora **508 comprobaciones** (423 hasta la 0.7;
+**La 0.8: la firma, el núcleo nuevo y el CD** (la tarde del 20/11). En la
+parte 12 (`SOLO=paquetes`), PAQUETES se compila con una **clave de prueba**
+(`hpq.py clave`, en la carpeta de la prueba; su `clave.cas` al lado de una
+copia de `upaquete.cas`, que el compilador encuentra antes que el de
+`nucleo32`) y el catálogo de prueba va firmado: `hpq.py` firma y comprueba;
+`PAQUETES FIRMA` dice buena y mala; de Internet, firmado, se usa; cambiado
+una letra, o sin `CATALOGO.FIR`, no se usa nada (tampoco de la carpeta que
+trae la firma mala); un `base` que cambia `NUCLEO.BIN` deja `NUCLEO.ANT`,
+`GRUBENV` (1.024 octetos, `nuevo=1`) y la entrada del de antes en `GRUB.CFG`
+una sola vez, y pide reiniciar; y la ventana, con «Buscar novedades» y «(firma
+buena)». La **parte 16** (`SOLO=cd`, unos ocho minutos) hace el CD con
+`cd.sh` (El Torito sin emulación, menos de 650 MB) y, en QEMU como VirtualBox:
+arranca sin instalar en un `pc` con IDE, OHCI con su tableta y la e1000 (con
+la red); instala en el disco IDE y en el SATA de un `q35` (con el CD en AHCI)
+y los dos discos arrancan (el asistente); y en el del `q35`, con un servidor
+HTTP de aquí (`servidor_prueba.py` con RAIZ) y un catálogo firmado: el aviso
+de la bandeja al arrancar, «Verlas», «Actualizar todo» con un núcleo nuevo,
+«Reiniciar ahora», «El núcleo nuevo ha arrancado bien» (`nuevo=0`); y con un
+núcleo que se queda en `hlt`, reiniciar a mano: GRUB elige solo el de antes,
+el sistema lo dice y `GRUBENV` queda en `nuevo=4`.
+
+Con la firma, el núcleo nuevo y el CD, la pasada entera del 20/11 por la tarde (rama
+`pentium-dvd`, con CASTEL32 ya dentro) dio **541 bien, 0 mal**; tras los
+arreglos de la ventana y el paso a `actualiza.hispados.es`, `SOLO=08` (de la 11
+a la 14 y la 16) dio **156 bien, 0 mal**.
+
+Antes, `pruebas.sh` tenía **508 comprobaciones** (423 hasta la 0.7;
 de la 0.8, los paquetes, el USB en caliente, la red, apagar de verdad y la
 batería, y las del AHCI del ICH7). La memoria USB trae ahora **16 programas**
 como módulos (eran 9: PAQUETES y ACTUALIZ, RED, IPCONFIG, PING y DESCARGA, y

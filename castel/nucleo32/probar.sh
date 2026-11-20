@@ -12,7 +12,8 @@
 # Sin NUCLEO.BIN (o si no existe), compila antes semilla.cas y los programas
 # de usuario (uhola.cas, umalo.cas y ucli.cas), que se le dan como módulos de multiboot
 # (-initrd). Con MODULOS="a.bin,b.bin", esos módulos (MODULOS= para ninguno).
-# Con MEMORIA=n, n MB (32 si no se dice).
+# Con MEMORIA=n, n MB (32 si no se dice). Con RELOJ=2001-01-01 (TLS), el reloj del PC
+# empieza en esa fecha (si no, en la de aquí: «-rtc base=localtime»).
 # Para el escritorio (ARRANQUE=escritorio, o la orden «escritorio»), el ratón y
 # las capturas: «:raton X Y» lleva la flecha a ese punto de la pantalla;
 # «:clic X Y» pulsa allí el botón izquierdo; «:doble X Y», dos veces;
@@ -79,7 +80,7 @@ INSTANTANEA=on; [ -n "${ESCRIBE:-}" ] && INSTANTANEA=off
 # se dice nada, y con ella el escritorio pondría en marcha el servicio de red
 case " ${QEMU_MAS:-} " in *" -nic "*|*" -netdev "*) ;; *) INITRD+=(-nic none) ;; esac
 qemu-system-i386 -kernel "$BIN" "${INITRD[@]}" -display none -monitor unix:$T/mon,server,nowait \
-  -serial file:$T/sal -device isa-debug-exit,iobase=0xf4,iosize=0x04 -no-reboot -rtc base=localtime -m ${MEMORIA:-32} > /dev/null 2>&1 &
+  -serial file:$T/sal -device isa-debug-exit,iobase=0xf4,iosize=0x04 -no-reboot -rtc base=${RELOJ:-localtime} -m ${MEMORIA:-32} > /dev/null 2>&1 &
 QPID=$!
 mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; sleep "${2:-0.08}"; }
 # las teclas de cada letra en el teclado español, como las llama «sendkey»
