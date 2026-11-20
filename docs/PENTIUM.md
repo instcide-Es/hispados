@@ -1,6 +1,6 @@
 # Hispa-Pentium — el núcleo de la gama XP, escrito en Castel
 
-*18/11/2026; puesto al día el 19/11/2026 (la 0.7: instalarlo en el disco duro). Hispa-Pentium es el miembro de la
+*18/11/2026; puesto al día el 20/11/2026 (la 0.8: los paquetes y las actualizaciones). Hispa-Pentium es el miembro de la
 familia Hispa-DOS para los PC de 2000 en adelante (la gama de Windows XP, [ROADMAP](ROADMAP.md)): un **núcleo propio
 de 32 bits, sin DOS por debajo**, con memoria virtual, escrito en
 [Castel](../castel/README.md). Esta nota cuenta lo que hay hecho: la semilla de la
@@ -39,7 +39,13 @@ y **memorias** (secciones 7 y 11). Y en la del 19/11 por la noche (la **0.7**):
 pantalla azul (elegir el disco, hacer la partición, darle formato FAT32, copiar
 el sistema a `C:\HISPA`), el **arranque desde el disco** (GRUB en el MBR) y el
 **asistente del primer arranque** (el nombre, la fecha y la hora, el teclado, la
-pantalla: `HISPA.INI`). Todo está en `castel/nucleo32/`.*
+pantalla: `HISPA.INI`). Y en la del 20/11 (la **0.8**): **los paquetes y las
+actualizaciones** (sección 13): paquetes `.HPQ` con sus dependencias y sus
+sumas SHA-256, hechos con `tools/hpq.py`; el programa **PAQUETES**, que instala
+(con lo que haga falta, en orden), actualiza y quita, o todo o nada (y deshace
+lo que deje a medias un corte de luz), y su ventana **«Programas y
+actualizaciones»**; INSTALAR deja apuntado lo que instala. Todo está en
+`castel/nucleo32/`.*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -219,7 +225,10 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 |---|---|---|
 | `llamadas.cas` (Llamadas) | — | El **módulo de las llamadas al sistema** para los programas: `tecla`, `leer_línea` (con su historia), `abrir`, `crear`, `leer`, `escribir_archivo`, `mover`, `cortar`, `cerrar`, `borrar`, `renombrar`, `crear_carpeta`, `cambiar_carpeta`, `redirigir`, `entrada`, `lanzar`, `esperar`, `argumentos`, `dato`, `más_memoria`...; y las **ventanas** (`ventana`, `suceso`, `rectángulo`, `degradado`, `texto`, `mapa`...), los **menús** (`menú`), el **portapapeles** (`al_portapapeles`, `del_portapapeles`) y los terminales. Un programa lo importa y no escribe ni una `int 0x80`. |
 | `barramenu.cas` (Barramenu) | — | La **barra de menús** de una ventana (Archivo, Edición, Ayuda): pintarla, saber qué rótulo se ha pulsado y abrir su menú. |
+| `sha256.cas` (Sha256) | — | El resumen **SHA-256** (FIPS 180-4): `empezar`, `añadir`, `acabar` (sección 13). |
 | `uinstala.cas` | `INSTALAR.BIN` | **INSTALAR**: instala el sistema en el disco duro, en pantalla azul (sección 12). |
+| `upaquete.cas` | `PAQUETES.BIN` | **PAQUETES**: instala, actualiza y quita paquetes `.HPQ`, con sus dependencias, sus sumas y deshaciendo lo que quede a medias (sección 13). |
+| `uactual.cas` | `ACTUALIZ.BIN` | La ventana **«Programas y actualizaciones»** del escritorio: la de PAQUETES (sección 13). |
 | `uasiste.cas` | `ASISTE.BIN` | El **asistente del primer arranque** de un sistema instalado (sección 12). |
 | `ubloc.cas` | `BLOC.BIN` | El **Bloc de notas** del escritorio (sección 10). |
 | `uequipo.cas` | `EQUIPO.BIN` | **Mi equipo**: las unidades (con su letra, de qué son y lo que cabe en ellas) y lo que hay dentro (sección 10). |
@@ -1266,7 +1275,7 @@ absolutos); las luces del teclado; los discos USB con sectores que no sean de 51
 `-device usb-ehci`, `-device piix3-usb-uhci`, y un EHCI con sus UHCI compañeras:
 `ich9-usb-ehci1` e `ich9-usb-uhci1`), teclado, ratón, concentrador (de USB 1.1) y memoria
 (`usb-kbd`, `usb-mouse`, `usb-hub`, `usb-storage`), y con `-machine pc,i8042=off`
-quita el teclado y el ratón PS/2, como en un Mac: sección 13. **Lo que QEMU no
+quita el teclado y el ratón PS/2, como en un Mac: sección 14. **Lo que QEMU no
 puede probar**: las transacciones partidas del EHCI (no tiene concentrador de
 alta velocidad), que son justo el camino del teclado y el panel del MacBook;
 están hechas según la norma y como las hace HSPUSB, pero hasta que no se prueben
@@ -1459,10 +1468,206 @@ qemu-system-i386 -m 64 -rtc base=localtime \
   -device ahci,id=sata -drive id=d,file=/dev/shm/disco.img,format=raw,if=none -device ide-hd,drive=d,bus=sata.0
 ```
 
-## 13. Las pruebas
+## 13. Los paquetes y las actualizaciones
 
-`castel/pruebas.sh` (las partes 8, 9 y 10; `SOLO=32 ./pruebas.sh` hace solo esas y la
-de los errores; `SOLO=06`, solo la 9, lo de la 0.6; `SOLO=07`, solo la 10, instalar en el disco) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
+Desde la **0.8** (20/11/2026), lo instalado en el disco se puede **poner al día,
+añadir y quitar** sin volver a instalar el sistema: por **paquetes** (archivos
+`.HPQ`), que maneja el programa **PAQUETES** (`upaquete.cas`, `PAQUETES.BIN`,
+del anillo 3, en Castel) y que se hacen en el VPS con **`tools/hpq.py`**. De
+momento los paquetes se traen de una carpeta (la de la memoria USB, la de otro
+disco...); cuando el núcleo tenga red, de Internet (más abajo: «el gancho de la
+red»). (El número de versión del sistema —el núcleo, el escritorio, INSTALAR—
+sigue en 0.7: lo cambia quien publique la 0.8.)
+
+### El paquete (.HPQ)
+
+Un archivo con dos partes: **una cabecera de texto** (página 437, líneas con CR
+LF) y, detrás, **los archivos tal cual**, uno detrás de otro, en el orden de la
+cabecera:
+
+```
+HPQ 1
+nombre=oficina
+version=1.0
+descripcion=La oficina de Hispa-386: Facturas, Pluma, Cuentas y Mirador
+necesita=hvprun >= 0.7
+choca=
+archivo=\OFICINA\FACTURAS.HVP 172610 4c1d...e9 (su SHA-256, en 64 cifras)
+archivo=\OFICINA\PLUMA.HVP 128402 90ab...17
+...
+fin
+```
+
+- **`nombre`**: hasta 8 letras (`a-z`, cifras, `-`, `_`): es también el nombre de
+  su registro (`OFICINA.PQI`). **`version`**: números con puntos, que se comparan
+  número a número (la 0.10 es más nueva que la 0.9).
+- **`necesita`** (las **dependencias**) y **`choca`** (los **conflictos**): una
+  lista separada por comas, cada uno con su versión si hace falta: `base >= 0.7,
+  nucleo >= 0.8, hvprun` (con `>=`, `<=`, `=`, `>` y `<`; sin nada, cualquier
+  versión). **`nucleo`** es el núcleo **que está en marcha** (su versión la da la
+  llamada 15): un programa que use llamadas nuevas lo pide así.
+- **`archivo`**: adónde va (una ruta entera de la unidad del sistema, en 8+3:
+  `\HISPA\BLOC.BIN`, `\OFICINA\PLUMA.HVP`; no en `\HISPA\PAQUETES`, que es la base
+  de lo instalado), lo que mide y su **SHA-256**.
+- Lo que PAQUETES no conoce lo deja pasar: así caben cosas nuevas sin cambiar de
+  formato. **`firma=`** queda reservada para firmar el paquete; esta versión de
+  PAQUETES dice que la lleva, pero aún no la comprueba (la cadena de confianza de
+  hoy es el catálogo, que lleva el SHA-256 de cada paquete entero: más abajo).
+
+El **SHA-256** está escrito en Castel (`nucleo32/sha256.cas`, el módulo `Sha256`:
+`empezar`, `añadir` y `acabar`, de FIPS 180-4), para los programas del anillo 3.
+
+### El catálogo (CATALOGO.TXT)
+
+Al lado de los paquetes, uno por línea (puede haber varias versiones del mismo):
+
+```
+HPQ-CATALOGO 1
+paquete=oficina 1.0 OFICINA.HPQ 798859 0d4f...a2 La oficina de Hispa-386: ...
+```
+
+El nombre, la versión, el archivo, **lo que mide y el SHA-256 del paquete
+entero** (cabecera incluida) y la descripción. Un paquete que se trae por el
+catálogo tiene que medir eso y dar esa suma, además de las de sus archivos.
+
+### Lo instalado: C:\HISPA\PAQUETES
+
+Un **registro por paquete**, `NOMBRE.PQI`: **la cabecera de su paquete, tal
+cual** (qué es, qué versión, qué necesita, qué archivos dejó y sus sumas). Con eso
+se actualiza (lo que la versión nueva ya no trae se quita), se quita limpiamente
+y se comprueba. Además, si hacen falta: `DIARIO.TXT` y `HECHO.TXT` (una
+instalación a medias, abajo), `ORIGEN.TXT` (de dónde traer los paquetes, si no se
+quiere que lo busque) y `BAJADAS` (lo traído de Internet).
+
+**INSTALAR deja apuntado lo que instala**: `usb.sh` hace con `hpq.py` los
+paquetes del sistema y sus registros, que van con lo que se instala (en la
+memoria, en `\INSTALA\PAQUETES`), y `CARPETAS.TXT` los manda a
+`HISPA\PAQUETES` (desde la 0.8, `CARPETAS.TXT` admite también una carpeta
+**dentro de `\HISPA`**: `ARCHIVO.EXT=HISPA\CARPETA`). Así, en un sistema recién
+instalado, `PAQUETES LISTA` ya dice los ocho paquetes del sistema y `PAQUETES
+COMPRUEBA` los encuentra iguales.
+
+### El programa PAQUETES
+
+En el intérprete de órdenes (o en la Consola del escritorio):
+
+| Orden | Qué hace |
+|---|---|
+| `PAQUETES LISTA` | lo instalado: nombre, versión y descripción |
+| `PAQUETES CATALOGO` | lo que hay para instalar (la versión más nueva de cada uno), y si está instalado o hay una más nueva |
+| `PAQUETES INSTALA nombre...` | lo instala del catálogo (la versión más nueva), **con lo que necesite, antes y en orden** |
+| `PAQUETES INSTALA X:\PAQUETES\A.HPQ` | instala ese archivo (lo que necesite, del catálogo de su carpeta, si lo tiene, o del de siempre) |
+| `PAQUETES ACTUALIZA [nombre...]` | pone al día todo lo instalado (o eso): lo que tenga una versión más nueva en el catálogo |
+| `PAQUETES QUITA nombre...` | lo quita: sus archivos, su registro y las carpetas que se queden vacías; no, si otro lo necesita |
+| `PAQUETES MIRA A.HPQ` | lo que lleva un paquete, y si está sano |
+| `PAQUETES COMPRUEBA` | si los archivos instalados siguen como se instalaron (su SHA-256) |
+| `PAQUETES ESTADO` | lo instalado y lo del catálogo, una línea por paquete, para otro programa (la ventana) |
+| `/DESDE=carpeta` o `/DESDE=http://...` | de dónde traer los paquetes |
+| `/FORZAR` | quitar aunque otro lo necesite; poner una versión igual o más vieja que la instalada |
+
+**De dónde.** Lo que diga `/DESDE=`; si no, la primera línea de
+`C:\HISPA\PAQUETES\ORIGEN.TXT`; si no, la carpeta **`\PAQUETES`** de la primera
+unidad que tenga un `CATALOGO.TXT` (primero las memorias USB: la de arranque de
+la 0.8 lleva todos los paquetes del sistema); y si no, Internet:
+`http://actualiza.clicgest.es/pentium/`.
+
+**Antes de tocar nada**, PAQUETES hace el plan entero: lo que se pide y lo que
+necesita (la versión más nueva del catálogo que cumpla, si lo instalado no
+cumple; las dependencias se siguen hasta 16 niveles, y una en círculo no se
+repite), y mira que **nada choque** (con lo instalado o entre sí, en los dos
+sentidos) y que **ningún archivo sea de otro paquete**. Luego **comprueba las
+sumas** de todos los paquetes del plan (el paquete entero contra el catálogo, y
+cada archivo contra su cabecera): con una sola mala, no se instala nada y el
+disco queda igual. Y también **mira que quepa**.
+
+**O todo o nada** (cada paquete): lo que se va a hacer se apunta antes en
+**`DIARIO.TXT`** (las carpetas que hay que hacer, los archivos que se ponen
+—diciendo si ya estaban— y los que se quitan); los archivos nuevos se escriben
+**aparte**, en la carpeta de su destino (`HPQnnnnn.NUE`), volviendo a comprobar
+su suma; y solo entonces se cambian: lo de antes se **aparta** (`HPQnnnnn.VIE`) y
+lo nuevo se pone en su sitio, cambiando nombres. El registro (`NOMBRE.PQI`) es el
+último. Con todo cambiado, el diario pasa a **`HECHO.TXT`**: desde ahí ya no se
+deshace; se borra lo apartado, las carpetas vacías, y el diario. Si algo falla a
+mitad (el disco lleno, un archivo que no se deja), se deshace en el momento. Y
+si **se va la luz** a mitad, la próxima vez que se use PAQUETES (cualquier orden)
+ve el diario y **lo deshace**: lo apartado vuelve a su sitio, lo nuevo se borra,
+y lo dice. (Si se va mientras se escribe un `.NUE`, quedan clusters sueltos que
+`fsck` recoge, como con cualquier archivo a medio escribir: lo instalado sigue
+entero.) Cuando hay que instalar varios paquetes, cada uno es su propio todo o
+nada, en orden: si falla el tercero, los dos primeros (lo que necesitaba) quedan
+instalados, y se dice.
+
+**El gancho de la red.** PAQUETES no sabe de TCP/IP: para traer de Internet el
+catálogo y cada paquete, a `C:\HISPA\PAQUETES\BAJADAS`, lanza el programa
+**`DESCARGA.BIN`** (la orden de descargar de la red: su nombre tiene que caber en
+8+3) con dos argumentos, **`URL DESTINO`**, lo espera, y vale si acaba con el
+código 0 y el archivo está. Si no está, lo dice («hace falta la red»). Si la red
+diera la descarga como **llamada al sistema** en vez de como programa, basta con
+poner su número en `LLAMADA_DESCARGAR` (`upaquete.cas`): se llama con EBX = la
+URL y ECX = el archivo de destino, y un error es lo de siempre. Lo traído se
+comprueba igual (el SHA-256 del catálogo y los de los archivos). Las pruebas lo
+ejercitan con un `DESCARGA` de mentira que copia de la memoria USB.
+
+### La ventana: «Programas y actualizaciones»
+
+![Programas y actualizaciones](pentium/actualizaciones.png)
+
+En el menú Inicio, **«Actualizar»** (encima de Configuración) abre
+`ACTUALIZ.BIN` (`uactual.cas`): la lista de lo instalado y de lo que hay en el
+catálogo, con la versión instalada, la que hay (en verde si es más nueva) y lo
+que es; y tres botones: **Instalarlo** (o **Actualizarlo**, si ya está y hay una
+más nueva), **Quitarlo** y **Actualizar todo**. Con el teclado: las flechas
+eligen, Intro instala, Supr quita, F5 vuelve a mirar. La ventana no sabe de
+paquetes: lanza PAQUETES (`PAQUETES ESTADO`, una línea por paquete fácil de
+leer: `p|nombre|instalada|la del catálogo|descripción`; `PAQUETES INSTALA
+nombre`...) con lo que escribe mandado a un archivo (`VENTANA.TXT`, en la base,
+que luego borra), y enseña abajo las últimas líneas de lo que ha dicho: las
+dependencias, las sumas y el todo o nada son los de PAQUETES.
+
+**El intérprete encuentra lo instalado**: en un sistema instalado, el `PATH` de
+fábrica de ORDENES lleva además `C:\HISPA` (`C:\;C:\HISPA`), así que un programa
+que trae un paquete se lanza por su nombre desde cualquier carpeta.
+
+### tools/hpq.py
+
+```
+python3 tools/hpq.py crea SALIDA.HPQ --nombre bloc --version 0.8 --descripcion "El Bloc de notas" \
+        --necesita "base >= 0.7" BLOC.BIN='\HISPA\BLOC.BIN'
+python3 tools/hpq.py catalogo CARPETA        # CATALOGO.TXT con los .HPQ de la carpeta
+python3 tools/hpq.py mira A.HPQ              # lo que lleva, y sus sumas
+python3 tools/hpq.py registro A.HPQ A.PQI    # su registro (la cabecera)
+python3 tools/hpq.py sistema SALIDA CARPETA...   # los paquetes del sistema (lo usa usb.sh)
+```
+
+**Los paquetes del sistema** (`hpq.py sistema`, de lo mismo que se instala):
+
+| Paquete | Versión | Lleva | Necesita |
+|---|---|---|---|
+| `base` | 0.7 | `NUCLEO.BIN`, `ORDENES.BIN`, `ASISTE.BIN`, `INSTALAR.BIN`, `LEEME.TXT` (en `\HISPA` y en la raíz), `MANUAL.TXT`, `BOOT.IMG`, `CORE.IMG` | — |
+| `bloc` | 0.7 | `BLOC.BIN` | base >= 0.7 |
+| `consola` | 0.7 | `CONSOLA.BIN` | base >= 0.7 |
+| `equipo` | 0.7 | `EQUIPO.BIN` (Mi equipo) | base >= 0.7 |
+| `ejemplos` | 0.7 | `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN` | base >= 0.7 |
+| `paquetes` | 1.0 | `PAQUETES.BIN`, `ACTUALIZ.BIN` (su ventana) | base >= 0.7, nucleo >= 0.7 |
+| `hvprun` | 0.7 | `HVPRUN.BIN` | base >= 0.7 |
+| `oficina` | 1.0 | `\OFICINA\`: `FACTURAS.HVP`, `PLUMA.HVP`, `CUENTAS.HVP`, `MIRADOR.HVP`, `TIPOS.DAT`, `DICCIO.DAT` | hvprun >= 0.7 |
+
+(`GRUB.CFG`, `HISPA.INI` y `MBR.ANT` no son de ningún paquete: son de este equipo.)
+Para publicar una actualización: hacer el paquete con su versión nueva, ponerlo
+con los demás, `hpq.py catalogo` y subir la carpeta (a la memoria USB o, cuando
+haya red, a `actualiza.clicgest.es/pentium/`).
+
+**Lo que falta**: comprobar la **firma** (del catálogo, que lleva las sumas de
+todo; con una clave pública dentro del sistema); actualizar el núcleo y pedir
+reiniciar (hoy se pone el archivo, y vale en el arranque siguiente); que la
+ventana deje elegir el origen y enseñe el avance; y la red (otra rama), que
+trae lo de Internet por el gancho.
+
+## 14. Las pruebas
+
+`castel/pruebas.sh` (las partes 8, 9, 10 y 11; `SOLO=32 ./pruebas.sh` hace solo esas y la
+de los errores; `SOLO=06`, solo la 9, lo de la 0.6; `SOLO=07`, solo la 10, instalar en el disco;
+`SOLO=08`, solo la 11, los paquetes) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
 teclado, el reloj corre y la división por cero llega a su excepción; que el mapa de
 memoria da los marcos; que la **paginación está activa** con la identidad; que un
 **fallo de página se atiende** en la zona a la demanda; que el **montón no pierde**
@@ -1682,6 +1887,38 @@ del disco arranca el intérprete, con el teclado guardado; y **la oficina, en el
 disco instalado**: el menú Inicio abre Facturas (con `C:\HISPA\HVPRUN.BIN`) y
 Mi equipo entra en `C:\OFICINA` y abre Cuentas.
 
+Y en la instalación de verdad, desde la 0.8: **INSTALAR deja los registros** de
+los ocho paquetes del sistema en `C:\HISPA\PAQUETES` (iguales a los de la
+memoria), y en el sistema instalado `PAQUETES LISTA` los dice y `PAQUETES
+COMPRUEBA` encuentra todos sus archivos como se instalaron (su SHA-256). En la
+instalación con el núcleo de `-kernel`, un registro de prueba va a
+`\HISPA\PAQUETES` por `CARPETAS.TXT` («HISPA\PAQUETES»).
+
+**La 0.8** (la parte 11 de `pruebas.sh`, `SOLO=08`: los paquetes), en QEMU, con
+un disco SATA «instalado» (FAT32, con `C:\HISPA` y lo instalado: `base`) y una
+memoria USB con paquetes de prueba hechos con `tools/hpq.py` (letras 1.0 y 1.1,
+saludo 1.0 y 2.0 —que necesitan letras, base y el núcleo—, choque —que choca
+con saludo— y malo —con un octeto cambiado—): `hpq.py` hace los paquetes, el
+catálogo y los registros, y ve la suma mala; `PAQUETES LISTA` y `CATALOGO` (la
+memoria USB, encontrada sola); **instalar un archivo de la memoria con lo que
+necesita** (letras antes, la versión más nueva del catálogo) y lanzar el
+programa nuevo por su nombre; **instalar por el nombre** (la versión más nueva);
+**actualizar** (la 1.0 a la 2.0: un archivo cambia, otro llega y el que ya no va
+se quita) y que después todo está al día; **una suma mala**, **un conflicto**,
+**quitar lo que otro necesita** y lo que no hay: se dice y **el disco queda
+idéntico octeto a octeto**; `COMPRUEBA` ve un archivo cambiado a mano;
+**quitar** (con las carpetas que quedan vacías): el disco vuelve a tener los
+mismos archivos y los mismos clusters que al principio; **un corte a mitad**
+(`/CORTE=4`: tras el cuarto cambio de nombre se queda quieto y QEMU se apaga):
+quedan el diario y lo apartado, y **al volver PAQUETES lo deshace** y el disco
+está como antes del corte; **el gancho de la red** con un `DESCARGA` de mentira
+(`/DESDE=http://...`: el catálogo y el paquete se traen a `BAJADAS` y se
+instalan) y sin él («hace falta la red»); y **la ventana** desde el menú Inicio
+(«Actualizar»): la lista, Instalarlo (con lo que necesita) y Quitarlo, con
+capturas. Después de cada paso, `fsck.fat` da el disco por sano, `mtools`
+compara lo instalado octeto a octeto y no quedan restos (`HPQ*.NUE`, `.VIE`,
+el diario).
+
 Lo que **no se puede probar en QEMU**: las transacciones partidas del EHCI (el
 teclado y el panel de un MacBook: sección 11), el traspaso de verdad desde la
 BIOS de cada equipo, y los discos SATA de verdad.
@@ -1717,7 +1954,7 @@ disco) son unos cinco minutos; `SOLO=06` (la parte 9, lo de la 0.6 y la
 oficina), unos diez, y `SOLO=16`, lo que no arranca el núcleo (de la parte 1 a
 la 7, con los dos compiladores y los dos ensambladores), otros siete.
 
-## 14. Por dónde seguir
+## 15. Por dónde seguir
 
 Hecho en la tanda del 18-19/11/2026: el disco (ATA) y la FAT, cargar programas del
 disco, las llamadas al sistema nuevas, la consola con cerrojo, el intérprete de
