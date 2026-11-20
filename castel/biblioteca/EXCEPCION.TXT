@@ -1,0 +1,15 @@
+EXCEPCION DE BIBLIOTECA DE CASTEL
+
+Copyright (C) 2026 Carlos Sanz y contribuidores.
+
+Las bibliotecas de Castel (castel/biblioteca/ y castel/biblioteca32/) se
+distribuyen con la licencia GPL-2.0 o posterior, con esta excepcion:
+
+  Si un programa se compila con un compilador de Castel y, al compilarlo,
+  lleva dentro codigo de estas bibliotecas, ese programa se puede
+  distribuir con la licencia que elija su autor, aunque no sea libre.
+
+La excepcion no cambia la licencia de las propias bibliotecas: quien
+distribuya las bibliotecas, o una version cambiada de ellas, lo hace con la
+GPL. Tampoco alcanza al compilador, al ensamblador ni al resto de Hispa-DOS,
+que siguen con su licencia (GPL-2.0 o posterior).

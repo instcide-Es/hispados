@@ -323,3 +323,7 @@ Punteros lejanos como tipo y copiar arreglos y estructuras enteros. Ver CASTEL.m
    arranque del disco con GRUB y el asistente del primer arranque). Lo siguiente: probarlo
    instalado en un PC de verdad; y crear nombres largos, tuberías y una caché de disco de
    verdad.
+
+## Licencia de los programas hechos con Castel
+
+Castel y Hispa-DOS son GPL-2.0 o posterior. Las bibliotecas de Castel (`biblioteca/` y `biblioteca32/`) llevan además una **excepción de biblioteca** (`biblioteca/EXCEPCION.TXT`): un programa compilado con Castel que use esas bibliotecas puede tener la licencia que elija su autor, también una no libre. La excepción no cambia la licencia de las bibliotecas ni del compilador.
