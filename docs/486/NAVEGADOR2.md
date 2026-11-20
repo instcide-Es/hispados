@@ -22,11 +22,11 @@ disquete «Internet») para la biblioteca en un 486 lento, el completo
 | | Navegador (NAVEGA.EXE) | Navegador completo (NAVEGA2.EXE) |
 |---|---|---|
 | Página | rejilla de letras 8×16, 256 colores de Hispa | puntos (32 bits, pasados a la paleta), letras DejaVu de ancho variable |
-| CSS | lo mínimo (de las `<style>`; clases de Bootstrap conocidas) | CSS 2.1 + flexbox + calc() de NetSurf, hojas de fuera, `@media`; variables de CSS (nuestro) |
+| CSS | lo mínimo (de las `<style>`; clases de Bootstrap conocidas) | CSS 2.1 + flexbox + calc() de NetSurf, hojas de fuera, `@media`; variables de CSS, `gap`, grid, esquinas redondas, sombras, `@font-face` (nuestro) |
 | JavaScript | sí (QuickJS, HSPJS.DLL) | todavía no (ver «Lo que falta») |
 | ClicGest | modo ligero (User-Agent `HispaNavegador`) | la web normal (User-Agent `HispaSurf`) |
 | Memoria | 1-3 MB | 8-15 MB (ver «Medidas») |
-| Tamaño | 300 KB | 1,07 MB + 208 KB de letras |
+| Tamaño | 300 KB | 1,14 MB + 208 KB de letras (dos disquetes) |
 
 ## Cómo se maneja
 
@@ -67,19 +67,22 @@ formato que las del Navegador propio).
 
 ## Dónde está y qué necesita
 
-En el disquete «Internet 2» (`make internet2`: `build/internet2.img`), que
-se copia **entero** en `C:\HISPADOS\INTERNET`, junto a lo del disquete
-«Internet» (que trae MSVCRT.DLL, WSOCK32.DLL y HSPTLS.DLL):
+En los disquetes «Internet 2» y «Internet 3» (`make internet2`:
+`build/internet2.img` y `build/internet3.img`), que se copian **enteros** en
+`C:\HISPADOS\INTERNET`, junto a lo del disquete «Internet» (que trae
+MSVCRT.DLL, WSOCK32.DLL y HSPTLS.DLL). Desde el 20/11/2026 son dos (con las
+letras de la web ya no cabía en uno): «Internet 2», el programa y `RECURSOS`;
+«Internet 3», las letras (`FUENTES`).
 
 | | |
 |---|---|
-| `NAVEGA2.EXE` | el programa (1.070 KB) |
+| `NAVEGA2.EXE` | el programa (1.142 KB) |
 | `NAVEGA2.INI` | sus opciones |
-| `RECURSOS\` | las hojas de estilo de NetSurf (`default.css`, `quirks.css`, `adblock.css`, `internal.css`), sus textos en español (`MESSAGES`) y la página de inicio |
-| `FUENTES\` | las letras: DejaVu Sans, Sans negrita, Serif, Serif negrita, Mono y Mono negrita, recortadas a las letras de Europa occidental (208 KB; `terceros/dejavu`) |
+| `RECURSOS\` | las hojas de estilo de NetSurf (`default.css`, `quirks.css`, `adblock.css`, `internal.css`), sus textos en español (`MESSAGES`), la página de inicio y `BROTLI.DIC` (el diccionario de Brotli para las letras WOFF2, comprimido: 58 KB) |
+| `FUENTES\` (disquete «Internet 3») | las letras: DejaVu Sans, Sans negrita, Serif, Serif negrita, Mono y Mono negrita, recortadas a las letras de Europa occidental (208 KB; `terceros/dejavu`) |
 | `LEEME.TXT` | cómo se instala |
 
-Le quedan 115 KB libres al disquete. Hispa Ventanas pone solo, al arrancar,
+Le quedan 184 KB libres a «Internet 2» y 1,2 MB a «Internet 3». Hispa Ventanas pone solo, al arrancar,
 el acceso **«Navegador completo»** en el grupo **Internet** del menú Inicio
 (si encuentra `INTERNET\NAVEGA2.EXE`; una vez: la clave `Internet2` de
 `[Centro]` en CENTRO.INI; si se borra, no vuelve).
@@ -112,6 +115,14 @@ w32/surf/           lo nuestro:
   imagen.c          PNG y JPEG con stb_image (los GIF, BMP e ICO, con
                     libnsgif y libnsbmp de NetSurf)
   cssvar.c          las variables de CSS (ver abajo) y los degradados
+  webletra.c        las letras de la web (@font-face): las lee, las pide
+  woff.c            WOFF y WOFF2 a TTF (terceros/brotli: el decodificador
+                    de Brotli de Google, MIT)
+  redondo.c         esquinas redondas, sombras y fondos con transparencia,
+                    en el búfer de la página
+  anfitrion.c,      el mismo NetSurf para Linux, sin ventana: pinta una
+  anfitrion_rh.c    página en un PPM (`make surfppm`; la red con curl); para
+                    probar el pintado en segundos (ver «Pruebas»)
   archivo.c         las rutas de DOS (C:\...) <-> file:///C:/...
   memoria.c         malloc/free propios (ver «Medidas»)
   apoyo.c, inc/     la biblioteca de C que falta en MSVCRT.DLL (POSIX,
@@ -177,43 +188,96 @@ Bootstrap 5.3 (233 KB) sale en 439 KB; en el VPS, 0,1 s.
 ## Comparado con Chrome
 
 Capturas de Chrome (Playwright, 780×493: la misma zona de página que
-NAVEGA2.EXE a 800×600) y de NAVEGA2.EXE en QEMU, en `navegador2/`:
+NAVEGA2.EXE a 800×600) y de NAVEGA2.EXE en QEMU, en `navegador2/`. Las del
+18/11 (`01`-`09`) son de antes del 20/11; las `1x_..._despues.png`, de
+después del pintado nuevo (`tools/surf_capturas.sh`):
 
-| Página | NAVEGA2.EXE | Chrome |
-|---|---|---|
-| Una página HTML+CSS del disco | `01_pagina_de_disco.png` | |
-| https://hispados.es/ | `02_hispados.png` (sin las variables: `02_hispados_sin_variables.png`) | `02_hispados_chrome.png` |
-| https://clicgest.es/login | `03_clicgest_login.png` | `03_clicgest_login_chrome.png` |
-| demo: panel | `04_demo_panel.png` | `04_demo_panel_chrome.png` |
-| demo: catálogo de la biblioteca | `05_catalogo.png` | `05_catalogo_chrome.png` |
-| demo: socios | `06_socios.png` | `06_socios_chrome.png` |
+| Página | NAVEGA2.EXE (18/11) | NAVEGA2.EXE (20/11) | Chrome |
+|---|---|---|---|
+| Una página HTML+CSS del disco | `01_pagina_de_disco.png` | | |
+| https://hispados.es/ | `02_hispados.png` (sin las variables: `02_hispados_sin_variables.png`) | | `02_hispados_chrome.png` |
+| https://clicgest.es/ | | `10_clicgest_inicio_despues.png` | `10_clicgest_inicio_chrome.png` |
+| https://clicgest.es/login | `03_clicgest_login.png` | `11_login_despues.png` | `03_clicgest_login_chrome.png` |
+| demo: panel | `04_demo_panel.png` | `12_panel_despues.png` | `04_demo_panel_chrome.png` |
+| demo: la biblioteca | | `13_biblioteca_despues.png` | `13_biblioteca_chrome.png` |
+| demo: catálogo de la biblioteca | `05_catalogo.png` | `14_catalogo_despues.png` | `05_catalogo_chrome.png` |
+| demo: socios | `06_socios.png` | | `06_socios_chrome.png` |
 
 (Solo lecturas en la demo: entrar por `/demo` y mirar.)
 
-Lo que falla o falta, de más a menos visible:
+### Lo que se arregló el 20/11/2026 (el pintado)
+
+Carlos (20/11): «Mejor dejar la web como tiene que estar y hacer compatible
+el explorador web» (veía «espacios raros» y le costaba encontrar «Entrar» en
+ClicGest). Sin tocar ClicGest:
+
+- **96 puntos por pulgada**, como Chrome. NetSurf usaba 90: 16px de CSS eran
+  15 puntos en las cajas y 17 en las letras (`letra.c` ya contaba con 96):
+  todo salía un poco más estrecho y las letras más grandes.
+- **Letras de la web** (`@font-face`, `webletra.c`): TTF, OTF, WOFF (zlib) y
+  WOFF2 (Brotli, `woff.c`; el diccionario, `RECURSOS\BROTLI.DIC`, se lee
+  solo mientras se descomprime). Se piden las familias que usa alguna regla
+  (`font-family`) y, con `unicode-range`, solo si tienen la «A»; la página
+  espera a que lleguen (como `font-display: block`), así se maqueta una vez.
+  Si la hoja da a elegir, TTF/OTF y WOFF antes que WOFF2 (en un 486 Brotli
+  tarda más y gasta más memoria). **Bootstrap Icons** sale (el ojo, la lupa,
+  las flechas...) y la letra de ClicGest, **Plus Jakarta Sans** (variable:
+  stb_truetype pinta su peso normal; la negrita se hace engordando 1-3 puntos
+  la letra). Hasta 16 letras y 2,5 MB entre todas; se guardan de una página a
+  otra.
+- **`::before` y `::after` con texto** (NetSurf solo hacía bloques vacíos):
+  los iconos de letra son eso (`.bi::before { content: "\f341" }`).
+- **Línea de base**: el texto y los inline-block (iconos, botones) a la
+  misma línea de base, con `vertical-align: -.125em`; la base sale de las
+  medidas de la letra (NetSurf la ponía a 3/4 de la línea: los iconos salían
+  cortados por arriba). El espacio detrás de un inline-block («`<i></i> Ver`»).
+- **`gap`** (`row-gap`, `column-gap`, `grid-gap`) en flexbox y grid, y
+  **`justify-content`** (NetSurf 3.11 no lo hacía: `space-between`, `center`...).
+- **CSS grid** (`layout_grid.c`): `grid-template-columns` con longitudes,
+  `fr`, `auto`, `minmax()`, `repeat(N | auto-fill | auto-fit, ...)`;
+  `grid-column` (`N`, `N / M`, `1 / -1`, `span N`); `align-items`. Las filas,
+  del alto de lo que llevan. No: `grid-template-areas`, `grid-row`,
+  `grid-template-rows`.
+- **Esquinas redondas** (`border-radius`, suavizadas), **sombras**
+  (`box-shadow`, la primera, difuminada) y **fondos y bordes con
+  transparencia** (`rgba()`): `redondo.c`, en el búfer de la página.
+- **Campos y botones como en Chrome**: `min-height` y `max-height` con
+  `box-sizing: border-box` (los campos de 48 de ClicGest medían 66); el texto
+  de los botones en el centro; el texto de ayuda (`placeholder`) en gris; las
+  casillas con estilo (Bootstrap), azules con su marca al estar marcadas.
+- **Flexbox**: los elementos en línea, los campos y los absolutos dentro de un
+  flex son bloques (si no, el campo de `.input-group` no se estiraba y
+  `.visually-hidden` ocupaba sitio); los absolutos no entran en el reparto;
+  el margen de la caja siguiente ya no atraviesa una caja flex; `inline-flex`
+  da alto a su línea; con `min-height`, se vuelve a centrar.
+- **CSS**: `font-weight: bolder` (el `<strong>` de Bootstrap salía normal);
+  `:focus-within` y `:focus-visible` (sin entenderlas se perdía la regla de
+  `.visually-hidden`); texto con degradado (`background-clip: text`: «todo en
+  uno»), los brillos desenfocados (`filter: blur()`, se esconden) y los
+  degradados casi transparentes (sin manchas de color); una imagen con su
+  alto y `width: auto` (el logotipo) guarda la proporción.
+
+### Lo que queda distinto, de más a menos visible
 
 1. **JavaScript**: ClicGest sin JavaScript enseña su versión para «sin
-   JavaScript» (los menús desplegables abiertos, `.cg-abrir-sin-js`; la barra
-   lateral como enlaces). Es lo que más cambia el aspecto.
-2. **Iconos de letra** (Bootstrap Icons: `@font-face` con WOFF2): NetSurf no
-   carga letras de la web; los iconos no salen (el ojo de «Ver», la lupa,
-   las flechas).
-3. **CSS grid** (`display: grid`): NetSurf 3.11 no lo tiene; lo de rejilla
-   sale uno debajo de otro (las tarjetas grandes de la biblioteca).
-4. **`gap`** en flexbox y **esquinas redondas** (`border-radius`), **sombras**
-   (`box-shadow`): no los pinta (las cajas son rectas y sin sombra).
-5. Los **campos de formulario** salen más altos que en Chrome (NetSurf mide
-   su alto con la letra y el relleno de Bootstrap a su manera).
-6. Las letras de la web (Inter, Space Grotesk...) son DejaVu: más anchas.
-7. Los colores, en los 256 de Hispa Ventanas (el más cercano, sin tramado):
-   los grises claros y los pasteles se parecen, pero no son.
-8. SVG: libsvgtiny necesita el XML de libdom (expat), que no va aún: el
-   logotipo de hispados.es (SVG) no sale.
-
-Arreglado aquí: las variables de CSS, los degradados de fondo, las
-mayúsculas de las letras con tilde y la ñ en `text-transform` (salía
-«ESPAñA»), las `<style>` partidas entre dos trozos de la red, el
-User-Agent que ClicGest tomaba por el del Navegador ligero.
+   JavaScript» (los menús desplegables abiertos, los botones `.js-only` como
+   «Ver» de la contraseña, el aviso de las galletas). Otra sesión.
+2. **SVG**: el botón de la hamburguesa (`navbar-toggler-icon`), las flechas
+   de los desplegables (`form-select`) y la marca de las casillas de
+   Bootstrap son SVG; sin SVG no salen (la de las casillas se pinta aquí).
+3. **`<details>`**: NetSurf lo enseña siempre abierto (y sin JavaScript no
+   se podría abrir): el formulario «Añadir un libro» del catálogo sale entero.
+4. **Las letras**: Plus Jakarta Sans variable en su peso normal (la negrita,
+   engordada); sin `letter-spacing` (NetSurf no lo hace): los títulos un poco
+   más anchos; los emojis (👋, 🟡) no salen.
+5. **`position: fixed`** (el botón del menú lateral del móvil), `opacity`,
+   `transform` (salvo esconder lo de fuera de la pantalla) y las animaciones.
+6. Los colores, en los 256 de Hispa Ventanas (el más cercano, sin tramado):
+   los grises claros, los pasteles y las sombras suaves se parecen, pero no
+   son.
+7. Algún caso de texto que salta a la línea siguiente en vez de partirse
+   (NetSurf parte las cajas de texto al maquetar y, si se maqueta otra vez
+   más ancho, no las junta).
 
 ## Medidas
 
@@ -266,12 +330,13 @@ Con 24-32 MB va todo. Ver «Lo que falta».
    lo nuestro, generar los enlaces de QuickJS con un nsgenbind propio.
    Ahora: sin JavaScript (`content/handlers/javascript/none`).
 2. **SVG**: el XML de libdom con expat (o un lector XML pequeño propio).
-3. **Iconos de letra y `@font-face`**: cargar TTF/WOFF (WOFF2 pide Brotli).
+3. ~~Iconos de letra y `@font-face`~~: hecho el 20/11 (ver «Comparado con
+   Chrome»). Queda: los pesos de las letras variables (`gvar`), `<details>`.
 4. **Cursiva** (inclinando las letras al pintarlas) y el «hinting».
 5. **Descargas** (al Lector, como el Navegador propio: `gui_download_table`)
    e **imprimir** (la página en puntos al Lector).
-6. **Grid** y `gap`: en el `layout` de NetSurf (los de NetSurf lo tienen
-   pedido; el flexbox de 3.11 es reciente).
+6. ~~Grid y `gap`~~: hecho el 20/11 (`layout_grid.c`). Queda: las áreas
+   con nombre, `grid-row`, `grid-template-rows`.
 7. **Memoria** para 16 MB justos: que una página que no cabe dé un aviso
    (ahora se queda en «Pidiendo»), soltar las páginas del historial, una
    caché de letras más pequeña, Bootstrap sin las reglas añadidas que no se
@@ -288,3 +353,20 @@ botones con variables por clase, degradado, flexbox, PNG y JPEG; el
 User-Agent `HispaSurf`), una redirección, una página del disco, Atrás, un
 formulario GET y una página larga (Av Pág, Fin), con las capturas
 (`GUARDAR=carpeta`) y los tiempos de `SURF.LOG`.
+
+`tests/run_surf_pintado_tests.sh` (en `make test`; en el anfitrión, sin QEMU
+ni Internet, unos segundos tras compilar `surfppm`): pinta
+`tests/surf/pagina.html` con el NetSurf de Linux (`w32/surf/anfitrion.c`) y
+mira los puntos: un icono de letra de prueba (`tests/surf/icono.*`, hecho
+con `tests/surf/genera_icono.py`) en TTF, WOFF y WOFF2 con `::before`; grid
+(`repeat(3, 1fr)` con `gap`, `auto-fill` con `minmax()`, `grid-column: 1 /
+-1`); `justify-content: space-between`; esquinas redondas; sombra; un campo
+con `min-height: 48px` y `border-box` (48 de alto) y su `placeholder`.
+`tests/run_surf_woff_tests.sh`: el decodificador WOFF/WOFF2 glifo a glifo
+contra el TTF de origen, y con archivos rotos.
+
+Para comparar con Chrome a mano: `make surfppm` y
+`build/anf/surfppm [-entera] -o pagina.ppm https://...` (las galletas en
+`/tmp/surfppm.galletas`: abrir antes `https://clicgest.es/demo` para entrar
+en la demo; `SURF_CAJAS=1` saca el árbol de cajas), y
+`tools/surf_capturas.sh CARPETA URL...` para las capturas en QEMU.

@@ -1,4 +1,4 @@
-NAVEGADOR COMPLETO DE HISPA-486 (disquete «Internet 2»)
+NAVEGADOR COMPLETO DE HISPA-486 (disquetes «Internet 2» e «Internet 3»)
 
 NAVEGA2.EXE es NetSurf 3.11 (navegador libre, GPL-2.0) con la ventana de
 Hispa Ventanas: muestra la web entera, con sus hojas de estilo, letras de
@@ -6,17 +6,22 @@ ancho variable e imágenes, como un navegador de los grandes. Para el modo
 ligero de ClicGest y las páginas sencillas, el Navegador de siempre
 (NAVEGA.EXE, disquete «Internet») va más deprisa.
 
-Instalar: copie TODO este disquete en C:\HISPADOS\INTERNET, donde ya está lo
-del disquete «Internet» (allí están las DLL que necesita: MSVCRT.DLL,
-WSOCK32.DLL y HSPTLS.DLL):
-    XCOPY A:\*.* C:\HISPADOS\INTERNET /S
+Son dos disquetes: «Internet 2» (el programa y sus recursos) e «Internet 3»
+(las letras, en FUENTES). Instalar: copie LOS DOS enteros en
+C:\HISPADOS\INTERNET, donde ya está lo del disquete «Internet» (allí están
+las DLL que necesita: MSVCRT.DLL, WSOCK32.DLL y HSPTLS.DLL):
+    XCOPY A:\*.* C:\HISPADOS\INTERNET /S      (con cada uno de los dos)
 Sale en el menú Inicio, grupo Internet: «Navegador completo».
 
 Necesita un 486 o mejor y 16 MB de memoria (mejor 32 MB).
+
+Carga las letras de las páginas (TTF, WOFF y WOFF2: los iconos de letra y
+las letras de la web) y las esquinas redondas, las sombras, gap y grid.
 
 F6: escribir la dirección.  F5: recargar.  Esc: parar.  Rueda: mover.
 
 NetSurf (c) The NetSurf Developers, GPL-2.0; sus bibliotecas, MIT; letras
 DejaVu (licencia libre de Bitstream Vera); stb_image y stb_truetype, dominio
-público. Lo demás: Copyright (C) 2026 Carlos Sanz y contribuidores,
+público; el decodificador Brotli (para WOFF2) y su diccionario, BROTLI.DIC,
+(c) Google, licencia MIT. Lo demás: Copyright (C) 2026 Carlos Sanz y contribuidores,
 GPL-2.0 o posterior.

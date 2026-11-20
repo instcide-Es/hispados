@@ -1196,6 +1196,7 @@ test: $(TEST_DEPS)
 	tests/run_navegador_js_tests.sh $(IMG)
 	tests/run_navegador2_tests.sh $(IMG)      # [NETSURF] el Navegador completo
 	tests/run_surf_woff_tests.sh               # [WOFF] sus letras de la web (anfitrión, ~45 s)
+	tests/run_surf_pintado_tests.sh            # [NETSURF] su pintado: grid, gap, esquinas, letras de la web (anfitrión)
 	tests/run_js_tests.sh $(IMG)
 	tests/run_red_usb_tests.sh $(IMG)
 	tests/run_wifi_tests.sh $(IMG)

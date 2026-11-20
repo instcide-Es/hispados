@@ -43,19 +43,28 @@ SURF_RECURSOS = $(SURF_T)/netsurf/resources/default.css $(SURF_T)/netsurf/resour
   $(SURF_T)/netsurf/resources/adblock.css $(SURF_T)/netsurf/resources/internal.css w32/surf/recursos/MESSAGES w32/surf/recursos/inicio.htm \
   w32/surf/recursos/BROTLI.DIC
 SURF_FUENTES = $(wildcard terceros/dejavu/*.TTF)
-# El disquete «Internet 2»: el Navegador completo (va a \HISPADOS\INTERNET,
-# junto a lo del disquete «Internet», que trae las DLL)
-$(B)/internet2.img: $(B)/NAVEGA2.EXE $(SURF_RECURSOS) $(SURF_FUENTES) w32/surf/NAVEGA2.INI w32/surf/LEEME.TXT
+# Los disquetes «Internet 2» (el Navegador completo y sus recursos) e
+# «Internet 3» (sus letras: con las letras de la web y el diccionario de
+# Brotli ya no cabía todo en uno). Los dos van a \HISPADOS\INTERNET, junto a
+# lo del disquete «Internet», que trae las DLL.
+$(B)/internet2.img: $(B)/NAVEGA2.EXE $(SURF_RECURSOS) w32/surf/NAVEGA2.INI w32/surf/LEEME.TXT
 	rm -f $@
 	dd if=/dev/zero of=$@ bs=1474560 count=1 2>/dev/null
 	MTOOLS_SKIP_CHECK=1 mformat -i $@ -f 1440 -v INTERNET2 ::
 	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/NAVEGA2.EXE w32/surf/NAVEGA2.INI ::
-	MTOOLS_SKIP_CHECK=1 mmd -i $@ ::RECURSOS ::FUENTES
+	MTOOLS_SKIP_CHECK=1 mmd -i $@ ::RECURSOS
 	for f in $(SURF_RECURSOS); do MTOOLS_SKIP_CHECK=1 mcopy -i $@ $$f ::RECURSOS/ || exit 1; done
-	for f in $(SURF_FUENTES); do MTOOLS_SKIP_CHECK=1 mcopy -i $@ $$f ::FUENTES/ || exit 1; done
 	iconv -f UTF-8 -t CP437 w32/surf/LEEME.TXT | sed 's/$$/\r/' > $(B)/internet2_leeme.txt
 	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/internet2_leeme.txt ::LEEME.TXT
-internet2: $(B)/internet2.img
+$(B)/internet3.img: $(SURF_FUENTES) w32/surf/LEEME.TXT
+	rm -f $@
+	dd if=/dev/zero of=$@ bs=1474560 count=1 2>/dev/null
+	MTOOLS_SKIP_CHECK=1 mformat -i $@ -f 1440 -v INTERNET3 ::
+	MTOOLS_SKIP_CHECK=1 mmd -i $@ ::FUENTES
+	for f in $(SURF_FUENTES); do MTOOLS_SKIP_CHECK=1 mcopy -i $@ $$f ::FUENTES/ || exit 1; done
+	iconv -f UTF-8 -t CP437 w32/surf/LEEME.TXT | sed 's/$$/\r/' > $(B)/internet3_leeme.txt
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/internet3_leeme.txt ::LEEME.TXT
+internet2: $(B)/internet2.img $(B)/internet3.img
 surf: $(B)/NAVEGA2.EXE
 
 # El Navegador completo en el anfitrión (Linux, sin ventana: w32/surf/anfitrion.c,

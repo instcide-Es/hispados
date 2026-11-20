@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Prueba del pintado</title>
+<!-- Página de tests/run_surf_pintado_tests.sh (el Navegador completo en el
+     anfitrión: surfppm). Cada prueba en su franja, con medidas fijas.
+     Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. -->
+<style>
+@font-face { font-family: IcoTTF; src: url(icono.ttf) format("truetype"); }
+@font-face { font-family: "Ico WOFF"; src: url("icono.woff2") format("woff2"), url("icono.woff") format("woff"); }
+@font-face { font-family: IcoWOFF2; src: url(icono.woff2) format("woff2"); }
+@font-face { font-family: SinUsar; src: url(no-existe.woff2) format("woff2"); }
+body { margin: 0; font: 16px sans-serif; background: #fff; color: #000; }
+.fila { height: 60px; display: flex; gap: 60px; }
+.i { display: block; width: 40px; height: 40px; font-size: 40px; line-height: 1; }
+.a::before { content: "\e000"; font-family: IcoTTF; }
+.b::before { content: "\e000"; font-family: "Ico WOFF"; }
+.c::before { content: "\e000"; font-family: IcoWOFF2, sans-serif; }
+.g { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; height: 50px; }
+.g div { background: #f00; height: 50px; }
+.f { display: flex; justify-content: space-between; height: 30px; }
+.f div { width: 100px; height: 30px; background: #00f; }
+.r { margin-top: 10px; width: 200px; height: 100px; background: #0a0; border-radius: 30px; }
+.s { margin-top: 10px; width: 200px; height: 50px; background: #eee; box-shadow: 0 10px 0 #000; }
+.campo { display: block; box-sizing: border-box; min-height: 48px; padding: 10px; border: 2px solid #f0f; width: 300px; margin: 30px 0 0 0; font: 16px sans-serif; }
+.auto { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-top: 10px; }
+.auto div { height: 20px; background: #0ff; }
+.todo { grid-column: 1 / -1; }
+</style></head>
+<body>
+<div class="fila"><span class="i a"></span><span class="i b"></span><span class="i c"></span></div>
+<div class="g"><div></div><div></div><div></div></div>
+<div class="f"><div></div><div></div><div></div></div>
+<div class="r"></div>
+<div class="s"></div>
+<input class="campo" placeholder="Escriba aquí">
+<div class="auto"><div></div><div></div><div></div><div></div><div class="todo"></div></div>
+</body></html>
