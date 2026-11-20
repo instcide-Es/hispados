@@ -19,7 +19,9 @@
 # «:triple X Y», tres; «:clicd X Y», el botón derecho (el secundario);
 # «:mayusclic X Y», el izquierdo con Mayús pulsada;
 # «:arrastra X1 Y1 X2 Y2» lo lleva pulsado de un sitio a otro; «:escribe
-# texto» lo teclea sin Intro; «:pausa S» espera S segundos; «:captura NOMBRE»
+# texto» lo teclea sin Intro; «:pausa S» espera S segundos; «:monitor ORDEN»
+# le da esa orden al monitor de QEMU (device_add, device_del...: enchufar y
+# desenchufar en marcha); «:captura NOMBRE»
 # deja la pantalla en $CAPTURAS/NOMBRE.ppm (CAPTURAS: una carpeta; /tmp si no
 # se dice). La flecha empieza en el centro (PANTALLA=800x600 si no se dice).
 # «:texto NOMBRE» deja la pantalla de texto (sus 25 líneas) en
@@ -134,6 +136,7 @@ for orden in "${ORDENES[@]}"; do
   fi
   case "$orden" in
     ":pausa "*) sleep ${orden:7}; continue ;;
+    ":monitor "*) mon "${orden:9}" 0.3; continue ;;
     ":raton "*) set -- ${orden:7}; ir $1 $2; continue ;;
     ":clic "*) set -- ${orden:6}; ir $1 $2; mon "mouse_button 1" 0.2; mon "mouse_button 0" 0.4; continue ;;
     ":doble "*) set -- ${orden:7}; ir $1 $2; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.1; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.5; continue ;;
