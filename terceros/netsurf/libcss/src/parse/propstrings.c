@@ -80,6 +80,8 @@ const stringmap_entry stringmap[LAST_KNOWN] = {
 	SMAP("disabled"),
 	SMAP("checked"),
 	SMAP("not"),
+	SMAP("focus-within"), /* [HISPA] */
+	SMAP("focus-visible"),
 
 	SMAP("first-line"),
 	SMAP("first-letter"),

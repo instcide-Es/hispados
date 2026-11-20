@@ -702,6 +702,15 @@ box_construct_element(struct box_construct_ctx *ctx, bool *convert_children)
 		 * inline container as if they were not absolutely positioned.
 		 * Layout expects and handles this. */
 		box->type = box_map[CSS_DISPLAY_INLINE_BLOCK];
+#ifdef nshispa
+		/* [HISPA] dentro de un flex, un bloque (no es un elemento flex:
+		 * .visually-hidden de Bootstrap ocupaba su sitio y su hueco) */
+		if (props.containing_block != NULL &&
+				(props.containing_block->type == BOX_FLEX ||
+				 props.containing_block->type ==
+				 BOX_INLINE_FLEX))
+			box->type = BOX_BLOCK;
+#endif
 	} else if (props.node_is_root) {
 		/* Special case for root element: force it to BLOCK, or the
 		 * rest of the layout will break. */
@@ -744,6 +753,22 @@ box_construct_element(struct box_construct_ctx *ctx, bool *convert_children)
 				     convert_children) == false) {
 		return false;
 	}
+
+#ifdef nshispa
+	/* [HISPA] los campos y botones (sus tipos los pone
+	 * convert_special_elements) dentro de un flex, también bloques: si no,
+	 * no son elementos flex (el campo de .input-group no se estiraba) */
+	if (!props.node_is_root && props.containing_block != NULL &&
+			(props.containing_block->type == BOX_FLEX ||
+			 props.containing_block->type == BOX_INLINE_FLEX) &&
+			box->gadget != NULL && box->type == BOX_INLINE_BLOCK &&
+			css_computed_position(box->style) !=
+			CSS_POSITION_ABSOLUTE &&
+			css_computed_position(box->style) !=
+			CSS_POSITION_FIXED) {
+		box->type = BOX_BLOCK;
+	}
+#endif
 
 	/* Handle the :before pseudo element */
 	if (!(box->flags & IS_REPLACED)

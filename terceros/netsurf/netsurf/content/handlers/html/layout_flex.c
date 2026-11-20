@@ -538,6 +538,10 @@ static inline int layout_flex__remaining_free_main(
 		struct flex_item_data *item = &ctx->item.data[i];
 
 		if (item->freeze) {
+#ifdef nshispa
+			if (lh__box_is_absolute(item->box))
+				continue; /* [HISPA] */
+#endif
 			remaining_free_main -= item->target_main_size;
 		} else {
 			remaining_free_main -= item->base_size;
@@ -748,6 +752,14 @@ static bool layout_flex__resolve_line(
 	for (size_t i = line->first; i < item_count; i++) {
 		struct flex_item_data *item = &ctx->item.data[i];
 
+#ifdef nshispa
+		/* [HISPA] los absolutos no son elementos flex: no cuentan */
+		if (lh__box_is_absolute(item->box)) {
+			item->target_main_size = item->main_size;
+			layout_flex__item_freeze(line, item);
+			continue;
+		}
+#endif
 		/* 3. Size inflexible items */
 		if (grow) {
 			if (item->grow == 0 ||

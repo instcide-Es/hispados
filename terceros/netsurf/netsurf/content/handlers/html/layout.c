@@ -4238,10 +4238,9 @@ bool layout_block_context(
 			cy = y;
 	}
 
-	int hispa_alto = -1; /* [HISPA] */
+	int hispa_alto = cy - block->padding[TOP]; /* [HISPA] */
 	if (block->height == AUTO) {
 		block->height = cy - block->padding[TOP];
-		hispa_alto = block->height;
 		if (block->type == BOX_BLOCK)
 			layout_block_add_scrollbar(block, BOTTOM);
 	}
