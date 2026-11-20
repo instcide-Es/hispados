@@ -1354,6 +1354,20 @@ mira "AHCI: la controladora SATA se encuentra en el bus PCI, IDENTIFY dice el di
 mira "AHCI: se leen sectores por DMA: una carpeta, un archivo de varios clusters (su suma, la de verdad) y programas" "^LARGO.TXT  *17600$" \
   "^archivo: TEXTOS.LARGO.TXT mide 17600 octetos; leídos 17600 a trozos de 777, 400 líneas, suma $suma$" \
   "^hijos: los dos ruidosos han acabado, con los códigos 9 y 9$" "^prueba.bin ha acabado con el código 7" "^hola$" "^eco2.bin ha acabado con el código 1"
+# 1b. lo que ahci.cas apunta para un PC de verdad (la orden «disco» y ARRANQUE.TXT), y
+# los caminos de las averías que en QEMU no se dan: PI a 0 (se miran los puertos de CAP),
+# unos registros que no empiezan en una página (la ABAR del ICH7 va a 1 KB) y la segunda
+# vuelta, reiniciando la controladora y cada puerto (COMRESET), si a la primera no sale el disco
+S=$N/sata.sal
+mira "AHCI: la orden «disco» dice lo que se ha visto: la controladora, CAP/PI/VS y cada puerto (SSTS, TFD, firma)" \
+  "^ahci: controladora 00:04\.0, 8086:2922, orden 0107, ABAR " "^ahci: CAP [0-9A-F]*, GHC 80000000, PI 0000003F, VS 00010000" \
+  "^ahci: puerto 0: SSTS 00000113, CMD [0-9A-F]*, TFD 00000050, SIG 00000101$" "^ahci: puerto 0: disco QEMU HARDDISK, 16 MB$"
+ARRANQUE="ahci=pi0 ahci=desalineada ahci=reinicio" SATA=$P/d16.img MODULOS= $AQUI/nucleo32/probar.sh "" disco "dir" apagar > $N/sataav.sal 2>&1
+S=$N/sataav.sal
+mira "AHCI, averías: con PI a 0, con los registros a media página y reiniciando la controladora (GHC.HR y COMRESET), el disco sale igual" \
+  "^ahci: prueba de la base desalineada ([0-9A-F]*100): bien$" "^ahci: PI vale 0: se miran los puertos que dice CAP (0000003F)$" \
+  "^ahci: ningún disco: se reinicia la controladora$" "^ahci: puerto 0: SSTS 00000113, CMD [0-9A-F]*, TFD 0000007F, SIG FFFFFFFF$" \
+  "^ahci: puerto 0: disco QEMU HARDDISK, 16 MB$" "^disco 0: QEMU HARDDISK, 16 MB, FAT16 (SATA)\.$" "^LEEME.TXT  *118$"
 # 2. escribir en él (FAT32 y la FAT16 de una partición), y que quede sano
 for c in 32 mbr; do
   case $c in 32) que="FAT32" ;; mbr) que="FAT16 en una partición" ;; esac

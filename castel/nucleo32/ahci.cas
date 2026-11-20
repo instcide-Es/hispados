@@ -14,17 +14,26 @@
 ;
 ;  Órdenes: IDENTIFY, READ DMA EXT y WRITE DMA EXT (LBA de 48 bits; las de 28
 ;  si el disco es de los de antes) y FLUSH CACHE. No se usa la interrupción:
-;  se mira el puerto hasta que acaba la orden. No se reinicia la
-;  controladora (los discos ya giran: los arrancó la BIOS); se le pide a la
-;  BIOS que la suelte si la norma lo prevé, se para cada puerto, se le dan
-;  sus tablas y se vuelve a poner en marcha.
+;  se mira el puerto hasta que acaba la orden. A la primera no se reinicia
+;  la controladora (los discos ya giran: los arrancó la BIOS); se le pide a
+;  la BIOS que la suelte si la norma lo prevé, se encienden los puertos (en
+;  las de Intel, también en su registro PCS del PCI, como hace Linux), se
+;  despierta el enlace, se para cada puerto, se le dan sus tablas y se
+;  vuelve a poner en marcha. Si así no sale ningún disco, se reinicia la
+;  controladora entera y cada puerto (COMRESET) y se espera a que el disco
+;  gire, como Linux.
+;
+;  Lo que va encontrando (la controladora, sus registros y, por cada puerto,
+;  SSTS, TFD y la firma) se apunta en el registro del arranque (ARRANQUE.TXT)
+;  y lo enseña la orden «disco» de la consola: en un PC de verdad, para
+;  saber dónde se para si no sale el disco.
 ;
 ;  De fábrica NO se escribe (como en ata.cas): solo si «escritura» es cierto.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Ahci
 
-    importar Pci, Paginas, Marcos, Tareas, Mem32
+    importar Pci, Paginas, Marcos, Tareas, Mem32, Formato, Registro, Textos32, Multiboot
 
     público constante SECTOR = 512
     público constante MAX_SATA = 4              ; los discos que se llevan
@@ -33,6 +42,7 @@ módulo Ahci
     constante CAP = 0x00
     constante GHC = 0x04
     constante PI = 0x0C                         ; los puertos que hay (un bit cada uno)
+    constante VS = 0x10                         ; la versión de la norma
     constante CAP2 = 0x24
     constante BOHC = 0x28                       ; el traspaso desde la BIOS
     ; ---- los de cada puerto (desde 0x100 + 0x80 * puerto) ----
@@ -44,15 +54,28 @@ módulo Ahci
     constante P_TFD = 0x20                      ; el estado del disco (como el del puerto 0x1F7)
     constante P_SIG = 0x24
     constante P_SSTS = 0x28
+    constante P_SCTL = 0x2C
     constante P_SERR = 0x30
     constante P_CI = 0x38                       ; las órdenes en marcha
 
     constante CMD_ST = 0x0001                   ; el puerto atiende órdenes
+    constante CMD_SUD = 0x0002                  ; que el disco gire (con CAP.SSS)
+    constante CMD_POD = 0x0004                  ; que tenga corriente (con CMD_CPD)
+    constante CMD_CPD = 0x100000
+    constante CMD_ICC = 0xF0000000              ; el estado del enlace que se pide
+    constante CMD_ACTIVO = 0x10000000           ; (1: activo, que se despierte)
+    constante CAP_SSS = 0x08000000              ; los discos giran uno a uno (escalonado)
+    constante GHC_AE = 0x80000000
+    constante GHC_HR = 0x00000001
+    constante PCI_PCS = 0x92                    ; (Intel) los puertos encendidos, bits 0 a 3
     constante CMD_FRE = 0x0010                  ; y recibe FIS
     constante CMD_FR = 0x4000
     constante CMD_CR = 0x8000
 
     constante FIRMA_DISCO = 0x00000101
+    constante FIRMA_ATAPI = 0xEB140101          ; un lector de CD o DVD
+    constante FIRMA_MULTI = 0x96690101          ; un multiplicador de puertos
+    constante FIRMA_SEMB = 0xC33C0101           ; un puente de gestión
 
     constante ORDEN_IDENTIFICAR = 0xEC
     constante ORDEN_LEER = 0xC8                 ; READ DMA
@@ -84,6 +107,38 @@ módulo Ahci
 
     variable reg: puntero a nat32               ; los registros, a la vista del núcleo
     variable cerrojo: Cerrojo
+    variable cap: nat32                         ; lo que dice la controladora de sí
+    variable espera_disco: nat32                ; las centésimas que se espera a que el disco esté listo
+
+    ; ---- lo que se ha visto, para el registro del arranque y la orden «disco» ----
+    público constante CABE_INFORME = 2000
+    público variable informe: arreglo [CABE_INFORME] de byte
+    variable informe_largo: nat32
+    variable renglón: arreglo [160] de byte
+    variable dd: arreglo [6] de nat32
+
+    ; apunta una línea en el informe (con formato, hasta 6 datos)
+    función di(plantilla: puntero a byte, a: nat32, b: nat32, c: nat32, d: nat32, e: nat32)
+        variable i: nat32
+        dd[0] := a
+        dd[1] := b
+        dd[2] := c
+        dd[3] := d
+        dd[4] := e
+        formatear(renglón, 160, plantilla, dd)
+        i := 0
+        mientras renglón[i] <> 0 y informe_largo + 1 < CABE_INFORME hacer
+            informe[informe_largo] := renglón[i]
+            informe_largo := informe_largo + 1
+            i := i + 1
+        fin
+        informe[informe_largo] := 0
+    fin
+
+    ; ¿se ha pedido esta prueba en la línea del cargador? («ahci=reinicio»...)
+    función prueba(qué: puntero a byte): bool
+        devolver buscar(línea_del_cargador(), qué) <> nulo
+    fin
 
     función lee(d: nat32): nat32
         devolver reg[d >> 2]
@@ -108,6 +163,17 @@ módulo Ahci
             si tics > tope o vueltas > 40000000 entonces devolver falso fin
         fin
         devolver cierto
+    fin
+
+    ; se queda «cs» centésimas sin hacer nada
+    función pausa(cs: nat32)
+        variable tope, vueltas: nat32
+        tope := tics + cs + 1
+        vueltas := 0
+        mientras tics <= tope y vueltas < cs * 200000 hacer
+            lee(CAP)
+            vueltas := vueltas + 1
+        fin
     fin
 
     ; para el puerto: ni órdenes ni FIS
@@ -189,21 +255,67 @@ módulo Ahci
         devolver bien
     fin
 
-    ; prepara el puerto p y, si tiene un disco, lo apunta
-    función mira_puerto(p: nat32)
-        variable s, i, t: nat32
+    ; el COMRESET del puerto p (parado): que el enlace se rehaga desde cero, sin
+    ; dejar que se duerma (IPM = 3); da cierto si vuelve a haber enlace
+    función reinicia_puerto(p: nat32): bool
+        variable c: nat32
+        c := lee(del_puerto(p, P_SCTL)) yb 0xFFFFF0F0
+        pon(del_puerto(p, P_SCTL), c ob 0x301)
+        pausa(2)                                                ; (la norma: 1 ms al menos)
+        pon(del_puerto(p, P_SCTL), c ob 0x300)
+        espera(del_puerto(p, P_SSTS), 0x0F, 3, 100)
+        pon(del_puerto(p, P_SERR), 0xFFFFFFFF)
+        devolver (lee(del_puerto(p, P_SSTS)) yb 0x0F) = 3
+    fin
+
+    ; que el puerto tenga corriente, que el disco gire (si los discos giran
+    ; uno a uno: CAP.SSS) y que el enlace se despierte (puede venir dormido:
+    ; en los portátiles, para ahorrar). Da cierto si se ha encendido algo
+    ; que estaba apagado.
+    función enciende_puerto(p: nat32): bool
+        variable c, n: nat32
+        c := lee(del_puerto(p, P_CMD))
+        n := c
+        si cap yb CAP_SSS <> 0 entonces n := n ob CMD_SUD fin
+        si c yb CMD_CPD <> 0 entonces n := n ob CMD_POD fin
+        si n <> c entonces pon(del_puerto(p, P_CMD), n) fin
+        si (n yb CMD_ICC) = 0 entonces pon(del_puerto(p, P_CMD), n ob CMD_ACTIVO) fin
+        devolver n <> c
+    fin
+
+    ; prepara el puerto p y, si tiene un disco, lo apunta. Con «a_fondo» (la
+    ; segunda vuelta, tras reiniciar la controladora), además el COMRESET y
+    ; esperar más a que el disco esté listo.
+    función mira_puerto(p: nat32, a_fondo: bool)
+        variable s, i, t, firma: nat32
         variable id: puntero a nat16
+        di("ahci: puerto %u: SSTS %08X, CMD %08X, TFD %08X, SIG %08X\n", p, lee(del_puerto(p, P_SSTS)), lee(del_puerto(p, P_CMD)), lee(del_puerto(p, P_TFD)), lee(del_puerto(p, P_SIG)))
+        si enciende_puerto(p) entonces espera(del_puerto(p, P_SSTS), 0x0F, 3, 100) fin
+        si a_fondo entonces
+            si no para_puerto(p) entonces
+                di("ahci: puerto %u: no se para (CMD %08X)\n", p, lee(del_puerto(p, P_CMD)), 0, 0, 0)
+                devolver
+            fin
+            reinicia_puerto(p)
+        fin
         t := lee(del_puerto(p, P_SSTS))
-        si (t yb 0x0F) <> 3 entonces devolver fin               ; nada enchufado (o sin enlace)
+        si (t yb 0x0F) <> 3 entonces                            ; nada enchufado (o sin enlace)
+            si (t yb 0x0F) <> 0 entonces di("ahci: puerto %u: sin enlace (SSTS %08X)\n", p, t, 0, 0, 0) fin
+            devolver
+        fin
         puertos_con_algo := puertos_con_algo + 1
         si cuántos >= MAX_SATA entonces devolver fin
-        si no para_puerto(p) entonces devolver fin
+        si no para_puerto(p) entonces
+            di("ahci: puerto %u: no se para (CMD %08X)\n", p, lee(del_puerto(p, P_CMD)), 0, 0, 0)
+            devolver
+        fin
         s := cuántos
         satas[s].hay := falso
         satas[s].puerto := p
         si satas[s].tablas = 0 entonces satas[s].tablas := reservar_marco() fin
         si satas[s].datos = 0 entonces satas[s].datos := reservar_marco() fin
         si satas[s].tablas = 0 o satas[s].datos = 0 entonces devolver fin
+        llenar(puntero(satas[s].tablas), 0x600, 0)
         pon(del_puerto(p, P_CLB), satas[s].tablas)
         pon(del_puerto(p, P_CLB + 4), 0)
         pon(del_puerto(p, P_FB), satas[s].tablas + 0x400)
@@ -212,13 +324,33 @@ módulo Ahci
         pon(del_puerto(p, P_SERR), 0xFFFFFFFF)
         pon(del_puerto(p, P_IS), 0xFFFFFFFF)
         pon(del_puerto(p, P_CMD), lee(del_puerto(p, P_CMD)) ob CMD_FRE)
+        ; que el disco esté listo (un disco que gira puede tardar unos segundos)
+        ; y que haya dicho quién es (la firma llega con su primer FIS)
+        si no espera(del_puerto(p, P_TFD), 0x88, 0, espera_disco) entonces
+            di("ahci: puerto %u: el disco sigue ocupado (TFD %08X)\n", p, lee(del_puerto(p, P_TFD)), 0, 0, 0)
+        fin
+        si lee(del_puerto(p, P_SIG)) = 0xFFFFFFFF entonces
+            i := tics + 100
+            mientras lee(del_puerto(p, P_SIG)) = 0xFFFFFFFF y tics <= i hacer lee(CAP) fin
+        fin
         pon(del_puerto(p, P_CMD), lee(del_puerto(p, P_CMD)) ob CMD_ST)
-        ; un lector de CD (ATAPI) u otra cosa: no es un disco
-        si lee(del_puerto(p, P_SIG)) <> FIRMA_DISCO entonces devolver fin
+        ; un lector de CD (ATAPI) u otra cosa: no es un disco. (Con una firma
+        ; que no se conoce, o sin firma, se le pregunta igual: IDENTIFY.)
+        firma := lee(del_puerto(p, P_SIG))
+        si firma = FIRMA_ATAPI o firma = FIRMA_MULTI o firma = FIRMA_SEMB entonces
+            di("ahci: puerto %u: no es un disco (firma %08X)\n", p, firma, 0, 0, 0)
+            devolver
+        fin
         satas[s].lba48 := falso
-        si no manda(s, ORDEN_IDENTIFICAR, 0, 0, SECTOR, falso) entonces devolver fin
+        si no manda(s, ORDEN_IDENTIFICAR, 0, 0, SECTOR, falso) entonces
+            di("ahci: puerto %u: IDENTIFY falla (firma %08X, TFD %08X, IS %08X, SERR %08X)\n", p, firma, lee(del_puerto(p, P_TFD)), lee(del_puerto(p, P_IS)), lee(del_puerto(p, P_SERR)))
+            devolver
+        fin
         id := puntero(satas[s].datos)
-        si id[49] yb 0x200 = 0 entonces devolver fin            ; sin LBA: no es de esta época
+        si id[49] yb 0x200 = 0 entonces                         ; sin LBA: no es de esta época
+            di("ahci: puerto %u: el disco no sabe LBA\n", p, 0, 0, 0, 0)
+            devolver
+        fin
         satas[s].sectores := nat32(id[60]) ob (nat32(id[61]) << 16)
         si id[83] yb 0x400 <> 0 entonces
             satas[s].lba48 := cierto
@@ -238,36 +370,161 @@ módulo Ahci
         si satas[s].sectores = 0 entonces devolver fin
         satas[s].hay := cierto
         cuántos := cuántos + 1
+        di("ahci: puerto %u: disco %s, %u MB\n", p, nat32(dirección(satas[s].modelo[0])), satas[s].sectores div 2048, 0, 0)
+    fin
+
+    ; los puertos que hay: PI (si la BIOS no lo ha puesto, los que dice CAP)
+    función los_puertos(): nat32
+        variable pi: nat32
+        pi := lee(PI)
+        si prueba("ahci=pi0") entonces pi := 0 fin
+        si pi = 0 entonces
+            pi := 0xFFFFFFFF
+            si (cap yb 0x1F) < 31 entonces pi := (nat32(1) << ((cap yb 0x1F) + 1)) - 1 fin
+            di("ahci: PI vale 0: se miran los puertos que dice CAP (%08X)\n", pi, 0, 0, 0, 0)
+        fin
+        devolver pi
+    fin
+
+    ; en las de Intel de antes (ICH6 a la serie 100), cada puerto se enciende
+    ; también en el registro PCS del PCI (0x92: un bit por puerto); si la BIOS
+    ; ha dejado alguno apagado, se enciende (como ahci_intel_pcs_quirk, en
+    ; Linux). A la primera, solo en las del ICH6 y el ICH7 (las de esta
+    ; avería); en la segunda vuelta, en todas las de Intel.
+    función enciende_pcs(pi: nat32, todas: bool)
+        variable pcs, id: nat32
+        id := pci_leer(aparato, 0)
+        si id yb 0xFFFF <> 0x8086 entonces devolver fin
+        id := id >> 16
+        si no todas y id <> 0x2652 y id <> 0x2653 y id <> 0x27C1 y id <> 0x27C5 y id <> 0x27C3 entonces devolver fin
+        pi := pi yb 0x3F
+        pcs := pci_leer16(aparato, PCI_PCS)
+        si (pcs yb pi) <> pi entonces
+            pci_escribir16(aparato, PCI_PCS, pcs ob pi)
+            di("ahci: PCS de %04X a %04X (los puertos encendidos)\n", pcs, pci_leer16(aparato, PCI_PCS), 0, 0, 0)
+            pausa(20)
+        fin
+    fin
+
+    ; la segunda vuelta: se reinicia la controladora entera (GHC.HR) y se
+    ; dejan como estaban CAP y PI (en Intel se escriben una vez: la BIOS)
+    función reinicia_controladora(pi: nat32)
+        variable p: nat32
+        para p desde 0 hasta 31 hacer
+            si pi yb (nat32(1) << p) <> 0 entonces para_puerto(p) fin
+        fin
+        pon(GHC, lee(GHC) ob GHC_AE)
+        pon(GHC, lee(GHC) ob GHC_HR)
+        si no espera(GHC, GHC_HR, 0, 100) entonces di("ahci: la controladora no acaba de reiniciarse (GHC %08X)\n", lee(GHC), 0, 0, 0, 0) fin
+        pon(GHC, lee(GHC) ob GHC_AE)
+        pon(CAP, cap)
+        pon(PI, pi)
+        pon(GHC, lee(GHC) yb nob 2)
+        enciende_pcs(pi, cierto)
+        di("ahci: reiniciada: CAP %08X, GHC %08X, PI %08X\n", lee(CAP), lee(GHC), lee(PI), 0, 0)
+    fin
+
+    ; (con «ahci=desalineada»: se comprueba que unos registros que no
+    ; empiezan en una página se ven bien: la ABAR del ICH7 va a 1 KB)
+    función prueba_desalineada(base: nat32)
+        variable v: nat32
+        variable otra: puntero a nat32
+        v := mapear_aparato(base + 0x100, 0x80)
+        si v = 0 entonces
+            di("ahci: prueba de la base desalineada: no se puede ver\n", 0, 0, 0, 0, 0)
+            devolver
+        fin
+        otra := puntero(v)
+        si v yb 0xFFF = 0x100 y otra[P_SSTS >> 2] = lee(del_puerto(0, P_SSTS)) y otra[P_SIG >> 2] = lee(del_puerto(0, P_SIG)) y otra[P_CLB >> 2] = lee(del_puerto(0, P_CLB)) entonces
+            di("ahci: prueba de la base desalineada (%08X): bien\n", base + 0x100, 0, 0, 0, 0)
+        sino
+            di("ahci: prueba de la base desalineada (%08X): MAL\n", base + 0x100, 0, 0, 0, 0)
+        fin
+    fin
+
+    ; las controladoras de discos que hay en el PCI (clase 01), para el
+    ; registro, cuando no se encuentra la AHCI
+    función lista_controladoras()
+        variable a, n: nat32
+        a := pci_busca(0x010000, 0xFF0000, NO_HAY_PCI)
+        n := 0
+        mientras a <> NO_HAY_PCI y n < 16 hacer
+            di("ahci: en el PCI, %02X:%02X.%u: %08X, clase %06X\n", (a >> 16) yb 0xFF, (a >> 11) yb 0x1F, (a >> 8) yb 7, pci_leer(a, 0), pci_leer(a, PCI_CLASE) >> 8)
+            a := pci_busca(0x010000, 0xFF0000, a)
+            n := n + 1
+        fin
+        si n = 0 entonces di("ahci: en el PCI no hay controladoras de discos (clase 01)\n", 0, 0, 0, 0, 0) fin
     fin
 
     ; busca la controladora AHCI y sus discos. Da cuántos discos hay.
     público función identificar(): nat32
-        variable base, pi, p, v: nat32
+        variable base, pi, p, v, vuelta: nat32
         cuántos := 0
         puertos_con_algo := 0
         hay_ahci := falso
+        informe_largo := 0
+        informe[0] := 0
         aparato := pci_busca(0x010601, 0xFFFFFF, NO_HAY_PCI)
-        si aparato = NO_HAY_PCI entonces devolver 0 fin
+        si aparato = NO_HAY_PCI entonces
+            di("ahci: no hay controladora AHCI (clase 01 06 01)\n", 0, 0, 0, 0, 0)
+            lista_controladoras()
+            apunta_solo(informe)
+            devolver 0
+        fin
+        di("ahci: controladora %02X:%02X.%u, %04X:%04X", (aparato >> 16) yb 0xFF, (aparato >> 11) yb 0x1F, (aparato >> 8) yb 7, pci_leer(aparato, 0) yb 0xFFFF, pci_leer(aparato, 0) >> 16)
+        di(", orden %04X, ABAR %08X\n", pci_leer16(aparato, PCI_ORDEN), pci_leer(aparato, PCI_BAR0 + 20), 0, 0, 0)
         base := pci_memoria(aparato, 5)
-        si base = 0 entonces devolver 0 fin
+        si base = 0 entonces
+            di("ahci: la ABAR no vale (no es de memoria, o está por encima de 4 GB)\n", 0, 0, 0, 0, 0)
+            apunta_solo(informe)
+            devolver 0
+        fin
         pci_enciende(aparato)
         v := mapear_aparato(base, 0x1100)
-        si v = 0 entonces devolver 0 fin
+        si v = 0 entonces
+            di("ahci: no se pueden ver sus registros\n", 0, 0, 0, 0, 0)
+            apunta_solo(informe)
+            devolver 0
+        fin
         reg := puntero(v)
         tomar(cerrojo)
         hay_ahci := cierto
+        ; antes de nada, en modo AHCI (la norma: GHC.AE, lo primero)
+        pon(GHC, lee(GHC) ob GHC_AE)
+        cap := lee(CAP)
+        di("ahci: CAP %08X, GHC %08X, PI %08X, VS %08X", cap, lee(GHC), lee(PI), lee(VS), 0)
+        si pci_leer(aparato, 0) yb 0xFFFF = 0x8086 entonces di(", MAP/PCS %08X", pci_leer(aparato, 0x90), 0, 0, 0, 0) fin
+        di("\n", 0, 0, 0, 0, 0)
+        si prueba("ahci=desalineada") entonces prueba_desalineada(base) fin
         ; que la BIOS la suelte, si la norma lo prevé en esta controladora
-        si lee(CAP2) yb 1 <> 0 entonces
+        ; (CAP2 es de la 1.2: en una 1.1, como la del ICH7, ni se mira)
+        si lee(VS) >= 0x00010200 y lee(CAP2) yb 1 <> 0 entonces
             pon(BOHC, lee(BOHC) ob 2)
             espera(BOHC, 1, 0, 200)
         fin
-        pon(GHC, lee(GHC) ob 0x80000000)                        ; en modo AHCI
-        pon(GHC, lee(GHC) yb nob 2)                             ; y sin interrupciones
-        pi := lee(PI)
-        para p desde 0 hasta 31 hacer
-            si pi yb (nat32(1) << p) <> 0 entonces mira_puerto(p) fin
+        pon(GHC, lee(GHC) yb nob 2)                             ; sin interrupciones
+        pi := los_puertos()
+        enciende_pcs(pi, falso)
+        ; la primera vuelta, como lo dejó la BIOS; si no sale ningún disco,
+        ; la segunda, reiniciando todo (con «ahci=reinicio», solo la segunda)
+        vuelta := 0
+        si prueba("ahci=reinicio") entonces vuelta := 1 fin
+        mientras vuelta < 2 y cuántos = 0 hacer
+            espera_disco := 300
+            si vuelta = 1 entonces
+                di("ahci: ningún disco: se reinicia la controladora\n", 0, 0, 0, 0, 0)
+                reinicia_controladora(pi)
+                espera_disco := 1000
+            fin
+            puertos_con_algo := 0
+            para p desde 0 hasta 31 hacer
+                si pi yb (nat32(1) << p) <> 0 entonces mira_puerto(p, vuelta = 1) fin
+            fin
+            vuelta := vuelta + 1
         fin
         soltar(cerrojo)
+        si cuántos = 0 entonces di("ahci: ningún disco (puertos con algo: %u)\n", puertos_con_algo, 0, 0, 0, 0) fin
+        apunta_solo(informe)
         devolver cuántos
     fin
 

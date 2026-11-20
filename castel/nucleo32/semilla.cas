@@ -508,6 +508,7 @@ módulo Semilla
                 imprimir1("disco %u: no hay\n", u)
             fin
         fin
+        escribir(informe_ahci())
         u := del_sistema
         si u = NINGUNA o unidades[u].clase <> U_FAT entonces
             escribir("sistema de archivos: no hay (la unidad del sistema no es un disco con FAT)\n")
