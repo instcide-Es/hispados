@@ -375,7 +375,10 @@ falta enlazar con otras cosas; de momento no hace falta.
   el disco) no se ha tocado nada: lo nuevo son dos programas del anillo 3
   aparte y un módulo corto en el núcleo, que usa 2.644 párrafos de 3.072 para
   los nombres, 2.809 de 4.096 para los textos y 8.718 de 10.240, lo más, para
-  el árbol (`CASTEL ... --gasto`). Un programa no puede declarar un arreglo de
+  el árbol (`CASTEL ... --gasto`). Con la 0.8 (la red) tampoco: la red es un
+  programa del anillo 3 aparte (`RED.BIN`, con seis módulos suyos) y el
+  núcleo solo gana un módulo corto (`red.cas`); las pruebas compilan la red en
+  una cuarta tanda de disquetes. Un programa no puede declarar un arreglo de
   más de 64 K: lo que haga falta mayor se pide con `más_memoria`.
 - **El núcleo de Hispa-Pentium**: desde la 0.4 tiene su entorno gráfico (el
   escritorio, PENTIUM.md §10; con menús, portapapeles e iconos desde la 0.5) y,
