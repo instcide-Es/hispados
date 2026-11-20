@@ -46,6 +46,7 @@
 ;   31  el teclado: el español (EBX = 1) o el de EE. UU. (0); con otra cosa,
 ;       solo dice cuál hay                           -> 1 o 0
 ;   (32 a 43: las ventanas, el portapapeles, los terminales y las unidades)
+;   (90 a 98: la red, con el servicio de red, RED.BIN: los cuenta red.cas)
 ;   Para instalar el sistema en el disco (el programa INSTALAR) y para el
 ;   asistente del primer arranque (ASISTE.BIN), desde la 0.7:
 ;   60  texto en la pantalla de texto: EDX letras de ECX en la columna (bits
@@ -88,11 +89,11 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Red
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
-    público constante VERSIÓN = 0x0007          ; la 0.7
+    público constante VERSIÓN = 0x0008          ; la 0.8
     público constante SIGUE = 0xFFFFFF00        ; (esperar sin quedarse) la tarea no ha acabado todavía
 
     ; ---- más errores (los de los archivos, en fat.cas) ----
@@ -735,8 +736,44 @@ módulo Usuario
                 devolver info_unidad(a, puntero(b))
             caso 60..68:
                 devolver atender_instalar(n, a, b, c)
+            caso 90..98:
+                r := atender_red(n, a, b, c)
+                ; si no hay servicio de red, se pone en marcha (una vez) y se
+                ; vuelve a pedir
+                si r = SIN_RED y n = 90 y lanza_red() entonces r := atender_red(n, a, b, c) fin
+                devolver r
         fin
         devolver NO_VALE
+    fin
+
+    ; pone en marcha el servicio de red (RED.BIN, de la unidad del sistema o
+    ; de su \HISPA) y espera a que se apunte (hasta 3 s). Falso si no puede
+    ; ser: con «sinred», si ya dijo que no hay tarjeta o si no está.
+    público función lanza_red(): bool
+        variable t: puntero a Tarea
+        variable e, k, id: nat32
+        si apagada o sin_tarjeta entonces devolver falso fin
+        si hay_servicio() entonces devolver cierto fin
+        t := cargar_archivo("\\RED.BIN", nulo, e)
+        si t = nulo entonces
+            sin_tarjeta := cierto                  ; (no está: no se vuelve a intentar)
+            devolver falso
+        fin
+        ; no es de nadie, no escribe en ningún terminal ni archivo, y en la raíz
+        t.padre := 0
+        t.terminal := 0
+        t.salida := SIN_SALIDA
+        t.carpeta[0] := 0
+        t.unidad := 0
+        id := t.id
+        k := 0
+        mientras no hay_servicio() y k < 300 hacer
+            dormir(1)
+            k := k + 1
+            t := tarea_de(id)
+            si t = nulo o t.estado = ACABADA entonces romper fin
+        fin
+        devolver hay_servicio()
     fin
 
     ; ¿puede el programa INSTALAR escribir sector a sector en el disco d?
@@ -1144,6 +1181,7 @@ módulo Usuario
         cerrar_módulos_de(actual.id)
         cerrar_ventanas_de(actual.id)
         soltar_terminales_de(actual.id)
+        acabó(actual)
     fin
 
     ; la interrupción 0x80: lo que se pide va en los registros que guardó

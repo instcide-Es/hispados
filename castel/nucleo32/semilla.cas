@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -707,6 +707,16 @@ módulo Semilla
         ; o el escritorio (el entorno gráfico): esta consola se queda esperando
         ; (las teclas son de las ventanas; lo que diga el núcleo sale por el
         ; puerto serie)
+        ; la red (el servicio de red, RED.BIN: red.cas): con «sinred», nunca;
+        ; con «conred», ya; con el escritorio, ya si hay una tarjeta de red
+        ; (por el icono de la bandeja); si no, cuando un programa la pida
+        si buscar(línea_del_cargador(), "sinred") <> nulo entonces
+            apagada := cierto
+        sino si buscar(línea_del_cargador(), "conred") <> nulo entonces
+            lanza_red()
+        sino si buscar(línea_del_cargador(), "escritorio") <> nulo y buscar(línea_del_cargador(), "instalar") = nulo y pci_busca(0x020000, 0xFF0000, NO_HAY_PCI) <> NO_HAY_PCI entonces
+            lanza_red()
+        fin
         si buscar(línea_del_cargador(), "instalar") <> nulo entonces
             ; el programa que instala el sistema en el disco duro (la
             ; pantalla es suya: esta consola espera a que acabe)
