@@ -127,6 +127,8 @@ LA CARPETA \HISPA
   HISPA.INI    los ajustes: usuario, equipo, teclado (es o us) y modo
   GRUB.CFG     el menú de arranque. La línea «set modo=» es la medida de la
                pantalla (por ejemplo 1024x768x32, o auto)
+  PANTALLA.ENV la medida elegida en Configuración (Cambiar...): la lee
+               GRUB.CFG y va por delante de «set modo=»; no tocar a mano
   PAQUETES     lo instalado (un .PQI por paquete): no tocar a mano
   ASISTE.BIN   el asistente del primer arranque: si se borra HISPA.INI,
                vuelve a salir al arrancar

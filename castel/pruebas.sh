@@ -121,6 +121,17 @@
 #      firmado): el aviso de la bandeja al arrancar, la ventana, actualizar
 #      el núcleo, reiniciar, que arranque el nuevo; y con un núcleo que se
 #      cuelga, que GRUB vuelva solo al de antes.
+#  17. Hispa-Pentium 0.8: la medida de la pantalla, desde Configuración
+#      (Cambiar...). Con la VBE de Bochs (QEMU -vga std; y el CD con el modo
+#      de GRUB, en un «pc» como VirtualBox, con -vga std y con -vga vmware,
+#      la VMSVGA): la lista (lo que da la tarjeta y lo que dice la pantalla,
+#      su EDID), «Probar...» en el momento, con una ventana maximizada que
+#      se pone a la medida nueva, «Mantener», y la vuelta sola a los 15 s.
+#      Sin ella (-vga cirrus, como un PC de verdad), en un sistema instalado
+#      desde el CD: \HISPA\PANTALLA.ENV y GRUB.CFG, «Reiniciar ahora», el
+#      arranque a prueba y «Mantener»; y si se reinicia sin darla por buena,
+#      GRUB vuelve solo a la de antes. Y, con la VBE de Bochs, la medida
+#      guardada que la BIOS no tiene (1200 x 800) la pone el núcleo al arrancar.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -135,6 +146,7 @@
 #   SOLO=red ./pruebas.sh         la primera y la decimotercera (la red)
 #   SOLO=acpi ./pruebas.sh        la primera y la decimocuarta (apagar de verdad y la batería: ACPI.BIN)
 #   SOLO=cd ./pruebas.sh          la primera y la decimosexta (el CD y las actualizaciones por Internet)
+#   SOLO=pantalla ./pruebas.sh    la primera y la decimoséptima (la medida de la pantalla)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -198,7 +210,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|cd) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|cd|pantalla) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -2687,25 +2699,11 @@ else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin apagar de verdad ni la batería)"
 fi   # apagar de verdad y la batería
 
-# ------------------------------- 16. Hispa-Pentium 0.8: el CD y las actualizaciones por Internet
-# El CD (cd.sh) en QEMU como lo pone VirtualBox, instalar desde él y, en el
-# sistema instalado, actualizar por la red (el núcleo también) con un
-# servidor HTTP de aquí (servidor_prueba.py con RAIZ) y un catálogo firmado
-# con una clave de prueba (en el disco instalado se pone un PAQUETES.BIN
-# hecho con ella, como en la parte 12).
-if parte08 cd; then
-echo "== Hispa-Pentium 0.8: el CD (VirtualBox) y las actualizaciones por Internet =="
-V=$P/cd
-mkdir -p $V/srv $V/raiz/pentium $G
-export MTOOLS_SKIP_CHECK=1
-if ! command -v grub-mkrescue > /dev/null || ! command -v xorriso > /dev/null; then
-  echo "  (sin grub-mkrescue o xorriso no se prueba el CD)"
-else
-HPQ="python3 -I $AQUI/../tools/hpq.py"
 # una máquina: maquina NOMBRE "opciones de QEMU" PASOS... (:pausa S, :tecla
 # K..., :texto N, :captura N, :clic X Y, :monitor ORDEN, :espera S REGEX:
-# hasta que salga REGEX por el puerto serie, como mucho S segundos); lo que
-# sale por el puerto serie, en $V/NOMBRE.sal
+# hasta que salga REGEX por el puerto serie, como mucho S segundos; :centro X Y:
+# la flecha está ahí, al arrancar con otra medida que 800 x 600); lo que
+# sale por el puerto serie, en $V/NOMBRE.sal (lo usan las partes 16 y 17)
 maquina() {
   local n=$1 o=$2 p x y s rx=400 ry=300 sx sy dx dy
   shift 2
@@ -2717,6 +2715,7 @@ maquina() {
   for p in "$@"; do
     case "$p" in
       ":pausa "*) sleep ${p:7} ;;
+      ":centro "*) set -- ${p:8}; rx=$1; ry=$2 ;;
       ":tecla "*) for k in ${p:7}; do printf 'sendkey %s\n' $k | socat - UNIX-CONNECT:$V/mon > /dev/null 2>&1; sleep 0.15; done ;;
       ":monitor "*) printf '%s\n' "${p:9}" | socat - UNIX-CONNECT:$V/mon > /dev/null 2>&1; sleep 0.3 ;;
       ":captura "*) printf 'screendump %s\n' $G/${p:9}.ppm | socat - UNIX-CONNECT:$V/mon > /dev/null 2>&1; sleep 0.6 ;;
@@ -2745,6 +2744,21 @@ for f in range(25): print('|' + bytes(d[f * 160:(f + 1) * 160:2]).decode('cp437'
   tr -d '\r' < $V/$n.sal | iconv -f CP437 -t UTF-8 > $V/$n.txt 2> /dev/null
   S=$V/$n.txt
 }
+# ------------------------------- 16. Hispa-Pentium 0.8: el CD y las actualizaciones por Internet
+# El CD (cd.sh) en QEMU como lo pone VirtualBox, instalar desde él y, en el
+# sistema instalado, actualizar por la red (el núcleo también) con un
+# servidor HTTP de aquí (servidor_prueba.py con RAIZ) y un catálogo firmado
+# con una clave de prueba (en el disco instalado se pone un PAQUETES.BIN
+# hecho con ella, como en la parte 12).
+if parte08 cd; then
+echo "== Hispa-Pentium 0.8: el CD (VirtualBox) y las actualizaciones por Internet =="
+V=$P/cd
+mkdir -p $V/srv $V/raiz/pentium $G
+export MTOOLS_SKIP_CHECK=1
+if ! command -v grub-mkrescue > /dev/null || ! command -v xorriso > /dev/null; then
+  echo "  (sin grub-mkrescue o xorriso no se prueba el CD)"
+else
+HPQ="python3 -I $AQUI/../tools/hpq.py"
 # 1. el CD
 if GUARDA_PAQ=$V/paq $AQUI/nucleo32/cd.sh $V/cd.iso > $V/cd.txt 2>&1 && xorriso -indev $V/cd.iso -report_el_torito plain > $V/torito.txt 2>&1 \
   && grep -q "^El Torito boot img : *1 *BIOS *y *none " $V/torito.txt && [ $(stat -c %s $V/cd.iso) -lt $((650 * 1048576)) ]; then
@@ -2850,6 +2864,124 @@ fi
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el CD)"
 fi   # el CD
+
+# ------------------------------- 17. Hispa-Pentium 0.8: la medida de la pantalla
+# Configuración > Cambiar...: con la VBE de Bochs, en el momento (y a prueba
+# 15 s); sin ella (cirrus, como un PC de verdad), guardada para GRUB
+# (\HISPA\PANTALLA.ENV) y a prueba al arrancar.
+if parte08 pantalla; then
+echo "== Hispa-Pentium 0.8: la medida de la pantalla (Configuración > Cambiar...: en el momento con la VBE de Bochs; al arrancar, con GRUB) =="
+V=$P/pan
+mkdir -p $V $G
+export MTOOLS_SKIP_CHECK=1
+[ -f $P/d16.img ] || $AQUI/nucleo32/disco.sh $P/d16.img 16 > $P/disco16.txt 2>&1
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $V/semilla.asm > /dev/null 2>&1 && nasm -f bin $V/semilla.asm -o $V/SEMILLA.BIN
+# 1. en QEMU con -kernel (el modo lo pone el núcleo): el Bloc de notas
+# maximizado; Configuración > Cambiar...; 1024 x 768 a prueba y «Mantener»;
+# luego 1280 x 800 a prueba, sin tocar nada: a los 15 s vuelve sola
+CAPTURAS=$G MEMORIA=128 DISCO=$P/d16.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 110" ":pausa 2" ":clic 553 76" ":pausa 1" \
+  ":clic 40 585" ":clic 250 500" ":captura m0" ":clic 572 236" ":pausa 1" ":captura m1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":captura m2" ":clic 431 418" ":pausa 1" ":captura m3" \
+  ":clic 677 347" ":clic 341 525" ":pausa 2" ":captura m4" ":pausa 17" ":captura m5" > $V/marcha.sal 2>&1
+S=$V/marcha.sal
+mira "con la VBE de Bochs (QEMU -vga std), «Probar...» pone la medida en el momento; «Mantener» la deja; sin tocar nada, a los 15 s vuelve sola la de antes" \
+  "^pantalla: 1024x768 con 32 bits por punto (cambiado en marcha, por la VBE de Bochs)" "^escritorio: la pantalla, a 1024 x 768 (en marcha)" \
+  "^escritorio: Se queda a 1024 x 768 (hasta que se apague)\." "^escritorio: la pantalla, a 1280 x 800 (en marcha)" \
+  "^escritorio: no se ha dado por buena en 15 s" "^escritorio: Ha vuelto la de antes\."
+miracap "Configuración: la medida de la pantalla y, a su lado, «Cambiar...»" m0 texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 530 224 542 232 "Cambiar..."
+miracap "la lista: los modos que da la tarjeta y caben en lo que dice la pantalla (su EDID: prefiere 1280 x 800), el de ahora elegido, «Probar...» y «Cerrar»" m1 \
+  negrita 200 120 208 126 "La medida de la pantalla" texto 200 140 208 146 "Ahora: 800 x 600, 32 bits por punto." negrita 200 218 210 224 "800 x 600" \
+  negrita 520 218 530 224 "1024 x 768" negrita 516 318 526 326 "1920 x 1080" texto 160 349 168 357 "La pantalla dice que prefiere 1280 x 800." \
+  negrita 188 430 198 436 "Probar..." negrita 565 430 575 436 Cerrar rgb 170 228 5CC45E 40
+miracap "a prueba: la pantalla ya a 1024 x 768, «¿Se ve bien?» con la cuenta atrás, y el Bloc de notas maximizado, a la medida nueva" m2 tam 1024 768 \
+  negrita 334 305 342 313 "¿Se ve bien la pantalla?" texto 334 327 342 335 "Está a 1024 x 768." negrita 393 405 405 415 Mantener negrita 571 405 583 415 Volver \
+  negrita 24 2 36 10 "NOTAS.TXT - Bloc de notas" rgb 1000 719 D7E5F8 10 texto 4 708 14 716 "NOTAS.TXT" negrita 30 742 46 752 Inicio
+miracap "«Mantener»: la lista otra vez, con la de ahora (1024 x 768) y lo que ha pasado" m3 tam 1024 768 texto 312 223 320 231 "Ahora: 1024 x 768, 32 bits por punto." \
+  texto 272 451 280 459 "Se queda a 1024 x 768 (hasta que se apague)."
+miracap "1280 x 800 a prueba" m4 tam 1280 800
+miracap "y a los 15 s, sin tocar nada, la de antes (1024 x 768): «Ha vuelto la de antes.»" m5 tam 1024 768 texto 272 451 280 459 "Ha vuelto la de antes."
+if ! grep -q "excepción\|\*\*\*" $S; then ok "ni una excepción ni una queja del núcleo al cambiar la pantalla en marcha"; else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -3 | sed 's/^/        /'; fi
+# 2. el CD, con el modo que ha puesto GRUB (por la VBE de la BIOS), en un
+# «pc» como el de VirtualBox: con -vga std (como VBoxVGA) y con -vga vmware
+# (la VMSVGA, 15AD:0405: la memoria, en su segunda zona PCI)
+CD=$P/cd/cd.iso
+[ -f $CD ] || { CD=$V/cd.iso; $AQUI/nucleo32/cd.sh $CD > $V/cd.txt 2>&1; }
+VBOX_PC="-machine pc -m 256 -nic user,model=e1000 -device pci-ohci,id=o -device usb-tablet,bus=o.0"
+truncate -s 2G $V/ide.img
+for vga in std vmware; do
+  maquina cd$vga "$VBOX_PC -vga $vga -cdrom $CD -drive file=$V/ide.img,format=raw,if=ide,index=0 -boot d" ":espera 40 ^escritorio: en marcha" ":pausa 3" \
+    ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":captura cd$vga" ":clic 565 263" ":clic 229 441" ":pausa 2" ":captura cd${vga}2" ":clic 559 434" ":pausa 1"
+  mira "el CD en un «pc» como VirtualBox con -vga $vga: el modo de GRUB (800 x 600) se cambia en marcha (1280 x 800) y se mantiene" \
+    "escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)" "^pantalla: 1280x800 con 32 bits por punto (cambiado en marcha" \
+    "^escritorio: Se queda a 1280 x 800 (hasta que se apague)\."
+  miracap "y se ve: a 1280 x 800, con «¿Se ve bien la pantalla?» (-vga $vga)" cd${vga}2 tam 1280 800 negrita 462 321 470 329 "¿Se ve bien la pantalla?" negrita 30 770 46 780 Inicio
+done
+# 3. instalado desde el CD, con una tarjeta sin la VBE de Bochs (-vga
+# cirrus: como un PC de verdad): «Guardar y reiniciar...»
+truncate -s 2G $V/inst.img
+maquina inst "$VBOX_PC -cdrom $CD -drive file=$V/inst.img,format=raw,if=ide,index=0 -boot d -no-reboot" ":pausa 3" ":tecla down ret" ":espera 40 ^instalar: bienvenida" \
+  ":tecla ret" ":pausa 2" ":tecla ret" ":pausa 2" ":tecla ret" ":espera 120 ^instalar: terminado" ":tecla ret" ":pausa 2"
+printf '[hispa]\r\nusuario=Ana\r\nequipo=PRUEBA\r\nteclado=es\r\nmodo=800x600\r\n' > $V/HISPA.INI
+mcopy -o -i $V/inst.img@@1M $V/HISPA.INI ::HISPA/
+cp $V/inst.img $V/inst0.img
+CIRRUS="$VBOX_PC -vga cirrus -drive file=$V/inst.img,format=raw,if=ide,index=0"
+maquina pc1 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":captura pc1" \
+  ":clic 565 229" ":clic 274 441" ":pausa 1" ":captura pc2" ":clic 314 336" ":pausa 6"
+mira "sin la VBE de Bochs (cirrus), instalado: la medida se guarda en \\HISPA\\PANTALLA.ENV (a prueba), GRUB.CFG la lee, y «Reiniciar ahora» reinicia" \
+  "^escritorio: GRUB.CFG lee ahora PANTALLA.ENV" "^escritorio: PANTALLA.ENV: pantalla=1024x768 antes= prueba=1" "^escritorio: reiniciar"
+miracap "la lista, sin cambio en marcha: «se pone al arrancar», «A la medida» y «Guardar y reiniciar...»" pc1 texto 160 167 168 175 "Esta tarjeta no deja cambiarla en marcha: se guarda y" \
+  negrita 352 352 364 360 "A la medida" negrita 180 428 190 436 "Guardar y reiniciar..."
+miracap "«Al arrancar otra vez, a 1024 x 768», con «Reiniciar ahora» y «Más tarde»" pc2 negrita 224 216 234 224 "Al arrancar otra vez, a 1024 x 768." \
+  negrita 248 324 258 332 "Reiniciar ahora" negrita 448 324 458 332 "Más tarde"
+mcopy -n -i $V/inst.img@@1M ::HISPA/GRUB.CFG $V/grub.cfg; mcopy -n -i $V/inst.img@@1M ::HISPA/PANTALLA.ENV $V/env1
+if [ $(stat -c %s $V/env1) = 1024 ] && head -c 25 $V/env1 | grep -q '^# GRUB Environment Block' && grep -q '^  load_env -f /HISPA/PANTALLA.ENV pantalla antes prueba$' $V/grub.cfg \
+  && grep -q 'set modo="${pantalla}x32,${pantalla},${modo}"' $V/grub.cfg && sano $V/inst.img 2048; then
+  ok "PANTALLA.ENV es un bloque de GRUB de 1024 octetos (GRUB escribe en él: save_env), GRUB.CFG lo lee y el disco está sano"
+else ko "PANTALLA.ENV o GRUB.CFG no quedan bien:"; head -c 80 $V/env1 | sed 's/^/        /'; fi
+# al arrancar: GRUB pone 1024 x 768 (y la apunta «probándose»); «Mantener»
+maquina pc2 "$CIRRUS -no-reboot" ":espera 40 la pantalla está a prueba" ":pausa 2" ":captura pc3" ":centro 512 384" ":clic 431 418" ":pausa 2"
+mcopy -n -i $V/inst.img@@1M ::HISPA/PANTALLA.ENV $V/env2
+mira "al arrancar, GRUB la pone (1024 x 768) y el escritorio pregunta; «Mantener» la deja para siempre" \
+  "escritorio: en marcha, 1024 x 768 con [0-9]* bits por punto (el modo lo ha dejado puesto el cargador)" "^escritorio: la pantalla está a prueba (PANTALLA.ENV)" \
+  "^escritorio: PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" "^escritorio: Se queda a 1024 x 768\."
+miracap "«¿Se ve bien la pantalla?», a 1024 x 768, con la cuenta atrás «vuelve la de antes»" pc3 negrita 334 305 342 313 "¿Se ve bien la pantalla?" \
+  texto 334 347 342 355 "Si no la da por buena, vuelve la de antes en 1"
+if head -c 100 $V/env2 | grep -q '^prueba=0$' && head -c 100 $V/env2 | grep -q '^pantalla=1024x768$'; then ok "y PANTALLA.ENV: pantalla=1024x768, prueba=0"
+else ko "PANTALLA.ENV no queda bien tras «Mantener»:"; head -c 70 $V/env2 | sed 's/^/        /'; fi
+# otra, 1280 x 1024: se reinicia y, en la prueba, se reinicia otra vez a lo
+# bruto (como con la pantalla a oscuras): GRUB vuelve sola a 1024 x 768
+maquina pc3 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":centro 512 384" ":clic 40 753" ":clic 250 668" ":clic 688 320" ":pausa 1" \
+  ":clic 353 381" ":clic 386 525" ":pausa 1" ":clic 426 420" ":pausa 6"
+mira "desde 1024 x 768, 1280 x 1024 guardada a prueba (la de antes, apuntada)" "^escritorio: PANTALLA.ENV: pantalla=1280x1024 antes=1024x768 prueba=1" "^escritorio: reiniciar"
+maquina pc4 "$CIRRUS" ":espera 40 la pantalla está a prueba" ":pausa 2" ":monitor system_reset" ":pausa 3" ":espera 40 en marcha, 1024 x 768" ":pausa 4"
+mcopy -n -i $V/inst.img@@1M ::HISPA/PANTALLA.ENV $V/env3
+mira "si se reinicia sin darla por buena, GRUB vuelve solo a la de antes (1024 x 768), sin preguntar" "escritorio: en marcha, 1280 x 1024" "^escritorio: la pantalla está a prueba" \
+  "escritorio: en marcha, 1024 x 768"
+if [ $(grep -c "la pantalla está a prueba" $S) = 1 ] && head -c 100 $V/env3 | grep -q '^pantalla=1024x768$' && head -c 100 $V/env3 | grep -q '^antes=$' && head -c 100 $V/env3 | grep -q '^prueba=0$' && sano $V/inst.img 2048; then
+  ok "y PANTALLA.ENV lo dice (GRUB lo ha escrito con save_env): pantalla=1024x768, antes vacío, prueba=0; el disco, sano"
+else ko "tras reiniciar sin darla por buena, PANTALLA.ENV no queda bien:"; head -c 70 $V/env3 | sed 's/^/        /'; fi
+# 4. instalado, con la VBE de Bochs (-vga std, como VirtualBox): «Mantener»
+# la guarda para los próximos arranques; y una medida que la BIOS no da
+# (1200 x 800; con -vga vmware, la VMSVGA: GRUB no tiene controlador
+# para ella y va por la VBE de la BIOS, que no la da) la pone el núcleo al arrancar
+cp $V/inst0.img $V/inst.img
+STD="$VBOX_PC -vga std -drive file=$V/inst.img,format=raw,if=ide,index=0"
+maquina vb1 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":clic 431 418" ":pausa 2"
+mira "instalado, con la VBE de Bochs: «Mantener» la guarda también para los próximos arranques" "^escritorio: PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" \
+  "^escritorio: Se queda a 1024 x 768, también al arrancar\."
+maquina vb2 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3"
+mira "y al arrancar otra vez, GRUB ya la pone (1024 x 768)" "escritorio: en marcha, 1024 x 768 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
+printf '# GRUB Environment Block\npantalla=1200x800\nantes=\nprueba=0\n' > $V/env4
+head -c 1024 /dev/zero | tr '\0' '#' | dd of=$V/env4 bs=1 seek=$(stat -c %s $V/env4) count=$((1024 - $(stat -c %s $V/env4))) status=none 2> /dev/null
+mcopy -o -i $V/inst.img@@1M $V/env4 ::HISPA/PANTALLA.ENV
+maquina vb3 "${STD/-vga std/-vga vmware}" ":espera 40 la pantalla, a 1200" ":pausa 2" ":captura vb3"
+mira "con la VMSVGA, 1200 x 800 (que su BIOS no da por VBE: GRUB pone otra) la pone el núcleo al arrancar, por la VBE de Bochs" \
+  "escritorio: en marcha, 800 x 600" "^escritorio: la pantalla, a 1200 x 800 (en marcha)"
+miracap "y el escritorio, a 1200 x 800" vb3 tam 1200 800 negrita 30 770 46 780 Inicio
+if ! cat $V/pc*.txt $V/vb*.txt $V/cd*.txt | grep -q "excepción\|\*\*\*"; then ok "en todos esos arranques, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; cat $V/pc*.txt $V/vb*.txt $V/cd*.txt | grep "excepción\|\*\*\*" | head -3 | sed 's/^/        /'; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin la medida de la pantalla)"
+fi   # la pantalla
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)

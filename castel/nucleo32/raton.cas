@@ -153,6 +153,18 @@ módulo Raton
         reponer(b)
     fin
 
+    ; la pantalla ha cambiado de medida: hasta dónde llega ahora la flecha
+    ; (y, si se queda fuera, adentro)
+    público función pon_medida_ratón(an: ent32, al: ent32)
+        variable b: nat32
+        b := sin_interrupciones()
+        ancho := an
+        alto := al
+        si ratón_x >= an entonces ratón_x := an - 1 fin
+        si ratón_y >= al entonces ratón_y := al - 1 fin
+        reponer(b)
+    fin
+
     ; enciende el ratón, con la flecha en el centro de una pantalla de ese
     ; ancho y ese alto. Falso si no contesta (no hay ratón PS/2).
     público función prepara_ratón(an: ent32, al: ent32): bool
