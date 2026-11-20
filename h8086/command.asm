@@ -3,9 +3,9 @@
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Un programa como otro cualquiera: el núcleo lo lanza al arrancar (y otra
-;  vez si termina) y él hace su trabajo con INT 21h. Al empezar se queda solo
-;  con la memoria que ocupa (unos 8 K) y devuelve el resto, para los programas
-;  que lance.
+;  vez si termina) y él hace su trabajo con INT 21h. Va en dos partes, como
+;  el de MS-DOS (ver «Lo residente y lo transitorio», más abajo): mientras
+;  corre un programa, del intérprete solo quedan en memoria unos 4 K.
 ;
 ;  Las órdenes llevan los mismos nombres que en Hispa-DOS, el español y el
 ;  clásico:
@@ -81,17 +81,255 @@ CPU_386     equ 4
         int 0x21
 %endmacro
 
+; =============================================================================
+;  LO RESIDENTE Y LO TRANSITORIO (como el COMMAND.COM de MS-DOS)
+; =============================================================================
+; El intérprete va en dos partes:
+;   - la residente (R), la que se queda en la memoria baja, con el prefijo:
+;     esto, los textos y tablas y todas las variables (con la pila);
+;   - la transitoria (T), el código de las órdenes: va en su sección, «.t»,
+;     detrás de R en el archivo, y corre en lo alto de la memoria, con su
+;     propio segmento (CS = T; DS = ES = SS = R siempre).
+; Antes de lanzar un programa (r_lanza) se suelta la memoria de T: el
+; programa la puede usar. Al volver, T se pide otra vez en lo alto y, si el
+; programa no la ha pisado (se mira su suma), sigue sin más; si la ha
+; pisado, se vuelve a leer del archivo (el de COMSPEC). Así, mientras corre
+; un programa, del intérprete solo queda R en memoria.
+T_BASE      equ 0x2000              ; T, con sus etiquetas a partir de aquí (más
+                                    ; allá de todo lo de R: ver pon_cad)
 inicio:
         cld
+        ; T, a lo alto de la memoria, antes de que las variables (que van
+        ; donde está T en el archivo) la pisen. La pila, mientras, debajo
+        mov ax, [0x02]              ; (el final de nuestra memoria)
+        sub ax, T_PARR
+        mov es, ax
+        mov dx, ax                  ; DX = adónde
+        sub ax, 0x10
+        cli
+        mov ss, ax
+        mov sp, 0x100
+        sti
+        mov si, r_fin
+        xor di, di
+        mov cx, T_TAM / 2
+        rep movsw
+        push cs
+        pop es
+        cli
+        push cs
+        pop ss
         mov sp, pila_fin            ; la pila, dentro de lo que nos quedamos
-        mov bx, pila_fin + 15
-        mov cl, 4
-        shr bx, cl
-        DOS 0x4A                    ; el resto de la memoria, para los demás
-        mov di, bss_ini
+        sti
+        mov di, bss_ini             ; las variables, a cero
         mov cx, pila_ini - bss_ini
         xor al, al
         rep stosb
+        mov [t_seg], dx
+        mov bx, pila_fin + 15       ; el resto de la memoria, para los demás
+        mov cl, 4
+        shr bx, cl
+        DOS 0x4A
+        call r_t_pide               ; T, en un bloque suyo arriba
+        jc r_sin_memoria
+        cmp ax, [t_seg]
+        je .ya
+        push ds                     ; (no ha quedado donde se copió: se pasa)
+        mov es, ax
+        mov ds, [t_seg]
+        xor si, si
+        xor di, di
+        mov cx, T_TAM / 2
+        rep movsw
+        pop ds
+        push ds
+        pop es
+.ya:
+        mov [t_seg], ax
+        call r_suma
+        mov [t_suma], dx
+        mov word [p_lanza], r_lanza
+        mov [p_lanza+2], cs
+        mov ax, [t_seg]
+        sub ax, T_BASE / 16
+        push ax
+        mov ax, t_inicio
+        push ax
+        retf
+
+; lanza el programa de DS:DX con el bloque de ES:BX (INT 21h/4B00h), soltando
+; antes T; al volver, T otra vez arriba. Se llama lejos, desde T. Devuelve
+; CF y AX como INT 21h, y vuelve al segmento nuevo de T
+r_lanza:
+        push bp
+        push es
+        mov es, [t_seg]
+        DOS 0x49
+        pop es
+        mov ax, 0x4B00
+        int 0x21
+        push ss
+        pop ds
+        push ss
+        pop es
+        pushf
+        push ax
+        call r_t_vuelve
+        mov bp, sp                  ; [AX][banderas][BP][IP][CS]: el CS, el nuevo
+        mov ax, [t_seg]
+        sub ax, T_BASE / 16
+        mov [bp+8], ax
+        pop ax
+        popf
+        pop bp
+        retf
+
+; T otra vez: se pide su bloque arriba y, si no está como estaba, se lee
+r_t_vuelve:
+        call r_t_pide
+        jc r_sin_memoria
+        mov [t_seg], ax
+.mira:
+        call r_suma
+        cmp dx, [t_suma]
+        je .x
+        call r_t_lee
+        jmp .mira
+.x:
+        ret
+r_sin_memoria:
+        mov dx, r_m_mem
+        DOS 0x09
+        mov ax, 0x4CFF              ; (el núcleo lanza otra vez el intérprete)
+        int 0x21
+
+; lee T del archivo del intérprete (COMSPEC=; si no está, \COMMAND.COM). Si
+; no se puede, lo pide (por la BIOS, que la salida puede estar redirigida) y
+; vuelve a probar
+r_t_lee:
+        mov es, [ent_seg]
+        xor di, di
+.b:
+        cmp byte [es:di], 0
+        je .defecto
+        mov si, r_comspec
+        mov cx, 8
+        push di
+        repe cmpsb
+        pop bx
+        je .esta
+        mov di, bx
+.f:
+        inc di
+        cmp byte [es:di-1], 0
+        jne .f
+        jmp .b
+.esta:
+        mov dx, di
+        push es
+        pop ds
+        jmp short .abre
+.defecto:
+        mov dx, r_t_cmd
+.abre:
+        mov ax, 0x3D00
+        int 0x21
+        push ss
+        pop ds
+        push ss
+        pop es
+        jc .pide
+        mov bx, ax
+        xor cx, cx
+        mov dx, T_ARCH              ; donde empieza T en el archivo
+        mov ax, 0x4200
+        int 0x21
+        push ds
+        mov ds, [t_seg]
+        xor dx, dx
+        mov cx, T_TAM
+        DOS 0x3F
+        pop ds
+        pushf
+        DOS 0x3E
+        popf
+        jc .pide
+        call r_suma
+        cmp dx, [t_suma]
+        je .x
+.pide:
+        mov si, r_m_ponga
+.c:
+        lodsb
+        test al, al
+        jz .t
+        mov ah, 0x0E
+        mov bx, 7
+        int 0x10
+        jmp .c
+.t:
+        xor ax, ax
+        int 0x16
+        jmp r_t_lee
+.x:
+        ret
+
+; DX = la suma de T (para saber si un programa la ha pisado)
+r_suma:
+        push ds
+        mov ds, [t_seg]
+        xor si, si
+        mov cx, T_TAM / 2
+        xor dx, dx
+.s:
+        lodsw
+        add dx, ax
+        rol dx, 1
+        loop .s
+        pop ds
+        ret
+
+; pide un bloque para T lo más arriba que se pueda -> AX. CF=1 si no cabe
+r_t_pide:
+        mov bx, 0xFFFF              ; lo más que hay seguido
+        DOS 0x48
+        cmp bx, T_PARR
+        jb .x                       ; (CF=1)
+        mov dx, bx
+        DOS 0x48                    ; todo eso...
+        jc .x
+        mov es, ax
+        mov bx, dx
+        sub bx, T_PARR + 1
+        jbe .justo
+        DOS 0x4A                    ; ...menos lo de T, que queda libre arriba
+        mov bx, T_PARR
+        DOS 0x48
+        pushf
+        push ax
+        DOS 0x49                    ; (y lo demás, otra vez libre)
+        pop ax
+        popf
+        jmp short .x
+.justo:
+        DOS 0x49
+        mov bx, T_PARR
+        DOS 0x48
+.x:
+        push ss
+        pop es
+        ret
+
+r_comspec   db "COMSPEC="
+r_t_cmd     db "\COMMAND.COM", 0
+r_m_ponga   db 13, 10, "Ponga el disquete con COMMAND.COM y pulse una tecla...", 13, 10, 0
+r_m_mem     db 13, 10, "No queda memoria para el intérprete.", 13, 10, "$"
+
+; =============================================================================
+;  T: el arranque del intérprete (lo de antes de la primera orden)
+; =============================================================================
+        section .t follows=.text vstart=T_BASE align=16
+t_inicio:
         mov dx, dta_int
         DOS 0x1A
         call ent_ini                ; un entorno propio, con sitio para crecer
@@ -127,7 +365,7 @@ inicio:
 ; ---- una línea tras otra: del lote, si hay uno; si no, del teclado ----
 bucle:
         cli
-        mov ax, cs
+        mov ax, ss
         mov ss, ax
         mov sp, pila_fin
         mov ds, ax
@@ -189,7 +427,7 @@ pon_indicador:
         mov byte [si], 0
         pop si
 .v:
-        push cs
+        push ss
         pop es
 .c:
         lodsb
@@ -247,9 +485,11 @@ pon_indicador:
         pop di
         pop si
         ret
+        section .text
 t_prompt    db "PROMPT", 0
 t_prompt_def db "$P$G", 0
 t_prompt_car db "G>L<B|Q=$$_", 10, 0
+        section .t
 ; «C:\» (la unidad de trabajo)
 pon_unidad:
         push ax
@@ -323,9 +563,11 @@ ejecuta_tubo:
         mov word [tubo_sal], 0
 .x:
         ret
+        section .text
 t_tubo1     db "\TUBO1.$$$", 0
 t_tubo2     db "\TUBO2.$$$", 0
 
+        section .t
 ; ---- ejecuta la línea de SI, con su redirección ----
 ; «> archivo», «>> archivo» y «< archivo», al final de la orden: se abren los
 ; archivos, se le dice al núcleo (46h), se ejecuta lo de delante y se deshace.
@@ -431,9 +673,9 @@ ejecuta_red:
         pop si
         call ejecuta_linea
 .deshace:
-        push cs
+        push ss
         pop ds
-        push cs
+        push ss
         pop es
         mov bx, [r_sal]
         test bx, bx
@@ -535,127 +777,115 @@ ejecuta_linea:
         xor al, al
         stosb
         mov [resto], si             ; lo que viene detrás
-        mov bx, ordenes             ; ¿es una orden de las de dentro?
+        mov si, ordenes             ; ¿es una orden de las de dentro?
 .b:
-        mov si, [bx]
-        test si, si
-        jz ejecuta
+        cmp byte [cs:si], 0
+        je ejecuta
         mov di, orden
 .c:
-        mov al, [si]
+        cs lodsb
         cmp al, [di]
         jne .otra
-        inc si
         inc di
         test al, al
         jnz .c
         ; una orden de dentro. Si pide memoria de borrador (borr_pide), se
         ; suelta al acabar
         mov word [borr_seg], 0
+        mov bx, si
         mov si, [resto]
-        call [bx+2]
+        call [cs:bx]
         cmp word [borr_seg], 0
         je .x
-        push cs
+        push ss
         pop ds
         mov es, [borr_seg]
         DOS 0x49
-        push cs
+        push ss
         pop es
         mov word [borr_seg], 0      ; (una orden puede ejecutar otra: IF, FOR)
 .x:
         ret
 .otra:
-        add bx, 4
+        test al, al                 ; (el resto del nombre)
+        jz .h
+.s:
+        cs lodsb
+        test al, al
+        jnz .s
+.h:
+        inc si
+        inc si
         jmp .b
 
-            align 2
-ordenes     dw t_ayuda, o_ayuda, t_help, o_ayuda
-            dw t_ver, o_ver, t_version, o_ver
-            dw t_equipo, o_equipo
-            dw t_dir, o_dir, t_listar, o_dir
-            dw t_mostrar, o_mostrar, t_type, o_mostrar
-            dw t_copiar, o_copiar, t_copy, o_copiar
-            dw t_borrar, o_borrar, t_del, o_borrar
-            dw t_renombrar, o_renombrar, t_ren, o_renombrar
-            dw t_cd, o_cd
-            dw t_creardir, o_md, t_md, o_md
-            dw t_borrardir, o_rd, t_rd, o_rd
-            dw t_limpiar, o_limpiar, t_cls, o_limpiar
-            dw t_actualizar, o_actualizar
-            dw t_eco, o_eco, t_echo, o_eco
-            dw t_rem, o_rem
-            dw t_pausa, o_pausa, t_pause, o_pausa
-            dw t_if, o_if, t_goto, o_goto
-            dw t_for, o_for, t_para, o_for
-            dw t_llamar, o_call, t_call, o_call
-            dw t_desplazar, o_shift, t_shift, o_shift
-            dw t_si, o_if, t_ir, o_goto
-            dw t_mover, o_mover, t_move, o_mover
-            dw t_fecha, o_fecha, t_date, o_fecha
-            dw t_hora, o_hora, t_time, o_hora
-            dw t_vol, o_vol
-            dw t_verificar, o_verificar, t_verify, o_verificar
-            dw t_memoria, o_memoria, t_mem, o_memoria
-            dw t_pon, o_pon, t_set, o_pon
-            dw t_ruta, o_ruta, t_path, o_ruta
-            dw t_indicador, o_indicador, t_prompt, o_indicador
-            dw 0
-; (las órdenes se miran a ocho letras: RENOMBRAR es RENOMBRA)
-t_ayuda     db "AYUDA", 0
-t_help      db "HELP", 0
-t_ver       db "VER", 0
-t_version   db "VERSION", 0
-t_equipo    db "EQUIPO", 0
-t_dir       db "DIR", 0
-t_listar    db "LISTAR", 0
-t_mostrar   db "MOSTRAR", 0
-t_type      db "TYPE", 0
-t_copiar    db "COPIAR", 0
-t_copy      db "COPY", 0
-t_borrar    db "BORRAR", 0
-t_del       db "DEL", 0
-t_renombrar db "RENOMBRA", 0
-t_ren       db "REN", 0
-t_cd        db "CD", 0
-t_creardir  db "CREARDIR", 0
-t_md        db "MD", 0
-t_borrardir db "BORRARDI", 0
-t_rd        db "RD", 0
-t_limpiar   db "LIMPIAR", 0
-t_cls       db "CLS", 0
-t_actualizar db "ACTUALIZ", 0
-t_eco       db "ECO", 0
-t_echo      db "ECHO", 0
-t_rem       db "REM", 0
-t_pausa     db "PAUSA", 0
-t_pause     db "PAUSE", 0
-t_if        db "IF", 0
-t_goto      db "GOTO", 0
-t_for       db "FOR", 0
-t_para      db "PARA", 0
-t_llamar    db "LLAMAR", 0
-t_call      db "CALL", 0
-t_desplazar db "DESPLAZA", 0
-t_shift     db "SHIFT", 0
-t_si        db "SI", 0
-t_ir        db "IR", 0
-t_mover     db "MOVER", 0
-t_move      db "MOVE", 0
-t_fecha     db "FECHA", 0
-t_date      db "DATE", 0
-t_hora      db "HORA", 0
-t_time      db "TIME", 0
-t_vol       db "VOL", 0
-t_verificar db "VERIFICA", 0
-t_verify    db "VERIFY", 0
-t_memoria   db "MEMORIA", 0
-t_mem       db "MEM", 0
-t_pon       db "PON", 0
-t_set       db "SET", 0
-t_ruta      db "RUTA", 0
+        section .text
+        section .t
+; las órdenes de dentro: el nombre (a ocho letras: RENOMBRAR es RENOMBRA), un
+; 0 y la rutina. Se leen con CS (van con T)
+%macro ORDEN 2
+        db %1, 0
+        dw %2
+%endmacro
+ordenes:
+        ORDEN "AYUDA", o_ayuda
+        ORDEN "HELP", o_ayuda
+        ORDEN "VER", o_ver
+        ORDEN "VERSION", o_ver
+        ORDEN "EQUIPO", o_equipo
+        ORDEN "DIR", o_dir
+        ORDEN "LISTAR", o_dir
+        ORDEN "MOSTRAR", o_mostrar
+        ORDEN "TYPE", o_mostrar
+        ORDEN "COPIAR", o_copiar
+        ORDEN "COPY", o_copiar
+        ORDEN "BORRAR", o_borrar
+        ORDEN "DEL", o_borrar
+        ORDEN "RENOMBRA", o_renombrar
+        ORDEN "REN", o_renombrar
+        ORDEN "CD", o_cd
+        ORDEN "CREARDIR", o_md
+        ORDEN "MD", o_md
+        ORDEN "BORRARDI", o_rd
+        ORDEN "RD", o_rd
+        ORDEN "LIMPIAR", o_limpiar
+        ORDEN "CLS", o_limpiar
+        ORDEN "ACTUALIZ", o_actualizar
+        ORDEN "ECO", o_eco
+        ORDEN "ECHO", o_eco
+        ORDEN "REM", o_rem
+        ORDEN "PAUSA", o_pausa
+        ORDEN "PAUSE", o_pausa
+        ORDEN "IF", o_if
+        ORDEN "GOTO", o_goto
+        ORDEN "FOR", o_for
+        ORDEN "PARA", o_for
+        ORDEN "LLAMAR", o_call
+        ORDEN "CALL", o_call
+        ORDEN "DESPLAZA", o_shift
+        ORDEN "SHIFT", o_shift
+        ORDEN "SI", o_if
+        ORDEN "IR", o_goto
+        ORDEN "MOVER", o_mover
+        ORDEN "MOVE", o_mover
+        ORDEN "FECHA", o_fecha
+        ORDEN "DATE", o_fecha
+        ORDEN "HORA", o_hora
+        ORDEN "TIME", o_hora
+        ORDEN "VOL", o_vol
+        ORDEN "VERIFICA", o_verificar
+        ORDEN "VERIFY", o_verificar
+        ORDEN "MEMORIA", o_memoria
+        ORDEN "MEM", o_memoria
+        ORDEN "PON", o_pon
+        ORDEN "SET", o_pon
+        ORDEN "RUTA", o_ruta
+        ORDEN "PATH", o_ruta
+        ORDEN "INDICADO", o_indicador
+        ORDEN "PROMPT", o_indicador
+        db 0
+        section .text
 t_path      db "PATH", 0
-t_indicador db "INDICADO", 0
+        section .t
 
 ; SI salta los espacios
 salta_esp:
@@ -831,6 +1061,7 @@ pon_error:
         pop si
         pop bx
         ret
+        section .text
             align 2
 errores     dw E_FORMATO, m_e_formato, E_ARCHIVO, m_e_no_esta, E_RUTA, m_e_ruta, E_MUCHOS, m_e_muchos
             dw E_ACCESO, m_e_acceso, E_DIR_ACT, m_e_dir_act, E_OTRO_DISP, m_e_otro_dir
@@ -838,6 +1069,7 @@ errores     dw E_FORMATO, m_e_formato, E_ARCHIVO, m_e_no_esta, E_RUTA, m_e_ruta,
             dw E_UNIDAD, m_e_unidad
             dw 0
 
+        section .t
 ; pide un trozo de memoria de borrador (8 K, o lo que haya) para la orden que
 ; corre: [borr_seg] y [borr_tam]. CF=1 (y lo dice) si no hay ni para empezar
 borr_pide:
@@ -2164,7 +2396,7 @@ ent_ini:
         DOS 0x49                    ; el que traíamos ya no hace falta
         mov ax, [ent_seg]
         mov [0x2C], ax
-        push cs
+        push ss
         pop es
         ret
 .x:
@@ -2279,7 +2511,7 @@ ent_pon:
         pop si
         cmp cx, ENT_TAM - 2
         jb .cabe
-        push cs
+        push ss
         pop es
         mov si, m_e_entorno
         call pon_cad
@@ -2301,7 +2533,7 @@ ent_pon:
         jnz .v1
         stosb                       ; y el 0 del final
 .x:
-        push cs
+        push ss
         pop es
         pop di
         pop si
@@ -2331,7 +2563,7 @@ o_pon:
         call pon_nl
         jmp .v
 .fin:
-        push cs
+        push ss
         pop es
         ret
 .pon:
@@ -2378,11 +2610,11 @@ var_orden:
         jmp .c
 .no:
         mov si, m_sin_ruta
-        push cs
+        push ss
         pop es
         jmp pon_cad
 .nl:
-        push cs
+        push ss
         pop es
         jmp pon_nl
 .may:
@@ -2654,8 +2886,7 @@ o_memoria:
         call pon_num
         mov si, m_mem_libre
         call pon_cad
-        mov bx, 0xFFFF
-        DOS 0x48
+        call libre
         mov ax, bx                  ; párrafos, en octetos
         xor dx, dx
         mov cx, 4
@@ -2700,7 +2931,7 @@ o_memoria:
         mov [bloque+2], es
         mov ah, 0x08
         call far [bloque]
-        push cs
+        push ss
         pop es
         mov ax, dx
         call pon_num
@@ -2731,7 +2962,7 @@ ejecuta:
         mov [cola], cl
         mov word [bloque], 0        ; el entorno: una copia del nuestro
         mov word [bloque+2], cola
-        mov [bloque+4], cs
+        mov [bloque+4], ss
         ; el nombre, entero (puede traer unidad y ruta: «C:\JUEGOS\AJEDREZ»),
         ; sin la extensión
         mov si, [pal_ini]
@@ -2769,26 +3000,36 @@ ejecuta:
         jnz .cl3
         ; sin ruta: si es el nombre clásico de una orden del disco, su archivo
         ; lleva el español
-        mov bx, clasicos
+        mov si, clasicos
 .cl:
-        mov si, [bx]
-        test si, si
-        jz .cl3
+        cmp byte [cs:si], 0
+        je .cl3
         mov di, orden
 .cl1:
-        mov al, [si]
+        cs lodsb
         cmp al, [di]
         jne .cl2
-        inc si
         inc di
         test al, al
         jnz .cl1
-        mov si, [bx+2]
-        mov di, orden_l
-        call copia_txt
+        mov di, orden_l             ; es este: el nombre del archivo
+.cl4:
+        cs lodsb
+        stosb
+        test al, al
+        jnz .cl4
         jmp short .cl3
 .cl2:
-        add bx, 4
+        test al, al                 ; (lo que queda de este y el del archivo)
+        jz .cl5
+.cl6:
+        cs lodsb
+        test al, al
+        jnz .cl6
+.cl5:
+        cs lodsb
+        test al, al
+        jnz .cl5
         jmp .cl
 .cl3:
         ; se busca en el directorio de trabajo y luego en los de la variable
@@ -2818,8 +3059,7 @@ ejecuta:
         push bx
         mov dx, arg1
         mov bx, bloque
-        mov ax, 0x4B00
-        int 0x21
+        call far [p_lanza]          ; (R: suelta T mientras corre el programa)
         pop bx
         jnc .x
         cmp ax, E_ARCHIVO
@@ -2884,7 +3124,7 @@ ejecuta:
         xor di, di
 .p4:
         mov [ej_path], di
-        push cs
+        push ss
         pop es
         cmp si, ej_pref
         je .prefijo                 ; (uno vacío: el siguiente)
@@ -2899,52 +3139,42 @@ ejecuta:
         mov byte [si], 0
         jmp .pre
 .no_es:
-        push cs
+        push ss
         pop es
 .no:
         mov si, m_e_orden
         call pon_cad
 .x:
         ret
+        section .text
             align 2
 extensiones dw t_com, t_exe, t_bat, 0
-clasicos    dw tc_format, tc_formatea, tc_sys, tc_sistema, tc_fdisk, tc_partir
-            dw tc_more, tc_mas, tc_mas2, tc_mas, tc_sort, tc_ordenar
-            dw tc_chkdsk, tc_revisar, tc_label, tc_etiqueta, tc_attrib, tc_atributo
-            dw tc_tree, tc_arbol, tc_xcopy, tc_xcopiar, tc_keyb, tc_teclado
-            dw tc_edit, tc_editar, tc_gwbasic, tc_basic, tc_basica, tc_basic, 0
-tc_format   db "FORMAT", 0
-tc_formatea db "FORMATEA", 0
-tc_sys      db "SYS", 0
-tc_sistema  db "SISTEMA", 0
-tc_fdisk    db "FDISK", 0
-tc_partir   db "PARTIR", 0
-tc_more     db "MORE", 0
-tc_mas2     db "M", 0xA0, "S", 0    ; «más», con su tilde
-tc_mas      db "MAS", 0
-tc_sort     db "SORT", 0
-tc_ordenar  db "ORDENAR", 0
-tc_chkdsk   db "CHKDSK", 0
-tc_revisar  db "REVISAR", 0
-tc_label    db "LABEL", 0
-tc_etiqueta db "ETIQUETA", 0
-tc_attrib   db "ATTRIB", 0
-tc_atributo db "ATRIBUTO", 0
-tc_tree     db "TREE", 0
-tc_arbol    db "ARBOL", 0
-tc_xcopy    db "XCOPY", 0
-tc_xcopiar  db "XCOPIAR", 0
-tc_keyb     db "KEYB", 0
-tc_teclado  db "TECLADO", 0
-tc_edit     db "EDIT", 0
-tc_editar   db "EDITAR", 0
-tc_gwbasic  db "GWBASIC", 0
-tc_basica   db "BASICA", 0
-tc_basic    db "BASIC", 0
+        section .t
+; los nombres clásicos de las órdenes del disco y, detrás de cada uno, el
+; del archivo; se leen con CS (van con T)
+clasicos:
+        db "FORMAT", 0, "FORMATEA", 0
+        db "SYS", 0, "SISTEMA", 0
+        db "FDISK", 0, "PARTIR", 0
+        db "MORE", 0, "MAS", 0
+        db "M", 0xA0, "S", 0, "MAS", 0
+        db "SORT", 0, "ORDENAR", 0
+        db "CHKDSK", 0, "REVISAR", 0
+        db "LABEL", 0, "ETIQUETA", 0
+        db "ATTRIB", 0, "ATRIBUTO", 0
+        db "TREE", 0, "ARBOL", 0
+        db "XCOPY", 0, "XCOPIAR", 0
+        db "KEYB", 0, "TECLADO", 0
+        db "EDIT", 0, "EDITAR", 0
+        db "GWBASIC", 0, "BASIC", 0
+        db "BASICA", 0, "BASIC", 0
+        db 0
+        section .text
 t_exe       db ".EXE", 0
 t_bat       db ".BAT", 0
 t_autoexec  db "\AUTOEXEC.BAT", 0
 
+        section .t
 ; empieza a ejecutar el archivo por lotes de SI: lo carga entero en un bloque
 ; de memoria. CF=1 si no existe (o no cabe); entonces, si había otro lote en
 ; marcha, sigue como estaba
@@ -3154,14 +3384,20 @@ pon_equipo:
         call pon_num
         mov si, m_mem2
         call pon_cad
-        mov bx, 0xFFFF              ; lo libre: pedir de más dice cuánto hay
-        DOS 0x48
+        call libre
         mov ax, bx
         mov cl, 6
         shr ax, cl
         call pon_num
         mov si, m_mem3
         jmp pon_cad
+; BX = los párrafos libres para un programa: lo más que hay seguido (pedir de
+; más dice cuánto es) y lo de T, que se suelta al lanzarlo
+libre:
+        mov bx, 0xFFFF
+        DOS 0x48
+        add bx, T_PARR + 1
+        ret
 ; si la máquina puede con un Hispa mayor, lo dice (toda la familia se
 ; recomienda entre sí: ver docs/8086/HISPA-8086.md)
 pon_consejo:
@@ -3202,16 +3438,25 @@ pon_nl:
         call pon_car
         pop ax
         ret
-; escribe el texto de DS:SI, que acaba en 0
+; escribe el texto de SI, que acaba en 0: de DS (las variables) o, si es de
+; los textos de T (desde T_BASE), de CS
 pon_cad:
         push ax
         push si
+        cmp si, T_BASE
+        jae .t
 .c:
         lodsb
         test al, al
         jz .x
         call pon_car
         jmp .c
+.t:
+        cs lodsb
+        test al, al
+        jz .x
+        call pon_car
+        jmp .t
 .x:
         pop si
         pop ax
@@ -3289,8 +3534,24 @@ pon_num32_ancho:
         pop ax
         ret
 
+        section .text
             align 2
 cpu_nombres dw c_8086, c_v20, c_186, c_286, c_386, c_486
+t_todos     db "*.*", 0
+t_com       db ".COM", 0
+t_in        db "IN", 0
+t_en        db "EN", 0
+t_do        db "DO", 0
+t_haz       db "HAZ", 0
+t_not       db "NOT", 0
+t_exist     db "EXIST", 0
+t_errorlevel db "ERRORLEVEL", 0
+t_no        db "NO", 0
+t_existe    db "EXISTE", 0
+t_nivel     db "NIVEL", 0
+t_a         db "A", 0
+        section .t
+; los textos van con T (se leen con CS: ver pon_cad)
 c_8086      db "8086 u 8088", 0
 c_v20       db "NEC V20 o V30", 0
 c_186       db "80186 u 80188", 0
@@ -3301,8 +3562,6 @@ c_486       db "80486 o superior", 0
 ; =============================================================================
 ;  Los textos (página 437)
 ; =============================================================================
-t_todos     db "*.*", 0
-t_com       db ".COM", 0
 m_ver       db "Hispa-8086 versión 0.12", 10, 0
 m_ayuda     db "Las órdenes de Hispa-8086 (entre paréntesis, el nombre clásico):", 10
             db "  AYUDA  VER  EQUIPO  MEMORIA (MEM)  LIMPIAR (CLS)  ACTUALIZAR", 10
@@ -3388,17 +3647,6 @@ m_e_for     db "Se escribe así: FOR %v IN (lista) DO orden", 10
             db "o PARA %v EN (lista) HAZ orden (en un lote, %%v)", 10, 0
 m_e_for2    db "Un FOR no puede llevar otro dentro.", 10, 0
 m_e_grande_lote db "No hay memoria para llamar a otro lote.", 10, 0
-t_in        db "IN", 0
-t_en        db "EN", 0
-t_do        db "DO", 0
-t_haz       db "HAZ", 0
-t_not       db "NOT", 0
-t_exist     db "EXIST", 0
-t_errorlevel db "ERRORLEVEL", 0
-t_no        db "NO", 0
-t_existe    db "EXISTE", 0
-t_nivel     db "NIVEL", 0
-t_a         db "A", 0
 m_cpu       db "Procesador: ", 0
 m_mem       db 10, "Memoria:    ", 0
 m_mem2      db " K (", 0
@@ -3413,9 +3661,22 @@ m_ayuda0    db 10, "Escriba AYUDA para ver las órdenes.", 10, 0
 ; =============================================================================
 ;  Las variables (no van en el archivo: se ponen a cero al empezar)
 ; =============================================================================
+        section .t
+        section .t
+            align 2, db 0
+t_fin:
+T_TAM       equ t_fin - t_inicio
+T_PARR      equ (T_TAM + 15) / 16
+        section .text
+            align 16, db 0
+r_fin:                              ; (y detrás, en el archivo, T)
+T_ARCH      equ r_fin - inicio + 0x100 - 0x100
         absolute $
             alignb 2
 bss_ini:
+t_seg       resw 1                  ; T: dónde está
+t_suma      resw 1                  ; y su suma, para ver si sigue entera
+p_lanza     resw 2                  ; r_lanza, para llamarla desde T
 es_mono     resb 1
 cpu_tipo    resb 1
 eco         resb 1                  ; se enseñan las líneas de los lotes
@@ -3483,3 +3744,4 @@ lin_buf     resb LIN_MAX + 6
 pila_ini:
             resb 768
 pila_fin:
+            resb T_BASE - 0x100 - (pila_fin - inicio)   ; (si falla: R no cabe por debajo de T_BASE)
