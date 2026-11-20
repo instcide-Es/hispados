@@ -124,5 +124,8 @@ bool box_hispa_encima(const struct box *b) {
   if (!b->style) return false;
   p = css_computed_position(b->style);
   if (p != CSS_POSITION_ABSOLUTE && p != CSS_POSITION_FIXED) return false;
+  /* (lo escondido, como el menú lateral «off-canvas» de ClicGest, que
+   * cssvar.c deja en visibility: hidden, no tapa los clics) */
+  if (css_computed_visibility(b->style) == CSS_VISIBILITY_HIDDEN) return false;
   return box_hispa_z(b) > 0;
 }
