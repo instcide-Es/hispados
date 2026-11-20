@@ -177,13 +177,23 @@ r_ofy       resd 1
 r_ofila     resd 1
 r_opal      resd 1
 r_fondo4    resd 1                  ; el color del fondo, cuatro veces
+r_lnum      resb 256                ; cuántos objetos en cada línea
+r_lmas      resb 256                ;   y si había más
+r_lobj      resb 240 * 20           ;   y cuáles
+v_sat_sucia resb 1                  ; se ha escrito en la tabla de objetos
+r_sclases   resb 1                  ; de qué prioridades hay objetos en la línea
+            alignb 4
 r_cx0       resd 1                  ; el recorte de casilla
 r_cx1       resd 1
 r_fondo_act resb 1                  ; el color del fondo de pal_pxb
             alignb 4
-r_fy        resd 1
-r_fila      resd 1
+r_fy4       resd 1
+r_fy4r      resd 1
+r_filap     resd 1
+r_colk      resd 1
 r_cmask     resd 1
+r_porcol    resb 1
+            alignb 4
 r_altos     resb R_ALTOS * 32
 lin         resb 320 + 2 * LIN_M    ; la línea: índices de la CRAM
 spr         resb 320 + 2 * LIN_M    ; los objetos de la línea

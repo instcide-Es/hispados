@@ -730,11 +730,21 @@ ifneq ($(M68KAS),)
 else
 	cp tests/hispadrv/PRUEBA.MD $@
 endif
+# y la de carga (solo para medir la velocidad: tests/run_hispadrv_tests.sh)
+$(B)/CARGA.MD: tests/hispadrv/carga.s tests/hispadrv/z80carga.s tools/asmz80.py tests/hispadrv/CARGA.MD | $(B)
+ifneq ($(M68KAS),)
+	@mkdir -p $(B)/gen/hispadrv
+	python3 tools/asmz80.py tests/hispadrv/z80carga.s $(B)/gen/hispadrv/z80carga.bin > /dev/null
+	cd $(B)/gen/hispadrv && m68k-linux-gnu-as --register-prefix-optional -o carga.o $(CURDIR)/tests/hispadrv/carga.s
+	m68k-linux-gnu-ld -e 0 -Ttext=0 --oformat binary -o $@ $(B)/gen/hispadrv/carga.o
+else
+	cp tests/hispadrv/CARGA.MD $@
+endif
 # el núcleo de Hispa-Drive como programa de Linux (tests/run_hispadrv_tests.sh)
 MDNAT = tests/hispadrv/mdnativo.asm $(wildcard programas/hispadrv/*.inc) $(EMUCOMUN) $(MDGEN)
 $(B)/mdnativo: $(MDNAT) | $(B)
 	$(NASM) -f bin -i programas/hispadrv/ -i programas/comun/ -i $(B)/gen/hispadrv/ -o $@ $< && chmod +x $@
-mdprogs: $(B)/mdnativo $(B)/PRUEBA.MD
+mdprogs: $(B)/mdnativo $(B)/PRUEBA.MD $(B)/CARGA.MD $(B)/HISPADRV.HVP
 # [Configuración] los programas de Hispa Ventanas que no son juegos van en
 # \HISPADOS, al lado de VENTANAS.COM (HVPSIS): Configuración (CONFIG.HVP)
 HVPSIS = $(B)/CONFIG.HVP

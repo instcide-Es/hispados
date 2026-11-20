@@ -31,26 +31,27 @@
 
 LIN_M       equ 32                  ; margen de lin a cada lado
 R_ALTOS     equ 192                 ; casillas de prioridad alta por línea
+LIN_SPR     equ lin - spr           ; (de un punto de spr al mismo de lin)
 
 ; cuatro puntos: %1 tabla de pares de colores (la de la paleta: EBX =
 ; paleta x 512), %2 de máscaras, %3 %4 los dos octetos (en el orden en que se
-; pintan), %5 desplazamiento en EDI. Gasta ECX, EBP
+; pintan), %5 desplazamiento en EDI. Gasta EDX, EBP
 %macro PINTA4 5
-        movzx ecx, %4
+        movzx edx, %4
         movzx ebp, %3
-        mov cx, [%1+ebx+ecx*2]
-        shl ecx, 16
-        mov cx, [%1+ebx+ebp*2]
+        mov dx, [%1+ebx+edx*2]
+        shl edx, 16
+        mov dx, [%1+ebx+ebp*2]
         push eax
         movzx eax, %4
         mov ax, [%2+eax*2]
         shl eax, 16
         mov ax, [%2+ebp*2]
-        ; ECX = cuatro puntos, EAX = su máscara
-        and ecx, eax
+        ; EDX = cuatro puntos, EAX = su máscara
+        and edx, eax
         not eax
         and eax, [edi+%5]
-        or eax, ecx
+        or eax, edx
         mov [edi+%5], eax
         pop eax
 %endmacro
@@ -136,13 +137,12 @@ vdp_col_pon:
         mov edx, ebx
         and edx, 15                 ; EDX = el número en la paleta
         push ebx
-        xor ebx, ebx
-.p:
-        mov ebp, ebx                ; el octeto EBX: ¿lleva el color arriba?
-        shr ebp, 4
-        cmp ebp, edx
-        jne .p1
+        ; los octetos con el color arriba: EDX*16 + k
+        mov ebx, edx
+        shl ebx, 4
         lea ebp, [ecx+ebx*2]
+        mov ebx, 16
+.p:
         mov [pal_px+ebp], al
         mov [pal_pxr+ebp+1], al
         test edx, edx
@@ -150,21 +150,23 @@ vdp_col_pon:
         mov [pal_pxb+ebp], al
         mov [pal_pxbr+ebp+1], al
 .p1:
-        mov ebp, ebx                ; ¿y abajo?
-        and ebp, 15
-        cmp ebp, edx
-        jne .p2
-        lea ebp, [ecx+ebx*2]
+        add ebp, 2
+        dec ebx
+        jnz .p
+        ; y abajo: k*16 + EDX
+        lea ebp, [ecx+edx*2]
+        mov ebx, 16
+.q:
         mov [pal_px+ebp+1], al
         mov [pal_pxr+ebp], al
         test edx, edx
-        jz .p2
+        jz .q1
         mov [pal_pxb+ebp+1], al
         mov [pal_pxbr+ebp], al
-.p2:
-        inc ebx
-        cmp ebx, 256
-        jb .p
+.q1:
+        add ebp, 32
+        dec ebx
+        jnz .q
         pop ebx
         pop edx
         pop ecx
@@ -429,6 +431,7 @@ vdp_esc_control:
         jae .x
         mov ah, [v_reg+ecx]
         mov [v_reg+ecx], al
+        mov byte [v_sat_sucia], 1   ; (5 y 12: otra tabla de objetos)
         cmp ecx, 1
         ja .r12
         call vdp_irq                ; (0 y 1: las interrupciones)
@@ -538,6 +541,7 @@ vdp_dma68:
 ; tantas veces como diga la longitud
 vdp_dma_relleno:
         pushad
+        mov byte [v_sat_sucia], 1
         mov byte [v_relleno], 0
         call vdp_dma_largo
         mov bl, ah
@@ -571,6 +575,7 @@ vdp_dma_relleno:
 ; copia dentro de la VRAM (de octeto en octeto)
 vdp_dma_copia:
         pushad
+        mov byte [v_sat_sucia], 1
         call vdp_dma_largo
         movzx esi, byte [v_reg+22]
         shl esi, 8
@@ -631,11 +636,17 @@ vdp_esc_dato:
         and ebp, 0xFFFE
         mov [vram+ebp], ah
         mov [vram+ebp+1], al
+        sub ebp, [r_sat]            ; ¿en la tabla de los objetos?
+        cmp ebp, 0x280
+        jae .sig
+        mov byte [v_sat_sucia], 1
         jmp .sig
 .cram:
         shr ebp, 1
         and ebp, 63
         and eax, 0x0EEE
+        cmp [cram+ebp*2], ax        ; (igual que estaba: nada que hacer)
+        je .sig
         mov [cram+ebp*2], ax
         push ebx
         mov ebx, ebp
@@ -760,10 +771,8 @@ vdp_linea:
         jae .a3
         call ventana
 .a3:
-        ; ---- los objetos de prioridad baja ----
+        ; ---- los objetos (los de prioridad baja van ya a lin) ----
         call objetos
-        mov ah, 0x80
-        call objetos_pon
         ; ---- lo de prioridad alta: B, A (y la ventana) ----
         call altos
         mov ah, 0xC0
@@ -839,60 +848,68 @@ plano:
         shl ecx, 3
         dec ecx
         and eax, ecx                ; EAX = x del plano en el punto 0
-        mov [r_px], eax
         mov ecx, eax
         and ecx, 7
         neg ecx
         mov esi, ecx                ; ESI = x en la pantalla de la primera casilla
-        test byte [v_reg+11], 4     ; ¿desplazamiento vertical por columnas?
-        jnz near .columnas
-        ; ---- lo normal: toda la línea en la misma fila del plano ----
-        mov eax, [r_plano]
-        movzx eax, word [vsram+eax*2]
-        add eax, [r_linea]
-        and eax, [r_hmask]
         mov ecx, eax
-        and ecx, 7
-        mov [r_fy], ecx             ; la línea dentro de la casilla
-        shr eax, 3
-        imul eax, [r_cw]
-        add eax, eax
-        add eax, [r_nt]
-        mov [r_fila], eax           ; la fila de la tabla
+        shr ecx, 3                  ; ECX = su columna en el plano
         mov eax, [r_cw]
         dec eax
         mov [r_cmask], eax
-.t:
-        cmp esi, [r_x1]
-        jge near .fin
-        lea eax, [esi+8]
-        cmp eax, [r_x0]
-        jle .s
-        mov eax, [r_px]
+        ; las casillas que quedan a la izquierda de r_x0, saltadas
+        mov eax, [r_x0]
+        sub eax, esi
+        jle .sx
         shr eax, 3
-        and eax, [r_cmask]
-        add eax, eax
-        add eax, [r_fila]
-        and eax, 0xFFFF
-        mov dx, [vram+eax]          ; la entrada (en el orden del 68000)
+        add ecx, eax
+        shl eax, 3
+        add esi, eax
+.sx:
+        and ecx, [r_cmask]
+        mov dword [r_colk], -1
+        test byte [v_reg+11], 4     ; ¿desplazamiento vertical por columnas?
+        setnz byte [r_porcol]
+        jnz .t
+        xor eax, eax                ; (si no, la fila de toda la línea)
+        call fila_plano
+.t:
+        cmp byte [r_porcol], 0      ; por columnas de 16 puntos: la fila de la
+        je .t0                      ; de esta casilla (si ha cambiado)
+        mov eax, esi
+        sar eax, 4
+        jns .c0
+        xor eax, eax
+.c0:
+        cmp eax, 19
+        jbe .c1
+        mov eax, 19
+.c1:
+        cmp eax, [r_colk]
+        je .t0
+        call fila_plano
+.t0:
+        mov edx, [r_filap]
+        movzx edx, word [edx+ecx*2] ; la entrada (en el orden del 68000)
         xchg dl, dh
-        movzx edx, dx
-        mov ebx, [r_fy]
-        test edx, 0x1000            ; girada de arriba abajo
-        jz .nv
-        xor ebx, 7
-.nv:
         mov eax, edx
         and eax, 0x7FF
         shl eax, 5
-        mov eax, [vram+eax+ebx*4]   ; los cuatro octetos de la fila
+        test dh, 0x10               ; girada de arriba abajo
+        jnz .nv
+        add eax, [r_fy4]
+        jmp .nv1
+.nv:
+        add eax, [r_fy4r]
+.nv1:
+        mov eax, [vram+eax]         ; los cuatro octetos de la fila
         test eax, eax
         jz .s                       ; (transparente del todo)
         mov ebx, edx
         shr ebx, 4
         and ebx, 0x600              ; la paleta (x 512)
         mov ebp, esi
-        test edx, 0x8000
+        test dh, 0x80
         jnz .alto
         lea edi, [lin+LIN_M+esi]
         cmp dword [r_plano], 1      ; (el plano B, de prioridad baja: debajo
@@ -905,76 +922,42 @@ plano:
 .alto:                              ; prioridad alta: para luego
         call apunta_alto
 .s:
+        inc ecx
+        and ecx, [r_cmask]
         add esi, 8
-        add dword [r_px], 8
-        jmp .t
-.fin:
+        cmp esi, [r_x1]
+        jl .t
         popad
         ret
-        ; ---- por columnas de 16 puntos (cada casilla, la fila de la suya) ----
-.columnas:
-.ct:
-        cmp esi, [r_x1]
-        jge .fin
-        lea eax, [esi+8]
-        cmp eax, [r_x0]
-        jle .cs
-        mov edx, esi
-        test edx, edx
-        jns .v1
-        xor edx, edx
-.v1:
-        shr edx, 4
-        cmp edx, 19
-        jbe .v2
-        mov edx, 19
-.v2:
-        mov eax, [r_plano]
-        lea eax, [eax+edx*2]
+
+; (plano) EAX=columna de 16 puntos (0-19; con desplazamiento de toda la
+; pantalla, 0): r_filap (la fila de la tabla), r_fy4 y r_fy4r (la línea
+; dentro de la casilla, x 4, derecha y girada)
+fila_plano:
+        push eax
+        push edx
+        mov [r_colk], eax
+        add eax, eax
+        add eax, [r_plano]
         movzx eax, word [vsram+eax*2]
         add eax, [r_linea]
         and eax, [r_hmask]
-        mov ebx, eax                ; EBX = y en el plano
+        mov edx, eax
+        and edx, 7
+        shl edx, 2
+        mov [r_fy4], edx
+        xor edx, 28
+        mov [r_fy4r], edx
         shr eax, 3
         imul eax, [r_cw]
-        mov edx, [r_px]
-        shr edx, 3
-        mov ebp, [r_cw]
-        dec ebp
-        and edx, ebp
-        add eax, edx
         add eax, eax
         add eax, [r_nt]
         and eax, 0xFFFF
-        mov dx, [vram+eax]
-        xchg dl, dh
-        movzx edx, dx
-        and ebx, 7
-        test edx, 0x1000
-        jz .cnv
-        xor ebx, 7
-.cnv:
-        mov eax, edx
-        and eax, 0x7FF
-        shl eax, 5
-        mov eax, [vram+eax+ebx*4]
-        test eax, eax
-        jz .cs
-        mov ebx, edx
-        shr ebx, 4
-        and ebx, 0x600
-        mov ebp, esi
-        test edx, 0x8000
-        jnz .calto
-        lea edi, [lin+LIN_M+esi]
-        call casilla
-        jmp .cs
-.calto:
-        call apunta_alto
-.cs:
-        add esi, 8
-        add dword [r_px], 8
-        jmp .ct
+        add eax, vram
+        mov [r_filap], eax
+        pop edx
+        pop eax
+        ret
 
 ; el recorte de casilla: r_x0 y r_x1, salvo en los bordes de la pantalla
 ; (allí no hace falta: lin tiene margen)
@@ -1003,48 +986,52 @@ casilla_b:
         jl casilla.recorta
         test edx, 0x0800
         jnz .girada
-        movzx ecx, ah
+        movzx edx, ah
         movzx ebp, al
-        mov cx, [pal_pxb+ebx+ecx*2]
-        shl ecx, 16
-        mov cx, [pal_pxb+ebx+ebp*2]
-        mov [edi], ecx
+        mov dx, [pal_pxb+ebx+edx*2]
+        shl edx, 16
+        mov dx, [pal_pxb+ebx+ebp*2]
+        mov [edi], edx
         rol eax, 16
-        movzx ecx, ah
+        movzx edx, ah
         movzx ebp, al
-        mov cx, [pal_pxb+ebx+ecx*2]
-        shl ecx, 16
-        mov cx, [pal_pxb+ebx+ebp*2]
-        mov [edi+4], ecx
+        mov dx, [pal_pxb+ebx+edx*2]
+        shl edx, 16
+        mov dx, [pal_pxb+ebx+ebp*2]
+        mov [edi+4], edx
         rol eax, 16
         ret
 .girada:
-        movzx ecx, ah
+        movzx edx, ah
         movzx ebp, al
-        mov cx, [pal_pxbr+ebx+ebp*2]
-        shl ecx, 16
-        mov cx, [pal_pxbr+ebx+ecx*2]
-        rol ecx, 16
-        mov [edi+4], ecx
+        mov dx, [pal_pxbr+ebx+ebp*2]
+        shl edx, 16
+        mov bp, [pal_pxbr+ebx+edx*2]  ; (EBP: el índice ya no hace falta)
+        mov dx, bp
+        rol edx, 16
+        mov [edi+4], edx
         rol eax, 16
-        movzx ecx, ah
+        movzx edx, ah
         movzx ebp, al
-        mov cx, [pal_pxbr+ebx+ebp*2]
-        shl ecx, 16
-        mov cx, [pal_pxbr+ebx+ecx*2]
-        rol ecx, 16
-        mov [edi], ecx
+        mov dx, [pal_pxbr+ebx+ebp*2]
+        shl edx, 16
+        mov bp, [pal_pxbr+ebx+edx*2]
+        mov dx, bp
+        rol edx, 16
+        mov [edi], edx
         rol eax, 16
         ret
 
 ; pinta una fila de una casilla: EAX=los cuatro octetos, EBX=paleta (x 512),
-; EDX=la entrada (bit 11: girada), EDI=en lin; solo entre r_x0 y r_x1 (EBP=x).
-; Conserva EAX, EBX, EDX, ESI, EDI
+; EDX=la entrada (bit 11: girada), EDI=en lin; solo entre r_cx0 y r_cx1
+; (EBP=x). Conserva EAX, EBX, ECX, ESI, EDI
 casilla:
         cmp ebp, [r_cx0]
         jl .recorta
+        push ecx
         lea ecx, [ebp+8]
         cmp ecx, [r_cx1]
+        pop ecx
         jg .recorta
         test edx, 0x0800
         jnz .girada
@@ -1060,6 +1047,7 @@ casilla:
         PINTA4 pal_pxr, tab_mkr, ah, al, 4
         ret
 .recorta:                           ; (de punto en punto, mirando los bordes)
+        push ecx
         push esi
         push edx
         push edi
@@ -1104,6 +1092,7 @@ casilla:
         pop edi
         pop edx
         pop esi
+        pop ecx
         ret
 
 ; apunta una casilla de prioridad alta (EAX, EBX, EBP y EDX como para
@@ -1266,22 +1255,25 @@ ventana:
         popad
         ret
 
-; ---- los objetos de la línea, a spr (índice de color, 40h si es de
-; prioridad alta, 80h si hay algo); el primero de la lista gana ----
-objetos:
+; ---- las listas de objetos de cada línea (una vez por cuadro, o si se ha
+; escrito en su tabla): siguiendo los enlaces desde el 0, cada objeto se
+; apunta en las líneas que toca (hasta 20 por línea con 320 puntos, 16 con
+; 256; si hay más, la línea lo apunta y salen los primeros) ----
+objetos_lista:
         pushad
-        mov dword [r_smin], 1000
-        mov dword [r_smax], -1
+        mov byte [v_sat_sucia], 0
+        mov edi, r_lnum
+        mov ecx, 256 / 4
+        xor eax, eax
+        rep stosd
         movzx ebx, byte [v_reg+5]   ; la tabla (en 320 puntos, sin el bit 0)
         and ebx, 0x7F
-        mov ecx, 80                 ; cuántos, por línea y puntos por línea
+        mov ecx, 80
         mov edx, 20
-        mov eax, 320
-        cmp dword [r_ancho], 320
+        cmp dword [v_ancho], 320
         je .t
         mov cl, 64
         mov dl, 16
-        mov eax, 256
         jmp .t1
 .t:
         and ebx, 0x7E
@@ -1289,48 +1281,52 @@ objetos:
         shl ebx, 9
         mov [r_sat], ebx
         mov [r_smaxn], edx
-        mov [r_spuntos], eax
         mov [r_stotal], ecx
-        mov dword [r_sn], 0
-        mov dword [r_sx0vis], 0
-        xor esi, esi                ; ESI = el objeto (empieza en el 0)
+        xor esi, esi                ; ESI = el objeto
         xor ebp, ebp                ; EBP = cuántos se han mirado
 .o:
-        mov eax, esi
-        shl eax, 3
-        add eax, [r_sat]
-        and eax, 0xFFFF
-        mov edi, eax                ; EDI = su entrada
+        mov edi, esi
+        shl edi, 3
+        add edi, [r_sat]
+        and edi, 0xFFFF             ; EDI = su entrada
         movzx eax, byte [vram+edi]
         shl eax, 8
         mov al, [vram+edi+1]
         and eax, 0x3FF
-        sub eax, 128                ; y
-        mov ecx, [r_linea]
-        sub ecx, eax                ; ECX = la línea dentro del objeto
-        js .sig
-        movzx edx, byte [vram+edi+2]
-        mov eax, edx
-        and eax, 3                  ; alto - 1, en casillas
-        inc eax
-        shl eax, 3
-        cmp ecx, eax
+        sub eax, 128                ; EAX = y (primera línea)
+        movzx ecx, byte [vram+edi+2]
+        and ecx, 3
+        inc ecx
+        shl ecx, 3
+        add ecx, eax                ; ECX = la de después de la última
+        test eax, eax
+        jns .a
+        xor eax, eax
+.a:
+        cmp ecx, 240
+        jbe .b
+        mov ecx, 240
+.b:
+        cmp eax, ecx
         jae .sig
-        ; está en la línea
-        mov eax, [r_sn]
-        cmp eax, [r_smaxn]
-        jb .cabe
-        or byte [v_st], 0x40        ; demasiados en la línea
-        jmp .fin
-.cabe:
-        inc dword [r_sn]
-        push esi
-        push ebp
-        call objeto                 ; EDI=entrada ECX=línea dentro
-        pop ebp
-        pop esi
-        cmp dword [r_spuntos], 0
-        jle .fin
+.l:
+        movzx edx, byte [r_lnum+eax]
+        cmp edx, [r_smaxn]
+        jae .lleno
+        imul ebx, eax, 20
+        add ebx, edx
+        push eax
+        mov eax, esi
+        mov [r_lobj+ebx], al
+        pop eax
+        inc byte [r_lnum+eax]
+        jmp .l1
+.lleno:
+        mov byte [r_lmas+eax], 1
+.l1:
+        inc eax
+        cmp eax, ecx
+        jb .l
 .sig:
         movzx esi, byte [vram+edi+3] ; el siguiente de la lista
         and esi, 0x7F
@@ -1340,6 +1336,65 @@ objetos:
         jae .fin
         cmp ebp, [r_stotal]
         jb .o
+.fin:
+        popad
+        ret
+
+; ---- los objetos de la línea, a spr (índice de color, 40h si es de
+; prioridad alta, 80h si hay algo); el primero de la lista gana ----
+objetos:
+        pushad
+        mov dword [r_smin], 1000
+        mov dword [r_smax], -1
+        mov byte [r_sclases], 0
+        cmp dword [r_linea], 0      ; las listas: al empezar el cuadro (o si
+        je .rehaz                   ; se ha escrito en la tabla)
+        cmp byte [v_sat_sucia], 0
+        je .hecha
+.rehaz:
+        call objetos_lista
+.hecha:
+        mov eax, 320
+        cmp dword [r_ancho], 320
+        je .p
+        mov eax, 256
+.p:
+        mov [r_spuntos], eax
+        mov dword [r_sx0vis], 0
+        mov ebx, [r_linea]
+        cmp byte [r_lmas+ebx], 0    ; demasiados en esta línea
+        je .nm
+        or byte [v_st], 0x40
+        mov byte [r_lmas+ebx], 0
+.nm:
+        movzx ebp, byte [r_lnum+ebx]
+        test ebp, ebp
+        jz .fin
+        imul ebx, 20
+        add ebx, r_lobj
+.o:
+        movzx esi, byte [ebx]
+        inc ebx
+        mov edi, esi
+        shl edi, 3
+        add edi, [r_sat]
+        and edi, 0xFFFF             ; EDI = su entrada
+        movzx eax, byte [vram+edi]
+        shl eax, 8
+        mov al, [vram+edi+1]
+        and eax, 0x3FF
+        sub eax, 128
+        mov ecx, [r_linea]
+        sub ecx, eax                ; ECX = la línea dentro del objeto
+        push ebx
+        push ebp
+        call objeto
+        pop ebp
+        pop ebx
+        cmp dword [r_spuntos], 0
+        jle .fin
+        dec ebp
+        jnz .o
 .fin:
         popad
         ret
@@ -1398,6 +1453,10 @@ objeto:
 .pb:
         or eax, 0x80
         mov [r_opal], eax
+        mov dl, al
+        and dl, 0x40
+        add dl, 0x40                ; (40h baja, 80h alta)
+        or [r_sclases], dl
         ; las casillas de izquierda a derecha
         xor esi, esi
 .c:
@@ -1481,6 +1540,11 @@ objeto_casilla:
         jne .ch1
         or edx, [r_opal]
         mov [edi], dl
+        test dl, 0x40               ; (de prioridad baja: ya a lin; los altos
+        jnz .n1                     ; van luego, encima de los planos altos)
+        and edx, 0x3F
+        mov dl, [v_col+edx]
+        mov [edi+LIN_SPR], dl
         jmp .n1
 .ch1:
         or byte [v_st], 0x20        ; (dos objetos en el mismo punto)
@@ -1493,6 +1557,11 @@ objeto_casilla:
         jne .ch2
         or edx, [r_opal]
         mov [edi], dl
+        test dl, 0x40
+        jnz .n2
+        and edx, 0x3F
+        mov dl, [v_col+edx]
+        mov [edi+LIN_SPR], dl
         jmp .n2
 .ch2:
         or byte [v_st], 0x20
@@ -1512,6 +1581,14 @@ objetos_pon:
         mov ecx, [r_smax]
         cmp esi, ecx
         jg .x                       ; (ninguno en esta línea)
+        mov bl, ah
+        mov al, 0x40                ; ¿hay de esta clase?
+        cmp bl, 0x80
+        je .k
+        mov al, 0x80
+.k:
+        test [r_sclases], al
+        jz .f
         cmp esi, 0
         jge .a
         xor esi, esi
@@ -1521,11 +1598,15 @@ objetos_pon:
         mov ecx, [r_ancho]
         dec ecx
 .b:
-        mov bl, ah
+        and esi, ~3
         xor edx, edx
 .c:
         cmp esi, ecx
         jg .f
+        cmp dword [spr+LIN_M+esi], 0 ; (cuatro vacíos: siguiente)
+        je .n4
+        mov edi, 4
+.c1:
         mov al, [spr+LIN_M+esi]
         mov dl, al
         and al, 0xC0
@@ -1536,6 +1617,11 @@ objetos_pon:
         mov [lin+LIN_M+esi], dl
 .n:
         inc esi
+        dec edi
+        jnz .c1
+        jmp .c
+.n4:
+        add esi, 4
         jmp .c
 .f:
         cmp bl, 0xC0
@@ -1543,8 +1629,8 @@ objetos_pon:
         mov edi, [r_smin]           ; (a cero para la siguiente)
         mov ecx, [r_smax]
         sub ecx, edi
-        inc ecx
-        lea edi, [spr+LIN_M+edi]
+        add ecx, 8
+        lea edi, [spr+LIN_M+edi-4]
         xor eax, eax
         rep stosb
 .x:
