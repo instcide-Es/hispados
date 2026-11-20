@@ -1,0 +1,171 @@
+; =============================================================================
+;  accesos.cas - los accesos de los programas que traen los paquetes: lo que
+;  sale en el menú Inicio (y, si se pide, en el tapiz) sin tocar el núcleo.
+;
+;  Un paquete deja, además de su programa, un archivo de texto (página 437,
+;  líneas con CR LF) en \HISPA\MENU (o en \MENU, en un sistema sin instalar)
+;  que se llama como quiera, acabado en .MNU:
+;
+;      nombre=Agenda
+;      programa=\HISPA\AGENDA.BIN
+;      argumentos=
+;      icono=\HISPA\MENU\AGENDA.ICP
+;      escritorio=si
+;
+;  «nombre» y «programa» hacen falta; lo demás no. El icono es un .ICP: la
+;  magia «HPIC», el ancho y el alto (32 y 32, en dos palabras de 32 bits, la
+;  baja primero) y 32 x 32 puntos 0xAARRGGBB (A = 0: transparente; lo hace
+;  tools/hpicono.py). Sin icono, uno de programa genérico. Como mucho
+;  MAX_ACCESOS; se leen cada vez que se abre el menú Inicio (así, lo que se
+;  instala con el escritorio en marcha sale la vez siguiente).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Accesos
+
+    importar Fat, Unidades, Monton, Usuario, Textos32
+
+    público constante MAX_ACCESOS = 6
+    público constante LADO_ICONO = 32
+
+    tipo Acceso = estructura
+        nombre: arreglo [32] de byte
+        programa: arreglo [80] de byte
+        argumentos: arreglo [80] de byte
+        en_escritorio: bool
+        icono: puntero a nat32                  ; 32 x 32 puntos (o nulo)
+    fin
+    variable accesos: arreglo [MAX_ACCESOS] de Acceso
+    público variable n_accesos: nat32
+    variable texto: arreglo [600] de byte
+    variable ruta: arreglo [80] de byte
+    variable valor_: arreglo [80] de byte
+
+    público función nombre_de(i: nat32): puntero a byte
+        devolver dirección(accesos[i].nombre[0])
+    fin
+
+    público función programa_de(i: nat32): puntero a byte
+        devolver dirección(accesos[i].programa[0])
+    fin
+
+    ; sus argumentos (nulo si no tiene)
+    público función argumentos_de(i: nat32): puntero a byte
+        si accesos[i].argumentos[0] = 0 entonces devolver nulo fin
+        devolver dirección(accesos[i].argumentos[0])
+    fin
+
+    público función en_escritorio(i: nat32): bool
+        devolver accesos[i].en_escritorio
+    fin
+
+    público función icono_de(i: nat32): puntero a nat32
+        devolver accesos[i].icono
+    fin
+
+    ; el valor de «clave=» en el texto leído (falso si no está)
+    función valor_de(clave: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+        variable i, k, n: nat32
+        i := 0
+        n := longitud(clave)
+        mientras texto[i] <> 0 hacer
+            si (i = 0 o texto[i - 1] = '\n') y empieza_por(dirección(texto[i]), clave) y texto[i + n] = '=' entonces
+                i := i + n + 1
+                k := 0
+                mientras texto[i] <> 0 y texto[i] <> '\r' y texto[i] <> '\n' y k + 1 < cabe hacer
+                    destino[k] := texto[i]
+                    i := i + 1
+                    k := k + 1
+                fin
+                destino[k] := 0
+                devolver cierto
+            fin
+            i := i + 1
+        fin
+        destino[0] := 0
+        devolver falso
+    fin
+
+    ; lee un .ICP de 32 x 32 a la memoria del núcleo (nulo si no vale)
+    función lee_icono(nombre: puntero a byte): puntero a nat32
+        variable m, n: nat32
+        variable cab: arreglo [3] de nat32
+        variable p: puntero a byte
+        m := abrir_archivo(del_sistema, nombre, PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver nulo fin
+        n := leer_archivo(m, puntero(dirección(cab)), 12)
+        si n <> 12 o cab[0] <> 0x43495048 o cab[1] <> LADO_ICONO o cab[2] <> LADO_ICONO entonces
+            cerrar_archivo(m)
+            devolver nulo
+        fin
+        p := reservar(LADO_ICONO * LADO_ICONO * 4)
+        si p <> nulo entonces
+            si leer_archivo(m, p, LADO_ICONO * LADO_ICONO * 4) <> LADO_ICONO * LADO_ICONO * 4 entonces
+                liberar(p)
+                p := nulo
+            fin
+        fin
+        cerrar_archivo(m)
+        devolver puntero(p)
+    fin
+
+    ; un .MNU de la carpeta «carpeta» (con su barra al final)
+    función lee_uno(carpeta: puntero a byte, archivo: puntero a byte)
+        variable m, n, k: nat32
+        si n_accesos >= MAX_ACCESOS entonces devolver fin
+        copiar(ruta, carpeta)
+        concatenar(ruta, archivo)
+        m := abrir_archivo(del_sistema, ruta, PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver fin
+        n := leer_archivo(m, texto, 599)
+        cerrar_archivo(m)
+        si n >= PRIMER_ERROR entonces devolver fin
+        texto[n] := 0
+        k := n_accesos
+        si no valor_de("nombre", accesos[k].nombre, 32) o no valor_de("programa", accesos[k].programa, 80) entonces devolver fin
+        valor_de("argumentos", accesos[k].argumentos, 80)
+        accesos[k].en_escritorio := valor_de("escritorio", valor_, 80) y (valor_[0] = 's' o valor_[0] = 'S')
+        accesos[k].icono := nulo
+        si valor_de("icono", valor_, 80) entonces accesos[k].icono := lee_icono(valor_) fin
+        n_accesos := n_accesos + 1
+    fin
+
+    función lee_carpeta(carpeta: puntero a byte)
+        variable m, r, n: nat32
+        variable e: Entrada
+        variable nombre: arreglo [16] de byte
+        m := abrir_archivo(del_sistema, carpeta, PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver fin
+        r := leer_entrada(m, dirección(e))
+        mientras r = 1 y n_accesos < MAX_ACCESOS hacer
+            n := 0
+            mientras e.nombre[n] <> 0 y n < 12 hacer
+                nombre[n] := e.nombre[n]
+                n := n + 1
+            fin
+            nombre[n] := 0
+            si e.atributos yb CARPETA = 0 y n > 4 y nombre[n - 4] = '.' y nombre[n - 3] = 'M' y nombre[n - 2] = 'N' y nombre[n - 1] = 'U' entonces
+                copiar(ruta, carpeta)
+                concatenar(ruta, "\\")
+                copiar(valor_, ruta)
+                lee_uno(valor_, nombre)
+            fin
+            r := leer_entrada(m, dirección(e))
+        fin
+        cerrar_archivo(m)
+    fin
+
+    ; vuelve a leer los accesos; da cuántos hay
+    público función lee_accesos(): nat32
+        variable i: nat32
+        para i desde 0 hasta MAX_ACCESOS - 1 hacer
+            si i < n_accesos y accesos[i].icono <> nulo entonces liberar(puntero(accesos[i].icono)) fin
+            accesos[i].icono := nulo
+        fin
+        n_accesos := 0
+        si del_sistema = 0xFFFFFFFF o unidad_en_memoria() entonces devolver 0 fin
+        lee_carpeta("\\HISPA\\MENU")
+        lee_carpeta("\\MENU")
+        devolver n_accesos
+    fin
+
+fin Accesos.

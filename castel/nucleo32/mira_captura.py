@@ -16,6 +16,10 @@ Ventanas. Las comprobaciones:
                                  algún punto de ese rectángulo
   negrita X0 Y0 X1 Y1 TEXTO      lo mismo, en negrita (cada letra, dos veces)
   notexto X0 Y0 X1 Y1 TEXTO      el texto (fino o en negrita) NO está ahí
+  texto2, negrita2 ...           como texto y negrita, con la letra a doble
+                                 tamaño (16x32: cada punto, 2x2; en negrita,
+                                 otra vez un punto a la derecha), la que
+                                 pintan los programas con «letra grande»
   igual X Y ANCHO ALTO OTRA.ppm  ese rectángulo es igual en la otra captura
   distinto X Y ANCHO ALTO OTRA.ppm   y que no lo es
 
@@ -54,33 +58,35 @@ class Captura:
         return self.d[o:o + 3]
 
 
-def dibujo(texto, negrita, tabla):
-    """los puntos del texto: una lista de filas, cada una una lista de 0 y 1"""
+def dibujo(texto, negrita, tabla, e=1):
+    """los puntos del texto: una lista de filas, cada una una lista de 0 y 1
+    (con e = 2, la letra a doble tamaño)"""
     cod = texto.encode('cp437', 'replace')
-    ancho = len(cod) * 8 + (1 if negrita else 0)
+    ancho = len(cod) * 8 * e + (1 if negrita else 0)
     filas = []
-    for f in range(16):
+    for f in range(16 * e):
         fila = [0] * ancho
         for i, c in enumerate(cod):
-            v = tabla[c][f]
-            for b in range(8):
-                if v & (0x80 >> b):
-                    fila[i * 8 + b] = 1
+            v = tabla[c][f // e]
+            for b in range(8 * e):
+                if v & (0x80 >> (b // e)):
+                    fila[i * 8 * e + b] = 1
                     if negrita:
-                        fila[i * 8 + b + 1] = 1
+                        fila[i * 8 * e + b + 1] = 1
         filas.append(fila)
     return filas
 
 
-def busca(cap, x0, y0, x1, y1, texto, negrita, tabla):
+def busca(cap, x0, y0, x1, y1, texto, negrita, tabla, e=1):
     """dónde está el texto (x, y), o None"""
-    filas = dibujo(texto, negrita, tabla)
+    filas = dibujo(texto, negrita, tabla, e)
     ancho = len(filas[0])
-    tinta = [(x, f) for f in range(16) for x in range(ancho) if filas[f][x]]
-    fondo = [(x, f) for f in range(16) for x in range(ancho) if not filas[f][x]]
+    alto = len(filas)
+    tinta = [(x, f) for f in range(alto) for x in range(ancho) if filas[f][x]]
+    fondo = [(x, f) for f in range(alto) for x in range(ancho) if not filas[f][x]]
     if not tinta:
         return None
-    for y in range(max(0, y0), min(y1, cap.alto - 16) + 1):
+    for y in range(max(0, y0), min(y1, cap.alto - alto) + 1):
         for x in range(max(0, x0), min(x1, cap.ancho - ancho) + 1):
             c = cap.punto(x + tinta[0][0], y + tinta[0][1])
             if all(cap.punto(x + a, y + b) == c for a, b in tinta) and \
@@ -118,6 +124,15 @@ def main():
             es = all(abs(p[k] - c[k]) <= margen for k in range(3))
             if es != (op == 'rgb'):
                 mal.append('el punto (%d,%d) es %s y %s %s' % (x, y, p.hex().upper(), 'se esperaba' if op == 'rgb' else 'no tenía que ser', c.hex().upper()))
+        elif op in ('texto2', 'negrita2'):
+            x0, y0, x1, y1 = (int(v) for v in a[i + 1:i + 5])
+            t = a[i + 5]
+            i += 6
+            r = busca(cap, x0, y0, x1, y1, t, op == 'negrita2', tabla, 2)
+            if r is None:
+                mal.append('no está «%s»%s, a doble tamaño, en (%d,%d)-(%d,%d)' % (t, ' (en negrita)' if op == 'negrita2' else '', x0, y0, x1, y1))
+            elif dice:
+                print('«%s» en (%d,%d)' % (t, r[0], r[1]))
         elif op in ('texto', 'negrita', 'notexto'):
             x0, y0, x1, y1 = (int(v) for v in a[i + 1:i + 5])
             t = a[i + 5]

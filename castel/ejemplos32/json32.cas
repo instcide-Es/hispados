@@ -1,0 +1,82 @@
+; json32.cas - la biblioteca JSON de 32 bits (biblioteca32/json.cas): leer un
+; documento (objetos, listas, textos con escapes y UTF-8, números, true,
+; false y null), andar por él con caminos («data.obras.1.l.2.0») y escribir
+; uno nuevo, en un núcleo. Las letras de fuera del ASCII se enseñan en
+; hexadecimal (en la página 437 de la casa: á es A0, ñ A4, Á B6, € F4).
+; código de salida: 0
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo Json32
+
+    modelo núcleo
+
+    importar Json, Textos32
+
+    variable sitio: arreglo [500] de Pieza
+    variable t: arreglo [200] de byte
+    variable buf: arreglo [600] de byte
+
+    ; un texto, con lo que no es ASCII en hexadecimal: <A0>
+    función enseña(p: puntero a byte)
+        variable i: nat32
+        variable h: arreglo [4] de byte
+        i := 0
+        mientras p[i] <> 0 hacer
+            si p[i] >= 0x80 o p[i] < 0x20 entonces
+                hex_a_texto(p[i], 2, h)
+                escribir("<", h, ">")
+            sino
+                escribir_car(p[i])
+            fin
+            i := i + 1
+        fin
+    fin
+
+    función principal()
+        variable doc: puntero a byte
+        variable d, ob_, i: nat32
+        json_memoria(dirección(sitio[0]), 500)
+        doc := "{\"ok\":true,\"data\":{\"obras\":[{\"id\":7,\"titulo\":\"El \xc3\xa1rbol \\\"de\\\" la ciencia\",\"autor\":\"P\xc3\xado Baroja\",\"n\":-12},{\"id\":8,\"titulo\":\"Ni\xc3\xb1os \xe2\x82\xac\\u00c1\\n \xe2\x80\x9cya\xe2\x80\x9d\",\"x\":null,\"l\":[1,2,[3]],\"v\":false}],\"vac\":{},\"vl\":[]}}"
+        si no json_leer(doc, longitud(doc)) entonces
+            escribir("fallo: ", json_fallo(), "\n")
+            devolver
+        fin
+        escribir("piezas: ", json_piezas(), "\n")
+        escribir("ok: ", json_verdad_campo(json_raíz(), "ok"), "\n")
+        d := json_ruta(json_raíz(), "data.obras")
+        escribir("obras: ", json_cuántos(d), "\n")
+        para i desde 0 hasta json_cuántos(d) - 1 hacer
+            ob_ := json_elemento(d, i)
+            json_texto_campo(ob_, "titulo", t, 200)
+            escribir(json_número_campo(ob_, "id"), " [")
+            enseña(t)
+            json_texto_campo(ob_, "autor", t, 200)
+            escribir("] [")
+            enseña(t)
+            escribir("] n=", json_número_campo(ob_, "n"), " x nulo: ", json_nulo(json_campo(ob_, "x")), "\n")
+        fin
+        escribir("data.obras.1.l.2.0 = ", json_número(json_ruta(json_raíz(), "data.obras.1.l.2.0")), "; vac: ", json_cuántos(json_ruta(json_raíz(), "data.vac")), "; no está: ", json_ruta(json_raíz(), "data.nada.x") = NINGUNA, "\n")
+        json_empezar(buf, 600)
+        json_abre()
+        json_campo_texto("email", "a\xa0b\"c")
+        json_campo_número("n", -45)
+        json_clave("l")
+        json_abre_lista()
+        json_pon_número(1)
+        json_pon_verdad(falso)
+        json_pon_nulo()
+        json_cierra()
+        json_campo_verdad("c", cierto)
+        json_cierra()
+        enseña(buf)
+        escribir("\n")
+        si json_leer(buf, json_largo()) entonces
+            json_texto_campo(json_raíz(), "email", t, 200)
+            escribir("vuelto a leer: ")
+            enseña(t)
+            escribir("\n")
+        fin
+        si no json_leer("{\"a\":[1,2}", 10) entonces escribir("mal: ", json_fallo(), "\n") fin
+        si no json_leer("[1,2] 3", 7) entonces escribir("mal: ", json_fallo(), "\n") fin
+    fin
+
+fin Json32.
