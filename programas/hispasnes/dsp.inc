@@ -384,6 +384,7 @@ dsp_muestra:
         imul edx, [eco_sal_l]
         sar edx, 7
         add eax, edx
+        add eax, eax                        ; (al doble: las muestras son de 15 bits)
         call .satura
         mov ebx, eax
         movsx eax, byte [dsp_reg+0x1C]
@@ -393,6 +394,7 @@ dsp_muestra:
         imul edx, [eco_sal_r]
         sar edx, 7
         add eax, edx
+        add eax, eax
         call .satura
         test byte [dsp_reg+0x6C], 0x40      ; FLG: silencio
         jz .s

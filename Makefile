@@ -709,14 +709,16 @@ $(B)/HISPASNS.HVP: programas/hispasnes.asm $(wildcard programas/hispasnes/*.inc)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 HVPJ = $(B)/HISPASNS.HVP
 SNESROMS = $(B)/PRUEBA.SFC
-SNESDEP = tests/hispasnes/comun.s sms/comun/letras.s tools/asm816.py
-$(B)/PRUEBA.SFC: tests/hispasnes/demo.s tests/hispasnes/ppu2.s $(SNESDEP) | $(B)
+SNESDEP = $(wildcard tests/hispasnes/*.s) sms/comun/letras.s tools/asm816.py
+$(B)/PRUEBA.SFC: tests/hispasnes/demo.s $(SNESDEP) | $(B)
 	python3 tools/asm816.py $< $@
 $(B)/PPU1.SFC: tests/hispasnes/ppu1.s $(SNESDEP) | $(B)
 	python3 tools/asm816.py $< $@
 $(B)/PPU2.SFC: tests/hispasnes/ppu2.s $(SNESDEP) | $(B)
 	python3 tools/asm816.py $< $@
 $(B)/PPU3.SFC: tests/hispasnes/ppu3.s $(SNESDEP) | $(B)
+	python3 tools/asm816.py $< $@
+$(B)/PPU4.SFC: tests/hispasnes/ppu4.s $(SNESDEP) | $(B)
 	python3 tools/asm816.py $< $@
 $(B)/BUSTEST.SFC: tests/hispasnes/bustest.s $(SNESDEP) | $(B)
 	python3 tools/asm816.py $< $@
@@ -725,7 +727,7 @@ $(B)/SPCTEST.SFC: tests/hispasnes/spctest.s $(SNESDEP) | $(B)
 SNESNAT = tests/hispasnes/snesnativo.asm $(wildcard programas/hispasnes/*.inc)
 $(B)/snesnativo: $(SNESNAT) | $(B)
 	$(NASM) -f bin -i programas/hispasnes/ -o $@ $< && chmod +x $@
-snesprogs: $(B)/snesnativo $(B)/PPU1.SFC $(B)/PPU2.SFC $(B)/PPU3.SFC $(B)/BUSTEST.SFC $(B)/SPCTEST.SFC $(SNESROMS)
+snesprogs: $(B)/snesnativo $(B)/PPU1.SFC $(B)/PPU2.SFC $(B)/PPU3.SFC $(B)/PPU4.SFC $(B)/BUSTEST.SFC $(B)/SPCTEST.SFC $(SNESROMS)
 # [Configuración] los programas de Hispa Ventanas que no son juegos van en
 # \HISPADOS, al lado de VENTANAS.COM (HVPSIS): Configuración (CONFIG.HVP)
 HVPSIS = $(B)/CONFIG.HVP

@@ -129,6 +129,26 @@ p_tics:
         pop ebx
         ret
 
+; [HISPA-SNES] aj_leer 20 (no está en Hispa Ventanas, que da 0): el reloj
+; fino, en tics del 8254 (1.193.182 por segundo), como lo cuentan los
+; emuladores con el contador 0 del 8254 en Hispa Ventanas; aquí no hay
+; puertos: los tics de Hispa-Pentium (100 por segundo) por lo que vale cada
+; uno. Da la vuelta (solo valen las diferencias) -> EAX
+p_reloj_fino:
+        push ebx
+        push ecx
+        push edx
+        PSIS PS_TICS
+        mov ecx, eax
+        mov eax, 1193182
+        xor edx, edx
+        div dword [p_hz]
+        imul eax, ecx
+        pop edx
+        pop ecx
+        pop ebx
+        ret
+
 ; (sistema) los tics de la BIOS de mentira, al día (nucleo.inc los lee ahí:
 ; los temporizadores)
 bda_tics:

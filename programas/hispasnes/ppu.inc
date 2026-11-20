@@ -1120,7 +1120,7 @@ fondo_linea:
         mov dword [fl_cz], pant_m
         mov eax, [vmask_m+ebx*4]
         mov [fl_mask], eax
-        call fondo_pinta
+        call fondo_mosaico
 .p1:
         cmp byte [con_sub], 0
         je .x
@@ -1130,8 +1130,72 @@ fondo_linea:
         mov dword [fl_cz], pant_s
         mov eax, [vmask_s+ebx*4]
         mov [fl_mask], eax
-        call fondo_pinta
+        call fondo_mosaico
 .x:
+        popad
+        ret
+
+; (interna) fondo_pinta, con el mosaico si el fondo lo tiene puesto: la
+; línea del principio del bloque (en vertical) se pinta aparte, en pant_t, y
+; de ahí, el primer punto de cada bloque, repetido (en horizontal)
+fondo_mosaico:
+        movzx eax, byte [mosaic]
+        mov edx, [cap_n]
+        bt eax, edx
+        jnc fondo_pinta
+        shr eax, 4
+        jz fondo_pinta              ; (de 1 punto: como sin él)
+        pushad
+        inc eax
+        mov ebp, eax                ; EBP = el tamaño del bloque
+        push dword [lin_y]
+        push dword [fl_cz]
+        push dword [fl_mask]
+        mov eax, [lin_y]            ; la línea: la primera de su bloque
+        dec eax
+        xor edx, edx
+        div ebp
+        sub [lin_y], edx
+        mov edi, pant_t             ; aparte, sin máscara
+        mov ecx, 256 / 4
+        xor eax, eax
+        rep stosd
+        mov dword [fl_cz], pant_t
+        mov dword [fl_mask], 0
+        call fondo_pinta
+        pop dword [fl_mask]
+        pop dword [fl_cz]
+        pop dword [lin_y]
+        ; los bloques, a la pantalla
+        mov edi, [fl_cz]
+        mov esi, [fl_mask]
+        xor ecx, ecx                ; ECX = x
+        xor ebx, ebx                ; EBX = el primero del bloque
+        xor edx, edx                ; EDX = lo que lleva del bloque
+.p:
+        mov al, [pant_t+ebx]
+        test al, al
+        jz .s
+        cmp al, [edi+ecx]
+        jbe .s
+        test esi, esi
+        jz .m
+        cmp byte [esi+ecx], 0
+        jne .s
+.m:
+        mov [edi+ecx], al
+        mov ax, [pant_t+256+ebx*2]
+        mov [edi+256+ecx*2], ax
+.s:
+        inc ecx
+        inc edx
+        cmp edx, ebp
+        jb .n
+        xor edx, edx
+        mov ebx, ecx
+.n:
+        cmp ecx, 256
+        jb .p
         popad
         ret
 

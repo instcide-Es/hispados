@@ -24,7 +24,7 @@
 ;    datos.inc    las variables
 ;  y aquí, lo que la une a Hispa Ventanas: la ventana y el menú, el reloj
 ;  (60 cuadros por segundo, 50 los de Europa; si el equipo no llega se deja
-;  de pintar alguno, solo o con «Saltar cuadros»), el teclado y los mandos
+;  de pintar alguno, solo o con «Pintar 1 de cada N»), el teclado y los mandos
 ;  de HSPJOY, el sonido por HSPSND (en trozos de la medida de la tarjeta,
 ;  sin esperar nunca) y los archivos (la ROM y la partida guardada, .SRM).
 ;
@@ -143,7 +143,7 @@ menu:
         dw 109
         db "&Salir", 0
         dw 0xFFFF
-        db "&Tamaño", 0
+        db "&Imagen", 0
         dw 111
         db "Tamaño x&1", 0
         dw 112
@@ -153,8 +153,8 @@ menu:
         dw 113
 pc_marca    db ' '                  ; [PANTALLA COMPLETA] la marca (* si activa)
         db " &Pantalla completa (Alt+Intro)", 0
-        dw 0xFFFF
-        db "&Velocidad", 0
+        dw 0
+        db 0
         dw 140
 salto_m0    db '*'
         db " Pintar los que &dé tiempo", 0
@@ -521,7 +521,7 @@ tam_ventana:
         add edx, EST_AL + 2*BORDE + TIT_H + 1 + MENU_H
         ret
 
-; los menús de «Velocidad»: la marca en el que está puesto
+; las órdenes de pintar del menú «Imagen»: la marca en la que está puesta
 salto_marca:
         push eax
         push ecx
@@ -752,7 +752,7 @@ snes_proc:
         call snd_ajusta
         jmp .estado
 .o14:
-        cmp ecx, 140                ; Velocidad: cuántos cuadros se pintan
+        cmp ecx, 140                ; Imagen: cuántos cuadros se pintan
         jb .o31
         cmp ecx, 144
         ja .o31

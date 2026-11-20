@@ -176,6 +176,14 @@ cp $W/i/* $W/m/INSTALA/
 cp $W/of/HVPRUN.BIN $W/m/
 mkdir -p $W/m/OFICINA
 cp $W/of/*.HVP $W/of/*.DAT $W/m/OFICINA/
+# [HISPA-SNES] el emulador de la consola de 16 bits (docs/HISPASNES.md: un
+# programa de Hispa Ventanas, como la oficina) en \JUEGOS, con PRUEBA.SFC, la
+# ROM nuestra: se abre desde Mi equipo con HVPRUN (solo en la memoria USB)
+RAIZ=$(readlink -f $AQUI/../..)
+mkdir -p $W/m/JUEGOS $W/sn
+python3 -I $RAIZ/tools/mkhvp.py $RAIZ/programas/hispasnes.asm $W/sn/HISPASNS.HVP > /dev/null
+python3 -I $RAIZ/tools/asm816.py $RAIZ/tests/hispasnes/demo.s $W/sn/PRUEBA.SFC
+cp $W/sn/HISPASNS.HVP $W/sn/PRUEBA.SFC $W/m/JUEGOS/
 mkdir -p $W/m/boot/grub
 { cat <<'G'
 set timeout=8

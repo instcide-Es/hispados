@@ -340,3 +340,4 @@ pc_capas    resb 8
 env_sig     resd 32                 ; (la envolvente: cuándo le toca a cada velocidad)
 env_vista   resd 32
 env_res     resb 32
+pant_t      resb 256 + 512          ; (el mosaico: la línea de un fondo, aparte)
