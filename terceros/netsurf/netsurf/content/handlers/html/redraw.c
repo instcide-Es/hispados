@@ -804,6 +804,143 @@ static bool html_redraw_background(int x, int y, struct box *box, float scale,
 }
 
 
+
+#ifdef nshispa
+#include "redondo.h"
+#include "desktop/knockout.h"
+
+/* [HISPA] un radio de esquina en puntos (los % del ancho de la caja) */
+static int hispa_radio(const html_content *html, const struct box *box,
+		uint8_t (*f)(const css_computed_style *, css_fixed *,
+				css_unit *), int ancho)
+{
+	css_fixed v = 0;
+	css_unit u = CSS_UNIT_PX;
+	if (f(box->style, &v, &u) != CSS_BORDER_RADIUS_SET || v <= 0)
+		return 0;
+	if (u == CSS_UNIT_PCT)
+		return FIXTOINT(FDIV(v * ancho, F_100));
+	return FIXTOINT(css_unit_len2device_px(box->style, &html->unit_len_ctx,
+			v, u));
+}
+
+static int hispa_px(const html_content *html, const struct box *box,
+		css_fixed v, css_unit u)
+{
+	if (u == CSS_UNIT_PCT)
+		return 0;
+	return FIXTOINT(css_unit_len2device_px(box->style, &html->unit_len_ctx,
+			v, u));
+}
+
+/**
+ * [HISPA] La sombra (box-shadow) y, con esquinas redondas (border-radius),
+ * el fondo de color y el borde liso de la caja: w32/surf/redondo.c.
+ * x0..y1: el borde de fuera de la caja; clip: el recorte del padre (la
+ * sombra va fuera de la caja); r: el de la caja. Dice si ya ha pintado el
+ * fondo y los bordes.
+ */
+static void hispa_redondo(const html_content *html, struct box *box,
+		int x0, int y0, int x1, int y1, const struct rect *clip,
+		const struct rect *r, const struct redraw_context *ctx,
+		colour *fondo_actual, bool *fondo_hecho, bool *bordes_hechos)
+{
+	int radio[4], ancho[4], k;
+	bool redondo = false;
+	css_fixed l[4];
+	css_unit u[4];
+	css_color c;
+	uint8_t t;
+
+	*fondo_hecho = *bordes_hechos = false;
+	if (box->style == NULL)
+		return;
+	radio[0] = hispa_radio(html, box, css_computed_border_top_left_radius,
+			x1 - x0);
+	radio[1] = hispa_radio(html, box, css_computed_border_top_right_radius,
+			x1 - x0);
+	radio[2] = hispa_radio(html, box,
+			css_computed_border_bottom_right_radius, x1 - x0);
+	radio[3] = hispa_radio(html, box,
+			css_computed_border_bottom_left_radius, x1 - x0);
+	for (k = 0; k < 4; k++)
+		if (radio[k] > 0)
+			redondo = true;
+
+	/* la sombra, fuera de la caja (con el recorte del padre) */
+	t = css_computed_box_shadow(box->style, &l[0], &u[0], &l[1], &u[1],
+			&l[2], &u[2], &l[3], &u[3], &c);
+	if (t == CSS_BOX_SHADOW_SET && (c >> 24) != 0) {
+		struct rect cr = *clip;
+		if (ctx->plot->clip(ctx, &cr) == NSERROR_OK &&
+				knockout_plot_hispa_vacia(ctx)) {
+			redondo_sombra(x0, y0, x1, y1, radio,
+					hispa_px(html, box, l[0], u[0]),
+					hispa_px(html, box, l[1], u[1]),
+					hispa_px(html, box, l[2], u[2]),
+					hispa_px(html, box, l[3], u[3]),
+					nscss_color_to_ns(c),
+					(int)((c >> 24) * 256 / 255));
+			ctx->plot->clip(ctx, r);
+		}
+	}
+
+	if (!redondo)
+		return;
+
+	/* el fondo (de color; con imagen, el de NetSurf) */
+	{
+		css_color bg;
+		bool con_fondo = false, con_borde = true;
+		colour fondo = 0, borde = 0;
+		if (html_redraw_find_bg_box(box) == box &&
+				box->background == NULL) {
+			css_computed_background_color(box->style, &bg);
+			if (!nscss_color_is_transparent(bg)) {
+				con_fondo = true;
+				fondo = nscss_color_to_ns(bg);
+			}
+		} else if (html_redraw_find_bg_box(box) != NULL) {
+			return;
+		}
+		/* el borde: liso, del mismo color en los cuatro lados */
+		for (k = 0; k < 4; k++) {
+			ancho[k] = box->border[k].width;
+			if (ancho[k] > 0 &&
+					box->border[k].style !=
+					CSS_BORDER_STYLE_SOLID)
+				con_borde = false;
+			if (ancho[k] > 0 && box->border[k].c !=
+					box->border[TOP].c)
+				con_borde = false;
+		}
+		if (ancho[0] + ancho[1] + ancho[2] + ancho[3] == 0)
+			con_borde = false;
+		if (con_borde) {
+			for (k = 0; k < 4; k++)
+				if (ancho[k] > 0)
+					borde = nscss_color_to_ns(
+							box->border[k].c);
+			if (nscss_color_is_transparent(box->border[TOP].c) &&
+					ancho[TOP] > 0)
+				con_borde = false;
+		}
+		if (!con_fondo && !con_borde) {
+			*fondo_hecho = true;
+			return;
+		}
+		if (knockout_plot_hispa_vacia(ctx) &&
+				redondo_caja(x0, y0, x1, y1, radio, fondo, con_fondo,
+				ancho, borde, con_borde)) {
+			*fondo_hecho = true;
+			*bordes_hechos = con_borde;
+			if (con_fondo)
+				*fondo_actual = fondo;
+		}
+	}
+}
+#endif
+
 /**
  * Plot an inline's background and/or background image.
  *
@@ -1249,6 +1386,10 @@ bool html_redraw_box(const html_content *html, struct box *box,
 	dom_exception exc;
 	dom_html_element_type tag_type;
 
+	/* [HISPA] ya pintados por redondo.c */
+	bool hispa_fondo_hecho = false;
+	bool hispa_bordes_hechos = false;
+
 
 	if (html_redraw_printing && (box->flags & PRINTED))
 		return true;
@@ -1464,6 +1605,24 @@ bool html_redraw_box(const html_content *html, struct box *box,
 			return false;
 	}
 
+#ifdef nshispa
+	/* [HISPA] la sombra y las esquinas redondas (w32/surf/redondo.c) */
+	if (box->style && box->parent && scale == 1.0f &&
+			(box->type == BOX_BLOCK ||
+			 box->type == BOX_INLINE_BLOCK ||
+			 box->type == BOX_FLEX ||
+			 box->type == BOX_INLINE_FLEX ||
+			 box->type == BOX_TABLE_CELL ||
+			 box->type == BOX_TABLE || box->object ||
+			 (box->type == BOX_INLINE && box->gadget))) {
+		hispa_redondo(html, box, x - border_left, y - border_top,
+				x + padding_width + border_right,
+				y + padding_height + border_bottom, clip, &r,
+				ctx, &current_background_color,
+				&hispa_fondo_hecho, &hispa_bordes_hechos);
+	}
+#endif
+
 	/* background colour and image for block level content and replaced
 	 * inlines */
 
@@ -1473,7 +1632,7 @@ bool html_redraw_box(const html_content *html, struct box *box,
 	* its background rendered. Otherwise filter out linebreaks,
 	* optimize away non-differing inlines, only plot background
 	* for BOX_TEXT it's in an inline */
-	if (bg_box && bg_box->type != BOX_BR &&
+	if (bg_box && !hispa_fondo_hecho && bg_box->type != BOX_BR &&
 			bg_box->type != BOX_TEXT &&
 			bg_box->type != BOX_INLINE_END &&
 			(bg_box->type != BOX_INLINE || bg_box->object ||
@@ -1524,7 +1683,7 @@ bool html_redraw_box(const html_content *html, struct box *box,
 	}
 
 	/* borders for block level content and replaced inlines */
-	if (box->style &&
+	if (box->style && !hispa_bordes_hechos &&
 	    box->type != BOX_TEXT &&
 	    box->type != BOX_INLINE_END &&
 	    (box->type != BOX_INLINE || box->object ||

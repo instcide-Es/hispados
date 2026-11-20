@@ -968,6 +968,12 @@ static void layout_minmax_block(
 		 * content? */
 		block->flags |= HAS_HEIGHT;
 	} else {
+		/* [HISPA] el hueco entre elementos flex (gap) y cuántos hay */
+		int n_dentro = 0;
+		int gap = lh__box_is_flex_container(block) ?
+				lh__gap(&content->unit_len_ctx, block,
+				!lh__flex_main_is_horizontal(block), AUTO) : 0;
+
 		/* recurse through children */
 		for (child = block->children; child; child = child->next) {
 			switch (child->type) {
@@ -1014,16 +1020,31 @@ static void layout_minmax_block(
 			}
 
 			if (lh__box_is_flex_container(block) &&
+			    lh__box_is_grid(block)) {
+				/* [HISPA] rejilla: ver layout_grid_minmax() */
+				n_dentro++;
+				if (min < child->min_width)
+					min = child->min_width;
+				if (max < child->max_width)
+					max = child->max_width;
+
+			} else if (lh__box_is_flex_container(block) &&
 			    lh__flex_main_is_horizontal(block)) {
 				if (block->style != NULL &&
 				    css_computed_flex_wrap(block->style) ==
 						CSS_FLEX_WRAP_NOWRAP) {
 					min += child->min_width;
+					/* [HISPA] y el hueco (gap) */
+					if (n_dentro > 0)
+						min += gap;
 				} else {
 					if (min < child->min_width)
 						min = child->min_width;
 				}
 				max += child->max_width;
+				if (n_dentro > 0)
+					max += gap;
+				n_dentro++;
 
 			} else {
 				if (min < child->min_width)
@@ -1035,6 +1056,11 @@ static void layout_minmax_block(
 			if (child_has_height)
 				block->flags |= HAS_HEIGHT;
 		}
+
+		/* [HISPA] la rejilla: con sus columnas */
+		if (lh__box_is_flex_container(block) && lh__box_is_grid(block))
+			layout_grid_minmax(block, &content->unit_len_ctx,
+					n_dentro, &min, &max);
 	}
 
 	if (max < min) {
@@ -1187,6 +1213,11 @@ layout_next_margin_block(const css_unit_ctx *unit_len_ctx,
 			/* Check whether box is the box current margin collapses
 			 * to */
 			if (box->flags & MAKE_HEIGHT ||
+					/* [HISPA] una caja flex (o rejilla) con
+					 * algo dentro no es vacía: el margen de
+					 * la siguiente no la atraviesa */
+					(box->type == BOX_FLEX &&
+					 box->children != NULL) ||
 					box->border[TOP].width ||
 					box->padding[TOP] ||
 					(box->style &&
@@ -2243,6 +2274,11 @@ static bool layout_apply_minmax_height(
 				h = FIXTOINT(css_unit_len2device_px(
 						box->style, unit_len_ctx,
 						value, unit));
+				/* [HISPA] con box-sizing: border-box */
+				layout_handle_box_sizing(unit_len_ctx, box,
+						containing_block ?
+						containing_block->width : 0,
+						false, &h);
 				if (h < box->height) {
 					box->height = h;
 					updated = true;
@@ -2274,6 +2310,12 @@ static bool layout_apply_minmax_height(
 				h = FIXTOINT(css_unit_len2device_px(
 						box->style, unit_len_ctx,
 						value, unit));
+				/* [HISPA] con box-sizing: border-box (min-height:
+				 * 48px de los campos y botones de ClicGest) */
+				layout_handle_box_sizing(unit_len_ctx, box,
+						containing_block ?
+						containing_block->width : 0,
+						false, &h);
 				if (h > box->height) {
 					box->height = h;
 					updated = true;

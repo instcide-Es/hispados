@@ -854,4 +854,32 @@ enum op_z_index {
 	Z_INDEX_AUTO			= 0x0000
 };
 
+/* [HISPA] gap, esquinas redondas, sombra y grid */
+enum op_row_gap {
+	ROW_GAP_NORMAL			= 0x0000,
+	ROW_GAP_SET			= 0x0080
+};
+
+enum op_border_radius {
+	BORDER_RADIUS_SET		= 0x0080
+};
+
+/* box-shadow: x, y, difuminado, extensión (longitud + unidad) y el color */
+enum op_box_shadow {
+	BOX_SHADOW_NONE			= 0x0000,
+	BOX_SHADOW_SET			= 0x0080,
+	BOX_SHADOW_INSET		= 0x0081
+};
+
+/* el texto del valor (un número de cadena de la hoja) */
+enum op_grid_template_columns {
+	GRID_TEMPLATE_COLUMNS_NONE	= 0x0000,
+	GRID_TEMPLATE_COLUMNS_SET	= 0x0080
+};
+
+enum op_grid_column {
+	GRID_COLUMN_AUTO		= 0x0000,
+	GRID_COLUMN_SET			= 0x0080
+};
+
 #endif

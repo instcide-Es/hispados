@@ -148,6 +148,15 @@ PROPERTY_FUNCS(width);
 PROPERTY_FUNCS(word_spacing);
 PROPERTY_FUNCS(writing_mode);
 PROPERTY_FUNCS(z_index);
+/* [HISPA] (hispa.c) */
+PROPERTY_FUNCS(row_gap);
+PROPERTY_FUNCS(border_top_left_radius);
+PROPERTY_FUNCS(border_top_right_radius);
+PROPERTY_FUNCS(border_bottom_right_radius);
+PROPERTY_FUNCS(border_bottom_left_radius);
+PROPERTY_FUNCS(box_shadow);
+PROPERTY_FUNCS(grid_template_columns);
+PROPERTY_FUNCS(grid_column);
 
 #undef PROPERTY_FUNCS
 

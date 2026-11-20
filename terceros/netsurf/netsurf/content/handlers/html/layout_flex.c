@@ -84,6 +84,8 @@ struct flex_line_data {
 	size_t first;
 	size_t count;
 	size_t frozen;
+
+	int gaps; /**< [HISPA] lo que suman los huecos entre sus elementos */
 };
 
 /**
@@ -103,6 +105,9 @@ struct flex_ctx {
 	bool horizontal;
 	bool main_reversed;
 	enum css_flex_wrap_e wrap;
+
+	int main_gap;  /**< [HISPA] hueco entre elementos (gap) */
+	int cross_gap; /**< [HISPA] hueco entre líneas */
 
 	struct flex_items {
 		size_t count;
@@ -417,6 +422,7 @@ static struct flex_line_data *layout_flex__build_line(struct flex_ctx *ctx,
 	enum box_side end_side = layout_flex__main_end_side(ctx);
 	struct flex_line_data *line;
 	int used_main = 0;
+	size_t dentro = 0; /* [HISPA] los de la línea que no son absolutos */
 
 	if (!layout_flex_ctx__ensure_line(ctx)) {
 		return NULL;
@@ -432,10 +438,14 @@ static struct flex_line_data *layout_flex__build_line(struct flex_ctx *ctx,
 		struct flex_item_data *item = &ctx->item.data[item_index];
 		struct box *b = item->box;
 		int pos_main;
+		/* [HISPA] el hueco (gap) antes de este, si no es el primero */
+		int gap = (dentro > 0 && !lh__box_is_absolute(b)) ?
+				ctx->main_gap : 0;
 
 		pos_main = ctx->horizontal ?
 				item->main_size :
 				b->height + lh__delta_outer_main(ctx->flex, b);
+		pos_main += gap;
 
 		if (ctx->wrap == CSS_FLEX_WRAP_NOWRAP ||
 		    pos_main + used_main <= ctx->available_main ||
@@ -444,8 +454,10 @@ static struct flex_line_data *layout_flex__build_line(struct flex_ctx *ctx,
 		    line->count == 0 ||
 		    pos_main == 0) {
 			if (lh__box_is_absolute(item->box) == false) {
-				line->main_size += item->main_size;
+				line->main_size += item->main_size + gap;
+				line->gaps += gap;
 				used_main += pos_main;
+				dentro++;
 
 				if (b->margin[start_side] == AUTO) {
 					line->main_auto_margin_count++;
@@ -714,9 +726,12 @@ static bool layout_flex__resolve_line(
 
 	if (available_main == AUTO) {
 		available_main = INT_MAX;
+	} else {
+		/* [HISPA] lo que ocupan los huecos no se reparte */
+		available_main -= line->gaps;
 	}
 
-	grow = (line->main_size < available_main);
+	grow = (line->main_size - line->gaps < available_main);
 	initial_free_main = available_main;
 
 	NSLOG(flex, DEEPDEBUG, "box %p: line %zu: first: %zu, count: %zu",
@@ -818,15 +833,57 @@ static bool layout_flex__place_line_items_main(
 				main_pos;
 	}
 
+	/* [HISPA] justify-content: lo que sobra, antes y entre los elementos */
+	int jc_antes = 0, jc_entre = 0, jc_resto = 0, n_dentro = 0;
+	bool primero = true;
+
+	for (size_t i = line->first; i < item_count; i++) {
+		if (!lh__box_is_absolute(ctx->item.data[i].box))
+			n_dentro++;
+	}
+
 	if (ctx->available_main != AUTO &&
 	    ctx->available_main != UNKNOWN_WIDTH &&
-	    ctx->available_main > line->used_main_size) {
+	    ctx->available_main > line->used_main_size + line->gaps) {
 		if (line->main_auto_margin_count > 0) {
-			extra = ctx->available_main - line->used_main_size;
+			extra = ctx->available_main - line->used_main_size -
+					line->gaps;
 
 			extra_remainder = extra % line->main_auto_margin_count;
 			extra /= line->main_auto_margin_count;
+		} else if (n_dentro > 0) {
+			int sobra = ctx->available_main -
+					line->used_main_size - line->gaps;
+			switch (css_computed_justify_content(ctx->flex->style)) {
+			case CSS_JUSTIFY_CONTENT_FLEX_END:
+				jc_antes = sobra;
+				break;
+			case CSS_JUSTIFY_CONTENT_CENTER:
+				jc_antes = sobra / 2;
+				break;
+			case CSS_JUSTIFY_CONTENT_SPACE_BETWEEN:
+				if (n_dentro > 1) {
+					jc_entre = sobra / (n_dentro - 1);
+					jc_resto = sobra % (n_dentro - 1);
+				}
+				break;
+			case CSS_JUSTIFY_CONTENT_SPACE_AROUND:
+				jc_entre = sobra / n_dentro;
+				jc_antes = jc_entre / 2;
+				break;
+			case CSS_JUSTIFY_CONTENT_SPACE_EVENLY:
+				jc_entre = sobra / (n_dentro + 1);
+				jc_antes = jc_entre;
+				break;
+			default:
+				break;
+			}
 		}
+	}
+	if (ctx->main_reversed) {
+		main_pos -= jc_antes;
+	} else {
+		main_pos += jc_antes;
 	}
 
 	for (size_t i = line->first; i < item_count; i++) {
@@ -851,6 +908,19 @@ static bool layout_flex__place_line_items_main(
 
 		box_size_main = lh__box_size_main(ctx->horizontal, b);
 		box_pos_main = ctx->horizontal ? &b->x : &b->y;
+
+		/* [HISPA] el hueco y lo de justify-content entre elementos */
+		if (!lh__box_is_absolute(b)) {
+			if (!primero) {
+				int h = ctx->main_gap + jc_entre;
+				if (jc_resto > 0) {
+					h++;
+					jc_resto--;
+				}
+				main_pos += ctx->main_reversed ? -h : h;
+			}
+			primero = false;
+		}
 
 		if (!lh__box_is_absolute(b)) {
 			if (b->margin[main_start] == AUTO) {
@@ -923,6 +993,9 @@ static bool layout_flex__collect_items_into_lines(
 			return false;
 		}
 
+		/* [HISPA] el hueco entre líneas */
+		if (ctx->line.count > 1)
+			ctx->cross_size += ctx->cross_gap;
 		ctx->cross_size += line->cross_size;
 		if (ctx->main_size < line->main_size) {
 			ctx->main_size = line->main_size;
@@ -1027,6 +1100,8 @@ static void layout_flex__place_lines(struct flex_ctx *ctx)
 		line->pos = line_pos;
 		line_pos += post_multiplier * line->cross_size +
 				extra + extra_remainder;
+		/* [HISPA] el hueco entre líneas */
+		line_pos += reversed ? -ctx->cross_gap : ctx->cross_gap;
 
 		layout_flex__place_line_items_cross(ctx, line,
 				extra + extra_remainder);
@@ -1052,6 +1127,11 @@ bool layout_flex(struct box *flex, int available_width,
 	struct flex_ctx *ctx;
 	bool success = false;
 
+	/* [HISPA] una rejilla (display: grid) va como flex: layout_grid.c */
+	if (lh__box_is_grid(flex)) {
+		return layout_grid(flex, available_width, content);
+	}
+
 	ctx = layout_flex_ctx__create(content, flex);
 	if (ctx == NULL) {
 		return false;
@@ -1068,6 +1148,12 @@ bool layout_flex(struct box *flex, int available_width,
 			flex->margin, flex->padding, flex->border);
 
 	available_width = min(available_width, flex->width);
+
+	/* [HISPA] los huecos (gap): column-gap entre columnas, row-gap entre filas */
+	ctx->main_gap = lh__gap(ctx->unit_len_ctx, flex, !ctx->horizontal,
+			available_width);
+	ctx->cross_gap = lh__gap(ctx->unit_len_ctx, flex, ctx->horizontal,
+			available_width);
 
 	if (ctx->horizontal) {
 		ctx->available_main = available_width;

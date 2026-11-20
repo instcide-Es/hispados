@@ -108,8 +108,13 @@ static const box_type box_map[] = {
 	BOX_NONE,            /* CSS_DISPLAY_NONE */
 	BOX_FLEX,            /* CSS_DISPLAY_FLEX */
 	BOX_INLINE_FLEX,     /* CSS_DISPLAY_INLINE_FLEX */
+#ifdef nshispa
+	BOX_FLEX,            /* CSS_DISPLAY_GRID [HISPA]: layout_grid.c */
+	BOX_INLINE_FLEX,     /* CSS_DISPLAY_INLINE_GRID */
+#else
 	BOX_BLOCK,           /* CSS_DISPLAY_GRID */
 	BOX_INLINE_BLOCK,    /* CSS_DISPLAY_INLINE_GRID */
+#endif
 };
 
 

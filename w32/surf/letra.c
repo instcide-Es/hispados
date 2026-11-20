@@ -69,7 +69,7 @@ bool letra_inicia(const char *dir) {
   int k, alguno = 0;
   snprintf(carpeta, sizeof carpeta, "%s", dir);
   for (k = 0; k < T_N; k++) {
-    snprintf(n, sizeof n, "%s\\%s", carpeta, t_archivo[k]);
+    snprintf(n, sizeof n, "%s" SURF_SEP "%s", carpeta, t_archivo[k]);
     tipo[k].datos = lee(n, NULL);
     if (!tipo[k].datos) continue;
     if (!stbtt_InitFont(&tipo[k].f, tipo[k].datos, stbtt_GetFontOffsetForIndex(tipo[k].datos, 0))) {

@@ -19,8 +19,12 @@ SURF_NSCF = -Iw32/surf -Iw32/surf/ns -I$(SURF_T)/netsurf -I$(SURF_T)/netsurf/inc
 # (SURF_REGISTRO=INFO para ver en NS.LOG lo que hace NetSurf: ver NAVEGADOR2.md)
 SURF_REGISTRO ?= WARNING
 SURF_UA = '-DHTTP_AGENTE="HispaSurf/0.1 (NetSurf 3.11; Hispa-DOS 486)"'
-surf_cf = $(if $(filter $(SURF_T)/netsurf/% w32/surf/%,$1),$(SURF_NSCF),$(if $(filter $(SURF_T)/libdom/%,$1),-I$(SURF_T)/libdom/src \
-  -I$(SURF_T)/libdom/bindings,$(if $(filter $(SURF_T)/libnsgif/%,$1),-I$(SURF_T)/libnsgif/src -DNSGIF_NAME=libnsgif,-I$(SURF_T)/$(word 3,$(subst /, ,$1))/src)))
+# [WOFF] Brotli (terceros/brotli, solo el descompresor) para las letras WOFF2 de
+# w32/surf/woff.c; su diccionario no va en el EXE: RECURSOS\BROTLI.DIC
+SURF_BRCF = -Iterceros/brotli/c/include -DBROTLI_EXTERNAL_DICTIONARY_DATA
+surf_cf = $(if $(filter terceros/brotli/%,$1),$(SURF_BRCF),$(if $(filter $(SURF_T)/netsurf/% w32/surf/%,$1),$(SURF_NSCF),$(if $(filter $(SURF_T)/libdom/%,$1),-I$(SURF_T)/libdom/src \
+  -I$(SURF_T)/libdom/bindings,$(if $(filter $(SURF_T)/libnsgif/%,$1),-I$(SURF_T)/libnsgif/src -DNSGIF_NAME=libnsgif,-I$(SURF_T)/$(word 3,$(subst /, ,$1))/src)))) \
+  $(if $(filter w32/surf/woff.c,$1),$(SURF_BRCF))
 $(B)/surf/%.o: %.c
 	@mkdir -p $(dir $@)
 	@nice -n 19 gcc $(SURF_CF) $(call surf_cf,$<) -c $< -o $@
@@ -36,7 +40,8 @@ $(B)/NAVEGA2.EXE: $(SURF_OBJ) $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL v
 # lo que va junto al programa: los recursos (las hojas de estilo de NetSurf, sus
 # textos y la página de inicio) y las letras (DejaVu, recortadas: terceros/dejavu)
 SURF_RECURSOS = $(SURF_T)/netsurf/resources/default.css $(SURF_T)/netsurf/resources/quirks.css \
-  $(SURF_T)/netsurf/resources/adblock.css $(SURF_T)/netsurf/resources/internal.css w32/surf/recursos/MESSAGES w32/surf/recursos/inicio.htm
+  $(SURF_T)/netsurf/resources/adblock.css $(SURF_T)/netsurf/resources/internal.css w32/surf/recursos/MESSAGES w32/surf/recursos/inicio.htm \
+  w32/surf/recursos/BROTLI.DIC
 SURF_FUENTES = $(wildcard terceros/dejavu/*.TTF)
 # El disquete «Internet 2»: el Navegador completo (va a \HISPADOS\INTERNET,
 # junto a lo del disquete «Internet», que trae las DLL)
@@ -52,3 +57,19 @@ $(B)/internet2.img: $(B)/NAVEGA2.EXE $(SURF_RECURSOS) $(SURF_FUENTES) w32/surf/N
 	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/internet2_leeme.txt ::LEEME.TXT
 internet2: $(B)/internet2.img
 surf: $(B)/NAVEGA2.EXE
+
+# El Navegador completo en el anfitrión (Linux, sin ventana: w32/surf/anfitrion.c,
+# la red con curl: anfitrion_rh.c): pinta una página en un PPM, para probar el
+# pintado y la maquetación sin QEMU (tests/run_surf_pintado_tests.sh,
+# tools/surf_compara.sh). `make surfppm`
+SURF_ANF_SRC = $(filter-out w32/surf/surf.c w32/surf/apoyo.c w32/surf/memoria.c %/css_property_parser_gen.c,$(SURF_SRC)) w32/surf/anfitrion.c w32/surf/anfitrion_rh.c
+SURF_ANF_OBJ = $(patsubst %.c,$(B)/anf/%.o,$(SURF_ANF_SRC))
+SURF_ANF_CF = -O1 -g -std=gnu99 -w -D_GNU_SOURCE -DSURF_ANFITRION -fno-common $(foreach l,$(SURF_LIBS),-I$(SURF_T)/$(l)/include) \
+  -DNDEBUG -D_ALIGNED="__attribute__((aligned))"
+$(B)/anf/%.o: %.c
+	@mkdir -p $(dir $@)
+	@nice -n 19 gcc $(SURF_ANF_CF) $(call surf_cf,$<) -c $< -o $@
+$(B)/anf/surfppm: $(SURF_ANF_OBJ) $(SURF_RECURSOS)
+	gcc -o $@ $(SURF_ANF_OBJ) -lm -lz
+	mkdir -p $(B)/anf/RECURSOS && cp $(SURF_RECURSOS) $(B)/anf/RECURSOS/
+surfppm: $(B)/anf/surfppm
