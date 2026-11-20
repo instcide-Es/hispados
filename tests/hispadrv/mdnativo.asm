@@ -11,13 +11,15 @@
 ;    Escribe las que fallan y, al final, cuántas van bien y cuántas tardan
 ;    los ciclos que dice la prueba
 ;  mdnativo ROM CUADROS IMAGEN.ppm [GUION|-] [MEMORIA|-] [SONIDO|-] [SRAM]
-;    corre la ROM CUADROS cuadros y deja la última imagen (320x224, PPM)
+;    corre la ROM CUADROS cuadros y deja la última imagen (320x224, PPM;
+;    con «-», sin pintar ninguna: para medir)
 ;    GUION    dos octetos por cuadro: los botones del mando 1 (bit 0 arriba,
 ;             1 abajo, 2 izquierda, 3 derecha, 4 B, 5 C, 6 A, 7 Start, 8 Z,
 ;             9 Y, 10 X, 11 Mode); con el bit 15, mando de seis botones
 ;    MEMORIA  la RAM del 68000 (64 KB, en su orden), la del Z80 (8 KB), la
 ;             del cartucho (64 KB), la CRAM (128), la VSRAM (80) y la VRAM
-;    SONIDO   las muestras (22.050 por segundo, 16 bits con signo, un canal)
+;    SONIDO   las muestras (22.050 por segundo, 16 bits con signo, un canal);
+;             «0»: sin hacer sonido (como en Hispa-Pentium, para medir)
 ;    SRAM     la RAM del cartucho al encender (como el .SRM del emulador)
 ;  Se hace solo con NASM (la cabecera ELF va escrita aquí; sin enlazador ni
 ;  biblioteca de C).
@@ -549,6 +551,12 @@ mdmain:
         mov ebx, [ebp+28]
         cmp byte [ebx], '-'
         je .ss
+        cmp byte [ebx], '0'         ; «0»: sin sonido (como en Hispa-Pentium)
+        jne .ss1
+        mov dword [psg_hz], 0
+        call psg_frecuencia
+        jmp .ss
+.ss1:
         mov ecx, 0x241
         mov edx, 0o644
         mov eax, 5
@@ -566,6 +574,11 @@ mdmain:
         call lee_archivo
 .sv:
         mov byte [dibujar], 1
+        mov ebx, [ebp+16]           ; (IMAGEN «-»: sin pintar, para medir)
+        cmp word [ebx], '-'
+        jne .dib
+        mov byte [dibujar], 0
+.dib:
         xor ebx, ebx
 .cuadro:
         cmp ebx, [ncuadros]
@@ -596,6 +609,8 @@ mdmain:
         inc ebx
         jmp .cuadro
 .fin:
+        cmp byte [dibujar], 0
+        je near .sinppm
         ; la imagen, en PPM
         mov esi, imagen
         mov edi, ppm_buf
@@ -651,6 +666,7 @@ mdmain:
         int 0x80
         mov eax, 6
         int 0x80
+.sinppm:
         ; la memoria
         cmp dword [ebp], 6
         jb .sm
