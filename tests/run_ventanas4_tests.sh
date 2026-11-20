@@ -340,7 +340,10 @@ if [ -n "$a" ] && [ "$a" = "$b" ]; then ok "memoria convencional igual al final 
 check "ARGS=[ /N]"
 check "DPMI=NO"
 check "TRAS-JUEGO"
-check "HSPDPMI: descargado; la memoria queda libre."
+# HSPRATON (cargado después) engancha ahora INT 2Fh para cederle el ratón a
+# Windows (1605h/1606h): HSPDPMI /D ya no puede soltar sus vectores y se
+# desactiva sin salir de memoria. Las dos respuestas son correctas.
+if grep -qF "HSPDPMI: descargado; la memoria queda libre." $T/log.txt || grep -qF "HSPDPMI: desactivado (sigue en memoria" $T/log.txt; then ok "HSPDPMI /D: descargado o desactivado"; else ko "HSPDPMI /D no responde"; fi
 check "SIGUE-VIVO"
 checkn "cargando el servidor DPMI"
 checkn "Hispa Ventanas ha terminado."
