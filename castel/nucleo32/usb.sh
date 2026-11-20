@@ -58,7 +58,7 @@ python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT10.BIN 1024 768 32 
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT6.BIN 1024 600 32 > /dev/null
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT13.BIN 1366 768 32 > /dev/null
 MODULOS=
-for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE ured:RED uipconf:IPCONFIG uping:PING udescarga:DESCARGA uinstala:INSTALAR uasiste:ASISTE; do
+for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uinstala:INSTALAR uasiste:ASISTE; do
   f=${p%%:*}; N=${p##*:}
   python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $W/$f.asm > /dev/null
   nasm -f bin $W/$f.asm -o $W/f/$N.BIN

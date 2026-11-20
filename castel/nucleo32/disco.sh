@@ -64,7 +64,7 @@ mcopy -i $V "$T/cancion_del_pirata.txt" "$T/Año nuevo.txt" ::LARGOS/
 mcopy -i $V $T/LARGO.TXT $T/PIRATA.TXT ::TEXTOS/
 mcopy -i $V $T/ECO.BIN ::TEXTOS/ECO2.BIN
 if [ "$RED" = red ]; then
-  for p in ured:RED uipconf:IPCONFIG uping:PING udescarga:DESCARGA; do
+  for p in ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA; do
     f=${p%%:*}; N=${p##*:}
     python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $T/$f.asm > /dev/null
     nasm -f bin $T/$f.asm -o $T/$N.BIN

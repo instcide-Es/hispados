@@ -1,5 +1,5 @@
 ; =============================================================================
-;  udescarga.cas - DESCARGA.BIN (la orden DESCARGAR): baja un archivo de la
+;  udescarg.cas - DESCARGA.BIN (la orden DESCARGAR): baja un archivo de la
 ;  red por HTTP/1.1 (sin cifrar) y lo guarda en el disco.
 ;    DESCARGAR http://servidor[:puerto]/camino [archivo]
 ;  Sin archivo, se llama como lo último del camino (en 8+3: «ultima.txt» es
@@ -8,7 +8,7 @@
 ;  trozos («Transfer-Encoding: chunked»). HTTPS, todavía no.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
-módulo Udescarga
+módulo Udescarg
 
     modelo usuario
 
@@ -452,4 +452,4 @@ módulo Udescarga
         devolver 0
     fin
 
-fin Udescarga.
+fin Udescarg.
