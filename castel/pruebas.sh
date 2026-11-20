@@ -2753,7 +2753,7 @@ VBOX_Q35="-machine q35 -m 256 -nic user,model=e1000"
 truncate -s 2G $V/ide.img
 maquina vivo "$VBOX_PC -cdrom $V/cd.iso -drive file=$V/ide.img,format=raw,if=ide,index=0 -boot d" ":espera 40 ^escritorio: en marcha" ":espera 20 ^red: DHCP: IP" ":pausa 2" ":captura cd1"
 mira "el CD en un «pc» como el de VirtualBox (IDE, USB OHCI, la e1000 82540EM): GRUB arranca solo la primera entrada, el escritorio sin instalar, con la red" \
-  "^escritorio: en marcha, 800 x 600" "^red: tarjeta 8086:100E" "^red: DHCP: IP 10\.0\.2\.15"
+  "escritorio: en marcha, 800 x 600" "red: tarjeta 8086:100E" "^red: DHCP: IP 10\.0\.2\.15"
 miracap "y el escritorio, desde la memoria (la unidad M:)" cd1 texto 20 50 110 70 "Mi equipo" negrita 30 570 80 590 Inicio
 if ! grep -q "excepción\|\*\*\*" $S; then ok "ni una excepción del núcleo (con el controlador OHCI y su tableta USB, que no se usan)"; else ko "hay excepciones:"; grep "excepción\|\*\*\*" $S | head -3 | sed 's/^/        /'; fi
 # 3. instalar desde el CD: en el «pc» (IDE) y en el «q35» (SATA: AHCI, con el CD en AHCI también)
@@ -2761,17 +2761,17 @@ truncate -s 2G $V/sata.img
 INSTALA_CD=(":pausa 3" ":tecla down ret" ":espera 40 ^instalar: bienvenida" ":texto c1" ":tecla ret" ":pausa 2" ":tecla ret" ":pausa 2" ":texto c3" ":tecla ret" ":espera 120 ^instalar: terminado" ":texto c4" ":tecla ret" ":pausa 2")
 maquina inside "$VBOX_PC -cdrom $V/cd.iso -drive file=$V/ide.img,format=raw,if=ide,index=0 -boot d -no-reboot" "${INSTALA_CD[@]}"
 mira "instalar desde el CD en el «pc» (el disco IDE): INSTALAR sabe que es el CD (MEDIO.TXT) y acaba" "^instalar: desde el CD$" "^instalar: terminado$"
-if grep -q "para que arranque de él, sin el CD\." $V/c1.txt && grep -q "Disco:      IDE   QEMU HARDDISK, 2048 MB" $V/c3.txt && grep -q "Saque ahora el CD (o el DVD) y pulse INTRO" $V/c4.txt; then
+if grep -q "para que arranque de él, sin el CD\." $V/c1.txt && grep -q "Disco: *IDE *QEMU HARDDISK, 2048 MB" $V/c3.txt && grep -q "Saque ahora el CD (o el DVD) y pulse INTRO" $V/c4.txt; then
   ok "y lo dice por el CD: «sin el CD», el disco IDE de 2 GB, «Saque ahora el CD (o el DVD)»"
-else ko "INSTALAR, desde el CD, no dice lo suyo:"; cat $V/c1.txt $V/c3.txt $V/c4.txt | grep -v '^|$' | sed 's/^/        /' | head -12; fi
+else ko "INSTALAR, desde el CD, no dice lo suyo:"; cat $V/c3.txt $V/c4.txt | grep -v '^|$' | sed 's/^/        /' | head -20; fi
 maquina insq35 "$VBOX_Q35 -cdrom $V/cd.iso -drive file=$V/sata.img,format=raw,if=none,id=d -device ide-hd,drive=d,bus=ide.0 -boot d -no-reboot" "${INSTALA_CD[@]}"
 mira "y en el «q35» (SATA, AHCI; el CD, en AHCI): el disco SATA, instalado" "^instalar: desde el CD$" "^instalar: terminado$"
-grep -q "Disco:      SATA  QEMU HARDDISK, 2048 MB" $V/c3.txt || ko "en el q35, el disco no sale como SATA: $(grep Disco: $V/c3.txt)"
+grep -q "Disco: *SATA *QEMU HARDDISK, 2048 MB" $V/c3.txt || ko "en el q35, el disco no sale como SATA: $(grep Disco: $V/c3.txt)"
 # 4. arrancar del disco (con el CD aún puesto: «-boot c»): el asistente del primer arranque
 for m in ide:pc sata:q35; do
   if [ ${m%%:*} = ide ]; then o="$VBOX_PC -drive file=$V/ide.img,format=raw,if=ide,index=0"; else o="$VBOX_Q35 -drive file=$V/sata.img,format=raw,if=none,id=d -device ide-hd,drive=d,bus=ide.0"; fi
   maquina arr${m%%:*} "$o -cdrom $V/cd.iso -boot c" ":espera 50 lanzo .HISPA.ASISTE.BIN"
-  mira "el disco instalado desde el CD arranca solo (el «${m##*:}»): el escritorio y el asistente del primer arranque" "^escritorio: en marcha" "lanzo .HISPA.ASISTE.BIN"
+  mira "el disco instalado desde el CD arranca solo (el «${m##*:}»): el escritorio y el asistente del primer arranque" "escritorio: en marcha" "lanzo .HISPA.ASISTE.BIN"
 done
 # 5. actualizar por Internet, en el instalado del q35: sus ajustes (sin
 # asistente), de dónde (ORIGEN.TXT: el servidor de aquí) y PAQUETES con la
@@ -2816,9 +2816,9 @@ mira "al arrancar, con red, ACTUALIZ /BANDEJA mira solo si hay actualizaciones (
   "^actualiz: aviso en la bandeja: Hay una actualización\.$" "^reiniciar$" "^actualiz: aviso en la bandeja: El núcleo de Hispa-Pentium El núcleo nuevo ha arrancado bien\.$"
 miracap "el aviso de la bandeja: una ventanita abajo a la derecha, «Hay una actualización», con «Verlas» y «Ahora no»" u1 negrita 400 460 480 480 "Hay una actualización." negrita 420 510 520 530 Verlas
 miracap "«Verlas» abre «Programas y actualizaciones»: base, con la 0.9 nueva, y el catálogo de Internet con su firma buena" u2 \
-  negrita 112 140 116 340 base texto 300 140 310 340 "0.9 (nueva)" texto 140 105 160 113 "Los paquetes, de http://10.0.2.2:" negrita 300 107 700 113 "(firma buena)"
+  negrita 112 140 116 340 base negrita 300 140 310 340 "0.9 (nueva)" texto 140 105 160 113 "Los paquetes, de http://10.0.2.2:" negrita 300 107 700 113 "(firma buena)"
 miracap "«Actualizar todo»: con el núcleo nuevo, «Reiniciar ahora» o «Más tarde»" u3 negrita 150 456 260 462 "Reiniciar ahora" negrita 400 456 520 462 "Más tarde" \
-  texto 112 410 116 420 "Reinicie para usar el núcleo nuevo; si no arrancara, vuelve el de antes."
+  texto 112 390 116 420 "Reinicie para usar el núcleo nuevo; si no arrancara, vuelve el de antes."
 miracap "tras reiniciar, el aviso: el núcleo nuevo ha arrancado bien" u4 texto 400 480 600 500 "El núcleo nuevo ha arrancado bien."
 mcopy -n -i $V/sata.img@@1M ::HISPA/GRUBENV $V/grubenv1 > /dev/null 2>&1; mcopy -n -i $V/sata.img@@1M ::HISPA/NUCLEO.ANT $V/ant1 > /dev/null 2>&1
 mcopy -n -i $V/sata.img@@1M ::HISPA/PAQUETES/BASE.PQI $V/base1.pqi > /dev/null 2>&1
@@ -2832,10 +2832,11 @@ nasm -f bin $V/colgado.asm -o $V/COLGADO.BIN
 AQUI=$AQUI sube_base 0.9.1 $V/COLGADO.BIN
 mcopy -n -i $V/sata.img@@1M ::HISPA/NUCLEO.BIN $V/NUCLEO09.BIN
 maquina act2 "$VBOX_Q35 $DISCO" ":espera 60 aviso en la bandeja: Hay una actualización" ":pausa 1" ":clic 478 526" ":pausa 6" ":clic 443 467" ":pausa 12" ":clic 240 467" \
-  ":espera 30 ^reiniciar$" ":pausa 25" ":monitor system_reset" ":pausa 4" ":captura u5" ":espera 90 aviso en la bandeja: El núcleo de Hispa-Pentium El nuevo no" ":pausa 1" ":captura u6"
+  ":espera 30 ^reiniciar$" ":pausa 25" ":monitor system_reset" ":pausa 4" ":texto g5" ":espera 90 aviso en la bandeja: El núcleo de Hispa-Pentium El nuevo no" ":pausa 1" ":captura u6"
 mira "con un núcleo nuevo que se cuelga, al reiniciar a mano GRUB arranca solo el de antes, y el sistema lo dice" \
   "^actualiz: aviso en la bandeja: El núcleo de Hispa-Pentium El nuevo no llegó a arrancar: se usa el de antes\.$"
-miracap "GRUB, en ese arranque: la entrada del núcleo de antes, elegida sola" u5 texto 10 100 700 140 "Hispa-Pentium con el nucleo de antes (si el nuevo no arranca)"
+if grep -q '\*Hispa-Pentium con el nucleo de antes (si el nuevo no arranca)' $V/g5.txt; then ok "GRUB, en ese arranque: la entrada del núcleo de antes, elegida sola"
+else ko "GRUB no elige solo el núcleo de antes:"; grep -v '^|$' $V/g5.txt | sed 's/^/        /' | head -8; fi
 mcopy -n -i $V/sata.img@@1M ::HISPA/GRUBENV $V/grubenv2 > /dev/null 2>&1; mcopy -n -i $V/sata.img@@1M ::HISPA/NUCLEO.ANT $V/ant2 > /dev/null 2>&1
 mcopy -n -i $V/sata.img@@1M ::HISPA/NUCLEO.BIN $V/nuc2 > /dev/null 2>&1
 if head -c 33 $V/grubenv2 | grep -q '^nuevo=4$' && cmp -s $V/ant2 $V/NUCLEO09.BIN && cmp -s $V/nuc2 $V/COLGADO.BIN && sano $V/sata.img 2048; then

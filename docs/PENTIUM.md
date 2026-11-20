@@ -58,7 +58,7 @@ de verdad** (ACPI, S5), reiniciar por la FADT y la **batería en la bandeja**
 con su recuadro de ayuda, con el núcleo ACPI de Hispa-DOS (ACPICA) como
 servicio del anillo 3, `ACPI.BIN` (sección 11). En la bandeja caben a la vez,
 de izquierda a derecha, la memoria USB, la red, la pila y el reloj. Todo está
-en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`).*
+en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`). Y la tarde del 20/11: las **actualizaciones por Internet** (`actualiza.clicgest.es/pentium/`), con el catálogo **firmado** (Ed25519, en Castel), la ventana con su barra, el aviso al arrancar y el **núcleo nuevo con vuelta sola al de antes** si no arranca (sección 13); y el **CD (o DVD) de instalación**, que vale para VirtualBox (sección 12).*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -2633,7 +2633,28 @@ apagar y reiniciar por el registro de la FADT); sin ACPI (`-no-acpi`: lo de
 antes); un sobremesa (sin pila, y apaga por ACPI); y que un programa
 cualquiera no puede usar las llamadas del servicio.
 
-Con todo, `pruebas.sh` tiene ahora **508 comprobaciones** (423 hasta la 0.7;
+**La 0.8: la firma, el núcleo nuevo y el CD** (la tarde del 20/11). En la
+parte 12 (`SOLO=paquetes`), PAQUETES se compila con una **clave de prueba**
+(`hpq.py clave`, en la carpeta de la prueba; su `clave.cas` al lado de una
+copia de `upaquete.cas`, que el compilador encuentra antes que el de
+`nucleo32`) y el catálogo de prueba va firmado: `hpq.py` firma y comprueba;
+`PAQUETES FIRMA` dice buena y mala; de Internet, firmado, se usa; cambiado
+una letra, o sin `CATALOGO.FIR`, no se usa nada (tampoco de la carpeta que
+trae la firma mala); un `base` que cambia `NUCLEO.BIN` deja `NUCLEO.ANT`,
+`GRUBENV` (1.024 octetos, `nuevo=1`) y la entrada del de antes en `GRUB.CFG`
+una sola vez, y pide reiniciar; y la ventana, con «Buscar novedades» y «(firma
+buena)». La **parte 16** (`SOLO=cd`, unos ocho minutos) hace el CD con
+`cd.sh` (El Torito sin emulación, menos de 650 MB) y, en QEMU como VirtualBox:
+arranca sin instalar en un `pc` con IDE, OHCI con su tableta y la e1000 (con
+la red); instala en el disco IDE y en el SATA de un `q35` (con el CD en AHCI)
+y los dos discos arrancan (el asistente); y en el del `q35`, con un servidor
+HTTP de aquí (`servidor_prueba.py` con RAIZ) y un catálogo firmado: el aviso
+de la bandeja al arrancar, «Verlas», «Actualizar todo» con un núcleo nuevo,
+«Reiniciar ahora», «El núcleo nuevo ha arrancado bien» (`nuevo=0`); y con un
+núcleo que se queda en `hlt`, reiniciar a mano: GRUB elige solo el de antes,
+el sistema lo dice y `GRUBENV` queda en `nuevo=4`.
+
+Con todo, `pruebas.sh` tenía **508 comprobaciones** (423 hasta la 0.7;
 de la 0.8, los paquetes, el USB en caliente, la red, apagar de verdad y la
 batería, y las del AHCI del ICH7). La memoria USB trae ahora **16 programas**
 como módulos (eran 9: PAQUETES y ACTUALIZ, RED, IPCONFIG, PING y DESCARGA, y
