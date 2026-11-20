@@ -38,13 +38,17 @@ def main():
         subprocess.run([sys.executable, cp437, '--ventanas', os.path.join(RAIZ, 'ventanas', inc),
                         os.path.join(gen, inc)], check=True)
     # los .inc propios del programa: en su carpeta (FUENTE sin «.asm»); si no
-    # está ahí, se busca en programas/comun/ (lo que comparten varios) y en lib/ (así TERMINAL.HVP incluye lib/version.inc)
+    # está ahí, se busca en programas/comun/ (lo que comparten varios), en lib/ (así TERMINAL.HVP incluye lib/version.inc)
+    # y en build/gen/<carpeta>/ (lo generado)
     propios = os.path.splitext(fuente)[0]
     for inc in re.findall(r'^\s*%include\s+"([^"]+)"', open(fuente, encoding='utf-8').read(), re.M):
         if inc in INCS:
             continue
+        # (y en build/gen/NOMBRE/, lo que se genera en la compilación: así
+        # HISPADRV.HVP incluye m68k_gen.inc, de tools/gen68k.py)
         for cand in (os.path.join(propios, inc), os.path.join(RAIZ, 'programas', 'comun', inc),
-                     os.path.join(RAIZ, 'lib', inc)):
+                     os.path.join(RAIZ, 'lib', inc),
+                     os.path.join(os.path.dirname(salida) or '.', 'gen', os.path.basename(propios), inc)):
             if os.path.isfile(cand):
                 subprocess.run([sys.executable, cp437, '--ventanas', cand, os.path.join(gen, inc)], check=True)
                 break

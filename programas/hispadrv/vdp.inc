@@ -32,21 +32,21 @@
 LIN_M       equ 32                  ; margen de lin a cada lado
 R_ALTOS     equ 192                 ; casillas de prioridad alta por línea
 
-; cuatro puntos: %1 tabla de puntos, %2 de máscaras, %3 %4 los dos octetos
-; (en el orden en que se pintan), %5 desplazamiento en EDI. Gasta ECX, EBP
+; cuatro puntos: %1 tabla de pares de colores (la de la paleta: EBX =
+; paleta x 512), %2 de máscaras, %3 %4 los dos octetos (en el orden en que se
+; pintan), %5 desplazamiento en EDI. Gasta ECX, EBP
 %macro PINTA4 5
         movzx ecx, %4
         movzx ebp, %3
-        mov cx, [%1+ecx*2]
+        mov cx, [%1+ebx+ecx*2]
         shl ecx, 16
-        mov cx, [%1+ebp*2]
+        mov cx, [%1+ebx+ebp*2]
         push eax
         movzx eax, %4
         mov ax, [%2+eax*2]
         shl eax, 16
         mov ax, [%2+ebp*2]
         ; ECX = cuatro puntos, EAX = su máscara
-        or ecx, [r_pal4+ebx]        ; (la paleta en los cuatro)
         and ecx, eax
         not eax
         and eax, [edi+%5]
@@ -64,18 +64,15 @@ vdp_arrancar:
         mov edi, cram
         mov ecx, (64 * 2 + 80) / 4
         rep stosd
-        ; las tablas: cada octeto de un dibujo, en dos puntos (el de los 4
-        ; bits altos primero) y su máscara (FFh donde no es transparente)
+        ; las máscaras de cada octeto de un dibujo: FFh en cada uno de sus
+        ; dos puntos que no es transparente (el de los 4 bits altos primero;
+        ; tab_mkr, al revés)
         xor ebx, ebx
 .t:
         mov eax, ebx
         shr eax, 4
         mov edx, ebx
         and edx, 15
-        mov [tab_px+ebx*2], al
-        mov [tab_px+ebx*2+1], dl
-        mov [tab_pxr+ebx*2], dl     ; (girado: el de los bits bajos primero)
-        mov [tab_pxr+ebx*2+1], al
         xor ecx, ecx
         test al, al
         jz .t1
@@ -92,6 +89,11 @@ vdp_arrancar:
         cmp ebx, 256
         jb .t
         call vdp_colores
+        mov al, [v_col]             ; (las tablas del fondo, enteras)
+        not al
+        mov [r_fondo_act], al
+        not al
+        call fondo_pon
         popad
         ret
 
@@ -107,9 +109,12 @@ vdp_colores:
         jb .c
         popad
         ret
-; EBX=entrada AX=su valor (----BBB-GGG-RRR-)
+; EBX=entrada AX=su valor (----BBB-GGG-RRR-): v_col y los pares de puntos de
+; su paleta que la llevan (pal_px: el de los 4 bits altos primero; pal_pxr:
+; al revés). Conserva todo menos EBP
 vdp_col_pon:
         push eax
+        push ecx
         push edx
         movzx edx, ax
         shr edx, 1                  ; -> 9 bits: BBBGGGRRR
@@ -125,8 +130,78 @@ vdp_col_pon:
         or eax, ebp
         mov al, [md_col9+eax]
         mov [v_col+ebx], al
+        mov ecx, ebx                ; la paleta: ECX = su tabla (x 512)
+        and ecx, 0x30
+        shl ecx, 5
+        mov edx, ebx
+        and edx, 15                 ; EDX = el número en la paleta
+        push ebx
+        xor ebx, ebx
+.p:
+        mov ebp, ebx                ; el octeto EBX: ¿lleva el color arriba?
+        shr ebp, 4
+        cmp ebp, edx
+        jne .p1
+        lea ebp, [ecx+ebx*2]
+        mov [pal_px+ebp], al
+        mov [pal_pxr+ebp+1], al
+        test edx, edx
+        jz .p1
+        mov [pal_pxb+ebp], al
+        mov [pal_pxbr+ebp+1], al
+.p1:
+        mov ebp, ebx                ; ¿y abajo?
+        and ebp, 15
+        cmp ebp, edx
+        jne .p2
+        lea ebp, [ecx+ebx*2]
+        mov [pal_px+ebp+1], al
+        mov [pal_pxr+ebp], al
+        test edx, edx
+        jz .p2
+        mov [pal_pxb+ebp+1], al
+        mov [pal_pxbr+ebp], al
+.p2:
+        inc ebx
+        cmp ebx, 256
+        jb .p
+        pop ebx
         pop edx
+        pop ecx
         pop eax
+        ret
+
+; AL=el color del fondo (del equipo): en los puntos transparentes de
+; pal_pxb y pal_pxbr (si ha cambiado)
+fondo_pon:
+        cmp al, [r_fondo_act]
+        jne .si
+        ret
+.si:
+        pushad
+        mov [r_fondo_act], al
+        xor ecx, ecx                ; ECX = paleta x 512
+.p:
+        xor ebx, ebx
+.o:
+        lea ebp, [ecx+ebx*2]
+        test bl, 0xF0
+        jnz .o1
+        mov [pal_pxb+ebp], al
+        mov [pal_pxbr+ebp+1], al
+.o1:
+        test bl, 0x0F
+        jnz .o2
+        mov [pal_pxb+ebp+1], al
+        mov [pal_pxbr+ebp], al
+.o2:
+        inc ebx
+        cmp ebx, 256
+        jb .o
+        add ecx, 512
+        cmp ecx, 2048
+        jb .p
+        popad
         ret
 
 vdp_reiniciar:
@@ -625,7 +700,8 @@ vdp_lee_datos:
 ;  El dibujo de una línea
 ; =============================================================================
 ; EAX=línea (0 a v_alto-1): se pinta en imagen (320 por fila; con 256
-; puntos, en medio y con el borde del color del fondo)
+; puntos, en medio y con el borde del color del fondo). lin va ya en los
+; colores del equipo
 vdp_linea:
         pushad
         mov [r_linea], eax
@@ -634,10 +710,13 @@ vdp_linea:
         ; el fondo (registro 7)
         movzx eax, byte [v_reg+7]
         and eax, 0x3F
+        mov al, [v_col+eax]
+        call fondo_pon
         mov ah, al
         mov ecx, eax
         shl eax, 16
         mov ax, cx
+        mov [r_fondo4], eax
         mov edi, lin
         mov ecx, (320 + 2 * LIN_M) / 4
         rep stosd
@@ -690,55 +769,26 @@ vdp_linea:
         mov ah, 0xC0
         call objetos_pon
 .pasa:
-        ; a la fila de la imagen, en los colores del equipo
+        ; a la fila de la imagen
         mov edi, [r_linea]
         imul edi, 320
         add edi, imagen
         mov esi, lin + LIN_M
         mov ecx, [r_ancho]
-        cmp ecx, 320
+        shr ecx, 2
+        cmp ecx, 80
         je .c
-        movzx eax, byte [v_reg+7]   ; (256: 32 de borde a cada lado)
-        and eax, 0x3F
-        mov al, [v_col+eax]
-        mov ah, al
-        mov edx, eax
-        shl eax, 16
-        mov ax, dx
+        mov eax, [r_fondo4]         ; (256: 32 de borde a cada lado)
         push ecx
         mov ecx, 8
         rep stosd
         pop ecx
-.c:
-        xor eax, eax
-        xor edx, edx
-        shr ecx, 2
-.c1:
-        mov al, [esi]
-        mov dl, [esi+1]
-        mov bl, [v_col+eax]
-        mov bh, [v_col+edx]
-        mov al, [esi+2]
-        mov dl, [esi+3]
-        mov [edi], bx
-        mov bl, [v_col+eax]
-        mov bh, [v_col+edx]
-        mov [edi+2], bx
-        add esi, 4
-        add edi, 4
-        dec ecx
-        jnz .c1
-        cmp dword [r_ancho], 320
-        je .x
-        movzx eax, byte [v_reg+7]
-        and eax, 0x3F
-        mov al, [v_col+eax]
-        mov ah, al
-        mov edx, eax
-        shl eax, 16
-        mov ax, dx
+        rep movsd
         mov ecx, 8
         rep stosd
+        jmp .x
+.c:
+        rep movsd
 .x:
         popad
         ret
@@ -747,6 +797,7 @@ vdp_linea:
 ; dibujos de prioridad baja se pintan ya; los de alta se apuntan (r_altos)
 plano:
         pushad
+        call recorte
         ; el tamaño (registro 16): 32, 64 o 128 casillas
         movzx eax, byte [v_reg+16]
         mov ecx, eax
@@ -789,23 +840,86 @@ plano:
         dec ecx
         and eax, ecx                ; EAX = x del plano en el punto 0
         mov [r_px], eax
-        ; las casillas, de 8 en 8 puntos
         mov ecx, eax
         and ecx, 7
-        neg ecx                     ; ECX = x en la pantalla de la primera
-        mov [r_sx], ecx
-.tile:
-        mov ecx, [r_sx]
-        cmp ecx, [r_x1]
-        jge near .fin
-        lea eax, [ecx+8]
-        cmp eax, [r_x0]
-        jle near .sig
-        ; el desplazamiento vertical: de toda la pantalla o de su columna
+        neg ecx
+        mov esi, ecx                ; ESI = x en la pantalla de la primera casilla
+        test byte [v_reg+11], 4     ; ¿desplazamiento vertical por columnas?
+        jnz near .columnas
+        ; ---- lo normal: toda la línea en la misma fila del plano ----
         mov eax, [r_plano]
-        test byte [v_reg+11], 4
-        jz .v0
-        mov edx, ecx
+        movzx eax, word [vsram+eax*2]
+        add eax, [r_linea]
+        and eax, [r_hmask]
+        mov ecx, eax
+        and ecx, 7
+        mov [r_fy], ecx             ; la línea dentro de la casilla
+        shr eax, 3
+        imul eax, [r_cw]
+        add eax, eax
+        add eax, [r_nt]
+        mov [r_fila], eax           ; la fila de la tabla
+        mov eax, [r_cw]
+        dec eax
+        mov [r_cmask], eax
+.t:
+        cmp esi, [r_x1]
+        jge near .fin
+        lea eax, [esi+8]
+        cmp eax, [r_x0]
+        jle .s
+        mov eax, [r_px]
+        shr eax, 3
+        and eax, [r_cmask]
+        add eax, eax
+        add eax, [r_fila]
+        and eax, 0xFFFF
+        mov dx, [vram+eax]          ; la entrada (en el orden del 68000)
+        xchg dl, dh
+        movzx edx, dx
+        mov ebx, [r_fy]
+        test edx, 0x1000            ; girada de arriba abajo
+        jz .nv
+        xor ebx, 7
+.nv:
+        mov eax, edx
+        and eax, 0x7FF
+        shl eax, 5
+        mov eax, [vram+eax+ebx*4]   ; los cuatro octetos de la fila
+        test eax, eax
+        jz .s                       ; (transparente del todo)
+        mov ebx, edx
+        shr ebx, 4
+        and ebx, 0x600              ; la paleta (x 512)
+        mov ebp, esi
+        test edx, 0x8000
+        jnz .alto
+        lea edi, [lin+LIN_M+esi]
+        cmp dword [r_plano], 1      ; (el plano B, de prioridad baja: debajo
+        je .b                       ; solo está el fondo)
+        call casilla
+        jmp .s
+.b:
+        call casilla_b
+        jmp .s
+.alto:                              ; prioridad alta: para luego
+        call apunta_alto
+.s:
+        add esi, 8
+        add dword [r_px], 8
+        jmp .t
+.fin:
+        popad
+        ret
+        ; ---- por columnas de 16 puntos (cada casilla, la fila de la suya) ----
+.columnas:
+.ct:
+        cmp esi, [r_x1]
+        jge .fin
+        lea eax, [esi+8]
+        cmp eax, [r_x0]
+        jle .cs
+        mov edx, esi
         test edx, edx
         jns .v1
         xor edx, edx
@@ -815,13 +929,12 @@ plano:
         jbe .v2
         mov edx, 19
 .v2:
+        mov eax, [r_plano]
         lea eax, [eax+edx*2]
-.v0:
         movzx eax, word [vsram+eax*2]
         add eax, [r_linea]
         and eax, [r_hmask]
         mov ebx, eax                ; EBX = y en el plano
-        ; la entrada de la tabla: fila y columna
         shr eax, 3
         imul eax, [r_cw]
         mov edx, [r_px]
@@ -833,69 +946,129 @@ plano:
         add eax, eax
         add eax, [r_nt]
         and eax, 0xFFFF
-        movzx edx, byte [vram+eax]
-        shl edx, 8
-        mov dl, [vram+eax+1]        ; EDX = la entrada
+        mov dx, [vram+eax]
+        xchg dl, dh
+        movzx edx, dx
         and ebx, 7
-        test edx, 0x1000            ; girado de arriba abajo
-        jz .nv
+        test edx, 0x1000
+        jz .cnv
         xor ebx, 7
-.nv:
+.cnv:
         mov eax, edx
         and eax, 0x7FF
         shl eax, 5
-        lea eax, [eax+ebx*4]
-        mov eax, [vram+eax]         ; los cuatro octetos de la fila
+        mov eax, [vram+eax+ebx*4]
         test eax, eax
-        jz .sig                     ; (transparente del todo)
+        jz .cs
         mov ebx, edx
-        shr ebx, 9
-        and ebx, 0x30               ; la paleta
-        mov ebp, [r_sx]
+        shr ebx, 4
+        and ebx, 0x600
+        mov ebp, esi
         test edx, 0x8000
-        jnz .alto
-        lea edi, [lin+LIN_M+ebp]
+        jnz .calto
+        lea edi, [lin+LIN_M+esi]
         call casilla
-        jmp .sig
-.alto:                              ; prioridad alta: para luego
+        jmp .cs
+.calto:
         call apunta_alto
-.sig:
-        add dword [r_sx], 8
+.cs:
+        add esi, 8
         add dword [r_px], 8
-        jmp .tile
-.fin:
-        popad
+        jmp .ct
+
+; el recorte de casilla: r_x0 y r_x1, salvo en los bordes de la pantalla
+; (allí no hace falta: lin tiene margen)
+recorte:
+        push eax
+        mov eax, [r_x0]
+        test eax, eax
+        jnz .a
+        mov eax, -LIN_M
+.a:
+        mov [r_cx0], eax
+        mov eax, [r_x1]
+        cmp eax, [r_ancho]
+        jb .b
+        mov eax, 320 + LIN_M
+.b:
+        mov [r_cx1], eax
+        pop eax
         ret
 
-; pinta una fila de una casilla: EAX=los cuatro octetos, EBX=paleta (0-48),
-; EDX=la entrada (bit 11: girada), EDI=en lin; solo entre r_x0 y r_x1 (EBP=x)
+; (plano B, prioridad baja) una fila de una casilla, sin mirar lo de debajo:
+; lo transparente es el color del fondo (pal_pxb). Como casilla, sin recorte
+; (el plano B va de borde a borde)
+casilla_b:
+        cmp ebp, [r_cx0]
+        jl casilla.recorta
+        test edx, 0x0800
+        jnz .girada
+        movzx ecx, ah
+        movzx ebp, al
+        mov cx, [pal_pxb+ebx+ecx*2]
+        shl ecx, 16
+        mov cx, [pal_pxb+ebx+ebp*2]
+        mov [edi], ecx
+        rol eax, 16
+        movzx ecx, ah
+        movzx ebp, al
+        mov cx, [pal_pxb+ebx+ecx*2]
+        shl ecx, 16
+        mov cx, [pal_pxb+ebx+ebp*2]
+        mov [edi+4], ecx
+        rol eax, 16
+        ret
+.girada:
+        movzx ecx, ah
+        movzx ebp, al
+        mov cx, [pal_pxbr+ebx+ebp*2]
+        shl ecx, 16
+        mov cx, [pal_pxbr+ebx+ecx*2]
+        rol ecx, 16
+        mov [edi+4], ecx
+        rol eax, 16
+        movzx ecx, ah
+        movzx ebp, al
+        mov cx, [pal_pxbr+ebx+ebp*2]
+        shl ecx, 16
+        mov cx, [pal_pxbr+ebx+ecx*2]
+        rol ecx, 16
+        mov [edi], ecx
+        rol eax, 16
+        ret
+
+; pinta una fila de una casilla: EAX=los cuatro octetos, EBX=paleta (x 512),
+; EDX=la entrada (bit 11: girada), EDI=en lin; solo entre r_x0 y r_x1 (EBP=x).
+; Conserva EAX, EBX, EDX, ESI, EDI
 casilla:
-        cmp ebp, [r_x0]
+        cmp ebp, [r_cx0]
         jl .recorta
         lea ecx, [ebp+8]
-        cmp ecx, [r_x1]
+        cmp ecx, [r_cx1]
         jg .recorta
         test edx, 0x0800
         jnz .girada
-        PINTA4 tab_px, tab_mk, al, ah, 0
-        shr eax, 16
-        PINTA4 tab_px, tab_mk, al, ah, 4
+        PINTA4 pal_px, tab_mk, al, ah, 0
+        rol eax, 16
+        PINTA4 pal_px, tab_mk, al, ah, 4
+        rol eax, 16
         ret
 .girada:
         rol eax, 16
-        PINTA4 tab_pxr, tab_mkr, ah, al, 0
-        shr eax, 16
-        PINTA4 tab_pxr, tab_mkr, ah, al, 4
+        PINTA4 pal_pxr, tab_mkr, ah, al, 0
+        rol eax, 16
+        PINTA4 pal_pxr, tab_mkr, ah, al, 4
         ret
 .recorta:                           ; (de punto en punto, mirando los bordes)
         push esi
         push edx
+        push edi
         mov esi, edx                ; ESI = la entrada (bit 11: girada)
         xor ecx, ecx                ; ECX = el punto (0-7)
 .r3:
-        cmp ebp, [r_x0]
+        cmp ebp, [r_cx0]
         jl .r5
-        cmp ebp, [r_x1]
+        cmp ebp, [r_cx1]
         jge .r6
         push ecx
         push eax
@@ -913,7 +1086,10 @@ casilla:
 .r4:
         and eax, 15
         jz .r8
-        or eax, ebx
+        mov edx, ebx                ; (la paleta x 16)
+        shr edx, 5
+        add eax, edx
+        mov al, [v_col+eax]
         mov [edi], al
 .r8:
         pop eax
@@ -925,6 +1101,7 @@ casilla:
         cmp ecx, 8
         jb .r3
 .r6:
+        pop edi
         pop edx
         pop esi
         ret
@@ -943,9 +1120,9 @@ apunta_alto:
         mov [r_altos+edi+4], ebx
         mov [r_altos+edi+8], ebp
         mov [r_altos+edi+12], edx
-        mov ecx, [r_x0]
+        mov ecx, [r_cx0]
         mov [r_altos+edi+16], ecx
-        mov ecx, [r_x1]
+        mov ecx, [r_cx1]
         mov [r_altos+edi+20], ecx
 .x:
         pop ecx
@@ -963,9 +1140,9 @@ altos:
         mov edi, esi
         shl edi, 5
         mov eax, [r_altos+edi+16]
-        mov [r_x0], eax
+        mov [r_cx0], eax
         mov eax, [r_altos+edi+20]
-        mov [r_x1], eax
+        mov [r_cx1], eax
         mov eax, [r_altos+edi]
         mov ebx, [r_altos+edi+4]
         mov ebp, [r_altos+edi+8]
@@ -1029,6 +1206,7 @@ ventana:
         mov [r_x0], eax
         mov eax, [r_wx1]
         mov [r_x1], eax
+        call recorte
         movzx edx, byte [v_reg+3]   ; su tabla: 64 casillas de ancho con 320
         mov ecx, 64                 ; puntos (32 con 256)
         and edx, 0x3C
@@ -1071,8 +1249,8 @@ ventana:
         test eax, eax
         jz .s
         mov ebx, edx
-        shr ebx, 9
-        and ebx, 0x30
+        shr ebx, 4
+        and ebx, 0x600
         mov ebp, esi
         test edx, 0x8000
         jnz .alto
@@ -1331,49 +1509,47 @@ objeto_casilla:
 objetos_pon:
         pushad
         mov esi, [r_smin]
+        mov ecx, [r_smax]
+        cmp esi, ecx
+        jg .x                       ; (ninguno en esta línea)
         cmp esi, 0
         jge .a
         xor esi, esi
 .a:
-        mov ecx, [r_smax]
         cmp ecx, [r_ancho]
         jl .b
         mov ecx, [r_ancho]
         dec ecx
 .b:
         mov bl, ah
+        xor edx, edx
 .c:
         cmp esi, ecx
         jg .f
         mov al, [spr+LIN_M+esi]
         mov dl, al
-        and dl, 0xC0
-        cmp dl, bl
+        and al, 0xC0
+        cmp al, bl
         jne .n
-        and al, 0x3F
-        mov [lin+LIN_M+esi], al
+        and edx, 0x3F
+        mov dl, [v_col+edx]
+        mov [lin+LIN_M+esi], dl
 .n:
         inc esi
         jmp .c
 .f:
         cmp bl, 0xC0
         jne .x
-        mov edi, spr                ; (a cero para la siguiente)
-        mov ecx, (320 + 2 * LIN_M) / 4
+        mov edi, [r_smin]           ; (a cero para la siguiente)
+        mov ecx, [r_smax]
+        sub ecx, edi
+        inc ecx
+        lea edi, [spr+LIN_M+edi]
         xor eax, eax
-        rep stosd
+        rep stosb
 .x:
         popad
         ret
 
         align 4
 tam_planos  dd 32, 64, 32, 128
-; la paleta repetida en los cuatro octetos (r_pal4+0, +16, +32, +48)
-r_pal4      times 4 db 0
-            times 12 db 0
-            times 4 db 0x10
-            times 12 db 0
-            times 4 db 0x20
-            times 12 db 0
-            times 4 db 0x30
-            times 12 db 0

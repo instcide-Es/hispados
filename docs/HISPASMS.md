@@ -118,9 +118,9 @@ se pueden montar también como programa de Linux para las pruebas):
 
 | Archivo | Qué |
 |---|---|
-| `z80.inc` | El procesador. Una rutina por instrucción, hechas con macros de NASM (las de DD y FD salen de las mismas que las de HL), y tablas de 256 saltos. Los registros del Z80 están en memoria; el contador de programa en ESI y el tiempo que queda en EDI. Las banderas salen de las del x86 (`LAHF`: S, Z, H y C están en el mismo sitio; P/V del desbordamiento o de una tabla de paridad). La memoria se ve por una tabla de punteros, uno por cada KB |
+| `z80.inc` | (En `programas/comun/`, porque también es el Z80 de Hispa-Drive.) El procesador. Una rutina por instrucción, hechas con macros de NASM (las de DD y FD salen de las mismas que las de HL), y tablas de 256 saltos. Los registros del Z80 están en memoria; el contador de programa en ESI y el tiempo que queda en EDI. Las banderas salen de las del x86 (`LAHF`: S, Z, H y C están en el mismo sitio; P/V del desbordamiento o de una tabla de paridad). La memoria se ve por una tabla de punteros, uno por cada KB |
 | `vdp.inc` | La imagen, los puertos y `sms_cuadro`: las 262 líneas de un cuadro. Cada línea visible se pinta de una vez (el fondo, de ocho en ocho puntos con tablas que pasan cada octeto de un plano a ocho puntos; luego los objetos, del primero al último) y luego corre el procesador sus 228 ciclos |
-| `psg.inc` | El sonido. Las muestras de cada línea, a la frecuencia que pide la ventana |
+| `psg.inc` | (En `programas/comun/`: Hispa-Drive lleva el mismo chip.) El sonido. Las muestras de cada línea, a la frecuencia que pide la ventana |
 | `mapas.inc` | Los cartuchos: la ROM (repetida hasta una potencia de 2), los mapeadores y la memoria de la consola |
 | `datos.inc` | Las variables, con 4 KB sin usar delante (como en Hispa-Nes: escribir en la misma página que el código que se ejecuta es carísimo) |
 

@@ -1,5 +1,6 @@
 ; =============================================================================
 ;  Hispa-System - el procesador: Z80 (el de la consola, a 3,58 MHz)
+;  (también el de sonido de Hispa-Drive: por eso está en programas/comun/)
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;  Escrito desde la documentación pública del Z80 (el manual del fabricante
