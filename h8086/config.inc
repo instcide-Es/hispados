@@ -86,6 +86,21 @@ config_lee:
 .sin:
         mov al, [cf_bufs]
         mov [n_cache], al
+        ; y el gestor de memoria extendida, si hay para qué (ver alta.inc): en
+        ; esta copia del arranque va justo detrás de él
+        cmp byte [xms_hay], 0
+        je .sin_xms
+        lea ax, [di+int2f]          ; (el puente salta a donde quede)
+        mov [b_punteros+20], ax
+        lea ax, [di+xms_entra]
+        mov [b_punteros+24], ax
+        mov si, ini_fin
+        mov cx, XMS_TAM
+.xms:
+        cs lodsb
+        stosb
+        loop .xms
+.sin_xms:
         call alto_sube              ; (con DOS=ALTO, a la memoria alta)
         cmp byte [alto], 0
         je .abajo

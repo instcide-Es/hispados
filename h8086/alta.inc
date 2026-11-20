@@ -24,6 +24,12 @@
 ;  K), se copian datos entre ellos y la memoria convencional, se abre y se
 ;  cierra A20 y se pide la HMA. Va DENTRO del núcleo y se activa solo: lo
 ;  útil es que la memoria esté ahí sin tener que saber poner un DEVICE=.
+;  Pero solo se queda en memoria si hace falta: el gestor (de int2f a
+;  x_copia) va en su sección, «.xms», detrás del arranque en el archivo, y
+;  config.inc lo copia detrás de la reserva de sectores si hay un 286 con
+;  memoria extendida; en un 8086 no ocupa nada. Por eso no puede depender de
+;  dónde quede: se ensambla desde 0, sus saltos son relativos, y su tabla de
+;  funciones se suma a donde está (xms_entra); el CS es el del núcleo.
 ;
 ;  Para copiar se usa la BIOS (INT 15h/87h), que es quien sabe entrar en modo
 ;  protegido y volver en cada máquina (en un 286 no hay vuelta limpia: la
@@ -138,6 +144,8 @@ alto_sube:
         ret
         section .text
 
+        section .xms follows=.init vstart=0 align=16
+xms_ini_cod:
 ; ---- INT 2Fh: ¿hay gestor de memoria extendida? ----
 int2f:
         cmp ah, 0x43
@@ -184,7 +192,12 @@ xms_entra:
         mov bl, ah
         xor bh, bh
         shl bx, 1
-        mov si, [x_funciones+bx]
+        call .aqui                  ; (dónde estamos: la tabla dice cuánto
+.aqui:                              ; hay desde el principio del gestor)
+        pop di
+        sub di, .aqui
+        mov si, [di+x_funciones+bx]
+        add si, di
         mov bx, bp
         call si
         jc .mal
@@ -754,6 +767,9 @@ x_copia:
         mov byte [es:di+5], 0x93
         mov [es:di+7], ah
         ret
+
+xms_fin_cod:
+XMS_TAM     equ xms_fin_cod - xms_ini_cod
 
         section .init
 m_sin_a20   db "No se puede abrir la puerta A20: el sistema se queda en la memoria baja.", 10, 0

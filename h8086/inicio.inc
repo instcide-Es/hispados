@@ -14,7 +14,9 @@
 ;
 ;  Desde aquí, una rutina del núcleo no se puede llamar con un CALL cercano
 ;  (está en otro segmento): se llama a «k_nombre», que la llama por «lejos»
-;  (nucleo.asm). Los textos y tablas de aquí se leen con CS: delante.
+;  (nucleo.asm). Los textos y tablas de aquí se leen con CS: delante. Detrás
+;  del arranque, en el archivo y en la copia, va el gestor de memoria
+;  extendida (alta.inc, «.xms»), que config.inc pone en su sitio si hace falta.
 ; =============================================================================
         section .init follows=.text vstart=0 align=16
 
@@ -25,13 +27,13 @@ i_entrada:
         int 0x12                    ; la memoria convencional, en K
         mov cl, 6
         shl ax, cl
-        sub ax, (ini_fin - i_entrada + 15) / 16
+        sub ax, (INI_TODO + 15) / 16
         mov es, ax
         push cs
         pop ds
         xor si, si
         xor di, di
-        mov cx, ini_fin - i_entrada
+        mov cx, INI_TODO
         cld
         rep movsb
         push es

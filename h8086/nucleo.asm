@@ -233,7 +233,8 @@ b_f_cierra:
         pop ax
         retf
             align 2
-b_punteros  dw int20, 0, int21, 0, int25, 0, int26, 0, int27, 0, int2f, 0, xms_entra, 0, int15, 0
+b_punteros  dw int20, 0, int21, 0, int25, 0, int26, 0, int27, 0, 0, 0, 0, 0, int15, 0
+            ; (INT 2Fh y el gestor de memoria extendida: config.inc, si los hay)
 b_quiere    db 0                    ; A20 tiene que estar abierta
 ; para el banco de pruebas: «HCFG:» y un octeto con lo que vale sin decir nada
 ; en CONFIG.SYS (bit 0: DOS=ALTO; bit 1: PROCESADOR=8086)
@@ -1777,4 +1778,6 @@ bss_fin:
 fichas      resb N_ARCH * H_TAM_F
 
         section .init
-ini_fin:
+            align 16, db 0
+ini_fin:                            ; (y detrás, el gestor de memoria extendida)
+INI_TODO    equ ini_fin - i_entrada + XMS_TAM
