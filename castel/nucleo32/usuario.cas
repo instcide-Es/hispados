@@ -858,7 +858,7 @@ módulo Usuario
                 si no escribir_sectores(a, pd.lba, pd.n, puntero(pd.datos)) entonces devolver MAL fin
                 devolver 0
             caso 66:
-                para k desde 0 hasta MAX_DISCOS - 1 hacer asentar(k) fin
+                vaciar_discos()
                 tomar_consola()
                 escribir("reiniciar\n")
                 soltar_consola()

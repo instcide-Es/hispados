@@ -325,6 +325,11 @@ int servicio_principal(void)
 		if (n > 100)
 			n = 100;
 		orden = sc(SC_SERVICIO, (u32)&pe, n, 0);
+		if (orden == ORDEN_SIN_ARCHIVOS) {
+			al_archivo = 0;
+			pe.sin_archivos = 1;
+			orden = sc(SC_SERVICIO, (u32)&pe, n, 0);
+		}
 		if (orden == ORDEN_APAGAR && pe.respuesta == RESP_NADA) {
 			apaga();
 			sc(SC_SERVICIO, (u32)&pe, 0, 0);

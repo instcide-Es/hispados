@@ -22,7 +22,7 @@
 ;        también usa CF8h y CFCh)                    -> lo leído
 ;   153  el servicio da lo último leído (EBX: una Energía) y espera, como
 ;        mucho ECX tics, a que el núcleo le mande algo  -> la orden (0 nada,
-;        1 apagar, 2 reiniciar)
+;        1 apagar, 2 reiniciar, 3 no escribir más en el disco: se va a vaciar)
 ;   154  (cualquier programa) la batería: la Energía, a EBX -> 1, o 0 si no
 ;        hay servicio
 ;
@@ -47,6 +47,7 @@ módulo Energia
     constante VENTANA_FINAL = 0xBF000000
     público constante ORDEN_APAGAR = 1
     público constante ORDEN_REINICIAR = 2
+    constante ORDEN_SIN_ARCHIVOS = 3            ; que no escriba más en el disco (se va a vaciar)
     constante RESP_PARADO = 1
     constante RESP_FALLO = 2
     público constante FASE_LISTO = 1            ; hay lecturas de la batería
@@ -58,7 +59,7 @@ módulo Energia
         versión, fase, nbat, pct, ca, cargando, minutos, estado, lecturas: nat32
         salud_pct, salud_n, unidad, diseño, llena, ciclos1, ciclos2: nat32
         s5, pm1a_cnt, pm1b_cnt, slp_typa, slp_typb, smi_cmd, acpi_enable: nat32
-        reset_esp, reset_dir, reset_valor, respuesta, reservado: nat32
+        reset_esp, reset_dir, reset_valor, respuesta, sin_archivos: nat32
     fin
 
     público variable energía: Energía           ; lo último que ha dado el servicio
@@ -66,6 +67,7 @@ módulo Energia
     público variable cambios_energía: nat32     ; sube cuando cambia lo que se ve de la batería
     variable servicio: nat32                    ; la tarea de ACPI.BIN (0: no hay)
     variable orden: nat32
+    variable sin_archivos: bool                 ; se le ha pedido que no escriba más en el disco
     variable ventana: nat32                     ; lo siguiente libre de su zona
     variable vistas: nat32
     variable idt_nula: arreglo [2] de nat32     ; (para el triple fallo)
@@ -190,8 +192,9 @@ módulo Energia
                     fin
                     hay_energía := cierto
                 fin
+                si orden = 0 y sin_archivos y energía.sin_archivos = 0 entonces devolver ORDEN_SIN_ARCHIVOS fin
                 ; (la orden se mira cada décima de segundo)
-                mientras b > 0 y orden = 0 hacer
+                mientras b > 0 y orden = 0 y (no sin_archivos o energía.sin_archivos <> 0) hacer
                     si b > 10 entonces
                         dormir(10)
                         b := b - 10
@@ -200,6 +203,7 @@ módulo Energia
                         b := 0
                     fin
                 fin
+                si orden = 0 y sin_archivos y energía.sin_archivos = 0 entonces devolver ORDEN_SIN_ARCHIVOS fin
                 devolver orden
         fin
         devolver NO_VALE
@@ -227,9 +231,19 @@ módulo Energia
         fin
     fin
 
-    ; lo que los discos tengan guardado, a su superficie
+    ; lo que los discos tengan guardado, a su superficie. Antes, el servicio
+    ; deja de escribir en el disco (su \ACPI.TXT): se le dice y se espera,
+    ; como mucho 2 s, a que conteste
     público función vaciar_discos()
         variable k: nat32
+        si servicio_acpi_vivo() y hay_energía entonces
+            sin_archivos := cierto
+            k := 0
+            mientras k < 200 y servicio_acpi_vivo() y energía.sin_archivos = 0 hacer
+                dormir(1)
+                k := k + 1
+            fin
+        fin
         para k desde 0 hasta MAX_DISCOS - 1 hacer asentar(k) fin
     fin
 

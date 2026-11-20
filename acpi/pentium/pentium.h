@@ -28,6 +28,7 @@
 #define ORDEN_NADA 0
 #define ORDEN_APAGAR 1
 #define ORDEN_REINICIAR 2
+#define ORDEN_SIN_ARCHIVOS 3	/* no escribir más en el disco (el núcleo lo va a vaciar para apagar) */
 
 /* lo que el servicio responde (pe_energia.respuesta) */
 #define RESP_NADA 0
@@ -69,6 +70,6 @@ struct pe_energia {
 	u32 reset_dir;		/* (PCI: bus << 16 | disp << 11 | func << 8 | registro) */
 	u32 reset_valor;
 	u32 respuesta;		/* RESP_... */
-	u32 reservado;
+	u32 sin_archivos;	/* 1: ya no se escribe en el disco (ORDEN_SIN_ARCHIVOS) */
 };
 #endif
