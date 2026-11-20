@@ -15,7 +15,7 @@
 ; =============================================================================
 módulo Programa
 
-    importar Base, Tablas, Cuentas, Tipos, Salida, Expr, Sent, Lexico, Sintactico, Apoyo, Textos, Archivos
+    importar Medidas, Base, Tablas, Cuentas, Tipos, Salida, Expr, Sent, Lexico, Sintactico, Apoyo, Textos, Archivos
 
     constante MAX_LN = 320
     constante N_R = 7
