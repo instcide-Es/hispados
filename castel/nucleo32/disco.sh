@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
-# nucleo32/disco.sh IMAGEN [12|16|32|mbr] [oficina]
+# nucleo32/disco.sh IMAGEN [12|16|32|mbr] [oficina] [red]
 # Hace la imagen de un disco duro FAT para Hispa-Pentium, con el intérprete de
 # órdenes (ORDENES.BIN), los programas de usuario de ejemplo (HOLA.BIN, PRUEBA.BIN,
 # ECO.BIN, MALO.BIN, CLI.BIN, ESCRIBE.BIN, BUCLE.BIN), los del escritorio
@@ -11,7 +11,8 @@
 # partición (desde el sector 63). Con «oficina» detrás, también HVPRUN.BIN (el
 # ejecutor de los programas de Hispa Ventanas) y la carpeta OFICINA con los de
 # la oficina de Hispa-386 (FACTURAS.HVP, PLUMA.HVP, CUENTAS.HVP, MIRADOR.HVP):
-# nucleo32/hvprun/hacer.sh.
+# nucleo32/hvprun/hacer.sh. Con «red», también el servicio de red (RED.BIN) y
+# sus programas: IPCONFIG.BIN, PING.BIN y DESCARGA.BIN (la orden DESCARGAR).
 # La imagen se le da a QEMU como disco IDE: DISCO=IMAGEN nucleo32/probar.sh ...
 # Necesita python3, nasm, mkfs.fat (dosfstools) y mtools.
 set -e
@@ -19,7 +20,11 @@ export LC_ALL=C.UTF-8
 AQUI=$(dirname "$(readlink -f "$0")")
 IMG=${1:?uso: disco.sh IMAGEN [12|16|32|mbr]}
 CLASE=${2:-16}
-OFICINA=${3:-}
+OFICINA=
+RED=
+for o in "${@:3}"; do
+  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; esac
+done
 T=$(mktemp -d)
 trap 'rm -rf $T' EXIT
 # los programas: cada uno, con su nombre en el disco
@@ -58,6 +63,14 @@ mcopy -i $V $T/ESCRIBE.BIN $T/BUCLE.BIN $T/LOTE.BAT $T/SINFIN.BAT $T/VISTO.BAT $
 mcopy -i $V "$T/cancion_del_pirata.txt" "$T/Año nuevo.txt" ::LARGOS/
 mcopy -i $V $T/LARGO.TXT $T/PIRATA.TXT ::TEXTOS/
 mcopy -i $V $T/ECO.BIN ::TEXTOS/ECO2.BIN
+if [ "$RED" = red ]; then
+  for p in ured:RED uipconf:IPCONFIG uping:PING udescarga:DESCARGA; do
+    f=${p%%:*}; N=${p##*:}
+    python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $T/$f.asm > /dev/null
+    nasm -f bin $T/$f.asm -o $T/$N.BIN
+  done
+  mcopy -i $V $T/RED.BIN $T/IPCONFIG.BIN $T/PING.BIN $T/DESCARGA.BIN ::
+fi
 if [ "$OFICINA" = oficina ]; then
   bash $AQUI/hvprun/hacer.sh $T/of > /dev/null
   mcopy -i $V $T/of/HVPRUN.BIN ::

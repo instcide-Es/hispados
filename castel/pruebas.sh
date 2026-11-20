@@ -1151,11 +1151,11 @@ mira "el menú lanza la Consola" "^escritorio: lanzo .CONSOLA.BIN (la tarea [0-9
 miracap "la Consola: el intérprete de órdenes dentro de una ventana (un terminal): órdenes, un programa, Ctrl+C y la versión" e9 \
   negrita 140 90 152 98 Consola texto 120 116 132 520 "C:\\>eco hola desde la ventana" texto 120 116 132 520 "hola desde la ventana" \
   texto 120 116 132 520 "bucle: doy vueltas sin fin (Ctrl+C para acabar)" texto 120 116 132 520 "^C" \
-  texto 120 116 132 520 "Hispa-Pentium 0.7: un núcleo de 32 bits escrito en Castel." texto 290 572 300 580 Consola
+  texto 120 116 132 520 "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel." texto 290 572 300 580 Consola
 miracap "SALIR acaba el intérprete y la Consola se cierra (su ventana y su botón)" e10 notexto 130 80 160 100 Consola notexto 280 570 310 582 Consola \
   negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas"
 miracap "Configuración: lo que hay (pantalla, memoria), el teclado y el tapiz" e11 negrita 196 126 206 136 "Configuración" \
-  negrita 240 160 256 170 "Hispa-Pentium 0.7" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
+  negrita 240 160 256 170 "Hispa-Pentium 0.8" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
 miracap "el tapiz se cambia desde Configuración (a «Verde»), y se repinta todo el escritorio" e12 rgb 10 10 1F6B52 negrita 30 570 46 580 Inicio \
   negrita 196 126 206 136 "Configuración"
 miracap "el botón de cerrar acaba el Bloc de notas (sin cambios pendientes): ni ventana ni botón en la barra" e13 \
@@ -1233,7 +1233,7 @@ miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 178 16
   texto 180 196 188 204 ".."
 miracap "y dos clics en un texto lo abren con el Bloc de notas" b11 negrita 198 142 206 150 "\\LEEME.TXT - Bloc de notas" \
   texto 178 224 186 232 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
-miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.7" \
+miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.8" \
   texto 196 294 204 302 "Copyright (C) 2026 Carlos Sanz y contribuidores."
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
@@ -1281,7 +1281,7 @@ else ko "modo_grafico.py no deja bien la cabecera multiboot: $(tail -1 $G/mg.txt
 if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/grub/i386-pc ] && command -v parted > /dev/null; then
   if $AQUI/nucleo32/usb.sh $G/usb.img > $G/usb.txt 2>&1; then
     rm -f $G/monu
-    qemu-system-i386 -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb.sal -no-reboot -device qemu-xhci \
+    qemu-system-i386 -nic none -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb.sal -no-reboot -device qemu-xhci \
       -drive file=$G/usb.img,format=raw,if=none,id=u,snapshot=on -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
     QPID=$!
     monu() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$G/monu > /dev/null 2>&1; sleep "${2:-0.3}"; }
@@ -1304,7 +1304,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     else ko "en la memoria USB, el Bloc de notas no se lanza desde el menú:"; sed 's/^/        /' $G/cap.txt | head -3; fi
     # la entrada de 1024 x 600 (la tercera): el modo lo pide la cabecera de ESCRIT6.BIN
     rm -f $G/monu
-    qemu-system-i386 -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb6.sal -no-reboot -device qemu-xhci \
+    qemu-system-i386 -nic none -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$G/usb6.sal -no-reboot -device qemu-xhci \
       -drive file=$G/usb.img,format=raw,if=none,id=u,snapshot=on -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
     QPID=$!
     for ((i = 0; i < 40; i++)); do [ -S $G/monu ] && break; sleep 0.1; done
@@ -1319,7 +1319,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     MTOOLS_SKIP_CHECK=1 mtype -i $G/usb.img@@1M ::/boot/grub/grub.cfg > $G/grub.cfg 2> /dev/null
     if grep -q "a la medida de la pantalla" $G/grub.cfg && grep -q "^  set gfxpayload=auto$" $G/grub.cfg && grep -q "^  videoinfo$" $G/grub.cfg \
       && [ "$(grep -c "^  multiboot /ESCRIT" $G/grub.cfg)" = 6 ] && grep -q "multiboot /ESCRIT13.BIN" $G/grub.cfg \
-      && [ "$(grep -c "escritura=usb unidad=X registro" $G/grub.cfg)" = 7 ] && grep -q "multiboot /ESCRIT8.BIN escritorio sindisco sinusb$" $G/grub.cfg; then
+      && [ "$(grep -c "escritura=usb unidad=X registro" $G/grub.cfg)" = 7 ] && grep -q "multiboot /ESCRIT8.BIN escritorio sindisco sinusb sinred$" $G/grub.cfg; then
       ok "el menú de GRUB: el escritorio a 800 x 600, «a la medida de la pantalla» (gfxpayload=auto), a 1024 x 600, 1366 x 768 y 1024 x 768, uno sin tocar el USB ni los discos, y los modos de vídeo de la BIOS (videoinfo); las demás, con «escritura=usb unidad=X registro»"
     else ko "el menú de GRUB de la memoria USB no trae las entradas nuevas"; fi
   else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
@@ -1528,7 +1528,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
       case $hc in xhci) dev="qemu-xhci,id=u"; que="xHCI" ;; ehci) dev="usb-ehci,id=u"; que="EHCI" ;; esac
       cp $G/usb.img $N/g$hc.img
       rm -f $G/monu
-      qemu-system-i386 -m 64 -machine pc,i8042=off -display none -monitor unix:$G/monu,server,nowait -serial file:$N/g$hc.sal -no-reboot -device $dev \
+      qemu-system-i386 -nic none -m 64 -machine pc,i8042=off -display none -monitor unix:$G/monu,server,nowait -serial file:$N/g$hc.sal -no-reboot -device $dev \
         -drive file=$N/g$hc.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1 -device usb-kbd,bus=u.0 -device usb-mouse,bus=u.0 > /dev/null 2>&1 &
       QPID=$!
       monu() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$G/monu > /dev/null 2>&1; sleep "${2:-0.3}"; }
@@ -1556,7 +1556,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     # la sexta entrada, «sin tocar el USB ni los discos»: como la 0.5 (con el
     # teclado y el ratón PS/2, y los programas de la unidad en memoria)
     rm -f $G/monu
-    qemu-system-i386 -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$N/gsin.sal -no-reboot -device qemu-xhci \
+    qemu-system-i386 -nic none -m 64 -display none -monitor unix:$G/monu,server,nowait -serial file:$N/gsin.sal -no-reboot -device qemu-xhci \
       -drive file=$G/usb.img,format=raw,if=none,id=u,snapshot=on -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
     QPID=$!
     for ((i = 0; i < 40; i++)); do [ -S $G/monu ] && break; sleep 0.1; done
@@ -1696,7 +1696,7 @@ tabla() { parted -s $1 unit s print 2> /dev/null | sed -n '/^Partition Table/p; 
 # 1. un disco SATA en blanco: la bienvenida, la ayuda, elegir el disco, instalar
 truncate -s 300M $Z/blanco.img
 instala $Z/blanco.img blanco ":texto i1" ":tecla f1" ":texto i2" ":tecla ret" ":tecla ret" ":texto i3" ":tecla ret" ":texto i4" ":tecla ret" ":pausa 5" ":texto i5" ":tecla ret"
-if grep -q "Instalación de Hispa-Pentium 0.7" $Z/i1.txt && grep -q "Bienvenido a la instalación de Hispa-Pentium" $Z/i1.txt && grep -q "INTRO=Continuar   F1=Ayuda   F3=Salir" $Z/i1.txt \
+if grep -q "Instalación de Hispa-Pentium 0.8" $Z/i1.txt && grep -q "Bienvenido a la instalación de Hispa-Pentium" $Z/i1.txt && grep -q "INTRO=Continuar   F1=Ayuda   F3=Salir" $Z/i1.txt \
   && grep -q "La memoria USB de arranque no se toca" $Z/i1.txt && grep -q "^|   Ayuda$" $Z/i2.txt && grep -q "hay que confirmarlo dos veces" $Z/i2.txt; then
   ok "INSTALAR: la pantalla azul de bienvenida (el título, el pie con INTRO=Continuar, F1=Ayuda y F3=Salir) y la ayuda (F1)"
 else ko "INSTALAR: la bienvenida o la ayuda no salen como deben:"; sed 's/^/        /' $Z/i1.txt | head -8; fi
@@ -1845,7 +1845,7 @@ espera_menu() {    # espera (hasta 15 s) a que el menú de GRUB esté en la pant
 }
 desde_disco() {    # arranca solo del disco $1 (SATA); lo que sale, a $2
   rm -f $Z/mon
-  qemu-system-i386 -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$2 -no-reboot -rtc base=localtime \
+  qemu-system-i386 -nic none -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$2 -no-reboot -rtc base=localtime \
     -device ahci,id=sata -drive id=dsata,file=$1,format=raw,if=none -device ide-hd,drive=dsata,bus=sata.0,bootindex=1 > /dev/null 2>&1 &
   QPID=$!
   for ((i = 0; i < 40; i++)); do [ -S $Z/mon ] && break; sleep 0.1; done
@@ -1855,7 +1855,7 @@ for hc in xhci ehci; do
   cp $G/usb.img $Z/u$hc.img
   rm -f $Z/d$hc.img; truncate -s 2G $Z/d$hc.img
   rm -f $Z/mon
-  qemu-system-i386 -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$Z/i$hc.sal -no-reboot -rtc base=localtime -device $dev \
+  qemu-system-i386 -nic none -m 64 -display none -monitor unix:$Z/mon,server,nowait -serial file:$Z/i$hc.sal -no-reboot -rtc base=localtime -device $dev \
     -drive file=$Z/u$hc.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1 \
     -device ahci,id=sata -drive id=dsata,file=$Z/d$hc.img,format=raw,if=none -device ide-hd,drive=dsata,bus=sata.0,bootindex=2 > /dev/null 2>&1 &
   QPID=$!
@@ -1875,8 +1875,8 @@ for hc in xhci ehci; do
   wait $QPID 2> /dev/null; QPID=
   tr -d '\r' < $Z/i$hc.sal | iconv -f CP437 -t UTF-8 > $Z/i$hc.txt
   S=$Z/i$hc.txt
-  if grep -q "Instalar Hispa-Pentium 0.7 en el disco duro" $Z/m$hc.txt && grep -q "^| │\*Instalar Hispa-Pentium 0.7 en el disco duro" $Z/m2$hc.txt; then
-    ok "$que: el menú de la memoria USB trae la entrada «Instalar Hispa-Pentium 0.7 en el disco duro» (la última)"
+  if grep -q "Instalar Hispa-Pentium 0.8 en el disco duro" $Z/m$hc.txt && grep -q "^| │\*Instalar Hispa-Pentium 0.8 en el disco duro" $Z/m2$hc.txt; then
+    ok "$que: el menú de la memoria USB trae la entrada «Instalar Hispa-Pentium 0.8 en el disco duro» (la última)"
   else ko "$que: el menú de la memoria USB no trae la entrada de instalar:"; sed 's/^/        /' $Z/m2$hc.txt | head -14; fi
   mira "$que: arrancando de la memoria USB con «instalar», el núcleo lanza INSTALAR con lo que trae el cargador (la unidad M:) y se instala en el disco SATA" \
     "^usb: controladora $que " "^disco 0: QEMU HARDDISK, 2048 MB, sin FAT (SATA)\.$" "la del sistema, M:$" "^lanzo INSTALAR.BIN del disco" \
@@ -1931,7 +1931,7 @@ for hc in xhci ehci; do
     miracap "al aceptar: «Todo listo», con el saludo; y el reloj de la barra ya marca la hora puesta (el reloj del PC)" a3$hc \
       negrita 154 98 162 106 "Todo listo" negrita 112 176 120 184 "¡Hola, Carlos!" negrita 454 427 462 435 "Empezar" negrita 740 570 760 584 "07:45"
     miracap "el menú Inicio saluda con el nombre («Hola, Carlos») y dice la versión; LEEME.TXT, en los documentos" a4$hc \
-      negrita 54 194 62 202 "Hola, Carlos" texto 54 212 62 220 "Hispa-Pentium, versión 0.7" texto 208 279 216 287 "LEEME.TXT"
+      negrita 54 194 62 202 "Hola, Carlos" texto 54 212 62 220 "Hispa-Pentium, versión 0.8" texto 208 279 216 287 "LEEME.TXT"
     if grep -q "^asistente: guardado HISPA.INI (Carlos, Toshiba)$" $S && [ "$(tr -d '\r' < $Z/ini.txt | tr '\n' '|')" = "[hispa]|usuario=Carlos|equipo=Toshiba|teclado=es|modo=1024x600|" ] \
       && grep -q "^set modo=1024x600x32,1024x600,auto$" $Z/cfg.txt && [ "$(grep -c '^set modo=' $Z/cfg.txt)" = 1 ] && [ $sano = 0 ]; then
       ok "lo guardado: C:\\HISPA\\HISPA.INI (usuario, equipo, teclado y modo) y la medida de la pantalla en el menú de arranque (GRUB.CFG); el disco, sano"
@@ -1960,7 +1960,7 @@ for hc in xhci ehci; do
     espera_a "lanzo ORDENES.BIN" 40 $Z/b$hc.sal; sleep 1
     teclas v e r ret d i r spc backslash h i s p a backslash h i s p a dot i n i ret; sleep 1.5; textoz b1$hc
     monz quit 0.5; wait $QPID 2> /dev/null; QPID=
-    if grep -q "Hispa-Pentium 0.7: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
+    if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -8; fi
     # la oficina, en el disco instalado: el grupo «Oficina» del menú Inicio
