@@ -1833,7 +1833,28 @@ crecido en un módulo corto (`ajustes.cas`) y nueve llamadas. CASTEL compila el
 núcleo con sitio: de sus tablas usa 2.644 párrafos de 3.072 para los nombres,
 2.809 de 4.096 para los textos y 8.718 de 10.240, lo más, para el árbol.
 
-Con todo, `pruebas.sh` tiene ahora **423 comprobaciones** (369 con la 0.6, 13 de
+Con el servicio de ACPI (20/11/2026, sección 11, «Apagar de verdad y la
+batería») hay una parte más, la **11**: **20 comprobaciones** (`SOLO=acpi
+./pruebas.sh`, los errores y esa parte: unos tres minutos). Con la batería de
+mentira de las pruebas de Hispa-DOS (`tests/acpi/bateria-qemu.aml`, cargada
+con `-acpitable`; la CMOS que lee se cambia por el monitor de QEMU con la
+máquina parada un momento, orden `:monitor` de `probar.sh`): que el núcleo
+lanza el servicio y este lee las tablas y la batería; la pila en la bandeja,
+su recuadro (sin cable, con los minutos, la salud y los ciclos), que se pone
+al día al enchufar, que un clic lo quita, la batería gastada; «Apagar» con el
+Bloc de notas sin guardar (no se apaga y se dice) y otra vez (se apaga por
+ACPI: QEMU termina); reiniciar con PIIX4 (por el teclado) y con ICH9 (`q35`:
+apagar y reiniciar por el registro de la FADT); sin ACPI (`-no-acpi`: lo de
+antes); un sobremesa (sin pila, y apaga por ACPI); y que un programa
+cualquiera no puede usar las llamadas del servicio. Con ACPI.BIN en la
+memoria USB, sus programas de usuario como módulos son 10 (eran 9). La pasada
+entera del 20/11 dio **437 bien y 1 mal**: la imagen USB de la parte 8 no se
+pudo hacer en ese momento (`losetup` compartido con otras sesiones); repetida
+esa parte (`SOLO=32`), bien (y en esa repetición la hora del asistente, por
+el minuto que cambia con el VPS cargado, salió mal una vez; con `SOLO=07`,
+115 bien y 0 mal). En total, **443 comprobaciones**.
+
+Hasta la 0.7, `pruebas.sh` tenía **423 comprobaciones** (369 con la 0.6, 13 de
 la oficina de Hispa-386 dentro y 41 de instalar en el disco, dos de ellas de la
 oficina en el disco instalado; unos cuarenta y cinco minutos en el VPS). La
 última pasada entera (19-20/11/2026, con la 0.7 y la oficina juntas) dio **423
