@@ -122,6 +122,7 @@ módulo Fat
         cluster, índice: nat32                  ; el cluster donde cae la posición, y cuál es de la cadena
         ent_sector, ent_despl: nat32            ; dónde está su entrada: el sector (0: la raíz) y dentro de él
         vol: nat32                              ; el volumen donde está
+        perdido: bool                           ; su volumen se ha ido: todo da MAL hasta que se cierre
     fin
 
     ; lo que se encuentra al recorrer una carpeta
@@ -956,7 +957,7 @@ módulo Fat
     función está_abierto(sector: nat32, despl: nat32, escribiendo: bool): bool
         variable i: nat32
         para i desde 0 hasta MAX_ABIERTOS - 1 hacer
-            si abiertos[i].usado y abiertos[i].vol = en_uso y abiertos[i].ent_sector = sector y abiertos[i].ent_despl = despl y sector <> 0 entonces
+            si abiertos[i].usado y no abiertos[i].perdido y abiertos[i].vol = en_uso y abiertos[i].ent_sector = sector y abiertos[i].ent_despl = despl y sector <> 0 entonces
                 si abiertos[i].escribe o no escribiendo entonces devolver cierto fin
             fin
         fin
@@ -1021,7 +1022,7 @@ módulo Fat
     ;  Lo que se ve desde fuera
     ; -------------------------------------------------------------------------
     función vale(m: nat32): bool
-        devolver m < MAX_ABIERTOS y abiertos[m].usado y abiertos[m].dueño = actual.id
+        devolver m < MAX_ABIERTOS y abiertos[m].usado y no abiertos[m].perdido y abiertos[m].dueño = actual.id
     fin
 
     ; abre (o crea) en a lo que dice la ruta, de ese modo. Da 0, o por qué no.
@@ -1091,6 +1092,7 @@ módulo Fat
             si r = 0 entonces
                 serie := serie + 1
                 abiertos[i].serie := serie
+                abiertos[i].perdido := falso
                 abiertos[i].usado := cierto
                 abiertos[i].dueño := actual.id
                 abiertos[i].vol := v
@@ -1306,6 +1308,11 @@ módulo Fat
         si vale(m) entonces
             cierra(m)
             r := 0
+        sino si m < MAX_ABIERTOS y abiertos[m].usado y abiertos[m].perdido y abiertos[m].dueño = actual.id entonces
+            ; (el de un volumen que se ha ido: solo se suelta)
+            abiertos[m].usado := falso
+            abiertos[m].perdido := falso
+            r := 0
         sino
             r := MAL
         fin
@@ -1321,7 +1328,12 @@ módulo Fat
             si abiertos[i].usado y abiertos[i].dueño = dueño entonces
                 tomar(cerrojo)
                 si abiertos[i].usado y abiertos[i].dueño = dueño entonces
-                    cierra(i)
+                    si abiertos[i].perdido entonces
+                        abiertos[i].usado := falso
+                        abiertos[i].perdido := falso
+                    sino
+                        cierra(i)
+                    fin
                     n := n + 1
                 fin
                 soltar(cerrojo)
@@ -1609,7 +1621,7 @@ módulo Fat
         variable i, n: nat32
         n := 0
         para i desde 0 hasta MAX_ABIERTOS - 1 hacer
-            si abiertos[i].usado y abiertos[i].vol = v entonces n := n + 1 fin
+            si abiertos[i].usado y no abiertos[i].perdido y abiertos[i].vol = v entonces n := n + 1 fin
         fin
         devolver n
     fin
@@ -1698,12 +1710,43 @@ módulo Fat
     fin
 
     ; olvida el volumen v (su disco se ha escrito por debajo, sector a
-    ; sector: lo que se sabía de él ya no vale). Lo que quedara por escribir
-    ; de él NO se escribe; sus archivos abiertos dejan de valer.
+    ; sector: lo que se sabía de él ya no vale; o se ha desenchufado). Lo que
+    ; quedara por escribir de él NO se escribe; sus archivos abiertos dejan
+    ; de valer (lo que se haga con ellos da MAL, hasta que se cierren).
     público función desmontar(v: nat32)
-        variable i: nat32
         si v >= VOLÚMENES entonces devolver fin
         tomar(cerrojo)
+        desmonta(v)
+        soltar(cerrojo)
+    fin
+
+    ; «quitar con seguridad»: lo pendiente del volumen v va a su disco (las
+    ; entradas de los archivos que hay abiertos para escribir, la FAT, la
+    ; cuenta de libres de FAT32) y se le dice que lo asiente; luego, se
+    ; desmonta. Da cuántos archivos tenía abiertos.
+    público función retirar(v: nat32): nat32
+        variable i, n: nat32
+        si v >= VOLÚMENES entonces devolver 0 fin
+        tomar(cerrojo)
+        n := 0
+        si volúmenes[v].montado entonces
+            elige(v)
+            fallo := falso
+            para i desde 0 hasta MAX_ABIERTOS - 1 hacer
+                si abiertos[i].usado y no abiertos[i].perdido y abiertos[i].vol = v entonces
+                    si abiertos[i].escribe entonces pon_entrada(abiertos[i]) fin
+                    n := n + 1
+                fin
+            fin
+            asienta(cierto)
+        fin
+        desmonta(v)
+        soltar(cerrojo)
+        devolver n
+    fin
+
+    función desmonta(v: nat32)
+        variable i: nat32
         si en_uso = v entonces
             fat_sucio := falso
             info_sucio := falso
@@ -1715,9 +1758,8 @@ módulo Fat
         volúmenes[v].montado := falso
         volúmenes[v].info_sucio := falso
         para i desde 0 hasta MAX_ABIERTOS - 1 hacer
-            si abiertos[i].usado y abiertos[i].vol = v entonces abiertos[i].usado := falso fin
+            si abiertos[i].usado y abiertos[i].vol = v entonces abiertos[i].perdido := cierto fin
         fin
-        soltar(cerrojo)
     fin
 
     función iguales_once(a: puntero a byte, b: puntero a byte): bool

@@ -19,7 +19,11 @@
 ;   - los menús del botón secundario (emergente.cas): el del tapiz, el de
 ;     una ventana (en su título o en su botón de la barra de tareas:
 ;     Restaurar, Mover, Minimizar, Maximizar, Cerrar) y «Abrir» en un icono
-;     o en una opción del menú Inicio.
+;     o en una opción del menú Inicio;
+;   - el USB en caliente (desde la 0.8, usbcal.cas): con una memoria USB
+;     enchufada, su icono en la bandeja (un clic: «Quitar con seguridad»
+;     cada una), y los avisos de lo que se enchufa y se quita, en un globo
+;     encima de la bandeja que se va solo a los pocos segundos.
 ;
 ;  Todo son ventanas del gestor (ventanas.cas): la barra y el menú, sin
 ;  marco y por delante de las demás; los cuadros, con él. Una tarea del
@@ -35,11 +39,13 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
-    constante BANDEJA_ANCHO = 68
+    constante BANDEJA_ANCHO = 68                ; la bandeja con el reloj (con una memoria USB, más ancha: su icono)
+    constante ICONO_USB = 26
+    constante GLOBO_AL = 58
     constante BOTONES_X = 108
     constante BOTÓN_MÁXIMO = 160
     constante MENÚ_ANCHO = 330
@@ -91,6 +97,7 @@ módulo Escritorio
     constante ME_VENTANA = 2                    ; el de una ventana (menú_dato: cuál)
     constante ME_INICIO = 3                     ; «Abrir» en una opción del menú Inicio
     constante ME_ICONO = 4                      ; «Abrir» en un icono del tapiz
+    constante ME_USB = 5                        ; el del icono de las memorias USB de la bandeja
 
     tipo Opción = estructura                    ; una opción del menú Inicio
         x, ye, an, al: ent32
@@ -146,6 +153,14 @@ módulo Escritorio
     variable saludo: arreglo [40] de byte       ; «Hola, » y el nombre del usuario (el menú Inicio)
     variable renglón: arreglo [96] de byte
     público variable lanzados: nat32            ; los programas que ha lanzado el escritorio
+    ; ---- el USB: el icono de la bandeja y el globo de los avisos ----
+    variable bandeja: ent32 = 68                ; lo que mide ahora la bandeja
+    variable usb_letras: arreglo [8] de byte    ; las unidades de las memorias USB
+    variable n_usb: nat32
+    variable unidades_vistas: nat32
+    variable v_globo: nat32
+    variable globo_hasta: nat32
+    variable texto_globo: arreglo [80] de byte
 
     ; -------------------------------------------------------------------------
     ;  El tapiz
@@ -444,6 +459,18 @@ módulo Escritorio
         devolver 0
     fin
 
+    ; una memoria USB (14 x 22): el conector arriba y el cuerpo azul
+    función icono_memoria(ref l: Lienzo, x: ent32, yy: ent32)
+        rectángulo(l, x + 3, yy, 8, 7, 0x6F87A8)
+        rectángulo(l, x + 4, yy + 1, 6, 6, 0xE4ECF7)
+        rectángulo(l, x + 5, yy + 2, 1, 2, 0x6F87A8)
+        rectángulo(l, x + 8, yy + 2, 1, 2, 0x6F87A8)
+        redondeado(l, x, yy + 6, 14, 16, 3, 0x14408A, 0x14408A, TODAS)
+        redondeado(l, x + 1, yy + 7, 12, 14, 2, 0x5DA8F5, 0x2463C2, TODAS)
+        rectángulo(l, x + 4, yy + 11, 6, 1, BLANCO)
+        rectángulo(l, x + 4, yy + 14, 6, 1, BLANCO)
+    fin
+
     ; -------------------------------------------------------------------------
     ;  La barra de tareas
     ; -------------------------------------------------------------------------
@@ -470,10 +497,14 @@ módulo Escritorio
         disquete(valor(l), 7, 5, 24)
         texto_negrita(valor(l), 39, 10, "Inicio", 0x1B5E2A)
         texto_negrita(valor(l), 38, 9, "Inicio", BLANCO)
-        ; la bandeja, con el reloj
-        degradado(valor(l), an - BANDEJA_ANCHO, 2, BANDEJA_ANCHO, ALTO_BARRA - 2, BANDEJA_ARRIBA, BANDEJA_ABAJO)
-        rectángulo(valor(l), an - BANDEJA_ANCHO, 2, 1, ALTO_BARRA - 2, 0x1A56AC)
-        rectángulo(valor(l), an - BANDEJA_ANCHO + 1, 2, 1, ALTO_BARRA - 2, 0x9AD4FF)
+        ; la bandeja, con el reloj (y, si hay memorias USB, su icono)
+        n_usb := letras_usb(usb_letras)
+        bandeja := BANDEJA_ANCHO
+        si n_usb > 0 entonces bandeja := BANDEJA_ANCHO + ICONO_USB fin
+        degradado(valor(l), an - bandeja, 2, bandeja, ALTO_BARRA - 2, BANDEJA_ARRIBA, BANDEJA_ABAJO)
+        rectángulo(valor(l), an - bandeja, 2, 1, ALTO_BARRA - 2, 0x1A56AC)
+        rectángulo(valor(l), an - bandeja + 1, 2, 1, ALTO_BARRA - 2, 0x9AD4FF)
+        si n_usb > 0 entonces icono_memoria(valor(l), an - bandeja + 8, 6) fin
         ahora(f, h)
         d[0] := h >> 11
         d[1] := (h >> 5) yb 63
@@ -490,7 +521,7 @@ módulo Escritorio
             fin
         fin
         si n_botones > 0 entonces
-            ancho_botón := (an - BOTONES_X - BANDEJA_ANCHO - 6) div ent32(n_botones)
+            ancho_botón := (an - BOTONES_X - bandeja - 6) div ent32(n_botones)
             si ancho_botón > BOTÓN_MÁXIMO entonces ancho_botón := BOTÓN_MÁXIMO fin
             i := 0
             mientras i < n_botones hacer
@@ -781,6 +812,68 @@ módulo Escritorio
         escribir("escritorio: aviso: ", t, "\n")
     fin
 
+    ; el globo de los avisos del USB, encima de la bandeja: se va solo a los
+    ; pocos segundos (o con un clic)
+    función cierra_globo()
+        si v_globo = 0 entonces devolver fin
+        cerrar_ventana(v_globo, 0)
+        v_globo := 0
+    fin
+
+    función globo(t: puntero a byte)
+        variable l: puntero a Lienzo
+        variable an: ent32
+        cierra_globo()
+        an := ancho_texto(t) + 60
+        si an < 220 entonces an := 220 fin
+        si an > pantalla.ancho - 8 entonces an := pantalla.ancho - 8 fin
+        v_globo := crear_ventana("aviso", pantalla.ancho - an - 4, pantalla.alto - ALTO_BARRA - GLOBO_AL - 4, an, GLOBO_AL, SIN_MARCO ob ENCIMA, 0)
+        l := lienzo_de(v_globo)
+        si l = nulo entonces
+            v_globo := 0
+            devolver
+        fin
+        rectángulo(valor(l), 0, 0, an, GLOBO_AL, 0x1A56AC)
+        redondeado(valor(l), 1, 1, an - 2, GLOBO_AL - 2, 6, 0xFFFDF2, 0xF1EACB, TODAS)
+        icono_memoria(valor(l), 15, 17)
+        texto_negrita(valor(l), 44, 9, "USB", TINTA)
+        texto(valor(l), 44, 30, t, TINTA)
+        repintada(v_globo, 0, 0, an, GLOBO_AL)
+        globo_hasta := tics + 6 * HZ
+        escribir("escritorio: globo: ", t, "\n")
+    fin
+
+    ; el icono de las memorias USB de la bandeja: un menú con «Quitar con
+    ; seguridad» para cada una (en gris, la del sistema)
+    función menú_usb(x: ent32)
+        variable i, grises: nat32
+        variable d: arreglo [1] de nat32
+        renglón[0] := 0
+        grises := 0
+        i := 0
+        mientras i < n_usb y i < 3 hacer
+            si i > 0 entonces concatenar(renglón, "|") fin
+            d[0] := usb_letras[i]
+            formatear(dirección(renglón[longitud(renglón)]), 30, "Quitar con seguridad %c:", d)
+            si no quitable(Unidades.por_letra(usb_letras[i])) entonces grises := grises ob (nat32(1) << i) fin
+            i := i + 1
+        fin
+        si i > 0 entonces abrir_emergente(x, pantalla.alto - ALTO_BARRA, renglón, grises, 0, ME_USB) fin
+    fin
+
+    función atiende_globo()
+        variable e: Evento
+        mientras v_globo <> 0 y saca_evento(v_globo, 0, e) hacer
+            si e.clase = EV_RATÓN_BAJA entonces cierra_globo() fin
+        fin
+        si v_globo <> 0 y tics >= globo_hasta entonces cierra_globo() fin
+        si saca_aviso(texto_globo, 80) entonces globo(texto_globo) fin
+        si Unidades.cambios <> unidades_vistas entonces
+            unidades_vistas := Unidades.cambios
+            pinta_barra()
+        fin
+    fin
+
     función abre_apagar()
         variable l: puntero a Lienzo
         si v_apagar <> 0 entonces
@@ -1066,6 +1159,9 @@ módulo Escritorio
                 si ent32(e.a) < INICIO_ANCHO entonces
                     ; «Inicio»: abre el menú (si no se acaba de cerrar con este mismo clic)
                     si no menú_abierto y tics - menú_cerrado_en > 3 entonces abre_menú() fin
+                sino si n_usb > 0 y ent32(e.a) >= pantalla.ancho - bandeja y ent32(e.a) < pantalla.ancho - BANDEJA_ANCHO entonces
+                    ; el icono de las memorias USB
+                    menú_usb(ent32(e.a))
                 sino si ent32(e.a) >= BOTONES_X y ancho_botón > 0 entonces
                     n := (ent32(e.a) - BOTONES_X) div ancho_botón
                     si n < ent32(n_botones) entonces
@@ -1148,6 +1244,8 @@ módulo Escritorio
                 si opción = 0 entonces haz(menú_acción, menú_dato) fin
             caso ME_ICONO:
                 si opción = 0 y menú_dato < n_iconos entonces haz(iconos[menú_dato].acción, 0) fin
+            caso ME_USB:
+                si opción < n_usb y opción < 3 entonces quitar(usb_letras[opción]) fin
         fin
     fin
 
@@ -1182,6 +1280,7 @@ módulo Escritorio
             atiende_cuadro(v_config)
             atiende_cuadro(v_aviso)
             atiende_cuadro(v_acerca)
+            atiende_globo()
             si Ventanas.cambios <> cambios_vistos entonces pinta_barra() fin
             ; cada segundo: el reloj (si ha cambiado el minuto) y las tareas acabadas
             si tics div HZ <> segundo_visto entonces
@@ -1252,6 +1351,9 @@ módulo Escritorio
         fin
         si no prepara_ratón(pantalla.ancho, pantalla.alto) entonces escribir("escritorio: no hay ratón PS/2 (se sigue, con el teclado)\n") fin
         alto_barra := ALTO_BARRA
+        ; (los avisos del USB de antes de que hubiera escritorio, fuera)
+        mientras saca_aviso(texto_globo, 80) hacer fin
+        unidades_vistas := Unidades.cambios
         pinta_tapiz()
         v_barra := crear_ventana("barra", 0, pantalla.alto - ALTO_BARRA, pantalla.ancho, ALTO_BARRA, SIN_MARCO ob ENCIMA, 0)
         v_menú := crear_ventana("menú", 0, pantalla.alto - ALTO_BARRA - MENÚ_ALTO, MENÚ_ANCHO, MENÚ_ALTO, SIN_MARCO ob ENCIMA ob OCULTA ob REDONDA, 0)

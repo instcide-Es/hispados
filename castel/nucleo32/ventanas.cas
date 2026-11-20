@@ -64,6 +64,7 @@ módulo Ventanas
     público constante EV_SALE = 9               ; el ratón ya no está encima
     público constante EV_MENÚ = 10              ; se ha cerrado el menú que pidió: a, la opción elegida (desde 0; SIN_ELEGIR si ninguna); b, su etiqueta
     público constante EV_MENÚ_VENTANA = 11      ; (a la del fondo) el botón secundario en el título de la ventana a, en el punto (b, c) de la pantalla
+    público constante EV_UNIDADES = 12          ; (a todas) ha aparecido o desaparecido una unidad (una memoria USB)
     público constante SIN_ELEGIR = 0xFFFFFFFF
     ; en «c» de los sucesos del ratón: abajo, los botones; luego las teclas de
     ; cambio (c >> 8: 1, Mayús; 2, Control) y las veces seguidas (c >> 16: 1, 2 o 3)
@@ -104,7 +105,7 @@ módulo Ventanas
 
     constante COLA_EV = 32
     constante LEJOS = 8192                      ; ninguna medida de un dibujo pasa de aquí
-    constante DEL_NÚCLEO = 9                    ; las ventanas que se guardan para el núcleo (la barra, el menú, el fondo, los cuadros, un menú emergente)
+    constante DEL_NÚCLEO = 10                   ; las ventanas que se guardan para el núcleo (la barra, el menú, el fondo, los cuadros, un menú emergente, el globo de los avisos)
 
     público tipo Ventana = estructura
         usada: bool
@@ -791,6 +792,17 @@ módulo Ventanas
         ventanas[i].sal := ventanas[i].sal + 1
         soltar(cerrojo)
         devolver cierto
+    fin
+
+    ; un suceso para todas las ventanas de los programas (EV_UNIDADES, sin datos)
+    público función a_todas(clase: nat32)
+        variable i: ent32
+        si no hay_pantalla entonces devolver fin
+        tomar(cerrojo)
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].dueño <> 0 entonces pon_evento(i, clase, 0, 0, 0) fin
+        fin
+        soltar(cerrojo)
     fin
 
     ; cambia el nombre de la ventana (el de su título y el de su botón)

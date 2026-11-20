@@ -10,7 +10,11 @@
 ;  no se mezclan: la pantalla tiene su cerrojo); con «fuera», toca memoria que
 ;  ya ha devuelto (y el núcleo lo acaba); con «pozo», se llama a sí mismo sin
 ;  fin hasta agotar su pila (y el núcleo lo acaba); con «solo», duerme un rato, dice una
-;  línea y acaba (es el que se deja sin esperar).
+;  línea y acaba (es el que se deja sin esperar); con «abierto RUTA», abre ese
+;  archivo para escribir, lee un trozo, espera una tecla (mientras, se puede
+;  desenchufar la memoria USB donde está) y vuelve a leer, a escribir y a
+;  cerrar: dice lo que da cada cosa (con la memoria quitada, errores; y el
+;  programa sigue).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UPrueba
@@ -188,6 +192,27 @@ módulo UPrueba
         imprimir2("hijos: los dos ruidosos han acabado, con los códigos %u y %u\n", ca, cb)
     fin
 
+    ; «abierto RUTA»: un archivo abierto en una memoria que se desenchufa
+    función abierto()
+        variable m, r: nat32
+        m := abrir_para(quién, PARA_ESCRIBIR)
+        si es_error(m) entonces
+            escribir("abierto: no se puede abrir ", dirección(quién[0]), ": ", texto_error(m), "\n")
+            devolver
+        fin
+        r := leer(m, trozo, 16)
+        imprimir1("abierto: leídos %u octetos; pulse una tecla\n", r)
+        tecla()
+        r := leer(m, trozo, 16)
+        si es_error(r) entonces escribir("abierto: al leer otra vez: ", texto_error(r), "\n") sino imprimir1("abierto: al leer otra vez, %u octetos\n", r) fin
+        r := escribir_archivo(m, "más", 3)
+        si es_error(r) entonces escribir("abierto: al escribir: ", texto_error(r), "\n") sino imprimir1("abierto: escritos %u octetos\n", r) fin
+        cerrar(m)
+        m := abrir(quién)
+        si es_error(m) entonces escribir("abierto: al abrirlo otra vez: ", texto_error(m), "\n") sino cerrar(m) fin
+        escribir("abierto: sigo en marcha, y acabo\n")
+    fin
+
     función principal(): byte
         variable p: puntero a byte
         variable n: nat32
@@ -207,6 +232,10 @@ módulo UPrueba
             escribir("pozo: una función que se llama a sí misma sin fin...\n")
             n := pozo(0)
             escribir("pozo: he salido con ", n, " (esto no tenía que salir)\n")
+            devolver 0
+        fin
+        si iguales(modo, "abierto") entonces
+            abierto()
             devolver 0
         fin
         si iguales(modo, "fuera") entonces

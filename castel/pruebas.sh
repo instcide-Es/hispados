@@ -74,12 +74,22 @@
 #      HISPA.INI y el saludo del menú Inicio; la memoria USB, intacta.
 #      Y la oficina en el disco instalado (C:\OFICINA y C:\HISPA\HVPRUN.BIN):
 #      desde el menú Inicio y desde Mi equipo.
+#  11. El USB en caliente (usbcal.cas): con el monitor de QEMU (device_add y
+#      device_del), en xHCI y EHCI (y un teclado por las UHCI compañeras):
+#      una memoria que se enchufa sale como W: y se lee; escribir y «quitar
+#      con seguridad» la deja sana (fsck.fat); quitarla a lo bruto con un
+#      archivo abierto no cuelga nada (el programa ve errores y sigue);
+#      teclados, ratones y un concentrador enchufados y quitados en marcha;
+#      la memoria del sistema no se deja quitar; y en el escritorio, el
+#      globo de los avisos, el icono de la bandeja con su menú y Mi equipo,
+#      que se pone al día solo y tiene «Quitar con seguridad».
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat. El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
 #   SOLO=32 ./pruebas.sh          la primera, la octava y la novena (lo de 32 bits)
 #   SOLO=06 ./pruebas.sh          la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
 #   SOLO=07 ./pruebas.sh          la primera y la décima (instalar en el disco: la 0.7)
+#   SOLO=08 ./pruebas.sh          la primera y la undécima (el USB en caliente)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
@@ -142,7 +152,7 @@ fi
 
 # SOLO=32: solo la primera parte, la octava y la novena (los 32 bits);
 # SOLO=06: solo la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
-if [ "${SOLO:-}" != 32 ] && [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ]; then
+if [ "${SOLO:-}" != 32 ] && [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ] && [ "${SOLO:-}" != 08 ]; then
 # -------------------------------------------------------- 2. compilar todo
 echo "== Castel: los ejemplos compilan =="
 EJEMPLOS=
@@ -540,7 +550,7 @@ else
   # los dos módulos que usan: todos juntos ya no caben con lo demás)
   for f in $AQUI/nucleo32/*.cas; do
     case "$(basename $f .cas)" in
-      uhci|unidades|usb|usbalm|usbbase|usbhid|usuario) [ $tanda = 2 ] || continue ;;
+      uhci|unidades|usb|usbalm|usbbase|usbcal|usbhid|usuario) [ $tanda = 2 ] || continue ;;
       u[a-z]*|llamadas|barramenu) [ $tanda = 3 ] || continue ;;
       *) [ $tanda = 2 ] || continue ;;
     esac
@@ -700,7 +710,7 @@ fi
 echo "== Castel de 32 bits: «modelo núcleo» (QEMU -kernel) y «modelo hispa32» (HW32) =="
 P=$T/p32
 mkdir $P
-if [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ]; then
+if [ "${SOLO:-}" != 06 ] && [ "${SOLO:-}" != 07 ] && [ "${SOLO:-}" != 08 ]; then
 # los ejemplos de 16 bits que no tocan el DOS, compilados como núcleo de 32
 # bits: tienen que escribir lo mismo
 MISMOS="arreglos bucles cuenta estruct mezcla nivel pares pruebas refs saltos saludo textos modulos"
@@ -1337,7 +1347,7 @@ fi   # SOLO=06, SOLO=07
 G=$P/graf
 N=$P/n06
 mkdir -p $G $N
-if [ "${SOLO:-}" != 07 ]; then
+if [ "${SOLO:-}" != 07 ] && [ "${SOLO:-}" != 08 ]; then
 echo "== Hispa-Pentium 0.6: los discos SATA (AHCI), las unidades con letra, el permiso de escritura por disco =="
 hechos=1
 for c in 16 32 mbr; do
@@ -1648,6 +1658,7 @@ fi   # SOLO=07
 # del disco (GRUB en el MBR y en el hueco de delante de la partición) y el
 # asistente del primer arranque (uasiste.cas). Lo que se instala (el núcleo,
 # los programas, BOOT.IMG y CORE.IMG) sale de la memoria USB que hace usb.sh.
+if [ "${SOLO:-}" != 08 ]; then
 echo "== Hispa-Pentium 0.7: instalar en el disco duro (INSTALAR), arrancar de él y el asistente del primer arranque =="
 if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/grub/i386-pc ] && command -v parted > /dev/null; then
 Z=$P/n07
@@ -2010,6 +2021,103 @@ else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba la instalación en el disco)"
 fi
+fi   # SOLO=08
+
+# ------------------------------------------------- 11. El USB en caliente
+# Lo que se enchufa y se desenchufa con el equipo en marcha (usbcal.cas),
+# por el monitor de QEMU: «:monitor drive_add ...» y «:monitor device_add
+# usb-storage...» enchufan una memoria; «:monitor device_del ...», la quitan.
+echo "== Hispa-Pentium 0.8: el USB en caliente (enchufar y quitar memorias, teclados, ratones y concentradores en marcha) =="
+Q=$P/n08
+mkdir -p $Q $G
+[ -f $P/d16.img ] || $AQUI/nucleo32/disco.sh $P/d16.img 16 > $P/disco16.txt 2>&1
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $Q/semilla.asm > /dev/null 2>&1 && nasm -f bin $Q/semilla.asm -o $Q/SEMILLA.BIN
+# una memoria con un texto, y otras vacías (FAT16, 16 MB)
+memoria() { rm -f $1; dd if=/dev/zero of=$1 bs=1M count=16 status=none; mkfs.fat -F 16 -n ${2:-MEMORIA} $1 > /dev/null; }
+memoria $Q/m1.img MEMORIA1
+printf 'hola desde la memoria enchufada\r\n' > $Q/HOLA.TXT
+MTOOLS_SKIP_CHECK=1 mcopy -i $Q/m1.img $Q/HOLA.TXT ::HOLA.TXT
+# 1 y 2. en xHCI y en EHCI, con el intérprete de órdenes (del disco IDE) y sin
+# teclado ni ratón PS/2: un teclado que llega (y se va, y vuelve); una
+# memoria que se lee y que se quita a lo bruto con un archivo abierto (PRUEBA
+# abierto); otra, que se escribe y se quita con seguridad; y en el xHCI, un
+# concentrador con un teclado y un ratón detrás, que se quita entero
+for hc in xhci ehci; do
+  case $hc in xhci) dev="qemu-xhci,id=u"; que="xHCI" ;; ehci) dev="usb-ehci,id=u"; que="EHCI" ;; esac
+  cp $P/d16.img $Q/c$hc.img; cp $Q/m1.img $Q/a$hc.img; memoria $Q/b$hc.img MEMORIA2
+  CONC=(":pausa 0.1")
+  [ $hc = xhci ] && CONC=(":monitor device_del k1" ":pausa 2" ":monitor device_add usb-hub,bus=u.0,port=3,id=h1" ":pausa 2" ":monitor device_add usb-kbd,bus=u.0,port=3.1,id=k2" \
+    ":monitor device_add usb-mouse,bus=u.0,port=3.2,id=r2" ":pausa 3" "eco dos" ":monitor device_del h1" ":pausa 2" ":monitor device_add usb-kbd,bus=u.0,id=k1" ":pausa 2")
+  ESCRIBE=1 DISCO=$Q/c$hc.img MODULOS= MAQUINA=pc,i8042=off ARRANQUE=ordenes QEMU_MAS="-device $dev" \
+    $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 1" ":monitor device_add usb-kbd,bus=u.0,id=k1" ":pausa 2" "eco uno" \
+    ":monitor drive_add 0 if=none,id=ma,file=$Q/a$hc.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=ma,id=mema" ":pausa 3" \
+    "type w:\\hola.txt" "prueba abierto w:\\hola.txt" ":pausa 1" ":monitor device_del mema" ":pausa 2" ":tecla ret" ":pausa 1" "dir w:" \
+    "${CONC[@]}" ":monitor drive_add 0 if=none,id=mb,file=$Q/b$hc.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=mb,id=memb" ":pausa 3" \
+    "copy textos\\largo.txt w:\\largo.txt" "md w:\\nueva" "copy leeme.txt w:\\nueva\\leeme.txt" "eco tres" salir "quitar w" "disco" \
+    ":monitor device_del memb" ":pausa 2" usb apagar > $Q/$hc.sal 2>&1
+  S=$Q/$hc.sal
+  mira "$que: un teclado USB enchufado con el intérprete en marcha teclea al momento" \
+    "usb: se enchufa el aparato 0, 0627:0001, velocidad [a-z]*, en el puerto [0-9] ($que); teclado$" "eco uno$" "^uno$"
+  mira "$que: una memoria enchufada en marcha sale como W: (y el aviso) y se lee" \
+    "($que); almacenamiento$" "^disco 1: QEMU    QEMU HARDDISK, 16 MB (USB), recién enchufado, W: (FAT16)\.$" "usb: aviso: Memoria USB conectada: W:$" \
+    "^hola desde la memoria enchufada$"
+  mira "$que: quitada a lo bruto con un archivo abierto: el programa ve errores y sigue, y la unidad ya no está" \
+    "^abierto: leídos 16 octetos; pulse una tecla$" "usb: aviso: Memoria USB desconectada sin «quitar con seguridad»: W:$" "^abierto: al leer otra vez: el disco falla$" \
+    "^abierto: al escribir: el disco falla$" "^abierto: al abrirlo otra vez: no hay disco" "^abierto: sigo en marcha, y acabo$" "^No puedo abrir w:: no hay disco"
+  if [ $hc = xhci ]; then
+    mira "$que: un concentrador enchufado en marcha, con un teclado y un ratón detrás: el teclado teclea; y al quitarlo se va todo, y otro teclado vuelve a ir" \
+      "usb: se desenchufa el aparato 0$" ": concentrador de 8 puertos$" "en el puerto 1 del concentrador [0-9]*; teclado$" "en el puerto 2 del concentrador [0-9]*; ratón$" \
+      "usb: 1 teclados, 1 ratones\.$" "^dos$" "usb: 1 teclados, 0 ratones\.$" "^tres$"
+  else
+    mira "$que: el teclado sigue tecleando después de quitar y enchufar memorias" "^tres$"
+  fi
+  mira "$que: la otra memoria (W: otra vez) se escribe y se quita con seguridad: «Ya puede quitar la memoria W:»" \
+    "^ *1 archivo(s) copiado(s)\.$" "^> quitar w$" "^disco 1: quitado con seguridad\.$" "usb: aviso: Ya puede quitar la memoria W:$"
+  saca $Q/b$hc.img LARGO.TXT $Q/largo$hc.txt; saca $Q/b$hc.img NUEVA/LEEME.TXT $Q/leeme$hc.txt
+  if sano $Q/b$hc.img && sano $Q/a$hc.img && [ "$(wc -c < $Q/largo$hc.txt 2> /dev/null)" = 17600 ] && [ -s $Q/leeme$hc.txt ] && [ "$(grep -c "sin «quitar con seguridad»" $S)" = 1 ]; then
+    ok "$que: lo escrito está en la memoria quitada con seguridad, y las dos quedan sanas (fsck.fat)"
+  else ko "$que: la memoria quitada con seguridad no queda bien:"; sed 's/^/        /' $P/fsck.txt | head -6; fi
+done
+# 3. un teclado de USB 1.1 enchufado en un EHCI con compañeras: va a la UHCI
+cp $P/d16.img $Q/cu.img
+ESCRIBE=1 DISCO=$Q/cu.img MODULOS= MAQUINA=pc,i8042=off ARRANQUE=ordenes QEMU_MAS="-device ich9-usb-ehci1,id=u -device ich9-usb-uhci1,masterbus=u.0,firstport=0 -device ich9-usb-uhci2,masterbus=u.0,firstport=2" \
+  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 1" ":monitor device_add usb-kbd,bus=u.0,port=1,usb_version=1,id=k1" ":pausa 3" "eco uno" \
+  ":monitor device_del k1" ":pausa 2" ":monitor device_add usb-kbd,bus=u.0,port=3,usb_version=1,id=k2" ":pausa 3" "eco dos" salir apagar > $Q/uhci.sal 2>&1
+S=$Q/uhci.sal
+mira "UHCI: un teclado de USB 1.1 enchufado en marcha en un puerto del EHCI pasa a su compañera y teclea; quitado y enchufado en otro, también" \
+  "usb: se enchufa el aparato 0, 0627:0001, velocidad plena, en el puerto 1 (UHCI); teclado$" "^uno$" "usb: se desenchufa el aparato 0$" "^dos$"
+# 4. la memoria del sistema (X:, de la que se ha arrancado) no se deja quitar
+cp $P/d16.img $Q/x.img
+ESCRIBE=1 MODULOS= ARRANQUE="escritura=usb unidad=X" QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/x.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu" \
+  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN "quitar x" "quitar c" "disco" apagar > $Q/x.sal 2>&1
+S=$Q/x.sal
+mira "la memoria del sistema (X:) no se deja quitar con seguridad: lo dice, y sigue montada" \
+  "usb: aviso: X: es la memoria del sistema: no se puede quitar$" "usb: aviso: No hay unidad C:$" "^unidades: X: (disco 0, USB, FAT16); la del sistema, X:$"
+# 5. en el escritorio (EHCI, con el teclado USB y sin ratón): un ratón que
+# llega abre Mi equipo; una memoria que llega sale en Mi equipo (que se pone
+# al día solo), en el globo de los avisos y en la bandeja; «Quitar con
+# seguridad» desde Mi equipo (botón secundario en la unidad) y desde la bandeja
+cp $P/d16.img $Q/ce.img; cp $Q/m1.img $Q/ea.img; memoria $Q/eb.img MEMORIA3
+CAPTURAS=$G ESCRIBE=1 DISCO=$Q/ce.img MODULOS= MAQUINA=pc,i8042=off ARRANQUE="escritorio escritura" QEMU_MAS="-device usb-ehci,id=u -device usb-kbd,bus=u.0" \
+  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":monitor device_add usb-mouse,bus=u.0,id=r1" ":pausa 2" ":doble 62 30" ":pausa 2" \
+  ":monitor drive_add 0 if=none,id=ma,file=$Q/ea.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=ma,id=mema" ":pausa 2.5" ":captura u1" \
+  ":clicd 300 240" ":pausa 0.5" ":captura u2" ":clic 360 281" ":pausa 1.5" ":captura u3" ":monitor device_del mema" ":pausa 2" \
+  ":monitor drive_add 0 if=none,id=mb,file=$Q/eb.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=mb,id=memb" ":pausa 2.5" ":raton 600 450" ":pausa 6" \
+  ":clic 720 583" ":pausa 0.5" ":captura u4" ":clic 680 549" ":pausa 1.5" ":captura u5" ":monitor device_del memb" ":pausa 2" > $Q/escritorio.sal 2>&1
+S=$Q/escritorio.sal
+mira "escritorio: un ratón USB enchufado en marcha mueve la flecha y abre Mi equipo con dos clics" \
+  "usb: se enchufa el aparato 1, 0627:0001, velocidad alta, en el puerto 2 (EHCI); ratón$" "^escritorio: lanzo .EQUIPO.BIN"
+miracap "escritorio: la memoria que llega sale en el globo de los avisos, en la bandeja (su icono) y en Mi equipo, que se pone al día solo" u1 \
+  texto 570 532 590 548 "Memoria USB conectada: W:" negrita 570 510 590 526 "USB" negrita 160 210 175 225 "Unidad W:" rgb 721 585 2463C2 40
+miracap "escritorio: Mi equipo, botón secundario en la memoria: «Abrir» y «Quitar con seguridad»" u2 texto 305 270 320 290 "Quitar con seguridad"
+miracap "escritorio: quitada con seguridad desde Mi equipo: el globo «Ya puede quitar la memoria W:», y en Mi equipo ya no está" u3 \
+  texto 540 532 600 548 "Ya puede quitar la memoria W:" texto 90 392 110 410 "Ya puede quitar la memoria W:." notexto 150 140 200 400 "Unidad W:"
+miracap "escritorio: el icono de la bandeja saca «Quitar con seguridad W:» de la otra memoria" u4 texto 580 535 600 560 "Quitar con seguridad W:"
+mira "escritorio: y desde la bandeja también se quita con seguridad; las dos memorias quedan sanas" \
+  "^escritorio: globo: Ya puede quitar la memoria W:$" "^disco 1: quitado con seguridad\.$"
+if [ "$(grep -c "^escritorio: globo: Ya puede quitar la memoria W:$" $S)" = 2 ] && ! grep -q "sin «quitar con seguridad»" $S && sano $Q/ea.img && sano $Q/eb.img; then
+  ok "escritorio: las dos memorias se han quitado con seguridad (ninguna «a lo bruto») y quedan sanas (fsck.fat)"
+else ko "escritorio: las memorias no se han quitado con seguridad, o no quedan sanas:"; grep "globo\|aviso" $S | sed 's/^/        /' | head -8; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 echo "== $nok bien, $fail mal =="

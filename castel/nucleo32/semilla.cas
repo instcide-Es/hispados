@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -467,6 +467,15 @@ módulo Semilla
         lanza(palabra1, args)
     fin
 
+    ; «quitar W»: quitar con seguridad la memoria USB de la unidad W:
+    función orden_quitar()
+        si no palabra(línea, 1, palabra1, 40) entonces
+            escribir("¿qué unidad? (quitar W: quitar con seguridad la memoria USB de la unidad W:)\n")
+            devolver
+        fin
+        Usbcal.quitar(palabra1[0])
+    fin
+
     ; lo que se dice de cada unidad: su letra, de dónde es y su FAT
     función enseña_unidades()
         variable u, letra: nat32
@@ -622,6 +631,8 @@ módulo Semilla
                 dd[1] := ratones
                 dd[2] := Usbalm.cuántas
                 apunta("usb: %u teclados, %u ratones, %u memorias.\n", dd)
+                ; y lo que se enchufe y se desenchufe a partir de ahora
+                Usbcal.prepara()
             fin
         fin
         n := 0
@@ -729,7 +740,7 @@ módulo Semilla
                 escribir("órdenes: ayuda hora memoria mapa paginas monton tareas programas ejecutar N\n")
                 escribir("         toca turnos dormir estropear teclas fallo cero apagar\n")
                 escribir("         disco dir [CARPETA] lanzar PROGRAMA.BIN [ARGUMENTOS] ordenes\n")
-                escribir("         teclado es, teclado us, escritorio, usb\n")
+                escribir("         teclado es, teclado us, escritorio, usb, quitar UNIDAD\n")
             sino si es("hora") entonces
                 escribir("llevo ", tics div HZ, " segundos y ", tics mod HZ, " centésimas encendido\n")
             sino si es("memoria") entonces
@@ -773,6 +784,8 @@ módulo Semilla
             sino si es("usb") entonces
                 Usb.enseña()
                 enseña_estado()
+            sino si iguales(palabra1, "quitar") entonces
+                orden_quitar()
             sino si es("escritorio") entonces
                 si arranca() = 0 entonces escribir("no se puede poner en marcha el escritorio\n") fin
             sino si es("fallo") entonces

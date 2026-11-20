@@ -71,7 +71,7 @@ módulo Ehci
         mem: nat32                              ; su página (dirección física, que es la que se ve)
         lista: nat32                            ; la lista periódica (0: aún no hay tuberías)
         primera: nat32                          ; el enlace a la primera tubería de la cadena (1: ninguna)
-        tubos: nat32
+        tubos: nat32                            ; las que están en uso: un bit cada una
         cedidos: nat32                          ; puertos cedidos a las compañeras
     fin
 
@@ -199,6 +199,18 @@ módulo Ehci
         devolver r
     fin
 
+    ; ¿ha cambiado lo enchufado en el puerto p desde la última vez? (los
+    ; avisos de cambio quedan borrados; los de un puerto cedido a la
+    ; compañera también: lo suyo lo ve ella)
+    público función puerto_cambio(c: nat32, p: nat32): bool
+        variable d, v: nat32
+        d := PORTSC + (p - 1) * 4
+        v := lee(c, d)
+        si v yb CAMBIOS = 0 entonces devolver falso fin
+        pon(c, d, (v yb nob CAMBIOS) ob (v yb CAMBIOS))
+        devolver v yb 2 <> 0 y v yb 0x2000 = 0
+    fin
+
     ; reinicia el puerto p. Da la velocidad de lo que hay (V_ALTA), o 0 si no
     ; hay nada o no es de alta velocidad (entonces se cede a la compañera).
     público función puerto_reinicia(c: nat32, p: nat32): nat32
@@ -293,8 +305,9 @@ módulo Ehci
     fin
 
     ; hace los n qTD preparados por la cola de trabajo y espera (hasta «cs»
-    ; centésimas). Da 0, T_PARADA o T_FALLO.
-    función ejecuta(c: nat32, n: nat32, cs: nat32): ent32
+    ; centésimas). Da 0, T_PARADA o T_FALLO (en el acto si el aparato a se
+    ; ha desenchufado).
+    función ejecuta(c: nat32, ref a: Aparato, n: nat32, cs: nat32): ent32
         variable q, t: puntero a nat32
         variable tope, vueltas, i, e: nat32
         q := puntero(ehcis[c].mem + D_TRABAJO)
@@ -321,7 +334,7 @@ módulo Ehci
             ; (si los datos han llegado cortos, la cola salta al estado: el
             ; último puede seguir activo solo hasta que acabe)
             vueltas := vueltas + 1
-            si tics > tope o vueltas > 100000000 entonces
+            si tics > tope o vueltas > 100000000 o a.ido entonces
                 aborta(c)
                 devolver T_FALLO
             fin
@@ -360,7 +373,7 @@ módulo Ehci
             pon_qtd(t, PID_ENTRA, 1, 0, 0, 1)
             m := 2
         fin
-        r := ejecuta(c, nat32(m), 100)
+        r := ejecuta(c, a, nat32(m), 100)
         si r <> 0 entonces devolver r fin
         si n = 0 entonces devolver 0 fin
         t := puntero(base + 0x40)
@@ -381,7 +394,7 @@ módulo Ehci
         pid := PID_SALE
         si e.número yb 0x80 <> 0 entonces pid := PID_ENTRA fin
         pon_qtd(t, pid, e.alterna yb 1, datos, n, 1)
-        r := ejecuta(c, 1, cs)
+        r := ejecuta(c, a, 1, cs)
         si r <> 0 entonces devolver r fin
         e.alterna := t[2] >> 31                 ; el testigo siguiente queda en el qTD
         devolver ent32(n - ((t[2] >> 16) yb 0x7FFF))
@@ -395,7 +408,10 @@ módulo Ehci
     público función tubo_abre(c: nat32, ref a: Aparato, ref e: Extremo): nat32
         variable q, l: puntero a nat32
         variable i, k, b: nat32
-        si ehcis[c].tubos >= MAX_TUBOS entonces devolver NINGUNA fin
+        ; (una libre: la de una que se ha cerrado, o una nueva)
+        i := 0
+        mientras i < MAX_TUBOS y ehcis[c].tubos yb (nat32(1) << i) <> 0 hacer i := i + 1 fin
+        si i >= MAX_TUBOS entonces devolver NINGUNA fin
         si ehcis[c].lista = 0 entonces
             ; la primera: la lista periódica, vacía
             ehcis[c].lista := reservar_marco()
@@ -405,7 +421,6 @@ módulo Ehci
             pon(c, PERIODICLISTBASE, ehcis[c].lista)
             pon(c, USBCMD, lee(c, USBCMD) ob 0x10)
         fin
-        i := ehcis[c].tubos
         b := ehcis[c].mem + D_TUBOS + i * 0x100
         llenar(puntero(b), 0x100, 0)
         q := puntero(b)
@@ -421,8 +436,34 @@ módulo Ehci
         ehcis[c].primera := b ob 2
         l := puntero(ehcis[c].lista)
         para k desde 0 hasta 1023 hacer l[k] := ehcis[c].primera fin
-        ehcis[c].tubos := i + 1
+        ehcis[c].tubos := ehcis[c].tubos ob (nat32(1) << i)
         devolver i
+    fin
+
+    ; la tubería t ya no se usa (su aparato se ha ido): su cola sale de la
+    ; cadena (y, si era la primera, las tramas apuntan a la siguiente), y se
+    ; deja pasar un par de tramas para que la controladora deje de mirarla
+    público función tubo_cierra(c: nat32, t: nat32)
+        variable q, w, l: puntero a nat32
+        variable b, j, k: nat32
+        si t >= MAX_TUBOS entonces devolver fin
+        si ehcis[c].tubos yb (nat32(1) << t) = 0 entonces devolver fin
+        b := ehcis[c].mem + D_TUBOS + t * 0x100
+        q := puntero(b)
+        q[4] := 1
+        q[6] := 0
+        si ehcis[c].primera = (b ob 2) entonces
+            ehcis[c].primera := q[0]
+            l := puntero(ehcis[c].lista)
+            para k desde 0 hasta 1023 hacer l[k] := ehcis[c].primera fin
+        sino
+            para j desde 0 hasta MAX_TUBOS - 1 hacer
+                w := puntero(ehcis[c].mem + D_TUBOS + j * 0x100)
+                si j <> t y ehcis[c].tubos yb (nat32(1) << j) <> 0 y w[0] = (b ob 2) entonces w[0] := q[0] fin
+            fin
+        fin
+        ehcis[c].tubos := ehcis[c].tubos yb nob (nat32(1) << t)
+        espera_ms(2)
     fin
 
     ; dónde quedan los octetos que llegan por la tubería t
