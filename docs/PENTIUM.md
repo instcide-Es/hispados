@@ -1868,7 +1868,7 @@ En el intérprete de órdenes (o en la Consola del escritorio):
 `C:\HISPA\PAQUETES\ORIGEN.TXT`; si no, la carpeta **`\PAQUETES`** de la primera
 unidad que tenga un `CATALOGO.TXT` (primero las memorias USB: la de arranque de
 la 0.8 lleva todos los paquetes del sistema); y si no, Internet:
-`http://actualiza.clicgest.es/pentium/`.
+`http://actualiza.hispados.es/pentium/`.
 
 **Antes de tocar nada**, PAQUETES hace el plan entero: lo que se pide y lo que
 necesita (la versión más nueva del catálogo que cumpla, si lo instalado no
@@ -1955,7 +1955,7 @@ python3 tools/hpq.py sistema SALIDA CARPETA...   # los paquetes del sistema (lo 
 (`GRUB.CFG`, `HISPA.INI` y `MBR.ANT` no son de ningún paquete: son de este equipo.)
 Para publicar una actualización: hacer el paquete con su versión nueva, ponerlo
 con los demás, `hpq.py catalogo` y subir la carpeta (a la memoria USB o, cuando
-haya red, a `actualiza.clicgest.es/pentium/`).
+haya red, a `actualiza.hispados.es/pentium/`).
 
 ### Por Internet (la tarde del 20/11)
 
@@ -2237,8 +2237,8 @@ QEMU_MAS="-nic user,model=e1000" ESCRIBE=1 DISCO=/tmp/d.img ARRANQUE=ordenes \
 pone `-nic none` si no se le da una tarjeta: si no, QEMU pone una e1000 y el
 escritorio pondría en marcha el servicio. Para descargar, un servidor HTTP en
 esta máquina se ve en `10.0.2.2` (`nucleo32/servidor_prueba.py`, el de las
-pruebas). En el VPS sale a internet: `ping actualiza.clicgest.es` y
-`descargar http://actualiza.clicgest.es/ultima.txt -` también van.
+pruebas). En el VPS sale a internet: `ping actualiza.hispados.es` y
+`descargar http://actualiza.hispados.es/ultima.txt -` también van.
 
 ### El Wi-Fi, más adelante
 
@@ -2574,7 +2574,7 @@ disco hecho con `disco.sh ... red`:
   octeto** que lo del servidor (los cuatro archivos) y el disco queda sano.
 - **La RTL8139**: IPCONFIG y DESCARGAR, igual octeto a octeto. El **DNS** (el
   de QEMU, que pregunta al de esta máquina): un nombre que no existe se dice y
-  uno de verdad (`actualiza.clicgest.es`) se resuelve (si esta máquina no sale
+  uno de verdad (`actualiza.hispados.es`) se resuelve (si esta máquina no sale
   a la red, no se prueba).
 - **Sin tarjeta** (el servicio lo dice, y PING también) y con **`sinred`** (ni se
   pone en marcha).
@@ -2583,7 +2583,7 @@ disco hecho con `disco.sh ... red`:
 
 Además, a mano, la memoria USB de `usb.sh` arrancada en QEMU con una e1000:
 GRUB, el escritorio, el servicio en marcha y el icono en verde; y, en el VPS,
-`ping actualiza.clicgest.es` y `descargar http://actualiza.clicgest.es/ultima.txt -`.
+`ping actualiza.hispados.es` y `descargar http://actualiza.hispados.es/ultima.txt -`.
 Lo que **no se prueba**: la Yukon (QEMU no la tiene), y TCP con pérdidas (la
 red de QEMU no pierde nada: las retransmisiones solo se han visto en papel).
 
