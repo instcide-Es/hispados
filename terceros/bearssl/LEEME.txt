@@ -3,7 +3,12 @@ https://bearssl.org/  -  bearssl-0.6.tar.gz
 SHA-256: 6705bba1714961b41a728dfc5debbe348d2966c117649392f8c8139efc83ff14
 
 Lo usa HSPTLS.DLL de Hispa-486 (w32/tls/hsptls.c, docs/RED.md): TLS 1.2 de
-cliente para los programas Hispa32. Aquí va, sin cambiar nada, solo lo que se
+cliente para los programas Hispa32. Y, desde el 20/11/2026, TLS.BIN de
+Hispa-Pentium (castel/nucleo32/tls/, docs/PENTIUM.md «HTTPS: el servicio
+TLS»): los mismos fuentes, compilados para Pentium (-march=i586 -O2) por
+castel/nucleo32/tls/hacer.sh. Los dos llevan dentro BearSSL tal cual, con su
+licencia MIT (LICENSE.txt): quien reparta TLS.BIN o HSPTLS.DLL tiene que
+acompañarlos de ese aviso de copyright y de permiso. Aquí va, sin cambiar nada, solo lo que se
 enlaza: las cabeceras públicas (inc/), src/inner.h, src/config.h y los
 archivos de src/ que hacen falta para el perfil de hsptls.c (todos juntos en
 src/, sin las subcarpetas del original). Si un cambio del perfil pide más

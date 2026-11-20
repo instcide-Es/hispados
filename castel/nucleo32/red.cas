@@ -37,6 +37,12 @@
 ;    98  (el servicio) la línea de interrupción de su tarjeta (EBX, de 1 a
 ;        15; 0: ninguna): cuando llega, se tapa y el servicio se despierta;
 ;        se destapa en su próxima llamada 92
+;    99  (TLS) pedir al SERVICIO TLS (TLS.BIN, nucleo32/tls/): como la 90,
+;        pero el pedido va a TLS.BIN, que hace las conexiones cifradas (y
+;        pide a RED.BIN, por la 90, las TCP que lleva debajo). TLS.BIN se
+;        apunta con la 91 (sin puertos), coge sus pedidos con la 92 y los
+;        contesta con la 93, igual que RED.BIN: cada hueco sabe a cuál de
+;        los dos va                                   -> (SIN_TLS: no hay)
 ;
 ;  Si el servicio se acaba (o lo acaban), el núcleo apaga el DMA de su
 ;  tarjeta antes de devolver su memoria, quita los registros de su vista y
@@ -55,6 +61,7 @@ módulo Red
     público constante RED_CONECTADA = 4         ; con IP
 
     público constante SIN_RED = 0xFFFFFFEF      ; no hay servicio de red
+    público constante SIN_TLS = 0xFFFFFFE3      ; (TLS) no hay servicio TLS (TLS.BIN)
     constante NO_VALE = 0xFFFFFFF9
     constante EN_USO = 0xFFFFFFF6
     constante SIN_MEMORIA = 0xFFFFFFFA
@@ -70,8 +77,14 @@ módulo Red
     constante ZONA_FINAL = 0xB0000000
     constante MAX_TROZOS = 8
 
+    ; (TLS) a qué servicio va un pedido
+    constante A_RED = 0
+    constante A_TLS = 1
+    constante A_NADIE = 2
+
     tipo Hueco = estructura
         estado: nat32
+        destino: nat32                          ; (TLS) A_RED o A_TLS
         tarea: puntero a Tarea
         id, serie, cabe, largo: nat32
         cab: arreglo [8] de nat32
@@ -93,13 +106,19 @@ módulo Red
 
     variable huecos: arreglo [MAX_HUECOS] de Hueco
     variable serie: nat32
-    variable usaron: arreglo [MAX_TAREAS] de nat32      ; las tareas que han usado la red
-    variable avisos: arreglo [MAX_TAREAS] de nat32      ; las que han acabado, para decírselo al servicio
-    variable n_avisos: nat32
+    ; (TLS) lo de los dos servicios: [0, MAX_TAREAS) el de red; detrás, el TLS
+    variable usaron: arreglo [2 * MAX_TAREAS] de nat32  ; las tareas que han usado la red
+    variable avisos: arreglo [2 * MAX_TAREAS] de nat32  ; las que han acabado, para decírselo al servicio
+    variable n_avisos: arreglo [2] de nat32
 
     público variable servicio: puntero a Tarea          ; nulo: no hay
     variable servicio_id: nat32
     variable servicio_espera: bool
+    ; (TLS) el servicio TLS (TLS.BIN)
+    público variable servicio_tls: puntero a Tarea
+    variable servicio_tls_id: nat32
+    variable tls_espera: bool
+    público variable sin_tls: bool                       ; no está TLS.BIN: no se vuelve a intentar
     público variable estado_red: nat32
     público variable ip_red: nat32                       ; (como va en la red: el primer octeto, abajo)
     público variable cambios_red: nat32                  ; sube cuando cambia (el escritorio repinta el icono)
@@ -121,6 +140,27 @@ módulo Red
         devolver hay_servicio() y servicio = actual
     fin
 
+    ; (TLS)
+    público función hay_tls(): bool
+        devolver servicio_tls <> nulo y servicio_tls.id = servicio_tls_id y servicio_tls.estado <> ACABADA y servicio_tls.estado <> LIBRE
+    fin
+
+    función es_tls(): bool
+        devolver hay_tls() y servicio_tls = actual
+    fin
+
+    ; (TLS) ¿de cuál de los dos servicios es la tarea actual?
+    función destino_actual(): nat32
+        si es_servicio() entonces devolver A_RED fin
+        si es_tls() entonces devolver A_TLS fin
+        devolver A_NADIE
+    fin
+
+    función hay_destino(d: nat32): bool
+        si d = A_TLS entonces devolver hay_tls() fin
+        devolver hay_servicio()
+    fin
+
     ; ¿puede el programa leer (o escribir) ahí? (si cae en su pila, sin
     ; estrenar, antes se le ponen esas páginas; como en usuario.cas)
     función puede(inicio: nat32, n: nat32, para_escribir: bool): bool
@@ -139,25 +179,37 @@ módulo Red
         si servicio_espera y hay_servicio() entonces despertar_dormida(servicio) fin
     fin
 
-    función apunta_uso(id: nat32)
-        variable i, libre: nat32
+    función despierta(d: nat32)
+        si d = A_TLS entonces
+            si tls_espera y hay_tls() entonces despertar_dormida(servicio_tls) fin
+        sino
+            despierta_servicio()
+        fin
+    fin
+
+    función apunta_uso(id: nat32, d: nat32)
+        variable i, libre, b: nat32
+        b := d * MAX_TAREAS
         libre := MAX_TAREAS
         para i desde 0 hasta MAX_TAREAS - 1 hacer
-            si usaron[i] = id entonces devolver fin
-            si usaron[i] = 0 y libre = MAX_TAREAS entonces libre := i fin
+            si usaron[b + i] = id entonces devolver fin
+            si usaron[b + i] = 0 y libre = MAX_TAREAS entonces libre := i fin
         fin
-        si libre < MAX_TAREAS entonces usaron[libre] := id fin
+        si libre < MAX_TAREAS entonces usaron[b + libre] := id fin
     fin
 
     ; -------------------------------------------------------------------------
     ;  Pedir (los programas) y contestar (el servicio)
     ; -------------------------------------------------------------------------
-    función pedir(a: nat32, b: nat32, c: nat32): nat32
+    función pedir(a: nat32, b: nat32, c: nat32, d: nat32): nat32
         variable cab: puntero a nat32
         variable h: puntero a Hueco
-        variable i, largo, bi, r: nat32
-        si no hay_servicio() entonces devolver SIN_RED fin
-        si es_servicio() entonces devolver NO_VALE fin
+        variable i, largo, bi, r, sin: nat32
+        sin := SIN_RED
+        si d = A_TLS entonces sin := SIN_TLS fin
+        si no hay_destino(d) entonces devolver sin fin
+        ; (el de red no pide a nadie; el TLS, solo al de red)
+        si es_servicio() o (d = A_TLS y es_tls()) entonces devolver NO_VALE fin
         si no puede(a, 32, cierto) entonces devolver NO_VALE fin
         cab := puntero(a)
         largo := cab[7]
@@ -180,18 +232,19 @@ módulo Red
         si h.cabe > MAX_DATOS entonces h.cabe := MAX_DATOS fin
         h.tarea := actual
         h.id := actual.id
-        apunta_uso(actual.id)
+        h.destino := d
+        apunta_uso(actual.id, d)
         bi := sin_interrupciones()
         serie := serie + 1
         h.serie := serie
         h.estado := H_PEDIDO
-        despierta_servicio()
+        despierta(d)
         mientras h.estado <> H_RESPONDIDO hacer
-            si actual.matar o no hay_servicio() entonces
+            si actual.matar o no hay_destino(d) entonces
                 ; (con Ctrl+C: lo que conteste el servicio se tirará, por la serie)
                 h.estado := H_LIBRE
                 reponer(bi)
-                devolver SIN_RED
+                devolver sin
             fin
             bloquear()
         fin
@@ -210,20 +263,21 @@ módulo Red
     función siguiente(a: nat32, espera: nat32): nat32
         variable p: puntero a Pedido_red
         variable h: puntero a Hueco
-        variable i, bi, vueltas: nat32
-        si no es_servicio() entonces devolver NO_VALE fin
+        variable i, bi, vueltas, d: nat32
+        d := destino_actual()
+        si d = A_NADIE entonces devolver NO_VALE fin
         si no puede(a, tamaño(Pedido_red) + MAX_DATOS, cierto) entonces devolver NO_VALE fin
         p := puntero(a)
         ; la interrupción de la tarjeta, otra vez destapada
-        si irq_red <> 0 entonces destapa_irq(irq_red) fin
+        si d = A_RED y irq_red <> 0 entonces destapa_irq(irq_red) fin
         vueltas := 0
         mientras vueltas < 2 hacer
             bi := sin_interrupciones()
-            si n_avisos > 0 entonces
-                n_avisos := n_avisos - 1
+            si n_avisos[d] > 0 entonces
+                n_avisos[d] := n_avisos[d] - 1
                 p.hueco := 0xFFFFFFFF
                 p.serie := 0
-                p.tarea := avisos[n_avisos]
+                p.tarea := avisos[d * MAX_TAREAS + n_avisos[d]]
                 p.cabe := 0
                 p.largo := 0
                 para i desde 0 hasta 7 hacer p.cab[i] := 0 fin
@@ -233,7 +287,7 @@ módulo Red
             fin
             para i desde 0 hasta MAX_HUECOS - 1 hacer
                 h := dirección(huecos[i])
-                si h.estado = H_PEDIDO entonces
+                si h.estado = H_PEDIDO y h.destino = d entonces
                     h.estado := H_EN_SERVICIO
                     reponer(bi)
                     p.hueco := i
@@ -250,9 +304,9 @@ módulo Red
                 reponer(bi)
                 devolver 0
             fin
-            servicio_espera := cierto
+            si d = A_TLS entonces tls_espera := cierto sino servicio_espera := cierto fin
             dormir(espera)
-            servicio_espera := falso
+            si d = A_TLS entonces tls_espera := falso sino servicio_espera := falso fin
             reponer(bi)
             vueltas := vueltas + 1
         fin
@@ -262,13 +316,14 @@ módulo Red
     función contestar(hu: nat32, a: nat32): nat32
         variable r: puntero a Respuesta_red
         variable h: puntero a Hueco
-        variable i, largo, bi: nat32
-        si no es_servicio() o hu >= MAX_HUECOS entonces devolver NO_VALE fin
+        variable i, largo, bi, d: nat32
+        d := destino_actual()
+        si d = A_NADIE o hu >= MAX_HUECOS entonces devolver NO_VALE fin
         si no puede(a, tamaño(Respuesta_red), falso) entonces devolver NO_VALE fin
         r := puntero(a)
         h := dirección(huecos[hu])
         ; (si el programa se ha ido, el hueco ya es de otro, o de nadie)
-        si h.estado <> H_EN_SERVICIO o h.serie <> r.serie entonces devolver NO_VALE fin
+        si h.estado <> H_EN_SERVICIO o h.serie <> r.serie o h.destino <> d entonces devolver NO_VALE fin
         largo := r.cab[7]
         si largo > h.cabe entonces largo := h.cabe fin
         si largo > 0 y no puede(r.datos, largo, falso) entonces devolver NO_VALE fin
@@ -285,8 +340,23 @@ módulo Red
     ; -------------------------------------------------------------------------
     ;  Lo que solo puede el servicio
     ; -------------------------------------------------------------------------
+    ; (TLS) TLS.BIN se apunta como servicio TLS: sin puertos ni memoria de DMA
+    función apuntarse_tls(): nat32
+        si hay_tls() entonces
+            si servicio_tls = actual entonces devolver 0 fin
+            devolver EN_USO
+        fin
+        si es_servicio() entonces devolver NO_VALE fin
+        servicio_tls := actual
+        servicio_tls_id := actual.id
+        sin_tls := falso
+        devolver 0
+    fin
+
     función apuntarse(): nat32
         variable p: puntero a nat32
+        si iguales_sin_caja(actual.nombre, "TLS.BIN") entonces devolver apuntarse_tls() fin
+        si es_tls() entonces devolver NO_VALE fin
         si hay_servicio() entonces
             si servicio = actual entonces devolver 0 fin
             devolver EN_USO
@@ -429,7 +499,24 @@ módulo Red
     ;  Cuando acaba una tarea (la llama usuario.cas, en recoge_lo_suyo)
     ; -------------------------------------------------------------------------
     público función acabó(t: puntero a Tarea)
-        variable i, j, bi: nat32
+        variable i, j, bi, d: nat32
+        ; (TLS) el servicio TLS: los que le esperaban, con SIN_TLS; y, como
+        ; también ha usado la red, se le dice al de red más abajo
+        si hay_tls() y servicio_tls = t entonces
+            bi := sin_interrupciones()
+            servicio_tls := nulo
+            n_avisos[A_TLS] := 0
+            para i desde 0 hasta MAX_HUECOS - 1 hacer
+                si huecos[i].destino = A_TLS y (huecos[i].estado = H_PEDIDO o huecos[i].estado = H_EN_SERVICIO) entonces
+                    huecos[i].cab[0] := SIN_TLS
+                    huecos[i].cab[7] := 0
+                    huecos[i].estado := H_RESPONDIDO
+                    despertar_tarea(huecos[i].tarea)
+                fin
+            fin
+            para i desde 0 hasta MAX_TAREAS - 1 hacer usaron[MAX_TAREAS + i] := 0 fin
+            reponer(bi)
+        fin
         si hay_servicio() y servicio = t entonces
             ; la tarjeta deja de leer y escribir en la memoria (que va a volver
             ; a los marcos libres) y su interrupción, tapada
@@ -451,10 +538,10 @@ módulo Red
             estado_red := RED_NADA
             ip_red := 0
             cambios_red := cambios_red + 1
-            n_avisos := 0
+            n_avisos[A_RED] := 0
             ; los que esperaban, con SIN_RED
             para i desde 0 hasta MAX_HUECOS - 1 hacer
-                si huecos[i].estado = H_PEDIDO o huecos[i].estado = H_EN_SERVICIO entonces
+                si huecos[i].destino = A_RED y (huecos[i].estado = H_PEDIDO o huecos[i].estado = H_EN_SERVICIO) entonces
                     huecos[i].cab[0] := SIN_RED
                     huecos[i].cab[7] := 0
                     huecos[i].estado := H_RESPONDIDO
@@ -465,28 +552,31 @@ módulo Red
             reponer(bi)
             devolver
         fin
-        para i desde 0 hasta MAX_TAREAS - 1 hacer
-            si usaron[i] = t.id entonces
-                usaron[i] := 0
-                bi := sin_interrupciones()
-                si n_avisos < MAX_TAREAS entonces
-                    avisos[n_avisos] := t.id
-                    n_avisos := n_avisos + 1
+        para d desde A_RED hasta A_TLS hacer
+            para i desde 0 hasta MAX_TAREAS - 1 hacer
+                si usaron[d * MAX_TAREAS + i] = t.id entonces
+                    usaron[d * MAX_TAREAS + i] := 0
+                    bi := sin_interrupciones()
+                    si n_avisos[d] < MAX_TAREAS entonces
+                        avisos[d * MAX_TAREAS + n_avisos[d]] := t.id
+                        n_avisos[d] := n_avisos[d] + 1
+                    fin
+                    despierta(d)
+                    reponer(bi)
                 fin
-                despierta_servicio()
-                reponer(bi)
             fin
         fin
     fin
 
     ; -------------------------------------------------------------------------
-    ;  Las llamadas (usuario.cas manda aquí de la 90 a la 98)
+    ;  Las llamadas (usuario.cas manda aquí de la 90 a la 99)
     ; -------------------------------------------------------------------------
     público función atender_red(n: nat32, a: nat32, b: nat32, c: nat32): nat32
         variable p: puntero a nat32
         si apagada entonces devolver SIN_RED fin
         según nat16(n)
-            caso 90: devolver pedir(a, b, c)
+            caso 90: devolver pedir(a, b, c, A_RED)
+            caso 99: devolver pedir(a, b, c, A_TLS)        ; (TLS)
             caso 91: devolver apuntarse()
             caso 92: devolver siguiente(a, b)
             caso 93: devolver contestar(a, b)

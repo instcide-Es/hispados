@@ -97,6 +97,17 @@
 #      con largo, en trozos, hasta que se cierra, redirección, 404) con lo
 #      descargado igual octeto a octeto, Ctrl+C, sin tarjeta, «sinred», y el
 #      icono de la red en el escritorio.
+#  13 bis. (TLS) Hispa-Pentium 0.8: HTTPS. El servicio TLS (TLS.BIN,
+#      nucleo32/tls/: BearSSL en el anillo 3) contra los servidores HTTPS de
+#      nucleo32/tls/servidor_https.py (con su raíz de prueba en \RAICES):
+#      DESCARGAR https:// (ECDSA y RSA, con largo y en trozos, igual octeto
+#      a octeto), la orden HTTPS con la biblioteca Https (galletas,
+#      keep-alive, POST con cabeceras, redirecciones entre servidores), los
+#      certificados que no valen (otro nombre, raíz desconocida, caducado),
+#      la memoria de cadenas (TLS.CCH) y la hora: el reloj del PC malo, la
+#      de la cabecera Date (TLS.INI) y sin hora. Si esta máquina sale a
+#      internet, también https://clicgest.es/ y https://hispados.es/ frente
+#      a curl, y la hora de actualiza.hispados.es.
 #  14. Hispa-Pentium 0.8: apagar de verdad y la batería. El servicio de ACPI
 #      (ACPI.BIN, acpi/pentium/: HSPACPI con ACPICA en el anillo 3) con la
 #      batería de mentira de las pruebas de Hispa-DOS (-acpitable): la pila
@@ -124,6 +135,7 @@
 #   SOLO=paquetes ./pruebas.sh    la primera y la duodécima (los paquetes: PAQUETES y tools/hpq.py)
 #   SOLO=red ./pruebas.sh         la primera y la decimotercera (la red)
 #   SOLO=acpi ./pruebas.sh        la primera y la decimocuarta (apagar de verdad y la batería: ACPI.BIN)
+#   SOLO=tls ./pruebas.sh         la primera y la 13 bis (HTTPS: el servicio TLS, TLS.BIN)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -187,7 +199,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -2461,7 +2473,7 @@ mira "PING a la puerta de enlace: tres respuestas y ninguna perdida" "^Haciendo 
 mira "DESCARGAR: con Content-Length, en trozos (chunked), hasta que se cierra, una redirección (302), un 404 y a otra carpeta" \
   "^Guardando GRANDE.BIN (409600 octetos)\.*$" "^Hecho: GRANDE.BIN, 409600 octetos en [0-9]*,[0-9] s" "^Hecho: TROZOS.BIN, 150001 octetos" "^Hecho: CIERRA.BIN, 70000 octetos" \
   "^Redirigido a /ultima.txt$" "^version=0.8$" "^DESCARGAR: no se ha bajado nada (el servidor ha dicho 404)\.$" "^Hecho: c:.textos.otra.txt, 41 octetos" \
-  "^DESCARGAR: HTTPS (con cifrado) todavía no lo sabe hacer Hispa-Pentium; solo http://\.$" "^Uso: DESCARGAR http://servidor\[:puerto\]/camino \[archivo\]$"
+  "^DESCARGAR: no hay conexión segura con 10.0.2.2: no hay servicio TLS (falta TLS.BIN): no se pueden hacer conexiones cifradas\.$" "^Uso: DESCARGAR http\[s\]://servidor\[:puerto\]/camino \[archivo\]$"
 mira "Ctrl+C en medio de una descarga que no llega: el programa acaba, y la red sigue (IPCONFIG /TODO, con lo que ha apuntado el servicio)" \
   "^Guardando LENTO.BIN (1000000 octetos)^C$" "^Lo que ha apuntado el servicio de red:$" "^red: DHCP: IP 10.0.2.15" "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 4\.$"
 iguales=1
@@ -2508,6 +2520,112 @@ kill $SPID 2> /dev/null; wait $SPID 2> /dev/null
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin la red)"
 fi   # la red
+
+# ------------------------------------------- 13 bis. (TLS) Hispa-Pentium 0.8: HTTPS
+# El servicio TLS (TLS.BIN: nucleo32/tls/, BearSSL en C en el anillo 3, como
+# ACPI.BIN) con los servidores HTTPS de nucleo32/tls/servidor_https.py: su
+# raíz de prueba va al disco (\RAICES\PRUEBA.CER) y sus certificados son
+# para «10.0.2.2» (el bueno ECDSA, el bueno RSA, uno de otro nombre y uno de
+# una raíz que no conoce nadie); y un HTTP para la cabecera Date.
+if parte08 tls; then
+echo "== Hispa-Pentium 0.8: HTTPS (el servicio TLS, TLS.BIN: DESCARGAR https://, la orden HTTPS y la biblioteca Https) =="
+R=$P/n08t
+mkdir -p $R/srv
+if bash $AQUI/nucleo32/tls/hacer.sh $R/TLS.BIN > $R/hacer.txt 2>&1; then
+  ok "nucleo32/tls/hacer.sh: TLS.BIN, BearSSL 0.6 (MIT) y tls.c como programa del anillo 3 ($(stat -c %s $R/TLS.BIN) octetos)"
+else ko "nucleo32/tls/hacer.sh no hace TLS.BIN: $(tail -1 $R/hacer.txt)"; fi
+python3 -I $AQUI/nucleo32/tls/servidor_https.py $R/srv > $R/srv.txt 2>&1 &
+SPID=$!
+for _ in $(seq 100); do [ -s $R/srv/puertos ] && break; sleep 0.1; done
+pu() { grep "^$1=" $R/srv/puertos | cut -d= -f2; }
+B=https://10.0.2.2:$(pu bueno); RS=https://10.0.2.2:$(pu rsa); OT=https://10.0.2.2:$(pu otro); EX=https://10.0.2.2:$(pu extrano)
+export MTOOLS_SKIP_CHECK=1
+if [ -s $R/srv/puertos ] && $AQUI/nucleo32/disco.sh $R/d.img 16 red tls > $R/disco.txt 2>&1 && mmd -i $R/d.img ::RAICES && mcopy -i $R/d.img $R/srv/RAIZ.CER ::RAICES/PRUEBA.CER; then
+cp $R/d.img $R/e.img
+ESCRIBE=1 DISCO=$R/e.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ":pausa 2" \
+  "descargar $B/grande.bin" ":pausa 6" "descargar $RS/trozos.bin" ":pausa 5" "https -i $B/galleta $B/mira" ":pausa 4" \
+  "https -d hola=mundo -H X-Uno:dos $RS/eco" ":pausa 3" "https $B/redirige $RS/lejos" ":pausa 4" \
+  "descargar $OT/ultima.txt" ":pausa 3" "descargar $EX/ultima.txt" ":pausa 3" "https /estado" ":pausa 2" > $R/e.sal 2>&1
+tr -d '\r' < $R/e.sal > $R/e.txt
+S=$R/e.txt
+mira "el servicio TLS se pone en marcha solo (la primera conexión cifrada), con las autoridades de HSPTLS y la raíz de prueba de \\RAICES, y la hora del reloj del PC" \
+  "tls: Hispa-Pentium 0.8: el servicio TLS (TLS.BIN, BearSSL 0.6, TLS 1.2)$" "tls: autoridad de más: .RAICES.PRUEBA.CER$" "tls: 21 autoridades raíz$" \
+  "tls: la hora, del reloj del PC: [0-9][0-9]/[0-9][0-9]/20[0-9][0-9]$"
+mira "DESCARGAR https://: el certificado ECDSA y el RSA comprobados (con la raíz de prueba), con largo y en trozos" \
+  "tls: 10.0.2.2: TLS 1.2, ECDHE-ECDSA, .*; apretón de manos en [0-9]* ms (BearSSL: [0-9,]* M ciclos), la cadena comprobada$" \
+  "^Conectando con 10.0.2.2 (10.0.2.2), puerto $(pu bueno)\.\.\. " "conectado (TLS 1.2, ECDHE-ECDSA, " "^Hecho: GRANDE.BIN, 409600 octetos en " \
+  "tls: 10.0.2.2: TLS 1.2, ECDHE-RSA, .*la cadena comprobada$" "^Hecho: TROZOS.BIN, 150001 octetos en "
+mira "la orden HTTPS (la biblioteca Https): las galletas que pone el servidor vuelven en el pedido siguiente, por la misma conexión (keep-alive)" \
+  "^== $B/galleta: 200, 18 octetos (redirecciones: 0)$" "^Set-Cookie: sesion=abc123; Path=/; HttpOnly$" "^== $B/mira: 200, 35 octetos" "^galletas=sesion=abc123; idioma=es$"
+if [ "$(sed -n "/^C:.>https -i /,/^C:.>https -d /p" $S | grep -c "apretón de manos")" = 1 ]; then ok "las dos direcciones del mismo servidor van por una sola conexión cifrada (un solo apretón de manos)"
+else ko "HTTPS no vuelve a usar la conexión (keep-alive):"; sed -n "/^C:.>https -i /,/^C:.>https -d /p" $S | sed 's/^/        /' | head -12; fi
+mira "HTTPS: un POST con su cuerpo y una cabecera propia; una redirección en el mismo servidor y otra (301) a otro servidor" \
+  "^metodo=POST$" "^largo=10$" "^x-uno=dos$" "^tipo=application/x-www-form-urlencoded$" "^cuerpo=hola=mundo$" \
+  "^== $B/ultima.txt: 200, 50 octetos (redirecciones: 1)$" "^Hispa-Pentium 0.8: la red, cifrada.$"
+[ "$(grep -c "^== $B/ultima.txt: 200, 50 octetos (redirecciones: 1)$" $S)" = 2 ] || ko "HTTPS: la redirección a otro servidor no llega"
+mira "los certificados que no valen no se aceptan, y se dice por qué en español: de otro nombre y de una raíz que no conoce nadie" \
+  "^DESCARGAR: no hay conexión segura con 10.0.2.2: el certificado es de otro sitio, no de 10.0.2.2\.$" \
+  "^DESCARGAR: no hay conexión segura con 10.0.2.2: el certificado de 10.0.2.2 no lo firma ninguna autoridad conocida\.$"
+mira "HTTPS /ESTADO: la fecha que usa (y de dónde), las autoridades, las conexiones y la memoria" \
+  "^  Servicio  . . . . . . : TLS.BIN (BearSSL 0.6), TLS 1.2$" "^  Fecha . . . . . . . . : .* (del reloj del PC)$" "^  Autoridades raíz  . . : 21$" \
+  "^  Conexiones  . . . . . : 0 abiertas, [5-9] apretones de manos$" "^  Memoria . . . . . . . : 37 K de conexiones$"
+iguales=1
+for f in GRANDE.BIN:grande.bin TROZOS.BIN:trozos.bin; do
+  saca $R/e.img ${f%%:*} $R/x.bin && cmp -s $R/x.bin $R/srv/${f##*:} || { iguales=0; echo "        ${f%%:*} no es igual"; }
+done
+sano $R/e.img
+if [ $iguales = 1 ] && grep -q "^$R/e.img: [0-9]* files" $P/fsck.txt && saca $R/e.img TLS.CCH $R/x.bin && [ "$(stat -c %s $R/x.bin)" = 576 ]; then
+  ok "lo descargado por HTTPS es igual octeto a octeto que lo del servidor, el disco queda sano y la memoria de cadenas (TLS.CCH) está guardada"
+else ko "lo descargado por HTTPS no es igual, el disco no queda sano o no se ha guardado TLS.CCH"; sed 's/^/        /' $P/fsck.txt | head -4; fi
+# otra vez (la cadena ya está en TLS.CCH), con el reloj del PC en el 2001 y la hora de la cabecera Date del servidor de aquí (TLS.INI)
+printf 'hora=10.0.2.2:%s\r\n' "$(pu hora)" > $R/TLS.INI
+mcopy -o -i $R/e.img $R/TLS.INI ::
+cp $R/d.img $R/s.img
+printf 'hora=10.0.2.2:1\r\n' > $R/TLS.INI
+mcopy -o -i $R/s.img $R/TLS.INI ::
+RELOJ=2001-01-01 DISCO=$R/e.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ":pausa 2" \
+  "descargar $B/ultima.txt -" ":pausa 4" "https /estado" ":pausa 2" > $R/h.sal 2>&1 &
+H1=$!
+RELOJ=2001-01-01 DISCO=$R/s.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ":pausa 2" \
+  "descargar $B/ultima.txt -" ":pausa 4" > $R/s.sal 2>&1 &
+H2=$!
+RELOJ=2050-06-01 DISCO=$R/d.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ":pausa 2" \
+  "descargar $B/ultima.txt -" ":pausa 4" > $R/c.sal 2>&1 &
+H3=$!
+wait $H1 $H2 $H3
+tr -d '\r' < $R/h.sal > $R/h.txt
+S=$R/h.txt
+mira "con el reloj del PC en el 2001, la hora se pide por HTTP (la cabecera Date: avisado como riesgo) y la cadena ya comprobada sale de TLS.CCH" \
+  "tls: el reloj del PC dice 01/01/2001: no puede ser (este TLS.BIN es del .*RIESGO" "tls: la hora, de la cabecera Date de 10.0.2.2: .* (UTC)$" \
+  "tls: 10.0.2.2: TLS 1.2, ECDHE-ECDSA, .*la cadena ya comprobada (de memoria)$" "^version=0.8$" "^  Fecha . . . . . . . . : .* (de la cabecera Date: el reloj del PC no está en hora)$"
+tr -d '\r' < $R/s.sal > $R/s.txt
+S=$R/s.txt
+mira "con el reloj del PC mal y sin servidor de la hora: no hay conexión, y se dice por qué" "tls: la hora: no se conecta con 10.0.2.2:1 " \
+  "^DESCARGAR: no hay conexión segura con 10.0.2.2: el reloj del equipo no está en hora y no se ha podido preguntar la hora a 10.0.2.2: sin la fecha no se pueden comprobar los certificados\.$"
+tr -d '\r' < $R/c.sal > $R/c.txt
+S=$R/c.txt
+mira "con el reloj del PC en el 2050, el certificado ha caducado: no se acepta" "tls: la hora, del reloj del PC: 01/06/2050$" \
+  "^DESCARGAR: no hay conexión segura con 10.0.2.2: el certificado de 10.0.2.2 ha caducado o aún no vale (con la fecha 01/06/2050, del reloj del PC); compruebe la fecha del equipo\.$"
+# con internet: clicgest.es y hispados.es, frente a curl (y la hora de actualiza.hispados.es)
+if curl -s -m 10 -o $R/clic.htm https://clicgest.es/ && curl -s -m 10 -o $R/hispa.htm https://hispados.es/ && [ -s $R/clic.htm ]; then
+  cp $R/d.img $R/i.img
+  ESCRIBE=1 RELOJ=2001-01-01 DISCO=$R/i.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ":pausa 2" \
+    "descargar https://clicgest.es/ clic.htm" ":pausa 8" "descargar https://hispados.es/ hispa.htm" ":pausa 8" > $R/i.sal 2>&1
+  tr -d '\r' < $R/i.sal > $R/i.txt
+  S=$R/i.txt
+  mira "(con internet) la hora, de actualiza.hispados.es; https://clicgest.es/ y https://hispados.es/ con sus cadenas de Let's Encrypt (ISRG Root YE)" \
+    "tls: la hora, de la cabecera Date de actualiza.hispados.es: " "tls: clicgest.es: TLS 1.2, ECDHE-ECDSA, .*la cadena comprobada$" \
+    "tls: hispados.es: TLS 1.2, ECDHE-ECDSA, .*la cadena comprobada$"
+  if saca $R/i.img CLIC.HTM $R/x.htm && curl -s -m 10 -o $R/clic.htm https://clicgest.es/ && cmp -s $R/x.htm $R/clic.htm \
+     && saca $R/i.img HISPA.HTM $R/y.htm && curl -s -m 10 -o $R/hispa.htm https://hispados.es/ && cmp -s $R/y.htm $R/hispa.htm; then
+    ok "(con internet) lo bajado de https://clicgest.es/ y https://hispados.es/ es igual octeto a octeto que lo que baja curl ($(stat -c %s $R/x.htm) y $(stat -c %s $R/y.htm) octetos)"
+  else ko "(con internet) lo bajado de clicgest.es o hispados.es no es igual que con curl"; fi
+else echo "  (esta máquina no llega a https://clicgest.es/: no se prueba contra internet)"; fi
+else ko "no se pueden poner en marcha los servidores HTTPS de prueba o hacer el disco: $(tail -1 $R/srv.txt) $(tail -1 $R/disco.txt)"; fi
+kill $SPID 2> /dev/null; wait $SPID 2> /dev/null
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin HTTPS)"
+fi   # HTTPS
 
 # ------------------------------------- 14. Hispa-Pentium 0.8: apagar de verdad y la batería
 # El servicio de ACPI, ACPI.BIN (acpi/pentium/: el núcleo de C de HSPACPI

@@ -9,6 +9,12 @@
 ;  Lo que no puede ser da un número de PRIMER_ERROR_RED para arriba (los de
 ;  aquí y los del núcleo): se mira con es_error_red y se dice con
 ;  texto_error_red.
+;  (TLS) Las conexiones cifradas (TLS 1.2, con el certificado del servidor
+;  comprobado) las hace el servicio TLS (TLS.BIN, nucleo32/tls/) por la
+;  llamada 99: se abren con conectar_seguro(nombre, puerto, espera) y luego
+;  son como las demás (enviar, recibir, cerrar_conexión). Si falla, el
+;  error es TLS_CERTIFICADO, TLS_FALLO o TLS_SIN_HORA, y texto_error_red lo
+;  dice con detalle (lo que ha dicho TLS.BIN).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Redes
@@ -26,6 +32,12 @@ módulo Redes
     público constante CORTADA_RED = 0xFFFFFFE8  ; la conexión se ha cortado
     público constante NO_CONEXIÓN = 0xFFFFFFE7  ; esa conexión no existe (o no quedan)
     público constante INALCANZABLE = 0xFFFFFFE6
+    ; (TLS) los de las conexiones cifradas (tls/tls.h)
+    público constante TLS_CERTIFICADO = 0xFFFFFFE5  ; el certificado del servidor no vale
+    público constante TLS_FALLO = 0xFFFFFFE4        ; no se ha podido hacer la conexión segura
+    público constante SIN_TLS = 0xFFFFFFE3          ; no hay servicio TLS (falta TLS.BIN)
+    público constante TLS_SIN_HORA = 0xFFFFFFE2     ; no se sabe la fecha: no se pueden mirar los certificados
+    público constante PRIMERA_SEGURA = 0x1000       ; el número de una conexión cifrada: de aquí a +0xFF
     público constante PRIMER_ERROR_RED = 0xFFFFFFE0
 
     ; ---- cómo está (Info_red.estado, y estado_rápido) ----
@@ -49,6 +61,7 @@ módulo Redes
     constante O_UDP_ENVIAR = 9
     constante O_RENOVAR = 10
     constante O_REGISTRO = 11
+    constante O_INFO = 12                       ; (TLS) el cifrado de una conexión
     constante MAX_DATOS = 8192
 
     ; lo que dice el servicio de la red (es el de rbase.cas)
@@ -67,6 +80,7 @@ módulo Redes
     fin
 
     variable cab: arreglo [8] de nat32
+    variable error_tls: arreglo [200] de byte       ; (TLS) lo último que ha dicho TLS.BIN de un fallo
 
     función llamada(n: nat32, a: nat32, b: nat32, c: nat32): nat32
         ensamblador
@@ -90,6 +104,24 @@ módulo Redes
         cab[6] := 0
         cab[7] := largo
         devolver llamada(90, nat32(dirección(cab[0])), nat32(datos), cabe)
+    fin
+
+    ; (TLS) lo mismo, al servicio TLS (la llamada 99)
+    función pide_tls(orden: nat32, a: nat32, b: nat32, c: nat32, datos: puntero a byte, largo: nat32, cabe: nat32): nat32
+        cab[0] := orden
+        cab[1] := a
+        cab[2] := b
+        cab[3] := c
+        cab[4] := 0
+        cab[5] := 0
+        cab[6] := 0
+        cab[7] := largo
+        devolver llamada(99, nat32(dirección(cab[0])), nat32(datos), cabe)
+    fin
+
+    ; (TLS) ¿es una conexión cifrada?
+    público función es_segura(s: nat32): bool
+        devolver s >= PRIMERA_SEGURA y s < PRIMERA_SEGURA + 0x100
     fin
 
     ; si la red aún se está poniendo en marcha (el enlace, la IP), espera a
@@ -124,7 +156,13 @@ módulo Redes
     fin
 
     público función texto_error_red(e: nat32): puntero a byte
+        ; (TLS) los de las conexiones cifradas, con lo que ha dicho TLS.BIN
+        si (e = TLS_CERTIFICADO o e = TLS_FALLO o e = TLS_SIN_HORA) y error_tls[0] <> 0 entonces devolver dirección(error_tls[0]) fin
         según nat16(e yb 0xFFFF)
+            caso 0xFFE5: devolver "el certificado del servidor no vale"
+            caso 0xFFE4: devolver "no se ha podido hacer la conexión segura"
+            caso 0xFFE3: devolver "no hay servicio TLS (falta TLS.BIN): no se pueden hacer conexiones cifradas"
+            caso 0xFFE2: devolver "no se sabe la fecha (el reloj del equipo no está en hora): no se pueden comprobar los certificados"
             caso 0xFFEF: devolver "no hay servicio de red (falta RED.BIN o se arrancó con «sinred»)"
             caso 0xFFEE: devolver "no hay ninguna tarjeta de red que Hispa-Pentium sepa llevar"
             caso 0xFFED: devolver "la tarjeta de red no tiene enlace (¿está enchufado el cable?)"
@@ -223,6 +261,62 @@ módulo Redes
         devolver pide_con_red(O_CONECTAR, ip, puerto, espera, 0, nulo, 0, 0)
     fin
 
+    ; (TLS) una conexión cifrada (TLS 1.2) con el servidor «nombre», a su
+    ; «puerto» (443 si es 0): resuelve el nombre, conecta y hace el apretón
+    ; de manos (comprobando el certificado del servidor para ese nombre). Da
+    ; su número (es_segura), o un error (TLS_CERTIFICADO...: texto_error_red
+    ; lo dice). Luego, enviar, recibir y cerrar_conexión, como una TCP
+    público función conectar_seguro(nombre: puntero a byte, puerto: nat32, espera: nat32): nat32
+        variable ip, r: nat32
+        error_tls[0] := 0
+        r := resolver(nombre, ip)
+        si es_error_red(r) entonces devolver r fin
+        si puerto = 0 entonces puerto := 443 fin
+        ; (el nombre va, y el texto del error vuelve, en error_tls)
+        copiar_hasta(dirección(error_tls[0]), nombre, 64)
+        r := pide_tls(O_CONECTAR, ip, puerto, espera, dirección(error_tls[0]), longitud(dirección(error_tls[0])), 199)
+        si r = SIN_IP o r = SIN_CABLE entonces
+            ; (la red aún se está poniendo en marcha: TLS.BIN acaba de lanzar RED.BIN)
+            espera_red()
+            r := pide_tls(O_CONECTAR, ip, puerto, espera, dirección(error_tls[0]), longitud(dirección(error_tls[0])), 199)
+        fin
+        si (r = TLS_CERTIFICADO o r = TLS_FALLO o r = TLS_SIN_HORA) y cab[7] > 0 entonces
+            error_tls[cab[7]] := 0
+        sino
+            error_tls[0] := 0
+        fin
+        devolver r
+    fin
+
+    ; (TLS) el cifrado de una conexión segura («TLS 1.2, ECDHE-ECDSA,
+    ; ChaCha20-Poly1305»), a «destino» (caben «cabe»); en «ms», lo que tardó
+    ; el apretón de manos; en «marcas», 1 si la sesión se reanudó y 2 si la
+    ; cadena de certificados ya estaba comprobada (de memoria)
+    público función info_segura(s: nat32, destino: puntero a byte, cabe: nat32, ref ms: nat32, ref marcas: nat32): nat32
+        variable r: nat32
+        r := pide_tls(O_INFO, s, 0, 0, destino, 0, cabe)
+        ms := cab[1]
+        marcas := cab[2]
+        devolver r
+    fin
+
+    ; (TLS) cómo está el servicio TLS (la fecha que usa, las autoridades...):
+    ; un texto, a «destino»: su largo, o un error
+    público función estado_tls(destino: puntero a byte, cabe: nat32): nat32
+        variable r: nat32
+        si cabe > MAX_DATOS entonces cabe := MAX_DATOS fin
+        r := pide_tls(O_ESTADO, 0, 0, 0, destino, 0, cabe - 1)
+        si es_error_red(r) entonces devolver r fin
+        destino[cab[7]] := 0
+        devolver cab[7]
+    fin
+
+    ; (TLS) lo que ha apuntado el servicio TLS
+    público función registro_tls(destino: puntero a byte, cabe: nat32): nat32
+        si cabe > MAX_DATOS entonces cabe := MAX_DATOS fin
+        devolver pide_tls(O_REGISTRO, 0, 0, 0, destino, 0, cabe)
+    fin
+
     ; manda los n octetos de p (todos, aunque haya que esperar): n, o un error
     público función enviar(s: nat32, p: puntero a byte, n: nat32): nat32
         variable hecho, r, trozo: nat32
@@ -230,7 +324,11 @@ módulo Redes
         mientras hecho < n hacer
             trozo := n - hecho
             si trozo > MAX_DATOS entonces trozo := MAX_DATOS fin
-            r := pide(O_ENVIAR, s, 0, 0, 0, p + hecho, trozo, 0)
+            si es_segura(s) entonces
+                r := pide_tls(O_ENVIAR, s, 0, 0, p + hecho, trozo, 0)      ; (TLS)
+            sino
+                r := pide(O_ENVIAR, s, 0, 0, 0, p + hecho, trozo, 0)
+            fin
             si es_error_red(r) entonces devolver r fin
             hecho := hecho + r
         fin
@@ -245,10 +343,12 @@ módulo Redes
     ; hasta «espera» tics): cuántos; 0 si la otra punta ha cerrado; o un error
     público función recibir(s: nat32, p: puntero a byte, cabe: nat32, espera: nat32): nat32
         si cabe > MAX_DATOS entonces cabe := MAX_DATOS fin
+        si es_segura(s) entonces devolver pide_tls(O_RECIBIR, s, espera, 0, p, 0, cabe) fin    ; (TLS)
         devolver pide(O_RECIBIR, s, espera, 0, 0, p, 0, cabe)
     fin
 
     público función cerrar_conexión(s: nat32): nat32
+        si es_segura(s) entonces devolver pide_tls(O_CERRAR, s, 0, 0, nulo, 0, 0) fin      ; (TLS)
         devolver pide(O_CERRAR, s, 0, 0, 0, nulo, 0, 0)
     fin
 
