@@ -50,6 +50,9 @@ def autoexec_cd(edicion):
     """El AUTOEXEC.BAT del disquete de arranque del CD: el de la memoria USB
     con %CD%: (la unidad del CD) en vez de su letra, y antes, buscar el CD."""
     txt = open(os.path.join('usb', 'AUTOEXEC.BAT'), encoding='utf-8').read()
+    # [WINDOWS] WINCONF cambia los archivos de la unidad de arranque (el
+    # disquete): aquí no (es para el disco duro, donde está Windows)
+    txt = re.sub(r'(?m)^IF EXIST C:\\WINDOWS\\WIN\.COM .*\n', '', txt)
     txt = re.sub(r'(?<![A-Za-z0-9%])[A-Z]:\\HISPADOS', r'%CD%:\\HISPADOS', txt)
     txt = re.sub(r'(?m)^PATH .*$', r'PATH %CD%:\\HISPADOS;A:\\HISPADOS', txt)
     busca = ('REM [CD] La unidad del CD de Hispa-DOS: la que tiene \\HISPADOS\\HISPACD.INI.\n'
