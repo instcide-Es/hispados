@@ -929,7 +929,9 @@ propio, con sus tildes y su eñe).
 - **«Apagar el equipo»**: Apagar, Reiniciar o Cancelar. Apagar deja la pantalla de
   «Ya puede apagar el equipo» (en QEMU, además, lo apaga).
 - **Configuración**: lo que hay (la pantalla, la memoria, las tareas), el teclado
-  (español o de EE. UU.) y el tapiz. **Acerca de Hispa-Pentium**: la versión y la
+  (español o de EE. UU.) y el tapiz; y, junto a la pantalla, **«Cambiar...»**: la
+  medida de la pantalla, en el momento donde la tarjeta lo deja y, si no, al
+  arrancar (más abajo, «La medida de la pantalla»). **Acerca de Hispa-Pentium**: la versión y la
   licencia.
 - **El Bloc de notas** (`BLOC.BIN`, `ubloc.cas`): escribir un texto con el teclado
   español y **guardarlo en el disco** («Guardar», F2 o Ctrl+S; en la página 437 y
@@ -977,7 +979,9 @@ gráficos del núcleo (sección 3). **Todo se dibuja con 32 bits por punto**; si
 modo que hay es de 24 o de 16 (hay tarjetas que no dan otro), se dibuja en un
 lienzo de 32 bits aparte y `volcar()` pasa a la pantalla de verdad lo que se ha
 tocado. (`bits=24` o `bits=16` en la línea del cargador lo fuerzan con la VBE de
-Bochs, para probarlo.)
+Bochs, para probarlo.) Con la VBE de Bochs, aunque el modo lo haya puesto el
+cargador, **se cambia en marcha** (`cambia_modo()`: más abajo, «La medida de la
+pantalla»).
 
 **Dibujar** (`grafico.cas`), en Castel. Un **lienzo** es un rectángulo de puntos
 (`0x00RRGGBB`) en la memoria, con su ancho, su alto y los puntos que hay de una
@@ -1078,6 +1082,183 @@ acaban todos.
 
 **Lo que dice el núcleo** con el escritorio en marcha (lo que lanza, los avisos, una
 excepción) sale por el **puerto serie**, como siempre.
+
+### La medida de la pantalla, desde Configuración (20/11)
+
+Lo que faltaba (lo dijo Carlos con el CD 0.8 en VirtualBox: «en Configuración se
+ve la resolución pero no se puede cambiar»). Ahora, en Configuración, junto a
+«Pantalla: 800 x 600, 32 bits por punto», el botón **«Cambiar...»** abre el
+cuadro **«Pantalla»**: la medida de ahora, la **lista de modos** (en verde el
+elegido; en azul el de ahora) y, debajo, lo último que ha pasado. Como en
+Hispa-486, de dos maneras según la tarjeta:
+
+![La lista de modos (QEMU -vga std)](pentium/pantalla-lista.png)
+
+**1. Con la VBE de Bochs: en el momento.** Es la tarjeta de QEMU y Bochs
+(`1234:1111`) y la de **VirtualBox**, tanto la **VBoxVGA** (`80EE:BEEF`) como
+la **VMSVGA** (`15AD:0405`, que lleva la misma VBE debajo mientras no se use
+como SVGA) y la VBoxSVGA: se sabe que está porque su puerto `0x1CE`/`0x1CF`
+contesta `B0C0`-`B0CF`. Aunque el modo lo haya puesto GRUB (el CD, el disco
+instalado), la VBE de la BIOS de esas máquinas es esa misma tarjeta, así que el
+núcleo puede cambiarlo él:
+
+- **«Probar...»** pone la elegida **ya**, y sale **«¿Se ve bien la pantalla?»**
+  con la cuenta atrás: **«Mantener»** (o Intro) la deja; **«Volver»** (o Esc, o
+  cerrar el cuadro) vuelve a la de antes; y si en **15 s** no se dice nada,
+  **vuelve sola** (por si la pantalla se ha quedado a oscuras o fuera de rango).
+  En un sistema instalado, «Mantener» la guarda también para los próximos
+  arranques (`\HISPA\PANTALLA.ENV`, abajo).
+- **Cómo se cambia** (`video.cas`, `cambia_modo()`): se apaga la tarjeta, se le
+  dan el ancho, el alto y 32 bits por punto, se enciende con la memoria seguida, y
+  el ancho virtual y los desplazamientos a la medida (así la fila mide lo que el
+  ancho, venga de donde venga el modo de antes); luego **se lee lo puesto**,
+  también el bit de encendido (VirtualBox, si el modo no le cabe en su memoria,
+  no lo enciende y no dice nada más). La memoria de la pantalla es la misma (la
+  tarjeta no la mueve): se pone a la vista lo que mida ahora. Si algo falla, se
+  vuelve al modo de antes, tal cual. Si el modo de antes era de 24 o 16 bits (con
+  el lienzo de 32 aparte), ese lienzo se suelta: el nuevo siempre es de 32.
+- **Las ventanas** (`ventanas.cas`, `cambia_pantalla()`): un doble búfer y un
+  tapiz nuevos (se piden antes de tocar nada: si no hay memoria, no se cambia),
+  y las ventanas dentro: **las maximizadas, a la medida nueva** (su programa
+  recibe `EV_TAMAÑO` y se vuelve a pintar, como al maximizar); las demás, donde
+  estaban si caben y si no, más arriba o más a la izquierda. El ratón llega hasta
+  el borde nuevo (`pon_medida_ratón()`).
+- **El escritorio** (`escritorio.cas`, `cambia_medida()`): cierra el menú Inicio,
+  los emergentes y el globo; la barra de tareas, de lado a lado y abajo; el menú
+  Inicio, encima; el tapiz, pintado otra vez a la medida; los iconos que se
+  salgan, dentro; los cuadros abiertos, centrados.
+
+![A prueba: la pantalla ya a 1024 x 768, con el Bloc de notas maximizado a la medida nueva](pentium/pantalla-probar.png)
+
+**La lista** (`prepara_modos()`): de 800 x 600 a 1920 x 1080 (800 x 600, 1024 x
+600, 1024 x 768, 1152 x 864, 1280 x 720, 1280 x 800, 1280 x 1024, 1366 x 768,
+1440 x 900, 1600 x 900, 1600 x 1200, 1680 x 1050 y 1920 x 1080), y de ellos solo
+los que caben:
+
+- en **la tarjeta**: lo más que da (la VBE de Bochs lo dice con `GETCAPS`), el
+  ancho en múltiplos de 8 en la de QEMU y Bochs (redondea: 1366 se queda en
+  1360; la de VirtualBox no), y **su
+  memoria**: la de QEMU y Bochs, su registro `0xA` (en trozos de 64 K); la de la
+  VBoxVGA, el mismo registro leído de 32 bits (en octetos: lo que usan los
+  controladores de VirtualBox); la de la VMSVGA no se sabe desde ahí, y entonces
+  manda lo que se lee al ponerlo (si no cabe, no se enciende: se dice y se vuelve);
+- en **la pantalla**: lo que ella dice de sí misma (su **EDID**). En QEMU, la
+  tarjeta lo deja en su tercera zona PCI: la medida que prefiere (se dice debajo:
+  «La pantalla dice que prefiere 1280 x 800») y, de sus medidas de siempre, la
+  más grande; no se ofrece nada más grande. En VirtualBox no hay EDID (su
+  «pantalla» es la ventana, que muestra lo que sea), ni se puede pedir a la BIOS
+  sin volver al modo real (más abajo);
+- en el **núcleo**: los 16 MB de su ventana para la memoria de la pantalla
+  (`GRÁFICOS_TABLAS`) y la memoria libre para el doble búfer y el tapiz nuevos.
+
+El de ahora sale siempre, aunque no sea de la lista.
+
+**2. Sin la VBE de Bochs (un PC de verdad): al arrancar.** El modo lo pone GRUB
+con la VBE de la BIOS, que desde el modo protegido no se puede llamar. El cuadro
+lo dice («Esta tarjeta no deja cambiarla en marcha: se guarda y se pone al
+arrancar otra vez»), la lista lleva también **«A la medida»** (lo que el monitor
+prefiera, `auto`: su EDID, que GRUB sí le pregunta a la BIOS), y el botón es
+**«Guardar y reiniciar...»**: se apunta para el próximo arranque y sale «Al
+arrancar otra vez, a 1024 x 768», con **«Reiniciar ahora»** y «Más tarde».
+
+- **`\HISPA\PANTALLA.ENV`**: un bloque de variables de GRUB (1024 octetos, como
+  `GRUBENV`, para que GRUB pueda escribir en él con `save_env`): `pantalla=`
+  (`1024x768` o `auto`), `antes=` (la de antes, para volver) y `prueba=`. Va
+  aparte de `GRUBENV` porque PAQUETES y ACTUALIZ escriben aquel entero (su
+  `nuevo=`) y se lo llevarían por delante.
+- **`GRUB.CFG` lo lee**: la primera vez que se guarda una medida, si `GRUB.CFG`
+  no lo hace aún (los instalados con la 0.8), el escritorio le añade al final
+  (GRUB lee el archivo entero antes de enseñar el menú, y la entrada usa
+  `$modo` al arrancar):
+
+  ```
+  if [ -f /HISPA/PANTALLA.ENV ]; then
+    load_env -f /HISPA/PANTALLA.ENV pantalla antes prueba
+    if [ "$prueba" = 2 ]; then
+      set pantalla="$antes"
+      set antes=
+      set prueba=0
+      save_env -f /HISPA/PANTALLA.ENV pantalla antes prueba
+    elif [ "$prueba" = 1 ]; then
+      set prueba=2
+      save_env -f /HISPA/PANTALLA.ENV prueba
+    fi
+    if [ "$pantalla" = auto ]; then
+      set modo=auto
+    elif [ -n "$pantalla" ]; then
+      set modo="${pantalla}x32,${pantalla},${modo}"
+    fi
+  fi
+  ```
+
+  La **reserva de siempre** sigue detrás: si la BIOS no tiene esa medida (ni con
+  32 bits ni con otros), GRUB pasa a la de `set modo=` (`800x600x32,800x600,auto`)
+  y, al final, a `auto`: siempre arranca con algo que se ve.
+- **A prueba, al arrancar**: «Guardar» deja `prueba=1`; GRUB, al arrancar con
+  ella, la pone a `2`. El escritorio, al ver `1` o `2`, pregunta **«¿Se ve bien
+  la pantalla?»** con los mismos 15 s: «Mantener» deja `prueba=0`; «Volver» o los
+  15 s apuntan la de antes (`pantalla=antes`) y ofrecen reiniciar. Y si la
+  pantalla se ha quedado a oscuras y se **reinicia a lo bruto**, GRUB ve
+  `prueba=2` (nadie la ha dado por buena) y **vuelve solo a la de antes**.
+- En un sistema instalado **con** la VBE de Bochs (VirtualBox), la medida
+  guardada la pone GRUB al arrancar (con la tarjeta de QEMU y Bochs la pone su
+  controlador `video_bochs`, cualquiera; con las de VirtualBox, por la VBE de la
+  BIOS); y si la BIOS no la tiene (la VMSVGA de QEMU no da, por ejemplo, 1200 x
+  800), GRUB pone otra y **el núcleo la cambia en marcha** al arrancar el
+  escritorio.
+- **Desde el CD o la memoria USB, sin instalar**, no hay dónde guardarla: la
+  lista sale en gris, y para arrancar a la medida está la entrada **«a la medida
+  de la pantalla»** del menú del CD.
+
+![Sin la VBE de Bochs (-vga cirrus, como un PC de verdad): «Guardar y reiniciar...»](pentium/pantalla-guardar.png)
+
+**¿Y la lista de modos de la BIOS?** GRUB deja en la información de multiboot
+la de su VBE (`vbe_control_info`), pero solo trae **números** de modo (y un
+puntero de modo real que puede apuntar a la memoria de trabajo de GRUB, ya
+pisada): la medida de cada uno hay que pedírsela a la BIOS (`4F01h`), y eso no
+se puede desde el modo protegido. Por eso, sin la VBE de Bochs, se ofrece la
+lista de siempre y manda la reserva de GRUB.
+
+**¿Cambiarla en marcha llamando a la VBE de la BIOS?** Evaluado, y **no se ha
+hecho**. Hay dos maneras:
+
+1. **Una tarea V86** (el modo virtual 8086 del procesador, lo que usaban X.org y
+   los controladores VESA de los 90): hace falta el primer mega a la vista **del
+   anillo 3** en ese espacio (la tabla de interrupciones de la página 0, la zona
+   de datos de la BIOS, su EBDA y sus ROM de `C0000h` a `FFFFFh`: hoy están en la
+   identidad del núcleo, sin el permiso del anillo 3), un **monitor** que atienda la
+   protección general de `INT`, `PUSHF`, `POPF`, `CLI`, `STI` e `IRET` (con
+   IOPL < 3) y el mapa de puertos del TSS (hoy no hay); y, sobre todo, una
+   **entrada de interrupción propia** en ensamblador: al pasar de V86 al anillo 0
+   el procesador deja `DS`, `ES`, `FS` y `GS` a 0, y las `interrupción función` de
+   Castel cuentan con `DS` plano (no lo vuelven a cargar), así que la protección
+   general, el fallo de página y las demás excepciones necesitarían su propia
+   puerta para cuando vienen de V86.
+2. **Un emulador de modo real** pequeño (como x86emu, el de X.org y `v86d` de
+   Linux): sin trucos del procesador, pero son miles de líneas para emular todo
+   lo de 16 bits (y de 32, que las VBIOS usan) y los puertos.
+
+Las dos se pueden hacer, pero **lo que no se puede aquí es dejarlo robusto**: la
+única VBIOS que se puede probar (la de QEMU, SeaVGABIOS) ya habla con la VBE de
+Bochs, que se cambia sin BIOS; las de los PC de verdad (la Intel GMA del Toshiba
+y del HP Mini, la de los Mac) hacen cada una lo suyo (llamadas a la BIOS del
+sistema, al PCI BIOS, esperas con el reloj, instrucciones de 32 bits), y un fallo
+ahí deja el equipo **colgado con la pantalla a oscuras**. Con GRUB, en cambio, el
+peor caso es un reinicio y la vuelta sola a la de antes. Queda para más adelante,
+como servicio aparte (al estilo de `ACPI.BIN`), cuando haya en qué probarlo; para
+las Intel GMA, el arreglo de la sección 11 (decirle a la tubería la medida nueva
+sin la BIOS) es lo que más rinde.
+
+**Probado** (parte 17 de las pruebas, `SOLO=pantalla`): con QEMU `-kernel`
+(-vga std: el modo lo pone el núcleo) la lista, «Probar...», «Mantener», el Bloc
+de notas maximizado que se pone a la medida nueva y la vuelta sola a los 15 s;
+el CD en un «pc» como VirtualBox con el modo de GRUB, con `-vga std` (como la
+VBoxVGA) y con `-vga vmware` (la VMSVGA, `15AD:0405`), cambiado en marcha; e
+instalado desde el CD con `-vga cirrus` (sin la VBE de Bochs, como un PC de
+verdad): guardar, reiniciar, la prueba al arrancar con «Mantener», y otra que
+no se da por buena y que GRUB deshace sola al reiniciar a lo bruto. Y,
+instalado con `-vga std`, «Mantener» que se guarda; y con `-vga vmware`, 1200 x
+800 (que su BIOS no da) puesta por el núcleo al arrancar.
 
 ### Lo que falta
 
@@ -1643,7 +1824,10 @@ con el sistema (`usb.sh`):
 | el sistema que ya estaba en el disco | (si se instaló junto a otro) `chainloader +1` de su partición |
 
 La primera línea que cuenta, **`set modo=800x600x32,800x600,auto`**, es la medida
-de la pantalla: la cambia el asistente (o se cambia a mano).
+de la pantalla: la cambia el asistente (o se cambia a mano). Desde el 20/11, lo
+que se elige en Configuración (`\HISPA\PANTALLA.ENV`) va por delante: la
+primera vez que se guarda una medida, el escritorio le añade a `GRUB.CFG` lo que
+la lee (sección 10, «La medida de la pantalla»).
 
 **Sin GRUB**, otro camino para más adelante: un cargador propio (MBR y sector de
 arranque de la partición) que lea el núcleo de la FAT32 y pida el modo a la VBE.
@@ -1754,7 +1938,7 @@ BIOS. En VirtualBox, «Habilitar EFI» tiene que estar quitado (lo está, para
 | el CD/DVD | en el mismo SATA o en el IDE secundario | lo lee GRUB por la BIOS |
 | la red | Intel PRO/1000 MT Desktop (82540EM, `8086:100E`) | la e1000 de `RED.BIN` (ya estaba en la lista) |
 | el USB | OHCI (USB 1.1), con la tableta USB si se elige | OHCI no lo lleva: se deja quieto; teclado y ratón, por PS/2 (el ratón «PS/2» de VirtualBox) |
-| la gráfica | VMSVGA o VBoxVGA, con VBE | el modo lo pone GRUB por la VBE |
+| la gráfica | VMSVGA o VBoxVGA, con VBE | el modo lo pone GRUB por la VBE; desde Configuración se cambia **en marcha** (las dos llevan la VBE de Bochs: sección 10) |
 | ACPI | sí | `ACPI.BIN`: apagar de verdad |
 
 **Probado en QEMU imitando a VirtualBox** (parte 15 de las pruebas): `-machine
@@ -2845,6 +3029,18 @@ de la bandeja al arrancar, «Verlas», «Actualizar todo» con un núcleo nuevo,
 «Reiniciar ahora», «El núcleo nuevo ha arrancado bien» (`nuevo=0`); y con un
 núcleo que se queda en `hlt`, reiniciar a mano: GRUB elige solo el de antes,
 el sistema lo dice y `GRUBENV` queda en `nuevo=4`.
+La **parte 17** (`SOLO=pantalla`, unos seis minutos) prueba la medida de la
+pantalla desde Configuración (sección 10): con `-kernel` (-vga std), la lista
+(con lo que dice el EDID de QEMU), «Probar...», «Mantener», el Bloc de notas
+maximizado a la medida nueva y la vuelta sola a los 15 s; el CD con el modo de
+GRUB en un `pc` como VirtualBox, con `-vga std` y `-vga vmware` (la VMSVGA),
+cambiado en marcha; instalado desde el CD con `-vga cirrus` (sin la VBE de
+Bochs): `PANTALLA.ENV` y `GRUB.CFG`, «Reiniciar ahora», la prueba al arrancar y
+«Mantener», y otra medida que no se da por buena y que GRUB deshace al
+reiniciar a lo bruto; e instalado con `-vga std`: «Mantener» guardada; y con `-vga
+vmware`, 1200 x 800 (que su BIOS no da) puesta por el núcleo al arrancar.
+Con ella, `SOLO=32` (rama `pentium-pantalla`, 20/11 por la noche) dio **479 bien,
+0 mal**.
 
 Con la firma, el núcleo nuevo y el CD, la pasada entera del 20/11 por la tarde (rama
 `pentium-dvd`, con CASTEL32 ya dentro) dio **541 bien, 0 mal**; tras los
@@ -2917,7 +3113,10 @@ arranque. Lo siguiente:
    Configuración deje cambiar lo del asistente, y usuarios con su carpeta.
    Y **los PC de verdad**: probar la 0.6 en el Mac de 2012 (el teclado y el panel
    por el EHCI con transacciones partidas), en el Toshiba y en el HP Mini; la
-   **medida del panel** cuando la BIOS no la da por VBE (sección 11); **enchufar
+   **medida del panel** cuando la BIOS no la da por VBE (sección 11; la medida
+   ya se elige desde Configuración, sección 10, pero en un PC de verdad solo
+   entre las que da la BIOS, y al arrancar; el cambio en marcha por la BIOS, con
+   V86 o un emulador, está evaluado allí y queda para cuando se pueda probar); **enchufar
    y desenchufar** el USB en marcha; las controladoras OHCI; **LBA de 48 bits**
    en el IDE (discos de más de 128 GB en modo IDE) y el canal IDE secundario;
    apagar de verdad (ACPI: hecho el 20/11, sección 11; falta probarlo en el HP
