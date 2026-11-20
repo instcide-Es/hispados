@@ -13,6 +13,8 @@
 #   imgusb    arranque de la imagen USB (su AUTOEXEC.BAT carga HSPRATON sin
 #             opciones: la vía directa, por la rueda)
 #   usb       ratón y teclado USB a través de HSPUSB.SYS (xHCI)
+#   windows   Windows 3.x se lleva el ratón (WINSIM: INT 2Fh 1605h, la BIOS
+#             como su MOUSE.DRV, 1606h) y HSPRATON lo recupera (directa y /BIOS)
 # Sin segundo argumento se hacen todas menos «usb».
 # Mouse test: INT 33h driver, BIOS and direct 8042 paths, under QEMU.
 set -u
@@ -285,6 +287,36 @@ t_usb() {
   fin
 }
 
+# ---- [WINDOWS] Windows 3.x se lleva el ratón (WINSIM: INT 2Fh 1605h, el
+# ratón por la BIOS como su MOUSE.DRV, 1606h) y HSPRATON lo recupera ----
+g_windows() {  # [opción de HSPRATON]
+  sleep 6
+  send "A:\\HISPADOS\\HSPRATON ${1:-}" 3
+  send "BIN\\WINSIM" 3
+  sleep 1; mon "mouse_move 30 0"
+  sleep 1; mon "mouse_move 30 0"
+  sleep 1; mon "mouse_move 0 10"
+  sleep 1; mon "sendkey ret"
+  sleep 4
+  send "BIN\\MOUSETST" 2
+  gestos
+  send "A:\\HISPADOS\\HSPRATON /INFO" 2
+  sleep 1
+}
+t_windows() {  # opción de HSPRATON, «En uso» esperado
+  caso "Windows se lleva el ratón (${1:-sin opciones})"
+  qemu "g_windows $1" 70
+  check "WINSIM: Windows arranca (INT 2Fh 1605h) -> CX=0000"
+  check "WINSIM: C205h=bien C203h=bien C207h=bien C200h=bien"
+  # la BIOS entrega a «Windows» los movimientos (60 a la derecha)
+  if grep -qE "^WINSIM: paquetes de la BIOS=[1-9][0-9]* movimiento X=([5-9][0-9]|[1-9][0-9][0-9])" $T/log.txt; then echo "  OK   Windows recibe el ratón por la BIOS"; else echo "  FAIL Windows no recibe el ratón por la BIOS"; cfail=1; fi
+  check "WINSIM: fin"
+  # y al salir, HSPRATON vuelve a ir (INT 33h) como al cargar
+  check_gestos
+  check "$2"
+  fin
+}
+
 case "$MODE" in
   ps2|bios) t_bios ;;
   directo)  t_directo ;;
@@ -294,7 +326,11 @@ case "$MODE" in
   sin8042)  t_sin8042 ;;
   imgusb)   t_imgusb ;;
   usb)      t_usb ;;
-  todo)     t_bios; t_directo; t_simple; t_reserva; t_teclado; t_sin8042; t_imgusb ;;
+  windows)  t_windows "" "En uso:  vía directa, Ratón PS/2 con rueda (IntelliMouse), paquetes de 4 bytes"
+            t_windows /BIOS "En uso:  vía BIOS, Ratón PS/2, paquetes de 3 bytes" ;;
+  todo)     t_bios; t_directo; t_simple; t_reserva; t_teclado; t_sin8042; t_imgusb
+            t_windows "" "En uso:  vía directa, Ratón PS/2 con rueda (IntelliMouse), paquetes de 4 bytes"
+            t_windows /BIOS "En uso:  vía BIOS, Ratón PS/2, paquetes de 3 bytes" ;;
   *)        echo "modo desconocido: $MODE"; exit 2 ;;
 esac
 exit $fail

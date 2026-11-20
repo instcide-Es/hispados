@@ -545,6 +545,9 @@ $(B)/TECLAS.COM: tests/progs/teclas.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/MOUSETST.COM: tests/progs/mousetst.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+# [WINDOWS] lo que hace Windows 3.x con el ratón (INT 2Fh 1605h/1606h y la BIOS)
+$(B)/WINSIM.COM: tests/progs/winsim.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 # [RUEDA] el touchpad Synaptics en modo absoluto, sin touchpad (tests/run_rueda_tests.sh)
 $(B)/SYNTEST.COM: tests/progs/syntest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -772,7 +775,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/HSPRAM.SYS $(B)/HSPTEST.SYS $(B)/HSPXMS.SYS $(B)/HSPEMM.SYS \
         $(B)/XMSTEST.COM $(B)/MCBWALK.COM $(B)/LOLTEST.COM \
         $(B)/HSPSND.COM $(B)/HSPDPMI.COM $(B)/PLAYWAV.COM $(B)/SONIDO.COM $(B)/AUDICION.COM $(B)/SYS.COM $(B)/HSPUSB.SYS $(B)/KEYB.COM $(B)/INSTALAR.COM $(B)/EDIT.COM $(B)/GESTOR.COM \
-        $(B)/SYSINFO.COM $(B)/EQUIPO.COM $(B)/APAGAR.COM $(B)/REINICIAR.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/HSPJOY.COM $(B)/MANDO.COM $(B)/MOUSETST.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
+        $(B)/SYSINFO.COM $(B)/EQUIPO.COM $(B)/APAGAR.COM $(B)/REINICIAR.COM $(B)/HSPCD.SYS $(B)/HSPRATON.COM $(B)/HSPJOY.COM $(B)/MANDO.COM $(B)/MOUSETST.COM $(B)/WINSIM.COM $(B)/TECLAS.COM $(B)/NOC2.COM $(B)/SHARETST.COM $(B)/FSTEST.COM \
         $(B)/MOVER.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/BUSCAR.COM $(B)/ORDENAR.COM $(B)/PAGINAR.COM $(B)/ELEGIR.COM $(B)/EXPANDIR.COM $(B)/ETIQUETA.COM $(B)/XCOPIAR.COM $(B)/REVISAR.COM $(B)/VELOCIDAD.COM $(B)/LOADFIX.COM $(B)/PROTECTOR.COM $(B)/TECLA.COM $(B)/UNIDADES.COM \
         $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS) $(SMSROMS) $(SONS) $(RED)
 
@@ -875,6 +878,7 @@ $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/AYUDA.HLP sistema/MANDO
 	mcopy -i $@ $(B)/UPPER.COM ::BIN/UPPER.COM
 	mcopy -i $@ $(B)/HELLOEXE.EXE ::HELLOEXE.EXE
 	mcopy -i $@ $(B)/MOUSETST.COM ::BIN/MOUSETST.COM
+	mcopy -i $@ $(B)/WINSIM.COM ::BIN/WINSIM.COM
 	mcopy -i $@ $(B)/TECLAS.COM ::BIN/TECLAS.COM
 	mcopy -i $@ $(B)/NOC2.COM ::BIN/NOC2.COM
 	mcopy -i $@ $(B)/SHARETST.COM ::BIN/SHARETST.COM
