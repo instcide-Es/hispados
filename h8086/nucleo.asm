@@ -1576,10 +1576,9 @@ ed_guarda:
 ; [REINICIO-SILENCIO] INT 15h AH=4Fh: la BIOS (la de un AT o posterior) lo
 ; llama desde INT 09h con cada código de tecla, antes de mirar si es
 ; Ctrl+Alt+Supr. Con Supr (53h) y Ctrl y Alt pulsadas va a reiniciar en
-; caliente: antes se calla el sonido (el altavoz del PC que deja SOUND o BEEP
-; y, en un 386 o mayor con PCI, la tarjeta HD Audio o AC'97, que en los
-; portátiles sigue encendida y suena mientras arranca la BIOS). La tecla
-; sigue su camino. lib/silencio.inc
+; caliente: antes se cierra la puerta del altavoz del PC (lo que deja SOUND
+; o BEEP sonando). Solo eso: un 8086 no tiene tarjeta de sonido y en Hispa-8086
+; cada octeto cuenta. La tecla sigue su camino.
 int15:
         cmp ah, 0x4F
         jne .sigue
@@ -1595,12 +1594,13 @@ int15:
         pop ax
         pop ds
         jne .sigue
-        call silencio
+        push ax
+        in al, 0x61                 ; la puerta del altavoz (bits 0 y 1), cerrada
+        and al, 0xFC
+        out 0x61, al
+        pop ax
 .sigue:
         jmp far [cs:ant15]
-%define SILENCIO_8086
-%define SILENCIO_SIN_AC97
-%include "silencio.inc"
 
 ; reconoce el procesador -> [cpu_tipo]. Cada prueba solo usa lo que ya se sabe
 ; que el procesador tiene
