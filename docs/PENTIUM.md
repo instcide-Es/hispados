@@ -1513,7 +1513,7 @@ de sus métodos y que la BIOS de cada uno apague con `SLP_EN`. Las pruebas
 (sección 15, la parte 14 de `pruebas.sh`) usan la batería de mentira de las de Hispa-DOS
 (`tests/acpi/bateria-qemu.aml`, con `-acpitable`), y apagan y reinician QEMU
 con PIIX4 (`pc`) y con ICH9 (`q35`). Para el equipo: la imagen
-`hispa-pentium-usb-0.8-acpi.zip`, con su LEEME.
+`hispa-pentium-usb-0.8-hp-mini.zip` (o `-toshiba`, la misma), con todo lo de la 0.8 y su LEEME.
 
 ## 12. Instalarlo en el disco duro
 
@@ -2428,12 +2428,15 @@ apagar y reiniciar por el registro de la FADT); sin ACPI (`-no-acpi`: lo de
 antes); un sobremesa (sin pila, y apaga por ACPI); y que un programa
 cualquiera no puede usar las llamadas del servicio.
 
-Con todo, `pruebas.sh` tiene ahora **CUENTA_TOTAL comprobaciones** (423 hasta la 0.7;
+Con todo, `pruebas.sh` tiene ahora **508 comprobaciones** (423 hasta la 0.7;
 de la 0.8, los paquetes, el USB en caliente, la red, apagar de verdad y la
 batería, y las del AHCI del ICH7). La memoria USB trae ahora **16 programas**
 como módulos (eran 9: PAQUETES y ACTUALIZ, RED, IPCONFIG, PING y DESCARGA, y
-ACPI.BIN), y 9 paquetes del sistema (con «red»). Unos cincuenta y cinco
-minutos en el VPS. RESULTADO_PASADA `SOLO=08` (las cuatro partes de la 0.8)
+ACPI.BIN), y 9 paquetes del sistema (con «red»). Algo más de una hora
+en el VPS. La última pasada entera (20/11/2026, con las cinco ramas juntas,
+el arreglo del AHCI del ICH7 y las tablas de CASTEL repartidas) dio **508
+bien, 0 mal**, y los dos compiladores sacan lo mismo en los 52 programas y
+dicen igual los 54 errores. `SOLO=08` (las cuatro partes de la 0.8)
 son unos doce minutos; `SOLO=caliente`, `SOLO=paquetes`, `SOLO=red` y
 `SOLO=acpi`, cada una sola, de tres a cinco.
 
