@@ -190,7 +190,7 @@ check junto "HSPRED descargado."
 check junto "fin-de-la-prueba"
 
 echo "== Wi-Fi en QEMU: HSPWIFI /AUTO (el AUTOEXEC.BAT de Hispa-486: cable primero) =="
-# sin red guardada se carga (desde la 0.9.28: así Hispa Ventanas puede
+# sin red guardada se carga (desde la 0.9.29: así Hispa Ventanas puede
 # buscar las redes); sin tarjeta (sin /SIMULA, QEMU no tiene Broadcom)
 # calla; con HSPRED con enlace calla y se queda el cable; con el cable
 # quitado (set_link off), descarga HSPRED y se carga el Wi-Fi
@@ -210,7 +210,7 @@ rm -f $T/amon
       -netdev user,id=n0 -device e1000,netdev=n0 > $T/auto.raw 2>&1
 tr -d '\r' < $T/auto.raw | iconv -f CP437 -t UTF-8 -c > $T/auto.txt
 sed -n '/HSPWIFI \/AUTO \/SIMULA/,/=A1=/p' $T/auto.txt | head -3 > $T/auto1.txt
-if grep -q "HSPWIFI 0.1" $T/auto1.txt; then ok "/AUTO sin red guardada (y sin cable): se carga, para elegir la red"; else ko "/AUTO sin red guardada: tenía que cargarse (0.9.28)"; fi
+if grep -q "HSPWIFI 0.1" $T/auto1.txt; then ok "/AUTO sin red guardada (y sin cable): se carga, para elegir la red"; else ko "/AUTO sin red guardada: tenía que cargarse (0.9.29)"; fi
 sed -n '/^.*>HSPWIFI \/AUTO$/,/=A2=/p' $T/auto.txt > $T/auto2.txt
 if grep -q "HSPWIFI 0.1" $T/auto2.txt; then ko "/AUTO sin tarjeta: tenía que callar"; else ok "/AUTO sin tarjeta Wi-Fi: calla"; fi
 sed -n '/HSPRED \/AUTO/,/=A3=/p' $T/auto.txt > $T/auto3.txt

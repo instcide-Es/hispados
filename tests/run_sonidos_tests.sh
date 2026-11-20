@@ -116,7 +116,7 @@ EST="texto 174 461 0 9 fina"                # la barra de estado
 printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nFILES=30\r\n' > $T/CONFIG.SYS
 
 echo "== Reproductor de sonido: los archivos del disco =="
-# (desde la 0.9.28 HISPA.WAV va en el disquete «Instalación 2», no en el de
+# (desde la 0.9.29 HISPA.WAV va en el disquete «Instalación 2», no en el de
 # arranque: la prueba lo pone en su copia)
 for f in PROGS/SONIDOS.HVP HISPA.WAV CAMPANA.WAV; do
   disq="$IMG"; nom="disquete"

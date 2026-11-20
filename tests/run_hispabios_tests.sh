@@ -154,7 +154,7 @@ else
 fi
 
 # ---- El arranque en un equipo «actual» y cuando algo falla ----
-# (El fallo de la 0.9.28 en un PC de verdad: HispaBIOS se quedaba parado tras
+# (El fallo de la 0.9.29 en un PC de verdad: HispaBIOS se quedaba parado tras
 # «Mapa de memoria por debajo de 1 MB», en la primera llamada al firmware con
 # la pila sin alinear a 16 octetos; OVMF lo perdona y los firmware actuales,
 # que usan SSE, no.) BOOTX64.EFI se ensambla aquí con las opciones de prueba
