@@ -1064,6 +1064,33 @@ mientras suceso(v, s, cierto) y s.clase <> EV_CERRAR hacer
 fin
 ```
 
+**Los programas de los paquetes en el menú y en el tapiz** (`accesos.cas`,
+desde el 20/11/2026, rama `clicgest-pentium`). Un paquete que trae un programa
+con ventana deja, además, un archivo de texto `NOMBRE.MNU` en `\HISPA\MENU`
+(o en `\MENU`, en un sistema sin instalar), en la página 437 y con CR LF:
+
+```
+nombre=ClicGest
+programa=\HISPA\CLICGEST.BIN
+argumentos=
+icono=\HISPA\MENU\CLICGEST.ICP
+escritorio=si
+```
+
+El escritorio lo pone en el menú Inicio, debajo de «Mi equipo» (el menú crece
+lo que haga falta) y, con `escritorio=si`, como icono del tapiz. Se vuelven a
+leer cada vez que se abre el menú: lo que se instala con el escritorio en
+marcha sale la vez siguiente (y si han cambiado, los iconos del tapiz se
+ordenan otra vez). Hasta seis. El icono es un **`.ICP`**: la magia `HPIC`, el
+ancho y el alto (32 y 32, dos palabras de 32 bits) y 32 x 32 puntos
+`0xAARRGGBB` (de A = 0x80 para arriba se pinta; lo demás es transparente); lo
+hace **`tools/hpicono.py ENTRADA.png SALIDA.ICP`** de un PNG de 32 x 32. En el
+menú se pinta a la mitad (16 x 16). Sin icono, una ventanita.
+
+**Mayús+Tab** (desde la misma fecha): con el escritorio en marcha, el teclado
+la da como la tecla `TECLA_MAYÚS_TAB` (`0x10F`, en `Llamadas`), para que los
+programas vuelvan al control de antes; Tab sigue siendo el 9.
+
 **Los terminales** (`terminal.cas`). Para que la Consola tenga dentro al intérprete
 de órdenes sin tocarlo: un terminal son **dos tubos**. El programa que lo hace (la
 Consola) lee por uno lo que escriben los de dentro y lo pinta, letra a letra, como

@@ -42,7 +42,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Accesos
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -52,7 +52,7 @@ módulo Escritorio
     constante BOTONES_X = 108
     constante BOTÓN_MÁXIMO = 160
     constante MENÚ_ANCHO = 330
-    constante MENÚ_ALTO = 380
+    constante MENÚ_ALTO = 380                   ; sin accesos de paquetes (con ellos, más: menú_alto)
     constante MENÚ_CABEZA = 54
     constante MENÚ_PIE = 42
     constante MENÚ_COLUMNA = 172                ; donde empieza la columna de la derecha
@@ -90,6 +90,7 @@ módulo Escritorio
     constante AM_EQUIPO = 25
     constante AM_OFICINA = 26                   ; un programa de la oficina (dato: cuál)
     constante AM_PROGRAMAS = 27                 ; «Programas y actualizaciones» (ACTUALIZ.BIN)
+    constante AM_ACCESO = 28                    ; un programa de un paquete (accesos.cas; dato: cuál)
     constante N_OFICINA = 4                     ; los que hay: Facturas, Pluma, Cuentas y Mirador
     constante AC_CERRAR_ACERCA = 11
     constante AC_ACERCA = 12
@@ -119,12 +120,13 @@ módulo Escritorio
     constante MAX_BOTONES = 12
 
     ; ---- los iconos del tapiz ----
-    constante MAX_ICONOS = 4
+    constante MAX_ICONOS = 4 + MAX_ACCESOS
     constante CELDA_AN = 112                    ; lo que ocupa uno, con su rótulo
     constante CELDA_AL = 62
     tipo Icono = estructura
         x, ye: ent32
         acción: nat32
+        dato: nat32                             ; (de un acceso: cuál)
         nombre: puntero a byte
         debajo: puntero a nat32                 ; lo que tapa del tapiz (para quitarlo de ahí)
     fin
@@ -136,6 +138,7 @@ módulo Escritorio
     variable cog_movido: bool
     variable menú_dato, menú_acción: nat32      ; de qué va el menú emergente abierto
 
+    variable menú_alto: ent32 = MENÚ_ALTO        ; lo que mide el menú Inicio (crece con los accesos de los paquetes)
     variable v_barra, v_menú, v_apagar, v_config, v_aviso, v_fondo, v_acerca: nat32
     variable menú_abierto: bool
     variable menú_cerrado_en: nat32             ; el tic en que se cerró (por un clic fuera)
@@ -308,6 +311,29 @@ módulo Escritorio
         fin
     fin
 
+    ; el icono de un acceso (el de su .ICP, de 32 x 32; o uno de programa si
+    ; no tiene), tomando uno de cada «salto» puntos (1: 32 x 32; 2: 16 x 16)
+    función icono_acceso(ref l: Lienzo, x: ent32, yy: ent32, i: nat32, salto: ent32)
+        variable p: puntero a nat32
+        variable f, c, lado: ent32
+        variable px: nat32
+        lado := LADO_ICONO div salto
+        p := nulo
+        si i < n_accesos entonces p := icono_de(i) fin
+        si p = nulo entonces
+            ; sin icono: una ventanita
+            redondeado(l, x, yy + lado div 8, lado, lado - lado div 4, 2, 0x4C97EC, 0x1D5DBA, TODAS)
+            rectángulo(l, x + 2, yy + lado div 8 + lado div 5, lado - 4, lado - lado div 4 - lado div 5 - 2, BLANCO)
+            devolver
+        fin
+        para f desde 0 hasta lado - 1 hacer
+            para c desde 0 hasta lado - 1 hacer
+                px := p[nat32(f * salto) * LADO_ICONO + nat32(c * salto)]
+                si px >> 24 >= 0x80 entonces punto(l, x + c, yy + f, px yb 0xFFFFFF) fin
+            fin
+        fin
+    fin
+
     ; una pantalla oscura grande con su «>_» (32 x 28)
     función icono_consola_grande(ref l: Lienzo, x: ent32, yy: ent32)
         redondeado(l, x, yy, 32, 28, 4, 0x4F6890, 0x4F6890, TODAS)
@@ -351,6 +377,7 @@ módulo Escritorio
             según iconos[i].acción
                 caso AM_EQUIPO: icono_equipo(tapiz, x + (CELDA_AN - 32) div 2, yy + 3)
                 caso AM_BLOC: icono_hoja_grande(tapiz, x + (CELDA_AN - 26) div 2, yy + 3)
+                caso AM_ACCESO: icono_acceso(tapiz, x + (CELDA_AN - LADO_ICONO) div 2, yy + 3, iconos[i].dato, 1)
                 si no: icono_consola_grande(tapiz, x + (CELDA_AN - 32) div 2, yy + 5)
             fin
             ; el rótulo, con letra normal: blanco con su sombra; el del elegido, sobre azul
@@ -379,6 +406,10 @@ módulo Escritorio
     fin
 
     función nuevo_icono(nombre: puntero a byte, acción: nat32)
+        nuevo_icono_de(nombre, acción, 0)
+    fin
+
+    función nuevo_icono_de(nombre: puntero a byte, acción: nat32, dato: nat32)
         variable m: puntero a byte
         si n_iconos >= MAX_ICONOS entonces devolver fin
         m := reservar(CELDA_AN * CELDA_AL * 4)
@@ -386,6 +417,7 @@ módulo Escritorio
         iconos[n_iconos].debajo := puntero(m)
         iconos[n_iconos].nombre := nombre
         iconos[n_iconos].acción := acción
+        iconos[n_iconos].dato := dato
         n_iconos := n_iconos + 1
     fin
 
@@ -738,7 +770,7 @@ módulo Escritorio
         si l = nulo entonces devolver fin
         n_opciones := 0
         ; el marco y la cabecera, azul, con el disquete y el nombre
-        rectángulo(valor(l), 0, 0, MENÚ_ANCHO, MENÚ_ALTO, 0x1A56AC)
+        rectángulo(valor(l), 0, 0, MENÚ_ANCHO, menú_alto, 0x1A56AC)
         redondeado(valor(l), 1, 1, MENÚ_ANCHO - 2, MENÚ_CABEZA, 7, 0x4E99EE, 0x1F62C0, ARRIBA)
         rectángulo(valor(l), 8, 2, MENÚ_ANCHO - 16, 1, 0x9CCBFA)
         disquete(valor(l), 9, 7, 42)
@@ -756,9 +788,9 @@ módulo Escritorio
         fin
         rectángulo(valor(l), 1, MENÚ_CABEZA, MENÚ_ANCHO - 2, 2, NARANJA)
         ; las dos columnas
-        rectángulo(valor(l), 2, MENÚ_CABEZA + 2, MENÚ_COLUMNA - 2, MENÚ_ALTO - MENÚ_CABEZA - MENÚ_PIE - 2, BLANCO)
-        rectángulo(valor(l), MENÚ_COLUMNA, MENÚ_CABEZA + 2, MENÚ_ANCHO - MENÚ_COLUMNA - 2, MENÚ_ALTO - MENÚ_CABEZA - MENÚ_PIE - 2, AZUL_CLARO)
-        rectángulo(valor(l), MENÚ_COLUMNA, MENÚ_CABEZA + 2, 1, MENÚ_ALTO - MENÚ_CABEZA - MENÚ_PIE - 2, 0xA9C6EC)
+        rectángulo(valor(l), 2, MENÚ_CABEZA + 2, MENÚ_COLUMNA - 2, menú_alto - MENÚ_CABEZA - MENÚ_PIE - 2, BLANCO)
+        rectángulo(valor(l), MENÚ_COLUMNA, MENÚ_CABEZA + 2, MENÚ_ANCHO - MENÚ_COLUMNA - 2, menú_alto - MENÚ_CABEZA - MENÚ_PIE - 2, AZUL_CLARO)
+        rectángulo(valor(l), MENÚ_COLUMNA, MENÚ_CABEZA + 2, 1, menú_alto - MENÚ_CABEZA - MENÚ_PIE - 2, 0xA9C6EC)
         ; a la izquierda: los programas
         yy := MENÚ_CABEZA + 10
         texto_negrita(valor(l), 12, yy, "Programas", TINTA_SUAVE)
@@ -775,6 +807,14 @@ módulo Escritorio
         degradado(valor(l), 15, yy + 8, 20, 13, 0x7FC2FA, 0x2A7AD6)
         rectángulo(valor(l), 22, yy + 23, 6, 2, 0x7F95B6)
         rectángulo(valor(l), 17, yy + 25, 16, 3, 0x6F87A8)
+        ; los programas de los paquetes (accesos.cas: \HISPA\MENU\*.MNU)
+        i := 0
+        mientras i < n_accesos hacer
+            yy := yy + ALTO_OPCIÓN + 2
+            pinta_opción(valor(l), 4, yy, MENÚ_COLUMNA - 6, nombre_de(i), AM_ACCESO, i, cierto)
+            icono_acceso(valor(l), 13, yy + 5, i, 2)
+            i := i + 1
+        fin
         ; y la oficina de Hispa-386 (programas de Hispa Ventanas: HVPRUN.BIN)
         yy := yy + ALTO_OPCIÓN + 4
         texto_negrita(valor(l), 12, yy, "Oficina", TINTA_SUAVE)
@@ -804,7 +844,7 @@ módulo Escritorio
                 i := i + 1
             fin
         fin
-        yy := MENÚ_ALTO - MENÚ_PIE - ALTO_OPCIÓN - 6
+        yy := menú_alto - MENÚ_PIE - ALTO_OPCIÓN - 6
         ; (encima de Configuración, «Actualizar»: los programas y las actualizaciones)
         pinta_opción_de(valor(l), MENÚ_COLUMNA + 2, yy - 37, MENÚ_ANCHO - MENÚ_COLUMNA - 4, 30, "Actualizar", AM_PROGRAMAS, 0, cierto)
         redondeado(valor(l), MENÚ_COLUMNA + 13, yy - 31, 18, 17, 2, 0x9A6A1E, 0x9A6A1E, TODAS)
@@ -818,20 +858,79 @@ módulo Escritorio
             icono_rueda(valor(l), MENÚ_COLUMNA + 11, yy + 5, AZUL_CLARO)
         fin
         ; el pie: «Apagar el equipo»
-        degradado(valor(l), 1, MENÚ_ALTO - MENÚ_PIE, MENÚ_ANCHO - 2, MENÚ_PIE - 1, 0x3D86E2, 0x1C5CB8)
-        rectángulo(valor(l), 1, MENÚ_ALTO - MENÚ_PIE, MENÚ_ANCHO - 2, 1, 0x7FB6F4)
-        i := nat32(nueva_opción(MENÚ_ANCHO - 190, MENÚ_ALTO - MENÚ_PIE + 5, 182, MENÚ_PIE - 10, AM_APAGAR, 0))
+        degradado(valor(l), 1, menú_alto - MENÚ_PIE, MENÚ_ANCHO - 2, MENÚ_PIE - 1, 0x3D86E2, 0x1C5CB8)
+        rectángulo(valor(l), 1, menú_alto - MENÚ_PIE, MENÚ_ANCHO - 2, 1, 0x7FB6F4)
+        i := nat32(nueva_opción(MENÚ_ANCHO - 190, menú_alto - MENÚ_PIE + 5, 182, MENÚ_PIE - 10, AM_APAGAR, 0))
         si ent32(i) = elegida entonces
-            redondeado(valor(l), MENÚ_ANCHO - 190, MENÚ_ALTO - MENÚ_PIE + 5, 182, MENÚ_PIE - 10, 5, 0x6AAEF6, 0x3A7EDC, TODAS)
+            redondeado(valor(l), MENÚ_ANCHO - 190, menú_alto - MENÚ_PIE + 5, 182, MENÚ_PIE - 10, 5, 0x6AAEF6, 0x3A7EDC, TODAS)
         fin
-        icono_apagar(valor(l), MENÚ_ANCHO - 184, MENÚ_ALTO - MENÚ_PIE + 10)
-        texto_negrita(valor(l), MENÚ_ANCHO - 153, MENÚ_ALTO - MENÚ_PIE + 14, "Apagar el equipo", 0x123F85)
-        texto_negrita(valor(l), MENÚ_ANCHO - 154, MENÚ_ALTO - MENÚ_PIE + 13, "Apagar el equipo", BLANCO)
-        repintada(v_menú, 0, 0, MENÚ_ANCHO, MENÚ_ALTO)
+        icono_apagar(valor(l), MENÚ_ANCHO - 184, menú_alto - MENÚ_PIE + 10)
+        texto_negrita(valor(l), MENÚ_ANCHO - 153, menú_alto - MENÚ_PIE + 14, "Apagar el equipo", 0x123F85)
+        texto_negrita(valor(l), MENÚ_ANCHO - 154, menú_alto - MENÚ_PIE + 13, "Apagar el equipo", BLANCO)
+        repintada(v_menú, 0, 0, MENÚ_ANCHO, menú_alto)
+    fin
+
+    ; vuelve a leer los accesos de los paquetes (accesos.cas); si han
+    ; cambiado, el menú cambia de alto y los iconos del tapiz se rehacen
+    ; (al arrancar, los iconos los pone quien arranca)
+    variable firma_accesos: arreglo [200] de byte
+    función pon_accesos()
+        variable i, k: nat32
+        variable alto_nuevo: ent32
+        variable firma: arreglo [200] de byte
+        lee_accesos()
+        firma[0] := 0
+        i := 0
+        mientras i < n_accesos hacer
+            copiar_hasta(dirección(firma[longitud(firma)]), nombre_de(i), 200 - longitud(firma))
+            si en_escritorio(i) entonces añadir_car(firma, '*') fin
+            añadir_car(firma, '|')
+            i := i + 1
+        fin
+        si iguales(firma, firma_accesos) entonces devolver fin
+        copiar(firma_accesos, firma)
+        ; el menú, más alto (si la pantalla da)
+        alto_nuevo := MENÚ_ALTO + ent32(n_accesos) * (ALTO_OPCIÓN + 2)
+        si alto_nuevo > pantalla.alto - ALTO_BARRA - 8 entonces alto_nuevo := pantalla.alto - ALTO_BARRA - 8 fin
+        si alto_nuevo <> menú_alto y v_menú <> 0 entonces
+            menú_alto := alto_nuevo
+            cerrar_ventana(v_menú, 0)
+            v_menú := crear_ventana("menú", 0, pantalla.alto - ALTO_BARRA - menú_alto, MENÚ_ANCHO, menú_alto, SIN_MARCO ob ENCIMA ob OCULTA ob REDONDA, 0)
+        fin
+        menú_alto := alto_nuevo
+        si v_fondo = 0 entonces devolver fin
+        ; los iconos del tapiz: los de siempre y los de los accesos que lo piden
+        quita_iconos()
+        k := 0
+        i := 0
+        mientras i < n_iconos hacer
+            si iconos[i].acción <> AM_ACCESO entonces
+                iconos[k].x := iconos[i].x
+                iconos[k].ye := iconos[i].ye
+                iconos[k].acción := iconos[i].acción
+                iconos[k].dato := iconos[i].dato
+                iconos[k].nombre := iconos[i].nombre
+                iconos[k].debajo := iconos[i].debajo
+                k := k + 1
+            sino
+                liberar(puntero(iconos[i].debajo))
+            fin
+            i := i + 1
+        fin
+        n_iconos := k
+        i := 0
+        mientras i < n_accesos hacer
+            si en_escritorio(i) entonces nuevo_icono_de(nombre_de(i), AM_ACCESO, i) fin
+            i := i + 1
+        fin
+        icono_elegido := -1
+        organiza_iconos()
+        pon_iconos()
     fin
 
     función abre_menú()
         lee_documentos()
+        pon_accesos()
         elegida := -1
         menú_abierto := cierto
         pinta_menú()
@@ -1280,6 +1379,7 @@ módulo Escritorio
             caso AM_APAGAR: abre_apagar()
             caso AM_EQUIPO: lanza("\\EQUIPO.BIN", nulo)
             caso AM_PROGRAMAS: lanza("\\ACTUALIZ.BIN", nulo)
+            caso AM_ACCESO: si dato < n_accesos entonces lanza(programa_de(dato), argumentos_de(dato)) fin
             caso AM_OFICINA: lanza("\\HVPRUN.BIN", de_oficina(dato, cierto))
             caso AC_ACERCA: abre_acerca()
             caso AC_CERRAR_ACERCA: cierra_cuadro(v_acerca)
@@ -1352,7 +1452,7 @@ módulo Escritorio
                             si opciones[n].acción <> AM_APAGAR entonces
                                 menú_acción := opciones[n].acción
                                 menú_dato := opciones[n].dato
-                                abrir_emergente(ent32(e.a), pantalla.alto - ALTO_BARRA - MENÚ_ALTO + ent32(e.b), "Abrir", 0, 0, ME_INICIO)
+                                abrir_emergente(ent32(e.a), pantalla.alto - ALTO_BARRA - menú_alto + ent32(e.b), "Abrir", 0, 0, ME_INICIO)
                             fin
                         sino
                             cierra_menú()
@@ -1435,7 +1535,7 @@ módulo Escritorio
                         fin
                     sino si k >= 0 entonces
                         si (e.c >> DESPLAZA_VECES) = 2 entonces
-                            haz(iconos[k].acción, 0)
+                            haz(iconos[k].acción, iconos[k].dato)
                         sino
                             icono_cogido := k
                             cog_dx := x - iconos[k].x
@@ -1478,7 +1578,7 @@ módulo Escritorio
                 cierra_menú()
                 si opción = 0 entonces haz(menú_acción, menú_dato) fin
             caso ME_ICONO:
-                si opción = 0 y menú_dato < n_iconos entonces haz(iconos[menú_dato].acción, 0) fin
+                si opción = 0 y menú_dato < n_iconos entonces haz(iconos[menú_dato].acción, iconos[menú_dato].dato) fin
             caso ME_USB:
                 si opción < n_usb y opción < 3 entonces quitar(usb_letras[opción]) fin
         fin
@@ -1551,6 +1651,7 @@ módulo Escritorio
         variable an, al, bits: nat32
         variable p, q: puntero a byte
         variable t: puntero a Tarea
+        variable i: nat32
         variable d: arreglo [5] de nat32
         si escritorio_en_marcha entonces devolver 1 fin
         bits := 0
@@ -1592,7 +1693,8 @@ módulo Escritorio
         unidades_vistas := Unidades.cambios
         pinta_tapiz()
         v_barra := crear_ventana("barra", 0, pantalla.alto - ALTO_BARRA, pantalla.ancho, ALTO_BARRA, SIN_MARCO ob ENCIMA, 0)
-        v_menú := crear_ventana("menú", 0, pantalla.alto - ALTO_BARRA - MENÚ_ALTO, MENÚ_ANCHO, MENÚ_ALTO, SIN_MARCO ob ENCIMA ob OCULTA ob REDONDA, 0)
+        pon_accesos()
+        v_menú := crear_ventana("menú", 0, pantalla.alto - ALTO_BARRA - menú_alto, MENÚ_ANCHO, menú_alto, SIN_MARCO ob ENCIMA ob OCULTA ob REDONDA, 0)
         si v_barra = 0 o v_menú = 0 entonces
             escribir("escritorio: no hay memoria para la barra de tareas\n")
             devolver 0
@@ -1605,6 +1707,11 @@ módulo Escritorio
         nuevo_icono("Mi equipo", AM_EQUIPO)
         nuevo_icono("Bloc de notas", AM_BLOC)
         nuevo_icono("Consola", AM_CONSOLA)
+        i := 0
+        mientras i < n_accesos hacer
+            si en_escritorio(i) entonces nuevo_icono_de(nombre_de(i), AM_ACCESO, i) fin
+            i := i + 1
+        fin
         organiza_iconos()
         pon_iconos()
         pinta_barra()

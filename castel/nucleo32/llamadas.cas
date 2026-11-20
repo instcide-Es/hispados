@@ -56,6 +56,7 @@ módulo Llamadas
     público constante TECLA_F1 = 0x13B
     público constante TECLA_F3 = 0x13D
     público constante TECLA_F8 = 0x142
+    público constante TECLA_MAYÚS_TAB = 0x10F   ; Mayús+Tab (en una ventana del escritorio): el control de antes
     público constante CTRL_C = 3
 
     público constante CORTADA = 254             ; el código de un programa acabado con Ctrl+C
