@@ -12,7 +12,7 @@ módulo Registro
 
     importar Formato
 
-    público constante CABE_REGISTRO = 8000
+    público constante CABE_REGISTRO = 12000
     público variable registro: arreglo [CABE_REGISTRO] de byte   ; con los finales de línea del DOS
     público variable registro_largo: nat32
     variable renglón: arreglo [240] de byte

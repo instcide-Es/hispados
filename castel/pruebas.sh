@@ -1404,7 +1404,7 @@ mira "AHCI: se leen sectores por DMA: una carpeta, un archivo de varios clusters
 # vuelta, reiniciando la controladora y cada puerto (COMRESET), si a la primera no sale el disco
 S=$N/sata.sal
 mira "AHCI: la orden «disco» dice lo que se ha visto: la controladora, CAP/PI/VS y cada puerto (SSTS, TFD, firma)" \
-  "^ahci: controladora 00:04\.0, 8086:2922, orden 0107, ABAR " "^ahci: CAP [0-9A-F]*, GHC 80000000, PI 0000003F, VS 00010000" \
+  "^ahci: controladora 00:0[0-9A-F]\.0, 8086:2922, orden 0107, ABAR " "^ahci: CAP [0-9A-F]*, GHC 80000000, PI 0000003F, VS 00010000" \
   "^ahci: puerto 0: SSTS 00000113, CMD [0-9A-F]*, TFD 00000050, SIG 00000101$" "^ahci: puerto 0: disco QEMU HARDDISK, 16 MB$"
 ARRANQUE="ahci=pi0 ahci=desalineada ahci=reinicio" SATA=$P/d16.img MODULOS= $AQUI/nucleo32/probar.sh "" disco "dir" apagar > $N/sataav.sal 2>&1
 S=$N/sataav.sal
@@ -1412,6 +1412,25 @@ mira "AHCI, averías: con PI a 0, con los registros a media página y reiniciand
   "^ahci: prueba de la base desalineada ([0-9A-F]*100): bien$" "^ahci: PI vale 0: se miran los puertos que dice CAP (0000003F)$" \
   "^ahci: ningún disco: se reinicia la controladora$" "^ahci: puerto 0: SSTS 00000113, CMD [0-9A-F]*, TFD 0000007F, SIG FFFFFFFF$" \
   "^ahci: puerto 0: disco QEMU HARDDISK, 16 MB$" "^disco 0: QEMU HARDDISK, 16 MB, FAT16 (SATA)\.$" "^LEEME.TXT  *118$"
+# 1c. el orden de la norma (AHCI 1.3, 10.1.2), lo que no le salía al ICH7 del
+# Toshiba: FRE = 1 antes de mirar TFD y, si el disco sigue ocupado, el COMRESET
+# con FRE = 1 y luego ST = 1 («ahci=ocupado»: como si TFD siguiera en 80h); y la
+# segunda vuelta del ICH6/ICH7 («ahci=ich7»), sin GHC.HR: solo el COMRESET de cada puerto
+ARRANQUE="ahci=ocupado" SATA=$P/d16.img MODULOS= $AQUI/nucleo32/probar.sh "" disco "dir" apagar > $N/sataoc.sal 2>&1
+S=$N/sataoc.sal
+l1=$(grep -n "^ahci: puerto 0: tras FRE=1: SSTS 00000113, TFD [0-9A-F]*, SERR 00000000, CMD [0-9A-F]*, SIG 00000101$" $S | head -1 | cut -d: -f1)
+l2=$(grep -n "^ahci: puerto 0: tras COMRESET: SSTS 00000113, TFD [0-9A-F]*, SERR 00000000" $S | head -1 | cut -d: -f1)
+l3=$(grep -n "^ahci: puerto 0: tras ST=1: SSTS 00000113, TFD [0-9A-F]*, SERR 00000000, CMD [0-9A-F]*[13579BDF], SIG 00000101$" $S | head -1 | cut -d: -f1)
+if [ -n "$l1" ] && [ -n "$l2" ] && [ -n "$l3" ] && [ "$l1" -lt "$l2" ] && [ "$l2" -lt "$l3" ] && grep -q "^ahci: puerto 0: disco QEMU HARDDISK, 16 MB$" $S \
+  && grep -q "^LEEME.TXT  *118$" $S && ! grep -q "se reinicia la controladora" $S; then
+  ok "AHCI, el orden de la norma: FRE=1 antes de mirar TFD; con el disco ocupado, COMRESET (con FRE=1) y luego ST=1; cada paso, apuntado (SSTS, TFD, SERR); el disco sale y se lee"
+else ko "AHCI: el orden FRE=1, COMRESET, ST=1 no sale así ($l1, $l2, $l3):"; grep "^ahci: puerto 0" $S | sed 's/^/        /' | head -6; fi
+ARRANQUE="ahci=reinicio ahci=ich7" SATA=$P/d16.img MODULOS= $AQUI/nucleo32/probar.sh "" disco "dir" apagar > $N/sataich7.sal 2>&1
+S=$N/sataich7.sal
+if grep -q "^ahci: ningún disco: COMRESET de cada puerto (en el ICH6/ICH7, sin reiniciar la controladora)$" $S && ! grep -q "se reinicia la controladora\|^ahci: reiniciada" $S \
+  && grep -q "^ahci: puerto 0: tras COMRESET: SSTS 00000113" $S && grep -q "^ahci: puerto 0: disco QEMU HARDDISK, 16 MB$" $S && grep -q "^LEEME.TXT  *118$" $S; then
+  ok "AHCI, la segunda vuelta en un ICH6/ICH7: sin GHC.HR (que en el Toshiba deja los puertos sin enlace), solo el COMRESET de cada puerto; el disco sale"
+else ko "AHCI: la segunda vuelta del ICH7 no va como debe:"; grep "^ahci:" $S | sed 's/^/        /' | head -8; fi
 # 2. escribir en él (FAT32 y la FAT16 de una partición), y que quede sano
 for c in 32 mbr; do
   case $c in 32) que="FAT32" ;; mbr) que="FAT16 en una partición" ;; esac
@@ -1954,9 +1973,9 @@ for hc in xhci ehci; do
   # lo instalado, apuntado para PAQUETES: los registros de los paquetes del sistema, en \HISPA\PAQUETES
   rm -rf $Z/pqi $Z/pqu; mkdir $Z/pqi $Z/pqu
   mcopy -n -i $Z/vol.img '::HISPA/PAQUETES/*' $Z/pqi/ > /dev/null 2>&1; mcopy -n -i $G/usb.img@@1M '::INSTALA/PAQUETES/*' $Z/pqu/ > /dev/null 2>&1
-  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
+  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
     && mcopy -n -i $Z/vol.img ::HISPA/PAQUETES.BIN $Z/f.bin > /dev/null 2>&1; then
-    ok "$que: INSTALAR apunta lo que instala: los registros de los 8 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
+    ok "$que: INSTALAR apunta lo que instala: los registros de los 9 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
   else ko "$que: lo instalado no queda apuntado en C:\\HISPA\\PAQUETES:"; ls $Z/pqi | sed 's/^/        /' | head -10; fi
   # SOLO el disco: el primer arranque
   desde_disco $Z/d$hc.img $Z/a$hc.sal

@@ -18,10 +18,18 @@
 ;  la controladora (los discos ya giran: los arrancó la BIOS); se le pide a
 ;  la BIOS que la suelte si la norma lo prevé, se encienden los puertos (en
 ;  las de Intel, también en su registro PCS del PCI, como hace Linux), se
-;  despierta el enlace, se para cada puerto, se le dan sus tablas y se
-;  vuelve a poner en marcha. Si así no sale ningún disco, se reinicia la
-;  controladora entera y cada puerto (COMRESET) y se espera a que el disco
-;  gire, como Linux.
+;  despierta el enlace, y cada puerto con algo enchufado va como dice la
+;  norma (AHCI 1.3, 10.1.2): parar ST y FRE (y esperar CR y FR), darle sus
+;  tablas (CLB, FB), FRE = 1, limpiar SERR e IS y SOLO ENTONCES mirar TFD
+;  (TFD sale del FIS que manda el disco: con FRE = 0 se queda como estaba).
+;  Si el disco sigue ocupado (BSY o DRQ), un COMRESET del puerto CON FRE = 1,
+;  para que el FIS que manda el disco al volver el enlace llegue (es lo que
+;  le pasaba al ICH7 del Toshiba NB250: el FIS del COMRESET de la BIOS se
+;  había perdido y TFD se quedaba en 80h); luego ST = 1 e IDENTIFY. Si así
+;  no sale ningún disco, la segunda vuelta: COMRESET de cada puerto y más
+;  espera a que el disco gire; y, salvo en el ICH6 y el ICH7, antes se
+;  reinicia la controladora entera (GHC.HR), como Linux (en el ICH7, el
+;  reinicio deja los puertos sin enlace: no se hace).
 ;
 ;  Lo que va encontrando (la controladora, sus registros y, por cada puerto,
 ;  SSTS, TFD y la firma) se apunta en el registro del arranque (ARRANQUE.TXT)
@@ -64,6 +72,8 @@ módulo Ahci
     constante CMD_CPD = 0x100000
     constante CMD_ICC = 0xF0000000              ; el estado del enlace que se pide
     constante CMD_ACTIVO = 0x10000000           ; (1: activo, que se despierte)
+    constante CMD_ALPE = 0x04000000             ; el ahorro de energía del enlace, solo...
+    constante CMD_ASP = 0x08000000              ; ...y el de «dormido»: se quitan, como Linux
     constante CAP_SSS = 0x08000000              ; los discos giran uno a uno (escalonado)
     constante GHC_AE = 0x80000000
     constante GHC_HR = 0x00000001
@@ -111,7 +121,7 @@ módulo Ahci
     variable espera_disco: nat32                ; las centésimas que se espera a que el disco esté listo
 
     ; ---- lo que se ha visto, para el registro del arranque y la orden «disco» ----
-    público constante CABE_INFORME = 2000
+    público constante CABE_INFORME = 4000
     público variable informe: arreglo [CABE_INFORME] de byte
     variable informe_largo: nat32
     variable renglón: arreglo [160] de byte
@@ -299,37 +309,43 @@ módulo Ahci
         n := c
         si cap yb CAP_SSS <> 0 entonces n := n ob CMD_SUD fin
         si c yb CMD_CPD <> 0 entonces n := n ob CMD_POD fin
+        n := n yb nob (CMD_ALPE ob CMD_ASP)                     ; (como Linux, «max_performance»)
         si n <> c entonces pon(del_puerto(p, P_CMD), n) fin
         si (n yb CMD_ICC) = 0 entonces pon(del_puerto(p, P_CMD), n ob CMD_ACTIVO) fin
         devolver n <> c
     fin
 
+    ; lo que tiene el puerto p ahora, para el registro (tras cada paso)
+    función di_puerto(p: nat32, qué: puntero a byte)
+        di("ahci: puerto %u: %s: SSTS %08X, TFD %08X, SERR %08X", p, nat32(qué), lee(del_puerto(p, P_SSTS)), lee(del_puerto(p, P_TFD)), lee(del_puerto(p, P_SERR)))
+        di(", CMD %08X, SIG %08X\n", lee(del_puerto(p, P_CMD)), lee(del_puerto(p, P_SIG)), 0, 0, 0)
+    fin
+
     ; prepara el puerto p y, si tiene un disco, lo apunta. Con «a_fondo» (la
-    ; segunda vuelta, tras reiniciar la controladora), además el COMRESET y
-    ; esperar más a que el disco esté listo.
+    ; segunda vuelta), siempre el COMRESET y esperar más a que el disco esté
+    ; listo. El orden, el de la norma (AHCI 1.3, 10.1.2): parar el puerto,
+    ; sus tablas, FRE = 1, limpiar SERR e IS, mirar TFD (y, si sigue
+    ; ocupado, el COMRESET, con FRE = 1), ST = 1.
     función mira_puerto(p: nat32, a_fondo: bool)
         variable s, i, t, firma: nat32
         variable id: puntero a nat16
+        variable reiniciar: bool
         di("ahci: puerto %u: SSTS %08X, CMD %08X, TFD %08X, SIG %08X\n", p, lee(del_puerto(p, P_SSTS)), lee(del_puerto(p, P_CMD)), lee(del_puerto(p, P_TFD)), lee(del_puerto(p, P_SIG)))
         si enciende_puerto(p) entonces espera_enlace(p, 100) fin
-        si a_fondo entonces
-            si no para_puerto(p) entonces
-                di("ahci: puerto %u: no se para (CMD %08X)\n", p, lee(del_puerto(p, P_CMD)), 0, 0, 0)
-                devolver
-            fin
-            reinicia_puerto(p)
-        fin
         t := lee(del_puerto(p, P_SSTS))
-        si (t yb 0x0F) <> 3 entonces                            ; nada enchufado (o sin enlace)
+        ; a la primera, sin enlace: nada enchufado (en la segunda, el
+        ; COMRESET puede traerlo)
+        si (t yb 0x0F) <> 3 y no a_fondo entonces
             si (t yb 0x0F) <> 0 entonces di("ahci: puerto %u: sin enlace (SSTS %08X)\n", p, t, 0, 0, 0) fin
             devolver
         fin
-        puertos_con_algo := puertos_con_algo + 1
         si cuántos >= MAX_SATA entonces devolver fin
+        ; 1. parado: ST = 0 y FRE = 0, y esperar CR = 0 y FR = 0
         si no para_puerto(p) entonces
             di("ahci: puerto %u: no se para (CMD %08X)\n", p, lee(del_puerto(p, P_CMD)), 0, 0, 0)
             devolver
         fin
+        ; 2. sus tablas: la lista de órdenes (CLB) y el sitio de los FIS (FB)
         s := cuántos
         satas[s].hay := falso
         satas[s].puerto := p
@@ -342,11 +358,34 @@ módulo Ahci
         pon(del_puerto(p, P_FB), satas[s].tablas + 0x400)
         pon(del_puerto(p, P_FB + 4), 0)
         pon(del_puerto(p, P_IE), 0)                             ; sin interrupciones: se mira
+        ; 3. FRE = 1 (y esperar FR): desde ahora, lo que mande el disco llega
+        pon(del_puerto(p, P_CMD), lee(del_puerto(p, P_CMD)) ob CMD_FRE)
+        espera(del_puerto(p, P_CMD), CMD_FR, CMD_FR, 50)
+        ; 4. limpiar SERR (también DIAG.X, que si no, el puerto no arranca) e IS
         pon(del_puerto(p, P_SERR), 0xFFFFFFFF)
         pon(del_puerto(p, P_IS), 0xFFFFFFFF)
-        pon(del_puerto(p, P_CMD), lee(del_puerto(p, P_CMD)) ob CMD_FRE)
-        ; que el disco esté listo (un disco que gira puede tardar unos segundos)
-        ; y que haya dicho quién es (la firma llega con su primer FIS)
+        di_puerto(p, "tras FRE=1")
+        ; 5. TFD, ya con FRE = 1. Si el disco sigue ocupado (BSY o DRQ) al
+        ; medio segundo, o sin enlace, o en la segunda vuelta: el COMRESET,
+        ; con FRE = 1, para que llegue el FIS que el disco manda al volver el
+        ; enlace (con «ahci=ocupado», siempre: la prueba de este camino)
+        reiniciar := a_fondo o prueba("ahci=ocupado") o (lee(del_puerto(p, P_SSTS)) yb 0x0F) <> 3
+        si no reiniciar entonces reiniciar := no espera(del_puerto(p, P_TFD), 0x88, 0, 50) fin
+        si reiniciar entonces
+            reinicia_puerto(p)
+            pon(del_puerto(p, P_SERR), 0xFFFFFFFF)
+            pon(del_puerto(p, P_IS), 0xFFFFFFFF)
+            di_puerto(p, "tras COMRESET")
+        fin
+        t := lee(del_puerto(p, P_SSTS))
+        si (t yb 0x0F) <> 3 entonces                            ; nada enchufado (o sin enlace)
+            si (t yb 0x0F) <> 0 entonces di("ahci: puerto %u: sin enlace (SSTS %08X)\n", p, t, 0, 0, 0) fin
+            para_puerto(p)                                      ; (que no reciba nada en esas tablas)
+            devolver
+        fin
+        puertos_con_algo := puertos_con_algo + 1
+        ; que el disco esté listo (un disco que gira puede tardar unos
+        ; segundos) y que haya dicho quién es (la firma llega con su FIS)
         si no espera(del_puerto(p, P_TFD), 0x88, 0, espera_disco) entonces
             di("ahci: puerto %u: el disco sigue ocupado (TFD %08X)\n", p, lee(del_puerto(p, P_TFD)), 0, 0, 0)
         fin
@@ -354,7 +393,10 @@ módulo Ahci
             i := tics + 100
             mientras lee(del_puerto(p, P_SIG)) = 0xFFFFFFFF y tics <= i hacer lee(CAP) fin
         fin
+        ; 6. ST = 1: el puerto atiende órdenes
+        pon(del_puerto(p, P_SERR), 0xFFFFFFFF)
         pon(del_puerto(p, P_CMD), lee(del_puerto(p, P_CMD)) ob CMD_ST)
+        di_puerto(p, "tras ST=1")
         ; un lector de CD (ATAPI) u otra cosa: no es un disco. (Con una firma
         ; que no se conoce, o sin firma, se le pregunta igual: IDENTIFY.)
         firma := lee(del_puerto(p, P_SIG))
@@ -412,12 +454,20 @@ módulo Ahci
     ; ha dejado alguno apagado, se enciende (como ahci_intel_pcs_quirk, en
     ; Linux). A la primera, solo en las del ICH6 y el ICH7 (las de esta
     ; avería); en la segunda vuelta, en todas las de Intel.
-    función enciende_pcs(pi: nat32, todas: bool)
-        variable pcs, id: nat32
+    ; ¿es la AHCI de un ICH6 o un ICH7 de Intel?
+    función ich6_o_7(): bool
+        variable id: nat32
+        si prueba("ahci=ich7") entonces devolver cierto fin     ; (para probar en QEMU el camino del ICH7)
         id := pci_leer(aparato, 0)
-        si id yb 0xFFFF <> 0x8086 entonces devolver fin
+        si id yb 0xFFFF <> 0x8086 entonces devolver falso fin
         id := id >> 16
-        si no todas y id <> 0x2652 y id <> 0x2653 y id <> 0x27C1 y id <> 0x27C5 y id <> 0x27C3 entonces devolver fin
+        devolver id = 0x2652 o id = 0x2653 o id = 0x27C1 o id = 0x27C5 o id = 0x27C3
+    fin
+
+    función enciende_pcs(pi: nat32, todas: bool)
+        variable pcs: nat32
+        si pci_leer(aparato, 0) yb 0xFFFF <> 0x8086 entonces devolver fin
+        si no todas y no ich6_o_7() entonces devolver fin
         pi := pi yb 0x3F
         pcs := pci_leer16(aparato, PCI_PCS)
         si (pcs yb pi) <> pi entonces
@@ -533,8 +583,15 @@ módulo Ahci
         mientras vuelta < 2 y cuántos = 0 hacer
             espera_disco := 300
             si vuelta = 1 entonces
-                di("ahci: ningún disco: se reinicia la controladora\n", 0, 0, 0, 0, 0)
-                reinicia_controladora(pi)
+                ; (en el ICH6 y el ICH7, GHC.HR deja los puertos sin enlace,
+                ; que no vuelve: solo el COMRESET de cada puerto; con
+                ; «ahci=hr», la controladora entera también, para probarlo)
+                si ich6_o_7() y no prueba("ahci=hr") entonces
+                    di("ahci: ningún disco: COMRESET de cada puerto (en el ICH6/ICH7, sin reiniciar la controladora)\n", 0, 0, 0, 0, 0)
+                sino
+                    di("ahci: ningún disco: se reinicia la controladora\n", 0, 0, 0, 0, 0)
+                    reinicia_controladora(pi)
+                fin
                 espera_disco := 1000
             fin
             puertos_con_algo := 0
