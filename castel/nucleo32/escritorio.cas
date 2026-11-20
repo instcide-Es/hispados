@@ -80,6 +80,7 @@ módulo Escritorio
     constante AM_APAGAR = 24
     constante AM_EQUIPO = 25
     constante AM_OFICINA = 26                   ; un programa de la oficina (dato: cuál)
+    constante AM_PROGRAMAS = 27                 ; «Programas y actualizaciones» (ACTUALIZ.BIN)
     constante N_OFICINA = 4                     ; los que hay: Facturas, Pluma, Cuentas y Mirador
     constante AC_CERRAR_ACERCA = 11
     constante AC_ACERCA = 12
@@ -694,6 +695,11 @@ módulo Escritorio
             fin
         fin
         yy := MENÚ_ALTO - MENÚ_PIE - ALTO_OPCIÓN - 6
+        ; (encima de Configuración, «Actualizar»: los programas y las actualizaciones)
+        pinta_opción_de(valor(l), MENÚ_COLUMNA + 2, yy - 37, MENÚ_ANCHO - MENÚ_COLUMNA - 4, 30, "Actualizar", AM_PROGRAMAS, 0, cierto)
+        redondeado(valor(l), MENÚ_COLUMNA + 13, yy - 31, 18, 17, 2, 0x9A6A1E, 0x9A6A1E, TODAS)
+        redondeado(valor(l), MENÚ_COLUMNA + 14, yy - 30, 16, 15, 1, 0xF2C46C, 0xD69A3A, TODAS)
+        rectángulo(valor(l), MENÚ_COLUMNA + 21, yy - 30, 2, 15, 0xB9822F)
         rectángulo(valor(l), MENÚ_COLUMNA + 10, yy - 5, MENÚ_ANCHO - MENÚ_COLUMNA - 22, 1, 0xA9C6EC)
         pinta_opción(valor(l), MENÚ_COLUMNA + 2, yy, MENÚ_ANCHO - MENÚ_COLUMNA - 4, "Configuración", AM_CONFIG, 0, cierto)
         si elegida >= 0 y opciones[elegida].acción = AM_CONFIG entonces
@@ -955,6 +961,7 @@ módulo Escritorio
             caso AM_CONFIG: abre_config()
             caso AM_APAGAR: abre_apagar()
             caso AM_EQUIPO: lanza("\\EQUIPO.BIN", nulo)
+            caso AM_PROGRAMAS: lanza("\\ACTUALIZ.BIN", nulo)
             caso AM_OFICINA: lanza("\\HVPRUN.BIN", de_oficina(dato, cierto))
             caso AC_ACERCA: abre_acerca()
             caso AC_CERRAR_ACERCA: cierra_cuadro(v_acerca)

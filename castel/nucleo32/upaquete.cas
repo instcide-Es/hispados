@@ -1445,6 +1445,28 @@ módulo UPaquetes
         fin
     fin
 
+    ; para la ventana (ACTUALIZ.BIN): una línea por paquete, fácil de leer,
+    ; «p|nombre|instalada|la más nueva del catálogo|descripción» (lo instalado
+    ; primero); y antes, «origen|de dónde»
+    función di_estado()
+        variable i, c: nat32
+        variable d: arreglo [200] de byte
+        carga_catálogo()
+        escribir("origen|", origen, "\n")
+        para i desde 1 hasta ins_n hacer
+            campo(ins_cab[i - 1], "descripcion", d, 200)
+            escribir("p|", ins_nombre[i - 1], "|", ins_versión[i - 1], "|")
+            c := mejor_del_catálogo(ins_nombre[i - 1], 0, "")
+            si c <> NINGUNO entonces escribir(cat_versión[c]) fin
+            escribir("|", d, "\n")
+        fin
+        para i desde 1 hasta cat_n hacer
+            si instalado(cat_nombre[i - 1]) = NINGUNO y mejor_del_catálogo(cat_nombre[i - 1], 0, "") = i - 1 entonces
+                escribir("p|", cat_nombre[i - 1], "||", cat_versión[i - 1], "|", cat_desc[i - 1], "\n")
+            fin
+        fin
+    fin
+
     ; hace el plan: comprueba que todo cabe junto, las sumas de todo, y
     ; luego instala uno a uno (lo que se necesita, antes)
     función hace_plan(): bool
@@ -1797,6 +1819,8 @@ módulo UPaquetes
             bien := quita()
         sino si iguales(orden_, "comprueba") entonces
             bien := comprueba()
+        sino si iguales(orden_, "estado") entonces
+            di_estado()
         sino
             imprimir1("paquetes: no sé qué es «%s» (PAQUETES AYUDA)\n", pt(orden_))
             bien := falso
