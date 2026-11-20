@@ -40,6 +40,7 @@ static u32 GetTickCount(void) { return 0; }
 u32 __attribute__((stdcall)) GetTickCount(void);
 #endif
 
+extern struct box html_hispa_sin_caja;
 /* box_construct.c [HISPA]: las cajas de una vez, sin el planificador */
 nserror dom_to_box_ya(dom_node *n, html_content *c);
 /* css/select.c [HISPA]: los datos de libcss de un nodo, fuera (se rehacen) */
@@ -89,7 +90,7 @@ void rehaz_cajas(html_content *c) {
   /* el campo del cursor: su control (que se queda); luego, su caja nueva */
   foco = c->focus_type == HTML_FOCUS_TEXTAREA && c->focus_owner.textarea ? c->focus_owner.textarea->gadget : NULL;
   for (f = c->forms; f; f = f->prev) for (k = f->controls; k; k = k->next) k->box = NULL;
-  for (o = c->object_list; o; o = o->next) o->box = NULL;
+  for (o = c->object_list; o; o = o->next) if (o->box) o->box = &html_hispa_sin_caja;   /* (object.c [HISPA]) */
   sin_caja(html, 1);
   /* las cajas, fuera; y otra vez */
   talloc_free(c->bctx);

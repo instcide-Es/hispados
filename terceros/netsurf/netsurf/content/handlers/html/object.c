@@ -151,6 +151,11 @@ html_object_nobox_callback(hlcache_handle *object,
 }
 
 
+/* [HISPA] la «caja» de los objetos que se quedan sin la suya al rehacer las
+ * cajas (w32/surf/rehaz.c); distinta de NULL, que es la de los que se piden
+ * sin caja (las imágenes que se adelantan al leer la página) */
+struct box html_hispa_sin_caja;
+
 /**
  * Callback for hlcache_handle_retrieve() for objects with a box.
  */
@@ -168,7 +173,7 @@ html_object_callback(hlcache_handle *object,
 
 	/* [HISPA] JavaScript: un objeto que se ha quedado sin caja al rehacer
 	 * las cajas (w32/surf/rehaz.c): solo se cuenta que ha llegado */
-	if (box == NULL) {
+	if (box == &html_hispa_sin_caja) {
 		switch (event->type) {
 		case CONTENT_MSG_DONE:
 			c->base.active--;
@@ -765,7 +770,8 @@ html_fetch_object(html_content *c,
 		for (object = c->object_list; object != NULL;
 		     object = object->next) {
 			bool igual = false;
-			if (object->box != NULL || object->content == NULL ||
+			if (object->box != &html_hispa_sin_caja ||
+			    object->content == NULL ||
 			    object->background != background)
 				continue;
 			igual = nsurl_compare(hlcache_handle_get_url(

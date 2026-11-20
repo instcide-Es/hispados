@@ -23,7 +23,7 @@ disquete «Internet») para la biblioteca en un 486 lento, el completo
 |---|---|---|
 | Página | rejilla de letras 8×16, 256 colores de Hispa | puntos (32 bits, pasados a la paleta), letras DejaVu de ancho variable |
 | CSS | lo mínimo (de las `<style>`; clases de Bootstrap conocidas) | CSS 2.1 + flexbox + calc() de NetSurf, hojas de fuera, `@media`; variables de CSS, `gap`, grid, esquinas redondas, sombras, `@font-face` (nuestro) |
-| JavaScript | sí (QuickJS, HSPJS.DLL) | todavía no (ver «Lo que falta») |
+| JavaScript | sí (QuickJS, HSPJS.DLL) | sí (QuickJS, la misma HSPJS.DLL, sobre el DOM de libdom: ver «JavaScript») |
 | ClicGest | modo ligero (User-Agent `HispaNavegador`) | la web normal (User-Agent `HispaSurf`) |
 | Memoria | 1-3 MB | 8-15 MB (ver «Medidas») |
 | Tamaño | 300 KB | 1,14 MB + 208 KB de letras (dos disquetes) |
@@ -259,9 +259,8 @@ ClicGest). Sin tocar ClicGest:
 
 ### Lo que queda distinto, de más a menos visible
 
-1. **JavaScript**: ClicGest sin JavaScript enseña su versión para «sin
-   JavaScript» (los menús desplegables abiertos, los botones `.js-only` como
-   «Ver» de la contraseña, el aviso de las galletas). Otra sesión.
+1. ~~**JavaScript**~~: hecho el 20/11 (ver «JavaScript»): ClicGest ya no
+   enseña su versión «sin JavaScript».
 2. **SVG**: el botón de la hamburguesa (`navbar-toggler-icon`), las flechas
    de los desplegables (`form-select`) y la marca de las casillas de
    Bootstrap son SVG; sin SVG no salen (la de las casillas se pinta aquí).
@@ -278,6 +277,128 @@ ClicGest). Sin tocar ClicGest:
 7. Algún caso de texto que salta a la línea siguiente en vez de partirse
    (NetSurf parte las cajas de texto al maquetar y, si se maqueta otra vez
    más ancho, no las junta).
+
+## JavaScript
+
+Desde el 20/11/2026 (decisión de Carlos: «mejor dejar la web como tiene que
+estar y hacer compatible el explorador web»), el Navegador completo ejecuta
+el JavaScript de las páginas: ClicGest se usa como en Chrome, **sin cambiar
+ClicGest** (su web normal, la de un ordenador).
+
+### Por qué QuickJS y no Duktape
+
+NetSurf trae sus enlaces hechos para **Duktape**, pero Duktape se queda en
+ES5: no entiende `class`, las funciones flecha, `const`/`let` ni las
+plantillas, y Bootstrap 5.3 (`bootstrap.bundle.min.js`) y el JavaScript de
+ClicGest (más de 5.000 funciones flecha) son ES2015 y más: con Duktape no se
+habría ejecutado ni una línea de ClicGest. **QuickJS** (ES2020) ya estaba
+hecho y probado en Hispa-486 (HSPJS.DLL, la del Navegador propio, en el
+disquete «Internet»): no ocupa sitio de más en los disquetes del Navegador
+completo. Lo que faltaba era unirlo al árbol de libdom; se ha hecho como en
+el Navegador propio: el DOM y lo de window los hace el **preludio** en
+JavaScript (`w32/navega/dom.js`, el mismo archivo, sin tocar), sobre unas 70
+funciones de C (`w32/surf/guion.c`, el objeto `N`) que esta vez trabajan con
+libdom. `w32/surf/surf.js` cambia lo que en NetSurf se sabe de verdad: las
+medidas de las cajas.
+
+### Qué hay (probado en ClicGest)
+
+- Todo lo del preludio del Navegador propio (ver NAVEGADOR.md,
+  «JavaScript»): `document` y los nodos, `querySelector(All)`, `matches`,
+  `closest` (los selectores de `w32/navega/dom.c`, pasados a libdom:
+  `w32/surf/selector.c`), `classList`, `dataset`, `style`, `innerHTML` (con
+  el lector de fragmentos de hubbub; dentro de una tabla o de un `<select>`,
+  en el suyo), eventos con captura y burbuja, `setTimeout`/`setInterval`,
+  promesas, `fetch` y `XMLHttpRequest` (con las galletas, la misma conexión
+  que las páginas, las redirecciones), `localStorage` (en `NAVEGA2.ALM`),
+  `document.cookie`, `alert`/`confirm` (los cuadros de Hispa Ventanas),
+  `console` (a `SURFJS.LOG`).
+- **Las medidas de verdad** (`surf.js`): `getBoundingClientRect`,
+  `offsetWidth/Height/Top/Left/Parent`, `clientWidth`, `scrollHeight`,
+  `getComputedStyle` (de la caja de NetSurf: `display`, `position`, rellenos,
+  márgenes, bordes, colores, `z-index`; las transiciones, 0 s),
+  `scrollY`/`scrollTo`. Si el árbol ha cambiado en ese mismo turno, las cajas
+  se rehacen antes de medir (como hacen los navegadores grandes).
+- **Las cajas otra vez** (`w32/surf/rehaz.c`): NetSurf 3.11 maqueta una vez
+  («NS layout is static»). Tras cada guion, evento o temporizador que cambia
+  el árbol, se rehacen las cajas de la página entera desde libdom (con los
+  estilos otra vez) y se maqueta, sin perder el sitio, lo escrito en los
+  campos (los controles se guardan en su nodo), el campo del cursor ni las
+  imágenes ya bajadas (el objeto se vuelve a usar).
+- **Lo que va por encima**: un elemento con `position: absolute` o `fixed` y
+  `z-index` mayor que 0 (los menús desplegables de Bootstrap) se pinta al
+  final y recibe los clics antes que lo que tiene debajo (`redraw.c` e
+  `interaction.c`, marcado `[HISPA]`). Popper (que coloca los menús con
+  `transform: translate()`, que NetSurf no tiene) se cambia por `left`/`top`.
+- **Los eventos de la persona**: `mousedown`, `mouseup` y `click` (al
+  elemento de dentro: el `<a>`, no el `<li>` de alrededor; si la página dice
+  `preventDefault()`, no se sigue el enlace ni se envía el formulario);
+  `input` al escribir en un campo, `change` en las casillas, `keydown` (al
+  campo del cursor), `focus`/`blur`, `submit` (con `preventDefault()`, lo
+  manda la página con `fetch`), `DOMContentLoaded` y `load`.
+- **El «Ver» de la contraseña**: cambiar `type` de `password` a `text`
+  rehace el campo con su texto.
+
+En ClicGest (la demostración, 20/11/2026, QEMU): el «Ver» de la contraseña
+del inicio de sesión (`20_js_login_ver.png`), los botones `.js-only`, el
+menú lateral plegable, «Herramientas» de socios (el menú de Bootstrap,
+encima de la lista: `21_js_socios_herramientas.png`), el catálogo de la
+biblioteca y su buscador (un formulario corriente), las pestañas y los menús
+de Bootstrap; sin errores de JavaScript en `SURFJS.LOG` en las páginas
+probadas (panel, catálogo, socios).
+
+Lo que no hay o es distinto:
+
+- Los **globos de ayuda** de Bootstrap (`tooltip`): `matchMedia('(hover:
+  none)')` dice que no hay ratón que pase por encima (como en el Navegador
+  propio) y ClicGest no los arranca (ni baja Bootstrap para ellos).
+- Las **ventanas** de Bootstrap (`modal`) se abren, pero NetSurf no tiene
+  `opacity` (el fondo oscuro sale negro entero) ni `position: fixed` de
+  verdad (la ventana va arriba de la página).
+- `<details>`, `mouseover`, arrastrar, `canvas`, los `iframe` con JavaScript.
+
+### Cómo está hecho
+
+- `w32/surf/guion.c`: la interfaz de NetSurf para un motor de JavaScript
+  (`javascript/js.h`, en vez de `javascript/none`), con QuickJS de
+  HSPJS.DLL: un motor por página (se suelta entero al irse; sin páginas, la
+  memoria de JavaScript vuelve toda al sistema), un objeto por nodo de
+  libdom, el objeto `N`, los turnos con su tope de tiempo (15 s), los
+  temporizadores con el planificador de NetSurf, lo compilado guardado
+  (Bootstrap y `mobile.js` se compilan una vez), lo que no se puede hacer en
+  medio de NetSurf (ir a otra página, enviar un formulario) desde el
+  planificador, y nada que toque el árbol mientras NetSurf hace las cajas a
+  trozos.
+- `w32/surf/red.c`: `fetch` y `XMLHttpRequest` van a la misma cola que lo de
+  NetSurf (una petición cada vez, por la conexión guardada).
+- Ganchos `[HISPA]` en NetSurf: `html.c` (`DOMContentLoaded`),
+  `interaction.c` (clics, teclas, foco; lo que va por encima),
+  `redraw.c` (pintarlo al final), `form.c` (`submit`), `forms.c` (los
+  controles sin formulario, guardados), `box_textarea.c` (el campo que ya
+  había se queda; `input`), `box_construct.c` (las cajas de una vez),
+  `object.c` (las imágenes sin caja), `css/select.c` (olvidar lo de libcss de
+  un nodo); en libdom, `element.c` (cambiar `class` cambia la lista de
+  clases: antes no) y `event.c` (sin `time()` en cada evento: preguntaba a
+  DOS y hacía cada `insertBefore` seis veces más lento).
+- `make SURF_PERFIL=-DPERFIL`: cuántas veces y cuántos ciclos lleva cada
+  función de `N` (en `SURFJS.LOG`).
+
+### Medidas del JavaScript
+
+En QEMU (sin KVM, en el VPS; un 486 DX2-66 es 4-6 veces más lento), 32 MB:
+
+| | |
+|---|---|
+| El preludio (dom.js + surf.js), por página | ~0,2 s; 590 KB de JavaScript en uso |
+| Bootstrap 5.3 (78 KB) la primera vez / ya compilado | 0,11-0,22 s / 0,06 s |
+| JavaScript de una página de ClicGest (panel, catálogo) | 0,7-1,4 MB en uso |
+| Socios (298 KB de HTML, Bootstrap, 54 filas) | 2,7 MB en uso; su guion de 22 KB, 0,33 s (2,6 s antes de quitar `time()` de libdom) |
+| Rehacer las cajas tras un clic | panel 0,2 s; catálogo 0,4 s; socios 0,9-1,2 s |
+
+El JavaScript gasta en su propio montón (el de HSPJS.DLL), aparte de la
+memoria de NetSurf: con 32 MB va holgado; con 16 MB, las páginas sencillas y
+el panel caben (1-2 MB más que sin JavaScript), la lista de socios no (ya no
+cabía sin JavaScript).
 
 ## Medidas
 
@@ -341,13 +462,11 @@ grid, letras, esquinas y lo demás, 32 KB). Con 16 MB sigue justo: ver abajo.
 
 ## Lo que falta (el plan)
 
-1. **JavaScript (fase 5).** NetSurf trae sus enlaces con JavaScript hechos
-   para Duktape (`content/handlers/javascript/duktape`, generados con
-   nsgenbind de los WebIDL: 220 archivos). Con QuickJS (HSPJS.DLL) habría
-   que rehacer esos enlaces (el DOM de libdom hacia QuickJS): es otro
-   proyecto. Lo rápido sería compilar Duktape tal cual (+700 KB y memoria);
-   lo nuestro, generar los enlaces de QuickJS con un nsgenbind propio.
-   Ahora: sin JavaScript (`content/handlers/javascript/none`).
+1. ~~**JavaScript (fase 5)**~~: hecho el 20/11/2026 con QuickJS (ver
+   «JavaScript»). Queda: `opacity` y `position: fixed` de verdad (las
+   ventanas de Bootstrap), rehacer solo la parte de las cajas que cambia (en
+   un 486, las páginas grandes tardan en cada clic), los eventos del ratón
+   que pasa por encima (`mouseover`: los globos de ayuda).
 2. **SVG**: el XML de libdom con expat (o un lector XML pequeño propio).
 3. ~~Iconos de letra y `@font-face`~~: hecho el 20/11 (ver «Comparado con
    Chrome»). Queda: los pesos de las letras variables (`gvar`), `<details>`.
@@ -372,6 +491,14 @@ botones con variables por clase, degradado, flexbox, PNG y JPEG; el
 User-Agent `HispaSurf`), una redirección, una página del disco, Atrás, un
 formulario GET y una página larga (Av Pág, Fin), con las capturas
 (`GUARDAR=carpeta`) y los tiempos de `SURF.LOG`.
+
+`tests/run_navegador2_js_tests.sh` (en `make test`; 14 comprobaciones,
+unos 3 minutos; sin Internet: `tests/tools/surfjs_servidor.py` por HTTP): un
+guion de hoy que cambia la cabecera (las cajas otra vez), `setTimeout`,
+`localStorage`, `fetch` con su galleta y una cabecera, un menú desplegable
+con `z-index` que se pinta encima y recibe el clic, un clic delegado con
+`closest()` y `preventDefault()`, `classList.toggle`, el evento `input` y un
+formulario parado en `submit` que se manda con `fetch` POST.
 
 `tests/run_surf_pintado_tests.sh` (en `make test`; en el anfitrión, sin QEMU
 ni Internet, unos segundos tras compilar `surfppm`): pinta
