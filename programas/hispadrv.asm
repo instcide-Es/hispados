@@ -65,7 +65,8 @@ ROM_MENOS   equ 512                 ; una ROM más pequeña no es de la consola
 SRAM_TAM    equ 0x10000             ; la RAM del cartucho: 64 KB
 TROZO_MAX   equ 8192                ; octetos de un trozo de sonido, como mucho
 BLANDA_N    equ 8                   ; cuadros que vale una tecla sin mapa
-BLANDA_PENT equ 22                  ;   (en Hispa-Pentium: hasta que repite)
+BLANDA_PENT equ 32                  ;   (en Hispa-Pentium: hasta que repite,
+BLANDA_REP  equ 4                   ;    y las repeticiones, 25 por segundo)
 ; botones del mando (pad_md)
 B_ARRIBA    equ 0x001
 B_ABAJO     equ 0x002
@@ -660,13 +661,21 @@ md_proc:
         jmp hecho
 .blando:
         mov ecx, N_TECLAS - 1       ; (por si el equipo no avisa de las teclas
-        mov dl, BLANDA_N            ; que se sueltan: vale unos cuadros)
-        cmp byte [pentium], 0
-        je .b1
-        mov dl, BLANDA_PENT
-.b1:
+.b1:                                ; que se sueltan: vale unos cuadros)
         cmp ax, [tec_bot+ecx*2]
         jne .b2
+        mov dl, BLANDA_N
+        cmp byte [pentium], 0
+        je .b3
+        ; en Hispa-Pentium no hay mapa: una tecla que se deja pulsada se
+        ; repite a los 0,5 s y luego 25 veces por segundo. La primera vale
+        ; hasta que empieza a repetirse; las repetidas, poco (si se suelta,
+        ; el botón se suelta enseguida)
+        mov dl, BLANDA_PENT
+        cmp byte [blandas+ecx], 0
+        je .b3
+        mov dl, BLANDA_REP
+.b3:
         mov [blandas+ecx], dl
 .b2:
         dec ecx
@@ -1565,12 +1574,12 @@ mandos_lee:
         cmp byte [esi+eax], 0
         je .t1
         or bx, [tec_bot+ecx*2]
-        mov byte [mapa_vale], 1
+        mov byte [mapa_vale+ecx], 1 ; (esta tecla sí sale en el mapa)
 .t1:
-        cmp byte [blandas+ecx], 0
-        je .t2
-        dec byte [blandas+ecx]
-        cmp byte [mapa_vale], 0
+        cmp byte [blandas+ecx], 0   ; las que no salen en el mapa (en algunos
+        je .t2                      ; equipos, las flechas; en Hispa-Pentium,
+        dec byte [blandas+ecx]      ; todas): unos cuadros por cada vez que
+        cmp byte [mapa_vale+ecx], 0 ; llega la tecla
         jne .t2
         or bx, [tec_bot+ecx*2]
 .t2:
@@ -2437,7 +2446,7 @@ snd_hay     resb 1
 snd_si      resb 1
 snd_fmt     resb 1                  ; 0: 8 bits, 1: 16 bits, 3: 16 bits estéreo
 joy_opc     resb 1
-mapa_vale   resb 1
+mapa_vale   resb N_TECLAS
 hubo_boton  resb 1
 sram_pend   resb 1
 blandas     resb N_TECLAS
