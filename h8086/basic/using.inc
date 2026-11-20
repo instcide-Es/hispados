@@ -570,16 +570,12 @@ us_numero:
 ; (al menos una: «0»)
 us_cifras:
         push si
-        mov si, ac
-        mov di, ac2
-        call f_copia
+        call f_ac_a_ac2
         mov cx, [v_us_ndec]
         jcxz .sin
         mov di, ac3
         call f_pot10
-        mov di, ac2
-        mov si, ac3
-        call f_mul
+        call f_mul_ac2_ac3
 .sin:
         mov si, f_medio_cte
         mov di, ac3
@@ -613,7 +609,7 @@ us_exponente:
         jne .e1
         dec cx                      ; (una posición para el signo)
 .e1:
-        cmp cx, 0
+        test cx, cx
         jge .e2
         xor cx, cx
 .e2:
@@ -630,9 +626,7 @@ us_exponente:
         imul bx
         mov [v_us_e10], dx
 .esc:
-        mov si, ac
-        mov di, ac2
-        call f_copia
+        call f_ac_a_ac2
         mov cx, [v_us_sig]
         dec cx
         sub cx, [v_us_e10]

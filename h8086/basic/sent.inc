@@ -469,8 +469,7 @@ lee_linea_cte:
         ret
 .otro:
         ; (por si viene como número normal)
-        call eval_ent
-        ret
+        jmp eval_ent
 
 ; ---- GOSUB ----
 sent_gosub:
@@ -1984,7 +1983,7 @@ a_palabra:
         mov cx, [di + AC_EXP]
         cmp cx, 16
         jg .mal
-        cmp cx, 0
+        test cx, cx
         jle .cero
         mov ax, [di + AC_M3]
         neg cx

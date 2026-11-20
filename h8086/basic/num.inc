@@ -26,6 +26,28 @@ f_es_cero:
         ret
 
 ; ---- copiar el de SI en DI (la estructura entera) ----
+; el final de muchas rutinas, una sola vez: se salta a donde toque (sal_dx
+; saca DX, CX, BX y AX, y vuelve)
+sal_di:
+        pop di
+sal_si:
+        pop si
+sal_dx:
+        pop dx
+sal_cx:
+        pop cx
+        pop bx
+        pop ax
+        ret
+; (las dos que más se repiten, con su nombre: ahorran sitio)
+f_ac_a_ac2:
+        mov si, ac
+        mov di, ac2
+        jmp short f_copia
+f_mul_ac2_ac3:
+        mov di, ac2
+        mov si, ac3
+        jmp f_mul
 f_copia:
         push cx
         push si
@@ -242,10 +264,7 @@ f_suma:
         call f_normaliza
 .x:
         pop si
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_cx
 ; intercambia mantisa, exponente y signo de DI y SI
 f_cambia_man:
         push ax
@@ -338,11 +357,7 @@ f_mul:
         dec word [di + AC_EXP]
 .x:
         pop bp
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_dx
 
 ; ---- división: DI = DI / SI (SI no puede ser cero: lo mira quien llama) ----
 f_div:
@@ -428,11 +443,7 @@ f_div:
         ; (exp+1 ya puesto); si no está, se normaliza
         call f_normaliza
 .x:
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_dx
 
 ; ---- comparar DI con SI: AX = -1, 0 o 1 (DI menor, igual, mayor) ----
 f_cmp:
@@ -502,7 +513,7 @@ f_trunca:
         call f_es_cero
         jz .x
         mov cx, [di + AC_EXP]
-        cmp cx, 0
+        test cx, cx
         jg .algo
         mov al, [di + AC_TIPO]
         call f_cero
@@ -573,7 +584,7 @@ f_a_entero:
         call f_es_cero
         jz .cero
         mov cx, [di + AC_EXP]
-        cmp cx, 0
+        test cx, cx
         jl .cero
         cmp cx, 16
         jg .no
@@ -1083,11 +1094,7 @@ man_por10_mas:
         add bx, 2
         cmp bx, AC_M3 + 2
         jb .c
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_dx
 
 ; =============================================================================
 ;  num_a_texto: el acumulador a texto en b_num, como lo escribe PRINT (con
@@ -1137,9 +1144,7 @@ num_a_texto:
         mov [v_aux + 8], dx         ; D
         push di
         ; ac2 = |ac|
-        mov si, ac
-        mov di, ac2
-        call f_copia
+        call f_ac_a_ac2
         mov byte [ac2 + AC_SIG], 0
         ; e10 aproximado: (exp-1) * log10(2)
         mov ax, [ac2 + AC_EXP]
@@ -1293,13 +1298,7 @@ num_a_texto:
 .ce4:
         call texto_natural
 .x:
-        pop di
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_di
 
 ; AX (sin signo) en decimal en ES:DI, ASCIZ (DI queda en el 0)
 texto_natural:
@@ -1322,11 +1321,7 @@ texto_natural:
         stosb
         loop .p
         mov byte [di], 0
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_dx
 
 ; el de ac4 (positivo, menos de 2^64) a entero de 64 bits en v_aux2 (trunca)
 f_a_u64:
@@ -1417,10 +1412,4 @@ u64_texto:
         stosb
         loop .p
         mov byte [di], 0
-        pop di
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_di

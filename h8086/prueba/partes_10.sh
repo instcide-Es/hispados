@@ -60,7 +60,9 @@ esta a4 "ARCHIVOS: BIEN" "y todo lo demás funciona: "
 como=$(libre_de a4)
 mon "pmemsave 0xbc 4 \"$T/v2f.bin\"" 0.4      # el vector de INT 2Fh
 apaga
-if [ -n "$como" ] && [ $((como - bajo)) -ge -64 ] && [ $((como - bajo)) -le 64 ]; then ok "como un 8086, la memoria libre es la del núcleo abajo ($como octetos)"; else ko "memoria como un 8086: $como (abajo: $bajo)"; fi
+# (como un 8086 el núcleo está abajo y, además, sin el gestor de memoria
+# extendida, que entonces no se carga: entre 1 y 2 K más que abajo en un 286)
+if [ -n "$como" ] && [ $((como - bajo)) -ge 1024 ] && [ $((como - bajo)) -le 2048 ]; then ok "como un 8086, la memoria libre es la del núcleo abajo sin el gestor de memoria extendida ($como octetos, $((como - bajo)) más)"; else ko "memoria como un 8086: $como (abajo: $bajo)"; fi
 if [ "$(xxd -p -s 2 -l 2 $T/v2f.bin)" != "6f00" ]; then ok "y INT 2Fh ni se toca: no apunta al núcleo"; else ko "como un 8086, INT 2Fh apunta al núcleo"; fi
 # 4. con 1 mega justo no hay memoria extendida: DOS=ALTO no hace nada y arranca
 arranca_alta 'DOS=ALTO\n' 1 a5

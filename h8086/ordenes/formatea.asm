@@ -38,6 +38,7 @@
 
         jmp inicio
 %include "util.inc"
+%include "sectores.inc"         ; (MBR_COD y ARR_COD: lo que miden sin los ceros del final)
 
 ; las medidas de disquete
 T_K         equ 0                   ; dw: cuántos K
@@ -75,6 +76,7 @@ inicio:
         mov cx, bss_fin - bss_ini
         xor al, al
         rep stosb
+        mov word [arr+510], 0xAA55
         call pide_nucleo
         call xfer_ini
         mov byte [unidad], 0xFF
@@ -1078,13 +1080,14 @@ t_sin_nombre db "NO NAME    "       ; (así se dice «sin etiqueta»)
 
 ; el sector de particiones y el de arranque, tal como salen de ensamblar
 mbr_codigo:
-        incbin "../mbr.bin"
+        incbin "../mbr.bin", 0, MBR_COD
 arr:
-        incbin "../arranque.bin"
+        incbin "../arranque.bin", 0, ARR_COD
 
         absolute $
-            alignb 2
 bss_ini:
+            resb 512 - ARR_COD      ; lo que falta de arr: ceros y la firma (al empezar)
+            alignb 2
 unidad      resb 1                  ; 0 = A:
 con_sistema resb 1                  ; /S
 rapido      resb 1                  ; /R

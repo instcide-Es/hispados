@@ -61,14 +61,16 @@ inicio:
         mov ah, 0x0F                ; la memoria de vídeo: monocromo o color
         int 0x10
         mov [modo], al
-        mov word [vseg], 0xB800
+        mov bx, 0xB800
         cmp al, 7
         jne .v
-        mov word [vseg], 0xB000
+        mov bh, 0xB0
 .v:
+        mov [vseg], bx
         call carga
-        mov word [top], txt
-        mov word [lin_ini], txt
+        mov ax, txt
+        mov [top], ax
+        mov [lin_ini], ax
         mov word [n_lin], 1
         mov byte [insertar], 1
         call trae_lin
@@ -91,11 +93,7 @@ bucle:
         mov dh, [cur_y]
         mov dl, [cur_x]
         sub dl, [izq]
-        xor bh, bh
-        mov ah, 2
-        int 0x10
-        xor ah, ah
-        int 0x16
+        call tecla_en
         test al, al
         jz .ext
         cmp al, 0xE0
@@ -159,8 +157,8 @@ teclas_e_fin:
 carga:
         mov word [fin], txt
         mov dx, nombre
-        mov al, 0
-        DOS 0x3D
+        mov ax, 0x3D00
+        int 0x21
         jc .x
         mov [h], ax
         xor bp, bp                  ; BP = letras de la línea que se lleva
@@ -289,7 +287,7 @@ deja_lin:
         cmp byte [lin_sucia], 0
         je .x
         mov byte [lin_sucia], 0
-        mov byte [cambiado], 1
+        call cambia
         mov cx, [lin_n]
         sub cx, [lin_tam]
         je .copia
@@ -383,6 +381,14 @@ derecha:
 al_inicio:
         mov word [cur_x], 0
         ret
+cambia:
+        mov byte [cambiado], 1
+        ret
+; hay cambios; el cursor, al principio de la línea (cortar y pegar)
+cambia_al_inicio:
+        call cambia
+        call al_inicio
+        jmp trae_lin
 al_fin:
         mov ax, [lin_n]
         mov [cur_x], ax
@@ -447,20 +453,16 @@ abajo:
         stc
         ret
 repag:
-        mov cx, FILAS - 1
-.c:
-        push cx
-        call arriba
-        pop cx
-        jc .x
-        loop .c
-.x:
-        ret
+        mov dx, arriba
+        jmp short pagina
 avpag:
+        mov dx, abajo
+; una pantalla arriba o abajo: DX = la de una línea (no tocan DX)
+pagina:
         mov cx, FILAS - 1
 .c:
         push cx
-        call abajo
+        call dx
         pop cx
         jc .x
         loop .c
@@ -507,8 +509,7 @@ inserta:
         inc word [lin_n]
 .hecho:
         inc word [cur_x]
-        mov byte [lin_sucia], 1
-        ret
+        jmp suprime.sucia
 ; Supr: la letra del cursor; al final de la línea, se le junta la siguiente
 suprime:
         mov bx, [cur_x]
@@ -521,6 +522,7 @@ suprime:
         lea si, [di+1]
         rep movsb
         dec word [lin_n]
+.sucia:                             ; (también de inserta)
         mov byte [lin_sucia], 1
         ret
 .junta:
@@ -544,7 +546,7 @@ suprime:
 .cabe:
         mov cx, 1
         call cierra
-        mov byte [cambiado], 1
+        call cambia
         call trae_lin
 .x:
         ret
@@ -570,10 +572,10 @@ intro:
         call abre
         jc .x
         mov byte [di], SALTO
-        mov byte [cambiado], 1
+        call cambia
         call trae_lin
         call abajo
-        mov word [cur_x], 0
+        call al_inicio
 .x:
         ret
 
@@ -599,9 +601,7 @@ cortar:
 .c:
         jcxz .x
         call cierra
-        mov byte [cambiado], 1
-        mov word [cur_x], 0
-        call trae_lin
+        jmp cambia_al_inicio
 .x:
         ret
 pegar:
@@ -617,9 +617,7 @@ pegar:
         dec cx
         rep movsb
         mov byte [di], SALTO
-        mov byte [cambiado], 1
-        mov word [cur_x], 0
-        call trae_lin
+        jmp cambia_al_inicio
 .x:
         ret
 
@@ -633,11 +631,7 @@ buscar:
 .t:
         push bx
         push dx
-        xor bh, bh
-        mov ah, 2
-        int 0x10
-        xor ah, ah
-        int 0x16
+        call tecla_en
         pop dx
         pop bx
         cmp al, 13
@@ -670,7 +664,6 @@ buscar:
         push es
         push di
         mov es, [vseg]
-        mov di, dx
         xor dh, dh
         mov di, dx
         shl di, 1
@@ -745,6 +738,15 @@ buscar:
         jmp .n
 .n1:
         jmp trae_lin
+; el cursor en la fila DH, columna DL, y espera una tecla -> AX (no conserva BX)
+tecla_en:
+        xor bh, bh
+        mov ah, 2
+        int 0x10
+tecla:
+        xor ah, ah
+        int 0x16
+        ret
 mayus:
         cmp al, 'a'
         jb .x
@@ -761,8 +763,7 @@ salir:
         je .fuera
         mov si, m_cambios
         call menu
-        xor ah, ah
-        int 0x16
+        call tecla
         and al, 0xDF
         cmp al, 'N'
         je .fuera
@@ -827,22 +828,15 @@ pinta:
         ; la línea de abajo: las teclas, y por dónde se va
         mov si, m_menu
         mov ah, C_MENU
-.m:
-        lodsb
-        test al, al
-        jz .m1
-        stosw
-        jmp .m
-.m1:
+        call menu_txt
         mov ax, [n_lin]
         call .num
-        mov al, ':'
-        mov ah, C_MENU
+        mov al, ':'                 ; (.num deja AH = C_MENU)
         stosw
         mov ax, [cur_x]
         inc ax
         call .num
-        mov ax, C_MENU * 256 + ' '
+        mov al, ' '
         stosw
         mov si, m_ins
         cmp byte [insertar], 0
@@ -860,15 +854,7 @@ pinta:
         mov al, '*'
 .m4:
         stosw
-        mov al, ' '
-.m5:
-        cmp di, 25 * 160
-        jae .x
-        stosw
-        jmp .m5
-.x:
-        pop es
-        ret
+        jmp menu.r                  ; (lo demás de la línea, y POP ES)
 ; (interna) las CX letras de SI, en una fila entera de la pantalla (desde la
 ; columna [izq])
 .linea:
@@ -919,12 +905,7 @@ menu:
         mov es, [vseg]
         mov di, FILAS * 160
         mov ah, C_MENU
-.c:
-        lodsb
-        test al, al
-        jz .r
-        stosw
-        jmp .c
+        call menu_txt
 .r:
         mov al, ' '
 .r1:
@@ -935,13 +916,20 @@ menu:
 .x:
         pop es
         ret
+; el texto de SI en ES:DI, con el color de AH
+menu_txt:
+        lodsb
+        test al, al
+        jz .x
+        stosw
+        jmp menu_txt
+.x:
+        ret
 ; un aviso en la línea de abajo, hasta que se pulse una tecla
 aviso:
         call menu
         call pita
-        xor ah, ah
-        int 0x16
-        ret
+        jmp tecla
 
 m_uso       db "EDITAR - editor de texto", 13, 10, "  EDITAR archivo", 13, 10, "$"
 m_menu      db " F2 Guardar  F3 Buscar  F4 Copiar  F5 Cortar  F6 Pegar  F10 Salir   ", 0

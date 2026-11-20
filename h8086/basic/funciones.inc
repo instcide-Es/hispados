@@ -154,9 +154,7 @@ fn_sqr_ac:
         jnz err_funcion
         push si
         ; ac2 = x; ac3 = la aproximación (x con la mitad de exponente)
-        mov si, ac
-        mov di, ac2
-        call f_copia
+        call f_ac_a_ac2
         mov di, ac3
         call f_copia
         mov ax, [ac3 + AC_EXP]
@@ -208,9 +206,7 @@ fn_exp_ac:
         mov si, c_ln2
         mov di, ac3
         call f_carga_cte
-        mov si, ac
-        mov di, ac2
-        call f_copia
+        call f_ac_a_ac2
         mov si, ac3
         call f_div                  ; ac2 = x / ln2
         mov si, f_medio_cte
@@ -318,9 +314,7 @@ fn_log_ac:
         mov si, f_uno_cte
         mov di, ac4
         call f_carga_cte
-        mov si, ac
-        mov di, ac2
-        call f_copia
+        call f_ac_a_ac2
         mov si, ac4
         call f_resta                ; ac2 = m - 1
         mov di, ac
@@ -339,9 +333,7 @@ fn_log_ac:
         call f_copia                ; ac = z
         mov cx, 3
 .t:
-        mov di, ac2
-        mov si, ac3
-        call f_mul                  ; z^k
+        call f_mul_ac2_ac3         ; z^k
         mov si, ac2
         mov di, ac4
         call f_copia
@@ -365,9 +357,7 @@ fn_log_ac:
         mov si, c_ln2
         mov di, ac3
         call f_carga_cte
-        mov di, ac2
-        mov si, ac3
-        call f_mul
+        call f_mul_ac2_ac3
         mov di, ac
         mov si, ac2
         call f_suma
@@ -434,9 +424,7 @@ seno_ac:
         mov si, c_pi_medios
         mov di, ac3
         call f_carga_cte
-        mov si, ac
-        mov di, ac2
-        call f_copia
+        call f_ac_a_ac2
         mov si, ac3
         call f_div                  ; ac2 = x / (π/2)
         mov si, f_medio_cte
@@ -455,9 +443,7 @@ seno_ac:
         mov si, c_pi_medios         ; (f_int y f_bajos usan ac3 y ac4)
         mov di, ac3
         call f_carga_cte
-        mov di, ac2
-        mov si, ac3
-        call f_mul                  ; k·π/2
+        call f_mul_ac2_ac3         ; k·π/2
         mov di, ac
         mov si, ac2
         call f_resta                ; ac = r
@@ -510,9 +496,7 @@ f_bajos:
         ret
 ; sen(r) = r - r³/3! + r⁵/5! …   (r en ac; usa ac2-ac4)
 serie_seno:
-        mov si, ac
-        mov di, ac2
-        call f_copia                ; el término
+        call f_ac_a_ac2            ; el término
         mov di, ac3
         call f_copia
         mov si, ac3
@@ -520,9 +504,7 @@ serie_seno:
         mov cx, 2
 .t:
         ; término = -término · r² / (cx·(cx+1))
-        mov di, ac2
-        mov si, ac3
-        call f_mul
+        call f_mul_ac2_ac3
         mov ax, cx
         inc ax
         mul cx
@@ -553,9 +535,7 @@ serie_coseno:
         call f_carga_cte            ; la suma
         mov cx, 1
 .t:
-        mov di, ac2
-        mov si, ac3
-        call f_mul
+        call f_mul_ac2_ac3
         mov ax, cx
         inc ax
         mul cx
@@ -592,9 +572,7 @@ fn_atn:
         call f_cmp
         cmp ax, 1
         jne .no_inv
-        mov si, ac
-        mov di, ac2
-        call f_copia
+        call f_ac_a_ac2
         mov si, f_uno_cte
         mov di, ac
         call f_carga_cte
@@ -609,9 +587,7 @@ fn_atn:
         mov si, c_raiz3
         mov di, ac3
         call f_carga_cte
-        mov si, ac
-        mov di, ac2
-        call f_copia
+        call f_ac_a_ac2
         mov si, ac3
         call f_mul                  ; ac2 = x·√3
         mov si, f_uno_cte
@@ -634,9 +610,7 @@ fn_atn:
 .serie:
         ; t - t³/3 + t⁵/5 …   (ac2 = t^k, ac3 = t², ac = la suma)
         push dx
-        mov si, ac
-        mov di, ac2
-        call f_copia
+        call f_ac_a_ac2
         mov di, ac3
         call f_copia
         mov si, ac3
@@ -644,9 +618,7 @@ fn_atn:
         mov cx, 3
         mov bl, 0x80                ; el signo del siguiente término
 .t:
-        mov di, ac2
-        mov si, ac3
-        call f_mul
+        call f_mul_ac2_ac3
         mov si, ac2
         mov di, ac4
         call f_copia
@@ -772,8 +744,7 @@ fn_rnd:
         mov [di + AC_M3 + 1], dl
         mov [di + AC_M3], ah
         mov [di + AC_M2 + 1], al
-        call f_normaliza
-        ret
+        jmp f_normaliza
 
 ; ---- FRE ----
 fn_fre:

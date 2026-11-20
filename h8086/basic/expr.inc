@@ -700,9 +700,7 @@ op_pot:
         mov si, ac2
         mov di, ac3
         call f_copia
-        mov di, ac2
-        mov si, ac3
-        call f_mul
+        call f_mul_ac2_ac3
         pop si
         jmp .b
 .b_fin:
@@ -720,9 +718,7 @@ op_pot:
         mov di, ac
         call f_carga_cte
         mov [ac + AC_TIPO], al
-        mov si, ac
-        mov di, ac2
-        call f_copia
+        call f_ac_a_ac2
         mov si, arg
         mov di, ac2
         call f_div

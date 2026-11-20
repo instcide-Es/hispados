@@ -24,6 +24,12 @@
 ;  K), se copian datos entre ellos y la memoria convencional, se abre y se
 ;  cierra A20 y se pide la HMA. Va DENTRO del núcleo y se activa solo: lo
 ;  útil es que la memoria esté ahí sin tener que saber poner un DEVICE=.
+;  Pero solo se queda en memoria si hace falta: el gestor (de int2f a
+;  x_copia) va en su sección, «.xms», detrás del arranque en el archivo, y
+;  config.inc lo copia detrás de la reserva de sectores si hay un 286 con
+;  memoria extendida; en un 8086 no ocupa nada. Por eso no puede depender de
+;  dónde quede: se ensambla desde 0, sus saltos son relativos, y su tabla de
+;  funciones se suma a donde está (xms_entra); el CS es el del núcleo.
 ;
 ;  Para copiar se usa la BIOS (INT 15h/87h), que es quien sabe entrar en modo
 ;  protegido y volver en cada máquina (en un 286 no hay vuelta limpia: la
@@ -52,7 +58,9 @@ XE_LARGO    equ 0xA7                ; el largo no vale
 XE_SIN_BLOQ equ 0xAA                ; no estaba bloqueado
 XE_BLOQ     equ 0xAB                ; está bloqueado
 
-; ¿hay un 286 con memoria extendida? Entonces hay gestor: [xms_hay]
+; ¿hay un 286 con memoria extendida? Entonces hay gestor: [xms_hay]. Esto y
+; alto_sube solo se usan al arrancar (en su sección: ver inicio.inc)
+        section .init
 xms_ini:
         cmp byte [cpu_tipo], CPU_286
         jb .x
@@ -81,7 +89,7 @@ xms_ini:
         mov [ant2f+2], ax
         cli
         mov word [es:0x2F*4], b_int2f
-        mov [es:0x2F*4+2], cs
+        mov [es:0x2F*4+2], ds
         sti
         pop es
 .x:
@@ -103,7 +111,7 @@ alto_sube:
         jnz .va
         mov byte [b_quiere], 0      ; no se abre: nos quedamos abajo
         mov si, m_sin_a20
-        jmp pon_cad
+        jmp ipon_cad
 .va:
         push di
         mov cx, di
@@ -124,18 +132,20 @@ alto_sube:
         mov ss, ax
         mov ds, ax
         sti
-        push ax
-        mov ax, .arriba
-        push ax
-        retf
-.arriba:
+        mov [cs:i_lejos+2], ax      ; (el arranque sigue donde está, en lo alto
+        mov [cs:i_interp+2], ax     ; de la memoria; lo que llama, arriba)
         mov byte [alto], 1
-        call disp_ini               ; (la cadena de dispositivos, con su sitio nuevo)
+        mov word [b_gdtp], B_GDT    ; los dos, en el sitio que queda libre abajo
+        mov word [b_bufp], B_BUF
+        call k_disp_ini             ; (la cadena de dispositivos, con su sitio nuevo)
 .x:
-        push cs
+        push ds
         pop es
         ret
+        section .text
 
+        section .xms follows=.init vstart=0 align=16
+xms_ini_cod:
 ; ---- INT 2Fh: ¿hay gestor de memoria extendida? ----
 int2f:
         cmp ah, 0x43
@@ -182,7 +192,12 @@ xms_entra:
         mov bl, ah
         xor bh, bh
         shl bx, 1
-        mov si, [x_funciones+bx]
+        call .aqui                  ; (dónde estamos: la tabla dice cuánto
+.aqui:                              ; hay desde el principio del gestor)
+        pop di
+        sub di, .aqui
+        mov si, [di+x_funciones+bx]
+        add si, di
         mov bx, bp
         call si
         jc .mal
@@ -708,20 +723,20 @@ x_copia:
         ; la tabla que quiere la BIOS: seis descriptores; el tercero dice de
         ; dónde y el cuarto, adónde
         mov es, [bajo_seg]
-        mov di, b_gdt
+        mov di, [b_gdtp]
         push cx
         mov cx, 24
         xor ax, ax
         rep stosw
         pop cx
-        mov di, b_gdt + 0x10
+        sub di, 0x30 - 0x10
         mov si, x_org
         call .descriptor
-        mov di, b_gdt + 0x18
+        add di, 8
         mov si, x_dst
         call .descriptor
         shr cx, 1                   ; en palabras
-        mov si, b_gdt
+        mov si, [b_gdtp]
         mov ah, 0x87
         call far [p_mueve]
         push cs
@@ -753,4 +768,9 @@ x_copia:
         mov [es:di+7], ah
         ret
 
+xms_fin_cod:
+XMS_TAM     equ xms_fin_cod - xms_ini_cod
+
+        section .init
 m_sin_a20   db "No se puede abrir la puerta A20: el sistema se queda en la memoria baja.", 10, 0
+        section .text

@@ -25,6 +25,7 @@
 
         jmp inicio
 %include "util.inc"
+%include "sectores.inc"         ; (MBR_COD y ARR_COD: lo que miden sin los ceros del final)
 
 inicio:
         cld
@@ -490,7 +491,7 @@ m_e_escribir db "Error al escribir en el disco.", 10, 0
 
 ; el código del sector de particiones, tal como sale de ensamblar
 mbr_codigo:
-        incbin "../mbr.bin"
+        incbin "../mbr.bin", 0, MBR_COD
 
         absolute $
             alignb 2

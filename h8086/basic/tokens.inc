@@ -358,8 +358,7 @@ tokeniza:
 .es_op:
         mov al, [cs:bx + 1]
         stosb
-        mov byte [v_opnd], 0
-        mov byte [v_ini_sent], 0
+        mov word [v_opnd], 0           ; (y v_ini_sent, el de detrás, a 0)
         cmp al, 0xEA                ; «-» entre números de línea (LIST 10-20)
         je .sig
         mov byte [v_lineas], 0
@@ -395,9 +394,7 @@ tokeniza:
         stosb
         cmp al, '"'
         jne .com1
-        mov byte [v_opnd], 1
-        mov byte [v_ini_sent], 0
-        mov byte [v_lineas], 0
+        call estado_1
         jmp .sig
 .apostrofo:
         mov ax, 0x8F3A              ; «:» REM
@@ -417,9 +414,7 @@ tokeniza:
 .interrog:
         mov al, 0x91
         stosb
-        mov byte [v_opnd], 0
-        mov byte [v_ini_sent], 0
-        mov byte [v_lineas], 0
+        call estado_0
         jmp .sig
 .dos_puntos:
         stosb
@@ -438,8 +433,7 @@ tokeniza:
 .numero:
         dec si
         call tok_numero
-        mov byte [v_opnd], 1
-        mov byte [v_ini_sent], 0
+        mov word [v_opnd], 1           ; (y v_ini_sent, el de detrás, a 0)
         jmp .sig
 .hex:                               ; &H1F, &O17 o &17 (octal)
         mov al, [si]
@@ -463,9 +457,7 @@ tokeniza:
         stosb
         call lee_base               ; AX = el valor
         stosw
-        mov byte [v_opnd], 1
-        mov byte [v_ini_sent], 0
-        mov byte [v_lineas], 0
+        call estado_1
         jmp .sig
 
         ; ---- una palabra ----
@@ -553,13 +545,11 @@ tok_numero:
         je .sim
         mov al, 0x1F
         stosb
-        call ac_a_mbf8              ; escribe 8 octetos en ES:DI
-        ret
+        jmp ac_a_mbf8              ; escribe 8 octetos en ES:DI
 .sim:
         mov al, 0x1D
         stosb
-        call ac_a_mbf4
-        ret
+        jmp ac_a_mbf4
 .ent:
         mov ax, [ac + AC_M0]
         cmp ax, 10
@@ -621,10 +611,7 @@ tok_palabra:
         stosb
         mov si, bx
         add si, 2
-        mov byte [v_opnd], 0
-        mov byte [v_ini_sent], 0
-        mov byte [v_lineas], 0
-        ret
+        jmp estado_0
 .no_fn:
         ; con el «$» o «(» de detrás
         push cx
@@ -671,9 +658,7 @@ tok_palabra:
         inc si
 .var_x:
         dec si
-        mov byte [v_opnd], 1
-        mov byte [v_ini_sent], 0
-        mov byte [v_lineas], 0
+        call estado_1
 .esp_hecha:
         ret
 
@@ -699,9 +684,7 @@ pon_codigo:
         stosb
         xchg al, ah
 .uno:
-        mov byte [v_opnd], 0
-        mov byte [v_ini_sent], 0
-        mov byte [v_lineas], 0
+        call estado_0
         test ah, ah
         jnz .func
         cmp al, 0x8F                ; REM: lo que queda, tal cual
@@ -1295,4 +1278,15 @@ parece_doble:
         ret
 .si:
         stc
+        ret
+
+; el estado del tokenizador tras una palabra: v_opnd (1 si lo último era un
+; operando), y v_ini_sent y v_lineas a 0 (van seguidos en datos.inc)
+estado_1:
+        mov word [v_opnd], 1
+        mov byte [v_lineas], 0
+        ret
+estado_0:
+        mov word [v_opnd], 0
+        mov byte [v_lineas], 0
         ret

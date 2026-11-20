@@ -353,10 +353,13 @@ duro_codigo:
         test al, al
         jnz .x                      ; ya tiene uno: se deja
         loop .c
-        mov si, mbr_codigo
+        mov si, mbr_codigo          ; (el programa solo lleva lo que no es cero)
         mov di, mbr
-        mov cx, 446
+        mov cx, MBR_COD
         rep movsb
+        mov cx, 446 - MBR_COD
+        xor al, al
+        rep stosb
 .x:
         pop di
         pop si
