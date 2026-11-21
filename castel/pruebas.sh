@@ -158,6 +158,10 @@
 #      Configuración, las pestañas de las propiedades, copiar y guardar el
 #      informe en X:); en un «q35» (RTL8139, xHCI con concentrador) el
 #      informe en texto; y con «sinusb» y «sinacpi», lo desactivado.
+#  20. SSH, WireGuard y Tailscale (SOLO=ssh): SSH.BIN y SSHD.BIN (en C, con
+#      Monocypher) contra OpenSSH de aquí; WG.BIN contra el WireGuard del
+#      núcleo Linux y TAILSCAL.BIN contra Headscale y un tailscaled (estas
+#      dos, con root e ip netns; Tailscale, con HEADSCALE=binario).
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -176,6 +180,7 @@
 #   SOLO=pantalla ./pruebas.sh    la primera y la decimoséptima (la medida de la pantalla)
 #   SOLO=navegador ./pruebas.sh   la primera y la decimoctava (el Navegador: NAVEGA.BIN)
 #   SOLO=dispositivos ./pruebas.sh  la primera y la 19 (el Administrador de dispositivos)
+#   SOLO=ssh ./pruebas.sh         la primera y la 20 (SSH, WireGuard y Tailscale; con HEADSCALE=binario, también Tailscale)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -239,7 +244,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -1414,8 +1419,9 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
+    # (SSH, TAILSCALE: 23 programas: SSH, SSHD, WG y TAILSCAL también van como módulos)
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 20 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 25 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
@@ -1719,7 +1725,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 20 archivos que ha traído el cargador hacen de unidad M:" $S \
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 25 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
       ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
@@ -2953,8 +2959,9 @@ VBOX_Q35="-machine q35 -m 256 -nic user,model=e1000"
 # 2. arrancar sin instalar (la primera entrada), en un «pc» con IDE, USB OHCI (que no se toca) y la e1000
 truncate -s 2G $V/ide.img
 maquina vivo "$VBOX_PC -cdrom $V/cd.iso -drive file=$V/ide.img,format=raw,if=ide,index=0 -boot d" ":espera 40 ^escritorio: en marcha" ":espera 20 ^red: DHCP: IP" ":pausa 2" ":captura cd1"
+# (TAILSCALE: sin «^» en la del DHCP: con más módulos, puede salir detrás del «> » de la consola)
 mira "el CD en un «pc» como el de VirtualBox (IDE, USB OHCI, la e1000 82540EM): GRUB arranca solo la primera entrada, el escritorio sin instalar, con la red" \
-  "escritorio: en marcha, 800 x 600" "red: tarjeta 8086:100E" "^red: DHCP: IP 10\.0\.2\.15"
+  "escritorio: en marcha, 800 x 600" "red: tarjeta 8086:100E" "red: DHCP: IP 10\.0\.2\.15"
 miracap "y el escritorio, desde la memoria (la unidad M:)" cd1 texto 20 50 110 70 "Mi equipo" negrita 30 570 80 590 Inicio
 if ! grep -q "excepción\|\*\*\*" $S; then ok "ni una excepción del núcleo (con el controlador OHCI y su tableta USB, que no se usan)"; else ko "hay excepciones:"; grep "excepción\|\*\*\*" $S | head -3 | sed 's/^/        /'; fi
 # 3. instalar desde el CD: en el «pc» (IDE) y en el «q35» (SATA: AHCI, con el CD en AHCI también)
@@ -3247,7 +3254,7 @@ miracap "la pestaña Controlador: el controlador, el identificador, el subsistem
   texto 100 150 700 400 "video.cas (en el núcleo)" texto 100 150 700 400 "PCI 1234:1111" texto 100 150 700 400 "030000 (Tarjeta gráfica (VGA))"
 miracap "la pestaña Recursos: sus zonas de memoria, con lo que miden" dv6 negrita 100 120 400 160 Recursos texto 100 150 700 400 "FD000000-FDFFFFFF (16 MB)"
 miracap "«Copiar informe»: al portapapeles" dv7 texto 30 520 760 545 "Informe copiado al portapapeles"
-miracap "Configuración, con «Administrador de dispositivos...»" dv8 negrita 160 120 700 160 "Configuración" negrita 170 380 480 420 "Administrador de dispositivos..."
+miracap "Configuración, con «Dispositivos...»" dv8 negrita 160 120 700 160 "Configuración" negrita 170 380 480 420 "Dispositivos..."
 miracap "y desde ahí, la ventana otra vez" dv9 negrita 30 15 400 40 "Administrador de dispositivos"
 if ! grep -q "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $Y/pc.sal; then ok "ni una excepción del núcleo ni un error de ACPICA (recorriendo el espacio de nombres y los _CRS)"
 else ko "hay excepciones o errores:"; grep "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $Y/pc.sal | head -4 | sed 's/^/        /'; fi
@@ -3277,6 +3284,112 @@ else ko "el núcleo se ha quejado:"; cat $Y/q35.sal $Y/sin.sal | grep "excepció
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Administrador de dispositivos)"
 fi   # el Administrador de dispositivos
+# ------------------------------------------- 20. SSH, WireGuard y Tailscale
+# (ssh; docs/PENTIUM.md §14 ter) Los programas en C de
+# nucleo32/hispac/ (hacer.sh): SSHD contra el cliente OpenSSH de aquí (QEMU
+# con hostfwd), SSH contra un sshd de OpenSSH propio de la prueba (puerto alto,
+# ForceCommand: no da una shell); y, con root, ip netns y wg, WireGuard contra
+# el del núcleo Linux en un espacio de nombres propio; con HEADSCALE= (el
+# binario), Tailscale contra Headscale y un tailscaled de pares, en otro. Sin
+# eso, esas dos se saltan (y se dice).
+if parte08 ssh; then
+echo "== Hispa-Pentium: SSH (SSH.BIN, SSHD.BIN), WireGuard (WG.BIN) y Tailscale (TAILSCAL.BIN) =="
+R=$P/ssh
+rm -rf $R; mkdir -p $R
+export MTOOLS_SKIP_CHECK=1
+if bash $AQUI/nucleo32/hispac/hacer.sh $R/bin > $R/hacer.txt 2>&1; then
+  ok "nucleo32/hispac/hacer.sh: SSH.BIN, SSHD.BIN, WG.BIN y TAILSCAL.BIN con Monocypher ($(stat -c %s $R/bin/SSH.BIN), $(stat -c %s $R/bin/SSHD.BIN), $(stat -c %s $R/bin/WG.BIN) y $(stat -c %s $R/bin/TAILSCAL.BIN) octetos)"
+else ko "nucleo32/hispac/hacer.sh no los hace: $(tail -1 $R/hacer.txt)"; fi
+ssh-keygen -q -t ed25519 -N '' -f $R/clave -C prueba
+PS=$((30000 + RANDOM % 10000)); PH=$((PS + 1))
+bash $AQUI/nucleo32/hispac/prueba_red.sh sshd $R/sshd $PS
+if $AQUI/nucleo32/disco.sh $R/d.img 16 red tls ssh > $R/disco.txt 2>&1 && mmd -i $R/d.img ::SSH && cp $R/clave.pub $R/AUT.TXT && mcopy -i $R/d.img $R/AUT.TXT ::SSH/AUTORIZA.TXT \
+   && mcopy -i $R/d.img $R/sshd/ID_ED.SSH ::SSH/ID_ED.SSH && [ -s $R/sshd/sshd.pid ]; then
+# 1. SSHD, con el ssh de aquí: una orden y una sesión con terminal
+cp $R/d.img $R/a.img
+( for _ in $(seq 120); do sleep 1; timeout 2 bash -c "</dev/tcp/127.0.0.1/$PH" 2> /dev/null && break; done
+  sleep 20
+  timeout 60 ssh -p $PH -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o BatchMode=yes -i $R/clave prueba@127.0.0.1 \
+    "echo hola desde hispa" < /dev/null > $R/orden.txt 2>&1; echo "código $?" >> $R/orden.txt
+  printf 'echo dentro de la consola\rver\rsalir\r' > $R/teclas.txt
+  setsid timeout 60 ssh -tt -p $PH -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o BatchMode=yes -i $R/clave \
+    prueba@127.0.0.1 < $R/teclas.txt > $R/tty.txt 2>&1
+  echo "código $?" >> $R/tty.txt ) &
+FUERA=$!
+ESCRIBE=1 DISCO=$R/a.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-netdev user,id=n0,hostfwd=tcp:127.0.0.1:$PH-:22 -device e1000,netdev=n0" \
+  $AQUI/nucleo32/probar.sh "" ":pausa 3" "sshd /encender" ":pausa 75" "sshd" ":pausa 2" > $R/a.sal 2>&1
+wait $FUERA
+tr -d '\r' < $R/a.sal > $R/a.txt
+S=$R/a.txt
+mira "SSHD: apagado hasta que se enciende; con /ENCENDER escucha en el puerto 22, con su llave del equipo (ssh-ed25519) hecha la primera vez" \
+  "^Servidor SSH encendido (puerto 22)" "sshd: llave del equipo nueva (ssh-ed25519)$" "red: tcp: escuchando en el puerto 22$" \
+  "sshd: Hispa-Pentium: el servidor SSH, en el puerto 22 (llave SHA256:"
+mira "SSHD con el cliente OpenSSH: curve25519-sha256, chacha20-poly1305 y kex-strict; entra con la llave de AUTORIZA.TXT" \
+  "sshd: la otra punta: SSH-2.0-OpenSSH" "sshd: kex-strict: sí (contra Terrapin)$" "sshd: cifrado: curve25519-sha256, ssh-ed25519, chacha20-poly1305@openssh.com$" \
+  "sshd: entra prueba con su llave$" "sshd: orden: echo hola desde hispa$" "^El servidor SSH de Hispa-Pentium: encendido (puerto 22)"
+S=$R/orden.txt
+mira "ssh equipo orden: la orden se hace en Hispa-Pentium (ORDENES /C) y vuelve lo que escribe, con el código 0" "^hola desde hispa$" "^código 0$"
+if grep -q "hola desde hispa.$(printf '\r')" $R/orden.txt; then ko "sin terminal, los finales de línea tienen que ir como en Unix (sin CR)"; else ok "sin terminal (una orden), los finales de línea van como en Unix"; fi
+tr -d '\r' < $R/tty.txt > $R/tty2.txt
+S=$R/tty2.txt
+mira "una sesión con terminal: la Consola de Hispa-Pentium (en UTF-8), las órdenes que se teclean al otro lado y SALIR" \
+  "^Hispa-Pentium: intérprete de órdenes" "^dentro de la consola$" "^Intérprete de órdenes del anillo 3 (ORDENES.BIN).$" "^Hasta luego.$" "^código 0$"
+# 2. SSH, con un sshd de OpenSSH: la huella, la llave propia, el terminal y una orden
+cp $R/d.img $R/b.img
+CAPTURAS=$R ESCRIBE=1 DISCO=$R/b.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ":pausa 3" \
+  "ssh -p $PS root@10.0.2.2" ":pausa 10" ":escribe s" ":pausa 6" ":texto b1" "hola mundo" ":pausa 2" ":texto b2" ":pausa 4" \
+  "ssh -p $PS root@10.0.2.2 una orden" ":pausa 10" ":texto b3" > $R/b.sal 2>&1
+tr -d '\r' < $R/b.sal > $R/b.txt
+S=$R/b.txt
+mira "SSH con OpenSSH: la primera vez enseña la huella y pregunta; entra con la llave propia (ID_ED.SSH)" \
+  "ssh: la otra punta: SSH-2.0-OpenSSH" "ssh: kex-strict: sí (contra Terrapin)$" "ssh: dentro, con la llave propia$" "ssh: sesión acabada (código 0)$" "ssh: sesión acabada (código 3)$"
+S=$R/b1.txt
+mira "el terminal de SSH (en la pantalla de texto): borrar, colores, mover el cursor y el UTF-8 (a la página 437)" \
+  "^|HOLA DESDE OPENSSH TERM=xterm" "^|          caja azul  ─ñ" "^|Escriba algo:"
+S=$R/b2.txt
+mira "lo que se teclea va al otro lado (y vuelve: «leido»)" "^|leido: \[hola mundo\]"
+S=$R/b3.txt
+mira "SSH con una orden: sin terminal, lo que sale, aquí mismo, y el código de salida de allí" "^|orden: una orden$" "^|(SSH.BIN ha acabado con el código 3)"
+S=$R/b.txt
+if grep -q "^\[10.0.2.2\]:$PS ssh-ed25519 " <(mtype -i $R/b.img ::SSH/CONOCIDO.TXT 2> /dev/null); then ok "la llave del servidor queda en \\HISPA\\SSH\\CONOCIDO.TXT (la segunda vez no se pregunta)"
+else ko "no está la llave del servidor en CONOCIDO.TXT"; fi
+# 3. WireGuard contra el del núcleo Linux (root, ip netns y wg)
+if [ "$(id -u)" = 0 ] && command -v wg > /dev/null && ip netns list > /dev/null 2>&1; then
+  cp $R/d.img $R/w.img
+  bash $AQUI/nucleo32/hispac/prueba_red.sh wg $R/wg $R/w.img
+  tr -d '\r' < $R/wg/q.sal > $R/w.txt
+  S=$R/w.txt
+  mira "WireGuard (WG /ENCENDER, el archivo de wg-quick): el apretón de manos con el WireGuard de Linux y la interfaz del túnel en RED.BIN" \
+    "red: túnel: la interfaz, con la IP 10.9.0.2 y 1 redes$" "wg: Hispa-Pentium: WireGuard en marcha (10.9.0.2, clave pública " \
+    "wg: 10.0.2.2: túnel hecho (claves nuevas)$" "^Respuesta desde 10.9.0.1: octetos=32 " "^  último apretón de manos: "
+  S=$R/wg/fuera.txt
+  mira "por el túnel, desde Linux: ping a Hispa-Pentium y SSH a su SSHD" "^64 bytes from 10.9.0.2" "latest handshake" "^hola por wireguard$" "^código 0$"
+else echo "  (WireGuard: hace falta root, ip netns y wg: se salta)"; fi
+# 4. Tailscale contra Headscale (HEADSCALE=...) y un tailscaled de pares
+if [ "$(id -u)" = 0 ] && [ -x "${HEADSCALE:-}" ] && command -v tailscaled > /dev/null && ip netns list > /dev/null 2>&1; then
+  cp $R/d.img $R/t.img
+  bash $AQUI/nucleo32/hispac/prueba_red.sh tailscale $R/ts $R/t.img $PS
+  tr -d '\r' < $R/ts/q.sal > $R/t.txt
+  S=$R/t.txt
+  mira "Tailscale: ts2021 con Headscale, la dirección de alta (que aprueba la prueba) y el registro" \
+    "tailscale: control: conectado con 10.0.2.2 (ts2021)$" "tailscale: dar de alta este equipo: abra https://10.0.2.2:8443/register/" \
+    "^  https://10.0.2.2:8443/register/" "tailscale: registrado en la red de prueba$"
+  mira "el mapa de la red: la IP 100.x, el relevo DERP de casa, las reglas, la interfaz del túnel y los nombres (MagicDNS)" \
+    "tailscale: relevo de casa: derp-999 (Relevo de prueba)$" "tailscale: reglas de la red: [1-9]" "red: túnel: la interfaz, con la IP 100.64.0." \
+    "tailscale: en la red: hispa-pentium.prueba.hispa., 100.64.0." "tailscale: derp-999: conectado con 10.0.2.2$" \
+    "^Este equipo: 100.64.0.[0-9]*  hispa-pentium.prueba.hispa." "^  100.64.0.[0-9]* *pares-vps *en línea"
+  mira "con el otro equipo, por DERP: el apretón de WireGuard, ping por el nombre y SSH a su sshd" \
+    "tailscale: pares-vps: túnel hecho" "^Haciendo ping a pares-vps \[100.64.0." "^Respuesta desde 100.64.0." "ssh: conectando con pares-vps (100.64.0." "ssh: dentro, con la llave propia$"
+  S=$R/ts/fuera.txt
+  mira "y desde el otro equipo (tailscaled), SSH al SSHD de Hispa-Pentium por la red de Tailscale" "hispa-pentium" "^hola por tailscale$" "^código 0$"
+else echo "  (Tailscale: hace falta root, ip netns, tailscaled y HEADSCALE=el binario de Headscale: se salta)"; fi
+if ! cat $R/*.txt | grep -q "excepción\|\*\*\*"; then ok "en todos esos arranques, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; cat $R/*.txt | grep "excepción\|\*\*\*" | head -3 | sed 's/^/        /'; fi
+else ko "no se ha podido hacer el disco de las pruebas de SSH: $(tail -1 $R/disco.txt)"; fi
+[ -s $R/sshd/sshd.pid ] && kill "$(cat $R/sshd/sshd.pid)" 2> /dev/null
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin SSH, WireGuard ni Tailscale)"
+fi   # ssh
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ---------------------------------------------- 18. el Navegador (NAVEGA.BIN)

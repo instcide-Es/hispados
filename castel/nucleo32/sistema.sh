@@ -5,7 +5,8 @@
 # (la carpeta nucleo32), $W (una carpeta de trabajo con f/ e i/ ya hechas)
 # y $MEDIO («usb» o «cd»). Deja:
 #   $W/f     el núcleo (SEMILLA.BIN y sus copias ESCRIT*.BIN que piden el modo
-#            gráfico), los programas, ACPI.BIN, TLS.BIN y LEEME.TXT
+#            gráfico), los programas, ACPI.BIN, TLS.BIN, SSH.BIN, SSHD.BIN,
+#            WG.BIN, TAILSCAL.BIN y LEEME.TXT
 #   $W/i     lo que solo vale para instalar: los textos del sistema instalado,
 #            BOOT.IMG, CORE.IMG, CARPETAS.TXT y los registros de los paquetes
 #            (PAQUETES/*.PQI)
@@ -39,6 +40,13 @@ MODULOS="$MODULOS  module /ACPI.BIN ACPI.BIN
 bash $AQUI/tls/hacer.sh $W/f/TLS.BIN
 MODULOS="$MODULOS  module /TLS.BIN TLS.BIN
 "
+# (SSH) el cliente y el servidor SSH, WireGuard y Tailscale (nucleo32/hispac/:
+# C con Monocypher), igual: en la raíz, como módulos y, al instalar, a \HISPA
+bash $AQUI/hispac/hacer.sh $W/f
+for N in SSH SSHD WG TAILSCAL; do
+  MODULOS="$MODULOS  module /$N.BIN $N.BIN
+"
+done
 # lo que se instala en el disco: el núcleo (con el nombre que tendrá allí), los
 # programas, los textos del sistema instalado y el arranque del disco
 INSTALA="  module /ESCRIT8.BIN NUCLEO.BIN
@@ -100,6 +108,19 @@ LA RED (por cable)
   Las tarjetas que lleva: Intel PRO/1000, Realtek RTL8139 y Marvell Yukon
   88E8059. El Wi-Fi, todavía no.
 
+SSH Y TAILSCALE (la red privada de sus equipos)
+  En la Consola:
+    SSH usuario@equipo     entra en la terminal de otro equipo (SSH /LLAVE:
+                           la llave propia, para no escribir la contraseña)
+    SSHD /CLAVE y SSHD /ENCENDER   deja entrar en este desde otros (apagado
+                           hasta que se enciende)
+    TAILSCALE /CONECTAR    lo pone en su red de Tailscale: la primera vez sale
+                           una dirección que se abre en otro equipo para darlo
+                           de alta; luego, cada equipo por su nombre (ssh
+                           usuario@nombre) y su IP 100.x
+    WG /ENCENDER           un túnel WireGuard con el archivo de wg-quick
+  Configuración > «Red y Tailscale...» enseña lo mismo en una ventana.
+
 LA CONSOLA (el intérprete de órdenes)
   AYUDA dice las órdenes: DIR, TYPE, COPY, DEL, REN, MD, CD, RD, PATH, VER,
   MEM, FECHA, CLS... Un programa se lanza por su nombre. C:, X: cambian de
@@ -136,6 +157,8 @@ LA CARPETA \HISPA
                reloj del PC mal, pide la hora a actualiza.hispados.es;
                TLS.CCH y TLS.SEM son suyos. Más autoridades: los .CER de
                la carpeta \HISPA\RAICES
+  SSH, TS, WG  lo de SSH (las llaves y la contraseña, resumida), Tailscale
+               y WireGuard: las llaves secretas no se dan a nadie
   HISPA.INI    los ajustes: usuario, equipo, teclado (es o us) y modo
   GRUB.CFG     el menú de arranque. La línea «set modo=» es la medida de la
                pantalla (por ejemplo 1024x768x32, o auto)
