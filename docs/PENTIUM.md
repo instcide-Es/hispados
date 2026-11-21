@@ -1,6 +1,6 @@
 # Hispa-Pentium — el núcleo de la gama XP, escrito en Castel
 
-*18/11/2026; puesto al día el 20/11/2026 (la 0.8, todo junto: el disco SATA del ICH7, el USB en caliente, los paquetes, la red y apagar de verdad con la batería) y el 21/11/2026 (la 0.8.2: los controles de las ventanas; la 0.8.3: **el Navegador**, la web de hoy con NetSurf y JavaScript, con la rueda del ratón y el x87 de cada programa en el núcleo: sección 14 ter; y **Escudo, el antivirus**, con las firmas de ClamAV: sección 14 sexies). Hispa-Pentium es el miembro de la
+*18/11/2026; puesto al día el 20/11/2026 (la 0.8, todo junto: el disco SATA del ICH7, el USB en caliente, los paquetes, la red y apagar de verdad con la batería) y el 21/11/2026 (la 0.8.2: los controles de las ventanas; la 0.8.3: **el Navegador**, la web de hoy con NetSurf y JavaScript, con la rueda del ratón y el x87 de cada programa en el núcleo: sección 14 ter; y **Escudo, el antivirus y el cortafuegos**, con las firmas de ClamAV: sección 14 sexies). Hispa-Pentium es el miembro de la
 
 *18/11/2026; puesto al día el 20/11/2026 (la 0.8: la red). Hispa-Pentium es el miembro de la
 familia Hispa-DOS para los PC de 2000 en adelante (la gama de Windows XP, [ROADMAP](ROADMAP.md)): un **núcleo propio
@@ -3915,17 +3915,19 @@ hasta que haya sonido); y Winsock sobre el servicio de red.
   SEH, escuchar en la red, HTTPS para ellos (por eso NAVEGA2.EXE aún no),
   Direct3D. Ver [pentium/WIN32.md](pentium/WIN32.md).
 
-## 14 sexies. Escudo, el antivirus (ESCUDO.BIN, 21/11)
+## 14 sexies. Escudo, el antivirus y el cortafuegos (ESCUDO.BIN, 21/11)
 
-*Lo pidió el presidente de la asociación (21/11/2026): «un sistema antivirus».
-Rama `pentium-escudo`. Lo de dentro, en `castel/nucleo32/escudo/LEEME.txt`.*
+*Lo pidió el presidente de la asociación (21/11/2026): «un sistema antivirus»; y
+Carlos, ese mismo día: «si se llama Escudo, añádele un cortafuegos». Rama
+`pentium-escudo`. Lo de dentro, en `castel/nucleo32/escudo/LEEME.txt`.*
 
 Hispa-Pentium es otro sistema: los virus de Windows no funcionan en él tal
 cual. Pero abre programas de Windows de 32 bits (`WIN32.BIN`), descarga de
 Internet, monta memorias USB y CD en caliente, y lo que pasa por él acaba en
 los Windows de la asociación. **Escudo** sirve para las dos cosas: proteger el
 propio Hispa-Pentium y ser la **estación donde se revisan las memorias y los
-archivos** antes de llevarlos a un Windows.
+archivos** antes de llevarlos a un Windows. Y su **cortafuegos** decide qué
+entra en el equipo desde la red.
 
 ### Cómo se maneja
 
@@ -3936,10 +3938,10 @@ archivos** antes de llevarlos a un Windows.
   lleva, lo que se ha encontrado y «Cancelar»; al acabar, cada hallazgo con
   «A cuarentena», «Borrarlo» o «Dejarlo»), **Cuarentena** (devolver a su sitio
   o borrar para siempre, con su pregunta), **Historial** (`REGISTRO.TXT`),
-  **Red** (el cortafuegos: lo que escucha; «Apagar SSH») y **Opciones**.
-  Con el teclado: Tab y Mayús+Tab, Intro o Espacio, las flechas, Ctrl+Tab de
-  pestaña y Esc. Nada se dice solo con el color: `[OK]`, `[!]`, `[i]` y sus
-  palabras; el control del teclado, con un borde grueso.
+  **Cortafuegos** (más abajo) y **Opciones**. Con el teclado: Tab y Mayús+Tab,
+  Intro o Espacio, las flechas, Ctrl+Tab de pestaña y Esc. Nada se dice solo
+  con el color: `[OK]`, `[!]`, `[i]` y sus palabras; el control del teclado,
+  con un borde grueso.
 - Al **conectar una memoria USB o meter un CD**, «¿Revisar la memoria USB W:
   (MEMORIA)?» (`ESCUDO /VIGILAR`, que lanza el escritorio al arrancar, mira las
   unidades cada segundo con la llamada 131).
@@ -3947,12 +3949,14 @@ archivos** antes de llevarlos a un Windows.
   nada si está limpia; si no, su cuadro («A cuarentena», «Borrarlo»,
   «Dejarlo»).
 - Antes de abrir un **.EXE de Windows**, `ESCUDO /ANTES RUTA` («A cuarentena»,
-  «No abrirlo», «Abrirlo igual»): el gancho de `WIN32.BIN` está listo en
-  `escudo/gancho_win32.h` (cinco líneas en `win32/principal.c`, justo antes de
-  `cargar_exe`); se pone cuando la rama `pentium-win32` entre en la principal.
+  «No abrirlo», «Abrirlo igual»): el gancho, en `win32/principal.c`, justo
+  antes de `cargar_exe` (`escudo/gancho_win32.h`). Lo que ya ha salido limpio
+  queda en `REVISADO.TXT` (su MD5, su tamaño y el de las firmas) y no se mira
+  otra vez: no se cargan las firmas cada vez que se abre el mismo programa.
 - En la **Consola**: `ESCUDO RUTA` (archivos, carpetas, `X:`, o `*`: todo),
   `ESCUDO /LISTA`, `/CUARENTENA`, `/ESTADO`, `/ACTUALIZA`, `/RESTAURA n`,
-  `/BORRA n`. Da 0 si no hay nada y 1 si encuentra algo.
+  `/BORRA n`, `/CORTAFUEGOS [PUERTO DE | SI | NO]`. Da 0 si no hay nada y 1 si
+  encuentra algo.
 - La **cuarentena** es `C:\HISPA\CUARENTE` (la FAT de Hispa-Pentium solo
   escribe nombres de 8+3: «CUARENTENA» queda así; si ya hay una
   `CUARENTENA` con su nombre largo, se usa esa): cada archivo con sus octetos
@@ -3960,115 +3964,189 @@ archivos** antes de llevarlos a un Windows.
   e `INDICE.TXT` (de dónde salió, qué firma, cuándo). Lo que se hace queda en
   `\HISPA\ESCUDO\REGISTRO.TXT`.
 - **No hay «autorun»** en Hispa-Pentium (mirado: ni el núcleo ni el escritorio
-  ni Mi equipo leen `AUTORUN.INF`; una memoria o un CD solo se montan y se
-  avisa). Escudo señala los `AUTORUN.INF` como aviso `[i]`: en un Windows
-  viejo podrían abrir un programa solo al meter la memoria.
-- **El cortafuegos** (pestaña Red): lo único que escucha en la red es el
-  servidor SSH (`SSHD.BIN`, de la rama de Tailscale), **apagado de fábrica**;
-  lo demás (el Navegador, las actualizaciones, DHCP, DNS, Tailscale) solo llama
-  hacia fuera. Lo dice leyendo `\HISPA\SSH\SSHD.INI` y `\HISPA\TS\TS.INI`;
-  preguntárselo a la pila de red (una orden de `RED.BIN` que liste las
-  escuchas) queda para cuando la rama SSH entre en la principal.
+  ni Mi equipo leen `AUTORUN.INF`, tampoco en la 0.8.4; una memoria o un CD
+  solo se montan y se avisa). Escudo señala los `AUTORUN.INF` como aviso
+  `[i]`: en un Windows viejo podrían abrir un programa solo al meter la memoria.
 
 ### El motor
 
-Propio y pequeño (unas 2.600 líneas de C; `ESCUDO.BIN` entero, con la ventana,
-93 KB), con las **firmas de ClamAV en su formato** (docs.clamav.net; libclamav
-es la referencia del formato, sin copiar nada de su código): las sumas
-(`.hdb`, `.hsb`, `.mdb`/`.msb` de las secciones PE, las limpias `.fp`/`.sfp`),
-los patrones del cuerpo (`.ndb`, con todos sus comodines y desplazamientos,
-también el punto de entrada y las secciones de un PE), las lógicas (`.ldb`,
-con sus modificadores, su expresión y sus cuentas), las retiradas (`.ign2`),
-**dentro de los ZIP** (hasta tres niveles) y **EICAR** siempre. Los `.cvd` se
-leen enteros: la cabecera, la **firma digital de ClamAV** (RSA de 1024 bits
-sobre la MD5 de lo de detrás, con su clave pública; la cuenta, con BearSSL) y
-el `.tar.gz` de dentro (deflate y gzip propios). Probado con el `.cvd` de las
-pruebas de ClamAV (`test-3.cvd`, firmado con su clave de verdad): buena; con
-un octeto tocado, mala y no se usa.
+Propio y pequeño (unas 3.300 líneas de C; `ESCUDO.BIN` entero, con la ventana
+y el cortafuegos, 107 KB), con las **firmas de ClamAV en su formato**
+(docs.clamav.net; libclamav es la referencia del formato, sin copiar nada de
+su código): las sumas (`.hdb`, `.hsb`, `.mdb`/`.msb` de las secciones PE, las
+limpias `.fp`/`.sfp`), los patrones del cuerpo (`.ndb`, con todos sus comodines
+y desplazamientos, también el punto de entrada y las secciones de un PE), las
+lógicas (`.ldb`, con sus modificadores, su expresión y sus cuentas), las
+retiradas (`.ign2`), **dentro de los ZIP** (hasta tres niveles) y **EICAR**
+siempre. Los `.cvd` se leen enteros: la cabecera, la **firma digital de
+ClamAV** (RSA de 1024 bits sobre la MD5 de lo de detrás, con su clave pública;
+la cuenta, con BearSSL) y el `.tar.gz` de dentro (deflate y gzip propios).
+Probado con el `.cvd` de las pruebas de ClamAV (`test-3.cvd`, firmado con su
+clave de verdad) y con los del espejo: buena; con un octeto tocado, mala y no
+se usa.
 
-Los patrones se buscan con un **ancla**: los tres (o dos) octetos más raros de
-cada uno, en un mapa de bits de 1 M y una tabla por cubos; lo demás se
-comprueba alrededor (los huecos `*` y `{n-m}`, hacia los dos lados). Las
-sumas solo se calculan si hay alguna firma de ese tamaño. Para el equipo, las
-firmas van en un índice propio, **FIRMAS.ESC**: las sumas ordenadas por
-tamaño, 16 octetos cada una, que **no se cargan**: un mapa de 128 K dice si hay
-alguna de ese tamaño y se lee solo su página de 4 K; en memoria van los
-patrones (unos 200 octetos cada uno).
+Para el equipo, las firmas van en un índice propio, **FIRMAS.ESC** (versión
+2): las **sumas**, en el disco, por tramos de tamaño y tipo (8 octetos cada
+una; un mapa de 256 K dice si hay alguna de ese tamaño, y se busca por la mitad
+en el disco); el **cuerpo y las lógicas**, en el disco, en bloques de 32 K
+comprimidos (deflate); y en memoria, de cada firma, sus **disparadores** (12
+octetos: 4 fijos y hasta 3 más, elegidos entre lo que menos se repite entre las
+firmas y en los programas limpios). Si salta uno en lo que se mira, la firma
+se lee del disco y se busca entera (todas las que han saltado en ese archivo,
+juntas, en una pasada). Las firmas propias o de prueba (en texto) van en
+memoria, con su ancla de tres octetos.
 
 **Lo que se pierde** (detallado en el LEEME): el bytecode (`bytecode.cvd`: su
 máquina virtual es enorme), lo que pide normalizar o desmontar antes (HTML,
 correo, texto normalizado, macros de Office, iconos, PCRE, comparaciones de
 octetos, YARA, phishing), los contenedores que no son ZIP (RAR, 7z, CAB,
-UPX, el interior de los PDF), las PUA, y de un archivo de más de 16 MB (se
-cambia en Opciones) los patrones solo miran el principio. Lo que importa para
-la asociación (ejecutables de Windows, documentos y memorias con virus
-conocidos) sí: sumas, cuerpo y lógicas son casi todas las firmas de ClamAV.
+UPX, el interior de los PDF), las PUA, lo que no se elige de las bases (más
+abajo), y de un archivo grande (de 4 a 16 MB según la memoria; se cambia en
+Opciones) los patrones solo miran el principio. Lo que importa para la
+asociación (ejecutables de Windows, documentos y memorias con virus conocidos)
+sí.
 
 ### Las firmas, por Internet
 
 **Los equipos no bajan nada del CDN de ClamAV.** Su FAQ admite solo freshclam y
 cvdupdate («las descargas con wget, curl u otras herramientas se deniegan»;
-403 y 429 a quien no lo es o baja demasiado), y el CDN rechaza ya a un cliente
-con un User-Agent propio (probado el 21/11: 403). Muchos equipos que bajan
-cada uno 100 MB serían, además, lo que ClamAV pide no hacer. Se hace como ClamAV
-recomienda: **un espejo propio en el VPS con cvdupdate** (su herramienta, una
-vez al día como mucho) y **`tools/escudo_firmas.py`**, que comprueba la firma
-digital de `main.cvd` y `daily.cvd` y hace dos paquetes de Hispa-Pentium:
-**`escbase`** (`BASE.ESC`, de main.cvd: cambia cada meses, con `COPYING.TXT`,
-la GPL-2 de las bases) y **`escdia`** (`DIA.ESC`, de daily.cvd, con
-`ORIGEN.TXT`), que van al catálogo **firmado** de
-`http://actualiza.hispados.es/pentium/` (`--publica CARPETA --clave PRIVADA`
-lo copia y firma otra vez el catálogo; lo publica la sesión principal). Escudo
-los trae con PAQUETES («Actualizar las firmas», `ESCUDO /ACTUALIZA`, o solo,
-una vez al día como mucho, si la opción está puesta). El User-Agent de
-Hispa-Pentium no lleva nada de Carlos.
+403 y 429 a quien no lo es o baja demasiado), y el CDN rechaza a un cliente con
+un User-Agent propio (probado el 21/11: 403). Se hace como ClamAV recomienda
+para muchos equipos: **un espejo propio en el VPS con cvdupdate** (aprobado por
+Carlos el 21/11: `/opt/cvdupdate`, la base en `/var/lib/escudo-espejo`) y
+**`tools/escudo_firmas.py`**, que comprueba la firma digital de `main.cvd` y
+`daily.cvd`, elige y hace **tres paquetes** para el catálogo firmado de
+`http://actualiza.hispados.es/pentium/`:
 
-Desde diciembre de 2025 (ClamAV retiró las firmas viejas) `main.cvd` mide unos
-85 MiB y `daily.cvd` unos 22 MiB comprimidos. `escudo_firmas.py` pone un
-límite a cada `.ESC` (48 MB la base, 24 el día): si no cabe, se dejan primero
-las sumas de main (de archivo y luego de sección); los patrones van siempre.
-Las bases de verdad no se han podido medir aquí (el CDN da 403 desde el VPS
-sin cvdupdate, que no está instalado): **la primera vez que corra
-`escudo_firmas.py` en el VPS dice cuántas firmas, cuánta memoria y cuánto
-disco**, y con eso se ajustan los límites (en un equipo de 64 MB, si los
-patrones de verdad pasan de unos 20 MB, se baja el de la base).
+| Paquete | Qué | Mide | Cambia |
+|---|---|---|---|
+| `escbase` | `BASE.ESC`: lo elegido de main.cvd (y `COPYING.TXT`, la GPL-2 de las bases) | 21 MB | cuando cambia main.cvd (la última, diciembre de 2025) |
+| `escmes` | `MES.ESC`: lo elegido de daily.cvd el día que se hace | 24 MB | cada mes (o antes, si el del día pasa de 3 MB) |
+| `escdia` | `DIA.ESC`: lo nuevo de daily.cvd desde el del mes, y lo retirado (por su nombre) | de KB a pocos MB | cada día; pide `escmes` de esa versión |
+
+Escudo los trae con PAQUETES (la primera vez `INSTALA escdia`, que trae los
+otros dos; luego `ACTUALIZA`), desde la ventana o solo, una vez al día como
+mucho. Lo que lleva el del mes (para hacer el del día) queda en `--estado`
+(`MES.LST.gz`, `NOMBRES.gz` y `BASE.V`). El User-Agent de Hispa-Pentium no
+lleva nada de Carlos.
+
+**Con las bases de verdad** (main.cvd 63 y daily.cvd 28190, el 21/11/2026: 3,3
+millones de sumas y 400.000 firmas del cuerpo y lógicas, 110 MB comprimidas)
+la primera versión del índice pedía **medio GB de memoria** y 75 MB al día. Lo
+que se elige ahora:
+
+- **Lo que llega en memorias y descargas**: Windows (`Win.*`), los documentos
+  (`Doc`, `Xls`, `Ppt`, `Rtf`, `Pdf`, `Onenote`, `Hwp`), los guiones (`Js`,
+  `Vbs`, `Ps1`, `Py`, `Html`, `Php`, `Asp`, `Xml`, `Txt`), `Java`, `Lnk`,
+  `Archive`, `Multios`, `Dos`, `Legacy`, `Emf`. Fuera: `Andr`, `Unix`,
+  `Osx`/`Macos`, `Ios`, `Symbos`, `Email`, `Img`, `Swf`, phishing... (otras
+  plataformas, o lo que no llega por una memoria), y lo que Escudo no sabe
+  mirar (objetivos 2-7, 9 y 11; PCRE).
+- **Las sumas de main**: las 600.000 que más valen de 3 millones (las de
+  archivo entero; luego las de sección PE de las familias que siguen vivas en
+  daily). Las de daily, todas.
+- **Las lógicas que piden cinco cadenas a la vez** (`0&1&2&3&4`: casi todas
+  las de daily), con cada cadena recortada a sus 24 octetos que más dicen (si
+  son variadas). Las demás, enteras: recortar una sola cadena, una de `0|1` o
+  una de `=0` dio avisos falsos en los programas de Windows de Open Watcom (y
+  32 octetos de una de `Win.Trojan.Startpage` están en el gcc del VPS).
+- **Los disparadores**, entre lo que menos se repite entre las firmas y en los
+  programas limpios (los de Windows de Open Watcom, `--corpus`): «msvbvm» sale
+  en 100.000 firmas de Visual Basic y en cualquier programa hecho con él.
+
+En el equipo, con los tres paquetes, **unos 13 MB de memoria**; con lo que se
+lee de cada archivo (4 MB con 64 MB de memoria, 8 con 128, 16 con más), unos
+17 MB en un equipo de 64 MB. Probado en QEMU con 64 MB.
+
+**Cobertura comprobada**: 10 muestras hechas de firmas de verdad (5 lógicas de
+daily, 5 del cuerpo de main), encontradas; **ningún aviso falso** en los 3.995
+EXE, DLL, PDF, DOC, XLS, ZIP y JS del VPS (2,1 GB, con todos los programas de
+Windows y OS/2 de Open Watcom). Lo que se pierde: lo de otras plataformas, las
+sumas de main que no caben (2,5 millones, casi todas de secciones PE de
+familias viejas), y lo de siempre (más arriba).
+
+### El cortafuegos
+
+Lo hace **`RED.BIN`** (`rcorta.cas`, y lo que lo llama en `rtcp.cas`,
+`rpila.cas`, `ured.cas` y `rbase.cas`, marcado «(CORTAFUEGOS)»); Escudo lo
+enseña y lo cambia.
+
+- Lo que sale y sus respuestas entran siempre (el Navegador, las
+  actualizaciones, DHCP, DNS, Tailscale).
+- **Una conexión TCP que no ha pedido el equipo** solo entra si hay una regla
+  para su puerto que deje entrar desde donde viene: `todos`, `red` (la red
+  local y la de Tailscale), `local`, `tailscale`, una red `a.b.c.d/n`, o
+  `nadie`. Si no, **se tira sin contestar** (tampoco hay RST a los puertos
+  cerrados: desde fuera no se ve ni que el equipo está) y se apunta.
+- **El ping**: de todos, de la red (de fábrica) o de nadie.
+- **Cuando un programa se pone a escuchar** en un puerto sin regla, RED.BIN lo
+  deja pendiente y `ESCUDO /VIGILAR` pregunta: «¿Dejar que un programa reciba
+  conexiones?» (*Desde la red*, *Desde todos*, *No*). Lo bloqueado va al
+  registro de Escudo.
+- Las reglas, en `\HISPA\ESCUDO\CORTAFUE.INI` (`activo=`, `ping=`, `avisar=`,
+  `regla=tcp 22 red`); RED.BIN las lee al arrancar y con la orden
+  **`O_CORTAFUEGOS`** (28: leerlas otra vez; el informe, con las reglas, lo que
+  escucha por TCP y por UDP, lo pendiente y lo último bloqueado; olvidar lo
+  pendiente).
+- **Sin `CORTAFUE.INI`**, lo de fábrica: SSH (apagado hasta que se enciende)
+  desde la red local y Tailscale, como se usa ahora; ping desde la red.
+- UDP: solo entra a un puerto que haya abierto un programa (ya lo hacía la
+  pila); sale en la lista, sin reglas.
+- La pestaña **Cortafuegos**: encendido, avisar, ping; lo que escucha, con su
+  regla («[!] TCP 22 (SSH): escucha (tarea 7); desde la red local y
+  Tailscale») y tres botones (*Desde la red y Tailscale*, *Desde cualquier
+  sitio*, *Que no entre*); lo último bloqueado; «Apagar SSH». Y en la Consola,
+  `ESCUDO /CORTAFUEGOS`.
+- Probado en QEMU con el SSHD de verdad y una conexión desde fuera (hostfwd):
+  con lo de fábrica entra; con `regla=tcp 22 nadie` no llega nada y se apunta;
+  y en el escritorio, la pregunta deja la regla y RED.BIN la lee.
 
 ### Lo que tarda
 
 | | |
 |---|---|
-| El mismo motor en Linux (un PC de hoy) | de 85 a 200 MB/s (según lo cargado que esté el VPS) |
-| En QEMU sin KVM, leyendo del disco IDE | de 1 a 1,8 MB/s |
-| En un Pentium a 133 MHz (estimado) | de 2 a 4 MB/s |
+| El mismo motor en Linux, con las bases de verdad, programas de Windows | unos 20-25 MB/s |
+| En QEMU sin KVM, con las bases de verdad, programas de Windows (64 MB de memoria) | unos 0,25 MB/s |
+| Cargar las bases de verdad, en QEMU | de 5 a 12 s (según lo cargado que esté el VPS) |
+| El mismo motor en Linux, 16 MB al azar con 20.000 patrones | de 85 a 200 MB/s |
+| En QEMU sin KVM, al azar, leyendo del disco IDE | de 1 a 2,8 MB/s |
 
-(16 MB al azar con 20.000 patrones, 5.000 lógicas y 100.000 sumas;
-`escudo/prueba/hazcarga.py`.) La estimación del Pentium sale de la cuenta del
-bucle de las anclas (unos 30 ciclos por octeto; sin multiplicar, que `imul`
-son 10 ciclos en un Pentium): una memoria de 1 GB llena, unos cinco minutos;
-la carpeta de documentos de siempre, segundos. Cargar las firmas (FIRMAS.ESC
-con 35.000 patrones) son 1,6 s en QEMU.
+En QEMU, con un programa de Windows, el tiempo se va en las sumas (leer los
+tramos del disco: un 40 %) y en las firmas que hay que leer y descomprimir
+porque ha saltado un disparador (unas 25 por programa: otro 50 %); buscar los
+disparadores en sí es poco (un 5 %). Para eso: los bloques del cuerpo son de
+8 K, hay caché de 32 páginas de 4 K de los `.ESC` y de 4 bloques, y el núcleo
+recuerda lo que hay seguido de cada archivo abierto (`fat.cas`, marcado
+«(ESCUDO)»: ir hacia atrás en un archivo grande ya no recorre la cadena de la
+FAT desde el principio). En un Pentium a 133 MHz, del orden de la mitad o la
+tercera parte que en QEMU en este VPS: unos 0,1 MB/s en programas de Windows
+y algo más en documentos; una memoria con 100 MB de programas, un cuarto de
+hora; con documentos, bastante menos. En el Toshiba (Atom a 1,6 GHz), unas
+diez veces más deprisa.
 
 ### Dónde está: el paquete «escudo»
 
-`escudo/hacer.sh` (y `paquete.sh`, `tools/hpq.py` en OPCIONALES: necesita
-base 0.8.3, red y tls): `\HISPA\ESCUDO.BIN`, `\HISPA\ESCUDO\LEEME.TXT` y el
-acceso del menú (`ESCUDO.MNU`, `ESCUDO.ICP`). `nucleo32/actualiza.sh` lo pone
-en el catálogo con el Navegador (y las firmas, con `ESCUDO_CVD=carpeta`). En
-el núcleo (marcado «(ESCUDO)»): el escudo de la bandeja y `ESCUDO /VIGILAR` al
-arrancar (`escritorio.cas`), sin más llamadas nuevas; y en el Navegador,
-`ESCUDO /DESCARGA` al acabar cada descarga (`navega/descarga.c`).
+`escudo/hacer.sh` (y `paquete.sh`, `tools/hpq.py` en OPCIONALES: «escudo» 0.2,
+necesita base 0.8.3, red y tls): `\HISPA\ESCUDO.BIN`, `\HISPA\ESCUDO\LEEME.TXT`
+y el acceso del menú (`ESCUDO.MNU`, `ESCUDO.ICP`). `nucleo32/actualiza.sh` lo
+pone en el catálogo con el Navegador (y las firmas, con `ESCUDO_CVD=carpeta`).
+En el núcleo (marcado «(ESCUDO)»): el escudo de la bandeja y `ESCUDO /VIGILAR`
+al arrancar (`escritorio.cas`), sin llamadas nuevas; en el Navegador,
+`ESCUDO /DESCARGA` al acabar cada descarga (`navega/descarga.c`); en
+`WIN32.BIN`, `ESCUDO /ANTES`; y el cortafuegos, en `RED.BIN` (paquete «red»).
 
 ### Lo que falta
 
-- Medir con las bases de verdad (en cuanto el VPS tenga cvdupdate) y ajustar.
-- El gancho de `WIN32.BIN` en su sitio (cuando la rama entre).
+- Medirlo en un Pentium de verdad (y en el Toshiba); y que salten menos
+  disparadores en los programas limpios (cada uno que salta es una firma que
+  se lee y se descomprime).
 - Más contenedores: RAR (de solo lectura) y los `.EXE` comprimidos con UPX;
   el interior de los PDF (sus streams con deflate).
-- Que la red diga de verdad qué puertos escucha (una orden de `RED.BIN`).
+- Reglas para UDP en el cortafuegos (de momento, solo entra lo que pide un
+  programa); y el nombre del programa que escucha (hoy, su tarea).
 - Revisar en segundo plano (hoy la ventana revisa ella misma).
-- Que `/DESCARGA` y `/ANTES` no carguen las firmas cada vez: con las de
-  verdad, en un Pentium, cargar los patrones puede llevar segundos; que se
-  lo pidan al residente (`/VIGILAR`), que ya las tiene.
+- Que `/DESCARGA` no cargue las firmas cada vez (unos 12 s en QEMU): que se lo
+  pida al residente (`/VIGILAR`). `/ANTES` ya recuerda lo revisado.
 
 ## 15. Las pruebas
 

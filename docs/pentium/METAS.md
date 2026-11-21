@@ -13,7 +13,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [x] ~~**Explorador de archivos** y **dock** — rama pentium-explorador~~ (hecho el 21/11: docs/PENTIUM.md, «El explorador de archivos» y «El dock»)
 - [x] ~~**Programas de Windows y DirectX** (HW32 de Hispa-486 llevado a Pentium) — rama pentium-win32~~ (21/11/2026: [WIN32.md](WIN32.md))
 - [x] ~~**Antivirus «Escudo»** (pedido por el presidente de la asociación): motor propio con las firmas de ClamAV, la ventana, la cuarentena, «¿Revisar la memoria?» al conectar una memoria USB o un CD, las descargas del Navegador y las firmas por Internet desde actualiza.hispados.es~~ — rama pentium-escudo (21/11: ESCUDO.BIN y las firmas en tres paquetes, medidas con las bases de verdad)
-- [ ] **Cortafuegos de Escudo** («si se llama Escudo, añádele un cortafuegos», Carlos 21/11): nada entra si no lo pide el equipo, reglas por puerto y red, avisar cuando un programa quiera escuchar — rama pentium-escudo
+- [x] ~~**Cortafuegos de Escudo** («si se llama Escudo, añádele un cortafuegos», Carlos 21/11): nada entra si no lo pide el equipo, reglas por puerto y red, avisar cuando un programa quiera escuchar~~ — rama pentium-escudo (21/11: rcorta.cas en RED.BIN y la pestaña «Cortafuegos»)
 - [x] ~~**Administrador de dispositivos** (PCI, USB, ACPI: qué hay, qué controlador lo lleva, recursos y estado)~~ — rama pentium-dispositivos (21/11: DISPOSIT.BIN y la llamada 155; informe en X:\DISPOSIT.TXT)
 
 ## El escritorio
@@ -36,7 +36,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] Compartir carpetas en red (SMB) y FTP
 - [x] ~~**Tailscale** (WireGuard + su red privada: cada equipo localizado por su nombre) y **SSH** (entrar en la terminal de Hispa-Pentium desde otro equipo y desde él en los demás)~~ — rama pentium-tailscale (21/11; lo directo por UDP, más adelante: docs/PENTIUM.md §14 quinquies)
 - [ ] Más tarjetas de red y controladoras (las que vaya trayendo el taller)
-- [ ] Escudo: RAR y UPX por dentro, el interior de los PDF, revisar en segundo plano, que la red diga qué puertos escucha
+- [ ] Escudo: RAR y UPX por dentro, el interior de los PDF, revisar en segundo plano, reglas de UDP en el cortafuegos
 - [ ] NTP: la hora por Internet (y quitar el riesgo de la hora sin cifrar de TLS)
 - [ ] TLS 1.3 y descompresión gzip
 

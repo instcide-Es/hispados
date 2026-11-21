@@ -415,6 +415,11 @@ void revisa(const char *ruta, int lista)
 	       rev.revisados, rev.octetos / 1024,
 	       rev.ms / 1000, rev.n_hallados, rev.cortada ? " (cancelado)" : "");
 	serie("escudo: %u octetos en %u ms", rev.octetos, rev.ms);
+	{
+		extern u32 motor_disparos, motor_leidas, motor_ms_sumas, motor_ms_disparos, motor_ms_candidatas, motor_bloques;
+		serie("escudo: tiempos: sumas %u ms, disparadores %u ms (%u saltan), firmas del disco %u ms (%u leídas, %u bloques)",
+		      motor_ms_sumas, motor_ms_disparos, motor_disparos, motor_ms_candidatas, motor_leidas, motor_bloques);
+	}
 	avanza();
 }
 

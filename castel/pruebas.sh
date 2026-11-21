@@ -3920,8 +3920,8 @@ if bash $AQUI/nucleo32/escudo/hacer.sh --anfitrion $E/anf > $E/hacer.txt 2>&1; t
   S=$E/l1.err
   mira "lo que no sabe mirar se cuenta y se deja (el objetivo HTML, la PCRE); y la del nivel 240 no se carga" "^escudo: firmas: 4 sumas, 1 limpias, 8 del cuerpo, 4 lógicas .*; 2 no soportadas"
   # shellcheck disable=SC2086
-  $E/anf -q $FIRMAS -o $E/PRUEBA.ESC -F && $E/anf -q -f $E/PRUEBA.ESC $E/p/ARCHIVOS > $E/l2.txt 2>&1
-  if $CMP $E/l2.txt > $E/c2.txt; then ok "y lo mismo desde FIRMAS.ESC (el índice propio: las sumas se leen del disco por páginas)"
+  $E/anf -q $FIRMAS -o $E/PRUEBA.ESC && $E/anf -q -f $E/PRUEBA.ESC $E/p/ARCHIVOS > $E/l2.txt 2>&1
+  if $CMP $E/l2.txt > $E/c2.txt; then ok "y lo mismo desde FIRMAS.ESC (el índice propio: las sumas en el disco por tramos; el cuerpo en bloques comprimidos y, en memoria, sus disparadores)"
   else ko "desde FIRMAS.ESC no dice lo mismo:"; sed 's/^/        /' $E/c2.txt | head -6; fi
   # un .cvd de verdad, firmado con la clave de ClamAV (el de sus pruebas): si hay red
   if curl -sf --max-time 20 -o $E/test-3.cvd https://raw.githubusercontent.com/Cisco-Talos/clamav/main/unit_tests/input/freshclam_testfiles/test-3.cvd; then
@@ -4006,13 +4006,122 @@ if $AQUI/nucleo32/disco.sh $E/d.img 32 escudo > $E/disco.txt 2>&1 && mmd -i $E/d
   if [ -x $E/anf ]; then
     python3 -I $AQUI/nucleo32/escudo/prueba/hazcarga.py $E/c 16 > /dev/null
     $E/anf -q -f $E/c/CARGA.NDB -f $E/c/CARGA.LDB -f $E/c/CARGA.HDB -o $E/c/CARGA.ESC -F
-    LIN=$($E/anf -f $E/c/CARGA.ESC -t $E/c/GRANDE.BIN 2>&1 | sed -n 's/.* \([0-9.]* MB\/s\)$/\1/p')
+    LIN=$($E/anf -f $E/c/CARGA.ESC -t $E/c/GRANDE.BIN 2>&1 | sed -n 's/.* \([0-9.]* MB\/s\).*/\1/p')
     $AQUI/nucleo32/disco.sh $E/r.img 32 escudo > /dev/null 2>&1 && mcopy -i $E/r.img $E/c/CARGA.ESC ::ESCUDO/FIRMAS/ && mcopy -i $E/r.img $E/c/GRANDE.BIN ::
-    DISCO=$E/r.img ARRANQUE=ordenes MODULOS= MEMORIA=96 $AQUI/nucleo32/probar.sh "" ":pausa 3" "escudo C:\\GRANDE.BIN" ":pausa 60" > $E/r.sal 2>&1
+    DISCO=$E/r.img ARRANQUE=ordenes MODULOS= MEMORIA=160 $AQUI/nucleo32/probar.sh "" ":pausa 3" "escudo C:\\GRANDE.BIN" ":pausa 60" > $E/r.sal 2>&1
     MS=$(tr -d '\r' < $E/r.sal | sed -n 's/^escudo: 16777216 octetos en \([0-9]*\) ms$/\1/p')
     if [ -n "$MS" ]; then ok "lo que tarda, 16 MB al azar con 20.000 patrones, 5.000 lógicas y 100.000 sumas: en Linux, $LIN; en QEMU (sin KVM), $(python3 -c "print('%.1f MB/s' % (16000/$MS))") (leyendo del disco IDE)"
     else ko "no se ha podido medir en QEMU"; fi
   fi
+  # 5. (CORTAFUEGOS) el cortafuegos de RED.BIN (rcorta.cas), con el servidor
+  # SSH de verdad (SSHD.BIN) y una conexión desde aquí por QEMU (hostfwd: la
+  # conexión llega desde 10.0.2.2, la red local). Lo que se mira: si llega su
+  # saludo («SSH-2.0»), del lado de aquí; y lo que apunta RED.BIN
+  if $AQUI/nucleo32/disco.sh $E/cf.img 32 red tls ssh escudo > $E/cfdisco.txt 2>&1; then
+    saludo() {   # intenta cada 2 s durante $1 s: «sí» si alguna vez llega el saludo de SSH
+      local k r=no
+      for k in $(seq $(($1 / 2))); do
+        sleep 2
+        if timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/$2; head -c 7 <&3" 2> /dev/null | grep -q 'SSH-2.0'; then r=sí; break; fi
+      done
+      echo $r
+    }
+    # a) sin CORTAFUE.INI: lo de fábrica deja entrar a SSH desde la red local
+    PH=$((40000 + RANDOM % 20000))
+    ( saludo 110 $PH > $E/cfa.host ) &
+    FUERA=$!
+    cp $E/cf.img $E/cfa.img
+    DISCO=$E/cfa.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-netdev user,id=n0,hostfwd=tcp:127.0.0.1:$PH-:22 -device e1000,netdev=n0" \
+      $AQUI/nucleo32/probar.sh "" ":pausa 3" "sshd /encender" ":pausa 70" "escudo /cortafuegos" ":pausa 3" > $E/cfa.sal 2>&1
+    wait $FUERA
+    tr -d '\r' < $E/cfa.sal > $E/cfa.txt
+    S=$E/cfa.txt
+    mira "(CORTAFUEGOS) sin CORTAFUE.INI, lo de fábrica: SSH, desde la red local y Tailscale" \
+      "red: cortafuegos: sin CORTAFUE.INI: lo de fábrica" "^  regla: TCP 22 (SSH): desde la red local y Tailscale$" "^  escucha: TCP 22 (la tarea [0-9]*)$"
+    [ "$(cat $E/cfa.host)" = sí ] && ok "y la conexión desde la red local entra (llega el saludo de SSHD)" || ko "con lo de fábrica, la conexión a SSH no entra"
+    # b) con «regla=tcp 22 nadie»: no entra, sin contestar, y se apunta
+    PH=$((40000 + RANDOM % 20000))
+    ( saludo 110 $PH > $E/cfb.host ) &
+    FUERA=$!
+    cp $E/cf.img $E/cfb.img
+    printf 'activo=si\r\nping=red\r\navisar=si\r\nregla=tcp 22 nadie\r\n' > $E/CORTAFUE.INI
+    mcopy -o -i $E/cfb.img $E/CORTAFUE.INI ::ESCUDO/CORTAFUE.INI
+    DISCO=$E/cfb.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-netdev user,id=n0,hostfwd=tcp:127.0.0.1:$PH-:22 -device e1000,netdev=n0" \
+      $AQUI/nucleo32/probar.sh "" ":pausa 3" "sshd /encender" ":pausa 70" "escudo /cortafuegos" ":pausa 3" > $E/cfb.sal 2>&1
+    wait $FUERA
+    tr -d '\r' < $E/cfb.sal > $E/cfb.txt
+    S=$E/cfb.txt
+    mira "(CORTAFUEGOS) con «regla=tcp 22 nadie»: la conexión se tira sin contestar y se apunta, y ESCUDO /CORTAFUEGOS lo dice" \
+      "red: cortafuegos: activo, con 1 reglas$" "red: cortafuegos: bloqueada una conexión TCP desde 10.0.2.2 al puerto 22 (1 en total)$" \
+      "^  regla: TCP 22 (SSH): no entra$" "^  bloqueado: TCP desde 10.0.2.2$"
+    [ "$(cat $E/cfb.host)" = no ] && ok "y desde aquí no llega nada (ni el saludo ni un «no hay nadie»: no se ve el equipo)" || ko "con la regla «nadie», la conexión ha entrado"
+    # c) en el escritorio, sin regla para el 22 y «avisar=si»: SSHD se pone a
+    # escuchar (desde la Consola) y Escudo pregunta; «Desde la red» (Intro) deja
+    # la regla en CORTAFUE.INI y RED.BIN la lee; y la pestaña Cortafuegos
+    cp $E/cf.img $E/cfc.img
+    printf 'activo=si\r\nping=red\r\navisar=si\r\n' > $E/CORTAFUE.INI
+    mcopy -o -i $E/cfc.img $E/CORTAFUE.INI ::ESCUDO/CORTAFUE.INI
+    CAPTURAS=$G ESCRIBE=1 DISCO=$E/cfc.img ARRANQUE="escritorio escritura" MODULOS= QEMU_MAS="-nic user,model=e1000" \
+      $AQUI/nucleo32/probar.sh "" ":pausa 5" ":doble 62 185" ":pausa 3" "sshd /encender" ":pausa 12" ":captura ef1" ":tecla ret" ":pausa 6" \
+      ":clic 720 585" ":pausa 3" ":clic 420 146" ":pausa 3" ":captura ef2" > $E/cfc.sal 2>&1
+    tr -d '\r' < $E/cfc.sal > $E/cfc.txt
+    S=$E/cfc.txt
+    mira "(CORTAFUEGOS) un programa se pone a escuchar sin regla: RED.BIN lo deja pendiente y Escudo pregunta (ESCUDO /PERMITIR)" \
+      "red: cortafuegos: la tarea [0-9]* quiere recibir conexiones en el puerto TCP 22, y no hay regla" "escudo: cortafuegos: pregunta por el puerto 22$"
+    miracap "«¿Dejar que un programa reciba conexiones?», con «Desde la red», «Desde todos» y «No»" ef1 negrita 120 180 720 220 "¿Dejar que un programa reciba conexiones?" \
+      negrita 120 360 720 420 "Desde la red" texto 120 360 720 420 "Desde todos"
+    mira "«Desde la red»: la regla, a CORTAFUE.INI, y RED.BIN la lee" "escudo: cortafuegos: puerto 22: desde la red$" "red: cortafuegos: activo, con 1 reglas$"
+    if saca $E/cfc.img ESCUDO/CORTAFUE.INI $E/cf.ini && grep -q '^regla=tcp 22 red' $E/cf.ini; then ok "CORTAFUE.INI lleva «regla=tcp 22 red»"
+    else ko "CORTAFUE.INI no lleva la regla"; fi
+    miracap "la pestaña «Cortafuegos»: encendido, lo que escucha con su regla y los botones" ef2 negrita 400 130 560 160 "Cortafuegos" \
+      texto 90 170 720 220 "[OK] Cortafuegos encendido" texto 90 250 720 300 "TCP 22 (SSH)" texto 90 380 720 420 "Que no entre"
+    if ! grep -q "excepción\|\*\*\*" $E/cfa.txt $E/cfb.txt $E/cfc.txt; then ok "(CORTAFUEGOS) ni una excepción del núcleo"
+    else ko "el núcleo se ha quejado:"; grep -h "excepción\|\*\*\*" $E/cfa.txt $E/cfb.txt $E/cfc.txt | head -3 | sed 's/^/        /'; fi
+  else ko "no se puede hacer el disco con la red y SSH: $(tail -3 $E/cfdisco.txt)"; fi
+  # 6. con las bases de verdad de ClamAV (si está el espejo de cvdupdate del
+  # VPS): los paquetes (tools/escudo_firmas.py), 10 muestras hechas de firmas
+  # de verdad (encontradas) y los programas de Windows de Open Watcom, el
+  # Python y el gcc de aquí (ningún aviso)
+  ESPEJO=${ESCUDO_ESPEJO:-/var/lib/escudo-espejo}
+  if [ -s $ESPEJO/main.cvd ] && [ -s $ESPEJO/daily.cvd ] && [ -d /opt/watcom/binnt64 ]; then
+    if python3 -I $AQUI/../tools/escudo_firmas.py --cvd $ESPEJO --sal $E/real > $E/real.txt 2>&1; then
+      for x in BASE:ESCBASE MES:ESCMES DIA:ESCDIA; do
+        python3 -I -c "
+import re, sys
+d = open(sys.argv[1], 'rb').read(); i = d.index(b'fin\r\n') + 5
+n = int(re.search(rb'%s.ESC (\d+)' % sys.argv[2].encode(), d).group(1)); open(sys.argv[3], 'wb').write(d[i:i + n])" \
+          $E/real/${x##*:}.HPQ ${x%%:*} $E/real/${x%%:*}.ESC
+      done
+      python3 -I - $ESPEJO $E/sint > /dev/null 2>&1 <<'PY'
+import io, os, random, re, sys, tarfile
+def saca(r):
+    d = open(r, 'rb').read()[512:]
+    t = tarfile.open(fileobj=io.BytesIO(d), mode='r:gz')
+    return {m.name: t.extractfile(m).read().decode('latin-1') for m in t.getmembers() if m.isfile()}
+m, d = saca(sys.argv[1] + '/main.cvd'), saca(sys.argv[1] + '/daily.cvd')
+os.makedirs(sys.argv[2], exist_ok=True)
+random.seed(21)
+ldb = [l for l in d['daily.ldb'].split('\n') if re.match(r'^Win\.[^;]*;Engine:\d+-255,Target:1;0&1&2&3&4;([0-9a-f]+;){4}[0-9a-f]+$', l)]
+ndb = [l for l in m['main.ndb'].split('\n') if re.match(r'^Win\.[^:]*:0:\*:[0-9a-f]+$', l) and len(l) < 200]
+pe = open('/opt/watcom/binnt/wcl386.exe', 'rb').read()
+for k, l in enumerate(random.sample(ldb, 5)):
+    p = l.split(';')
+    open('%s/L%d.EXE' % (sys.argv[2], k), 'wb').write(pe + b''.join(b'\0' * 37 + bytes.fromhex(x) for x in p[3:]))
+for k, l in enumerate(random.sample(ndb, 5)):
+    p = l.split(':')
+    open('%s/N%d.BIN' % (sys.argv[2], k), 'wb').write(os.urandom(3000) + bytes.fromhex(p[3]) + os.urandom(100))
+PY
+      $E/anf -f $E/real/BASE.ESC -f $E/real/MES.ESC -f $E/real/DIA.ESC $E/sint > $E/sint.txt 2>&1
+      $E/anf -f $E/real/BASE.ESC -f $E/real/MES.ESC -f $E/real/DIA.ESC -t /opt/watcom/binnt64 /opt/watcom/binp /usr/bin/python3 /usr/bin/gcc > $E/limpios.txt 2>&1
+      S=$E/real.txt
+      mira "con las bases de verdad: escbase, escmes y escdia, con la firma de ClamAV de cada .cvd comprobada" "firma digital BUENA" \
+        "^escudo_firmas: escbase " "^escudo_firmas: escmes " "^escudo_firmas: escdia "
+      [ "$(grep -c ENCONTRADO $E/sint.txt)" = 10 ] && ok "las 10 muestras hechas de firmas de verdad (5 lógicas de daily, 5 del cuerpo de main), encontradas" \
+        || { ko "de las 10 muestras, encontradas $(grep -c ENCONTRADO $E/sint.txt)"; grep -v ENCONTRADO $E/sint.txt | tail -3 | sed 's/^/        /'; }
+      if ! grep -q ENCONTRADO $E/limpios.txt; then ok "y ningún aviso en los programas limpios ($(grep -c ': limpio' $E/limpios.txt) archivos: los de Windows de Open Watcom, python y gcc; $(sed -n 's/.* \([0-9.]* MB\/s\).*/\1/p' $E/limpios.txt) en Linux)"
+      else ko "avisos falsos:"; grep ENCONTRADO $E/limpios.txt | head -3 | sed 's/^/        /'; fi
+    else ko "tools/escudo_firmas.py: $(tail -2 $E/real.txt)"; fi
+  else echo "  (sin el espejo de las bases de ClamAV: sin la prueba con las de verdad)"; fi
 else ko "no se puede hacer el disco: $(tail -3 $E/disco.txt)"; fi
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin Escudo)"

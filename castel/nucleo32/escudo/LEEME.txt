@@ -1,4 +1,5 @@
-ESCUDO.BIN - Escudo, el antivirus de Hispa-Pentium (docs/PENTIUM.md, «Escudo»).
+ESCUDO.BIN - Escudo, el antivirus y el cortafuegos de Hispa-Pentium
+(docs/PENTIUM.md, «Escudo»).
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 
 Para qué
@@ -14,8 +15,9 @@ Para qué
 Cómo se usa
   - Inicio > Escudo, o el escudo de la bandeja (abajo a la derecha): la
     ventana, con sus pestañas Revisar (todo, una unidad o una carpeta, con
-    su barra y «Cancelar»), Cuarentena (devolver o borrar), Historial, Red
-    (lo que escucha en la red) y Opciones.
+    su barra y «Cancelar»), Cuarentena (devolver o borrar), Historial,
+    Cortafuegos (lo que escucha en la red, sus reglas y lo bloqueado) y
+    Opciones.
   - Al conectar una memoria USB o meter un CD: «¿Revisar la memoria?».
   - Desde la Consola:
       ESCUDO RUTA...          revisa archivos, carpetas o unidades (X:); * todo
@@ -25,6 +27,9 @@ Cómo se usa
       ESCUDO /ACTUALIZA       trae las firmas nuevas (PAQUETES ACTUALIZA escbase escdia)
       ESCUDO /RESTAURA n      devuelve a su sitio lo n.º n de la cuarentena
       ESCUDO /BORRA n         lo borra para siempre
+      ESCUDO /CORTAFUEGOS     el cortafuegos: cómo está, lo que escucha, lo bloqueado
+      ESCUDO /CORTAFUEGOS 22 red   la regla del puerto TCP 22 (red, todos, local,
+                              tailscale o no); ESCUDO /CORTAFUEGOS SI|NO
     Da 0 si no hay nada, 1 si encuentra algo y 2 si algo falla.
   - Los avisos dicen qué archivo, qué firma y qué se puede hacer, con su
     signo y su palabra ([OK], [!], [i]): nada se dice solo con el color.
@@ -34,8 +39,13 @@ Lo que hay en \HISPA (el paquete «escudo»)
   ESCUDO\LEEME.TXT        esto
   ESCUDO\ESCUDO.INI       sus opciones (las escribe la ventana)
   ESCUDO\REGISTRO.TXT     lo que ha hecho (el historial)
+  ESCUDO\CORTAFUE.INI     las reglas del cortafuegos (las escribe Escudo; las
+                          lee RED.BIN)
+  ESCUDO\REVISADO.TXT     los .EXE que ya han salido limpios (para no cargar las
+                          firmas cada vez que se abre el mismo)
   ESCUDO\FIRMAS\          las firmas: BASE.ESC y COPYING.TXT (el paquete
-                          «escbase»), DIA.ESC y ORIGEN.TXT («escdia»); y, si
+                          «escbase»), MES.ESC («escmes»), DIA.ESC y ORIGEN.TXT
+                          («escdia»); y, si
                           se quiere, firmas propias en el formato de ClamAV
                           (.hdb .hsb .mdb .msb .ndb .ldb .fp .sfp .ign2) o un
                           .cvd de ClamAV traído a mano (se comprueba su firma)
@@ -92,10 +102,17 @@ Lo que se pierde frente a ClamAV (y por qué)
     128), los patrones solo miran el principio; las sumas, todo.
   - La firma digital nueva de ClamAV (los .cvd.sign, con certificados X.509)
     no se mira: se mira la de siempre, que va dentro de cada .cvd.
-  - En FIRMAS.ESC las sumas guardan 8 de sus octetos (no la suma entera) y su
+  - En FIRMAS.ESC las sumas guardan 5 de sus octetos (no la suma entera) y su
     tamaño: que un archivo limpio dé lo mismo por casualidad es del orden de
-    una vez en 10^13. Y sus nombres van sin el número de ClamAV (de
-    «Win.Trojan.Agent-1234567-0» queda «Win.Trojan.Agent»).
+    una vez en un billón por archivo. Y sus nombres van sin el número de ClamAV
+    (de «Win.Trojan.Agent-1234567» queda «Win.Trojan.Agent»).
+  - De las bases de ClamAV va lo de Windows, documentos y guiones (lo que llega
+    en memorias y descargas); las de otras plataformas (Android, Linux, Mac,
+    correo, imágenes, Flash) no. Y de las sumas de main.cvd, las 600.000 que más
+    valen de 3 millones (las de archivo entero; luego las de sección PE de las
+    familias que siguen vivas). Ver «Las firmas» (abajo).
+  - Las subfirmas de las lógicas que piden cinco cadenas a la vez van
+    recortadas a sus 24 octetos que más dicen (las demás, enteras).
   Lo importante para la asociación (ejecutables de Windows, documentos y
   memorias con virus conocidos) sí se mira: sumas, patrones del cuerpo y
   lógicas son casi todas las firmas de ClamAV.
@@ -104,27 +121,59 @@ Las firmas: de dónde y cuánto
   Los equipos NO las traen del CDN de ClamAV: ClamAV solo admite bajarlas con
   freshclam o cvdupdate (lo demás se deniega: 403/429; probado). Se hace como
   pide ClamAV para muchos equipos: un espejo propio en el VPS, puesto al día
-  con cvdupdate una vez al día, y tools/escudo_firmas.py hace con él los
-  paquetes «escbase» (de main.cvd) y «escdia» (de daily.cvd), que van con el
-  catálogo firmado de http://actualiza.hispados.es/pentium/ (lo publica la
-  sesión que publica Hispa-Pentium). Escudo los trae con PAQUETES, desde la
-  ventana o solo, una vez al día como mucho.
-  Desde diciembre de 2025 (ClamAV retiró las firmas viejas) main.cvd mide
-  unos 85 MiB y daily.cvd unos 22 MiB (comprimidos): son millones de sumas y
-  unas decenas de miles de patrones. En FIRMAS.ESC cada suma ocupa 16 octetos
-  en el disco (y no se cargan en memoria: se lee la página que hace falta); lo
-  que va a memoria son los patrones (unos 200 octetos cada uno: 35.000
-  patrones, unos 7 MB). Si no cabe en el límite (48 MB la base, 24 el día:
-  tools/escudo_firmas.py), se dejan primero las sumas de main (de archivo y
-  luego de sección); los patrones van siempre.
+  con cvdupdate (/opt/cvdupdate; la base en /var/lib/escudo-espejo) una vez al
+  día, y tools/escudo_firmas.py hace con él tres paquetes, que van con el
+  catálogo firmado de http://actualiza.hispados.es/pentium/:
+    escbase  BASE.ESC   lo elegido de main.cvd: 21 MB; solo cambia si cambia
+                        main.cvd (la última, en diciembre de 2025)
+    escmes   MES.ESC    lo elegido de daily.cvd el día que se hace: 24 MB; cada
+                        mes (o antes, si el del día pasa de 3 MB)
+    escdia   DIA.ESC    lo nuevo de daily.cvd desde el del mes y lo que ClamAV
+                        ha retirado (por su nombre): de KB a pocos MB, cada día
+  Escudo los trae con PAQUETES (la primera vez, INSTALA escdia, que trae los
+  otros dos), desde la ventana o solo, una vez al día como mucho.
+  Las bases de verdad (main.cvd 63 y daily.cvd 28190, el 21/11/2026) son 3,3
+  millones de sumas y 400.000 firmas del cuerpo y lógicas (110 MB comprimidas;
+  con el índice de la primera versión, medio GB de memoria). Ahora, en el
+  equipo, con los tres paquetes: unos 13 MB de memoria (en un equipo de 64 MB,
+  con lo que se lee de cada archivo, unos 16-17 MB), porque:
+  - las sumas no se cargan: van en el disco, por tramos de tamaño (8 octetos
+    cada una; un mapa de 256 K en memoria dice si hay alguna de ese tamaño, y
+    se busca por la mitad en el disco)
+  - las firmas del cuerpo y las lógicas tampoco: van en bloques de 32 K
+    comprimidos; en memoria, de cada una, sus «disparadores» (12 octetos: 4
+    fijos y hasta 3 más, elegidos entre lo que menos se repite entre las
+    firmas y en los programas limpios: los de Open Watcom, en el VPS). Si
+    aparece uno en lo que se mira, la firma se lee del disco y se busca entera
+    (todas las que han saltado, juntas, en una pasada).
+  Cobertura: las 10 muestras hechas de firmas de verdad (5 lógicas de daily y
+  5 del cuerpo de main), encontradas; y ningún aviso en los 3.995 EXE, DLL,
+  PDF, DOC, XLS, ZIP y JS del VPS (2,1 GB, con los de Windows de Open Watcom).
 
 Lo que tarda
-  En QEMU (sin KVM), de 1 a 1,8 MB/s leyendo del disco IDE (16 MB con 20.000
-  patrones, 5.000 lógicas y 100.000 sumas); el mismo motor en un PC de hoy,
-  de 85 a 200 MB/s. En un Pentium a 133 MHz, por la cuenta de ciclos del bucle
-  de las anclas (unos 30 por octeto; sin multiplicar: «imul» son 10 ciclos en
-  un Pentium), del orden de 2 a 4 MB/s: una memoria de 1 GB llena, unos
-  5 minutos; los documentos de siempre, segundos.
+  Con las bases de verdad: cargarlas, de 5 a 12 s en QEMU (sin KVM); mirar
+  programas de Windows, unos 20-25 MB/s en Linux y unos 0,25 MB/s en QEMU (el
+  tiempo se va en las sumas y en las firmas que hay que leer del disco cuando
+  salta un disparador). En un Pentium a 133 MHz, del orden de 0,1 MB/s en
+  programas y algo más en documentos: una memoria con 100 MB de programas, un
+  cuarto de hora. En el Toshiba (Atom), unas diez veces más deprisa.
+
+El cortafuegos (CORTAFUE.INI; lo hace RED.BIN: rcorta.cas)
+  - Lo que sale y sus respuestas entran siempre (el Navegador, las
+    actualizaciones, DHCP, DNS, Tailscale...).
+  - Una conexión TCP que no ha pedido el equipo solo entra si hay una regla
+    para su puerto que deje entrar desde donde viene: «todos», «red» (la red
+    local y la de Tailscale), «local», «tailscale», una red «a.b.c.d/n», o
+    «nadie». Si no, se tira sin contestar (tampoco a los puertos cerrados:
+    desde fuera no se ve ni que el equipo está) y se apunta.
+  - El ping: de todos, de la red (de fábrica) o de nadie.
+  - Cuando un programa se pone a escuchar en un puerto sin regla, Escudo
+    pregunta: «¿Dejar que un programa reciba conexiones?» (Desde la red,
+    Desde todos, No). La pestaña «Cortafuegos» lo enseña todo y deja cambiarlo.
+  - Sin CORTAFUE.INI, lo de fábrica: SSH (apagado hasta que se enciende), desde
+    la red local y Tailscale; ping, desde la red.
+  - UDP: solo entra a un puerto que haya abierto un programa (eso ya lo hacía
+    la pila); no lleva reglas.
 
 Lo que no hace Hispa-Pentium (y no hace falta mirar)
   - No hay «autorun»: al conectar una memoria o meter un CD, el sistema solo
@@ -132,21 +181,26 @@ Lo que no hace Hispa-Pentium (y no hace falta mirar)
     lee nunca. Escudo lo señala como aviso ([i]), porque en un Windows viejo
     podría abrir un programa solo.
   - Escuchar en la red: solo el servidor SSH (SSHD.BIN), apagado de fábrica;
-    la pestaña Red lo dice y lo apaga. Lo demás solo llama hacia fuera.
+    y aunque se encienda, el cortafuegos decide desde dónde se entra.
 
 Los ganchos (marcados «(ESCUDO)» en los archivos de todos)
   - escritorio.cas: el escudo de la bandeja (un clic: la ventana) y, al
     arrancar, «ESCUDO /VIGILAR».
   - navega/descarga.c: al acabar una descarga, «ESCUDO /DESCARGA RUTA» (solo
     dice algo si encuentra un virus).
-  - WIN32.BIN (rama pentium-win32): antes de cargar el .EXE,
-    «ESCUDO /ANTES RUTA» (da 1 si no se debe abrir): gancho_win32.h.
+  - win32/principal.c (WIN32.BIN): antes de cargar el .EXE,
+    «ESCUDO /ANTES RUTA» (da 1 si no se debe abrir): gancho_win32.h. Lo que ya
+    ha salido limpio queda en REVISADO.TXT y no se mira otra vez (hasta que
+    cambien las firmas o el archivo).
+  - RED.BIN (marcado «(CORTAFUEGOS)»): rcorta.cas, y lo que lo llama en
+    rtcp.cas, rpila.cas, ured.cas y rbase.cas (la orden O_CORTAFUEGOS, 28).
 
 Cómo está hecho (castel/nucleo32/escudo/)
   escudo.h       lo que se dicen el motor y la plataforma
-  motor.c        las firmas, los índices, buscar, los ZIP, FIRMAS.ESC
+  motor.c        las firmas, los índices, buscar, los ZIP, FIRMAS.ESC (versión 2)
   inflar.c       deflate y gzip; cvd.c los .cvd y su firma; sumas.c MD5/SHA
-  escudo.c       las órdenes, revisar, la cuarentena, el registro, vigilar
+  escudo.c       las órdenes, revisar, la cuarentena, el registro, vigilar,
+                 el cortafuegos (CORTAFUE.INI y lo que dice RED.BIN)
   ventana.c      la ventana y sus cuadros (con la letra de letra.cas)
   plataforma.c   las llamadas al sistema, la memoria, la biblioteca
   anfitrion.c    el mismo motor en Linux (pruebas; hacer FIRMAS.ESC)
@@ -161,7 +215,7 @@ Lleva dentro, de terceros:
     i31_*). Copyright (c) 2016 Thomas Pornin <pornin@bolet.org>.
   - La clave pública de ClamAV (su módulo y su exponente: son públicos), para
     comprobar la firma digital de los .cvd.
-Las firmas (paquetes escbase y escdia) son las de ClamAV, de Cisco Systems y
+Las firmas (paquetes escbase, escmes y escdia) son las de ClamAV, de Cisco Systems y
 Cisco Talos, con su licencia (GPL-2: COPYING.TXT, el que va dentro de sus
 .cvd), cambiadas de formato y con ORIGEN.TXT, que dice de qué versiones
 salen. ClamAV es una marca de Cisco; Escudo no es ClamAV ni es de Cisco.
