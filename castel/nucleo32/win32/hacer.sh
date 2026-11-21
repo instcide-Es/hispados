@@ -16,10 +16,11 @@
 set -e
 AQUI=$(dirname "$(readlink -f "$0")")
 RAIZ=$(readlink -f "$AQUI/../../..")
-SAL=$(readlink -f "${1:?uso: hacer.sh SALIDA [CARPETA]}")
-CAR=${2:+$(readlink -f "$2")}
-EJE=${3:+$(readlink -f "$3")}
-MNU=${4:+$(readlink -f "$4")}
+SAL=$(readlink -m "${1:?uso: hacer.sh SALIDA [CARPETA_DLL [CARPETA_EJEMPLOS [CARPETA_MENU]]]}")
+mkdir -p "$(dirname "$SAL")"
+CAR=${2:+$(readlink -m "$2")}
+EJE=${3:+$(readlink -m "$3")}
+MNU=${4:+$(readlink -m "$4")}
 cd "$RAIZ"
 O=build/win32-pentium
 mkdir -p $O
