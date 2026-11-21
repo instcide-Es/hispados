@@ -451,11 +451,20 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 68 | **los ajustes** (`HISPA.INI`): EBX = 0, leerlos otra vez; 1, el nombre del usuario, a ECX; 2, ¿está el sistema instalado en el disco?; 3, el nombre del equipo | `releer_ajustes`, `nombre_usuario`, `sistema_instalado`, `nombre_equipo` | |
 | 130 | **quitar con seguridad** la memoria USB de la unidad de letra EBX (desde la 0.8): lo pendiente se escribe, la memoria se para y sus unidades dejan de estar | `quitar_memoria` | 0 (`QUITADA`), ya se puede quitar; 1, no hay tal unidad; 2, no es una memoria USB; 3 (`ES_DEL_SISTEMA`), el sistema corre desde ella |
 | 131 | las veces que han **aparecido o desaparecido unidades** (además, a las ventanas de los programas les llega `EV_UNIDADES`) | `cambios_unidades` | ese número |
+| 170 | (explorador, 21/11) **los atributos** del archivo o la carpeta de nombre EBX: con ECX = 0xFFFFFFFF, solo leerlos; si no, poner los de solo lectura, oculto, de sistema y archivo (`0x27`: los de carpeta y volumen no se tocan) | `atributos_de`, `poner_atributos` | los que quedan, o un error |
+| 171 | (explorador) **lo soltado fuera de la ventana**: EBX, la ventana (suya); ECX, una `Suelta` (el punto, dentro de la ventana, y una ruta entera con su letra). Lo recoge el escritorio: en el dock, se fija (o va a la Papelera); en el tapiz, un acceso nuevo | `soltar_fuera` | 0 (`EN_USO` si aún no ha recogido el de antes) |
 | 80 | **colocar la ventana** EBX (suya) con su esquina en (ECX, EDX) de la pantalla; con ECX = 0xFFFFFFFF, en el centro (encima de la barra de tareas). La usa HVPRUN (sección 10, «La oficina de Hispa-386») | — | 0 |
 | 90-98 | **la red**: pedir al servicio de red (90) y lo del propio servicio (91 a 96, 98); cómo está (97). Las cuenta la sección 14 | `redes.cas` | |
 
 | 150-153 | **solo el servicio de ACPI** (`ACPI.BIN`): puertos, memoria física, configuración PCI, y dar la batería y esperar órdenes (sección 11, «Apagar de verdad y la batería») | — | |
 | 154 | **la batería**: lo último que ha leído el servicio de ACPI (una `Energía`, `energia.cas`) a EBX | — | 1, o 0 si no hay servicio |
+
+(La 15 con `DATO_ALTO_LIBRE`, el 14, da lo alto de la pantalla sin la barra
+de tareas ni el dock: así una ventana grande no queda debajo del dock. La
+12 y la 28 dan además, en lo que antes iba a cero, la fecha del último
+acceso (`reservado`) y la fecha y la hora en que se hizo el archivo (`libre`:
+abajo la fecha, arriba la hora). La 22 lleva también **carpetas** a otra
+carpeta de la misma unidad: se pone bien su «..»; no dentro de sí misma.)
 
 (La 11, con ECX = 1, no se queda esperando: da `SIGUE` si la tarea no ha acabado
 —`acabada`—. La 15 da además el ancho y el alto de la pantalla gráfica y si el
@@ -950,15 +959,12 @@ propio, con sus tildes y su eñe).
   **Pegar** teclea lo del portapapeles. Lo seleccionado se suelta en cuanto se
   escribe algo en la pantalla. Menús: Archivo (Cerrar), Edición (Copiar, Pegar,
   Seleccionar todo) y Ayuda (las órdenes: teclea `AYUDA`).
-- **Mi equipo** (`EQUIPO.BIN`, `uequipo.cas`): **las unidades** del equipo, una
-  debajo de otra, cada una con su letra y su nombre, de qué es («disco duro
-  (SATA)», «memoria USB», «en memoria»), su FAT, lo que mide, lo que le queda y
-  si es de solo lectura; y, detrás, los discos en los que no hay nada que se
-  pueda leer («sin ninguna partición FAT»: el disco de un PC con Windows en
-  NTFS, por ejemplo). Con dos clics se entra en una unidad: sus carpetas y sus
-  archivos, con su tamaño. Dos clics en una carpeta entran en ella; en «..», se
-  vuelve; un texto (`.TXT`, `.BAT`) lo abre el Bloc de notas; un programa
-  (`.BIN`) se lanza. Las flechas, Intro y Retroceso también valen.
+- **Mi equipo** (`EQUIPO.BIN`, `uequipo.cas`), desde el 21/11/2026 **el
+  explorador de archivos**: el árbol de las unidades y las carpetas, cuatro
+  vistas, copiar, cortar y pegar, la Papelera, buscar, Propiedades, Abrir
+  con... y las miniaturas (más abajo, «El explorador de archivos»).
+- **El dock**: los programas fijados y los abiertos, centrado encima de la
+  barra de tareas (más abajo, «El dock»).
 
 ### Cómo está hecho
 
@@ -1163,6 +1169,207 @@ acaban todos.
 **Lo que dice el núcleo** con el escritorio en marcha (lo que lanza, los avisos, una
 excepción) sale por el **puerto serie**, como siempre.
 
+### El explorador de archivos: `EQUIPO.BIN` (21/11)
+
+| | |
+|---|---|
+| ![Mi equipo: el árbol y las unidades](pentium/explorador-equipo.png) | ![Una carpeta, en iconos](pentium/explorador-iconos.png) |
+| ![Detalles: la rejilla, ordenada por el nombre](pentium/explorador-detalles.png) | ![Miniaturas de BMP, PNG y JPG](pentium/explorador-miniaturas.png) |
+| ![Elegir varios con el recuadro del ratón](pentium/explorador-recuadro.png) | ![El menú del botón secundario](pentium/explorador-menu.png) |
+| ![La Papelera](pentium/explorador-papelera.png) | ![Buscar por el nombre](pentium/explorador-buscar.png) |
+
+Lo pidió Carlos el 21/11 («actualizar el explorador de archivos, dock… lo
+que necesitemos para estar a la altura de un sistema operativo»). «Mi
+equipo» (`EQUIPO.BIN`) pasa a ser un **explorador** de los de verdad: un
+programa del anillo 3 hecho con los controles de las ventanas
+(`controles.cas`: la barra de menús, la de herramientas, la dirección, la
+rejilla de los detalles, los botones y las casillas de los cuadros), con lo
+que hace con los archivos aparte (`exoper.cas`, sin pintar nada) y los
+iconos dibujados (`iconos.cas`, que comparte con el dock).
+
+**Lo que se ve.** Arriba, la **barra de menús** (Archivo, Edición, Ver, Ir,
+Herramientas, Ayuda: Alt y su letra la abren; con las flechas a los lados,
+al menú de al lado), la de **herramientas** (Atrás, Adelante, Subir, Buscar,
+Cortar, Copiar, Pegar, Borrar, Carpeta nueva y Vistas; en gris lo que no
+toca) y la **dirección** (`C:\TEXTOS`, `Mi equipo`, `Papelera`), que se
+puede escribir (Intro va; vale sin la letra). A la izquierda, el **árbol**:
+Mi equipo con sus unidades (cada una con su icono: disco duro, memoria USB,
+CD, en memoria) y sus carpetas (por orden; el `[+]` y el `[-]` son un
+cuadrito con su signo, no un color), y la Papelera. A la derecha, lo que hay
+donde se está; abajo, la **barra de estado** (cuántos hay, cuántos elegidos
+y lo que miden, lo libre de la unidad o «De solo lectura»).
+
+**Las vistas** (Ver, Vistas o F8): **miniaturas** (las imágenes en pequeño;
+lo demás, su icono grande), **iconos**, **lista** (en columnas) y
+**detalles** (la rejilla de `controles.cas`: nombre, tamaño, tipo y fecha de
+modificación; un clic en el rótulo ordena, otra vez al revés, con su
+triángulo). Las carpetas van siempre delante; el tamaño y la fecha se
+ordenan por su número. En Mi equipo, cada unidad en un mosaico con lo libre,
+de cuánto, y una barra; en la Papelera, de dónde era y cuándo se borró; al
+buscar, en qué carpeta está.
+
+**Elegir.** Un clic elige uno; **Control y un clic** añade o quita;
+**Mayús y un clic**, desde el anterior hasta ahí; **un recuadro con el
+ratón** desde un sitio sin nada, los que toca (con Control, se suman). Con
+el teclado: las flechas (en iconos, también arriba y abajo por filas),
+Inicio, Fin, Re Pág, Av Pág; **con Mayús, eligiendo**; **Espacio** elige o
+suelta el del cursor; Ctrl+A, todos. Lo elegido, **letra blanca sobre
+azul**; el cursor, **un borde** alrededor (no solo el color).
+
+**Abrir.** Dos clics o Intro: una carpeta, se entra; un archivo, **con lo
+suyo**: las **asociaciones** de `ASOCIA.TXT` (`\HISPA\ASOCIA.TXT` en un
+sistema instalado; si no, `\ASOCIA.TXT`): un texto en la página 437, una
+línea por extensión, `EXT=programa|argumentos`, donde `%1` es el archivo
+(`TXT=\BLOC.BIN|%1`, `PLU=\HVPRUN.BIN|\OFICINA\PLUMA.HVP %1`, `BIN=%1|`).
+Sin él, las de siempre (el Bloc, HVPRUN con la oficina, Mirador para las
+imágenes). **Abrir con...** saca la lista de los programas (los de siempre
+y los de los paquetes, sus `.MNU`), o se escribe otro; con «Abrir siempre
+los .EXT con este», lo guarda en `ASOCIA.TXT`. Herramientas > Las
+asociaciones lo abre en el Bloc de notas.
+
+**Copiar, cortar y pegar** (Ctrl+C, Ctrl+X, Ctrl+V, Edición, las
+herramientas o el menú del botón secundario): va por **el portapapeles del
+sistema** (un texto que empieza por `\x01ARCHIVOS COPIAR` o `CORTAR` y una
+ruta por renglón), así que de una ventana del explorador a otra también.
+**Arrastrar** lo elegido a una carpeta (de lo de dentro o del árbol) lo
+**lleva** allí (en otra unidad, o con Control, lo **copia**); mientras se
+arrastra, un rótulo con lo que va junto a la flecha y un borde verde en la
+carpeta donde caería. **Fuera de la ventana**: en el **tapiz**, un acceso
+(un icono con la flechita, que lo abre con lo suyo; se lleva a otro sitio
+arrastrándolo y el botón secundario lo quita: `ATAJOS.INI`); en el
+**dock**, un programa (`.BIN`) se fija, y en su Papelera, se tira. (Va lo
+primero de lo elegido: la llamada 171.)
+
+**El trabajo** (`exoper.cas`): copiar, mover, mandar a la Papelera, borrar
+del todo, restaurar y vaciar. Primero se apunta todo lo que hay que hacer
+(las carpetas, enteras, de una en una: así solo hay un archivo abierto a la
+vez y se sabe cuánto es) y luego se hace **a pasos cortos** (un trozo de 16
+K, una carpeta, un nombre), con **un cuadro con la barra de progreso** (lo
+que va, cuál de cuántos y el tanto por ciento, en número además de la
+barra) y **Cancelar** (o Esc: lo que iba por la mitad se quita). Si el
+destino ya existe: **«¿Se reemplaza?»**: Reemplazar, Saltar, A todos,
+Saltar todos o Cancelar. Mover en la misma unidad solo cambia el sitio (la
+llamada 22, también con carpetas); a otra, copia y borra. Copiar en la misma
+carpeta hace `NOMBRE~1.EXT`. Una carpeta no se lleva dentro de sí misma.
+Lo que no ha ido bien sale en la barra de estado.
+
+**Cambiar el nombre** (F2) y **Carpeta nueva** (F7, Ctrl+N): un cuadro con
+el nombre (lo primero que se escribe sustituye al que había). De momento,
+**8 letras, un punto y 3 más** (la FAT de Hispa-Pentium aún no escribe
+nombres largos; los lee y los enseña). **Propiedades**: el nombre (y el
+corto), el tipo, dónde está, el tamaño (de una carpeta, todo lo de dentro:
+cuántos archivos y carpetas), cuándo se hizo, cuándo se cambió y el último
+acceso, y **los atributos** (solo lectura, oculto, archivo: casillas que se
+pueden cambiar; «es del sistema», si lo es); de una unidad, su tipo, su FAT,
+la capacidad, lo libre y lo ocupado, el disco y si se puede escribir.
+
+**La Papelera.** Supr manda lo elegido a `\PAPELERA` de su unidad (una
+carpeta oculta y de sistema que se hace la primera vez), con un nombre
+propio (`D1234567.EXT`) y una línea en `\PAPELERA\INDICE.TXT` (el nombre de
+dentro, de dónde era, su nombre y cuándo se borró). La Papelera del árbol
+junta las de todas las unidades: **Restaurar** lo devuelve a donde estaba
+(haciendo su carpeta si ya no está), **Borrar del todo** y **Vaciar la
+Papelera** preguntan antes. **Mayús+Supr** borra del todo sin pasar por
+ella (preguntando). En las unidades de solo lectura (el permiso de
+escritura de cada disco: «escritura», «escritura=usb»; los CD; la unidad en
+memoria) no se borra, ni se pega, ni se cambia nada: sale en gris y lo dice.
+
+**Buscar** (F3, Ctrl+F, la herramienta): el panel de la izquierda pasa a
+ser el de buscar: el nombre o un trozo (sin mirar mayúsculas ni tildes; con
+`*` y `?`, como en el DOS), «También dentro» (las subcarpetas), y Buscar.
+Busca en la carpeta en que se está (en Mi equipo, en todas las unidades);
+Esc para. Lo encontrado sale en detalles, con su carpeta; se abre, se
+copia o se borra como lo demás. «Carpetas» vuelve al árbol.
+
+**Las miniaturas**: **`MINIAT.BIN`** (`nucleo32/miniat/`: `miniat.c` con
+**stb_image**, de `terceros/stb`, en C, como TLS.BIN), un programa aparte
+que lee la imagen (BMP, PNG, JPG, GIF, TGA, PSD, PNM), la deja en 64 x 64
+como mucho (con su forma; lo transparente, sobre blanco) y la escribe en un
+archivo (`HPMI`, el ancho, el alto y los puntos), en la primera unidad en
+la que se pueda escribir (`X:\MINIAT.TMP`, que el explorador no enseña y
+borra). El explorador lo lanza para cada imagen que se ve, de una en una y
+sin esperar (sigue respondiendo mientras), y guarda hasta 120 en su
+memoria. Sin `MINIAT.BIN`, o sin sitio, el icono de imagen.
+
+**Las unidades que van y vienen**: con `EV_UNIDADES` (una memoria USB que
+se enchufa o se quita, y los CD de la rama pentium-cd: `MEDIO_CD`, el 4,
+con su icono) se vuelven a leer el árbol y Mi equipo; si se estaba en una
+que ya no está, a Mi equipo, diciéndolo. El botón secundario en una
+memoria USB: «Quitar con seguridad».
+
+**El teclado entero**: Tab y Mayús+Tab (la dirección, Ir, el árbol, lo de
+dentro), las flechas, Intro (abrir), Retroceso (subir), Supr y Mayús+Supr,
+F1 (las teclas), F2, F3, F4 o Ctrl+L (la dirección: lo que se escribe la
+sustituye), F5 (actualizar), F6 (el árbol o lo de dentro), F7, F8 (otra
+vista), F9 (el menú de lo elegido), F10 (el menú Archivo), Alt y la letra
+de cada menú, Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V. En el árbol: arriba y abajo
+(va a la carpeta), la derecha abre (y baja), la izquierda cierra (o sube).
+En los cuadros: Tab, Intro, Espacio y Esc.
+
+```
+EQUIPO                 Mi equipo
+EQUIPO C:\CARPETA      abre ahí (también sin la letra)
+EQUIPO /PAPELERA       la Papelera
+EQUIPO /ABRIR RUTA     abre ese archivo con lo suyo (una carpeta: ahí); sin ventana (los accesos del tapiz)
+EQUIPO /BORRAR RUTA    lo manda a la Papelera, sin ventana (la Papelera del dock)
+```
+
+**Lo de `controles.cas` que ha hecho falta** (sin duplicar: lo genérico va
+en el sistema): la rejilla con **icono** delante del nombre
+(`Renglón.icono`, `letra`), **varios elegidos** (`g.varios`,
+`Renglón.marcado`; `sel` es el cursor), un **grupo** que va siempre delante
+(las carpetas), las columnas que **se ordenan por un número**
+(`g.col_clave`, `col_clave2`: `Renglón.clave`, `id2`), `rejilla_en` (el
+renglón en un punto, sin elegirlo), `rejilla_caben`, `rejilla_de_vista`; los
+iconos de herramienta `I_SUBIR`, `I_CORTAR`, `I_COPIAR`, `I_PEGAR`,
+`I_CARPETA` y `I_VISTAS`; y `alto_pedido`/`ancho_pedido` para la medida de
+la ventana. En el emergente, **CON_FLECHAS** en la etiqueta de un menú:
+las flechas a los lados lo cierran con `A_LA_IZQUIERDA` o `A_LA_DERECHA`.
+
+### El dock (21/11)
+
+| | |
+|---|---|
+| ![El dock, un acceso soltado en el tapiz y un programa abierto](pentium/dock-tapiz.png) | ![El menú del dock](pentium/dock-menu.png) |
+
+Una barra de lanzamiento con **iconos grandes** (40 puntos), centrada abajo,
+encima de la barra de tareas: un panel azul con los bordes redondos y la
+raya verde de la casa (lo que aprobó Carlos: «bordes redondeados, azules,
+verdes»). Lleva los **programas fijados** (Mi equipo, el Bloc de notas, la
+Consola, Programas y actualizaciones, Configuración y la Papelera, si no se
+dice otra cosa) y, detrás de una raya, **los abiertos que no lo están**
+(con el nombre de su ventana). Debajo de cada programa abierto, **un
+punto**; bajo el de la ventana de delante, además, **una raya** (formas, no
+colores). Con la flecha encima, el icono se resalta y su **nombre** sale en
+una etiqueta. **Un clic** lo abre o trae su ventana (si ya era la de
+delante, la recoge, como su botón de la barra de tareas). **El botón
+secundario**: Abrir, Abrir otra ventana, Fijar en el dock, Quitar del dock,
+Cerrar la ventana y Ocultar el dock (en gris lo que no toca). Un icono
+fijado **se arrastra** a lo largo del dock para cambiarlo de sitio. Lo que
+se suelta desde el explorador: un programa se fija; en la Papelera (que
+cambia de icono cuando tiene algo), se tira.
+
+Se guarda en **`DOCK.INI`** (`\HISPA\DOCK.INI`, o `\DOCK.INI` en un sistema
+sin instalar; si no se puede escribir, solo dura hasta apagar):
+
+```
+visible=si
+fijado=\EQUIPO.BIN||Mi equipo|12
+fijado=\EQUIPO.BIN|/PAPELERA|Papelera|13
+```
+
+(el programa, sus argumentos, su nombre y la clase de su icono; con 0, el de
+su paquete —su `.ICP`— o una ventanita). En **Configuración**, «Dock:
+Visible / Oculto». Cómo está hecho (`dock.cas`, en el núcleo, con
+`iconos.cas`): una ventana sin marco, siempre delante y **TRASLÚCIDA**
+(una bandera nueva del gestor: sus puntos con el octeto de arriba puesto no
+se ven ni se pulsan, y dejan ver y pulsar lo de debajo: así el panel es
+redondo y la etiqueta no tapa nada). Lo que ocupa su panel no lo tapan las
+**ventanas maximizadas** (`Ventanas.alto_dock`), y una ventana que se
+centra y cabría encima, no queda debajo. Sabe qué está abierto mirando las
+ventanas y el nombre (y los argumentos) de la tarea de cada una; lo que se
+pulsa se lo pide al escritorio (`Dock.pide`: lanzar o Configuración).
+
 ### La medida de la pantalla, desde Configuración (20/11)
 
 Lo que faltaba (lo dijo Carlos con el CD 0.8 en VirtualBox: «en Configuración se
@@ -1342,8 +1549,10 @@ instalado con `-vga std`, «Mantener» que se guarda; y con `-vga vmware`, 1200 
 
 ### Lo que falta
 
-Hacer carpetas y cambiar nombres desde Mi equipo (y «Nueva carpeta» en el tapiz);
-iconos del tapiz para los documentos; la barra de desplazamiento y la **rueda del
+Escribir **nombres largos** (el explorador ya hace carpetas, cambia
+nombres y deja accesos de documentos en el tapiz, pero en 8+3); arrastrar
+de una ventana del explorador a otra y desde otros programas; ocultar el
+dock solo (que salga al acercarse); «Nueva carpeta» en el tapiz; la barra de desplazamiento y la **rueda del
 ratón** (el panel táctil la imita, pero el ratón se enciende como PS/2 sencillo);
 que la Consola cambie sus filas y columnas con la ventana, y guarde lo que ha
 pasado hacia arriba; menús que se abren con Alt y submenús; letras de otros
@@ -2883,7 +3092,19 @@ la ventana** en su título (Maximizar, Cerrar) y en su botón de la barra de tar
 (Restaurar); estirarla. **Mi equipo**: las unidades, entrar en C:, y abrir un
 texto con el Bloc de notas. «Acerca de Hispa-Pentium». Y a **1024 x 600**: el
 escritorio a esa medida, llevar un icono a otro sitio y «Organizar iconos»,
-Configuración diciendo la medida, y **«Mover»** desde el menú de una ventana. De
+Configuración diciendo la medida, y **«Mover»** desde el menú de una ventana.
+**El explorador de archivos y el dock** (21/11): el dock con su borde; Mi
+equipo con el árbol, el mosaico de C: (lo libre) y la Papelera; las vistas
+de iconos y de detalles (la rejilla); las **miniaturas** de un BMP, un PNG y
+un JPG (`MINIAT.BIN`, si hay gcc con `-m32`: el color de la miniatura);
+copiar y pegar con Ctrl+C y Ctrl+V; F2 y F7 (los cuadros); Supr a la
+Papelera, la Papelera del árbol y Restaurar; el menú del botón secundario;
+Control y un clic, y el recuadro del ratón (los elegidos, en la barra de
+estado); soltar un archivo en el tapiz (un acceso, que con dos clics lo abre
+en el Bloc) y un programa en el dock (fijado); buscar con F3; el menú del
+dock y «Ocultar el dock». Luego, en el disco (mtools): la copia con su
+nombre nuevo igual al original, la carpeta restaurada, `\PAPELERA` oculta
+con su índice vacío, `ATAJOS.INI` y `DOCK.INI`, y fsck.fat. De
 la memoria USB, además: la entrada de **1024 x 600** arrancada en QEMU (el modo lo
 pone GRUB por la cabecera de esa copia del núcleo) y que el menú trae las
 entradas nuevas («a la medida de la pantalla», con `gfxpayload=auto`; los modos

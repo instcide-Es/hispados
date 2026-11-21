@@ -252,6 +252,16 @@ módulo Iconos
         li(16, 9, 22, 3, 0x2A6BC8)
     fin
 
+    ; el color de la cabecera de un documento, por su letra (la de la oficina)
+    público función tinte_de(letra_: nat32): nat32
+        según nat16(letra_)
+            caso 'P': devolver 0x2F74D0        ; Pluma
+            caso 'C': devolver 0x2A8A3C        ; Cuentas
+            caso 'F': devolver 0xCC531C        ; Facturas
+        fin
+        devolver 0x8E5BD8
+    fin
+
     ; -------------------------------------------------------------------------
     ;  Lo de fuera
     ; -------------------------------------------------------------------------
@@ -274,6 +284,7 @@ módulo Iconos
                 paisaje()
             caso IC_PROGRAMA: ventanita()
             caso IC_DOCUMENTO:
+                si tinte = 0 entonces tinte := tinte_de(letra_) fin
                 hoja()
                 r(6, 2, 16, 6, tinte)
                 si lado >= 24 entonces

@@ -27,7 +27,7 @@
 ; =============================================================================
 módulo Controles
 
-    importar Llamadas, Grafico, Letra, Textos32
+    importar Llamadas, Grafico, Letra, Textos32, Iconos
 
     ; ---- los colores ----
     público constante C_FONDO = 0xE9EDF2
@@ -87,6 +87,7 @@ módulo Controles
     ; abre la ventana con la letra de ese tamaño (T_NORMAL, T_GRANDE o
     ; T_MUY_GRANDE: si no cabe, la que quepa); «máxima», maximizada (si no,
     ; de casi toda la pantalla y en el centro)
+    público variable alto_pedido, ancho_pedido: nat32   ; (explorador) lo que mide la ventana, si se pide (0: lo de siempre)
     público función preparar(nombre: puntero a byte, tamaño_: nat32, máxima: bool): bool
         variable sw, sh, an, al: nat32
         variable p: puntero a byte
@@ -97,6 +98,9 @@ módulo Controles
         si an > 1100 y no máxima entonces an := 1100 fin
         al := sh - 70
         si al > 760 y no máxima entonces al := 760 fin
+        ; (explorador) lo que pida el programa, como mucho
+        si alto_pedido > 0 y alto_pedido < al entonces al := alto_pedido fin
+        si ancho_pedido > 0 y ancho_pedido < an entonces an := ancho_pedido fin
         p := más_memoria(sw * sh * 4)
         si p = nulo entonces devolver falso fin
         memoria := puntero(p)
@@ -976,6 +980,13 @@ módulo Controles
     público constante I_ÚLTIMO = 10
     público constante I_EDITAR = 11
     público constante I_BORRAR = 12
+    ; (explorador) los de los archivos
+    público constante I_SUBIR = 13
+    público constante I_CORTAR = 14
+    público constante I_COPIAR = 15
+    público constante I_PEGAR = 16
+    público constante I_CARPETA = 17
+    público constante I_VISTAS = 18
 
     público función alto_herramientas(): ent32
         devolver 16 * E + 14
@@ -1043,6 +1054,42 @@ módulo Controles
                     caja(x + lado div 6 + g, yy + lado * 5 div 6 - g, lado div 6 + 1, lado div 6 + 1, c2)
                 fin
                 caja(x + 1, yy + lado - 3, lado div 4, 2, c)
+            caso I_SUBIR:
+                ; una flecha que sube, con su palo
+                flechita_vertical(x + lado div 2, yy + 1, lado * 2 div 3, falso, c2)
+                caja(x + lado div 2 - g div 2 - 1, yy + lado div 3, g + 2, lado * 2 div 3 - 1, c2)
+            caso I_CORTAR:
+                ; unas tijeras: dos aros abajo y las hojas cruzadas
+                para g desde 0 hasta lado div 2 hacer
+                    caja(x + lado div 4 + g div 2, yy + 1 + g, 2, 2, c)
+                    caja(x + lado * 3 div 4 - g div 2 - 1, yy + 1 + g, 2, 2, c)
+                fin
+                Grafico.círculo(lz, x + lado div 4, yy + lado * 3 div 4, lado div 5, c)
+                Grafico.círculo(lz, x + lado div 4, yy + lado * 3 div 4, lado div 5 - 2, C_BARRA)
+                Grafico.círculo(lz, x + lado * 3 div 4, yy + lado * 3 div 4, lado div 5, c)
+                Grafico.círculo(lz, x + lado * 3 div 4, yy + lado * 3 div 4, lado div 5 - 2, C_BARRA)
+            caso I_COPIAR:
+                ; dos hojas, una encima de otra
+                caja(x + 1, yy + 1, lado * 3 div 5, lado * 3 div 4, c)
+                caja(x + 2, yy + 2, lado * 3 div 5 - 2, lado * 3 div 4 - 2, C_PAPEL)
+                caja(x + lado * 2 div 5, yy + lado div 4, lado * 3 div 5 - 1, lado * 3 div 4 - 1, c2)
+                caja(x + lado * 2 div 5 + 1, yy + lado div 4 + 1, lado * 3 div 5 - 3, lado * 3 div 4 - 3, C_PAPEL)
+            caso I_PEGAR:
+                ; la tablilla con su pinza y una hoja
+                caja(x + 2, yy + 3, lado * 3 div 4, lado - 4, 0x8A5A20)
+                caja(x + lado div 4, yy + 1, lado * 3 div 10, lado div 5, c)
+                caja(x + lado * 2 div 5, yy + lado * 2 div 5, lado * 3 div 5 - 1, lado * 3 div 5 - 1, c2)
+                caja(x + lado * 2 div 5 + 1, yy + lado * 2 div 5 + 1, lado * 3 div 5 - 3, lado * 3 div 5 - 3, C_PAPEL)
+            caso I_CARPETA:
+                icono(lz, x, yy, lado, IC_CARPETA, 0, 0)
+                caja(x + lado * 2 div 3 - 1, yy + lado div 2 - g, 2 * g + 1, lado div 2, 0x15803D)
+                caja(x + lado * 2 div 3 - lado div 4 + g, yy + lado * 3 div 4 - g, lado div 2 - g, 2 * g + 1, 0x15803D)
+            caso I_VISTAS:
+                ; cuatro cuadros (los iconos)
+                caja(x + 1, yy + 1, lado div 2 - 2, lado div 2 - 2, c2)
+                caja(x + lado div 2 + 1, yy + 1, lado div 2 - 2, lado div 2 - 2, c2)
+                caja(x + 1, yy + lado div 2 + 1, lado div 2 - 2, lado div 2 - 2, c2)
+                caja(x + lado div 2 + 1, yy + lado div 2 + 1, lado div 2 - 2, lado div 2 - 2, c2)
             caso I_BORRAR:
                 ; una X
                 para g desde 0 hasta lado - 5 hacer
@@ -1136,6 +1183,12 @@ módulo Controles
         clase: nat32
         id, id2: nat32
         celdas: arreglo [MAX_COLS] de arreglo [LARGO_CELDA] de byte
+        ; (explorador) lo de las rejillas de archivos
+        icono: nat32                            ; el de iconos.cas delante de la primera celda (0: ninguno)
+        letra: nat32                            ; la letra de un IC_DOCUMENTO
+        marcado: bool                           ; elegido, con g.varios (se ve como el elegido)
+        grupo: nat32                            ; va antes el de grupo menor (las carpetas antes que los archivos)
+        clave: nat32                            ; el número por el que se ordena la columna g.col_clave (el tamaño, la fecha)
     fin
     público tipo Rejilla = estructura
         r: puntero a Renglón                     ; los renglones
@@ -1151,6 +1204,10 @@ módulo Controles
         orden_baja: bool
         filtro: arreglo [64] de byte
         x, ye, an, al: ent32
+        ; (explorador) iconos, varios elegidos y ordenar por número
+        con_iconos: bool                        ; los renglones llevan su icono (Renglón.icono)
+        varios: bool                            ; se eligen varios (Renglón.marcado); «sel» es donde está el cursor
+        col_clave, col_clave2: ent32            ; las columnas que se ordenan por Renglón.clave (y .id2); -1: ninguna
     fin
 
     ; prepara una rejilla de hasta «máximo» renglones (la memoria se pide
@@ -1168,6 +1225,10 @@ módulo Controles
         g.orden_col := -1
         g.orden_baja := falso
         g.filtro[0] := 0
+        g.con_iconos := falso
+        g.varios := falso
+        g.col_clave := -1
+        g.col_clave2 := -1
         rejilla_vaciar(g)
         devolver cierto
     fin
@@ -1198,6 +1259,11 @@ módulo Controles
         g.r[k].clase := clase
         g.r[k].id := id
         g.r[k].id2 := 0
+        g.r[k].icono := 0
+        g.r[k].letra := 0
+        g.r[k].marcado := falso
+        g.r[k].grupo := 0
+        g.r[k].clave := 0
         para c desde 0 hasta MAX_COLS - 1 hacer g.r[k].celdas[c][0] := 0 fin
         g.n := g.n + 1
         devolver ent32(k)
@@ -1270,6 +1336,20 @@ módulo Controles
         variable ta, tb: puntero a byte
         variable na, nb, i: nat32
         variable r: ent32
+        ; (explorador) el grupo, siempre antes; y las columnas de número
+        si g.r[a].grupo <> g.r[b].grupo entonces devolver g.r[a].grupo < g.r[b].grupo fin
+        si g.orden_col = g.col_clave o g.orden_col = g.col_clave2 entonces
+            na := g.r[a].clave
+            nb := g.r[b].clave
+            si g.orden_col = g.col_clave2 entonces
+                na := g.r[a].id2
+                nb := g.r[b].id2
+            fin
+            si na <> nb entonces
+                si g.orden_baja entonces devolver na > nb fin
+                devolver na < nb
+            fin
+        fin
         ta := dirección(g.r[a].celdas[g.orden_col][0])
         tb := dirección(g.r[b].celdas[g.orden_col][0])
         na := clave_número(ta)
@@ -1506,11 +1586,13 @@ módulo Controles
             si i mod 2 = 1 entonces fondo_ := 0xF6F8FA fin
             si g.r[k].clase = R_AVISO entonces fondo_ := C_NARANJA_CLARO fin
             si g.r[k].clase = R_GRIS entonces tinta := 0x6B7280 fin
-            si i = g.sel entonces
+            si (i = g.sel y no g.varios) o g.r[k].marcado entonces
                 fondo_ := C_AZUL
                 tinta := C_PAPEL
             fin
             caja(x + 2, fy, an - 4, ar, fondo_)
+            ; (explorador) con varios, el cursor: un borde de puntos alrededor
+            si g.varios y i = g.sel y id = foco entonces borde(x + 3, fy + 1, an - 6, ar - 2, 1, tinta) fin
             si g.r[k].clase = R_AVISO y i <> g.sel entonces caja(x + 2, fy, 4 * E, ar, C_NARANJA) fin
             si i = g.sel entonces flechita(x + LA div 2, fy + ar div 2, LT div 2, C_PAPEL) fin
             c := 0
@@ -1519,6 +1601,12 @@ módulo Controles
                 t := dirección(g.r[k].celdas[c][0])
                 xt := g.col_x[c]
                 si g.col_der[c] y ancho_texto(t) < w entonces xt := g.col_x[c] + w - ancho_texto(t) fin
+                si c = 0 y g.con_iconos entonces
+                    ; (explorador) su icono, delante
+                    si g.r[k].icono <> 0 entonces icono(lz, xt, fy + (ar - 2 * LA) div 2, 2 * LA, g.r[k].icono, g.r[k].letra, 0) fin
+                    xt := xt + 2 * LA + LA div 2
+                    w := w - 2 * LA - LA div 2
+                fin
                 texto_corto(xt, fy + 4 * E, t, w, tinta, c = 0 o i = g.sel)
                 c := c + 1
             fin
@@ -1536,6 +1624,28 @@ módulo Controles
     función mayor(a: ent32, b: ent32): ent32
         si a > b entonces devolver a fin
         devolver b
+    fin
+
+    ; (explorador) el renglón que se ve en ese punto (su sitio en lo que se
+    ; ve), sin elegirlo; -1 si ninguno; -2 en los rótulos
+    público función rejilla_en(ref g: Rejilla, x: ent32, yy: ent32): ent32
+        variable i: ent32
+        si x < g.x o x >= g.x + g.an o yy < g.ye o yy >= g.ye + g.al entonces devolver -1 fin
+        si yy < g.ye + alto_renglón() entonces devolver -2 fin
+        i := g.primero + (yy - g.ye - alto_renglón() - 2) div alto_renglón()
+        si i < 0 o i >= ent32(g.n_vista) entonces devolver -1 fin
+        devolver i
+    fin
+
+    ; (explorador) lo que cabe a lo alto
+    público función rejilla_caben(ref g: Rejilla): ent32
+        devolver caben_renglones(g)
+    fin
+
+    ; (explorador) el renglón que se ve en el sitio i (de lo que se ve)
+    público función rejilla_de_vista(ref g: Rejilla, i: ent32): ent32
+        si i < 0 o nat32(i) >= g.n_vista entonces devolver -1 fin
+        devolver ent32(g.vista[i])
     fin
 
     ; un clic en la rejilla: en un rótulo, ordena por esa columna (y da -2);

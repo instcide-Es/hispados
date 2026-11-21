@@ -1,0 +1,990 @@
+; =============================================================================
+;  exoper.cas - lo que hace el explorador de archivos de Hispa-Pentium
+;  (EQUIPO.BIN, uequipo.cas) con los archivos, sin pintar nada:
+;
+;   - las rutas (siempre enteras, con su letra: «C:\CARTAS\ENERO.TXT»);
+;   - el TRABAJO: copiar, mover, mandar a la Papelera, borrar del todo,
+;     restaurar y vaciar la Papelera. Primero se apunta todo lo que hay que
+;     hacer (las carpetas se recorren enteras: así se sabe cuánto es, para la
+;     barra de progreso) y luego se hace a pasos cortos (un_paso(): un trozo de
+;     16 K de un archivo, o una carpeta, o un nombre), para que la ventana
+;     siga viva y se pueda cancelar. Si el destino ya existe, paso() da
+;     PREGUNTA y espera a responde() (Reemplazar, Saltar, a todos, Cancelar);
+;   - la Papelera: \PAPELERA en cada unidad en la que se puede escribir
+;     (oculta y de sistema), con lo borrado con un nombre propio
+;     (D1234567.EXT) y \PAPELERA\INDICE.TXT, una línea por cosa:
+;         D1234567.TXT|C:\CARTAS\ENERO.TXT|Enero de 2026.txt|fecha|hora
+;     (el nombre de dentro, de dónde era, su nombre largo, cuándo se borró);
+;   - las asociaciones: con qué programa se abre cada clase de archivo
+;     (ASOCIA.TXT, un texto que se puede editar: «TXT=\BLOC.BIN|%1»;
+;     %1 es el archivo). Sin él, las de siempre.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Exoper
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Formato, Mem32
+
+    público constante MAX_RUTA = 128
+
+    ; =========================================================================
+    ;  Las rutas
+    ; =========================================================================
+    ; une la carpeta y el nombre en destino
+    público función une(destino: puntero a byte, carpeta: puntero a byte, nombre: puntero a byte)
+        variable n: nat32
+        copiar_hasta(destino, carpeta, MAX_RUTA)
+        n := longitud(destino)
+        si n > 0 y destino[n - 1] <> '\\' entonces añadir_car(destino, '\\') fin
+        si longitud(destino) + longitud(nombre) < MAX_RUTA entonces concatenar(destino, nombre) fin
+    fin
+
+    ; lo de detrás de la última barra
+    público función base_de(ruta: puntero a byte): puntero a byte
+        variable i: nat32
+        i := longitud(ruta)
+        mientras i > 0 y ruta[i - 1] <> '\\' y ruta[i - 1] <> ':' hacer i := i - 1 fin
+        devolver dirección(ruta[i])
+    fin
+
+    ; la carpeta de arriba («C:\A\B» -> «C:\A»; «C:\A» -> «C:\»)
+    público función padre_de(ruta: puntero a byte, destino: puntero a byte)
+        variable n: nat32
+        copiar_hasta(destino, ruta, MAX_RUTA)
+        n := longitud(destino)
+        mientras n > 0 y destino[n - 1] <> '\\' hacer n := n - 1 fin
+        si n > 0 entonces n := n - 1 fin
+        si n <= 2 entonces n := 3 fin                 ; (la raíz: «C:\»)
+        si n < longitud(destino) entonces destino[n] := 0 fin
+    fin
+
+    ; ¿es «a» la carpeta «b» o algo de dentro de ella? (sin mirar mayúsculas)
+    público función dentro_de(a: puntero a byte, b: puntero a byte): bool
+        variable n, i: nat32
+        n := longitud(b)
+        si n > 0 y b[n - 1] = '\\' entonces n := n - 1 fin
+        i := 0
+        mientras i < n hacer
+            si mayúscula(a[i]) <> mayúscula(b[i]) entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver a[n] = 0 o a[n] = '\\'
+    fin
+
+    ; la extensión (sin el punto, en mayúsculas; vacía si no tiene)
+    público función extensión(nombre: puntero a byte, destino: puntero a byte)
+        variable n, i, k: nat32
+        destino[0] := 0
+        n := longitud(nombre)
+        i := n
+        mientras i > 0 y nombre[i - 1] <> '.' y nombre[i - 1] <> '\\' hacer i := i - 1 fin
+        si i = 0 o nombre[i - 1] <> '.' entonces devolver fin
+        k := 0
+        mientras nombre[i] <> 0 y k < 7 hacer
+            destino[k] := mayúscula(nombre[i])
+            i := i + 1
+            k := k + 1
+        fin
+        destino[k] := 0
+    fin
+
+    ; ¿existe? (y si es una carpeta)
+    público función existe(ruta: puntero a byte, ref carpeta: bool): bool
+        variable a: nat32
+        carpeta := falso
+        a := atributos_de(ruta)
+        si es_error(a) entonces
+            ; la raíz no tiene atributos: se mira si se abre
+            a := abrir(ruta)
+            si es_error(a) entonces devolver falso fin
+            cerrar(a)
+            carpeta := cierto
+            devolver cierto
+        fin
+        carpeta := a yb CARPETA <> 0
+        devolver cierto
+    fin
+
+    ; un nombre libre en la carpeta para una copia de «nombre» (8+3):
+    ; NOMBRE~1.EXT, NOMBR~12.EXT...
+    público función nombre_libre(carpeta: puntero a byte, nombre: puntero a byte, destino: puntero a byte)
+        variable raíz: arreglo [12] de byte
+        variable ext: arreglo [8] de byte
+        variable prueba: arreglo [16] de byte
+        variable ruta: arreglo [MAX_RUTA] de byte
+        variable i, k, n: nat32
+        variable c: bool
+        variable d: arreglo [3] de nat32
+        i := 0
+        mientras nombre[i] <> 0 y nombre[i] <> '.' y i < 8 hacer
+            raíz[i] := nombre[i]
+            i := i + 1
+        fin
+        raíz[i] := 0
+        extensión(nombre, ext)
+        para k desde 1 hasta 999 hacer
+            n := 2
+            si k >= 10 entonces n := 3 fin
+            si k >= 100 entonces n := 4 fin
+            si longitud(raíz) > 8 - n entonces raíz[8 - n] := 0 fin
+            d[0] := nat32(dirección(raíz[0]))
+            d[1] := k
+            d[2] := nat32(dirección(ext[0]))
+            si ext[0] <> 0 entonces formatear(prueba, 16, "%s~%u.%s", d) sino formatear(prueba, 16, "%s~%u", d) fin
+            une(ruta, carpeta, prueba)
+            si no existe(ruta, c) entonces
+                copiar(destino, prueba)
+                devolver
+            fin
+        fin
+        copiar(destino, nombre)
+    fin
+
+    ; =========================================================================
+    ;  El trabajo
+    ; =========================================================================
+    público constante SIGUE = 1
+    público constante PREGUNTA = 2              ; el destino ya existe: responde()
+    público constante ACABADO = 3
+
+    público constante R_REEMPLAZAR = 1
+    público constante R_SALTAR = 2
+    público constante R_REEMPLAZAR_TODOS = 3
+    público constante R_SALTAR_TODOS = 4
+    público constante R_CANCELAR = 5
+
+    ; las clases de trabajo (para el título de la barra de progreso)
+    público constante TR_COPIAR = 1
+    público constante TR_MOVER = 2
+    público constante TR_PAPELERA = 3
+    público constante TR_BORRAR = 4
+    público constante TR_RESTAURAR = 5
+    público constante TR_VACIAR = 6
+
+    constante P_CREAR = 1                       ; hacer la carpeta (si ya está, se sigue: se juntan)
+    constante P_COPIAR = 2
+    constante P_RENOMBRAR = 3                   ; llevar a otro sitio de la misma unidad
+    constante P_BORRAR_ARCHIVO = 4
+    constante P_BORRAR_CARPETA = 5
+    constante P_A_PAPELERA = 6
+    constante P_RESTAURAR = 7                   ; de la papelera a donde estaba (y fuera del índice)
+
+    tipo Paso = estructura
+        clase: nat32
+        tamaño: nat32
+        carpeta: bool
+        origen: arreglo [MAX_RUTA] de byte
+        destino: arreglo [MAX_RUTA] de byte
+    fin
+    constante MAX_PASOS = 3000
+    variable pasos: puntero a Paso
+    público variable n_pasos: nat32
+    público variable hecho: nat32               ; los pasos acabados
+    público variable total_octetos, octetos_hechos: nat32
+    público variable clase_trabajo: nat32
+    público variable en_marcha: bool
+    público variable errores: nat32
+    público variable primer_error: arreglo [160] de byte
+    público variable preguntado: arreglo [MAX_RUTA] de byte   ; lo que ya existe (en una PREGUNTA)
+    público variable cambió_papelera: bool      ; (para el dock: se ha tirado o vaciado algo)
+    variable a_todos: nat32                     ; 0, R_REEMPLAZAR_TODOS o R_SALTAR_TODOS
+    variable respuesta: nat32
+    variable m_origen, m_destino: nat32         ; los archivos abiertos de la copia que va por la mitad
+    variable copiando: bool
+    variable trozo: puntero a byte
+    constante TROZO = 16384
+    variable índice: puntero a byte              ; el texto de un INDICE.TXT
+    constante MAX_ÍNDICE = 65536
+    variable n_índice: nat32
+
+    función memoria(): bool
+        variable p: puntero a byte
+        si pasos <> nulo entonces devolver cierto fin
+        p := más_memoria(MAX_PASOS * tamaño(Paso) + TROZO + MAX_ÍNDICE + 16)
+        si p = nulo entonces devolver falso fin
+        pasos := puntero(p)
+        trozo := p + MAX_PASOS * tamaño(Paso)
+        índice := trozo + TROZO
+        devolver cierto
+    fin
+
+    función falla(qué: puntero a byte, ruta: puntero a byte, e: nat32)
+        variable d: arreglo [3] de nat32
+        errores := errores + 1
+        si errores > 1 entonces devolver fin
+        d[0] := nat32(qué)
+        d[1] := nat32(base_de(ruta))
+        d[2] := nat32(texto_error(e))
+        formatear(primer_error, 160, "%s %s: %s.", d)
+    fin
+
+    ; empieza un trabajo nuevo (vacío)
+    público función empieza(clase: nat32): bool
+        si no memoria() entonces devolver falso fin
+        n_pasos := 0
+        hecho := 0
+        total_octetos := 0
+        octetos_hechos := 0
+        clase_trabajo := clase
+        errores := 0
+        primer_error[0] := 0
+        a_todos := 0
+        respuesta := 0
+        copiando := falso
+        en_marcha := cierto
+        devolver cierto
+    fin
+
+    función apunta(clase: nat32, origen: puntero a byte, destino: puntero a byte, tam: nat32, carpeta: bool): bool
+        si n_pasos >= MAX_PASOS entonces
+            si errores = 0 entonces
+                errores := 1
+                copiar(primer_error, "Son demasiadas cosas a la vez: se ha hecho solo una parte.")
+            fin
+            devolver falso
+        fin
+        pasos[n_pasos].clase := clase
+        pasos[n_pasos].tamaño := tam
+        pasos[n_pasos].carpeta := carpeta
+        copiar_hasta(dirección(pasos[n_pasos].origen[0]), origen, MAX_RUTA)
+        pasos[n_pasos].destino[0] := 0
+        si destino <> nulo entonces copiar_hasta(dirección(pasos[n_pasos].destino[0]), destino, MAX_RUTA) fin
+        n_pasos := n_pasos + 1
+        total_octetos := total_octetos + tam
+        devolver cierto
+    fin
+
+    ; lo que hay en una carpeta, sin «.» ni «..»: se lee entero antes de
+    ; bajar (así solo hay un archivo abierto a la vez)
+    constante MAX_HIJOS = 256
+    tipo Hijo = estructura
+        nombre: arreglo [13] de byte
+        carpeta: bool
+        tamaño: nat32
+    fin
+
+    función lee_hijos(carpeta: puntero a byte, hijos: puntero a Hijo, ref n: nat32)
+        variable m: nat32
+        variable e: Entrada
+        n := 0
+        m := abrir(carpeta)
+        si es_error(m) entonces devolver fin
+        mientras n < MAX_HIJOS y entrada(m, e) hacer
+            si e.nombre[0] <> '.' y e.atributos yb 0x08 = 0 entonces
+                copiar_hasta(dirección(hijos[n].nombre[0]), dirección(e.nombre[0]), 13)
+                hijos[n].carpeta := e.atributos yb CARPETA <> 0
+                hijos[n].tamaño := e.tamaño
+                n := n + 1
+            fin
+        fin
+        cerrar(m)
+    fin
+
+    ; copiar «origen» (un archivo o una carpeta entera) como «destino»
+    función apunta_copia(origen: puntero a byte, destino: puntero a byte, carpeta: bool, tam: nat32, nivel: nat32)
+        variable p: puntero a byte
+        variable hijos: puntero a Hijo
+        variable n, i: nat32
+        variable ro, rd: arreglo [MAX_RUTA] de byte
+        si no carpeta entonces
+            apunta(P_COPIAR, origen, destino, tam, falso)
+            devolver
+        fin
+        si no apunta(P_CREAR, origen, destino, 0, cierto) entonces devolver fin
+        si nivel > 12 entonces devolver fin
+        ; los hijos, en memoria de la pila del montón: se pide y se devuelve
+        p := más_memoria(MAX_HIJOS * tamaño(Hijo))
+        si p = nulo entonces devolver fin
+        hijos := puntero(p)
+        lee_hijos(origen, hijos, n)
+        i := 0
+        mientras i < n hacer
+            une(ro, origen, dirección(hijos[i].nombre[0]))
+            une(rd, destino, dirección(hijos[i].nombre[0]))
+            apunta_copia(ro, rd, hijos[i].carpeta, hijos[i].tamaño, nivel + 1)
+            i := i + 1
+        fin
+        menos_memoria(MAX_HIJOS * tamaño(Hijo))
+    fin
+
+    ; borrar del todo (lo de dentro antes que la carpeta)
+    función apunta_borrado(origen: puntero a byte, carpeta: bool, tam: nat32, nivel: nat32)
+        variable p: puntero a byte
+        variable hijos: puntero a Hijo
+        variable n, i: nat32
+        variable ro: arreglo [MAX_RUTA] de byte
+        si no carpeta entonces
+            apunta(P_BORRAR_ARCHIVO, origen, nulo, 0, falso)
+            devolver
+        fin
+        si nivel <= 12 entonces
+            p := más_memoria(MAX_HIJOS * tamaño(Hijo))
+            si p <> nulo entonces
+                hijos := puntero(p)
+                lee_hijos(origen, hijos, n)
+                i := 0
+                mientras i < n hacer
+                    une(ro, origen, dirección(hijos[i].nombre[0]))
+                    apunta_borrado(ro, hijos[i].carpeta, hijos[i].tamaño, nivel + 1)
+                    i := i + 1
+                fin
+                menos_memoria(MAX_HIJOS * tamaño(Hijo))
+            fin
+        fin
+        apunta(P_BORRAR_CARPETA, origen, nulo, 0, cierto)
+    fin
+
+    ; lo que mide una carpeta entera (y cuántos archivos y carpetas lleva)
+    público función medir(ruta: puntero a byte, ref archivos: nat32, ref carpetas: nat32, nivel: nat32): nat32
+        variable p: puntero a byte
+        variable hijos: puntero a Hijo
+        variable n, i, total: nat32
+        variable ro: arreglo [MAX_RUTA] de byte
+        total := 0
+        si nivel > 12 entonces devolver 0 fin
+        p := más_memoria(MAX_HIJOS * tamaño(Hijo))
+        si p = nulo entonces devolver 0 fin
+        hijos := puntero(p)
+        lee_hijos(ruta, hijos, n)
+        i := 0
+        mientras i < n hacer
+            si hijos[i].carpeta entonces
+                carpetas := carpetas + 1
+                une(ro, ruta, dirección(hijos[i].nombre[0]))
+                total := total + medir(ro, archivos, carpetas, nivel + 1)
+            sino
+                archivos := archivos + 1
+                total := total + hijos[i].tamaño
+            fin
+            i := i + 1
+        fin
+        menos_memoria(MAX_HIJOS * tamaño(Hijo))
+        devolver total
+    fin
+
+    ; ---- lo que pide el explorador ----
+    ; copiar (o mover) «origen» a la carpeta «carpeta». Falso (y por qué en
+    ; primer_error) si no tiene sentido
+    público función añade_copia(origen: puntero a byte, carpeta_destino: puntero a byte, mover: bool): bool
+        variable destino, arriba: arreglo [MAX_RUTA] de byte
+        variable nombre: arreglo [16] de byte
+        variable c, c2: bool
+        variable tam, archivos, carpetas: nat32
+        variable m: nat32
+        si no existe(origen, c) entonces
+            falla("No está", origen, NO_HAY)
+            devolver falso
+        fin
+        si c y dentro_de(carpeta_destino, origen) entonces
+            errores := errores + 1
+            copiar(primer_error, "Una carpeta no se puede llevar dentro de sí misma.")
+            devolver falso
+        fin
+        padre_de(origen, arriba)
+        copiar_hasta(nombre, base_de(origen), 16)
+        si iguales_sin_caja(arriba, carpeta_destino) entonces
+            ; en la misma carpeta: mover no hace nada; copiar hace NOMBRE~1
+            si mover entonces devolver cierto fin
+            nombre_libre(carpeta_destino, base_de(origen), nombre)
+        fin
+        une(destino, carpeta_destino, nombre)
+        tam := 0
+        si no c entonces
+            m := abrir(origen)
+            si no es_error(m) entonces
+                tam := largo_de(m)
+                cerrar(m)
+            fin
+        fin
+        si mover y mayúscula(origen[0]) = mayúscula(carpeta_destino[0]) entonces
+            ; en la misma unidad: solo cambia de sitio
+            devolver apunta(P_RENOMBRAR, origen, destino, 0, c)
+        fin
+        apunta_copia(origen, destino, c, tam, 0)
+        si mover entonces apunta_borrado(origen, c, 0, 0) fin
+        c2 := falso
+        devolver cierto
+    fin
+
+    ; borrar del todo (sin Papelera)
+    público función añade_borrado(origen: puntero a byte): bool
+        variable c: bool
+        si no existe(origen, c) entonces devolver falso fin
+        apunta_borrado(origen, c, 0, 0)
+        devolver cierto
+    fin
+
+    ; a la Papelera de su unidad (si es de la Papelera, del todo)
+    público función añade_a_papelera(origen: puntero a byte): bool
+        variable c: bool
+        variable p: arreglo [16] de byte
+        si no existe(origen, c) entonces devolver falso fin
+        papelera_de(origen[0], p)
+        si dentro_de(origen, p) entonces devolver añade_borrado(origen) fin
+        devolver apunta(P_A_PAPELERA, origen, nulo, 0, c)
+    fin
+
+    ; sacarlo de la Papelera: «interno» (X:\PAPELERA\D1234567.EXT) vuelve a «origen»
+    público función añade_restaurar(interno: puntero a byte, origen: puntero a byte): bool
+        variable c: bool
+        si no existe(interno, c) entonces devolver falso fin
+        devolver apunta(P_RESTAURAR, interno, origen, 0, c)
+    fin
+
+    ; vaciar la Papelera de la unidad de esa letra
+    público función añade_vaciado(letra: byte): bool
+        variable p: arreglo [16] de byte
+        variable ro: arreglo [MAX_RUTA] de byte
+        variable hijos: puntero a Hijo
+        variable pm: puntero a byte
+        variable n, i: nat32
+        papelera_de(letra, p)
+        pm := más_memoria(MAX_HIJOS * tamaño(Hijo))
+        si pm = nulo entonces devolver falso fin
+        hijos := puntero(pm)
+        lee_hijos(p, hijos, n)
+        i := 0
+        mientras i < n hacer
+            une(ro, p, dirección(hijos[i].nombre[0]))
+            apunta_borrado(ro, hijos[i].carpeta, 0, 0)
+            i := i + 1
+        fin
+        menos_memoria(MAX_HIJOS * tamaño(Hijo))
+        devolver cierto
+    fin
+
+    ; responde a una PREGUNTA
+    público función responde(r: nat32)
+        respuesta := r
+        si r = R_REEMPLAZAR_TODOS entonces
+            a_todos := R_REEMPLAZAR_TODOS
+            respuesta := R_REEMPLAZAR
+        fin
+        si r = R_SALTAR_TODOS entonces
+            a_todos := R_SALTAR_TODOS
+            respuesta := R_SALTAR
+        fin
+    fin
+
+    ; lo deja (lo que va por la mitad, cerrado y quitado)
+    público función cancela()
+        si copiando entonces
+            cerrar(m_origen)
+            cerrar(m_destino)
+            borrar(dirección(pasos[hecho].destino[0]))
+            copiando := falso
+        fin
+        hecho := n_pasos
+        en_marcha := falso
+    fin
+
+    ; lo que se está haciendo ahora (para la barra de progreso)
+    público función de_ahora(): puntero a byte
+        si hecho >= n_pasos entonces devolver "" fin
+        devolver base_de(dirección(pasos[hecho].origen[0]))
+    fin
+
+    ; el destino ya está: se pregunta (o se hace lo dicho para todos). Cierto si se sigue con él
+    función destino_libre(ref p: Paso, ref r: nat32): bool
+        variable c: bool
+        variable e: nat32
+        r := SIGUE
+        si no existe(dirección(p.destino[0]), c) entonces devolver cierto fin
+        si c entonces
+            ; ya hay una carpeta con ese nombre
+            si p.clase = P_CREAR entonces devolver cierto fin
+            falla("Ya hay una carpeta que se llama", dirección(p.destino[0]), YA_EXISTE)
+            devolver falso
+        fin
+        si p.clase = P_CREAR o p.carpeta entonces
+            falla("Ya hay un archivo que se llama", dirección(p.destino[0]), YA_EXISTE)
+            devolver falso
+        fin
+        si respuesta = 0 entonces
+            si a_todos = R_SALTAR_TODOS entonces devolver falso fin
+            si a_todos <> R_REEMPLAZAR_TODOS entonces
+                copiar(preguntado, dirección(p.destino[0]))
+                r := PREGUNTA
+                devolver falso
+            fin
+            respuesta := R_REEMPLAZAR
+        fin
+        si respuesta = R_SALTAR entonces
+            respuesta := 0
+            devolver falso
+        fin
+        respuesta := 0
+        e := borrar(dirección(p.destino[0]))
+        si es_error(e) entonces
+            falla("No se puede reemplazar", dirección(p.destino[0]), e)
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+    ; un paso del trabajo
+    público función un_paso(): nat32
+        variable r, e, n: nat32
+        variable p: puntero a Paso
+        variable sigue: bool
+        si no en_marcha entonces devolver ACABADO fin
+        si respuesta = R_CANCELAR entonces
+            respuesta := 0
+            cancela()
+            devolver ACABADO
+        fin
+        si hecho >= n_pasos entonces
+            en_marcha := falso
+            devolver ACABADO
+        fin
+        p := pasos + hecho
+        si copiando entonces
+            ; un trozo más del archivo
+            n := leer(m_origen, trozo, TROZO)
+            si n = 0 o es_error(n) entonces
+                cerrar(m_origen)
+                cerrar(m_destino)
+                copiando := falso
+                si es_error(n) entonces falla("No se puede leer", dirección(p.origen[0]), n) fin
+                hecho := hecho + 1
+                devolver SIGUE
+            fin
+            e := escribir_archivo(m_destino, trozo, n)
+            octetos_hechos := octetos_hechos + n
+            si e <> n entonces
+                cerrar(m_origen)
+                cerrar(m_destino)
+                copiando := falso
+                borrar(dirección(p.destino[0]))
+                si es_error(e) entonces falla("No se puede escribir", dirección(p.destino[0]), e) sino falla("No se puede escribir", dirección(p.destino[0]), DISCO_LLENO) fin
+                ; sin sitio, lo demás tampoco va a caber
+                si e = DISCO_LLENO o not_error(e) entonces cancela() fin
+                devolver SIGUE
+            fin
+            devolver SIGUE
+        fin
+        según nat16(p.clase)
+            caso P_CREAR:
+                sigue := destino_libre(valor(p), r)
+                si r = PREGUNTA entonces devolver PREGUNTA fin
+                si sigue entonces
+                    e := crear_carpeta(dirección(p.destino[0]))
+                    si es_error(e) y e <> YA_EXISTE entonces falla("No se puede hacer la carpeta", dirección(p.destino[0]), e) fin
+                fin
+            caso P_COPIAR:
+                sigue := destino_libre(valor(p), r)
+                si r = PREGUNTA entonces devolver PREGUNTA fin
+                si sigue entonces
+                    m_origen := abrir(dirección(p.origen[0]))
+                    si es_error(m_origen) entonces
+                        falla("No se puede abrir", dirección(p.origen[0]), m_origen)
+                    sino
+                        m_destino := crear(dirección(p.destino[0]))
+                        si es_error(m_destino) entonces
+                            cerrar(m_origen)
+                            falla("No se puede hacer", dirección(p.destino[0]), m_destino)
+                        sino
+                            copiando := cierto
+                            devolver SIGUE
+                        fin
+                    fin
+                sino
+                    octetos_hechos := octetos_hechos + p.tamaño
+                fin
+            caso P_RENOMBRAR:
+                sigue := destino_libre(valor(p), r)
+                si r = PREGUNTA entonces devolver PREGUNTA fin
+                si sigue entonces
+                    e := renombrar(dirección(p.origen[0]), dirección(p.destino[0]))
+                    si es_error(e) entonces falla("No se puede mover", dirección(p.origen[0]), e) fin
+                fin
+            caso P_BORRAR_ARCHIVO:
+                e := borrar(dirección(p.origen[0]))
+                si es_error(e) entonces
+                    ; uno de solo lectura: se le quita y se vuelve a probar
+                    si e = PROTEGIDO y no es_error(poner_atributos(dirección(p.origen[0]), 0)) entonces e := borrar(dirección(p.origen[0])) fin
+                    si es_error(e) entonces falla("No se puede borrar", dirección(p.origen[0]), e) fin
+                fin
+            caso P_BORRAR_CARPETA:
+                e := borrar_carpeta(dirección(p.origen[0]))
+                si es_error(e) entonces falla("No se puede borrar la carpeta", dirección(p.origen[0]), e) fin
+            caso P_A_PAPELERA:
+                a_papelera(valor(p))
+                cambió_papelera := cierto
+            caso P_RESTAURAR:
+                restaura(valor(p))
+                cambió_papelera := cierto
+        fin
+        hecho := hecho + 1
+        devolver SIGUE
+    fin
+
+    función not_error(e: nat32): bool
+        devolver no es_error(e)
+    fin
+
+    ; =========================================================================
+    ;  La Papelera
+    ; =========================================================================
+    público función papelera_de(letra: byte, destino: puntero a byte)
+        destino[0] := mayúscula(letra)
+        destino[1] := 0
+        concatenar(destino, ":\\PAPELERA")
+    fin
+
+    función índice_de(letra: byte, destino: puntero a byte)
+        papelera_de(letra, destino)
+        concatenar(destino, "\\INDICE.TXT")
+    fin
+
+    ; que esté la carpeta (oculta y de sistema). Falso si no se puede
+    función asegura_papelera(letra: byte): bool
+        variable p: arreglo [16] de byte
+        variable c: bool
+        variable e: nat32
+        papelera_de(letra, p)
+        si existe(p, c) entonces devolver c fin
+        e := crear_carpeta(p)
+        si es_error(e) entonces devolver falso fin
+        poner_atributos(p, OCULTO ob DE_SISTEMA)
+        devolver cierto
+    fin
+
+    función a_papelera(ref p: Paso)
+        variable dentro, línea, ruta: arreglo [MAX_RUTA * 2 + 64] de byte
+        variable nombre: arreglo [16] de byte
+        variable ext: arreglo [8] de byte
+        variable i, e, m, f: nat32
+        variable c: bool
+        variable d: arreglo [5] de nat32
+        si no asegura_papelera(p.origen[0]) entonces
+            falla("No se puede hacer la Papelera para", dirección(p.origen[0]), PROTEGIDO)
+            devolver
+        fin
+        ; un nombre que no esté: D y siete cifras
+        extensión(dirección(p.origen[0]), ext)
+        i := tics() yb 0xFFFFFF
+        mientras cierto hacer
+            d[0] := 0x1000000 ob i
+            d[1] := nat32(dirección(ext[0]))
+            si ext[0] <> 0 y no p.carpeta entonces formatear(nombre, 16, "D%X.%s", d) sino formatear(nombre, 16, "D%X", d) fin
+            papelera_de(p.origen[0], ruta)
+            une(dentro, ruta, nombre)
+            si no existe(dentro, c) entonces romper fin
+            i := (i + 1) yb 0xFFFFFF
+        fin
+        e := renombrar(dirección(p.origen[0]), dentro)
+        si es_error(e) entonces
+            falla("No se puede mandar a la Papelera", dirección(p.origen[0]), e)
+            devolver
+        fin
+        ; y al índice
+        f := dato(DATO_FECHA)
+        d[0] := nat32(dirección(nombre[0]))
+        d[1] := nat32(dirección(p.origen[0]))
+        d[2] := nat32(base_de(dirección(p.origen[0])))
+        d[3] := f >> 16
+        d[4] := f yb 0xFFFF
+        formatear(línea, MAX_RUTA * 2 + 64, "%s|%s|%s|%u|%u\r\n", d)
+        índice_de(p.origen[0], ruta)
+        m := abrir_para(ruta, PARA_AÑADIR)
+        si no es_error(m) entonces
+            escribir_archivo(m, línea, longitud(línea))
+            cerrar(m)
+        fin
+    fin
+
+    ; lee el índice de la papelera de esa unidad (falso si no hay)
+    público función lee_índice(letra: byte): bool
+        variable ruta: arreglo [32] de byte
+        variable m, n: nat32
+        n_índice := 0
+        si no memoria() entonces devolver falso fin
+        índice[0] := 0
+        índice_de(letra, ruta)
+        m := abrir(ruta)
+        si es_error(m) entonces devolver falso fin
+        n := leer(m, índice, MAX_ÍNDICE - 1)
+        cerrar(m)
+        si es_error(n) entonces n := 0 fin
+        índice[n] := 0
+        n_índice := n
+        devolver n > 0
+    fin
+
+    ; el trozo k de la línea l (hasta «|» o el final)
+    función trozo_de(l: puntero a byte, k: nat32, destino: puntero a byte, cabe: nat32)
+        variable i, j: nat32
+        i := 0
+        mientras k > 0 y l[i] <> 0 y l[i] <> '\r' y l[i] <> '\n' hacer
+            si l[i] = '|' entonces k := k - 1 fin
+            i := i + 1
+        fin
+        j := 0
+        mientras l[i] <> 0 y l[i] <> '|' y l[i] <> '\r' y l[i] <> '\n' y j + 1 < cabe hacer
+            destino[j] := l[i]
+            i := i + 1
+            j := j + 1
+        fin
+        destino[j] := 0
+    fin
+
+    ; la línea siguiente del índice leído (desde «pos»): el nombre de dentro,
+    ; de dónde era, su nombre y la fecha de borrado (como en la FAT, arriba la fecha)
+    público función línea_índice(ref pos: nat32, dentro: puntero a byte, origen: puntero a byte, nombre: puntero a byte, ref cuándo: nat32): bool
+        variable l: puntero a byte
+        variable t: arreglo [16] de byte
+        variable f, h: nat32
+        mientras pos < n_índice y (índice[pos] = '\r' o índice[pos] = '\n') hacer pos := pos + 1 fin
+        si pos >= n_índice entonces devolver falso fin
+        l := índice + pos
+        trozo_de(l, 0, dentro, 16)
+        trozo_de(l, 1, origen, MAX_RUTA)
+        trozo_de(l, 2, nombre, 80)
+        trozo_de(l, 3, t, 16)
+        texto_a_natural(t, f)
+        trozo_de(l, 4, t, 16)
+        texto_a_natural(t, h)
+        cuándo := (f << 16) ob h
+        mientras pos < n_índice y índice[pos] <> '\n' hacer pos := pos + 1 fin
+        devolver cierto
+    fin
+
+    ; quita del índice de esa unidad la línea de «dentro» (y las que ya no están)
+    función quita_del_índice(letra: byte, dentro: puntero a byte)
+        variable ruta, interno: arreglo [MAX_RUTA] de byte
+        variable de: arreglo [16] de byte
+        variable i, k, m, ini: nat32
+        variable c: bool
+        variable p: puntero a byte
+        si no lee_índice(letra) entonces devolver fin
+        ; se rehace encima, en el mismo sitio (lo que se queda siempre es menos)
+        k := 0
+        i := 0
+        mientras i < n_índice hacer
+            ini := i
+            mientras i < n_índice y índice[i] <> '\n' hacer i := i + 1 fin
+            si i < n_índice entonces i := i + 1 fin
+            p := índice + ini
+            trozo_de(p, 0, de, 16)
+            papelera_de(letra, ruta)
+            une(interno, ruta, de)
+            si de[0] <> 0 y no iguales_sin_caja(de, dentro) y existe(interno, c) entonces
+                mientras ini < i hacer
+                    índice[k] := índice[ini]
+                    k := k + 1
+                    ini := ini + 1
+                fin
+            fin
+        fin
+        índice_de(letra, ruta)
+        m := crear(ruta)
+        si es_error(m) entonces devolver fin
+        si k > 0 entonces escribir_archivo(m, índice, k) fin
+        cerrar(m)
+        n_índice := 0
+    fin
+
+    función restaura(ref p: Paso)
+        variable arriba: arreglo [MAX_RUTA] de byte
+        variable c: bool
+        variable e: nat32
+        si existe(dirección(p.destino[0]), c) entonces
+            falla("Ya hay algo donde estaba", dirección(p.destino[0]), YA_EXISTE)
+            devolver
+        fin
+        ; si su carpeta ya no está, se hace
+        padre_de(dirección(p.destino[0]), arriba)
+        si no existe(arriba, c) entonces crea_carpetas(arriba) fin
+        e := renombrar(dirección(p.origen[0]), dirección(p.destino[0]))
+        si es_error(e) entonces
+            falla("No se puede restaurar", dirección(p.destino[0]), e)
+            devolver
+        fin
+        quita_del_índice(p.origen[0], base_de(dirección(p.origen[0])))
+    fin
+
+    ; hace la carpeta y las de arriba que falten
+    función crea_carpetas(ruta: puntero a byte)
+        variable arriba: arreglo [MAX_RUTA] de byte
+        variable c: bool
+        si longitud(ruta) <= 3 o existe(ruta, c) entonces devolver fin
+        padre_de(ruta, arriba)
+        crea_carpetas(arriba)
+        crear_carpeta(ruta)
+    fin
+
+    ; tras vaciar: el índice, vacío
+    público función índice_vacío(letra: byte)
+        variable ruta: arreglo [32] de byte
+        variable m: nat32
+        índice_de(letra, ruta)
+        m := crear(ruta)
+        si no es_error(m) entonces cerrar(m) fin
+        cambió_papelera := cierto
+    fin
+
+    ; =========================================================================
+    ;  Las asociaciones: con qué se abre cada clase de archivo
+    ; =========================================================================
+    constante MAX_ASOCIA = 4096
+    variable asocia: arreglo [MAX_ASOCIA] de byte
+    variable asocia_leída: bool
+    público variable ruta_asocia: arreglo [40] de byte
+    variable de_siempre: arreglo [700] de byte = "; con qu\x82 se abre cada clase de archivo: EXT=programa|argumentos (%1 es el archivo)\r\nTXT=\\BLOC.BIN|%1\r\nBAT=\\BLOC.BIN|%1\r\nINI=\\BLOC.BIN|%1\r\nMNU=\\BLOC.BIN|%1\r\nBIN=%1|\r\nHVP=\\HVPRUN.BIN|%1\r\nPLU=\\HVPRUN.BIN|\\OFICINA\\PLUMA.HVP %1\r\nHOJ=\\HVPRUN.BIN|\\OFICINA\\CUENTAS.HVP %1\r\nFAC=\\HVPRUN.BIN|\\OFICINA\\FACTURAS.HVP %1\r\nBMP=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nPCX=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nGIF=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nPNG=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nJPG=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nTGA=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nICO=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nPPM=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\n"
+
+    ; dónde está ASOCIA.TXT: \HISPA\ASOCIA.TXT en un sistema instalado
+    ; (si está la carpeta \HISPA); si no, \ASOCIA.TXT, en la unidad del sistema
+    función busca_asocia()
+        variable c: bool
+        variable letra: nat32
+        letra := unidad(0)
+        ruta_asocia[0] := byte(letra)
+        ruta_asocia[1] := 0
+        concatenar(ruta_asocia, ":\\HISPA")
+        si existe(ruta_asocia, c) y c entonces
+            concatenar(ruta_asocia, "\\ASOCIA.TXT")
+        sino
+            ruta_asocia[2] := 0
+            concatenar(ruta_asocia, "\\ASOCIA.TXT")
+        fin
+    fin
+
+    público función lee_asociaciones()
+        variable m, n: nat32
+        si ruta_asocia[0] = 0 entonces busca_asocia() fin
+        copiar(asocia, de_siempre)
+        m := abrir(ruta_asocia)
+        si no es_error(m) entonces
+            n := leer(m, asocia, MAX_ASOCIA - 1)
+            cerrar(m)
+            si es_error(n) entonces n := 0 fin
+            asocia[n] := 0
+            si n = 0 entonces copiar(asocia, de_siempre) fin
+        fin
+        asocia_leída := cierto
+    fin
+
+    ; dónde empieza la línea de la extensión (o MAX_ASOCIA si no está)
+    función línea_de(ext: puntero a byte): nat32
+        variable i, n: nat32
+        n := longitud(ext)
+        si n = 0 entonces devolver MAX_ASOCIA fin
+        i := 0
+        mientras asocia[i] <> 0 hacer
+            si (i = 0 o asocia[i - 1] = '\n') y asocia[i + n] = '=' entonces
+                si comparar_sin_caja(dirección(asocia[i]), ext, n) entonces devolver i fin
+            fin
+            i := i + 1
+        fin
+        devolver MAX_ASOCIA
+    fin
+
+    función comparar_sin_caja(a: puntero a byte, b: puntero a byte, n: nat32): bool
+        variable i: nat32
+        para i desde 0 hasta n - 1 hacer
+            si mayúscula(a[i]) <> mayúscula(b[i]) entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; con qué se abre la extensión: el programa y la plantilla de argumentos
+    público función asociado(ext: puntero a byte, programa: puntero a byte, plantilla: puntero a byte): bool
+        variable i, j: nat32
+        si no asocia_leída entonces lee_asociaciones() fin
+        programa[0] := 0
+        plantilla[0] := 0
+        i := línea_de(ext)
+        si i = MAX_ASOCIA entonces devolver falso fin
+        i := i + longitud(ext) + 1
+        j := 0
+        mientras asocia[i] <> 0 y asocia[i] <> '|' y asocia[i] <> '\r' y asocia[i] <> '\n' y j < 79 hacer
+            programa[j] := asocia[i]
+            i := i + 1
+            j := j + 1
+        fin
+        programa[j] := 0
+        j := 0
+        si asocia[i] = '|' entonces
+            i := i + 1
+            mientras asocia[i] <> 0 y asocia[i] <> '\r' y asocia[i] <> '\n' y j < 79 hacer
+                plantilla[j] := asocia[i]
+                i := i + 1
+                j := j + 1
+            fin
+        fin
+        plantilla[j] := 0
+        devolver programa[0] <> 0
+    fin
+
+    ; pone (o cambia) la de la extensión y lo guarda. Da 0 o el error
+    público función asociar(ext: puntero a byte, programa: puntero a byte, plantilla: puntero a byte): nat32
+        variable nuevo: arreglo [MAX_ASOCIA] de byte
+        variable i, j, m, n: nat32
+        variable d: arreglo [3] de nat32
+        variable línea: arreglo [200] de byte
+        si no asocia_leída entonces lee_asociaciones() fin
+        i := línea_de(ext)
+        nuevo[0] := 0
+        si i = MAX_ASOCIA entonces
+            copiar(nuevo, asocia)
+        sino
+            ; sin la línea de antes
+            j := i
+            mientras asocia[j] <> 0 y asocia[j] <> '\n' hacer j := j + 1 fin
+            si asocia[j] = '\n' entonces j := j + 1 fin
+            asocia[i] := 0
+            copiar(nuevo, asocia)
+            si longitud(nuevo) + longitud(dirección(asocia[j])) < MAX_ASOCIA entonces concatenar(nuevo, dirección(asocia[j])) fin
+        fin
+        n := longitud(nuevo)
+        si n > 0 y nuevo[n - 1] <> '\n' entonces concatenar(nuevo, "\r\n") fin
+        d[0] := nat32(ext)
+        d[1] := nat32(programa)
+        d[2] := nat32(plantilla)
+        formatear(línea, 200, "%s=%s|%s\r\n", d)
+        si longitud(nuevo) + longitud(línea) < MAX_ASOCIA entonces concatenar(nuevo, línea) fin
+        copiar(asocia, nuevo)
+        m := crear(ruta_asocia)
+        si es_error(m) entonces devolver m fin
+        escribir_archivo(m, asocia, longitud(asocia))
+        cerrar(m)
+        devolver 0
+    fin
+
+    ; abre el archivo «ruta» con ese programa y esa plantilla (%1: el
+    ; archivo). Los programas que vienen de la oficina reciben la ruta sin
+    ; la letra, con la unidad de trabajo ya puesta en la suya (como antes en
+    ; Mi equipo). Da la tarea, o un error
+    público función abre_con(programa: puntero a byte, plantilla: puntero a byte, ruta: puntero a byte): nat32
+        variable args: arreglo [260] de byte
+        variable prog: arreglo [MAX_RUTA] de byte
+        variable sin_letra: puntero a byte
+        variable i: nat32
+        sin_letra := ruta
+        si ruta[1] = ':' entonces
+            unidad(ruta[0])
+            sin_letra := dirección(ruta[2])
+        fin
+        si iguales(programa, "%1") entonces
+            copiar_hasta(prog, sin_letra, MAX_RUTA)
+        sino
+            copiar_hasta(prog, programa, MAX_RUTA)
+        fin
+        args[0] := 0
+        i := 0
+        mientras plantilla[i] <> 0 hacer
+            si plantilla[i] = '%' y plantilla[i + 1] = '1' entonces
+                si longitud(args) + longitud(sin_letra) < 250 entonces concatenar(args, sin_letra) fin
+                i := i + 2
+            sino
+                añadir_car(args, plantilla[i])
+                i := i + 1
+            fin
+        fin
+        si args[0] = 0 entonces devolver lanzar_suelto(prog, nulo) fin
+        devolver lanzar_suelto(prog, args)
+    fin
+
+fin Exoper.

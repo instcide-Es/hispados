@@ -122,6 +122,7 @@ módulo Llamadas
     público constante DATO_ANCHO_PANTALLA = 11  ; el ancho de la pantalla gráfica (0 si no hay)
     público constante DATO_ALTO_PANTALLA = 12
     público constante DATO_ESCRITORIO = 13      ; 1 si el escritorio está en marcha
+    público constante DATO_ALTO_LIBRE = 14      ; (explorador) lo alto de la pantalla sin la barra de tareas ni el dock
 
     público constante SIGUE = 0xFFFFFF00        ; lo que da acabada() si la tarea no ha acabado
 

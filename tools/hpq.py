@@ -93,7 +93,8 @@ SISTEMA = [
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
     ('bloc', VERSION_08, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
     ('consola', VERSION_08, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
-    ('equipo', VERSION_08, 'Mi equipo: las unidades, las carpetas y los archivos', 'base >= 0.7', [('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN')]),
+    ('equipo', '0.9', 'Mi equipo, el explorador de archivos: carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas', 'base >= 0.8.2', [
+        ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('MINIAT.BIN', r'\HISPA\MINIAT.BIN')]),
     ('ejemplos', VERSION_BASE, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.2', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
         ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN'), ('MUESTRA.BIN', r'\HISPA\MUESTRA.BIN')]),

@@ -977,6 +977,8 @@ módulo Ventanas
             ensuciar_ventana(ventanas[i])
             ventanas[i].px := mayor(0, (pantalla.ancho - ventanas[i].ancho) div 2)
             ventanas[i].py := mayor(0, (pantalla.alto - alto_barra - ventanas[i].alto) div 2)
+            ; (dock) que no quede debajo del dock, si cabe encima
+            si ventanas[i].py + ventanas[i].alto > pantalla.alto - alto_barra - alto_dock entonces ventanas[i].py := mayor(0, pantalla.alto - alto_barra - alto_dock - ventanas[i].alto) fin
             ensuciar_ventana(ventanas[i])
         fin
         soltar(cerrojo)

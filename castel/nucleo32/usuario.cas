@@ -127,6 +127,7 @@ módulo Usuario
     público constante DATO_ANCHO_PANTALLA = 11  ; el ancho de la pantalla gráfica (0 si no hay)
     público constante DATO_ALTO_PANTALLA = 12
     público constante DATO_ESCRITORIO = 13      ; 1 si el escritorio está en marcha
+    público constante DATO_ALTO_LIBRE = 14      ; (explorador) lo alto de la pantalla sin la barra de tareas ni el dock
 
     ; la función (sin argumentos; da 1 o 0) que pone en marcha el escritorio:
     ; la pone escritorio.cas, y se la llama por su dirección
@@ -589,6 +590,11 @@ módulo Usuario
                 devolver 0
             caso DATO_ESCRITORIO:
                 si escritorio_en_marcha entonces devolver 1 fin
+                devolver 0
+            caso DATO_ALTO_LIBRE:
+                ; (explorador) lo que queda a lo alto sin la barra de tareas ni el dock
+                si hay_pantalla y escritorio_en_marcha entonces devolver nat32(pantalla.alto - alto_barra - alto_dock) fin
+                si hay_pantalla entonces devolver nat32(pantalla.alto) fin
                 devolver 0
         fin
         devolver NO_VALE

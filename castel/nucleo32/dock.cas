@@ -36,7 +36,7 @@
 ; =============================================================================
 módulo Dock
 
-    importar Tareas, Grafico, Letra, Video, Ventanas, Emergente, Fat, Unidades, Monton, Textos32, Formato, Mem32, Accesos, Iconos
+    importar Tareas, Grafico, Letra, Video, Raton, Ventanas, Emergente, Fat, Unidades, Monton, Textos32, Formato, Mem32, Accesos, Iconos
 
     ; ---- las medidas ----
     constante LADO = 40                         ; el de cada icono
@@ -92,7 +92,7 @@ módulo Dock
     variable unidades_vistas: nat32
     variable papelera_llena: bool
     variable mirada_papelera: nat32             ; el tic en que se miró
-    variable texto: arreglo [2048] de byte
+    variable tini: arreglo [2048] de byte    ; (lo leído de DOCK.INI o de ATAJOS.INI)
     variable renglón: arreglo [260] de byte
 
     ; ---- los accesos del tapiz (ATAJOS.INI) ----
@@ -153,34 +153,34 @@ módulo Dock
         destino[j] := 0
     fin
 
-    ; lee un archivo de ajustes entero a «texto» (falso si no está)
+    ; lee un archivo de ajustes entero a «tini» (falso si no está)
     función lee_ini(nombre: puntero a byte): bool
         variable m, n: nat32
-        texto[0] := 0
+        tini[0] := 0
         si del_sistema = NINGUNA entonces devolver falso fin
         ruta_ini(nombre)
         m := abrir_archivo(del_sistema, renglón, PARA_LEER)
         si m >= PRIMER_ERROR entonces devolver falso fin
-        n := leer_archivo(m, texto, 2047)
+        n := leer_archivo(m, tini, 2047)
         cerrar_archivo(m)
         si n >= PRIMER_ERROR entonces n := 0 fin
-        texto[n] := 0
+        tini[n] := 0
         devolver cierto
     fin
 
-    ; la línea siguiente de «texto» desde la posición p (a renglón): falso al final
+    ; la línea siguiente de «tini» desde la posición p (a renglón): falso al final
     función línea_de(ref p: nat32): bool
         variable j: nat32
-        si texto[p] = 0 entonces devolver falso fin
+        si tini[p] = 0 entonces devolver falso fin
         j := 0
-        mientras texto[p] <> 0 y texto[p] <> '\n' hacer
-            si texto[p] <> '\r' y j < 258 entonces
-                renglón[j] := texto[p]
+        mientras tini[p] <> 0 y tini[p] <> '\n' hacer
+            si tini[p] <> '\r' y j < 258 entonces
+                renglón[j] := tini[p]
                 j := j + 1
             fin
             p := p + 1
         fin
-        si texto[p] = '\n' entonces p := p + 1 fin
+        si tini[p] = '\n' entonces p := p + 1 fin
         renglón[j] := 0
         devolver cierto
     fin
@@ -229,23 +229,23 @@ módulo Dock
         n_fijados := n_el
     fin
 
-    ; escribe «texto» en el archivo de ajustes (falso si no se puede)
+    ; escribe «tini» en el archivo de ajustes (falso si no se puede)
     función escribe_ini(nombre: puntero a byte): bool
         variable m, n: nat32
         si del_sistema = NINGUNA o no escribible(del_sistema) entonces devolver falso fin
         ruta_ini(nombre)
         m := abrir_archivo(del_sistema, renglón, PARA_CREAR)
         si m >= PRIMER_ERROR entonces devolver falso fin
-        n := escribir_archivo(m, texto, longitud(texto))
+        n := escribir_archivo(m, tini, longitud(tini))
         cerrar_archivo(m)
-        devolver n = longitud(texto)
+        devolver n = longitud(tini)
     fin
 
     público función guarda_dock(): bool
         variable i: nat32
         variable d: arreglo [4] de nat32
-        copiar(texto, "; el dock de Hispa-Pentium: programa|argumentos|nombre|icono\r\nvisible=")
-        si visible entonces concatenar(texto, "si\r\n") sino concatenar(texto, "no\r\n") fin
+        copiar(tini, "; el dock de Hispa-Pentium: programa|argumentos|nombre|icono\r\nvisible=")
+        si visible entonces concatenar(tini, "si\r\n") sino concatenar(tini, "no\r\n") fin
         i := 0
         mientras i < n_fijados hacer
             d[0] := nat32(dirección(el[i].programa[0]))
@@ -253,7 +253,7 @@ módulo Dock
             d[2] := nat32(dirección(el[i].nombre[0]))
             d[3] := el[i].clase
             formatear(renglón, 260, "fijado=%s|%s|%s|%u\r\n", d)
-            si longitud(texto) + longitud(renglón) < 2040 entonces concatenar(texto, renglón) fin
+            si longitud(tini) + longitud(renglón) < 2040 entonces concatenar(tini, renglón) fin
             i := i + 1
         fin
         devolver escribe_ini("DOCK.INI")
@@ -284,7 +284,7 @@ módulo Dock
     público función guarda_atajos(): bool
         variable i: nat32
         variable d: arreglo [5] de nat32
-        copiar(texto, "; los accesos del tapiz: ruta|nombre|icono|x|y\r\n")
+        copiar(tini, "; los accesos del tapiz: ruta|nombre|icono|x|y\r\n")
         i := 0
         mientras i < n_atajos hacer
             d[0] := nat32(dirección(atajos[i].ruta[0]))
@@ -293,7 +293,7 @@ módulo Dock
             d[3] := nat32(atajos[i].x)
             d[4] := nat32(atajos[i].ye)
             formatear(renglón, 260, "atajo=%s|%s|%u|%d|%d\r\n", d)
-            si longitud(texto) + longitud(renglón) < 2040 entonces concatenar(texto, renglón) fin
+            si longitud(tini) + longitud(renglón) < 2040 entonces concatenar(tini, renglón) fin
             i := i + 1
         fin
         devolver escribe_ini("ATAJOS.INI")
@@ -368,14 +368,33 @@ módulo Dock
         devolver dirección(t[i])
     fin
 
-    ; ¿es la tarea t la del elemento i? (su programa y, si los lleva, sus argumentos)
-    función es_suyo(i: nat32, t: puntero a Tarea): bool
+    ; ¿es la tarea t la del elemento i? Con «justo», su programa y sus
+    ; argumentos, los mismos; si no, su programa (un elemento sin argumentos:
+    ; el Bloc de notas con un documento abierto sigue siendo el Bloc)
+    función es_suyo(i: nat32, t: puntero a Tarea, justo: bool): bool
+        variable sin: bool
         si el[i].programa[0] = '*' entonces devolver falso fin
         si no iguales_sin_caja(base(dirección(el[i].programa[0])), t.nombre) entonces devolver falso fin
-        si el[i].argumentos[0] = 0 entonces
-            devolver t.args = nulo o valor(t.args) = 0
+        sin := t.args = nulo o valor(t.args) = 0
+        si el[i].argumentos[0] = 0 entonces devolver sin o no justo fin
+        devolver no sin y iguales_sin_caja(t.args, dirección(el[i].argumentos[0]))
+    fin
+
+    ; el elemento de la tarea t (primero, uno justo; si no, uno de su programa), o -1
+    función elemento_de(t: puntero a Tarea, dueño: nat32): ent32
+        variable k: nat32
+        k := 0
+        mientras k < n_el hacer
+            si es_suyo(k, t, cierto) entonces devolver ent32(k) fin
+            si k >= n_fijados y el[k].ventana <> 0 y marcas_de(el[k].ventana) <> 0xFFFFFFFF y tarea_de_ventana(el[k].ventana) = dueño entonces devolver ent32(k) fin
+            k := k + 1
         fin
-        devolver t.args <> nulo y iguales_sin_caja(t.args, dirección(el[i].argumentos[0]))
+        k := 0
+        mientras k < n_fijados hacer
+            si es_suyo(k, t, falso) entonces devolver ent32(k) fin
+            k := k + 1
+        fin
+        devolver -1
     fin
 
     ; mira las ventanas: qué elementos están abiertos, y los abiertos sin fijar
@@ -383,6 +402,7 @@ módulo Dock
         variable i, k: nat32
         variable t: puntero a Tarea
         variable hallado: bool
+        variable e: ent32
         variable antes: arreglo [MAX_ELEMENTOS] de nat32
         variable n_antes: nat32
         variable cambia: bool
@@ -404,14 +424,12 @@ módulo Dock
                 t := tarea_de(ventanas[i].dueño)
                 si t <> nulo entonces
                     hallado := falso
-                    k := 0
-                    mientras k < n_el y no hallado hacer
-                        si es_suyo(k, t) o (k >= n_fijados y el[k].ventana <> 0 y marcas_de(el[k].ventana) <> 0xFFFFFFFF y tarea_de_ventana(el[k].ventana) = ventanas[i].dueño) entonces
-                            hallado := cierto
-                            si el[k].ventana = 0 o ent32(i) = activa entonces el[k].ventana := ventanas[i].id fin
-                            si ent32(i) = activa entonces el[k].activa := cierto fin
-                        fin
-                        k := k + 1
+                    e := elemento_de(t, ventanas[i].dueño)
+                    si e >= 0 entonces
+                        k := nat32(e)
+                        hallado := cierto
+                        si el[k].ventana = 0 o ent32(i) = activa entonces el[k].ventana := ventanas[i].id fin
+                        si ent32(i) = activa entonces el[k].activa := cierto fin
                     fin
                     si no hallado y n_el < MAX_ELEMENTOS entonces
                         ; abierto sin estar fijado: detrás, con el nombre de su ventana

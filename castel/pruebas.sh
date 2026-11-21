@@ -1316,7 +1316,7 @@ else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | se
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":doble 60 186" ":pausa 4" ":doble 150 140" ":raton 400 300" ":captura b1" ":tecla ctrl-c" \
   ":clicd 300 75" ":captura b2" ":clic 320 164" ":pausa 1" ":captura b3" ":clicd 180 585" ":captura b4" ":clic 200 445" ":pausa 1" ":captura b5" ":arrastra 743 523 643 423" \
   ":pausa 1" ":captura b6" ":clic 40 585" ":clic 80 293" ":pausa 2" ":tecla ctrl-v" ":captura b7" ":clicd 300 75" ":clic 320 197" ":pausa 1" ":captura b8" ":doble 60 40" ":pausa 2" \
-  ":captura b9" ":doble 250 230" ":pausa 1" ":captura b10" ":doble 250 348" ":pausa 2" ":captura b11" ":clicd 700 300" ":clic 650 398" ":pausa 1" ":captura b12" > $G/menus2.sal 2>&1
+  ":captura b9" ":doble 330 160" ":pausa 1" ":captura b10" ":doble 452 310" ":pausa 2" ":captura b11" ":clicd 150 540" ":clic 200 523" ":pausa 1" ":captura b12" > $G/menus2.sal 2>&1
 S=$G/menus2.sal
 mira "dos clics en el icono «Consola» la abren" "escritorio: lanzo .CONSOLA.BIN (la tarea [0-9]*)"
 miracap "en la Consola, dos clics seleccionan una palabra de lo que hay en la pantalla" b1 rgb 97 133 $RES rgb 206 146 $RES nrgb 213 133 $RES texto 92 128 100 136 "Hispa-Pentium:"
@@ -1330,10 +1330,9 @@ miracap "la Consola también cambia de tamaño por la esquina (su pantalla sigue
 miracap "lo copiado en la Consola (Ctrl+C con algo seleccionado) se pega en el Bloc de notas" b7 texto 122 172 130 180 "Hispa-Pentium:"
 miracap "«Cerrar», en el menú de la ventana, la cierra: ni ventana ni botón en la barra" b8 notexto 100 60 200 80 Consola notexto 120 570 300 582 Consola \
   negrita 140 90 152 98 "NOTAS.TXT - Bloc de notas"
-miracap "dos clics en «Mi equipo»: las unidades (C:, el disco FAT16, con lo que mide)" b9 negrita 168 116 180 124 "Mi equipo" negrita 154 167 162 175 "Las unidades de este equipo" \
-  negrita 220 204 228 212 "Unidad C:" texto 220 222 228 230 "disco duro, FAT16"
-miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 178 167 186 175 "C:\\" texto 180 336 188 344 LEEME.TXT texto 180 396 188 404 TEXTOS \
-  texto 180 196 188 204 ".."
+miracap "dos clics en «Mi equipo»: el explorador, con la unidad C: (el disco FAT16) en su mosaico y lo que tiene libre" b9 negrita 30 10 40 20 "Mi equipo" \
+  negrita 265 133 275 143 "HISPA (C:)" texto 313 151 323 161 "libres de"
+miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 30 10 40 20 "C:\\" texto 412 322 422 332 LEEME.TXT texto 424 166 434 176 TEXTOS
 miracap "y dos clics en un texto lo abren con el Bloc de notas" b11 negrita 198 142 206 150 "\\LEEME.TXT - Bloc de notas" \
   texto 178 224 186 232 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
 miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.8" \
@@ -1353,6 +1352,90 @@ miracap "«Organizar iconos» los devuelve a su sitio" c3 texto 32 202 40 210 Co
 miracap "Configuración dice la medida de la pantalla" c4 texto 302 225 310 233 "Pantalla:  1024 x 600, 32 bits por punto"
 miracap "«Mover», en el menú de una ventana: la flecha va a su título y la ventana la sigue hasta el clic siguiente" c5 negrita 348 185 356 193 "Configuración" \
   notexto 300 120 330 140 "Configuración"
+# (explorador, 21/11) el explorador de archivos (EQUIPO.BIN: el árbol, las
+# vistas, las miniaturas con MINIAT.BIN, copiar y pegar, cambiar el nombre,
+# carpeta nueva, la Papelera, el menú del botón secundario, elegir varios,
+# buscar) y el dock (soltar en el tapiz y en el dock, el punto de los
+# abiertos, su menú, ocultarlo); el disco lo miran luego mtools y fsck.fat
+echo "== Hispa-Pentium: el explorador de archivos y el dock =="
+cp $P/d16.img $G/ex.img
+export MTOOLS_SKIP_CHECK=1
+mmd -i $G/ex.img ::FOTOS
+python3 - $G <<'PY'
+import struct, sys, zlib, base64
+g = sys.argv[1]
+def png(w, h, f):
+    raw = b''.join(b'\0' + b''.join(bytes(f(x, y)) for x in range(w)) for y in range(h))
+    ch = lambda t, d: struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d))
+    return b'\x89PNG\r\n\x1a\n' + ch(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) + ch(b'IDAT', zlib.compress(raw)) + ch(b'IEND', b'')
+open(g + '/FLOR.PNG', 'wb').write(png(160, 120, lambda x, y: (255, 122, 51) if (x - 80) ** 2 + (y - 60) ** 2 < 35 ** 2 else (47, 116, 208)))
+w, h = 64, 96
+filas = b''.join(bytes((255, 255, 255) if 10 <= x < 54 and 56 <= y < 86 else (0x4A, 0x29, 0x14)) * 1 for y in range(h) for x in range(w))
+bmp = b'BM' + struct.pack('<IHHI', 54 + len(filas), 0, 0, 54) + struct.pack('<IiiHHIIiiII', 40, w, h, 1, 24, 0, len(filas), 2835, 2835, 0, 0) + filas
+open(g + '/CASA.BMP', 'wb').write(bmp)
+open(g + '/PAISAJE.JPG', 'wb').write(base64.b64decode('/9j/4AAQSkZJRgABAQAAAAAAAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAgADADASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAYH/8QAFhAAAwAAAAAAAAAAAAAAAAAAABRh/8QAFwEBAQEBAAAAAAAAAAAAAAAAAAYFB//EABcRAQEBAQAAAAAAAAAAAAAAAAATFGH/2gAMAwEAAhEDEQA/ANQfofpKP0P04rgWkVW/Q/SUfofowEVW/Q/SUfofowEUo/Q/SUfofpa4ONWKrfofpKP0P0YOEVW/Q/SUfofowcIv/9k='))
+PY
+mcopy -i $G/ex.img $G/CASA.BMP $G/FLOR.PNG $G/PAISAJE.JPG ::FOTOS/
+miniat=no
+if bash $AQUI/nucleo32/miniat/hacer.sh $G/MINIAT.BIN > $G/miniat.txt 2>&1; then mcopy -i $G/ex.img $G/MINIAT.BIN ::; miniat=si; fi
+SES=(":pausa 2" ":captura ex1" ":doble 60 40" ":pausa 3" ":captura ex2" ":doble 330 160" ":pausa 2" ":raton 600 440" ":captura ex3"
+ ":tecla alt-v" ":tecla down down down down ret" ":pausa 1" ":captura ex4"
+ ":tecla ret" ":pausa 1" ":tecla alt-v" ":tecla down ret" ":pausa 6" ":captura ex5"
+ ":tecla alt-v" ":tecla down down ret" ":tecla backspace" ":pausa 1"
+ ":clic 452 310" ":tecla ctrl-c" ":doble 548 155" ":pausa 1" ":tecla ctrl-v" ":pausa 2" ":raton 600 440" ":captura ex6"
+ ":clic 260 160" ":tecla f2" ":pausa 1" ":captura ex7" ":escribe NUEVO.TXT" ":tecla ret" ":pausa 1" ":tecla f7" ":pausa 1" ":captura ex8"
+ ":tecla ret" ":pausa 1" ":raton 600 440" ":captura ex9" ":clic 260 160" ":tecla delete" ":pausa 2" ":raton 600 440" ":captura ex10"
+ ":clic 84 260" ":pausa 2" ":raton 600 440" ":captura ex11" ":clic 260 160" ":tecla alt-h" ":tecla down down ret" ":pausa 2" ":captura ex12"
+ ":tecla f4" ":escribe C:\\" ":tecla ret" ":pausa 1" ":clicd 452 310" ":pausa 1" ":captura ex13" ":tecla esc"
+ ":clic 260 260" ":ctrlclic 356 260" ":pausa 1" ":captura ex14" ":arrastra 600 455 380 290" ":pausa 1" ":captura ex15"
+ ":clic 452 310" ":arrastra 452 310 120 540" ":pausa 2" ":clic 260 410" ":arrastra 260 410 400 535" ":pausa 2" ":captura ex16"
+ ":tecla f3" ":escribe pir" ":tecla ret" ":pausa 3" ":captura ex17" ":doble 100 525" ":pausa 3" ":captura ex18"
+ ":clicd 320 530" ":pausa 1" ":captura ex19" ":clic 380 513" ":pausa 1" ":captura ex20")
+CAPTURAS=$G ESCRIBE=1 DISCO=$G/ex.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" "${SES[@]}" > $G/explorador.sal 2>&1
+S=$G/explorador.sal
+miracap "el dock: centrado abajo, encima de la barra de tareas, con el borde del panel" ex1 rgb 400 504 0F3F8A 20 negrita 30 570 46 580 Inicio
+miracap "«Mi equipo» es el explorador: el árbol (Mi equipo), la unidad C: en su mosaico, con lo libre, y la Papelera" ex2 negrita 30 10 40 20 "Mi equipo" \
+  negrita 265 133 275 143 "HISPA (C:)" negrita 515 133 525 143 Papelera texto 313 151 323 161 "libres de" texto 48 127 58 137 "Mi equipo"
+miracap "dos clics en la unidad: sus carpetas y sus archivos, en iconos, y lo libre en la barra de estado" ex3 texto 236 166 246 176 FOTOS \
+  texto 412 322 422 332 LEEME.TXT texto 687 475 697 485 "Libre:"
+miracap "la vista de detalles: la rejilla de los controles, con su nombre, su tamaño, su tipo y su fecha (las carpetas, delante)" ex4 \
+  negrita 221 127 231 137 Nombre negrita 629 127 639 137 Modificado texto 477 177 487 187 Carpeta texto 477 249 487 259 Programa
+if [ $miniat = si ]; then
+  miracap "las miniaturas (MINIAT.BIN, con stb_image): un BMP, un PNG y un JPG en pequeño, con su nombre" ex5 texto 344 204 354 214 FLOR.PNG \
+    texto 444 204 454 214 PAISAJE.JPG rgb 381 170 FF7A33 24 rgb 270 150 FFFFFF 10 nrgb 493 170 FFFFFF 30
+else ko "no se ha podido hacer MINIAT.BIN (¿gcc con -m32?): $(tail -1 $G/miniat.txt)"; fi
+miracap "copiar (Ctrl+C) en una carpeta y pegar (Ctrl+V) en otra: el archivo, y «Hecho» en la barra de estado" ex6 texto 220 166 230 176 LEEME.TXT \
+  texto 159 475 169 485 "copiados 1"
+miracap "F2: el cuadro para cambiar el nombre, con el que tiene" ex7 negrita 187 170 197 180 Cambiar texto 194 225 204 235 LEEME.TXT texto 191 253 201 263 "Hasta 8 letras"
+miracap "F7: la carpeta nueva, con su nombre (CARPETA)" ex8 texto 194 225 204 235 CARPETA
+miracap "el nombre cambiado y la carpeta nueva, en la carpeta" ex9 texto 228 166 238 176 CARPETA texto 316 166 326 176 NUEVO.TXT
+miracap "Supr manda lo elegido a la Papelera (y lo dice)" ex10 texto 220 166 230 176 NUEVO.TXT notexto 210 160 400 180 CARPETA texto 207 475 217 485 Papelera
+miracap "la Papelera, en el árbol: lo que se ha tirado" ex11 negrita 30 10 40 20 Papelera texto 228 166 238 176 CARPETA
+miracap "Herramientas > Restaurar lo elegido: lo devuelve a su sitio, y la Papelera queda vacía" ex12 texto 217 135 227 145 "La Papelera est"
+miracap "el botón secundario en un archivo: Abrir, Abrir con..., Mandar a la Papelera, Propiedades..." ex13 texto 461 338 471 348 "Abrir con..." \
+  texto 461 452 471 462 "Mandar a la Papelera" texto 461 509 471 519 Propiedades
+miracap "Control y un clic eligen dos" ex14 texto 111 475 121 485 "2 elegidos"
+miracap "y un recuadro con el ratón, los que toca" ex15 texto 111 475 121 485 "7 elegidos"
+mira "arrastrar un archivo al tapiz deja en él un acceso" "^escritorio: un acceso nuevo en el tapiz: C:.LEEME.TXT"
+miracap "el acceso en el tapiz (con su flechita), y un programa soltado en el dock queda fijado" ex16 texto 79 541 89 551 LEEME.TXT texto 615 529 625 539 "Fijado en el dock."
+miracap "buscar (F3) «pir» en la carpeta y las de dentro: lo encontrado, con su carpeta" ex17 negrita 236 172 256 192 PIRATA.TXT texto 373 177 383 187 "C:\\TEXTOS" \
+  texto 103 475 113 485 "Encontrados: 2."
+miracap "dos clics en el acceso del tapiz lo abren con lo suyo (EQUIPO /ABRIR: el Bloc de notas)" ex18 negrita 149 89 159 99 "LEEME.TXT"
+miracap "el botón secundario en el dock: Abrir, Abrir otra ventana, Fijar, Quitar, Cerrar y Ocultar el dock" ex19 texto 329 501 339 511 "Ocultar el dock"
+miracap "«Ocultar el dock» lo quita (y lo de debajo se ve)" ex20 nrgb 400 504 0F3F8A 20
+saca $G/ex.img VACIA/NUEVO.TXT $G/nuevo.txt; saca $G/ex.img LEEME.TXT $G/leeme.txt
+if cmp -s $G/nuevo.txt $G/leeme.txt && mdir -i $G/ex.img ::VACIA/CARPETA > /dev/null 2>&1; then ok "en el disco: la copia, con su nombre nuevo, igual que el original, y la carpeta restaurada en su sitio"
+else ko "en el disco no está lo que se ha hecho en el explorador:"; mdir -i $G/ex.img ::VACIA 2>&1 | head -6 | sed 's/^/        /'; fi
+saca $G/ex.img PAPELERA/INDICE.TXT $G/indice.txt
+if [ -f $G/indice.txt ] && [ ! -s $G/indice.txt ] && mattrib -i $G/ex.img ::PAPELERA 2>/dev/null | grep -q "H"; then ok "la Papelera (\\PAPELERA, oculta) queda con su índice vacío"
+else ko "la Papelera no ha quedado bien: $(cat $G/indice.txt 2>/dev/null | head -2)"; fi
+saca $G/ex.img ATAJOS.INI $G/atajos.ini; saca $G/ex.img DOCK.INI $G/dock.ini
+if grep -q "^atajo=C:.LEEME.TXT|LEEME.TXT|" $G/atajos.ini 2>/dev/null && grep -q "^fijado=.MINIAT.BIN||MINIAT.BIN|" $G/dock.ini 2>/dev/null && grep -q "^visible=no" $G/dock.ini; then
+  ok "ATAJOS.INI guarda el acceso del tapiz, y DOCK.INI el programa fijado y que está oculto"
+else ko "ATAJOS.INI o DOCK.INI no guardan lo que tocaba:"; cat $G/atajos.ini $G/dock.ini 2>&1 | head -12 | sed 's/^/        /'; fi
+if sano $G/ex.img; then ok "y el disco, sano (fsck.fat)"; else ko "el disco ha quedado mal:"; sed 's/^/        /' $P/fsck.txt | head -5; fi
+if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
 # la orden ESCRITORIO del intérprete, y abrir un documento desde el menú
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" escritorio ":pausa 2" ":clic 40 585" ":clic 240 291" ":pausa 2" \
   ":captura o1" ":clic 40 585" ":clic 230 545" ":clic 533 327" ":captura o2" > $G/orden.sal 2>&1
