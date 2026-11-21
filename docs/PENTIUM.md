@@ -3637,8 +3637,8 @@ las DLL de Hispa-486 sin CMOV ni FCOMI (`-march=i586` / `i486`).
 `navega-fijo` y `pentium-edid` juntas): el catálogo firmado con base, red y ejemplos 0.8.4,
 equipo 0.9 (el explorador, `MINIAT.BIN` y `DISPOSIT.BIN`; pide base >= 0.8.4),
 ssh, tailscal 0.8.4 y win32 1.0 (nuevos), navega 0.2 y clicgest 0.2.2 tal como
-están publicados, y los demás iguales octeto a octeto a lo publicado (bloc,
-consola, hvprun, oficina, paquetes, tls). Probado en QEMU (`q35`) desde un
+están publicados, paquetes 1.1 y tls 0.8.4 (la revisión de seguridad), y los
+demás iguales octeto a octeto a lo publicado (bloc, consola, hvprun, oficina). Probado en QEMU (`q35`) desde un
 sistema instalado con el CD de la 0.8.3 y lo publicado de la 0.8.3 (navega
 0.1, clicgest 0.2.1), con el catálogo por HTTP: la firma, buena; `PAQUETES
 ACTUALIZA` pone base, ejemplos, equipo, red, navega y clicgest; `PAQUETES
