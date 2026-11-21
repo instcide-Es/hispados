@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -63,6 +63,7 @@ módulo Semilla
         imprimir1(" en 0x%08X", eip)
         si cs_ yb 3 = 3 entonces
             escribir(", en el anillo 3\n")
+            sonar(SS_ERROR)                     ; (SONIDO) el sonido de error (con el escritorio)
             matar_actual()
         fin
         escribir(". El núcleo se para.\n")
@@ -762,6 +763,8 @@ módulo Semilla
         ; la red (el servicio de red, RED.BIN: red.cas): con «sinred», nunca;
         ; con «conred», ya; con el escritorio, ya si hay una tarjeta de red
         ; (por el icono de la bandeja); si no, cuando un programa la pida
+        ; (SONIDO) con «sinsonido», el servicio de sonido no se pone nunca
+        si buscar(línea_del_cargador(), "sinsonido") <> nulo entonces sin_sonido := cierto fin
         si buscar(línea_del_cargador(), "sinred") <> nulo entonces
             apagada := cierto
         sino si buscar(línea_del_cargador(), "conred") <> nulo entonces

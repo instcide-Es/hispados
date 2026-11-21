@@ -732,7 +732,33 @@ API(BOOL) IsBadWritePtr(void *p, u32 n) { return p == 0 && n; }
 API(BOOL) IsBadCodePtr(void *p) { return p == 0; }
 API(BOOL) IsBadStringPtrA(const char *p, u32 n) { return p == 0 && n; }
 API(void) SetHandleCount(u32 n) { (void)n; }
-API(BOOL) Beep(u32 f, u32 d) { (void)f; sys_dormir(d / 10); return TRUE; }
+/* (SONIDO) Beep: un tono de verdad (cuadrado, suave), por un canal propio; sin
+ * tarjeta, solo el tiempo */
+API(BOOL) Beep(u32 f, u32 d)
+{
+	static i16 b[2 * 960];
+	u32 c, hechas = 0, total, fase = 0, paso, k;
+	if (f < 37 || f > 32767 || d > 60000)
+		return FALSE;
+	c = sc(190, 48000, 2 | 16 << 8, 0);
+	if (ES_ERROR(c) || c > 64) {
+		sys_dormir(d / 10);
+		return TRUE;
+	}
+	total = 48 * d;
+	paso = f * 89478u + f * 485u / 1000u;     /* (2^32 / 48.000 por hercio) */
+	while (hechas < total) {
+		u32 n = total - hechas > 960 ? 960 : total - hechas;
+		for (k = 0; k < n; k++, fase += paso)
+			b[2 * k] = b[2 * k + 1] = (fase & 0x80000000u) ? -6000 : 6000;
+		if (sc(191, c, LIN(b), n * 4) != n * 4)
+			break;
+		hechas += n;
+	}
+	sc(192, c, 5, 0);
+	sc(192, c, 0, 0);
+	return TRUE;
+}
 API(void) InitializeSListHead(void *p) { memset(p, 0, 8); }
 API(u32) GetTickCount(void) { return tics_ms(); }
 API(u64) GetTickCount64(void) { return tics_ms(); }

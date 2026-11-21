@@ -239,6 +239,7 @@ cuarta parte, los discos y el USB).
 
 | `energia.cas` (Energia) | **Apagar de verdad, reiniciar y la batería**: las llamadas del servicio de ACPI (`ACPI.BIN`, un programa del anillo 3 con ACPICA) y la 154; apagar por ACPI (S5) y reiniciar (FADT, 8042, CF9h); la pila de la bandeja y su recuadro de ayuda (sección 11). |
 | `dispositivos.cas` (Dispositivos) | **Lo que hay en el equipo y qué lo lleva** (desde la 0.8.3): las llamadas 155 (la lista, de solo lectura) y 156 (lo que apuntan los servicios del anillo 3), para el Administrador de dispositivos (sección 10). |
+| `sonido.cas` (Sonido) | (SONIDO) **El sonido**, lo que pone el núcleo (sección 14 decies): los canales de los programas (sus colas), el volumen general, el silencio, los sonidos del sistema y las órdenes para el servicio de sonido (`SONIDO.BIN`); las llamadas 190 a 199. |
 | `win32.cas` (Win32) | [WIN32] **Lo de los programas de Windows** (sección 14 quater): las llamadas 180 a 182 (páginas en cualquier sitio de la zona del programa, el mapa de las teclas, las ventanas sin marco o a pantalla completa). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
 
@@ -266,6 +267,7 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `redes.cas` (Redes) | — | La **red para los programas** (sección 14): `estado_red`, `resolver`, `ping`, `conectar`, `enviar`, `recibir`, los puertos UDP... |
 | `ured.cas` con `rbase.cas`, `rtarjeta.cas`, `ryukon.cas`, `rpila.cas` y `rtcp.cas` | `RED.BIN` | El **servicio de red**: las tarjetas y la pila TCP/IP (sección 14). |
 | `tls/tls.c` con BearSSL (en C: `tls/hacer.sh`) | `TLS.BIN` | El **servicio TLS**: las conexiones cifradas, HTTPS (sección 14). |
+| `sonido/*.c` (en C: `sonido/hacer.sh`) | `SONIDO.BIN` | (SONIDO) El **servicio de sonido** (HD Audio, AC'97 y Sound Blaster 16; la mezcla; los sonidos del sistema) y la orden **SONIDO** (sección 14 decies). |
 | `uhttps.cas` (con `biblioteca32/https.cas`) | `HTTPS.BIN` | La orden **HTTPS**: pedir direcciones con la biblioteca `Https` (sección 14). |
 | `uipconf.cas`, `uping.cas`, `udescarg.cas` | `IPCONFIG.BIN`, `PING.BIN`, `DESCARGA.BIN` | **IPCONFIG**, **PING** y **DESCARGAR** (sección 14). |
 | `ubucle.cas` | `BUCLE.BIN` | El que no acaba nunca (da vueltas, duerme, espera teclas o escribe sin parar): para probar **Ctrl+C**. |
@@ -461,6 +463,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 80 | **colocar la ventana** EBX (suya) con su esquina en (ECX, EDX) de la pantalla; con ECX = 0xFFFFFFFF, en el centro (encima de la barra de tareas). La usa HVPRUN (sección 10, «La oficina de Hispa-386») | — | 0 |
 | 90-98 | **la red**: pedir al servicio de red (90) y lo del propio servicio (91 a 96, 98); cómo está (97). Las cuenta la sección 14 | `redes.cas` | |
 
+| 190-199 | (SONIDO) **el sonido**: abrir un canal (190), darle muestras (191), el canal (192), el volumen y lo de todos (193), tocar un .WAV (194); y lo del servicio de sonido (195 a 199). Las cuenta la sección 14 decies | `abrir_canal`, `dar_muestras`, `orden_canal`, `tocar_wav`, `volumen_general`, `sonar` | |
 | 180-182 | [WIN32] **los programas de Windows** (`WIN32.BIN`, sección 14 ter): poner y quitar páginas en cualquier sitio de la zona del programa (180), las teclas pulsadas ahora y desde la última vez (181), y las ventanas: hacerlas sin marco o a pantalla completa, colocarlas, traerlas delante, dónde están, el ratón (182) | — | |
 
 | 150-153 | **solo el servicio de ACPI** (`ACPI.BIN`): puertos, memoria física, configuración PCI, y dar la batería y esperar órdenes (sección 11, «Apagar de verdad y la batería») | — | |
@@ -4326,8 +4329,8 @@ KERNEL32, USER32, GDI32, COMDLG32, ADVAPI32, SHELL32 y WSOCK32, con las DLL de
 Hispa-486 que valen tal cual (MSVCRT, UCRT, COMCTL32 y DirectX: DDRAW, DSOUND,
 DINPUT, WINMM, OLE32) en `\WIN32`. Corren NASM, TCC, FASM y FASMW, los ejemplos
 de `\HISPA32` (CALC32, HOLA32, CTL32, MENU32, AVISO32) y **«Naves»**, que se
-juega a pantalla completa con DirectDraw y DirectInput (DirectSound, en silencio
-hasta que haya sonido); y Winsock sobre el servicio de red.
+juega a pantalla completa con DirectDraw y DirectInput (y DirectSound, que suena
+desde el 21/11: sección 14 decies); y Winsock sobre el servicio de red.
 
 - **Cómo**: los programas de Windows corren con sus propios segmentos del anillo
   3, de base `0x40000000` (`cpu.cas`: `0x33`, `0x3B` y la TEB en `0x43`), así que
@@ -5150,6 +5153,262 @@ con su icono). Sin tocar el núcleo.*
   `--tipo herramientas`; el menú de la 0.8.5 los pone en Accesorios por el
   `tipo=Accesorios` de su `.MNU`).
 - **Las pruebas**: `SOLO=accesorios ./pruebas.sh`, la parte 28.
+
+## 14 decies. El sonido (SONIDO.BIN, rama pentium-sonido)
+
+*21/11/2026, la rama `pentium-sonido` (sobre `pentium-084`). Carlos: «Vamos a
+darle caña con todo». Lo que suena en Hispa-DOS y en Hispa-486 (HSPSND, el
+Mezclador), en Hispa-Pentium. Lo cambiado fuera de lo nuevo lleva la marca
+`(SONIDO)`.*
+
+Hispa-Pentium **suena**: HD Audio (casi todos los portátiles: el IDT del HP
+Mini 5103, el Realtek del Toshiba NB250, el Cirrus de los Mac, el STAC9221 de
+VirtualBox, el códec de QEMU), AC'97 (las ICH de Intel y las compatibles —el
+AD1980 de VirtualBox, el STAC9700 de QEMU—, la SiS 7012 y la VIA VT8233/35/37)
+y la Sound Blaster 16 (la de QEMU, VirtualBox, Bochs y DOSBox). Salida estéreo
+de 16 bits a 48 kHz (44,1 kHz con la Sound Blaster), con **varios programas a
+la vez**, el **volumen general y el de cada programa**, el **silencio**, los
+**auriculares** (con algo enchufado, los altavoces se callan) y los **sonidos
+del sistema** (inicio, apagar, aviso y error, que se pueden quitar). En el
+escritorio, **el altavoz de la bandeja** (la rueda del ratón encima sube y
+baja el volumen; un clic, la ventanita; el botón secundario, «Silenciar» y la
+configuración) y **Configuración > Sonido** (la tarjeta, el códec, la salida,
+el volumen, probar el altavoz izquierdo y el derecho, los sonidos del sistema
+y el volumen de cada programa que suena). **DirectSound y WinMM** de
+WIN32.BIN suenan de verdad, y **HVPRUN** pasa el sonido de los programas de
+Hispa Ventanas (Hispa-Snes, el Reproductor) a la tarjeta.
+
+### Cómo está repartido: un servicio del anillo 3, y por qué
+
+Como la red (`RED.BIN`) y ACPI (`ACPI.BIN`): la tarjeta, la mezcla y los
+sonidos del sistema son de un programa del anillo 3, **el servicio de sonido
+(`SONIDO.BIN`, `castel/nucleo32/sonido/`, en C)**, con el código de HSPSND
+pasado a C (`hda.c`, `ac97.c`, `sb16.c`). En el núcleo solo queda
+**`sonido.cas`** (unas 650 líneas): las colas de los programas, el volumen,
+las órdenes para el servicio y lo que solo el servicio puede tener.
+
+**No hace falta ni la interrupción de la tarjeta ni un módulo del núcleo con
+ella**: el servicio mira en cada tic (100 por segundo) por dónde va la DMA
+(`LPIB` en HD Audio; `CIV` y `PICB` en AC'97; el contador del canal 5 del
+8237 con la Sound Blaster) y mezcla por delante hasta 80 ms, con 120 ms de
+silencio detrás de lo mezclado: si el servicio se retrasa (otra tarea con el
+procesador), suena silencio, nunca lo de la vuelta anterior. Así no hay que
+compartir la línea de la interrupción (en los portátiles, la del HD Audio
+suele ser de varios aparatos), el núcleo no crece (CASTEL va justo de tablas
+con él) y un fallo de un controlador acaba con el servicio, no con el sistema.
+
+```
+  programas (Castel: llamadas.cas; C: sonido.h; WIN32.BIN; HVPRUN)
+        │  190 abrir un canal · 191 dar muestras (espera si su cola de 64 K
+        │  está llena) · 192 el canal · 193 el volumen y lo de todos · 194 un .WAV
+        ▼
+  el núcleo (sonido.cas): los canales, el volumen general, el silencio,
+  los sonidos del sistema sí o no, las órdenes; la bandeja y Configuración
+        │  198 el intercambio (cada tic, o cuando lo despiertan) · 199 sacar
+        ▼  muestras de un canal · 195 apuntarse (IOPL 3) · 196 DMA · 197 registros
+  SONIDO.BIN (anillo 3)
+     servicio.c  el bucle, las órdenes, SONIDO.INI, los sonidos del sistema;
+                 y la orden SONIDO
+     mezcla.c    las voces (los canales, los .WAV, los tonos): cada una a 48 kHz
+                 (interpolación lineal), con su volumen y el general, sumadas
+     hda.c       HD Audio: el códec, sus caminos, EAPD, GPIO, Cirrus, VT-d
+     ac97.c      AC'97: Intel y compatibles, SiS 7012, VIA VT8233
+     sb16.c      la Sound Blaster 16 (DMA de 16 bits por debajo de los 16 MB)
+     ventana.c   Configuración > Sonido y la ventanita de la bandeja
+        │  la DMA sobre un anillo de 64 K
+        ▼
+  la tarjeta
+```
+
+### Las llamadas
+
+| EAX | Quién | Qué | Devuelve |
+|---|---|---|---|
+| 190 | un programa | **abrir un canal**: EBX, la frecuencia (de 4.000 a 96.000 Hz); ECX, los canales (1 o 2) y, en los bits 8-15, los bits (8 sin signo o 16 con signo). Si no hay servicio, el núcleo lo pone en marcha (una vez) y espera a que diga su tarjeta | el canal (1 a 8), o `NO_HAY` (no hay tarjeta de sonido) |
+| 191 | un programa | **dar muestras** al canal EBX (con el bit 31, sin esperar): ECX, los datos; EDX, los octetos. Si su cola (64 K) está llena, espera de tic en tic a que el servicio la vacíe | los que han entrado |
+| 192 | un programa | **el canal** EBX: ECX, la orden: 0 cerrar, 1 volumen (EDX, de 0 a 100), 2 pausa (EDX 1 o 0), 3 vaciar la cola, 4 cuánto hay en la cola, 5 esperar a que se vacíe, 6 los octetos sacados desde que se abrió, 7 cerrarlo cuando se acabe la cola. Con el número de una voz de la 194, 0 la para | lo pedido |
+| 193 | cualquiera | **lo de todos**: EBX, la orden: 0 el estado (un `Estado_sonido` a ECX: la tarjeta, el códec, la salida, los auriculares, la frecuencia, el volumen...); 1 el volumen general (EDX; `0xFFFFFFFF`: solo preguntar); 2 el silencio (EDX 0, 1, o 2: cambiarlo); 3 un sonido del sistema (EDX: 0 inicio, 1 apagar, 2 aviso, 3 error, 4 el «clic» del volumen); 4 probar un altavoz (EDX: 1 izquierdo, 2 derecho, 3 los dos); 5 los sonidos del sistema sí o no (EDX: 2 preguntar); 6 subir o bajar el volumen (EDX, con signo); 7 el volumen del canal ECX (EDX); 8 los canales (8 `Info_canal` a ECX: de quién, su forma, su volumen, lo que tiene en cola) | lo pedido (la 0: 1 si hay tarjeta) |
+| 194 | un programa | **tocar un .WAV** (PCM de 8 o 16 bits, mono o estéreo) de nombre EBX: lo abre y lo toca el servicio, sin que el programa espere (y sigue aunque el programa acabe) | el número de su voz (`0x100` en adelante) |
+| 195 | el servicio | apuntarse (solo `SONIDO.BIN`): IOPL 3, para los puertos | 0, o `EN_USO` |
+| 196 | el servicio | EBX páginas seguidas de memoria física (hasta 16), a su vista desde `0xA0000000`; la dirección física, a ECX; con EDX = 1, por debajo de los 16 MB y sin cruzar 64 K (la DMA ISA: `reservar_seguidos_bajo` de `marcos.cas`) | dónde se ven |
+| 197 | el servicio | los registros de la tarjeta (EBX la dirección física, ECX los octetos), sin caché | dónde se ven |
+| 198 | el servicio | **el intercambio**: EBX, su `Estado_sonido` (0: nada nuevo); ECX, adónde va un `Para_servicio` (el volumen, el silencio, los sonidos del sistema, los 8 canales y las órdenes pendientes: un sonido del sistema, probar un altavoz, un .WAV, parar una voz, una tarea que ha acabado, callar para apagar); EDX, cuántos tics esperar si no hay nada (una orden o muestras nuevas lo despiertan antes) | cuántas órdenes |
+| 199 | el servicio | sacar de la cola del canal EBX hasta EDX octetos, a ECX (si el programa pidió cerrarlo al acabar y ya no queda nada, se cierra) | los sacados |
+
+Si el servicio se acaba (o lo acaban), el núcleo **apaga la DMA de su
+tarjeta** (el bit 2 de la orden PCI; con la Sound Blaster, tapa el canal 5
+del 8237) antes de que su memoria vuelva a los marcos libres, quita los
+registros de su vista y cierra los canales. Cuando acaba un programa, se le
+cierran los suyos.
+
+En Castel (`llamadas.cas`): `abrir_canal(hz, canales, bits)`,
+`dar_muestras`, `dar_muestras_ya`, `orden_canal` (con `SONIDO_VOLUMEN`,
+`SONIDO_PAUSA`, `SONIDO_ESPERAR`...), `cerrar_canal`, `tocar_wav(ruta)`,
+`volumen_general(v)` y `sonar(SISTEMA_AVISO)`. En C, `sonido/sonido.h`.
+
+### El servicio
+
+- **Cuándo se pone en marcha**: al arrancar el escritorio (con `/ARRANQUE`:
+  suena el de inicio); si no, la primera vez que un programa abre un canal o
+  toca un .WAV. Con **`sinsonido`** en la línea del cargador, nunca. Busca la
+  tarjeta por este orden: HD Audio (clase PCI 0403), AC'97 (0401) y la Sound
+  Blaster 16 (el DSP en 220h, 240h, 260h o 280h, versión 4 o más). Si no hay
+  ninguna, lo dice y acaba (no se vuelve a lanzar, y no sale el altavoz en la
+  bandeja). Lo que hace lo dice por el puerto serie (`sonido: ...`).
+- **HD Audio** (`hda.c`, lo de HSPSND): los registros, la memoria y el bus
+  master; TCSEL a 0 en las Intel, el «snoop» de las AMD/ATI; el enlace
+  reiniciado; las órdenes al códec **inmediatas**, como HSPSND, y por
+  **CORB/RIRB** si el códec no contesta así. El grupo de audio en D0; los
+  pines que pueden sacar sonido, por su configuración (altavoces, luego
+  auriculares, luego línea; hasta seis); desde cada uno, un camino hasta un
+  DAC, directo o por mezcladores y selectores (dos niveles, como `find_dac`);
+  todo el camino en D0 con sus amplificadores **a 0 dB** (el volumen se hace en
+  la mezcla: así no depende del códec, que era lo que pasaba con el Realtek
+  ALC269 del Toshiba NB250, docs/AUDICION.md [TOSHIBA]); **EAPD** encendido y
+  las **GPIO a 1** (el amplificador de los altavoces de muchos portátiles); y
+  si ningún pin dice lo que es (el ALC888 del MSI MS-7468 [SINCFG]), todos los
+  que pueden sacar sonido a la vez. **Los Cirrus de los Mac** (CS4206/7/8,
+  lib/cirrus.inc): las GPIO de sus amplificadores, su widget de proceso con sus
+  coeficientes y la configuración de los pines del MacBook Air 6,x. **[VTD]**
+  si el firmware dejó encendida la traducción de DMA de VT-d (el MacBook Air
+  de 2017: la controladora no podía leer la memoria; docs/AUDICION.md, «La DMA
+  cerrada por el firmware»), se apagan las regiones protegidas y la
+  traducción de esa unidad (`MCHBAR` + 5410h), que es lo que haría un sistema
+  al arrancar (aquí ya no está el firmware leyendo el disco). El flujo 1, a
+  48 kHz, 16 bits, estéreo, sobre 16 trozos de 4 K. **Los auriculares**: si su
+  pin sabe si hay algo enchufado, cada medio segundo se mira (con la orden de
+  «mira ahora» si el códec la necesita); con ellos puestos, los pines de los
+  altavoces se apagan. En `\HISPA\SONIDO.INI`, para un equipo raro, lo que
+  AUDICION de Hispa-DOS averigua: `pines=14,1b` (en hexadecimal), `gpio=03`,
+  `nogpio=1`, `eapd=0`.
+- **AC'97** (`ac97.c`): las de Intel y compatibles, como HSPSND (los puertos
+  encendidos también en las ICH4 y siguientes; reinicio en frío; el maestro,
+  los auriculares y el PCM a 0 dB; 48 kHz con la frecuencia variable); la
+  **SiS 7012** (lo mismo, con el estado y la cuenta cambiados de sitio, la
+  cuenta en octetos y su salida abierta); y la **VIA VT8233/8235/8237** (su
+  «SGD», otra cosa: el enlace por la configuración PCI, el códec por el
+  registro 80h; **sin probar en un equipo**). EAPD encendido (con `eapd=1`,
+  al revés: hay placas que lo llevan invertido). El anillo son las 32
+  entradas de la lista, de 2 K; en cada vuelta, la última válida justo detrás
+  de la que suena, para que no se pare nunca.
+- **La Sound Blaster 16** (`sb16.c`): 44.100 Hz, 16 bits con signo, estéreo,
+  por el canal 5 del 8237 en modo automático, sobre un anillo de 64 K por
+  debajo de los 16 MB (la llamada 196 con EDX = 1); el mezclador al máximo.
+- **La mezcla** (`mezcla.c`): hasta 16 voces (los canales de los programas,
+  los .WAV de la 194, los sonidos del sistema y los tonos de prueba), cada
+  una pasada a la frecuencia de la tarjeta con interpolación lineal (el paso
+  en 16.16), con su volumen y el general **por la curva de HSPSND y del
+  Mezclador de Hispa-486** (100 % = 0 dB y cada punto, 0,47 dB menos; el 0 %,
+  silencio), sumadas y recortadas. En silencio las voces siguen avanzando
+  (ningún programa se queda esperando). Lo que un canal ya había sacado de su
+  cola cuando el programa lo cierra suena hasta el final.
+- **Lo guardado** (`\HISPA\SONIDO.INI`): `volumen=`, `silencio=` y
+  `sonidos=`, a los dos segundos de un cambio (y al apagar). **Los sonidos
+  del sistema**: `INICIO.WAV` (do, mi, sol, do), `APAGAR.WAV` (sol, mi, do),
+  `AVISO.WAV` («din-don») y `ERROR.WAV` (dos golpes graves), hechos aquí por
+  `sonido/hazwav.py` (sintetizados: nuestros, y dados al dominio público,
+  CC0); se pueden cambiar por otros `.WAV` con el mismo nombre. Suenan: al
+  arrancar el escritorio; al apagar o reiniciar (el escritorio espera a que
+  acabe, hasta 3 s, y luego le dice al servicio que **calle la tarjeta**: la
+  DMA parada, los pines apagados y el códec en D3, para que no suene la
+  «lluvia de interferencias» al reiniciar); con cada aviso del escritorio; con
+  un programa que se acaba por un fallo; y con `MessageBox`/`MessageBeep` de
+  los programas de Windows.
+
+### La bandeja, Configuración y la orden SONIDO
+
+- **El altavoz de la bandeja** (`escritorio.cas`), a la izquierda de la pila y
+  a la derecha de la red, mientras haya servicio con tarjeta: el cono y tantas
+  ondas como volumen (una cruz roja en silencio). **La rueda del ratón encima**
+  lo sube o lo baja de 5 en 5 (con su «clic», como la campanita de Hispa
+  Ventanas); **un clic** abre la ventanita del volumen (`SONIDO /BANDEJA`:
+  arrastrar, la rueda, las flechas, «Silencio» y «Ajustes...»; se va al
+  pinchar fuera); **el botón secundario**, «Silenciar» (o «Quitar el
+  silencio») y «Configuración de sonido...».
+- **Configuración > «Sonido...»** (`SONIDO /VENTANA`): la tarjeta, el códec y
+  la salida (con los auriculares: «enchufados» o no), el volumen general
+  (arrastrando, con la rueda o con las flechas), el silencio, «Probar:
+  Izquierdo / Derecho» (un do por la izquierda; un mi por la derecha), los
+  sonidos del sistema, y **los programas que suenan**, cada uno con su
+  volumen. Se pone al día sola (con los auriculares que se enchufan, el
+  volumen que cambia la bandeja...).
+- **La orden `SONIDO`** (la Consola): sin nada, cómo está (la tarjeta, el
+  códec, la salida, el volumen, los canales abiertos); `SONIDO archivo.wav`,
+  lo toca (y espera); `/FONDO archivo.wav`, lo toca el servicio; `/TONO hz [ms]
+  [I|D]`; `/VOLUMEN n`; `/SILENCIO [SI|NO]`; `/SISTEMA SI|NO`; `/PROBAR I|D`;
+  `/AVISO`, `/ERROR`; y `/SUELTO` al final para seguir sin esperar (otro
+  programa que suena a la vez).
+- **El Administrador de dispositivos** dice que la tarjeta la lleva
+  `SONIDO.BIN` («un servicio del anillo 3»), con el códec y la salida; una
+  Sound Blaster 16, entre lo de la placa (`PNPB003`), con su puerto y su DMA.
+
+### Los programas de Windows y los de Hispa Ventanas
+
+- **DirectSound y WinMM** (`win32/dx.c`, `HispaDXSonido`): las DLL de
+  Hispa-486 (DSOUND, WINMM) mezclan como siempre y dan sus trozos de 2.048
+  tramas a un canal de 48 kHz, 16 bits y estéreo, dejando ir por delante
+  como mucho tres (unos 130 ms, lo que un juego nota). Sin tarjeta, lo de
+  antes: en silencio y el tiempo pasando como si sonara. `Beep` toca su tono
+  de verdad; `MessageBeep` y `MessageBox` con icono, el sonido del sistema
+  (el de error con `MB_ICONHAND`).
+- **HVPRUN** (`hvprun/psonido.inc`): `snd_info`, `snd_pcm`, `snd_pcm2`,
+  `snd_orden` (esperar, parar, el volumen, el silencio y «cuántos trozos
+  caben», que deja ir 170 ms por delante) y `snd_campana`, las de HSPSND en
+  Ventanas, sobre un canal con la forma de lo que se toca (si cambia, se abre
+  otro y el de antes acaba de sonar solo); y `aj_leer 9` («¿hay sonido?»).
+  **Hispa-Snes** suena en HVPRUN (ya no se calla allí: lo dice HVPRUN). Y
+  **Hispa-Nes e Hispa-System corren ya en HVPRUN** (como Hispa-Snes con su
+  `[HISPA-SNES]`: si `aj_leer 13`, el texto de la versión de Ventanas, da 0,
+  están en HVPRUN y no piden el DPMI ni HSPJOY ni leen el 8254, sino el reloj
+  fino de HVPRUN, `aj_leer 20`; Hispa-Nes pregunta la tarjeta con `snd_info`),
+  a 60 cuadros por segundo en QEMU, y suenan. En la memoria USB, en
+  `\JUEGOS` con sus ROM nuestras (`HISPA1.NES`, `BUZO.SMS`), junto a Hispa-Snes.
+
+### Los paquetes
+
+`sonido` 1.0 (nuevo: `SONIDO.BIN` y los cuatro `.WAV`, en `\HISPA`), que pide
+la base con las llamadas 190 a 199 (`VERSION_SONIDO` en `tools/hpq.py`: la de
+esta rama); suben `win32` (1.1) y `hvprun` (0.9). En la memoria USB y el CD,
+como módulos (`sistema.sh`), y al instalar, a `\HISPA`.
+
+### Probarlo
+
+`SOLO=sonido castel/pruebas.sh` (la parte 29): QEMU graba lo que sale por la
+tarjeta (`-audiodev wav`) y `nucleo32/sonido/oye.py` lo parte en ráfagas (lo
+que dura cada sonido, su frecuencia, su nivel por cada lado, los cortes y,
+con Goertzel, el nivel de las frecuencias que se le piden). Con `intel-hda` y
+`hda-duplex`, `AC97` y `sb16`: el estado; un tono solo por la izquierda y
+otro solo por la derecha; dos programas a la vez (se oyen los dos y se
+suman); un WAV de 8 bits a 11.025 Hz a su frecuencia; el volumen al 40 %
+(unos 19 dB menos); el silencio (nada) y un .WAV de la 194. El Administrador
+de dispositivos. En el escritorio: el sonido de inicio, la rueda sobre el
+altavoz (dos «clics», el segundo más fuerte), la ventanita, el menú del
+botón secundario, Configuración > Sonido con «Izquierdo» y «Derecho», y el
+sonido de apagar. DirectSound con `WINDX.EXE` (440 Hz en bucle y luego, con
+`SetFrequency`, 660); Hispa-Snes en HVPRUN con la música de `PRUEBA.SFC`, y
+Hispa-Nes (`HISPA1.NES`) e Hispa-System (`BUZO.SMS`), que corren y suenan.
+
+A mano, en QEMU:
+
+```
+QEMU_MAS="-audiodev wav,id=s,path=/tmp/sale.wav -device intel-hda -device hda-duplex,audiodev=s" \
+  MODULOS=ORDENES.BIN,SONIDO.BIN,INICIO.WAV ARRANQUE=ordenes castel/nucleo32/probar.sh SEMILLA.BIN "sonido" "sonido /tono 440 2000"
+```
+
+(`-device AC97,audiodev=s` o `-device sb16,audiodev=s` para las otras; con
+`-audiodev pa` o `alsa`, suena de verdad.)
+
+### Lo que falta
+
+- **Probarlo en los equipos de verdad**: el IDT del HP Mini 5103 y el Realtek
+  del Toshiba NB250 (el camino que eligió HSPSND es el que debería salir: está
+  en docs/AUDICION.md, «Equipos probados»), el MacBook Air 2017 con el
+  arreglo de VT-d, el MSI con todo abierto; VirtualBox (HD Audio con el
+  STAC9221 y AC'97 con el AD1980); y la VIA, que no tiene emulador.
+- Grabar (el micrófono y la línea); el mezclador por fuentes de HSPSND
+  (`snd_mezcla`); el HDMI; más de un códec a la vez; cambiar de salida a mano.
+- Los mandos (HSPJOY) en HVPRUN; un reproductor de música (MP3, OGG) y el
+  CD de música.
 
 ## 15. Las pruebas
 

@@ -176,6 +176,17 @@ partida es siempre igual.
 
 Los siguientes juegos irán en `sms/` y en `SMSROMS` del Makefile.
 
+## En Hispa-Pentium (HVPRUN)
+
+(SONIDO, 21/11/2026) Hispa-System corre también dentro de Hispa-Pentium, con HVPRUN
+(`HVPRUN \JUEGOS\HISPASMS.HVP \JUEGOS\BUZO.SMS`, o con dos clics desde Mi equipo; en la memoria USB,
+en `\JUEGOS` con `BUZO.SMS`), como Hispa-Snes (docs/HISPASNES.md): si
+`aj_leer 13` (el texto de la versión de Ventanas) da 0, está en HVPRUN y no
+pide el DPMI, ni HSPJOY, ni lee el 8254: toma el reloj fino de HVPRUN
+(`aj_leer 20`). El sonido va por el de Hispa-Pentium (docs/PENTIUM.md §14
+sexies: HVPRUN lo pasa de `snd_pcm` y `snd_orden` a un canal). Sin mandos,
+de momento. Lo prueba `SOLO=sonido castel/pruebas.sh` (la parte 23).
+
 ## Pruebas
 
 `tests/run_hispasms_tests.sh`:

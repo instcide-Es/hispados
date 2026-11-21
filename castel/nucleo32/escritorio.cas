@@ -47,7 +47,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro, Inicio
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro, Inicio, Sonido
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -106,6 +106,9 @@ módulo Escritorio
     constante AC_PANTALLA = 30
     constante AC_RED_TS = 70                    ; (TAILSCALE) Configuración > «Red y Tailscale...»
     constante AC_PROGRAMAS_INST = 95            ; (PROGRAMAS) Configuración > «Programas...» (PROGRAMA.BIN)
+    constante AC_SONIDO = 97                    ; (SONIDO) Configuración > «Sonido...»
+    constante ME_SONIDO = 47                    ; (SONIDO) el menú del icono del altavoz de la bandeja
+    constante ICONO_SONIDO = 24                 ; (SONIDO) lo que se ensancha la bandeja con el altavoz
     constante AC_CERRAR_PANTALLA = 31
     constante AC_PROBAR = 32
     constante AC_GUARDAR_MODO = 33
@@ -187,6 +190,7 @@ módulo Escritorio
     variable ancho_botón: ent32
     variable cambios_vistos: nat32
     variable red_vista: nat32                   ; (los cambios de la red que ya pinta el icono)
+    variable sonido_visto: nat32                ; (SONIDO) los cambios del sonido que ya pinta el altavoz
     constante ICONO_RED = 24                    ; lo que se ensancha la bandeja con el icono de la red
     constante ICONO_ESCUDO = 22                 ; (ESCUDO) y con el del antivirus, si está ESCUDO.BIN
     variable hay_escudo: bool                   ; (ESCUDO)
@@ -602,6 +606,12 @@ módulo Escritorio
         fin
     fin
 
+    ; (SONIDO) el altavoz, si hay servicio de sonido con su tarjeta
+    función hueco_sonido(): ent32
+        si hay_tarjeta() entonces devolver ICONO_SONIDO fin
+        devolver 0
+    fin
+
     función hueco_pila(): ent32
         si hay_pila() entonces devolver ANCHO_PILA fin
         devolver 0
@@ -614,7 +624,7 @@ módulo Escritorio
     fin
 
     función ancho_bandeja(): ent32
-        devolver BANDEJA_ANCHO + hueco_usb() + hueco_red() + hueco_pila() + hueco_escudo()
+        devolver BANDEJA_ANCHO + hueco_usb() + hueco_red() + hueco_sonido() + hueco_pila() + hueco_escudo()
     fin
 
     ; (ESCUDO) el icono del antivirus (14 x 18): un escudo azul con su borde y
@@ -679,6 +689,24 @@ módulo Escritorio
         fin
     fin
 
+    ; (SONIDO) el altavoz de la bandeja: el cono y, delante, tantas ondas como
+    ; volumen (con el silencio, una cruz roja)
+    función pinta_icono_sonido(ref l: Lienzo, x: ent32, yy: ent32)
+        variable i: ent32
+        rectángulo(l, x, yy + 5, 4, 6, 0xF4F8FE)
+        para i desde 0 hasta 4 hacer rectángulo(l, x + 4 + i, yy + 5 - i, 1, 6 + 2 * i, 0xF4F8FE) fin
+        si silencio entonces
+            para i desde 0 hasta 5 hacer
+                rectángulo(l, x + 11 + i, yy + 5 + i, 2, 2, 0xE53935)
+                rectángulo(l, x + 16 - i, yy + 5 + i, 2, 2, 0xE53935)
+            fin
+            devolver
+        fin
+        si volumen_general > 0 entonces rectángulo(l, x + 11, yy + 6, 1, 4, BLANCO) fin
+        si volumen_general > 33 entonces rectángulo(l, x + 14, yy + 4, 1, 8, BLANCO) fin
+        si volumen_general > 66 entonces rectángulo(l, x + 17, yy + 2, 1, 12, BLANCO) fin
+    fin
+
     ; con un clic en el icono de la red: cómo está
     función dice_red()
         variable t: arreglo [80] de byte
@@ -732,9 +760,11 @@ módulo Escritorio
         si hueco_red() > 0 entonces
             si icono_wifi() entonces pinta_icono_wifi(valor(l), an - bandeja + hueco_usb() + 3, 8) sino pinta_icono_red(valor(l), an - bandeja + hueco_usb() + 7, 9) fin    ; (WIFI)
         fin
-        si hay_pila() entonces pinta_pila(valor(l), an - bandeja + hueco_usb() + hueco_red() + 8, 0) fin
-        si hay_escudo entonces icono_escudo(valor(l), an - bandeja + hueco_usb() + hueco_red() + hueco_pila() + 4, 7) fin   ; (ESCUDO)
+        si hueco_sonido() > 0 entonces pinta_icono_sonido(valor(l), an - bandeja + hueco_usb() + hueco_red() + 6, 9) fin   ; (SONIDO)
+        si hay_pila() entonces pinta_pila(valor(l), an - bandeja + hueco_usb() + hueco_red() + hueco_sonido() + 8, 0) fin
+        si hay_escudo entonces icono_escudo(valor(l), an - bandeja + hueco_usb() + hueco_red() + hueco_sonido() + hueco_pila() + 4, 7) fin   ; (ESCUDO)
         red_vista := cambios_red
+        sonido_visto := cambios_sonido
         ahora(f, h)
         d[0] := h >> 11
         d[1] := (h >> 5) yb 63
@@ -906,6 +936,7 @@ módulo Escritorio
         texto(valor(l), 64, 30, t, TINTA)
         pulsador(v_aviso, (an - 100) div 2, 76, 100, 30, "Aceptar", 0x5AA6F4, 0x2468C8, AC_CERRAR_AVISO)
         repintada(v_aviso, 0, 0, an, 118)
+        sonar(SS_AVISO)                         ; (SONIDO)
         escribir("escritorio: aviso: ", t, "\n")
     fin
 
@@ -1093,15 +1124,19 @@ módulo Escritorio
         botón_elegido(110, 246, "Automático", AC_PREFIERE, preferir_red = PREFIERE_AUTO)
         botón_elegido(218, 246, "Cable", AC_PREFIERE + 1, preferir_red = PREFIERE_CABLE)
         botón_elegido(326, 246, "Wi-Fi", AC_PREFIERE + 2, preferir_red = PREFIERE_WIFI)
+        ; (SONIDO) el volumen y los sonidos del sistema (SONIDO.BIN /VENTANA)
+        texto(valor(l), 20, 282, "Sonido:", TINTA)
+        pulsador(v_config, 110, 276, 208, 26, "Volumen y sonidos...", 0x5AA6F4, 0x2468C8, AC_SONIDO)
         ; (dispositivos) lo que hay en el equipo y qué lo lleva; (TAILSCALE) la red
-        pulsador(v_config, 14, 278, 150, 28, "Dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
-        pulsador(v_config, 172, 278, 166, 28, "Red y Tailscale...", 0x5AA6F4, 0x2468C8, AC_RED_TS)
-        pulsador(v_config, 346, 278, 100, 28, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
+        pulsador(v_config, 14, 312, 150, 28, "Dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
+        pulsador(v_config, 172, 312, 166, 28, "Red y Tailscale...", 0x5AA6F4, 0x2468C8, AC_RED_TS)
+        pulsador(v_config, 346, 312, 100, 28, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
         repintada(v_config, 0, 0, 460, CONFIG_AL)
     fin
 
-    ; (WIFI) 314 de alto (con la fila «Red:»), donde estaba la de 280: lo de arriba, en su sitio
-    constante CONFIG_AL = 314
+    ; (WIFI, SONIDO) 348 de alto (con las filas «Red:» y «Sonido:»), donde
+    ; estaba la de 280: lo de arriba, en su sitio
+    constante CONFIG_AL = 348
     función abre_config()
         si v_config <> 0 entonces cierra_cuadro(v_config) fin
         v_config := crear_ventana("Configuración", (pantalla.ancho - 460) div 2, (pantalla.alto - ALTO_BARRA - 280) div 2 - 20, 460, CONFIG_AL, FIJA, 0)
@@ -1922,6 +1957,23 @@ módulo Escritorio
     ; registro de la FADT, el teclado o CF9h). Sin ACPI: en QEMU (se sabe por
     ; su tarjeta), su puerto de pruebas, con el código 5; en un PC de verdad,
     ; el aviso de «ya puede apagar», y parado.
+    ; (SONIDO) antes de acabar los programas: el sonido de apagar (hasta que
+    ; acabe, como mucho 3 s) y la tarjeta parada sin ruido
+    función apaga_sonido()
+        variable k: nat32
+        si no hay_tarjeta() entonces devolver fin
+        sonar(SS_APAGAR)
+        k := 0
+        dormir(20)
+        mientras k < 280 y suena() hacer
+            dormir(1)
+            k := k + 1
+        fin
+        escribir("escritorio: el sonido de apagar, tocado\n")
+        callar_sonido()
+        dormir(10)
+    fin
+
     función apaga(reiniciar: bool)
         variable t: puntero a byte
         si no cierra_programas() entonces devolver fin
@@ -1933,6 +1985,7 @@ módulo Escritorio
         texto_negrita(pantalla, (pantalla.ancho - ancho_texto(t)) div 2, pantalla.alto div 2, t, BLANCO)
         texto(pantalla, (pantalla.ancho - 13 * 8) div 2, pantalla.alto div 2 + 28, "Hispa-Pentium", 0xBFDCFA)
         volcar(0, 0, pantalla.ancho, pantalla.alto)
+        apaga_sonido()                          ; (SONIDO)
         acabar_programas(200)
         recoger_huérfanas()
         vaciar_discos()
@@ -2045,7 +2098,7 @@ módulo Escritorio
             quita_ayuda()
             devolver
         fin
-        x0 := pantalla.ancho - ancho_bandeja() + hueco_usb() + hueco_red() + 4
+        x0 := pantalla.ancho - ancho_bandeja() + hueco_usb() + hueco_red() + hueco_sonido() + 4
         si ratón_x < x0 o ratón_x >= x0 + ANCHO_PILA o ratón_y < pantalla.alto - ALTO_BARRA entonces
             quita_ayuda()
             ayuda_tapada := falso
@@ -2134,6 +2187,7 @@ módulo Escritorio
             caso AC_CERRAR_CONFIG: cierra_cuadro(v_config)
             caso AC_RED_TS: lanza("\\TAILSCAL.BIN", "/VENTANA")     ; (TAILSCALE) Configuración > Red y Tailscale
             caso AC_PROGRAMAS_INST: lanza("\\PROGRAMA.BIN", "/INSTALADAS")    ; (PROGRAMAS) Configuración > Programas
+            caso AC_SONIDO: lanza("\\SONIDO.BIN", "/VENTANA")       ; (SONIDO) Configuración > Sonido
             caso AC_PANTALLA:
                 texto_pantalla[0] := 0
                 abre_pantalla()
@@ -2830,7 +2884,12 @@ módulo Escritorio
         variable e: Evento
         variable n: ent32
         mientras saca_evento(v_barra, 0, e) hacer
-            si e.clase = EV_TECLA entonces
+            si e.clase = EV_RUEDA y hueco_sonido() > 0 y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() + hueco_red() y ent32(e.a) < pantalla.ancho - bandeja + hueco_usb() + hueco_red() + ICONO_SONIDO entonces
+                ; (SONIDO) la rueda sobre el altavoz: el volumen, de 5 en 5
+                n := ent32(e.c yb 0xFF)
+                si n >= 128 entonces n := n - 256 fin
+                subir_volumen(n * 5)
+            sino si e.clase = EV_TECLA entonces
                 atajo(e.a)                      ; (MENÚ) el logo y los atajos de todo el sistema
             sino si e.clase = EV_RATÓN_BAJA entonces
                 si ent32(e.a) < INICIO_ANCHO entonces
@@ -2842,9 +2901,20 @@ módulo Escritorio
                 sino si hueco_red() > 0 y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() y ent32(e.a) < pantalla.ancho - bandeja + hueco_usb() + ICONO_RED entonces
                     ; el icono de la red (TAILSCALE: con el túnel, la ventana de Tailscale; WIFI: con el servicio Wi-Fi, la del Wi-Fi)
                     si túnel_red <> 0 entonces lanza("\\TAILSCAL.BIN", "/VENTANA") sino si estado_wifi <> WIFI_NADA entonces lanza("\\REDWIFI.BIN", nulo) sino dice_red() fin
-                sino si hay_escudo y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() + hueco_red() + hueco_pila() y ent32(e.a) < pantalla.ancho - BANDEJA_ANCHO entonces
+                sino si hay_escudo y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() + hueco_red() + hueco_sonido() + hueco_pila() y ent32(e.a) < pantalla.ancho - BANDEJA_ANCHO entonces
                     ; (ESCUDO) el del antivirus: su ventana
                     lanza(ruta_escudo, "/VENTANA")
+                sino si hueco_sonido() > 0 y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() + hueco_red() y ent32(e.a) < pantalla.ancho - bandeja + hueco_usb() + hueco_red() + ICONO_SONIDO entonces
+                    ; (SONIDO) el altavoz: la ventanita del volumen; con el secundario, su menú
+                    si e.c yb BOTÓN_DERECHO <> 0 entonces
+                        si silencio entonces
+                            abrir_emergente(ent32(e.a), pantalla.alto - ALTO_BARRA, "Quitar el silencio|Configuración de sonido...", 0, 0, ME_SONIDO)
+                        sino
+                            abrir_emergente(ent32(e.a), pantalla.alto - ALTO_BARRA, "Silenciar|Configuración de sonido...", 0, 0, ME_SONIDO)
+                        fin
+                    sino
+                        lanza("\\SONIDO.BIN", "/BANDEJA")
+                    fin
                 sino si ent32(e.a) >= BOTONES_X y ancho_botón > 0 entonces
                     n := (ent32(e.a) - BOTONES_X) div ancho_botón
                     si n < ent32(n_botones) entonces
@@ -2947,6 +3017,10 @@ módulo Escritorio
                 si opción = 0 y menú_dato < n_iconos entonces haz(iconos[menú_dato].acción, iconos[menú_dato].dato) fin
                 si opción = 1 y menú_dato < n_iconos entonces quita_atajo_del_tapiz(menú_dato) fin
             caso ME_DOCK: elegido_dock(opción)
+            caso ME_SONIDO:
+                ; (SONIDO) el menú del altavoz de la bandeja
+                si opción = 0 entonces pon_silencio(no silencio) fin
+                si opción = 1 entonces lanza("\\SONIDO.BIN", "/VENTANA") fin
         fin
     fin
 
@@ -3128,7 +3202,7 @@ módulo Escritorio
                 pide := PIDE_NADA
             fin
             si suelta_pedida entonces atiende_suelta() fin
-            si Ventanas.cambios <> cambios_vistos o cambios_red <> red_vista o cambios_energía <> energía_vista entonces pinta_barra() fin
+            si Ventanas.cambios <> cambios_vistos o cambios_red <> red_vista o cambios_energía <> energía_vista o cambios_sonido <> sonido_visto entonces pinta_barra() fin
             ; cada segundo: el reloj (si ha cambiado el minuto) y las tareas acabadas
             si tics div HZ <> segundo_visto entonces
                 segundo_visto := tics div HZ
@@ -3288,6 +3362,7 @@ módulo Escritorio
             t := cargar_servicio("ESCUDO.BIN", "/VIGILAR", an)   ; (PROTEGE) de la carpeta del sistema: con su sello de servicio
             si t <> nulo entonces t.padre := 0 fin
         fin
+        arranca_sonido()              ; (SONIDO) el servicio de sonido (y el sonido de inicio)
         devolver 1
     fin
 

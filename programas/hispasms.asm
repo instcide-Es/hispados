@@ -49,6 +49,7 @@ JUEGO_AN    equ 256                 ; [PANTALLA COMPLETA] el cuadro de la consol
 JUEGO_AL    equ 192
 FULL_MAX    equ 3                   ; escala entera máxima (la medida de «pant»)
 TICS_SEG    equ 1193182             ; tics del reloj (el contador 8254) por segundo
+AJ_RELOJ    equ 20                  ; (SONIDO) (HVPRUN) aj_leer: el reloj fino, como en Hispa-Snes
 TICS_CUADRO equ 19913               ; y por cuadro (59,92 por segundo)
 ROM_MAX     equ 4 * 1024 * 1024 + 512
 ROM_MENOS   equ 8192                ; una ROM más pequeña no es de la consola
@@ -252,6 +253,13 @@ entrada:
         call hvl_cad
         mov byte [edi], 0
 .c2:
+        ; (SONIDO) ¿Hispa Ventanas o HVPRUN (Hispa-Pentium)? Como Hispa-Snes: en
+        ; HVPRUN no hay DPMI ni puertos (ni HSPJOY): el reloj fino de HVPRUN; el
+        ; sonido, el suyo (snd_info y snd_pcm2, sobre el de Hispa-Pentium)
+        mov eax, AJ_TXT_VERSION
+        HV aj_leer
+        test eax, eax
+        setz [en_hvprun]
         call carpeta_lee            ; la última de Abrir ROM (HISPASMS.INI)
         pop edi
         ; los parámetros
@@ -312,9 +320,12 @@ entrada:
 .n4:
         mov byte [edi], 0
 .sn:
+        cmp byte [en_hvprun], 0     ; (SONIDO)
+        jne .sinreal
         call cero_busca
-        call paleta_haz
         call mandos_busca
+.sinreal:
+        call paleta_haz
         mov eax, [hv_api + HV_tec_mapa * 4]
         mov [p_mapa], eax
         mov eax, AJ_HAY_SONIDO
@@ -1342,6 +1353,8 @@ paleta_haz:
 ; vueltas por tic) o en modo 2: se pregunta con la orden de «leer atrás».
 ; -> EAX (da la vuelta cada hora: solo valen las diferencias)
 reloj:
+        cmp byte [en_hvprun], 0     ; (SONIDO) en HVPRUN, su reloj fino
+        jne .hvprun
         push ebx
         push ecx
         push edx
@@ -1384,6 +1397,15 @@ reloj:
         pop edx
         pop ecx
         pop ebx
+        ret
+.hvprun:
+        mov eax, AJ_RELOJ
+        HV aj_leer
+        test eax, eax
+        jnz .h1
+        HV tics                     ; (un HVPRUN de antes: los tics de la BIOS)
+        shl eax, 16
+.h1:
         ret
 
 ; el puntero a la dirección lineal 0 (para los datos de la BIOS y HSPJOY)
@@ -2266,6 +2288,7 @@ prueba:
             alignb 4
 ven         resd 1
 cero        resd 1
+en_hvprun   resb 1                  ; (SONIDO) 1: dentro de HVPRUN (Hispa-Pentium)
 p_mapa      resd 1                  ; el mapa de teclas pulsadas de Hispa Ventanas
 joy         resd 1                  ; los datos de HSPJOY (0: no está)
 joy_seg     resd 1                  ;   y su segmento

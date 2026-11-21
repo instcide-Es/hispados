@@ -1,0 +1,717 @@
+; =============================================================================
+;  sonido.cas - (SONIDO) lo que el núcleo de Hispa-Pentium pone para el
+;  sonido (docs/PENTIUM.md, «El sonido»). La tarjeta de verdad (HD Audio,
+;  AC'97, Sound Blaster 16), la mezcla de los programas, el volumen y los
+;  sonidos del sistema son de un programa del anillo 3, el SERVICIO DE
+;  SONIDO (SONIDO.BIN, nucleo32/sonido/, en C), como la red (RED.BIN) o ACPI
+;  (ACPI.BIN). El núcleo solo guarda:
+;    - los CANALES de los programas: cada uno, una cola de 64 K del montón
+;      donde el programa deja sus muestras (la llamada 191) y de donde el
+;      servicio_sonido las saca para mezclarlas (la 199). Si la cola está llena, el
+;      programa espera (de tic en tic) a que el servicio_sonido la vacíe;
+;    - el VOLUMEN GENERAL, el SILENCIO y si hay SONIDOS DEL SISTEMA (lo que
+;      enseña y cambia la bandeja del escritorio, que es del núcleo);
+;    - las ÓRDENES para el servicio_sonido (un sonido del sistema, probar un
+;      altavoz, tocar un .WAV, una tarea que ha acabado...), en una cola;
+;    - lo que el servicio_sonido dice de la tarjeta (Estado_sonido), para la
+;      bandeja, Configuración y el Administrador de dispositivos;
+;    - lo que solo él puede: los puertos (IOPL 3), memoria física seguida
+;      para la DMA (también por debajo de los 16 MB, para la Sound Blaster)
+;      y los registros de la tarjeta a su vista.
+;  No hace falta la interrupción de la tarjeta: el servicio_sonido mira cada tic
+;  por dónde va la DMA (LPIB en HD Audio, CIV y PICB en AC'97, el contador
+;  del 8237 con la Sound Blaster) y rellena por delante; así no hay que
+;  compartir la línea (en los portátiles, la del HD Audio suele ser de
+;  varios) ni más código en el núcleo.
+;
+;  Las llamadas (usuario.cas manda aquí de la 190 a la 199):
+;    190  abrir un canal: EBX, la frecuencia (de 4.000 a 96.000 Hz); ECX,
+;         los canales (1 o 2) y, en los bits 8-15, los bits (8 o 16)
+;                                    -> el canal (1 a 8) o un error (NO_HAY:
+;                                       no hay tarjeta de sonido)
+;    191  dar muestras: EBX, el canal (con el bit 31, sin esperar); ECX, los
+;         datos; EDX, los octetos      -> los que han entrado en la cola
+;    192  el canal EBX: ECX, la orden (C_CERRAR, C_VOLUMEN con EDX de 0 a
+;         100, C_PAUSA con EDX 1 o 0, C_VACIAR, C_EN_COLA, C_ESPERAR,
+;         C_TOCADOS, C_CERRAR_AL_ACABAR). Una voz de la 194 vale para
+;         C_CERRAR y C_ESPERAR
+;    193  lo de todos: EBX, la orden (G_ESTADO, con ECX un Estado_sonido;
+;         G_VOLUMEN y G_SILENCIO (EDX; 0xFFFFFFFF: solo preguntar; el
+;         silencio, 2: cambiarlo), G_SISTEMA (EDX, el sonido), G_PROBAR (EDX:
+;         1 izquierda, 2 derecha, 3 los dos), G_SONIDOS (EDX: 0 no, 1 sí, 2
+;         preguntar), G_SUBIR (EDX, con signo), G_VOLUMEN_CANAL (ECX el
+;         canal, EDX el volumen), G_CANALES (ECX: MAX_CANALES Info_canal))
+;    194  (usuario.cas, con la ruta ya entera, «C:\...») tocar un .WAV: lo
+;         abre y lo toca el servicio_sonido, sin que el programa espere
+;                                      -> el número de su voz (0x100 + n)
+;    195  (el servicio_sonido) apuntarse: solo SONIDO.BIN (PROTEGE: el de \HISPA, por su sello). Le da los puertos
+;    196  (el servicio_sonido) EBX páginas seguidas de memoria física (hasta 16); a
+;         ECX, su dirección física; con EDX = 1, por debajo de los 16 MB y
+;         sin cruzar 64 K (la DMA ISA)  -> dónde se ven
+;    197  (el servicio_sonido) los registros de la tarjeta: EBX la dirección
+;         física, ECX los octetos (sin caché)  -> dónde se ven
+;    198  (el servicio_sonido) el intercambio: EBX, su Estado_sonido (0: nada); ECX,
+;         adónde va un Para_servicio (el volumen, los canales y las órdenes
+;         pendientes); EDX, cuántos tics esperar si no hay nada que hacer
+;                                      -> cuántas órdenes
+;    199  (el servicio_sonido) sacar de la cola del canal EBX hasta EDX octetos, a
+;         ECX                          -> los sacados
+;  Si el servicio_sonido se acaba, el núcleo apaga la DMA de su tarjeta (el bit 2
+;  de la orden PCI; con la Sound Blaster, tapa su canal del 8237) antes de
+;  que su memoria vuelva a los marcos libres, y cierra los canales.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Sonido
+
+    importar Tareas, Paginas, Marcos, Monton, Mem32, Cpu, Pci, Textos32, Permisos
+
+    constante NO_HAY = 0xFFFFFFFF
+    constante NO_VALE = 0xFFFFFFF9
+    constante EN_USO = 0xFFFFFFF6
+    constante SIN_MEMORIA = 0xFFFFFFFA
+
+    ; las tarjetas (Estado_sonido.tarjeta)
+    público constante TARJETA_NINGUNA = 0
+    público constante TARJETA_SB16 = 2
+    público constante TARJETA_AC97 = 3
+    público constante TARJETA_HDA = 4
+
+    ; los sonidos del sistema
+    público constante SS_INICIO = 0
+    público constante SS_APAGAR = 1
+    público constante SS_AVISO = 2
+    público constante SS_ERROR = 3
+    público constante SS_VOLUMEN = 4            ; el «clic» al cambiar el volumen
+
+    ; las órdenes de un canal (192)
+    público constante C_CERRAR = 0
+    público constante C_VOLUMEN = 1
+    público constante C_PAUSA = 2
+    público constante C_VACIAR = 3
+    público constante C_EN_COLA = 4
+    público constante C_ESPERAR = 5
+    público constante C_TOCADOS = 6
+    público constante C_CERRAR_AL_ACABAR = 7
+
+    ; las de todos (193)
+    público constante G_ESTADO = 0
+    público constante G_VOLUMEN = 1
+    público constante G_SILENCIO = 2
+    público constante G_SISTEMA = 3
+    público constante G_PROBAR = 4
+    público constante G_SONIDOS = 5
+    público constante G_SUBIR = 6
+    público constante G_VOLUMEN_CANAL = 7
+    público constante G_CANALES = 8
+
+    ; las órdenes para el servicio_sonido
+    constante O_SISTEMA = 1                     ; a: el sonido
+    constante O_PROBAR = 2                      ; a: 1 izquierda, 2 derecha, 3 los dos
+    constante O_WAV = 3                         ; a: la voz; b: la tarea; ruta
+    constante O_PARAR_VOZ = 4                   ; a: la voz
+    constante O_ACABÓ = 5                       ; a: la tarea que ha acabado
+    constante O_CALLAR = 6                      ; se va a apagar: la tarjeta, parada y sin ruido
+
+    público constante MAX_CANALES = 8
+    constante COLA = 65536                      ; lo que cabe en la cola de un canal (potencia de 2)
+    constante MAX_ÓRDENES = 16
+    constante PRIMERA_VOZ = 0x100
+    constante ZONA_INICIO = 0xA0000000          ; donde ve el servicio_sonido la memoria de DMA y los registros
+    constante ZONA_FINAL = 0xB0000000
+    constante MAX_TROZOS = 4
+
+    ; lo que dice el servicio_sonido de la tarjeta (la misma estructura que
+    ; struct estado_sonido en nucleo32/sonido/sonido.h y que Estado_sonido
+    ; de llamadas.cas: si cambia una, las otras). 240 octetos
+    público tipo Estado_sonido = estructura
+        versión, tarjeta, hz, pci, dma_isa, salida, detecta, auriculares: nat32
+        volumen, silencio, sistema, voces, cambios, puertos, memoria, irq: nat32
+        nombre: arreglo [48] de byte            ; la tarjeta («Intel HD Audio (ICH6)»)
+        códec: arreglo [48] de byte             ; el códec («Realtek ALC269»)
+        detalle: arreglo [80] de byte           ; la salida, la frecuencia...
+    fin
+
+    ; un canal, como se le da al servicio_sonido y al mezclador (48 octetos)
+    público tipo Info_canal = estructura
+        dueño, hz, canales, bits, volumen, pausa, en_cola, tocados: nat32
+        nombre: arreglo [16] de byte
+    fin
+
+    ; una orden para el servicio_sonido (128 octetos)
+    tipo Orden_sonido = estructura
+        clase, a, b, relleno: nat32
+        ruta: arreglo [112] de byte
+    fin
+
+    ; lo que recibe el servicio_sonido en el intercambio (la 198)
+    tipo Para_servicio = estructura
+        volumen, silencio, sistema, cambios, n_órdenes: nat32
+        relleno: arreglo [3] de nat32
+        canales: arreglo [MAX_CANALES] de Info_canal
+        órdenes: arreglo [MAX_ÓRDENES] de Orden_sonido
+    fin
+
+    tipo Canal = estructura
+        dueño: nat32                            ; la tarea (0: libre)
+        hz, canales, bits, volumen, pausa, al_acabar: nat32
+        lee, escribe: nat32                     ; lo sacado y lo metido (la cola: escribe - lee)
+        cola: puntero a byte
+        nombre: arreglo [16] de byte
+    fin
+
+    variable canales: arreglo [MAX_CANALES] de Canal
+    variable órdenes: arreglo [MAX_ÓRDENES] de Orden_sonido
+    variable n_órdenes: nat32
+    variable voz_siguiente: nat32
+
+    público variable estado_sonido: Estado_sonido   ; lo último que ha dicho el servicio_sonido
+    público variable volumen_general: nat32 = 80
+    público variable silencio: bool
+    público variable sonidos_sistema: bool = cierto
+    público variable cambios_sonido: nat32      ; sube cuando cambia lo que enseña la bandeja
+    público variable sin_sonido: bool              ; «sinsonido» en la línea del cargador
+    público variable sonido_listo: bool                ; el servicio ya ha dicho qué tarjeta lleva
+    público variable sin_tarjeta_sonido: bool          ; el servicio_sonido ya dijo que no hay tarjeta: no se vuelve a lanzar
+
+    público variable servicio_sonido: puntero a Tarea
+    variable servicio_id: nat32
+    variable servicio_espera: bool
+    variable zona: nat32
+    variable trozo_v, trozo_n: arreglo [MAX_TROZOS] de nat32
+    variable n_trozos: nat32
+
+    ; ---- ayudantes ----
+    público función hay_servicio_sonido(): bool
+        devolver servicio_sonido <> nulo y servicio_sonido.id = servicio_id y servicio_sonido.estado <> ACABADA y servicio_sonido.estado <> LIBRE
+    fin
+
+    función es_servicio(): bool
+        devolver hay_servicio_sonido() y servicio_sonido = actual
+    fin
+
+    ; ¿hay servicio_sonido y una tarjeta que suena?
+    público función hay_tarjeta(): bool
+        devolver hay_servicio_sonido() y estado_sonido.tarjeta <> TARJETA_NINGUNA
+    fin
+
+    ; ¿puede el programa leer (o escribir) ahí? (como en red.cas)
+    función puede(inicio: nat32, n: nat32, para_escribir: bool): bool
+        variable p: nat32
+        si n > 0 y inicio >= PILA_INICIO y inicio < PILA_FINAL y inicio + n > inicio y inicio + n <= PILA_FINAL entonces
+            p := inicio yb 0xFFFFF000
+            mientras p < inicio + n hacer
+                si banderas_de(actual.cr3, p) = 0 y no atender_pila(actual.cr3, p, actual.esp_usuario) entonces devolver falso fin
+                p := p + PÁGINA
+            fin
+        fin
+        devolver usuario_puede(actual.cr3, inicio, n, para_escribir)
+    fin
+
+    función despierta_servicio()
+        si servicio_espera y hay_servicio_sonido() entonces despertar_dormida(servicio_sonido) fin
+    fin
+
+    ; una orden para el servicio_sonido (se tira si la cola está llena)
+    función manda(clase: nat32, a: nat32, b: nat32, ruta: puntero a byte)
+        variable bi: nat32
+        variable od: puntero a Orden_sonido
+        si no hay_servicio_sonido() entonces devolver fin
+        bi := sin_interrupciones()
+        si n_órdenes < MAX_ÓRDENES entonces
+            od := dirección(órdenes[n_órdenes])
+            od.clase := clase
+            od.a := a
+            od.b := b
+            od.ruta[0] := 0
+            si ruta <> nulo entonces copiar_hasta(dirección(od.ruta[0]), ruta, 112) fin
+            n_órdenes := n_órdenes + 1
+        fin
+        reponer(bi)
+        despierta_servicio()
+    fin
+
+    ; el canal c (1 a MAX_CANALES) si es de la tarea actual
+    función canal_mío(c: nat32): puntero a Canal
+        si c < 1 o c > MAX_CANALES entonces devolver nulo fin
+        si canales[c - 1].dueño = 0 o canales[c - 1].dueño <> actual.id entonces devolver nulo fin
+        devolver dirección(canales[c - 1])
+    fin
+
+    función suelta_canal(k: puntero a Canal)
+        variable bi: nat32
+        variable p: puntero a byte
+        bi := sin_interrupciones()
+        p := k.cola
+        k.cola := nulo
+        k.dueño := 0
+        reponer(bi)
+        si p <> nulo entonces liberar(p) fin
+        cambios_sonido := cambios_sonido + 1
+    fin
+
+    función en_cola(k: puntero a Canal): nat32
+        devolver k.escribe - k.lee
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo de los programas
+    ; -------------------------------------------------------------------------
+    función abrir(hz: nat32, forma: nat32): nat32
+        variable i, can, bits: nat32
+        variable k: puntero a Canal
+        si no hay_tarjeta() entonces devolver NO_HAY fin
+        can := forma yb 0xFF
+        bits := (forma >> 8) yb 0xFF
+        si hz < 4000 o hz > 96000 o (can <> 1 y can <> 2) o (bits <> 8 y bits <> 16) entonces devolver NO_VALE fin
+        para i desde 0 hasta MAX_CANALES - 1 hacer
+            k := dirección(canales[i])
+            si k.dueño = 0 y k.cola = nulo entonces
+                k.cola := reservar(COLA)
+                si k.cola = nulo entonces devolver SIN_MEMORIA fin
+                k.hz := hz
+                k.canales := can
+                k.bits := bits
+                k.volumen := 100
+                k.pausa := 0
+                k.al_acabar := 0
+                k.lee := 0
+                k.escribe := 0
+                k.nombre[0] := 0
+                si actual.nombre <> nulo entonces copiar_hasta(dirección(k.nombre[0]), actual.nombre, 16) fin
+                k.dueño := actual.id
+                cambios_sonido := cambios_sonido + 1
+                devolver i + 1
+            fin
+        fin
+        devolver EN_USO
+    fin
+
+    ; pasa n octetos de d (del programa) a la cola, esperando si está llena
+    función dar(c: nat32, d: nat32, n: nat32): nat32
+        variable k: puntero a Canal
+        variable hecho, libre, t, pos, ahora, espera: nat32
+        espera := c yb 0x80000000
+        k := canal_mío(c yb 0x7FFFFFFF)
+        si k = nulo entonces devolver NO_VALE fin
+        si n = 0 entonces devolver 0 fin
+        si n > 0x1000000 o no puede(d, n, falso) entonces devolver NO_VALE fin
+        hecho := 0
+        mientras hecho < n hacer
+            si k.dueño <> actual.id o k.cola = nulo o no hay_servicio_sonido() entonces devolver hecho fin
+            libre := COLA - en_cola(k)
+            si libre = 0 entonces
+                si espera <> 0 o actual.matar entonces devolver hecho fin
+                despierta_servicio()
+                dormir(1)
+            sino
+                ahora := n - hecho
+                si ahora > libre entonces ahora := libre fin
+                ; (en dos trozos si da la vuelta a la cola)
+                pos := k.escribe yb (COLA - 1)
+                t := ahora
+                si t > COLA - pos entonces t := COLA - pos fin
+                copiar_memoria(k.cola + pos, puntero(d + hecho), t)
+                si ahora > t entonces copiar_memoria(k.cola, puntero(d + hecho + t), ahora - t) fin
+                k.escribe := k.escribe + ahora
+                hecho := hecho + ahora
+                despierta_servicio()
+            fin
+        fin
+        devolver hecho
+    fin
+
+    función orden_canal(c: nat32, qué: nat32, v: nat32): nat32
+        variable k: puntero a Canal
+        variable i: nat32
+        si c >= PRIMERA_VOZ entonces
+            ; una voz de la 194 (un .WAV que toca el servicio_sonido)
+            si qué = C_CERRAR entonces manda(O_PARAR_VOZ, c, actual.id, nulo) fin
+            devolver 0
+        fin
+        k := canal_mío(c)
+        si k = nulo entonces devolver NO_VALE fin
+        según nat16(qué)
+            caso C_CERRAR:
+                suelta_canal(k)
+                despierta_servicio()
+                devolver 0
+            caso C_VOLUMEN:
+                si v > 100 entonces v := 100 fin
+                k.volumen := v
+                cambios_sonido := cambios_sonido + 1
+                devolver 0
+            caso C_PAUSA:
+                k.pausa := v yb 1
+                devolver 0
+            caso C_VACIAR:
+                k.lee := k.escribe
+                devolver 0
+            caso C_EN_COLA: devolver en_cola(k)
+            caso C_TOCADOS: devolver k.lee
+            caso C_ESPERAR:
+                i := 0
+                mientras k.dueño = actual.id y en_cola(k) > 0 y hay_servicio_sonido() y no actual.matar y i < 6000 hacer
+                    dormir(1)
+                    i := i + 1
+                fin
+                devolver 0
+            caso C_CERRAR_AL_ACABAR:
+                k.al_acabar := 1
+                despierta_servicio()
+                devolver 0
+        fin
+        devolver NO_VALE
+    fin
+
+    ; los canales, para el mezclador (o para el servicio_sonido)
+    función da_canales(d: puntero a Info_canal)
+        variable i: nat32
+        variable k: puntero a Canal
+        para i desde 0 hasta MAX_CANALES - 1 hacer
+            k := dirección(canales[i])
+            d[i].dueño := k.dueño
+            d[i].hz := k.hz
+            d[i].canales := k.canales
+            d[i].bits := k.bits
+            d[i].volumen := k.volumen
+            d[i].pausa := k.pausa ob (k.al_acabar << 1)
+            d[i].en_cola := en_cola(k)
+            d[i].tocados := k.lee
+            copiar_memoria(dirección(d[i].nombre[0]), dirección(k.nombre[0]), 16)
+            si k.dueño = 0 entonces d[i].en_cola := 0 fin
+        fin
+    fin
+
+    ; ---- lo que usan el escritorio y el resto del núcleo ----
+    público función pon_volumen(v: nat32)
+        si v > 100 entonces v := 100 fin
+        si v <> volumen_general entonces
+            volumen_general := v
+            cambios_sonido := cambios_sonido + 1
+            despierta_servicio()
+        fin
+    fin
+
+    público función pon_silencio(s: bool)
+        si s <> silencio entonces
+            silencio := s
+            cambios_sonido := cambios_sonido + 1
+            despierta_servicio()
+        fin
+    fin
+
+    ; sube (o baja, con n negativo) el volumen general; con la rueda del
+    ; ratón sobre el icono de la bandeja. Quita el silencio y hace «clic»
+    público función subir_volumen(n: ent32)
+        variable v: ent32
+        v := ent32(volumen_general) + n
+        si v < 0 entonces v := 0 fin
+        si v > 100 entonces v := 100 fin
+        pon_volumen(nat32(v))
+        pon_silencio(falso)
+        sonar(SS_VOLUMEN)
+    fin
+
+    ; un sonido del sistema (si los hay y no está en silencio)
+    público función sonar(cuál: nat32)
+        si no sonidos_sistema o silencio o no hay_tarjeta() o actual = servicio_sonido entonces devolver fin
+        manda(O_SISTEMA, cuál, 0, nulo)
+    fin
+
+    ; tocar un .WAV (la ruta, entera con su letra): la 194
+    público función tocar_archivo(ruta: puntero a byte): nat32
+        variable v: nat32
+        si no hay_tarjeta() entonces devolver NO_HAY fin
+        voz_siguiente := voz_siguiente + 1
+        si voz_siguiente >= 0x10000 entonces voz_siguiente := 1 fin
+        v := PRIMERA_VOZ + voz_siguiente
+        manda(O_WAV, v, actual.id, ruta)
+        devolver v
+    fin
+
+    ; antes de apagar o reiniciar: que la tarjeta se pare sin ruido (y lo
+    ; cambiado del volumen quede guardado)
+    público función callar_sonido()
+        si hay_servicio_sonido() entonces manda(O_CALLAR, 0, 0, nulo) fin
+    fin
+
+    ; ¿suena algo del sistema o de un programa? (para esperar al sonido de
+    ; apagar)
+    público función suena(): bool
+        devolver hay_tarjeta() y (estado_sonido.voces > 0 o n_órdenes > 0)
+    fin
+
+    función general(qué: nat32, a: nat32, v: nat32): nat32
+        variable p: puntero a Estado_sonido
+        variable k: puntero a Canal
+        según nat16(qué)
+            caso G_ESTADO:
+                si no puede(a, tamaño(Estado_sonido), cierto) entonces devolver NO_VALE fin
+                p := puntero(a)
+                copiar_memoria(puntero(a), puntero(dirección(estado_sonido)), tamaño(Estado_sonido))
+                si no hay_servicio_sonido() entonces p.tarjeta := TARJETA_NINGUNA fin
+                p.volumen := volumen_general
+                p.silencio := 0
+                si silencio entonces p.silencio := 1 fin
+                p.sistema := 0
+                si sonidos_sistema entonces p.sistema := 1 fin
+                p.cambios := cambios_sonido
+                si hay_tarjeta() entonces devolver 1 fin
+                devolver 0
+            caso G_VOLUMEN:
+                si v <> 0xFFFFFFFF entonces pon_volumen(v) fin
+                devolver volumen_general
+            caso G_SILENCIO:
+                si v = 2 entonces pon_silencio(no silencio) sino si v <= 1 entonces pon_silencio(v = 1) fin
+                si silencio entonces devolver 1 fin
+                devolver 0
+            caso G_SISTEMA:
+                sonar(v)
+                devolver 0
+            caso G_PROBAR:
+                si no hay_tarjeta() entonces devolver NO_HAY fin
+                manda(O_PROBAR, v yb 3, 0, nulo)
+                devolver 0
+            caso G_SONIDOS:
+                si v <= 1 entonces
+                    si sonidos_sistema <> (v = 1) entonces
+                        sonidos_sistema := v = 1
+                        cambios_sonido := cambios_sonido + 1
+                        despierta_servicio()
+                    fin
+                fin
+                si sonidos_sistema entonces devolver 1 fin
+                devolver 0
+            caso G_SUBIR:
+                subir_volumen(ent32(v))
+                devolver volumen_general
+            caso G_VOLUMEN_CANAL:
+                si a < 1 o a > MAX_CANALES entonces devolver NO_VALE fin
+                k := dirección(canales[a - 1])
+                si k.dueño = 0 entonces devolver NO_VALE fin
+                si v > 100 entonces v := 100 fin
+                k.volumen := v
+                cambios_sonido := cambios_sonido + 1
+                devolver 0
+            caso G_CANALES:
+                si no puede(a, MAX_CANALES * tamaño(Info_canal), cierto) entonces devolver NO_VALE fin
+                da_canales(puntero(a))
+                devolver MAX_CANALES
+        fin
+        devolver NO_VALE
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que solo puede el servicio_sonido
+    ; -------------------------------------------------------------------------
+    función apuntarse(): nat32
+        variable p: puntero a nat32
+        si hay_servicio_sonido() entonces
+            si servicio_sonido = actual entonces devolver 0 fin
+            devolver EN_USO
+        fin
+        si no actual.servicio o actual.sello <> SELLO_SONIDO entonces devolver NO_VALE fin   ; (PROTEGE) por su sello (de \HISPA), no por su nombre
+        servicio_sonido := actual
+        servicio_id := actual.id
+        sonido_listo := falso
+        zona := ZONA_INICIO
+        n_trozos := 0
+        llenar(puntero(dirección(estado_sonido)), tamaño(Estado_sonido), 0)
+        estado_sonido.pci := 0xFFFFFFFF
+        estado_sonido.dma_isa := 0xFFFFFFFF
+        sin_tarjeta_sonido := falso
+        cambios_sonido := cambios_sonido + 1
+        ; los puertos: IOPL 3 en las banderas que repondrá «iretd» (como RED.BIN)
+        p := puntero(actual.pila_tope - 12)
+        valor(p) := valor(p) ob 0x3000
+        devolver 0
+    fin
+
+    función memoria_dma(n: nat32, física: nat32, baja: nat32): nat32
+        variable m, i, v: nat32
+        variable f: puntero a nat32
+        si n = 0 o n > 16 entonces devolver NO_VALE fin
+        si zona + n * PÁGINA > ZONA_FINAL entonces devolver SIN_MEMORIA fin
+        si no puede(física, 4, cierto) entonces devolver NO_VALE fin
+        si baja <> 0 entonces m := reservar_seguidos_bajo(n) sino m := reservar_seguidos(n) fin
+        si m = 0 entonces devolver SIN_MEMORIA fin
+        para i desde 0 hasta n - 1 hacer
+            si no mapear(actual.cr3, zona + i * PÁGINA, m + i * PÁGINA, ESCRIBIR ob USUARIO) entonces
+                mientras i < n hacer
+                    soltar_marco(m + i * PÁGINA)
+                    i := i + 1
+                fin
+                devolver SIN_MEMORIA
+            fin
+        fin
+        v := zona
+        zona := zona + n * PÁGINA
+        f := puntero(física)
+        valor(f) := m
+        devolver v
+    fin
+
+    función registros(física: nat32, octetos: nat32): nat32
+        variable d, n, i, v: nat32
+        d := física yb (PÁGINA - 1)
+        n := (d + octetos + PÁGINA - 1) div PÁGINA
+        si octetos = 0 o n > 16 o n_trozos >= MAX_TROZOS entonces devolver NO_VALE fin
+        si zona + n * PÁGINA > ZONA_FINAL entonces devolver SIN_MEMORIA fin
+        si física < límite entonces devolver NO_VALE fin
+        para i desde 0 hasta n - 1 hacer
+            si no mapear(actual.cr3, zona + i * PÁGINA, (física yb 0xFFFFF000) + i * PÁGINA, ESCRIBIR ob USUARIO ob 0x18) entonces devolver SIN_MEMORIA fin
+        fin
+        trozo_v[n_trozos] := zona
+        trozo_n[n_trozos] := n
+        n_trozos := n_trozos + 1
+        v := zona + d
+        zona := zona + n * PÁGINA
+        devolver v
+    fin
+
+    función intercambio(a: nat32, b: nat32, espera: nat32): nat32
+        variable p: puntero a Para_servicio
+        variable i, n, bi: nat32
+        variable e: puntero a Estado_sonido
+        si a <> 0 entonces
+            si no puede(a, tamaño(Estado_sonido), falso) entonces devolver NO_VALE fin
+            e := puntero(a)
+            si e.tarjeta <> estado_sonido.tarjeta o e.salida <> estado_sonido.salida o e.auriculares <> estado_sonido.auriculares entonces cambios_sonido := cambios_sonido + 1 fin
+            copiar_memoria(puntero(dirección(estado_sonido)), puntero(a), tamaño(Estado_sonido))
+            estado_sonido.nombre[47] := 0
+            estado_sonido.códec[47] := 0
+            estado_sonido.detalle[79] := 0
+            si estado_sonido.tarjeta = TARJETA_NINGUNA entonces sin_tarjeta_sonido := cierto fin
+            sonido_listo := cierto
+        fin
+        si no puede(b, tamaño(Para_servicio), cierto) entonces devolver NO_VALE fin
+        ; si no hay nada pendiente, a dormir (una orden nueva o muestras lo despiertan)
+        si espera > 0 y n_órdenes = 0 entonces
+            bi := sin_interrupciones()
+            servicio_espera := cierto
+            dormir(espera)
+            servicio_espera := falso
+            reponer(bi)
+        fin
+        p := puntero(b)
+        p.volumen := volumen_general
+        p.silencio := 0
+        si silencio entonces p.silencio := 1 fin
+        p.sistema := 0
+        si sonidos_sistema entonces p.sistema := 1 fin
+        p.cambios := cambios_sonido
+        da_canales(dirección(p.canales[0]))
+        bi := sin_interrupciones()
+        n := n_órdenes
+        para i desde 0 hasta MAX_ÓRDENES - 1 hacer
+            si i < n entonces copiar_memoria(puntero(dirección(p.órdenes[i])), puntero(dirección(órdenes[i])), tamaño(Orden_sonido)) fin
+        fin
+        n_órdenes := 0
+        reponer(bi)
+        p.n_órdenes := n
+        devolver n
+    fin
+
+    ; el servicio_sonido saca muestras de la cola de un canal (y lo cierra si lo
+    ; pidió el programa y ya no queda nada)
+    función sacar(c: nat32, d: nat32, n: nat32): nat32
+        variable k: puntero a Canal
+        variable hay, pos, t, bi: nat32
+        si c < 1 o c > MAX_CANALES entonces devolver NO_VALE fin
+        si n > COLA o no puede(d, n, cierto) entonces devolver NO_VALE fin
+        k := dirección(canales[c - 1])
+        bi := sin_interrupciones()
+        si k.dueño = 0 o k.cola = nulo entonces
+            reponer(bi)
+            devolver 0
+        fin
+        hay := en_cola(k)
+        si n > hay entonces n := hay fin
+        pos := k.lee yb (COLA - 1)
+        t := n
+        si t > COLA - pos entonces t := COLA - pos fin
+        si t > 0 entonces copiar_memoria(puntero(d), k.cola + pos, t) fin
+        si n > t entonces copiar_memoria(puntero(d + t), k.cola, n - t) fin
+        k.lee := k.lee + n
+        reponer(bi)
+        si k.al_acabar <> 0 y en_cola(k) = 0 entonces suelta_canal(k) fin
+        devolver n
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Cuando acaba una tarea (usuario.cas, en recoge_lo_suyo)
+    ; -------------------------------------------------------------------------
+    público función acabó_sonido(t: puntero a Tarea)
+        variable i, j, ord: nat32
+        si hay_servicio_sonido() y servicio_sonido = t entonces
+            ; la tarjeta deja de leer en su memoria, que vuelve a los marcos libres
+            si estado_sonido.pci <> 0xFFFFFFFF entonces
+                ord := pci_leer16(estado_sonido.pci, PCI_ORDEN)
+                pci_escribir16(estado_sonido.pci, PCI_ORDEN, ord yb 0xFFFB)
+            fin
+            si estado_sonido.dma_isa < 8 entonces
+                si estado_sonido.dma_isa >= 4 entonces
+                    sacar_puerto(0xD4, byte(0x04 ob (estado_sonido.dma_isa - 4)))
+                sino
+                    sacar_puerto(0x0A, byte(0x04 ob estado_sonido.dma_isa))
+                fin
+            fin
+            para i desde 0 hasta MAX_TROZOS - 1 hacer
+                si i < n_trozos entonces
+                    para j desde 0 hasta trozo_n[i] - 1 hacer desmapear(t.cr3, trozo_v[i] + j * PÁGINA) fin
+                fin
+            fin
+            n_trozos := 0
+            servicio_sonido := nulo
+            si estado_sonido.tarjeta = TARJETA_NINGUNA entonces sin_tarjeta_sonido := cierto fin
+            estado_sonido.tarjeta := TARJETA_NINGUNA
+            estado_sonido.voces := 0
+            n_órdenes := 0
+            para i desde 0 hasta MAX_CANALES - 1 hacer
+                si canales[i].dueño <> 0 entonces suelta_canal(dirección(canales[i])) fin
+            fin
+            cambios_sonido := cambios_sonido + 1
+            devolver
+        fin
+        para i desde 0 hasta MAX_CANALES - 1 hacer
+            si canales[i].dueño = t.id entonces suelta_canal(dirección(canales[i])) fin
+        fin
+        si hay_servicio_sonido() entonces manda(O_ACABÓ, t.id, 0, nulo) fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las llamadas (usuario.cas manda aquí de la 190 a la 199; la 194 va
+    ;  por tocar_archivo, con la ruta ya entera)
+    ; -------------------------------------------------------------------------
+    público función atender_sonido(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        si sin_sonido entonces devolver NO_HAY fin
+        según nat16(n)
+            caso 190: devolver abrir(a, b)
+            caso 191: devolver dar(a, b, c)
+            caso 192: devolver orden_canal(a, b, c)
+            caso 193: devolver general(a, b, c)
+            caso 195: devolver apuntarse()
+            caso 196:
+                si no actual.servicio o no es_servicio() entonces devolver NO_VALE fin   ; (PROTEGE)
+                devolver memoria_dma(a, b, c)
+            caso 197:
+                si no actual.servicio o no es_servicio() entonces devolver NO_VALE fin   ; (PROTEGE)
+                devolver registros(a, b)
+            caso 198:
+                si no actual.servicio o no es_servicio() entonces devolver NO_VALE fin   ; (PROTEGE)
+                devolver intercambio(a, b, c)
+            caso 199:
+                si no actual.servicio o no es_servicio() entonces devolver NO_VALE fin   ; (PROTEGE)
+                devolver sacar(a, b, c)
+        fin
+        devolver NO_VALE
+    fin
+
+    ; (dispositivos) la tarjeta que lleva el servicio_sonido de sonido (NO_HAY_PCI si
+    ; no hay servicio_sonido o no es PCI)
+    público función aparato_de_sonido(): nat32
+        si no hay_tarjeta() o estado_sonido.pci = 0xFFFFFFFF entonces devolver NO_HAY_PCI fin
+        devolver estado_sonido.pci
+    fin
+
+fin Sonido.

@@ -186,6 +186,13 @@ VERSION_085 = '0.8.5'
 VERSION_WIFI = VERSION_085
 # [GL] (21/11/2026) win32 1.1: con OpenGL (HispaGL: OPENGL32.DLL y GLU32.DLL,
 # GLPRUEBA y ENGRANA; docs/486/OPENGL.md)
+# (SONIDO, 21/11/2026) el sonido: en el núcleo (las llamadas 190 a 199,
+# sonido.cas; el altavoz de la bandeja y Configuración > Sonido), y el
+# paquete sonido (1.0): el servicio, SONIDO.BIN, y los sonidos del sistema;
+# suben win32 (1.1: DirectSound y WinMM suenan) y hvprun (0.9: el sonido de
+# los programas de Hispa Ventanas). Pide la base con las llamadas del sonido
+# (la que salga con esta rama; ver docs/PENTIUM.md, «El sonido»)
+VERSION_SONIDO = VERSION_085
 SISTEMA = [
     ('base', VERSION_085, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
@@ -227,14 +234,18 @@ SISTEMA = [
      'base >= ' + VERSION_WIFI + ', red >= ' + VERSION_WIFI, [
         ('WIFI.BIN', r'\HISPA\WIFI.BIN'), ('REDWIFI.BIN', r'\HISPA\REDWIFI.BIN'), ('WIFI.TXT', r'\HISPA\WIFI.TXT'),
         ('BCM43XX.FW', r'\HISPA\BCM43XX.FW'), ('BCM43XXH.FW', r'\HISPA\BCM43XXH.FW'), ('BCM43XX.TXT', r'\HISPA\BCM43XX.TXT')]),
-    ('hvprun', VERSION_08, 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio', 'base >= 0.7', [
+    ('sonido', '1.0', 'El sonido: el servicio de sonido (HD Audio, AC\'97 y Sound Blaster 16; SONIDO.BIN y la orden SONIDO) y los sonidos del sistema',
+     'base >= ' + VERSION_SONIDO, [
+        ('SONIDO.BIN', r'\HISPA\SONIDO.BIN'), ('INICIO.WAV', r'\HISPA\INICIO.WAV'), ('APAGAR.WAV', r'\HISPA\APAGAR.WAV'),
+        ('AVISO.WAV', r'\HISPA\AVISO.WAV'), ('ERROR.WAV', r'\HISPA\ERROR.WAV')]),
+    ('hvprun', '0.9', 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio (con su sonido)', 'base >= 0.7', [
         ('HVPRUN.BIN', r'\HISPA\HVPRUN.BIN')]),
     ('oficina', '1.0', 'La oficina de Hispa-386: Facturas, Pluma, Cuentas y Mirador', 'hvprun >= 0.7', [
         ('FACTURAS.HVP', r'\OFICINA\FACTURAS.HVP'), ('PLUMA.HVP', r'\OFICINA\PLUMA.HVP'),
         ('CUENTAS.HVP', r'\OFICINA\CUENTAS.HVP'), ('MIRADOR.HVP', r'\OFICINA\MIRADOR.HVP'),
         ('TIPOS.DAT', r'\OFICINA\TIPOS.DAT'), ('DICCIO.DAT', r'\OFICINA\DICCIO.DAT')]),
     # [WIN32] los programas de Windows de 32 bits y DirectX (docs/pentium/WIN32.md)
-    ('win32', '1.1', 'Programas de Windows de 32 bits, DirectX y OpenGL: WIN32.BIN, sus DLL y los ejemplos (Naves, GLPRUEBA)', 'base >= ' + VERSION_084, [
+    ('win32', '1.1', 'Programas de Windows de 32 bits, DirectX (con sonido) y OpenGL: WIN32.BIN, sus DLL y los ejemplos (Naves, GLPRUEBA)', 'base >= ' + VERSION_084, [
         ('WIN32.BIN', r'\HISPA\WIN32.BIN'),
         ('MSVCRT.DLL', r'\WIN32\MSVCRT.DLL'), ('UCRT.DLL', r'\WIN32\UCRT.DLL'), ('COMCTL32.DLL', r'\WIN32\COMCTL32.DLL'),
         ('WINMM.DLL', r'\WIN32\WINMM.DLL'), ('DDRAW.DLL', r'\WIN32\DDRAW.DLL'), ('DSOUND.DLL', r'\WIN32\DSOUND.DLL'),

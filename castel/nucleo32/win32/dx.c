@@ -10,8 +10,11 @@
  *                    con las que se han pulsado y soltado entre dos miradas),
  *                    el ratón (en las coordenadas del modo del juego); mandos,
  *                    no hay.
- *   HispaDXSonido    una tarjeta de mentira, en silencio: el tiempo pasa como
- *                    si sonara (hasta que Hispa-Pentium tenga sonido).
+ *   HispaDXSonido    (SONIDO) un canal del sonido de Hispa-Pentium (las llamadas
+ *                    190 a 193, nucleo32/sonido.cas): 48 kHz, 16 bits, estéreo,
+ *                    como el HD Audio de HSPSND; la mezcla de WINMM le da
+ *                    trozos de 2.048 tramas. Sin tarjeta, la de antes: en
+ *                    silencio, y el tiempo pasa como si sonara.
  *   HispaDXTic       la función del programa (la mezcla y los temporizadores
  *                    de WINMM) a la que se llama al pedir mensajes y en Sleep.
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
@@ -193,12 +196,49 @@ API(u32) HispaDXEntrada(i32 op, u32 a, u32 b)
 	return 0;
 }
 
-/* ---- el sonido: una tarjeta de 8 bits a 22.050 Hz, en silencio ---- */
-static u32 cola_hasta;          /* (ms) cuándo acaba lo que se le ha dado */
+/* ---- (SONIDO) el sonido: un canal de Hispa-Pentium; sin tarjeta, una de
+ * mentira de 8 bits a 22.050 Hz, en silencio ---- */
+#define SC_ABRIR_CANAL 190
+#define SC_DAR 191
+#define SC_CANAL 192
+#define C_VACIAR 3
+#define C_EN_COLA 4
+#define TROZO_SND 8192                 /* 2.048 tramas de 16 bits en estéreo */
+#define EN_COLA_MAX (3 * TROZO_SND)    /* (unos 130 ms: lo que un juego puede ir por delante) */
+static u32 canal_snd;                  /* 0: aún no se ha mirado; 0xFFFFFFFF: no hay tarjeta */
+static int hay_canal(void)
+{
+	if (!canal_snd) {
+		u32 c = sc(SC_ABRIR_CANAL, 48000, 2 | 16 << 8, 0);
+		canal_snd = ES_ERROR(c) || c > 64 ? 0xFFFFFFFF : c;
+		traza("DirectSound/WinMM: %s", canal_snd == 0xFFFFFFFF ? "no hay tarjeta de sonido (en silencio)" : "el canal de sonido, abierto");
+	}
+	return canal_snd != 0xFFFFFFFF;
+}
+static u32 cola_hasta;          /* (ms) cuándo acaba lo que se le ha dado (sin tarjeta) */
 API(i32) HispaDXSonido(i32 op, u32 a, u32 b, u32 c)
 {
 	u32 ahora = sys_tics() * 10;
-	(void)a; (void)c;
+	(void)c;
+	if (hay_canal()) {
+		switch (op) {
+		case 0:
+			return 3;                         /* «AC'97»: 48 kHz, 16 bits, estéreo */
+		case 1:                               /* un trozo: b octetos en a */
+			sc(SC_DAR, canal_snd, LIN(a), b);
+			return 1;
+		case 2: {                             /* cuántos trozos caben sin esperar */
+			u32 n = sc(SC_CANAL, canal_snd, C_EN_COLA, 0);
+			if (ES_ERROR(n) || n >= EN_COLA_MAX)
+				return 0;
+			return (EN_COLA_MAX - n) / TROZO_SND;
+		}
+		case 3:
+			sc(SC_CANAL, canal_snd, C_VACIAR, 0);
+			return 1;
+		}
+		return 0;
+	}
 	switch (op) {
 	case 0:
 		return 1;                             /* «una Sound Blaster de 8 bits» */

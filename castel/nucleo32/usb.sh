@@ -96,6 +96,13 @@ python3 -I $RAIZ/tools/genym.py $RAIZ/build/gen/hispadrv/ym_tablas.inc
 python3 -I $RAIZ/tools/mkhvp.py $RAIZ/programas/hispadrv.asm $RAIZ/build/HISPADRV.HVP > /dev/null
 cp $RAIZ/build/HISPADRV.HVP $W/m/JUEGOS/
 cp $RAIZ/tests/hispadrv/PRUEBA.MD $W/m/JUEGOS/
+# (SONIDO) y los de 8 bits, que desde el 21/11 corren en HVPRUN (y suenan):
+# Hispa-Nes con HISPA1.NES e Hispa-System con BUZO.SMS, nuestras
+python3 -I $RAIZ/tools/mkhvp.py $RAIZ/programas/hispanes.asm $W/sn/HISPANES.HVP > /dev/null
+python3 -I $RAIZ/tools/asm6502.py $RAIZ/nes/hispa1/hispa1.s $W/sn/HISPA1.NES > /dev/null
+python3 -I $RAIZ/tools/mkhvp.py $RAIZ/programas/hispasms.asm $W/sn/HISPASMS.HVP > /dev/null
+python3 -I $RAIZ/tools/asmz80.py $RAIZ/sms/buzo/buzo.s $W/sn/BUZO.SMS > /dev/null
+cp $W/sn/HISPANES.HVP $W/sn/HISPA1.NES $W/sn/HISPASMS.HVP $W/sn/BUZO.SMS $W/m/JUEGOS/
 mkdir -p $W/m/boot/grub
 { cat <<'G'
 set timeout=8

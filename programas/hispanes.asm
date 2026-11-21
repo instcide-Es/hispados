@@ -44,6 +44,7 @@ JUEGO_AN    equ 256                 ; [PANTALLA COMPLETA] el cuadro de la consol
 JUEGO_AL    equ 240
 FULL_MAX    equ 3                   ; escala entera máxima (la medida de «pant»)
 TICS_SEG    equ 1193182             ; tics del reloj (el contador 8254) por segundo
+AJ_RELOJ    equ 20                  ; (SONIDO) (HVPRUN) aj_leer: el reloj fino, como en Hispa-Snes
 TICS_CUADRO equ 19854               ; y por cuadro (60,1 por segundo)
 TICS_MUESTRA equ 54                 ; y por muestra de sonido (22.050 Hz)
 ROM_MAX     equ 3 * 1024 * 1024
@@ -269,6 +270,13 @@ entrada:
         call hvl_cad
         mov byte [edi], 0
 .c2:
+        ; (SONIDO) ¿Hispa Ventanas o HVPRUN (Hispa-Pentium)? Como Hispa-Snes: en
+        ; HVPRUN no hay DPMI ni puertos (ni HSPJOY): el reloj fino de HVPRUN y
+        ; su sonido (snd_info y snd_pcm, sobre el de Hispa-Pentium)
+        mov eax, AJ_TXT_VERSION
+        HV aj_leer
+        test eax, eax
+        setz [en_hvprun]
         call carpeta_lee            ; la última de Abrir ROM (HISPANES.INI)
         pop edi
         ; los parámetros
@@ -320,9 +328,12 @@ entrada:
 .n4:
         mov byte [edi], 0
 .sn:
+        cmp byte [en_hvprun], 0     ; (SONIDO)
+        jne .sinreal
         call cero_busca
-        call paleta_haz
         call mandos_busca
+.sinreal:
+        call paleta_haz
         mov eax, [hv_api + HV_tec_mapa * 4]
         mov [p_mapa], eax
         mov eax, AJ_HAY_SONIDO
@@ -1337,6 +1348,8 @@ paleta_haz:
 ; vueltas por tic) o en modo 2: se pregunta con la orden de «leer atrás».
 ; -> EAX (da la vuelta cada hora: solo valen las diferencias)
 reloj:
+        cmp byte [en_hvprun], 0     ; (SONIDO) en HVPRUN, su reloj fino
+        jne .hvprun
         push ebx
         push ecx
         push edx
@@ -1379,6 +1392,15 @@ reloj:
         pop edx
         pop ecx
         pop ebx
+        ret
+.hvprun:
+        mov eax, AJ_RELOJ
+        HV aj_leer
+        test eax, eax
+        jnz .h1
+        HV tics                     ; (un HVPRUN de antes: los tics de la BIOS)
+        shl eax, 16
+.h1:
         ret
 
 ; el puntero a la dirección lineal 0 (para los datos de la BIOS y HSPJOY)
@@ -1727,6 +1749,15 @@ snd_busca:
         mov dword [snd_bloque], 1024
         cmp byte [snd_hay], 0
         je .x
+        cmp byte [en_hvprun], 0     ; (SONIDO) en HVPRUN: su snd_info
+        je .dos
+        HV snd_info                 ; -> EAX=tarjeta (-1: no hay)
+        test eax, eax
+        jg .tarjeta
+        mov byte [snd_hay], 0
+        mov byte [snd_si], 0
+        jmp .x
+.dos:
         call .limpia
         mov dword [rmcs+0x1C], 0xD700
         mov ebx, 0x002F
@@ -1745,6 +1776,7 @@ snd_busca:
         int 0x31
         jc .x
         mov al, [rmcs+0x1C]         ; 1 Sound Blaster, 2 SB16, 3 AC'97, 4 HD Audio
+.tarjeta:
         cmp al, 2
         je .x
         mov dword [snd_bloque], 900
@@ -2240,6 +2272,7 @@ ROM_VARS    equ 8                   ; rom_prg ... rom_entren (dd seguidos)
             alignb 4
 ven         resd 1
 cero        resd 1
+en_hvprun   resb 1                  ; (SONIDO) 1: dentro de HVPRUN (Hispa-Pentium)
 p_mapa      resd 1                  ; el mapa de teclas pulsadas de Hispa Ventanas
 joy         resd 1                  ; los datos de HSPJOY (0: no está)
 joy_seg     resd 1                  ;   y su segmento

@@ -1011,4 +1011,67 @@ módulo Llamadas
     público constante A_LA_IZQUIERDA = 0xFFFFFFFE
     público constante A_LA_DERECHA = 0xFFFFFFFD
 
+    ; -------------------------------------------------------------------------
+    ;  (SONIDO) El sonido (las llamadas 190 a 194, nucleo32/sonido.cas; el
+    ;  servicio de sonido, SONIDO.BIN, lo mezcla todo y lo toca). Un programa
+    ;  abre un canal con la forma de sus muestras (de 4.000 a 96.000 Hz, uno o
+    ;  dos canales, 8 bits sin signo o 16 con signo) y le va dando muestras:
+    ;  si su cola (64 K) está llena, dar_muestras espera. Varios programas
+    ;  suenan a la vez; cada canal tiene su volumen, y encima va el general.
+    ;  Para lo sencillo, tocar_wav(ruta): un .WAV (PCM de 8 o 16 bits) que el
+    ;  servicio toca solo, sin que el programa espere.
+    ; -------------------------------------------------------------------------
+    público constante SONIDO_CERRAR = 0             ; las órdenes de orden_canal
+    público constante SONIDO_VOLUMEN = 1            ; (dato: de 0 a 100)
+    público constante SONIDO_PAUSA = 2              ; (dato: 1 en pausa, 0 sigue)
+    público constante SONIDO_VACIAR = 3             ; tira lo que haya en la cola
+    público constante SONIDO_EN_COLA = 4            ; -> los octetos que aún no ha sacado el servicio
+    público constante SONIDO_ESPERAR = 5            ; espera a que se vacíe la cola
+    público constante SONIDO_TOCADOS = 6            ; -> los octetos sacados desde que se abrió
+    público constante SONIDO_CERRAR_AL_ACABAR = 7   ; se cierra solo cuando se acabe la cola
+    público constante SISTEMA_AVISO = 2             ; los sonidos del sistema (sonar)
+    público constante SISTEMA_ERROR = 3
+
+    ; un canal: frecuencia, canales (1 o 2) y bits (8 o 16) -> su número, o
+    ; un error (NO_HAY: no hay tarjeta de sonido)
+    público función abrir_canal(hz: nat32, canales: nat32, bits: nat32): nat32
+        devolver llamada(190, hz, canales ob (bits << 8), 0)
+    fin
+
+    ; n octetos de muestras al canal c (esperando si la cola está llena) ->
+    ; los que han entrado
+    público función dar_muestras(c: nat32, muestras: puntero a byte, n: nat32): nat32
+        devolver llamada(191, c, nat32(muestras), n)
+    fin
+
+    ; lo mismo, sin esperar: solo lo que quepa ahora
+    público función dar_muestras_ya(c: nat32, muestras: puntero a byte, n: nat32): nat32
+        devolver llamada(191, c ob 0x80000000, nat32(muestras), n)
+    fin
+
+    ; una orden para el canal c (SONIDO_...)
+    público función orden_canal(c: nat32, orden: nat32, dato: nat32): nat32
+        devolver llamada(192, c, orden, dato)
+    fin
+
+    público función cerrar_canal(c: nat32)
+        llamada(192, c, SONIDO_CERRAR, 0)
+    fin
+
+    ; tocar un archivo .WAV sin esperar -> el número de su voz (con
+    ; cerrar_canal se para), o un error
+    público función tocar_wav(ruta: puntero a byte): nat32
+        devolver llamada(194, nat32(ruta), 0, 0)
+    fin
+
+    ; el volumen general (de 0 a 100; con 0xFFFFFFFF, solo se pregunta)
+    público función volumen_general(v: nat32): nat32
+        devolver llamada(193, 1, 0, v)
+    fin
+
+    ; un sonido del sistema (SISTEMA_AVISO, SISTEMA_ERROR), si los hay
+    público función sonar(cuál: nat32)
+        llamada(193, 3, 0, cuál)
+    fin
+
 fin Llamadas.

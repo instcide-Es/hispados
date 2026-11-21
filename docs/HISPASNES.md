@@ -87,7 +87,8 @@ clic en `HISPASNS.HVP`, que lo abre con HVPRUN). Allí no hay modo real ni
 puertos: el emulador lo nota (en HVPRUN, `aj_leer` no da el texto de la
 versión de Ventanas) y entonces no busca HSPJOY (INT 2Fh), no lee el 8254
 (toma el **reloj fino de HVPRUN**, `aj_leer 20`, que se ha añadido para esto)
-y va **sin sonido** (HVPRUN aún no lo tiene). Las teclas de Hispa-Pentium
+y (SONIDO, 21/11) **suena** si Hispa-Pentium tiene tarjeta: HVPRUN lo dice
+(`aj_leer 9`) y pasa `snd_pcm2` y `snd_orden` al sonido de Hispa-Pentium. Las teclas de Hispa-Pentium
 llegan como pulsaciones sin aviso de soltar: cada una vale unos cuadros (como
 en Hispa Ventanas cuando falta el mapa de teclas), así que conviene dejarla
 pulsada (la repetición del teclado la mantiene).

@@ -104,6 +104,7 @@ hpu_salto:
 %include "ppantalla.inc"            ; la ventana, la paleta, presentar y los sucesos
 %include "pdos.inc"                 ; los archivos y las interrupciones de DOS
 %include "pfaltan.inc"              ; lo que el gestor espera del escritorio
+%include "psonido.inc"              ; (SONIDO) el sonido, sobre el de Hispa-Pentium
 
 ; ---- la tabla de la interfaz, en el orden de api.inc ----
 ; (las de nombre HVA_x, si las hay, sustituyen a las de Ventanas)

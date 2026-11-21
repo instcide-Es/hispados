@@ -7,6 +7,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 
 ## En marcha (21/11/2026)
 - [x] ~~**OpenGL** (HispaGL: OpenGL 1.1 por programa, en Hispa-486 y en Hispa-Pentium) — rama opengl~~ (21/11: [../486/OPENGL.md](../486/OPENGL.md))
+- [x] ~~**Sonido** (HD Audio, AC'97, Sound Blaster 16; mezcla, volumen, bandeja, Configuración > Sonido, sonidos del sistema, DirectSound y HVPRUN) — rama pentium-sonido~~ (21/11: docs/PENTIUM.md §14 decies; falta probarlo en los equipos)
 - [ ] **Navegador web** (NetSurf de Hispa-486 con JavaScript, sobre la red y el HTTPS de Pentium) — rama pentium-navegador
 - [ ] **CD y DVD** (ATAPI por IDE, SATA y USB; ISO 9660 + Joliet; meter y sacar en marcha) y **montar imágenes .ISO como CD virtual** — rama pentium-cd
 - [ ] **Controles de ventana completos** (pestañas, rejillas con columnas, barra de herramientas, recuadros, fechas, listas desplegables) y ClicGest 0.2 — rama controles-erp
@@ -25,15 +26,15 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [x] ~~Menú Inicio con todos los programas («Todos los programas» con carpetas, por el tipo de cada paquete), fijados y más usados, y Cerrar sesión / Reiniciar / Apagar equipo siempre a la vista~~ — rama pentium-menu (21/11: docs/PENTIUM.md, «El menú Inicio y los atajos de teclado»)
 - [x] ~~La rueda del ratón en todo el entorno: menús y submenús largos, rejillas de controles.cas, Bloc, Consola (historial), Explorador, Administrador de dispositivos, Actualizaciones; Ctrl+rueda, la letra o la vista~~ — ramas pentium-menu y pentium-rueda (21/11; ClicGest, en su versión siguiente)
 - [x] ~~Atajos de teclado de todo el sistema: Alt+F4, Alt+Tab, Logo (E, D, R, L), Ctrl+Esc, Alt+Espacio, Ctrl+Alt+Supr (Administrador de tareas), Impr Pant, F1~~ — rama pentium-menu (21/11)
-- [ ] Barra de tareas: agrupar ventanas, vista previa, bandeja con más iconos (sonido; el Wi-Fi, hecho)
-- [ ] Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido, ratón, teclado, red y Wi-Fi, energía, usuarios, programas (hecho: actualizaciones y «Programas instalados»)
+- [ ] Barra de tareas: agrupar ventanas, vista previa (la bandeja ya lleva el Wi-Fi, el sonido —volumen con la rueda, silencio— y Escudo)
+- [ ] Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido (hecho el 21/11: Configuración > Sonido), ratón, teclado, red y Wi-Fi, energía, usuarios, programas (hecho: actualizaciones y «Programas instalados»)
 - [x] ~~**Gestor de programas instalados** por tipos para desinstalarlos (como «Agregar o quitar programas»): árbol por tipos, tamaño, fecha, dependencias, desinstalar (con lo que lo necesita), reparar, ver archivos, los programas sueltos con «Borrar»; y en la misma ventana, «Programas y actualizaciones» con pestañas Pendientes, Al día, Instaladas y Sin instalar, con búsqueda~~ — rama pentium-programas (21/11: PROGRAMA.BIN, el campo `tipo=` de los paquetes; docs/PENTIUM.md §13)
 - [ ] Temas y fondo de escritorio; letras TrueType del sistema; protector de pantalla
 - [ ] Portapapeles con imágenes y archivos; arrastrar y soltar entre programas
 - [ ] Ayuda del sistema con buscador
 
 ## El sistema
-- [ ] Sonido: HD Audio y AC'97, mezclador, sonidos del sistema
+- [x] ~~Sonido: HD Audio y AC'97, mezclador, sonidos del sistema~~ (21/11, rama pentium-sonido: SONIDO.BIN con HD Audio, AC'97 y Sound Blaster 16, varios programas a la vez, el volumen general y el de cada uno, los auriculares, los sonidos del sistema; docs/PENTIUM.md §14 sexies). Queda: probarlo en el HP Mini, el Toshiba y el MacBook 2017; grabar
 - [x] ~~Wi-Fi (el núcleo de C de Hispa-486: Broadcom y Atheros) con su ventanita~~ — rama pentium-wifi (21/11: WIFI.BIN, REDWIFI.BIN, el icono con rayitas, Configuración › Red; a falta de probarlo en el HP Mini)
 - [ ] Usuarios con contraseña y carpetas propias; permisos
 - [ ] Suspender e hibernar (ACPI S3/S4)
@@ -53,7 +54,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] Compresor ZIP
 - [ ] **Herramienta de PDF propia** (en lugar de PDF24, que es de 64 bits y no libre): unir y separar, girar/ordenar/quitar páginas, comprimir, PDF ↔ imágenes, PDF a texto, poner y quitar contraseña; con piezas libres (qpdf…) y el Lector de la oficina; al ser nuestra, se compila tal cual para Hispa-64 (pedido de Carlos 21/11)
 - [x] ~~Calculadora, Reloj, Mapa de caracteres~~ (21/11, rama pentium-accesorios: la Calculadora estándar, científica y de oficina —IVA, cinta, euros— con cuentas decimales; el Reloj con calendario, festivos, alarma, cronómetro, cuenta atrás y poner en hora; el Mapa de caracteres con copiar y la tecla de cada letra; paquete «accesori»: docs/PENTIUM.md §14 sexies)
-- [ ] Juegos: los emuladores (Hispa-Nes, Hispa-System, Hispa-Snes, Hispa-Drive) con sonido en Pentium
+- [ ] Juegos: los emuladores (Hispa-Nes, Hispa-System, Hispa-Snes, Hispa-Drive) con sonido en Pentium (21/11: HVPRUN pasa el sonido; Hispa-Snes, Hispa-Nes e Hispa-System corren en HVPRUN y suenan; falta Hispa-Drive y los mandos)
 - [ ] Correo
 - [ ] ClicGest (programa de ClicGest, licencia propia): 0.1 publicado; 0.2 con pestañas en marcha
 

@@ -103,6 +103,9 @@
 ;  Lo que se escribe, se borra o se cambia de nombre en la zona protegida
 ;  (\HISPA de la unidad del sistema y lo que dice la tabla), y lo que se lee
 ;  de un secreto, solo lo puede quien tiene permiso: si no, DENEGADO.
+;  (SONIDO) 190 a 199: el sonido, con el servicio de sonido (SONIDO.BIN):
+;       los canales de los programas, el volumen, los sonidos del sistema y
+;       tocar un .WAV (la 194); los cuenta sonido.cas
 ;
 ;  Los nombres de archivo que no empiezan por una barra se entienden desde la
 ;  carpeta de trabajo de la tarea (la hereda de quien la lanza); «.» y «..»
@@ -125,7 +128,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -833,6 +836,19 @@ módulo Usuario
                 devolver t.sello
             caso 180..189:
                 devolver atender_win32(n, a, b, c)     ; [WIN32] los programas de Windows (win32.cas)
+            caso 190..199:
+                ; (SONIDO) el sonido (sonido.cas); si no hay servicio de sonido,
+                ; se pone en marcha (una vez) al abrir un canal o tocar un .WAV
+                si (n = 190 o n = 194) y no hay_tarjeta() y lanza_sonido(nulo) entonces fin
+                si n = 194 entonces
+                    ; tocar un .WAV: la ruta, entera y con su letra, para el servicio
+                    si no ruta_de_usuario(a, ruta, u) o u >= MAX_UNIDADES entonces devolver NO_VALE fin
+                    ruta2[0] := unidades[u].letra
+                    ruta2[1] := ':'
+                    copiar_hasta(dirección(ruta2[2]), ruta, 108)
+                    devolver tocar_archivo(ruta2)
+                fin
+                devolver atender_sonido(n, a, b, c)
         fin
         devolver NO_VALE
     fin
@@ -865,6 +881,56 @@ módulo Usuario
             si t = nulo o t.estado = ACABADA entonces romper fin
         fin
         devolver hay_servicio()
+    fin
+
+    ; (SONIDO) pone en marcha el servicio de sonido (SONIDO.BIN, de la unidad
+    ; del sistema o de su \HISPA) y espera a que se apunte (hasta 3 s); con
+    ; «/ARRANQUE» (desde el escritorio), toca el sonido de inicio. Falso si
+    ; no puede ser: con «sinsonido», si ya dijo que no hay tarjeta o si no está
+    público función lanza_sonido(args: puntero a byte): bool
+        variable t: puntero a Tarea
+        variable e, k, id: nat32
+        si Sonido.sin_sonido o Sonido.sin_tarjeta_sonido entonces devolver falso fin
+        si hay_servicio_sonido() entonces devolver cierto fin
+        si args = nulo entonces args := "/SERVICIO" fin
+        t := cargar_archivo("\\SONIDO.BIN", args, e)
+        si t = nulo entonces
+            Sonido.sin_tarjeta_sonido := cierto
+            devolver falso
+        fin
+        t.padre := 0
+        t.terminal := 0
+        t.salida := SIN_SALIDA
+        t.carpeta[0] := 0
+        t.unidad := 0
+        id := t.id
+        k := 0
+        ; (que se apunte y diga qué tarjeta tiene)
+        mientras no (hay_servicio_sonido() y sonido_listo) y k < 400 hacer
+            dormir(1)
+            k := k + 1
+            t := tarea_de(id)
+            si t = nulo o t.estado = ACABADA entonces romper fin
+        fin
+        devolver hay_servicio_sonido()
+    fin
+
+    ; (SONIDO) el servicio de sonido al arrancar el escritorio, sin esperarlo
+    ; (con «/ARRANQUE»: suena el de inicio). Si no hay tarjeta, acaba solo
+    público función arranca_sonido()
+        variable t: puntero a Tarea
+        variable e: nat32
+        si Sonido.sin_sonido o Sonido.sin_tarjeta_sonido o hay_servicio_sonido() entonces devolver fin
+        t := cargar_servicio("SONIDO.BIN", "/ARRANQUE", e)    ; (PROTEGE) de la carpeta del sistema, con su sello
+        si t = nulo entonces
+            Sonido.sin_tarjeta_sonido := cierto
+            devolver
+        fin
+        t.padre := 0
+        t.terminal := 0
+        t.salida := SIN_SALIDA
+        t.carpeta[0] := 0
+        t.unidad := 0
     fin
 
     ; (TLS) pone en marcha el servicio TLS (TLS.BIN, nucleo32/tls/), como
@@ -1465,6 +1531,7 @@ módulo Usuario
         cerrar_ventanas_de(actual.id)
         soltar_terminales_de(actual.id)
         acabó(actual)
+        acabó_sonido(actual)                    ; (SONIDO)
     fin
 
     ; la interrupción 0x80: lo que se pide va en los registros que guardó

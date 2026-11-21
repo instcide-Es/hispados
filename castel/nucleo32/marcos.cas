@@ -178,6 +178,35 @@ módulo Marcos
         devolver 0
     fin
 
+    ; (SONIDO) «n» marcos seguidos (hasta 16) por debajo de los 16 MB y sin
+    ; pasar de un trozo de 64 K a otro: lo que pide la DMA de las tarjetas
+    ; ISA (la Sound Blaster 16, por el 8237), que solo llega hasta ahí y no
+    ; cruza esas fronteras. Ya a cero; 0 si no hay
+    público función reservar_seguidos_bajo(n: nat32): nat32
+        variable m, k, b: nat32
+        variable libre_: bool
+        si n = 0 o n > 16 entonces devolver 0 fin
+        b := sin_interrupciones()
+        m := 0x100000 div MARCO
+        mientras m + n <= 0x1000000 div MARCO y (m + n) * MARCO <= límite hacer
+            libre_ := cierto
+            k := 0
+            mientras libre_ y k < n hacer
+                si ocupado(m + k) entonces libre_ := falso fin
+                k := k + 1
+            fin
+            si libre_ entonces
+                para k desde 0 hasta n - 1 hacer tapa(m + k) fin
+                reponer(b)
+                llenar(puntero(m * MARCO), n * MARCO, 0)
+                devolver m * MARCO
+            fin
+            m := m + 16
+        fin
+        reponer(b)
+        devolver 0
+    fin
+
     ; devuelve un marco. Da falso (y no hace nada) si ya estaba libre o no es
     ; un marco: así no se cuenta dos veces
     público función soltar_marco(dir: nat32): bool
