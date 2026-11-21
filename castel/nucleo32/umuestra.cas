@@ -5,7 +5,7 @@
 ;  campo de fecha, una lista desplegable, una casilla y la barra de estado).
 ;  Es el ejemplo para escribir programas de ventana y lo que prueba
 ;  castel/pruebas.sh. Con «normal» en la línea de órdenes, con la letra
-;  normal (si no, la grande).
+;  normal; con «doble», al doble (si no, vez y media).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UMuestra
@@ -26,14 +26,15 @@ módulo UMuestra
     constante MENÚS = "&Archivo|&Ver|A&yuda"
     constante TIPOS = "Socio|Socio de honor|No socio|Lector de la biblioteca"
 
-    variable grande: bool = cierto
+    variable tamaño_: nat32 = T_GRANDE
     variable pestaña: nat32
     variable filtro: arreglo [40] de byte
     variable nombre: arreglo [60] de byte = "Ana Ejemplo"
     variable fecha: arreglo [12] de byte = "21/11/2026"
-    variable tipo: nat32
+    variable tipo_p: nat32
     variable socio: bool = cierto
     variable aviso: arreglo [120] de byte
+    variable g: Rejilla
     variable abierto: ent32 = -1
 
     función llena()
@@ -41,34 +42,34 @@ módulo UMuestra
         variable r: ent32
         variable t: arreglo [48] de byte
         variable d: arreglo [3] de nat32
-        rejilla_nueva()
-        rejilla_columna("N\xA7", 4, cierto)
-        rejilla_columna("Nombre", 0, falso)
-        rejilla_columna("Fecha", 10, falso)
-        rejilla_columna("Importe", 8, cierto)
-        rejilla_columna("Estado", 9, falso)
+        rejilla_nueva(g, 100)
+        rejilla_columna(g, "N\xA7", 4, cierto)
+        rejilla_columna(g, "Nombre", 0, falso)
+        rejilla_columna(g, "Fecha", 10, falso)
+        rejilla_columna(g, "Importe", 8, cierto)
+        rejilla_columna(g, "Estado", 9, falso)
         para i desde 1 hasta 30 hacer
             k := (i * 7) mod 30 + 1
-            si k mod 5 = 0 entonces r := renglón_nuevo(R_AVISO, k) sino r := renglón_nuevo(R_NORMAL, k) fin
+            si k mod 5 = 0 entonces r := renglón_nuevo(g, R_AVISO, k) sino r := renglón_nuevo(g, R_NORMAL, k) fin
             d[0] := k
             formatear(t, 48, "%u", d)
-            celda(r, 0, t)
+            celda(g, r, 0, t)
             d[0] := k
             formatear(t, 48, "Persona de ejemplo %u", d)
             si k = 3 entonces copiar(t, "\xB5ngel \xA0lvarez") fin
             si k = 4 entonces copiar(t, "Zoe Mart\xA1nez") fin
-            celda(r, 1, t)
+            celda(g, r, 1, t)
             d[0] := k mod 28 + 1
             d[1] := k mod 12 + 1
             formatear(t, 48, "%02u/%02u/2026", d)
-            celda(r, 2, t)
+            celda(g, r, 2, t)
             d[0] := k * 3
             d[1] := (k * 25) mod 100
             formatear(t, 48, "%u,%02u", d)
-            celda(r, 3, t)
-            si k mod 5 = 0 entonces celda(r, 4, "VENCIDA") sino celda(r, 4, "al d\xA1a") fin
+            celda(g, r, 3, t)
+            si k mod 5 = 0 entonces celda(g, r, 4, "VENCIDA") sino celda(g, r, 4, "al d\xA1a") fin
         fin
-        rejilla_lista()
+        rejilla_lista(g)
     fin
 
     función pinta()
@@ -102,13 +103,13 @@ módulo UMuestra
             si pestaña = 0 entonces
                 yy := yy + 6 * E
                 yy := yy + campo(ID_FILTRO, LA, yy, an div 2, "Filtrar", filtro, falso) + 6 * E
-                rejilla(ID_REJILLA, LA, yy, an, ar - yy, "No hay nada que se parezca.")
+                rejilla(g, ID_REJILLA, LA, yy, an, ar - yy, "No hay nada que se parezca.")
             sino
                 yy := yy + 6 * E
                 y2 := recuadro(LA, yy, an, 4 * (LT + 4 * E) + 2 * (alto_caja() + LT + 4 * E), "Datos generales")
                 y2 := y2 + campo(ID_NOMBRE, 2 * LA, y2, an - 2 * LA, "Nombre", nombre, falso) + 4 * E
                 y2 := y2 + campo(ID_FECHA, 2 * LA, y2, 12 * LA, "Fecha de alta", fecha, falso) + 4 * E
-                desplegable(ID_TIPO, 16 * LA, y2 - alto_caja() - LT - 6 * E, an - 16 * LA, "Tipo", TIPOS, tipo, falso)
+                desplegable(ID_TIPO, 16 * LA + 2 * LA, y2 - alto_caja() - LT - 6 * E, an - 18 * LA, "Tipo", TIPOS, tipo_p, falso)
                 casilla(ID_SOCIO, 2 * LA, y2, "Al corriente de pago", socio)
                 yy := yy + 4 * (LT + 4 * E) + 2 * (alto_caja() + LT + 4 * E) + 6 * E
                 si yy + 3 * LT < ar entonces
@@ -116,7 +117,7 @@ módulo UMuestra
                     botón(ID_GUARDAR, 2 * LA, y2, "Guardar", cierto, falso)
                 fin
             fin
-            d[0] := nat32(rejilla_vistos())
+            d[0] := nat32(rejilla_vistos(g))
             formatear(est, 200, "Ana (titular)|Asociaci\xA2n de ejemplo|%u renglones|", d)
             si aviso[0] <> 0 entonces concatenar(est, aviso) sino concatenar(est, "12:00") fin
             barra_estado(alto - alto_estado(), est)
@@ -129,7 +130,7 @@ módulo UMuestra
     función hace(id: nat32)
         variable r: ent32
         si id = ID_H_NUEVO + I_PRIMERO o id = ID_H_NUEVO + I_ANTERIOR o id = ID_H_NUEVO + I_SIGUIENTE o id = ID_H_NUEVO + I_ÚLTIMO entonces
-            rejilla_ir(id - ID_H_NUEVO)
+            rejilla_ir(g, id - ID_H_NUEVO)
         sino si id = ID_SOCIO entonces
             socio := no socio
         sino si id = ID_TIPO entonces
@@ -137,9 +138,9 @@ módulo UMuestra
         sino si id = ID_GUARDAR o id = ID_H_NUEVO + I_GUARDAR entonces
             si fecha_vale(fecha) entonces copiar(aviso, "Guardado") sino copiar(aviso, "La fecha no vale") fin
         sino si id = ID_REJILLA entonces
-            r := rejilla_elegido()
+            r := rejilla_elegido(g)
             si r >= 0 entonces
-                copiar_hasta(nombre, renglones[r].celdas[1], 60)
+                copiar_hasta(nombre, renglón(g, r).celdas[1], 60)
                 pestaña := 1
             fin
         fin
@@ -166,16 +167,16 @@ módulo UMuestra
             si foco = ID_FECHA entonces
                 fecha_tecla(fecha, c)
             sino si foco = ID_FILTRO entonces
-                si campo_tecla(filtro, 40, c) entonces rejilla_filtrar(filtro) fin
+                si campo_tecla(filtro, 40, c) entonces rejilla_filtrar(g, filtro) fin
                 si c = TECLA_ABAJO entonces foco := ID_REJILLA fin
             sino
                 campo_tecla(nombre, 60, c)
             fin
         sino si k = K_LISTA entonces
-            si no rejilla_tecla(c) y c = TECLA_ARRIBA entonces foco := ID_FILTRO fin
+            si no rejilla_tecla(g, c) y c = TECLA_ARRIBA entonces foco := ID_FILTRO fin
             si c = '\n' entonces hace(foco) fin
         sino si k = K_DESPLEGABLE entonces
-            si c = '\n' o c = ' ' entonces hace(foco) sino desplegable_tecla(TIPOS, tipo, c) fin
+            si c = '\n' o c = ' ' entonces hace(foco) sino desplegable_tecla(TIPOS, tipo_p, c) fin
         sino si c = '\n' o c = ' ' entonces
             hace(foco)
         fin
@@ -186,7 +187,7 @@ módulo UMuestra
         abierto := ent32(k)
         según k
             caso 0: abrir_menú_barra(0, "Nuevo|Guardar|-|Salir", 0)
-            caso 1: abrir_menú_barra(1, "Letra grande|Letra normal", 0)
+            caso 1: abrir_menú_barra(1, "Letra normal|Letra grande|Letra muy grande", 0)
             si no: abrir_menú_barra(2, "Acerca de", 0)
         fin
     fin
@@ -207,7 +208,7 @@ módulo UMuestra
                 si p >= 0 y p < 2 entonces pestaña := nat32(p) fin
             caso K_LISTA:
                 foco := id
-                si rejilla_clic(x, yy) >= 0 y veces_ >= 2 entonces hace(id) fin
+                si rejilla_clic(g, x, yy) >= 0 y veces_ >= 2 entonces hace(id) fin
             caso K_HERRAMIENTA:
                 hace(id)
             caso K_CAMPO:
@@ -222,8 +223,9 @@ módulo UMuestra
         variable s: Suceso
         variable args: arreglo [40] de byte
         argumentos(args, 40)
-        si iguales_sin_caja(args, "normal") entonces grande := falso fin
-        si no preparar("Muestra de controles", grande, cierto) entonces
+        si iguales_sin_caja(args, "normal") entonces tamaño_ := T_NORMAL fin
+        si iguales_sin_caja(args, "doble") entonces tamaño_ := T_MUY_GRANDE fin
+        si no preparar("Muestra de controles", tamaño_, cierto) entonces
             escribir("muestra: hace falta el escritorio\n")
             devolver 1
         fin
@@ -239,14 +241,13 @@ módulo UMuestra
                 pinta()
             sino si s.clase = EV_MENÚ entonces
                 abierto := -1
-                si s.b = 1 y s.a = 0 entonces grande := cierto fin
-                si s.b = 1 y s.a = 1 entonces grande := falso fin
+                si s.b = 1 entonces tamaño_ := s.a + 1 fin
                 si s.b = 0 y s.a = 3 entonces devolver 0 fin
-                si s.b = ID_TIPO y s.a <> SIN_ELEGIR entonces tipo := s.a fin
-                nuevo_tamaño(ancho, alto, grande)
+                si s.b = ID_TIPO y s.a <> SIN_ELEGIR entonces tipo_p := s.a fin
+                nuevo_tamaño(ancho, alto, tamaño_)
                 pinta()
             sino si s.clase = EV_TAMAÑO entonces
-                nuevo_tamaño(ent32(s.a), ent32(s.b), grande)
+                nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
                 pinta()
             sino si s.clase = EV_CERRAR entonces
                 devolver 0

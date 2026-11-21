@@ -1097,6 +1097,59 @@ menú se pinta a la mitad (16 x 16). Sin icono, una ventanita.
 la da como la tecla `TECLA_MAYÚS_TAB` (`0x10F`, en `Llamadas`), para que los
 programas vuelvan al control de antes; Tab sigue siendo el 9.
 
+**Ctrl+Tab, Ctrl+Mayús+Tab y Alt+letra** (desde la 0.8.2, rama
+`controles-erp`, 21/11/2026): con el escritorio en marcha llegan como
+`TECLA_CTRL_TAB` (`0x110`), `TECLA_CTRL_MAYÚS_TAB` (`0x111`) y `TECLA_ALT` +
+la letra (`0x180` para la a ... `0x199` para la z; el Alt de la izquierda; el
+Alt Gr sigue siendo el de las letras de más), para cambiar de pestaña y abrir
+los menús de una ventana. Y la **llamada 81** (`maximizar(v)` en
+`Llamadas`): la ventana se maximiza (como con dos clics en su título) y le
+llega `EV_TAMAÑO` con lo que mide.
+
+### Los controles de las ventanas: `controles.cas`
+
+![Muestra de controles](pentium/controles-muestra.png)
+
+*Desde la 0.8.2 (21/11/2026).* Un módulo para los programas del anillo 3 que
+quieren una ventana de aplicación de las de siempre (un programa de gestión,
+un ERP de escritorio): `importar Controles`. El programa pinta en un **lienzo
+propio** del tamaño de la ventana (con `Grafico`, el de dibujar del
+escritorio) y `volcar()` lo manda entero a la ventana (la llamada 34,
+`mapa`). Así puede escribir con la letra del sistema **a vez y media (12x24)
+o al doble (16x32)** además de a su tamaño (8x16): `preparar(nombre,
+T_NORMAL|T_GRANDE|T_MUY_GRANDE, maximizada)`; `LA` y `LT` son lo que mide
+una letra, `E` los márgenes. Con la escala impar, cada punto de la letra es
+uno o dos, alternando (nítida, sin difuminar).
+
+| Control | Funciones | Teclas |
+|---|---|---|
+| botón | `botón`, `botón_ancho` (principal: verde; apagado: gris) | Intro, Espacio |
+| campo | `campo`, `campo_de` (el rótulo encima; oculto; solo para ver), `campo_izq` (el rótulo a la izquierda) y `campo_tecla` (con su cursor: flechas, Inicio, Fin, Retroceso, Supr) | |
+| números | `número_tecla`: solo cifras y, con decimales, una coma (el punto, también el del teclado numérico, vale como coma) | |
+| fecha | `fecha_tecla` (dd/mm/aaaa, las barras las pone él), `fecha_vale`, `fecha_a_iso`, `fecha_de_iso` | |
+| casilla | `casilla` (con una X dentro) | Espacio |
+| lista desplegable | `desplegable` (lo elegido y la flecha), `abrir_desplegable` (las opciones, en un menú del escritorio: llega `EV_MENÚ` con la etiqueta del control), `desplegable_tecla` | Intro, Espacio; arriba y abajo, sin abrirla |
+| recuadro con título | `recuadro(x, y, ancho, alto, «Datos generales»)`: da dónde empieza lo de dentro | |
+| pestañas | `pestañas(id, x, y, ancho, «Inicio\|Socios\|...», activa, apagadas)`, `pestaña_en`, `otra_pestaña` | Ctrl+Tab, Ctrl+Mayús+Tab |
+| rejilla | una variable `Rejilla` por tabla (`rejilla_nueva(g, máximo)`: los renglones, en memoria pedida con `más_memoria`), `rejilla_columna` (rótulo, ancho en letras —0: lo que quede—, a la derecha), `renglón_nuevo`, `celda`, `rejilla_lista`, `rejilla_filtrar` (sin mirar mayúsculas ni tildes), `rejilla_ordenar` (números, fechas dd/mm/aaaa o textos; otra vez, al revés), `rejilla_elegido`, `rejilla_id`, `rejilla_ir` (primero, anterior, siguiente, último), `rejilla_clic` (en un rótulo, ordena) | flechas, Re Pág, Av Pág, Inicio, Fin |
+| barra de menús | `barra_menús(x, y, ancho, «&Archivo\|&Ver\|A&yuda», abierto)` (la letra tras «&», subrayada), `menú_de_alt`, `menú_en_barra`, `abrir_menú_barra` | Alt+letra |
+| barra de herramientas | `barra_herramientas`, `herramienta(id, x, y, icono, texto, apagado)` con los iconos dibujados (`I_NUEVO`, `I_GUARDAR`, `I_DESHACER`, `I_BUSCAR`, `I_IMPRIMIR`, `I_REFRESCAR`, `I_PRIMERO`, `I_ANTERIOR`, `I_SIGUIENTE`, `I_ÚLTIMO`, `I_EDITAR`, `I_BORRAR`), `separador` | (no las recorre el tabulador: son atajos) |
+| barra de estado | `barra_estado(y, «usuario\|asociación\|...\|12:00»)`: el último trozo, a la derecha | |
+
+**El foco**: los controles se apuntan al pintarlos (`empezar_controles()` al
+empezar cada vez), en el orden en que los recorre el tabulador
+(`pasar_foco`); `control_en(x, y)` dice cuál hay en un punto y
+`asegurar_foco()` lo pone en el primero si el que tenía ya no está. El que
+tiene el teclado lleva **un borde azul grueso**; lo elegido de una rejilla,
+**letra blanca sobre azul y una flecha**; lo que hay que mirar
+(`R_AVISO`), fondo naranja claro **y una franja** a la izquierda (y su
+palabra en una celda): nada depende solo del color.
+
+**`MUESTRA.BIN`** (`umuestra.cas`) lleva todos (`MUESTRA normal`, con la
+letra normal; `MUESTRA doble`, al doble): es el ejemplo para empezar un
+programa de ventana, y lo que prueba `castel/pruebas.sh`. El primer
+programa hecho con ellos es ClicGest 0.2 (un programa de ClicGest, aparte).
+
 **Los terminales** (`terminal.cas`). Para que la Consola tenga dentro al intérprete
 de órdenes sin tocarlo: un terminal son **dos tubos**. El programa que lo hace (la
 Consola) lee por uno lo que escriben los de dentro y lo pinta, letra a letra, como
@@ -2179,11 +2232,11 @@ python3 tools/hpq.py sistema SALIDA CARPETA...   # los paquetes del sistema (lo 
 
 | Paquete | Versión | Lleva | Necesita |
 |---|---|---|---|
-| `base` | 0.7 | `NUCLEO.BIN`, `ORDENES.BIN`, `ASISTE.BIN`, `INSTALAR.BIN`, `LEEME.TXT` (en `\HISPA` y en la raíz), `MANUAL.TXT`, `BOOT.IMG`, `CORE.IMG` | — |
+| `base` | 0.8.2 | `NUCLEO.BIN`, `ORDENES.BIN`, `ASISTE.BIN`, `INSTALAR.BIN`, `LEEME.TXT` (en `\HISPA` y en la raíz), `MANUAL.TXT`, `BOOT.IMG`, `CORE.IMG` | — |
 | `bloc` | 0.7 | `BLOC.BIN` | base >= 0.7 |
 | `consola` | 0.7 | `CONSOLA.BIN` | base >= 0.7 |
 | `equipo` | 0.7 | `EQUIPO.BIN` (Mi equipo) | base >= 0.7 |
-| `ejemplos` | 0.7 | `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN` | base >= 0.7 |
+| `ejemplos` | 0.8.2 | `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN`, `MUESTRA.BIN` (los controles de las ventanas) | base >= 0.8.2 |
 | `paquetes` | 1.0 | `PAQUETES.BIN`, `ACTUALIZ.BIN` (su ventana) | base >= 0.7, nucleo >= 0.7 |
 | `hvprun` | 0.7 | `HVPRUN.BIN` | base >= 0.7 |
 | `oficina` | 1.0 | `\OFICINA\`: `FACTURAS.HVP`, `PLUMA.HVP`, `CUENTAS.HVP`, `MIRADOR.HVP`, `TIPOS.DAT`, `DICCIO.DAT` | hvprun >= 0.7 |

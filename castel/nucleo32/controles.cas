@@ -61,7 +61,12 @@ módulo Controles
     variable máx_an, máx_al: ent32
     público variable v: nat32                   ; la ventana
     público variable ancho, alto: ent32         ; lo de dentro
-    público variable E: ent32 = 2               ; la escala de la letra (1 o 2)
+    ; los tamaños de la letra
+    público constante T_NORMAL = 1              ; la del sistema, 8x16
+    público constante T_GRANDE = 2              ; vez y media, 12x24
+    público constante T_MUY_GRANDE = 3          ; el doble, 16x32
+    público variable M: ent32 = 4               ; la escala de la letra, en medios (2: 8x16; 3: 12x24; 4: 16x32)
+    público variable E: ent32 = 2               ; la de los márgenes y las rayas (1 o 2)
     público variable LA: ent32 = 16             ; lo que mide una letra a lo ancho
     público variable LT: ent32 = 32             ; y a lo alto
 
@@ -79,7 +84,10 @@ módulo Controles
     ; =========================================================================
     ; abre la ventana: «grande», con la letra al doble (si cabe); «máxima»,
     ; maximizada (si no, de casi toda la pantalla y en el centro)
-    público función preparar(nombre: puntero a byte, grande: bool, máxima: bool): bool
+    ; abre la ventana con la letra de ese tamaño (T_NORMAL, T_GRANDE o
+    ; T_MUY_GRANDE: si no cabe, la que quepa); «máxima», maximizada (si no,
+    ; de casi toda la pantalla y en el centro)
+    público función preparar(nombre: puntero a byte, tamaño_: nat32, máxima: bool): bool
         variable sw, sh, an, al: nat32
         variable p: puntero a byte
         sw := dato(DATO_ANCHO_PANTALLA)
@@ -100,7 +108,7 @@ módulo Controles
         ancho := ent32(an)
         alto := ent32(al)
         pon_lienzo(lz, memoria, an, ancho, alto)
-        escala(grande)
+        escala(tamaño_)
         si máxima entonces maximizar(v) fin
         devolver cierto
     fin
@@ -115,20 +123,23 @@ módulo Controles
         fin
     fin
 
-    público función escala(grande: bool)
-        si grande y ancho >= 640 y alto >= 400 entonces E := 2 sino E := 1 fin
-        LA := 8 * E
-        LT := 16 * E
+    público función escala(tamaño_: nat32)
+        M := 2
+        si tamaño_ >= T_GRANDE y ancho >= 560 y alto >= 360 entonces M := 3 fin
+        si tamaño_ >= T_MUY_GRANDE y ancho >= 720 y alto >= 460 entonces M := 4 fin
+        E := M div 2
+        LA := 4 * M
+        LT := 8 * M
     fin
 
     ; la ventana ha cambiado de tamaño (EV_TAMAÑO)
-    público función nuevo_tamaño(an: ent32, al: ent32, grande: bool)
+    público función nuevo_tamaño(an: ent32, al: ent32, tamaño_: nat32)
         si an > máx_an entonces an := máx_an fin
         si al > máx_al entonces al := máx_al fin
         ancho := an
         alto := al
         pon_lienzo(lz, memoria, nat32(an), an, al)
-        escala(grande)
+        escala(tamaño_)
     fin
 
     ; manda lo pintado a la ventana
@@ -158,72 +169,79 @@ módulo Controles
         Grafico.línea(lz, x1, y1, x2, y2, c)
     fin
 
-    función bloque(x: ent32, yy: ent32, e: ent32, c: nat32)
+    función bloque(x: ent32, yy: ent32, an: ent32, al: ent32, c: nat32)
         variable i, j: ent32
-        para j desde yy hasta yy + e - 1 hacer
+        para j desde yy hasta yy + al - 1 hacer
             si j >= 0 y j < lz.alto entonces
-                para i desde x hasta x + e - 1 hacer
+                para i desde x hasta x + an - 1 hacer
                     si i >= 0 y i < lz.ancho entonces lz.puntos[nat32(j) * lz.salto + nat32(i)] := c fin
                 fin
             fin
         fin
     fin
 
-    ; una letra, a la escala «e» (1: 8x16; 2: 16x32)
-    público función letra_e(x: ent32, yy: ent32, c: nat32, tinta: nat32, e: ent32)
+    ; una letra, a la escala «m» (en medios: 2, 8x16; 3, 12x24; 4, 16x32). Con
+    ; la escala impar, cada punto de la letra es uno o dos (alternando)
+    público función letra_m(x: ent32, yy: ent32, c: nat32, tinta: nat32, m: ent32)
         variable g: puntero a byte
-        variable f, k: ent32
+        variable f, k, y0, y1, x0, x1: ent32
         variable b: nat32
         g := dibujo_letra(c)
         para f desde 0 hasta 15 hacer
             b := g[f]
             si b <> 0 entonces
+                y0 := (f * m) div 2
+                y1 := ((f + 1) * m) div 2
                 para k desde 0 hasta 7 hacer
-                    si b yb (0x80 >> nat32(k)) <> 0 entonces bloque(x + k * e, yy + f * e, e, tinta) fin
+                    si b yb (0x80 >> nat32(k)) <> 0 entonces
+                        x0 := (k * m) div 2
+                        x1 := ((k + 1) * m) div 2
+                        bloque(x + x0, yy + y0, x1 - x0, y1 - y0, tinta)
+                    fin
                 fin
             fin
         fin
     fin
 
-    ; n letras de t (o hasta el 0), a la escala «e»; da hasta dónde llega.
-    ; En negrita, cada letra otra vez un punto a la derecha.
-    público función texto_ne(x: ent32, yy: ent32, t: puntero a byte, n: nat32, tinta: nat32, e: ent32, negrita_: bool): ent32
+    ; n letras de t (o hasta el 0), a la escala «m» (en medios); da hasta
+    ; dónde llega. En negrita, cada letra otra vez un punto a la derecha.
+    público función texto_ne(x: ent32, yy: ent32, t: puntero a byte, n: nat32, tinta: nat32, m: ent32, negrita_: bool): ent32
         variable i: nat32
         i := 0
         mientras i < n y t[i] <> 0 hacer
             si t[i] <> ' ' entonces
-                letra_e(x, yy, t[i], tinta, e)
-                si negrita_ entonces letra_e(x + 1, yy, t[i], tinta, e) fin
+                letra_m(x, yy, t[i], tinta, m)
+                si negrita_ entonces letra_m(x + 1, yy, t[i], tinta, m) fin
             fin
-            x := x + 8 * e
+            x := x + 4 * m
             i := i + 1
         fin
         devolver x
     fin
 
     público función texto(x: ent32, yy: ent32, t: puntero a byte, tinta: nat32): ent32
-        devolver texto_ne(x, yy, t, 0xFFFFFFFF, tinta, E, falso)
+        devolver texto_ne(x, yy, t, 0xFFFFFFFF, tinta, M, falso)
     fin
 
     público función negrita(x: ent32, yy: ent32, t: puntero a byte, tinta: nat32): ent32
-        devolver texto_ne(x, yy, t, 0xFFFFFFFF, tinta, E, cierto)
+        devolver texto_ne(x, yy, t, 0xFFFFFFFF, tinta, M, cierto)
     fin
 
     ; lo que cabe de t en «an» puntos; si no cabe entero, acaba en «...»
     público función texto_corto(x: ent32, yy: ent32, t: puntero a byte, an: ent32, tinta: nat32, negrita_: bool)
-        texto_corto_e(x, yy, t, an, tinta, negrita_, E)
+        texto_corto_e(x, yy, t, an, tinta, negrita_, M)
     fin
 
-    público función texto_corto_e(x: ent32, yy: ent32, t: puntero a byte, an: ent32, tinta: nat32, negrita_: bool, e: ent32)
+    público función texto_corto_e(x: ent32, yy: ent32, t: puntero a byte, an: ent32, tinta: nat32, negrita_: bool, m: ent32)
         variable n, cabe: nat32
         n := longitud(t)
         si an <= 0 entonces devolver fin
-        cabe := nat32(an div (8 * e))
+        cabe := nat32(an div (4 * m))
         si n <= cabe entonces
-            texto_ne(x, yy, t, n, tinta, e, negrita_)
+            texto_ne(x, yy, t, n, tinta, m, negrita_)
         sino si cabe > 3 entonces
-            x := texto_ne(x, yy, t, cabe - 3, tinta, e, negrita_)
-            texto_ne(x, yy, "...", 3, tinta, e, negrita_)
+            x := texto_ne(x, yy, t, cabe - 3, tinta, m, negrita_)
+            texto_ne(x, yy, "...", 3, tinta, m, negrita_)
         fin
     fin
 
@@ -255,7 +273,7 @@ módulo Controles
             sino si t[i] = ' ' o t[i] = '\n' entonces
                 i := i + 1
             fin
-            si pinta entonces texto_ne(x, yy, dirección(t[ini]), n, tinta, E, negrita_) fin
+            si pinta entonces texto_ne(x, yy, dirección(t[ini]), n, tinta, M, negrita_) fin
             yy := yy + LT + 2
         fin
         devolver yy - y0
@@ -281,7 +299,7 @@ módulo Controles
     público función flechita_vertical(x: ent32, yy: ent32, lado: ent32, abajo: bool, c: nat32)
         variable i: ent32
         para i desde 0 hasta lado div 2 hacer
-            si abajo entonces caja(x - (lado div 2 - i), yy - i, 2 * (lado div 2 - i) + 1, 1, c)
+            si abajo entonces caja(x - (lado div 2 - i), yy - lado div 2 + i, 2 * (lado div 2 - i) + 1, 1, c)
             sino caja(x - i, yy + i, 2 * i + 1, 1, c) fin
         fin
     fin
@@ -472,13 +490,13 @@ módulo Controles
             cursor_de := id
             cursor := nat32(n)
         fin
-        si cursor > nat32(n) entonces cursor := nat32(n) fin
+        si id = foco y cursor > nat32(n) entonces cursor := nat32(n) fin
         ; lo que se ve: si no cabe, hasta el cursor
         cabe := (an - 6 * E) div LA - 1
         ini := 0
         si id = foco y ent32(cursor) > cabe entonces ini := ent32(cursor) - cabe fin
         si id <> foco y n > cabe entonces ini := 0 fin
-        texto_ne(x + 3 * E, yy + 6 * E, p + nat32(ini), nat32(cabe), C_TINTA, E, falso)
+        texto_ne(x + 3 * E, yy + 6 * E, p + nat32(ini), nat32(cabe), C_TINTA, M, falso)
         si id = foco y no solo_ver entonces
             marca_foco(x, yy, an, al)
             cx := x + 3 * E + (ent32(cursor) - ini) * LA
@@ -488,6 +506,13 @@ módulo Controles
         fin
         apuntar(id, K_CAMPO, x, yy, an, al)
         devolver yy + al - y0
+    fin
+
+    ; lo mismo, con el rótulo a la izquierda (en «an_rótulo» puntos): ocupa
+    ; menos de alto (las fichas con muchos campos). Da lo que ocupa de alto.
+    público función campo_izq(id: nat32, x: ent32, yy: ent32, an_rótulo: ent32, an: ent32, rótulo: puntero a byte, t: puntero a byte, solo_ver: bool): ent32
+        texto_corto(x, yy + (alto_caja() - LT) div 2, rótulo, an_rótulo - LA div 2, C_SUAVE, falso)
+        devolver campo_de(id, x + an_rótulo, yy, an - an_rótulo, "", t, falso, solo_ver)
     fin
 
     ; una tecla en un campo (t: lo escrito; caben «cabe» octetos con el 0).
@@ -538,6 +563,18 @@ módulo Controles
             devolver cierto
         fin
         devolver falso
+    fin
+
+    ; una tecla en un campo de números (un nº de socio, un importe): solo
+    ; cifras y, con «decimales», una coma (el punto, también el del
+    ; teclado numérico, vale como coma). Lo demás, como campo_tecla.
+    público función número_tecla(t: puntero a byte, cabe: nat32, c: nat32, decimales: bool): bool
+        si c >= ' ' y c < 0x100 entonces
+            si c >= '0' y c <= '9' entonces devolver campo_tecla(t, cabe, c) fin
+            si decimales y (c = ',' o c = '.') y buscar_car(t, ',') = nulo entonces devolver campo_tecla(t, cabe, ',') fin
+            devolver cierto
+        fin
+        devolver campo_tecla(t, cabe, c)
     fin
 
     ; ---- el campo de fecha: dd/mm/aaaa ----
@@ -1027,7 +1064,7 @@ módulo Controles
         icono_herramienta(x + 5, yy + (al - lado) div 2, lado, cuál, apagado)
         tinta := C_TINTA
         si apagado entonces tinta := 0x8A919C fin
-        si t[0] <> 0 entonces texto_ne(x + lado + 9, yy + (al - 16) div 2, t, 0xFFFFFFFF, tinta, 1, falso) fin
+        si t[0] <> 0 entonces texto_ne(x + lado + 9, yy + (al - 16) div 2, t, 0xFFFFFFFF, tinta, 2, falso) fin
         si no apagado entonces
             borde(x, yy, an, al, 1, 0xC9CED6)
             apuntar(id, K_HERRAMIENTA, x, yy, an, al)
@@ -1056,25 +1093,28 @@ módulo Controles
 
     público función barra_estado(yy: ent32, trozos: puntero a byte)
         variable k, n: nat32
-        variable x, w: ent32
+        variable x, w, wu: ent32
         variable t: arreglo [120] de byte
         caja(0, yy, ancho, alto_estado(), C_BARRA)
         caja(0, yy, ancho, 1, C_BORDE)
         n := cuántas_opciones(trozos)
+        si n = 0 entonces devolver fin
+        ; el último, pegado a la derecha; los demás, de izquierda a derecha, hasta donde quepan
+        opción_de(trozos, n - 1, t, 120)
+        wu := ancho_texto(t)
+        texto(ancho - LA div 2 - wu, yy + 4 * E, t, C_TINTA)
+        caja(ancho - LA - wu, yy + 3 * E, 1, alto_estado() - 6 * E, C_BORDE)
         x := LA div 2
         k := 0
         mientras k + 1 < n hacer
             opción_de(trozos, k, t, 120)
             w := ancho_texto(t)
-            texto(x, yy + 4 * E, t, C_TINTA)
+            si x + w > ancho - 2 * LA - wu entonces w := ancho - 2 * LA - wu - x fin
+            si w < 4 * LA entonces romper fin
+            texto_corto(x, yy + 4 * E, t, w, C_TINTA, falso)
             x := x + w + LA
             caja(x - LA div 2, yy + 3 * E, 1, alto_estado() - 6 * E, C_BORDE)
             k := k + 1
-        fin
-        si n > 0 entonces
-            opción_de(trozos, n - 1, t, 120)
-            w := ancho_texto(t)
-            si ancho - LA div 2 - w > x entonces texto(ancho - LA div 2 - w, yy + 4 * E, t, C_TINTA) fin
         fin
     fin
 
@@ -1082,10 +1122,12 @@ módulo Controles
     ;  La rejilla: una tabla con columnas (con su rótulo, su ancho en letras
     ;  y si va a la derecha), renglones de hasta MAX_COLS celdas, ordenar por
     ;  una columna (un clic en su rótulo, o rejilla_ordenar) y filtrar (los
-    ;  renglones que llevan un texto, sin mirar mayúsculas ni tildes)
+    ;  renglones que llevan un texto, sin mirar mayúsculas ni tildes).
+    ;  Cada rejilla es una variable del programa (tipo Rejilla); sus
+    ;  renglones van en memoria pedida con más_memoria (rejilla_nueva), así
+    ;  que puede haber varias y de muchos renglones.
     ; =========================================================================
     público constante MAX_COLS = 6
-    público constante MAX_RENGLONES = 200
     público constante LARGO_CELDA = 48
     público constante R_NORMAL = 0
     público constante R_AVISO = 1               ; algo que mirar (con su palabra en alguna celda)
@@ -1095,67 +1137,80 @@ módulo Controles
         id, id2: nat32
         celdas: arreglo [MAX_COLS] de arreglo [LARGO_CELDA] de byte
     fin
-    público variable renglones: arreglo [MAX_RENGLONES] de Renglón
-    público variable n_renglones: nat32
-    variable vista: arreglo [MAX_RENGLONES] de nat16   ; los que se ven, en su orden
-    variable n_vista: nat32
-    variable sel: ent32 = -1                    ; el elegido (en la vista)
-    variable primero: ent32                     ; el primero que se ve
-    variable n_cols: nat32
-    variable col_nombre: arreglo [MAX_COLS] de arreglo [24] de byte
-    variable col_ancho: arreglo [MAX_COLS] de ent32
-    variable col_der: arreglo [MAX_COLS] de bool
-    variable col_x: arreglo [MAX_COLS] de ent32
-    variable orden_col: ent32 = -1
-    variable orden_baja: bool
-    variable filtro: arreglo [64] de byte
-    variable rej_x, rej_y, rej_an, rej_al: ent32
+    público tipo Rejilla = estructura
+        r: puntero a Renglón                     ; los renglones
+        vista: puntero a nat32                   ; los que se ven, en su orden
+        cabe, n, n_vista: nat32
+        sel, primero: ent32                      ; el elegido (en la vista; -1: ninguno) y el primero que se ve
+        n_cols: nat32
+        col_nombre: arreglo [MAX_COLS] de arreglo [24] de byte
+        col_ancho: arreglo [MAX_COLS] de ent32
+        col_der: arreglo [MAX_COLS] de bool
+        col_x: arreglo [MAX_COLS] de ent32
+        orden_col: ent32
+        orden_baja: bool
+        filtro: arreglo [64] de byte
+        x, ye, an, al: ent32
+    fin
 
-    ; empieza otra rejilla (sin columnas ni renglones)
-    público función rejilla_nueva()
-        n_cols := 0
-        n_renglones := 0
-        n_vista := 0
-        sel := -1
-        primero := 0
-        orden_col := -1
-        filtro[0] := 0
+    ; prepara una rejilla de hasta «máximo» renglones (la memoria se pide
+    ; la primera vez; luego, solo se vacía) y sin columnas. Falso si no hay memoria
+    público función rejilla_nueva(ref g: Rejilla, máximo: nat32): bool
+        variable p: puntero a byte
+        si g.cabe = 0 entonces
+            p := más_memoria(máximo * tamaño(Renglón) + máximo * 4)
+            si p = nulo entonces devolver falso fin
+            g.r := puntero(p)
+            g.vista := puntero(p + máximo * tamaño(Renglón))
+            g.cabe := máximo
+        fin
+        g.n_cols := 0
+        g.orden_col := -1
+        g.orden_baja := falso
+        g.filtro[0] := 0
+        rejilla_vaciar(g)
+        devolver cierto
     fin
 
     ; una columna más: su rótulo, su ancho en letras (0: lo que quede) y si
     ; va a la derecha (los números)
-    público función rejilla_columna(nombre: puntero a byte, letras: nat32, derecha: bool)
-        si n_cols >= MAX_COLS entonces devolver fin
-        copiar_hasta(col_nombre[n_cols], nombre, 24)
-        col_ancho[n_cols] := ent32(letras)
-        col_der[n_cols] := derecha
-        n_cols := n_cols + 1
+    público función rejilla_columna(ref g: Rejilla, nombre: puntero a byte, letras: nat32, derecha: bool)
+        si g.n_cols >= MAX_COLS entonces devolver fin
+        copiar_hasta(g.col_nombre[g.n_cols], nombre, 24)
+        g.col_ancho[g.n_cols] := ent32(letras)
+        g.col_der[g.n_cols] := derecha
+        g.n_cols := g.n_cols + 1
     fin
 
-    ; quita los renglones (las columnas se quedan)
-    público función rejilla_vaciar()
-        n_renglones := 0
-        n_vista := 0
-        sel := -1
-        primero := 0
+    ; quita los renglones (las columnas, el orden y el filtro se quedan)
+    público función rejilla_vaciar(ref g: Rejilla)
+        g.n := 0
+        g.n_vista := 0
+        g.sel := -1
+        g.primero := 0
     fin
 
     ; un renglón nuevo: da su número (-1 si no caben más)
-    público función renglón_nuevo(clase: nat32, id: nat32): ent32
+    público función renglón_nuevo(ref g: Rejilla, clase: nat32, id: nat32): ent32
         variable k, c: nat32
-        si n_renglones >= MAX_RENGLONES entonces devolver -1 fin
-        k := n_renglones
-        renglones[k].clase := clase
-        renglones[k].id := id
-        renglones[k].id2 := 0
-        para c desde 0 hasta MAX_COLS - 1 hacer renglones[k].celdas[c][0] := 0 fin
-        n_renglones := n_renglones + 1
+        si g.n >= g.cabe entonces devolver -1 fin
+        k := g.n
+        g.r[k].clase := clase
+        g.r[k].id := id
+        g.r[k].id2 := 0
+        para c desde 0 hasta MAX_COLS - 1 hacer g.r[k].celdas[c][0] := 0 fin
+        g.n := g.n + 1
         devolver ent32(k)
     fin
 
-    público función celda(k: ent32, c: nat32, t: puntero a byte)
-        si k < 0 o nat32(k) >= n_renglones o c >= MAX_COLS entonces devolver fin
-        copiar_hasta(renglones[k].celdas[c], t, LARGO_CELDA)
+    público función celda(ref g: Rejilla, k: ent32, c: nat32, t: puntero a byte)
+        si k < 0 o nat32(k) >= g.n o c >= MAX_COLS entonces devolver fin
+        copiar_hasta(g.r[k].celdas[c], t, LARGO_CELDA)
+    fin
+
+    ; el renglón número k
+    público función renglón(ref g: Rejilla, k: ent32): puntero a Renglón
+        devolver g.r + nat32(k)
     fin
 
     ; las letras, para comparar: en minúscula y sin tilde
@@ -1172,7 +1227,8 @@ módulo Controles
         devolver minúscula(c)
     fin
 
-    función contiene(t: puntero a byte, q: puntero a byte): bool
+    ; ¿lleva t el texto q? (sin mirar mayúsculas ni tildes)
+    público función contiene(t: puntero a byte, q: puntero a byte): bool
         variable i, j: nat32
         si q[0] = 0 entonces devolver cierto fin
         i := 0
@@ -1186,7 +1242,7 @@ módulo Controles
     fin
 
     ; la clave para ordenar: un número (con su coma), una fecha dd/mm/aaaa
-    ; (como aaaammdd) o, si no, nada (0xFFFFFFFF: se compara el texto)
+    ; (como aaaammdd) o, si no, 0xFFFFFFFF (se compara el texto)
     función clave_número(t: puntero a byte): nat32
         variable i, n: nat32
         variable algo: bool
@@ -1210,120 +1266,133 @@ módulo Controles
     fin
 
     ; ¿va a delante de b? (por la columna de ordenar)
-    función antes_que(a: nat32, b: nat32): bool
+    función antes_que(ref g: Rejilla, a: nat32, b: nat32): bool
         variable ta, tb: puntero a byte
         variable na, nb, i: nat32
         variable r: ent32
-        ta := dirección(renglones[a].celdas[orden_col][0])
-        tb := dirección(renglones[b].celdas[orden_col][0])
+        ta := dirección(g.r[a].celdas[g.orden_col][0])
+        tb := dirección(g.r[b].celdas[g.orden_col][0])
         na := clave_número(ta)
         nb := clave_número(tb)
         si na <> 0xFFFFFFFF y nb <> 0xFFFFFFFF entonces
-            si orden_baja entonces devolver na > nb fin
+            si g.orden_baja entonces devolver na > nb fin
             devolver na < nb
         fin
         i := 0
         mientras ta[i] <> 0 y llana(ta[i]) = llana(tb[i]) hacer i := i + 1 fin
         r := ent32(llana(ta[i])) - ent32(llana(tb[i]))
-        si orden_baja entonces devolver r > 0 fin
+        si g.orden_baja entonces devolver r > 0 fin
         devolver r < 0
     fin
 
-    ; rehace lo que se ve (con el filtro y el orden); lo elegido sigue siendo el mismo renglón
-    función rehacer_vista()
-        variable i, j, k, antes: nat32
-        variable m: nat16
-        antes := 0xFFFFFFFF
-        si sel >= 0 y nat32(sel) < n_vista entonces antes := vista[sel] fin
-        n_vista := 0
-        para i desde 0 hasta n_renglones hacer
-            si i = n_renglones entonces romper fin
-            si filtro[0] = 0 o pasa_filtro(i) entonces
-                vista[n_vista] := nat16(i)
-                n_vista := n_vista + 1
-            fin
-        fin
-        ; ordenar (por inserción: son pocos)
-        si orden_col >= 0 y n_vista > 1 entonces
-            para i desde 1 hasta n_vista - 1 hacer
-                m := vista[i]
-                j := i
-                mientras j > 0 y antes_que(m, vista[j - 1]) hacer
-                    vista[j] := vista[j - 1]
-                    j := j - 1
-                fin
-                vista[j] := m
-            fin
-        fin
-        sel := -1
-        si antes <> 0xFFFFFFFF entonces
-            para k desde 0 hasta n_vista hacer
-                si k = n_vista entonces romper fin
-                si vista[k] = antes entonces sel := ent32(k) fin
-            fin
-        fin
-    fin
-
-    función pasa_filtro(i: nat32): bool
+    función pasa_filtro(ref g: Rejilla, i: nat32): bool
         variable c: nat32
-        para c desde 0 hasta n_cols - 1 hacer
-            si contiene(dirección(renglones[i].celdas[c][0]), filtro) entonces devolver cierto fin
+        para c desde 0 hasta g.n_cols - 1 hacer
+            si contiene(dirección(g.r[i].celdas[c][0]), g.filtro) entonces devolver cierto fin
         fin
         devolver falso
     fin
 
-    ; tras llenar los renglones: que se vean (con el filtro y el orden que haya)
-    público función rejilla_lista()
-        rehacer_vista()
-        si sel < 0 y n_vista > 0 entonces sel := 0 fin
+    ; rehace lo que se ve (con el filtro y el orden); lo elegido sigue siendo el mismo renglón
+    función rehacer_vista(ref g: Rejilla)
+        variable i, j, k, antes, m: nat32
+        antes := 0xFFFFFFFF
+        si g.sel >= 0 y nat32(g.sel) < g.n_vista entonces antes := g.vista[g.sel] fin
+        g.n_vista := 0
+        i := 0
+        mientras i < g.n hacer
+            si g.filtro[0] = 0 o pasa_filtro(g, i) entonces
+                g.vista[g.n_vista] := i
+                g.n_vista := g.n_vista + 1
+            fin
+            i := i + 1
+        fin
+        ; ordenar (por inserción)
+        si g.orden_col >= 0 y g.n_vista > 1 entonces
+            para i desde 1 hasta g.n_vista - 1 hacer
+                m := g.vista[i]
+                j := i
+                mientras j > 0 y antes_que(g, m, g.vista[j - 1]) hacer
+                    g.vista[j] := g.vista[j - 1]
+                    j := j - 1
+                fin
+                g.vista[j] := m
+            fin
+        fin
+        g.sel := -1
+        si antes <> 0xFFFFFFFF entonces
+            k := 0
+            mientras k < g.n_vista hacer
+                si g.vista[k] = antes entonces g.sel := ent32(k) fin
+                k := k + 1
+            fin
+        fin
     fin
 
-    público función rejilla_filtrar(t: puntero a byte)
-        copiar_hasta(filtro, t, 64)
-        rehacer_vista()
-        si sel < 0 y n_vista > 0 entonces sel := 0 fin
+    ; tras llenar los renglones: que se vean (con el filtro y el orden que haya)
+    público función rejilla_lista(ref g: Rejilla)
+        rehacer_vista(g)
+        si g.sel < 0 y g.n_vista > 0 entonces g.sel := 0 fin
+    fin
+
+    público función rejilla_filtrar(ref g: Rejilla, t: puntero a byte)
+        copiar_hasta(g.filtro, t, 64)
+        rehacer_vista(g)
+        si g.sel < 0 y g.n_vista > 0 entonces g.sel := 0 fin
     fin
 
     ; ordenar por la columna c; si ya lo estaba, al revés
-    público función rejilla_ordenar(c: nat32)
-        si c >= n_cols entonces devolver fin
-        si orden_col = ent32(c) entonces orden_baja := no orden_baja sino orden_baja := falso fin
-        orden_col := ent32(c)
-        rehacer_vista()
+    público función rejilla_ordenar(ref g: Rejilla, c: nat32)
+        si c >= g.n_cols entonces devolver fin
+        si g.orden_col = ent32(c) entonces g.orden_baja := no g.orden_baja sino g.orden_baja := falso fin
+        g.orden_col := ent32(c)
+        rehacer_vista(g)
     fin
 
-    ; cuántos se ven, y el número (en renglones) del que va en el sitio k de lo que se ve
-    público función rejilla_vistos(): nat32
-        devolver n_vista
+    público función rejilla_vistos(ref g: Rejilla): nat32
+        devolver g.n_vista
     fin
 
     ; el renglón elegido (-1 si no hay)
-    público función rejilla_elegido(): ent32
-        si sel < 0 o nat32(sel) >= n_vista entonces devolver -1 fin
-        devolver ent32(vista[sel])
+    público función rejilla_elegido(ref g: Rejilla): ent32
+        si g.sel < 0 o nat32(g.sel) >= g.n_vista entonces devolver -1 fin
+        devolver ent32(g.vista[g.sel])
+    fin
+
+    ; el id del renglón elegido (0 si no hay)
+    público función rejilla_id(ref g: Rejilla): nat32
+        variable k: ent32
+        k := rejilla_elegido(g)
+        si k < 0 entonces devolver 0 fin
+        devolver g.r[k].id
     fin
 
     ; elige el renglón de ese id (si se ve); cierto si lo ha encontrado
-    público función rejilla_elegir_id(id: nat32): bool
+    público función rejilla_elegir_id(ref g: Rejilla, id: nat32): bool
         variable k: nat32
-        para k desde 0 hasta n_vista hacer
-            si k = n_vista entonces romper fin
-            si renglones[vista[k]].id = id entonces
-                sel := ent32(k)
+        k := 0
+        mientras k < g.n_vista hacer
+            si g.r[g.vista[k]].id = id entonces
+                g.sel := ent32(k)
                 devolver cierto
             fin
+            k := k + 1
         fin
         devolver falso
     fin
 
     ; ir al primero, al de antes, al siguiente o al último (los botones ◀◀ ◀ ▶ ▶▶)
-    público función rejilla_ir(cuál: nat32): bool
-        si n_vista = 0 entonces devolver falso fin
+    público función rejilla_ir(ref g: Rejilla, cuál: nat32): bool
+        si g.n_vista = 0 entonces devolver falso fin
         según cuál
-            caso I_PRIMERO: sel := 0
-            caso I_ANTERIOR: si sel > 0 entonces sel := sel - 1 sino devolver falso fin
-            caso I_SIGUIENTE: si sel + 1 < ent32(n_vista) entonces sel := sel + 1 sino devolver falso fin
-            caso I_ÚLTIMO: sel := ent32(n_vista) - 1
+            caso I_PRIMERO: g.sel := 0
+            caso I_ANTERIOR:
+                si g.sel <= 0 entonces devolver falso fin
+                g.sel := g.sel - 1
+            caso I_SIGUIENTE:
+                si g.sel + 1 >= ent32(g.n_vista) entonces devolver falso fin
+                g.sel := g.sel + 1
+            caso I_ÚLTIMO: g.sel := ent32(g.n_vista) - 1
         fin
         devolver cierto
     fin
@@ -1332,62 +1401,69 @@ módulo Controles
         devolver LT + 8 * E
     fin
 
-    función caben_renglones(): ent32
+    función caben_renglones(ref g: Rejilla): ent32
         variable n: ent32
-        n := (rej_al - alto_renglón() - 4) div alto_renglón()
+        n := (g.al - alto_renglón() - 4) div alto_renglón()
         si n < 1 entonces n := 1 fin
         devolver n
     fin
 
     ; las teclas de una rejilla (flechas, Re Pág, Av Pág, Inicio, Fin).
     ; Falso si no es suya, o si se pide subir estando arriba del todo.
-    público función rejilla_tecla(c: nat32): bool
+    público función rejilla_tecla(ref g: Rejilla, c: nat32): bool
         variable n: ent32
-        si n_vista = 0 entonces devolver falso fin
+        si g.n_vista = 0 entonces devolver falso fin
         n := 0
         según c
             caso TECLA_ARRIBA:
-                si sel <= 0 entonces devolver falso fin
+                si g.sel <= 0 entonces devolver falso fin
                 n := -1
             caso TECLA_ABAJO: n := 1
-            caso TECLA_RE_PÁG: n := -caben_renglones()
-            caso TECLA_AV_PÁG: n := caben_renglones()
+            caso TECLA_RE_PÁG: n := -caben_renglones(g)
+            caso TECLA_AV_PÁG: n := caben_renglones(g)
             caso TECLA_INICIO: n := -100000
             caso TECLA_FIN: n := 100000
             si no: devolver falso
         fin
-        sel := sel + n
-        si sel < 0 entonces sel := 0 fin
-        si sel >= ent32(n_vista) entonces sel := ent32(n_vista) - 1 fin
+        g.sel := g.sel + n
+        si g.sel < 0 entonces g.sel := 0 fin
+        si g.sel >= ent32(g.n_vista) entonces g.sel := ent32(g.n_vista) - 1 fin
         devolver cierto
     fin
 
+    función ancho_de_col(ref g: Rejilla, c: nat32): ent32
+        si c + 1 < g.n_cols entonces devolver g.col_x[c + 1] - g.col_x[c] - LA fin
+        devolver g.x + g.an - 5 * E - 4 - g.col_x[c]
+    fin
+
     ; pinta la rejilla en ese rectángulo («vacía»: lo que dice si no hay renglones)
-    público función rejilla(id: nat32, x: ent32, yy: ent32, an: ent32, al: ent32, vacía: puntero a byte)
+    público función rejilla(ref g: Rejilla, id: nat32, x: ent32, yy: ent32, an: ent32, al: ent32, vacía: puntero a byte)
         variable c, k: nat32
-        variable i, fy, ar, cx, w, resto, caben, xt: ent32
-        variable t, t2: puntero a byte
+        variable i, fy, ar, cx, w, resto, caben, xt, fijo: ent32
+        variable t: puntero a byte
         variable tinta, fondo_: nat32
-        rej_x := x
-        rej_y := yy
-        rej_an := an
-        rej_al := al
+        g.x := x
+        g.ye := yy
+        g.an := an
+        g.al := al
         ar := alto_renglón()
         caja(x, yy, an, al, C_BORDE)
         caja(x + 1, yy + 1, an - 2, al - 2, C_PAPEL)
-        ; las columnas: las de ancho fijo y la que se lleva lo que quede
-        resto := an - 3 * LA - 8 * E
+        ; las columnas: las de ancho fijo (si no caben, más estrechas) y la que se lleva lo que quede
+        fijo := 0
         c := 0
-        mientras c < n_cols hacer
-            resto := resto - col_ancho[c] * LA - LA
+        mientras c < g.n_cols hacer
+            fijo := fijo + g.col_ancho[c] * LA + LA
             c := c + 1
         fin
+        resto := an - 3 * LA - 8 * E - fijo
         cx := x + 2 * LA
         c := 0
-        mientras c < n_cols hacer
-            col_x[c] := cx
-            w := col_ancho[c] * LA
-            si col_ancho[c] = 0 entonces w := mayor(resto, 4 * LA) fin
+        mientras c < g.n_cols hacer
+            g.col_x[c] := cx
+            w := g.col_ancho[c] * LA
+            si resto < 8 * LA y fijo > 0 entonces w := (w * (an - 3 * LA - 8 * E - 8 * LA)) div fijo fin
+            si g.col_ancho[c] = 0 entonces w := mayor(resto, 8 * LA) fin
             cx := cx + w + LA
             c := c + 1
         fin
@@ -1395,63 +1471,63 @@ módulo Controles
         caja(x + 1, yy + 1, an - 2, ar, 0xE5E7EB)
         caja(x + 1, yy + ar, an - 2, 1, C_BORDE)
         c := 0
-        mientras c < n_cols hacer
-            w := ancho_de_col(c, x, an)
-            xt := col_x[c]
-            si col_der[c] entonces xt := col_x[c] + w - ancho_texto(col_nombre[c]) fin
-            texto_corto(xt, yy + 4 * E, col_nombre[c], w, C_TINTA, cierto)
-            si ent32(c) = orden_col entonces
-                ; la columna por la que se ordena: un triángulo (arriba o abajo)
-                flechita_vertical(col_x[c] - LA div 2 - 2, yy + ar div 2 - LT div 6 + (LT div 3) * ent32(orden_baja), LT div 3, orden_baja, C_AZUL)
+        mientras c < g.n_cols hacer
+            w := ancho_de_col(g, c)
+            xt := g.col_x[c]
+            si g.col_der[c] y ancho_texto(g.col_nombre[c]) < w entonces xt := g.col_x[c] + w - ancho_texto(g.col_nombre[c]) fin
+            texto_corto(xt, yy + 4 * E, g.col_nombre[c], w, C_TINTA, cierto)
+            si ent32(c) = g.orden_col entonces
+                ; la columna por la que se ordena: un triángulo (arriba: de menos a más)
+                si g.orden_baja entonces flechita_vertical(g.col_x[c] - LA div 2 - E, yy + ar div 2 + LT div 6, LT div 3, cierto, C_AZUL)
+                sino flechita_vertical(g.col_x[c] - LA div 2 - E, yy + ar div 2 - LT div 6, LT div 3, falso, C_AZUL) fin
             fin
-            si c > 0 entonces caja(col_x[c] - LA div 2 - E, yy + 2, 1, ar - 3, C_GRIS) fin
+            si c > 0 entonces caja(g.col_x[c] - LA div 2 - E, yy + 2, 1, ar - 3, C_GRIS) fin
             c := c + 1
         fin
-        si n_vista = 0 entonces
+        si g.n_vista = 0 entonces
             párrafo(x + LA, yy + ar + 6 * E, an - 2 * LA, vacía, C_SUAVE, falso, cierto)
             si id = foco entonces marca_foco(x, yy, an, al) fin
             apuntar(id, K_LISTA, x, yy, an, al)
             devolver
         fin
-        caben := caben_renglones()
-        si sel >= 0 entonces
-            si sel < primero entonces primero := sel fin
-            si sel >= primero + caben entonces primero := sel - caben + 1 fin
+        caben := caben_renglones(g)
+        si g.sel >= 0 entonces
+            si g.sel < g.primero entonces g.primero := g.sel fin
+            si g.sel >= g.primero + caben entonces g.primero := g.sel - caben + 1 fin
         fin
-        si primero > ent32(n_vista) - caben entonces primero := ent32(n_vista) - caben fin
-        si primero < 0 entonces primero := 0 fin
-        i := primero
+        si g.primero > ent32(g.n_vista) - caben entonces g.primero := ent32(g.n_vista) - caben fin
+        si g.primero < 0 entonces g.primero := 0 fin
+        i := g.primero
         fy := yy + ar + 2
-        mientras i < ent32(n_vista) y i < primero + caben hacer
-            k := vista[i]
+        mientras i < ent32(g.n_vista) y i < g.primero + caben hacer
+            k := g.vista[i]
             tinta := C_TINTA
             fondo_ := C_PAPEL
             si i mod 2 = 1 entonces fondo_ := 0xF6F8FA fin
-            si renglones[k].clase = R_AVISO entonces fondo_ := C_NARANJA_CLARO fin
-            si renglones[k].clase = R_GRIS entonces tinta := 0x6B7280 fin
-            si i = sel entonces
+            si g.r[k].clase = R_AVISO entonces fondo_ := C_NARANJA_CLARO fin
+            si g.r[k].clase = R_GRIS entonces tinta := 0x6B7280 fin
+            si i = g.sel entonces
                 fondo_ := C_AZUL
                 tinta := C_PAPEL
             fin
             caja(x + 2, fy, an - 4, ar, fondo_)
-            si renglones[k].clase = R_AVISO y i <> sel entonces caja(x + 2, fy, 4 * E, ar, C_NARANJA) fin
-            si i = sel entonces flechita(x + LA div 2, fy + ar div 2, LT div 2, C_PAPEL) fin
+            si g.r[k].clase = R_AVISO y i <> g.sel entonces caja(x + 2, fy, 4 * E, ar, C_NARANJA) fin
+            si i = g.sel entonces flechita(x + LA div 2, fy + ar div 2, LT div 2, C_PAPEL) fin
             c := 0
-            mientras c < n_cols hacer
-                w := ancho_de_col(c, x, an)
-                t := dirección(renglones[k].celdas[c][0])
-                xt := col_x[c]
-                si col_der[c] y ancho_texto(t) < w entonces xt := col_x[c] + w - ancho_texto(t) fin
-                texto_corto(xt, fy + 4 * E, t, w, tinta, c = 0 o i = sel)
+            mientras c < g.n_cols hacer
+                w := ancho_de_col(g, c)
+                t := dirección(g.r[k].celdas[c][0])
+                xt := g.col_x[c]
+                si g.col_der[c] y ancho_texto(t) < w entonces xt := g.col_x[c] + w - ancho_texto(t) fin
+                texto_corto(xt, fy + 4 * E, t, w, tinta, c = 0 o i = g.sel)
                 c := c + 1
             fin
             fy := fy + ar
             i := i + 1
         fin
-        ; si hay más de los que caben, la barrita de la derecha
-        si ent32(n_vista) > caben entonces
+        si ent32(g.n_vista) > caben entonces
             caja(x + an - 5 * E - 2, yy + ar + 2, 5 * E, al - ar - 4, 0xE5E7EB)
-            caja(x + an - 5 * E - 2, yy + ar + 2 + ((al - ar - 4) * primero) div ent32(n_vista), 5 * E, mayor(((al - ar - 4) * caben) div ent32(n_vista), 4), C_BORDE)
+            caja(x + an - 5 * E - 2, yy + ar + 2 + ((al - ar - 4) * g.primero) div ent32(g.n_vista), 5 * E, mayor(((al - ar - 4) * caben) div ent32(g.n_vista), 4), C_BORDE)
         fin
         si id = foco entonces marca_foco(x, yy, an, al) fin
         apuntar(id, K_LISTA, x, yy, an, al)
@@ -1462,31 +1538,26 @@ módulo Controles
         devolver b
     fin
 
-    función ancho_de_col(c: nat32, x: ent32, an: ent32): ent32
-        si c + 1 < n_cols entonces devolver col_x[c + 1] - col_x[c] - LA fin
-        devolver x + an - 5 * E - 4 - col_x[c]
-    fin
-
     ; un clic en la rejilla: en un rótulo, ordena por esa columna (y da -2);
     ; en un renglón, lo elige y da su sitio en lo que se ve; -1 si en nada
-    público función rejilla_clic(x: ent32, yy: ent32): ent32
+    público función rejilla_clic(ref g: Rejilla, x: ent32, yy: ent32): ent32
         variable c: nat32
         variable i: ent32
-        si x < rej_x o x >= rej_x + rej_an o yy < rej_y o yy >= rej_y + rej_al entonces devolver -1 fin
-        si yy < rej_y + alto_renglón() entonces
-            c := n_cols
+        si x < g.x o x >= g.x + g.an o yy < g.ye o yy >= g.ye + g.al entonces devolver -1 fin
+        si yy < g.ye + alto_renglón() entonces
+            c := g.n_cols
             mientras c > 0 hacer
                 c := c - 1
-                si x >= col_x[c] - LA div 2 entonces
-                    rejilla_ordenar(c)
+                si x >= g.col_x[c] - LA div 2 entonces
+                    rejilla_ordenar(g, c)
                     devolver -2
                 fin
             fin
             devolver -1
         fin
-        i := primero + (yy - rej_y - alto_renglón() - 2) div alto_renglón()
-        si i < 0 o i >= ent32(n_vista) entonces devolver -1 fin
-        sel := i
+        i := g.primero + (yy - g.ye - alto_renglón() - 2) div alto_renglón()
+        si i < 0 o i >= ent32(g.n_vista) entonces devolver -1 fin
+        g.sel := i
         devolver i
     fin
 
