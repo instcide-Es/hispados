@@ -3574,7 +3574,7 @@ S=$V/edid1024:600.sal
 mira "con un EDID de 1024 x 600 (un netbook), el núcleo lo lee y lo apunta en el registro del arranque" "pantalla: EDID: «QEMU Monitor», hecha para 1024 x 600 (la tarjeta de QEMU)"
 miracap "y la lista ofrece solo lo que cabe en la pantalla: 800 x 600 y 1024 x 600, la recomendada" ed1024 negrita 200 218 210 224 "800 x 600" negrita 355 218 365 224 "1024 x 600 *" \
   texto 160 249 168 257 "* La de la pantalla (recomendada): 1024 x 600." notexto 0 0 800 600 "1024 x 768"
-miracap "el Administrador de dispositivos dice el monitor en Pantalla, colgado de la tarjeta (lo lleva edid.cas)" dv1024 texto 544 175 552 183 "edid.cas"
+miracap "el Administrador de dispositivos dice el monitor en Pantalla, colgado de la tarjeta (lo lleva edid.cas)" dv1024 texto 520 178 560 194 "edid.cas"
 S=$V/edid1366:768.sal
 mira "con un EDID de 1366 x 768" "pantalla: EDID: «QEMU Monitor», hecha para 1366 x 768"
 miracap "nada mayor que 1366 x 768 (y 1366 no, que la VBE de QEMU no la da: la deja en 1360)" ed1366 negrita 0 0 800 600 "1280 x 720" texto 160 200 168 400 "* La de la pantalla (recomendada): 1366 x 768." \
