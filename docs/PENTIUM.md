@@ -4004,6 +4004,18 @@ por buenos; con el núcleo nuevo hay que reiniciar (sección 13).
   en la 437 de Hispa (`tools/hispa437.py`) y Alt Gr+E, el euro (F4h); el
   Navegador las traduce bien (`navega/frontal.c`, `alto437`).
 - `usb.sh` con `USB_MB` (la memoria del HP Mini, de 256 MB: caben las firmas).
+- **INSTALAR**: hasta 192 archivos y `CARPETAS.TXT` de 4 K (con el Wi-Fi, el
+  sonido y los accesorios eran 98 y 1063 octetos, y se quedaban fuera
+  `\HISPA\PAQUETES`, `\WIN32`, `\HISPA32` y el menú); si no caben, no
+  instala a medias.
+- **El menú Inicio con todo instalado** (el fallo de Carlos con la 0.8.4 en
+  VirtualBox a 1282 x 724: el menú de antes crecía hacia abajo y tapaba la
+  barra y «Apagar»): el nuevo, con navega, clicgest, win32, ssh, tailscal,
+  escudo, wifi, sonido, accesori y 30 y tantos programas, a 1280 x 724 y a
+  1024 x 600, queda siempre encima de la barra (la carpeta larga se desplaza
+  con sus flechas), con «Inicio» y «Apagar equipo» a la vista; la parte 23 lo
+  prueba también a 1280 x 724. Los accesorios no entran de salida entre los
+  más usados (dejaban fuera la oficina): salen al usarlos.
 
 Los paquetes: base, bloc, consola, ejemplos, red y tls **0.8.5**; paquetes
 1.2; equipo 0.9.1; navega 0.2.1; win32 1.1 (OpenGL y DirectSound que suena);
