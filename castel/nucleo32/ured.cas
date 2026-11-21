@@ -102,6 +102,7 @@ módulo Ured
         si orden = AVISO_ACABÓ entonces
             tcp_acabó(p.tarea)
             udp_acabó(p.tarea)
+            túnel_acabó(p.tarea)                            ; (TÚNEL)
             devolver
         fin
         f := falta()
@@ -164,6 +165,24 @@ módulo Ured
                 si tarjeta = T_NINGUNA entonces contestar(h, s, SIN_TARJETA, 0, 0, nulo, 0) sino contestar(h, s, escuchar(p.tarea, p.cab[1]), 0, 0, nulo, 0) fin
             caso O_ACEPTAR:
                 aceptar(p.cab[1], p.tarea, h, s, p.cab[2])
+            ; ---- (TÚNEL) la interfaz del túnel (WireGuard, Tailscale) ----
+            caso O_TUNEL:
+                contestar(h, s, poner_túnel(p.tarea, p.cab[1], puntero(datos), p.largo div 8), 0, 0, nulo, 0)
+            caso O_TUNEL_QUITAR:
+                contestar(h, s, quitar_túnel(p.tarea), 0, 0, nulo, 0)
+            caso O_TUNEL_LEER:
+                leer_túnel(p.tarea, h, s, p.cab[1], p.cabe)
+            caso O_TUNEL_ENTRA:
+                si túnel_ip = 0 o túnel_dueño <> p.tarea entonces
+                    contestar(h, s, NO_VALE_RED, 0, 0, nulo, 0)
+                sino
+                    si entrada_ip(datos, p.largo, cierto) = ENTRA_TCP entonces tcp_entra(ent_ip, ent_datos, ent_largo) fin
+                    contestar(h, s, 0, 0, 0, nulo, 0)
+                fin
+            caso O_TUNEL_DNS:
+                contestar(h, s, nombres_del_túnel(p.tarea, datos, p.largo), 0, 0, nulo, 0)
+            caso O_TUNEL_ESTADO:
+                contestar(h, s, túnel_ip, túnel_salidos, túnel_entrados, nulo, 0)
             caso O_UDP:
                 si tarjeta = T_NINGUNA entonces
                     contestar(h, s, SIN_TARJETA, 0, 0, nulo, 0)

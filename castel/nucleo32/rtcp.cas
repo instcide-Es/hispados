@@ -131,6 +131,7 @@ módulo Rtcp
             seg[20] := 2
             seg[21] := 4
             pon16(dirección(seg[22]), 1460)
+            si por_túnel(c.ip) entonces pon16(dirección(seg[22]), MTU_TÚNEL - 40) fin    ; (TÚNEL)
             h := 24
         fin
         pon16(dirección(seg[0]), c.puerto_l)
@@ -149,7 +150,7 @@ módulo Rtcp
             si k = CABE_TX entonces k := 0 fin
             i := i + 1
         fin
-        pon_ip(dirección(ps[0]), mi_ip)
+        pon_ip(dirección(ps[0]), ip_propia(c.ip))
         pon_ip(dirección(ps[4]), c.ip)
         ps[8] := 0
         ps[9] := 6
@@ -187,7 +188,7 @@ módulo Rtcp
         pon32(dirección(seg[4]), sq)
         pon32(dirección(seg[8]), ak)
         seg[12] := 0x50
-        pon_ip(dirección(ps[0]), mi_ip)
+        pon_ip(dirección(ps[0]), ip_propia(ip))
         pon_ip(dirección(ps[4]), ip)
         ps[8] := 0
         ps[9] := 6
@@ -428,6 +429,7 @@ módulo Rtcp
             i := i + ol
         fin
         si c.mss < 64 entonces c.mss := 536 fin
+        si por_túnel(c.ip) entonces c.mss := mín(c.mss, MTU_TÚNEL - 40) fin     ; (TÚNEL)
         c.rto := RTO_INICIAL
         c.intentos := 0
         c.tx_ini := 0
@@ -602,7 +604,7 @@ módulo Rtcp
         si n < 20 entonces devolver fin
         ; la suma, con la pseudocabecera
         pon_ip(dirección(ps[0]), ip)
-        pon_ip(dirección(ps[4]), mi_ip)
+        pon_ip(dirección(ps[4]), ip_propia(ip))
         ps[8] := 0
         ps[9] := 6
         pon16(dirección(ps[10]), n)
@@ -685,6 +687,7 @@ módulo Rtcp
                     i := i + ol
                 fin
                 si c.mss < 64 entonces c.mss := 536 fin
+                si por_túnel(c.ip) entonces c.mss := mín(c.mss, MTU_TÚNEL - 40) fin     ; (TÚNEL)
                 c.estado := ESTABLECIDA
                 c.reloj := 0
                 c.intentos := 0

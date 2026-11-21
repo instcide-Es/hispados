@@ -15,7 +15,8 @@
 # sus programas: IPCONFIG.BIN, PING.BIN y DESCARGA.BIN (la orden DESCARGAR).
 # Con «tls» (y «red»), también el servicio TLS (TLS.BIN, nucleo32/tls/hacer.sh:
 # necesita gcc con -m32) y HTTPS.BIN (la orden HTTPS). Con «ssh» (y «red»),
-# también SSH.BIN y SSHD.BIN (el cliente y el servidor SSH: nucleo32/ssh/hacer.sh).
+# también SSH.BIN y SSHD.BIN (el cliente y el servidor SSH), WG.BIN (WireGuard) y
+# TAILSCALE.BIN: nucleo32/hispac/hacer.sh.
 # La imagen se le da a QEMU como disco IDE: DISCO=IMAGEN nucleo32/probar.sh ...
 # Necesita python3, nasm, mkfs.fat (dosfstools) y mtools.
 set -e
@@ -82,10 +83,10 @@ if [ "$RED" = red ]; then
     nasm -f bin $T/uhttps.asm -o $T/HTTPS.BIN
     mcopy -i $V $T/TLS.BIN $T/HTTPS.BIN ::
   fi
-  # (SSH) el cliente y el servidor SSH
+  # (SSH) el cliente y el servidor SSH, WireGuard y Tailscale (nucleo32/hispac/hacer.sh)
   if [ "$SSH" = ssh ]; then
-    bash $AQUI/ssh/hacer.sh $T/ssh
-    mcopy -i $V $T/ssh/SSH.BIN $T/ssh/SSHD.BIN ::
+    bash $AQUI/hispac/hacer.sh $T/hc
+    mcopy -i $V $T/hc/*.BIN ::
   fi
 fi
 if [ "$OFICINA" = oficina ]; then
