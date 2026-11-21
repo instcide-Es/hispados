@@ -82,7 +82,8 @@ MAX_CABECERA = 16384
 VERSION_SISTEMA = '0.8.1'
 # (la 0.8.2, 21/11/2026: los controles de las ventanas —Ctrl+Tab, Alt+letra
 # y la llamada 81, maximizar— en el núcleo, y MUESTRA.BIN en los ejemplos;
-# suben base y ejemplos)
+# suben base y ejemplos; y el Administrador de dispositivos —las llamadas
+# 155 y 156, ACPI.BIN que apunta lo de ACPI y DISPOSIT.BIN—: suben base y equipo)
 VERSION_BASE = '0.8.2'
 VERSION_08 = '0.8'
 SISTEMA = [
@@ -93,7 +94,9 @@ SISTEMA = [
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
     ('bloc', VERSION_08, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
     ('consola', VERSION_08, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
-    ('equipo', VERSION_08, 'Mi equipo: las unidades, las carpetas y los archivos', 'base >= 0.7', [('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN')]),
+    # (dispositivos) con el Administrador de dispositivos (DISPOSIT.BIN, la llamada 155 del núcleo 0.8.2)
+    ('equipo', VERSION_BASE, 'Mi equipo y el Administrador de dispositivos', 'base >= 0.8.2', [
+        ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
     ('ejemplos', VERSION_BASE, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.2', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
         ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN'), ('MUESTRA.BIN', r'\HISPA\MUESTRA.BIN')]),

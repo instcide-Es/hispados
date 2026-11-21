@@ -1,0 +1,1254 @@
+; =============================================================================
+;  udisposi.cas - DISPOSIT.BIN, el Administrador de dispositivos de
+;  Hispa-Pentium: lo que hay en el equipo (todo lo del PCI, los aparatos USB,
+;  lo que declara ACPI, los discos, el teclado y el ratón PS/2, los relojes,
+;  los puertos serie y el procesador), en un árbol por categorías, con el
+;  controlador de Hispa-Pentium que lleva cada cosa (o «SIN CONTROLADOR»),
+;  su estado, su identificador y sus recursos. Se lo pide al núcleo con la
+;  llamada 155 (dispositivos.cas), que solo lee.
+;
+;    DISPOSIT                  la ventana (sin escritorio: el informe, en texto)
+;    DISPOSIT /INFORME         el informe, por la salida (DISPOSIT /INFORME > A.TXT)
+;    DISPOSIT /GUARDAR [RUTA]  el informe, a ese archivo (sin ruta: X:\DISPOSIT.TXT
+;                              o la primera unidad en la que se pueda escribir)
+;    DISPOSIT /P BUS DIR       las propiedades de un dispositivo (las abre la
+;                              ventana: General, Controlador y Recursos)
+;
+;  En la ventana: el árbol (Intro, dos clics o un clic en [+]/[-] abren y
+;  cierran una categoría; Intro o dos clics en un dispositivo, sus
+;  propiedades), y «Copiar informe» (al portapapeles) y «Guardar informe»
+;  (para mandar qué tiene cada portátil del taller). Lo que no tiene
+;  controlador va con un «!», fondo naranja, una franja y la palabra; lo que
+;  funciona, con «+» (y una marca en sus propiedades): nada depende solo del color.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UDisposi
+
+    modelo usuario
+
+    importar Llamadas, Controles, Textos32, Formato, Redes
+
+    constante MAX = 200
+    constante N_CAT = 11
+    constante ID_REJILLA = 1
+    constante ID_PROPIEDADES = 10
+    constante ID_COPIAR = 11
+    constante ID_GUARDAR = 12
+    constante ID_ACTUALIZAR = 13
+    constante ID_PESTAÑAS = 20
+    constante ID_CERRAR = 21
+    constante ID_COPIAR_FICHA = 22
+    constante ES_CATEGORÍA = 0x10000            ; el id de un renglón de categoría (más su número)
+    constante MENÚS = "&Archivo|&Ver|A&yuda"
+    constante CABE_INFORME = 60000
+
+    variable lista: arreglo [MAX] de Dispositivo
+    variable n: nat32
+    variable oculto: arreglo [MAX] de bool      ; (lo de ACPI que ya sale como «lo de siempre»)
+    variable acpi_de: arreglo [MAX] de nat32    ; la ficha de ACPI que va con ella (SIN_PADRE)
+    variable abierta: arreglo [N_CAT] de bool
+    variable red: Info_red
+    variable hay_red: bool
+    variable en: Energía
+    variable hay_en: bool
+    variable g: Rejilla
+    variable informe: arreglo [CABE_INFORME] de byte
+    variable aviso: arreglo [120] de byte
+    variable t: arreglo [200] de byte
+    variable t2: arreglo [200] de byte
+    variable abierto_m: ent32 = -1
+    variable tamaño_: nat32 = T_NORMAL
+    variable dd: arreglo [6] de nat32
+    ; las propiedades
+    variable prop: nat32                        ; la ficha que se ve
+    variable pestaña: nat32
+    variable ficha_t: arreglo [3000] de byte
+
+    ; =========================================================================
+    ;  Las tablas de nombres (lo que se sabe y lo típico): «\nCLAVE Nombre»
+    ; =========================================================================
+    constante FAB_PCI = "\n8086 Intel\n10EC Realtek\n11AB Marvell\n1B4B Marvell\n14E4 Broadcom\n168C Atheros\n1969 Atheros\n1106 VIA\n1039 SiS\n1022 AMD\n1002 AMD (ATI)\n10DE NVIDIA\n80EE VirtualBox\n1234 QEMU (Bochs)\n1AF4 Red Hat (virtio)\n1B36 Red Hat (QEMU)\n15AD VMware\n1033 NEC\n104C Texas Instruments\n1180 Ricoh\n197B JMicron\n1B21 ASMedia\n1912 Renesas\n10B9 ALi\n1013 Cirrus Logic\n5333 S3\n102B Matrox\n1217 O2 Micro\n1814 Ralink\n1095 Silicon Image\n105A Promise\n13F6 C-Media\n1274 Ensoniq\n1102 Creative\n125D ESS\n106B Apple\n1179 Toshiba\n103C HP\n1028 Dell\n17AA Lenovo\n1025 Acer\n1043 ASUS\n144D Samsung\n1C5C SK hynix\n15B7 SanDisk\n1987 Phison\n126F Silicon Motion\n8384 SigmaTel\n1414 Microsoft\n1AB8 Parallels\n1AE0 Google\n9005 Adaptec\n1000 LSI\n11C1 Agere\n10B7 3Com\n1011 DEC\n1186 D-Link\n1317 ADMtek\n100B National Semiconductor\n1050 Winbond\n1023 Trident\n1524 ENE\n1E0F KIOXIA\n"
+    constante MOD_PCI1 = "\n1234:1111 QEMU/Bochs: tarjeta gráfica (VBE de Bochs)\n80EE:BEEF VirtualBox: tarjeta gráfica (VBoxVGA)\n80EE:CAFE VirtualBox: servicio del invitado\n15AD:0405 VMware SVGA II (VMSVGA)\n15AD:0740 VMware VMCI\n15AD:07B0 VMware VMXNET3 (red)\n15AD:0790 VMware: puente PCI\n15AD:07A0 VMware: puente PCI Express\n1013:00B8 Cirrus Logic GD 5446\n1B36:0001 QEMU: puente PCI a PCI\n1B36:0008 QEMU: puente al procesador (PCIe)\n1B36:000C QEMU: puerto raíz PCI Express\n1B36:000D QEMU: controladora USB 3 (xHCI)\n1B36:0010 QEMU: disco NVMe\n1B36:0100 QEMU: tarjeta gráfica QXL\n1AF4:1000 virtio: tarjeta de red\n1AF4:1001 virtio: disco\n1AF4:1002 virtio: globo de memoria\n1AF4:1003 virtio: consola\n1AF4:1004 virtio: SCSI\n1AF4:1005 virtio: números al azar\n1AF4:1041 virtio: tarjeta de red (1.0)\n1AF4:1042 virtio: disco (1.0)\n1AF4:1050 virtio: tarjeta gráfica\n1AF4:1052 virtio: entrada (teclado y ratón)\n1022:2000 AMD PCnet-PCI II (red, Am79C970A)\n1033:0194 NEC uPD720200: USB 3 (xHCI)\n1033:0035 NEC: USB 1.1 (OHCI)\n1033:00E0 NEC: USB 2.0 (EHCI)\n106B:003F Apple KeyLargo: USB 1.1 (OHCI)\n1274:5000 Ensoniq ES1370 AudioPCI\n197B:2363 JMicron JMB363: SATA e IDE\n197B:2368 JMicron JMB368: IDE\n1B21:1042 ASMedia ASM1042: USB 3 (xHCI)\n1B21:0612 ASMedia ASM1062: SATA (AHCI)\n1912:0014 Renesas uPD720201: USB 3 (xHCI)\n1912:0015 Renesas uPD720202: USB 3 (xHCI)\n1180:0476 Ricoh R5C476: puente CardBus\n1180:0822 Ricoh R5C822: lector de tarjetas SD\n1180:0832 Ricoh R5C832: FireWire\n1180:E822 Ricoh: lector de tarjetas SD\n1B4B:9172 Marvell 88SE9172: SATA (AHCI)\n"
+    constante MOD_PCI2 = "\n8086:1237 Intel 440FX: puente al procesador\n8086:7000 Intel PIIX3: puente ISA\n8086:7010 Intel PIIX3: controladora IDE\n8086:7020 Intel PIIX3: USB 1.1 (UHCI)\n8086:7110 Intel PIIX4: puente ISA\n8086:7111 Intel PIIX4: controladora IDE\n8086:7112 Intel PIIX4: USB 1.1 (UHCI)\n8086:7113 Intel PIIX4: energía (ACPI)\n8086:100E Intel PRO/1000 MT (82540EM)\n8086:100F Intel PRO/1000 MT (82545EM)\n8086:1004 Intel PRO/1000 (82543GC)\n8086:10D3 Intel 82574L (Gigabit)\n8086:10F5 Intel 82567LM (Gigabit)\n8086:10BD Intel 82566DM-2 (Gigabit)\n8086:294C Intel 82566DC-2 (Gigabit)\n8086:1502 Intel 82579LM (Gigabit)\n8086:1503 Intel 82579V (Gigabit)\n8086:153A Intel I217-LM (Gigabit)\n8086:15A3 Intel I218-V (Gigabit)\n8086:1229 Intel PRO/100 (8255x)\n8086:1209 Intel PRO/100 (8255x)\n8086:29C0 Intel Q35: puente al procesador\n8086:2918 Intel ICH9: puente LPC\n8086:2919 Intel ICH9-M: puente LPC\n8086:2922 Intel ICH9: SATA (AHCI)\n8086:2929 Intel ICH9-M: SATA (AHCI)\n8086:2920 Intel ICH9: SATA (IDE)\n8086:2930 Intel ICH9: SMBus\n8086:2934 Intel ICH9: USB 1.1 (UHCI 1)\n8086:2935 Intel ICH9: USB 1.1 (UHCI 2)\n8086:2936 Intel ICH9: USB 1.1 (UHCI 3)\n8086:2937 Intel ICH9: USB 1.1 (UHCI 4)\n8086:2938 Intel ICH9: USB 1.1 (UHCI 5)\n8086:2939 Intel ICH9: USB 1.1 (UHCI 6)\n8086:293A Intel ICH9: USB 2.0 (EHCI 1)\n8086:293C Intel ICH9: USB 2.0 (EHCI 2)\n8086:293E Intel ICH9: sonido HD Audio\n8086:24CD Intel ICH4: USB 2.0 (EHCI)\n8086:2415 Intel ICH: sonido AC'97\n8086:2668 Intel ICH6: sonido HD Audio\n8086:2829 Intel ICH8-M: SATA (AHCI)\n8086:2850 Intel ICH8-M: controladora IDE\n8086:284B Intel ICH8: sonido HD Audio\n8086:283A Intel ICH8: USB 2.0 (EHCI)\n8086:2836 Intel ICH8: USB 2.0 (EHCI)\n8086:2815 Intel ICH8-M: puente LPC\n8086:2448 Intel 82801: puente PCI (portátil)\n8086:244E Intel 82801: puente PCI\n"
+    constante MOD_PCI3 = "\n8086:27D8 Intel ICH7: sonido HD Audio\n8086:27B8 Intel ICH7: puente LPC\n8086:27B9 Intel ICH7-M: puente LPC\n8086:27BC Intel NM10: puente LPC\n8086:27C0 Intel ICH7: SATA (IDE)\n8086:27C4 Intel ICH7-M: SATA (IDE)\n8086:27C5 Intel ICH7-M: SATA (AHCI)\n8086:27C8 Intel ICH7: USB 1.1 (UHCI 1)\n8086:27C9 Intel ICH7: USB 1.1 (UHCI 2)\n8086:27CA Intel ICH7: USB 1.1 (UHCI 3)\n8086:27CB Intel ICH7: USB 1.1 (UHCI 4)\n8086:27CC Intel ICH7: USB 2.0 (EHCI)\n8086:27D0 Intel ICH7: puerto PCI Express 1\n8086:27D2 Intel ICH7: puerto PCI Express 2\n8086:27D4 Intel ICH7: puerto PCI Express 3\n8086:27D6 Intel ICH7: puerto PCI Express 4\n8086:27DA Intel ICH7: SMBus\n8086:27DF Intel ICH7: controladora IDE\n8086:A010 Intel Atom N4xx/N5xx: puente al procesador\n8086:A011 Intel GMA 3150 (Atom)\n8086:A012 Intel GMA 3150 (Atom, 2.ª función)\n8086:A000 Intel Atom D4xx/D5xx: puente al procesador\n8086:A001 Intel GMA 3150 (Atom)\n8086:27A0 Intel 945GM: puente al procesador\n8086:27A2 Intel GMA 950 (945GM)\n8086:27A6 Intel GMA 950 (945GM, 2.ª función)\n8086:27AC Intel 945GSE: puente al procesador\n8086:27AE Intel GMA 950 (945GSE)\n8086:2A00 Intel GM965: puente al procesador\n8086:2A02 Intel GMA X3100 (GM965)\n8086:2A40 Intel GM45: puente al procesador\n8086:2A42 Intel GMA 4500MHD (GM45)\n8086:0044 Intel Core (Arrandale): puente al procesador\n8086:0046 Intel HD Graphics (Arrandale)\n8086:0104 Intel Core 2.ª gen.: puente al procesador\n8086:0116 Intel HD Graphics 3000\n8086:0126 Intel HD Graphics 3000\n8086:0166 Intel HD Graphics 4000\n8086:0A16 Intel HD Graphics 4400\n8086:0A26 Intel HD Graphics 5000\n8086:0F00 Intel Atom Bay Trail: puente al procesador\n8086:0F31 Intel Atom Bay Trail: gráficos\n8086:0F35 Intel Atom Bay Trail: USB 3 (xHCI)\n8086:0F23 Intel Atom Bay Trail: SATA (AHCI)\n8086:0F04 Intel Atom Bay Trail: sonido HD Audio\n8086:0F1C Intel Atom Bay Trail: puente LPC\n8086:0F18 Intel Atom Bay Trail: TXE\n8086:0F12 Intel Atom Bay Trail: SMBus\n8086:0F14 Intel Atom Bay Trail: eMMC\n8086:0F16 Intel Atom Bay Trail: lector SD\n8086:0F28 Intel Atom Bay Trail: sonido (SST)\n8086:0F48 Intel Atom Bay Trail: PCI Express 1\n8086:0F4A Intel Atom Bay Trail: PCI Express 2\n"
+    constante MOD_PCI4 = "\n8086:1C26 Intel serie 6: USB 2.0 (EHCI 1)\n8086:1C2D Intel serie 6: USB 2.0 (EHCI 2)\n8086:1C20 Intel serie 6: sonido HD Audio\n8086:1C03 Intel serie 6: SATA (AHCI)\n8086:1C3A Intel serie 6: motor de gestión (MEI)\n8086:1E31 Intel serie 7: USB 3 (xHCI)\n8086:1E26 Intel serie 7: USB 2.0 (EHCI 1)\n8086:1E2D Intel serie 7: USB 2.0 (EHCI 2)\n8086:1E20 Intel serie 7: sonido HD Audio\n8086:1E03 Intel serie 7: SATA (AHCI)\n8086:1E3A Intel serie 7: motor de gestión (MEI)\n8086:8C31 Intel serie 8: USB 3 (xHCI)\n8086:9C31 Intel serie 8 (portátil): USB 3 (xHCI)\n8086:9C03 Intel serie 8 (portátil): SATA (AHCI)\n8086:9D2F Intel serie 100: USB 3 (xHCI)\n8086:A12F Intel serie 100: USB 3 (xHCI)\n8086:3B64 Intel serie 5: motor de gestión (MEI)\n8086:3B34 Intel serie 5: USB 2.0 (EHCI)\n8086:3B56 Intel serie 5: sonido HD Audio\n8086:4222 Intel PRO/Wireless 3945ABG (Wi-Fi)\n8086:4227 Intel PRO/Wireless 3945ABG (Wi-Fi)\n8086:4229 Intel Wireless 4965AGN (Wi-Fi)\n8086:4230 Intel Wireless 4965AGN (Wi-Fi)\n8086:4232 Intel WiFi Link 5100\n8086:4237 Intel WiFi Link 5100\n8086:4235 Intel WiFi Link 5300\n8086:4236 Intel WiFi Link 5300\n8086:0083 Intel Centrino Wireless-N 1000\n8086:0084 Intel Centrino Wireless-N 1000\n8086:0082 Intel Centrino Advanced-N 6205\n8086:0085 Intel Centrino Advanced-N 6205\n8086:008A Intel Centrino Wireless-N 1030\n8086:0887 Intel Centrino Wireless-N 2230\n8086:0888 Intel Centrino Wireless-N 2230\n8086:08B1 Intel Wireless 7260 (Wi-Fi)\n8086:08B2 Intel Wireless 7260 (Wi-Fi)\n8086:095A Intel Wireless 7265 (Wi-Fi)\n8086:095B Intel Wireless 7265 (Wi-Fi)\n8086:24F3 Intel Wireless 8260 (Wi-Fi)\n8086:24FD Intel Wireless 8265 (Wi-Fi)\n8086:2723 Intel Wi-Fi 6 AX200\n"
+    constante MOD_PCI5 = "\n10EC:8139 Realtek RTL8139 (Fast Ethernet)\n10EC:8168 Realtek RTL8111/8168 (Gigabit)\n10EC:8136 Realtek RTL8101E/8102E (Fast Ethernet)\n10EC:8169 Realtek RTL8169 (Gigabit)\n10EC:8167 Realtek RTL8169SC (Gigabit)\n10EC:5209 Realtek RTS5209: lector de tarjetas\n10EC:5227 Realtek RTS5227: lector de tarjetas\n10EC:5229 Realtek RTS5229: lector de tarjetas\n10EC:522A Realtek RTS522A: lector de tarjetas\n10EC:8176 Realtek RTL8188CE (Wi-Fi)\n10EC:8172 Realtek RTL8191SE (Wi-Fi)\n10EC:8179 Realtek RTL8188EE (Wi-Fi)\n10EC:B723 Realtek RTL8723BE (Wi-Fi)\n10EC:C821 Realtek RTL8821CE (Wi-Fi)\n11AB:4380 Marvell Yukon 88E8057 (Gigabit)\n11AB:4381 Marvell Yukon Optima 88E8059 (Gigabit)\n11AB:436C Marvell Yukon 88E8072 (Gigabit)\n11AB:436A Marvell Yukon 88E8058 (Gigabit)\n11AB:4364 Marvell Yukon 88E8056 (Gigabit)\n11AB:4362 Marvell Yukon 88E8053 (Gigabit)\n11AB:4353 Marvell Yukon 88E8039 (Fast Ethernet)\n11AB:4354 Marvell Yukon 88E8040 (Fast Ethernet)\n11AB:4355 Marvell Yukon 88E8040T (Fast Ethernet)\n11AB:4357 Marvell Yukon 88E8042 (Fast Ethernet)\n14E4:4311 Broadcom BCM4311 (Wi-Fi)\n14E4:4312 Broadcom BCM4311 (Wi-Fi)\n14E4:4315 Broadcom BCM4312 (Wi-Fi)\n14E4:4727 Broadcom BCM4313 (Wi-Fi)\n14E4:4328 Broadcom BCM4321 (Wi-Fi)\n14E4:432B Broadcom BCM4322 (Wi-Fi)\n14E4:4353 Broadcom BCM43224 (Wi-Fi)\n14E4:4357 Broadcom BCM43225 (Wi-Fi)\n14E4:4331 Broadcom BCM4331 (Wi-Fi)\n14E4:43A0 Broadcom BCM4360 (Wi-Fi)\n14E4:43B1 Broadcom BCM4352 (Wi-Fi)\n14E4:43BA Broadcom BCM43602 (Wi-Fi)\n14E4:1692 Broadcom NetLink BCM57780 (Gigabit)\n14E4:16B4 Broadcom BCM57765 (Gigabit)\n14E4:16BC Broadcom BCM57765: lector de tarjetas\n14E4:1693 Broadcom NetLink BCM5787M (Gigabit)\n14E4:1713 Broadcom NetLink BCM5906M (Fast Ethernet)\n14E4:1684 Broadcom BCM5764M (Gigabit)\n"
+    constante MOD_PCI6 = "\n168C:0013 Atheros AR5212 (Wi-Fi)\n168C:001A Atheros AR2413 (Wi-Fi)\n168C:001C Atheros AR242x/AR542x (Wi-Fi)\n168C:0024 Atheros AR5418 (Wi-Fi)\n168C:0027 Atheros AR9160 (Wi-Fi)\n168C:0029 Atheros AR922X (Wi-Fi)\n168C:002A Atheros AR928X (Wi-Fi)\n168C:002B Atheros AR9285 (Wi-Fi)\n168C:002E Atheros AR9287 (Wi-Fi)\n168C:0030 Atheros AR93xx (Wi-Fi)\n168C:0032 Atheros AR9485 (Wi-Fi)\n168C:0034 Atheros AR9462 (Wi-Fi)\n168C:0036 Qualcomm Atheros QCA9565 (Wi-Fi)\n168C:003E Qualcomm Atheros QCA6174 (Wi-Fi)\n1969:1062 Atheros AR8132 (Fast Ethernet)\n1969:1063 Atheros AR8131 (Gigabit)\n1969:1073 Atheros AR8151 (Gigabit)\n1969:1083 Atheros AR8151 v2 (Gigabit)\n1969:2060 Atheros AR8152 v1.1 (Fast Ethernet)\n1969:2062 Atheros AR8152 v2 (Fast Ethernet)\n1969:1091 Atheros AR8161 (Gigabit)\n1969:1048 Attansic L1 (Gigabit)\n1969:E091 Killer E220x (Gigabit)\n1106:3038 VIA: USB 1.1 (UHCI)\n1106:3104 VIA: USB 2.0 (EHCI)\n1106:3065 VIA Rhine-II (Fast Ethernet)\n1106:3106 VIA Rhine-III (Fast Ethernet)\n1106:3119 VIA Velocity (Gigabit)\n1106:0571 VIA: controladora IDE\n1106:3149 VIA: SATA\n1106:3058 VIA: sonido AC'97\n1106:3059 VIA: sonido AC'97\n1106:3288 VIA: sonido HD Audio\n1039:0900 SiS900 (Fast Ethernet)\n1039:0191 SiS191 (Gigabit)\n1039:7001 SiS: USB 1.1 (OHCI)\n1039:7002 SiS: USB 2.0 (EHCI)\n1039:5513 SiS: controladora IDE\n1039:7012 SiS: sonido AC'97\n"
+    constante CLASES6 = "\n010601 Controladora SATA (AHCI)\n010802 Controladora de discos NVMe\n0C0300 Controladora USB 1.1 (UHCI)\n0C0310 Controladora USB 1.1 (OHCI)\n0C0320 Controladora USB 2.0 (EHCI)\n0C0330 Controladora USB 3 (xHCI)\n"
+    constante CLASES4 = "\n0000 Aparato antiguo\n0001 Tarjeta gráfica antigua\n0100 Controladora SCSI\n0101 Controladora IDE\n0102 Controladora de disquetes\n0104 Controladora RAID\n0105 Controladora ATA\n0106 Controladora SATA\n0107 Controladora SAS\n0108 Controladora de memoria (NVMe)\n0180 Controladora de discos\n0200 Tarjeta de red (Ethernet)\n0280 Tarjeta de red inalámbrica (Wi-Fi)\n0300 Tarjeta gráfica (VGA)\n0302 Tarjeta gráfica 3D\n0380 Tarjeta gráfica\n0400 Vídeo\n0401 Tarjeta de sonido (AC'97)\n0403 Sonido HD Audio\n0480 Sonido\n0500 Controladora de memoria RAM\n0580 Controladora de memoria\n0600 Puente al procesador\n0601 Puente ISA (LPC)\n0602 Puente EISA\n0604 Puente PCI a PCI\n0607 Puente CardBus\n0609 Puente PCI\n0680 Puente\n0700 Puerto serie\n0701 Puerto paralelo\n0703 Módem\n0780 Comunicaciones (motor de gestión)\n0800 Controladora de interrupciones\n0801 Controladora de DMA\n0802 Temporizador\n0803 Reloj\n0805 Lector de tarjetas SD\n0806 IOMMU\n0880 Periférico del sistema\n0900 Teclado\n0902 Ratón\n0B40 Coprocesador\n0C00 FireWire (IEEE 1394)\n0C03 Controladora USB\n0C05 Controladora SMBus\n0C80 Bus serie\n0D11 Bluetooth\n0D80 Aparato inalámbrico\n1080 Cifrado\n1180 Sensores\n1101 Medida de rendimiento\n"
+    constante FAB_USB = "\n1D6B Linux Foundation\n0627 QEMU\n46F4 QEMU\n0409 NEC\n80EE VirtualBox\n0E0F VMware\n8087 Intel\n0781 SanDisk\n090C Silicon Motion\n058F Alcor Micro\n0951 Kingston\n13FE Phison\n8564 Transcend\n054C Sony\n0930 Toshiba\n125F A-DATA\n18A5 Verbatim\n1F75 Innostor\n046D Logitech\n045E Microsoft\n413C Dell\n04F2 Chicony\n05AC Apple\n0BDA Realtek\n1A40 Terminus\n05E3 Genesys Logic\n0424 Microchip (SMSC)\n0B95 ASIX\n0CF3 Atheros\n04CA Lite-On\n03F0 HP\n04A9 Canon\n04B8 Epson\n04E8 Samsung\n0BC2 Seagate\n1058 Western Digital\n152D JMicron\n174C ASMedia\n2109 VIA Labs\n1532 Razer\n0C45 Microdia\n05C8 Cheng Uei\n064E Suyin\n04F3 Elan\n06CB Synaptics\n0A5C Broadcom\n0A12 Cambridge Silicon Radio\n2001 D-Link\n148F Ralink\n067B Prolific\n0403 FTDI\n10C4 Silicon Labs\n1A86 QinHeng\n093A Pixart\n09DA A4Tech\n1C4F SiGma Micro\n258A Sinowealth\n0458 Genius (KYE)\n17EF Lenovo\n0D8C C-Media\n04D9 Holtek\n"
+    constante MOD_USB = "\n46F4:0001 QEMU: memoria USB\n0409:55AA NEC: concentrador USB\n80EE:0021 VirtualBox: tableta USB\n0E0F:0003 VMware: ratón virtual\n1D6B:0002 Concentrador raíz USB 2.0\n0781:5567 SanDisk Cruzer Blade\n0781:5571 SanDisk Cruzer Fit\n0781:5581 SanDisk Ultra\n0951:1666 Kingston DataTraveler\n090C:1000 Silicon Motion: memoria USB\n058F:6387 Alcor: memoria USB\n13FE:4200 Phison: memoria USB\n046D:C077 Logitech M105 (ratón)\n046D:C52B Logitech Unifying (receptor)\n046D:C534 Logitech: receptor inalámbrico\n045E:0040 Microsoft Wheel Mouse Optical\n0BDA:8153 Realtek RTL8153 (red Gigabit por USB)\n0BDA:8152 Realtek RTL8152 (red por USB)\n0B95:772B ASIX AX88772B (red por USB)\n0B95:1790 ASIX AX88179 (red Gigabit por USB)\n0CF3:9271 Atheros AR9271 (Wi-Fi por USB)\n0BDA:8179 Realtek RTL8188EUS (Wi-Fi por USB)\n0BDA:0129 Realtek RTS5129: lector de tarjetas\n1A40:0101 Terminus: concentrador de 4 puertos\n05E3:0608 Genesys Logic: concentrador USB 2.0\n8087:0024 Intel: concentrador interno\n8087:8000 Intel: concentrador interno\n8087:8008 Intel: concentrador interno\n8087:0A2A Intel: Bluetooth\n0A5C:21E6 Broadcom: Bluetooth\n0A12:0001 CSR: Bluetooth\n"
+    constante PNP = "\nPNP0303 Teclado PS/2\nPNP030B Teclado PS/2\nPNP0F13 Ratón PS/2\nPNP0F03 Ratón PS/2\nPNP0F0E Ratón PS/2\nPNP0B00 Reloj de la CMOS\nPNP0B01 Reloj de la CMOS\nPNP0B02 Reloj de la CMOS\nPNP0100 Reloj del sistema (8253)\nPNP0000 Controladora de interrupciones (8259)\nPNP0200 Controladora de DMA\nPNP0800 Altavoz del PC\nPNP0C04 Coprocesador matemático\nPNP0501 Puerto serie\nPNP0400 Puerto paralelo (impresora)\nPNP0401 Puerto paralelo ECP\nPNP0700 Controladora de disquetes\nPNP0103 Temporizador de alta precisión (HPET)\nPNP0A03 Bus PCI\nPNP0A08 Bus PCI Express\nPNP0A05 Contenedor de la placa\nPNP0A06 Contenedor de la placa\nPNP0C01 Memoria del sistema\nPNP0C02 Recursos de la placa base\nPNP0C09 Controlador embebido\nPNP0C0A Batería\nACPI0003 Adaptador de corriente\nPNP0C0C Botón de encendido\nPNP0C0D Tapa del portátil\nPNP0C0E Botón de suspender\nPNP0C0F Enlace de interrupciones PCI\nPNP0C14 Interfaz WMI\nPNP0C32 Botón rápido\nPNP0C80 Memoria (se puede añadir en marcha)\nPNP0C50 Panel táctil (HID por I2C)\nACPI0007 Procesador\nACPI0010 Contenedor de procesadores\nACPI0004 Módulo\nACPI0006 Contenedor de sucesos (GPE)\nACPI000E Reloj de despertar\nQEMU0002 QEMU: configuración (fw_cfg)\nINT0800 Memoria del firmware (Intel)\nINT3F0D Vigilante (Intel)\nLNXVIDEO Vídeo (ACPI)\nLNXPWRBN Botón de encendido\n"
+    constante CATEGORÍAS = "Pantalla|Discos|Controladoras de disco|USB|Red|Sonido|Teclado y ratón|Sistema y ACPI|Batería|Procesador|Otros dispositivos"
+
+    ; busca «clave» en la tabla y copia su nombre a d (falso si no está)
+    función en_tabla(tabla: puntero a byte, clave: puntero a byte, d: puntero a byte, cabe: nat32): bool
+        variable patrón: arreglo [24] de byte
+        variable p: puntero a byte
+        variable k: nat32
+        patrón[0] := '\n'
+        patrón[1] := 0
+        concatenar(patrón, clave)
+        concatenar(patrón, " ")
+        p := buscar(tabla, patrón)
+        si p = nulo entonces devolver falso fin
+        p := p + longitud(patrón)
+        k := 0
+        mientras p[k] <> '\n' y p[k] <> 0 y k + 1 < cabe hacer
+            d[k] := p[k]
+            k := k + 1
+        fin
+        d[k] := 0
+        devolver cierto
+    fin
+
+    función hex4(v: nat32, d: puntero a byte)
+        dd[0] := v yb 0xFFFF
+        formatear(d, 8, "%04X", dd)
+    fin
+
+    función clave_id(a: nat32, b: nat32, d: puntero a byte)
+        dd[0] := a yb 0xFFFF
+        dd[1] := b yb 0xFFFF
+        formatear(d, 12, "%04X:%04X", dd)
+    fin
+
+    ; el nombre de la clase de PCI (con su interfaz, si la tabla la tiene)
+    función nombre_clase(c: nat32, d: puntero a byte, cabe: nat32)
+        variable k: arreglo [12] de byte
+        dd[0] := c
+        formatear(k, 12, "%06X", dd)
+        si en_tabla(CLASES6, k, d, cabe) entonces devolver fin
+        dd[0] := c >> 8
+        formatear(k, 12, "%04X", dd)
+        si en_tabla(CLASES4, k, d, cabe) entonces devolver fin
+        dd[0] := c >> 16
+        formatear(d, cabe, "Aparato de la clase %02X", dd)
+    fin
+
+    función nombre_clase_usb(c: nat32, d: puntero a byte)
+        variable cc, pr: nat32
+        cc := c >> 16
+        pr := c yb 0xFF
+        según nat16(cc)
+            caso 0x01: Textos32.copiar(d, "sonido USB")
+            caso 0x02: Textos32.copiar(d, "módem o red USB (CDC)")
+            caso 0x03:
+                si pr = 1 entonces Textos32.copiar(d, "teclado USB") sino si pr = 2 entonces Textos32.copiar(d, "ratón USB") sino Textos32.copiar(d, "aparato HID (mando, panel...)") fin
+            caso 0x06: Textos32.copiar(d, "cámara de fotos (PTP)")
+            caso 0x07: Textos32.copiar(d, "impresora USB")
+            caso 0x08: Textos32.copiar(d, "memoria o disco USB")
+            caso 0x09: Textos32.copiar(d, "concentrador USB")
+            caso 0x0A: Textos32.copiar(d, "datos (CDC)")
+            caso 0x0B: Textos32.copiar(d, "lector de tarjetas inteligentes")
+            caso 0x0E: Textos32.copiar(d, "cámara USB")
+            caso 0xE0: Textos32.copiar(d, "Bluetooth")
+            caso 0xEF: Textos32.copiar(d, "aparato USB compuesto")
+            caso 0xFF: Textos32.copiar(d, "aparato USB del fabricante")
+            si no: Textos32.copiar(d, "aparato USB")
+        fin
+    fin
+
+    ; el fabricante (vacío si no se sabe)
+    función fabricante(i: nat32, d: puntero a byte)
+        variable k: arreglo [12] de byte
+        d[0] := 0
+        si lista[i].bus = BUS_PCI entonces
+            hex4(lista[i].fabricante, k)
+            si no en_tabla(FAB_PCI, k, d, 48) entonces
+                dd[0] := lista[i].fabricante
+                formatear(d, 48, "el %04X (sin nombre en la tabla)", dd)
+            fin
+        sino si lista[i].bus = BUS_USB y lista[i].dirección < 0x100 entonces
+            hex4(lista[i].fabricante, k)
+            si no en_tabla(FAB_USB, k, d, 48) entonces
+                si lista[i].marca[0] <> 0 entonces copiar_hasta(d, lista[i].marca, 48) sino
+                    dd[0] := lista[i].fabricante
+                    formatear(d, 48, "el %04X (sin nombre en la tabla)", dd)
+                fin
+            fin
+        sino si lista[i].bus = BUS_CPU entonces
+            si iguales(lista[i].marca, "GenuineIntel") entonces Textos32.copiar(d, "Intel")
+            sino si iguales(lista[i].marca, "AuthenticAMD") entonces Textos32.copiar(d, "AMD")
+            sino copiar_hasta(d, lista[i].marca, 48) fin
+        sino
+            copiar_hasta(d, lista[i].marca, 48)
+        fin
+    fin
+
+    ; el nombre que se enseña (hasta «cabe»)
+    función nombre_de(i: nat32, d: puntero a byte, cabe: nat32)
+        variable k: arreglo [12] de byte
+        variable f: arreglo [48] de byte
+        variable c: arreglo [48] de byte
+        d[0] := 0
+        si lista[i].bus = BUS_PCI entonces
+            clave_id(lista[i].fabricante, lista[i].producto, k)
+            si en_tabla(MOD_PCI1, k, d, cabe) o en_tabla(MOD_PCI2, k, d, cabe) o en_tabla(MOD_PCI3, k, d, cabe) o en_tabla(MOD_PCI4, k, d, cabe) o en_tabla(MOD_PCI5, k, d, cabe) o en_tabla(MOD_PCI6, k, d, cabe) entonces devolver fin
+            si lista[i].nombre[0] <> 0 entonces
+                copiar_hasta(d, lista[i].nombre, cabe)
+                devolver
+            fin
+            fabricante(i, f)
+            nombre_clase(lista[i].clase, c, 48)
+            hex4(lista[i].fabricante, k)
+            si en_tabla(FAB_PCI, k, f, 48) entonces
+                dd[0] := nat32(dirección(f[0]))
+                dd[1] := nat32(dirección(c[0]))
+                formatear(d, cabe, "%s: %s", dd)
+            sino
+                copiar_hasta(d, c, cabe)
+            fin
+        sino si lista[i].bus = BUS_USB entonces
+            si lista[i].nombre[0] <> 0 entonces
+                ; con la marca delante, si no la lleva ya
+                si lista[i].marca[0] <> 0 y buscar(lista[i].nombre, lista[i].marca) = nulo entonces
+                    dd[0] := nat32(dirección(lista[i].marca[0]))
+                    dd[1] := nat32(dirección(lista[i].nombre[0]))
+                    formatear(d, cabe, "%s %s", dd)
+                sino
+                    copiar_hasta(d, lista[i].nombre, cabe)
+                fin
+                devolver
+            fin
+            clave_id(lista[i].fabricante, lista[i].producto, k)
+            si en_tabla(MOD_USB, k, d, cabe) entonces devolver fin
+            nombre_clase_usb(lista[i].clase, c)
+            hex4(lista[i].fabricante, k)
+            si en_tabla(FAB_USB, k, f, 48) entonces
+                dd[0] := nat32(dirección(f[0]))
+                dd[1] := nat32(dirección(c[0]))
+                formatear(d, cabe, "%s: %s", dd)
+            sino
+                c[0] := mayúscula(c[0])
+                copiar_hasta(d, c, cabe)
+            fin
+        sino si lista[i].bus = BUS_DISCO entonces
+            junta_espacios(lista[i].nombre)
+            dd[0] := nat32(dirección(lista[i].nombre[0]))
+            dd[1] := lista[i].dato1 div 2048
+            si lista[i].dato1 >= 2048 * 10240 entonces
+                dd[1] := lista[i].dato1 div (2048 * 1024)
+                formatear(d, cabe, "%s (%u GB)", dd)
+            sino
+                formatear(d, cabe, "%s (%u MB)", dd)
+            fin
+        sino si lista[i].bus = BUS_ACPI y lista[i].pnp[0] <> 0 y en_tabla(PNP, lista[i].pnp, d, cabe) entonces
+            si lista[i].dirección = 0 entonces copiar_hasta(d, lista[i].nombre, cabe) fin
+        sino si lista[i].bus = BUS_ACPI y lista[i].dirección <> 0 entonces
+            dd[0] := nat32(dirección(lista[i].pnp[0]))
+            formatear(d, cabe, "Dispositivo ACPI %s", dd)
+        sino
+            copiar_hasta(d, lista[i].nombre, cabe)
+        fin
+    fin
+
+    ; sin espacios repetidos («QEMU    QEMU HARDDISK»: el fabricante y el modelo del USB)
+    función junta_espacios(p: puntero a byte)
+        variable i, k: nat32
+        i := 0
+        k := 0
+        mientras p[i] <> 0 hacer
+            si p[i] <> ' ' o (k > 0 y p[k - 1] <> ' ') entonces
+                p[k] := p[i]
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        p[k] := 0
+    fin
+
+    ; la categoría (0 a N_CAT - 1)
+    función categoría(i: nat32): nat32
+        variable c, s: nat32
+        c := lista[i].clase >> 16
+        s := lista[i].clase >> 8
+        según nat16(lista[i].bus)
+            caso BUS_DISCO: devolver 1
+            caso BUS_CPU: devolver 9
+            caso BUS_PLACA:
+                si c = 0x09 entonces devolver 6 fin
+                devolver 7
+            caso BUS_ACPI:
+                si iguales(lista[i].pnp, "PNP0C0A") o iguales(lista[i].pnp, "ACPI0003") entonces devolver 8 fin
+                si iguales(lista[i].pnp, "PNP0303") o iguales(lista[i].pnp, "PNP030B") o empieza_por(lista[i].pnp, "PNP0F") entonces devolver 6 fin
+                si iguales(lista[i].pnp, "ACPI0007") entonces devolver 9 fin
+                devolver 7
+            caso BUS_USB:
+                si c = 0x03 entonces devolver 6 fin
+                si c = 0x01 entonces devolver 5 fin
+                si c = 0x02 o c = 0x0A o c = 0xE0 entonces devolver 4 fin
+                devolver 3
+        fin
+        si c = 0x03 entonces devolver 0 fin
+        si c = 0x01 entonces devolver 2 fin
+        si s = 0x0C03 entonces devolver 3 fin
+        si c = 0x02 o c = 0x0D entonces devolver 4 fin
+        si c = 0x04 entonces devolver 5 fin
+        si c = 0x06 o c = 0x08 o c = 0x05 o s = 0x0C05 entonces devolver 7 fin
+        si c = 0x0B entonces devolver 9 fin
+        si c = 0x09 entonces devolver 6 fin
+        devolver 10
+    fin
+
+    función palabra_estado(e: nat32): puntero a byte
+        según nat16(e)
+            caso EST_FUNCIONA: devolver "funciona"
+            caso EST_ERROR: devolver "CON ERROR"
+            caso EST_APAGADO: devolver "desactivado"
+            caso EST_NO_HACE_FALTA: devolver "no le hace falta"
+        fin
+        devolver "SIN CONTROLADOR"
+    fin
+
+    función signo(e: nat32): byte
+        según nat16(e)
+            caso EST_FUNCIONA: devolver '+'          ; (la letra no tiene «√»)
+            caso EST_ERROR: devolver 'X'
+            caso EST_APAGADO: devolver '-'
+            caso EST_NO_HACE_FALTA: devolver 0xFA    ; ·
+        fin
+        devolver '!'
+    fin
+
+    función marca_informe(e: nat32): puntero a byte
+        según nat16(e)
+            caso EST_FUNCIONA: devolver "[OK]"
+            caso EST_ERROR: devolver "[X] "
+            caso EST_APAGADO: devolver "[--]"
+            caso EST_NO_HACE_FALTA: devolver "[OK]"
+        fin
+        devolver "[!] "
+    fin
+
+    ; el identificador corto: «8086:100E», «PNP0303»...
+    función identificador(i: nat32, d: puntero a byte)
+        d[0] := 0
+        si lista[i].bus = BUS_PCI o (lista[i].bus = BUS_USB y lista[i].dirección < 0x100) entonces
+            clave_id(lista[i].fabricante, lista[i].producto, d)
+        sino
+            copiar_hasta(d, lista[i].pnp, 16)
+        fin
+    fin
+
+    ; dónde está
+    función dónde(i: nat32, d: puntero a byte)
+        variable a: nat32
+        a := lista[i].dirección
+        según nat16(lista[i].bus)
+            caso BUS_PCI:
+                dd[0] := (a >> 16) yb 0xFF
+                dd[1] := (a >> 11) yb 0x1F
+                dd[2] := (a >> 8) yb 7
+                formatear(d, 120, "bus PCI, %02X:%02X.%u", dd)
+            caso BUS_USB: Textos32.copiar(d, "USB")
+            caso BUS_ACPI:
+                si lista[i].dirección = 0 entonces Textos32.copiar(d, "ACPI (las tablas de la BIOS)") sino
+                    dd[0] := nat32(dirección(lista[i].nombre[0]))
+                    formatear(d, 120, "ACPI: %s", dd)
+                fin
+            caso BUS_PLACA: Textos32.copiar(d, "en la placa (los puertos de siempre)")
+            caso BUS_DISCO:
+                si lista[i].dato2 = 1 entonces Textos32.copiar(d, "disco IDE")
+                sino si lista[i].dato2 = 2 entonces Textos32.copiar(d, "disco SATA (AHCI)")
+                sino Textos32.copiar(d, "disco USB") fin
+            si no: Textos32.copiar(d, "el procesador")
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Leer la lista
+    ; -------------------------------------------------------------------------
+    función lee()
+        variable i, k, ip: nat32
+        n := lista_dispositivos(dirección(lista[0]), MAX)
+        si es_error(n) entonces n := 0 fin
+        si n > MAX entonces n := MAX fin
+        para i desde 0 hasta n - 1 hacer
+            oculto[i] := falso
+            acpi_de[i] := SIN_PADRE
+        fin
+        ; lo de ACPI que ya sale como «lo de siempre» (el teclado PS/2, el
+        ; reloj, los puertos serie...) va con ello, no aparte
+        para i desde 0 hasta n - 1 hacer
+            si lista[i].bus = BUS_ACPI y lista[i].pnp[0] <> 0 entonces
+                para k desde 0 hasta n - 1 hacer
+                    si no oculto[i] y lista[k].bus = BUS_PLACA y acpi_de[k] = SIN_PADRE y iguales(lista[k].pnp, lista[i].pnp) entonces
+                        ; (los puertos serie: el de los mismos puertos)
+                        si no iguales(lista[k].pnp, "PNP0501") o (lista[i].n_recursos > 0 y lista[k].n_recursos > 0 y lista[i].recursos[0].base = lista[k].recursos[0].base) entonces
+                            oculto[i] := cierto
+                            acpi_de[k] := i
+                        fin
+                    fin
+                    ; (el teclado y el ratón PS/2 declarados con otro nombre)
+                    si no oculto[i] y lista[k].bus = BUS_PLACA y acpi_de[k] = SIN_PADRE y empieza_por(lista[i].pnp, "PNP0F") y iguales(lista[k].pnp, "PNP0F13") entonces
+                        oculto[i] := cierto
+                        acpi_de[k] := i
+                    fin
+                fin
+            fin
+        fin
+        ; la red y la batería, de sus servicios (sin ponerlos en marcha)
+        hay_red := falso
+        si estado_rápido(ip) <> RED_NADA entonces hay_red := estado_red(red) = 0 fin
+        hay_en := batería(en)
+    fin
+
+    función cuenta(e: nat32): nat32
+        variable i, c: nat32
+        c := 0
+        para i desde 0 hasta n - 1 hacer
+            si no oculto[i] y lista[i].estado = e entonces c := c + 1 fin
+        fin
+        devolver c
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La ficha en texto: «Rótulo\tvalor\n» (la parte 0, General; la 1,
+    ;  Controlador; la 2, Recursos)
+    ; -------------------------------------------------------------------------
+    función línea(d: puntero a byte, rótulo: puntero a byte, valor_: puntero a byte)
+        si longitud(d) + longitud(rótulo) + longitud(valor_) + 4 >= 3000 entonces devolver fin
+        concatenar(d, rótulo)
+        concatenar(d, "\t")
+        concatenar(d, valor_)
+        concatenar(d, "\n")
+    fin
+
+    función tamaño_texto(n_: nat32, d: puntero a byte)
+        dd[0] := n_
+        si n_ = 0 entonces Textos32.copiar(d, "")
+        sino si n_ >= 0x100000 y n_ yb 0xFFFFF = 0 entonces
+            dd[0] := n_ >> 20
+            formatear(d, 20, " (%u MB)", dd)
+        sino si n_ >= 0x400 y n_ yb 0x3FF = 0 entonces
+            dd[0] := n_ >> 10
+            formatear(d, 20, " (%u K)", dd)
+        sino
+            formatear(d, 20, " (%u octetos)", dd)
+        fin
+    fin
+
+    función ficha_de(i: nat32, parte: nat32, d: puntero a byte)
+        variable k, a: nat32
+        variable v: arreglo [200] de byte
+        variable w: arreglo [64] de byte
+        variable z: arreglo [24] de byte
+        d[0] := 0
+        si parte = 0 entonces
+            opción_de(CATEGORÍAS, categoría(i), v, 200)
+            línea(d, "Tipo", v)
+            fabricante(i, v)
+            si v[0] <> 0 entonces línea(d, "Fabricante", v) fin
+            dónde(i, v)
+            línea(d, "Dónde está", v)
+            según nat16(lista[i].estado)
+                caso EST_FUNCIONA:
+                    dd[0] := nat32(dirección(lista[i].controlador[0]))
+                    formatear(v, 200, "Funciona: lo lleva %s.", dd)
+                caso EST_ERROR:
+                    dd[0] := nat32(dirección(lista[i].controlador[0]))
+                    formatear(v, 200, "CON ERROR: %s lo ha visto, pero no ha podido ponerlo en marcha.", dd)
+                caso EST_APAGADO: Textos32.copiar(v, "Desactivado: se ha pedido que no se use.")
+                caso EST_NO_HACE_FALTA: Textos32.copiar(v, "Funciona: no necesita controlador.")
+                si no: Textos32.copiar(v, "SIN CONTROLADOR: Hispa-Pentium aún no sabe usarlo.")
+            fin
+            línea(d, "Estado", v)
+            si lista[i].detalle[0] <> 0 entonces línea(d, "Detalle", lista[i].detalle) fin
+            ; lo de la red y la batería, de sus servicios
+            si hay_red y lista[i].bus = BUS_PCI y red.pci = lista[i].dirección entonces
+                dd[0] := red.mac[0]
+                dd[1] := red.mac[1]
+                dd[2] := red.mac[2]
+                dd[3] := red.mac[3]
+                dd[4] := red.mac[4]
+                dd[5] := red.mac[5]
+                formatear(v, 200, "%02X:%02X:%02X:%02X:%02X:%02X", dd)
+                línea(d, "MAC", v)
+                si red.velocidad <> 0 entonces
+                    dd[0] := red.velocidad
+                    formatear(v, 200, "sí, a %u Mbit/s", dd)
+                sino
+                    Textos32.copiar(v, "no (¿está enchufado el cable?)")
+                fin
+                línea(d, "Enlace", v)
+            fin
+            si hay_en y lista[i].bus = BUS_ACPI y iguales(lista[i].pnp, "PNP0C0A") y en.nbat > 0 entonces
+                dd[0] := en.pct
+                si en.pct <= 100 entonces formatear(v, 200, "%u %%", dd) sino Textos32.copiar(v, "no se sabe") fin
+                si en.cargando <> 0 entonces concatenar(v, ", cargando") fin
+                línea(d, "Carga", v)
+                si en.salud_pct <= 100 entonces
+                    dd[0] := en.salud_pct
+                    dd[1] := en.llena
+                    dd[2] := en.diseño
+                    dd[3] := nat32("mWh")
+                    si en.unidad = 1 entonces dd[3] := nat32("mAh") fin
+                    formatear(v, 200, "%u %% (guarda %u de %u %s de cuando era nueva)", dd)
+                    línea(d, "Salud", v)
+                fin
+                si en.ciclos1 <> 0xFFFF entonces
+                    dd[0] := en.ciclos1
+                    formatear(v, 200, "%u", dd)
+                    línea(d, "Ciclos de carga", v)
+                fin
+            fin
+            si hay_en y lista[i].bus = BUS_ACPI y iguales(lista[i].pnp, "ACPI0003") y en.ca <= 1 entonces
+                si en.ca = 1 entonces línea(d, "Corriente", "enchufado") sino línea(d, "Corriente", "sin enchufar") fin
+            fin
+        sino si parte = 1 entonces
+            si lista[i].controlador[0] = 0 entonces
+                si lista[i].estado = EST_NO_HACE_FALTA entonces línea(d, "Controlador", "no le hace falta") sino línea(d, "Controlador", "ninguno") fin
+            sino
+                dd[0] := nat32(dirección(lista[i].controlador[0]))
+                si buscar(lista[i].controlador, ".cas") <> nulo entonces
+                    formatear(v, 200, "%s (en el núcleo)", dd)
+                sino si buscar(lista[i].controlador, ".BIN") <> nulo entonces
+                    formatear(v, 200, "%s (un servicio del anillo 3)", dd)
+                sino
+                    formatear(v, 200, "%s", dd)
+                fin
+                línea(d, "Controlador", v)
+            fin
+            si lista[i].bus = BUS_PCI entonces
+                clave_id(lista[i].fabricante, lista[i].producto, z)
+                dd[0] := nat32(dirección(z[0]))
+                formatear(v, 200, "PCI %s", dd)
+                línea(d, "Identificador", v)
+                si lista[i].subsistema <> 0 y lista[i].subsistema <> 0xFFFFFFFF entonces
+                    clave_id(lista[i].subsistema, lista[i].subsistema >> 16, z)
+                    línea(d, "Subsistema", z)
+                fin
+                dd[0] := lista[i].revisión
+                formatear(v, 200, "%02X", dd)
+                línea(d, "Revisión", v)
+                nombre_clase(lista[i].clase, w, 64)
+                dd[0] := lista[i].clase
+                dd[1] := nat32(dirección(w[0]))
+                formatear(v, 200, "%06X (%s)", dd)
+                línea(d, "Clase", v)
+            sino si lista[i].bus = BUS_USB y lista[i].dirección < 0x100 entonces
+                clave_id(lista[i].fabricante, lista[i].producto, z)
+                dd[0] := nat32(dirección(z[0]))
+                formatear(v, 200, "USB %s", dd)
+                línea(d, "Identificador", v)
+                nombre_clase_usb(lista[i].clase, w)
+                dd[0] := lista[i].clase >> 16
+                dd[1] := (lista[i].clase >> 8) yb 0xFF
+                dd[2] := lista[i].clase yb 0xFF
+                dd[3] := nat32(dirección(w[0]))
+                formatear(v, 200, "%02X/%02X/%02X (%s)", dd)
+                línea(d, "Clase", v)
+                si lista[i].nombre[0] <> 0 entonces línea(d, "Dice que es", lista[i].nombre) fin
+                si lista[i].marca[0] <> 0 entonces línea(d, "Dice su marca", lista[i].marca) fin
+                dd[0] := lista[i].dato3
+                formatear(v, 200, "%u", dd)
+                línea(d, "Dirección USB", v)
+            sino si lista[i].bus = BUS_DISCO entonces
+                línea(d, "Modelo", lista[i].nombre)
+                dd[0] := lista[i].dato1
+                dd[1] := lista[i].dato1 div 2048
+                formatear(v, 200, "%u sectores de 512 octetos (%u MB)", dd)
+                línea(d, "Tamaño", v)
+            sino si lista[i].bus = BUS_CPU entonces
+                línea(d, "Nombre", lista[i].nombre)
+                dd[0] := lista[i].fabricante
+                formatear(v, 200, "%08X (CPUID 1)", dd)
+                línea(d, "Firma", v)
+            sino si lista[i].pnp[0] <> 0 entonces
+                línea(d, "Nombre PnP", lista[i].pnp)
+            fin
+            si lista[i].bus = BUS_ACPI y lista[i].dirección <> 0 entonces línea(d, "En ACPI", lista[i].nombre) fin
+            si acpi_de[i] <> SIN_PADRE entonces línea(d, "En ACPI", lista[acpi_de[i]].nombre) fin
+            si lista[i].padre <> SIN_PADRE y lista[i].padre < n entonces
+                nombre_de(lista[i].padre, v, 200)
+                línea(d, "Cuelga de", v)
+            fin
+        sino
+            si lista[i].irq <> SIN_IRQ entonces
+                dd[0] := lista[i].irq
+                formatear(v, 200, "%u", dd)
+                línea(d, "Interrupción (IRQ)", v)
+            sino si lista[i].bus = BUS_PCI y lista[i].dato1 <> 0 entonces
+                línea(d, "Interrupción (IRQ)", "sin poner por la BIOS")
+            fin
+            a := i
+            ; (lo de siempre que ACPI declara: sus recursos, de ahí, si no tiene)
+            si lista[i].n_recursos = 0 y acpi_de[i] <> SIN_PADRE entonces a := acpi_de[i] fin
+            para k desde 1 hasta lista[a].n_recursos hacer
+                tamaño_texto(lista[a].recursos[k - 1].largo, z)
+                dd[0] := lista[a].recursos[k - 1].base
+                dd[1] := lista[a].recursos[k - 1].base + lista[a].recursos[k - 1].largo - 1
+                dd[2] := nat32(dirección(z[0]))
+                si lista[a].recursos[k - 1].clase = REC_PUERTOS entonces
+                    si lista[a].recursos[k - 1].largo > 1 entonces formatear(v, 200, "%04X-%04X%s", dd) sino formatear(v, 200, "%04X", dd) fin
+                    línea(d, "Puertos", v)
+                sino si lista[a].recursos[k - 1].clase = REC_MEMORIA64 entonces
+                    formatear(v, 200, "por encima de 4 GB (...%08X)", dd)
+                    línea(d, "Memoria", v)
+                sino
+                    si lista[a].recursos[k - 1].largo > 0 entonces formatear(v, 200, "%08X-%08X%s", dd) sino formatear(v, 200, "%08X", dd) fin
+                    línea(d, "Memoria", v)
+                fin
+            fin
+            si d[0] = 0 entonces línea(d, "Recursos", "ninguno que se sepa") fin
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El informe (para Carlos: qué tiene cada portátil del taller)
+    ; -------------------------------------------------------------------------
+    función añade_inf(s: puntero a byte)
+        si longitud(informe) + longitud(s) + 2 < CABE_INFORME entonces concatenar(informe, s) fin
+    fin
+
+    ; la ficha, sangrada, al informe
+    función ficha_al_informe(i: nat32)
+        variable parte, k, j: nat32
+        variable r: arreglo [240] de byte
+        para parte desde 0 hasta 2 hacer
+            ficha_de(i, parte, ficha_t)
+            k := 0
+            mientras ficha_t[k] <> 0 hacer
+                Textos32.copiar(r, "       ")
+                j := longitud(r)
+                mientras ficha_t[k] <> 0 y ficha_t[k] <> '\n' y j < 236 hacer
+                    si ficha_t[k] = '\t' entonces
+                        r[j] := ':'
+                        r[j + 1] := ' '
+                        j := j + 2
+                    sino
+                        r[j] := ficha_t[k]
+                        j := j + 1
+                    fin
+                    k := k + 1
+                fin
+                r[j] := '\n'
+                r[j + 1] := 0
+                si ficha_t[k] = '\n' entonces k := k + 1 fin
+                ; (en General el tipo ya va en la cabecera)
+                si no empieza_por(r, "       Tipo:") entonces añade_inf(r) fin
+            fin
+        fin
+    fin
+
+    función haz_informe()
+        variable c, i, f, h: nat32
+        variable nom: arreglo [80] de byte
+        variable id: arreglo [24] de byte
+        informe[0] := 0
+        añade_inf("Administrador de dispositivos de Hispa-Pentium\n")
+        nombre_equipo(nom, 80)
+        f := dato(DATO_FECHA)
+        dd[0] := nat32(dirección(nom[0]))
+        si nom[0] = 0 entonces dd[0] := nat32("(sin nombre)") fin
+        dd[1] := (f >> 16) yb 31
+        dd[2] := (f >> 21) yb 15
+        dd[3] := ((f >> 25) yb 127) + 1980
+        dd[4] := (f >> 11) yb 31
+        dd[5] := (f >> 5) yb 63
+        formatear(t, 200, "Equipo: %s   Fecha: %02u/%02u/%u %02u:%02u\n", dd)
+        añade_inf(t)
+        dd[0] := dato(DATO_MARCOS) * 4 div 1024
+        dd[1] := dato(DATO_ANCHO_PANTALLA)
+        dd[2] := dato(DATO_ALTO_PANTALLA)
+        h := dato(DATO_VERSIÓN)
+        dd[3] := (h >> 8) yb 0xFF
+        dd[4] := h yb 0xFF
+        formatear(t, 200, "Memoria: %u MB   Pantalla: %u x %u   Núcleo: %u.%u\n", dd)
+        añade_inf(t)
+        dd[0] := n - cuenta_ocultos()
+        dd[1] := cuenta(EST_FUNCIONA) + cuenta(EST_NO_HACE_FALTA)
+        dd[2] := cuenta(EST_SIN_CONTROLADOR)
+        dd[3] := cuenta(EST_ERROR)
+        dd[4] := cuenta(EST_APAGADO)
+        formatear(t, 200, "Resumen: %u dispositivos; %u funcionan, %u SIN CONTROLADOR, %u CON ERROR, %u desactivados.\n", dd)
+        añade_inf(t)
+        ; lo que falta, lo primero
+        si dd[2] + dd[3] <> 0 entonces
+            añade_inf("\nLo que falta (sin controlador o con error):\n")
+            para i desde 0 hasta n - 1 hacer
+                si no oculto[i] y (lista[i].estado = EST_SIN_CONTROLADOR o lista[i].estado = EST_ERROR) entonces
+                    nombre_de(i, nom, 80)
+                    identificador(i, id)
+                    opción_de(CATEGORÍAS, categoría(i), t2, 200)
+                    dd[0] := nat32(marca_informe(lista[i].estado))
+                    dd[1] := nat32(dirección(nom[0]))
+                    dd[2] := nat32(dirección(id[0]))
+                    dd[3] := nat32(dirección(t2[0]))
+                    formatear(t, 200, "  %s %s  [%s; %s]\n", dd)
+                    añade_inf(t)
+                fin
+            fin
+        fin
+        para c desde 0 hasta N_CAT - 1 hacer
+            h := 0
+            para i desde 0 hasta n - 1 hacer
+                si no oculto[i] y categoría(i) = c entonces
+                    si h = 0 entonces
+                        opción_de(CATEGORÍAS, c, t2, 200)
+                        dd[0] := nat32(dirección(t2[0]))
+                        formatear(t, 200, "\n== %s ==\n", dd)
+                        añade_inf(t)
+                    fin
+                    h := h + 1
+                    nombre_de(i, nom, 80)
+                    identificador(i, id)
+                    dd[0] := nat32(marca_informe(lista[i].estado))
+                    dd[1] := nat32(dirección(nom[0]))
+                    dd[2] := nat32(dirección(id[0]))
+                    si id[0] <> 0 entonces formatear(t, 200, "  %s %s  [%s]\n", dd) sino formatear(t, 200, "  %s %s\n", dd) fin
+                    añade_inf(t)
+                    ficha_al_informe(i)
+                fin
+            fin
+        fin
+        si longitud(informe) + 80 >= CABE_INFORME entonces añade_inf("\n(el informe no cabe entero)\n") fin
+    fin
+
+    función cuenta_ocultos(): nat32
+        variable i, c: nat32
+        c := 0
+        para i desde 0 hasta n - 1 hacer
+            si oculto[i] entonces c := c + 1 fin
+        fin
+        devolver c
+    fin
+
+    ; escribe el informe en ese archivo (con los finales de línea del DOS)
+    función guarda_en(ruta: puntero a byte): nat32
+        variable m, i, k, r: nat32
+        variable trozo: arreglo [512] de byte
+        m := crear(ruta)
+        si es_error(m) entonces devolver m fin
+        i := 0
+        k := 0
+        mientras informe[i] <> 0 hacer
+            si informe[i] = '\n' entonces
+                trozo[k] := '\r'
+                k := k + 1
+            fin
+            trozo[k] := informe[i]
+            k := k + 1
+            i := i + 1
+            si k >= 500 entonces
+                r := escribir_archivo(m, trozo, k)
+                si r <> k entonces
+                    cerrar(m)
+                    devolver DISCO_LLENO
+                fin
+                k := 0
+            fin
+        fin
+        si k > 0 entonces
+            r := escribir_archivo(m, trozo, k)
+            si r <> k entonces
+                cerrar(m)
+                devolver DISCO_LLENO
+            fin
+        fin
+        cerrar(m)
+        devolver 0
+    fin
+
+    ; adónde va el informe: X:\DISPOSIT.TXT, o la primera memoria USB, o el
+    ; primer disco en los que se pueda escribir (en «ruta»; falso si ninguno)
+    función dónde_guardar(ruta: puntero a byte): bool
+        variable u: Info_unidad
+        variable k, vuelta: nat32
+        para vuelta desde 0 hasta 2 hacer
+            k := 0
+            mientras info_unidad(k, u) hacer
+                si u.letra <> 0 y u.solo_lectura = 0 y u.clase <> 1 y u.clase <> 0 entonces
+                    si (vuelta = 0 y u.letra = 'X') o (vuelta = 1 y u.medio = MEDIO_USB) o vuelta = 2 entonces
+                        ruta[0] := u.letra
+                        ruta[1] := 0
+                        concatenar(ruta, ":\\DISPOSIT.TXT")
+                        devolver cierto
+                    fin
+                fin
+                k := k + 1
+            fin
+        fin
+        devolver falso
+    fin
+
+    función guarda(ruta_dada: puntero a byte)
+        variable ruta: arreglo [100] de byte
+        variable r: nat32
+        si ruta_dada <> nulo y ruta_dada[0] <> 0 entonces
+            copiar_hasta(ruta, ruta_dada, 100)
+        sino si no dónde_guardar(ruta) entonces
+            Textos32.copiar(aviso, "No hay ninguna unidad en la que se pueda escribir (arranque con «escritura=usb»).")
+            devolver
+        fin
+        haz_informe()
+        r := guarda_en(ruta)
+        si es_error(r) entonces
+            dd[0] := nat32(dirección(ruta[0]))
+            dd[1] := nat32(texto_error(r))
+            formatear(aviso, 120, "No se puede guardar en %s: %s.", dd)
+        sino
+            dd[0] := nat32(dirección(ruta[0]))
+            formatear(aviso, 120, "Informe guardado en %s", dd)
+        fin
+    fin
+
+    función copia()
+        haz_informe()
+        si al_portapapeles(informe, longitud(informe)) entonces
+            dd[0] := longitud(informe)
+            formatear(aviso, 120, "Informe copiado al portapapeles (%u letras)", dd)
+        sino
+            Textos32.copiar(aviso, "No se ha podido copiar al portapapeles")
+        fin
+    fin
+
+    ; =========================================================================
+    ;  La ventana: el árbol
+    ; =========================================================================
+    función llena_rejilla()
+        variable c, i, h, antes: nat32
+        variable r: ent32
+        variable nom: arreglo [80] de byte
+        variable cl: nat32
+        antes := rejilla_id(g)
+        rejilla_vaciar(g)
+        para c desde 0 hasta N_CAT - 1 hacer
+            h := 0
+            para i desde 0 hasta n - 1 hacer
+                si no oculto[i] y categoría(i) = c entonces h := h + 1 fin
+            fin
+            si h > 0 entonces
+                r := renglón_nuevo(g, R_NORMAL, ES_CATEGORÍA + c)
+                opción_de(CATEGORÍAS, c, t2, 200)
+                dd[0] := nat32("[-]")
+                si no abierta[c] entonces dd[0] := nat32("[+]") fin
+                dd[1] := nat32(dirección(t2[0]))
+                dd[2] := h
+                formatear(t, 200, "%s %s (%u)", dd)
+                celda(g, r, 0, t)
+                si abierta[c] entonces
+                    para i desde 0 hasta n - 1 hacer
+                        si no oculto[i] y categoría(i) = c entonces
+                            cl := R_NORMAL
+                            si lista[i].estado = EST_SIN_CONTROLADOR o lista[i].estado = EST_ERROR entonces cl := R_AVISO fin
+                            si lista[i].estado = EST_APAGADO entonces cl := R_GRIS fin
+                            r := renglón_nuevo(g, cl, i + 1)
+                            nombre_de(i, nom, 80)
+                            Textos32.copiar(t, "    ")
+                            añadir_car(t, signo(lista[i].estado))
+                            concatenar(t, " ")
+                            concatenar(t, nom)
+                            celda(g, r, 0, t)
+                            celda(g, r, 1, palabra_estado(lista[i].estado))
+                            si lista[i].estado = EST_NO_HACE_FALTA entonces celda(g, r, 2, "-") sino celda(g, r, 2, lista[i].controlador) fin
+                            identificador(i, t)
+                            celda(g, r, 3, t)
+                        fin
+                    fin
+                fin
+            fin
+        fin
+        rejilla_lista(g)
+        si antes <> 0 entonces rejilla_elegir_id(g, antes) fin
+    fin
+
+    función pinta()
+        variable yy, x: ent32
+        variable vueltas: nat32
+        variable est: arreglo [240] de byte
+        vueltas := 0
+        mientras vueltas < 2 hacer
+            empezar_controles()
+            caja(0, 0, ancho, alto, C_FONDO)
+            yy := barra_menús(0, 0, ancho, MENÚS, abierto_m)
+            barra_herramientas(0, yy, ancho)
+            x := 4
+            x := x + herramienta(ID_PROPIEDADES, x, yy + 2, I_EDITAR, "Propiedades", rejilla_id(g) = 0 o rejilla_id(g) >= ES_CATEGORÍA) + 2
+            x := x + separador(x, yy)
+            x := x + herramienta(ID_COPIAR, x, yy + 2, I_IMPRIMIR, "Copiar informe", falso) + 2
+            x := x + herramienta(ID_GUARDAR, x, yy + 2, I_GUARDAR, "Guardar informe", falso) + 2
+            x := x + separador(x, yy)
+            x := x + herramienta(ID_ACTUALIZAR, x, yy + 2, I_REFRESCAR, "Actualizar", falso) + 2
+            yy := yy + alto_herramientas() + 4 * E
+            rejilla(g, ID_REJILLA, LA div 2, yy, ancho - LA, alto - alto_estado() - 4 * E - yy, "No hay dispositivos (¿el núcleo no da la lista?)")
+            dd[0] := n - cuenta_ocultos()
+            dd[1] := cuenta(EST_SIN_CONTROLADOR)
+            dd[2] := cuenta(EST_ERROR)
+            formatear(est, 240, "%u dispositivos|%u sin controlador|%u con error|", dd)
+            si aviso[0] <> 0 entonces concatenar(est, aviso) sino concatenar(est, "Intro o dos clics: propiedades") fin
+            barra_estado(alto - alto_estado(), est)
+            si no asegurar_foco() entonces romper fin
+            vueltas := vueltas + 1
+        fin
+        volcar()
+    fin
+
+    ; las propiedades del elegido (otra ventana: el mismo programa, con /P)
+    función abre_propiedades()
+        variable id, r: nat32
+        id := rejilla_id(g)
+        si id = 0 entonces devolver fin
+        si id >= ES_CATEGORÍA entonces
+            abierta[id - ES_CATEGORÍA] := no abierta[id - ES_CATEGORÍA]
+            llena_rejilla()
+            devolver
+        fin
+        dd[0] := lista[id - 1].bus
+        dd[1] := lista[id - 1].dirección
+        formatear(t, 200, "/P %u %u", dd)
+        r := lanzar_suelto("\\DISPOSIT.BIN", t)
+        si es_error(r) entonces
+            Textos32.copiar(aviso, "No se pueden abrir las propiedades: ")
+            concatenar(aviso, texto_error(r))
+        fin
+    fin
+
+    función actualiza()
+        lee()
+        llena_rejilla()
+        Textos32.copiar(aviso, "Lista puesta al día")
+    fin
+
+    función hace(id: nat32)
+        si id = ID_PROPIEDADES o id = ID_REJILLA entonces abre_propiedades()
+        sino si id = ID_COPIAR entonces copia()
+        sino si id = ID_GUARDAR entonces guarda(nulo)
+        sino si id = ID_ACTUALIZAR entonces actualiza() fin
+    fin
+
+    función abre_menú_n(k: nat32)
+        abierto_m := ent32(k)
+        según k
+            caso 0: abrir_menú_barra(0, "Propiedades|-|Copiar informe|Guardar informe|-|Cerrar", 0)
+            caso 1: abrir_menú_barra(1, "Actualizar|Abrir todas|Cerrar todas|-|Letra normal|Letra grande", 0)
+            si no: abrir_menú_barra(2, "Acerca del Administrador de dispositivos", 0)
+        fin
+    fin
+
+    función todas(sí: bool)
+        variable c: nat32
+        para c desde 0 hasta N_CAT - 1 hacer abierta[c] := sí fin
+        llena_rejilla()
+    fin
+
+    ; lo elegido en un menú: cierto si hay que cerrar
+    función elegido(cuál: nat32, op: nat32): bool
+        abierto_m := -1
+        si op = SIN_ELEGIR entonces devolver falso fin
+        si cuál = 0 entonces
+            según nat16(op)
+                caso 0: abre_propiedades()
+                caso 2: copia()
+                caso 3: guarda(nulo)
+                caso 5: devolver cierto
+            fin
+        sino si cuál = 1 entonces
+            según nat16(op)
+                caso 0: actualiza()
+                caso 1: todas(cierto)
+                caso 2: todas(falso)
+                caso 4:
+                    tamaño_ := T_NORMAL
+                    nuevo_tamaño(ancho, alto, tamaño_)
+                caso 5:
+                    tamaño_ := T_GRANDE
+                    nuevo_tamaño(ancho, alto, tamaño_)
+            fin
+        sino si cuál = 2 entonces
+            Textos32.copiar(aviso, "Administrador de dispositivos de Hispa-Pentium (GPL-2.0 o posterior)")
+        sino si cuál = 3 y op = 0 entonces
+            abre_propiedades()
+        sino si cuál = 3 y op = 1 entonces
+            ; copiar la ficha de lo elegido
+            si rejilla_id(g) > 0 y rejilla_id(g) < ES_CATEGORÍA entonces copia_ficha(rejilla_id(g) - 1) fin
+        fin
+        devolver falso
+    fin
+
+    función copia_ficha(i: nat32)
+        variable nom: arreglo [80] de byte
+        variable id: arreglo [24] de byte
+        informe[0] := 0
+        nombre_de(i, nom, 80)
+        identificador(i, id)
+        dd[0] := nat32(marca_informe(lista[i].estado))
+        dd[1] := nat32(dirección(nom[0]))
+        dd[2] := nat32(dirección(id[0]))
+        formatear(t, 200, "%s %s  [%s]\n", dd)
+        añade_inf(t)
+        ficha_al_informe(i)
+        si al_portapapeles(informe, longitud(informe)) entonces Textos32.copiar(aviso, "Copiado al portapapeles") fin
+    fin
+
+    función tecla_pulsada(c: nat32): bool
+        variable m: ent32
+        variable id: nat32
+        aviso[0] := 0
+        m := menú_de_alt(MENÚS, c)
+        si m >= 0 entonces
+            abre_menú_n(nat32(m))
+            devolver falso
+        fin
+        id := rejilla_id(g)
+        si c = '\n' entonces
+            abre_propiedades()
+        sino si (c = TECLA_IZQUIERDA o c = TECLA_DERECHA) y id >= ES_CATEGORÍA entonces
+            abierta[id - ES_CATEGORÍA] := c = TECLA_DERECHA
+            llena_rejilla()
+        sino si c = TECLA_F5 entonces
+            actualiza()
+        sino si c = 27 entonces
+            devolver cierto
+        sino
+            rejilla_tecla(g, c)
+        fin
+        devolver falso
+    fin
+
+    función clic(x: ent32, yy: ent32, veces_: nat32, derecho: bool)
+        variable id: nat32
+        variable m, r: ent32
+        aviso[0] := 0
+        m := menú_en_barra(x, yy)
+        si m >= 0 entonces
+            abre_menú_n(nat32(m))
+            devolver
+        fin
+        id := control_en(x, yy)
+        si id = 0 entonces devolver fin
+        si clase_de(id) = K_LISTA entonces
+            foco := id
+            r := rejilla_clic(g, x, yy)
+            si r = -2 entonces
+                ; (el árbol no se ordena: va como está)
+                g.orden_col := -1
+                llena_rejilla()
+                devolver
+            fin
+            si r < 0 entonces devolver fin
+            si derecho entonces
+                si rejilla_id(g) > 0 y rejilla_id(g) < ES_CATEGORÍA entonces menú(v, x, yy, "Propiedades|Copiar sus datos", 0, 3) fin
+                devolver
+            fin
+            ; un clic en [+]/[-] abre o cierra; dos clics, lo de Intro
+            si rejilla_id(g) >= ES_CATEGORÍA y x < g.col_x[0] + 3 * LA entonces
+                abre_propiedades()
+            sino si veces_ >= 2 entonces
+                abre_propiedades()
+            fin
+        sino si no derecho entonces
+            hace(id)
+        fin
+    fin
+
+    función ventana_principal(): byte
+        variable s: Suceso
+        variable c: nat32
+        si no preparar_medida("Administrador de dispositivos", 720, 500, tamaño_) entonces devolver 2 fin
+        para c desde 0 hasta N_CAT - 1 hacer abierta[c] := cierto fin
+        rejilla_nueva(g, MAX + N_CAT + 4)
+        rejilla_columna(g, "Dispositivo", 0, falso)
+        rejilla_columna(g, "Estado", 16, falso)
+        rejilla_columna(g, "Controlador", 12, falso)
+        rejilla_columna(g, "Identificador", 10, falso)
+        lee()
+        llena_rejilla()
+        foco := ID_REJILLA
+        pinta()
+        mientras suceso(v, s, cierto) hacer
+            si s.clase = EV_TECLA entonces
+                si tecla_pulsada(s.a) entonces devolver 0 fin
+                pinta()
+            sino si s.clase = EV_RATÓN_BAJA entonces
+                clic(ent32(s.a), ent32(s.b), veces(s.c), s.c yb BOTÓN_DERECHO <> 0)
+                pinta()
+            sino si s.clase = EV_MENÚ entonces
+                si elegido(s.b, s.a) entonces devolver 0 fin
+                pinta()
+            sino si s.clase = EV_UNIDADES entonces
+                ; (se ha enchufado o quitado algo: la lista, al día)
+                lee()
+                llena_rejilla()
+                pinta()
+            sino si s.clase = EV_TAMAÑO entonces
+                nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
+                pinta()
+            sino si s.clase = EV_CERRAR entonces
+                devolver 0
+            fin
+        fin
+        devolver 0
+    fin
+
+    ; =========================================================================
+    ;  La ventana de las propiedades (DISPOSIT /P BUS DIR)
+    ; =========================================================================
+    función pinta_prop()
+        variable yy, x, y2, an: ent32
+        variable vueltas, k, j: nat32
+        variable rot: arreglo [40] de byte
+        variable val: arreglo [200] de byte
+        variable nom: arreglo [80] de byte
+        variable tinta: nat32
+        vueltas := 0
+        mientras vueltas < 2 hacer
+            empezar_controles()
+            caja(0, 0, ancho, alto, C_FONDO)
+            ; la cabecera: el signo (con su palabra) y el nombre
+            nombre_de(prop, nom, 80)
+            tinta := C_VERDE
+            si lista[prop].estado = EST_SIN_CONTROLADOR o lista[prop].estado = EST_ERROR entonces tinta := C_NARANJA fin
+            si lista[prop].estado = EST_ERROR entonces tinta := C_ROJO fin
+            caja_redonda(LA, 3 * E, LT + 4 * E, LT + 4 * E, 3 * E, tinta)
+            si lista[prop].estado = EST_FUNCIONA o lista[prop].estado = EST_NO_HACE_FALTA entonces
+                marca_hecho(LA + 3 * E, 6 * E, LT - 2 * E, C_PAPEL)
+            sino
+                rot[0] := signo(lista[prop].estado)
+                rot[1] := 0
+                negrita(LA + 2 * E + LA div 2, 5 * E, rot, C_PAPEL)
+            fin
+            texto_corto(4 * LA, 2 * E, nom, ancho - 4 * LA, C_TINTA, cierto)
+            texto_corto(4 * LA, 2 * E + LT, palabra_estado(lista[prop].estado), ancho - 4 * LA, tinta, cierto)
+            yy := 2 * LT + 8 * E
+            yy := yy + pestañas(ID_PESTAÑAS, 0, yy, ancho, "General|Controlador|Recursos", pestaña, 0)
+            an := ancho - 2 * LA
+            caja(LA div 2, yy, ancho - LA, alto - yy - alto_botón() - 8 * E, C_PAPEL)
+            borde(LA div 2, yy, ancho - LA, alto - yy - alto_botón() - 8 * E, 1, C_BORDE)
+            ficha_de(prop, pestaña, ficha_t)
+            y2 := yy + 4 * E
+            k := 0
+            mientras ficha_t[k] <> 0 y y2 + LT < alto - alto_botón() - 8 * E hacer
+                j := 0
+                mientras ficha_t[k] <> '\t' y ficha_t[k] <> 0 y j < 39 hacer
+                    rot[j] := ficha_t[k]
+                    j := j + 1
+                    k := k + 1
+                fin
+                rot[j] := 0
+                si ficha_t[k] = '\t' entonces k := k + 1 fin
+                j := 0
+                mientras ficha_t[k] <> '\n' y ficha_t[k] <> 0 y j < 199 hacer
+                    val[j] := ficha_t[k]
+                    j := j + 1
+                    k := k + 1
+                fin
+                val[j] := 0
+                si ficha_t[k] = '\n' entonces k := k + 1 fin
+                texto_corto(LA + LA div 2, y2, rot, 17 * LA, C_SUAVE, cierto)
+                y2 := y2 + párrafo(LA + 19 * LA, y2, an - 19 * LA, val, C_TINTA, falso, cierto) + E
+            fin
+            x := ancho - LA - ancho_botón("Cerrar")
+            botón(ID_CERRAR, x, alto - alto_botón() - 4 * E, "Cerrar", cierto, falso)
+            botón(ID_COPIAR_FICHA, LA, alto - alto_botón() - 4 * E, "Copiar estos datos", falso, falso)
+            si aviso[0] <> 0 entonces Controles.texto(LA + ancho_botón("Copiar estos datos") + LA, alto - alto_botón() - 2 * E, aviso, C_VERDE) fin
+            si no asegurar_foco() entonces romper fin
+            vueltas := vueltas + 1
+        fin
+        volcar()
+    fin
+
+    función ventana_propiedades(args: puntero a byte): byte
+        variable s: Suceso
+        variable bus, dir, i, id: nat32
+        variable p: arreglo [20] de byte
+        variable nom: arreglo [80] de byte
+        variable tit: arreglo [100] de byte
+        variable m: ent32
+        palabra(args, 1, p, 20)
+        si no texto_a_natural(p, bus) entonces devolver 1 fin
+        palabra(args, 2, p, 20)
+        si no texto_a_natural(p, dir) entonces devolver 1 fin
+        lee()
+        prop := MAX
+        para i desde 0 hasta n - 1 hacer
+            si lista[i].bus = bus y lista[i].dirección = dir y prop = MAX entonces prop := i fin
+        fin
+        si prop = MAX entonces
+            escribir("disposit: ese dispositivo ya no está\n")
+            devolver 1
+        fin
+        nombre_de(prop, nom, 80)
+        Textos32.copiar(tit, "Propiedades: ")
+        concatenar(tit, nom)
+        tit[60] := 0
+        si no preparar_medida(tit, 600, 420, tamaño_) entonces devolver 2 fin
+        foco := ID_PESTAÑAS
+        pinta_prop()
+        mientras suceso(v, s, cierto) hacer
+            si s.clase = EV_TECLA entonces
+                aviso[0] := 0
+                si s.a = 27 o (s.a = '\n' y foco = ID_CERRAR) entonces devolver 0 fin
+                si s.a = TECLA_CTRL_TAB o s.a = TECLA_CTRL_MAYÚS_TAB entonces
+                    pestaña := otra_pestaña(pestaña, 3, 0, s.a = TECLA_CTRL_TAB)
+                sino si s.a = '\t' o s.a = TECLA_MAYÚS_TAB entonces
+                    pasar_foco(s.a = '\t')
+                sino si foco = ID_PESTAÑAS y (s.a = TECLA_DERECHA o s.a = TECLA_IZQUIERDA) entonces
+                    pestaña := otra_pestaña(pestaña, 3, 0, s.a = TECLA_DERECHA)
+                sino si (s.a = '\n' o s.a = ' ') y foco = ID_COPIAR_FICHA entonces
+                    copia_ficha(prop)
+                fin
+                pinta_prop()
+            sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                aviso[0] := 0
+                id := control_en(ent32(s.a), ent32(s.b))
+                si id = ID_CERRAR entonces devolver 0 fin
+                si id = ID_PESTAÑAS entonces
+                    m := pestaña_en(ent32(s.a), ent32(s.b))
+                    si m >= 0 entonces pestaña := nat32(m) fin
+                fin
+                si id = ID_COPIAR_FICHA entonces copia_ficha(prop) fin
+                si id <> 0 entonces foco := id fin
+                pinta_prop()
+            sino si s.clase = EV_TAMAÑO entonces
+                nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
+                pinta_prop()
+            sino si s.clase = EV_CERRAR entonces
+                devolver 0
+            fin
+        fin
+        devolver 0
+    fin
+
+    ; =========================================================================
+    función principal(): byte
+        variable args: arreglo [160] de byte
+        variable p: arreglo [100] de byte
+        variable r: byte
+        argumentos(args, 160)
+        palabra(args, 0, p, 100)
+        a_mayúsculas(p)
+        si iguales(p, "/P") entonces devolver ventana_propiedades(args) fin
+        si iguales(p, "/INFORME") entonces
+            lee()
+            haz_informe()
+            escribir(informe)
+            devolver 0
+        fin
+        si iguales(p, "/GUARDAR") entonces
+            lee()
+            p[0] := 0
+            palabra(args, 1, p, 100)
+            guarda(p)
+            escribir(aviso)
+            escribir("\n")
+            si empieza_por(aviso, "Informe guardado") entonces devolver 0 fin
+            devolver 1
+        fin
+        si iguales(p, "/?") entonces
+            escribir("DISPOSIT [/INFORME | /GUARDAR [RUTA]]: el Administrador de dispositivos.\n")
+            devolver 0
+        fin
+        r := ventana_principal()
+        si r = 2 entonces
+            ; sin escritorio: el informe, en texto
+            lee()
+            haz_informe()
+            escribir(informe)
+            devolver 0
+        fin
+        devolver r
+    fin
+
+fin UDisposi.
