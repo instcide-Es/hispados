@@ -2533,16 +2533,28 @@ $AQUI/nucleo32/disco.sh $C10/d.img 16 > /dev/null 2>&1
 mcopy -i $C10/d.img $C10/MUESTRA.BIN ::
 CAPTURAS=$G DISCO=$C10/d.img MEMORIA=64 MODULOS= ARRANQUE=escritorio $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":doble 40 190" ":pausa 2" ":escribe muestra" ":tecla ret" ":pausa 4" \
   ":raton 620 590" ":captura ct1" ":clic 60 217" ":pausa 1" ":raton 620 590" ":captura ct2" ":clic 30 178" ":escribe angel" ":raton 620 590" ":pausa 1" ":captura ct3" \
-  ":tecla ctrl-tab" ":pausa 1" ":captura ct4" ":tecla alt-v" ":pausa 1" ":captura ct5" ":tecla esc" ":pausa 1" ":clic 60 112" ":pausa 1" ":raton 620 590" ":captura ct6" > $C10/sal.txt 2>&1
+  ":tecla ctrl-tab" ":pausa 1" ":captura ct4" ":tecla alt-v" ":pausa 1" ":captura ct5" ":tecla esc" ":pausa 1" ":clic 60 112" ":pausa 1" ":raton 620 590" ":captura ct6" \
+  ":clic 300 178" ":tecla backspace" ":tecla backspace" ":tecla backspace" ":tecla backspace" ":tecla backspace" ":pausa 1" \
+  ":raton 620 590" ":captura cr0" ":arrastra 653 217 713 217" ":pausa 1" ":raton 620 590" ":captura cr1" ":doble 713 217" ":pausa 1" ":raton 620 590" ":captura cr2" \
+  ":arrastra 72 217 120 217" ":pausa 1" ":raton 620 590" ":captura cr3" > $C10/sal.txt 2>&1
 miracap "MUESTRA.BIN: maximizada (800 x 600), la barra de menús, la de herramientas, las pestañas, la rejilla con sus rótulos y la barra de estado, a vez y media" ct1 \
   tam 800 600 texto15 10 30 140 60 rchivo texto 20 60 120 90 Nuevo texto 90 60 300 90 Guardar negrita15 10 95 120 130 Lista texto15 90 95 300 130 Ficha \
   negrita15 60 195 200 235 Nombre negrita15 400 195 660 235 Importe texto15 0 525 300 560 "Ana (titular)"
-miracap "un clic en el rótulo «Nº» ordena la rejilla por él (de menos a más: la 1 arriba)" ct2 texto15 90 230 420 270 "Persona de ejemplo 1"
+miracap "un clic en el rótulo «Nº» ordena la rejilla por él (de menos a más: la 1 arriba)" ct2 texto15 60 230 420 270 "Persona de ejemplo 1"
 miracap "filtrar sin mirar tildes ni mayúsculas: «angel» encuentra «Àngel álvarez»" ct3 negrita15 90 230 420 270 "ngel álvarez" texto15 200 525 800 560 "1 renglones"
 miracap "Ctrl+Tab: la pestaña Ficha, con su recuadro «Datos generales», los campos, la fecha, la desplegable y la casilla" ct4 \
   negrita15 10 125 300 160 "Datos generales" texto15 20 180 300 215 "Ana Ejemplo" texto15 20 245 300 280 "21/11/2026" texto15 200 245 600 280 "Socio" texto15 40 280 400 320 "Al corriente de pago"
 miracap "Alt+V abre el menú «Ver» de la barra (un menú del escritorio)" ct5 texto 100 40 330 160 "Letra muy grande"
 miracap "y un clic en la pestaña «Lista» vuelve a ella (pestaña_en: la fila de pestañas que hay en ese punto)" ct6 negrita15 60 195 200 235 Nombre
+# los anchos de las columnas (pentium-letras): cada una, lo que mide lo más
+# largo (Nombre, la del texto largo, lo que sobra); se arrastra el borde de
+# un rótulo (va con el ratón: Importe gana lo que pierde Estado) y dos clics
+# en él la ajustan a lo más largo que se ve
+miracap "la rejilla reparte el ancho por lo que mide cada columna (Fecha e Importe, lo justo; Nombre, lo que sobra)" cr0 \
+  negrita15 560 200 580 235 Importe negrita15 70 200 90 235 Nombre negrita15 425 200 445 235 Fecha
+miracap "arrastrar el borde entre Importe y Estado: Importe más ancha (60 puntos), Fecha donde estaba" cr1 negrita15 620 200 640 235 Importe negrita15 425 200 445 235 Fecha distinto 0 200 800 100 $G/cr0.ppm
+miracap "dos clics en ese borde: Importe, a lo que mide lo más largo que se ve (lo que sobra, a Nombre)" cr2 negrita15 620 200 640 235 Importe negrita15 485 200 505 235 Fecha
+miracap "y el borde entre Nº y Nombre: Nº más ancha" cr3 negrita15 117 200 137 235 Nombre
 
 # 9. la firma (Ed25519, firma.cas): el catálogo de prueba va firmado con la
 # clave de prueba (la que lleva este PAQUETES); PAQUETES FIRMA la comprueba;
@@ -3212,7 +3224,7 @@ miracap "la ventana: el árbol por categorías, con el controlador de cada cosa"
   negrita 30 15 400 40 "Administrador de dispositivos" negrita 40 120 400 520 "[-] Pantalla (1)" negrita 40 120 500 520 "Intel PRO/1000 MT (82540EM)" \
   texto 400 120 760 520 RED.BIN texto 400 120 760 520 ahci.cas texto 30 60 700 100 "Guardar informe"
 miracap "las categorías se cierran con la flecha izquierda; la tableta USB, «SIN CONTROLADOR» con su «!», fondo naranja y su franja" dv10 \
-  negrita 40 120 400 520 "[+] Discos (2)" negrita 40 120 400 520 "[+] Red (1)" negrita 40 120 760 520 "! QEMU USB Tablet" texto 400 120 560 520 "SIN CONTROLADOR"
+  negrita 40 120 400 520 "[+] Discos (2)" negrita 40 120 400 520 "[+] Red (1)" negrita 40 120 760 520 "! QEMU USB Tablet" texto 300 120 720 520 "SIN CONTROLADOR"
 miracap "«Guardar informe»: dónde lo ha dejado (la memoria USB, X:)" dv3 texto 30 520 760 545 "Informe guardado en X:\\DISPOSIT.TXT"
 mcopy -n -i $Y/mem.img ::DISPOSIT.TXT $Y/disposit.437 > /dev/null 2>&1
 iconv -f CP437 -t UTF-8 < $Y/disposit.437 2> /dev/null | tr -d '\r' > $Y/disposit.txt

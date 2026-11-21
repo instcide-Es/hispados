@@ -1436,9 +1436,21 @@ módulo Controles
     ;  Cada rejilla es una variable del programa (tipo Rejilla); sus
     ;  renglones van en memoria pedida con más_memoria (rejilla_nueva), así
     ;  que puede haber varias y de muchos renglones.
+    ;
+    ;  Los anchos de las columnas (pentium-letras, 21/11/2026): cada columna
+    ;  de ancho dado mide lo que su contenido más largo (sin pasar de lo que
+    ;  dijo el programa, en letras medias: lo típico, como un nombre y dos
+    ;  apellidos, 28; ni bajar de su rótulo); la de ancho 0
+    ;  (el texto largo) se lleva lo que sobra, y si no cabe todo es la que se
+    ;  recorta antes (con «…»), y solo después las demás. Quien la usa puede
+    ;  arrastrar el borde de un rótulo para cambiar un ancho (dos clics en
+    ;  él: lo que mide lo más largo que se ve); con anchos_archivo(ruta), se
+    ;  recuerdan (por rejilla: sus rótulos) en ese archivo. El programa pasa
+    ;  los sucesos del ratón: rejilla_clic_veces (al pulsar), rejilla_arrastra
+    ;  (al moverlo) y rejilla_suelta (al soltarlo).
     ; =========================================================================
     público constante MAX_COLS = 6
-    público constante LARGO_CELDA = 48
+    público constante LARGO_CELDA = 64           ; (48 hasta la 0.8.3: un nombre y dos apellidos largos no cabían)
     público constante R_NORMAL = 0
     público constante R_AVISO = 1               ; algo que mirar (con su palabra en alguna celda)
     público constante R_GRIS = 2                ; se ve, apagado
@@ -1457,6 +1469,11 @@ módulo Controles
         col_ancho: arreglo [MAX_COLS] de ent32
         col_der: arreglo [MAX_COLS] de bool
         col_x: arreglo [MAX_COLS] de ent32
+        col_w: arreglo [MAX_COLS] de ent32       ; lo que mide cada una ahora (en puntos)
+        col_usu: arreglo [MAX_COLS] de ent32     ; el ancho elegido arrastrando (en dieciseisavos de LA; 0: el de siempre)
+        col_cont: arreglo [MAX_COLS] de ent32    ; lo que mide lo más largo de cada una (con su rótulo)
+        medido_m: ent32                          ; con qué letra se ha medido (0: hay que medir)
+        cargado: bool                            ; ya ha mirado los anchos recordados
         orden_col: ent32
         orden_baja: bool
         filtro: arreglo [64] de byte
@@ -1467,13 +1484,17 @@ módulo Controles
     ; la primera vez; luego, solo se vacía) y sin columnas. Falso si no hay memoria
     público función rejilla_nueva(ref g: Rejilla, máximo: nat32): bool
         variable p: puntero a byte
+        variable c: nat32
         si g.cabe = 0 entonces
             p := más_memoria(máximo * tamaño(Renglón) + máximo * 4)
             si p = nulo entonces devolver falso fin
             g.r := puntero(p)
             g.vista := puntero(p + máximo * tamaño(Renglón))
             g.cabe := máximo
+            para c desde 0 hasta MAX_COLS - 1 hacer g.col_usu[c] := 0 fin
         fin
+        g.medido_m := 0
+        g.cargado := falso
         g.n_cols := 0
         g.orden_col := -1
         g.orden_baja := falso
@@ -1486,6 +1507,10 @@ módulo Controles
     ; va a la derecha (los números)
     público función rejilla_columna(ref g: Rejilla, nombre: puntero a byte, letras: nat32, derecha: bool)
         si g.n_cols >= MAX_COLS entonces devolver fin
+        ; otra columna en ese sitio: sin el ancho que se eligió para la de antes
+        si no iguales(g.col_nombre[g.n_cols], nombre) entonces g.col_usu[g.n_cols] := 0 fin
+        g.cargado := falso
+        g.medido_m := 0
         copiar_hasta(g.col_nombre[g.n_cols], nombre, 24)
         g.col_ancho[g.n_cols] := ent32(letras)
         g.col_der[g.n_cols] := derecha
@@ -1494,6 +1519,7 @@ módulo Controles
 
     ; quita los renglones (las columnas, el orden y el filtro se quedan)
     público función rejilla_vaciar(ref g: Rejilla)
+        g.medido_m := 0
         g.n := 0
         g.n_vista := 0
         g.sel := -1
@@ -1509,6 +1535,7 @@ módulo Controles
         g.r[k].id := id
         g.r[k].id2 := 0
         para c desde 0 hasta MAX_COLS - 1 hacer g.r[k].celdas[c][0] := 0 fin
+        g.medido_m := 0
         g.n := g.n + 1
         devolver ent32(k)
     fin
@@ -1516,6 +1543,7 @@ módulo Controles
     público función celda(ref g: Rejilla, k: ent32, c: nat32, t: puntero a byte)
         si k < 0 o nat32(k) >= g.n o c >= MAX_COLS entonces devolver fin
         copiar_hasta(g.r[k].celdas[c], t, LARGO_CELDA)
+        g.medido_m := 0
     fin
 
     ; el renglón número k
@@ -1746,6 +1774,428 @@ módulo Controles
         devolver g.x + g.an - 5 * E - 4 - g.col_x[c]
     fin
 
+    ; ---- los anchos de las columnas (pentium-letras) ----
+    ; lo que mide lo más largo de cada columna (en negrita, que es como va
+    ; lo elegido), con su rótulo; se mide otra vez si cambian los renglones
+    ; o la letra
+    función medir_columnas(ref g: Rejilla)
+        variable c, k, n: nat32
+        variable w: ent32
+        si g.medido_m = M entonces devolver fin
+        c := 0
+        mientras c < g.n_cols hacer
+            g.col_cont[c] := ancho_ne(g.col_nombre[c], 24, M, cierto)
+            c := c + 1
+        fin
+        n := g.n
+        si n > 3000 entonces n := 3000 fin
+        k := 0
+        mientras k < n hacer
+            c := 0
+            mientras c < g.n_cols hacer
+                si g.col_ancho[c] <> 0 entonces
+                    w := ancho_ne(g.r[k].celdas[c], LARGO_CELDA, M, cierto)
+                    si w > g.col_cont[c] entonces g.col_cont[c] := w fin
+                fin
+                c := c + 1
+            fin
+            k := k + 1
+        fin
+        g.medido_m := M
+    fin
+
+    ; ¿es la del texto largo (la que se lleva lo que sobra)?
+    función es_larga(ref g: Rejilla, c: nat32): bool
+        devolver g.col_ancho[c] = 0
+    fin
+
+    ; lo que suman las columnas de ancho dado, si ninguna pasa de «tope»
+    función suma_con_tope(ref g: Rejilla, tope: ent32): ent32
+        variable c: nat32
+        variable t: ent32
+        t := 0
+        c := 0
+        mientras c < g.n_cols hacer
+            si no es_larga(g, c) entonces
+                si g.col_w[c] > tope entonces t := t + tope sino t := t + g.col_w[c] fin
+            fin
+            c := c + 1
+        fin
+        devolver t
+    fin
+
+    ; reparte el ancho de la rejilla entre sus columnas: col_x y col_w
+    función rejilla_reparto(ref g: Rejilla)
+        variable c, nl: nat32
+        variable sitio, fijo, w, tope, cx, mín_larga, objetivo, bajo, alto_, medio: ent32
+        medir_columnas(g)
+        si no g.cargado entonces anchos_recordados(g) fin
+        sitio := g.an - 3 * LA - 8 * E - ent32(g.n_cols) * LA
+        ; lo menos para el texto largo: que se lea algo (un sexto de la
+        ; rejilla, y no menos de 8 letras)
+        mín_larga := mayor(8 * LA, sitio div 6)
+        ; (si quien la usa ha elegido anchos, manda lo que ha elegido: el texto
+        ; largo puede quedar más estrecho)
+        c := 0
+        mientras c < g.n_cols hacer
+            si g.col_usu[c] > 0 entonces mín_larga := 3 * LA fin
+            c := c + 1
+        fin
+        fijo := 0
+        nl := 0
+        c := 0
+        mientras c < g.n_cols hacer
+            si es_larga(g, c) entonces
+                nl := nl + 1
+                w := 0
+            sino si g.col_usu[c] > 0 entonces
+                w := (g.col_usu[c] * LA + 8) div 16
+            sino si g.n = 0 entonces
+                w := mayor(g.col_ancho[c] * LA, g.col_cont[c])
+            sino
+                ; lo más largo, sin pasar de lo que dijo el programa (su
+                ; contenido típico: un nombre y dos apellidos, una fecha...),
+                ; y no menos que su rótulo
+                tope := mayor(g.col_ancho[c] * LA, ancho_ne(g.col_nombre[c], 24, M, cierto) + E)
+                w := g.col_cont[c] + E
+                si w > tope entonces w := tope fin
+            fin
+            si w < 2 * LA y no es_larga(g, c) entonces w := 2 * LA fin
+            g.col_w[c] := w
+            fijo := fijo + w
+            c := c + 1
+        fin
+        ; si no cabe, primero se estrecha el texto largo (hasta su mínimo) y
+        ; luego las más anchas, a la vez, hasta que quepa (las estrechas
+        ; —fechas, números, importes— se quedan enteras mientras se pueda):
+        ; ninguna pasa de un tope, el mayor con el que cabe todo
+        si fijo + ent32(nl) * mín_larga > sitio y fijo > 0 entonces
+            objetivo := mayor(sitio - ent32(nl) * mín_larga, ent32(g.n_cols) * LA)
+            bajo := LA
+            alto_ := 0
+            c := 0
+            mientras c < g.n_cols hacer
+                si g.col_w[c] > alto_ entonces alto_ := g.col_w[c] fin
+                c := c + 1
+            fin
+            mientras alto_ - bajo > 1 hacer
+                medio := (bajo + alto_) div 2
+                si suma_con_tope(g, medio) <= objetivo entonces bajo := medio sino alto_ := medio fin
+            fin
+            c := 0
+            mientras c < g.n_cols hacer
+                si no es_larga(g, c) y g.col_w[c] > bajo entonces g.col_w[c] := bajo fin
+                c := c + 1
+            fin
+            fijo := suma_con_tope(g, bajo)
+        fin
+        c := 0
+        mientras c < g.n_cols hacer
+            si es_larga(g, c) entonces g.col_w[c] := mayor((sitio - fijo) div ent32(nl), mín_larga) fin
+            c := c + 1
+        fin
+        cx := g.x + 2 * LA
+        c := 0
+        mientras c < g.n_cols hacer
+            g.col_x[c] := cx
+            cx := cx + g.col_w[c] + LA
+            c := c + 1
+        fin
+    fin
+
+    ; ---- arrastrar el borde de un rótulo ----
+    variable arr_g: puntero a Rejilla           ; la rejilla (nulo: no se arrastra nada)
+    variable arr_c: nat32                       ; el borde: entre la columna arr_c - 1 y la arr_c
+    variable arr_izq, arr_der: bool             ; las que cambian: la de la izquierda del borde, la de la derecha (o las dos)
+    variable arr_x0, arr_w1, arr_w2: ent32      ; dónde se pulsó, y lo que medían las dos
+
+    ; el borde de rótulo que hay en x (entre la columna c - 1 y la c): c, o 0 si ninguno
+    función borde_en(ref g: Rejilla, x: ent32): nat32
+        variable c: nat32
+        variable b, h: ent32
+        h := mayor(LA div 3, 4)
+        c := 1
+        mientras c < g.n_cols hacer
+            b := g.col_x[c] - LA div 2 - E
+            si x >= b - h y x <= b + h entonces devolver c fin
+            c := c + 1
+        fin
+        devolver 0
+    fin
+
+    ; lo que mide lo más largo que se ve de la columna c (y su rótulo)
+    función lo_que_se_ve(ref g: Rejilla, c: nat32): ent32
+        variable i, w, mx: ent32
+        mx := ancho_ne(g.col_nombre[c], 24, M, cierto)
+        i := g.primero
+        mientras i < ent32(g.n_vista) y i < g.primero + caben_renglones(g) hacer
+            w := ancho_ne(g.r[g.vista[i]].celdas[c], LARGO_CELDA, M, cierto)
+            si w > mx entonces mx := w fin
+            i := i + 1
+        fin
+        devolver mx + E
+    fin
+
+    ; el ancho que ha elegido quien la usa para la columna c (en puntos)
+    función pon_ancho(ref g: Rejilla, c: nat32, w: ent32)
+        si w < 2 * LA entonces w := 2 * LA fin
+        si w > g.an - 8 * LA entonces w := g.an - 8 * LA fin
+        g.col_usu[c] := (w * 16 + LA div 2) div LA
+    fin
+
+    ; un clic en la rejilla (con las veces: 2, el doble clic): en el borde
+    ; de un rótulo, empieza a arrastrarlo (y da -3; dos clics: lo ajusta a lo
+    ; más largo que se ve); en un rótulo, ordena por esa columna (y da -2);
+    ; en un renglón, lo elige y da su sitio en lo que se ve; -1 si en nada
+    público función rejilla_clic_veces(ref g: Rejilla, x: ent32, yy: ent32, veces_: nat32): ent32
+        variable c, l: nat32
+        variable i: ent32
+        si x < g.x o x >= g.x + g.an o yy < g.ye o yy >= g.ye + g.al entonces devolver -1 fin
+        si yy < g.ye + alto_renglón() entonces
+            c := borde_en(g, x)
+            si c > 0 entonces
+                ; el borde va con el ratón. Si la del texto largo (la que se
+                ; lleva lo que sobra) está a la derecha, cambia la de su
+                ; izquierda (y lo de la derecha se corre); si está a la
+                ; izquierda, cambian las dos de los lados (una gana lo que
+                ; pierde la otra); si es la de su izquierda, la de su derecha
+                l := 0
+                mientras l < g.n_cols y no es_larga(g, l) hacer l := l + 1 fin
+                arr_izq := no es_larga(g, c - 1)
+                arr_der := l < c y no es_larga(g, c)
+                si veces_ >= 2 entonces
+                    ; dos clics: lo más largo que se ve (la de la izquierda; si es la larga, la de la derecha)
+                    si arr_izq entonces pon_ancho(g, c - 1, lo_que_se_ve(g, c - 1))
+                    sino si no es_larga(g, c) entonces pon_ancho(g, c, lo_que_se_ve(g, c)) fin
+                    guarda_anchos(g)
+                    arr_g := nulo
+                    devolver -3
+                fin
+                si arr_izq o arr_der entonces
+                    arr_g := dirección(g)
+                    arr_c := c
+                    arr_x0 := x
+                    arr_w1 := g.col_w[c - 1]
+                    arr_w2 := g.col_w[c]
+                fin
+                devolver -3
+            fin
+            c := g.n_cols
+            mientras c > 0 hacer
+                c := c - 1
+                si x >= g.col_x[c] - LA div 2 entonces
+                    rejilla_ordenar(g, c)
+                    devolver -2
+                fin
+            fin
+            devolver -1
+        fin
+        i := g.primero + (yy - g.ye - alto_renglón() - 2) div alto_renglón()
+        si i < 0 o i >= ent32(g.n_vista) entonces devolver -1 fin
+        g.sel := i
+        devolver i
+    fin
+
+    ; ¿se está arrastrando el borde de un rótulo?
+    público función arrastrando(): bool
+        devolver arr_g <> nulo
+    fin
+
+    ; el ratón se ha movido (EV_RATÓN_MUEVE): si se arrastra un borde, lo
+    ; lleva a x; cierto si hay que volver a pintar
+    público función rejilla_arrastra(x: ent32): bool
+        variable d: ent32
+        si arr_g = nulo entonces devolver falso fin
+        d := x - arr_x0
+        si arr_izq y arr_w1 + d < 2 * LA entonces d := 2 * LA - arr_w1 fin
+        si arr_der y arr_w2 - d < 2 * LA entonces d := arr_w2 - 2 * LA fin
+        si arr_izq entonces pon_ancho(arr_g[0], arr_c - 1, arr_w1 + d) fin
+        si arr_der entonces pon_ancho(arr_g[0], arr_c, arr_w2 - d) fin
+        devolver cierto
+    fin
+
+    ; se ha soltado el ratón (EV_RATÓN_SUBE): se acaba de arrastrar y se
+    ; recuerda el ancho; cierto si se arrastraba
+    público función rejilla_suelta(): bool
+        si arr_g = nulo entonces devolver falso fin
+        guarda_anchos(arr_g[0])
+        arr_g := nulo
+        devolver cierto
+    fin
+
+    ; ---- los anchos recordados: un archivo de líneas «rótulos=anchos»
+    ; («Libro|Lo tiene|Desde|Hasta|Estado=0,312,0,0,0», en dieciseisavos de
+    ; letra media: valen para cualquier tamaño de letra) ----
+    constante MAX_RECORDADOS = 24
+    constante LARGO_CLAVE = 64
+    variable rec_clave: arreglo [MAX_RECORDADOS] de arreglo [LARGO_CLAVE] de byte
+    variable rec_ancho: arreglo [MAX_RECORDADOS] de arreglo [MAX_COLS] de ent32
+    variable rec_n: nat32
+    variable rec_ruta: arreglo [80] de byte
+
+    ; la clave de una rejilla: sus rótulos, separados por «|»
+    función clave_de(ref g: Rejilla, destino: puntero a byte)
+        variable c, i, k: nat32
+        k := 0
+        c := 0
+        mientras c < g.n_cols hacer
+            si c > 0 y k + 1 < LARGO_CLAVE entonces
+                destino[k] := '|'
+                k := k + 1
+            fin
+            i := 0
+            mientras g.col_nombre[c][i] <> 0 y k + 1 < LARGO_CLAVE hacer
+                destino[k] := g.col_nombre[c][i]
+                k := k + 1
+                i := i + 1
+            fin
+            c := c + 1
+        fin
+        destino[k] := 0
+    fin
+
+    función recordado(clave: puntero a byte): ent32
+        variable i: nat32
+        i := 0
+        mientras i < rec_n hacer
+            si iguales(rec_clave[i], clave) entonces devolver ent32(i) fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    ; mira si hay anchos recordados para esa rejilla
+    función anchos_recordados(ref g: Rejilla)
+        variable clave: arreglo [LARGO_CLAVE] de byte
+        variable r: ent32
+        variable c: nat32
+        g.cargado := cierto
+        si rec_n = 0 entonces devolver fin
+        clave_de(g, clave)
+        r := recordado(clave)
+        si r < 0 entonces devolver fin
+        para c desde 0 hasta g.n_cols - 1 hacer g.col_usu[c] := rec_ancho[r][c] fin
+    fin
+
+    ; los recuerda (y, si hay archivo, lo escribe)
+    función guarda_anchos(ref g: Rejilla)
+        variable clave: arreglo [LARGO_CLAVE] de byte
+        variable r: ent32
+        variable c: nat32
+        clave_de(g, clave)
+        r := recordado(clave)
+        si r < 0 entonces
+            si rec_n >= MAX_RECORDADOS entonces devolver fin
+            r := ent32(rec_n)
+            rec_n := rec_n + 1
+            copiar_hasta(rec_clave[r], clave, LARGO_CLAVE)
+        fin
+        para c desde 0 hasta MAX_COLS - 1 hacer
+            si c < g.n_cols entonces rec_ancho[r][c] := g.col_usu[c] sino rec_ancho[r][c] := 0 fin
+        fin
+        escribe_anchos()
+    fin
+
+    función escribe_anchos()
+        variable m, i, c, k: nat32
+        variable t: arreglo [2400] de byte
+        variable n: arreglo [12] de byte
+        si rec_ruta[0] = 0 entonces devolver fin
+        k := 0
+        i := 0
+        mientras i < rec_n y k + LARGO_CLAVE + 80 < 2400 hacer
+            copiar(dirección(t[k]), rec_clave[i])
+            k := k + longitud(rec_clave[i])
+            t[k] := '='
+            k := k + 1
+            para c desde 0 hasta MAX_COLS - 1 hacer
+                si c > 0 entonces
+                    t[k] := ','
+                    k := k + 1
+                fin
+                de_número(nat32(rec_ancho[i][c]), n)
+                copiar(dirección(t[k]), n)
+                k := k + longitud(n)
+            fin
+            t[k] := '\r'
+            t[k + 1] := '\n'
+            k := k + 2
+            i := i + 1
+        fin
+        m := crear(rec_ruta)
+        si es_error(m) entonces devolver fin
+        escribir_archivo(m, t, k)
+        cerrar(m)
+    fin
+
+    ; un número sin signo, en decimal
+    función de_número(v: nat32, destino: puntero a byte)
+        variable t: arreglo [12] de byte
+        variable i, k: nat32
+        i := 0
+        t[0] := '0'
+        si v = 0 entonces i := 1 fin
+        mientras v > 0 hacer
+            t[i] := byte('0' + v mod 10)
+            v := v div 10
+            i := i + 1
+        fin
+        k := 0
+        mientras i > 0 hacer
+            i := i - 1
+            destino[k] := t[i]
+            k := k + 1
+        fin
+        destino[k] := 0
+    fin
+
+    ; dónde se recuerdan los anchos de las columnas que elige quien usa el
+    ; programa (un archivo de texto; se lee ahora y se escribe al cambiarlos)
+    público función anchos_archivo(ruta: puntero a byte)
+        variable t: arreglo [2400] de byte
+        variable m, n, i, k, c: nat32
+        variable v: ent32
+        copiar_hasta(rec_ruta, ruta, 80)
+        rec_n := 0
+        m := abrir(ruta)
+        si es_error(m) entonces devolver fin
+        n := leer(m, t, 2399)
+        cerrar(m)
+        si es_error(n) entonces devolver fin
+        t[n] := 0
+        i := 0
+        mientras t[i] <> 0 y rec_n < MAX_RECORDADOS hacer
+            ; la clave, hasta «=»
+            k := 0
+            mientras t[i] <> 0 y t[i] <> '=' y t[i] <> '\n' hacer
+                si k + 1 < LARGO_CLAVE entonces
+                    rec_clave[rec_n][k] := t[i]
+                    k := k + 1
+                fin
+                i := i + 1
+            fin
+            rec_clave[rec_n][k] := 0
+            si t[i] = '=' entonces
+                i := i + 1
+                c := 0
+                mientras c < MAX_COLS hacer
+                    v := 0
+                    mientras t[i] >= '0' y t[i] <= '9' hacer
+                        v := v * 10 + ent32(t[i] - '0')
+                        i := i + 1
+                    fin
+                    si v > 4000 entonces v := 0 fin
+                    rec_ancho[rec_n][c] := v
+                    si t[i] = ',' entonces i := i + 1 fin
+                    c := c + 1
+                fin
+                si k > 0 entonces rec_n := rec_n + 1 fin
+            fin
+            mientras t[i] <> 0 y t[i] <> '\n' hacer i := i + 1 fin
+            si t[i] = '\n' entonces i := i + 1 fin
+        fin
+    fin
+
     ; pinta la rejilla en ese rectángulo («vacía»: lo que dice si no hay renglones)
     público función rejilla(ref g: Rejilla, id: nat32, x: ent32, yy: ent32, an: ent32, al: ent32, vacía: puntero a byte)
         variable c, k: nat32
@@ -1760,24 +2210,8 @@ módulo Controles
         ar := alto_renglón()
         caja(x, yy, an, al, C_BORDE)
         caja(x + 1, yy + 1, an - 2, al - 2, C_PAPEL)
-        ; las columnas: las de ancho fijo (si no caben, más estrechas) y la que se lleva lo que quede
-        fijo := 0
-        c := 0
-        mientras c < g.n_cols hacer
-            fijo := fijo + g.col_ancho[c] * LA + LA
-            c := c + 1
-        fin
-        resto := an - 3 * LA - 8 * E - fijo
-        cx := x + 2 * LA
-        c := 0
-        mientras c < g.n_cols hacer
-            g.col_x[c] := cx
-            w := g.col_ancho[c] * LA
-            si resto < 8 * LA y fijo > 0 entonces w := (w * (an - 3 * LA - 8 * E - 8 * LA)) div fijo fin
-            si g.col_ancho[c] = 0 entonces w := mayor(resto, 8 * LA) fin
-            cx := cx + w + LA
-            c := c + 1
-        fin
+        ; las columnas (los anchos: rejilla_reparto)
+        rejilla_reparto(g)
         ; los rótulos
         caja(x + 1, yy + 1, an - 2, ar, 0xE5E7EB)
         caja(x + 1, yy + ar, an - 2, 1, C_BORDE)
@@ -1852,26 +2286,10 @@ módulo Controles
     fin
 
     ; un clic en la rejilla: en un rótulo, ordena por esa columna (y da -2);
-    ; en un renglón, lo elige y da su sitio en lo que se ve; -1 si en nada
+    ; en un renglón, lo elige y da su sitio en lo que se ve; en el borde de
+    ; un rótulo, empieza a arrastrarlo (-3); -1 si en nada
     público función rejilla_clic(ref g: Rejilla, x: ent32, yy: ent32): ent32
-        variable c: nat32
-        variable i: ent32
-        si x < g.x o x >= g.x + g.an o yy < g.ye o yy >= g.ye + g.al entonces devolver -1 fin
-        si yy < g.ye + alto_renglón() entonces
-            c := g.n_cols
-            mientras c > 0 hacer
-                c := c - 1
-                si x >= g.col_x[c] - LA div 2 entonces
-                    rejilla_ordenar(g, c)
-                    devolver -2
-                fin
-            fin
-            devolver -1
-        fin
-        i := g.primero + (yy - g.ye - alto_renglón() - 2) div alto_renglón()
-        si i < 0 o i >= ent32(g.n_vista) entonces devolver -1 fin
-        g.sel := i
-        devolver i
+        devolver rejilla_clic_veces(g, x, yy, 1)
     fin
 
 fin Controles.

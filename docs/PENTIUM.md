@@ -1154,7 +1154,7 @@ de 32).
 | lista desplegable | `desplegable` (lo elegido y la flecha), `abrir_desplegable` (las opciones, en un menú del escritorio: llega `EV_MENÚ` con la etiqueta del control), `desplegable_tecla` | Intro, Espacio; arriba y abajo, sin abrirla |
 | recuadro con título | `recuadro(x, y, ancho, alto, «Datos generales»)`: da dónde empieza lo de dentro | |
 | pestañas | `pestañas(id, x, y, ancho, «Inicio\|Socios\|...», activa, apagadas)`, `pestaña_en`, `otra_pestaña` | Ctrl+Tab, Ctrl+Mayús+Tab |
-| rejilla | una variable `Rejilla` por tabla (`rejilla_nueva(g, máximo)`: los renglones, en memoria pedida con `más_memoria`), `rejilla_columna` (rótulo, ancho en letras —0: lo que quede—, a la derecha), `renglón_nuevo`, `celda`, `rejilla_lista`, `rejilla_filtrar` (sin mirar mayúsculas ni tildes), `rejilla_ordenar` (números, fechas dd/mm/aaaa o textos; otra vez, al revés), `rejilla_elegido`, `rejilla_id`, `rejilla_ir` (primero, anterior, siguiente, último), `rejilla_clic` (en un rótulo, ordena) | flechas, Re Pág, Av Pág, Inicio, Fin |
+| rejilla | una variable `Rejilla` por tabla (`rejilla_nueva(g, máximo)`: los renglones, en memoria pedida con `más_memoria`), `rejilla_columna` (rótulo, ancho típico en letras medias —lo más que mide; 0: la del texto largo, que se lleva lo que sobra—, a la derecha), **anchos que se cambian arrastrando el borde de un rótulo** (`rejilla_clic_veces`, `rejilla_arrastra`, `rejilla_suelta`; dos clics en el borde: lo más largo que se ve) y que se recuerdan con `anchos_archivo(ruta)`, `renglón_nuevo`, `celda`, `rejilla_lista`, `rejilla_filtrar` (sin mirar mayúsculas ni tildes), `rejilla_ordenar` (números, fechas dd/mm/aaaa o textos; otra vez, al revés), `rejilla_elegido`, `rejilla_id`, `rejilla_ir` (primero, anterior, siguiente, último), `rejilla_clic` (en un rótulo, ordena) | flechas, Re Pág, Av Pág, Inicio, Fin |
 | barra de menús | `barra_menús(x, y, ancho, «&Archivo\|&Ver\|A&yuda», abierto)` (la letra tras «&», subrayada), `menú_de_alt`, `menú_en_barra`, `abrir_menú_barra` | Alt+letra |
 | barra de herramientas | `barra_herramientas`, `herramienta(id, x, y, icono, texto, apagado)` con los iconos dibujados (`I_NUEVO`, `I_GUARDAR`, `I_DESHACER`, `I_BUSCAR`, `I_IMPRIMIR`, `I_REFRESCAR`, `I_PRIMERO`, `I_ANTERIOR`, `I_SIGUIENTE`, `I_ÚLTIMO`, `I_EDITAR`, `I_BORRAR`), `separador` | (no las recorre el tabulador: son atajos) |
 | barra de estado | `barra_estado(y, «usuario\|asociación\|...\|12:00»)`: el último trozo, a la derecha | |
@@ -1167,6 +1167,29 @@ tiene el teclado lleva **un borde azul grueso**; lo elegido de una rejilla,
 **letra blanca sobre azul y una flecha**; lo que hay que mirar
 (`R_AVISO`), fondo naranja claro **y una franja** a la izquierda (y su
 palabra en una celda): nada depende solo del color.
+
+**Los anchos de las columnas de la rejilla** (rama `pentium-letras`,
+21/11/2026). Cada columna de ancho dado mide lo que su contenido más largo
+(medido con la letra de verdad, en negrita, que es como va lo elegido), sin
+pasar de lo que dijo el programa (lo típico: un nombre y dos apellidos, unas
+30 letras; una fecha, 10) ni bajar de su rótulo; la del texto largo (ancho
+0: un título, un concepto) se lleva lo que sobra. Si no cabe todo, primero
+se estrecha el texto largo (hasta un sexto de la rejilla) y luego las más
+anchas a la vez, hasta que quepa: las fechas, los números y los importes se
+quedan enteros mientras se pueda. Quien la usa puede **arrastrar el borde
+de un rótulo** (el borde va con el ratón: si el texto largo está a la
+derecha, cambia la columna de la izquierda y lo demás se corre; si está a
+la izquierda, una columna gana lo que pierde la otra) y **dos clics en el
+borde** dejan la columna en lo que mide lo más largo que se ve. Con
+`anchos_archivo(ruta)` los anchos elegidos se recuerdan (por rejilla, por
+sus rótulos; en dieciseisavos de letra, así valen para cualquier tamaño)
+en un archivo de texto. El programa pasa los sucesos del ratón:
+`rejilla_clic_veces(g, x, y, veces(s.c))` al pulsar, `rejilla_arrastra(x)`
+con `EV_RATÓN_MUEVE` y `rejilla_suelta()` con `EV_RATÓN_SUBE`
+(`rejilla_clic` sigue valiendo: es con una vez). Una celda lleva hasta 63
+letras (antes, 47).
+
+![Los anchos de las columnas: repartidos, arrastrando un borde, dos clics y otro borde](pentium/columnas-muestra.png)
 
 **`MUESTRA.BIN`** (`umuestra.cas`) lleva todos (`MUESTRA normal`, con la
 letra normal; `MUESTRA doble`, al doble): es el ejemplo para empezar un
