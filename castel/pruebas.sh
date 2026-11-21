@@ -1430,7 +1430,7 @@ SES=(":pausa 2" ":captura ex1" ":doble 60 40" ":pausa 3" ":captura ex2" ":doble 
  ":clic 452 310" ":tecla ctrl-c" ":doble 548 155" ":pausa 1" ":tecla ctrl-v" ":pausa 2" ":raton 600 440" ":captura ex6"
  ":clic 260 160" ":tecla f2" ":pausa 1" ":captura ex7" ":escribe NUEVO.TXT" ":tecla ret" ":pausa 1" ":tecla f7" ":pausa 1" ":captura ex8"
  ":tecla ret" ":pausa 1" ":raton 600 440" ":captura ex9" ":clic 260 160" ":tecla delete" ":pausa 2" ":raton 600 440" ":captura ex10"
- ":clic 84 260" ":pausa 2" ":raton 600 440" ":captura ex11" ":clic 260 160" ":tecla alt-h" ":tecla down down ret" ":pausa 2" ":captura ex12"
+ ":clic 84 280" ":pausa 2" ":raton 600 440" ":captura ex11" ":clic 260 160" ":tecla alt-h" ":tecla down down ret" ":pausa 2" ":captura ex12"
  ":tecla f4" ":escribe C:\\" ":tecla ret" ":pausa 1" ":clicd 452 310" ":pausa 1" ":captura ex13" ":tecla esc"
  ":clic 260 260" ":ctrlclic 356 260" ":pausa 1" ":captura ex14" ":arrastra 600 455 380 290" ":pausa 1" ":captura ex15"
  ":clic 452 310" ":arrastra 452 310 120 540" ":pausa 2" ":clic 260 410" ":arrastra 260 410 400 535" ":pausa 2" ":captura ex16"
@@ -1440,7 +1440,7 @@ CAPTURAS=$G ESCRIBE=1 DISCO=$G/ex.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo3
 S=$G/explorador.sal
 miracap "el dock: centrado abajo, encima de la barra de tareas, con el borde del panel" ex1 rgb 400 504 0F3F8A 20 negrita 30 570 46 580 Inicio
 miracap "«Mi equipo» es el explorador: el árbol (Mi equipo), la unidad C: en su mosaico, con lo libre, y la Papelera" ex2 negrita 30 10 40 20 "Mi equipo" \
-  negrita 265 133 275 143 "HISPA (C:)" negrita 515 133 525 143 Papelera texto 313 151 323 161 "libres de" texto 48 127 58 137 "Mi equipo"
+  negrita 265 133 275 143 "HISPA (C:)" negrita 515 133 525 143 "CD (D:)" texto 515 151 525 161 "sin disco" negrita 265 195 275 205 Papelera texto 313 151 323 161 "libres de" texto 48 127 58 137 "Mi equipo"
 miracap "dos clics en la unidad: sus carpetas y sus archivos, en iconos, y lo libre en la barra de estado" ex3 texto 236 166 246 176 FOTOS \
   texto 412 322 422 332 LEEME.TXT texto 687 475 697 485 "Libre:"
 miracap "la vista de detalles: la rejilla de los controles, con su nombre, su tamaño, su tipo y su fecha (las carpetas, delante)" ex4 \
@@ -1528,7 +1528,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     S=$G/usb.txt2
     # (SSH, TAILSCALE: 23 programas: SSH, SSHD, WG y TAILSCAL también van como módulos)
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 28 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 26 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
@@ -1831,7 +1831,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 28 archivos que ha traído el cargador hacen de unidad M:" $S \
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 26 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
       ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
@@ -2162,9 +2162,9 @@ for hc in xhci ehci; do
   # lo instalado, apuntado para PAQUETES: los registros de los paquetes del sistema, en \HISPA\PAQUETES
   rm -rf $Z/pqi $Z/pqu; mkdir $Z/pqi $Z/pqu
   mcopy -n -i $Z/vol.img '::HISPA/PAQUETES/*' $Z/pqi/ > /dev/null 2>&1; mcopy -n -i $G/usb.img@@1M '::INSTALA/PAQUETES/*' $Z/pqu/ > /dev/null 2>&1
-  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI TLS.PQI WIN32.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
+  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI SSH.PQI TAILSCAL.PQI TLS.PQI WIN32.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
     && mcopy -n -i $Z/vol.img ::HISPA/PAQUETES.BIN $Z/f.bin > /dev/null 2>&1; then
-    ok "$que: INSTALAR apunta lo que instala: los registros de los 11 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
+    ok "$que: INSTALAR apunta lo que instala: los registros de los 13 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
   else ko "$que: lo instalado no queda apuntado en C:\\HISPA\\PAQUETES:"; ls $Z/pqi | sed 's/^/        /' | head -10; fi
   # SOLO el disco: el primer arranque
   desde_disco $Z/d$hc.img $Z/a$hc.sal
@@ -2209,7 +2209,7 @@ for hc in xhci ehci; do
     miracap "al aceptar: «Todo listo», con el saludo; y el reloj de la barra ya marca la hora puesta (el reloj del PC)" a3$hc \
       negrita 154 98 162 106 "Todo listo" negrita 112 176 120 184 "¡Hola, Carlos!" negrita 454 427 462 435 "Empezar" negrita 740 570 760 584 "07:45"
     miracap "el menú Inicio saluda con el nombre («Hola, Carlos») y dice la versión; LEEME.TXT, en los documentos" a4$hc \
-      negrita 54 194 62 202 "Hola, Carlos" texto 54 212 62 220 "Hispa-Pentium, versión 0.8" texto 208 279 216 287 "LEEME.TXT"
+      negrita 54 158 62 166 "Hola, Carlos" texto 54 176 62 184 "Hispa-Pentium, versión 0.8" texto 208 243 216 251 "LEEME.TXT" negrita 42 358 50 366 Naves
     if grep -q "^asistente: guardado HISPA.INI (Carlos, Toshiba)$" $S && [ "$(tr -d '\r' < $Z/ini.txt | tr '\n' '|')" = "[hispa]|usuario=Carlos|equipo=Toshiba|teclado=es|modo=1024x600|" ] \
       && grep -q "^set modo=1024x600x32,1024x600,auto$" $Z/cfg.txt && [ "$(grep -c '^set modo=' $Z/cfg.txt)" = 1 ] && [ $sano = 0 ]; then
       ok "lo guardado: C:\\HISPA\\HISPA.INI (usuario, equipo, teclado y modo) y la medida de la pantalla en el menú de arranque (GRUB.CFG); el disco, sano"
@@ -2222,7 +2222,7 @@ for hc in xhci ehci; do
     monz quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $Z/b$hc.sal | iconv -f CP437 -t UTF-8 > $Z/b$hc.txt
     S=$Z/b$hc.txt
-    if grep -q "^escritorio: en marcha, 1024 x 600 con 32 bits por punto" $S && ! grep -q "ASISTE.BIN" $S && cap $G/b1$hc.ppm tam 1024 600 negrita 54 194 62 202 "Hola, Carlos"; then
+    if grep -q "^escritorio: en marcha, 1024 x 600 con 32 bits por punto" $S && ! grep -q "ASISTE.BIN" $S && cap $G/b1$hc.ppm tam 1024 600 negrita 54 158 62 166 "Hola, Carlos"; then
       ok "el segundo arranque: sin asistente, el escritorio a 1024 x 600 (la medida elegida, puesta por GRUB) y el menú Inicio con el saludo"
     else ko "el segundo arranque no sale como se dejó:"; grep "escritorio" $S | sed 's/^/        /' | head -4; sed 's/^/        /' $G/cap.txt | head -4; fi
   else
@@ -2244,9 +2244,9 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -8; fi
-    if grep -q "^|  base      0.8.4   El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|13 paquetes\.$" $Z/b2$hc.txt \
+    if grep -q "^|  win32     1.0     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0.8.4   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|13 paquetes\.$" $Z/b2$hc.txt \
       && grep -q "^|Los archivos de los 13 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
-      ok "PAQUETES en el sistema recién instalado: LISTA dice los 13 paquetes del sistema (base, oficina, ssh, tailscal, win32...) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
+      ok "PAQUETES en el sistema recién instalado: LISTA dice los 13 paquetes del sistema (..., ssh, tailscal, tls y win32: con 13, base ya no cabe en la pantalla) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -12; fi
     # la oficina, en el disco instalado: el grupo «Oficina» del menú Inicio
     # (Facturas, con C:\\HISPA\\HVPRUN.BIN) y Mi equipo abriendo Cuentas de C:\\OFICINA
@@ -2270,7 +2270,7 @@ for hc in xhci ehci; do
     S=$Z/c$hc.txt
     volumen $Z/d$hc.img 2048; sano=$?
     if grep -q "escritorio: lanzo .HVPRUN.BIN (la tarea [0-9]*)" $S && ! grep -q "ASISTE.BIN" $S \
-      && cap $G/c1$hc.ppm negrita 8 382 16 390 Oficina negrita 38 410 46 418 Facturas negrita 54 194 62 202 "Hola, Ana:" \
+      && cap $G/c1$hc.ppm negrita 8 382 16 390 Oficina negrita 38 410 46 418 Facturas negrita 54 158 62 166 "Hola, Ana:" \
       && cap $G/c2$hc.ppm negrita 72 22 84 30 Facturas texto 62 126 74 138 "No hay facturas emitidas."; then
       ok "la oficina en el disco instalado: el menú Inicio (con su saludo) tiene el grupo «Oficina», y Facturas se abre con C:\\HISPA\\HVPRUN.BIN (FACTURAS.HVP, de C:\\OFICINA)"
     else ko "la oficina no se abre desde el menú Inicio del disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; grep "lanzo" $S | sed 's/^/        /' | head -4; fi
@@ -2365,17 +2365,17 @@ cp $P/d16.img $Q/ce.img; cp $Q/m1.img $Q/ea.img; memoria $Q/eb.img MEMORIA3
 CAPTURAS=$G ESCRIBE=1 DISCO=$Q/ce.img MODULOS= MAQUINA=pc,i8042=off ARRANQUE="escritorio escritura" QEMU_MAS="-device usb-ehci,id=u -device usb-kbd,bus=u.0" \
   $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":monitor device_add usb-mouse,bus=u.0,id=r1" ":pausa 2" ":doble 62 30" ":pausa 2" \
   ":monitor drive_add 0 if=none,id=ma,file=$Q/ea.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=ma,id=mema" ":pausa 2.5" ":captura u1" \
-  ":clicd 580 160" ":pausa 0.5" ":captura u2" ":clic 620 195" ":pausa 1.5" ":captura u3" ":monitor device_del mema" ":pausa 2" \
+  ":clicd 330 222" ":pausa 0.5" ":captura u2" ":clic 370 257" ":pausa 1.5" ":captura u3" ":monitor device_del mema" ":pausa 2" \
   ":monitor drive_add 0 if=none,id=mb,file=$Q/eb.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=mb,id=memb" ":pausa 2.5" ":raton 600 450" ":pausa 6" \
   ":clic 720 583" ":pausa 0.5" ":captura u4" ":clic 680 549" ":pausa 1.5" ":captura u5" ":monitor device_del memb" ":pausa 2" > $Q/escritorio.sal 2>&1
 S=$Q/escritorio.sal
 mira "escritorio: un ratón USB enchufado en marcha mueve la flecha y abre Mi equipo con dos clics" \
   "usb: se enchufa el aparato 1, 0627:0001, velocidad alta, en el puerto 2 (EHCI); ratón$" "^escritorio: lanzo .EQUIPO.BIN"
 miracap "escritorio: la memoria que llega sale en el globo de los avisos, en la bandeja (su icono) y en Mi equipo, que se pone al día solo" u1 \
-  texto 570 532 590 548 "Memoria USB conectada: W:" negrita 570 510 590 526 "USB" negrita 466 128 760 148 "(W:)" rgb 721 585 2463C2 40
-miracap "escritorio: Mi equipo, botón secundario en la memoria: «Abrir» y «Quitar con seguridad»" u2 texto 585 180 605 205 "Quitar con seguridad"
+  texto 570 532 590 548 "Memoria USB conectada: W:" negrita 570 510 590 526 "USB" negrita 216 190 460 212 "(W:)" rgb 721 585 2463C2 40
+miracap "escritorio: Mi equipo, botón secundario en la memoria: «Abrir» y «Quitar con seguridad»" u2 texto 335 242 355 267 "Quitar con seguridad"
 miracap "escritorio: quitada con seguridad desde Mi equipo: el globo «Ya puede quitar la memoria W:», y en Mi equipo ya no está" u3 \
-  texto 540 532 600 548 "Ya puede quitar la memoria W:" texto 100 474 130 490 "Ya puede quitar la memoria W:." notexto 466 128 760 148 "(W:)"
+  texto 540 532 600 548 "Ya puede quitar la memoria W:" texto 100 474 130 490 "Ya puede quitar la memoria W:." notexto 216 190 460 212 "(W:)"
 miracap "escritorio: el icono de la bandeja saca «Quitar con seguridad W:» de la otra memoria" u4 texto 580 535 600 560 "Quitar con seguridad W:"
 mira "escritorio: y desde la bandeja también se quita con seguridad; las dos memorias quedan sanas" \
   "^escritorio: globo: Ya puede quitar la memoria W:$" "^disco 2: quitado con seguridad\.$"
@@ -3598,18 +3598,21 @@ mira "una imagen dentro del CD y otra en la memoria USB: si se va la memoria, o 
   "^  E:  imagen D:.dentro\.iso  «PRUEBA_CD»$" "cd: aviso: Imagen desmontada: E: (su disco se ha ido)$" "^  D:  lector de CD o DVD QEMU DVD-ROM: sin disco$"
 if ! cat $L/*.sal | grep -q "excepción\|\*\*\*"; then ok "en todo eso, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; cat $L/*.sal | grep "excepción\|\*\*\*" | head -3 | sed 's/^/        /'; fi
-# 6. el escritorio: Mi equipo con el CD (D:), y una .ISO montada con dos clics (el CD virtual, E:)
+# 6. el escritorio: el explorador (Mi equipo) con el CD (D:), y una .ISO
+# montada al abrirla (el CD virtual, E:), que «Expulsar» desmonta
 cp $P/d16.img $L/e.img; mmd -i $L/e.img ::DISCOS; mcopy -i $L/e.img $L/joliet.iso ::DISCOS/PRUEBA.ISO
 CAPTURAS=$G ESCRIBE=1 DISCO=$L/e.img ARRANQUE=escritorio MODULOS= QEMU_MAS="-drive id=cd,file=$L/joliet.iso,media=cdrom,if=none -device ide-cd,drive=cd,id=lector,bus=ide.1,unit=0" \
-  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN ":pausa 3" ":doble 62 30" ":pausa 2" ":captura cd18a" ":tecla ret" ":pausa 1" ":tecla end ret" ":pausa 1" ":tecla down ret" ":pausa 2" \
-  ":captura cd18b" ":tecla backspace" ":pausa 1" ":clicd 300 300" ":pausa 1" ":captura cd18c" ":clic 340 341" ":pausa 2" ":captura cd18d" > $L/escritorio.sal 2>&1
+  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN ":pausa 3" ":doble 62 30" ":pausa 3" ":captura cd18a" ":tecla f4" ":escribe C:\\DISCOS" ":tecla ret" ":pausa 2" \
+  ":tecla ret" ":pausa 3" ":raton 600 440" ":captura cd18b" ":tecla backspace" ":pausa 2" ":clicd 330 222" ":pausa 1" ":captura cd18c" ":clic 370 257" ":pausa 2" \
+  ":raton 600 440" ":captura cd18d" > $L/escritorio.sal 2>&1
 S=$L/escritorio.sal
-miracap "Mi equipo enseña el CD con su letra, su nombre y su lector, con un disco dibujado" cd18a negrita 160 150 180 170 "Unidad C:" negrita 160 210 180 230 "Unidad D:  PRUEBA_CD" \
-  texto 160 228 180 248 "lector de CD o DVD: QEMU DVD-ROM" texto 160 244 180 264 "670 K, ISO 9660 (de solo lectura)"
-miracap "dos clics en una .ISO la montan (E:) y entran en ella; el aviso de la bandeja es de los CD y DVD" cd18b negrita 110 110 140 130 "E:\\" texto 120 200 140 220 "GRANDE.BIN" \
-  texto 90 385 300 400 "montada como E:" negrita 610 505 640 520 "CD y DVD"
-miracap "el CD virtual sale en Mi equipo (en un marco de puntos, y lo dice: «CD virtual»), y su menú, «Expulsar»" cd18c negrita 160 270 180 290 "Unidad E:  PRUEBA_CD" \
-  texto 300 320 330 345 "Expulsar" rgb 112 282 4F6890 rgb 112 300 4F6890 nrgb 112 222 4F6890
+miracap "Mi equipo (el explorador) enseña el CD con su nombre y su letra, lo que tiene y que es de solo lectura" cd18a negrita 265 133 275 143 "HISPA (C:)" \
+  negrita 515 133 525 143 "PRUEBA_CD (D:)" texto 515 151 525 161 "670 K, ISO 9660" texto 515 167 525 177 "(de solo lectura)"
+miracap "abrir una .ISO la monta (E:) y entra en ella; el aviso de la bandeja es de los CD y DVD" cd18b texto 100 98 130 112 "E:\\" texto 200 130 700 400 "GRANDE.BIN" \
+  texto 10 474 700 490 "montada como E:" negrita 570 505 640 520 "CD y DVD"
+miracap "el CD virtual sale en Mi equipo («CD virtual», con lo que tiene), y su menú, «Expulsar»" cd18c negrita 265 195 275 205 "PRUEBA_CD (E:)" \
+  texto 265 213 275 223 "CD virtual: 670 K" texto 335 242 355 267 "Expulsar"
+miracap "y «Expulsar» la quita de Mi equipo" cd18d notexto 216 190 460 212 "(E:)" texto 10 474 700 490 "desmontada"
 mira "y «Expulsar» la desmonta" "cd: E: la imagen C:.DISCOS.PRUEBA\.ISO (sectores de 2048)$" "cd: E: imagen desmontada\.$" "escritorio: globo: Imagen desmontada: E:"
 fi   # la ISO de prueba
 else
@@ -3675,14 +3678,12 @@ if ! grep -q "excepción\|\*\*\*" $S; then ok "con todos esos, ni una excepción
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
 # 3. Naves (DirectDraw a pantalla completa, DirectInput) desde Mi equipo: se
 # juega; y el ejemplo DDRAW de FASM; y FASMW
-# (HISPA32, en el orden de la raíz del disco, como la enseña Mi equipo: «..» y lo demás)
-NH=$(mdir -b -i $V/d.img :: 2> /dev/null | grep -n "/HISPA32/*$" | cut -d: -f1)
-D=""; for _ in $(seq ${NH:-23}); do D="$D down"; done
-CAPTURAS=$G DISCO=$V/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 40" ":pausa 3" ":tecla ret" ":pausa 2" \
-  ":tecla$D" ":tecla ret" ":pausa 2" ":captura n0" ":tecla down down down down down down" ":tecla ret" ":pausa 9" ":captura n1" ":tecla spc" ":pausa 3" ":captura n2" \
+# (en el explorador: la dirección, C:\\HISPA32, y la N lleva a NAVES.EXE)
+CAPTURAS=$G DISCO=$V/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 40" ":pausa 3" ":tecla f4" ":escribe C:\\HISPA32" ":tecla ret" ":pausa 2" \
+  ":raton 600 440" ":captura n0" ":tecla n" ":tecla ret" ":pausa 9" ":captura n1" ":tecla spc" ":pausa 3" ":captura n2" \
   ":monitor sendkey left 1000" ":pausa 1" ":captura n3" ":monitor sendkey ctrl 200" ":pausa 0.3" ":captura n4" ":tecla esc" ":pausa 3" ":captura n5" > $V/naves.sal 2>&1
 S=$V/naves.sal
-miracap "Mi equipo ve los .EXE como programas y los abre (los corre WIN32.BIN)" n0 negrita 100 110 220 140 "C:\\HISPA32" texto 100 140 200 300 "NAVES.EXE"
+miracap "Mi equipo ve los .EXE como programas y los abre (los corre WIN32.BIN)" n0 texto 100 98 220 112 "C:\\HISPA32" texto 210 130 790 470 "NAVES.EXE"
 miracap "Naves: DirectDraw a pantalla completa (su modo, 320 x 240 a 8 bits, al doble y en el centro, sin la barra de tareas)" n1 \
   rgb 10 10 000000 rgb 790 590 000000 nrgb 40 585 37A53A 60
 miracap "Espacio (DirectInput): empieza la partida, con las naves enemigas" n2 rgb 10 10 000000 distinto 80 60 640 200 $G/n1.ppm

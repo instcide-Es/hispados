@@ -392,8 +392,28 @@ módulo UEquipo
 
     ; ---- las unidades ----
     función lee_unidades()
+        variable i, j: nat32
+        variable t: Info_unidad
         n_us := 0
         mientras n_us < MAX_UNIDADES y info_unidad(n_us, us[n_us]) hacer n_us := n_us + 1 fin
+        ; (CD) por la letra (C:, D:, E:...; los discos sin nada que leer, al final):
+        ; el lector de CD del IDE secundario, o una imagen montada, no se ponen delante
+        i := 1
+        mientras i < n_us hacer
+            j := i
+            mientras j > 0 y orden_letra(us[j - 1].letra) > orden_letra(us[j].letra) hacer
+                copiar_memoria(puntero(dirección(t)), puntero(dirección(us[j])), tamaño(Info_unidad))
+                copiar_memoria(puntero(dirección(us[j])), puntero(dirección(us[j - 1])), tamaño(Info_unidad))
+                copiar_memoria(puntero(dirección(us[j - 1])), puntero(dirección(t)), tamaño(Info_unidad))
+                j := j - 1
+            fin
+            i := i + 1
+        fin
+    fin
+
+    función orden_letra(l: byte): nat32
+        si l = 0 entonces devolver 1000 fin
+        devolver nat32(l)
     fin
 
     función clase_unidad(ref u: Info_unidad): nat32
@@ -548,7 +568,9 @@ módulo UEquipo
         celda(g, r, 0, dirección(it.largo[0]))
         según nat16(lugar)
             caso L_EQUIPO:
+                ; (CD) las unidades por su letra (C:, D:...), no por el nombre; la Papelera, al final
                 renglón(g, r).grupo := 0
+                si it.unidad >= 0 entonces renglón(g, r).grupo := orden_letra(us[it.unidad].letra) fin
                 si it.unidad >= 0 entonces
                     celda(g, r, 1, tipo_unidad(us[it.unidad]))
                     si us[it.unidad].letra <> 0 entonces
@@ -563,7 +585,7 @@ módulo UEquipo
                     renglón(g, r).id2 := us[it.unidad].libre_k
                 sino
                     celda(g, r, 1, "Lo borrado, por si hace falta")
-                    renglón(g, r).grupo := 1
+                    renglón(g, r).grupo := 2000
                 fin
             caso L_PAPELERA:
                 celda(g, r, 1, dirección(it.extra[0]))
@@ -1426,7 +1448,26 @@ módulo UEquipo
             si elegido entonces tinta := C_PAPEL fin
             icono(lz, x + 6, yy + 8, 40, it.clase, 0, 0)
             corto_en(x + 54, yy + 4, dirección(it.largo[0]), an - 58, tinta, cierto)
-            si it.unidad >= 0 y us[it.unidad].letra <> 0 entonces
+            si it.unidad >= 0 y us[it.unidad].letra <> 0 y (nat32(us[it.unidad].medio) = MEDIO_CD o nat32(us[it.unidad].medio) = MEDIO_IMAGEN) entonces
+                ; (CD) un lector o una imagen: lo que tiene, o que no tiene disco
+                si us[it.unidad].clase = 0 entonces
+                    si us[it.unidad].relleno[0] = 2 entonces
+                        corto_en(x + 54, yy + 22, "un CD de m\xA3sica", an - 58, tinta, falso)
+                    sino si us[it.unidad].relleno[0] = 3 entonces
+                        corto_en(x + 54, yy + 22, "un disco que no se lee", an - 58, tinta, falso)
+                    sino
+                        corto_en(x + 54, yy + 22, "sin disco", an - 58, tinta, falso)
+                    fin
+                sino
+                    texto_[0] := 0
+                    si nat32(us[it.unidad].medio) = MEDIO_IMAGEN entonces copiar(texto_, "CD virtual: ") fin
+                    tamaño_k(us[it.unidad].total_k, t)
+                    concatenar(texto_, t)
+                    si us[it.unidad].clase = 9 entonces concatenar(texto_, ", ISO 9660") fin
+                    corto_en(x + 54, yy + 22, texto_, an - 58, tinta, falso)
+                    corto_en(x + 54, yy + 38, "(de solo lectura)", an - 58, tinta, falso)
+                fin
+            sino si it.unidad >= 0 y us[it.unidad].letra <> 0 entonces
                 si us[it.unidad].libre_k <> 0xFFFFFFFF entonces
                     tamaño_k(us[it.unidad].libre_k, t)
                     d[0] := nat32(dirección(t[0]))
