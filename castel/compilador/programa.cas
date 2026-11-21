@@ -1092,13 +1092,6 @@ módulo Programa
         at_texto(mod_nombre[prog], t)
         s(t)
         sl(". NO editar a mano.")
-        si es_linux entonces
-            sl("; Ensamblar:  nasm -f bin ESTE.asm -o PROGRAMA")
-        sino
-            sl("; Ensamblar:  nasm -f bin ESTE.asm -o NUCLEO64.BIN")
-        fin
-        sl("; -----------------------------------------------------------------")
-        sl("cpu x64")
         s(l64_arranque())
         sl("    call F_principal")
         si f_tret(pr) = T_NADA entonces sl("    xor eax, eax") fin
@@ -1135,17 +1128,6 @@ módulo Programa
             i := i + 1
         fin
         s(l64_arranque_datos())
-        sl("    align 8, db 0")
-        sl("_datos_fin:")
-        sl("")
-        sl("; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----")
-        sl("_vacio:")
-        sl("    absolute _vacio")
-        sl("C_pila:")
-        s("    resb ")
-        s_nat(l64_pila())
-        s("\n")
-        sl("C_pila_fin:")
         m_ := 0
         mientras m_ < n_modulos hacer
             d := nb(mod_arbol[m_])
@@ -1404,7 +1386,7 @@ módulo Programa
                 en64 := es_linux o na(d) = a_núcleo64
                 plano := plano o en64
                 si en64 y no hay_64() entonces
-                    m("los modelos de 64 bits no están en el CASTEL de 16 bits: se compilan con CASTEL32 o CASTEL64")
+                    m("este CASTEL, el de 16 bits, no saca 64 bits: use CASTEL32 o CASTEL64")
                     falla(nlin(d), ncol(d))
                 fin
             fin

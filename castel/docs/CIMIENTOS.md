@@ -228,6 +228,17 @@ la elijo: hace el primer compilador abordable.
   Hispa-8086 y compila lo de 16 bits), pero **ningún límite del núcleo depende ya
   de él**. Y el compilador queda preparado para más partes de atrás: la de x86-64
   para Hispa-64 es la siguiente (CASTEL32.md §12).
+- **Fase 7 — Castel de 64 bits (CASTEL64):** *(hecha el 21/11/2026, CASTEL64.md).*
+  Una tercera parte de atrás, para x86-64 en modo largo, en los dos compiladores
+  (`Generador64` en ccastel.py, el módulo `Gen64` en el escrito en Castel) y en los dos
+  ensambladores (`bits 64`), con `nat64`/`ent64` y punteros de 8 octetos. Dos modelos:
+  `linux64` (un programa de Linux x86-64, para probarlo todo deprisa en el servidor) y
+  `núcleo64` (el núcleo de Hispa-64: multiboot, modo largo, paginación de cuatro
+  niveles). **CASTEL64**, los mismos fuentes compilados para Linux x86-64, se compila a
+  sí mismo hasta el punto fijo en 0,27 s y saca lo mismo que ccastel.py en todo lo de
+  16, 32 y 64 bits: el compilador cruzado de toda la familia. Y el primer ladrillo de
+  Hispa-64 (`nucleo64/hola.cas`) arranca en QEMU y con GRUB y saluda. Lo de 16 y 32
+  bits no cambia ni un octeto.
 
 Cada fase es un hito pequeño y comprobable, al estilo de cómo venimos haciendo Hispa-DOS.
 

@@ -131,8 +131,6 @@ l64 = [
     "",
     "    público constante N_APOYO_LINUX64 = %d" % len(LINUX64),
     "    público constante N_APOYO_NÚCLEO64 = %d" % len(NUCLEO64),
-    "    público constante PILA_LINUX64 = %d" % ccastel.PILA64['linux64'],
-    "    público constante PILA_NUCLEO64 = %d" % ccastel.PILA64['núcleo64'],
 ]
 for letra, tabla in (('L', LINUX64), ('N', NUCLEO64)):
     for i, (nombre, txt) in enumerate(tabla.items()):

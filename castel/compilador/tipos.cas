@@ -152,6 +152,12 @@ módulo Tipos
     ; -------------------------------------------------------------------------
     ;  Tipos escritos -> tipo
     ; -------------------------------------------------------------------------
+    ; [CASTEL64] «... es de 64 bits», y el error
+    función falla_64(lin: nat16, col: nat16)
+        m(" es de 64 bits (modelo linux64 o núcleo64)")
+        falla(lin, col)
+    fin
+
     público función resuelve(t: nat16): nat16
         variable r, base, c, nm, tt, off, off2, tipo2: nat16
         variable n: N64
@@ -161,8 +167,7 @@ módulo Tipos
                 si r = 0 entonces no_está("tipo desconocido", na(t), nlin(t), ncol(t)) fin
                 si (r = T_NAT64 o r = T_ENT64) y no en64 entonces
                     m_at(na(t))
-                    m(" es de 64 bits (modelo linux64 o núcleo64)")
-                    falla(nlin(t), ncol(t))
+                    falla_64(nlin(t), ncol(t))
                 fin
                 devolver r
             caso K_TPUNT:
@@ -906,11 +911,9 @@ módulo Tipos
         si plano entonces
             si i = I_INTERRUPCION o (i >= I_ACARREO y i <= I_REG_ES) entonces
                 m_at(nm)
-                si en64 entonces
-                    m("() es del modo real (BIOS y DOS): en 64 bits no está (se usa un bloque «ensamblador»)")
-                sino
-                    m("() es del modo real (BIOS y DOS): en 32 bits no está (se usa un bloque «ensamblador»)")
-                fin
+                m("() es del modo real (BIOS y DOS): en ")
+                si en64 entonces m_nat(64) sino m_nat(32) fin
+                m(" bits no está (se usa un bloque «ensamblador»)")
                 falla(nlin(e), ncol(e))
             fin
         fin
@@ -1033,8 +1036,8 @@ módulo Tipos
             caso I_NAT8, I_BYTE, I_NAT16, I_ENT16, I_NAT32, I_ENT32, I_NAT64, I_ENT64:
                 si (i = I_NAT64 o i = I_ENT64) y no en64 entonces
                     m_at(nm)
-                    m("() es de 64 bits (modelo linux64 o núcleo64)")
-                    falla(nlin(e), ncol(e))
+                    m("()")
+                    falla_64(nlin(e), ncol(e))
                 fin
                 args_simples(e, 1, 0)
                 a := arg(e, 0)

@@ -665,7 +665,7 @@ módulo Sent
         si es_var(a) entonces
             var(a, nlin(s), ncol(s), v)
             si v.por_ref entonces
-                l("[rbp+")
+                l(l64_t(T64_RBP_MAS))
                 l_nat(v.off)
                 l("]")
                 devolver
@@ -1584,7 +1584,7 @@ módulo Sent
             l64_expr64(e)
         sino
             l64_expr(e)
-            si ttam(td) = 4 y de64(tipo_de(e)) entonces em("mov eax, eax") fin
+            si ttam(td) = 4 y de64(tipo_de(e)) entonces em(l64_t(T64_MOV_EAX_EAX)) fin
         fin
         si hay_fijo entonces
             em4("mov [", fijo, "], ", reg)
@@ -1592,9 +1592,9 @@ módulo Sent
             l64_lugar(dest, lug)
             em4("mov [", lug, "], ", reg)
         sino
-            em("push rax")
+            em(l64_t(T64_PUSH_RAX))
             l64_lugar(dest, lug)
-            em("pop rax")
+            em(l64_t(T64_POP_RAX))
             em4("mov [", lug, "], ", reg)
         fin
     fin
@@ -1669,7 +1669,7 @@ módulo Sent
             l64_texto_lugar(r, tope)
             si ocho entonces
                 l64_expr64(na(s2))
-                em3("mov [", tope, "], rax")
+                em3("mov [", tope, l64_t(T64_DE_RAX))
             sino
                 l64_expr(na(s2))
                 em3("mov [", tope, "], eax")
@@ -1721,10 +1721,10 @@ módulo Sent
             em_n("cmp eax, ", v.bajo, "")
         sino si l64_cabe_i32(v) entonces
             n_texto(v, t)
-            em2("cmp rax, ", t)
+            em2(l64_t(T64_CMP_RAX), t)
         sino
-            em_n("mov ecx, ", v.bajo, "")
-            em("cmp rax, rcx")
+            em_n(l64_t(T64_MOV_ECX), v.bajo, "")
+            em(l64_t(T64_CMP_RAX_RCX))
         fin
     fin
 
@@ -1851,25 +1851,25 @@ módulo Sent
         et_nombre(t)
         si atiende entonces                     ; la llama el procesador: se guarda todo
             para i desde 0 hasta 14 hacer em2("push ", l64_registro(i)) fin
-            em("mov rbp, rsp")
-            si marco <> 0 entonces em_n("sub rsp, ", marco, "") fin
+            em(l64_t(T64_MOV_RBP_RSP))
+            si marco <> 0 entonces em_n(l64_t(T64_SUB_RSP), marco, "") fin
             em("cld")
         sino si con_marco entonces
-            em("push rbp")
-            em("mov rbp, rsp")
-            si marco <> 0 entonces em_n("sub rsp, ", marco, "") fin
+            em(l64_t(T64_PUSH_RBP))
+            em(l64_t(T64_MOV_RBP_RSP))
+            si marco <> 0 entonces em_n(l64_t(T64_SUB_RSP), marco, "") fin
         fin
         gen_bloque(cuerpo, cierto)
         si fin_usado entonces et(0) fin
         si atiende entonces
-            si marco <> 0 entonces em("mov rsp, rbp") fin
+            si marco <> 0 entonces em(l64_t(T64_MOV_RSP_RBP)) fin
             para i desde 0 hasta 14 hacer em2("pop ", l64_registro(14 - i)) fin
-            si nparams <> 0 entonces em("add rsp, 8") fin
-            em("iretq")
+            si nparams <> 0 entonces em(l64_t(T64_ADD_RSP_8)) fin
+            em(l64_t(T64_IRETQ))
         sino
             si con_marco entonces
-                si marco <> 0 entonces em("mov rsp, rbp") fin
-                em("pop rbp")
+                si marco <> 0 entonces em(l64_t(T64_MOV_RSP_RBP)) fin
+                em(l64_t(T64_POP_RBP))
             fin
             ini()
             l("ret")

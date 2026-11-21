@@ -568,6 +568,21 @@ Las cifras (QEMU sin aceleración, en el servidor de desarrollo):
 
 ## 12. El camino a x86-64 (Hispa-64)
 
+> **Hecho el 21/11/2026: ver [CASTEL64.md](CASTEL64.md).** Los puntos 1 a 4 de abajo
+> están hechos (y el 5, salvo las referencias de 32 bits en las tablas): `modelo
+> linux64` y `modelo núcleo64`, `nat64`/`ent64`, `Generador64` en ccastel.py y el
+> módulo `Gen64` en el compilador escrito en Castel, `bits 64` en los dos
+> ensambladores, y **CASTEL64**, un programa de Linux x86-64 que se compila a sí mismo
+> hasta el punto fijo y saca lo mismo que ccastel.py en todos los programas de 16, 32
+> y 64 bits. Lo que se afinó del plan: el primer destino no fue el núcleo sino
+> **Linux x86-64** (así se prueba todo deprisa, sin emular, antes de tener Hispa-64);
+> el núcleo (`núcleo64`) lleva multiboot y multiboot2 con su paso de 32 a 64 bits en
+> el arranque; las cuentas son de 32 bits salvo que haya uno de 64 (como LP64), y
+> por eso los mismos fuentes del compilador corren en 64 sin tocarlos; y `Gen64` va
+> en un módulo propio (con uno vacío para el CASTEL de 16 bits, que no tiene sitio
+> para sus textos). CASTEL32 y CASTELW también sacan ya 64 bits. Lo que sigue es lo
+> que se escribió el 20/11, tal cual.
+
 El compilador ya está partido como hace falta: **una parte de delante** (léxico,
 gramática, tipos, lo declarado: `lexico`, `sintactico`, `tipos`, `tablas`,
 `cuentas`, `base`) que no sabe nada de la máquina, y **partes de atrás** que

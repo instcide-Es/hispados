@@ -59,6 +59,28 @@ módulo Gen64
         devolver n_entre(c, -2147483647 - 1, 0x7FFFFFFF)
     fin
 
+    ; los textos de 64 bits que usa Sent (aquí, para que no vayan en el CASTEL de 16 bits)
+    público constante T64_PUSH_RBP = 0
+    público constante T64_MOV_RBP_RSP = 1
+    público constante T64_SUB_RSP = 2
+    público constante T64_MOV_RSP_RBP = 3
+    público constante T64_POP_RBP = 4
+    público constante T64_IRETQ = 5
+    público constante T64_ADD_RSP_8 = 6
+    público constante T64_PUSH_RAX = 7
+    público constante T64_POP_RAX = 8
+    público constante T64_MOV_EAX_EAX = 9
+    público constante T64_RBP_MAS = 10
+    público constante T64_DE_RAX = 11
+    público constante T64_CMP_RAX = 12
+    público constante T64_CMP_RAX_RCX = 13
+    público constante T64_MOV_ECX = 14
+    variable textos64: arreglo [15] de puntero a byte = ("push rbp", "mov rbp, rsp", "sub rsp, ", "mov rsp, rbp", "pop rbp", "iretq", "add rsp, 8", "push rax", "pop rax", "mov eax, eax", "[rbp+", "], rax", "cmp rax, ", "cmp rax, rcx", "mov ecx, ")
+
+    público función l64_t(i: byte): puntero a byte
+        devolver textos64[i]
+    fin
+
     público función l64_cabe_i32(ref c: N64): bool
         devolver cabe_i32(c)
     fin
@@ -1509,10 +1531,5 @@ módulo Gen64
         devolver ARRANQUE_NUCLEO64_DATOS
     fin
 
-    ; lo que ocupa la pila (en lo que empieza a cero)
-    público función l64_pila(): nat32
-        si es_linux entonces devolver PILA_LINUX64 fin
-        devolver PILA_NUCLEO64
-    fin
 
 fin Gen64.

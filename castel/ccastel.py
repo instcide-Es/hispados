@@ -5151,12 +5151,11 @@ class Generador64(Generador32):
         def vivos(lista):
             return [ln for t in lista if t.vivo for ln in t.lineas]
         bss = vivos(self.bss)
+        # (lo que va delante del programa, desde la tercera línea, y lo que va
+        # detrás de los datos, hasta las variables sin valor inicial: ARRANQUE64)
         sal = [
             '; -----------------------------------------------------------------',
             f'; Generado por ccastel desde el módulo {prog.nombre}. NO editar a mano.',
-            '; Ensamblar:  nasm -f bin ESTE.asm -o ' + {'linux64': 'PROGRAMA', 'núcleo64': 'NUCLEO64.BIN'}[self.modelo],
-            '; -----------------------------------------------------------------',
-            'cpu x64',
         ]
         sal += ARRANQUE64[self.modelo].strip('\n').split('\n')
         sal.append('    call F_principal')
@@ -5166,18 +5165,14 @@ class Generador64(Generador32):
         sal += vivos(codigo) + vivos(apoyo)
         sal += ['', '; ---- datos ----'] + vivos(self.datos)
         sal += ARRANQUE64[self.modelo + '_datos'].strip('\n').split('\n')
-        sal += ['    align 8, db 0', '_datos_fin:']
-        sal += ['', '; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----',
-                '_vacio:', '    absolute _vacio']
-        sal += ['C_pila:', f"    resb {PILA64[self.modelo]}", 'C_pila_fin:']
         sal += bss + ['_vacio_fin:']
         if '_fin_programa' in palabras:
             sal.append('_fin_programa:')        # el primer octeto libre detrás del programa
         return '\n'.join(limpia(sal)) + '\n'
 
 
-# [CASTEL64] la pila de cada modelo (en lo que empieza a cero, detrás de las variables)
-PILA64 = {'linux64': 16777216, 'núcleo64': 65536}
+# [CASTEL64] (la pila de cada modelo va en lo que empieza a cero, delante de
+# las variables: 16 MB en linux64 y 64 K en núcleo64, en ARRANQUE64)
 
 # [CASTEL64] las rutinas de apoyo de 64 bits: los números, en RAX
 APOYO64 = {
@@ -5373,10 +5368,14 @@ castel_salir:
 """,
 }
 
-# [CASTEL64] el arranque de 64 bits: lo que va delante del programa (hasta
-# llamar a principal) y lo que va detrás de los datos
+# [CASTEL64] el arranque de 64 bits: lo que va delante del programa (desde la
+# tercera línea hasta llamar a principal) y lo que va detrás de los datos
+# (hasta las variables sin valor inicial, que llevan delante la pila)
 ARRANQUE64 = {
     'linux64': r"""
+; Ensamblar:  nasm -f bin ESTE.asm -o PROGRAMA
+; -----------------------------------------------------------------
+cpu x64
 bits 64
 org 0x400000
 ; un programa de Linux para x86-64: un ELF estático, con las cabeceras a mano
@@ -5407,8 +5406,20 @@ C_arranque:
     align 8, db 0
 C_pila_linux:
     dq 0
+    align 8, db 0
+_datos_fin:
+
+; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----
+_vacio:
+    absolute _vacio
+C_pila:
+    resb 16777216
+C_pila_fin:
 """,
     'núcleo64': r"""
+; Ensamblar:  nasm -f bin ESTE.asm -o NUCLEO64.BIN
+; -----------------------------------------------------------------
+cpu x64
 bits 32
 org 0x100000
 ; un núcleo de 64 bits: lo carga QEMU con -kernel (multiboot) o GRUB
@@ -5535,6 +5546,15 @@ C_largo:
     out dx, al
 """,
     'núcleo64_datos': r"""
+    align 8, db 0
+_datos_fin:
+
+; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----
+_vacio:
+    absolute _vacio
+C_pila:
+    resb 65536
+C_pila_fin:
 """,
 }
 

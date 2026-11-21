@@ -113,8 +113,24 @@ módulo Gen64
         devolver nulo
     fin
 
-    público función l64_pila(): nat32
-        devolver 0
+    público constante T64_PUSH_RBP = 0
+    público constante T64_MOV_RBP_RSP = 1
+    público constante T64_SUB_RSP = 2
+    público constante T64_MOV_RSP_RBP = 3
+    público constante T64_POP_RBP = 4
+    público constante T64_IRETQ = 5
+    público constante T64_ADD_RSP_8 = 6
+    público constante T64_PUSH_RAX = 7
+    público constante T64_POP_RAX = 8
+    público constante T64_MOV_EAX_EAX = 9
+    público constante T64_RBP_MAS = 10
+    público constante T64_DE_RAX = 11
+    público constante T64_CMP_RAX = 12
+    público constante T64_CMP_RAX_RCX = 13
+    público constante T64_MOV_ECX = 14
+
+    público función l64_t(i: byte): puntero a byte
+        devolver nulo
     fin
 
 fin Gen64.
