@@ -3472,10 +3472,10 @@ if $AQUI/nucleo32/disco.sh $R/d.img 16 red tls ssh > $R/disco.txt 2>&1 && mmd -i
 cp $R/d.img $R/a.img
 ( for _ in $(seq 120); do sleep 1; timeout 2 bash -c "</dev/tcp/127.0.0.1/$PH" 2> /dev/null && break; done
   sleep 20
-  timeout 60 ssh -p $PH -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o BatchMode=yes -i $R/clave prueba@127.0.0.1 \
+  timeout 60 ssh -p $PH -o StrictHostKeyChecking=no -o UserKnownHostsFile=$R/conocidos -o UpdateHostKeys=no -o IdentitiesOnly=yes -o BatchMode=yes -i $R/clave prueba@127.0.0.1 \
     "echo hola desde hispa" < /dev/null > $R/orden.txt 2>&1; echo "código $?" >> $R/orden.txt
   printf 'echo dentro de la consola\rver\rsalir\r' > $R/teclas.txt
-  setsid timeout 60 ssh -tt -p $PH -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o BatchMode=yes -i $R/clave \
+  setsid timeout 60 ssh -tt -p $PH -o StrictHostKeyChecking=no -o UserKnownHostsFile=$R/conocidos -o UpdateHostKeys=no -o IdentitiesOnly=yes -o BatchMode=yes -i $R/clave \
     prueba@127.0.0.1 < $R/teclas.txt > $R/tty.txt 2>&1
   echo "código $?" >> $R/tty.txt ) &
 FUERA=$!
