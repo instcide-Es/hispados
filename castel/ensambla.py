@@ -904,7 +904,7 @@ class Ensamblador:
             n += 1
             if not self.cambio:
                 break
-            if n > 200:
+            if n > 1000:                         # (el núcleo de la 0.8.4 pide unas 300: lo que se mueve avanza poco a poco)
                 raise ErrorEns("los saltos no se asientan")
         self.final = True
         self.pasada()

@@ -20,7 +20,7 @@
 ; =============================================================================
 módulo Fat
 
-    importar Discos, Tareas, Mem32, Fecha
+    importar Discos, Tareas, Mem32, Fecha, Iso
 
     ; ---- lo que devuelven las funciones cuando no puede ser ----
     público constante NO_HAY = 0xFFFFFFFF       ; no existe ese archivo
@@ -123,6 +123,7 @@ módulo Fat
         ent_sector, ent_despl: nat32            ; dónde está su entrada: el sector (0: la raíz) y dentro de él
         vol: nat32                              ; el volumen donde está
         perdido: bool                           ; su volumen se ha ido: todo da MAL hasta que se cierre
+        iso: bool                               ; (CD) es de un volumen ISO 9660 (iso.cas): primero, su sector; índice, lo que mide la carpeta
     fin
 
     ; lo que se encuentra al recorrer una carpeta
@@ -155,6 +156,7 @@ módulo Fat
         pista: nat32
         info_sucio: bool
         etiqueta: arreglo [12] de byte          ; el nombre que le puso quien lo formateó
+        iso: bool                               ; (CD) es un CD o DVD (ISO 9660): lo lee iso.cas (clase 9660)
     fin
     público variable volúmenes: arreglo [VOLÚMENES] de Volumen
     variable en_uso: nat32 = 0xFFFFFFFF         ; el volumen que está en uso (NINGUNO: ninguno)
@@ -1079,6 +1081,7 @@ módulo Fat
         si v >= VOLÚMENES entonces devolver SIN_DISCO fin
         si no volúmenes[v].montado entonces devolver SIN_DISCO fin
         si modo > PARA_AÑADIR entonces devolver MAL fin
+        si volúmenes[v].iso entonces devolver abre_en_iso(v, ruta, modo) fin    ; (CD)
         ; sin permiso para escribir en el disco (ata.cas), todo es de solo lectura
         si modo <> PARA_LEER y no se_puede_escribir(volúmenes[v].disco) entonces devolver PROTEGIDO fin
         tomar(cerrojo)
@@ -1093,6 +1096,7 @@ módulo Fat
                 serie := serie + 1
                 abiertos[i].serie := serie
                 abiertos[i].perdido := falso
+                abiertos[i].iso := falso
                 abiertos[i].usado := cierto
                 abiertos[i].dueño := actual.id
                 abiertos[i].vol := v
@@ -1110,6 +1114,8 @@ módulo Fat
         tomar(cerrojo)
         si no vale(m) o abiertos[m].carpeta entonces
             r := MAL
+        sino si abiertos[m].iso entonces
+            r := lee_en_iso(abiertos[m], destino, n)            ; (CD)
         sino
             elige(abiertos[m].vol)
             fallo := falso
@@ -1236,6 +1242,8 @@ módulo Fat
         tomar(cerrojo)
         si no vale(m) o no abiertos[m].carpeta entonces
             r := MAL
+        sino si abiertos[m].iso entonces
+            r := entrada_iso(abiertos[m].vol, abiertos[m].primero, abiertos[m].índice, abiertos[m].posición, puntero(nat32(e)), nombre_largo, cabe)  ; (CD)
         sino
             elige(abiertos[m].vol)
             fallo := falso
@@ -1243,12 +1251,14 @@ módulo Fat
             si siguiente_entrada(abiertos[m], h) entonces
                 de_once(dirección(h.c.nombre[0]), dirección(e.nombre[0]))
                 e.atributos := h.c.atributos
-                e.reservado := 0
+                ; (explorador) en lo que sobraba: la fecha del último acceso y
+                ; la fecha y la hora en que se hizo (abajo la fecha, arriba la hora)
+                e.reservado := h.c.fecha_acceso
                 e.tamaño := h.c.tamaño
                 e.fecha := h.c.fecha
                 e.hora := h.c.hora
                 e.cluster := cluster_de(h.c)
-                e.libre := 0
+                e.libre := nat32(h.c.fecha_alta) ob (nat32(h.c.hora_alta) << 16)
                 si nombre_largo <> nulo y cabe > 0 entonces
                     i := 0
                     si largo_hay entonces
@@ -1431,7 +1441,25 @@ módulo Fat
                     si h.lfn < h.pos entonces tacha(d, h.lfn, h.pos - 32) fin
                 fin
             sino si h.c.atributos yb CARPETA <> 0 entonces
-                r := ES_CARPETA                         ; una carpeta no se cambia de sitio (su «..»)
+                ; (explorador) una carpeta, a otra: la entrada nueva allí, la
+                ; vieja tachada y su «..», que apunte a la carpeta nueva. No
+                ; dentro de sí misma (ni de una suya: lo mira quien lo pide)
+                si cluster_de(h.c) = d2.primero entonces
+                    r := NOMBRE_MALO                 ; (dentro de sí misma)
+                sino
+                    copiar_memoria(puntero(dirección(h2.c)), puntero(dirección(h.c)), 32)
+                    r := nueva_entrada(d2, once, h.c.atributos, cluster_de(h.c), h2)
+                    si r = 0 entonces
+                        si trae(h2.sector) entonces
+                            c := puntero(dirección(buf[h2.despl]))
+                            c.fecha := h.c.fecha
+                            c.hora := h.c.hora
+                            guarda()
+                        fin
+                        tacha(d, h.lfn, h.pos)
+                        pon_puntos(cluster_de(h.c), d2)
+                    fin
+                fin
             sino
                 ; a otra carpeta: la entrada nueva allí, y la vieja, tachada
                 copiar_memoria(puntero(dirección(h2.c)), puntero(dirección(h.c)), 32)
@@ -1449,6 +1477,59 @@ módulo Fat
             fin
             asienta(cierto)
             si r = 0 y fallo entonces r := MAL fin
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; (explorador) el «..» de la carpeta que empieza en el cluster c, que
+    ; apunte a la carpeta d2 (adonde se ha llevado)
+    función pon_puntos(c: nat32, ref d2: Abierto)
+        variable padre: nat32
+        variable e: puntero a Cruda
+        padre := d2.primero
+        si d2.fija o (clase = 32 y d2.primero = raíz_cluster) entonces padre := 0 fin
+        si trae(sector_de_cluster(c)) entonces
+            e := puntero(dirección(buf[32]))
+            si e.nombre[0] = '.' y e.nombre[1] = '.' entonces
+                e.cluster_bajo := padre
+                si clase = 32 entonces e.cluster_alto := padre >> 16 fin
+                guarda()
+            fin
+        fin
+    fin
+
+    ; (explorador) los atributos de un archivo o una carpeta: con «nuevos» =
+    ; 0xFFFFFFFF solo se leen; si no, se ponen los de solo lectura, oculto,
+    ; de sistema y archivo (0x27: los de carpeta y volumen no se tocan). Da
+    ; los que quedan, o un error.
+    público función poner_atributos(v: nat32, ruta: puntero a byte, nuevos: nat32): nat32
+        variable d: Abierto
+        variable h: Hallazgo
+        variable nombre: puntero a byte
+        variable n, r: nat32
+        variable c: puntero a Cruda
+        si v >= VOLÚMENES entonces devolver SIN_DISCO fin
+        si no volúmenes[v].montado entonces devolver SIN_DISCO fin
+        si nuevos <> 0xFFFFFFFF y no se_puede_escribir(volúmenes[v].disco) entonces devolver PROTEGIDO fin
+        tomar(cerrojo)
+        elige(v)
+        r := camina(ruta, d, nombre, n)
+        si r = ES_RAÍZ entonces r := PROTEGIDO fin
+        si r = 0 y no busca_en(d, nombre, n, h) entonces
+            r := NO_HAY
+            si fallo entonces r := MAL fin
+        fin
+        si r = 0 entonces
+            r := h.c.atributos
+            si nuevos <> 0xFFFFFFFF y trae(h.sector) entonces
+                c := puntero(dirección(buf[h.despl]))
+                c.atributos := (c.atributos yb 0xD8) ob byte(nuevos yb 0x27)
+                r := c.atributos
+                guarda()
+                asienta(cierto)
+            fin
+            si fallo entonces r := MAL fin
         fin
         soltar(cerrojo)
         devolver r
@@ -1570,6 +1651,7 @@ módulo Fat
         variable n: nat32
         si v >= VOLÚMENES entonces devolver NINGUNO fin
         si no volúmenes[v].montado entonces devolver NINGUNO fin
+        si volúmenes[v].iso entonces devolver 0 fin             ; (CD)
         tomar(cerrojo)
         elige(v)
         fallo := falso
@@ -1599,6 +1681,7 @@ módulo Fat
         variable n: nat32
         si v >= VOLÚMENES entonces devolver NINGUNO fin
         si no volúmenes[v].montado entonces devolver NINGUNO fin
+        si volúmenes[v].iso entonces devolver 0 fin             ; (CD)
         tomar(cerrojo)
         elige(v)
         fallo := falso
@@ -1689,6 +1772,7 @@ módulo Fat
             fin
         fin
         volúmenes[v].montado := montado
+        volúmenes[v].iso := falso
         volúmenes[v].clase := clase
         volúmenes[v].disco := disco
         volúmenes[v].base := base
@@ -1729,7 +1813,8 @@ módulo Fat
         si v >= VOLÚMENES entonces devolver 0 fin
         tomar(cerrojo)
         n := 0
-        si volúmenes[v].montado entonces
+        si volúmenes[v].montado y volúmenes[v].iso entonces n := abiertos_en(v) fin      ; (CD)
+        si volúmenes[v].montado y no volúmenes[v].iso entonces
             elige(v)
             fallo := falso
             para i desde 0 hasta MAX_ABIERTOS - 1 hacer
@@ -1755,6 +1840,8 @@ módulo Fat
             montado := falso
             en_uso := NINGUNO
         fin
+        si volúmenes[v].iso entonces olvida_iso(v) fin                ; (CD)
+        volúmenes[v].iso := falso
         volúmenes[v].montado := falso
         volúmenes[v].info_sucio := falso
         para i desde 0 hasta MAX_ABIERTOS - 1 hacer
@@ -1767,6 +1854,145 @@ módulo Fat
         i := 0
         mientras a[i] <> 0 y a[i] = b[i] hacer i := i + 1 fin
         devolver a[i] = b[i]
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  (CD) Los volúmenes ISO 9660 de los CD y DVD (los lee iso.cas)
+    ; -------------------------------------------------------------------------
+    ; mira si en el disco d (un CD o DVD, o su imagen) hay un volumen ISO
+    ; 9660; si lo hay, queda montado como el volumen v
+    público función montar_iso(v: nat32, d: nat32): bool
+        variable n: nat32
+        si v >= VOLÚMENES entonces devolver falso fin
+        tomar(cerrojo)
+        si en_uso = v entonces
+            fat_guarda()
+            en_uso := NINGUNO
+        fin
+        n := monta_iso(v, d, dirección(volúmenes[v].etiqueta[0]))
+        volúmenes[v].montado := n <> 0
+        volúmenes[v].iso := n <> 0
+        volúmenes[v].clase := 9660
+        volúmenes[v].disco := d
+        volúmenes[v].base := 0
+        volúmenes[v].sectores_cluster := 4                      ; (de 512: un sector de 2048)
+        volúmenes[v].clusters := n
+        volúmenes[v].total := n * 4
+        volúmenes[v].libres := 0
+        volúmenes[v].info_sucio := falso
+        soltar(cerrojo)
+        devolver n <> 0
+    fin
+
+    ; abre en el volumen ISO v (con «abrir_archivo»)
+    función abre_en_iso(v: nat32, ruta: puntero a byte, modo: nat32): nat32
+        variable i, r, inicio, tam: nat32
+        variable carpeta: bool
+        si modo <> PARA_LEER entonces devolver PROTEGIDO fin
+        tomar(cerrojo)
+        i := 0
+        mientras i < MAX_ABIERTOS y abiertos[i].usado hacer i := i + 1 fin
+        si i = MAX_ABIERTOS entonces
+            r := LLENO
+        sino
+            r := abre_iso(v, ruta, inicio, tam, carpeta)
+            si r = 0 entonces
+                abiertos[i].carpeta := carpeta
+                abiertos[i].fija := falso
+                abiertos[i].escribe := falso
+                abiertos[i].cambiado := falso
+                abiertos[i].atributos := SOLO_LECTURA
+                si carpeta entonces abiertos[i].atributos := SOLO_LECTURA ob CARPETA fin
+                abiertos[i].primero := inicio
+                abiertos[i].índice := tam
+                abiertos[i].tamaño := tam
+                si carpeta entonces abiertos[i].tamaño := 0 fin
+                abiertos[i].posición := 0
+                abiertos[i].cluster := 0
+                abiertos[i].ent_sector := 0
+                abiertos[i].ent_despl := 0
+                serie := serie + 1
+                abiertos[i].serie := serie
+                abiertos[i].perdido := falso
+                abiertos[i].iso := cierto
+                abiertos[i].usado := cierto
+                abiertos[i].dueño := actual.id
+                abiertos[i].vol := v
+                r := i
+            fin
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; lee del archivo a (de un volumen ISO), con el cerrojo tomado
+    función lee_en_iso(ref a: Abierto, destino: puntero a byte, n: nat32): nat32
+        variable r: nat32
+        r := lee_iso(a.vol, a.primero, a.tamaño, a.posición, destino, n)
+        si r < PRIMER_ERROR entonces a.posición := a.posición + r fin
+        devolver r
+    fin
+
+    ; (las imágenes de disco que se montan) dónde está en su disco el archivo
+    ; de esa ruta: sus trozos seguidos (hasta «cabe»: el sector de su disco
+    ; donde empieza cada uno y cuántos sectores tiene), cuánto mide, en qué
+    ; disco está y de cuánto son sus sectores (512 o 2048). Da 0, o por qué
+    ; no (LLENO: tiene más trozos de los que caben).
+    público función trozos_archivo(v: nat32, ruta: puntero a byte, inicios: puntero a nat32, cuentas: puntero a nat32, cabe: nat32, ref n: nat32, ref tam: nat32, ref en_disco: nat32, ref sector_de_disco: nat32): nat32
+        variable a: Abierto
+        variable r, c, s, falta, inicio: nat32
+        variable carpeta: bool
+        n := 0
+        si v >= VOLÚMENES entonces devolver SIN_DISCO fin
+        si no volúmenes[v].montado entonces devolver SIN_DISCO fin
+        tomar(cerrojo)
+        si volúmenes[v].iso entonces
+            r := abre_iso(v, ruta, inicio, tam, carpeta)
+            si r = 0 y carpeta entonces r := ES_CARPETA fin
+            si r = 0 entonces
+                inicios[0] := inicio
+                cuentas[0] := (tam + 2047) div 2048
+                n := 1
+                en_disco := volúmenes[v].disco
+                sector_de_disco := 2048
+            fin
+            soltar(cerrojo)
+            devolver r
+        fin
+        elige(v)
+        fallo := falso
+        r := busca(ruta, a)
+        si r = 0 y a.carpeta entonces r := ES_CARPETA fin
+        si r = 0 entonces
+            tam := a.tamaño
+            en_disco := disco
+            sector_de_disco := SECTOR
+            c := a.primero
+            falta := (tam + sectores_cluster * SECTOR - 1) div (sectores_cluster * SECTOR)
+            mientras falta > 0 y r = 0 hacer
+                si c < 2 o c >= clusters + 2 entonces
+                    r := MAL
+                sino
+                    s := base + sector_de_cluster(c)
+                    si n > 0 y inicios[n - 1] + cuentas[n - 1] = s entonces
+                        cuentas[n - 1] := cuentas[n - 1] + sectores_cluster
+                    sino si n >= cabe entonces
+                        r := LLENO
+                    sino
+                        inicios[n] := s
+                        cuentas[n] := sectores_cluster
+                        n := n + 1
+                    fin
+                    falta := falta - 1
+                    si falta > 0 entonces
+                        c := siguiente(c)
+                        si fallo entonces r := MAL fin
+                    fin
+                fin
+            fin
+        fin
+        soltar(cerrojo)
+        devolver r
     fin
 
 fin Fat.

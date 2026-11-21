@@ -125,6 +125,12 @@ módulo Emergente
     fin
 
     ; cierra el menú que haya abierto, sin elegir nada
+    ; (explorador) las flechas a los lados en un menú de una barra de menús
+    ; (la marca CON_FLECHAS en su etiqueta): se cierra con una de estas
+    constante CON_FLECHAS = 0x40000000
+    constante A_LA_IZQUIERDA = 0xFFFFFFFE
+    constante A_LA_DERECHA = 0xFFFFFFFD
+
     público función cerrar_emergente()
         tomar(cerrojo)
         cierra(SIN_ELEGIR)
@@ -256,6 +262,9 @@ módulo Emergente
                         anda(-1)
                     sino si e.a = '\n' y se_puede(elegida) entonces
                         cierra(nat32(elegida))
+                    sino si (e.a = TECLA_IZQUIERDA o e.a = TECLA_DERECHA) y destino <> 0 y etiqueta yb CON_FLECHAS <> 0 entonces
+                        ; (explorador) en una barra de menús que lo pide: al menú de al lado
+                        si e.a = TECLA_IZQUIERDA entonces cierra(A_LA_IZQUIERDA) sino cierra(A_LA_DERECHA) fin
                     fin
             fin
         fin

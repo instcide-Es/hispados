@@ -10,16 +10,17 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] **CD y DVD** (ATAPI por IDE, SATA y USB; ISO 9660 + Joliet; meter y sacar en marcha) y **montar imágenes .ISO como CD virtual** — rama pentium-cd
 - [ ] **Controles de ventana completos** (pestañas, rejillas con columnas, barra de herramientas, recuadros, fechas, listas desplegables) y ClicGest 0.2 — rama controles-erp
 - [ ] **Disco SATA del Toshiba NB250** (ICH7) — rama pentium-sata, a falta de la prueba de Carlos
-- [ ] **Explorador de archivos** y **dock** — rama pentium-explorador
-- [ ] **Programas de Windows y DirectX** (HW32 de Hispa-486 llevado a Pentium) — rama pentium-win32
-- [x] ~~**Antivirus «Escudo»** (pedido por el presidente de la asociación): motor propio con las firmas de ClamAV, la ventana, la cuarentena, «¿Revisar la memoria?» al conectar una memoria USB o un CD, las descargas del Navegador, el cortafuegos (lo que escucha) y las firmas por Internet desde actualiza.hispados.es~~ — rama pentium-escudo (21/11: ESCUDO.BIN; falta el gancho de WIN32.BIN cuando entre la rama, y medir con las bases de verdad)
+- [x] ~~**Explorador de archivos** y **dock** — rama pentium-explorador~~ (hecho el 21/11: docs/PENTIUM.md, «El explorador de archivos» y «El dock»)
+- [x] ~~**Programas de Windows y DirectX** (HW32 de Hispa-486 llevado a Pentium) — rama pentium-win32~~ (21/11/2026: [WIN32.md](WIN32.md))
+- [x] ~~**Antivirus «Escudo»** (pedido por el presidente de la asociación): motor propio con las firmas de ClamAV, la ventana, la cuarentena, «¿Revisar la memoria?» al conectar una memoria USB o un CD, las descargas del Navegador y las firmas por Internet desde actualiza.hispados.es~~ — rama pentium-escudo (21/11: ESCUDO.BIN y las firmas en tres paquetes, medidas con las bases de verdad)
+- [ ] **Cortafuegos de Escudo** («si se llama Escudo, añádele un cortafuegos», Carlos 21/11): nada entra si no lo pide el equipo, reglas por puerto y red, avisar cuando un programa quiera escuchar — rama pentium-escudo
 - [x] ~~**Administrador de dispositivos** (PCI, USB, ACPI: qué hay, qué controlador lo lleva, recursos y estado)~~ — rama pentium-dispositivos (21/11: DISPOSIT.BIN y la llamada 155; informe en X:\DISPOSIT.TXT)
 
 ## El escritorio
+- [x] ~~Explorador de archivos: árbol de carpetas, vistas (iconos, lista, detalles), copiar/cortar/pegar, arrastrar y soltar, papelera, buscar, propiedades, abrir con…, miniaturas de imágenes~~ (21/11; falta escribir nombres largos)
+- [x] ~~Dock: barra de lanzamiento con los programas favoritos y los abiertos, que se pueda fijar y quitar~~ (21/11)
 - [ ] **Menú Inicio**: «Todos los programas» con todo lo instalado (también lo de los paquetes), y «Apagar equipo» siempre a la vista aunque haya muchos programas (pedido de Carlos 21/11)
 - [ ] **Rueda del ratón en todo el entorno**: menús, listas y rejillas, Explorador, Bloc de notas, Consola, cuadros, ClicGest (pedido de Carlos 21/11)
-- [ ] Explorador de archivos: árbol de carpetas, vistas (iconos, lista, detalles), copiar/cortar/pegar, arrastrar y soltar, papelera, buscar, propiedades, abrir con…, miniaturas de imágenes
-- [ ] Dock: barra de lanzamiento con los programas favoritos y los abiertos, que se pueda fijar y quitar
 - [ ] Barra de tareas: agrupar ventanas, vista previa, bandeja con más iconos (sonido, Wi-Fi)
 - [ ] Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido, ratón, teclado, red y Wi-Fi, energía, usuarios, programas (hecho: actualizaciones)
 - [ ] Temas y fondo de escritorio; letras TrueType del sistema; protector de pantalla
@@ -33,14 +34,14 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] Suspender e hibernar (ACPI S3/S4)
 - [ ] Impresoras (USB y de red)
 - [ ] Compartir carpetas en red (SMB) y FTP
-- [ ] **Tailscale** (WireGuard + su red privada: cada equipo localizado por su nombre) y **SSH** (entrar en la terminal de Hispa-Pentium desde otro equipo y desde él en los demás) — rama pentium-tailscale
+- [x] ~~**Tailscale** (WireGuard + su red privada: cada equipo localizado por su nombre) y **SSH** (entrar en la terminal de Hispa-Pentium desde otro equipo y desde él en los demás)~~ — rama pentium-tailscale (21/11; lo directo por UDP, más adelante: docs/PENTIUM.md §14 quinquies)
 - [ ] Más tarjetas de red y controladoras (las que vaya trayendo el taller)
 - [ ] Escudo: RAR y UPX por dentro, el interior de los PDF, revisar en segundo plano, que la red diga qué puertos escucha
 - [ ] NTP: la hora por Internet (y quitar el riesgo de la hora sin cifrar de TLS)
 - [ ] TLS 1.3 y descompresión gzip
 
 ## Programas
-- [ ] Programas de Windows de 32 bits (cargador PE) y **DirectX** (DirectDraw, DirectSound, DirectInput), como en Hispa-486
+- [x] ~~Programas de Windows de 32 bits (cargador PE) y **DirectX** (DirectDraw, DirectSound, DirectInput), como en Hispa-486~~ (WIN32.BIN: NASM, TCC, FASMW, Naves; [WIN32.md](WIN32.md)). Queda: hilos de verdad, SEH, Direct3D, el sonido de DirectSound
 - [ ] Reproductor de música y vídeo (MP3, OGG, WAV; vídeo sencillo)
 - [ ] Visor de imágenes y Pintura
 - [ ] Compresor ZIP

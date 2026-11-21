@@ -78,6 +78,8 @@ cp $W/paq/*.HPQ $W/paq/CATALOGO.TXT $W/m/PAQUETES/
 cp $W/of/HVPRUN.BIN $W/m/
 mkdir -p $W/m/OFICINA
 cp $W/of/*.HVP $W/of/*.DAT $W/m/OFICINA/
+# [WIN32] las DLL de los programas de Windows y sus ejemplos
+cp -r $W/w32/WIN32 $W/w32/HISPA32 $W/m/
 # [HISPA-SNES] el emulador de la consola de 16 bits (docs/HISPASNES.md: un
 # programa de Hispa Ventanas, como la oficina) en \JUEGOS, con PRUEBA.SFC, la
 # ROM nuestra: se abre desde Mi equipo con HVPRUN (solo en la memoria USB)
@@ -91,17 +93,45 @@ mkdir -p $W/m/boot/grub
 set timeout=8
 set default=0
 insmod all_video
+# [EDID] la medida elegida en Configuración (\PANTALLA.ENV, la escribe el
+# escritorio): la usa la primera entrada. prueba=1, se va a probar; 2, se esta
+# probando (si se vuelve a arrancar sin darla por buena, vuelve la de antes)
+set modo=
+if [ -f /PANTALLA.ENV ]; then
+  load_env -f /PANTALLA.ENV pantalla antes prueba
+  if [ "$prueba" = 2 ]; then
+    set pantalla="$antes"
+    set antes=
+    set prueba=0
+    save_env -f /PANTALLA.ENV pantalla antes prueba
+  elif [ "$prueba" = 1 ]; then
+    set prueba=2
+    save_env -f /PANTALLA.ENV prueba
+  fi
+  if [ "$pantalla" = auto ]; then
+    set modo=auto
+  elif [ -n "$pantalla" ]; then
+    set modo="${pantalla}x32,${pantalla},800x600x32,800x600,auto"
+  fi
+fi
 G
   # el rótulo, el núcleo, lo que se le dice y, si hace falta, el modo que
   # se le pide a GRUB (después de «multiboot», que pone el de la cabecera)
   entrada() {
     printf 'menuentry "%s" {\n  multiboot /%s %s\n%s' "$1" "$2" "$3" "$MODULOS"
     [ -n "${4:-}" ] && printf '  set gfxpayload=%s\n' "$4"
+    [ -n "${5:-}" ] && printf '%s\n' "$5"
     printf '  boot\n}\n'
   }
   N="escritura=usb unidad=X registro"
-  entrada "Hispa-Pentium 0.8: el escritorio (800 x 600)" ESCRIT8.BIN "escritorio $N"
-  entrada "Hispa-Pentium 0.8: el escritorio a la medida de la pantalla" ESCRIT8.BIN "escritorio $N" "auto"
+  # [EDID] la primera, con la medida de PANTALLA.ENV si la hay (y lo dice
+  # antes de arrancar); «a la medida», con «amedida» (el núcleo sabe así
+  # que la que pone GRUB es la de la pantalla)
+  entrada "Hispa-Pentium 0.8: el escritorio (800 x 600, o la elegida en Configuracion)" ESCRIT8.BIN "escritorio $N" "" '  if [ -n "$modo" ]; then
+    echo "Hispa-Pentium: la pantalla, a $pantalla (si la BIOS no la da, otra)"
+    set gfxpayload=$modo
+  fi'
+  entrada "Hispa-Pentium 0.8: el escritorio a la medida de la pantalla" ESCRIT8.BIN "escritorio $N amedida" "auto"
   entrada "Hispa-Pentium 0.8: el escritorio (1024 x 600)" ESCRIT6.BIN "escritorio $N"
   entrada "Hispa-Pentium 0.8: el escritorio (1366 x 768)" ESCRIT13.BIN "escritorio $N"
   entrada "Hispa-Pentium 0.8: el escritorio (1024 x 768)" ESCRIT10.BIN "escritorio $N"

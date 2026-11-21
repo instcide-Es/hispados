@@ -6,7 +6,12 @@
 ;                 memoria de arranque; las que se enchufan en marcha, desde
 ;                 la W:, la primera libre hacia abajo);
 ;     M:          la unidad en memoria: los archivos que ha traído el
-;                 cargador (los módulos de multiboot), de solo lectura.
+;                 cargador (los módulos de multiboot), de solo lectura;
+;     (CD) D: E:...  los lectores de CD y DVD (ISO 9660: iso.cas), la primera
+;                 letra libre tras los discos de dentro (D: si hay un disco
+;                 duro, aunque no tenga FAT), una para cada lector, que se
+;                 le queda aunque no tenga disco; detrás, las imágenes de
+;                 disco montadas (.ISO, .IMG...), la primera libre.
 ;  Aquí se miran las particiones de cada disco (la tabla del MBR, y la GPT
 ;  de los discos de ahora) y se monta cada volumen FAT que haya (fat.cas);
 ;  un disco sin tabla, entero, también vale. La unidad número n es el
@@ -43,6 +48,7 @@ módulo Unidades
     público variable del_sistema: nat32 = 0xFFFFFFFF    ; la unidad del sistema (NINGUNA: no hay ninguna)
     variable sector: arreglo [512] de byte
     variable letra_interna: nat32 = 'C'
+    variable letras_cd: arreglo [MAX_DISCOS] de byte   ; (CD) la letra de cada lector de CD o DVD
     variable en_caliente: bool                  ; montando una memoria enchufada en marcha (desde la W:)
     variable sistema_ido: bool                  ; la unidad del sistema se ha desenchufado
     público variable cambios: nat32             ; sube cada vez que aparece o desaparece una unidad
@@ -75,15 +81,18 @@ módulo Unidades
         si discos[d].clase = DE_USB entonces
             l := letra_usb()
             si l = 0 entonces devolver falso fin
+        sino si discos[d].clase = DE_CD o discos[d].clase = DE_IMAGEN entonces
+            l := letra_de_cd(d)                         ; (CD)
+            si l = 0 entonces devolver falso fin
         fin
-        si discos[d].clase <> DE_USB y letra_interna >= 'M' entonces devolver falso fin
+        si l = 0 y letra_interna >= 'M' entonces devolver falso fin
         si no montar(u, d, inicio) entonces devolver falso fin
         unidades[u].hay := cierto
         unidades[u].clase := U_FAT
         unidades[u].disco := d
         unidades[u].partición := partición
         cambios := cambios + 1
-        si discos[d].clase = DE_USB entonces
+        si l <> 0 entonces
             unidades[u].letra := l
         sino
             unidades[u].letra := letra_interna
@@ -153,6 +162,16 @@ módulo Unidades
         variable clases: arreglo [4] de byte
         si d >= MAX_DISCOS entonces devolver 0 fin
         si no discos[d].hay entonces devolver 0 fin
+        ; (CD) un lector: su letra (lo monta cdcal.cas, cuando tiene disco); una
+        ; imagen de CD, su ISO 9660
+        si discos[d].clase = DE_CD entonces
+            letra_de_cd(d)
+            devolver 0
+        fin
+        si discos[d].bloque = 2048 entonces
+            si monta_cd(d) entonces devolver 1 fin
+            devolver 0
+        fin
         ; el disco entero, sin tabla de particiones
         si prueba(d, 0, 0) entonces devolver 1 fin
         si no leer_sectores(d, 0, 1, sector) entonces devolver 0 fin
@@ -228,6 +247,7 @@ módulo Unidades
         variable m: nat32
         si u >= MAX_UNIDADES entonces devolver falso fin
         si no unidades[u].hay o unidades[u].clase <> U_FAT entonces devolver falso fin
+        si discos[unidades[u].disco].clase = DE_CD o discos[unidades[u].disco].clase = DE_IMAGEN entonces devolver falso fin   ; (CD) (el CD de instalar es M:)
         m := abrir_archivo(u, "\\ORDENES.BIN", PARA_LEER)
         si m >= PRIMER_ERROR entonces m := abrir_archivo(u, "\\HISPA\\ORDENES.BIN", PARA_LEER) fin
         si m >= PRIMER_ERROR entonces devolver falso fin
@@ -347,6 +367,86 @@ módulo Unidades
         fin
         si n < 4 entonces letras[n] := 0 sino letras[4] := 0 fin
         devolver n
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  (CD) Los CD y los DVD, y las imágenes de disco
+    ; -------------------------------------------------------------------------
+    ; ¿es esa letra la de algún lector de CD (aunque no tenga disco)?
+    función letra_de_lector(l: nat32): bool
+        variable d: nat32
+        para d desde 0 hasta MAX_DISCOS - 1 hacer
+            si letras_cd[d] = l y discos[d].hay y discos[d].clase = DE_CD entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; la primera letra libre tras los discos de dentro (D: si hay un disco
+    ; duro, aunque no tenga FAT), antes de la M:. 0: ninguna.
+    función letra_libre_cd(): nat32
+        variable l, d: nat32
+        l := letra_interna
+        si l = 'C' entonces
+            para d desde 0 hasta MAX_DISCOS - 1 hacer
+                si discos[d].hay y (discos[d].clase = DE_ATA o discos[d].clase = DE_AHCI) entonces l := 'D' fin
+            fin
+        fin
+        mientras l < 'M' y (por_letra(l) <> NINGUNA o letra_de_lector(l)) hacer l := l + 1 fin
+        si l >= 'M' entonces devolver 0 fin
+        devolver l
+    fin
+
+    ; la letra del disco d (un lector de CD, que la guarda para siempre; o
+    ; una imagen, la primera libre). 0: no queda ninguna.
+    público función letra_de_cd(d: nat32): nat32
+        si d >= MAX_DISCOS entonces devolver 0 fin
+        si discos[d].clase = DE_CD entonces
+            si letras_cd[d] = 0 entonces letras_cd[d] := letra_libre_cd() fin
+            devolver letras_cd[d]
+        fin
+        devolver letra_libre_cd()
+    fin
+
+    ; el disco del lector de CD que lleva esa letra (0xFFFFFFFF: ninguno)
+    público función lector_de_letra(letra: nat32): nat32
+        variable d: nat32
+        si letra >= 'a' y letra <= 'z' entonces letra := letra - 32 fin
+        para d desde 0 hasta MAX_DISCOS - 1 hacer
+            si letras_cd[d] = letra y discos[d].hay y discos[d].clase = DE_CD entonces devolver d fin
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    ; el lector del disco d se ha ido (uno de USB): su letra queda libre
+    público función suelta_letra_cd(d: nat32)
+        si d < MAX_DISCOS entonces letras_cd[d] := 0 fin
+    fin
+
+    ; monta el ISO 9660 del disco d (un CD o DVD, o una imagen de CD), con
+    ; su letra. Falso si no lo tiene.
+    público función monta_cd(d: nat32): bool
+        variable u, l: nat32
+        u := libre()
+        si u = NINGUNA entonces devolver falso fin
+        l := letra_de_cd(d)
+        si l = 0 entonces devolver falso fin
+        si no montar_iso(u, d) entonces devolver falso fin
+        unidades[u].hay := cierto
+        unidades[u].clase := U_FAT
+        unidades[u].disco := d
+        unidades[u].partición := 0
+        unidades[u].letra := l
+        cambios := cambios + 1
+        devolver cierto
+    fin
+
+    ; la unidad del disco d (la primera: NINGUNA si no tiene)
+    público función unidad_de_disco(d: nat32): nat32
+        variable u: nat32
+        para u desde 0 hasta MAX_UNIDADES - 2 hacer
+            si unidades[u].hay y unidades[u].clase = U_FAT y unidades[u].disco = d entonces devolver u fin
+        fin
+        devolver NINGUNA
     fin
 
 fin Unidades.

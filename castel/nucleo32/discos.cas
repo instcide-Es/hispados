@@ -17,7 +17,7 @@
 ; =============================================================================
 módulo Discos
 
-    importar Ata, Ahci, Usbalm, Textos32
+    importar Ata, Ahci, Usbalm, Cdrom, Tareas, Textos32, Mem32
 
     público constante SECTOR = 512
     público constante MAX_DISCOS = 8
@@ -26,6 +26,8 @@ módulo Discos
     público constante DE_ATA = 1                ; del canal IDE clásico
     público constante DE_AHCI = 2               ; SATA, por AHCI
     público constante DE_USB = 3                ; una memoria (o un disco) USB
+    público constante DE_CD = 4                 ; (CD) un lector de CD o DVD (de los tres: cdrom.cas); sus sectores, de 2048
+    público constante DE_IMAGEN = 5             ; (CD) una imagen de disco (.ISO, .IMG, .BIN) montada: un archivo de otro disco
 
     ; ---- los permisos de escritura ----
     público constante SIN_PERMISO = 0           ; no se escribe en ningún disco
@@ -36,10 +38,11 @@ módulo Discos
     público tipo Disco = estructura
         hay: bool
         clase: nat32                            ; DE_ATA, DE_AHCI o DE_USB
-        cuál: nat32                             ; su número para su controlador
-        sectores: nat32
+        cuál: nat32                             ; su número para su controlador (DE_CD: el lector de cdrom.cas)
+        sectores: nat32                         ; (DE_CD: los del disco que hay, de 2048; 0 sin disco)
         escribible: bool                        ; se puede escribir en él
         modelo: arreglo [41] de byte
+        bloque: nat32                           ; (CD) lo que mide un sector: 512; 2048 los CD, los DVD y sus imágenes
     fin
 
     público variable discos: arreglo [MAX_DISCOS] de Disco
@@ -58,6 +61,8 @@ módulo Discos
         discos[d].cuál := cuál
         discos[d].sectores := sectores
         discos[d].escribible := falso
+        discos[d].bloque := SECTOR
+        si clase = DE_CD entonces discos[d].bloque := 2048 fin
         copiar_hasta(discos[d].modelo, modelo, 41)
         cuántos_discos := cuántos_discos + 1
         devolver d
@@ -69,7 +74,7 @@ módulo Discos
         Ahci.escritura := Ata.escritura
         Usbalm.escritura := el_permiso = PERMISO_USB o el_permiso = PERMISO_TODOS
         para d desde 0 hasta MAX_DISCOS - 1 hacer
-            discos[d].escribible := discos[d].hay y (el_permiso = PERMISO_TODOS o (el_permiso = PERMISO_USB y discos[d].clase = DE_USB) o (el_permiso = PERMISO_INTERNOS y discos[d].clase <> DE_USB))
+            discos[d].escribible := discos[d].hay y discos[d].clase <> DE_CD y discos[d].clase <> DE_IMAGEN y (el_permiso = PERMISO_TODOS o (el_permiso = PERMISO_USB y discos[d].clase = DE_USB) o (el_permiso = PERMISO_INTERNOS y discos[d].clase <> DE_USB))
         fin
     fin
 
@@ -107,7 +112,9 @@ módulo Discos
         variable u, n: nat32
         n := cuántos_discos
         para u desde 0 hasta MAX_MEMORIAS - 1 hacer
-            si memorias[u].hay entonces añade(DE_USB, u, memorias[u].sectores, dirección(memorias[u].modelo[0])) fin
+            si memorias[u].hay y no memorias[u].cd entonces          ; ((CD) los lectores, luego: busca_cd)
+                añade(DE_USB, u, memorias[u].sectores, dirección(memorias[u].modelo[0]))
+            fin
         fin
         reparte_permiso()
         devolver cuántos_discos - n
@@ -121,6 +128,170 @@ módulo Discos
         d := añade(DE_USB, m, memorias[m].sectores, dirección(memorias[m].modelo[0]))
         reparte_permiso()
         devolver d
+    fin
+
+    ; (CD) los lectores de CD y DVD: los del IDE y los del SATA, y los de USB
+    ; que haya al arrancar. Van detrás de los discos y las memorias (después
+    ; de busca_internos y busca_usb), y así sus letras, tras las de los
+    ; discos. Da cuántos.
+    público función busca_cd(): nat32
+        variable u, n: nat32
+        n := cuántos_discos
+        busca_lectores()
+        para u desde 0 hasta MAX_LECTORES - 1 hacer
+            si lectores[u].hay y lectores[u].clase <> L_USB entonces añade(DE_CD, u, 0, dirección(lectores[u].modelo[0])) fin
+        fin
+        para u desde 0 hasta MAX_MEMORIAS - 1 hacer
+            si memorias[u].hay y memorias[u].cd entonces añade_cd_usb(u) fin
+        fin
+        reparte_permiso()
+        devolver cuántos_discos - n
+    fin
+
+    ; (CD) la memoria USB número m es un lector de CD o DVD: un lector más
+    ; (cdrom.cas) y un disco más, sin sectores hasta que se mire su disco.
+    ; Da el número del disco, o 0xFFFFFFFF.
+    público función añade_cd_usb(m: nat32): nat32
+        variable l: nat32
+        l := lector_usb(m)
+        si l = NINGUNO_CD entonces devolver 0xFFFFFFFF fin
+        devolver añade(DE_CD, l, 0, dirección(lectores[l].modelo[0]))
+    fin
+
+    ; (CD) ¿es el disco d un lector de CD o DVD?
+    público función es_cd(d: nat32): bool
+        si d >= MAX_DISCOS entonces devolver falso fin
+        devolver discos[d].hay y discos[d].clase = DE_CD
+    fin
+
+    ; (CD) el disco del lector l de cdrom.cas (0xFFFFFFFF: no lo hay)
+    público función de_lector(l: nat32): nat32
+        variable d: nat32
+        para d desde 0 hasta MAX_DISCOS - 1 hacer
+            si discos[d].hay y discos[d].clase = DE_CD y discos[d].cuál = l entonces devolver d fin
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  (CD) Las imágenes de disco montadas: un archivo (de una FAT o de un CD)
+    ;  que hace de disco. Se apunta dónde está en su disco (sus trozos
+    ;  seguidos: fat.cas, trozos_archivo) y se lee de ahí, por debajo de la
+    ;  FAT (sin abrirlo: la FAT no se llama a sí misma). Las .ISO, de
+    ;  sectores de 2048; las .BIN de CD «en crudo» (MODE1/2352), de 2352 con
+    ;  los 2048 de datos a partir del 16; las .IMG (de disquete o de disco
+    ;  duro, con FAT), de 512.
+    ; -------------------------------------------------------------------------
+    público constante MAX_IMÁGENES = 4
+    público constante MAX_TROZOS = 96
+    público tipo Imagen = estructura
+        hay: bool
+        disco: nat32                            ; el disco donde está el archivo
+        sector: nat32                           ; lo que miden los sectores de ese disco (512 o 2048)
+        zancada, salto: nat32                      ; cada sector de la imagen: «zancada» octetos, los datos desde «salto»
+        trozos: nat32
+        inicios: arreglo [MAX_TROZOS] de nat32  ; dónde empieza cada trozo en su disco
+        cuentas: arreglo [MAX_TROZOS] de nat32  ; y cuántos sectores tiene
+        ruta: arreglo [100] de byte             ; el archivo («X:\DISCOS\ALGO.ISO»)
+    fin
+    público variable imágenes: arreglo [MAX_IMÁGENES] de Imagen
+    variable crudo: arreglo [4608] de byte      ; (las .BIN en crudo: lo que cubre un sector)
+    variable cerrojo_crudo: Cerrojo
+
+    ; una imagen libre (para llenarla y luego apuntarla con añade_imagen)
+    público función imagen_libre(): nat32
+        variable i: nat32
+        para i desde 0 hasta MAX_IMÁGENES - 1 hacer
+            si no imágenes[i].hay entonces devolver i fin
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    ; la imagen i (ya llena) es un disco más, de «sectores» de «bloque»
+    ; octetos. Da su número, o 0xFFFFFFFF.
+    público función añade_imagen(i: nat32, sectores: nat32, bloque: nat32): nat32
+        variable d, k: nat32
+        variable nombre: arreglo [41] de byte
+        si i >= MAX_IMÁGENES entonces devolver 0xFFFFFFFF fin
+        ; (de modelo, lo último de la ruta que quepa)
+        k := longitud(imágenes[i].ruta)
+        si k > 40 entonces copiar_hasta(nombre, dirección(imágenes[i].ruta[k - 40]), 41) sino copiar_hasta(nombre, imágenes[i].ruta, 41) fin
+        d := añade(DE_IMAGEN, i, sectores, nombre)
+        si d = 0xFFFFFFFF entonces devolver d fin
+        discos[d].bloque := bloque
+        imágenes[i].hay := cierto
+        reparte_permiso()
+        devolver d
+    fin
+
+    ; la imagen del disco d deja de estar (con el disco: olvida_disco)
+    público función olvida_imagen(d: nat32)
+        si d >= MAX_DISCOS entonces devolver fin
+        si discos[d].hay y discos[d].clase = DE_IMAGEN y discos[d].cuál < MAX_IMÁGENES entonces imágenes[discos[d].cuál].hay := falso fin
+        olvida_disco(d)
+    fin
+
+    ; el sector s del archivo de la imagen i: dónde está en su disco y cuántos
+    ; le siguen en el mismo trozo (0: fuera del archivo)
+    función en_disco(i: nat32, s: nat32, ref quedan: nat32): nat32
+        variable t: nat32
+        t := 0
+        mientras t < imágenes[i].trozos hacer
+            si s < imágenes[i].cuentas[t] entonces
+                quedan := imágenes[i].cuentas[t] - s
+                devolver imágenes[i].inicios[t] + s
+            fin
+            s := s - imágenes[i].cuentas[t]
+            t := t + 1
+        fin
+        quedan := 0
+        devolver 0
+    fin
+
+    ; lee los sectores del archivo desde el s, n, a destino
+    función lee_trozos(i: nat32, s: nat32, n: nat32, destino: puntero a byte): bool
+        variable k, q, ds: nat32
+        mientras n > 0 hacer
+            ds := en_disco(i, s, q)
+            si q = 0 entonces devolver falso fin
+            k := n
+            si k > q entonces k := q fin
+            si k > 64 entonces k := 64 fin
+            si no leer_sectores(imágenes[i].disco, ds, k, destino) entonces devolver falso fin
+            destino := destino + k * imágenes[i].sector
+            s := s + k
+            n := n - k
+        fin
+        devolver cierto
+    fin
+
+    ; trae n sectores de la imagen i (desde el lba) a destino
+    función leer_imagen(i: nat32, lba: nat32, n: nat32, destino: puntero a byte): bool
+        variable pos, ss, s, k, b: nat32
+        variable bien: bool
+        si i >= MAX_IMÁGENES entonces devolver falso fin
+        si no imágenes[i].hay entonces devolver falso fin
+        ss := imágenes[i].sector
+        b := imágenes[i].zancada
+        si imágenes[i].salto = 0 y b mod ss = 0 entonces
+            ; los sectores de la imagen caen enteros en los del disco
+            devolver lee_trozos(i, lba * (b div ss), n * (b div ss), destino)
+        fin
+        ; en crudo: lo que cubre cada sector, y de ahí sus datos
+        tomar(cerrojo_crudo)
+        bien := cierto
+        mientras bien y n > 0 hacer
+            pos := lba * b + imágenes[i].salto
+            s := pos div ss
+            k := (pos mod ss + 2048 + ss - 1) div ss
+            bien := k * ss <= 4608 y lee_trozos(i, s, k, crudo)
+            si bien entonces copiar_memoria(destino, dirección(crudo[pos mod ss]), 2048) fin
+            destino := destino + 2048
+            lba := lba + 1
+            n := n - 1
+        fin
+        soltar(cerrojo_crudo)
+        devolver bien
     fin
 
     ; el disco de la memoria USB número m (0xFFFFFFFF: no lo hay)
@@ -154,6 +325,8 @@ módulo Discos
             caso DE_ATA: devolver Ata.leer_sectores(discos[d].cuál, lba, n, destino)
             caso DE_AHCI: devolver Ahci.leer_sectores(discos[d].cuál, lba, n, destino)
             caso DE_USB: devolver Usbalm.leer_sectores(discos[d].cuál, lba, n, destino)
+            caso DE_CD: devolver leer_bloques(discos[d].cuál, lba, n, destino)     ; (CD) de 2048
+            caso DE_IMAGEN: devolver leer_imagen(discos[d].cuál, lba, n, destino)  ; (CD)
         fin
         devolver falso
     fin
@@ -207,6 +380,8 @@ módulo Discos
             caso DE_ATA: devolver "IDE"
             caso DE_AHCI: devolver "SATA"
             caso DE_USB: devolver "USB"
+            caso DE_CD: devolver "CD"
+            caso DE_IMAGEN: devolver "imagen"
         fin
         devolver "?"
     fin

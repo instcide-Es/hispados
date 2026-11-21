@@ -203,6 +203,8 @@ módulo Tareas
         si t = nulo entonces t := ociosa fin
         t.estado := CORRIENDO
         t.turnos := t.turnos + 1
+        ; ([WIN32] el coprocesador de cada programa, también los de Windows: el
+        ; x87 de cada tarea de la 0.8.3, con CR0.TS, más abajo)
         si t <> actual entonces cambios := cambios + 1 fin
         actual := t
         ; (NAVEGADOR) el x87: si no es el suyo, que avise al usarlo
@@ -464,6 +466,7 @@ módulo Tareas
         t.marco := nat32(p)
         t.cr3 := directorio
         t.usuario := cierto
+        t.x87_usado := falso                    ; (NAVEGADOR, [WIN32]) su coprocesador, nuevo
         t.quiebre_inicio := quiebre
         t.quiebre := quiebre
         t.esp_usuario := pila

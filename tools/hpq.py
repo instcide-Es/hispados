@@ -94,33 +94,59 @@ VERSION_082 = '0.8.2'
 # «navega», OPCIONALES—, y el Administrador de dispositivos; suben base y equipo)
 VERSION_BASE = '0.8.3'
 VERSION_08 = '0.8'
+# (la 0.8.4, 21/11/2026, tres ramas juntas en pentium-084: los CD y DVD
+# —las llamadas 132 y 133, MONTAR y EXPULSAR—, SSH y Tailscale —TCP en
+# escucha y la interfaz del túnel en RED.BIN, ORDENES /C, la marca del túnel
+# en la bandeja y Configuración > «Red y Tailscale...»— y el explorador de
+# archivos con el dock —las llamadas 170 y 171—; suben base, red, equipo
+# (0.9, con MINIAT.BIN) y ejemplos (MUESTRA, con los controles nuevos), y
+# salen ssh y tailscal —Tailscale: los nombres de
+# paquete son de 8 letras, por el registro <NOMBRE>.PQI—)
+VERSION_084 = '0.8.4'
+# [WIN32] (21/11/2026) los programas de Windows: en el núcleo (los
+# segmentos de Win32, las llamadas 180 a 182; el coprocesador de cada tarea
+# es el de la 0.8.3), ORDENES (los .EXE) y Mi equipo (los abre); y el
+# paquete win32 (1.0, que pide la base 0.8.4)
 SISTEMA = [
-    ('base', VERSION_BASE, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
+    ('base', VERSION_084, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
     ('bloc', VERSION_08, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
     ('consola', VERSION_08, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
-    # (dispositivos) con el Administrador de dispositivos (DISPOSIT.BIN, la llamada 155 del núcleo)
-    ('equipo', VERSION_BASE, 'Mi equipo y el Administrador de dispositivos', 'base >= 0.8.3', [
-        ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
-    ('ejemplos', VERSION_082, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.2', [
+    # (explorador, dispositivos) el explorador de archivos, sus miniaturas y el Administrador de dispositivos
+    ('equipo', '0.9', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
+        ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('MINIAT.BIN', r'\HISPA\MINIAT.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
+    ('ejemplos', VERSION_084, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.4', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
         ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN'), ('MUESTRA.BIN', r'\HISPA\MUESTRA.BIN')]),
     ('paquetes', '1.0', 'Programas y actualizaciones: PAQUETES y su ventana', 'base >= 0.7, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN')]),
-    ('red', VERSION_SISTEMA, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= 0.8.1', [
+    ('red', VERSION_084, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= 0.8.4', [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
     ('tls', VERSION_SISTEMA, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
         ('TLS.BIN', r'\HISPA\TLS.BIN'), ('HTTPS.BIN', r'\HISPA\HTTPS.BIN')]),
+    ('ssh', VERSION_084, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, apagado hasta que se encienda)', 'base >= 0.8.4, red >= 0.8.4', [
+        ('SSH.BIN', r'\HISPA\SSH.BIN'), ('SSHD.BIN', r'\HISPA\SSHD.BIN')]),
+    ('tailscal', VERSION_084, 'Tailscale y WireGuard: la red privada de sus equipos, cada uno con su nombre y su IP 100.x', 'base >= 0.8.4, red >= 0.8.4, tls >= 0.8.1', [
+        ('TAILSCAL.BIN', r'\HISPA\TAILSCAL.BIN'), ('WG.BIN', r'\HISPA\WG.BIN')]),
     ('hvprun', VERSION_08, 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio', 'base >= 0.7', [
         ('HVPRUN.BIN', r'\HISPA\HVPRUN.BIN')]),
     ('oficina', '1.0', 'La oficina de Hispa-386: Facturas, Pluma, Cuentas y Mirador', 'hvprun >= 0.7', [
         ('FACTURAS.HVP', r'\OFICINA\FACTURAS.HVP'), ('PLUMA.HVP', r'\OFICINA\PLUMA.HVP'),
         ('CUENTAS.HVP', r'\OFICINA\CUENTAS.HVP'), ('MIRADOR.HVP', r'\OFICINA\MIRADOR.HVP'),
         ('TIPOS.DAT', r'\OFICINA\TIPOS.DAT'), ('DICCIO.DAT', r'\OFICINA\DICCIO.DAT')]),
+    # [WIN32] los programas de Windows de 32 bits y DirectX (docs/pentium/WIN32.md)
+    ('win32', '1.0', 'Programas de Windows de 32 bits y DirectX: WIN32.BIN, sus DLL y los ejemplos (Naves)', 'base >= ' + VERSION_084, [
+        ('WIN32.BIN', r'\HISPA\WIN32.BIN'),
+        ('MSVCRT.DLL', r'\WIN32\MSVCRT.DLL'), ('UCRT.DLL', r'\WIN32\UCRT.DLL'), ('COMCTL32.DLL', r'\WIN32\COMCTL32.DLL'),
+        ('WINMM.DLL', r'\WIN32\WINMM.DLL'), ('DDRAW.DLL', r'\WIN32\DDRAW.DLL'), ('DSOUND.DLL', r'\WIN32\DSOUND.DLL'),
+        ('DINPUT.DLL', r'\WIN32\DINPUT.DLL'), ('OLE32.DLL', r'\WIN32\OLE32.DLL'),
+        ('CALC32.EXE', r'\HISPA32\CALC32.EXE'), ('HOLA32.EXE', r'\HISPA32\HOLA32.EXE'), ('CTL32.EXE', r'\HISPA32\CTL32.EXE'),
+        ('MENU32.EXE', r'\HISPA32\MENU32.EXE'), ('AVISO32.EXE', r'\HISPA32\AVISO32.EXE'), ('NAVES.EXE', r'\HISPA32\NAVES.EXE'),
+        ('NAVES.ICP', r'\HISPA32\NAVES.ICP'), ('NAVES.MNU', r'\HISPA\MENU\NAVES.MNU')]),
 ]
 
 
@@ -272,7 +298,7 @@ def busca(nombre, carpetas):
 NAVEGA_RECURSOS = ['DEFAULT.CSS', 'QUIRKS.CSS', 'ADBLOCK.CSS', 'INTERNAL.CSS', 'MESSAGES', 'BROTLI.DIC', 'INICIO.HTM']
 NAVEGA_FUENTES = ['SANS.TTF', 'SANSN.TTF', 'SERIF.TTF', 'SERIFN.TTF', 'MONO.TTF', 'MONON.TTF']
 OPCIONALES = [
-    ('navega', '0.1', 'El Navegador: la web de hoy (NetSurf con JavaScript), con pestañas y descargas',
+    ('navega', '0.2', 'El Navegador: la web de hoy (NetSurf con JavaScript), con pestañas y descargas',
      'base >= 0.8.3, red >= 0.8.1, tls >= 0.8.1', [
         ('NAVEGA/NAVEGA.BIN', r'\HISPA\NAVEGA\NAVEGA.BIN'), ('NAVEGA/NAVEGA.INI', r'\HISPA\NAVEGA\NAVEGA.INI'),
         ('NAVEGA/LEEME.TXT', r'\HISPA\NAVEGA\LEEME.TXT')]

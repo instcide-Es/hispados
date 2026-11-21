@@ -1995,7 +1995,7 @@ módulo Montador
             primera := falso
             pasadas := pasadas + 1
             si no cambio entonces romper fin
-            si pasadas > 200 entonces
+            si pasadas > 1000 entonces                  ; (el núcleo de la 0.8.4 pide unas 300)
                 escribir("ENSAMBLA: los saltos no se asientan\r\n")
                 devolver 1
             fin

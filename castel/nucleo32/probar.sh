@@ -18,7 +18,7 @@
 # las capturas: «:raton X Y» lleva la flecha a ese punto de la pantalla;
 # «:clic X Y» pulsa allí el botón izquierdo; «:doble X Y», dos veces;
 # «:triple X Y», tres; «:clicd X Y», el botón derecho (el secundario);
-# «:mayusclic X Y», el izquierdo con Mayús pulsada;
+# «:mayusclic X Y», el izquierdo con Mayús pulsada; «:ctrlclic X Y», con Control;
 # «:arrastra X1 Y1 X2 Y2» lo lleva pulsado de un sitio a otro; «:escribe
 # texto» lo teclea sin Intro; «:pausa S» espera S segundos; «:monitor ORDEN»
 # le da esa orden al monitor de QEMU (device_add, device_del...: enchufar y
@@ -151,6 +151,7 @@ for orden in "${ORDENES[@]}"; do
     ":triple "*) set -- ${orden:8}; ir $1 $2; for _ in 1 2; do mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.1; done; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.5; continue ;;
     ":clicd "*) set -- ${orden:7}; ir $1 $2; mon "mouse_button 2" 0.2; mon "mouse_button 0" 0.4; continue ;;
     ":mayusclic "*) set -- ${orden:11}; ir $1 $2; mon "sendkey shift 900" 0.3; mon "mouse_button 1" 0.2; mon "mouse_button 0" 0.9; continue ;;
+    ":ctrlclic "*) set -- ${orden:10}; ir $1 $2; mon "sendkey ctrl 900" 0.3; mon "mouse_button 1" 0.2; mon "mouse_button 0" 0.9; continue ;;
     ":arrastra "*) set -- ${orden:10}; ir $1 $2; mon "mouse_button 1" 0.25; ir $3 $4; mon "mouse_button 0" 0.4; continue ;;
     ":captura "*) sleep 0.4; mon "screendump ${CAPTURAS:-/tmp}/${orden:9}.ppm" 0.5; continue ;;
     ":texto "*) sleep 0.4; pantalla; cp $T/pantalla.txt "${CAPTURAS:-/tmp}/${orden:7}.txt"; continue ;;

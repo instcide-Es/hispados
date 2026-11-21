@@ -745,6 +745,81 @@ static int vigilar(void)
 }
 
 /* ------------------------------------------------------------ las órdenes */
+/* ---- lo ya revisado (para /ANTES: no cargar todas las firmas cada vez que se
+ * abre el mismo programa): «MD5 tamaño firmas» de lo que ha salido limpio,
+ * en REVISADO.TXT (los últimos 256); «firmas»: lo que miden DIA.ESC y
+ * MES.ESC (si cambian las firmas, se mira otra vez) ---- */
+static int clave_revisado(const char *ruta, char *d)
+{
+	static u8 b[16384];
+	md5_ctx m;
+	u8 h[16];
+	char r[RUTA];
+	int f = pl_abrir(ruta), n, i;
+	u32 tam, v = 0;
+	if (f < 0)
+		return 0;
+	tam = pl_largo(f);
+	md5_inicia(&m);
+	while ((n = pl_leer(f, b, sizeof b)) > 0)
+		md5_suma(&m, b, (u32)n);
+	pl_cerrar(f);
+	md5_acaba(&m, h);
+	ruta_en(r, dir_escudo, "FIRMAS\\DIA.ESC");
+	if ((f = pl_abrir(r)) >= 0)
+		v += pl_largo(f), pl_cerrar(f);
+	ruta_en(r, dir_escudo, "FIRMAS\\MES.ESC");
+	if ((f = pl_abrir(r)) >= 0)
+		v = v * 31 + pl_largo(f), pl_cerrar(f);
+	for (i = 0; i < 16; i++)
+		formatear(d + 2 * i, 3, "%02x", h[i]);
+	formatear(d + 32, 40, " %u %u", tam, v);
+	return 1;
+}
+
+static int ya_revisado(const char *clave)
+{
+	static char t[256 * 64];
+	char r[RUTA];
+	int n;
+	ruta_en(r, dir_escudo, "REVISADO.TXT");
+	n = lee_todo(r, t, sizeof t - 1);
+	if (n <= 0)
+		return 0;
+	t[n] = 0;
+	return strstr(t, clave) != 0;
+}
+
+static void apunta_revisado(const char *clave)
+{
+	static char t[256 * 64];
+	char r[RUTA], *p;
+	int n, lineas = 0;
+	ruta_en(r, dir_escudo, "REVISADO.TXT");
+	n = lee_todo(r, t, sizeof t - 1);
+	if (n < 0)
+		n = 0;
+	t[n] = 0;
+	for (p = t; *p; p++)
+		if (*p == '\n')
+			lineas++;
+	p = t;
+	while (lineas >= 255 && (p = strchr(p, '\n')))	/* (los más viejos, fuera) */
+		p++, lineas--;
+	if (!p)
+		p = t;
+	{
+		char nuevo[96];
+		int k = formatear(nuevo, sizeof nuevo, "%s\r\n", clave);
+		int h = pl_crear(r);
+		if (h >= 0) {
+			pl_escribir(h, p, (u32)strlen(p));
+			pl_escribir(h, nuevo, (u32)k);
+			pl_cerrar(h);
+		}
+	}
+}
+
 static void ayuda(void)
 {
 	escribe("Escudo " ESCUDO_VERSION ", el antivirus de Hispa-Pentium (con las firmas de ClamAV).\n"
@@ -904,9 +979,18 @@ int escudo_principal(void)
 			return 2;
 		if ((antes && !op.antes_exe) || (!antes && !op.descargas))
 			return 0;
-		carga_firmas();
-		if (motor_revisa_archivo(a, a, &r) < 0)
-			return 0;
+		{
+			char clave[80];
+			if (antes && clave_revisado(a, clave) && ya_revisado(clave)) {
+				serie("escudo: antes de abrir %s: ya revisado, limpio", a);
+				return 0;
+			}
+			carga_firmas();
+			if (motor_revisa_archivo(a, a, &r) < 0)
+				return 0;
+			if (antes && !r.hallado && clave_revisado(a, clave))
+				apunta_revisado(clave);
+		}
 		serie("escudo: %s %s: %s", antes ? "antes de abrir" : "descarga", a, r.hallado ? r.nombre : "limpio");
 		if (!r.hallado)
 			return 0;

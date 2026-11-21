@@ -113,6 +113,33 @@ void rehaz_cajas(html_content *c) {
   surf_reg("cajas otra vez (JavaScript): %u ms (%u veces, %u ms en total)", GetTickCount() - t0, n_rehechas, t_rehechas);
 }
 
+/* [HISPA] position: fixed y sticky (ver guion.h) */
+int hispa_fijo_x, hispa_fijo_y;
+/* (solo la de fuera: las cajas de dentro, anónimas o no, van con ella) */
+static bool hay_fuera(const struct box *b, uint8_t que) {
+  for (b = b->parent; b; b = b->parent)
+    if (b->style && css_computed_position(b->style) == que) return true;
+  return false;
+}
+bool box_hispa_fijo(const struct box *b) {
+  return b->style && css_computed_position(b->style) == CSS_POSITION_FIXED && !hay_fuera(b, CSS_POSITION_FIXED);
+}
+/* sticky: se pinta al final, como lo que va por encima (si no, lo de detrás
+ * en la página lo tapaba al pegarse arriba) */
+bool box_hispa_pegado(const struct box *b) {
+  return b->style && css_computed_position(b->style) == CSS_POSITION_STICKY && !hay_fuera(b, CSS_POSITION_STICKY);
+}
+bool box_hispa_hay_fijos(const struct box *b) {
+  for (; b; b = b->next) {
+    if (b->style) {
+      uint8_t p = css_computed_position(b->style);
+      if (p == CSS_POSITION_FIXED || p == CSS_POSITION_STICKY) return true;
+    }
+    if (box_hispa_hay_fijos(b->children)) return true;
+  }
+  return false;
+}
+
 /* lo que va por encima (ver guion.h) */
 int box_hispa_z(const struct box *b) {
   css_fixed z = 0;

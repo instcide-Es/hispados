@@ -1,0 +1,290 @@
+; =============================================================================
+;  cdrom.cas - los lectores de CD y DVD de Hispa-Pentium, sean de donde
+;  sean: del canal IDE (atapi.cas), de una controladora SATA (ahcicd.cas) o
+;  de USB (usbalm.cas). Todos hablan las órdenes SCSI de los lectores (MMC),
+;  que aquí se arman y se mandan por el que toque:
+;
+;    TEST UNIT READY (00)      ¿hay disco, y está listo?
+;    REQUEST SENSE (03)        por qué ha fallado la anterior: «no hay
+;                              disco» (02/3A), «se está poniendo a girar»
+;                              (02/04), «se ha cambiado el disco» (06/28)...
+;    READ CAPACITY (25)        cuántos sectores (de 2048) tiene el disco
+;    READ TOC (43)             las pistas: si la primera es de sonido, es un
+;                              CD de música
+;    READ(10) (28)             leer sectores
+;    PREVENT ALLOW MEDIUM REMOVAL (1E) y START STOP UNIT (1B): expulsar
+;
+;  mira_disco() dice qué hay en el lector (CD_VACÍO, CD_DATOS, CD_MÚSICA)
+;  y apunta si se ha cambiado el disco desde la última vez (el lector lo
+;  dice con «atención»: 06/28); lo usa cdcal.cas, que lo pregunta cada dos
+;  segundos. Las órdenes van de una en una (un cerrojo).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Cdrom
+
+    importar Atapi, Ahcicd, Usbalm, Tareas, Mem32, Textos32
+
+    público constante MAX_LECTORES = 6
+    público constante NINGUNO_CD = 0xFFFFFFFF
+
+    ; ---- por dónde va el lector ----
+    público constante L_IDE = 1
+    público constante L_SATA = 2
+    público constante L_USB = 3
+
+    ; ---- lo que hay en él (mira_disco) ----
+    público constante CD_VACÍO = 0
+    público constante CD_DATOS = 1
+    público constante CD_MÚSICA = 2
+    público constante CD_ILEGIBLE = 3           ; (cdcal.cas: hay un disco, pero sin ISO 9660)
+    público constante CD_GIRANDO = 4            ; se está poniendo a girar: aún no se sabe
+
+    público constante BLOQUE_CD = 2048
+
+    público tipo Lector = estructura
+        hay: bool
+        clase: nat32                            ; L_IDE, L_SATA o L_USB
+        cuál: nat32                             ; su número para atapi.cas, ahcicd.cas o usbalm.cas
+        bloques: nat32                          ; los del disco que hay (0: ninguno)
+        cambiado: bool                          ; el lector ha dicho que se ha cambiado el disco
+        modelo: arreglo [41] de byte
+    fin
+
+    público variable lectores: arreglo [MAX_LECTORES] de Lector
+    público variable bloques_leídos, fallos_cd: nat32
+    variable clave, asc, ascq: nat32            ; lo que ha dicho REQUEST SENSE la última vez
+
+    variable cerrojo: Cerrojo
+    variable cdb: arreglo [12] de byte
+    variable resp: arreglo [64] de byte
+
+    ; apunta un lector en un sitio libre. Da su número, o NINGUNO_CD.
+    función añade_lector(clase: nat32, cuál: nat32, modelo: puntero a byte): nat32
+        variable l: nat32
+        l := 0
+        mientras l < MAX_LECTORES y lectores[l].hay hacer l := l + 1 fin
+        si l >= MAX_LECTORES entonces devolver NINGUNO_CD fin
+        lectores[l].hay := cierto
+        lectores[l].clase := clase
+        lectores[l].cuál := cuál
+        lectores[l].bloques := 0
+        lectores[l].cambiado := falso
+        copiar_hasta(lectores[l].modelo, modelo, 41)
+        devolver l
+    fin
+
+    ; busca los lectores de dentro: los del canal IDE y los de la controladora
+    ; SATA (después de Ahci.identificar). Da cuántos.
+    público función busca_lectores(): nat32
+        variable i, n: nat32
+        n := 0
+        Atapi.busca_ide()
+        para i desde 1 hasta cuántos_ide hacer
+            si añade_lector(L_IDE, i - 1, dirección(lectores_ide[i - 1].modelo[0])) <> NINGUNO_CD entonces n := n + 1 fin
+        fin
+        prepara_sata_cd()
+        para i desde 1 hasta cuántos_sata_cd hacer
+            si añade_lector(L_SATA, i - 1, dirección(lectores_sata[i - 1].modelo[0])) <> NINGUNO_CD entonces n := n + 1 fin
+        fin
+        devolver n
+    fin
+
+    ; el lector de USB que es la memoria m de usbalm.cas. Da su número.
+    público función lector_usb(m: nat32): nat32
+        si m >= MAX_MEMORIAS entonces devolver NINGUNO_CD fin
+        devolver añade_lector(L_USB, m, dirección(memorias[m].modelo[0]))
+    fin
+
+    ; el lector de USB de la memoria m se ha desenchufado: deja de estar. Da
+    ; el número que tenía (o NINGUNO_CD).
+    público función olvida_lector_usb(m: nat32): nat32
+        variable l: nat32
+        para l desde 0 hasta MAX_LECTORES - 1 hacer
+            si lectores[l].hay y lectores[l].clase = L_USB y lectores[l].cuál = m entonces
+                lectores[l].hay := falso
+                lectores[l].bloques := 0
+                devolver l
+            fin
+        fin
+        devolver NINGUNO_CD
+    fin
+
+    público función nombre_de_vía(l: nat32): puntero a byte
+        si l < MAX_LECTORES entonces
+            según lectores[l].clase
+                caso L_IDE: devolver "IDE"
+                caso L_SATA: devolver "SATA"
+                caso L_USB: devolver "USB"
+            fin
+        fin
+        devolver "?"
+    fin
+
+    ; ---------------------------------------------------------------- órdenes
+    función prepara(código: nat32)
+        llenar(cdb, 12, 0)
+        cdb[0] := código
+    fin
+
+    ; lo más que trae una orden por la vía del lector l
+    función lo_más(l: nat32): nat32
+        según lectores[l].clase
+            caso L_SATA: devolver MAX_OCTETOS_SATA
+            caso L_USB: devolver MAX_OCTETOS_USB
+        fin
+        devolver 32768
+    fin
+
+    ; manda la orden que hay en cdb al lector l (con el cerrojo tomado); trae
+    ; hasta «octetos» a destino
+    función manda(l: nat32, octetos: nat32, destino: puntero a byte): bool
+        variable largo: nat32
+        según lectores[l].clase
+            caso L_IDE: devolver paquete_ide(lectores[l].cuál, cdb, octetos, destino)
+            caso L_SATA: devolver paquete_sata(lectores[l].cuál, cdb, octetos, destino)
+            caso L_USB:
+                ; (por USB, el largo de verdad de la orden: 6, 10 o 12)
+                largo := 12
+                si cdb[0] < 0x20 entonces largo := 6 sino si cdb[0] < 0x60 entonces largo := 10 fin
+                devolver paquete_usb(lectores[l].cuál, cdb, largo, octetos, destino)
+        fin
+        devolver falso
+    fin
+
+    ; por qué ha fallado la última orden (REQUEST SENSE): a clave, asc y
+    ; ascq (clave 0xFF: ni eso contesta)
+    función pregunta(l: nat32)
+        llenar(resp, 18, 0)
+        prepara(0x03)
+        cdb[4] := 18
+        clave := 0xFF
+        asc := 0
+        ascq := 0
+        si manda(l, 18, resp) entonces
+            clave := resp[2] yb 0x0F
+            asc := resp[12]
+            ascq := resp[13]
+        fin
+        ; «se ha cambiado el disco» (o el lector se ha reiniciado)
+        si clave = 6 y (asc = 0x28 o asc = 0x29) entonces lectores[l].cambiado := cierto fin
+    fin
+
+    ; la orden de cdb; si falla, se pregunta por qué
+    función orden(l: nat32, octetos: nat32, destino: puntero a byte): bool
+        si manda(l, octetos, destino) entonces devolver cierto fin
+        pregunta(l)
+        devolver falso
+    fin
+
+    ; ¿qué hay en el lector l? (CD_VACÍO, CD_DATOS, CD_MÚSICA o CD_GIRANDO).
+    ; Pone al día sus bloques; si se ha cambiado el disco desde la última
+    ; vez, lo deja dicho en lectores[l].cambiado (lo baja quien lo mira).
+    público función mira_disco(l: nat32): nat32
+        variable i: nat32
+        variable listo: bool
+        si l >= MAX_LECTORES entonces devolver CD_VACÍO fin
+        si no lectores[l].hay entonces devolver CD_VACÍO fin
+        tomar(cerrojo)
+        ; TEST UNIT READY: tras un «atención» (06), otra vez
+        listo := falso
+        i := 0
+        mientras no listo y i < 4 hacer
+            prepara(0x00)
+            listo := orden(l, 0, nulo)
+            si no listo y clave <> 6 entonces i := 4 fin
+            i := i + 1
+        fin
+        si no listo entonces
+            lectores[l].bloques := 0
+            soltar(cerrojo)
+            si clave = 2 y asc = 0x04 entonces devolver CD_GIRANDO fin
+            devolver CD_VACÍO
+        fin
+        ; READ CAPACITY: el último sector y lo que mide (2048)
+        prepara(0x25)
+        llenar(resp, 8, 0)
+        si no orden(l, 8, resp) entonces
+            prepara(0x25)
+            si no orden(l, 8, resp) entonces
+                lectores[l].bloques := 0
+                soltar(cerrojo)
+                si clave = 2 y asc = 0x04 entonces devolver CD_GIRANDO fin
+                devolver CD_VACÍO
+            fin
+        fin
+        lectores[l].bloques := ((nat32(resp[0]) << 24) ob (nat32(resp[1]) << 16) ob (nat32(resp[2]) << 8) ob resp[3]) + 1
+        ; READ TOC (formato 0, la primera pista): si es de sonido (su control
+        ; sin el bit 2), un CD de música. Si no contesta, se da por de datos.
+        prepara(0x43)
+        cdb[6] := 1
+        cdb[8] := 12
+        llenar(resp, 12, 0)
+        si orden(l, 12, resp) entonces
+            si resp[0] <> 0 o resp[1] >= 10 entonces
+                si resp[5] yb 0x04 = 0 entonces
+                    soltar(cerrojo)
+                    devolver CD_MÚSICA
+                fin
+            fin
+        fin
+        soltar(cerrojo)
+        devolver CD_DATOS
+    fin
+
+    ; trae n sectores (de 2048) del disco del lector l, desde el lba, a
+    ; destino. Falso si no puede ser (o si se ha cambiado el disco).
+    público función leer_bloques(l: nat32, lba: nat32, n: nat32, destino: puntero a byte): bool
+        variable k, por_vez, intentos: nat32
+        variable bien: bool
+        si l >= MAX_LECTORES entonces devolver falso fin
+        si no lectores[l].hay o lba >= lectores[l].bloques o n > lectores[l].bloques - lba entonces devolver falso fin
+        tomar(cerrojo)
+        por_vez := lo_más(l) div BLOQUE_CD
+        bien := cierto
+        mientras bien y n > 0 hacer
+            k := n
+            si k > por_vez entonces k := por_vez fin
+            intentos := 0
+            bien := falso
+            mientras no bien y intentos < 3 hacer
+                prepara(0x28)
+                cdb[2] := lba >> 24
+                cdb[3] := lba >> 16
+                cdb[4] := lba >> 8
+                cdb[5] := lba
+                cdb[7] := k >> 8
+                cdb[8] := k
+                bien := orden(l, k * BLOQUE_CD, destino)
+                ; (otro disco, o ninguno: no se insiste)
+                si no bien y (lectores[l].cambiado o clave = 2) entonces intentos := 3 fin
+                intentos := intentos + 1
+            fin
+            si bien entonces
+                destino := destino + k * BLOQUE_CD
+                bloques_leídos := bloques_leídos + k
+                lba := lba + k
+                n := n - k
+            fin
+        fin
+        si no bien entonces fallos_cd := fallos_cd + 1 fin
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+    ; abre la bandeja del lector l (deja que se saque el disco y lo expulsa)
+    público función expulsar(l: nat32): bool
+        variable bien: bool
+        si l >= MAX_LECTORES entonces devolver falso fin
+        si no lectores[l].hay entonces devolver falso fin
+        tomar(cerrojo)
+        prepara(0x1E)                                   ; PREVENT ALLOW MEDIUM REMOVAL: que se deje
+        orden(l, 0, nulo)
+        prepara(0x1B)                                   ; START STOP UNIT: LoEj = 1, Start = 0
+        cdb[4] := 2
+        bien := orden(l, 0, nulo)
+        lectores[l].bloques := 0
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+fin Cdrom.

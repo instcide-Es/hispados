@@ -220,6 +220,9 @@ módulo UOrdenes
         escribir("  CD [carpeta]    cambia de carpeta de trabajo (CD .. sube una)\n")
         escribir("  PATH [carpetas] dónde se buscan los programas (PATH C:\\;C:\\UTIL)\n")
         escribir("  ECHO texto      escribe el texto          PAUSE        espera una tecla\n")
+        escribir("  MONTAR [imagen] monta una imagen de CD o de disco (.ISO, .CUE, .IMG) como una\n")
+        escribir("                  unidad más; sin nada, lo montado   DESMONTAR D:  la quita\n")
+        escribir("  EXPULSAR D:     abre la bandeja del lector de CD o DVD (o desmonta la imagen)\n")
         escribir("  ESCRITORIO      pone en marcha el escritorio (el entorno gráfico)\n")
         escribir("  IPCONFIG, PING, DESCARGAR  la red (IPCONFIG /?, PING, DESCARGAR /?)\n")
         escribir("  SALIR           acaba el intérprete de órdenes\n")
@@ -227,6 +230,71 @@ módulo UOrdenes
         escribir("archivo de órdenes (.BAT), con lo que se escriba detrás como sus argumentos.\n")
         escribir("Con «> archivo» detrás, lo que escriba la orden va al archivo (>> lo añade).\n")
         escribir("Ctrl+C acaba el programa que corre. Las flechas traen las órdenes de antes.\n")
+    fin
+
+    ; (CD) MONTAR [imagen]: la monta como una unidad más; sin nada, dice los
+    ; lectores de CD y las imágenes montadas
+    función orden_montar(cuál: puntero a byte)
+        variable r, i, n: nat32
+        variable u: Info_unidad
+        variable d: arreglo [3] de nat32
+        si valor(cuál) = 0 entonces
+            n := 0
+            i := 0
+            mientras info_unidad(i, u) hacer
+                d[0] := u.letra
+                d[1] := nat32(dirección(u.nombre[0]))
+                d[2] := nat32(dirección(u.etiqueta[0]))
+                si u.medio = MEDIO_IMAGEN entonces
+                    imprimir("  %c:  imagen %s", d)
+                    si u.etiqueta[0] <> 0 entonces imprimir1("  «%s»", d[2]) fin
+                    escribir("\n")
+                    n := n + 1
+                sino si u.medio = MEDIO_CD entonces
+                    imprimir("  %c:  lector de CD o DVD %s", d)
+                    si u.clase = 9 entonces
+                        imprimir1(": «%s»\n", d[2])
+                    sino si u.relleno[0] = 2 entonces
+                        escribir(": un CD de música\n")
+                    sino si u.relleno[0] = 3 entonces
+                        escribir(": un disco que no se puede leer\n")
+                    sino
+                        escribir(": sin disco\n")
+                    fin
+                    n := n + 1
+                fin
+                i := i + 1
+            fin
+            si n = 0 entonces escribir("No hay lectores de CD ni imágenes montadas (MONTAR imagen.iso monta una).\n") fin
+            devolver
+        fin
+        r := montar_imagen(cuál)
+        si es_error(r) entonces
+            no_puedo("montar", cuál, r)
+        sino si r < 'A' entonces
+            imprimir2("No puedo montar %s: %s.\n", nat32(cuál), nat32(texto_imagen(r)))
+        sino
+            imprimir2("%s está montada como la unidad %c:.\n", nat32(cuál), r)
+        fin
+    fin
+
+    ; (CD) DESMONTAR D: (una imagen) y EXPULSAR D: (un lector, o una imagen)
+    función orden_expulsar(cuál: puntero a byte, desmontar: bool)
+        variable r: nat32
+        si valor(cuál) = 0 o (cuál[1] <> ':' y cuál[1] <> 0) entonces
+            si desmontar entonces escribir("¿Qué unidad? (DESMONTAR E:)\n") sino escribir("¿Qué unidad? (EXPULSAR D:)\n") fin
+            devolver
+        fin
+        r := expulsar(cuál[0])
+        si r = EXPULSADA y desmontar entonces
+            imprimir1("La unidad %c: está desmontada.\n", mayúscula(cuál[0]))
+        sino si r = EXPULSADA entonces
+            imprimir1("Ya puede sacar el disco de %c:.\n", mayúscula(cuál[0]))
+        sino si r = NO_EXPULSABLE entonces
+            imprimir1("%c: no es un CD ni una imagen montada.\n", mayúscula(cuál[0]))
+        sino
+            imprimir1("No hay unidad %c:.\n", mayúscula(cuál[0]))
+        fin
     fin
 
     función orden_ver()
@@ -629,6 +697,9 @@ módulo UOrdenes
         concatenar(ruta, ".BIN")
         si es_archivo(ruta) entonces devolver 1 fin
         ruta[n] := 0
+        concatenar(ruta, ".EXE")                ; [WIN32] un programa de Windows (lo corre WIN32.BIN)
+        si es_archivo(ruta) entonces devolver 1 fin
+        ruta[n] := 0
         concatenar(ruta, ".BAT")
         si es_archivo(ruta) entonces devolver 2 fin
         devolver 0
@@ -841,6 +912,12 @@ módulo UOrdenes
             orden_rd(resto)
         sino si iguales(mayús, "CD") o iguales(mayús, "CHDIR") entonces
             orden_cd(resto)
+        sino si iguales(mayús, "MONTAR") o iguales(mayús, "MOUNT") entonces
+            orden_montar(resto)                         ; (CD)
+        sino si iguales(mayús, "DESMONTAR") entonces
+            orden_expulsar(resto, cierto)
+        sino si iguales(mayús, "EXPULSAR") o iguales(mayús, "EJECT") entonces
+            orden_expulsar(resto, falso)
         sino si iguales(mayús, "PATH") entonces
             orden_path(resto)
         sino si iguales(mayús, "ECHO") entonces
@@ -906,6 +983,7 @@ módulo UOrdenes
 
     función principal(): byte
         variable p: puntero a byte
+        variable na: nat32
         atender_corte(cierto)
         camino[0] := unidad(0)                  ; el PATH de fábrica: la raíz de la unidad de trabajo
         ; (y, en el sistema instalado, su carpeta \HISPA: los programas que
@@ -915,6 +993,12 @@ módulo UOrdenes
         si es_carpeta(carpeta) entonces
             concatenar(camino, ";")
             concatenar(camino, carpeta)
+        fin
+        ; (SSH) «ORDENES /C orden»: hace esa orden y acaba (lo de «ssh equipo orden»)
+        na := argumentos(dirección(cruda[0]), LÍNEA)
+        si na > 3 y cruda[0] = '/' y (cruda[1] = 'C' o cruda[1] = 'c') y cruda[2] = ' ' entonces
+            haz(dirección(cruda[3]))
+            devolver 0
         fin
         escribir("\nHispa-Pentium: intérprete de órdenes (un programa del anillo 3, la tarea ", mi_tarea(), ").\n")
         escribir("Escriba AYUDA para ver las órdenes.\n")

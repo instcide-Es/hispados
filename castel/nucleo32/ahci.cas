@@ -402,6 +402,7 @@ módulo Ahci
         firma := lee(del_puerto(p, P_SIG))
         si firma = FIRMA_ATAPI o firma = FIRMA_MULTI o firma = FIRMA_SEMB entonces
             di("ahci: puerto %u: no es un disco (firma %08X)\n", p, firma, 0, 0, 0)
+            si firma = FIRMA_ATAPI entonces apunta_atapi(p) fin       ; (CD) para ahcicd.cas
             devolver
         fin
         satas[s].lba48 := falso
@@ -670,6 +671,37 @@ módulo Ahci
         bien := manda(s, orden, 0, 0, 0, falso)
         soltar(cerrojo)
         devolver bien
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  (CD) Los lectores de CD y DVD (ATAPI) de la controladora: aquí solo se
+    ;  apuntan sus puertos (y se paran, que no usen las tablas de los
+    ;  discos); los lleva ahcicd.cas, con estas dos funciones para sus
+    ;  registros.
+    ; -------------------------------------------------------------------------
+    público constante MAX_SATA_CD = 4
+    público variable puertos_atapi: arreglo [MAX_SATA_CD] de nat32
+    público variable cuántos_atapi: nat32
+
+    función apunta_atapi(p: nat32)
+        variable i: nat32
+        para_puerto(p)
+        para i desde 1 hasta cuántos_atapi hacer
+            si puertos_atapi[i - 1] = p entonces devolver fin     ; (la segunda vuelta)
+        fin
+        si cuántos_atapi < MAX_SATA_CD entonces
+            puertos_atapi[cuántos_atapi] := p
+            cuántos_atapi := cuántos_atapi + 1
+        fin
+    fin
+
+    ; el registro d (P_CMD, P_TFD...: 0x00 a 0x7F) del puerto p
+    público función reg_atapi(p: nat32, d: nat32): nat32
+        devolver lee(del_puerto(p, d))
+    fin
+
+    público función pon_reg_atapi(p: nat32, d: nat32, v: nat32)
+        pon(del_puerto(p, d), v)
     fin
 
 fin Ahci.
