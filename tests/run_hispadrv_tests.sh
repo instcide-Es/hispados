@@ -103,6 +103,34 @@ open('$T/g6.bin','wb').write(struct.pack('<H', 0x8000 | 0x0400 | 0x0100 | 0x0041
       if [ "$s" = "$(cat $ESP/$nom.suma 2> /dev/null)" ]; then ok "${nom^^}.MD: la pantalla es la guardada ($s)"; else ko "${nom^^}.MD: la pantalla ha cambiado ($s)"; fi
     done
     convert $T/c.ppm $B/hispadrv_carga.png 2> /dev/null
+    # las sombras y los brillos (SOMBRAS.MD): cada zona, con la luz que le toca
+    $NAT $B/SOMBRAS.MD 10 $T/s.ppm
+    convert $T/s.ppm $B/hispadrv_sombras.png 2> /dev/null
+    r=$(python3 -c "
+import sys
+d = open(sys.argv[1], 'rb').read().split(b'\\n', 3)
+w = int(d[1].split()[0]); px = d[3]
+def p(x, y):
+    i = (y * w + x) * 3
+    return tuple(px[i:i + 3])
+gris, verde = p(300, 10), p(50, 165)
+def mitad(a, b): return all(abs(2 * x - y) <= 40 for x, y in zip(a, b))
+def mas(a, b): return all(x >= y for x, y in zip(a, b)) and sum(a) > sum(b)
+mal = []
+for nom, x, y, f in [('el plano B bajo, a la mitad', 10, 10, lambda c: mitad(c, gris)),
+                     ('el plano A bajo, a la mitad', 100, 85, lambda c: c[1] == c[2] == 0 and 64 <= c[0] <= 160),
+                     ('lo transparente alto deja normal', 155, 165, lambda c: c == gris),
+                     ('la luz sobre la sombra: normal', 50, 50, lambda c: c == gris),
+                     ('la luz sobre lo normal: brillo', 210, 50, lambda c: mas(c, gris)),
+                     ('la sombra tapada por un plano alto', 250, 110, lambda c: c == gris),
+                     ('la sombra de un objeto alto', 270, 50, lambda c: mitad(c, gris)),
+                     ('un objeto bajo en la sombra, a la mitad', 50, 152, lambda c: mitad(c, verde)),
+                     ('un objeto alto, normal', 90, 152, lambda c: c == verde),
+                     ('el color 14, siempre normal', 130, 152, lambda c: c == p(130, 165)),
+                     ('la luz sobre una fila normal: brillo', 20, 165, lambda c: mas(c, gris))]:
+    if not f(p(x, y)): mal.append('%s %s' % (nom, p(x, y)))
+print('|'.join(mal) or 'BIEN')" $T/s.ppm)
+    if [ "$r" = BIEN ]; then ok "SOMBRAS.MD: las sombras y los brillos (planos, ventana de luz, objetos 3Eh y 3Fh, color 14), BIEN"; else ko "SOMBRAS.MD: $r"; fi
     # la nota FM: 440 Hz en el último segundo
     hz=$(python3 -c "
 import struct, sys

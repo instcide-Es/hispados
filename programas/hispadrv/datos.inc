@@ -197,6 +197,12 @@ r_porcol    resb 1
 r_altos     resb R_ALTOS * 32
 lin         resb 320 + 2 * LIN_M    ; la línea: índices de la CRAM
 spr         resb 320 + 2 * LIN_M    ; los objetos de la línea
+luz         resb 320 + 2 * LIN_M    ; (sombras y brillos) 1 donde un plano tiene prioridad alta
+lin_b       resb 320 + 2 * LIN_M    ;   lin antes de lo de prioridad alta
+t_sombra    resb 256                ;   cada color del equipo, a la mitad
+t_brillo    resb 256                ;   y con brillo
+r_sh        resb 1                  ;   1: el modo de sombras y brillos (registro 12, bit 3)
+            alignb 4
 tab_mk      resw 256                ; cada octeto de un dibujo: la máscara de sus dos puntos
 tab_mkr     resw 256                ;   (girado)
 pal_px      resw 4 * 256            ; y sus dos colores (del equipo), en cada paleta

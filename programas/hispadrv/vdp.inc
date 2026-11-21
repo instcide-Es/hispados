@@ -108,6 +108,41 @@ vdp_colores:
         inc ebx
         cmp ebx, 64
         jb .c
+        ; las sombras y los brillos: cada uno de los 512 colores, con cada
+        ; componente (0-7) a la mitad (L/2) o a la mitad más la mitad del
+        ; máximo ((L+7)/2); a cada color del equipo le toca el de uno de los
+        ; de la consola que lo dan (todos se parecen)
+        xor ebx, ebx
+.s:
+        xor ecx, ecx                ; ECX = el de sombra, EDX = el de brillo
+        xor edx, edx
+        xor esi, esi                ; ESI = el desplazamiento de la componente
+.s1:
+        mov eax, ebx
+        push ecx
+        mov ecx, esi
+        shr eax, cl
+        and eax, 7
+        mov ebp, eax
+        shr eax, 1
+        shl eax, cl
+        add ebp, 7
+        shr ebp, 1
+        shl ebp, cl
+        pop ecx
+        or ecx, eax
+        or edx, ebp
+        add esi, 3
+        cmp esi, 9
+        jb .s1
+        movzx eax, byte [md_col9+ebx]
+        mov cl, [md_col9+ecx]
+        mov [t_sombra+eax], cl
+        mov dl, [md_col9+edx]
+        mov [t_brillo+eax], dl
+        inc ebx
+        cmp ebx, 512
+        jb .s
         popad
         ret
 ; EBX=entrada AX=su valor (----BBB-GGG-RRR-): v_col y los pares de puntos de
@@ -731,9 +766,18 @@ vdp_linea:
         mov edi, lin
         mov ecx, (320 + 2 * LIN_M) / 4
         rep stosd
+        mov byte [r_sh], 0
         test byte [v_reg+1], 0x40   ; la imagen apagada: solo el fondo
         jz near .pasa
         mov dword [r_nalto], 0
+        test byte [v_reg+12], 8     ; ¿sombras y brillos?
+        jz .nsh
+        mov byte [r_sh], 1
+        mov edi, luz
+        mov ecx, (320 + 2 * LIN_M) / 4
+        xor eax, eax
+        rep stosd
+.nsh:
         ; ---- el plano B ----
         movzx eax, byte [v_reg+4]
         and eax, 7
@@ -773,10 +817,20 @@ vdp_linea:
 .a3:
         ; ---- los objetos (los de prioridad baja van ya a lin) ----
         call objetos
+        cmp byte [r_sh], 0
+        je .ns1
+        mov esi, lin
+        mov edi, lin_b
+        mov ecx, (320 + 2 * LIN_M) / 4
+        rep movsd
+.ns1:
         ; ---- lo de prioridad alta: B, A (y la ventana) ----
         call altos
         mov ah, 0xC0
         call objetos_pon
+        cmp byte [r_sh], 0
+        je .pasa
+        call sombras
 .pasa:
         ; a la fila de la imagen
         mov edi, [r_linea]
@@ -892,6 +946,12 @@ plano:
         mov edx, [r_filap]
         movzx edx, word [edx+ecx*2] ; la entrada (en el orden del 68000)
         xchg dl, dh
+        test dh, 0x80               ; (sombras y brillos: dónde hay prioridad
+        jz .nl                      ; alta, aunque sea transparente)
+        cmp byte [r_sh], 0
+        je .nl
+        call marca_luz
+.nl:
         mov eax, edx
         and eax, 0x7FF
         shl eax, 5
@@ -1224,6 +1284,12 @@ ventana:
         movzx edx, byte [vram+eax]
         shl edx, 8
         mov dl, [vram+eax+1]
+        test edx, 0x8000
+        jz .nl
+        cmp byte [r_sh], 0
+        je .nl
+        call marca_luz
+.nl:
         mov ebx, [r_linea]
         and ebx, 7
         test edx, 0x1000
@@ -1543,6 +1609,9 @@ objeto_casilla:
         test dl, 0x40               ; (de prioridad baja: ya a lin; los altos
         jnz .n1                     ; van luego, encima de los planos altos)
         and edx, 0x3F
+        cmp dl, 0x3E                ; (con sombras y brillos, 3Eh y 3Fh no se
+        jae .n1op                  ; pintan: cambian lo de debajo)
+.n1pi:
         mov dl, [v_col+edx]
         mov [edi+LIN_SPR], dl
         jmp .n1
@@ -1560,6 +1629,9 @@ objeto_casilla:
         test dl, 0x40
         jnz .n2
         and edx, 0x3F
+        cmp dl, 0x3E                ; (con sombras y brillos, 3Eh y 3Fh no se
+        jae .n2op                  ; pintan: cambian lo de debajo)
+.n2pi:
         mov dl, [v_col+edx]
         mov [edi+LIN_SPR], dl
         jmp .n2
@@ -1572,6 +1644,14 @@ objeto_casilla:
         jnz .c
         popad
         ret
+.n1op:
+        cmp byte [r_sh], 0
+        je .n1pi
+        jmp .n1
+.n2op:
+        cmp byte [r_sh], 0
+        je .n2pi
+        jmp .n2
 
 ; los puntos de los objetos a lin: AH=80h los de prioridad baja, C0h los de
 ; alta (y estos, al acabar, se borran de spr)
@@ -1613,6 +1693,9 @@ objetos_pon:
         cmp al, bl
         jne .n
         and edx, 0x3F
+        cmp dl, 0x3E
+        jae .op
+.pi:
         mov dl, [v_col+edx]
         mov [lin+LIN_M+esi], dl
 .n:
@@ -1623,16 +1706,122 @@ objetos_pon:
 .n4:
         add esi, 4
         jmp .c
+.op:
+        cmp byte [r_sh], 0
+        je .pi
+        jmp .n
 .f:
         cmp bl, 0xC0
         jne .x
-        mov edi, [r_smin]           ; (a cero para la siguiente)
+        cmp byte [r_sh], 0          ; (con sombras: los borra «sombras»)
+        jne .x
+        call spr_borra
+.x:
+        popad
+        ret
+
+; spr a cero (lo que han ocupado los objetos de la línea), para la siguiente
+spr_borra:
+        pushad
+        mov edi, [r_smin]
         mov ecx, [r_smax]
         sub ecx, edi
         add ecx, 8
         lea edi, [spr+LIN_M+edi-4]
         xor eax, eax
         rep stosb
+        popad
+        ret
+
+; ---- las sombras y los brillos (registro 12, bit 3) ----
+; (plano y ventana) ESI=x de una casilla de prioridad alta: sus ocho puntos,
+; dentro del recorte, a 1 en luz (lo que no es de prioridad alta en ningún
+; plano sale a la mitad, también el fondo)
+marca_luz:
+        push eax
+        push ecx
+        push edi
+        mov eax, esi
+        cmp eax, [r_cx0]
+        jge .a
+        mov eax, [r_cx0]
+.a:
+        lea ecx, [esi+8]
+        cmp ecx, [r_cx1]
+        jle .b
+        mov ecx, [r_cx1]
+.b:
+        sub ecx, eax
+        jle .x
+        lea edi, [luz+LIN_M+eax]
+        mov al, 1
+        rep stosb
+.x:
+        pop edi
+        pop ecx
+        pop eax
+        ret
+
+; la línea ya pintada (sin los puntos 3Eh y 3Fh de los objetos), a su luz:
+; en cada punto, normal si algún plano es de prioridad alta y a la mitad si
+; no; un objeto que se ve (de prioridad alta, o baja y sin un plano alto
+; encima) cambia eso: el color 3Eh da un paso más de luz, el 3Fh deja a la
+; mitad, los de prioridad alta y los colores 14 de cada paleta salen
+; normales; los demás de prioridad baja, como lo de debajo. Luego spr a
+; cero (spr_borra)
+sombras:
+        pushad
+        xor esi, esi
+.c:
+        cmp esi, [r_ancho]
+        jae .f
+        movzx ebx, byte [luz+LIN_M+esi] ; EBX = 0 sombra, 1 normal, 2 brillo
+        mov al, [spr+LIN_M+esi]
+        test al, al
+        jz .p
+        mov dl, [lin+LIN_M+esi]
+        test al, 0x40
+        jnz .vis
+        cmp dl, [lin_b+LIN_M+esi]   ; (de prioridad baja: si un plano alto lo
+        jne .p                      ; ha tapado, no cuenta)
+.vis:
+        mov ah, al
+        and ah, 0x3F
+        cmp ah, 0x3F
+        jne .k1
+        xor ebx, ebx                ; sombra
+        jmp .p
+.k1:
+        cmp ah, 0x3E
+        jne .k2
+        inc ebx                     ; un paso más de luz
+        jmp .p
+.k2:
+        test al, 0x40
+        jnz .nor
+        and ah, 15
+        cmp ah, 14
+        jne .p
+.nor:
+        mov ebx, 1
+.p:
+        movzx edx, byte [lin+LIN_M+esi]
+        cmp ebx, 1
+        je .s
+        jb .som
+        mov dl, [t_brillo+edx]
+        jmp .w
+.som:
+        mov dl, [t_sombra+edx]
+.w:
+        mov [lin+LIN_M+esi], dl
+.s:
+        inc esi
+        jmp .c
+.f:
+        cmp dword [r_smin], 1000    ; (sin objetos en la línea)
+        je .x
+        call spr_borra
 .x:
         popad
         ret
