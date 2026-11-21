@@ -1,0 +1,262 @@
+; =============================================================================
+;  edid.cas - lo que dice la pantalla de sí misma (su EDID, los 128 octetos
+;  que lleva todo monitor y todo panel desde finales de los 90): su nombre,
+;  la medida para la que está hecha (la «nativa»: su primera medida
+;  detallada) y lo más grande que sabe mostrar. Con eso, Configuración no
+;  ofrece medidas que la pantalla no pueda (escritorio.cas) y el
+;  Administrador de dispositivos dice qué monitor hay (dispositivos.cas).
+;
+;  De dónde se saca, por este orden (se mira una vez, al poner el escritorio):
+;   1. la tarjeta de QEMU (1234:1111): lo deja en su tercera zona PCI;
+;   2. las Intel (GMA 950/945, GMA 3150 «Pineview» de los Atom N450/N455/
+;      N550, GMA X3100/4500, HD Graphics...): se le pide a la pantalla por su
+;      DDC (el bus I2C del conector, la dirección 50h) con el GMBUS de la
+;      tarjeta, primero por las patillas del panel (LVDS: los portátiles) y
+;      luego por las del VGA. Los registros, como los cuenta la
+;      documentación pública de Intel (IHD-OS, «Display registers»): GMBUS0
+;      (la patilla y la velocidad), GMBUS1 (la orden), GMBUS2 (el estado) y
+;      GMBUS3 (los datos, de cuatro en cuatro octetos); en 5100h de su zona
+;      de registros hasta las GMA 4500, en C5100h desde las HD Graphics (con
+;      PCH). Los paneles eDP (por DisplayPort: Bay Trail, muchos de Haswell
+;      en adelante) no lo dan por ahí, sino por el canal AUX: no se mira.
+;  Si nada contesta, no se sabe (y escritorio.cas tira de lo que haya: la
+;  medida con la que GRUB arrancó «a la medida de la pantalla»).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Edid
+
+    importar Cpu, Pci, Paginas, Textos32, Formato
+
+    público variable hay_edid: bool
+    público variable nativa_an, nativa_al: nat32     ; la medida para la que está hecha
+    público variable máx_an, máx_al: nat32           ; lo más que sabe mostrar
+    público variable digital: bool                   ; un panel (o un monitor digital): más que la nativa no se ve
+    público variable nombre_monitor: arreglo [16] de byte
+    público variable de_dónde: arreglo [40] de byte  ; por dónde se ha sabido
+    variable mirado: bool
+    variable e: arreglo [128] de byte
+
+    ; ---- el GMBUS de las Intel ----
+    constante G0 = 0                            ; GMBUS0: la patilla (bits 2-0) y la velocidad (10-8: 0, 100 kHz)
+    constante G1 = 4                            ; GMBUS1: la orden
+    constante G2 = 8                            ; GMBUS2: el estado
+    constante G3 = 12                           ; GMBUS3: los datos
+    constante SW_CLR_INT = 0x80000000
+    constante SW_RDY = 0x40000000
+    constante CICLO_ESPERA = 0x02000000         ; (bits 27-25: 1, esperar; 2, con índice; 4, parar)
+    constante CICLO_ÍNDICE = 0x04000000
+    constante CICLO_PARA = 0x08000000
+    constante HW_FASE_ESPERA = 0x4000
+    constante HW_LISTO = 0x0800
+    constante HW_NAK = 0x0400
+    constante HW_ACTIVO = 0x0200
+    constante PATILLA_VGA = 2
+    constante PATILLA_PANEL = 3
+    constante VUELTAS = 400000                  ; (mirar el estado: unos 100 ms en un PC de 2010)
+
+    variable gm: nat32                          ; dónde se ven los registros del GMBUS (0: no hay)
+
+    función lee_reg(r: nat32): nat32
+        variable p: puntero a nat32
+        p := puntero(gm + r)
+        devolver valor(p)
+    fin
+
+    función pon_reg(r: nat32, v: nat32)
+        variable p: puntero a nat32
+        p := puntero(gm + r)
+        valor(p) := v
+    fin
+
+    ; espera a que en GMBUS2 esté alguno de los bits de «qué» (o el NAK);
+    ; falso si no llega o si la pantalla no contesta
+    función espera(qué: nat32): bool
+        variable k, s: nat32
+        k := 0
+        mientras k < VUELTAS hacer
+            s := lee_reg(G2)
+            si s yb HW_NAK <> 0 entonces devolver falso fin
+            si s yb qué <> 0 entonces devolver cierto fin
+            k := k + 1
+        fin
+        devolver falso
+    fin
+
+    ; deja el GMBUS como estaba (tras un fallo, se le dice que lo olvide)
+    función suelta_gmbus(mal: bool)
+        variable k: nat32
+        si mal entonces
+            pon_reg(G1, SW_CLR_INT)
+            pon_reg(G1, 0)
+        fin
+        k := 0
+        mientras k < VUELTAS y lee_reg(G2) yb HW_ACTIVO <> 0 hacer k := k + 1 fin
+        pon_reg(G0, 0)
+    fin
+
+    ; los 128 octetos del EDID por la patilla «p» (desde el octeto 0 de la
+    ; dirección 50h, con un ciclo «con índice»). Falso si nadie contesta.
+    función por_gmbus(p: nat32): bool
+        variable i, v: nat32
+        si lee_reg(G2) yb HW_ACTIVO <> 0 entonces devolver falso fin      ; (alguien lo está usando)
+        pon_reg(G0, p)
+        pon_reg(G1, SW_RDY ob CICLO_ÍNDICE ob CICLO_ESPERA ob (128 << 16) ob (0x50 << 1) ob 1)
+        i := 0
+        mientras i < 128 hacer
+            si no espera(HW_LISTO) entonces
+                suelta_gmbus(cierto)
+                devolver falso
+            fin
+            v := lee_reg(G3)
+            e[i] := v yb 0xFF
+            e[i + 1] := (v >> 8) yb 0xFF
+            e[i + 2] := (v >> 16) yb 0xFF
+            e[i + 3] := v >> 24
+            i := i + 4
+        fin
+        si no espera(HW_FASE_ESPERA) entonces
+            suelta_gmbus(cierto)
+            devolver falso
+        fin
+        pon_reg(G1, SW_RDY ob CICLO_PARA)
+        suelta_gmbus(falso)
+        devolver cierto
+    fin
+
+    ; dónde está el GMBUS en la zona de registros de esa Intel (0: no se sabe,
+    ; o no se mira: los Bay Trail y Cherry Trail, con eDP, y las GMA de antes de la 945)
+    función sitio_gmbus(modelo: nat32): nat32
+        variable alto: nat32
+        alto := modelo >> 8
+        si alto = 0x27 o alto = 0x29 o alto = 0x2A o alto = 0x2E o alto = 0xA0 entonces devolver 0x5100 fin
+        si modelo = 0x0F31 o (modelo >= 0x22B0 y modelo <= 0x22B3) entonces devolver 0 fin
+        si alto <= 0x26 y alto >= 0x25 entonces devolver 0 fin
+        si alto = 0x35 o alto = 0x33 entonces devolver 0 fin
+        devolver 0xC5100
+    fin
+
+    ; ¿están bien los 128 octetos? (la cabecera 00 FF FF FF FF FF FF 00 y la
+    ; suma, que da 0)
+    función vale(): bool
+        variable i, s: nat32
+        si e[0] <> 0 o e[7] <> 0 entonces devolver falso fin
+        para i desde 1 hasta 6 hacer
+            si e[i] <> 0xFF entonces devolver falso fin
+        fin
+        s := 0
+        para i desde 0 hasta 127 hacer s := s + nat32(e[i]) fin
+        devolver s yb 0xFF = 0
+    fin
+
+    ; lo que dicen los 128 octetos: la nativa (la primera medida detallada),
+    ; lo más grande (en un panel digital, la nativa; en uno analógico, la
+    ; más grande de sus medidas) y el nombre (el descriptor FCh)
+    función saca_medidas()
+        variable i, k, a, c, h, d: nat32
+        nativa_an := nat32(e[56]) ob ((nat32(e[58]) yb 0xF0) << 4)
+        nativa_al := nat32(e[59]) ob ((nat32(e[61]) yb 0xF0) << 4)
+        digital := e[20] yb 0x80 <> 0
+        máx_an := nativa_an
+        máx_al := nativa_al
+        nombre_monitor[0] := 0
+        para k desde 0 hasta 3 hacer
+            d := 54 + k * 18
+            si e[d] = 0 y e[d + 1] = 0 entonces
+                si e[d + 3] = 0xFC entonces
+                    i := 0
+                    mientras i < 13 y e[d + 5 + i] <> 0x0A y e[d + 5 + i] >= ' ' hacer
+                        nombre_monitor[i] := e[d + 5 + i]
+                        i := i + 1
+                    fin
+                    mientras i > 0 y nombre_monitor[i - 1] = ' ' hacer i := i - 1 fin
+                    nombre_monitor[i] := 0
+                fin
+            sino si no digital entonces
+                a := nat32(e[d + 2]) ob ((nat32(e[d + 4]) yb 0xF0) << 4)
+                h := nat32(e[d + 5]) ob ((nat32(e[d + 7]) yb 0xF0) << 4)
+                si a > máx_an entonces máx_an := a fin
+                si h > máx_al entonces máx_al := h fin
+            fin
+        fin
+        si no digital entonces
+            para i desde 0 hasta 7 hacer
+                a := nat32(e[38 + i * 2])
+                c := nat32(e[39 + i * 2])
+                si a > 1 entonces
+                    a := (a + 31) * 8
+                    según c >> 6
+                        caso 0: h := a * 10 div 16
+                        caso 1: h := a * 3 div 4
+                        caso 2: h := a * 4 div 5
+                        si no: h := a * 9 div 16
+                    fin
+                    si a > máx_an entonces máx_an := a fin
+                    si h > máx_al entonces máx_al := h fin
+                fin
+            fin
+        fin
+    fin
+
+    función copia_edid(p: puntero a byte)
+        variable i: nat32
+        para i desde 0 hasta 127 hacer e[i] := p[i] fin
+    fin
+
+    ; lo mira una vez (las demás, da lo de la primera). Cierto si se sabe.
+    público función mira_edid(): bool
+        variable a, id, base, sitio, v, alto: nat32
+        si mirado entonces devolver hay_edid fin
+        mirado := cierto
+        hay_edid := falso
+        de_dónde[0] := 0
+        a := pci_busca(0x030000, 0xFF0000, NO_HAY_PCI)
+        mientras a <> NO_HAY_PCI y no hay_edid hacer
+            id := pci_leer(a, 0)
+            ; 1. QEMU: en su tercera zona PCI
+            si id = 0x11111234 entonces
+                base := pci_leer(a, 0x18)
+                si base yb 1 = 0 y base yb 0xFFFFFFF0 <> 0 entonces
+                    v := mapear_aparato(base yb 0xFFFFFFF0, 256)
+                    si v <> 0 entonces
+                        copia_edid(puntero(v))
+                        si vale() entonces
+                            hay_edid := cierto
+                            Textos32.copiar(de_dónde, "la tarjeta de QEMU")
+                        fin
+                    fin
+                fin
+            fin
+            ; 2. Intel: por el DDC, con el GMBUS
+            si id yb 0xFFFF = 0x8086 entonces
+                sitio := sitio_gmbus(id >> 16)
+                base := pci_leer(a, 0x10)
+                alto := 0
+                si base yb 6 = 4 entonces alto := pci_leer(a, 0x14) fin      ; (de 64 bits: tiene que estar por debajo de 4 GB)
+                si sitio <> 0 y base yb 1 = 0 y alto = 0 y base yb 0xFFFFFFF0 <> 0 y pci_leer(a, 4) yb 2 <> 0 entonces
+                    gm := mapear_aparato((base yb 0xFFFFFFF0) + sitio, 0x30)
+                    si gm <> 0 entonces
+                        si por_gmbus(PATILLA_PANEL) y vale() entonces
+                            hay_edid := cierto
+                            Textos32.copiar(de_dónde, "el panel, por el GMBUS de Intel")
+                        sino si por_gmbus(PATILLA_VGA) y vale() entonces
+                            hay_edid := cierto
+                            Textos32.copiar(de_dónde, "el VGA, por el GMBUS de Intel")
+                        fin
+                    fin
+                fin
+            fin
+            a := pci_busca(0x030000, 0xFF0000, a)
+        fin
+        si hay_edid entonces
+            saca_medidas()
+            si nativa_an < 320 o nativa_al < 200 entonces hay_edid := falso fin
+        fin
+        si hay_edid entonces
+            escribir("edid: ", nombre_monitor, ", hecha para ", nativa_an, "x", nativa_al, "; lo más: ", máx_an, "x", máx_al, " (", de_dónde, ")\n")
+        sino
+            escribir("edid: la pantalla no dice su medida\n")
+        fin
+        devolver hay_edid
+    fin
+
+fin Edid.

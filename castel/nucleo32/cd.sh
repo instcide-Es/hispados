@@ -60,7 +60,7 @@ G
   }
   entrada "Arrancar Hispa-Pentium 0.8 sin instalar (desde el CD)" ESCRIT8.BIN "escritorio unidad=M" "$MODULOS"
   entrada "Instalar Hispa-Pentium 0.8 en el disco duro" SEMILLA.BIN "instalar unidad=M" "$INSTALA"
-  entrada "Sin instalar, a la medida de la pantalla" ESCRIT8.BIN "escritorio unidad=M" "$MODULOS" auto
+  entrada "Sin instalar, a la medida de la pantalla" ESCRIT8.BIN "escritorio unidad=M amedida" "$MODULOS" auto
   entrada "Sin instalar, sin USB, discos, red ni ACPI (por si no arranca)" ESCRIT8.BIN "escritorio unidad=M sindisco sinusb sinred sinacpi" "$MODULOS"
   entrada "El interprete de ordenes (modo texto)" SEMILLA.BIN "ordenes unidad=M" "$MODULOS"
   cat <<'G'

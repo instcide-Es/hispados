@@ -34,7 +34,7 @@
 ; =============================================================================
 módulo Dispositivos
 
-    importar Cpu, Pci, Tareas, Paginas, Mem32, Textos32, Formato, Multiboot, Ata, Ahci, Discos, Unidades, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Video, Raton, Red, Energia
+    importar Cpu, Pci, Tareas, Paginas, Mem32, Textos32, Formato, Multiboot, Ata, Ahci, Discos, Unidades, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Video, Raton, Red, Energia, Edid
 
     ; ---- los buses ----
     público constante BUS_PCI = 1
@@ -110,6 +110,8 @@ módulo Dispositivos
     variable cpu_r: arreglo [4] de nat32
     variable buf: arreglo [256] de byte
     variable vga_vista: bool
+    variable k_pantalla: nat32                  ; (EDID) la tarjeta de la pantalla en la lista (SIN_PADRE: ninguna)
+    variable es_pantalla: bool
 
     ; -------------------------------------------------------------------------
     ;  Los puertos (leer el 8042 y la zona de datos de la BIOS)
@@ -425,6 +427,7 @@ módulo Dispositivos
         si sub = 0x03 entonces
             si lleva_pantalla() entonces
                 lleva(EST_FUNCIONA, "video.cas")
+                es_pantalla := cierto       ; (EDID) el monitor cuelga de ella
                 dd[0] := nat32(pantalla.ancho)
                 dd[1] := nat32(pantalla.alto)
                 dd[2] := bits_pantalla
@@ -490,8 +493,10 @@ módulo Dispositivos
             si uno.dato1 <> 0 y k yb 0xFF <> 0xFF y k yb 0xFF <> 0 entonces uno.irq := k yb 0xFF fin
             si cab = 0 entonces zonas(a, 6) sino si cab = 1 entonces zonas(a, 2) sino zonas(a, 1) fin
             uno.padre := puentes[(a >> 16) yb 31]
+            es_pantalla := falso
             quién_lo_lleva(a)
             k := añade()
+            si es_pantalla entonces k_pantalla := k fin
             ; un puente PCI-PCI: lo de su bus de detrás cuelga de él
             si cab = 1 entonces
                 bus2 := pci_leer8(a, 0x19)
@@ -762,6 +767,24 @@ módulo Dispositivos
         uno.irq := irq
     fin
 
+    ; (EDID) el monitor (o el panel del portátil), colgado de la tarjeta, si
+    ; ha dicho quién es (su EDID: edid.cas): su nombre y la medida para la
+    ; que está hecho. Solo se lee lo que ya se miró al poner el escritorio.
+    función mira_monitor()
+        si k_pantalla = SIN_PADRE o no hay_edid entonces devolver fin
+        empieza(BUS_PLACA, 0x0300)
+        uno.clase := 0x038000
+        uno.padre := k_pantalla
+        dd[0] := nat32(dirección(nombre_monitor[0]))
+        si nombre_monitor[0] <> 0 entonces formatear(uno.nombre, 48, "Monitor: %s", dd) sino Textos32.copiar(uno.nombre, "Monitor") fin
+        dd[0] := nativa_an
+        dd[1] := nativa_al
+        dd[2] := nat32(dirección(de_dónde[0]))
+        formatear(uno.detalle, 80, "hecho para %u x %u (EDID: %s)", dd)
+        lleva(EST_FUNCIONA, "edid.cas")
+        añade()
+    fin
+
     función mira_placa()
         variable k, base: nat32
         variable bda: puntero a nat16
@@ -973,7 +996,9 @@ módulo Dispositivos
         cabe := c
         n := 0
         vga_vista := falso
+        k_pantalla := SIN_PADRE
         mira_pci()
+        mira_monitor()
         mira_usb()
         mira_discos()
         mira_placa()
