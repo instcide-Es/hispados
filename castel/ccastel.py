@@ -27,6 +27,10 @@
 #  interrupción() con registros por nombre, acarreo(), reg_bx()...; y las
 #  funciones de bajo nivel (puertos y memoria lejana).
 #
+#  Y, con «modelo núcleo», «hispa32» o «usuario», 32 bits (Generador32,
+#  CASTEL32.md); con «modelo linux64» o «núcleo64», 64 bits: x86-64, nat64 y
+#  ent64 (Generador64, CASTEL64.md).
+#
 #  Las partes: 1) léxico, 2) sintáctico (árbol), 3) tipos y comprobaciones,
 #  4) generación de NASM, 5) los archivos (el programa y los módulos que importa:
 #  todo acaba en un solo .asm). (Los saltos condicionales del 8086 solo llegan a

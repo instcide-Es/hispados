@@ -150,7 +150,6 @@ movsx rsi, word [rbp-8]
 movsx rcx, word [dato]
 movsxd rsi, dword [rbp-8]
 movsxd rcx, dword [dato]
-movsxd rax, eax
 ; la pila
 push rax
 push rbx
@@ -178,7 +177,7 @@ jmp r8
 jmp [dato]
 x1: jmp x1
 x2: jz x2
-x3: jne near x3
+x3: jne strict near x3
 ret
 ret 16
 iretq

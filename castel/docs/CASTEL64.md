@@ -342,7 +342,10 @@ minutos; sin emular nada salvo Hispa-64):
 - los ejemplos de 16 bits sin DOS, como programas de `linux64`, escriben lo mismo;
   `ejemplos64/` dan su salida esperada y su código; cuentas al azar de 64 bits;
 - CASTEL64 frente a ccastel.py en todos los programas de las pruebas (y los errores,
-  con `ejemplos64/errores`); `ensambla.py` y ENSAMB64 frente a NASM;
+  con `ejemplos64/errores`), y CASTEL32 (con corre32) en los de 64 bits; `ensambla.py`
+  y ENSAMB64 frente a NASM (el de aquí, 2.16, y el del PC de Albinyana, 3.01: dan lo
+  mismo con lo que saca el compilador; en `formas64.asm`, NASM 3 cambia `movsxd rax,
+  eax` por `cdqe` y acorta los `near` sin `strict`, así que ahí no están);
 - el arranque en tres pasos;
 - Hispa-64 en QEMU por multiboot y, si está `grub-mkrescue`, por multiboot2 con GRUB.
 

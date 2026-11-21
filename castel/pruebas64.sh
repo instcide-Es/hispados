@@ -146,6 +146,22 @@ done
 t1=$(date +%s.%N)
 if [ -z "$mal" ]; then ok "CASTEL64 saca el mismo ensamblador que ccastel.py en los $bien programas (ejemplos de 16, 32 y 64 bits, biblioteca entera, ENSAMBLA, cuentas al azar, el núcleo de Hispa-Pentium y sus programas, CASTEL, CASTEL32, ENSAMB32, CASTEL64 y ENSAMB64; $(tiempo $t0 $t1) en todo)"
 else ko "CASTEL64 no saca lo mismo que ccastel.py en:$mal"; fi
+# CASTEL32 (el de Hispa-Pentium, aquí con corre32) también saca 64 bits: lo mismo
+# que ccastel.py en los programas de 64 bits y el núcleo de Hispa-64
+if command -v gcc > /dev/null && python3 -I $AQUI/ccastel.py $AQUI/compilador/32/pentium/castel32.cas -o $W/castel32.asm \
+     -I $AQUI/compilador/32 -I $AQUI/biblioteca32/pentium -I $AQUI/compilador -I $AQUI/nucleo32 > /dev/null 2>&1 \
+   && nasm -f bin $W/castel32.asm -o $W/castel32.bin 2> /dev/null; then
+  cp $AQUI/nucleo64/hola.cas $F/EJ64/HOLA.CAS
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo64/hola.cas -o $W/ref/HOLA.ASM > /dev/null 2>&1
+  bien=0; mal=
+  for f in $AQUI/ejemplos64/*.cas $W/azar64.cas $AQUI/nucleo64/hola.cas; do
+    N=$(up $f)
+    (cd $F/EJ64 && $AQUI/corre32/corre32.sh -C $F $W/castel32.bin $N.CAS -o \\S\\$N.A32 -I \\B64 -I \\BIB > $F/S/$N.S32 2>&1)
+    if cmp -s $W/ref/$N.ASM $F/S/$N.A32; then bien=$((bien + 1)); else mal="$mal $N"; fi
+  done
+  if [ -z "$mal" ]; then ok "CASTEL32 (el de Hispa-Pentium, con corre32) también saca 64 bits: lo mismo que ccastel.py en los $bien programas de 64 bits (Hispa-64 incluido)"
+  else ko "CASTEL32 no saca lo mismo que ccastel.py en los de 64 bits:$mal"; fi
+fi
 # los errores: los mismos mensajes, con su línea y su columna
 bien=0; mal=
 for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas $AQUI/ejemplos64/errores/*.cas; do
