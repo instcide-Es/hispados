@@ -7,10 +7,11 @@
  *       .ndb .ldb .fp .sfp .ign2, .cvd/.cld o FIRMAS.ESC): una línea por
  *       archivo, «RUTA: NOMBRE ENCONTRADO» o «RUTA: limpio»; -t dice lo que
  *       tarda (MB/s); -z no mira dentro de los ZIP
- *   escudo-anfitrion -f ... -o FIRMAS.ESC [-F] [-d AAAAMMDD] [-l MB]
- *       hace FIRMAS.ESC con lo cargado (-F: los nombres de las sumas, por familia;
- *       -l: que no pase de tantos MB, dejando primero las sumas de main;
- *       -O main|dia: solo lo que viene de main.cvd, o solo lo demás)
+ *   escudo-anfitrion -f ... -o FIRMAS.ESC [-F] [-d AAAAMMDD]
+ *       hace FIRMAS.ESC (la versión 2: motor.c) con lo cargado (-F: los nombres
+ *       de las sumas, por familia). Lo que va y lo que no, lo decide antes
+ *       tools/escudo_firmas.py. -v MAIN DAILY BYTECODE: sus versiones de ClamAV;
+ *       -k CARPETA: archivos limpios (los disparadores evitan lo que sale en ellos)
  *   escudo-anfitrion -c ARCHIVO.cvd
  *       solo comprueba la firma digital de un .cvd y dice su cabecera
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
@@ -80,6 +81,38 @@ void pl_apunta(const char *f, ...)
 	fputc('\n', stderr);
 }
 
+static u32 corpus_leido;
+static void lee_corpus(const char *r)
+{
+	struct stat s;
+	if (corpus_leido > (300u << 20) || stat(r, &s))
+		return;
+	if (S_ISDIR(s.st_mode)) {
+		DIR *d = opendir(r);
+		struct dirent *e;
+		if (!d)
+			return;
+		while ((e = readdir(d))) {
+			char n[4096];
+			if (e->d_name[0] == '.')
+				continue;
+			snprintf(n, sizeof n, "%s/%s", r, e->d_name);
+			lee_corpus(n);
+		}
+		closedir(d);
+	} else if (S_ISREG(s.st_mode) && s.st_size > 0 && s.st_size < (64 << 20)) {
+		FILE *f = fopen(r, "rb");
+		u8 *b = malloc((size_t)s.st_size);
+		if (f && b && fread(b, 1, (size_t)s.st_size, f) == (size_t)s.st_size) {
+			motor_corpus(b, (u32)s.st_size);
+			corpus_leido += (u32)s.st_size;
+		}
+		free(b);
+		if (f)
+			fclose(f);
+	}
+}
+
 static int encontrados, revisados;
 static double octetos;
 
@@ -123,8 +156,7 @@ int main(int argc, char **argv)
 	info_firmas inf;
 	const char *salida = 0;
 	int familias = 0, tiempo = 0, i, n_rutas = 0;
-	u32 fecha = 0, t0, limite = 0;
-	int origen = 0;
+	u32 fecha = 0, t0;
 	const char *rutas[4096];
 	memset(&inf, 0, sizeof inf);
 	motor_inicia();
@@ -143,18 +175,22 @@ int main(int argc, char **argv)
 			motor_guarda_lineas = 1;
 		} else if (!strcmp(argv[i], "-F"))
 			familias = 1;
-		else if (!strcmp(argv[i], "-l") && i + 1 < argc)
-			limite = (u32)atoi(argv[++i]) << 20;
-		else if (!strcmp(argv[i], "-O") && i + 1 < argc) {
-			i++;
-			origen = !strcmp(argv[i], "main") ? 1 : !strcmp(argv[i], "dia") ? 2 : 0;
-		} else if (!strcmp(argv[i], "-q"))
+		else if (!strcmp(argv[i], "-q"))
 			callado = 1;
-		else if (!strcmp(argv[i], "-d") && i + 1 < argc)
+		else if (!strcmp(argv[i], "-v") && i + 3 < argc) {	/* las versiones de ClamAV de lo que va en el .ESC */
+			inf.version_main = (u32)atoi(argv[++i]);
+			inf.version_daily = (u32)atoi(argv[++i]);
+			inf.version_bytecode = (u32)atoi(argv[++i]);
+		} else if (!strcmp(argv[i], "-d") && i + 1 < argc)
 			fecha = (u32)atoi(argv[++i]);
 		else if (!strcmp(argv[i], "-m") && i + 1 < argc)
 			motor_max_archivo = (u32)atoi(argv[++i]) << 20;
-		else if (!strcmp(argv[i], "-z"))
+		else if (!strcmp(argv[i], "-k") && i + 1 < argc)
+			lee_corpus(argv[++i]);
+		else if (!strcmp(argv[i], "-D")) {
+			extern int motor_depura;
+			motor_depura++;
+		} else if (!strcmp(argv[i], "-z"))
 			motor_zip = 0;
 		else if (!strcmp(argv[i], "-t"))
 			tiempo = 1;
@@ -183,7 +219,7 @@ int main(int argc, char **argv)
 	if (salida) {
 		if (!fecha)
 			fecha = inf.fecha;
-		if (motor_escribe_esc(salida, familias, fecha, limite, origen)) {
+		if (motor_escribe_esc(salida, familias, fecha)) {
 			fprintf(stderr, "escudo: no se puede escribir %s\n", salida);
 			return 2;
 		}
@@ -193,8 +229,9 @@ int main(int argc, char **argv)
 		revisa_ruta(rutas[i]);
 	if (tiempo) {
 		u32 ms = pl_ms() - t0;
-		fprintf(stderr, "escudo: %d archivos, %.1f MB en %u ms: %.1f MB/s\n", revisados, octetos / 1048576.0, ms,
-			ms ? octetos / 1048576.0 / (ms / 1000.0) : 0.0);
+		extern u32 motor_disparos, motor_leidas;
+		fprintf(stderr, "escudo: %d archivos, %.1f MB en %u ms: %.1f MB/s (disparadores: %u; firmas leídas del disco: %u)\n",
+			revisados, octetos / 1048576.0, ms, ms ? octetos / 1048576.0 / (ms / 1000.0) : 0.0, motor_disparos, motor_leidas);
 	}
 	return encontrados ? 1 : 0;
 }

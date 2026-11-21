@@ -116,7 +116,11 @@ void lee_opciones(void)
 	op.zip = si_no(t, "zip", 1);
 	op.cuarentena_sola = si_no(t, "cuarentena_sola", 0);
 	op.actualizar_solo = si_no(t, "actualizar_solo", 1);
-	op.max_mb = valor_ini(t, "max_mb", v, sizeof v) ? numero(v) : 16;
+	/* de fábrica, según la memoria: 4 MB con 64, 8 con 128, 16 con más */
+	{
+		u32 megas = sc(SC_DATO, 1, 0, 0) / 256;
+		op.max_mb = valor_ini(t, "max_mb", v, sizeof v) ? numero(v) : megas <= 72 ? 4 : megas <= 144 ? 8 : 16;
+	}
 	if (op.max_mb < 1 || op.max_mb > 128)
 		op.max_mb = 16;
 	op.ultima_act = valor_ini(t, "ultima_act", v, sizeof v) ? numero(v) : 0;
@@ -661,22 +665,28 @@ int apaga_ssh(void)
 	return c == 0 ? 0 : -1;
 }
 
-/* las firmas nuevas: los paquetes «escbase» y «escdia» (tools/escudo_firmas.py
- * los hace en el VPS con las bases de ClamAV; el catálogo va firmado) */
+/* las firmas nuevas: los paquetes «escbase» (de main.cvd), «escmes» (de
+ * daily.cvd, cada mes) y «escdia» (lo nuevo de cada día): los hace
+ * tools/escudo_firmas.py en el VPS con las bases de ClamAV; el catálogo va
+ * firmado. La primera vez, PAQUETES INSTALA escdia (trae los otros dos, que
+ * necesita); luego, PAQUETES ACTUALIZA de los tres */
 int actualiza_firmas(void)
 {
-	char r[RUTA];
+	char r[RUTA], q[RUTA];
+	const char *orden;
 	u32 t, c;
 	formatear(r, RUTA, "%c:\\HISPA\\PAQUETES.BIN", unidad_sistema());
 	if (!existe(r))
 		return -2;
+	formatear(q, RUTA, "%c:\\HISPA\\PAQUETES\\ESCDIA.PQI", unidad_sistema());
+	orden = existe(q) ? "ACTUALIZA escbase escmes escdia" : "INSTALA escdia";
 	op.ultima_act = fecha_hoy();
 	guarda_opciones();
-	t = sc(SC_LANZAR, (u32)r, (u32)"ACTUALIZA escbase escdia", 0);
+	t = sc(SC_LANZAR, (u32)r, (u32)orden, 0);
 	if (ES_ERROR(t))
 		return -1;
 	c = sc(SC_ESPERAR, t, 0, 0);
-	apunta("actualizar las firmas (PAQUETES ACTUALIZA escbase escdia): %s", c == 0 ? "hecho" : "no ha podido");
+	apunta("actualizar las firmas (PAQUETES %s): %s", orden, c == 0 ? "hecho" : "no ha podido");
 	if (c == 0) {
 		motor_suelta();
 		firmas_cargadas = 0;

@@ -280,8 +280,8 @@ OPCIONALES = [
      + [('NAVEGA/FUENTES/' + n, '\\HISPA\\NAVEGA\\FUENTES\\' + n) for n in NAVEGA_FUENTES]
      + [('NAVEGA.MNU', r'\HISPA\MENU\NAVEGA.MNU'), ('NAVEGA.ICP', r'\HISPA\MENU\NAVEGA.ICP')]),
     # (ESCUDO) el antivirus (castel/nucleo32/escudo/paquete.sh). Sus firmas, aparte
-    # (los paquetes «escbase» y «escdia», que hace cada día tools/escudo_firmas.py)
-    ('escudo', '0.1', 'Escudo: el antivirus (con las firmas de ClamAV), para el equipo y para revisar memorias USB',
+    # (los paquetes «escbase», «escmes» y «escdia», que hace tools/escudo_firmas.py)
+    ('escudo', '0.2', 'Escudo: el antivirus (con las firmas de ClamAV), para el equipo y para revisar memorias USB',
      'base >= 0.8.3, red >= 0.8.1, tls >= 0.8.1', [
         ('ESCUDO.BIN', r'\HISPA\ESCUDO.BIN'), ('ESCUDO/LEEME.TXT', r'\HISPA\ESCUDO\LEEME.TXT'),
         ('MENU/ESCUDO.MNU', r'\HISPA\MENU\ESCUDO.MNU'), ('MENU/ESCUDO.ICP', r'\HISPA\MENU\ESCUDO.ICP')]),

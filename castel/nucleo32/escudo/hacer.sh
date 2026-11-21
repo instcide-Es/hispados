@@ -1,7 +1,7 @@
 #!/bin/bash
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 # nucleo32/escudo/hacer.sh CARPETA
-# nucleo32/escudo/hacer.sh --anfitrion SALIDA
+# nucleo32/escudo/hacer.sh --anfitrion [SALIDA]
 # Hace Escudo, el antivirus de Hispa-Pentium (docs/PENTIUM.md, «Escudo»), y
 # deja en CARPETA lo que va en \HISPA: ESCUDO.BIN (el motor, las órdenes y la
 # ventana: un programa del anillo 3, en C), ESCUDO\LEEME.TXT y, en
@@ -19,7 +19,7 @@ BEAR="rsa_i31_pub i31_decode i31_encode i31_bitlen i31_ninv31 i31_modpow2 i31_mo
 MOTOR="motor inflar cvd sumas"
 cd "$RAIZ"
 if [ "${1:-}" = --anfitrion ]; then
-  SAL=$(readlink -f "${2:?uso: hacer.sh --anfitrion SALIDA}")
+  SAL=$(readlink -m "${2:-build/escudo-anfitrion/escudo-anfitrion}")
   O=build/escudo-anfitrion
   mkdir -p $O
   for f in $BEAR; do
@@ -28,7 +28,9 @@ if [ "${1:-}" = --anfitrion ]; then
   objs=
   for f in $BEAR; do objs="$objs $O/$f.o"; done
   # shellcheck disable=SC2086
-  gcc -O2 -g -Wall -Wno-unused-parameter -I$AQUI -Iterceros/bearssl/inc $(for f in $MOTOR anfitrion; do echo $AQUI/$f.c; done) $objs -o "$SAL"
+  gcc -O2 -g -Wall -Wno-unused-parameter -DESCUDO_ANFITRION -I$AQUI -Iterceros/bearssl/inc $(for f in $MOTOR anfitrion; do echo $AQUI/$f.c; done) $objs -lz -o "$SAL" \
+    || { echo "hacer.sh: no se ha podido hacer escudo-anfitrion (hace falta gcc y la zlib: zlib1g-dev)"; exit 1; }
+  echo "hacer.sh: $SAL"
   exit 0
 fi
 SAL=$(readlink -f "${1:?uso: hacer.sh CARPETA}")

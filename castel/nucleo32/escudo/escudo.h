@@ -18,7 +18,7 @@ typedef uint32_t u32;
 typedef int32_t i32;
 typedef uint64_t u64;
 
-#define ESCUDO_VERSION "0.1"
+#define ESCUDO_VERSION "0.2"
 /* el «nivel de funciones» de ClamAV que dice tener el motor: las firmas que
  * piden uno mayor se dejan (como hace ClamAV); las de uno menor se leen si
  * su formato se entiende (lo que no, se cuenta como «no soportado») */
@@ -146,7 +146,8 @@ int motor_revisa_memoria(const u8 *d, u32 n, const char *nombre, resultado *r);
 extern u32 motor_max_archivo;
 extern int motor_zip;			/* mirar dentro de los ZIP */
 /* hacer FIRMAS.ESC con lo cargado (anfitrion.c y ESCUDO /CONVIERTE) */
-int motor_escribe_esc(const char *ruta, int familias, u32 fecha, u32 limite, int origen);	/* limite: octetos (0: sin)*/
+int motor_escribe_esc(const char *ruta, int familias, u32 fecha);
+void motor_corpus(const u8 *d, u32 n);	/* (al hacer FIRMAS.ESC) un archivo limpio, para elegir los disparadores */	/* limite: octetos (0: sin)*/
 
 /* ---- los .cvd (cvd.c) ---- */
 typedef struct cabecera_cvd {

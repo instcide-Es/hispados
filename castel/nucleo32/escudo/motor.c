@@ -89,12 +89,28 @@ static int redispersa(void)
 	return 1;
 }
 
+/* lo de leer una firma sola (de un disparador, o para hacer los disparadores) */
+#define ID_TEMPORAL 0xFF0000u		/* + n: el nombre n de los de un momento */
+#define MAX_TEMPORALES 512
+#define HALLADA_TEMPORAL 0xFFFFFFFEu
+static int modo_temporal;
+static char tnombres[MAX_TEMPORALES][MAX_NOMBRE_VIRUS], nombre_hallado[MAX_NOMBRE_VIRUS];
+static u32 n_tnombres;
+#define nombre_temporal (tnombres[0])
+
 /* el número de un nombre (lo apunta si es nuevo); INF si no hay memoria */
 static u32 nombre_id(const char *s, u32 n)
 {
 	u32 h, id;
 	if (n >= MAX_NOMBRE_VIRUS)
 		n = MAX_NOMBRE_VIRUS - 1;
+	if (modo_temporal) {	/* (una firma leída un momento: su nombre, aparte) */
+		if (n_tnombres >= MAX_TEMPORALES)
+			return INF;
+		memcpy(tnombres[n_tnombres], s, n);
+		tnombres[n_tnombres][n] = 0;
+		return ID_TEMPORAL + n_tnombres++;
+	}
 	if ((n_nombres + 1) * 2 > cap_disp && !redispersa())
 		return INF;
 	h = suma_texto(s, n) & (cap_disp - 1);
@@ -132,36 +148,46 @@ static u32 n_sumas, cap_sumas;
 static u32 n_comodin_ram;		/* las de cualquier tamaño, al final (tras ordenar) */
 static u32 tipos_comodin;		/* (bits 1 << tipo) */
 
-/* los FIRMAS.ESC: el índice propio (en el disco; solo se lee lo que hace
- * falta). Puede haber varios: el de la base (BASE.ESC, de main.cvd) y el
- * del día (DIA.ESC, de daily.cvd), cada uno de su paquete. */
-#define ESC_POR_PAGINA 256
+/* los FIRMAS.ESC (versión 2): el índice propio, en el disco. Puede haber
+ * varios: el de la base (BASE.ESC) y el del día (DIA.ESC), cada uno de su
+ * paquete. De cada uno, en memoria, solo lo pequeño: el mapa de los tamaños,
+ * la página de cada 256 tramos, la tabla de los bloques del cuerpo y sus
+ * disparadores (que van todos juntos, en «disps»). El formato, en
+ * motor_escribe_esc. */
+#define TRAMOS_POR_PAGINA 256
 #define MAX_ESC 4
+#define BLOQUE 32768u		/* (lo que mide como mucho un bloque del cuerpo, descomprimido) */
+typedef struct tramo { u32 tam, tipo, primero, cuantos; } tramo;
 typedef struct esc {
 	int h;
-	u32 n, off, idx, blob, paginas;
-	u32 *pag;			/* el primer tamaño de cada página */
-	u8 *bits;			/* 1 << 20 bits: ¿hay alguna con este tamaño? */
-	suma *comodin;
+	u32 n_sumas, off_sumas, n_tramos, off_tramos, paginas, nbits;
+	u32 idx, blob;
+	u32 *pag;			/* el tamaño del primer tramo de cada página */
+	u8 *bits;			/* 1 << 21 bits: ¿hay alguna suma con este tamaño? */
+	tramo *comodin;			/* los tramos de cualquier tamaño (en memoria) */
 	u32 n_comodin;
-	suma cache[ESC_POR_PAGINA];
+	u32 n_bloques;
+	u32 *bloques;			/* dónde empieza cada bloque del cuerpo (n_bloques + 1) */
+	tramo cache[TRAMOS_POR_PAGINA];
 	u32 cache_pag;
 } esc;
 static esc escs[MAX_ESC];
 static int n_escs;
 static esc *E;				/* el que se está mirando */
-#define esc_h (E->h)
-#define esc_n (E->n)
-#define esc_off (E->off)
-#define esc_idx (E->idx)
-#define esc_blob (E->blob)
-#define esc_paginas (E->paginas)
-#define esc_pag (E->pag)
-#define esc_bits (E->bits)
-#define esc_comodin (E->comodin)
-#define esc_n_comodin (E->n_comodin)
-#define esc_cache (E->cache)
-#define esc_cache_pag (E->cache_pag)
+
+/* los disparadores: 4 octetos fijos (y hasta 2 más) de una firma del cuerpo
+ * que está en el disco; si aparecen, se lee la firma y se mira entera */
+typedef struct disp { u32 clave, ref, sl; } disp;	/* sl: los 3 de detrás, cuántos valen (<< 24) y el .ESC (<< 28) */
+#define D_SIGUE(d) ((d)->sl & 0xFFFFFF)
+#define D_LARGO(d) (((d)->sl >> 24) & 3)
+#define D_ESC(d) ((d)->sl >> 28)
+#define D_SOLO_PE 0x04000000u		/* (en sl) la firma es solo de ejecutables PE */
+static disp *disps;
+static u32 n_disps, cap_disps;
+static u8 *mapa4;			/* 1 << 23 bits */
+static u32 *cubo4;			/* (1 << 16) + 1 */
+static u32 h4(u32 k) { return (k ^ (k >> 7) ^ (k >> 17) ^ (k >> 27)) & 0x7FFFFF; }
+
 
 static int compara_suma(const suma *a, const suma *b)
 {
@@ -200,73 +226,81 @@ static void ordena_sumas(suma *v, u32 n)
 	}
 }
 
-static u32 bit_tam(u32 tam) { return (tam * 2654435761u) >> 12; }
 
 static u32 le32(const u8 *p) { return p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24; }
 static u16 le16(const u8 *p) { return (u16)(p[0] | p[1] << 8); }
 static void pon32(u8 *p, u32 v) { p[0] = (u8)v, p[1] = (u8)(v >> 8), p[2] = (u8)(v >> 16), p[3] = (u8)(v >> 24); }
 
+/* el bit del mapa de los tamaños (de «bits» bits: 21 en uno grande, 16 en uno pequeño) */
+static u32 bit_tam2(u32 tam, u32 bits) { return (tam * 2654435761u) >> (32 - bits); }
+
+/* la página «pg» de los tramos de E, a su caché */
 static int esc_pagina(u32 pg)
 {
 	u32 n, i;
-	u8 b[ESC_POR_PAGINA * 16];
-	if (pg == esc_cache_pag)
+	u8 b[TRAMOS_POR_PAGINA * 16];
+	if (pg == E->cache_pag)
 		return 1;
-	n = esc_n - pg * ESC_POR_PAGINA;
-	if (n > ESC_POR_PAGINA)
-		n = ESC_POR_PAGINA;
-	if (pl_mover(esc_h, esc_off + pg * ESC_POR_PAGINA * 16) < 0 || pl_leer(esc_h, b, n * 16) != (int)(n * 16))
+	n = E->n_tramos - E->n_comodin - pg * TRAMOS_POR_PAGINA;
+	if (n > TRAMOS_POR_PAGINA)
+		n = TRAMOS_POR_PAGINA;
+	if (pl_mover(E->h, E->off_tramos + pg * TRAMOS_POR_PAGINA * 12) < 0 || pl_leer(E->h, b, n * 12) != (int)(n * 12))
 		return 0;
 	for (i = 0; i < n; i++) {
-		esc_cache[i].tam = le32(b + 16 * i);
-		esc_cache[i].nt = le32(b + 16 * i + 4);
-		memcpy(esc_cache[i].h, b + 16 * i + 8, 8);
+		E->cache[i].tam = le32(b + 12 * i);
+		E->cache[i].tipo = le32(b + 12 * i + 4) & 0xFF;
+		E->cache[i].primero = le32(b + 12 * i + 4) >> 8;
+		E->cache[i].cuantos = le32(b + 12 * i + 8);
 	}
-	for (; i < ESC_POR_PAGINA; i++)
-		esc_cache[i].tam = INF, esc_cache[i].nt = 0;
-	esc_cache_pag = pg;
+	for (; i < TRAMOS_POR_PAGINA; i++)
+		E->cache[i].tam = INF, E->cache[i].cuantos = 0;
+	E->cache_pag = pg;
 	return 1;
 }
 
-/* las de ese tamaño en un FIRMAS.ESC (el de E) */
-typedef int (*con_suma)(void *yo, const suma *s);
-static int recorre_esc(u32 tam, con_suma f, void *yo)
+/* los tramos de E de ese tamaño (y los de cualquiera), a «f» */
+typedef int (*con_tramo)(void *yo, const tramo *t);
+static int recorre_esc(u32 tam, con_tramo f, void *yo)
 {
-	u32 a, b, m, i, pg;
-	for (i = 0; i < esc_n_comodin; i++)
-		if (f(yo, &esc_comodin[i]))
+	u32 a, b, m, i, pg, np = E->paginas;
+	for (i = 0; i < E->n_comodin; i++)
+		if (f(yo, &E->comodin[i]))
 			return 1;
-	if (esc_h < 0 || !esc_paginas || !(esc_bits[bit_tam(tam) >> 3] >> (bit_tam(tam) & 7) & 1))
+	if (E->h < 0 || !np || !(E->bits[bit_tam2(tam, E->nbits) >> 3] >> (bit_tam2(tam, E->nbits) & 7) & 1))
 		return 0;
-	a = 0, b = esc_paginas;
+	a = 0, b = np;
 	while (a < b) {			/* la primera página que empieza en >= tam */
 		m = (a + b) / 2;
-		if (esc_pag[m] < tam)
+		if (E->pag[m] < tam)
 			a = m + 1;
 		else
 			b = m;
 	}
 	pg = a ? a - 1 : 0;
-	for (; pg < esc_paginas && esc_pag[pg] <= tam; pg++) {
+	for (; pg < np && E->pag[pg] <= tam; pg++) {
 		if (!esc_pagina(pg))
 			return 0;
-		for (i = 0; i < ESC_POR_PAGINA; i++) {
-			if (esc_cache[i].tam > tam)
+		for (i = 0; i < TRAMOS_POR_PAGINA; i++) {
+			if (E->cache[i].tam > tam)
 				return 0;
-			if (esc_cache[i].tam == tam && f(yo, &esc_cache[i]))
+			if (E->cache[i].tam == tam && f(yo, &E->cache[i]))
 				return 1;
 		}
 	}
 	return 0;
 }
 
-/* recorre las sumas de ese tamaño (en memoria y en los FIRMAS.ESC), dándolas
- * a «f» (con E en el .ESC de la que se da; nulo si es de memoria) */
-static int recorre_tam(u32 tam, con_suma f, void *yo)
+static int junta_tipos_t(void *yo, const tramo *t)
 {
-	u32 a = 0, b = n_sumas - n_comodin_ram, m, i;
+	*(u32 *)yo |= 1u << (t->tipo & 0x1F);
+	return 0;
+}
+
+/* qué tipos de suma (bits 1 << tipo, con S_LIMPIA) hay para ese tamaño */
+static u32 tipos_de(u32 tam)
+{
+	u32 t = 0, a = 0, b = n_sumas - n_comodin_ram, m, i;
 	int k;
-	E = 0;
 	while (a < b) {
 		m = (a + b) / 2;
 		if (sumas[m].tam < tam)
@@ -275,55 +309,71 @@ static int recorre_tam(u32 tam, con_suma f, void *yo)
 			b = m;
 	}
 	for (i = a; i < n_sumas - n_comodin_ram && sumas[i].tam == tam; i++)
-		if (f(yo, &sumas[i]))
-			return 1;
-	for (i = n_sumas - n_comodin_ram; i < n_sumas; i++)
-		if (f(yo, &sumas[i]))
-			return 1;
+		t |= 1u << (sumas[i].nt & 0x1F);
 	for (k = 0; k < n_escs; k++) {
 		E = &escs[k];
-		if (recorre_esc(tam, f, yo))
-			return 1;
+		recorre_esc(tam, junta_tipos_t, &t);
 	}
-	E = 0;
-	return 0;
-}
-
-static int junta_tipos(void *yo, const suma *s)
-{
-	*(u32 *)yo |= 1u << (s->nt & 0x1F);
-	return 0;
-}
-
-/* qué tipos de suma (bits 1 << tipo, con S_LIMPIA) hay para ese tamaño */
-static u32 tipos_de(u32 tam)
-{
-	u32 t = 0;
-	recorre_tam(tam, junta_tipos, &t);
 	return t;
 }
 
-typedef struct busca_s { u32 tipo; const u8 *h; u32 nombre; int de_esc; } busca_s;
-static int compara_una(void *yo, const suma *s)
+/* busca en un tramo (en el disco: por la mitad, 8 octetos cada vez) */
+typedef struct busca_s { u32 tipo; const u8 *h; u32 nombre; } busca_s;
+static int busca_en_tramo(void *yo, const tramo *t)
 {
 	busca_s *b = yo;
-	if ((s->nt & 0x1F) == b->tipo && !memcmp(s->h, b->h, 8)) {
-		b->nombre = s->nt >> 8;
-		/* (las de memoria tienen su nombre en «arena»; las otras, en su FIRMAS.ESC) */
-		b->de_esc = E ? (int)(E - escs) + 1 : 0;
-		return 1;
+	u32 a = 0, z = t->cuantos;
+	if ((t->tipo & 0x1F) != b->tipo)
+		return 0;
+	while (a < z) {
+		u32 m = (a + z) / 2;
+		u8 e[8];
+		int c;
+		if (pl_mover(E->h, E->off_sumas + (t->primero + m) * 8) < 0 || pl_leer(E->h, e, 8) != 8)
+			return 0;
+		c = memcmp(e, b->h, 5);
+		if (!c) {
+			b->nombre = e[5] | (u32)e[6] << 8 | (u32)e[7] << 16;
+			return 1;
+		}
+		if (c < 0)
+			a = m + 1;
+		else
+			z = m;
 	}
 	return 0;
 }
 
-/* busca la suma (de ese tamaño o de cualquiera): su nombre, o INF */
+/* busca la suma (de ese tamaño o de cualquiera): su nombre, o INF; de_esc:
+ * 0 si es de memoria, k + 1 si es del FIRMAS.ESC k */
 static u32 busca_suma(u32 tam, u32 tipo, const u8 *h, int *de_esc)
 {
-	busca_s b;
-	b.tipo = tipo, b.h = h, b.nombre = INF, b.de_esc = 0;
-	recorre_tam(tam, compara_una, &b);
-	*de_esc = b.de_esc;
-	return b.nombre;
+	u32 a = 0, b = n_sumas - n_comodin_ram, m, i;
+	int k;
+	busca_s s;
+	*de_esc = 0;
+	while (a < b) {
+		m = (a + b) / 2;
+		if (sumas[m].tam < tam)
+			a = m + 1;
+		else
+			b = m;
+	}
+	for (i = a; i < n_sumas - n_comodin_ram && sumas[i].tam == tam; i++)
+		if ((sumas[i].nt & 0x1F) == tipo && !memcmp(sumas[i].h, h, 8))
+			return sumas[i].nt >> 8;
+	for (i = n_sumas - n_comodin_ram; i < n_sumas; i++)
+		if ((sumas[i].nt & 0x1F) == tipo && !memcmp(sumas[i].h, h, 8))
+			return sumas[i].nt >> 8;
+	s.tipo = tipo, s.h = h, s.nombre = INF;
+	for (k = 0; k < n_escs; k++) {
+		E = &escs[k];
+		if (recorre_esc(tam, busca_en_tramo, &s)) {
+			*de_esc = k + 1;
+			return s.nombre;
+		}
+	}
+	return INF;
 }
 
 /* -------------------------------------------------------- los patrones */
@@ -385,6 +435,7 @@ static u32 *exprs;			/* la expresión, al revés (polaca) */
 static u32 n_exprs, cap_exprs;
 static u32 n_cuentas;			/* las subfirmas de todas las ldb */
 static u8 *cuentas;			/* (por archivo) */
+static u32 n_cuentas_cabe;
 static u32 *tocadas;
 static u32 n_tocadas, cap_tocadas;
 static u32 *ignorar;			/* los nombres (.ign2) que no se dicen */
@@ -861,7 +912,7 @@ static int nivel_vale(const char **tr, const u32 *lr, int k, int desde)
 
 static int guarda_linea(char clase, const char *s, u32 n)
 {
-	if (!motor_guarda_lineas)
+	if (!motor_guarda_lineas || modo_temporal)
 		return 1;
 	if (!CRECE(lineas, cap_lineas, n_lineas + n + 3))
 		return 0;
@@ -1404,17 +1455,95 @@ static int carga_cvd(const char *ruta, info_firmas *inf)
 	return 0;
 }
 
-/* FIRMAS.ESC (el formato, en motor_escribe_esc) */
+/* ---- el cuerpo de los FIRMAS.ESC: bloques de 64 K, comprimidos (deflate) ---- */
+typedef struct bloque_c { int esc; u32 bloque; u32 n; u8 *d; } bloque_c;
+static bloque_c bcache[2];
+static int bcache_turno;
+typedef struct de_mem { const u8 *p; u32 n, i; u8 *sale; u32 hecho, cabe; } de_mem;
+static int mem_lee(void *yo, u8 *d, u32 cabe)
+{
+	de_mem *m = yo;
+	u32 k = m->n - m->i < cabe ? m->n - m->i : cabe;
+	memcpy(d, m->p + m->i, k);
+	m->i += k;
+	return (int)k;
+}
+static int mem_saca(void *yo, const u8 *d, u32 n)
+{
+	de_mem *m = yo;
+	if (m->hecho + n > m->cabe)
+		return 1;
+	memcpy(m->sale + m->hecho, d, n);
+	m->hecho += n;
+	return 0;
+}
+
+/* el bloque «bl» del FIRMAS.ESC «e», descomprimido (en una de las dos cachés) */
+static bloque_c *bloque_de(int e, u32 bl)
+{
+	esc *x = &escs[e];
+	bloque_c *c;
+	u32 n;
+	u8 *z;
+	static inflar zi;
+	de_mem m;
+	int i;
+	for (i = 0; i < 2; i++)
+		if (bcache[i].d && bcache[i].esc == e && bcache[i].bloque == bl)
+			return &bcache[i];
+	if (bl >= x->n_bloques)
+		return 0;
+	c = &bcache[bcache_turno];
+	bcache_turno ^= 1;
+	if (!c->d && !(c->d = pl_reserva(BLOQUE + 1)))
+		return 0;
+	n = x->bloques[bl + 1] - x->bloques[bl];
+	z = pl_reserva(n + 1);
+	if (!z)
+		return 0;
+	if (pl_mover(x->h, x->bloques[bl]) < 0 || pl_leer(x->h, z, n) != (int)n) {
+		pl_libera(z);
+		return 0;
+	}
+	memset(&zi, 0, sizeof zi);
+	m.p = z, m.n = n, m.i = 0, m.sale = c->d, m.hecho = 0, m.cabe = BLOQUE;
+	zi.lee = mem_lee, zi.saca = mem_saca, zi.yo = &m;
+	i = inflar_todo(&zi);
+	pl_libera(z);
+	if (i != INF_BIEN) {
+		c->esc = -1;
+		return 0;
+	}
+	c->esc = e, c->bloque = bl, c->n = m.hecho;
+	c->d[c->n] = 0;
+	return c;
+}
+
+/* la línea de «ref» (bloque << 16 | sitio): su clase ('n', 'l' o 'i') y su texto */
+static int linea_de(int e, u32 ref, const char **t, u32 *n)
+{
+	bloque_c *c = bloque_de(e, ref >> 16);
+	u32 p = ref & 0xFFFF, q;
+	if (!c || p + 2 >= c->n || c->d[p + 1] != '|')
+		return 0;
+	for (q = p; q < c->n && c->d[q] != '\n'; q++) ;
+	*t = (const char *)c->d + p + 2;
+	*n = q - p - 2;
+	return c->d[p];
+}
+
+static int clase_linea(int c) { return c == 'n' ? B_NDB : c == 'l' ? B_LDB : c == 'i' ? B_IGN2 : B_NADA; }
+
 static int carga_esc(const char *ruta, info_firmas *inf)
 {
-	u8 c[64];
-	u32 n_cuerpo, off_cuerpo, off_bits, i;
-	int h = pl_abrir(ruta);
+	u8 c[128];
+	u32 i, n_disp, off_disp, n_siempre, off_siempre, off_bits, off_bloques, c0, l0;
+	int h = pl_abrir(ruta), e;
 	if (h < 0)
 		return -1;
-	if (pl_leer(h, c, 64) != 64 || memcmp(c, "HPESCUD1", 8)) {
+	if (pl_leer(h, c, 128) != 128 || memcmp(c, "HPESCUD2", 8)) {
 		pl_cerrar(h);
-		formatear(inf->error, sizeof inf->error, "%s no es un FIRMAS.ESC", ruta);
+		formatear(inf->error, sizeof inf->error, "%s no es un FIRMAS.ESC (de la versión 2)", ruta);
 		return -1;
 	}
 	if (n_escs >= MAX_ESC) {
@@ -1422,77 +1551,96 @@ static int carga_esc(const char *ruta, info_firmas *inf)
 		formatear(inf->error, sizeof inf->error, "demasiados .ESC (%u como mucho)", MAX_ESC);
 		return -1;
 	}
-	E = &escs[n_escs++];
+	e = n_escs++;
+	E = &escs[e];
 	memset(E, 0, sizeof *E);
-	esc_h = h;
+	E->h = h;
+	E->cache_pag = INF;
 	if (le32(c + 8) > inf->fecha)
 		inf->fecha = le32(c + 8);
-	esc_n = le32(c + 12), esc_off = le32(c + 16);
-	esc_idx = le32(c + 24), esc_blob = le32(c + 28);
-	off_cuerpo = le32(c + 36), n_cuerpo = le32(c + 40), off_bits = le32(c + 44);
-	if (le32(c + 48))
-		inf->version_daily = le32(c + 48);
-	if (le32(c + 52))
-		inf->version_main = le32(c + 52);
-	if (le32(c + 56))
-		inf->version_bytecode = le32(c + 56);
-	esc_n_comodin = le32(c + 60);
-	esc_paginas = (esc_n + ESC_POR_PAGINA - 1) / ESC_POR_PAGINA;
-	esc_cache_pag = INF;
-	esc_pag = pl_reserva(esc_paginas * 4 + 4);
-	esc_bits = pl_reserva(1u << 17);
-	esc_comodin = pl_reserva(esc_n_comodin * sizeof(suma) + 1);
-	if (!esc_pag || !esc_bits || !esc_comodin)
-		return -2;
-	if (pl_mover(h, off_bits) < 0 || pl_leer(h, esc_bits, 1u << 17) != (1 << 17))
+	if (le32(c + 12))
+		inf->version_daily = le32(c + 12);
+	if (le32(c + 16))
+		inf->version_main = le32(c + 16);
+	if (le32(c + 20))
+		inf->version_bytecode = le32(c + 20);
+	E->n_sumas = le32(c + 24), E->off_sumas = le32(c + 28);
+	E->n_tramos = le32(c + 32), E->off_tramos = le32(c + 36);
+	off_bits = le32(c + 40);
+	E->idx = le32(c + 48), E->blob = le32(c + 52);
+	E->n_bloques = le32(c + 56), off_bloques = le32(c + 60);
+	n_disp = le32(c + 64), off_disp = le32(c + 68);
+	n_siempre = le32(c + 72), off_siempre = le32(c + 76);
+	E->n_comodin = le32(c + 80);
+	inf->sumas += E->n_sumas;
+	inf->cuerpo += le32(c + 84);
+	inf->logicas += le32(c + 88);
+	inf->limpias += le32(c + 92);
+	E->nbits = le32(c + 96) ? le32(c + 96) : 21;
+	if (E->nbits < 8 || E->nbits > 24)
 		return -1;
-	for (i = 0; i < esc_paginas; i++) {
+	E->bits = pl_reserva(1u << (E->nbits - 3));
+	E->bloques = pl_reserva((E->n_bloques + 1) * 4);
+	E->comodin = pl_reserva(E->n_comodin * sizeof(tramo) + 1);
+	E->paginas = (E->n_tramos - E->n_comodin + TRAMOS_POR_PAGINA - 1) / TRAMOS_POR_PAGINA;
+	E->pag = pl_reserva(E->paginas * 4 + 4);
+	if (!E->bits || !E->bloques || !E->comodin || !E->pag)
+		return -2;
+	if (pl_mover(h, off_bits) < 0 || pl_leer(h, E->bits, 1u << (E->nbits - 3)) != (int)(1u << (E->nbits - 3)))
+		return -1;
+	if (pl_mover(h, off_bloques) < 0 || pl_leer(h, E->bloques, (E->n_bloques + 1) * 4) != (int)((E->n_bloques + 1) * 4))
+		return -1;
+	for (i = 0; i <= E->n_bloques; i++)
+		E->bloques[i] = le32((u8 *)&E->bloques[i]);
+	for (i = 0; i < E->paginas; i++) {
 		u8 b[4];
-		if (pl_mover(h, esc_off + i * ESC_POR_PAGINA * 16) < 0 || pl_leer(h, b, 4) != 4)
+		if (pl_mover(h, E->off_tramos + i * TRAMOS_POR_PAGINA * 12) < 0 || pl_leer(h, b, 4) != 4)
 			return -1;
-		esc_pag[i] = le32(b);
+		E->pag[i] = le32(b);
 	}
-	for (i = 0; i < esc_n_comodin; i++) {
-		u8 b[16];
-		u32 j = esc_n - esc_n_comodin + i;
-		if (pl_mover(h, esc_off + j * 16) < 0 || pl_leer(h, b, 16) != 16)
+	for (i = 0; i < E->n_comodin; i++) {	/* (los últimos tramos) */
+		u8 b[12];
+		if (pl_mover(h, E->off_tramos + (E->n_tramos - E->n_comodin + i) * 12) < 0 || pl_leer(h, b, 12) != 12)
 			return -1;
-		esc_comodin[i].tam = INF;
-		esc_comodin[i].nt = le32(b + 4);
-		memcpy(esc_comodin[i].h, b + 8, 8);
-		tipos_comodin |= 1u << (le32(b + 4) & 0x1F);
+		E->comodin[i].tam = INF;
+		E->comodin[i].tipo = le32(b + 4) & 0xFF;
+		E->comodin[i].primero = le32(b + 4) >> 8;
+		E->comodin[i].cuantos = le32(b + 8);
+		tipos_comodin |= 1u << (E->comodin[i].tipo & 0x1F);
 	}
-	esc_paginas = (esc_n - esc_n_comodin + ESC_POR_PAGINA - 1) / ESC_POR_PAGINA;
-	esc_n -= esc_n_comodin;
-	inf->sumas += esc_n + esc_n_comodin;
-	/* el cuerpo (texto: «n|línea» de .ndb, «l|» de .ldb, «i|» de .ign2) */
-	if (n_cuerpo) {
-		char *t = pl_reserva(n_cuerpo + 1), *p, *q;
-		int r = 0;
-		if (!t)
-			return -2;
-		if (pl_mover(h, off_cuerpo) < 0 || pl_leer(h, t, n_cuerpo) != (int)n_cuerpo) {
-			pl_libera(t);
+	/* los disparadores, a memoria (todos los de todos los .ESC juntos) */
+	if (!CRECE(disps, cap_disps, n_disps + n_disp))
+		return -2;
+	if (pl_mover(h, off_disp) < 0)
+		return -1;
+	for (i = 0; i < n_disp;) {
+		static u8 b[12 * 1024];
+		u32 k = n_disp - i < 1024 ? n_disp - i : 1024, j;
+		if (pl_leer(h, b, k * 12) != (int)(k * 12))
 			return -1;
+		for (j = 0; j < k; j++, i++) {
+			disp *d = &disps[n_disps++];
+			d->clave = le32(b + 12 * j);
+			d->ref = le32(b + 12 * j + 4);
+			d->sl = (le32(b + 12 * j + 8) & 0x07FFFFFF) | (u32)e << 28;
 		}
-		t[n_cuerpo] = 0;
-		inf_actual = inf;
-		for (p = t; *p && r != -2; p = q + 1) {
-			q = strchr(p, '\n');
-			if (!q)
-				q = p + strlen(p);
-			if (q - p > 2 && p[1] == '|') {
-				int c0 = p[0] | 32;
-				int cl = c0 == 'n' ? B_NDB : c0 == 'l' ? B_LDB : c0 == 'i' ? B_IGN2 : B_NADA;
-				r = una_linea(cl, p + 2, (u32)(q - p - 2));
-			}
-			if (!*q)
-				break;
-		}
-		pl_libera(t);
-		if (r == -2)
+	}
+	/* las que van siempre en memoria (sin 4 octetos fijos, y las .ign2; ya
+	 * contadas en la cabecera) */
+	inf_actual = inf;
+	c0 = inf->cuerpo, l0 = inf->logicas;
+	for (i = 0; i < n_siempre; i++) {
+		u8 b[4];
+		const char *t;
+		u32 n;
+		int cl;
+		if (pl_mover(h, off_siempre + i * 4) < 0 || pl_leer(h, b, 4) != 4)
+			return -1;
+		cl = linea_de(e, le32(b), &t, &n);
+		if (cl && una_linea(clase_linea(cl), t, n) == -2)
 			return -2;
 	}
+	inf->cuerpo = c0, inf->logicas = l0;
 	return 0;
 }
 
@@ -1537,6 +1685,273 @@ int motor_carga_como(const char *ruta, const char *nombre, info_firmas *inf)
 	}
 	pl_cerrar(h);
 	return lector_acaba(&lec);
+}
+
+/* ------------------------------------------------ los disparadores
+ * De cada firma del cuerpo que va en el disco se guardan unos cuantos
+ * «disparadores»: 4 octetos fijos de sus patrones (y hasta 2 más para
+ * descartar antes). Bastan para la firma: si no aparece ninguno, la firma no
+ * puede casar. En una .ldb, los de las subfirmas que la expresión pide sí o
+ * sí: de «0&1&2», los de una sola (la de menos patrones); de «0|1», los de
+ * las dos; con «=0» o «<n» la firma puede casar sin nada: va siempre en
+ * memoria. */
+typedef struct marca { u32 toks, segs, pats, firmas, conj, alts, altdatos, exprs, cuentas; } marca;
+static void pon_marca(marca *m)
+{
+	m->toks = n_toks, m->segs = n_segs, m->pats = n_pats, m->firmas = n_firmas, m->conj = n_conj;
+	m->alts = n_alts, m->altdatos = n_altdatos, m->exprs = n_exprs, m->cuentas = n_cuentas;
+}
+static void vuelve_a(const marca *m)
+{
+	n_toks = m->toks, n_segs = m->segs, n_pats = m->pats, n_firmas = m->firmas, n_conj = m->conj;
+	n_alts = m->alts, n_altdatos = m->altdatos, n_exprs = m->exprs, n_cuentas = m->cuentas;
+}
+
+/* lee una línea sola (sin apuntar su nombre ni contarla): 1 si ha quedado una
+ * firma (la última de «firmas»), con sus patrones desde m->pats */
+static int linea_temporal(int clase, const char *t, u32 n, marca *m)
+{
+	static info_firmas falsa;
+	info_firmas *antes = inf_actual;
+	int r;
+	pon_marca(m);
+	inf_actual = &falsa;
+	modo_temporal = 1;
+	n_tnombres = 0;
+	r = una_linea(clase, t, n);
+	modo_temporal = 0;
+	inf_actual = antes;
+	if (r < 0 || n_firmas == m->firmas || n_pats == m->pats) {
+		vuelve_a(m);
+		return 0;
+	}
+	return 1;
+}
+
+/* los 4 octetos fijos más raros de un patrón (y hasta 3 detrás: un
+ * disparador de 7 octetos casi nunca salta por casualidad): 0 si no tiene */
+/* (al hacer FIRMAS.ESC) cuántas firmas tienen cada ventana de 4 a 7 octetos:
+ * el disparador de cada una, de las que menos se repiten («msvbvm» sale en
+ * 100.000 firmas de Visual Basic y en cualquier programa hecho con él) */
+static u16 *frec;
+static u8 *limpio4, *limpio7;		/* (y cuántas veces sale cada una en archivos limpios: motor_corpus) */
+#define LIMPIO_BITS 26
+static u32 h_limpio(u32 clave, u32 sl) { return ((clave * 2654435761u) ^ (sl * 2246822519u) ^ (sl >> 11)) >> (32 - LIMPIO_BITS); }
+/* (lo que cuenta: el ruido de la tabla —unas pocas por casilla— no) */
+static u32 cuenta_limpio(const u8 *t, u32 h) { return t[h] > 3 ? t[h] - 3 : 0; }
+#define FREC_BITS 24
+static u32 h_ventana(u32 clave, u32 sl) { return ((clave * 2654435761u) ^ (sl * 40503u) ^ (sl >> 13)) >> (32 - FREC_BITS); }
+
+static int ancla4(const patron *p, u32 *clave, u32 *sl, u32 *coste)
+{
+	u32 mejor = 0, s, k;
+	for (s = 0; s < p->nseg; s++) {
+		const seg *sg = &segs[p->seg0 + s];
+		const tok *t = &toks[sg->ini];
+		for (k = 0; k + 4 <= sg->largo; k++) {
+			u32 pt = 0, j, l = 0, distintos = 0;
+			for (j = 0; j < 4; j++)
+				if (!es_fijo(&t[k + j]))
+					break;
+			if (j < 4)
+				continue;
+			while (l < 3 && k + 4 + l < sg->largo && es_fijo(&t[k + 4 + l]))
+				l++;
+			for (j = 0; j < 4 + l; j++) {
+				u32 q;
+				u8 v = fold[t[k + j].v];
+				pt += (u32)rareza(t[k + j].v) * 4;
+				if (v == 0 || v == 0xFF)
+					continue;
+				for (q = 0; q < j && fold[t[k + q].v] != v; q++) ;
+				if (q == j)
+					distintos++;	/* (los valores distintos, sin contar ceros ni FF) */
+			}
+			/* (ceros, FF o lo mismo una y otra vez: eso está en cualquier archivo) */
+			if (distintos < 3)
+				continue;
+			pt += distintos * 3 + l * 8;
+			{
+				u32 c = fold[t[k].v] | (u32)fold[t[k + 1].v] << 8 | (u32)fold[t[k + 2].v] << 16 |
+					(u32)fold[t[k + 3].v] << 24, x = l << 24, f = 0;
+				for (j = 0; j < l; j++)
+					x |= (u32)fold[t[k + 4 + j].v] << (8 * j);
+				if (frec) {
+					f = frec[h_ventana(c, x)];
+					if (limpio4)	/* lo que sale en los archivos limpios, mucho peor */
+						f += cuenta_limpio(limpio7, h_limpio(c, x)) * 4000 + cuenta_limpio(limpio4, h_limpio(c, 0)) * 60;
+					if (f > 65535)
+						f = 65535;
+					pt += (65535 - f) * 256;
+				}
+				if (pt > mejor) {
+					mejor = pt;
+					*clave = c, *sl = x;
+					if (coste)
+						*coste = f;
+				}
+			}
+		}
+	}
+	return mejor > 0;
+}
+
+static u32 cuenta_bits(u64 x)
+{
+	u32 n = 0;
+	for (; x; x &= x - 1)
+		n++;
+	return n;
+}
+
+/* las subfirmas que la expresión de «f» pide sí o sí: 0 si puede casar sin ninguna */
+static u32 coste_de(u64 s, const u32 *coste)
+{
+	u32 c = 0, i;
+	for (i = 0; i < 64; i++)
+		if (s >> i & 1)
+			c = c + coste[i] < c ? INF : c + coste[i];
+	return c;
+}
+
+static int requeridas(const firma *f, u64 *sale, const u32 *coste)
+{
+	u64 s[32];
+	u8 ok[32];
+	int sp = 0;
+	const u32 *x;
+	if (f->clase == F_NDB) {
+		*sale = 1;
+		return 1;
+	}
+	for (x = exprs + f->expr; *x; x++) {
+		u32 op = *x & 0xFF000000u;
+		if (op == X_SUB) {
+			if (sp >= 32)
+				return 0;
+			s[sp] = (u64)1 << (*x & 0x3F), ok[sp] = 1;
+			sp++;
+		} else if (op == X_AND || op == X_OR) {
+			if (sp < 2)
+				return 0;
+			sp--;
+			if (op == X_OR) {
+				ok[sp - 1] = ok[sp - 1] && ok[sp];
+				s[sp - 1] |= s[sp];
+			} else if (ok[sp - 1] && ok[sp]) {
+				u32 a = coste_de(s[sp - 1], coste), b = coste_de(s[sp], coste);
+				if (b < a || (b == a && cuenta_bits(s[sp]) < cuenta_bits(s[sp - 1])))
+					s[sp - 1] = s[sp];
+			} else if (ok[sp]) {
+				s[sp - 1] = s[sp], ok[sp - 1] = 1;
+			}
+		} else {
+			u32 v = (*x >> 12) & 0xFFF;
+			if (sp < 1)
+				return 0;
+			if (op == X_MENOR || (op == X_IGUAL && v == 0))
+				ok[sp - 1] = 0;
+		}
+	}
+	if (sp != 1 || !ok[0])
+		return 0;
+	*sale = s[0];
+	return 1;
+}
+
+/* los disparadores de la firma que acaba de quedar (desde «m»): cuántos, o
+ * -1 si tiene que ir siempre en memoria */
+static int disparadores_de(const marca *m, disp *d, int max)
+{
+	const firma *f = &firmas[n_firmas - 1];
+	u64 req;
+	u32 p, coste[64], c;
+	int n = 0, i;
+	for (i = 0; i < 64; i++)
+		coste[i] = 0;
+	for (p = m->pats; p < n_pats; p++) {	/* lo que cuesta cada subfirma: su peor patrón */
+		disp x;
+		if (pats[p].sub >= 64)
+			return -1;
+		if (!ancla4(&pats[p], &x.clave, &x.sl, &c))
+			c = INF;
+		if (c > coste[pats[p].sub])
+			coste[pats[p].sub] = c;
+	}
+	if (!requeridas(f, &req, coste))
+		return -1;
+	for (p = m->pats; p < n_pats; p++) {
+		disp x;
+		if (!(req >> pats[p].sub & 1))
+			continue;
+		if (!ancla4(&pats[p], &x.clave, &x.sl, 0))
+			return -1;
+		for (i = 0; i < n; i++)
+			if (d[i].clave == x.clave && d[i].sl == x.sl)
+				break;
+		if (i < n)
+			continue;
+		if (n >= max)
+			return -1;
+		d[n++] = x;
+	}
+	return n ? n : -1;
+}
+
+/* el índice de los disparadores (en motor_prepara) */
+static int compara_disp(const disp *a, const disp *b)
+{
+	u32 x = h4(a->clave), y = h4(b->clave);
+	return x < y ? -1 : x > y;
+}
+static void ordena_disps(void)
+{
+	u32 i, raiz, hijo, fin, n = n_disps;
+	disp t, *v = disps;
+	if (n < 2)
+		return;
+	for (i = n / 2; i-- > 0;)
+		for (raiz = i; (hijo = 2 * raiz + 1) < n; raiz = hijo) {
+			if (hijo + 1 < n && compara_disp(&v[hijo], &v[hijo + 1]) < 0)
+				hijo++;
+			if (compara_disp(&v[raiz], &v[hijo]) >= 0)
+				break;
+			t = v[raiz], v[raiz] = v[hijo], v[hijo] = t;
+		}
+	for (fin = n - 1; fin > 0; fin--) {
+		t = v[0], v[0] = v[fin], v[fin] = t;
+		for (raiz = 0; (hijo = 2 * raiz + 1) < fin; raiz = hijo) {
+			if (hijo + 1 < fin && compara_disp(&v[hijo], &v[hijo + 1]) < 0)
+				hijo++;
+			if (compara_disp(&v[raiz], &v[hijo]) >= 0)
+				break;
+			t = v[raiz], v[raiz] = v[hijo], v[hijo] = t;
+		}
+	}
+}
+static int prepara_disps(void)
+{
+	u32 i, j;
+	if (!n_disps)
+		return 1;
+	ordena_disps();
+	if (!mapa4)
+		mapa4 = pl_reserva(1u << 20);
+	if (!cubo4)
+		cubo4 = pl_reserva(((1u << 16) + 1) * 4);
+	if (!mapa4 || !cubo4)
+		return 0;
+	memset(mapa4, 0, 1u << 20);
+	for (i = 0; i < n_disps; i++) {
+		u32 h = h4(disps[i].clave);
+		mapa4[h >> 3] |= (u8)(1u << (h & 7));
+	}
+	for (i = 0, j = 0; i <= (1u << 16); i++) {
+		while (j < n_disps && (h4(disps[j].clave) >> 7) < i)
+			j++;
+		cubo4[i] = j;
+	}
+	return 1;
 }
 
 /* --------------------------------------------- preparar los índices */
@@ -1654,17 +2069,26 @@ void motor_prepara(info_firmas *inf)
 		cubo2[i] = j;
 	}
 	pl_libera(cuentas);
-	cuentas = pl_reserva(n_cuentas + 1);
+	n_cuentas_cabe = n_cuentas + 8192;	/* (y sitio para las que se leen de los disparadores) */
+	cuentas = pl_reserva(n_cuentas_cabe);
 	if (!cuentas)
-		n_cuentas = 0;
+		n_cuentas = n_cuentas_cabe = 0;
 	else
-		memset(cuentas, 0, n_cuentas + 1);
+		memset(cuentas, 0, n_cuentas_cabe);
+	if (!prepara_disps())
+		formatear(inf->error, sizeof inf->error, "no hay memoria para los disparadores");
 	inf->memoria_k = (n_sumas * sizeof(suma) + arena_n + n_nombres * 4 + cap_disp * 4 + n_toks * sizeof(tok) +
 			  n_segs * sizeof(seg) + n_pats * sizeof(patron) + n_firmas * sizeof(firma) + n_conj * 32 +
 			  n_altdatos + n_exprs * 4 + (n_a3 + n_a2) * sizeof(ancla) + (1u << (BITS3 - 3)) + (1u << 13) +
-			  2 * ((1u << 16) + 1) * 4 + n_escs * (1u << 17) + MAX_LINEA) / 1024;
-	pl_apunta("escudo: firmas: %u sumas, %u limpias, %u del cuerpo, %u lógicas (%u patrones: %u con ancla de 3, %u de 2, %u fijos); %u no soportadas, %u PUA sin cargar; %u K en memoria",
-		  inf->sumas, inf->limpias, inf->cuerpo, inf->logicas, n_pats, n_a3, n_a2, n_fijos, inf->no_soportadas,
+			  2 * ((1u << 16) + 1) * 4 + MAX_LINEA + 2 * BLOQUE +
+			  cap_disps * sizeof(disp) + (n_disps ? (1u << 20) + ((1u << 16) + 1) * 4 : 0)) / 1024;
+	{
+		int k;
+		for (k = 0; k < n_escs; k++)
+			inf->memoria_k += (escs[k].paginas * 4 + escs[k].n_bloques * 4 + (1u << (escs[k].nbits - 3))) / 1024;
+	}
+	pl_apunta("escudo: firmas: %u sumas, %u limpias, %u del cuerpo, %u lógicas (%u patrones en memoria: %u con ancla de 3, %u de 2, %u fijos; %u disparadores de las del disco); %u no soportadas, %u PUA sin cargar; %u K en memoria",
+		  inf->sumas, inf->limpias, inf->cuerpo, inf->logicas, n_pats, n_a3, n_a2, n_fijos, n_disps, inf->no_soportadas,
 		  inf->pua, inf->memoria_k);
 }
 
@@ -1692,12 +2116,15 @@ void motor_suelta(void)
 	n_comodin_ram = 0, tipos_comodin = 0;
 	while (n_escs > 0) {
 		E = &escs[--n_escs];
-		if (esc_h >= 0)
-			pl_cerrar(esc_h);
-		pl_libera(esc_pag), pl_libera(esc_bits), pl_libera(esc_comodin);
+		if (E->h >= 0)
+			pl_cerrar(E->h);
+		pl_libera(E->pag), pl_libera(E->bits), pl_libera(E->comodin), pl_libera(E->bloques);
 		memset(E, 0, sizeof *E);
 	}
 	E = 0;
+	pl_libera(disps);
+	disps = 0, n_disps = cap_disps = 0;
+	bcache[0].esc = bcache[1].esc = -1;
 }
 
 /* ------------------------------------------------------- buscar */
@@ -1877,6 +2304,8 @@ static int ignorada_texto(const char *s)
 static int ignorada(u32 nombre)
 {
 	u32 i;
+	if (nombre >= ID_TEMPORAL && nombre < ID_TEMPORAL + MAX_TEMPORALES)
+		return ignorada_texto(tnombres[nombre - ID_TEMPORAL]);
 	for (i = 0; i < n_ignorar; i++)
 		if (ignorar[i] == nombre)
 			return 1;
@@ -2026,6 +2455,183 @@ static int evalua(const firma *f)
 	return sp == 1 && pv[0];
 }
 
+/* ---- los disparadores: primero se apuntan las firmas cuyo disparador sale
+ * en lo que se mira; luego se leen todas del disco y se buscan todas juntas,
+ * en una sola pasada (con una tabla por su primer octeto de ancla) ---- */
+#define MAX_CANDIDATAS 384
+static void nombre_de(u32 id, int de_esc, char *d);
+static u32 memo_ref[1024], memo_gen[1024], gen_actual;
+static u32 cand[MAX_CANDIDATAS], n_cand;
+u32 motor_disparos, motor_leidas;	/* (para medir) los disparadores que han saltado y las firmas leídas del disco */
+int motor_depura;
+static u32 *cab_t, *sig_t;			/* la tabla de las candidatas: 256 cabezas y la lista */
+static u32 cap_sig_t;
+
+static void apunta_candidata(const disp *d)
+{
+	u32 esc_d = D_ESC(d), r = d->ref ^ esc_d << 30, k = (r * 2654435761u) >> 22;
+	motor_disparos++;
+#ifdef ESCUDO_ANFITRION
+	if (motor_depura > 1)
+		pl_apunta("escudo: salta %08x/%06x l%u", d->clave, D_SIGUE(d), D_LARGO(d));
+#endif
+	if (memo_gen[k] == gen_actual && memo_ref[k] == r)
+		return;
+	memo_gen[k] = gen_actual, memo_ref[k] = r;
+	if (n_cand < MAX_CANDIDATAS)
+		cand[n_cand++] = r;
+}
+
+/* lee las candidatas y las busca: 1 si alguna casa (su nombre, a nombre_hallado) */
+static int busca_candidatas(mirado *m)
+{
+	marca mk;
+	u32 i, p, f, t0 = n_tocadas, cabe;
+	int r = 0;
+	static info_firmas falsa;
+	info_firmas *antes = inf_actual;
+	if (!n_cand)
+		return 0;
+	/* (por orden: las del mismo bloque, seguidas, con el bloque ya descomprimido) */
+	for (i = 1; i < n_cand; i++) {
+		u32 x = cand[i], q = i;
+		while (q > 0 && cand[q - 1] > x) {
+			cand[q] = cand[q - 1];
+			q--;
+		}
+		cand[q] = x;
+	}
+	pon_marca(&mk);
+	inf_actual = &falsa;
+	modo_temporal = 1;
+	n_tnombres = 0;
+	for (i = 0; i < n_cand; i++) {
+		const char *t;
+		u32 n;
+		int cl = linea_de((int)(cand[i] >> 30), cand[i] & 0x3FFFFFFF, &t, &n);
+		motor_leidas++;
+#ifdef ESCUDO_ANFITRION
+		if (motor_depura)
+			pl_apunta("escudo: lee %.*s", (int)(n < 60 ? n : 60), t);
+#endif
+		if (cl && una_linea(clase_linea(cl), t, n) == -2)
+			break;
+	}
+	modo_temporal = 0;
+	inf_actual = antes;
+	if (n_cuentas > n_cuentas_cabe)		/* (no caben sus cuentas: no se miran las lógicas de más) */
+		goto fuera;
+	/* la tabla: por el primer octeto del ancla (de las que se pueden mirar aquí) */
+	if (!cab_t && !(cab_t = pl_reserva(257 * 4)))
+		goto fuera;
+	cabe = n_pats - mk.pats;
+	if (!CRECE(sig_t, cap_sig_t, cabe + 1))
+		goto fuera;
+	for (i = 0; i < 256; i++)
+		cab_t[i] = INF;
+	m->pasos = 1 << 22;
+	for (p = n_pats; p-- > mk.pats;) {
+		const patron *pt = &pats[p];
+		u32 a;
+		if (!firma_vale(&firmas[pt->firma], m))
+			continue;
+		if (pt->o_tipo != O_CUALQUIERA) {
+			if (prueba_fijo(pt, m) && hallada != INF) {
+				r = 1;
+				goto acaba;
+			}
+			continue;
+		}
+		a = fold[toks[segs[pt->seg0 + pt->ancla_seg].ini + pt->ancla_pos].v];
+		sig_t[p - mk.pats] = cab_t[a];
+		cab_t[a] = p;
+	}
+	/* una pasada */
+	{
+		const u8 *b = m->b;
+		u32 n = m->n;
+		hallada = INF;
+		for (i = 0; i + 1 < n; i++) {
+			u32 q = cab_t[fold[b[i]]];
+			while (q != INF) {
+				const patron *pt = &pats[q];
+				const tok *a = &toks[segs[pt->seg0 + pt->ancla_seg].ini + pt->ancla_pos];
+				if (fold[b[i + 1]] == fold[a[1].v] && (pt->ancla_largo < 3 || (i + 2 < n && fold[b[i + 2]] == fold[a[2].v])) &&
+				    prueba_ancla(pt, i, m) && hallada != INF) {
+					r = 1;
+					goto acaba;
+				}
+				q = sig_t[q - mk.pats];
+			}
+			if (m->pasos < 0)
+				break;
+		}
+	}
+	/* las lógicas que han visto algo */
+	for (i = t0; i < n_tocadas; i++) {
+		f = tocadas[i];
+		if (f >= mk.firmas && evalua(&firmas[f]) && !ignorada(firmas[f].nombre)) {
+			hallada = f;
+			r = 1;
+			break;
+		}
+	}
+acaba:
+	if (r) {
+		nombre_de(firmas[hallada].nombre, 0, nombre_hallado);
+		hallada = HALLADA_TEMPORAL;
+	}
+	for (f = mk.firmas; f < n_firmas; f++)
+		if (firmas[f].clase == F_LDB && firmas[f].cuentas + firmas[f].nsub <= n_cuentas_cabe)
+			memset(cuentas + firmas[f].cuentas, 0, firmas[f].nsub);
+fuera:
+	n_tocadas = t0;
+	vuelve_a(&mk);
+	n_cand = 0;
+	return r;
+}
+
+/* los disparadores, por todo lo que se mira; luego, las candidatas */
+static int busca_disparos(mirado *m)
+{
+	const u8 *b = m->b;
+	u32 n = m->n, i, j, k, es_pe = (m->clases >> A_PE) & 1;
+	if (!n_disps || n < 4)
+		return 0;
+	gen_actual++;
+	n_cand = 0;
+	k = (u32)fold[b[0]] << 8 | (u32)fold[b[1]] << 16 | (u32)fold[b[2]] << 24;
+	for (i = 0; i + 3 < n; i++) {
+		u32 h;
+		k = (k >> 8) | (u32)fold[b[i + 3]] << 24;
+		h = h4(k);
+		if (!(mapa4[h >> 3] >> (h & 7) & 1))
+			continue;
+		for (j = cubo4[h >> 7]; j < cubo4[(h >> 7) + 1]; j++) {
+			const disp *d = &disps[j];
+			if (d->clave != k || ((d->sl & D_SOLO_PE) && !es_pe))
+				continue;
+			if (D_LARGO(d)) {
+				u32 l = D_LARGO(d), q, sg = D_SIGUE(d);
+				if (i + 4 + l > n)
+					continue;
+				for (q = 0; q < l; q++)
+					if (fold[b[i + 4 + q]] != ((sg >> (8 * q)) & 0xFF))
+						break;
+				if (q < l)
+					continue;
+			}
+			apunta_candidata(d);
+		}
+		/* (de vez en cuando: si ya hay muchas, se miran y se sigue) */
+		if (n_cand >= MAX_CANDIDATAS - 8 && busca_candidatas(m))
+			return 1;
+		if ((i & 0xFFFFF) == 0xFFFFF && pl_cortar())
+			break;
+	}
+	return busca_candidatas(m);
+}
+
 /* las firmas del cuerpo en lo que hay en m->b: 1 si hay algo (en «hallada») */
 static int busca_cuerpo(mirado *m)
 {
@@ -2075,6 +2681,9 @@ static int busca_cuerpo(mirado *m)
 			}
 		}
 	}
+	/* las firmas del disco, por sus disparadores */
+	if (busca_disparos(m))
+		goto fin;
 	/* las lógicas que han visto algo */
 	for (i = 0; i < n_tocadas; i++) {
 		const firma *f = &firmas[tocadas[i]];
@@ -2097,6 +2706,10 @@ fin:
 /* el nombre de una firma (de_esc: 0, de memoria; k + 1, del FIRMAS.ESC k) */
 static void nombre_de(u32 id, int de_esc, char *d)
 {
+	if (id >= ID_TEMPORAL && id < ID_TEMPORAL + MAX_TEMPORALES) {
+		formatear(d, MAX_NOMBRE_VIRUS, "%s", tnombres[id - ID_TEMPORAL]);
+		return;
+	}
 	if (!de_esc) {
 		formatear(d, MAX_NOMBRE_VIRUS, "%s", id < n_nombres ? arena + nombres[id] : "?");
 		return;
@@ -2107,12 +2720,12 @@ static void nombre_de(u32 id, int de_esc, char *d)
 		int n;
 		d[0] = 0;
 		E = &escs[de_esc - 1];
-		if (pl_mover(esc_h, esc_idx + id * 4) < 0 || pl_leer(esc_h, b, 4) != 4)
+		if (pl_mover(E->h, E->idx + id * 4) < 0 || pl_leer(E->h, b, 4) != 4)
 			return;
 		off = le32(b);
-		if (pl_mover(esc_h, esc_blob + off) < 0)
+		if (pl_mover(E->h, E->blob + off) < 0)
 			return;
-		n = pl_leer(esc_h, d, MAX_NOMBRE_VIRUS - 1);
+		n = pl_leer(E->h, d, MAX_NOMBRE_VIRUS - 1);
 		if (n < 0)
 			n = 0;
 		d[n] = 0;
@@ -2462,8 +3075,11 @@ static int revisa(const fuente *f, const char *nombre, int prof, int contenedor,
 			}
 	/* el cuerpo */
 	hallada = INF;
-	if (n_pats && busca_cuerpo(&m)) {
-		nombre_de(firmas[hallada].nombre, 0, r->nombre);
+	if ((n_pats || n_disps) && busca_cuerpo(&m)) {
+		if (hallada == HALLADA_TEMPORAL)
+			formatear(r->nombre, sizeof r->nombre, "%s", nombre_hallado);
+		else
+			nombre_de(firmas[hallada].nombre, 0, r->nombre);
 		r->dentro[0] = 0;
 		return 1;
 	}
@@ -2502,125 +3118,136 @@ int motor_revisa_archivo(const char *ruta, const char *nombre, resultado *r)
 	return r->hallado;
 }
 
-/* ----------------------------------------------------- FIRMAS.ESC
- * Todo en little endian. La cabecera (64 octetos):
- *    0 «HPESCUD1»       8 fecha (AAAAMMDD)     12 sumas (con las comodín)
- *   16 dónde las sumas 20 nombres             24 dónde su índice (4 por nombre)
- *   28 dónde los nombres (texto con 0)        32 lo que miden
- *   36 dónde el cuerpo 40 lo que mide         44 dónde el mapa de tamaños (128 K)
- *   48 versión de daily, 52 de main, 56 de bytecode
- *   60 cuántas sumas son de cualquier tamaño (las últimas)
- * Las sumas: 16 octetos (tamaño, nombre << 8 | tipo, 8 de la suma), por
- * tamaño, tipo y suma. El cuerpo: líneas «n|...» (.ndb), «l|...» (.ldb) e
- * «i|...» (.ign2), tal cual. Con «familias», el nombre de una suma pierde su
- * número («Win.Trojan.Agent-123456-0» se queda en «Win.Trojan.Agent»): son
- * muchas menos, y el aviso dice lo mismo. */
+/* ----------------------------------------------------- FIRMAS.ESC (versión 2)
+ * Todo en little endian. La cabecera (128 octetos):
+ *    0 «HPESCUD2»       8 fecha (AAAAMMDD)
+ *   12 versión de daily, 16 de main, 20 de bytecode
+ *   24 sumas            28 dónde (8 octetos cada una: 5 de la suma y 3 del nombre)
+ *   32 tramos           36 dónde (12 octetos: tamaño, primera << 8 | tipo, cuántas;
+ *                          por tamaño y tipo; los de cualquier tamaño, al final)
+ *   40 dónde el mapa de los tamaños (1 << bits bits; los bits, en 96: 21, o 16 si hay pocas)
+ *   44 nombres          48 dónde su índice (4 por nombre)   52 dónde los nombres (con 0)
+ *   56 bloques          60 dónde su tabla (bloques + 1 sitios: dónde empieza cada uno)
+ *   64 disparadores     68 dónde (12 octetos: los 4 fijos, ref = bloque << 16 | sitio,
+ *                          y los 3 de detrás | cuántos de esos 3 valen << 24)
+ *   72 «siempre»        76 dónde (4 octetos: ref)
+ *   80 tramos de cualquier tamaño   84 firmas del cuerpo   88 lógicas   92 limpias
+ *   96 los bits del mapa de los tamaños
+ * Las sumas de cada tramo van por su suma (se busca por la mitad en el disco).
+ * El cuerpo: líneas «n|...» (.ndb), «l|...» (.ldb) e «i|...» (.ign2), en
+ * bloques de hasta 64 K, cada uno comprimido (deflate) por su cuenta; una
+ * línea no pasa de un bloque a otro. Con «familias», el nombre de una suma
+ * pierde su número («Win.Trojan.Agent-123456» queda «Win.Trojan.Agent»).
+ * Solo lo hace escudo-anfitrion (con la zlib del sistema, para comprimir). */
 static u32 familia(const char *s, u32 n)
 {
-	u32 i = n, d1 = 0, d2 = 0;
-	while (i > 0 && s[i - 1] >= '0' && s[i - 1] <= '9')
-		i--, d1++;
-	if (!d1 || i == 0 || s[i - 1] != '-')
-		return n;
-	i--;
-	while (i > 0 && s[i - 1] >= '0' && s[i - 1] <= '9')
-		i--, d2++;
-	if (!d2 || i == 0 || s[i - 1] != '-')
-		return n;
-	return i - 1;
+	u32 i, vueltas;
+	for (vueltas = 0; vueltas < 2; vueltas++) {
+		i = n;
+		while (i > 0 && s[i - 1] >= '0' && s[i - 1] <= '9')
+			i--;
+		if (i == n || i == 0 || s[i - 1] != '-')
+			break;
+		n = i - 1;
+	}
+	return n;
 }
 
-int motor_escribe_esc(const char *ruta, int familias, u32 fecha, u32 limite, int origen)
+#ifdef ESCUDO_ANFITRION
+#include <zlib.h>
+/* una firma que irá siempre en memoria: ¿tiene un ancla que diga algo? (la
+ * de 3 o 2 octetos de cada patrón: no solo ceros o FF) */
+static int buena_en_memoria(const char *t, u32 n, int cl)
+{
+	marca mk;
+	u32 p;
+	int buena = 1;
+	if (!linea_temporal(clase_linea(cl), t, n, &mk))
+		return 0;
+	for (p = mk.pats; p < n_pats && buena; p++) {
+		const patron *pt = &pats[p];
+		const tok *a;
+		u32 j, malos = 0;
+		if (pt->o_tipo != O_CUALQUIERA)
+			continue;	/* (las de sitio fijo solo se miran allí) */
+		a = &toks[segs[pt->seg0 + pt->ancla_seg].ini + pt->ancla_pos];
+		for (j = 0; j < pt->ancla_largo; j++)
+			if (a[j].v == 0 || a[j].v == 0xFF)
+				malos++;
+		if (malos == pt->ancla_largo)
+			buena = 0;
+	}
+	vuelve_a(&mk);
+	return buena;
+}
+static int escribe(int h, const void *d, u32 n) { return pl_escribir(h, d, n) == (int)n ? 0 : -1; }
+
+/* lo que sale en un archivo limpio (los programas de Windows de un
+ * compilador, por ejemplo): los disparadores lo evitan */
+void motor_corpus(const u8 *b, u32 n)
+{
+	u32 i, k;
+	if (!limpio4) {
+		limpio4 = pl_reserva(1u << LIMPIO_BITS);
+		limpio7 = pl_reserva(1u << LIMPIO_BITS);
+		if (!limpio4 || !limpio7) {
+			pl_libera(limpio4), pl_libera(limpio7);
+			limpio4 = limpio7 = 0;
+			return;
+		}
+		memset(limpio4, 0, 1u << LIMPIO_BITS);
+		memset(limpio7, 0, 1u << LIMPIO_BITS);
+	}
+	if (n < 7)
+		return;
+	if (!fold['A'])
+		motor_inicia();
+	for (i = 0; i + 7 <= n; i++) {
+		u32 x;
+		k = fold[b[i]] | (u32)fold[b[i + 1]] << 8 | (u32)fold[b[i + 2]] << 16 | (u32)fold[b[i + 3]] << 24;
+		x = 3u << 24 | fold[b[i + 4]] | (u32)fold[b[i + 5]] << 8 | (u32)fold[b[i + 6]] << 16;
+		if (limpio4[h_limpio(k, 0)] < 255)
+			limpio4[h_limpio(k, 0)]++;
+		if (limpio7[h_limpio(k, x)] < 255)
+			limpio7[h_limpio(k, x)]++;
+	}
+}
+
+int motor_escribe_esc(const char *ruta, int familias, u32 fecha)
 {
 	int h = pl_crear(ruta);
-	u8 c[64];
-	u32 i, *nuevo_id, n_nuevos = 0, *orden_nombres, pos, blob = 0;
-	u8 *bits;
-	char *texto;
-	u32 off_sumas = 64, off_bits, off_idx, off_blob, off_cuerpo;
+	u8 c[128], *bits;
+	u32 i, j, *nuevo_id, *orden_nombres, n_nuevos = 0, blob = 0, n_tramos = 0, n_comodin = 0, pos, nbits;
+	u32 *tramos = 0, cap_tramos = 0;
+	u32 off_sumas, off_tramos, off_bits, off_idx, off_blob, off_bloques, off_disp, off_siempre, fin_cuerpo;
+	u32 n_bl = 0, *bl_off = 0, cap_bl = 0, n_siempre = 0, *siempre = 0, cap_siempre = 0;
+	u32 n_d = 0, cap_d = 0, n_cu = 0, n_lo = 0, n_li = 0, sin_disp = 0, largas = 0, debiles = 0;
+	disp *ds = 0;
+	static u8 bloque[BLOQUE], z[BLOQUE + 4096];
+	u32 en_bloque = 0;
 	if (h < 0)
 		return -1;
-	/* solo lo de main (origen 1) o lo demás (2); y fuera las sumas de los
-	 * nombres de .ign2 (los nombres de las sumas pueden quedar sin su número) */
-	{
-		u32 j, k, q;
-		for (j = k = 0; j < n_sumas; j++) {
-			int es_main = (sumas[j].nt & S_MAIN) != 0, fuera = 0;
-			if ((origen == 1 && !es_main) || (origen == 2 && es_main))
-				fuera = 1;
-			for (q = 0; !fuera && q < n_ignorar; q++)
-				if (ignorar[q] == sumas[j].nt >> 8)
-					fuera = 1;
-			if (!fuera)
-				sumas[k++] = sumas[j];
-		}
-		n_sumas = k;
-		if (origen) {
-			char *d = lineas, *p = lineas, *fin = lineas + n_lineas;
-			while (p < fin) {
-				char *q2 = p;
-				int es_main;
-				while (q2 < fin && *q2 != '\n')
-					q2++;
-				es_main = p[0] >= 'A' && p[0] <= 'Z';
-				/* (las .ign2 van con las dos) */
-				if ((p[0] | 32) == 'i' || (origen == 1) == es_main) {
-					u32 l = (u32)(q2 - p) + (q2 < fin ? 1 : 0);
-					memmove(d, p, l);
-					d[0] = (char)(d[0] | 32);
-					d += l;
-				}
-				p = q2 + 1;
-			}
-			n_lineas = (u32)(d - lineas);
-		}
-	}
-	/* si no cabe en «limite»: se dejan sumas, primero las de main (de archivo
-	 * MD5, SHA-1, SHA-256 y luego las de sección), luego las del día */
-	if (limite) {
-		static const u32 orden[12] = { S_MAIN | 1, S_MAIN | 2, S_MAIN | 3, S_MAIN | 4, S_MAIN | 5, S_MAIN | 6, 1, 2, 3, 4, 5, 6 };
-		u32 fijo = 64 + (1u << 17) + n_lineas, k, j, dejadas = 0;
-		u64 total = fijo + (u64)n_sumas * (16 + 28);	/* (unos 28 octetos de nombre por suma, de más) */
-		for (k = 0; k < 12 && total > limite; k++)
-			for (j = 0; j < n_sumas && total > limite; j++)
-				if ((sumas[j].nt & 0x3F) == orden[k] && sumas[j].tam != 0) {
-					sumas[j].tam = 0, sumas[j].nt |= 0x40;
-					total -= 16 + 28;
-					dejadas++;
-				}
-		for (j = k = 0; j < n_sumas; j++)
-			if (!(sumas[j].nt & 0x40))
-				sumas[k++] = sumas[j];
-		n_sumas = k;
-		if (dejadas)
-			pl_apunta("escudo: FIRMAS.ESC: no caben en %u K: se dejan %u sumas (primero las de main)", limite / 1024, dejadas);
-	}
 	ordena_sumas(sumas, n_sumas);
-	n_comodin_ram = 0;
-	{
-		u32 i2;
-		for (i2 = n_sumas; i2 > 0 && sumas[i2 - 1].tam == INF; i2--)
-			n_comodin_ram++;
-	}
-	/* los nombres que usan las sumas (reducidos a su familia si se pide) */
+	for (i = 0; i < n_sumas; i++)
+		if (sumas[i].nt & S_LIMPIA)
+			n_li++;
+	/* los nombres que usan las sumas (por familia si se pide) */
 	nuevo_id = pl_reserva(n_nombres * 4 + 4);
 	orden_nombres = pl_reserva(n_nombres * 4 + 4);
-	bits = pl_reserva(1u << 17);
-	texto = pl_reserva(MAX_NOMBRE_VIRUS);
-	if (!nuevo_id || !orden_nombres || !bits || !texto)
+	nbits = n_sumas > 20000 ? 21 : 16;
+	bits = pl_reserva(1u << 18);
+	if (!nuevo_id || !orden_nombres || !bits)
 		return -2;
-	memset(nuevo_id, 0xFF, n_nombres * 4);
-	memset(bits, 0, 1u << 17);
+	memset(nuevo_id, 0xFF, n_nombres * 4 + 4);
+	memset(bits, 0, 1u << 18);
 	{
-		/* (un segundo juego de nombres: el de las familias) */
-		static u32 *disp;
-		u32 cd = 1;
+		u32 cd = 1, *dd;
 		while (cd < n_nombres * 2 + 16)
 			cd *= 2;
-		disp = pl_reserva(cd * 4);
-		if (!disp)
+		dd = pl_reserva(cd * 4);
+		if (!dd)
 			return -2;
-		memset(disp, 0, cd * 4);
+		memset(dd, 0, cd * 4);
 		for (i = 0; i < n_sumas; i++) {
 			u32 id = sumas[i].nt >> 8, l, hh, k;
 			const char *s;
@@ -2629,7 +3256,7 @@ int motor_escribe_esc(const char *ruta, int familias, u32 fecha, u32 limite, int
 			s = arena + nombres[id];
 			l = familias ? familia(s, (u32)strlen(s)) : (u32)strlen(s);
 			hh = suma_texto(s, l) & (cd - 1);
-			while ((k = disp[hh])) {
+			while ((k = dd[hh])) {
 				const char *t = arena + nombres[orden_nombres[k - 1]];
 				u32 lt = familias ? familia(t, (u32)strlen(t)) : (u32)strlen(t);
 				if (lt == l && !strncmp(t, s, l))
@@ -2640,65 +3267,233 @@ int motor_escribe_esc(const char *ruta, int familias, u32 fecha, u32 limite, int
 				nuevo_id[id] = k - 1;
 			else {
 				orden_nombres[n_nuevos] = id;
-				disp[hh] = n_nuevos + 1;
+				dd[hh] = n_nuevos + 1;
 				nuevo_id[id] = n_nuevos++;
 				blob += l + 1;
 			}
 		}
-		pl_libera(disp);
+		pl_libera(dd);
+		if (n_nuevos > 0xFFFFFF)
+			return -2;
 	}
-	off_bits = off_sumas + n_sumas * 16;
-	off_idx = off_bits + (1u << 17);
+	/* los tramos (por tamaño y tipo) */
+	for (i = 0; i < n_sumas; i = j) {
+		for (j = i; j < n_sumas && sumas[j].tam == sumas[i].tam && (sumas[j].nt & 0x1F) == (sumas[i].nt & 0x1F); j++) ;
+		if (!CRECE(tramos, cap_tramos, (n_tramos + 1) * 3))
+			return -2;
+		tramos[3 * n_tramos] = sumas[i].tam;
+		tramos[3 * n_tramos + 1] = i << 8 | (sumas[i].nt & 0x1F);
+		tramos[3 * n_tramos + 2] = j - i;
+		n_tramos++;
+		if (sumas[i].tam == INF)
+			n_comodin++;
+		else
+			bits[bit_tam2(sumas[i].tam, nbits) >> 3] |= (u8)(1u << (bit_tam2(sumas[i].tam, nbits) & 7));
+	}
+	off_sumas = 128;
+	off_tramos = off_sumas + n_sumas * 8;
+	off_bits = off_tramos + n_tramos * 12;
+	off_idx = off_bits + (1u << (nbits - 3));
 	off_blob = off_idx + n_nuevos * 4;
-	off_cuerpo = off_blob + blob;
+	off_bloques = off_blob + blob;	/* (de momento: la tabla va detrás de los bloques) */
 	memset(c, 0, sizeof c);
-	memcpy(c, "HPESCUD1", 8);
-	pon32(c + 8, fecha);
-	pon32(c + 12, n_sumas);
-	pon32(c + 16, off_sumas);
-	pon32(c + 20, n_nuevos);
-	pon32(c + 24, off_idx);
-	pon32(c + 28, off_blob);
-	pon32(c + 32, blob);
-	pon32(c + 36, off_cuerpo);
-	pon32(c + 40, n_lineas);
-	pon32(c + 44, off_bits);
-	pon32(c + 48, inf_actual ? inf_actual->version_daily : 0);
-	pon32(c + 52, inf_actual ? inf_actual->version_main : 0);
-	pon32(c + 56, inf_actual ? inf_actual->version_bytecode : 0);
-	pon32(c + 60, n_comodin_ram);
-	pl_escribir(h, c, 64);
+	escribe(h, c, 128);
+	/* las sumas: dentro de cada tramo, por sus 5 primeros octetos (ya lo están: ordena_sumas) */
 	for (i = 0; i < n_sumas; i++) {
-		u8 e[16];
-		pon32(e, sumas[i].tam);
-		pon32(e + 4, nuevo_id[sumas[i].nt >> 8] << 8 | (sumas[i].nt & 0x1F));
-		memcpy(e + 8, sumas[i].h, 8);
-		if (sumas[i].tam != INF)
-			bits[bit_tam(sumas[i].tam) >> 3] |= (u8)(1u << (bit_tam(sumas[i].tam) & 7));
-		if (pl_escribir(h, e, 16) != 16) {
-			pl_cerrar(h);
+		u8 e[8];
+		u32 id = nuevo_id[sumas[i].nt >> 8];
+		memcpy(e, sumas[i].h, 5);
+		e[5] = (u8)id, e[6] = (u8)(id >> 8), e[7] = (u8)(id >> 16);
+		if (escribe(h, e, 8))
 			return -1;
-		}
 	}
-	pl_escribir(h, bits, 1u << 17);
+	for (i = 0; i < n_tramos * 3; i++) {
+		u8 e[4];
+		pon32(e, tramos[i]);
+		escribe(h, e, 4);
+	}
+	escribe(h, bits, 1u << (nbits - 3));
 	for (i = 0, pos = 0; i < n_nuevos; i++) {
 		u8 e[4];
 		const char *s = arena + nombres[orden_nombres[i]];
 		pon32(e, pos);
-		pl_escribir(h, e, 4);
+		escribe(h, e, 4);
 		pos += (familias ? familia(s, (u32)strlen(s)) : (u32)strlen(s)) + 1;
 	}
 	for (i = 0; i < n_nuevos; i++) {
 		const char *s = arena + nombres[orden_nombres[i]];
 		u32 l = familias ? familia(s, (u32)strlen(s)) : (u32)strlen(s);
-		pl_escribir(h, s, l);
-		pl_escribir(h, "", 1);
+		escribe(h, s, l);
+		escribe(h, "", 1);
 	}
-	if (n_lineas)
-		pl_escribir(h, lineas, n_lineas);
+	/* antes, cuántas firmas tienen cada ventana (para elegir los disparadores) */
+	frec = pl_reserva((1u << FREC_BITS) * 2);
+	if (frec) {
+		char *p = lineas, *fin = lineas + n_lineas;
+		memset(frec, 0, (1u << FREC_BITS) * 2);
+		while (p < fin) {
+			char *q = p;
+			marca mk;
+			while (q < fin && *q != '\n')
+				q++;
+			if (q - p > 2 && p[1] == '|' && (p[0] | 32) != 'i' &&
+			    linea_temporal(clase_linea(p[0] | 32), p + 2, (u32)(q - p - 2), &mk)) {
+				u32 pp, sg, k, j, l;
+				for (pp = mk.pats; pp < n_pats; pp++)
+					for (sg = 0; sg < pats[pp].nseg; sg++) {
+						const seg *g = &segs[pats[pp].seg0 + sg];
+						const tok *t = &toks[g->ini];
+						for (k = 0; k + 4 <= g->largo; k++) {
+							u32 c, x;
+							for (j = 0; j < 4 && es_fijo(&t[k + j]); j++) ;
+							if (j < 4)
+								continue;
+							c = fold[t[k].v] | (u32)fold[t[k + 1].v] << 8 | (u32)fold[t[k + 2].v] << 16 |
+							    (u32)fold[t[k + 3].v] << 24;
+							for (l = 0, x = 0; l < 3 && k + 4 + l < g->largo && es_fijo(&t[k + 4 + l]); l++)
+								x |= (u32)fold[t[k + 4 + l].v] << (8 * l);
+							/* (las cuatro largas: 4, 5, 6 y 7) */
+							for (j = 0; j <= l; j++) {
+								u32 y = (u32)j << 24 | (x & ((1u << (8 * j)) - 1));
+								u16 *f = &frec[h_ventana(c, y)];
+								if (*f < 65535)
+									(*f)++;
+							}
+						}
+					}
+				vuelve_a(&mk);
+			}
+			p = q + 1;
+		}
+	}
+	/* el cuerpo: cada línea, con sus disparadores (o a «siempre») */
+	{
+		char *p = lineas, *fin = lineas + n_lineas;
+		u32 sitio = off_bloques;
+		while (p <= fin) {
+			char *q = p;
+			u32 l;
+			int ultimo = p == fin;
+			while (q < fin && *q != '\n')
+				q++;
+			l = (u32)(q - p);
+			if (!ultimo && l > 2 && p[1] == '|' && l + 1 > BLOQUE - 16)
+				largas++;
+			if (ultimo || (l > 2 && p[1] == '|' && l + 1 <= BLOQUE - 16)) {
+				if (ultimo || en_bloque + l + 1 > BLOQUE - 1) {
+					/* el bloque, comprimido */
+					if (en_bloque) {
+						z_stream zs;
+						memset(&zs, 0, sizeof zs);
+						deflateInit2(&zs, 9, Z_DEFLATED, -15, 9, Z_DEFAULT_STRATEGY);
+						zs.next_in = bloque, zs.avail_in = en_bloque, zs.next_out = z, zs.avail_out = sizeof z;
+						deflate(&zs, Z_FINISH);
+						if (!CRECE(bl_off, cap_bl, n_bl + 2))
+							return -2;
+						bl_off[n_bl++] = sitio;
+						escribe(h, z, (u32)zs.total_out);
+						sitio += (u32)zs.total_out;
+						deflateEnd(&zs);
+						en_bloque = 0;
+					}
+					if (ultimo)
+						break;
+				}
+				{
+					u32 ref = n_bl << 16 | en_bloque;
+					int cl = (u8)p[0] | 32;
+					marca mk;
+					disp d[64];
+					int nd = -1;
+					memcpy(bloque + en_bloque, p, l);
+					bloque[en_bloque] = (u8)cl;
+					bloque[en_bloque + l] = '\n';
+					en_bloque += l + 1;
+					if (cl == 'n')
+						n_cu++;
+					else if (cl == 'l')
+						n_lo++;
+					int solo_pe = 0;
+					if (cl != 'i' && linea_temporal(clase_linea(cl), p + 2, l - 2, &mk)) {
+						nd = disparadores_de(&mk, d, 64);
+						solo_pe = firmas[n_firmas - 1].objetivo == 1;
+						vuelve_a(&mk);
+					}
+					if (nd <= 0 && cl != 'i' && !buena_en_memoria(p + 2, l - 2, cl)) {
+						debiles++;	/* (sin nada que la distinga: fuera) */
+						en_bloque -= l + 1;
+						if (cl == 'n')
+							n_cu--;
+						else
+							n_lo--;
+					} else if (nd <= 0) {
+						if (!CRECE(siempre, cap_siempre, n_siempre + 1))
+							return -2;
+						siempre[n_siempre++] = ref;
+						if (cl != 'i')
+							sin_disp++;
+					} else {
+						if (!CRECE(ds, cap_d, n_d + (u32)nd))
+							return -2;
+						for (i = 0; i < (u32)nd; i++) {
+							ds[n_d] = d[i];
+							if (solo_pe)
+								ds[n_d].sl |= D_SOLO_PE;
+							ds[n_d++].ref = ref;
+						}
+					}
+				}
+			}
+			p = q + 1;
+		}
+		if (!CRECE(bl_off, cap_bl, n_bl + 1))
+			return -2;
+		bl_off[n_bl] = sitio;
+		off_bloques = sitio;
+	}
+	for (i = 0; i <= n_bl; i++) {
+		u8 e[4];
+		pon32(e, bl_off[i]);
+		escribe(h, e, 4);
+	}
+	off_disp = off_bloques + (n_bl + 1) * 4;
+	for (i = 0; i < n_d; i++) {
+		u8 e[12];
+		pon32(e, ds[i].clave);
+		pon32(e + 4, ds[i].ref);
+		pon32(e + 8, ds[i].sl);
+		escribe(h, e, 12);
+	}
+	off_siempre = off_disp + n_d * 12;
+	for (i = 0; i < n_siempre; i++) {
+		u8 e[4];
+		pon32(e, siempre[i]);
+		escribe(h, e, 4);
+	}
+	fin_cuerpo = off_siempre + n_siempre * 4;
+	/* la cabecera, ahora que se sabe todo */
+	memcpy(c, "HPESCUD2", 8);
+	pon32(c + 8, fecha);
+	pon32(c + 12, inf_actual ? inf_actual->version_daily : 0);
+	pon32(c + 16, inf_actual ? inf_actual->version_main : 0);
+	pon32(c + 20, inf_actual ? inf_actual->version_bytecode : 0);
+	pon32(c + 24, n_sumas), pon32(c + 28, off_sumas);
+	pon32(c + 32, n_tramos), pon32(c + 36, off_tramos);
+	pon32(c + 40, off_bits);
+	pon32(c + 44, n_nuevos), pon32(c + 48, off_idx), pon32(c + 52, off_blob);
+	pon32(c + 56, n_bl), pon32(c + 60, off_bloques);
+	pon32(c + 64, n_d), pon32(c + 68, off_disp);
+	pon32(c + 72, n_siempre), pon32(c + 76, off_siempre);
+	pon32(c + 80, n_comodin), pon32(c + 84, n_cu), pon32(c + 88, n_lo), pon32(c + 92, n_li);
+	pon32(c + 96, nbits);
+	pl_mover(h, 0);
+	escribe(h, c, 128);
 	pl_cerrar(h);
-	pl_libera(nuevo_id), pl_libera(orden_nombres), pl_libera(bits), pl_libera(texto);
-	pl_apunta("escudo: FIRMAS.ESC: %u sumas (%u nombres), %u octetos de cuerpo, %u octetos en total", n_sumas,
-		  n_nuevos, n_lineas, off_cuerpo + n_lineas);
+	pl_apunta("escudo: FIRMAS.ESC: %u sumas en %u tramos (%u nombres); %u firmas del cuerpo y %u lógicas en %u bloques; %u disparadores; %u siempre en memoria (%u sin 4 octetos fijos que digan algo); %u fuera por débiles (solo ceros, FF o repeticiones); %u líneas demasiado largas; %u octetos",
+		  n_sumas, n_tramos, n_nuevos, n_cu, n_lo, n_bl, n_d, n_siempre, sin_disp, debiles, largas, fin_cuerpo);
+	pl_libera(nuevo_id), pl_libera(orden_nombres), pl_libera(bits), pl_libera(tramos);
+	pl_libera(bl_off), pl_libera(siempre), pl_libera(ds), pl_libera(frec);
+	frec = 0;
 	return 0;
 }
+#endif
