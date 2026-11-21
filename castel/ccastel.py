@@ -3360,9 +3360,10 @@ class Generador32(Generador):
         self.et(d.etq)
         if atiende:                             # la llama el procesador: se guarda todo
             self.em('pushad')
-            # [WIN32] DS y ES, los planos de siempre (el programa Win32 que
-            # se haya parado lleva los suyos, con base: docs/pentium/WIN32.md)
-            self.em('mov ax, 35')
+            # [WIN32] DS y ES, los de la pila del núcleo (planos: el programa
+            # Win32 que se haya parado lleva los suyos, con base:
+            # docs/pentium/WIN32.md)
+            self.em('mov ax, ss')
             self.em('mov ds, ax')
             self.em('mov es, ax')
             self.em('mov ebp, esp')
@@ -3383,17 +3384,14 @@ class Generador32(Generador):
             self.em('popad')
             if nparams:
                 self.em('add esp, 4')           # el número de error
-            # [WIN32] los DS y ES de a quien se vuelve: los del programa Win32
-            # (0x3B) si su CS es el suyo (0x33); si no, los planos (0x23)
-            self.em('push eax')
-            self.em('mov eax, [esp+8]')
-            self.em('and eax, 32')
-            self.em('imul eax, eax, 3')
-            self.em('shr eax, 2')
-            self.em('add eax, 35')
-            self.em('mov ds, ax')
-            self.em('mov es, ax')
-            self.em('pop eax')
+            # [WIN32] los DS y ES de a quien se vuelve: si es del anillo 3, los
+            # de datos que van con su CS (CS + 8: 0x23 con 0x1B, 0x3B con
+            # 0x33, el de los programas Win32); si es del 0, los de la pila
+            for x in ('push eax', 'push ecx', 'mov ecx, [esp+12]', 'and ecx, 3', 'imul ecx, ecx, 21845',
+                      'mov eax, [esp+12]', 'add eax, 8', 'and eax, ecx', 'xor ecx, 65535', 'push eax',
+                      'xor eax, eax', 'mov ax, ss', 'and eax, ecx', 'or eax, [esp]', 'add esp, 4',
+                      'mov ds, ax', 'mov es, ax', 'pop ecx', 'pop eax'):
+                self.em(x)
             self.em('iretd')
         else:
             if con_marco:

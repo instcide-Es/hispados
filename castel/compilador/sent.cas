@@ -1334,9 +1334,10 @@ módulo Sent
         et_nombre(t)
         si atiende entonces
             em("pushad")
-            ; [WIN32] DS y ES, los planos de siempre (el programa Win32 que se
-            ; haya parado lleva los suyos, con base: docs/pentium/WIN32.md)
-            em("mov ax, 35")
+            ; [WIN32] DS y ES, los de la pila del núcleo (planos: el programa
+            ; Win32 que se haya parado lleva los suyos, con base:
+            ; docs/pentium/WIN32.md)
+            em("mov ax, ss")
             em("mov ds, ax")
             em("mov es, ax")
             em("mov ebp, esp")
@@ -1353,16 +1354,27 @@ módulo Sent
             si marco <> 0 entonces em("mov esp, ebp") fin
             em("popad")
             si nparams <> 0 entonces em("add esp, 4") fin
-            ; [WIN32] los DS y ES de a quien se vuelve: los del programa Win32
-            ; (0x3B) si su CS es el suyo (0x33); si no, los planos (0x23)
+            ; [WIN32] los DS y ES de a quien se vuelve: si es del anillo 3, los
+            ; de datos que van con su CS (CS + 8: 0x23 con 0x1B, 0x3B con
+            ; 0x33, el de los programas Win32); si es del 0, los de la pila
             em("push eax")
-            em("mov eax, [esp+8]")
-            em("and eax, 32")
-            em("imul eax, eax, 3")
-            em("shr eax, 2")
-            em("add eax, 35")
+            em("push ecx")
+            em("mov ecx, [esp+12]")
+            em("and ecx, 3")
+            em("imul ecx, ecx, 21845")
+            em("mov eax, [esp+12]")
+            em("add eax, 8")
+            em("and eax, ecx")
+            em("xor ecx, 65535")
+            em("push eax")
+            em("xor eax, eax")
+            em("mov ax, ss")
+            em("and eax, ecx")
+            em("or eax, [esp]")
+            em("add esp, 4")
             em("mov ds, ax")
             em("mov es, ax")
+            em("pop ecx")
             em("pop eax")
             em("iretd")
         sino
