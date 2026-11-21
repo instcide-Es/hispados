@@ -3358,24 +3358,24 @@ python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $V/semilla.asm > /dev/
 # luego 1280 x 800 a prueba, sin tocar nada: a los 15 s vuelve sola
 CAPTURAS=$G MEMORIA=128 DISCO=$P/d16.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 110" ":pausa 2" ":clic 553 76" ":pausa 1" \
   ":clic 40 585" ":clic 250 500" ":captura m0" ":clic 572 236" ":pausa 1" ":captura m1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":captura m2" ":clic 431 418" ":pausa 1" ":captura m3" \
-  ":clic 677 347" ":clic 341 525" ":pausa 2" ":captura m4" ":pausa 17" ":captura m5" > $V/marcha.sal 2>&1
+  ":clic 495 347" ":clic 341 525" ":pausa 2" ":captura m4" ":pausa 17" ":captura m5" > $V/marcha.sal 2>&1
 S=$V/marcha.sal
 mira "con la VBE de Bochs (QEMU -vga std), «Probar...» pone la medida en el momento; «Mantener» la deja; sin tocar nada, a los 15 s vuelve sola la de antes" \
   "^pantalla: 1024x768 con 32 bits por punto (cambiado en marcha, por la VBE de Bochs)" "^escritorio: la pantalla, a 1024 x 768 (en marcha)" \
   "^escritorio: Se queda a 1024 x 768 (hasta que se apague)\." "^escritorio: la pantalla, a 1280 x 800 (en marcha)" \
   "^escritorio: no se ha dado por buena en 15 s" "^escritorio: Ha vuelto la de antes\."
 miracap "Configuración: la medida de la pantalla y, a su lado, «Cambiar...»" m0 texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 530 224 542 232 "Cambiar..."
-miracap "la lista: los modos que da la tarjeta y caben en lo que dice la pantalla (su EDID: prefiere 1280 x 800), el de ahora elegido, «Probar...» y «Cerrar»" m1 \
+miracap "la lista: los modos que da la tarjeta y caben en la pantalla (su EDID: 1280 x 800, recomendada), el de ahora elegido, «Probar...» y «Cerrar»" m1 \
   negrita 200 120 208 126 "La medida de la pantalla" texto 200 140 208 146 "Ahora: 800 x 600, 32 bits por punto." negrita 200 218 210 224 "800 x 600" \
-  negrita 520 218 530 224 "1024 x 768" negrita 516 318 526 326 "1920 x 1080" texto 160 349 168 357 "La pantalla dice que prefiere 1280 x 800." \
+  negrita 520 218 530 224 "1024 x 768" negrita 350 250 360 258 "1280 x 800 *" texto 160 283 168 291 "* La de la pantalla (recomendada): 1280 x 800." notexto 0 0 800 600 "1920 x 1080" \
   negrita 188 430 198 436 "Probar..." negrita 565 430 575 436 Cerrar rgb 170 228 5CC45E 40
 miracap "a prueba: la pantalla ya a 1024 x 768, «¿Se ve bien?» con la cuenta atrás, y el Bloc de notas maximizado, a la medida nueva" m2 tam 1024 768 \
   negrita 334 305 342 313 "¿Se ve bien la pantalla?" texto 334 327 342 335 "Está a 1024 x 768." negrita 393 405 405 415 Mantener negrita 571 405 583 415 Volver \
   negrita 24 2 36 10 "NOTAS.TXT - Bloc de notas" rgb 1000 719 D7E5F8 10 texto 4 708 14 716 "NOTAS.TXT" negrita 30 742 46 752 Inicio
 miracap "«Mantener»: la lista otra vez, con la de ahora (1024 x 768) y lo que ha pasado" m3 tam 1024 768 texto 312 223 320 231 "Ahora: 1024 x 768, 32 bits por punto." \
-  texto 272 451 280 459 "Se queda a 1024 x 768 (hasta que se apague)."
+  texto 272 383 280 391 "Se queda a 1024 x 768 (hasta que se apague)."
 miracap "1280 x 800 a prueba" m4 tam 1280 800
-miracap "y a los 15 s, sin tocar nada, la de antes (1024 x 768): «Ha vuelto la de antes.»" m5 tam 1024 768 texto 272 451 280 459 "Ha vuelto la de antes."
+miracap "y a los 15 s, sin tocar nada, la de antes (1024 x 768): «Ha vuelto la de antes.»" m5 tam 1024 768 texto 272 383 280 391 "Ha vuelto la de antes."
 if ! grep -q "excepción\|\*\*\*" $S; then ok "ni una excepción ni una queja del núcleo al cambiar la pantalla en marcha"; else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -3 | sed 's/^/        /'; fi
 # 2. el CD, con el modo que ha puesto GRUB (por la VBE de la BIOS), en un
 # «pc» como el de VirtualBox: con -vga std (como VBoxVGA) y con -vga vmware
@@ -3385,8 +3385,10 @@ CD=$P/cd/cd.iso
 VBOX_PC="-machine pc -m 256 -nic user,model=e1000 -device pci-ohci,id=o -device usb-tablet,bus=o.0"
 truncate -s 2G $V/ide.img
 for vga in std vmware; do
+  # (EDID) con -vga std, la lista llega hasta lo que dice su EDID (1280 x 800, la quinta); con vmware, sin EDID, la sexta
+  if [ $vga = std ]; then x=403; else x=565; fi
   maquina cd$vga "$VBOX_PC -vga $vga -cdrom $CD -drive file=$V/ide.img,format=raw,if=ide,index=0 -boot d" ":espera 40 ^escritorio: en marcha" ":pausa 3" \
-    ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":captura cd$vga" ":clic 565 263" ":clic 229 441" ":pausa 2" ":captura cd${vga}2" ":clic 559 434" ":pausa 1"
+    ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":captura cd$vga" ":clic $x 263" ":clic 229 441" ":pausa 2" ":captura cd${vga}2" ":clic 559 434" ":pausa 1"
   mira "el CD en un «pc» como VirtualBox con -vga $vga: el modo de GRUB (800 x 600) se cambia en marcha (1280 x 800) y se mantiene" \
     "escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)" "^pantalla: 1280x800 con 32 bits por punto (cambiado en marcha" \
     "^escritorio: Se queda a 1280 x 800 (hasta que se apague)\."
@@ -3400,13 +3402,17 @@ maquina inst "$VBOX_PC -cdrom $CD -drive file=$V/inst.img,format=raw,if=ide,inde
 printf '[hispa]\r\nusuario=Ana\r\nequipo=PRUEBA\r\nteclado=es\r\nmodo=800x600\r\n' > $V/HISPA.INI
 mcopy -o -i $V/inst.img@@1M $V/HISPA.INI ::HISPA/
 cp $V/inst.img $V/inst0.img
+# (EDID) cirrus no da EDID: la nativa (1024 x 768), como si se hubiera
+# sabido otro día arrancando «a la medida»; sin ella, nada mayor que la de ahora
+python3 -I -c "import sys; t='# GRUB Environment Block\npantalla=\nantes=\nprueba=0\nnativa=1024x768\n'; open(sys.argv[1],'w').write(t+'#'*(1024-len(t)))" $V/envn
+mcopy -o -i $V/inst.img@@1M $V/envn ::HISPA/PANTALLA.ENV
 CIRRUS="$VBOX_PC -vga cirrus -drive file=$V/inst.img,format=raw,if=ide,index=0"
 maquina pc1 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":captura pc1" \
   ":clic 565 229" ":clic 274 441" ":pausa 1" ":captura pc2" ":clic 314 336" ":pausa 6"
 mira "sin la VBE de Bochs (cirrus), instalado: la medida se guarda en \\HISPA\\PANTALLA.ENV (a prueba), GRUB.CFG la lee, y «Reiniciar ahora» reinicia" \
-  "^escritorio: GRUB.CFG lee ahora PANTALLA.ENV" "^escritorio: PANTALLA.ENV: pantalla=1024x768 antes= prueba=1" "^escritorio: reiniciar"
+  "^escritorio: GRUB.CFG lee ahora PANTALLA.ENV" "^escritorio: .*PANTALLA.ENV: pantalla=1024x768 antes= prueba=1" "^escritorio: reiniciar"
 miracap "la lista, sin cambio en marcha: «se pone al arrancar», «A la medida» y «Guardar y reiniciar...»" pc1 texto 160 167 168 175 "Esta tarjeta no deja cambiarla en marcha: se guarda y" \
-  negrita 352 352 364 360 "A la medida" negrita 180 428 190 436 "Guardar y reiniciar..."
+  negrita 190 252 200 260 "A la medida" negrita 512 216 522 224 "1024 x 768 *" notexto 0 0 800 600 "1280 x 800" negrita 180 428 190 436 "Guardar y reiniciar..."
 miracap "«Al arrancar otra vez, a 1024 x 768», con «Reiniciar ahora» y «Más tarde»" pc2 negrita 224 216 234 224 "Al arrancar otra vez, a 1024 x 768." \
   negrita 248 324 258 332 "Reiniciar ahora" negrita 448 324 458 332 "Más tarde"
 mcopy -n -i $V/inst.img@@1M ::HISPA/GRUB.CFG $V/grub.cfg; mcopy -n -i $V/inst.img@@1M ::HISPA/PANTALLA.ENV $V/env1
@@ -3415,25 +3421,25 @@ if [ $(stat -c %s $V/env1) = 1024 ] && head -c 25 $V/env1 | grep -q '^# GRUB Env
   ok "PANTALLA.ENV es un bloque de GRUB de 1024 octetos (GRUB escribe en él: save_env), GRUB.CFG lo lee y el disco está sano"
 else ko "PANTALLA.ENV o GRUB.CFG no quedan bien:"; head -c 80 $V/env1 | sed 's/^/        /'; fi
 # al arrancar: GRUB pone 1024 x 768 (y la apunta «probándose»); «Mantener»
-maquina pc2 "$CIRRUS -no-reboot" ":espera 40 la pantalla está a prueba" ":pausa 2" ":captura pc3" ":centro 512 384" ":clic 431 418" ":pausa 2"
+maquina pc2 "$CIRRUS -no-reboot" ":espera 40 está a prueba" ":pausa 2" ":captura pc3" ":centro 512 384" ":clic 431 418" ":pausa 2"
 mcopy -n -i $V/inst.img@@1M ::HISPA/PANTALLA.ENV $V/env2
 mira "al arrancar, GRUB la pone (1024 x 768) y el escritorio pregunta; «Mantener» la deja para siempre" \
-  "escritorio: en marcha, 1024 x 768 con [0-9]* bits por punto (el modo lo ha dejado puesto el cargador)" "^escritorio: la pantalla está a prueba (PANTALLA.ENV)" \
-  "^escritorio: PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" "^escritorio: Se queda a 1024 x 768\."
+  "escritorio: en marcha, 1024 x 768 con [0-9]* bits por punto (el modo lo ha dejado puesto el cargador)" "pantalla: está a prueba" \
+  "^escritorio: .*PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" "^escritorio: Se queda a 1024 x 768\."
 miracap "«¿Se ve bien la pantalla?», a 1024 x 768, con la cuenta atrás «vuelve la de antes»" pc3 negrita 334 305 342 313 "¿Se ve bien la pantalla?" \
   texto 334 347 342 355 "Si no la da por buena, vuelve la de antes en 1"
 if head -c 100 $V/env2 | grep -q '^prueba=0$' && head -c 100 $V/env2 | grep -q '^pantalla=1024x768$'; then ok "y PANTALLA.ENV: pantalla=1024x768, prueba=0"
 else ko "PANTALLA.ENV no queda bien tras «Mantener»:"; head -c 70 $V/env2 | sed 's/^/        /'; fi
-# otra, 1280 x 1024: se reinicia y, en la prueba, se reinicia otra vez a lo
+# otra, 1024 x 600: se reinicia y, en la prueba, se reinicia otra vez a lo
 # bruto (como con la pantalla a oscuras): GRUB vuelve sola a 1024 x 768
 maquina pc3 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":centro 512 384" ":clic 40 753" ":clic 250 668" ":clic 688 320" ":pausa 1" \
-  ":clic 353 381" ":clic 386 525" ":pausa 1" ":clic 426 420" ":pausa 6"
-mira "desde 1024 x 768, 1280 x 1024 guardada a prueba (la de antes, apuntada)" "^escritorio: PANTALLA.ENV: pantalla=1280x1024 antes=1024x768 prueba=1" "^escritorio: reiniciar"
-maquina pc4 "$CIRRUS" ":espera 40 la pantalla está a prueba" ":pausa 2" ":monitor system_reset" ":pausa 3" ":espera 40 en marcha, 1024 x 768" ":pausa 4"
+  ":clic 515 313" ":clic 386 525" ":pausa 1" ":clic 426 420" ":pausa 6"
+mira "desde 1024 x 768, 1024 x 600 guardada a prueba (la de antes, apuntada)" "^escritorio: .*PANTALLA.ENV: pantalla=1024x600 antes=1024x768 prueba=1" "^escritorio: reiniciar"
+maquina pc4 "$CIRRUS" ":espera 40 está a prueba" ":pausa 2" ":monitor system_reset" ":pausa 3" ":espera 40 en marcha, 1024 x 768" ":pausa 4"
 mcopy -n -i $V/inst.img@@1M ::HISPA/PANTALLA.ENV $V/env3
-mira "si se reinicia sin darla por buena, GRUB vuelve solo a la de antes (1024 x 768), sin preguntar" "escritorio: en marcha, 1280 x 1024" "^escritorio: la pantalla está a prueba" \
+mira "si se reinicia sin darla por buena, GRUB vuelve solo a la de antes (1024 x 768), sin preguntar" "escritorio: en marcha, 1024 x 600" "pantalla: está a prueba" \
   "escritorio: en marcha, 1024 x 768"
-if [ $(grep -c "la pantalla está a prueba" $S) = 1 ] && head -c 100 $V/env3 | grep -q '^pantalla=1024x768$' && head -c 100 $V/env3 | grep -q '^antes=$' && head -c 100 $V/env3 | grep -q '^prueba=0$' && sano $V/inst.img 2048; then
+if [ $(grep -c "pantalla: está a prueba" $S) = 1 ] && head -c 100 $V/env3 | grep -q '^pantalla=1024x768$' && head -c 100 $V/env3 | grep -q '^antes=$' && head -c 100 $V/env3 | grep -q '^prueba=0$' && sano $V/inst.img 2048; then
   ok "y PANTALLA.ENV lo dice (GRUB lo ha escrito con save_env): pantalla=1024x768, antes vacío, prueba=0; el disco, sano"
 else ko "tras reiniciar sin darla por buena, PANTALLA.ENV no queda bien:"; head -c 70 $V/env3 | sed 's/^/        /'; fi
 # 4. instalado, con la VBE de Bochs (-vga std, como VirtualBox): «Mantener»
@@ -3443,7 +3449,7 @@ else ko "tras reiniciar sin darla por buena, PANTALLA.ENV no queda bien:"; head 
 cp $V/inst0.img $V/inst.img
 STD="$VBOX_PC -vga std -drive file=$V/inst.img,format=raw,if=ide,index=0"
 maquina vb1 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":clic 431 418" ":pausa 2"
-mira "instalado, con la VBE de Bochs: «Mantener» la guarda también para los próximos arranques" "^escritorio: PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" \
+mira "instalado, con la VBE de Bochs: «Mantener» la guarda también para los próximos arranques" "^escritorio: .*PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" \
   "^escritorio: Se queda a 1024 x 768, también al arrancar\."
 maquina vb2 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3"
 mira "y al arrancar otra vez, GRUB ya la pone (1024 x 768)" "escritorio: en marcha, 1024 x 768 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
@@ -3454,6 +3460,53 @@ maquina vb3 "${STD/-vga std/-vga vmware}" ":espera 40 la pantalla, a 1200" ":pau
 mira "con la VMSVGA, 1200 x 800 (que su BIOS no da por VBE: GRUB pone otra) la pone el núcleo al arrancar, por la VBE de Bochs" \
   "escritorio: en marcha, 800 x 600" "^escritorio: la pantalla, a 1200 x 800 (en marcha)"
 miracap "y el escritorio, a 1200 x 800" vb3 tam 1200 800 negrita 30 770 46 780 Inicio
+# 5. (EDID) lo que dice la pantalla de sí misma: con QEMU -device VGA y un
+# EDID de 1024 x 600 (un netbook), uno de 1366 x 768 y sin EDID; el
+# Administrador de dispositivos dice el monitor
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/udisposi.cas -o $V/udisposi.asm -I $AQUI/nucleo32 > /dev/null 2>&1 && nasm -f bin $V/udisposi.asm -o $V/DISPOSIT.BIN
+cp $P/d16.img $V/de.img; mcopy -o -i $V/de.img $V/DISPOSIT.BIN ::DISPOSIT.BIN
+for e in 1024:600 1366:768 no; do
+  if [ $e = no ]; then o="edid=off"; else o="xres=${e%:*},yres=${e#*:}"; fi
+  CAPTURAS=$G MEMORIA=128 DISCO=$V/de.img ARRANQUE=escritorio MODULOS= VGA=none QEMU_MAS="-device VGA,$o" $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" \
+    ":clic 40 585" ":clic 250 500" ":clic 576 236" ":pausa 1" ":captura ed${e%:*}" ":clic 594 441" ":clic 333 399" ":pausa 3" ":captura dv${e%:*}" > $V/edid$e.sal 2>&1
+done
+S=$V/edid1024:600.sal
+mira "con un EDID de 1024 x 600 (un netbook), el núcleo lo lee y lo apunta en el registro del arranque" "pantalla: EDID: «QEMU Monitor», hecha para 1024 x 600 (la tarjeta de QEMU)"
+miracap "y la lista ofrece solo lo que cabe en la pantalla: 800 x 600 y 1024 x 600, la recomendada" ed1024 negrita 200 218 210 224 "800 x 600" negrita 355 218 365 224 "1024 x 600 *" \
+  texto 160 249 168 257 "* La de la pantalla (recomendada): 1024 x 600." notexto 0 0 800 600 "1024 x 768"
+miracap "el Administrador de dispositivos dice el monitor en Pantalla, colgado de la tarjeta (lo lleva edid.cas)" dv1024 texto 544 175 552 183 "edid.cas"
+S=$V/edid1366:768.sal
+mira "con un EDID de 1366 x 768" "pantalla: EDID: «QEMU Monitor», hecha para 1366 x 768"
+miracap "nada mayor que 1366 x 768 (y 1366 no, que la VBE de QEMU no la da: la deja en 1360)" ed1366 negrita 0 0 800 600 "1280 x 720" texto 160 200 168 400 "* La de la pantalla (recomendada): 1366 x 768." \
+  notexto 0 0 800 600 "1440 x 900" notexto 0 0 800 600 "1366 x 768 *"
+S=$V/edidno.sal
+mira "sin EDID, lo dice" "la pantalla no dice su medida"
+miracap "y en una máquina virtual (su pantalla es una ventana) la lista sigue sin tope" edno negrita 0 0 800 600 "1920 x 1080"
+# 6. (EDID) la memoria USB (usb.sh, como root), en un PC sin la VBE de
+# Bochs ni EDID (-vga cirrus, como el HP Mini): se guarda en X:\PANTALLA.ENV
+# y la usa la primera entrada de su menú; lo que la BIOS no da se dice
+if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && command -v parted > /dev/null; then
+  $AQUI/nucleo32/usb.sh $V/usb.img > $V/usb.txt 2>&1
+  USBQ="-machine pc -m 256 -vga cirrus -nic none -device qemu-xhci,id=u -drive file=$V/usb.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1"
+  maquina us1 "$USBQ -no-reboot" ":espera 60 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 250 500" ":clic 576 236" ":pausa 1" ":captura us1" \
+    ":clic 403 229" ":clic 274 441" ":pausa 1" ":clic 314 336" ":pausa 6"
+  mira "desde la memoria USB (sin EDID): nada mayor que la de ahora, «A la medida», y se guarda en X:\\PANTALLA.ENV" \
+    "la pantalla no dice su medida" "^escritorio: \\\\PANTALLA.ENV: pantalla=auto antes= prueba=1" "^escritorio: reiniciar"
+  miracap "«No se sabe su medida: nada mayor que la de ahora.»" us1 texto 160 249 168 257 "No se sabe su medida: nada mayor que la de ahora." negrita 350 218 370 226 "A la medida"
+  maquina us2 "$USBQ -no-reboot" ":espera 60 está a prueba" ":pausa 2" ":clic 431 418" ":pausa 2"
+  mira "y al arrancar, GRUB la pone (a la medida) desde la primera entrada y pregunta" "PANTALLA.ENV pide «auto» (prueba=2)" "pantalla: está a prueba"
+  python3 -I -c "import sys; t='# GRUB Environment Block\npantalla=1600x900\nantes=\nprueba=0\nnativa=\n'; open(sys.argv[1],'w').write(t+'#'*(1024-len(t)))" $V/envu
+  mcopy -o -i $V/usb.img@@1M $V/envu ::PANTALLA.ENV
+  maquina us3 "$USBQ -no-reboot" ":espera 60 no permite" ":pausa 3" ":captura us3"
+  mcopy -n -i $V/usb.img@@1M ::ARRANQUE.TXT $V/arranque.txt; mcopy -n -i $V/usb.img@@1M ::PANTALLA.ENV $V/envu2
+  mira "si la BIOS no da la pedida (1600 x 900 en cirrus), GRUB pone otra y el núcleo lo dice" "Este equipo no permite 1600 x 900: se queda en 800 x 600\."
+  miracap "con un aviso" us3 texto 0 0 800 600 "Este equipo no permite 1600 x 900: se queda en 800 x 600."
+  if tr -d '\r' < $V/arranque.txt | iconv -f CP437 -t UTF-8 | grep -q "Este equipo no permite 1600 x 900" && head -c 60 $V/envu2 | grep -q '^pantalla=800x600$'; then
+    ok "y queda en X:\\ARRANQUE.TXT (para mandarlo), y PANTALLA.ENV pasa a la que hay"
+  else ko "ARRANQUE.TXT o PANTALLA.ENV no lo dicen:"; head -c 60 $V/envu2 | sed 's/^/        /'; fi
+else
+  echo "  (sin ser root no se hace la memoria USB: sin la parte de la memoria USB)"
+fi
 if ! cat $V/pc*.txt $V/vb*.txt $V/cd*.txt | grep -q "excepción\|\*\*\*"; then ok "en todos esos arranques, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; cat $V/pc*.txt $V/vb*.txt $V/cd*.txt | grep "excepción\|\*\*\*" | head -3 | sed 's/^/        /'; fi
 else
@@ -3492,7 +3545,7 @@ CAPTURAS=$G ESCRIBE=1 SATA=$Y/sata.img SOLO_LECTURA=1 MODULOS=$Y/ACPI.BIN,$Y/DIS
   ":clicd 63 40" ":pausa 1" ":captura dv1" ":clic 100 70" ":pausa 4" ":captura dv2" ":clic 395 81" ":pausa 3" ":captura dv3" \
   ":tecla down" ":tecla ret" ":pausa 4" ":captura dv4" ":clic 228 140" ":raton 400 450" ":pausa 1" ":captura dv5" ":clic 323 140" ":raton 400 450" ":pausa 1" ":captura dv6" \
   ":tecla esc" ":pausa 1" ":clic 245 81" ":pausa 2" ":captura dv7" \
-  ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":pausa 1" ":captura dv10" ":clic 742 31" ":pausa 1" \
+  ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":pausa 1" ":captura dv10" ":clic 742 31" ":pausa 1" \
   ":clic 40 585" ":pausa 1" ":clic 250 500" ":pausa 1" ":captura dv8" ":clic 300 398" ":pausa 4" ":captura dv9" > $Y/pc.sal 2>&1
 S=$Y/pc.sal
 mira "ACPI.BIN apunta lo que hay en el espacio de nombres de ACPI (la llamada 156)" "^ACPI: [0-9]* dispositivos del espacio de nombres, apuntados para el Administrador de dispositivos"
@@ -3501,7 +3554,7 @@ mira "Mi equipo > Propiedades, Configuración > «Administrador de dispositivos.
 [ "$(grep -c '^escritorio: lanzo .DISPOSIT.BIN' $S)" = 2 ] && ok "(dos veces: desde Mi equipo y desde Configuración)" || ko "DISPOSIT.BIN no se lanza dos veces: $(grep -c '^escritorio: lanzo .DISPOSIT' $S)"
 miracap "el botón secundario en Mi equipo: «Abrir» y «Propiedades»" dv1 texto 60 30 200 100 Abrir texto 60 30 200 100 Propiedades
 miracap "la ventana: el árbol por categorías, con el controlador de cada cosa" dv2 \
-  negrita 30 15 400 40 "Administrador de dispositivos" negrita 40 120 400 520 "[-] Pantalla (1)" negrita 40 120 500 520 "Intel PRO/1000 MT (82540EM)" \
+  negrita 30 15 400 40 "Administrador de dispositivos" negrita 40 120 400 520 "[-] Pantalla (2)" negrita 40 120 500 520 "Intel PRO/1000 MT (82540EM)" \
   texto 400 120 760 520 RED.BIN texto 400 120 760 520 ahci.cas texto 30 60 700 100 "Guardar informe"
 miracap "las categorías se cierran con la flecha izquierda; la tableta USB, «SIN CONTROLADOR» con su «!», fondo naranja y su franja" dv10 \
   negrita 40 120 400 520 "[+] Discos (2)" negrita 40 120 400 520 "[+] Red (1)" negrita 40 120 760 520 "! QEMU USB Tablet" texto 400 120 560 520 "SIN CONTROLADOR"
@@ -3780,15 +3833,15 @@ else ko "el núcleo se ha quejado:"; cat $L/*.sal | grep "excepción\|\*\*\*" | 
 cp $P/d16.img $L/e.img; mmd -i $L/e.img ::DISCOS; mcopy -i $L/e.img $L/joliet.iso ::DISCOS/PRUEBA.ISO
 CAPTURAS=$G ESCRIBE=1 DISCO=$L/e.img ARRANQUE=escritorio MODULOS= QEMU_MAS="-drive id=cd,file=$L/joliet.iso,media=cdrom,if=none -device ide-cd,drive=cd,id=lector,bus=ide.1,unit=0" \
   $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN ":pausa 3" ":doble 62 30" ":pausa 3" ":captura cd18a" ":tecla f4" ":escribe C:\\DISCOS" ":tecla ret" ":pausa 2" \
-  ":tecla ret" ":pausa 3" ":raton 600 440" ":captura cd18b" ":tecla backspace" ":pausa 2" ":clicd 330 222" ":pausa 1" ":captura cd18c" ":clic 370 257" ":pausa 2" \
+  ":tecla ret" ":pausa 3" ":raton 600 440" ":captura cd18b" ":tecla backspace" ":pausa 2" ":raton 600 440" ":captura cd18e" ":clicd 330 222" ":pausa 1" ":captura cd18c" ":clic 370 257" ":pausa 2" \
   ":raton 600 440" ":captura cd18d" > $L/escritorio.sal 2>&1
 S=$L/escritorio.sal
 miracap "Mi equipo (el explorador) enseña el CD con su nombre y su letra, lo que tiene y que es de solo lectura" cd18a negrita 265 133 275 143 "HISPA (C:)" \
   negrita 515 133 525 143 "PRUEBA_CD (D:)" texto 515 151 525 161 "670 K, ISO 9660" texto 515 167 525 177 "(de solo lectura)"
-miracap "abrir una .ISO la monta (E:) y entra en ella; el aviso de la bandeja es de los CD y DVD" cd18b texto 100 98 130 112 "E:\\" texto 200 130 700 400 "GRANDE.BIN" \
-  texto 10 474 700 490 "montada como E:" negrita 570 505 640 520 "CD y DVD"
-miracap "el CD virtual sale en Mi equipo («CD virtual», con lo que tiene), y su menú, «Expulsar»" cd18c negrita 265 195 275 205 "PRUEBA_CD (E:)" \
-  texto 265 213 275 223 "CD virtual: 670 K" texto 335 242 355 267 "Expulsar"
+miracap "abrir una .ISO la monta (E:) y entra en ella; el aviso de la bandeja es de los CD y DVD" cd18b texto 100 98 130 112 "E:\\" texto 200 130 700 400 "grande.bin" \
+  texto 10 474 700 490 "PRUEBA.ISO, montada como E:" negrita 570 505 640 520 "CD y DVD"
+miracap "el CD virtual sale en Mi equipo («CD virtual», con lo que tiene)" cd18e negrita 265 195 275 205 "PRUEBA_CD (E:)" texto 265 213 275 223 "CD virtual: 670 K"
+miracap "y su menú (el botón secundario): «Expulsar»" cd18c texto 335 242 355 267 "Expulsar"
 miracap "y «Expulsar» la quita de Mi equipo" cd18d notexto 216 190 460 212 "(E:)" texto 10 474 700 490 "desmontada"
 mira "y «Expulsar» la desmonta" "cd: E: la imagen C:.DISCOS.PRUEBA\.ISO (sectores de 2048)$" "cd: E: imagen desmontada\.$" "escritorio: globo: Imagen desmontada: E:"
 fi   # la ISO de prueba

@@ -42,7 +42,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -176,6 +176,11 @@ módulo Escritorio
     variable texto_reiniciar: arreglo [96] de byte
     ; \HISPA\PANTALLA.ENV (un bloque de variables de GRUB, como GRUBENV)
     variable env_pantalla, env_antes: arreglo [16] de byte
+    ; (EDID) la medida de la pantalla, si se sabe: la recomendada y el tope de la lista
+    variable env_nativa: arreglo [16] de byte   ; la nativa apuntada en PANTALLA.ENV (se supo otro día)
+    variable rec_an, rec_al: nat32              ; la recomendada (la nativa), 0 si no se sabe
+    variable tope_an, tope_al: nat32            ; nada mayor en la lista (0: sin tope)
+    variable nat_an, nat_al: nat32              ; la nativa, sabida por haber arrancado «a la medida»
     variable env_prueba: byte
     variable texto_env: arreglo [1100] de byte
     variable texto_grub: arreglo [8200] de byte
@@ -1030,8 +1035,13 @@ módulo Escritorio
     ; un aviso con su botón «Aceptar»
     función aviso(t: puntero a byte)
         variable l: puntero a Lienzo
+        variable an: ent32
         cierra_cuadro(v_aviso)
-        v_aviso := cuadro("Hispa-Pentium", 440, 118)
+        ; (EDID) más ancho si el texto no cabe
+        an := ancho_texto(t) + 84
+        si an < 440 entonces an := 440 fin
+        si an > pantalla.ancho - 16 entonces an := pantalla.ancho - 16 fin
+        v_aviso := cuadro("Hispa-Pentium", an, 118)
         l := lienzo_de(v_aviso)
         si l = nulo entonces
             v_aviso := 0
@@ -1041,8 +1051,8 @@ módulo Escritorio
         rectángulo(valor(l), 32, 28, 4, 13, BLANCO)
         rectángulo(valor(l), 32, 44, 4, 4, BLANCO)
         texto(valor(l), 64, 30, t, TINTA)
-        pulsador(v_aviso, 170, 76, 100, 30, "Aceptar", 0x5AA6F4, 0x2468C8, AC_CERRAR_AVISO)
-        repintada(v_aviso, 0, 0, 440, 118)
+        pulsador(v_aviso, (an - 100) div 2, 76, 100, 30, "Aceptar", 0x5AA6F4, 0x2468C8, AC_CERRAR_AVISO)
+        repintada(v_aviso, 0, 0, an, 118)
         escribir("escritorio: aviso: ", t, "\n")
     fin
 
@@ -1298,31 +1308,100 @@ módulo Escritorio
 
     ; ¿se puede guardar para el próximo arranque? (instalado, y con permiso)
     función se_guarda(): bool
-        devolver instalado() y escribible(del_sistema)
+        si no escribible(del_sistema) entonces devolver falso fin
+        devolver instalado() o memoria_lee_env()
+    fin
+
+    ; (EDID) ¿es la memoria USB de arranque y su menú (\BOOT\GRUB\GRUB.CFG)
+    ; lee PANTALLA.ENV? (las hechas desde el 21/11)
+    función memoria_lee_env(): bool
+        variable m, n: nat32
+        si instalado() o del_sistema = NINGUNA entonces devolver falso fin
+        m := abrir_archivo(del_sistema, "\\BOOT\\GRUB\\GRUB.CFG", PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        n := leer_archivo(m, texto_grub, 8192)
+        cerrar_archivo(m)
+        si n > 8192 entonces devolver falso fin
+        texto_grub[n] := 0
+        devolver buscar(texto_grub, "PANTALLA.ENV") <> nulo
+    fin
+
+    ; (EDID) dónde está PANTALLA.ENV: en \HISPA (instalado) o en la raíz (la memoria USB)
+    función ruta_env(): puntero a byte
+        si instalado() entonces devolver "\\HISPA\\PANTALLA.ENV" fin
+        devolver "\\PANTALLA.ENV"
+    fin
+
+    ; (EDID) por qué no se puede guardar aquí (dicho claro)
+    función por_qué_no(): puntero a byte
+        variable m: nat32
+        si unidad_en_memoria() entonces devolver "Desde el CD no se guarda (es de solo lectura): instálelo." fin
+        si no escribible(del_sistema) entonces devolver "Arrancado sin permiso para escribir: no se puede guardar." fin
+        m := abrir_archivo(del_sistema, "\\BOOT\\GRUB\\GRUB.CFG", PARA_LEER)
+        si m < PRIMER_ERROR entonces
+            cerrar_archivo(m)
+            devolver "Esta memoria USB es de antes del 21/11: rehágala o instálelo."
+        fin
+        devolver "Sin instalar no se guarda (no arranca de aquí): instálelo."
+    fin
+
+    ; (EDID) «AnchoxAlto» a dos números (0 si no es eso)
+    función lee_medida(t: puntero a byte, ref an: nat32, ref al: nat32)
+        variable q: puntero a byte
+        an := 0
+        al := 0
+        si t[0] < '1' o t[0] > '9' entonces devolver fin
+        an := número_tras(t, q)
+        si valor(q) = 'x' entonces al := número_tras(q + 1, q) fin
+        si an < 320 o al < 200 entonces
+            an := 0
+            al := 0
+        fin
     fin
 
     ; la lista de modos: los de la lista que caben en la tarjeta (su máximo y
     ; su memoria), en la pantalla (si dice lo que puede) y en la memoria del
     ; núcleo (el doble búfer y el tapiz); el de ahora, siempre
     función prepara_modos()
-        variable i, a, l, ma, ml, vram, ea, el, libres, k: nat32
-        variable hay_edid, vale, está: bool
+        variable i, a, l, ma, ml, vram, libres, k: nat32
+        variable hay_edid, vale, está, rec_vale: bool
         en_marcha := se_cambia_en_marcha()
         ma := 0
         ml := 0
         vram := 0
-        hay_edid := falso
         monitor_an := 0
         monitor_al := 0
         si en_marcha entonces
             máximo_tarjeta(ma, ml)
             vram := memoria_tarjeta()
-            hay_edid := medida_monitor(monitor_an, monitor_al, ea, el)
-            si no hay_edid entonces
-                monitor_an := 0
-                monitor_al := 0
-            fin
         fin
+        ; (EDID) lo que puede la pantalla: lo que dice su EDID; si no lo
+        ; dice, la medida con la que arrancó «a la medida» (la que eligió
+        ; GRUB por ella); y si tampoco, en un PC de verdad, nada mayor que la
+        ; de ahora (en una máquina virtual, sin tope: su pantalla es una ventana)
+        hay_edid := mira_edid()
+        rec_an := 0
+        rec_al := 0
+        tope_an := 0
+        tope_al := 0
+        si hay_edid entonces
+            rec_an := nativa_an
+            rec_al := nativa_al
+            tope_an := máx_an
+            tope_al := máx_al
+        sino si nat_an > 0 entonces
+            rec_an := nat_an
+            rec_al := nat_al
+            tope_an := nat_an
+            tope_al := nat_al
+        sino si no en_marcha entonces
+            tope_an := nat32(pantalla.ancho)
+            tope_al := nat32(pantalla.alto)
+        fin
+        monitor_an := rec_an
+        monitor_al := rec_al
+        ; (la recomendada se ofrece siempre, si la tarjeta la puede poner)
+        rec_vale := rec_an > 0 y (no en_marcha o rec_an mod paso_ancho() = 0)
         libres := marcos_libres()
         n_modos := 0
         está := falso
@@ -1333,12 +1412,13 @@ módulo Escritorio
                 si ma >= 640 y (a > ma o l > ml) entonces vale := falso fin
                 si a mod paso_ancho() <> 0 entonces vale := falso fin
                 si vram > 0 y a * l * 4 > vram entonces vale := falso fin
-                si hay_edid y (a > ea o l > el) entonces vale := falso fin
                 si libres < (a * l * 8 + 0x200000) div 4096 entonces vale := falso fin
             sino
                 ; (al arrancar: lo de arranca(), con lo que ahora tienen el doble búfer y el tapiz)
                 si libres + nat32(pantalla.ancho * pantalla.alto) * 8 div 4096 < (a * l * 12 + 0x300000) div 4096 entonces vale := falso fin
             fin
+            si tope_an > 0 y (a > tope_an o l > tope_al) entonces vale := falso fin
+            si rec_vale y a = rec_an y l = rec_al entonces vale := cierto fin
             si a = nat32(pantalla.ancho) y l = nat32(pantalla.alto) entonces
                 vale := cierto
                 está := cierto
@@ -1360,6 +1440,24 @@ módulo Escritorio
             modos_an[n_modos] := nat32(pantalla.ancho)
             modos_al[n_modos] := nat32(pantalla.alto)
             n_modos := n_modos + 1
+        fin
+        ; (EDID) la recomendada, aunque no sea de la lista, en su sitio
+        si rec_vale y n_modos < MAX_MODOS - 1 entonces
+            está := falso
+            para k desde 0 hasta n_modos - 1 hacer
+                si modos_an[k] = rec_an y modos_al[k] = rec_al entonces está := cierto fin
+            fin
+            si no está entonces
+                k := n_modos
+                mientras k > 0 y (modos_an[k - 1] > rec_an o (modos_an[k - 1] = rec_an y modos_al[k - 1] > rec_al)) hacer
+                    modos_an[k] := modos_an[k - 1]
+                    modos_al[k] := modos_al[k - 1]
+                    k := k - 1
+                fin
+                modos_an[k] := rec_an
+                modos_al[k] := rec_al
+                n_modos := n_modos + 1
+            fin
         fin
         ; sin cambio en marcha: también «a la medida de la pantalla» (lo que diga a GRUB)
         si no en_marcha entonces
@@ -1413,6 +1511,8 @@ módulo Escritorio
                 d[0] := modos_an[i]
                 d[1] := modos_al[i]
                 formatear(rótulo, 24, "%u x %u", d)
+                ; (EDID) la recomendada, con su estrella
+                si modos_an[i] = rec_an y modos_al[i] = rec_al entonces concatenar(rótulo, " *") fin
             fin
             si ent32(i) = modo_elegido entonces
                 arriba := VERDE_ARRIBA
@@ -1425,15 +1525,24 @@ módulo Escritorio
                 abajo := 0x7C95B8
             fin
             acción := AC_MODO + i
-            si no en_marcha y no guarda entonces acción := 0 fin
             pulsador(v_pantalla, x, yy, 154, 28, rótulo, arriba, abajo, acción)
         fin
         yy := 104 + ent32((n_modos + 2) div 3) * 34 + 2
-        si monitor_an > 0 entonces
-            d[0] := monitor_an
-            d[1] := monitor_al
-            formatear(renglón, 96, "La pantalla dice que prefiere %u x %u.", d)
+        ; (EDID) lo que se sabe de la pantalla
+        si hay_edid entonces
+            d[0] := rec_an
+            d[1] := rec_al
+            formatear(renglón, 96, "* La de la pantalla (recomendada): %u x %u.", d)
             texto(valor(l), 20, yy, renglón, TINTA_SUAVE)
+            yy := yy + 18
+        sino si rec_an > 0 entonces
+            d[0] := rec_an
+            d[1] := rec_al
+            formatear(renglón, 96, "* La de la pantalla (al arrancar a su medida): %u x %u.", d)
+            texto(valor(l), 20, yy, renglón, TINTA_SUAVE)
+            yy := yy + 18
+        sino si tope_an > 0 entonces
+            texto(valor(l), 20, yy, "No se sabe su medida: nada mayor que la de ahora.", TINTA_SUAVE)
             yy := yy + 18
         fin
         texto(valor(l), 20, yy, texto_pantalla, TINTA)
@@ -1477,9 +1586,10 @@ módulo Escritorio
         variable t: arreglo [4] de byte
         env_pantalla[0] := 0
         env_antes[0] := 0
+        env_nativa[0] := 0
         env_prueba := '0'
-        si no instalado() entonces devolver fin
-        m := abrir_archivo(del_sistema, "\\HISPA\\PANTALLA.ENV", PARA_LEER)
+        si no instalado() y no memoria_lee_env() entonces devolver fin
+        m := abrir_archivo(del_sistema, ruta_env(), PARA_LEER)
         si m >= PRIMER_ERROR entonces devolver fin
         n := leer_archivo(m, texto_env, 1024)
         cerrar_archivo(m)
@@ -1487,6 +1597,7 @@ módulo Escritorio
         texto_env[n] := 0
         valor_env("\npantalla=", env_pantalla, 16)
         valor_env("\nantes=", env_antes, 16)
+        valor_env("\nnativa=", env_nativa, 16)
         valor_env("\nprueba=", t, 4)
         si t[0] = '1' o t[0] = '2' entonces env_prueba := t[0] fin
     fin
@@ -1495,22 +1606,27 @@ módulo Escritorio
     ; él, en su sitio, con save_env). Falso si no se puede.
     función escribe_env(): bool
         variable m, n: nat32
-        variable d: arreglo [3] de nat32
+        variable d: arreglo [4] de nat32
+        ; (EDID) la nativa, si se sabe, también (GRUB no la usa: es para el núcleo)
+        si nat_an > 0 entonces medida_texto(nat_an, nat_al, env_nativa) fin
         d[0] := nat32(dirección(env_pantalla[0]))
         d[1] := nat32(dirección(env_antes[0]))
         d[2] := env_prueba
+        d[3] := nat32(dirección(env_nativa[0]))
         llenar(texto_env, 1024, '#')
-        formatear(texto_env, 200, "# GRUB Environment Block\npantalla=%s\nantes=%s\nprueba=%c\n", d)
+        formatear(texto_env, 240, "# GRUB Environment Block\npantalla=%s\nantes=%s\nprueba=%c\nnativa=%s\n", d)
         texto_env[longitud(texto_env)] := '#'
-        m := abrir_archivo(del_sistema, "\\HISPA\\PANTALLA.ENV", PARA_ESCRIBIR)
-        si m >= PRIMER_ERROR entonces m := abrir_archivo(del_sistema, "\\HISPA\\PANTALLA.ENV", PARA_CREAR) fin
+        m := abrir_archivo(del_sistema, ruta_env(), PARA_ESCRIBIR)
+        si m >= PRIMER_ERROR entonces m := abrir_archivo(del_sistema, ruta_env(), PARA_CREAR) fin
         si m >= PRIMER_ERROR entonces devolver falso fin
         n := escribir_archivo(m, texto_env, 1024)
         cerrar_archivo(m)
         si n <> 1024 entonces devolver falso fin
-        escribir("escritorio: PANTALLA.ENV: pantalla=", env_pantalla, " antes=", env_antes, " prueba=")
-        escribir_car(env_prueba)
-        escribir("\n")
+        d[0] := nat32(ruta_env())
+        d[1] := nat32(dirección(env_pantalla[0]))
+        d[2] := nat32(dirección(env_antes[0]))
+        d[3] := env_prueba
+        apunta("escritorio: %s: pantalla=%s antes=%s prueba=%c\n", d)
         devolver cierto
     fin
 
@@ -1520,6 +1636,7 @@ módulo Escritorio
     función grub_lee_env(): bool
         variable m, n, k: nat32
         variable e: puntero a byte
+        si no instalado() entonces devolver memoria_lee_env() fin      ; (EDID) la memoria USB ya lo trae en su menú
         m := abrir_archivo(del_sistema, "\\HISPA\\GRUB.CFG", PARA_LEER)
         si m >= PRIMER_ERROR entonces devolver falso fin
         n := 0
@@ -1566,7 +1683,9 @@ módulo Escritorio
         fin
         medida_texto(an, al, env_pantalla)
         si no grub_lee_env() entonces devolver falso fin
-        devolver escribe_env()
+        si no escribe_env() entonces devolver falso fin
+        guarda_arranque()               ; (EDID) lo elegido, también al registro
+        devolver cierto
     fin
 
     ; pone la pantalla a otra medida en marcha y le pone al escritorio la
@@ -1701,6 +1820,8 @@ módulo Escritorio
             env_antes[0] := 0
             escribe_env()
             formatear(texto_pantalla, 96, "Se queda a %u x %u.", d)
+            apunta1("pantalla: %s\n", nat32(dirección(texto_pantalla[0])))     ; (EDID)
+            guarda_arranque()
         sino si se_guarda() y guarda_medida(d[0], d[1], falso) entonces
             formatear(texto_pantalla, 96, "Se queda a %u x %u, también al arrancar.", d)
         sino
@@ -1733,9 +1854,10 @@ módulo Escritorio
                 Textos32.copiar(texto_pantalla, "Ha vuelto la de antes.")
                 escribir("escritorio: ", texto_pantalla, "\n")
             sino
-                escribir("escritorio: la de antes, al arrancar otra vez\n")
+                apunta0("pantalla: no se ha dado por buena: la de antes, al arrancar otra vez\n")
                 abre_reiniciar("Al arrancar otra vez, vuelve la de antes.")
             fin
+            guarda_arranque()       ; (EDID)
             devolver
         fin
         si cambia_medida(antes_an, antes_al) entonces
@@ -1783,25 +1905,101 @@ módulo Escritorio
         fin
     fin
 
-    ; al arrancar (instalado): lo que dice PANTALLA.ENV. A prueba (GRUB acaba
-    ; de poner la nueva): «¿Se ve bien?». Y con la VBE de Bochs, si GRUB no
-    ; ha podido poner la medida guardada (su BIOS no la tiene), se pone ya.
+    ; (EDID) lo apuntado en el registro del arranque, a \ARRANQUE.TXT de la
+    ; unidad del sistema (instalado: C:; la memoria USB, con «registro»):
+    ; para mandarlo cuando algo de la pantalla no va
+    función guarda_arranque()
+        variable m: nat32
+        si del_sistema = NINGUNA o no escribible(del_sistema) entonces devolver fin
+        si no instalado() y buscar(línea_del_cargador(), "registro") = nulo entonces devolver fin
+        m := abrir_archivo(del_sistema, "\\ARRANQUE.TXT", PARA_CREAR)
+        si m < PRIMER_ERROR entonces
+            escribir_archivo(m, registro, registro_largo)
+            cerrar_archivo(m)
+        fin
+    fin
+
+    ; al arrancar: lo que se sabe de la pantalla (su EDID, o la medida con la
+    ; que ha arrancado «a la medida»), al registro; y lo que dice PANTALLA.ENV
+    ; (instalado, o la memoria USB). Si GRUB no ha podido poner la pedida, se
+    ; dice («Este equipo no permite...») y se apunta la que hay. A prueba
+    ; (GRUB acaba de poner la nueva): «¿Se ve bien?». Con la VBE de Bochs, si
+    ; GRUB no la ha podido poner (su BIOS no la tiene), se pone ya.
     función mira_pantalla_guardada()
-        variable an, al: nat32
-        variable q: puntero a byte
-        si no instalado() entonces devolver fin
-        lee_env()
-        si env_prueba <> '0' entonces
-            escribir("escritorio: la pantalla está a prueba (PANTALLA.ENV)\n")
-            abre_probar(cierto)
+        variable pa, pl, ea, el: nat32
+        variable d: arreglo [4] de nat32
+        variable de_medida: bool
+        d[0] := nat32(pantalla.ancho)
+        d[1] := nat32(pantalla.alto)
+        d[2] := bits_pantalla
+        si por_bochs entonces d[3] := nat32("el núcleo") sino d[3] := nat32("el cargador") fin
+        apunta("pantalla: arrancada a %u x %u, %u bits (la ha puesto %s)\n", d)
+        si mira_edid() entonces
+            d[0] := nat32(dirección(nombre_monitor[0]))
+            d[1] := nativa_an
+            d[2] := nativa_al
+            d[3] := nat32(dirección(de_dónde[0]))
+            apunta("pantalla: EDID: «%s», hecha para %u x %u (%s)\n", d)
+        sino
+            apunta0("pantalla: la pantalla no dice su medida (no se ha podido leer su EDID)\n")
+        fin
+        ; arrancada «a la medida» (la entrada del menú, o PANTALLA.ENV con «auto»):
+        ; GRUB ha puesto la que prefiere la pantalla
+        de_medida := buscar(línea_del_cargador(), "amedida") <> nulo
+        si no se_guarda() entonces
+            si de_medida entonces
+                nat_an := nat32(pantalla.ancho)
+                nat_al := nat32(pantalla.alto)
+            fin
+            apunta1("pantalla: no se guarda la medida aquí (%s)\n", nat32(por_qué_no()))
+            guarda_arranque()
             devolver
         fin
-        si se_cambia_en_marcha() y env_pantalla[0] >= '1' y env_pantalla[0] <= '9' entonces
-            an := número_tras(env_pantalla, q)
-            al := 0
-            si valor(q) = 'x' entonces al := número_tras(q + 1, q) fin
-            si an >= 640 y al >= 480 y (an <> nat32(pantalla.ancho) o al <> nat32(pantalla.alto)) entonces cambia_medida(an, al) fin
+        lee_env()
+        lee_medida(env_nativa, nat_an, nat_al)
+        si de_medida o iguales(env_pantalla, "auto") entonces
+            nat_an := nat32(pantalla.ancho)
+            nat_al := nat32(pantalla.alto)
         fin
+        d[0] := nat32(ruta_env())
+        d[1] := nat32(dirección(env_pantalla[0]))
+        d[2] := env_prueba
+        apunta("pantalla: %s pide «%s» (prueba=%c)\n", d)
+        lee_medida(env_pantalla, pa, pl)
+        si pa > 0 y (pa <> nat32(pantalla.ancho) o pl <> nat32(pantalla.alto)) entonces
+            si se_cambia_en_marcha() y pa >= 640 y pl >= 480 y cambia_medida(pa, pl) entonces
+                apunta2("pantalla: GRUB no la ha puesto; la pone el núcleo: %u x %u\n", pa, pl)
+            sino
+                ; GRUB no la ha podido poner (la BIOS no la da): se dice, y se
+                ; apunta la que hay (si estaba a prueba, vuelve la de antes)
+                d[0] := pa
+                d[1] := pl
+                d[2] := nat32(pantalla.ancho)
+                d[3] := nat32(pantalla.alto)
+                formatear(texto_aviso, 128, "Este equipo no permite %u x %u: se queda en %u x %u.", d)
+                apunta1("pantalla: %s\n", nat32(dirección(texto_aviso[0])))
+                aviso(texto_aviso)
+                si env_prueba <> '0' entonces
+                    Textos32.copiar(env_pantalla, env_antes)
+                sino
+                    medida_texto(nat32(pantalla.ancho), nat32(pantalla.alto), env_pantalla)
+                fin
+                env_antes[0] := 0
+                env_prueba := '0'
+                escribe_env()
+            fin
+            guarda_arranque()
+            devolver
+        fin
+        si env_prueba <> '0' entonces
+            apunta0("pantalla: está a prueba: «¿Se ve bien la pantalla?»\n")
+            abre_probar(cierto)
+        sino
+            ; (la nativa, para los arranques siguientes)
+            lee_medida(env_nativa, ea, el)
+            si nat_an > 0 y (ea <> nat_an o el <> nat_al) entonces escribe_env() fin
+        fin
+        guarda_arranque()
     fin
 
     ; -------------------------------------------------------------------------
@@ -2086,6 +2284,8 @@ módulo Escritorio
                 si acción - AC_MODO < n_modos entonces
                     modo_elegido := ent32(acción - AC_MODO)
                     texto_pantalla[0] := 0
+                    ; (EDID) si aquí no se puede guardar, se dice por qué
+                    si no en_marcha y no se_guarda() entonces Textos32.copiar(texto_pantalla, por_qué_no()) fin
                     pinta_pantalla()
                 fin
             caso AC_CERRAR_AVISO: cierra_cuadro(v_aviso)
@@ -2608,8 +2808,8 @@ módulo Escritorio
                 t := cargar_archivo("\\HISPA\\TAILSCAL.BIN", "/ARRANQUE", an)
                 si t <> nulo entonces t.padre := 0 fin
             fin
-            mira_pantalla_guardada()
         fin
+        mira_pantalla_guardada()      ; (EDID) también desde la memoria USB
         devolver 1
     fin
 
