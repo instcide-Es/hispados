@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<!-- tests/run_surf_pintado_tests.sh: position: fixed y sticky, pintada
+     desplazada (surfppm -y 300). Copyright (C) 2026 Carlos Sanz y
+     contribuidores. GPL-2.0 o posterior. -->
+<html lang="es"><head><meta charset="utf-8"><title>Fijos</title><style>
+body { margin: 0; }
+#cabecera { position: fixed; top: 0; left: 0; right: 0; height: 40px; background: #ff0000; z-index: 10; }
+.lateral { position: fixed; top: 0; left: 0; width: 120px; height: 100vh; overflow-y: auto; background: #0000ff; z-index: 100; }
+main { margin-left: 120px; padding-top: 40px; }
+#pegado { position: sticky; top: 40px; height: 30px; background: #00aa00; }
+.banda { height: 200px; background: #ffffff; }
+</style></head><body>
+<div id="cabecera"></div><aside class="lateral"></aside>
+<main><div class="banda"></div><div id="pegado"></div>
+<div class="banda"></div><div class="banda"></div><div class="banda"></div><div class="banda"></div><div class="banda"></div>
+<div class="banda"></div><div class="banda"></div><div class="banda"></div><div class="banda"></div><div class="banda"></div>
+</main></body></html>

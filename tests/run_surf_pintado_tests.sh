@@ -72,5 +72,32 @@ chk('grid-column: 1 / -1 (de lado a lado)', cerca(p(10, yy + 60), CIAN) and cerc
 sys.exit(fallo)
 EOP
 r=$?
+# position: fixed y sticky, con la página desplazada 300 puntos (-y): la
+# cabecera fija y la barra lateral fija (de height: 100vh: hasta abajo) en su
+# sitio; el sticky, pegado bajo la cabecera (la barra lateral de ClicGest se
+# cortaba al desplazar)
+if build/anf/surfppm -w 746 -h 420 -y 300 -o $T/f.ppm tests/surf/fijo.html > /dev/null 2>&1; then
+  python3 -I - $T/f.ppm <<'EOP' || r=1
+import sys
+d = open(sys.argv[1], 'rb').read()
+t = d.split(b'\n', 3)
+w, h = map(int, t[1].split())
+px = t[3]
+def p(x, y):
+    o = (y * w + x) * 3
+    return tuple(px[o:o + 3])
+def cerca(c, r, tol=40):
+    return all(abs(a - b) <= tol for a, b in zip(c, r))
+fallo = 0
+def chk(nombre, ok):
+    global fallo
+    print('  %s %s' % ('OK  ' if ok else 'FAIL', nombre))
+    if not ok: fallo = 1
+chk('position: fixed desplazada: la cabecera, arriba', cerca(p(400, 20), (255, 0, 0)))
+chk('position: fixed desplazada: la barra lateral, entera (100vh: de arriba abajo)', cerca(p(60, 5), (0, 0, 255)) and cerca(p(60, 419), (0, 0, 255)))
+chk('position: sticky: pegado bajo la cabecera', cerca(p(400, 55), (0, 170, 0)) and cerca(p(400, 90), (255, 255, 255)))
+sys.exit(fallo)
+EOP
+else echo "  FAIL surfppm no pinta tests/surf/fijo.html"; r=1; fi
 [ -n "${GUARDAR:-}" ] && { mkdir -p "$GUARDAR"; python3 -I tests/tools/ppm2png.py $T/p.ppm "$GUARDAR"/pintado.png; }
 exit $r

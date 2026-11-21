@@ -3806,6 +3806,23 @@ if [ -n "$HS" ] && $AQUI/nucleo32/disco.sh $Q/d.img 32 red tls navegador > $Q/di
   if saca $Q/e.img NAVEGA/SURFGAL.TXT $Q/gal.txt && grep -q "recuerda" $Q/gal.txt && ! grep -q "sesion" $Q/gal.txt && saca $Q/e.img NAVEGA/NAVEGA2.ALM $Q/alm.txt; then
     ok "las galletas que dicen hasta cuándo valen se guardan al cerrar (SURFGAL.TXT; las de sesión, no), y lo de localStorage (NAVEGA2.ALM)"
   else ko "no se guardan las galletas o localStorage"; fi
+  # position: fixed y sticky (navega 0.2: la barra lateral de ClicGest se
+  # cortaba al desplazar): la rueda, y la cabecera fija, la barra lateral fija
+  # (entera, hasta abajo) y el bloque sticky siguen en su sitio; y el enlace de
+  # abajo de la barra lateral, ya desplazada, se puede pulsar
+  printf 'Inicio=http://10.0.2.2:%s/fijo.html\r\n' $HP > $Q/NAVEGA.INI
+  cp $Q/d.img $Q/f.img
+  mcopy -o -i $Q/f.img $Q/NAVEGA.INI ::NAVEGA/
+  CAPTURAS=$G DISCO=$Q/f.img ARRANQUE=escritorio MODULOS= MEMORIA=128 QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" \
+    ":pausa 3" ":doble 62 260" ":pausa 12" ":captura nvf0" ":raton 400 400" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" \
+    ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 2" ":captura nvf1" \
+    ":clic 45 500" ":pausa 3" > $Q/f.sal 2>&1
+  miracap "position: fixed y sticky, sin desplazar: la cabecera fija (roja), la barra lateral fija (azul, de height: 100vh: hasta abajo) y el sticky (verde) en su sitio" nvf0 \
+    rgb 300 128 e03030 rgb 60 130 305080 rgb 60 524 305080 rgb 300 360 20a060
+  miracap "y desplazada 300 puntos con la rueda: la cabecera y la barra lateral, donde estaban y enteras; el sticky, pegado bajo la cabecera" nvf1 \
+    rgb 300 128 e03030 rgb 60 130 305080 rgb 60 524 305080 rgb 300 163 20a060 nrgb 300 360 20a060
+  S=$Q/srv/pedidos.txt
+  mira "y el enlace de abajo de la barra lateral fija, con la página desplazada, se pulsa (donde se ve)" "^GET /eco?lateral |"
   # el x87: dos programas con coma flotante a la vez
   DISCO=$Q/d.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "x87" ":pausa 6" > $Q/x.sal 2>&1
   tr -d '\r' < $Q/x.sal > $Q/x.txt

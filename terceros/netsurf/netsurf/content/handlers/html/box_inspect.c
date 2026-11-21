@@ -196,6 +196,12 @@ box_contains_point(const css_unit_ctx *unit_len_ctx,
  *
  * If no box can be found in given direction, NULL is returned.
  */
+/* [HISPA] position: fixed: la caja, donde se ve (respecto a la ventana: ver
+ * redraw.c), para saber dónde se ha dado con el ratón */
+#include "guion.h"
+#define HISPA_X(b) ((b)->x + (box_hispa_fijo(b) ? hispa_fijo_x : 0))
+#define HISPA_Y(b) ((b)->y + (box_hispa_fijo(b) ? hispa_fijo_y : 0))
+
 static inline struct box *
 box_move_xy(struct box *b, enum box_walk_dir dir, int *x, int *y)
 {
@@ -206,8 +212,8 @@ box_move_xy(struct box *b, enum box_walk_dir dir, int *x, int *y)
 		b = b->children;
 		if (b == NULL)
 			break;
-		*x += b->x;
-		*y += b->y;
+		*x += HISPA_X(b);
+		*y += HISPA_Y(b);
 		if (!box_is_float(b)) {
 			rb = b;
 			break;
@@ -216,20 +222,20 @@ box_move_xy(struct box *b, enum box_walk_dir dir, int *x, int *y)
 
 	case BOX_WALK_NEXT_SIBLING:
 		do {
-			*x -= b->x;
-			*y -= b->y;
+			*x -= HISPA_X(b);
+			*y -= HISPA_Y(b);
 			b = b->next;
 			if (b == NULL)
 				break;
-			*x += b->x;
-			*y += b->y;
+			*x += HISPA_X(b);
+			*y += HISPA_Y(b);
 		} while (box_is_float(b));
 		rb = b;
 		break;
 
 	case BOX_WALK_PARENT:
-		*x -= b->x;
-		*y -= b->y;
+		*x -= HISPA_X(b);
+		*y -= HISPA_Y(b);
 		rb = b->parent;
 		break;
 
@@ -237,25 +243,25 @@ box_move_xy(struct box *b, enum box_walk_dir dir, int *x, int *y)
 		b = b->float_children;
 		if (b == NULL)
 			break;
-		*x += b->x;
-		*y += b->y;
+		*x += HISPA_X(b);
+		*y += HISPA_Y(b);
 		rb = b;
 		break;
 
 	case BOX_WALK_NEXT_FLOAT_SIBLING:
-		*x -= b->x;
-		*y -= b->y;
+		*x -= HISPA_X(b);
+		*y -= HISPA_Y(b);
 		b = b->next_float;
 		if (b == NULL)
 			break;
-		*x += b->x;
-		*y += b->y;
+		*x += HISPA_X(b);
+		*y += HISPA_Y(b);
 		rb = b;
 		break;
 
 	case BOX_WALK_FLOAT_CONTAINER:
-		*x -= b->x;
-		*y -= b->y;
+		*x -= HISPA_X(b);
+		*y -= HISPA_Y(b);
 		rb = b->float_container;
 		break;
 
