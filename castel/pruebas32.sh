@@ -46,6 +46,8 @@ for f in $AQUI/compilador/*.cas; do cp $f $F/COMP/$(up $f).CAS; done
 cp $AQUI/ensamblador/montador.cas $F/ENS/MONTADOR.CAS
 cp $AQUI/compilador/32/pentium/castel32.cas $F/C32/CASTEL32.CAS
 cp $AQUI/compilador/32/medidas.cas $F/C32/MEDIDAS.CAS
+# [CASTEL64] la parte de atrás de 64 bits (CASTEL64.md): CASTEL32 la lleva
+cp $AQUI/compilador/32/gen64.cas $F/C32/GEN64.CAS; cp $AQUI/compilador/32/apoyo64.cas $F/C32/APOYO64.CAS
 cp $AQUI/ensamblador/32/pentium/ensamb32.cas $F/E32/ENSAMB32.CAS
 
 # ---- con corre32, en Linux: todos los programas de las pruebas ----
@@ -231,6 +233,8 @@ if [ -f $B/hispados.img ] && [ -f $B/HW32.COM ]; then
     for f in $AQUI/biblioteca32/hw32/*.cas; do MTOOLS_SKIP_CHECK=1 mcopy -i $DW/b.img $f ::B32W/$(up $f).CAS; done
     MTOOLS_SKIP_CHECK=1 mcopy -i $DW/b.img $AQUI/compilador/32/hw32/castelw.cas ::C32/CASTELW.CAS
     MTOOLS_SKIP_CHECK=1 mcopy -i $DW/b.img $AQUI/compilador/32/medidas.cas ::C32/MEDIDAS.CAS
+    MTOOLS_SKIP_CHECK=1 mcopy -i $DW/b.img $AQUI/compilador/32/gen64.cas ::C32/GEN64.CAS
+    MTOOLS_SKIP_CHECK=1 mcopy -i $DW/b.img $AQUI/compilador/32/apoyo64.cas ::C32/APOYO64.CAS
     MTOOLS_SKIP_CHECK=1 mcopy -i $DW/b.img $AQUI/ensamblador/montador.cas ::ENS/MONTADOR.CAS
     MTOOLS_SKIP_CHECK=1 mcopy -i $DW/b.img $AQUI/ensamblador/32/hw32/ensambw.cas ::E32/ENSAMBW.CAS
     MTOOLS_SKIP_CHECK=1 mcopy -i $DW/b.img $1 ::CW.EXE

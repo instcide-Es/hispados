@@ -1,0 +1,100 @@
+; =============================================================================
+;  hola.cas - el primer ladrillo de Hispa-64 («modelo núcleo64», CASTEL64.md):
+;  un núcleo de 64 bits que arranca en QEMU x86_64 (qemu-system-x86_64
+;  -kernel NUCLEO64.BIN, por multiboot) o con GRUB (multiboot2), pasa al modo
+;  largo con la paginación de cuatro niveles (eso lo pone el arranque del
+;  compilador) y saluda por el puerto serie y por la pantalla. Comprueba que
+;  de verdad está en el modo largo (EFER.LMA), pone una tabla de interrupciones
+;  de 64 bits (IDT) y se atiende a sí mismo una «int3» con una función de
+;  interrupción de Castel (que vuelve con iretq), y acaba diciéndolo por el
+;  puerto 0xF4 (el isa-debug-exit de QEMU) con el código 42.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Hola64
+
+    modelo núcleo64
+
+    ; una puerta de la IDT de 64 bits: 16 octetos
+    tipo Puerta = estructura
+        bajo: nat16                     ; la dirección de la función, a trozos
+        selector: nat16
+        ist: byte
+        tipo_: byte
+        medio: nat16
+        alto: nat32
+        nada: nat32
+    fin
+
+    tipo Idtr = estructura
+        límite: nat16
+        base: nat64
+    fin
+
+    variable idt: arreglo [256] de Puerta
+    variable idtr: Idtr
+    variable veces: nat32
+    variable dónde: nat64
+
+    ; lo atiende el procesador en «int3»: cuenta y apunta adónde vuelve
+    interrupción función punto_de_parada()
+        veces := veces + 1
+        ensamblador
+            mov rax, [rbp+120]
+            mov {dónde}, rax
+        fin
+    fin
+
+    función pon_puerta(n: nat16, f: nat64)
+        idt[n].bajo := nat16(f)
+        idt[n].selector := 0x08
+        idt[n].ist := 0
+        idt[n].tipo_ := 0x8E            ; presente, anillo 0, puerta de interrupción de 64 bits
+        idt[n].medio := nat16(f >> 16)
+        idt[n].alto := nat32(f >> 32)
+        idt[n].nada := 0
+    fin
+
+    ; el registro EFER (MSR 0xC0000080): el bit 10 (LMA) dice si va en el modo largo
+    función efer(): nat64
+        ensamblador
+            mov ecx, 0xC0000080
+            rdmsr
+            shl rdx, 32
+            or rax, rdx
+        fin
+    fin
+
+    función principal(): byte
+        variable magia: nat32
+        variable p: puntero a nat16
+        escribir("Hola desde Hispa-64\n")
+        ensamblador
+            mov eax, [C_mb_magia]
+            mov {magia}, eax
+        fin
+        si magia = 0x2BADB002 entonces
+            escribir("cargado por multiboot\n")
+        sino si magia = 0x36D76289 entonces
+            escribir("cargado por multiboot2\n")
+        sino
+            escribir("cargado por quién sabe\n")
+        fin
+        si efer() yb 0x400 <> 0 entonces escribir("en el modo largo (64 bits)\n") fin
+        escribir("un puntero ocupa ", tamaño(p), " octetos; 2^40 = ", nat64(1) << 40, "\n")
+        ; la IDT, con la int3 (la 3)
+        pon_puerta(3, nat64(dirección(punto_de_parada)))
+        idtr.límite := tamaño(idt) - 1
+        idtr.base := nat64(dirección(idt))
+        ensamblador
+            lidt {idtr}
+            int3
+            int3
+        fin
+        escribir("int3 atendida ", veces, " veces; vuelve a ", dónde > 0x100000, "\n")
+        ; y la pantalla de texto, a mano: una «!» en la esquina
+        p := puntero(0xB8000)
+        p[80 * 24 + 79] := 0x4E21
+        devolver 42
+    fin
+
+fin Hola64.

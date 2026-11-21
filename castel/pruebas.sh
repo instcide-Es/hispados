@@ -206,6 +206,7 @@
 #   SOLO=win32 ./pruebas.sh       la primera y la 22 (los programas de Windows y DirectX)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
+#   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
 #                                 de 16 bits (azar.py) y otros tres de 32
@@ -252,10 +253,11 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 }
 
 . $AQUI/pruebas32.sh               # la parte 15 (CASTEL32), como la función parte15
+. $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
 echo "== Castel: los errores se dicen en español, con línea y columna =="
-for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
+for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas $AQUI/ejemplos64/errores/*.cas; do
   n=$(basename $f .cas)
   esperado=$(sed -n 's/^; ERROR: //p' $f | head -1)
   if python3 -I $AQUI/ccastel.py $f -o $T/err.asm -I $AQUI/ejemplos/partes > $T/err.txt 2>&1; then
@@ -276,6 +278,11 @@ if [ "${SOLO:-}" = errores ]; then
 fi
 if [ "${SOLO:-}" = castel32 ]; then
   parte15
+  echo "== $nok bien, $fail mal =="
+  exit $((fail > 0))
+fi
+if [ "${SOLO:-}" = castel64 ]; then
+  parte23
   echo "== $nok bien, $fail mal =="
   exit $((fail > 0))
 fi
@@ -3890,6 +3897,7 @@ fi   # el Navegador
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
 [ -z "${SOLO:-}" ] && parte15
+[ -z "${SOLO:-}" ] && parte23
 
 echo "== $nok bien, $fail mal =="
 exit $((fail > 0))

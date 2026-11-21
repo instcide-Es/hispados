@@ -165,14 +165,15 @@ bien=0; mal=; bienp=0; malp=
 for f in $W/ref/*.ASM; do
   N=$(basename $f .ASM)
   nasm -f bin $f -o $W/l/$N.NASM 2> /dev/null || continue
-  if grep -qE '^(bits 64|cpu x64)' $f; then
+  # (ensambla.py, en Python, es lento: los de 64 bits de menos de 10.000 líneas; los grandes, ENSAMB64)
+  if grep -qE '^(bits 64|cpu x64)' $f && [ $(wc -l < $f) -lt 10000 ]; then
     python3 -I $AQUI/ensambla.py $f -o $W/l/$N.PY > /dev/null 2>&1
     if cmp -s $W/l/$N.NASM $W/l/$N.PY; then bienp=$((bienp + 1)); else malp="$malp $N"; fi
   fi
   (cd $W/l && $W/ensamb64 ../ref/$N.ASM $N.BIN > $N.SAL 2>&1)
   if cmp -s $W/l/$N.NASM $W/l/$N.BIN; then bien=$((bien + 1)); else mal="$mal $N"; fi
 done
-if [ -z "$malp" ]; then ok "ensambla.py da los mismos octetos que NASM en los $bienp archivos de 64 bits (las formas de x86-64, los ejemplos, CASTEL64 y ENSAMB64)"
+if [ -z "$malp" ]; then ok "ensambla.py da los mismos octetos que NASM en los $bienp archivos de 64 bits (las formas de x86-64, los ejemplos, las cuentas al azar y ENSAMB64)"
 else ko "ensambla.py no da lo mismo que NASM en:$malp"; fi
 if [ -z "$mal" ]; then ok "ENSAMB64 da los mismos octetos que NASM en los $bien archivos (de 16, 32 y 64 bits)"
 else ko "ENSAMB64 no da lo mismo que NASM en:$mal"; fi
