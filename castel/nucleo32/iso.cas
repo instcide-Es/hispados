@@ -1,0 +1,505 @@
+; =============================================================================
+;  iso.cas - el sistema de archivos de los CD y DVD de datos: ISO 9660, con
+;  los nombres largos de Joliet (los de Windows) o, si no los hay, los de
+;  Rock Ridge (los de Linux); de solo lectura, en sectores de 2048.
+;
+;  Lo usa fat.cas, que lleva los archivos abiertos de todos los volúmenes:
+;  un volumen ISO es uno más de los suyos (con «iso» en su ficha) y, para
+;  él, fat.cas pide aquí lo que hace falta: montarlo (los descriptores de
+;  volumen, desde el sector 16), buscar una ruta (abre_iso), leer de un
+;  archivo (lee_iso) y la entrada siguiente de una carpeta (entrada_iso).
+;  Aquí no se guarda nada de los archivos abiertos: su sector de inicio, su
+;  tamaño y su posición los lleva fat.cas (todo con su cerrojo tomado).
+;
+;  Los nombres se dan en la página 437, como los de la FAT. Cada entrada
+;  lleva también un nombre corto (8+3, en mayúsculas), hecho del largo como
+;  hace Windows (DOCUME~1.TXT): por él también se abre.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Iso
+
+    importar Discos, Mem32, Textos32
+
+    público constante BLOQUE_ISO = 2048
+    constante VOLS = 8                          ; (los de fat.cas: VOLÚMENES)
+    constante NINGUNO = 0xFFFFFFFF
+    ; (los mismos números que en fat.cas)
+    constante NO_HAY = 0xFFFFFFFF
+    constante MAL = 0xFFFFFFFC
+    constante NO_CARPETA = 0xFFFFFFF1
+    constante SOLO_LECTURA = 0x01
+    constante OCULTO = 0x02
+    constante CARPETA = 0x10
+    constante MAX_LARGO = 256
+
+    tipo Vol = estructura
+        hay: bool
+        disco: nat32
+        joliet: bool                            ; los nombres, de su descriptor suplementario (UCS-2)
+        rr: bool                                ; Rock Ridge (y sin Joliet): los nombres de sus NM
+        raíz, raíz_tamaño: nat32
+    fin
+    variable vols: arreglo [VOLS] de Vol
+
+    ; un sector del disco, el último que se ha leído
+    variable blq: arreglo [BLOQUE_ISO] de byte
+    variable blq_disco: nat32 = 0xFFFFFFFF
+    variable blq_lba: nat32 = 0xFFFFFFFF
+    variable fallo: bool
+
+    ; el registro de carpeta que se acaba de leer (hasta 255 octetos)
+    variable reg: arreglo [256] de byte
+    ; lo de la última entrada vista
+    variable largo: arreglo [MAX_LARGO] de byte
+    variable corto: arreglo [13] de byte
+    variable hallado_inicio, hallado_tamaño: nat32
+    variable hallado_carpeta: bool
+    variable trozo: arreglo [MAX_LARGO] de byte
+
+    ; las letras de fuera del ASCII de la página 437: su número de Unicode
+    ; (de 0x80 a 0xFF) y el de la 437, de dos en dos (como en fat.cas)
+    variable de_unicode: arreglo [35] de byte = "\xE1\xA0\xE9\x82\xED\xA1\xF3\xA2\xFA\xA3\xF1\xA4\xD1\xA5\xFC\x81\xDC\x9A\xE7\x87\xC7\x80\xBF\xA8\xA1\xAD\xBA\xA7\xAA\xA6\xC9\x90\xE0\x85"
+    variable de_unicode2: arreglo [33] de byte = "\xE8\x8A\xEC\x8D\xF2\x95\xF9\x97\xE4\x84\xEB\x89\xEF\x8B\xF6\x94\xC4\x8E\xD6\x99\xE2\x83\xEA\x88\xEE\x8C\xF4\x93\xFB\x96\xB7\xFA"
+
+    función p32(p: puntero a byte): nat32
+        devolver p[0] ob (nat32(p[1]) << 8) ob (nat32(p[2]) << 16) ob (nat32(p[3]) << 24)
+    fin
+
+    función pon32(p: puntero a byte, v: nat32)
+        p[0] := v
+        p[1] := v >> 8
+        p[2] := v >> 16
+        p[3] := v >> 24
+    fin
+
+    ; el sector n del disco d, en blq
+    función trae(d: nat32, n: nat32): bool
+        si blq_disco = d y blq_lba = n entonces devolver cierto fin
+        si no leer_sectores(d, n, 1, blq) entonces
+            blq_disco := NINGUNO
+            fallo := cierto
+            devolver falso
+        fin
+        blq_disco := d
+        blq_lba := n
+        devolver cierto
+    fin
+
+    ; una letra de Unicode, en la página 437 («_» si no está)
+    función a_437(u: nat32): byte
+        variable i: nat32
+        si u < 0x80 entonces devolver u fin
+        si u <= 0xFF entonces
+            i := 0
+            mientras i + 1 < 34 hacer
+                si de_unicode[i] = u entonces devolver de_unicode[i + 1] fin
+                i := i + 2
+            fin
+            i := 0
+            mientras i + 1 < 32 hacer
+                si de_unicode2[i] = u entonces devolver de_unicode2[i + 1] fin
+                i := i + 2
+            fin
+        fin
+        devolver '_'
+    fin
+
+    ; mayúscula (de las del ASCII y las de la 437 que tienen)
+    función mayús_437(c: nat32): nat32
+        si c >= 'a' y c <= 'z' entonces devolver c - 32 fin
+        según c
+            caso 0xA4: devolver 0xA5               ; ñ
+            caso 0x87: devolver 0x80               ; ç
+            caso 0x81: devolver 0x9A               ; ü
+            caso 0x82: devolver 0x90               ; é
+            caso 0x84: devolver 0x8E               ; ä
+            caso 0x94: devolver 0x99               ; ö
+        fin
+        devolver c
+    fin
+
+    ; el nombre corto (8+3) que le toca al largo t, a «corto»
+    función hazcorto(t: puntero a byte)
+        variable n, punto, i, k, c: nat32
+        variable perdido: bool
+        n := longitud(t)
+        punto := NINGUNO
+        i := n
+        mientras i > 1 y punto = NINGUNO hacer
+            i := i - 1
+            si t[i] = '.' entonces punto := i fin
+        fin
+        perdido := falso
+        k := 0
+        i := 0
+        mientras i < n y (punto = NINGUNO o i < punto) hacer
+            c := mayús_437(t[i])
+            si c = ' ' o c = '.' entonces
+                perdido := cierto
+            sino
+                si no ((c >= 'A' y c <= 'Z') o (c >= '0' y c <= '9') o c >= 0x80 o c = '!' o c = '#' o c = '$' o c = '%' o c = '&' o c = 0x27 o c = '(' o c = ')' o c = '-' o c = '@' o c = '^' o c = '_' o c = '`' o c = '{' o c = '}' o c = '~') entonces
+                    c := '_'
+                    perdido := cierto
+                fin
+                si k < 8 entonces
+                    corto[k] := c
+                    k := k + 1
+                sino
+                    perdido := cierto
+                fin
+            fin
+            i := i + 1
+        fin
+        si k = 0 entonces
+            corto[0] := '_'
+            k := 1
+        fin
+        si perdido entonces
+            si k > 6 entonces k := 6 fin
+            corto[k] := '~'
+            corto[k + 1] := '1'
+            k := k + 2
+        fin
+        si punto <> NINGUNO entonces
+            corto[k] := '.'
+            k := k + 1
+            i := punto + 1
+            mientras i < n y i < punto + 4 hacer
+                c := mayús_437(t[i])
+                si no ((c >= 'A' y c <= 'Z') o (c >= '0' y c <= '9') o c >= 0x80 o c = '-' o c = '_' o c = '~' o c = '!' o c = '$') entonces c := '_' fin
+                corto[k] := c
+                k := k + 1
+                i := i + 1
+            fin
+        fin
+        corto[k] := 0
+    fin
+
+    ; el nombre de Rock Ridge (NM) del registro de reg, si lo tiene, a
+    ; «largo» (de UTF-8 a la 437). Falso si no lo tiene.
+    función nombre_rr(): bool
+        variable i, fin_, n, k, j, u, c: nat32
+        variable hay: bool
+        n := reg[32]
+        i := 33 + n
+        si n yb 1 = 0 entonces i := i + 1 fin
+        fin_ := reg[0]
+        hay := falso
+        k := 0
+        mientras i + 4 <= fin_ hacer
+            si reg[i + 2] < 4 entonces romper fin
+            si reg[i] = 'N' y reg[i + 1] = 'M' y reg[i + 4] yb 0x06 = 0 entonces
+                j := i + 5
+                mientras j < i + reg[i + 2] y k + 1 < MAX_LARGO hacer
+                    c := reg[j]
+                    u := c
+                    j := j + 1
+                    si c >= 0xC0 y c < 0xE0 y j < i + reg[i + 2] entonces
+                        u := ((c yb 0x1F) << 6) ob (reg[j] yb 0x3F)
+                        j := j + 1
+                    sino si c >= 0xE0 entonces
+                        u := 0xFFFF                     ; (de más de dos octetos: no está en la 437)
+                        mientras j < i + reg[i + 2] y reg[j] >= 0x80 y reg[j] < 0xC0 hacer j := j + 1 fin
+                    fin
+                    largo[k] := a_437(u)
+                    k := k + 1
+                fin
+                hay := cierto
+            fin
+            i := i + reg[i + 2]
+        fin
+        largo[k] := 0
+        devolver hay y k > 0
+    fin
+
+    ; el nombre largo de la entrada que hay en reg, a «largo»; y el corto
+    función nombra(v: nat32)
+        variable n, i, k, u: nat32
+        n := reg[32]
+        k := 0
+        si vols[v].joliet entonces
+            i := 0
+            mientras i + 1 < n y k + 1 < MAX_LARGO hacer
+                u := (nat32(reg[33 + i]) << 8) ob reg[34 + i]
+                si u = ';' entonces romper fin
+                largo[k] := a_437(u)
+                k := k + 1
+                i := i + 2
+            fin
+            largo[k] := 0
+        sino si vols[v].rr y nombre_rr() entonces
+            k := longitud(largo)
+        sino
+            i := 0
+            mientras i < n y reg[33 + i] <> ';' y k + 1 < MAX_LARGO hacer
+                largo[k] := reg[33 + i]
+                k := k + 1
+                i := i + 1
+            fin
+            largo[k] := 0
+        fin
+        ; sin el punto del final («LEEME.» es «LEEME»)
+        si k > 1 y largo[k - 1] = '.' entonces
+            k := k - 1
+            largo[k] := 0
+        fin
+        hazcorto(largo)
+    fin
+
+    ; el registro siguiente de la carpeta (del sector «inicio», de «tamaño»
+    ; octetos), desde «pos», a reg. Falso si se han acabado (o falla el disco).
+    función siguiente_registro(v: nat32, inicio: nat32, tam: nat32, ref pos: nat32): bool
+        variable b, de, n: nat32
+        mientras pos < tam hacer
+            b := pos div BLOQUE_ISO
+            de := pos mod BLOQUE_ISO
+            si no trae(vols[v].disco, inicio + b) entonces devolver falso fin
+            n := blq[de]
+            si n < 34 o de + n > BLOQUE_ISO entonces
+                ; (el resto del sector va vacío: los registros no cruzan de un sector a otro)
+                pos := (b + 1) * BLOQUE_ISO
+            sino
+                copiar_memoria(reg, dirección(blq[de]), n)
+                pos := pos + n
+                devolver cierto
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; la entrada siguiente de verdad (sin «.» ni «..» ni los trozos de los
+    ; archivos de varios trozos), con sus nombres y lo demás en «hallado_»
+    función siguiente(v: nat32, inicio: nat32, tam: nat32, ref pos: nat32, con_padre: bool): bool
+        mientras siguiente_registro(v, inicio, tam, pos) hacer
+            si reg[32] = 1 y reg[33] = 1 y con_padre entonces
+                largo[0] := '.'
+                largo[1] := '.'
+                largo[2] := 0
+                copiar_hasta(corto, "..", 13)
+                hallado_inicio := p32(dirección(reg[2]))
+                hallado_tamaño := p32(dirección(reg[10]))
+                hallado_carpeta := cierto
+                devolver cierto
+            fin
+            si (reg[32] <> 1 o reg[33] > 1) y reg[25] yb 0x80 = 0 entonces
+                nombra(v)
+                hallado_inicio := p32(dirección(reg[2]))
+                hallado_tamaño := p32(dirección(reg[10]))
+                hallado_carpeta := reg[25] yb 0x02 <> 0
+                devolver cierto
+            fin
+        fin
+        devolver falso
+    fin
+
+    función iguales(a: puntero a byte, b: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras a[i] <> 0 y mayús_437(a[i]) = mayús_437(b[i]) hacer i := i + 1 fin
+        devolver a[i] = 0 y b[i] = 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que pide fat.cas
+    ; -------------------------------------------------------------------------
+    ; mira si en el disco d (un CD o DVD) hay un volumen ISO 9660 y, si lo
+    ; hay, lo deja como el volumen v. Deja su nombre en «etiqueta» (12
+    ; octetos). Da cuántos sectores (de 2048) tiene, o 0 si no es ISO 9660.
+    público función monta_iso(v: nat32, d: nat32, etiqueta: puntero a byte): nat32
+        variable n, bloques, i, k, u: nat32
+        variable hay_pvd: bool
+        variable pvd_raíz, pvd_tamaño: nat32
+        variable nombre: arreglo [12] de byte
+        si v >= VOLS entonces devolver 0 fin
+        vols[v].hay := falso
+        vols[v].disco := d
+        vols[v].joliet := falso
+        vols[v].rr := falso
+        blq_disco := NINGUNO
+        fallo := falso
+        hay_pvd := falso
+        bloques := 0
+        etiqueta[0] := 0
+        n := 16
+        mientras n < 48 hacer
+            si no trae(d, n) entonces devolver 0 fin
+            si blq[1] <> 'C' o blq[2] <> 'D' o blq[3] <> '0' o blq[4] <> '0' o blq[5] <> '1' entonces romper fin
+            si blq[0] = 255 entonces romper fin             ; el final de los descriptores
+            si blq[0] = 1 y no hay_pvd entonces
+                hay_pvd := cierto
+                bloques := p32(dirección(blq[80]))
+                pvd_raíz := p32(dirección(blq[158]))
+                pvd_tamaño := p32(dirección(blq[166]))
+                ; su nombre: 32 letras, sin los espacios del final (se quedan 11)
+                k := 0
+                mientras k < 11 hacer
+                    nombre[k] := blq[40 + k]
+                    k := k + 1
+                fin
+                mientras k > 0 y (nombre[k - 1] = ' ' o nombre[k - 1] = 0) hacer k := k - 1 fin
+                nombre[k] := 0
+                si etiqueta[0] = 0 entonces copiar_hasta(etiqueta, nombre, 12) fin
+            sino si blq[0] = 2 y blq[88] = 0x25 y blq[89] = 0x2F y (blq[90] = 0x40 o blq[90] = 0x43 o blq[90] = 0x45) y no vols[v].joliet entonces
+                ; Joliet: la raíz de los nombres largos, y el nombre del volumen en UCS-2
+                vols[v].joliet := cierto
+                vols[v].raíz := p32(dirección(blq[158]))
+                vols[v].raíz_tamaño := p32(dirección(blq[166]))
+                k := 0
+                i := 0
+                mientras k < 11 hacer
+                    u := (nat32(blq[40 + i]) << 8) ob blq[41 + i]
+                    nombre[k] := a_437(u)
+                    k := k + 1
+                    i := i + 2
+                fin
+                mientras k > 0 y (nombre[k - 1] = ' ' o nombre[k - 1] = 0) hacer k := k - 1 fin
+                nombre[k] := 0
+                copiar_hasta(etiqueta, nombre, 12)
+            fin
+            n := n + 1
+        fin
+        si no hay_pvd entonces devolver 0 fin
+        si no vols[v].joliet entonces
+            vols[v].raíz := pvd_raíz
+            vols[v].raíz_tamaño := pvd_tamaño
+            ; ¿Rock Ridge? (el «.» de la raíz empieza su área de sistema con «SP»)
+            si trae(d, pvd_raíz) entonces
+                si blq[0] >= 41 y blq[34] = 'S' y blq[35] = 'P' y blq[38] = 0xBE y blq[39] = 0xEF entonces vols[v].rr := cierto fin
+            fin
+        fin
+        si bloques = 0 o vols[v].raíz_tamaño = 0 entonces devolver 0 fin
+        vols[v].hay := cierto
+        devolver bloques
+    fin
+
+    ; ¿lleva Joliet (o Rock Ridge) el volumen v?
+    público función nombres_iso(v: nat32): puntero a byte
+        si v < VOLS entonces
+            si vols[v].joliet entonces devolver "Joliet" fin
+            si vols[v].rr entonces devolver "Rock Ridge" fin
+        fin
+        devolver ""
+    fin
+
+    ; el volumen v ya no está (se ha sacado el disco): lo que hubiera de él en
+    ; la memoria no vale
+    público función olvida_iso(v: nat32)
+        si v >= VOLS entonces devolver fin
+        si blq_disco = vols[v].disco entonces blq_disco := NINGUNO fin
+        vols[v].hay := falso
+    fin
+
+    ; busca la ruta («\CARPETA\archivo largo.txt», «» o «\» la raíz) en el
+    ; volumen v: deja en inicio y tamaño los suyos y dice si es una carpeta.
+    ; Da 0, NO_HAY, NO_CARPETA o MAL.
+    público función abre_iso(v: nat32, ruta: puntero a byte, ref inicio: nat32, ref tam: nat32, ref carpeta: bool): nat32
+        variable p: puntero a byte
+        variable n, pos: nat32
+        variable visto: bool
+        si v >= VOLS entonces devolver MAL fin
+        si no vols[v].hay entonces devolver MAL fin
+        fallo := falso
+        inicio := vols[v].raíz
+        tam := vols[v].raíz_tamaño
+        carpeta := cierto
+        p := ruta
+        mientras valor(p) <> 0 hacer
+            mientras valor(p) = '\\' o valor(p) = '/' hacer p := p + 1 fin
+            si valor(p) = 0 entonces romper fin
+            n := 0
+            mientras p[n] <> 0 y p[n] <> '\\' y p[n] <> '/' y n + 1 < MAX_LARGO hacer
+                trozo[n] := p[n]
+                n := n + 1
+            fin
+            trozo[n] := 0
+            p := p + n
+            si no (n = 1 y trozo[0] = '.') entonces
+                si no carpeta entonces devolver NO_CARPETA fin
+                pos := 0
+                visto := falso
+                mientras no visto y siguiente(v, inicio, tam, pos, cierto) hacer
+                    si iguales(trozo, largo) o iguales(trozo, corto) entonces visto := cierto fin
+                fin
+                si no visto entonces
+                    si fallo entonces devolver MAL fin
+                    devolver NO_HAY
+                fin
+                inicio := hallado_inicio
+                tam := hallado_tamaño
+                carpeta := hallado_carpeta
+            fin
+        fin
+        devolver 0
+    fin
+
+    ; lee hasta n octetos del archivo (del sector «inicio», de «tamaño»
+    ; octetos), desde «pos», a destino. Da los leídos, o MAL.
+    público función lee_iso(v: nat32, inicio: nat32, tam: nat32, pos: nat32, destino: puntero a byte, n: nat32): nat32
+        variable hecho, b, de, k: nat32
+        si v >= VOLS entonces devolver MAL fin
+        si no vols[v].hay entonces devolver MAL fin
+        si pos >= tam entonces devolver 0 fin
+        si n > tam - pos entonces n := tam - pos fin
+        hecho := 0
+        mientras hecho < n hacer
+            b := pos div BLOQUE_ISO
+            de := pos mod BLOQUE_ISO
+            si de = 0 y n - hecho >= BLOQUE_ISO entonces
+                ; sectores enteros: derechos a destino (de 32 en 32)
+                k := (n - hecho) div BLOQUE_ISO
+                si k > 32 entonces k := 32 fin
+                si no leer_sectores(vols[v].disco, inicio + b, k, destino + hecho) entonces devolver MAL fin
+                k := k * BLOQUE_ISO
+            sino
+                si no trae(vols[v].disco, inicio + b) entonces devolver MAL fin
+                k := BLOQUE_ISO - de
+                si k > n - hecho entonces k := n - hecho fin
+                copiar_memoria(destino + hecho, dirección(blq[de]), k)
+            fin
+            hecho := hecho + k
+            pos := pos + k
+        fin
+        devolver hecho
+    fin
+
+    ; la entrada siguiente de la carpeta (del sector «inicio», de «tamaño»
+    ; octetos), desde «pos»: la deja en e (una Entrada de fat.cas, 32
+    ; octetos) y su nombre largo en nombre_largo (si no es nulo; caben
+    ; «cabe»). Da 1, 0 si se han acabado, o MAL.
+    público función entrada_iso(v: nat32, inicio: nat32, tam: nat32, ref pos: nat32, e: puntero a byte, nombre_largo: puntero a byte, cabe: nat32): nat32
+        variable a, año: nat32
+        si v >= VOLS entonces devolver MAL fin
+        si no vols[v].hay entonces devolver MAL fin
+        fallo := falso
+        si no siguiente(v, inicio, tam, pos, falso) entonces
+            si fallo entonces devolver MAL fin
+            devolver 0
+        fin
+        llenar(e, 32, 0)
+        copiar_hasta(e, corto, 13)
+        a := SOLO_LECTURA
+        si hallado_carpeta entonces a := a ob CARPETA fin
+        si reg[25] yb 0x01 <> 0 entonces a := a ob OCULTO fin
+        e[13] := a
+        si no hallado_carpeta entonces pon32(e + 16, hallado_tamaño) fin
+        ; la fecha y la hora, como las guarda la FAT (desde 1980)
+        año := reg[18]
+        si año >= 80 y reg[19] >= 1 y reg[19] <= 12 entonces
+            a := ((año - 80) << 9) ob (nat32(reg[19]) << 5) ob reg[20]
+            e[20] := a
+            e[21] := a >> 8
+            a := (nat32(reg[21]) << 11) ob (nat32(reg[22]) << 5) ob (reg[23] div 2)
+            e[22] := a
+            e[23] := a >> 8
+        fin
+        pon32(e + 24, hallado_inicio)
+        si nombre_largo <> nulo y cabe > 0 entonces copiar_hasta(nombre_largo, largo, cabe) fin
+        devolver 1
+    fin
+
+    ; lo que mide la carpeta o el archivo que se acaba de ver (para fat.cas)
+    público función tamaño_visto(): nat32
+        devolver hallado_tamaño
+    fin
+
+fin Iso.

@@ -158,6 +158,31 @@
 #      Configuración, las pestañas de las propiedades, copiar y guardar el
 #      informe en X:); en un «q35» (RTL8139, xHCI con concentrador) el
 #      informe en texto; y con «sinusb» y «sinacpi», lo desactivado.
+#  20. SSH, WireGuard y Tailscale (SOLO=ssh): SSH.BIN y SSHD.BIN (en C, con
+#      Monocypher) contra OpenSSH de aquí; WG.BIN contra el WireGuard del
+#      núcleo Linux y TAILSCAL.BIN contra Headscale y un tailscaled (estas
+#      dos, con root e ip netns; Tailscale, con HEADSCALE=binario).
+#  21. (CD, SOLO=lectores) Hispa-Pentium: los lectores de CD y DVD y las imágenes de disco.
+#      Una ISO de prueba con Joliet (genisoimage o xorriso): por IDE (como
+#      VirtualBox: el lector en el secundario maestro, el disco en SATA), por
+#      AHCI (el q35) y por USB (usb-storage con la ISO, también enchufado en
+#      marcha); sus archivos, copiados al disco y comparados octeto a octeto;
+#      sacar, cambiar y meter el disco con el monitor de QEMU (eject, change)
+#      y EXPULSAR; MONTAR la misma ISO (y una .IMG de disquete y una
+#      .CUE/.BIN en crudo) desde C:, desde el CD y desde una memoria USB que
+#      se quita (la imagen se desmonta sola); y Mi equipo, con el CD y el CD
+#      virtual, montado con dos clics.
+#  22. [WIN32, SOLO=win32] Los programas de Windows de 32 bits y DirectX (WIN32.BIN,
+#      nucleo32/win32/, docs/pentium/WIN32.md): los de consola de las pruebas
+#      de HW32 (PEHOLA, HOLAC, K32PRUE con lo que da Windows 98, una DLL),
+#      NASM, TCC (compila un «hola» que luego corre) y FASM, de otros
+#      (tests/thirdparty/fetch_win32.sh; si no están, se saltan); los de
+#      ventanas de \HISPA32 (HOLA32, AVISO32 con sus MessageBox, CALC32 con
+#      el ratón y su menú, MENU32, CTL32) como ventanas de Hispa-Pentium; Naves
+#      (DirectDraw a pantalla completa, DirectInput) jugando; el ejemplo DDRAW
+#      de FASM (ensamblado ahí); FASMW abriendo y ensamblando HELLO.ASM, y
+#      ese HELLO.EXE; Mi equipo abriendo un .EXE; y WSOCK32 (REDPRUE) contra
+#      el servidor HTTP de aquí.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -176,6 +201,9 @@
 #   SOLO=pantalla ./pruebas.sh    la primera y la decimoséptima (la medida de la pantalla)
 #   SOLO=navegador ./pruebas.sh   la primera y la decimoctava (el Navegador: NAVEGA.BIN)
 #   SOLO=dispositivos ./pruebas.sh  la primera y la 19 (el Administrador de dispositivos)
+#   SOLO=ssh ./pruebas.sh         la primera y la 20 (SSH, WireGuard y Tailscale; con HEADSCALE=binario, también Tailscale)
+#   SOLO=lectores ./pruebas.sh    la primera y la 21 (los CD y DVD, y las imágenes de disco)
+#   SOLO=win32 ./pruebas.sh       la primera y la 22 (los programas de Windows y DirectX)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -205,7 +233,7 @@ ko() { echo "  FAIL $1"; fail=$((fail + 1)); }
 mira() {       # lo que se prueba, y las líneas que tienen que salir (expresiones de grep)
   local que=$1 l; shift
   for l in "$@"; do
-    if ! grep -q -- "$l" $S; then ko "$que: falta «$l»"; sed 's/^/        /' $S | grep -v '^ *$' | head -60 | tail -20; return; fi
+    if ! grep -q -- "$l" $S; then ko "$que: falta «$l»"; sed 's/^/        /' $S | grep -v '^ *$' | head -60 | tail -n 20; return; fi
   done
   ok "$que"
 }
@@ -239,7 +267,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -460,7 +488,7 @@ wait $QPID 2>/dev/null
 QPID=
 if [ $hecho = 0 ]; then
   ko "el lote no ha llegado al final (pantalla en $T/p.txt):"
-  sed 's/^/        /' $T/p.txt | grep -v '^ *$' | tail -8
+  sed 's/^/        /' $T/p.txt | grep -v '^ *$' | tail -n 8
 fi
 mkdir $T/sal
 mcopy -n -i $T/a.img '::*.SAL' $T/sal/ > /dev/null 2>&1
@@ -840,7 +868,7 @@ PY
     distintos="$distintos $n(no compila)"; continue
   fi
   $AQUI/probar32.sh $P/$n.bin > $P/$n.sal 2>&1
-  cod=$(tail -1 $P/$n.sal); sed -i '$d' $P/$n.sal
+  cod=$(tail -n 1 $P/$n.sal); sed -i '$d' $P/$n.sal
   esperado_c="[código 0]"; [ $n = nivel ] && esperado_c="[código 7]"
   if cmp -s $P/$n.sal $AQUI/ejemplos/esperado/$n.txt && [ "$cod" = "$esperado_c" ]; then iguales=$((iguales + 1))
   else distintos="$distintos $n"; fi
@@ -855,7 +883,7 @@ for f in $AQUI/ejemplos32/*.cas; do
   if ! $AQUI/compilar.sh $f $P/$n.$X > $T/comp.txt 2>&1; then ko "$n.cas no compila: $(head -1 $T/comp.txt)"; continue; fi
   if [ $X = BIN ]; then
     $AQUI/probar32.sh $P/$n.$X > $P/$n.sal 2>&1
-    cod=$(tail -1 $P/$n.sal); sed -i '$d' $P/$n.sal
+    cod=$(tail -n 1 $P/$n.sal); sed -i '$d' $P/$n.sal
   elif [ -f $AQUI/../build/hispados.img ] && [ -f $AQUI/../build/HW32.COM ]; then
     NIVEL=42 $AQUI/probar32.sh $P/$n.$X > $P/$n.log 2>&1
     sed '/^A:\\>/,$d' $P/$n.log | sed '/^$/d' > $P/$n.sal
@@ -888,11 +916,11 @@ if grep -q "^órdenes: ayuda hora memoria mapa paginas monton tareas programas e
     && grep -q "^\[código 5\]" $P/semilla.sal; then ok "la semilla de Hispa-Pentium arranca, lee el teclado y entiende sus órdenes"
 else ko "la semilla de Hispa-Pentium no hace lo que debe:"; sed 's/^/        /' $P/semilla.sal | head -12; fi
 s1=$(grep "^llevo" $P/semilla.sal | head -1 | awk '{print $2 * 100 + $5}')
-s2=$(grep "^llevo" $P/semilla.sal | tail -1 | awk '{print $2 * 100 + $5}')
+s2=$(grep "^llevo" $P/semilla.sal | tail -n 1 | awk '{print $2 * 100 + $5}')
 if [ -n "$s1" ] && [ -n "$s2" ] && [ $((s2 - s1)) -ge 100 ]; then ok "el reloj (IRQ 0) corre: $s1 y luego $s2 centésimas"
 else ko "el reloj no corre: «$s1» y «$s2»"; fi
 if grep -q "^28 teclas pulsadas" $P/semilla.sal; then ok "el teclado (IRQ 1) cuenta las teclas, mayúsculas incluidas"
-else ko "el teclado no cuenta bien las teclas: $(grep teclas $P/semilla.sal | tail -1)"; fi
+else ko "el teclado no cuenta bien las teclas: $(grep teclas $P/semilla.sal | tail -n 1)"; fi
 $AQUI/nucleo32/probar.sh "" cero > $P/cero.sal 2>&1
 if grep -q "excepción 0: división por cero" $P/cero.sal && grep -q "^\[código 9\]" $P/cero.sal; then ok "una división por cero llega a su excepción (la 0, por la IDT)"
 else ko "la división por cero no llega a la excepción"; sed 's/^/        /' $P/cero.sal | head -6; fi
@@ -940,7 +968,7 @@ else ko "el fallo de página del núcleo no se dice bien"; sed 's/^/        /' $
 echo "== Hispa-Pentium con disco: ATA, FAT, programas del disco y el intérprete de órdenes del anillo 3 =="
 hechos=1
 for c in 12 16 32 mbr; do
-  $AQUI/nucleo32/disco.sh $P/d$c.img $c > $P/disco$c.txt 2>&1 || { hechos=0; ko "no se puede hacer el disco de prueba ($c): $(tail -1 $P/disco$c.txt)"; }
+  $AQUI/nucleo32/disco.sh $P/d$c.img $c > $P/disco$c.txt 2>&1 || { hechos=0; ko "no se puede hacer el disco de prueba ($c): $(tail -n 1 $P/disco$c.txt)"; }
 done
 if [ $hechos = 1 ]; then
 # lo que tiene que sumar TEXTOS\LARGO.TXT (el mismo que escribe disco.sh)
@@ -950,7 +978,7 @@ DISCO=$P/d16.img $AQUI/nucleo32/probar.sh "" disco dir "dir textos" "dir nada" "
   "lanzar noprog.bin" "lanzar nada.bin" disco apagar > $P/disco.sal 2>&1
 S=$P/disco.sal
 mira "el controlador ATA (PIO): IDENTIFY dice qué disco hay en el canal primario, y cuántos sectores" \
-  "^disco 0: QEMU HARDDISK, 16 MB, FAT16\.$" "^disco 0: QEMU HARDDISK, 32768 sectores (16 MB), LBA" "^disco 1: no hay"
+  "^disco 0: QEMU HARDDISK, 16 MB, FAT16\.$" "^disco 0: QEMU HARDDISK, 32768 sectores (16 MB), LBA" "^disco 1: QEMU DVD-ROM, lector de CD o DVD (IDE), sin disco$"
 mira "la FAT16 se monta y se lee su raíz (los nombres largos se saltan; queda el corto)" \
   "^sistema de archivos: FAT16, desde el sector 0, [0-9]* clusters de 2048 octetos, [0-9]* libres" \
   "^ORDENES.BIN  *[0-9]*$" "^LEEME.TXT  *118$" "^NOMBRE~1.TXT  *32$" "^TEXTOS  *<carpeta>" "^20 entradas"
@@ -972,7 +1000,7 @@ mira "el intérprete de órdenes es un programa del anillo 3 cargado del disco, 
   "^lanzo ORDENES.BIN del disco (la tarea [0-9]*, en el anillo 3)" "^Hispa-Pentium: intérprete de órdenes (un programa del anillo 3" \
   "^C:.>ayuda$" "^Las órdenes de Hispa-Pentium:" "^  TYPE archivo "
 mira "VER y MEM" "^Hispa-Pentium 0\.8: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
-  "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 3\.$"
+  "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 4\.$"
 mira "DIR: la raíz y una carpeta, con sus tamaños, sus fechas y lo que queda libre" "^ Directorio de C:.$" "^LEEME    TXT  *118  [0-9/]*  [0-9:]*$" \
   "^TEXTOS  *<DIR>  " "^ *17 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
   "^LARGO    TXT  *17600  " "^ *3 archivos  *18[0-9]* octetos$" "^No puedo abrir nada: no existe\.$"
@@ -1014,9 +1042,9 @@ m1=$(grep "^ORDENES.BIN ha acabado" $S | awk '{print $10, $13}')
 mira "al salir, el núcleo ha recogido lo que dejó PRUEBA sin cerrar ni esperar (un archivo abierto y un programa)" \
   "^prueba: acabo con el código 7, un archivo abierto y un programa sin esperar$" "^(PRUEBA.BIN ha acabado con el código 7)$" \
   "soy el que nadie espera: he dormido y acabo solo$" \
-  "^Hasta luego\.$" "^ORDENES.BIN ha acabado con el código 0; marcos libres" "; archivos abiertos: 0$" "^montón: 1 bloques ocupados con 8192 octetos"
-if [ -n "$m1" ] && [ "$(echo $m1 | awk '{print $1}')" = "$(echo $m1 | awk '{print $2}')" ] && [ "$(grep -c '^ *[0-9]*  [A-Za-z.-]*  *[a-z]*  *[03]  ' $S)" = 2 ]; then
-  ok "y no queda nada: los mismos marcos libres que antes de lanzar el intérprete ($m1) y solo las dos tareas del núcleo"
+  "^Hasta luego\.$" "^ORDENES.BIN ha acabado con el código 0; marcos libres" "; archivos abiertos: 0$" "^montón: 2 bloques ocupados con 16384 octetos"
+if [ -n "$m1" ] && [ "$(echo $m1 | awk '{print $1}')" = "$(echo $m1 | awk '{print $2}')" ] && [ "$(grep -c '^ *[0-9]*  [A-Za-z.-]*  *[a-z]*  *[03]  ' $S)" = 3 ]; then
+  ok "y no queda nada: los mismos marcos libres que antes de lanzar el intérprete ($m1) y solo las tres tareas del núcleo (con cd-cambios, la del lector de CD de QEMU)"
 else ko "tras el intérprete queda memoria o tareas sin recoger: «$m1»"; grep -A6 "^> tareas" $S | sed 's/^/        /'; fi
 # CLS: se mira la pantalla (lo que hay justo antes de la última orden)
 VER=1 DISCO=$P/d16.img $AQUI/nucleo32/probar.sh "" ordenes dir cls apagar > $P/cls.sal 2>&1
@@ -1041,7 +1069,7 @@ mira "si el cargador se lo dice (-append ordenes), el núcleo arranca con el int
   "^C:.>ver$" "^Hispa-Pentium 0\.8" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
 MODULOS= $AQUI/nucleo32/probar.sh "" disco dir ordenes apagar > $P/sindisco.sal 2>&1
 S=$P/sindisco.sal
-mira "sin disco (y sin nada que traiga el cargador), el núcleo lo dice y sigue" "^disco 0: no hay" "^sistema de archivos: no hay" "^no puedo lanzar ORDENES.BIN: no hay disco" "^\[código 5\]"
+mira "sin disco (y sin nada que traiga el cargador), el núcleo lo dice y sigue" "^disco 0: QEMU DVD-ROM, lector de CD o DVD (IDE), sin disco$" "^sistema de archivos: no hay" "^no puedo lanzar ORDENES.BIN: no hay disco" "^\[código 5\]"
 
 # ---- escribir en el disco: ATA, la FAT (12, 16, 32 y con particiones) y las órdenes ----
 # (cada prueba escribe en una copia del disco, con ESCRIBE=1; luego la miran fsck.fat y mtools)
@@ -1084,7 +1112,7 @@ for c in 16 12 32 mbr; do
       "^lleno: lo borro: 0; vuelven a estar libres los de antes: cierto$"
   fi
   # lo que ha quedado en el disco, visto desde fuera
-  if sano $I $s0; then ok "$que: después de todo eso, fsck.fat da el disco por sano ($(tail -1 $P/fsck.txt | sed 's/^[^:]*: //'))"
+  if sano $I $s0; then ok "$que: después de todo eso, fsck.fat da el disco por sano ($(tail -n 1 $P/fsck.txt | sed 's/^[^:]*: //'))"
   else ko "$que: fsck.fat encuentra el disco mal:"; sed 's/^/        /' $P/fsck.txt | head -12; fi
   bien=1
   saca $M NUEVO.TXT $P/x.txt && printf 'primera l\xa1nea\r\ny la segunda\r\n' | cmp -s - $P/x.txt || bien=0
@@ -1161,9 +1189,9 @@ if [ -n "$t" ] && [ "$t" -gt 0 ] && [ $((t % 1000)) = 0 ] && sano $I && saca $I 
 else ko "el archivo del programa cortado no queda bien: «$t»"; sed 's/^/        /' $P/fsck.txt | head -8; fi
 m1=$(grep "^ORDENES.BIN ha acabado" $S | awk '{print $10, $13}')
 mira "al cortar, el núcleo lo recoge todo: ni archivos abiertos ni tareas de más; y Ctrl+C también desde la consola del núcleo" \
-  "^ORDENES.BIN ha acabado con el código 0; marcos libres" "; archivos abiertos: 0$" "^montón: 1 bloques ocupados con 8192 octetos" \
+  "^ORDENES.BIN ha acabado con el código 0; marcos libres" "; archivos abiertos: 0$" "^montón: 2 bloques ocupados con 16384 octetos" \
   "^bucle.bin ha acabado con el código 254; marcos libres" "^\[código 5\]"
-if [ -n "$m1" ] && [ "$(echo $m1 | awk '{print $1}')" = "$(echo $m1 | awk '{print $2}')" ] && [ "$(grep -c '^ *[0-9]*  [A-Za-z.-]*  *[a-z]*  *[03]  ' $S)" = 4 ]; then
+if [ -n "$m1" ] && [ "$(echo $m1 | awk '{print $1}')" = "$(echo $m1 | awk '{print $2}')" ] && [ "$(grep -c '^ *[0-9]*  [A-Za-z.-]*  *[a-z]*  *[03]  ' $S)" = 6 ]; then
   ok "y la memoria vuelve entera ($m1 marcos libres antes y después)"
 else ko "tras Ctrl+C queda memoria o tareas sin recoger: «$m1»"; grep -A6 "^> tareas" $S | sed 's/^/        /'; fi
 
@@ -1333,7 +1361,7 @@ else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | se
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":doble 60 186" ":pausa 4" ":doble 150 140" ":raton 400 300" ":captura b1" ":tecla ctrl-c" \
   ":clicd 300 75" ":captura b2" ":clic 320 164" ":pausa 1" ":captura b3" ":clicd 180 585" ":captura b4" ":clic 200 445" ":pausa 1" ":captura b5" ":arrastra 743 523 643 423" \
   ":pausa 1" ":captura b6" ":clic 40 585" ":clic 80 293" ":pausa 2" ":tecla ctrl-v" ":captura b7" ":clicd 300 75" ":clic 320 197" ":pausa 1" ":captura b8" ":doble 60 40" ":pausa 2" \
-  ":captura b9" ":doble 250 230" ":pausa 1" ":captura b10" ":doble 250 348" ":pausa 2" ":captura b11" ":clicd 700 300" ":clic 650 398" ":pausa 1" ":captura b12" > $G/menus2.sal 2>&1
+  ":captura b9" ":doble 330 160" ":pausa 1" ":raton 600 440" ":captura b10" ":doble 356 310" ":pausa 2" ":captura b11" ":clicd 150 540" ":clic 200 523" ":pausa 1" ":captura b12" > $G/menus2.sal 2>&1
 S=$G/menus2.sal
 mira "dos clics en el icono «Consola» la abren" "escritorio: lanzo .CONSOLA.BIN (la tarea [0-9]*)"
 miracap "en la Consola, dos clics seleccionan una palabra de lo que hay en la pantalla" b1 rgb 97 133 $RES rgb 206 146 $RES nrgb 213 133 $RES texto 92 128 100 136 "Hispa-Pentium:"
@@ -1347,10 +1375,9 @@ miracap "la Consola también cambia de tamaño por la esquina (su pantalla sigue
 miracap "lo copiado en la Consola (Ctrl+C con algo seleccionado) se pega en el Bloc de notas" b7 texto 122 172 130 180 "Hispa-Pentium:"
 miracap "«Cerrar», en el menú de la ventana, la cierra: ni ventana ni botón en la barra" b8 notexto 100 60 200 80 Consola notexto 120 570 300 582 Consola \
   negrita 140 90 152 98 "NOTAS.TXT - Bloc de notas"
-miracap "dos clics en «Mi equipo»: las unidades (C:, el disco FAT16, con lo que mide)" b9 negrita 168 116 180 124 "Mi equipo" negrita 154 167 162 175 "Las unidades de este equipo" \
-  negrita 220 204 228 212 "Unidad C:" texto 220 222 228 230 "disco duro, FAT16"
-miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 178 167 186 175 "C:\\" texto 180 336 188 344 LEEME.TXT texto 180 396 188 404 TEXTOS \
-  texto 180 196 188 204 ".."
+miracap "dos clics en «Mi equipo»: el explorador, con la unidad C: (el disco FAT16) en su mosaico y lo que tiene libre" b9 negrita 30 10 40 20 "Mi equipo" \
+  negrita 265 133 275 143 "HISPA (C:)" texto 313 151 323 161 "libres de"
+miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 30 10 40 20 "C:\\" texto 316 322 326 332 LEEME.TXT texto 428 166 438 176 VACIA
 miracap "y dos clics en un texto lo abren con el Bloc de notas" b11 negrita 198 142 206 150 "\\LEEME.TXT - Bloc de notas" \
   texto 178 224 186 232 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
 miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.8" \
@@ -1370,6 +1397,91 @@ miracap "«Organizar iconos» los devuelve a su sitio" c3 texto 32 202 40 210 Co
 miracap "Configuración dice la medida de la pantalla" c4 texto 302 225 310 233 "Pantalla:  1024 x 600, 32 bits por punto"
 miracap "«Mover», en el menú de una ventana: la flecha va a su título y la ventana la sigue hasta el clic siguiente" c5 negrita 348 185 356 193 "Configuración" \
   notexto 300 120 330 140 "Configuración"
+# (explorador, 21/11) el explorador de archivos (EQUIPO.BIN: el árbol, las
+# vistas, las miniaturas con MINIAT.BIN, copiar y pegar, cambiar el nombre,
+# carpeta nueva, la Papelera, el menú del botón secundario, elegir varios,
+# buscar) y el dock (soltar en el tapiz y en el dock, el punto de los
+# abiertos, su menú, ocultarlo); el disco lo miran luego mtools y fsck.fat
+echo "== Hispa-Pentium: el explorador de archivos y el dock =="
+cp $P/d16.img $G/ex.img
+export MTOOLS_SKIP_CHECK=1
+mmd -i $G/ex.img ::FOTOS
+python3 - $G <<'PY'
+import struct, sys, zlib, base64
+g = sys.argv[1]
+def png(w, h, f):
+    raw = b''.join(b'\0' + b''.join(bytes(f(x, y)) for x in range(w)) for y in range(h))
+    ch = lambda t, d: struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d))
+    return b'\x89PNG\r\n\x1a\n' + ch(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) + ch(b'IDAT', zlib.compress(raw)) + ch(b'IEND', b'')
+open(g + '/FLOR.PNG', 'wb').write(png(160, 120, lambda x, y: (255, 122, 51) if (x - 80) ** 2 + (y - 60) ** 2 < 35 ** 2 else (47, 116, 208)))
+w, h = 64, 96
+filas = b''.join(bytes((255, 255, 255) if 10 <= x < 54 and 56 <= y < 86 else (0x4A, 0x29, 0x14)) * 1 for y in range(h) for x in range(w))
+bmp = b'BM' + struct.pack('<IHHI', 54 + len(filas), 0, 0, 54) + struct.pack('<IiiHHIIiiII', 40, w, h, 1, 24, 0, len(filas), 2835, 2835, 0, 0) + filas
+open(g + '/CASA.BMP', 'wb').write(bmp)
+open(g + '/PAISAJE.JPG', 'wb').write(base64.b64decode('/9j/4AAQSkZJRgABAQAAAAAAAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAgADADASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAYH/8QAFhAAAwAAAAAAAAAAAAAAAAAAABRh/8QAFwEBAQEBAAAAAAAAAAAAAAAAAAYFB//EABcRAQEBAQAAAAAAAAAAAAAAAAATFGH/2gAMAwEAAhEDEQA/ANQfofpKP0P04rgWkVW/Q/SUfofowEVW/Q/SUfofowEUo/Q/SUfofpa4ONWKrfofpKP0P0YOEVW/Q/SUfofowcIv/9k='))
+PY
+mcopy -i $G/ex.img $G/CASA.BMP $G/FLOR.PNG $G/PAISAJE.JPG ::FOTOS/
+miniat=no
+if bash $AQUI/nucleo32/miniat/hacer.sh $G/MINIAT.BIN > $G/miniat.txt 2>&1; then mcopy -i $G/ex.img $G/MINIAT.BIN ::; miniat=si; fi
+SES=(":pausa 2" ":captura ex1" ":doble 60 40" ":pausa 3" ":captura ex2" ":doble 330 160" ":pausa 2" ":raton 600 440" ":captura ex3"
+ ":tecla alt-v" ":tecla down down down down ret" ":pausa 1" ":captura ex4"
+ ":tecla ret" ":pausa 1" ":tecla alt-v" ":tecla down ret" ":pausa 6" ":captura ex5"
+ ":tecla alt-v" ":tecla down down ret" ":tecla backspace" ":pausa 1"
+ ":clic 452 310" ":tecla ctrl-c" ":doble 548 155" ":pausa 1" ":tecla ctrl-v" ":pausa 2" ":raton 600 440" ":captura ex6"
+ ":clic 260 160" ":tecla f2" ":pausa 1" ":captura ex7" ":escribe NUEVO.TXT" ":tecla ret" ":pausa 1" ":tecla f7" ":pausa 1" ":captura ex8"
+ ":tecla ret" ":pausa 1" ":raton 600 440" ":captura ex9" ":clic 260 160" ":tecla delete" ":pausa 2" ":raton 600 440" ":captura ex10"
+ ":clic 84 280" ":pausa 2" ":raton 600 440" ":captura ex11" ":clic 260 160" ":tecla alt-h" ":tecla down down ret" ":pausa 2" ":captura ex12"
+ ":tecla f4" ":escribe C:\\" ":tecla ret" ":pausa 1" ":clicd 452 310" ":pausa 1" ":captura ex13" ":tecla esc"
+ ":clic 260 260" ":ctrlclic 356 260" ":pausa 1" ":captura ex14" ":arrastra 600 455 380 290" ":pausa 1" ":captura ex15"
+ ":clic 452 310" ":arrastra 452 310 120 540" ":pausa 2" ":clic 260 410" ":arrastra 260 410 400 535" ":pausa 2" ":captura ex16"
+ ":tecla f3" ":escribe pir" ":tecla ret" ":pausa 3" ":captura ex17" ":doble 100 525" ":pausa 3" ":captura ex18" ":arrastra 292 530 400 530" ":pausa 1"
+ ":clicd 320 530" ":pausa 1" ":captura ex19" ":clic 380 513" ":pausa 1" ":captura ex20")
+CAPTURAS=$G ESCRIBE=1 DISCO=$G/ex.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" "${SES[@]}" > $G/explorador.sal 2>&1
+S=$G/explorador.sal
+miracap "el dock: centrado abajo, encima de la barra de tareas, con el borde del panel" ex1 rgb 400 504 0F3F8A 20 negrita 30 570 46 580 Inicio
+miracap "«Mi equipo» es el explorador: el árbol (Mi equipo), la unidad C: en su mosaico, con lo libre, y la Papelera" ex2 negrita 30 10 40 20 "Mi equipo" \
+  negrita 265 133 275 143 "HISPA (C:)" negrita 515 133 525 143 "CD (D:)" texto 515 151 525 161 "sin disco" negrita 265 195 275 205 Papelera texto 313 151 323 161 "libres de" texto 48 127 58 137 "Mi equipo"
+miracap "dos clics en la unidad: sus carpetas y sus archivos, en iconos, y lo libre en la barra de estado" ex3 texto 236 166 246 176 FOTOS \
+  texto 412 322 422 332 LEEME.TXT texto 687 475 697 485 "Libre:"
+miracap "la vista de detalles: la rejilla de los controles, con su nombre, su tamaño, su tipo y su fecha (las carpetas, delante)" ex4 \
+  negrita 221 127 231 137 Nombre negrita 629 127 639 137 Modificado texto 477 177 487 187 Carpeta texto 477 249 487 259 Programa
+if [ $miniat = si ]; then
+  miracap "las miniaturas (MINIAT.BIN, con stb_image): un BMP, un PNG y un JPG en pequeño, con su nombre" ex5 texto 344 204 354 214 FLOR.PNG \
+    texto 444 204 454 214 PAISAJE.JPG rgb 381 170 FF7A33 24 rgb 270 150 FFFFFF 10 nrgb 493 170 FFFFFF 30
+else ko "no se ha podido hacer MINIAT.BIN (¿gcc con -m32?): $(tail -n 1 $G/miniat.txt)"; fi
+miracap "copiar (Ctrl+C) en una carpeta y pegar (Ctrl+V) en otra: el archivo, y «Hecho» en la barra de estado" ex6 texto 220 166 230 176 LEEME.TXT \
+  texto 159 475 169 485 "copiados 1"
+miracap "F2: el cuadro para cambiar el nombre, con el que tiene" ex7 negrita 187 170 197 180 Cambiar texto 194 225 204 235 LEEME.TXT texto 191 253 201 263 "Hasta 8 letras"
+miracap "F7: la carpeta nueva, con su nombre (CARPETA)" ex8 texto 194 225 204 235 CARPETA
+miracap "el nombre cambiado y la carpeta nueva, en la carpeta" ex9 texto 228 166 238 176 CARPETA texto 316 166 326 176 NUEVO.TXT
+miracap "Supr manda lo elegido a la Papelera (y lo dice)" ex10 texto 220 166 230 176 NUEVO.TXT notexto 210 160 400 180 CARPETA texto 207 475 217 485 Papelera
+miracap "la Papelera, en el árbol: lo que se ha tirado" ex11 negrita 30 10 40 20 Papelera texto 228 166 238 176 CARPETA
+miracap "Herramientas > Restaurar lo elegido: lo devuelve a su sitio, y la Papelera queda vacía" ex12 texto 217 135 227 145 "La Papelera est"
+miracap "el botón secundario en un archivo: Abrir, Abrir con..., Mandar a la Papelera, Propiedades..." ex13 texto 461 338 471 348 "Abrir con..." \
+  texto 461 452 471 462 "Mandar a la Papelera" texto 461 509 471 519 Propiedades
+miracap "Control y un clic eligen dos" ex14 texto 111 475 121 485 "2 elegidos"
+miracap "y un recuadro con el ratón, los que toca" ex15 texto 111 475 121 485 "7 elegidos"
+mira "arrastrar un archivo al tapiz deja en él un acceso" "^escritorio: un acceso nuevo en el tapiz: C:.LEEME.TXT"
+miracap "el acceso en el tapiz (con su flechita), y un programa soltado en el dock queda fijado" ex16 texto 79 541 89 551 LEEME.TXT texto 615 529 625 539 "Fijado en el dock."
+miracap "buscar (F3) «pir» en la carpeta y las de dentro: lo encontrado, con su carpeta" ex17 negrita 236 172 256 192 PIRATA.TXT texto 373 177 383 187 "C:\\TEXTOS" \
+  texto 103 475 113 485 "Encontrados: 2."
+miracap "dos clics en el acceso del tapiz lo abren con lo suyo (EQUIPO /ABRIR: el Bloc de notas)" ex18 negrita 149 89 159 99 "LEEME.TXT"
+miracap "el botón secundario en el dock: Abrir, Abrir otra ventana, Fijar, Quitar, Cerrar y Ocultar el dock" ex19 texto 329 501 339 511 "Ocultar el dock"
+miracap "«Ocultar el dock» lo quita (y lo de debajo se ve)" ex20 nrgb 400 504 0F3F8A 20
+saca $G/ex.img VACIA/NUEVO.TXT $G/nuevo.txt; saca $G/ex.img LEEME.TXT $G/leeme.txt
+if cmp -s $G/nuevo.txt $G/leeme.txt && mdir -i $G/ex.img ::VACIA/CARPETA > /dev/null 2>&1; then ok "en el disco: la copia, con su nombre nuevo, igual que el original, y la carpeta restaurada en su sitio"
+else ko "en el disco no está lo que se ha hecho en el explorador:"; mdir -i $G/ex.img ::VACIA 2>&1 | head -6 | sed 's/^/        /'; fi
+saca $G/ex.img PAPELERA/INDICE.TXT $G/indice.txt
+if [ -f $G/indice.txt ] && [ ! -s $G/indice.txt ] && mattrib -i $G/ex.img ::PAPELERA 2>/dev/null | grep -q "H"; then ok "la Papelera (\\PAPELERA, oculta) queda con su índice vacío"
+else ko "la Papelera no ha quedado bien: $(cat $G/indice.txt 2>/dev/null | head -2)"; fi
+saca $G/ex.img ATAJOS.INI $G/atajos.ini; saca $G/ex.img DOCK.INI $G/dock.ini
+if grep -q "^atajo=C:.LEEME.TXT|LEEME.TXT|" $G/atajos.ini 2>/dev/null && grep -q "^fijado=.MINIAT.BIN||MINIAT.BIN|" $G/dock.ini 2>/dev/null && grep -q "^visible=no" $G/dock.ini \
+  && [ "$(grep "^fijado=" $G/dock.ini | sed -n 4p | cut -d'|' -f1)" = 'fijado=\BLOC.BIN' ]; then
+  ok "ATAJOS.INI guarda el acceso del tapiz, y DOCK.INI el orden (el Bloc, arrastrado al cuarto sitio), el programa fijado y que está oculto"
+else ko "ATAJOS.INI o DOCK.INI no guardan lo que tocaba:"; cat $G/atajos.ini $G/dock.ini 2>&1 | head -12 | sed 's/^/        /'; fi
+if sano $G/ex.img; then ok "y el disco, sano (fsck.fat)"; else ko "el disco ha quedado mal:"; sed 's/^/        /' $P/fsck.txt | head -5; fi
+if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
 # la orden ESCRITORIO del intérprete, y abrir un documento desde el menú
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" escritorio ":pausa 2" ":clic 40 585" ":clic 240 291" ":pausa 2" \
   ":captura o1" ":clic 40 585" ":clic 230 545" ":clic 533 327" ":captura o2" > $G/orden.sal 2>&1
@@ -1396,7 +1508,7 @@ python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $G/semilla.asm > /dev/
 python3 -I $AQUI/nucleo32/modo_grafico.py $G/SEMILLA.BIN $G/GRAFICO.BIN 1024 768 32 > $G/mg.txt 2>&1
 if python3 -I $AQUI/nucleo32/modo_grafico.py --mira $G/SEMILLA.BIN $G/GRAFICO.BIN 1024 768 32 >> $G/mg.txt 2>&1; then
   ok "modo_grafico.py: la copia del núcleo pide al cargador 1024x768x32 en su cabecera multiboot (bandera de vídeo y suma al día); lo demás, igual"
-else ko "modo_grafico.py no deja bien la cabecera multiboot: $(tail -1 $G/mg.txt)"; fi
+else ko "modo_grafico.py no deja bien la cabecera multiboot: $(tail -n 1 $G/mg.txt)"; fi
 # la memoria USB con GRUB (hace falta ser root, y grub-install para PC)
 if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/grub/i386-pc ] && command -v parted > /dev/null; then
   if $AQUI/nucleo32/usb.sh $G/usb.img > $G/usb.txt 2>&1; then
@@ -1414,8 +1526,9 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
+    # (SSH, TAILSCALE: 23 programas: SSH, SSHD, WG y TAILSCAL también van como módulos)
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 20 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 26 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
@@ -1442,7 +1555,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
       && [ "$(grep -c "escritura=usb unidad=X registro" $G/grub.cfg)" = 7 ] && grep -q "multiboot /ESCRIT8.BIN escritorio sindisco sinusb sinred sinacpi$" $G/grub.cfg; then
       ok "el menú de GRUB: el escritorio a 800 x 600, «a la medida de la pantalla» (gfxpayload=auto), a 1024 x 600, 1366 x 768 y 1024 x 768, uno sin tocar el USB ni los discos, y los modos de vídeo de la BIOS (videoinfo); las demás, con «escritura=usb unidad=X registro»"
     else ko "el menú de GRUB de la memoria USB no trae las entradas nuevas"; fi
-  else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
+  else ko "usb.sh no puede hacer la imagen: $(tail -n 1 $G/usb.txt)"; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba la memoria USB con GRUB)"
 fi
@@ -1519,7 +1632,7 @@ for c in 32 mbr; do
     "^escribir: leído de vuelta: 10000 octetos, 0 distintos; no se deja escribir si se abrió para leer: cierto$" \
     "^carpetas: 70 archivos en PD: 70 hechos; la carpeta tiene 72 entradas" "^escribe: todo queda como estaba (los mismos clusters libres): cierto$" \
     "^ *3 archivo(s) copiado(s)\.$" "; archivos abiertos: 0$" "^\[código 5\]"
-  if sano $I $s0; then ok "AHCI, $que: fsck.fat da el disco por sano ($(tail -1 $P/fsck.txt | sed 's/^[^:]*: //'))"
+  if sano $I $s0; then ok "AHCI, $que: fsck.fat da el disco por sano ($(tail -n 1 $P/fsck.txt | sed 's/^[^:]*: //'))"
   else ko "AHCI, $que: fsck.fat encuentra el disco mal:"; sed 's/^/        /' $P/fsck.txt | head -12; fi
   saca $M TEXTOS/LARGO.TXT $N/largo.txt; saca $M COPIA.TXT $N/copia.txt; saca $M MARIA.TXT $N/maria.txt
   if cmp -s $N/largo.txt $N/copia.txt && [ "$(iconv -f CP437 -t UTF-8 $N/maria.txt | tr -d '\r')" = "Querida señora: ¿qué tal está?" ] \
@@ -1590,7 +1703,7 @@ for hc in xhci ehci; do
     "^escribir: leído de vuelta: 10000 octetos, 0 distintos; no se deja escribir si se abrió para leer: cierto$" \
     "^carpetas: 70 archivos en PD: 70 hechos; la carpeta tiene 72 entradas" "^escribe: todo queda como estaba (los mismos clusters libres): cierto$" \
     "; archivos abiertos: 0$" "^\[código 5\]"
-  if sano $N/u$hc.img; then ok "$que: la memoria USB queda sana (fsck.fat: $(tail -1 $P/fsck.txt | sed 's/^[^:]*: //'))"
+  if sano $N/u$hc.img; then ok "$que: la memoria USB queda sana (fsck.fat: $(tail -n 1 $P/fsck.txt | sed 's/^[^:]*: //'))"
   else ko "$que: fsck.fat encuentra mal la memoria USB:"; sed 's/^/        /' $P/fsck.txt | head -12; fi
   saca $N/u$hc.img TEXTOS/LARGO.TXT $N/largo.txt; saca $N/u$hc.img COPIA.TXT $N/copia.txt; saca $N/u$hc.img MARIA.TXT $N/maria.txt
   if cmp -s $N/largo.txt $N/copia.txt && [ "$(iconv -f CP437 -t UTF-8 $N/maria.txt | tr -d '\r')" = "Querida señora: ¿qué tal está? El pingüino" ]; then
@@ -1650,14 +1763,14 @@ else ko "con «escritura=usb», o el disco de dentro ha cambiado o la memoria no
 MODULOS= QEMU_MAS="-device qemu-xhci,id=u -drive id=mu,file=$P/d16.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" ARRANQUE=sinusb \
   $AQUI/nucleo32/probar.sh "" disco apagar > $N/sinusb.sal 2>&1
 S=$N/sinusb.sal
-if ! grep -q "^usb:" $S && grep -q "^disco 0: no hay" $S && grep -q "^\[código 5\]" $S; then ok "con «sinusb» el núcleo ni toca el USB (se teclea por el teclado PS/2, y la memoria no se ve)"
+if ! grep -q "^usb:" $S && grep -q "^disco 0: QEMU DVD-ROM, lector de CD o DVD (IDE), sin disco$" $S && grep -q "^\[código 5\]" $S; then ok "con «sinusb» el núcleo ni toca el USB (se teclea por el teclado PS/2, y la memoria no se ve)"
 else ko "«sinusb» no deja el USB sin tocar:"; sed 's/^/        /' $S | head -8; fi
 # 10. el escritorio, sin teclado ni ratón PS/2: el ratón y el teclado USB, guardar en la memoria, y Mi equipo con sus unidades
 cp $P/d16.img $N/eu.img
 CAPTURAS=$G ESCRIBE=1 MODULOS= MAQUINA=pc,i8042=off SOLO_LECTURA=1 SATA=$P/d32.img ARRANQUE="escritorio escritura=usb unidad=X" \
   QEMU_MAS="-device usb-ehci,id=u -device usb-kbd,bus=u.0 -device usb-mouse,bus=u.0 -drive id=mu,file=$N/eu.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu" \
   $AQUI/nucleo32/probar.sh "" ":pausa 2" ":clic 40 585" ":captura m1" ":clic 80 293" ":pausa 2" ":escribe Guardado en la memoria USB: ¡señor!" ":tecla f2" ":pausa 1" ":captura m2" \
-  ":clic 578 76" ":pausa 1" ":doble 62 30" ":pausa 2" ":captura m3" ":doble 300 290" ":pausa 1" ":captura m4" > $N/escusb.sal 2>&1
+  ":clic 578 76" ":pausa 1" ":doble 62 30" ":pausa 2" ":captura m3" ":doble 580 160" ":pausa 1" ":captura m4" > $N/escusb.sal 2>&1
 S=$N/escusb.sal
 mira "el escritorio en un PC sin teclado ni ratón PS/2 (como un Mac): arranca con el ratón y el teclado USB" \
   "^usb: 1 teclados, 1 ratones, 1 memorias\.$" "^escritorio: en marcha, 800 x 600" "escritorio: lanzo .BLOC.BIN" "^bloc: guardado NOTAS.TXT, 35 octetos"
@@ -1667,10 +1780,9 @@ miracap "el teclado USB escribe en el Bloc de notas (con eñe y «¡»), y F2 gu
 saca $N/eu.img NOTAS.TXT $N/notas.txt
 if [ "$(iconv -f CP437 -t UTF-8 $N/notas.txt 2> /dev/null)" = "Guardado en la memoria USB: ¡señor!" ] && sano $N/eu.img; then ok "y lo guardado está en la memoria USB (la unidad del sistema, X:), que queda sana"
 else ko "lo guardado con el Bloc de notas no está en la memoria USB"; fi
-miracap "Mi equipo enseña las unidades con su letra: C: (el disco SATA de dentro, de solo lectura) y X: (la memoria USB)" m3 negrita 126 141 134 149 "Las unidades de este equipo" \
-  negrita 192 178 200 186 "Unidad C:" texto 192 196 200 204 "disco duro (SATA), FAT32" texto 192 212 200 220 "39 MB, 39 MB libres (de solo lectura)" \
-  negrita 192 238 200 246 "Unidad X:" texto 192 256 200 264 "memoria USB, FAT16"
-miracap "y dos clics en X: enseñan lo que hay en la memoria (con lo recién guardado)" m4 negrita 150 141 158 149 "X:\\" texto 152 190 160 198 "ORDENES.BIN"
+miracap "Mi equipo enseña las unidades con su letra: C: (el disco SATA de dentro, de solo lectura) y X: (la memoria USB)" m3 negrita 20 5 60 25 "Mi equipo" \
+  negrita 313 133 323 143 "(C:)" texto 313 151 323 161 "libres de" texto 264 169 274 179 "(de solo lectura)" negrita 563 133 573 143 "(X:)"
+miracap "y dos clics en X: enseñan lo que hay en la memoria (con lo recién guardado)" m4 negrita 20 5 60 25 "X:\\" texto 316 322 326 332 "LEEME.TXT" texto 316 400 326 410 "NOTAS.TXT"
 fi   # los discos de prueba
 
 # 11. la memoria USB con GRUB, como la arranca un PC: el núcleo la lee él (X:)
@@ -1719,11 +1831,11 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 20 archivos que ha traído el cargador hacen de unidad M:" $S \
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 26 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
       ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
-  else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
+  else ko "usb.sh no puede hacer la imagen: $(tail -n 1 $G/usb.txt)"; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba la memoria USB con GRUB)"
 fi
@@ -1757,7 +1869,8 @@ if $AQUI/nucleo32/disco.sh $N/of.img 16 oficina > $N/discoof.txt 2>&1; then
   if [ -s $N/facturas.dat ] && LC_ALL=C grep -qa "Taller Pe.a" $N/facturas.dat && LC_ALL=C grep -qa "Hola, se.or P.rez" $N/carta.plu && sano $N/of.img; then
     ok "lo guardado está en el disco: OFICINA\\FACTURAS.DAT (con la factura) y CARTA.PLU (lo de Pluma), y el disco queda sano"
   else ko "lo guardado por Facturas o Pluma no está en el disco, o no queda sano:"; sed 's/^/        /' $P/fsck.txt | head -6; fi
-  # Mi equipo: un documento de Pluma y una imagen (Mirador), con dos clics o Intro
+  # Mi equipo: un documento de Pluma y una imagen (Mirador), con el teclado:
+  # Intro entra en C:, una letra va al primero que empieza por ella, Intro abre
   python3 - $N/FOTO.BMP <<'PY'
 import struct, sys
 an, al = 160, 100
@@ -1773,12 +1886,12 @@ open(sys.argv[1], 'wb').write(cab + datos)
 PY
   MTOOLS_SKIP_CHECK=1 mcopy -i $N/of.img $N/FOTO.BMP ::
   CAPTURAS=$G DISCO=$N/of.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":doble 62 30" ":pausa 3" ":tecla ret" ":pausa 2" \
-    ":tecla pgdn pgdn pgdn" ":pausa 1" ":tecla ret" ":pausa 5" ":raton 400 450" ":captura of10" ":clic 180 582" ":pausa 1" ":tecla up" ":tecla ret" ":pausa 5" ":captura of11" > $N/oficina2.sal 2>&1
+    ":tecla f" ":pausa 1" ":tecla ret" ":pausa 5" ":raton 400 450" ":captura of10" ":clic 180 582" ":pausa 1" ":tecla c" ":tecla ret" ":pausa 5" ":captura of11" > $N/oficina2.sal 2>&1
   miracap "Mi equipo abre una imagen con Mirador (MIRADOR.HVP): su nombre, lo que mide y la imagen" of10 negrita 30 20 42 32 "Mirador - FOTO.BMP" \
     texto 10 520 20 535 "FOTO.BMP" texto 108 519 120 531 "160 x 100"
   miracap "y un documento de Pluma (.PLU) con Pluma: lo guardado antes, con sus acentos" of11 negrita 110 30 122 42 "Pluma - \\CARTA.PLU" \
     texto 146 142 158 154 "señor Pérez." texto 98 158 110 170 "Segunda línea."
-else ko "disco.sh no puede hacer el disco con la oficina: $(tail -1 $N/discoof.txt)"; fi
+else ko "disco.sh no puede hacer el disco con la oficina: $(tail -n 1 $N/discoof.txt)"; fi
 
 fi   # SOLO=07
 
@@ -1888,7 +2001,7 @@ instala $Z/blanco.img otravez ":tecla ret" ":texto r1" ":tecla ret" ":tecla ret"
 if grep -q "^disco 0: QEMU HARDDISK, 300 MB, FAT32 (SATA)\.$" $S && grep -q "partición 1: FAT32  *299 MB" $Z/r1.txt && grep -q "^instalar: terminado$" $S \
   && grep -q "Hispa-Pentium está instalado" $Z/r2.txt && volumen $Z/blanco.img 2048 && instalado $Z/blanco.img; then
   ok "instalar otra vez encima (el disco ya llevaba Hispa-Pentium, montado como C:): borrándolo con sus dos confirmaciones, queda instalado y sano"
-else ko "instalar encima de un Hispa-Pentium ya instalado no va:"; sed 's/^/        /' $Z/fsck.txt | head -6; tail -4 $S | sed 's/^/        /'; fi
+else ko "instalar encima de un Hispa-Pentium ya instalado no va:"; sed 's/^/        /' $Z/fsck.txt | head -6; tail -n 4 $S | sed 's/^/        /'; fi
 
 # 2. un disco con la partición de otro sistema y espacio sin usar: salir con
 # F3 y no confirmar el borrado no tocan nada; se instala en lo libre
@@ -1921,7 +2034,7 @@ rm -f $Z/cfg.txt $Z/mbr.ant; mcopy -n -i $Z/vol.img ::HISPA/GRUB.CFG $Z/cfg.txt 
 if grep -q "^set timeout=8$" $Z/cfg.txt && grep -q 'El sistema que ya estaba en el disco (particion 1)' $Z/cfg.txt && grep -q "set root=(hd0,msdos1)" $Z/cfg.txt && grep -q "chainloader +1" $Z/cfg.txt \
   && cmp -s -n 512 $Z/mbr.ant $Z/otro0.img; then
   ok "el menú de arranque lleva una entrada para el sistema que ya había, y el primer sector de antes queda guardado (\\HISPA\\MBR.ANT)"
-else ko "el menú de arranque no lleva el otro sistema, o no se guarda el primer sector de antes:"; sed 's/^/        /' $Z/cfg.txt | tail -6; fi
+else ko "el menú de arranque no lleva el otro sistema, o no se guarda el primer sector de antes:"; sed 's/^/        /' $Z/cfg.txt | tail -n 6; fi
 
 # 3. un disco lleno (sin espacio sin usar): solo se puede borrar, con sus dos confirmaciones
 truncate -s 200M $Z/lleno.img
@@ -1960,7 +2073,7 @@ IDE=1 instala $Z/ide.img ide ":tecla ret" ":texto d1" ":tecla ret" ":tecla ret" 
 if grep -q "Disco 1   IDE   QEMU HARDDISK  *2048 MB" $Z/d1.txt && grep -q "^instalar: FAT32 con clusters de 4096 octetos, [0-9]* clusters, [0-9]* sectores por FAT$" $S \
   && grep -q "Hispa-Pentium está instalado" $Z/d2.txt && volumen $Z/ide.img 2048 && instalado $Z/ide.img; then
   ok "un disco IDE de 2 GB: instalado, con su FAT32 de clusters de 4 K sana y el sistema dentro"
-else ko "instalar en un disco IDE de 2 GB no va:"; sed 's/^/        /' $Z/fsck.txt | head -6; tail -4 $S | sed 's/^/        /'; fi
+else ko "instalar en un disco IDE de 2 GB no va:"; sed 's/^/        /' $Z/fsck.txt | head -6; tail -n 4 $S | sed 's/^/        /'; fi
 
 # 6. sin «instalar» en la línea del cargador, el núcleo no deja escribir en
 # los discos sector a sector: INSTALAR no encuentra dónde, aunque haya «escritura»
@@ -2049,9 +2162,9 @@ for hc in xhci ehci; do
   # lo instalado, apuntado para PAQUETES: los registros de los paquetes del sistema, en \HISPA\PAQUETES
   rm -rf $Z/pqi $Z/pqu; mkdir $Z/pqi $Z/pqu
   mcopy -n -i $Z/vol.img '::HISPA/PAQUETES/*' $Z/pqi/ > /dev/null 2>&1; mcopy -n -i $G/usb.img@@1M '::INSTALA/PAQUETES/*' $Z/pqu/ > /dev/null 2>&1
-  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI TLS.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
+  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI SSH.PQI TAILSCAL.PQI TLS.PQI WIN32.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
     && mcopy -n -i $Z/vol.img ::HISPA/PAQUETES.BIN $Z/f.bin > /dev/null 2>&1; then
-    ok "$que: INSTALAR apunta lo que instala: los registros de los 10 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
+    ok "$que: INSTALAR apunta lo que instala: los registros de los 13 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
   else ko "$que: lo instalado no queda apuntado en C:\\HISPA\\PAQUETES:"; ls $Z/pqi | sed 's/^/        /' | head -10; fi
   # SOLO el disco: el primer arranque
   desde_disco $Z/d$hc.img $Z/a$hc.sal
@@ -2096,8 +2209,8 @@ for hc in xhci ehci; do
     miracap "al aceptar: «Todo listo», con el saludo; y el reloj de la barra ya marca la hora puesta (el reloj del PC)" a3$hc \
       negrita 154 98 162 106 "Todo listo" negrita 112 176 120 184 "¡Hola, Carlos!" negrita 454 427 462 435 "Empezar" negrita 740 570 760 584 "07:45"
     miracap "el menú Inicio saluda con el nombre («Hola, Carlos») y dice la versión; LEEME.TXT, en los documentos" a4$hc \
-      negrita 54 194 62 202 "Hola, Carlos" texto 54 212 62 220 "Hispa-Pentium, versión 0.8" texto 208 279 216 287 "LEEME.TXT"
-    if grep -q "^asistente: guardado HISPA.INI (Carlos, Toshiba)$" $S && [ "$(tr -d '\r' < $Z/ini.txt | tr '\n' '|')" = "[hispa]|usuario=Carlos|equipo=Toshiba|teclado=es|modo=1024x600|" ] \
+      negrita 54 158 62 166 "Hola, Carlos" texto 54 176 62 184 "Hispa-Pentium, versión 0.8" texto 208 243 216 251 "LEEME.TXT" negrita 38 352 46 360 Naves
+    if grep -q "asistente: guardado HISPA.INI (Carlos, Toshiba)$" $S && [ "$(tr -d '\r' < $Z/ini.txt | tr '\n' '|')" = "[hispa]|usuario=Carlos|equipo=Toshiba|teclado=es|modo=1024x600|" ] \
       && grep -q "^set modo=1024x600x32,1024x600,auto$" $Z/cfg.txt && [ "$(grep -c '^set modo=' $Z/cfg.txt)" = 1 ] && [ $sano = 0 ]; then
       ok "lo guardado: C:\\HISPA\\HISPA.INI (usuario, equipo, teclado y modo) y la medida de la pantalla en el menú de arranque (GRUB.CFG); el disco, sano"
     else ko "el asistente no deja bien HISPA.INI o GRUB.CFG:"; cat $Z/ini.txt | sed 's/^/        /'; grep "set modo" $Z/cfg.txt | sed 's/^/        /'; sed 's/^/        /' $Z/fsck.txt | head -4; fi
@@ -2109,14 +2222,14 @@ for hc in xhci ehci; do
     monz quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $Z/b$hc.sal | iconv -f CP437 -t UTF-8 > $Z/b$hc.txt
     S=$Z/b$hc.txt
-    if grep -q "^escritorio: en marcha, 1024 x 600 con 32 bits por punto" $S && ! grep -q "ASISTE.BIN" $S && cap $G/b1$hc.ppm tam 1024 600 negrita 54 194 62 202 "Hola, Carlos"; then
+    if grep -q "^escritorio: en marcha, 1024 x 600 con 32 bits por punto" $S && ! grep -q "ASISTE.BIN" $S && cap $G/b1$hc.ppm tam 1024 600 negrita 54 158 62 166 "Hola, Carlos"; then
       ok "el segundo arranque: sin asistente, el escritorio a 1024 x 600 (la medida elegida, puesta por GRUB) y el menú Inicio con el saludo"
     else ko "el segundo arranque no sale como se dejó:"; grep "escritorio" $S | sed 's/^/        /' | head -4; sed 's/^/        /' $G/cap.txt | head -4; fi
   else
     miracap "el asistente, con el ratón: clic en «de EE. UU.» cambia el teclado en el momento (la tecla de la eñe da «:»), y clic en Aceptar" a2$hc \
       texto 290 164 298 172 "Ana:"
     miracap "y queda «Todo listo» con su saludo" a3$hc negrita 154 98 162 106 "Todo listo" negrita 112 176 120 184 "¡Hola, Ana:!"
-    if grep -q "^asistente: guardado HISPA.INI (Ana:, HISPA)$" $S && grep -q "^teclado=us" $Z/ini.txt && grep -q "^modo=800x600" $Z/ini.txt && grep -q "^set modo=800x600x32,800x600,auto$" $Z/cfg.txt; then
+    if grep -q "asistente: guardado HISPA.INI (Ana:, HISPA)$" $S && grep -q "^teclado=us" $Z/ini.txt && grep -q "^modo=800x600" $Z/ini.txt && grep -q "^set modo=800x600x32,800x600,auto$" $Z/cfg.txt; then
       ok "lo guardado con el ratón: el teclado de EE. UU. y la pantalla como estaba"
     else ko "el asistente, con el ratón, no guarda lo elegido:"; cat $Z/ini.txt | sed 's/^/        /'; fi
     # la segunda entrada del menú del disco: el intérprete de órdenes, en modo texto, con el teclado guardado
@@ -2130,11 +2243,11 @@ for hc in xhci ehci; do
     monz quit 0.5; wait $QPID 2> /dev/null; QPID=
     if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
-    else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -8; fi
-    if grep -q "^|  base      0.8.3   El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|10 paquetes\.$" $Z/b2$hc.txt \
-      && grep -q "^|Los archivos de los 10 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
-      ok "PAQUETES en el sistema recién instalado: LISTA dice los 10 paquetes del sistema (base, oficina...) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
-    else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -12; fi
+    else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -n 8; fi
+    if grep -q "^|  win32     1.0     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0.8.4   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|13 paquetes\.$" $Z/b2$hc.txt \
+      && grep -q "^|Los archivos de los 13 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
+      ok "PAQUETES en el sistema recién instalado: LISTA dice los 13 paquetes del sistema (..., ssh, tailscal, tls y win32: con 13, base ya no cabe en la pantalla) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
+    else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -n 12; fi
     # la oficina, en el disco instalado: el grupo «Oficina» del menú Inicio
     # (Facturas, con C:\\HISPA\\HVPRUN.BIN) y Mi equipo abriendo Cuentas de C:\\OFICINA
     desde_disco $Z/d$hc.img $Z/c$hc.sal
@@ -2148,26 +2261,26 @@ for hc in xhci ehci; do
     # suceso; lo que sobra llegaría con el clic siguiente)
     monz "mouse_move 327 -193" 0.2; monz "mouse_move 327 -193" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 2
     monz "mouse_move -336 -2" 0.2; monz "mouse_move -336 -2" 0.4; monz "mouse_button 1" 0.1; monz "mouse_button 0" 0.1; monz "mouse_button 1" 0.1; monz "mouse_button 0" 3
-    teclas ret; sleep 2; teclas down down ret; sleep 2
+    teclas ret; sleep 2; teclas o ret; sleep 2
     monz "screendump $G/c3$hc.ppm" 0.6
-    teclas down ret; sleep 5
+    teclas c ret; sleep 5
     monz "screendump $G/c4$hc.ppm" 0.6
     monz quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $Z/c$hc.sal | iconv -f CP437 -t UTF-8 > $Z/c$hc.txt
     S=$Z/c$hc.txt
     volumen $Z/d$hc.img 2048; sano=$?
     if grep -q "escritorio: lanzo .HVPRUN.BIN (la tarea [0-9]*)" $S && ! grep -q "ASISTE.BIN" $S \
-      && cap $G/c1$hc.ppm negrita 8 382 16 390 Oficina negrita 38 410 46 418 Facturas negrita 54 194 62 202 "Hola, Ana:" \
+      && cap $G/c1$hc.ppm negrita 8 382 16 390 Oficina negrita 38 410 46 418 Facturas negrita 54 158 62 166 "Hola, Ana:" \
       && cap $G/c2$hc.ppm negrita 72 22 84 30 Facturas texto 62 126 74 138 "No hay facturas emitidas."; then
       ok "la oficina en el disco instalado: el menú Inicio (con su saludo) tiene el grupo «Oficina», y Facturas se abre con C:\\HISPA\\HVPRUN.BIN (FACTURAS.HVP, de C:\\OFICINA)"
     else ko "la oficina no se abre desde el menú Inicio del disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; grep "lanzo" $S | sed 's/^/        /' | head -4; fi
-    if cap $G/c3$hc.ppm negrita 142 90 150 98 "Mi equipo" negrita 150 141 158 149 "C:\\OFICINA" texto 152 190 160 198 "CUENTAS.HVP" texto 152 270 160 278 "DICCIO.DAT" \
+    if cap $G/c3$hc.ppm negrita 29 9 39 19 "C:\\OFICINA" texto 213 166 223 176 "CUENTAS.HV" texto 311 166 321 176 "DICCIO.DAT" \
       && cap $G/c4$hc.ppm negrita 80 16 110 36 "Cuentas - (sin nombre)" && [ $sano = 0 ]; then
       ok "y Mi equipo entra en C:\\OFICINA y abre CUENTAS.HVP (Cuentas, con HVPRUN); el disco queda sano"
     else ko "Mi equipo no abre la oficina de C:\\OFICINA en el disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; sed 's/^/        /' $Z/fsck.txt | head -3; fi
   fi
 done
-else ko "usb.sh no puede hacer la imagen: $(tail -1 $G/usb.txt)"; fi
+else ko "usb.sh no puede hacer la imagen: $(tail -n 1 $G/usb.txt)"; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba la instalación en el disco)"
 fi
@@ -2210,7 +2323,7 @@ for hc in xhci ehci; do
   mira "$que: un teclado USB enchufado con el intérprete en marcha teclea al momento" \
     "usb: se enchufa el aparato 0, 0627:0001, velocidad [a-z]*, en el puerto [0-9] ($que); teclado$" "eco uno$" "^uno$"
   mira "$que: una memoria enchufada en marcha sale como W: (y el aviso) y se lee" \
-    "($que); almacenamiento$" "^disco 1: QEMU    QEMU HARDDISK, 16 MB (USB), recién enchufado, W: (FAT16)\.$" "usb: aviso: Memoria USB conectada: W:$" \
+    "($que); almacenamiento$" "^disco 2: QEMU    QEMU HARDDISK, 16 MB (USB), recién enchufado, W: (FAT16)\.$" "usb: aviso: Memoria USB conectada: W:$" \
     "^hola desde la memoria enchufada$"
   mira "$que: quitada a lo bruto con un archivo abierto: el programa ve errores y sigue, y la unidad ya no está" \
     "^abierto: leídos 16 octetos; pulse una tecla$" "usb: aviso: Memoria USB desconectada sin «quitar con seguridad»: W:$" "^abierto: al leer otra vez: el disco falla$" \
@@ -2223,7 +2336,7 @@ for hc in xhci ehci; do
     mira "$que: el teclado sigue tecleando después de quitar y enchufar memorias" "^tres$"
   fi
   mira "$que: la otra memoria (W: otra vez) se escribe y se quita con seguridad: «Ya puede quitar la memoria W:»" \
-    "^ *1 archivo(s) copiado(s)\.$" "^> quitar w$" "^disco 1: quitado con seguridad\.$" "usb: aviso: Ya puede quitar la memoria W:$"
+    "^ *1 archivo(s) copiado(s)\.$" "^> quitar w$" "^disco 2: quitado con seguridad\.$" "usb: aviso: Ya puede quitar la memoria W:$"
   saca $Q/b$hc.img LARGO.TXT $Q/largo$hc.txt; saca $Q/b$hc.img NUEVA/LEEME.TXT $Q/leeme$hc.txt
   if sano $Q/b$hc.img && sano $Q/a$hc.img && [ "$(wc -c < $Q/largo$hc.txt 2> /dev/null)" = 17600 ] && [ -s $Q/leeme$hc.txt ] && [ "$(grep -c "sin «quitar con seguridad»" $S)" = 1 ]; then
     ok "$que: lo escrito está en la memoria quitada con seguridad, y las dos quedan sanas (fsck.fat)"
@@ -2252,20 +2365,20 @@ cp $P/d16.img $Q/ce.img; cp $Q/m1.img $Q/ea.img; memoria $Q/eb.img MEMORIA3
 CAPTURAS=$G ESCRIBE=1 DISCO=$Q/ce.img MODULOS= MAQUINA=pc,i8042=off ARRANQUE="escritorio escritura" QEMU_MAS="-device usb-ehci,id=u -device usb-kbd,bus=u.0" \
   $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":monitor device_add usb-mouse,bus=u.0,id=r1" ":pausa 2" ":doble 62 30" ":pausa 2" \
   ":monitor drive_add 0 if=none,id=ma,file=$Q/ea.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=ma,id=mema" ":pausa 2.5" ":captura u1" \
-  ":clicd 300 240" ":pausa 0.5" ":captura u2" ":clic 360 281" ":pausa 1.5" ":captura u3" ":monitor device_del mema" ":pausa 2" \
+  ":clicd 330 222" ":pausa 0.5" ":captura u2" ":clic 370 257" ":pausa 1.5" ":captura u3" ":monitor device_del mema" ":pausa 2" \
   ":monitor drive_add 0 if=none,id=mb,file=$Q/eb.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=mb,id=memb" ":pausa 2.5" ":raton 600 450" ":pausa 6" \
   ":clic 720 583" ":pausa 0.5" ":captura u4" ":clic 680 549" ":pausa 1.5" ":captura u5" ":monitor device_del memb" ":pausa 2" > $Q/escritorio.sal 2>&1
 S=$Q/escritorio.sal
 mira "escritorio: un ratón USB enchufado en marcha mueve la flecha y abre Mi equipo con dos clics" \
   "usb: se enchufa el aparato 1, 0627:0001, velocidad alta, en el puerto 2 (EHCI); ratón$" "^escritorio: lanzo .EQUIPO.BIN"
 miracap "escritorio: la memoria que llega sale en el globo de los avisos, en la bandeja (su icono) y en Mi equipo, que se pone al día solo" u1 \
-  texto 570 532 590 548 "Memoria USB conectada: W:" negrita 570 510 590 526 "USB" negrita 160 210 175 225 "Unidad W:" rgb 721 585 2463C2 40
-miracap "escritorio: Mi equipo, botón secundario en la memoria: «Abrir» y «Quitar con seguridad»" u2 texto 305 270 320 290 "Quitar con seguridad"
+  texto 570 532 590 548 "Memoria USB conectada: W:" negrita 570 510 590 526 "USB" negrita 216 190 460 212 "(W:)" rgb 721 585 2463C2 40
+miracap "escritorio: Mi equipo, botón secundario en la memoria: «Abrir» y «Quitar con seguridad»" u2 texto 335 242 355 267 "Quitar con seguridad"
 miracap "escritorio: quitada con seguridad desde Mi equipo: el globo «Ya puede quitar la memoria W:», y en Mi equipo ya no está" u3 \
-  texto 540 532 600 548 "Ya puede quitar la memoria W:" texto 90 392 110 410 "Ya puede quitar la memoria W:." notexto 150 140 200 400 "Unidad W:"
+  texto 540 532 600 548 "Ya puede quitar la memoria W:" texto 100 474 130 490 "Ya puede quitar la memoria W:." notexto 216 190 460 212 "(W:)"
 miracap "escritorio: el icono de la bandeja saca «Quitar con seguridad W:» de la otra memoria" u4 texto 580 535 600 560 "Quitar con seguridad W:"
 mira "escritorio: y desde la bandeja también se quita con seguridad; las dos memorias quedan sanas" \
-  "^escritorio: globo: Ya puede quitar la memoria W:$" "^disco 1: quitado con seguridad\.$"
+  "^escritorio: globo: Ya puede quitar la memoria W:$" "^disco 2: quitado con seguridad\.$"
 if [ "$(grep -c "^escritorio: globo: Ya puede quitar la memoria W:$" $S)" = 2 ] && ! grep -q "sin «quitar con seguridad»" $S && sano $Q/ea.img && sano $Q/eb.img; then
   ok "escritorio: las dos memorias se han quitado con seguridad (ninguna «a lo bruto») y quedan sanas (fsck.fat)"
 else ko "escritorio: las memorias no se han quitado con seguridad, o no quedan sanas:"; grep "globo\|aviso" $S | sed 's/^/        /' | head -8; fi
@@ -2369,7 +2482,7 @@ mcopy -i $Q/usb.img $F/BASE09.HPQ $F/BASE091.HPQ ::PAQUETES/ || hechos=0
 if [ $hechos = 1 ] && $HPQ mira $F/paq/SALUDO1.HPQ > $Q/mira.txt && ! $HPQ mira $F/paq/MALO.HPQ > $Q/mira2.txt && grep -q '^paquete=saludo 2.0 SALUDO2.HPQ 1[0-9]* [0-9a-f]\{64\} Un programa que saluda (la 2)' $F/paq/CATALOGO.TXT \
   && grep -q 'MALO2.DAT  *70000  MAL' $Q/mira2.txt && head -1 $F/BASE.PQI | grep -q '^HPQ 1'; then
   ok "tools/hpq.py: hace los paquetes (crea), su catálogo (CATALOGO.TXT, con el tamaño y el SHA-256 de cada .HPQ), los registros (.PQI) y mira las sumas (la de MALO.HPQ, mal)"
-else ko "tools/hpq.py no hace bien los paquetes de prueba:"; tail -4 $Q/hpq.txt | sed 's/^/        /'; fi
+else ko "tools/hpq.py no hace bien los paquetes de prueba:"; tail -n 4 $Q/hpq.txt | sed 's/^/        /'; fi
 # PAQUETES en el sistema del disco $1, con la memoria USB: lo que sale, a $Q/$2.sal (y en $S)
 paq() {
   local d=$1 n=$2; shift 2
@@ -2395,7 +2508,7 @@ mira "PAQUETES INSTALA X:\\PAQUETES\\SALUDO1.HPQ: antes, lo que necesita (letras
 if sano $Q/s1.img && sin_restos $Q/s1.img && igual_en $Q/s1.img HISPA/SALUDO.BIN $F/HOLA.BIN && igual_en $Q/s1.img HISPA/SALUDO.DAT $F/GRANDE.DAT \
   && igual_en $Q/s1.img DOCS/LETRAS/A.TXT $F/A.TXT && igual_en $Q/s1.img DOCS/LETRAS/B.TXT $F/B11.TXT && igual_en $Q/s1.img HISPA/PAQUETES/SALUDO.PQI $F/SALUDO1.PQI; then
   ok "lo instalado, desde fuera: fsck.fat da el disco por sano, los archivos son los del paquete octeto a octeto (también en carpetas nuevas: C:\\DOCS\\LETRAS), el registro es la cabecera del paquete y no quedan restos (ni HPQ*.NUE, ni .VIE, ni el diario)"
-else ko "lo instalado no queda bien en el disco:"; lista_de $Q/s1.img | sed 's/^/        /' | head -14; tail -3 $P/fsck.txt | sed 's/^/        /'; fi
+else ko "lo instalado no queda bien en el disco:"; lista_de $Q/s1.img | sed 's/^/        /' | head -14; tail -n 3 $P/fsck.txt | sed 's/^/        /'; fi
 
 # 2. por su nombre, del catálogo (la versión más nueva, con lo que necesita)
 cp $Q/sis.img $Q/s5.img
@@ -2415,7 +2528,7 @@ mira "PAQUETES ACTUALIZA: el catálogo dice lo que es más nuevo; se pone saludo
 if sano $Q/s2.img && sin_restos $Q/s2.img && igual_en $Q/s2.img HISPA/SALUDO.TXT $F/S2.TXT && ! igual_en $Q/s2.img HISPA/SALUDO.DAT $F/GRANDE.DAT \
   && igual_en $Q/s2.img HISPA/PAQUETES/SALUDO.PQI $F/SALUDO2.PQI && igual_en $Q/s2.img HISPA/SALUDO.BIN $F/HOLA.BIN; then
   ok "lo actualizado, desde fuera: el disco sano, lo de la 2.0 en su sitio, el archivo que la 2.0 ya no trae (SALUDO.DAT) quitado y el registro, el de la 2.0"
-else ko "lo actualizado no queda bien en el disco:"; lista_de $Q/s2.img | sed 's/^/        /' | head -14; tail -3 $P/fsck.txt | sed 's/^/        /'; fi
+else ko "lo actualizado no queda bien en el disco:"; lista_de $Q/s2.img | sed 's/^/        /' | head -14; tail -n 3 $P/fsck.txt | sed 's/^/        /'; fi
 
 # 4. lo que no vale no toca nada: una suma mala, un conflicto, quitar lo que
 # otro necesita; y COMPRUEBA ve un archivo cambiado (la imagen, idéntica)
@@ -2458,7 +2571,7 @@ mira "al volver, PAQUETES ve el diario y lo deshace: saludo sigue en la 1.0" \
 if sano $Q/s6.img && [ "$(lista_de $Q/s6.img)" = "$(lista_de $Q/s1.img)" ] && igual_en $Q/s6.img HISPA/SALUDO.DAT $F/GRANDE.DAT && igual_en $Q/s6.img HISPA/SALUDO.BIN $F/HOLA.BIN \
   && igual_en $Q/s6.img HISPA/PAQUETES/SALUDO.PQI $F/SALUDO1.PQI && ! lista_de $Q/s6.img | grep -q "SALUDO\.TXT"; then
   ok "lo deshecho, desde fuera: fsck.fat da el disco por sano y está como antes del corte (los mismos archivos, iguales octeto a octeto; sin restos)"
-else ko "después del corte el disco no vuelve a como estaba:"; diff <(lista_de $Q/s6.img) <(lista_de $Q/s1.img) | sed 's/^/        /' | head -8; tail -3 $P/fsck.txt | sed 's/^/        /'; fi
+else ko "después del corte el disco no vuelve a como estaba:"; diff <(lista_de $Q/s6.img) <(lista_de $Q/s1.img) | sed 's/^/        /' | head -8; tail -n 3 $P/fsck.txt | sed 's/^/        /'; fi
 
 # 7. el gancho de la red: con /DESDE=http://..., PAQUETES lanza DESCARGA
 # (aquí, uno de mentira) para el catálogo y cada paquete; sin DESCARGA, lo dice
@@ -2533,7 +2646,7 @@ $AQUI/nucleo32/disco.sh $C10/d.img 16 > /dev/null 2>&1
 mcopy -i $C10/d.img $C10/MUESTRA.BIN ::
 CAPTURAS=$G DISCO=$C10/d.img MEMORIA=64 MODULOS= ARRANQUE=escritorio $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":doble 40 190" ":pausa 2" ":escribe muestra" ":tecla ret" ":pausa 4" \
   ":raton 620 590" ":captura ct1" ":clic 60 217" ":pausa 1" ":raton 620 590" ":captura ct2" ":clic 30 178" ":escribe angel" ":raton 620 590" ":pausa 1" ":captura ct3" \
-  ":tecla ctrl-tab" ":pausa 1" ":captura ct4" ":tecla alt-v" ":pausa 1" ":captura ct5" > $C10/sal.txt 2>&1
+  ":tecla ctrl-tab" ":pausa 1" ":captura ct4" ":tecla alt-v" ":pausa 1" ":captura ct5" ":tecla esc" ":pausa 1" ":clic 60 112" ":pausa 1" ":raton 620 590" ":captura ct6" > $C10/sal.txt 2>&1
 miracap "MUESTRA.BIN: maximizada (800 x 600), la barra de menús, la de herramientas, las pestañas, la rejilla con sus rótulos y la barra de estado, a vez y media" ct1 \
   tam 800 600 texto15 10 30 140 60 rchivo texto 20 60 120 90 Nuevo texto 90 60 300 90 Guardar negrita15 10 95 120 130 Lista texto15 90 95 300 130 Ficha \
   negrita15 60 195 200 235 Nombre negrita15 400 195 660 235 Importe texto15 0 525 300 560 "Ana (titular)"
@@ -2542,6 +2655,7 @@ miracap "filtrar sin mirar tildes ni mayúsculas: «angel» encuentra «Àngel �
 miracap "Ctrl+Tab: la pestaña Ficha, con su recuadro «Datos generales», los campos, la fecha, la desplegable y la casilla" ct4 \
   negrita15 10 125 300 160 "Datos generales" texto15 20 180 300 215 "Ana Ejemplo" texto15 20 245 300 280 "21/11/2026" texto15 200 245 600 280 "Socio" texto15 40 280 400 320 "Al corriente de pago"
 miracap "Alt+V abre el menú «Ver» de la barra (un menú del escritorio)" ct5 texto 100 40 330 160 "Letra muy grande"
+miracap "y un clic en la pestaña «Lista» vuelve a ella (pestaña_en: la fila de pestañas que hay en ese punto)" ct6 negrita15 60 195 200 235 Nombre
 
 # 9. la firma (Ed25519, firma.cas): el catálogo de prueba va firmado con la
 # clave de prueba (la que lleva este PAQUETES); PAQUETES FIRMA la comprueba;
@@ -2587,7 +2701,7 @@ if sano $Q/s10.img && sin_restos $Q/s10.img && igual_en $Q/s10.img HISPA/NUCLEO.
   && [ "$(stat -c %s $Q/grubenv10)" = 1024 ] && head -c 33 $Q/grubenv10 | grep -q '^nuevo=1$' && [ "$(grep -c -- '--id anterior' $Q/grub10.cfg)" = 1 ] \
   && grep -q '^  multiboot /HISPA/NUCLEO.ANT escritorio escritura$' $Q/grub10.cfg && grep -q '^  load_env -f /HISPA/GRUBENV nuevo$' $Q/grub10.cfg && head -1 $Q/grub10.cfg | grep -q '^set modo='; then
   ok "y en el disco: el núcleo nuevo en NUCLEO.BIN y el de justo antes en NUCLEO.ANT; GRUBENV (1.024 octetos) dice nuevo=1; GRUB.CFG, con la entrada del de antes una sola vez"
-else ko "el núcleo nuevo no deja bien el arranque:"; lista_de $Q/s10.img | sed 's/^/        /' | head -12; tail -5 $Q/grub10.cfg | sed 's/^/        /'; fi
+else ko "el núcleo nuevo no deja bien el arranque:"; lista_de $Q/s10.img | sed 's/^/        /' | head -12; tail -n 5 $Q/grub10.cfg | sed 's/^/        /'; fi
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin los paquetes)"
 fi
@@ -2629,7 +2743,7 @@ mira "DESCARGAR: con Content-Length, en trozos (chunked), hasta que se cierra, u
   "^Redirigido a /ultima.txt$" "^version=0.8$" "^DESCARGAR: no se ha bajado nada (el servidor ha dicho 404)\.$" "^Hecho: c:.textos.otra.txt, 41 octetos" \
   "^DESCARGAR: no hay conexión segura con 10.0.2.2: no hay servicio TLS (falta TLS.BIN): no se pueden hacer conexiones cifradas\.$" "^Uso: DESCARGAR http\[s\]://servidor\[:puerto\]/camino \[archivo\]$"
 mira "Ctrl+C en medio de una descarga que no llega: el programa acaba, y la red sigue (IPCONFIG /TODO, con lo que ha apuntado el servicio)" \
-  "^Guardando LENTO.BIN (1000000 octetos)^C$" "^Lo que ha apuntado el servicio de red:$" "^red: DHCP: IP 10.0.2.15" "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 4\.$"
+  "^Guardando LENTO.BIN (1000000 octetos)^C$" "^Lo que ha apuntado el servicio de red:$" "^red: DHCP: IP 10.0.2.15" "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 5\.$"
 iguales=1
 for f in GRANDE.BIN:grande.bin TROZOS.BIN:trozos.bin CIERRA.BIN:cierra.bin TEXTOS/OTRA.TXT:ultima.txt; do
   saca $R/e.img ${f%%:*} $R/x.bin && cmp -s $R/x.bin $R/srv/${f##*:} || { iguales=0; echo "        ${f%%:*} no es igual"; }
@@ -2661,7 +2775,7 @@ DISCO=$R/d.img ARRANQUE="ordenes sinred" MODULOS= QEMU_MAS="-nic user,model=e100
 tr -d '\r' < $R/sinred.sal > $R/sinred.txt
 S=$R/sinred.txt
 if grep -q "^  no hay servicio de red (falta RED.BIN o se arrancó con «sinred»)\.$" $S && ! grep -q "^red:" $S; then ok "con «sinred», ni se pone en marcha el servicio de red (y IPCONFIG lo dice)"
-else ko "con «sinred» se pone en marcha la red:"; sed 's/^/        /' $S | tail -6; fi
+else ko "con «sinred» se pone en marcha la red:"; sed 's/^/        /' $S | tail -n 6; fi
 # el escritorio: el servicio, en marcha al arrancar (hay tarjeta), y su icono
 CAPTURAS=$G DISCO=$R/d.img ARRANQUE=escritorio MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ":pausa 5" ":captura r1" ":clic 720 583" ":pausa 1" ":captura r2" > $R/esc.sal 2>&1
 S=$R/esc.sal
@@ -2669,7 +2783,7 @@ mira "el escritorio pone en marcha el servicio de red (hay una tarjeta) y, con u
   "^red: Hispa-Pentium 0.8: el servicio de red (RED.BIN)$" "^escritorio: aviso: La red: conectada, con la IP 10.0.2.15\.$"
 miracap "el icono de la red en la bandeja, con la luz verde (conectada), a la izquierda del reloj" r1 rgb 729 587 2ECC40 rgb 725 582 8FDCFF
 miracap "y el aviso de la red, al pulsarlo" r2 texto 230 255 260 280 "La red: conectada, con la IP 10.0.2.15."
-else ko "no se puede hacer el disco de prueba de la red: $(tail -1 $R/disco.txt)"; fi
+else ko "no se puede hacer el disco de prueba de la red: $(tail -n 1 $R/disco.txt)"; fi
 kill $SPID 2> /dev/null; wait $SPID 2> /dev/null
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin la red)"
@@ -2687,7 +2801,7 @@ R=$P/n08t
 mkdir -p $R/srv
 if bash $AQUI/nucleo32/tls/hacer.sh $R/TLS.BIN > $R/hacer.txt 2>&1; then
   ok "nucleo32/tls/hacer.sh: TLS.BIN, BearSSL 0.6 (MIT) y tls.c como programa del anillo 3 ($(stat -c %s $R/TLS.BIN) octetos)"
-else ko "nucleo32/tls/hacer.sh no hace TLS.BIN: $(tail -1 $R/hacer.txt)"; fi
+else ko "nucleo32/tls/hacer.sh no hace TLS.BIN: $(tail -n 1 $R/hacer.txt)"; fi
 python3 -I $AQUI/nucleo32/tls/servidor_https.py $R/srv > $R/srv.txt 2>&1 &
 SPID=$!
 for _ in $(seq 100); do [ -s $R/srv/puertos ] && break; sleep 0.1; done
@@ -2775,7 +2889,7 @@ if curl -s -m 10 -o $R/clic.htm https://clicgest.es/ && curl -s -m 10 -o $R/hisp
     ok "(con internet) lo bajado de https://clicgest.es/ y https://hispados.es/ es igual octeto a octeto que lo que baja curl ($(stat -c %s $R/x.htm) y $(stat -c %s $R/y.htm) octetos)"
   else ko "(con internet) lo bajado de clicgest.es o hispados.es no es igual que con curl"; fi
 else echo "  (esta máquina no llega a https://clicgest.es/: no se prueba contra internet)"; fi
-else ko "no se pueden poner en marcha los servidores HTTPS de prueba o hacer el disco: $(tail -1 $R/srv.txt) $(tail -1 $R/disco.txt)"; fi
+else ko "no se pueden poner en marcha los servidores HTTPS de prueba o hacer el disco: $(tail -n 1 $R/srv.txt) $(tail -n 1 $R/disco.txt)"; fi
 kill $SPID 2> /dev/null; wait $SPID 2> /dev/null
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin HTTPS)"
@@ -2797,7 +2911,7 @@ Y=$P/acpi
 mkdir -p $Y $G
 if bash $AQUI/../acpi/pentium/hacer.sh $Y/ACPI.BIN > $Y/hacer.txt 2>&1; then
   ok "acpi/pentium/hacer.sh: ACPI.BIN, el núcleo de HSPACPI (ACPICA) como programa del anillo 3 ($(stat -c %s $Y/ACPI.BIN) octetos)"
-else ko "acpi/pentium/hacer.sh no hace ACPI.BIN: $(tail -1 $Y/hacer.txt)"; fi
+else ko "acpi/pentium/hacer.sh no hace ACPI.BIN: $(tail -n 1 $Y/hacer.txt)"; fi
 python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $Y/semilla.asm > /dev/null && nasm -f bin $Y/semilla.asm -o $Y/SEMILLA.BIN
 for u in ubloc:BLOC uconsola:CONSOLA uordenes:ORDENES uhola:HOLA; do
   python3 -I $AQUI/ccastel.py $AQUI/nucleo32/${u%%:*}.cas -o $Y/${u%%:*}.asm > /dev/null && nasm -f bin $Y/${u%%:*}.asm -o $Y/${u##*:}.BIN
@@ -2858,8 +2972,8 @@ mira "ICH9 (QEMU q35): «Apagar» apaga por ACPI (SMI_CMD B2h <- 02h) y QEMU ter
 S=$Y/q35reiniciar.sal
 mira "ICH9: «Reiniciar» por el registro de reinicio de la FADT (E/S CF9h <- 0Fh)" \
   "^ACPI: para reiniciar: el registro de la FADT (E/S CF9h) <- Fh" "^energía: reiniciar por el registro de la FADT" "^\[código 0\]"
-# 4. sin ACPI (-no-acpi): el servicio lo dice, no hay pila y «Apagar» es lo de antes (en QEMU, su puerto de pruebas)
-CAPTURAS=$G MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="-no-acpi" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":captura a7" \
+# 4. sin ACPI (-machine acpi=off; -no-acpi ya no está en QEMU 10): el servicio lo dice, no hay pila y «Apagar» es lo de antes (en QEMU, su puerto de pruebas)
+CAPTURAS=$G MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="-machine acpi=off" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":captura a7" \
   ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 2" > $Y/sinacpi.sal 2>&1
 S=$Y/sinacpi.sal
 mira "sin ACPI: el servicio lo dice y «Apagar» hace lo de antes (en QEMU, el código 5 de su puerto de pruebas)" \
@@ -2947,15 +3061,18 @@ HPQ="python3 -I $AQUI/../tools/hpq.py"
 if GUARDA_PAQ=$V/paq $AQUI/nucleo32/cd.sh $V/cd.iso > $V/cd.txt 2>&1 && xorriso -indev $V/cd.iso -report_el_torito plain > $V/torito.txt 2>&1 \
   && grep -q "^El Torito boot img : *1 *BIOS *y *none " $V/torito.txt && [ $(stat -c %s $V/cd.iso) -lt $((650 * 1048576)) ]; then
   ok "cd.sh hace el CD: una ISO de $(($(stat -c %s $V/cd.iso) / 1048576)) MB que arranca por la BIOS con El Torito sin emulación (vale en CD y en DVD), con GRUB"
-else ko "cd.sh no hace bien el CD:"; tail -3 $V/cd.txt $V/torito.txt | sed 's/^/        /'; fi
+else ko "cd.sh no hace bien el CD:"; tail -n 3 $V/cd.txt $V/torito.txt | sed 's/^/        /'; fi
 VBOX_PC="-machine pc -m 256 -nic user,model=e1000 -device pci-ohci,id=o -device usb-tablet,bus=o.0"
 VBOX_Q35="-machine q35 -m 256 -nic user,model=e1000"
 # 2. arrancar sin instalar (la primera entrada), en un «pc» con IDE, USB OHCI (que no se toca) y la e1000
 truncate -s 2G $V/ide.img
 maquina vivo "$VBOX_PC -cdrom $V/cd.iso -drive file=$V/ide.img,format=raw,if=ide,index=0 -boot d" ":espera 40 ^escritorio: en marcha" ":espera 20 ^red: DHCP: IP" ":pausa 2" ":captura cd1"
+# (TAILSCALE: sin «^» en la del DHCP: con más módulos, puede salir detrás del «> » de la consola)
 mira "el CD en un «pc» como el de VirtualBox (IDE, USB OHCI, la e1000 82540EM): GRUB arranca solo la primera entrada, el escritorio sin instalar, con la red" \
-  "escritorio: en marcha, 800 x 600" "red: tarjeta 8086:100E" "^red: DHCP: IP 10\.0\.2\.15"
+  "escritorio: en marcha, 800 x 600" "red: tarjeta 8086:100E" "red: DHCP: IP 10\.0\.2\.15"
 miracap "y el escritorio, desde la memoria (la unidad M:)" cd1 texto 20 50 110 70 "Mi equipo" negrita 30 570 80 590 Inicio
+mira "(CD) y el núcleo lee el propio CD: el lector del IDE secundario maestro (el de VirtualBox) es D:, con su ISO 9660" \
+  "^disco 1: QEMU DVD-ROM, lector de CD o DVD (IDE)\.$" "cd: D: CD de datos: «HISPA_PENTI[A-Z_0-9]*», ISO 9660"
 if ! grep -q "excepción\|\*\*\*" $S; then ok "ni una excepción del núcleo (con el controlador OHCI y su tableta USB, que no se usan)"; else ko "hay excepciones:"; grep "excepción\|\*\*\*" $S | head -3 | sed 's/^/        /'; fi
 # 3. instalar desde el CD: en el «pc» (IDE) y en el «q35» (SATA: AHCI, con el CD en AHCI también)
 truncate -s 2G $V/sata.img
@@ -3065,24 +3182,24 @@ python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $V/semilla.asm > /dev/
 # luego 1280 x 800 a prueba, sin tocar nada: a los 15 s vuelve sola
 CAPTURAS=$G MEMORIA=128 DISCO=$P/d16.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 110" ":pausa 2" ":clic 553 76" ":pausa 1" \
   ":clic 40 585" ":clic 250 500" ":captura m0" ":clic 572 236" ":pausa 1" ":captura m1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":captura m2" ":clic 431 418" ":pausa 1" ":captura m3" \
-  ":clic 677 347" ":clic 341 525" ":pausa 2" ":captura m4" ":pausa 17" ":captura m5" > $V/marcha.sal 2>&1
+  ":clic 495 347" ":clic 341 525" ":pausa 2" ":captura m4" ":pausa 17" ":captura m5" > $V/marcha.sal 2>&1
 S=$V/marcha.sal
 mira "con la VBE de Bochs (QEMU -vga std), «Probar...» pone la medida en el momento; «Mantener» la deja; sin tocar nada, a los 15 s vuelve sola la de antes" \
   "^pantalla: 1024x768 con 32 bits por punto (cambiado en marcha, por la VBE de Bochs)" "^escritorio: la pantalla, a 1024 x 768 (en marcha)" \
   "^escritorio: Se queda a 1024 x 768 (hasta que se apague)\." "^escritorio: la pantalla, a 1280 x 800 (en marcha)" \
   "^escritorio: no se ha dado por buena en 15 s" "^escritorio: Ha vuelto la de antes\."
 miracap "Configuración: la medida de la pantalla y, a su lado, «Cambiar...»" m0 texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 530 224 542 232 "Cambiar..."
-miracap "la lista: los modos que da la tarjeta y caben en lo que dice la pantalla (su EDID: prefiere 1280 x 800), el de ahora elegido, «Probar...» y «Cerrar»" m1 \
+miracap "la lista: los modos que da la tarjeta y caben en la pantalla (su EDID: 1280 x 800, recomendada), el de ahora elegido, «Probar...» y «Cerrar»" m1 \
   negrita 200 120 208 126 "La medida de la pantalla" texto 200 140 208 146 "Ahora: 800 x 600, 32 bits por punto." negrita 200 218 210 224 "800 x 600" \
-  negrita 520 218 530 224 "1024 x 768" negrita 516 318 526 326 "1920 x 1080" texto 160 349 168 357 "La pantalla dice que prefiere 1280 x 800." \
+  negrita 520 218 530 224 "1024 x 768" negrita 350 250 360 258 "1280 x 800 *" texto 160 283 168 291 "* La de la pantalla (recomendada): 1280 x 800." notexto 0 0 800 600 "1920 x 1080" \
   negrita 188 430 198 436 "Probar..." negrita 565 430 575 436 Cerrar rgb 170 228 5CC45E 40
 miracap "a prueba: la pantalla ya a 1024 x 768, «¿Se ve bien?» con la cuenta atrás, y el Bloc de notas maximizado, a la medida nueva" m2 tam 1024 768 \
   negrita 334 305 342 313 "¿Se ve bien la pantalla?" texto 334 327 342 335 "Está a 1024 x 768." negrita 393 405 405 415 Mantener negrita 571 405 583 415 Volver \
   negrita 24 2 36 10 "NOTAS.TXT - Bloc de notas" rgb 1000 719 D7E5F8 10 texto 4 708 14 716 "NOTAS.TXT" negrita 30 742 46 752 Inicio
 miracap "«Mantener»: la lista otra vez, con la de ahora (1024 x 768) y lo que ha pasado" m3 tam 1024 768 texto 312 223 320 231 "Ahora: 1024 x 768, 32 bits por punto." \
-  texto 272 451 280 459 "Se queda a 1024 x 768 (hasta que se apague)."
+  texto 272 383 280 391 "Se queda a 1024 x 768 (hasta que se apague)."
 miracap "1280 x 800 a prueba" m4 tam 1280 800
-miracap "y a los 15 s, sin tocar nada, la de antes (1024 x 768): «Ha vuelto la de antes.»" m5 tam 1024 768 texto 272 451 280 459 "Ha vuelto la de antes."
+miracap "y a los 15 s, sin tocar nada, la de antes (1024 x 768): «Ha vuelto la de antes.»" m5 tam 1024 768 texto 272 383 280 391 "Ha vuelto la de antes."
 if ! grep -q "excepción\|\*\*\*" $S; then ok "ni una excepción ni una queja del núcleo al cambiar la pantalla en marcha"; else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -3 | sed 's/^/        /'; fi
 # 2. el CD, con el modo que ha puesto GRUB (por la VBE de la BIOS), en un
 # «pc» como el de VirtualBox: con -vga std (como VBoxVGA) y con -vga vmware
@@ -3092,8 +3209,10 @@ CD=$P/cd/cd.iso
 VBOX_PC="-machine pc -m 256 -nic user,model=e1000 -device pci-ohci,id=o -device usb-tablet,bus=o.0"
 truncate -s 2G $V/ide.img
 for vga in std vmware; do
+  # (EDID) con -vga std, la lista llega hasta lo que dice su EDID (1280 x 800, la quinta); con vmware, sin EDID, la sexta
+  if [ $vga = std ]; then x=403; else x=565; fi
   maquina cd$vga "$VBOX_PC -vga $vga -cdrom $CD -drive file=$V/ide.img,format=raw,if=ide,index=0 -boot d" ":espera 40 ^escritorio: en marcha" ":pausa 3" \
-    ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":captura cd$vga" ":clic 565 263" ":clic 229 441" ":pausa 2" ":captura cd${vga}2" ":clic 559 434" ":pausa 1"
+    ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":captura cd$vga" ":clic $x 263" ":clic 229 441" ":pausa 2" ":captura cd${vga}2" ":clic 559 434" ":pausa 1"
   mira "el CD en un «pc» como VirtualBox con -vga $vga: el modo de GRUB (800 x 600) se cambia en marcha (1280 x 800) y se mantiene" \
     "escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)" "^pantalla: 1280x800 con 32 bits por punto (cambiado en marcha" \
     "^escritorio: Se queda a 1280 x 800 (hasta que se apague)\."
@@ -3107,13 +3226,17 @@ maquina inst "$VBOX_PC -cdrom $CD -drive file=$V/inst.img,format=raw,if=ide,inde
 printf '[hispa]\r\nusuario=Ana\r\nequipo=PRUEBA\r\nteclado=es\r\nmodo=800x600\r\n' > $V/HISPA.INI
 mcopy -o -i $V/inst.img@@1M $V/HISPA.INI ::HISPA/
 cp $V/inst.img $V/inst0.img
+# (EDID) cirrus no da EDID: la nativa (1024 x 768), como si se hubiera
+# sabido otro día arrancando «a la medida»; sin ella, nada mayor que la de ahora
+python3 -I -c "import sys; t='# GRUB Environment Block\npantalla=\nantes=\nprueba=0\nnativa=1024x768\n'; open(sys.argv[1],'w').write(t+'#'*(1024-len(t)))" $V/envn
+mcopy -o -i $V/inst.img@@1M $V/envn ::HISPA/PANTALLA.ENV
 CIRRUS="$VBOX_PC -vga cirrus -drive file=$V/inst.img,format=raw,if=ide,index=0"
 maquina pc1 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":captura pc1" \
   ":clic 565 229" ":clic 274 441" ":pausa 1" ":captura pc2" ":clic 314 336" ":pausa 6"
 mira "sin la VBE de Bochs (cirrus), instalado: la medida se guarda en \\HISPA\\PANTALLA.ENV (a prueba), GRUB.CFG la lee, y «Reiniciar ahora» reinicia" \
-  "^escritorio: GRUB.CFG lee ahora PANTALLA.ENV" "^escritorio: PANTALLA.ENV: pantalla=1024x768 antes= prueba=1" "^escritorio: reiniciar"
+  "^escritorio: GRUB.CFG lee ahora PANTALLA.ENV" "^escritorio: .*PANTALLA.ENV: pantalla=1024x768 antes= prueba=1" "^escritorio: reiniciar"
 miracap "la lista, sin cambio en marcha: «se pone al arrancar», «A la medida» y «Guardar y reiniciar...»" pc1 texto 160 167 168 175 "Esta tarjeta no deja cambiarla en marcha: se guarda y" \
-  negrita 352 352 364 360 "A la medida" negrita 180 428 190 436 "Guardar y reiniciar..."
+  negrita 190 252 200 260 "A la medida" negrita 512 216 522 224 "1024 x 768 *" notexto 0 0 800 600 "1280 x 800" negrita 180 428 190 436 "Guardar y reiniciar..."
 miracap "«Al arrancar otra vez, a 1024 x 768», con «Reiniciar ahora» y «Más tarde»" pc2 negrita 224 216 234 224 "Al arrancar otra vez, a 1024 x 768." \
   negrita 248 324 258 332 "Reiniciar ahora" negrita 448 324 458 332 "Más tarde"
 mcopy -n -i $V/inst.img@@1M ::HISPA/GRUB.CFG $V/grub.cfg; mcopy -n -i $V/inst.img@@1M ::HISPA/PANTALLA.ENV $V/env1
@@ -3122,25 +3245,25 @@ if [ $(stat -c %s $V/env1) = 1024 ] && head -c 25 $V/env1 | grep -q '^# GRUB Env
   ok "PANTALLA.ENV es un bloque de GRUB de 1024 octetos (GRUB escribe en él: save_env), GRUB.CFG lo lee y el disco está sano"
 else ko "PANTALLA.ENV o GRUB.CFG no quedan bien:"; head -c 80 $V/env1 | sed 's/^/        /'; fi
 # al arrancar: GRUB pone 1024 x 768 (y la apunta «probándose»); «Mantener»
-maquina pc2 "$CIRRUS -no-reboot" ":espera 40 la pantalla está a prueba" ":pausa 2" ":captura pc3" ":centro 512 384" ":clic 431 418" ":pausa 2"
+maquina pc2 "$CIRRUS -no-reboot" ":espera 40 está a prueba" ":pausa 2" ":captura pc3" ":centro 512 384" ":clic 431 418" ":pausa 2"
 mcopy -n -i $V/inst.img@@1M ::HISPA/PANTALLA.ENV $V/env2
 mira "al arrancar, GRUB la pone (1024 x 768) y el escritorio pregunta; «Mantener» la deja para siempre" \
-  "escritorio: en marcha, 1024 x 768 con [0-9]* bits por punto (el modo lo ha dejado puesto el cargador)" "^escritorio: la pantalla está a prueba (PANTALLA.ENV)" \
-  "^escritorio: PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" "^escritorio: Se queda a 1024 x 768\."
+  "escritorio: en marcha, 1024 x 768 con [0-9]* bits por punto (el modo lo ha dejado puesto el cargador)" "pantalla: está a prueba" \
+  "^escritorio: .*PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" "^escritorio: Se queda a 1024 x 768\."
 miracap "«¿Se ve bien la pantalla?», a 1024 x 768, con la cuenta atrás «vuelve la de antes»" pc3 negrita 334 305 342 313 "¿Se ve bien la pantalla?" \
   texto 334 347 342 355 "Si no la da por buena, vuelve la de antes en 1"
 if head -c 100 $V/env2 | grep -q '^prueba=0$' && head -c 100 $V/env2 | grep -q '^pantalla=1024x768$'; then ok "y PANTALLA.ENV: pantalla=1024x768, prueba=0"
 else ko "PANTALLA.ENV no queda bien tras «Mantener»:"; head -c 70 $V/env2 | sed 's/^/        /'; fi
-# otra, 1280 x 1024: se reinicia y, en la prueba, se reinicia otra vez a lo
+# otra, 1024 x 600: se reinicia y, en la prueba, se reinicia otra vez a lo
 # bruto (como con la pantalla a oscuras): GRUB vuelve sola a 1024 x 768
 maquina pc3 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":centro 512 384" ":clic 40 753" ":clic 250 668" ":clic 688 320" ":pausa 1" \
-  ":clic 353 381" ":clic 386 525" ":pausa 1" ":clic 426 420" ":pausa 6"
-mira "desde 1024 x 768, 1280 x 1024 guardada a prueba (la de antes, apuntada)" "^escritorio: PANTALLA.ENV: pantalla=1280x1024 antes=1024x768 prueba=1" "^escritorio: reiniciar"
-maquina pc4 "$CIRRUS" ":espera 40 la pantalla está a prueba" ":pausa 2" ":monitor system_reset" ":pausa 3" ":espera 40 en marcha, 1024 x 768" ":pausa 4"
+  ":clic 515 313" ":clic 386 525" ":pausa 1" ":clic 426 420" ":pausa 6"
+mira "desde 1024 x 768, 1024 x 600 guardada a prueba (la de antes, apuntada)" "^escritorio: .*PANTALLA.ENV: pantalla=1024x600 antes=1024x768 prueba=1" "^escritorio: reiniciar"
+maquina pc4 "$CIRRUS" ":espera 40 está a prueba" ":pausa 2" ":monitor system_reset" ":pausa 3" ":espera 40 en marcha, 1024 x 768" ":pausa 4"
 mcopy -n -i $V/inst.img@@1M ::HISPA/PANTALLA.ENV $V/env3
-mira "si se reinicia sin darla por buena, GRUB vuelve solo a la de antes (1024 x 768), sin preguntar" "escritorio: en marcha, 1280 x 1024" "^escritorio: la pantalla está a prueba" \
+mira "si se reinicia sin darla por buena, GRUB vuelve solo a la de antes (1024 x 768), sin preguntar" "escritorio: en marcha, 1024 x 600" "pantalla: está a prueba" \
   "escritorio: en marcha, 1024 x 768"
-if [ $(grep -c "la pantalla está a prueba" $S) = 1 ] && head -c 100 $V/env3 | grep -q '^pantalla=1024x768$' && head -c 100 $V/env3 | grep -q '^antes=$' && head -c 100 $V/env3 | grep -q '^prueba=0$' && sano $V/inst.img 2048; then
+if [ $(grep -c "pantalla: está a prueba" $S) = 1 ] && head -c 100 $V/env3 | grep -q '^pantalla=1024x768$' && head -c 100 $V/env3 | grep -q '^antes=$' && head -c 100 $V/env3 | grep -q '^prueba=0$' && sano $V/inst.img 2048; then
   ok "y PANTALLA.ENV lo dice (GRUB lo ha escrito con save_env): pantalla=1024x768, antes vacío, prueba=0; el disco, sano"
 else ko "tras reiniciar sin darla por buena, PANTALLA.ENV no queda bien:"; head -c 70 $V/env3 | sed 's/^/        /'; fi
 # 4. instalado, con la VBE de Bochs (-vga std, como VirtualBox): «Mantener»
@@ -3150,7 +3273,7 @@ else ko "tras reiniciar sin darla por buena, PANTALLA.ENV no queda bien:"; head 
 cp $V/inst0.img $V/inst.img
 STD="$VBOX_PC -vga std -drive file=$V/inst.img,format=raw,if=ide,index=0"
 maquina vb1 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":clic 431 418" ":pausa 2"
-mira "instalado, con la VBE de Bochs: «Mantener» la guarda también para los próximos arranques" "^escritorio: PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" \
+mira "instalado, con la VBE de Bochs: «Mantener» la guarda también para los próximos arranques" "^escritorio: .*PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" \
   "^escritorio: Se queda a 1024 x 768, también al arrancar\."
 maquina vb2 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3"
 mira "y al arrancar otra vez, GRUB ya la pone (1024 x 768)" "escritorio: en marcha, 1024 x 768 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
@@ -3161,6 +3284,53 @@ maquina vb3 "${STD/-vga std/-vga vmware}" ":espera 40 la pantalla, a 1200" ":pau
 mira "con la VMSVGA, 1200 x 800 (que su BIOS no da por VBE: GRUB pone otra) la pone el núcleo al arrancar, por la VBE de Bochs" \
   "escritorio: en marcha, 800 x 600" "^escritorio: la pantalla, a 1200 x 800 (en marcha)"
 miracap "y el escritorio, a 1200 x 800" vb3 tam 1200 800 negrita 30 770 46 780 Inicio
+# 5. (EDID) lo que dice la pantalla de sí misma: con QEMU -device VGA y un
+# EDID de 1024 x 600 (un netbook), uno de 1366 x 768 y sin EDID; el
+# Administrador de dispositivos dice el monitor
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/udisposi.cas -o $V/udisposi.asm -I $AQUI/nucleo32 > /dev/null 2>&1 && nasm -f bin $V/udisposi.asm -o $V/DISPOSIT.BIN
+cp $P/d16.img $V/de.img; mcopy -o -i $V/de.img $V/DISPOSIT.BIN ::DISPOSIT.BIN
+for e in 1024:600 1366:768 no; do
+  if [ $e = no ]; then o="edid=off"; else o="xres=${e%:*},yres=${e#*:}"; fi
+  CAPTURAS=$G MEMORIA=128 DISCO=$V/de.img ARRANQUE=escritorio MODULOS= VGA=none QEMU_MAS="-device VGA,$o" $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" \
+    ":clic 40 585" ":clic 250 500" ":clic 576 236" ":pausa 1" ":captura ed${e%:*}" ":clic 594 441" ":clic 333 399" ":pausa 3" ":captura dv${e%:*}" > $V/edid$e.sal 2>&1
+done
+S=$V/edid1024:600.sal
+mira "con un EDID de 1024 x 600 (un netbook), el núcleo lo lee y lo apunta en el registro del arranque" "pantalla: EDID: «QEMU Monitor», hecha para 1024 x 600 (la tarjeta de QEMU)"
+miracap "y la lista ofrece solo lo que cabe en la pantalla: 800 x 600 y 1024 x 600, la recomendada" ed1024 negrita 200 218 210 224 "800 x 600" negrita 355 218 365 224 "1024 x 600 *" \
+  texto 160 249 168 257 "* La de la pantalla (recomendada): 1024 x 600." notexto 0 0 800 600 "1024 x 768"
+miracap "el Administrador de dispositivos dice el monitor en Pantalla, colgado de la tarjeta (lo lleva edid.cas)" dv1024 texto 544 175 552 183 "edid.cas"
+S=$V/edid1366:768.sal
+mira "con un EDID de 1366 x 768" "pantalla: EDID: «QEMU Monitor», hecha para 1366 x 768"
+miracap "nada mayor que 1366 x 768 (y 1366 no, que la VBE de QEMU no la da: la deja en 1360)" ed1366 negrita 0 0 800 600 "1280 x 720" texto 160 200 168 400 "* La de la pantalla (recomendada): 1366 x 768." \
+  notexto 0 0 800 600 "1440 x 900" notexto 0 0 800 600 "1366 x 768 *"
+S=$V/edidno.sal
+mira "sin EDID, lo dice" "la pantalla no dice su medida"
+miracap "y en una máquina virtual (su pantalla es una ventana) la lista sigue sin tope" edno negrita 0 0 800 600 "1920 x 1080"
+# 6. (EDID) la memoria USB (usb.sh, como root), en un PC sin la VBE de
+# Bochs ni EDID (-vga cirrus, como el HP Mini): se guarda en X:\PANTALLA.ENV
+# y la usa la primera entrada de su menú; lo que la BIOS no da se dice
+if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && command -v parted > /dev/null; then
+  $AQUI/nucleo32/usb.sh $V/usb.img > $V/usb.txt 2>&1
+  USBQ="-machine pc -m 256 -vga cirrus -nic none -device qemu-xhci,id=u -drive file=$V/usb.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1"
+  maquina us1 "$USBQ -no-reboot" ":espera 60 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 250 500" ":clic 576 236" ":pausa 1" ":captura us1" \
+    ":clic 403 229" ":clic 274 441" ":pausa 1" ":clic 314 336" ":pausa 6"
+  mira "desde la memoria USB (sin EDID): nada mayor que la de ahora, «A la medida», y se guarda en X:\\PANTALLA.ENV" \
+    "la pantalla no dice su medida" "^escritorio: \\\\PANTALLA.ENV: pantalla=auto antes= prueba=1" "^escritorio: reiniciar"
+  miracap "«No se sabe su medida: nada mayor que la de ahora.»" us1 texto 160 249 168 257 "No se sabe su medida: nada mayor que la de ahora." negrita 350 218 370 226 "A la medida"
+  maquina us2 "$USBQ -no-reboot" ":espera 60 está a prueba" ":pausa 2" ":clic 431 418" ":pausa 2"
+  mira "y al arrancar, GRUB la pone (a la medida) desde la primera entrada y pregunta" "PANTALLA.ENV pide «auto» (prueba=2)" "pantalla: está a prueba"
+  python3 -I -c "import sys; t='# GRUB Environment Block\npantalla=1600x900\nantes=\nprueba=0\nnativa=\n'; open(sys.argv[1],'w').write(t+'#'*(1024-len(t)))" $V/envu
+  mcopy -o -i $V/usb.img@@1M $V/envu ::PANTALLA.ENV
+  maquina us3 "$USBQ -no-reboot" ":espera 60 no permite" ":pausa 3" ":captura us3"
+  mcopy -n -i $V/usb.img@@1M ::ARRANQUE.TXT $V/arranque.txt; mcopy -n -i $V/usb.img@@1M ::PANTALLA.ENV $V/envu2
+  mira "si la BIOS no da la pedida (1600 x 900 en cirrus), GRUB pone otra y el núcleo lo dice" "Este equipo no permite 1600 x 900: se queda en 800 x 600\."
+  miracap "con un aviso" us3 texto 0 0 800 600 "Este equipo no permite 1600 x 900: se queda en 800 x 600."
+  if tr -d '\r' < $V/arranque.txt | iconv -f CP437 -t UTF-8 | grep -q "Este equipo no permite 1600 x 900" && head -c 60 $V/envu2 | grep -q '^pantalla=800x600$'; then
+    ok "y queda en X:\\ARRANQUE.TXT (para mandarlo), y PANTALLA.ENV pasa a la que hay"
+  else ko "ARRANQUE.TXT o PANTALLA.ENV no lo dicen:"; head -c 60 $V/envu2 | sed 's/^/        /'; fi
+else
+  echo "  (sin ser root no se hace la memoria USB: sin la parte de la memoria USB)"
+fi
 if ! cat $V/pc*.txt $V/vb*.txt $V/cd*.txt | grep -q "excepción\|\*\*\*"; then ok "en todos esos arranques, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; cat $V/pc*.txt $V/vb*.txt $V/cd*.txt | grep "excepción\|\*\*\*" | head -3 | sed 's/^/        /'; fi
 else
@@ -3178,7 +3348,7 @@ if parte08 dispositivos; then
 echo "== Hispa-Pentium 0.8.3: el Administrador de dispositivos (DISPOSIT.BIN y la llamada 155) =="
 Y=$P/disp
 mkdir -p $Y $G
-bash $AQUI/../acpi/pentium/hacer.sh $Y/ACPI.BIN > $Y/hacer.txt 2>&1 || ko "acpi/pentium/hacer.sh no hace ACPI.BIN: $(tail -1 $Y/hacer.txt)"
+bash $AQUI/../acpi/pentium/hacer.sh $Y/ACPI.BIN > $Y/hacer.txt 2>&1 || ko "acpi/pentium/hacer.sh no hace ACPI.BIN: $(tail -n 1 $Y/hacer.txt)"
 python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $Y/semilla.asm > /dev/null && nasm -f bin $Y/semilla.asm -o $Y/SEMILLA.BIN
 for u in udisposi:DISPOSIT uequipo:EQUIPO uordenes:ORDENES ured:RED; do
   python3 -I $AQUI/ccastel.py $AQUI/nucleo32/${u%%:*}.cas -o $Y/${u%%:*}.asm > /dev/null && nasm -f bin $Y/${u%%:*}.asm -o $Y/${u##*:}.BIN \
@@ -3199,7 +3369,7 @@ CAPTURAS=$G ESCRIBE=1 SATA=$Y/sata.img SOLO_LECTURA=1 MODULOS=$Y/ACPI.BIN,$Y/DIS
   ":clicd 63 40" ":pausa 1" ":captura dv1" ":clic 100 70" ":pausa 4" ":captura dv2" ":clic 395 81" ":pausa 3" ":captura dv3" \
   ":tecla down" ":tecla ret" ":pausa 4" ":captura dv4" ":clic 228 140" ":raton 400 450" ":pausa 1" ":captura dv5" ":clic 323 140" ":raton 400 450" ":pausa 1" ":captura dv6" \
   ":tecla esc" ":pausa 1" ":clic 245 81" ":pausa 2" ":captura dv7" \
-  ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":pausa 1" ":captura dv10" ":clic 742 31" ":pausa 1" \
+  ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":pausa 1" ":captura dv10" ":clic 742 31" ":pausa 1" \
   ":clic 40 585" ":pausa 1" ":clic 250 500" ":pausa 1" ":captura dv8" ":clic 300 398" ":pausa 4" ":captura dv9" > $Y/pc.sal 2>&1
 S=$Y/pc.sal
 mira "ACPI.BIN apunta lo que hay en el espacio de nombres de ACPI (la llamada 156)" "^ACPI: [0-9]* dispositivos del espacio de nombres, apuntados para el Administrador de dispositivos"
@@ -3208,7 +3378,7 @@ mira "Mi equipo > Propiedades, Configuración > «Administrador de dispositivos.
 [ "$(grep -c '^escritorio: lanzo .DISPOSIT.BIN' $S)" = 2 ] && ok "(dos veces: desde Mi equipo y desde Configuración)" || ko "DISPOSIT.BIN no se lanza dos veces: $(grep -c '^escritorio: lanzo .DISPOSIT' $S)"
 miracap "el botón secundario en Mi equipo: «Abrir» y «Propiedades»" dv1 texto 60 30 200 100 Abrir texto 60 30 200 100 Propiedades
 miracap "la ventana: el árbol por categorías, con el controlador de cada cosa" dv2 \
-  negrita 30 15 400 40 "Administrador de dispositivos" negrita 40 120 400 520 "[-] Pantalla (1)" negrita 40 120 500 520 "Intel PRO/1000 MT (82540EM)" \
+  negrita 30 15 400 40 "Administrador de dispositivos" negrita 40 120 400 520 "[-] Pantalla (2)" negrita 40 120 500 520 "Intel PRO/1000 MT (82540EM)" \
   texto 400 120 760 520 RED.BIN texto 400 120 760 520 ahci.cas texto 30 60 700 100 "Guardar informe"
 miracap "las categorías se cierran con la flecha izquierda; la tableta USB, «SIN CONTROLADOR» con su «!», fondo naranja y su franja" dv10 \
   negrita 40 120 400 520 "[+] Discos (2)" negrita 40 120 400 520 "[+] Red (1)" negrita 40 120 760 520 "! QEMU USB Tablet" texto 400 120 560 520 "SIN CONTROLADOR"
@@ -3247,7 +3417,7 @@ miracap "la pestaña Controlador: el controlador, el identificador, el subsistem
   texto 100 150 700 400 "video.cas (en el núcleo)" texto 100 150 700 400 "PCI 1234:1111" texto 100 150 700 400 "030000 (Tarjeta gráfica (VGA))"
 miracap "la pestaña Recursos: sus zonas de memoria, con lo que miden" dv6 negrita 100 120 400 160 Recursos texto 100 150 700 400 "FD000000-FDFFFFFF (16 MB)"
 miracap "«Copiar informe»: al portapapeles" dv7 texto 30 520 760 545 "Informe copiado al portapapeles"
-miracap "Configuración, con «Administrador de dispositivos...»" dv8 negrita 160 120 700 160 "Configuración" negrita 170 380 480 420 "Administrador de dispositivos..."
+miracap "Configuración, con «Dispositivos...»" dv8 negrita 160 120 700 160 "Configuración" negrita 170 380 480 420 "Dispositivos..."
 miracap "y desde ahí, la ventana otra vez" dv9 negrita 30 15 400 40 "Administrador de dispositivos"
 if ! grep -q "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $Y/pc.sal; then ok "ni una excepción del núcleo ni un error de ACPICA (recorriendo el espacio de nombres y los _CRS)"
 else ko "hay excepciones o errores:"; grep "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $Y/pc.sal | head -4 | sed 's/^/        /'; fi
@@ -3277,6 +3447,340 @@ else ko "el núcleo se ha quejado:"; cat $Y/q35.sal $Y/sin.sal | grep "excepció
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Administrador de dispositivos)"
 fi   # el Administrador de dispositivos
+# ------------------------------------------- 20. SSH, WireGuard y Tailscale
+# (ssh; docs/PENTIUM.md §14 quinquies) Los programas en C de
+# nucleo32/hispac/ (hacer.sh): SSHD contra el cliente OpenSSH de aquí (QEMU
+# con hostfwd), SSH contra un sshd de OpenSSH propio de la prueba (puerto alto,
+# ForceCommand: no da una shell); y, con root, ip netns y wg, WireGuard contra
+# el del núcleo Linux en un espacio de nombres propio; con HEADSCALE= (el
+# binario), Tailscale contra Headscale y un tailscaled de pares, en otro. Sin
+# eso, esas dos se saltan (y se dice).
+if parte08 ssh; then
+echo "== Hispa-Pentium: SSH (SSH.BIN, SSHD.BIN), WireGuard (WG.BIN) y Tailscale (TAILSCAL.BIN) =="
+R=$P/ssh
+rm -rf $R; mkdir -p $R
+export MTOOLS_SKIP_CHECK=1
+if bash $AQUI/nucleo32/hispac/hacer.sh $R/bin > $R/hacer.txt 2>&1; then
+  ok "nucleo32/hispac/hacer.sh: SSH.BIN, SSHD.BIN, WG.BIN y TAILSCAL.BIN con Monocypher ($(stat -c %s $R/bin/SSH.BIN), $(stat -c %s $R/bin/SSHD.BIN), $(stat -c %s $R/bin/WG.BIN) y $(stat -c %s $R/bin/TAILSCAL.BIN) octetos)"
+else ko "nucleo32/hispac/hacer.sh no los hace: $(tail -n 1 $R/hacer.txt)"; fi
+ssh-keygen -q -t ed25519 -N '' -f $R/clave -C prueba
+PS=$((30000 + RANDOM % 10000)); PH=$((PS + 1))
+bash $AQUI/nucleo32/hispac/prueba_red.sh sshd $R/sshd $PS
+if $AQUI/nucleo32/disco.sh $R/d.img 16 red tls ssh > $R/disco.txt 2>&1 && mmd -i $R/d.img ::SSH && cp $R/clave.pub $R/AUT.TXT && mcopy -i $R/d.img $R/AUT.TXT ::SSH/AUTORIZA.TXT \
+   && mcopy -i $R/d.img $R/sshd/ID_ED.SSH ::SSH/ID_ED.SSH && [ -s $R/sshd/sshd.pid ]; then
+# 1. SSHD, con el ssh de aquí: una orden y una sesión con terminal
+cp $R/d.img $R/a.img
+( for _ in $(seq 120); do sleep 1; timeout 2 bash -c "</dev/tcp/127.0.0.1/$PH" 2> /dev/null && break; done
+  sleep 20
+  timeout 60 ssh -p $PH -o StrictHostKeyChecking=no -o UserKnownHostsFile=$R/conocidos -o UpdateHostKeys=no -o IdentitiesOnly=yes -o BatchMode=yes -i $R/clave prueba@127.0.0.1 \
+    "echo hola desde hispa" < /dev/null > $R/orden.txt 2>&1; echo "código $?" >> $R/orden.txt
+  printf 'echo dentro de la consola\rver\rsalir\r' > $R/teclas.txt
+  setsid timeout 60 ssh -tt -p $PH -o StrictHostKeyChecking=no -o UserKnownHostsFile=$R/conocidos -o UpdateHostKeys=no -o IdentitiesOnly=yes -o BatchMode=yes -i $R/clave \
+    prueba@127.0.0.1 < $R/teclas.txt > $R/tty.txt 2>&1
+  echo "código $?" >> $R/tty.txt ) &
+FUERA=$!
+ESCRIBE=1 DISCO=$R/a.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-netdev user,id=n0,hostfwd=tcp:127.0.0.1:$PH-:22 -device e1000,netdev=n0" \
+  $AQUI/nucleo32/probar.sh "" ":pausa 3" "sshd /encender" ":pausa 75" "sshd" ":pausa 2" > $R/a.sal 2>&1
+wait $FUERA
+tr -d '\r' < $R/a.sal > $R/a.txt
+S=$R/a.txt
+mira "SSHD: apagado hasta que se enciende; con /ENCENDER escucha en el puerto 22, con su llave del equipo (ssh-ed25519) hecha la primera vez" \
+  "^Servidor SSH encendido (puerto 22)" "sshd: llave del equipo nueva (ssh-ed25519)$" "red: tcp: escuchando en el puerto 22$" \
+  "sshd: Hispa-Pentium: el servidor SSH, en el puerto 22 (llave SHA256:"
+mira "SSHD con el cliente OpenSSH: curve25519-sha256, chacha20-poly1305 y kex-strict; entra con la llave de AUTORIZA.TXT" \
+  "sshd: la otra punta: SSH-2.0-OpenSSH" "sshd: kex-strict: sí (contra Terrapin)$" "sshd: cifrado: curve25519-sha256, ssh-ed25519, chacha20-poly1305@openssh.com$" \
+  "sshd: entra prueba con su llave$" "sshd: orden: echo hola desde hispa$" "^El servidor SSH de Hispa-Pentium: encendido (puerto 22)"
+S=$R/orden.txt
+mira "ssh equipo orden: la orden se hace en Hispa-Pentium (ORDENES /C) y vuelve lo que escribe, con el código 0" "^hola desde hispa$" "^código 0$"
+if grep -q "hola desde hispa.$(printf '\r')" $R/orden.txt; then ko "sin terminal, los finales de línea tienen que ir como en Unix (sin CR)"; else ok "sin terminal (una orden), los finales de línea van como en Unix"; fi
+tr -d '\r' < $R/tty.txt > $R/tty2.txt
+S=$R/tty2.txt
+mira "una sesión con terminal: la Consola de Hispa-Pentium (en UTF-8), las órdenes que se teclean al otro lado y SALIR" \
+  "^Hispa-Pentium: intérprete de órdenes" "^dentro de la consola$" "^Intérprete de órdenes del anillo 3 (ORDENES.BIN).$" "^Hasta luego.$" "^código 0$"
+# 2. SSH, con un sshd de OpenSSH: la huella, la llave propia, el terminal y una orden
+cp $R/d.img $R/b.img
+CAPTURAS=$R ESCRIBE=1 DISCO=$R/b.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ":pausa 3" \
+  "ssh -p $PS root@10.0.2.2" ":pausa 10" ":escribe s" ":pausa 6" ":texto b1" "hola mundo" ":pausa 2" ":texto b2" ":pausa 4" \
+  "ssh -p $PS root@10.0.2.2 una orden" ":pausa 10" ":texto b3" > $R/b.sal 2>&1
+tr -d '\r' < $R/b.sal > $R/b.txt
+S=$R/b.txt
+mira "SSH con OpenSSH: la primera vez enseña la huella y pregunta; entra con la llave propia (ID_ED.SSH)" \
+  "ssh: la otra punta: SSH-2.0-OpenSSH" "ssh: kex-strict: sí (contra Terrapin)$" "ssh: dentro, con la llave propia$" "ssh: sesión acabada (código 0)$" "ssh: sesión acabada (código 3)$"
+S=$R/b1.txt
+mira "el terminal de SSH (en la pantalla de texto): borrar, colores, mover el cursor y el UTF-8 (a la página 437)" \
+  "^|HOLA DESDE OPENSSH TERM=xterm" "^|          caja azul  ─ñ" "^|Escriba algo:"
+S=$R/b2.txt
+mira "lo que se teclea va al otro lado (y vuelve: «leido»)" "^|leido: \[hola mundo\]"
+S=$R/b3.txt
+mira "SSH con una orden: sin terminal, lo que sale, aquí mismo, y el código de salida de allí" "^|orden: una orden$" "^|(SSH.BIN ha acabado con el código 3)"
+S=$R/b.txt
+if grep -q "^\[10.0.2.2\]:$PS ssh-ed25519 " <(mtype -i $R/b.img ::SSH/CONOCIDO.TXT 2> /dev/null); then ok "la llave del servidor queda en \\HISPA\\SSH\\CONOCIDO.TXT (la segunda vez no se pregunta)"
+else ko "no está la llave del servidor en CONOCIDO.TXT"; fi
+# 3. WireGuard contra el del núcleo Linux (root, ip netns y wg)
+if [ "$(id -u)" = 0 ] && command -v wg > /dev/null && ip netns list > /dev/null 2>&1; then
+  cp $R/d.img $R/w.img
+  bash $AQUI/nucleo32/hispac/prueba_red.sh wg $R/wg $R/w.img
+  tr -d '\r' < $R/wg/q.sal > $R/w.txt
+  S=$R/w.txt
+  mira "WireGuard (WG /ENCENDER, el archivo de wg-quick): el apretón de manos con el WireGuard de Linux y la interfaz del túnel en RED.BIN" \
+    "red: túnel: la interfaz, con la IP 10.9.0.2 y 1 redes$" "wg: Hispa-Pentium: WireGuard en marcha (10.9.0.2, clave pública " \
+    "wg: 10.0.2.2: túnel hecho (claves nuevas)$" "^Respuesta desde 10.9.0.1: octetos=32 " "^  último apretón de manos: "
+  S=$R/wg/fuera.txt
+  mira "por el túnel, desde Linux: ping a Hispa-Pentium y SSH a su SSHD" "^64 bytes from 10.9.0.2" "latest handshake" "^hola por wireguard$" "^código 0$"
+else echo "  (WireGuard: hace falta root, ip netns y wg: se salta)"; fi
+# 4. Tailscale contra Headscale (HEADSCALE=...) y un tailscaled de pares
+if [ "$(id -u)" = 0 ] && [ -x "${HEADSCALE:-}" ] && command -v tailscaled > /dev/null && ip netns list > /dev/null 2>&1; then
+  cp $R/d.img $R/t.img
+  bash $AQUI/nucleo32/hispac/prueba_red.sh tailscale $R/ts $R/t.img $PS
+  tr -d '\r' < $R/ts/q.sal > $R/t.txt
+  S=$R/t.txt
+  mira "Tailscale: ts2021 con Headscale, la dirección de alta (que aprueba la prueba) y el registro" \
+    "tailscale: control: conectado con 10.0.2.2 (ts2021)$" "tailscale: dar de alta este equipo: abra https://10.0.2.2:8443/register/" \
+    "^  https://10.0.2.2:8443/register/" "tailscale: registrado en la red de prueba$"
+  mira "el mapa de la red: la IP 100.x, el relevo DERP de casa, las reglas, la interfaz del túnel y los nombres (MagicDNS)" \
+    "tailscale: relevo de casa: derp-999 (Relevo de prueba)$" "tailscale: reglas de la red: [1-9]" "red: túnel: la interfaz, con la IP 100.64.0." \
+    "tailscale: en la red: hispa-pentium.prueba.hispa., 100.64.0." "tailscale: derp-999: conectado con 10.0.2.2$" \
+    "^Este equipo: 100.64.0.[0-9]*  hispa-pentium.prueba.hispa." "^  100.64.0.[0-9]* *pares-vps *en línea"
+  mira "con el otro equipo, por DERP: el apretón de WireGuard, ping por el nombre y SSH a su sshd" \
+    "tailscale: pares-vps: túnel hecho" "^Haciendo ping a pares-vps \[100.64.0." "^Respuesta desde 100.64.0." "ssh: conectando con pares-vps (100.64.0." "ssh: dentro, con la llave propia$"
+  S=$R/ts/fuera.txt
+  mira "y desde el otro equipo (tailscaled), SSH al SSHD de Hispa-Pentium por la red de Tailscale" "hispa-pentium" "^hola por tailscale$" "^código 0$"
+else echo "  (Tailscale: hace falta root, ip netns, tailscaled y HEADSCALE=el binario de Headscale: se salta)"; fi
+if ! cat $R/*.txt | grep -q "excepción\|\*\*\*"; then ok "en todos esos arranques, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; cat $R/*.txt | grep "excepción\|\*\*\*" | head -3 | sed 's/^/        /'; fi
+else ko "no se ha podido hacer el disco de las pruebas de SSH: $(tail -n 1 $R/disco.txt)"; fi
+[ -s $R/sshd/sshd.pid ] && kill "$(cat $R/sshd/sshd.pid)" 2> /dev/null
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin SSH, WireGuard ni Tailscale)"
+fi   # ssh
+
+# --------------------------------- 21. (CD) los lectores de CD y DVD y las imágenes
+if parte08 lectores; then
+echo "== Hispa-Pentium: los CD y DVD (IDE, AHCI y USB; ISO 9660 con Joliet), meter y sacar el disco, y las imágenes de disco =="
+L=$P/lectores
+mkdir -p $L $G
+export MTOOLS_SKIP_CHECK=1
+if command -v genisoimage > /dev/null; then HAZISO="genisoimage -quiet"; else HAZISO="xorriso -as mkisofs -quiet"; fi
+[ -f $P/d16.img ] || $AQUI/nucleo32/disco.sh $P/d16.img 16 > $P/disco16.txt 2>&1
+[ -f $P/d32.img ] || $AQUI/nucleo32/disco.sh $P/d32.img 32 > $P/disco32.txt 2>&1
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $L/semilla.asm > /dev/null 2>&1 && nasm -f bin $L/semilla.asm -o $L/SEMILLA.BIN
+# la ISO de prueba: nombres largos (Joliet, y Rock Ridge), una carpeta dentro de otra y un archivo de 300 K
+rm -rf $L/iso $L/iso2; mkdir -p "$L/iso/Carpeta con nombre largo/sub" $L/iso2
+printf 'Hola desde el CD de prueba\r\n' > $L/iso/LEEME.TXT
+printf 'Texto con nombre largo, en Joliet.\r\n' > "$L/iso/Carpeta con nombre largo/documento-de-prueba-largo.txt"
+printf 'dentro\r\n' > "$L/iso/Carpeta con nombre largo/sub/hondo.txt"
+python3 -I -c "import random; random.seed(18); open('$L/iso/grande.bin', 'wb').write(bytes(random.randrange(256) for _ in range(300000)))"
+$HAZISO -J -r -V PRUEBA_CD -o $L/joliet.iso $L/iso
+$HAZISO -J -V OTRO -o $L/otro.iso $L/iso/LEEME.TXT
+cp $L/joliet.iso $L/iso2/dentro.iso; $HAZISO -J -V CONTIENE -o $L/contiene.iso $L/iso2
+LARGO="$L/iso/Carpeta con nombre largo/documento-de-prueba-largo.txt"
+# ¿lo copiado al disco es igual que lo del CD? (la imagen y los archivos de ella)
+igual_cd() { local img=$1 f; shift; for f in "$@"; do rm -f $L/sacado; mcopy -n -i $img ::$f $L/sacado 2> /dev/null || return 1
+  case $f in DOC*) cmp -s $L/sacado "$LARGO" ;; *) cmp -s $L/sacado $L/iso/grande.bin ;; esac || return 1; done; }
+if [ ! -f $L/joliet.iso ] || [ ! -f $L/SEMILLA.BIN ]; then ko "no se puede hacer la ISO de prueba (genisoimage o xorriso) o el núcleo"; else
+# 1. como VirtualBox: un «pc» con el disco en SATA (AHCI) y el lector en el IDE secundario maestro
+cp $P/d32.img $L/c.img
+ESCRIBE=1 SATA=$L/c.img MAQUINA=pc ARRANQUE=ordenes MODULOS= QEMU_MAS="-drive id=cd,file=$L/joliet.iso,media=cdrom,if=none -device ide-cd,drive=cd,id=lector,bus=ide.1,unit=0" \
+  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN "dir d:\\" "type d:\\leeme.txt" "dir d:\\carpet~1" "type d:\\carpet~1\\sub\\hondo.txt" "copy d:\\grande.bin c:\\grande.bin" \
+  "copy d:\\carpet~1\\docume~1.txt c:\\doc.txt" ":monitor eject -f cd" ":pausa 3" "dir d:\\" ":monitor change cd $L/otro.iso" ":pausa 3" "dir d:\\" \
+  ":monitor change cd $L/joliet.iso" ":pausa 3" "type d:\\leeme.txt" "expulsar d:" "montar" salir disco apagar > $L/vbox.sal 2>&1
+S=$L/vbox.sal
+mira "como VirtualBox (el disco en SATA, el lector en el IDE secundario maestro): ATAPI por PIO, el lector es D: y su ISO 9660 se monta" \
+  "^disco 0: QEMU HARDDISK, 40 MB, FAT32 (SATA)\.$" "^disco 1: QEMU DVD-ROM, lector de CD o DVD (IDE)\.$" "cd: D: el lector QEMU DVD-ROM (IDE)$" \
+  "cd: D: CD de datos: «PRUEBA_CD», ISO 9660 Joliet, 1 MB\.$" "^unidades: C: (disco 0, SATA, FAT32) D: (disco 1, CD, ISO 9660); la del sistema, C:"
+mira "DIR y TYPE en el CD: los nombres largos de Joliet (y el corto que les toca, CARPET~1), carpetas dentro de carpetas" \
+  "^ Directorio de D:.$" "^CARPET~1 *<DIR> .*Carpeta con nombre largo$" "^GRANDE   BIN      300000 " "^Hola desde el CD de prueba$" \
+  "^DOCUME~1 TXT          36 .*documento-de-prueba-largo\.txt$" "^dentro$"
+if igual_cd $L/c.img GRANDE.BIN DOC.TXT; then ok "lo copiado del CD al disco es igual que lo de la ISO, octeto a octeto (300 K y el del nombre largo)"
+else ko "lo copiado del CD (IDE) no es igual que lo de la ISO"; fi
+mira "sacar el disco, meter otro y volver al primero (el monitor de QEMU: eject y change): la unidad se va y vuelve sola, con aviso" \
+  "cd: D: sin disco\.$" "cd: aviso: CD retirado: D:$" "^No puedo abrir d:.: no hay disco" "cd: D: CD de datos: «OTRO», ISO 9660 Joliet" "cd: aviso: CD insertado: D:$"
+mira "EXPULSAR D: abre la bandeja; MONTAR dice lo que hay en el lector" "cd: D: expulsado\.$" "^Ya puede sacar el disco de D:\.$" "^  D:  lector de CD o DVD QEMU DVD-ROM: sin disco$"
+# 2. por AHCI: el q35, con el lector en un puerto SATA (la firma EB140101)
+cp $P/d16.img $L/q.img
+ESCRIBE=1 DISCO=$L/q.img MAQUINA=q35 ARRANQUE=ordenes MODULOS= QEMU_MAS="-drive id=cd,file=$L/joliet.iso,media=cdrom,if=none -device ide-cd,drive=cd,id=lector,bus=ide.2" \
+  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN "copy d:\\grande.bin c:\\grande.bin" "copy d:\\carpet~1\\docume~1.txt c:\\doc.txt" ":monitor change cd $L/otro.iso" ":pausa 3" "dir d:\\" salir apagar > $L/ahci.sal 2>&1
+S=$L/ahci.sal
+mira "por AHCI (el q35): el puerto con la firma EB140101 es un lector, ATAPI por DMA (PACKET con el bit A y el paquete en ACMD)" \
+  "^disco 1: QEMU DVD-ROM, lector de CD o DVD (SATA)\.$" "cd: D: CD de datos: «PRUEBA_CD», ISO 9660 Joliet" "^ *1 archivo(s) copiado(s)\.$" "cd: D: CD de datos: «OTRO»"
+if igual_cd $L/q.img GRANDE.BIN DOC.TXT; then ok "y lo copiado del CD por AHCI es igual que lo de la ISO"; else ko "lo copiado del CD (AHCI) no es igual que lo de la ISO"; fi
+# 3. por USB: un lector de CD (usb-storage con la ISO: SCSI, clase 5) al arrancar, y otro enchufado en marcha
+cp $P/d16.img $L/u.img
+ESCRIBE=1 DISCO=$L/u.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-device qemu-xhci,id=u -drive id=ucd,file=$L/joliet.iso,media=cdrom,if=none -device usb-storage,bus=u.0,drive=ucd,id=ulector -drive id=ucd2,file=$L/otro.iso,media=cdrom,if=none" \
+  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN "copy e:\\grande.bin c:\\grande.bin" "copy e:\\carpet~1\\docume~1.txt c:\\doc.txt" ":monitor eject -f ucd" ":pausa 3" \
+  ":monitor device_add usb-storage,bus=u.0,drive=ucd2,id=ulector2" ":pausa 4" "type f:\\leeme.txt" ":monitor device_del ulector" ":pausa 3" "montar" salir apagar > $L/usb.sal 2>&1
+S=$L/usb.sal
+mira "por USB: un lector de CD (almacenamiento masivo, SCSI de la clase 5) es una unidad de CD más (E:; D: es el lector vacío de QEMU)" \
+  "^disco 2: QEMU    QEMU CD-ROM, lector de CD o DVD (USB)\.$" "cd: E: CD de datos: «PRUEBA_CD», ISO 9660 Joliet" "cd: aviso: CD retirado: E:$"
+mira "y enchufado en marcha, se lee al momento; desenchufado, se va (y su letra)" "cd: aviso: Lector de CD conectado: F:$" "^Hola desde el CD de prueba$" \
+  "cd: aviso: Lector de CD desconectado: E:$" "^  F:  lector de CD o DVD QEMU    QEMU CD-ROM: «OTRO»$"
+if igual_cd $L/u.img GRANDE.BIN DOC.TXT; then ok "y lo copiado del CD por USB es igual que lo de la ISO"; else ko "lo copiado del CD (USB) no es igual que lo de la ISO"; fi
+# 4. las imágenes de disco: la misma ISO, un disquete (.IMG, FAT12) y la ISO en crudo (.CUE y .BIN, MODE1/2352), desde C:
+cp $P/d16.img $L/i.img
+mmd -i $L/i.img ::DISCOS; mcopy -i $L/i.img $L/joliet.iso ::DISCOS/PRUEBA.ISO
+rm -f $L/flop.img; mformat -C -f 1440 -i $L/flop.img ::; printf 'en el disquete\r\n' > $L/disq.txt; mcopy -i $L/flop.img $L/disq.txt ::DISQUETE.TXT; mcopy -i $L/i.img $L/flop.img ::DISCOS/FLOP.IMG
+python3 -I - $L <<'PY'
+import sys
+L = sys.argv[1]
+d = open(L + '/joliet.iso', 'rb').read()
+o = bytearray()
+for i in range(len(d) // 2048):
+    o += b'\x00' + b'\xff' * 10 + b'\x00' + bytes(3) + b'\x01' + d[i * 2048:(i + 1) * 2048] + bytes(288)
+open(L + '/crudo.bin', 'wb').write(o)
+open(L + '/crudo.cue', 'w').write('FILE "CRUDO.BIN" BINARY\r\n  TRACK 01 MODE1/2352\r\n    INDEX 01 00:00:00\r\n')
+PY
+mcopy -i $L/i.img $L/crudo.bin ::DISCOS/CRUDO.BIN; mcopy -i $L/i.img $L/crudo.cue ::DISCOS/CRUDO.CUE
+ESCRIBE=1 DISCO=$L/i.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-drive id=cd,file=$L/joliet.iso,media=cdrom,if=none -device ide-cd,drive=cd,id=lector,bus=ide.1,unit=0" \
+  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN "montar c:\\discos\\prueba.iso" "montar c:\\discos\\flop.img" "montar c:\\discos\\crudo.cue" "montar" "type f:\\disquete.txt" \
+  "copy e:\\grande.bin c:\\grande.bin" "copy g:\\carpet~1\\docume~1.txt c:\\doc.txt" "copy g:\\grande.bin c:\\crudo.bin" "type e:\\carpet~1\\sub\\hondo.txt" \
+  "desmontar e:" "desmontar f:" "montar" "montar c:\\leeme.txt" "desmontar c:" salir apagar > $L/imagen.sal 2>&1
+S=$L/imagen.sal
+mira "MONTAR una imagen de disco: la .ISO (la misma del lector), un disquete .IMG (FAT12) y una .CUE con su .BIN en crudo, cada una con la primera letra libre" \
+  "^c:.discos.prueba\.iso está montada como la unidad E:\.$" "^c:.discos.flop\.img está montada como la unidad F:\.$" "^c:.discos.crudo\.cue está montada como la unidad G:\.$" \
+  "^  E:  imagen C:.discos.prueba\.iso  «PRUEBA_CD»$" "^  F:  imagen C:.discos.flop\.img$" "^en el disquete$" "^dentro$"
+if igual_cd $L/i.img GRANDE.BIN DOC.TXT CRUDO.BIN; then ok "lo leído de las imágenes (la .ISO y la .BIN en crudo) es igual que lo de la ISO del lector"; else ko "lo leído de una imagen montada no es igual que lo de la ISO"; fi
+mira "DESMONTAR la quita; lo que no es una imagen, o no es una imagen montada, se dice" "^La unidad E: está desmontada\.$" "^La unidad F: está desmontada\.$" \
+  "^No puedo montar c:.leeme\.txt: no es una imagen de disco que se pueda leer" "^C: no es un CD ni una imagen montada\.$"
+# 5. una imagen dentro del CD y otra en una memoria USB que se desenchufa: se desmontan solas
+cp $P/d16.img $L/m.img; mcopy -i $L/m.img $L/joliet.iso ::PRUEBA.ISO
+DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-drive id=cd,file=$L/contiene.iso,media=cdrom,if=none -device ide-cd,drive=cd,id=lector,bus=ide.1,unit=0 -device qemu-xhci,id=u -drive id=mu,file=$L/m.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu,id=memo" \
+  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN "montar d:\\dentro.iso" "montar x:\\prueba.iso" "type e:\\leeme.txt" "type f:\\leeme.txt" ":monitor device_del memo" ":pausa 3" "montar" \
+  ":monitor eject -f cd" ":pausa 3" "montar" salir apagar > $L/base.sal 2>&1
+S=$L/base.sal
+mira "una imagen dentro del CD y otra en la memoria USB: si se va la memoria, o se saca el CD, su imagen se desmonta sola (sin colgarse)" \
+  "^d:.dentro\.iso está montada como la unidad E:\.$" "^x:.prueba\.iso está montada como la unidad F:\.$" "cd: aviso: Imagen desmontada: F: (su disco se ha ido)$" \
+  "^  E:  imagen D:.dentro\.iso  «PRUEBA_CD»$" "cd: aviso: Imagen desmontada: E: (su disco se ha ido)$" "^  D:  lector de CD o DVD QEMU DVD-ROM: sin disco$"
+if ! cat $L/*.sal | grep -q "excepción\|\*\*\*"; then ok "en todo eso, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; cat $L/*.sal | grep "excepción\|\*\*\*" | head -3 | sed 's/^/        /'; fi
+# 6. el escritorio: el explorador (Mi equipo) con el CD (D:), y una .ISO
+# montada al abrirla (el CD virtual, E:), que «Expulsar» desmonta
+cp $P/d16.img $L/e.img; mmd -i $L/e.img ::DISCOS; mcopy -i $L/e.img $L/joliet.iso ::DISCOS/PRUEBA.ISO
+CAPTURAS=$G ESCRIBE=1 DISCO=$L/e.img ARRANQUE=escritorio MODULOS= QEMU_MAS="-drive id=cd,file=$L/joliet.iso,media=cdrom,if=none -device ide-cd,drive=cd,id=lector,bus=ide.1,unit=0" \
+  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN ":pausa 3" ":doble 62 30" ":pausa 3" ":captura cd18a" ":tecla f4" ":escribe C:\\DISCOS" ":tecla ret" ":pausa 2" \
+  ":tecla ret" ":pausa 3" ":raton 600 440" ":captura cd18b" ":tecla backspace" ":pausa 2" ":raton 600 440" ":captura cd18e" ":clicd 330 222" ":pausa 1" ":captura cd18c" ":clic 370 257" ":pausa 2" \
+  ":raton 600 440" ":captura cd18d" > $L/escritorio.sal 2>&1
+S=$L/escritorio.sal
+miracap "Mi equipo (el explorador) enseña el CD con su nombre y su letra, lo que tiene y que es de solo lectura" cd18a negrita 265 133 275 143 "HISPA (C:)" \
+  negrita 515 133 525 143 "PRUEBA_CD (D:)" texto 515 151 525 161 "670 K, ISO 9660" texto 515 167 525 177 "(de solo lectura)"
+miracap "abrir una .ISO la monta (E:) y entra en ella; el aviso de la bandeja es de los CD y DVD" cd18b texto 100 98 130 112 "E:\\" texto 200 130 700 400 "grande.bin" \
+  texto 10 474 700 490 "PRUEBA.ISO, montada como E:" negrita 570 505 640 520 "CD y DVD"
+miracap "el CD virtual sale en Mi equipo («CD virtual», con lo que tiene)" cd18e negrita 265 195 275 205 "PRUEBA_CD (E:)" texto 265 213 275 223 "CD virtual: 670 K"
+miracap "y su menú (el botón secundario): «Expulsar»" cd18c texto 335 242 355 267 "Expulsar"
+miracap "y «Expulsar» la quita de Mi equipo" cd18d notexto 216 190 460 212 "(E:)" texto 10 474 700 490 "desmontada"
+mira "y «Expulsar» la desmonta" "cd: E: la imagen C:.DISCOS.PRUEBA\.ISO (sectores de 2048)$" "cd: E: imagen desmontada\.$" "escritorio: globo: Imagen desmontada: E:"
+fi   # la ISO de prueba
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin los CD y DVD)"
+fi   # los lectores
+
+# ------------------------------- 22. [WIN32] Los programas de Windows y DirectX
+# WIN32.BIN (nucleo32/win32/): el cargador de PE y KERNEL32, USER32, GDI32...
+# en C, con las DLL de Hispa-486 (MSVCRT, COMCTL32, DDRAW, DSOUND, DINPUT,
+# WINMM); el disco, de nucleo32/win32/disco.sh (FAT32, con lo de las pruebas)
+if parte08 win32; then
+echo "== Hispa-Pentium: los programas de Windows de 32 bits y DirectX (WIN32.BIN: consola, ventanas, Naves, FASMW, red) =="
+V=$P/w32
+mkdir -p $V $G
+export MTOOLS_SKIP_CHECK=1
+if bash $AQUI/nucleo32/win32/disco.sh $V/d.img > $V/disco.txt 2>&1; then
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $V/semilla.asm > /dev/null 2>&1 && nasm -f bin $V/semilla.asm -o $V/SEMILLA.BIN
+HAY_TP=0; mdir -i $V/d.img ::NASM > /dev/null 2>&1 && HAY_TP=1
+# 1. los de consola, en el intérprete de órdenes (modo texto)
+O=("cd \\PRUEBAS" "PEHOLA uno dos" ":pausa 2" "HOLAC tres" ":pausa 3" "K32PRUE" ":pausa 6" "USADLL" ":pausa 2")
+[ $HAY_TP = 1 ] && O+=("cd \\NASM" "nasm -v" ":pausa 4" "nasm -f win32 hola.asm -o hola.obj" ":pausa 8" "dir hola.obj" ":pausa 1" \
+  "cd \\TCC" "tcc hola.c -o hola.exe" ":pausa 12" "hola" ":pausa 3" "cd \\FASM\\DDRAW" "\\FASM\\FASM DDRAW.ASM" ":pausa 12" "dir ddraw.exe" ":pausa 1")
+ESCRIBE=1 DISCO=$V/d.img ARRANQUE=ordenes MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN "${O[@]}" > $V/consola.sal 2>&1
+tr -d '\r' < $V/consola.sal > $V/consola.txt
+S=$V/consola.txt
+mira "un .EXE se lanza por su nombre: el núcleo ve «MZ» y lo corre WIN32.BIN (PEHOLA: KERNEL32 a mano, su línea de órdenes y su código de salida)" \
+  "^Hola desde Win32$" "^Linea: C:.PRUEBAS.PEHOLA.EXE uno dos$" "(PEHOLA.EXE ha acabado con el código 42)"
+mira "HOLAC, en C (gcc y tools/elf2pe.py), con MSVCRT.DLL de Hispa-486" "^Hola desde C (gcc) en Hispa-486$" "^Primo 100: 541$" "^Suma: 704982704$" "(HOLAC.EXE ha acabado con el código 7)"
+mira "K32PRUE: KERNEL32 de consola da lo que da Windows 98 (versión, archivos, búsquedas, carpetas, la hora, el montón, el entorno, TLS, los módulos)" \
+  "^version: C0000A04$" "^versionex: 4.10 plataforma 1 build 1998$" "^escritos: 22$" "^leer3: uno$" "^crear_nuevo_existe: si error 80$" "^fin_busqueda: 18$" \
+  "^ft_1970: 019DB1DED53E8000$" "^ida_y_vuelta: 2026-11-17 12:34:56.789 semana 2$" "^realloc: conservado 5000 0$" "^20000_vueltas: si$" "^tls: si 1234$" \
+  "^getprocaddress: si 6$" "^modulo_propio: 00400000$" "^FIN K32PRUE$"
+mira "una DLL propia (DLLPRUE.DLL, con su DllMain y sus datos exportados)" "^Doble(20) = 41$" "^contador = 42$"
+if [ $HAY_TP = 1 ]; then
+  mira "NASM 2.16 para Win32 (MinGW) dice su versión y ensambla un .ASM a un .OBJ de Win32" "^NASM version 2.16.03" "^hola.obj es un archivo de 196 octetos\.$"
+  mira "TCC 0.9.27, el compilador de C de Windows, compila un «hola» (con su libtcc.dll) y el .EXE que hace corre" "^Hola desde TCC en Hispa-Pentium$" "(HOLA.EXE ha acabado con el código 7)"
+  mira "FASM (el de consola) ensambla el ejemplo DDRAW de DirectDraw" "^flat assembler  version 1.73.32" "passes, .* seconds, 4608 bytes\.$" "^ddraw.exe es un archivo de 4608 octetos\.$"
+else
+  echo "  (sin NASM, TCC ni FASM: tests/thirdparty/fetch_win32.sh)"
+fi
+if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+# 2. los de ventanas, desde la Consola del escritorio: cada uno, su ventana
+CAPTURAS=$G DISCO=$V/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 186" ":pausa 4" \
+  ":escribe \\HISPA32\\HOLA32" ":tecla ret" ":pausa 5" ":captura w1" ":tecla alt-f4" ":pausa 2" \
+  ":escribe \\HISPA32\\AVISO32" ":tecla ret" ":pausa 4" ":captura w2" ":tecla ret" ":pausa 2" ":captura w3" ":tecla ret" ":pausa 2" \
+  ":escribe \\HISPA32\\CALC32" ":tecla ret" ":pausa 5" ":clic 99 152" ":clic 156 152" ":clic 270 252" ":clic 156 186" ":clic 213 252" ":pausa 1" ":captura w4" \
+  ":clic 175 88" ":pausa 1" ":captura w5" ":tecla esc" ":pausa 1" ":tecla alt-f4" ":pausa 2" \
+  ":escribe \\HISPA32\\MENU32" ":tecla ret" ":pausa 5" ":captura w6" ":tecla alt-f4" ":pausa 2" \
+  ":escribe \\HISPA32\\CTL32" ":tecla ret" ":pausa 5" ":captura w7" ":tecla alt-f4" ":pausa 2" > $V/ventanas.sal 2>&1
+S=$V/ventanas.sal
+miracap "HOLA32: un programa de Windows de ventanas es una ventana de Hispa-Pentium (su clase, su WM_PAINT, el texto y los dibujos de GDI, un temporizador)" w1 \
+  negrita 100 60 140 90 "Hola desde Win32" texto 90 90 130 115 "¡Hola, mundo de Win32!" texto 90 150 130 175 "Temporizador: bien" texto 90 190 130 215 "Todo bien."
+miracap "AVISO32: MessageBoxA es un cuadro de Hispa-Pentium, con sus botones en español" w2 \
+  negrita 270 210 320 240 "Prueba de Win32" texto 280 250 320 275 "¿Le gusta Hispa-486?" texto 280 300 360 340 "Sí" texto 400 300 470 340 "No"
+miracap "Intro: «Sí» (el botón de antes) y el cuadro siguiente con la respuesta" w3 texto 280 250 320 280 "Ha dicho que sí." texto 280 280 320 310 "Todo bien."
+miracap "CALC32: los botones con el ratón (78 + 5 = 83) y la caja (EDIT)" w4 negrita 60 50 100 75 "Calculadora" texto 60 100 120 130 "83"
+miracap "su menú (de los recursos), con el menú emergente del núcleo" w5 texto 60 80 200 100 "Archivo" texto 100 100 220 140 "Raíz cuadrada"
+miracap "MENU32: los menús y los recursos (textos, iconos, menús de los recursos)" w6 negrita 40 40 100 70 "Menús y recursos" texto 40 60 120 90 "Archivo"
+miracap "CTL32: los controles de serie (botones, casillas, opciones, una lista con sus cuatro colores, una lista desplegable, una caja de varias líneas)" w7 \
+  negrita 40 40 100 70 "Controles de Win32" texto 40 70 120 100 "Nombre:" texto 260 70 340 100 "Saludar" texto 40 130 100 160 "Rojo" texto 40 160 100 190 "Azul" texto 40 170 100 200 "Amarillo"
+if ! grep -q "excepción\|\*\*\*" $S; then ok "con todos esos, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+# 3. Naves (DirectDraw a pantalla completa, DirectInput) desde Mi equipo: se
+# juega; y el ejemplo DDRAW de FASM; y FASMW
+# (en el explorador: la dirección, C:\\HISPA32, y la N lleva a NAVES.EXE)
+CAPTURAS=$G DISCO=$V/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 40" ":pausa 3" ":tecla f4" ":escribe C:\\HISPA32" ":tecla ret" ":pausa 2" \
+  ":raton 600 440" ":captura n0" ":tecla n" ":tecla ret" ":pausa 9" ":captura n1" ":tecla spc" ":pausa 3" ":captura n2" \
+  ":monitor sendkey left 1000" ":pausa 1" ":captura n3" ":monitor sendkey ctrl 200" ":pausa 0.3" ":captura n4" ":tecla esc" ":pausa 3" ":captura n5" > $V/naves.sal 2>&1
+S=$V/naves.sal
+miracap "Mi equipo ve los .EXE como programas y los abre (los corre WIN32.BIN)" n0 texto 100 98 220 112 "C:\\HISPA32" texto 210 130 790 470 "NAVES.EXE"
+miracap "Naves: DirectDraw a pantalla completa (su modo, 320 x 240 a 8 bits, al doble y en el centro, sin la barra de tareas)" n1 \
+  rgb 10 10 000000 rgb 790 590 000000 nrgb 40 585 37A53A 60
+miracap "Espacio (DirectInput): empieza la partida, con las naves enemigas" n2 rgb 10 10 000000 distinto 80 60 640 200 $G/n1.ppm
+miracap "la nave se mueve con las flechas (mantenidas) y dispara con Control" n3 distinto 80 380 640 100 $G/n2.ppm
+miracap "Esc acaba el juego y vuelve el escritorio" n5 negrita 30 570 70 590 Inicio
+if ! grep -q "excepción\|\*\*\*" $S; then ok "Naves: ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+if [ $HAY_TP = 1 ]; then
+  CAPTURAS=$G DISCO=$V/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 186" ":pausa 4" \
+    ":escribe cd \\FASM\\DDRAW" ":tecla ret" ":escribe \\FASM\\FASM DDRAW.ASM" ":tecla ret" ":pausa 12" ":escribe DDRAW" ":tecla ret" ":pausa 10" ":captura d1" ":tecla esc" ":pausa 3" \
+    ":escribe cd \\FASM" ":tecla ret" ":escribe FASMW" ":tecla ret" ":pausa 12" ":captura f1" ":tecla ctrl-o" ":pausa 3" ":captura f2" ":escribe hello.asm" ":tecla ret" ":pausa 4" \
+    ":captura f3" ":tecla ctrl-f9" ":pausa 10" ":captura f4" ":tecla ret" ":pausa 2" ":tecla alt-f4" ":pausa 3" ":escribe hello" ":tecla ret" ":pausa 4" ":captura f5" > $V/fasm.sal 2>&1
+  S=$V/fasm.sal
+  miracap "el ejemplo DDRAW de FASM (ensamblado en Hispa-Pentium): DirectDraw a 640 x 480 con su paleta, en el centro" d1 rgb 10 10 000000 rgb 790 10 000000 nrgb 400 500 000000
+  miracap "FASMW, el flat assembler de Windows: su menú (MENUEX), su editor propio, las pestañas y la barra de estado (COMCTL32)" f1 \
+    negrita 100 60 200 90 "flat assembler 1.73.32" texto 100 90 140 110 "File" texto 140 90 200 110 "Edit" texto 280 90 400 110 "Options" texto 100 330 200 360 "Untitled"
+  miracap "Ctrl+O (su acelerador): el cuadro de abrir de COMDLG32, con la carpeta y sus archivos" f2 negrita 150 90 260 125 "Abrir" texto 150 125 400 160 "C:\\FASM" texto 150 150 300 190 "HELLO.ASM"
+  miracap "abre HELLO.ASM (con sus colores) y lo ensambla en otro hilo (Ctrl+F9): «4 passes»" f4 texto 90 320 220 370 "hello.asm" texto 150 100 600 260 "4 passes"
+  miracap "y el HELLO.EXE que ha hecho FASMW corre: su MessageBox" f5 texto 250 240 400 290 "May I introduce myself?"
+  if ! grep -q "excepción\|\*\*\*" $S; then ok "DDRAW y FASMW: ni una excepción ni una queja del núcleo"
+  else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+fi
+# 4. la red de los programas de Windows: WSOCK32 (REDPRUE) contra el servidor de aquí
+mkdir -p $V/srv
+python3 -I $AQUI/nucleo32/servidor_prueba.py $V/srv > $V/srv.txt 2>&1 &
+SPID=$!
+for _ in $(seq 50); do [ -s $V/srv/puerto ] && break; sleep 0.1; done
+PU=$(cat $V/srv/puerto 2> /dev/null)
+DISCO=$V/d.img ARRANQUE=ordenes MODULOS= MEMORIA=64 QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN "cd \\PRUEBAS" ":pausa 3" \
+  "REDPRUE 10.0.2.2 $PU /grande.bin" ":pausa 20" "REDPRUE 10.0.2.2 $PU /trozos.bin P" ":pausa 20" > $V/red.sal 2>&1
+kill $SPID 2> /dev/null
+tr -d '\r' < $V/red.sal > $V/red.txt
+S=$V/red.txt
+SUMA=$(python3 -c "import sys; d=open(sys.argv[1],'rb').read(); print(len(d), sum(d))" $V/srv/grande.bin 2> /dev/null)
+mira "WSOCK32 sobre el servicio de red: la IP (HispaRedConfig), el DNS, una descarga de 400 KB por TCP con su suma (la del archivo: $SUMA)" \
+  "^IP 10.0.2.15 puerta 10.0.2.2 MAC 52:54:00:12:34:56$" "^Respuesta: HTTP/1.1 200 OK$" "^Cuerpo: ${SUMA% *} octetos, suma ${SUMA#* }$"
+mira "y sin bloqueo: un puerto cerrado (WSAECONNREFUSED), connect y select, y otra descarga" "^Puerto cerrado: -1, error 10061$" "^select: 1 (escribir 1, fallo 0)$" "^Cuerpo: 150508 octetos"
+else
+  ko "nucleo32/win32/disco.sh no puede hacer el disco: $(tail -n 2 $V/disco.txt)"
+fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin los programas de Windows)"
+fi   # [WIN32] los programas de Windows
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ---------------------------------------------- 18. el Navegador (NAVEGA.BIN)
@@ -3355,13 +3859,30 @@ if [ -n "$HS" ] && $AQUI/nucleo32/disco.sh $Q/d.img 32 red tls navegador > $Q/di
   if saca $Q/e.img NAVEGA/SURFGAL.TXT $Q/gal.txt && grep -q "recuerda" $Q/gal.txt && ! grep -q "sesion" $Q/gal.txt && saca $Q/e.img NAVEGA/NAVEGA2.ALM $Q/alm.txt; then
     ok "las galletas que dicen hasta cuándo valen se guardan al cerrar (SURFGAL.TXT; las de sesión, no), y lo de localStorage (NAVEGA2.ALM)"
   else ko "no se guardan las galletas o localStorage"; fi
+  # position: fixed y sticky (navega 0.2: la barra lateral de ClicGest se
+  # cortaba al desplazar): la rueda, y la cabecera fija, la barra lateral fija
+  # (entera, hasta abajo) y el bloque sticky siguen en su sitio; y el enlace de
+  # abajo de la barra lateral, ya desplazada, se puede pulsar
+  printf 'Inicio=http://10.0.2.2:%s/fijo.html\r\n' $HP > $Q/NAVEGA.INI
+  cp $Q/d.img $Q/f.img
+  mcopy -o -i $Q/f.img $Q/NAVEGA.INI ::NAVEGA/
+  CAPTURAS=$G DISCO=$Q/f.img ARRANQUE=escritorio MODULOS= MEMORIA=128 QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" \
+    ":pausa 3" ":doble 62 260" ":pausa 12" ":captura nvf0" ":raton 400 400" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" \
+    ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 2" ":captura nvf1" \
+    ":clic 45 500" ":pausa 3" > $Q/f.sal 2>&1
+  miracap "position: fixed y sticky, sin desplazar: la cabecera fija (roja), la barra lateral fija (azul, de height: 100vh: hasta abajo) y el sticky (verde) en su sitio" nvf0 \
+    rgb 300 128 e03030 rgb 60 130 305080 rgb 60 524 305080 rgb 300 360 20a060
+  miracap "y desplazada 300 puntos con la rueda: la cabecera y la barra lateral, donde estaban y enteras; el sticky, pegado bajo la cabecera" nvf1 \
+    rgb 300 128 e03030 rgb 60 130 305080 rgb 60 524 305080 rgb 300 163 20a060 nrgb 300 360 20a060
+  S=$Q/srv/pedidos.txt
+  mira "y el enlace de abajo de la barra lateral fija, con la página desplazada, se pulsa (donde se ve)" "^GET /eco?lateral |"
   # el x87: dos programas con coma flotante a la vez
   DISCO=$Q/d.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "x87" ":pausa 6" > $Q/x.sal 2>&1
   tr -d '\r' < $Q/x.sal > $Q/x.txt
   S=$Q/x.txt
   mira "el x87 de cada programa: X87.BIN y sus dos copias, a la vez, cada una con su coma flotante (el núcleo la guarda y la repone)" \
     "^x87: bien (dos programas a la vez, cada uno con su x87)$"
-else ko "no se puede poner en marcha el sitio de prueba o hacer el disco: $(tail -1 $Q/srv.txt) $(tail -3 $Q/disco.txt)"; fi
+else ko "no se puede poner en marcha el sitio de prueba o hacer el disco: $(tail -n 1 $Q/srv.txt) $(tail -n 3 $Q/disco.txt)"; fi
 kill $NPID 2> /dev/null; wait $NPID 2> /dev/null
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Navegador)"

@@ -1,0 +1,12 @@
+Monocypher 4.0.2 (Loup Vaillant, Michael Savage, Fabio Scotoni), con dos
+licencias a elegir: BSD de 2 cláusulas o CC0 (ver LICENCE.md).
+https://monocypher.org/  -  monocypher-4.0.2.tar.gz
+SHA-256: 38d07179738c0c90677dba3ceb7a7b8496bcfea758ba1a53e803fed30ae0879c
+
+Lo usan los programas en C del anillo 3 de Hispa-Pentium que hablan SSH,
+WireGuard y Tailscale (castel/nucleo32/hispac/, ssh/, wg/; docs/PENTIUM.md
+«SSH» y «Tailscale»): X25519, Ed25519 (con SHA-512: monocypher-ed25519.c),
+ChaCha20 (la de DJB, la de la IETF y HChaCha20), Poly1305 y la AEAD
+ChaCha20-Poly1305 de la RFC 8439. Aquí van, sin cambiar nada, src/monocypher.c,
+src/monocypher.h, src/optional/monocypher-ed25519.c y .h, y LICENCE.md.
+Quien reparta esos binarios los acompaña del aviso de LICENCE.md (licencia BSD).

@@ -42,6 +42,9 @@ módulo Ventanas
     público constante MAXIMIZADA = 16
     público constante FIJA = 32                 ; no se maximiza (un cuadro de diálogo)
     público constante REDONDA = 64              ; sin marco, pero con las esquinas de arriba redondas y sombra (un menú)
+    público constante TRASLÚCIDA = 128          ; (dock) sus puntos con algo en el octeto de arriba (TRANSPARENTE) no se ven ni se pulsan
+    público constante TRANSPARENTE = 0xFF000000 ; (dock) el punto que no se ve, en una TRASLÚCIDA
+    público constante COMPLETA = 256            ; [WIN32] sin marco, pero puede ser la activa (las teclas): la pantalla completa de un juego (win32.cas; era 128, la de TRASLÚCIDA)
 
     ; ---- las medidas del marco ----
     público constante BORDE = 4
@@ -144,6 +147,7 @@ módulo Ventanas
     público variable ventana_inicio: nat32      ; la que recibe la tecla del logo
     público variable ventana_fondo: nat32       ; la que recibe lo que cae en el tapiz y el botón secundario en los títulos
     público variable alto_barra: ent32          ; lo que ocupa abajo la barra de tareas (no lo tapa una maximizada)
+    público variable alto_dock: ent32           ; (dock) lo que ocupa el dock encima de ella (DATO_ALTO_LIBRE)
     público variable composiciones: nat32       ; las veces que se ha recompuesto un trozo
 
     variable trasero: Lienzo                    ; el doble búfer
@@ -306,7 +310,21 @@ módulo Ventanas
             fin
             y1 := j
         fin
-        si y2 > y1 entonces copiar_lienzo(trasero, x1, y1, v.todo, x1 - v.px, y1 - v.py, x2 - x1, y2 - y1) fin
+        si y2 <= y1 entonces devolver fin
+        si v.banderas yb TRASLÚCIDA <> 0 entonces
+            ; (dock) punto a punto: lo transparente deja ver lo de debajo
+            mientras y1 < y2 hacer
+                f := x1
+                mientras f < x2 hacer
+                    s := ent32(v.todo.puntos[(y1 - v.py) * ent32(v.todo.salto) + f - v.px])
+                    si nat32(s) yb TRANSPARENTE = 0 entonces trasero.puntos[y1 * ent32(trasero.salto) + f] := nat32(s) fin
+                    f := f + 1
+                fin
+                y1 := y1 + 1
+            fin
+            devolver
+        fin
+        copiar_lienzo(trasero, x1, y1, v.todo, x1 - v.px, y1 - v.py, x2 - x1, y2 - y1)
     fin
 
     función pinta_flecha()
@@ -546,7 +564,7 @@ módulo Ventanas
         nueva := -1
         k := ent32(cuántas) - 1
         mientras k >= 0 y nueva < 0 hacer
-            si se_ve(ventanas[orden[k]]) y ventanas[orden[k]].banderas yb (SIN_MARCO ob ENCIMA) = 0 entonces nueva := orden[k] fin
+            si se_ve(ventanas[orden[k]]) y (ventanas[orden[k]].banderas yb (SIN_MARCO ob ENCIMA) = 0 o ventanas[orden[k]].banderas yb COMPLETA <> 0) entonces nueva := orden[k] fin    ; [WIN32] (o COMPLETA)
             k := k - 1
         fin
         si nueva = activa entonces devolver fin
@@ -1152,6 +1170,36 @@ módulo Ventanas
         devolver l
     fin
 
+    ; (dock) ¿es transparente ese punto de la pantalla en la ventana i?
+    función transparente_en(i: ent32, x: ent32, yy: ent32): bool
+        si ventanas[i].banderas yb TRASLÚCIDA = 0 entonces devolver falso fin
+        devolver ventanas[i].todo.puntos[(yy - ventanas[i].py) * ent32(ventanas[i].todo.salto) + x - ventanas[i].px] yb TRANSPARENTE <> 0
+    fin
+
+    ; (explorador) la ventana que se ve en ese punto de la pantalla (su
+    ; número), o 0 si es el tapiz
+    público función ventana_en_punto(x: ent32, yy: ent32): nat32
+        variable l: nat32
+        variable i: ent32
+        tomar(cerrojo)
+        i := ventana_o_borde(x, yy, l)
+        soltar(cerrojo)
+        si i < 0 entonces devolver 0 fin
+        si l <> 0 o ventanas[i].banderas yb OCULTA <> 0 entonces devolver 0 fin
+        devolver ventanas[i].id
+    fin
+
+    ; (dock) ¿tapa alguna ventana con marco (que se vea) ese rectángulo de la pantalla?
+    público función tapado(x: ent32, yy: ent32, an: ent32, al: ent32): bool
+        variable i: ent32
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si se_ve(ventanas[i]) y ventanas[i].banderas yb SIN_MARCO = 0 entonces
+                si ventanas[i].px < x + an y ventanas[i].px + ventanas[i].ancho > x y ventanas[i].py < yy + al y ventanas[i].py + ventanas[i].alto > yy entonces devolver cierto fin
+            fin
+        fin
+        devolver falso
+    fin
+
     ; la ventana de más adelante que está en ese punto, o que se agarra desde
     ; él por su borde («lados»: por cuáles; 0 si no es para cambiar el tamaño)
     función ventana_o_borde(x: ent32, yy: ent32, ref lados: nat32): ent32
@@ -1161,7 +1209,7 @@ módulo Ventanas
         mientras k >= 0 hacer
             i := orden[k]
             si se_ve(ventanas[i]) entonces
-                si x >= ventanas[i].px y yy >= ventanas[i].py y x < ventanas[i].px + ventanas[i].ancho y yy < ventanas[i].py + ventanas[i].alto entonces
+                si x >= ventanas[i].px y yy >= ventanas[i].py y x < ventanas[i].px + ventanas[i].ancho y yy < ventanas[i].py + ventanas[i].alto y no transparente_en(i, x, yy) entonces
                     si elástica(ventanas[i]) entonces lados := lados_en(ventanas[i], x, yy) fin
                     devolver i
                 fin
@@ -1223,7 +1271,7 @@ módulo Ventanas
             fin
             devolver
         fin
-        si ventanas[i].banderas yb (SIN_MARCO ob ENCIMA) = 0 y (cuántas = 0 o i <> activa) entonces
+        si (ventanas[i].banderas yb (SIN_MARCO ob ENCIMA) = 0 o ventanas[i].banderas yb COMPLETA <> 0) y (cuántas = 0 o i <> activa) entonces    ; [WIN32] (o COMPLETA)
             al_frente(i)
             mira_activa()
         fin
@@ -1516,6 +1564,98 @@ módulo Ventanas
         cambios := cambios + 1
         soltar(cerrojo)
         devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  [WIN32] Lo que piden los programas de Windows (win32.cas)
+    ; -------------------------------------------------------------------------
+    ; coloca una ventana suya con lo de dentro en (x, yy) de la pantalla y de
+    ; an x al (con marco, el marco va por fuera). Falso si no es suya o no
+    ; hay memoria; si cambia la medida, le llega EV_TAMAÑO.
+    público función colocar_dentro(id: nat32, dueño: nat32, x: ent32, yy: ent32, an: ent32, al: ent32): bool
+        variable i: ent32
+        variable r: bool
+        tomar(cerrojo)
+        i := busca(id)
+        si i < 0 o ventanas[i].dueño <> dueño o an < 1 o al < 1 o an > 4096 o al > 4096 entonces
+            soltar(cerrojo)
+            devolver falso
+        fin
+        si con_marco(ventanas[i]) entonces
+            x := x - BORDE
+            yy := yy - ALTO_TÍTULO
+            an := an + 2 * BORDE
+            al := al + ALTO_TÍTULO + BORDE
+            si an < 120 entonces an := 120 fin
+        fin
+        r := cierto
+        si an = ventanas[i].ancho y al = ventanas[i].alto entonces
+            ensuciar_ventana(ventanas[i])
+            ventanas[i].px := x
+            ventanas[i].py := yy
+            ensuciar_ventana(ventanas[i])
+        sino
+            ventanas[i].banderas := ventanas[i].banderas yb nob MAXIMIZADA
+            r := cambia_tamaño(i, x, yy, an, al)
+        fin
+        cambios := cambios + 1
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; la trae delante (y la saca si estaba minimizada): pasa a ser la activa
+    público función traer_ventana(id: nat32, dueño: nat32)
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i >= 0 y ventanas[i].dueño = dueño entonces
+            ventanas[i].banderas := ventanas[i].banderas yb nob MINIMIZADA
+            al_frente(i)
+            cambios := cambios + 1
+            mira_activa()
+        fin
+        soltar(cerrojo)
+    fin
+
+    ; dónde está lo de dentro de una ventana suya: d[0], d[1] en la pantalla;
+    ; d[2], d[3] lo que mide; d[4] sus banderas; d[5] 1 si es la activa.
+    ; Falso si no es suya.
+    público función dónde_está(id: nat32, dueño: nat32, d: puntero a ent32): bool
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i < 0 o ventanas[i].dueño <> dueño entonces
+            soltar(cerrojo)
+            devolver falso
+        fin
+        d[0] := ventanas[i].px
+        d[1] := ventanas[i].py
+        si con_marco(ventanas[i]) entonces
+            d[0] := d[0] + BORDE
+            d[1] := d[1] + ALTO_TÍTULO
+        fin
+        d[2] := ventanas[i].dentro.ancho
+        d[3] := ventanas[i].dentro.alto
+        d[4] := ent32(ventanas[i].banderas)
+        d[5] := 0
+        si i = activa entonces d[5] := 1 fin
+        soltar(cerrojo)
+        devolver cierto
+    fin
+
+    ; de quién es la ventana activa (0: de nadie, o del núcleo)
+    público función dueño_de_activa(): nat32
+        variable r: nat32
+        r := 0
+        tomar(cerrojo)
+        si activa >= 0 y ventanas[activa].usada entonces r := ventanas[activa].dueño fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; los botones del ratón que el gestor ha visto pulsados
+    público función botones_vistos(): nat32
+        devolver botones_antes
     fin
 
     ; prepara el gestor: el doble búfer y el tapiz (con la pantalla ya en modo

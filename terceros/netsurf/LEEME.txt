@@ -70,7 +70,10 @@ Cambios (todos marcados «[HISPA]»):
                                el búfer)
   (21/11/2026, el Navegador de Hispa-Pentium: docs/PENTIUM.md, «El Navegador»)
   libcss/src/select/unit.c     vh y vw estaban cambiados (100vh era el ancho
-                               de la ventana)
+                               de la ventana); y, sin redondear lo que vale
+                               1vh (100vh, en 420 puntos, eran 400)
   html/redraw.c                opacity: 0, no se pinta (ni lo de dentro)
+  html/redraw.c, box_inspect.c position: fixed respecto a la ventana (al pintar
+                               y al buscar dónde se ha dado) y sticky (top)
   html/layout.c, html/redraw.c un campo que JavaScript hace de texto (type)
                                tras hacer su caja: su textarea, al maquetar

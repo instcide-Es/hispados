@@ -353,6 +353,19 @@ css_fixed css_unit_len2device_px(
 
 	px_per_unit = css_unit_css2device_px(px_per_unit, ctx->device_dpi);
 
+	/* [HISPA] las unidades de la ventana (vh, vw...), sin redondear lo que
+	 * vale una: con 420 puntos de alto, 1vh son 4,2 y 100vh salían 400 (la
+	 * barra lateral de ClicGest, de height: 100vh, se quedaba corta) */
+	if (unit == CSS_UNIT_VH || unit == CSS_UNIT_VW || unit == CSS_UNIT_VMIN ||
+			unit == CSS_UNIT_VMAX || unit == CSS_UNIT_VI || unit == CSS_UNIT_VB) {
+		css_fixed alto = css_unit_css2device_px(ctx->viewport_height, ctx->device_dpi);
+		css_fixed ancho = css_unit_css2device_px(ctx->viewport_width, ctx->device_dpi);
+		css_fixed v = (unit == CSS_UNIT_VH || unit == CSS_UNIT_VB) ? alto
+				: (unit == CSS_UNIT_VW || unit == CSS_UNIT_VI) ? ancho
+				: (unit == CSS_UNIT_VMIN) == (alto < ancho) ? alto : ancho;
+		return FDIV(FMUL(length, v), F_100);
+	}
+
 	/* Ensure we round px_per_unit to the nearest whole number of pixels:
 	 * the use of FIXTOINT() below will truncate. */
 	px_per_unit += F_0_5;

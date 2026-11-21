@@ -1,0 +1,926 @@
+; =============================================================================
+;  dock.cas - el dock de Hispa-Pentium: una barra de lanzamiento con iconos
+;  grandes, centrada abajo, encima de la barra de tareas (bordes redondos,
+;  azul con su raya verde: el diseño de la casa). Lleva:
+;
+;   - los programas fijados (Mi equipo, el Bloc de notas, la Consola,
+;     Programas y actualizaciones, Configuración y la Papelera, si no se
+;     dice otra cosa) y, detrás de una raya, los que están abiertos sin
+;     estar fijados;
+;   - debajo de cada programa abierto, un punto (y una raya bajo el de la
+;     ventana activa): una forma, no solo un color;
+;   - con el puntero encima, su nombre en una etiqueta;
+;   - un clic: lo abre (o trae su ventana; si ya era la de delante, la
+;     recoge); el botón secundario: Abrir, Abrir otra ventana, Fijar en el
+;     dock, Quitar del dock, Cerrar la ventana y Ocultar el dock;
+;   - arrastrando un icono fijado a lo largo del dock, se cambia de sitio;
+;   - lo que se suelta encima desde el explorador: un programa (.BIN) se
+;     fija; en la Papelera, se manda a la papelera.
+;
+;  Lo fijado (y si se ve) se guarda en DOCK.INI, en \HISPA (o en la raíz de
+;  un sistema sin instalar), en la página 437 y con CR LF:
+;
+;      visible=si
+;      fijado=\EQUIPO.BIN||Mi equipo|12
+;
+;  (el programa, sus argumentos, su nombre y la clase de su icono:
+;  iconos.cas). Configuración del dock: «Dock: Visible / Oculto» en
+;  Configuración. También guarda los accesos que se sueltan en el tapiz
+;  (ATAJOS.INI, junto a él: «atajo=C:\RUTA|nombre|clase|x|y»), que pinta el
+;  escritorio como sus iconos.
+;
+;  Es una ventana del núcleo sin marco, siempre delante y TRASLÚCIDA (lo de
+;  fuera de su panel y de la etiqueta no se ve ni se pulsa). No tapa nada de
+;  nadie: cuando una ventana (una maximizada, un cuadro grande) ocupa el sitio
+;  de su panel, se aparta; vuelve cuando el sitio queda libre, o al llevar la
+;  flecha a la raya de encima de la barra de tareas (y mientras esté encima).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Dock
+
+    importar Tareas, Grafico, Letra, Video, Raton, Ventanas, Emergente, Fat, Unidades, Monton, Textos32, Formato, Mem32, Accesos, Iconos
+
+    ; ---- las medidas ----
+    constante LADO = 40                         ; el de cada icono
+    constante CELDA = 54                        ; lo que ocupa cada uno a lo ancho
+    constante PANEL = 58                        ; lo que mide el panel a lo alto
+    constante ETIQUETA = 26                     ; la franja de arriba, para el nombre
+    constante MARGEN = 4                        ; entre el panel y la barra de tareas
+    constante RAYA = 12                         ; lo que ocupa la raya entre fijados y abiertos
+    público constante ALTO_RESERVADO = PANEL + MARGEN
+
+    ; ---- los colores (los de la barra de tareas) ----
+    constante AZUL_ARRIBA = 0x5AA6F4
+    constante AZUL_ABAJO = 0x1D5DBA
+    constante BORDE = 0x0F3F8A
+    constante VERDE = 0x46C282
+    constante BLANCO = 0xFFFFFF
+    constante TINTA = 0x14294A
+    constante RESALTE = 0xBFE0FF                 ; bajo el icono que tiene el puntero encima
+
+    ; ---- lo que se le pide al escritorio (lo atiende escritorio.cas) ----
+    público constante PIDE_NADA = 0
+    público constante PIDE_LANZAR = 1           ; pide_programa con pide_argumentos
+    público constante PIDE_CONFIG = 2           ; abrir Configuración
+    público variable pide: nat32
+    público variable pide_programa: arreglo [80] de byte
+    público variable pide_argumentos: arreglo [160] de byte
+
+    público constante ME_DOCK = 40              ; la etiqueta de su menú emergente
+
+    constante MAX_ELEMENTOS = 14
+    tipo Elemento = estructura
+        nombre: arreglo [32] de byte
+        programa: arreglo [80] de byte
+        argumentos: arreglo [80] de byte
+        clase: nat32                            ; la de su icono (Iconos.IC_...); 0: el de su acceso, o una ventanita
+        fijado: bool
+        ventana: nat32                          ; una ventana suya (0: no está abierto)
+        activa: bool                            ; esa ventana es la de delante
+    fin
+    variable el: arreglo [MAX_ELEMENTOS] de Elemento
+    variable n_el: nat32
+    variable n_fijados: nat32
+
+    público variable v_dock: nat32
+    público variable visible: bool = cierto
+    variable ancho_panel: ent32
+    variable dock_x, dock_y, dock_an, dock_al: ent32    ; dónde está su ventana
+    variable apartado: bool                     ; se ha quitado de en medio: una ventana tapa su sitio
+    variable debajo_puntero: ent32 = -1         ; el que tiene el puntero encima
+    variable cogido: ent32 = -1                 ; el que se está arrastrando (o -1)
+    variable cog_x: ent32
+    variable movido: bool
+    variable menú_de: ent32 = -1
+    variable cambios_vistos: nat32
+    variable unidades_vistas: nat32
+    variable papelera_llena: bool
+    variable mirada_papelera: nat32             ; el tic en que se miró
+    variable tini: arreglo [2048] de byte    ; (lo leído de DOCK.INI o de ATAJOS.INI)
+    variable renglón: arreglo [260] de byte
+
+    ; ---- los accesos del tapiz (ATAJOS.INI) ----
+    público constante MAX_ATAJOS = 8
+    público tipo Atajo = estructura
+        ruta: arreglo [128] de byte
+        nombre: arreglo [32] de byte
+        clase: nat32
+        x, ye: ent32
+    fin
+    público variable atajos: arreglo [MAX_ATAJOS] de Atajo
+    público variable n_atajos: nat32
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que hay
+    ; -------------------------------------------------------------------------
+    función pon(i: nat32, nombre: puntero a byte, programa: puntero a byte, args: puntero a byte, clase: nat32)
+        copiar_hasta(dirección(el[i].nombre[0]), nombre, 32)
+        copiar_hasta(dirección(el[i].programa[0]), programa, 80)
+        copiar_hasta(dirección(el[i].argumentos[0]), args, 80)
+        el[i].clase := clase
+        el[i].fijado := cierto
+        el[i].ventana := 0
+        el[i].activa := falso
+    fin
+
+    función de_siempre()
+        pon(0, "Mi equipo", "\\EQUIPO.BIN", "", IC_EQUIPO)
+        pon(1, "Bloc de notas", "\\BLOC.BIN", "", IC_TEXTO)
+        pon(2, "Consola", "\\CONSOLA.BIN", "", IC_CONSOLA)
+        pon(3, "Programas y actualizaciones", "\\ACTUALIZ.BIN", "", IC_PAQUETE)
+        pon(4, "Configuración", "*CONFIG", "", IC_RUEDA)
+        pon(5, "Papelera", "\\EQUIPO.BIN", "/PAPELERA", IC_PAPELERA)
+        n_fijados := 6
+        n_el := 6
+    fin
+
+    ; dónde van DOCK.INI y ATAJOS.INI (en «renglón»)
+    función ruta_ini(nombre: puntero a byte)
+        si instalado() entonces copiar(renglón, "\\HISPA\\") sino copiar(renglón, "\\") fin
+        concatenar(renglón, nombre)
+    fin
+
+    ; el trozo número k (desde 0) de una línea «a|b|c», a destino
+    función trozo(línea: puntero a byte, k: nat32, destino: puntero a byte, cabe: nat32)
+        variable i, j: nat32
+        i := 0
+        mientras k > 0 y línea[i] <> 0 hacer
+            si línea[i] = '|' entonces k := k - 1 fin
+            i := i + 1
+        fin
+        j := 0
+        mientras línea[i] <> 0 y línea[i] <> '|' y j + 1 < cabe hacer
+            destino[j] := línea[i]
+            i := i + 1
+            j := j + 1
+        fin
+        destino[j] := 0
+    fin
+
+    ; lee un archivo de ajustes entero a «tini» (falso si no está)
+    función lee_ini(nombre: puntero a byte): bool
+        variable m, n: nat32
+        tini[0] := 0
+        si del_sistema = NINGUNA entonces devolver falso fin
+        ruta_ini(nombre)
+        m := abrir_archivo(del_sistema, renglón, PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        n := leer_archivo(m, tini, 2047)
+        cerrar_archivo(m)
+        si n >= PRIMER_ERROR entonces n := 0 fin
+        tini[n] := 0
+        devolver cierto
+    fin
+
+    ; la línea siguiente de «tini» desde la posición p (a renglón): falso al final
+    función línea_de(ref p: nat32): bool
+        variable j: nat32
+        si tini[p] = 0 entonces devolver falso fin
+        j := 0
+        mientras tini[p] <> 0 y tini[p] <> '\n' hacer
+            si tini[p] <> '\r' y j < 258 entonces
+                renglón[j] := tini[p]
+                j := j + 1
+            fin
+            p := p + 1
+        fin
+        si tini[p] = '\n' entonces p := p + 1 fin
+        renglón[j] := 0
+        devolver cierto
+    fin
+
+    función número(t: puntero a byte): ent32
+        variable n: ent32
+        variable i: nat32
+        variable menos: bool
+        n := 0
+        i := 0
+        menos := t[0] = '-'
+        si menos entonces i := 1 fin
+        mientras t[i] >= '0' y t[i] <= '9' hacer
+            n := n * 10 + ent32(t[i] - '0')
+            i := i + 1
+        fin
+        si menos entonces devolver -n fin
+        devolver n
+    fin
+
+    función lee_dock()
+        variable p: nat32
+        variable nombre: arreglo [32] de byte
+        variable programa, args: arreglo [80] de byte
+        variable cl: arreglo [8] de byte
+        si no lee_ini("DOCK.INI") entonces
+            de_siempre()
+            devolver
+        fin
+        n_el := 0
+        p := 0
+        mientras línea_de(p) hacer
+            si empieza_por(renglón, "visible=") entonces
+                visible := renglón[8] <> 'n' y renglón[8] <> 'N'
+            sino si empieza_por(renglón, "fijado=") y n_el < MAX_ELEMENTOS - 2 entonces
+                trozo(dirección(renglón[7]), 0, programa, 80)
+                trozo(dirección(renglón[7]), 1, args, 80)
+                trozo(dirección(renglón[7]), 2, nombre, 32)
+                trozo(dirección(renglón[7]), 3, cl, 8)
+                si programa[0] <> 0 y nombre[0] <> 0 entonces
+                    pon(n_el, nombre, programa, args, nat32(número(cl)))
+                    n_el := n_el + 1
+                fin
+            fin
+        fin
+        n_fijados := n_el
+    fin
+
+    ; escribe «tini» en el archivo de ajustes (falso si no se puede)
+    función escribe_ini(nombre: puntero a byte): bool
+        variable m, n: nat32
+        si del_sistema = NINGUNA o no escribible(del_sistema) entonces devolver falso fin
+        ruta_ini(nombre)
+        m := abrir_archivo(del_sistema, renglón, PARA_CREAR)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        n := escribir_archivo(m, tini, longitud(tini))
+        cerrar_archivo(m)
+        devolver n = longitud(tini)
+    fin
+
+    público función guarda_dock(): bool
+        variable i: nat32
+        variable d: arreglo [4] de nat32
+        copiar(tini, "; el dock de Hispa-Pentium: programa|argumentos|nombre|icono\r\nvisible=")
+        si visible entonces concatenar(tini, "si\r\n") sino concatenar(tini, "no\r\n") fin
+        i := 0
+        mientras i < n_fijados hacer
+            d[0] := nat32(dirección(el[i].programa[0]))
+            d[1] := nat32(dirección(el[i].argumentos[0]))
+            d[2] := nat32(dirección(el[i].nombre[0]))
+            d[3] := el[i].clase
+            formatear(renglón, 260, "fijado=%s|%s|%s|%u\r\n", d)
+            si longitud(tini) + longitud(renglón) < 2040 entonces concatenar(tini, renglón) fin
+            i := i + 1
+        fin
+        devolver escribe_ini("DOCK.INI")
+    fin
+
+    ; ---- los accesos del tapiz ----
+    público función lee_atajos()
+        variable p: nat32
+        variable t: arreglo [16] de byte
+        n_atajos := 0
+        si no lee_ini("ATAJOS.INI") entonces devolver fin
+        p := 0
+        mientras línea_de(p) y n_atajos < MAX_ATAJOS hacer
+            si empieza_por(renglón, "atajo=") entonces
+                trozo(dirección(renglón[6]), 0, dirección(atajos[n_atajos].ruta[0]), 128)
+                trozo(dirección(renglón[6]), 1, dirección(atajos[n_atajos].nombre[0]), 32)
+                trozo(dirección(renglón[6]), 2, t, 16)
+                atajos[n_atajos].clase := nat32(número(t))
+                trozo(dirección(renglón[6]), 3, t, 16)
+                atajos[n_atajos].x := número(t)
+                trozo(dirección(renglón[6]), 4, t, 16)
+                atajos[n_atajos].ye := número(t)
+                si atajos[n_atajos].ruta[0] <> 0 y atajos[n_atajos].nombre[0] <> 0 entonces n_atajos := n_atajos + 1 fin
+            fin
+        fin
+    fin
+
+    público función guarda_atajos(): bool
+        variable i: nat32
+        variable d: arreglo [5] de nat32
+        copiar(tini, "; los accesos del tapiz: ruta|nombre|icono|x|y\r\n")
+        i := 0
+        mientras i < n_atajos hacer
+            d[0] := nat32(dirección(atajos[i].ruta[0]))
+            d[1] := nat32(dirección(atajos[i].nombre[0]))
+            d[2] := atajos[i].clase
+            d[3] := nat32(atajos[i].x)
+            d[4] := nat32(atajos[i].ye)
+            formatear(renglón, 260, "atajo=%s|%s|%u|%d|%d\r\n", d)
+            si longitud(tini) + longitud(renglón) < 2040 entonces concatenar(tini, renglón) fin
+            i := i + 1
+        fin
+        devolver escribe_ini("ATAJOS.INI")
+    fin
+
+    ; la clase de icono de un archivo, por su extensión (como el explorador)
+    público función clase_de_ruta(ruta: puntero a byte, carpeta: bool): nat32
+        variable n: nat32
+        variable e: arreglo [4] de byte
+        si carpeta entonces devolver IC_CARPETA fin
+        n := longitud(ruta)
+        e[0] := 0
+        si n > 4 y ruta[n - 4] = '.' entonces
+            e[0] := mayúscula(ruta[n - 3])
+            e[1] := mayúscula(ruta[n - 2])
+            e[2] := mayúscula(ruta[n - 1])
+            e[3] := 0
+        fin
+        si iguales(e, "TXT") o iguales(e, "BAT") o iguales(e, "INI") o iguales(e, "MNU") entonces devolver IC_TEXTO fin
+        si iguales(e, "BIN") o iguales(e, "HVP") o iguales(e, "EXE") entonces devolver IC_PROGRAMA fin
+        si iguales(e, "BMP") o iguales(e, "PNG") o iguales(e, "JPG") o iguales(e, "GIF") o iguales(e, "PCX") o iguales(e, "TGA") o iguales(e, "PPM") o iguales(e, "ICO") entonces devolver IC_IMAGEN fin
+        devolver IC_ARCHIVO
+    fin
+
+    ; un acceso nuevo en el tapiz, en ese punto: da su número, o -1
+    público función nuevo_atajo(ruta: puntero a byte, carpeta: bool, x: ent32, yy: ent32): ent32
+        variable i, k: nat32
+        si n_atajos >= MAX_ATAJOS entonces devolver -1 fin
+        k := n_atajos
+        copiar_hasta(dirección(atajos[k].ruta[0]), ruta, 128)
+        ; su nombre: lo de detrás de la última barra
+        i := longitud(ruta)
+        mientras i > 0 y ruta[i - 1] <> '\\' y ruta[i - 1] <> ':' hacer i := i - 1 fin
+        copiar_hasta(dirección(atajos[k].nombre[0]), dirección(ruta[i]), 32)
+        si atajos[k].nombre[0] = 0 entonces copiar_hasta(dirección(atajos[k].nombre[0]), ruta, 32) fin
+        si ruta[i] = 0 entonces carpeta := cierto fin
+        atajos[k].clase := clase_de_ruta(ruta, carpeta)
+        atajos[k].x := x
+        atajos[k].ye := yy
+        n_atajos := n_atajos + 1
+        guarda_atajos()
+        devolver ent32(k)
+    fin
+
+    público función quita_atajo(k: nat32)
+        variable i, j: nat32
+        si k >= n_atajos entonces devolver fin
+        i := k
+        mientras i + 1 < n_atajos hacer
+            copiar_memoria(puntero(dirección(atajos[i])), puntero(dirección(atajos[i + 1])), tamaño(Atajo))
+            i := i + 1
+        fin
+        n_atajos := n_atajos - 1
+        guarda_atajos()
+    fin
+
+    público función mueve_atajo(k: nat32, x: ent32, yy: ent32)
+        si k >= n_atajos entonces devolver fin
+        atajos[k].x := x
+        atajos[k].ye := yy
+        guarda_atajos()
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los que están abiertos
+    ; -------------------------------------------------------------------------
+    ; lo de detrás de la última barra
+    función base(t: puntero a byte): puntero a byte
+        variable i: nat32
+        i := longitud(t)
+        mientras i > 0 y t[i - 1] <> '\\' y t[i - 1] <> ':' y t[i - 1] <> '/' hacer i := i - 1 fin
+        devolver dirección(t[i])
+    fin
+
+    ; ¿es la tarea t la del elemento i? Con «justo», su programa y sus
+    ; argumentos, los mismos; si no, su programa (un elemento sin argumentos:
+    ; el Bloc de notas con un documento abierto sigue siendo el Bloc)
+    función es_suyo(i: nat32, t: puntero a Tarea, justo: bool): bool
+        variable sin: bool
+        si el[i].programa[0] = '*' entonces devolver falso fin
+        si no iguales_sin_caja(base(dirección(el[i].programa[0])), t.nombre) entonces devolver falso fin
+        sin := t.args = nulo o valor(t.args) = 0
+        si el[i].argumentos[0] = 0 entonces devolver sin o no justo fin
+        devolver no sin y iguales_sin_caja(t.args, dirección(el[i].argumentos[0]))
+    fin
+
+    ; el elemento de la tarea t (primero, uno justo; si no, uno de su programa), o -1
+    función elemento_de(t: puntero a Tarea, dueño: nat32): ent32
+        variable k: nat32
+        k := 0
+        mientras k < n_el hacer
+            si es_suyo(k, t, cierto) entonces devolver ent32(k) fin
+            si k >= n_fijados y el[k].ventana <> 0 y marcas_de(el[k].ventana) <> 0xFFFFFFFF y tarea_de_ventana(el[k].ventana) = dueño entonces devolver ent32(k) fin
+            k := k + 1
+        fin
+        k := 0
+        mientras k < n_fijados hacer
+            si es_suyo(k, t, falso) entonces devolver ent32(k) fin
+            k := k + 1
+        fin
+        devolver -1
+    fin
+
+    ; mira las ventanas: qué elementos están abiertos, y los abiertos sin fijar
+    función mira_abiertos(): bool
+        variable i, k: nat32
+        variable t: puntero a Tarea
+        variable hallado: bool
+        variable e: ent32
+        variable antes: arreglo [MAX_ELEMENTOS] de nat32
+        variable n_antes: nat32
+        variable cambia: bool
+        n_antes := n_el
+        para k desde 0 hasta MAX_ELEMENTOS - 1 hacer
+            antes[k] := 0
+            si k < n_el entonces
+                antes[k] := el[k].ventana
+                si el[k].activa entonces antes[k] := antes[k] ob 0x80000000 fin
+            fin
+        fin
+        para k desde 0 hasta MAX_ELEMENTOS - 1 hacer
+            el[k].ventana := 0
+            el[k].activa := falso
+        fin
+        n_el := n_fijados
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].dueño <> 0 y ventanas[i].banderas yb (SIN_MARCO ob OCULTA) = 0 entonces
+                t := tarea_de(ventanas[i].dueño)
+                si t <> nulo entonces
+                    hallado := falso
+                    e := elemento_de(t, ventanas[i].dueño)
+                    si e >= 0 entonces
+                        k := nat32(e)
+                        hallado := cierto
+                        si el[k].ventana = 0 o ent32(i) = activa entonces el[k].ventana := ventanas[i].id fin
+                        si ent32(i) = activa entonces el[k].activa := cierto fin
+                    fin
+                    si no hallado y n_el < MAX_ELEMENTOS entonces
+                        ; abierto sin estar fijado: detrás, con el nombre de su ventana
+                        k := n_el
+                        copiar_hasta(dirección(el[k].nombre[0]), dirección(ventanas[i].título[0]), 32)
+                        copiar(dirección(el[k].programa[0]), "\\")
+                        concatenar(dirección(el[k].programa[0]), t.nombre)
+                        el[k].argumentos[0] := 0
+                        si t.args <> nulo entonces copiar_hasta(dirección(el[k].argumentos[0]), t.args, 80) fin
+                        el[k].clase := clase_de_programa(t.nombre)
+                        el[k].fijado := falso
+                        el[k].ventana := ventanas[i].id
+                        el[k].activa := ent32(i) = activa
+                        n_el := n_el + 1
+                    fin
+                fin
+            fin
+        fin
+        cambia := n_el <> n_antes
+        para k desde 0 hasta n_el - 1 hacer
+            i := el[k].ventana
+            si el[k].activa entonces i := i ob 0x80000000 fin
+            si i <> antes[k] entonces cambia := cierto fin
+        fin
+        devolver cambia
+    fin
+
+    función tarea_de_ventana(id: nat32): nat32
+        variable i: nat32
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].id = id entonces devolver ventanas[i].dueño fin
+        fin
+        devolver 0
+    fin
+
+    ; el icono de un programa abierto por su nombre
+    función clase_de_programa(nombre: puntero a byte): nat32
+        si iguales_sin_caja(nombre, "EQUIPO.BIN") entonces devolver IC_EQUIPO fin
+        si iguales_sin_caja(nombre, "BLOC.BIN") entonces devolver IC_TEXTO fin
+        si iguales_sin_caja(nombre, "CONSOLA.BIN") entonces devolver IC_CONSOLA fin
+        si iguales_sin_caja(nombre, "ACTUALIZ.BIN") entonces devolver IC_PAQUETE fin
+        si iguales_sin_caja(nombre, "HVPRUN.BIN") entonces devolver IC_DOCUMENTO fin
+        devolver 0
+    fin
+
+    ; ¿hay algo en alguna papelera? (\PAPELERA\INDICE.TXT, que no esté vacío)
+    función mira_papelera(): bool
+        variable u, m, n: nat32
+        variable llena: bool
+        llena := falso
+        para u desde 0 hasta MAX_UNIDADES - 1 hacer
+            si unidades[u].hay y unidades[u].clase = U_FAT y no llena entonces
+                m := abrir_archivo(u, "\\PAPELERA\\INDICE.TXT", PARA_LEER)
+                si m < PRIMER_ERROR entonces
+                    n := tamaño_archivo(m)
+                    cerrar_archivo(m)
+                    si n > 0 y n < PRIMER_ERROR entonces llena := cierto fin
+                fin
+            fin
+        fin
+        mirada_papelera := tics
+        unidades_vistas := Unidades.cambios
+        devolver llena
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Pintar
+    ; -------------------------------------------------------------------------
+    función ancho_de(): ent32
+        variable a: ent32
+        a := ent32(n_el) * CELDA + 16
+        si n_el > n_fijados y n_fijados > 0 entonces a := a + RAYA fin
+        devolver a
+    fin
+
+    ; dónde empieza (a lo ancho, dentro de la ventana) el elemento i
+    función x_de(i: nat32): ent32
+        variable x: ent32
+        x := 8 + ent32(i) * CELDA
+        si i >= n_fijados y n_fijados > 0 entonces x := x + RAYA fin
+        devolver x
+    fin
+
+    ; el elemento que está en ese punto de la ventana (-1: ninguno)
+    función elemento_en(x: ent32, yy: ent32): ent32
+        variable i: nat32
+        si yy < ETIQUETA o yy >= ETIQUETA + PANEL entonces devolver -1 fin
+        i := 0
+        mientras i < n_el hacer
+            si x >= x_de(i) y x < x_de(i) + CELDA entonces devolver ent32(i) fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    función pinta_icono(ref l: Lienzo, i: nat32, x: ent32, yy: ent32)
+        variable p: puntero a nat32
+        variable f, c, k: ent32
+        variable px: nat32
+        variable cl: nat32
+        cl := el[i].clase
+        si cl = IC_PAPELERA y papelera_llena entonces cl := IC_PAPELERA_LLENA fin
+        si cl = 0 entonces
+            ; el icono de su acceso (de su paquete), si lo hay
+            k := 0
+            mientras k < ent32(n_accesos) hacer
+                si iguales_sin_caja(base(programa_de(nat32(k))), base(dirección(el[i].programa[0]))) entonces
+                    p := icono_de(nat32(k))
+                    si p <> nulo entonces
+                        ; 32 x 32, al lado del dock (sin escalar: en medio de los 40)
+                        para f desde 0 hasta LADO_ICONO - 1 hacer
+                            para c desde 0 hasta LADO_ICONO - 1 hacer
+                                px := p[nat32(f) * LADO_ICONO + nat32(c)]
+                                si px >> 24 >= 0x80 entonces punto(l, x + 4 + c, yy + 4 + f, px yb 0xFFFFFF) fin
+                            fin
+                        fin
+                        devolver
+                    fin
+                fin
+                k := k + 1
+            fin
+            cl := IC_PROGRAMA
+        fin
+        icono(l, x, yy, LADO, cl, 'P', 0x8E5BD8)
+    fin
+
+    público función pinta_dock()
+        variable l: puntero a Lienzo
+        variable an, x, k, tx, n: ent32
+        variable i: nat32
+        si v_dock = 0 entonces devolver fin
+        l := lienzo_de(v_dock)
+        si l = nulo entonces devolver fin
+        an := l.ancho
+        ; todo transparente; luego, el panel en medio
+        llenar32(l.puntos, l.salto * nat32(l.alto), TRANSPARENTE)
+        x := (an - ancho_panel) div 2
+        redondeado(valor(l), x, ETIQUETA, ancho_panel, PANEL, 14, BORDE, BORDE, TODAS)
+        redondeado(valor(l), x + 1, ETIQUETA + 1, ancho_panel - 2, PANEL - 2, 13, AZUL_ARRIBA, AZUL_ABAJO, TODAS)
+        rectángulo(valor(l), x + 12, ETIQUETA + 2, ancho_panel - 24, 1, 0xA9D4FF)
+        ; la raya verde de abajo (la de la casa)
+        rectángulo(valor(l), x + 14, ETIQUETA + PANEL - 5, ancho_panel - 28, 2, VERDE)
+        ; la raya entre los fijados y los abiertos
+        si n_el > n_fijados y n_fijados > 0 entonces
+            rectángulo(valor(l), x + x_de(n_fijados) - RAYA div 2 - 1, ETIQUETA + 10, 2, PANEL - 20, 0xDCEBFF)
+        fin
+        i := 0
+        mientras i < n_el hacer
+            k := x + x_de(i) + (CELDA - LADO) div 2
+            si ent32(i) = debajo_puntero y cogido < 0 entonces
+                redondeado(valor(l), x + x_de(i) + 2, ETIQUETA + 3, CELDA - 4, PANEL - 6, 9, RESALTE, 0x86C0FA, TODAS)
+            fin
+            si ent32(i) = cogido y movido entonces
+                ; el que se arrastra: un hueco con su borde
+                marco(valor(l), x + x_de(i) + 4, ETIQUETA + 5, CELDA - 8, LADO + 2, BLANCO)
+            sino
+                pinta_icono(valor(l), i, k, ETIQUETA + 5)
+            fin
+            ; abierto: un punto blanco con su borde; el de delante, además, una raya
+            si el[i].ventana <> 0 entonces
+                círculo(valor(l), x + x_de(i) + CELDA div 2, ETIQUETA + PANEL - 9, 3, BORDE)
+                círculo(valor(l), x + x_de(i) + CELDA div 2, ETIQUETA + PANEL - 9, 2, BLANCO)
+                si el[i].activa entonces
+                    rectángulo(valor(l), x + x_de(i) + CELDA div 2 - 9, ETIQUETA + PANEL - 4, 18, 3, BLANCO)
+                fin
+            fin
+            i := i + 1
+        fin
+        ; el que se arrastra, donde va el puntero
+        si cogido >= 0 y movido entonces
+            k := x + cog_x - LADO div 2
+            pinta_icono(valor(l), nat32(cogido), k, ETIQUETA + 3)
+        fin
+        ; la etiqueta con el nombre del que tiene el puntero encima
+        si debajo_puntero >= 0 y debajo_puntero < ent32(n_el) y cogido < 0 entonces
+            n := ancho_texto(dirección(el[debajo_puntero].nombre[0]))
+            tx := x + x_de(nat32(debajo_puntero)) + CELDA div 2 - n div 2 - 6
+            si tx < 0 entonces tx := 0 fin
+            si tx + n + 12 > an entonces tx := an - n - 12 fin
+            redondeado(valor(l), tx, 2, n + 12, ETIQUETA - 5, 6, TINTA, TINTA, TODAS)
+            redondeado(valor(l), tx + 1, 3, n + 10, ETIQUETA - 7, 5, 0xFFFFFF, 0xE8F1FD, TODAS)
+            texto(valor(l), tx + 6, 6, dirección(el[debajo_puntero].nombre[0]), TINTA)
+        fin
+        repintada(v_dock, 0, 0, an, l.alto)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Ponerlo, colocarlo y quitarlo
+    ; -------------------------------------------------------------------------
+    ; la ventana, a la medida de lo que lleva, centrada encima de la barra
+    función coloca()
+        variable an, al, x, yy: ent32
+        ancho_panel := ancho_de()
+        an := ancho_panel + 200                 ; (sitio para las etiquetas largas a los lados)
+        si an > pantalla.ancho entonces an := pantalla.ancho fin
+        si ancho_panel > an entonces ancho_panel := an fin
+        al := ETIQUETA + PANEL
+        x := (pantalla.ancho - an) div 2
+        yy := pantalla.alto - alto_barra - MARGEN - al
+        si v_dock = 0 entonces
+            v_dock := crear_ventana("dock", x, yy, an, al, SIN_MARCO ob ENCIMA ob TRASLÚCIDA ob OCULTA, 0)
+        sino
+            recolocar_ventana(v_dock, x, yy, an, al)
+        fin
+        dock_x := x
+        dock_y := yy
+        dock_an := an
+        dock_al := al
+        apartado := falso
+        si v_dock <> 0 entonces mostrar(v_dock, visible) fin
+        si visible entonces alto_dock := ALTO_RESERVADO sino alto_dock := 0 fin
+    fin
+
+    ; al arrancar el escritorio (después de la barra de tareas): la ventana,
+    ; con lo de siempre; lo guardado (DOCK.INI) y la papelera se leen luego
+    ; (lee_ajustes_dock), cuando el escritorio ya está en marcha
+    público función prepara_dock()
+        de_siempre()
+        mira_abiertos()
+        coloca()
+        cambios_vistos := Ventanas.cambios
+        pinta_dock()
+    fin
+
+    público función lee_ajustes_dock()
+        lee_dock()
+        papelera_llena := mira_papelera()
+        mira_abiertos()
+        coloca()
+        pinta_dock()
+    fin
+
+    ; la pantalla ha cambiado de medida
+    público función recoloca_dock()
+        coloca()
+        pinta_dock()
+    fin
+
+    ; verlo u ocultarlo (desde Configuración, o su menú)
+    público función pon_visible(sí: bool)
+        visible := sí
+        coloca()
+        pinta_dock()
+        guarda_dock()
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que se hace
+    ; -------------------------------------------------------------------------
+    función lanza_elemento(i: nat32)
+        si el[i].programa[0] = '*' entonces
+            pide := PIDE_CONFIG
+            devolver
+        fin
+        copiar(pide_programa, dirección(el[i].programa[0]))
+        copiar(pide_argumentos, dirección(el[i].argumentos[0]))
+        pide := PIDE_LANZAR
+    fin
+
+    función activa_elemento(i: nat32)
+        si el[i].ventana <> 0 entonces
+            botón_de_barra(el[i].ventana)
+        sino
+            lanza_elemento(i)
+        fin
+    fin
+
+    función fija(i: nat32)
+        variable e: Elemento
+        si el[i].fijado o n_fijados >= MAX_ELEMENTOS - 2 entonces devolver fin
+        ; pasa al final de los fijados
+        copiar_memoria(puntero(dirección(e)), puntero(dirección(el[i])), tamaño(Elemento))
+        mientras i > n_fijados hacer
+            copiar_memoria(puntero(dirección(el[i])), puntero(dirección(el[i - 1])), tamaño(Elemento))
+            i := i - 1
+        fin
+        copiar_memoria(puntero(dirección(el[n_fijados])), puntero(dirección(e)), tamaño(Elemento))
+        el[n_fijados].fijado := cierto
+        n_fijados := n_fijados + 1
+        guarda_dock()
+    fin
+
+    función quita(i: nat32)
+        si i >= n_fijados entonces devolver fin
+        mientras i + 1 < n_el hacer
+            copiar_memoria(puntero(dirección(el[i])), puntero(dirección(el[i + 1])), tamaño(Elemento))
+            i := i + 1
+        fin
+        n_el := n_el - 1
+        n_fijados := n_fijados - 1
+        guarda_dock()
+    fin
+
+    ; el fijado «de» pasa al sitio «a» (los dos, de los fijados)
+    función lleva(de: nat32, a: nat32)
+        variable e: Elemento
+        si de = a o de >= n_fijados o a >= n_fijados entonces devolver fin
+        copiar_memoria(puntero(dirección(e)), puntero(dirección(el[de])), tamaño(Elemento))
+        mientras de < a hacer
+            copiar_memoria(puntero(dirección(el[de])), puntero(dirección(el[de + 1])), tamaño(Elemento))
+            de := de + 1
+        fin
+        mientras de > a hacer
+            copiar_memoria(puntero(dirección(el[de])), puntero(dirección(el[de - 1])), tamaño(Elemento))
+            de := de - 1
+        fin
+        copiar_memoria(puntero(dirección(el[a])), puntero(dirección(e)), tamaño(Elemento))
+    fin
+
+    ; lo elegido en su menú (lo llama el escritorio con lo que llega de Emergente)
+    público función elegido_dock(opción: nat32)
+        variable i: nat32
+        si menú_de < 0 o menú_de >= ent32(n_el) entonces devolver fin
+        i := nat32(menú_de)
+        menú_de := -1
+        según nat16(opción)
+            caso 0: activa_elemento(i)
+            caso 1: lanza_elemento(i)
+            caso 3: fija(i)
+            caso 4: quita(i)
+            caso 6: si el[i].ventana <> 0 entonces pedir_cierre(el[i].ventana) fin
+            caso 8: pon_visible(falso)
+        fin
+        mira_abiertos()
+        coloca()
+        pinta_dock()
+    fin
+
+    ; lo que se ha soltado encima desde el explorador (x: en la pantalla).
+    ; Da 1 si se ha fijado; 2 si ha caído en la Papelera (lo manda a ella el
+    ; escritorio: EQUIPO /BORRAR); 0 si nada
+    público función soltado_en_dock(ruta: puntero a byte, x: ent32): nat32
+        variable k: ent32
+        variable i, n: nat32
+        variable px, py: ent32
+        variable nombre: arreglo [32] de byte
+        si v_dock = 0 o no visible entonces devolver 0 fin
+        px := 0
+        py := 0
+        a_pantalla(v_dock, px, py)
+        k := elemento_en(x - px - (lienzo_de(v_dock).ancho - ancho_panel) div 2, ETIQUETA + 2)
+        si k >= 0 y el[k].clase = IC_PAPELERA entonces devolver 2 fin
+        n := longitud(ruta)
+        si n < 5 o no iguales_sin_caja(dirección(ruta[n - 4]), ".BIN") entonces devolver 0 fin
+        si n_fijados >= MAX_ELEMENTOS - 2 entonces devolver 0 fin
+        ; un programa: se fija al final (sin la letra de la unidad)
+        i := n_el
+        si n_el >= MAX_ELEMENTOS entonces i := MAX_ELEMENTOS - 1 sino n_el := n_el + 1 fin
+        copiar_hasta(nombre, base(ruta), 32)
+        si ruta[1] = ':' entonces pon(i, nombre, dirección(ruta[2]), "", 0) sino pon(i, nombre, ruta, "", 0) fin
+        el[i].clase := clase_de_programa(nombre)
+        el[i].fijado := falso
+        fija(i)
+        mira_abiertos()
+        coloca()
+        pinta_dock()
+        devolver 1
+    fin
+
+    ; los sucesos de su ventana, y estar al día: lo llama la tarea del escritorio
+    público función atiende_dock()
+        variable e: Evento
+        variable k, x, base_x, d: ent32
+        variable cambia: bool
+        si v_dock = 0 entonces devolver fin
+        cambia := falso
+        base_x := 0
+        si lienzo_de(v_dock) <> nulo entonces base_x := (lienzo_de(v_dock).ancho - ancho_panel) div 2 fin
+        mientras saca_evento(v_dock, 0, e) hacer
+            x := ent32(e.a) - base_x
+            según e.clase
+                caso EV_RATÓN_MUEVE:
+                    si cogido >= 0 y e.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                        si no movido y (ent32(e.a) - cog_x > 5 o cog_x - ent32(e.a) > 5) entonces movido := cierto fin
+                        si movido entonces
+                            cog_x := ent32(e.a) - base_x
+                            ; el sitio de los fijados que toca
+                            si nat32(cogido) < n_fijados entonces
+                                d := (cog_x - 8) div CELDA
+                                si d < 0 entonces d := 0 fin
+                                si d >= ent32(n_fijados) entonces d := ent32(n_fijados) - 1 fin
+                                si d <> cogido entonces
+                                    lleva(nat32(cogido), nat32(d))
+                                    cogido := d
+                                fin
+                            fin
+                            cambia := cierto
+                        fin
+                    sino
+                        k := elemento_en(x, ent32(e.b))
+                        si k <> debajo_puntero entonces
+                            debajo_puntero := k
+                            cambia := cierto
+                        fin
+                    fin
+                caso EV_SALE:
+                    si debajo_puntero >= 0 entonces
+                        debajo_puntero := -1
+                        cambia := cierto
+                    fin
+                caso EV_RATÓN_BAJA:
+                    k := elemento_en(x, ent32(e.b))
+                    si k >= 0 entonces
+                        si e.c yb BOTÓN_DERECHO <> 0 entonces
+                            menú_de := k
+                            abrir_menú(k, ent32(e.a), ent32(e.b))
+                        sino
+                            cogido := k
+                            cog_x := ent32(e.a)
+                            movido := falso
+                        fin
+                    fin
+                caso EV_RATÓN_SUBE:
+                    si cogido >= 0 entonces
+                        si movido entonces
+                            guarda_dock()
+                        sino
+                            activa_elemento(nat32(cogido))
+                        fin
+                        cogido := -1
+                        movido := falso
+                        cambia := cierto
+                    fin
+            fin
+        fin
+        ; al día: las ventanas abiertas y la papelera (cada dos segundos, o si cambian las unidades)
+        si Ventanas.cambios <> cambios_vistos entonces
+            cambios_vistos := Ventanas.cambios
+            si mira_abiertos() entonces
+                coloca()
+                cambia := cierto
+            fin
+        fin
+        si tics - mirada_papelera > 200 o Unidades.cambios <> unidades_vistas entonces
+            si mira_papelera() <> papelera_llena entonces
+                papelera_llena := no papelera_llena
+                cambia := cierto
+            fin
+        fin
+        si cambia entonces pinta_dock() fin
+        aparta()
+    fin
+
+    ; se quita de en medio cuando una ventana tapa el sitio de su panel (no
+    ; tapa nada de nadie); vuelve cuando no lo tapa ninguna, o al acercar la
+    ; flecha a la raya de encima de la barra de tareas (y se queda mientras
+    ; la flecha esté encima)
+    función aparta()
+        variable px, pan, abajo: ent32
+        variable encima, cerca, quiere_ver: bool
+        si v_dock = 0 o no visible entonces devolver fin
+        px := dock_x + (dock_an - ancho_panel) div 2
+        pan := ancho_panel
+        abajo := dock_y + ETIQUETA + PANEL + MARGEN       ; (la barra de tareas empieza aquí)
+        encima := ratón_x >= px y ratón_x < px + pan y ratón_y >= dock_y + ETIQUETA y ratón_y < abajo
+        cerca := ratón_x >= px y ratón_x < px + pan y ratón_y >= abajo - MARGEN - 3 y ratón_y < abajo
+        si apartado entonces
+            quiere_ver := cerca o no tapado(px, dock_y + ETIQUETA, pan, PANEL)
+        sino
+            quiere_ver := encima o no tapado(px, dock_y + ETIQUETA, pan, PANEL)
+        fin
+        si quiere_ver = apartado entonces
+            apartado := no quiere_ver
+            mostrar(v_dock, quiere_ver)
+            si apartado entonces
+                debajo_puntero := -1
+                cogido := -1
+            fin
+        fin
+    fin
+
+    ; mira la papelera ya (el explorador acaba de tirar o vaciar)
+    público función mira_ya()
+        mirada_papelera := 0
+    fin
+
+    función abrir_menú(k: ent32, x: ent32, yy: ent32)
+        variable grises: nat32
+        variable px, py: ent32
+        grises := 0
+        si el[k].ventana = 0 entonces grises := grises ob (1 << 6) fin
+        si el[k].programa[0] = '*' entonces grises := grises ob 2 fin
+        si el[k].fijado entonces grises := grises ob (1 << 3) sino grises := grises ob (1 << 4) fin
+        px := x
+        py := yy
+        a_pantalla(v_dock, px, py)
+        abrir_emergente(px, py, "Abrir|Abrir otra ventana|-|Fijar en el dock|Quitar del dock|-|Cerrar la ventana|-|Ocultar el dock", grises, 0, ME_DOCK)
+    fin
+
+fin Dock.

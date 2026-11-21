@@ -230,6 +230,25 @@ módulo Udescarg
     fin
 
     ; pasa «n» octetos de la conexión al archivo (0xFFFFFFFF: hasta que se cierre)
+    ; ¿caben n octetos en la unidad del archivo? (si no se sabe lo libre, sí:
+    ; lo que no quepa lo dirá luego la escritura)
+    función cabe(n: nat32): bool
+        variable i, letra: nat32
+        variable u: Info_unidad
+        letra := nat32(archivo[0])
+        si archivo[1] <> ':' entonces letra := unidad(0) fin
+        si letra >= 'a' y letra <= 'z' entonces letra := letra - 32 fin
+        i := 0
+        mientras info_unidad(i, u) hacer
+            si nat32(u.letra) = letra entonces
+                si u.libre_k = 0xFFFFFFFF entonces devolver cierto fin
+                devolver n div 1024 + 1 <= u.libre_k
+            fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
     función copia(n: nat32): bool
         variable k: nat32
         mientras n > 0 hacer
@@ -366,6 +385,12 @@ módulo Udescarg
             devolver código
         fin
         ; el archivo
+        si no a_pantalla y con_largo y no cabe(largo) entonces
+            ; (seguridad, 21/11) lo que dice el servidor que mide no cabe: ni se empieza
+            imprimir2("DESCARGAR: %s no cabe: son %u octetos y no queda tanto sitio en esa unidad.\n", nat32(dirección(archivo[0])), largo)
+            cerrar_conexión(sock)
+            devolver 0
+        fin
         si no a_pantalla entonces
             salida := crear(archivo)
             si es_error(salida) entonces

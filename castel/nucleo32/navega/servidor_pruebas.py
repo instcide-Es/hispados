@@ -23,6 +23,8 @@ Lo que sirve:
   /api           (fetch) {"galleta": "si"} si le llegan sesion=abc y desdejs=1
   /eco           (POST) la página con lo que se ha mandado
   /pagina2.html  otra página (un bloque de color)
+  /fijo.html     position: fixed (cabecera y barra lateral, con un enlace
+                 abajo) y sticky, en una página larga
   /descarga      un archivo de 50.000 octetos «Informe anual 2026.zip»
                  (Content-Disposition: attachment)
 Lo pone en marcha pruebas.sh y lo para por su PID.
@@ -105,6 +107,28 @@ fetch('/api?visitas=' + n, { headers: { 'X-Prueba': 'fetch' } }).then(r => r.jso
 </body></html>
 """.encode()
 
+# position: fixed y sticky: una cabecera fija (roja), una barra lateral fija
+# como la de ClicGest (azul: height 100vh, overflow-y auto, z-index 100), con un
+# enlace abajo del todo, y un bloque sticky (verde) en el contenido, que es largo
+FIJO = """<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Fijos</title><style>
+body { margin: 0; font-family: sans-serif; }
+#cabecera { position: fixed; top: 0; left: 0; right: 0; height: 40px; background: #e03030; color: #fff; z-index: 10; }
+.lateral { position: fixed; top: 0; left: 0; width: 120px; height: 100vh; overflow-y: auto; background: #305080; color: #fff; z-index: 100; }
+.lateral a { color: #fff; display: block; padding: 8px; }
+#abajo { position: absolute; bottom: 10px; left: 0; }
+main { margin-left: 120px; padding-top: 40px; }
+#pegado { position: sticky; top: 40px; height: 30px; background: #20a060; }
+.banda { height: 200px; }
+.par { background: #f0f0c0; } .impar { background: #c0d8f0; }
+</style></head><body>
+<div id="cabecera">Cabecera fija</div>
+<aside class="lateral"><a href="/pagina2.html">Uno</a><a href="/pagina2.html">Dos</a><a id="abajo" href="/eco?lateral">Abajo</a></aside>
+<main><div class="banda par">arriba</div><div id="pegado">sticky</div>
+""" + ''.join('<div class="banda %s">banda %d</div>' % ('par' if k % 2 else 'impar', k) for k in range(15)) + """
+</main></body></html>
+"""
+
 PAGINA2 = """<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>La segunda</title></head>
 <body style="margin:0"><div style="background:#008b8b;height:200px;color:#fff;font-size:30px">La segunda página</div></body></html>
 """.encode()
@@ -147,6 +171,12 @@ class Pedidos(http.server.BaseHTTPRequestHandler):
             c = self.headers.get('Cookie', '')
             si = 'sesion=abc' in c and 'desdejs=1' in c
             self.da(200, 'application/json', json.dumps({'galleta': 'si' if si else 'no'}).encode())
+        elif camino == '/fijo.html':
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            pag = FIJO
+            if 'y' in q:            # (para comparar con Chrome: ya desplazada)
+                pag = pag.replace('</body>', '<script>window.scrollTo(0, %d)</script></body>' % int(q['y'][0]))
+            self.da(200, 'text/html; charset=utf-8', pag.encode())
         elif camino == '/pagina2.html':
             self.da(200, 'text/html; charset=utf-8', PAGINA2)
         elif camino == '/descarga':

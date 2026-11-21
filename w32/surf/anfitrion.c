@@ -4,7 +4,7 @@
  *  deja la página pintada en un PPM. Para probar el pintado y la maquetación
  *  (CSS, letras, rejillas) en segundos, sin QEMU: tests/run_surf_pintado_tests.sh
  *  y tools/surf_compara.sh. La red, con curl (anfitrion_rh.c).
- *    surfppm [-w ancho] [-h alto] [-entera] [-o salida.ppm] DIRECCION
+ *    surfppm [-w ancho] [-h alto] [-y desplazada] [-entera] [-o salida.ppm] DIRECCION
  *  (-entera: la página entera de alto, no solo lo que se ve)
  *  Las letras y los recursos: SURF_LETRAS (terceros/dejavu) y SURF_RECURSOS.
  *  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -53,6 +53,7 @@
 struct gui_window { struct browser_window *bw; int cargando, ext_w, ext_h; };
 static struct gui_window *ventana;
 static int pw = 780, ph = 493, hecha, hubo_carga;
+static int desp_y;    /* -y: la página, desplazada tantos puntos (position: fixed y sticky) */
 int _commit(int fd) { (void)fd; return 0; }   /* (lo usa utils/log.c [HISPA]) */
 
 void surf_reg(const char *f, ...) {
@@ -149,6 +150,7 @@ int main(int argc, char **argv) {
   for (k = 1; k < argc; k++) {
     if (!strcmp(argv[k], "-w") && k + 1 < argc) pw = atoi(argv[++k]);
     else if (!strcmp(argv[k], "-h") && k + 1 < argc) ph = atoi(argv[++k]);
+    else if (!strcmp(argv[k], "-y") && k + 1 < argc) desp_y = atoi(argv[++k]);
     else if (!strcmp(argv[k], "-o") && k + 1 < argc) sal = argv[++k];
     else if (!strcmp(argv[k], "-entera")) entera = 1;
     else dir = argv[k];
@@ -227,7 +229,7 @@ int main(int argc, char **argv) {
     nsfb_bbox_t c = { 0, 0, pw, alto };
     nsfb_plot_set_clip(lienzo, &c);
     nsfb_plot_rectangle_fill(lienzo, &c, 0xFFFFFFFF);
-    browser_window_redraw(ventana->bw, 0, 0, &clip, &ctx);
+    browser_window_redraw(ventana->bw, 0, -desp_y, &clip, &ctx);
   }
   nsfb_get_buffer(lienzo, &px, &paso);
   f = fopen(sal, "wb");

@@ -38,6 +38,15 @@ void rehaz_cajas(struct html_content *c);
 void rehaz_pide(struct html_content *c);        /* cuando se pueda (al acabar el turno) */
 void rehaz_olvida(struct html_content *c);      /* la página se va */
 void rehaz_suelta_nodo(dom_node *n);            /* un nodo sale del árbol: sus cajas, olvidadas */
+/* [HISPA] position: fixed y sticky (rehaz.c): lo desplazada que está la
+ * ventana (lo pone html_redraw: la página empieza en -hispa_fijo_x,
+ * -hispa_fijo_y), si una caja es fija, y si hay alguna en el árbol (para no
+ * desplazar moviendo lo ya pintado) */
+extern int hispa_fijo_x, hispa_fijo_y;
+struct box;
+bool box_hispa_fijo(const struct box *b);
+bool box_hispa_pegado(const struct box *b);
+bool box_hispa_hay_fijos(const struct box *raiz);
 struct form_control *html_forms_hispa_ctl(dom_node *n);   /* (forms.c [HISPA]) */
 bool rehaz_listo(struct html_content *c);
 /* lo que va por encima: position absolute o fixed con z-index > 0 (redraw.c

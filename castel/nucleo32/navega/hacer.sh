@@ -15,6 +15,7 @@ AQUI=$(dirname "$(readlink -f "$0")")
 RAIZ=$(readlink -f "$AQUI/../../..")
 SAL=$(readlink -f "${1:?uso: hacer.sh CARPETA}")
 cd "$RAIZ"
+mkdir -p build
 make -s -f castel/nucleo32/navega/navega.mk build/navega-pentium/NAVEGA.BIN > build/navega-pentium.log 2>&1 || { tail -20 build/navega-pentium.log; exit 1; }
 T=$(stat -c %s build/navega-pentium/NAVEGA.BIN)
 # (lo que el núcleo deja cargar: MAX_PROGRAMA de usuario.cas)

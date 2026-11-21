@@ -58,7 +58,7 @@ de verdad** (ACPI, S5), reiniciar por la FADT y la **batería en la bandeja**
 con su recuadro de ayuda, con el núcleo ACPI de Hispa-DOS (ACPICA) como
 servicio del anillo 3, `ACPI.BIN` (sección 11). En la bandeja caben a la vez,
 de izquierda a derecha, la memoria USB, la red, la pila y el reloj. Todo está
-en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`). Y la tarde del 20/11: las **actualizaciones por Internet** (`actualiza.hispados.es/pentium/`), con el catálogo **firmado** (Ed25519, en Castel), la ventana con su barra, el aviso al arrancar y el **núcleo nuevo con vuelta sola al de antes** si no arranca (sección 13); y el **CD (o DVD) de instalación**, que vale para VirtualBox (sección 12).*
+en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`). Y la tarde del 20/11: las **actualizaciones por Internet** (`actualiza.hispados.es/pentium/`), con el catálogo **firmado** (Ed25519, en Castel), la ventana con su barra, el aviso al arrancar y el **núcleo nuevo con vuelta sola al de antes** si no arranca (sección 13); y el **CD (o DVD) de instalación**, que vale para VirtualBox (sección 12). Y el 21/11: **los CD y los DVD** (ATAPI por IDE y por AHCI, y los lectores USB; ISO 9660 con Joliet y Rock Ridge, meter y sacar el disco en marcha, «Expulsar») y **las imágenes de disco** (.ISO, .CUE/.BIN, .IMG) montadas como una unidad más (sección 7, «Los CD y los DVD»).*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -227,6 +227,7 @@ cuarta parte, los discos y el USB).
 | `ajustes.cas` (Ajustes) | Los **ajustes de un sistema instalado** (`\HISPA\HISPA.INI`): el nombre del usuario y del equipo y el teclado (sección 12). |
 | `usuario.cas` (Usuario) | Los **programas del anillo 3**: los carga **del disco** (o de los módulos de multiboot) en su espacio de direcciones y atiende la **llamada al sistema** (`int 0x80`, sección 6). |
 | `video.cas` (Video) | El **modo gráfico**: el que haya dejado el cargador (multiboot) o el de la **VBE de Bochs/QEMU**; la memoria de la pantalla, a la vista del núcleo; y, si el modo no es de 32 bits, el volcado a 24 o a 16 (sección 10). |
+| `edid.cas` (Edid) | Lo que dice la **pantalla** de sí misma (su EDID): en QEMU, de su tarjeta; en las Intel, por el DDC con el GMBUS; la nativa, lo más grande y su nombre (sección 10). |
 | `grafico.cas` (Grafico), `letra.cas` (Letra) | **Dibujar**: los lienzos; rectángulos, degradados, esquinas redondas, líneas, círculos, el disquete de la casa, texto con la **letra de 8x16** (la de Hispa Ventanas, hecha por `hazletra.py`) y copiar de un lienzo a otro. |
 | `raton.cas` (Raton) | El **ratón** (el PS/2, por la IRQ 12, o uno USB): dónde está la flecha y la cola de clics. |
 | `ventanas.cas` (Ventanas) | El **gestor de ventanas**: un lienzo por ventana, el marco, el orden, componer solo lo que cambia con doble búfer, la flecha (y sus formas), mover y **cambiar de tamaño**, y repartir el ratón y las teclas. |
@@ -237,6 +238,7 @@ cuarta parte, los discos y el USB).
 
 | `energia.cas` (Energia) | **Apagar de verdad, reiniciar y la batería**: las llamadas del servicio de ACPI (`ACPI.BIN`, un programa del anillo 3 con ACPICA) y la 154; apagar por ACPI (S5) y reiniciar (FADT, 8042, CF9h); la pila de la bandeja y su recuadro de ayuda (sección 11). |
 | `dispositivos.cas` (Dispositivos) | **Lo que hay en el equipo y qué lo lleva** (desde la 0.8.3): las llamadas 155 (la lista, de solo lectura) y 156 (lo que apuntan los servicios del anillo 3), para el Administrador de dispositivos (sección 10). |
+| `win32.cas` (Win32) | [WIN32] **Lo de los programas de Windows** (sección 14 quater): las llamadas 180 a 182 (páginas en cualquier sitio de la zona del programa, el mapa de las teclas, las ventanas sin marco o a pantalla completa). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
 
 Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
@@ -453,13 +455,24 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 68 | **los ajustes** (`HISPA.INI`): EBX = 0, leerlos otra vez; 1, el nombre del usuario, a ECX; 2, ¿está el sistema instalado en el disco?; 3, el nombre del equipo | `releer_ajustes`, `nombre_usuario`, `sistema_instalado`, `nombre_equipo` | |
 | 130 | **quitar con seguridad** la memoria USB de la unidad de letra EBX (desde la 0.8): lo pendiente se escribe, la memoria se para y sus unidades dejan de estar | `quitar_memoria` | 0 (`QUITADA`), ya se puede quitar; 1, no hay tal unidad; 2, no es una memoria USB; 3 (`ES_DEL_SISTEMA`), el sistema corre desde ella |
 | 131 | las veces que han **aparecido o desaparecido unidades** (además, a las ventanas de los programas les llega `EV_UNIDADES`) | `cambios_unidades` | ese número |
+| 170 | (explorador, 21/11) **los atributos** del archivo o la carpeta de nombre EBX: con ECX = 0xFFFFFFFF, solo leerlos; si no, poner los de solo lectura, oculto, de sistema y archivo (`0x27`: los de carpeta y volumen no se tocan) | `atributos_de`, `poner_atributos` | los que quedan, o un error |
+| 171 | (explorador) **lo soltado fuera de la ventana**: EBX, la ventana (suya); ECX, una `Suelta` (el punto, dentro de la ventana, y una ruta entera con su letra). Lo recoge el escritorio: en el dock, se fija (o va a la Papelera); en el tapiz, un acceso nuevo | `soltar_fuera` | 0 (`EN_USO` si aún no ha recogido el de antes) |
 | 80 | **colocar la ventana** EBX (suya) con su esquina en (ECX, EDX) de la pantalla; con ECX = 0xFFFFFFFF, en el centro (encima de la barra de tareas). La usa HVPRUN (sección 10, «La oficina de Hispa-386») | — | 0 |
 | 90-98 | **la red**: pedir al servicio de red (90) y lo del propio servicio (91 a 96, 98); cómo está (97). Las cuenta la sección 14 | `redes.cas` | |
+
+| 180-182 | [WIN32] **los programas de Windows** (`WIN32.BIN`, sección 14 ter): poner y quitar páginas en cualquier sitio de la zona del programa (180), las teclas pulsadas ahora y desde la última vez (181), y las ventanas: hacerlas sin marco o a pantalla completa, colocarlas, traerlas delante, dónde están, el ratón (182) | — | |
 
 | 150-153 | **solo el servicio de ACPI** (`ACPI.BIN`): puertos, memoria física, configuración PCI, y dar la batería y esperar órdenes (sección 11, «Apagar de verdad y la batería») | — | |
 | 154 | **la batería**: lo último que ha leído el servicio de ACPI (una `Energía`, `energia.cas`) a EBX | — | 1, o 0 si no hay servicio |
 | 155 | (dispositivos) **la lista de los dispositivos** y qué los lleva: hasta ECX fichas `Dispositivo` (320 octetos, `dispositivos.cas`) a EBX. Solo lee | `lista_dispositivos` | cuántos hay (aunque no quepan) |
 | 156 | (dispositivos; **solo los servicios**: `ACPI.BIN`, `RED.BIN`) apuntar la ficha de EBX (ECX = 0) u olvidar las suyas (ECX = 1) | — | 0 |
+
+(La 15 con `DATO_ALTO_LIBRE`, el 14, da lo alto de la pantalla sin la barra
+de tareas ni el dock: así una ventana grande puede quedar encima del dock. La
+12 y la 28 dan además, en lo que antes iba a cero, la fecha del último
+acceso (`reservado`) y la fecha y la hora en que se hizo el archivo (`libre`:
+abajo la fecha, arriba la hora). La 22 lleva también **carpetas** a otra
+carpeta de la misma unidad: se pone bien su «..»; no dentro de sí misma.)
 
 (La 11, con ECX = 1, no se queda esperando: da `SIGUE` si la tarea no ha acabado
 —`acabada`—. La 15 da además el ancho y el alto de la pantalla gráfica y si el
@@ -745,6 +758,127 @@ enseña a la derecha, y un archivo o una carpeta se puede **abrir por su nombre
 largo** (sin distinguir mayúsculas) igual que por el corto. Al borrar o cambiar de
 nombre, los trozos se tachan con la entrada (que no queden sueltos).
 
+### Los CD y los DVD, y las imágenes de disco (21/11)
+
+Carlos, con la 0.8.1 en VirtualBox: «Hispa-Pentium no reconoce los DVD». Hasta
+aquí el CD de instalación lo cargaba GRUB entero en la memoria (la unidad M:) y
+el núcleo no sabía leer un lector. Ahora lee **CD y DVD de datos**, por las tres
+vías, y **monta imágenes de disco** como si fueran un CD más.
+
+**Los lectores** (todos hablan las órdenes SCSI de los lectores, MMC, que arma
+`cdrom.cas`):
+
+- **IDE** (`atapi.cas`): los **dos canales** (el primario, `0x1F0`/`0x3F6`, y el
+  secundario, `0x170`/`0x376`), maestro y esclavo: donde no hay un disco duro se
+  pregunta con **IDENTIFY PACKET DEVICE** (A1h), y si es ATAPI de la clase 5
+  (CD/DVD), se apunta con su modelo. Cada orden es **PACKET** (A0h) y, detrás,
+  el paquete de 12 octetos por el puerto de datos; los datos vienen por **PIO**
+  en tandas (el lector dice en LBA_MEDIO/ALTO cuántos octetos trae cada vez; lo
+  que no se quiere se tira). En el canal primario se usa el cerrojo de
+  `ata.cas` (`toma_canal`/`suelta_canal`). Es donde pone **VirtualBox** su lector
+  (el secundario maestro), y muchos PC de los 2000.
+- **SATA** (`ahcicd.cas`): los puertos con la firma **EB140101**. `ahci.cas` solo
+  los apunta (y los para, que no usen las tablas de los discos: una línea en
+  `mira_puerto` y tres funciones al final, para que la fusión con la rama del
+  SATA sea fácil); `ahcicd.cas` les da sus tablas y ocho páginas para los datos
+  (16 sectores de 2048 por orden, un PRD por página) y manda **PACKET con el bit
+  «A»** en la cabecera de la orden y el paquete en **ACMD** (0x40 de la tabla),
+  con los datos por **DMA**. Si falla, el registro de error (en TFD) dice la
+  clave, y el puerto se para y se vuelve a arrancar.
+- **USB** (`usbalm.cas`): un aparato de almacenamiento cuyo INQUIRY dice
+  **clase 5** es un lector (sin disco puede no estar listo ni decir cuánto mide:
+  no se le pregunta al enchufarlo); se aceptan también las subclases 02 (ATAPI)
+  y 05 (SFF-8070i) de los lectores USB de antes. Las órdenes van en el mismo
+  envoltorio (CBW) que las de las memorias, con su largo de verdad (6, 10 o 12),
+  dos sectores por orden. Enchufar y desenchufar en marcha va por
+  `usbcal.cas`, como las memorias («Lector de CD conectado: F:»).
+
+**Las órdenes** (`cdrom.cas`): TEST UNIT READY (¿hay disco y está listo?),
+REQUEST SENSE (por qué no: 02/3A «no hay disco», 02/04 «se está poniendo a
+girar», **06/28 «se ha cambiado el disco»**), READ CAPACITY, **READ TOC** (si la
+primera pista es de sonido, es un **CD de música**: se dice, y no se cuelga
+nada; escucharlo, otro día), READ(10) (de 16 en 16 sectores por IDE y SATA, de
+2 en 2 por USB; con tres intentos, salvo si el disco ya no está) y, para
+**expulsar**, PREVENT ALLOW MEDIUM REMOVAL y START STOP UNIT (LoEj).
+
+**La capa de discos**: un lector es un disco más, de la clase **DE_CD**, con
+sectores de **2048** (el campo nuevo `bloque` de cada disco) y tantos como el
+disco que tenga (0 sin disco). No se escribe en él nunca (ni con «escritura»),
+INSTALAR no lo ve (la llamada 63 lo salta) y la 64 no lee de él.
+
+**ISO 9660** (`iso.cas`), de solo lectura, como un volumen más de `fat.cas`
+(que sigue llevando todos los archivos abiertos: un volumen ISO lleva «iso» en
+su ficha y, para él, `fat.cas` pide a `iso.cas` lo suyo; los cambios en
+`fat.cas` van marcados con «(CD)»). Se miran los descriptores desde el sector
+16: el primario (su nombre, lo que mide, la raíz) y, si lo hay, el
+suplementario de **Joliet** (escapes `%/@`, `%/C`, `%/E`): con él, los nombres
+largos (UCS-2, a la página 437) y el nombre del volumen. Sin Joliet, **Rock
+Ridge** si lo hay (el «SP» del «.» de la raíz; los nombres de las entradas
+**NM**, de UTF-8 a la 437); si no, los nombres de siempre (sin el `;1` ni el
+punto del final). Cada entrada lleva además un **nombre corto** hecho del largo
+como Windows (`documento-de-prueba-largo.txt` es `DOCUME~1.TXT`), y se abre por
+los dos. Las fechas pasan a las de la FAT; todo sale con el atributo de solo
+lectura. Se lee de sector en sector (con uno guardado) y, los sectores enteros,
+derechos a donde se piden, de 32 en 32.
+
+**Las letras** (`unidades.cas`): cada lector tiene **la primera letra libre tras
+los discos de dentro** (D: si hay un disco duro, aunque no tenga FAT; la C: si
+no hay ninguno), como en Hispa-DOS, y **se le queda aunque no tenga disco**. Un
+CD nunca es la unidad del sistema (el CD de instalar sigue siendo M:, en la
+memoria; su lector, además, es D:).
+
+**Meter y sacar el disco** (`cdcal.cas`): una tarea del núcleo, `cd-cambios`, le
+pregunta a cada lector **cada dos segundos** qué tiene. Si llega un disco de
+datos, se monta con la letra del lector; si se va, o se cambia por otro (el
+«06/28»), su unidad deja de estar (los archivos abiertos en ella dan error y los
+programas que trabajaban en ella pasan a la unidad del sistema) y, si es otro,
+se monta el nuevo. Se avisa en la **bandeja** («CD insertado: D:», «DVD
+insertado: D:», «CD retirado: D:», «CD de música en D:», «El disco de D: no se
+puede leer»): los avisos llegan con los del USB (los saca `usbcal.cas`), con un
+disco dibujado y «CD y DVD» de título; y a las ventanas les llega EV_UNIDADES.
+**Expulsar** (la llamada 132, la orden `EXPULSAR D:` o el menú de la unidad en
+Mi equipo): la unidad deja de estar y se abre la bandeja.
+
+**Las imágenes de disco**: `MONTAR X:\DISCOS\ALGO.ISO` (o dos clics en el
+archivo en Mi equipo, o «Montar» en su menú) la monta como una unidad más, con
+la **primera letra libre**, y Mi equipo entra en ella. Valen las **.ISO**
+(sectores de 2048), las **.BIN en crudo** (de 2352: MODE1, los datos desde el
+16, o MODE2, desde el 24) y su hoja **.CUE** (se lee el `FILE "..." BINARY`), y
+las **.IMG** (.IMA, .VFD) de disquete o de disco duro, con FAT. Cómo: se apunta
+dónde está el archivo **en su disco** (`fat.cas`, `trozos_archivo`: la cadena de
+clusters, hecha trozos seguidos; en un CD, un trozo) y la imagen es un disco
+más, de la clase **DE_IMAGEN** (`discos.cas`), que lee de esos sectores por
+debajo de la FAT (sin abrir el archivo: la FAT no se llama a sí misma). Vale con
+la imagen en cualquier unidad (C:, una memoria USB, un CD, otra imagen); un
+archivo en más de 96 trozos no se monta (se dice). **Si se va el disco donde
+está el archivo** (se desenchufa la memoria, se saca el CD, se quita con
+seguridad), la imagen **se desmonta sola** («Imagen desmontada: F: (su disco se
+ha ido)»). `DESMONTAR F:` (o «Expulsar») la quita; `MONTAR` sin nada dice los
+lectores (con lo que tienen) y las imágenes montadas.
+
+**Mi equipo**: los lectores salen con su letra aunque no tengan disco (detrás de
+las unidades), con un **disco dibujado**: «Unidad D:  PRUEBA_CD», «lector de CD o
+DVD: QEMU DVD-ROM», «670 K, ISO 9660 (de solo lectura)», o «sin disco», «un CD
+de música», «el disco no se puede leer». Una imagen sale como **«CD virtual: la
+imagen C:\DISCOS\PRUEBA.ISO»** (o «disco virtual», una .IMG), con el disco
+dentro de un **marco de puntos** (se distingue por la forma y por el texto, no
+solo por el color). El menú de una unidad de CD o de una imagen: «Abrir|Expulsar».
+
+Las llamadas nuevas: **132** (expulsar la unidad de la letra EBX: el lector abre
+la bandeja; la imagen se desmonta) y **133** (montar la imagen del archivo EBX:
+da su letra, o 1 no está, 2 no es una imagen que se pueda leer, 3 demasiados
+trozos, 4 no caben más, 5 está en M:). En `Info_unidad` (la 43): `medio` 4 es un
+lector de CD (MEDIO_CD) y 5 una imagen (MEDIO_IMAGEN); `clase` 9 es ISO 9660;
+`quitable` 2, que se puede expulsar; y `relleno[0]`, lo que tiene el lector (0
+nada, 1 datos, 2 música, 3 no se lee).
+
+**Lo que falta**: escuchar los CD de música (READ CD y el sonido); UDF (los
+DVD que solo lo llevan; los de vídeo y casi todos los de datos llevan también
+ISO 9660); los archivos de varios trozos (de más de 4 GB) de ISO 9660 y las
+entradas CE de Rock Ridge; GET EVENT STATUS NOTIFICATION (hoy, TEST UNIT READY
+cada dos segundos, que vale en todos); grabar. Y probarlo en VirtualBox y en un
+PC de verdad con un lector IDE y uno SATA.
+
 ## 8. El intérprete de órdenes
 
 `uordenes.cas` (`ORDENES.BIN` en el disco): **un programa del anillo 3**, escrito
@@ -933,7 +1067,7 @@ propio, con sus tildes y su eñe).
 - **«Apagar el equipo»**: Apagar, Reiniciar o Cancelar. Apagar deja la pantalla de
   «Ya puede apagar el equipo» (en QEMU, además, lo apaga).
 - **Configuración**: lo que hay (la pantalla, la memoria, las tareas), el teclado
-  (español o de EE. UU.) y el tapiz; y, junto a la pantalla, **«Cambiar...»**: la
+  (español o de EE. UU.), el tapiz y el dock (visible u oculto); y, junto a la pantalla, **«Cambiar...»**: la
   medida de la pantalla, en el momento donde la tarjeta lo deja y, si no, al
   arrancar (más abajo, «La medida de la pantalla»). **Acerca de Hispa-Pentium**: la versión y la
   licencia.
@@ -954,15 +1088,12 @@ propio, con sus tildes y su eñe).
   **Pegar** teclea lo del portapapeles. Lo seleccionado se suelta en cuanto se
   escribe algo en la pantalla. Menús: Archivo (Cerrar), Edición (Copiar, Pegar,
   Seleccionar todo) y Ayuda (las órdenes: teclea `AYUDA`).
-- **Mi equipo** (`EQUIPO.BIN`, `uequipo.cas`): **las unidades** del equipo, una
-  debajo de otra, cada una con su letra y su nombre, de qué es («disco duro
-  (SATA)», «memoria USB», «en memoria»), su FAT, lo que mide, lo que le queda y
-  si es de solo lectura; y, detrás, los discos en los que no hay nada que se
-  pueda leer («sin ninguna partición FAT»: el disco de un PC con Windows en
-  NTFS, por ejemplo). Con dos clics se entra en una unidad: sus carpetas y sus
-  archivos, con su tamaño. Dos clics en una carpeta entran en ella; en «..», se
-  vuelve; un texto (`.TXT`, `.BAT`) lo abre el Bloc de notas; un programa
-  (`.BIN`) se lanza. Las flechas, Intro y Retroceso también valen.
+- **Mi equipo** (`EQUIPO.BIN`, `uequipo.cas`), desde el 21/11/2026 **el
+  explorador de archivos**: el árbol de las unidades y las carpetas, cuatro
+  vistas, copiar, cortar y pegar, la Papelera, buscar, Propiedades, Abrir
+  con... y las miniaturas (más abajo, «El explorador de archivos»).
+- **El dock**: los programas fijados y los abiertos, centrado encima de la
+  barra de tareas (más abajo, «El dock»).
 
 ### Cómo está hecho
 
@@ -1172,7 +1303,7 @@ excepción) sale por el **puerto serie**, como siempre.
 Lo pidió Carlos el 21/11: qué hay en cada equipo, qué controlador de
 Hispa-Pentium lo lleva y qué falta, y **un informe para mandarlo** desde
 cada portátil del taller. Se abre desde **Inicio › Configuración ›
-«Administrador de dispositivos...»** y desde **el botón secundario en «Mi
+«Dispositivos...»** y desde **el botón secundario en «Mi
 equipo» › Propiedades** (`DISPOSIT.BIN`, `udisposi.cas`, hecho con los
 controles de `controles.cas`).
 
@@ -1258,6 +1389,218 @@ nombres PnP) van en unas tablas de texto de `udisposi.cas`: lo que se conoce
 (QEMU, VirtualBox, VMware, Intel PIIX/ICH7/ICH9/NM10/Bay Trail, las Wi-Fi de
 Intel, Broadcom y Atheros, Realtek, Marvell, VIA, SiS...) y, si no está, el
 fabricante y la clase («Realtek: Tarjeta de red (Ethernet)»).
+
+### El explorador de archivos: `EQUIPO.BIN` (21/11)
+
+| | |
+|---|---|
+| ![Mi equipo: el árbol y las unidades](pentium/explorador-equipo.png) | ![Una carpeta, en iconos](pentium/explorador-iconos.png) |
+| ![Detalles: la rejilla, ordenada por el nombre](pentium/explorador-detalles.png) | ![Miniaturas de BMP, PNG y JPG](pentium/explorador-miniaturas.png) |
+| ![Elegir varios con el recuadro del ratón](pentium/explorador-recuadro.png) | ![El menú del botón secundario](pentium/explorador-menu.png) |
+| ![La Papelera](pentium/explorador-papelera.png) | ![Buscar por el nombre](pentium/explorador-buscar.png) |
+
+Lo pidió Carlos el 21/11 («actualizar el explorador de archivos, dock… lo
+que necesitemos para estar a la altura de un sistema operativo»). «Mi
+equipo» (`EQUIPO.BIN`) pasa a ser un **explorador** de los de verdad: un
+programa del anillo 3 hecho con los controles de las ventanas
+(`controles.cas`: la barra de menús, la de herramientas, la dirección, la
+rejilla de los detalles, los botones y las casillas de los cuadros), con lo
+que hace con los archivos aparte (`exoper.cas`, sin pintar nada) y los
+iconos dibujados (`iconos.cas`, que comparte con el dock).
+
+**Lo que se ve.** Arriba, la **barra de menús** (Archivo, Edición, Ver, Ir,
+Herramientas, Ayuda: Alt y su letra la abren; con las flechas a los lados,
+al menú de al lado), la de **herramientas** (Atrás, Adelante, Subir, Buscar,
+Cortar, Copiar, Pegar, Borrar, Carpeta nueva y Vistas; en gris lo que no
+toca) y la **dirección** (`C:\TEXTOS`, `Mi equipo`, `Papelera`), que se
+puede escribir (Intro va; vale sin la letra). A la izquierda, el **árbol**:
+Mi equipo con sus unidades (cada una con su icono: disco duro, memoria USB,
+CD, en memoria) y sus carpetas (por orden; el `[+]` y el `[-]` son un
+cuadrito con su signo, no un color), y la Papelera. A la derecha, lo que hay
+donde se está; abajo, la **barra de estado** (cuántos hay, cuántos elegidos
+y lo que miden, lo libre de la unidad o «De solo lectura»).
+
+**Las vistas** (Ver, Vistas o F8): **miniaturas** (las imágenes en pequeño;
+lo demás, su icono grande), **iconos**, **lista** (en columnas) y
+**detalles** (la rejilla de `controles.cas`: nombre, tamaño, tipo y fecha de
+modificación; un clic en el rótulo ordena, otra vez al revés, con su
+triángulo). Las carpetas van siempre delante; el tamaño y la fecha se
+ordenan por su número. En Mi equipo, cada unidad en un mosaico con lo libre,
+de cuánto, y una barra; en la Papelera, de dónde era y cuándo se borró; al
+buscar, en qué carpeta está.
+
+**Elegir.** Un clic elige uno; **Control y un clic** añade o quita;
+**Mayús y un clic**, desde el anterior hasta ahí; **un recuadro con el
+ratón** desde un sitio sin nada, los que toca (con Control, se suman). Con
+el teclado: las flechas (en iconos, también arriba y abajo por filas),
+Inicio, Fin, Re Pág, Av Pág; **con Mayús, eligiendo**; **Espacio** elige o
+suelta el del cursor; Ctrl+A, todos. Lo elegido, **letra blanca sobre
+azul**; el cursor, **un borde** alrededor (no solo el color).
+
+**Abrir.** Dos clics o Intro: una carpeta, se entra; un archivo, **con lo
+suyo**: las **asociaciones** de `ASOCIA.TXT` (`\HISPA\ASOCIA.TXT` en un
+sistema instalado; si no, `\ASOCIA.TXT`): un texto en la página 437, una
+línea por extensión, `EXT=programa|argumentos`, donde `%1` es el archivo
+(`TXT=\BLOC.BIN|%1`, `PLU=\HVPRUN.BIN|\OFICINA\PLUMA.HVP %1`, `BIN=%1|`).
+Sin él, las de siempre (el Bloc, HVPRUN con la oficina, Mirador para las
+imágenes). **Abrir con...** saca la lista de los programas (los de siempre
+y los de los paquetes, sus `.MNU`), o se escribe otro; con «Abrir siempre
+los .EXT con este», lo guarda en `ASOCIA.TXT`. Herramientas > Las
+asociaciones lo abre en el Bloc de notas.
+
+**Copiar, cortar y pegar** (Ctrl+C, Ctrl+X, Ctrl+V, Edición, las
+herramientas o el menú del botón secundario): va por **el portapapeles del
+sistema** (un texto que empieza por `\x01ARCHIVOS COPIAR` o `CORTAR` y una
+ruta por renglón), así que de una ventana del explorador a otra también.
+**Arrastrar** lo elegido a una carpeta (de lo de dentro o del árbol) lo
+**lleva** allí (en otra unidad, o con Control, lo **copia**); mientras se
+arrastra, un rótulo con lo que va junto a la flecha y un borde verde en la
+carpeta donde caería. **Fuera de la ventana**: en el **tapiz**, un acceso
+(un icono con la flechita, que lo abre con lo suyo; se lleva a otro sitio
+arrastrándolo y el botón secundario lo quita: `ATAJOS.INI`); en el
+**dock**, un programa (`.BIN`) se fija, y en su Papelera, se tira. (Va lo
+primero de lo elegido: la llamada 171.)
+
+**El trabajo** (`exoper.cas`): copiar, mover, mandar a la Papelera, borrar
+del todo, restaurar y vaciar. Primero se apunta todo lo que hay que hacer
+(las carpetas, enteras, de una en una: así solo hay un archivo abierto a la
+vez y se sabe cuánto es) y luego se hace **a pasos cortos** (un trozo de 16
+K, una carpeta, un nombre), con **un cuadro con la barra de progreso** (lo
+que va, cuál de cuántos y el tanto por ciento, en número además de la
+barra) y **Cancelar** (o Esc: lo que iba por la mitad se quita). Si el
+destino ya existe: **«¿Se reemplaza?»**: Reemplazar, Saltar, A todos,
+Saltar todos o Cancelar. Mover en la misma unidad solo cambia el sitio (la
+llamada 22, también con carpetas); a otra, copia y borra. Copiar en la misma
+carpeta hace `NOMBRE~1.EXT`. Una carpeta no se lleva dentro de sí misma.
+Lo que no ha ido bien sale en la barra de estado.
+
+**Cambiar el nombre** (F2) y **Carpeta nueva** (F7, Ctrl+N): un cuadro con
+el nombre (lo primero que se escribe sustituye al que había). De momento,
+**8 letras, un punto y 3 más** (la FAT de Hispa-Pentium aún no escribe
+nombres largos; los lee y los enseña). **Propiedades**: el nombre (y el
+corto), el tipo, dónde está, el tamaño (de una carpeta, todo lo de dentro:
+cuántos archivos y carpetas), cuándo se hizo, cuándo se cambió y el último
+acceso, y **los atributos** (solo lectura, oculto, archivo: casillas que se
+pueden cambiar; «es del sistema», si lo es); de una unidad, su tipo, su FAT,
+la capacidad, lo libre y lo ocupado, el disco y si se puede escribir.
+
+**La Papelera.** Supr manda lo elegido a `\PAPELERA` de su unidad (una
+carpeta oculta y de sistema que se hace la primera vez), con un nombre
+propio (`D1234567.EXT`) y una línea en `\PAPELERA\INDICE.TXT` (el nombre de
+dentro, de dónde era, su nombre y cuándo se borró). La Papelera del árbol
+junta las de todas las unidades: **Restaurar** lo devuelve a donde estaba
+(haciendo su carpeta si ya no está), **Borrar del todo** y **Vaciar la
+Papelera** preguntan antes. **Mayús+Supr** borra del todo sin pasar por
+ella (preguntando). En las unidades de solo lectura (el permiso de
+escritura de cada disco: «escritura», «escritura=usb»; los CD; la unidad en
+memoria) no se borra, ni se pega, ni se cambia nada: sale en gris y lo dice.
+
+**Buscar** (F3, Ctrl+F, la herramienta): el panel de la izquierda pasa a
+ser el de buscar: el nombre o un trozo (sin mirar mayúsculas ni tildes; con
+`*` y `?`, como en el DOS), «También dentro» (las subcarpetas), y Buscar.
+Busca en la carpeta en que se está (en Mi equipo, en todas las unidades);
+Esc para. Lo encontrado sale en detalles, con su carpeta; se abre, se
+copia o se borra como lo demás. «Carpetas» vuelve al árbol.
+
+**Las miniaturas**: **`MINIAT.BIN`** (`nucleo32/miniat/`: `miniat.c` con
+**stb_image**, de `terceros/stb`, en C, como TLS.BIN), un programa aparte
+que lee la imagen (BMP, PNG, JPG, GIF, TGA, PSD, PNM), la deja en 64 x 64
+como mucho (con su forma; lo transparente, sobre blanco) y la escribe en un
+archivo (`HPMI`, el ancho, el alto y los puntos), en la primera unidad en
+la que se pueda escribir (`X:\MINIAT.TMP`, que el explorador no enseña y
+borra). El explorador lo lanza para cada imagen que se ve, de una en una y
+sin esperar (sigue respondiendo mientras), y guarda hasta 120 en su
+memoria. Sin `MINIAT.BIN`, o sin sitio, el icono de imagen.
+
+**Las unidades que van y vienen**: con `EV_UNIDADES` (una memoria USB que
+se enchufa o se quita, un CD que se mete o se saca, una imagen que se
+monta o se desmonta: `MEDIO_CD`, el 4, y `MEDIO_IMAGEN`, el 5, con el icono
+del CD) se vuelven a leer el árbol y Mi equipo; si se estaba en una que ya
+no está, a Mi equipo, diciéndolo. El botón secundario en una memoria USB:
+«Quitar con seguridad»; en un CD o una imagen montada, «Expulsar» (la
+llamada 132). Un lector sin disco dice «sin disco» (o «un CD de música», o
+que no se lee) en su tipo y al abrirlo. **Una imagen de disco** (`.ISO`,
+`.CUE`, `.IMG`, `.IMA`) se **monta** al abrirla (dos clics, Intro, o
+«Montar» en su menú: la llamada 133) y se entra en ella: sale en Mi equipo
+con su nombre y «CD virtual: 670 K, ISO 9660» (si no tiene nombre, «CD virtual (E:)»).
+
+**El teclado entero**: Tab y Mayús+Tab (la dirección, Ir, el árbol, lo de
+dentro), las flechas, Intro (abrir), Retroceso (subir), Supr y Mayús+Supr,
+F1 (las teclas), F2, F3, F4 o Ctrl+L (la dirección: lo que se escribe la
+sustituye), F5 (actualizar), F6 (el árbol o lo de dentro), F7, F8 (otra
+vista), F9 (el menú de lo elegido), F10 (el menú Archivo), Alt y la letra
+de cada menú, Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V. En el árbol: arriba y abajo
+(va a la carpeta), la derecha abre (y baja), la izquierda cierra (o sube).
+En los cuadros: Tab, Intro, Espacio y Esc.
+
+```
+EQUIPO                 Mi equipo
+EQUIPO C:\CARPETA      abre ahí (también sin la letra)
+EQUIPO /PAPELERA       la Papelera
+EQUIPO /ABRIR RUTA     abre ese archivo con lo suyo (una carpeta: ahí); sin ventana (los accesos del tapiz)
+EQUIPO /BORRAR RUTA    lo manda a la Papelera, sin ventana (la Papelera del dock)
+```
+
+**Lo de `controles.cas` que ha hecho falta** (sin duplicar: lo genérico va
+en el sistema): la rejilla con **icono** delante del nombre
+(`Renglón.icono`, `letra`), **varios elegidos** (`g.varios`,
+`Renglón.marcado`; `sel` es el cursor), un **grupo** que va siempre delante
+(las carpetas), las columnas que **se ordenan por un número**
+(`g.col_clave`, `col_clave2`: `Renglón.clave`, `id2`), `rejilla_en` (el
+renglón en un punto, sin elegirlo), `rejilla_caben`, `rejilla_de_vista`; los
+iconos de herramienta `I_SUBIR`, `I_CORTAR`, `I_COPIAR`, `I_PEGAR`,
+`I_CARPETA` y `I_VISTAS`; y `alto_pedido`/`ancho_pedido` para la medida de
+la ventana. En el emergente, **CON_FLECHAS** en la etiqueta de un menú:
+las flechas a los lados lo cierran con `A_LA_IZQUIERDA` o `A_LA_DERECHA`.
+
+### El dock (21/11)
+
+| | |
+|---|---|
+| ![El dock, un acceso soltado en el tapiz y un programa abierto](pentium/dock-tapiz.png) | ![El menú del dock](pentium/dock-menu.png) |
+
+Una barra de lanzamiento con **iconos grandes** (40 puntos), centrada abajo,
+encima de la barra de tareas: un panel azul con los bordes redondos y la
+raya verde de la casa (lo que aprobó Carlos: «bordes redondeados, azules,
+verdes»). Lleva los **programas fijados** (Mi equipo, el Bloc de notas, la
+Consola, Programas y actualizaciones, Configuración y la Papelera, si no se
+dice otra cosa) y, detrás de una raya, **los abiertos que no lo están**
+(con el nombre de su ventana). Debajo de cada programa abierto, **un
+punto**; bajo el de la ventana de delante, además, **una raya** (formas, no
+colores). Con la flecha encima, el icono se resalta y su **nombre** sale en
+una etiqueta. **Un clic** lo abre o trae su ventana (si ya era la de
+delante, la recoge, como su botón de la barra de tareas). **El botón
+secundario**: Abrir, Abrir otra ventana, Fijar en el dock, Quitar del dock,
+Cerrar la ventana y Ocultar el dock (en gris lo que no toca). Un icono
+fijado **se arrastra** a lo largo del dock para cambiarlo de sitio. Lo que
+se suelta desde el explorador: un programa se fija; en la Papelera (que
+cambia de icono cuando tiene algo), se tira.
+
+Se guarda en **`DOCK.INI`** (`\HISPA\DOCK.INI`, o `\DOCK.INI` en un sistema
+sin instalar; si no se puede escribir, solo dura hasta apagar):
+
+```
+visible=si
+fijado=\EQUIPO.BIN||Mi equipo|12
+fijado=\EQUIPO.BIN|/PAPELERA|Papelera|13
+```
+
+(el programa, sus argumentos, su nombre y la clase de su icono; con 0, el de
+su paquete —su `.ICP`— o una ventanita). En **Configuración**, «Dock:
+Visible / Oculto» (en la 0.8.4, en su fila, y debajo «Dispositivos...»,
+«Red y Tailscale...» y «Cerrar»). Cómo está hecho (`dock.cas`, en el núcleo, con
+`iconos.cas`): una ventana sin marco, siempre delante y **TRASLÚCIDA**
+(una bandera nueva del gestor: sus puntos con el octeto de arriba puesto no
+se ven ni se pulsan, y dejan ver y pulsar lo de debajo: así el panel es
+redondo y la etiqueta no tapa nada). **No tapa nada de nadie**: cuando una
+ventana ocupa el sitio de su panel (una maximizada, un cuadro grande de
+un programa), el dock **se aparta**; vuelve cuando el sitio queda libre, o
+al llevar la flecha a la raya de justo encima de la barra de tareas (y se
+queda mientras la flecha esté encima). Un programa que quiera caber encima
+del dock lo sabe con `DATO_ALTO_LIBRE` (`Ventanas.alto_dock`): así se
+pone el explorador. Sabe qué está abierto mirando las
+ventanas y el nombre (y los argumentos) de la tarea de cada una; lo que se
+pulsa se lo pide al escritorio (`Dock.pide`: lanzar o Configuración).
 
 ### La medida de la pantalla, desde Configuración (20/11)
 
@@ -1436,12 +1779,97 @@ no se da por buena y que GRUB deshace sola al reiniciar a lo bruto. Y,
 instalado con `-vga std`, «Mantener» que se guarda; y con `-vga vmware`, 1200 x
 800 (que su BIOS no da) puesta por el núcleo al arrancar.
 
+### La pantalla, por su EDID; y la memoria USB (21/11)
+
+Lo que dijo Carlos con el **HP Mini 5103** de verdad (GMA 3150, panel de
+1024 x 600): Configuración ofrecía **1920 de ancho**, y «ponga lo que ponga, se
+queda en 1024 x 600». Lo primero, porque sin la VBE de Bochs no se miraba lo
+que puede la pantalla; lo segundo, porque arrancaba **de la memoria USB**, y
+desde ella la lista no hacía nada (sin decir por qué).
+
+**Lo que dice la pantalla** (`edid.cas`, nuevo): su **EDID**, una vez, al poner
+el escritorio:
+
+1. en QEMU, de su tarjeta (la tercera zona PCI de `1234:1111`);
+2. en las **Intel** (GMA 950/945, **GMA 3150** de los Atom N450/N455/N550, GMA
+   X3100/4500 y HD Graphics), por el **DDC** de la pantalla (I2C, dirección 50h)
+   con el **GMBUS** de la tarjeta (sus registros GMBUS0 a GMBUS3, como los
+   cuenta la documentación pública de Intel, «IHD-OS»): primero las patillas
+   del panel (LVDS, los portátiles) y luego las del VGA. En `5100h` de su zona
+   de registros hasta las GMA 4500; en `C5100h` desde las HD Graphics. Se lee
+   con un ciclo «con índice» desde el octeto 0, de cuatro en cuatro, con un
+   tope de espera en cada paso, y se comprueba la cabecera y la suma. Los paneles
+   **eDP** (Bay Trail, como el Acer One 10, y muchos de Haswell en adelante) no
+   lo dan por ahí sino por el canal AUX de DisplayPort: no se mira. **Sin
+   probar aún en un Intel de verdad** (QEMU no tiene esa tarjeta): lo dirá el
+   registro del arranque del HP Mini.
+
+De él: la **nativa** (su primera medida detallada), el **nombre** del monitor
+(su descriptor `FCh`) y lo más grande que sabe mostrar (en un panel o un monitor
+digital, la nativa; en uno analógico, lo más grande de sus medidas).
+
+**La lista** (`prepara_modos()`), con eso:
+
+- **con EDID**: nada mayor que lo que puede la pantalla, y la nativa marcada
+  como **recomendada** («1024 x 600 *» y, debajo, «La de la pantalla
+  (recomendada): 1024 x 600.»), aunque no esté en la lista de siempre;
+- **sin EDID, pero sabiendo la nativa**: si se ha arrancado **«a la medida de la
+  pantalla»** (la entrada del menú, que ahora le dice al núcleo `amedida`, o
+  `PANTALLA.ENV` con `auto`), la que puso GRUB es la de la pantalla (la eligió
+  él por su EDID, que GRUB sí le pide a la BIOS). Se apunta en `PANTALLA.ENV`
+  (`nativa=`) para los arranques siguientes;
+- **sin saber nada, en un PC de verdad**: nada mayor que la de ahora («No se
+  sabe su medida: nada mayor que la de ahora»), y «A la medida» para que la
+  elija GRUB;
+- en una **máquina virtual** sin EDID (VirtualBox), sin tope: su pantalla es
+  una ventana, y «Probar...» vuelve sola a los 15 s;
+- nunca se elige de por sí nada mayor: la elegida al abrir es la de ahora.
+
+**La memoria USB** (`usb.sh`): su menú lee `\PANTALLA.ENV` (en su raíz) igual
+que el del disco instalado, y lo usa la **primera entrada** (dice antes de
+arrancar a qué medida va); «Guardar y reiniciar...» lo escribe ahí (se arranca
+con `escritura=usb`). Las memorias hechas antes del 21/11 no lo traen: el
+cuadro lo dice. Y cuando no se puede guardar, al pulsar una medida se dice
+**por qué** (el CD es de solo lectura; sin permiso de escritura; una memoria de
+antes; sin instalar).
+
+**Si la BIOS no da la pedida**, GRUB pone otra de la reserva sin decir nada; el
+núcleo, al arrancar, compara: «**Este equipo no permite 1600 x 900: se queda en
+800 x 600.**», en un aviso, y `PANTALLA.ENV` pasa a la que hay (si estaba a
+prueba, a la de antes). Con la VBE de Bochs, la pone él.
+
+**El registro del arranque**: todo lo de la pantalla (con qué medida ha
+arrancado, el EDID o que no lo hay, lo que pide `PANTALLA.ENV`, lo que se elige,
+la prueba y si no se permite) va a `ARRANQUE.TXT` de la unidad del sistema: en
+la memoria USB (con `registro`, como siempre) y en el disco instalado
+(`C:\ARRANQUE.TXT`).
+
+**El Administrador de dispositivos** enseña, en Pantalla, colgado de la
+tarjeta, el **monitor** con su nombre y para qué medida está hecho («Monitor:
+QEMU Monitor», «hecho para 1024 x 600 (EDID: la tarjeta de QEMU)»): lo que ya
+se leyó al arrancar (la llamada 155, de solo lectura, como siempre).
+
+**Lo que no se ha hecho**: el `_DDC` de ACPI (el EDID que algunas BIOS dan por
+ACPI, sobre todo de paneles eDP): pide que `ACPI.BIN` evalúe un método más y lo
+pase al núcleo por una llamada de servicio; queda para la próxima si el GMBUS no
+basta en algún equipo.
+
+**Probado** (parte 17, `SOLO=pantalla`): QEMU con `-device VGA,xres=1024,yres=600`
+(la lista: 800 x 600 y 1024 x 600 recomendada; el monitor en el Administrador
+de dispositivos), con `xres=1366,yres=768` y con `edid=off`; la memoria USB con
+`-vga cirrus` (sin VBE de Bochs ni EDID, como el HP Mini): «A la medida»
+guardada en `X:\PANTALLA.ENV`, la prueba al arrancar, y 1600 x 900 (que cirrus
+no da) dicho en un aviso y en `X:\ARRANQUE.TXT`; y el disco instalado con
+cirrus, con la nativa apuntada.
+
 ### Lo que falta
 
-Hacer carpetas y cambiar nombres desde Mi equipo (y «Nueva carpeta» en el tapiz);
-iconos del tapiz para los documentos; la barra de desplazamiento en los
-programas de Castel (la **rueda del ratón** ya llega, desde la 0.8.3: `EV_RUEDA`,
-sección 14 ter; la usa el Navegador);
+Escribir **nombres largos** (el explorador ya hace carpetas, cambia
+nombres y deja accesos de documentos en el tapiz, pero en 8+3); arrastrar
+de una ventana del explorador a otra y desde otros programas; ocultar el
+dock solo (que salga al acercarse); «Nueva carpeta» en el tapiz; la barra de
+desplazamiento en los programas de Castel (la **rueda del ratón** ya llega,
+desde la 0.8.3: `EV_RUEDA`, sección 14 ter; la usa el Navegador);
 que la Consola cambie sus filas y columnas con la ventana, y guarde lo que ha
 pasado hacia arriba; menús que se abren con Alt y submenús; letras de otros
 tamaños y de ancho variable; el ajuste del doble clic; y que el tapiz pueda ser
@@ -2117,7 +2545,7 @@ BIOS. En VirtualBox, «Habilitar EFI» tiene que estar quitado (lo está, para
 | Pieza | En VirtualBox | Hispa-Pentium |
 |---|---|---|
 | el disco | SATA AHCI (ICH9) o IDE (PIIX3/PIIX4) | los dos (`ahci.cas`, `ata.cas`); el CD en AHCI (ATAPI) se ve y no se toca |
-| el CD/DVD | en el mismo SATA o en el IDE secundario | lo lee GRUB por la BIOS |
+| el CD/DVD | en el mismo SATA o en el IDE secundario | GRUB lo carga para arrancar (M:); desde el 21/11 el núcleo lo lee también: es D: (`atapi.cas`, `ahcicd.cas`, sección 7) |
 | la red | Intel PRO/1000 MT Desktop (82540EM, `8086:100E`) | la e1000 de `RED.BIN` (ya estaba en la lista) |
 | el USB | OHCI (USB 1.1), con la tableta USB si se elige | OHCI no lo lleva: se deja quieto; teclado y ratón, por PS/2 (el ratón «PS/2» de VirtualBox) |
 | la gráfica | VMSVGA o VBoxVGA, con VBE | el modo lo pone GRUB por la VBE; desde Configuración se cambia **en marcha** (las dos llevan la VBE de Bochs: sección 10) |
@@ -2390,7 +2818,9 @@ sus archivos, así que con firmar el catálogo queda atado todo.
   su **SHA-512** (los números de 64 bits hechos de dos de 32) y las cuentas de la
   curva con los números módulo 2^255 − 19 en **32 trozos de 8 bits**, cada uno en
   un `ent32`: así ninguna cuenta pasa de 32 bits (Castel no tiene números de 64)
-  y no hace falta ensamblador. Comprueba que S < 2^253 y que la clave es un punto
+  y no hace falta ensamblador. Comprueba que S < L (el orden del grupo, como pide la RFC 8032: desde el
+  21/11, la revisión de seguridad; antes solo S < 2^253, y la misma firma con
+  S + L también pasaba) y que la clave es un punto
   de la curva. Tarda unos **0,25 s** en QEMU (24-30 tics).
 - **Cuándo**: lo traído **de Internet** tiene que llevar firma, y buena: si no
   la trae («el catálogo de Internet no trae su firma») o no es buena («la firma
@@ -2770,8 +3200,13 @@ cual (descomprimir costaría un inflado en Castel; no es barato).
   núcleo, llamada 17, la primera vez que hace falta).
 - Lo que pasa lo **apunta** (`tls: ...` por el puerto serie; `HTTPS /TODO`).
 
-`TLS.CCH`, `TLS.SEM` y `TLS.INI` van en `\HISPA` de la unidad del sistema (o en
-su raíz si no hay `\HISPA`).
+`TLS.CCH`, `TLS.SEM`, `TLS.HOR` y `TLS.INI` van en `\HISPA` de la unidad del
+sistema (o en su raíz si no hay `\HISPA`). **`TLS.HOR`** (21/11, la revisión de
+seguridad): el último día en que una cadena se comprobó entera y valía con la
+fecha del reloj del PC. La hora que se pide por HTTP sin cifrar (la cabecera
+`Date`) no se cree si da una fecha anterior a ese día o al de la compilación de
+`TLS.BIN`: quien esté en medio no puede llevar el reloj atrás para colar un
+certificado caducado o revocado.
 
 **La hora.** Para mirar las fechas de un certificado hace falta saber qué día
 es. `TLS.BIN` usa **el reloj del PC** (la CMOS, por la llamada 15) si es
@@ -2836,13 +3271,248 @@ demás del sistema en el catálogo firmado de `actualiza.sh`.
 
 ### Lo que falta
 
-Escuchar en un puerto (un servidor), reensamblar lo que llega desordenado y la
-retransmisión rápida; IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
+Reensamblar lo que llega desordenado y la retransmisión rápida (escuchar en un
+puerto ya va: sección 14 ter); IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
 la vez; el Wi-Fi (arriba); TLS 1.3 (BearSSL no lo tiene), gzip en `Https` y la
 hora por NTP; más tarjetas (la RTL8168 del Toshiba NB250,
 la PCnet, NE2000: Hispa-DOS ya las lleva). (El navegador, encima de esto, ya
 está: sección 14 ter.)
 (Las **actualizaciones** por la red ya van: sección 13.)
+
+## 14 quinquies. SSH, WireGuard y Tailscale (rama pentium-tailscale)
+
+*21/11/2026.* Lo que pidió Carlos: entrar en la terminal de Hispa-Pentium
+desde cualquier otro equipo, y desde él en los demás, como hace ya con sus
+MacBook: **SSH** (cliente y servidor) y **Tailscale** (cada equipo con su
+nombre y su IP 100.x, esté donde esté), con **WireGuard** debajo, que también
+vale suelto (un túnel como el de wg-quick).
+
+```
+  SSH.BIN, SSHD.BIN, WG.BIN, TAILSCAL.BIN   (C del anillo 3: nucleo32/hispac/hacer.sh)
+     hispac/   hispa.c (llamadas, red, archivos, azar, ventanas, página 437), cripto.c
+     ssh/      ssh.c (el transporte), sshc.c (SSH), sshd.c (SSHD)
+     wg/       wg.c (el protocolo de WireGuard), wgmain.c (WG)
+     tailscale/ ts.c (TAILSCALE), control.c (ts2021: Noise y HTTP/2), derp.c, json.c
+     terceros/monocypher (X25519, Ed25519, ChaCha20, Poly1305)
+        │ llamada 90 (TCP, UDP, la interfaz del túnel)     │ llamada 99 (TLS: DERP y el control por https)
+        ▼                                                  ▼
+  RED.BIN: TCP en escucha (SSH) y la interfaz del túnel ── TLS.BIN
+```
+
+**Por qué no Dropbear.** Se miró portarlo (MIT), pero Dropbear vive de POSIX:
+`fork`, `select`, los pseudoterminales, `getpwnam`, los archivos de `/etc`;
+hacerle una capa de todo eso era más código (y más fallos) que el propio SSH.
+El SSH de Hispa-Pentium está **escrito aquí**, a partir de las RFC 4251 a 4254,
+8709 y 8731 y de `PROTOCOL.chacha20poly1305` de OpenSSH (la descripción), con
+la criptografía de **Monocypher 4.0.2** (BSD-2 o CC0, `terceros/monocypher`,
+con su LEEME y su licencia). Lo mismo WireGuard (del documento de WireGuard y de
+wireguard.com/protocol: sin código del núcleo Linux ni de wireguard-go) y
+Tailscale (de su documentación y de su código, BSD-3, como referencia, sin
+copiarlo; Headscale, BSD-3, solo para las pruebas).
+
+### Lo que cambia en RED.BIN (marcado «(SSH)», «(TÚNEL)» y «(TAILSCALE)»)
+
+- **TCP en escucha** (`rtcp.cas`): `O_ESCUCHAR` (20: un puerto; da el número
+  de la escucha, de `0x40` en adelante) y `O_ACEPTAR` (21: espera a que llegue
+  una conexión; da su número y, en `cab[1]` y `cab[2]`, la IP y el puerto de la
+  otra punta). Un SYN a un puerto en escucha hace una conexión en
+  `SYN_RECIBIDO`, que contesta SYN+ACK (otra vez si se pierde) y pasa a
+  establecida con el ACK. Dos como mucho esperando a que se acepten, por
+  puerto; la que no se acepta en 30 s, fuera. Al acabar el programa, sus
+  escuchas se cierran (`tcp_acabó`).
+- **La interfaz del túnel** (`rpila.cas`), para WireGuard y Tailscale:
+  `O_TUNEL` (22: la IP propia del túnel y sus redes, pares red-máscara, hasta 8),
+  `O_TUNEL_LEER` (23: el paquete IP siguiente que sale por él, con espera),
+  `O_TUNEL_ENTRA` (24: uno que ha llegado, ya descifrado), `O_TUNEL_QUITAR` (25),
+  `O_TUNEL_DNS` (26: los nombres de los equipos, «nombre ip» por línea) y
+  `O_TUNEL_ESTADO` (27). Lo que va a una de sus redes no sale por la tarjeta:
+  se pone en una cola de 16 para el servicio del túnel; la IP de origen (y la de
+  las sumas de TCP y UDP) es la del túnel (`ip_propia`); el MSS por el túnel,
+  1.240 (MTU de 1.280, la de Tailscale). Lo que entra por él solo vale si va a
+  la IP del túnel y viene de una de sus redes. `resolver` mira antes los
+  nombres del túnel (el corto, «mac3», o el entero, «mac3.red.ts.net»): es el
+  MagicDNS de Tailscale. La interfaz es de quien la puso: si acaba, se quita.
+- **La bandeja** (`red.cas`, `escritorio.cas`): RED.BIN dice con el bit 8 de la
+  llamada 96 si hay túnel (`túnel_red`); el icono de la red lleva entonces cuatro
+  puntos en la pantallita, y un clic abre la ventana de Tailscale. En
+  **Configuración**, el botón «Red y Tailscale...» la abre también.
+- **ORDENES /C orden** hace esa orden y acaba: lo que usa `ssh equipo orden`.
+
+### SSH: el cliente (`SSH.BIN`)
+
+```
+SSH [-p puerto] usuario@equipo [orden]
+SSH /LLAVE        hace la llave propia (ssh-ed25519) y enseña la pública
+```
+
+- Intercambio **curve25519-sha256**, llave del servidor **ssh-ed25519**, cifrado
+  **chacha20-poly1305@openssh.com**, con **kex-strict** (la defensa contra
+  Terrapin, CVE-2023-48795) y claves nuevas si la otra punta las pide. Es lo
+  que hablan OpenSSH 6.5 y siguientes (Linux, macOS, Windows 10).
+- **Los equipos conocidos**, en `\HISPA\SSH\CONOCIDO.TXT` (como known_hosts): la
+  primera vez se enseña la huella («SHA256:...») y se pregunta; si luego
+  cambia, no se entra y se dice por qué.
+- **Entrar**: con la llave propia (`\HISPA\SSH\ID_ED.SSH`, la semilla secreta;
+  `ID_ED.PUB`, la línea para el `~/.ssh/authorized_keys` del otro equipo) si la
+  hay, y si no, con la contraseña (sin eco; se borra de la memoria al mandarla).
+- **El terminal**: una ventana suya de 80 x 25 (sin escritorio, la pantalla de
+  texto) que entiende lo de un **xterm**: los 16 colores, los 256 y los de 24
+  bits (al más cercano), negrita, inverso, subrayado, mover el cursor, borrar,
+  insertar y quitar líneas y letras, la zona de desplazamiento, la pantalla
+  alternativa (nano, top, mc, less), las líneas del DEC y el UTF-8 (a la página
+  437). Las teclas salen como las de un xterm (flechas, Inicio, Fin, RePág,
+  AvPág, Supr, F1 a F12, Ctrl+letra). **«~.»** al principio de una línea corta.
+- Con una **orden** detrás, la hace allí y enseña lo que salga en la Consola.
+
+### SSH: el servidor (`SSHD.BIN`)
+
+```
+SSHD               cómo está (y la huella de la llave del equipo)
+SSHD /ENCENDER     lo enciende (y queda encendido en los arranques)
+SSHD /APAGAR       lo apaga
+SSHD /CLAVE        pone la contraseña para entrar
+SSHD /PUERTO=n     otro puerto (22 si no se dice)
+```
+
+**Apagado de fábrica**: no escucha hasta que el usuario lo enciende (aquí, o
+con el botón de la ventana «Red y Tailscale»); encendido, en un sistema
+instalado vuelve solo en los arranques siguientes (el escritorio lanza
+`SSHD /ARRANQUE`, que mira `SSHD.INI`). La contraseña se guarda
+**resumida** (`\HISPA\SSH\CLAVE.TXT`: PBKDF2-HMAC-SHA-256, 10.000 vueltas, sal de
+16 octetos; nunca en claro) y las llaves que pueden entrar sin ella, en
+`\HISPA\SSH\AUTORIZA.TXT` (o `authorized_keys`), como las de OpenSSH
+(ssh-ed25519). La llave del equipo (`LLAVE.SSH`, secreta) se hace la primera
+vez. El usuario tiene que ser el de `HISPA.INI` (si lo hay); tres contraseñas
+malas y se corta (con espera entre una y otra).
+
+Dentro, **la Consola de Hispa-Pentium**: SSHD hace un terminal del núcleo
+(`terminal.cas`, llamada 37: lo que ya usa la Consola del escritorio; no ha
+hecho falta nada nuevo en el núcleo) y lanza dentro ORDENES.BIN; lo que este
+escribe sale por el canal en UTF-8 (con `\r\n`; el salto de página, «borrar la
+pantalla»), y lo que se teclea al otro lado (UTF-8 y las secuencias de un
+xterm) entra como las teclas de Hispa-Pentium. Ctrl+C acaba lo que corre
+dentro. Una sesión a la vez (un terminal por programa). Lo que pasa se apunta
+por el puerto serie (`sshd: ...`).
+
+### WireGuard (`WG.BIN`)
+
+```
+WG                     cómo está (como «wg show»)
+WG /ENCENDER [archivo] lo pone en marcha (\HISPA\WG\WG0.CNF si no se dice)
+WG /APAGAR             lo quita
+WG /LLAVE              una clave privada nueva y su pública
+WG /PUBLICA clave      la pública de una privada
+```
+
+El archivo es el de wg-quick (`[Interface]` PrivateKey, Address, ListenPort;
+`[Peer]` PublicKey, PresharedKey, Endpoint, AllowedIPs, PersistentKeepalive),
+solo IPv4 y sin la ruta por defecto (0.0.0.0/0: todavía no; las demás redes
+sí). El protocolo (`wg/wg.c`): el apretón **Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s**
+(como iniciador y como respondedor, con su marca de tiempo TAI64N que siempre
+sube), mac1 y mac2 con las galletas (XChaCha20-Poly1305), los mensajes de datos
+con su ventana contra repeticiones, las claves nuevas cada 2 minutos (las
+viejas no valen a los 3), «sigo aquí» a los 10 s y el PersistentKeepalive. Los
+paquetes van por UDP (un puerto de RED.BIN) y por la interfaz del túnel.
+
+### Tailscale (`TAILSCAL.BIN`, la orden `TAILSCALE`)
+
+```
+TAILSCALE                  cómo está: el nombre, la IP 100.x y los equipos de la red
+TAILSCALE /CONECTAR [url]  se conecta (con una url, a ese servidor: Headscale)
+TAILSCALE /DESCONECTAR     se desconecta (y queda así en los arranques)
+TAILSCALE /OLVIDAR         olvida las claves (la próxima vez, un equipo nuevo)
+TAILSCALE /IP              la IP 100.x de este equipo
+```
+
+1. **Las claves**: la de la máquina, la del nodo (que es la de WireGuard) y la
+   de «disco», en `\HISPA\TS\CLAVES.TS` (secretas; se hacen la primera vez).
+2. **El servidor de control** (`control.c`): `GET /key` da su clave; luego
+   **ts2021**: `POST /ts2021` con `Upgrade: tailscale-control-protocol` y el
+   primer mensaje de **Noise_IK_25519_ChaChaPoly_BLAKE2s** en la cabecera
+   `X-Tailscale-Handshake` (prólogo «Tailscale Control Protocol v113»); el
+   servidor contesta 101 y su mensaje de Noise; desde ahí, registros cifrados
+   (tipo 4, de hasta 4.096 octetos, nonce de mayor a menor). Dentro va **HTTP/2**
+   con lo justo: el prefacio, los ajustes (sin «push», ventana de 4 MB), un
+   pedido cada vez con las cabeceras en HPACK literal, PING y SETTINGS
+   contestados, y de las cabeceras de la respuesta solo el «:status 200»
+   (0x88). Lo «temprano» que manda el servidor antes de HTTP/2 se salta.
+3. **El alta**: `POST /machine/register` con la clave del nodo y el Hostinfo
+   (el nombre del equipo, de `HISPA.INI`, en minúsculas). Si el servidor da una
+   **dirección de alta** (`AuthURL`), sale en la orden, en la ventana y en el
+   registro: el usuario la abre en otro equipo con su cuenta y lo aprueba;
+   mientras, el registro se repite con `Followup` (el servidor espera a que se
+   apruebe). **El alta en la red de verdad de Carlos la hace él**: la dirección
+   sale en pantalla.
+4. **El mapa de la red**: `POST /machine/map` con `Stream: true`: mensajes de 4
+   octetos de largo (de menor a mayor) y su JSON (`json.c`: un lector sin
+   memoria, por trozos del texto): el nodo propio (su nombre y su IP 100.x), los
+   relevos DERP (`DERPMap`), los equipos (`Peers`, `PeersChanged`,
+   `PeersRemoved`, `PeersChangedPatch`, `OnlineChange`) y las reglas
+   (`PacketFilter`). Con eso se pone la interfaz del túnel (100.64.0.0/10 y las
+   subredes que anuncien), los nombres (MagicDNS) y un par de WireGuard por
+   equipo.
+5. **DERP** (`derp.c`): por HTTPS (TLS.BIN), `GET /derp` con `Upgrade: DERP`;
+   el servidor se presenta (FrameServerKey: «DERP🔑» y su clave), uno dice quién
+   es con una caja de NaCl (FrameClientInfo: X25519 + XSalsa20-Poly1305,
+   `cripto.c`), y luego FrameSendPacket y FrameRecvPacket con la clave del
+   otro; los Ping se contestan. El relevo de casa es el que antes conecta (o el
+   de `derp=` en TS.INI), se le dice al servidor (`PreferredDERP`) y se guarda;
+   lo de cada equipo va por el relevo de casa de él (hasta 4 a la vez).
+6. **Las reglas**: lo que entra por el túnel solo pasa si lo dejan las reglas
+   de la red (las ACL de Tailscale: origen, destino, puertos y protocolo) o si
+   contesta a algo que salió de aquí; hasta que llegan las reglas, nada nuevo
+   entra.
+
+**Lo directo por UDP** (la perforación de NAT con los mensajes «disco») queda
+para más adelante: todo va por DERP, que es más lento (unos 20 a 80 ms más por
+ida y vuelta, según el relevo) pero llega siempre. Los mensajes disco que
+llegan se ignoran; los demás equipos, al no recibir respuesta, siguen por DERP.
+
+**La ventana** (`TAILSCALE /VENTANA`: Configuración > «Red y Tailscale...», o
+el icono de la red con el túnel puesto): conectado o no, el nombre y la IP de
+este equipo, la dirección de alta si falta, el botón Conectar/Desconectar, la
+lista de equipos con su IP y su estado (en línea o no), y el servidor SSH con
+su botón Encender/Apagar. Se repinta cada 2 s.
+
+Lo suyo va en `\HISPA\TS`: TS.INI (`encendido=`, `servidor=`, `nombre=`,
+`derp=`), CLAVES.TS y ESTADO.TXT (cómo está: lo leen la orden y la ventana).
+
+### Probarlo
+
+`castel/pruebas.sh`, parte 18 (`SOLO=ssh`, `SOLO=wg`, `SOLO=tailscale`):
+
+- **SSHD contra el cliente OpenSSH** de esta máquina (QEMU con
+  `hostfwd=tcp::P-:22`): una orden (`ssh -p P prueba@127.0.0.1 "echo ..."`) y
+  una sesión con terminal; con llave.
+- **SSH contra un sshd de OpenSSH** propio de la prueba (en un puerto alto, con
+  su llave del equipo, su `authorized_keys` y un `ForceCommand` que pinta con
+  colores y lee una línea: no da una shell): la huella, la llave propia, el
+  terminal (en la pantalla de texto) y una orden.
+- **WireGuard contra el del núcleo Linux**, en un espacio de nombres de red
+  (`ip netns`, con QEMU dentro: no toca la red de la máquina): el apretón, ping
+  en los dos sentidos y SSH por el túnel.
+- **Tailscale contra Headscale 0.29** (un servidor de control libre, BSD) con su
+  DERP dentro, en otro espacio de nombres, con un `tailscaled` de verdad como
+  otro equipo (en modo de usuario, con su estado y su socket aparte: la
+  Tailscale de la máquina no se toca): el alta con la dirección (la aprueba la
+  prueba con `headscale auth register`), el mapa, DERP, ping y SSH en los dos
+  sentidos por la red de Tailscale, por el nombre.
+
+### Los paquetes
+
+`ssh` (SSH.BIN y SSHD.BIN) y `tailscal` (TAILSCAL.BIN y WG.BIN: los nombres de
+los paquetes son de 8 letras, por su registro `<NOMBRE>.PQI`), los dos de la
+0.8.3 y con `base >= 0.8.3` y `red >= 0.8.3` (`tailscal`, además, `tls`); suben
+`base` (ORDENES /C, la bandeja, Configuración) y `red` (la escucha y el túnel).
+
+### Lo que falta
+
+Lo directo por UDP de Tailscale (disco, STUN, perforar el NAT); IPv6 por el
+túnel; la ruta por defecto por WireGuard; varias sesiones de SSHD a la vez;
+reenviar puertos y `scp`/`sftp`; llaves RSA y ECDSA (solo ssh-ed25519); la
+«tailnet lock»; y ponerlos en marcha al arrancar sin escritorio (con él, en un
+sistema instalado, el escritorio lanza `SSHD /ARRANQUE` y `TAILSCALE /ARRANQUE`,
+que solo se quedan si se dejaron encendidos).
 
 ## 14 bis. Hispa-Pentium se compila a sí mismo (CASTEL32)
 
@@ -2952,6 +3622,39 @@ memoria USB con el catálogo): `PAQUETES INSTALA navega` dice «Se va a
 instalar: base 0.8.3 (en lugar de la 0.8.2), navega 0.1», comprueba las sumas,
 los pone (con las carpetas de `\HISPA\NAVEGA`) y `PAQUETES COMPRUEBA` los da
 por buenos; con el núcleo nuevo hay que reiniciar (sección 13).
+
+**Las pruebas de la 0.8.4** (21/11, en el PC de Albinyana con
+`tools/pruebas_castel_pc.sh`, cada parte en su copia; y en el VPS): `SOLO=32`
+621 bien; `castel32` 62/0 (CASTEL32 igual que ccastel.py y el punto fijo);
+`acpi`, `dispositivos`, `lectores`, `win32`, `caliente`, `paquetes`, `red`,
+`tls` y `ssh`, sin fallos; `pantalla` y `cd`, sin fallos en el VPS (en el PC,
+con QEMU 10 y el `tail` de uutils, la memoria USB sin EDID y `cd.sh` salen
+mal por el entorno). Lo que se ha arreglado al juntar: `ensambla.py` y
+ENSAMBLA/ENSAMB32 aceptan hasta 1000 pasadas (el núcleo de la 0.8.4 pide unas
+300 para asentar los saltos); el explorador ordena las unidades por la letra
+(el lector de CD que QEMU pone de serie ya no sale delante de C:); el menú
+Inicio del sistema instalado trae Naves (36 puntos más alto); «sin ACPI» con
+`-machine acpi=off` (QEMU 10 ya no tiene `-no-acpi`); WINMM.DLL de Pentium y
+las DLL de Hispa-486 sin CMOV ni FCOMI (`-march=i586` / `i486`).
+
+**La 0.8.4, por Internet** (21/11, rama `pentium-084`: las ramas `pentium-cd`,
+`pentium-tailscale`, `pentium-explorador`, `pentium-win32`, `pestanas-raton`,
+`navega-fijo` y `pentium-edid` juntas): el catálogo firmado con base, red y ejemplos 0.8.4,
+equipo 0.9 (el explorador, `MINIAT.BIN` y `DISPOSIT.BIN`; pide base >= 0.8.4),
+ssh, tailscal 0.8.4 y win32 1.0 (nuevos), navega 0.2 y clicgest 0.2.3 tal como
+están publicados, paquetes 1.1 y tls 0.8.4 (la revisión de seguridad), y los
+demás iguales octeto a octeto a lo publicado (bloc, consola, hvprun, oficina). Probado en QEMU (`q35`) desde un
+sistema instalado con el CD de la 0.8.3 y lo publicado de la 0.8.3 (navega
+0.1, clicgest 0.2.1), con el catálogo por HTTP: la firma, buena; `PAQUETES
+ACTUALIZA` pone base, ejemplos, equipo, red, paquetes, tls, navega y clicgest; `PAQUETES
+INSTALA ssh tailscal win32`; `PAQUETES COMPRUEBA`: los 15 paquetes cuadran. Y
+tras reiniciar: «El núcleo nuevo ha arrancado bien», el dock, Naves en el menú
+Inicio, el explorador con el CD del lector (IDE en el `q35`, `ide-cd`), una
+`.ISO` del CD montada con dos clics (E:) y Configuración > «Red y Tailscale...»:
+
+| | | |
+|---|---|---|
+| ![El menú Inicio, con Naves](pentium/actualizado-084-menu.png) | ![Una .ISO del CD, montada](pentium/actualizado-084-iso.png) | ![Red y Tailscale](pentium/actualizado-084-tailscale.png) |
 
 **La 0.8.3 entera, por Internet** (21/11): el catálogo firmado con base y
 equipo 0.8.3 (el núcleo del Navegador y el Administrador de dispositivos),
@@ -3081,6 +3784,38 @@ Tres cambios, marcados «(NAVEGADOR)»:
 - Un campo que el JavaScript hace de texto (su `type`) después de hacer su
   caja tiene su textarea al maquetar (Wikipedia: un fallo de página).
 
+### navega 0.2: position: fixed y sticky (21/11, por la tarde)
+
+Carlos, con la 0.8.3 en VirtualBox: «cuando bajas el ratón para abajo, el
+menú lateral se corta» (en ClicGest, dentro de la sesión). La barra lateral
+de ClicGest es `position: fixed; top: 0; height: 100vh; overflow-y: auto`
+(se ve desde 1025 puntos de ancho: por debajo, ClicGest da su diseño de
+móvil). NetSurf 3.11 trataba `fixed` como `absolute`: se iba con la página y
+debajo no quedaba nada. Arreglado (en el código común: vale también para
+NAVEGA2.EXE de Hispa-486):
+
+- **`position: fixed`**, respecto a la ventana: al pintar (`redraw.c`: la caja
+  fija, donde iría sin desplazar) y al buscar dónde se ha dado con el ratón
+  (`box_inspect.c`: los enlaces de la barra lateral se pulsan donde se ven).
+- **`position: sticky`** (con `top`, cuando lo que se desplaza es la ventana):
+  se pega al borde de arriba sin salirse de su caja de fuera, y se pinta
+  encima de lo que tiene detrás (las cabeceras de tabla de Bootstrap).
+- **`vh` y `vw`, sin redondear** (libcss redondeaba lo que vale una unidad:
+  con 420 puntos de alto, 1vh eran 4 y 100vh, 400: la barra lateral se quedaba
+  16 puntos corta).
+- `frontal.c`: con cajas fijas, al desplazar se pinta la página entera (mover
+  lo ya pintado se llevaba la barra lateral con la página).
+
+| | |
+|---|---|
+| ![ClicGest, Socios, a 1360 x 768, desplazada 600 puntos: arriba la 0.1 (la barra lateral, cortada arriba), en medio la 0.2 y abajo Chrome](pentium/navegador/09_clicgest_fijo.png) | ![La página de las pruebas (cabecera y barra lateral fijas, sticky verde), desplazada 300: el Navegador y Chrome](pentium/navegador/10_fijo_prueba_chrome.png) |
+
+Las pruebas: la parte 18 abre `/fijo.html` del sitio de prueba (una cabecera
+fija, una barra lateral fija como la de ClicGest con un enlace abajo del todo,
+un bloque sticky), la desplaza con la rueda, mira los colores y pulsa el
+enlace de abajo de la barra; y `tests/run_surf_pintado_tests.sh`, en el
+anfitrión, la pinta desplazada (`surfppm -y 300`, nuevo).
+
 ### Comparado con Chrome
 
 A 1024 x 768 (la página, 970 x 588; Chrome a esa medida, `google-chrome
@@ -3099,8 +3834,7 @@ conoce su página sencilla de siempre (a Chrome, que sale de un servidor en
 Alemania, el aviso de las galletas): sin el icono de las aplicaciones (SVG).
 Wikipedia, entera, con su JavaScript (el buscador y los menús de arriba, en
 SVG, no salen). Lo que queda distinto es lo de NAVEGADOR2.md («Lo que queda
-distinto»): sin SVG, sin `position: fixed` de verdad, sin `transform` ni
-animaciones; aquí, en cambio, los colores son los de verdad (32 bits, no la
+distinto»): sin SVG, sin `transform` ni animaciones (`position: fixed` y `sticky`, desde navega 0.2); aquí, en cambio, los colores son los de verdad (32 bits, no la
 paleta de 256 de Hispa Ventanas).
 
 ### Medidas
@@ -3163,7 +3897,7 @@ DISCO=/tmp/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 QEMU_MAS="-nic user,mo
   ese momento: unos 3 s la primera vez en un Pentium 133); pedir varias cosas
   a la vez (hoy, una petición cada vez, como en Hispa-486).
 - Lo de NetSurf que queda (NAVEGADOR2.md, «Lo que falta»): **SVG** (los iconos
-  de Google, de Wikipedia, de Bootstrap), `position: fixed`, `transform`,
+  de Google, de Wikipedia, de Bootstrap), `transform`,
   `<details>`, la cursiva de verdad, los pesos de las letras variables, rehacer
   solo la parte de las cajas que cambia (en las páginas grandes, cada clic que
   cambia el árbol tarda).
@@ -3172,6 +3906,40 @@ DISCO=/tmp/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 QEMU_MAS="-nic user,mo
   arrastrar y soltar, el historial y los marcadores guardados, y preguntar
   dónde guardar una descarga.
 - Nombres largos al descargar (el núcleo aún crea solo 8+3).
+
+## 14 quater. Los programas de Windows de 32 bits y DirectX (WIN32.BIN)
+
+*21/11/2026, la rama `pentium-win32`. Todo, con la arquitectura y por qué, en
+[pentium/WIN32.md](pentium/WIN32.md).*
+
+| | |
+|---|---|
+| ![HOLA32, como ventana de Hispa-Pentium](pentium/win32-hola32.png) | ![Naves: DirectDraw a pantalla completa](pentium/win32-naves.png) |
+
+Un `.EXE` de Windows de 32 bits se abre como cualquier programa (la Consola o
+Mi equipo): el núcleo ve que empieza por «MZ» y lo corre
+**`WIN32.BIN`** (`castel/nucleo32/win32/`, en C), que hace de cargador de PE y de
+KERNEL32, USER32, GDI32, COMDLG32, ADVAPI32, SHELL32 y WSOCK32, con las DLL de
+Hispa-486 que valen tal cual (MSVCRT, UCRT, COMCTL32 y DirectX: DDRAW, DSOUND,
+DINPUT, WINMM, OLE32) en `\WIN32`. Corren NASM, TCC, FASM y FASMW, los ejemplos
+de `\HISPA32` (CALC32, HOLA32, CTL32, MENU32, AVISO32) y **«Naves»**, que se
+juega a pantalla completa con DirectDraw y DirectInput (DirectSound, en silencio
+hasta que haya sonido); y Winsock sobre el servicio de red.
+
+- **Cómo**: los programas de Windows corren con sus propios segmentos del anillo
+  3, de base `0x40000000` (`cpu.cas`: `0x33`, `0x3B` y la TEB en `0x43`), así que
+  su `0x400000` es la `0x40400000` de verdad; las interrupciones ponen los DS y ES
+  planos al entrar y los del programa al volver (los dos compiladores de Castel);
+  las llamadas 180 a 182 (`win32.cas`); el coprocesador de cada tarea, el de
+  la 0.8.3 (`tareas.cas`, con CR0.TS); el mapa de las teclas (`consola.cas`);
+  `V_COMPLETA` (`ventanas.cas`). Todo lo cambiado lleva la marca `[WIN32]`.
+- **Cada ventana de Windows de primer nivel es una de Hispa-Pentium**; dentro, un
+  lienzo de 32 bits donde WIN32.BIN pinta ella y sus controles. Los menús son el
+  emergente del núcleo.
+- **Los paquetes**: `win32` 1.0 (nuevo), que pide `base` 0.8.4 (en la 0.8.4, con el CD, SSH y el explorador: `base` 0.8.4 y `equipo` 0.9); Naves, en el menú Inicio del sistema instalado.
+- **Falta**: hilos de verdad (como en HW32, un hilo corre entero al crearlo),
+  SEH, escuchar en la red, HTTPS para ellos (por eso NAVEGA2.EXE aún no),
+  Direct3D. Ver [pentium/WIN32.md](pentium/WIN32.md).
 
 ## 15. Las pruebas
 
@@ -3302,7 +4070,19 @@ la ventana** en su título (Maximizar, Cerrar) y en su botón de la barra de tar
 (Restaurar); estirarla. **Mi equipo**: las unidades, entrar en C:, y abrir un
 texto con el Bloc de notas. «Acerca de Hispa-Pentium». Y a **1024 x 600**: el
 escritorio a esa medida, llevar un icono a otro sitio y «Organizar iconos»,
-Configuración diciendo la medida, y **«Mover»** desde el menú de una ventana. De
+Configuración diciendo la medida, y **«Mover»** desde el menú de una ventana.
+**El explorador de archivos y el dock** (21/11): el dock con su borde; Mi
+equipo con el árbol, el mosaico de C: (lo libre) y la Papelera; las vistas
+de iconos y de detalles (la rejilla); las **miniaturas** de un BMP, un PNG y
+un JPG (`MINIAT.BIN`, si hay gcc con `-m32`: el color de la miniatura);
+copiar y pegar con Ctrl+C y Ctrl+V; F2 y F7 (los cuadros); Supr a la
+Papelera, la Papelera del árbol y Restaurar; el menú del botón secundario;
+Control y un clic, y el recuadro del ratón (los elegidos, en la barra de
+estado); soltar un archivo en el tapiz (un acceso, que con dos clics lo abre
+en el Bloc) y un programa en el dock (fijado); buscar con F3; el menú del
+dock y «Ocultar el dock». Luego, en el disco (mtools): la copia con su
+nombre nuevo igual al original, la carpeta restaurada, `\PAPELERA` oculta
+con su índice vacío, `ATAJOS.INI` y `DOCK.INI`, y fsck.fat. De
 la memoria USB, además: la entrada de **1024 x 600** arrancada en QEMU (el modo lo
 pone GRUB por la cabecera de esa copia del núcleo) y que el menú trae las
 entradas nuevas («a la medida de la pantalla», con `gfxpayload=auto`; los modos
@@ -3571,6 +4351,28 @@ Bochs): `PANTALLA.ENV` y `GRUB.CFG`, «Reiniciar ahora», la prueba al arrancar 
 «Mantener», y otra medida que no se da por buena y que GRUB deshace al
 reiniciar a lo bruto; e instalado con `-vga std`: «Mantener» guardada; y con `-vga
 vmware`, 1200 x 800 (que su BIOS no da) puesta por el núcleo al arrancar.
+La **parte 21** (`SOLO=lectores`, unos cuatro minutos; 21/11) prueba los CD
+y DVD y las imágenes de disco (sección 7) con una ISO de prueba hecha allí
+mismo (genisoimage o xorriso, con Joliet y Rock Ridge: una carpeta con nombre
+largo, otra dentro y un archivo de 300 K): como **VirtualBox** (`pc`, el disco
+en SATA y el lector en el IDE secundario maestro), por **AHCI** (el `q35`, el
+lector en un puerto SATA) y por **USB** (`usb-storage` con la ISO, al arrancar
+y enchufado en marcha con `device_add`): DIR y TYPE con los nombres largos, y
+lo copiado al disco, **comparado octeto a octeto** con lo de la ISO; sacar,
+cambiar y volver a meter el disco con el monitor de QEMU (`eject`, `change`),
+con sus avisos, y `EXPULSAR`; `MONTAR` la misma ISO, un disquete `.IMG` y una
+`.CUE` con su `.BIN` en crudo (comparados también con lo de la ISO), una
+imagen dentro del CD y otra en una memoria USB que se desenchufa (se desmontan
+solas al irse su disco); y Mi equipo: el CD con su disco dibujado, una `.ISO`
+montada con dos clics, el CD virtual en su marco de puntos y «Expulsar».
+Desde esta rama, el lector de CD vacío que QEMU pone de serie (IDE secundario
+maestro) sale en todas las pruebas: es un disco más (detrás de los discos y
+las memorias del arranque: una memoria enchufada en marcha pasa a ser el disco
+2), y la tarea `cd-cambios`, una tarea más del núcleo (las cuentas de tareas y
+del montón de las partes 8 y 13 suben en una). Con ella, `SOLO=32` (rama
+`pentium-cd`, 21/11) dio **517 bien, 1 mal**: el que falla es una línea del
+servicio de red pegada a la petición del intérprete (`> red: DHCP...`) en la
+parte 16, con la máquina cargada (tres suites a la vez); suelta (`SOLO=cd`), 72 bien, 0 mal.
 Con ella, `SOLO=32` (rama `pentium-pantalla`, 20/11 por la noche) dio **479 bien,
 0 mal**.
 La **parte 18** (`SOLO=navegador`, unos tres minutos; rama `pentium-navegador`,
@@ -3605,12 +4407,27 @@ disco) son unos cinco minutos; `SOLO=06` (la parte 9, lo de la 0.6 y la
 oficina), unos diez, y `SOLO=16`, lo que no arranca el núcleo (de la parte 1 a
 la 7, con los dos compiladores y los dos ensambladores), otros siete.
 
+**[WIN32] Los programas de Windows** (la parte 18, `SOLO=win32`; también con
+`SOLO=32` y `SOLO=08`): con el disco de `nucleo32/win32/disco.sh`, los de
+consola de HW32 en el intérprete de órdenes (PEHOLA, HOLAC, K32PRUE con lo que da
+Windows 98, una DLL), NASM, TCC y FASM (si se han bajado); en el escritorio,
+HOLA32, AVISO32, CALC32 con el ratón y su menú, MENU32 y CTL32, mirando las
+capturas; Naves desde Mi equipo, jugando (DirectDraw a pantalla completa,
+DirectInput); el ejemplo DDRAW y FASMW abriendo y ensamblando HELLO.ASM; y
+WSOCK32 (REDPRUE) contra el servidor HTTP de aquí. Ver
+[pentium/WIN32.md](pentium/WIN32.md).
+
 ## 16. Por dónde seguir
 
 Hecho el 21/11 (la 0.8.3, rama `pentium-navegador`): **el Navegador** (sección
 14 ter), con la rueda del ratón, el x87 de cada programa y programas de hasta 8
 MB en el núcleo. Lo siguiente, allí: que la ventana no espere al apretón de
 manos, SVG y probarlo en el HP Mini y en el Toshiba.
+
+**Metas** (21/11): ~~**CD y DVD**~~ (hecho el 21/11: IDE, SATA y USB, ISO 9660
+con Joliet, meter y sacar en marcha, «Expulsar»; sección 7) · **montar
+imágenes** de disco (.ISO, .CUE/.BIN, .IMG): hecho el 21/11 · escuchar los CD
+de música · UDF.
 
 Hecho en la del 20/11 (la 0.8, cinco ramas juntas en `pentium-08`): el AHCI
 del ICH7 (sección 7), el USB en caliente y apagar de verdad con la batería
@@ -3688,5 +4505,7 @@ arranque. Lo siguiente:
 7. **El lenguaje**: llamar a funciones por su dirección, sumar a un arreglo como a
    un puntero y funciones de interrupción públicas (CASTEL32.md §10), que hoy se
    rodean a mano.
-8. **Más tarde**: el cargador de PE (los programas Win32 de Hispa-486, HW32) sobre
-   este núcleo, que es la base de la gama XP.
+8. ~~**Más tarde**: el cargador de PE (los programas Win32 de Hispa-486, HW32) sobre
+   este núcleo, que es la base de la gama XP.~~ Hecho (21/11/2026): WIN32.BIN,
+   sección 14 ter. Lo que le falta: varias tareas por espacio de direcciones
+   (los hilos) y pasarle al programa sus excepciones (SEH).

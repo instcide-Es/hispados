@@ -272,6 +272,10 @@ este mismo NetSurf con otra ventana; lo arreglado allí vale aquí:
   aparte: con el de la página, jQuery se llevaba el cuerpo entero al arrancar
   (Wikipedia en blanco).
 - Un campo que JavaScript hace de texto tras hacer su caja tiene su textarea.
+- **`position: fixed` y `sticky`** (21/11 por la tarde, navega 0.2 de
+  Hispa-Pentium): lo fijo, respecto a la ventana (la barra lateral de
+  ClicGest ya no se va con la página), al pintar y al pulsar; lo sticky, pegado
+  arriba; y `vh`/`vw` sin redondear (100vh se quedaba corto).
 
 ### Lo que queda distinto, de más a menos visible
 

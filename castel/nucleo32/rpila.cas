@@ -3,6 +3,10 @@
 ;  menos TCP (rtcp.cas): Ethernet, ARP, IPv4, ICMP (contestar a los ping y
 ;  hacerlos), UDP (los puertos de los programas), DHCP (pedir la IP, la
 ;  máscara, la puerta y el DNS) y DNS (de un nombre, su IP).
+;  (TÚNEL, 21/11) Y una interfaz virtual, la del túnel (WireGuard: WG.BIN o
+;  TAILSCALE.BIN): lo que va a sus redes no sale por la tarjeta sino que se
+;  le da al servicio del túnel (O_TUNEL_LEER), y lo que él descifra entra
+;  aquí como si hubiera llegado (O_TUNEL_ENTRA); con sus nombres (MagicDNS).
 ;  Las IP se guardan como van en la red: el primer octeto, el de abajo
 ;  («10.0.2.15» es 0x0F02000A).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -24,6 +28,28 @@ módulo Rpila
     público variable ent_largo: nat32
 
     variable trama: arreglo [1536] de byte      ; la que se está haciendo para enviar
+
+    ; ---- (TÚNEL) la interfaz del túnel ----
+    constante MAX_RUTAS = 8
+    constante COLA_TÚNEL = 16                   ; los paquetes que esperan a que el servicio del túnel los recoja
+    constante MAX_NOMBRES = 48
+    público constante MTU_TÚNEL = 1280          ; (lo de Tailscale y WireGuard sin trocear)
+    público variable túnel_ip: nat32            ; 0: no hay túnel
+    público variable túnel_dueño: nat32
+    variable rutas_red, rutas_máscara: arreglo [MAX_RUTAS] de nat32
+    variable n_rutas: nat32
+    variable túnel_cola: arreglo [COLA_TÚNEL] de arreglo [MTU_TÚNEL] de byte
+    variable túnel_largo: arreglo [COLA_TÚNEL] de nat32
+    variable túnel_ini, túnel_n: nat32
+    variable túnel_espera: bool
+    variable túnel_hueco, túnel_serie, túnel_límite: nat32
+    público variable túnel_salidos, túnel_entrados, túnel_tirados: nat32
+    tipo Nombre_túnel = estructura
+        nombre: arreglo [64] de byte
+        ip: nat32
+    fin
+    variable nombres_túnel: arreglo [MAX_NOMBRES] de Nombre_túnel
+    variable n_nombres: nat32
     variable ip_id: nat32
 
     ; =========================================================================
@@ -124,6 +150,187 @@ módulo Rpila
     fin
 
     ; =========================================================================
+    ;  (TÚNEL) la interfaz del túnel
+    ; =========================================================================
+    ; ¿va por el túnel lo que es para esa IP?
+    público función por_túnel(ip: nat32): bool
+        variable i: nat32
+        si túnel_ip = 0 entonces devolver falso fin
+        para i desde 0 hasta n_rutas - 1 hacer
+            si i < n_rutas y (ip yb rutas_máscara[i]) = rutas_red[i] entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; la IP propia para hablar con esa (la del túnel, o la de la tarjeta)
+    público función ip_propia(ip: nat32): nat32
+        si por_túnel(ip) entonces devolver túnel_ip fin
+        devolver mi_ip
+    fin
+
+    ; O_TUNEL: pone la interfaz (la IP, y las redes que van por ella: pares red, máscara)
+    público función poner_túnel(dueño: nat32, ip: nat32, rutas: puntero a nat32, n: nat32): nat32
+        variable i: nat32
+        variable t: arreglo [16] de byte
+        si túnel_ip <> 0 y túnel_dueño <> dueño entonces devolver NO_VALE_RED fin
+        si ip = 0 o n = 0 o n > MAX_RUTAS entonces devolver NO_VALE_RED fin
+        túnel_ip := ip
+        túnel_dueño := dueño
+        n_rutas := n
+        para i desde 0 hasta n - 1 hacer
+            rutas_máscara[i] := rutas[2 * i + 1]
+            rutas_red[i] := rutas[2 * i] yb rutas_máscara[i]
+        fin
+        túnel_ini := 0
+        túnel_n := 0
+        n_nombres := 0
+        ip_texto(ip, dirección(t[0]))
+        apunta4("túnel: la interfaz, con la IP %s y %u redes", nat32(dirección(t[0])), n, 0, 0)
+        devolver 0
+    fin
+
+    público función quitar_túnel(dueño: nat32): nat32
+        si túnel_ip = 0 o túnel_dueño <> dueño entonces devolver NO_VALE_RED fin
+        si túnel_espera entonces contestar(túnel_hueco, túnel_serie, CORTADA_RED, 0, 0, nulo, 0) fin
+        túnel_espera := falso
+        túnel_ip := 0
+        n_rutas := 0
+        n_nombres := 0
+        apunta("túnel: quitado")
+        devolver 0
+    fin
+
+    ; lo que sale por el túnel: a la cola, y al servicio si lo espera
+    función al_túnel(p: puntero a byte, n: nat32): bool
+        variable k: nat32
+        si n > MTU_TÚNEL entonces
+            túnel_tirados := túnel_tirados + 1
+            devolver falso
+        fin
+        si túnel_espera entonces
+            túnel_espera := falso
+            túnel_salidos := túnel_salidos + 1
+            contestar(túnel_hueco, túnel_serie, n, 0, 0, p, n)
+            devolver cierto
+        fin
+        si túnel_n = COLA_TÚNEL entonces
+            túnel_tirados := túnel_tirados + 1
+            devolver falso
+        fin
+        k := (túnel_ini + túnel_n) mod COLA_TÚNEL
+        copiar_memoria(dirección(túnel_cola[k][0]), p, n)
+        túnel_largo[k] := n
+        túnel_n := túnel_n + 1
+        devolver cierto
+    fin
+
+    ; O_TUNEL_LEER: el paquete siguiente que sale por el túnel (espera, en tics, si no hay)
+    público función leer_túnel(dueño: nat32, hueco: nat32, serie: nat32, espera: nat32, cabe: nat32)
+        si túnel_ip = 0 o túnel_dueño <> dueño entonces
+            contestar(hueco, serie, NO_CONEXIÓN, 0, 0, nulo, 0)
+            devolver
+        fin
+        si túnel_n > 0 entonces
+            si túnel_largo[túnel_ini] > cabe entonces
+                contestar(hueco, serie, NO_VALE_RED, 0, 0, nulo, 0)
+                devolver
+            fin
+            túnel_salidos := túnel_salidos + 1
+            contestar(hueco, serie, túnel_largo[túnel_ini], 0, 0, dirección(túnel_cola[túnel_ini][0]), túnel_largo[túnel_ini])
+            túnel_ini := (túnel_ini + 1) mod COLA_TÚNEL
+            túnel_n := túnel_n - 1
+            devolver
+        fin
+        si túnel_espera entonces contestar(túnel_hueco, túnel_serie, TIEMPO, 0, 0, nulo, 0) fin
+        túnel_espera := cierto
+        túnel_hueco := hueco
+        túnel_serie := serie
+        túnel_límite := ahora() + espera
+    fin
+
+    ; O_TUNEL_DNS: los nombres de los equipos del túnel («nombre ip» por línea, la IP con puntos)
+    público función nombres_del_túnel(dueño: nat32, t: puntero a byte, n: nat32): nat32
+        variable i, k, ip, v, parte, cifras: nat32
+        si túnel_ip = 0 o túnel_dueño <> dueño entonces devolver NO_VALE_RED fin
+        n_nombres := 0
+        i := 0
+        mientras i < n y n_nombres < MAX_NOMBRES hacer
+            k := 0
+            mientras i < n y t[i] <> ' ' y t[i] <> '\n' hacer
+                si k < 63 entonces
+                    nombres_túnel[n_nombres].nombre[k] := t[i]
+                    k := k + 1
+                fin
+                i := i + 1
+            fin
+            nombres_túnel[n_nombres].nombre[k] := 0
+            ip := 0
+            parte := 0
+            v := 0
+            cifras := 0
+            mientras i < n y t[i] = ' ' hacer i := i + 1 fin
+            mientras i < n y t[i] <> '\n' hacer
+                si t[i] >= '0' y t[i] <= '9' entonces
+                    v := v * 10 + (t[i] - '0')
+                    cifras := cifras + 1
+                sino si t[i] = '.' y parte < 3 entonces
+                    ip := ip ob ((v yb 255) << (parte * 8))
+                    parte := parte + 1
+                    v := 0
+                fin
+                i := i + 1
+            fin
+            ip := ip ob ((v yb 255) << 24)
+            si i < n entonces i := i + 1 fin
+            si k > 0 y parte = 3 y cifras > 0 entonces
+                nombres_túnel[n_nombres].ip := ip
+                n_nombres := n_nombres + 1
+            fin
+        fin
+        apunta4("túnel: %u nombres de equipos", n_nombres, 0, 0, 0)
+        devolver 0
+    fin
+
+    ; ¿es «corto» lo de antes del primer punto de «largo»? (sin mirar mayúsculas)
+    función es_corto_de(corto: puntero a byte, largo: puntero a byte): bool
+        variable i: nat32
+        variable a, b: byte
+        i := 0
+        mientras corto[i] <> 0 hacer
+            a := corto[i]
+            b := largo[i]
+            si a >= 'A' y a <= 'Z' entonces a := a + 32 fin
+            si b >= 'A' y b <= 'Z' entonces b := b + 32 fin
+            si a <> b entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver largo[i] = '.' o largo[i] = 0
+    fin
+
+    ; un nombre de los del túnel (el corto, «mac3», o el entero, «mac3.red.ts.net»): su IP, o 0
+    público función nombre_del_túnel(nombre: puntero a byte): nat32
+        variable i, n: nat32
+        n := 0
+        mientras nombre[n] <> 0 hacer n := n + 1 fin
+        si n > 0 y nombre[n - 1] = '.' entonces devolver 0 fin
+        para i desde 0 hasta MAX_NOMBRES - 1 hacer
+            si i < n_nombres y es_corto_de(nombre, dirección(nombres_túnel[i].nombre[0])) entonces devolver nombres_túnel[i].ip fin
+        fin
+        devolver 0
+    fin
+
+    función túnel_tic()
+        si túnel_espera y ahora() >= túnel_límite entonces
+            túnel_espera := falso
+            contestar(túnel_hueco, túnel_serie, TIEMPO, 0, 0, nulo, 0)
+        fin
+    fin
+
+    público función túnel_acabó(dueño: nat32)
+        si túnel_ip <> 0 y túnel_dueño = dueño entonces quitar_túnel(dueño) fin
+    fin
+
+    ; =========================================================================
     ;  IPv4
     ; =========================================================================
     ; manda un paquete IP con lo que hay en «datos» (n octetos) para «destino»
@@ -144,6 +351,13 @@ módulo Rpila
         h[9] := byte(proto)
         pon_ip(h + 12, mi_ip)
         pon_ip(h + 16, destino)
+        si por_túnel(destino) entonces
+            ; (TÚNEL) por la interfaz del túnel: sin Ethernet
+            pon_ip(h + 12, túnel_ip)
+            pon16(h + 10, suma_ip(h, 20))
+            copiar_memoria(dirección(trama[34]), datos, n)
+            devolver al_túnel(h, 20 + n)
+        fin
         pon16(h + 10, suma_ip(h, 20))
         copiar_memoria(dirección(trama[34]), datos, n)
         si destino = DIFUSIÓN o destino = (mi_ip ob nob máscara) entonces
@@ -191,22 +405,35 @@ módulo Rpila
                 devolver ENTRA_NADA
         fin
         h := p + 14
-        si n < 34 o h[0] >> 4 <> 4 entonces devolver ENTRA_NADA fin
+        si n < 34 entonces devolver ENTRA_NADA fin
+        devolver entrada_ip(h, n - 14, falso)
+    fin
+
+    ; un paquete IPv4 (de la tarjeta, o —TÚNEL— del servicio del túnel)
+    público función entrada_ip(h: puntero a byte, n: nat32, del_túnel: bool): nat32
+        variable hl, total, proto, de, a: nat32
+        si n < 20 o h[0] >> 4 <> 4 entonces devolver ENTRA_NADA fin
         hl := (nat32(h[0]) yb 15) * 4
         total := lee16(h + 2)
-        si hl < 20 o total < hl o total > n - 14 entonces devolver ENTRA_NADA fin
+        si hl < 20 o total < hl o total > n entonces devolver ENTRA_NADA fin
         si suma_ip(h, hl) <> 0 entonces devolver ENTRA_NADA fin
         ; (los trozos de un paquete partido, no)
         si lee16(h + 6) yb 0x3FFF <> 0 entonces devolver ENTRA_NADA fin
         proto := h[9]
         de := lee_ip(h + 12)
         a := lee_ip(h + 16)
-        si a <> mi_ip y a <> DIFUSIÓN y a <> (mi_ip ob nob máscara) y no (mi_ip = 0 y proto = 17) entonces devolver ENTRA_NADA fin
+        si del_túnel entonces
+            ; (TÚNEL) solo lo que es para la IP del túnel, y de una de sus redes
+            si túnel_ip = 0 o a <> túnel_ip o no por_túnel(de) entonces devolver ENTRA_NADA fin
+            túnel_entrados := túnel_entrados + 1
+        sino si a <> mi_ip y a <> DIFUSIÓN y a <> (mi_ip ob nob máscara) y no (mi_ip = 0 y proto = 17) entonces
+            devolver ENTRA_NADA
+        fin
         según nat16(proto)
             caso 1: entra_icmp(de, h + hl, total - hl, h[8])
-            caso 17: entra_udp(de, h + hl, total - hl)
+            caso 17: entra_udp(de, h + hl, total - hl, a)
             caso 6:
-                si a <> mi_ip entonces devolver ENTRA_NADA fin
+                si a <> mi_ip y a <> túnel_ip entonces devolver ENTRA_NADA fin
                 ent_ip := de
                 ent_datos := h + hl
                 ent_largo := total - hl
@@ -314,7 +541,7 @@ módulo Rpila
         pon16(dirección(udp[6]), 0)
         copiar_memoria(dirección(udp[8]), datos, n)
         ; la suma, con la pseudocabecera
-        pon_ip(dirección(ps[0]), mi_ip)
+        pon_ip(dirección(ps[0]), ip_propia(destino))
         pon_ip(dirección(ps[4]), destino)
         ps[8] := 0
         ps[9] := 17
@@ -352,7 +579,7 @@ módulo Rpila
         u.esperando := falso
     fin
 
-    función entra_udp(de: nat32, p: puntero a byte, n: nat32)
+    función entra_udp(de: nat32, p: puntero a byte, n: nat32, ip_a: nat32)
         variable a, largo, i, k: nat32
         variable u: puntero a Puerto_udp
         variable cab: arreglo [12] de byte
@@ -360,11 +587,11 @@ módulo Rpila
         a := lee16(p + 2)
         largo := lee16(p + 4)
         si largo < 8 o largo > n entonces devolver fin
-        si a = 68 entonces
+        si a = 68 y ip_a <> túnel_ip entonces
             entra_dhcp(p + 8, largo - 8)
             devolver
         fin
-        si de = dns y lee16(p) = 53 y a >= 0xC000 y a < 0xC100 entonces
+        si de = dns y ip_a = mi_ip y lee16(p) = 53 y a >= 0xC000 y a < 0xC100 entonces
             entra_dns(p + 8, largo - 8)
             devolver
         fin
@@ -717,6 +944,12 @@ módulo Rpila
     público función resolver(hueco: nat32, serie: nat32, nombre: puntero a byte, espera: nat32)
         variable i, k: nat32
         variable q: puntero a Pregunta
+        ; (TÚNEL) los nombres de los equipos del túnel (MagicDNS de Tailscale)
+        i := nombre_del_túnel(nombre)
+        si i <> 0 entonces
+            contestar(hueco, serie, 0, i, 0, nulo, 0)
+            devolver
+        fin
         si mi_ip = 0 o dns = 0 entonces
             contestar(hueco, serie, SIN_IP, 0, 0, nulo, 0)
             devolver
@@ -811,6 +1044,7 @@ módulo Rpila
         variable i, t: nat32
         t := ahora()
         dhcp_tic()
+        túnel_tic()
         para i desde 0 hasta MAX_PING - 1 hacer
             si pings[i].usado y t >= pings[i].límite entonces
                 contestar(pings[i].hueco, pings[i].serie, TIEMPO, 0, 0, nulo, 0)

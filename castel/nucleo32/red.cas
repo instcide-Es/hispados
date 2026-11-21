@@ -122,6 +122,7 @@ módulo Red
     público variable estado_red: nat32
     público variable ip_red: nat32                       ; (como va en la red: el primer octeto, abajo)
     público variable cambios_red: nat32                  ; sube cuando cambia (el escritorio repinta el icono)
+    público variable túnel_red: nat32                    ; (TAILSCALE) 1 si RED.BIN tiene puesta la interfaz del túnel (bit 8 de la 96)
     público variable apagada: bool                       ; «sinred» en la línea del cargador
     público variable sin_tarjeta: bool                   ; el servicio ya dijo que no hay tarjeta: no se vuelve a lanzar
     variable aparato: nat32
@@ -588,8 +589,9 @@ módulo Red
                 devolver registros(a, b)
             caso 96:
                 si no es_servicio() entonces devolver NO_VALE fin
-                si estado_red <> a o ip_red <> b entonces cambios_red := cambios_red + 1 fin
-                estado_red := a
+                si estado_red <> (a yb 0xFF) o ip_red <> b o túnel_red <> ((a >> 8) yb 1) entonces cambios_red := cambios_red + 1 fin
+                estado_red := a yb 0xFF
+                túnel_red := (a >> 8) yb 1             ; (TAILSCALE)
                 ip_red := b
                 aparato := c
                 devolver 0

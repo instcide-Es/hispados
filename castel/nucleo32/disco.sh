@@ -14,7 +14,9 @@
 # nucleo32/hvprun/hacer.sh. Con «red», también el servicio de red (RED.BIN) y
 # sus programas: IPCONFIG.BIN, PING.BIN y DESCARGA.BIN (la orden DESCARGAR).
 # Con «tls» (y «red»), también el servicio TLS (TLS.BIN, nucleo32/tls/hacer.sh:
-# necesita gcc con -m32) y HTTPS.BIN (la orden HTTPS).
+# necesita gcc con -m32) y HTTPS.BIN (la orden HTTPS). Con «ssh» (y «red»),
+# también SSH.BIN y SSHD.BIN (el cliente y el servidor SSH), WG.BIN (WireGuard) y
+# TAILSCALE.BIN: nucleo32/hispac/hacer.sh.
 # Con «navegador» (y «red» y «tls»), también el Navegador (nucleo32/navega/hacer.sh)
 # en \NAVEGA, su acceso en \MENU (NAVEGA.MNU, con el icono en el tapiz) y
 # X87.BIN (la prueba de que cada programa tiene su coma flotante). Con 32,
@@ -30,8 +32,9 @@ OFICINA=
 RED=
 TLS=
 NAVEGADOR=
+SSH=
 for o in "${@:3}"; do
-  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; navegador) NAVEGADOR=navegador ;; esac
+  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; navegador) NAVEGADOR=navegador ;; ssh) SSH=ssh ;; esac
 done
 T=$(mktemp -d)
 trap 'rm -rf $T' EXIT
@@ -84,6 +87,11 @@ if [ "$RED" = red ]; then
     python3 -I $AQUI/../ccastel.py $AQUI/uhttps.cas -o $T/uhttps.asm > /dev/null
     nasm -f bin $T/uhttps.asm -o $T/HTTPS.BIN
     mcopy -i $V $T/TLS.BIN $T/HTTPS.BIN ::
+  fi
+  # (SSH) el cliente y el servidor SSH, WireGuard y Tailscale (nucleo32/hispac/hacer.sh)
+  if [ "$SSH" = ssh ]; then
+    bash $AQUI/hispac/hacer.sh $T/hc
+    mcopy -i $V $T/hc/*.BIN ::
   fi
 fi
 if [ "$OFICINA" = oficina ]; then

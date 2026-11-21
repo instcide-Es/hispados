@@ -27,7 +27,7 @@ módulo Ured
     variable nombre: arreglo [256] de byte
     variable info: Info_red
     variable enlace: bool
-    variable estado_dicho, ip_dicha: nat32
+    variable estado_dicho, ip_dicha, túnel_dicho: nat32
 
     ; lo que falta para usar la red (0: nada)
     función falta(): nat32
@@ -47,11 +47,12 @@ módulo Ured
     función dilo()
         variable e, a: nat32
         e := cómo_está()
-        si e <> estado_dicho o mi_ip <> ip_dicha entonces
+        si e <> estado_dicho o mi_ip <> ip_dicha o túnel_ip <> túnel_dicho entonces
             a := 0xFFFFFFFF
             si tarjeta <> T_NINGUNA entonces a := pci_tarjeta fin
-            decir_estado(e, mi_ip, a)
+            si túnel_ip <> 0 entonces decir_estado(e ob 0x100, mi_ip, a) sino decir_estado(e, mi_ip, a) fin    ; (TAILSCALE) con el túnel
             estado_dicho := e
+            túnel_dicho := túnel_ip
             ip_dicha := mi_ip
         fin
     fin
@@ -102,6 +103,7 @@ módulo Ured
         si orden = AVISO_ACABÓ entonces
             tcp_acabó(p.tarea)
             udp_acabó(p.tarea)
+            túnel_acabó(p.tarea)                            ; (TÚNEL)
             devolver
         fin
         f := falta()
@@ -151,8 +153,37 @@ módulo Ured
                     udp_recibir(p.cab[1], p.tarea, h, s, p.cab[2], p.cabe)
                 fin
             caso O_CERRAR:
-                si es_tcp(p.cab[1]) entonces r := Rtcp.cerrar(p.cab[1], p.tarea) sino r := udp_cerrar(p.cab[1], p.tarea) fin
+                si es_tcp(p.cab[1]) entonces
+                    r := Rtcp.cerrar(p.cab[1], p.tarea)
+                sino si es_escucha(p.cab[1]) entonces
+                    r := no_escuchar(p.cab[1], p.tarea)          ; (SSH)
+                sino
+                    r := udp_cerrar(p.cab[1], p.tarea)
+                fin
                 contestar(h, s, r, 0, 0, nulo, 0)
+            caso O_ESCUCHAR:
+                ; (SSH) un puerto TCP en escucha (el servidor SSH)
+                si tarjeta = T_NINGUNA entonces contestar(h, s, SIN_TARJETA, 0, 0, nulo, 0) sino contestar(h, s, escuchar(p.tarea, p.cab[1]), 0, 0, nulo, 0) fin
+            caso O_ACEPTAR:
+                aceptar(p.cab[1], p.tarea, h, s, p.cab[2])
+            ; ---- (TÚNEL) la interfaz del túnel (WireGuard, Tailscale) ----
+            caso O_TUNEL:
+                contestar(h, s, poner_túnel(p.tarea, p.cab[1], puntero(datos), p.largo div 8), 0, 0, nulo, 0)
+            caso O_TUNEL_QUITAR:
+                contestar(h, s, quitar_túnel(p.tarea), 0, 0, nulo, 0)
+            caso O_TUNEL_LEER:
+                leer_túnel(p.tarea, h, s, p.cab[1], p.cabe)
+            caso O_TUNEL_ENTRA:
+                si túnel_ip = 0 o túnel_dueño <> p.tarea entonces
+                    contestar(h, s, NO_VALE_RED, 0, 0, nulo, 0)
+                sino
+                    si entrada_ip(datos, p.largo, cierto) = ENTRA_TCP entonces tcp_entra(ent_ip, ent_datos, ent_largo) fin
+                    contestar(h, s, 0, 0, 0, nulo, 0)
+                fin
+            caso O_TUNEL_DNS:
+                contestar(h, s, nombres_del_túnel(p.tarea, datos, p.largo), 0, 0, nulo, 0)
+            caso O_TUNEL_ESTADO:
+                contestar(h, s, túnel_ip, túnel_salidos, túnel_entrados, nulo, 0)
             caso O_UDP:
                 si tarjeta = T_NINGUNA entonces
                     contestar(h, s, SIN_TARJETA, 0, 0, nulo, 0)
