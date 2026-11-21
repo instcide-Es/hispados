@@ -1,0 +1,1634 @@
+; =============================================================================
+;  inicio.cas - (MENÚ) el menú Inicio de Hispa-Pentium, al estilo de los
+;  escritorios de principios de los 2000 y de diseño propio (azules y
+;  verdes, esquinas redondas, el disquete de la casa):
+;
+;   - arriba, el saludo («Hola, Carlos») con el disquete;
+;   - a la izquierda, en blanco: los programas fijados (en negrita, con su
+;     explicación debajo) y los más usados (los que más se abren desde el
+;     menú; mientras no hay cuentas, los de los paquetes y la oficina) y,
+;     abajo, «Todos los programas», que abre un submenú con sus carpetas
+;     (Accesorios, Oficina, Internet, Juegos, Sistema, Programas de
+;     Windows...) y, cada una, otro con lo que lleva: lo de serie y lo que
+;     dejan los paquetes (\HISPA\MENU\*.MNU, accesos.cas, por su «tipo»);
+;   - a la derecha, en azul muy claro: Mis documentos (un submenú con los
+;     .TXT de la raíz), Mi equipo, Configuración, el Administrador de
+;     dispositivos, Programas instalados, Actualizar, Ayuda y Ejecutar...;
+;   - abajo, siempre a la vista: Cerrar sesión, Reiniciar y Apagar equipo.
+;
+;  El menú mide siempre lo mismo (lo que quepa encima de la barra de
+;  tareas, como mucho ALTO_MÁXIMO): los más usados que no caben no se
+;  pintan, y los submenús largos no crecen más allá de la pantalla: se
+;  desplazan con sus flechas (arriba y abajo), con la rueda del ratón y con
+;  el teclado. Así nada empuja «Apagar equipo» fuera de la pantalla.
+;
+;  El teclado: las flechas (arriba y abajo, de una opción a otra; a la
+;  derecha y a la izquierda, de una columna a otra y a los submenús y de
+;  vuelta), Intro, Esc (cierra el submenú, o el menú) y la letra inicial
+;  (la opción siguiente que empieza por ella). Con el botón secundario,
+;  en un programa: Abrir, y Anclar al menú Inicio (o Quitar del menú).
+;
+;  Lo fijado y las veces que se ha abierto cada programa se guardan en
+;  INICIO.INI (en \HISPA, o en la raíz de un sistema sin instalar; página
+;  437, CR LF): «fijo=Bloc de notas» y «uso=3|Navegador».
+;
+;  Lo que se elige no lo hace este módulo: lo deja en «pedido» (la acción
+;  del escritorio y su dato, o un programa con sus argumentos) y lo hace
+;  escritorio.cas (haz). Las acciones son las de escritorio.cas (AM_...).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Inicio
+
+    importar Tareas, Consola, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Fat, Unidades, Usuario, Multiboot, Ajustes, Textos32, Accesos, Iconos
+
+    ; ---- las acciones (las de escritorio.cas, con los mismos números) ----
+    público constante P_SESIÓN = 15             ; Cerrar sesión
+    público constante P_EJECUTAR = 16           ; Ejecutar...
+    público constante P_AYUDA = 17              ; la Ayuda
+    público constante P_RUTA = 18               ; lanzar pedido_programa con pedido_argumentos
+    constante P_REINICIAR = 2                   ; (AC_REINICIAR)
+    constante P_BLOC = 20
+    constante P_CONSOLA = 21
+    constante P_CONFIG = 23
+    constante P_APAGAR = 24
+    constante P_EQUIPO = 25
+    constante P_OFICINA = 26
+    constante P_PROGRAMAS = 27
+    constante P_ACCESO = 28
+    constante P_DISPOSITIVOS = 29
+    constante P_RED_TS = 70
+    ; el programa de «Programas instalados» (rama pentium-programas: si aún no está, sale apagado)
+    función ruta_instalados(): puntero a byte
+        devolver "\\INSTALAD.BIN"
+    fin
+    constante TECLA_RE_PÁG_ = 0x149
+    constante TECLA_AV_PÁG_ = 0x151
+    público constante ME_INICIO = 3             ; la etiqueta del menú del botón secundario (la de escritorio.cas)
+
+    ; ---- las medidas ----
+    constante ALTO_BARRA = 34                   ; (la de escritorio.cas)
+    constante ANCHO = 440
+    constante ALTO_MÁXIMO = 470
+    constante CABEZA = 54
+    constante PIE = 42
+    constante IZQUIERDA = 222                   ; donde empieza la columna de la derecha
+    constante ALTO_FIJO = 40                    ; un programa fijado (con su explicación)
+    constante ALTO_USADO = 30
+    constante ALTO_DERECHA = 30
+    constante ALTO_TODOS = 36
+    constante PANEL_ANCHO = 240                 ; los submenús
+    constante FILA = 26
+    constante FLECHA = 16                       ; las franjas con las flechas de un submenú que se desplaza
+    constante HUECO = 4                         ; lo que queda arriba y abajo en un submenú
+
+    ; ---- los colores (los de escritorio.cas) ----
+    constante BLANCO = 0xFFFFFF
+    constante AZUL_CLARO = 0xDCEAFB
+    constante AZUL_ELEGIDO = 0x2F74D0
+    constante TINTA = 0x14294A
+    constante TINTA_SUAVE = 0x5A7396
+    constante TINTA_GRIS = 0x9AAAC0
+    constante NARANJA = 0xFF7A33
+    constante VERDE = 0x2A8A3C
+    constante RAYA = 0xC9D8EC
+
+    ; ---- las carpetas de «Todos los programas» (en este orden) ----
+    constante C_ACCESORIOS = 0
+    constante C_DESARROLLO = 1
+    constante C_INTERNET = 2
+    constante C_JUEGOS = 3
+    constante C_MULTIMEDIA = 4
+    constante C_OFICINA = 5
+    constante C_TERCEROS = 6
+    constante C_WINDOWS = 7
+    constante C_SEGURIDAD = 8
+    constante C_SISTEMA = 9
+    constante C_OTROS = 10
+    constante N_CARPETAS = 11
+    constante C_NINGUNA = 11                    ; lo que no va en «Todos los programas» (Ayuda, Apagar...)
+
+    ; ---- lo que hay: cada programa (o cosa del menú) ----
+    constante MAX_PROGRAMAS = 72
+    constante SIN_RANGO = 0xFFFF
+    tipo Programa = estructura
+        nombre: arreglo [32] de byte
+        explica: puntero a byte                 ; lo que sale debajo, si está fijado (o nulo)
+        acción, dato: nat32
+        programa: arreglo [80] de byte          ; (P_RUTA) el programa y sus argumentos
+        argumentos: arreglo [80] de byte
+        carpeta: nat32
+        icono: nat32                            ; la clase de iconos.cas (0: el .ICP de un acceso)
+        letra: nat32                            ; (IC_DOCUMENTO) su letra
+        icp: puntero a nat32                    ; el icono de un acceso (32 x 32) o nulo
+        apagado: bool                           ; no se puede (en gris)
+        rango: nat32                            ; su sitio entre los más usados mientras no hay cuentas (SIN_RANGO: no sale)
+    fin
+    variable progs: arreglo [MAX_PROGRAMAS] de Programa
+    variable n_progs: nat32
+    variable p_equipo, p_config, p_dispositivos, p_instalados, p_actualizar, p_ayuda, p_ejecutar: ent32
+    variable p_sesión, p_reiniciar, p_apagar: ent32
+
+    ; ---- lo fijado y las cuentas (INICIO.INI) ----
+    constante MAX_FIJOS = 6
+    constante MAX_USOS = 32
+    variable fijos: arreglo [MAX_FIJOS] de arreglo [32] de byte
+    variable n_fijos: nat32
+    variable usos_nombre: arreglo [MAX_USOS] de arreglo [32] de byte
+    variable usos_n: arreglo [MAX_USOS] de nat32
+    variable n_usos: nat32
+    variable ini_leído: bool
+    variable tini: arreglo [2600] de byte
+    variable ruta: arreglo [96] de byte
+
+    ; ---- los documentos (los .TXT de la raíz) ----
+    constante MAX_DOCUMENTOS = 24
+    variable documentos: arreglo [MAX_DOCUMENTOS] de arreglo [13] de byte
+    variable n_documentos: nat32
+
+    ; ---- las opciones del menú (lo que se puede elegir en él) ----
+    constante O_PROGRAMA = 1                    ; un programa de «progs» (índice)
+    constante O_TODOS = 2                       ; «Todos los programas»
+    constante O_DOCUMENTOS = 3                  ; «Mis documentos»
+    constante MAX_OPCIONES = 32
+    tipo Opción = estructura
+        x, ye, an, al: ent32
+        clase: nat32
+        índice: ent32
+        columna: nat32                          ; 0: la izquierda; 1: la derecha; 2: el pie
+    fin
+    variable opciones: arreglo [MAX_OPCIONES] de Opción
+    variable n_opciones: nat32
+    variable elegida: ent32 = -1
+
+    ; ---- los submenús (dos: el de «Todos los programas» o el de los
+    ; documentos, y el de una carpeta) ----
+    constante F_CARPETA = 1
+    constante F_PROGRAMA = 2
+    constante F_DOCUMENTO = 3
+    constante MAX_FILAS = 64
+    tipo Panel = estructura
+        v: nat32                                ; su ventana (0: cerrado)
+        x, ye, an, al: ent32
+        de: nat32                               ; de qué opción del menú, o de qué carpeta, cuelga
+        clase: arreglo [MAX_FILAS] de nat32
+        índice: arreglo [MAX_FILAS] de nat32
+        n: nat32
+        primera: ent32                          ; la primera que se ve
+        caben: ent32                            ; las que se ven
+        flechas: bool                           ; se desplaza (las franjas de arriba y abajo)
+        elegida: ent32
+    fin
+    variable paneles: arreglo [2] de Panel
+    variable nivel: nat32                       ; dónde está el teclado: 0, el menú; 1 y 2, los submenús
+
+    ; ---- lo que se ve fuera ----
+    público variable menú_abierto: bool
+    público variable menú_cerrado_en: nat32     ; el tic en que se cerró (por un clic fuera)
+    público variable hay_pedido: bool           ; se ha elegido algo: lo hace el escritorio
+    público variable pedido_acción, pedido_dato: nat32
+    público variable pedido_programa: arreglo [80] de byte
+    público variable pedido_argumentos: arreglo [80] de byte
+    público variable v_menú: nat32
+    variable ancho, alto, mx, my: ent32         ; lo que mide el menú y dónde está
+    variable saludo: arreglo [40] de byte
+    variable menú_prog: ent32                   ; (el del botón secundario)
+    variable auto_tic: nat32                    ; (desplazar solo con la flecha encima de una franja)
+    variable cierre_en: nat32                   ; (el submenú se cierra un poco después de salir de su opción: 0, no)
+    variable cambio_en: nat32                   ; (lo mismo con la carpeta abierta del primer submenú)
+    constante ESPERA_CIERRE = 35                ; tics (un tercio de segundo): da tiempo a llevar la flecha al submenú en diagonal
+
+    ; -------------------------------------------------------------------------
+    ;  Lo de los textos
+    ; -------------------------------------------------------------------------
+    ; la letra sin tilde y en minúscula (para la letra inicial y ordenar)
+    función llana(c: byte): byte
+        c := minúscula(c)
+        según c
+            caso 0xA0, 0x85, 0x83, 0x84: devolver 'a'      ; á à â ä
+            caso 0x82, 0x8A, 0x88, 0x89, 0x90: devolver 'e'
+            caso 0xA1, 0x8D, 0x8C, 0x8B: devolver 'i'
+            caso 0xA2, 0x95, 0x93, 0x94: devolver 'o'
+            caso 0xA3, 0x97, 0x96, 0x81, 0x9A: devolver 'u'
+            caso 0xA4, 0xA5: devolver 'n' + 1      ; la ñ, detrás de la n
+        fin
+        devolver c
+    fin
+
+    ; ¿va «a» antes que «b»? (sin mirar mayúsculas ni tildes)
+    función antes(a: puntero a byte, b: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras a[i] <> 0 y llana(a[i]) = llana(b[i]) hacer i := i + 1 fin
+        devolver llana(a[i]) < llana(b[i])
+    fin
+
+    función iguales_llanos(a: puntero a byte, b: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras a[i] <> 0 y llana(a[i]) = llana(b[i]) hacer i := i + 1 fin
+        devolver a[i] = 0 y b[i] = 0
+    fin
+
+    ; el texto, cortado con «...» si no cabe en «an» puntos
+    función texto_corto(ref l: Lienzo, x: ent32, yy: ent32, t: puntero a byte, an: ent32, c: nat32, negrita: bool)
+        variable n, caben: nat32
+        variable corto: arreglo [64] de byte
+        n := longitud(t)
+        caben := nat32(an div ANCHO_LETRA)
+        si n > caben y caben > 3 y caben < 60 entonces
+            copiar_hasta(corto, t, caben - 2)
+            concatenar(corto, "...")
+            t := corto
+        fin
+        si negrita entonces texto_negrita(l, x, yy, t, c) sino texto(l, x, yy, t, c) fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que hay en el disco
+    ; -------------------------------------------------------------------------
+    ; ¿está ese programa? (en la unidad en memoria: un módulo con ese
+    ; nombre; en el disco: donde se dice o, si no, en \HISPA, como lo busca
+    ; el núcleo al cargarlo)
+    público función existe(r: puntero a byte): bool
+        variable m, i, k: nat32
+        variable nombre, p: puntero a byte
+        variable en_hispa: arreglo [24] de byte
+        nombre := r
+        p := r
+        mientras valor(p) <> 0 hacer
+            si valor(p) = '\\' o valor(p) = ':' entonces nombre := p + 1 fin
+            p := p + 1
+        fin
+        si del_sistema = 0xFFFFFFFF entonces devolver falso fin
+        si unidad_en_memoria() entonces
+            i := 0
+            mientras i < módulos() hacer
+                p := módulo_nombre(i)
+                k := 0
+                mientras nombre[k] <> 0 y mayúscula(p[k]) = mayúscula(nombre[k]) hacer k := k + 1 fin
+                si nombre[k] = 0 y (p[k] = 0 o p[k] = ' ') entonces devolver cierto fin
+                i := i + 1
+            fin
+            devolver falso
+        fin
+        m := abrir_archivo(del_sistema, r, PARA_LEER)
+        si m >= PRIMER_ERROR entonces
+            copiar_hasta(en_hispa, "\\HISPA\\", 24)
+            copiar_hasta(dirección(en_hispa[7]), nombre, 13)
+            m := abrir_archivo(del_sistema, en_hispa, PARA_LEER)
+        fin
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        cerrar_archivo(m)
+        devolver cierto
+    fin
+
+    ; los documentos: los .TXT de la raíz del disco
+    función lee_documentos()
+        variable m, r, n, i: nat32
+        variable e: Entrada
+        n_documentos := 0
+        si del_sistema = 0xFFFFFFFF entonces devolver fin
+        si unidad_en_memoria() entonces
+            ; sin disco: los .TXT que ha traído el cargador
+            i := 0
+            mientras i < módulos() y n_documentos < MAX_DOCUMENTOS hacer
+                n := 0
+                mientras n < 12 y módulo_nombre(i)[n] <> 0 y módulo_nombre(i)[n] <> ' ' hacer
+                    documentos[n_documentos][n] := mayúscula(módulo_nombre(i)[n])
+                    n := n + 1
+                fin
+                documentos[n_documentos][n] := 0
+                si n > 4 y documentos[n_documentos][n - 4] = '.' y documentos[n_documentos][n - 3] = 'T' y documentos[n_documentos][n - 2] = 'X' y documentos[n_documentos][n - 1] = 'T' entonces
+                    n_documentos := n_documentos + 1
+                fin
+                i := i + 1
+            fin
+            devolver
+        fin
+        m := abrir_archivo(del_sistema, "\\", PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver fin
+        r := leer_entrada(m, dirección(e))
+        mientras r = 1 y n_documentos < MAX_DOCUMENTOS hacer
+            n := 0
+            mientras e.nombre[n] <> 0 hacer n := n + 1 fin
+            si e.atributos yb CARPETA = 0 y n > 4 y e.nombre[n - 4] = '.' y e.nombre[n - 3] = 'T' y e.nombre[n - 2] = 'X' y e.nombre[n - 1] = 'T' entonces
+                para i desde 0 hasta n hacer documentos[n_documentos][i] := e.nombre[i] fin
+                n_documentos := n_documentos + 1
+            fin
+            r := leer_entrada(m, dirección(e))
+        fin
+        cerrar_archivo(m)
+    fin
+
+    ; ---- INICIO.INI ----
+    función ruta_ini()
+        si instalado() entonces copiar(ruta, "\\HISPA\\INICIO.INI") sino copiar(ruta, "\\INICIO.INI") fin
+    fin
+
+    ; el valor de la línea que empieza en t (hasta el final de la línea)
+    función saca_línea(t: puntero a byte, destino: puntero a byte, cabe: nat32): puntero a byte
+        variable k: nat32
+        k := 0
+        mientras valor(t) <> 0 y valor(t) <> '\r' y valor(t) <> '\n' hacer
+            si k + 1 < cabe entonces
+                destino[k] := valor(t)
+                k := k + 1
+            fin
+            t := t + 1
+        fin
+        destino[k] := 0
+        devolver t
+    fin
+
+    función lee_ini()
+        variable m, n, k: nat32
+        variable t: puntero a byte
+        variable cifras: arreglo [40] de byte
+        ini_leído := cierto
+        n_fijos := 0
+        n_usos := 0
+        m := 0xFFFFFFFF
+        si del_sistema <> 0xFFFFFFFF y no unidad_en_memoria() entonces
+            ruta_ini()
+            m := abrir_archivo(del_sistema, ruta, PARA_LEER)
+        fin
+        si m >= PRIMER_ERROR entonces
+            ; lo de siempre: el Bloc de notas y la Consola, fijados
+            copiar(fijos[0], "Bloc de notas")
+            copiar(fijos[1], "Consola")
+            n_fijos := 2
+            devolver
+        fin
+        n := leer_archivo(m, tini, 2599)
+        cerrar_archivo(m)
+        si n > 2599 entonces n := 0 fin
+        tini[n] := 0
+        t := tini
+        mientras valor(t) <> 0 hacer
+            si empieza_por(t, "fijo=") y n_fijos < MAX_FIJOS entonces
+                t := saca_línea(t + 5, fijos[n_fijos], 32)
+                si fijos[n_fijos][0] <> 0 entonces n_fijos := n_fijos + 1 fin
+            sino si empieza_por(t, "uso=") y n_usos < MAX_USOS entonces
+                t := saca_línea(t + 4, cifras, 40)
+                k := 0
+                usos_n[n_usos] := 0
+                mientras cifras[k] >= '0' y cifras[k] <= '9' hacer
+                    usos_n[n_usos] := usos_n[n_usos] * 10 + (cifras[k] - '0')
+                    k := k + 1
+                fin
+                si cifras[k] = '|' y cifras[k + 1] <> 0 entonces
+                    copiar_hasta(usos_nombre[n_usos], dirección(cifras[k + 1]), 32)
+                    n_usos := n_usos + 1
+                fin
+            sino
+                mientras valor(t) <> 0 y valor(t) <> '\n' hacer t := t + 1 fin
+            fin
+            si valor(t) <> 0 entonces t := t + 1 fin
+        fin
+    fin
+
+    función guarda_ini()
+        variable m, i: nat32
+        variable cifras: arreglo [12] de byte
+        si del_sistema = 0xFFFFFFFF o unidad_en_memoria() o no escribible(del_sistema) entonces devolver fin
+        copiar(tini, "; el menú Inicio de Hispa-Pentium: lo fijado y las veces que se ha abierto cada programa\r\n")
+        i := 0
+        mientras i < n_fijos hacer
+            concatenar(tini, "fijo=")
+            concatenar(tini, fijos[i])
+            concatenar(tini, "\r\n")
+            i := i + 1
+        fin
+        i := 0
+        mientras i < n_usos hacer
+            concatenar(tini, "uso=")
+            natural_a_texto(usos_n[i], cifras)
+            concatenar(tini, cifras)
+            concatenar(tini, "|")
+            concatenar(tini, usos_nombre[i])
+            concatenar(tini, "\r\n")
+            i := i + 1
+        fin
+        ruta_ini()
+        m := abrir_archivo(del_sistema, ruta, PARA_CREAR)
+        si m >= PRIMER_ERROR entonces devolver fin
+        escribir_archivo(m, tini, longitud(tini))
+        cerrar_archivo(m)
+    fin
+
+    función usos_de(nombre: puntero a byte): nat32
+        variable i: nat32
+        i := 0
+        mientras i < n_usos hacer
+            si iguales(usos_nombre[i], nombre) entonces devolver usos_n[i] fin
+            i := i + 1
+        fin
+        devolver 0
+    fin
+
+    función cuenta_uso(nombre: puntero a byte)
+        variable i, k: nat32
+        i := 0
+        mientras i < n_usos y no iguales(usos_nombre[i], nombre) hacer i := i + 1 fin
+        si i = n_usos entonces
+            si n_usos < MAX_USOS entonces
+                n_usos := n_usos + 1
+            sino
+                ; lleno: fuera el que menos se ha usado
+                i := 0
+                para k desde 1 hasta MAX_USOS - 1 hacer
+                    si usos_n[k] < usos_n[i] entonces i := k fin
+                fin
+            fin
+            copiar_hasta(usos_nombre[i], nombre, 32)
+            usos_n[i] := 0
+        fin
+        usos_n[i] := usos_n[i] + 1
+        guarda_ini()
+    fin
+
+    función es_fijo(nombre: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras i < n_fijos hacer
+            si iguales(fijos[i], nombre) entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    función cambia_fijo(nombre: puntero a byte)
+        variable i, k: nat32
+        i := 0
+        mientras i < n_fijos y no iguales(fijos[i], nombre) hacer i := i + 1 fin
+        si i < n_fijos entonces
+            para k desde i + 1 hasta n_fijos hacer
+                si k < n_fijos entonces copiar(fijos[k - 1], fijos[k]) fin
+            fin
+            n_fijos := n_fijos - 1
+        sino si n_fijos < MAX_FIJOS entonces
+            copiar_hasta(fijos[n_fijos], nombre, 32)
+            n_fijos := n_fijos + 1
+        fin
+        guarda_ini()
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que hay: los programas de serie y los de los paquetes
+    ; -------------------------------------------------------------------------
+    función nuevo(nombre: puntero a byte, explica: puntero a byte, acción: nat32, dato: nat32, carpeta: nat32, icono_: nat32, rango: nat32): ent32
+        variable k: nat32
+        si n_progs >= MAX_PROGRAMAS entonces devolver -1 fin
+        k := n_progs
+        copiar_hasta(progs[k].nombre, nombre, 32)
+        progs[k].explica := explica
+        progs[k].acción := acción
+        progs[k].dato := dato
+        progs[k].programa[0] := 0
+        progs[k].argumentos[0] := 0
+        progs[k].carpeta := carpeta
+        progs[k].icono := icono_
+        progs[k].letra := 0
+        progs[k].icp := nulo
+        progs[k].apagado := falso
+        progs[k].rango := rango
+        n_progs := n_progs + 1
+        devolver ent32(k)
+    fin
+
+    ; uno que se lanza por su ruta (si no está, no sale)
+    función nuevo_de_ruta(nombre: puntero a byte, r: puntero a byte, args: puntero a byte, carpeta: nat32, icono_: nat32): ent32
+        variable k: ent32
+        si no existe(r) entonces devolver -1 fin
+        k := nuevo(nombre, nulo, P_RUTA, 0, carpeta, icono_, SIN_RANGO)
+        si k >= 0 entonces
+            copiar_hasta(progs[k].programa, r, 80)
+            si args <> nulo entonces copiar_hasta(progs[k].argumentos, args, 80) fin
+        fin
+        devolver k
+    fin
+
+    ; la carpeta de un tipo («Internet y red» -> Internet...), por sus
+    ; primeras letras; C_OTROS si no es ninguno
+    función carpeta_de_tipo(t: puntero a byte): nat32
+        variable a: arreglo [16] de byte
+        variable i: nat32
+        i := 0
+        mientras i < 15 y t[i] <> 0 hacer
+            a[i] := llana(t[i])
+            i := i + 1
+        fin
+        a[i] := 0
+        si empieza_por(a, "sist") entonces devolver C_SISTEMA fin
+        si empieza_por(a, "ofic") entonces devolver C_OFICINA fin
+        si empieza_por(a, "inter") o empieza_por(a, "red") entonces devolver C_INTERNET fin
+        si empieza_por(a, "jueg") o empieza_por(a, "emul") entonces devolver C_JUEGOS fin
+        si empieza_por(a, "mult") entonces devolver C_MULTIMEDIA fin
+        si empieza_por(a, "segu") entonces devolver C_SEGURIDAD fin
+        si empieza_por(a, "programas de w") o empieza_por(a, "wind") entonces devolver C_WINDOWS fin
+        si empieza_por(a, "programas de t") o empieza_por(a, "terc") entonces devolver C_TERCEROS fin
+        si empieza_por(a, "herr") o empieza_por(a, "acce") entonces devolver C_ACCESORIOS fin
+        si empieza_por(a, "desa") entonces devolver C_DESARROLLO fin
+        devolver C_OTROS
+    fin
+
+    ; sin tipo: por el programa
+    función carpeta_de_programa(r: puntero a byte): nat32
+        variable a: arreglo [80] de byte
+        copiar_hasta(a, r, 80)
+        a_mayúsculas(a)
+        si buscar(a, "NAVEGA") <> nulo o buscar(a, "WIFI") <> nulo o buscar(a, "TAILSCAL") <> nulo o buscar(a, "SSH") <> nulo o buscar(a, "CORREO") <> nulo entonces devolver C_INTERNET fin
+        si buscar(a, "CLICGEST") <> nulo entonces devolver C_OFICINA fin
+        si buscar(a, "ESCUDO") <> nulo entonces devolver C_SEGURIDAD fin
+        si buscar(a, "NES") <> nulo o buscar(a, "SNES") <> nulo o buscar(a, "JUEGO") <> nulo entonces devolver C_JUEGOS fin
+        si buscar(a, ".EXE") <> nulo entonces devolver C_WINDOWS fin
+        devolver C_OTROS
+    fin
+
+    función nombre_carpeta(c: nat32): puntero a byte
+        según c
+            caso C_ACCESORIOS: devolver "Accesorios"
+            caso C_DESARROLLO: devolver "Desarrollo"
+            caso C_INTERNET: devolver "Internet"
+            caso C_JUEGOS: devolver "Juegos"
+            caso C_MULTIMEDIA: devolver "Multimedia"
+            caso C_OFICINA: devolver "Oficina"
+            caso C_TERCEROS: devolver "Programas de terceros"
+            caso C_WINDOWS: devolver "Programas de Windows"
+            caso C_SEGURIDAD: devolver "Seguridad"
+            caso C_SISTEMA: devolver "Sistema"
+        fin
+        devolver "Otros"
+    fin
+
+    función de_oficina(i: nat32): puntero a byte
+        según i
+            caso 0: devolver "Facturas"
+            caso 1: devolver "Pluma"
+            caso 2: devolver "Cuentas"
+        fin
+        devolver "Mirador"
+    fin
+
+    función hace_lista()
+        variable i, rango: nat32
+        variable k: ent32
+        n_progs := 0
+        rango := 0
+        ; los accesorios
+        nuevo("Bloc de notas", "Escribir un texto", P_BLOC, 0, C_ACCESORIOS, IC_TEXTO, SIN_RANGO)
+        nuevo("Consola", "Las órdenes", P_CONSOLA, 0, C_ACCESORIOS, IC_CONSOLA, SIN_RANGO)
+        p_equipo := nuevo("Mi equipo", "Discos, carpetas y archivos", P_EQUIPO, 0, C_ACCESORIOS, IC_EQUIPO, SIN_RANGO)
+        ; los de los paquetes (\HISPA\MENU\*.MNU)
+        i := 0
+        mientras i < n_accesos hacer
+            k := nuevo(nombre_de(i), nulo, P_ACCESO, i, C_OTROS, 0, rango)
+            si k >= 0 entonces
+                rango := rango + 1
+                progs[k].icp := icono_de(i)
+                si tipo_de(i)[0] <> 0 entonces progs[k].carpeta := carpeta_de_tipo(tipo_de(i)) sino progs[k].carpeta := carpeta_de_programa(programa_de(i)) fin
+            fin
+            i := i + 1
+        fin
+        ; la oficina de Hispa-386 (HVPRUN.BIN)
+        i := 0
+        mientras i < 4 hacer
+            k := nuevo(de_oficina(i), nulo, P_OFICINA, i, C_OFICINA, IC_DOCUMENTO, rango)
+            si k >= 0 entonces progs[k].letra := nat32(de_oficina(i)[0]) fin
+            rango := rango + 1
+            i := i + 1
+        fin
+        ; los programas de Windows de ejemplo (el paquete win32)
+        nuevo_de_ruta("Calculadora", "\\HISPA32\\CALC32.EXE", nulo, C_WINDOWS, IC_PROGRAMA)
+        nuevo_de_ruta("Hola, Windows", "\\HISPA32\\HOLA32.EXE", nulo, C_WINDOWS, IC_PROGRAMA)
+        nuevo_de_ruta("Controles de Windows", "\\HISPA32\\CTL32.EXE", nulo, C_WINDOWS, IC_PROGRAMA)
+        nuevo_de_ruta("Menús de Windows", "\\HISPA32\\MENU32.EXE", nulo, C_WINDOWS, IC_PROGRAMA)
+        nuevo_de_ruta("Avisos de Windows", "\\HISPA32\\AVISO32.EXE", nulo, C_WINDOWS, IC_PROGRAMA)
+        ; los de ejemplo (el paquete ejemplos)
+        nuevo_de_ruta("Muestra de controles", "\\MUESTRA.BIN", nulo, C_DESARROLLO, IC_PROGRAMA)
+        ; el sistema
+        p_config := nuevo("Configuración", nulo, P_CONFIG, 0, C_SISTEMA, IC_RUEDA, SIN_RANGO)
+        p_dispositivos := nuevo("Administrador de dispositivos", nulo, P_DISPOSITIVOS, 0, C_SISTEMA, IC_EQUIPO, SIN_RANGO)
+        p_actualizar := nuevo("Programas y actualizaciones", nulo, P_PROGRAMAS, 0, C_SISTEMA, IC_PAQUETE, SIN_RANGO)
+        p_instalados := nuevo("Programas instalados", nulo, P_RUTA, 0, C_SISTEMA, IC_PAQUETE, SIN_RANGO)
+        si p_instalados >= 0 entonces
+            copiar(progs[p_instalados].programa, ruta_instalados())
+            progs[p_instalados].apagado := no existe(ruta_instalados())
+        fin
+        si existe("\\TAILSCAL.BIN") entonces nuevo("Red y Tailscale", nulo, P_RED_TS, 0, C_SISTEMA, IC_EQUIPO, SIN_RANGO) fin
+        ; lo que no va en «Todos los programas»
+        p_ayuda := nuevo("Ayuda", nulo, P_AYUDA, 0, C_NINGUNA, IC_TEXTO, SIN_RANGO)
+        p_ejecutar := nuevo("Ejecutar...", nulo, P_EJECUTAR, 0, C_NINGUNA, IC_PROGRAMA, SIN_RANGO)
+        p_sesión := nuevo("Cerrar sesión", nulo, P_SESIÓN, 0, C_NINGUNA, 0, SIN_RANGO)
+        p_reiniciar := nuevo("Reiniciar", nulo, P_REINICIAR, 0, C_NINGUNA, 0, SIN_RANGO)
+        p_apagar := nuevo("Apagar equipo", nulo, P_APAGAR, 0, C_NINGUNA, 0, SIN_RANGO)
+    fin
+
+    función busca_prog(nombre: puntero a byte): ent32
+        variable i: nat32
+        i := 0
+        mientras i < n_progs hacer
+            si iguales(progs[i].nombre, nombre) entonces devolver ent32(i) fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los dibujos propios
+    ; -------------------------------------------------------------------------
+    ; el icono de un programa, de ese lado (16, 20, 24 o 32)
+    función icono_prog(ref l: Lienzo, x: ent32, yy: ent32, lado: ent32, k: nat32)
+        variable p: puntero a nat32
+        variable f, c: ent32
+        variable px: nat32
+        si progs[k].icono = 0 entonces
+            p := progs[k].icp
+            si p = nulo entonces
+                icono(l, x, yy, lado, IC_PROGRAMA, 0, 0)
+                devolver
+            fin
+            para f desde 0 hasta lado - 1 hacer
+                para c desde 0 hasta lado - 1 hacer
+                    px := p[nat32(f * LADO_ICONO div lado) * LADO_ICONO + nat32(c * LADO_ICONO div lado)]
+                    si px >> 24 >= 0x80 entonces punto(l, x + c, yy + f, px yb 0xFFFFFF) fin
+                fin
+            fin
+            devolver
+        fin
+        icono(l, x, yy, lado, progs[k].icono, progs[k].letra, 0)
+    fin
+
+    ; el triangulito de un submenú, hacia la derecha (de «lado» de alto)
+    función flechita(ref l: Lienzo, x: ent32, yy: ent32, lado: ent32, c: nat32)
+        variable i: ent32
+        para i desde 0 hasta lado div 2 hacer
+            rectángulo(l, x + i, yy + i, 1, lado - 2 * i, c)
+        fin
+    fin
+
+    ; hacia arriba o hacia abajo (las franjas de un submenú que se desplaza)
+    función flechita_vertical(ref l: Lienzo, cx: ent32, yy: ent32, lado: ent32, abajo: bool, c: nat32)
+        variable i: ent32
+        para i desde 0 hasta lado div 2 hacer
+            si abajo entonces
+                rectángulo(l, cx - lado div 2 + i, yy + i, lado - 2 * i, 1, c)
+            sino
+                rectángulo(l, cx - i, yy + i, 2 * i + 1, 1, c)
+            fin
+        fin
+    fin
+
+    ; los del pie (22 x 22): apagar (naranja), reiniciar (verde) y cerrar sesión (amarillo)
+    función icono_pie(ref l: Lienzo, x: ent32, yy: ent32, cuál: ent32)
+        variable c: nat32
+        c := NARANJA
+        si cuál = p_reiniciar entonces c := 0x3FAE4A fin
+        si cuál = p_sesión entonces c := 0xE8B730 fin
+        redondeado(l, x, yy, 22, 22, 5, BLANCO, BLANCO, TODAS)
+        redondeado(l, x + 1, yy + 1, 20, 20, 4, mezcla(c, BLANCO, 70), c, TODAS)
+        si cuál = p_apagar entonces
+            círculo(l, x + 11, yy + 12, 6, BLANCO)
+            círculo(l, x + 11, yy + 12, 4, c)
+            rectángulo(l, x + 8, yy + 3, 7, 7, c)
+            rectángulo(l, x + 10, yy + 4, 2, 8, BLANCO)
+        sino si cuál = p_reiniciar entonces
+            círculo(l, x + 11, yy + 11, 6, BLANCO)
+            círculo(l, x + 11, yy + 11, 4, c)
+            rectángulo(l, x + 11, yy + 3, 7, 7, c)
+            flechita(l, x + 12, yy + 3, 7, BLANCO)
+        sino
+            ; una puerta con su flecha que sale
+            rectángulo(l, x + 5, yy + 4, 8, 14, BLANCO)
+            rectángulo(l, x + 6, yy + 5, 6, 12, mezcla(c, 0, 60))
+            rectángulo(l, x + 11, yy + 10, 6, 2, BLANCO)
+            flechita(l, x + 15, yy + 8, 6, BLANCO)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El menú
+    ; -------------------------------------------------------------------------
+    función nueva_opción(x: ent32, yy: ent32, an: ent32, al: ent32, clase: nat32, índice: ent32, columna: nat32): ent32
+        si n_opciones >= MAX_OPCIONES entonces devolver -2 fin
+        opciones[n_opciones].x := x
+        opciones[n_opciones].ye := yy
+        opciones[n_opciones].an := an
+        opciones[n_opciones].al := al
+        opciones[n_opciones].clase := clase
+        opciones[n_opciones].índice := índice
+        opciones[n_opciones].columna := columna
+        n_opciones := n_opciones + 1
+        devolver ent32(n_opciones) - 1
+    fin
+
+    ; la franja de la opción (resaltada si es la elegida); da el color del texto
+    función franja(ref l: Lienzo, n: ent32, x: ent32, yy: ent32, an: ent32, al: ent32, apagado: bool): nat32
+        si apagado entonces devolver TINTA_GRIS fin
+        si n = elegida y n >= 0 entonces
+            redondeado(l, x + 2, yy + 1, an - 4, al - 2, 4, 0x3F86E0, AZUL_ELEGIDO, TODAS)
+            devolver BLANCO
+        fin
+        ; (la del submenú abierto, en azul claro)
+        si n >= 0 y paneles[0].v <> 0 y paneles[0].de = nat32(n) entonces
+            redondeado(l, x + 2, yy + 1, an - 4, al - 2, 4, 0xB9D4F6, 0xA6C6F0, TODAS)
+        fin
+        devolver TINTA
+    fin
+
+    ; un programa de la columna de la izquierda: fijado (con su explicación) o de los más usados
+    función pinta_izquierda(ref l: Lienzo, yy: ent32, k: nat32, fijado: bool)
+        variable n: ent32
+        variable c: nat32
+        si fijado entonces
+            n := nueva_opción(2, yy, IZQUIERDA - 4, ALTO_FIJO, O_PROGRAMA, ent32(k), 0)
+            c := franja(l, n, 2, yy, IZQUIERDA - 4, ALTO_FIJO, progs[k].apagado)
+            icono_prog(l, 10, yy + 4, 32, k)
+            texto_corto(l, 50, yy + 3, progs[k].nombre, IZQUIERDA - 58, c, cierto)
+            si progs[k].explica <> nulo entonces
+                si c = TINTA entonces c := TINTA_SUAVE fin
+                texto_corto(l, 50, yy + 20, progs[k].explica, IZQUIERDA - 58, c, falso)
+            fin
+        sino
+            n := nueva_opción(2, yy, IZQUIERDA - 4, ALTO_USADO, O_PROGRAMA, ent32(k), 0)
+            c := franja(l, n, 2, yy, IZQUIERDA - 4, ALTO_USADO, progs[k].apagado)
+            icono_prog(l, 12, yy + 5, 20, k)
+            texto_corto(l, 42, yy + 7, progs[k].nombre, IZQUIERDA - 50, c, falso)
+        fin
+    fin
+
+    ; una de la columna de la derecha (en negrita; si no cabe, en dos renglones)
+    función pinta_derecha(ref l: Lienzo, yy: ent32, k: ent32, clase: nat32): ent32
+        variable t: puntero a byte
+        si k < 0 entonces devolver yy fin
+        t := progs[k].nombre
+        si clase = O_DOCUMENTOS entonces t := "Mis documentos" fin
+        si k = p_actualizar entonces t := "Actualizar" fin
+        devolver pinta_derecha_t(l, yy, k, clase, t)
+    fin
+
+    función pinta_derecha_t(ref l: Lienzo, yy: ent32, k: ent32, clase: nat32, t: puntero a byte): ent32
+        variable n, al, an, corte, i: ent32
+        variable c: nat32
+        variable trozo: arreglo [32] de byte
+        an := ANCHO - IZQUIERDA - 2
+        al := ALTO_DERECHA
+        corte := -1
+        si ancho_texto(t) > an - 44 entonces
+            ; dos renglones: se corta por el último espacio que cabe
+            i := 0
+            mientras t[i] <> 0 hacer
+                si t[i] = ' ' y (i + 1) * ANCHO_LETRA <= an - 44 entonces corte := i fin
+                i := i + 1
+            fin
+            si corte > 0 entonces al := 40 fin
+        fin
+        n := nueva_opción(IZQUIERDA, yy, an, al, clase, k, 1)
+        c := franja(l, n, IZQUIERDA, yy, an, al, clase = O_PROGRAMA y progs[k].apagado)
+        si clase = O_DOCUMENTOS entonces
+            icono(l, IZQUIERDA + 10, yy + (al - 20) div 2, 20, IC_CARPETA, 0, 0)
+        sino
+            icono_prog(l, IZQUIERDA + 10, yy + (al - 20) div 2, 20, nat32(k))
+        fin
+        si corte > 0 entonces
+            copiar_hasta(trozo, t, nat32(corte) + 1)
+            texto_negrita(l, IZQUIERDA + 38, yy + 3, trozo, c)
+            texto_negrita(l, IZQUIERDA + 38, yy + 20, t + nat32(corte) + 1, c)
+        sino
+            texto_negrita(l, IZQUIERDA + 38, yy + (al - 16) div 2, t, c)
+        fin
+        si clase = O_DOCUMENTOS entonces flechita(l, ANCHO - 18, yy + (al - 9) div 2, 9, c) fin
+        devolver yy + al
+    fin
+
+    función raya_derecha(ref l: Lienzo, yy: ent32): ent32
+        rectángulo(l, IZQUIERDA + 10, yy + 3, ANCHO - IZQUIERDA - 22, 1, 0xA9C6EC)
+        devolver yy + 7
+    fin
+
+    ; los más usados: los de más cuentas (y, a igualdad, por su rango); sin
+    ; los fijados ni lo que no va en «Todos los programas»
+    variable usados: arreglo [MAX_PROGRAMAS] de nat32
+    función pon_usados(): nat32
+        variable i, j, m, n: nat32
+        n := 0
+        i := 0
+        mientras i < n_progs hacer
+            si progs[i].carpeta <> C_NINGUNA y no es_fijo(progs[i].nombre) y (usos_de(progs[i].nombre) > 0 o progs[i].rango <> SIN_RANGO) entonces
+                usados[n] := i
+                n := n + 1
+            fin
+            i := i + 1
+        fin
+        ; por inserción: más usos antes; a igualdad, el rango menor
+        si n > 1 entonces
+            para i desde 1 hasta n - 1 hacer
+                m := usados[i]
+                j := i
+                mientras j > 0 y más_usado(m, usados[j - 1]) hacer
+                    usados[j] := usados[j - 1]
+                    j := j - 1
+                fin
+                usados[j] := m
+            fin
+        fin
+        devolver n
+    fin
+
+    función más_usado(a: nat32, b: nat32): bool
+        variable ua, ub: nat32
+        ua := usos_de(progs[a].nombre)
+        ub := usos_de(progs[b].nombre)
+        si ua <> ub entonces devolver ua > ub fin
+        devolver progs[a].rango < progs[b].rango
+    fin
+
+    función pinta()
+        variable l: puntero a Lienzo
+        variable yy, k, tope, n: ent32
+        variable i, nu: nat32
+        variable c: nat32
+        l := lienzo_de(v_menú)
+        si l = nulo entonces devolver fin
+        n_opciones := 0
+        ; el marco y la cabecera, azul, con el disquete y el saludo
+        rectángulo(valor(l), 0, 0, ancho, alto, 0x1A56AC)
+        redondeado(valor(l), 1, 1, ancho - 2, CABEZA, 7, 0x4E99EE, 0x1F62C0, ARRIBA)
+        rectángulo(valor(l), 8, 2, ancho - 16, 1, 0x9CCBFA)
+        disquete(valor(l), 9, 7, 42)
+        si Ajustes.usuario[0] <> 0 entonces
+            copiar_hasta(saludo, "Hola, ", 40)
+            concatenar(saludo, Ajustes.usuario)
+            texto_negrita(valor(l), 59, 13, saludo, 0x123F85)
+            texto_negrita(valor(l), 58, 12, saludo, BLANCO)
+            texto(valor(l), 58, 30, "Hispa-Pentium, versión 0.8", 0xD3E7FD)
+        sino
+            texto_negrita(valor(l), 59, 13, "Hispa-Pentium", 0x123F85)
+            texto_negrita(valor(l), 58, 12, "Hispa-Pentium", BLANCO)
+            texto(valor(l), 58, 30, "el escritorio, versión 0.8", 0xD3E7FD)
+        fin
+        rectángulo(valor(l), 1, CABEZA, ancho - 2, 2, NARANJA)
+        ; las dos columnas
+        rectángulo(valor(l), 2, CABEZA + 2, IZQUIERDA - 2, alto - CABEZA - PIE - 2, BLANCO)
+        rectángulo(valor(l), IZQUIERDA, CABEZA + 2, ancho - IZQUIERDA - 2, alto - CABEZA - PIE - 2, AZUL_CLARO)
+        rectángulo(valor(l), IZQUIERDA, CABEZA + 2, 1, alto - CABEZA - PIE - 2, 0xA9C6EC)
+        ; a la izquierda: lo fijado...
+        yy := CABEZA + 6
+        i := 0
+        mientras i < n_fijos hacer
+            k := busca_prog(fijos[i])
+            si k >= 0 y yy + ALTO_FIJO < alto - PIE - ALTO_TODOS - 60 entonces
+                pinta_izquierda(valor(l), yy, nat32(k), cierto)
+                yy := yy + ALTO_FIJO
+            fin
+            i := i + 1
+        fin
+        rectángulo(valor(l), 12, yy + 3, IZQUIERDA - 24, 1, RAYA)
+        yy := yy + 7
+        ; ...los más usados, los que quepan (nunca empujan nada)...
+        tope := alto - PIE - ALTO_TODOS - 8
+        nu := pon_usados()
+        i := 0
+        mientras i < nu y yy + ALTO_USADO <= tope hacer
+            pinta_izquierda(valor(l), yy, usados[i], falso)
+            yy := yy + ALTO_USADO
+            i := i + 1
+        fin
+        ; ...y «Todos los programas», abajo del todo
+        yy := alto - PIE - ALTO_TODOS - 4
+        rectángulo(valor(l), 12, yy, IZQUIERDA - 24, 1, RAYA)
+        n := nueva_opción(2, yy + 3, IZQUIERDA - 4, ALTO_TODOS - 2, O_TODOS, -1, 0)
+        c := franja(valor(l), n, 2, yy + 3, IZQUIERDA - 4, ALTO_TODOS - 2, falso)
+        texto_negrita(valor(l), 62, yy + 12, "Todos los programas", c)
+        redondeado(valor(l), 26, yy + 9, 22, 22, 5, 0x5CC45E, VERDE, TODAS)
+        flechita(valor(l), 34, yy + 14, 12, BLANCO)
+        ; a la derecha
+        yy := CABEZA + 6
+        yy := pinta_derecha(valor(l), yy, p_equipo, O_DOCUMENTOS)
+        opciones[n_opciones - 1].índice := -1
+        yy := pinta_derecha(valor(l), yy, p_equipo, O_PROGRAMA)
+        yy := raya_derecha(valor(l), yy)
+        yy := pinta_derecha(valor(l), yy, p_config, O_PROGRAMA)
+        yy := pinta_derecha(valor(l), yy, p_dispositivos, O_PROGRAMA)
+        yy := pinta_derecha(valor(l), yy, p_instalados, O_PROGRAMA)
+        yy := pinta_derecha(valor(l), yy, p_actualizar, O_PROGRAMA)
+        yy := raya_derecha(valor(l), yy)
+        yy := pinta_derecha(valor(l), yy, p_ayuda, O_PROGRAMA)
+        si yy + ALTO_DERECHA <= alto - PIE - 4 entonces yy := pinta_derecha(valor(l), yy, p_ejecutar, O_PROGRAMA) fin
+        ; el pie: Cerrar sesión, Reiniciar y Apagar equipo (siempre a la vista)
+        degradado(valor(l), 1, alto - PIE, ancho - 2, PIE - 1, 0x3D86E2, 0x1C5CB8)
+        rectángulo(valor(l), 1, alto - PIE, ancho - 2, 1, 0x7FB6F4)
+        pinta_pie(valor(l), 40, 136, p_sesión)
+        pinta_pie(valor(l), 182, 104, p_reiniciar)
+        pinta_pie(valor(l), 292, 136, p_apagar)
+        repintada(v_menú, 0, 0, ancho, alto)
+    fin
+
+    función pinta_pie(ref l: Lienzo, x: ent32, an: ent32, k: ent32)
+        variable n, yy: ent32
+        yy := alto - PIE + 5
+        n := nueva_opción(x, yy, an, PIE - 10, O_PROGRAMA, k, 2)
+        si n = elegida entonces redondeado(l, x, yy, an, PIE - 10, 5, 0x6AAEF6, 0x3A7EDC, TODAS) fin
+        icono_pie(l, x + 5, yy + 5, k)
+        texto_negrita(l, x + 33, yy + 9, progs[k].nombre, 0x123F85)
+        texto_negrita(l, x + 32, yy + 8, progs[k].nombre, BLANCO)
+    fin
+
+    ; la opción del menú que está en ese punto; -1 si no hay
+    función opción_en(x: ent32, yy: ent32): ent32
+        variable i: nat32
+        i := 0
+        mientras i < n_opciones hacer
+            si x >= opciones[i].x y yy >= opciones[i].ye y x < opciones[i].x + opciones[i].an y yy < opciones[i].ye + opciones[i].al entonces
+                devolver ent32(i)
+            fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los submenús
+    ; -------------------------------------------------------------------------
+    función cierra_panel(p: nat32)
+        si p = 0 entonces cierra_panel(1) fin
+        si paneles[p].v <> 0 entonces
+            cerrar_ventana(paneles[p].v, 0)
+            paneles[p].v := 0
+        fin
+        si nivel > p entonces nivel := p fin
+    fin
+
+    función pon_fila(p: nat32, clase: nat32, índice: nat32)
+        si paneles[p].n >= MAX_FILAS entonces devolver fin
+        paneles[p].clase[paneles[p].n] := clase
+        paneles[p].índice[paneles[p].n] := índice
+        paneles[p].n := paneles[p].n + 1
+    fin
+
+    ; los programas de una carpeta, por orden alfabético
+    función llena_carpeta(c: nat32)
+        variable i, j, m: nat32
+        paneles[1].n := 0
+        i := 0
+        mientras i < n_progs hacer
+            si progs[i].carpeta = c entonces pon_fila(1, F_PROGRAMA, i) fin
+            i := i + 1
+        fin
+        si paneles[1].n > 1 entonces
+            para i desde 1 hasta paneles[1].n - 1 hacer
+                m := paneles[1].índice[i]
+                j := i
+                mientras j > 0 y antes(progs[m].nombre, progs[paneles[1].índice[j - 1]].nombre) hacer
+                    paneles[1].índice[j] := paneles[1].índice[j - 1]
+                    j := j - 1
+                fin
+                paneles[1].índice[j] := m
+            fin
+        fin
+    fin
+
+    función carpeta_vacía(c: nat32): bool
+        variable i: nat32
+        i := 0
+        mientras i < n_progs hacer
+            si progs[i].carpeta = c entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; abre el submenú p (ya lleno) con su esquina en (x, yy), o con su pie en
+    ; «pie» si «yy» es negativo; si no cabe, con flechas
+    función abre_panel(p: nat32, x: ent32, yy: ent32, pie: ent32)
+        variable tope, al: ent32
+        si paneles[p].v <> 0 entonces
+            cerrar_ventana(paneles[p].v, 0)
+            paneles[p].v := 0
+        fin
+        si paneles[p].n = 0 entonces devolver fin
+        tope := pantalla.alto - ALTO_BARRA
+        paneles[p].flechas := falso
+        paneles[p].caben := ent32(paneles[p].n)
+        al := ent32(paneles[p].n) * FILA + 2 * HUECO
+        si al > tope entonces
+            paneles[p].flechas := cierto
+            paneles[p].caben := (tope - 2 * HUECO - 2 * FLECHA) div FILA
+            al := paneles[p].caben * FILA + 2 * HUECO + 2 * FLECHA
+        fin
+        si yy < 0 entonces yy := pie - al fin
+        si yy + al > tope entonces yy := tope - al fin
+        si yy < 0 entonces yy := 0 fin
+        si x + PANEL_ANCHO > pantalla.ancho entonces x := pantalla.ancho - PANEL_ANCHO fin
+        si x < 0 entonces x := 0 fin
+        paneles[p].x := x
+        paneles[p].ye := yy
+        paneles[p].an := PANEL_ANCHO
+        paneles[p].al := al
+        paneles[p].primera := 0
+        paneles[p].elegida := -1
+        paneles[p].v := crear_ventana("submenú", x, yy, PANEL_ANCHO, al, SIN_MARCO ob ENCIMA ob REDONDA, 0)
+        pinta_panel(p)
+    fin
+
+    ; dónde empieza la fila i (de las que se ven) dentro del submenú
+    función arriba_fila(p: nat32, i: ent32): ent32
+        variable a: ent32
+        a := HUECO + (i - paneles[p].primera) * FILA
+        si paneles[p].flechas entonces a := a + FLECHA fin
+        devolver a
+    fin
+
+    ; el texto de una fila
+    función texto_fila(p: nat32, i: nat32): puntero a byte
+        según paneles[p].clase[i]
+            caso F_CARPETA: devolver nombre_carpeta(paneles[p].índice[i])
+            caso F_PROGRAMA: devolver progs[paneles[p].índice[i]].nombre
+        fin
+        devolver documentos[paneles[p].índice[i]]
+    fin
+
+    función pinta_panel(p: nat32)
+        variable l: puntero a Lienzo
+        variable i, yy, an, al: ent32
+        variable k: nat32
+        variable c: nat32
+        si paneles[p].v = 0 entonces devolver fin
+        l := lienzo_de(paneles[p].v)
+        si l = nulo entonces devolver fin
+        an := paneles[p].an
+        al := paneles[p].al
+        redondeado(valor(l), 0, 0, an, al, 8, 0x1A56AC, 0x1A56AC, ARRIBA)
+        redondeado(valor(l), 1, 1, an - 2, al - 2, 7, BLANCO, 0xF1F6FD, ARRIBA)
+        si paneles[p].flechas entonces
+            ; las franjas de las flechas (en gris si ya no se puede ir más allá)
+            c := TINTA
+            si paneles[p].primera = 0 entonces c := TINTA_GRIS fin
+            rectángulo(valor(l), 4, HUECO, an - 8, FLECHA - 2, 0xE4EEFB)
+            flechita_vertical(valor(l), an div 2, HUECO + 3, 9, falso, c)
+            c := TINTA
+            si paneles[p].primera + paneles[p].caben >= ent32(paneles[p].n) entonces c := TINTA_GRIS fin
+            rectángulo(valor(l), 4, al - HUECO - FLECHA + 2, an - 8, FLECHA - 2, 0xE4EEFB)
+            flechita_vertical(valor(l), an div 2, al - HUECO - FLECHA + 5, 9, cierto, c)
+        fin
+        i := paneles[p].primera
+        mientras i < ent32(paneles[p].n) y i < paneles[p].primera + paneles[p].caben hacer
+            yy := arriba_fila(p, i)
+            k := paneles[p].índice[i]
+            c := TINTA
+            si paneles[p].clase[i] = F_PROGRAMA y progs[k].apagado entonces
+                c := TINTA_GRIS
+            sino si i = paneles[p].elegida entonces
+                redondeado(valor(l), 3, yy + 1, an - 6, FILA - 2, 4, 0x3F86E0, AZUL_ELEGIDO, TODAS)
+                c := BLANCO
+            sino si p = 0 y paneles[1].v <> 0 y paneles[0].clase[i] = F_CARPETA y paneles[1].de = k entonces
+                redondeado(valor(l), 3, yy + 1, an - 6, FILA - 2, 4, 0xB9D4F6, 0xA6C6F0, TODAS)
+            fin
+            según paneles[p].clase[i]
+                caso F_CARPETA:
+                    icono(valor(l), 10, yy + 5, 16, IC_CARPETA, 0, 0)
+                    flechita(valor(l), an - 16, yy + 8, 9, c)
+                caso F_PROGRAMA: icono_prog(valor(l), 10, yy + 5, 16, k)
+                si no: icono(valor(l), 10, yy + 5, 16, IC_TEXTO, 0, 0)
+            fin
+            texto_corto(valor(l), 34, yy + 5, texto_fila(p, nat32(i)), an - 56, c, falso)
+            i := i + 1
+        fin
+        repintada(paneles[p].v, 0, 0, an, al)
+    fin
+
+    ; que se vea la elegida
+    función a_la_vista(p: nat32)
+        si paneles[p].elegida < 0 entonces devolver fin
+        si paneles[p].elegida < paneles[p].primera entonces paneles[p].primera := paneles[p].elegida fin
+        si paneles[p].elegida >= paneles[p].primera + paneles[p].caben entonces paneles[p].primera := paneles[p].elegida - paneles[p].caben + 1 fin
+    fin
+
+    ; desplaza el submenú «n» filas (hacia abajo si es positivo); cierto si se ha movido
+    función desplaza(p: nat32, n: ent32): bool
+        variable d: ent32
+        si no paneles[p].flechas entonces devolver falso fin
+        d := paneles[p].primera + n
+        si d > ent32(paneles[p].n) - paneles[p].caben entonces d := ent32(paneles[p].n) - paneles[p].caben fin
+        si d < 0 entonces d := 0 fin
+        si d = paneles[p].primera entonces devolver falso fin
+        paneles[p].primera := d
+        ; (si la de la carpeta abierta se va de la vista, su submenú se cierra)
+        si p = 0 entonces cierra_panel(1) fin
+        pinta_panel(p)
+        devolver cierto
+    fin
+
+    ; la fila que está a esa altura dentro del submenú (-1: ninguna; -2: la
+    ; franja de arriba; -3: la de abajo)
+    función fila_en(p: nat32, x: ent32, yy: ent32): ent32
+        variable i: ent32
+        si x < 0 o x >= paneles[p].an entonces devolver -1 fin
+        si paneles[p].flechas entonces
+            si yy < HUECO + FLECHA entonces devolver -2 fin
+            si yy >= paneles[p].al - HUECO - FLECHA entonces devolver -3 fin
+        fin
+        si yy < arriba_fila(p, paneles[p].primera) entonces devolver -1 fin
+        i := paneles[p].primera + (yy - arriba_fila(p, paneles[p].primera)) div FILA
+        si i < 0 o i >= ent32(paneles[p].n) o i >= paneles[p].primera + paneles[p].caben entonces devolver -1 fin
+        devolver i
+    fin
+
+    ; abre el submenú de «Todos los programas» (desde la opción n del menú)
+    función abre_todos(n: ent32)
+        variable c: nat32
+        si paneles[0].v <> 0 y paneles[0].de = nat32(n) entonces devolver fin
+        cierra_panel(0)
+        paneles[0].n := 0
+        paneles[0].de := nat32(n)
+        para c desde 0 hasta N_CARPETAS - 1 hacer
+            si no carpeta_vacía(c) entonces pon_fila(0, F_CARPETA, c) fin
+        fin
+        abre_panel(0, mx + IZQUIERDA - 2, -1, my + opciones[n].ye + opciones[n].al + 2)
+        pinta()
+    fin
+
+    ; abre el de «Mis documentos» (desde la opción n)
+    función abre_documentos(n: ent32)
+        variable i: nat32
+        si paneles[0].v <> 0 y paneles[0].de = nat32(n) entonces devolver fin
+        cierra_panel(0)
+        paneles[0].n := 0
+        paneles[0].de := nat32(n)
+        i := 0
+        mientras i < n_documentos hacer
+            pon_fila(0, F_DOCUMENTO, i)
+            i := i + 1
+        fin
+        si n_documentos = 0 entonces
+            ; (no hay ninguno: Mi equipo, abierto en la raíz)
+            devolver
+        fin
+        abre_panel(0, mx + ancho - 4, my + opciones[n].ye - HUECO, 0)
+        pinta()
+    fin
+
+    ; abre el submenú de la carpeta de la fila i del primero
+    función abre_carpeta(i: ent32)
+        variable c: nat32
+        si i < 0 o paneles[0].clase[i] <> F_CARPETA entonces devolver fin
+        c := paneles[0].índice[i]
+        si paneles[1].v <> 0 y paneles[1].de = c entonces devolver fin
+        cierra_panel(1)
+        llena_carpeta(c)
+        paneles[1].de := c
+        abre_panel(1, paneles[0].x + PANEL_ANCHO - 4, paneles[0].ye + arriba_fila(0, i) - HUECO, 0)
+        ; (si no cabe a la derecha, a la izquierda del primero)
+        si paneles[0].x + 2 * PANEL_ANCHO - 4 > pantalla.ancho y paneles[1].v <> 0 entonces
+            mover_ventana(paneles[1].v, paneles[0].x - PANEL_ANCHO + 4, paneles[1].ye)
+            paneles[1].x := paneles[0].x - PANEL_ANCHO + 4
+        fin
+        pinta_panel(0)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Elegir
+    ; -------------------------------------------------------------------------
+    ; cierra todo y deja hecho el pedido del programa k
+    función lanza_prog(k: nat32)
+        si progs[k].apagado entonces devolver fin
+        cierra_inicio()
+        si progs[k].carpeta <> C_NINGUNA entonces cuenta_uso(progs[k].nombre) fin
+        pedido_acción := progs[k].acción
+        pedido_dato := progs[k].dato
+        copiar(pedido_programa, progs[k].programa)
+        copiar(pedido_argumentos, progs[k].argumentos)
+        hay_pedido := cierto
+    fin
+
+    función abre_documento(i: nat32)
+        cierra_inicio()
+        pedido_acción := P_RUTA
+        copiar(pedido_programa, "\\BLOC.BIN")
+        copiar(pedido_argumentos, documentos[i])
+        hay_pedido := cierto
+    fin
+
+    ; elegir la opción n del menú (con el ratón o con Intro)
+    función elige_opción(n: ent32, de_teclado: bool)
+        si n < 0 o n >= ent32(n_opciones) entonces devolver fin
+        según opciones[n].clase
+            caso O_TODOS:
+                abre_todos(n)
+                si de_teclado entonces entra(0) fin
+            caso O_DOCUMENTOS:
+                si n_documentos = 0 entonces
+                    ; sin documentos: el explorador, en la raíz
+                    lanza_prog(nat32(p_equipo))
+                    devolver
+                fin
+                abre_documentos(n)
+                si de_teclado entonces entra(0) fin
+            si no:
+                si opciones[n].índice >= 0 entonces lanza_prog(nat32(opciones[n].índice)) fin
+        fin
+    fin
+
+    ; el teclado pasa al submenú p (a su primera fila)
+    función entra(p: nat32)
+        si paneles[p].v = 0 entonces devolver fin
+        nivel := p + 1
+        paneles[p].elegida := 0
+        a_la_vista(p)
+        pinta_panel(p)
+    fin
+
+    ; elegir la fila i del submenú p
+    función elige_fila(p: nat32, i: ent32, de_teclado: bool)
+        si i < 0 o i >= ent32(paneles[p].n) entonces devolver fin
+        según paneles[p].clase[i]
+            caso F_CARPETA:
+                abre_carpeta(i)
+                si de_teclado entonces entra(1) fin
+            caso F_PROGRAMA: lanza_prog(paneles[p].índice[i])
+            si no: abre_documento(paneles[p].índice[i])
+        fin
+    fin
+
+    ; la opción del menú siguiente (o la de antes) que se puede elegir
+    función anda_menú(salto: ent32)
+        variable i, vueltas: ent32
+        i := elegida
+        si i < 0 y salto < 0 entonces i := 0 fin
+        vueltas := 0
+        mientras vueltas < ent32(n_opciones) hacer
+            i := i + salto
+            si i < 0 entonces i := ent32(n_opciones) - 1 fin
+            si i >= ent32(n_opciones) entonces i := 0 fin
+            si opciones[i].clase <> O_PROGRAMA o opciones[i].índice < 0 o no progs[opciones[i].índice].apagado entonces
+                elegida := i
+                devolver
+            fin
+            vueltas := vueltas + 1
+        fin
+    fin
+
+    ; la primera opción de esa columna
+    función primera_de(columna: nat32): ent32
+        variable i: nat32
+        i := 0
+        mientras i < n_opciones hacer
+            si opciones[i].columna = columna entonces devolver ent32(i) fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    ; el texto de la opción n (para la letra inicial)
+    función texto_opción(n: nat32): puntero a byte
+        si opciones[n].clase = O_TODOS entonces devolver "Todos los programas" fin
+        si opciones[n].clase = O_DOCUMENTOS entonces devolver "Mis documentos" fin
+        si opciones[n].índice < 0 entonces devolver "" fin
+        si opciones[n].índice = p_actualizar y opciones[n].columna = 1 entonces devolver "Actualizar" fin
+        devolver progs[opciones[n].índice].nombre
+    fin
+
+    ; la letra inicial: la siguiente que empieza por ella (-1: ninguna)
+    función por_letra_menú(c: byte): ent32
+        variable i, k: ent32
+        k := 1
+        mientras k <= ent32(n_opciones) hacer
+            i := (elegida + k) mod ent32(n_opciones)
+            si i < 0 entonces i := i + ent32(n_opciones) fin
+            si llana(texto_opción(nat32(i))[0]) = llana(c) entonces devolver i fin
+            k := k + 1
+        fin
+        devolver -1
+    fin
+
+    función por_letra_panel(p: nat32, c: byte): ent32
+        variable i, k: ent32
+        k := 1
+        mientras k <= ent32(paneles[p].n) hacer
+            i := (paneles[p].elegida + k) mod ent32(paneles[p].n)
+            si i < 0 entonces i := i + ent32(paneles[p].n) fin
+            si llana(texto_fila(p, nat32(i))[0]) = llana(c) entonces devolver i fin
+            k := k + 1
+        fin
+        devolver -1
+    fin
+
+    ; las teclas
+    función tecla_menú(c: nat32)
+        variable p: nat32
+        variable n: ent32
+        si c = 27 entonces
+            ; Esc: el submenú de más adentro, o el menú
+            si nivel > 0 entonces
+                p := nivel - 1
+                cierra_panel(p)
+                nivel := p
+                si p > 0 entonces pinta_panel(p - 1) sino pinta() fin
+            sino
+                cierra_inicio()
+            fin
+            devolver
+        fin
+        si nivel = 0 entonces
+            según c
+                caso TECLA_ABAJO: anda_menú(1)
+                caso TECLA_ARRIBA: anda_menú(-1)
+                caso TECLA_DERECHA:
+                    si elegida >= 0 y (opciones[elegida].clase = O_TODOS o opciones[elegida].clase = O_DOCUMENTOS) entonces
+                        elige_opción(elegida, cierto)
+                        devolver
+                    fin
+                    si elegida < 0 o opciones[elegida].columna = 0 entonces elegida := primera_de(1) fin
+                caso TECLA_IZQUIERDA:
+                    si elegida < 0 o opciones[elegida].columna <> 0 entonces elegida := primera_de(0) fin
+                caso '\n', ' ':
+                    si elegida >= 0 entonces
+                        elige_opción(elegida, cierto)
+                        devolver
+                    fin
+                si no:
+                    si c > ' ' y c < 0x100 entonces
+                        n := por_letra_menú(byte(c))
+                        si n >= 0 entonces elegida := n fin
+                    fin
+            fin
+            ; (si la opción nueva no es la del submenú abierto, el submenú se cierra)
+            si paneles[0].v <> 0 y (elegida < 0 o paneles[0].de <> nat32(elegida)) entonces cierra_panel(0) fin
+            pinta()
+            devolver
+        fin
+        p := nivel - 1
+        según c
+            caso TECLA_ABAJO:
+                paneles[p].elegida := paneles[p].elegida + 1
+                si paneles[p].elegida >= ent32(paneles[p].n) entonces paneles[p].elegida := 0 fin
+            caso TECLA_ARRIBA:
+                paneles[p].elegida := paneles[p].elegida - 1
+                si paneles[p].elegida < 0 entonces paneles[p].elegida := ent32(paneles[p].n) - 1 fin
+            caso TECLA_INICIO: paneles[p].elegida := 0
+            caso TECLA_FIN: paneles[p].elegida := ent32(paneles[p].n) - 1
+            caso TECLA_RE_PÁG_: paneles[p].elegida := mayor(paneles[p].elegida - paneles[p].caben, 0)
+            caso TECLA_AV_PÁG_: paneles[p].elegida := menor(paneles[p].elegida + paneles[p].caben, ent32(paneles[p].n) - 1)
+            caso TECLA_DERECHA, '\n', ' ':
+                si paneles[p].elegida >= 0 y (c <> TECLA_DERECHA o paneles[p].clase[paneles[p].elegida] = F_CARPETA) entonces
+                    elige_fila(p, paneles[p].elegida, cierto)
+                fin
+                devolver
+            caso TECLA_IZQUIERDA:
+                cierra_panel(p)
+                nivel := p
+                si p > 0 entonces pinta_panel(p - 1) sino pinta() fin
+                devolver
+            si no:
+                si c > ' ' y c < 0x100 entonces
+                    n := por_letra_panel(p, byte(c))
+                    si n >= 0 entonces paneles[p].elegida := n fin
+                fin
+        fin
+        si p = 0 y paneles[1].v <> 0 entonces cierra_panel(1) fin
+        a_la_vista(p)
+        pinta_panel(p)
+    fin
+
+    función mayor(a: ent32, b: ent32): ent32
+        si a > b entonces devolver a fin
+        devolver b
+    fin
+
+    función menor(a: ent32, b: ent32): ent32
+        si a < b entonces devolver a fin
+        devolver b
+    fin
+
+    ; el botón secundario en un programa: Abrir, y Anclar (o Quitar del menú)
+    función menú_de(k: ent32, x: ent32, yy: ent32)
+        si k < 0 o progs[k].carpeta = C_NINGUNA entonces devolver fin
+        menú_prog := k
+        si es_fijo(progs[k].nombre) entonces
+            abrir_emergente(x, yy, "Abrir|Quitar del menú Inicio", 0, 0, ME_INICIO)
+        sino
+            abrir_emergente(x, yy, "Abrir|Anclar al menú Inicio", 0, 0, ME_INICIO)
+        fin
+    fin
+
+    ; lo elegido en ese menú (lo llama el escritorio)
+    público función elegido_inicio(opción: nat32)
+        si menú_prog < 0 o nat32(menú_prog) >= n_progs entonces devolver fin
+        si opción = 0 entonces
+            lanza_prog(nat32(menú_prog))
+        sino si opción = 1 entonces
+            cambia_fijo(progs[menú_prog].nombre)
+            si menú_abierto entonces
+                cierra_panel(0)
+                nivel := 0
+                elegida := -1
+                emergente := v_menú
+                teclas_a := v_menú
+                pinta()
+            fin
+        sino
+            cierra_inicio()
+        fin
+        menú_prog := -1
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Fuera
+    ; -------------------------------------------------------------------------
+    público función abre_inicio()
+        si menú_abierto entonces devolver fin
+        si no ini_leído entonces lee_ini() fin
+        lee_documentos()
+        hace_lista()
+        ancho := ANCHO
+        alto := ALTO_MÁXIMO
+        si alto > pantalla.alto - ALTO_BARRA - 4 entonces alto := pantalla.alto - ALTO_BARRA - 4 fin
+        mx := 0
+        my := pantalla.alto - ALTO_BARRA - alto
+        si v_menú <> 0 entonces cerrar_ventana(v_menú, 0) fin
+        v_menú := crear_ventana("menú", mx, my, ancho, alto, SIN_MARCO ob ENCIMA ob REDONDA, 0)
+        si v_menú = 0 entonces devolver fin
+        elegida := -1
+        nivel := 0
+        paneles[0].v := 0
+        paneles[1].v := 0
+        menú_prog := -1
+        menú_abierto := cierto
+        pinta()
+        emergente := v_menú
+        teclas_a := v_menú
+    fin
+
+    público función cierra_inicio()
+        si no menú_abierto entonces devolver fin
+        menú_abierto := falso
+        cierra_panel(0)
+        nivel := 0
+        si emergente = v_menú entonces emergente := 0 fin
+        si teclas_a = v_menú entonces teclas_a := 0 fin
+        si v_menú <> 0 entonces cerrar_ventana(v_menú, 0) fin
+        v_menú := 0
+        menú_cerrado_en := tics
+    fin
+
+    ; ¿es de los submenús esa ventana?
+    función es_panel(v: nat32): bool
+        devolver v <> 0 y (v = paneles[0].v o v = paneles[1].v)
+    fin
+
+    ; los pasos de la rueda (con signo; hacia arriba, positivos)
+    función pasos_rueda(c: nat32): ent32
+        variable n: ent32
+        n := ent32(c yb 0xFF)
+        si n > 127 entonces n := n - 256 fin
+        devolver n
+    fin
+
+    ; los sucesos de un submenú
+    función atiende_panel(p: nat32)
+        variable e: Evento
+        variable i: ent32
+        mientras paneles[p].v <> 0 y saca_evento(paneles[p].v, 0, e) hacer
+            según e.clase
+                caso EV_RATÓN_MUEVE:
+                    i := fila_en(p, ent32(e.a), ent32(e.b))
+                    si cierre_en <> 0 entonces
+                        ; ha llegado al submenú: se queda, y su opción del menú, elegida
+                        cierre_en := 0
+                        si p = 0 entonces
+                            elegida := ent32(paneles[0].de)
+                            pinta()
+                        fin
+                    fin
+                    si p = 1 y cambio_en <> 0 entonces
+                        ; ha llegado al de la carpeta: se queda
+                        cambio_en := 0
+                        paneles[0].elegida := -1
+                        pinta_panel(0)
+                    fin
+                    si i >= 0 y i <> paneles[p].elegida entonces
+                        nivel := p + 1
+                        paneles[p].elegida := i
+                        si p = 0 entonces
+                            si paneles[1].v <> 0 y (paneles[0].clase[i] <> F_CARPETA o paneles[1].de <> paneles[0].índice[i]) entonces
+                                cambio_en := tics + ESPERA_CIERRE     ; (por si la flecha va en diagonal hacia el abierto)
+                            sino si paneles[0].clase[i] = F_CARPETA entonces
+                                abre_carpeta(i)
+                            fin
+                        fin
+                        pinta_panel(p)
+                    fin
+                caso EV_SALE:
+                    ; (la elegida se queda si su carpeta está abierta)
+                    si paneles[p].elegida >= 0 y no (p = 0 y paneles[1].v <> 0) entonces
+                        paneles[p].elegida := -1
+                        pinta_panel(p)
+                    fin
+                caso EV_RATÓN_BAJA:
+                    i := fila_en(p, ent32(e.a), ent32(e.b))
+                    si i = -2 entonces
+                        desplaza(p, -3)
+                    sino si i = -3 entonces
+                        desplaza(p, 3)
+                    sino si i >= 0 entonces
+                        si e.c yb BOTÓN_DERECHO <> 0 entonces
+                            si paneles[p].clase[i] = F_PROGRAMA entonces menú_de(ent32(paneles[p].índice[i]), paneles[p].x + ent32(e.a), paneles[p].ye + ent32(e.b)) fin
+                        sino
+                            elige_fila(p, i, falso)
+                        fin
+                    fin
+                caso EV_RUEDA:
+                    ; (RUEDA) la rueda desplaza el submenú (hacia arriba, lo de antes)
+                    desplaza(p, -2 * pasos_rueda(e.c))
+                    si paneles[p].v <> 0 entonces
+                        i := fila_en(p, ent32(e.a), ent32(e.b))
+                        si i >= 0 y i <> paneles[p].elegida entonces
+                            paneles[p].elegida := i
+                            pinta_panel(p)
+                        fin
+                    fin
+            fin
+        fin
+    fin
+
+    ; el submenú de la opción n, si lo tiene (si no, se cierra el que haya)
+    función abre_de(n: ent32)
+        cierre_en := 0
+        si n >= 0 y opciones[n].clase = O_TODOS entonces
+            abre_todos(n)
+        sino si n >= 0 y opciones[n].clase = O_DOCUMENTOS entonces
+            abre_documentos(n)
+        sino
+            cierra_panel(0)
+        fin
+    fin
+
+    ; los sucesos del menú y de sus submenús: lo llama la tarea del escritorio, cada pulso
+    público función atiende_inicio()
+        variable e: Evento
+        variable n: ent32
+        variable p: nat32
+        si v_menú = 0 entonces devolver fin
+        mientras v_menú <> 0 y saca_evento(v_menú, 0, e) hacer
+            según e.clase
+                caso EV_FUERA:
+                    ; (un clic en un submenú no es «fuera»)
+                    si no es_panel(ventana_en_punto(ratón_x, ratón_y)) entonces cierra_inicio() fin
+                caso EV_RATÓN_MUEVE:
+                    n := opción_en(ent32(e.a), ent32(e.b))
+                    si n <> elegida y menú_abierto y n >= 0 entonces
+                        elegida := n
+                        nivel := 0
+                        si paneles[0].v <> 0 y paneles[0].de <> nat32(n) entonces
+                            ; (con un submenú abierto, el cambio espera un poco: por si la flecha va hacia él)
+                            cierre_en := tics + ESPERA_CIERRE
+                        sino
+                            abre_de(n)
+                        fin
+                        pinta()
+                    fin
+                caso EV_RATÓN_BAJA:
+                    n := opción_en(ent32(e.a), ent32(e.b))
+                    si n >= 0 y menú_abierto entonces
+                        si e.c yb BOTÓN_DERECHO <> 0 entonces
+                            si opciones[n].clase = O_PROGRAMA y opciones[n].índice >= 0 entonces menú_de(opciones[n].índice, mx + ent32(e.a), my + ent32(e.b)) fin
+                        sino
+                            elige_opción(n, falso)
+                        fin
+                    fin
+                caso EV_TECLA:
+                    si menú_abierto entonces tecla_menú(e.a) fin
+            fin
+        fin
+        para p desde 0 hasta 1 hacer atiende_panel(p) fin
+        si cambio_en <> 0 y menú_abierto y tics >= cambio_en entonces
+            cambio_en := 0
+            si paneles[0].v <> 0 y paneles[0].elegida >= 0 entonces
+                si paneles[0].clase[paneles[0].elegida] = F_CARPETA entonces abre_carpeta(paneles[0].elegida) sino cierra_panel(1) fin
+                pinta_panel(0)
+            fin
+        fin
+        si cierre_en <> 0 y menú_abierto y tics >= cierre_en entonces
+            abre_de(elegida)
+            pinta()
+        fin
+        ; con la flecha quieta encima de una franja de las flechas, se desplaza solo
+        si menú_abierto y tics - auto_tic >= 12 entonces
+            auto_tic := tics
+            para p desde 0 hasta 1 hacer
+                si paneles[p].v <> 0 y paneles[p].flechas y ventana_en_punto(ratón_x, ratón_y) = paneles[p].v entonces
+                    n := fila_en(p, ratón_x - paneles[p].x, ratón_y - paneles[p].ye)
+                    si n = -2 entonces desplaza(p, -1) fin
+                    si n = -3 entonces desplaza(p, 1) fin
+                fin
+            fin
+        fin
+    fin
+
+    público función prepara_inicio()
+        v_menú := 0
+        menú_abierto := falso
+        menú_prog := -1
+    fin
+
+fin Inicio.
