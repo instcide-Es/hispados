@@ -2123,7 +2123,7 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -8; fi
-    if grep -q "^|  base      0.8.2   El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|10 paquetes\.$" $Z/b2$hc.txt \
+    if grep -q "^|  base      0.8.3   El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|10 paquetes\.$" $Z/b2$hc.txt \
       && grep -q "^|Los archivos de los 10 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
       ok "PAQUETES en el sistema recién instalado: LISTA dice los 10 paquetes del sistema (base, oficina...) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -12; fi
@@ -2135,8 +2135,11 @@ for hc in xhci ehci; do
     monz "screendump $G/c1$hc.ppm" 0.6
     monz "mouse_move 40 -165" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 5
     monz "screendump $G/c2$hc.ppm" 0.6
-    monz "mouse_move 654 -386" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 2
-    monz "mouse_move -672 -4" 0.4; monz "mouse_button 1" 0.1; monz "mouse_button 0" 0.1; monz "mouse_button 1" 0.1; monz "mouse_button 0" 3
+    # (los saltos grandes, en dos: con la rueda, el ratón PS/2 manda cuatro
+    # octetos y en la cola de QEMU, de 16, caben 4 paquetes de 127 puntos por
+    # suceso; lo que sobra llegaría con el clic siguiente)
+    monz "mouse_move 327 -193" 0.2; monz "mouse_move 327 -193" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 2
+    monz "mouse_move -336 -2" 0.2; monz "mouse_move -336 -2" 0.4; monz "mouse_button 1" 0.1; monz "mouse_button 0" 0.1; monz "mouse_button 1" 0.1; monz "mouse_button 0" 3
     teclas ret; sleep 2; teclas down down ret; sleep 2
     monz "screendump $G/c3$hc.ppm" 0.6
     teclas down ret; sleep 5
