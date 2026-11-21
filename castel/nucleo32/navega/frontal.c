@@ -51,6 +51,12 @@
 #include "netsurf/layout.h"
 #include "netsurf/download.h"
 #include "utils/file.h"
+#include "html/box.h"
+#include "html/box_inspect.h"
+#include "html/html.h"
+#include "html/private.h"
+#include "utils/corestrings.h"
+#include "guion.h"
 
 #include "netsurf/browser.h"
 #include "surf.h"
@@ -1425,6 +1431,49 @@ static void tecla(u32 k, u32 con_mayus)
 {
   uint32_t ns = 0, u = 0;
   if (k == T_F6 || k == 12) { foco_a_dir(1); return; }            /* F6, Ctrl+L */
+  if (k == T_F1 && registro && actual && browser_window_get_content(actual->bw)) {
+    /* (con SURF.LOG: F1 deja el árbol de cajas de la página en CAJAS.TXT, para ver qué pasa) */
+    char n[300];
+    FILE *f;
+    struct box *b = html_get_box_tree(browser_window_get_content(actual->bw));
+    snprintf(n, sizeof n, "%s\\CAJAS.TXT", surf_carpeta);
+    if (b && (f = fopen(n, "w"))) {
+      html_content *hc = (html_content *)hlcache_handle_get_content(browser_window_get_content(actual->bw));
+      dom_node *raiz = NULL;
+      box_dump(f, b, 0, false);
+      /* y el árbol de libdom (los elementos, con su id y su clase, y si tienen caja) */
+      fprintf(f, "== DOM ==\n");
+      if (hc && dom_document_get_document_element(hc->document, &raiz) == DOM_NO_ERR && raiz) {
+        dom_node *pila[64];
+        int hondo[64], np = 0;
+        pila[np] = raiz; hondo[np++] = 0;
+        while (np) {
+          dom_node *x = pila[--np];
+          int h = hondo[np];
+          NodoI *c;
+          if (NI(x)->tipo == DOM_ELEMENT_NODE) {
+            dom_string *id = sel_atr(x, "id"), *cl = sel_atr(x, "class");
+            void *caja = NULL;
+            dom_node_get_user_data(x, corestring_dom___ns_key_box_node_data, &caja);
+            fprintf(f, "%*s<%.*s id=%.40s class=%.80s>%s\n", h * 2, "", (int)dom_string_byte_length(NI(x)->nombre), dom_string_data(NI(x)->nombre),
+                    id ? dom_string_data(id) : "", cl ? dom_string_data(cl) : "", caja ? "" : " (sin caja)");
+            if (id) dom_string_unref(id);
+            if (cl) dom_string_unref(cl);
+            if (h < 5) {
+              int k0 = np;
+              for (c = NI(x)->hijo; c && np < 63; c = c->sig) if (c->tipo == DOM_ELEMENT_NODE) { pila[np] = (dom_node *)c; hondo[np++] = h + 1; }
+              /* (al revés, para sacarlos en orden) */
+              { int i = k0, j = np - 1; while (i < j) { dom_node *t = pila[i]; pila[i] = pila[j]; pila[j] = t; i++; j--; } }
+            }
+          }
+        }
+        dom_node_unref(raiz);
+      }
+      fclose(f);
+      frontal_aviso_estado("El \xc3\xa1rbol de cajas, en CAJAS.TXT");
+    }
+    return;
+  }
   if (k == T_F5 || k == 18) { boton(B_RECARGA); return; }         /* F5, Ctrl+R */
   if (k == 20) { nueva_pestana(inicio, 1); return; }               /* Ctrl+T */
   if (k == 23) { cierra_pestana(indice(actual)); return; }         /* Ctrl+W */

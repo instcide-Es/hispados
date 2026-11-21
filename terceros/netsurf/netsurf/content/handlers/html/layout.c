@@ -67,6 +67,7 @@
 #include "html/font.h"
 #include "html/form_internal.h"
 #include "html/layout.h"
+#include "html/box_textarea.h"
 #include "html/layout_internal.h"
 #include "html/table.h"
 
@@ -4299,6 +4300,11 @@ bool layout_block_context(
 		font_plot_style_from_css(&content->unit_len_ctx,
 				block->style, &fstyle);
 		fstyle.background = NS_TRANSPARENT;
+		/* [HISPA] un campo que JavaScript ha hecho de texto (su
+		 * «type») después de hacer su caja: su textarea, ahora */
+		if (block->gadget->data.text.ta == NULL && block->node != NULL)
+			box_textarea_create_textarea(content, block, block->node);
+		if (block->gadget->data.text.ta != NULL)
 		textarea_set_layout(block->gadget->data.text.ta,
 				&fstyle, ta_width, ta_height,
 				block->padding[TOP], block->padding[RIGHT],

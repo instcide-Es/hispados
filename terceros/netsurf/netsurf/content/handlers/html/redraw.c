@@ -1621,6 +1621,15 @@ bool html_redraw_box(const html_content *html, struct box *box,
 		else box->flags |= PRINTED; /*it won't be printed anymore*/
 	}
 
+	/* [HISPA] opacity: 0 (lo que se enseña poco a poco, los botones de
+	 * Google con su capa encima): no se ve, ni lo de dentro. NetSurf no hace
+	 * transparencias de cajas enteras; lo de en medio (0,5) se pinta entero */
+	if (box->style) {
+		css_fixed opacidad;
+		if (css_computed_opacity(box->style, &opacidad) == CSS_OPACITY_SET && opacidad <= 0)
+			return true;
+	}
+
 	/* if visibility is hidden render children only */
 	if (box->style && css_computed_visibility(box->style) ==
 			CSS_VISIBILITY_HIDDEN) {
@@ -2109,7 +2118,7 @@ bool html_redraw_box(const html_content *html, struct box *box,
 				current_background_color, &html->unit_len_ctx, ctx))
 			return false;
 
-	} else if (box->gadget &&
+	} else if (box->gadget && box->gadget->data.text.ta != NULL &&	/* [HISPA] (sin textarea aún: nada) */
 			(box->gadget->type == GADGET_TEXTAREA ||
 			box->gadget->type == GADGET_PASSWORD ||
 			box->gadget->type == GADGET_TEXTBOX)) {

@@ -78,7 +78,11 @@ void surf_desp(int *x, int *y);
 void surf_ve_a(int x, int y);
 void surf_pon_dir(const char *u8);
 
+#ifdef HISPA_PENTIUM
+#define AGENTE "HispaSurf/0.2 (NetSurf 3.11; Hispa-Pentium)"      /* [PENTIUM] (el de http.c: SURF_UA en navega.mk) */
+#else
 #define AGENTE "HispaSurf/0.1 (NetSurf 3.11; Hispa-DOS 486)"   /* (el de http.c: SURF_UA en surf.mk) */
+#endif
 
 int guion_tope_ms = 15000;              /* lo más que puede tardar un turno */
 int guion_memoria_kb = 8192;            /* lo más que puede usar el JavaScript de una página */

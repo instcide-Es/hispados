@@ -68,3 +68,9 @@ Cambios (todos marcados «[HISPA]»):
   css/utils.h                  display: grid -> flex (layout_grid.c)
   desktop/knockout.{c,h}       knockout_plot_hispa_vacia() (antes de pintar en
                                el búfer)
+  (21/11/2026, el Navegador de Hispa-Pentium: docs/PENTIUM.md, «El Navegador»)
+  libcss/src/select/unit.c     vh y vw estaban cambiados (100vh era el ancho
+                               de la ventana)
+  html/redraw.c                opacity: 0, no se pinta (ni lo de dentro)
+  html/layout.c, html/redraw.c un campo que JavaScript hace de texto (type)
+                               tras hacer su caja: su textarea, al maquetar

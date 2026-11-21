@@ -266,11 +266,14 @@ static inline css_fixed css_unit__px_per_unit(
 				viewport_height,
 				viewport_width);
 
+	/* [HISPA] vh es el alto y vw el ancho (en libcss 0.9.2 estaban
+	 * cambiados: 100vh daba el ancho de la ventana, y la tarjeta de entrar de
+	 * ClicGest, centrada en un body de min-height: 100vh, salía muy abajo) */
 	case CSS_UNIT_VH:
-		return FDIV(viewport_width, F_100);
+		return FDIV(viewport_height, F_100);
 
 	case CSS_UNIT_VW:
-		return FDIV(viewport_height, F_100);
+		return FDIV(viewport_width, F_100);
 
 	default:
 		return 0;

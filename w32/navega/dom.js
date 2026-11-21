@@ -601,6 +601,29 @@ function esDe(c, t) {
  * ============================================================================= */
 let estadoDoc = 'loading';
 let actual = null;          // document.currentScript
+// document.implementation.createHTMLDocument(): un documento aparte (un <html>
+// suelto, con su <head> y su <body>) para leer HTML sin tocar la página. Antes
+// daba el de la página, y jQuery, al arrancar («body.innerHTML = '<form></form>
+// <form></form>'», para ver si sabe), se llevaba el cuerpo entero de la página:
+// Wikipedia salía en blanco (21/11/2026, el Navegador de Hispa-Pentium)
+function docAparte(titulo) {
+  const html = documento.createElement('html'), head = documento.createElement('head'), body = documento.createElement('body');
+  html.appendChild(head); html.appendChild(body);
+  if (titulo !== undefined) { const t = documento.createElement('title'); t.textContent = S(titulo); head.appendChild(t); }
+  return {
+    nodeType: 9, nodeName: '#document', documentElement: html, head, body, defaultView: null, location: null, readyState: 'complete',
+    get title() { const t = head.querySelector('title'); return t ? t.textContent : ''; },
+    createElement: (n) => documento.createElement(n), createElementNS: (ns, n) => documento.createElementNS(ns, n),
+    createTextNode: (t) => documento.createTextNode(t), createComment: (t) => documento.createComment(t),
+    createDocumentFragment: () => documento.createDocumentFragment(),
+    get implementation() { return documento.implementation; },
+    querySelector: (s) => html.querySelector(s), querySelectorAll: (s) => html.querySelectorAll(s),
+    getElementById: (id) => html.querySelector('#' + CSS.escape(S(id))),
+    getElementsByTagName: (t) => html.getElementsByTagName(t), getElementsByClassName: (c) => html.getElementsByClassName(c),
+    importNode: (n, h) => n.cloneNode(h), adoptNode: (n) => n,
+    addEventListener() {}, removeEventListener() {},
+  };
+}
 class Document extends Node {
   get documentElement() { for (let n = N.hijo(this); n; n = N.sig(n)) if (N.tipo(n) === 1) return n; return null; }
   get head() { return N.busca(this, 'head', 1); }
@@ -636,7 +659,7 @@ class Document extends Node {
   get fonts() { return { ready: Promise.resolve(), check() { return true; }, load() { return Promise.resolve([]); }, addEventListener() {} }; }
   get scrollingElement() { return this.documentElement; }
   get fullscreenElement() { return null; }
-  get implementation() { return { createHTMLDocument: () => documento, hasFeature: () => true }; }
+  get implementation() { return { createHTMLDocument: (t) => docAparte(t), hasFeature: () => true }; }
   getElementById(id) { return N.porId(S(id)); }
   getElementsByName(n) { return lista(N.busca(this, '[name="' + CSS.escape(S(n)) + '"]', 0)); }
   getElementsByTagName(t) { return Element.prototype.getElementsByTagName.call(this, t); }
