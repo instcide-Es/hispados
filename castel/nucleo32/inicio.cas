@@ -587,9 +587,12 @@ módulo Inicio
         mientras i < n_accesos hacer
             k := nuevo(nombre_de(i), nulo, P_ACCESO, i, C_OTROS, 0, rango)
             si k >= 0 entonces
-                rango := rango + 1
                 progs[k].icp := icono_de(i)
                 si tipo_de(i)[0] <> 0 entonces progs[k].carpeta := carpeta_de_tipo(tipo_de(i)) sino progs[k].carpeta := carpeta_de_programa(programa_de(i)) fin
+                ; (0.8.5) los accesorios (la Calculadora, el Reloj...) no entran de
+                ; salida entre los más usados (dejarían fuera la oficina): salen
+                ; cuando se usan, y siempre en Todos los programas > Accesorios
+                si progs[k].carpeta = C_ACCESORIOS entonces progs[k].rango := SIN_RANGO sino rango := rango + 1 fin
             fin
             i := i + 1
         fin
