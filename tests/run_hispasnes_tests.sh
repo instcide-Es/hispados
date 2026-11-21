@@ -184,7 +184,7 @@ if quiero pentium; then
     mcopy -o -i $T/of.img $B/HISPASNS.HVP $B/BUSTEST.SFC $B/PRUEBA.SFC ::OFICINA/
     pent() {
       CAPTURAS=$T ESCRIBE=1 DISCO=$T/of.img ARRANQUE=escritorio MODULOS= timeout 400 bash castel/nucleo32/probar.sh "" \
-        ":pausa 2" ":clic 40 585" ":pausa 1" ":clic 80 328" ":pausa 3" ":escribe HVPRUN \\OFICINA\\HISPASNS.HVP $1" ":tecla ret" \
+        ":pausa 2" ":clic 40 585" ":pausa 1" ":clic 70 213" ":pausa 3" ":escribe HVPRUN \\OFICINA\\HISPASNS.HVP $1" ":tecla ret" \
         ":pausa $2" ":captura p" > $T/pent.txt 2>&1
       mtype -i $T/of.img ::OFICINA/HISPASNS.LOG 2> /dev/null | tr -d '\r' > $T/snes.log
     }

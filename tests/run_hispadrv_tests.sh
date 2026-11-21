@@ -240,7 +240,7 @@ if toca pentium; then
     mcopy -i $T/pent.img $B/HISPADRV.HVP ::HISPADRV.HVP
     mcopy -i $T/pent.img $B/PRUEBA.MD ::PRUEBA.MD
     CAPTURAS=$T ESCRIBE=1 DISCO=$T/pent.img ARRANQUE=escritorio MODULOS= timeout 300 castel/nucleo32/probar.sh "" \
-      ":pausa 3" ":clic 40 585" ":pausa 1" ":clic 70 328" ":pausa 4" ":escribe HVPRUN.BIN HISPADRV.HVP PRUEBA.MD /T=600 /V" \
+      ":pausa 3" ":clic 40 585" ":pausa 1" ":clic 70 213" ":pausa 4" ":escribe HVPRUN.BIN HISPADRV.HVP PRUEBA.MD /T=600 /V" \
       ":pausa 1" ":tecla ret" ":pausa 40" ":captura pe1" > $T/pent.sal 2>&1
     mtype -i $T/pent.img ::HISPADRV.LOG 2> /dev/null | tr -d '\r' > $T/md.log
     if del_log Texto | grep -q "FIN. FALLOS: 0000"; then ok "HVPRUN: PRUEBA.MD, todo BIEN dentro de Hispa-Pentium"; else ko "HVPRUN: $(tr '\n' ' ' < $T/md.log)"; fi
