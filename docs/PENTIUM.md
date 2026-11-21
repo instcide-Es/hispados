@@ -4034,6 +4034,19 @@ alarma del Reloj (suena), «Poner en hora» (pregunta el modo
 administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
 
+**Las pruebas de la 0.8.5** (21/11, en el PC de Albinyana con
+`tools/pruebas_castel_pc.sh -j 5`, y en el VPS lo que el PC no tiene —zlib,
+`convert`, el `xorriso` de `cd.sh`—): `sonido` 104/0, `accesorios` 76/0,
+`protege` 71/0 (con la 67), `paquetes` 97/0, `16` 134/0, `07` 97/0, `menu`
+90/0 (con 1280 x 724), `pantalla` 93/0, `programas` 87/0, `wifi` 91/0,
+`win32` 85/0, `ssh` 65/0, `rueda` 66/0, `lectores` 74/0, `dispositivos`
+80/0, `06` 117/0, `castel32` 62/0, `caliente` 74/0, `red` 67/0, `acpi`
+73/0, `tls` 67/0; en el VPS, `cd` 72/0, `escudo` 93/0 y `navegador` 78/0.
+Hispa-486: HispaGL en el PC contra Mesa (13 escenas) y en QEMU (GLPRUEBA,
+ENGRANA, la sala), DirectX 24/24, GDI 12/12, ventanas Win32, Hispa-Nes,
+Hispa-System, Hispa-Snes (también en HVPRUN de Pentium) e Hispa-Drive (14),
+sin fallos. Sin CMOV ni FCOMI en ningún `.o` de Pentium ni en las DLL.
+
 **Las pruebas de la 0.8.4** (21/11, en el PC de Albinyana con
 `tools/pruebas_castel_pc.sh`, cada parte en su copia; y en el VPS): `SOLO=32`
 621 bien; `castel32` 62/0 (CASTEL32 igual que ccastel.py y el punto fijo);
