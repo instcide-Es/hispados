@@ -127,11 +127,9 @@ API(i32) HispaDXPantalla(i32 op, u32 a, u32 b, u32 c)
 		}
 		sys_dormir(1);
 		return 1;
-	case 4:                                   /* ¿la sigue teniendo? (y lo pintado, a la pantalla) */
+	case 4:                                   /* ¿la sigue teniendo? (lo que pinte, a la pantalla en la vuelta siguiente) */
 		if (!juego || !wnd((HWND)juego))
 			return 0;
-		if (sucio)
-			presentar(juego);
 		marca_caja();
 		return activa == juego || !activa;
 	case 5: {                                 /* ¿en el retrazo? */
@@ -159,7 +157,10 @@ API(u32) HispaDXEntrada(i32 op, u32 a, u32 b)
 	u32 k;
 	switch (op) {
 	case 0:                                   /* las pulsadas (por su código de la BIOS) */
-		sys_teclas(m);
+		{
+			extern int leer_teclas(u32 *m, int de_dx);
+			leer_teclas(m, 1);
+		}
 		for (k = 1; k < 128; k++)
 			mapa_bios[k] = ((m[k >> 5] >> (k & 31)) & 1) || ((m[(k + 128) >> 5] >> ((k + 128) & 31)) & 1);
 		return (u32)mapa_bios;

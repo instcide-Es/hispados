@@ -6,7 +6,8 @@
 # intérprete de órdenes, la Consola, el Bloc y Mi equipo) y, además,
 # WIN32.BIN, la carpeta \WIN32 (las DLL), \HISPA32 (los programas de
 # ejemplo de Hispa-486: CALC32, HOLA32, CTL32, MENU32, AVISO32, NAVES),
-# \PRUEBAS (los de las pruebas de HW32: PEHOLA, HOLAC, K32PRUE, USADLL...) y,
+# \PRUEBAS (los de las pruebas de HW32: PEHOLA, HOLAC, K32PRUE, USADLL,
+# REDPRUE...), el servicio de red (RED.BIN) y,
 # si se han bajado (tests/thirdparty/fetch_win32.sh), NASM, TCC y el flat
 # assembler (FASM, FASMW y su ejemplo DDRAW).
 set -e
@@ -16,10 +17,10 @@ RAIZ=$(readlink -f "$AQUI/../../..")
 IMG=$(readlink -f "${1:?uso: disco.sh IMAGEN}")
 T=$(mktemp -d)
 trap 'rm -rf $T' EXIT
-bash $AQUI/../disco.sh $T/base.img 32 > /dev/null
+bash $AQUI/../disco.sh $T/base.img 32 red > /dev/null
 bash $AQUI/hacer.sh $T/WIN32.BIN $T/w32
 cd "$RAIZ"
-make -s build/PEHOLA.EXE build/HOLAC.EXE build/K32PRUE.EXE build/USADLL.EXE build/DLLPRUE.DLL > /dev/null
+make -s build/PEHOLA.EXE build/HOLAC.EXE build/K32PRUE.EXE build/USADLL.EXE build/DLLPRUE.DLL build/REDPRUE.EXE > /dev/null
 V=$T/base.img
 mcopy -i $V $T/WIN32.BIN ::
 mmd -i $V ::WIN32 ::HISPA32 ::PRUEBAS
@@ -27,7 +28,7 @@ mcopy -i $V $T/w32/* ::WIN32/
 for p in WINCALC:CALC32 WINHOLA:HOLA32 WINCTL:CTL32 WINMENU:MENU32 WINGUI:AVISO32 NAVES:NAVES; do
   mcopy -i $V build/${p%%:*}.EXE ::HISPA32/${p##*:}.EXE
 done
-mcopy -i $V build/PEHOLA.EXE build/HOLAC.EXE build/K32PRUE.EXE build/USADLL.EXE build/DLLPRUE.DLL ::PRUEBAS/
+mcopy -i $V build/PEHOLA.EXE build/HOLAC.EXE build/K32PRUE.EXE build/USADLL.EXE build/DLLPRUE.DLL build/REDPRUE.EXE ::PRUEBAS/
 D=tests/thirdparty/dl
 if [ -f $D/win32-nasm/nasm-2.16.03/nasm.exe ]; then
   mmd -i $V ::NASM

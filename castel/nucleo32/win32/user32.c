@@ -555,6 +555,14 @@ void presentar(Wnd *w)
 	Sup *s = &w->lienzo;
 	if (!w->hay_sucio || !w->vn || !s->bits)
 		return;
+	{
+		static u32 n, t0;
+		if (traza_si && !(++n % 100)) {
+			u32 t = sys_tics();
+			traza("presentar: 100 en %u ms", (t - t0) * 10);
+			t0 = t;
+		}
+	}
 	caret_ensenar(0);
 	r = w->sucio;
 	w->hay_sucio = 0;
@@ -1365,16 +1373,39 @@ static void tecla_msg(u32 k, int baja, int repite)
 	m = baja ? WM_KEYDOWN : WM_KEYUP;
 	if (vk == 0x12 || vk == 0x79 || (teclas_alt() && !teclas_control()))
 		m = baja ? WM_SYSKEYDOWN : WM_SYSKEYUP;
-	traza("tecla %x vk %x %s -> %x", k, vk, baja ? "baja" : "sube", (u32)d);
 	if (d)
 		poner_mensaje(d, m, vk, lp);
+}
+/* la llamada 181, para los dos que la usan (los mensajes y DirectInput):
+ * cada uno se lleva las teclas pulsadas y soltadas entre dos miradas suyas */
+static u32 ent_user[8], ent_dx[8], ultimas[8];
+static int suya_ultima;
+int leer_teclas(u32 *m, int de_dx)
+{
+	u32 x[16], k;
+	int suya = sys_teclas(x) == 1;
+	for (k = 0; k < 8; k++) {
+		ent_user[k] |= x[8 + k];
+		ent_dx[k] |= x[8 + k];
+		ultimas[k] = x[k];
+	}
+	suya_ultima = suya;
+	for (k = 0; k < 8; k++) {
+		m[k] = x[k];
+		m[8 + k] = de_dx ? ent_dx[k] : ent_user[k];
+		if (de_dx)
+			ent_dx[k] = 0;
+		else
+			ent_user[k] = 0;
+	}
+	return suya;
 }
 static void mira_teclas(void)
 {
 	u32 m[16], k;
 	int suya;
 	static int era_suya;
-	suya = sys_teclas(m) == 1;
+	suya = leer_teclas(m, 0) == 1;
 	if (suya && !era_suya) {
 		/* (acaba de ser la activa: lo pulsado antes no es para ella) */
 		memset(m + 8, 0, 32);
@@ -1534,7 +1565,6 @@ static void tecla_suceso(Wnd *raiz, Suceso *s)
 {
 	u32 c = s->a;
 	Wnd *d;
-	traza("EV_TECLA %x (activa %x, foco %x, modal %d)", c, (u32)activa, (u32)foco, raiz->modal);
 	if (bloqueada(raiz) || menu_abierto())
 		return;
 	d = destino_teclas();
@@ -1567,7 +1597,6 @@ static void tecla_suceso(Wnd *raiz, Suceso *s)
 static void activar(Wnd *raiz, int si)
 {
 	Wnd *antes = activa;
-	traza("activar %x %d (antes %x)", (u32)raiz, si, (u32)antes);
 	if (si) {
 		if (activa == raiz)
 			return;
@@ -1661,7 +1690,6 @@ void bomba(int esperar)
 	for (w = escritorio->hijas; w; w = sig) {
 		sig = w->sig;
 		while (w->vn && n < 64 && sys_suceso(w->vn, &s) == 1) {
-			traza("suceso %u de %u: %x %x %x", s.clase, w->vn, s.a, s.b, s.c);
 			suceso(w, &s);
 			n++;
 			if (!wnd((HWND)w))
@@ -1795,10 +1823,7 @@ API(BOOL) GetMessageA(MSG *m, HWND h, u32 a, u32 b)
 			return m->message != WM_QUIT;
 		presentar_todo();
 		{
-			static u32 vueltas;
 			u32 f = falta_temp();
-			if (!(++vueltas % 100))
-				traza("GetMessage: %u vueltas", vueltas);
 			sys_dormir(f >= 20 ? 2 : 1);
 		}
 	}
@@ -1848,7 +1873,6 @@ void bucle_modal(Wnd *w, i32 *fin)
 			PostQuitMessage(m.wParam);
 			break;
 		}
-		traza("modal: %x %x %x %x", (u32)m.hwnd, m.message, m.wParam, m.lParam);
 		if (!IsDialogMessageA((HWND)w, &m)) {
 			TranslateMessage(&m);
 			DispatchMessageA(&m);

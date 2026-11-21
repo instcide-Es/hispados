@@ -66,6 +66,8 @@ módulo Tareas
         matar: bool                             ; hay que acabarla (Ctrl+C) en cuanto vuelva al anillo 3
         corte: bool                             ; se ha pulsado Ctrl+C (para las que lo atienden)
         terminal: nat32                         ; el terminal por el que escribe y lee (terminal.cas), o 0: la consola
+        fpu: arreglo [28] de nat32              ; [WIN32] lo del coprocesador (FNSAVE: 108 octetos) de una del anillo 3
+        fpu_hecha: bool                         ; [WIN32] ya se ha guardado una vez (si no, empieza con FNINIT)
     fin
 
     público tipo Cola = estructura
@@ -194,11 +196,43 @@ módulo Tareas
         si t = nulo entonces t := ociosa fin
         t.estado := CORRIENDO
         t.turnos := t.turnos + 1
-        si t <> actual entonces cambios := cambios + 1 fin
+        si t <> actual entonces
+            cambios := cambios + 1
+            ; [WIN32] el coprocesador de cada programa (los de Windows lo usan:
+            ; no se lo pisan unos a otros)
+            si actual.usuario entonces
+                guarda_fpu(nat32(dirección(actual.fpu[0])))
+                actual.fpu_hecha := cierto
+            fin
+            si t.usuario entonces
+                si t.fpu_hecha entonces repone_fpu(nat32(dirección(t.fpu[0]))) sino nueva_fpu() fin
+            fin
+        fin
         actual := t
         pon_pila_núcleo(t.pila_tope)
         si leer_cr3() <> t.cr3 entonces poner_cr3(t.cr3) fin
         devolver t.marco
+    fin
+
+    ; [WIN32] FNSAVE, FRSTOR y FNINIT (en octetos: los dos ensambladores los entienden así)
+    función guarda_fpu(dir: nat32)
+        ensamblador
+            mov eax, {dir}
+            db 0xDD, 0x30
+        fin
+    fin
+
+    función repone_fpu(dir: nat32)
+        ensamblador
+            mov eax, {dir}
+            db 0xDD, 0x20
+        fin
+    fin
+
+    función nueva_fpu()
+        ensamblador
+            db 0xDB, 0xE3
+        fin
     fin
 
     ; el reloj: cuenta el tic, despierta a las dormidas a las que les toca,
@@ -405,6 +439,7 @@ módulo Tareas
         t.marco := nat32(p)
         t.cr3 := directorio
         t.usuario := cierto
+        t.fpu_hecha := falso                    ; [WIN32] (su coprocesador, nuevo)
         t.quiebre_inicio := quiebre
         t.quiebre := quiebre
         t.esp_usuario := pila

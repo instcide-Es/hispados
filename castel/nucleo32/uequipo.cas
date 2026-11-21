@@ -301,7 +301,7 @@ módulo UEquipo
             fin
             si carpetas[i] entonces
                 dibujo_carpeta(10, yy + 3)
-            sino si acaba_en(nombres[i], "BIN") entonces
+            sino si acaba_en(nombres[i], "BIN") o acaba_en(nombres[i], "EXE") entonces    ; [WIN32] (los de Windows, igual)
                 dibujo_hoja(13, yy + 2, 0x46C282)
             sino
                 dibujo_hoja(13, yy + 2, 0x4C97EC)
@@ -412,7 +412,7 @@ módulo UEquipo
                 Textos32.copiar(aviso, "No se puede abrir el Bloc de notas: ")
                 concatenar(aviso, texto_error(r))
             fin
-        sino si acaba_en(nombres[elegida], "BIN") entonces
+        sino si acaba_en(nombres[elegida], "BIN") o acaba_en(nombres[elegida], "EXE") entonces    ; [WIN32] un .EXE lo corre WIN32.BIN (usuario.cas)
             r := lanzar_suelto(otra, nulo)
             si es_error(r) entonces
                 Textos32.copiar(aviso, "No se puede lanzar: ")
