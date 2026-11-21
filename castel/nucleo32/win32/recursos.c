@@ -493,6 +493,7 @@ API(i32) TranslateAcceleratorA(HWND h, HACCEL ha, MSG *m)
 	}
 	return 0;
 }
+/* EXPORTA TranslateAccelerator=TranslateAcceleratorA */
 API(i32) TranslateAcceleratorW(HWND h, HACCEL a, MSG *m) { return TranslateAcceleratorA(h, a, m); }
 API(BOOL) TranslateMDISysAccel(HWND h, MSG *m) { (void)h; (void)m; return FALSE; }
 

@@ -1286,6 +1286,7 @@ static u8 vk_pulsada[256];                  /* el estado de las teclas de Window
 static u8 credito[256];
 static int raton_px, raton_py;
 static u32 botones_ahora;
+int sc_es_teclado(void) { static int v = -1; if (v < 0) v = sc(31, 2, 0, 0) == 1; return v; }
 int raton_x(void) { return raton_px; }
 int raton_y(void) { return raton_py; }
 static void raton_pantalla(void)
@@ -1372,7 +1373,15 @@ static void mira_teclas(void)
 {
 	u32 m[16], k;
 	int suya;
+	static int era_suya;
 	suya = sys_teclas(m) == 1;
+	if (suya && !era_suya) {
+		/* (acaba de ser la activa: lo pulsado antes no es para ella) */
+		memset(m + 8, 0, 32);
+		for (k = 0; k < 8; k++)
+			m[k] &= teclas[k] | 0x00000000;
+	}
+	era_suya = suya;
 	if (!suya) {
 		/* no es la activa: las que estaban pulsadas, se sueltan */
 		for (k = 0; k < 256; k++)
@@ -1613,9 +1622,27 @@ static void suceso(Wnd *w, Suceso *s)
 		invalidar(w, 0, 1);
 		break;
 	}
-	case EV_FOCO:
-		activar(w, s->a == 1);
+	case EV_FOCO: {
+		/* (los sucesos de cada ventana llegan por separado: el orden entre
+		 * ellas no se sabe. Se le pregunta al núcleo cuál es la activa) */
+		Wnd *o, *nueva = 0;
+		(void)w;
+		for (o = escritorio->hijas; o; o = o->sig)
+			if (o->vn) {
+				i32 d[6];
+				if (!ES_ERROR(sys_ventana_op(4, o->vn, LIN(d))) && d[5] == 1) {
+					nueva = o;
+					break;
+				}
+			}
+		if (nueva != activa) {
+			if (activa)
+				activar(activa, 0);
+			if (nueva)
+				activar(nueva, 1);
+		}
 		break;
+	}
 	case EV_MENU:
 		menu_suceso(w, s->a, s->b);
 		break;
@@ -2663,16 +2690,47 @@ API(i16) VkKeyScanA(char c)
 	return -1;
 }
 API(i16) VkKeyScanExA(char c, HANDLE l) { (void)l; return VkKeyScanA(c); }
+/* las letras de cada tecla (por su código), las del teclado del núcleo
+ * (consola.cas): el español y el de EE. UU., en la página del núcleo */
+static const char es_normal[59] = "\0\0331234567890'\xAD\x08\tqwertyuiop`+\r\0asdfghjkl\xA4'\xA7\0\x87zxcvbnm,.-\0*\0 ";
+static const char es_mayus[59] = "\0\033!\"\xFA$%&/()=?\xA8\x08\tQWERTYUIOP^*\r\0ASDFGHJKL\xA5\"\xA6\0\x80ZXCVBNM;:_\0*\0 ";
+static const char es_altgr[59] = "\0\0|@#~\0\xAA\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0[]\0\0\0\0\0\0\0\0\0\0\0\0{\\\0}";
+static const char us_normal[59] = "\0\0331234567890-=\x08\tqwertyuiop[]\r\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 ";
+static const char us_mayus[59] = "\0\033!@#$%^&*()_+\x08\tQWERTYUIOP{}\r\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 ";
 API(i32) ToAscii(u32 vk, u32 sc, const u8 *e, u16 *d, u32 f)
 {
-	(void)sc; (void)f;
-	if (vk >= 'A' && vk <= 'Z') {
-		int may = (e && (e[0x10] & 0x80)) ^ (e && (e[0x14] & 1));
-		*d = may ? vk : vk + 32;
-		return 1;
+	u32 k = sc & 0x7F, es = sc_es_teclado();
+	int may = e && (e[0x10] & 0x80), ctl = e && (e[0x11] & 0x80), alt = e && (e[0x12] & 0x80), bloq = e && (e[0x14] & 1);
+	u8 c = 0;
+	(void)f;
+	if (!k)
+		k = MapVirtualKeyA(vk, 0);
+	if (vk >= 0x60 && vk <= 0x69) { *d = '0' + vk - 0x60; return 1; }   /* el teclado numérico */
+	if (vk == 0x6A) { *d = '*'; return 1; }
+	if (vk == 0x6B) { *d = '+'; return 1; }
+	if (vk == 0x6D) { *d = '-'; return 1; }
+	if (vk == 0x6E) { *d = '.'; return 1; }
+	if (vk == 0x6F) { *d = '/'; return 1; }
+	if (k >= 59 || (sc & 0x100))
+		return 0;
+	if (ctl && alt && es)
+		c = es_altgr[k];
+	else if (ctl) {
+		c = (es ? es_normal : us_normal)[k];
+		if (c >= 'a' && c <= 'z') c -= 0x60;
+		else if (c != 8 && c != 13 && c != 27 && c != 9) c = 0;
+	} else {
+		int m = may;
+		c = (es ? es_normal : us_normal)[k];
+		if (bloq && ((c >= 'a' && c <= 'z') || c == (char)0xA4 || c == (char)0x87))
+			m = !m;
+		if (m)
+			c = (es ? es_mayus : us_mayus)[k];
 	}
-	if ((vk >= '0' && vk <= '9') || vk == ' ' || vk == 0x0D || vk == 8) { *d = vk; return 1; }
-	return 0;
+	if (!c)
+		return 0;
+	*d = a1252c(c);
+	return 1;
 }
 API(i32) ToAsciiEx(u32 vk, u32 sc, const u8 *e, u16 *d, u32 f, HANDLE l) { (void)l; return ToAscii(vk, sc, e, d, f); }
 API(i32) GetKeyNameTextA(i32 lp, char *d, i32 n)

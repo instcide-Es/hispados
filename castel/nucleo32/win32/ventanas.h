@@ -236,6 +236,8 @@ BOOL WINAPI EndDialog(HWND h, i32 r);
 HMENU WINAPI GetSubMenu(HMENU m, i32 p);
 extern int pantalla_an, pantalla_al;
 int raton_x(void), raton_y(void);
+int sc_es_teclado(void);
+u32 WINAPI MapVirtualKeyA(u32 c, u32 t);
 
 /* gdi32.c */
 HDC dc_de_ventana(Wnd *w, int dentro, int clip_hijas);
