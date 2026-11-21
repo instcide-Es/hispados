@@ -3923,6 +3923,27 @@ if bash $AQUI/nucleo32/escudo/hacer.sh --anfitrion $E/anf > $E/hacer.txt 2>&1; t
   $E/anf -q $FIRMAS -o $E/PRUEBA.ESC && $E/anf -q -f $E/PRUEBA.ESC $E/p/ARCHIVOS > $E/l2.txt 2>&1
   if $CMP $E/l2.txt > $E/c2.txt; then ok "y lo mismo desde FIRMAS.ESC (el índice propio: las sumas en el disco por tramos; el cuerpo en bloques comprimidos y, en memoria, sus disparadores)"
   else ko "desde FIRMAS.ESC no dice lo mismo:"; sed 's/^/        /' $E/c2.txt | head -6; fi
+  # lo de la revisión de seguridad (21/11): los casos que encontró (FIRMAS.ESC
+  # con la cabecera mentirosa, una tabla de bloques al revés, paréntesis sin
+  # fin, variantes que piden 1 GB, una bomba ZIP de miembros solapados, un PE
+  # con el punto de entrada que da la vuelta) y otros 2.000 estropeados al azar,
+  # con el motor compilado con ASan y UBSan: ni un fallo, ni colgarse
+  if bash $AQUI/nucleo32/escudo/hacer.sh --asan $E/asan > $E/asan.txt 2>&1; then
+    C=$AQUI/nucleo32/escudo/prueba/casos
+    malos=0
+    for f in $C/*.ESC $C/*.ndb $C/*.ldb; do
+      ASAN_OPTIONS=detect_leaks=0 timeout 60 $E/asan -q -f $f $E/p/ARCHIVOS/EICAR.COM > /dev/null 2> $E/caso.txt
+      rc=$?; { [ $rc -ge 2 ] || grep -q 'ERROR: AddressSanitizer\|runtime error' $E/caso.txt; } && { malos=$((malos + 1)); echo "        $(basename $f): $rc $(tail -n 1 $E/caso.txt)"; }
+    done
+    for f in $C/*.zip $C/*.exe; do
+      ASAN_OPTIONS=detect_leaks=0 timeout 60 $E/asan -q $FIRMAS $f > /dev/null 2> $E/caso.txt
+      rc=$?; { [ $rc -ge 2 ] || grep -q 'ERROR: AddressSanitizer\|runtime error' $E/caso.txt; } && { malos=$((malos + 1)); echo "        $(basename $f): $rc $(tail -n 1 $E/caso.txt)"; }
+    done
+    [ $malos = 0 ] && ok "los $(ls $C | wc -l) casos de la revisión de seguridad (con ASan y UBSan): ni un fallo, ni colgarse" || ko "$malos casos de la revisión fallan"
+    cp $E/PRUEBA.ESC $E/p/PRUEBA.ESC
+    if python3 -I $AQUI/nucleo32/escudo/prueba/fuzz.py $E/asan $E/p 2000 > $E/fuzz.txt 2>&1; then ok "y 2.000 FIRMAS.ESC, firmas, ZIP y PE estropeados al azar: $(tail -n 1 $E/fuzz.txt | sed 's/^fuzz.py: //')"
+    else ko "estropeados al azar:"; tail -n 4 $E/fuzz.txt | sed 's/^/        /'; fi
+  else ko "hacer.sh --asan: $(tail -n 2 $E/asan.txt)"; fi
   # un .cvd de verdad, firmado con la clave de ClamAV (el de sus pruebas): si hay red
   if curl -sf --max-time 20 -o $E/test-3.cvd https://raw.githubusercontent.com/Cisco-Talos/clamav/main/unit_tests/input/freshclam_testfiles/test-3.cvd; then
     cp $E/test-3.cvd $E/toca.cvd

@@ -38,10 +38,14 @@ static void *crece(void *p, u32 *cap, u32 n, u32 tam)
 	void *q;
 	if (n <= c)
 		return p;
+	if (n > 0x7FFFFFFFu / tam)		/* (que la cuenta no dé la vuelta) */
+		return 0;
 	if (!c)
 		c = 64;
 	while (c < n)
-		c *= 2;
+		c = c > 0x3FFFFFFFu ? n : c * 2;
+	if (c > 0x7FFFFFFFu / tam)
+		c = n;
 	q = pl_rereserva(p, c * tam);
 	if (!q)
 		return 0;
@@ -162,7 +166,7 @@ static u32 tipos_comodin;		/* (bits 1 << tipo) */
 typedef struct tramo { u32 tam, tipo, primero, cuantos; } tramo;
 typedef struct esc {
 	int h;
-	u32 n_sumas, off_sumas, n_tramos, off_tramos, paginas, nbits;
+	u32 n_sumas, off_sumas, n_tramos, off_tramos, paginas, nbits, n_nombres;
 	u32 idx, blob;
 	u32 *pag;			/* el tamaño del primer tramo de cada página */
 	u8 *bits;			/* 1 << 21 bits: ¿hay alguna suma con este tamaño? */
@@ -228,6 +232,13 @@ static void ordena_sumas(suma *v, u32 n)
 	}
 }
 
+
+/* ¿cabe [off, off + n * tam) en un archivo de «largo» octetos? (sin dar la vuelta) */
+static int cabe_en(u32 off, u32 n, u32 tam, u32 largo)
+{
+	u64 fin = (u64)off + (u64)n * tam;
+	return off <= largo && fin <= largo;
+}
 
 static u32 le32(const u8 *p) { return p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24; }
 static u16 le16(const u8 *p) { return (u16)(p[0] | p[1] << 8); }
@@ -375,7 +386,7 @@ static int busca_en_tramo(void *yo, const tramo *t)
 {
 	busca_s *b = yo;
 	u32 a = 0, z = t->cuantos;
-	if ((t->tipo & 0x1F) != b->tipo)
+	if ((t->tipo & 0x1F) != b->tipo || !cabe_en(t->primero, t->cuantos, 1, E->n_sumas))
 		return 0;
 	if (z <= 512) {		/* (un tramo pequeño, de una vez: una lectura en vez de nueve) */
 		static u8 e[512 * 8];
@@ -862,11 +873,18 @@ static int un_patron(u32 fi, u16 sub, const char *hex, u32 nhex, const patron *p
 	return 0;
 }
 
+static u32 variantes;			/* (las de una subfirma: con tope, que 84 K no pidan 1 GB) */
+#define MAX_VARIANTES 64
 static int patrones_de(u32 fi, u16 sub, const char *hex, u32 nhex, const patron *plantilla, int insens, int ancho, int nivel)
 {
-	int r = un_patron(fi, sub, hex, nhex, plantilla, insens, ancho);
+	int r;
 	const char *a, *c, *q;
 	char *nuevo;
+	if (nivel == 0)
+		variantes = 0;
+	if (++variantes > MAX_VARIANTES || nhex > 65536)
+		return HEX_MAL;
+	r = un_patron(fi, sub, hex, nhex, plantilla, insens, ancho);
 	if (r != HEX_VARIANTES)
 		return r;
 	if (nivel >= 4)
@@ -1074,7 +1092,7 @@ static int linea_ndb(const char *s, u32 n)
 #define X_IGUAL 0x04000000u
 #define X_MAYOR 0x05000000u
 #define X_MENOR 0x06000000u
-typedef struct lex { const char *p, *fin; int error; u32 nsub; } lex;
+typedef struct lex { const char *p, *fin; int error; u32 nsub, prof; } lex;	/* prof: los paréntesis abiertos */
 static int pon_x(u32 x) { if (!CRECE(exprs, cap_exprs, n_exprs + 1)) return 0; exprs[n_exprs++] = x; return 1; }
 static void x_o(lex *l);
 static void x_cuenta(lex *l)
@@ -1105,8 +1123,13 @@ static void x_primario(lex *l)
 {
 	u32 v;
 	if (l->p < l->fin && *l->p == '(') {
+		if (++l->prof > 32) {	/* (paréntesis sin fin: la pila no se acaba) */
+			l->error = 1;
+			return;
+		}
 		l->p++;
 		x_o(l);
+		l->prof--;
 		if (l->p >= l->fin || *l->p != ')') {
 			l->error = 1;
 			return;
@@ -1212,7 +1235,7 @@ static int linea_ldb(const char *s, u32 n)
 	f->nsub = (u16)(k - 3);
 	f->expr = n_exprs;
 	f->cuentas = n_cuentas;
-	l.p = tr[2], l.fin = tr[2] + lr[2], l.error = 0, l.nsub = (u32)(k - 3);
+	l.p = tr[2], l.fin = tr[2] + lr[2], l.error = 0, l.nsub = (u32)(k - 3), l.prof = 0;
 	x_o(&l);
 	if (l.error || l.p != l.fin || !pon_x(0)) {
 		n_exprs = x0;
@@ -1397,6 +1420,7 @@ static int al_lector(lector *l, const u8 *d, u32 k)
 	for (i = 0; i < k; i++) {
 		char c = (char)d[i];
 		if (c == '\n') {
+			l->b[l->n] = 0;	/* (que nadie lea más allá de la línea) */
 			if (!l->larga && una_linea(l->clase, l->b, l->n) == -2) {
 				l->sin_memoria = 1;
 				return 1;
@@ -1416,6 +1440,7 @@ static int al_lector(lector *l, const u8 *d, u32 k)
 
 static int lector_acaba(lector *l)
 {
+	l->b[l->n] = 0;
 	if (l->n && !l->larga && una_linea(l->clase, l->b, l->n) == -2)
 		l->sin_memoria = 1;
 	l->n = 0, l->larga = 0;
@@ -1426,7 +1451,7 @@ int motor_carga_texto(const char *nombre, const char *t, u32 n, info_firmas *inf
 {
 	inf_actual = inf;
 	lec.clase = clase_de(nombre);
-	if (!lec.b && !(lec.b = pl_reserva(MAX_LINEA)))
+	if (!lec.b && !(lec.b = pl_reserva(MAX_LINEA + 1)))
 		return -2;
 	lec.n = 0, lec.larga = 0, lec.sin_memoria = 0;
 	al_lector(&lec, (const u8 *)t, n);
@@ -1500,7 +1525,7 @@ static int carga_cvd(const char *ruta, info_firmas *inf)
 		pl_apunta("escudo: %s pide el nivel %u (el motor dice %u): lo que no entienda, se deja", ruta, cab.flevel,
 			  ESCUDO_FLEVEL);
 	inf_actual = inf;
-	if (!lec.b && !(lec.b = pl_reserva(MAX_LINEA))) {
+	if (!lec.b && !(lec.b = pl_reserva(MAX_LINEA + 1))) {
 		pl_cerrar(h);
 		return -2;
 	}
@@ -1517,6 +1542,18 @@ static int carga_cvd(const char *ruta, info_firmas *inf)
 		return -2;
 	}
 	return 0;
+}
+
+typedef struct marca { u32 toks, segs, pats, firmas, conj, alts, altdatos, exprs, cuentas; } marca;
+static void pon_marca(marca *m)
+{
+	m->toks = n_toks, m->segs = n_segs, m->pats = n_pats, m->firmas = n_firmas, m->conj = n_conj;
+	m->alts = n_alts, m->altdatos = n_altdatos, m->exprs = n_exprs, m->cuentas = n_cuentas;
+}
+static void vuelve_a(const marca *m)
+{
+	n_toks = m->toks, n_segs = m->segs, n_pats = m->pats, n_firmas = m->firmas, n_conj = m->conj;
+	n_alts = m->alts, n_altdatos = m->altdatos, n_exprs = m->exprs, n_cuentas = m->cuentas;
 }
 
 /* ---- el cuerpo de los FIRMAS.ESC: bloques de 64 K, comprimidos (deflate) ---- */
@@ -1562,6 +1599,8 @@ static bloque_c *bloque_de(int e, u32 bl)
 	bcache_turno = (bcache_turno + 1) % BLOQUES_CACHE;
 	if (!c->d && !(c->d = pl_reserva(BLOQUE + 1)))
 		return 0;
+	if (x->bloques[bl + 1] < x->bloques[bl] || x->bloques[bl + 1] - x->bloques[bl] > 2 * BLOQUE)
+		return 0;
 	n = x->bloques[bl + 1] - x->bloques[bl];
 	z = pl_reserva(n + 1);
 	if (!z)
@@ -1600,13 +1639,20 @@ static int linea_de(int e, u32 ref, const char **t, u32 *n)
 
 static int clase_linea(int c) { return c == 'n' ? B_NDB : c == 'l' ? B_LDB : c == 'i' ? B_IGN2 : B_NADA; }
 
+/* un FIRMAS.ESC: no se fía de nada de su cabecera (puede venir de una memoria
+ * USB o estar roto): todo se mide contra lo que mide el archivo; si algo no
+ * cuadra, o falta memoria, se deja entero (no se queda contado a medias) */
 static int carga_esc(const char *ruta, info_firmas *inf)
 {
 	u8 c[128];
-	u32 i, n_disp, off_disp, n_siempre, off_siempre, off_bits, off_bloques, c0, l0;
-	int h = pl_abrir(ruta), e;
+	u32 i, n_disp, off_disp, n_siempre, off_siempre, off_bits, off_bloques, largo, disps_antes = n_disps;
+	u32 sum0 = inf->sumas, cu0 = inf->cuerpo, lo0 = inf->logicas, li0 = inf->limpias, fe0 = inf->fecha;
+	u32 vd0 = inf->version_daily, vm0 = inf->version_main, vb0 = inf->version_bytecode, tc0 = tipos_comodin;
+	int h = pl_abrir(ruta), e, r = -1;
+	marca mk;
 	if (h < 0)
 		return -1;
+	largo = pl_largo(h);
 	if (pl_leer(h, c, 128) != 128 || memcmp(c, "HPESCUD2", 8)) {
 		pl_cerrar(h);
 		formatear(inf->error, sizeof inf->error, "%s no es un FIRMAS.ESC (de la versión 2)", ruta);
@@ -1617,11 +1663,101 @@ static int carga_esc(const char *ruta, info_firmas *inf)
 		formatear(inf->error, sizeof inf->error, "demasiados .ESC (%u como mucho)", MAX_ESC);
 		return -1;
 	}
+	pon_marca(&mk);
 	e = n_escs++;
 	E = &escs[e];
 	memset(E, 0, sizeof *E);
 	E->h = h;
 	E->cache_pag = INF;
+	E->n_sumas = le32(c + 24), E->off_sumas = le32(c + 28);
+	E->n_tramos = le32(c + 32), E->off_tramos = le32(c + 36);
+	off_bits = le32(c + 40);
+	E->n_nombres = le32(c + 44), E->idx = le32(c + 48), E->blob = le32(c + 52);
+	E->n_bloques = le32(c + 56), off_bloques = le32(c + 60);
+	n_disp = le32(c + 64), off_disp = le32(c + 68);
+	n_siempre = le32(c + 72), off_siempre = le32(c + 76);
+	E->n_comodin = le32(c + 80);
+	E->nbits = le32(c + 96) ? le32(c + 96) : 21;
+	/* lo que dice la cabecera, contra lo que mide el archivo */
+	if (E->nbits < 8 || E->nbits > 24 || E->n_comodin > E->n_tramos || E->n_bloques >= (1u << 14) ||
+	    !cabe_en(E->off_sumas, E->n_sumas, 8, largo) || !cabe_en(E->off_tramos, E->n_tramos, 12, largo) ||
+	    !cabe_en(off_bits, 1u << (E->nbits - 3), 1, largo) || !cabe_en(E->idx, E->n_nombres, 4, largo) ||
+	    E->blob > largo || !cabe_en(off_bloques, E->n_bloques + 1, 4, largo) || !cabe_en(off_disp, n_disp, 12, largo) ||
+	    !cabe_en(off_siempre, n_siempre, 4, largo))
+		goto roto;
+	E->bits = pl_reserva(1u << (E->nbits - 3));
+	E->bloques = pl_reserva((E->n_bloques + 1) * 4);
+	E->comodin = pl_reserva(E->n_comodin * sizeof(tramo) + 1);
+	E->paginas = (E->n_tramos - E->n_comodin + TRAMOS_POR_PAGINA - 1) / TRAMOS_POR_PAGINA;
+	E->pag = pl_reserva(E->paginas * 4 + 4);
+	r = -2;
+	if (!E->bits || !E->bloques || !E->comodin || !E->pag)
+		goto fuera;
+	r = -1;
+	if (pl_mover(h, off_bits) < 0 || pl_leer(h, E->bits, 1u << (E->nbits - 3)) != (int)(1u << (E->nbits - 3)))
+		goto roto;
+	if (pl_mover(h, off_bloques) < 0 || pl_leer(h, E->bloques, (E->n_bloques + 1) * 4) != (int)((E->n_bloques + 1) * 4))
+		goto roto;
+	for (i = 0; i <= E->n_bloques; i++) {
+		E->bloques[i] = le32((u8 *)&E->bloques[i]);
+		/* (cada bloque, detrás del anterior, dentro del archivo y no mayor que 2 × BLOQUE) */
+		if (E->bloques[i] > largo || (i && (E->bloques[i] < E->bloques[i - 1] || E->bloques[i] - E->bloques[i - 1] > 2 * BLOQUE)))
+			goto roto;
+	}
+	for (i = 0; i < E->paginas; i++) {
+		u8 b[4];
+		if (pl_mover(h, E->off_tramos + i * TRAMOS_POR_PAGINA * 12) < 0 || pl_leer(h, b, 4) != 4)
+			goto roto;
+		E->pag[i] = le32(b);
+	}
+	for (i = 0; i < E->n_comodin; i++) {	/* (los últimos tramos) */
+		u8 b[12];
+		if (pl_mover(h, E->off_tramos + (E->n_tramos - E->n_comodin + i) * 12) < 0 || pl_leer(h, b, 12) != 12)
+			goto roto;
+		E->comodin[i].tam = INF;
+		E->comodin[i].tipo = le32(b + 4) & 0xFF;
+		E->comodin[i].primero = le32(b + 4) >> 8;
+		E->comodin[i].cuantos = le32(b + 8);
+		if (!cabe_en(E->comodin[i].primero, E->comodin[i].cuantos, 1, E->n_sumas))
+			goto roto;
+		tipos_comodin |= 1u << (E->comodin[i].tipo & 0x1F);
+	}
+	/* los disparadores, a memoria (todos los de todos los .ESC juntos) */
+	r = -2;
+	if (n_disp > 0x7FFFFFFFu - n_disps || !CRECE(disps, cap_disps, n_disps + n_disp))
+		goto fuera;
+	r = -1;
+	if (pl_mover(h, off_disp) < 0)
+		goto roto;
+	for (i = 0; i < n_disp;) {
+		static u8 b[12 * 1024];
+		u32 k = n_disp - i < 1024 ? n_disp - i : 1024, j;
+		if (pl_leer(h, b, k * 12) != (int)(k * 12))
+			goto roto;
+		for (j = 0; j < k; j++, i++) {
+			disp *d = &disps[n_disps++];
+			d->clave = le32(b + 12 * j);
+			d->ref = le32(b + 12 * j + 4);
+			d->sl = (le32(b + 12 * j + 8) & 0x07FFFFFF) | (u32)e << 28;
+		}
+	}
+	/* las que van siempre en memoria (sin 4 octetos fijos, y las .ign2) */
+	inf_actual = inf;
+	for (i = 0; i < n_siempre; i++) {
+		u8 b[4];
+		const char *t;
+		u32 n;
+		int cl;
+		if (pl_mover(h, off_siempre + i * 4) < 0 || pl_leer(h, b, 4) != 4)
+			goto roto;
+		cl = linea_de(e, le32(b), &t, &n);
+		if (cl && una_linea(clase_linea(cl), t, n) == -2) {
+			r = -2;
+			goto fuera;
+		}
+	}
+	/* bien: lo de la cabecera, a la cuenta */
+	inf->cuerpo = cu0, inf->logicas = lo0;
 	if (le32(c + 8) > inf->fecha)
 		inf->fecha = le32(c + 8);
 	if (le32(c + 12))
@@ -1630,84 +1766,37 @@ static int carga_esc(const char *ruta, info_firmas *inf)
 		inf->version_main = le32(c + 16);
 	if (le32(c + 20))
 		inf->version_bytecode = le32(c + 20);
-	E->n_sumas = le32(c + 24), E->off_sumas = le32(c + 28);
-	E->n_tramos = le32(c + 32), E->off_tramos = le32(c + 36);
-	off_bits = le32(c + 40);
-	E->idx = le32(c + 48), E->blob = le32(c + 52);
-	E->n_bloques = le32(c + 56), off_bloques = le32(c + 60);
-	n_disp = le32(c + 64), off_disp = le32(c + 68);
-	n_siempre = le32(c + 72), off_siempre = le32(c + 76);
-	E->n_comodin = le32(c + 80);
 	inf->sumas += E->n_sumas;
 	inf->cuerpo += le32(c + 84);
 	inf->logicas += le32(c + 88);
 	inf->limpias += le32(c + 92);
-	E->nbits = le32(c + 96) ? le32(c + 96) : 21;
-	if (E->nbits < 8 || E->nbits > 24)
-		return -1;
-	E->bits = pl_reserva(1u << (E->nbits - 3));
-	E->bloques = pl_reserva((E->n_bloques + 1) * 4);
-	E->comodin = pl_reserva(E->n_comodin * sizeof(tramo) + 1);
-	E->paginas = (E->n_tramos - E->n_comodin + TRAMOS_POR_PAGINA - 1) / TRAMOS_POR_PAGINA;
-	E->pag = pl_reserva(E->paginas * 4 + 4);
-	if (!E->bits || !E->bloques || !E->comodin || !E->pag)
-		return -2;
-	if (pl_mover(h, off_bits) < 0 || pl_leer(h, E->bits, 1u << (E->nbits - 3)) != (int)(1u << (E->nbits - 3)))
-		return -1;
-	if (pl_mover(h, off_bloques) < 0 || pl_leer(h, E->bloques, (E->n_bloques + 1) * 4) != (int)((E->n_bloques + 1) * 4))
-		return -1;
-	for (i = 0; i <= E->n_bloques; i++)
-		E->bloques[i] = le32((u8 *)&E->bloques[i]);
-	for (i = 0; i < E->paginas; i++) {
-		u8 b[4];
-		if (pl_mover(h, E->off_tramos + i * TRAMOS_POR_PAGINA * 12) < 0 || pl_leer(h, b, 4) != 4)
-			return -1;
-		E->pag[i] = le32(b);
-	}
-	for (i = 0; i < E->n_comodin; i++) {	/* (los últimos tramos) */
-		u8 b[12];
-		if (pl_mover(h, E->off_tramos + (E->n_tramos - E->n_comodin + i) * 12) < 0 || pl_leer(h, b, 12) != 12)
-			return -1;
-		E->comodin[i].tam = INF;
-		E->comodin[i].tipo = le32(b + 4) & 0xFF;
-		E->comodin[i].primero = le32(b + 4) >> 8;
-		E->comodin[i].cuantos = le32(b + 8);
-		tipos_comodin |= 1u << (E->comodin[i].tipo & 0x1F);
-	}
-	/* los disparadores, a memoria (todos los de todos los .ESC juntos) */
-	if (!CRECE(disps, cap_disps, n_disps + n_disp))
-		return -2;
-	if (pl_mover(h, off_disp) < 0)
-		return -1;
-	for (i = 0; i < n_disp;) {
-		static u8 b[12 * 1024];
-		u32 k = n_disp - i < 1024 ? n_disp - i : 1024, j;
-		if (pl_leer(h, b, k * 12) != (int)(k * 12))
-			return -1;
-		for (j = 0; j < k; j++, i++) {
-			disp *d = &disps[n_disps++];
-			d->clave = le32(b + 12 * j);
-			d->ref = le32(b + 12 * j + 4);
-			d->sl = (le32(b + 12 * j + 8) & 0x07FFFFFF) | (u32)e << 28;
-		}
-	}
-	/* las que van siempre en memoria (sin 4 octetos fijos, y las .ign2; ya
-	 * contadas en la cabecera) */
-	inf_actual = inf;
-	c0 = inf->cuerpo, l0 = inf->logicas;
-	for (i = 0; i < n_siempre; i++) {
-		u8 b[4];
-		const char *t;
-		u32 n;
-		int cl;
-		if (pl_mover(h, off_siempre + i * 4) < 0 || pl_leer(h, b, 4) != 4)
-			return -1;
-		cl = linea_de(e, le32(b), &t, &n);
-		if (cl && una_linea(clase_linea(cl), t, n) == -2)
-			return -2;
-	}
-	inf->cuerpo = c0, inf->logicas = l0;
 	return 0;
+roto:
+	formatear(inf->error, sizeof inf->error, "%s está roto o no es de este Escudo: no se usa", ruta);
+	pl_apunta("escudo: %s está roto: no se usa", ruta);
+fuera:
+	if (r == -2)
+		formatear(inf->error, sizeof inf->error, "no hay memoria para %s: no se usa", ruta);
+	/* fuera entero: ni sus disparadores, ni lo que haya cargado, ni sus cuentas */
+	vuelve_a(&mk);
+	n_disps = disps_antes;
+	tipos_comodin = tc0;
+	inf->sumas = sum0, inf->cuerpo = cu0, inf->logicas = lo0, inf->limpias = li0, inf->fecha = fe0;
+	inf->version_daily = vd0, inf->version_main = vm0, inf->version_bytecode = vb0;
+	pl_cerrar(h);
+	pl_libera(E->pag), pl_libera(E->bits), pl_libera(E->comodin), pl_libera(E->bloques);
+	memset(E, 0, sizeof *E);
+	E->h = -1;
+	n_escs--;
+	for (i = 0; i < BLOQUES_CACHE; i++)
+		if (bcache[i].esc == e)
+			bcache[i].esc = -1;
+	if (pcache)
+		for (i = 0; i < PAGS_CACHE; i++)
+			if (pcache[i].esc == e)
+				pcache[i].esc = -1;
+	E = 0;
+	return r;
 }
 
 int motor_carga(const char *ruta, info_firmas *inf) { return motor_carga_como(ruta, ruta, inf); }
@@ -1734,7 +1823,7 @@ int motor_carga_como(const char *ruta, const char *nombre, info_firmas *inf)
 		return -1;
 	}
 	inf_actual = inf;
-	if (!lec.b && !(lec.b = pl_reserva(MAX_LINEA))) {
+	if (!lec.b && !(lec.b = pl_reserva(MAX_LINEA + 1))) {
 		pl_cerrar(h);
 		return -2;
 	}
@@ -1761,18 +1850,6 @@ int motor_carga_como(const char *ruta, const char *nombre, info_firmas *inf)
  * sí: de «0&1&2», los de una sola (la de menos patrones); de «0|1», los de
  * las dos; con «=0» o «<n» la firma puede casar sin nada: va siempre en
  * memoria. */
-typedef struct marca { u32 toks, segs, pats, firmas, conj, alts, altdatos, exprs, cuentas; } marca;
-static void pon_marca(marca *m)
-{
-	m->toks = n_toks, m->segs = n_segs, m->pats = n_pats, m->firmas = n_firmas, m->conj = n_conj;
-	m->alts = n_alts, m->altdatos = n_altdatos, m->exprs = n_exprs, m->cuentas = n_cuentas;
-}
-static void vuelve_a(const marca *m)
-{
-	n_toks = m->toks, n_segs = m->segs, n_pats = m->pats, n_firmas = m->firmas, n_conj = m->conj;
-	n_alts = m->alts, n_altdatos = m->altdatos, n_exprs = m->exprs, n_cuentas = m->cuentas;
-}
-
 /* lee una línea sola (sin apuntar su nombre ni contarla): 1 si ha quedado una
  * firma (la última de «firmas»), con sus patrones desde m->pats */
 static __attribute__((unused)) int linea_temporal(int clase, const char *t, u32 n, marca *m)
@@ -2417,34 +2494,36 @@ static int casado(const patron *pt)
 /* un patrón de desplazamiento fijo: dónde puede empezar */
 static int ventana_fija(const patron *pt, const mirado *m, u32 *lo, u32 *hi)
 {
-	i32 base;
+	int64_t base;	/* (con 64 bits: un PE con lo que sea no da la vuelta) */
 	switch (pt->o_tipo) {
 	case O_ABS: base = pt->o_n; break;
-	case O_EOF: base = (i32)m->total + pt->o_n; break;
+	case O_EOF: base = (int64_t)m->total + pt->o_n; break;
 	case O_EP:
 		if (m->ep == INF)
 			return 0;
-		base = (i32)m->ep + pt->o_n;
+		base = (int64_t)m->ep + pt->o_n;
 		break;
 	case O_SX:
 		if (pt->o_sec >= m->nsec)
 			return 0;
-		base = (i32)m->sec[pt->o_sec].raw + pt->o_n;
+		base = (int64_t)m->sec[pt->o_sec].raw + pt->o_n;
 		break;
 	case O_SL:
 		if (!m->nsec)
 			return 0;
-		base = (i32)m->sec[m->nsec - 1].raw + pt->o_n;
+		base = (int64_t)m->sec[m->nsec - 1].raw + pt->o_n;
 		break;
 	case O_SEX:
 		if (pt->o_sec >= m->nsec)
 			return 0;
 		*lo = m->sec[pt->o_sec].raw;
 		*hi = *lo + m->sec[pt->o_sec].rtam;
+		if (*hi < *lo)
+			*hi = INF;
 		return *lo < m->n;
 	default: return 0;
 	}
-	if (base < 0)
+	if (base < 0 || base >= m->n)
 		return 0;
 	*lo = (u32)base;
 	*hi = *lo + pt->o_m;
@@ -2799,6 +2878,8 @@ static void nombre_de(u32 id, int de_esc, char *d)
 		int n;
 		d[0] = 0;
 		E = &escs[de_esc - 1];
+		if (id >= E->n_nombres)
+			return;
 		if (pl_mover(E->h, E->idx + id * 4) < 0 || pl_leer(E->h, b, 4) != 4)
 			return;
 		off = le32(b);
@@ -2990,11 +3071,18 @@ static int zip_saca(void *yo, const u8 *d, u32 n)
 	return pl_cortar();
 }
 
+/* contra las «bombas»: lo que se descomprime en total por cada archivo que se
+ * revisa (con lo de los ZIP de dentro) y los miembros que se miran */
+#define MAX_ZIP_TOTAL (64u << 20)
+#define MAX_ZIP_MIEMBROS 1024
+static u32 zip_gastado, zip_miembros;
+
 static int revisa_zip(const fuente *f, const char *nombre, int prof, resultado *r)
 {
 	u8 e[22], c[46], l[30];
-	u32 n = f->n, k, cd, ncd, i, pos;
+	u32 n = f->n, k, cd, ncd, i, pos, j, n_tramos_zip = 0;
 	int hecho = 0;
+	static u32 ini_z[MAX_PROF + 1][256], fin_z[MAX_PROF + 1][256];	/* lo ya mirado de este ZIP (los solapes, fuera) */
 	if (n < 22)
 		return 0;
 	/* el final del directorio central: «PK\5\6», en los últimos 64 K */
@@ -3026,8 +3114,15 @@ static int revisa_zip(const fuente *f, const char *nombre, int prof, resultado *
 			miembro[q] = 0;
 		}
 		pos += 46 + nlen + xlen + clen;
+		for (j = 0; miembro[j]; j++)	/* (sin letras de control: el nombre va al registro) */
+			if ((u8)miembro[j] < 0x20 || miembro[j] == 0x7F)
+				miembro[j] = '?';
 		if (nlen && miembro[nlen < sizeof miembro - 1 ? nlen - 1 : sizeof miembro - 2] == '/')
 			continue;	/* una carpeta */
+		if (++zip_miembros > MAX_ZIP_MIEMBROS) {
+			r->sin_mirar++;
+			break;
+		}
 		if (flag & 1) {
 			r->cifrados++;
 			continue;
@@ -3037,10 +3132,22 @@ static int revisa_zip(const fuente *f, const char *nombre, int prof, resultado *
 			continue;
 		}
 		dat = loff + 30 + le16(l + 26) + le16(l + 28);
-		if (usize > motor_max_archivo || (metodo != 0 && metodo != 8)) {
+		if (usize > motor_max_archivo || (metodo != 0 && metodo != 8) || usize > MAX_ZIP_TOTAL - zip_gastado ||
+		    dat < loff || dat > n || csize > n - dat) {
 			r->sin_mirar++;
 			continue;
 		}
+		/* (dos miembros que usan los mismos octetos: una bomba; el segundo, no) */
+		for (j = 0; j < n_tramos_zip; j++)
+			if (loff < fin_z[prof][j] && dat + csize > ini_z[prof][j])
+				break;
+		if (j < n_tramos_zip) {
+			r->sin_mirar++;
+			continue;
+		}
+		if (n_tramos_zip < 256)
+			ini_z[prof][n_tramos_zip] = loff, fin_z[prof][n_tramos_zip++] = dat + csize;
+		zip_gastado += usize;
 		{
 			u8 *b = pl_reserva(usize + 1);
 			u32 largo = 0;
@@ -3183,6 +3290,7 @@ int motor_revisa_memoria(const u8 *d, u32 n, const char *nombre, resultado *r)
 {
 	fuente f;
 	memset(r, 0, sizeof *r);
+	zip_gastado = 0, zip_miembros = 0;
 	f.mem = d, f.h = -1, f.n = n;
 	r->hallado = revisa(&f, nombre, 0, 0, r);
 	return r->hallado;
@@ -3193,6 +3301,7 @@ int motor_revisa_archivo(const char *ruta, const char *nombre, resultado *r)
 	fuente f;
 	int h = pl_abrir(ruta);
 	memset(r, 0, sizeof *r);
+	zip_gastado = 0, zip_miembros = 0;
 	if (h < 0)
 		return -1;
 	f.mem = 0, f.h = h, f.n = pl_largo(h);

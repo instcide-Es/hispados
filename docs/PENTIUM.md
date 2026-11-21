@@ -4106,6 +4106,31 @@ enseña y lo cambia.
   con lo de fábrica entra; con `regla=tcp 22 nadie` no llega nada y se apunta;
   y en el escritorio, la pregunta deja la regla y RED.BIN la lee.
 
+### La revisión de seguridad (21/11)
+
+Una revisión (con ASan y un fuzzer) encontró, y se arregló:
+- **FIRMAS.ESC con la cabecera mentirosa** (cuentas enormes, una tabla de
+  bloques al revés): escribían fuera del montón. Ahora todo lo de la cabecera
+  se mide contra lo que mide el archivo, la tabla de bloques tiene que crecer y
+  cada bloque no pasa de 128 K, `crece()` no da la vuelta, y un `.ESC` que
+  falla a medias **se deja entero** (no se queda contado a medias).
+- **Bombas ZIP de miembros solapados** (3,6 MB bloqueaban horas): como mucho
+  64 MB descomprimidos y 1.024 miembros por archivo revisado, y dos miembros
+  que usan los mismos octetos, el segundo fuera.
+- Paréntesis sin fin en una `.ldb` (la pila): como mucho 32; variantes de un
+  patrón (84 K pedían 1,28 GB): como mucho 64; leer más allá de una línea; la
+  suma con signo de un PE hostil (con 64 bits); los nombres de un ZIP con
+  saltos de línea en el registro (se escapan); y un `.cvd` más viejo que lo
+  publicado (aunque esté bien firmado) no se usa.
+- **El cortafuegos** decide «local» o «Tailscale» por la interfaz por la que
+  llegó el paquete (no por su IP de origen), y tira lo que llegue por la
+  tarjeta con origen de una red del túnel. La ventana avisa de que «la red
+  local», en una Wi-Fi pública, es también la de los demás.
+La parte 23 de las pruebas pasa los casos de la revisión
+(`escudo/prueba/casos/`) y 2.000 archivos estropeados al azar
+(`escudo/prueba/fuzz.py`) con el motor compilado con ASan y UBSan
+(`hacer.sh --asan`).
+
 ### Lo que tarda
 
 | | |
@@ -4148,7 +4173,9 @@ al arrancar (`escritorio.cas`), sin llamadas nuevas; en el Navegador,
 - Más contenedores: RAR (de solo lectura) y los `.EXE` comprimidos con UPX;
   el interior de los PDF (sus streams con deflate).
 - Reglas para UDP en el cortafuegos (de momento, solo entra lo que pide un
-  programa); y el nombre del programa que escucha (hoy, su tarea).
+  programa); el nombre del programa que escucha (hoy, su tarea); y «redes de
+  confianza» (que «la red» sea solo la de casa o la de la asociación, no
+  cualquier Wi-Fi).
 - Revisar en segundo plano (hoy la ventana revisa ella misma).
 - Que `/DESCARGA` no cargue las firmas cada vez (unos 12 s en QEMU): que se lo
   pida al residente (`/VIGILAR`). `/ANTES` ya recuerda lo revisado.

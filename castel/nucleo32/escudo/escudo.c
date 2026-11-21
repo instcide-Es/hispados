@@ -152,9 +152,13 @@ void apunta(const char *f, ...)
 	char t[600], l[700], r[RUTA];
 	va_list va;
 	u32 d = fecha_hoy(), h = hora_ahora();
+	char *q;
 	va_start(va, f);
 	vformatear(t, sizeof t, f, va);
 	va_end(va);
+	for (q = t; *q; q++)	/* (un nombre con saltos de línea, de un ZIP, no rompe el registro) */
+		if ((u8)*q < 0x20)
+			*q = '?';
 	serie("escudo: %s", t);
 	formatear(l, sizeof l, "%u-%02u-%02u %02u:%02u  %s\r\n", d / 10000, d / 100 % 100, d % 100, h / 100, h % 100, t);
 	hacer_carpeta(dir_escudo);

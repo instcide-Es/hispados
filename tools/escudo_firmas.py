@@ -337,6 +337,16 @@ def main():
     cm, cd = cabecera(main_cvd), cabecera(daily_cvd)
     cb = cabecera(byte_cvd)['version'] if byte_cvd else 0
     hoy = time.strftime('%Y%m%d')
+    # (que nadie cuele un .cvd viejo, aunque esté bien firmado: las versiones
+    # no pueden ir hacia atrás de lo ya publicado)
+    vb, vm = os.path.join(estado, 'BASE.V'), os.path.join(estado, 'MES.LST.gz')
+    if os.path.exists(vb) and cm['version'] < int(open(vb).read().split()[0]):
+        falla('main.cvd %d es más viejo que el de la base publicada (%s): no se usa' % (cm['version'], open(vb).read().strip()))
+    if os.path.exists(vm):
+        with gzip.open(vm, 'rt') as f:
+            v_mes = int(f.readline().split()[0])
+        if cd['version'] < v_mes:
+            falla('daily.cvd %d es más viejo que el del mes publicado (%d): no se usa' % (cd['version'], v_mes))
     with tempfile.TemporaryDirectory() as w:
         anf = os.path.join(w, 'escudo-anfitrion')
         p = subprocess.run(['bash', os.path.join(ESCUDO, 'hacer.sh'), '--anfitrion', anf], capture_output=True, text=True)

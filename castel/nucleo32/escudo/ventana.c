@@ -336,8 +336,8 @@ int pregunta_puerto(u32 puerto, u32 tarea)
 	int r;
 	formatear(t, sizeof t,
 		  "¿Dejar que un programa reciba conexiones?\nUn programa (la tarea %u) quiere recibir conexiones por el puerto TCP %u%s%s%s. "
-		  "Hasta que se diga, el cortafuegos no deja entrar nada.\n«Desde la red»: solo desde la red local y desde Tailscale (lo prudente). "
-		  "«Desde todos»: también desde Internet.",
+		  "Hasta que se diga, el cortafuegos no deja entrar nada.\n«Desde la red»: solo desde la red local y desde Tailscale. "
+		  "Ojo: en una Wi-Fi pública (un bar, una biblioteca), la red local es también la de los demás. «Desde todos»: también desde Internet.",
 		  tarea, puerto, np[0] ? " (el de " : "", np, np[0] ? ")" : "");
 	serie("escudo: cortafuegos: pregunta por el puerto %u", puerto);
 	r = cuadro("Escudo: cortafuegos", t, b, 3, 1);
@@ -798,7 +798,7 @@ static void pinta_red(void)
 		texto_n(28, y + 18 + 18 * i, t, (L.an - 160) / 8, C_SUAVE, 0);
 	}
 	boton(L.an - 20 - 130, L.al - 66, 130, "Apagar SSH", B_APAGAR_SSH, 0, ssh_encendido());
-	pie("Entra solo lo que pide el equipo. Las reglas: por puerto, y de dónde puede venir.");
+	pie("«Red local»: la del cable o la Wi-Fi de ahora (en una Wi-Fi pública, también la de los demás).");
 }
 
 static void pinta_opciones(void)

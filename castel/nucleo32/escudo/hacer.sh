@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 # nucleo32/escudo/hacer.sh CARPETA
 # nucleo32/escudo/hacer.sh --anfitrion [SALIDA]
+# nucleo32/escudo/hacer.sh --asan [SALIDA]     (el de Linux con ASan y UBSan)
 # Hace Escudo, el antivirus de Hispa-Pentium (docs/PENTIUM.md, «Escudo»), y
 # deja en CARPETA lo que va en \HISPA: ESCUDO.BIN (el motor, las órdenes y la
 # ventana: un programa del anillo 3, en C), ESCUDO\LEEME.TXT y, en
@@ -18,6 +19,17 @@ RAIZ=$(readlink -f "$AQUI/../../..")
 BEAR="rsa_i31_pub i31_decode i31_encode i31_bitlen i31_ninv31 i31_modpow2 i31_modpow i31_montmul i31_tmont i31_fmont i31_muladd i31_sub i31_add i31_iszero i31_decmod i31_rshift i32_div32 ccopy"
 MOTOR="motor inflar cvd sumas"
 cd "$RAIZ"
+if [ "${1:-}" = --asan ]; then
+  # el mismo, con AddressSanitizer y UBSan (las pruebas de resistencia: prueba/fuzz.py)
+  SAL=$(readlink -m "${2:-build/escudo-anfitrion/escudo-asan}")
+  mkdir -p "$(dirname "$SAL")"
+  # shellcheck disable=SC2046
+  gcc -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -DESCUDO_ANFITRION -I$AQUI -Iterceros/bearssl/inc -Iterceros/bearssl/src \
+    $(for f in $MOTOR anfitrion; do echo $AQUI/$f.c; done) $(for f in $BEAR; do echo terceros/bearssl/src/$f.c; done) -lz -o "$SAL" \
+    || { echo "hacer.sh: no se ha podido hacer escudo-asan"; exit 1; }
+  echo "hacer.sh: $SAL"
+  exit 0
+fi
 if [ "${1:-}" = --anfitrion ]; then
   SAL=$(readlink -m "${2:-build/escudo-anfitrion/escudo-anfitrion}")
   O=build/escudo-anfitrion

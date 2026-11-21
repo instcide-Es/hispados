@@ -640,7 +640,7 @@ módulo Rtcp
         fin
         si c = nulo y señal yb (F_SYN ob F_ACK ob F_RST) = F_SYN entonces
             ; (CORTAFUEGOS) una conexión que no se ha pedido: ¿la deja entrar?
-            si no deja_tcp(ip, pl, (ip yb máscara) = (mi_ip yb máscara), por_túnel(ip)) entonces devolver fin
+            si no deja_tcp(ip, pl, no ent_túnel y (ip yb máscara) = (mi_ip yb máscara), ent_túnel) entonces devolver fin
             si llega_syn(ip, p, n) entonces devolver fin     ; (SSH) a un puerto en escucha
         fin
         ; (CORTAFUEGOS) a lo que no es de ninguna conexión, nada (ni que no hay nadie)
