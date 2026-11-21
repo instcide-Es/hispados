@@ -5,7 +5,7 @@
 ;  campo de fecha, una lista desplegable, una casilla y la barra de estado).
 ;  Es el ejemplo para escribir programas de ventana y lo que prueba
 ;  castel/pruebas.sh. Con «normal» en la línea de órdenes, con la letra
-;  normal; con «doble», al doble (si no, vez y media).
+;  normal; con «doble», la muy grande (si no, la grande: letrasuave.cas).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UMuestra
@@ -208,7 +208,7 @@ módulo UMuestra
                 si p >= 0 y p < 2 entonces pestaña := nat32(p) fin
             caso K_LISTA:
                 foco := id
-                si rejilla_clic(g, x, yy) >= 0 y veces_ >= 2 entonces hace(id) fin
+                si rejilla_clic_veces(g, x, yy, veces_) >= 0 y veces_ >= 2 entonces hace(id) fin
             caso K_HERRAMIENTA:
                 hace(id)
             caso K_CAMPO:
@@ -239,6 +239,11 @@ módulo UMuestra
             sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
                 clic(ent32(s.a), ent32(s.b), veces(s.c))
                 pinta()
+            sino si s.clase = EV_RATÓN_MUEVE entonces
+                ; (arrastrando el borde de un rótulo de la rejilla)
+                si rejilla_arrastra(ent32(s.a)) entonces pinta() fin
+            sino si s.clase = EV_RATÓN_SUBE entonces
+                si rejilla_suelta() entonces pinta() fin
             sino si s.clase = EV_MENÚ entonces
                 abierto := -1
                 si s.b = 1 y s.a <> SIN_ELEGIR entonces tamaño_ := s.a + 1 fin

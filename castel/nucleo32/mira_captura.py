@@ -16,12 +16,15 @@ Ventanas. Las comprobaciones:
                                  algún punto de ese rectángulo
   negrita X0 Y0 X1 Y1 TEXTO      lo mismo, en negrita (cada letra, dos veces)
   notexto X0 Y0 X1 Y1 TEXTO      el texto (fino o en negrita) NO está ahí
-  texto2, negrita2 ...           como texto y negrita, con la letra a doble
-                                 tamaño (16x32: cada punto, 2x2; en negrita,
-                                 otra vez un punto a la derecha)
-  texto15, negrita15 ...         lo mismo, a vez y media (12x24: cada punto,
-                                 uno o dos, alternando), la «letra grande» de
-                                 controles.cas
+  texto15, negrita15 ...         lo mismo, con la «letra grande» de
+                                 controles.cas (el renglón de 24 puntos: la
+                                 letra suavizada de letrasuave.cas, DejaVu
+                                 Sans; en negrita, DejaVu Sans Bold); los
+                                 texto2 y negrita2, con la de 32. Se busca con
+                                 la letra ya rasterizada: los puntos de tinta
+                                 entera, todos del mismo color; los que no
+                                 toca ninguna letra, de otro (la esquina: la
+                                 pluma al empezar y lo alto del renglón)
   igual X Y ANCHO ALTO OTRA.ppm  ese rectángulo es igual en la otra captura
   distinto X Y ANCHO ALTO OTRA.ppm   y que no lo es
 
@@ -44,6 +47,90 @@ def letra():
             filas.append([int(v, 16) for v in m.group(1).split(',')])
     assert len(filas) == 256
     return filas
+
+
+def letra_suave():
+    """las 4 caras de letrasuave.cas (0 y 1: el renglón de 24, normal y en
+    negrita; 2 y 3: el de 32): cada una, (base, tabla, comienzos, pares, puntos)"""
+    datos, actual, caras = {}, None, []
+    for l in open(os.path.join(AQUI, 'letrasuave.cas'), encoding='utf-8'):
+        m = re.match(r'\s+(LS_[tikp]\d+):', l)
+        if m:
+            actual = m.group(1)
+            datos[actual] = bytearray()
+            continue
+        m = re.match(r'\s+dd LS_t\d+, LS_i\d+, LS_k\d+, LS_p\d+, (\d+), (\d+)', l)
+        if m:
+            caras.append(int(m.group(2)))
+            continue
+        m = re.match(r'\s+db ([0-9,]+)$', l)
+        if m and actual:
+            datos[actual] += bytes(int(v) for v in m.group(1).split(','))
+    return [(caras[n], datos['LS_t%d' % n], datos['LS_i%d' % n], datos['LS_k%d' % n], datos['LS_p%d' % n]) for n in range(4)]
+
+
+def _sg(b):
+    return b - 256 if b >= 128 else b
+
+
+def dibujo_suave(texto, cara):
+    """los puntos del texto con la letra suavizada, como los pinta
+    controles.cas: {(x, y): tono de 0 a 15} (el mayor, si se pisan)"""
+    sys.path.insert(0, os.path.join(AQUI, '..', '..', 'tools'))
+    import hispa437
+    base, tabla, ini, pares, puntos = cara
+    cod = []
+    for ch in texto:
+        c = hispa437.codigo(ch)
+        cod.append(c if c is not None else ord('?'))
+    pts = {}
+    x = 0
+    for i, c in enumerate(cod):
+        if c < 32:
+            c = 32
+        if i > 0 and cod[i - 1] >= 32:
+            a = cod[i - 1] - 32
+            j0 = ini[2 * a] | ini[2 * a + 1] << 8
+            j1 = ini[2 * a + 2] | ini[2 * a + 3] << 8
+            for j in range(j0, j1):
+                if pares[2 * j] == c:
+                    x += _sg(pares[2 * j + 1])
+                    break
+        f = tabla[(c - 32) * 8:(c - 31) * 8]
+        an, al = f[3], f[4]
+        off = f[6] | f[7] << 8
+        fila = (an + 1) // 2
+        gx, gy = x + _sg(f[1]), _sg(f[2])
+        for yy in range(al):
+            for xx in range(an):
+                b = puntos[off + yy * fila + xx // 2]
+                t = b & 15 if xx & 1 else b >> 4
+                if t:
+                    k = (gx + xx, gy + yy)
+                    pts[k] = max(pts.get(k, 0), t)
+        x += f[0]
+    return pts
+
+
+def busca_suave(cap, x0, y0, x1, y1, texto, cara):
+    """dónde está el texto (la pluma al empezar y lo alto del renglón), o None"""
+    pts = dibujo_suave(texto, cara)
+    if not pts:
+        return None
+    tinta = [k for k, t in pts.items() if t == 15]
+    if not tinta:
+        return None
+    xs = [k[0] for k in pts]
+    ys = [k[1] for k in pts]
+    mx, Mx, my, My = min(xs), max(xs), min(ys), max(ys)
+    fondo = [(a, b) for b in range(my, My + 1) for a in range(mx, Mx + 1) if (a, b) not in pts]
+    for y in range(max(-my, y0), min(y1, cap.alto - 1 - My) + 1):
+        for x in range(max(-mx, x0), min(x1, cap.ancho - 1 - Mx) + 1):
+            c = cap.punto(x + tinta[0][0], y + tinta[0][1])
+            if all(cap.punto(x + a, y + b) == c for a, b in tinta) and \
+               all(cap.punto(x + a, y + b) != c for a, b in fondo):
+                return x, y
+    return None
 
 
 class Captura:
@@ -107,6 +194,7 @@ def main():
         sys.exit(__doc__)
     cap = Captura(a[0])
     tabla = letra()
+    suaves = None
     mal = []
     i = 1
     while i < len(a):
@@ -131,9 +219,11 @@ def main():
             t = a[i + 5]
             i += 6
             m = 4 if op.endswith('2') else 3
-            r = busca(cap, x0, y0, x1, y1, t, op.startswith('negrita'), tabla, m)
+            if suaves is None:
+                suaves = letra_suave()
+            r = busca_suave(cap, x0, y0, x1, y1, t, suaves[(2 if m == 4 else 0) + (1 if op.startswith('negrita') else 0)])
             if r is None:
-                mal.append('no está «%s»%s, %s, en (%d,%d)-(%d,%d)' % (t, ' (en negrita)' if op.startswith('negrita') else '', 'a doble tamaño' if m == 4 else 'a vez y media', x0, y0, x1, y1))
+                mal.append('no está «%s»%s, %s, en (%d,%d)-(%d,%d)' % (t, ' (en negrita)' if op.startswith('negrita') else '', 'con la letra grande de 32' if m == 4 else 'con la letra grande de 24', x0, y0, x1, y1))
             elif dice:
                 print('«%s» en (%d,%d)' % (t, r[0], r[1]))
         elif op in ('texto', 'negrita', 'notexto'):
