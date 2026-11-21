@@ -2928,7 +2928,7 @@ miracap "base no se puede desinstalar: lo dice, y por qué" pg2 texto 140 220 66
 miracap "letras: hay otros que lo necesitan (saludo y extra): se dice, y se ofrece quitarlos también" pg3 texto 140 220 660 320 "Hay programas que necesitan letras: saludo, extra. Sin" \
   negrita 380 270 660 370 "Quitar los 3" negrita 380 270 660 370 Cancelar
 miracap "«Actualizar» del menú abre la misma ventana en «Pendientes (1)»: juego, de la 1.0 a la 1.1, con «Actualizar» y «Actualizar todo»" pg4 \
-  negrita 10 120 150 140 "Pendientes (1)" negrita 20 170 330 195 "[-] Juegos y emuladores" negrita 50 195 120 220 juego texto 330 195 420 220 "1.0" texto 410 195 480 220 "1.1" \
+  negrita 10 120 150 140 "Pendientes (1)" negrita 20 170 330 195 "[-] Juegos y emuladores" negrita 50 195 120 220 juego texto 200 195 290 220 "1.0" texto 290 195 340 220 "1.1" \
   negrita 640 360 790 390 Actualizar negrita 640 390 790 415 "Actualizar todo"
 miracap "Ctrl+Tab hasta «Sin instalar (1)»: visor (Multimedia), con «Instalar»" pg5 negrita 370 120 530 140 "Sin instalar (1)" negrita 20 170 250 195 "[-] Multimedia" negrita 50 195 120 220 visor \
   negrita 640 360 790 390 Instalar
@@ -3629,7 +3629,7 @@ CAPTURAS=$G ESCRIBE=1 SATA=$Y/sata.img SOLO_LECTURA=1 MODULOS=$Y/ACPI.BIN,$Y/DIS
   ":tecla down" ":tecla ret" ":pausa 4" ":captura dv4" ":clic 228 140" ":raton 400 450" ":pausa 1" ":captura dv5" ":clic 323 140" ":raton 400 450" ":pausa 1" ":captura dv6" \
   ":tecla esc" ":pausa 1" ":clic 245 81" ":pausa 2" ":captura dv7" \
   ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":pausa 1" ":captura dv10" ":clic 742 31" ":pausa 1" \
-  ":clic 40 585" ":pausa 1" ":clic 300 238" ":raton 700 470" ":pausa 1" ":captura dv8" ":clic 300 398" ":pausa 4" ":captura dv9" > $Y/pc.sal 2>&1
+  ":clic 40 585" ":pausa 1" ":clic 300 238" ":raton 700 470" ":pausa 1" ":captura dv8" ":clic 300 430" ":pausa 4" ":captura dv9" > $Y/pc.sal 2>&1
 S=$Y/pc.sal
 mira "ACPI.BIN apunta lo que hay en el espacio de nombres de ACPI (la llamada 156)" "^ACPI: [0-9]* dispositivos del espacio de nombres, apuntados para el Administrador de dispositivos"
 mira "Mi equipo > Propiedades, Configuración > «Administrador de dispositivos...» y las propiedades lanzan DISPOSIT.BIN" \
@@ -3676,7 +3676,7 @@ miracap "la pestaña Controlador: el controlador, el identificador, el subsistem
   texto 100 150 700 400 "video.cas (en el núcleo)" texto 100 150 700 400 "PCI 1234:1111" texto 100 150 700 400 "030000 (Tarjeta gráfica (VGA))"
 miracap "la pestaña Recursos: sus zonas de memoria, con lo que miden" dv6 negrita 100 120 400 160 Recursos texto 100 150 700 400 "FD000000-FDFFFFFF (16 MB)"
 miracap "«Copiar informe»: al portapapeles" dv7 texto 30 520 760 545 "Informe copiado al portapapeles"
-miracap "Configuración, con «Dispositivos...»" dv8 negrita 160 120 700 160 "Configuración" negrita 170 380 480 420 "Dispositivos..."
+miracap "Configuración, con «Dispositivos...»" dv8 negrita 160 120 700 160 "Configuración" negrita 170 412 480 452 "Dispositivos..."
 miracap "y desde ahí, la ventana otra vez" dv9 negrita 30 15 400 40 "Administrador de dispositivos"
 if ! grep -q "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $Y/pc.sal; then ok "ni una excepción del núcleo ni un error de ACPICA (recorriendo el espacio de nombres y los _CRS)"
 else ko "hay excepciones o errores:"; grep "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $Y/pc.sal | head -4 | sed 's/^/        /'; fi
@@ -4235,7 +4235,7 @@ for i in range(1, 401): sys.stdout.write('linea %03d de un texto largo\r\n' % i)
   miracap "el Administrador de dispositivos: la rueda baja la lista y la elegida («Pantalla», arriba) se queda elegida, aunque ya no se vea" ru8 \
     notexto 40 120 400 520 "[-] Pantalla (1)" negrita 40 120 400 520 "[-] Procesador (1)" texto 40 520 300 545 "16 dispositivos"
   miracap "MUESTRA: la rueda baja la rejilla seis renglones (el 20, arriba) sin mover la elegida (la 8, que ya no se ve)" ru9 \
-    negrita 0 0 400 30 "Muestra de controles" texto 60 195 300 220 "Persona de ejemplo 20" notexto 0 190 800 520 "Persona de ejemplo 8"
+    negrita 0 0 400 30 "Muestra de controles" texto 40 195 300 220 "Persona de ejemplo 20" notexto 0 190 800 520 "Persona de ejemplo 8"
   miracap "MUESTRA: Ctrl+rueda hacia arriba, la letra más grande (vez y media)" ru10 negrita15 0 150 800 300 "Nombre"
   miracap "y con la flecha abajo (la primera lleva el teclado a la rejilla), la elegida pasa a la siguiente (la 15) y se ve otra vez" ru11 negrita15 0 150 800 400 "Persona de ejemplo 15"
   [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/ru*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
