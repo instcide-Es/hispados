@@ -227,6 +227,7 @@ cuarta parte, los discos y el USB).
 | `ajustes.cas` (Ajustes) | Los **ajustes de un sistema instalado** (`\HISPA\HISPA.INI`): el nombre del usuario y del equipo y el teclado (sección 12). |
 | `usuario.cas` (Usuario) | Los **programas del anillo 3**: los carga **del disco** (o de los módulos de multiboot) en su espacio de direcciones y atiende la **llamada al sistema** (`int 0x80`, sección 6). |
 | `video.cas` (Video) | El **modo gráfico**: el que haya dejado el cargador (multiboot) o el de la **VBE de Bochs/QEMU**; la memoria de la pantalla, a la vista del núcleo; y, si el modo no es de 32 bits, el volcado a 24 o a 16 (sección 10). |
+| `edid.cas` (Edid) | Lo que dice la **pantalla** de sí misma (su EDID): en QEMU, de su tarjeta; en las Intel, por el DDC con el GMBUS; la nativa, lo más grande y su nombre (sección 10). |
 | `grafico.cas` (Grafico), `letra.cas` (Letra) | **Dibujar**: los lienzos; rectángulos, degradados, esquinas redondas, líneas, círculos, el disquete de la casa, texto con la **letra de 8x16** (la de Hispa Ventanas, hecha por `hazletra.py`) y copiar de un lienzo a otro. |
 | `raton.cas` (Raton) | El **ratón** (el PS/2, por la IRQ 12, o uno USB): dónde está la flecha y la cola de clics. |
 | `ventanas.cas` (Ventanas) | El **gestor de ventanas**: un lienzo por ventana, el marco, el orden, componer solo lo que cambia con doble búfer, la flecha (y sus formas), mover y **cambiar de tamaño**, y repartir el ratón y las teclas. |
@@ -1777,6 +1778,89 @@ verdad): guardar, reiniciar, la prueba al arrancar con «Mantener», y otra que
 no se da por buena y que GRUB deshace sola al reiniciar a lo bruto. Y,
 instalado con `-vga std`, «Mantener» que se guarda; y con `-vga vmware`, 1200 x
 800 (que su BIOS no da) puesta por el núcleo al arrancar.
+
+### La pantalla, por su EDID; y la memoria USB (21/11)
+
+Lo que dijo Carlos con el **HP Mini 5103** de verdad (GMA 3150, panel de
+1024 x 600): Configuración ofrecía **1920 de ancho**, y «ponga lo que ponga, se
+queda en 1024 x 600». Lo primero, porque sin la VBE de Bochs no se miraba lo
+que puede la pantalla; lo segundo, porque arrancaba **de la memoria USB**, y
+desde ella la lista no hacía nada (sin decir por qué).
+
+**Lo que dice la pantalla** (`edid.cas`, nuevo): su **EDID**, una vez, al poner
+el escritorio:
+
+1. en QEMU, de su tarjeta (la tercera zona PCI de `1234:1111`);
+2. en las **Intel** (GMA 950/945, **GMA 3150** de los Atom N450/N455/N550, GMA
+   X3100/4500 y HD Graphics), por el **DDC** de la pantalla (I2C, dirección 50h)
+   con el **GMBUS** de la tarjeta (sus registros GMBUS0 a GMBUS3, como los
+   cuenta la documentación pública de Intel, «IHD-OS»): primero las patillas
+   del panel (LVDS, los portátiles) y luego las del VGA. En `5100h` de su zona
+   de registros hasta las GMA 4500; en `C5100h` desde las HD Graphics. Se lee
+   con un ciclo «con índice» desde el octeto 0, de cuatro en cuatro, con un
+   tope de espera en cada paso, y se comprueba la cabecera y la suma. Los paneles
+   **eDP** (Bay Trail, como el Acer One 10, y muchos de Haswell en adelante) no
+   lo dan por ahí sino por el canal AUX de DisplayPort: no se mira. **Sin
+   probar aún en un Intel de verdad** (QEMU no tiene esa tarjeta): lo dirá el
+   registro del arranque del HP Mini.
+
+De él: la **nativa** (su primera medida detallada), el **nombre** del monitor
+(su descriptor `FCh`) y lo más grande que sabe mostrar (en un panel o un monitor
+digital, la nativa; en uno analógico, lo más grande de sus medidas).
+
+**La lista** (`prepara_modos()`), con eso:
+
+- **con EDID**: nada mayor que lo que puede la pantalla, y la nativa marcada
+  como **recomendada** («1024 x 600 *» y, debajo, «La de la pantalla
+  (recomendada): 1024 x 600.»), aunque no esté en la lista de siempre;
+- **sin EDID, pero sabiendo la nativa**: si se ha arrancado **«a la medida de la
+  pantalla»** (la entrada del menú, que ahora le dice al núcleo `amedida`, o
+  `PANTALLA.ENV` con `auto`), la que puso GRUB es la de la pantalla (la eligió
+  él por su EDID, que GRUB sí le pide a la BIOS). Se apunta en `PANTALLA.ENV`
+  (`nativa=`) para los arranques siguientes;
+- **sin saber nada, en un PC de verdad**: nada mayor que la de ahora («No se
+  sabe su medida: nada mayor que la de ahora»), y «A la medida» para que la
+  elija GRUB;
+- en una **máquina virtual** sin EDID (VirtualBox), sin tope: su pantalla es
+  una ventana, y «Probar...» vuelve sola a los 15 s;
+- nunca se elige de por sí nada mayor: la elegida al abrir es la de ahora.
+
+**La memoria USB** (`usb.sh`): su menú lee `\PANTALLA.ENV` (en su raíz) igual
+que el del disco instalado, y lo usa la **primera entrada** (dice antes de
+arrancar a qué medida va); «Guardar y reiniciar...» lo escribe ahí (se arranca
+con `escritura=usb`). Las memorias hechas antes del 21/11 no lo traen: el
+cuadro lo dice. Y cuando no se puede guardar, al pulsar una medida se dice
+**por qué** (el CD es de solo lectura; sin permiso de escritura; una memoria de
+antes; sin instalar).
+
+**Si la BIOS no da la pedida**, GRUB pone otra de la reserva sin decir nada; el
+núcleo, al arrancar, compara: «**Este equipo no permite 1600 x 900: se queda en
+800 x 600.**», en un aviso, y `PANTALLA.ENV` pasa a la que hay (si estaba a
+prueba, a la de antes). Con la VBE de Bochs, la pone él.
+
+**El registro del arranque**: todo lo de la pantalla (con qué medida ha
+arrancado, el EDID o que no lo hay, lo que pide `PANTALLA.ENV`, lo que se elige,
+la prueba y si no se permite) va a `ARRANQUE.TXT` de la unidad del sistema: en
+la memoria USB (con `registro`, como siempre) y en el disco instalado
+(`C:\ARRANQUE.TXT`).
+
+**El Administrador de dispositivos** enseña, en Pantalla, colgado de la
+tarjeta, el **monitor** con su nombre y para qué medida está hecho («Monitor:
+QEMU Monitor», «hecho para 1024 x 600 (EDID: la tarjeta de QEMU)»): lo que ya
+se leyó al arrancar (la llamada 155, de solo lectura, como siempre).
+
+**Lo que no se ha hecho**: el `_DDC` de ACPI (el EDID que algunas BIOS dan por
+ACPI, sobre todo de paneles eDP): pide que `ACPI.BIN` evalúe un método más y lo
+pase al núcleo por una llamada de servicio; queda para la próxima si el GMBUS no
+basta en algún equipo.
+
+**Probado** (parte 17, `SOLO=pantalla`): QEMU con `-device VGA,xres=1024,yres=600`
+(la lista: 800 x 600 y 1024 x 600 recomendada; el monitor en el Administrador
+de dispositivos), con `xres=1366,yres=768` y con `edid=off`; la memoria USB con
+`-vga cirrus` (sin VBE de Bochs ni EDID, como el HP Mini): «A la medida»
+guardada en `X:\PANTALLA.ENV`, la prueba al arrancar, y 1600 x 900 (que cirrus
+no da) dicho en un aviso y en `X:\ARRANQUE.TXT`; y el disco instalado con
+cirrus, con la nativa apuntada.
 
 ### Lo que falta
 

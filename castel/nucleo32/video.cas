@@ -14,9 +14,9 @@
 ;
 ;  Con esa tarjeta (aunque el modo lo haya puesto el cargador: su VBE habla
 ;  con ella), el modo se puede cambiar en marcha: cambia_modo(). Lo que da
-;  (el máximo, su memoria) y lo que dice la pantalla (su EDID, en QEMU) lo
-;  cuentan máximo_tarjeta(), memoria_tarjeta() y medida_monitor(), para la
-;  lista de modos de Configuración.
+;  (el máximo, su memoria) lo cuentan máximo_tarjeta() y memoria_tarjeta(),
+;  para la lista de modos de Configuración; lo que dice la pantalla (su
+;  EDID), edid.cas.
 ;
 ;  Se dibuja siempre con 32 bits por punto. Si el modo que hay es de 24 o de
 ;  16 (hay tarjetas que no dan otro), «pantalla» es un lienzo de 32 bits en
@@ -56,9 +56,6 @@ módulo Video
     variable real: nat32                        ; la pantalla de verdad (si no es de 32 bits)
     variable octetos_fila: nat32                ; de una fila a la siguiente, en ella
     variable lienzo_aparte: puntero a byte      ; el lienzo de 32 bits (si el modo no lo es), para soltarlo al cambiar
-    variable edid_mirado: bool
-    variable edid_hay: bool
-    variable edid_an, edid_al, edid_max_an, edid_max_al: nat32
 
     función vbe_pon(índice: nat32, dato: nat32)
         ensamblador
@@ -179,57 +176,6 @@ módulo Video
             si n >= 0x100000 y n <= 0x40000000 entonces devolver n fin
         fin
         devolver 0
-    fin
-
-    ; lo que dice la pantalla de sí misma (su EDID): la medida que prefiere y
-    ; la más grande que sabe mostrar. Solo en QEMU (lo deja en la tercera zona
-    ; PCI de su tarjeta); en VirtualBox y en los PC de verdad no se sabe desde
-    ; aquí (falso)
-    público función medida_monitor(ref pref_an: nat32, ref pref_al: nat32, ref max_an: nat32, ref max_al: nat32): bool
-        variable bus, d, id, física, v, i, a, h, c: nat32
-        variable e: puntero a byte
-        si no edid_mirado entonces
-            edid_mirado := cierto
-            id := tarjeta_bochs(bus, d)
-            si id = 0x11111234 entonces
-                física := pci_lee(bus, d, 0x18)
-                si física yb 1 = 0 y física yb 0xFFFFFFF0 <> 0 entonces
-                    v := mapear_aparato(física yb 0xFFFFFFF0, 256)
-                    si v <> 0 entonces
-                        e := puntero(v)
-                        si e[0] = 0 y e[1] = 0xFF y e[2] = 0xFF y e[7] = 0 entonces
-                            ; la primera medida detallada: la que prefiere
-                            edid_an := nat32(e[56]) ob ((nat32(e[58]) yb 0xF0) << 4)
-                            edid_al := nat32(e[59]) ob ((nat32(e[61]) yb 0xF0) << 4)
-                            edid_max_an := edid_an
-                            edid_max_al := edid_al
-                            ; y las de siempre (bytes 38 a 53): la más grande
-                            para i desde 0 hasta 7 hacer
-                                a := nat32(e[38 + i * 2])
-                                c := nat32(e[39 + i * 2])
-                                si a > 1 entonces
-                                    a := (a + 31) * 8
-                                    según c >> 6
-                                        caso 0: h := a * 10 div 16
-                                        caso 1: h := a * 3 div 4
-                                        caso 2: h := a * 4 div 5
-                                        si no: h := a * 9 div 16
-                                    fin
-                                    si a > edid_max_an entonces edid_max_an := a fin
-                                    si h > edid_max_al entonces edid_max_al := h fin
-                                fin
-                            fin
-                            edid_hay := edid_an >= 640 y edid_al >= 400
-                        fin
-                    fin
-                fin
-            fin
-        fin
-        pref_an := edid_an
-        pref_al := edid_al
-        max_an := edid_max_an
-        max_al := edid_max_al
-        devolver edid_hay
     fin
 
     ; pone en la VBE de Bochs ese modo (32 bits por punto si no se dice otra
