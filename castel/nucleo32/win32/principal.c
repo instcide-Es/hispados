@@ -6,6 +6,9 @@
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include "w32.h"
 #include "k32.h"
+#include "../escudo/gancho_win32.h"	/* (ESCUDO) */
+
+static char ruta_437[160];		/* (ESCUDO) la ruta tal cual llega (en la 437) */
 
 extern char linea_ordenes[400];
 void prepara_entorno(void);
@@ -153,6 +156,7 @@ int w32_principal(void)
 			r[k++] = *p++;
 		r[k] = 0;
 		a1252(ruta_exe, r, sizeof ruta_exe);
+		memcpy(ruta_437, r, k + 1);	/* (ESCUDO) */
 		if (*p == ' ')
 			p++;
 	}
@@ -172,6 +176,12 @@ int w32_principal(void)
 			traza_si = t[5] == '3' ? 3 : t[5] == '2' ? 2 : 1;
 	}
 	traza("WIN32: %s (Win32 en %s)", linea_ordenes, carpeta_w32);
+	/* (ESCUDO) antes de cargarlo, que lo mire Escudo (si está y con su opción
+	 * puesta): si encuentra algo y no se pide abrirlo igual, no se abre */
+	if (escudo_antes(ruta_437)) {
+		traza("WIN32: Escudo dice que %s no se abra", ruta_437);
+		sys_salir(255);
+	}
 	if (!cargar_exe(ruta_exe, &falta)) {
 		char t[200];
 		if (falta == 4)

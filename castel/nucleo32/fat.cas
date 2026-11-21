@@ -125,6 +125,7 @@ módulo Fat
         vol: nat32                              ; el volumen donde está
         perdido: bool                           ; su volumen se ha ido: todo da MAL hasta que se cierre
         iso: bool                               ; (CD) es de un volumen ISO 9660 (iso.cas): primero, su sector; índice, lo que mide la carpeta
+        contiguo, contiguo_serie: nat32         ; (ESCUDO) los primeros «contiguo» clusters van seguidos (primero, primero + 1...): ir atrás no recorre la FAT (vale si contiguo_serie es su serie)
     fin
 
     ; lo que se encuentra al recorrer una carpeta
@@ -473,14 +474,26 @@ módulo Fat
         fin
         oc := sectores_cluster * SECTOR
         quiero := a.posición div oc
+        ; (ESCUDO) lo que se sabe seguido desde el principio (de esta apertura)
+        si a.serie = 0 o a.contiguo_serie <> a.serie entonces
+            a.contiguo_serie := a.serie
+            a.contiguo := 1
+        fin
         si quiero < a.índice entonces
-            a.cluster := a.primero
-            a.índice := 0
+            si a.serie <> 0 y quiero < a.contiguo entonces
+                ; (ESCUDO) atrás, a un cluster que se sabe seguido: sin recorrer la FAT
+                a.cluster := a.primero + quiero
+                a.índice := quiero
+            sino
+                a.cluster := a.primero
+                a.índice := 0
+            fin
         fin
         si a.cluster < 2 o a.cluster >= clusters + 2 entonces devolver 0 fin
         mientras a.índice < quiero hacer
             s := siguiente(a.cluster)
             si s = 0 entonces devolver 0 fin
+            si a.índice + 1 = a.contiguo y s = a.cluster + 1 entonces a.contiguo := a.contiguo + 1 fin   ; (ESCUDO)
             a.cluster := s
             a.índice := a.índice + 1
         fin
@@ -492,6 +505,7 @@ módulo Fat
     función sector_para_escribir(ref a: Abierto): nat32
         variable oc, quiero, s: nat32
         si a.fija entonces devolver sector_de(a) fin
+        a.contiguo_serie := 0                   ; (ESCUDO) al escribir, la cadena puede cambiar: otra vez a contar
         oc := sectores_cluster * SECTOR
         quiero := a.posición div oc
         si a.primero < 2 entonces
@@ -603,6 +617,7 @@ módulo Fat
         a.posición := tope
         a.cluster := a.primero
         a.índice := 0
+        a.contiguo_serie := 0                   ; (ESCUDO)
         a.cambiado := cierto
         devolver no fallo
     fin

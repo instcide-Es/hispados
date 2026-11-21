@@ -52,7 +52,8 @@
 #               registros .PQI, el catálogo y CARPETAS.TXT para INSTALAR, de
 #               los archivos ya hechos que haya en esas carpetas: usb.sh)
 #    hpq.py opcionales SALIDA CARPETA...  (los que no van con el sistema:
-#               «navega», el Navegador; de lo que deja su hacer.sh)
+#               «navega», el Navegador, y «escudo», el antivirus; de lo que
+#               deja su hacer.sh)
 #    hpq.py linea PAQUETE.HPQ         (sus líneas para CATALOGO.TXT: la del
 #               paquete y la de su tipo)
 #    hpq.py tipos                     (PROGRAMAS: la tabla de los tipos)
@@ -115,7 +116,8 @@ TIPO_POR_NOMBRE = {
     'consola': 'herramientas',
     'ejemplos': 'desarrollo',
     'win32': 'windows',
-    'escudo': 'seguridad',
+    'escudo': 'seguridad', 'escbase': 'seguridad', 'escmes': 'seguridad', 'escdia': 'seguridad',
+    'sonido': 'multimedia',
     'clicgest': 'terceros',
 }
 
@@ -384,6 +386,12 @@ OPCIONALES = [
      + [('NAVEGA/RECURSOS/' + n, '\\HISPA\\NAVEGA\\RECURSOS\\' + n) for n in NAVEGA_RECURSOS]
      + [('NAVEGA/FUENTES/' + n, '\\HISPA\\NAVEGA\\FUENTES\\' + n) for n in NAVEGA_FUENTES]
      + [('NAVEGA.MNU', r'\HISPA\MENU\NAVEGA.MNU'), ('NAVEGA.ICP', r'\HISPA\MENU\NAVEGA.ICP')]),
+    # (ESCUDO) el antivirus (castel/nucleo32/escudo/paquete.sh). Sus firmas, aparte
+    # (los paquetes «escbase», «escmes» y «escdia», que hace tools/escudo_firmas.py)
+    ('escudo', '0.2', 'Escudo: el antivirus (con las firmas de ClamAV), para el equipo y para revisar memorias USB',
+     'base >= 0.8.3, red >= 0.8.1, tls >= 0.8.1', [
+        ('ESCUDO.BIN', r'\HISPA\ESCUDO.BIN'), ('ESCUDO/LEEME.TXT', r'\HISPA\ESCUDO\LEEME.TXT'),
+        ('MENU/ESCUDO.MNU', r'\HISPA\MENU\ESCUDO.MNU'), ('MENU/ESCUDO.ICP', r'\HISPA\MENU\ESCUDO.ICP')]),
 ]
 
 
@@ -393,6 +401,10 @@ def opcionales(salida, carpetas, nombres=None):
     n = 0
     for nombre, version, descripcion, necesita, archivos in OPCIONALES:
         if nombres and nombre not in nombres:
+            continue
+        # (ESCUDO) los que no tienen ninguno de sus archivos en esas carpetas, no
+        # se hacen (cada paquete.sh deja solo lo suyo); a medias, es un error
+        if not nombres and not any(os.path.isfile(os.path.join(c, o)) for o, _ in archivos for c in carpetas):
             continue
         lista = [(d, open(busca(o, carpetas), 'rb').read()) for o, d in archivos]
         haz_paquete(os.path.join(salida, nombre.upper() + '.HPQ'), nombre, version, descripcion, necesita, '', lista,

@@ -92,7 +92,13 @@ wg)
     "$(cat $D/hispa.key)" "$(cat $D/fuera.pub)" > $D/WG0.CNF
   mmd -i $DISCO ::WG 2> /dev/null
   mcopy -o -i $DISCO $D/WG0.CNF ::WG/WG0.CNF
-  ( sleep 45
+  # (ESCUDO) no a ciegas (45 s, que con la máquina cargada no llegan): hasta
+  # que el WireGuard de aquí tenga el apretón de manos de Hispa-Pentium
+  ( for _ in $(seq 120); do
+      [ "$(ip netns exec $ESP wg show wg0 latest-handshakes | awk '{print $2}')" -gt 0 ] 2> /dev/null && break
+      sleep 1
+    done
+    sleep 2
     echo "=== ping"; ip netns exec $ESP ping -c 3 -W 2 10.9.0.2
     echo "=== wg"; ip netns exec $ESP wg show wg0
     echo "=== ssh"

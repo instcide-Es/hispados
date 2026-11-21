@@ -13,7 +13,7 @@
 ; =============================================================================
 módulo Rpila
 
-    importar Rbase, Rtarjeta, Llamadas, Mem32, Textos32
+    importar Rbase, Rtarjeta, Llamadas, Mem32, Textos32, Rcorta, Formato
 
     público constante ENTRA_NADA = 0
     público constante ENTRA_TCP = 6             ; un segmento TCP para nosotros: ent_ip, ent_datos, ent_largo
@@ -26,6 +26,7 @@ módulo Rpila
     público variable ent_ip: nat32              ; de quien viene lo que ha entrado (TCP)
     público variable ent_datos: puntero a byte
     público variable ent_largo: nat32
+    público variable ent_túnel: bool            ; (CORTAFUEGOS) lo que ha entrado llegó por el túnel (y no por la tarjeta)
 
     variable trama: arreglo [1536] de byte      ; la que se está haciendo para enviar
 
@@ -428,9 +429,13 @@ módulo Rpila
             túnel_entrados := túnel_entrados + 1
         sino si a <> mi_ip y a <> DIFUSIÓN y a <> (mi_ip ob nob máscara) y no (mi_ip = 0 y proto = 17) entonces
             devolver ENTRA_NADA
+        sino si túnel_ip <> 0 y por_túnel(de) entonces
+            ; (CORTAFUEGOS) por la tarjeta, con origen de una red del túnel: falso, fuera
+            devolver ENTRA_NADA
         fin
+        ent_túnel := del_túnel                  ; (CORTAFUEGOS) de dónde viene: por la interfaz, no por la IP
         según nat16(proto)
-            caso 1: entra_icmp(de, h + hl, total - hl, h[8])
+            caso 1: entra_icmp(de, h + hl, total - hl, h[8], del_túnel)
             caso 17: entra_udp(de, h + hl, total - hl, a)
             caso 6:
                 si a <> mi_ip y a <> túnel_ip entonces devolver ENTRA_NADA fin
@@ -453,10 +458,12 @@ módulo Rpila
     variable pings: arreglo [MAX_PING] de Ping
     variable icmp: arreglo [1480] de byte
 
-    función entra_icmp(de: nat32, p: puntero a byte, n: nat32, ttl: nat32)
+    función entra_icmp(de: nat32, p: puntero a byte, n: nat32, ttl: nat32, del_túnel: bool)
         variable i, t: nat32
         si n < 8 o suma_ip(p, n) <> 0 entonces devolver fin
         si p[0] = 8 y n <= 1480 entonces
+            ; (CORTAFUEGOS) ¿se le contesta?
+            si no deja_ping(de, no del_túnel y (de yb máscara) = (mi_ip yb máscara), del_túnel) entonces devolver fin
             ; un ping para nosotros: la misma cosa, de vuelta
             copiar_memoria(dirección(icmp[0]), p, n)
             icmp[0] := 0
@@ -616,6 +623,21 @@ módulo Rpila
                 u.n := u.n + largo + 12
                 udp_entrega(u)
                 devolver
+            fin
+        fin
+    fin
+
+    ; (CORTAFUEGOS) los puertos UDP abiertos, para el informe: «escucha=udp PUERTO TAREA»
+    público función lista_udp(destino: puntero a byte, cabe: nat32)
+        variable i, n: nat32
+        variable d: arreglo [2] de nat32
+        para i desde 0 hasta MAX_UDP - 1 hacer
+            n := 0
+            mientras destino[n] <> 0 hacer n := n + 1 fin
+            si udps[i].usado y n + 40 < cabe entonces
+                d[0] := udps[i].puerto
+                d[1] := udps[i].dueño
+                formatear(destino + n, cabe - n, "escucha=udp %u %u\n", dirección(d[0]))
             fin
         fin
     fin

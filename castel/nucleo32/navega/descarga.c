@@ -152,6 +152,24 @@ static void d_error(struct gui_download_window *d, const char *m)
   frontal_aviso_estado(t);
   pent_serie("navega: descarga: error %s", m ? m : "");
 }
+/* (ESCUDO) lo descargado, al antivirus si está (ESCUDO.BIN /DESCARGA: solo
+ * dice algo si encuentra un virus; docs/PENTIUM.md, «Escudo») */
+static void a_escudo(const char *ruta)
+{
+  static const char *const sitios[] = { "\\HISPA\\ESCUDO.BIN", "\\ESCUDO.BIN" };
+  char p[40], a[320];
+  int k;
+  for (k = 0; k < 2; k++) {
+    snprintf(p, sizeof p, "%c:%s", ruta[0], sitios[k]);
+    if (GetFileAttributesA(p) != 0xFFFFFFFFu) {
+      snprintf(a, sizeof a, "/DESCARGA %s", ruta);
+      if (!ES_ERROR(sc(SC_LANZAR_SUELTO, (uint32_t)p, (uint32_t)a, 0)))
+        pent_serie("navega: descarga: a Escudo (%s)", p);
+      return;
+    }
+  }
+}
+
 static void d_hecha(struct gui_download_window *d)
 {
   char t[400], a[32];
@@ -161,6 +179,7 @@ static void d_hecha(struct gui_download_window *d)
     snprintf(t, sizeof t, "Descargado: %s (%s)", d->ruta, a);
     frontal_aviso_estado(t);
     pent_serie("navega: descarga: hecha %s, %u octetos", d->ruta, (unsigned)d->hecho);
+    a_escudo(d->ruta);                                  /* (ESCUDO) */
   }
   free(d);
 }
