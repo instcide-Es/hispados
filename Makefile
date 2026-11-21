@@ -677,21 +677,23 @@ $(B)/CPUTEST.NES: tests/hispanes/cputest.s tools/asm6502.py | $(B)
 $(B)/NESJOY.COM: tests/progs/nesjoy.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 nesprogs: $(B)/nesnativo $(B)/nesnativo_t $(B)/CPUTEST.NES $(B)/NESJOY.COM
+# el Z80 y el SN76489 (programas/comun/): los usan Hispa-System e Hispa-Drive
+EMUCOMUN = programas/comun/z80.inc programas/comun/psg.inc
 # Hispa-System (docs/HISPASYS.md): el emulador, con sus piezas en
 # programas/hispasms/, y sus juegos propios, hechos para la consola y
 # ensamblados aquí con tools/asmz80.py (SMSROMS: van a \HISPADOS\JUEGOS\SMS)
-$(B)/HISPASMS.HVP: programas/hispasms.asm $(wildcard programas/hispasms/*.inc) lib/emufull.inc $(HVPDEP) | $(B)
+$(B)/HISPASMS.HVP: programas/hispasms.asm $(wildcard programas/hispasms/*.inc) $(EMUCOMUN) lib/emufull.inc $(HVPDEP) | $(B)
 	NASM=$(NASM) python3 tools/mkhvp.py $< $@
 SMSROMS = $(B)/BUZO.SMS
 $(B)/BUZO.SMS: sms/buzo/buzo.s $(wildcard sms/buzo/*.s sms/comun/*.s) tools/asmz80.py | $(B)
 	python3 tools/asmz80.py $< $@
 # el núcleo de Hispa-System como programa de Linux y sus ROM de prueba
 # (tests/run_hispasms_tests.sh)
-SMSNAT = tests/hispasms/smsnativo.asm $(wildcard programas/hispasms/*.inc)
+SMSNAT = tests/hispasms/smsnativo.asm $(wildcard programas/hispasms/*.inc) $(EMUCOMUN)
 $(B)/smsnativo: $(SMSNAT) | $(B)
-	$(NASM) -f bin -i programas/hispasms/ -o $@ $< && chmod +x $@
+	$(NASM) -f bin -i programas/hispasms/ -i programas/comun/ -o $@ $< && chmod +x $@
 $(B)/smsnativo_t: $(SMSNAT) | $(B)
-	$(NASM) -f bin -DTRAZA -i programas/hispasms/ -o $@ $< && chmod +x $@
+	$(NASM) -f bin -DTRAZA -i programas/hispasms/ -i programas/comun/ -o $@ $< && chmod +x $@
 $(B)/VDPTEST.SMS: tests/hispasms/vdptest.s sms/comun/letras.s tools/asmz80.py | $(B)
 	python3 tools/asmz80.py $< $@
 $(B)/TMSTEST.SMS: tests/hispasms/tmstest.s sms/comun/letras.s tools/asmz80.py | $(B)
@@ -728,6 +730,59 @@ SNESNAT = tests/hispasnes/snesnativo.asm $(wildcard programas/hispasnes/*.inc)
 $(B)/snesnativo: $(SNESNAT) | $(B)
 	$(NASM) -f bin -i programas/hispasnes/ -o $@ $< && chmod +x $@
 snesprogs: $(B)/snesnativo $(B)/PPU1.SFC $(B)/PPU2.SFC $(B)/PPU3.SFC $(B)/PPU4.SFC $(B)/BUSTEST.SFC $(B)/SPCTEST.SFC $(SNESROMS)
+# Hispa-Drive (docs/HISPADRIVE.md): el emulador de la consola de 16 bits, con
+# sus piezas en programas/hispadrv/ y lo que se genera: las instrucciones del
+# 68000 (tools/gen68k.py) y las tablas del YM2612 (tools/genym.py), en
+# build/gen/hispadrv/. Su ROM de prueba (MDROMS: va a \HISPADOS\JUEGOS\MD)
+# se ensambla con GNU as para el 68000 si está (binutils-m68k-linux-gnu); si
+# no, se usa la ya hecha (tests/hispadrv/PRUEBA.MD)
+MDGEN = $(B)/gen/hispadrv/m68k_gen.inc $(B)/gen/hispadrv/ym_tablas.inc
+$(B)/gen/hispadrv/m68k_gen.inc: tools/gen68k.py | $(B)
+	@mkdir -p $(B)/gen/hispadrv
+	python3 tools/gen68k.py $@
+$(B)/gen/hispadrv/ym_tablas.inc: tools/genym.py | $(B)
+	@mkdir -p $(B)/gen/hispadrv
+	python3 tools/genym.py $@
+$(B)/HISPADRV.HVP: programas/hispadrv.asm $(wildcard programas/hispadrv/*.inc) $(EMUCOMUN) $(MDGEN) lib/emufull.inc $(HVPDEP) | $(B)
+	NASM=$(NASM) python3 tools/mkhvp.py $< $@
+MDROMS = $(B)/PRUEBA.MD
+HVPJ += $(B)/HISPADRV.HVP
+M68KAS := $(shell command -v m68k-linux-gnu-as 2> /dev/null)
+$(B)/PRUEBA.MD: tests/hispadrv/mdtest.s tests/hispadrv/z80prueba.s sms/comun/letras.s tools/md_letras.py tools/asmz80.py tests/hispadrv/PRUEBA.MD | $(B)
+ifneq ($(M68KAS),)
+	@mkdir -p $(B)/gen/hispadrv
+	python3 tools/md_letras.py sms/comun/letras.s $(B)/gen/hispadrv/letras.bin
+	python3 tools/asmz80.py tests/hispadrv/z80prueba.s $(B)/gen/hispadrv/z80prueba.bin > /dev/null
+	cd $(B)/gen/hispadrv && m68k-linux-gnu-as --register-prefix-optional -o mdtest.o $(CURDIR)/tests/hispadrv/mdtest.s
+	m68k-linux-gnu-ld -e 0 -Ttext=0 --oformat binary -o $@ $(B)/gen/hispadrv/mdtest.o
+	@cmp -s $@ tests/hispadrv/PRUEBA.MD || echo "AVISO: PRUEBA.MD ha cambiado: cópiela a tests/hispadrv/ (cp $@ tests/hispadrv/)"
+else
+	cp tests/hispadrv/PRUEBA.MD $@
+endif
+# y la de carga (solo para medir la velocidad: tests/run_hispadrv_tests.sh)
+$(B)/CARGA.MD: tests/hispadrv/carga.s tests/hispadrv/z80carga.s tools/asmz80.py tests/hispadrv/CARGA.MD | $(B)
+ifneq ($(M68KAS),)
+	@mkdir -p $(B)/gen/hispadrv
+	python3 tools/asmz80.py tests/hispadrv/z80carga.s $(B)/gen/hispadrv/z80carga.bin > /dev/null
+	cd $(B)/gen/hispadrv && m68k-linux-gnu-as --register-prefix-optional -o carga.o $(CURDIR)/tests/hispadrv/carga.s
+	m68k-linux-gnu-ld -e 0 -Ttext=0 --oformat binary -o $@ $(B)/gen/hispadrv/carga.o
+else
+	cp tests/hispadrv/CARGA.MD $@
+endif
+# y la de las sombras y los brillos (tests/run_hispadrv_tests.sh)
+$(B)/SOMBRAS.MD: tests/hispadrv/sombras.s tests/hispadrv/SOMBRAS.MD | $(B)
+ifneq ($(M68KAS),)
+	@mkdir -p $(B)/gen/hispadrv
+	cd $(B)/gen/hispadrv && m68k-linux-gnu-as --register-prefix-optional -o sombras.o $(CURDIR)/tests/hispadrv/sombras.s
+	m68k-linux-gnu-ld -e 0 -Ttext=0 --oformat binary -o $@ $(B)/gen/hispadrv/sombras.o
+else
+	cp tests/hispadrv/SOMBRAS.MD $@
+endif
+# el núcleo de Hispa-Drive como programa de Linux (tests/run_hispadrv_tests.sh)
+MDNAT = tests/hispadrv/mdnativo.asm $(wildcard programas/hispadrv/*.inc) $(EMUCOMUN) $(MDGEN)
+$(B)/mdnativo: $(MDNAT) | $(B)
+	$(NASM) -f bin -i programas/hispadrv/ -i programas/comun/ -i $(B)/gen/hispadrv/ -o $@ $< && chmod +x $@
+mdprogs: $(B)/mdnativo $(B)/PRUEBA.MD $(B)/CARGA.MD $(B)/SOMBRAS.MD $(B)/HISPADRV.HVP
 # [Configuración] los programas de Hispa Ventanas que no son juegos van en
 # \HISPADOS, al lado de VENTANAS.COM (HVPSIS): Configuración (CONFIG.HVP)
 HVPSIS = $(B)/CONFIG.HVP
@@ -958,7 +1013,7 @@ $(B)/BOOTIA32.EFI: $(HBEFI32) hispabios/pe.inc $(HBBIOS32) $(B)/FUENTE16.BIN
 	$(NASM) -f bin -I hispabios/ -I $(B)/ -o $@ hispabios/efi32.asm
 hispabios: $(HBEFI)
 
-usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(wildcard usb/* floppy/*)
+usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(MDROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(wildcard usb/* floppy/*)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py
 
 # [HISPA-486] la imagen USB de Hispa-486 (build/hispa486-usb.img) y su disquete
@@ -970,7 +1025,7 @@ usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) 
 # «Internet») y la red puesta sola al arrancar (HSPRED y HSPWIFI /AUTO). Todo por tools/mkusb.py (docs/486/HISPA-486.md, «La
 # imagen»). Hacen falta gcc -m32 (los programas en C) y mtools.
 H32EXE = $(B)/WINCALC.EXE $(B)/WINHOLA.EXE $(B)/WINCTL.EXE $(B)/WINMENU.EXE $(B)/WINGUI.EXE $(B)/NAVES.EXE
-usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(DXDLL) $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
+usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(MDROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(DXDLL) $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py 486
 
 # [CD] las imágenes de CD (docs/CD.md): lo mismo que la imagen USB de cada
@@ -1067,7 +1122,7 @@ $(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
 # Lo que necesitan las pruebas (también lo usa tools/pruebas_pc.sh).
-TEST_DEPS = $(IMG) usb usb486 cd cd486 nucprogs emmprogs joyprogs nesprogs smsprogs snesprogs $(HVPJ) $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM $(B)/VTDON.COM $(B)/PITIDO.COM $(B)/HDAVIVO.COM
+TEST_DEPS = $(IMG) usb usb486 cd cd486 nucprogs emmprogs joyprogs nesprogs smsprogs snesprogs mdprogs $(HVPJ) $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM $(B)/VTDON.COM $(B)/PITIDO.COM $(B)/HDAVIVO.COM
 
 para-pruebas: $(TEST_DEPS)
 
@@ -1221,6 +1276,7 @@ test: $(TEST_DEPS)
 	tests/run_hispanes_tests.sh $(IMG)
 	tests/run_hispasms_tests.sh $(IMG)
 	tests/run_hispasnes_tests.sh $(IMG)
+	tests/run_hispadrv_tests.sh $(IMG)
 	tests/run_red_tests.sh $(IMG)
 	tests/run_yukon_tests.sh
 	tests/run_red32_tests.sh $(IMG)
@@ -1245,4 +1301,4 @@ clean:
 	rm -rf $(B)
 
 PHONY_CD = cd cd486
-.PHONY: all usb usb486 $(PHONY_CD) fondo486 paq paq486 run run-hdd test para-pruebas clean nucprogs emmprogs joyprogs nesprogs smsprogs
+.PHONY: all usb usb486 $(PHONY_CD) fondo486 paq paq486 run run-hdd test para-pruebas clean nucprogs emmprogs joyprogs nesprogs smsprogs mdprogs
