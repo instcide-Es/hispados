@@ -42,7 +42,7 @@ módulo Instala
 
     constante MAX_DISCOS = 8
     constante MAX_PARTES = 16
-    constante MAX_ARCHIVOS = 80                 ; (SSH, TAILSCALE: eran 48; con SSH, SSHD, WG, TAILSCAL y sus paquetes no cabían)
+    constante MAX_ARCHIVOS = 96                 ; (eran 48; 80 con SSH, SSHD, WG, TAILSCAL y sus paquetes; [WIN32] 96, con las DLL y los ejemplos de Windows)
     constante MIN_MB = 64                       ; lo menos que mide la partición
     constante MAX_SECTORES = 67108864           ; lo más: 32 GB (una FAT32 mayor tarda mucho en repasarse)
     constante ALINEA = 2048                     ; las particiones, a 1 MB
@@ -90,7 +90,7 @@ módulo Instala
     constante A_HISPA = 0
     constante A_RAÍZ = 1
     constante A_OTRA = 2
-    constante MAX_OTRAS = 4
+    constante MAX_OTRAS = 8                     ; [WIN32] (eran 4: \WIN32, \HISPA32 y \HISPA\MENU, además)
     variable destinos: arreglo [MAX_ARCHIVOS] de byte
     variable otras: arreglo [MAX_OTRAS] de arreglo [16] de byte   ; sus nombres («OFICINA», o «HISPA\PAQUETES»)
     variable otras_en_hispa: arreglo [MAX_OTRAS] de bool         ; va dentro de \HISPA (no en la raíz)

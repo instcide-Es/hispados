@@ -697,6 +697,9 @@ módulo UOrdenes
         concatenar(ruta, ".BIN")
         si es_archivo(ruta) entonces devolver 1 fin
         ruta[n] := 0
+        concatenar(ruta, ".EXE")                ; [WIN32] un programa de Windows (lo corre WIN32.BIN)
+        si es_archivo(ruta) entonces devolver 1 fin
+        ruta[n] := 0
         concatenar(ruta, ".BAT")
         si es_archivo(ruta) entonces devolver 2 fin
         devolver 0

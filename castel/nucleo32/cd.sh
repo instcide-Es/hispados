@@ -43,6 +43,8 @@ cp -r $W/i/* $W/m/INSTALA/
 cp $W/of/HVPRUN.BIN $W/m/
 mkdir -p $W/m/OFICINA
 cp $W/of/*.HVP $W/of/*.DAT $W/m/OFICINA/
+# [WIN32] las DLL de los programas de Windows y sus ejemplos
+cp -r $W/w32/WIN32 $W/w32/HISPA32 $W/m/
 mkdir $W/m/PAQUETES
 cp $W/paq/*.HPQ $W/paq/CATALOGO.TXT $W/m/PAQUETES/
 [ -n "${GUARDA_PAQ:-}" ] && { mkdir -p "$GUARDA_PAQ"; cp $W/paq/*.HPQ $W/paq/CATALOGO.TXT "$GUARDA_PAQ"/; }

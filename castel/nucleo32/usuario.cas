@@ -113,7 +113,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -803,6 +803,8 @@ módulo Usuario
             caso 155, 156:
                 ; (dispositivos) la lista de los dispositivos, y lo que apuntan los servicios
                 devolver atender_dispositivos(n, a, b, c)
+            caso 180..189:
+                devolver atender_win32(n, a, b, c)     ; [WIN32] los programas de Windows (win32.cas)
         fin
         devolver NO_VALE
     fin
@@ -1348,6 +1350,13 @@ módulo Usuario
             mov {c}, eax
             sti
         fin
+        ; [WIN32] un programa de Windows lleva la pila con base 0x40000000
+        ; (su SS): por dónde va, de verdad
+        ensamblador
+            mov eax, [ebp+40]
+            mov {r}, eax
+        fin
+        si r yb 0xFFFF = CÓDIGO_WIN32 entonces esp_u := esp_u + BASE_WIN32 fin
         actual.esp_usuario := esp_u
         ; si a la tarea la han cortado con Ctrl+C, se acaba aquí (antes de
         ; hacer nada, o al volver: no está a medias de nada del núcleo)
@@ -1547,6 +1556,15 @@ módulo Usuario
             error := m
             devolver nulo
         fin
+        ; [WIN32] un programa de Windows (empieza por «MZ»): lo corre
+        ; WIN32.BIN, con su ruta entera delante de sus argumentos
+        si no es_carpeta(m) y tamaño_archivo(m) > 64 entonces
+            si leer_archivo(m, dirección(en_hispa[0]), 2) = 2 y en_hispa[0] = 'M' y en_hispa[1] = 'Z' entonces
+                cerrar_archivo(m)
+                devolver carga_win32(u, ruta, args, error)
+            fin
+            mover_archivo(m, 0, 0)
+        fin
         largo := tamaño_archivo(m)
         si es_carpeta(m) o largo < tamaño(Cabecera) o largo > MAX_PROGRAMA entonces
             cerrar_archivo(m)
@@ -1575,6 +1593,47 @@ módulo Usuario
         fin
         t := cargar_imagen(nombre, nat32(imagen), largo, args, error)
         liberar(imagen)
+        devolver t
+    fin
+
+    ; [WIN32] carga WIN32.BIN (de la unidad del sistema, o de su \HISPA) para
+    ; que corra el programa de Windows «ruta» de la unidad u: sus argumentos,
+    ; «U:\RUTA\PROG.EXE» y los que traía. La tarea lleva el nombre del .EXE.
+    función carga_win32(u: nat32, ruta: puntero a byte, args: puntero a byte, ref error: nat32): puntero a Tarea
+        variable todo: puntero a byte
+        variable n, k: nat32
+        variable t: puntero a Tarea
+        variable nombre, p: puntero a byte
+        n := 0
+        mientras ruta[n] <> 0 hacer n := n + 1 fin
+        k := 0
+        si args <> nulo entonces
+            mientras args[k] <> 0 hacer k := k + 1 fin
+        fin
+        todo := reservar(n + k + 8)
+        si todo = nulo entonces
+            error := SIN_MEMORIA
+            devolver nulo
+        fin
+        todo[0] := unidades[u].letra
+        todo[1] := ':'
+        copiar_memoria(todo + 2, ruta, n)
+        todo[n + 2] := ' '
+        si k > 0 entonces copiar_memoria(todo + n + 3, args, k) fin
+        todo[n + 3 + k] := 0
+        t := carga_de(del_sistema, "\\WIN32.BIN", todo, error)
+        liberar(todo)
+        si t <> nulo entonces
+            ; su nombre: el del .EXE
+            nombre := ruta
+            p := ruta
+            mientras valor(p) <> 0 hacer
+                si valor(p) = '\\' o valor(p) = '/' o valor(p) = ':' entonces nombre := p + 1 fin
+                p := p + 1
+            fin
+            copiar_hasta(dirección(t.nombre_propio[0]), nombre, 16)
+            t.nombre := dirección(t.nombre_propio[0])
+        fin
         devolver t
     fin
 

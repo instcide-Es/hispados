@@ -1,0 +1,188 @@
+; =============================================================================
+;  win32.cas - lo que pone el núcleo de Hispa-Pentium para los programas de
+;  Windows de 32 bits (docs/pentium/WIN32.md). Los corre WIN32.BIN
+;  (nucleo32/win32/), un programa del anillo 3 que carga el .EXE en su propio
+;  espacio de direcciones y le da KERNEL32, USER32, GDI32 y lo demás; aquí
+;  solo está lo que un programa normal no puede hacer:
+;
+;   - Los segmentos (cpu.cas): un programa de Windows espera su imagen en
+;     0x400000, que en Hispa-Pentium es memoria del núcleo. WIN32.BIN corre
+;     con CS = 0x33 y DS = ES = SS = 0x3B, de base 0x40000000: la dirección
+;     0x400000 del programa es la 0x40400000 de verdad. FS = 0x43 es su TEB
+;     (en 0xBFBF0000). Las interrupciones ponen los planos al entrar y los del
+;     programa al volver (ccastel.py, «atiende»).
+;   - 180  la memoria: poner (ECX = 0) o quitar (1) páginas en cualquier sitio
+;          de la zona del programa: EBX la dirección (de verdad), ECX los
+;          octetos. Para VirtualAlloc y para poner la imagen donde la quiere
+;          el programa. -> 0, o un error
+;   - 181  las teclas: 64 octetos a EBX: las pulsadas ahora (un bit por código
+;          del teclado; desde el 128, las de 0xE0) y, detrás, las que se han
+;          pulsado desde la última vez -> 1 si la ventana activa es del
+;          programa (si no, ceros)
+;   - 182  las ventanas: EBX lo que se pide, ECX la ventana, EDX los datos
+;          (Pide_ventana): 0 hacer una con banderas (sin marco, encima,
+;          oculta, fija, pantalla completa); 1 colocarla (lo de dentro, en la
+;          pantalla); 2 enseñarla (EDX = 1) o esconderla (0); 3 traerla
+;          delante; 4 dónde está (seis números a EDX); 5 minimizar,
+;          maximizar o restaurar (EDX: PIDE_...); 6 el ratón (x, y y los
+;          botones, en la pantalla, a EDX); 7 de quién es la ventana activa
+;          (1 si es suya).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Win32
+
+    importar Cpu, Tareas, Paginas, Marcos, Consola, Ventanas, Raton, Mem32
+
+    constante NO_VALE = 0xFFFFFFF9              ; (los de usuario.cas)
+    constante SIN_MEMORIA = 0xFFFFFFFA
+
+    tipo Pide_ventana = estructura
+        nombre: puntero a byte
+        x, ye, ancho, alto: ent32
+        marcas: nat32
+    fin
+
+    variable sitio: nat32                       ; para que las ventanas nuevas no salgan una encima de otra
+
+    ; pone (o quita) las páginas de [a, a + n) en el espacio del programa
+    función w_memoria(a: nat32, n: nat32, quitar: bool): nat32
+        variable v, f, m: nat32
+        si n = 0 o a yb (PÁGINA - 1) <> 0 entonces devolver NO_VALE fin
+        n := (n + PÁGINA - 1) yb 0xFFFFF000
+        ; en la zona del programa, por encima de lo suyo y por debajo de su pila
+        si a < redondea_w(actual.quiebre, PÁGINA) o a + n < a o a + n > PILA_INICIO entonces devolver NO_VALE fin
+        v := a
+        mientras v < a + n hacer
+            si quitar entonces
+                si banderas_de(actual.cr3, v) yb AJENO = 0 entonces
+                    f := desmapear(actual.cr3, v)
+                    si f <> 0 entonces soltar_marco(f) fin
+                fin
+            sino si banderas_de(actual.cr3, v) = 0 entonces
+                m := reservar_marco()
+                si m = 0 o no mapear(actual.cr3, v, m, ESCRIBIR ob USUARIO) entonces
+                    si m <> 0 entonces soltar_marco(m) fin
+                    devolver SIN_MEMORIA
+                fin
+            fin
+            v := v + PÁGINA
+        fin
+        devolver 0
+    fin
+
+    función redondea_w(x: nat32, a: nat32): nat32
+        devolver (x + a - 1) yb nob (a - 1)
+    fin
+
+    ; las teclas pulsadas, a d (32 octetos)
+    función w_teclas(d: nat32): nat32
+        variable p: puntero a nat32
+        variable i, b: nat32
+        variable suya: bool
+        si no usuario_puede(actual.cr3, d, 64, cierto) entonces devolver NO_VALE fin
+        p := puntero(d)
+        suya := dueño_de_activa() = actual.id
+        b := sin_interrupciones()
+        para i desde 0 hasta 7 hacer
+            si suya entonces
+                p[i] := pulsadas[i]
+                p[8 + i] := pulsadas_antes[i]
+            sino
+                p[i] := 0
+                p[8 + i] := 0
+            fin
+            pulsadas_antes[i] := pulsadas[i]
+        fin
+        reponer(b)
+        si suya entonces devolver 1 fin
+        devolver 0
+    fin
+
+    ; copia un texto del programa (acabado en 0) a «destino»
+    función texto_suyo(dir: nat32, destino: puntero a byte, cabe: nat32): bool
+        variable i: nat32
+        variable p: puntero a byte
+        p := puntero(dir)
+        i := 0
+        mientras i < cabe hacer
+            si (i = 0 o (dir + i) yb (PÁGINA - 1) = 0) y no usuario_puede(actual.cr3, dir + i, 1, falso) entonces devolver falso fin
+            destino[i] := p[i]
+            si p[i] = 0 entonces devolver cierto fin
+            i := i + 1
+        fin
+        destino[cabe - 1] := 0
+        devolver cierto
+    fin
+
+    función w_ventana(op: nat32, id: nat32, c: nat32): nat32
+        variable pv: puntero a Pide_ventana
+        variable nombre: arreglo [MAX_TÍTULO] de byte
+        variable d: puntero a ent32
+        variable r, m: nat32
+        variable x, yy: ent32
+        según op
+            caso 0:
+                si no usuario_puede(actual.cr3, c, tamaño(Pide_ventana), falso) entonces devolver NO_VALE fin
+                pv := puntero(c)
+                si no texto_suyo(nat32(pv.nombre), nombre, MAX_TÍTULO) entonces devolver NO_VALE fin
+                si pv.ancho < 1 o pv.alto < 1 o pv.ancho > 4096 o pv.alto > 4096 entonces devolver NO_VALE fin
+                m := pv.marcas yb (SIN_MARCO ob ENCIMA ob OCULTA ob FIJA ob COMPLETA)
+                x := pv.x
+                yy := pv.ye
+                si x < -4096 o x > 4096 o yy < -4096 o yy > 4096 entonces
+                    sitio := (sitio + 1) mod 6
+                    x := 70 + ent32(sitio) * 28
+                    yy := 40 + ent32(sitio) * 26
+                fin
+                r := crear_ventana(nombre, x, yy, pv.ancho, pv.alto, m, actual.id)
+                si r = 0 entonces devolver SIN_MEMORIA fin
+                devolver r
+            caso 1:
+                si no usuario_puede(actual.cr3, c, tamaño(Pide_ventana), falso) entonces devolver NO_VALE fin
+                pv := puntero(c)
+                si pv.x < -4096 o pv.x > 4096 o pv.ye < -4096 o pv.ye > 4096 entonces devolver NO_VALE fin
+                si colocar_dentro(id, actual.id, pv.x, pv.ye, pv.ancho, pv.alto) entonces devolver 0 fin
+                devolver NO_VALE
+            caso 2:
+                si no es_de(id, actual.id) entonces devolver NO_VALE fin
+                mostrar(id, c = 1)
+                devolver 0
+            caso 3:
+                traer_ventana(id, actual.id)
+                devolver 0
+            caso 4:
+                si no usuario_puede(actual.cr3, c, 24, cierto) entonces devolver NO_VALE fin
+                d := puntero(c)
+                si dónde_está(id, actual.id, d) entonces devolver 0 fin
+                devolver NO_VALE
+            caso 5:
+                si no es_de(id, actual.id) entonces devolver NO_VALE fin
+                orden_ventana(id, c)
+                devolver 0
+            caso 6:
+                si no usuario_puede(actual.cr3, c, 12, cierto) entonces devolver NO_VALE fin
+                d := puntero(c)
+                r := sin_interrupciones()
+                d[0] := ratón_x
+                d[1] := ratón_y
+                reponer(r)
+                d[2] := ent32(botones_vistos())
+                devolver 0
+            caso 7:
+                si dueño_de_activa() = actual.id entonces devolver 1 fin
+                devolver 0
+        fin
+        devolver NO_VALE
+    fin
+
+    ; la llamada al sistema (180 a 189), desde usuario.cas
+    público función atender_win32(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        según n
+            caso 180: devolver w_memoria(a, b, c = 1)
+            caso 181: devolver w_teclas(a)
+            caso 182: devolver w_ventana(a, b, c)
+        fin
+        devolver NO_VALE
+    fin
+
+fin Win32.
