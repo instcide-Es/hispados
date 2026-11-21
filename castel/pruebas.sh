@@ -798,8 +798,11 @@ paso() {       # número del paso, el compilador (un .EXE) y cómo se llama en e
   mcopy -i $T/d.img $T/ens/nasm/ensambla.bin ::ENSAMBLA.COM
   for f in $AQUI/compilador/*.cas; do mcopy -i $T/d.img $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
   for f in $AQUI/biblioteca/*.cas; do mcopy -i $T/d.img $f ::BIB/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
-  rm -f $T/b.img; mformat -C -f 1440 -i $T/b.img ::
-  arranca_ab "$3 CASTEL.CAS -o B:C$1.ASM -I BIB > B:P$1.SAL" || ko "el paso $1 del arranque (compilar) no ha llegado al final"
+  # [CASTEL64] B: de 2,88 MB, y se compila desde él: ahí deja CASTEL su archivo
+  # temporal (con la parte de atrás de 64 bits, los fuentes del compilador y el
+  # temporal ya no caben juntos en A:)
+  rm -f $T/b.img; mformat -C -f 2880 -i $T/b.img ::
+  arranca_ab "B:"$'\r\n'"A:\\$3 A:\\CASTEL.CAS -o B:C$1.ASM -I A:\\BIB > B:P$1.SAL"$'\r\n'"A:" || ko "el paso $1 del arranque (compilar) no ha llegado al final"
   arranca_ab "ENSAMBLA B:C$1.ASM B:C$1.EXE > B:E$1.SAL" || ko "el paso $1 del arranque (ensamblar) no ha llegado al final"
   mcopy -n -i $T/b.img "::C$1.*" '::*.SAL' $A/arr/ > /dev/null 2>&1
 }
