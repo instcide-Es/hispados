@@ -42,6 +42,8 @@ módulo Ventanas
     público constante MAXIMIZADA = 16
     público constante FIJA = 32                 ; no se maximiza (un cuadro de diálogo)
     público constante REDONDA = 64              ; sin marco, pero con las esquinas de arriba redondas y sombra (un menú)
+    público constante TRASLÚCIDA = 128          ; (dock) sus puntos con algo en el octeto de arriba (TRANSPARENTE) no se ven ni se pulsan
+    público constante TRANSPARENTE = 0xFF000000 ; (dock) el punto que no se ve, en una TRASLÚCIDA
 
     ; ---- las medidas del marco ----
     público constante BORDE = 4
@@ -143,6 +145,7 @@ módulo Ventanas
     público variable ventana_inicio: nat32      ; la que recibe la tecla del logo
     público variable ventana_fondo: nat32       ; la que recibe lo que cae en el tapiz y el botón secundario en los títulos
     público variable alto_barra: ent32          ; lo que ocupa abajo la barra de tareas (no lo tapa una maximizada)
+    público variable alto_dock: ent32           ; (dock) y lo que ocupa el dock encima de ella (tampoco lo tapa)
     público variable composiciones: nat32       ; las veces que se ha recompuesto un trozo
 
     variable trasero: Lienzo                    ; el doble búfer
@@ -305,7 +308,21 @@ módulo Ventanas
             fin
             y1 := j
         fin
-        si y2 > y1 entonces copiar_lienzo(trasero, x1, y1, v.todo, x1 - v.px, y1 - v.py, x2 - x1, y2 - y1) fin
+        si y2 <= y1 entonces devolver fin
+        si v.banderas yb TRASLÚCIDA <> 0 entonces
+            ; (dock) punto a punto: lo transparente deja ver lo de debajo
+            mientras y1 < y2 hacer
+                f := x1
+                mientras f < x2 hacer
+                    s := ent32(v.todo.puntos[(y1 - v.py) * ent32(v.todo.salto) + f - v.px])
+                    si nat32(s) yb TRANSPARENTE = 0 entonces trasero.puntos[y1 * ent32(trasero.salto) + f] := nat32(s) fin
+                    f := f + 1
+                fin
+                y1 := y1 + 1
+            fin
+            devolver
+        fin
+        copiar_lienzo(trasero, x1, y1, v.todo, x1 - v.px, y1 - v.py, x2 - x1, y2 - y1)
     fin
 
     función pinta_flecha()
@@ -632,7 +649,7 @@ módulo Ventanas
             ventanas[i].gancho := ventanas[i].ancho
             ventanas[i].galto := ventanas[i].alto
             ventanas[i].banderas := ventanas[i].banderas ob MAXIMIZADA
-            si no cambia_tamaño(i, 0, 0, pantalla.ancho, pantalla.alto - alto_barra) entonces
+            si no cambia_tamaño(i, 0, 0, pantalla.ancho, pantalla.alto - alto_barra - alto_dock) entonces
                 ventanas[i].banderas := ventanas[i].banderas yb nob MAXIMIZADA
             fin
         sino
@@ -1142,6 +1159,38 @@ módulo Ventanas
         devolver l
     fin
 
+    ; (dock) ¿es transparente ese punto de la pantalla en la ventana i?
+    función transparente_en(i: ent32, x: ent32, yy: ent32): bool
+        si ventanas[i].banderas yb TRASLÚCIDA = 0 entonces devolver falso fin
+        devolver ventanas[i].todo.puntos[(yy - ventanas[i].py) * ent32(ventanas[i].todo.salto) + x - ventanas[i].px] yb TRANSPARENTE <> 0
+    fin
+
+    ; (explorador) la ventana que se ve en ese punto de la pantalla (su
+    ; número), o 0 si es el tapiz
+    público función ventana_en_punto(x: ent32, yy: ent32): nat32
+        variable l: nat32
+        variable i: ent32
+        tomar(cerrojo)
+        i := ventana_o_borde(x, yy, l)
+        soltar(cerrojo)
+        si i < 0 entonces devolver 0 fin
+        si l <> 0 o ventanas[i].banderas yb OCULTA <> 0 entonces devolver 0 fin
+        devolver ventanas[i].id
+    fin
+
+    ; (dock) el dock ha cambiado lo que ocupa: las maximizadas, a la medida nueva
+    público función reajusta_maximizadas()
+        variable i: ent32
+        tomar(cerrojo)
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].banderas yb (SIN_MARCO ob MAXIMIZADA) = MAXIMIZADA entonces
+                cambia_tamaño(i, 0, 0, pantalla.ancho, pantalla.alto - alto_barra - alto_dock)
+            fin
+        fin
+        cambios := cambios + 1
+        soltar(cerrojo)
+    fin
+
     ; la ventana de más adelante que está en ese punto, o que se agarra desde
     ; él por su borde («lados»: por cuáles; 0 si no es para cambiar el tamaño)
     función ventana_o_borde(x: ent32, yy: ent32, ref lados: nat32): ent32
@@ -1151,7 +1200,7 @@ módulo Ventanas
         mientras k >= 0 hacer
             i := orden[k]
             si se_ve(ventanas[i]) entonces
-                si x >= ventanas[i].px y yy >= ventanas[i].py y x < ventanas[i].px + ventanas[i].ancho y yy < ventanas[i].py + ventanas[i].alto entonces
+                si x >= ventanas[i].px y yy >= ventanas[i].py y x < ventanas[i].px + ventanas[i].ancho y yy < ventanas[i].py + ventanas[i].alto y no transparente_en(i, x, yy) entonces
                     si elástica(ventanas[i]) entonces lados := lados_en(ventanas[i], x, yy) fin
                     devolver i
                 fin
@@ -1477,7 +1526,7 @@ módulo Ventanas
         para i desde 0 hasta MAX_VENTANAS - 1 hacer
             si ventanas[i].usada y ventanas[i].banderas yb SIN_MARCO = 0 entonces
                 si ventanas[i].banderas yb MAXIMIZADA <> 0 entonces
-                    si no cambia_tamaño(i, 0, 0, an, al - alto_barra) entonces
+                    si no cambia_tamaño(i, 0, 0, an, al - alto_barra - alto_dock) entonces
                         ; (sin memoria para la medida nueva: deja de estar maximizada)
                         ventanas[i].banderas := ventanas[i].banderas yb nob MAXIMIZADA
                     fin

@@ -849,4 +849,41 @@ módulo Llamadas
         devolver llamada(131, 0, 0, 0)
     fin
 
+    ; ---- (explorador) los atributos y soltar fuera de la ventana ----
+    público constante ARCHIVADO = 0x20          ; el atributo de «archivo» (cambiado desde la última copia)
+    público constante MEDIO_CD = 4              ; (pentium-cd) un lector de CD o DVD
+    ; los atributos de un archivo o una carpeta (SOLO_LECTURA, OCULTO,
+    ; DE_SISTEMA, CARPETA, ARCHIVADO), o un error
+    público función atributos_de(nombre: puntero a byte): nat32
+        devolver llamada(170, nat32(nombre), 0xFFFFFFFF, 0)
+    fin
+
+    ; los cambia (solo lectura, oculto, de sistema y archivo): da los que quedan
+    público función poner_atributos(nombre: puntero a byte, nuevos: nat32): nat32
+        devolver llamada(170, nat32(nombre), nuevos, 0)
+    fin
+
+    tipo Suelta = estructura
+        x, ye: ent32
+        ruta: puntero a byte
+    fin
+    variable suelta: Suelta
+
+    ; lo que se arrastra desde la ventana v (una ruta entera, con su letra)
+    ; se ha soltado en el punto (x, yy) de ella, que cae fuera: el escritorio
+    ; lo pone en el tapiz (un acceso) o, en el dock, lo fija
+    público función soltar_fuera(v: nat32, x: ent32, yy: ent32, ruta: puntero a byte): nat32
+        suelta.x := x
+        suelta.ye := yy
+        suelta.ruta := ruta
+        devolver llamada(171, v, nat32(dirección(suelta)), 0)
+    fin
+
+    ; los menús con flechas (la barra de menús): con esta marca en la
+    ; etiqueta de menú(), las flechas a los lados lo cierran y el suceso
+    ; EV_MENÚ trae A_LA_IZQUIERDA o A_LA_DERECHA
+    público constante CON_FLECHAS = 0x40000000
+    público constante A_LA_IZQUIERDA = 0xFFFFFFFE
+    público constante A_LA_DERECHA = 0xFFFFFFFD
+
 fin Llamadas.

@@ -133,6 +133,17 @@ módulo Usuario
     público variable al_escritorio: nat32
     público variable escritorio_en_marcha: bool
 
+    ; (explorador) lo que un programa ha soltado fuera de su ventana (la
+    ; llamada 171): la ruta y el punto de la pantalla. Lo recoge el
+    ; escritorio (un acceso en el tapiz, o fijarlo en el dock)
+    público variable suelta_pedida: bool
+    público variable suelta_x, suelta_y: ent32
+    público variable suelta_ruta: arreglo [128] de byte
+    tipo Suelta = estructura
+        x, ye: ent32
+        ruta: nat32
+    fin
+
     constante MAX_PROGRAMA = 0x200000           ; lo más que mide un programa en el disco
     constante MAX_RUTA = 128
     constante MAX_ARGS = 128
@@ -682,6 +693,8 @@ módulo Usuario
                 devolver cortar_archivo(a)
             caso 21..24:
                 devolver atender_carpetas(n, a, b)
+            caso 170, 171:
+                devolver atender_explorador(n, a, b)
             caso 25:
                 si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
                 devolver cambiar_carpeta(u, ruta)
@@ -1034,6 +1047,38 @@ módulo Usuario
         fin
         si es_carpeta_de_alguien(u, ruta) entonces devolver EN_USO fin
         devolver borrar_carpeta(u, ruta)
+    fin
+
+    ; (explorador) 170: los atributos del archivo a (b = 0xFFFFFFFF: solo
+    ; leerlos); 171: lo soltado fuera de la ventana a (suya), como dice b
+    ; (una Suelta: el punto, dentro de la ventana, y la ruta)
+    función atender_explorador(n: nat32, a: nat32, b: nat32): nat32
+        variable ruta: arreglo [MAX_RUTA] de byte
+        variable u: nat32
+        variable x, yy: ent32
+        variable s: puntero a Suelta
+        si n = 170 entonces
+            si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
+            si u >= MAX_UNIDADES entonces devolver SIN_DISCO fin
+            si en_memoria(u) entonces
+                si b <> 0xFFFFFFFF entonces devolver PROTEGIDO fin
+                devolver SOLO_LECTURA
+            fin
+            devolver poner_atributos(u, ruta, b)
+        fin
+        si no escritorio_en_marcha o no es_de(a, actual.id) o no puede(b, tamaño(Suelta), falso) entonces devolver NO_VALE fin
+        s := puntero(b)
+        x := s.x
+        yy := s.ye
+        si x < -4096 o x > 4096 o yy < -4096 o yy > 4096 entonces devolver NO_VALE fin
+        si suelta_pedida entonces devolver EN_USO fin
+        si no texto_de_usuario(s.ruta, ruta, MAX_RUTA) entonces devolver NO_VALE fin
+        a_pantalla(a, x, yy)
+        copiar(suelta_ruta, ruta)
+        suelta_x := x
+        suelta_y := yy
+        suelta_pedida := cierto
+        devolver 0
     fin
 
     ; el portapapeles del sistema: un texto (en la página 437, con sus

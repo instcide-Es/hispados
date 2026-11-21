@@ -1243,12 +1243,14 @@ módulo Fat
             si siguiente_entrada(abiertos[m], h) entonces
                 de_once(dirección(h.c.nombre[0]), dirección(e.nombre[0]))
                 e.atributos := h.c.atributos
-                e.reservado := 0
+                ; (explorador) en lo que sobraba: la fecha del último acceso y
+                ; la fecha y la hora en que se hizo (abajo la fecha, arriba la hora)
+                e.reservado := h.c.fecha_acceso
                 e.tamaño := h.c.tamaño
                 e.fecha := h.c.fecha
                 e.hora := h.c.hora
                 e.cluster := cluster_de(h.c)
-                e.libre := 0
+                e.libre := nat32(h.c.fecha_alta) ob (nat32(h.c.hora_alta) << 16)
                 si nombre_largo <> nulo y cabe > 0 entonces
                     i := 0
                     si largo_hay entonces
@@ -1431,7 +1433,25 @@ módulo Fat
                     si h.lfn < h.pos entonces tacha(d, h.lfn, h.pos - 32) fin
                 fin
             sino si h.c.atributos yb CARPETA <> 0 entonces
-                r := ES_CARPETA                         ; una carpeta no se cambia de sitio (su «..»)
+                ; (explorador) una carpeta, a otra: la entrada nueva allí, la
+                ; vieja tachada y su «..», que apunte a la carpeta nueva. No
+                ; dentro de sí misma (ni de una suya: lo mira quien lo pide)
+                si cluster_de(h.c) = d2.primero entonces
+                    r := NOMBRE_MALO                 ; (dentro de sí misma)
+                sino
+                    copiar_memoria(puntero(dirección(h2.c)), puntero(dirección(h.c)), 32)
+                    r := nueva_entrada(d2, once, h.c.atributos, cluster_de(h.c), h2)
+                    si r = 0 entonces
+                        si trae(h2.sector) entonces
+                            c := puntero(dirección(buf[h2.despl]))
+                            c.fecha := h.c.fecha
+                            c.hora := h.c.hora
+                            guarda()
+                        fin
+                        tacha(d, h.lfn, h.pos)
+                        pon_puntos(cluster_de(h.c), d2)
+                    fin
+                fin
             sino
                 ; a otra carpeta: la entrada nueva allí, y la vieja, tachada
                 copiar_memoria(puntero(dirección(h2.c)), puntero(dirección(h.c)), 32)
@@ -1449,6 +1469,59 @@ módulo Fat
             fin
             asienta(cierto)
             si r = 0 y fallo entonces r := MAL fin
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; (explorador) el «..» de la carpeta que empieza en el cluster c, que
+    ; apunte a la carpeta d2 (adonde se ha llevado)
+    función pon_puntos(c: nat32, ref d2: Abierto)
+        variable padre: nat32
+        variable e: puntero a Cruda
+        padre := d2.primero
+        si d2.fija o (clase = 32 y d2.primero = raíz_cluster) entonces padre := 0 fin
+        si trae(sector_de_cluster(c)) entonces
+            e := puntero(dirección(buf[32]))
+            si e.nombre[0] = '.' y e.nombre[1] = '.' entonces
+                e.cluster_bajo := padre
+                si clase = 32 entonces e.cluster_alto := padre >> 16 fin
+                guarda()
+            fin
+        fin
+    fin
+
+    ; (explorador) los atributos de un archivo o una carpeta: con «nuevos» =
+    ; 0xFFFFFFFF solo se leen; si no, se ponen los de solo lectura, oculto,
+    ; de sistema y archivo (0x27: los de carpeta y volumen no se tocan). Da
+    ; los que quedan, o un error.
+    público función poner_atributos(v: nat32, ruta: puntero a byte, nuevos: nat32): nat32
+        variable d: Abierto
+        variable h: Hallazgo
+        variable nombre: puntero a byte
+        variable n, r: nat32
+        variable c: puntero a Cruda
+        si v >= VOLÚMENES entonces devolver SIN_DISCO fin
+        si no volúmenes[v].montado entonces devolver SIN_DISCO fin
+        si nuevos <> 0xFFFFFFFF y no se_puede_escribir(volúmenes[v].disco) entonces devolver PROTEGIDO fin
+        tomar(cerrojo)
+        elige(v)
+        r := camina(ruta, d, nombre, n)
+        si r = ES_RAÍZ entonces r := PROTEGIDO fin
+        si r = 0 y no busca_en(d, nombre, n, h) entonces
+            r := NO_HAY
+            si fallo entonces r := MAL fin
+        fin
+        si r = 0 entonces
+            r := h.c.atributos
+            si nuevos <> 0xFFFFFFFF y trae(h.sector) entonces
+                c := puntero(dirección(buf[h.despl]))
+                c.atributos := (c.atributos yb 0xD8) ob byte(nuevos yb 0x27)
+                r := c.atributos
+                guarda()
+                asienta(cierto)
+            fin
+            si fallo entonces r := MAL fin
         fin
         soltar(cerrojo)
         devolver r
