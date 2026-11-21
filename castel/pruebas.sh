@@ -159,6 +159,7 @@
 #   SOLO=tls ./pruebas.sh         la primera y la 13 bis (HTTPS: el servicio TLS, TLS.BIN)
 #   SOLO=cd ./pruebas.sh          la primera y la decimosexta (el CD y las actualizaciones por Internet)
 #   SOLO=pantalla ./pruebas.sh    la primera y la decimoséptima (la medida de la pantalla)
+#   SOLO=ssh ./pruebas.sh         la primera y la decimoctava (SSH, WireGuard y Tailscale; con HEADSCALE=binario, también Tailscale)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -222,7 +223,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|ssh) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -3146,6 +3147,112 @@ else ko "el núcleo se ha quejado:"; cat $V/pc*.txt $V/vb*.txt $V/cd*.txt | grep
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin la medida de la pantalla)"
 fi   # la pantalla
+# ------------------------------------------- 18. SSH, WireGuard y Tailscale
+# (rama pentium-tailscale, docs/PENTIUM.md §14 ter) Los programas en C de
+# nucleo32/hispac/ (hacer.sh): SSHD contra el cliente OpenSSH de aquí (QEMU
+# con hostfwd), SSH contra un sshd de OpenSSH propio de la prueba (puerto alto,
+# ForceCommand: no da una shell); y, con root, ip netns y wg, WireGuard contra
+# el del núcleo Linux en un espacio de nombres propio; con HEADSCALE= (el
+# binario), Tailscale contra Headscale y un tailscaled de pares, en otro. Sin
+# eso, esas dos se saltan (y se dice).
+if parte08 ssh; then
+echo "== Hispa-Pentium: SSH (SSH.BIN, SSHD.BIN), WireGuard (WG.BIN) y Tailscale (TAILSCAL.BIN) =="
+R=$P/n18
+rm -rf $R; mkdir -p $R
+export MTOOLS_SKIP_CHECK=1
+if bash $AQUI/nucleo32/hispac/hacer.sh $R/bin > $R/hacer.txt 2>&1; then
+  ok "nucleo32/hispac/hacer.sh: SSH.BIN, SSHD.BIN, WG.BIN y TAILSCAL.BIN con Monocypher ($(stat -c %s $R/bin/SSH.BIN), $(stat -c %s $R/bin/SSHD.BIN), $(stat -c %s $R/bin/WG.BIN) y $(stat -c %s $R/bin/TAILSCAL.BIN) octetos)"
+else ko "nucleo32/hispac/hacer.sh no los hace: $(tail -1 $R/hacer.txt)"; fi
+ssh-keygen -q -t ed25519 -N '' -f $R/clave -C prueba
+PS=$((30000 + RANDOM % 10000)); PH=$((PS + 1))
+bash $AQUI/nucleo32/hispac/prueba_red.sh sshd $R/sshd $PS
+if $AQUI/nucleo32/disco.sh $R/d.img 16 red tls ssh > $R/disco.txt 2>&1 && mmd -i $R/d.img ::SSH && cp $R/clave.pub $R/AUT.TXT && mcopy -i $R/d.img $R/AUT.TXT ::SSH/AUTORIZA.TXT \
+   && mcopy -i $R/d.img $R/sshd/ID_ED.SSH ::SSH/ID_ED.SSH && [ -s $R/sshd/sshd.pid ]; then
+# 1. SSHD, con el ssh de aquí: una orden y una sesión con terminal
+cp $R/d.img $R/a.img
+( for _ in $(seq 120); do sleep 1; timeout 2 bash -c "</dev/tcp/127.0.0.1/$PH" 2> /dev/null && break; done
+  sleep 20
+  timeout 60 ssh -p $PH -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o BatchMode=yes -i $R/clave prueba@127.0.0.1 \
+    "echo hola desde hispa" < /dev/null > $R/orden.txt 2>&1; echo "código $?" >> $R/orden.txt
+  printf 'echo dentro de la consola\rver\rsalir\r' > $R/teclas.txt
+  setsid timeout 60 ssh -tt -p $PH -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o BatchMode=yes -i $R/clave \
+    prueba@127.0.0.1 < $R/teclas.txt > $R/tty.txt 2>&1
+  echo "código $?" >> $R/tty.txt ) &
+FUERA=$!
+ESCRIBE=1 DISCO=$R/a.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-netdev user,id=n0,hostfwd=tcp:127.0.0.1:$PH-:22 -device e1000,netdev=n0" \
+  $AQUI/nucleo32/probar.sh "" ":pausa 3" "sshd /encender" ":pausa 75" "sshd" ":pausa 2" > $R/a.sal 2>&1
+wait $FUERA
+tr -d '\r' < $R/a.sal > $R/a.txt
+S=$R/a.txt
+mira "SSHD: apagado hasta que se enciende; con /ENCENDER escucha en el puerto 22, con su llave del equipo (ssh-ed25519) hecha la primera vez" \
+  "^Servidor SSH encendido (puerto 22)" "sshd: llave del equipo nueva (ssh-ed25519)$" "red: tcp: escuchando en el puerto 22$" \
+  "sshd: Hispa-Pentium: el servidor SSH, en el puerto 22 (llave SHA256:"
+mira "SSHD con el cliente OpenSSH: curve25519-sha256, chacha20-poly1305 y kex-strict; entra con la llave de AUTORIZA.TXT" \
+  "sshd: la otra punta: SSH-2.0-OpenSSH" "sshd: kex-strict: sí (contra Terrapin)$" "sshd: cifrado: curve25519-sha256, ssh-ed25519, chacha20-poly1305@openssh.com$" \
+  "sshd: entra prueba con su llave$" "sshd: orden: echo hola desde hispa$" "^El servidor SSH de Hispa-Pentium: encendido (puerto 22)"
+S=$R/orden.txt
+mira "ssh equipo orden: la orden se hace en Hispa-Pentium (ORDENES /C) y vuelve lo que escribe, con el código 0" "^hola desde hispa$" "^código 0$"
+if grep -q "hola desde hispa.$(printf '\r')" $R/orden.txt; then ko "sin terminal, los finales de línea tienen que ir como en Unix (sin CR)"; else ok "sin terminal (una orden), los finales de línea van como en Unix"; fi
+tr -d '\r' < $R/tty.txt > $R/tty2.txt
+S=$R/tty2.txt
+mira "una sesión con terminal: la Consola de Hispa-Pentium (en UTF-8), las órdenes que se teclean al otro lado y SALIR" \
+  "^Hispa-Pentium: intérprete de órdenes" "^dentro de la consola$" "^Intérprete de órdenes del anillo 3 (ORDENES.BIN).$" "^Hasta luego.$" "^código 0$"
+# 2. SSH, con un sshd de OpenSSH: la huella, la llave propia, el terminal y una orden
+cp $R/d.img $R/b.img
+CAPTURAS=$R ESCRIBE=1 DISCO=$R/b.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ":pausa 3" \
+  "ssh -p $PS root@10.0.2.2" ":pausa 10" ":escribe s" ":pausa 6" ":texto b1" "hola mundo" ":pausa 2" ":texto b2" ":pausa 4" \
+  "ssh -p $PS root@10.0.2.2 una orden" ":pausa 10" ":texto b3" > $R/b.sal 2>&1
+tr -d '\r' < $R/b.sal > $R/b.txt
+S=$R/b.txt
+mira "SSH con OpenSSH: la primera vez enseña la huella y pregunta; entra con la llave propia (ID_ED.SSH)" \
+  "ssh: la otra punta: SSH-2.0-OpenSSH" "ssh: kex-strict: sí (contra Terrapin)$" "ssh: dentro, con la llave propia$" "ssh: sesión acabada (código 0)$" "ssh: sesión acabada (código 3)$"
+S=$R/b1.txt
+mira "el terminal de SSH (en la pantalla de texto): borrar, colores, mover el cursor y el UTF-8 (a la página 437)" \
+  "^|HOLA DESDE OPENSSH TERM=xterm" "^|          caja azul  ─ñ" "^|Escriba algo:"
+S=$R/b2.txt
+mira "lo que se teclea va al otro lado (y vuelve: «leido»)" "^|leido: \[hola mundo\]"
+S=$R/b3.txt
+mira "SSH con una orden: sin terminal, lo que sale, aquí mismo, y el código de salida de allí" "^|orden: una orden$" "^|(SSH.BIN ha acabado con el código 3)"
+S=$R/b.txt
+if grep -q "^\[10.0.2.2\]:$PS ssh-ed25519 " <(mtype -i $R/b.img ::SSH/CONOCIDO.TXT 2> /dev/null); then ok "la llave del servidor queda en \\HISPA\\SSH\\CONOCIDO.TXT (la segunda vez no se pregunta)"
+else ko "no está la llave del servidor en CONOCIDO.TXT"; fi
+# 3. WireGuard contra el del núcleo Linux (root, ip netns y wg)
+if [ "$(id -u)" = 0 ] && command -v wg > /dev/null && ip netns list > /dev/null 2>&1; then
+  cp $R/d.img $R/w.img
+  bash $AQUI/nucleo32/hispac/prueba_red.sh wg $R/wg $R/w.img
+  tr -d '\r' < $R/wg/q.sal > $R/w.txt
+  S=$R/w.txt
+  mira "WireGuard (WG /ENCENDER, el archivo de wg-quick): el apretón de manos con el WireGuard de Linux y la interfaz del túnel en RED.BIN" \
+    "red: túnel: la interfaz, con la IP 10.9.0.2 y 1 redes$" "wg: Hispa-Pentium: WireGuard en marcha (10.9.0.2, clave pública " \
+    "wg: 10.0.2.2: túnel hecho (claves nuevas)$" "^Respuesta desde 10.9.0.1: octetos=32 " "^  último apretón de manos: "
+  S=$R/wg/fuera.txt
+  mira "por el túnel, desde Linux: ping a Hispa-Pentium y SSH a su SSHD" "^64 bytes from 10.9.0.2" "latest handshake" "^hola por wireguard$" "^código 0$"
+else echo "  (WireGuard: hace falta root, ip netns y wg: se salta)"; fi
+# 4. Tailscale contra Headscale (HEADSCALE=...) y un tailscaled de pares
+if [ "$(id -u)" = 0 ] && [ -x "${HEADSCALE:-}" ] && command -v tailscaled > /dev/null && ip netns list > /dev/null 2>&1; then
+  cp $R/d.img $R/t.img
+  bash $AQUI/nucleo32/hispac/prueba_red.sh tailscale $R/ts $R/t.img $PS
+  tr -d '\r' < $R/ts/q.sal > $R/t.txt
+  S=$R/t.txt
+  mira "Tailscale: ts2021 con Headscale, la dirección de alta (que aprueba la prueba) y el registro" \
+    "tailscale: control: conectado con 10.0.2.2 (ts2021)$" "tailscale: dar de alta este equipo: abra https://10.0.2.2:8443/register/" \
+    "^  https://10.0.2.2:8443/register/" "tailscale: registrado en la red de prueba$"
+  mira "el mapa de la red: la IP 100.x, el relevo DERP de casa, las reglas, la interfaz del túnel y los nombres (MagicDNS)" \
+    "tailscale: relevo de casa: derp-999 (Relevo de prueba)$" "tailscale: reglas de la red: [1-9]" "red: túnel: la interfaz, con la IP 100.64.0." \
+    "tailscale: en la red: hispa-pentium.prueba.hispa., 100.64.0." "tailscale: derp-999: conectado con 10.0.2.2$" \
+    "^Este equipo: 100.64.0.[0-9]*  hispa-pentium.prueba.hispa." "^  100.64.0.[0-9]* *pares-vps *en línea"
+  mira "con el otro equipo, por DERP: el apretón de WireGuard, ping por el nombre y SSH a su sshd" \
+    "tailscale: pares-vps: túnel hecho" "^Haciendo ping a pares-vps \[100.64.0." "^Respuesta desde 100.64.0." "ssh: conectando con pares-vps (100.64.0." "ssh: dentro, con la llave propia$"
+  S=$R/ts/fuera.txt
+  mira "y desde el otro equipo (tailscaled), SSH al SSHD de Hispa-Pentium por la red de Tailscale" "hispa-pentium" "^hola por tailscale$" "^código 0$"
+else echo "  (Tailscale: hace falta root, ip netns, tailscaled y HEADSCALE=el binario de Headscale: se salta)"; fi
+if ! cat $R/*.txt | grep -q "excepción\|\*\*\*"; then ok "en todos esos arranques, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; cat $R/*.txt | grep "excepción\|\*\*\*" | head -3 | sed 's/^/        /'; fi
+else ko "no se ha podido hacer el disco de las pruebas de SSH: $(tail -1 $R/disco.txt)"; fi
+[ -s $R/sshd/sshd.pid ] && kill "$(cat $R/sshd/sshd.pid)" 2> /dev/null
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin SSH, WireGuard ni Tailscale)"
+fi   # ssh
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)

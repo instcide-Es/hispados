@@ -93,10 +93,10 @@ wg)
   mmd -i $DISCO ::WG 2> /dev/null
   mcopy -o -i $DISCO $D/WG0.CNF ::WG/WG0.CNF
   ( sleep 45
-    echo "=== ping"; ping -c 3 -W 2 10.9.0.2
-    echo "=== wg"; wg show wg0
+    echo "=== ping"; ip netns exec $ESP ping -c 3 -W 2 10.9.0.2
+    echo "=== wg"; ip netns exec $ESP wg show wg0
     echo "=== ssh"
-    timeout 60 ssh -p 22 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o BatchMode=yes -i $D/../clave \
+    ip netns exec $ESP timeout 60 ssh -p 22 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o BatchMode=yes -i $D/../clave \
       prueba@10.9.0.2 "echo hola por wireguard" < /dev/null
     echo "código $?"
   ) > $D/fuera.txt 2>&1 &

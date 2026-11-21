@@ -568,12 +568,14 @@ static void da_teclas(void)
 }
 
 /* lo que escribe el intérprete, en UTF-8 y con CR LF */
+static int con_pty;		/* (sin terminal —una orden—, los finales de línea van como en Unix) */
+
 static u32 a_utf8(const u8 *d, u32 n, u8 *o)
 {
 	u32 i, k = 0;
 
 	for (i = 0; i < n; i++) {
-		if (d[i] == '\n') {
+		if (d[i] == '\n' && con_pty) {
 			o[k++] = '\r';
 			o[k++] = '\n';
 		} else if (d[i] == 12) {
@@ -625,6 +627,7 @@ static int sesion(void)
 	static char args[1100];
 
 	t_ini = t_n = esc_n = utf_falta = 0;
+	con_pty = 0;
 	/* lo que quedara en el terminal de antes, fuera */
 	while (sc(SC_TERMINAL, 1, (u32)sal, sizeof sal) > 0) ;
 	for (;;) {
@@ -687,6 +690,8 @@ static int sesion(void)
 				sl_u32(&l);
 				q = sl_cad(&l, &nq);
 				quiere = sl_u8(&l);
+				if (sl_cad_es(q, nq, "pty-req"))
+					con_pty = 1;
 				if (sl_cad_es(q, nq, "pty-req") || sl_cad_es(q, nq, "window-change") || sl_cad_es(q, nq, "env")) {
 					bien = !sl_cad_es(q, nq, "env");
 				} else if ((sl_cad_es(q, nq, "shell") || sl_cad_es(q, nq, "exec")) && tarea < 0) {

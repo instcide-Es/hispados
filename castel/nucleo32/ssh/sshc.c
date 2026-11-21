@@ -725,6 +725,22 @@ static void colores(struct celda *c, int *f, int *b)
 	*f = x, *b = y;
 }
 
+/* la letra de las ventanas no tiene los dibujos de cajas de la página 437: con lo que se parece */
+static char de_ventana(u8 c)
+{
+	if (c < 0xB0 || c > 0xDF)
+		return c;
+	if (c == 0xB3 || c == 0xBA)
+		return '|';
+	if (c == 0xC4 || c == 0xCD)
+		return '-';
+	if (c >= 0xB0 && c <= 0xB2)
+		return '#';
+	if (c == 0xDB || c == 0xDC || c == 0xDD || c == 0xDE || c == 0xDF)
+		return '#';
+	return '+';
+}
+
 #define MARGEN 4
 static int cursor_pintado_x = -1, cursor_pintado_y = -1;
 
@@ -741,6 +757,8 @@ static void pinta_fila(int fl)
 			if (f1 != f0 || b1 != b0 || (pant[fl][k].at & AT_SUBRAYA) != (pant[fl][x].at & AT_SUBRAYA))
 				break;
 			t[k - x] = pant[fl][k].c;
+			if (ventana)
+				t[k - x] = de_ventana(t[k - x]);
 			k++;
 		}
 		if (ventana) {
