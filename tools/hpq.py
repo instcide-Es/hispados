@@ -305,6 +305,14 @@ OPCIONALES = [
      + [('NAVEGA/RECURSOS/' + n, '\\HISPA\\NAVEGA\\RECURSOS\\' + n) for n in NAVEGA_RECURSOS]
      + [('NAVEGA/FUENTES/' + n, '\\HISPA\\NAVEGA\\FUENTES\\' + n) for n in NAVEGA_FUENTES]
      + [('NAVEGA.MNU', r'\HISPA\MENU\NAVEGA.MNU'), ('NAVEGA.ICP', r'\HISPA\MENU\NAVEGA.ICP')]),
+    # (ZIP) Comprimidos y las órdenes ZIP y UNZIP (castel/nucleo32/comprim/paquete.sh; tipo «herramientas»)
+    ('comprim', '1.0', 'Comprimidos: los .ZIP como una carpeta (sacar, añadir y quitar, con contraseña) y las órdenes ZIP y UNZIP', 'base >= 0.8.4', [
+        ('BIN/COMPRIM.BIN', r'\HISPA\COMPRIM.BIN'), ('BIN/ZIP.BIN', r'\HISPA\ZIP.BIN'), ('BIN/UNZIP.BIN', r'\HISPA\UNZIP.BIN'),
+        ('COMPRIM.TXT', r'\HISPA\COMPRIM.TXT'), ('COMPRIM.MNU', r'\HISPA\MENU\COMPRIM.MNU'), ('COMPRIM.ICP', r'\HISPA\MENU\COMPRIM.ICP')]),
+    # (MIRADOR) el Mirador, el visor de imágenes (castel/nucleo32/mirador/paquete.sh; tipo «multimedia»)
+    ('mirador', '1.0', 'El Mirador: ver imágenes (BMP, PNG, JPG, GIF animados, ICO...), girar, diapositivas, pantalla completa y fondo de escritorio', 'base >= 0.8.4', [
+        ('BIN/MIRADOR.BIN', r'\HISPA\MIRADOR.BIN'), ('MIRADOR.TXT', r'\HISPA\MIRADOR.TXT'),
+        ('MIRADOR.MNU', r'\HISPA\MENU\MIRADOR.MNU'), ('MIRADOR.ICP', r'\HISPA\MENU\MIRADOR.ICP')]),
 ]
 
 
@@ -314,6 +322,10 @@ def opcionales(salida, carpetas, nombres=None):
     n = 0
     for nombre, version, descripcion, necesita, archivos in OPCIONALES:
         if nombres and nombre not in nombres:
+            continue
+        # (ESCUDO) los que no tienen ninguno de sus archivos en esas carpetas, no
+        # se hacen (cada paquete.sh deja solo lo suyo); a medias, es un error
+        if not nombres and not any(os.path.isfile(os.path.join(c, o)) for o, _ in archivos for c in carpetas):
             continue
         lista = [(d, open(busca(o, carpetas), 'rb').read()) for o, d in archivos]
         haz_paquete(os.path.join(salida, nombre.upper() + '.HPQ'), nombre, version, descripcion, necesita, '', lista)

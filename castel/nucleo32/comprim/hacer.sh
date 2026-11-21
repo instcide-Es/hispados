@@ -10,10 +10,11 @@
 set -e
 AQUI=$(dirname "$(readlink -f "$0")")
 RAIZ=$(readlink -f "$AQUI/../../..")
-SAL=$(readlink -f "${1:?uso: hacer.sh CARPETA}")
+mkdir -p "${1:?uso: hacer.sh CARPETA}"
+SAL=$(readlink -f "$1")
 cd "$RAIZ"
 O=build/comprim-pentium
-mkdir -p $O "$SAL"
+mkdir -p $O
 C=castel/nucleo32/comprim
 # (como mucho -march=i586: nada de CMOV, que el Pentium de verdad no tiene)
 BF="-m32 -std=gnu11 -march=i586 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables
@@ -41,5 +42,5 @@ done
 if objdump -d $O/comprim.elf | grep -qE '\scmov|\sfcomi|\sfucomi'; then echo "hacer.sh: COMPRIM.BIN lleva instrucciones de después del Pentium"; exit 1; fi
 # el acceso del menú Inicio (accesos.cas)
 python3 -I tools/hpicono.py $C/comprim32.png "$SAL/../COMPRIM.ICP"
-printf 'nombre=Comprimidos\r\nprograma=%s\r\nargumentos=\r\nicono=%s\r\nescritorio=no\r\n' \
+printf 'nombre=Comprimidos\r\nprograma=%s\r\nargumentos=\r\nicono=%s\r\nescritorio=no\r\ntipo=Herramientas\r\n' \
   "${COMPRIM_PROGRAMA:-\\HISPA\\COMPRIM.BIN}" "${COMPRIM_ICONO:-\\HISPA\\MENU\\COMPRIM.ICP}" > "$SAL/../COMPRIM.MNU"

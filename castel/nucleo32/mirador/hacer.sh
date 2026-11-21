@@ -31,5 +31,5 @@ ld -m elf_i386 --no-warn-rwx-segments -z noexecstack --gc-sections -T $C/pentium
 objcopy -O binary $O/mirador.elf "$SAL/MIRADOR.BIN"
 if objdump -d $O/mirador.elf | grep -qE '\scmov|\sfcomi|\sfucomi'; then echo "hacer.sh: MIRADOR.BIN lleva instrucciones de después del Pentium"; exit 1; fi
 python3 -I tools/hpicono.py $M/mirador32.png "$SAL/../MIRADOR.ICP"
-printf 'nombre=Mirador\r\nprograma=%s\r\nargumentos=\r\nicono=%s\r\nescritorio=no\r\n' \
+printf 'nombre=Mirador\r\nprograma=%s\r\nargumentos=\r\nicono=%s\r\nescritorio=no\r\ntipo=Multimedia\r\n' \
   "${MIRADOR_PROGRAMA:-\\HISPA\\MIRADOR.BIN}" "${MIRADOR_ICONO:-\\HISPA\\MENU\\MIRADOR.ICP}" > "$SAL/../MIRADOR.MNU"

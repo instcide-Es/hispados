@@ -21,7 +21,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [x] ~~Dock: barra de lanzamiento con los programas favoritos y los abiertos, que se pueda fijar y quitar~~ (21/11)
 - [ ] Barra de tareas: agrupar ventanas, vista previa, bandeja con más iconos (sonido, Wi-Fi)
 - [ ] Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido, ratón, teclado, red y Wi-Fi, energía, usuarios, programas (hecho: actualizaciones)
-- [ ] Temas y fondo de escritorio; letras TrueType del sistema; protector de pantalla
+- [ ] Temas y fondo de escritorio (una imagen de fondo, ya: el Mirador, la llamada 172); letras TrueType del sistema; protector de pantalla
 - [ ] Portapapeles con imágenes y archivos; arrastrar y soltar entre programas
 - [ ] Ayuda del sistema con buscador
 
@@ -40,8 +40,8 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 ## Programas
 - [x] ~~Programas de Windows de 32 bits (cargador PE) y **DirectX** (DirectDraw, DirectSound, DirectInput), como en Hispa-486~~ (WIN32.BIN: NASM, TCC, FASMW, Naves; [WIN32.md](WIN32.md)). Queda: hilos de verdad, SEH, Direct3D, el sonido de DirectSound
 - [ ] Reproductor de música y vídeo (MP3, OGG, WAV; vídeo sencillo)
-- [ ] Visor de imágenes y Pintura
-- [ ] Compresor ZIP
+- [x] ~~**Visor de imágenes**: el Mirador (BMP, PNG, JPG, GIF animado, ICO; ajustar, rueda, girar, diapositivas, pantalla completa, fondo de escritorio)~~ — rama pentium-zipvisor (21/11: docs/PENTIUM.md §14 octies). Queda: **Pintura**
+- [x] ~~**Compresor ZIP**: Comprimidos (el ZIP como una carpeta, Comprimir en ZIP y Extraer todo en el explorador, ZipCrypto y AES para leer, ZIP64, ZIP y UNZIP en la Consola)~~ — rama pentium-zipvisor (21/11: docs/PENTIUM.md §14 octies). Queda: escribir con contraseña, nombres largos al sacar (cuando el núcleo los escriba)
 - [ ] **Herramienta de PDF propia** (en lugar de PDF24, que es de 64 bits y no libre): unir y separar, girar/ordenar/quitar páginas, comprimir, PDF ↔ imágenes, PDF a texto, poner y quitar contraseña; con piezas libres (qpdf…) y el Lector de la oficina; al ser nuestra, se compila tal cual para Hispa-64 (pedido de Carlos 21/11)
 - [ ] Calculadora, Reloj, Mapa de caracteres
 - [ ] Juegos: los emuladores (Hispa-Nes, Hispa-System, Hispa-Snes, Hispa-Drive) con sonido en Pentium

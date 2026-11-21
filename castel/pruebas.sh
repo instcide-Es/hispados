@@ -183,6 +183,17 @@
 #      de FASM (ensamblado ahí); FASMW abriendo y ensamblando HELLO.ASM, y
 #      ese HELLO.EXE; Mi equipo abriendo un .EXE; y WSOCK32 (REDPRUE) contra
 #      el servidor HTTP de aquí.
+#  27. (ZIP, SOLO=zip) Comprimidos (COMPRIM.BIN, ZIP y UNZIP; pruebas_zipvisor.sh):
+#      el motor en el anfitrión (comprim/prueba/prueba.sh: con el zip y el
+#      unzip de Linux octeto a octeto, ZipCrypto, AES, ZIP64, los ZIP malos y
+#      el fuzz con ASan; FUZZ_ZIP=vueltas, SIN_GRANDE=1 sin el de 4 GB); las
+#      órdenes en el intérprete; y la ventana desde el explorador (abrir,
+#      entrar, Extraer todo, Quitar, Añadir, Propiedades, arrastrar al tapiz,
+#      contraseña, «Comprimir en ZIP»), mirando el disco con mtools y unzip.
+#  28. (MIRADOR, SOLO=mirador) El Mirador (MIRADOR.BIN): PNG, BMP, JPG, GIF
+#      animado e ICO desde el explorador, las flechas, la rueda, girar,
+#      pantalla completa, diapositivas y «Usar como fondo de escritorio» (la
+#      llamada 172: FONDO.HPM), que sigue al arrancar otra vez.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -204,6 +215,8 @@
 #   SOLO=ssh ./pruebas.sh         la primera y la 20 (SSH, WireGuard y Tailscale; con HEADSCALE=binario, también Tailscale)
 #   SOLO=lectores ./pruebas.sh    la primera y la 21 (los CD y DVD, y las imágenes de disco)
 #   SOLO=win32 ./pruebas.sh       la primera y la 22 (los programas de Windows y DirectX)
+#   SOLO=zip ./pruebas.sh         la primera y la 27 (Comprimidos: ZIP y UNZIP; pruebas_zipvisor.sh)
+#   SOLO=mirador ./pruebas.sh     la primera y la 28 (el Mirador y la imagen de tapiz; pruebas_zipvisor.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -252,6 +265,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 }
 
 . $AQUI/pruebas32.sh               # la parte 15 (CASTEL32), como la función parte15
+. $AQUI/pruebas_zipvisor.sh        # (ZIP) (MIRADOR) las partes 27 y 28, como parte_zip y parte_mirador
 
 # ---------------------------------------------------------------- 1. errores
 echo "== Castel: los errores se dicen en español, con línea y columna =="
@@ -267,7 +281,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|zip|mirador) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -3887,6 +3901,10 @@ kill $NPID 2> /dev/null; wait $NPID 2> /dev/null
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Navegador)"
 fi   # el Navegador
+
+# ------------------------- 27 y 28. (ZIP) Comprimidos y (MIRADOR) el Mirador
+if parte08 zip; then parte_zip; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Comprimidos)"; fi
+if parte08 mirador; then parte_mirador; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Mirador)"; fi
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
 [ -z "${SOLO:-}" ] && parte15

@@ -25,7 +25,7 @@ módulo Emergente
 
     importar Tareas, Grafico, Letra, Video, Ventanas, Consola
 
-    público constante MAX_OPCIONES = 12
+    público constante MAX_OPCIONES = 16         ; (ZIP) eran 12: «Comprimir en ZIP» y «Extraer todo...» (la 0.8.5 lo sube a 32)
     constante MAX_TEXTO = 256
     constante ALTO_OPCIÓN = 24
     constante ALTO_RAYA = 9
