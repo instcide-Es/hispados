@@ -48,7 +48,7 @@ if [ -n "$CAR" ]; then
   make -s build/MSVCRT.DLL build/UCRT.DLL build/COMCTL32.DLL build/DDRAW.DLL build/DSOUND.DLL build/DINPUT.DLL build/OLE32.DLL \
     build/WINCALC.EXE build/WINHOLA.EXE build/WINCTL.EXE build/WINMENU.EXE build/WINGUI.EXE build/NAVES.EXE > /dev/null
   # WINMM.DLL de Pentium: la misma, con la hora de GetTickCount (no hay tics de la BIOS)
-  gcc -m32 -std=gnu11 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-builtin \
+  gcc -m32 -march=i586 -std=gnu11 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-builtin \
     -fno-tree-loop-distribute-patterns -DHISPA_PENTIUM -c w32/dx/winmm.c -o $O/winmm.o
   python3 tools/elf2pe.py --dll --exp "$(nm -g --defined-only $O/winmm.o | awk '$2=="T"{print $3}' | grep -v '^mem' | paste -sd,)" -t ventanas/win32.inc -o "$CAR/WINMM.DLL" $O/winmm.o
   for d in MSVCRT UCRT COMCTL32 DDRAW DSOUND DINPUT OLE32; do cp build/$d.DLL "$CAR/"; done
