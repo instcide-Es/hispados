@@ -290,8 +290,8 @@ el compilador de Hispa-Pentium ya puede compilar para Hispa-64.
 
 | | |
 |---|---|
-| CASTEL64 / ENSAMB64 | 171.896 / 29.968 octetos (45.403 y 9.133 líneas de ensamblador) |
-| CASTEL64 compilándose a sí mismo, en Linux (el servidor) | 0,27 s |
+| CASTEL64 / ENSAMB64 | 172.240 / 29.968 octetos (45.412 y 9.133 líneas de ensamblador) |
+| CASTEL64 compilándose a sí mismo, en Linux (el servidor) | 0,2 s (0,21 a 0,27) |
 | ... y ENSAMB64 ensamblándolo | 0,15 s |
 | CASTEL64 con los 63 programas de las pruebas (de 16, 32 y 64 bits: el núcleo de Hispa-Pentium y sus programas, CASTEL, CASTEL32, ENSAMB32, CASTEL64...) | 26 s en total |
 | CASTEL32.BIN (con Gen64) | 166.560 octetos (eran 134.808) |
