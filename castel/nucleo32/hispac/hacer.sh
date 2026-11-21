@@ -6,7 +6,7 @@
 #   SSH.BIN        el cliente SSH (ssh/sshc.c)
 #   SSHD.BIN       el servidor SSH (ssh/sshd.c)
 #   WG.BIN         un túnel WireGuard, como wg-quick (wg/wgmain.c)
-#   TAILSCALE.BIN  el cliente de Tailscale (tailscale/ts.c, con wg/wg.c)
+#   TAILSCAL.BIN   el cliente de Tailscale (tailscale/ts.c, con wg/wg.c; la orden TAILSCALE)
 # Con lo común de hispac/ (hispa.c, cripto.c), la libc de TLS.BIN
 # (tls/libc.c) y Monocypher 4.0.2 (terceros/monocypher, BSD-2 o CC0),
 # enlazados para 0x40000000 como programas del anillo 3 (como TLS.BIN). Los
@@ -64,5 +64,5 @@ if [ -f $N/tailscale/ts.c ]; then
   for f in ts json derp control; do
     [ -f $N/tailscale/$f.c ] && objeto $N/tailscale/$f.c $O/ts_$f.o -fexec-charset=CP437
   done
-  enlaza TAILSCALE $O/wg.o $O/ts_*.o
+  enlaza TAILSCAL $O/wg.o $O/ts_*.o
 fi

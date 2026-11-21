@@ -27,7 +27,7 @@ módulo Ured
     variable nombre: arreglo [256] de byte
     variable info: Info_red
     variable enlace: bool
-    variable estado_dicho, ip_dicha: nat32
+    variable estado_dicho, ip_dicha, túnel_dicho: nat32
 
     ; lo que falta para usar la red (0: nada)
     función falta(): nat32
@@ -47,11 +47,12 @@ módulo Ured
     función dilo()
         variable e, a: nat32
         e := cómo_está()
-        si e <> estado_dicho o mi_ip <> ip_dicha entonces
+        si e <> estado_dicho o mi_ip <> ip_dicha o túnel_ip <> túnel_dicho entonces
             a := 0xFFFFFFFF
             si tarjeta <> T_NINGUNA entonces a := pci_tarjeta fin
-            decir_estado(e, mi_ip, a)
+            si túnel_ip <> 0 entonces decir_estado(e ob 0x100, mi_ip, a) sino decir_estado(e, mi_ip, a) fin    ; (TAILSCALE) con el túnel
             estado_dicho := e
+            túnel_dicho := túnel_ip
             ip_dicha := mi_ip
         fin
     fin

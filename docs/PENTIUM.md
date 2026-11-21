@@ -2729,12 +2729,245 @@ demás del sistema en el catálogo firmado de `actualiza.sh`.
 
 ### Lo que falta
 
-Escuchar en un puerto (un servidor), reensamblar lo que llega desordenado y la
-retransmisión rápida; IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
+Reensamblar lo que llega desordenado y la retransmisión rápida (escuchar en un
+puerto ya va: sección 14 ter); IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
 la vez; el Wi-Fi (arriba); TLS 1.3 (BearSSL no lo tiene), gzip en `Https` y la
 hora por NTP; más tarjetas (la RTL8168 del Toshiba NB250,
 la PCnet, NE2000: Hispa-DOS ya las lleva); y, encima de esto, un navegador.
 (Las **actualizaciones** por la red ya van: sección 13.)
+
+## 14 ter. SSH, WireGuard y Tailscale (rama pentium-tailscale)
+
+*21/11/2026.* Lo que pidió Carlos: entrar en la terminal de Hispa-Pentium
+desde cualquier otro equipo, y desde él en los demás, como hace ya con sus
+MacBook: **SSH** (cliente y servidor) y **Tailscale** (cada equipo con su
+nombre y su IP 100.x, esté donde esté), con **WireGuard** debajo, que también
+vale suelto (un túnel como el de wg-quick).
+
+```
+  SSH.BIN, SSHD.BIN, WG.BIN, TAILSCAL.BIN   (C del anillo 3: nucleo32/hispac/hacer.sh)
+     hispac/   hispa.c (llamadas, red, archivos, azar, ventanas, página 437), cripto.c
+     ssh/      ssh.c (el transporte), sshc.c (SSH), sshd.c (SSHD)
+     wg/       wg.c (el protocolo de WireGuard), wgmain.c (WG)
+     tailscale/ ts.c (TAILSCALE), control.c (ts2021: Noise y HTTP/2), derp.c, json.c
+     terceros/monocypher (X25519, Ed25519, ChaCha20, Poly1305)
+        │ llamada 90 (TCP, UDP, la interfaz del túnel)     │ llamada 99 (TLS: DERP y el control por https)
+        ▼                                                  ▼
+  RED.BIN: TCP en escucha (SSH) y la interfaz del túnel ── TLS.BIN
+```
+
+**Por qué no Dropbear.** Se miró portarlo (MIT), pero Dropbear vive de POSIX:
+`fork`, `select`, los pseudoterminales, `getpwnam`, los archivos de `/etc`;
+hacerle una capa de todo eso era más código (y más fallos) que el propio SSH.
+El SSH de Hispa-Pentium está **escrito aquí**, a partir de las RFC 4251 a 4254,
+8709 y 8731 y de `PROTOCOL.chacha20poly1305` de OpenSSH (la descripción), con
+la criptografía de **Monocypher 4.0.2** (BSD-2 o CC0, `terceros/monocypher`,
+con su LEEME y su licencia). Lo mismo WireGuard (del documento de WireGuard y de
+wireguard.com/protocol: sin código del núcleo Linux ni de wireguard-go) y
+Tailscale (de su documentación y de su código, BSD-3, como referencia, sin
+copiarlo; Headscale, BSD-3, solo para las pruebas).
+
+### Lo que cambia en RED.BIN (marcado «(SSH)», «(TÚNEL)» y «(TAILSCALE)»)
+
+- **TCP en escucha** (`rtcp.cas`): `O_ESCUCHAR` (20: un puerto; da el número
+  de la escucha, de `0x40` en adelante) y `O_ACEPTAR` (21: espera a que llegue
+  una conexión; da su número y, en `cab[1]` y `cab[2]`, la IP y el puerto de la
+  otra punta). Un SYN a un puerto en escucha hace una conexión en
+  `SYN_RECIBIDO`, que contesta SYN+ACK (otra vez si se pierde) y pasa a
+  establecida con el ACK. Dos como mucho esperando a que se acepten, por
+  puerto; la que no se acepta en 30 s, fuera. Al acabar el programa, sus
+  escuchas se cierran (`tcp_acabó`).
+- **La interfaz del túnel** (`rpila.cas`), para WireGuard y Tailscale:
+  `O_TUNEL` (22: la IP propia del túnel y sus redes, pares red-máscara, hasta 8),
+  `O_TUNEL_LEER` (23: el paquete IP siguiente que sale por él, con espera),
+  `O_TUNEL_ENTRA` (24: uno que ha llegado, ya descifrado), `O_TUNEL_QUITAR` (25),
+  `O_TUNEL_DNS` (26: los nombres de los equipos, «nombre ip» por línea) y
+  `O_TUNEL_ESTADO` (27). Lo que va a una de sus redes no sale por la tarjeta:
+  se pone en una cola de 16 para el servicio del túnel; la IP de origen (y la de
+  las sumas de TCP y UDP) es la del túnel (`ip_propia`); el MSS por el túnel,
+  1.240 (MTU de 1.280, la de Tailscale). Lo que entra por él solo vale si va a
+  la IP del túnel y viene de una de sus redes. `resolver` mira antes los
+  nombres del túnel (el corto, «mac3», o el entero, «mac3.red.ts.net»): es el
+  MagicDNS de Tailscale. La interfaz es de quien la puso: si acaba, se quita.
+- **La bandeja** (`red.cas`, `escritorio.cas`): RED.BIN dice con el bit 8 de la
+  llamada 96 si hay túnel (`túnel_red`); el icono de la red lleva entonces cuatro
+  puntos en la pantallita, y un clic abre la ventana de Tailscale. En
+  **Configuración**, el botón «Red y Tailscale...» la abre también.
+- **ORDENES /C orden** hace esa orden y acaba: lo que usa `ssh equipo orden`.
+
+### SSH: el cliente (`SSH.BIN`)
+
+```
+SSH [-p puerto] usuario@equipo [orden]
+SSH /LLAVE        hace la llave propia (ssh-ed25519) y enseña la pública
+```
+
+- Intercambio **curve25519-sha256**, llave del servidor **ssh-ed25519**, cifrado
+  **chacha20-poly1305@openssh.com**, con **kex-strict** (la defensa contra
+  Terrapin, CVE-2023-48795) y claves nuevas si la otra punta las pide. Es lo
+  que hablan OpenSSH 6.5 y siguientes (Linux, macOS, Windows 10).
+- **Los equipos conocidos**, en `\HISPA\SSH\CONOCIDO.TXT` (como known_hosts): la
+  primera vez se enseña la huella («SHA256:...») y se pregunta; si luego
+  cambia, no se entra y se dice por qué.
+- **Entrar**: con la llave propia (`\HISPA\SSH\ID_ED.SSH`, la semilla secreta;
+  `ID_ED.PUB`, la línea para el `~/.ssh/authorized_keys` del otro equipo) si la
+  hay, y si no, con la contraseña (sin eco; se borra de la memoria al mandarla).
+- **El terminal**: una ventana suya de 80 x 25 (sin escritorio, la pantalla de
+  texto) que entiende lo de un **xterm**: los 16 colores, los 256 y los de 24
+  bits (al más cercano), negrita, inverso, subrayado, mover el cursor, borrar,
+  insertar y quitar líneas y letras, la zona de desplazamiento, la pantalla
+  alternativa (nano, top, mc, less), las líneas del DEC y el UTF-8 (a la página
+  437). Las teclas salen como las de un xterm (flechas, Inicio, Fin, RePág,
+  AvPág, Supr, F1 a F12, Ctrl+letra). **«~.»** al principio de una línea corta.
+- Con una **orden** detrás, la hace allí y enseña lo que salga en la Consola.
+
+### SSH: el servidor (`SSHD.BIN`)
+
+```
+SSHD               cómo está (y la huella de la llave del equipo)
+SSHD /ENCENDER     lo enciende (y queda encendido en los arranques)
+SSHD /APAGAR       lo apaga
+SSHD /CLAVE        pone la contraseña para entrar
+SSHD /PUERTO=n     otro puerto (22 si no se dice)
+```
+
+**Apagado de fábrica**: no escucha hasta que el usuario lo enciende (aquí, o
+con el botón de la ventana «Red y Tailscale»). La contraseña se guarda
+**resumida** (`\HISPA\SSH\CLAVE.TXT`: PBKDF2-HMAC-SHA-256, 10.000 vueltas, sal de
+16 octetos; nunca en claro) y las llaves que pueden entrar sin ella, en
+`\HISPA\SSH\AUTORIZA.TXT` (o `authorized_keys`), como las de OpenSSH
+(ssh-ed25519). La llave del equipo (`LLAVE.SSH`, secreta) se hace la primera
+vez. El usuario tiene que ser el de `HISPA.INI` (si lo hay); tres contraseñas
+malas y se corta (con espera entre una y otra).
+
+Dentro, **la Consola de Hispa-Pentium**: SSHD hace un terminal del núcleo
+(`terminal.cas`, llamada 37: lo que ya usa la Consola del escritorio; no ha
+hecho falta nada nuevo en el núcleo) y lanza dentro ORDENES.BIN; lo que este
+escribe sale por el canal en UTF-8 (con `\r\n`; el salto de página, «borrar la
+pantalla»), y lo que se teclea al otro lado (UTF-8 y las secuencias de un
+xterm) entra como las teclas de Hispa-Pentium. Ctrl+C acaba lo que corre
+dentro. Una sesión a la vez (un terminal por programa). Lo que pasa se apunta
+por el puerto serie (`sshd: ...`).
+
+### WireGuard (`WG.BIN`)
+
+```
+WG                     cómo está (como «wg show»)
+WG /ENCENDER [archivo] lo pone en marcha (\HISPA\WG\WG0.CNF si no se dice)
+WG /APAGAR             lo quita
+WG /LLAVE              una clave privada nueva y su pública
+WG /PUBLICA clave      la pública de una privada
+```
+
+El archivo es el de wg-quick (`[Interface]` PrivateKey, Address, ListenPort;
+`[Peer]` PublicKey, PresharedKey, Endpoint, AllowedIPs, PersistentKeepalive),
+solo IPv4 y sin la ruta por defecto (0.0.0.0/0: todavía no; las demás redes
+sí). El protocolo (`wg/wg.c`): el apretón **Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s**
+(como iniciador y como respondedor, con su marca de tiempo TAI64N que siempre
+sube), mac1 y mac2 con las galletas (XChaCha20-Poly1305), los mensajes de datos
+con su ventana contra repeticiones, las claves nuevas cada 2 minutos (las
+viejas no valen a los 3), «sigo aquí» a los 10 s y el PersistentKeepalive. Los
+paquetes van por UDP (un puerto de RED.BIN) y por la interfaz del túnel.
+
+### Tailscale (`TAILSCAL.BIN`, la orden `TAILSCALE`)
+
+```
+TAILSCALE                  cómo está: el nombre, la IP 100.x y los equipos de la red
+TAILSCALE /CONECTAR [url]  se conecta (con una url, a ese servidor: Headscale)
+TAILSCALE /DESCONECTAR     se desconecta (y queda así en los arranques)
+TAILSCALE /OLVIDAR         olvida las claves (la próxima vez, un equipo nuevo)
+TAILSCALE /IP              la IP 100.x de este equipo
+```
+
+1. **Las claves**: la de la máquina, la del nodo (que es la de WireGuard) y la
+   de «disco», en `\HISPA\TS\CLAVES.TS` (secretas; se hacen la primera vez).
+2. **El servidor de control** (`control.c`): `GET /key` da su clave; luego
+   **ts2021**: `POST /ts2021` con `Upgrade: tailscale-control-protocol` y el
+   primer mensaje de **Noise_IK_25519_ChaChaPoly_BLAKE2s** en la cabecera
+   `X-Tailscale-Handshake` (prólogo «Tailscale Control Protocol v113»); el
+   servidor contesta 101 y su mensaje de Noise; desde ahí, registros cifrados
+   (tipo 4, de hasta 4.096 octetos, nonce de mayor a menor). Dentro va **HTTP/2**
+   con lo justo: el prefacio, los ajustes (sin «push», ventana de 4 MB), un
+   pedido cada vez con las cabeceras en HPACK literal, PING y SETTINGS
+   contestados, y de las cabeceras de la respuesta solo el «:status 200»
+   (0x88). Lo «temprano» que manda el servidor antes de HTTP/2 se salta.
+3. **El alta**: `POST /machine/register` con la clave del nodo y el Hostinfo
+   (el nombre del equipo, de `HISPA.INI`, en minúsculas). Si el servidor da una
+   **dirección de alta** (`AuthURL`), sale en la orden, en la ventana y en el
+   registro: el usuario la abre en otro equipo con su cuenta y lo aprueba;
+   mientras, el registro se repite con `Followup` (el servidor espera a que se
+   apruebe). **El alta en la red de verdad de Carlos la hace él**: la dirección
+   sale en pantalla.
+4. **El mapa de la red**: `POST /machine/map` con `Stream: true`: mensajes de 4
+   octetos de largo (de menor a mayor) y su JSON (`json.c`: un lector sin
+   memoria, por trozos del texto): el nodo propio (su nombre y su IP 100.x), los
+   relevos DERP (`DERPMap`), los equipos (`Peers`, `PeersChanged`,
+   `PeersRemoved`, `PeersChangedPatch`, `OnlineChange`) y las reglas
+   (`PacketFilter`). Con eso se pone la interfaz del túnel (100.64.0.0/10 y las
+   subredes que anuncien), los nombres (MagicDNS) y un par de WireGuard por
+   equipo.
+5. **DERP** (`derp.c`): por HTTPS (TLS.BIN), `GET /derp` con `Upgrade: DERP`;
+   el servidor se presenta (FrameServerKey: «DERP🔑» y su clave), uno dice quién
+   es con una caja de NaCl (FrameClientInfo: X25519 + XSalsa20-Poly1305,
+   `cripto.c`), y luego FrameSendPacket y FrameRecvPacket con la clave del
+   otro; los Ping se contestan. El relevo de casa es el que antes conecta (o el
+   de `derp=` en TS.INI), se le dice al servidor (`PreferredDERP`) y se guarda;
+   lo de cada equipo va por el relevo de casa de él (hasta 4 a la vez).
+6. **Las reglas**: lo que entra por el túnel solo pasa si lo dejan las reglas
+   de la red (las ACL de Tailscale: origen, destino, puertos y protocolo) o si
+   contesta a algo que salió de aquí; hasta que llegan las reglas, nada nuevo
+   entra.
+
+**Lo directo por UDP** (la perforación de NAT con los mensajes «disco») queda
+para más adelante: todo va por DERP, que es más lento (unos 20 a 80 ms más por
+ida y vuelta, según el relevo) pero llega siempre. Los mensajes disco que
+llegan se ignoran; los demás equipos, al no recibir respuesta, siguen por DERP.
+
+**La ventana** (`TAILSCALE /VENTANA`: Configuración > «Red y Tailscale...», o
+el icono de la red con el túnel puesto): conectado o no, el nombre y la IP de
+este equipo, la dirección de alta si falta, el botón Conectar/Desconectar, la
+lista de equipos con su IP y su estado (en línea o no), y el servidor SSH con
+su botón Encender/Apagar. Se repinta cada 2 s.
+
+Lo suyo va en `\HISPA\TS`: TS.INI (`encendido=`, `servidor=`, `nombre=`,
+`derp=`), CLAVES.TS y ESTADO.TXT (cómo está: lo leen la orden y la ventana).
+
+### Probarlo
+
+`castel/pruebas.sh`, parte 18 (`SOLO=ssh`, `SOLO=wg`, `SOLO=tailscale`):
+
+- **SSHD contra el cliente OpenSSH** de esta máquina (QEMU con
+  `hostfwd=tcp::P-:22`): una orden (`ssh -p P prueba@127.0.0.1 "echo ..."`) y
+  una sesión con terminal; con llave.
+- **SSH contra un sshd de OpenSSH** propio de la prueba (en un puerto alto, con
+  su llave del equipo, su `authorized_keys` y un `ForceCommand` que pinta con
+  colores y lee una línea: no da una shell): la huella, la llave propia, el
+  terminal (en la pantalla de texto) y una orden.
+- **WireGuard contra el del núcleo Linux**, en un espacio de nombres de red
+  (`ip netns`, con QEMU dentro: no toca la red de la máquina): el apretón, ping
+  en los dos sentidos y SSH por el túnel.
+- **Tailscale contra Headscale 0.29** (un servidor de control libre, BSD) con su
+  DERP dentro, en otro espacio de nombres, con un `tailscaled` de verdad como
+  otro equipo (en modo de usuario, con su estado y su socket aparte: la
+  Tailscale de la máquina no se toca): el alta con la dirección (la aprueba la
+  prueba con `headscale auth register`), el mapa, DERP, ping y SSH en los dos
+  sentidos por la red de Tailscale, por el nombre.
+
+### Los paquetes
+
+`ssh` (SSH.BIN y SSHD.BIN) y `tailscal` (TAILSCAL.BIN y WG.BIN: los nombres de
+los paquetes son de 8 letras, por su registro `<NOMBRE>.PQI`), los dos de la
+0.8.3 y con `base >= 0.8.3` y `red >= 0.8.3` (`tailscal`, además, `tls`); suben
+`base` (ORDENES /C, la bandeja, Configuración) y `red` (la escucha y el túnel).
+
+### Lo que falta
+
+Lo directo por UDP de Tailscale (disco, STUN, perforar el NAT); IPv6 por el
+túnel; la ruta por defecto por WireGuard; varias sesiones de SSHD a la vez;
+reenviar puertos y `scp`/`sftp`; llaves RSA y ECDSA (solo ssh-ed25519); la
+«tailnet lock»; y que SSHD y Tailscale se pongan en marcha solos al arrancar
+(ahora: `SSHD /ENCENDER` y `TAILSCALE /CONECTAR` lo dejan apuntado, y hay que
+volver a darlo tras reiniciar si no lo lanza el escritorio).
 
 ## 14 bis. Hispa-Pentium se compila a sí mismo (CASTEL32)
 

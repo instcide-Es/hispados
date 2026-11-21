@@ -5,7 +5,8 @@
 # (la carpeta nucleo32), $W (una carpeta de trabajo con f/ e i/ ya hechas)
 # y $MEDIO («usb» o «cd»). Deja:
 #   $W/f     el núcleo (SEMILLA.BIN y sus copias ESCRIT*.BIN que piden el modo
-#            gráfico), los programas, ACPI.BIN, TLS.BIN y LEEME.TXT
+#            gráfico), los programas, ACPI.BIN, TLS.BIN, SSH.BIN, SSHD.BIN,
+#            WG.BIN, TAILSCAL.BIN y LEEME.TXT
 #   $W/i     lo que solo vale para instalar: los textos del sistema instalado,
 #            BOOT.IMG, CORE.IMG, CARPETAS.TXT y los registros de los paquetes
 #            (PAQUETES/*.PQI)
@@ -39,6 +40,13 @@ MODULOS="$MODULOS  module /ACPI.BIN ACPI.BIN
 bash $AQUI/tls/hacer.sh $W/f/TLS.BIN
 MODULOS="$MODULOS  module /TLS.BIN TLS.BIN
 "
+# (SSH) el cliente y el servidor SSH, WireGuard y Tailscale (nucleo32/hispac/:
+# C con Monocypher), igual: en la raíz, como módulos y, al instalar, a \HISPA
+bash $AQUI/hispac/hacer.sh $W/f
+for N in SSH SSHD WG TAILSCAL; do
+  MODULOS="$MODULOS  module /$N.BIN $N.BIN
+"
+done
 # lo que se instala en el disco: el núcleo (con el nombre que tendrá allí), los
 # programas, los textos del sistema instalado y el arranque del disco
 INSTALA="  module /ESCRIT8.BIN NUCLEO.BIN

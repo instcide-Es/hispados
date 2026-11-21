@@ -584,8 +584,12 @@ u32 h_recibir(u32 s, void *d, u32 cabe, u32 espera)
 {
 	if (cabe > MAX_DATOS)
 		cabe = MAX_DATOS;
-	if (segura(s))
+	if (segura(s)) {
+		/* (TLS.BIN da por pasado el tiempo antes de mirar la red si la espera es 0) */
+		if (espera < 2)
+			espera = 2;
 		return tls_pide(O_RECIBIR, s, espera, 0, 0, 0, d, cabe);
+	}
 	return h_red(O_RECIBIR, s, espera, 0, 0, 0, d, cabe);
 }
 

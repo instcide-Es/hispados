@@ -98,6 +98,7 @@ módulo Escritorio
     constante AC_ORGANIZAR = 14
     ; ---- la medida de la pantalla (Configuración > Cambiar...) ----
     constante AC_PANTALLA = 30
+    constante AC_RED_TS = 70                    ; (TAILSCALE) Configuración > «Red y Tailscale...»
     constante AC_CERRAR_PANTALLA = 31
     constante AC_PROBAR = 32
     constante AC_GUARDAR_MODO = 33
@@ -594,6 +595,13 @@ módulo Escritorio
         rectángulo(l, x + 3, yy + 13, 9, 2, 0x14336A)
         círculo(l, x + 14, yy + 12, 4, 0x14336A)
         círculo(l, x + 14, yy + 12, 3, luz)
+        ; (TAILSCALE) con el túnel puesto, la marca de Tailscale (puntos) en la pantallita
+        si túnel_red <> 0 entonces
+            rectángulo(l, x + 8, yy + 2, 2, 2, 0x14336A)
+            rectángulo(l, x + 11, yy + 2, 2, 2, 0x14336A)
+            rectángulo(l, x + 8, yy + 5, 2, 2, 0x14336A)
+            rectángulo(l, x + 11, yy + 5, 2, 2, 0x14336A)
+        fin
     fin
 
     ; con un clic en el icono de la red: cómo está
@@ -1180,6 +1188,7 @@ módulo Escritorio
         sino
             pulsador(v_config, 326, 174, 100, 30, "Verde", 0xA9BDD8, 0x7C95B8, AC_FONDO + 2)
         fin
+        pulsador(v_config, 20, 232, 180, 32, "Red y Tailscale...", 0x5AA6F4, 0x2468C8, AC_RED_TS)    ; (TAILSCALE)
         pulsador(v_config, 346, 232, 100, 32, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
         repintada(v_config, 0, 0, 460, 280)
     fin
@@ -2003,6 +2012,7 @@ módulo Escritorio
                 repintar_todo()
                 si v_config <> 0 entonces pinta_config() fin
             caso AC_CERRAR_CONFIG: cierra_cuadro(v_config)
+            caso AC_RED_TS: lanza("\\TAILSCAL.BIN", "/VENTANA")     ; (TAILSCALE) Configuración > Red y Tailscale
             caso AC_PANTALLA:
                 texto_pantalla[0] := 0
                 abre_pantalla()
@@ -2109,8 +2119,8 @@ módulo Escritorio
                     ; el icono de las memorias USB
                     menú_usb(ent32(e.a))
                 sino si hueco_red() > 0 y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() y ent32(e.a) < pantalla.ancho - bandeja + hueco_usb() + ICONO_RED entonces
-                    ; el icono de la red
-                    dice_red()
+                    ; el icono de la red (TAILSCALE: con el túnel, la ventana de Tailscale)
+                    si túnel_red <> 0 entonces lanza("\\TAILSCAL.BIN", "/VENTANA") sino dice_red() fin
                 sino si ent32(e.a) >= BOTONES_X y ancho_botón > 0 entonces
                     n := (ent32(e.a) - BOTONES_X) div ancho_botón
                     si n < ent32(n_botones) entonces
