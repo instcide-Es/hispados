@@ -2927,7 +2927,11 @@ Tres cambios, marcados «(NAVEGADOR)»:
   **`EV_RUEDA` (13)**: `a`, `b`, dónde; `c`, los pasos con signo en el octeto
   bajo (arriba, positivos) y `CON_MAYÚS`/`CON_CONTROL`. Al arrancar dice
   «escritorio: el ratón PS/2 tiene rueda». (En `llamadas.cas`, `EV_RUEDA`,
-  para los programas de Castel.)
+  para los programas de Castel.) Ojo en las pruebas: con cuatro octetos por
+  paquete, en la cola PS/2 de QEMU (16 octetos) caben 4 paquetes por suceso
+  (508 puntos, antes 635); lo que sobra de un `mouse_move` más grande llega
+  con el suceso siguiente (el clic). `probar.sh` ya mueve de 50 en 50; los
+  saltos a mano de `pruebas.sh`, en dos.
 - **El x87 de cada programa** (`tareas.cas`): hasta ahora el núcleo no
   guardaba la coma flotante al cambiar de tarea, y dos programas que la
   usaran a la vez (el Navegador, QuickJS, lo de HVPRUN) se la pisaban. Ahora
