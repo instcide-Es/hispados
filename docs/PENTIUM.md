@@ -2944,6 +2944,7 @@ terceros (sin paquete)»**, los programas copiados a mano.
 ![Sin instalar](pentium/programas-sininstalar.png)
 ![Buscar](pentium/programas-buscar.png)
 ![Actualizar todo con un núcleo nuevo: reiniciar](pentium/programas-reiniciar.png)
+![El menú Inicio: Programas instalados y Actualizar](pentium/programas-menu.png)
 
 **Una sola ventana** para todo lo de los programas (petición de Carlos del
 21/11: lo instalado por tipos para desinstalarlo, y las actualizaciones
@@ -3009,9 +3010,9 @@ instalando) y, si cambia el núcleo, ofrecen reiniciar.
 ![base no se puede quitar](pentium/programas-imprescindible.png)
 ![Un programa suelto: a la Papelera](pentium/programas-suelto.png)
 
-Probado en QEMU (`castel/pruebas.sh`, parte 23, `SOLO=programas`: 19
-comprobaciones de la Consola y del disco desde fuera y 16 capturas de la
-ventana: Instaladas desde Configuración, Pendientes desde «Actualizar»,
+Probado en QEMU (`castel/pruebas.sh`, parte 24, `SOLO=programas`: 19
+comprobaciones de la Consola y del disco desde fuera y 18 capturas de la
+ventana y del menú Inicio: Instaladas desde Configuración, Pendientes desde «Actualizar»,
 Sin instalar e Instalar, la búsqueda, Actualizar, desinstalar con lo que lo
 necesita y su barra, los archivos, reparar y borrar un suelto).
 

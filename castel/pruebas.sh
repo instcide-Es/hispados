@@ -2870,11 +2870,11 @@ printf 'nombre=Programas (prueba)\r\nprograma=\\HISPA\\PROGRAMA.BIN\r\nargumento
 printf 'red cambiada\r\n' > $Q/rc.txt
 mcopy -i $Q/s5.img $Q/HISPA.INI ::HISPA/ && mcopy -i $Q/s5.img $Q/PRUEBA.MNU ::HISPA/MENU/ && mcopy -o -i $Q/s5.img $Q/rc.txt ::HISPA/RED.TXT
 CAPTURAS=$G ESCRIBE=1 SATA=$Q/s5.img MEMORIA=64 MODULOS= ARRANQUE=escritorio QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/usb2.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
-  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":clic 40 585" ":pausa 1" ":clic 250 500" ":pausa 1" ":captura pg0" ":clic 556 374" ":pausa 5" ":raton 790 300" ":captura pg1" \
+  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":clic 40 585" ":pausa 1" ":clic 300 238" ":pausa 1" ":captura pg0" ":clic 556 374" ":pausa 5" ":raton 790 300" ":captura pg1" \
   ":tecla down" ":tecla delete" ":pausa 1" ":captura pg2" ":tecla esc" ":tecla down" ":tecla down" ":tecla delete" ":pausa 1" ":captura pg3" ":tecla esc" ":tecla esc" ":pausa 1" \
-  ":clic 40 585" ":pausa 1" ":clic 250 461" ":pausa 5" ":captura pg4" ":tecla ctrl-tab" ":tecla ctrl-tab" ":tecla ctrl-tab" ":pausa 1" ":captura pg5" ":tecla down" ":tecla ret" ":pausa 5" ":captura pg6" \
+  ":clic 40 585" ":pausa 1" ":clic 290 338" ":pausa 5" ":captura pg4" ":tecla ctrl-tab" ":tecla ctrl-tab" ":tecla ctrl-tab" ":pausa 1" ":captura pg5" ":tecla down" ":tecla ret" ":pausa 5" ":captura pg6" \
   ":tecla ctrl-tab" ":pausa 1" ":escribe juego" ":pausa 1" ":captura pg7" ":tecla ret" ":tecla down" ":clic 720 374" ":pausa 5" ":captura pg8" ":tecla esc" ":tecla esc" ":pausa 1" \
-  ":clic 40 585" ":pausa 1" ":clic 100 364" ":pausa 5" ":tecla down" ":tecla down" ":tecla down" ":tecla delete" ":pausa 1" ":captura pg9" ":tecla tab" ":tecla ret" ":pausa 1" ":captura pg10" ":pausa 6" ":captura pg11" \
+  ":clic 40 585" ":pausa 1" ":captura pgm" ":clic 330 308" ":pausa 5" ":captura pgi" ":tecla esc" ":pausa 1" ":clic 40 585" ":pausa 1" ":captura pgm2" ":clic 100 348" ":pausa 5" ":tecla down" ":tecla down" ":tecla down" ":tecla delete" ":pausa 1" ":captura pg9" ":tecla tab" ":tecla ret" ":pausa 1" ":captura pg10" ":pausa 6" ":captura pg11" \
   ":tecla home" ":tecla down" ":tecla down" ":tecla down" ":tecla ret" ":pausa 3" ":captura pg12" ":clic 720 403" ":pausa 5" ":captura pg13" \
   ":tecla end" ":tecla up" ":tecla delete" ":pausa 1" ":captura pg14" ":tecla tab" ":tecla ret" ":pausa 4" ":captura pg15" > $Q/ventana.sal 2>&1
 miracap "Configuración trae «Programas...»" pg0 negrita 160 120 700 160 "Configuración" negrita 490 360 580 385 "Programas..."
@@ -2896,6 +2896,9 @@ miracap "Instalar visor: hecho, y ya no queda nada sin instalar" pg6 texto 400 5
 miracap "buscar «juego» (sin tildes ni mayúsculas) filtra todas las pestañas: Pendientes (1: juego), Al día (1: saludo, por su tipo, Juegos), Instaladas (3: y MIJUEGO.EXE)" pg7 \
   texto 30 88 320 110 juego negrita 10 120 150 140 "Pendientes (1)" texto 140 120 250 140 "Al día (1)" texto 220 120 380 140 "Instaladas (3)"
 miracap "y «Actualizar» con juego elegido: juego 1.1, y ya no hay pendientes" pg8 texto 300 538 795 560 "juego actualizado a la 1.1." negrita 10 120 150 140 "Pendientes (0)"
+miracap "el menú Inicio nuevo: «Programas instalados» y «Actualizar» en la columna de la derecha" pgm negrita 250 295 430 320 "Programas instalados" negrita 250 325 400 350 Actualizar
+# (los más usados del menú suben: «Programas (prueba)», el cuarto de ellos)
+miracap "«Programas instalados» del menú abre la ventana en «Instaladas»" pgi negrita 240 120 380 140 "Instaladas (10)" negrita 20 170 130 195 "[-] Sistema"
 miracap "desde el acceso con /LENTO (en Instaladas): lo mismo con letras" pg9 negrita 380 270 660 370 "Quitar los 3"
 miracap "al decir que sí, la barra de avance mientras se quita (archivo a archivo)" pg10 negrita 150 230 650 300 "Quitando" rgb 200 301 166534 40
 miracap "y luego, la lista sin letras, saludo ni extra; «Desinstalado.»" pg11 texto 500 538 795 560 "Desinstalado." notexto 20 160 630 330 letras notexto 20 160 630 330 saludo \
