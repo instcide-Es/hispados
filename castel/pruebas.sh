@@ -1427,7 +1427,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 20 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 24 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
@@ -1731,7 +1731,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 20 archivos que ha traído el cargador hacen de unidad M:" $S \
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 24 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
       ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
@@ -3477,12 +3477,12 @@ miracap "conectada: arriba «Conectado a», la señal, el canal y la IP; en la l
 # Configuración (el menú del tapiz): «Red: Automático, Cable, Wi-Fi»; Wi-Fi y luego Cable
 cp $Wf/d.img $Wf/v2.img
 CAPTURAS=$G MEMORIA=64 ESCRIBE=1 DISCO=$Wf/v2.img ARRANQUE="escritorio conred" MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 8" ":clicd 400 300" ":pausa 1" ":clic 420 310" ":pausa 2" \
-  ":captura wf5" ":clic 550 362" ":pausa 2" ":captura wf6" ":clic 440 362" ":pausa 3" ":captura wf7" > $Wf/conf.sal 2>&1
+  ":captura wf5" ":clic 550 369" ":pausa 2" ":captura wf6" ":clic 440 369" ":pausa 3" ":captura wf7" > $Wf/conf.sal 2>&1
 S=$Wf/conf.sal
 mira "Configuración, «Red»: Wi-Fi y luego Cable llegan a RED.BIN (un aviso del núcleo), que lo guarda; con Cable, WIFI.BIN se para" \
   "^red: Wi-Fi: se usa el Wi-Fi (Preferir=WIFI)$" "^red: Wi-Fi: se usa solo el cable (Preferir=CABLE)$" "^wifi: RED.BIN usa el cable: el Wi-Fi se para$"
-miracap "Configuración: la fila «Red:» con Automático, Cable y Wi-Fi (elegido Automático)" wf5 texto 190 352 200 370 "Red:" negrita 290 352 300 370 "Automático" negrita 415 352 440 370 "Cable"
-miracap "y elegido Wi-Fi, el botón cambia (y los otros dos, no elegidos)" wf6 distinto 502 348 96 28 $G/wf5.ppm igual 190 300 200 40 $G/wf5.ppm
+miracap "Configuración: la fila «Red:» con Automático, Cable y Wi-Fi (elegido Automático)" wf5 texto 190 355 200 372 "Red:" negrita 290 355 300 372 "Automático" negrita 415 355 440 372 "Cable"
+miracap "y elegido Wi-Fi, el botón cambia (y los otros dos, no elegidos)" wf6 distinto 502 359 96 20 $G/wf5.ppm igual 190 300 200 40 $G/wf5.ppm
 miracap "y con Cable, el icono de la bandeja deja de ser el del Wi-Fi" wf7 distinto 700 570 40 25 $G/wf6.ppm
 if saca $Wf/v2.img RED.INI $Wf/red2.ini && grep -q "^Preferir=CABLE.$" $Wf/red2.ini; then ok "y RED.INI queda con Preferir=CABLE"; else ko "RED.INI no guarda lo de Configuración"; fi
 else ko "no se pueden hacer el disco o WIFISIM.BIN: $(tail -2 $Wf/disco.txt) $(tail -2 $Wf/chip_hacer.txt)"; fi

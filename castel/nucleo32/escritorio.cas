@@ -1172,9 +1172,9 @@ módulo Escritorio
     ; (WIFI) un pulsador de los de elegir uno (verde el elegido, gris los otros)
     función botón_elegido(x: ent32, yy: ent32, t: puntero a byte, acción: nat32, elegido: bool)
         si elegido entonces
-            pulsador(v_config, x, yy, 100, 30, t, VERDE_ARRIBA, VERDE_ABAJO, acción)
+            pulsador(v_config, x, yy, 100, 22, t, VERDE_ARRIBA, VERDE_ABAJO, acción)
         sino
-            pulsador(v_config, x, yy, 100, 30, t, 0xA9BDD8, 0x7C95B8, acción)
+            pulsador(v_config, x, yy, 100, 22, t, 0xA9BDD8, 0x7C95B8, acción)
         fin
     fin
 
@@ -1184,7 +1184,7 @@ módulo Escritorio
         l := lienzo_de(v_config)
         si l = nulo entonces devolver fin
         quita_pulsadores(v_config)
-        degradado(valor(l), 0, 0, 460, 320, 0xF4F8FE, 0xD6E6FA)
+        degradado(valor(l), 0, 0, 460, 280, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 14, 10, 48)
         texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.8", TINTA)
         texto(valor(l), 74, 34, "un núcleo de 32 bits escrito en Castel", TINTA_SUAVE)
@@ -1225,19 +1225,20 @@ módulo Escritorio
             pulsador(v_config, 326, 174, 100, 30, "Verde", 0xA9BDD8, 0x7C95B8, AC_FONDO + 2)
         fin
         ; (WIFI) la red: por dónde va (lo guarda RED.BIN en RED.INI)
-        texto(valor(l), 20, 224, "Red:", TINTA)
-        botón_elegido(110, 216, "Automático", AC_PREFIERE, preferir_red = PREFIERE_AUTO)
-        botón_elegido(218, 216, "Cable", AC_PREFIERE + 1, preferir_red = PREFIERE_CABLE)
-        botón_elegido(326, 216, "Wi-Fi", AC_PREFIERE + 2, preferir_red = PREFIERE_WIFI)
+        ; (en una fila más baja, entre el tapiz y los botones: el cuadro no cambia de medida)
+        texto(valor(l), 20, 211, "Red:", TINTA)
+        botón_elegido(110, 207, "Automático", AC_PREFIERE, preferir_red = PREFIERE_AUTO)
+        botón_elegido(218, 207, "Cable", AC_PREFIERE + 1, preferir_red = PREFIERE_CABLE)
+        botón_elegido(326, 207, "Wi-Fi", AC_PREFIERE + 2, preferir_red = PREFIERE_WIFI)
         ; (dispositivos) lo que hay en el equipo y qué lo lleva
-        pulsador(v_config, 14, 272, 290, 32, "Administrador de dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
-        pulsador(v_config, 346, 272, 100, 32, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
-        repintada(v_config, 0, 0, 460, 320)
+        pulsador(v_config, 14, 232, 290, 32, "Administrador de dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
+        pulsador(v_config, 346, 232, 100, 32, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
+        repintada(v_config, 0, 0, 460, 280)
     fin
 
     función abre_config()
         si v_config <> 0 entonces cierra_cuadro(v_config) fin
-        v_config := cuadro("Configuración", 460, 320)
+        v_config := cuadro("Configuración", 460, 280)
         pinta_config()
     fin
 

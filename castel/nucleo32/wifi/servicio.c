@@ -101,7 +101,7 @@ u32 hl_pentium_hz(void) { return hz; }
  * arranca, el archivo se escribe y se cierra en cada línea; luego, una vez
  * por segundo y en lo importante. */
 static char linea[200];
-static int linea_n, linea_salta;
+static int linea_n, linea_salta = 8;		/* (cada línea empieza con su hora: «%7lu ») */
 static int cada_linea = 1;
 static char pend[8192];
 static int pend_n;

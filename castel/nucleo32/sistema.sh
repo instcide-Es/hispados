@@ -47,9 +47,10 @@ MODULOS="$MODULOS  module /TLS.BIN TLS.BIN
 bash $AQUI/wifi/hacer.sh $W/f/WIFI.BIN
 cp $AQUI/../../wifi/firmware/bcm43xx-0.fw $W/f/BCM43XX.FW
 cp $AQUI/../../wifi/firmware/bcm43xx_hdr-0.fw $W/f/BCM43XXH.FW
-sed 's/$/\r/' $AQUI/../../wifi/firmware/LICENCE.broadcom_bcm43xx > $W/f/BCM43XX.TXT
-{ cat $AQUI/wifi/WIFI.TXT; echo "------------------------------------------------------------------------"; cat $AQUI/../../LICENSE; } | iconv -f UTF-8 -t CP437 | sed 's/$/\r/' > $W/f/WIFI.TXT
-for N in WIFI.BIN BCM43XX.FW BCM43XXH.FW BCM43XX.TXT WIFI.TXT; do
+# (los dos .TXT, en \INSTALA: en la raíz saldrían como documentos del menú Inicio)
+sed 's/$/\r/' $AQUI/../../wifi/firmware/LICENCE.broadcom_bcm43xx > $W/i/BCM43XX.TXT
+{ cat $AQUI/wifi/WIFI.TXT; echo "------------------------------------------------------------------------"; cat $AQUI/../../LICENSE; } | iconv -f UTF-8 -t CP437 | sed 's/$/\r/' > $W/i/WIFI.TXT
+for N in WIFI.BIN BCM43XX.FW BCM43XXH.FW; do
   MODULOS="$MODULOS  module /$N $N
 "
 done
@@ -60,6 +61,8 @@ INSTALA="  module /ESCRIT8.BIN NUCLEO.BIN
   module /ASISTE.BIN ASISTE.BIN
 $MODULOS  module /INSTALA/LEEME.TXT LEEME.TXT
   module /INSTALA/MANUAL.TXT MANUAL.TXT
+  module /INSTALA/WIFI.TXT WIFI.TXT
+  module /INSTALA/BCM43XX.TXT BCM43XX.TXT
   module /INSTALA/BOOT.IMG BOOT.IMG
   module /INSTALA/CORE.IMG CORE.IMG
 "
