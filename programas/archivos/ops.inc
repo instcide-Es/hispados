@@ -1709,7 +1709,17 @@ o_abrir:
         mov edi, ab_ruta
         mov esi, n_bloc
         cmp eax, TI_TEXTO
-        je abrir_con_int
+        jne .nt
+        call cart_md                ; [HISPA-DRIVE] un .MD de JUEGOS\MD es un
+        jnc abrir_con_int           ; cartucho (los demás .MD, texto)
+        mov esi, ab_ruta
+        call largo
+        cmp word [esi+eax-2], 'MD'
+        mov esi, n_bloc
+        jne abrir_con_int
+        mov ebx, n_hispadrv
+        jmp .c1
+.nt:
         cmp eax, TI_MOD
         je .mod
         mov ebx, n_pintura
@@ -1720,6 +1730,9 @@ o_abrir:
         je .progs
         cmp eax, TI_CART
         je .cart
+        call cart_md                ; [HISPA-DRIVE] (un .BIN de JUEGOS\MD)
+        mov ebx, n_hispadrv
+        jc .c1
         ; no se sabe: ¿con qué programa? [0.9.22]
         jmp abrir_con_lista
 .mod:
@@ -1754,6 +1767,46 @@ o_abrir:
         jmp abrir_con
 .x:
         ret
+
+; [HISPA-DRIVE] CF=1 si ab_ruta está en una carpeta JUEGOS\MD (la de los
+; cartuchos de Hispa-Drive: allí .MD y .BIN son volcados, no texto). Conserva
+; todo
+cart_md:
+        pushad
+        mov esi, ab_ruta
+.c:
+        mov edi, t_juegos_md
+        mov ebx, esi
+.k:
+        mov al, [edi]
+        test al, al
+        jz .si
+        mov ah, [ebx]
+        cmp ah, 'a'
+        jb .k1
+        cmp ah, 'z'
+        ja .k1
+        sub ah, 32
+.k1:
+        cmp al, ah
+        jne .sig
+        inc edi
+        inc ebx
+        jmp .k
+.sig:
+        cmp byte [esi], 0
+        je .no
+        inc esi
+        jmp .c
+.si:
+        popad
+        stc
+        ret
+.no:
+        popad
+        clc
+        ret
+t_juegos_md db "\JUEGOS\MD\", 0
 
 o_editar:
         call objetivo

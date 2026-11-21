@@ -60,6 +60,10 @@ se presenta como consola americana (NTSC, 60 Hz); si solo para Japón, como
 japonesa; si solo para Europa, como europea (PAL, 50 Hz, 313 líneas). Con
 `/R=1`, `/R=2` o `/R=3` en los parámetros se fuerza Japón, América o Europa.
 
+En el **Administrador de archivos**, un `.GEN` o un `.SMD` se abre con
+Hispa-Drive; un `.MD` o un `.BIN`, solo si está en una carpeta `JUEGOS\MD`
+(fuera de ella, un `.MD` es un texto y se abre con el Bloc de notas).
+
 Parámetros del acceso directo: una ROM (se abre al entrar), `/6` (el mando
 de seis), `/R=n`, `/1` (tamaño x1); para las pruebas, `/P` (paso a paso) y
 `/T=n` (n cuadros a toda velocidad y el resultado en `HISPADRV.LOG`; con
@@ -84,15 +88,14 @@ segundo. Pendiente: que el núcleo avise al soltar.
 | Parte | Estado |
 |---|---|
 | Procesador (68000) | Todas las instrucciones, con sus ciclos (también los de MULU/MULS y DIVU/DIVS, que dependen de los números). Excepciones (TRAP, CHK, división entre 0, privilegio, ilegal, línea A y F), interrupciones con sus vectores automáticos, STOP, las dos pilas. **Pasa 818.231 de las 821.970 pruebas de una instrucción de SingleStepTests** (99,5 %): lo que no coincide es ASR con más desplazamiento que bits y un número negativo (la prueba dice C=X=0; el manual del fabricante dice «el último bit que sale», que es lo que se hace aquí), dos pruebas de ASL.b y una de DIVU que son errores de dirección mal marcados. Sin hacer: los errores de bus y de dirección (los juegos no los usan) y la traza |
-| Imagen (VDP) | Los dos planos (32, 64 o 128 casillas), desplazamiento horizontal de pantalla, por filas de 8 o por línea, y vertical de pantalla o por columnas de 16 puntos; la ventana (por arriba, abajo, izquierda o derecha); 80 objetos (64 con 256 puntos) de 1 a 4 casillas de lado, girados, con su lista enlazada, 20 por línea (16) y el límite de puntos, la máscara de x=0 y las banderas de demasiados y de choque; las prioridades de los planos y de los objetos; 320 y 256 puntos de ancho, 224 líneas (240 en PAL); la paleta de 64 colores de 9 bits a los 256 de Hispa Ventanas; las tres DMA (del 68000 a VRAM, CRAM y VSRAM, relleno y copia) con el tiempo que el 68000 se queda quieto; las interrupciones de línea (registro 10) y de cuadro, el estado y el contador H/V. Cada línea se pinta de una vez (después de dejar correr al 68000 el borde de la línea, para que los cambios de la interrupción de línea salgan en su sitio) |
+| Imagen (VDP) | Los dos planos (32, 64 o 128 casillas), desplazamiento horizontal de pantalla, por filas de 8 o por línea, y vertical de pantalla o por columnas de 16 puntos; la ventana (por arriba, abajo, izquierda o derecha); 80 objetos (64 con 256 puntos) de 1 a 4 casillas de lado, girados, con su lista enlazada, 20 por línea (16) y el límite de puntos, la máscara de x=0 y las banderas de demasiados y de choque; las prioridades de los planos y de los objetos; las **sombras y los brillos** (el bit 3 del registro 12: lo que no tiene prioridad alta en ningún plano, a la mitad; los objetos de los colores 14 y 15 de la última paleta dan luz o sombra a lo de debajo, sin pintarse); 320 y 256 puntos de ancho, 224 líneas (240 en PAL); la paleta de 64 colores de 9 bits a los 256 de Hispa Ventanas; las tres DMA (del 68000 a VRAM, CRAM y VSRAM, relleno y copia) con el tiempo que el 68000 se queda quieto; las interrupciones de línea (registro 10) y de cuadro, el estado y el contador H/V. Cada línea se pinta de una vez (después de dejar correr al 68000 el borde de la línea, para que los cambios de la interrupción de línea salgan en su sitio) |
 | Sonido FM (YM2612) | Seis canales de cuatro operadores, los ocho algoritmos, la realimentación, la envolvente con sus velocidades y la escala por la nota (las tablas de la documentación del chip), la desafinación y el múltiplo, el LFO de volumen y de tono, el DAC del canal 6, el modo especial del canal 3 y los dos temporizadores con sus avisos. Las muestras salen directamente a la frecuencia de la tarjeta |
 | Sonido (SN76489) | El de Hispa-System (`programas/comun/psg.inc`), mezclado con el FM |
 | Z80 | El de Hispa-System (pasa zexdoc y zexall), con su RAM de 8 KB, el YM2612, el registro del banco y la ventana de 32 KB al cartucho; el 68000 le pide el bus y lo reinicia; la interrupción del VDP en cada cuadro |
 | Mandos | Dos, de tres o de seis botones (la secuencia de TH, que vuelve a empezar tras 1,5 ms quieto), con el teclado y HSPJOY |
 | Cartuchos | Hasta 4 MB, con la cabecera de las copiadoras y el formato `.SMD`; la RAM con pila (64 KB, `.SRM`) |
 
-**Sin hacer** (pendiente): las sombras y los brillos del VDP (el modo del
-registro 12; los juegos que lo usan salen sin sombras), el modo entrelazado
+**Sin hacer** (pendiente): el modo entrelazado
 2 (el de dos jugadores de algún juego de carreras), los cambios a mitad de
 una línea, la caché de la tabla de objetos del VDP (se vuelve a leer si se
 escribe en ella a mitad de cuadro), la cola del puerto de datos (el tiempo
@@ -104,7 +107,7 @@ Compatibilidad: **solo se ha probado con las ROM nuestras**: en el proyecto
 no hay ni se han usado ROM comerciales. Por cómo está hecho (el 68000
 comprobado instrucción a instrucción, el VDP por líneas con sus
 interrupciones), lo esperable es que la mayoría de los juegos vayan; los que
-usan sombras, el entrelazado o trucos a mitad de línea se verán con fallos.
+usan el entrelazado o trucos a mitad de línea se verán con fallos.
 
 ## Cómo está hecho
 
@@ -162,7 +165,9 @@ un Pentium de verdad**: `/T=600 /V` lo apunta en `HISPADRV.LOG`.
    programa, su ventana al cartucho y sus interrupciones, los temporizadores
    del YM2612, los mandos de tres y de seis botones con un guion, la RAM del
    cartucho y que se guarda), su pantalla y la nota FM del final (un La de
-   440 Hz); `CARGA.MD` y su pantalla; y lo que cuesta cada cuadro.
+   440 Hz); `CARGA.MD` y su pantalla; `SOMBRAS.MD` (las sombras y los
+   brillos: se mira la luz de cada zona de la pantalla, punto a punto); y
+   lo que cuesta cada cuadro.
 2. **En Hispa Ventanas**: `/T=600 /V` con `PRUEBA.MD`, todo bien dentro del
    módulo y 60 cuadros por segundo o más al doble; la velocidad con
    `CARGA.MD`.
@@ -170,10 +175,10 @@ un Pentium de verdad**: `/T=600 /V` lo apunta en `HISPADRV.LOG`.
 4. **En Hispa-Pentium**: `HVPRUN.BIN HISPADRV.HVP PRUEBA.MD /T=600 /V` desde
    la Consola, todo bien.
 
-Las ROM de prueba (`tests/hispadrv/mdtest.s`, `carga.s` y los programas de
+Las ROM de prueba (`tests/hispadrv/mdtest.s`, `carga.s`, `sombras.s` y los programas de
 sus Z80, `z80prueba.s` y `z80carga.s`) son nuestras: las del 68000 se
 ensamblan con GNU as (`binutils-m68k-linux-gnu`) si está; si no, se usan las
-ya hechas (`tests/hispadrv/PRUEBA.MD` y `CARGA.MD`). Las del Z80, con
+ya hechas (`tests/hispadrv/PRUEBA.MD`, `CARGA.MD` y `SOMBRAS.MD`). Las del Z80, con
 `tools/asmz80.py`; las letras, las de Hispa-System
 (`sms/comun/letras.s`, pasadas por `tools/md_letras.py`).
 
@@ -181,7 +186,7 @@ ya hechas (`tests/hispadrv/PRUEBA.MD` y `CARGA.MD`). Las del Z80, con
 
 - Probarlo en equipos de verdad (un Pentium, el HP Mini) con cartuchos
   propios volcados.
-- Las sombras y los brillos, el entrelazado y lo demás de «Sin hacer».
+- El entrelazado y lo demás de «Sin hacer».
 - Que el núcleo de Hispa-Pentium avise al soltar una tecla, y el sonido en
   HVPRUN.
 - Guardar el estado de la consola en cualquier momento.
