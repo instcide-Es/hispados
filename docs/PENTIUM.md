@@ -3636,12 +3636,12 @@ las DLL de Hispa-486 sin CMOV ni FCOMI (`-march=i586` / `i486`).
 `pentium-tailscale`, `pentium-explorador`, `pentium-win32`, `pestanas-raton`,
 `navega-fijo` y `pentium-edid` juntas): el catálogo firmado con base, red y ejemplos 0.8.4,
 equipo 0.9 (el explorador, `MINIAT.BIN` y `DISPOSIT.BIN`; pide base >= 0.8.4),
-ssh, tailscal 0.8.4 y win32 1.0 (nuevos), navega 0.2 y clicgest 0.2.2 tal como
+ssh, tailscal 0.8.4 y win32 1.0 (nuevos), navega 0.2 y clicgest 0.2.3 tal como
 están publicados, paquetes 1.1 y tls 0.8.4 (la revisión de seguridad), y los
 demás iguales octeto a octeto a lo publicado (bloc, consola, hvprun, oficina). Probado en QEMU (`q35`) desde un
 sistema instalado con el CD de la 0.8.3 y lo publicado de la 0.8.3 (navega
 0.1, clicgest 0.2.1), con el catálogo por HTTP: la firma, buena; `PAQUETES
-ACTUALIZA` pone base, ejemplos, equipo, red, navega y clicgest; `PAQUETES
+ACTUALIZA` pone base, ejemplos, equipo, red, paquetes, tls, navega y clicgest; `PAQUETES
 INSTALA ssh tailscal win32`; `PAQUETES COMPRUEBA`: los 15 paquetes cuadran. Y
 tras reiniciar: «El núcleo nuevo ha arrancado bien», el dock, Naves en el menú
 Inicio, el explorador con el CD del lector (IDE en el `q35`, `ide-cd`), una
