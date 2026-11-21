@@ -9,9 +9,11 @@
 ;  dependencias, las sumas y el todo o nada son los de PAQUETES.
 ;  Con el teclado: las flechas eligen, Intro instala (o actualiza) el
 ;  elegido, Supr lo quita, F5 busca novedades (vuelve a traer el catálogo).
-;  (PROGRAMAS) Arriba a la derecha, «Instalados...» (o F6) abre «Programas
-;  instalados» (PROGRAMA.BIN: por tipos, con desinstalar, reparar y los
-;  archivos de cada uno).
+;  (PROGRAMAS) Desde el 21/11, ACTUALIZ (sin /BANDEJA) abre PROGRAMA.BIN,
+;  la ventana unificada «Programas y actualizaciones» (pestañas Pendientes,
+;  Al día, Instaladas y Sin instalar, por tipos, con búsqueda); la de aquí
+;  queda solo si PROGRAMA.BIN no está. Arriba a la derecha lleva
+;  «Instalados...» (o F6), que también la abre.
 ;  Mientras PAQUETES trabaja, la ventana no se queda parada: enseña lo que
 ;  hace con una barra (lo que escribe PAQUETES /AVANCE en AVANCE.TXT; al
 ;  bajar un paquete, DESCARGA lo pone al día cada 16 K). Si se ha cambiado el
@@ -530,7 +532,7 @@ módulo UActual
     función clic(x: ent32, yy: ent32)
         ; (PROGRAMAS) «Instalados...»
         si yy >= INST_Y y yy < INST_Y + INST_AL y x >= w_an - INST_AN - 12 y x < w_an - 12 entonces
-            lanzar_suelto("\\HISPA\\PROGRAMA.BIN", "")
+            lanzar_suelto("\\HISPA\\PROGRAMA.BIN", "/INSTALADAS")
             devolver
         fin
         si yy >= botón_y y yy < botón_y + BOTÓN_ALTO y reiniciar_ entonces
@@ -719,6 +721,10 @@ módulo UActual
         concatenar(fich_avance, ":\\HISPA\\PAQUETES\\AVANCE.TXT")
         argumentos(a, 64)
         si buscar(a, "/BANDEJA") <> nulo o buscar(a, "/bandeja") <> nulo entonces devolver bandeja() fin
+        ; (PROGRAMAS) la ventana es ya la de PROGRAMA.BIN («Programas y
+        ; actualizaciones», con sus pestañas), en «Pendientes»; esta de aquí,
+        ; solo si no está (un sistema a medio actualizar)
+        si no es_error(lanzar_suelto("\\HISPA\\PROGRAMA.BIN", "/PENDIENTES")) entonces devolver 0 fin
         medidas(ANCHO_INICIAL, ALTO_INICIAL)
         v := ventana("Programas y actualizaciones", ANCHO_INICIAL, ALTO_INICIAL)
         si es_error(v) entonces
@@ -746,7 +752,7 @@ módulo UActual
                 sino si s.a = TECLA_F5 entonces
                     novedades()
                 sino si s.a = TECLA_F6 entonces
-                    lanzar_suelto("\\HISPA\\PROGRAMA.BIN", "")     ; (PROGRAMAS)
+                    lanzar_suelto("\\HISPA\\PROGRAMA.BIN", "/INSTALADAS")     ; (PROGRAMAS)
                 fin
             sino si s.clase = EV_RATÓN_BAJA entonces
                 clic(ent32(s.a), ent32(s.b))

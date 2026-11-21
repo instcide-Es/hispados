@@ -187,6 +187,7 @@ módulo UPaquetes
     variable quitando: bool                     ; (el avance, archivo a archivo)
     variable av_h, av_t: nat32
     variable lento: bool                        ; (las pruebas) /LENTO: cada archivo quitado, un poco de espera
+    variable con_catálogo: bool                 ; FICHAS /CATALOGO: también lo del catálogo
     variable ins_fecha: arreglo [MAX_PAQ] de nat32  ; la fecha de su registro (la de la FAT): cuándo se instaló
     variable cat_tipos_n: nat32
     variable cat_tipo_nombre: arreglo [MAX_PAQ] de arreglo [12] de byte
@@ -2001,6 +2002,19 @@ módulo UPaquetes
             fecha_texto(suelto_fecha[i - 1], f)
             escribir("s|", suelto_ruta[i - 1], "|", suelto_tamaño[i - 1], "|", f, "\n")
         fin
+        ; (/CATALOGO) de dónde, y la más nueva de cada uno del catálogo:
+        ; «o|de dónde|firmado» y «c|nombre|versión|tipo|octetos del paquete|descripción»
+        si con_catálogo y carga_catálogo() entonces
+            escribir("o|", origen, "|")
+            si firmado entonces escribir("firmado") fin
+            escribir("\n")
+            para i desde 1 hasta cat_n hacer
+                si mejor_del_catálogo(cat_nombre[i - 1], 0, "") = i - 1 entonces
+                    código_tipo(tipo_de(nulo, cat_nombre[i - 1]), x)
+                    escribir("c|", cat_nombre[i - 1], "|", cat_versión[i - 1], "|", x, "|", cat_tamaño[i - 1], "|", cat_desc[i - 1], "\n")
+                fin
+            fin
+        fin
     fin
 
     ; PAQUETES ARCHIVOS nombre: sus archivos, y cómo están
@@ -2574,6 +2588,7 @@ módulo UPaquetes
             si iguales_sin_caja(palabra_, "/TIPO") o iguales_sin_caja(palabra_, "/TIPOS") entonces por_tipo := cierto fin
             si iguales_sin_caja(palabra_, "/DEPENDIENTES") entonces con_dependientes := cierto fin
             si iguales_sin_caja(palabra_, "/LENTO") entonces lento := cierto fin
+            si iguales_sin_caja(palabra_, "/CATALOGO") entonces con_catálogo := cierto fin
             si empieza_por(palabra_, "/CORTE=") o empieza_por(palabra_, "/corte=") entonces
                 texto_a_natural(dirección(palabra_[7]), corte)
             fin

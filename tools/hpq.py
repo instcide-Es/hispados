@@ -339,8 +339,10 @@ def catalogo(carpeta):
             falla('el paquete %s tiene que llamarse en 8+3 y en mayúsculas' % n)
         filas.append('paquete=%s %s %s %d %s %s' % (campos['nombre'], campos['version'], n, len(datos), sha(datos),
                                                     campos.get('descripcion', '')))
-        tipos[campos['nombre']] = tipo_de(campos['nombre'], campos)
-    # (PROGRAMAS) y el tipo de cada uno, aparte (un PAQUETES de antes no lo mira)
+        if tipo_de(campos['nombre'], campos) != 'otros':
+            tipos[campos['nombre']] = tipo_de(campos['nombre'], campos)
+    # (PROGRAMAS) y el tipo de cada uno, aparte (un PAQUETES de antes no lo mira;
+    # «otros», el de no saberlo, no se escribe)
     filas += ['tipo=%s %s' % (k, tipos[k]) for k in sorted(tipos)]
     with open(os.path.join(carpeta, 'CATALOGO.TXT'), 'wb') as f:
         f.write(a437(MAGIA_CATALOGO) + b'\r\n')
@@ -402,7 +404,7 @@ def linea_catalogo(ruta):
         catalogo(tmp)
         with open(os.path.join(tmp, 'CATALOGO.TXT'), 'rb') as f:
             # (y la de su tipo: PROGRAMAS)
-            return b'\r\n'.join(f.read().split(b'\r\n')[1:3])
+            return b'\r\n'.join(x for x in f.read().split(b'\r\n')[1:3] if x)
     finally:
         for x in os.listdir(tmp):
             os.remove(os.path.join(tmp, x))

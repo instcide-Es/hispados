@@ -11,6 +11,8 @@
 ;      argumentos=
 ;      icono=\HISPA\MENU\AGENDA.ICP
 ;      escritorio=si
+;      tipo=sistema                (PROGRAMAS: la carpeta de «Todos los programas»)
+;      menu=todos                  (PROGRAMAS: solo en «Todos los programas»)
 ;
 ;  «nombre» y «programa» hacen falta; lo demás no. El icono es un .ICP: la
 ;  magia «HPIC», el ancho y el alto (32 y 32, en dos palabras de 32 bits, la
@@ -121,6 +123,9 @@ módulo Accesos
         si n >= PRIMER_ERROR entonces devolver fin
         texto[n] := 0
         k := n_accesos
+        ; (PROGRAMAS) «menu=todos»: solo en «Todos los programas» (en su carpeta, por su
+        ; «tipo=»), no aquí, en la columna de los accesos (el de «Programas instalados»)
+        si valor_de("menu", valor_, 80) y iguales_sin_caja(valor_, "todos") entonces devolver fin
         si no valor_de("nombre", accesos[k].nombre, 32) o no valor_de("programa", accesos[k].programa, 80) entonces devolver fin
         valor_de("argumentos", accesos[k].argumentos, 80)
         accesos[k].en_escritorio := valor_de("escritorio", valor_, 80) y (valor_[0] = 's' o valor_[0] = 'S')

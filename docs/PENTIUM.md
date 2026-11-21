@@ -2679,7 +2679,7 @@ En el intérprete de órdenes (o en la Consola del escritorio):
 | `PAQUETES REPARA [nombre...]` | (PROGRAMAS) comprueba las sumas de lo instalado (todo, o eso) y vuelve a poner **solo lo dañado** (lo cambiado y lo que falta), del paquete de la misma versión |
 | `PAQUETES ARCHIVOS nombre` | (PROGRAMAS) sus archivos: lo que mide cada uno y si está `bien`, `CAMBIADO` o `FALTA` |
 | `PAQUETES SUELTOS` | (PROGRAMAS) los programas que no son de ningún paquete (`.EXE`, `.BIN`, `.HVP` en la raíz, `\HISPA`, `\HISPA32` y `\PROGRAMS`, con sus subcarpetas) |
-| `PAQUETES FICHAS` | (PROGRAMAS) todo lo de lo instalado y lo suelto, una línea cada uno, para «Programas instalados» |
+| `PAQUETES FICHAS [/CATALOGO]` | (PROGRAMAS) todo lo de lo instalado y lo suelto (y, con /CATALOGO, lo del catálogo), una línea cada uno, para la ventana |
 | `PAQUETES QUITA nombre /DEPENDIENTES` | (PROGRAMAS) lo quita, y antes lo que lo necesite (y lo que necesite a eso), cada uno su todo o nada |
 | `/DESDE=carpeta` o `/DESDE=http://...` | de dónde traer los paquetes |
 | `/FORZAR` | quitar aunque otro lo necesite; poner una versión igual o más vieja que la instalada |
@@ -2787,7 +2787,8 @@ terceros (sin paquete)»**, los programas copiados a mano.
   `tipo=` del registro `.PQI` del paquete que deja su `.MNU` (o, si no lo
   dice, la tabla por nombre; si no, «Otros»). Un `.MNU` puede llevar su propio
   `tipo=` (el mismo código), que manda: el de «Programas instalados»
-  (`\HISPA\MENU\PROGRAMA.MNU`) dice `tipo=sistema`.
+  (`\HISPA\MENU\PROGRAMA.MNU`) dice `tipo=sistema` y **`menu=todos`**: sale solo en «Todos los programas»,
+  no en la columna de los accesos del menú de ahora (accesos.cas lo salta).
 - **El tipo puede ir solo en el catálogo**: `hpq.py catalogo` pone la línea
   `tipo=` de cada paquete (de su cabecera o de la tabla), así que un paquete
   que no cambia (ClicGest 0.2.3) no hay que rehacerlo ni subirle la versión.
@@ -2799,21 +2800,49 @@ terceros (sin paquete)»**, los programas copiados a mano.
   `/FORZAR`): PAQUETES lo dice y por qué. Un paquete de otro puede pedirlo con
   `imprescindible=si` en su cabecera.
 
-### La ventana: «Programas instalados» (PROGRAMA.BIN)
+### La ventana: «Programas y actualizaciones» con pestañas (PROGRAMA.BIN)
 
-![Programas instalados](pentium/programas1.png)
+![Programas y actualizaciones: Instaladas](pentium/programas1.png)
+![Pendientes](pentium/programas-pendientes.png)
+![Sin instalar](pentium/programas-sininstalar.png)
+![Buscar](pentium/programas-buscar.png)
 
-`PROGRAMA.BIN` (`uprogram.cas`, con los controles del sistema, del paquete
-`paquetes` 1.1): en **Configuración › «Programas...»**, en el menú Inicio
-(«Programas instalados», su `.MNU` con `tipo=sistema`: en la carpeta Sistema
-de «Todos los programas») y en «Programas y actualizaciones» (el botón
-«Instalados...» de arriba a la derecha, o F6). Arriba, **un árbol por tipos**
-(cada uno con cuántos tiene y lo que ocupan; `[+]`/`[-]` lo abre y lo cierra)
-con cada programa, su versión, su tamaño y qué es; abajo, en «Detalles», el
-elegido: su paquete, su tipo, su versión, **lo que ocupa en el disco** (y
-cuántos archivos), **cuándo se instaló** (la fecha de su registro), **lo que
-necesita** y **lo que lo necesita**; y a la derecha sus botones y **lo que
-ocupan todos los programas y lo libre en el disco** (con su barra).
+**Una sola ventana** para todo lo de los programas (petición de Carlos del
+21/11: lo instalado por tipos para desinstalarlo, y las actualizaciones
+organizadas): `PROGRAMA.BIN` (`uprogram.cas`, con los controles del sistema:
+pestañas y rejilla; del paquete `paquetes` 1.1). Cuatro pestañas, cada una
+con **cuántos tiene** («Pendientes (3)»):
+
+| Pestaña | Qué tiene | Botones |
+|---|---|---|
+| **Pendientes** (la de por omisión) | lo instalado con una versión más nueva en el catálogo (columnas «Instalada» y «Hay»); sin nada, «Todo está al día» | **Actualizar** (el elegido), **Actualizar todo**, Ver archivos |
+| **Al día** | lo instalado que ya está en su última versión | Desinstalar..., Reparar, Ver archivos |
+| **Instaladas** | todo lo instalado y, al final, los programas sueltos | Desinstalar... (o Borrar...), Reparar, Ver archivos |
+| **Sin instalar** | lo del catálogo que no está instalado (los opcionales: navega, clicgest, ssh, tailscal, win32...) | **Instalar** |
+
+En todas, **un árbol por tipos** (cada tipo con cuántos tiene y lo que
+ocupan; `[+]`/`[-]` lo abre y lo cierra). Arriba, **la búsqueda** (con su
+lupa), común a las cuatro: filtra al escribir por nombre, qué es o tipo, sin
+mirar tildes ni mayúsculas (`contiene` de controles.cas), y las cuentas de
+las pestañas son las de lo que se encuentra; Esc la borra. A su derecha, de
+dónde son los paquetes (y «firma buena»).
+
+**Se abre** en la pestaña que toca: `PROGRAMA [/PENDIENTES | /ALDIA |
+/INSTALADAS | /SININSTALAR]`. El menú Inicio («Actualizar»), el dock y el
+aviso de la bandeja («Verlas») lanzan `ACTUALIZ.BIN`, que ahora abre esta
+ventana en **Pendientes** (la ventana vieja de `uactual.cas` queda solo si
+`PROGRAMA.BIN` no está; `ACTUALIZ /BANDEJA` sigue igual); **Configuración ›
+«Programas...»** y el acceso «Programas instalados» (`PROGRAMA.MNU`, con
+`tipo=sistema` y `menu=todos`: para la carpeta Sistema de «Todos los
+programas») la abren en **Instaladas**.
+
+Abajo, en «Detalles», el elegido: su paquete, su tipo, su versión (y la
+nueva, si la hay), **lo que ocupa en el disco** (y cuántos archivos), **cuándo
+se instaló** (la fecha de su registro), **lo que necesita** y **lo que lo
+necesita**; de uno sin instalar, lo que se trae. A la derecha, sus botones y
+**lo que ocupan todos los programas y lo libre en el disco** (con su barra).
+Instalar y actualizar van con la barra de PAQUETES (bajando, comprobando,
+instalando) y, si cambia el núcleo, ofrecen reiniciar.
 
 - **Desinstalar...** pide confirmarlo. Si otros lo necesitan, lo dice y
   ofrece quitarlos también («Hay programas que necesitan letras: saludo,
@@ -2840,21 +2869,31 @@ ocupan todos los programas y lo libre en el disco** (con su barra).
 ![base no se puede quitar](pentium/programas-imprescindible.png)
 ![Un programa suelto: a la Papelera](pentium/programas-suelto.png)
 
-Probado en QEMU (`castel/pruebas.sh`, parte 23, `SOLO=programas`: 16
-comprobaciones de la Consola y del disco desde fuera y 13 capturas de la
-ventana).
+Probado en QEMU (`castel/pruebas.sh`, parte 23, `SOLO=programas`: 19
+comprobaciones de la Consola y del disco desde fuera y 16 capturas de la
+ventana: Instaladas desde Configuración, Pendientes desde «Actualizar»,
+Sin instalar e Instalar, la búsqueda, Actualizar, desinstalar con lo que lo
+necesita y su barra, los archivos, reparar y borrar un suelto).
 
 Con el teclado: las flechas andan por el árbol (izquierda y derecha cierran y
-abren un tipo), Supr desinstala o borra, Intro abre un tipo o enseña los
-archivos, Ctrl+Tab cambia de pestaña, F5 vuelve a mirar, Alt+P/V/Y los menús;
+abren un tipo), Ctrl+Tab cambia de pestaña, escribir busca (Ctrl+F o F3: la
+búsqueda; Esc la borra), Supr desinstala o borra, Intro abre un tipo, enseña
+los archivos o instala, F5 busca novedades, Alt+P/V/Y los menús;
 el botón derecho, el menú del programa. Como la de las actualizaciones, no sabe
-de paquetes: lanza `PAQUETES FICHAS` (una línea por paquete:
+de paquetes: lanza `PAQUETES FICHAS /CATALOGO` (una línea por paquete:
 `f|nombre|versión|tipo|octetos|archivos|fecha|imprescindible (por qué)|necesita|lo necesitan|descripción`;
-una por suelto, `s|ruta|octetos|fecha`; y `u|letra|total K|libre K`) con su
+una por suelto, `s|ruta|octetos|fecha`; `u|letra|total K|libre K`; y, con
+`/CATALOGO`, `o|de dónde|firmado` y la más nueva de cada uno del catálogo,
+`c|nombre|versión|tipo|octetos|descripción`) con su
 salida a `C:\HISPA\PAQUETES\PROGRAMA.TXT`. `PROGRAMA /LENTO` (para las
 pruebas) hace que PAQUETES vaya despacio al quitar, para ver la barra.
 
-### La ventana: «Programas y actualizaciones»
+### La ventana de antes: ACTUALIZ.BIN
+
+*(PROGRAMAS, 21/11: desde la 1.1 de `paquetes`, `ACTUALIZ.BIN` abre la ventana
+unificada de arriba, `PROGRAMA.BIN`, en «Pendientes»; lo que sigue es la
+ventana de antes, que queda solo si `PROGRAMA.BIN` no está, y `ACTUALIZ
+/BANDEJA`, que no cambia.)*
 
 ![Programas y actualizaciones](pentium/actualizaciones.png)
 

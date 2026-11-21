@@ -1535,7 +1535,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     S=$G/usb.txt2
     # (SSH, TAILSCALE: 23 programas: SSH, SSHD, WG y TAILSCAL también van como módulos)
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 26 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 27 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
@@ -1838,7 +1838,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 26 archivos que ha traído el cargador hacen de unidad M:" $S \
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 27 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
       ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
@@ -2752,7 +2752,7 @@ printf 'la red (de prueba)\r\n' > $F/R.TXT; head -c 70000 /dev/urandom > $F/GRAN
   $HPQ crea paq/EXTRA.HPQ --nombre extra --version 1.0 --descripcion 'Lo que necesita a saludo' --necesita 'saludo' E.TXT='\EXTRA\E.TXT'
   $HPQ crea paq/JUEGO.HPQ --nombre juego --version 1.0 --descripcion 'Un juego (su tipo, solo en el catálogo)' J.TXT='\JUEGOS\J.TXT'
   $HPQ catalogo paq
-  sed -i 's/^tipo=juego otros/tipo=juego juegos/' paq/CATALOGO.TXT
+  printf 'tipo=juego juegos\r\n' >> paq/CATALOGO.TXT
   $HPQ firma paq $Q/prueba.key
   $HPQ registro paq/LETRAS.HPQ LETRAS.PQI ) > $Q/hpq.txt 2>&1 || hechos=0
 # el disco: base y red instalados, y los sueltos (un .EXE en \HISPA32, un .BIN
@@ -2764,9 +2764,9 @@ mkfs.fat -F 32 -s 1 -n HISPA -C $Q/sis.img 65536 > /dev/null && mmd -i $Q/sis.im
   && mcopy -i $Q/sis.img $F/HOLA.BIN ::HISPA/SUELTO.BIN && mcopy -i $Q/sis.img $F/HOLA.BIN ::PROGRAMS/COSAS/OTRO.BIN || hechos=0
 mkfs.fat -F 16 -n MEMORIA -C $Q/usb.img 16384 > /dev/null && mmd -i $Q/usb.img ::PAQUETES && mcopy -i $Q/usb.img $F/paq/* ::PAQUETES/ || hechos=0
 if [ $hechos = 1 ] && grep -q $'^tipo=sistema\r$' $F/BASE.PQI && grep -q '^tipo=juegos' $F/paq/SALUDO.HPQ && ! grep -aq '^tipo=' $F/paq/JUEGO.HPQ \
-  && grep -q '^tipo=letras oficina' $F/paq/CATALOGO.TXT && grep -q '^tipo=extra otros' $F/paq/CATALOGO.TXT && grep -q '^tipo=juego juegos' $F/paq/CATALOGO.TXT \
+  && grep -q '^tipo=letras oficina' $F/paq/CATALOGO.TXT && ! grep -q '^tipo=extra' $F/paq/CATALOGO.TXT && grep -q '^tipo=juego juegos' $F/paq/CATALOGO.TXT \
   && $HPQ comprueba $F/paq $Q/clave.cas > /dev/null && [ "$($HPQ tipos | wc -l)" = 11 ]; then
-  ok "tools/hpq.py: el tipo en la cabecera (--tipo, por su código o por su nombre: «Juegos y emuladores» es juegos) y en el catálogo, una línea «tipo=» por paquete (el que no lo dice, «otros»)"
+  ok "tools/hpq.py: el tipo en la cabecera (--tipo, por su código o por su nombre: «Juegos y emuladores» es juegos) y en el catálogo, una línea «tipo=» por paquete (el que no lo dice ni se sabe, sin línea: «otros»)"
 else ko "tools/hpq.py no pone bien los tipos:"; tail -4 $Q/hpq.txt | sed 's/^/        /'; grep '^tipo' $F/paq/CATALOGO.TXT | sed 's/^/        /'; fi
 paq() {
   local d=$1 n=$2; shift 2
@@ -2832,48 +2832,67 @@ if sano $Q/s4.img && [ "$(lista_de $Q/s4.img)" = "$(lista_de $Q/s1.img)" ] && ig
   ok "y en el disco, como antes del corte: los mismos archivos, iguales"
 else ko "después del corte el disco no vuelve a como estaba:"; diff <(lista_de $Q/s4.img) <(lista_de $Q/s1.img) | sed 's/^/        /' | head -8; fi
 
-# 5. la ventana «Programas instalados» (PROGRAMA.BIN), en el escritorio: desde
-# Configuración (el árbol por tipos; base, que no se quita; letras, que
-# necesitan otros), desde «Programas y actualizaciones» (Instalados...) y desde
-# un acceso del menú con /LENTO (para ver la barra): quitar letras con lo que
-# lo necesita, los archivos de juego (uno cambiado a mano), repararlo, y
-# borrar un programa suelto (a la Papelera del explorador)
+# 5. la ventana «Programas y actualizaciones» (PROGRAMA.BIN, una sola, con
+# pestañas: Pendientes, Al día, Instaladas y Sin instalar, y la búsqueda), en
+# el escritorio, con otra memoria (su catálogo trae juego 1.1, visor, que no
+# está instalado, y red, para repararlo). Primero: desde Configuración, en
+# «Instaladas» (el árbol por tipos; base, que no se quita; letras, que
+# necesitan otros); desde «Actualizar» del menú, en «Pendientes» (juego 1.1);
+# «Sin instalar» e Instalar (visor); buscar «juego» (en todas las pestañas) y
+# Actualizar. Luego, con un acceso del menú con /LENTO (para ver la barra):
+# quitar letras con lo que lo necesita, los archivos de red (uno cambiado a
+# mano), repararlo, y borrar un programa suelto (a la Papelera)
+( cd $F && printf 'el juego, la 1.1\r\n' > J11.TXT && printf 'un visor\r\n' > V.TXT && mkdir -p paq2 && cp paq/*.HPQ RED.HPQ paq2/ \
+  && $HPQ crea paq2/JUEGO11.HPQ --nombre juego --version 1.1 --tipo juegos --descripcion 'Un juego (la 1.1)' J11.TXT='\JUEGOS\J.TXT' \
+  && $HPQ crea paq2/VISOR.HPQ --nombre visor --version 1.0 --tipo multimedia --descripcion 'Un visor de imágenes' V.TXT='\VISOR\V.TXT' \
+  && $HPQ catalogo paq2 --clave $Q/prueba.key ) >> $Q/hpq.txt 2>&1
+mkfs.fat -F 16 -n MEMORIA -C $Q/usb2.img 16384 > /dev/null && mmd -i $Q/usb2.img ::PAQUETES && mcopy -i $Q/usb2.img $F/paq2/* ::PAQUETES/
 cp $Q/s1.img $Q/s5.img
 printf '[hispa]\r\nusuario=Ana\r\nequipo=PRUEBA\r\nteclado=es\r\nmodo=800x600\r\n' > $Q/HISPA.INI
-printf 'nombre=Programas (prueba)\r\nprograma=\\HISPA\\PROGRAMA.BIN\r\nargumentos=/LENTO\r\n' > $Q/PRUEBA.MNU
-printf 'juego cambiado\r\n' > $Q/jc.txt
-mcopy -i $Q/s5.img $Q/HISPA.INI ::HISPA/ && mcopy -i $Q/s5.img $Q/PRUEBA.MNU ::HISPA/MENU/ && mcopy -o -i $Q/s5.img $Q/jc.txt ::JUEGOS/J.TXT
-CAPTURAS=$G ESCRIBE=1 SATA=$Q/s5.img MEMORIA=64 MODULOS= ARRANQUE=escritorio QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/usb.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
-  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":clic 40 585" ":pausa 1" ":clic 250 500" ":pausa 1" ":captura pg0" ":clic 556 374" ":pausa 4" ":raton 790 300" ":captura pg1" \
+printf 'nombre=Programas (prueba)\r\nprograma=\\HISPA\\PROGRAMA.BIN\r\nargumentos=/LENTO /INSTALADAS\r\n' > $Q/PRUEBA.MNU
+printf 'red cambiada\r\n' > $Q/rc.txt
+mcopy -i $Q/s5.img $Q/HISPA.INI ::HISPA/ && mcopy -i $Q/s5.img $Q/PRUEBA.MNU ::HISPA/MENU/ && mcopy -o -i $Q/s5.img $Q/rc.txt ::HISPA/RED.TXT
+CAPTURAS=$G ESCRIBE=1 SATA=$Q/s5.img MEMORIA=64 MODULOS= ARRANQUE=escritorio QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/usb2.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
+  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":clic 40 585" ":pausa 1" ":clic 250 500" ":pausa 1" ":captura pg0" ":clic 556 374" ":pausa 5" ":raton 790 300" ":captura pg1" \
   ":tecla down" ":tecla delete" ":pausa 1" ":captura pg2" ":tecla esc" ":tecla down" ":tecla down" ":tecla delete" ":pausa 1" ":captura pg3" ":tecla esc" ":tecla esc" ":pausa 1" \
-  ":clic 40 585" ":pausa 1" ":clic 250 461" ":pausa 4" ":captura pg4" ":clic 627 99" ":pausa 4" ":captura pg5" ":tecla esc" ":pausa 1" \
-  ":clic 40 585" ":pausa 1" ":clic 100 364" ":pausa 4" ":tecla down" ":tecla down" ":tecla down" ":tecla delete" ":pausa 1" ":captura pg6" ":tecla tab" ":tecla ret" ":pausa 1" ":captura pg7" ":pausa 5" ":captura pg8" \
-  ":tecla home" ":tecla down" ":tecla down" ":tecla down" ":tecla down" ":tecla down" ":tecla ret" ":pausa 3" ":captura pg9" ":clic 700 390" ":pausa 4" ":captura pg10" \
-  ":tecla end" ":tecla up" ":tecla delete" ":pausa 1" ":captura pg11" ":tecla tab" ":tecla ret" ":pausa 4" ":captura pg12" > $Q/ventana.sal 2>&1
+  ":clic 40 585" ":pausa 1" ":clic 250 461" ":pausa 5" ":captura pg4" ":tecla ctrl-tab" ":tecla ctrl-tab" ":tecla ctrl-tab" ":pausa 1" ":captura pg5" ":tecla down" ":tecla ret" ":pausa 5" ":captura pg6" \
+  ":tecla ctrl-tab" ":pausa 1" ":escribe juego" ":pausa 1" ":captura pg7" ":tecla ret" ":tecla down" ":clic 720 374" ":pausa 5" ":captura pg8" ":tecla esc" ":tecla esc" ":pausa 1" \
+  ":clic 40 585" ":pausa 1" ":clic 100 364" ":pausa 5" ":tecla down" ":tecla down" ":tecla down" ":tecla delete" ":pausa 1" ":captura pg9" ":tecla tab" ":tecla ret" ":pausa 1" ":captura pg10" ":pausa 6" ":captura pg11" \
+  ":tecla home" ":tecla down" ":tecla down" ":tecla down" ":tecla ret" ":pausa 3" ":captura pg12" ":clic 720 403" ":pausa 5" ":captura pg13" \
+  ":tecla end" ":tecla up" ":tecla delete" ":pausa 1" ":captura pg14" ":tecla tab" ":tecla ret" ":pausa 4" ":captura pg15" > $Q/ventana.sal 2>&1
 miracap "Configuración trae «Programas...»" pg0 negrita 160 120 700 160 "Configuración" negrita 490 360 580 385 "Programas..."
-miracap "«Programas instalados»: un árbol por tipos (cada uno con cuántos tiene y lo que ocupan), su versión, su tamaño y qué es; la ficha del elegido; los botones; lo que ocupan los programas y lo libre en el disco" pg1 \
-  negrita 30 105 120 130 "[-] Sistema" negrita 500 105 790 130 "1 programa" negrita 60 130 130 160 base negrita 30 200 200 280 "[-] Internet y red" \
-  negrita 20 320 120 345 Detalles negrita 630 345 790 370 "Desinstalar..." negrita 630 375 790 400 Reparar negrita 630 405 790 430 "Ver archivos" \
-  texto 620 455 790 480 "Libre en el disco:" texto 20 535 200 560 "6 paquetes" texto 100 535 300 560 "3 sueltos"
-miracap "base no se puede desinstalar: lo dice, y por qué" pg2 texto 150 240 650 300 "base no se puede desinstalar: es imprescindible (es el" negrita 400 300 650 345 Entendido \
-  negrita 20 350 620 535 "Lo necesitan:"
-miracap "letras: hay otros que lo necesitan (saludo y extra): se dice, y se ofrece quitarlos también" pg3 texto 150 240 650 300 "Hay programas que necesitan letras: saludo, extra. Sin" \
-  negrita 380 300 650 350 "Quitar los 3" negrita 380 300 650 350 Cancelar
-miracap "«Programas y actualizaciones» lleva «Instalados...» arriba a la derecha" pg4 texto 560 85 700 110 "Instalados..." negrita 140 85 400 110 "Programas y actualizaciones"
-miracap "y desde ahí se abre «Programas instalados»" pg5 negrita 30 105 120 130 "[-] Sistema"
-miracap "desde el acceso con /LENTO: lo mismo con letras" pg6 negrita 380 300 650 350 "Quitar los 3"
-miracap "al decir que sí, la barra de avance mientras se quita (archivo a archivo)" pg7 negrita 150 250 650 300 "Quitando" rgb 200 301 166534 30
-miracap "y luego, la lista sin letras, saludo ni extra; «Desinstalado.»" pg8 texto 500 535 795 560 "Desinstalado." notexto 20 100 620 320 letras notexto 20 100 620 320 saludo \
-  negrita 30 100 400 320 "[-] Juegos y emuladores" negrita 30 100 400 320 "[-] Programas de terceros (sin paquete)"
-miracap "Ver archivos (Intro en juego): su archivo, CAMBIADO (en naranja y con su palabra)" pg9 negrita 20 320 200 345 Archivos negrita 25 375 200 400 CAMBIADO negrita 100 375 400 400 'C:\JUEGOS\J.TXT' \
-  texto 250 535 795 560 "Un archivo dañado"
-miracap "Reparar: lo vuelve a poner, y luego está bien" pg10 negrita 25 375 200 400 bien texto 250 535 795 560 "juego reparado"
-miracap "un programa suelto (sin paquete): «Borrar...» pregunta, y dice que va a la Papelera" pg11 texto 150 240 650 300 'C:\HISPA32\MIJUEGO.EXE (760 octetos)? Va a la' \
-  negrita 630 345 790 370 "Borrar..."
-miracap "borrado: ya no sale, y «Está en la Papelera.»" pg12 texto 500 535 795 560 "Está en la Papelera." notexto 20 100 620 320 MIJUEGO
-if sano $Q/s5.img && sin_restos $Q/s5.img && ! lista_de $Q/s5.img | grep -q 'DOCS\|EXTRA\|HISPA/SALUDO\|HISPA32/MIJUEGO' && igual_en $Q/s5.img JUEGOS/J.TXT $F/J.TXT \
+miracap "«Programas...» abre la ventana en «Instaladas (9)» (con las otras pestañas y su cuenta), la búsqueda con su lupa, el árbol por tipos, la ficha, los botones y lo libre en el disco" pg1 \
+  negrita 0 0 400 30 "Programas y actualizaciones" negrita 240 120 380 140 "Instaladas (9)" texto 10 120 150 140 "Pendientes (1)" texto 140 120 250 140 "Al día (5)" texto 370 120 520 140 "Sin instalar (1)" \
+  texto 30 88 320 110 "Buscar por nombre, qué es o tipo" negrita 20 170 130 195 "[-] Sistema" negrita 40 195 120 220 base negrita 20 265 220 290 "[-] Internet y red" \
+  negrita 10 340 120 360 Detalles negrita 640 360 790 390 "Desinstalar..." negrita 640 390 790 415 Reparar negrita 640 420 790 445 "Ver archivos" \
+  texto 630 465 790 490 "Libre en el disco:" texto 5 538 200 560 "6 paquetes"
+miracap "base no se puede desinstalar: lo dice, y por qué" pg2 texto 140 220 660 320 "base no se puede desinstalar: es imprescindible (es el" negrita 400 260 660 360 Entendido \
+  negrita 10 360 640 530 "Lo necesitan:"
+miracap "letras: hay otros que lo necesitan (saludo y extra): se dice, y se ofrece quitarlos también" pg3 texto 140 220 660 320 "Hay programas que necesitan letras: saludo, extra. Sin" \
+  negrita 380 270 660 370 "Quitar los 3" negrita 380 270 660 370 Cancelar
+miracap "«Actualizar» del menú abre la misma ventana en «Pendientes (1)»: juego, de la 1.0 a la 1.1, con «Actualizar» y «Actualizar todo»" pg4 \
+  negrita 10 120 150 140 "Pendientes (1)" negrita 20 170 330 195 "[-] Juegos y emuladores" negrita 50 195 120 220 juego texto 330 195 420 220 "1.0" texto 410 195 480 220 "1.1" \
+  negrita 640 360 790 390 Actualizar negrita 640 390 790 415 "Actualizar todo"
+miracap "Ctrl+Tab hasta «Sin instalar (1)»: visor (Multimedia), con «Instalar»" pg5 negrita 370 120 530 140 "Sin instalar (1)" negrita 20 170 250 195 "[-] Multimedia" negrita 50 195 120 220 visor \
+  negrita 640 360 790 390 Instalar
+miracap "Instalar visor: hecho, y ya no queda nada sin instalar" pg6 texto 400 538 795 560 "visor instalado." negrita 370 120 530 140 "Sin instalar (0)" texto 10 170 400 200 "Todo lo del catálogo está instalado."
+miracap "buscar «juego» (sin tildes ni mayúsculas) filtra todas las pestañas: Pendientes (1: juego), Al día (1: saludo, por su tipo, Juegos), Instaladas (3: y MIJUEGO.EXE)" pg7 \
+  texto 30 88 320 110 juego negrita 10 120 150 140 "Pendientes (1)" texto 140 120 250 140 "Al día (1)" texto 220 120 380 140 "Instaladas (3)"
+miracap "y «Actualizar» con juego elegido: juego 1.1, y ya no hay pendientes" pg8 texto 300 538 795 560 "juego actualizado a la 1.1." negrita 10 120 150 140 "Pendientes (0)"
+miracap "desde el acceso con /LENTO (en Instaladas): lo mismo con letras" pg9 negrita 380 270 660 370 "Quitar los 3"
+miracap "al decir que sí, la barra de avance mientras se quita (archivo a archivo)" pg10 negrita 150 230 650 300 "Quitando" rgb 200 301 166534 40
+miracap "y luego, la lista sin letras, saludo ni extra; «Desinstalado.»" pg11 texto 500 538 795 560 "Desinstalado." notexto 20 160 630 330 letras notexto 20 160 630 330 saludo \
+  negrita 20 160 400 330 "[-] Juegos y emuladores" negrita 20 160 400 330 "[-] Multimedia"
+miracap "Ver archivos (Intro en red): su archivo, CAMBIADO (en naranja y con su palabra)" pg12 negrita 90 335 200 360 Archivos negrita 15 380 200 420 CAMBIADO negrita 100 380 420 420 'C:\HISPA\RED.TXT' \
+  texto 250 538 795 560 "Un archivo dañado"
+miracap "Reparar: lo vuelve a poner, y luego está bien" pg13 negrita 15 380 200 420 bien texto 250 538 795 560 "red reparado"
+miracap "un programa suelto (sin paquete): «Borrar...» pregunta, y dice que va a la Papelera" pg14 texto 140 220 660 320 'C:\HISPA32\MIJUEGO.EXE (760 octetos)? Va a la' \
+  negrita 640 360 790 390 "Borrar..."
+miracap "borrado: ya no sale, y «Está en la Papelera.»" pg15 texto 500 538 795 560 "Está en la Papelera." notexto 20 160 630 330 MIJUEGO
+if sano $Q/s5.img && sin_restos $Q/s5.img && ! lista_de $Q/s5.img | grep -q 'DOCS\|EXTRA\|HISPA/SALUDO\|HISPA32/MIJUEGO' && igual_en $Q/s5.img JUEGOS/J.TXT $F/J11.TXT \
+  && igual_en $Q/s5.img HISPA/RED.TXT $F/R.TXT && igual_en $Q/s5.img VISOR/V.TXT $F/V.TXT \
   && lista_de $Q/s5.img | grep -qi 'PAPELERA/' && ! lista_de $Q/s5.img | grep -q 'PROGRAMA\.TXT\|AVANCE\.TXT'; then
-  ok "lo hecho desde la ventana, desde fuera: el disco sano, sin letras, saludo ni extra, juego reparado (octeto a octeto), MIJUEGO.EXE en la Papelera, y sin restos (ni PROGRAMA.TXT ni AVANCE.TXT)"
+  ok "lo hecho desde la ventana, desde fuera: el disco sano, visor instalado, juego en la 1.1, sin letras, saludo ni extra, red reparado (octeto a octeto), MIJUEGO.EXE en la Papelera, y sin restos (ni PROGRAMA.TXT ni AVANCE.TXT)"
 else ko "lo hecho desde la ventana no queda bien en el disco:"; lista_de $Q/s5.img | sed 's/^/        /' | head -16; fi
 # (GUARDA_CAPTURAS=carpeta: las capturas de la ventana se quedan ahí)
 [ -n "${GUARDA_CAPTURAS:-}" ] && mkdir -p "$GUARDA_CAPTURAS" && cp $G/pg*.ppm "$GUARDA_CAPTURAS/"

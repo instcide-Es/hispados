@@ -101,7 +101,7 @@ printf 'NAVES.MNU=HISPA\\MENU\r\n' >> $W/i/CARPETAS.TXT
 cp $W/w32/MENU/NAVES.MNU $W/i/
 # (PROGRAMAS) el acceso de «Programas instalados» (PROGRAMA.BIN, del paquete
 # «paquetes»), en \HISPA\MENU; «tipo=sistema»: el menú Inicio lo pone en Sistema
-printf 'nombre=Programas instalados\r\nprograma=\\HISPA\\PROGRAMA.BIN\r\ntipo=sistema\r\nescritorio=no\r\n' > $W/i/PROGRAMA.MNU
+printf 'nombre=Programas instalados\r\nprograma=\\HISPA\\PROGRAMA.BIN\r\nargumentos=/INSTALADAS\r\ntipo=sistema\r\nmenu=todos\r\nescritorio=no\r\n' > $W/i/PROGRAMA.MNU
 INSTALA="$INSTALA  module /INSTALA/PROGRAMA.MNU PROGRAMA.MNU
 "
 printf 'PROGRAMA.MNU=HISPA\\MENU\r\n' >> $W/i/CARPETAS.TXT

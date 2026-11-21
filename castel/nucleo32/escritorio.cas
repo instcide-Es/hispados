@@ -2267,7 +2267,7 @@ módulo Escritorio
                 si v_config <> 0 entonces pinta_config() fin
             caso AC_CERRAR_CONFIG: cierra_cuadro(v_config)
             caso AC_RED_TS: lanza("\\TAILSCAL.BIN", "/VENTANA")     ; (TAILSCALE) Configuración > Red y Tailscale
-            caso AC_PROGRAMAS_INST: lanza("\\PROGRAMA.BIN", nulo)    ; (PROGRAMAS) Configuración > Programas
+            caso AC_PROGRAMAS_INST: lanza("\\PROGRAMA.BIN", "/INSTALADAS")    ; (PROGRAMAS) Configuración > Programas
             caso AC_PANTALLA:
                 texto_pantalla[0] := 0
                 abre_pantalla()
