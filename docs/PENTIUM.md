@@ -1,6 +1,6 @@
 # Hispa-Pentium — el núcleo de la gama XP, escrito en Castel
 
-*18/11/2026; puesto al día el 20/11/2026 (la 0.8, todo junto: el disco SATA del ICH7, el USB en caliente, los paquetes, la red y apagar de verdad con la batería) y el 21/11/2026 (la 0.8.2: los controles de las ventanas; la 0.8.3: **el Navegador**, la web de hoy con NetSurf y JavaScript, con la rueda del ratón y el x87 de cada programa en el núcleo: sección 14 ter; y **Escudo, el antivirus y el cortafuegos**, con las firmas de ClamAV: sección 14 septies). Hispa-Pentium es el miembro de la
+*18/11/2026; puesto al día el 20/11/2026 (la 0.8, todo junto: el disco SATA del ICH7, el USB en caliente, los paquetes, la red y apagar de verdad con la batería) y el 21/11/2026 (la 0.8.2: los controles de las ventanas; la 0.8.3: **el Navegador**, la web de hoy con NetSurf y JavaScript, con la rueda del ratón y el x87 de cada programa en el núcleo: sección 14 ter; y **Escudo, el antivirus y el cortafuegos**, con las firmas de ClamAV: sección 14 septies; y **el Wi-Fi**, `WIFI.BIN`, el núcleo Wi-Fi de Hispa-486 en el anillo 3: sección 14 octies). Hispa-Pentium es el miembro de la
 
 *18/11/2026; puesto al día el 20/11/2026 (la 0.8: la red). Hispa-Pentium es el miembro de la
 familia Hispa-DOS para los PC de 2000 en adelante (la gama de Windows XP, [ROADMAP](ROADMAP.md)): un **núcleo propio
@@ -469,6 +469,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 156 | (dispositivos; **solo los servicios**: `ACPI.BIN`, `RED.BIN`) apuntar la ficha de EBX (ECX = 0) u olvidar las suyas (ECX = 1) | — | 0 |
 | 157 | (PROTEGE) **el modo administrador**: EBX = 0, pedirlo (lo pregunta el núcleo en la pantalla: sección 14 sexies); 1, dejarlo; 2, ¿se tiene? | `pedir_admin`, `dejar_admin`, `es_admin` | 1 o 0 (`DENEGADO` si no hay a quién preguntar) |
 | 158 | (PROTEGE; **solo los servicios**) el sello de la tarea EBX (los de `permisos.cas`; con el bit 31, es un servicio) | `sello_de_tarea` | el sello, o `NO_VALE` |
+| 100 | (WIFI) **pedir al servicio Wi-Fi** (`WIFI.BIN`), como la 90 (sección 14 octies) | — | la primera palabra de la respuesta (`SIN_WIFI` si no hay servicio) |
 
 Desde la 0.8.4 (PROTEGE), **lo que toca archivos del sistema pasa por
 `permisos.cas`**: la 7 (abrir para escribir; y, para leer, los secretos), la
@@ -3433,23 +3434,10 @@ esta máquina se ve en `10.0.2.2` (`nucleo32/servidor_prueba.py`, el de las
 pruebas). En el VPS sale a internet: `ping actualiza.hispados.es` y
 `descargar http://actualiza.hispados.es/ultima.txt -` también van.
 
-### El Wi-Fi, más adelante
+### El Wi-Fi
 
-El Wi-Fi de Hispa-486 (`wifi/`: la gestión 802.11 y WPA2 propias, en C, y el
-controlador `brcmsmac` de Linux para la Broadcom BCM43224 del HP Mini, con su
-microcódigo; docs/WIFI.md) es C y son decenas de miles de líneas: no se va a
-pasar a Castel. Cómo encajaría: **un segundo servicio, `WIFI.BIN`**, compilado
-de esos mismos fuentes con `gcc -m32 -ffreestanding` como binario plano con la
-cabecera `HPU3` (lo que hace `HVPRUN` en NASM: CASTEL32.md §8), con un `compat/`
-nuevo que en vez de las llamadas del residente de Hispa-486 use las del servicio
-(91 con su propio nombre, 94 para el DMA, 95 para los registros, 98 para la
-interrupción). La radio da tramas 802.3 (el `nucleo/` ya traduce de 802.11),
-así que la pila de `RED.BIN` no cambia: le basta **una tarjeta más**,
-`T_WIFI`, cuyas `enviar_trama`/`recibir_trama` pasan las tramas entre los dos
-servicios por un tubo del núcleo (dos llamadas nuevas, a partir de la 99), y
-`hay_enlace` es «asociada y con la clave puesta». La red elegida y su clave,
-en `\HISPA\RED.INI` (como `RED.INI` de Hispa-486); un programa `WIFI` para
-buscar redes y conectarse, y el icono diría la intensidad.
+Hecho el 21/11 (sección 14 octies): un segundo servicio, `WIFI.BIN`, con el
+núcleo Wi-Fi de Hispa-486, que para `RED.BIN` es **una tarjeta más**.
 
 ### HTTPS: el servicio TLS (`TLS.BIN`)
 
@@ -3638,7 +3626,7 @@ demás del sistema en el catálogo firmado de `actualiza.sh`.
 
 Reensamblar lo que llega desordenado y la retransmisión rápida (escuchar en un
 puerto ya va: sección 14 ter); IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
-la vez; el Wi-Fi (arriba); TLS 1.3 (BearSSL no lo tiene), gzip en `Https` y la
+la vez (con el Wi-Fi, una u otra: sección 14 octies); TLS 1.3 (BearSSL no lo tiene), gzip en `Https` y la
 hora por NTP; más tarjetas (la RTL8168 del Toshiba NB250,
 la PCnet, NE2000: Hispa-DOS ya las lleva). (El navegador, encima de esto, ya
 está: sección 14 ter.)
@@ -4781,6 +4769,244 @@ al arrancar (`escritorio.cas`), sin llamadas nuevas; en el Navegador,
 - Revisar en segundo plano (hoy la ventana revisa ella misma).
 - Que `/DESCARGA` no cargue las firmas cada vez (unos 12 s en QEMU): que se lo
   pida al residente (`/VIGILAR`). `/ANTES` ya recuerda lo revisado.
+
+## 14 octies. El Wi-Fi (WIFI.BIN)
+
+*21/11/2026* (rama `pentium-wifi`). Carlos quería el Wi-Fi en su HP Mini 5103
+con Hispa-Pentium, como ya va en Hispa-486 (docs/WIFI.md: el HP Mini con su
+Broadcom y el Toshiba NB250 con su Atheros AR9285, conectados por WPA2 de
+verdad). Es **el mismo núcleo Wi-Fi de Hispa-486**, sin reescribir: `wifi/`
+entero (la gestión 802.11 y WPA2 propias; `brcmsmac` y `bcma` de Linux para
+las Broadcom BCM43224/43225; `ath9k` de Linux para las Atheros AR9285, AR9280,
+AR9287 y su familia; la radio de mentira de las pruebas), compilado como
+programa del anillo 3 con `-DHL_PENTIUM`, como `TLS.BIN` con BearSSL.
+
+| | |
+|---|---|
+| ![La ventana del Wi-Fi, sin conectar](pentium/wifi-redes.png) | ![Conectada por WPA2, con la IP de DHCP](pentium/wifi-conectada.png) |
+
+### Cómo se usa
+
+- **El icono de la red** de la bandeja, con una tarjeta Wi-Fi y la red sin ir
+  por un cable conectado, son **cuatro rayitas de alto creciente** (lo dice la
+  forma, no solo el color): llenas (blancas), las de la señal, de 1 a 4; las
+  demás, huecas. Conectando: las cuatro huecas. Sin conectar: huecas y con un
+  **aspa** arriba a la izquierda. Con la red por el cable, el icono de siempre.
+- **Un clic** abre **la ventana del Wi-Fi** (`REDWIFI.BIN`, `uredwifi.cas`, con
+  los controles de `controles.cas`): arriba, cómo está («Conectado a «red»» con
+  la señal en rayitas, el canal y la IP; «Preparando la clave...»,
+  «Conectando...», o por qué no conecta); **las redes a la vista**, la de más
+  señal arriba, cada una con su señal en rayitas, un **candado** si pide
+  contraseña, los dBm, la seguridad («WPA2», «abierta», «WPA (no admitida)»...)
+  y «conectada» o «recordada»; el campo **Contraseña** (con asteriscos), la
+  casillas **«Conectar automáticamente»** y **«Recordar la red»** (quitada, la
+  red no se guarda: la contraseña se escribe cada vez), **Buscar**, **Conectar** (o dos clics,
+  o Intro), **Desconectar** y **Olvidar**; y **«Usar: Automático / Cable /
+  Wi-Fi»** (el elegido, verde y subrayado).
+- **Configuración** tiene la misma fila, **«Red: Automático, Cable, Wi-Fi»**.
+- Las redes conectadas se **recuerdan** y el equipo **se conecta solo** a la
+  mejor que se vea (si se pierde, vuelve a buscarla cada 5 segundos). Tras
+  conectar, la IP la pide `RED.BIN` por DHCP, como con el cable: `IPCONFIG`,
+  `PING`, `DESCARGAR`, el Navegador... van igual.
+- En la Consola, lo mismo en texto: `REDWIFI /REDES`, `REDWIFI /CONECTAR red
+  [/AUTO] [/ABIERTA] [/NORECORDAR]` (la red por su nombre, entre comillas si
+  lleva espacios, o por su número en la lista; **la contraseña la pregunta**,
+  con asteriscos: no va en la orden, para que no quede en ninguna lista de
+  tareas), `/ESTADO`, `/DESCONECTAR`, `/OLVIDAR red`, `/REGISTRO` y `/USAR
+  AUTO|CABLE|WIFI`.
+
+**Cable, Wi-Fi o Automático** (`Preferir=` en `RED.INI`, como en Hispa-486,
+docs/RED.md «Cable o Wi-Fi»): con **Automático** (lo de siempre), la red va por
+el cable si tiene enlace y, si no, por el Wi-Fi; al enchufar o quitar el cable
+cambia sola (se mira cada cuarto de segundo) y pide la IP otra vez. **Wi-Fi**:
+por el Wi-Fi aunque haya cable. **Cable**: `WIFI.BIN` ni se pone en marcha (y
+si lo estaba, se para). Al contrario que en Hispa-486, **no hace falta
+reiniciar** para cambiar.
+
+Lo que admite es lo de Hispa-486: redes abiertas y **WPA2-Personal con AES**;
+2,4 GHz, 802.11b/g. No: WEP, WPA (TKIP), WPA2-Empresa, WPA3; la BCM4313 se
+encuentra pero no va (su PHY «LCN» no está incluido).
+
+### Cómo está hecho
+
+```
+  REDWIFI.BIN (la ventana)        IPCONFIG, PING, el Navegador...
+        │ llamada 100                    │ llamada 90
+        ▼                                ▼
+  WIFI.BIN (anillo 3, C)  ── la 90: O_WIFI_CAMBIO ──►  RED.BIN (anillo 3, Castel)
+     servicio.c   el bucle, la memoria,     las tramas Ethernet que llegan;   rwifi.cas: la tarjeta T_WIFI
+                  WIFI.INI, conectarse      de vuelta, las que salen          (rtarjeta.cas, ured.cas)
+     wifi/        w80211, wpa, brcmsmac,
+                  bcma, ath9k (Hispa-486)
+        │ IOPL 3 (PCI), 94 (DMA), 95 (registros), 96 (el icono)
+        ▼
+  la tarjeta (Broadcom, con BCM43XX.FW; o Atheros)
+```
+
+**El servicio** (`castel/nucleo32/wifi/servicio.c`) hace lo que en Hispa-486
+hacían el residente (`drivers/hspwifi.asm`) y `wifi/nucleo/nucleo.c`:
+
+- Se apunta con la **91** (solo un programa que se llame `WIFI.BIN`): el núcleo
+  le da **IOPL 3** (los puertos: la configuración PCI, con las interrupciones
+  cerradas entre `CF8h` y `CFCh`, porque `RED.BIN` y el núcleo también la usan).
+- Pide con la **94 un bloque de 2 MB de memoria física seguida** (para
+  `WIFI.BIN` la 94 da hasta 1.024 páginas; a `RED.BIN`, 16) y en él pone **el
+  montón del controlador**: los anillos de DMA y los paquetes de brcmsmac y
+  ath9k salen de ahí, así que la dirección física de cualquier cosa del montón
+  es una suma. En Hispa-486 el núcleo Wi-Fi corría sin paginación con una base
+  (`hl_virt` y `hl_fis` restaban o sumaban `hl_base`); aquí `hl_virt` y
+  `hl_fis` son dos funciones de `servicio.c`. Es el único cambio en
+  `wifi/compat/`, marcado `(PENTIUM)`, junto con el reloj y el PCI: con
+  `HL_PENTIUM` sin definir, `base.c` da el mismo código que antes (comprobado:
+  el mismo `.text`). Los **registros** de la tarjeta, a la vista con la **95**
+  (`pci_iomap` e `ioremap`).
+- El **TSC** se mide con los tics del núcleo (200 ms), no con el 8254: el
+  reloj reparte el procesador y una espera medida a mano se alargaría.
+- Arranca en los **tres pasos** de Hispa-486 (buscar la tarjeta; despertarla y
+  montar el controlador, con el microcódigo de `BCM43XX.FW` y `BCM43XXH.FW`;
+  encender la radio), y lo apunta en **`WIFI.LOG`** (en `\HISPA`, o en la raíz
+  de la memoria USB), que mientras arranca **se escribe y se cierra en cada
+  línea**: si algo se cuelga, lo último del archivo es lo último que se hizo.
+  Cada línea va también al puerto serie (`wifi: ...`, lo que leen las pruebas).
+- **Para `RED.BIN` es una tarjeta**: en cada vuelta de su bucle le manda la
+  orden `O_WIFI_CAMBIO` (la llamada 90, como un programa) con las tramas
+  Ethernet que han llegado por la radio (ya descifradas y pasadas de 802.11 a
+  Ethernet por `w80211.c`), el enlace («asociada y con las claves puestas») y
+  la señal; la respuesta trae las que hay que enviar. Si no hay nada que hacer,
+  espera un tic en la 92. Y `RED.BIN` le dice ahí si se ha elegido el cable
+  (entonces se para).
+- Atiende a la ventana por la **llamada 100** (`pedir` de `red.cas` con un
+  tercer destino, como la 99 del TLS): `WO_ESTADO`, `WO_BUSCAR`, `WO_REDES`,
+  `WO_CONECTAR` (la contraseña se convierte en la clave de WPA2 —PBKDF2, 4.096
+  vueltas— **a trozos**, sin parar el servicio; la contraseña se borra de la
+  memoria en cuanto se usa), `WO_DESCONECTAR`, `WO_OLVIDAR`, `WO_AUTO` y
+  `WO_REGISTRO` (los números, en `wifi/wifi.h`).
+- **`WIFI.INI`**: una línea por red, `Red=1,<el nombre en hexadecimal>,2:<la
+  clave>`, con un comentario delante con el nombre a la vista. **No se guarda
+  la contraseña**: se guarda la clave ya preparada (la PMK, que solo vale para
+  esa red), **cifrada (AES-128 en modo contador) y firmada (HMAC-SHA1)** con
+  dos llaves sacadas de la de este equipo (`WIFI.LLV`, 16 octetos hechos al
+  azar la primera vez): una clave cambiada en el archivo no se usa. **Esto es
+  una ofuscación, no una protección de verdad**: la llave está en el mismo
+  disco, así que protege de quien vea solo `WIFI.INI` (una copia, una foto),
+  no de quien tenga el disco entero; y lo dice el propio archivo. Para no
+  guardar nada, «Recordar la red» quitado (o `/NORECORDAR`). Una red nueva se
+  recuerda **cuando conecta**: con la contraseña mal, ni se recuerda ni se
+  insiste. (Los `WIFI.INI` del formato del principio, AES por bloques sin
+  firma, se leen y se guardan en el nuevo.)
+- **Una red se elige por el nombre Y la seguridad** (revisión de seguridad,
+  21/11): una red **abierta** que se llame como una **WPA2 recordada** (una
+  falsa, para que el equipo se conecte a ella) **no se usa nunca**: ni al
+  conectarse solo, ni pidiéndola (dice que puede ser falsa: para usarla, hay
+  que olvidar antes la recordada), ni rebaja la recordada a abierta; la
+  ventana enseña las dos por separado (la abierta, sin candado). Y en
+  `w80211.c` (también para Hispa-486): con contraseña se elige el punto de
+  acceso WPA2 aunque la abierta se oiga mejor. En `wpa.c`: un mensaje del
+  acuerdo de claves **con el MIC mal se ignora** (cualquiera puede mandarlo)
+  en vez de cortar y culpar a la contraseña; si el acuerdo no acaba y han
+  llegado así, se dice eso (fallo `W_F_ACUERDO`); y **la misma clave de grupo
+  otra vez no se vuelve a poner** ni vuelve su contador a cero (la variante
+  de «KRACK» contra la clave de grupo); la nueva se pone con el contador que
+  trae el mensaje (Key RSC).
+- Le dice al núcleo con la **96** cómo está (sin tarjeta, sin conectar,
+  conectando, conectada), **las barras** (de 1 a 4: -55, -67 y -75 dBm, las de
+  `WIFI REDES` de Hispa-486) y su tarjeta PCI: si el servicio se acaba (o lo
+  acaban), el núcleo **le apaga el DMA** y le quita los registros de la vista,
+  como a `RED.BIN`; y el **Administrador de dispositivos** dice que la tarjeta
+  Wi-Fi la lleva `WIFI.BIN` («Wi-Fi: conectada (señal -47 dBm); la red va por
+  ella»).
+
+**`RED.BIN`** (`rwifi.cas`, y lo marcado `(WIFI)` en `rtarjeta.cas`,
+`ured.cas` y `rbase.cas`): al arrancar lee `RED.INI` y, si hay en el PCI una de
+las tarjetas que lleva `WIFI.BIN` y no se ha elegido el cable, lo pone en
+marcha (`lanzar_suelto`), antes de la tarjeta del cable. La tarjeta Wi-Fi es
+`T_WIFI`: `enviar_trama` la deja en una cola de 24 tramas que se lleva
+`WIFI.BIN` en su vuelta, `hay_enlace` es el enlace que dijo, la velocidad, 54
+Mbit/s. **Cambiar de tarjeta** (cable ↔ Wi-Fi) es como quitar el cable de una
+y enchufarlo en la otra: se corta lo que había (DHCP, ARP, las conexiones TCP
+con `SIN_CABLE`), pasan a usarse la MAC y el nombre de la otra y, con su
+enlace, se pide la IP otra vez. Mientras se va por el Wi-Fi, la tarjeta del
+cable se sigue atendiendo (su interrupción vista y lo que le llega, tirado)
+para saber si tiene enlace.
+
+**El núcleo** (marcado `(WIFI)`): en `red.cas`, el tercer servicio (la 91 por
+su nombre, la 92 y la 93 con su destino, la vista de la 94 y la 95 de cada
+servicio por separado, la 96 de `WIFI.BIN`, la 100, y al acabar: el DMA
+apagado y `SIN_WIFI` a los que esperaban), `pedir_preferencia` (Configuración:
+un aviso a `RED.BIN`, `AVISO_PREFERIR`, que lo guarda en `RED.INI`) y lo que
+dice `RED.BIN` en su 96 (el bit 9: va por el Wi-Fi; los 12 y 13: lo que se
+prefiere); en `usuario.cas`, la 100; en `escritorio.cas`, el icono, el clic y
+la fila de Configuración; en `dispositivos.cas`, la tarjeta Wi-Fi.
+
+### El paquete «wifi»
+
+Es un paquete **del sistema** (`tools/hpq.py`, 0.8.5: va en la memoria USB y en
+el CD y se instala; necesita `base` y `red` 0.8.5, que suben con él): `WIFI.BIN`,
+`REDWIFI.BIN`, `WIFI.TXT` (lo que es y las licencias, con la GPL-2.0 entera
+detrás) y **el microcódigo de Broadcom** con su licencia (`BCM43XX.FW`,
+`BCM43XXH.FW`, `BCM43XX.TXT`), aparte del programa y tal cual, como en
+Hispa-486 (docs/WIFI.md, «El microcódigo»: se puede repartir completo y sin
+modificar, con la licencia; no es software libre). **Licencias**: lo nuestro,
+GPL-2.0 o posterior; brcmsmac, brcmutil y ath9k, ISC; bcma y cordic, GPL-2.0
+«solo versión 2»: `WIFI.BIN` entero se reparte bajo la GPL-2.0 (wifi/LEEME.md).
+
+| | |
+|---|---|
+| `WIFI.BIN` | 560 K en el disco (brcmsmac, bcma y ath9k con la gestión y WPA2) y 250 K de variables (el registro de 96 K, las colas) |
+| Memoria de DMA | 2 MB seguidos (el montón: con la BCM43224, unos 320 K usados) |
+| `REDWIFI.BIN` | 24 K |
+
+### Probarlo
+
+Sin tarjeta Wi-Fi en QEMU: `RED.INI` con **`WifiSimulada=SI`** y `WIFI.BIN`
+usa la radio de mentira de `wifi/nucleo/sim.c` (una red «HispaPrueba», WPA2 con
+«clave de prueba», y detrás DHCP, ARP y eco en 192.168.77.1; y otras dos, una
+abierta y una WPA antigua). Con **`WifiSimulada=CHIP`** se pone en marcha
+aunque no haya tarjeta en el PCI: es para **`WIFISIM.BIN`** (`wifi/hacer.sh
+SALIDA chip`), que lleva dentro el modelo de la BCM43224 de
+`tests/wifi/tarjeta_sim.c`; así se prueban **brcmsmac y bcma de verdad en el
+anillo 3** (la SPROM, el microcódigo leído del disco, los anillos de DMA en la
+memoria de la 94, WPA2, DHCP y PING):
+
+```
+castel/nucleo32/disco.sh /tmp/d.img 16 red wifisim
+MEMORIA=64 DISCO=/tmp/d.img ARRANQUE=ordenes castel/nucleo32/probar.sh "" "redwifi /redes" ":pausa 2" \
+  "redwifi /conectar HispaPrueba" "clave de prueba" ":pausa 2" "ping 192.168.77.1"
+```
+
+`castel/pruebas.sh`, parte 27 (`SOLO=wifi`): en el anfitrión, las normas y la
+gestión de Hispa-486 (`build/prueba_wifi`: SHA-1, HMAC, PBKDF2, la PMK, PRF,
+AES, el envoltorio de claves y CCMP con el vector de IEEE 802.11; y lo de la
+revisión de seguridad: el MIC falso ignorado, la clave de grupo repetida sin
+reinstalar, la WPA2 elegida con una abierta falsa al lado) y brcmsmac contra
+el modelo (`build/chip_sim`); con la radio de mentira y sin cable: buscar, la
+contraseña preguntada con asteriscos (y en ningún sitio escrita), la
+equivocada, conectar, DHCP, IPCONFIG y PING por `RED.BIN`, `WIFI.INI` sin la
+contraseña (y uno cambiado a mano, que no se usa) y, al arrancar otra vez,
+conectarse solo; con una red abierta falsa con el mismo nombre
+(`WifiSimulada=GEMELA`): conecta a la WPA2, la lista enseña las dos, la
+abierta no se usa ni rebaja la recordada, y al arrancar otra vez, a la WPA2; con la e1000: Automático (el cable), Wi-Fi (la IP otra vez y el PING por
+el Wi-Fi) y Cable (`WIFI.BIN` se para y `RED.INI` lo guarda; al arrancar, ni
+se pone en marcha); `WIFISIM.BIN`; y el escritorio: el icono (las rayitas
+huecas con el aspa, y llenas al conectar), la ventana (la lista, la contraseña
+con asteriscos, conectar) y la fila «Red» de Configuración.
+
+**En el HP Mini** (sin probar todavía en la tarjeta de verdad desde
+Hispa-Pentium; en Hispa-486 sí va): la imagen
+`Pruebas/Pendientes/HP-Mini-5103/Pentium-WiFi/hispa-pentium-usb-wifi-hp-mini.zip`
+con su `LEEME.TXT`: arrancar de la memoria, conectar a su Wi-Fi desde el
+icono, `PING` y Google en el Navegador; si falla, `X:\WIFI.LOG`.
+
+### Lo que falta
+
+- **Probarlo en el HP Mini** (y en el Toshiba, con la Atheros) y corregir con
+  `WIFI.LOG`.
+- La interrupción de la tarjeta (hoy se mira en cada vuelta, como en
+  Hispa-486); con ella, `WIFI.BIN` no daría vueltas sin nada que hacer.
+- Lo que falta también en Hispa-486: 802.11n y 5 GHz, la clave de grupo TKIP
+  (los routers en modo mixto), la BCM4313 (su PHY LCN), otras tarjetas
+  (Realtek `rtw88`, Intel `iwlwifi`).
+- Redes ocultas por su nombre; una IP puesta a mano por red.
 
 ## 15. Las pruebas
 

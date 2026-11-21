@@ -469,8 +469,20 @@ struct timer_list { int x; };
 /* El núcleo corre con segmentos de base «hl_base» (la dirección física de su
  * bloque): una dirección física F se ve en el puntero F - hl_base. */
 extern u32 hl_base;
+#ifdef HL_PENTIUM
+/* (PENTIUM) En Hispa-Pentium (WIFI.BIN, un programa del anillo 3 con
+ * paginación) no hay una base fija: la memoria de DMA es un bloque de
+ * memoria física seguida que da el núcleo (llamada 94) y los registros se
+ * ponen a la vista (llamada 95). Las dos cuentas las hace
+ * castel/nucleo32/wifi/servicio.c. */
+void *hl_virt_f(u32 fis);
+u32 hl_fis_f(const void *virt);
+#define hl_virt(fis) hl_virt_f((u32)(fis))
+#define hl_fis(virt) hl_fis_f((const void *)(virt))
+#else
 #define hl_virt(fis) ((void *)((u32)(fis) - hl_base))
 #define hl_fis(virt) ((u32)(virt) + hl_base)
+#endif
 #ifdef HL_SIMULA_ES
 u32 hl_sim_leer(const void *dir, int tam);
 void hl_sim_escribir(const void *dir, int tam, u32 v);

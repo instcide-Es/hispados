@@ -24,7 +24,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [x] ~~Menú Inicio con todos los programas («Todos los programas» con carpetas, por el tipo de cada paquete), fijados y más usados, y Cerrar sesión / Reiniciar / Apagar equipo siempre a la vista~~ — rama pentium-menu (21/11: docs/PENTIUM.md, «El menú Inicio y los atajos de teclado»)
 - [x] ~~La rueda del ratón en todo el entorno: menús y submenús largos, rejillas de controles.cas, Bloc, Consola (historial), Explorador, Administrador de dispositivos, Actualizaciones; Ctrl+rueda, la letra o la vista~~ — ramas pentium-menu y pentium-rueda (21/11; ClicGest, en su versión siguiente)
 - [x] ~~Atajos de teclado de todo el sistema: Alt+F4, Alt+Tab, Logo (E, D, R, L), Ctrl+Esc, Alt+Espacio, Ctrl+Alt+Supr (Administrador de tareas), Impr Pant, F1~~ — rama pentium-menu (21/11)
-- [ ] Barra de tareas: agrupar ventanas, vista previa, bandeja con más iconos (sonido, Wi-Fi)
+- [ ] Barra de tareas: agrupar ventanas, vista previa, bandeja con más iconos (sonido; el Wi-Fi, hecho)
 - [ ] Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido, ratón, teclado, red y Wi-Fi, energía, usuarios, programas (hecho: actualizaciones y «Programas instalados»)
 - [x] ~~**Gestor de programas instalados** por tipos para desinstalarlos (como «Agregar o quitar programas»): árbol por tipos, tamaño, fecha, dependencias, desinstalar (con lo que lo necesita), reparar, ver archivos, los programas sueltos con «Borrar»; y en la misma ventana, «Programas y actualizaciones» con pestañas Pendientes, Al día, Instaladas y Sin instalar, con búsqueda~~ — rama pentium-programas (21/11: PROGRAMA.BIN, el campo `tipo=` de los paquetes; docs/PENTIUM.md §13)
 - [ ] Temas y fondo de escritorio; letras TrueType del sistema; protector de pantalla
@@ -33,7 +33,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 
 ## El sistema
 - [ ] Sonido: HD Audio y AC'97, mezclador, sonidos del sistema
-- [ ] Wi-Fi (el núcleo de C de Hispa-486: Broadcom y Atheros) con su ventanita
+- [x] ~~Wi-Fi (el núcleo de C de Hispa-486: Broadcom y Atheros) con su ventanita~~ — rama pentium-wifi (21/11: WIFI.BIN, REDWIFI.BIN, el icono con rayitas, Configuración › Red; a falta de probarlo en el HP Mini)
 - [ ] Usuarios con contraseña y carpetas propias; permisos
 - [ ] Suspender e hibernar (ACPI S3/S4)
 - [ ] Impresoras (USB y de red)

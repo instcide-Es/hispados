@@ -542,8 +542,12 @@ static int wpa_responde(struct wpa *w, o8 *s, int info, const o8 *rep, const o8 
 	return n;
 }
 
-/* busca la clave de grupo (KDE 00-0F-AC 1) en los datos descifrados */
-static int wpa_busca_gtk(struct wpa *w, const o8 *d, int n)
+/* busca la clave de grupo (KDE 00-0F-AC 1) en los datos descifrados; rsc:
+ * el contador de repetición de esa clave (los 6 octetos bajos del «Key RSC»
+ * del mensaje). La MISMA clave que ya está puesta no se vuelve a poner: así su
+ * contador no vuelve a cero y no se aceptan otra vez tramas ya recibidas
+ * (la variante del ataque «KRACK» contra la clave de grupo) */
+static int wpa_busca_gtk(struct wpa *w, const o8 *d, int n, const o8 *rsc)
 {
 	int i = 0;
 
@@ -559,10 +563,14 @@ static int wpa_busca_gtk(struct wpa *w, const o8 *d, int n)
 				hl_log(0, "WPA: la clave de grupo no es de CCMP (%d octetos)\n", l - 6);
 				return -1;
 			}
+			if (w->gtk_puesta && (d[i + 6] & 3) == w->gtk_id && memcmp(w->gtk, d + i + 8, 16) == 0) {
+				hl_log(1, "WPA: la misma clave de grupo otra vez: no se vuelve a poner (ni su contador)\n");
+				return 0;
+			}
 			w->gtk_id = d[i + 6] & 3;
 			memcpy(w->gtk, d + i + 8, 16);
 			aes_clave(&w->gk, w->gtk);
-			memset(w->pn_rx_g, 0, 6);
+			memcpy(w->pn_rx_g, rsc, 6);
 			w->gtk_puesta = 1;
 			return 0;
 		}
@@ -627,9 +635,11 @@ int wpa_eapol(struct wpa *w, const o8 *e, int n, o8 *sal)
 	memset(copia + 81, 0, 16);
 	hmac_sha1(w->ptk, 16, copia, 99 + nd, mic);
 	if (memcmp(mic, e + 81, 16) != 0) {
+		/* no se corta: puede no venir del punto de acceso (cualquiera puede
+		 * mandar un mensaje así). Se cuenta, y si el acuerdo no acaba, se dice */
 		w->fallos_mic++;
-		hl_log(0, "WPA: el MIC no cuadra (la contraseña no es la de esta red)\n");
-		return -1;
+		hl_log(1, "WPA: un mensaje del acuerdo de claves con el MIC mal: se ignora (%d)\n", w->fallos_mic);
+		return 0;
 	}
 	memcpy(w->repeticion, e + 9, 8);
 	w->hay_rep = 1;
@@ -655,7 +665,7 @@ int wpa_eapol(struct wpa *w, const o8 *e, int n, o8 *sal)
 			hl_log(1, "WPA: paso 3 repetido; se repite el 4\n");
 			return wpa_responde(w, sal, 2 | KI_PAR | KI_MIC | KI_SEGURA, e + 9, NULL, NULL, 0);
 		}
-		if (wpa_busca_gtk(w, datos, nd - 8) < 0)
+		if (wpa_busca_gtk(w, datos, nd - 8, e + 65) < 0)
 			return -1;
 		aes_clave(&w->tk, w->ptk + 32);
 		memset(w->pn_tx, 0, 6);
@@ -673,7 +683,7 @@ int wpa_eapol(struct wpa *w, const o8 *e, int n, o8 *sal)
 		return 0;
 	if (aes_desenvuelve(w->ptk + 16, e + 99, nd - 8, datos) < 0)
 		return 0;
-	if (wpa_busca_gtk(w, datos, nd - 8) < 0)
+	if (wpa_busca_gtk(w, datos, nd - 8, e + 65) < 0)
 		return 0;
 	hl_log(2, "WPA: clave de grupo renovada (clave %d)\n", w->gtk_id);
 	return wpa_responde(w, sal, 2 | KI_MIC | KI_SEGURA, e + 9, NULL, NULL, 0);

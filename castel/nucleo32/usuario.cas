@@ -47,7 +47,8 @@
 ;       solo dice cuál hay                           -> 1 o 0
 ;   (32 a 43: las ventanas, el portapapeles, los terminales y las unidades)
 ;   (90 a 98: la red, con el servicio de red, RED.BIN: los cuenta red.cas;
-;   y la 99, las conexiones cifradas, con el servicio TLS, TLS.BIN)
+;   y la 99, las conexiones cifradas, con el servicio TLS, TLS.BIN; (WIFI)
+;   y la 100, el Wi-Fi, con el servicio Wi-Fi, WIFI.BIN)
 ;   Para instalar el sistema en el disco (el programa INSTALAR) y para el
 ;   asistente del primer arranque (ASISTE.BIN), desde la 0.7:
 ;   60  texto en la pantalla de texto: EDX letras de ECX en la columna (bits
@@ -805,7 +806,7 @@ módulo Usuario
                 si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
                 si no puede_leer(u, ruta) entonces devolver DENEGADO fin       ; (PROTEGE)
                 devolver montar_imagen(u, ruta)
-            caso 90..99:
+            caso 90..100:                               ; (WIFI) la 100, el servicio Wi-Fi
                 r := atender_red(n, a, b, c)
                 ; si no hay servicio de red, se pone en marcha (una vez) y se
                 ; vuelve a pedir

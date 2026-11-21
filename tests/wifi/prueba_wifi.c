@@ -373,11 +373,92 @@ static void gestion(void)
 	comprueba(entregadas == 1, "DHCP por la red abierta");
 }
 
+/* (seguridad) el suplicante, a mano: un mensaje con el MIC mal no corta el
+ * acuerdo (puede no venir del punto de acceso); la misma clave de grupo otra
+ * vez no se vuelve a poner ni pone su contador a cero (KRACK de grupo) */
+static int eapol_firmado(struct wpa *w, o8 *e, int info, int rep, const o8 *gtk, int id, int mic_bueno, int rsc)
+{
+	o8 d[24], mic[20];
+	int nd = 32, n = 99 + nd;
+
+	memset(e, 0, n);
+	e[0] = 2; e[1] = 3; e[2] = (n - 4) >> 8; e[3] = n - 4;
+	e[4] = 2; e[5] = info >> 8; e[6] = info;
+	e[16] = rep;
+	e[65] = rsc;		/* Key RSC: el contador de la clave de grupo */
+	memset(d, 0, sizeof d);
+	d[0] = 0xdd; d[1] = 22; d[2] = 0x00; d[3] = 0x0f; d[4] = 0xac; d[5] = 1; d[6] = id;
+	memcpy(d + 8, gtk, 16);
+	aes_envuelve(w->ptk + 16, d, 24, e + 99);
+	e[97] = 0; e[98] = nd;
+	hmac_sha1(w->ptk, 16, e, n, mic);
+	memcpy(e + 81, mic, 16);
+	if (!mic_bueno)
+		e[81] ^= 0x55;
+	return n;
+}
+
+static void suplicante(void)
+{
+	static const o8 aa[6] = { 2, 0, 0, 0, 0, 1 }, spa[6] = { 2, 0, 0, 0, 0, 2 };
+	struct wpa w;
+	o8 pmk[32], e[300], r[300], g1[16], g2[16];
+	int n, k;
+
+	memset(pmk, 7, 32);
+	memset(g1, 0x11, 16);
+	memset(g2, 0x22, 16);
+	/* paso 1 y, luego, un «paso 3» con el MIC mal */
+	wpa_empieza(&w, pmk, aa, spa, NULL, 0);
+	memset(e, 0, 99);
+	e[0] = 2; e[1] = 3; e[4] = 2; e[5] = 0x00; e[6] = 0x8a; e[16] = 1;
+	for (k = 0; k < 32; k++)
+		e[17 + k] = k;
+	comprueba(wpa_eapol(&w, e, 99, r) > 0 && w.paso == 1, "suplicante: paso 1, se manda el 2");
+	n = eapol_firmado(&w, e, 0x13ca, 2, g1, 1, 0, 0);
+	for (k = 0; k < 32; k++)
+		e[17 + k] = k;
+	n = wpa_eapol(&w, e, 99 + 32, r);
+	comprueba(n == 0 && w.fallos_mic == 1 && w.paso == 1 && !w.ptk_puesta,
+		  "un mensaje con el MIC mal se ignora (no corta ni culpa a la contraseña) y se cuenta");
+	/* con las claves puestas: la misma clave de grupo, otra vez */
+	w.paso = 2; w.ptk_puesta = 1; w.hay_rep = 1; memset(w.repeticion, 0, 8); w.repeticion[7] = 2;
+	memcpy(w.gtk, g1, 16); w.gtk_id = 1; w.gtk_puesta = 1; aes_clave(&w.gk, g1);
+	memset(w.pn_rx_g, 0, 6); w.pn_rx_g[0] = 5;
+	n = eapol_firmado(&w, e, 0x1382, 3, g1, 1, 1, 0);
+	comprueba(wpa_eapol(&w, e, n, r) > 0 && w.pn_rx_g[0] == 5,
+		  "la misma clave de grupo otra vez: no se vuelve a poner y su contador no vuelve a cero (KRACK)");
+	n = eapol_firmado(&w, e, 0x1382, 4, g2, 2, 1, 9);
+	comprueba(wpa_eapol(&w, e, n, r) > 0 && w.gtk_id == 2 && memcmp(w.gtk, g2, 16) == 0 && w.pn_rx_g[0] == 9,
+		  "una clave de grupo nueva sí, con el contador que dice el mensaje (Key RSC)");
+}
+
+/* (seguridad) una red ABIERTA con el mismo nombre que la WPA2 (una falsa):
+ * con contraseña se elige la WPA2, aunque la otra se vea antes */
+static void gemela(void)
+{
+	struct w_info i;
+	o8 pmk[32];
+
+	sim_configura("Biblioteca", "clave de la prueba", 6);
+	sim_gemela = 1;
+	w80211_inicia(sim_radio());
+	pmk_de("clave de la prueba", "Biblioteca", pmk);
+	w80211_conectar((const o8 *)"Biblioteca", 10, pmk);
+	comprueba(espera_estado(W_CONECTADO, 6000), "con una «Biblioteca» abierta falsa al lado, conecta");
+	w80211_estado(&i);
+	comprueba(memcmp(i.bssid, mac_ap, 6) == 0 && i.seguridad == W_SEG_WPA2, "y es con la de WPA2, no con la abierta");
+	w80211_desconectar();
+	sim_gemela = 0;
+}
+
 int main(int argc, char **argv)
 {
 	charla = argc > 1;
 	vectores();
 	gestion();
+	suplicante();
+	gemela();
 	printf("Wi-Fi (anfitrión): %d comprobaciones, %d fallos\n", hechas, fallos);
 	return fallos != 0;
 }

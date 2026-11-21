@@ -6,7 +6,8 @@
 # y $MEDIO («usb» o «cd»). Deja:
 #   $W/f     el núcleo (SEMILLA.BIN y sus copias ESCRIT*.BIN que piden el modo
 #            gráfico), los programas, ACPI.BIN, TLS.BIN, SSH.BIN, SSHD.BIN,
-#            WG.BIN, TAILSCAL.BIN y LEEME.TXT
+#            WG.BIN, TAILSCAL.BIN, (WIFI) WIFI.BIN con el microcódigo de las
+#            Broadcom, y LEEME.TXT
 #   $W/i     lo que solo vale para instalar: los textos del sistema instalado,
 #            BOOT.IMG, CORE.IMG, CARPETAS.TXT y los registros de los paquetes
 #            (PAQUETES/*.PQI)
@@ -24,7 +25,7 @@ python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT10.BIN 1024 768 32 
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT6.BIN 1024 600 32 > /dev/null
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT13.BIN 1366 768 32 > /dev/null
 MODULOS=
-for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO udisposi:DISPOSIT upaquete:PAQUETES uactual:ACTUALIZ uprogram:PROGRAMA uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE umuestra:MUESTRA ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uhttps:HTTPS uinstala:INSTALAR uasiste:ASISTE; do
+for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO udisposi:DISPOSIT upaquete:PAQUETES uactual:ACTUALIZ uprogram:PROGRAMA uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE umuestra:MUESTRA ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uhttps:HTTPS uredwifi:REDWIFI uinstala:INSTALAR uasiste:ASISTE; do
   f=${p%%:*}; N=${p##*:}
   python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $W/$f.asm > /dev/null
   nasm -f bin $W/$f.asm -o $W/f/$N.BIN
@@ -55,6 +56,20 @@ done
 bash $AQUI/miniat/hacer.sh $W/f/MINIAT.BIN
 MODULOS="$MODULOS  module /MINIAT.BIN MINIAT.BIN
 "
+# (WIFI) el servicio Wi-Fi (nucleo32/wifi/: el núcleo Wi-Fi de Hispa-486 en
+# el anillo 3), el microcódigo de las Broadcom (de linux-firmware, con su
+# licencia: aparte, sin tocar) y WIFI.TXT (lo que es y las licencias, con la
+# GPL-2.0 entera detrás), igual: en la raíz, como módulos y, al instalar, a \HISPA
+bash $AQUI/wifi/hacer.sh $W/f/WIFI.BIN
+cp $AQUI/../../wifi/firmware/bcm43xx-0.fw $W/f/BCM43XX.FW
+cp $AQUI/../../wifi/firmware/bcm43xx_hdr-0.fw $W/f/BCM43XXH.FW
+# (los dos .TXT, en \INSTALA: en la raíz saldrían como documentos del menú Inicio)
+sed 's/$/\r/' $AQUI/../../wifi/firmware/LICENCE.broadcom_bcm43xx > $W/i/BCM43XX.TXT
+{ cat $AQUI/wifi/WIFI.TXT; echo "------------------------------------------------------------------------"; cat $AQUI/../../LICENSE; } | iconv -f UTF-8 -t CP437 | sed 's/$/\r/' > $W/i/WIFI.TXT
+for N in WIFI.BIN BCM43XX.FW BCM43XXH.FW; do
+  MODULOS="$MODULOS  module /$N $N
+"
+done
 # lo que se instala en el disco: el núcleo (con el nombre que tendrá allí), los
 # programas, los textos del sistema instalado y el arranque del disco
 INSTALA="  module /ESCRIT8.BIN NUCLEO.BIN
@@ -62,6 +77,8 @@ INSTALA="  module /ESCRIT8.BIN NUCLEO.BIN
   module /ASISTE.BIN ASISTE.BIN
 $MODULOS  module /INSTALA/LEEME.TXT LEEME.TXT
   module /INSTALA/MANUAL.TXT MANUAL.TXT
+  module /INSTALA/WIFI.TXT WIFI.TXT
+  module /INSTALA/BCM43XX.TXT BCM43XX.TXT
   module /INSTALA/BOOT.IMG BOOT.IMG
   module /INSTALA/CORE.IMG CORE.IMG
 "
@@ -158,7 +175,21 @@ LA RED (por cable)
     HTTPS dirección        pide una página y la enseña (HTTPS /ESTADO: la
                            fecha que usa y las autoridades de confianza)
   Las tarjetas que lleva: Intel PRO/1000, Realtek RTL8139 y Marvell Yukon
-  88E8059. El Wi-Fi, todavía no.
+  88E8059.
+
+EL WI-FI
+  Con una tarjeta Wi-Fi de las que lleva (Broadcom BCM43224/43225, la del HP
+  Mini 5103; Atheros AR9285 y su familia), el icono de la red de la bandeja
+  son cuatro rayitas: llenas, las de la señal; huecas y con un aspa, sin
+  conectar. Con un clic se abre la ventana del Wi-Fi: las redes a la vista
+  (con un candado las que piden contraseña), la contraseña, «Conectar
+  automáticamente», Conectar, Desconectar y Olvidar. Las redes se recuerdan
+  en WIFI.INI (sin la contraseña) y el equipo se conecta solo a ellas.
+  «Usar:» (en esa ventana y en Configuración) dice por dónde va la red:
+  Automático (el cable si está enchufado; si no, el Wi-Fi), Cable o Wi-Fi.
+  En la Consola: REDWIFI /REDES, REDWIFI /CONECTAR red (pregunta la
+  contraseña),
+  REDWIFI /ESTADO. Si no va, mande el archivo C:\HISPA\WIFI.LOG.
 
 SSH Y TAILSCALE (la red privada de sus equipos)
   En la Consola:
@@ -232,6 +263,9 @@ LA CARPETA \HISPA
   ACPI.BIN     el servicio de ACPI: apagar de verdad y la batería de los
                portátiles (sin él, «Apagar» solo dice que ya se puede)
   WIN32.BIN    el que corre los programas de Windows (sus DLL, en C:\WIN32)
+  WIFI.BIN     el servicio Wi-Fi (WIFI.TXT dice lo que es y sus licencias;
+               BCM43XX.FW y BCM43XXH.FW, el microcódigo de Broadcom, con su
+               licencia en BCM43XX.TXT). WIFI.INI, WIFI.LLV y WIFI.LOG son suyos
   TLS.BIN      el servicio TLS: las conexiones cifradas (https). Con el
                reloj del PC mal, pide la hora a actualiza.hispados.es;
                TLS.CCH y TLS.SEM son suyos. Más autoridades: los .CER de

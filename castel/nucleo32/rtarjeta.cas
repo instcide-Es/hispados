@@ -15,12 +15,13 @@
 ; =============================================================================
 módulo Rtarjeta
 
-    importar Rbase, Ryukon, Mem32, Textos32, Formato, Llamadas
+    importar Rbase, Ryukon, Rwifi, Mem32, Textos32, Formato, Llamadas
 
     público constante T_NINGUNA = 0
     público constante T_E1000 = 1
     público constante T_RTL8139 = 2
     público constante T_YUKON = 3
+    público constante T_WIFI = 4                ; (WIFI) el servicio Wi-Fi (WIFI.BIN): rwifi.cas
     público constante MAX_TRAMA = 1518
 
     público variable tarjeta: nat32
@@ -29,6 +30,12 @@ módulo Rtarjeta
     público variable pci_tarjeta, id_tarjeta, irq_tarjeta: nat32
     público variable recibidas, enviadas, errores: nat32
     variable usa_irq: bool
+    ; (WIFI) la tarjeta de cable, mientras se va por el Wi-Fi
+    público variable tarjeta_cable: nat32
+    variable mac_cable: arreglo [8] de byte
+    variable nombre_cable: arreglo [48] de byte
+    público variable pci_cable: nat32 = 0xFFFFFFFF
+    variable id_cable, irq_cable: nat32
 
     ; =========================================================================
     ;  Intel PRO/1000 («e1000»)
@@ -433,7 +440,10 @@ módulo Rtarjeta
                 fin
             fin
         fin
+        tarjeta_cable := tarjeta                ; (WIFI)
+        pci_cable := 0xFFFFFFFF
         si tarjeta = T_NINGUNA entonces devolver falso fin
+        pci_cable := pci_tarjeta
         apunta4("MAC %02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3])
         apunta4("MAC ...:%02X:%02X", mac[4], mac[5], 0, 0)
         ; la interrupción: si el núcleo la puede dar, se usa; si no, se mira cada tic
@@ -451,6 +461,7 @@ módulo Rtarjeta
             caso T_E1000: ok := e_enviar(p, n)
             caso T_RTL8139: ok := r_enviar(p, n)
             caso T_YUKON: ok := yk_enviar(p, n)
+            caso T_WIFI: ok := Rwifi.enviar(p, n)       ; (WIFI)
         fin
         si ok entonces enviadas := enviadas + 1 fin
         devolver ok
@@ -459,10 +470,15 @@ módulo Rtarjeta
     ; la trama que haya llegado, a «destino» (caben MAX_TRAMA): su largo; 0 si
     ; no hay ninguna
     público función recibir_trama(destino: puntero a byte): nat32
+        devolver recibir_de(tarjeta, destino)
+    fin
+
+    ; (WIFI) la de la tarjeta de esa clase
+    función recibir_de(t: nat32, destino: puntero a byte): nat32
         variable n: nat32
         mientras cierto hacer
             n := 0
-            según nat16(tarjeta)
+            según nat16(t)
                 caso T_E1000: n := e_recibir(destino)
                 caso T_RTL8139: n := r_recibir(destino)
                 caso T_YUKON: n := yk_recibir(destino)
@@ -476,7 +492,22 @@ módulo Rtarjeta
     ; lo que haya que hacer cada vez que se mira la tarjeta (la interrupción,
     ; vista: así deja de pedirla)
     público función atender_tarjeta()
-        según nat16(tarjeta)
+        atender_de(tarjeta)
+    fin
+
+    ; (WIFI) mientras se va por el Wi-Fi, la del cable sigue atendida (su
+    ; interrupción, vista) y lo que le llega se tira: así se sabe si tiene
+    ; enlace y no despierta al servicio a cada momento
+    público función vaciar_cable(destino: puntero a byte)
+        variable k: nat32
+        si tarjeta <> T_WIFI o tarjeta_cable = T_NINGUNA entonces devolver fin
+        atender_de(tarjeta_cable)
+        k := 0
+        mientras k < 64 y recibir_de(tarjeta_cable, destino) > 0 hacer k := k + 1 fin
+    fin
+
+    función atender_de(t: nat32)
+        según nat16(t)
             caso T_E1000: e_lee(E_ICR)
             caso T_RTL8139: sale16(r_io + R_ISR, entra16(r_io + R_ISR))
             caso T_YUKON: yk_atender()
@@ -484,7 +515,13 @@ módulo Rtarjeta
     fin
 
     público función hay_enlace(): bool
-        según nat16(tarjeta)
+        devolver enlace_de(tarjeta)
+    fin
+
+    ; (WIFI) ¿tiene enlace la tarjeta de esa clase? (también la del cable mientras se va por el Wi-Fi)
+    público función enlace_de(t: nat32): bool
+        según nat16(t)
+            caso T_WIFI: devolver enlace_wifi
             caso T_E1000: devolver e_lee(E_STATUS) yb 2 <> 0
             caso T_RTL8139: devolver entra8(r_io + R_MSR) yb 4 = 0
             caso T_YUKON: devolver yk_enlace()
@@ -505,8 +542,33 @@ módulo Rtarjeta
                 si entra8(r_io + R_MSR) yb 8 <> 0 entonces devolver 10 fin
                 devolver 100
             caso T_YUKON: devolver yk_velocidad()
+            caso T_WIFI: devolver 54                    ; (WIFI) 802.11g
         fin
         devolver 0
+    fin
+
+    ; (WIFI) ir por el Wi-Fi (sí) o volver al cable: la tarjeta, su MAC y su
+    ; nombre pasan a ser los de la otra (la del cable se queda como estaba)
+    público función usar_wifi(sí: bool)
+        si sí y tarjeta <> T_WIFI entonces
+            copiar_memoria(dirección(mac_cable[0]), dirección(mac[0]), 8)
+            copiar(nombre_cable, nombre_tarjeta)
+            id_cable := id_tarjeta
+            irq_cable := irq_tarjeta
+            tarjeta := T_WIFI
+            copiar_memoria(dirección(mac[0]), dirección(mac_wifi[0]), 8)
+            copiar_hasta(nombre_tarjeta, nombre_wifi, 48)
+            pci_tarjeta := pci_wifi
+            id_tarjeta := id_wifi
+            irq_tarjeta := 0
+        sino si no sí y tarjeta = T_WIFI entonces
+            tarjeta := tarjeta_cable
+            copiar_memoria(dirección(mac[0]), dirección(mac_cable[0]), 8)
+            copiar(nombre_tarjeta, nombre_cable)
+            pci_tarjeta := pci_cable
+            id_tarjeta := id_cable
+            irq_tarjeta := irq_cable
+        fin
     fin
 
     ; para la tarjeta (antes de acabar el servicio)

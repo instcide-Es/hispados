@@ -1,0 +1,66 @@
+EL WI-FI DE HISPA-PENTIUM (el paquete «wifi»)
+
+Copyright (C) 2026 Carlos Sanz y contribuidores.
+
+Lo que hay en C:\HISPA:
+  WIFI.BIN     el servicio Wi-Fi: la tarjeta, las redes y WPA2. Lo pone en
+               marcha el servicio de red (RED.BIN) si el equipo tiene una de
+               las tarjetas que lleva y no se ha elegido «Usar: Cable».
+  REDWIFI.BIN  la ventana del Wi-Fi (un clic en el icono de la red de la
+               bandeja). En la Consola: REDWIFI /REDES, REDWIFI /CONECTAR...
+  BCM43XX.FW, BCM43XXH.FW  el microcódigo de las tarjetas Broadcom (de
+               Broadcom: ver más abajo y BCM43XX.TXT)
+  WIFI.INI     las redes recordadas: el nombre y la clave ya preparada (no la
+               contraseña), cifrada y firmada con la llave de este equipo
+               (WIFI.LLV). Como la llave está al lado, es una ofuscación:
+               quien tenga los dos archivos puede entrar en esas redes
+  WIFI.LOG     lo que ha hecho el Wi-Fi la última vez que arrancó (si algo no
+               va, es el archivo que hay que mandar)
+
+Las tarjetas que lleva:
+  - Broadcom BCM43224 y BCM43225 (la del HP Mini 5103, la del MacBook Air de
+    2012): el controlador «brcmsmac» de Linux.
+  - Atheros AR9285, AR9280, AR9287 y otras de la familia AR9002 (la del
+    Toshiba NB250): el controlador «ath9k» de Linux.
+  La Broadcom BCM4313 se encuentra, pero todavía no funciona (le falta su
+  parte de radio, el PHY «LCN»).
+Redes abiertas y con WPA2-Personal (AES); 2,4 GHz, 802.11b/g. No: WEP, WPA
+antigua (TKIP), WPA2-Empresa, WPA3.
+
+LICENCIAS
+
+WIFI.BIN junta código de varios:
+  - Lo de Hispa-DOS (la gestión 802.11, WPA2, el servicio): GPL-2.0 o
+    posterior.
+  - brcmsmac y brcmutil (Broadcom y los contribuidores de Linux) y ath9k
+    (Atheros y los contribuidores de Linux): licencia ISC, el texto de abajo.
+    Copyright (c) 2010 Broadcom Corporation; Copyright (c) 2008-2011 Atheros
+    Communications Inc.; y sus contribuidores.
+  - bcma (el bus de los chips de Broadcom) y cordic (contribuidores de
+    Linux): GPL-2.0 (solo la versión 2, la del núcleo de Linux).
+  Por eso WIFI.BIN entero se reparte bajo la GPL-2.0 (el texto, al final de
+  este archivo). Los fuentes: los de Linux 5.10, sin cambiar, y los nuestros,
+  en el repositorio de Hispa-DOS (las carpetas wifi/ y castel/nucleo32/wifi/),
+  o pidiéndolos a quien le dio este programa.
+
+El texto de la licencia ISC:
+
+  Permission to use, copy, modify, and/or distribute this software for any
+  purpose with or without fee is hereby granted, provided that the above
+  copyright notice and this permission notice appear in all copies.
+
+  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+  SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+  OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+  CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+El microcódigo de Broadcom (BCM43XX.FW y BCM43XXH.FW) no es software libre:
+es de Broadcom, de linux-firmware (brcm/bcm43xx-0.fw y bcm43xx_hdr-0.fw,
+versión 610.812), y su licencia (BCM43XX.TXT, en inglés) deja usarlo y
+repartirlo completo y sin cambiar, con una copia de la licencia, para usarlo
+con los chips de Broadcom; no deja cambiarlo ni desensamblarlo. Va aparte del
+programa y WIFI.BIN lo lee al arrancar (como hace Linux).
+

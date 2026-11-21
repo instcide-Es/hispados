@@ -447,6 +447,22 @@ módulo Dispositivos
         fin
         ; la red: la tarjeta del servicio de red (RED.BIN)
         si sub = 0x02 entonces
+            ; (WIFI) la tarjeta Wi-Fi del servicio Wi-Fi (WIFI.BIN)
+            si Red.hay_wifi() y aparato_de_wifi() = a entonces
+                lleva(EST_FUNCIONA, "WIFI.BIN")
+                dd[0] := nat32(señal_wifi)
+                según nat16(estado_wifi)
+                    caso WIFI_CONECTADA:
+                        si por_wifi entonces
+                            formatear(uno.detalle, 80, "Wi-Fi: conectada (señal %d dBm); la red va por ella", dd)
+                        sino
+                            formatear(uno.detalle, 80, "Wi-Fi: conectada (señal %d dBm); la red va por el cable", dd)
+                        fin
+                    caso WIFI_CONECTANDO: Textos32.copiar(uno.detalle, "Wi-Fi: conectando")
+                    si no: Textos32.copiar(uno.detalle, "Wi-Fi: la radio en marcha, sin conectar a ninguna red")
+                fin
+                devolver
+            fin
             si Red.hay_servicio() y aparato_de_red() = a entonces
                 lleva(EST_FUNCIONA, "RED.BIN")
                 según nat16(estado_red)
@@ -1011,7 +1027,8 @@ módulo Dispositivos
     ; las llamadas 155 y 156 (usuario.cas)
     ;  155  la lista: a EBX, hasta ECX fichas (Dispositivo, 320 octetos cada
     ;       una)                                    -> cuántas hay
-    ;  156  (los servicios del anillo 3: ACPI.BIN, RED.BIN) apuntar la ficha
+    ;  156  (los servicios del anillo 3: ACPI.BIN, RED.BIN; la tarjeta de WIFI.BIN
+;       la pone sola mira_pci, con la 96 de red.cas) apuntar la ficha
     ;       de EBX (ECX = 0); con ECX = 1, olvidar todas las suyas -> 0
     público función atender_dispositivos(nn: nat32, a: nat32, b: nat32, c: nat32): nat32
         variable d: Dispositivo

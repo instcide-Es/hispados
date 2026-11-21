@@ -31,7 +31,13 @@ módulo Rbase
     público constante O_TUNEL_DNS = 26          ; (TÚNEL) los nombres de los equipos del túnel: «nombre ip» por línea
     público constante O_TUNEL_ESTADO = 27       ; (TÚNEL) -> la IP del túnel; cab[1] salidos, cab[2] entrados
     público constante O_CORTAFUEGOS = 28        ; (CORTAFUEGOS) cab[1]: 0 leer otra vez CORTAFUE.INI; 1 el informe (texto); 2 olvidar lo pendiente del puerto cab[2]
+    ; (WIFI) el servicio Wi-Fi (WIFI.BIN, rwifi.cas) y lo que se prefiere (los números, también en nucleo32/wifi/wifi.h)
+    público constante O_WIFI_PONER = 40         ; (WIFI) soy la tarjeta Wi-Fi: cab[1] y cab[2] la MAC, cab[3] el aparato PCI, cab[4] su id; los octetos, su nombre
+    público constante O_WIFI_CAMBIO = 41        ; (WIFI) cab[1] bit 0 enlace, cab[2] señal; las tramas que han llegado -> las que salen; cab[1] bit 0: que se pare
+    público constante O_WIFI_QUITAR = 42        ; (WIFI) ya no hay tarjeta Wi-Fi
+    público constante O_WIFI_PREFERIR = 43      ; (WIFI) cab[1]: 0 Automático, 1 Cable, 2 Wi-Fi (otro: solo preguntar) -> lo que queda
     público constante AVISO_ACABÓ = 0xFFFF      ; (del núcleo) ha acabado la tarea cab... (la del pedido)
+    público constante AVISO_PREFERIR = 0xFFFE   ; (WIFI) (del núcleo) Configuración pide Automático, Cable o Wi-Fi: cab[1]
 
     ; ---- los errores (los de red.cas y los de aquí; los del núcleo, de 0xFFFFFFF0 para arriba) ----
     público constante SIN_RED = 0xFFFFFFEF      ; no hay servicio de red

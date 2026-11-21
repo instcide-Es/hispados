@@ -368,7 +368,7 @@ static int col;
 
 static void pinta(char c)
 {
-#ifndef ANFITRION
+#if !defined(ANFITRION) && !defined(HL_PENTIUM)	/* (PENTIUM) sin pantalla de texto a la vista */
 	/* la última línea de la pantalla de texto, subiendo las demás: se ve
 	 * aunque el equipo se quede colgado dentro del núcleo. Las columnas,
 	 * las filas y dónde empieza la página que se ve, de los datos de la
@@ -398,8 +398,14 @@ static void pinta(char c)
 #endif
 }
 
+#ifdef HL_PENTIUM
+void hl_letra_pentium(char c);	/* (PENTIUM) servicio.c: al puerto serie y a WIFI.LOG */
+#endif
 void hl_reg_c(char c)
 {
+#ifdef HL_PENTIUM
+	hl_letra_pentium(c);
+#endif
 	reg[reg_w % REG_TAM] = c;
 	reg_w++;
 	if (reg_w - reg_r > REG_TAM)
@@ -678,7 +684,57 @@ void hl_aviso(const char *archivo, int linea, const char *que)
 /* ---------------------------------------------------------------- tiempo */
 static u64 tsc0;
 static u32 tsc_por_ms = 1000000;
-#ifdef ANFITRION
+#if defined(HL_PENTIUM) && !defined(ANFITRION)
+/* (PENTIUM) en el anillo 3: el TSC se mide con los tics del núcleo (el reloj
+ * reparte el procesador: una espera con el 8254 se alargaría si nos quitan
+ * el procesador en medio; los tics no) */
+static inline u8 inb(u16 p) { u8 v; __asm__ __volatile__("inb %1, %0" : "=a"(v) : "Nd"(p)); return v; }
+static inline void outb(u8 v, u16 p) { __asm__ __volatile__("outb %0, %1" : : "a"(v), "Nd"(p)); }
+static inline u32 inl(u16 p) { u32 v; __asm__ __volatile__("inl %1, %0" : "=a"(v) : "Nd"(p)); return v; }
+static inline void outl(u32 v, u16 p) { __asm__ __volatile__("outl %0, %1" : : "a"(v), "Nd"(p)); }
+u32 hl_pentium_tics(void);
+u32 hl_pentium_hz(void);
+
+unsigned long hl_jiffies(void)
+{
+	return (unsigned long)hl_div64(tsc() - tsc0, tsc_por_ms, NULL);
+}
+
+void hl_udelay(unsigned long us)
+{
+	u64 fin = tsc() + hl_div64((u64)us * tsc_por_ms, 1000, NULL) + 1;
+	while (tsc() < fin)
+		__asm__ __volatile__("pause");
+}
+
+int hl_tiempo_inicia(void)
+{
+	u32 a, b, c, d, t, hz = hl_pentium_hz(), n;
+	u64 t0, t1;
+
+	__asm__ __volatile__("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1));
+	if (!(d & 0x10))
+		return -1;
+	if (hz < 10)
+		hz = 100;
+	n = hz / 5;		/* 200 ms */
+	t = hl_pentium_tics();
+	while (hl_pentium_tics() == t)
+		;
+	t0 = tsc();
+	t = hl_pentium_tics();
+	while (hl_pentium_tics() - t < n)
+		;
+	t1 = tsc();
+	a = (u32)hl_div64(t1 - t0, n * 1000 / hz, NULL);
+	hl_log(3, "Tiempo: %u ciclos en %u tics\n", (u32)(t1 - t0), n);
+	if (a < 1000)
+		return -2;
+	tsc_por_ms = a;
+	tsc0 = tsc();
+	return 0;
+}
+#elif defined(ANFITRION)
 unsigned long hl_reloj_falso;
 unsigned long hl_jiffies(void) { return hl_reloj_falso; }
 void hl_udelay(unsigned long us) { static u32 r; r += us; hl_reloj_falso += r / 1000; r %= 1000; }
@@ -881,6 +937,30 @@ static u32 pci_dir(struct pci_dev *d, int w)
 {
 	return 0x80000000u | (d->bus0.number << 16) | (d->devfn << 8) | (w & 0xfc);
 }
+#ifdef HL_PENTIUM
+/* (PENTIUM) RED.BIN y el núcleo también usan los dos puertos: sin que el
+ * reloj se cuele entre poner la dirección y leer o escribir el dato */
+static u32 pci_lee_c(u32 dir)
+{
+	u32 v, f;
+	__asm__ __volatile__("pushfl; popl %0; cli" : "=r"(f));
+	outl(dir, 0xcf8);
+	v = inl(0xcfc);
+	__asm__ __volatile__("pushl %0; popfl" : : "r"(f) : "cc");
+	return v;
+}
+static void pci_pon_c(u32 dir, u32 v)
+{
+	u32 f;
+	__asm__ __volatile__("pushfl; popl %0; cli" : "=r"(f));
+	outl(dir, 0xcf8);
+	outl(v, 0xcfc);
+	__asm__ __volatile__("pushl %0; popfl" : : "r"(f) : "cc");
+}
+u32 hl_pci_lee(int bus, int devfn, int w) { return pci_lee_c(0x80000000u | (bus << 16) | (devfn << 8) | (w & 0xfc)); }
+int pci_read_config_dword(struct pci_dev *d, int w, u32 *v) { *v = pci_lee_c(pci_dir(d, w)); return 0; }
+int pci_write_config_dword(struct pci_dev *d, int w, u32 v) { pci_pon_c(pci_dir(d, w), v); return 0; }
+#else
 u32 hl_pci_lee(int bus, int devfn, int w)
 {
 	outl(0x80000000u | (bus << 16) | (devfn << 8) | (w & 0xfc), 0xcf8);
@@ -888,6 +968,7 @@ u32 hl_pci_lee(int bus, int devfn, int w)
 }
 int pci_read_config_dword(struct pci_dev *d, int w, u32 *v) { outl(pci_dir(d, w), 0xcf8); *v = inl(0xcfc); return 0; }
 int pci_write_config_dword(struct pci_dev *d, int w, u32 v) { outl(pci_dir(d, w), 0xcf8); outl(v, 0xcfc); return 0; }
+#endif
 #else
 u32 hl_sim_pci_lee(int w);
 void hl_sim_pci_escribe(int w, u32 v);
@@ -975,6 +1056,19 @@ void pci_apaga(struct pci_dev *d)
 	pci_write_config_word(d, PCI_COMMAND, (cmd & ~PCI_COMMAND_MASTER) | 0x400);
 }
 
+#ifdef HL_PENTIUM
+/* (PENTIUM) los registros, a la vista con la llamada 95 (servicio.c) */
+void *hl_mapea(u32 fis, u32 tam);
+void __iomem *pci_iomap(struct pci_dev *d, int bar, unsigned long max)
+{
+	return hl_mapea(d->bar0, d->bar0_tam ? d->bar0_tam : 0x10000);
+}
+
+void __iomem *ioremap(u32 fis, unsigned long tam)
+{
+	return hl_mapea(fis, tam);
+}
+#else
 void __iomem *pci_iomap(struct pci_dev *d, int bar, unsigned long max)
 {
 	return hl_virt(d->bar0);
@@ -984,6 +1078,7 @@ void __iomem *ioremap(u32 fis, unsigned long tam)
 {
 	return hl_virt(fis);
 }
+#endif
 
 /* ----------------------------------------------------------- microcódigo */
 static struct { const char *nombre; const u8 *datos; u32 tam; } fws[2];
