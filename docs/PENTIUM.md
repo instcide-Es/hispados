@@ -1025,7 +1025,7 @@ propio, con sus tildes y su eñe).
   **botón por cada ventana abierta** (pulsarlo la trae delante; si ya lo estaba, la
   minimiza; si estaba minimizada, la recupera) y, a la derecha, la **bandeja con el
   reloj** (el de la CMOS; se pone al día cada minuto).
-- **El menú Inicio**, de dos columnas: a la izquierda, en blanco, los **Programas**
+- **El menú Inicio** (desde la 0.8.4 es otro: más abajo, «El menú Inicio y los atajos de teclado»). El de antes, de dos columnas: a la izquierda, en blanco, los **Programas**
   (Bloc de notas, Consola, Mi equipo); a la derecha, en azul muy claro, los
   **Documentos** (los `.TXT` de la raíz del disco: se abren con el Bloc de notas) y
   **Configuración**; y abajo, **«Apagar el equipo»**. Se abre con el botón o con la
@@ -1600,6 +1600,144 @@ del dock lo sabe con `DATO_ALTO_LIBRE` (`Ventanas.alto_dock`): así se
 pone el explorador. Sabe qué está abierto mirando las
 ventanas y el nombre (y los argumentos) de la tarea de cada una; lo que se
 pulsa se lo pide al escritorio (`Dock.pide`: lanzar o Configuración).
+
+### El menú Inicio y los atajos de teclado (21/11, la 0.8.4; marcado «(MENÚ)»)
+
+| | |
+|---|---|
+| ![El menú Inicio nuevo](pentium/menu-inicio.png) | ![Todos los programas > Juegos: más de los que caben, con sus flechas](pentium/menu-todos.png) |
+| ![Un menú emergente de 30 opciones, desplazado con la rueda](pentium/menu-largo.png) | ![Alt+F4 en el tapiz: Apagar el equipo, con Cerrar sesión](pentium/menu-apagar.png) |
+
+Lo pidió Carlos el 21/11: «actualizar el menú de inicio con todos los
+programas, y que *Apagar equipo* no se esconda por tener muchos programas».
+Antes el menú crecía con cada acceso de un paquete (hasta 6) y, con muchos,
+el pie se iba de la pantalla. Ahora (`inicio.cas`, un módulo nuevo del
+núcleo) es de los de principios de los 2000, con diseño propio:
+
+- **Arriba**, el saludo («Hola, Carlos») con el disquete.
+- **A la izquierda**, en blanco: los **fijados** (en negrita, con su
+  explicación debajo: el Bloc de notas y la Consola, si no se dice otra
+  cosa) y los **más usados** (los que más se han abierto desde el menú;
+  mientras no hay cuentas, los de los paquetes y la oficina). Caben los que
+  caben: nunca empujan nada. Abajo del todo, **«Todos los programas»** (la
+  flecha verde).
+- **«Todos los programas»** abre un submenú con sus **carpetas** (las que
+  tienen algo, en este orden): Accesorios, Desarrollo, Internet, Juegos,
+  Multimedia, Oficina, Programas de terceros, Programas de Windows,
+  Seguridad, Sistema y Otros; y cada carpeta, otro submenú con lo que lleva,
+  por orden alfabético: lo de serie (el Bloc, la Consola, Mi equipo; la
+  oficina; los programas de Windows de ejemplo y MUESTRA, si están;
+  Configuración, el Administrador de dispositivos, Programas y
+  actualizaciones, Programas instalados y Red y Tailscale) y **lo de los
+  paquetes** (`\HISPA\MENU\*.MNU`: hasta 32).
+- La carpeta de un acceso sale de su **`tipo=`** (los de la tabla de §13:
+  Sistema, Oficina, Internet y red, Juegos y emuladores, Multimedia,
+  Seguridad, Programas de Windows, Herramientas —a Accesorios—, Desarrollo,
+  Programas de terceros): el del `.MNU` si lo lleva; si no, el de la
+  cabecera del paquete que lo trae (su registro, `\HISPA\PAQUETES\*.PQI`,
+  donde está la línea `archivo=\HISPA\MENU\X.MNU`); y si tampoco, por el
+  programa (NAVEGA, WIFI, SSH → Internet; CLICGEST → Oficina; ESCUDO →
+  Seguridad; un `.EXE` → Programas de Windows) o **Otros**.
+- **A la derecha**, en azul muy claro (en negrita, y en dos renglones lo que
+  no cabe): **Mis documentos** (un submenú con los `.TXT` de la raíz, hasta
+  24; sin ninguno, abre Mi equipo), **Mi equipo**, **Configuración**, el
+  **Administrador de dispositivos**, **Programas instalados** (la ventana
+  para desinstalar de la rama pentium-programas, `\INSTALAD.BIN`: mientras
+  no esté, en gris), **Actualizar** (Programas y actualizaciones), **Ayuda**
+  (`MANUAL.TXT` en el Bloc de notas) y **Ejecutar...**.
+- **El pie**, siempre a la vista: **Cerrar sesión**, **Reiniciar** y
+  **Apagar equipo** (cada uno con su icono: una puerta amarilla, una
+  flecha en círculo verde y el botón de encender naranja).
+
+El menú **mide siempre lo mismo**: 440 x 470 puntos, o lo que quepa encima
+de la barra de tareas (a 640 x 480, 442 de alto); a 800 x 600 y a
+1024 x 600, igual. **Los submenús no crecen más que la pantalla**: si no
+caben, se ve lo que cabe entre dos franjas con flechas (▲ ▼, en gris si ya
+no se puede ir más allá) y se desplazan con **un clic en la franja**, con
+**la flecha quieta encima** (solo), con **la rueda** y con el teclado.
+
+**Con el ratón**: la flecha encima de «Todos los programas» (o de «Mis
+documentos», o de una carpeta) abre su submenú; si se va de ahí, el
+submenú se cierra un tercio de segundo después, salvo que la flecha llegue
+a él (así se puede ir **en diagonal** sin que se cierre). Un clic abre el
+programa. **El botón secundario** en un programa: **Abrir** y **Anclar al
+menú Inicio** (o **Quitar del menú Inicio**, si ya está fijado).
+
+**Con el teclado**: el logo (o **Ctrl+Esc**) lo abre; **↑ ↓** de una
+opción a otra; **→ ←** de una columna a otra, y a los submenús y de vuelta;
+**Intro** (o el espacio) abre; **Esc** cierra el submenú de más adentro (y
+luego el menú); **Inicio, Fin, Re Pág, Av Pág** en los submenús; y **la
+letra inicial** (sin mirar tildes ni mayúsculas) lleva a la opción
+siguiente que empieza por ella.
+
+**Lo fijado y las cuentas** se guardan, en un sistema instalado, en
+`C:\HISPA\INICIO.INI` (página 437, CR LF; sin instalar —la memoria USB, un
+disco de pruebas— solo mientras está en marcha):
+
+    ; el menú Inicio de Hispa-Pentium: lo fijado y las veces que se ha abierto cada programa
+    fijo=Bloc de notas
+    fijo=Consola
+    uso=3|Navegador
+
+**Cómo está hecho**: `inicio.cas` hace la lista de lo que hay cada vez que se
+abre (con los accesos de `accesos.cas`, que ahora lleva también el `tipo`) y
+pinta el menú y sus dos submenús, cada uno en su ventana del núcleo (sin
+marco, por delante). Lo que se elige no lo hace él: lo deja en `pedido` (la
+acción de `escritorio.cas`, o un programa con sus argumentos) y lo hace
+`haz()` del escritorio. Un clic en un submenú le llega al menú como «fuera»
+(`EV_FUERA`): se mira con `ventana_en_punto` si cae en uno de los suyos. El
+gestor de ventanas pasa de 20 a 24 (14 guardadas para el núcleo: los
+programas siguen teniendo 10).
+
+**Los menús emergentes largos** (`emergente.cas`): hasta 32 opciones (eran
+12) y 1024 letras (la llamada 39, 768). Si no caben a lo alto, como los
+submenús: lo que cabe, con sus franjas de flechas, la rueda, el teclado
+(Re Pág, Av Pág, Inicio, Fin) y **la letra inicial**. `ularga.cas`
+(`LARGA.BIN`) es el programa de las pruebas: un menú de 30 opciones.
+
+#### Los atajos de teclado de todo el sistema
+
+Los atiende el escritorio (le llegan a la barra de tareas, como el logo), por
+delante de los programas, sin quitarles los suyos (Ctrl+Tab de las pestañas,
+Alt+letra de los menús de `controles.cas`, F2 de ClicGest... siguen igual).
+El teclado (`consola.cas`) da unas teclas nuevas con el escritorio en marcha:
+`TECLA_ALT_F4` (0x112), `TECLA_ALT_TAB`, `TECLA_ALT_MAYÚS_TAB`,
+`TECLA_ALT_SUELTA` (Alt suelto tras un Alt+Tab), `TECLA_ALT_ESPACIO`,
+`TECLA_TAREAS`, `TECLA_IMPR`, `TECLA_ALT_IMPR` (hasta 0x119) y
+`TECLA_LOGO_LETRA` + letra (0x1A0...). El logo ya no abre el menú al
+pulsarlo, sino **al soltarlo** si no se ha pulsado otra tecla con él (como
+en los sistemas de hoy; también en un teclado USB, que manda el logo como
+E0 5B / E0 DB).
+
+| Atajo | Lo que hace |
+|---|---|
+| Logo, o Ctrl+Esc | abre y cierra el menú Inicio |
+| Logo+E | Mi equipo (el explorador) |
+| Logo+D | enseña el escritorio: minimiza todas las ventanas; otra vez, las devuelve |
+| Logo+R | **Ejecutar...**: un cuadro con un campo; Intro abre lo escrito (un programa —sin extensión, `.BIN`—, una carpeta —en Mi equipo— o un `.TXT`/`.INI`/`.BAT` —en el Bloc—, con sus argumentos detrás) |
+| Logo+L | cierra la sesión, si hay usuario (con nombre en HISPA.INI); si no, nada |
+| Alt+Tab, Alt+Mayús+Tab | a la ventana siguiente (o a la de antes); mientras se tiene Alt, una **franja** en medio con sus iconos y el nombre de la elegida; al soltar Alt, se queda esa (y si estaba recogida, sale). Esc, sin cambiar |
+| Alt+F4 | cierra la ventana activa, como su botón ✕ (el programa puede preguntar si guarda); **en el tapiz** (si lo último pulsado es el tapiz, o no hay ventanas): el cuadro **Apagar el equipo** |
+| Alt+Espacio | el menú de la ventana activa: Restaurar, Mover, **Tamaño**, Minimizar, Maximizar y Cerrar; **Mover** y **Tamaño** también **con las flechas** (16 puntos cada vez; Intro o Esc acaban) |
+| Ctrl+Alt+Supr, o Ctrl+Mayús+Esc | el **Administrador de tareas**: los programas con ventana (su título, su tarea, si está recogido); **Cambiar a** (Intro), **Terminar** (Supr: acaba la tarea, sin guardar), Cerrar (Esc). No había ninguno en Pentium |
+| Impr Pant | una **captura** de la pantalla, en `\CAPTURAS\CAPTnnnn.BMP` (24 bits; el portapapeles es de texto), y un globo que lo dice |
+| Alt+Impr Pant | lo mismo, de la ventana activa |
+| F1 | en el tapiz: la **Ayuda** (`MANUAL.TXT`); en un programa, la suya, si la tiene (le llega F1 como siempre) |
+
+**El cuadro «Apagar el equipo»** (el del pie del menú y el de Alt+F4) lleva
+ahora **Apagar** (elegido: un borde oscuro alrededor, no solo un color),
+**Reiniciar**, **Cerrar sesión** y **Cancelar**: las flechas (o Tab) cambian
+lo elegido, **Intro** lo hace, **Esc** cancela.
+
+**Cerrar sesión** cierra los programas (como al apagar: el que tiene algo sin
+guardar lo pregunta, y entonces no sigue) y deja un cuadro «Hasta pronto,
+Carlos» con **Entrar**. Aún no hay contraseñas (está en METAS: «Usuarios con
+contraseña»); cuando las haya, ese cuadro será el de entrar.
+
+**«Reiniciar»** del pie del menú reinicia sin más preguntas (como el del
+cuadro: antes cierra los programas, y el que tenga algo sin guardar lo dice).
+
+Las pruebas: `SOLO=menu ./pruebas.sh` (la parte 23).
 
 ### La medida de la pantalla, desde Configuración (20/11)
 
@@ -3817,7 +3955,7 @@ y Ctrl+rueda cambia la letra (como Ver > Letra, y lo guarda); le hace falta
 una línea en su bucle (la de arriba), así que sale en su versión siguiente.
 Sus fichas no se desplazan (caben en la ventana, con sus subpestañas).
 
-Los paquetes: `bloc` y `consola` 0.8.5, `paquetes` 1.0.1; `equipo` (Mi
+Los paquetes: `bloc` y `consola` 0.8.4, `paquetes` 1.0.1; `equipo` (Mi
 equipo y el Administrador de dispositivos) y `ejemplos` (MUESTRA) cambian
 también. Las pruebas: `SOLO=rueda ./pruebas.sh` (la parte 23 bis: la
 Consola, el Bloc, Mi equipo en sus vistas, el Administrador de dispositivos

@@ -17,6 +17,9 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 ## El escritorio
 - [x] ~~Explorador de archivos: árbol de carpetas, vistas (iconos, lista, detalles), copiar/cortar/pegar, arrastrar y soltar, papelera, buscar, propiedades, abrir con…, miniaturas de imágenes~~ (21/11; falta escribir nombres largos)
 - [x] ~~Dock: barra de lanzamiento con los programas favoritos y los abiertos, que se pueda fijar y quitar~~ (21/11)
+- [x] ~~Menú Inicio con todos los programas («Todos los programas» con carpetas, por el tipo de cada paquete), fijados y más usados, y Cerrar sesión / Reiniciar / Apagar equipo siempre a la vista~~ — rama pentium-menu (21/11: docs/PENTIUM.md, «El menú Inicio y los atajos de teclado»)
+- [x] ~~La rueda del ratón en todo el entorno: menús y submenús largos, rejillas de controles.cas, Bloc, Consola (historial), Explorador, Administrador de dispositivos, Actualizaciones; Ctrl+rueda, la letra o la vista~~ — ramas pentium-menu y pentium-rueda (21/11; ClicGest, en su versión siguiente)
+- [x] ~~Atajos de teclado de todo el sistema: Alt+F4, Alt+Tab, Logo (E, D, R, L), Ctrl+Esc, Alt+Espacio, Ctrl+Alt+Supr (Administrador de tareas), Impr Pant, F1~~ — rama pentium-menu (21/11)
 - [ ] Barra de tareas: agrupar ventanas, vista previa, bandeja con más iconos (sonido, Wi-Fi)
 - [ ] Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido, ratón, teclado, red y Wi-Fi, energía, usuarios, programas (hecho: actualizaciones)
 - [ ] Temas y fondo de escritorio; letras TrueType del sistema; protector de pantalla

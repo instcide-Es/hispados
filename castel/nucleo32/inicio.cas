@@ -28,9 +28,9 @@
 ;  (la opción siguiente que empieza por ella). Con el botón secundario,
 ;  en un programa: Abrir, y Anclar al menú Inicio (o Quitar del menú).
 ;
-;  Lo fijado y las veces que se ha abierto cada programa se guardan en
-;  INICIO.INI (en \HISPA, o en la raíz de un sistema sin instalar; página
-;  437, CR LF): «fijo=Bloc de notas» y «uso=3|Navegador».
+;  Lo fijado y las veces que se ha abierto cada programa se guardan, en un
+;  sistema instalado, en \HISPA\INICIO.INI (página 437, CR LF): «fijo=Bloc
+;  de notas» y «uso=3|Navegador» (sin instalar, solo mientras está en marcha).
 ;
 ;  Lo que se elige no lo hace este módulo: lo deja en «pedido» (la acción
 ;  del escritorio y su dato, o un programa con sus argumentos) y lo hace
@@ -390,7 +390,8 @@ módulo Inicio
     función guarda_ini()
         variable m, i: nat32
         variable cifras: arreglo [12] de byte
-        si del_sistema = 0xFFFFFFFF o unidad_en_memoria() o no escribible(del_sistema) entonces devolver fin
+        ; (solo en un sistema instalado: un disco de prueba o una memoria USB no se tocan)
+        si del_sistema = 0xFFFFFFFF o unidad_en_memoria() o no instalado() o no escribible(del_sistema) entonces devolver fin
         copiar(tini, "; el menú Inicio de Hispa-Pentium: lo fijado y las veces que se ha abierto cada programa\r\n")
         i := 0
         mientras i < n_fijos hacer

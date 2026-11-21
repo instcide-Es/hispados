@@ -109,9 +109,11 @@ VERSION_084 = '0.8.4'
 # (RUEDA) (21/11/2026) la rueda del ratón en los programas: el Bloc de notas
 # (desplaza el texto sin mover el cursor), la Consola (el historial de lo que
 # sube: rueda y Mayús+Re Pág) y Programas y actualizaciones (su lista) suben
-# a la 0.8.5 / 1.0.1. (Mi equipo y el Administrador de dispositivos —equipo—
-# y MUESTRA —ejemplos— también la llevan: su versión la sube quien fusiona.)
-VERSION_RUEDA = '0.8.5'
+# a la 0.8.4 / 1.0.1. (Mi equipo y el Administrador de dispositivos —equipo
+# 0.9— y MUESTRA —ejemplos 0.8.4— también la llevan: van en la 0.8.4, que aún
+# no se ha publicado.) (MENÚ) el menú Inicio nuevo, los menús largos y los
+# atajos de todo el sistema van en el núcleo (base 0.8.4, sin publicar).
+VERSION_RUEDA = VERSION_084
 SISTEMA = [
     ('base', VERSION_084, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
