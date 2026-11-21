@@ -1067,6 +1067,19 @@ módulo UDisposi
             sino si s.clase = EV_MENÚ entonces
                 si elegido(s.b, s.a) entonces devolver 0 fin
                 pinta()
+            sino si s.clase = EV_RUEDA entonces
+                ; (RUEDA) la rueda desplaza la lista sin mover lo elegido; con Ctrl, la letra
+                si rueda(s) entonces
+                    pinta()
+                sino si rueda_letra(s) > 0 y tamaño_ < T_MUY_GRANDE entonces
+                    tamaño_ := tamaño_ + 1
+                    nuevo_tamaño(ancho, alto, tamaño_)
+                    pinta()
+                sino si rueda_letra(s) < 0 y tamaño_ > T_NORMAL entonces
+                    tamaño_ := tamaño_ - 1
+                    nuevo_tamaño(ancho, alto, tamaño_)
+                    pinta()
+                fin
             sino si s.clase = EV_UNIDADES entonces
                 ; (se ha enchufado o quitado algo: la lista, al día)
                 lee()

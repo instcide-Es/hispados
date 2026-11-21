@@ -3778,6 +3778,56 @@ DISCO=/tmp/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 QEMU_MAS="-nic user,mo
   dónde guardar una descarga.
 - Nombres largos al descargar (el núcleo aún crea solo 8+3).
 
+### La rueda del ratón en los programas (RUEDA)
+
+*21/11/2026, por la tarde.* La rueda (`EV_RUEDA`, de la 0.8.3) ya no es solo
+del Navegador: llega a la ventana que hay **debajo de la flecha** (aunque no
+sea la activa, como en los sistemas de hoy) y la usan todos los programas que
+tienen algo que desplazar. Un paso de la rueda son **tres renglones** (como en
+Windows); hacia arriba, sube. Y, como en Windows, **desplazar no mueve lo
+elegido ni el cursor**: en cuanto se pulsa una tecla (o se hace clic), lo que
+se ve vuelve a seguir a lo elegido.
+
+| Dónde | La rueda | Ctrl+rueda |
+|---|---|---|
+| Las **rejillas y listas** de `controles.cas` (MUESTRA, el Administrador de dispositivos, ClicGest...) | la rejilla que hay debajo de la flecha, tres renglones por paso | la letra: hacia arriba, más grande (normal, vez y media, doble); hacia abajo, más pequeña |
+| El **Bloc de notas** | el texto, tres líneas por paso (el cursor se queda donde estaba; «Lín» no cambia) | — (el Bloc tiene una sola letra) |
+| La **Consola** | el **historial**: lo que ha subido por arriba de la pantalla (las últimas 500 líneas), en un azul algo más claro, y el título dice cuántas líneas se ha subido («Consola - historial: 6 líneas más arriba»); al escribir algo el programa, al teclear o con un clic, otra vez abajo. También con **Mayús+Re Pág** y **Mayús+Av Pág** | — |
+| **Mi equipo** (el explorador) | en el árbol, tres renglones; en los iconos y las miniaturas, una fila; en la lista, una columna; en los detalles, tres renglones de la rejilla | la vista, como en Windows: hacia arriba, más grande (detalles, lista, iconos, miniaturas); hacia abajo, más pequeña |
+| **Programas y actualizaciones** | la lista de los paquetes | — |
+| El **Navegador** | la página (o la caja con desplazamiento de debajo); con Mayús, a los lados | (lo de la 0.8.3) |
+
+**Para los programas de Castel** (`controles.cas`): cada `rejilla()` pintada
+se apunta, y en el bucle de los sucesos basta con
+
+    sino si s.clase = EV_RUEDA entonces
+        si rueda(s) entonces pinta() fin            ; la rejilla de debajo, sin mover la elegida
+        ; y, si se quiere: rueda_letra(s) da 1 (Ctrl y hacia arriba), -1 o 0
+
+Además, `pasos_rueda(c)` (los pasos con su signo), `rejilla_rueda(g, pasos)`
+y `rejilla_bajo(x, y)`. La `Rejilla` lleva un campo nuevo al final,
+`suelta` (desplazada con la rueda: `rejilla()` ya no la lleva a la
+elegida); lo quitan las teclas, el clic, `rejilla_ir`, `rejilla_elegir_id`,
+`rejilla_lista` y `rejilla_filtrar`. Los programas que se compilan con
+`controles.cas` (ClicGest) tienen que volver a compilarse.
+
+**ClicGest** (repositorio aparte, rama `rueda`): sus rejillas (socios,
+cuotas, salidas, inscritos, biblioteca, tesorería) se desplazan con la rueda
+y Ctrl+rueda cambia la letra (como Ver > Letra, y lo guarda); le hace falta
+una línea en su bucle (la de arriba), así que sale en su versión siguiente.
+Sus fichas no se desplazan (caben en la ventana, con sus subpestañas).
+
+Los paquetes: `bloc` y `consola` 0.8.5, `paquetes` 1.0.1; `equipo` (Mi
+equipo y el Administrador de dispositivos) y `ejemplos` (MUESTRA) cambian
+también. Las pruebas: `SOLO=rueda ./pruebas.sh` (la parte 23 bis: la
+Consola, el Bloc, Mi equipo en sus vistas, el Administrador de dispositivos
+y MUESTRA, con la rueda de QEMU: `mouse_move 0 0 N`, un paso cada vez).
+
+| | |
+|---|---|
+| ![La Consola con la rueda: el historial](pentium/rueda-consola.png) | ![Mi equipo: Ctrl+rueda, de los iconos a la lista](pentium/rueda-equipo.png) |
+| ![El Administrador de dispositivos, desplazado sin mover lo elegido](pentium/rueda-dispositivos.png) | ![MUESTRA: la rejilla desplazada, la elegida fuera de la vista](pentium/rueda-muestra.png) |
+
 ## 14 quater. Los programas de Windows de 32 bits y DirectX (WIN32.BIN)
 
 *21/11/2026, la rama `pentium-win32`. Todo, con la arquitectura y por qué, en

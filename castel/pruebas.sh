@@ -183,6 +183,12 @@
 #      de FASM (ensamblado ahí); FASMW abriendo y ensamblando HELLO.ASM, y
 #      ese HELLO.EXE; Mi equipo abriendo un .EXE; y WSOCK32 (REDPRUE) contra
 #      el servidor HTTP de aquí.
+#  23 bis. (RUEDA, SOLO=rueda) La rueda del ratón en los programas: la
+#      Consola (el historial de lo que ha subido, y vuelve abajo al
+#      teclear), el Bloc de notas (sin mover el cursor), Mi equipo (iconos,
+#      lista y detalles; Ctrl+rueda cambia la vista), el Administrador de
+#      dispositivos y MUESTRA (las rejillas de controles.cas: sin mover lo
+#      elegido; Ctrl+rueda, la letra).
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -204,6 +210,7 @@
 #   SOLO=ssh ./pruebas.sh         la primera y la 20 (SSH, WireGuard y Tailscale; con HEADSCALE=binario, también Tailscale)
 #   SOLO=lectores ./pruebas.sh    la primera y la 21 (los CD y DVD, y las imágenes de disco)
 #   SOLO=win32 ./pruebas.sh       la primera y la 22 (los programas de Windows y DirectX)
+#   SOLO=rueda ./pruebas.sh       la primera y la 23 bis (la rueda del ratón en los programas)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -267,7 +274,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -3834,6 +3841,66 @@ kill $NPID 2> /dev/null; wait $NPID 2> /dev/null
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Navegador)"
 fi   # el Navegador
+
+# ------------------------------------- 23 bis. (RUEDA) la rueda en los programas
+if parte08 rueda; then
+echo "== Hispa-Pentium: la rueda del ratón en los programas (RUEDA) =="
+W=$P/rueda
+rm -rf $W; mkdir -p $W $G
+export MTOOLS_SKIP_CHECK=1
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $W/semilla.asm > /dev/null && nasm -f bin $W/semilla.asm -o $W/SEMILLA.BIN || ko "semilla.cas no compila"
+for u in udisposi:DISPOSIT umuestra:MUESTRA; do
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/${u%%:*}.cas -o $W/x.asm > /dev/null && nasm -f bin $W/x.asm -o $W/${u##*:}.BIN || ko "${u%%:*}.cas no compila"
+done
+# (y Programas y actualizaciones, que solo se compila: su rueda se ve con un catálogo)
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/uactual.cas -o $W/x.asm > /dev/null && nasm -f bin $W/x.asm -o $W/ACTUALIZ.BIN \
+  && ok "ACTUALIZ.BIN (Programas y actualizaciones, con la rueda en su lista) compila" || ko "uactual.cas no compila"
+if $AQUI/nucleo32/disco.sh $W/d.img 32 > $W/disco.txt 2>&1; then
+  python3 -c "
+import sys
+for i in range(1, 401): sys.stdout.write('linea %03d de un texto largo\r\n' % i)" > $W/LARGO.TXT
+  mmd -i $W/d.img ::MUCHOS
+  for i in $(seq -w 1 80); do printf 'archivo %s\r\n' $i > $W/A$i.TXT; done
+  mcopy -i $W/d.img $W/A*.TXT ::MUCHOS/
+  mcopy -i $W/d.img $W/LARGO.TXT $W/DISPOSIT.BIN $W/MUESTRA.BIN ::/
+  # la Consola (dos clics en su icono): 400 líneas, y la rueda hacia arriba
+  # (cada «mouse_move 0 0 N» de QEMU es un paso: tres líneas); luego el
+  # Bloc, Mi equipo, el Administrador de dispositivos y MUESTRA, lanzados desde ella
+  CAPTURAS=$G DISCO=$W/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $W/SEMILLA.BIN \
+    ":pausa 3" ":doble 62 185" ":pausa 3" "type largo.txt" ":pausa 3" ":raton 300 300" \
+    ":monitor mouse_move 0 0 1" ":pausa 1" ":monitor mouse_move 0 0 1" ":pausa 1" ":captura ru1" \
+    "bloc largo.txt" ":pausa 3" ":captura ru2" ":raton 300 300" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru3" \
+    ":tecla right" ":pausa 1" ":captura ru4" ":clic 606 102" ":pausa 1" \
+    "equipo c:\\muchos" ":pausa 4" ":raton 400 300" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru5" \
+    ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 -1" ":pausa 2" ":captura ru6" \
+    ":tecla f8" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru7" ":clic 775 21" ":pausa 1" \
+    "disposit" ":pausa 4" ":raton 400 300" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru8" ":clic 745 31" ":pausa 1" \
+    "muestra normal" ":pausa 4" ":raton 400 350" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru9" \
+    ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 1" ":pausa 2" ":captura ru10" ":tecla down" ":pausa 1" ":tecla down" ":pausa 1" ":captura ru11" > $W/r.sal 2>&1
+  tr -d '\r' < $W/r.sal > $W/r.txt
+  S=$W/r.txt
+  mira "la Consola, el Bloc, Mi equipo y el Administrador de dispositivos, lanzados" \
+    "escritorio: lanzo .CONSOLA.BIN" 
+  miracap "la Consola: la rueda hacia arriba enseña lo que había subido (dos pasos, seis líneas: la 371 arriba, en otro azul) y el título lo dice" ru1 \
+    negrita 90 60 600 90 "Consola - historial: 6 l" texto 90 110 400 130 "linea 371 de un texto largo"
+  miracap "el Bloc de notas con LARGO.TXT (y la Consola, al escribir, otra vez abajo)" ru2 texto 110 170 400 200 "linea 001 de un texto largo" notexto 80 60 600 90 "historial"
+  miracap "el Bloc: dos pasos de rueda hacia abajo, seis líneas (la 007 arriba), y el cursor donde estaba (Lín 1)" ru3 \
+    texto 110 170 400 200 "linea 007 de un texto largo" texto 110 455 400 480 "Lín 1, Col 1"
+  miracap "y con una tecla (la flecha), otra vez al cursor" ru4 texto 110 170 400 200 "linea 001 de un texto largo" texto 110 455 400 480 "Lín 1, Col 2"
+  miracap "Mi equipo: un paso de rueda, una fila de iconos (A06 arriba), sin elegir nada" ru5 texto 210 160 300 200 A06.TXT notexto 210 160 300 200 A01.TXT texto 10 478 300 500 "Nada elegido"
+  miracap "Ctrl+rueda hacia abajo: la vista, más pequeña (de los iconos a la lista)" ru6 texto 210 130 320 160 A01.TXT texto 440 130 560 160 A16.TXT
+  miracap "en los detalles (F8), la rueda baja seis renglones de la rejilla" ru7 negrita 220 150 320 180 A07.TXT notexto 210 130 320 470 A01.TXT
+  miracap "el Administrador de dispositivos: la rueda baja la lista y la elegida («Pantalla», arriba) se queda elegida, aunque ya no se vea" ru8 \
+    notexto 40 120 400 520 "[-] Pantalla (1)" negrita 40 120 400 520 "[-] Procesador (1)" texto 40 520 300 545 "15 dispositivos"
+  miracap "MUESTRA: la rueda baja la rejilla seis renglones (el 20, arriba) sin mover la elegida (la 8, que ya no se ve)" ru9 \
+    negrita 0 0 400 30 "Muestra de controles" texto 60 195 300 220 "Persona de ejemplo 20" notexto 0 190 800 520 "Persona de ejemplo 8"
+  miracap "MUESTRA: Ctrl+rueda hacia arriba, la letra más grande (vez y media)" ru10 negrita15 0 150 800 300 "Nombre"
+  miracap "y con la flecha abajo (la primera lleva el teclado a la rejilla), la elegida pasa a la siguiente (la 15) y se ve otra vez" ru11 negrita15 0 150 800 400 "Persona de ejemplo 15"
+  [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/ru*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
+else ko "no se puede hacer el disco: $(tail -2 $W/disco.txt)"; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin la rueda)"
+fi   # la rueda
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
 [ -z "${SOLO:-}" ] && parte15
