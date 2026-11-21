@@ -2,8 +2,9 @@
 ;  controles.cas - los controles de las ventanas de Hispa-Pentium, para los
 ;  programas del anillo 3 que quieren una ventana de aplicación de las de
 ;  siempre (un programa de gestión, un ERP de escritorio): un lienzo propio
-;  del tamaño de la ventana, la letra del sistema a su tamaño o al doble
-;  (la «letra grande»), y los controles:
+;  del tamaño de la ventana, la letra del sistema a su tamaño o la «letra
+;  grande» (DejaVu Sans suavizada, proporcional: letrasuave.cas, en renglones
+;  de 24 o de 32 puntos), y los controles:
 ;
 ;    botón, campo (con su cursor), campo de fecha, casilla, lista
 ;    desplegable, recuadro con título, pestañas, rejilla (una tabla con
@@ -63,11 +64,11 @@ módulo Controles
     público variable ancho, alto: ent32         ; lo de dentro
     ; los tamaños de la letra
     público constante T_NORMAL = 1              ; la del sistema, 8x16
-    público constante T_GRANDE = 2              ; vez y media, 12x24
-    público constante T_MUY_GRANDE = 3          ; el doble, 16x32
+    público constante T_GRANDE = 2              ; la grande: renglón de 24 (la de 12x24 de antes)
+    público constante T_MUY_GRANDE = 3          ; la muy grande: renglón de 32 (la de 16x32)
     público variable M: ent32 = 4               ; la escala de la letra, en medios (2: 8x16; 3: 12x24; 4: 16x32)
     público variable E: ent32 = 2               ; la de los márgenes y las rayas (1 o 2)
-    público variable LA: ent32 = 16             ; lo que mide una letra a lo ancho
+    público variable LA: ent32 = 16             ; lo que mide una letra media a lo ancho (para colocar las cosas)
     público variable LT: ent32 = 32             ; y a lo alto
 
     tipo Control = estructura
@@ -204,8 +205,10 @@ módulo Controles
         fin
     fin
 
-    ; una letra, a la escala «m» (en medios: 2, 8x16; 3, 12x24; 4, 16x32). Con
-    ; la escala impar, cada punto de la letra es uno o dos (alternando)
+    ; una letra de la del sistema, a la escala «m» (en medios: 2, 8x16; 3,
+    ; 12x24; 4, 16x32). Con la escala impar, cada punto de la letra es uno o
+    ; dos (alternando). Lo usan los que quieran la de mapa de bits escalada:
+    ; texto_ne, con m de 3 o 4, pinta la suavizada
     público función letra_m(x: ent32, yy: ent32, c: nat32, tinta: nat32, m: ent32)
         variable g: puntero a byte
         variable f, k, y0, y1, x0, x1: ent32
@@ -1108,11 +1111,11 @@ módulo Controles
                 caja_redonda(px + 2, yy + 2, w - 4, al + 4, 4 * E, C_PAPEL)
                 caja(px + 2, yy + al - 2, w - 4, 4, C_PAPEL)
                 caja(px + 2, yy + 2, w - 4, 3 * E, C_VERDE)
-                negrita(px + LA, yy + 7 * E, t, tinta)
+                negrita(px + (w - ancho_negrita(t)) div 2, yy + 7 * E, t, tinta)
             sino
                 caja_redonda(px, yy + 3 * E, w, al - 3 * E, 4 * E, C_BORDE)
                 caja_redonda(px + 1, yy + 3 * E + 1, w - 2, al - 3 * E - 2, 4 * E, 0xDDE3EA)
-                texto(px + LA, yy + 8 * E, t, tinta)
+                texto(px + (w - ancho_texto(t)) div 2, yy + 8 * E, t, tinta)          ; en el centro (la pestaña mide lo de la negrita)
             fin
             px := px + w + 2 * E
             k := k + 1

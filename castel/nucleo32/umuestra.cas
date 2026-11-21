@@ -5,7 +5,7 @@
 ;  campo de fecha, una lista desplegable, una casilla y la barra de estado).
 ;  Es el ejemplo para escribir programas de ventana y lo que prueba
 ;  castel/pruebas.sh. Con «normal» en la línea de órdenes, con la letra
-;  normal; con «doble», al doble (si no, vez y media).
+;  normal; con «doble», la muy grande (si no, la grande: letrasuave.cas).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UMuestra

@@ -19,3 +19,11 @@ SERIFN.TTF, MONO.TTF y MONON.TTF, de estos (SHA-256 de los originales):
   DejaVuSerif-Bold.ttf    847b33e13925f19ff87e4d934d6b3cf7cac35ce16424f6f670e40c2f377cf2df
   DejaVuSansMono.ttf      c805f9436dbc268644c1d9584f01a601a653e028e08fd74b9b949f6cf8304d88
   DejaVuSansMono-Bold.ttf 3a3c502eeff669a231549e80df9f7c49de109bafe303170409e905d0b31a38fe
+
+Hispa-Pentium (desde la rama pentium-letras, 21/11/2026) usa DejaVu Sans y
+DejaVu Sans Bold, los originales de arriba (con su «hinting» y su tabla de
+kerning; hazletrasuave.py comprueba su SHA-256), para la letra grande de
+los programas de ventana (castel/nucleo32/controles.cas, ClicGest): no van
+como archivo .ttf, sino ya rasterizadas por castel/nucleo32/hazletrasuave.py
+en castel/nucleo32/letrasuave.cas (dos tamaños, 16 tonos por punto, las
+letras de la página de Ventanas). Misma licencia: ver LICENSE.

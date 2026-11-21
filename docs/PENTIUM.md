@@ -1119,11 +1119,30 @@ quieren una ventana de aplicación de las de siempre (un programa de gestión,
 un ERP de escritorio): `importar Controles`. El programa pinta en un **lienzo
 propio** del tamaño de la ventana (con `Grafico`, el de dibujar del
 escritorio) y `volcar()` lo manda entero a la ventana (la llamada 34,
-`mapa`). Así puede escribir con la letra del sistema **a vez y media (12x24)
-o al doble (16x32)** además de a su tamaño (8x16): `preparar(nombre,
-T_NORMAL|T_GRANDE|T_MUY_GRANDE, maximizada)`; `LA` y `LT` son lo que mide
-una letra, `E` los márgenes. Con la escala impar, cada punto de la letra es
-uno o dos, alternando (nítida, sin difuminar).
+`mapa`). Así puede escribir con la letra del sistema a su tamaño (8x16) o
+con la **letra grande** (el renglón de 24 o de 32 puntos): `preparar(nombre,
+T_NORMAL|T_GRANDE|T_MUY_GRANDE, maximizada)`; `LT` es el alto del renglón,
+`LA` la medida para colocar las cosas (la de una letra media: 8, 12 o 16) y
+`E` los márgenes.
+
+**La letra grande, suavizada** (desde la rama `pentium-letras`, 21/11/2026):
+antes era la de 8x16 escalada (a vez y media, cada punto uno o dos: trazos
+desiguales y escalones); ahora es **DejaVu Sans** (y **DejaVu Sans Bold** en
+negrita), **proporcional**, rasterizada para cada tamaño (letra de 18 puntos
+en el renglón de 24, de 24 en el de 32) con el «hinting» de la letra, **16
+tonos por punto** que se mezclan con lo que hay debajo, y su **kerning**. No
+se escala ni se rasteriza en marcha: `letrasuave.cas` (unos 100 KB, hecho
+por `hazletrasuave.py` con FreeType, en tiempo de compilación; no se edita)
+trae cada letra lista, y pintarla es mezclar (la fila, en ensamblador). Para
+medir: `ancho_texto`, `ancho_negrita`, `ancho_ne(t, n, m, negrita)` y
+`caben_ne` (cuántas letras caben en tantos puntos); `texto_corto` recorta con
+«…», `párrafo` parte las líneas por lo que mide cada letra, y el cursor de
+los campos va donde acaba la letra de verdad. La letra normal (8x16) sigue
+siendo la del sistema. `mira_captura.py` busca la letra grande con la letra
+ya rasterizada (`texto15`/`negrita15`, renglón de 24; `texto2`/`negrita2`,
+de 32).
+
+![La letra grande, antes y después](pentium/letras-antes-despues.png)
 
 | Control | Funciones | Teclas |
 |---|---|---|
