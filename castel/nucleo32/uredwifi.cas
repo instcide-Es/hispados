@@ -140,7 +140,14 @@ módulo UredWifi
     fin
 
     función lee_redes()
-        variable r, n: nat32
+        variable r, n, i, ant_n: nat32
+        variable ant: arreglo [36] de byte
+        ; (la elegida se sigue por su nombre: la lista puede cambiar de orden)
+        ant_n := 0
+        si elegida >= 0 y elegida < ent32(n_redes) entonces
+            ant_n := redes[elegida].ssid_n
+            copiar_memoria(dirección(ant[0]), dirección(redes[elegida].ssid[0]), 36)
+        fin
         r := pide(WO_REDES, 0, 0, 0, 0)
         si r >= 0xFFFFFFE0 entonces
             n_redes := 0
@@ -150,6 +157,11 @@ módulo UredWifi
         si n > MAX_REDES entonces n := MAX_REDES fin
         copiar_memoria(puntero(dirección(redes[0])), dirección(buf[0]), n * tamaño(Red_wifi))
         n_redes := n
+        si ant_n > 0 y n > 0 entonces
+            para i desde 0 hasta n - 1 hacer
+                si redes[i].ssid_n = ant_n y comparar_memoria(dirección(redes[i].ssid[0]), dirección(ant[0]), ant_n) = 0 entonces elegida := ent32(i) fin
+            fin
+        fin
         si elegida >= ent32(n_redes) entonces elegida := ent32(n_redes) - 1 fin
     fin
 

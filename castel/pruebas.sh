@@ -158,6 +158,17 @@
 #      Configuración, las pestañas de las propiedades, copiar y guardar el
 #      informe en X:); en un «q35» (RTL8139, xHCI con concentrador) el
 #      informe en texto; y con «sinusb» y «sinacpi», lo desactivado.
+#  23. (WIFI) El Wi-Fi (WIFI.BIN, nucleo32/wifi/: el núcleo Wi-Fi de Hispa-486
+#      en el anillo 3; la tarjeta Wi-Fi de RED.BIN, rwifi.cas; REDWIFI.BIN).
+#      QEMU no tiene tarjetas Wi-Fi: los vectores de las normas y la gestión
+#      802.11/WPA2 en el anfitrión (los de Hispa-486); la radio de mentira
+#      (RED.INI: WifiSimulada=SI) sin cable: buscar, conectar con WPA2, DHCP y
+#      PING por RED.BIN, WIFI.INI sin la contraseña, la contraseña equivocada,
+#      y al arrancar otra vez, se conecta sola; con la e1000: Automático,
+#      Wi-Fi y Cable (RED.INI); el controlador de verdad (brcmsmac y bcma)
+#      contra el modelo de la tarjeta (WIFISIM.BIN) con el microcódigo del
+#      disco; y el escritorio: el icono con rayitas, la ventana del Wi-Fi
+#      (la lista, la contraseña con asteriscos, conectar) y Configuración.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -176,6 +187,7 @@
 #   SOLO=pantalla ./pruebas.sh    la primera y la decimoséptima (la medida de la pantalla)
 #   SOLO=navegador ./pruebas.sh   la primera y la decimoctava (el Navegador: NAVEGA.BIN)
 #   SOLO=dispositivos ./pruebas.sh  la primera y la 19 (el Administrador de dispositivos)
+#   SOLO=wifi ./pruebas.sh        la primera y la 23 (el Wi-Fi: WIFI.BIN)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -192,7 +204,7 @@ H=$AQUI/../h8086
 USU="$AQUI/nucleo32/uinstala.cas $AQUI/nucleo32/uasiste.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas $AQUI/nucleo32/uequipo.cas $AQUI/nucleo32/udisposi.cas $AQUI/nucleo32/upaquete.cas $AQUI/nucleo32/uactual.cas"
 # y los de la red (la 0.8): el servicio, RED.BIN, y sus programas (con sus
 # módulos: rbase, rtarjeta, ryukon, rpila, rtcp y redes); van en su tanda
-RED_USU="$AQUI/nucleo32/ured.cas $AQUI/nucleo32/uipconf.cas $AQUI/nucleo32/uping.cas $AQUI/nucleo32/udescarg.cas"
+RED_USU="$AQUI/nucleo32/ured.cas $AQUI/nucleo32/uipconf.cas $AQUI/nucleo32/uping.cas $AQUI/nucleo32/udescarg.cas $AQUI/nucleo32/uredwifi.cas"
 T=$(mktemp -d)
 QPID=
 acaba() { [ -n "$QPID" ] && kill $QPID 2>/dev/null; [ -n "${VER:-}" ] && { rm -rf /tmp/castel-pruebas; cp -r $T /tmp/castel-pruebas; }; rm -rf $T; }
@@ -239,7 +251,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|wifi) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -2049,9 +2061,9 @@ for hc in xhci ehci; do
   # lo instalado, apuntado para PAQUETES: los registros de los paquetes del sistema, en \HISPA\PAQUETES
   rm -rf $Z/pqi $Z/pqu; mkdir $Z/pqi $Z/pqu
   mcopy -n -i $Z/vol.img '::HISPA/PAQUETES/*' $Z/pqi/ > /dev/null 2>&1; mcopy -n -i $G/usb.img@@1M '::INSTALA/PAQUETES/*' $Z/pqu/ > /dev/null 2>&1
-  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI TLS.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
+  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI TLS.PQI WIFI.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
     && mcopy -n -i $Z/vol.img ::HISPA/PAQUETES.BIN $Z/f.bin > /dev/null 2>&1; then
-    ok "$que: INSTALAR apunta lo que instala: los registros de los 10 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
+    ok "$que: INSTALAR apunta lo que instala: los registros de los 11 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
   else ko "$que: lo instalado no queda apuntado en C:\\HISPA\\PAQUETES:"; ls $Z/pqi | sed 's/^/        /' | head -10; fi
   # SOLO el disco: el primer arranque
   desde_disco $Z/d$hc.img $Z/a$hc.sal
@@ -2131,9 +2143,9 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -8; fi
-    if grep -q "^|  base      0.8.3   El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|10 paquetes\.$" $Z/b2$hc.txt \
-      && grep -q "^|Los archivos de los 10 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
-      ok "PAQUETES en el sistema recién instalado: LISTA dice los 10 paquetes del sistema (base, oficina...) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
+    if grep -q "^|  base      0.8.5   El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|11 paquetes\.$" $Z/b2$hc.txt \
+      && grep -q "^|Los archivos de los 11 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
+      ok "PAQUETES en el sistema recién instalado: LISTA dice los 11 paquetes del sistema (base, oficina...) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -12; fi
     # la oficina, en el disco instalado: el grupo «Oficina» del menú Inicio
     # (Facturas, con C:\\HISPA\\HVPRUN.BIN) y Mi equipo abriendo Cuentas de C:\\OFICINA
@@ -3366,6 +3378,117 @@ kill $NPID 2> /dev/null; wait $NPID 2> /dev/null
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Navegador)"
 fi   # el Navegador
+
+# ------------------------------------------------- 23. (WIFI) el Wi-Fi
+# WIFI.BIN (nucleo32/wifi/servicio.c con wifi/ de Hispa-486), su ventana
+# (REDWIFI.BIN, uredwifi.cas) y la tarjeta Wi-Fi de RED.BIN (rwifi.cas). Sin
+# tarjeta Wi-Fi en QEMU: la radio de mentira de wifi/nucleo/sim.c (una red
+# «HispaPrueba», WPA2 con «clave de prueba», y detrás DHCP, ARP y eco en
+# 192.168.77.1) y el modelo de la BCM43224 de tests/wifi/tarjeta_sim.c.
+if parte08 wifi; then
+echo "== (WIFI) Hispa-Pentium: el Wi-Fi (WIFI.BIN, REDWIFI.BIN y la tarjeta Wi-Fi de RED.BIN) =="
+Wf=$P/wifi
+mkdir -p $Wf $G
+# 0. en el anfitrión, lo de Hispa-486: las normas (SHA-1, HMAC, PBKDF2, la PMK,
+# PRF, AES, el envoltorio de claves y CCMP con el vector de IEEE 802.11) y la
+# gestión contra el punto de acceso de mentira; y brcmsmac contra el modelo
+if make -s -C $AQUI/.. build/prueba_wifi build/chip_sim > $Wf/make.txt 2>&1; then
+  if $AQUI/../build/prueba_wifi > $Wf/anf.txt 2>&1 && grep -q ", 0 fallos" $Wf/anf.txt; then ok "en el anfitrión, las normas y la gestión 802.11 y WPA2: $(tail -1 $Wf/anf.txt)"
+  else ko "build/prueba_wifi falla:"; tail -5 $Wf/anf.txt | sed 's/^/        /'; fi
+  if $AQUI/../build/chip_sim > $Wf/chip.txt 2>&1 && grep -q ", 0 fallos" $Wf/chip.txt; then ok "en el anfitrión, brcmsmac contra el modelo de la tarjeta: $(tail -1 $Wf/chip.txt | iconv -f CP437 -t UTF-8)"
+  else ko "build/chip_sim falla:"; tail -5 $Wf/chip.txt | iconv -f CP437 -t UTF-8 | sed 's/^/        /'; fi
+else ko "no se hacen build/prueba_wifi y build/chip_sim: $(tail -2 $Wf/make.txt)"; fi
+if $AQUI/nucleo32/disco.sh $Wf/d.img 16 red wifisim > $Wf/disco.txt 2>&1 && bash $AQUI/nucleo32/wifi/hacer.sh $Wf/WIFISIM.BIN chip > $Wf/chip_hacer.txt 2>&1; then
+# 1. sin cable, la radio de mentira: buscar, conectar (WPA2), DHCP y PING por RED.BIN
+cp $Wf/d.img $Wf/e.img
+MEMORIA=64 ESCRIBE=1 DISCO=$Wf/e.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "redwifi /estado" ":pausa 6" "redwifi /redes" ":pausa 2" \
+  "redwifi /conectar HispaPrueba otra_clave" ":pausa 2" "redwifi /conectar 2 \"clave de prueba\" /auto" ":pausa 2" "ipconfig" ":pausa 2" "ping -n 3 192.168.77.1" ":pausa 4" \
+  "redwifi /estado" "redwifi /registro" > $Wf/sim.sal 2>&1
+tr -d '\r' < $Wf/sim.sal > $Wf/sim.txt
+S=$Wf/sim.txt
+mira "RED.BIN pone en marcha WIFI.BIN (WifiSimulada=SI en RED.INI), que se apunta como tarjeta Wi-Fi: la red va por él" \
+  "^red: Wi-Fi: WIFI.BIN en marcha, con la radio simulada$" "wifi: Hispa-Pentium: el servicio Wi-Fi (WIFI.BIN" "^wifi: Memoria para la tarjeta: 2048 KB en " \
+  "^red: Wi-Fi simulada (pruebas)$" "^red: la red va por el Wi-Fi$"
+mira "REDWIFI /REDES: busca y dice las redes, con la señal en rayitas y la seguridad" "^N.º  Red  " \
+  "^  [123]  HispaPrueba  *6  ████ -47 dBm  WPA2$" "^  [123]  Vecina abierta  *11  ████ -47 dBm  abierta$" "^  [123]  Vecina vieja  *3  ████ -47 dBm  WPA (no admitida)$"
+mira "la contraseña equivocada: no conecta, lo dice y no la recuerda" "^No se conecta a «HispaPrueba»: la contraseña no es la de esta red\.$" "^wifi: No se recuerda «HispaPrueba»: la contraseña no es la de esta red$"
+mira "con la buena (por su número en la lista): WPA2 (los 4 pasos), y la recuerda en WIFI.INI; RED.BIN ve el enlace y pide la IP (DHCP)" \
+  "^wifi: WPA: paso 3 de 4 correcto; se manda el 4\. Claves puestas" "^wifi: 802\.11: CONECTADO a «HispaPrueba»$" "^Conectado a «HispaPrueba»\.$" \
+  "^wifi: La red «HispaPrueba» queda recordada en WIFI.INI (se conectará sola)$" "^red: Wi-Fi: enlace (asociada, -47 dBm)$" \
+  "red: DHCP: IP 192\.168\.77\.10, máscara 255\.255\.255\.0, puerta 192\.168\.77\.1"
+mira "IPCONFIG y PING, por el Wi-Fi (la pila TCP/IP de siempre)" "^  Tarjeta . . . . . . . : Wi-Fi simulada (pruebas)" "^  Enlace  . . . . . . . : sí, a 54 Mbit/s$" \
+  "^  Dirección IP  . . . . : 192\.168\.77\.10$" "^    Paquetes: enviados = 3, recibidos = 3, perdidos = 0 (0% perdidos)$"
+mira "REDWIFI /ESTADO y /REGISTRO: conectada, con la señal, la IP y lo que se prefiere" "^Conectado a «HispaPrueba»$" "^  Señal -47 dBm, canal 6; IP 192\.168\.77\.10$" \
+  "^  La red: por el cable si está enchufado; si no, por el Wi-Fi (Usar: Automático)$" "^WIFI.BIN 0\.1: Wi-Fi simulada (pruebas); radio en marcha; estado 5"
+saca $Wf/e.img WIFI.INI $Wf/wifi.ini; saca $Wf/e.img WIFI.LOG $Wf/wifi.log; saca $Wf/e.img WIFI.LLV $Wf/wifi.llv
+if [ -f $Wf/wifi.ini ] && ! grep -q "clave de prueba" $Wf/wifi.ini && grep -q "^Red=1,4869737061507275656261,[0-9A-F]\{64\}.$" $Wf/wifi.ini \
+  && [ "$(stat -c %s $Wf/wifi.llv 2> /dev/null)" = 16 ] && grep -q "CONECTADO a" $Wf/wifi.log; then
+  ok "WIFI.INI: la red (en hexadecimal) y su clave preparada, cifrada (64 cifras): la contraseña no está escrita; WIFI.LLV (la llave, 16 octetos) y WIFI.LOG en el disco"
+else ko "WIFI.INI, WIFI.LLV o WIFI.LOG no son como deben:"; cat $Wf/wifi.ini 2> /dev/null | sed 's/^/        /'; fi
+# 2. otra vez (el mismo disco): se conecta sola a la red recordada
+MEMORIA=64 DISCO=$Wf/e.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "ipconfig" ":pausa 8" "redwifi /estado" > $Wf/otra.sal 2>&1
+tr -d '\r' < $Wf/otra.sal > $Wf/otra.txt
+S=$Wf/otra.txt
+mira "al arrancar otra vez, se conecta sola a la red recordada (WIFI.INI) y RED.BIN pide la IP" "^wifi: WIFI.INI: 1 redes recordadas$" \
+  "^wifi: Se conecta sola a la red recordada «HispaPrueba» (-47 dBm)$" "red: DHCP: IP 192\.168\.77\.10" "^Conectado a «HispaPrueba»$"
+# 3. con la e1000 (el cable) y el Wi-Fi: Automático (el cable), Wi-Fi y Cable (RED.INI)
+cp $Wf/e.img $Wf/c.img
+MEMORIA=64 ESCRIBE=1 DISCO=$Wf/c.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 8" "redwifi /estado" \
+  "redwifi /usar wifi" ":pausa 4" "ipconfig" "ping -n 2 192.168.77.1" ":pausa 3" "redwifi /usar auto" ":pausa 4" "ipconfig" "redwifi /usar cable" ":pausa 3" "redwifi /estado" > $Wf/cable.sal 2>&1
+tr -d '\r' < $Wf/cable.sal > $Wf/cable.txt
+S=$Wf/cable.txt
+mira "con cable y Wi-Fi, en Automático: la red va por el cable (el Wi-Fi conecta, pero no se usa)" "red: DHCP: IP 10\.0\.2\.15" \
+  "^  Señal -47 dBm, canal 6; la red va por el cable (IP 10\.0\.2\.15)$"
+mira "«Usar: Wi-Fi»: RED.BIN cambia a la tarjeta Wi-Fi, pide la IP otra vez y el PING va por ella" "^red: Wi-Fi: se usa el Wi-Fi (Preferir=WIFI)$" "^red: la red va por el Wi-Fi$" \
+  "^  Tarjeta . . . . . . . : Wi-Fi simulada (pruebas)" "^  Dirección IP  . . . . : 192\.168\.77\.10$" "^    Paquetes: enviados = 2, recibidos = 2, perdidos = 0"
+mira "«Usar: Automático»: otra vez el cable; «Usar: Cable»: WIFI.BIN se para" "^red: la red va por el cable$" "^  Tarjeta . . . . . . . : Intel PRO/1000 (e1000)" \
+  "^red: Wi-Fi: se usa solo el cable (Preferir=CABLE)$" "^wifi: RED.BIN usa el cable: el Wi-Fi se para$" "^red: Wi-Fi: WIFI.BIN ya no está$" "^  La red: solo por el cable (Usar: Cable)$"
+if saca $Wf/c.img RED.INI $Wf/red.ini && grep -q "^WifiSimulada=SI.$" $Wf/red.ini && grep -q "^Preferir=CABLE.$" $Wf/red.ini; then ok "RED.INI guarda lo elegido (Preferir=CABLE) y deja lo demás"
+else ko "RED.INI no queda bien:"; sed 's/^/        /' $Wf/red.ini 2> /dev/null; fi
+MEMORIA=64 DISCO=$Wf/c.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 3" > $Wf/cable2.sal 2>&1
+if grep -q "red: DHCP: IP 10.0.2.15" $Wf/cable2.sal && ! grep -q "^red: Wi-Fi: WIFI.BIN en marcha" $Wf/cable2.sal; then ok "con «Preferir=CABLE», al arrancar el Wi-Fi ni se pone en marcha"
+else ko "con «Preferir=CABLE» se pone en marcha el Wi-Fi"; fi
+# 4. el controlador de verdad (brcmsmac y bcma) contra el modelo de la tarjeta, con el microcódigo del disco
+cp $Wf/d.img $Wf/k.img
+printf 'WifiSimulada=CHIP\r\n' > $Wf/RED.INI
+mcopy -o -i $Wf/k.img $Wf/WIFISIM.BIN ::WIFI.BIN && mcopy -o -i $Wf/k.img $Wf/RED.INI ::
+MEMORIA=64 DISCO=$Wf/k.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "redwifi /estado" ":pausa 8" "redwifi /conectar HispaPrueba \"clave de prueba\"" ":pausa 2" \
+  "ping -n 5 192.168.77.1" ":pausa 5" > $Wf/k.sal 2>&1
+tr -d '\r' < $Wf/k.sal > $Wf/k.txt
+S=$Wf/k.txt
+mira "WIFISIM.BIN: brcmsmac y bcma de Linux en el anillo 3, con los anillos de DMA en la memoria del núcleo (la 94) y los registros a la vista (la 95)" \
+  "^wifi: Tarjeta Wi-Fi: 14E4:4353 (subsistema 103C:1510)" "^wifi: Chip BCM43224 (0xA8D8), revisión 1" "^wifi: SPROM: revisión 8, placa 103C:1510" \
+  "BCM43XX\.FW: 96224 octetos$" "^wifi: PASO 3 de 3 hecho: radio en marcha" "^red: Wi-Fi Broadcom BCM43224$"
+mira "y con él: WPA2, DHCP y cinco PING sin perder ninguno" "^wifi: brcmsmac: brcms_ops_bss_info_changed: associated$" "^wifi: 802\.11: CONECTADO a «HispaPrueba»$" \
+  "red: DHCP: IP 192\.168\.77\.10" "^    Paquetes: enviados = 5, recibidos = 5, perdidos = 0"
+# 5. el escritorio: el icono (con el aspa, sin conectar), la ventana del Wi-Fi, la contraseña con asteriscos, conectar; Configuración
+cp $Wf/d.img $Wf/v.img
+CAPTURAS=$G MEMORIA=64 DISCO=$Wf/v.img ARRANQUE="escritorio conred" MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 8" ":captura wf1" ":clic 720 583" ":pausa 4" ":captura wf2" \
+  ":clic 300 187" ":pausa 1" ":clic 227 347" ":escribe clave de prueba" ":pausa 1" ":captura wf3" ":clic 150 397" ":pausa 8" ":captura wf4" > $Wf/esc.sal 2>&1
+S=$Wf/esc.sal
+mira "el escritorio: RED.BIN y WIFI.BIN en marcha; un clic en el icono de la red abre la ventana del Wi-Fi (REDWIFI.BIN), y se conecta desde ella" \
+  "^red: la red va por el Wi-Fi$" "^escritorio: lanzo .REDWIFI.BIN" "^wifi: 802.11: CONECTADO a «HispaPrueba»$" "red: DHCP: IP 192.168.77.10"
+miracap "el icono del Wi-Fi sin conectar: las cuatro rayitas huecas y un aspa (la forma, no solo el color)" wf1 rgb 727 584 4F9BE6 rgb 712 586 4F9BE6 rgb 711 574 14336A
+miracap "la ventana del Wi-Fi: cómo está, las redes (con la señal y la seguridad) y «Usar»" wf2 negrita 135 85 150 100 "Wi-Fi: sin conectar" \
+  negrita 100 125 120 145 "Redes a la vista" texto 160 155 175 170 "Vecina vieja" texto 160 178 175 195 "HispaPrueba" texto 530 178 560 195 "WPA2" negrita 100 438 120 455 "Usar:"
+miracap "la contraseña, con asteriscos (y la red elegida, en azul con su flecha)" wf3 texto 108 336 120 355 "************" notexto 100 330 350 360 "clave" rgb 400 190 1D4ED8
+miracap "conectada: arriba «Conectado a», la señal, el canal y la IP; en la lista, «conectada»; y en la bandeja, las cuatro rayitas llenas" wf4 negrita 135 85 150 100 "Conectado a" \
+  texto 210 103 230 118 "dBm, canal 6; IP 192.168.77.10" texto 580 178 600 195 "conectada" rgb 727 584 FFFFFF rgb 712 586 FFFFFF
+# Configuración (el menú del tapiz): «Red: Automático, Cable, Wi-Fi»; Wi-Fi y luego Cable
+cp $Wf/d.img $Wf/v2.img
+CAPTURAS=$G MEMORIA=64 ESCRIBE=1 DISCO=$Wf/v2.img ARRANQUE="escritorio conred" MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 8" ":clicd 400 300" ":pausa 1" ":clic 420 310" ":pausa 2" \
+  ":captura wf5" ":clic 550 362" ":pausa 2" ":captura wf6" ":clic 440 362" ":pausa 3" ":captura wf7" > $Wf/conf.sal 2>&1
+S=$Wf/conf.sal
+mira "Configuración, «Red»: Wi-Fi y luego Cable llegan a RED.BIN (un aviso del núcleo), que lo guarda; con Cable, WIFI.BIN se para" \
+  "^red: Wi-Fi: se usa el Wi-Fi (Preferir=WIFI)$" "^red: Wi-Fi: se usa solo el cable (Preferir=CABLE)$" "^wifi: RED.BIN usa el cable: el Wi-Fi se para$"
+miracap "Configuración: la fila «Red:» con Automático, Cable y Wi-Fi (elegido Automático)" wf5 texto 190 352 200 370 "Red:" negrita 290 352 300 370 "Automático" negrita 415 352 440 370 "Cable"
+miracap "y elegido Wi-Fi, el botón cambia (y los otros dos, no elegidos)" wf6 distinto 502 348 96 28 $G/wf5.ppm igual 190 300 200 40 $G/wf5.ppm
+miracap "y con Cable, el icono de la bandeja deja de ser el del Wi-Fi" wf7 distinto 700 570 40 25 $G/wf6.ppm
+if saca $Wf/v2.img RED.INI $Wf/red2.ini && grep -q "^Preferir=CABLE.$" $Wf/red2.ini; then ok "y RED.INI queda con Preferir=CABLE"; else ko "RED.INI no guarda lo de Configuración"; fi
+else ko "no se pueden hacer el disco o WIFISIM.BIN: $(tail -2 $Wf/disco.txt) $(tail -2 $Wf/chip_hacer.txt)"; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin el Wi-Fi)"
+fi   # el Wi-Fi
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
 [ -z "${SOLO:-}" ] && parte15

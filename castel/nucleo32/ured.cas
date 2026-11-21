@@ -258,10 +258,12 @@ módulo Ured
         atender_corte(cierto)
         si apuntarse() <> 0 entonces salir(1) fin
         apunta("Hispa-Pentium 0.8: el servicio de red (RED.BIN)")
+        ; (WIFI) RED.INI y, si hay tarjeta Wi-Fi, WIFI.BIN (antes que la del
+        ; cable: así enciende su radio mientras tanto)
+        Rwifi.arrancar()
         si no buscar_tarjeta() entonces
             apunta("no hay ninguna tarjeta de red que se sepa llevar")
         fin
-        Rwifi.arrancar()                                ; (WIFI) RED.INI y, si hay tarjeta Wi-Fi, WIFI.BIN
         enlace := falso
         estado_dicho := 0xFFFFFFFF
         mira_enlace()

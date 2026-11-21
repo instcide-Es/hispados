@@ -42,7 +42,7 @@ módulo Instala
 
     constante MAX_DISCOS = 8
     constante MAX_PARTES = 16
-    constante MAX_ARCHIVOS = 48
+    constante MAX_ARCHIVOS = 96                 ; (eran 48; 80 con SSH, SSHD, WG, TAILSCAL y sus paquetes; [WIN32] 96, con las DLL y los ejemplos de Windows)
     constante MIN_MB = 64                       ; lo menos que mide la partición
     constante MAX_SECTORES = 67108864           ; lo más: 32 GB (una FAT32 mayor tarda mucho en repasarse)
     constante ALINEA = 2048                     ; las particiones, a 1 MB

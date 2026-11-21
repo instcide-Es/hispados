@@ -17,7 +17,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 ## El escritorio
 - [ ] Explorador de archivos: árbol de carpetas, vistas (iconos, lista, detalles), copiar/cortar/pegar, arrastrar y soltar, papelera, buscar, propiedades, abrir con…, miniaturas de imágenes
 - [ ] Dock: barra de lanzamiento con los programas favoritos y los abiertos, que se pueda fijar y quitar
-- [ ] Barra de tareas: agrupar ventanas, vista previa, bandeja con más iconos (sonido, Wi-Fi)
+- [ ] Barra de tareas: agrupar ventanas, vista previa, bandeja con más iconos (sonido; el Wi-Fi, hecho)
 - [ ] Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido, ratón, teclado, red y Wi-Fi, energía, usuarios, programas (hecho: actualizaciones)
 - [ ] Temas y fondo de escritorio; letras TrueType del sistema; protector de pantalla
 - [ ] Portapapeles con imágenes y archivos; arrastrar y soltar entre programas
@@ -25,7 +25,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 
 ## El sistema
 - [ ] Sonido: HD Audio y AC'97, mezclador, sonidos del sistema
-- [ ] Wi-Fi (el núcleo de C de Hispa-486: Broadcom y Atheros) con su ventanita
+- [x] ~~Wi-Fi (el núcleo de C de Hispa-486: Broadcom y Atheros) con su ventanita~~ — rama pentium-wifi (21/11: WIFI.BIN, REDWIFI.BIN, el icono con rayitas, Configuración › Red; a falta de probarlo en el HP Mini)
 - [ ] Usuarios con contraseña y carpetas propias; permisos
 - [ ] Suspender e hibernar (ACPI S3/S4)
 - [ ] Impresoras (USB y de red)
