@@ -3979,6 +3979,49 @@ instalar: base 0.8.3 (en lugar de la 0.8.2), navega 0.1», comprueba las sumas,
 los pone (con las carpetas de `\HISPA\NAVEGA`) y `PAQUETES COMPRUEBA` los da
 por buenos; con el núcleo nuevo hay que reiniciar (sección 13).
 
+**La 0.8.5** (21/11, rama `pentium-085`: las ramas `pentium-programas` —con
+`pentium-menu` y `pentium-rueda`—, `pentium-letras` —por `menu-letras`—,
+`pentium-protege`, `pentium-escudo`, `pentium-wifi`, `opengl`,
+`pentium-accesorios` y `pentium-sonido` juntas). Lo que se tocó al juntar:
+
+- **La zona protegida con lo de las demás ramas**: WIFI.BIN se apunta (91) por
+  `SELLO_WIFI` y la 94/95 piden la marca de servicio; SONIDO.BIN, la 195 por
+  `SELLO_SONIDO` y la 196-199 con la marca; `cargar_servicio` para `ESCUDO.BIN
+  /VIGILAR` y `SONIDO.BIN /ARRANQUE`; en la tabla, lo del Navegador que
+  faltaba (`SURFJS.LOG`, `NAVEGA2.ALM` —localStorage, secreto— y
+  `NAVEGA2.INI`: con él instalado no podía escribir su registro de JavaScript).
+- **La llamada 67** (poner el reloj del sistema) ya no es de cualquiera:
+  atrasar la hora haría pasar certificados caducados (lo que la revisión de
+  seguridad cerró en TLS). Solo los servicios, el asistente, INSTALAR y el
+  modo administrador; el Reloj la pide con la 157 al «Poner en hora». La
+  parte 25 lo prueba (el programa malo: acceso denegado).
+- **La 96** junta el túnel (bit 8, Tailscale) y el Wi-Fi (bits 9, 12 y 13).
+- **Configuración**, de 348 de alto en el mismo sitio (lo de arriba no se
+  mueve): debajo del dock, «Red: Automático / Cable / Wi-Fi» y «Sonido:
+  Volumen y sonidos...»; abajo, «Dispositivos...», «Red y Tailscale...» y
+  «Cerrar». La bandeja: USB, red (o Wi-Fi), altavoz, pila y Escudo.
+- **El teclado**: la tecla muerta con Mayús da Á, É, Í, Ó, Ú (y À, Â, Ë...)
+  en la 437 de Hispa (`tools/hispa437.py`) y Alt Gr+E, el euro (F4h); el
+  Navegador las traduce bien (`navega/frontal.c`, `alto437`).
+- `usb.sh` con `USB_MB` (la memoria del HP Mini, de 256 MB: caben las firmas).
+
+Los paquetes: base, bloc, consola, ejemplos, red y tls **0.8.5**; paquetes
+1.2; equipo 0.9.1; navega 0.2.1; win32 1.1 (OpenGL y DirectSound que suena);
+hvprun 0.9 (el sonido); nuevos accesori 1.0, sonido 1.0, wifi 0.8.5, escudo
+0.2 y sus firmas (escbase, escmes, escdia); ssh, tailscal, oficina y clicgest
+0.2.5, iguales octeto a octeto a lo publicado. Probado en QEMU (`q35`, con
+`intel-hda`) desde un disco instalado con el CD de la 0.8.4 y lo publicado
+(con navega y clicgest), con el catálogo nuevo por HTTP: «Hay 11
+actualizaciones» > «Actualizar todo» > «Reiniciar ahora» > «El núcleo nuevo
+ha arrancado bien»; `PAQUETES INSTALA ESCUDO WIFI SONIDO ACCESORI` y las
+firmas; tras reiniciar, el menú Inicio nuevo, el dock, la bandeja con el
+altavoz y Escudo, «Revisar todo el equipo» (137 archivos, nada; los secretos
+de otros no los lee), el Navegador con Google, ClicGest, Naves (suena),
+`SSH` a otro equipo (recuerda su llave en `\HISPA\SSH`), `TAILSCALE`, la
+alarma del Reloj (suena), «Poner en hora» (pregunta el modo
+administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
+denegado.
+
 **Las pruebas de la 0.8.4** (21/11, en el PC de Albinyana con
 `tools/pruebas_castel_pc.sh`, cada parte en su copia; y en el VPS): `SOLO=32`
 621 bien; `castel32` 62/0 (CASTEL32 igual que ccastel.py y el punto fijo);

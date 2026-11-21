@@ -42,7 +42,7 @@ módulo Instala
 
     constante MAX_DISCOS = 8
     constante MAX_PARTES = 16
-    constante MAX_ARCHIVOS = 96                 ; (eran 48; 80 con SSH, SSHD, WG, TAILSCAL y sus paquetes; [WIN32] 96, con las DLL y los ejemplos de Windows)
+    constante MAX_ARCHIVOS = 192                ; (eran 48; 80 con SSH, SSHD, WG, TAILSCAL y sus paquetes; [WIN32] 96, con las DLL y los ejemplos de Windows; 0.8.5: 192, que con el Wi-Fi, el sonido y los accesorios son 98)
     constante MIN_MB = 64                       ; lo menos que mide la partición
     constante MAX_SECTORES = 67108864           ; lo más: 32 GB (una FAT32 mayor tarda mucho en repasarse)
     constante ALINEA = 2048                     ; las particiones, a 1 MB
@@ -99,7 +99,7 @@ módulo Instala
     variable otras_n: arreglo [MAX_OTRAS] de nat32
     variable otras_cluster: arreglo [MAX_OTRAS] de nat32
     variable n_otras: nat32
-    variable mapa: arreglo [1025] de byte       ; CARPETAS.TXT
+    variable mapa: arreglo [4097] de byte       ; CARPETAS.TXT (0.8.5: eran 1024 octetos y ya mide más)
 
     ; ---- la FAT32 que se escribe ----
     variable por_cluster: nat32                 ; sectores por cluster
@@ -1159,11 +1159,13 @@ módulo Instala
                 n_archivos := n_archivos + 1
             fin
         fin
+        ; (0.8.5) si no caben todos, no se instala a medias
+        si n_archivos >= MAX_ARCHIVOS entonces fallo("Hay demasiados archivos que instalar.", "") fin
         cerrar(m)
         mapa[0] := 0
         n_otras := 0
         si hay_mapa entonces
-            i := lee_entero("CARPETAS.TXT", mapa, 1024)
+            i := lee_entero("CARPETAS.TXT", mapa, 4096)
             mapa[i] := 0
         fin
         para i desde 1 hasta n_archivos hacer destinos[i - 1] := destino_de(nombres[i - 1]) fin
