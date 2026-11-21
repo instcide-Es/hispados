@@ -228,6 +228,12 @@
 #      contra el modelo de la tarjeta (WIFISIM.BIN) con el microcódigo del
 #      disco; y el escritorio: el icono con rayitas, la ventana del Wi-Fi
 #      (la lista, la contraseña con asteriscos, conectar) y Configuración.
+#  28. (ACCESORIOS, SOLO=accesorios) Los accesorios: la Calculadora (CALC.BIN,
+#      con las cuentas decimales de decimal.cas), el Reloj (RELOJ.BIN) y el
+#      Mapa de caracteres (CARACTER.BIN). Con corre32: las cuentas con lo que
+#      tienen que dar justo, el calendario y los festivos, cada carácter; en
+#      el escritorio: los tres modos de la Calculadora, la cinta y el IVA, la
+#      ñ copiada y pegada en el Bloc, la alarma, la cuenta atrás y el calendario.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -255,6 +261,7 @@
 #   SOLO=protege ./pruebas.sh     la primera y la 25 (PROTEGE: la zona protegida, los secretos y los servicios por su sello)
 #   SOLO=escudo ./pruebas.sh      la primera y la 26 (Escudo, el antivirus)
 #   SOLO=wifi ./pruebas.sh        la primera y la 27 (el Wi-Fi: WIFI.BIN)
+#   SOLO=accesorios ./pruebas.sh  la primera y la 28 (ACCESORIOS: la Calculadora, el Reloj y el Mapa de caracteres)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -318,7 +325,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -1579,7 +1586,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     S=$G/usb.txt2
     # (SSH, TAILSCALE: 23 programas: SSH, SSHD, WG y TAILSCAL también van como módulos)
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 31 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 34 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 46 155 54 163 "Bloc de notas" negrita 256 159 264 167 "Mis documentos"
@@ -1882,7 +1889,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 31 archivos que ha traído el cargador hacen de unidad M:" $S \
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 34 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
       ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
@@ -2213,9 +2220,9 @@ for hc in xhci ehci; do
   # lo instalado, apuntado para PAQUETES: los registros de los paquetes del sistema, en \HISPA\PAQUETES
   rm -rf $Z/pqi $Z/pqu; mkdir $Z/pqi $Z/pqu
   mcopy -n -i $Z/vol.img '::HISPA/PAQUETES/*' $Z/pqi/ > /dev/null 2>&1; mcopy -n -i $G/usb.img@@1M '::INSTALA/PAQUETES/*' $Z/pqu/ > /dev/null 2>&1
-  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI SSH.PQI TAILSCAL.PQI TLS.PQI WIFI.PQI WIN32.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
+  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "ACCESORI.PQI BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI SSH.PQI TAILSCAL.PQI TLS.PQI WIFI.PQI WIN32.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
     && mcopy -n -i $Z/vol.img ::HISPA/PAQUETES.BIN $Z/f.bin > /dev/null 2>&1; then
-    ok "$que: INSTALAR apunta lo que instala: los registros de los 14 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
+    ok "$que: INSTALAR apunta lo que instala: los registros de los 15 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
   else ko "$que: lo instalado no queda apuntado en C:\\HISPA\\PAQUETES:"; ls $Z/pqi | sed 's/^/        /' | head -10; fi
   # SOLO el disco: el primer arranque
   desde_disco $Z/d$hc.img $Z/a$hc.sal
@@ -2295,9 +2302,9 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -n 8; fi
-    if grep -q "^|  win32     1.1     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0.8.4   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|14 paquetes\.$" $Z/b2$hc.txt \
-      && grep -q "^|Los archivos de los 14 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
-      ok "PAQUETES en el sistema recién instalado: LISTA dice los 14 paquetes del sistema (..., ssh, tailscal, tls, wifi y win32: con 14, base ya no cabe en la pantalla) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
+    if grep -q "^|  win32     1.1     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0.8.4   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|15 paquetes\.$" $Z/b2$hc.txt \
+      && grep -q "^|Los archivos de los 15 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
+      ok "PAQUETES en el sistema recién instalado: LISTA dice los 15 paquetes del sistema (..., ssh, tailscal, tls, wifi y win32: con 15, base ya no cabe en la pantalla) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -n 12; fi
     # la oficina, en el disco instalado: el grupo «Oficina» del menú Inicio
     # (Facturas, con C:\\HISPA\\HVPRUN.BIN) y Mi equipo abriendo Cuentas de C:\\OFICINA
@@ -4077,6 +4084,173 @@ fi
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin los programas de Windows)"
 fi   # [WIN32] los programas de Windows
+# ------------------------------------------------- 28. (ACCESORIOS) los accesorios
+# (ACCESORIOS, SOLO=accesorios) La Calculadora (CALC.BIN, ucalc.cas, con
+# las cuentas decimales de decimal.cas), el Reloj (RELOJ.BIN, ureloj.cas) y
+# el Mapa de caracteres (CARACTER.BIN, ucaract.cas, con caracnom.cas). Con
+# corre32 (en Linux, deprisa): las cuentas, con lo que tienen que dar justo
+# (0,1 + 0,2 = 0,3; el IVA; los céntimos redondeados a la mitad hacia
+# fuera; la trigonometría en grados; los errores), el calendario y los
+# festivos, y lo de cada carácter. Y en el escritorio (sus accesos de
+# nucleo32/accesorios.py, con el icono en el tapiz): las tres ventanas, los
+# modos de la Calculadora (por el menú Ver), la cinta y el IVA, copiar el
+# resultado; la ñ copiada en el Mapa y pegada en el Bloc de notas; la alarma
+# (RELOJ /ALARMA +0:40) con su aviso, la cuenta atrás y el calendario.
+if parte08 accesorios; then
+echo "== Hispa-Pentium: los accesorios (la Calculadora, el Reloj y el Mapa de caracteres) =="
+A=$P/acc
+rm -rf $A; mkdir -p $A $G
+for u in ucalc:CALC ureloj:RELOJ ucaract:CARACTER; do
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/${u%%:*}.cas -o $A/${u%%:*}.asm > /dev/null && nasm -f bin $A/${u%%:*}.asm -o $A/${u##*:}.BIN \
+    || ko "${u%%:*}.cas no compila"
+done
+R=$AQUI/corre32/corre32.sh
+# lo que sale, de la página de Hispa (la 437 con Á, €...) a UTF-8
+hispa() { python3 -I -c "import sys; sys.path.insert(0, '$AQUI/../tools'); import hispa437; sys.stdout.write(''.join(hispa437.letra(b) for b in sys.stdin.buffer.read() if b != 13))"; }
+# las cuentas: una por línea, «teclas|opciones|lo que tiene que salir»
+cuentas() {
+  local que=$1 t op esp r mal= n=0
+  while IFS='|' read -r t op esp; do
+    [ -z "$t" ] && continue
+    # shellcheck disable=SC2086
+    r=$($R $A/CALC.BIN /TECLAS "$t" $op 2>&1 | hispa | sed -n 's/^calc: visor: //p')
+    n=$((n + 1))
+    [ "$r" = "$esp" ] || mal="$mal «$t» $op dio «$r» (y es «$esp»);"
+  done
+  if [ -z "$mal" ]; then ok "$que ($n cuentas)"; else ko "$que:$mal"; fi
+}
+cuentas "la Calculadora estándar: decimal (0,1 + 0,2 = 0,3), de izquierda a derecha, el tanto por ciento, la memoria, «=» otra vez, los miles y los errores" <<'L'
+0,1+0,2=||0,3
+0,1*3=||0,3
+1-0,9=||0,1
+1/3=||0,3333333333333333
+2+3*4=||20
+10/4=||2,5
+100+21%=||121
+200-15%=||170
+50*10%=||5
+2{raiz}||1,414213562373095
+1,21{cuad}||1,4641
+4{inv}||0,25
+1234567,5*2=||2.469.135
+99999999*99999999=||9.999.999.800.000.001
+2+3===||11
+5{ms}3{m+}{mr}||8
+7{mas}||-7
+1/0=||No se puede dividir entre cero
+4{mas}{raiz}||No existe (entrada no válida)
+L
+cuentas "la científica: la prioridad y los paréntesis, potencias y raíces, la trigonometría justa en grados (sen 30 = 0,5; tan 90 no existe) y en radianes, logaritmos, e^x, n! y el exponente" <<'L'
+2+3*4=|/CIENTIFICA|14
+2*(3+4)=|/CIENTIFICA|14
+2(3+1)=|/CIENTIFICA|8
+2^10=|/CIENTIFICA|1.024
+2^3^2=|/CIENTIFICA|512
+27{raizn}3=|/CIENTIFICA|3
+30{sen}|/CIENTIFICA|0,5
+60{cos}|/CIENTIFICA|0,5
+45{tan}|/CIENTIFICA|1
+390{sen}|/CIENTIFICA|0,5
+30{mas}{sen}|/CIENTIFICA|-0,5
+90{tan}|/CIENTIFICA|No existe (entrada no válida)
+0,5{asen}|/CIENTIFICA|30
+1{atan}|/CIENTIFICA|45
+1{mas}{acos}|/CIENTIFICA|180
+{pi}{sen}|/CIENTIFICA /RAD|0
+{pi}{cos}|/CIENTIFICA /RAD|-1
+1000{log}|/CIENTIFICA|3
+0,001{log}|/CIENTIFICA|-3
+2{log}|/CIENTIFICA|0,3010299956639812
+2{ln}|/CIENTIFICA|0,6931471805599453
+{e}{ln}|/CIENTIFICA|1
+1{exp}|/CIENTIFICA|2,718281828459045
+2^0,5=|/CIENTIFICA|1,414213562373095
+20{fact}|/CIENTIFICA|2,43290200817664E+18
+1,5{exp10}3{mas}*2=|/CIENTIFICA|0,003
+0{ln}|/CIENTIFICA|No existe (entrada no válida)
+L
+cuentas "la de oficina: el IVA (21, 10 y 4 %, ponerlo y sacar la base) y los euros redondeados a la mitad hacia fuera (2,675 da 2,68; 1,005, 1,01)" <<'L'
+100{iva+}|/OFICINA|121,00
+121{iva-}|/OFICINA|100,00
+{iva10}50{iva+}|/OFICINA|55,00
+{iva4}10,4{iva-}|/OFICINA|10,00
+99,99{iva+}|/OFICINA|120,99
+2,675*1=|/OFICINA|2,68
+1,005*1=|/OFICINA|1,01
+3*1,255=|/OFICINA|3,77
+12,5+7,25-3=|/OFICINA|16,75
+0,1+0,2=|/OFICINA|0,30
+L
+$R $A/CALC.BIN /TECLAS "3*1,255+12,5={iva21}{iva+}" /OFICINA 2>&1 | hispa > $A/cinta.txt
+S=$A/cinta.txt
+mira "la cinta de la de oficina: cada número con su operación (el precio con sus tres decimales), el total y el desglose del IVA" \
+  "^calc: cinta: 3,00 x$" "^calc: cinta: 1,255 +$" "^calc: cinta: 12,50 =$" "^calc: cinta: 16,27 TOTAL$" "^calc: cinta: 16,27 BASE$" \
+  "^calc: cinta: 3,42 IVA 21 %$" "^calc: cinta: 19,69 TOTAL$" "^calc: Base 16,27 + IVA 21 % 3,42$" "^calc: visor: 19,69$"
+{ $R $A/RELOJ.BIN /CALENDARIO 11/2026; $R $A/RELOJ.BIN /CALENDARIO 02/2028; $R $A/RELOJ.BIN /FESTIVOS 2027; } 2>&1 | hispa > $A/reloj.txt
+S=$A/reloj.txt
+mira "el Reloj en texto: el calendario (de lunes a domingo; 2028, bisiesto) y los festivos nacionales, con el Viernes Santo calculado" \
+  "^reloj: noviembre de 2026$" "^reloj: lu ma mi ju vi sá do$" "^reloj:                    1$" "^reloj:  2  3  4  5  6  7  8$" "^reloj: 30$" \
+  "^reloj: festivo el 1: Todos los Santos$" "^reloj:     1  2  3  4  5  6$" "^reloj: 28 29$" \
+  "^reloj: Viernes, 26 de marzo de 2027: Viernes Santo$" "^reloj: Miércoles, 6 de enero de 2027: Epifanía del Señor (Reyes)$" \
+  "^reloj: Martes, 12 de octubre de 2027: Fiesta Nacional de España$" "^reloj: Sábado, 25 de diciembre de 2027: Navidad$"
+{ for c in 164 130 182 244 64 94; do $R $A/CARACTER.BIN /INFO $c; done; } 2>&1 | hispa > $A/caract.txt
+n=$($R $A/CARACTER.BIN /LISTA 2>&1 | grep -c '^caracter: ')
+S=$A/caract.txt
+mira "el Mapa de caracteres en texto: el código, el Unicode, el nombre y cómo se escribe con el teclado español del núcleo" \
+  "^caracter: 164 A4h U+00F1 ñ Eñe minúscula | tecla ñ$" "^caracter: 130 82h U+00E9 é E con tilde (minúscula) | tecla del acento y luego e$" \
+  "^caracter: 182 B6h U+00C1 Á A con tilde (mayúscula) | (no se puede escribir)$" "^caracter: 244 F4h U+20AC € Euro | (no se puede escribir)$" \
+  "^caracter: 64 40h U+0040 @ Arroba | Alt Gr + tecla 2$" "^caracter: 94 5Eh U+005E ^ Circunflejo | Mayús + tecla \` y luego espacio$"
+[ "$n" = 166 ] && ok "y las 166 letras con dibujo de la letra del sistema (CARACTER /LISTA)" || ko "CARACTER /LISTA da $n letras (y son 166)"
+# en el escritorio
+export MTOOLS_SKIP_CHECK=1
+if $AQUI/nucleo32/disco.sh $A/d.img 32 > $A/disco.txt 2>&1 && python3 -I $AQUI/nucleo32/accesorios.py $A/menu --raiz --escritorio; then
+  printf 'argumentos=/ALARMA +0:40 Reuni\xa2n de la junta\r\n' >> $A/menu/RELOJ.MNU
+  mmd -i $A/d.img ::MENU && mcopy -i $A/d.img $A/menu/* ::MENU/ && mcopy -i $A/d.img $A/CALC.BIN $A/RELOJ.BIN $A/CARACTER.BIN ::
+  CAPTURAS=$G ESCRIBE=1 DISCO=$A/d.img ARRANQUE=escritorio MODULOS= RELOJ=2026-11-21T10:00:00 $AQUI/nucleo32/probar.sh "" \
+    ":pausa 3" ":captura ac0" ":doble 63 258" ":pausa 3" ":raton 790 590" ":escribe 0,1+0,2=" ":pausa 1" ":captura ac1" \
+    ":tecla alt-v" ":pausa 1" ":tecla down" ":tecla down" ":pausa 1" ":tecla ret" ":pausa 1" ":escribe 2+3*4=" ":escribe 30s" ":pausa 2" ":captura ac2" \
+    ":tecla alt-v" ":pausa 1" ":tecla down" ":tecla down" ":tecla down" ":pausa 1" ":tecla ret" ":pausa 1" ":escribe 100i" ":escribe 3*1,255+12,5=" \
+    ":tecla ctrl-c" ":pausa 2" ":captura ac3" ":clic 778 16" ":pausa 1" \
+    ":doble 63 334" ":pausa 3" ":escribe ñ" ":tecla ctrl-c" ":tecla ret" ":pausa 1" ":captura ac4" ":clic 778 16" ":pausa 1" \
+    ":doble 63 106" ":pausa 3" ":tecla ctrl-v" ":pausa 1" ":captura ac5" \
+    ":doble 63 410" ":pausa 3" ":captura ac6" ":pausa 42" ":captura ac7" ":tecla ret" ":pausa 1" \
+    ":tecla ctrl-tab" ":tecla ctrl-tab" ":pausa 1" ":clic 65 277" ":tecla backspace" ":escribe 0" ":clic 175 277" ":tecla backspace" ":escribe 4" \
+    ":tecla ret" ":pausa 2" ":captura ac8" ":pausa 5" ":captura ac9" ":tecla ret" ":pausa 1" ":tecla ctrl-tab" ":pausa 1" ":captura ac10" > $A/e.sal 2>&1
+  # (lo del puerto serie ya llega en UTF-8: probar.sh lo pasa de la 437)
+  tr -d '\r' < $A/e.sal > $A/e.txt
+  S=$A/e.txt
+  mira "los accesos (\\MENU\\CALC.MNU, CARACTER.MNU y RELOJ.MNU) los lanzan" "escritorio: lanzo .CALC.BIN (la tarea [0-9]*)" \
+    "escritorio: lanzo .CARACTER.BIN (la tarea [0-9]*)" "escritorio: lanzo .RELOJ.BIN (la tarea [0-9]*)"
+  miracap "los tres en el tapiz, con su nombre" ac0 texto 10 270 120 300 Calculadora texto 0 420 120 450 Reloj
+  mira "la Calculadora: 0,1 + 0,2 = 0,3 con el teclado; en la científica, 2 + 3 x 4 = 14; en la de oficina, el IVA, 3 x 1,255 + 12,5 = 16,27 (a céntimos) y Ctrl+C" \
+    "^calc: = 0,3$" "^calc: = 14$" "^calc: Base 100,00 + IVA 21 % 21,00$" "^calc: = 16,27$" "^calc: copiado 16,27$"
+  miracap "la estándar: la cuenta encima del número, y sus teclas con su nombre" ac1 texto15 300 60 780 100 "0,1 + 0,2 =" \
+    negrita15 20 170 800 240 MC negrita15 20 230 800 300 Borrar
+  miracap "la científica: GRADOS (con su palabra) y sen, cos, tan" ac2 negrita15 20 60 300 100 GRADOS negrita15 20 230 300 300 sen \
+    negrita15 20 230 300 300 cos negrita15 20 170 300 240 Inv
+  miracap "la de oficina: el tipo de IVA elegido (21 %, con su marca), +IVA y -IVA, y la cinta con la base, el IVA y el total" ac3 \
+    negrita15 20 170 470 230 "21 %" negrita15 20 170 470 230 "+IVA" negrita15 470 60 800 100 "La cinta" texto15 480 120 800 480 BASE \
+    texto15 480 120 800 480 "IVA 21 %" texto15 480 120 800 480 TOTAL texto15 20 60 470 100 "1,255 + 12,50 ="
+  mira "el Mapa de caracteres: la ñ, tecleada, copiada al portapapeles" "^caracter: copiado 164 (ñ, U+00F1)$"
+  miracap "el Mapa: la ñ en grande con su nombre, su código y su tecla" ac4 negrita15 470 200 800 300 "Eñe" texto15 470 240 800 320 "164" \
+    texto15 470 300 800 380 "tecla ñ" texto15 10 480 470 530 "ñ"
+  miracap "y pegada (Ctrl+V) en el Bloc de notas: el portapapeles de todo el sistema" ac5 texto 100 160 400 260 "ñ"
+  mira "el Reloj: la alarma de RELOJ /ALARMA +0:40, a su hora, con su mensaje; y la cuenta atrás de 4 segundos" \
+    "^reloj: alarma puesta a las 10:0[0-9]:[0-9][0-9]$" "^reloj: ALARMA: 10:0[0-9]:[0-9][0-9]  Reunión de la junta$" \
+    "^reloj: cuenta atrás de 4 segundos$" "^reloj: SE ACAB. EL TIEMPO: La cuenta atrás ha llegado a cero$"
+  miracap "la pestaña Alarma: puesta, con su hora y su mensaje" ac6 negrita15 20 100 780 150 "ALARMA PUESTA" texto15 140 160 780 220 "Reuni"
+  miracap "el aviso de la alarma: su mensaje y los botones Parar y Posponer" ac7 negrita15 40 260 780 330 "junta" negrita15 40 300 780 380 Parar \
+    negrita15 40 300 780 380 "Posponer 5 minutos"
+  miracap "la cuenta atrás en marcha: Pausa y Cancelar" ac8 negrita15 10 280 400 380 Pausa negrita15 10 280 400 380 Cancelar
+  miracap "y su aviso al llegar a cero" ac9 negrita15 40 260 780 340 "cuenta" negrita15 40 260 780 340 "cero"
+  miracap "el calendario del mes, con hoy (HOY, en negro) y el festivo del 1 (con *)" ac10 negrita15 360 100 790 140 "Noviembre de 2026" \
+    negrita 640 300 720 370 HOY negrita15 700 160 790 200 "1*" texto15 360 450 790 490 "21 de noviembre de 2026"
+  if ! grep -q "excepción\|\*\*\*" $A/e.sal; then ok "y ni una excepción del núcleo"
+  else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $A/e.sal | head -3 | sed 's/^/        /'; fi
+else ko "no se puede hacer el disco de prueba: $(tail -n 2 $A/disco.txt)"; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin los accesorios)"
+fi   # (ACCESORIOS) los accesorios
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ---------------------------------------------- 18. el Navegador (NAVEGA.BIN)

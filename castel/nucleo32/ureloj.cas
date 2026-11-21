@@ -1,0 +1,1162 @@
+; =============================================================================
+;  ureloj.cas - (ACCESORIOS) RELOJ.BIN, el Reloj de Hispa-Pentium, en cuatro
+;  pestañas:
+;
+;    Reloj         la hora y la fecha, grandes; el calendario del mes (se
+;                  pasa de mes con < y >, con Re Pág y Av Pág, y de día con
+;                  las flechas; Inicio vuelve a hoy), con los festivos
+;                  nacionales de España (también el Viernes Santo, que se
+;                  calcula); y poner en hora el reloj del equipo
+;    Alarma        a una hora (de una vez o todos los días), con su mensaje;
+;                  suena mientras el Reloj está abierto (aunque esté
+;                  minimizado): un aviso que parpadea en la ventana, el título
+;                  de la ventana dice «ALARMA» y, si hay sonido, el sonido de
+;                  aviso del sistema (la llamada 193 de pentium-sonido; sin
+;                  ella, nada). Se para o se pospone 5 minutos
+;    Cronómetro    con centésimas y las vueltas
+;    Cuenta atrás  minutos y segundos; al acabar, el mismo aviso
+;
+;  La hora es la del reloj del PC (DATO_FECHA, de dos en dos segundos);
+;  los segundos de en medio, por los tics. Poner en hora usa la llamada 67
+;  (poner_reloj), que en la 0.8.5 no pide el modo administrador.
+;
+;  En la línea de órdenes: RELOJ /CALENDARIO [mm/aaaa] (el calendario del
+;  mes, en texto), RELOJ /FESTIVOS [aaaa], RELOJ /HOY; y para abrirlo con
+;  la alarma puesta: RELOJ /ALARMA hh:mm[:ss] [mensaje] (o +mm[:ss]: dentro
+;  de tantos minutos y segundos).
+;  Nada va solo por el color: hoy va en negro con letra blanca y «HOY»
+;  debajo, los festivos llevan «*» y el día elegido, un borde grueso.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UReloj
+
+    modelo usuario
+
+    importar Llamadas, Controles, Textos32, Formato
+
+    constante ID_PESTAÑAS = 1
+    constante ID_CAL = 2
+    constante ID_FECHA = 3
+    constante ID_HORA = 4
+    constante ID_PONER = 5
+    constante ID_AHORA = 6
+    constante ID_MES_ANT = 7
+    constante ID_MES_SIG = 8
+    constante ID_HOY = 9
+    constante ID_AL_HORA = 10
+    constante ID_AL_TEXTO = 11
+    constante ID_AL_DIARIA = 12
+    constante ID_AL_PONER = 13
+    constante ID_AL_QUITAR = 14
+    constante ID_CR_EMPEZAR = 15
+    constante ID_CR_VUELTA = 16
+    constante ID_CR_CERO = 17
+    constante ID_CR_VUELTAS = 18
+    constante ID_CA_MIN = 19
+    constante ID_CA_SEG = 20
+    constante ID_CA_EMPEZAR = 21
+    constante ID_CA_CANCELAR = 22
+    constante ID_AV_PARAR = 23
+    constante ID_AV_POSPONER = 24
+    constante ID_CA_1 = 25
+    constante ID_CA_5 = 26
+    constante ID_CA_10 = 27
+
+    constante PESTAÑAS = "Reloj|Alarma|Cron\xA2metro|Cuenta atr\xA0s"
+    constante MENÚS = "&Archivo|&Ver|A&yuda"
+    constante DÍAS = "lunes|martes|mi\x82rcoles|jueves|viernes|s\xA0bado|domingo"
+    constante DÍAS_CORTOS = "lu|ma|mi|ju|vi|s\xA0|do"
+    constante MESES = "enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre"
+
+    variable tamaño_: nat32 = T_GRANDE
+    variable pestaña: nat32
+    variable abierto: ent32 = -1
+    variable hz: nat32 = 100
+    variable consola_: bool
+
+    ; ---- la hora de ahora ----
+    variable crudo_ant: nat32 = 0xFFFFFFFF
+    variable ref_tics: nat32
+    variable hoy_d, hoy_m, hoy_a, hh, mm, ss: nat32
+    variable seg_ant: nat32                     ; el segundo del día de la vuelta de antes
+    variable pintado: nat32 = 0xFFFFFFFF        ; el segundo que se pintó
+
+    ; ---- el calendario ----
+    variable cal_d, cal_m, cal_a: nat32
+    variable cal_x, cal_y, cal_cw, cal_ch: ent32
+    variable cal_hueco: nat32
+
+    ; ---- poner en hora ----
+    variable campo_fecha: arreglo [12] de byte
+    variable campo_hora: arreglo [12] de byte
+
+    ; ---- la alarma ----
+    variable al_hora: arreglo [12] de byte = "08:00"
+    variable al_texto: arreglo [60] de byte
+    variable al_diaria: bool
+    variable al_puesta: bool
+    variable al_seg: nat32                      ; su segundo del día
+
+    ; ---- el cronómetro ----
+    variable cr_marcha: bool
+    variable cr_desde: nat32                    ; los tics al empezar
+    variable cr_acum: nat32                     ; lo de antes, en tics
+    variable cr_ultima: nat32                   ; el total de la vuelta de antes
+    variable cr_n: nat32
+    variable gv: Rejilla
+
+    ; ---- la cuenta atrás ----
+    variable ca_min: arreglo [8] de byte = "5"
+    variable ca_seg: arreglo [8] de byte = "0"
+    variable ca_marcha: bool
+    variable ca_pausa: bool
+    variable ca_fin: nat32                      ; los tics en que acaba
+    variable ca_queda: nat32                    ; (en pausa) lo que queda, en tics
+    variable ca_total: nat32
+
+    ; ---- el aviso (la alarma o el final de la cuenta atrás) ----
+    variable av_activo: bool
+    variable av_título: arreglo [40] de byte
+    variable av_texto: arreglo [100] de byte
+    variable av_es_alarma: bool
+    variable av_sonó: nat32                     ; los tics del último sonido
+    variable av_desde: nat32
+
+    variable aviso: arreglo [120] de byte
+
+    ; =========================================================================
+    ;  Las fechas
+    ; =========================================================================
+    función bisiesto(a: nat32): bool
+        devolver (a mod 4 = 0 y a mod 100 <> 0) o a mod 400 = 0
+    fin
+
+    función días_del_mes(m: nat32, a: nat32): nat32
+        si m = 2 entonces
+            si bisiesto(a) entonces devolver 29 fin
+            devolver 28
+        fin
+        si m = 4 o m = 6 o m = 9 o m = 11 entonces devolver 30 fin
+        devolver 31
+    fin
+
+    ; los días desde el 1 de enero de 1970 (el día 0, un jueves)
+    función número_de_día(d: nat32, m: nat32, a: nat32): nat32
+        variable n, i: nat32
+        n := 0
+        i := 1970
+        mientras i < a hacer
+            si bisiesto(i) entonces n := n + 366 sino n := n + 365 fin
+            i := i + 1
+        fin
+        i := 1
+        mientras i < m hacer
+            n := n + días_del_mes(i, a)
+            i := i + 1
+        fin
+        devolver n + d - 1
+    fin
+
+    función de_número(n: nat32, ref d: nat32, ref m: nat32, ref a: nat32)
+        variable l: nat32
+        a := 1970
+        mientras cierto hacer
+            si bisiesto(a) entonces l := 366 sino l := 365 fin
+            si n < l entonces romper fin
+            n := n - l
+            a := a + 1
+        fin
+        m := 1
+        mientras n >= días_del_mes(m, a) hacer
+            n := n - días_del_mes(m, a)
+            m := m + 1
+        fin
+        d := n + 1
+    fin
+
+    ; 0 el lunes ... 6 el domingo
+    función día_semana(d: nat32, m: nat32, a: nat32): nat32
+        devolver (número_de_día(d, m, a) + 3) mod 7
+    fin
+
+    ; el Domingo de Resurrección (el algoritmo de Meeus, el de Butcher)
+    función pascua(a: nat32, ref d: nat32, ref m: nat32)
+        variable aa, b, c, dd, e, f, gg, h, i, k, l, x: nat32
+        aa := a mod 19
+        b := a div 100
+        c := a mod 100
+        dd := b div 4
+        e := b mod 4
+        f := (b + 8) div 25
+        gg := (b - f + 1) div 3
+        h := (19 * aa + b - dd - gg + 15) mod 30
+        i := c div 4
+        k := c mod 4
+        l := (32 + 2 * e + 2 * i - h - k) mod 7
+        x := (aa + 11 * h + 22 * l) div 451
+        m := (h + l - 7 * x + 114) div 31
+        d := (h + l - 7 * x + 114) mod 31 + 1
+    fin
+
+    ; el festivo nacional de ese día (nulo si no lo es)
+    función festivo(d: nat32, m: nat32, a: nat32): puntero a byte
+        variable pd, pm, vd, vm, a2: nat32
+        si d = 1 y m = 1 entonces devolver "A\xA4o Nuevo" fin
+        si d = 6 y m = 1 entonces devolver "Epifan\xA1a del Se\xA4or (Reyes)" fin
+        si d = 1 y m = 5 entonces devolver "Fiesta del Trabajo" fin
+        si d = 15 y m = 8 entonces devolver "Asunci\xA2n de la Virgen" fin
+        si d = 12 y m = 10 entonces devolver "Fiesta Nacional de Espa\xA4a" fin
+        si d = 1 y m = 11 entonces devolver "Todos los Santos" fin
+        si d = 6 y m = 12 entonces devolver "D\xA1a de la Constituci\xA2n" fin
+        si d = 8 y m = 12 entonces devolver "Inmaculada Concepci\xA2n" fin
+        si d = 25 y m = 12 entonces devolver "Navidad" fin
+        ; el Viernes Santo: dos días antes de Pascua
+        pascua(a, pd, pm)
+        de_número(número_de_día(pd, pm, a) - 2, vd, vm, a2)
+        si d = vd y m = vm entonces devolver "Viernes Santo" fin
+        devolver nulo
+    fin
+
+    ; «sábado, 21 de noviembre de 2026»
+    función fecha_larga(d: nat32, m: nat32, a: nat32, t: puntero a byte)
+        variable nd: arreglo [16] de byte
+        variable nm: arreglo [16] de byte
+        variable x: arreglo [4] de nat32
+        opción_de(DÍAS, día_semana(d, m, a), nd, 16)
+        opción_de(MESES, m - 1, nm, 16)
+        nd[0] := mayúscula(nd[0])
+        x[0] := nat32(dirección(nd[0]))
+        x[1] := d
+        x[2] := nat32(dirección(nm[0]))
+        x[3] := a
+        formatear(t, 80, "%s, %u de %s de %u", x)
+    fin
+
+    ; =========================================================================
+    ;  La hora de ahora
+    ; =========================================================================
+    función mira_reloj()
+        variable f, t, más: nat32
+        f := dato(DATO_FECHA)
+        t := tics()
+        si f <> crudo_ant entonces
+            crudo_ant := f
+            ref_tics := t
+        fin
+        hoy_a := 1980 + (f >> 25)
+        hoy_m := (f >> 21) yb 15
+        hoy_d := (f >> 16) yb 31
+        hh := (f >> 11) yb 31
+        mm := (f >> 5) yb 63
+        ss := (f yb 31) * 2
+        si hoy_m < 1 o hoy_m > 12 o hoy_d < 1 entonces
+            ; (sin reloj que valga)
+            hoy_d := 1
+            hoy_m := 1
+        fin
+        más := (t - ref_tics) div hz
+        si más > 1 entonces más := 1 fin
+        ss := ss + más
+    fin
+
+    función segundo_del_día(): nat32
+        devolver hh * 3600 + mm * 60 + ss
+    fin
+
+    ; ¿se ha pasado por el segundo «obj» desde «antes» hasta «ahora»?
+    función cruza(antes: nat32, ahora_: nat32, obj: nat32): bool
+        si ahora_ >= antes entonces devolver antes < obj y obj <= ahora_ fin
+        devolver antes < obj o obj <= ahora_            ; ha pasado la medianoche
+    fin
+
+    ; «hh:mm» o «hh:mm:ss» -> segundos del día (falso si no vale)
+    función lee_hora(t: puntero a byte, ref s: nat32): bool
+        variable h, m, x, n: nat32
+        n := longitud(t)
+        si n <> 5 y n <> 8 entonces devolver falso fin
+        si t[2] <> ':' entonces devolver falso fin
+        si n = 8 y t[5] <> ':' entonces devolver falso fin
+        h := (t[0] - '0') * 10 + (t[1] - '0')
+        m := (t[3] - '0') * 10 + (t[4] - '0')
+        x := 0
+        si n = 8 entonces x := (t[6] - '0') * 10 + (t[7] - '0') fin
+        si t[0] < '0' o t[0] > '9' o t[1] < '0' o t[1] > '9' o t[3] < '0' o t[3] > '9' o t[4] < '0' o t[4] > '9' entonces devolver falso fin
+        si h > 23 o m > 59 o x > 59 entonces devolver falso fin
+        s := h * 3600 + m * 60 + x
+        devolver cierto
+    fin
+
+    ; una tecla en un campo de hora (hh:mm:ss; los dos puntos los pone él)
+    función hora_tecla(t: puntero a byte, máx: nat32, c: nat32): bool
+        variable n: nat32
+        n := longitud(t)
+        si c >= '0' y c <= '9' entonces
+            si n >= máx entonces devolver cierto fin
+            si n = 2 o n = 5 entonces
+                t[n] := ':'
+                n := n + 1
+            fin
+            t[n] := byte(c)
+            t[n + 1] := 0
+            cursor := n + 1
+            devolver cierto
+        fin
+        si c = ':' o c = '.' entonces devolver cierto fin
+        si c = 8 entonces
+            si n > 0 entonces
+                n := n - 1
+                si n > 0 y t[n - 1] = ':' entonces n := n - 1 fin
+                t[n] := 0
+            fin
+            cursor := n
+            devolver cierto
+        fin
+        si c = TECLA_SUPR entonces
+            t[0] := 0
+            cursor := 0
+            devolver cierto
+        fin
+        devolver falso
+    fin
+
+    función texto_hora(s: nat32, t: puntero a byte)
+        variable x: arreglo [3] de nat32
+        x[0] := s div 3600
+        x[1] := (s div 60) mod 60
+        x[2] := s mod 60
+        formatear(t, 12, "%02u:%02u:%02u", x)
+    fin
+
+    ; los tics como «h:mm:ss,cc» (o «mm:ss,cc»)
+    función texto_crono(t_: nat32, t: puntero a byte)
+        variable x: arreglo [4] de nat32
+        variable c: nat32
+        c := t_ * 100 div hz
+        x[0] := c div 360000
+        x[1] := (c div 6000) mod 60
+        x[2] := (c div 100) mod 60
+        x[3] := c mod 100
+        si x[0] > 0 entonces
+            formatear(t, 20, "%u:%02u:%02u,%02u", x)
+        sino
+            formatear(t, 20, "%02u:%02u,%02u", dirección(x[1]))
+        fin
+    fin
+
+    ; el sonido de aviso del sistema (SONIDO: la llamada 193 de pentium-sonido;
+    ; con un núcleo sin sonido, la llamada no existe y no pasa nada)
+    función sonar_aviso()
+        ensamblador
+            mov eax, 193
+            mov ebx, 3
+            xor ecx, ecx
+            mov edx, 2
+            int 0x80
+        fin
+    fin
+
+    función avisa(título_: puntero a byte, texto_: puntero a byte, es_alarma: bool)
+        av_activo := cierto
+        copiar_hasta(av_título, título_, 40)
+        copiar_hasta(av_texto, texto_, 100)
+        av_es_alarma := es_alarma
+        av_desde := tics()
+        av_sonó := 0
+        si es_alarma entonces título(v, "ALARMA - Reloj") sino título(v, "TIEMPO - Reloj") fin
+        imprimir2("reloj: %s: %s\n", nat32(título_), nat32(texto_))
+        sonar_aviso()
+        av_sonó := tics()
+    fin
+
+    función para_aviso()
+        av_activo := falso
+        título(v, "Reloj")
+    fin
+
+    ; lo que pasa con el tiempo: la alarma, la cuenta atrás
+    función vigila()
+        variable s: nat32
+        variable t: arreglo [100] de byte
+        variable hora_: arreglo [12] de byte
+        mira_reloj()
+        s := segundo_del_día()
+        si al_puesta y cruza(seg_ant, s, al_seg) entonces
+            texto_hora(al_seg, hora_)
+            copiar(t, hora_)
+            si al_texto[0] <> 0 entonces
+                concatenar(t, "  ")
+                concatenar(t, al_texto)
+            fin
+            avisa("ALARMA", t, cierto)
+            si no al_diaria entonces al_puesta := falso fin
+        fin
+        seg_ant := s
+        si ca_marcha y no ca_pausa y ent32(tics() - ca_fin) >= 0 entonces
+            ca_marcha := falso
+            avisa("SE ACAB\xD3 EL TIEMPO", "La cuenta atr\xA0s ha llegado a cero", falso)
+        fin
+        ; mientras dura el aviso, el sonido cada dos segundos (un minuto)
+        si av_activo y tics() - av_sonó >= 2 * hz y tics() - av_desde < 60 * hz entonces
+            sonar_aviso()
+            av_sonó := tics()
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Pintar
+    ; =========================================================================
+    función grande(x: ent32, yy: ent32, t: puntero a byte, m: ent32, tinta: nat32): ent32
+        devolver texto_ne(x, yy, t, 0xFFFFFFFF, tinta, m, cierto)
+    fin
+
+    ; la escala de la letra para que t quepa en «an»
+    función escala_para(t: puntero a byte, an: ent32, máx: ent32): ent32
+        variable m: ent32
+        m := máx
+        mientras m > 2 y ent32(longitud(t)) * 4 * m > an hacer m := m - 1 fin
+        devolver m
+    fin
+
+    función pinta_calendario(x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable t: arreglo [80] de byte
+        variable nm: arreglo [16] de byte
+        variable dc: arreglo [4] de byte
+        variable xd: arreglo [2] de nat32
+        variable i, primero, n, col, fila, cx, cy, y0: ent32
+        variable fondo_, tinta: nat32
+        variable f: puntero a byte
+        ; la cabecera: < mes > y Hoy
+        botón(ID_MES_ANT, x, yy, "<", falso, falso)
+        opción_de(MESES, cal_m - 1, nm, 16)
+        xd[0] := nat32(dirección(nm[0]))
+        xd[1] := cal_a
+        formatear(t, 80, "%s de %u", xd)
+        t[0] := mayúscula(t[0])
+        negrita(x + (an - ancho_texto(t)) div 2, yy + 5 * E, t, C_TINTA)
+        botón(ID_MES_SIG, x + an - ancho_botón(">"), yy, ">", falso, falso)
+        yy := yy + alto_botón() + 4 * E
+        ; los días de la semana
+        cal_cw := an div 7
+        para i desde 0 hasta 6 hacer
+            opción_de(DÍAS_CORTOS, nat32(i), dc, 4)
+            negrita(x + i * cal_cw + (cal_cw - 2 * LA) div 2, yy, dc, C_SUAVE)
+        fin
+        yy := yy + LT + 2 * E
+        caja(x, yy - E, an, 1, C_BORDE)
+        cal_ch := (al - 2 * alto_botón() - 2 * LT - 16 * E) div 6
+        si cal_ch > 2 * LT + 4 * E entonces cal_ch := 2 * LT + 4 * E fin
+        si cal_ch < LT + 4 * E entonces cal_ch := LT + 4 * E fin
+        cal_x := x
+        cal_y := yy
+        primero := ent32(día_semana(1, cal_m, cal_a))
+        cal_hueco := nat32(primero)
+        n := ent32(días_del_mes(cal_m, cal_a))
+        para i desde 1 hasta n hacer
+            col := (primero + i - 1) mod 7
+            fila := (primero + i - 1) div 7
+            cx := x + col * cal_cw
+            cy := yy + fila * cal_ch
+            fondo_ := C_PAPEL
+            tinta := C_TINTA
+            f := festivo(nat32(i), cal_m, cal_a)
+            si f <> nulo entonces fondo_ := C_NARANJA_CLARO fin
+            si nat32(i) = hoy_d y cal_m = hoy_m y cal_a = hoy_a entonces
+                fondo_ := C_TINTA
+                tinta := C_PAPEL
+            fin
+            caja(cx + 1, cy + 1, cal_cw - 2, cal_ch - 2, C_GRIS)
+            caja(cx + 2, cy + 2, cal_cw - 4, cal_ch - 4, fondo_)
+            natural_a_texto(nat32(i), t)
+            si f <> nulo entonces concatenar(t, "*") fin
+            negrita(cx + (cal_cw - ancho_texto(t)) div 2, cy + 2 * E, t, tinta)
+            si fondo_ = C_TINTA y cal_ch >= LT + LT div 2 + 4 * E entonces
+                texto_ne(cx + (cal_cw - 3 * 8) div 2, cy + cal_ch - 16 - 2 * E, "HOY", 3, C_PAPEL, 2, cierto)
+            fin
+            si nat32(i) = cal_d entonces
+                si foco = ID_CAL entonces borde(cx, cy, cal_cw, cal_ch, 4 * E, C_AZUL) sino borde(cx, cy, cal_cw, cal_ch, 2 * E, C_AZUL) fin
+            fin
+        fin
+        apuntar(ID_CAL, K_LISTA, x, yy, an, 6 * cal_ch)
+        y0 := yy + 6 * cal_ch + 2 * E
+        ; lo del día elegido
+        fecha_larga(cal_d, cal_m, cal_a, t)
+        f := festivo(cal_d, cal_m, cal_a)
+        si f <> nulo entonces
+            concatenar(t, ": ")
+            concatenar(t, f)
+            concatenar(t, " (festivo)")
+        fin
+        texto_corto(x, y0, t, an, C_TINTA, f <> nulo)
+        botón(ID_HOY, x, y0 + LT + 3 * E, "Hoy", falso, falso)
+        texto_corto(x + ancho_botón("Hoy") + LA, y0 + LT + 8 * E, "* festivo   HOY: hoy", an - ancho_botón("Hoy") - LA, C_SUAVE, falso)
+    fin
+
+    función pinta_reloj(yy: ent32, abajo: ent32)
+        variable t: arreglo [80] de byte
+        variable an_iz, m, x2, y2: ent32
+        an_iz := (ancho - 3 * LA) * 9 div 20
+        ; la hora, grande
+        texto_hora(segundo_del_día(), t)
+        m := escala_para(t, an_iz, 5 * M)
+        grande(LA, yy + 2 * E, t, m, C_TINTA)
+        y2 := yy + 2 * E + 8 * m + 4 * E
+        fecha_larga(hoy_d, hoy_m, hoy_a, t)
+        párrafo(LA, y2, an_iz, t, C_TINTA, cierto, cierto)
+        y2 := y2 + párrafo(LA, y2, an_iz, t, C_TINTA, cierto, falso) + 6 * E
+        ; poner en hora
+        si abajo - y2 > 2 * (alto_caja() + LT) + alto_botón() + LT + 10 * E entonces
+            y2 := recuadro(LA, y2, an_iz, abajo - y2 - 2 * E, "Poner en hora el equipo")
+            x2 := 2 * LA
+            campo(ID_FECHA, x2, y2, 12 * LA, "Fecha", campo_fecha, falso)
+            y2 := y2 + campo(ID_HORA, x2 + 13 * LA, y2, 10 * LA, "Hora", campo_hora, falso) + 4 * E
+            x2 := x2 + botón(ID_PONER, x2, y2, "Poner en hora", cierto, falso) + LA
+            botón(ID_AHORA, x2, y2, "Ahora", falso, falso)
+        fin
+        pinta_calendario(2 * LA + an_iz, yy + 2 * E, ancho - 3 * LA - an_iz, abajo - yy - 2 * E)
+    fin
+
+    función pinta_alarma(yy: ent32, abajo: ent32)
+        variable t: arreglo [120] de byte
+        variable h_: arreglo [12] de byte
+        variable an, y2, x2: ent32
+        variable d: arreglo [2] de nat32
+        an := ancho - 2 * LA
+        y2 := yy + 4 * E
+        si al_puesta entonces
+            texto_hora(al_seg, h_)
+            d[0] := nat32(dirección(h_[0]))
+            si al_diaria entonces formatear(t, 120, "ALARMA PUESTA: todos los d\xA1as a las %s", d) sino formatear(t, 120, "ALARMA PUESTA: a las %s", d) fin
+            caja(LA, y2, an, LT + 8 * E, C_VERDE_CLARO)
+            borde(LA, y2, an, LT + 8 * E, 2, C_VERDE)
+            negrita(2 * LA, y2 + 4 * E, t, C_VERDE)
+        sino
+            caja(LA, y2, an, LT + 8 * E, C_PAPEL)
+            borde(LA, y2, an, LT + 8 * E, 1, C_BORDE)
+            negrita(2 * LA, y2 + 4 * E, "Sin alarma", C_TINTA)
+        fin
+        y2 := y2 + LT + 14 * E
+        campo(ID_AL_HORA, LA, y2, 10 * LA, "Hora", al_hora, falso)
+        y2 := y2 + campo(ID_AL_TEXTO, 12 * LA, y2, an - 11 * LA, "Mensaje (si quiere)", al_texto, falso) + 6 * E
+        casilla(ID_AL_DIARIA, LA, y2, "Todos los d\xA1as", al_diaria)
+        y2 := y2 + LT + 10 * E
+        x2 := LA + botón(ID_AL_PONER, LA, y2, "Poner la alarma", cierto, falso) + LA
+        botón(ID_AL_QUITAR, x2, y2, "Quitar la alarma", falso, no al_puesta)
+        y2 := y2 + alto_botón() + 8 * E
+        párrafo(LA, y2, an, "La alarma suena mientras el Reloj est\xA0 abierto (aunque est\x82 minimizado): un aviso que parpadea, el t\xA1tulo de la ventana dice ALARMA y, si el equipo tiene sonido, el sonido de aviso.", C_SUAVE, falso, cierto)
+    fin
+
+    función pinta_crono(yy: ent32, abajo: ent32)
+        variable t: arreglo [20] de byte
+        variable m, x2, y2, an: ent32
+        variable total: nat32
+        an := ancho - 2 * LA
+        total := cr_acum
+        si cr_marcha entonces total := total + tics() - cr_desde fin
+        texto_crono(total, t)
+        m := escala_para(t, an, 5 * M)
+        grande(LA + (an - ent32(longitud(t)) * 4 * m) div 2, yy + 4 * E, t, m, C_TINTA)
+        y2 := yy + 4 * E + 8 * m + 6 * E
+        si cr_marcha entonces x2 := LA + botón(ID_CR_EMPEZAR, LA, y2, "Parar", cierto, falso) + LA sino x2 := LA + botón(ID_CR_EMPEZAR, LA, y2, "Empezar", cierto, falso) + LA fin
+        x2 := x2 + botón(ID_CR_VUELTA, x2, y2, "Vuelta", falso, no cr_marcha) + LA
+        botón(ID_CR_CERO, x2, y2, "A cero", falso, cr_marcha o total = 0)
+        y2 := y2 + alto_botón() + 6 * E
+        si abajo - y2 > 3 * LT entonces rejilla(gv, ID_CR_VUELTAS, LA, y2, an, abajo - y2 - 2 * E, "Las vueltas salen aqu\xA1 (bot\xA2n Vuelta).") fin
+    fin
+
+    función pinta_cuenta(yy: ent32, abajo: ent32)
+        variable t: arreglo [20] de byte
+        variable m, x2, y2, an: ent32
+        variable queda: nat32
+        an := ancho - 2 * LA
+        si ca_marcha entonces
+            si ca_pausa entonces queda := ca_queda sino queda := ca_fin - tics() fin
+            si ent32(queda) < 0 entonces queda := 0 fin
+            ; hacia arriba: se ve el segundo que está corriendo
+            texto_hora((queda + hz - 1) div hz, t)
+        sino
+            texto_hora(cuenta_desde_campos(), t)
+        fin
+        m := escala_para(t, an, 5 * M)
+        grande(LA + (an - ent32(longitud(t)) * 4 * m) div 2, yy + 4 * E, t, m, C_TINTA)
+        y2 := yy + 4 * E + 8 * m + 6 * E
+        campo(ID_CA_MIN, LA, y2, 8 * LA, "Minutos", ca_min, falso)
+        campo(ID_CA_SEG, 10 * LA, y2, 8 * LA, "Segundos", ca_seg, falso)
+        x2 := 19 * LA
+        y2 := y2 + LT + 2 * E
+        x2 := x2 + botón(ID_CA_1, x2, y2, "1 min", falso, falso) + LA div 2
+        x2 := x2 + botón(ID_CA_5, x2, y2, "5 min", falso, falso) + LA div 2
+        botón(ID_CA_10, x2, y2, "10 min", falso, falso)
+        y2 := y2 + alto_caja() + 6 * E
+        si no ca_marcha entonces
+            x2 := LA + botón(ID_CA_EMPEZAR, LA, y2, "Empezar", cierto, falso) + LA
+        sino si ca_pausa entonces
+            x2 := LA + botón(ID_CA_EMPEZAR, LA, y2, "Seguir", cierto, falso) + LA
+        sino
+            x2 := LA + botón(ID_CA_EMPEZAR, LA, y2, "Pausa", cierto, falso) + LA
+        fin
+        botón(ID_CA_CANCELAR, x2, y2, "Cancelar", falso, no ca_marcha)
+    fin
+
+    función pinta_aviso()
+        variable x, yy, an, al, m, y2, x2: ent32
+        variable c1, c2: nat32
+        an := ancho - 4 * LA
+        al := 8 * 3 * M + 2 * LT + alto_botón() + 30 * E
+        x := 2 * LA
+        yy := (alto - al) div 2
+        ; el borde parpadea (negro y amarillo), pero lo que avisa es la palabra
+        si (tics() - av_desde) div (hz div 2) mod 2 = 0 entonces
+            c1 := C_TINTA
+            c2 := 0xFACC15
+        sino
+            c1 := 0xFACC15
+            c2 := C_TINTA
+        fin
+        caja(x, yy, an, al, c1)
+        caja(x + 4 * E, yy + 4 * E, an - 8 * E, al - 8 * E, c2)
+        caja(x + 8 * E, yy + 8 * E, an - 16 * E, al - 16 * E, C_PAPEL)
+        m := escala_para(av_título, an - 4 * LA, 3 * M)
+        grande(x + (an - ent32(longitud(av_título)) * 4 * m) div 2, yy + 12 * E, av_título, m, C_TINTA)
+        y2 := yy + 12 * E + 8 * m + 4 * E
+        texto_corto(x + 2 * LA, y2, av_texto, an - 4 * LA, C_TINTA, cierto)
+        y2 := y2 + LT + 6 * E
+        x2 := x + 2 * LA
+        x2 := x2 + botón(ID_AV_PARAR, x2, y2, "Parar", cierto, falso) + LA
+        si av_es_alarma entonces botón(ID_AV_POSPONER, x2, y2, "Posponer 5 minutos", falso, falso) fin
+    fin
+
+    función pinta()
+        variable yy, abajo: ent32
+        variable est: arreglo [200] de byte
+        variable h_: arreglo [12] de byte
+        variable vueltas: nat32
+        vueltas := 0
+        mientras vueltas < 2 hacer
+            empezar_controles()
+            caja(0, 0, ancho, alto, C_FONDO)
+            yy := barra_menús(0, 0, ancho, MENÚS, abierto)
+            yy := yy + 4 * E
+            yy := yy + pestañas(ID_PESTAÑAS, 0, yy, ancho, PESTAÑAS, pestaña, 0)
+            abajo := alto - alto_estado()
+            según nat16(pestaña)
+                caso 0: pinta_reloj(yy + 4 * E, abajo - 2 * E)
+                caso 1: pinta_alarma(yy + 4 * E, abajo - 2 * E)
+                caso 2: pinta_crono(yy + 4 * E, abajo - 2 * E)
+                si no: pinta_cuenta(yy + 4 * E, abajo - 2 * E)
+            fin
+            si av_activo entonces
+                ; con el aviso, solo sus botones
+                empezar_controles()
+                pinta_aviso()
+                si foco <> ID_AV_PARAR y foco <> ID_AV_POSPONER entonces foco := ID_AV_PARAR fin
+            fin
+            texto_hora(segundo_del_día(), h_)
+            si al_puesta entonces
+                copiar(est, "Alarma: ")
+                texto_hora(al_seg, dirección(est[8]))
+            sino
+                copiar(est, "Sin alarma")
+            fin
+            concatenar(est, "|")
+            si ca_marcha entonces concatenar(est, "Cuenta atr\xA0s en marcha|") fin
+            si cr_marcha entonces concatenar(est, "Cron\xA2metro en marcha|") fin
+            si aviso[0] <> 0 entonces concatenar(est, aviso) sino concatenar(est, h_) fin
+            barra_estado(abajo, est)
+            si no asegurar_foco() entonces romper fin
+            vueltas := vueltas + 1
+        fin
+        volcar()
+        pintado := segundo_del_día()
+    fin
+
+    ; =========================================================================
+    ;  Lo que se hace
+    ; =========================================================================
+    función rellena_ahora()
+        variable x: arreglo [3] de nat32
+        mira_reloj()
+        x[0] := hoy_d
+        x[1] := hoy_m
+        x[2] := hoy_a
+        formatear(campo_fecha, 12, "%02u/%02u/%04u", x)
+        texto_hora(segundo_del_día(), campo_hora)
+    fin
+
+    función pon_en_hora()
+        variable d, m, a, s: nat32
+        variable x: arreglo [2] de nat32
+        si campo_fecha[0] = 0 o no fecha_vale(campo_fecha) entonces
+            copiar(aviso, "La fecha no vale (dd/mm/aaaa)")
+            devolver
+        fin
+        si no lee_hora(campo_hora, s) entonces
+            copiar(aviso, "La hora no vale (hh:mm:ss)")
+            devolver
+        fin
+        d := (campo_fecha[0] - '0') * 10 + campo_fecha[1] - '0'
+        m := (campo_fecha[3] - '0') * 10 + campo_fecha[4] - '0'
+        a := (campo_fecha[6] - '0') * 1000 + (campo_fecha[7] - '0') * 100 + (campo_fecha[8] - '0') * 10 + campo_fecha[9] - '0'
+        si a < 1980 o a > 2107 entonces
+            copiar(aviso, "El a\xA4o tiene que ir de 1980 a 2107")
+            devolver
+        fin
+        ; (la 0.8.5 no pide el modo administrador para esto; si algún día
+        ; lo pidiera, aquí: pedir_admin(), la llamada 157)
+        poner_reloj(((a - 1980) << 9) ob (m << 5) ob d, ((s div 3600) << 11) ob (((s div 60) mod 60) << 5) ob ((s mod 60) div 2))
+        crudo_ant := 0xFFFFFFFF
+        mira_reloj()
+        seg_ant := segundo_del_día()
+        x[0] := nat32(dirección(campo_fecha[0]))
+        x[1] := nat32(dirección(campo_hora[0]))
+        formatear(aviso, 120, "Puesto en hora: %s %s", x)
+        imprimir2("reloj: puesto en hora %s %s\n", x[0], x[1])
+        cal_d := d
+        cal_m := m
+        cal_a := a
+    fin
+
+    función pon_alarma()
+        si no lee_hora(al_hora, al_seg) entonces
+            copiar(aviso, "La hora de la alarma no vale (hh:mm)")
+            devolver
+        fin
+        al_puesta := cierto
+        mira_reloj()
+        seg_ant := segundo_del_día()
+        copiar(aviso, "Alarma puesta")
+        imprimir1("reloj: alarma puesta a las %s\n", nat32(dirección(al_hora[0])))
+    fin
+
+    función mueve_cal(días: ent32)
+        variable n: ent32
+        n := ent32(número_de_día(cal_d, cal_m, cal_a)) + días
+        si n < 3653 entonces n := 3653 fin                ; desde 1980
+        si n > 50000 entonces n := 50000 fin
+        de_número(nat32(n), cal_d, cal_m, cal_a)
+    fin
+
+    función mes_más(k: ent32)
+        variable m, a: ent32
+        m := ent32(cal_m) - 1 + k
+        a := ent32(cal_a)
+        mientras m < 0 hacer
+            m := m + 12
+            a := a - 1
+        fin
+        mientras m > 11 hacer
+            m := m - 12
+            a := a + 1
+        fin
+        si a < 1980 entonces a := 1980 fin
+        si a > 2107 entonces a := 2107 fin
+        cal_m := nat32(m + 1)
+        cal_a := nat32(a)
+        si cal_d > días_del_mes(cal_m, cal_a) entonces cal_d := días_del_mes(cal_m, cal_a) fin
+    fin
+
+    función a_hoy()
+        mira_reloj()
+        cal_d := hoy_d
+        cal_m := hoy_m
+        cal_a := hoy_a
+    fin
+
+    función cuenta_desde_campos(): nat32
+        variable mi, se: nat32
+        mi := 0
+        se := 0
+        texto_a_natural(ca_min, mi)
+        texto_a_natural(ca_seg, se)
+        si mi > 1440 entonces mi := 1440 fin
+        devolver mi * 60 + se
+    fin
+
+    función hace(id: nat32)
+        variable total: nat32
+        variable t: arreglo [20] de byte
+        variable x: arreglo [4] de nat32
+        variable r: ent32
+        aviso[0] := 0
+        según nat16(id)
+            caso ID_PONER: pon_en_hora()
+            caso ID_AHORA: rellena_ahora()
+            caso ID_MES_ANT: mes_más(-1)
+            caso ID_MES_SIG: mes_más(1)
+            caso ID_HOY: a_hoy()
+            caso ID_AL_DIARIA: al_diaria := no al_diaria
+            caso ID_AL_PONER: pon_alarma()
+            caso ID_AL_QUITAR:
+                al_puesta := falso
+                copiar(aviso, "Alarma quitada")
+            caso ID_CR_EMPEZAR:
+                si cr_marcha entonces
+                    cr_acum := cr_acum + tics() - cr_desde
+                    cr_marcha := falso
+                sino
+                    cr_desde := tics()
+                    cr_marcha := cierto
+                fin
+            caso ID_CR_VUELTA:
+                si cr_marcha entonces
+                    total := cr_acum + tics() - cr_desde
+                    cr_n := cr_n + 1
+                    r := renglón_nuevo(gv, R_NORMAL, cr_n)
+                    natural_a_texto(cr_n, t)
+                    celda(gv, r, 0, t)
+                    texto_crono(total - cr_ultima, t)
+                    celda(gv, r, 1, t)
+                    texto_crono(total, t)
+                    celda(gv, r, 2, t)
+                    cr_ultima := total
+                    rejilla_lista(gv)
+                    rejilla_ir(gv, I_ÚLTIMO)
+                fin
+            caso ID_CR_CERO:
+                si no cr_marcha entonces
+                    cr_acum := 0
+                    cr_ultima := 0
+                    cr_n := 0
+                    rejilla_vaciar(gv)
+                    rejilla_lista(gv)
+                fin
+            caso ID_CA_1, ID_CA_5, ID_CA_10:
+                si id = ID_CA_1 entonces copiar(ca_min, "1") fin
+                si id = ID_CA_5 entonces copiar(ca_min, "5") fin
+                si id = ID_CA_10 entonces copiar(ca_min, "10") fin
+                copiar(ca_seg, "0")
+            caso ID_CA_EMPEZAR:
+                si not_marcha() entonces
+                    total := cuenta_desde_campos()
+                    si total = 0 entonces
+                        copiar(aviso, "Ponga los minutos o los segundos")
+                    sino
+                        ca_total := total
+                        ca_fin := tics() + total * hz
+                        ca_marcha := cierto
+                        ca_pausa := falso
+                        x[0] := total
+                        imprimir("reloj: cuenta atr\xA0s de %u segundos\n", x)
+                    fin
+                sino si ca_pausa entonces
+                    ca_fin := tics() + ca_queda
+                    ca_pausa := falso
+                sino
+                    ca_queda := ca_fin - tics()
+                    ca_pausa := cierto
+                fin
+            caso ID_CA_CANCELAR:
+                ca_marcha := falso
+                ca_pausa := falso
+            caso ID_AV_PARAR: para_aviso()
+            caso ID_AV_POSPONER:
+                para_aviso()
+                mira_reloj()
+                al_seg := (segundo_del_día() + 300) mod 86400
+                al_puesta := cierto
+                seg_ant := segundo_del_día()
+                copiar(aviso, "Alarma pospuesta 5 minutos")
+        fin
+    fin
+
+    función not_marcha(): bool
+        devolver no ca_marcha
+    fin
+
+    función tecla_pulsada(c: nat32)
+        variable k: nat32
+        variable m: ent32
+        si av_activo entonces
+            si c = 27 entonces
+                hace(ID_AV_PARAR)
+                devolver
+            fin
+            si c = '\t' o c = TECLA_MAYÚS_TAB entonces
+                pasar_foco(c = '\t')
+                devolver
+            fin
+            si c = '\n' o c = ' ' entonces hace(foco) fin
+            devolver
+        fin
+        si c = '\t' o c = TECLA_MAYÚS_TAB entonces
+            pasar_foco(c = '\t')
+            devolver
+        fin
+        si c = TECLA_CTRL_TAB o c = TECLA_CTRL_MAYÚS_TAB entonces
+            pestaña := otra_pestaña(pestaña, 4, 0, c = TECLA_CTRL_TAB)
+            devolver
+        fin
+        m := menú_de_alt(MENÚS, c)
+        si m >= 0 entonces
+            abre(nat32(m))
+            devolver
+        fin
+        k := clase_de(foco)
+        si foco = ID_CAL entonces
+            según nat16(c)
+                caso TECLA_IZQUIERDA: mueve_cal(-1)
+                caso TECLA_DERECHA: mueve_cal(1)
+                caso TECLA_ARRIBA: mueve_cal(-7)
+                caso TECLA_ABAJO: mueve_cal(7)
+                caso TECLA_RE_PÁG: mes_más(-1)
+                caso TECLA_AV_PÁG: mes_más(1)
+                caso TECLA_INICIO: a_hoy()
+            fin
+            devolver
+        fin
+        si foco = ID_CR_VUELTAS entonces
+            rejilla_tecla(gv, c)
+            devolver
+        fin
+        si k = K_CAMPO entonces
+            si c = '\n' entonces
+                si foco = ID_FECHA o foco = ID_HORA entonces hace(ID_PONER) fin
+                si foco = ID_AL_HORA o foco = ID_AL_TEXTO entonces hace(ID_AL_PONER) fin
+                si foco = ID_CA_MIN o foco = ID_CA_SEG entonces hace(ID_CA_EMPEZAR) fin
+                devolver
+            fin
+            según nat16(foco)
+                caso ID_FECHA: fecha_tecla(campo_fecha, c)
+                caso ID_HORA: hora_tecla(campo_hora, 8, c)
+                caso ID_AL_HORA: hora_tecla(al_hora, 5, c)
+                caso ID_AL_TEXTO: campo_tecla(al_texto, 60, c)
+                caso ID_CA_MIN: número_tecla(ca_min, 6, c, falso)
+                caso ID_CA_SEG: número_tecla(ca_seg, 4, c, falso)
+            fin
+            devolver
+        fin
+        si c = '\n' o c = ' ' entonces hace(foco) fin
+    fin
+
+    función abre(k: nat32)
+        abierto := ent32(k)
+        según nat16(k)
+            caso 0: abrir_menú_barra(0, "Salir", 0)
+            caso 1: abrir_menú_barra(1, "Reloj|Alarma|Cron\xA2metro|Cuenta atr\xA0s|-|Letra normal|Letra grande|Letra muy grande", 0)
+            si no: abrir_menú_barra(2, "Acerca del Reloj", 0)
+        fin
+    fin
+
+    función clic(x: ent32, yy: ent32)
+        variable id: nat32
+        variable m, p, col, fila, d: ent32
+        m := menú_en_barra(x, yy)
+        si m >= 0 entonces
+            abre(nat32(m))
+            devolver
+        fin
+        id := control_en(x, yy)
+        si id = 0 entonces devolver fin
+        según nat16(clase_de(id))
+            caso K_PESTAÑAS:
+                p := pestaña_en(x, yy)
+                si p >= 0 entonces pestaña := nat32(p) fin
+            caso K_LISTA:
+                foco := id
+                si id = ID_CAL entonces
+                    col := (x - cal_x) div cal_cw
+                    fila := (yy - cal_y) div cal_ch
+                    d := fila * 7 + col - ent32(cal_hueco) + 1
+                    si d >= 1 y d <= ent32(días_del_mes(cal_m, cal_a)) entonces cal_d := nat32(d) fin
+                sino
+                    rejilla_clic(gv, x, yy)
+                fin
+            caso K_CAMPO:
+                foco := id
+            caso K_CASILLA:
+                foco := id
+                hace(id)
+            si no:
+                foco := id
+                hace(id)
+        fin
+    fin
+
+    ; =========================================================================
+    ;  La línea de órdenes
+    ; =========================================================================
+    función calendario_texto(m: nat32, a: nat32)
+        variable t: arreglo [120] de byte
+        variable nm: arreglo [16] de byte
+        variable x: arreglo [2] de nat32
+        variable i, primero, n, col: nat32
+        variable f: puntero a byte
+        opción_de(MESES, m - 1, nm, 16)
+        x[0] := nat32(dirección(nm[0]))
+        x[1] := a
+        imprimir("reloj: %s de %u\n", x)
+        escribir("reloj: lu ma mi ju vi s\xA0 do\n")
+        primero := día_semana(1, m, a)
+        n := días_del_mes(m, a)
+        copiar(t, "reloj:")
+        para i desde 1 hasta primero hacer concatenar(t, "   ") fin
+        col := primero
+        para i desde 1 hasta n hacer
+            x[0] := i
+            formatear(dirección(t[longitud(t)]), 8, " %2u", x)
+            col := col + 1
+            si col = 7 entonces
+                concatenar(t, "\n")
+                escribir(t)
+                copiar(t, "reloj:")
+                col := 0
+            fin
+        fin
+        si col <> 0 entonces
+            concatenar(t, "\n")
+            escribir(t)
+        fin
+        para i desde 1 hasta n hacer
+            f := festivo(i, m, a)
+            si f <> nulo entonces
+                x[0] := i
+                x[1] := nat32(f)
+                imprimir("reloj: festivo el %u: %s\n", x)
+            fin
+        fin
+    fin
+
+    función por_consola(args: puntero a byte, p: puntero a byte): byte
+        variable q: arreglo [40] de byte
+        variable t: arreglo [80] de byte
+        variable m, a, d, i: nat32
+        variable x: arreglo [4] de nat32
+        variable f: puntero a byte
+        mira_reloj()
+        si iguales_sin_caja(p, "/HOY") entonces
+            fecha_larga(hoy_d, hoy_m, hoy_a, t)
+            imprimir1("reloj: hoy es %s\n", nat32(dirección(t[0])))
+            devolver 0
+        fin
+        si iguales_sin_caja(p, "/CALENDARIO") entonces
+            m := hoy_m
+            a := hoy_a
+            si palabra(args, 1, q, 40) y longitud(q) = 7 y q[2] = '/' entonces
+                m := (q[0] - '0') * 10 + q[1] - '0'
+                a := (q[3] - '0') * 1000 + (q[4] - '0') * 100 + (q[5] - '0') * 10 + q[6] - '0'
+            fin
+            si m < 1 o m > 12 o a < 1980 o a > 2107 entonces
+                escribir("reloj: RELOJ /CALENDARIO mm/aaaa (de 1980 a 2107)\n")
+                devolver 1
+            fin
+            calendario_texto(m, a)
+            devolver 0
+        fin
+        si iguales_sin_caja(p, "/FESTIVOS") entonces
+            a := hoy_a
+            si palabra(args, 1, q, 40) entonces texto_a_natural(q, a) fin
+            si a < 1980 o a > 2107 entonces devolver 1 fin
+            para i desde 0 hasta 365 hacer
+                de_número(número_de_día(1, 1, a) + i, d, m, x[3])
+                si x[3] = a entonces
+                    f := festivo(d, m, a)
+                    si f <> nulo entonces
+                        fecha_larga(d, m, a, t)
+                        x[0] := nat32(dirección(t[0]))
+                        x[1] := nat32(f)
+                        imprimir("reloj: %s: %s\n", x)
+                    fin
+                fin
+            fin
+            devolver 0
+        fin
+        escribir("reloj: RELOJ [/HOY | /CALENDARIO [mm/aaaa] | /FESTIVOS [aaaa] | /ALARMA hh:mm[:ss] [mensaje]]\n")
+        devolver 0
+    fin
+
+    función principal(): byte
+        variable s: Suceso
+        variable args: arreglo [160] de byte
+        variable p: arreglo [40] de byte
+        variable i, n, k: nat32
+        variable q: puntero a byte
+        hz := dato(DATO_HZ)
+        si hz = 0 o hz > 10000 entonces hz := 100 fin
+        argumentos(args, 160)
+        si palabra(args, 0, p, 40) y p[0] = '/' y no iguales_sin_caja(p, "/ALARMA") y no iguales_sin_caja(p, "/NORMAL") y no iguales_sin_caja(p, "/DOBLE") entonces
+            consola_ := cierto
+            devolver por_consola(args, p)
+        fin
+        si iguales_sin_caja(p, "/NORMAL") entonces tamaño_ := T_NORMAL fin
+        si iguales_sin_caja(p, "/DOBLE") entonces tamaño_ := T_MUY_GRANDE fin
+        mira_reloj()
+        seg_ant := segundo_del_día()
+        a_hoy()
+        rellena_ahora()
+        si iguales_sin_caja(p, "/ALARMA") y palabra(args, 1, p, 40) entonces
+            copiar_hasta(al_hora, p, 12)
+            si p[0] = '+' entonces
+                ; «+mm» o «+mm:ss»: dentro de tanto
+                i := 0
+                n := 0
+                k := 1
+                mientras p[k] >= '0' y p[k] <= '9' hacer
+                    i := i * 10 + p[k] - '0'
+                    k := k + 1
+                fin
+                si p[k] = ':' entonces
+                    k := k + 1
+                    mientras p[k] >= '0' y p[k] <= '9' hacer
+                        n := n * 10 + p[k] - '0'
+                        k := k + 1
+                    fin
+                fin
+                texto_hora((segundo_del_día() + i * 60 + n) mod 86400, al_hora)
+            fin
+            ; el mensaje: lo que queda detrás de la hora
+            q := buscar(args, p)
+            si q <> nulo entonces
+                q := saltar_espacios(q + longitud(p))
+                copiar_hasta(al_texto, q, 60)
+            fin
+            pon_alarma()
+            aviso[0] := 0
+            pestaña := 1
+        fin
+        si no preparar_medida("Reloj", 784, 560, tamaño_) entonces
+            escribir("reloj: hace falta el escritorio (sin \x82l: RELOJ /HOY, RELOJ /CALENDARIO)\n")
+            devolver 1
+        fin
+        rejilla_nueva(gv, 500)
+        rejilla_columna(gv, "Vuelta", 6, cierto)
+        rejilla_columna(gv, "Tiempo", 12, cierto)
+        rejilla_columna(gv, "Total", 12, cierto)
+        escribir("reloj: Reloj 1.0\n")
+        foco := ID_CAL
+        pinta()
+        mientras cierto hacer
+            si suceso(v, s, falso) entonces
+                si s.clase = EV_TECLA entonces
+                    tecla_pulsada(s.a)
+                    pinta()
+                sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                    clic(ent32(s.a), ent32(s.b))
+                    pinta()
+                sino si s.clase = EV_MENÚ entonces
+                    abierto := -1
+                    si s.b = 0 y s.a = 0 entonces devolver 0 fin
+                    si s.b = 1 y s.a <> SIN_ELEGIR entonces
+                        si s.a <= 3 entonces pestaña := s.a fin
+                        si s.a >= 5 entonces
+                            tamaño_ := s.a - 4
+                            nuevo_tamaño(ancho, alto, tamaño_)
+                        fin
+                    fin
+                    si s.b = 2 y s.a = 0 entonces copiar(aviso, "Reloj 1.0 de Hispa-Pentium") fin
+                    pinta()
+                sino si s.clase = EV_TAMAÑO entonces
+                    nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
+                    pinta()
+                sino si s.clase = EV_CERRAR entonces
+                    devolver 0
+                fin
+            sino
+                vigila()
+                ; se pinta cuando cambia el segundo; el cronómetro, cada décima
+                si av_activo o segundo_del_día() <> pintado o (cr_marcha y pestaña = 2) o (ca_marcha y pestaña = 3) entonces pinta() fin
+                si cr_marcha y pestaña = 2 entonces dormir(5) sino dormir(10) fin
+            fin
+        fin
+        devolver 0
+    fin
+
+fin UReloj.

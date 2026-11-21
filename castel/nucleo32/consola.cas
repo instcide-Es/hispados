@@ -88,15 +88,15 @@ módulo Consola
     ; el teclado español: sin nada, con Mayús y con Alt Gr (por el código de la tecla)
     variable es_normal: arreglo [59] de byte = "\0\e1234567890'\xAD\x08\tqwertyuiop\x02+\n\0asdfghjkl\xA4\x01\xA7\0\x87zxcvbnm,.-\0*\0 "
     variable es_mayús: arreglo [59] de byte = "\0\e!\"\xFA$%&/()=?\xA8\x08\tQWERTYUIOP\x03*\n\0ASDFGHJKL\xA5\x04\xA6\0\x80ZXCVBNM;:_\0*\0 "
-    variable es_altgr: arreglo [59] de byte = "\0\0|@#~\0\xAA\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0[]\0\0\0\0\0\0\0\0\0\0\0\0{\\\0}"
+    variable es_altgr: arreglo [59] de byte = "\0\0|@#~\0\xAA\0\0\0\0\0\0\0\0\0\0\xF4\0\0\0\0\0\0\0[]\0\0\0\0\0\0\0\0\0\0\0\0{\\\0}"   ; (0.8.5) Alt Gr+E: el euro (F4h, la 437 de Hispa: tools/hispa437.py)
     ; y el de EE. UU.
     variable us_normal: arreglo [59] de byte = "\0\e1234567890-=\x08\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 "
     variable us_mayús: arreglo [59] de byte = "\0\e!@#$%^&*()_+\x08\tQWERTYUIOP{}\n\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 "
     ; las vocales con cada acento (a e i o u, y A E I O U), en la página 437
-    variable con_agudo: arreglo [11] de byte = "\xA0\x82\xA1\xA2\xA3A\x90IOU"
-    variable con_grave: arreglo [11] de byte = "\x85\x8A\x8D\x95\x97AEIOU"
-    variable con_circunflejo: arreglo [11] de byte = "\x83\x88\x8C\x93\x96AEIOU"
-    variable con_diéresis: arreglo [11] de byte = "\x84\x89\x8B\x94\x81\x8EEI\x99\x9A"
+    variable con_agudo: arreglo [11] de byte = "\xA0\x82\xA1\xA2\xA3\xB6\x90\xCF\xD3\xD7"   ; (0.8.5) Á É Í Ó Ú: la 437 de Hispa (tools/hispa437.py)
+    variable con_grave: arreglo [11] de byte = "\x85\x8A\x8D\x95\x97\xB5\xBD\xC7\xD2\xD6"
+    variable con_circunflejo: arreglo [11] de byte = "\x83\x88\x8C\x93\x96\xB7\xBE\xD0\xD4\xD8"
+    variable con_diéresis: arreglo [11] de byte = "\x84\x89\x8B\x94\x81\x8E\xC6\xD1\x99\x9A"
     variable vocales: arreglo [11] de byte = "aeiouAEIOU"
     variable acentos: arreglo [6] de byte = " '`^\""
 

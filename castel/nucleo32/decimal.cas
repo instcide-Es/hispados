@@ -1,0 +1,1209 @@
+; =============================================================================
+;  decimal.cas - (ACCESORIOS) números decimales de coma flotante, para la
+;  Calculadora (ucalc.cas) y para quien cuente dinero: 34 cifras
+;  significativas en base 10, así que 0,1 + 0,2 da 0,3 justo (no
+;  0,30000000000000004, como la coma flotante binaria del x87) y los euros
+;  se redondean bien (a la mitad, hacia fuera: 2,675 -> 2,68).
+;
+;  Un Dec vale 0,d0d1d2...d33 x 10^e (d0 <> 0), o cero (d0 = 0). Las cuentas
+;  se hacen con cifras de sobra y se redondean al final; el resultado puede
+;  ser cualquiera de los operandos (sumar(a, a, b) vale).
+;
+;      variable a, b, c: Dec
+;      de_texto(a, "0,1")  de_texto(b, "0,2")  sumar(c, a, b)
+;      a_texto(c, t, 16, -1, cierto)          ; «0,3»
+;
+;  Además, las funciones de la calculadora científica, calculadas también
+;  en decimal (series de Taylor, Newton): raíz, potencias, logaritmos,
+;  exponencial, trigonometría en grados o radianes, factorial. Esas se
+;  redondean a SIG_F cifras (las que salen bien seguro), así que sen 30° da
+;  0,5 justo y raíz de 16, 4. Los errores (dividir entre cero, la raíz de un
+;  negativo...) se apuntan en error_dec (se pone a D_BIEN antes de contar).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Decimal
+
+    importar Textos32
+
+    público constante P = 34                    ; las cifras significativas
+    constante P1 = 35
+    constante W = 84                            ; las cifras de las cuentas de en medio
+    público constante SIG_F = 30                ; las de las funciones (raíz, seno...)
+    constante E_MÁX = 9999                      ; hasta 10^9999
+
+    público constante D_BIEN = 0
+    público constante D_DIV_CERO = 1            ; dividir entre cero
+    público constante D_DESBORDE = 2            ; un número demasiado grande
+    público constante D_DOMINIO = 3             ; no existe (la raíz de un negativo, el logaritmo de 0...)
+
+    público constante GRADOS = 0
+    público constante RADIANES = 1
+
+    público tipo Dec = estructura
+        neg: bool
+        e: ent32
+        d: arreglo [P] de byte
+    fin
+
+    público variable error_dec: nat32
+
+    ; las constantes, de su texto (la primera vez que hacen falta)
+    variable hechas: bool
+    público variable PI, MEDIO_PI, LN10, UNO, NOVENTA, NÚMERO_E: Dec
+    variable CUARTO_PI, CUARENTA_Y_CINCO, CIENTO_OCHENTA: Dec
+
+    público función constantes()
+        si hechas entonces devolver fin
+        hechas := cierto
+        de_texto(PI, "3,14159265358979323846264338327950288419716939937510")
+        de_texto(MEDIO_PI, "1,57079632679489661923132169163975144209858469968755")
+        de_texto(CUARTO_PI, "0,785398163397448309615660845819875721049292349843776")
+        de_texto(LN10, "2,30258509299404568401799145468436420760110148862877")
+        de_texto(NÚMERO_E, "2,71828182845904523536028747135266249775724709369995")
+        de_nat(UNO, 1)
+        de_nat(NOVENTA, 90)
+        de_nat(CUARENTA_Y_CINCO, 45)
+        de_nat(CIENTO_OCHENTA, 180)
+    fin
+
+    ; =========================================================================
+    ;  Lo básico
+    ; =========================================================================
+    público función es_cero(ref a: Dec): bool
+        devolver a.d[0] = 0
+    fin
+
+    público función poner_cero(ref a: Dec)
+        variable i: ent32
+        para i desde 0 hasta P - 1 hacer a.d[i] := 0 fin
+        a.e := 0
+        a.neg := falso
+    fin
+
+    ; a := b
+    público función copiar_dec(ref a: Dec, ref b: Dec)
+        variable i: ent32
+        para i desde 0 hasta P - 1 hacer a.d[i] := b.d[i] fin
+        a.e := b.e
+        a.neg := b.neg
+    fin
+
+    público función de_nat(ref a: Dec, n: nat32)
+        variable w: arreglo [12] de byte
+        variable i: ent32
+        i := 11
+        mientras i >= 0 hacer
+            w[i] := byte(n mod 10)
+            n := n div 10
+            i := i - 1
+        fin
+        ajusta(a, dirección(w[0]), 12, 12, falso)
+    fin
+
+    público función de_ent(ref a: Dec, n: ent32)
+        si n < 0 entonces
+            de_nat(a, nat32(0 - n))
+            a.neg := cierto
+        sino
+            de_nat(a, nat32(n))
+        fin
+    fin
+
+    público función cambiar_signo(ref a: Dec)
+        si no es_cero(a) entonces a.neg := no a.neg fin
+    fin
+
+    función límites(ref r: Dec)
+        si es_cero(r) entonces devolver fin
+        si r.e > E_MÁX + 1 entonces error_dec := D_DESBORDE fin
+        si r.e < 0 - E_MÁX entonces poner_cero(r) fin
+    fin
+
+    ; r := 0,w[0..n-1] x 10^e (con ceros delante o no), redondeado a P cifras
+    función ajusta(ref r: Dec, w: puntero a byte, n: ent32, e: ent32, neg: bool)
+        variable i, k: ent32
+        variable lleva: bool
+        i := 0
+        mientras i < n y w[i] = 0 hacer i := i + 1 fin
+        si i >= n entonces
+            poner_cero(r)
+            devolver
+        fin
+        e := e - i
+        k := 0
+        mientras k < P hacer
+            si i + k < n entonces r.d[k] := w[i + k] sino r.d[k] := 0 fin
+            k := k + 1
+        fin
+        si i + P < n entonces
+            si w[i + P] >= 5 entonces
+                k := P - 1
+                lleva := cierto
+                mientras lleva y k >= 0 hacer
+                    si r.d[k] = 9 entonces
+                        r.d[k] := 0
+                        k := k - 1
+                    sino
+                        r.d[k] := r.d[k] + 1
+                        lleva := falso
+                    fin
+                fin
+                si lleva entonces
+                    r.d[0] := 1
+                    e := e + 1
+                fin
+            fin
+        fin
+        r.e := e
+        r.neg := neg
+        límites(r)
+    fin
+
+    ; =========================================================================
+    ;  Las cuatro cuentas
+    ; =========================================================================
+    público función sumar(ref r: Dec, ref a: Dec, ref b: Dec)
+        suma_signo(r, a, b, falso)
+    fin
+
+    público función restar(ref r: Dec, ref a: Dec, ref b: Dec)
+        suma_signo(r, a, b, cierto)
+    fin
+
+    función suma_signo(ref r: Dec, ref a: Dec, ref b: Dec, cambia: bool)
+        variable w, x: arreglo [W] de byte
+        variable i, ee, des_a, des_b, s, c: ent32
+        variable nb, mayor_a: bool
+        nb := b.neg
+        si cambia entonces nb := no nb fin
+        si es_cero(b) entonces
+            copiar_dec(r, a)
+            devolver
+        fin
+        si es_cero(a) entonces
+            copiar_dec(r, b)
+            r.neg := nb
+            devolver
+        fin
+        ee := a.e
+        si b.e > ee entonces ee := b.e fin
+        para i desde 0 hasta W - 1 hacer
+            w[i] := 0
+            x[i] := 0
+        fin
+        des_a := ee - a.e + 1
+        des_b := ee - b.e + 1
+        para i desde 0 hasta P - 1 hacer
+            si des_a + i < W entonces w[des_a + i] := a.d[i] fin
+            si des_b + i < W entonces x[des_b + i] := b.d[i] fin
+        fin
+        si a.neg = nb entonces
+            c := 0
+            i := W - 1
+            mientras i >= 0 hacer
+                s := ent32(w[i]) + ent32(x[i]) + c
+                si s >= 10 entonces
+                    w[i] := byte(s - 10)
+                    c := 1
+                sino
+                    w[i] := byte(s)
+                    c := 0
+                fin
+                i := i - 1
+            fin
+            ajusta(r, dirección(w[0]), W, ee + 1, a.neg)
+            devolver
+        fin
+        ; con signos distintos: el mayor menos el menor
+        i := 0
+        mientras i < W y w[i] = x[i] hacer i := i + 1 fin
+        si i = W entonces
+            poner_cero(r)
+            devolver
+        fin
+        mayor_a := w[i] > x[i]
+        c := 0
+        i := W - 1
+        mientras i >= 0 hacer
+            si mayor_a entonces s := ent32(w[i]) - ent32(x[i]) - c sino s := ent32(x[i]) - ent32(w[i]) - c fin
+            si s < 0 entonces
+                s := s + 10
+                c := 1
+            sino
+                c := 0
+            fin
+            w[i] := byte(s)
+            i := i - 1
+        fin
+        si mayor_a entonces ajusta(r, dirección(w[0]), W, ee + 1, a.neg) sino ajusta(r, dirección(w[0]), W, ee + 1, nb) fin
+    fin
+
+    público función multiplicar(ref r: Dec, ref a: Dec, ref b: Dec)
+        variable acc: arreglo [W] de nat32
+        variable w: arreglo [W] de byte
+        variable i, j, n: ent32
+        variable c: nat32
+        variable neg: bool
+        si es_cero(a) o es_cero(b) entonces
+            poner_cero(r)
+            devolver
+        fin
+        neg := a.neg <> b.neg
+        n := 2 * P
+        para i desde 0 hasta n - 1 hacer acc[i] := 0 fin
+        para i desde 0 hasta P - 1 hacer
+            si a.d[i] <> 0 entonces
+                para j desde 0 hasta P - 1 hacer
+                    acc[i + j + 1] := acc[i + j + 1] + nat32(a.d[i]) * nat32(b.d[j])
+                fin
+            fin
+        fin
+        c := 0
+        i := n - 1
+        mientras i >= 0 hacer
+            c := c + acc[i]
+            w[i] := byte(c mod 10)
+            c := c div 10
+            i := i - 1
+        fin
+        ajusta(r, dirección(w[0]), n, a.e + b.e, neg)
+    fin
+
+    ; ¿x < y? (n cifras, la más alta primero)
+    función menor(x: puntero a byte, z: puntero a byte, n: ent32): bool
+        variable i: ent32
+        i := 0
+        mientras i < n hacer
+            si x[i] <> z[i] entonces devolver x[i] < z[i] fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; x := x - y (n cifras; x >= y)
+    función resta_en(x: puntero a byte, z: puntero a byte, n: ent32)
+        variable i, s, c: ent32
+        c := 0
+        i := n - 1
+        mientras i >= 0 hacer
+            s := ent32(x[i]) - ent32(z[i]) - c
+            si s < 0 entonces
+                s := s + 10
+                c := 1
+            sino
+                c := 0
+            fin
+            x[i] := byte(s)
+            i := i - 1
+        fin
+    fin
+
+    público función dividir(ref r: Dec, ref a: Dec, ref b: Dec)
+        variable resto, dv: arreglo [P1] de byte
+        variable q: arreglo [W] de byte
+        variable i, k, n, cuenta: ent32
+        variable neg: bool
+        si es_cero(b) entonces
+            error_dec := D_DIV_CERO
+            poner_cero(r)
+            devolver
+        fin
+        si es_cero(a) entonces
+            poner_cero(r)
+            devolver
+        fin
+        neg := a.neg <> b.neg
+        dv[0] := 0
+        para i desde 0 hasta P - 1 hacer dv[i + 1] := b.d[i] fin
+        para i desde 0 hasta P hacer resto[i] := 0 fin
+        n := 2 * P + 1
+        para k desde 0 hasta n - 1 hacer
+            para i desde 0 hasta P - 1 hacer resto[i] := resto[i + 1] fin
+            si k < P entonces resto[P] := a.d[k] sino resto[P] := 0 fin
+            cuenta := 0
+            mientras no menor(dirección(resto[0]), dirección(dv[0]), P1) hacer
+                resta_en(dirección(resto[0]), dirección(dv[0]), P1)
+                cuenta := cuenta + 1
+            fin
+            q[k] := byte(cuenta)
+        fin
+        ajusta(r, dirección(q[0]), n, P + a.e - b.e, neg)
+    fin
+
+    ; r := a / n (n, un natural pequeño: hasta 400 millones)
+    público función div_nat(ref r: Dec, ref a: Dec, n: nat32)
+        variable q: arreglo [W] de byte
+        variable k, m: ent32
+        variable resto: nat32
+        si n = 0 entonces
+            error_dec := D_DIV_CERO
+            poner_cero(r)
+            devolver
+        fin
+        si es_cero(a) entonces
+            poner_cero(r)
+            devolver
+        fin
+        m := P + 12
+        resto := 0
+        para k desde 0 hasta m - 1 hacer
+            resto := resto * 10
+            si k < P entonces resto := resto + a.d[k] fin
+            q[k] := byte(resto div n)
+            resto := resto mod n
+        fin
+        ajusta(r, dirección(q[0]), m, a.e, a.neg)
+    fin
+
+    ; r := a * n (n, hasta 400 millones)
+    público función mul_nat(ref r: Dec, ref a: Dec, n: nat32)
+        variable w: arreglo [W] de byte
+        variable i: ent32
+        variable c, x: nat32
+        c := 0
+        i := P - 1
+        mientras i >= 0 hacer
+            x := nat32(a.d[i]) * n + c
+            w[10 + i] := byte(x mod 10)
+            c := x div 10
+            i := i - 1
+        fin
+        i := 9
+        mientras i >= 0 hacer
+            w[i] := byte(c mod 10)
+            c := c div 10
+            i := i - 1
+        fin
+        ajusta(r, dirección(w[0]), P + 10, a.e + 10, a.neg)
+    fin
+
+    ; -1, 0 o 1: según |a| sea menor, igual o mayor que |b|
+    público función comparar_abs(ref a: Dec, ref b: Dec): ent32
+        variable i: ent32
+        si es_cero(a) y es_cero(b) entonces devolver 0 fin
+        si es_cero(a) entonces devolver -1 fin
+        si es_cero(b) entonces devolver 1 fin
+        si a.e <> b.e entonces
+            si a.e < b.e entonces devolver -1 fin
+            devolver 1
+        fin
+        para i desde 0 hasta P - 1 hacer
+            si a.d[i] <> b.d[i] entonces
+                si a.d[i] < b.d[i] entonces devolver -1 fin
+                devolver 1
+            fin
+        fin
+        devolver 0
+    fin
+
+    público función comparar_dec(ref a: Dec, ref b: Dec): ent32
+        variable m: ent32
+        si es_cero(a) y es_cero(b) entonces devolver 0 fin
+        si es_cero(a) entonces
+            si b.neg entonces devolver 1 fin
+            devolver -1
+        fin
+        si es_cero(b) entonces
+            si a.neg entonces devolver -1 fin
+            devolver 1
+        fin
+        si a.neg <> b.neg entonces
+            si a.neg entonces devolver -1 fin
+            devolver 1
+        fin
+        m := comparar_abs(a, b)
+        si a.neg entonces devolver 0 - m fin
+        devolver m
+    fin
+
+    ; =========================================================================
+    ;  Redondear y la parte entera
+    ; =========================================================================
+    ; se queda con las k primeras cifras, redondeando a la mitad hacia fuera
+    función redondea_en(ref a: Dec, k: ent32)
+        variable i: ent32
+        variable sube, lleva: bool
+        si es_cero(a) o k >= P entonces devolver fin
+        si k < 0 entonces
+            poner_cero(a)
+            devolver
+        fin
+        sube := a.d[k] >= 5
+        para i desde k hasta P - 1 hacer a.d[i] := 0 fin
+        si no sube entonces
+            si k = 0 entonces poner_cero(a) fin
+            devolver
+        fin
+        si k = 0 entonces
+            a.d[0] := 1
+            a.e := a.e + 1
+            devolver
+        fin
+        i := k - 1
+        lleva := cierto
+        mientras lleva y i >= 0 hacer
+            si a.d[i] = 9 entonces
+                a.d[i] := 0
+                i := i - 1
+            sino
+                a.d[i] := a.d[i] + 1
+                lleva := falso
+            fin
+        fin
+        si lleva entonces
+            a.d[0] := 1
+            a.e := a.e + 1
+        fin
+    fin
+
+    ; a esos decimales (2: los céntimos)
+    público función redondear(ref a: Dec, decimales: ent32)
+        redondea_en(a, a.e + decimales)
+    fin
+
+    ; a esas cifras significativas
+    público función redondear_sig(ref a: Dec, cifras: ent32)
+        redondea_en(a, cifras)
+    fin
+
+    ; la parte entera (hacia el cero)
+    público función truncar(ref a: Dec)
+        variable i: ent32
+        si es_cero(a) entonces devolver fin
+        si a.e <= 0 entonces
+            poner_cero(a)
+            devolver
+        fin
+        si a.e < P entonces
+            para i desde a.e hasta P - 1 hacer a.d[i] := 0 fin
+        fin
+    fin
+
+    público función es_entero(ref a: Dec): bool
+        variable i: ent32
+        si es_cero(a) entonces devolver cierto fin
+        si a.e <= 0 entonces devolver falso fin
+        si a.e >= P entonces devolver cierto fin
+        para i desde a.e hasta P - 1 hacer
+            si a.d[i] <> 0 entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; el mayor entero que no pasa de a
+    público función suelo(ref a: Dec)
+        variable tenía: bool
+        tenía := no es_entero(a)
+        truncar(a)
+        si tenía y a.neg entonces
+            constantes()
+            restar(a, a, UNO)
+        sino si tenía y es_cero(a) entonces
+            a.neg := falso
+        fin
+    fin
+
+    ; si a es un entero que cabe en un ent32, n := a (cierto)
+    público función a_ent(ref a: Dec, ref n: ent32): bool
+        variable i: ent32
+        variable v: nat32
+        si no es_entero(a) entonces devolver falso fin
+        si es_cero(a) entonces
+            n := 0
+            devolver cierto
+        fin
+        si a.e > 10 entonces devolver falso fin
+        v := 0
+        para i desde 0 hasta a.e - 1 hacer
+            si v > 214748364 entonces devolver falso fin
+            v := v * 10 + a.d[i]
+        fin
+        si v > 2147483647 entonces devolver falso fin
+        si a.neg entonces n := 0 - ent32(v) sino n := ent32(v) fin
+        devolver cierto
+    fin
+
+    ; =========================================================================
+    ;  De texto y a texto (en español: la coma decimal, los puntos de los miles)
+    ; =========================================================================
+    ; a := lo escrito en t («1.234,56», «-0,5», «3,2E-5»; si no hay coma y el
+    ; punto no va seguido de tres cifras justas, el punto es la coma: «3.14»).
+    ; Deja pasar los espacios y el euro. Falso si no es un número.
+    público función de_texto(ref a: Dec, t: puntero a byte): bool
+        variable w: arreglo [W] de byte
+        variable i, n, nent, ex, puntos, comas, tras: ent32
+        variable c: byte
+        variable neg, en_dec, hay, exneg, coma_es_punto: bool
+        poner_cero(a)
+        ; ¿qué hace de coma?
+        puntos := 0
+        comas := 0
+        tras := -1
+        i := 0
+        mientras t[i] <> 0 hacer
+            si t[i] = ',' entonces comas := comas + 1 fin
+            si t[i] = '.' entonces
+                puntos := puntos + 1
+                tras := 0
+            sino si tras >= 0 y es_cifra(t[i]) entonces
+                tras := tras + 1
+            sino si tras >= 0 entonces
+                si t[i] = 'e' o t[i] = 'E' o t[i] = ' ' o t[i] = 0xF4 entonces tras := tras + 100 fin
+            fin
+            i := i + 1
+        fin
+        coma_es_punto := comas = 0 y puntos = 1 y tras mod 100 <> 3
+        neg := falso
+        en_dec := falso
+        hay := falso
+        n := 0
+        nent := 0
+        ex := 0
+        i := 0
+        mientras t[i] = ' ' hacer i := i + 1 fin
+        si t[i] = '-' entonces
+            neg := cierto
+            i := i + 1
+        sino si t[i] = '+' entonces
+            i := i + 1
+        fin
+        mientras t[i] <> 0 hacer
+            c := t[i]
+            si es_cifra(c) entonces
+                hay := cierto
+                si n < W entonces
+                    w[n] := c - '0'
+                    n := n + 1
+                    si no en_dec entonces nent := nent + 1 fin
+                sino si no en_dec entonces
+                    nent := nent + 1
+                fin
+            sino si c = ',' o (c = '.' y coma_es_punto) entonces
+                si en_dec entonces devolver falso fin
+                en_dec := cierto
+            sino si c = '.' entonces
+                si en_dec entonces devolver falso fin
+            sino si c = ' ' o c = 0xF4 entonces
+                ; los espacios y el euro
+            sino si (c = 'e' o c = 'E') y hay entonces
+                i := i + 1
+                exneg := falso
+                si t[i] = '-' entonces
+                    exneg := cierto
+                    i := i + 1
+                sino si t[i] = '+' entonces
+                    i := i + 1
+                fin
+                si no es_cifra(t[i]) entonces devolver falso fin
+                mientras es_cifra(t[i]) hacer
+                    si ex < 100000 entonces ex := ex * 10 + ent32(t[i] - '0') fin
+                    i := i + 1
+                fin
+                si exneg entonces ex := 0 - ex fin
+                mientras t[i] = ' ' o t[i] = 0xF4 hacer i := i + 1 fin
+                si t[i] <> 0 entonces devolver falso fin
+                romper
+            sino
+                devolver falso
+            fin
+            i := i + 1
+        fin
+        si no hay entonces devolver falso fin
+        error_dec := D_BIEN
+        ajusta(a, dirección(w[0]), n, nent + ex, neg)
+        devolver error_dec = D_BIEN
+    fin
+
+    ; a, en texto (t: caben 80): «cifras» significativas como mucho; con
+    ; «decimales» >= 0, justo esos decimales (los euros: 2); con «miles», los
+    ; puntos de los millares (1.234.567,89). Los muy grandes o muy pequeños,
+    ; con exponente: 1,5E+20
+    público función a_texto(ref a: Dec, t: puntero a byte, cifras: ent32, decimales: ent32, miles: bool)
+        variable x: Dec
+        variable n, i, j, nd, último, ex: ent32
+        variable num: arreglo [12] de byte
+        variable científica: bool
+        copiar_dec(x, a)
+        si decimales >= 0 entonces redondear(x, decimales) sino redondear_sig(x, cifras) fin
+        n := 0
+        si x.neg y no es_cero(x) entonces
+            t[n] := '-'
+            n := n + 1
+        fin
+        científica := falso
+        si no es_cero(x) entonces
+            si x.e > cifras entonces científica := cierto fin
+            si decimales < 0 y x.e < -5 entonces científica := cierto fin
+        fin
+        si científica entonces
+            redondear_sig(x, cifras)
+            t[n] := '0' + x.d[0]
+            n := n + 1
+            último := 0
+            para i desde 1 hasta P - 1 hacer
+                si x.d[i] <> 0 y i < cifras entonces último := i fin
+            fin
+            si último > 0 entonces
+                t[n] := ','
+                n := n + 1
+                para i desde 1 hasta último hacer
+                    t[n] := '0' + x.d[i]
+                    n := n + 1
+                fin
+            fin
+            t[n] := 'E'
+            n := n + 1
+            ex := x.e - 1
+            si ex < 0 entonces
+                t[n] := '-'
+                ex := 0 - ex
+            sino
+                t[n] := '+'
+            fin
+            n := n + 1
+            t[n] := 0
+            natural_a_texto(nat32(ex), num)
+            concatenar(t, num)
+            devolver
+        fin
+        ; la parte entera
+        si x.e <= 0 o es_cero(x) entonces
+            t[n] := '0'
+            n := n + 1
+        sino
+            para i desde 0 hasta x.e - 1 hacer
+                si miles y i > 0 y (x.e - i) mod 3 = 0 entonces
+                    t[n] := '.'
+                    n := n + 1
+                fin
+                si i < P entonces t[n] := '0' + x.d[i] sino t[n] := '0' fin
+                n := n + 1
+            fin
+        fin
+        ; los decimales
+        si decimales >= 0 entonces
+            nd := decimales
+        sino
+            nd := 0
+            si no es_cero(x) entonces
+                último := -1
+                para i desde 0 hasta P - 1 hacer
+                    si x.d[i] <> 0 entonces último := i fin
+                fin
+                nd := último + 1 - x.e
+                si nd < 0 entonces nd := 0 fin
+            fin
+        fin
+        si nd > 0 entonces
+            t[n] := ','
+            n := n + 1
+            para j desde 0 hasta nd - 1 hacer
+                i := x.e + j
+                si es_cero(x) o i < 0 o i >= P entonces t[n] := '0' sino t[n] := '0' + x.d[i] fin
+                n := n + 1
+            fin
+        fin
+        t[n] := 0
+    fin
+
+    ; =========================================================================
+    ;  Las funciones de la calculadora científica
+    ; =========================================================================
+    ; ¿es «term» tan pequeño al lado de «s» que ya no cuenta?
+    función no_cuenta(ref term: Dec, ref s: Dec): bool
+        si es_cero(term) entonces devolver cierto fin
+        si es_cero(s) entonces devolver falso fin
+        devolver term.e < s.e - P - 2
+    fin
+
+    función isqrt(n: nat32): nat32
+        variable x, z: nat32
+        si n = 0 entonces devolver 0 fin
+        x := n
+        z := (x + 1) div 2
+        mientras z < x hacer
+            x := z
+            z := (x + n div x) div 2
+        fin
+        devolver x
+    fin
+
+    ; la raíz cuadrada, con todas las cifras (sin redondear a SIG_F)
+    función raíz_toda(ref r: Dec, ref x: Dec)
+        variable g, q: Dec
+        variable i, ee: ent32
+        variable m: nat32
+        si es_cero(x) entonces
+            poner_cero(r)
+            devolver
+        fin
+        si x.neg entonces
+            error_dec := D_DOMINIO
+            poner_cero(r)
+            devolver
+        fin
+        ; la primera aproximación, de las primeras cifras
+        m := 0
+        si x.e mod 2 = 0 entonces
+            para i desde 0 hasta 7 hacer m := m * 10 + x.d[i] fin
+            de_nat(g, isqrt(m))
+            g.e := g.e + x.e div 2 - 4
+        sino
+            para i desde 0 hasta 6 hacer m := m * 10 + x.d[i] fin
+            de_nat(g, isqrt(m))
+            g.e := g.e + (x.e - 1) div 2 - 3
+        fin
+        ee := 0
+        ; Newton: g := (g + x / g) / 2
+        para i desde 1 hasta 7 hacer
+            dividir(q, x, g)
+            sumar(g, g, q)
+            div_nat(g, g, 2)
+        fin
+        copiar_dec(r, g)
+    fin
+
+    público función raíz(ref r: Dec, ref x: Dec)
+        raíz_toda(r, x)
+        redondear_sig(r, SIG_F)
+    fin
+
+    ; e elevado a x
+    función exponencial_toda(ref r: Dec, ref x: Dec)
+        variable t, kk, rr, s, term: Dec
+        variable k, i: ent32
+        constantes()
+        si es_cero(x) entonces
+            copiar_dec(r, UNO)
+            devolver
+        fin
+        si x.e > 6 entonces
+            ; |x| de un millón o más: 0 o demasiado grande
+            si no x.neg entonces error_dec := D_DESBORDE fin
+            poner_cero(r)
+            devolver
+        fin
+        ; x = k ln 10 + rr, con |rr| <= 1,16
+        dividir(t, x, LN10)
+        redondear(t, 0)
+        k := 0
+        si no a_ent(t, k) entonces k := 0 fin
+        de_ent(kk, k)
+        multiplicar(t, kk, LN10)
+        restar(rr, x, t)
+        ; e^rr = (e^(rr/32))^32
+        div_nat(rr, rr, 32)
+        de_nat(s, 1)
+        de_nat(term, 1)
+        i := 1
+        mientras i < 80 hacer
+            multiplicar(term, term, rr)
+            div_nat(term, term, nat32(i))
+            si no_cuenta(term, s) entonces romper fin
+            sumar(s, s, term)
+            i := i + 1
+        fin
+        para i desde 1 hasta 5 hacer multiplicar(s, s, s) fin
+        s.e := s.e + k
+        límites(s)
+        copiar_dec(r, s)
+    fin
+
+    público función exponencial(ref r: Dec, ref x: Dec)
+        exponencial_toda(r, x)
+        redondear_sig(r, SIG_F)
+    fin
+
+    ; el logaritmo neperiano, con todas las cifras
+    función ln_todo(ref r: Dec, ref x: Dec)
+        variable m, num, den, z, z2, term, t2, s, kk, t: Dec
+        variable k, i: ent32
+        constantes()
+        si es_cero(x) o x.neg entonces
+            error_dec := D_DOMINIO
+            poner_cero(r)
+            devolver
+        fin
+        ; x = m x 10^k, con 1 <= m < 10; ln x = ln m + k ln 10
+        copiar_dec(m, x)
+        m.e := 1
+        k := x.e - 1
+        ; m^(1/16), cerca de 1
+        para i desde 1 hasta 4 hacer raíz_toda(m, m) fin
+        ; ln m = 2 (z + z^3/3 + z^5/5 ...), z = (m - 1) / (m + 1)
+        restar(num, m, UNO)
+        sumar(den, m, UNO)
+        dividir(z, num, den)
+        multiplicar(z2, z, z)
+        copiar_dec(s, z)
+        copiar_dec(term, z)
+        i := 1
+        mientras i < 200 y no es_cero(z) hacer
+            multiplicar(term, term, z2)
+            div_nat(t2, term, nat32(2 * i + 1))
+            si no_cuenta(t2, s) entonces romper fin
+            sumar(s, s, t2)
+            i := i + 1
+        fin
+        mul_nat(s, s, 32)
+        de_ent(kk, k)
+        multiplicar(t, kk, LN10)
+        sumar(r, s, t)
+    fin
+
+    público función logaritmo_n(ref r: Dec, ref x: Dec)
+        ln_todo(r, x)
+        redondear_sig(r, SIG_F)
+    fin
+
+    ; ¿es x una potencia de diez justa (1, 10, 100, 0,01...)?
+    función potencia_de_diez(ref x: Dec): bool
+        variable i: ent32
+        si es_cero(x) o x.neg o x.d[0] <> 1 entonces devolver falso fin
+        para i desde 1 hasta P - 1 hacer
+            si x.d[i] <> 0 entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; el logaritmo decimal
+    público función logaritmo(ref r: Dec, ref x: Dec)
+        variable t: Dec
+        constantes()
+        si potencia_de_diez(x) entonces
+            de_ent(r, x.e - 1)
+            devolver
+        fin
+        ln_todo(t, x)
+        dividir(r, t, LN10)
+        redondear_sig(r, SIG_F)
+    fin
+
+    ; x elevado a n (un entero), multiplicando: justo
+    función potencia_entera(ref r: Dec, ref x: Dec, n: ent32)
+        variable base, res, t: Dec
+        variable m: nat32
+        variable negativo: bool
+        constantes()
+        negativo := n < 0
+        si negativo entonces m := nat32(0 - n) sino m := nat32(n) fin
+        copiar_dec(base, x)
+        copiar_dec(res, UNO)
+        mientras m > 0 y error_dec = D_BIEN hacer
+            si m yb 1 <> 0 entonces multiplicar(res, res, base) fin
+            m := m >> 1
+            si m > 0 entonces multiplicar(base, base, base) fin
+        fin
+        si negativo entonces
+            dividir(t, UNO, res)
+            copiar_dec(res, t)
+        fin
+        copiar_dec(r, res)
+    fin
+
+    ; x elevado a y
+    público función potencia(ref r: Dec, ref x: Dec, ref ex: Dec)
+        variable t, l: Dec
+        variable n: ent32
+        constantes()
+        si a_ent(ex, n) y n >= -100000 y n <= 100000 entonces
+            si es_cero(x) y n < 0 entonces
+                error_dec := D_DIV_CERO
+                poner_cero(r)
+                devolver
+            fin
+            potencia_entera(r, x, n)
+            devolver
+        fin
+        si es_cero(x) entonces
+            si ex.neg entonces error_dec := D_DIV_CERO fin
+            poner_cero(r)
+            devolver
+        fin
+        si x.neg entonces
+            error_dec := D_DOMINIO
+            poner_cero(r)
+            devolver
+        fin
+        ln_todo(l, x)
+        multiplicar(t, l, ex)
+        exponencial(r, t)
+    fin
+
+    ; la raíz y-ésima de x (con x negativo, si y es un entero impar)
+    público función raíz_n(ref r: Dec, ref x: Dec, ref ex: Dec)
+        variable inv, ax: Dec
+        variable n: ent32
+        variable negativo: bool
+        constantes()
+        si es_cero(ex) entonces
+            error_dec := D_DOMINIO
+            poner_cero(r)
+            devolver
+        fin
+        n := 0
+        si a_ent(ex, n) y n = 2 entonces
+            raíz(r, x)
+            devolver
+        fin
+        negativo := falso
+        copiar_dec(ax, x)
+        si x.neg entonces
+            si a_ent(ex, n) y n mod 2 <> 0 entonces
+                negativo := cierto
+                ax.neg := falso
+            sino
+                error_dec := D_DOMINIO
+                poner_cero(r)
+                devolver
+            fin
+        fin
+        dividir(inv, UNO, ex)
+        potencia(r, ax, inv)
+        si negativo entonces cambiar_signo(r) fin
+    fin
+
+    ; n! (n entero, de 0 a 3500)
+    público función factorial(ref r: Dec, ref x: Dec)
+        variable n, i: ent32
+        constantes()
+        si no a_ent(x, n) o n < 0 o n > 3500 entonces
+            error_dec := D_DOMINIO
+            poner_cero(r)
+            devolver
+        fin
+        copiar_dec(r, UNO)
+        i := 2
+        mientras i <= n y error_dec = D_BIEN hacer
+            mul_nat(r, r, nat32(i))
+            i := i + 1
+        fin
+    fin
+
+    ; ---- la trigonometría ----
+    ; el seno (o, con «coseno», el coseno) de r, con 0 <= r <= pi/4
+    función serie_trig(ref s: Dec, ref r: Dec, coseno: bool)
+        variable term, r2: Dec
+        variable k: nat32
+        multiplicar(r2, r, r)
+        si coseno entonces
+            copiar_dec(s, UNO)
+            copiar_dec(term, UNO)
+            k := 1
+        sino
+            copiar_dec(s, r)
+            copiar_dec(term, r)
+            k := 2
+        fin
+        mientras k < 200 hacer
+            multiplicar(term, term, r2)
+            div_nat(term, term, k * (k + 1))
+            cambiar_signo(term)
+            si no_cuenta(term, s) entonces romper fin
+            sumar(s, s, term)
+            k := k + 2
+        fin
+    fin
+
+    ; el resto de dividir el entero t entre 4 (de 0 a 3, también si es negativo)
+    función resto_4(ref t: Dec): ent32
+        variable v, i: ent32
+        si es_cero(t) o t.e <= 0 entonces devolver 0 fin
+        v := 0
+        i := t.e - 2
+        si i < 0 entonces i := 0 fin
+        mientras i < t.e hacer
+            si i < P entonces v := v * 10 + ent32(t.d[i]) sino v := v * 10 fin
+            i := i + 1
+        fin
+        v := v mod 4
+        si t.neg entonces v := (4 - v) mod 4 fin
+        devolver v
+    fin
+
+    ; el seno (cuál = 0) o el coseno (cuál = 1) de x, en grados o radianes
+    función trig(ref r: Dec, ref x: Dec, unidad: nat32, cuál: ent32)
+        variable cuarto, mitad, t, t2, red: Dec
+        variable q: ent32
+        variable coseno: bool
+        constantes()
+        si x.e > 24 entonces
+            error_dec := D_DOMINIO
+            poner_cero(r)
+            devolver
+        fin
+        si unidad = GRADOS entonces
+            copiar_dec(cuarto, NOVENTA)
+            copiar_dec(mitad, CUARENTA_Y_CINCO)
+        sino
+            copiar_dec(cuarto, MEDIO_PI)
+            copiar_dec(mitad, CUARTO_PI)
+        fin
+        ; x = q cuartos + red, 0 <= red < un cuarto
+        dividir(t, x, cuarto)
+        suelo(t)
+        multiplicar(t2, t, cuarto)
+        restar(red, x, t2)
+        q := resto_4(t)
+        si red.neg y no es_cero(red) entonces
+            sumar(red, red, cuarto)
+            q := (q + 3) mod 4
+        fin
+        si comparar_dec(red, cuarto) >= 0 entonces
+            restar(red, red, cuarto)
+            q := (q + 1) mod 4
+        fin
+        ; lo que queda a menos de 10^-30 de un múltiplo de un cuarto (pi en
+        ; radianes, que no se escribe justo) es ese múltiplo: sen pi = 0
+        si no es_cero(red) y red.e < cuarto.e - 30 entonces poner_cero(red) fin
+        restar(t2, cuarto, red)
+        si no es_cero(t2) y t2.e < cuarto.e - 30 entonces
+            poner_cero(red)
+            q := (q + 1) mod 4
+        fin
+        ; cos x = sen (x + un cuarto)
+        q := (q + cuál) mod 4
+        ; sen (q cuartos + red): q = 0, sen red; 1, cos red; 2, -sen red; 3, -cos red
+        coseno := q mod 2 = 1
+        si comparar_dec(red, mitad) > 0 entonces
+            restar(red, cuarto, red)
+            coseno := no coseno
+        fin
+        si unidad = GRADOS entonces
+            multiplicar(t, red, PI)
+            div_nat(red, t, 180)
+        fin
+        serie_trig(r, red, coseno)
+        si q >= 2 entonces cambiar_signo(r) fin
+        redondear_sig(r, SIG_F)
+    fin
+
+    público función seno(ref r: Dec, ref x: Dec, unidad: nat32)
+        trig(r, x, unidad, 0)
+    fin
+
+    público función coseno(ref r: Dec, ref x: Dec, unidad: nat32)
+        trig(r, x, unidad, 1)
+    fin
+
+    público función tangente(ref r: Dec, ref x: Dec, unidad: nat32)
+        variable s, c: Dec
+        trig(s, x, unidad, 0)
+        trig(c, x, unidad, 1)
+        si es_cero(c) entonces
+            error_dec := D_DOMINIO
+            poner_cero(r)
+            devolver
+        fin
+        dividir(r, s, c)
+        redondear_sig(r, SIG_F)
+    fin
+
+    ; de radianes a la unidad
+    función a_unidad(ref r: Dec, unidad: nat32)
+        variable t: Dec
+        si unidad = GRADOS entonces
+            multiplicar(t, r, CIENTO_OCHENTA)
+            dividir(r, t, PI)
+        fin
+        redondear_sig(r, SIG_F)
+    fin
+
+    ; el arco tangente en radianes, con todas las cifras
+    función atan_toda(ref r: Dec, ref x: Dec)
+        variable a, a2, term, t, s, q: Dec
+        variable k: nat32
+        variable inv: bool
+        constantes()
+        si es_cero(x) entonces
+            poner_cero(r)
+            devolver
+        fin
+        copiar_dec(a, x)
+        a.neg := falso
+        inv := comparar_abs(a, UNO) > 0
+        si inv entonces
+            dividir(t, UNO, a)
+            copiar_dec(a, t)
+        fin
+        ; atan a = 2 atan (a / (1 + raíz(1 + a^2))), dos veces
+        para k desde 1 hasta 2 hacer
+            multiplicar(a2, a, a)
+            sumar(a2, a2, UNO)
+            raíz_toda(q, a2)
+            sumar(q, q, UNO)
+            dividir(t, a, q)
+            copiar_dec(a, t)
+        fin
+        multiplicar(a2, a, a)
+        copiar_dec(s, a)
+        copiar_dec(term, a)
+        k := 1
+        mientras k < 400 hacer
+            multiplicar(term, term, a2)
+            cambiar_signo(term)
+            div_nat(t, term, 2 * k + 1)
+            si no_cuenta(t, s) entonces romper fin
+            sumar(s, s, t)
+            k := k + 1
+        fin
+        mul_nat(s, s, 4)
+        si inv entonces restar(s, MEDIO_PI, s) fin
+        si x.neg entonces cambiar_signo(s) fin
+        copiar_dec(r, s)
+    fin
+
+    público función arcotangente(ref r: Dec, ref x: Dec, unidad: nat32)
+        atan_toda(r, x)
+        a_unidad(r, unidad)
+    fin
+
+    público función arcoseno(ref r: Dec, ref x: Dec, unidad: nat32)
+        variable t, q: Dec
+        variable c: ent32
+        constantes()
+        c := comparar_abs(x, UNO)
+        si c > 0 entonces
+            error_dec := D_DOMINIO
+            poner_cero(r)
+            devolver
+        fin
+        si c = 0 entonces
+            copiar_dec(r, MEDIO_PI)
+            si x.neg entonces cambiar_signo(r) fin
+        sino
+            ; asen x = atan (x / raíz(1 - x^2))
+            multiplicar(t, x, x)
+            restar(t, UNO, t)
+            raíz_toda(q, t)
+            dividir(t, x, q)
+            atan_toda(r, t)
+        fin
+        a_unidad(r, unidad)
+    fin
+
+    público función arcocoseno(ref r: Dec, ref x: Dec, unidad: nat32)
+        variable t, q: Dec
+        variable c: ent32
+        constantes()
+        c := comparar_abs(x, UNO)
+        si c > 0 entonces
+            error_dec := D_DOMINIO
+            poner_cero(r)
+            devolver
+        fin
+        si c = 0 entonces
+            si x.neg entonces copiar_dec(t, PI) sino poner_cero(t) fin
+        sino
+            multiplicar(t, x, x)
+            restar(t, UNO, t)
+            raíz_toda(q, t)
+            dividir(t, x, q)
+            atan_toda(q, t)
+            restar(t, MEDIO_PI, q)
+        fin
+        copiar_dec(r, t)
+        a_unidad(r, unidad)
+    fin
+
+fin Decimal.

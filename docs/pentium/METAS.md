@@ -52,7 +52,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] Visor de imágenes y Pintura
 - [ ] Compresor ZIP
 - [ ] **Herramienta de PDF propia** (en lugar de PDF24, que es de 64 bits y no libre): unir y separar, girar/ordenar/quitar páginas, comprimir, PDF ↔ imágenes, PDF a texto, poner y quitar contraseña; con piezas libres (qpdf…) y el Lector de la oficina; al ser nuestra, se compila tal cual para Hispa-64 (pedido de Carlos 21/11)
-- [ ] Calculadora, Reloj, Mapa de caracteres
+- [x] ~~Calculadora, Reloj, Mapa de caracteres~~ (21/11, rama pentium-accesorios: la Calculadora estándar, científica y de oficina —IVA, cinta, euros— con cuentas decimales; el Reloj con calendario, festivos, alarma, cronómetro, cuenta atrás y poner en hora; el Mapa de caracteres con copiar y la tecla de cada letra; paquete «accesori»: docs/PENTIUM.md §14 sexies)
 - [ ] Juegos: los emuladores (Hispa-Nes, Hispa-System, Hispa-Snes, Hispa-Drive) con sonido en Pentium
 - [ ] Correo
 - [ ] ClicGest (programa de ClicGest, licencia propia): 0.1 publicado; 0.2 con pestañas en marcha

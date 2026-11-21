@@ -5033,6 +5033,124 @@ icono, `PING` y Google en el Navegador; si falla, `X:\WIFI.LOG`.
   (Realtek `rtw88`, Intel `iwlwifi`).
 - Redes ocultas por su nombre; una IP puesta a mano por red.
 
+## 14 nonies. Los accesorios: la Calculadora, el Reloj y el Mapa de caracteres
+
+*21/11/2026, la rama `pentium-accesorios` (marca «(ACCESORIOS)»). Tres programas
+de ventana hechos con los controles de `controles.cas`, en el paquete
+**`accesori`** 1.0 (tipo herramientas: salen en **Accesorios** del menú Inicio,
+con su icono). Sin tocar el núcleo.*
+
+| | |
+|---|---|
+| ![La Calculadora de oficina: el IVA y la cinta](pentium/accesorios-calc-oficina.png) | ![La Calculadora científica](pentium/accesorios-calc-cientifica.png) |
+| ![El Reloj: la hora, el calendario y poner en hora](pentium/accesorios-reloj.png) | ![El aviso de la alarma](pentium/accesorios-alarma.png) |
+| ![El Mapa de caracteres](pentium/accesorios-mapa.png) | |
+
+### La Calculadora (`CALC.BIN`, `ucalc.cas`)
+
+- **Las cuentas son decimales** (`decimal.cas`, un módulo que vale para
+  cualquier programa que cuente dinero): 34 cifras significativas en base 10,
+  así que **0,1 + 0,2 da 0,3** y no 0,30000000000000004; los euros se redondean
+  **a la mitad hacia fuera** (2,675 da 2,68; 1,005, 1,01), como hace Hacienda.
+  Las funciones científicas también van en decimal (Newton para la raíz;
+  series de Taylor para el seno, el coseno, el arco tangente, la exponencial y
+  el logaritmo, con la reducción de cada una) y se redondean a 30 cifras: así
+  **sen 30° = 0,5**, **cos 90° = 0**, **tan 45° = 1** y **raíz de 16 = 4** justos, y
+  tan 90° dice que no existe. Sin el x87: lo mismo en cualquier procesador.
+- **Tres modos** (menú Ver): **Estándar** (las cuatro cuentas de izquierda a
+  derecha, como las de bolsillo: 2 + 3 x 4 = 20; %, raíz, x², 1/x, ±, la
+  memoria MC MR M+ M- MS); **Científica** (con la prioridad de siempre: 2 + 3 x
+  4 = 14; paréntesis, seno, coseno, tangente y sus inversas con Inv, en grados
+  o radianes, log, ln, e^x, 10^x, x^y, la raíz y-ésima, n!, pi, e y el
+  exponente); y **Oficina**, la de la asociación: los euros con dos decimales,
+  **+IVA** (le pone el IVA a una base) y **-IVA** (saca la base de un total con
+  IVA), con el **tipo de IVA** elegido (21 %, 10 % o 4 %, con su marca), y **la
+  cinta**: cada número con su operación, los totales y el desglose del IVA,
+  que se copia entera al portapapeles. Los precios con más decimales (1,255
+  €/l) se guardan tal cual y el resultado se redondea a céntimos.
+- **El tanto por ciento**, como en Windows: con + o - pendiente, el % del
+  número de antes (100 + 21 % = 121; 200 - 15 % = 170); si no, el número entre
+  100 (50 x 10 % = 5). **«=» otra vez** repite la última operación.
+- **Todo con el teclado**: las cifras (también las del teclado numérico; su
+  punto hace de coma), + - * (o x) /, Intro o =, Retroceso, Supr (CE), Esc
+  (C), %, F9 (±), R (1/x), @ (raíz), Q (x²); en la científica S C T, I (Inv),
+  D (grados o radianes), L, N, ^, !, P, E, ( y ); en la de oficina I (+IVA), B
+  (-IVA) y T (el tipo). **Ctrl+C** copia el número (sin los puntos de los
+  miles, para pegarlo en otro programa) y **Ctrl+V** pega uno («1.234,56»,
+  «3,5», «3.14» o «1,5E-3»). Ctrl+L, Ctrl+R, Ctrl+P, Ctrl+Q y Ctrl+M: MC,
+  MR, M+, M- y MS. F1, las teclas.
+- **Lo que se ve**: la cuenta encima del número; la coma española y los puntos
+  de los miles (1.234,8); las teclas con su nombre (cifras en blanco,
+  operaciones en azul claro, borrar en rojo claro, «=» en verde), la memoria
+  con su «M», GRADOS o RADIANES con su palabra. Nada va solo por el color.
+- **En la línea de órdenes**: `CALC /TECLAS secuencia [/OFICINA | /CIENTIFICA]
+  [/RAD]` hace la cuenta sin ventana (las teclas tal cual y las demás entre
+  llaves: `{raiz}`, `{sen}`, `{iva+}`...: la cabecera de `ucalc.cas`) y dice el
+  resultado y la cinta. Es lo que usan las pruebas.
+
+### El Reloj (`RELOJ.BIN`, `ureloj.cas`)
+
+- **Reloj**: la hora grande (con los segundos: el reloj del PC da la hora de
+  dos en dos segundos y los de en medio salen de los tics) y la fecha larga
+  («Sábado, 21 de noviembre de 2026»); el **calendario del mes**, de lunes a
+  domingo, con **hoy** en negro con «HOY» debajo y **los festivos nacionales**
+  con «*» y su nombre debajo (también el Viernes Santo, que se calcula con la
+  Pascua); se pasa de mes con < y > (o Re Pág y Av Pág) y de día con las
+  flechas; Inicio o «Hoy» vuelven a hoy. Y **poner en hora el equipo** (fecha
+  y hora; «Ahora» las rellena): la llamada 67, que en la 0.8.5 no pide el modo
+  administrador (si lo pidiera, está apuntado dónde: `pon_en_hora`).
+- **Alarma**: a una hora (hh:mm), con su mensaje, de una vez o todos los días.
+  Suena **mientras el Reloj está abierto** (aunque esté minimizado): un aviso
+  grande que parpadea (con la palabra ALARMA, no solo el color), el título de
+  la ventana (y su botón de la barra de tareas) dice «ALARMA» y, si el equipo
+  tiene sonido, el sonido de aviso del sistema cada dos segundos durante un
+  minuto (la llamada 193 de la rama `pentium-sonido`, `sonar(SISTEMA_AVISO)`:
+  con un núcleo sin sonido la llamada no existe y no pasa nada). «Parar» o
+  «Posponer 5 minutos». `RELOJ /ALARMA 17:30 Reunión` lo abre con la alarma
+  puesta (o `+mm[:ss]`: dentro de tanto).
+- **Cronómetro**, con centésimas, y sus vueltas en una rejilla. **Cuenta
+  atrás** (minutos y segundos, o 1, 5 o 10 minutos de un clic), con pausa; al
+  llegar a cero, el mismo aviso.
+- **En la línea de órdenes**: `RELOJ /HOY`, `RELOJ /CALENDARIO [mm/aaaa]` (el
+  mes en texto) y `RELOJ /FESTIVOS [aaaa]`.
+
+### El Mapa de caracteres (`CARACTER.BIN`, `ucaract.cas`)
+
+- La rejilla con **las 166 letras que tienen dibujo** en la letra del sistema
+  (la página 437 de Hispa, con Á, Í, Ó, Ú, À, Õ, Œ, ©, ®, el euro y los
+  puntos suspensivos de más: `tools/hispa437.py`); las de la 437 que la letra
+  no dibuja (los recuadros, ½, √...) no salen, porque se verían como una caja.
+- La elegida, **en grande**, con su **nombre** en español («Eñe minúscula», «E
+  con tilde (mayúscula)»), su **código** (164, A4h), su **Unicode** (U+00F1) y
+  **cómo se escribe con el teclado** español del núcleo («tecla del acento y
+  luego e», «Alt Gr + tecla 2», «Mayús + tecla ` y luego espacio»), o que no se
+  puede (y entonces, a copiarla).
+- **Copiar** (Ctrl+C) la deja en el portapapeles del sistema; Intro o dos
+  clics la añaden al **texto para copiar** de abajo, que se copia entero.
+  Tecleando una letra se va a ella.
+- Los nombres, los Unicode y las teclas los hace `nucleo32/hazcaract.py` (en
+  `caracnom.cas`, que no se edita) de `letra.cas` y de las tablas del teclado
+  de `consola.cas`: si cambia la letra o el teclado, se vuelve a pasar.
+- `CARACTER /INFO código` (o la letra) y `CARACTER /LISTA`, en texto.
+- **Lo que el teclado del núcleo no da** (apuntado para quien lo toque): las
+  mayúsculas con tilde (la tecla del acento y Mayús + A da «A», no «Á»: en
+  `consola.cas`, `con_agudo` lleva A, I, O y U sin tilde) y el euro (no hay
+  Alt Gr + E). Con el Mapa se copian.
+
+### Dónde está
+
+- Los programas, en `castel/nucleo32/` (`ucalc.cas`, `decimal.cas`,
+  `ureloj.cas`, `ucaract.cas`, `caracnom.cas`); los accesos (`.MNU`, con
+  `tipo=Accesorios`) y sus iconos (`.ICP`, dibujados en el propio script), de
+  `nucleo32/accesorios.py`. `sistema.sh` los compila con los demás y los pone
+  en `\HISPA` y `\HISPA\MENU` del sistema instalado (como NAVES.MNU).
+- **El paquete** `accesori` 1.0 (`tools/hpq.py`, en SISTEMA), que pide `base`
+  0.8.4: `CALC.BIN`, `RELOJ.BIN` y `CARACTER.BIN` en `\HISPA`, y sus `.MNU` y
+  `.ICP` en `\HISPA\MENU`. Tipo **herramientas** (con el hpq.py de la 0.8.5,
+  `--tipo herramientas`; el menú de la 0.8.5 los pone en Accesorios por el
+  `tipo=Accesorios` de su `.MNU`).
+- **Las pruebas**: `SOLO=accesorios ./pruebas.sh`, la parte 28.
+
 ## 15. Las pruebas
 
 `castel/pruebas.sh` (las partes 8 a 14; `SOLO=32 ./pruebas.sh` hace solo esas y la

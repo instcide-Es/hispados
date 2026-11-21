@@ -1,0 +1,1514 @@
+; =============================================================================
+;  ucalc.cas - (ACCESORIOS) CALC.BIN, la Calculadora de Hispa-Pentium:
+;
+;    Estándar    las cuatro cuentas, el tanto por ciento, la raíz, x², 1/x,
+;                ± y la memoria (MC, MR, M+, M-, MS); de izquierda a derecha,
+;                como las de bolsillo (2 + 3 x 4 = 20)
+;    Científica  y además seno, coseno y tangente (y sus inversas, con Inv)
+;                en grados o radianes, logaritmos, e^x, 10^x, x^y, la raíz
+;                y-ésima, n!, pi, e, paréntesis y el exponente (Exp); con la
+;                prioridad de siempre (2 + 3 x 4 = 14)
+;    Oficina     la de la asociación: los euros con dos decimales bien
+;                redondeados, la cinta con cada operación (se copia al
+;                portapapeles) y el IVA (21 %, 10 % y 4 %): «+IVA» le pone el
+;                IVA a una base y «-IVA» saca la base de un total
+;
+;  Las cuentas son decimales (decimal.cas): 0,1 + 0,2 da 0,3. La coma es la
+;  española (el punto del teclado numérico también vale de coma) y los miles
+;  van con punto. Todo se puede hacer con el teclado: las cifras (también
+;  las del teclado numérico), + - * x / , Intro o = (igual), Retroceso,
+;  Supr (CE), Esc (C), % y F9 (±); R (1/x), @ (raíz), Q (x²); en la
+;  científica, S C T (seno, coseno, tangente), I (Inv), L (log), N (ln),
+;  ^ o Y (x^y), ! (n!), P (pi), E (Exp), ( y ); en la de oficina, I (+IVA),
+;  B (-IVA, la base) y T (el tipo de IVA). Ctrl+C copia el número y Ctrl+V
+;  lo pega; Ctrl+L, Ctrl+R, Ctrl+P, Ctrl+Q y Ctrl+M son MC, MR, M+, M- y MS.
+;  Nada va solo por el color: cada tecla lleva su nombre, la memoria se dice
+;  con «M» y el tipo de IVA elegido lleva su marca.
+;
+;  En la línea de órdenes (para las pruebas y para hacer una cuenta sin
+;  ventana): CALC /TECLAS secuencia [/OFICINA | /CIENTIFICA] [/RAD], con
+;  las teclas tal cual y las demás entre llaves: {raiz} {cuad} {inv} {pot}
+;  {raizn} {sen} {cos} {tan} {asen} {acos} {atan} {log} {ln} {exp} {10x}
+;  {fact} {pi} {e} {mas} (±) {mc} {mr} {m+} {m-} {ms} {ce} {c} {iva+}
+;  {iva-} {iva21} {iva10} {iva4} {00}. Dice el número del final y, en la de
+;  oficina, la cinta.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UCalc
+
+    modelo usuario
+
+    importar Llamadas, Controles, Textos32, Formato, Decimal
+
+    ; ---- los modos ----
+    constante M_ESTÁNDAR = 0
+    constante M_CIENTÍFICA = 1
+    constante M_OFICINA = 2
+
+    ; ---- lo que hace cada tecla (y el id de su botón) ----
+    constante A_CERO = 100                      ; A_CERO + n: la cifra n
+    constante A_COMA = 110
+    constante A_DOBLE_CERO = 111
+    constante A_SUMA = 120
+    constante A_RESTA = 121
+    constante A_POR = 122
+    constante A_ENTRE = 123
+    constante A_POT = 124                       ; x^y
+    constante A_RAÍZ_N = 125                    ; la raíz y-ésima de x
+    constante A_IGUAL = 130
+    constante A_PORCIENTO = 131
+    constante A_CE = 132
+    constante A_C = 133
+    constante A_BORRA = 134
+    constante A_SIGNO = 135
+    constante A_RAÍZ = 140
+    constante A_CUAD = 141
+    constante A_INVERSA = 142
+    constante A_CUBO = 143
+    constante A_SEN = 144
+    constante A_COS = 145
+    constante A_TAN = 146
+    constante A_LOG = 147
+    constante A_LN = 148
+    constante A_EXP_E = 149                     ; e^x
+    constante A_DIEZ_X = 150                    ; 10^x
+    constante A_FACT = 151
+    constante A_PI = 152
+    constante A_E = 153
+    constante A_ABRE = 154
+    constante A_CIERRA = 155
+    constante A_EXP = 156                       ; el exponente de lo que se teclea (1,5E-3)
+    constante A_INV = 157
+    constante A_UNIDAD = 158
+    constante A_ASEN = 159
+    constante A_ACOS = 160
+    constante A_ATAN = 161
+    constante A_MC = 170
+    constante A_MR = 171
+    constante A_MMAS = 172
+    constante A_MMENOS = 173
+    constante A_MS = 174
+    constante A_IVA_MAS = 180
+    constante A_IVA_MENOS = 181
+    constante A_IVA21 = 182
+    constante A_IVA10 = 183
+    constante A_IVA4 = 184
+    constante A_IVA_OTRO = 185                  ; T: el tipo siguiente
+    constante A_COPIAR_CINTA = 186
+    constante A_BORRAR_CINTA = 187
+    constante A_CERRAR_AYUDA = 190
+    constante ID_CINTA = 2
+
+    ; ---- las operaciones pendientes ----
+    constante OP_PARÉNTESIS = 9
+    constante MAX_PILA = 32
+
+    ; ---- las clases de tecla (su color; su nombre va siempre escrito) ----
+    constante CL_CIFRA = 0
+    constante CL_OP = 1
+    constante CL_IGUAL = 2
+    constante CL_BORRAR = 3
+    constante CL_FUNCIÓN = 4
+    constante CL_MEMORIA = 5
+
+    constante MENÚS = "&Archivo|&Edici\xA2n|&Ver|A&yuda"
+    constante MAX_CINTA = 400
+    constante LARGO_ENTRADA = 40
+
+    variable tamaño_: nat32 = T_GRANDE
+    variable modo: nat32 = M_ESTÁNDAR
+    variable unidad: nat32 = GRADOS
+    variable inv: bool
+    variable abierto: ent32 = -1
+    variable ayuda: bool
+    variable consola_: bool                     ; sin ventana (CALC /TECLAS)
+
+    ; lo que se ve y lo que se teclea
+    variable visor: Dec
+    variable entrada: arreglo [48] de byte
+    variable tecleando: bool
+    variable espera_operando: bool              ; se acaba de pulsar una operación
+    variable fallo: arreglo [64] de byte        ; el error que se ve (vacío: ninguno)
+    variable expresión: arreglo [128] de byte   ; la cuenta, encima del número
+    variable desglose: arreglo [96] de byte     ; (oficina) lo del IVA, debajo del número
+    ; la cuenta pendiente
+    variable pila_v: arreglo [MAX_PILA] de Dec
+    variable n_v: nat32
+    variable pila_o: arreglo [MAX_PILA] de nat32
+    variable n_o: nat32
+    ; «=» otra vez repite la última operación
+    variable últ_op: nat32
+    variable últ_val: Dec
+    ; la memoria
+    variable memoria: Dec
+    variable hay_memoria: bool
+    ; el IVA
+    variable tipo_iva: nat32 = 21
+    ; la cinta (oficina)
+    variable cinta_imp: arreglo [MAX_CINTA] de arreglo [40] de byte
+    variable cinta_op: arreglo [MAX_CINTA] de arreglo [20] de byte
+    variable n_cinta: nat32
+    variable g: Rejilla
+    ; lo pulsado con el teclado se ve un momento
+    variable pulsada: nat32
+    variable pulsada_hasta: nat32
+    variable aviso: arreglo [120] de byte
+
+    ; =========================================================================
+    ;  Los números en texto
+    ; =========================================================================
+    función cifras_visor(): ent32
+        devolver 16
+    fin
+
+    función decimales_visor(): ent32
+        si modo = M_OFICINA entonces devolver 2 fin
+        devolver -1
+    fin
+
+    ; un número como se ve (con los puntos de los miles)
+    función en_texto(ref x: Dec, t: puntero a byte)
+        a_texto(x, t, cifras_visor(), decimales_visor(), cierto)
+    fin
+
+    ; un número de la cuenta (la expresión, la cinta): en la de oficina,
+    ; con dos decimales, o con los suyos si lleva más (un precio de 1,255)
+    función texto_operando(ref x: Dec, t: puntero a byte)
+        variable y2: Dec
+        si modo <> M_OFICINA entonces
+            en_texto(x, t)
+            devolver
+        fin
+        copiar_dec(y2, x)
+        redondear(y2, 2)
+        si comparar_dec(y2, x) = 0 entonces a_texto(x, t, 16, 2, cierto) sino a_texto(x, t, 16, -1, cierto) fin
+    fin
+
+    ; lo que se está tecleando, con los puntos de los miles
+    función entrada_con_miles(t: puntero a byte)
+        variable i, n, k, ent: nat32
+        n := 0
+        i := 0
+        si entrada[0] = '-' entonces
+            t[n] := '-'
+            n := n + 1
+            i := 1
+        fin
+        ent := 0
+        k := i
+        mientras entrada[k] >= '0' y entrada[k] <= '9' hacer
+            ent := ent + 1
+            k := k + 1
+        fin
+        mientras entrada[i] <> 0 hacer
+            t[n] := entrada[i]
+            n := n + 1
+            si ent > 1 y entrada[i] >= '0' y entrada[i] <= '9' entonces
+                ent := ent - 1
+                si ent mod 3 = 0 entonces
+                    t[n] := '.'
+                    n := n + 1
+                fin
+            sino si ent = 1 entonces
+                ent := 0
+            fin
+            i := i + 1
+        fin
+        t[n] := 0
+    fin
+
+    ; el valor de lo que se ve: lo tecleado o el resultado
+    función valor_actual(ref x: Dec)
+        si tecleando entonces
+            si no de_texto(x, entrada) entonces poner_cero(x) fin
+        sino
+            copiar_dec(x, visor)
+        fin
+    fin
+
+    función acaba_entrada()
+        si tecleando entonces
+            valor_actual(visor)
+            tecleando := falso
+            entrada[0] := 0
+        fin
+    fin
+
+    ; en la de oficina, los resultados a céntimos
+    función a_céntimos(ref x: Dec)
+        si modo = M_OFICINA entonces redondear(x, 2) fin
+    fin
+
+    función pon_fallo(): bool
+        si error_dec = D_BIEN entonces devolver falso fin
+        según nat16(error_dec)
+            caso D_DIV_CERO: copiar(fallo, "No se puede dividir entre cero")
+            caso D_DESBORDE: copiar(fallo, "Demasiado grande")
+            si no: copiar(fallo, "No existe (entrada no v\xA0lida)")
+        fin
+        poner_cero(visor)
+        tecleando := falso
+        entrada[0] := 0
+        n_v := 0
+        n_o := 0
+        últ_op := 0
+        si consola_ entonces imprimir1("calc: error: %s\n", nat32(dirección(fallo[0]))) fin
+        devolver cierto
+    fin
+
+    ; ---- la expresión de encima ----
+    función a_expresión(t: puntero a byte)
+        variable n, k, i: nat32
+        n := longitud(expresión)
+        k := longitud(t)
+        si n + k >= 120 entonces
+            ; se tira lo de delante
+            i := 0
+            mientras expresión[i + 40] <> 0 hacer
+                expresión[i] := expresión[i + 40]
+                i := i + 1
+            fin
+            expresión[i] := 0
+        fin
+        concatenar(expresión, t)
+    fin
+
+    función símbolo(op: nat32): puntero a byte
+        según nat16(op)
+            caso A_SUMA: devolver "+"
+            caso A_RESTA: devolver "-"
+            caso A_POR: devolver "x"
+            caso A_ENTRE: devolver "\xF6"
+            caso A_POT: devolver "^"
+            caso A_RAÍZ_N: devolver "ra\xA1z"
+        fin
+        devolver "?"
+    fin
+
+    ; =========================================================================
+    ;  La cinta
+    ; =========================================================================
+    función a_la_cinta(ref x: Dec, op: puntero a byte)
+        variable i: nat32
+        si n_cinta >= MAX_CINTA entonces
+            para i desde 1 hasta MAX_CINTA - 1 hacer
+                copiar(cinta_imp[i - 1], cinta_imp[i])
+                copiar(cinta_op[i - 1], cinta_op[i])
+            fin
+            n_cinta := MAX_CINTA - 1
+        fin
+        texto_operando(x, cinta_imp[n_cinta])
+        copiar_hasta(cinta_op[n_cinta], op, 20)
+        si consola_ entonces imprimir2("calc: cinta: %s %s\n", nat32(dirección(cinta_imp[n_cinta][0])), nat32(op)) fin
+        n_cinta := n_cinta + 1
+        si no consola_ entonces llena_cinta() fin
+    fin
+
+    función raya_cinta()
+        variable i: nat32
+        si n_cinta = 0 entonces devolver fin
+        si cinta_imp[n_cinta - 1][0] = '-' y cinta_imp[n_cinta - 1][1] = '-' entonces devolver fin
+        si n_cinta >= MAX_CINTA entonces devolver fin
+        copiar(cinta_imp[n_cinta], "----------")
+        cinta_op[n_cinta][0] := 0
+        n_cinta := n_cinta + 1
+        i := 0
+        si no consola_ entonces llena_cinta() fin
+    fin
+
+    función llena_cinta()
+        variable i: nat32
+        variable r: ent32
+        rejilla_vaciar(g)
+        i := 0
+        mientras i < n_cinta hacer
+            r := renglón_nuevo(g, R_NORMAL, i + 1)
+            celda(g, r, 0, cinta_imp[i])
+            celda(g, r, 1, cinta_op[i])
+            i := i + 1
+        fin
+        rejilla_lista(g)
+        rejilla_ir(g, I_ÚLTIMO)
+    fin
+
+    función copia_cinta()
+        variable t: puntero a byte
+        variable i, n, k: nat32
+        variable línea: arreglo [80] de byte
+        si n_cinta = 0 entonces
+            copiar(aviso, "La cinta est\xA0 vac\xA1a")
+            devolver
+        fin
+        t := más_memoria(n_cinta * 64 + 16)
+        si t = nulo entonces devolver fin
+        n := 0
+        i := 0
+        mientras i < n_cinta hacer
+            ; el importe a la derecha, en 16 letras, y su operación
+            línea[0] := 0
+            k := longitud(cinta_imp[i])
+            mientras k < 16 hacer
+                concatenar(línea, " ")
+                k := k + 1
+            fin
+            concatenar(línea, cinta_imp[i])
+            si cinta_op[i][0] <> 0 entonces
+                concatenar(línea, "  ")
+                concatenar(línea, cinta_op[i])
+            fin
+            concatenar(línea, "\n")
+            copiar(t + n, línea)
+            n := n + longitud(línea)
+            i := i + 1
+        fin
+        al_portapapeles(t, n)
+        menos_memoria(n_cinta * 64 + 16)
+        copiar(aviso, "Cinta copiada al portapapeles")
+    fin
+
+    ; =========================================================================
+    ;  Las cuentas
+    ; =========================================================================
+    función prioridad(op: nat32): nat32
+        si modo <> M_CIENTÍFICA entonces devolver 1 fin
+        si op = A_SUMA o op = A_RESTA entonces devolver 1 fin
+        si op = A_POR o op = A_ENTRE entonces devolver 2 fin
+        devolver 3
+    fin
+
+    ; r := a op b
+    función opera(ref r: Dec, ref a: Dec, op: nat32, ref b: Dec)
+        según nat16(op)
+            caso A_SUMA: sumar(r, a, b)
+            caso A_RESTA: restar(r, a, b)
+            caso A_POR: multiplicar(r, a, b)
+            caso A_ENTRE: dividir(r, a, b)
+            caso A_POT: potencia(r, a, b)
+            caso A_RAÍZ_N: raíz_n(r, a, b)
+        fin
+        a_céntimos(r)
+    fin
+
+    ; hace las pendientes de prioridad p o más (con «hasta_par», hasta el paréntesis)
+    función reduce(p: nat32, derecha: bool)
+        variable op, q: nat32
+        variable r: Dec
+        mientras n_o > 0 y n_v >= 2 y pila_o[n_o - 1] <> OP_PARÉNTESIS hacer
+            op := pila_o[n_o - 1]
+            q := prioridad(op)
+            si q < p o (derecha y q = p) entonces romper fin
+            opera(r, pila_v[n_v - 2], op, pila_v[n_v - 1])
+            n_o := n_o - 1
+            n_v := n_v - 1
+            copiar_dec(pila_v[n_v - 1], r)
+            si error_dec <> D_BIEN entonces devolver fin
+        fin
+    fin
+
+    función mete_valor(ref x: Dec)
+        si n_v < MAX_PILA entonces
+            copiar_dec(pila_v[n_v], x)
+            n_v := n_v + 1
+        fin
+    fin
+
+    función operación(op: nat32)
+        variable x: Dec
+        variable t: arreglo [64] de byte
+        si espera_operando y n_o > 0 y pila_o[n_o - 1] <> OP_PARÉNTESIS entonces
+            ; otra operación: se cambia la de antes
+            pila_o[n_o - 1] := op
+            t[0] := 0
+            si longitud(expresión) >= 2 entonces expresión[longitud(expresión) - 2] := 0 fin
+            a_expresión(símbolo(op))
+            a_expresión(" ")
+            devolver
+        fin
+        valor_actual(x)
+        acaba_entrada()
+        mete_valor(x)
+        texto_operando(x, t)
+        a_expresión(t)
+        a_expresión(" ")
+        a_expresión(símbolo(op))
+        a_expresión(" ")
+        si modo = M_OFICINA entonces a_la_cinta(x, símbolo(op)) fin
+        error_dec := D_BIEN
+        reduce(prioridad(op), op = A_POT o op = A_RAÍZ_N)
+        si pon_fallo() entonces devolver fin
+        si n_o < MAX_PILA entonces
+            pila_o[n_o] := op
+            n_o := n_o + 1
+        fin
+        copiar_dec(visor, pila_v[n_v - 1])
+        espera_operando := cierto
+        desglose[0] := 0
+    fin
+
+    función igual()
+        variable x, r: Dec
+        variable t: arreglo [64] de byte
+        variable i: nat32
+        error_dec := D_BIEN
+        desglose[0] := 0
+        si n_o = 0 entonces
+            ; «=» otra vez: la última operación, con el mismo número
+            valor_actual(x)
+            acaba_entrada()
+            si últ_op <> 0 entonces
+                opera(r, x, últ_op, últ_val)
+                si pon_fallo() entonces devolver fin
+                si modo = M_OFICINA entonces
+                    a_la_cinta(x, símbolo(últ_op))
+                    a_la_cinta(últ_val, "=")
+                    a_la_cinta(r, "TOTAL")
+                    raya_cinta()
+                fin
+                copiar_dec(visor, r)
+            sino
+                copiar_dec(visor, x)
+                a_céntimos(visor)
+            fin
+            expresión[0] := 0
+            espera_operando := falso
+            devolver
+        fin
+        valor_actual(x)
+        acaba_entrada()
+        mete_valor(x)
+        texto_operando(x, t)
+        a_expresión(t)
+        ; los paréntesis que queden abiertos se cierran
+        i := 0
+        mientras i < n_o hacer
+            si pila_o[i] = OP_PARÉNTESIS entonces a_expresión(" )") fin
+            i := i + 1
+        fin
+        a_expresión(" =")
+        ; para repetirla: la última operación y su número
+        últ_op := 0
+        i := n_o
+        mientras i > 0 hacer
+            si pila_o[i - 1] <> OP_PARÉNTESIS entonces
+                últ_op := pila_o[i - 1]
+                romper
+            fin
+            i := i - 1
+        fin
+        copiar_dec(últ_val, x)
+        ; todo lo pendiente, quitando los paréntesis
+        quita_paréntesis()
+        reduce(0, falso)
+        si pon_fallo() entonces devolver fin
+        copiar_dec(visor, pila_v[0])
+        a_céntimos(visor)
+        n_v := 0
+        n_o := 0
+        espera_operando := falso
+        si modo = M_OFICINA entonces
+            a_la_cinta(x, "=")
+            a_la_cinta(visor, "TOTAL")
+            raya_cinta()
+        fin
+        en_texto(visor, t)
+        imprimir1("calc: = %s\n", nat32(dirección(t[0])))
+    fin
+
+    ; quita los paréntesis abiertos de la pila (al dar «=»)
+    función quita_paréntesis()
+        variable i, k: nat32
+        k := 0
+        i := 0
+        mientras i < n_o hacer
+            si pila_o[i] <> OP_PARÉNTESIS entonces
+                pila_o[k] := pila_o[i]
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        n_o := k
+    fin
+
+    función abre_paréntesis()
+        variable x: Dec
+        si n_o >= MAX_PILA - 1 entonces devolver fin
+        si tecleando o (no espera_operando y n_v = 0 y n_o > 0) entonces
+            ; un número delante: se multiplica (2(3 + 1) = 8)
+            si tecleando entonces
+                valor_actual(x)
+                acaba_entrada()
+                mete_valor(x)
+                pila_o[n_o] := A_POR
+                n_o := n_o + 1
+                a_expresión(entrada)
+            fin
+        fin
+        pila_o[n_o] := OP_PARÉNTESIS
+        n_o := n_o + 1
+        a_expresión("( ")
+        espera_operando := falso
+        poner_cero(visor)
+    fin
+
+    función cierra_paréntesis()
+        variable x: Dec
+        variable t: arreglo [64] de byte
+        variable i: nat32
+        variable hay: bool
+        hay := falso
+        i := 0
+        mientras i < n_o hacer
+            si pila_o[i] = OP_PARÉNTESIS entonces hay := cierto fin
+            i := i + 1
+        fin
+        si no hay entonces devolver fin
+        valor_actual(x)
+        acaba_entrada()
+        mete_valor(x)
+        texto_operando(x, t)
+        a_expresión(t)
+        a_expresión(" ) ")
+        error_dec := D_BIEN
+        reduce(0, falso)
+        si pon_fallo() entonces devolver fin
+        si n_o > 0 y pila_o[n_o - 1] = OP_PARÉNTESIS entonces n_o := n_o - 1 fin
+        ; lo de dentro es el número de ahora
+        n_v := n_v - 1
+        copiar_dec(visor, pila_v[n_v])
+        espera_operando := falso
+    fin
+
+    ; el tanto por ciento: con + o - pendientes, el % del número de antes
+    ; (100 + 21 % = 121); si no, el número entre 100 (50 x 10 % = 5)
+    función porciento()
+        variable x, t: Dec
+        valor_actual(x)
+        acaba_entrada()
+        error_dec := D_BIEN
+        si n_o > 0 y n_v > 0 y (pila_o[n_o - 1] = A_SUMA o pila_o[n_o - 1] = A_RESTA) entonces
+            multiplicar(t, pila_v[n_v - 1], x)
+            div_nat(x, t, 100)
+        sino
+            div_nat(t, x, 100)
+            copiar_dec(x, t)
+        fin
+        a_céntimos(x)
+        si pon_fallo() entonces devolver fin
+        copiar_dec(visor, x)
+        espera_operando := falso
+    fin
+
+    ; una función de un número (raíz, seno...)
+    función función_de(a: nat32)
+        variable x, r, t: Dec
+        valor_actual(x)
+        acaba_entrada()
+        error_dec := D_BIEN
+        constantes()
+        según nat16(a)
+            caso A_RAÍZ: raíz(r, x)
+            caso A_CUAD: multiplicar(r, x, x)
+            caso A_CUBO:
+                multiplicar(t, x, x)
+                multiplicar(r, t, x)
+            caso A_INVERSA: dividir(r, UNO, x)
+            caso A_SEN: seno(r, x, unidad)
+            caso A_COS: coseno(r, x, unidad)
+            caso A_TAN: tangente(r, x, unidad)
+            caso A_ASEN: arcoseno(r, x, unidad)
+            caso A_ACOS: arcocoseno(r, x, unidad)
+            caso A_ATAN: arcotangente(r, x, unidad)
+            caso A_LOG: logaritmo(r, x)
+            caso A_LN: logaritmo_n(r, x)
+            caso A_EXP_E: exponencial(r, x)
+            caso A_DIEZ_X:
+                de_nat(t, 10)
+                potencia(r, t, x)
+            caso A_FACT: factorial(r, x)
+        fin
+        a_céntimos(r)
+        si pon_fallo() entonces devolver fin
+        copiar_dec(visor, r)
+        espera_operando := falso
+        inv := falso
+    fin
+
+    ; una cifra (o la coma, o el 00)
+    función cifra(a: nat32)
+        variable n, i, cuenta: nat32
+        variable en_exp: bool
+        si no tecleando entonces
+            si n_o = 0 y n_v = 0 entonces expresión[0] := 0 fin
+            entrada[0] := 0
+            tecleando := cierto
+            desglose[0] := 0
+        fin
+        espera_operando := falso
+        n := longitud(entrada)
+        en_exp := buscar_car(entrada, 'E') <> nulo
+        ; cuántas cifras hay (sin el exponente)
+        cuenta := 0
+        i := 0
+        mientras entrada[i] <> 0 y entrada[i] <> 'E' hacer
+            si entrada[i] >= '0' y entrada[i] <= '9' entonces cuenta := cuenta + 1 fin
+            i := i + 1
+        fin
+        si a = A_COMA entonces
+            si en_exp o buscar_car(entrada, ',') <> nulo entonces devolver fin
+            si n = 0 o (n = 1 y entrada[0] = '-') entonces añadir_car(entrada, '0') fin
+            añadir_car(entrada, ',')
+            devolver
+        fin
+        si en_exp entonces
+            ; las cifras del exponente: hasta 4
+            si n - nat32(buscar_car(entrada, 'E') - dirección(entrada[0])) > 5 entonces devolver fin
+            añadir_car(entrada, byte('0' + a - A_CERO))
+            devolver
+        fin
+        si cuenta >= 16 entonces devolver fin
+        ; un cero delante no vale
+        si (n = 1 y entrada[0] = '0') o (n = 2 y entrada[0] = '-' y entrada[1] = '0') entonces
+            si a = A_CERO o a = A_DOBLE_CERO entonces devolver fin
+            entrada[n - 1] := 0
+        fin
+        si a = A_DOBLE_CERO entonces
+            si n = 0 o (n = 1 y entrada[0] = '-') entonces
+                añadir_car(entrada, '0')
+            sino
+                añadir_car(entrada, '0')
+                si cuenta < 15 entonces añadir_car(entrada, '0') fin
+            fin
+            devolver
+        fin
+        añadir_car(entrada, byte('0' + a - A_CERO))
+    fin
+
+    función borra()
+        variable n: nat32
+        si no tecleando entonces devolver fin
+        n := longitud(entrada)
+        si n > 0 entonces entrada[n - 1] := 0 fin
+        si entrada[0] = 0 o (entrada[0] = '-' y entrada[1] = 0) entonces copiar(entrada, "0") fin
+    fin
+
+    función cambia_signo()
+        variable n, i: nat32
+        variable p: puntero a byte
+        si tecleando entonces
+            p := buscar_car(entrada, 'E')
+            si p <> nulo entonces
+                ; el signo del exponente
+                si p[1] = '-' entonces
+                    copiar(p + 1, p + 2)
+                sino
+                    n := longitud(p)
+                    i := n + 1
+                    mientras i > 1 hacer
+                        p[i] := p[i - 1]
+                        i := i - 1
+                    fin
+                    p[1] := '-'
+                fin
+                devolver
+            fin
+            si entrada[0] = '-' entonces
+                copiar(dirección(entrada[0]), dirección(entrada[1]))
+            sino si longitud(entrada) + 1 < LARGO_ENTRADA entonces
+                n := longitud(entrada)
+                i := n + 1
+                mientras i > 0 hacer
+                    entrada[i] := entrada[i - 1]
+                    i := i - 1
+                fin
+                entrada[0] := '-'
+            fin
+            devolver
+        fin
+        cambiar_signo(visor)
+        espera_operando := falso
+    fin
+
+    función borra_todo()
+        n_v := 0
+        n_o := 0
+        tecleando := falso
+        entrada[0] := 0
+        poner_cero(visor)
+        fallo[0] := 0
+        expresión[0] := 0
+        desglose[0] := 0
+        espera_operando := falso
+        últ_op := 0
+        inv := falso
+    fin
+
+    ; ---- el IVA (oficina) ----
+    función iva_mas()
+        variable base, cuota, total: Dec
+        variable t: arreglo [64] de byte
+        variable c, b: arreglo [40] de byte
+        variable d: arreglo [4] de nat32
+        valor_actual(base)
+        acaba_entrada()
+        redondear(base, 2)
+        mul_nat(cuota, base, tipo_iva)
+        div_nat(cuota, cuota, 100)
+        redondear(cuota, 2)
+        sumar(total, base, cuota)
+        d[0] := tipo_iva
+        formatear(t, 64, "IVA %u %%", d)
+        a_la_cinta(base, "BASE")
+        a_la_cinta(cuota, t)
+        a_la_cinta(total, "TOTAL")
+        raya_cinta()
+        a_texto(base, b, 16, 2, cierto)
+        a_texto(cuota, c, 16, 2, cierto)
+        d[0] := nat32(dirección(b[0]))
+        d[1] := tipo_iva
+        d[2] := nat32(dirección(c[0]))
+        formatear(desglose, 96, "Base %s + IVA %u %% %s", d)
+        copiar_dec(visor, total)
+        espera_operando := falso
+        imprimir1("calc: %s\n", nat32(dirección(desglose[0])))
+    fin
+
+    función iva_menos()
+        variable base, cuota, total, divisor, cien: Dec
+        variable t: arreglo [64] de byte
+        variable c, b: arreglo [40] de byte
+        variable d: arreglo [4] de nat32
+        valor_actual(total)
+        acaba_entrada()
+        redondear(total, 2)
+        ; base = total / (1 + tipo/100)
+        de_nat(cien, 100 + tipo_iva)
+        div_nat(divisor, cien, 100)
+        error_dec := D_BIEN
+        dividir(base, total, divisor)
+        redondear(base, 2)
+        restar(cuota, total, base)
+        d[0] := tipo_iva
+        formatear(t, 64, "IVA %u %%", d)
+        a_la_cinta(total, "TOTAL")
+        a_la_cinta(base, "BASE")
+        a_la_cinta(cuota, t)
+        raya_cinta()
+        a_texto(base, b, 16, 2, cierto)
+        a_texto(cuota, c, 16, 2, cierto)
+        d[0] := nat32(dirección(b[0]))
+        d[1] := tipo_iva
+        d[2] := nat32(dirección(c[0]))
+        formatear(desglose, 96, "Base %s + IVA %u %% %s", d)
+        copiar_dec(visor, base)
+        espera_operando := falso
+        imprimir1("calc: %s\n", nat32(dirección(desglose[0])))
+    fin
+
+    ; ---- copiar y pegar ----
+    función copia()
+        variable t: arreglo [80] de byte
+        si fallo[0] <> 0 entonces devolver fin
+        si tecleando entonces
+            copiar(t, entrada)
+        sino
+            a_texto(visor, t, cifras_visor(), decimales_visor(), falso)
+        fin
+        al_portapapeles(t, longitud(t))
+        copiar(aviso, "Copiado: ")
+        concatenar(aviso, t)
+        si no consola_ entonces imprimir1("calc: copiado %s\n", nat32(dirección(t[0]))) fin
+    fin
+
+    función pega()
+        variable t: arreglo [80] de byte
+        variable x: Dec
+        variable n: nat32
+        n := del_portapapeles(t, 79)
+        t[n] := 0
+        ; sin los saltos de línea del final
+        mientras n > 0 y (t[n - 1] = '\n' o t[n - 1] = '\r' o t[n - 1] = ' ') hacer
+            n := n - 1
+            t[n] := 0
+        fin
+        si n = 0 o no de_texto(x, t) entonces
+            copiar(aviso, "Lo del portapapeles no es un n\xA3mero")
+            devolver
+        fin
+        acaba_entrada()
+        copiar_dec(visor, x)
+        espera_operando := falso
+        copiar(aviso, "Pegado")
+    fin
+
+    ; =========================================================================
+    ;  Hacer lo de una tecla (o un botón)
+    ; =========================================================================
+    función haz(a: nat32)
+        variable x: Dec
+        aviso[0] := 0
+        si a = A_CERRAR_AYUDA entonces
+            ayuda := falso
+            devolver
+        fin
+        ; tras un error, cualquier tecla empieza de nuevo
+        si fallo[0] <> 0 entonces
+            borra_todo()
+            si a = A_C o a = A_CE entonces devolver fin
+        fin
+        si a >= A_CERO y a <= A_DOBLE_CERO entonces
+            cifra(a)
+        sino si a >= A_SUMA y a <= A_RAÍZ_N entonces
+            operación(a)
+        sino
+            según nat16(a)
+                caso A_IGUAL: igual()
+                caso A_PORCIENTO: porciento()
+                caso A_CE:
+                    tecleando := cierto
+                    copiar(entrada, "0")
+                    desglose[0] := 0
+                caso A_C: borra_todo()
+                caso A_BORRA: borra()
+                caso A_SIGNO: cambia_signo()
+                caso A_RAÍZ, A_CUAD, A_CUBO, A_INVERSA, A_LOG, A_LN, A_EXP_E, A_DIEZ_X, A_FACT:
+                    función_de(a)
+                caso A_SEN:
+                    si inv entonces función_de(A_ASEN) sino función_de(A_SEN) fin
+                caso A_COS:
+                    si inv entonces función_de(A_ACOS) sino función_de(A_COS) fin
+                caso A_TAN:
+                    si inv entonces función_de(A_ATAN) sino función_de(A_TAN) fin
+                caso A_ASEN, A_ACOS, A_ATAN: función_de(a)
+                caso A_PI, A_E:
+                    constantes()
+                    acaba_entrada()
+                    si a = A_PI entonces copiar_dec(visor, PI) sino copiar_dec(visor, NÚMERO_E) fin
+                    espera_operando := falso
+                caso A_ABRE: abre_paréntesis()
+                caso A_CIERRA: cierra_paréntesis()
+                caso A_EXP:
+                    si no tecleando entonces cifra(A_CERO + 1) fin
+                    si buscar_car(entrada, 'E') = nulo y longitud(entrada) + 2 < LARGO_ENTRADA entonces añadir_car(entrada, 'E') fin
+                caso A_INV: inv := no inv
+                caso A_UNIDAD:
+                    si unidad = GRADOS entonces unidad := RADIANES sino unidad := GRADOS fin
+                caso A_MC:
+                    poner_cero(memoria)
+                    hay_memoria := falso
+                caso A_MR:
+                    si hay_memoria entonces
+                        acaba_entrada()
+                        copiar_dec(visor, memoria)
+                        espera_operando := falso
+                    fin
+                caso A_MMAS, A_MMENOS, A_MS:
+                    valor_actual(x)
+                    acaba_entrada()
+                    error_dec := D_BIEN
+                    si a = A_MMAS entonces sumar(memoria, memoria, x) fin
+                    si a = A_MMENOS entonces restar(memoria, memoria, x) fin
+                    si a = A_MS entonces copiar_dec(memoria, x) fin
+                    hay_memoria := cierto
+                    espera_operando := falso
+                caso A_IVA_MAS: si modo = M_OFICINA entonces iva_mas() fin
+                caso A_IVA_MENOS: si modo = M_OFICINA entonces iva_menos() fin
+                caso A_IVA21: tipo_iva := 21
+                caso A_IVA10: tipo_iva := 10
+                caso A_IVA4: tipo_iva := 4
+                caso A_IVA_OTRO:
+                    si tipo_iva = 21 entonces tipo_iva := 10 sino si tipo_iva = 10 entonces tipo_iva := 4 sino tipo_iva := 21 fin
+                caso A_COPIAR_CINTA: copia_cinta()
+                caso A_BORRAR_CINTA:
+                    n_cinta := 0
+                    si no consola_ entonces llena_cinta() fin
+            fin
+        fin
+    fin
+
+    ; la acción de una tecla del teclado (0: ninguna)
+    función acción_de_tecla(c: nat32): nat32
+        si c >= '0' y c <= '9' entonces devolver A_CERO + c - '0' fin
+        según nat16(c)
+            caso ',', '.': devolver A_COMA
+            caso '+': devolver A_SUMA
+            caso '-': devolver A_RESTA
+            caso '*', 'x', 'X': devolver A_POR
+            caso '/', 0xF6: devolver A_ENTRE
+            caso '\n', '=': devolver A_IGUAL
+            caso '%': devolver A_PORCIENTO
+            caso 8: devolver A_BORRA
+            caso TECLA_SUPR: devolver A_CE
+            caso 27: devolver A_C
+            caso '@': devolver A_RAÍZ
+            caso 'r', 'R': devolver A_INVERSA
+            caso 'q', 'Q': devolver A_CUAD
+            caso 12: devolver A_MC                  ; Ctrl+L
+            caso 18: devolver A_MR                  ; Ctrl+R
+            caso 16: devolver A_MMAS                ; Ctrl+P
+            caso 17: devolver A_MMENOS              ; Ctrl+Q
+            caso 13: devolver A_MS                  ; Ctrl+M
+        fin
+        si c = 0x143 entonces devolver A_SIGNO fin        ; F9
+        si modo = M_CIENTÍFICA entonces
+            según nat16(c)
+                caso 's', 'S': devolver A_SEN
+                caso 'o', 'O', 'c', 'C': devolver A_COS
+                caso 't', 'T': devolver A_TAN
+                caso 'i', 'I': devolver A_INV
+                caso 'l', 'L': devolver A_LOG
+                caso 'n', 'N': devolver A_LN
+                caso '^', 'y', 'Y': devolver A_POT
+                caso '!': devolver A_FACT
+                caso 'p', 'P': devolver A_PI
+                caso 'e', 'E': devolver A_EXP
+                caso '(': devolver A_ABRE
+                caso ')': devolver A_CIERRA
+                caso 'd', 'D': devolver A_UNIDAD
+            fin
+        fin
+        si modo = M_OFICINA entonces
+            según nat16(c)
+                caso 'i', 'I': devolver A_IVA_MAS
+                caso 'b', 'B': devolver A_IVA_MENOS
+                caso 't', 'T': devolver A_IVA_OTRO
+            fin
+        fin
+        devolver 0
+    fin
+
+    ; =========================================================================
+    ;  La línea de órdenes: CALC /TECLAS ...
+    ; =========================================================================
+    función acción_de_nombre(t: puntero a byte): nat32
+        si iguales(t, "raiz") entonces devolver A_RAÍZ fin
+        si iguales(t, "cuad") entonces devolver A_CUAD fin
+        si iguales(t, "cubo") entonces devolver A_CUBO fin
+        si iguales(t, "inv") entonces devolver A_INVERSA fin
+        si iguales(t, "pot") entonces devolver A_POT fin
+        si iguales(t, "raizn") entonces devolver A_RAÍZ_N fin
+        si iguales(t, "sen") entonces devolver A_SEN fin
+        si iguales(t, "cos") entonces devolver A_COS fin
+        si iguales(t, "tan") entonces devolver A_TAN fin
+        si iguales(t, "asen") entonces devolver A_ASEN fin
+        si iguales(t, "acos") entonces devolver A_ACOS fin
+        si iguales(t, "atan") entonces devolver A_ATAN fin
+        si iguales(t, "log") entonces devolver A_LOG fin
+        si iguales(t, "ln") entonces devolver A_LN fin
+        si iguales(t, "exp") entonces devolver A_EXP_E fin
+        si iguales(t, "10x") entonces devolver A_DIEZ_X fin
+        si iguales(t, "fact") entonces devolver A_FACT fin
+        si iguales(t, "pi") entonces devolver A_PI fin
+        si iguales(t, "e") entonces devolver A_E fin
+        si iguales(t, "mas") entonces devolver A_SIGNO fin
+        si iguales(t, "mc") entonces devolver A_MC fin
+        si iguales(t, "mr") entonces devolver A_MR fin
+        si iguales(t, "m+") entonces devolver A_MMAS fin
+        si iguales(t, "m-") entonces devolver A_MMENOS fin
+        si iguales(t, "ms") entonces devolver A_MS fin
+        si iguales(t, "ce") entonces devolver A_CE fin
+        si iguales(t, "c") entonces devolver A_C fin
+        si iguales(t, "iva+") entonces devolver A_IVA_MAS fin
+        si iguales(t, "iva-") entonces devolver A_IVA_MENOS fin
+        si iguales(t, "iva21") entonces devolver A_IVA21 fin
+        si iguales(t, "iva10") entonces devolver A_IVA10 fin
+        si iguales(t, "iva4") entonces devolver A_IVA4 fin
+        si iguales(t, "00") entonces devolver A_DOBLE_CERO fin
+        si iguales(t, "exp10") entonces devolver A_EXP fin
+        si iguales(t, "(") entonces devolver A_ABRE fin
+        si iguales(t, ")") entonces devolver A_CIERRA fin
+        devolver 0
+    fin
+
+    función por_consola(args: puntero a byte): byte
+        variable p: arreglo [130] de byte
+        variable nom: arreglo [16] de byte
+        variable t: arreglo [80] de byte
+        variable k, i, n, a: nat32
+        variable secuencia: nat32
+        consola_ := cierto
+        secuencia := 99
+        k := 0
+        mientras palabra(args, k, p, 130) hacer
+            si iguales_sin_caja(p, "/OFICINA") entonces modo := M_OFICINA fin
+            si iguales_sin_caja(p, "/CIENTIFICA") entonces modo := M_CIENTÍFICA fin
+            si iguales_sin_caja(p, "/RAD") entonces unidad := RADIANES fin
+            si iguales_sin_caja(p, "/TECLAS") entonces secuencia := k + 1 fin
+            k := k + 1
+        fin
+        borra_todo()
+        si no palabra(args, secuencia, p, 130) entonces
+            escribir("calc: CALC /TECLAS secuencia [/OFICINA | /CIENTIFICA] [/RAD]\n")
+            devolver 1
+        fin
+        i := 0
+        mientras p[i] <> 0 hacer
+            a := 0
+            si p[i] = '{' entonces
+                n := 0
+                i := i + 1
+                mientras p[i] <> 0 y p[i] <> '}' y n < 15 hacer
+                    nom[n] := minúscula(p[i])
+                    n := n + 1
+                    i := i + 1
+                fin
+                nom[n] := 0
+                a := acción_de_nombre(nom)
+                si a = 0 entonces
+                    imprimir1("calc: no conozco {%s}\n", nat32(dirección(nom[0])))
+                    devolver 1
+                fin
+            sino
+                a := acción_de_tecla(p[i])
+            fin
+            si a <> 0 entonces haz(a) fin
+            si p[i] <> 0 entonces i := i + 1 fin
+        fin
+        si fallo[0] <> 0 entonces
+            imprimir1("calc: visor: %s\n", nat32(dirección(fallo[0])))
+        sino si tecleando entonces
+            imprimir1("calc: visor: %s\n", nat32(dirección(entrada[0])))
+        sino
+            en_texto(visor, t)
+            imprimir1("calc: visor: %s\n", nat32(dirección(t[0])))
+        fin
+        si hay_memoria entonces
+            en_texto(memoria, t)
+            imprimir1("calc: memoria: %s\n", nat32(dirección(t[0])))
+        fin
+        devolver 0
+    fin
+
+    ; =========================================================================
+    ;  La ventana
+    ; =========================================================================
+    función colores(clase: nat32, ref fondo_: nat32, ref tinta: nat32)
+        según nat16(clase)
+            caso CL_CIFRA:
+                fondo_ := C_PAPEL
+                tinta := C_TINTA
+            caso CL_OP:
+                fondo_ := C_AZUL_CLARO
+                tinta := C_TINTA
+            caso CL_IGUAL:
+                fondo_ := C_VERDE
+                tinta := C_PAPEL
+            caso CL_BORRAR:
+                fondo_ := C_ROJO_CLARO
+                tinta := C_ROJO
+            caso CL_MEMORIA:
+                fondo_ := C_BARRA
+                tinta := C_TINTA
+            si no:
+                fondo_ := 0xE5E7EB
+                tinta := C_TINTA
+        fin
+    fin
+
+    ; una tecla de la calculadora (no la recorre el tabulador: van con su
+    ; tecla del teclado); «marcada»: la elegida (el tipo de IVA, Inv), en
+    ; azul con letra blanca y su marca
+    función tecla_calc(id: nat32, x: ent32, yy: ent32, an: ent32, al: ent32, rótulo: puntero a byte, clase: nat32, marcada: bool)
+        variable fondo_, tinta: nat32
+        variable w, m, tx: ent32
+        colores(clase, fondo_, tinta)
+        si marcada entonces
+            fondo_ := C_AZUL
+            tinta := C_PAPEL
+        fin
+        si id = pulsada entonces
+            fondo_ := C_TINTA
+            tinta := C_PAPEL
+        fin
+        caja_redonda(x, yy, an, al, 3 * E, C_BORDE)
+        caja_redonda(x + 1, yy + 1, an - 2, al - 2, 3 * E, fondo_)
+        si id = pulsada entonces borde(x + 2, yy + 2, an - 4, al - 4, 2, C_PAPEL) fin
+        ; la letra que quepa
+        m := M
+        w := ent32(longitud(rótulo)) * 4 * m
+        mientras w > an - 2 * E - 4 y m > 2 hacer
+            m := m - 1
+            w := ent32(longitud(rótulo)) * 4 * m
+        fin
+        tx := x + (an - w) div 2
+        si marcada entonces
+            marca_hecho(x + 3 * E, yy + 3 * E, 3 * m, tinta)
+            si tx < x + 3 * E + 3 * m entonces tx := x + 3 * E + 3 * m fin
+        fin
+        texto_ne(tx, yy + (al - 8 * m) div 2, rótulo, 0xFFFFFFFF, tinta, m, cierto)
+        apuntar(id, K_HERRAMIENTA, x, yy, an, al)
+    fin
+
+    ; la rejilla de teclas: columnas y filas, y dónde empieza
+    variable kx, ky, kan, kal, khueco: ent32
+    variable kcols, kfilas: ent32
+
+    función tecla_en(id: nat32, col: ent32, fila: ent32, ancho_: ent32, rótulo: puntero a byte, clase: nat32, marcada: bool)
+        variable x, yy, an, al: ent32
+        an := (kan - (kcols - 1) * khueco) div kcols
+        al := (kal - (kfilas - 1) * khueco) div kfilas
+        x := kx + col * (an + khueco)
+        yy := ky + fila * (al + khueco)
+        tecla_calc(id, x, yy, an * ancho_ + (ancho_ - 1) * khueco, al, rótulo, clase, marcada)
+    fin
+
+    ; las teclas de siempre (cinco columnas, desde la columna c0)
+    función teclas_básicas(c0: ent32, f0: ent32)
+        tecla_en(A_MC, c0, f0, 1, "MC", CL_MEMORIA, falso)
+        tecla_en(A_MR, c0 + 1, f0, 1, "MR", CL_MEMORIA, falso)
+        tecla_en(A_MMAS, c0 + 2, f0, 1, "M+", CL_MEMORIA, falso)
+        tecla_en(A_MMENOS, c0 + 3, f0, 1, "M-", CL_MEMORIA, falso)
+        tecla_en(A_MS, c0 + 4, f0, 1, "MS", CL_MEMORIA, falso)
+        tecla_en(A_PORCIENTO, c0, f0 + 1, 1, "%", CL_OP, falso)
+        tecla_en(A_CE, c0 + 1, f0 + 1, 1, "CE", CL_BORRAR, falso)
+        tecla_en(A_C, c0 + 2, f0 + 1, 1, "C", CL_BORRAR, falso)
+        tecla_en(A_BORRA, c0 + 3, f0 + 1, 1, "Borrar", CL_BORRAR, falso)
+        tecla_en(A_ENTRE, c0 + 4, f0 + 1, 1, "\xF6", CL_OP, falso)
+        tecla_en(A_CERO + 7, c0 + 1, f0 + 2, 1, "7", CL_CIFRA, falso)
+        tecla_en(A_CERO + 8, c0 + 2, f0 + 2, 1, "8", CL_CIFRA, falso)
+        tecla_en(A_CERO + 9, c0 + 3, f0 + 2, 1, "9", CL_CIFRA, falso)
+        tecla_en(A_POR, c0 + 4, f0 + 2, 1, "x", CL_OP, falso)
+        tecla_en(A_CERO + 4, c0 + 1, f0 + 3, 1, "4", CL_CIFRA, falso)
+        tecla_en(A_CERO + 5, c0 + 2, f0 + 3, 1, "5", CL_CIFRA, falso)
+        tecla_en(A_CERO + 6, c0 + 3, f0 + 3, 1, "6", CL_CIFRA, falso)
+        tecla_en(A_RESTA, c0 + 4, f0 + 3, 1, "-", CL_OP, falso)
+        tecla_en(A_CERO + 1, c0 + 1, f0 + 4, 1, "1", CL_CIFRA, falso)
+        tecla_en(A_CERO + 2, c0 + 2, f0 + 4, 1, "2", CL_CIFRA, falso)
+        tecla_en(A_CERO + 3, c0 + 3, f0 + 4, 1, "3", CL_CIFRA, falso)
+        tecla_en(A_SUMA, c0 + 4, f0 + 4, 1, "+", CL_OP, falso)
+        tecla_en(A_COMA, c0 + 3, f0 + 5, 1, ",", CL_CIFRA, falso)
+        tecla_en(A_IGUAL, c0 + 4, f0 + 5, 1, "=", CL_IGUAL, falso)
+        si modo = M_OFICINA entonces
+            tecla_en(A_SIGNO, c0, f0 + 2, 1, "\xF1", CL_FUNCIÓN, falso)
+            tecla_en(A_DOBLE_CERO, c0, f0 + 3, 1, "00", CL_CIFRA, falso)
+            tecla_en(A_RAÍZ, c0, f0 + 4, 1, "Ra\xA1z", CL_FUNCIÓN, falso)
+            tecla_en(A_CERO, c0, f0 + 5, 3, "0", CL_CIFRA, falso)
+        sino
+            tecla_en(A_RAÍZ, c0, f0 + 2, 1, "Ra\xA1z", CL_FUNCIÓN, falso)
+            tecla_en(A_CUAD, c0, f0 + 3, 1, "x^2", CL_FUNCIÓN, falso)
+            tecla_en(A_INVERSA, c0, f0 + 4, 1, "1/x", CL_FUNCIÓN, falso)
+            tecla_en(A_SIGNO, c0, f0 + 5, 1, "\xF1", CL_FUNCIÓN, falso)
+            tecla_en(A_CERO, c0 + 1, f0 + 5, 2, "0", CL_CIFRA, falso)
+        fin
+    fin
+
+    función teclas_científicas()
+        si unidad = GRADOS entonces tecla_en(A_UNIDAD, 0, 0, 1, "Grados", CL_FUNCIÓN, falso) sino tecla_en(A_UNIDAD, 0, 0, 1, "Radian.", CL_FUNCIÓN, falso) fin
+        tecla_en(A_INV, 1, 0, 1, "Inv", CL_FUNCIÓN, inv)
+        tecla_en(A_PI, 2, 0, 1, "\xE3", CL_FUNCIÓN, falso)
+        si inv entonces
+            tecla_en(A_SEN, 0, 1, 1, "asen", CL_FUNCIÓN, falso)
+            tecla_en(A_COS, 1, 1, 1, "acos", CL_FUNCIÓN, falso)
+            tecla_en(A_TAN, 2, 1, 1, "atan", CL_FUNCIÓN, falso)
+        sino
+            tecla_en(A_SEN, 0, 1, 1, "sen", CL_FUNCIÓN, falso)
+            tecla_en(A_COS, 1, 1, 1, "cos", CL_FUNCIÓN, falso)
+            tecla_en(A_TAN, 2, 1, 1, "tan", CL_FUNCIÓN, falso)
+        fin
+        tecla_en(A_LN, 0, 2, 1, "ln", CL_FUNCIÓN, falso)
+        tecla_en(A_LOG, 1, 2, 1, "log", CL_FUNCIÓN, falso)
+        tecla_en(A_EXP_E, 2, 2, 1, "e^x", CL_FUNCIÓN, falso)
+        tecla_en(A_POT, 0, 3, 1, "x^y", CL_OP, falso)
+        tecla_en(A_RAÍZ_N, 1, 3, 1, "Ra\xA1z y", CL_OP, falso)
+        tecla_en(A_DIEZ_X, 2, 3, 1, "10^x", CL_FUNCIÓN, falso)
+        tecla_en(A_FACT, 0, 4, 1, "n!", CL_FUNCIÓN, falso)
+        tecla_en(A_ABRE, 1, 4, 1, "(", CL_OP, falso)
+        tecla_en(A_CIERRA, 2, 4, 1, ")", CL_OP, falso)
+        tecla_en(A_EXP, 0, 5, 1, "Exp", CL_FUNCIÓN, falso)
+        tecla_en(A_E, 1, 5, 1, "e", CL_FUNCIÓN, falso)
+        tecla_en(A_CUBO, 2, 5, 1, "x^3", CL_FUNCIÓN, falso)
+    fin
+
+    función teclas_oficina()
+        tecla_en(A_IVA21, 0, 0, 1, "21 %", CL_FUNCIÓN, tipo_iva = 21)
+        tecla_en(A_IVA10, 1, 0, 1, "10 %", CL_FUNCIÓN, tipo_iva = 10)
+        tecla_en(A_IVA4, 2, 0, 1, "4 %", CL_FUNCIÓN, tipo_iva = 4)
+        tecla_en(A_IVA_MAS, 3, 0, 1, "+IVA", CL_OP, falso)
+        tecla_en(A_IVA_MENOS, 4, 0, 1, "-IVA", CL_OP, falso)
+    fin
+
+    función pinta_visor(x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable t: arreglo [96] de byte
+        variable m, w, y2, cabe, n: ent32
+        variable d: arreglo [2] de nat32
+        caja(x, yy, an, al, C_BORDE)
+        caja(x + 2, yy + 2, an - 4, al - 4, C_PAPEL)
+        ; arriba: los indicadores (con su palabra) y la cuenta
+        y2 := yy + 3 * E
+        t[0] := 0
+        si hay_memoria entonces concatenar(t, "M  ") fin
+        si modo = M_CIENTÍFICA entonces
+            si unidad = GRADOS entonces concatenar(t, "GRADOS  ") sino concatenar(t, "RADIANES  ") fin
+            si inv entonces concatenar(t, "INV  ") fin
+        fin
+        si modo = M_OFICINA entonces
+            d[0] := tipo_iva
+            formatear(dirección(t[longitud(t)]), 40, "IVA %u %%  EUR", d)
+        fin
+        negrita(x + 3 * E + LA div 2, y2, t, C_SUAVE)
+        ; la cuenta, a la derecha; si no cabe, lo último
+        cabe := (an - 3 * LA - ancho_texto(t)) div LA
+        n := ent32(longitud(expresión))
+        si n > cabe y cabe > 0 entonces
+            Controles.texto(x + an - LA - cabe * LA, y2, dirección(expresión[n - cabe]), C_SUAVE)
+        sino si cabe > 0 entonces
+            Controles.texto(x + an - LA - n * LA, y2, expresión, C_SUAVE)
+        fin
+        ; el número, grande
+        si fallo[0] <> 0 entonces
+            copiar(t, fallo)
+        sino si tecleando entonces
+            entrada_con_miles(t)
+        sino
+            en_texto(visor, t)
+        fin
+        m := 2 * M
+        w := ent32(longitud(t)) * 4 * m
+        mientras w > an - 2 * LA y m > 2 hacer
+            m := m - 1
+            w := ent32(longitud(t)) * 4 * m
+        fin
+        si desglose[0] <> 0 entonces
+            texto_ne(x + an - LA - w, yy + al - 8 * m - LT - 6 * E, t, 0xFFFFFFFF, C_TINTA, m, cierto)
+            w := ancho_texto(desglose)
+            texto_corto(x + an - LA - w, yy + al - LT - 3 * E, desglose, an - 2 * LA, C_TINTA, falso)
+        sino si fallo[0] <> 0 entonces
+            texto_ne(x + an - LA - w, yy + al - 8 * m - 4 * E, t, 0xFFFFFFFF, C_ROJO, m, cierto)
+        sino
+            texto_ne(x + an - LA - w, yy + al - 8 * m - 4 * E, t, 0xFFFFFFFF, C_TINTA, m, cierto)
+        fin
+    fin
+
+    función pinta_ayuda(x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable y2: ent32
+        caja(x, yy, an, al, C_BORDE)
+        caja(x + 2, yy + 2, an - 4, al - 4, C_PAPEL)
+        y2 := yy + 4 * E
+        negrita(x + LA, y2, "Las teclas de la Calculadora", C_TINTA)
+        y2 := y2 + LT + 4 * E
+        y2 := y2 + párrafo(x + LA, y2, an - 2 * LA, "Cifras: las de arriba o las del teclado num\x82rico. Coma: la coma o el punto. + - * (o x) / ; Intro o = da el resultado (otra vez: repite la \xA3ltima operaci\xA2n). Retroceso borra una cifra; Supr, el n\xA3mero (CE); Esc, todo (C). % el tanto por ciento (100 + 21 % = 121). F9 cambia el signo. R 1/x, @ la ra\xA1z, Q x al cuadrado.", C_TINTA, falso, cierto) + 2 * E
+        y2 := y2 + párrafo(x + LA, y2, an - 2 * LA, "Memoria: Ctrl+L borrarla (MC), Ctrl+R sacarla (MR), Ctrl+P sumarle (M+), Ctrl+Q restarle (M-), Ctrl+M guardar (MS). Ctrl+C copia el n\xA3mero y Ctrl+V lo pega.", C_TINTA, falso, cierto) + 2 * E
+        y2 := y2 + párrafo(x + LA, y2, an - 2 * LA, "Cient\xA1fica: S seno, C coseno, T tangente, I Inv (las inversas), D grados o radianes, L log, N ln, ^ x elevado a y, ! factorial, P pi, E exponente, ( y ).", C_TINTA, falso, cierto) + 2 * E
+        y2 := y2 + párrafo(x + LA, y2, an - 2 * LA, "Oficina: los euros con dos decimales. I le pone el IVA a la base (+IVA); B saca la base de un total (-IVA); T cambia el tipo (21, 10 o 4 %). La cinta apunta cada operaci\xA2n: Edici\xA2n > Copiar la cinta.", C_TINTA, falso, cierto) + 4 * E
+        botón(A_CERRAR_AYUDA, x + LA, y2, "Cerrar", cierto, falso)
+    fin
+
+    función nombre_modo(): puntero a byte
+        si modo = M_CIENTÍFICA entonces devolver "Cient\xA1fica" fin
+        si modo = M_OFICINA entonces devolver "Oficina (euros, IVA y cinta)" fin
+        devolver "Est\xA0ndar"
+    fin
+
+    función pinta()
+        variable yy, an_teclas, al_visor, x_cinta, abajo: ent32
+        variable est: arreglo [200] de byte
+        variable t: arreglo [64] de byte
+        variable d: arreglo [3] de nat32
+        empezar_controles()
+        caja(0, 0, ancho, alto, C_FONDO)
+        yy := barra_menús(0, 0, ancho, MENÚS, abierto)
+        abajo := alto - alto_estado()
+        khueco := 3 * E
+        si ayuda entonces
+            pinta_ayuda(LA, yy + 4 * E, ancho - 2 * LA, abajo - yy - 8 * E)
+        sino
+            al_visor := 2 * LT + 16 * M + 10 * E
+            si desglose[0] <> 0 entonces al_visor := al_visor + LT fin
+            an_teclas := ancho - 2 * LA
+            x_cinta := 0
+            si modo = M_OFICINA entonces
+                an_teclas := (ancho - 3 * LA) * 3 div 5
+                x_cinta := LA + an_teclas + LA
+            fin
+            pinta_visor(LA, yy + 4 * E, an_teclas, al_visor)
+            kx := LA
+            ky := yy + 4 * E + al_visor + 6 * E
+            kan := an_teclas
+            kal := abajo - ky - 4 * E
+            si modo = M_CIENTÍFICA entonces
+                kcols := 8
+                kfilas := 6
+                teclas_científicas()
+                teclas_básicas(3, 0)
+            sino si modo = M_OFICINA entonces
+                kcols := 5
+                kfilas := 7
+                teclas_oficina()
+                teclas_básicas(0, 1)
+            sino
+                kcols := 5
+                kfilas := 6
+                teclas_básicas(0, 0)
+            fin
+            si modo = M_OFICINA entonces
+                negrita(x_cinta, yy + 4 * E, "La cinta", C_TINTA)
+                rejilla(g, ID_CINTA, x_cinta, yy + 4 * E + LT + 2 * E, ancho - x_cinta - LA, abajo - yy - 2 * LT - 8 * E - alto_botón() - 4 * E, "Aqu\xA1 sale cada operaci\xA2n.")
+                botón(A_COPIAR_CINTA, x_cinta, abajo - alto_botón() - 4 * E, "Copiar", falso, n_cinta = 0)
+                botón(A_BORRAR_CINTA, x_cinta + ancho_botón("Copiar") + 2 * LA, abajo - alto_botón() - 4 * E, "Borrar cinta", falso, n_cinta = 0)
+            fin
+        fin
+        copiar(est, nombre_modo())
+        concatenar(est, "|")
+        si hay_memoria entonces
+            a_texto(memoria, t, 16, decimales_visor(), cierto)
+            concatenar(est, "Memoria: ")
+            concatenar(est, t)
+        sino
+            concatenar(est, "Memoria vac\xA1a")
+        fin
+        concatenar(est, "|")
+        si aviso[0] <> 0 entonces concatenar(est, aviso) sino concatenar(est, "F1: las teclas") fin
+        d[0] := 0
+        barra_estado(abajo, est)
+        asegurar_foco()
+        volcar()
+    fin
+
+    función abre(k: nat32)
+        abierto := ent32(k)
+        según nat16(k)
+            caso 0: abrir_menú_barra(0, "Salir", 0)
+            caso 1:
+                si modo = M_OFICINA entonces
+                    abrir_menú_barra(1, "Copiar            Ctrl+C|Pegar             Ctrl+V|-|Copiar la cinta|Borrar la cinta", 0)
+                sino
+                    abrir_menú_barra(1, "Copiar            Ctrl+C|Pegar             Ctrl+V|-|Copiar la cinta|Borrar la cinta", 24)
+                fin
+            caso 2: abrir_menú_barra(2, "Est\xA0ndar|Cient\xA1fica|Oficina (euros, IVA y cinta)|-|Letra normal|Letra grande|Letra muy grande", 0)
+            si no: abrir_menú_barra(3, "Las teclas         F1|Acerca de la Calculadora", 0)
+        fin
+    fin
+
+    función elegido(menú_: nat32, op: nat32): bool
+        abierto := -1
+        si op = SIN_ELEGIR entonces devolver cierto fin
+        según nat16(menú_)
+            caso 0: devolver falso
+            caso 1:
+                si op = 0 entonces copia() fin
+                si op = 1 entonces pega() fin
+                si op = 3 entonces haz(A_COPIAR_CINTA) fin
+                si op = 4 entonces haz(A_BORRAR_CINTA) fin
+            caso 2:
+                si op <= 2 entonces
+                    modo := op
+                    borra_todo()
+                fin
+                si op >= 4 entonces
+                    tamaño_ := op - 3
+                    nuevo_tamaño(ancho, alto, tamaño_)
+                fin
+            caso 3:
+                si op = 0 entonces ayuda := cierto fin
+                si op = 1 entonces copiar(aviso, "Calculadora 1.0 de Hispa-Pentium: cuentas decimales (0,1 + 0,2 = 0,3)") fin
+        fin
+        devolver cierto
+    fin
+
+    función tecla_pulsada(c: nat32)
+        variable a: nat32
+        variable m: ent32
+        m := menú_de_alt(MENÚS, c)
+        si m >= 0 entonces
+            abre(nat32(m))
+            devolver
+        fin
+        si c = CTRL_C entonces
+            copia()
+            devolver
+        fin
+        si c = 22 entonces
+            pega()
+            devolver
+        fin
+        si c = TECLA_F1 entonces
+            ayuda := no ayuda
+            devolver
+        fin
+        si ayuda entonces
+            si c = 27 o c = '\n' entonces ayuda := falso fin
+            devolver
+        fin
+        si modo = M_OFICINA y (c = TECLA_ARRIBA o c = TECLA_ABAJO o c = TECLA_RE_PÁG o c = TECLA_AV_PÁG) entonces
+            rejilla_tecla(g, c)
+            devolver
+        fin
+        a := acción_de_tecla(c)
+        si a <> 0 entonces
+            haz(a)
+            pulsada := a
+            pulsada_hasta := tics() + 15
+        fin
+    fin
+
+    función clic(x: ent32, yy: ent32)
+        variable id: nat32
+        variable m: ent32
+        m := menú_en_barra(x, yy)
+        si m >= 0 entonces
+            abre(nat32(m))
+            devolver
+        fin
+        id := control_en(x, yy)
+        si id = ID_CINTA entonces
+            rejilla_clic(g, x, yy)
+            devolver
+        fin
+        si id >= A_CERO entonces haz(id) fin
+    fin
+
+    función principal(): byte
+        variable s: Suceso
+        variable args: arreglo [160] de byte
+        variable p: arreglo [40] de byte
+        variable espera: bool
+        argumentos(args, 160)
+        si palabra(args, 0, p, 40) entonces
+            si p[0] = '/' y no iguales_sin_caja(p, "/NORMAL") y no iguales_sin_caja(p, "/DOBLE") y no iguales_sin_caja(p, "/OFICINA") y no iguales_sin_caja(p, "/CIENTIFICA") entonces
+                devolver por_consola(args)
+            fin
+            si buscar(args, "/TECLAS") <> nulo o buscar(args, "/teclas") <> nulo entonces devolver por_consola(args) fin
+        fin
+        si buscar(args, "/NORMAL") <> nulo o buscar(args, "/normal") <> nulo entonces tamaño_ := T_NORMAL fin
+        si buscar(args, "/DOBLE") <> nulo o buscar(args, "/doble") <> nulo entonces tamaño_ := T_MUY_GRANDE fin
+        si buscar(args, "/OFICINA") <> nulo o buscar(args, "/oficina") <> nulo entonces modo := M_OFICINA fin
+        si buscar(args, "/CIENTIFICA") <> nulo o buscar(args, "/cientifica") <> nulo entonces modo := M_CIENTÍFICA fin
+        borra_todo()
+        si no preparar_medida("Calculadora", 784, 560, tamaño_) entonces
+            escribir("calc: hace falta el escritorio (sin \x82l: CALC /TECLAS 2+2=)\n")
+            devolver 1
+        fin
+        rejilla_nueva(g, MAX_CINTA)
+        rejilla_columna(g, "Importe", 15, cierto)
+        rejilla_columna(g, "", 0, falso)
+        escribir("calc: Calculadora 1.0\n")
+        pinta()
+        mientras cierto hacer
+            espera := pulsada = 0
+            si no suceso(v, s, espera) entonces
+                si pulsada <> 0 y tics() >= pulsada_hasta entonces
+                    pulsada := 0
+                    pinta()
+                fin
+                si pulsada <> 0 entonces dormir(2) fin
+                seguir
+            fin
+            si s.clase = EV_TECLA entonces
+                tecla_pulsada(s.a)
+                pinta()
+            sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                clic(ent32(s.a), ent32(s.b))
+                pinta()
+            sino si s.clase = EV_MENÚ entonces
+                si no elegido(s.b, s.a) entonces devolver 0 fin
+                pinta()
+            sino si s.clase = EV_TAMAÑO entonces
+                nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
+                pinta()
+            sino si s.clase = EV_CERRAR entonces
+                devolver 0
+            fin
+        fin
+        devolver 0
+    fin
+
+fin UCalc.
