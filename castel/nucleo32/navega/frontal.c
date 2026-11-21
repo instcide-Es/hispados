@@ -401,6 +401,7 @@ static struct gui_window *pest[N_PESTANAS];
 static int n_pest;
 static struct gui_window *actual;
 static struct { int x0, y0, x1, y1; } sucio;   /* lo que hay que repintar de la página */
+static int subir_toda;         /* la página se ha movido en el búfer: darla entera a la ventana */
 static int salir;
 static char estado[400];       /* UTF-8 */
 static char aviso_estado[300]; /* (de las descargas: tiene prioridad) */
@@ -734,7 +735,8 @@ static void pinta_sucio(void)
     pen.stroke_colour = 0xFF000000;
     nsfb_plot_line(lienzo, &l, &pen);
   }
-  sube(lienzo, clip.x0, clip.y0, clip.x1 - clip.x0, clip.y1 - clip.y0, clip.x0, ARRIBA_H + clip.y0);
+  if (subir_toda) { subir_toda = 0; sube(lienzo, 0, 0, pw, ph, 0, ARRIBA_H); }
+  else sube(lienzo, clip.x0, clip.y0, clip.x1 - clip.x0, clip.y1 - clip.y0, clip.x0, ARRIBA_H + clip.y0);
 }
 static void nuevos_buferes(void)
 {
@@ -760,8 +762,24 @@ static void desplaza_a(int x, int y)
   if (x < 0) x = 0;
   if (y < 0) y = 0;
   if (x == actual->sx && y == actual->sy) return;
-  actual->sx = x; actual->sy = y;
-  ensucia_todo();
+  {
+    int dy = y - actual->sy;
+    if (x == actual->sx && sucio.x0 >= sucio.x1 && lienzo && dy && (dy < 0 ? -dy : dy) < ph * 3 / 4) {
+      /* solo de arriba abajo: lo ya pintado se mueve en el búfer y se pinta
+       * solo la franja que entra (en un Pentium, mucho menos que la página) */
+      uint8_t *px;
+      int paso, k;
+      nsfb_get_buffer(lienzo, &px, &paso);
+      if (dy > 0) for (k = 0; k < ph - dy; k++) memcpy(px + k * paso, px + (k + dy) * paso, pw * 4);
+      else for (k = ph - 1; k >= -dy; k--) memcpy(px + k * paso, px + (k + dy) * paso, pw * 4);
+      actual->sy = y;
+      if (dy > 0) ensucia(0, ph - dy, pw, ph); else ensucia(0, 0, pw, -dy);
+      subir_toda = 1;
+    } else {
+      actual->sx = x; actual->sy = y;
+      ensucia_todo();
+    }
+  }
   pinta_desp();
 }
 static void desplaza(int dx, int dy) { if (actual) desplaza_a(actual->sx + dx, actual->sy + dy); }

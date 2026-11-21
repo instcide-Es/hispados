@@ -143,6 +143,14 @@
 #      arranque a prueba y «Mantener»; y si se reinicia sin darla por buena,
 #      GRUB vuelve solo a la de antes. Y, con la VBE de Bochs, la medida
 #      guardada que la BIOS no tiene (1200 x 800) la pone el núcleo al arrancar.
+#  18. El Navegador (NAVEGA.BIN, nucleo32/navega/: NetSurf con QuickJS en el
+#      anillo 3) contra el sitio de prueba de navega/servidor_pruebas.py
+#      (HTTP y HTTPS con su raíz en \RAICES): CSS de fuera con variables,
+#      PNG y JPEG, JavaScript (DOM, setTimeout, localStorage, fetch con
+#      galletas), un formulario POST, la rueda, Fin, Atrás, el menú del botón
+#      derecho y las pestañas, la dirección, el portapapeles, una descarga a
+#      C:\DESCARGA (igual octeto a octeto) y las galletas al cerrar; y el x87
+#      de cada programa (X87.BIN).
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -159,6 +167,7 @@
 #   SOLO=tls ./pruebas.sh         la primera y la 13 bis (HTTPS: el servicio TLS, TLS.BIN)
 #   SOLO=cd ./pruebas.sh          la primera y la decimosexta (el CD y las actualizaciones por Internet)
 #   SOLO=pantalla ./pruebas.sh    la primera y la decimoséptima (la medida de la pantalla)
+#   SOLO=navegador ./pruebas.sh   la primera y la decimoctava (el Navegador: NAVEGA.BIN)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -222,7 +231,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -3125,6 +3134,94 @@ else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin la medida de la pantalla)"
 fi   # la pantalla
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
+
+# ---------------------------------------------- 18. el Navegador (NAVEGA.BIN)
+# NetSurf con QuickJS en un programa del anillo 3 (nucleo32/navega/: el
+# Navegador completo de Hispa-486 con un frontal nuevo; docs/PENTIUM.md, «El
+# Navegador»), contra el sitio de prueba de navega/servidor_pruebas.py (HTTP
+# y HTTPS, con su raíz de prueba en \RAICES): una hoja de fuera con variables
+# de CSS, un PNG y un JPEG, JavaScript (el DOM, setTimeout, localStorage,
+# fetch con galletas y una cabecera), un formulario POST con eñe, la rueda del
+# ratón, Fin, Atrás, el menú del botón derecho (abrir el enlace en otra
+# pestaña), la dirección (F6) por HTTP, el portapapeles del sistema (Ctrl+L,
+# Ctrl+C y Ctrl+V en un campo), una descarga a C:\DESCARGA con su nombre en
+# 8+3 (igual octeto a octeto), las galletas que se guardan al cerrar; y el
+# x87 de cada programa (X87.BIN, a la vez con su copia). Las posiciones, las de
+# la ventana en una pantalla de 800 x 600 (la página empieza en (20, 108)).
+if parte08 navegador; then
+echo "== Hispa-Pentium: el Navegador (NetSurf con QuickJS, NAVEGA.BIN) =="
+Q=$P/nav
+rm -rf $Q; mkdir -p $Q $G
+python3 -I $AQUI/nucleo32/navega/servidor_pruebas.py $Q/srv > $Q/srv.txt 2>&1 &
+NPID=$!
+for _ in $(seq 100); do [ -s $Q/srv/puertos ] && break; sleep 0.1; done
+HP=$(sed -n 's/^http=//p' $Q/srv/puertos); HS=$(sed -n 's/^https=//p' $Q/srv/puertos)
+export MTOOLS_SKIP_CHECK=1
+if [ -n "$HS" ] && $AQUI/nucleo32/disco.sh $Q/d.img 32 red tls navegador > $Q/disco.txt 2>&1 && mmd -i $Q/d.img ::RAICES \
+   && mcopy -i $Q/d.img $Q/srv/RAIZ.CER ::RAICES/PRUEBA.CER; then
+  ok "nucleo32/navega/hacer.sh: NAVEGA.BIN, NetSurf 3.11 con QuickJS y la biblioteca de C de Hispa-486 en un programa del anillo 3 ($(mdir -i $Q/d.img ::NAVEGA/NAVEGA.BIN | sed -n 's/^NAVEGA *BIN *\([0-9]*\).*/\1/p') octetos)"
+  printf 'Inicio=https://10.0.2.2:%s/\r\n' $HS > $Q/NAVEGA.INI
+  mcopy -o -i $Q/d.img $Q/NAVEGA.INI ::NAVEGA/
+  : > $Q/SURF.LOG; mcopy -i $Q/d.img $Q/SURF.LOG ::NAVEGA/
+  cp $Q/d.img $Q/e.img
+  CAPTURAS=$G ESCRIBE=1 DISCO=$Q/e.img ARRANQUE=escritorio MODULOS= MEMORIA=128 QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" \
+    ":pausa 3" ":captura nv0" ":doble 62 260" ":pausa 15" ":captura nv1" \
+    ":raton 400 400" ":monitor mouse_move 0 0 -3" ":pausa 2" ":captura nv2" ":tecla end" ":pausa 2" ":captura nv3" ":tecla home" ":pausa 2" \
+    ":clic 130 267" ":escribe Peña" ":tecla ret" ":pausa 5" ":captura nv4" ":clic 41 89" ":pausa 5" ":captura nv5" \
+    ":clicd 95 309" ":pausa 1" ":captura nv6" ":clic 150 326" ":pausa 5" ":captura nv7" \
+    ":tecla f6" ":escribe 10.0.2.2:$HP/pagina2.html" ":tecla ret" ":pausa 4" ":captura nv8" \
+    ":tecla ctrl-l" ":tecla ctrl-c" ":tecla esc" ":clic 482 57" ":pausa 6" ":clic 130 267" ":tecla ctrl-v" ":tecla ret" ":pausa 5" \
+    ":tecla f6" ":escribe https://10.0.2.2:$HS/descarga" ":tecla ret" ":pausa 6" ":captura nv9" ":clic 765 26" ":pausa 4" > $Q/e.sal 2>&1
+  tr -d '\r' < $Q/e.sal > $Q/e.txt
+  S=$Q/e.txt
+  mira "el acceso del menú (\\MENU\\NAVEGA.MNU) lo pone en el tapiz y lo lanza; arranca con la página de NAVEGA.INI" \
+    "escritorio: lanzo .NAVEGA.NAVEGA.BIN (la tarea [0-9]*)" "^navega: Navegador [0-9.]*, en C:.NAVEGA$" "^navega: primera https://10.0.2.2:$HS/$"
+  miracap "el icono «Navegador» en el tapiz" nv0 texto 20 276 40 292 Navegador
+  mira "la página por HTTPS (TLS.BIN, con la raíz de prueba) y su hoja, sus imágenes y su fetch, por la misma conexión cifrada" \
+    "tls: 10.0.2.2: TLS 1.2, ECDHE-ECDSA, .*la cadena comprobada$" "^navega: hecho https://10.0.2.2:$HS/ \[[0-9]* KB en uso"
+  S=$Q/srv/pedidos.txt
+  mira "lo que pide: el User-Agent propio (HispaSurf, sin «Hispa32» ni «HispaNavegador»: ClicGest da la web normal), las galletas y la cabecera de fetch" \
+    "^GET / | HispaSurf/0.2 (NetSurf 3.11; Hispa-Pentium) |" "^GET /estilo.css | HispaSurf.* | sesion=abc; recuerda=1; desdejs=1 |" \
+    "^GET /rojo.png |" "^GET /azul.jpg |" "^GET /api?visitas=1 | .* | sesion=abc; recuerda=1; desdejs=1 | fetch |"
+  miracap "la página pintada: la hoja de fuera con variables de CSS (la cabecera verde), el JavaScript (la caja magenta), setTimeout (azul), fetch con las dos galletas (naranja), el PNG y el JPEG" nv1 \
+    rgb 300 140 2e8b57 rgb 77 222 c71585 rgb 181 222 1e90ff rgb 285 222 ff8c00 rgb 382 208 d02020 rgb 472 208 2040d0 14
+  miracap "la rueda del ratón mueve la página (60 puntos por paso)" nv2 nrgb 300 112 2e8b57 rgb 77 160 c71585 rgb 285 160 ff8c00
+  miracap "Fin: al final de la página (el pie, morado)" nv3 rgb 300 500 8a2be2
+  S=$Q/srv/pedidos.txt
+  mira "el formulario: lo tecleado (con eñe) va por POST" "^POST /eco | .* | nombre=Pe%C3%B1a$"
+  miracap "y la respuesta del servidor, pintada" nv4 rgb 300 150 daa520
+  miracap "Atrás: la página de antes, con su JavaScript otra vez" nv5 rgb 300 140 2e8b57 rgb 77 222 c71585
+  miracap "el botón derecho sobre un enlace: su menú (abrirlo en otra pestaña, copiar su dirección, descargarlo)" nv6 texto 100 310 140 340 Abrir
+  S=$Q/e.txt
+  mira "«Abrir el enlace en otra pestaña»: la segunda página, en una pestaña nueva" "^navega: hecho https://10.0.2.2:$HS/pagina2.html "
+  mira "F6 y una dirección sin http:// (por HTTP, sin cifrar)" "^navega: ir a http://10.0.2.2:$HP/pagina2.html$" "^navega: hecho http://10.0.2.2:$HP/pagina2.html "
+  miracap "la segunda página, por HTTP, en la segunda pestaña" nv8 rgb 300 150 008b8b
+  S=$Q/srv/pedidos.txt
+  mira "el portapapeles del sistema: Ctrl+L y Ctrl+C copian la dirección; Ctrl+V la pega en un campo de otra pestaña (+), y va con el formulario" \
+    "^POST /eco | .* | nombre=http%3A%2F%2F10.0.2.2%3A$HP%2Fpagina2.html$"
+  S=$Q/e.txt
+  mira "una descarga (Content-Disposition: attachment): a C:\\DESCARGA, con su nombre en 8+3" \
+    "^navega: descarga: Informe anual 2026.zip -> C:.DESCARGA.INFORMEA.ZIP$" "^navega: descarga: hecha C:.DESCARGA.INFORMEA.ZIP, 50000 octetos$"
+  mira "y al cerrar la ventana, se acaba" "^navega: adiós$"
+  if ! grep -q "excepción\|\*\*\*" $S; then ok "ni una excepción ni una queja del núcleo"; else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -3 | sed 's/^/        /'; fi
+  sano $Q/e.img
+  if saca $Q/e.img DESCARGA/INFORMEA.ZIP $Q/x.zip && cmp -s $Q/x.zip $Q/srv/descarga.bin && grep -q "^$Q/e.img: [0-9]* files" $P/fsck.txt; then
+    ok "lo descargado es igual octeto a octeto que lo del servidor, y el disco queda sano"
+  else ko "lo descargado no está, no es igual o el disco no queda sano"; sed 's/^/        /' $P/fsck.txt | head -4; fi
+  if saca $Q/e.img NAVEGA/SURFGAL.TXT $Q/gal.txt && grep -q "recuerda" $Q/gal.txt && ! grep -q "sesion" $Q/gal.txt && saca $Q/e.img NAVEGA/NAVEGA2.ALM $Q/alm.txt; then
+    ok "las galletas que dicen hasta cuándo valen se guardan al cerrar (SURFGAL.TXT; las de sesión, no), y lo de localStorage (NAVEGA2.ALM)"
+  else ko "no se guardan las galletas o localStorage"; fi
+  # el x87: dos programas con coma flotante a la vez
+  DISCO=$Q/d.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "x87" ":pausa 6" > $Q/x.sal 2>&1
+  tr -d '\r' < $Q/x.sal > $Q/x.txt
+  S=$Q/x.txt
+  mira "el x87 de cada programa: X87.BIN y sus dos copias, a la vez, cada una con su coma flotante (el núcleo la guarda y la repone)" \
+    "^x87: bien (dos programas a la vez, cada uno con su x87)$"
+else ko "no se puede poner en marcha el sitio de prueba o hacer el disco: $(tail -1 $Q/srv.txt) $(tail -3 $Q/disco.txt)"; fi
+kill $NPID 2> /dev/null; wait $NPID 2> /dev/null
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin el Navegador)"
+fi   # el Navegador
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
 [ -z "${SOLO:-}" ] && parte15

@@ -21,6 +21,11 @@ trap 'rm -rf $W' EXIT
 mkdir $W/f $W/m $W/i
 MEDIO=usb
 . $AQUI/sistema.sh
+# los que no van con el sistema (el Navegador: navega/paquete.sh), al
+# catálogo con los demás
+bash $AQUI/navega/paquete.sh $W/paq > /dev/null
+rm -f $W/paq/CATALOGO.LIN
+python3 -I $AQUI/../../tools/hpq.py catalogo $W/paq > /dev/null
 mkdir -p "$SAL"
 rm -f "$SAL"/*.HPQ "$SAL"/CATALOGO.TXT "$SAL"/CATALOGO.FIR
 cp $W/paq/*.HPQ $W/paq/CATALOGO.TXT "$SAL"/

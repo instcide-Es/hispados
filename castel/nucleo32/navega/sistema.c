@@ -553,8 +553,8 @@ static int es_carpeta(u32 m)
 u32 WINAPI GetFileAttributesA(const char *n)
 {
 	u32 m = abre(n, PARA_LEER), a;
-	char t[8];
-	limpia(n, t, 4);
+	char t[300];
+	limpia(n, t, sizeof t);
 	if (ES_ERROR(m)) {
 		/* «C:» o «C:\»: la raíz */
 		if (t[0] && t[1] == ':' && (!t[2] || (t[2] == '\\' && !t[3]))) return 0x10;

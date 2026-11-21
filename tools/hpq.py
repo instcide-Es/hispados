@@ -41,6 +41,9 @@
 #    hpq.py sistema SALIDA CARPETA...  (los paquetes del sistema, con sus
 #               registros .PQI, el catálogo y CARPETAS.TXT para INSTALAR, de
 #               los archivos ya hechos que haya en esas carpetas: usb.sh)
+#    hpq.py opcionales SALIDA CARPETA...  (los que no van con el sistema:
+#               «navega», el Navegador; de lo que deja su hacer.sh)
+#    hpq.py linea PAQUETE.HPQ         (su línea para CATALOGO.TXT)
 #
 #  La firma (Ed25519, RFC 8032): el catálogo lleva las sumas de todos los
 #  paquetes, y cada paquete las de sus archivos; así que basta con firmar el
@@ -81,8 +84,11 @@ MAX_CABECERA = 16384
 # cambiado: base, red y tls. Los demás siguen en la 0.8, la del CD)
 VERSION_SISTEMA = '0.8.1'
 VERSION_08 = '0.8'
+# (la 0.8.2, 21/11/2026: el núcleo con la rueda del ratón, el x87 de cada
+# programa y programas de hasta 8 MB, para el Navegador; solo sube «base»)
+VERSION_082 = '0.8.2'
 SISTEMA = [
-    ('base', VERSION_SISTEMA, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
+    ('base', VERSION_082, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
@@ -249,6 +255,56 @@ def busca(nombre, carpetas):
     falla('no está %s en %s' % (nombre, ', '.join(carpetas)))
 
 
+# Los paquetes que no van con el sistema (INSTALAR no los pone: se instalan
+# desde «Programas y actualizaciones» o con PAQUETES INSTALA), hechos con
+# «hpq.py opcionales SALIDA CARPETA...» de lo que deja su hacer.sh (los
+# archivos se buscan por su ruta relativa en esas carpetas). Van en el
+# catálogo de Internet con los del sistema (nucleo32/actualiza.sh).
+NAVEGA_RECURSOS = ['DEFAULT.CSS', 'QUIRKS.CSS', 'ADBLOCK.CSS', 'INTERNAL.CSS', 'MESSAGES', 'BROTLI.DIC', 'INICIO.HTM']
+NAVEGA_FUENTES = ['SANS.TTF', 'SANSN.TTF', 'SERIF.TTF', 'SERIFN.TTF', 'MONO.TTF', 'MONON.TTF']
+OPCIONALES = [
+    ('navega', '0.1', 'El Navegador: la web de hoy (NetSurf con JavaScript), con pestañas y descargas',
+     'base >= 0.8.2, red >= 0.8.1, tls >= 0.8.1', [
+        ('NAVEGA/NAVEGA.BIN', r'\HISPA\NAVEGA\NAVEGA.BIN'), ('NAVEGA/NAVEGA.INI', r'\HISPA\NAVEGA\NAVEGA.INI'),
+        ('NAVEGA/LEEME.TXT', r'\HISPA\NAVEGA\LEEME.TXT')]
+     + [('NAVEGA/RECURSOS/' + n, '\\HISPA\\NAVEGA\\RECURSOS\\' + n) for n in NAVEGA_RECURSOS]
+     + [('NAVEGA/FUENTES/' + n, '\\HISPA\\NAVEGA\\FUENTES\\' + n) for n in NAVEGA_FUENTES]
+     + [('NAVEGA.MNU', r'\HISPA\MENU\NAVEGA.MNU'), ('NAVEGA.ICP', r'\HISPA\MENU\NAVEGA.ICP')]),
+]
+
+
+def opcionales(salida, carpetas, nombres=None):
+    """Los paquetes de OPCIONALES (o los de «nombres») en SALIDA: da cuántos."""
+    os.makedirs(salida, exist_ok=True)
+    n = 0
+    for nombre, version, descripcion, necesita, archivos in OPCIONALES:
+        if nombres and nombre not in nombres:
+            continue
+        lista = [(d, open(busca(o, carpetas), 'rb').read()) for o, d in archivos]
+        haz_paquete(os.path.join(salida, nombre.upper() + '.HPQ'), nombre, version, descripcion, necesita, '', lista)
+        n += 1
+    return n
+
+
+def linea_catalogo(ruta):
+    """La línea del catálogo de un paquete (como la escribe «catalogo»)."""
+    carpeta = os.path.dirname(os.path.abspath(ruta))
+    tmp = os.path.join(carpeta, '.linea')
+    os.makedirs(tmp, exist_ok=True)
+    try:
+        d = os.path.join(tmp, os.path.basename(ruta))
+        if os.path.exists(d):
+            os.remove(d)
+        os.link(ruta, d)
+        catalogo(tmp)
+        with open(os.path.join(tmp, 'CATALOGO.TXT'), 'rb') as f:
+            return f.read().split(b'\r\n')[1]
+    finally:
+        for x in os.listdir(tmp):
+            os.remove(os.path.join(tmp, x))
+        os.rmdir(tmp)
+
+
 def sistema(salida, carpetas):
     """Los paquetes del sistema en SALIDA (con CATALOGO.TXT) y sus registros
     en SALIDA/PQI (con el CARPETAS.TXT que manda cada uno a \\HISPA\\PAQUETES)."""
@@ -399,11 +455,18 @@ def principal(a):
         with open(a[3], 'wb') as f:
             f.write(datos[:largo])
         return 0
+    if orden == 'opcionales':
+        n = opcionales(a[2], a[3:])
+        print('hpq: %d paquetes opcionales en %s' % (n, a[2]))
+        return 0
+    if orden == 'linea':
+        sys.stdout.buffer.write(linea_catalogo(a[2]) + b'\r\n')
+        return 0
     if orden == 'sistema':
         n = sistema(a[2], a[3:])
         print('hpq: %d paquetes del sistema en %s (con CATALOGO.TXT y sus registros en PQI)' % (n, a[2]))
         return 0
-    falla('no sé qué es «%s»: crea, catalogo, mira, registro, sistema, clave, publica, firma o comprueba' % orden)
+    falla('no sé qué es «%s»: crea, catalogo, mira, registro, sistema, opcionales, linea, clave, publica, firma o comprueba' % orden)
 
 
 if __name__ == '__main__':
