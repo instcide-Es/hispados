@@ -503,6 +503,43 @@ uint8_t css_computed_order(
 		const css_computed_style *style,
 		int32_t *order);
 
+/* [HISPA] gap, esquinas redondas, sombra y grid (ver properties.h) */
+uint8_t css_computed_row_gap(
+		const css_computed_style *style,
+		css_fixed *length, css_unit *unit);
+
+uint8_t css_computed_border_top_left_radius(
+		const css_computed_style *style,
+		css_fixed *length, css_unit *unit);
+
+uint8_t css_computed_border_top_right_radius(
+		const css_computed_style *style,
+		css_fixed *length, css_unit *unit);
+
+uint8_t css_computed_border_bottom_right_radius(
+		const css_computed_style *style,
+		css_fixed *length, css_unit *unit);
+
+uint8_t css_computed_border_bottom_left_radius(
+		const css_computed_style *style,
+		css_fixed *length, css_unit *unit);
+
+uint8_t css_computed_box_shadow(
+		const css_computed_style *style,
+		css_fixed *x, css_unit *x_unit,
+		css_fixed *y, css_unit *y_unit,
+		css_fixed *blur, css_unit *blur_unit,
+		css_fixed *spread, css_unit *spread_unit,
+		css_color *color);
+
+uint8_t css_computed_grid_template_columns(
+		const css_computed_style *style,
+		lwc_string **text);
+
+uint8_t css_computed_grid_column(
+		const css_computed_style *style,
+		lwc_string **text);
+
 #ifdef __cplusplus
 }
 #endif

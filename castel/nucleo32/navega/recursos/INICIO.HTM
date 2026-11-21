@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Navegador de Hispa-Pentium</title>
+<style>
+:root { --azul: #1f4f96; --claro: #eaf3fe; --verde: #2e8b57; }
+body { font-family: sans-serif; margin: 0; background: var(--claro); color: #14294a; }
+header { background: linear-gradient(#2a64b8, #1f4f96); color: #fff; padding: 18px 28px; }
+header h1 { margin: 0; font-size: 26px; }
+header p { margin: 4px 0 0 0; color: #dce9fa; }
+main { padding: 12px 28px 28px 28px; }
+.fila { display: flex; flex-wrap: wrap; gap: 14px; }
+.ficha { flex: 1 1 220px; background: #fff; border: 1px solid #c4dcf8; border-radius: 10px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(20,41,74,.15); }
+.ficha h2 { font-size: 17px; margin: 0 0 6px 0; color: var(--azul); }
+a { color: var(--azul); }
+a.boton { display: inline-block; background: var(--verde); color: #fff; text-decoration: none; padding: 6px 14px; border-radius: 8px; margin: 4px 6px 0 0; }
+table { border-collapse: collapse; }
+td { padding: 3px 10px 3px 0; vertical-align: top; }
+kbd { background: #fff; border: 1px solid #9db9de; border-radius: 4px; padding: 0 5px; font-family: monospace; }
+</style>
+</head>
+<body>
+<header>
+<h1>Navegador de Hispa-Pentium</h1>
+<p>La web de hoy (hojas de estilo, imágenes, letras de la web y JavaScript) con NetSurf y QuickJS.</p>
+</header>
+<main>
+<div class="fila">
+<div class="ficha">
+<h2>Para empezar</h2>
+<a class="boton" href="https://www.google.es/">Google</a>
+<a class="boton" href="https://es.wikipedia.org/">Wikipedia</a>
+<a class="boton" href="https://hispados.es/">Hispa-DOS</a>
+<a class="boton" href="https://clicgest.es/login">ClicGest</a>
+</div>
+<div class="ficha">
+<h2>En el disco</h2>
+<p><a href="file:///C:/">C:\</a> · <a href="file:///C:/DESCARGA/">Las descargas (C:\DESCARGA)</a></p>
+<p>Escriba en la dirección <kbd>C:\CARPETA\PAGINA.HTM</kbd> para abrir una página del disco.</p>
+</div>
+</div>
+<div class="ficha" style="margin-top: 14px">
+<h2>Cómo se maneja</h2>
+<table>
+<tr><td><kbd>F6</kbd> o <kbd>Ctrl+L</kbd></td><td>a la dirección (lo que no es una dirección, se busca en Google)</td></tr>
+<tr><td><kbd>F5</kbd> o <kbd>Ctrl+R</kbd></td><td>recargar; <kbd>Esc</kbd>, parar</td></tr>
+<tr><td><kbd>Ctrl+T</kbd>, <kbd>Ctrl+W</kbd></td><td>una pestaña nueva; cerrar la de ahora</td></tr>
+<tr><td>La rueda del ratón</td><td>mueve la página (con <kbd>Mayús</kbd>, a los lados)</td></tr>
+<tr><td>El botón derecho</td><td>abrir un enlace en otra pestaña, copiar su dirección, descargarlo; copiar y pegar</td></tr>
+<tr><td><kbd>Ctrl+C</kbd>, <kbd>Ctrl+V</kbd></td><td>copiar y pegar, con el portapapeles del sistema</td></tr>
+<tr><td><kbd>Retroceso</kbd></td><td>fuera de un campo: atrás</td></tr>
+</table>
+</div>
+</main>
+</body>
+</html>

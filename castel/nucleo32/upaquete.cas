@@ -10,8 +10,27 @@
 ;    PAQUETES MIRA X.HPQ               lo que lleva un paquete, y si está sano
 ;    PAQUETES COMPRUEBA                si los archivos instalados siguen iguales
 ;    /DESDE=carpeta o /DESDE=http://...  de dónde se traen los paquetes
+;    PAQUETES FIRMA ARCHIVO            si ARCHIVO.FIR es su firma buena
 ;    /FORZAR                           quitar aunque lo necesite otro; poner
 ;                                      una versión más vieja o la misma
+;
+;  La firma: el catálogo (que lleva el SHA-256 de cada paquete, y cada
+;  paquete los de sus archivos) va firmado (Ed25519, firma.cas) en
+;  CATALOGO.FIR, con la clave privada del proyecto; la pública va dentro
+;  (clave.cas). Lo que viene de Internet (por HTTP, sin cifrar) no se usa
+;  sin firma buena. De una carpeta, si trae CATALOGO.FIR, también se
+;  comprueba; si no la trae, se usa (la ha puesto ahí quien maneja el equipo).
+;
+;  El núcleo: cuando un paquete cambia \HISPA\NUCLEO.BIN, el de antes queda
+;  en \HISPA\NUCLEO.ANT, GRUB.CFG lleva una entrada para él y \HISPA\GRUBENV
+;  dice «nuevo=1»: al arrancar, GRUB lo pasa a 2 y arranca el nuevo; si el
+;  sistema arranca bien, ACTUALIZ /BANDEJA lo pone a 0; si no (se cuelga, se
+;  reinicia a mano), GRUB ve el 2 y arranca solo el de antes (3; y 4 cuando
+;  ACTUALIZ ya lo ha dicho), hasta que se instale otro núcleo.
+;
+;  El avance (para la ventana, con /AVANCE): en C:\HISPA\PAQUETES\AVANCE.TXT,
+;  una línea «hecho total texto», que se reescribe (DESCARGA la pone al día
+;  mientras trae un paquete: /AVANCE=). La ventana la lee y luego la borra.
 ;
 ;  Un paquete (.HPQ, tools/hpq.py) es una cabecera de texto (nombre, versión,
 ;  descripción, lo que necesita, con lo que choca y sus archivos, cada uno
@@ -28,14 +47,14 @@
 ;  De dónde salen los paquetes: lo que diga /DESDE=, o la primera línea de
 ;  C:\HISPA\PAQUETES\ORIGEN.TXT, o la carpeta \PAQUETES de una unidad que
 ;  tenga CATALOGO.TXT (primero las memorias USB), o, si no, Internet:
-;  http://actualiza.clicgest.es/pentium/ (por el gancho de la red, más abajo).
+;  http://actualiza.hispados.es/pentium/ (por el gancho de la red, más abajo).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UPaquetes
 
     modelo usuario
 
-    importar Llamadas, Textos32, Mem32, Formato, Sha256
+    importar Llamadas, Textos32, Mem32, Formato, Sha256, Firma, Clave
 
     constante MAX_PAQ = 64                      ; paquetes instalados, en el catálogo o en un plan
     constante MAX_ARCH = 64                     ; archivos de un paquete
@@ -45,7 +64,7 @@ módulo UPaquetes
     constante TROZO = 32768
     constante RUTA = 160
     constante NINGUNO = 0xFFFFFFFF
-    constante URL_POR_DEFECTO = "http://actualiza.clicgest.es/pentium/"
+    constante URL_POR_DEFECTO = "http://actualiza.hispados.es/pentium/"
 
     ; ---------------------------------------------------------------------
     ;  EL GANCHO DE LA RED. Para traer los paquetes de Internet, PAQUETES no
@@ -129,6 +148,10 @@ módulo UPaquetes
     variable txn_largo: nat32
     variable diario: arreglo [48] de byte
     variable hecho: arreglo [48] de byte
+    variable avance: arreglo [48] de byte       ; C:\HISPA\PAQUETES\AVANCE.TXT
+    variable firmado: bool                      ; el catálogo lleva firma, y es buena
+    variable núcleo_nuevo: bool                 ; se ha cambiado \HISPA\NUCLEO.BIN
+    variable con_avance: bool                   ; /AVANCE: lo pide la ventana
 
     ; -------------------------------------------------------------------------
     ;  Lo de siempre
@@ -635,6 +658,10 @@ módulo UPaquetes
         fin
         une(a, url, " ")
         concatenar(a, destino)
+        si avance[0] <> 0 entonces
+            concatenar(a, " /AVANCE=")
+            concatenar(a, avance)
+        fin
         t := lanzar("DESCARGA.BIN", a)
         si es_error(t) entonces
             imprimir1("paquetes: para traer %s de Internet hace falta la red (el programa DESCARGA),\n", pt(url))
@@ -643,6 +670,15 @@ módulo UPaquetes
             devolver falso
         fin
         r := esperar(t)
+        si r = 4 entonces
+            ; (el servidor dice que no lo tiene: 404)
+            si acaba_en(url, "CATALOGO.TXT") entonces
+                escribir("Todavía no hay actualizaciones publicadas en el servidor.\n")
+            sino
+                imprimir1("paquetes: el servidor no tiene %s (¿se está publicando una versión nueva? Pruebe más tarde)\n", pt(url))
+            fin
+            devolver falso
+        fin
         si r <> 0 o no existe(destino) entonces
             imprimir2("paquetes: no se ha podido traer %s (DESCARGA acaba con el código %u)\n", pt(url), r)
             devolver falso
@@ -661,6 +697,7 @@ módulo UPaquetes
             imprimir2("paquetes: no está %s en %s\n", pt(nombre), pt(origen))
             devolver falso
         fin
+        di_avance(0, 0, "Bajando", nombre)
         en_base("BAJADAS", destino)
         crear_carpeta(destino)
         concatenar(destino, "\\")
@@ -678,6 +715,76 @@ módulo UPaquetes
             n := n - 1
         fin
         devolver t
+    fin
+
+    ; el avance, para la ventana: «hecho total texto» (se pisa cada vez)
+    función di_avance(h: nat32, total: nat32, t: puntero a byte, nombre: puntero a byte)
+        variable m: nat32
+        variable d: arreglo [4] de nat32
+        variable x: arreglo [120] de byte
+        si avance[0] = 0 entonces devolver fin
+        d[0] := h
+        d[1] := total
+        d[2] := pt(t)
+        d[3] := pt(nombre)
+        formatear(x, 120, "%u %u %s %s\r\n", d)
+        m := crear(avance)
+        si es_error(m) entonces devolver fin
+        escribir_archivo(m, x, longitud(x))
+        cerrar(m)
+    fin
+
+    función cifra_hex(c: byte): nat32
+        si c >= '0' y c <= '9' entonces devolver nat32(c - '0') fin
+        si c >= 'a' y c <= 'f' entonces devolver nat32(c - 'a') + 10 fin
+        si c >= 'A' y c <= 'F' entonces devolver nat32(c - 'A') + 10 fin
+        devolver 16
+    fin
+
+    ; lee una firma (un archivo «ed25519 <128 cifras>») a f (64 octetos)
+    función lee_firma(ruta: puntero a byte, f: puntero a byte): bool
+        variable m, n, i, a, b: nat32
+        variable x: arreglo [200] de byte
+        m := abrir(ruta)
+        si es_error(m) entonces devolver falso fin
+        n := leer(m, x, 199)
+        cerrar(m)
+        si es_error(n) o n < 136 o comparar_memoria(x, "ed25519 ", 8) <> 0 entonces devolver falso fin
+        para i desde 0 hasta 63 hacer
+            a := cifra_hex(x[8 + i * 2])
+            b := cifra_hex(x[9 + i * 2])
+            si a > 15 o b > 15 entonces devolver falso fin
+            f[i] := byte(a * 16 + b)
+        fin
+        devolver cierto
+    fin
+
+    ; ¿lleva el catálogo (los n octetos de cat) su firma buena? Lo de Internet
+    ; tiene que llevarla; lo de una carpeta, solo si trae CATALOGO.FIR
+    función firma_del_catálogo(n: nat32): bool
+        variable r: arreglo [RUTA] de byte
+        variable f: arreglo [64] de byte
+        variable t0: nat32
+        firmado := falso
+        si es_red entonces
+            si no trae("CATALOGO.FIR", r) entonces
+                devolver mal("el catálogo de Internet no trae su firma (CATALOGO.FIR): no se usa")
+            fin
+        sino
+            une(r, origen, "CATALOGO.FIR")
+            si no existe(r) entonces devolver cierto fin
+        fin
+        si no lee_firma(r, f) entonces devolver mal("la firma del catálogo (CATALOGO.FIR) no se entiende: no se usa el catálogo") fin
+        di_avance(0, 0, "Comprobando", "la firma del catálogo")
+        t0 := tics()
+        si no Firma.verifica(f, cat, n, dirección(Clave.pública[0])) entonces
+            escribir("paquetes: la firma del catálogo NO es buena: no se usa nada de él\n")
+            escribir("  (no lo ha hecho quien tiene la clave de Hispa-Pentium, o lo han cambiado por el camino)\n")
+            devolver falso
+        fin
+        imprimir2("La firma del catálogo es buena (la clave %s; %u tics).\n", pt(Clave.HUELLA), tics() - t0)
+        firmado := cierto
+        devolver cierto
     fin
 
     ; CATALOGO.TXT: «paquete=nombre versión ARCHIVO.HPQ octetos sha256 descripción»
@@ -703,6 +810,7 @@ módulo UPaquetes
             imprimir1("paquetes: %s no es un catálogo de paquetes\n", pt(r))
             devolver falso
         fin
+        si no firma_del_catálogo(n) entonces devolver falso fin
         ; cada línea, un texto aparte (los fines de línea, a 0)
         para k desde 1 hasta n hacer
             si cat[k - 1] = '\r' o cat[k - 1] = '\n' entonces cat[k - 1] := 0 fin
@@ -1325,14 +1433,67 @@ módulo UPaquetes
         fin
     fin
 
+    ; ¿es C:\HISPA\NUCLEO.BIN?
+    función es_el_núcleo(ruta: puntero a byte): bool
+        devolver iguales_sin_caja(dirección(ruta[2]), "\\HISPA\\NUCLEO.BIN")
+    fin
+
+    ; el arranque, tras cambiar el núcleo: GRUBENV con «nuevo=1» y, en
+    ; GRUB.CFG, la entrada del de antes y lo que hace que GRUB vuelva solo a
+    ; él si el nuevo no llega a arrancar bien (si no la tiene ya)
+    función prepara_arranque()
+        variable m, n, i: nat32
+        variable r: arreglo [RUTA] de byte
+        variable e: puntero a byte
+        e := buf
+        llenar(e, 1024, '#')
+        Textos32.copiar(e, "# GRUB Environment Block\nnuevo=1\n")
+        e[longitud(e)] := '#'
+        une(r, base, "\\..\\GRUBENV")
+        m := crear(r)
+        si es_error(m) o no escribe_todo(m, e, 1024) entonces
+            si no es_error(m) entonces cerrar(m) fin
+            escribir("paquetes: no se puede escribir C:\\HISPA\\GRUBENV (el arranque no sabrá volver solo al núcleo de antes)\n")
+        sino
+            cerrar(m)
+        fin
+        une(r, base, "\\..\\GRUB.CFG")
+        m := abrir(r)
+        n := 0
+        si no es_error(m) entonces
+            n := leer(m, buf, TROZO - 1)
+            cerrar(m)
+            si es_error(n) entonces n := 0 fin
+        fin
+        buf[n] := 0
+        si n > 0 y buscar(buf, "NUCLEO.ANT") = nulo entonces
+            m := abrir_para(r, 3)
+            si no es_error(m) entonces
+                e := "\n# (lo pone PAQUETES al cambiar el nucleo) el de antes, por si el nuevo no arranca;\n# GRUBENV: nuevo=1, el nuevo no ha arrancado aun; 2, ha empezado a arrancar;\n# 3, no llego a arrancar bien (si arranca, ACTUALIZ lo pone a 0): se vuelve al de antes (4: ya se ha dicho)\nmenuentry \"Hispa-Pentium con el nucleo de antes (si el nuevo no arranca)\" --id anterior {\n  multiboot /HISPA/NUCLEO.ANT escritorio escritura\n  set gfxpayload=$modo\n  boot\n}\nif [ -f /HISPA/GRUBENV ]; then\n  load_env -f /HISPA/GRUBENV nuevo\n  if [ \"$nuevo\" = 1 ]; then\n    set nuevo=2\n    save_env -f /HISPA/GRUBENV nuevo\n  elif [ \"$nuevo\" = 2 ]; then\n    set nuevo=3\n    save_env -f /HISPA/GRUBENV nuevo\n    set default=anterior\n    set timeout=10\n  elif [ \"$nuevo\" = 3 -o \"$nuevo\" = 4 ]; then\n    set default=anterior\n  fi\nfi\n"
+                escribe_todo(m, e, longitud(e))
+                cerrar(m)
+            fin
+        fin
+        escribir("reiniciar|Reinicie para usar el núcleo nuevo; si no arranca, vuelve el de antes.\n")
+    fin
+
     ; ya está todo cambiado: fuera lo de antes y el diario
     función limpia()
         variable i: nat32
         variable v: arreglo [RUTA] de byte
+        variable a: arreglo [RUTA] de byte
         para i desde 1 hasta n_pasos hacer
             si pasos[i - 1].clase = P_BORRA o (pasos[i - 1].clase = P_NUEVO y pasos[i - 1].existía = 1) entonces
                 temporal(i - 1, "VIE", v)
-                borrar(v)
+                si pasos[i - 1].clase = P_NUEVO y es_el_núcleo(pasos[i - 1].destino) y existe(v) entonces
+                    ; el núcleo de antes no se borra: queda como NUCLEO.ANT, para volver a él
+                    une(a, base, "\\..\\NUCLEO.ANT")
+                    borrar(a)
+                    renombrar(v, a)
+                    núcleo_nuevo := cierto
+                sino
+                    borrar(v)
+                fin
             fin
         fin
         para i desde 1 hasta n_pasos hacer
@@ -1391,6 +1552,7 @@ módulo UPaquetes
         escribir("  PAQUETES QUITA nombre         lo quita\n")
         escribir("  PAQUETES MIRA X.HPQ           lo que lleva un paquete, y si está sano\n")
         escribir("  PAQUETES COMPRUEBA            si lo instalado sigue igual\n")
+        escribir("  PAQUETES FIRMA ARCHIVO        si ARCHIVO.FIR es su firma buena (la de Hispa-Pentium)\n")
         escribir("  /DESDE=X:\\PAQUETES            de dónde se traen (también una dirección http://)\n")
         escribir("  /FORZAR                       quitar aunque otro lo necesite; poner una versión igual o más vieja\n")
     fin
@@ -1452,7 +1614,9 @@ módulo UPaquetes
         variable i, c: nat32
         variable d: arreglo [200] de byte
         carga_catálogo()
-        escribir("origen|", origen, "\n")
+        escribir("origen|", origen)
+        si firmado entonces escribir("|firmado") fin
+        escribir("\n")
         para i desde 1 hasta ins_n hacer
             campo(ins_cab[i - 1], "descripcion", d, 200)
             escribir("p|", ins_nombre[i - 1], "|", ins_versión[i - 1], "|")
@@ -1490,6 +1654,7 @@ módulo UPaquetes
         fin
         para i desde 1 hasta orden_n hacer
             k := orden[i - 1]
+            di_avance(i - 1, orden_n, "Comprobando", plan_nombre[k])
             si no verifica(k) entonces
                 escribir("No se instala nada: el disco queda como estaba.\n")
                 devolver falso
@@ -1498,6 +1663,7 @@ módulo UPaquetes
         escribir("Las sumas (SHA-256) de todos los archivos están bien.\n")
         para i desde 1 hasta orden_n hacer
             k := orden[i - 1]
+            di_avance(i - 1, orden_n, "Instalando", plan_nombre[k])
             si no pasos_de_instalar(k) entonces devolver falso fin
             si no ejecuta() entonces
                 si i > 1 entonces escribir("(lo de antes en la lista sí ha quedado instalado)\n") fin
@@ -1506,6 +1672,8 @@ módulo UPaquetes
             apunta_instalado(plan_nombre[k], plan_versión[k], plan_cab[k])
             imprimir2("  instalado %s %s\n", pt(plan_nombre[k]), pt(plan_versión[k]))
         fin
+        di_avance(orden_n, orden_n, "Hecho", "")
+        si núcleo_nuevo entonces prepara_arranque() fin
         escribir("Hecho.\n")
         devolver cierto
     fin
@@ -1678,7 +1846,6 @@ módulo UPaquetes
         escribir("  necesita: ", x, "\n")
         campo(cab, "choca", x, 256)
         si x[0] <> 0 entonces escribir("  choca con: ", x, "\n") fin
-        si campo(cab, "firma", x, 256) y x[0] <> 0 entonces escribir("  lleva firma (esta versión de PAQUETES aún no la comprueba)\n") fin
         n := lee_archivos(cab, nuevos)
         para a desde 1 hasta n hacer
             escribir("  ")
@@ -1694,6 +1861,43 @@ módulo UPaquetes
             escribir("Está sano: las sumas (SHA-256) de sus archivos están bien.\n")
             devolver cierto
         fin
+        devolver falso
+    fin
+
+    ; PAQUETES FIRMA ARCHIVO: ¿es ARCHIVO.FIR (el mismo nombre, con .FIR) su firma buena?
+    función firma_de_archivo(): bool
+        variable m, n, t0, i, p: nat32
+        variable r: arreglo [RUTA] de byte
+        variable f: arreglo [RUTA] de byte
+        variable g: arreglo [64] de byte
+        si no palabra(args, 1, palabra_, RUTA) entonces devolver mal("¿qué archivo? PAQUETES FIRMA CATALOGO.TXT") fin
+        absoluta(palabra_, r)
+        Textos32.copiar(f, r)
+        p := longitud(f)
+        para i desde 1 hasta longitud(f) hacer
+            si f[i - 1] = '.' entonces p := i - 1 fin
+            si f[i - 1] = '\\' entonces p := longitud(f) fin
+        fin
+        f[p] := 0
+        concatenar(f, ".FIR")
+        m := abrir(r)
+        si es_error(m) entonces
+            imprimir1("paquetes: no está %s\n", pt(r))
+            devolver falso
+        fin
+        n := leer(m, cat, MAX_CATÁLOGO)
+        cerrar(m)
+        si es_error(n) entonces n := 0 fin
+        si no lee_firma(f, g) entonces
+            imprimir1("paquetes: no está su firma (%s), o no se entiende\n", pt(f))
+            devolver falso
+        fin
+        t0 := tics()
+        si Firma.verifica(g, cat, n, dirección(Clave.pública[0])) entonces
+            imprimir3("La firma de %s es buena (la clave %s; %u tics).\n", pt(r), pt(Clave.HUELLA), tics() - t0)
+            devolver cierto
+        fin
+        imprimir1("La firma de %s NO es buena.\n", pt(r))
         devolver falso
     fin
 
@@ -1743,6 +1947,7 @@ módulo UPaquetes
         i := 0
         mientras palabra(args, i, palabra_, RUTA) hacer
             si iguales_sin_caja(palabra_, "/FORZAR") entonces forzar := cierto fin
+            si iguales_sin_caja(palabra_, "/AVANCE") entonces con_avance := cierto fin
             si empieza_por(palabra_, "/CORTE=") o empieza_por(palabra_, "/corte=") entonces
                 texto_a_natural(dirección(palabra_[7]), corte)
             fin
@@ -1791,6 +1996,10 @@ módulo UPaquetes
             si mira() entonces devolver 0 fin
             devolver 1
         fin
+        si iguales(orden_, "firma") entonces
+            si firma_de_archivo() entonces devolver 0 fin
+            devolver 1
+        fin
         r[0] := sis
         r[1] := 0
         concatenar(r, ":\\HISPA")
@@ -1803,6 +2012,7 @@ módulo UPaquetes
         concatenar(base, "\\PAQUETES")
         en_base("DIARIO.TXT", diario)
         en_base("HECHO.TXT", hecho)
+        si con_avance entonces en_base("AVANCE.TXT", avance) fin
         si no existe(base) entonces crear_carpeta(base) fin
         recupera()
         carga_instalados()

@@ -25,6 +25,7 @@
 ;      sent.cas        4. generar: sentencias y funciones
 ;      apoyo.cas       las rutinas de apoyo (las de ccastel.py)
 ;      programa.cas    el programa entero: declarar, generar, qué va y escribirlo
+;      mando.cas       la línea de órdenes (lo que hace este programa)
 ;  Es un programa de «modelo grande» (un .EXE: cada módulo en su segmento) y
 ;  sus tablas van en memoria lejana. Ver docs/CASTEL.md y el README.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -33,68 +34,10 @@ módulo Castel
 
     modelo grande
 
-    importar Base, Tablas, Salida, Sintactico, Programa, Argumentos, Textos
-
-    variable entrada: arreglo [80] de byte
-    variable salida: arreglo [80] de byte
-    variable arg_: arreglo [80] de byte
-
-    función uso(): byte
-        escribir("uso: CASTEL ENTRADA.CAS [-o SALIDA.ASM] [-I CARPETA]... [--todo]\r\n")
-        devolver 2
-    fin
+    importar Mando
 
     función principal(): byte
-        variable i, n: nat16
-        variable todo, gasto: bool
-        variable p: puntero a byte
-        prepara_base()
-        prepara_tablas()
-        prepara_salida()
-        todo := falso
-        gasto := falso
-        n := cuántos_argumentos()
-        i := 1
-        mientras i <= n hacer
-            argumento(i, arg_, 80)
-            si iguales_sin_caja(arg_, "-o") y i < n entonces
-                argumento(i + 1, salida, 80)
-                i := i + 2
-            sino si iguales_sin_caja(arg_, "-i") y i < n entonces
-                argumento(i + 1, arg_, 80)
-                añade_carpeta(arg_)
-                i := i + 2
-            sino si (arg_[0] = '-') y (arg_[1] = 'I' o arg_[1] = 'i') y arg_[2] <> 0 entonces
-                añade_carpeta(dirección(arg_[2]))
-                i := i + 1
-            sino si iguales_sin_caja(arg_, "--todo") entonces
-                todo := cierto
-                i := i + 1
-            sino si iguales_sin_caja(arg_, "--gasto") entonces
-                gasto := cierto
-                i := i + 1
-            sino si entrada[0] = 0 y arg_[0] <> '-' entonces
-                copiar(entrada, arg_)
-                i := i + 1
-            sino
-                devolver uso()
-            fin
-        fin
-        si entrada[0] = 0 entonces devolver uso() fin
-        si salida[0] = 0 entonces
-            ; el mismo nombre, con .ASM
-            copiar(salida, entrada)
-            p := nulo
-            para i desde 0 hasta longitud(salida) hacer
-                si salida[i] = '.' entonces p := dirección(salida[i]) fin
-                si salida[i] = '\\' o salida[i] = ':' entonces p := nulo fin
-            fin
-            si p <> nulo entonces valor(p) := 0 fin
-            concatenar(salida, ".ASM")
-        fin
-        carga_programa(entrada)
-        compila(entrada, salida, todo, gasto)
-        devolver 0
+        devolver mandar()
     fin
 
 fin Castel.

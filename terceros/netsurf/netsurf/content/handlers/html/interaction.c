@@ -58,6 +58,7 @@
 #include "html/private.h"
 #include "html/imagemap.h"
 #include "html/interaction.h"
+#include "guion.h"	/* [HISPA] JavaScript (w32/surf/guion.c) */
 
 /**
  * Get pointer shape for given box
@@ -673,6 +674,7 @@ get_mouse_action_node(html_content *html,
 		      struct mouse_action_state *man)
 {
 	struct box *box;
+	struct box *hispa_encima = NULL;	/* [HISPA] */
 	int box_x = 0;
 	int box_y = 0;
 
@@ -691,6 +693,18 @@ get_mouse_action_node(html_content *html,
 	box_y = box->margin[TOP];
 
 	do {
+		/* [HISPA] lo que va por encima (un menú desplegable, con
+		 * z-index): si se ha dado en él, lo de después no cuenta */
+		if (hispa_encima != NULL) {
+			struct box *b;
+			for (b = box; b != NULL && b != hispa_encima; b = b->parent)
+				;
+			if (b == NULL)
+				goto next_box;
+		} else if (box_hispa_encima(box)) {
+			hispa_encima = box;
+		}
+
 		/* skip hidden boxes */
 		if ((box->style != NULL) &&
 		    (css_computed_visibility(box->style) ==
@@ -1319,6 +1333,29 @@ default_mouse_action(html_content *html,
 
 
 /**
+ * [HISPA] JavaScript: el elemento en el que se ha dado. Si es un texto (que
+ * en NetSurf no tiene nodo), el elemento en línea más de dentro que lo
+ * envuelve (el <a> de un enlace, no el <li> de alrededor)
+ */
+static dom_node *hispa_nodo_texto(struct mouse_action_state *mas)
+{
+	struct box *t = mas->text.box != NULL ? mas->text.box : mas->link.box;
+	struct box *b, *pila[32];
+	int n = 0;
+	if (t == NULL || t->node != NULL || t->parent == NULL)
+		return mas->node;
+	for (b = t->parent->children; b != NULL && b != t; b = b->next) {
+		if (b->type == BOX_INLINE && n < 32)
+			pila[n++] = b;
+		else if (b->type == BOX_INLINE_END && n > 0)
+			n--;
+	}
+	if (b == t && n > 0 && pila[n - 1]->node != NULL)
+		return pila[n - 1]->node;
+	return mas->node;
+}
+
+/**
  * handle non dragging mouse actions
  */
 static nserror
@@ -1331,6 +1368,8 @@ mouse_action_drag_none(html_content *html,
 	struct content *c = (struct content *)html;
 	union content_msg_data msg_data;
 	lwc_string *path;
+	nsurl *hispa_url = NULL;	/* [HISPA] JavaScript */
+	char *hispa_dest = NULL;
 
 	/**
 	 * computed state
@@ -1397,8 +1436,36 @@ mouse_action_drag_none(html_content *html,
 	}
 
 	/* fire dom click event */
-	if (mouse & BROWSER_MOUSE_CLICK_1) {
-		fire_generic_dom_event(corestring_dom_click, mas.node, true, true);
+	/* [HISPA] JavaScript: el clic va primero a la página (guion.c); si dice
+	 * preventDefault(), no se sigue el enlace ni se envía el formulario */
+	if ((mouse & (BROWSER_MOUSE_PRESS_1 | BROWSER_MOUSE_CLICK_1)) &&
+	    html->jsthread != NULL && mas.node != NULL) {
+		dom_node *nodo = dom_node_ref(hispa_nodo_texto(&mas));
+		bool cancela;
+		/* (lo de las cajas que se usa luego, copiado: JavaScript puede
+		 * hacer que se rehagan, w32/surf/rehaz.c) */
+		if (mas.link.url != NULL)
+			hispa_url = mas.link.url = nsurl_ref(mas.link.url);
+		if (mas.link.target != NULL)
+			hispa_dest = (char *)(mas.link.target = strdup(mas.link.target));
+		if (mouse & BROWSER_MOUSE_PRESS_1) {
+			guion_evento(html->jsthread, nodo, "mousedown", NULL);
+		} else {
+			guion_evento(html->jsthread, nodo, "mouseup", NULL);
+			cancela = guion_evento(html->jsthread, nodo, "click", NULL);
+			if (cancela && (mas.result.action == ACTION_GO ||
+					mas.result.action == ACTION_SUBMIT ||
+					mas.result.action == ACTION_JS)) {
+				mas.result.action = ACTION_NONE;
+			}
+			if (!cancela && mas.gadget.control != NULL &&
+			    (mas.gadget.control->type == GADGET_CHECKBOX ||
+			     mas.gadget.control->type == GADGET_RADIO)) {
+				guion_evento(html->jsthread, nodo, "input", NULL);
+				guion_evento(html->jsthread, nodo, "change", NULL);
+			}
+		}
+		dom_node_unref(nodo);
 	}
 
 	/* deferred actions that can cause this browser_window to be destroyed
@@ -1442,6 +1509,11 @@ mouse_action_drag_none(html_content *html,
 		res = NSERROR_OK;
 		break;
 	}
+
+	/* [HISPA] las copias de antes de JavaScript */
+	if (hispa_url != NULL)
+		nsurl_unref(hispa_url);
+	free(hispa_dest);
 
 	return res;
 }
@@ -1552,9 +1624,19 @@ bool html_keypress(struct content *c, uint32_t key)
 	 * `event.preventDefault()` then we won't handle the event when
 	 * we're not supposed to.
 	 */
-	if (html->layout != NULL && html->layout->node != NULL) {
-		fire_dom_keyboard_event(corestring_dom_keydown,
-				html->layout->node, true, true, key);
+	/* [HISPA] JavaScript: la tecla va primero a la página (al campo del
+	 * cursor, o a body); si dice preventDefault(), no se hace nada más */
+	if (html->jsthread != NULL) {
+		dom_node *nodo = NULL;
+		if (html->focus_type == HTML_FOCUS_TEXTAREA &&
+		    html->focus_owner.textarea != NULL &&
+		    html->focus_owner.textarea->gadget != NULL)
+			nodo = html->focus_owner.textarea->gadget->node;
+		else if (html->layout != NULL)
+			nodo = html->layout->node;
+		if (nodo != NULL &&
+		    guion_tecla(html->jsthread, nodo, "keydown", key))
+			return true;
 	}
 
 	switch (html->focus_type) {
@@ -1737,6 +1819,16 @@ void html_set_focus(html_content *html, html_focus_type focus_type,
 
 	/* Inform of the content's drag status change */
 	content_broadcast((struct content *)html, CONTENT_MSG_CARET, &msg_data);
+
+	/* [HISPA] JavaScript: focus y blur (y change, si se escribió algo) */
+	if (html->jsthread != NULL) {
+		dom_node *nodo = NULL;
+		if (focus_type == HTML_FOCUS_TEXTAREA &&
+		    focus_owner.textarea != NULL &&
+		    focus_owner.textarea->gadget != NULL)
+			nodo = focus_owner.textarea->gadget->node;
+		guion_foco_luego(html->jsthread, nodo);
+	}
 }
 
 /* Documented in html_internal.h */

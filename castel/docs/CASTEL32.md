@@ -137,8 +137,7 @@ en cuanto hay un número por medio; con signo si alguno de los dos lo lleva.
 ## 5. El sistema, sin BIOS ni DOS
 
 En el modelo plano **no están** `interrupción()`, `acarreo()`, `banderas()`,
-`reg_bx()`... (son del modo real: la BIOS y el DOS no existen aquí), ni la memoria
-lejana (`leer_byte`, `poner_byte`, `leer_palabra`, `poner_palabra`): la memoria es
+`reg_bx()`... (son del modo real: la BIOS y el DOS no existen aquí). La memoria es
 plana, y a cualquier sitio se llega con un **puntero** normal:
 
 ```
@@ -152,11 +151,21 @@ Lo que queda del lenguaje sí está: `escribir`, `escribir_car`, `salir`,
 `dirección`, `valor`, `puntero`, `tamaño`, las conversiones y `fin_programa`.
 `escribir` saca su texto por donde toque según el modelo (sección 8).
 
+**La memoria «por párrafos»** (desde el 20/11/2026). `leer_byte(p, d)`,
+`poner_byte(p, d, v)`, `leer_palabra(p, d)` y `poner_palabra(p, d, v)` también
+están, con el mismo sentido que en el modo real: el octeto (o la palabra) de la
+dirección **`p * 16 + d`**, solo que aquí `p` y `d` son de 32 bits. Así,
+`leer_palabra(0xB800, 0)` es la primera letra de la pantalla, como en el DOS
+(`ejemplos32/parrafos.cas`). Sirve para que lo escrito para 16 bits con memoria
+lejana corra igual en 32: el compilador CASTEL y el ensamblador ENSAMBLA guardan
+así sus tablas, y en 32 bits sus «segmentos» son párrafos de la memoria plana
+(sección 11). Hasta el 19/11 eran un error («en 32 bits no hay memoria lejana»).
+Se genera en cuatro instrucciones: con un desplazamiento constante,
+`shl eax, 4` y `movzx eax, word [eax+6]`.
+
 Si el compilador ve uno de los que no están, lo dice:
 
 ```
-error: en 32 bits no hay memoria lejana: leer_byte() no está (la memoria es
-plana: se usa un puntero, como puntero(0xB8000))
 error: interrupción() es del modo real (BIOS y DOS): en 32 bits no está (se usa
 un bloque «ensamblador»)
 ```
@@ -262,6 +271,21 @@ n := formatear(línea, 80, "%5u marcos libres", datos)      ; datos: arreglo de 
 cabe); `imprimir(plantilla, datos)` lo escribe; `imprimir1` a `imprimir4`, con uno
 a cuatro datos sueltos. `ejemplos32/biblio32.cas` prueba las tres.
 
+**`Json`** (`json.cas`, desde el 20/11/2026): leer y escribir JSON. `json_leer(texto,
+largo)` trocea un documento entero en **piezas** (objetos, listas, textos, números,
+`true`, `false`, `null`; sin copiar nada: cada pieza dice dónde está en el texto),
+en la memoria que se le da antes con `json_memoria(sitio, cuántas)`. Luego se
+pregunta con `json_campo(objeto, "clave")`, `json_elemento(lista, i)`,
+`json_cuántos`, `json_ruta(pieza, "data.obras.0.titulo")`, `json_texto` (en la
+página 437 de la casa, con los escapes y el UTF-8 hechos; lo que no está en ella,
+«?»), `json_número`, `json_verdad`, `json_nulo` y sus atajos `json_texto_campo`...
+Una pieza que no está es `NINGUNA`, y preguntar por ella no falla. Para escribir:
+`json_empezar(sitio, cabe)`, `json_abre`, `json_clave`, `json_pon_texto` (de la
+página 437 a UTF-8, escapado), `json_pon_número`, `json_cierra`... y los atajos
+`json_campo_texto("email", correo)`. Y dos sueltas: `a_utf8(letra, destino)` y
+`de_unicode(código)`. `ejemplos32/json32.cas` la prueba (y es lo que usan los
+programas que hablan con una API web).
+
 ---
 
 ## 8. El arranque y el enlazado
@@ -303,8 +327,13 @@ compilador según el modelo.
 ### `modelo hispa32` → un programa Win32 de consola (PE, `ImageBase 0x400000`)
 
 - Las **cabeceras PE a mano** (MZ + PE + una sección en `0x401000`) y la tabla de
-  lo que se importa de **KERNEL32** (`GetStdHandle`, `WriteFile`, `ExitProcess`):
-  justo lo que HW32 (el cargador de Hispa-486, `utils/hw32.asm`) sabe cargar.
+  lo que se importa de **KERNEL32**: lo del arranque (`GetStdHandle`, `WriteFile`,
+  `ExitProcess`) y, desde el 20/11, lo que hace falta para los archivos, los
+  argumentos y la memoria (`ReadFile`, `CreateFileA`, `CloseHandle`,
+  `SetFilePointer`, `DeleteFileA`, `GetCommandLineA`, `GetModuleFileNameA`,
+  `VirtualAlloc`), siempre las mismas once: un bloque `ensamblador` llama a
+  cualquiera con `call [C_CreateFileA]` (así lo hace `biblioteca32/hw32`). Todo
+  lo sabe cargar HW32 (el cargador de Hispa-486, `utils/hw32.asm`).
 - El arranque pide el manejador de salida (`GetStdHandle(-11)`) y llama a
   `principal()`. `escribir` va por `WriteFile`; `salir`, por `ExitProcess`.
 - Sale un `.EXE` que se ejecuta con `HW32 PROGRAMA.EXE` dentro de Hispa-DOS.
@@ -355,10 +384,14 @@ falta enlazar con otras cosas; de momento no hace falta.
 - **Funciones de interrupción públicas** (`público interrupción función`): hoy cada
   módulo pone en la IDT las suyas.
 - **ELF32** de salida, si algún día hay que enlazar con código de fuera.
-- **Tablas de datos grandes**: un bloque `ensamblador` no puede pasar de 6000
-  octetos en CASTEL (la letra del entorno gráfico de Hispa-Pentium va en cuatro
-  bloques seguidos), y un arreglo con valor inicial, de unos 4000.
-- **El sitio de CASTEL para los textos** (los nombres y los textos entre
+- **Tablas de datos grandes**: en el CASTEL de 16 bits un bloque `ensamblador` no
+  puede pasar de 6000 octetos (la letra del entorno gráfico de Hispa-Pentium va en
+  cuatro bloques seguidos), y un arreglo con valor inicial, de unos 4000 (unas
+  1000 piezas). En CASTEL32 (sección 11), 60.000 y unas 4000 piezas.
+- **El sitio de CASTEL (el de 16 bits) para sus tablas**: lo que sigue es su
+  historia hasta el 19/11/2026, cuando se quedó sin sitio. **Desde el 20/11 el
+  núcleo lo compila CASTEL32** (sección 11), que tiene cada tabla de casi 1 MB, y
+  esto ya no limita nada del núcleo. (Los nombres y los textos entre
   comillas de todo el programa, con sus módulos): eran 40 K y, desde la 0.5 de
   Hispa-Pentium, son 64 K (`compilador/base.cas`): el núcleo ya no cabía. Es una
   tabla del compilador, no del lenguaje: lo que saca no cambia. Con la 0.6
@@ -387,9 +420,9 @@ falta enlazar con otras cosas; de momento no hace falta.
   K: **52 K para los nombres** (eran 48) y **60 K para los textos** (eran 64;
   el núcleo usa 50). Queda muy poco margen (nombres al 92 %, árbol al 99 %,
   declarados al 95 %, textos al 83 %): el siguiente estirón del núcleo pedirá
-  ya lo de soltar del árbol lo que no
-  haga falta o compilar por módulos. Un programa no puede declarar un arreglo de
-  más de 64 K: lo que haga falta mayor se pide con `más_memoria`.
+  ya lo de soltar del árbol lo que no haga falta o compilar por módulos (o eso
+  se pensaba: lo que ha pedido es CASTEL32). Un programa no puede declarar un
+  arreglo de más de 64 K: lo que haga falta mayor se pide con `más_memoria`.
 - **El núcleo de Hispa-Pentium**: desde la 0.4 tiene su entorno gráfico (el
   escritorio, PENTIUM.md §10; con menús, portapapeles e iconos desde la 0.5) y,
   desde la 0.6, los discos SATA y el USB de los PC de verdad (PENTIUM.md §7 y
@@ -403,3 +436,168 @@ falta enlazar con otras cosas; de momento no hace falta.
   (la pila ya la pone el núcleo: sección 8). Lo que más se ha echado de menos al
   escribirlo: llamar a una función por su dirección (el reloj llama así, con dos
   líneas de ensamblador, a quien acaba una tarea cortada con Ctrl+C).
+
+---
+
+## 11. CASTEL32: el compilador de Castel, de 32 bits
+
+*20/11/2026.* Castel nació para escribir los sistemas del 386 en adelante, pero su
+compilador escrito en Castel (CASTEL, `compilador/`) era un programa de **16 bits**:
+corría en Hispa-8086 con 640 K, y con el núcleo de Hispa-Pentium 0.8 sus tablas
+estaban al límite (árbol 10.153 de 10.240 párrafos, nombres al 92 %, declarados al
+95 %; sección 10). No era por diseño, sino por cómo se llegó: el autohospedaje se
+hizo antes que los 32 bits. **CASTEL32** es el mismo compilador (y su ensamblador,
+ENSAMBLA) compilado con la parte de atrás de 32 bits.
+
+### La decisión
+
+- **El que manda es CASTEL32.** El núcleo de Hispa-Pentium y sus programas los
+  compila CASTEL32 (en las pruebas, dentro de Hispa-Pentium: `pruebas.sh`, parte
+  15). **Ningún límite futuro del núcleo depende ya del CASTEL de 16 bits**: si un
+  día el núcleo no le cabe, no pasa nada.
+- **El CASTEL de 16 bits sigue** (CASTEL.EXE, `compilador/castel.cas`): compila
+  todo lo de 16 bits y los programas de 32 que caben, y se sigue compilando a sí
+  mismo en Hispa-8086 (partes 5 y 6). Pero ya no compila el núcleo en las pruebas.
+- **Los mismos fuentes para todos.** No hay un compilador de 32 bits aparte: son
+  los módulos de `compilador/` (y `ensamblador/montador.cas`) tal cual. Lo que
+  cambia entre uno y otro es poquísimo y está en módulos pequeños que el programa
+  importa **antes que nada** (así, al buscar un módulo ya cargado, vale el
+  primero):
+
+| | 16 bits (Hispa-8086, DOS) | Hispa-Pentium (anillo 3) | Hispa-386/486 (HW32) |
+|---|---|---|---|
+| el programa | `compilador/castel.cas` (`modelo grande`) | `compilador/32/pentium/castel32.cas` (`modelo usuario`) | `compilador/32/hw32/castelw.cas` (`modelo hispa32`) |
+| su ensamblador | `ensamblador/ensambla.cas` | `ensamblador/32/pentium/ensamb32.cas` | `ensamblador/32/hw32/ensambw.cas` |
+| las medidas | `compilador/medidas.cas` | `compilador/32/medidas.cas` | la misma |
+| el sistema (Lejos, Archivos, Argumentos) | `biblioteca/` (la 21h del DOS) | `biblioteca32/pentium/` (las llamadas del núcleo) | `biblioteca32/hw32/` (KERNEL32) |
+| lo que sale | CASTEL.EXE, ENSAMBLA.COM | CASTEL32.BIN, ENSAMB32.BIN | CASTELW.EXE, ENSAMBW.EXE |
+
+  Lo común: `Mando` (la línea de órdenes), los once módulos del compilador y
+  `Montador` (ENSAMBLA por dentro). Lo que se tocó en ellos para esto: los
+  segmentos son del tipo **`Segmento`** (de Lejos: `nat16` en 16 bits, `nat32`
+  en 32), los tamaños de las tablas vienen de **`Medidas`**, y la carpeta del
+  propio programa la dice `Argumentos.ruta_del_programa`.
+- **Cómo se ven las tablas en 32 bits.** El compilador guarda sus tablas en
+  memoria lejana: un nudo del árbol es el párrafo `seg_ar + n`, y se lee con
+  `leer_palabra(seg_ar + n, 6)`. En 32 bits eso es la memoria «por párrafos»
+  (sección 5): `p * 16 + d` en la memoria plana. El Lejos de 32 bits pide los
+  bloques al sistema (`más_memoria` en Hispa-Pentium, `VirtualAlloc` en HW32) y da
+  su párrafo, un `nat32`. Así el código no cambia, y las tablas pasan de los 272 K
+  que cabían en 640 K a casi 6 MB.
+- **Por qué PE para Hispa-386/486, y no DPMI.** Las dos maneras corren en modo
+  protegido de 32 bits sobre HSPDPMI; pero un programa DPMI propio habría pedido
+  un modelo nuevo en los dos compiladores (su arranque: pasar a modo protegido,
+  pedir los selectores, hablar con el DOS por la 0300h). El `modelo hispa32` ya
+  estaba en los dos compiladores, y **HW32** ya carga programas PE y les da
+  archivos, línea de órdenes y memoria por KERNEL32 (y es lo que ejecuta FASM,
+  NASM y el resto de Hispa-486: está muy probado). Solo ha hecho falta que el
+  arranque de hispa32 importe ocho funciones más de KERNEL32 (sección 8) y
+  escribir `biblioteca32/hw32` (tres módulos cortos). Menos trabajo y más robusto.
+
+### Las medidas (`compilador/32/medidas.cas`)
+
+Las referencias siguen siendo de 16 bits (un nudo, un nombre o un texto es un
+párrafo **dentro de su tabla**), así que cada tabla puede llegar a 64 K párrafos:
+se le dan **61.440 (960 K)** a los nombres, los textos, el árbol, los tipos y lo
+declarado; 200 módulos por programa; 31.738 datos y otras tantas etiquetas; 1000
+locales por función; 64 K y 16.000 líneas de ensamblador por función; bloques
+`ensamblador` de 60.000 octetos. Con el núcleo de Hispa-Pentium 0.8
+(`CASTEL32 SEMILLA.CAS --gasto`):
+
+```
+  gasto de las tablas, de lo que hay (en párrafos de 16 octetos; los módulos, uno a uno):
+    nombres         3075 de 61440 (5 %)
+    textos          3171 de 61440 (5 %)
+    árbol (lo más)  10153 de 61440 (16 %)
+    tipos           878 de 61440 (1 %)
+    declarados      3400 de 61440 (5 %)
+    módulos         39 de 200 (19 %)
+```
+
+(El de 16 bits, con el mismo núcleo: árbol 10.153 de 10.240, el 99 %.) El árbol,
+lo que más gasta, tiene sitio para un núcleo **seis veces** mayor; lo demás, para
+uno veinte veces mayor. Si algún día hace falta más, el camino está claro y no
+toca el lenguaje: referencias de 32 bits (un tipo `Ref` que sea `nat16` en 16 bits
+y `nat32` en 32, como `Segmento`, y nudos de 32 octetos en vez de 16).
+
+### El arranque y el punto fijo
+
+```
+ccastel.py + NASM  ->  CASTEL32.BIN, ENSAMB32.BIN            (paso 1)
+CASTEL32 se compila a sí mismo, ENSAMB32 lo ensambla  ->  C2  (paso 2)
+C2 se compila a sí mismo  ->  C3                             (paso 3)
+```
+
+El paso 2 da **el mismo ensamblador que el paso 1** (el de ccastel.py) y el mismo
+binario que NASM; el paso 3, **el mismo que el 2, octeto a octeto**. Las pruebas
+lo hacen tres veces: en Linux (con `corre32`, abajo), **dentro de Hispa-Pentium** y,
+con CASTELW, **dentro de Hispa-DOS con HW32**. Y CASTEL32 saca exactamente lo mismo
+que ccastel.py en **todos** los programas de las pruebas (los ejemplos de 16 y 32
+bits, la biblioteca entera, ENSAMBLA, las cuentas al azar, el núcleo con sus
+programas, el CASTEL de 16 bits y él mismo) y dice los mismos errores.
+
+Las cifras (QEMU sin aceleración, en el servidor de desarrollo):
+
+| | |
+|---|---|
+| CASTEL32.BIN / ENSAMB32.BIN | 134.808 / 24.876 octetos |
+| CASTELW.EXE / ENSAMBW.EXE | 136.192 / 26.112 octetos |
+| el núcleo y sus 19 programas, compilados dentro de Hispa-Pentium | 21 s (el núcleo solo: unos 8 s) |
+| ... y ensamblados con ENSAMB32 | 7 s (el núcleo solo: unos 3 s; NASM en Linux tarda 14) |
+| CASTEL32 compilándose a sí mismo dentro de Hispa-Pentium | 5 s |
+| CASTELW compilándose a sí mismo y ensamblándose, en Hispa-DOS desde disquete | 35 s |
+| el núcleo con CASTEL32 en Linux (corre32) | 2 s |
+
+### Correr y probar
+
+- **Dentro de Hispa-Pentium**: CASTEL32.BIN y ENSAMB32.BIN son programas del disco
+  como los demás: `CASTEL32 SEMILLA.CAS -o \S\SEMILLA.ASM -I \BIB32 --gasto` y
+  `ENSAMB32 S\SEMILLA.ASM S\SEMILLA.BIN`. Hispa-Pentium no les dice de qué carpeta
+  se han cargado: los módulos se buscan en la del programa que se compila y en las
+  de `-I` (hasta cinco). La línea de órdenes, hasta 127 letras.
+- **En Hispa-386/486**: `HW32 CASTELW.EXE PROGRAMA.CAS ...` (con HSPDPMI cargado),
+  y `HW32 ENSAMBW.EXE PROGRAMA.ASM`. CASTELW busca también en su propia carpeta.
+- **`corre32/`** (`corre32.sh PROGRAMA.BIN [args]`): corre en **Linux** un programa
+  del anillo 3 de Hispa-Pentium, con ptrace (cada `int 0x80` se para, se anula y se
+  hace allí, con los números de `nucleo32/usuario.cas`). Para probar deprisa: el
+  núcleo entero en 2 s. No sustituye a las pruebas dentro de Hispa-Pentium.
+- **`pruebas.sh`, parte 15** (`SOLO=castel32 ./pruebas.sh`, unos 4 minutos):
+  todo lo de arriba.
+
+---
+
+## 12. El camino a x86-64 (Hispa-64)
+
+El compilador ya está partido como hace falta: **una parte de delante** (léxico,
+gramática, tipos, lo declarado: `lexico`, `sintactico`, `tipos`, `tablas`,
+`cuentas`, `base`) que no sabe nada de la máquina, y **partes de atrás** que
+generan: la de 16 bits (`gen_expr` y los suyos en `expr.cas` y `sent.cas`) y la de
+32 (`gen_expr32p`, `llama_función32`... en los mismos módulos), elegidas por el
+modelo (`plano`). La de 64 bits será una tercera, y el plan es:
+
+1. **El ensamblador**, primero (`ensambla.py` y luego Montador): `bits 64`, el
+   prefijo REX (registros `rax`..`r15`, operandos de 64 bits), el direccionamiento
+   relativo a RIP y los inmediatos de 64 bits (`mov rax, imm64`); comprobado contra
+   NASM con unas `formas64.asm`, como las de 32.
+2. **La parte de atrás en ccastel.py**: un `Generador64` que herede de
+   `Generador32` (casi todo es igual cambiando `e` por `r`), con punteros de 8
+   octetos, las cuentas en 64 bits y una convención de llamada propia sencilla (los
+   argumentos en la pila, de ocho en ocho, como ahora de cuatro en cuatro; ya habrá
+   tiempo de pasarlos en registros). El tipo `nat64`/`ent64` en la parte de delante
+   (los literales ya se calculan en 64 bits: `cuentas.cas`).
+3. **Un modelo nuevo, `modelo hispa64`**: un núcleo que arranca en modo largo
+   (multiboot2, o multiboot con su paso de 32 a 64 bits en el arranque que pone el
+   compilador, como hoy pone la GDT del de 32) y, luego, los programas de su anillo 3.
+4. **La misma parte de atrás en el compilador escrito en Castel** (un módulo
+   `Gen64` al lado de las de 16 y 32), comprobada como siempre: el mismo
+   ensamblador que ccastel.py en todos los programas.
+5. Y, cuando Hispa-64 tenga archivos, **CASTEL64**: el compilador compilado para
+   64 bits, con un `Medidas` y un `Lejos` suyos (y ahí sí, referencias de 32 o 64
+   bits). Hasta entonces, el compilador de Hispa-64 es CASTEL32 (o ccastel.py): un
+   compilador de 32 bits puede sacar código de 64 sin problema.
+
+Lo que se ha hecho el 20/11 para que esto salga barato: los segmentos con su tipo
+(`Segmento`), las medidas aparte (`Medidas`), el sistema aparte (Lejos, Archivos y
+Argumentos por sistema) y la línea de órdenes y el ensamblador como módulos
+(`Mando`, `Montador`): un CASTEL64 será otro programa de veinte líneas como
+`castel32.cas`.

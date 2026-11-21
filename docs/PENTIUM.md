@@ -1,6 +1,6 @@
 # Hispa-Pentium — el núcleo de la gama XP, escrito en Castel
 
-*18/11/2026; puesto al día el 20/11/2026 (la 0.8, todo junto: el disco SATA del ICH7, el USB en caliente, los paquetes, la red y apagar de verdad con la batería). Hispa-Pentium es el miembro de la
+*18/11/2026; puesto al día el 20/11/2026 (la 0.8, todo junto: el disco SATA del ICH7, el USB en caliente, los paquetes, la red y apagar de verdad con la batería) y el 21/11/2026 (la 0.8.2: los controles de las ventanas; la 0.8.3: **el Navegador**, la web de hoy con NetSurf y JavaScript, con la rueda del ratón y el x87 de cada programa en el núcleo: sección 14 ter). Hispa-Pentium es el miembro de la
 
 *18/11/2026; puesto al día el 20/11/2026 (la 0.8: la red). Hispa-Pentium es el miembro de la
 familia Hispa-DOS para los PC de 2000 en adelante (la gama de Windows XP, [ROADMAP](ROADMAP.md)): un **núcleo propio
@@ -58,7 +58,7 @@ de verdad** (ACPI, S5), reiniciar por la FADT y la **batería en la bandeja**
 con su recuadro de ayuda, con el núcleo ACPI de Hispa-DOS (ACPICA) como
 servicio del anillo 3, `ACPI.BIN` (sección 11). En la bandeja caben a la vez,
 de izquierda a derecha, la memoria USB, la red, la pila y el reloj. Todo está
-en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`).*
+en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`). Y la tarde del 20/11: las **actualizaciones por Internet** (`actualiza.hispados.es/pentium/`), con el catálogo **firmado** (Ed25519, en Castel), la ventana con su barra, el aviso al arrancar y el **núcleo nuevo con vuelta sola al de antes** si no arranca (sección 13); y el **CD (o DVD) de instalación**, que vale para VirtualBox (sección 12).*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -233,9 +233,10 @@ cuarta parte, los discos y el USB).
 | `emergente.cas` (Emergente) | Los **menús emergentes**: el del botón secundario y el que cuelga de una barra de menús. |
 | `terminal.cas` (Terminal) | Los **terminales**: dos tubos para que una ventana tenga dentro al intérprete de órdenes y a sus programas. |
 | `escritorio.cas` (Escritorio) | El **escritorio**: el tapiz y sus **iconos**, la barra de tareas, el menú Inicio, el reloj, los cuadros (apagar, configuración, «Acerca de»), los menús del botón secundario, y la tarea que lo mueve todo. |
-| `red.cas` (Red) | **La red**, lo que pone el núcleo (sección 14): el cartero entre los programas y el servicio de red (`RED.BIN`), y lo que solo el servicio puede pedir: los puertos, memoria física seguida para el DMA, los registros de la tarjeta y su interrupción. |
+| `red.cas` (Red) | **La red**, lo que pone el núcleo (sección 14): el cartero entre los programas y el servicio de red (`RED.BIN`) —y el servicio TLS (`TLS.BIN`), con la llamada 99—, y lo que solo el servicio de red puede pedir: los puertos, memoria física seguida para el DMA, los registros de la tarjeta y su interrupción. |
 
 | `energia.cas` (Energia) | **Apagar de verdad, reiniciar y la batería**: las llamadas del servicio de ACPI (`ACPI.BIN`, un programa del anillo 3 con ACPICA) y la 154; apagar por ACPI (S5) y reiniciar (FADT, 8042, CF9h); la pila de la bandeja y su recuadro de ayuda (sección 11). |
+| `dispositivos.cas` (Dispositivos) | **Lo que hay en el equipo y qué lo lleva** (desde la 0.8.3): las llamadas 155 (la lista, de solo lectura) y 156 (lo que apuntan los servicios del anillo 3), para el Administrador de dispositivos (sección 10). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
 
 Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
@@ -251,6 +252,7 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `uasiste.cas` | `ASISTE.BIN` | El **asistente del primer arranque** de un sistema instalado (sección 12). |
 | `ubloc.cas` | `BLOC.BIN` | El **Bloc de notas** del escritorio (sección 10). |
 | `uequipo.cas` | `EQUIPO.BIN` | **Mi equipo**: las unidades (con su letra, de qué son y lo que cabe en ellas) y lo que hay dentro (sección 10). |
+| `udisposi.cas` | `DISPOSIT.BIN` | El **Administrador de dispositivos**: el PCI, el USB, ACPI, los discos, lo de siempre y el procesador, con el controlador de cada cosa, sus recursos y un informe (sección 10). |
 | `uconsola.cas` | `CONSOLA.BIN` | La **Consola** del escritorio: el intérprete de órdenes dentro de una ventana (sección 10). |
 | `uordenes.cas` | `ORDENES.BIN` | El **intérprete de órdenes** (sección 8). |
 | `uhola.cas` | `HOLA.BIN` | Escribe, suma, duerme, pide su número de tarea y prueba que la llamada al sistema no le deja enseñar la memoria del núcleo. |
@@ -260,6 +262,8 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `uescribe.cas` | `ESCRIBE.BIN` | Prueba **escribir en el disco** desde dentro: crear, escribir a trozos, leer de vuelta, escribir en medio, cortar, alargar con hueco, añadir; lo que no se puede; las carpetas; con `lleno`, llena el disco y lo vacía. |
 | `redes.cas` (Redes) | — | La **red para los programas** (sección 14): `estado_red`, `resolver`, `ping`, `conectar`, `enviar`, `recibir`, los puertos UDP... |
 | `ured.cas` con `rbase.cas`, `rtarjeta.cas`, `ryukon.cas`, `rpila.cas` y `rtcp.cas` | `RED.BIN` | El **servicio de red**: las tarjetas y la pila TCP/IP (sección 14). |
+| `tls/tls.c` con BearSSL (en C: `tls/hacer.sh`) | `TLS.BIN` | El **servicio TLS**: las conexiones cifradas, HTTPS (sección 14). |
+| `uhttps.cas` (con `biblioteca32/https.cas`) | `HTTPS.BIN` | La orden **HTTPS**: pedir direcciones con la biblioteca `Https` (sección 14). |
 | `uipconf.cas`, `uping.cas`, `udescarg.cas` | `IPCONFIG.BIN`, `PING.BIN`, `DESCARGA.BIN` | **IPCONFIG**, **PING** y **DESCARGAR** (sección 14). |
 | `ubucle.cas` | `BUCLE.BIN` | El que no acaba nunca (da vueltas, duerme, espera teclas o escribe sin parar): para probar **Ctrl+C**. |
 
@@ -454,6 +458,8 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 
 | 150-153 | **solo el servicio de ACPI** (`ACPI.BIN`): puertos, memoria física, configuración PCI, y dar la batería y esperar órdenes (sección 11, «Apagar de verdad y la batería») | — | |
 | 154 | **la batería**: lo último que ha leído el servicio de ACPI (una `Energía`, `energia.cas`) a EBX | — | 1, o 0 si no hay servicio |
+| 155 | (dispositivos) **la lista de los dispositivos** y qué los lleva: hasta ECX fichas `Dispositivo` (320 octetos, `dispositivos.cas`) a EBX. Solo lee | `lista_dispositivos` | cuántos hay (aunque no quepan) |
+| 156 | (dispositivos; **solo los servicios**: `ACPI.BIN`, `RED.BIN`) apuntar la ficha de EBX (ECX = 0) u olvidar las suyas (ECX = 1) | — | 0 |
 
 (La 11, con ECX = 1, no se queda esperando: da `SIGUE` si la tarea no ha acabado
 —`acabada`—. La 15 da además el ancho y el alto de la pantalla gráfica y si el
@@ -927,7 +933,9 @@ propio, con sus tildes y su eñe).
 - **«Apagar el equipo»**: Apagar, Reiniciar o Cancelar. Apagar deja la pantalla de
   «Ya puede apagar el equipo» (en QEMU, además, lo apaga).
 - **Configuración**: lo que hay (la pantalla, la memoria, las tareas), el teclado
-  (español o de EE. UU.) y el tapiz. **Acerca de Hispa-Pentium**: la versión y la
+  (español o de EE. UU.) y el tapiz; y, junto a la pantalla, **«Cambiar...»**: la
+  medida de la pantalla, en el momento donde la tarjeta lo deja y, si no, al
+  arrancar (más abajo, «La medida de la pantalla»). **Acerca de Hispa-Pentium**: la versión y la
   licencia.
 - **El Bloc de notas** (`BLOC.BIN`, `ubloc.cas`): escribir un texto con el teclado
   español y **guardarlo en el disco** («Guardar», F2 o Ctrl+S; en la página 437 y
@@ -975,7 +983,9 @@ gráficos del núcleo (sección 3). **Todo se dibuja con 32 bits por punto**; si
 modo que hay es de 24 o de 16 (hay tarjetas que no dan otro), se dibuja en un
 lienzo de 32 bits aparte y `volcar()` pasa a la pantalla de verdad lo que se ha
 tocado. (`bits=24` o `bits=16` en la línea del cargador lo fuerzan con la VBE de
-Bochs, para probarlo.)
+Bochs, para probarlo.) Con la VBE de Bochs, aunque el modo lo haya puesto el
+cargador, **se cambia en marcha** (`cambia_modo()`: más abajo, «La medida de la
+pantalla»).
 
 **Dibujar** (`grafico.cas`), en Castel. Un **lienzo** es un rectángulo de puntos
 (`0x00RRGGBB`) en la memoria, con su ancho, su alto y los puntos que hay de una
@@ -1064,6 +1074,86 @@ mientras suceso(v, s, cierto) y s.clase <> EV_CERRAR hacer
 fin
 ```
 
+**Los programas de los paquetes en el menú y en el tapiz** (`accesos.cas`,
+desde el 20/11/2026, rama `clicgest-pentium`). Un paquete que trae un programa
+con ventana deja, además, un archivo de texto `NOMBRE.MNU` en `\HISPA\MENU`
+(o en `\MENU`, en un sistema sin instalar), en la página 437 y con CR LF:
+
+```
+nombre=Agenda
+programa=\HISPA\AGENDA.BIN
+argumentos=
+icono=\HISPA\MENU\AGENDA.ICP
+escritorio=si
+```
+
+El escritorio lo pone en el menú Inicio, debajo de «Mi equipo» (el menú crece
+lo que haga falta) y, con `escritorio=si`, como icono del tapiz. Se vuelven a
+leer cada vez que se abre el menú: lo que se instala con el escritorio en
+marcha sale la vez siguiente (y si han cambiado, los iconos del tapiz se
+ordenan otra vez). Hasta seis. El icono es un **`.ICP`**: la magia `HPIC`, el
+ancho y el alto (32 y 32, dos palabras de 32 bits) y 32 x 32 puntos
+`0xAARRGGBB` (de A = 0x80 para arriba se pinta; lo demás es transparente); lo
+hace **`tools/hpicono.py ENTRADA.png SALIDA.ICP`** de un PNG de 32 x 32. En el
+menú se pinta a la mitad (16 x 16). Sin icono, una ventanita.
+
+**Mayús+Tab** (desde la misma fecha): con el escritorio en marcha, el teclado
+la da como la tecla `TECLA_MAYÚS_TAB` (`0x10F`, en `Llamadas`), para que los
+programas vuelvan al control de antes; Tab sigue siendo el 9.
+
+**Ctrl+Tab, Ctrl+Mayús+Tab y Alt+letra** (desde la 0.8.2, rama
+`controles-erp`, 21/11/2026): con el escritorio en marcha llegan como
+`TECLA_CTRL_TAB` (`0x110`), `TECLA_CTRL_MAYÚS_TAB` (`0x111`) y `TECLA_ALT` +
+la letra (`0x180` para la a ... `0x199` para la z; el Alt de la izquierda; el
+Alt Gr sigue siendo el de las letras de más), para cambiar de pestaña y abrir
+los menús de una ventana. Y la **llamada 81** (`maximizar(v)` en
+`Llamadas`): la ventana se maximiza (como con dos clics en su título) y le
+llega `EV_TAMAÑO` con lo que mide.
+
+### Los controles de las ventanas: `controles.cas`
+
+![Muestra de controles](pentium/controles-muestra.png)
+
+*Desde la 0.8.2 (21/11/2026).* Un módulo para los programas del anillo 3 que
+quieren una ventana de aplicación de las de siempre (un programa de gestión,
+un ERP de escritorio): `importar Controles`. El programa pinta en un **lienzo
+propio** del tamaño de la ventana (con `Grafico`, el de dibujar del
+escritorio) y `volcar()` lo manda entero a la ventana (la llamada 34,
+`mapa`). Así puede escribir con la letra del sistema **a vez y media (12x24)
+o al doble (16x32)** además de a su tamaño (8x16): `preparar(nombre,
+T_NORMAL|T_GRANDE|T_MUY_GRANDE, maximizada)`; `LA` y `LT` son lo que mide
+una letra, `E` los márgenes. Con la escala impar, cada punto de la letra es
+uno o dos, alternando (nítida, sin difuminar).
+
+| Control | Funciones | Teclas |
+|---|---|---|
+| botón | `botón`, `botón_ancho` (principal: verde; apagado: gris) | Intro, Espacio |
+| campo | `campo`, `campo_de` (el rótulo encima; oculto; solo para ver), `campo_izq` (el rótulo a la izquierda) y `campo_tecla` (con su cursor: flechas, Inicio, Fin, Retroceso, Supr) | |
+| números | `número_tecla`: solo cifras y, con decimales, una coma (el punto, también el del teclado numérico, vale como coma) | |
+| fecha | `fecha_tecla` (dd/mm/aaaa, las barras las pone él), `fecha_vale`, `fecha_a_iso`, `fecha_de_iso` | |
+| casilla | `casilla` (con una X dentro) | Espacio |
+| lista desplegable | `desplegable` (lo elegido y la flecha), `abrir_desplegable` (las opciones, en un menú del escritorio: llega `EV_MENÚ` con la etiqueta del control), `desplegable_tecla` | Intro, Espacio; arriba y abajo, sin abrirla |
+| recuadro con título | `recuadro(x, y, ancho, alto, «Datos generales»)`: da dónde empieza lo de dentro | |
+| pestañas | `pestañas(id, x, y, ancho, «Inicio\|Socios\|...», activa, apagadas)`, `pestaña_en`, `otra_pestaña` | Ctrl+Tab, Ctrl+Mayús+Tab |
+| rejilla | una variable `Rejilla` por tabla (`rejilla_nueva(g, máximo)`: los renglones, en memoria pedida con `más_memoria`), `rejilla_columna` (rótulo, ancho en letras —0: lo que quede—, a la derecha), `renglón_nuevo`, `celda`, `rejilla_lista`, `rejilla_filtrar` (sin mirar mayúsculas ni tildes), `rejilla_ordenar` (números, fechas dd/mm/aaaa o textos; otra vez, al revés), `rejilla_elegido`, `rejilla_id`, `rejilla_ir` (primero, anterior, siguiente, último), `rejilla_clic` (en un rótulo, ordena) | flechas, Re Pág, Av Pág, Inicio, Fin |
+| barra de menús | `barra_menús(x, y, ancho, «&Archivo\|&Ver\|A&yuda», abierto)` (la letra tras «&», subrayada), `menú_de_alt`, `menú_en_barra`, `abrir_menú_barra` | Alt+letra |
+| barra de herramientas | `barra_herramientas`, `herramienta(id, x, y, icono, texto, apagado)` con los iconos dibujados (`I_NUEVO`, `I_GUARDAR`, `I_DESHACER`, `I_BUSCAR`, `I_IMPRIMIR`, `I_REFRESCAR`, `I_PRIMERO`, `I_ANTERIOR`, `I_SIGUIENTE`, `I_ÚLTIMO`, `I_EDITAR`, `I_BORRAR`), `separador` | (no las recorre el tabulador: son atajos) |
+| barra de estado | `barra_estado(y, «usuario\|asociación\|...\|12:00»)`: el último trozo, a la derecha | |
+
+**El foco**: los controles se apuntan al pintarlos (`empezar_controles()` al
+empezar cada vez), en el orden en que los recorre el tabulador
+(`pasar_foco`); `control_en(x, y)` dice cuál hay en un punto y
+`asegurar_foco()` lo pone en el primero si el que tenía ya no está. El que
+tiene el teclado lleva **un borde azul grueso**; lo elegido de una rejilla,
+**letra blanca sobre azul y una flecha**; lo que hay que mirar
+(`R_AVISO`), fondo naranja claro **y una franja** a la izquierda (y su
+palabra en una celda): nada depende solo del color.
+
+**`MUESTRA.BIN`** (`umuestra.cas`) lleva todos (`MUESTRA normal`, con la
+letra normal; `MUESTRA doble`, al doble): es el ejemplo para empezar un
+programa de ventana, y lo que prueba `castel/pruebas.sh`. El primer
+programa hecho con ellos es ClicGest 0.2 (un programa de ClicGest, aparte).
+
 **Los terminales** (`terminal.cas`). Para que la Consola tenga dentro al intérprete
 de órdenes sin tocarlo: un terminal son **dos tubos**. El programa que lo hace (la
 Consola) lee por uno lo que escriben los de dentro y lo pinta, letra a letra, como
@@ -1077,11 +1167,281 @@ acaban todos.
 **Lo que dice el núcleo** con el escritorio en marcha (lo que lanza, los avisos, una
 excepción) sale por el **puerto serie**, como siempre.
 
+### El Administrador de dispositivos (21/11, la 0.8.3)
+
+Lo pidió Carlos el 21/11: qué hay en cada equipo, qué controlador de
+Hispa-Pentium lo lleva y qué falta, y **un informe para mandarlo** desde
+cada portátil del taller. Se abre desde **Inicio › Configuración ›
+«Administrador de dispositivos...»** y desde **el botón secundario en «Mi
+equipo» › Propiedades** (`DISPOSIT.BIN`, `udisposi.cas`, hecho con los
+controles de `controles.cas`).
+
+![El Administrador de dispositivos (QEMU «pc»)](pentium/dispositivos-arbol.png)
+
+- **El árbol, por categorías**: Pantalla, Discos, Controladoras de disco, USB,
+  Red, Sonido, Teclado y ratón, Sistema y ACPI, Batería, Procesador y Otros
+  dispositivos (una rejilla con «[-]»/«[+]»: un clic ahí, Intro, dos clics o
+  las flechas izquierda y derecha la abren y la cierran). Cada dispositivo con
+  su **nombre**, su **estado en palabra** («funciona», «SIN CONTROLADOR», «CON
+  ERROR», «desactivado», «no le hace falta»), el **controlador** y el
+  **identificador** (`8086:100E`, `PNP0303`). Lo que no tiene controlador o
+  tiene un error va con un **«!»** (o una «X») delante, **fondo naranja y una
+  franja** a la izquierda, y su palabra: **nada depende solo del color**
+  (Carlos es daltónico). Lo que funciona lleva un «+» (la letra del sistema no
+  tiene «√»).
+- **Las propiedades** (Intro o dos clics): otra ventana (el mismo programa, con
+  `/P BUS DIRECCIÓN`), con las pestañas **General** (tipo, fabricante, dónde
+  está, el estado en una frase y el detalle: la MAC y el enlace de la tarjeta
+  de red, la carga, la salud y los ciclos de la batería), **Controlador** (quién
+  lo lleva —en el núcleo o un servicio del anillo 3—, el identificador, el
+  subsistema, la revisión, la clase, lo que dice de sí un aparato USB, la ruta
+  en ACPI, de qué cuelga) y **Recursos** (la IRQ, los puertos y la memoria, con
+  lo que miden). «Copiar estos datos» y «Cerrar» (o Esc; Ctrl+Tab cambia de pestaña).
+- **«Copiar informe»** (al portapapeles: se pega en el Bloc de notas) y
+  **«Guardar informe»**: a `X:\DISPOSIT.TXT` (la memoria USB), o a la primera
+  memoria USB o el primer disco en los que se pueda escribir. El informe
+  empieza por el equipo, la fecha, la memoria, la pantalla, un resumen y **lo
+  que falta** (sin controlador o con error), y luego cada categoría con cada
+  dispositivo y todos sus datos (`[OK]`, `[!]`, `[X]`, `[--]` delante, para
+  buscarlo a ojo). Sin escritorio, `DISPOSIT` lo escribe en la pantalla;
+  `DISPOSIT /INFORME > A.TXT` y `DISPOSIT /GUARDAR [RUTA]`, desde las órdenes.
+
+| | |
+|---|---|
+| ![Las propiedades: General](pentium/dispositivos-general.png) | ![Las propiedades: Recursos](pentium/dispositivos-recursos.png) |
+
+**La llamada 155** (`dispositivos.cas`, de solo lectura) hace la lista cada vez
+que se pide, en fichas `Dispositivo` de 320 octetos (la misma en
+`llamadas.cas` y en `acpi/pentium/pentium.h`): el bus (`BUS_PCI`, `BUS_USB`,
+`BUS_ACPI`, `BUS_PLACA`, `BUS_DISCO`, `BUS_CPU`), la dirección, de quién cuelga
+(su número en la lista), el fabricante y el modelo, la clase al estilo del PCI,
+el subsistema, la revisión, el estado (`EST_...`), la IRQ, hasta seis
+recursos (clase, base y largo), el nombre PnP, el controlador, el nombre (el
+modelo del disco, lo que dice el aparato USB, la ruta ACPI), la marca y un
+detalle. Mira:
+
+- **el bus PCI entero** (también detrás de los puentes), cada función con sus
+  zonas: **medidas una vez** (se escriben unos en el BAR con el aparato sin
+  atender en la memoria ni en los puertos y las interrupciones cerradas, y se
+  pone como estaba: lo de todos los sistemas), su IRQ y lo que dicen de él los
+  controladores: `ahci.cas` (su controladora), `ata.cas` (el canal primario),
+  `xhci/ehci/uhci.cas` (las que han tomado; las que no se han dejado, «con
+  error»; con `sinusb`, desactivadas), `video.cas` (la tarjeta que tiene la
+  memoria de la pantalla; sin modo gráfico, la pantalla de texto),
+  `RED.BIN` (la tarjeta que lleva el servicio de red), `pci.cas` (los puentes);
+- **los aparatos USB** de `usb.cas`, con **su nombre y su marca de verdad**
+  (sus descriptores de cadena, preguntados una vez a cada uno) y qué módulo los
+  atiende (`usbhid.cas`, `usbalm.cas`, `usb.cas` los concentradores), colgados
+  de su controladora o de su concentrador; y lo que no se ha dejado enumerar;
+- **los discos** de `discos.cas`, colgados de su controladora, con su tamaño,
+  sus unidades y si se puede escribir en ellos;
+- **lo de siempre**: el teclado y el ratón PS/2 (si contestan), el reloj de la
+  CMOS, el 8253, los 8259 y los puertos serie que dice la BIOS (COM1 es el
+  registro del núcleo); y **el procesador** (CPUID: su nombre, su familia y lo
+  que tiene);
+- **ACPI**: el sistema (`ACPI.BIN`) y **lo que apunta el servicio con la 156**:
+  después de la primera lectura de la batería, con la tarea quieta, `ACPI.BIN`
+  recorre el espacio de nombres (los dispositivos con `_HID` y `_STA` presente,
+  sin los enlaces de interrupción `PNP0C0F`), con su ruta y lo que dice su
+  `_CRS`, y dice quién lo lleva (la batería, el adaptador y el controlador
+  embebido, él; los buses PCI, `pci.cas`; los recursos de la placa y los
+  contenedores, nadie: no les hace falta). Con `acpisindisp` en la línea del
+  cargador no lo hace. Lo de ACPI que ya sale como «lo de siempre» (el teclado,
+  el ratón, el reloj, COM1) va con ello (su ruta, en sus propiedades), no aparte.
+- **Para un controlador nuevo** (los lectores de CD de `pentium-cd`, una
+  tarjeta): `Dispositivos.apuntar(ficha, 1)` desde el núcleo; si es un aparato
+  PCI (bus `BUS_PCI` y su dirección), su estado, su controlador y sus textos se
+  juntan con la ficha del PCI. Lo que apunta un servicio que se acaba ya no sale.
+
+Los nombres (los fabricantes y los modelos del PCI y del USB, las clases y los
+nombres PnP) van en unas tablas de texto de `udisposi.cas`: lo que se conoce
+(QEMU, VirtualBox, VMware, Intel PIIX/ICH7/ICH9/NM10/Bay Trail, las Wi-Fi de
+Intel, Broadcom y Atheros, Realtek, Marvell, VIA, SiS...) y, si no está, el
+fabricante y la clase («Realtek: Tarjeta de red (Ethernet)»).
+
+### La medida de la pantalla, desde Configuración (20/11)
+
+Lo que faltaba (lo dijo Carlos con el CD 0.8 en VirtualBox: «en Configuración se
+ve la resolución pero no se puede cambiar»). Ahora, en Configuración, junto a
+«Pantalla: 800 x 600, 32 bits por punto», el botón **«Cambiar...»** abre el
+cuadro **«Pantalla»**: la medida de ahora, la **lista de modos** (en verde el
+elegido; en azul el de ahora) y, debajo, lo último que ha pasado. Como en
+Hispa-486, de dos maneras según la tarjeta:
+
+![La lista de modos (QEMU -vga std)](pentium/pantalla-lista.png)
+
+**1. Con la VBE de Bochs: en el momento.** Es la tarjeta de QEMU y Bochs
+(`1234:1111`) y la de **VirtualBox**, tanto la **VBoxVGA** (`80EE:BEEF`) como
+la **VMSVGA** (`15AD:0405`, que lleva la misma VBE debajo mientras no se use
+como SVGA) y la VBoxSVGA: se sabe que está porque su puerto `0x1CE`/`0x1CF`
+contesta `B0C0`-`B0CF`. Aunque el modo lo haya puesto GRUB (el CD, el disco
+instalado), la VBE de la BIOS de esas máquinas es esa misma tarjeta, así que el
+núcleo puede cambiarlo él:
+
+- **«Probar...»** pone la elegida **ya**, y sale **«¿Se ve bien la pantalla?»**
+  con la cuenta atrás: **«Mantener»** (o Intro) la deja; **«Volver»** (o Esc, o
+  cerrar el cuadro) vuelve a la de antes; y si en **15 s** no se dice nada,
+  **vuelve sola** (por si la pantalla se ha quedado a oscuras o fuera de rango).
+  En un sistema instalado, «Mantener» la guarda también para los próximos
+  arranques (`\HISPA\PANTALLA.ENV`, abajo).
+- **Cómo se cambia** (`video.cas`, `cambia_modo()`): se apaga la tarjeta, se le
+  dan el ancho, el alto y 32 bits por punto, se enciende con la memoria seguida, y
+  el ancho virtual y los desplazamientos a la medida (así la fila mide lo que el
+  ancho, venga de donde venga el modo de antes); luego **se lee lo puesto**,
+  también el bit de encendido (VirtualBox, si el modo no le cabe en su memoria,
+  no lo enciende y no dice nada más). La memoria de la pantalla es la misma (la
+  tarjeta no la mueve): se pone a la vista lo que mida ahora. Si algo falla, se
+  vuelve al modo de antes, tal cual. Si el modo de antes era de 24 o 16 bits (con
+  el lienzo de 32 aparte), ese lienzo se suelta: el nuevo siempre es de 32.
+- **Las ventanas** (`ventanas.cas`, `cambia_pantalla()`): un doble búfer y un
+  tapiz nuevos (se piden antes de tocar nada: si no hay memoria, no se cambia),
+  y las ventanas dentro: **las maximizadas, a la medida nueva** (su programa
+  recibe `EV_TAMAÑO` y se vuelve a pintar, como al maximizar); las demás, donde
+  estaban si caben y si no, más arriba o más a la izquierda. El ratón llega hasta
+  el borde nuevo (`pon_medida_ratón()`).
+- **El escritorio** (`escritorio.cas`, `cambia_medida()`): cierra el menú Inicio,
+  los emergentes y el globo; la barra de tareas, de lado a lado y abajo; el menú
+  Inicio, encima; el tapiz, pintado otra vez a la medida; los iconos que se
+  salgan, dentro; los cuadros abiertos, centrados.
+
+![A prueba: la pantalla ya a 1024 x 768, con el Bloc de notas maximizado a la medida nueva](pentium/pantalla-probar.png)
+
+**La lista** (`prepara_modos()`): de 800 x 600 a 1920 x 1080 (800 x 600, 1024 x
+600, 1024 x 768, 1152 x 864, 1280 x 720, 1280 x 800, 1280 x 1024, 1366 x 768,
+1440 x 900, 1600 x 900, 1600 x 1200, 1680 x 1050 y 1920 x 1080), y de ellos solo
+los que caben:
+
+- en **la tarjeta**: lo más que da (la VBE de Bochs lo dice con `GETCAPS`), el
+  ancho en múltiplos de 8 en la de QEMU y Bochs (redondea: 1366 se queda en
+  1360; la de VirtualBox no), y **su
+  memoria**: la de QEMU y Bochs, su registro `0xA` (en trozos de 64 K); la de la
+  VBoxVGA, el mismo registro leído de 32 bits (en octetos: lo que usan los
+  controladores de VirtualBox); la de la VMSVGA no se sabe desde ahí, y entonces
+  manda lo que se lee al ponerlo (si no cabe, no se enciende: se dice y se vuelve);
+- en **la pantalla**: lo que ella dice de sí misma (su **EDID**). En QEMU, la
+  tarjeta lo deja en su tercera zona PCI: la medida que prefiere (se dice debajo:
+  «La pantalla dice que prefiere 1280 x 800») y, de sus medidas de siempre, la
+  más grande; no se ofrece nada más grande. En VirtualBox no hay EDID (su
+  «pantalla» es la ventana, que muestra lo que sea), ni se puede pedir a la BIOS
+  sin volver al modo real (más abajo);
+- en el **núcleo**: los 16 MB de su ventana para la memoria de la pantalla
+  (`GRÁFICOS_TABLAS`) y la memoria libre para el doble búfer y el tapiz nuevos.
+
+El de ahora sale siempre, aunque no sea de la lista.
+
+**2. Sin la VBE de Bochs (un PC de verdad): al arrancar.** El modo lo pone GRUB
+con la VBE de la BIOS, que desde el modo protegido no se puede llamar. El cuadro
+lo dice («Esta tarjeta no deja cambiarla en marcha: se guarda y se pone al
+arrancar otra vez»), la lista lleva también **«A la medida»** (lo que el monitor
+prefiera, `auto`: su EDID, que GRUB sí le pregunta a la BIOS), y el botón es
+**«Guardar y reiniciar...»**: se apunta para el próximo arranque y sale «Al
+arrancar otra vez, a 1024 x 768», con **«Reiniciar ahora»** y «Más tarde».
+
+- **`\HISPA\PANTALLA.ENV`**: un bloque de variables de GRUB (1024 octetos, como
+  `GRUBENV`, para que GRUB pueda escribir en él con `save_env`): `pantalla=`
+  (`1024x768` o `auto`), `antes=` (la de antes, para volver) y `prueba=`. Va
+  aparte de `GRUBENV` porque PAQUETES y ACTUALIZ escriben aquel entero (su
+  `nuevo=`) y se lo llevarían por delante.
+- **`GRUB.CFG` lo lee**: la primera vez que se guarda una medida, si `GRUB.CFG`
+  no lo hace aún (los instalados con la 0.8), el escritorio le añade al final
+  (GRUB lee el archivo entero antes de enseñar el menú, y la entrada usa
+  `$modo` al arrancar):
+
+  ```
+  if [ -f /HISPA/PANTALLA.ENV ]; then
+    load_env -f /HISPA/PANTALLA.ENV pantalla antes prueba
+    if [ "$prueba" = 2 ]; then
+      set pantalla="$antes"
+      set antes=
+      set prueba=0
+      save_env -f /HISPA/PANTALLA.ENV pantalla antes prueba
+    elif [ "$prueba" = 1 ]; then
+      set prueba=2
+      save_env -f /HISPA/PANTALLA.ENV prueba
+    fi
+    if [ "$pantalla" = auto ]; then
+      set modo=auto
+    elif [ -n "$pantalla" ]; then
+      set modo="${pantalla}x32,${pantalla},${modo}"
+    fi
+  fi
+  ```
+
+  La **reserva de siempre** sigue detrás: si la BIOS no tiene esa medida (ni con
+  32 bits ni con otros), GRUB pasa a la de `set modo=` (`800x600x32,800x600,auto`)
+  y, al final, a `auto`: siempre arranca con algo que se ve.
+- **A prueba, al arrancar**: «Guardar» deja `prueba=1`; GRUB, al arrancar con
+  ella, la pone a `2`. El escritorio, al ver `1` o `2`, pregunta **«¿Se ve bien
+  la pantalla?»** con los mismos 15 s: «Mantener» deja `prueba=0`; «Volver» o los
+  15 s apuntan la de antes (`pantalla=antes`) y ofrecen reiniciar. Y si la
+  pantalla se ha quedado a oscuras y se **reinicia a lo bruto**, GRUB ve
+  `prueba=2` (nadie la ha dado por buena) y **vuelve solo a la de antes**.
+- En un sistema instalado **con** la VBE de Bochs (VirtualBox), la medida
+  guardada la pone GRUB al arrancar (con la tarjeta de QEMU y Bochs la pone su
+  controlador `video_bochs`, cualquiera; con las de VirtualBox, por la VBE de la
+  BIOS); y si la BIOS no la tiene (la VMSVGA de QEMU no da, por ejemplo, 1200 x
+  800), GRUB pone otra y **el núcleo la cambia en marcha** al arrancar el
+  escritorio.
+- **Desde el CD o la memoria USB, sin instalar**, no hay dónde guardarla: la
+  lista sale en gris, y para arrancar a la medida está la entrada **«a la medida
+  de la pantalla»** del menú del CD.
+
+![Sin la VBE de Bochs (-vga cirrus, como un PC de verdad): «Guardar y reiniciar...»](pentium/pantalla-guardar.png)
+
+**¿Y la lista de modos de la BIOS?** GRUB deja en la información de multiboot
+la de su VBE (`vbe_control_info`), pero solo trae **números** de modo (y un
+puntero de modo real que puede apuntar a la memoria de trabajo de GRUB, ya
+pisada): la medida de cada uno hay que pedírsela a la BIOS (`4F01h`), y eso no
+se puede desde el modo protegido. Por eso, sin la VBE de Bochs, se ofrece la
+lista de siempre y manda la reserva de GRUB.
+
+**¿Cambiarla en marcha llamando a la VBE de la BIOS?** Evaluado, y **no se ha
+hecho**. Hay dos maneras:
+
+1. **Una tarea V86** (el modo virtual 8086 del procesador, lo que usaban X.org y
+   los controladores VESA de los 90): hace falta el primer mega a la vista **del
+   anillo 3** en ese espacio (la tabla de interrupciones de la página 0, la zona
+   de datos de la BIOS, su EBDA y sus ROM de `C0000h` a `FFFFFh`: hoy están en la
+   identidad del núcleo, sin el permiso del anillo 3), un **monitor** que atienda la
+   protección general de `INT`, `PUSHF`, `POPF`, `CLI`, `STI` e `IRET` (con
+   IOPL < 3) y el mapa de puertos del TSS (hoy no hay); y, sobre todo, una
+   **entrada de interrupción propia** en ensamblador: al pasar de V86 al anillo 0
+   el procesador deja `DS`, `ES`, `FS` y `GS` a 0, y las `interrupción función` de
+   Castel cuentan con `DS` plano (no lo vuelven a cargar), así que la protección
+   general, el fallo de página y las demás excepciones necesitarían su propia
+   puerta para cuando vienen de V86.
+2. **Un emulador de modo real** pequeño (como x86emu, el de X.org y `v86d` de
+   Linux): sin trucos del procesador, pero son miles de líneas para emular todo
+   lo de 16 bits (y de 32, que las VBIOS usan) y los puertos.
+
+Las dos se pueden hacer, pero **lo que no se puede aquí es dejarlo robusto**: la
+única VBIOS que se puede probar (la de QEMU, SeaVGABIOS) ya habla con la VBE de
+Bochs, que se cambia sin BIOS; las de los PC de verdad (la Intel GMA del Toshiba
+y del HP Mini, la de los Mac) hacen cada una lo suyo (llamadas a la BIOS del
+sistema, al PCI BIOS, esperas con el reloj, instrucciones de 32 bits), y un fallo
+ahí deja el equipo **colgado con la pantalla a oscuras**. Con GRUB, en cambio, el
+peor caso es un reinicio y la vuelta sola a la de antes. Queda para más adelante,
+como servicio aparte (al estilo de `ACPI.BIN`), cuando haya en qué probarlo; para
+las Intel GMA, el arreglo de la sección 11 (decirle a la tubería la medida nueva
+sin la BIOS) es lo que más rinde.
+
+**Probado** (parte 17 de las pruebas, `SOLO=pantalla`): con QEMU `-kernel`
+(-vga std: el modo lo pone el núcleo) la lista, «Probar...», «Mantener», el Bloc
+de notas maximizado que se pone a la medida nueva y la vuelta sola a los 15 s;
+el CD en un «pc» como VirtualBox con el modo de GRUB, con `-vga std` (como la
+VBoxVGA) y con `-vga vmware` (la VMSVGA, `15AD:0405`), cambiado en marcha; e
+instalado desde el CD con `-vga cirrus` (sin la VBE de Bochs, como un PC de
+verdad): guardar, reiniciar, la prueba al arrancar con «Mantener», y otra que
+no se da por buena y que GRUB deshace sola al reiniciar a lo bruto. Y,
+instalado con `-vga std`, «Mantener» que se guarda; y con `-vga vmware`, 1200 x
+800 (que su BIOS no da) puesta por el núcleo al arrancar.
+
 ### Lo que falta
 
 Hacer carpetas y cambiar nombres desde Mi equipo (y «Nueva carpeta» en el tapiz);
-iconos del tapiz para los documentos; la barra de desplazamiento y la **rueda del
-ratón** (el panel táctil la imita, pero el ratón se enciende como PS/2 sencillo);
+iconos del tapiz para los documentos; la barra de desplazamiento en los
+programas de Castel (la **rueda del ratón** ya llega, desde la 0.8.3: `EV_RUEDA`,
+sección 14 ter; la usa el Navegador);
 que la Consola cambie sus filas y columnas con la ventana, y guarde lo que ha
 pasado hacia arriba; menús que se abren con Alt y submenús; letras de otros
 tamaños y de ancho variable; el ajuste del doble clic; y que el tapiz pueda ser
@@ -1646,7 +2006,10 @@ con el sistema (`usb.sh`):
 | el sistema que ya estaba en el disco | (si se instaló junto a otro) `chainloader +1` de su partición |
 
 La primera línea que cuenta, **`set modo=800x600x32,800x600,auto`**, es la medida
-de la pantalla: la cambia el asistente (o se cambia a mano).
+de la pantalla: la cambia el asistente (o se cambia a mano). Desde el 20/11, lo
+que se elige en Configuración (`\HISPA\PANTALLA.ENV`) va por delante: la
+primera vez que se guarda una medida, el escritorio le añade a `GRUB.CFG` lo que
+la lee (sección 10, «La medida de la pantalla»).
 
 **Sin GRUB**, otro camino para más adelante: un cargador propio (MBR y sector de
 arranque de la partición) que lea el núcleo de la FAT32 y pida el modo a la VBE.
@@ -1707,16 +2070,105 @@ qemu-system-i386 -m 64 -rtc base=localtime \
   -device ahci,id=sata -drive id=d,file=/dev/shm/disco.img,format=raw,if=none -device ide-hd,drive=d,bus=sata.0
 ```
 
+### El CD (o DVD) de instalación, y VirtualBox (20/11)
+
+**`nucleo32/cd.sh IMAGEN.ISO [CLAVE_PRIVADA]`** hace el **CD de Hispa-Pentium**:
+una ISO 9660 (unos 8 MB) que arranca **por la BIOS con El Torito «sin
+emulación»** (`grub-mkrescue` con solo `i386-pc`, y `xorriso`; no hace falta
+ser root). La misma imagen vale **grabada en un CD o en un DVD**, en un PC de
+verdad, y en **VirtualBox** o QEMU como unidad óptica; y, como es híbrida,
+grabada tal cual en una memoria USB también arranca.
+
+**Por qué no hace falta ATAPI ni ISO 9660 en el núcleo.** GRUB lee el CD por
+la BIOS y **carga en la memoria** todo lo que hace falta, como módulos: el
+núcleo lo ve como la **unidad M:** (en memoria, de solo lectura), la misma de
+la memoria USB cuando su USB no se deja (sección 7). Así vale cualquier unidad
+de CD (IDE, SATA, USB) sin un controlador más, y el núcleo no crece; y el
+programa INSTALAR copia de M: al disco como siempre. (Un controlador ATAPI y
+la ISO 9660 solo servirían para leer el CD *después* de arrancar: para
+instalar, no hacen falta.) Lo común con la memoria USB (compilar todo, el
+núcleo y sus copias que piden el modo, los programas, ACPI, la oficina, los
+textos, `BOOT.IMG`/`CORE.IMG`, los paquetes del sistema y las listas de
+módulos) está en **`nucleo32/sistema.sh`**, que leen `usb.sh`, `cd.sh` y
+`actualiza.sh`.
+
+El menú de GRUB del CD (10 s):
+
+| Entrada | Qué arranca |
+|---|---|
+| **Arrancar Hispa-Pentium 0.8 sin instalar** (la de por omisión) | `ESCRIT8.BIN escritorio unidad=M`, con los programas como módulos: el escritorio a 800 x 600; los discos se ven pero no se tocan |
+| **Instalar Hispa-Pentium 0.8 en el disco duro** | `SEMILLA.BIN instalar unidad=M` con todo lo que se instala y **`MEDIO.TXT`** («CD»), que le dice a INSTALAR que es el CD: «sin el CD», «Saque ahora el CD (o el DVD)» (no lo instala) |
+| sin instalar, a la medida de la pantalla | `gfxpayload=auto` |
+| sin instalar, sin USB, discos, red ni ACPI | por si un equipo no arranca |
+| el intérprete de órdenes (modo texto) | `SEMILLA.BIN ordenes unidad=M` |
+| los modos de vídeo de la BIOS | `videoinfo` |
+| arrancar del disco duro | `chainloader +1` del primer disco (si se ha dejado el CD puesto) |
+
+En el CD van también, en `\PAQUETES`, los paquetes del sistema con su catálogo
+(con `CLAVE_PRIVADA`, firmado).
+
+**Sin UEFI**: el núcleo usa la pantalla de texto (INSTALAR) y el modo que pone
+GRUB por la VBE, que con UEFI no están, y el disco instalado arranca por la
+BIOS. En VirtualBox, «Habilitar EFI» tiene que estar quitado (lo está, para
+«Other»).
+
+**VirtualBox**, lo que trae de serie y cómo va:
+
+| Pieza | En VirtualBox | Hispa-Pentium |
+|---|---|---|
+| el disco | SATA AHCI (ICH9) o IDE (PIIX3/PIIX4) | los dos (`ahci.cas`, `ata.cas`); el CD en AHCI (ATAPI) se ve y no se toca |
+| el CD/DVD | en el mismo SATA o en el IDE secundario | lo lee GRUB por la BIOS |
+| la red | Intel PRO/1000 MT Desktop (82540EM, `8086:100E`) | la e1000 de `RED.BIN` (ya estaba en la lista) |
+| el USB | OHCI (USB 1.1), con la tableta USB si se elige | OHCI no lo lleva: se deja quieto; teclado y ratón, por PS/2 (el ratón «PS/2» de VirtualBox) |
+| la gráfica | VMSVGA o VBoxVGA, con VBE | el modo lo pone GRUB por la VBE; desde Configuración se cambia **en marcha** (las dos llevan la VBE de Bochs: sección 10) |
+| ACPI | sí | `ACPI.BIN`: apagar de verdad |
+
+**Probado en QEMU imitando a VirtualBox** (parte 15 de las pruebas): `-machine
+pc` con el disco IDE, `-device pci-ohci` con una `usb-tablet` y la e1000
+(`-nic user,model=e1000`): arranca sin instalar, con la red; instala en el disco
+IDE y el disco arranca solo. `-machine q35` (ICH9: el disco y el CD en AHCI):
+instala en el disco SATA y arranca. El LEEME de la carpeta del CD cuenta paso a
+paso cómo hacer la máquina en VirtualBox.
+
+```
+castel/nucleo32/cd.sh /tmp/cd.iso
+truncate -s 2G /tmp/d.img
+qemu-system-i386 -machine q35 -m 256 -nic user,model=e1000 -cdrom /tmp/cd.iso \
+  -drive file=/tmp/d.img,format=raw,if=none,id=d -device ide-hd,drive=d,bus=ide.0 -boot d
+```
+
 ## 13. Los paquetes y las actualizaciones
 
 Desde la **0.8** (20/11/2026), lo instalado en el disco se puede **poner al día,
 añadir y quitar** sin volver a instalar el sistema: por **paquetes** (archivos
 `.HPQ`), que maneja el programa **PAQUETES** (`upaquete.cas`, `PAQUETES.BIN`,
-del anillo 3, en Castel) y que se hacen en el VPS con **`tools/hpq.py`**. De
-momento los paquetes se traen de una carpeta (la de la memoria USB, la de otro
-disco...); cuando el núcleo tenga red, de Internet (más abajo: «el gancho de la
-red»). (El número de versión del sistema —el núcleo, el escritorio, INSTALAR—
-sigue en 0.7: lo cambia quien publique la 0.8.)
+del anillo 3, en Castel) y que se hacen en el VPS con **`tools/hpq.py`**. Los
+paquetes se traen de una carpeta (la de la memoria USB, la de otro disco...) o,
+desde la tarde del 20/11, **de Internet**, con el catálogo **firmado**
+(Ed25519): más abajo, «Por Internet», «La firma» y «El núcleo nuevo».
+
+### La 0.8.1: la primera actualización de verdad
+
+*20/11/2026, por la noche.* Lo que cambia desde el CD 0.8 llega por el
+actualizador como **0.8.1**: solo suben los paquetes cuyo contenido ha cambiado
+(comparados archivo a archivo con los del CD): **`base`** (el núcleo con la
+llamada 99 del servicio TLS, cambiar la resolución desde Configuración, los
+accesos de los paquetes en el menú Inicio y Mayús+Tab; y su MANUAL.TXT),
+**`red`** (IPCONFIG, PING y DESCARGAR, que ya sabe `https://`) y el nuevo
+**`tls`** (`TLS.BIN` y `HTTPS.BIN`, sección 14). Los demás siguen en la 0.8
+(`VERSION_08` en `tools/hpq.py`). `tls` y `red` necesitan `base >= 0.8.1`; el
+programa **ClicGest** (paquete `clicgest`, de su propio repositorio) necesita
+`base`, `red` y `tls` 0.8.1. El núcleo sigue diciendo «versión 0.8» (los textos
+de VER y del menú Inicio no cambian: lo que se instala lo dicen los paquetes).
+
+Probado a mano en QEMU (un «q35» como el VirtualBox de Carlos): el sistema
+instalado del CD 0.8 (el mismo `.iso`), con el catálogo firmado de verdad en un
+servidor de aquí, avisa «Hay 2 actualizaciones», las pone, reinicia con el
+núcleo nuevo («El núcleo nuevo ha arrancado bien»; el de antes, en
+`NUCLEO.ANT`), instala `clicgest` (y con él `tls`) desde «Programas y
+actualizaciones», ClicGest sale en el menú Inicio y, al entrar con una cuenta
+que no existe, habla TLS 1.2 con clicgest.es (la cadena comprobada) y dice «El
+correo o la contraseña no son correctos» (el 401 de su API).
 
 ### El paquete (.HPQ)
 
@@ -1749,9 +2201,8 @@ fin
   `\HISPA\BLOC.BIN`, `\OFICINA\PLUMA.HVP`; no en `\HISPA\PAQUETES`, que es la base
   de lo instalado), lo que mide y su **SHA-256**.
 - Lo que PAQUETES no conoce lo deja pasar: así caben cosas nuevas sin cambiar de
-  formato. **`firma=`** queda reservada para firmar el paquete; esta versión de
-  PAQUETES dice que la lleva, pero aún no la comprueba (la cadena de confianza de
-  hoy es el catálogo, que lleva el SHA-256 de cada paquete entero: más abajo).
+  formato. Lo que se firma es el **catálogo**, que lleva el SHA-256 de cada
+  paquete entero (más abajo, «La firma»): el paquete no lleva firma propia.
 
 El **SHA-256** está escrito en Castel (`nucleo32/sha256.cas`, el módulo `Sha256`:
 `empezar`, `añadir` y `acabar`, de FIPS 180-4), para los programas del anillo 3.
@@ -1808,7 +2259,7 @@ En el intérprete de órdenes (o en la Consola del escritorio):
 `C:\HISPA\PAQUETES\ORIGEN.TXT`; si no, la carpeta **`\PAQUETES`** de la primera
 unidad que tenga un `CATALOGO.TXT` (primero las memorias USB: la de arranque de
 la 0.8 lleva todos los paquetes del sistema); y si no, Internet:
-`http://actualiza.clicgest.es/pentium/`.
+`http://actualiza.hispados.es/pentium/`.
 
 **Antes de tocar nada**, PAQUETES hace el plan entero: lo que se pide y lo que
 necesita (la versión más nueva del catálogo que cumpla, si lo instalado no
@@ -1836,7 +2287,8 @@ entero.) Cuando hay que instalar varios paquetes, cada uno es su propio todo o
 nada, en orden: si falla el tercero, los dos primeros (lo que necesitaba) quedan
 instalados, y se dice.
 
-**El gancho de la red.** PAQUETES no sabe de TCP/IP: para traer de Internet el
+**El gancho de la red** (cómo era; hoy lo hace `DESCARGA.BIN`, el de verdad:
+«Por Internet», abajo). PAQUETES no sabe de TCP/IP: para traer de Internet el
 catálogo y cada paquete, a `C:\HISPA\PAQUETES\BAJADAS`, lanza el programa
 **`DESCARGA.BIN`** (la orden de descargar de la red: su nombre tiene que caber en
 8+3) con dos argumentos, **`URL DESTINO`**, lo espera, y vale si acaba con el
@@ -1882,25 +2334,159 @@ python3 tools/hpq.py sistema SALIDA CARPETA...   # los paquetes del sistema (lo 
 
 | Paquete | Versión | Lleva | Necesita |
 |---|---|---|---|
-| `base` | 0.7 | `NUCLEO.BIN`, `ORDENES.BIN`, `ASISTE.BIN`, `INSTALAR.BIN`, `LEEME.TXT` (en `\HISPA` y en la raíz), `MANUAL.TXT`, `BOOT.IMG`, `CORE.IMG` | — |
+| `base` | 0.8.3 | `NUCLEO.BIN`, `ORDENES.BIN`, `ASISTE.BIN`, `INSTALAR.BIN`, `LEEME.TXT` (en `\HISPA` y en la raíz), `MANUAL.TXT`, `BOOT.IMG`, `CORE.IMG` | — |
 | `bloc` | 0.7 | `BLOC.BIN` | base >= 0.7 |
 | `consola` | 0.7 | `CONSOLA.BIN` | base >= 0.7 |
-| `equipo` | 0.7 | `EQUIPO.BIN` (Mi equipo) | base >= 0.7 |
-| `ejemplos` | 0.7 | `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN` | base >= 0.7 |
+| `equipo` | 0.8.3 | `EQUIPO.BIN` (Mi equipo) y `DISPOSIT.BIN` (el Administrador de dispositivos) | base >= 0.8.3 |
+| `ejemplos` | 0.8.2 | `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN`, `MUESTRA.BIN` (los controles de las ventanas) | base >= 0.8.2 |
 | `paquetes` | 1.0 | `PAQUETES.BIN`, `ACTUALIZ.BIN` (su ventana) | base >= 0.7, nucleo >= 0.7 |
 | `hvprun` | 0.7 | `HVPRUN.BIN` | base >= 0.7 |
 | `oficina` | 1.0 | `\OFICINA\`: `FACTURAS.HVP`, `PLUMA.HVP`, `CUENTAS.HVP`, `MIRADOR.HVP`, `TIPOS.DAT`, `DICCIO.DAT` | hvprun >= 0.7 |
 
+Y uno que no va con el sistema (`hpq.py opcionales`, la lista `OPCIONALES`: se
+instala desde «Programas y actualizaciones»): `navega` 0.1, **el Navegador**
+(`\HISPA\NAVEGA\...` y su acceso en `\HISPA\MENU`; necesita base >= 0.8.3,
+red y tls: sección 14 ter).
+
 (`GRUB.CFG`, `HISPA.INI` y `MBR.ANT` no son de ningún paquete: son de este equipo.)
 Para publicar una actualización: hacer el paquete con su versión nueva, ponerlo
 con los demás, `hpq.py catalogo` y subir la carpeta (a la memoria USB o, cuando
-haya red, a `actualiza.clicgest.es/pentium/`).
+haya red, a `actualiza.hispados.es/pentium/`).
 
-**Lo que falta**: comprobar la **firma** (del catálogo, que lleva las sumas de
-todo; con una clave pública dentro del sistema); actualizar el núcleo y pedir
-reiniciar (hoy se pone el archivo, y vale en el arranque siguiente); que la
-ventana deje elegir el origen y enseñe el avance; y la red (sección 14), que
-trae lo de Internet por el gancho.
+### Por Internet (la tarde del 20/11)
+
+**El servidor.** `http://actualiza.hispados.es/pentium/` (el VPS sirve
+`/www/hispados` con ese nombre; la carpeta `pentium` va al lado de los `.paq` de
+Hispa-DOS): los `.HPQ`, su `CATALOGO.TXT` y la firma, `CATALOGO.FIR`. Lo hace
+**`nucleo32/actualiza.sh CARPETA CLAVE_PRIVADA`** (los mismos paquetes que van
+en la memoria USB y en el CD, hechos de lo que se instala, y el catálogo
+firmado; al acabar comprueba la firma con la clave pública del sistema). Para
+publicar una versión nueva: subir su número en `tools/hpq.py` (`SISTEMA`), hacer
+`actualiza.sh` otra vez y copiar **la carpeta entera** (los paquetes y el
+catálogo van juntos: si no, las sumas no cuadran y no se instala).
+
+**De dónde.** Igual que antes (`/DESDE=`, `ORIGEN.TXT`, la carpeta `\PAQUETES` de
+una unidad con catálogo, primero las memorias USB) y, si no, Internet. Lo trae
+**`DESCARGA.BIN`** (la orden DESCARGAR de la sección 14) a
+`C:\HISPA\PAQUETES\BAJADAS`: el catálogo, su firma y cada paquete, cada vez
+(«Buscar novedades» es eso: traer el catálogo otra vez).
+
+### La firma
+
+Todo va por **HTTP sin cifrar**, así que cualquiera en el camino podría
+cambiar lo que llega. Por eso el catálogo va **firmado con Ed25519** (RFC 8032):
+el catálogo lleva el tamaño y el SHA-256 de cada paquete, y cada paquete los de
+sus archivos, así que con firmar el catálogo queda atado todo.
+
+- **`CATALOGO.FIR`**, al lado del catálogo: una línea, `ed25519 ` y las 128
+  cifras hexadecimales de la firma de `CATALOGO.TXT` tal cual (octeto a octeto).
+- **La clave pública va dentro del sistema**: `nucleo32/clave.cas` (el módulo
+  `Clave`: sus 32 octetos y su huella, las 16 primeras cifras, que PAQUETES
+  dice al comprobar). **La privada no está en el repositorio**: en el VPS, en
+  `/root/.claude/Secretos/hispa-pentium-firma.key` (permisos 600). Sin ella no
+  se puede publicar nada que un Hispa-Pentium acepte de Internet.
+- **Comprobarla**: `nucleo32/firma.cas` (el módulo `Firma`, en Castel: unas 600
+  líneas, de dominio público el camino —el de TweetNaCl— y GPL lo escrito). Lleva
+  su **SHA-512** (los números de 64 bits hechos de dos de 32) y las cuentas de la
+  curva con los números módulo 2^255 − 19 en **32 trozos de 8 bits**, cada uno en
+  un `ent32`: así ninguna cuenta pasa de 32 bits (Castel no tiene números de 64)
+  y no hace falta ensamblador. Comprueba que S < 2^253 y que la clave es un punto
+  de la curva. Tarda unos **0,25 s** en QEMU (24-30 tics).
+- **Cuándo**: lo traído **de Internet** tiene que llevar firma, y buena: si no
+  la trae («el catálogo de Internet no trae su firma») o no es buena («la firma
+  del catálogo NO es buena: no se usa nada de él»), no se usa **nada** del
+  catálogo. De **una carpeta**, si trae `CATALOGO.FIR` se comprueba igual (y con
+  una mala, nada); sin ella se usa, como antes (la ha puesto ahí quien maneja el
+  equipo). `PAQUETES ESTADO` dice `origen|...|firmado` y la ventana pone
+  «(firma buena)» al lado del origen.
+- **`PAQUETES FIRMA ARCHIVO`**: si `ARCHIVO.FIR` (el mismo nombre, con `.FIR`)
+  es su firma buena, con la clave del sistema.
+- **`tools/hpq.py`**: `clave PRIVADA` (una nueva: la privada al archivo, 600, y
+  dice la pública), `publica PRIVADA [clave.cas]` (y el módulo de Castel),
+  `firma CARPETA PRIVADA`, `catalogo CARPETA --clave PRIVADA` (hace el catálogo y
+  lo firma) y `comprueba CARPETA PUBLICA`. Usa el módulo `cryptography` de Python.
+- **Cambiar de clave** (si la privada se perdiera o se supiera): una nueva con
+  `hpq.py clave`, `hpq.py publica ... clave.cas`, y sacar un `paquetes` nuevo
+  firmado aún con la vieja (que lleva ya la clave nueva); luego, todo con la
+  nueva.
+
+### El núcleo nuevo, y volver al de antes
+
+Cuando un paquete cambia **`\HISPA\NUCLEO.BIN`** (el `base`):
+
+1. El de antes **no se borra**: queda en **`\HISPA\NUCLEO.ANT`** (el de justo
+   antes de la última actualización).
+2. PAQUETES escribe **`\HISPA\GRUBENV`** (el «bloque de entorno» de GRUB: 1.024
+   octetos, texto y `#` hasta el final) con **`nuevo=1`**, y, si `GRUB.CFG` aún
+   no la tiene, le añade al final la entrada **«Hispa-Pentium con el núcleo de
+   antes»** (`--id anterior`, `NUCLEO.ANT`) y unas líneas que leen y escriben
+   `GRUBENV` (`load_env`, `save_env`: el `CORE.IMG` de la 0.8 lleva `loadenv`):
+
+   | `nuevo=` | Qué hace GRUB al arrancar |
+   |---|---|
+   | 1 | lo pasa a **2** y arranca el núcleo nuevo, como siempre |
+   | 2 | (el nuevo no llegó a decir que arrancó) lo pasa a **3** y arranca **el de antes** |
+   | 3 o 4 | sigue arrancando el de antes |
+   | 0 | lo de siempre |
+
+3. PAQUETES dice `reiniciar|...` y la ventana ofrece **«Reiniciar ahora»** o
+   **«Más tarde»** (la llamada 66, que vacía los discos antes).
+4. Al arrancar el escritorio de un sistema instalado, **`ACTUALIZ /BANDEJA`**
+   mira `GRUBENV`: con `nuevo=2`, el núcleo nuevo ha arrancado: lo pone a **0** y
+   lo dice («El núcleo nuevo ha arrancado bien»); con `nuevo=3`, GRUB ha vuelto
+   al de antes: lo pone a **4** (para decirlo una sola vez) y lo dice («El nuevo
+   no llegó a arrancar: se usa el de antes»).
+
+Así, un núcleo nuevo que se cuelga, o que reinicia, o que no llega al
+escritorio: **al reiniciar (aunque sea a mano), GRUB arranca solo el de antes**.
+Probado en QEMU con un núcleo que se queda en `hlt` (parte 15 de las pruebas).
+Se sigue con el de antes hasta que se instale otro núcleo (`PAQUETES INSTALA
+... /FORZAR`, o uno más nuevo). En un disco instalado con la 0.7 (su `CORE.IMG`
+sin `loadenv`), GRUB dice que no conoce `load_env` y sigue: la entrada del de
+antes está igual en el menú, pero hay que elegirla a mano.
+
+### El aviso de la bandeja
+
+Al arrancar el escritorio de un sistema instalado (con `HISPA.INI`: no en el
+primer arranque, que es el del asistente), el núcleo lanza, si está,
+**`\HISPA\ACTUALIZ.BIN /BANDEJA`** (lo único nuevo en el núcleo: tres líneas
+en `escritorio.cas`). Sin molestar: lo de `GRUBENV` (arriba); luego espera a
+la red (hasta 90 s; sin red, se acaba sin decir nada), hace `PAQUETES ESTADO`
+a su archivo (`BANDEJA.TXT`) y, **solo si hay algo más nuevo** que lo
+instalado (o algo que contar del núcleo), saca una **ventanita abajo a la
+derecha, encima de la bandeja**: «Hay N actualizaciones», con **«Verlas»** (abre
+la ventana) y **«Ahora no»**; se va sola a los 45 s. (Un icono propio en la
+bandeja, como el de la red, pediría más núcleo: la ventanita es un programa
+del anillo 3.)
+
+![El aviso de la bandeja](pentium/actualiza-bandeja.png)
+
+### La ventana, con su barra
+
+«Programas y actualizaciones» lanza PAQUETES **sin quedarse parada**
+(`acabada`, cada 15 tics) y con **`/AVANCE`**: PAQUETES escribe en
+`C:\HISPA\PAQUETES\AVANCE.TXT` una línea `hecho total texto` («Comprobando
+la firma del catálogo», «Bajando BASE.HPQ», «Comprobando base», «Instalando
+base»), y `DESCARGA /AVANCE=archivo` la pone al día cada 16 K mientras baja un
+paquete (con lo que dice `Content-Length`): la ventana la lee y pinta la
+**barra** (sin total, una franja que corre). Botones: **Instalarlo**
+(o Actualizarlo), **Quitarlo**, **Actualizar todo** y **Buscar novedades**
+(F5). Abajo, lo que dice PAQUETES (sin lo que dice DESCARGA de cada archivo).
+**A la medida de la ventana**: al cambiarla de tamaño o maximizarla, la lista,
+los mensajes, la barra y los botones se recolocan a su ancho y su alto (la
+lista enseña más renglones), y lo que no cabe se corta con «...» (antes, con
+la ventana maximizada, las descripciones y los mensajes se salían de su
+recuadro: lo vio Carlos con la red de verdad, 20/11). Si el servidor aún no
+tiene nada publicado (el catálogo da 404: `DESCARGA` acaba entonces con el
+código 4), PAQUETES lo dice en llano: «Todavía no hay actualizaciones
+publicadas en el servidor.»
+
+![La ventana, con lo nuevo de Internet](pentium/actualiza-ventana.png)
+
+**Lo que falta**: HTTPS (sección 14); buscar novedades cada cierto tiempo (hoy,
+al arrancar y al pulsar); que la ventana deje elegir el origen; las
+diferencias (hoy se baja el paquete entero); y una firma por paquete, para
+los que se instalan sueltos de una carpeta.
 
 ## 14. La red por cable (la 0.8)
 
@@ -1951,6 +2537,7 @@ núcleo) y un fallo de la red acaba con el servicio, no con el sistema.
 | 96 | el servicio | **cómo está la red** (EBX: `RED_SIN_TARJETA`, `RED_SIN_CABLE`, `RED_BUSCANDO`, `RED_CONECTADA`), su IP (ECX) y el aparato PCI que hace DMA (EDX) | 0 |
 | 97 | cualquiera | cómo está la red (lo que dijo el servicio con la 96) y, a EBX, la IP | `RED_...` (`RED_NADA`: no hay servicio) |
 | 98 | el servicio | **la interrupción de su tarjeta** (EBX: 3, 5, 7, 9, 10 u 11; 0: ninguna): cuando llega, el núcleo **tapa esa línea** en el 8259, despierta al servicio y la destapa en su siguiente llamada 92 (el servicio ya ha visto la causa en la tarjeta) | 0 |
+| 99 | un programa | **pedir al servicio TLS** (`TLS.BIN`): como la 90, pero el pedido va al servicio de las conexiones cifradas (más abajo, «HTTPS: el servicio TLS»). Si no está en marcha, el núcleo lo pone (una vez) | la primera palabra de la respuesta (`SIN_TLS`, `0xFFFFFFE3`, si no hay servicio) |
 
 Si el servicio se acaba (o lo acaban), el núcleo **apaga el DMA de su tarjeta**
 (el bit 2 de la orden PCI) antes de que su memoria vuelva a los marcos libres,
@@ -2019,7 +2606,8 @@ núcleo: `es_error_red` mira los dos, y `texto_error_red` los dice.
 |---|---|---|
 | `IPCONFIG [/RENOVAR] [/TODO]` | `IPCONFIG.BIN` (`uipconf.cas`) | cómo está la red (si aún se pide la IP, espera); `/RENOVAR`, otra vez DHCP; `/TODO`, además lo apuntado por el servicio (para mandarlo si algo no va: `IPCONFIG /TODO > RED.TXT`) |
 | `PING nombre [-n veces] [-l octetos] [-t]` | `PING.BIN` (`uping.cas`) | como el de siempre, con su resumen; Ctrl+C para (`-t`) y dice el resumen |
-| `DESCARGAR http://servidor[:puerto]/camino [archivo]` | `DESCARGA.BIN` (`udescarg.cas`) | HTTP/1.1 sin cifrar: `Content-Length`, en trozos (`chunked`) o hasta que se cierre; hasta 5 redirecciones; el archivo, con el nombre de lo último del camino en 8+3 (o el que se diga; `-`: a la pantalla); un punto cada 32 K y, al final, cuánto y en cuánto tiempo |
+| `DESCARGAR http[s]://servidor[:puerto]/camino [archivo]` | `DESCARGA.BIN` (`udescarg.cas`) | HTTP/1.1, sin cifrar o (desde el 20/11, con `https://`) cifrado con el servicio TLS: `Content-Length`, en trozos (`chunked`) o hasta que se cierre; hasta 5 redirecciones; el archivo, con el nombre de lo último del camino en 8+3 (o el que se diga; `-`: a la pantalla); un punto cada 32 K y, al final, cuánto y en cuánto tiempo. Si el certificado no vale, no baja nada y dice por qué |
+| `HTTPS [-X MÉTODO] [-d DATOS] [-H Cabecera:valor] [-i] [-o ARCHIVO] dirección...` | `HTTPS.BIN` (`uhttps.cas`) | un curl pequeño con la biblioteca `Https`: varias direcciones seguidas, por la misma conexión y con las galletas; `HTTPS /ESTADO` (la fecha que usa el servicio TLS, las autoridades) y `HTTPS /TODO` (lo que ha apuntado) |
 
 El intérprete de órdenes, con un nombre de más de ocho letras que no
 encuentra, prueba con las ocho primeras (como el DOS): `DESCARGAR` es
@@ -2047,8 +2635,8 @@ QEMU_MAS="-nic user,model=e1000" ESCRIBE=1 DISCO=/tmp/d.img ARRANQUE=ordenes \
 pone `-nic none` si no se le da una tarjeta: si no, QEMU pone una e1000 y el
 escritorio pondría en marcha el servicio. Para descargar, un servidor HTTP en
 esta máquina se ve en `10.0.2.2` (`nucleo32/servidor_prueba.py`, el de las
-pruebas). En el VPS sale a internet: `ping actualiza.clicgest.es` y
-`descargar http://actualiza.clicgest.es/ultima.txt -` también van.
+pruebas). En el VPS sale a internet: `ping actualiza.hispados.es` y
+`descargar http://actualiza.hispados.es/ultima.txt -` también van.
 
 ### El Wi-Fi, más adelante
 
@@ -2068,36 +2656,529 @@ servicios por un tubo del núcleo (dos llamadas nuevas, a partir de la 99), y
 en `\HISPA\RED.INI` (como `RED.INI` de Hispa-486); un programa `WIFI` para
 buscar redes y conectarse, y el icono diría la intensidad.
 
-### HTTPS, más adelante
+### HTTPS: el servicio TLS (`TLS.BIN`)
 
-`DESCARGAR` solo sabe `http://`. Para HTTPS, lo que ya tiene el proyecto es
-**HSPTLS** (`w32/tls/hsptls.c` con BearSSL 0.6, TLS 1.2 con ECDHE y la cadena
-de certificados comprobada; `w32/https.c`; docs/RED.md, «HSPTLS.DLL»): C de
-32 bits sin memoria dinámica, hecho para máquinas pequeñas. Lo más corto: un
-programa del anillo 3 en C (con el mismo arreglo de `gcc -m32` y la cabecera
-`HPU3` que el Wi-Fi) que enlace `hsptls.c` y BearSSL y hable con `RED.BIN` por
-la llamada 90 igual que `redes.cas` (son ocho palabras y un `int 0x80`): un
-`DESCARGAR` que entienda `https://`, o mejor un **servicio TLS** al que
-`DESCARGAR` y los demás le pidan una conexión cifrada como le piden una TCP a
-`RED.BIN`. Lo que hace falta además: la hora buena (para las fechas de los
-certificados: el reloj del PC, o NTP por UDP) y sitio para la caché de
-certificados (`\HISPA\HSPTLS.CCH`). Pasar BearSSL a Castel (las curvas, AES,
-ChaCha20, SHA-2, RSA, X.509) sería mucho más largo.
+*20/11/2026.* Para que los programas de Castel (el primero, ClicGest, que solo
+va por HTTPS) hablen con un servidor de hoy: **TLS 1.2 de cliente**, con el
+certificado del servidor comprobado hasta una autoridad raíz de confianza, SNI
+y la fecha buena. Es lo de **HSPTLS** de Hispa-486 (`w32/tls/hsptls.c`,
+docs/RED.md «HSPTLS.DLL»), pasado a este sistema: **BearSSL 0.6** (Thomas
+Pornin, licencia MIT, `terceros/bearssl`: los mismos fuentes, sin cambiar
+nada) compilado en C para el anillo 3, como `ACPI.BIN` con ACPICA.
+
+**Un servicio aparte, no dentro de `RED.BIN`.** `RED.BIN` es Castel (lo compila
+CASTEL32) y BearSSL es C: no se pueden enlazar juntos sin un enlazador que el
+sistema no tiene. Y así un fallo del cifrado acaba con `TLS.BIN`, no con la
+red, y lo que no usa HTTPS no paga sus 140 K. El precio es un salto más (el
+programa → `TLS.BIN` → `RED.BIN`): nada al lado del apretón de manos.
+
+```
+  DESCARGAR, HTTPS, ClicGest...  (redes.cas: conectar_seguro, enviar, recibir...;
+        │                         biblioteca32/https.cas: Https)
+        │  llamada 99: un pedido, como la 90
+        ▼
+  el núcleo (red.cas): cartero de los dos servicios (cada hueco sabe a cuál va)
+        │  llamadas 92 y 93
+        ▼
+  TLS.BIN, el servicio TLS (anillo 3; nucleo32/tls/: tls.c, libc.c, entrada.asm)
+     BearSSL 0.6: TLS 1.2, X.509, ECDHE, ECDSA, RSA, ChaCha20-Poly1305, AES-GCM
+        │  llamada 90: las conexiones TCP, como cualquier programa
+        ▼
+  RED.BIN, el servicio de red
+```
+
+Lo cambiado en el núcleo es poco y va marcado con «(TLS)»: en `red.cas`, cada
+hueco lleva su destino (el de red o el TLS), un segundo servicio (`TLS.BIN` se
+apunta con la 91, sin puertos ni DMA; coge sus pedidos con la 92 y contesta con
+la 93) y los avisos de las tareas que acaban, para los dos; en `usuario.cas`, la
+99 y `lanza_tls` (como `lanza_red`).
+
+**Para los programas** (`redes.cas`), una conexión cifrada es como una TCP:
+
+```
+s := conectar_seguro("clicgest.es", 443, ESPERA_NORMAL)   ; resuelve, conecta, apretón de manos
+si es_error_red(s) entonces escribir(texto_error_red(s)) ... fin
+enviar(s, pedido, n)                 ; como siempre: enviar, enviar_texto, recibir, cerrar_conexión
+n := recibir(s, búfer, 8192, 1000)   ; 0: el servidor ha cerrado
+cerrar_conexión(s)
+```
+
+El número de una conexión cifrada va de `0x1000` en adelante (`es_segura(s)`):
+`enviar`, `recibir` y `cerrar_conexión` lo ven y van a la 99 en vez de a la 90.
+Además: `info_segura(s, texto, cabe, ms, marcas)` («TLS 1.2, ECDHE-ECDSA,
+ChaCha20-Poly1305», lo que tardó el apretón y si se reanudó o la cadena ya
+estaba comprobada), `estado_tls(texto, cabe)` y `registro_tls`. Los errores
+nuevos: `TLS_CERTIFICADO` (`0xFFFFFFE5`: el certificado no vale), `TLS_FALLO`
+(`E4`: la conexión segura no se ha podido hacer), `SIN_TLS` (`E3`: falta
+`TLS.BIN`) y `TLS_SIN_HORA` (`E2`); para los tres de TLS, `texto_error_red` da
+**el texto de `TLS.BIN`, en español y con el detalle**: «el certificado es de
+otro sitio, no de 10.0.2.2», «el certificado de X no lo firma ninguna autoridad
+conocida», «el certificado de X ha caducado o aún no vale (con la fecha
+01/06/2050, del reloj del PC); compruebe la fecha del equipo», «el reloj del
+equipo no está en hora y no se ha podido preguntar la hora a
+actualiza.hispados.es: sin la fecha no se pueden comprobar los certificados»...
+
+**La biblioteca `Https`** (`castel/biblioteca32/https.cas`; importa `Redes`, así
+que un programa de fuera de `nucleo32/` se compila con `-I castel/nucleo32`):
+
+| Función | Qué |
+|---|---|
+| `https_get(url, destino, cabe, r)` | GET: el cuerpo, a `destino` (acaba en 0 si cabe); da el código (200...) o un error |
+| `https_post(url, clase, cuerpo, n, destino, cabe, r)` | POST con `Content-Type: clase` |
+| `https_pedir(método, url, cabeceras, cuerpo, n, destino, cabe, r)` | cualquier método, con cabeceras propias (`"X-Uno: 1\r\nX-Dos: 2\r\n"`) |
+| `https_abrir(...)` y `https_leer(trozo, cabe)` | lo mismo, pero el cuerpo a trozos (para lo grande); `https_cerrar()` si no se lee entero |
+| `https_cabecera(nombre, destino, cabe)` | una cabecera de la última respuesta |
+| `https_galleta(nombre, destino, cabe)`, `https_borrar_galletas()` | las galletas guardadas |
+| `https_texto_error(e)` | el error, en español |
+
+`r` es un `Respuesta_https`: `código`, `error`, `largo` (lo dejado en
+`destino`), `total` (lo que traía), `redirigida`, `url` (la final) y
+`contenido` (el `Content-Type`). Sigue hasta 5 redirecciones (con 303, y 301/302
+tras un POST, pasa a GET; `sin_redirecciones := cierto` para no seguirlas);
+entiende `Content-Length`, los trozos (`chunked`) y «hasta que se cierre»;
+guarda las galletas (`Set-Cookie`: 16, con `Domain`, `Path`, `Secure` y
+`Max-Age=0`; `Expires` no se mira: son de sesión; `sin_galletas := cierto`) y
+las devuelve a ese servidor; y **deja la conexión abierta** (keep-alive) para
+el pedido siguiente al mismo servidor, que así no repite el apretón de manos (si
+el servidor la ha cerrado entretanto, lo intenta otra vez con una nueva). **Sin
+gzip**: no se manda `Accept-Encoding` y los servidores mandan el cuerpo tal
+cual (descomprimir costaría un inflado en Castel; no es barato).
+
+**Dentro de `TLS.BIN`** (`nucleo32/tls/tls.c`):
+
+- *El perfil* (el de HSPTLS): solo **TLS 1.2** —BearSSL 0.6 no tiene TLS 1.3, y
+  clicgest.es e hispados.es (nginx) aceptan 1.2—; intercambio ECDHE (Curve25519,
+  P-256, P-384), certificado del servidor ECDSA o RSA, y ChaCha20-Poly1305 o
+  AES-GCM. Con **SNI**. Reanuda sesiones (4 servidores): la segunda conexión a
+  clicgest.es no hace ni el intercambio de claves.
+- *Las autoridades raíz*: las 20 de HSPTLS (`w32/tls/anclas.h`, hecho de
+  `w32/tls/raices/*.pem` con `tools/mkanclas.sh`: ISRG Root X1, X2, **YE** y
+  **YR** —la cadena de clicgest.es y de hispados.es acaba en ISRG Root YE—,
+  DigiCert, GlobalSign, Sectigo, Amazon, Google...) y los `*.CER` (X.509 en DER,
+  de autoridad) que haya en `\HISPA\RAICES` y en `\RAICES` de la unidad del
+  sistema: así se añade una (las pruebas ponen ahí la suya).
+- *La memoria de certificados* (la de HSPTLS): una cadena ya comprobada para un
+  servidor (su resumen SHA-256 con el nombre) vale una semana sin volver a
+  comprobar sus firmas; en la memoria del servicio y en `TLS.CCH`.
+- *El azar*: no hay generador del sistema; se junta el contador de ciclos (TSC)
+  cada vez que llega algo de la red, los tics y la fecha, y una semilla que se
+  guarda de una vez para otra (`TLS.SEM`).
+- *Sin hilos*: un bucle que atiende los pedidos y, de cada conexión, mueve los
+  registros entre BearSSL y `RED.BIN`; lo que espera un programa (el apretón,
+  lo que tiene que llegar) se contesta cuando está, y mientras tanto se atiende
+  a los demás (8 conexiones a la vez; la memoria de cada una se pide al
+  núcleo, llamada 17, la primera vez que hace falta).
+- Lo que pasa lo **apunta** (`tls: ...` por el puerto serie; `HTTPS /TODO`).
+
+`TLS.CCH`, `TLS.SEM` y `TLS.INI` van en `\HISPA` de la unidad del sistema (o en
+su raíz si no hay `\HISPA`).
+
+**La hora.** Para mirar las fechas de un certificado hace falta saber qué día
+es. `TLS.BIN` usa **el reloj del PC** (la CMOS, por la llamada 15) si es
+creíble: no antes del día en que se hizo ese `TLS.BIN` (lo pone `hacer.sh`:
+el del último cambio de `tls.c`) ni 30 años después. Si no lo es (la pila del
+reloj gastada: el HP Mini o el Toshiba arrancan en el 2000 o el 2009), pide la
+hora por **HTTP sin cifrar** a `actualiza.hispados.es` (o al servidor que diga
+una línea `hora=servidor[:puerto]` de `TLS.INI`) y toma la de su cabecera
+`Date`. **Es un riesgo, y se apunta**: quien pueda cambiar esa respuesta (en la
+red de en medio) puede hacer pasar por bueno un certificado caducado o aún no
+válido —no uno falso: la firma y el nombre se siguen comprobando—. Lo mejor es
+poner el reloj en hora (el asistente del primer arranque, llamada 67). Si
+tampoco hay respuesta, no hay conexión: `TLS_SIN_HORA`.
+
+**Lo que cuesta.** Medido en QEMU con `-icount shift=0` (el contador de ciclos
+cuenta entonces instrucciones: es lo que `TLS.BIN` apunta como «M ciclos» de
+BearSSL), con `-O2 -march=i586`:
+
+| | Instrucciones (BearSSL) | Pentium a 133 MHz (estimado) |
+|---|---|---|
+| **Apretón de manos con clicgest.es, la primera vez** (la cadena: dos firmas ECDSA P-384; más P-256 y X25519) | **201 M** | **unos 3 s** (de 2,3 a 3,8) |
+| El mismo con hispados.es | 211 M | unos 3 s |
+| **Con la cadena ya comprobada** (`TLS.CCH`) | **25 M** | **unos 0,35 s** |
+| **Sesión reanudada** (la segunda conexión al mismo servidor) | **menos de 1 M** | **menos de 10 ms** (más la ida y vuelta por la red) |
+| Con el certificado de prueba (P-256) / RSA 2048 | 42 M / 30 M | 0,5 s / 0,35 s |
+| Descifrar los datos: ChaCha20-Poly1305 (clicgest.es) | 94 por octeto | unos 0,9 MB/s |
+| Descifrar los datos: AES-256-GCM (el servidor de prueba) | 239 por octeto | unos 0,3 MB/s |
+
+La estimación, como la de HSPTLS para el 486 (docs/RED.md): unos 1,5 ciclos
+por instrucción corriente en un Pentium (P5, con las dos tuberías a medias) y 10
+por multiplicación de 32×32 bits (`MUL`), que son el 5 % de las instrucciones
+de un apretón (las cuentas de HSPTLS); el margen, de 1,2 a 2 ciclos por
+instrucción. Con keep-alive y la reanudación, lo normal de un programa como
+ClicGest es pagar el apretón entero una vez por arranque (y ni eso con
+`TLS.CCH`): luego, cada pedido, lo que tarde el servidor.
+
+**La memoria.** `TLS.BIN` mide 102 K en el disco (BearSSL entero, las
+autoridades y el servicio) y 37 K de variables; **cada conexión cifrada, 37 K**
+más (los búferes de TLS: 16 K de lo que llega, 4 K de lo que sale, la cadena y
+el estado de BearSSL), además de los 48 K de la conexión TCP de `RED.BIN`.
+
+**Probarlo** (`castel/pruebas.sh`, parte 13 bis: `SOLO=tls`):
+
+```
+castel/nucleo32/disco.sh /tmp/d.img 16 red tls       # con TLS.BIN y HTTPS.BIN (hacer.sh: gcc -m32)
+QEMU_MAS="-nic user,model=e1000" ESCRIBE=1 DISCO=/tmp/d.img ARRANQUE=ordenes \
+  castel/nucleo32/probar.sh "" ":pausa 2" "descargar https://clicgest.es/ clic.htm" ":pausa 10" "https /estado"
+```
+
+Sin internet, `nucleo32/tls/servidor_https.py` hace una raíz de prueba
+(`RAIZ.CER`, que se copia a `\RAICES\PRUEBA.CER` del disco) y cuatro servidores
+HTTPS para «10.0.2.2» (ECDSA, RSA, uno de otro nombre y uno de una raíz que no
+conoce nadie) y uno HTTP para la cabecera `Date`; `RELOJ=2001-01-01` en
+`probar.sh` pone el reloj del PC donde se quiera. Lo descargado de
+https://clicgest.es/ y https://hispados.es/ en QEMU es igual octeto a octeto que
+lo que baja `curl`.
+
+**En el sistema**: `TLS.BIN` y `HTTPS.BIN` van en la memoria USB y en el CD
+(`nucleo32/sistema.sh`: en la raíz, como módulos, y a `\HISPA` al instalar) y
+son el paquete **`tls`** de `tools/hpq.py` (necesita `base` y `red`), con los
+demás del sistema en el catálogo firmado de `actualiza.sh`.
 
 ### Lo que falta
 
 Escuchar en un puerto (un servidor), reensamblar lo que llega desordenado y la
 retransmisión rápida; IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
-la vez; el Wi-Fi y HTTPS (arriba); más tarjetas (la RTL8168 del Toshiba NB250,
-la PCnet, NE2000: Hispa-DOS ya las lleva); y, encima de esto, las
-**actualizaciones** por la red y un navegador.
+la vez; el Wi-Fi (arriba); TLS 1.3 (BearSSL no lo tiene), gzip en `Https` y la
+hora por NTP; más tarjetas (la RTL8168 del Toshiba NB250,
+la PCnet, NE2000: Hispa-DOS ya las lleva). (El navegador, encima de esto, ya
+está: sección 14 ter.)
+(Las **actualizaciones** por la red ya van: sección 13.)
+
+## 14 bis. Hispa-Pentium se compila a sí mismo (CASTEL32)
+
+*20/11/2026.* El núcleo y sus programas se pueden compilar **dentro de
+Hispa-Pentium**: el compilador de Castel escrito en Castel, compilado para 32 bits,
+es un programa del anillo 3 más (**CASTEL32.BIN**, con su ensamblador
+**ENSAMB32.BIN**; [CASTEL32.md](../castel/docs/CASTEL32.md) §11). Con los fuentes
+en el disco:
+
+```
+C:\NUC>\CASTEL32 SEMILLA.CAS -o \S\SEMILLA.ASM -I \BIB32 --gasto
+C:\>ENSAMB32 S\SEMILLA.ASM S\NUCLEO.BIN
+```
+
+sale el mismo NUCLEO.BIN, octeto a octeto, que con ccastel.py y NASM (en QEMU, unos
+8 s compilar y 3 ensamblar; el núcleo con sus 19 programas, 21 y 7). Y CASTEL32 se
+compila a sí mismo dentro, hasta el punto fijo. Lo comprueba `castel/pruebas.sh`
+en su parte 15 (`SOLO=castel32`).
+
+## 14 ter. El Navegador (NAVEGA.BIN, la 0.8.3)
+
+*21/11/2026.* Lo que faltaba (Carlos: «todavía le falta el explorador web»):
+**un navegador de verdad**, que abre la web de hoy —ClicGest, hispados.es,
+Google, Wikipedia— con sus hojas de estilo, sus imágenes, sus letras y su
+JavaScript, en una ventana del escritorio, con pestañas, la rueda del ratón,
+el portapapeles del sistema y descargas.
+
+| | |
+|---|---|
+| ![ClicGest: entrar](pentium/navegador/01_clicgest_login.png) | ![hispados.es](pentium/navegador/02_hispados.png) |
+| ![Google](pentium/navegador/03_google.png) | ![Wikipedia, con JavaScript](pentium/navegador/04_wikipedia.png) |
+| ![El sitio de las pruebas: CSS de fuera con variables, JavaScript, fetch con galletas, PNG y JPEG](pentium/navegador/05_prueba.png) | ![El menú del botón derecho sobre un enlace](pentium/navegador/06_menu_enlace.png) |
+
+**Es el Navegador completo de Hispa-486** ([NAVEGADOR2.md](486/NAVEGADOR2.md):
+NetSurf 3.11 con lo nuestro —las variables de CSS, `@font-face` con WOFF y
+WOFF2, grid, `gap`, esquinas redondas, sombras, 96 ppp y JavaScript con
+QuickJS—), con un **frontal nuevo** sobre las llamadas de Hispa-Pentium. Los
+fuentes de `w32/surf` (la red, las letras, las imágenes, el CSS, el
+JavaScript) van **tal cual**; lo único que no sirve es su ventana de Hispa
+Ventanas (`surf.c`). Así, lo que se arregle en uno vale para los dos.
+
+### Cómo se maneja
+
+Arriba, **las pestañas** (cada una con su «×»; la **+** abre otra con la
+página de inicio) y **la barra**: Atrás, Adelante, Recargar (mientras carga,
+Parar), Inicio, **la dirección** (con el candado verde en las cifradas: el
+servidor en negro y lo demás en gris) y **el menú** (≡: Nueva pestaña, Cerrar
+la pestaña, Copiar la dirección, Ver las descargas, Página de inicio, Acerca
+del Navegador, Salir). Abajo, la línea de estado («Cargando…» en ocre,
+«Conexión cifrada» en verde, el enlace de debajo del ratón, lo que lleva una
+descarga). A la derecha, la barra de desplazamiento (el pulgar se arrastra).
+
+| | |
+|---|---|
+| La rueda del ratón | mueve la página (o la caja con desplazamiento que hay debajo); con Mayús, a los lados |
+| El botón derecho | en un enlace: Abrir el enlace en otra pestaña, Copiar la dirección del enlace, Descargar el enlace; siempre: Atrás, Adelante, Recargar, Copiar, Pegar, Seleccionar todo |
+| F6 o Ctrl+L | a la dirección (elegida entera). Lo que no parece una dirección (con espacios, sin punto) se busca en Google; `C:\CARPETA\PAGINA.HTM` abre la del disco |
+| F5 o Ctrl+R | recargar; Esc, parar |
+| Ctrl+T, Ctrl+W | pestaña nueva, cerrar la de ahora (con el núcleo de la rama `controles-erp`, Ctrl+Tab y Ctrl+Mayús+Tab cambian de pestaña) |
+| Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+A | con **el portapapeles del sistema** (lo copiado en el Navegador se pega en el Bloc de notas, y al revés) |
+| Flechas, Re Pág, Av Pág, Inicio, Fin, Espacio | mueven la página (en un campo, el cursor) |
+| Retroceso | fuera de un campo: atrás |
+| Tab, Mayús+Tab | en los formularios, al campo siguiente o al anterior |
+
+`alert()` y `confirm()` de las páginas salen en un cuadro propio (otra
+ventana, en el centro). **Las descargas** (lo que el servidor manda como
+`attachment`, lo que no se puede enseñar, o «Descargar el enlace») van a
+**`C:\DESCARGA`** con un nombre de 8+3 sacado del suyo («Informe anual
+2026.zip» queda `INFORMEA.ZIP`; si ya hay uno, `INFORM~1.ZIP`), y la línea
+de estado dice lo que lleva y, al acabar, dónde está.
+
+**`NAVEGA.INI`** (junto al programa; todas las líneas son opcionales):
+`Inicio=` (la página de arranque y del botón Inicio: `https://www.google.es/`
+si no se dice; `resource:welcome.html` es la que va con el Navegador, sin
+red), `Idioma=` (`es`: lo que se pide a las páginas) y `Descargas=`
+(`C:\DESCARGA`). Las galletas que dicen hasta cuándo valen se guardan al
+cerrar en `SURFGAL.TXT`, y lo de `localStorage` en `NAVEGA2.ALM`. Con un
+`SURF.LOG` (aunque esté vacío) en la carpeta, apunta lo que hace (NetSurf en
+`NS.LOG`, el JavaScript en `SURFJS.LOG`) y **F1** deja en `CAJAS.TXT` el árbol
+de cajas y el de libdom de la página (así se encontró lo de Wikipedia).
+
+### Dónde está: el paquete «navega»
+
+Es un **paquete aparte** (no va con el sistema: el CD y la memoria USB no
+crecen 2,4 MB), **`navega`** («navegador» no cabe: los nombres de paquete son
+de 8 letras, como su registro `.PQI`), versión 0.1, que se instala desde
+**«Programas y actualizaciones»** o con `PAQUETES INSTALA navega`. Necesita
+`base >= 0.8.3` (el núcleo de abajo), `red` y `tls`. Lleva:
+
+| | |
+|---|---|
+| `\HISPA\NAVEGA\NAVEGA.BIN` | el programa (2,0 MB) |
+| `\HISPA\NAVEGA\NAVEGA.INI`, `LEEME.TXT` | las opciones; las licencias |
+| `\HISPA\NAVEGA\RECURSOS\` | las hojas de estilo de NetSurf, sus textos en español, la página de inicio sin red y el diccionario de Brotli (para las letras WOFF2) |
+| `\HISPA\NAVEGA\FUENTES\` | las letras DejaVu (Sans, Serif y Mono, normal y negrita), recortadas a las de Europa occidental (208 KB) |
+| `\HISPA\MENU\NAVEGA.MNU`, `NAVEGA.ICP` | el acceso **«Navegador»** del menú Inicio y del tapiz (un globo con la flecha, de diseño propio: `navega/navega32.png`) |
+
+Lo hace **`castel/nucleo32/navega/paquete.sh SALIDA`** (`NAVEGA.HPQ` y su
+línea del catálogo, `CATALOGO.LIN`), con `tools/hpq.py opcionales` (la lista
+`OPCIONALES`, para los paquetes que no van con el sistema) y `hpq.py linea`;
+y `nucleo32/actualiza.sh` lo mete en el catálogo de Internet con los demás.
+Sin instalar (las pruebas), en `\NAVEGA` y su acceso en `\MENU`
+(`disco.sh ... navegador`).
+
+Probado con PAQUETES (en QEMU: un sistema con base 0.8.2, red y tls, y una
+memoria USB con el catálogo): `PAQUETES INSTALA navega` dice «Se va a
+instalar: base 0.8.3 (en lugar de la 0.8.2), navega 0.1», comprueba las sumas,
+los pone (con las carpetas de `\HISPA\NAVEGA`) y `PAQUETES COMPRUEBA` los da
+por buenos; con el núcleo nuevo hay que reiniciar (sección 13).
+
+**La 0.8.3 entera, por Internet** (21/11): el catálogo firmado con base y
+equipo 0.8.3 (el núcleo del Navegador y el Administrador de dispositivos),
+navega 0.1, clicgest 0.2.1 y los demás como estaban (iguales octeto a octeto a
+los publicados). Probado en QEMU desde un sistema con lo publicado de la 0.8.2
+(base 0.8.2, equipo 0.8, clicgest 0.2.1...), sirviendo el catálogo por HTTP
+(`PAQUETES ... /DESDE=http://10.0.2.2:...`): la firma, buena; `PAQUETES
+ACTUALIZA` pone base y equipo 0.8.3 («Reinicie para usar el núcleo nuevo»),
+`PAQUETES INSTALA navega` lo baja (2,4 MB) y lo pone; los 49 archivos de
+`\HISPA` cuadran con sus registros; y con el núcleo nuevo, el menú Inicio
+trae ClicGest y el Navegador, el Navegador abre Google y DISPOSIT, el
+Administrador de dispositivos:
+
+![Tras actualizar a la 0.8.3: el Navegador y el Administrador de dispositivos](pentium/navegador/08_actualizado_083.png)
+
+### Cómo está hecho
+
+```
+castel/nucleo32/navega/
+  frontal.c     la ventana (llamadas 32-36, 39, 40 y 80): pestañas (una ventana
+                de NetSurf cada una), barra, dirección, desplazamiento, estado,
+                ratón y rueda, teclado (de la página 437 a Unicode), portapapeles,
+                menús emergentes, los cuadros de alert/confirm; y el bucle de los
+                sucesos con el planificador de NetSurf
+  descarga.c    las descargas (gui_download_table), con su nombre 8+3
+  sistema.c     lo de Windows que piden los fuentes de Hispa-486, con las
+                llamadas de Hispa-Pentium (abajo)
+  entrada.asm   la cabecera HPU3 y la entrada (fninit); pentium.ld: 0x40000000
+  navega.mk     cómo se compila (make -f, sin -j); hacer.sh: la carpeta entera
+  paquete.sh    el paquete; servidor_pruebas.py: el sitio de las pruebas
+  prueba_x87.c  X87.BIN (abajo)
+w32/surf/       el Navegador completo de Hispa-486, sin su surf.c
+w32/navega/http.c, w32/msvcrt.c, w32/js/ (QuickJS), terceros/netsurf, stb, brotli, dejavu
+```
+
+**Un programa del anillo 3 en C, como `TLS.BIN`**, pero de 2 MB: NetSurf
+(-Os), QuickJS (-O2) y la biblioteca de C, con `gcc -m32 -march=i586
+-ffreestanding` y enlazado con `ld --gc-sections` para `0x40000000`.
+
+**Los fuentes de Hispa-486, sin tocar: `sistema.c`.** NAVEGA2.EXE era un
+programa Win32 para HW32 y llamaba a KERNEL32, WSOCK32, HSPTLS y USER32. En
+vez de reescribir su red, sus archivos y su memoria, `sistema.c` da **esas
+mismas funciones** (con su nombre y su `stdcall`) hechas con las llamadas de
+Hispa-Pentium, y todo lo demás compila igual:
+
+| Lo de Windows | Con qué se hace aquí |
+|---|---|
+| `CreateFileA`, `ReadFile`, `WriteFile`, `SetFilePointer`, `FindFirstFileA`... | los archivos del núcleo (llamadas 7-9, 12, 13, 18-26, 28); 16 abiertos a la vez en todo el sistema |
+| `VirtualAlloc`, `VirtualFree` | la llamada 17 (el final del programa); las zonas sueltas se apuntan y se vuelven a dar, la de arriba se devuelve |
+| `HeapAlloc` (el `malloc` de MSVCRT) | el `malloc` de `w32/surf/memoria.c`: uno solo para todo el programa |
+| `GetSystemTimeAsFileTime`, `GetTickCount`, `Sleep` | el reloj del PC (dato 10) y los tics (como HW32: sin huso) |
+| `socket`, `connect`, `send`, `recv`, `select`, `gethostbyname` | las conexiones TCP de `RED.BIN` (llamada 90) |
+| `TlsAbrir`, `TlsConectar`, `TlsLeer`... (HSPTLS) | las cifradas de `TLS.BIN` (llamada 99), que resuelve, conecta y hace el apretón de manos él: `http.c` dice antes si la que viene es https (un gancho `[PENTIUM]`) |
+| `MessageBoxA` | el cuadro de `frontal.c` |
+
+**La biblioteca de C** es `w32/msvcrt.c` (la MSVCRT.DLL de Hispa-486) con
+su `malloc` con otro nombre (el de todos es el de `memoria.c`); **QuickJS**
+(`w32/js`, la HSPJS.DLL) va dentro como iba en la DLL: se enlaza aparte y solo
+se ve desde fuera lo que exportaba (`objcopy --keep-global-symbols`), así su
+`malloc`, su `fprintf` y sus divisiones de 64 bits no chocan con los demás.
+
+**El dibujo.** NetSurf pinta la página en un búfer de 32 bits (libnsfb) y lo
+de la ventana (las pestañas, la barra, la dirección, el estado) se pinta en
+otros tres, con **las mismas letras DejaVu** de la página (`letra.c`, de
+cualquier tamaño, suavizadas) y rayas suavizadas para los iconos; todo se da
+al núcleo con `OP_MAPA` (llamada 34), **solo lo que ha cambiado**. La rueda y
+las flechas **mueven lo ya pintado** en el búfer y se pinta solo la franja que
+entra.
+
+**La red.** Las conexiones TCP las hace `RED.BIN` y las cifradas `TLS.BIN`
+(con la cadena comprobada, la sesión reanudada y `TLS.CCH`: sección 14). Una
+petición cada vez, por la conexión que se guarda abierta (la de NAVEGA2). El
+apretón de manos se hace de una vez (unos 3 s la primera vez en un Pentium
+133; luego, la sesión reanudada, nada): mientras, la ventana espera. El
+User-Agent es **`HispaSurf/0.2 (NetSurf 3.11; Hispa-Pentium)`**: sin
+«HispaNavegador», «(Hispa-486» ni «Hispa32», así ClicGest da su web normal
+(no la ligera).
+
+### El núcleo 0.8.3 (lo que necesita el Navegador)
+
+Tres cambios, marcados «(NAVEGADOR)»:
+
+- **La rueda del ratón** (`raton.cas`, `usbhid.cas`, `ventanas.cas`): el
+  ratón PS/2 se pone en **IntelliMouse** (las frecuencias 200, 100 y 80; si
+  luego dice que es el 3, manda cuatro octetos: el cuarto, la rueda) y el
+  USB con protocolo de arranque da la suya en el cuarto octeto. El escritorio
+  manda a la ventana que hay debajo de la flecha el suceso nuevo
+  **`EV_RUEDA` (13)**: `a`, `b`, dónde; `c`, los pasos con signo en el octeto
+  bajo (arriba, positivos) y `CON_MAYÚS`/`CON_CONTROL`. Al arrancar dice
+  «escritorio: el ratón PS/2 tiene rueda». (En `llamadas.cas`, `EV_RUEDA`,
+  para los programas de Castel.) Ojo en las pruebas: con cuatro octetos por
+  paquete, en la cola PS/2 de QEMU (16 octetos) caben 4 paquetes por suceso
+  (508 puntos, antes 635); lo que sobra de un `mouse_move` más grande llega
+  con el suceso siguiente (el clic). `probar.sh` ya mueve de 50 en 50; los
+  saltos a mano de `pruebas.sh`, en dos.
+- **El x87 de cada programa** (`tareas.cas`): hasta ahora el núcleo no
+  guardaba la coma flotante al cambiar de tarea, y dos programas que la
+  usaran a la vez (el Navegador, QuickJS, lo de HVPRUN) se la pisaban. Ahora
+  cada ficha lleva su x87 (108 octetos, `fnsave`/`frstor`) y se reparte **al
+  usarlo**: al cambiar de tarea se enciende `CR0.TS` y, si la nueva usa coma
+  flotante, la excepción 7 (`sin_x87`) guarda la de la otra y pone la suya (o
+  una a estrenar). Lo que no la usa (casi todo, y el núcleo) no paga nada.
+  Las instrucciones van como `db` (`clts`, `fninit`, `fnsave`, `frstor`), para
+  que el núcleo se siga compilando igual con CASTEL32 y ENSAMB32 (sección 14
+  bis). **`X87.BIN`** (`navega/prueba_x87.c`) lo prueba: se lanza a sí mismo
+  dos veces y los tres dejan números distintos en la pila del x87 mientras
+  duermen; con el núcleo de antes dice «MAL», con este «bien».
+- **Programas de hasta 8 MB** (`MAX_PROGRAMA`, `usuario.cas`; antes 2 MB:
+  NAVEGA.BIN mide 2.095.604 octetos).
+
+`tools/hpq.py`: `base` y `equipo` (con el Administrador de dispositivos) pasan a la **0.8.3** (sobre la 0.8.2 de los controles; los demás siguen como estaban).
+
+### Lo que se arregló por el camino (vale también para Hispa-486)
+
+- **`vh` y `vw` estaban cambiados en libcss 0.9.2** (`100vh` daba el ancho de
+  la ventana): la tarjeta de entrar de ClicGest (centrada en un `body` de
+  `min-height: 100vh`) salía muy abajo, también en Hispa-486; ahora sale como
+  en Chrome.
+- **`opacity: 0`** no se pinta (ni lo de dentro): los botones de Google con su
+  capa encima, lo que se enseña poco a poco (las `.reveal` de clicgest.es, que
+  su JavaScript enseña). Lo de en medio (0,5) se sigue pintando entero.
+- **`document.implementation.createHTMLDocument()`** (`w32/navega/dom.js`)
+  daba el documento de la página: jQuery, al arrancar, prueba
+  `body.innerHTML = "<form></form><form></form>"` en él y **se llevaba el
+  cuerpo entero de la página** (Wikipedia salía en blanco con JavaScript).
+  Ahora da uno aparte.
+- Un campo que el JavaScript hace de texto (su `type`) después de hacer su
+  caja tiene su textarea al maquetar (Wikipedia: un fallo de página).
+
+### Comparado con Chrome
+
+A 1024 x 768 (la página, 970 x 588; Chrome a esa medida, `google-chrome
+--headless`), en `pentium/navegador/`:
+
+| Página | El Navegador | Chrome |
+|---|---|---|
+| https://clicgest.es/login | `01_clicgest_login.png` | `01_clicgest_login_chrome.png` |
+| https://hispados.es/ | `02_hispados.png` | `02_hispados_chrome.png` |
+| https://www.google.es/ | `03_google.png` | `03_google_chrome.png` |
+| https://es.wikipedia.org/ | `04_wikipedia.png` | `04_wikipedia_chrome.png` |
+
+ClicGest y hispados.es salen casi iguales (las letras de la web, las
+esquinas, las sombras, los colores de las variables). Google da a quien no
+conoce su página sencilla de siempre (a Chrome, que sale de un servidor en
+Alemania, el aviso de las galletas): sin el icono de las aplicaciones (SVG).
+Wikipedia, entera, con su JavaScript (el buscador y los menús de arriba, en
+SVG, no salen). Lo que queda distinto es lo de NAVEGADOR2.md («Lo que queda
+distinto»): sin SVG, sin `position: fixed` de verdad, sin `transform` ni
+animaciones; aquí, en cambio, los colores son los de verdad (32 bits, no la
+paleta de 256 de Hispa Ventanas).
+
+### Medidas
+
+En QEMU sin KVM (en el VPS va, para este código, como un Pentium de 200-300
+MHz: NAVEGADOR2.md, «Medidas»), 128 MB, 1024 x 768, por la red de QEMU a
+Internet; la memoria, la de `memoria.c` (en uso / lo más) y lo pedido al
+sistema (`VirtualAlloc`), que dice la línea `navega: hecho ...` del puerto
+serie:
+
+| Página (por orden, en la misma pestaña) | Tiempo («Hecho») | En uso (KB) | Lo más (KB) | Del sistema (KB) |
+|---|---|---|---|---|
+| (al abrirlo: `about:blank`) | — | 3.196 | 3.253 | 3.264 |
+| https://clicgest.es/login (la primera conexión cifrada: la cadena se comprueba; Bootstrap, sus dos letras de la web) | 4,1 s | 7.452 | 10.677 | 9.664 |
+| https://hispados.es/ | 2,3 s | 8.877 | 12.092 | 11.200 |
+| https://www.google.es/ (lleva a google.com) | 3,4 s | 7.066 | 12.105 | 16.340 |
+| https://es.wikipedia.org/ (con 1,4 MB de JavaScript) | 33,5 s | 34.423 | 40.003 | 50.836 |
+
+(Con la pestaña de Wikipedia abierta, una nueva con ClicGest: 3,5 s.) Lo que
+cuesta el cifrado lo apunta `TLS.BIN`: el apretón de manos con la cadena ya
+comprobada, 25 M instrucciones; con la sesión reanudada, menos de 1 M; los 1,4
+MB del JavaScript de Wikipedia, 235 M (ChaCha20-Poly1305).
+
+Con el programa (2,1 MB), su pila y los búferes de la ventana (a 1024 x 768,
+unos 3,5 MB), el Navegador **arranca en unos 7 MB**. ClicGest, hispados.es y
+Google caben de sobra en **64 MB** (probado: tras las tres, 7.827 marcos
+libres, 31 MB); Wikipedia (1,4 MB de JavaScript) pide unos 50 MB al sistema:
+con 64 MB sale entera, pero justísima (quedan 43 marcos libres: 172 KB); con
+128 MB, holgada.
+Un Pentium de verdad a 133 MHz es unas dos veces más lento que este QEMU:
+ClicGest, unos 8 s la primera vez (la cadena de certificados se comprueba una
+vez: luego, `TLS.CCH`); Wikipedia, más de un minuto.
+
+### Probarlo
+
+`castel/pruebas.sh`, **parte 18** (`SOLO=navegador`, unos 3 minutos; sin
+Internet): `navega/servidor_pruebas.py` sirve el mismo sitio por HTTP y por
+HTTPS (con su raíz de prueba en `\RAICES`) y apunta lo que le piden. Se
+comprueba: el acceso del menú y su icono en el tapiz; la página por HTTPS, con
+**la hoja de fuera con variables de CSS, un PNG, un JPEG, JavaScript (el DOM,
+`setTimeout`, `localStorage`), `fetch` con las dos galletas** (la del servidor
+y la de `document.cookie`) y su cabecera; el User-Agent; **la rueda**, Fin,
+un **formulario POST con eñe** y su respuesta, **Atrás**, **el menú del botón
+derecho** (abrir el enlace en otra pestaña), **F6** con una dirección sin
+`http://` (por HTTP), **el portapapeles** (Ctrl+L, Ctrl+C y Ctrl+V en un campo
+de otra pestaña), **una descarga** a `C:\DESCARGA\INFORMEA.ZIP` igual octeto a
+octeto, cerrar la ventana, **las galletas guardadas** (`SURFGAL.TXT`: las que
+duran, no las de sesión) y `localStorage`; y **X87.BIN** (el x87 de cada
+programa). Para mirarlo a mano:
+
+```
+castel/nucleo32/disco.sh /tmp/d.img 32 red tls navegador
+DISCO=/tmp/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 QEMU_MAS="-nic user,model=e1000" \
+  castel/nucleo32/probar.sh "" ":pausa 3" ":doble 62 260" ":pausa 20" ":captura nav"
+```
+
+### Lo que falta
+
+- **Que la ventana no espere** al apretón de manos de TLS (hoy se queda quieta
+  ese momento: unos 3 s la primera vez en un Pentium 133); pedir varias cosas
+  a la vez (hoy, una petición cada vez, como en Hispa-486).
+- Lo de NetSurf que queda (NAVEGADOR2.md, «Lo que falta»): **SVG** (los iconos
+  de Google, de Wikipedia, de Bootstrap), `position: fixed`, `transform`,
+  `<details>`, la cursiva de verdad, los pesos de las letras variables, rehacer
+  solo la parte de las cajas que cambia (en las páginas grandes, cada clic que
+  cambia el árbol tarda).
+- Letras de más escrituras (las DejaVu van recortadas a las de Europa
+  occidental), imprimir, la forma de la flecha (el núcleo no deja cambiarla),
+  arrastrar y soltar, el historial y los marcadores guardados, y preguntar
+  dónde guardar una descarga.
+- Nombres largos al descargar (el núcleo aún crea solo 8+3).
 
 ## 15. Las pruebas
 
 `castel/pruebas.sh` (las partes 8 a 14; `SOLO=32 ./pruebas.sh` hace solo esas y la
 de los errores; `SOLO=06`, solo la 9, lo de la 0.6; `SOLO=07`, solo la 10, instalar en el disco;
-`SOLO=08`, las de la 0.8, de la 11 a la 14; y `SOLO=caliente`, `SOLO=paquetes`, `SOLO=red` o
-`SOLO=acpi`, solo una de ellas) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
+`SOLO=08`, las de la 0.8, de la 11 a la 14; y `SOLO=caliente`, `SOLO=paquetes`, `SOLO=red`,
+`SOLO=tls` o `SOLO=acpi`, solo una de ellas) arranca el núcleo en QEMU varias veces y comprueba: que arranca, lee el
 teclado, el reloj corre y la división por cero llega a su excepción; que el mapa de
 memoria da los marcos; que la **paginación está activa** con la identidad; que un
 **fallo de página se atiende** en la zona a la demanda; que el **montón no pierde**
@@ -2360,13 +3441,13 @@ disco hecho con `disco.sh ... red`:
   servidor; **PING** a la puerta, tres respuestas; **DESCARGAR** con
   `Content-Length` (400 K), en trozos (`chunked`, con trozos de todos los
   tamaños), hasta que se cierra (HTTP/1.0), una redirección 302, un 404, a otra
-  carpeta, `https://` (se dice que aún no) y sin nada; **Ctrl+C** en medio de
+  carpeta, `https://` sin `TLS.BIN` en el disco (se dice que falta) y sin nada; **Ctrl+C** en medio de
   una descarga que no llega (el programa acaba y la red sigue: `IPCONFIG
   /TODO` y `MEM`); y, desde fuera, que **lo descargado es igual octeto a
   octeto** que lo del servidor (los cuatro archivos) y el disco queda sano.
 - **La RTL8139**: IPCONFIG y DESCARGAR, igual octeto a octeto. El **DNS** (el
   de QEMU, que pregunta al de esta máquina): un nombre que no existe se dice y
-  uno de verdad (`actualiza.clicgest.es`) se resuelve (si esta máquina no sale
+  uno de verdad (`actualiza.hispados.es`) se resuelve (si esta máquina no sale
   a la red, no se prueba).
 - **Sin tarjeta** (el servicio lo dice, y PING también) y con **`sinred`** (ni se
   pone en marcha).
@@ -2375,7 +3456,7 @@ disco hecho con `disco.sh ... red`:
 
 Además, a mano, la memoria USB de `usb.sh` arrancada en QEMU con una e1000:
 GRUB, el escritorio, el servicio en marcha y el icono en verde; y, en el VPS,
-`ping actualiza.clicgest.es` y `descargar http://actualiza.clicgest.es/ultima.txt -`.
+`ping actualiza.hispados.es` y `descargar http://actualiza.hispados.es/ultima.txt -`.
 Lo que **no se prueba**: la Yukon (QEMU no la tiene), y TCP con pérdidas (la
 red de QEMU no pierde nada: las retransmisiones solo se han visto en papel).
 
@@ -2418,6 +3499,23 @@ del anillo 3 aparte, que van en una **cuarta tanda** (en A:, `RED.BIN` con sus
 seis módulos e IPCONFIG, PING y DESCARGAR; en B:, lo que sale), lo mismo para
 ENSAMBLA.
 
+**La 0.8: HTTPS** (sección 14, «HTTPS: el servicio TLS»; la parte 13 bis de
+`pruebas.sh`: **14 comprobaciones**, `SOLO=tls ./pruebas.sh`, unos tres
+minutos y medio), con los servidores de `nucleo32/tls/servidor_https.py` y un
+disco hecho con `disco.sh ... red tls`, con la raíz de prueba en `\RAICES`:
+`TLS.BIN` se hace (`hacer.sh`) y se pone en marcha solo; **DESCARGAR
+https://** con un certificado ECDSA y con uno RSA, con largo y en trozos, igual
+octeto a octeto; la orden **HTTPS** (la biblioteca `Https`): las galletas
+vuelven en el pedido siguiente por la misma conexión (un solo apretón de
+manos), un POST con su cuerpo y una cabecera propia, una redirección en el
+mismo servidor y otra a otro; los certificados que **no valen** (otro nombre,
+una raíz desconocida y, con el reloj en el 2050, caducado), cada uno con su
+texto; `HTTPS /ESTADO`; `TLS.CCH` guardado y usado al arrancar otra vez; **la
+hora** con el reloj del PC en el 2001 (de la cabecera `Date`, avisado como
+riesgo) y sin servidor de la hora (no hay conexión, y se dice). Si esta máquina
+sale a internet, también **https://clicgest.es/ y https://hispados.es/**,
+iguales octeto a octeto que con `curl`, con la hora de actualiza.hispados.es.
+
 **La 0.8: apagar de verdad y la batería** (sección 11; la parte 14 de
 `pruebas.sh`: **20 comprobaciones**, `SOLO=acpi ./pruebas.sh`, los errores y
 esa parte: unos tres minutos). Con la batería de
@@ -2433,11 +3531,64 @@ apagar y reiniciar por el registro de la FADT); sin ACPI (`-no-acpi`: lo de
 antes); un sobremesa (sin pila, y apaga por ACPI); y que un programa
 cualquiera no puede usar las llamadas del servicio.
 
-Con todo, `pruebas.sh` tiene ahora **508 comprobaciones** (423 hasta la 0.7;
+**La 0.8: la firma, el núcleo nuevo y el CD** (la tarde del 20/11). En la
+parte 12 (`SOLO=paquetes`), PAQUETES se compila con una **clave de prueba**
+(`hpq.py clave`, en la carpeta de la prueba; su `clave.cas` al lado de una
+copia de `upaquete.cas`, que el compilador encuentra antes que el de
+`nucleo32`) y el catálogo de prueba va firmado: `hpq.py` firma y comprueba;
+`PAQUETES FIRMA` dice buena y mala; de Internet, firmado, se usa; cambiado
+una letra, o sin `CATALOGO.FIR`, no se usa nada (tampoco de la carpeta que
+trae la firma mala); un `base` que cambia `NUCLEO.BIN` deja `NUCLEO.ANT`,
+`GRUBENV` (1.024 octetos, `nuevo=1`) y la entrada del de antes en `GRUB.CFG`
+una sola vez, y pide reiniciar; y la ventana, con «Buscar novedades» y «(firma
+buena)». La **parte 16** (`SOLO=cd`, unos ocho minutos) hace el CD con
+`cd.sh` (El Torito sin emulación, menos de 650 MB) y, en QEMU como VirtualBox:
+arranca sin instalar en un `pc` con IDE, OHCI con su tableta y la e1000 (con
+la red); instala en el disco IDE y en el SATA de un `q35` (con el CD en AHCI)
+y los dos discos arrancan (el asistente); y en el del `q35`, con un servidor
+HTTP de aquí (`servidor_prueba.py` con RAIZ) y un catálogo firmado: el aviso
+de la bandeja al arrancar, «Verlas», «Actualizar todo» con un núcleo nuevo,
+«Reiniciar ahora», «El núcleo nuevo ha arrancado bien» (`nuevo=0`); y con un
+núcleo que se queda en `hlt`, reiniciar a mano: GRUB elige solo el de antes,
+el sistema lo dice y `GRUBENV` queda en `nuevo=4`.
+La **parte 19** (`SOLO=dispositivos`, unos dos minutos) prueba el
+**Administrador de dispositivos**: en un «pc» con la e1000, EHCI con teclado,
+ratón, tableta (sin controlador) y una memoria, un disco SATA y la batería de
+mentira, desde Mi equipo › Propiedades y desde Configuración; guardar el
+informe en la memoria (y lo que dice: el PCI con sus zonas medidas, la red con
+su MAC, el USB con sus nombres de verdad, los discos, lo de siempre con lo de
+ACPI, la batería, lo que falta); las tres pestañas de las propiedades;
+copiarlo. Y en un «q35» (ICH9, la RTL8139, xHCI con un concentrador), el
+informe en texto; y con `sinusb` y `sinacpi`, lo desactivado.
+
+La **parte 17** (`SOLO=pantalla`, unos seis minutos) prueba la medida de la
+pantalla desde Configuración (sección 10): con `-kernel` (-vga std), la lista
+(con lo que dice el EDID de QEMU), «Probar...», «Mantener», el Bloc de notas
+maximizado a la medida nueva y la vuelta sola a los 15 s; el CD con el modo de
+GRUB en un `pc` como VirtualBox, con `-vga std` y `-vga vmware` (la VMSVGA),
+cambiado en marcha; instalado desde el CD con `-vga cirrus` (sin la VBE de
+Bochs): `PANTALLA.ENV` y `GRUB.CFG`, «Reiniciar ahora», la prueba al arrancar y
+«Mantener», y otra medida que no se da por buena y que GRUB deshace al
+reiniciar a lo bruto; e instalado con `-vga std`: «Mantener» guardada; y con `-vga
+vmware`, 1200 x 800 (que su BIOS no da) puesta por el núcleo al arrancar.
+Con ella, `SOLO=32` (rama `pentium-pantalla`, 20/11 por la noche) dio **479 bien,
+0 mal**.
+La **parte 18** (`SOLO=navegador`, unos tres minutos; rama `pentium-navegador`,
+21/11) prueba **el Navegador** (sección 14 ter) contra el sitio de prueba de
+`navega/servidor_pruebas.py` (HTTP y HTTPS) y el x87 de cada programa
+(`X87.BIN`): **22 comprobaciones, 22 bien**.
+
+Con la firma, el núcleo nuevo y el CD, la pasada entera del 20/11 por la tarde (rama
+`pentium-dvd`, con CASTEL32 ya dentro) dio **541 bien, 0 mal**; tras los
+arreglos de la ventana y el paso a `actualiza.hispados.es`, `SOLO=08` (de la 11
+a la 14 y la 16) dio **156 bien, 0 mal**.
+
+Antes, `pruebas.sh` tenía **508 comprobaciones** (423 hasta la 0.7;
 de la 0.8, los paquetes, el USB en caliente, la red, apagar de verdad y la
-batería, y las del AHCI del ICH7). La memoria USB trae ahora **16 programas**
-como módulos (eran 9: PAQUETES y ACTUALIZ, RED, IPCONFIG, PING y DESCARGA, y
-ACPI.BIN), y 9 paquetes del sistema (con «red»). Algo más de una hora
+batería, y las del AHCI del ICH7). La memoria USB trae ahora **20 programas** (18 hasta la 0.8.1; la 0.8.2 añade MUESTRA.BIN y la 0.8.3, DISPOSIT.BIN)
+como módulos (eran 9: PAQUETES y ACTUALIZ, RED, IPCONFIG, PING y DESCARGA,
+ACPI.BIN y, desde el 20/11, TLS.BIN y HTTPS), y 10 paquetes del sistema (con
+«red» y «tls»). Algo más de una hora
 en el VPS. La última pasada entera (20/11/2026, con las cinco ramas juntas,
 el arreglo del AHCI del ICH7 y las tablas de CASTEL repartidas) dio **508
 bien, 0 mal**, y los dos compiladores sacan lo mismo en los 52 programas y
@@ -2455,6 +3606,11 @@ oficina), unos diez, y `SOLO=16`, lo que no arranca el núcleo (de la parte 1 a
 la 7, con los dos compiladores y los dos ensambladores), otros siete.
 
 ## 16. Por dónde seguir
+
+Hecho el 21/11 (la 0.8.3, rama `pentium-navegador`): **el Navegador** (sección
+14 ter), con la rueda del ratón, el x87 de cada programa y programas de hasta 8
+MB en el núcleo. Lo siguiente, allí: que la ventana no espere al apretón de
+manos, SVG y probarlo en el HP Mini y en el Toshiba.
 
 Hecho en la del 20/11 (la 0.8, cinco ramas juntas en `pentium-08`): el AHCI
 del ICH7 (sección 7), el USB en caliente y apagar de verdad con la batería
@@ -2498,7 +3654,10 @@ arranque. Lo siguiente:
    Configuración deje cambiar lo del asistente, y usuarios con su carpeta.
    Y **los PC de verdad**: probar la 0.6 en el Mac de 2012 (el teclado y el panel
    por el EHCI con transacciones partidas), en el Toshiba y en el HP Mini; la
-   **medida del panel** cuando la BIOS no la da por VBE (sección 11); **enchufar
+   **medida del panel** cuando la BIOS no la da por VBE (sección 11; la medida
+   ya se elige desde Configuración, sección 10, pero en un PC de verdad solo
+   entre las que da la BIOS, y al arrancar; el cambio en marcha por la BIOS, con
+   V86 o un emulador, está evaluado allí y queda para cuando se pueda probar); **enchufar
    y desenchufar** el USB en marcha; las controladoras OHCI; **LBA de 48 bits**
    en el IDE (discos de más de 128 GB en modo IDE) y el canal IDE secundario;
    apagar de verdad (ACPI: hecho el 20/11, sección 11; falta probarlo en el HP

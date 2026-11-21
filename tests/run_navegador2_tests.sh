@@ -22,7 +22,7 @@
 set -u
 cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
-make -s build/NAVEGA2.EXE build/HSPTLS.DLL build/WSOCK32.DLL build/MSVCRT.DLL build/HW32.COM > /dev/null 2>&1 || {
+make -s build/NAVEGA2.EXE build/HSPJS.DLL build/HSPTLS.DLL build/WSOCK32.DLL build/MSVCRT.DLL build/HW32.COM > /dev/null 2>&1 || {
   echo "== Hispa-486: el Navegador completo: sin gcc de 32 bits, se salta =="; exit 0; }
 . tests/tools/win32_ventanas.sh
 . tests/tools/nav_certs.sh
@@ -42,7 +42,7 @@ mkdir -p $T/c
 mcopy -s -n -i "$IMG" ::HISPADOS $T/c/
 I=$T/c/HISPADOS/INTERNET
 mkdir -p $I/RECURSOS $I/FUENTES $T/c/PAGINAS
-cp $B/MSVCRT.DLL $B/WSOCK32.DLL $B/HSPTLS.DLL $B/NAVEGA2.EXE $T/RAIZ.CER $I/
+cp $B/MSVCRT.DLL $B/WSOCK32.DLL $B/HSPTLS.DLL $B/HSPJS.DLL $B/NAVEGA2.EXE $T/RAIZ.CER $I/
 cp $B/HW32.COM $B/MSVCRT.DLL $T/c/HISPADOS/
 cp w32/surf/recursos/* terceros/netsurf/netsurf/resources/{default,quirks,adblock,internal}.css $I/RECURSOS/
 cp terceros/dejavu/*.TTF $I/FUENTES/
@@ -115,7 +115,7 @@ def fin_ies(y0, y1):
         if hueco > 5: return x - hueco
         x += 1
     return 999
-a, b = fin_ies(136, 152), fin_ies(172, 188)
+a, b = fin_ies(141, 160), fin_ies(179, 198)   # (con 96 ppp desde el 20/11)
 print('  (las «i»: hasta x=%d la normal, x=%d la monoespaciada)' % (a, b))
 sys.exit(0 if a + 20 < b else 1)
 EOP

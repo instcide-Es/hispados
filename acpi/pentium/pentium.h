@@ -21,6 +21,7 @@
 #define SC_MEMORIA 151		/* EBX física, ECX octetos -> dónde se ve en el programa (0: no se puede) */
 #define SC_PCI 152		/* EBX dirección (como en CF8h; bits 0-1: el octeto), ECX valor, EDX octetos | ES_ESCRIBE */
 #define SC_SERVICIO 153		/* EBX struct pe_energia (o 0), ECX tics que esperar como mucho -> la orden */
+#define SC_DISPOSITIVO 156	/* (dispositivos) EBX struct pe_dispositivo, ECX 0 apuntar / 1 olvidar los suyos */
 #define ES_ESCRIBE 0x100
 #define ES_ERROR(r) ((r) >= 0xFFFFFFF0u)
 
@@ -72,4 +73,25 @@ struct pe_energia {
 	u32 respuesta;		/* RESP_... */
 	u32 sin_archivos;	/* 1: ya no se escribe en el disco (ORDEN_SIN_ARCHIVOS) */
 };
+
+/* (dispositivos) lo que el servicio ha hallado en el espacio de nombres de
+ * ACPI, para el Administrador de dispositivos (la llamada 156). La misma
+ * ficha que Dispositivo de castel/nucleo32/dispositivos.cas (320 octetos):
+ * si cambia una, la otra. */
+#define DISP_BUS_ACPI 3
+#define DISP_SIN_CONTROLADOR 0
+#define DISP_FUNCIONA 1
+#define DISP_NO_HACE_FALTA 4
+#define DISP_PUERTOS 1
+#define DISP_MEMORIA 2
+struct pe_recurso {
+	u32 clase, base, largo;
+};
+struct pe_dispositivo {
+	u32 bus, direccion, padre, fabricante, producto, clase, subsistema, revision;
+	u32 estado, irq, n_recursos, dato1, dato2, dato3;
+	struct pe_recurso recursos[6];
+	char pnp[16], controlador[16], nombre[48], marca[32], detalle[80];
+};
+
 #endif

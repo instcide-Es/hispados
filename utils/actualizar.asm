@@ -18,7 +18,7 @@
 ;      nivel=0            ; "riqueza" de la edición (mayor = más completa)
 ;      edicion=Hispa-386 (con Hispa Ventanas)
 ;      gama=386           ; [HISPA-486] la gama: 386 (por omisión) o 486
-;      paquete=http://actualiza.clicgest.es/hispados-0.9.16.paq
+;      paquete=http://actualiza.hispados.es/hispados-0.9.16.paq
 ;      nota=Novedades...
 ;  [HISPA-486] Cada instalación se actualiza en su gama: la de la instalada
 ;  sale de \HISPADOS\EDICION.INI («Gama=486»; sin el archivo, 386) y las
@@ -2508,7 +2508,7 @@ m_oct       db " octetos", 0
 
 ; --- la dirección de por omisión: se puede cambiar con la clave ACTUALIZAR=
 ;     de \HISPADOS\RED.INI ---
-s_url_def   db "http://actualiza.clicgest.es/versiones.txt", 0
+s_url_def   db "http://actualiza.hispados.es/versiones.txt", 0
 
 hspred_path db "A:\HISPADOS\HSPRED.COM", 0
 hspred_tail db 0, 13

@@ -140,6 +140,16 @@ enum css_properties_e {
 	CSS_PROP_ORDER				= 0x07b,
 	CSS_PROP_FILL_OPACITY			= 0x07c,
 	CSS_PROP_STROKE_OPACITY			= 0x07d,
+	/* [HISPA] lo que hace falta para la web de hoy (NAVEGA2.EXE,
+	 * docs/486/NAVEGADOR2.md): gap, esquinas redondas, sombra y grid */
+	CSS_PROP_ROW_GAP			= 0x07e,
+	CSS_PROP_BORDER_TOP_LEFT_RADIUS		= 0x07f,
+	CSS_PROP_BORDER_TOP_RIGHT_RADIUS	= 0x080,
+	CSS_PROP_BORDER_BOTTOM_RIGHT_RADIUS	= 0x081,
+	CSS_PROP_BORDER_BOTTOM_LEFT_RADIUS	= 0x082,
+	CSS_PROP_BOX_SHADOW			= 0x083,
+	CSS_PROP_GRID_TEMPLATE_COLUMNS		= 0x084,
+	CSS_PROP_GRID_COLUMN			= 0x085,
 
 	CSS_N_PROPERTIES
 };
@@ -903,6 +913,41 @@ enum css_z_index_e {
 	CSS_Z_INDEX_INHERIT			= 0x0,
 	CSS_Z_INDEX_SET				= 0x1,
 	CSS_Z_INDEX_AUTO			= 0x2
+};
+
+/* [HISPA] row-gap: como column-gap («normal» es 0 en flex y grid) */
+enum css_row_gap_e {
+	CSS_ROW_GAP_INHERIT			= 0x0,
+	CSS_ROW_GAP_SET				= 0x1,
+	CSS_ROW_GAP_NORMAL			= 0x2
+};
+
+/* [HISPA] border-*-radius: un radio por esquina (el primero, sin elipses) */
+enum css_border_radius_e {
+	CSS_BORDER_RADIUS_INHERIT		= 0x0,
+	CSS_BORDER_RADIUS_SET			= 0x1
+};
+
+/* [HISPA] box-shadow: la primera sombra (x, y, difuminado, extensión, color) */
+enum css_box_shadow_e {
+	CSS_BOX_SHADOW_INHERIT			= 0x0,
+	CSS_BOX_SHADOW_NONE			= 0x1,
+	CSS_BOX_SHADOW_SET			= 0x2,
+	CSS_BOX_SHADOW_INSET			= 0x3
+};
+
+/* [HISPA] grid-template-columns y grid-column: el texto del valor (lo lee
+ * el layout de NetSurf: layout_grid.c); sin texto, «none» / «auto» */
+enum css_grid_template_columns_e {
+	CSS_GRID_TEMPLATE_COLUMNS_INHERIT	= 0x0,
+	CSS_GRID_TEMPLATE_COLUMNS_NONE		= 0x1,
+	CSS_GRID_TEMPLATE_COLUMNS_SET		= 0x1
+};
+
+enum css_grid_column_e {
+	CSS_GRID_COLUMN_INHERIT			= 0x0,
+	CSS_GRID_COLUMN_AUTO			= 0x1,
+	CSS_GRID_COLUMN_SET			= 0x1
 };
 
 #ifdef __cplusplus

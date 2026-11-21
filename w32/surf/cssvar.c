@@ -273,6 +273,28 @@ static const char *busca_grad(const char *v, size_t l) {
   for (k = 0; k + 9 <= l; k++) if (!memcmp(v + k, "gradient(", 9)) return v + k;
   return NULL;
 }
+/* la regla tiene «background-clip: text» (el texto pintado con el degradado:
+ * «todo en uno» de clicgest.es): el degradado, al color del texto */
+static int fondo_texto;
+/* ¿es un color casi transparente? (rgba(..., .15), #rrggbbaa, transparent):
+ * los brillos de los degradados; NetSurf pinta sin transparencia y salían
+ * manchas de color */
+static int casi_transparente(const char *c, size_t l) {
+  if (l >= 11 && !strncmp(c, "transparent", 11)) return 1;
+  if (l == 9 && c[0] == '#') { int a = (int)strtol(c + 7, NULL, 16); return a < 0x80; }
+  if (l >= 4 && !strncmp(c, "rgba", 4)) {
+    const char *u = c + l;
+    while (u > c && u[-1] != ',' && u[-1] != '/') u--;
+    if (u > c) { double a = strtod(u, NULL); if (strchr(u, '%')) a /= 100; return a < 0.5; }
+  }
+  if (l >= 4 && !strncmp(c, "rgb(", 4) && memchr(c, '/', l)) {
+    const char *u = memchr(c, '/', l) + 1;
+    double a = strtod(u, NULL);
+    if (memchr(u, '%', c + l - u)) a /= 100;
+    return a < 0.5;
+  }
+  return 0;
+}
 /* escribe en x el valor sin degradados; 0 si no queda nada que valga */
 static int sin_degradado(Txt *x, const char *n, size_t ln, const char *v, size_t l) {
   Txt r = { 0 };
@@ -302,7 +324,8 @@ static int sin_degradado(Txt *x, const char *n, size_t ln, const char *v, size_t
     if (m && !(ln == 16)) { tx_pon(x, n, ln); tx_cad(x, ":"); tx_pon(x, t, m); tx_cad(x, ";"); free(r.t); return 1; }
   }
   free(r.t);
-  if (color) { tx_cad(x, "background-color:"); tx_pon(x, color, lc); tx_cad(x, ";"); return 1; }
+  if (color && fondo_texto) { tx_cad(x, "color:"); tx_pon(x, color, lc); tx_cad(x, ";"); return 1; }
+  if (color && !casi_transparente(color, lc)) { tx_cad(x, "background-color:"); tx_pon(x, color, lc); tx_cad(x, ";"); return 1; }
   return 0;
 }
 static int strstr_n(const char *v, size_t l, const char *b) {
@@ -310,15 +333,127 @@ static int strstr_n(const char *v, size_t l, const char *b) {
   for (k = 0; k + m <= l; k++) if (!memcmp(v + k, b, m)) return 1;
   return 0;
 }
+/* ---- clamp(), min() y max() (libcss 0.9.2 no los entiende y tira la
+ * declaración: los títulos de hispados.es, «font-size: clamp(44px, 8vw,
+ * 92px)», salían con la letra de siempre): si lo de dentro son longitudes
+ * que se pueden pasar a puntos (px, rem, em y vw/vh con la medida de la
+ * ventana de ahora: cssvar_ancho, cssvar_alto), se cambian por lo que dan ---- */
+int cssvar_ancho = 780, cssvar_alto = 493;
+static int long_px(const char *a, size_t l, double *px) {
+  char b[40], *e;
+  double v;
+  a = recorta(a, &l);
+  if (!l || l >= sizeof b) return 0;
+  memcpy(b, a, l); b[l] = 0;
+  v = strtod(b, &e);
+  if (e == b) return 0;
+  if (!*e) { if (v != 0) return 0; *px = 0; return 1; }
+  if (!strcmp(e, "px")) *px = v;
+  else if (!strcmp(e, "rem") || !strcmp(e, "em")) *px = v * 16;
+  else if (!strcmp(e, "vw")) *px = v * cssvar_ancho / 100;
+  else if (!strcmp(e, "vh")) *px = v * cssvar_alto / 100;
+  else if (!strcmp(e, "pt")) *px = v * 96 / 72;
+  else return 0;
+  return 1;
+}
+/* la función (clamp, min o max) que empieza en v[k] (su nombre) y acaba en el
+ * «)» de v + *fin: lo que da, en puntos; 0 si no se sabe */
+static int una_mates(const char *v, size_t l, size_t k, size_t *fin, double *res) {
+  int que = v[k] == 'c' ? 0 : v[k + 1] == 'i' ? 1 : 2, n = 0, prof = 0;
+  size_t i = k + (que ? 4 : 6), ini = i;
+  double a[3];
+  for (; i < l; i++) {
+    if (v[i] == '(') { prof++; continue; }
+    if (v[i] == ')' && prof) { prof--; continue; }
+    if (prof) continue;
+    if (v[i] == ',' || v[i] == ')') {
+      if (n == 3 || !long_px(v + ini, i - ini, &a[n])) return 0;
+      n++;
+      ini = i + 1;
+      if (v[i] == ')') break;
+    }
+  }
+  if (i >= l || (que == 0 && n != 3) || (que && n < 2)) return 0;
+  *fin = i;
+  if (que == 0) *res = a[1] < a[0] ? a[0] : a[1] > a[2] ? a[2] : a[1];
+  else { int j; *res = a[0]; for (j = 1; j < n; j++) if (que == 1 ? a[j] < *res : a[j] > *res) *res = a[j]; }
+  return 1;
+}
+static int es_mates(const char *v, size_t l, size_t k) {
+  if (k && ((v[k - 1] >= 'a' && v[k - 1] <= 'z') || v[k - 1] == '-')) return 0;   /* (minmax(), -webkit-...) */
+  return (k + 6 <= l && !memcmp(v + k, "clamp(", 6)) || (k + 4 <= l && (!memcmp(v + k, "min(", 4) || !memcmp(v + k, "max(", 4)));
+}
+/* env(nombre, reserva): la reserva (sin ella, 0px): aquí no hay muescas ni
+ * esquinas redondas en la pantalla («padding: max(20px,
+ * env(safe-area-inset-left, 0px))» de hispados.es) */
+static size_t sin_env(const char *v, size_t l, char *d, size_t cabe) {
+  size_t k = 0, n = 0;
+  while (k < l && n + 8 < cabe) {
+    if (v[k] == 'e' && k + 4 <= l && !memcmp(v + k, "env(", 4) && (!k || !((v[k - 1] >= 'a' && v[k - 1] <= 'z') || v[k - 1] == '-'))) {
+      size_t i = k + 4, coma = 0;
+      int prof = 0;
+      for (; i < l; i++) {
+        if (v[i] == '(') prof++;
+        else if (v[i] == ')') { if (!prof) break; prof--; }
+        else if (v[i] == ',' && !prof && !coma) coma = i;
+      }
+      if (i < l) {
+        const char *r = coma ? v + coma + 1 : "0px";
+        size_t lr = coma ? i - coma - 1 : 3;
+        if (n + lr + 1 >= cabe) break;
+        memcpy(d + n, r, lr); n += lr;
+        k = i + 1;
+        continue;
+      }
+    }
+    d[n++] = v[k++];
+  }
+  if (k < l) return 0;                          /* (no cabe: tal cual) */
+  return n;
+}
+static void pon_valor(Txt *x, const char *v, size_t l) {
+  size_t k, desde = 0;
+  char b0[512];
+  if (l < sizeof b0 && memchr(v, '(', l)) {
+    size_t m = 0;
+    const char *e = v;
+    while (e + 4 <= v + l && memcmp(e, "env(", 4)) e++;
+    if (e + 4 <= v + l && (m = sin_env(v, l, b0, sizeof b0))) { v = b0; l = m; }
+  }
+  for (k = 0; k < l; k++) {
+    size_t fin;
+    double r;
+    if ((v[k] == 'c' || v[k] == 'm') && es_mates(v, l, k) && una_mates(v, l, k, &fin, &r)) {
+      char b[32];
+      tx_pon(x, v + desde, k - desde);
+      snprintf(b, sizeof b, "%dpx", (int)(r + 0.5));
+      tx_cad(x, b);
+      k = fin;
+      desde = fin + 1;
+    }
+  }
+  tx_pon(x, v + desde, l - desde);
+}
+
 /* una declaración ya sin var(): a la salida (quitando los degradados) */
 static void pon_decl(Txt *x, const char *n, size_t ln, const char *v, size_t lv) {
   v = recorta(v, &lv);
   if (!lv) return;                              /* (una variable vacía: «--bs-btn-font-family: ;») */
+  /* con el degradado en el texto, el color transparente no (ver fondo_texto) */
+  if (fondo_texto && ((ln == 5 && !memcmp(n, "color", 5)) || (ln == 23 && !memcmp(n, "-webkit-text-fill-color", 23))) &&
+      lv >= 11 && !memcmp(v, "transparent", 11)) return;
   if (es_fondo(n, ln) && busca_grad(v, lv)) { sin_degradado(x, n, ln, v, lv); return; }
-  tx_pon(x, n, ln); tx_cad(x, ":"); tx_pon(x, v, lv); tx_cad(x, ";");
+  tx_pon(x, n, ln); tx_cad(x, ":"); pon_valor(x, v, lv); tx_cad(x, ";");
   /* lo que se esconde fuera de la pantalla moviéndolo (el menú lateral
    * «off-canvas»: transform: translateX(-100%)): NetSurf no mueve, así que
    * se quedaba encima de la página; se esconde */
+  /* un brillo de adorno (filter: blur() grande: los «blobs» de colores de
+   * clicgest.es): sin desenfoque salía un círculo de color; se esconde */
+  if (ln == 6 && !memcmp(n, "filter", 6) && lv > 5 && strstr_n(v, lv, "blur(")) {
+    const char *b = v;
+    while (b + 5 <= v + lv && memcmp(b, "blur(", 5)) b++;
+    if (atoi(b + 5) >= 16) tx_cad(x, "visibility:hidden;");
+  }
   if (ln == 9 && !memcmp(n, "transform", 9) &&
       (strstr_n(v, lv, "translateX(-100%") || strstr_n(v, lv, "translate(-100%") || strstr_n(v, lv, "translate3d(-100%")))
     tx_cad(x, "visibility:hidden;");
@@ -392,6 +527,14 @@ static void escribe(Txt *x, Item *lista, Item *todas) {
     if (i->tipo == I_GRUPO) { tx_pon(x, i->a, i->la); tx_cad(x, "{\n"); escribe(x, i->hijos, todas); tx_cad(x, "}\n"); continue; }
     tx_pon(x, i->a, i->la);
     tx_cad(x, "{");
+    fondo_texto = 0;
+    for (k = 0; k < i->nd; k++) {
+      Decl *e = &i->d[k];
+      size_t lv = e->lv;
+      const char *v = recorta(e->v, &lv);
+      if (((e->ln == 15 && !memcmp(e->n, "background-clip", 15)) || (e->ln == 23 && !memcmp(e->n, "-webkit-background-clip", 23))) &&
+          lv >= 4 && !memcmp(v, "text", 4)) fondo_texto = 1;
+    }
     for (k = 0; k < i->nd; k++) {
       Decl *e = &i->d[k];
       if (e->ln > 2 && e->n[0] == '-' && e->n[1] == '-') continue;   /* (las variables, libcss no las quiere) */
@@ -403,6 +546,7 @@ static void escribe(Txt *x, Item *lista, Item *todas) {
       }
     }
     tx_cad(x, "}\n");
+    fondo_texto = 0;
   }
   /* las reglas añadidas: las que usan variables que pone otra regla */
   for (i = lista; i; i = i->sig) {
@@ -441,7 +585,9 @@ char *cssvar_expande(const char *css, size_t n, size_t *sale) {
     int hay = 0;
     for (k = 0; k + 9 <= n && !hay; k++)
       if ((css[k] == 'v' && !memcmp(css + k, "var(", 4)) || (css[k] == '-' && css[k + 1] == '-') || (css[k] == 'g' && !memcmp(css + k, "gradient(", 9)) ||
-          (css[k] == 't' && !memcmp(css + k, "translate", 9))) hay = 1;
+          (css[k] == 't' && !memcmp(css + k, "translate", 9)) || (css[k] == 'c' && !memcmp(css + k, "clamp(", 6)) ||
+          (css[k] == 'e' && !memcmp(css + k, "env(", 4)) ||
+          ((css[k] == 'm') && es_mates(css, n, k))) hay = 1;
     if (!hay) return NULL;
   }
   arbol = lee(&p, f, 0);

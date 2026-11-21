@@ -6,6 +6,10 @@
 ;  está la flecha (dentro de la pantalla) y apunta cada cambio de botón en
 ;  una cola, con el sitio donde fue: así no se pierde un clic aunque quien lo
 ;  atiende tarde.
+;  (NAVEGADOR, 21/11) La rueda: si el ratón es un IntelliMouse (lo dicen
+;  casi todos los de rueda, y los paneles táctiles que la imitan), cada
+;  movimiento trae un cuarto octeto con lo que ha girado; se va sumando
+;  (hacia arriba, positivo) y el escritorio lo reparte (saca_rueda()).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Raton
@@ -26,12 +30,16 @@ módulo Raton
 
     público variable hay_ratón: bool
     público variable hay_ratón_usb: bool        ; hay un ratón USB (lo dice usbhid.cas)
+    público variable ratón_ps2: bool            ; (dispositivos) hay un ratón PS/2 (ha contestado)
     público variable ratón_x, ratón_y: ent32    ; dónde está la flecha
     público variable ratón_botones: nat32       ; los que están pulsados
     público variable paquetes: nat32            ; los movimientos que han llegado
     variable ancho, alto: ent32                 ; hasta dónde llega
-    variable trozo: arreglo [3] de byte
+    variable trozo: arreglo [4] de byte
     variable cuántos: nat32
+    variable largo_paquete: nat32 = 3           ; (NAVEGADOR) 4 con la rueda (IntelliMouse)
+    público variable hay_rueda: bool            ; (NAVEGADOR) el ratón PS/2 tiene rueda
+    variable rueda: ent32                       ; (NAVEGADOR) lo que ha girado y aún no se ha repartido (arriba, positivo)
     constante COLA = 32
     variable cola: arreglo [COLA] de Clic
     variable cola_ent, cola_sal: nat32
@@ -63,6 +71,12 @@ módulo Raton
         devolver espera_leer()
     fin
 
+    ; (NAVEGADOR) le pone esa frecuencia (muestras por segundo): cierto si la entiende
+    función frecuencia(n: byte): bool
+        si al_ratón(0xF3) <> 0xFA entonces devolver falso fin
+        devolver al_ratón(n) = 0xFA
+    fin
+
     ; el ratón se ha movido (dx a la derecha, dy hacia abajo) y sus botones
     ; están así: lo diga el ratón PS/2 o uno USB. Con las interrupciones
     ; tapadas.
@@ -85,6 +99,26 @@ módulo Raton
         fin
     fin
 
+    ; (NAVEGADOR) la rueda ha girado n pasos (hacia arriba, positivos), lo
+    ; diga el ratón PS/2 o uno USB (usbhid.cas)
+    público función ruedado(n: ent32)
+        variable b: nat32
+        b := sin_interrupciones()
+        rueda := rueda + n
+        reponer(b)
+    fin
+
+    ; (NAVEGADOR) lo que ha girado la rueda desde la última vez (y se pone a cero)
+    público función saca_rueda(): ent32
+        variable b: nat32
+        variable n: ent32
+        b := sin_interrupciones()
+        n := rueda
+        rueda := 0
+        reponer(b)
+        devolver n
+    fin
+
     ; lo mismo, desde un ratón USB (usbhid.cas)
     público función ratón_de_fuera(dx: ent32, dy: ent32, botones: nat32)
         variable b: nat32
@@ -105,7 +139,7 @@ módulo Raton
                 trozo[cuántos] := d
                 cuántos := cuántos + 1
             fin
-            si cuántos = 3 entonces
+            si cuántos = largo_paquete entonces
                 cuántos := 0
                 b := trozo[0]
                 si b yb 0xC0 = 0 entonces               ; (si se ha desbordado, no vale)
@@ -114,6 +148,12 @@ módulo Raton
                     dy := ent32(trozo[2])
                     si b yb 0x20 <> 0 entonces dy := dy - 256 fin
                     movido(dx, 0 - dy, b yb 7)
+                    ; (NAVEGADOR) el cuarto: la rueda (hacia el que la usa, positivo)
+                    si largo_paquete = 4 y trozo[3] <> 0 entonces
+                        dx := ent32(trozo[3] yb 0x0F)
+                        si dx >= 8 entonces dx := dx - 16 fin
+                        rueda := rueda - dx
+                    fin
                 sino
                     paquetes := paquetes + 1
                 fin
@@ -153,6 +193,18 @@ módulo Raton
         reponer(b)
     fin
 
+    ; la pantalla ha cambiado de medida: hasta dónde llega ahora la flecha
+    ; (y, si se queda fuera, adentro)
+    público función pon_medida_ratón(an: ent32, al: ent32)
+        variable b: nat32
+        b := sin_interrupciones()
+        ancho := an
+        alto := al
+        si ratón_x >= an entonces ratón_x := an - 1 fin
+        si ratón_y >= al entonces ratón_y := al - 1 fin
+        reponer(b)
+    fin
+
     ; enciende el ratón, con la flecha en el centro de una pantalla de ese
     ; ancho y ese alto. Falso si no contesta (no hay ratón PS/2).
     público función prepara_ratón(an: ent32, al: ent32): bool
@@ -182,8 +234,19 @@ módulo Raton
             sacar_puerto(DATOS, c)
         fin
         r := al_ratón(0xF6)                     ; como de fábrica
-        si r = 0xFA entonces r := al_ratón(0xF4) fin    ; y que cuente lo que se mueve
+        ; (NAVEGADOR) ¿tiene rueda? La llamada del IntelliMouse: la frecuencia
+        ; a 200, a 100 y a 80; si luego dice que es el 3, manda cuatro octetos
+        si r = 0xFA entonces
+            si frecuencia(200) y frecuencia(100) y frecuencia(80) entonces
+                si al_ratón(0xF2) = 0xFA y espera_leer() = 3 entonces
+                    hay_rueda := cierto
+                    largo_paquete := 4
+                fin
+            fin
+            r := al_ratón(0xF4)                 ; y que cuente lo que se mueve
+        fin
         hay_ratón := r = 0xFA o hay_ratón_usb
+        ratón_ps2 := r = 0xFA                   ; (dispositivos)
         si r = 0xFA entonces
             cuántos := 0
             pon_puerta(0x2C, nat32(dirección(ratón)), PUERTA_NÚCLEO)

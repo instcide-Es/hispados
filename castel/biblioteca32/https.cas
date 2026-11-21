@@ -1,0 +1,814 @@
+; =============================================================================
+;  https.cas - HTTP y HTTPS para los programas de Hispa-Pentium («modelo
+;  usuario»): pedir una página (GET), mandar un formulario o unos datos
+;  (POST, PUT...) con las cabeceras que se quiera, y leer la respuesta, con
+;  las galletas (cookies), las redirecciones, los trozos (chunked) y la
+;  conexión que se queda abierta para el pedido siguiente (keep-alive: con
+;  HTTPS, así no se repite el apretón de manos). Va sobre Redes
+;  (nucleo32/redes.cas): https:// con conectar_seguro (el servicio TLS,
+;  TLS.BIN: TLS 1.2 con el certificado del servidor comprobado), http:// con
+;  conectar. Sin gzip: no se pide (no se manda Accept-Encoding) y los
+;  servidores mandan el cuerpo tal cual.
+;
+;  Lo fácil (todo el cuerpo, a un sitio):
+;    importar Https
+;    variable r: Respuesta_https
+;    variable página: arreglo [20000] de byte
+;    ...
+;    si https_get("https://clicgest.es/", página, 20000, r) = 200 entonces ...
+;    https_post("https://servidor/api", "application/json", datos, n, página, 20000, r)
+;    https_pedir("PUT", url, "X-Clave: 123\r\n", datos, n, página, 20000, r)
+;  (el cuerpo acaba en un 0 si cabe; r.largo dice cuánto hay; r.total,
+;  cuánto traía; r.error, por qué no ha podido ser: https_texto_error)
+;  Lo largo (un archivo grande, a trozos):
+;    si https_abrir("GET", url, nulo, nulo, 0, r) = 200 entonces
+;        mientras cierto hacer
+;            n := https_leer(trozo, 8192)          ; 0: se acabó
+;            si n = 0 o es_error_red(n) entonces romper fin
+;            ...
+;        fin
+;    fin
+;    https_cerrar()                               ; (si no se ha leído entero)
+;  Las cabeceras de la última respuesta: https_cabecera("Content-Type", t, 80).
+;  Las galletas que mande el servidor se guardan (16, en la memoria del
+;  programa: las de sesión; Max-Age=0 las quita; Expires no se mira) y se
+;  devuelven en los pedidos siguientes a ese servidor (las «Secure», solo
+;  por https). https_galleta(nombre, t, cabe) da una; https_borrar_galletas.
+;  Con sin_redirecciones := cierto, un 3xx se devuelve tal cual.
+;
+;  Importa Redes, que está en castel/nucleo32/: un programa de fuera de esa
+;  carpeta se compila con «-I castel/nucleo32».
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Https
+
+    importar Redes, Textos32, Mem32, Formato
+
+    público constante HTTPS_NO_VALE = 0xFFFFFFE1   ; la dirección no vale, o la respuesta no es de HTTP
+    público constante MAX_REDIRECCIONES = 5
+
+    ; lo que se sabe de la respuesta
+    público tipo Respuesta_https = estructura
+        código: nat32                           ; el del servidor (200, 404...); 0: no ha contestado
+        error: nat32                            ; 0, o por qué no ha podido ser (https_texto_error)
+        largo: nat32                            ; los octetos del cuerpo dejados en el destino
+        total: nat32                            ; los que traía (más que «largo» si no cabían)
+        redirigida: nat32                       ; cuántas redirecciones se han seguido
+        url: arreglo [512] de byte              ; la dirección final
+        contenido: arreglo [80] de byte         ; su Content-Type
+    fin
+
+    público variable sin_redirecciones: bool    ; cierto: un 3xx se devuelve, sin seguirlo
+    público variable sin_galletas: bool         ; cierto: ni se guardan ni se mandan
+
+    constante CABE_BUF = 8192
+    constante ESPERA = 3000                     ; tics (30 s) sin que llegue nada: se deja
+    constante CABE_PET = 6144
+    constante CABE_CAB = 4096
+    constante MAX_GALLETAS = 16
+
+    ; lo que llega
+    variable buf: arreglo [CABE_BUF] de byte
+    variable bn, bi: nat32
+    variable cerrada: bool
+    variable error_lectura: nat32
+    ; la conexión abierta (0: ninguna) y de dónde es
+    variable sock: nat32
+    variable sock_segura: bool
+    variable sock_host: arreglo [256] de byte
+    variable sock_puerto: nat32
+    variable reusada: bool
+    ; la dirección, partida
+    variable u_segura: bool
+    variable u_host: arreglo [256] de byte
+    variable u_puerto: nat32
+    variable u_camino: arreglo [1024] de byte
+    ; el pedido y la respuesta
+    variable pet: arreglo [CABE_PET] de byte
+    variable pet_n: nat32
+    variable lin: arreglo [1024] de byte
+    variable cabs: arreglo [CABE_CAB] de byte   ; las cabeceras de la respuesta, una por línea
+    variable cabs_n: nat32
+    variable modo: nat32                        ; el cuerpo: 0 no hay, 1 con largo, 2 en trozos, 3 hasta que se cierre
+    variable quedan: nat32                      ; (1) lo que falta; (2) lo que falta del trozo
+    variable en_trozo: bool                     ; (2) ya ha habido un trozo: antes del siguiente, su fin de línea
+    variable acabado: bool
+    variable mantener: bool                     ; la conexión vale para el pedido siguiente
+    variable nueva_url: arreglo [512] de byte
+    variable tirar: arreglo [2048] de byte
+
+    tipo Galleta = estructura
+        usada: bool
+        segura: bool
+        dominio: arreglo [64] de byte
+        camino: arreglo [64] de byte
+        nombre: arreglo [48] de byte
+        val: arreglo [256] de byte
+    fin
+    variable galletas: arreglo [MAX_GALLETAS] de Galleta
+    variable galleta_sig: nat32
+
+    ; ---- ayudantes de textos ----
+    función empieza_sin_caja(t: puntero a byte, principio: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras principio[i] <> 0 hacer
+            si minúscula(t[i]) <> minúscula(principio[i]) entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    función contiene_sin_caja(t: puntero a byte, trozo: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras t[i] <> 0 hacer
+            si empieza_sin_caja(dirección(t[i]), trozo) entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    función natural_hasta(t: puntero a byte, ref n: nat32): bool
+        variable i: nat32
+        n := 0
+        i := 0
+        mientras t[i] >= '0' y t[i] <= '9' hacer
+            n := n * 10 + (t[i] - '0')
+            i := i + 1
+        fin
+        devolver i > 0
+    fin
+
+    función hex_hasta(t: puntero a byte, ref n: nat32): bool
+        variable i: nat32
+        variable c: byte
+        n := 0
+        i := 0
+        mientras cierto hacer
+            c := minúscula(t[i])
+            si c >= '0' y c <= '9' entonces
+                n := n * 16 + (c - '0')
+            sino si c >= 'a' y c <= 'f' entonces
+                n := n * 16 + (c - 'a' + 10)
+            sino
+                romper
+            fin
+            i := i + 1
+        fin
+        devolver i > 0
+    fin
+
+    ; añade un texto al pedido (lo que no cabe, no va)
+    función pon(t: puntero a byte)
+        variable i: nat32
+        i := 0
+        mientras t[i] <> 0 y pet_n < CABE_PET - 1 hacer
+            pet[pet_n] := t[i]
+            pet_n := pet_n + 1
+            i := i + 1
+        fin
+        pet[pet_n] := 0
+    fin
+
+    función pon_n(n: nat32)
+        variable t: arreglo [12] de byte
+        natural_a_texto(n, t)
+        pon(t)
+    fin
+
+    ; ---- la dirección: http[s]://nombre[:puerto][/camino] ----
+    función parte(u: puntero a byte): bool
+        variable i, k: nat32
+        variable p: puntero a byte
+        p := u
+        si empieza_sin_caja(p, "https://") entonces
+            u_segura := cierto
+            p := p + 8
+        sino si empieza_sin_caja(p, "http://") entonces
+            u_segura := falso
+            p := p + 7
+        sino
+            devolver falso
+        fin
+        i := 0
+        mientras p[i] <> 0 y p[i] <> '/' y p[i] <> ':' y p[i] <> '?' y p[i] <> '#' y i < 255 hacer
+            u_host[i] := minúscula(p[i])
+            i := i + 1
+        fin
+        u_host[i] := 0
+        si i = 0 entonces devolver falso fin
+        u_puerto := 80
+        si u_segura entonces u_puerto := 443 fin
+        si p[i] = ':' entonces
+            i := i + 1
+            u_puerto := 0
+            mientras p[i] >= '0' y p[i] <= '9' hacer
+                u_puerto := u_puerto * 10 + (p[i] - '0')
+                i := i + 1
+            fin
+            si u_puerto = 0 o u_puerto > 65535 entonces devolver falso fin
+        fin
+        k := 0
+        si p[i] <> '/' entonces
+            u_camino[0] := '/'
+            k := 1
+        fin
+        mientras p[i] <> 0 y p[i] <> '#' y k < 1022 hacer
+            ; (los espacios no van en una dirección)
+            si p[i] = ' ' entonces
+                u_camino[k] := '%'
+                u_camino[k + 1] := '2'
+                u_camino[k + 2] := '0'
+                k := k + 3
+            sino
+                u_camino[k] := p[i]
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        u_camino[k] := 0
+        devolver cierto
+    fin
+
+    ; la dirección de una redirección («Location»), entera, a nueva_url
+    función a_dónde(loc: puntero a byte)
+        variable d: arreglo [4] de nat32
+        variable esquema: puntero a byte
+        esquema := "http"
+        si u_segura entonces esquema := "https" fin
+        si empieza_sin_caja(loc, "http://") o empieza_sin_caja(loc, "https://") entonces
+            copiar_hasta(nueva_url, loc, 512)
+        sino si loc[0] = '/' y loc[1] = '/' entonces
+            d[0] := nat32(esquema)
+            d[1] := nat32(loc)
+            formatear(nueva_url, 512, "%s:%s", d)
+        sino si loc[0] = '/' entonces
+            d[0] := nat32(esquema)
+            d[1] := nat32(dirección(u_host[0]))
+            d[2] := u_puerto
+            d[3] := nat32(loc)
+            formatear(nueva_url, 512, "%s://%s:%u%s", d)
+        sino
+            ; relativa: a la carpeta del camino de ahora
+            d[0] := nat32(esquema)
+            d[1] := nat32(dirección(u_host[0]))
+            d[2] := u_puerto
+            formatear(nueva_url, 512, "%s://%s:%u", d)
+            añade_carpeta()
+            concatenar_hasta(nueva_url, loc, 512)
+        fin
+    fin
+
+    ; (a_dónde) pone en nueva_url la carpeta de u_camino (hasta su última barra)
+    función añade_carpeta()
+        variable i, k, n: nat32
+        k := 0
+        i := 0
+        mientras u_camino[i] <> 0 y u_camino[i] <> '?' hacer
+            si u_camino[i] = '/' entonces k := i fin
+            i := i + 1
+        fin
+        n := longitud(nueva_url)
+        i := 0
+        mientras i <= k y n < 510 hacer
+            nueva_url[n] := u_camino[i]
+            n := n + 1
+            i := i + 1
+        fin
+        nueva_url[n] := 0
+    fin
+
+    función concatenar_hasta(d: puntero a byte, t: puntero a byte, cabe: nat32)
+        variable n, i: nat32
+        n := longitud(d)
+        i := 0
+        mientras t[i] <> 0 y n + 1 < cabe hacer
+            d[n] := t[i]
+            n := n + 1
+            i := i + 1
+        fin
+        d[n] := 0
+    fin
+
+    ; ---- la conexión ----
+    público función https_cerrar()
+        si sock <> 0 entonces cerrar_conexión(sock) fin
+        sock := 0
+        acabado := cierto
+    fin
+
+    ; una conexión con u_host:u_puerto (la que hay, si es de allí): 0 o el error
+    función conecta(): nat32
+        variable ip, r: nat32
+        si sock <> 0 y sock_segura = u_segura y sock_puerto = u_puerto y iguales(sock_host, u_host) entonces
+            reusada := cierto
+            devolver 0
+        fin
+        https_cerrar()
+        reusada := falso
+        si u_segura entonces
+            r := conectar_seguro(u_host, u_puerto, ESPERA_NORMAL)
+        sino
+            r := resolver(u_host, ip)
+            si no es_error_red(r) entonces r := conectar(ip, u_puerto, ESPERA_NORMAL) fin
+        fin
+        si es_error_red(r) entonces devolver r fin
+        sock := r
+        sock_segura := u_segura
+        sock_puerto := u_puerto
+        copiar_hasta(sock_host, u_host, 256)
+        devolver 0
+    fin
+
+    ; ---- leer ----
+    función llena(): bool
+        variable r: nat32
+        si cerrada o sock = 0 entonces devolver falso fin
+        r := recibir(sock, buf, CABE_BUF, ESPERA)
+        si es_error_red(r) entonces
+            error_lectura := r
+            cerrada := cierto
+            devolver falso
+        fin
+        si r = 0 entonces
+            cerrada := cierto
+            devolver falso
+        fin
+        bn := r
+        bi := 0
+        devolver cierto
+    fin
+
+    función lee_octeto(ref c: byte): bool
+        si bi >= bn y no llena() entonces devolver falso fin
+        c := buf[bi]
+        bi := bi + 1
+        devolver cierto
+    fin
+
+    ; una línea, a «lin» (sin el retorno de carro ni el avance)
+    función lee_lin(): bool
+        variable c: byte
+        variable n: nat32
+        n := 0
+        mientras cierto hacer
+            si no lee_octeto(c) entonces
+                lin[n] := 0
+                devolver n > 0
+            fin
+            si c = '\n' entonces romper fin
+            si c <> '\r' y n < 1022 entonces
+                lin[n] := c
+                n := n + 1
+            fin
+        fin
+        lin[n] := 0
+        devolver cierto
+    fin
+
+    ; lo de detrás de «Nombre:» en «lin», si es esa cabecera
+    función de_cab(nom: puntero a byte): puntero a byte
+        variable p: puntero a byte
+        si no empieza_sin_caja(lin, nom) entonces devolver nulo fin
+        p := dirección(lin[longitud(nom)])
+        si valor(p) <> ':' entonces devolver nulo fin
+        p := p + 1
+        mientras valor(p) = ' ' o valor(p) = '\t' hacer p := p + 1 fin
+        devolver p
+    fin
+
+    ; ---- las galletas ----
+    ; ¿vale la galleta g para ese servidor y ese camino?
+    función galleta_vale(g: puntero a Galleta, host: puntero a byte, camino: puntero a byte, segura: bool): bool
+        variable n, m: nat32
+        si no g.usada o (g.segura y no segura) entonces devolver falso fin
+        n := longitud(host)
+        m := longitud(dirección(g.dominio[0]))
+        si n < m entonces devolver falso fin
+        si no iguales(host + (n - m), dirección(g.dominio[0])) entonces devolver falso fin
+        si n > m y host[n - m - 1] <> '.' entonces devolver falso fin
+        devolver empieza_por(camino, dirección(g.camino[0]))
+    fin
+
+    función pon_galletas()
+        variable i, n: nat32
+        variable g: puntero a Galleta
+        si sin_galletas entonces devolver fin
+        n := 0
+        para i desde 0 hasta MAX_GALLETAS - 1 hacer
+            g := dirección(galletas[i])
+            si galleta_vale(g, u_host, u_camino, u_segura) entonces
+                si n = 0 entonces pon("Cookie: ") sino pon("; ") fin
+                pon(dirección(g.nombre[0]))
+                pon("=")
+                pon(dirección(g.val[0]))
+                n := n + 1
+            fin
+        fin
+        si n > 0 entonces pon("\r\n") fin
+    fin
+
+    ; un trozo «; Nombre=valor» de un Set-Cookie: el nombre (en minúsculas)
+    ; a «a», el valor a «v»; da dónde sigue
+    función trozo_galleta(p: puntero a byte, a: puntero a byte, ca: nat32, v: puntero a byte, cv: nat32): puntero a byte
+        variable i: nat32
+        mientras valor(p) = ' ' o valor(p) = ';' hacer p := p + 1 fin
+        i := 0
+        mientras valor(p) <> 0 y valor(p) <> '=' y valor(p) <> ';' hacer
+            si i + 1 < ca y valor(p) <> ' ' entonces
+                a[i] := valor(p)
+                i := i + 1
+            fin
+            p := p + 1
+        fin
+        a[i] := 0
+        i := 0
+        si valor(p) = '=' entonces
+            p := p + 1
+            mientras valor(p) <> 0 y valor(p) <> ';' hacer
+                si i + 1 < cv entonces
+                    v[i] := valor(p)
+                    i := i + 1
+                fin
+                p := p + 1
+            fin
+        fin
+        ; (sin los espacios del final)
+        mientras i > 0 y v[i - 1] = ' ' hacer i := i - 1 fin
+        v[i] := 0
+        devolver p
+    fin
+
+    función recibe_galleta(p: puntero a byte)
+        variable nom: arreglo [48] de byte
+        variable v: arreglo [256] de byte
+        variable a: arreglo [16] de byte
+        variable x: arreglo [64] de byte
+        variable dom: arreglo [64] de byte
+        variable cam: arreglo [64] de byte
+        variable segura, quitar: bool
+        variable i, n: nat32
+        variable g: puntero a Galleta
+        si sin_galletas entonces devolver fin
+        p := trozo_galleta(p, nom, 48, v, 256)
+        si nom[0] = 0 entonces devolver fin
+        copiar_hasta(dom, u_host, 64)
+        copiar(cam, "/")
+        segura := falso
+        quitar := falso
+        mientras valor(p) <> 0 hacer
+            p := trozo_galleta(p, a, 16, x, 64)
+            para i desde 0 hasta 15 hacer a[i] := minúscula(a[i]) fin
+            si iguales(a, "domain") y x[0] <> 0 entonces
+                i := 0
+                si x[0] = '.' entonces i := 1 fin
+                para n desde 0 hasta 62 hacer x[n] := minúscula(x[n]) fin
+                ; (solo de ese servidor o de uno de más arriba)
+                n := longitud(u_host)
+                si n >= longitud(dirección(x[i])) y iguales(dirección(u_host[n - longitud(dirección(x[i]))]), dirección(x[i])) entonces copiar_hasta(dom, dirección(x[i]), 64) fin
+            sino si iguales(a, "path") y x[0] = '/' entonces
+                copiar_hasta(cam, x, 64)
+            sino si iguales(a, "secure") entonces
+                segura := cierto
+            sino si iguales(a, "max-age") y (x[0] = '0' o x[0] = '-') entonces
+                quitar := cierto
+            fin
+        fin
+        ; la que ya había con ese nombre (de ese sitio y camino), o un sitio libre
+        g := nulo
+        para i desde 0 hasta MAX_GALLETAS - 1 hacer
+            si g = nulo y galletas[i].usada y iguales(dirección(galletas[i].nombre[0]), nom) y iguales(dirección(galletas[i].dominio[0]), dom) y iguales(dirección(galletas[i].camino[0]), cam) entonces g := dirección(galletas[i]) fin
+        fin
+        si quitar entonces
+            si g <> nulo entonces g.usada := falso fin
+            devolver
+        fin
+        para i desde 0 hasta MAX_GALLETAS - 1 hacer
+            si g = nulo y no galletas[i].usada entonces g := dirección(galletas[i]) fin
+        fin
+        si g = nulo entonces
+            g := dirección(galletas[galleta_sig])
+            galleta_sig := (galleta_sig + 1) mod MAX_GALLETAS
+        fin
+        g.usada := cierto
+        g.segura := segura
+        copiar_hasta(dirección(g.nombre[0]), nom, 48)
+        copiar_hasta(dirección(g.val[0]), v, 256)
+        copiar_hasta(dirección(g.dominio[0]), dom, 64)
+        copiar_hasta(dirección(g.camino[0]), cam, 64)
+    fin
+
+    ; el valor de la galleta «nombre» (de cualquier sitio), a «destino»
+    público función https_galleta(nombre: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+        variable i: nat32
+        para i desde 0 hasta MAX_GALLETAS - 1 hacer
+            si galletas[i].usada y iguales(dirección(galletas[i].nombre[0]), nombre) entonces
+                copiar_hasta(destino, dirección(galletas[i].val[0]), cabe)
+                devolver cierto
+            fin
+        fin
+        devolver falso
+    fin
+
+    público función https_borrar_galletas()
+        variable i: nat32
+        para i desde 0 hasta MAX_GALLETAS - 1 hacer galletas[i].usada := falso fin
+    fin
+
+    ; ---- un pedido y su respuesta ----
+    ; manda el pedido (por la conexión que haya): 0 o el error
+    función manda(método: puntero a byte, cabeceras: puntero a byte, cuerpo: puntero a byte, n: nat32): nat32
+        variable r, k: nat32
+        pet_n := 0
+        pet[0] := 0
+        pon(método)
+        pon(" ")
+        pon(u_camino)
+        pon(" HTTP/1.1\r\nHost: ")
+        pon(u_host)
+        si (u_segura y u_puerto <> 443) o (no u_segura y u_puerto <> 80) entonces
+            pon(":")
+            pon_n(u_puerto)
+        fin
+        pon("\r\nUser-Agent: Hispa-Pentium/0.8\r\nAccept: */*\r\nConnection: keep-alive\r\n")
+        pon_galletas()
+        si cuerpo <> nulo o n > 0 o iguales(método, "POST") o iguales(método, "PUT") entonces
+            pon("Content-Length: ")
+            pon_n(n)
+            pon("\r\n")
+        fin
+        si cabeceras <> nulo y cabeceras[0] <> 0 entonces
+            pon(cabeceras)
+            k := longitud(cabeceras)
+            si cabeceras[k - 1] <> '\n' entonces pon("\r\n") fin
+        fin
+        pon("\r\n")
+        si pet_n >= CABE_PET - 1 entonces devolver HTTPS_NO_VALE fin
+        r := enviar(sock, pet, pet_n)
+        si es_error_red(r) entonces devolver r fin
+        si n > 0 entonces
+            r := enviar(sock, cuerpo, n)
+            si es_error_red(r) entonces devolver r fin
+        fin
+        devolver 0
+    fin
+
+    ; la línea de estado y las cabeceras: el código (0 si no ha llegado nada
+    ; que sea HTTP)
+    función lee_cabeceras(método: puntero a byte, ref r: Respuesta_https): nat32
+        variable código, n: nat32
+        variable p: puntero a byte
+        variable trozos, con_largo, http10: bool
+        código := 100
+        mientras código >= 100 y código < 200 hacer
+            si no lee_lin() entonces devolver 0 fin
+            si no empieza_sin_caja(lin, "HTTP/") entonces devolver 0 fin
+            http10 := empieza_sin_caja(lin, "HTTP/1.0")
+            p := buscar_car(lin, ' ')
+            código := 0
+            si p <> nulo entonces natural_hasta(p + 1, código) fin
+            si código >= 100 y código < 200 entonces
+                mientras lee_lin() y lin[0] <> 0 hacer fin
+            fin
+        fin
+        si código = 0 entonces devolver 0 fin
+        trozos := falso
+        con_largo := falso
+        mantener := no http10
+        quedan := 0
+        cabs_n := 0
+        cabs[0] := 0
+        nueva_url[0] := 0
+        r.contenido[0] := 0
+        mientras lee_lin() hacer
+            si lin[0] = 0 entonces romper fin
+            ; (guardada, para https_cabecera)
+            n := longitud(lin)
+            si cabs_n + n + 2 < CABE_CAB entonces
+                copiar_memoria(dirección(cabs[cabs_n]), lin, n)
+                cabs_n := cabs_n + n
+                cabs[cabs_n] := '\n'
+                cabs_n := cabs_n + 1
+                cabs[cabs_n] := 0
+            fin
+            p := de_cab("content-length")
+            si p <> nulo entonces con_largo := natural_hasta(p, quedan) fin
+            p := de_cab("transfer-encoding")
+            si p <> nulo y contiene_sin_caja(p, "chunked") entonces trozos := cierto fin
+            p := de_cab("connection")
+            si p <> nulo entonces
+                si contiene_sin_caja(p, "close") entonces mantener := falso fin
+                si contiene_sin_caja(p, "keep-alive") entonces mantener := cierto fin
+            fin
+            p := de_cab("location")
+            si p <> nulo entonces a_dónde(p) fin
+            p := de_cab("set-cookie")
+            si p <> nulo entonces recibe_galleta(p) fin
+            p := de_cab("content-type")
+            si p <> nulo entonces copiar_hasta(dirección(r.contenido[0]), p, 80) fin
+        fin
+        acabado := falso
+        en_trozo := falso
+        si iguales(método, "HEAD") o código = 204 o código = 304 entonces
+            modo := 0
+        sino si trozos entonces
+            modo := 2
+            quedan := 0
+        sino si con_largo entonces
+            modo := 1
+        sino
+            modo := 3
+            mantener := falso
+        fin
+        si modo = 0 o (modo = 1 y quedan = 0) entonces termina() fin
+        devolver código
+    fin
+
+    ; se acabó el cuerpo: la conexión se queda para la siguiente, o se cierra
+    función termina()
+        acabado := cierto
+        si no mantener o cerrada entonces https_cerrar() fin
+    fin
+
+    ; lee del cuerpo de la respuesta (ya sin trozos) hasta «cabe» octetos, a
+    ; «destino»: cuántos; 0 cuando se acaba; o un error (de la red, o
+    ; HTTPS_NO_VALE si los trozos no se entienden)
+    público función https_leer(destino: puntero a byte, cabe: nat32): nat32
+        variable k: nat32
+        si acabado o cabe = 0 entonces devolver 0 fin
+        si modo = 2 y quedan = 0 entonces
+            ; el trozo siguiente: su largo en hexadecimal (y, antes, el fin del anterior)
+            si en_trozo entonces lee_lin() fin
+            en_trozo := cierto
+            si no lee_lin() o no hex_hasta(lin, quedan) entonces
+                https_cerrar()
+                si error_lectura <> 0 entonces devolver error_lectura fin
+                devolver HTTPS_NO_VALE
+            fin
+            si quedan = 0 entonces
+                ; (las cabeceras de detrás, si las hay)
+                mientras lee_lin() y lin[0] <> 0 hacer fin
+                termina()
+                devolver 0
+            fin
+        fin
+        si bi >= bn entonces
+            si no llena() entonces
+                si modo = 3 y error_lectura = 0 entonces
+                    termina()
+                    devolver 0
+                fin
+                https_cerrar()
+                si error_lectura <> 0 entonces devolver error_lectura fin
+                devolver CORTADA_RED
+            fin
+        fin
+        k := bn - bi
+        si k > cabe entonces k := cabe fin
+        si modo <> 3 y k > quedan entonces k := quedan fin
+        copiar_memoria(destino, dirección(buf[bi]), k)
+        bi := bi + k
+        si modo <> 3 entonces
+            quedan := quedan - k
+            si modo = 1 y quedan = 0 entonces termina() fin
+        fin
+        devolver k
+    fin
+
+    ; manda el pedido y lee la respuesta hasta el cuerpo (siguiendo las
+    ; redirecciones): el código del servidor, o un error (r.error)
+    público función https_abrir(método: puntero a byte, url: puntero a byte, cabeceras: puntero a byte, cuerpo: puntero a byte, n: nat32, ref r: Respuesta_https): nat32
+        variable e, código, intento, k: nat32
+        variable mét: arreglo [16] de byte
+        copiar_hasta(mét, método, 16)
+        r.código := 0
+        r.error := 0
+        r.largo := 0
+        r.total := 0
+        r.redirigida := 0
+        copiar_hasta(dirección(r.url[0]), url, 512)
+        mientras cierto hacer
+            si no parte(dirección(r.url[0])) entonces
+                r.error := HTTPS_NO_VALE
+                devolver HTTPS_NO_VALE
+            fin
+            intento := 0
+            mientras cierto hacer
+                ; (si la conexión de antes la ha cerrado el servidor, otra vez con una nueva)
+                si sock <> 0 y no acabado entonces https_cerrar() fin
+                e := conecta()
+                si e <> 0 entonces
+                    r.error := e
+                    devolver e
+                fin
+                bn := 0
+                bi := 0
+                cerrada := falso
+                error_lectura := 0
+                e := manda(mét, cabeceras, cuerpo, n)
+                código := 0
+                si e = 0 entonces código := lee_cabeceras(mét, r) fin
+                si código <> 0 entonces romper fin
+                https_cerrar()
+                si reusada y intento = 0 entonces
+                    intento := 1
+                    seguir
+                fin
+                si e = 0 entonces
+                    e := error_lectura
+                    si e = 0 entonces e := HTTPS_NO_VALE fin
+                fin
+                r.error := e
+                devolver e
+            fin
+            r.código := código
+            si código >= 300 y código < 400 y código <> 304 y nueva_url[0] <> 0 y no sin_redirecciones y r.redirigida < MAX_REDIRECCIONES entonces
+                ; (lo que traiga, fuera, para que la conexión valga)
+                mientras cierto hacer
+                    k := https_leer(tirar, 2048)
+                    si k = 0 o es_error_red(k) entonces romper fin
+                fin
+                r.redirigida := r.redirigida + 1
+                copiar_hasta(dirección(r.url[0]), nueva_url, 512)
+                si código = 303 o ((código = 301 o código = 302) y iguales(mét, "POST")) entonces
+                    copiar(mét, "GET")
+                    cuerpo := nulo
+                    n := 0
+                fin
+                seguir
+            fin
+            devolver código
+        fin
+        devolver 0
+    fin
+
+    ; el pedido entero: el cuerpo de la respuesta, a «destino» (hasta «cabe»
+    ; octetos; detrás, un 0 si cabe). El código del servidor, o un error
+    público función https_pedir(método: puntero a byte, url: puntero a byte, cabeceras: puntero a byte, cuerpo: puntero a byte, n: nat32, destino: puntero a byte, cabe: nat32, ref r: Respuesta_https): nat32
+        variable c, k: nat32
+        c := https_abrir(método, url, cabeceras, cuerpo, n, r)
+        si r.error <> 0 entonces devolver c fin
+        mientras cierto hacer
+            si r.largo < cabe entonces
+                k := https_leer(destino + r.largo, cabe - r.largo)
+            sino
+                k := https_leer(tirar, 2048)
+            fin
+            si k = 0 entonces romper fin
+            si es_error_red(k) entonces
+                r.error := k
+                romper
+            fin
+            si r.largo < cabe entonces r.largo := r.largo + k fin
+            r.total := r.total + k
+        fin
+        si r.largo < cabe entonces destino[r.largo] := 0 fin
+        si r.error <> 0 entonces devolver r.error fin
+        devolver c
+    fin
+
+    público función https_get(url: puntero a byte, destino: puntero a byte, cabe: nat32, ref r: Respuesta_https): nat32
+        devolver https_pedir("GET", url, nulo, nulo, 0, destino, cabe, r)
+    fin
+
+    ; un POST con el cuerpo «cuerpo» (n octetos) de la clase «clase»
+    ; («application/x-www-form-urlencoded», «application/json»...)
+    público función https_post(url: puntero a byte, clase: puntero a byte, cuerpo: puntero a byte, n: nat32, destino: puntero a byte, cabe: nat32, ref r: Respuesta_https): nat32
+        variable c: arreglo [120] de byte
+        variable d: arreglo [1] de nat32
+        d[0] := nat32(clase)
+        formatear(c, 120, "Content-Type: %s\r\n", d)
+        devolver https_pedir("POST", url, c, cuerpo, n, destino, cabe, r)
+    fin
+
+    ; una cabecera de la última respuesta (sin caja: «content-type»), a «destino»
+    público función https_cabecera(nombre: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+        variable i, k, n: nat32
+        n := longitud(nombre)
+        i := 0
+        mientras i < cabs_n hacer
+            si empieza_sin_caja(dirección(cabs[i]), nombre) y cabs[i + n] = ':' entonces
+                i := i + n + 1
+                mientras cabs[i] = ' ' hacer i := i + 1 fin
+                k := 0
+                mientras cabs[i] <> '\n' y cabs[i] <> 0 y k + 1 < cabe hacer
+                    destino[k] := cabs[i]
+                    k := k + 1
+                    i := i + 1
+                fin
+                destino[k] := 0
+                devolver cierto
+            fin
+            mientras i < cabs_n y cabs[i] <> '\n' hacer i := i + 1 fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    público función https_texto_error(e: nat32): puntero a byte
+        si e = HTTPS_NO_VALE entonces devolver "la dirección no vale (http:// o https://), o la respuesta no es de HTTP" fin
+        devolver texto_error_red(e)
+    fin
+
+fin Https.

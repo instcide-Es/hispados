@@ -13,6 +13,12 @@
 # la oficina de Hispa-386 (FACTURAS.HVP, PLUMA.HVP, CUENTAS.HVP, MIRADOR.HVP):
 # nucleo32/hvprun/hacer.sh. Con «red», también el servicio de red (RED.BIN) y
 # sus programas: IPCONFIG.BIN, PING.BIN y DESCARGA.BIN (la orden DESCARGAR).
+# Con «tls» (y «red»), también el servicio TLS (TLS.BIN, nucleo32/tls/hacer.sh:
+# necesita gcc con -m32) y HTTPS.BIN (la orden HTTPS).
+# Con «navegador» (y «red» y «tls»), también el Navegador (nucleo32/navega/hacer.sh)
+# en \NAVEGA, su acceso en \MENU (NAVEGA.MNU, con el icono en el tapiz) y
+# X87.BIN (la prueba de que cada programa tiene su coma flotante). Con 32,
+# que caben (16 MB se quedan cortos).
 # La imagen se le da a QEMU como disco IDE: DISCO=IMAGEN nucleo32/probar.sh ...
 # Necesita python3, nasm, mkfs.fat (dosfstools) y mtools.
 set -e
@@ -22,8 +28,10 @@ IMG=${1:?uso: disco.sh IMAGEN [12|16|32|mbr]}
 CLASE=${2:-16}
 OFICINA=
 RED=
+TLS=
+NAVEGADOR=
 for o in "${@:3}"; do
-  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; esac
+  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; navegador) NAVEGADOR=navegador ;; esac
 done
 T=$(mktemp -d)
 trap 'rm -rf $T' EXIT
@@ -70,12 +78,29 @@ if [ "$RED" = red ]; then
     nasm -f bin $T/$f.asm -o $T/$N.BIN
   done
   mcopy -i $V $T/RED.BIN $T/IPCONFIG.BIN $T/PING.BIN $T/DESCARGA.BIN ::
+  # (TLS) el servicio TLS y la orden HTTPS
+  if [ "$TLS" = tls ]; then
+    bash $AQUI/tls/hacer.sh $T/TLS.BIN
+    python3 -I $AQUI/../ccastel.py $AQUI/uhttps.cas -o $T/uhttps.asm > /dev/null
+    nasm -f bin $T/uhttps.asm -o $T/HTTPS.BIN
+    mcopy -i $V $T/TLS.BIN $T/HTTPS.BIN ::
+  fi
 fi
 if [ "$OFICINA" = oficina ]; then
   bash $AQUI/hvprun/hacer.sh $T/of > /dev/null
   mcopy -i $V $T/of/HVPRUN.BIN ::
   mmd -i $V ::OFICINA
   mcopy -i $V $T/of/FACTURAS.HVP $T/of/PLUMA.HVP $T/of/CUENTAS.HVP $T/of/MIRADOR.HVP $T/of/TIPOS.DAT $T/of/DICCIO.DAT ::OFICINA/
+fi
+# (NAVEGADOR) el Navegador, sin instalar: en \NAVEGA y su acceso en \MENU
+if [ "$NAVEGADOR" = navegador ]; then
+  mkdir -p $T/nav/NAVEGA
+  NAVEGA_PROGRAMA='\NAVEGA\NAVEGA.BIN' NAVEGA_ICONO='\MENU\NAVEGA.ICP' bash $AQUI/navega/hacer.sh $T/nav/NAVEGA
+  make -s -C $AQUI/../.. -f castel/nucleo32/navega/navega.mk build/navega-pentium/X87.BIN > /dev/null
+  mcopy -s -i $V $T/nav/NAVEGA ::
+  mmd -i $V ::MENU
+  mcopy -i $V $T/nav/NAVEGA.MNU $T/nav/NAVEGA.ICP ::MENU/
+  mcopy -i $V $AQUI/../../build/navega-pentium/X87.BIN ::
 fi
 if [ $CLASE = mbr ]; then
   # una tabla de particiones con una sola, de FAT16 (clase 0x06), desde el sector 63

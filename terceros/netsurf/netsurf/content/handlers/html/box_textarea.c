@@ -38,9 +38,21 @@
 #include "html/box_textarea.h"
 #include "html/font.h"
 #include "html/form_internal.h"
+#include "guion.h"	/* [HISPA] JavaScript (w32/surf/guion.c) */
+
+static int hispa_tecleando;	/* [HISPA] lo cambia una tecla: evento input */
 
 
+static nserror box_textarea_keypress2(html_content *html, struct box *box, uint32_t key);
 nserror box_textarea_keypress(html_content *html, struct box *box, uint32_t key)
+{
+	nserror r;
+	hispa_tecleando++;
+	r = box_textarea_keypress2(html, box, key);
+	hispa_tecleando--;
+	return r;
+}
+static nserror box_textarea_keypress2(html_content *html, struct box *box, uint32_t key)
 {
 	struct form_control *gadget = box->gadget;
 	struct textarea *ta = gadget->data.text.ta;
@@ -248,6 +260,9 @@ static void box_textarea_callback(void *data, struct textarea_msg *msg)
 		form_gadget_update_value(gadget,
 					 strndup(msg->data.modified.text,
 						 msg->data.modified.len));
+		/* [HISPA] JavaScript: lo escrito, a la página (luego) */
+		if (hispa_tecleando && html != NULL && html->jsthread != NULL)
+			guion_evento_luego(html->jsthread, gadget->node, "input");
 		break;
 	}
 }
@@ -278,6 +293,11 @@ bool box_textarea_create_textarea(html_content *html,
 	assert(gadget->type == GADGET_TEXTAREA ||
 			gadget->type == GADGET_TEXTBOX ||
 			gadget->type == GADGET_PASSWORD);
+
+	/* [HISPA] JavaScript: al rehacer las cajas (w32/surf/rehaz.c), el campo
+	 * que ya había se queda (con lo escrito y el cursor) */
+	if (gadget->data.text.ta != NULL)
+		return true;
 
 	if (gadget->type == GADGET_TEXTAREA) {
 		dom_html_text_area_element *textarea =

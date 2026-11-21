@@ -42,7 +42,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -52,7 +52,7 @@ módulo Escritorio
     constante BOTONES_X = 108
     constante BOTÓN_MÁXIMO = 160
     constante MENÚ_ANCHO = 330
-    constante MENÚ_ALTO = 380
+    constante MENÚ_ALTO = 380                   ; sin accesos de paquetes (con ellos, más: menú_alto)
     constante MENÚ_CABEZA = 54
     constante MENÚ_PIE = 42
     constante MENÚ_COLUMNA = 172                ; donde empieza la columna de la derecha
@@ -90,11 +90,23 @@ módulo Escritorio
     constante AM_EQUIPO = 25
     constante AM_OFICINA = 26                   ; un programa de la oficina (dato: cuál)
     constante AM_PROGRAMAS = 27                 ; «Programas y actualizaciones» (ACTUALIZ.BIN)
+    constante AM_ACCESO = 28                    ; un programa de un paquete (accesos.cas; dato: cuál)
+    constante AM_DISPOSITIVOS = 29              ; (dispositivos) el Administrador de dispositivos (DISPOSIT.BIN)
     constante N_OFICINA = 4                     ; los que hay: Facturas, Pluma, Cuentas y Mirador
     constante AC_CERRAR_ACERCA = 11
     constante AC_ACERCA = 12
     constante AC_TAPIZ_SIGUIENTE = 13
     constante AC_ORGANIZAR = 14
+    ; ---- la medida de la pantalla (Configuración > Cambiar...) ----
+    constante AC_PANTALLA = 30
+    constante AC_CERRAR_PANTALLA = 31
+    constante AC_PROBAR = 32
+    constante AC_GUARDAR_MODO = 33
+    constante AC_MANTENER = 34
+    constante AC_VOLVER = 35
+    constante AC_REINICIAR_YA = 36
+    constante AC_MÁS_TARDE = 37
+    constante AC_MODO = 40                      ; 40 y los siguientes: los modos de la lista
 
     ; ---- los menús del botón secundario (la etiqueta de cada uno) ----
     constante ME_FONDO = 1                      ; el del tapiz
@@ -115,16 +127,17 @@ módulo Escritorio
 
     constante MAX_OPCIONES = 16
     constante MAX_DOCUMENTOS = 5
-    constante MAX_PULSADORES = 16
+    constante MAX_PULSADORES = 48
     constante MAX_BOTONES = 12
 
     ; ---- los iconos del tapiz ----
-    constante MAX_ICONOS = 4
+    constante MAX_ICONOS = 4 + MAX_ACCESOS
     constante CELDA_AN = 112                    ; lo que ocupa uno, con su rótulo
     constante CELDA_AL = 62
     tipo Icono = estructura
         x, ye: ent32
         acción: nat32
+        dato: nat32                             ; (de un acceso: cuál)
         nombre: puntero a byte
         debajo: puntero a nat32                 ; lo que tapa del tapiz (para quitarlo de ahí)
     fin
@@ -136,7 +149,30 @@ módulo Escritorio
     variable cog_movido: bool
     variable menú_dato, menú_acción: nat32      ; de qué va el menú emergente abierto
 
+    variable menú_alto: ent32 = MENÚ_ALTO        ; lo que mide el menú Inicio (crece con los accesos de los paquetes)
     variable v_barra, v_menú, v_apagar, v_config, v_aviso, v_fondo, v_acerca: nat32
+    ; ---- la medida de la pantalla ----
+    constante MAX_MODOS = 15
+    constante N_CANDIDATOS = 13
+    constante PRUEBA_SEGUNDOS = 15
+    constante PANTALLA_AN = 520
+    constante PANTALLA_AL = 360
+    variable v_pantalla, v_probar, v_reiniciar: nat32
+    variable modos_an, modos_al: arreglo [MAX_MODOS] de nat32  ; (0 x 0: «a la medida de la pantalla», al arrancar)
+    variable n_modos: nat32
+    variable modo_elegido: ent32
+    variable en_marcha: bool                    ; la tarjeta deja cambiarlo en marcha (la VBE de Bochs)
+    variable monitor_an, monitor_al: nat32      ; la que prefiere la pantalla (su EDID), si se sabe
+    variable prueba_arranque: bool              ; lo que se prueba lo ha puesto GRUB al arrancar
+    variable prueba_hasta, prueba_vista: nat32
+    variable antes_an, antes_al: nat32          ; la medida de antes de probar
+    variable texto_pantalla: arreglo [96] de byte   ; lo último que ha pasado (debajo de la lista)
+    variable texto_reiniciar: arreglo [96] de byte
+    ; \HISPA\PANTALLA.ENV (un bloque de variables de GRUB, como GRUBENV)
+    variable env_pantalla, env_antes: arreglo [16] de byte
+    variable env_prueba: byte
+    variable texto_env: arreglo [1100] de byte
+    variable texto_grub: arreglo [8200] de byte
     variable menú_abierto: bool
     variable menú_cerrado_en: nat32             ; el tic en que se cerró (por un clic fuera)
     variable opciones: arreglo [MAX_OPCIONES] de Opción
@@ -308,6 +344,29 @@ módulo Escritorio
         fin
     fin
 
+    ; el icono de un acceso (el de su .ICP, de 32 x 32; o uno de programa si
+    ; no tiene), tomando uno de cada «salto» puntos (1: 32 x 32; 2: 16 x 16)
+    función icono_acceso(ref l: Lienzo, x: ent32, yy: ent32, i: nat32, salto: ent32)
+        variable p: puntero a nat32
+        variable f, c, lado: ent32
+        variable px: nat32
+        lado := LADO_ICONO div salto
+        p := nulo
+        si i < n_accesos entonces p := icono_de(i) fin
+        si p = nulo entonces
+            ; sin icono: una ventanita
+            redondeado(l, x, yy + lado div 8, lado, lado - lado div 4, 2, 0x4C97EC, 0x1D5DBA, TODAS)
+            rectángulo(l, x + 2, yy + lado div 8 + lado div 5, lado - 4, lado - lado div 4 - lado div 5 - 2, BLANCO)
+            devolver
+        fin
+        para f desde 0 hasta lado - 1 hacer
+            para c desde 0 hasta lado - 1 hacer
+                px := p[nat32(f * salto) * LADO_ICONO + nat32(c * salto)]
+                si px >> 24 >= 0x80 entonces punto(l, x + c, yy + f, px yb 0xFFFFFF) fin
+            fin
+        fin
+    fin
+
     ; una pantalla oscura grande con su «>_» (32 x 28)
     función icono_consola_grande(ref l: Lienzo, x: ent32, yy: ent32)
         redondeado(l, x, yy, 32, 28, 4, 0x4F6890, 0x4F6890, TODAS)
@@ -351,6 +410,7 @@ módulo Escritorio
             según iconos[i].acción
                 caso AM_EQUIPO: icono_equipo(tapiz, x + (CELDA_AN - 32) div 2, yy + 3)
                 caso AM_BLOC: icono_hoja_grande(tapiz, x + (CELDA_AN - 26) div 2, yy + 3)
+                caso AM_ACCESO: icono_acceso(tapiz, x + (CELDA_AN - LADO_ICONO) div 2, yy + 3, iconos[i].dato, 1)
                 si no: icono_consola_grande(tapiz, x + (CELDA_AN - 32) div 2, yy + 5)
             fin
             ; el rótulo, con letra normal: blanco con su sombra; el del elegido, sobre azul
@@ -379,6 +439,10 @@ módulo Escritorio
     fin
 
     función nuevo_icono(nombre: puntero a byte, acción: nat32)
+        nuevo_icono_de(nombre, acción, 0)
+    fin
+
+    función nuevo_icono_de(nombre: puntero a byte, acción: nat32, dato: nat32)
         variable m: puntero a byte
         si n_iconos >= MAX_ICONOS entonces devolver fin
         m := reservar(CELDA_AN * CELDA_AL * 4)
@@ -386,6 +450,7 @@ módulo Escritorio
         iconos[n_iconos].debajo := puntero(m)
         iconos[n_iconos].nombre := nombre
         iconos[n_iconos].acción := acción
+        iconos[n_iconos].dato := dato
         n_iconos := n_iconos + 1
     fin
 
@@ -738,7 +803,7 @@ módulo Escritorio
         si l = nulo entonces devolver fin
         n_opciones := 0
         ; el marco y la cabecera, azul, con el disquete y el nombre
-        rectángulo(valor(l), 0, 0, MENÚ_ANCHO, MENÚ_ALTO, 0x1A56AC)
+        rectángulo(valor(l), 0, 0, MENÚ_ANCHO, menú_alto, 0x1A56AC)
         redondeado(valor(l), 1, 1, MENÚ_ANCHO - 2, MENÚ_CABEZA, 7, 0x4E99EE, 0x1F62C0, ARRIBA)
         rectángulo(valor(l), 8, 2, MENÚ_ANCHO - 16, 1, 0x9CCBFA)
         disquete(valor(l), 9, 7, 42)
@@ -756,9 +821,9 @@ módulo Escritorio
         fin
         rectángulo(valor(l), 1, MENÚ_CABEZA, MENÚ_ANCHO - 2, 2, NARANJA)
         ; las dos columnas
-        rectángulo(valor(l), 2, MENÚ_CABEZA + 2, MENÚ_COLUMNA - 2, MENÚ_ALTO - MENÚ_CABEZA - MENÚ_PIE - 2, BLANCO)
-        rectángulo(valor(l), MENÚ_COLUMNA, MENÚ_CABEZA + 2, MENÚ_ANCHO - MENÚ_COLUMNA - 2, MENÚ_ALTO - MENÚ_CABEZA - MENÚ_PIE - 2, AZUL_CLARO)
-        rectángulo(valor(l), MENÚ_COLUMNA, MENÚ_CABEZA + 2, 1, MENÚ_ALTO - MENÚ_CABEZA - MENÚ_PIE - 2, 0xA9C6EC)
+        rectángulo(valor(l), 2, MENÚ_CABEZA + 2, MENÚ_COLUMNA - 2, menú_alto - MENÚ_CABEZA - MENÚ_PIE - 2, BLANCO)
+        rectángulo(valor(l), MENÚ_COLUMNA, MENÚ_CABEZA + 2, MENÚ_ANCHO - MENÚ_COLUMNA - 2, menú_alto - MENÚ_CABEZA - MENÚ_PIE - 2, AZUL_CLARO)
+        rectángulo(valor(l), MENÚ_COLUMNA, MENÚ_CABEZA + 2, 1, menú_alto - MENÚ_CABEZA - MENÚ_PIE - 2, 0xA9C6EC)
         ; a la izquierda: los programas
         yy := MENÚ_CABEZA + 10
         texto_negrita(valor(l), 12, yy, "Programas", TINTA_SUAVE)
@@ -775,6 +840,14 @@ módulo Escritorio
         degradado(valor(l), 15, yy + 8, 20, 13, 0x7FC2FA, 0x2A7AD6)
         rectángulo(valor(l), 22, yy + 23, 6, 2, 0x7F95B6)
         rectángulo(valor(l), 17, yy + 25, 16, 3, 0x6F87A8)
+        ; los programas de los paquetes (accesos.cas: \HISPA\MENU\*.MNU)
+        i := 0
+        mientras i < n_accesos hacer
+            yy := yy + ALTO_OPCIÓN + 2
+            pinta_opción(valor(l), 4, yy, MENÚ_COLUMNA - 6, nombre_de(i), AM_ACCESO, i, cierto)
+            icono_acceso(valor(l), 13, yy + 5, i, 2)
+            i := i + 1
+        fin
         ; y la oficina de Hispa-386 (programas de Hispa Ventanas: HVPRUN.BIN)
         yy := yy + ALTO_OPCIÓN + 4
         texto_negrita(valor(l), 12, yy, "Oficina", TINTA_SUAVE)
@@ -804,7 +877,7 @@ módulo Escritorio
                 i := i + 1
             fin
         fin
-        yy := MENÚ_ALTO - MENÚ_PIE - ALTO_OPCIÓN - 6
+        yy := menú_alto - MENÚ_PIE - ALTO_OPCIÓN - 6
         ; (encima de Configuración, «Actualizar»: los programas y las actualizaciones)
         pinta_opción_de(valor(l), MENÚ_COLUMNA + 2, yy - 37, MENÚ_ANCHO - MENÚ_COLUMNA - 4, 30, "Actualizar", AM_PROGRAMAS, 0, cierto)
         redondeado(valor(l), MENÚ_COLUMNA + 13, yy - 31, 18, 17, 2, 0x9A6A1E, 0x9A6A1E, TODAS)
@@ -818,20 +891,79 @@ módulo Escritorio
             icono_rueda(valor(l), MENÚ_COLUMNA + 11, yy + 5, AZUL_CLARO)
         fin
         ; el pie: «Apagar el equipo»
-        degradado(valor(l), 1, MENÚ_ALTO - MENÚ_PIE, MENÚ_ANCHO - 2, MENÚ_PIE - 1, 0x3D86E2, 0x1C5CB8)
-        rectángulo(valor(l), 1, MENÚ_ALTO - MENÚ_PIE, MENÚ_ANCHO - 2, 1, 0x7FB6F4)
-        i := nat32(nueva_opción(MENÚ_ANCHO - 190, MENÚ_ALTO - MENÚ_PIE + 5, 182, MENÚ_PIE - 10, AM_APAGAR, 0))
+        degradado(valor(l), 1, menú_alto - MENÚ_PIE, MENÚ_ANCHO - 2, MENÚ_PIE - 1, 0x3D86E2, 0x1C5CB8)
+        rectángulo(valor(l), 1, menú_alto - MENÚ_PIE, MENÚ_ANCHO - 2, 1, 0x7FB6F4)
+        i := nat32(nueva_opción(MENÚ_ANCHO - 190, menú_alto - MENÚ_PIE + 5, 182, MENÚ_PIE - 10, AM_APAGAR, 0))
         si ent32(i) = elegida entonces
-            redondeado(valor(l), MENÚ_ANCHO - 190, MENÚ_ALTO - MENÚ_PIE + 5, 182, MENÚ_PIE - 10, 5, 0x6AAEF6, 0x3A7EDC, TODAS)
+            redondeado(valor(l), MENÚ_ANCHO - 190, menú_alto - MENÚ_PIE + 5, 182, MENÚ_PIE - 10, 5, 0x6AAEF6, 0x3A7EDC, TODAS)
         fin
-        icono_apagar(valor(l), MENÚ_ANCHO - 184, MENÚ_ALTO - MENÚ_PIE + 10)
-        texto_negrita(valor(l), MENÚ_ANCHO - 153, MENÚ_ALTO - MENÚ_PIE + 14, "Apagar el equipo", 0x123F85)
-        texto_negrita(valor(l), MENÚ_ANCHO - 154, MENÚ_ALTO - MENÚ_PIE + 13, "Apagar el equipo", BLANCO)
-        repintada(v_menú, 0, 0, MENÚ_ANCHO, MENÚ_ALTO)
+        icono_apagar(valor(l), MENÚ_ANCHO - 184, menú_alto - MENÚ_PIE + 10)
+        texto_negrita(valor(l), MENÚ_ANCHO - 153, menú_alto - MENÚ_PIE + 14, "Apagar el equipo", 0x123F85)
+        texto_negrita(valor(l), MENÚ_ANCHO - 154, menú_alto - MENÚ_PIE + 13, "Apagar el equipo", BLANCO)
+        repintada(v_menú, 0, 0, MENÚ_ANCHO, menú_alto)
+    fin
+
+    ; vuelve a leer los accesos de los paquetes (accesos.cas); si han
+    ; cambiado, el menú cambia de alto y los iconos del tapiz se rehacen
+    ; (al arrancar, los iconos los pone quien arranca)
+    variable firma_accesos: arreglo [200] de byte
+    función pon_accesos()
+        variable i, k: nat32
+        variable alto_nuevo: ent32
+        variable firma: arreglo [200] de byte
+        lee_accesos()
+        firma[0] := 0
+        i := 0
+        mientras i < n_accesos hacer
+            copiar_hasta(dirección(firma[longitud(firma)]), nombre_de(i), 200 - longitud(firma))
+            si en_escritorio(i) entonces añadir_car(firma, '*') fin
+            añadir_car(firma, '|')
+            i := i + 1
+        fin
+        si iguales(firma, firma_accesos) entonces devolver fin
+        copiar(firma_accesos, firma)
+        ; el menú, más alto (si la pantalla da)
+        alto_nuevo := MENÚ_ALTO + ent32(n_accesos) * (ALTO_OPCIÓN + 2)
+        si alto_nuevo > pantalla.alto - ALTO_BARRA - 8 entonces alto_nuevo := pantalla.alto - ALTO_BARRA - 8 fin
+        si alto_nuevo <> menú_alto y v_menú <> 0 entonces
+            menú_alto := alto_nuevo
+            cerrar_ventana(v_menú, 0)
+            v_menú := crear_ventana("menú", 0, pantalla.alto - ALTO_BARRA - menú_alto, MENÚ_ANCHO, menú_alto, SIN_MARCO ob ENCIMA ob OCULTA ob REDONDA, 0)
+        fin
+        menú_alto := alto_nuevo
+        si v_fondo = 0 entonces devolver fin
+        ; los iconos del tapiz: los de siempre y los de los accesos que lo piden
+        quita_iconos()
+        k := 0
+        i := 0
+        mientras i < n_iconos hacer
+            si iconos[i].acción <> AM_ACCESO entonces
+                iconos[k].x := iconos[i].x
+                iconos[k].ye := iconos[i].ye
+                iconos[k].acción := iconos[i].acción
+                iconos[k].dato := iconos[i].dato
+                iconos[k].nombre := iconos[i].nombre
+                iconos[k].debajo := iconos[i].debajo
+                k := k + 1
+            sino
+                liberar(puntero(iconos[i].debajo))
+            fin
+            i := i + 1
+        fin
+        n_iconos := k
+        i := 0
+        mientras i < n_accesos hacer
+            si en_escritorio(i) entonces nuevo_icono_de(nombre_de(i), AM_ACCESO, i) fin
+            i := i + 1
+        fin
+        icono_elegido := -1
+        organiza_iconos()
+        pon_iconos()
     fin
 
     función abre_menú()
         lee_documentos()
+        pon_accesos()
         elegida := -1
         menú_abierto := cierto
         pinta_menú()
@@ -1019,6 +1151,7 @@ módulo Escritorio
         d[2] := bits_pantalla
         formatear(renglón, 96, "Pantalla:  %u x %u, %u bits por punto", d)
         texto(valor(l), 20, 78, renglón, TINTA)
+        pulsador(v_config, 358, 72, 88, 26, "Cambiar...", 0x5AA6F4, 0x2468C8, AC_PANTALLA)
         d[0] := (límite + 0xFFFFF) div 0x100000
         d[1] := marcos_libres() * 4 div 1024
         d[2] := cuántas_tareas()
@@ -1048,6 +1181,8 @@ módulo Escritorio
         sino
             pulsador(v_config, 326, 174, 100, 30, "Verde", 0xA9BDD8, 0x7C95B8, AC_FONDO + 2)
         fin
+        ; (dispositivos) lo que hay en el equipo y qué lo lleva
+        pulsador(v_config, 14, 232, 290, 32, "Administrador de dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
         pulsador(v_config, 346, 232, 100, 32, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
         repintada(v_config, 0, 0, 460, 280)
     fin
@@ -1056,6 +1191,569 @@ módulo Escritorio
         si v_config <> 0 entonces cierra_cuadro(v_config) fin
         v_config := cuadro("Configuración", 460, 280)
         pinta_config()
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La medida de la pantalla (Configuración > Cambiar...)
+    ;
+    ;  Con la VBE de Bochs (QEMU, Bochs, VirtualBox con VBoxVGA o VMSVGA), se
+    ;  cambia en el momento: «Probar...» la pone, y si no se dice «Mantener»
+    ;  en 15 s, vuelve sola la de antes. En un PC sin ella, el modo lo pone
+    ;  GRUB al arrancar: en un sistema instalado se guarda en
+    ;  \HISPA\PANTALLA.ENV (que lee GRUB.CFG) y se reinicia; al arrancar con
+    ;  ella, lo mismo: 15 s para darla por buena, y si no (o si se reinicia
+    ;  antes, con la pantalla a oscuras), GRUB vuelve a la de antes.
+    ; -------------------------------------------------------------------------
+    ; las medidas que se ofrecen (las que la tarjeta y la pantalla puedan)
+    función candidato(i: nat32, ref an: nat32, ref al: nat32)
+        según i
+            caso 0:
+                an := 800
+                al := 600
+            caso 1:
+                an := 1024
+                al := 600
+            caso 2:
+                an := 1024
+                al := 768
+            caso 3:
+                an := 1152
+                al := 864
+            caso 4:
+                an := 1280
+                al := 720
+            caso 5:
+                an := 1280
+                al := 800
+            caso 6:
+                an := 1280
+                al := 1024
+            caso 7:
+                an := 1366
+                al := 768
+            caso 8:
+                an := 1440
+                al := 900
+            caso 9:
+                an := 1600
+                al := 900
+            caso 10:
+                an := 1600
+                al := 1200
+            caso 11:
+                an := 1680
+                al := 1050
+            si no:
+                an := 1920
+                al := 1080
+        fin
+    fin
+
+    ; ¿se puede guardar para el próximo arranque? (instalado, y con permiso)
+    función se_guarda(): bool
+        devolver instalado() y escribible(del_sistema)
+    fin
+
+    ; la lista de modos: los de la lista que caben en la tarjeta (su máximo y
+    ; su memoria), en la pantalla (si dice lo que puede) y en la memoria del
+    ; núcleo (el doble búfer y el tapiz); el de ahora, siempre
+    función prepara_modos()
+        variable i, a, l, ma, ml, vram, ea, el, libres, k: nat32
+        variable hay_edid, vale, está: bool
+        en_marcha := se_cambia_en_marcha()
+        ma := 0
+        ml := 0
+        vram := 0
+        hay_edid := falso
+        monitor_an := 0
+        monitor_al := 0
+        si en_marcha entonces
+            máximo_tarjeta(ma, ml)
+            vram := memoria_tarjeta()
+            hay_edid := medida_monitor(monitor_an, monitor_al, ea, el)
+            si no hay_edid entonces
+                monitor_an := 0
+                monitor_al := 0
+            fin
+        fin
+        libres := marcos_libres()
+        n_modos := 0
+        está := falso
+        para i desde 0 hasta N_CANDIDATOS - 1 hacer
+            candidato(i, a, l)
+            vale := a * l * 4 <= VENTANA_PANTALLA
+            si en_marcha entonces
+                si ma >= 640 y (a > ma o l > ml) entonces vale := falso fin
+                si a mod paso_ancho() <> 0 entonces vale := falso fin
+                si vram > 0 y a * l * 4 > vram entonces vale := falso fin
+                si hay_edid y (a > ea o l > el) entonces vale := falso fin
+                si libres < (a * l * 8 + 0x200000) div 4096 entonces vale := falso fin
+            sino
+                ; (al arrancar: lo de arranca(), con lo que ahora tienen el doble búfer y el tapiz)
+                si libres + nat32(pantalla.ancho * pantalla.alto) * 8 div 4096 < (a * l * 12 + 0x300000) div 4096 entonces vale := falso fin
+            fin
+            si a = nat32(pantalla.ancho) y l = nat32(pantalla.alto) entonces
+                vale := cierto
+                está := cierto
+            fin
+            ; el de ahora, en su sitio, aunque no sea de la lista
+            si no está y n_modos < MAX_MODOS - 1 y (a > nat32(pantalla.ancho) o (a = nat32(pantalla.ancho) y l > nat32(pantalla.alto))) entonces
+                modos_an[n_modos] := nat32(pantalla.ancho)
+                modos_al[n_modos] := nat32(pantalla.alto)
+                n_modos := n_modos + 1
+                está := cierto
+            fin
+            si vale y n_modos < MAX_MODOS - 1 entonces
+                modos_an[n_modos] := a
+                modos_al[n_modos] := l
+                n_modos := n_modos + 1
+            fin
+        fin
+        si no está entonces
+            modos_an[n_modos] := nat32(pantalla.ancho)
+            modos_al[n_modos] := nat32(pantalla.alto)
+            n_modos := n_modos + 1
+        fin
+        ; sin cambio en marcha: también «a la medida de la pantalla» (lo que diga a GRUB)
+        si no en_marcha entonces
+            modos_an[n_modos] := 0
+            modos_al[n_modos] := 0
+            n_modos := n_modos + 1
+        fin
+        ; el elegido: el de ahora
+        modo_elegido := 0
+        para k desde 0 hasta n_modos - 1 hacer
+            si modos_an[k] = nat32(pantalla.ancho) y modos_al[k] = nat32(pantalla.alto) entonces modo_elegido := ent32(k) fin
+        fin
+    fin
+
+    función pinta_pantalla()
+        variable l: puntero a Lienzo
+        variable d: arreglo [4] de nat32
+        variable i: nat32
+        variable x, yy: ent32
+        variable arriba, abajo, acción: nat32
+        variable guarda: bool
+        variable rótulo: arreglo [24] de byte
+        l := lienzo_de(v_pantalla)
+        si l = nulo entonces devolver fin
+        quita_pulsadores(v_pantalla)
+        guarda := se_guarda()
+        degradado(valor(l), 0, 0, PANTALLA_AN, PANTALLA_AL, 0xF4F8FE, 0xD6E6FA)
+        icono_equipo(valor(l), 16, 12)
+        texto_negrita(valor(l), 60, 12, "La medida de la pantalla", TINTA)
+        d[0] := nat32(pantalla.ancho)
+        d[1] := nat32(pantalla.alto)
+        d[2] := bits_pantalla
+        formatear(renglón, 96, "Ahora: %u x %u, %u bits por punto.", d)
+        texto(valor(l), 60, 32, renglón, TINTA_SUAVE)
+        si en_marcha entonces
+            texto(valor(l), 20, 60, "Elija una y pruébela: se pone en el momento, y si no", TINTA)
+            texto(valor(l), 20, 78, "se ve bien, vuelve sola a la de antes en 15 segundos.", TINTA)
+        sino si guarda entonces
+            texto(valor(l), 20, 60, "Esta tarjeta no deja cambiarla en marcha: se guarda y", TINTA)
+            texto(valor(l), 20, 78, "se pone al arrancar otra vez (con 15 s para probarla).", TINTA)
+        sino
+            texto(valor(l), 20, 60, "Esta tarjeta no deja cambiarla en marcha, y sin instalar", TINTA)
+            texto(valor(l), 20, 78, "no se guarda: «a la medida de la pantalla», al arrancar.", TINTA)
+        fin
+        para i desde 0 hasta n_modos - 1 hacer
+            x := 20 + ent32(i mod 3) * 162
+            yy := 104 + ent32(i div 3) * 34
+            si modos_an[i] = 0 entonces
+                Textos32.copiar(rótulo, "A la medida")
+            sino
+                d[0] := modos_an[i]
+                d[1] := modos_al[i]
+                formatear(rótulo, 24, "%u x %u", d)
+            fin
+            si ent32(i) = modo_elegido entonces
+                arriba := VERDE_ARRIBA
+                abajo := VERDE_ABAJO
+            sino si modos_an[i] = nat32(pantalla.ancho) y modos_al[i] = nat32(pantalla.alto) entonces
+                arriba := 0x5AA6F4
+                abajo := 0x2468C8
+            sino
+                arriba := 0xA9BDD8
+                abajo := 0x7C95B8
+            fin
+            acción := AC_MODO + i
+            si no en_marcha y no guarda entonces acción := 0 fin
+            pulsador(v_pantalla, x, yy, 154, 28, rótulo, arriba, abajo, acción)
+        fin
+        yy := 104 + ent32((n_modos + 2) div 3) * 34 + 2
+        si monitor_an > 0 entonces
+            d[0] := monitor_an
+            d[1] := monitor_al
+            formatear(renglón, 96, "La pantalla dice que prefiere %u x %u.", d)
+            texto(valor(l), 20, yy, renglón, TINTA_SUAVE)
+            yy := yy + 18
+        fin
+        texto(valor(l), 20, yy, texto_pantalla, TINTA)
+        si en_marcha entonces
+            pulsador(v_pantalla, 20, PANTALLA_AL - 46, 130, 32, "Probar...", VERDE_ARRIBA, VERDE_ABAJO, AC_PROBAR)
+        sino si guarda entonces
+            pulsador(v_pantalla, 20, PANTALLA_AL - 46, 220, 32, "Guardar y reiniciar...", VERDE_ARRIBA, VERDE_ABAJO, AC_GUARDAR_MODO)
+        fin
+        pulsador(v_pantalla, PANTALLA_AN - 120, PANTALLA_AL - 46, 100, 32, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_PANTALLA)
+        repintada(v_pantalla, 0, 0, PANTALLA_AN, PANTALLA_AL)
+    fin
+
+    función abre_pantalla()
+        si v_pantalla <> 0 entonces cierra_cuadro(v_pantalla) fin
+        prepara_modos()
+        v_pantalla := cuadro("Pantalla", PANTALLA_AN, PANTALLA_AL)
+        pinta_pantalla()
+    fin
+
+    ; ---- \HISPA\PANTALLA.ENV ----
+    ; lo que vale «clave=» en el texto del bloque, a destino (vacío si no está)
+    función valor_env(clave: puntero a byte, destino: puntero a byte, cabe: nat32)
+        variable p: puntero a byte
+        variable n: nat32
+        destino[0] := 0
+        p := buscar(texto_env, clave)
+        si p = nulo entonces devolver fin
+        p := p + longitud(clave)
+        n := 0
+        mientras valor(p) > ' ' y valor(p) <> '#' y n + 1 < cabe hacer
+            destino[n] := valor(p)
+            n := n + 1
+            p := p + 1
+        fin
+        destino[n] := 0
+    fin
+
+    ; lee el bloque (si no está: todo vacío y la prueba a 0)
+    función lee_env()
+        variable m, n: nat32
+        variable t: arreglo [4] de byte
+        env_pantalla[0] := 0
+        env_antes[0] := 0
+        env_prueba := '0'
+        si no instalado() entonces devolver fin
+        m := abrir_archivo(del_sistema, "\\HISPA\\PANTALLA.ENV", PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver fin
+        n := leer_archivo(m, texto_env, 1024)
+        cerrar_archivo(m)
+        si n > 1024 entonces n := 0 fin
+        texto_env[n] := 0
+        valor_env("\npantalla=", env_pantalla, 16)
+        valor_env("\nantes=", env_antes, 16)
+        valor_env("\nprueba=", t, 4)
+        si t[0] = '1' o t[0] = '2' entonces env_prueba := t[0] fin
+    fin
+
+    ; lo escribe (1024 octetos, como los de GRUB: así GRUB puede escribir en
+    ; él, en su sitio, con save_env). Falso si no se puede.
+    función escribe_env(): bool
+        variable m, n: nat32
+        variable d: arreglo [3] de nat32
+        d[0] := nat32(dirección(env_pantalla[0]))
+        d[1] := nat32(dirección(env_antes[0]))
+        d[2] := env_prueba
+        llenar(texto_env, 1024, '#')
+        formatear(texto_env, 200, "# GRUB Environment Block\npantalla=%s\nantes=%s\nprueba=%c\n", d)
+        texto_env[longitud(texto_env)] := '#'
+        m := abrir_archivo(del_sistema, "\\HISPA\\PANTALLA.ENV", PARA_ESCRIBIR)
+        si m >= PRIMER_ERROR entonces m := abrir_archivo(del_sistema, "\\HISPA\\PANTALLA.ENV", PARA_CREAR) fin
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        n := escribir_archivo(m, texto_env, 1024)
+        cerrar_archivo(m)
+        si n <> 1024 entonces devolver falso fin
+        escribir("escritorio: PANTALLA.ENV: pantalla=", env_pantalla, " antes=", env_antes, " prueba=")
+        escribir_car(env_prueba)
+        escribir("\n")
+        devolver cierto
+    fin
+
+    ; que GRUB.CFG lea PANTALLA.ENV: si aún no lo hace (un sistema instalado
+    ; con la 0.8), se le añade al final lo que hace falta (va antes de que se
+    ; arranque nada: GRUB lee todo el archivo antes de enseñar el menú)
+    función grub_lee_env(): bool
+        variable m, n, k: nat32
+        variable e: puntero a byte
+        m := abrir_archivo(del_sistema, "\\HISPA\\GRUB.CFG", PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        n := 0
+        mientras n < 8192 hacer
+            k := leer_archivo(m, dirección(texto_grub[n]), 8192 - n)
+            si k = 0 o k > 8192 entonces romper fin
+            n := n + k
+        fin
+        cerrar_archivo(m)
+        texto_grub[n] := 0
+        si buscar(texto_grub, "PANTALLA.ENV") <> nulo entonces devolver cierto fin
+        m := abrir_archivo(del_sistema, "\\HISPA\\GRUB.CFG", PARA_AÑADIR)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        e := "\n# la medida de la pantalla que se elige en Configuracion (\\HISPA\\PANTALLA.ENV,\n# la escribe el escritorio): prueba=1, se va a probar; 2, se esta probando\n# (si se vuelve a arrancar sin darla por buena, vuelve la de antes)\nif [ -f /HISPA/PANTALLA.ENV ]; then\n  load_env -f /HISPA/PANTALLA.ENV pantalla antes prueba\n  if [ \"$prueba\" = 2 ]; then\n    set pantalla=\"$antes\"\n    set antes=\n    set prueba=0\n    save_env -f /HISPA/PANTALLA.ENV pantalla antes prueba\n  elif [ \"$prueba\" = 1 ]; then\n    set prueba=2\n    save_env -f /HISPA/PANTALLA.ENV prueba\n  fi\n  if [ \"$pantalla\" = auto ]; then\n    set modo=auto\n  elif [ -n \"$pantalla\" ]; then\n    set modo=\"${pantalla}x32,${pantalla},${modo}\"\n  fi\nfi\n"
+        n := escribir_archivo(m, e, longitud(e))
+        cerrar_archivo(m)
+        escribir("escritorio: GRUB.CFG lee ahora PANTALLA.ENV\n")
+        devolver n = longitud(e)
+    fin
+
+    ; la medida «an x al» (o «auto»), como texto
+    función medida_texto(an: nat32, al: nat32, destino: puntero a byte)
+        variable d: arreglo [2] de nat32
+        si an = 0 entonces
+            Textos32.copiar(destino, "auto")
+            devolver
+        fin
+        d[0] := an
+        d[1] := al
+        formatear(destino, 16, "%ux%u", d)
+    fin
+
+    ; guarda la medida para los próximos arranques; con «probar», a prueba
+    ; (la de antes queda apuntada para volver a ella)
+    función guarda_medida(an: nat32, al: nat32, probar: bool): bool
+        si no se_guarda() entonces devolver falso fin
+        lee_env()
+        si probar entonces
+            si env_prueba = '0' entonces Textos32.copiar(env_antes, env_pantalla) fin
+            env_prueba := '1'
+        sino
+            env_antes[0] := 0
+            env_prueba := '0'
+        fin
+        medida_texto(an, al, env_pantalla)
+        si no grub_lee_env() entonces devolver falso fin
+        devolver escribe_env()
+    fin
+
+    ; pone la pantalla a otra medida en marcha y le pone al escritorio la
+    ; suya: la barra, el menú, el tapiz, los iconos y los cuadros. Falso si
+    ; no se puede (y todo sigue como estaba).
+    función cambia_medida(an: nat32, al: nat32): bool
+        variable i: nat32
+        variable d: arreglo [2] de nat32
+        cierra_menú()
+        cerrar_emergente()
+        cierra_globo()
+        quita_ayuda()
+        si no cambia_pantalla(ent32(an), ent32(al)) entonces devolver falso fin
+        recolocar_ventana(v_barra, 0, ent32(al) - ALTO_BARRA, ent32(an), ALTO_BARRA)
+        mover_ventana(v_menú, 0, ent32(al) - ALTO_BARRA - MENÚ_ALTO)
+        ; los iconos, dentro (sin quitarlos del tapiz: es nuevo)
+        para i desde 0 hasta MAX_ICONOS - 1 hacer
+            si i < n_iconos entonces
+                si iconos[i].x > ent32(an) - CELDA_AN entonces iconos[i].x := ent32(an) - CELDA_AN fin
+                si iconos[i].ye > ent32(al) - ALTO_BARRA - CELDA_AL entonces iconos[i].ye := ent32(al) - ALTO_BARRA - CELDA_AL fin
+            fin
+        fin
+        pinta_tapiz()
+        si v_config <> 0 entonces centrar_ventana(v_config) fin
+        si v_aviso <> 0 entonces centrar_ventana(v_aviso) fin
+        si v_apagar <> 0 entonces centrar_ventana(v_apagar) fin
+        si v_acerca <> 0 entonces centrar_ventana(v_acerca) fin
+        si v_pantalla <> 0 entonces centrar_ventana(v_pantalla) fin
+        si v_reiniciar <> 0 entonces centrar_ventana(v_reiniciar) fin
+        pinta_barra()
+        si v_config <> 0 entonces pinta_config() fin
+        repintar_todo()
+        d[0] := an
+        d[1] := al
+        tomar_consola()
+        imprimir2("escritorio: la pantalla, a %u x %u (en marcha)\n", an, al)
+        soltar_consola()
+        devolver cierto
+    fin
+
+    ; el cuadro de la prueba: «¿Se ve bien?», con la cuenta atrás
+    función pinta_probar()
+        variable l: puntero a Lienzo
+        variable d: arreglo [3] de nat32
+        l := lienzo_de(v_probar)
+        si l = nulo entonces devolver fin
+        quita_pulsadores(v_probar)
+        degradado(valor(l), 0, 0, 480, 160, 0xEAF3FE, 0xC4DCF8)
+        icono_equipo(valor(l), 16, 14)
+        texto_negrita(valor(l), 62, 14, "¿Se ve bien la pantalla?", TINTA)
+        d[0] := nat32(pantalla.ancho)
+        d[1] := nat32(pantalla.alto)
+        formatear(renglón, 96, "Está a %u x %u.", d)
+        texto(valor(l), 62, 36, renglón, TINTA)
+        d[0] := prueba_vista
+        si prueba_arranque entonces
+            formatear(renglón, 96, "Si no la da por buena, vuelve la de antes en %u s.", d)
+        sino
+            formatear(renglón, 96, "Si no la da por buena, vuelve sola en %u s.", d)
+        fin
+        texto(valor(l), 62, 56, renglón, TINTA_SUAVE)
+        pulsador(v_probar, 90, 106, 130, 34, "Mantener", VERDE_ARRIBA, VERDE_ABAJO, AC_MANTENER)
+        pulsador(v_probar, 260, 106, 130, 34, "Volver", 0x5AA6F4, 0x2468C8, AC_VOLVER)
+        repintada(v_probar, 0, 0, 480, 160)
+    fin
+
+    función abre_probar(de_arranque: bool)
+        si v_probar <> 0 entonces cierra_cuadro(v_probar) fin
+        prueba_arranque := de_arranque
+        prueba_hasta := tics + PRUEBA_SEGUNDOS * HZ
+        prueba_vista := PRUEBA_SEGUNDOS
+        v_probar := cuadro("Probar la pantalla", 480, 160)
+        pinta_probar()
+    fin
+
+    ; el aviso de «se pondrá al arrancar»: Reiniciar ahora o más tarde
+    función abre_reiniciar(t: puntero a byte)
+        variable l: puntero a Lienzo
+        si v_reiniciar <> 0 entonces cierra_cuadro(v_reiniciar) fin
+        Textos32.copiar(texto_reiniciar, t)
+        v_reiniciar := cuadro("Reiniciar", 480, 170)
+        l := lienzo_de(v_reiniciar)
+        si l = nulo entonces
+            v_reiniciar := 0
+            devolver
+        fin
+        degradado(valor(l), 0, 0, 480, 170, 0xEAF3FE, 0xC4DCF8)
+        disquete(valor(l), 14, 12, 40)
+        texto_negrita(valor(l), 66, 14, texto_reiniciar, TINTA)
+        texto(valor(l), 66, 36, "Si al arrancar no se ve, reinicie otra vez:", TINTA_SUAVE)
+        texto(valor(l), 66, 54, "vuelve sola la de antes.", TINTA_SUAVE)
+        pulsador(v_reiniciar, 70, 112, 160, 36, "Reiniciar ahora", VERDE_ARRIBA, VERDE_ABAJO, AC_REINICIAR_YA)
+        pulsador(v_reiniciar, 260, 112, 130, 36, "Más tarde", 0x5AA6F4, 0x2468C8, AC_MÁS_TARDE)
+        repintada(v_reiniciar, 0, 0, 480, 170)
+    fin
+
+    ; «Probar...»: la elegida, en el momento
+    función probar_elegida()
+        variable an, al: nat32
+        variable d: arreglo [2] de nat32
+        si modo_elegido < 0 o modo_elegido >= ent32(n_modos) entonces devolver fin
+        an := modos_an[modo_elegido]
+        al := modos_al[modo_elegido]
+        si an = nat32(pantalla.ancho) y al = nat32(pantalla.alto) entonces
+            Textos32.copiar(texto_pantalla, "Ya está a esa medida.")
+            pinta_pantalla()
+            devolver
+        fin
+        antes_an := nat32(pantalla.ancho)
+        antes_al := nat32(pantalla.alto)
+        cierra_cuadro(v_pantalla)
+        si no cambia_medida(an, al) entonces
+            d[0] := an
+            d[1] := al
+            formatear(texto_aviso, 128, "No se puede poner %u x %u: sigue la de antes.", d)
+            aviso(texto_aviso)
+            devolver
+        fin
+        abre_probar(falso)
+    fin
+
+    ; «Mantener»: se queda; instalado, también para los próximos arranques
+    función mantener()
+        variable d: arreglo [2] de nat32
+        cierra_cuadro(v_probar)
+        d[0] := nat32(pantalla.ancho)
+        d[1] := nat32(pantalla.alto)
+        si prueba_arranque entonces
+            lee_env()
+            env_prueba := '0'
+            env_antes[0] := 0
+            escribe_env()
+            formatear(texto_pantalla, 96, "Se queda a %u x %u.", d)
+        sino si se_guarda() y guarda_medida(d[0], d[1], falso) entonces
+            formatear(texto_pantalla, 96, "Se queda a %u x %u, también al arrancar.", d)
+        sino
+            formatear(texto_pantalla, 96, "Se queda a %u x %u (hasta que se apague).", d)
+        fin
+        escribir("escritorio: ", texto_pantalla, "\n")
+        abre_pantalla()
+    fin
+
+    ; «Volver», o se han acabado los 15 s: la de antes
+    función volver()
+        variable an, al: nat32
+        variable q: puntero a byte
+        cierra_cuadro(v_probar)
+        si prueba_arranque entonces
+            ; la de antes la pone GRUB: se apunta y se reinicia (o, con la VBE
+            ; de Bochs y una medida que se sepa, ya)
+            lee_env()
+            Textos32.copiar(env_pantalla, env_antes)
+            env_antes[0] := 0
+            env_prueba := '0'
+            escribe_env()
+            an := 0
+            al := 0
+            si env_pantalla[0] >= '1' y env_pantalla[0] <= '9' entonces
+                an := número_tras(env_pantalla, q)
+                si valor(q) = 'x' entonces al := número_tras(q + 1, q) fin
+            fin
+            si se_cambia_en_marcha() y an >= 640 y al >= 480 y cambia_medida(an, al) entonces
+                Textos32.copiar(texto_pantalla, "Ha vuelto la de antes.")
+                escribir("escritorio: ", texto_pantalla, "\n")
+            sino
+                escribir("escritorio: la de antes, al arrancar otra vez\n")
+                abre_reiniciar("Al arrancar otra vez, vuelve la de antes.")
+            fin
+            devolver
+        fin
+        si cambia_medida(antes_an, antes_al) entonces
+            Textos32.copiar(texto_pantalla, "Ha vuelto la de antes.")
+        sino
+            Textos32.copiar(texto_pantalla, "No se ha podido volver a la de antes.")
+        fin
+        escribir("escritorio: ", texto_pantalla, "\n")
+        abre_pantalla()
+    fin
+
+    ; cada tic, con la prueba en marcha: la cuenta atrás y, al acabar, volver
+    función atiende_prueba()
+        variable q: nat32
+        si v_probar = 0 entonces devolver fin
+        si tics >= prueba_hasta entonces
+            escribir("escritorio: no se ha dado por buena en 15 s\n")
+            volver()
+            devolver
+        fin
+        q := (prueba_hasta - tics + HZ - 1) div HZ
+        si q <> prueba_vista entonces
+            prueba_vista := q
+            pinta_probar()
+        fin
+    fin
+
+    ; «Guardar y reiniciar...» (sin VBE de Bochs): para el próximo arranque, a prueba
+    función guarda_elegida()
+        variable d: arreglo [2] de nat32
+        si modo_elegido < 0 o modo_elegido >= ent32(n_modos) entonces devolver fin
+        si no guarda_medida(modos_an[modo_elegido], modos_al[modo_elegido], cierto) entonces
+            Textos32.copiar(texto_pantalla, "No se puede guardar en C:\\HISPA.")
+            pinta_pantalla()
+            devolver
+        fin
+        cierra_cuadro(v_pantalla)
+        si modos_an[modo_elegido] = 0 entonces
+            abre_reiniciar("Al arrancar, a la medida de la pantalla.")
+        sino
+            d[0] := modos_an[modo_elegido]
+            d[1] := modos_al[modo_elegido]
+            formatear(renglón, 96, "Al arrancar otra vez, a %u x %u.", d)
+            abre_reiniciar(renglón)
+        fin
+    fin
+
+    ; al arrancar (instalado): lo que dice PANTALLA.ENV. A prueba (GRUB acaba
+    ; de poner la nueva): «¿Se ve bien?». Y con la VBE de Bochs, si GRUB no
+    ; ha podido poner la medida guardada (su BIOS no la tiene), se pone ya.
+    función mira_pantalla_guardada()
+        variable an, al: nat32
+        variable q: puntero a byte
+        si no instalado() entonces devolver fin
+        lee_env()
+        si env_prueba <> '0' entonces
+            escribir("escritorio: la pantalla está a prueba (PANTALLA.ENV)\n")
+            abre_probar(cierto)
+            devolver
+        fin
+        si se_cambia_en_marcha() y env_pantalla[0] >= '1' y env_pantalla[0] <= '9' entonces
+            an := número_tras(env_pantalla, q)
+            al := 0
+            si valor(q) = 'x' entonces al := número_tras(q + 1, q) fin
+            si an >= 640 y al >= 480 y (an <> nat32(pantalla.ancho) o al <> nat32(pantalla.alto)) entonces cambia_medida(an, al) fin
+        fin
     fin
 
     ; -------------------------------------------------------------------------
@@ -1279,7 +1977,9 @@ módulo Escritorio
             caso AM_CONFIG: abre_config()
             caso AM_APAGAR: abre_apagar()
             caso AM_EQUIPO: lanza("\\EQUIPO.BIN", nulo)
+            caso AM_DISPOSITIVOS: lanza("\\DISPOSIT.BIN", nulo)       ; (dispositivos)
             caso AM_PROGRAMAS: lanza("\\ACTUALIZ.BIN", nulo)
+            caso AM_ACCESO: si dato < n_accesos entonces lanza(programa_de(dato), argumentos_de(dato)) fin
             caso AM_OFICINA: lanza("\\HVPRUN.BIN", de_oficina(dato, cierto))
             caso AC_ACERCA: abre_acerca()
             caso AC_CERRAR_ACERCA: cierra_cuadro(v_acerca)
@@ -1307,6 +2007,24 @@ módulo Escritorio
                 repintar_todo()
                 si v_config <> 0 entonces pinta_config() fin
             caso AC_CERRAR_CONFIG: cierra_cuadro(v_config)
+            caso AC_PANTALLA:
+                texto_pantalla[0] := 0
+                abre_pantalla()
+            caso AC_CERRAR_PANTALLA: cierra_cuadro(v_pantalla)
+            caso AC_PROBAR: probar_elegida()
+            caso AC_GUARDAR_MODO: guarda_elegida()
+            caso AC_MANTENER: mantener()
+            caso AC_VOLVER: volver()
+            caso AC_REINICIAR_YA:
+                cierra_cuadro(v_reiniciar)
+                apaga(cierto)
+            caso AC_MÁS_TARDE: cierra_cuadro(v_reiniciar)
+            caso AC_MODO..AC_MODO + MAX_MODOS - 1:
+                si acción - AC_MODO < n_modos entonces
+                    modo_elegido := ent32(acción - AC_MODO)
+                    texto_pantalla[0] := 0
+                    pinta_pantalla()
+                fin
             caso AC_CERRAR_AVISO: cierra_cuadro(v_aviso)
         fin
     fin
@@ -1352,7 +2070,7 @@ módulo Escritorio
                             si opciones[n].acción <> AM_APAGAR entonces
                                 menú_acción := opciones[n].acción
                                 menú_dato := opciones[n].dato
-                                abrir_emergente(ent32(e.a), pantalla.alto - ALTO_BARRA - MENÚ_ALTO + ent32(e.b), "Abrir", 0, 0, ME_INICIO)
+                                abrir_emergente(ent32(e.a), pantalla.alto - ALTO_BARRA - menú_alto + ent32(e.b), "Abrir", 0, 0, ME_INICIO)
                             fin
                         sino
                             cierra_menú()
@@ -1429,13 +2147,18 @@ módulo Escritorio
                     si e.c yb BOTÓN_DERECHO <> 0 entonces
                         si k >= 0 entonces
                             menú_dato := nat32(k)
-                            abrir_emergente(x, yy, "Abrir", 0, 0, ME_ICONO)
+                            ; (dispositivos) Mi equipo, con sus «Propiedades»: el Administrador de dispositivos
+                            si iconos[k].acción = AM_EQUIPO entonces
+                                abrir_emergente(x, yy, "Abrir|Propiedades", 0, 0, ME_ICONO)
+                            sino
+                                abrir_emergente(x, yy, "Abrir", 0, 0, ME_ICONO)
+                            fin
                         sino
                             abrir_emergente(x, yy, "Configuración|Cambiar el tapiz|Organizar iconos|-|Acerca de Hispa-Pentium", 0, 0, ME_FONDO)
                         fin
                     sino si k >= 0 entonces
                         si (e.c >> DESPLAZA_VECES) = 2 entonces
-                            haz(iconos[k].acción, 0)
+                            haz(iconos[k].acción, iconos[k].dato)
                         sino
                             icono_cogido := k
                             cog_dx := x - iconos[k].x
@@ -1478,7 +2201,8 @@ módulo Escritorio
                 cierra_menú()
                 si opción = 0 entonces haz(menú_acción, menú_dato) fin
             caso ME_ICONO:
-                si opción = 0 y menú_dato < n_iconos entonces haz(iconos[menú_dato].acción, 0) fin
+                si opción = 0 y menú_dato < n_iconos entonces haz(iconos[menú_dato].acción, iconos[menú_dato].dato) fin
+                si opción = 1 y menú_dato < n_iconos entonces haz(AM_DISPOSITIVOS, 0) fin     ; (dispositivos)
             caso ME_USB:
                 si opción < n_usb y opción < 3 entonces quitar(usb_letras[opción]) fin
         fin
@@ -1493,6 +2217,22 @@ módulo Escritorio
                 cierra_cuadro(v)
             sino si e.clase = EV_RATÓN_BAJA entonces
                 a := pulsador_en(v, ent32(e.a), ent32(e.b))
+                si a <> 0 entonces haz(a, 0) fin
+            fin
+        fin
+    fin
+
+    ; los de la prueba de la pantalla: cerrarlo o Esc es «Volver»; Intro, «Mantener»
+    función atiende_probar()
+        variable e: Evento
+        variable a: nat32
+        mientras v_probar <> 0 y saca_evento(v_probar, 0, e) hacer
+            si e.clase = EV_CERRAR o (e.clase = EV_TECLA y e.a = 27) entonces
+                volver()
+            sino si e.clase = EV_TECLA y e.a = '\n' entonces
+                mantener()
+            sino si e.clase = EV_RATÓN_BAJA entonces
+                a := pulsador_en(v_probar, ent32(e.a), ent32(e.b))
                 si a <> 0 entonces haz(a, 0) fin
             fin
         fin
@@ -1515,6 +2255,10 @@ módulo Escritorio
             atiende_cuadro(v_config)
             atiende_cuadro(v_aviso)
             atiende_cuadro(v_acerca)
+            atiende_cuadro(v_pantalla)
+            atiende_probar()
+            atiende_cuadro(v_reiniciar)
+            atiende_prueba()
             atiende_globo()
             vigila_ayuda()
             si Ventanas.cambios <> cambios_vistos o cambios_red <> red_vista o cambios_energía <> energía_vista entonces pinta_barra() fin
@@ -1551,6 +2295,7 @@ módulo Escritorio
         variable an, al, bits: nat32
         variable p, q: puntero a byte
         variable t: puntero a Tarea
+        variable i: nat32
         variable d: arreglo [5] de nat32
         si escritorio_en_marcha entonces devolver 1 fin
         bits := 0
@@ -1586,13 +2331,15 @@ módulo Escritorio
             devolver 0
         fin
         si no prepara_ratón(pantalla.ancho, pantalla.alto) entonces escribir("escritorio: no hay ratón PS/2 (se sigue, con el teclado)\n") fin
+        si hay_rueda entonces escribir("escritorio: el ratón PS/2 tiene rueda\n") fin       ; (NAVEGADOR)
         alto_barra := ALTO_BARRA
         ; (los avisos del USB de antes de que hubiera escritorio, fuera)
         mientras saca_aviso(texto_globo, 80) hacer fin
         unidades_vistas := Unidades.cambios
         pinta_tapiz()
         v_barra := crear_ventana("barra", 0, pantalla.alto - ALTO_BARRA, pantalla.ancho, ALTO_BARRA, SIN_MARCO ob ENCIMA, 0)
-        v_menú := crear_ventana("menú", 0, pantalla.alto - ALTO_BARRA - MENÚ_ALTO, MENÚ_ANCHO, MENÚ_ALTO, SIN_MARCO ob ENCIMA ob OCULTA ob REDONDA, 0)
+        pon_accesos()
+        v_menú := crear_ventana("menú", 0, pantalla.alto - ALTO_BARRA - menú_alto, MENÚ_ANCHO, menú_alto, SIN_MARCO ob ENCIMA ob OCULTA ob REDONDA, 0)
         si v_barra = 0 o v_menú = 0 entonces
             escribir("escritorio: no hay memoria para la barra de tareas\n")
             devolver 0
@@ -1605,6 +2352,11 @@ módulo Escritorio
         nuevo_icono("Mi equipo", AM_EQUIPO)
         nuevo_icono("Bloc de notas", AM_BLOC)
         nuevo_icono("Consola", AM_CONSOLA)
+        i := 0
+        mientras i < n_accesos hacer
+            si en_escritorio(i) entonces nuevo_icono_de(nombre_de(i), AM_ACCESO, i) fin
+            i := i + 1
+        fin
         organiza_iconos()
         pon_iconos()
         pinta_barra()
@@ -1628,9 +2380,16 @@ módulo Escritorio
         imprimir("escritorio: en marcha, %u x %u con %u bits por punto (el modo %s), tapiz %u\n", d)
         soltar_consola()
         ; un sistema instalado en el disco: sus ajustes (HISPA.INI); si aún
-        ; no los tiene, es su primer arranque: el asistente
-        si instalado() y no hay_ajustes entonces
-            si no lee_ajustes() entonces lanza("\\HISPA\\ASISTE.BIN", nulo) fin
+        ; no los tiene, es su primer arranque: el asistente. Si no, mirar sin
+        ; molestar si hay actualizaciones (ACTUALIZ /BANDEJA; si no está, nada)
+        si instalado() entonces
+            si no hay_ajustes y no lee_ajustes() entonces
+                lanza("\\HISPA\\ASISTE.BIN", nulo)
+            sino
+                t := cargar_archivo("\\HISPA\\ACTUALIZ.BIN", "/BANDEJA", an)
+                si t <> nulo entonces t.padre := 0 fin
+            fin
+            mira_pantalla_guardada()
         fin
         devolver 1
     fin

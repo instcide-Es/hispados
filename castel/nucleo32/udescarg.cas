@@ -1,11 +1,19 @@
 ; =============================================================================
 ;  udescarg.cas - DESCARGA.BIN (la orden DESCARGAR): baja un archivo de la
-;  red por HTTP/1.1 (sin cifrar) y lo guarda en el disco.
-;    DESCARGAR http://servidor[:puerto]/camino [archivo]
+;  red por HTTP/1.1 (o HTTPS, cifrado, con el servicio TLS: TLS.BIN) y lo
+;  guarda en el disco.
+;    DESCARGAR http[s]://servidor[:puerto]/camino [archivo]
 ;  Sin archivo, se llama como lo último del camino (en 8+3: «ultima.txt» es
 ;  ULTIMA.TXT; «/» es INDEX.HTM). Con «-» como archivo, sale en la pantalla.
 ;  Sigue las redirecciones (hasta cinco), entiende «Content-Length» y los
-;  trozos («Transfer-Encoding: chunked»). HTTPS, todavía no.
+;  trozos («Transfer-Encoding: chunked»). Con https://, la conexión es
+;  cifrada (TLS 1.2) y el certificado del servidor se comprueba: si no vale,
+;  no se baja nada y se dice por qué.
+;  Acaba con 0 si lo ha bajado; 4 si el servidor dice que no lo tiene (404);
+;  1 con cualquier otro fallo.
+;  Con /AVANCE=ARCHIVO, cada 16 K reescribe en ARCHIVO una línea «llevados
+;  total Bajando nombre» (total: 0 si el servidor no lo dice): así enseña la
+;  barra la ventana de «Programas y actualizaciones» (PAQUETES se lo pide).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Udescarg
@@ -29,20 +37,25 @@ módulo Udescarg
     variable bn, bi: nat32
     variable puerto, sock, error_red: nat32
     variable cerrada, a_pantalla: bool
+    variable segura: bool                       ; (TLS) https://
     variable salida: nat32
     variable escritos, próximo_punto: nat32
+    variable avance: arreglo [128] de byte      ; /AVANCE=archivo (o nada)
+    variable total_, próximo_avance: nat32
 
     ; ---- la URL ----
-    ; http://nombre[:puerto][/camino]. Falso si no vale (o es https)
+    ; http[s]://nombre[:puerto][/camino]. Falso si no vale
     función parte_url(u: puntero a byte): bool
         variable i, k: nat32
         variable p: puntero a byte
         p := u
+        segura := falso
         si empieza_por_sin_caja(p, "https://") entonces
-            escribir("DESCARGAR: HTTPS (con cifrado) todavía no lo sabe hacer Hispa-Pentium; solo http://.\n")
-            devolver falso
+            segura := cierto
+            p := p + 8
+        sino si empieza_por_sin_caja(p, "http://") entonces
+            p := p + 7
         fin
-        si empieza_por_sin_caja(p, "http://") entonces p := p + 7 fin
         i := 0
         mientras p[i] <> 0 y p[i] <> '/' y p[i] <> ':' y p[i] <> '?' y i < 255 hacer
             nombre[i] := p[i]
@@ -51,6 +64,7 @@ módulo Udescarg
         nombre[i] := 0
         si i = 0 entonces devolver falso fin
         puerto := 80
+        si segura entonces puerto := 443 fin
         si p[i] = ':' entonces
             i := i + 1
             puerto := 0
@@ -190,11 +204,29 @@ módulo Udescarg
             fin
         fin
         escritos := escritos + n
+        si avance[0] <> 0 y escritos >= próximo_avance entonces
+            di_avance()
+            próximo_avance := próximo_avance + 16384
+        fin
         si no a_pantalla y escritos >= próximo_punto entonces
             escribir(".")
             próximo_punto := próximo_punto + 32768
         fin
         devolver cierto
+    fin
+
+    función di_avance()
+        variable m: nat32
+        variable d: arreglo [3] de nat32
+        variable x: arreglo [200] de byte
+        d[0] := escritos
+        d[1] := total_
+        d[2] := nat32(dirección(archivo[0]))
+        formatear(x, 200, "%u %u Bajando %s\r\n", d)
+        m := crear(avance)
+        si es_error(m) entonces devolver fin
+        escribir_archivo(m, x, longitud(x))
+        cerrar(m)
     fin
 
     ; pasa «n» octetos de la conexión al archivo (0xFFFFFFFF: hasta que se cierre)
@@ -255,16 +287,27 @@ módulo Udescarg
         fin
         ip_a_texto(ip, t)
         imprimir3("Conectando con %s (%s), puerto %u... ", nat32(dirección(nombre[0])), nat32(dirección(t[0])), puerto)
-        sock := conectar(ip, puerto, ESPERA_NORMAL)
-        si es_error_red(sock) entonces
-            imprimir1("\nDESCARGAR: %s.\n", nat32(texto_error_red(sock)))
-            devolver 0
+        si segura entonces
+            ; (TLS) la conexión cifrada, con el certificado comprobado
+            sock := conectar_seguro(nombre, puerto, ESPERA_NORMAL)
+            si es_error_red(sock) entonces
+                imprimir2("\nDESCARGAR: no hay conexión segura con %s: %s.\n", nat32(dirección(nombre[0])), nat32(texto_error_red(sock)))
+                devolver 0
+            fin
+            info_segura(sock, línea, 100, r, largo)
+            imprimir1("conectado (%s).\n", nat32(dirección(línea[0])))
+        sino
+            sock := conectar(ip, puerto, ESPERA_NORMAL)
+            si es_error_red(sock) entonces
+                imprimir1("\nDESCARGAR: %s.\n", nat32(texto_error_red(sock)))
+                devolver 0
+            fin
+            escribir("conectado.\n")
         fin
-        escribir("conectado.\n")
         d[0] := nat32(dirección(camino[0]))
         d[1] := nat32(dirección(nombre[0]))
         formatear(petición, 1200, "GET %s HTTP/1.1\r\nHost: %s", d)
-        si puerto <> 80 entonces
+        si (no segura y puerto <> 80) o (segura y puerto <> 443) entonces
             formatear(línea, 16, ":%u", puntero(dirección(puerto)))
             concatenar(petición, línea)
         fin
@@ -334,6 +377,10 @@ módulo Udescarg
         fin
         escritos := 0
         próximo_punto := 32768
+        total_ := 0
+        si con_largo entonces total_ := largo fin
+        próximo_avance := 16384
+        si avance[0] <> 0 entonces di_avance() fin
         si trozos entonces
             mientras cierto hacer
                 si no lee_línea() o no hex(línea, largo) entonces
@@ -396,15 +443,55 @@ módulo Udescarg
         devolver falso
     fin
 
+    ; t sin su palabra número n (las demás, en su orden)
+    función tras_palabra(t: puntero a byte, n: nat32): puntero a byte
+        variable i, k, w: nat32
+        variable x: arreglo [600] de byte
+        k := 0
+        w := 0
+        i := 0
+        mientras t[i] <> 0 hacer
+            mientras t[i] = ' ' hacer i := i + 1 fin
+            si t[i] = 0 entonces romper fin
+            si w <> n entonces
+                si k > 0 entonces
+                    x[k] := ' '
+                    k := k + 1
+                fin
+                mientras t[i] <> 0 y t[i] <> ' ' hacer
+                    x[k] := t[i]
+                    k := k + 1
+                    i := i + 1
+                fin
+            sino
+                mientras t[i] <> 0 y t[i] <> ' ' hacer i := i + 1 fin
+            fin
+            w := w + 1
+        fin
+        x[k] := 0
+        Textos32.copiar(línea, x)
+        devolver línea
+    fin
+
     función principal(): byte
         variable vueltas, código, empezó, s: nat32
         variable dado: bool
         variable pal: arreglo [128] de byte
         variable d: arreglo [4] de nat32
         argumentos(args, 600)
+        ; /AVANCE=archivo, donde esté; lo demás, en su orden
+        s := 0
+        mientras palabra(args, s, pal, 128) hacer
+            si empieza_por_sin_caja(pal, "/AVANCE=") entonces
+                copiar_hasta(avance, dirección(pal[8]), 128)
+                Textos32.copiar(args, tras_palabra(args, s))
+            sino
+                s := s + 1
+            fin
+        fin
         si no palabra(args, 0, url, 512) o iguales(url, "/?") entonces
-            escribir("Uso: DESCARGAR http://servidor[:puerto]/camino [archivo]\n")
-            escribir("  Baja ese archivo por HTTP y lo guarda (con «-» como archivo, a la pantalla).\n")
+            escribir("Uso: DESCARGAR http[s]://servidor[:puerto]/camino [archivo]\n")
+            escribir("  Baja ese archivo por HTTP o HTTPS y lo guarda (con «-» como archivo, a la pantalla).\n")
             devolver 1
         fin
         dado := palabra(args, 1, pal, 128)
@@ -413,7 +500,7 @@ módulo Udescarg
         vueltas := 0
         mientras cierto hacer
             si no parte_url(url) entonces
-                si no empieza_por_sin_caja(url, "https://") entonces imprimir1("DESCARGAR: la dirección no vale: %s\n", nat32(dirección(url[0]))) fin
+                imprimir1("DESCARGAR: la dirección no vale: %s\n", nat32(dirección(url[0])))
                 devolver 1
             fin
             si dado entonces copiar_hasta(archivo, pal, 128) sino nombre_de_archivo() fin
@@ -427,7 +514,7 @@ módulo Udescarg
                     d[0] := nat32(dirección(nombre[0]))
                     d[1] := puerto
                     d[2] := nat32(dirección(ubicación[0]))
-                    formatear(url, 512, "http://%s:%u%s", d)
+                    si segura entonces formatear(url, 512, "https://%s:%u%s", d) sino formatear(url, 512, "http://%s:%u%s", d) fin
                 sino
                     copiar_hasta(url, ubicación, 512)
                 fin
@@ -437,6 +524,8 @@ módulo Udescarg
         fin
         si código <> 200 entonces
             imprimir1("DESCARGAR: no se ha bajado nada (el servidor ha dicho %u).\n", código)
+            ; (404: no está en el servidor; PAQUETES lo dice en llano)
+            si código = 404 entonces devolver 4 fin
             devolver 1
         fin
         s := tics() - empezó

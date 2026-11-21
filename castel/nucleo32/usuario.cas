@@ -46,7 +46,8 @@
 ;   31  el teclado: el español (EBX = 1) o el de EE. UU. (0); con otra cosa,
 ;       solo dice cuál hay                           -> 1 o 0
 ;   (32 a 43: las ventanas, el portapapeles, los terminales y las unidades)
-;   (90 a 98: la red, con el servicio de red, RED.BIN: los cuenta red.cas)
+;   (90 a 98: la red, con el servicio de red, RED.BIN: los cuenta red.cas;
+;   y la 99, las conexiones cifradas, con el servicio TLS, TLS.BIN)
 ;   Para instalar el sistema en el disco (el programa INSTALAR) y para el
 ;   asistente del primer arranque (ASISTE.BIN), desde la 0.7:
 ;   60  texto en la pantalla de texto: EDX letras de ECX en la columna (bits
@@ -77,6 +78,11 @@
 ;   150 a 154: apagar de verdad, reiniciar y la batería (energia.cas): las
 ;       150 a 153 solo para el servicio de ACPI (ACPI.BIN); la 154, la
 ;       batería, para todos
+;  155  (dispositivos) la lista de los dispositivos y qué los lleva, a EBX
+;       (hasta ECX fichas de 320 octetos: Dispositivo, dispositivos.cas)
+;       -> cuántos hay. Solo lee
+;  156  (dispositivos; solo los servicios: ACPI.BIN, RED.BIN) apuntar la
+;       ficha de EBX (ECX = 0), u olvidar las suyas (ECX = 1)
 ;
 ;  Los nombres de archivo que no empiezan por una barra se entienden desde la
 ;  carpeta de trabajo de la tarea (la hereda de quien la lanza); «.» y «..»
@@ -99,7 +105,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Red, Energia
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Red, Energia, Dispositivos
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -132,7 +138,7 @@ módulo Usuario
     público variable al_escritorio: nat32
     público variable escritorio_en_marcha: bool
 
-    constante MAX_PROGRAMA = 0x200000           ; lo más que mide un programa en el disco
+    constante MAX_PROGRAMA = 0x800000           ; lo más que mide un programa en el disco (8 MB desde la 0.8.3: el Navegador)
     constante MAX_RUTA = 128
     constante MAX_ARGS = 128
 
@@ -726,7 +732,7 @@ módulo Usuario
                 devolver 0
             caso 32..41:
                 devolver atender_ventanas(n, a, b, c)
-            caso 80:
+            caso 80, 81:
                 devolver atender_ventanas(n, a, b, c)
             caso 42:
                 ; la unidad de trabajo: cambiarla (a: su letra; 0: solo
@@ -751,14 +757,19 @@ módulo Usuario
                 devolver Usbcal.quitar(a)
             caso 131:
                 devolver Unidades.cambios
-            caso 90..98:
+            caso 90..99:
                 r := atender_red(n, a, b, c)
                 ; si no hay servicio de red, se pone en marcha (una vez) y se
                 ; vuelve a pedir
                 si r = SIN_RED y n = 90 y lanza_red() entonces r := atender_red(n, a, b, c) fin
+                ; (TLS) lo mismo con el servicio TLS
+                si r = SIN_TLS y n = 99 y lanza_tls() entonces r := atender_red(n, a, b, c) fin
                 devolver r
             caso 150..154:
                 devolver atender_energía(n, a, b, c)
+            caso 155, 156:
+                ; (dispositivos) la lista de los dispositivos, y lo que apuntan los servicios
+                devolver atender_dispositivos(n, a, b, c)
         fin
         devolver NO_VALE
     fin
@@ -791,6 +802,34 @@ módulo Usuario
             si t = nulo o t.estado = ACABADA entonces romper fin
         fin
         devolver hay_servicio()
+    fin
+
+    ; (TLS) pone en marcha el servicio TLS (TLS.BIN, nucleo32/tls/), como
+    ; lanza_red. Falso si no está (y no se vuelve a intentar)
+    función lanza_tls(): bool
+        variable t: puntero a Tarea
+        variable e, k, id: nat32
+        si apagada o sin_tls entonces devolver falso fin
+        si hay_tls() entonces devolver cierto fin
+        t := cargar_archivo("\\TLS.BIN", nulo, e)
+        si t = nulo entonces
+            sin_tls := cierto
+            devolver falso
+        fin
+        t.padre := 0
+        t.terminal := 0
+        t.salida := SIN_SALIDA
+        t.carpeta[0] := 0
+        t.unidad := 0
+        id := t.id
+        k := 0
+        mientras no hay_tls() y k < 300 hacer
+            dormir(1)
+            k := k + 1
+            t := tarea_de(id)
+            si t = nulo o t.estado = ACABADA entonces romper fin
+        fin
+        devolver hay_tls()
     fin
 
     ; ¿puede el programa INSTALAR escribir sector a sector en el disco d?
@@ -1179,6 +1218,11 @@ módulo Usuario
                 yy := ent32(c)
                 si x < -4096 o x > 4096 o yy < -4096 o yy > 4096 entonces devolver NO_VALE fin
                 mover_ventana(a, x, yy)
+                devolver 0
+            caso 81:
+                ; maximizar la ventana a (suya): le llega EV_TAMAÑO con lo que mide
+                si no es_de(a, actual.id) entonces devolver NO_VALE fin
+                maximizar_ventana(a)
                 devolver 0
         fin
         devolver NO_VALE

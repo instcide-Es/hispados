@@ -1,0 +1,754 @@
+; =============================================================================
+;  json.cas - leer y escribir JSON en Castel (biblioteca de 32 bits).
+;
+;  LEER. json_leer(texto, largo) trocea un documento entero en «piezas» (una
+;  por cada objeto, lista, texto, número, cierto, falso o nulo; las claves de
+;  los objetos también son piezas de texto), sin copiar nada: cada pieza dice
+;  dónde está en el texto. Las piezas van en la memoria que se le dé antes con
+;  json_memoria(sitio, cuántas). Un documento a la vez. Luego se pregunta:
+;
+;      si json_leer(cuerpo, n) entonces
+;          d := json_ruta(json_raíz(), "data.obras")       ; una lista
+;          para i desde 0 hasta json_cuántos(d) - 1 hacer
+;              o := json_elemento(d, i)
+;              json_texto_campo(o, "titulo", título, 80)    ; ya en la página 437
+;              n := json_número_campo(o, "disponibles")
+;          fin
+;      fin
+;
+;  Una pieza es un número (su orden); NINGUNA si no está. Preguntar por una
+;  pieza que no está no falla: da NINGUNA, un texto vacío, 0 o falso.
+;  Los textos llegan en UTF-8 (con \n, \", \uXXXX...) y se dan en la página
+;  437 de la casa (la de Hispa Ventanas y del escritorio de Hispa-Pentium: la
+;  437 con Á, Í, Ó, Ú, À, È, Ò, €...; tools/hispa437.py). Lo que no está en
+;  ella sale como «?» (y las comillas tipográficas y las rayas, como ' " -).
+;
+;  ESCRIBIR. json_empezar(sitio, cabe) y luego json_abre(), json_clave("x"),
+;  json_pon_texto(t), json_pon_número(n), json_pon_verdad(b), json_pon_nulo(),
+;  json_abre_lista(), json_cierra()... (las comas las pone él), o los atajos
+;  json_campo_texto("email", correo), json_campo_número("socio_id", 12). Los
+;  textos se dan en la página 437 de la casa y salen en UTF-8, con lo que haga
+;  falta escapado. json_largo() dice cuánto ocupa; json_cabe() si ha cabido.
+;
+;  Y dos cosas sueltas: a_utf8(c, destino) (una letra de la página 437, en
+;  UTF-8: de 1 a 3 octetos) y de_unicode(cp) (al revés: la letra de la página
+;  437 de un código de Unicode, o «?»).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Json
+
+    público constante NINGUNA = 0xFFFFFFFF      ; la pieza que no está
+
+    ; las clases de pieza
+    público constante J_OBJETO = 1
+    público constante J_LISTA = 2
+    público constante J_TEXTO = 3
+    público constante J_NÚMERO = 4
+    público constante J_CIERTO = 5
+    público constante J_FALSO = 6
+    público constante J_NULO = 7
+
+    constante HONDO = 64                        ; objetos y listas, unos dentro de otros
+
+    público tipo Pieza = estructura
+        clase: nat32
+        ini: nat32                               ; dónde empieza en el texto (de un texto: tras la comilla)
+        final: nat32                             ; dónde acaba (de un texto: su comilla de cierre)
+        hijos: nat32                             ; de un objeto, sus pares; de una lista, sus elementos
+        sig: nat32                               ; la pieza que va detrás de esta y de todo lo suyo
+    fin
+
+    variable txt: puntero a byte
+    variable largo: nat32
+    variable pos: nat32
+    variable piezas: puntero a Pieza
+    variable máx_piezas: nat32
+    variable n_piezas: nat32
+    variable hondo: nat32
+    variable fallo: arreglo [80] de byte
+
+    ; de 0x80 a 0xFF de la página 437 de la casa, su código de Unicode
+    variable unicode: arreglo [128] de nat16 = (
+        0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7,
+        0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+        0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9,
+        0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
+        0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA,
+        0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+        0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x00C0, 0x00C1, 0x00C2,
+        0x00C3, 0x2563, 0x2551, 0x2557, 0x255D, 0x00C8, 0x00CA, 0x2510,
+        0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x00CB, 0x00CC,
+        0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x00CD,
+        0x00CE, 0x00CF, 0x00D2, 0x00D3, 0x00D4, 0x00D5, 0x00D9, 0x00DA,
+        0x00DB, 0x2518, 0x250C, 0x2588, 0x2584, 0x00E3, 0x00F5, 0x2580,
+        0x03B1, 0x00DF, 0x0152, 0x03C0, 0x03A3, 0x0153, 0x00B5, 0x00A9,
+        0x00AE, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
+        0x2261, 0x00B1, 0x2265, 0x2264, 0x20AC, 0x2026, 0x00F7, 0x2248,
+        0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0)
+
+    ; =========================================================================
+    ;  Las letras: de la página 437 de la casa a UTF-8, y de Unicode a ella
+    ; =========================================================================
+    ; la letra c, en UTF-8, a destino: da cuántos octetos (1 a 3)
+    público función a_utf8(c: nat32, destino: puntero a byte): nat32
+        variable u: nat32
+        c := c yb 0xFF
+        si c < 0x80 entonces
+            destino[0] := c
+            devolver 1
+        fin
+        u := unicode[c - 0x80]
+        si u < 0x800 entonces
+            destino[0] := 0xC0 ob (u >> 6)
+            destino[1] := 0x80 ob (u yb 0x3F)
+            devolver 2
+        fin
+        destino[0] := 0xE0 ob (u >> 12)
+        destino[1] := 0x80 ob ((u >> 6) yb 0x3F)
+        destino[2] := 0x80 ob (u yb 0x3F)
+        devolver 3
+    fin
+
+    ; la letra de la página 437 de la casa de un código de Unicode («?» si no está)
+    público función de_unicode(cp: nat32): nat32
+        variable i: nat32
+        si cp < 0x80 entonces devolver cp fin
+        según nat32(cp)
+            caso 0x2018, 0x2019, 0x201A, 0x2032, 0x00B4: devolver '\''
+            caso 0x201C, 0x201D, 0x201E, 0x2033: devolver '"'
+            caso 0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212: devolver '-'
+            caso 0x2022: devolver 0xFA
+        fin
+        para i desde 0 hasta 127 hacer
+            si unicode[i] = cp entonces devolver i + 0x80 fin
+        fin
+        devolver '?'
+    fin
+
+    ; =========================================================================
+    ;  Leer
+    ; =========================================================================
+    ; dónde poner las piezas (cuántas caben). Hay que darlo antes de leer.
+    público función json_memoria(sitio: puntero a Pieza, cuántas: nat32)
+        piezas := sitio
+        máx_piezas := cuántas
+        n_piezas := 0
+    fin
+
+    ; por qué no se ha podido leer el último documento (vacío si se pudo)
+    público función json_fallo(): puntero a byte
+        devolver dirección(fallo[0])
+    fin
+
+    ; cuántas piezas tiene el último documento leído
+    público función json_piezas(): nat32
+        devolver n_piezas
+    fin
+
+    función falla(qué: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras qué[i] <> 0 y i < 79 hacer
+            fallo[i] := qué[i]
+            i := i + 1
+        fin
+        fallo[i] := 0
+        devolver falso
+    fin
+
+    función blancos()
+        variable c: byte
+        mientras pos < largo hacer
+            c := txt[pos]
+            si c <> ' ' y c <> '\t' y c <> '\n' y c <> '\r' entonces devolver fin
+            pos := pos + 1
+        fin
+    fin
+
+    función nueva(clase: nat32): nat32
+        variable k: nat32
+        si n_piezas >= máx_piezas entonces devolver NINGUNA fin
+        k := n_piezas
+        n_piezas := n_piezas + 1
+        piezas[k].clase := clase
+        piezas[k].ini := pos
+        piezas[k].final := pos
+        piezas[k].hijos := 0
+        piezas[k].sig := 0
+        devolver k
+    fin
+
+    ; un texto entre comillas (pos está en la primera)
+    función lee_texto(): bool
+        variable k: nat32
+        variable c: byte
+        k := nueva(J_TEXTO)
+        si k = NINGUNA entonces devolver falla("hay demasiadas piezas") fin
+        pos := pos + 1
+        piezas[k].ini := pos
+        mientras pos < largo hacer
+            c := txt[pos]
+            si c = '"' entonces
+                piezas[k].final := pos
+                pos := pos + 1
+                piezas[k].sig := n_piezas
+                devolver cierto
+            fin
+            si c = '\\' entonces pos := pos + 1 fin
+            si c < 0x20 entonces devolver falla("hay una letra de control dentro de un texto") fin
+            pos := pos + 1
+        fin
+        devolver falla("falta la comilla del final de un texto")
+    fin
+
+    función es_de_número(c: byte): bool
+        devolver (c >= '0' y c <= '9') o c = '-' o c = '+' o c = '.' o c = 'e' o c = 'E'
+    fin
+
+    ; una palabra suelta (true, false, null) o un número
+    función lee_suelto(): bool
+        variable k: nat32
+        variable c: byte
+        c := txt[pos]
+        si c = 't' entonces
+            k := nueva(J_CIERTO)
+        sino si c = 'f' entonces
+            k := nueva(J_FALSO)
+        sino si c = 'n' entonces
+            k := nueva(J_NULO)
+        sino si c = '-' o (c >= '0' y c <= '9') entonces
+            k := nueva(J_NÚMERO)
+        sino
+            devolver falla("hay algo que no es JSON")
+        fin
+        si k = NINGUNA entonces devolver falla("hay demasiadas piezas") fin
+        si piezas[k].clase = J_NÚMERO entonces
+            mientras pos < largo y es_de_número(txt[pos]) hacer pos := pos + 1 fin
+        sino
+            mientras pos < largo y txt[pos] >= 'a' y txt[pos] <= 'z' hacer pos := pos + 1 fin
+            si no palabra_vale(k) entonces devolver falla("hay una palabra que no es true, false ni null") fin
+        fin
+        piezas[k].final := pos
+        piezas[k].sig := n_piezas
+        devolver cierto
+    fin
+
+    función palabra_vale(k: nat32): bool
+        variable n: nat32
+        n := pos - piezas[k].ini
+        según piezas[k].clase
+            caso J_CIERTO: devolver n = 4 y txt[piezas[k].ini + 1] = 'r'
+            caso J_FALSO: devolver n = 5 y txt[piezas[k].ini + 1] = 'a'
+            caso J_NULO: devolver n = 4 y txt[piezas[k].ini + 1] = 'u'
+        fin
+        devolver falso
+    fin
+
+    ; un valor cualquiera (pos, en su primera letra)
+    función lee_valor(): bool
+        variable k: nat32
+        variable c: byte
+        variable objeto: bool
+        blancos()
+        si pos >= largo entonces devolver falla("el documento se acaba antes de tiempo") fin
+        c := txt[pos]
+        si c = '"' entonces devolver lee_texto() fin
+        si c <> '{' y c <> '[' entonces devolver lee_suelto() fin
+        objeto := c = '{'
+        si objeto entonces k := nueva(J_OBJETO) sino k := nueva(J_LISTA) fin
+        si k = NINGUNA entonces devolver falla("hay demasiadas piezas") fin
+        si hondo >= HONDO entonces devolver falla("hay demasiados objetos unos dentro de otros") fin
+        hondo := hondo + 1
+        pos := pos + 1
+        blancos()
+        si pos < largo y ((objeto y txt[pos] = '}') o (no objeto y txt[pos] = ']')) entonces
+            pos := pos + 1
+        sino
+            mientras cierto hacer
+                si objeto entonces
+                    blancos()
+                    si pos >= largo o txt[pos] <> '"' entonces devolver falla("falta la clave de un campo") fin
+                    si no lee_texto() entonces devolver falso fin
+                    blancos()
+                    si pos >= largo o txt[pos] <> ':' entonces devolver falla("faltan los dos puntos tras una clave") fin
+                    pos := pos + 1
+                fin
+                si no lee_valor() entonces devolver falso fin
+                piezas[k].hijos := piezas[k].hijos + 1
+                blancos()
+                si pos >= largo entonces devolver falla("el documento se acaba antes de tiempo") fin
+                c := txt[pos]
+                pos := pos + 1
+                si c = ',' entonces seguir fin
+                si objeto y c = '}' entonces romper fin
+                si no objeto y c = ']' entonces romper fin
+                devolver falla("falta una coma o el cierre")
+            fin
+        fin
+        hondo := hondo - 1
+        piezas[k].final := pos
+        piezas[k].sig := n_piezas
+        devolver cierto
+    fin
+
+    ; trocea el documento. Falso si no es JSON (json_fallo dice por qué)
+    público función json_leer(t: puntero a byte, n: nat32): bool
+        txt := t
+        largo := n
+        pos := 0
+        n_piezas := 0
+        hondo := 0
+        fallo[0] := 0
+        si piezas = nulo entonces devolver falla("no se ha dado memoria para las piezas") fin
+        si no lee_valor() entonces
+            n_piezas := 0
+            devolver falso
+        fin
+        blancos()
+        si pos < largo entonces
+            n_piezas := 0
+            devolver falla("sobra algo detrás del documento")
+        fin
+        devolver cierto
+    fin
+
+    ; la pieza de fuera (la primera); NINGUNA si no hay documento
+    público función json_raíz(): nat32
+        si n_piezas = 0 entonces devolver NINGUNA fin
+        devolver 0
+    fin
+
+    función vale(p: nat32): bool
+        devolver p < n_piezas
+    fin
+
+    público función json_clase(p: nat32): nat32
+        si no vale(p) entonces devolver 0 fin
+        devolver piezas[p].clase
+    fin
+
+    ; cuántos elementos (una lista) o campos (un objeto) tiene
+    público función json_cuántos(p: nat32): nat32
+        si no vale(p) entonces devolver 0 fin
+        si piezas[p].clase <> J_OBJETO y piezas[p].clase <> J_LISTA entonces devolver 0 fin
+        devolver piezas[p].hijos
+    fin
+
+    ; ¿la clave de la pieza k es «clave»? (las claves se comparan tal cual)
+    función clave_es(k: nat32, clave: puntero a byte, n: nat32): bool
+        variable i: nat32
+        si piezas[k].final - piezas[k].ini <> n entonces devolver falso fin
+        para i desde 0 hasta n - 1 hacer
+            si txt[piezas[k].ini + i] <> clave[i] entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    función campo_n(obj: nat32, clave: puntero a byte, n: nat32): nat32
+        variable i, k: nat32
+        si not_obj(obj) entonces devolver NINGUNA fin
+        k := obj + 1
+        i := 0
+        mientras i < piezas[obj].hijos hacer
+            si n = 0 entonces
+                si piezas[k].final = piezas[k].ini entonces devolver k + 1 fin
+            sino si clave_es(k, clave, n) entonces
+                devolver k + 1
+            fin
+            k := piezas[k + 1].sig
+            i := i + 1
+        fin
+        devolver NINGUNA
+    fin
+
+    función not_obj(p: nat32): bool
+        devolver no vale(p) o piezas[p].clase <> J_OBJETO
+    fin
+
+    ; el valor del campo «clave» del objeto (NINGUNA si no lo tiene)
+    público función json_campo(obj: nat32, clave: puntero a byte): nat32
+        variable n: nat32
+        n := 0
+        mientras clave[n] <> 0 hacer n := n + 1 fin
+        devolver campo_n(obj, clave, n)
+    fin
+
+    ; el elemento número i (desde 0) de una lista; o el valor del campo número i de un objeto
+    público función json_elemento(p: nat32, i: nat32): nat32
+        variable k, j: nat32
+        si no vale(p) o i >= json_cuántos(p) entonces devolver NINGUNA fin
+        k := p + 1
+        j := 0
+        mientras j < i hacer
+            si piezas[p].clase = J_OBJETO entonces k := piezas[k + 1].sig sino k := piezas[k].sig fin
+            j := j + 1
+        fin
+        si piezas[p].clase = J_OBJETO entonces devolver k + 1 fin
+        devolver k
+    fin
+
+    ; la clave del campo número i de un objeto, como pieza de texto
+    público función json_clave_de(obj: nat32, i: nat32): nat32
+        variable k: nat32
+        k := json_elemento(obj, i)
+        si k = NINGUNA entonces devolver NINGUNA fin
+        devolver k - 1
+    fin
+
+    ; un camino de claves separadas por puntos: «data.socio.nombre». Un
+    ; número en el camino es un elemento de una lista: «data.obras.0.titulo»
+    público función json_ruta(p: nat32, camino: puntero a byte): nat32
+        variable i, n, k: nat32
+        i := 0
+        mientras p <> NINGUNA y camino[i] <> 0 hacer
+            n := 0
+            mientras camino[i + n] <> 0 y camino[i + n] <> '.' hacer n := n + 1 fin
+            si vale(p) y piezas[p].clase = J_LISTA y n > 0 y camino[i] >= '0' y camino[i] <= '9' entonces
+                k := 0
+                mientras camino[i] >= '0' y camino[i] <= '9' hacer
+                    k := k * 10 + (camino[i] - '0')
+                    i := i + 1
+                    n := n - 1
+                fin
+                p := json_elemento(p, k)
+            sino
+                p := campo_n(p, dirección(camino[i]), n)
+                i := i + n
+            fin
+            si camino[i] = '.' entonces i := i + 1 fin
+        fin
+        devolver p
+    fin
+
+    público función json_nulo(p: nat32): bool
+        devolver no vale(p) o piezas[p].clase = J_NULO
+    fin
+
+    ; el texto de la pieza, en la página 437 de la casa, a destino (caben
+    ; «cabe» octetos con el 0): de un texto, sin las comillas y con los
+    ; escapes hechos; de un número, de cierto o de falso, tal cual; de nulo (o
+    ; de una pieza que no está), vacío. Da cuántas letras.
+    público función json_texto(p: nat32, destino: puntero a byte, cabe: nat32): nat32
+        variable i, f, n, cp, c2, k: nat32
+        variable c: byte
+        n := 0
+        si cabe = 0 entonces devolver 0 fin
+        destino[0] := 0
+        si no vale(p) entonces devolver 0 fin
+        si piezas[p].clase = J_NULO o piezas[p].clase = J_OBJETO o piezas[p].clase = J_LISTA entonces devolver 0 fin
+        i := piezas[p].ini
+        f := piezas[p].final
+        mientras i < f y n + 1 < cabe hacer
+            c := txt[i]
+            i := i + 1
+            si piezas[p].clase <> J_TEXTO entonces
+                destino[n] := c
+                n := n + 1
+                seguir
+            fin
+            si c = '\\' y i < f entonces
+                c := txt[i]
+                i := i + 1
+                según c
+                    caso 'n': cp := '\n'
+                    caso 't': cp := '\t'
+                    caso 'r': cp := '\r'
+                    caso 'b': cp := 8
+                    caso 'f': cp := 12
+                    caso 'u':
+                        cp := hex4(i, f)
+                        i := i + 4
+                        ; un par de mitades (lo de fuera del plano básico)
+                        si cp >= 0xD800 y cp < 0xDC00 y i + 6 <= f y txt[i] = '\\' y txt[i + 1] = 'u' entonces
+                            c2 := hex4(i + 2, f)
+                            si c2 >= 0xDC00 y c2 < 0xE000 entonces
+                                cp := 0x10000 + ((cp - 0xD800) << 10) + (c2 - 0xDC00)
+                                i := i + 6
+                            fin
+                        fin
+                    si no: cp := c                 ; \" \\ \/
+                fin
+            sino si c < 0x80 entonces
+                cp := c
+            sino
+                ; UTF-8: de 2 a 4 octetos
+                si c >= 0xF0 entonces
+                    cp := c yb 0x07
+                    k := 3
+                sino si c >= 0xE0 entonces
+                    cp := c yb 0x0F
+                    k := 2
+                sino si c >= 0xC0 entonces
+                    cp := c yb 0x1F
+                    k := 1
+                sino
+                    cp := '?'
+                    k := 0
+                fin
+                mientras k > 0 y i < f y (txt[i] yb 0xC0) = 0x80 hacer
+                    cp := (cp << 6) ob (txt[i] yb 0x3F)
+                    i := i + 1
+                    k := k - 1
+                fin
+            fin
+            destino[n] := de_unicode(cp)
+            n := n + 1
+        fin
+        destino[n] := 0
+        devolver n
+    fin
+
+    función hex4(i: nat32, f: nat32): nat32
+        variable n, j: nat32
+        variable c: byte
+        n := 0
+        para j desde 0 hasta 3 hacer
+            si i + j >= f entonces devolver '?' fin
+            c := txt[i + j]
+            si c >= '0' y c <= '9' entonces
+                n := n * 16 + (c - '0')
+            sino si c >= 'a' y c <= 'f' entonces
+                n := n * 16 + (c - 'a' + 10)
+            sino si c >= 'A' y c <= 'F' entonces
+                n := n * 16 + (c - 'A' + 10)
+            sino
+                devolver '?'
+            fin
+        fin
+        devolver n
+    fin
+
+    ; el número de la pieza (un número, o un texto con un número dentro:
+    ; «"12"»), sin decimales; cierto es 1; lo demás, 0
+    público función json_número(p: nat32): ent32
+        variable i, f: nat32
+        variable n: ent32
+        variable menos: bool
+        si no vale(p) entonces devolver 0 fin
+        si piezas[p].clase = J_CIERTO entonces devolver 1 fin
+        si piezas[p].clase <> J_NÚMERO y piezas[p].clase <> J_TEXTO entonces devolver 0 fin
+        i := piezas[p].ini
+        f := piezas[p].final
+        menos := falso
+        si i < f y txt[i] = '-' entonces
+            menos := cierto
+            i := i + 1
+        fin
+        n := 0
+        mientras i < f y txt[i] >= '0' y txt[i] <= '9' hacer
+            n := n * 10 + ent32(txt[i] - '0')
+            i := i + 1
+        fin
+        si menos entonces devolver -n fin
+        devolver n
+    fin
+
+    ; ¿es cierto? (cierto, o un número que no es 0)
+    público función json_verdad(p: nat32): bool
+        si no vale(p) entonces devolver falso fin
+        si piezas[p].clase = J_CIERTO entonces devolver cierto fin
+        si piezas[p].clase = J_NÚMERO entonces devolver json_número(p) <> 0 fin
+        devolver falso
+    fin
+
+    ; los atajos: lo mismo, del campo «clave» de un objeto
+    público función json_texto_campo(obj: nat32, clave: puntero a byte, destino: puntero a byte, cabe: nat32): nat32
+        devolver json_texto(json_campo(obj, clave), destino, cabe)
+    fin
+
+    público función json_número_campo(obj: nat32, clave: puntero a byte): ent32
+        devolver json_número(json_campo(obj, clave))
+    fin
+
+    público función json_verdad_campo(obj: nat32, clave: puntero a byte): bool
+        devolver json_verdad(json_campo(obj, clave))
+    fin
+
+    ; =========================================================================
+    ;  Escribir
+    ; =========================================================================
+    variable es: puntero a byte
+    variable es_cabe, es_n: nat32
+    variable es_lleno: bool
+    variable es_nivel: nat32
+    variable es_primero: arreglo [HONDO] de bool
+    variable es_cierre: arreglo [HONDO] de byte
+    variable es_tras_clave: bool
+
+    público función json_empezar(sitio: puntero a byte, cabe: nat32)
+        es := sitio
+        es_cabe := cabe
+        es_n := 0
+        es_lleno := falso
+        es_nivel := 0
+        es_tras_clave := falso
+        si cabe > 0 entonces es[0] := 0 fin
+    fin
+
+    público función json_largo(): nat32
+        devolver es_n
+    fin
+
+    ; ¿ha cabido todo?
+    público función json_cabe(): bool
+        devolver no es_lleno
+    fin
+
+    función pon(c: nat32)
+        si es_n + 1 >= es_cabe entonces
+            es_lleno := cierto
+            devolver
+        fin
+        es[es_n] := c
+        es_n := es_n + 1
+        es[es_n] := 0
+    fin
+
+    ; antes de un valor: la coma, si no es el primero (y no va detrás de su clave)
+    función antes()
+        si es_tras_clave entonces
+            es_tras_clave := falso
+            devolver
+        fin
+        si es_nivel > 0 entonces
+            si no es_primero[es_nivel - 1] entonces pon(',') fin
+            es_primero[es_nivel - 1] := falso
+        fin
+    fin
+
+    función abre_(c: byte, cierre: byte)
+        antes()
+        pon(c)
+        si es_nivel < HONDO entonces
+            es_primero[es_nivel] := cierto
+            es_cierre[es_nivel] := cierre
+            es_nivel := es_nivel + 1
+        fin
+    fin
+
+    público función json_abre()
+        abre_('{', '}')
+    fin
+
+    público función json_abre_lista()
+        abre_('[', ']')
+    fin
+
+    ; cierra el objeto o la lista que esté abierto
+    público función json_cierra()
+        si es_nivel = 0 entonces devolver fin
+        es_nivel := es_nivel - 1
+        pon(es_cierre[es_nivel])
+    fin
+
+    ; un texto entre comillas, en UTF-8 y con lo que haga falta escapado
+    función pon_comillas(t: puntero a byte)
+        variable i, n, j: nat32
+        variable c: byte
+        variable u: arreglo [4] de byte
+        pon('"')
+        i := 0
+        mientras t[i] <> 0 hacer
+            c := t[i]
+            i := i + 1
+            si c = '"' o c = '\\' entonces
+                pon('\\')
+                pon(c)
+            sino si c = '\n' entonces
+                pon('\\')
+                pon('n')
+            sino si c = '\r' entonces
+                pon('\\')
+                pon('r')
+            sino si c = '\t' entonces
+                pon('\\')
+                pon('t')
+            sino si c < 0x20 entonces
+                pon(' ')
+            sino
+                n := a_utf8(c, u)
+                para j desde 0 hasta n - 1 hacer pon(u[j]) fin
+            fin
+        fin
+        pon('"')
+    fin
+
+    público función json_clave(k: puntero a byte)
+        antes()
+        pon_comillas(k)
+        pon(':')
+        es_tras_clave := cierto
+    fin
+
+    público función json_pon_texto(t: puntero a byte)
+        antes()
+        pon_comillas(t)
+    fin
+
+    público función json_pon_número(n: ent32)
+        variable cifras: arreglo [12] de byte
+        variable i: nat32
+        variable m: nat32
+        antes()
+        si n < 0 entonces
+            pon('-')
+            m := nat32(-n)
+        sino
+            m := nat32(n)
+        fin
+        i := 0
+        repetir_cifras(m, cifras, i)
+        mientras i > 0 hacer
+            i := i - 1
+            pon(cifras[i])
+        fin
+    fin
+
+    función repetir_cifras(m: nat32, cifras: puntero a byte, ref i: nat32)
+        si m = 0 entonces
+            cifras[0] := '0'
+            i := 1
+            devolver
+        fin
+        mientras m > 0 hacer
+            cifras[i] := '0' + m mod 10
+            m := m div 10
+            i := i + 1
+        fin
+    fin
+
+    público función json_pon_verdad(b: bool)
+        antes()
+        si b entonces pon_trozo("true") sino pon_trozo("false") fin
+    fin
+
+    público función json_pon_nulo()
+        antes()
+        pon_trozo("null")
+    fin
+
+    función pon_trozo(t: puntero a byte)
+        variable i: nat32
+        i := 0
+        mientras t[i] <> 0 hacer
+            pon(t[i])
+            i := i + 1
+        fin
+    fin
+
+    público función json_campo_texto(k: puntero a byte, t: puntero a byte)
+        json_clave(k)
+        json_pon_texto(t)
+    fin
+
+    público función json_campo_número(k: puntero a byte, n: ent32)
+        json_clave(k)
+        json_pon_número(n)
+    fin
+
+    público función json_campo_verdad(k: puntero a byte, b: bool)
+        json_clave(k)
+        json_pon_verdad(b)
+    fin
+
+fin Json.

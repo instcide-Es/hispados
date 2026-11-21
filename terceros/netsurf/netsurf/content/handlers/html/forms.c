@@ -540,9 +540,51 @@ invent_fake_gadget(dom_node *node)
 	return ctl;
 }
 
-/* documented in html_internal.h */
+/* [HISPA] JavaScript: los controles que no van en un formulario (los
+ * buscadores de ClicGest) se guardan en su nodo, para que al rehacer las
+ * cajas (w32/surf/rehaz.c) sigan con lo escrito; se sueltan con el nodo */
+static dom_string *hispa_clave_ctl;
+static void hispa_ctl_suelta(dom_node_operation op, dom_string *key,
+		void *data, struct dom_node *src, struct dom_node *dst)
+{
+	(void)key; (void)src; (void)dst;
+	if (op == DOM_NODE_DELETED && data != NULL)
+		form_free_control(data);
+}
+struct form_control *html_forms_hispa_ctl(dom_node *node)
+{
+	void *ctl = NULL;
+	if (hispa_clave_ctl == NULL)
+		return NULL;
+	if (dom_node_get_user_data(node, hispa_clave_ctl, &ctl) != DOM_NO_ERR)
+		return NULL;
+	return ctl;
+}
+
+static struct form_control *
+html_forms_get_control_for_node2(struct form *forms, dom_node *node);
 struct form_control *
 html_forms_get_control_for_node(struct form *forms, dom_node *node)
+{
+	struct form_control *ctl = html_forms_hispa_ctl(node);
+	void *viejo = NULL;
+	if (ctl != NULL)
+		return ctl;
+	ctl = html_forms_get_control_for_node2(forms, node);
+	if (ctl != NULL && ctl->form == NULL) {
+		if (hispa_clave_ctl == NULL)
+			dom_string_create_interned((const uint8_t *)"__hispa_ctl",
+					11, &hispa_clave_ctl);
+		if (hispa_clave_ctl != NULL)
+			dom_node_set_user_data(node, hispa_clave_ctl, ctl,
+					hispa_ctl_suelta, &viejo);
+	}
+	return ctl;
+}
+
+/* documented in html_internal.h */
+static struct form_control *
+html_forms_get_control_for_node2(struct form *forms, dom_node *node)
 {
 	struct form *f;
 	struct form_control *ctl = NULL;

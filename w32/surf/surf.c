@@ -45,9 +45,11 @@
 #include "utils/file.h"
 #include "desktop/browser_history.h"
 
+#include "netsurf/browser.h"
 #include "surf.h"
 #include "rh.h"
 #include "cssvar.h"
+#include "woff.h"
 
 /* ---- lo justo de USER32, GDI32 y KERNEL32 ---- */
 #define WINAPI __attribute__((stdcall))
@@ -246,6 +248,7 @@ static void coloca(void) {
   pw = an - DESP_W; ph = al - BARRA_H - ESTADO_H;
   if (pw < 64) pw = 64;
   if (ph < 32) ph = 32;
+  cssvar_ancho = pw; cssvar_alto = ph;          /* (vw y vh en clamp(): cssvar.c) */
   for (k = 0; k < B_IR; k++) {
     int w = (strlen(k == B_RECARGA ? "Recargar" : b_texto[k]) + 2) * LW;
     b_rect[k].left = x; b_rect[k].top = 4; b_rect[k].right = x + w; b_rect[k].bottom = 27;
@@ -521,6 +524,17 @@ static void v_cursor(struct gui_window *g, int x, int y, int h, const struct rec
 static void v_consola(struct gui_window *g, browser_window_console_source src, const char *m, size_t n,
                       browser_window_console_flags f) {
   (void)g; (void)src; (void)m; (void)n; (void)f;
+}
+
+/* [JS] lo que pide guion.c a la ventana */
+HANDLE surf_ventana(void) { return vent; }
+void surf_desp(int *x, int *y) { *x = actual ? actual->sx : 0; *y = actual ? actual->sy : 0; }
+void surf_ve_a(int x, int y) { desplaza_a(x, y); }
+void surf_pon_dir(const char *u8) {
+  if (foco_dir) return;
+  a_1252(u8, dir, sizeof dir);
+  n_dir = strlen(dir); dir_cur = n_dir; dir_desp = 0;
+  repinta_barras();
 }
 
 static struct gui_window_table tabla_ventana = {
@@ -817,7 +831,7 @@ static int WINAPI proc(HANDLE h, u32 m, u32 w, u32 l) {
 static nserror opciones(struct nsoption_s *d) {
   (void)d;
   nsoption_set_bool(core_select_menu, true);
-  nsoption_set_bool(enable_javascript, false);
+  nsoption_set_bool(enable_javascript, true);     /* [JS] guion.c (QuickJS, HSPJS.DLL) */
   nsoption_set_int(memory_cache_size, 1024 * 1024);   /* (1 MB: en 16 MB de memoria cuenta) */
   nsoption_set_int(max_fetchers, 8);
   nsoption_set_int(max_fetchers_per_host, 4);
@@ -886,12 +900,17 @@ void inicio_prog(void) {
   messages_add_from_file(b);
   snprintf(b, sizeof b, "%s\\FUENTES", surf_carpeta);
   if (!letra_inicia(b)) muere("No se encuentran las letras (FUENTES\\SANS.TTF junto al programa).");
+  /* 96 puntos por pulgada, como Chrome: con los 90 de NetSurf, 16px de CSS
+   * eran 15 puntos en las cajas y 17 en las letras (letra.c) */
+  browser_set_dpi(96);
   e = netsurf_init(NULL);
   if (e != NSERROR_OK) {
     snprintf(b, sizeof b, "NetSurf no ha podido empezar: %s", messages_get_errorcode(e));
     muere(b);
   }
   rh_inicia(idioma);
+  snprintf(b, sizeof b, "%s\\RECURSOS", surf_carpeta);
+  woff_carpeta(b);      /* (BROTLI.DIC, para las letras WOFF2 de la web) */
   snprintf(galletas, sizeof galletas, "%s\\SURFGAL.TXT", surf_carpeta);
   rh_galletas_carga(galletas);
 

@@ -504,13 +504,13 @@ Cada instalación se actualiza **en su gama**:
 [0.9.26]
 cpu=386
 edicion=Hispa-386 (con Hispa Ventanas)
-paquete=http://actualiza.clicgest.es/hispados-0.9.26.paq
+paquete=http://actualiza.hispados.es/hispados-0.9.26.paq
 
 [0.9.26]
 gama=486
 cpu=386
 edicion=Hispa-486
-paquete=http://actualiza.clicgest.es/hispa486-0.9.26.paq
+paquete=http://actualiza.hispados.es/hispa486-0.9.26.paq
 ```
 
 (El número de la sección es el de Hispa-DOS, `lib/version.inc`, el mismo

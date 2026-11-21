@@ -11,15 +11,13 @@
 ; =============================================================================
 módulo Salida
 
-    importar Base, Tablas, Textos, Archivos
+    importar Medidas, Base, Tablas, Textos, Archivos, Lejos
 
-    constante PARRAFOS_LIN = 0x0C00             ; 48 K de texto por función
-    constante MAX_TEXTO = 0xBE00
-    constante MAX_LINEAS = 4000
+    constante MAX_TEXTO = TEXTO_FUNCIÓN         ; (de Medidas, como PARRAFOS_LIN)
+    constante MAX_LINEAS = LÍNEAS_FUNCIÓN
     constante MAX_LN = 300
-    público constante NOMBRE_TEMPORAL = "CASTEL.$$$"
 
-    variable seg_lin, seg_idx: nat16
+    variable seg_lin, seg_idx: Segmento
     variable n_lineas: nat16
     variable libre_lin: nat16                   ; por dónde va el texto en seg_lin
     variable ln: arreglo [MAX_LN] de byte       ; la línea que se está montando

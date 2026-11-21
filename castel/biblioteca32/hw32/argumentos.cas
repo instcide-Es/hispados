@@ -1,0 +1,114 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; argumentos.cas (HW32) - los argumentos de biblioteca/argumentos.cas para
+; los programas Win32 de consola («modelo hispa32») con HW32: lo que se
+; escribió detrás del nombre del programa (la línea de GetCommandLineA, sin
+; su primera palabra, que es el programa), partido en palabras separadas por
+; espacios o tabuladores. La misma forma de usarlo que en DOS.
+módulo Argumentos
+
+    variable línea: puntero a byte
+
+    función línea_win32(): puntero a byte
+        ensamblador
+            call [C_GetCommandLineA]
+        fin
+    fin
+
+    función ruta_win32(destino: puntero a byte, cabe: nat32): nat32
+        ensamblador
+            push dword {cabe}
+            push dword {destino}
+            push 0
+            call [C_GetModuleFileNameA]
+        fin
+    fin
+
+    función es_blanco(c: byte): bool
+        devolver c = ' ' o c = '\t'
+    fin
+
+    función acaba(c: byte): bool
+        devolver c = '\r' o c = 0
+    fin
+
+    ; la línea de órdenes entera, sin el programa (acabada en 0)
+    público función línea_de_órdenes(): puntero a byte
+        variable p: puntero a byte
+        variable comillas: bool
+        si línea = nulo entonces
+            p := línea_win32()
+            mientras es_blanco(valor(p)) hacer p := p + 1 fin
+            comillas := falso
+            mientras valor(p) <> 0 y (comillas o no es_blanco(valor(p))) hacer
+                si valor(p) = '"' entonces comillas := no comillas fin
+                p := p + 1
+            fin
+            línea := p
+        fin
+        devolver línea
+    fin
+
+    público función cuántos_argumentos(): nat16
+        variable p: puntero a byte
+        variable n: nat16
+        p := línea_de_órdenes()
+        n := 0
+        mientras cierto hacer
+            mientras es_blanco(valor(p)) hacer
+                p := p + 1
+            fin
+            si acaba(valor(p)) entonces devolver n fin
+            n := n + 1
+            mientras no es_blanco(valor(p)) y no acaba(valor(p)) hacer
+                p := p + 1
+            fin
+        fin
+        devolver n
+    fin
+
+    ; copia en destino el argumento número n (el primero es el 1), acabado en
+    ; 0; «cabe» es el sitio que hay, con el 0. Da falso si no hay tantos.
+    público función argumento(n: nat16, destino: puntero a byte, cabe: nat16): bool
+        variable p: puntero a byte
+        variable i: nat16
+        p := línea_de_órdenes()
+        valor(destino) := 0
+        si n = 0 o cabe = 0 entonces devolver falso fin
+        mientras cierto hacer
+            mientras es_blanco(valor(p)) hacer
+                p := p + 1
+            fin
+            si acaba(valor(p)) entonces devolver falso fin
+            n := n - 1
+            si n = 0 entonces romper fin
+            mientras no es_blanco(valor(p)) y no acaba(valor(p)) hacer
+                p := p + 1
+            fin
+        fin
+        i := 0
+        mientras no es_blanco(valor(p)) y no acaba(valor(p)) hacer
+            si i + 1 < cabe entonces
+                destino[i] := valor(p)
+                i := i + 1
+            fin
+            p := p + 1
+        fin
+        destino[i] := 0
+        devolver cierto
+    fin
+
+    ; la ruta del archivo del programa (como «A:\BIN\CASTELW.EXE»), en destino,
+    ; donde caben «cabe» octetos con el 0 (GetModuleFileNameA). Falso si no cabe.
+    público función ruta_del_programa(destino: puntero a byte, cabe: nat16): bool
+        variable n: nat32
+        si cabe = 0 entonces devolver falso fin
+        valor(destino) := 0
+        n := ruta_win32(destino, cabe)
+        si n = 0 o n >= cabe entonces
+            valor(destino) := 0
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+fin Argumentos.

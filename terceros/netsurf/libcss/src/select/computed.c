@@ -189,6 +189,13 @@ css_error css_computed_style_destroy(css_computed_style *style)
 	if (style->i.background_image != NULL)
 		lwc_string_unref(style->i.background_image);
 
+	/* [HISPA] */
+	if (style->i.grid_template_columns != NULL)
+		lwc_string_unref(style->i.grid_template_columns);
+
+	if (style->i.grid_column != NULL)
+		lwc_string_unref(style->i.grid_column);
+
 	free(style);
 
 	return CSS_OK;
@@ -877,6 +884,62 @@ uint8_t css_computed_column_gap(const css_computed_style *style,
 	return get_column_gap(style, length, unit);
 }
 
+/* [HISPA] gap, esquinas redondas, sombra y grid */
+uint8_t css_computed_row_gap(const css_computed_style *style,
+		css_fixed *length, css_unit *unit)
+{
+	return get_row_gap(style, length, unit);
+}
+
+uint8_t css_computed_border_top_left_radius(const css_computed_style *style,
+		css_fixed *length, css_unit *unit)
+{
+	return get_border_top_left_radius(style, length, unit);
+}
+
+uint8_t css_computed_border_top_right_radius(const css_computed_style *style,
+		css_fixed *length, css_unit *unit)
+{
+	return get_border_top_right_radius(style, length, unit);
+}
+
+uint8_t css_computed_border_bottom_right_radius(
+		const css_computed_style *style,
+		css_fixed *length, css_unit *unit)
+{
+	return get_border_bottom_right_radius(style, length, unit);
+}
+
+uint8_t css_computed_border_bottom_left_radius(
+		const css_computed_style *style,
+		css_fixed *length, css_unit *unit)
+{
+	return get_border_bottom_left_radius(style, length, unit);
+}
+
+uint8_t css_computed_box_shadow(const css_computed_style *style,
+		css_fixed *x, css_unit *x_unit,
+		css_fixed *y, css_unit *y_unit,
+		css_fixed *blur, css_unit *blur_unit,
+		css_fixed *spread, css_unit *spread_unit,
+		css_color *color)
+{
+	return get_box_shadow(style, x, x_unit, y, y_unit, blur, blur_unit,
+			spread, spread_unit, color);
+}
+
+uint8_t css_computed_grid_template_columns(const css_computed_style *style,
+		lwc_string **text)
+{
+	return get_grid_template_columns(style, text);
+}
+
+uint8_t css_computed_grid_column(const css_computed_style *style,
+		lwc_string **text)
+{
+	return get_grid_column(style, text);
+}
+
 uint8_t css_computed_column_rule_color(const css_computed_style *style,
 		css_color *color)
 {
@@ -1141,6 +1204,28 @@ css_error css__compute_absolute_values(const css_computed_style *parent,
 	css_hint psize, size, ex_size;
 	css_error error;
 
+	/* [HISPA] font-weight: bolder y lighter, según el del padre (CSS
+	 * Fonts 4, la tabla de los pesos relativos): Bootstrap pone
+	 * «b, strong { font-weight: bolder }» y se quedaba en normal */
+	{
+		uint8_t w = get_font_weight(style);
+		if (w == CSS_FONT_WEIGHT_BOLDER || w == CSS_FONT_WEIGHT_LIGHTER) {
+			int p = 400;
+			uint8_t pw = parent != NULL ? get_font_weight(parent) :
+					CSS_FONT_WEIGHT_NORMAL;
+			if (pw == CSS_FONT_WEIGHT_BOLD)
+				p = 700;
+			else if (pw >= CSS_FONT_WEIGHT_100 &&
+					pw <= CSS_FONT_WEIGHT_900)
+				p = (pw - CSS_FONT_WEIGHT_100 + 1) * 100;
+			if (w == CSS_FONT_WEIGHT_BOLDER)
+				p = p < 350 ? 400 : p < 550 ? 700 : 900;
+			else
+				p = p < 550 ? 100 : p < 750 ? 400 : 700;
+			set_font_weight(style, CSS_FONT_WEIGHT_100 + p / 100 - 1);
+		}
+	}
+
 	/* Get reference font-size for relative sizes. */
 	if (parent != NULL) {
 		psize.status = get_font_size(parent,
@@ -1352,6 +1437,30 @@ css_error css__compute_absolute_values(const css_computed_style *parent,
 			&ex_size.data.length,
 			get_column_gap,
 			set_column_gap);
+	if (error != CSS_OK)
+		return error;
+
+	/* [HISPA] row-gap y las esquinas */
+	error = compute_absolute_length(style, &ex_size.data.length,
+			get_row_gap, set_row_gap);
+	if (error != CSS_OK)
+		return error;
+	error = compute_absolute_length(style, &ex_size.data.length,
+			get_border_top_left_radius, set_border_top_left_radius);
+	if (error != CSS_OK)
+		return error;
+	error = compute_absolute_length(style, &ex_size.data.length,
+			get_border_top_right_radius, set_border_top_right_radius);
+	if (error != CSS_OK)
+		return error;
+	error = compute_absolute_length(style, &ex_size.data.length,
+			get_border_bottom_right_radius,
+			set_border_bottom_right_radius);
+	if (error != CSS_OK)
+		return error;
+	error = compute_absolute_length(style, &ex_size.data.length,
+			get_border_bottom_left_radius,
+			set_border_bottom_left_radius);
 	if (error != CSS_OK)
 		return error;
 

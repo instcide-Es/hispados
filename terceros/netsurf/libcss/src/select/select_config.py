@@ -106,6 +106,16 @@ style = {
     ('vertical_align', 4, 'length', 'CSS_VERTICAL_ALIGN_SET'),
     ('width', 2, 'length', 'CSS_WIDTH_SET'),
     ('z_index', 2, 'integer'),
+    # [HISPA] gap, esquinas redondas, sombra y grid (NAVEGA2.EXE)
+    ('row_gap', 2, 'length', 'CSS_ROW_GAP_SET', 'CSS_ROW_GAP_NORMAL'),
+    ('border_top_left_radius', 1, 'length', 'CSS_BORDER_RADIUS_SET'),
+    ('border_top_right_radius', 1, 'length', 'CSS_BORDER_RADIUS_SET'),
+    ('border_bottom_right_radius', 1, 'length', 'CSS_BORDER_RADIUS_SET'),
+    ('border_bottom_left_radius', 1, 'length', 'CSS_BORDER_RADIUS_SET'),
+    ('box_shadow', 2, (('length',), ('length',), ('length',), ('length',),
+        ('color',)), None, 'CSS_BOX_SHADOW_NONE'),
+    ('grid_template_columns', 1, 'string'),
+    ('grid_column', 1, 'string'),
     # Style group, arrays
     ('font_family', 3, 'string_arr', None, None,
         'Encode font family as an array of string objects, terminated with a '

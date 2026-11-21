@@ -1,0 +1,45 @@
+NAVEGA.BIN - el Navegador de Hispa-Pentium (docs/PENTIUM.md, «El Navegador»):
+la web de hoy, con sus hojas de estilo, sus imágenes, sus letras y su
+JavaScript, en una ventana del escritorio.
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+Lo que hay en \HISPA\NAVEGA (el paquete «navegador»):
+  NAVEGA.BIN    el programa (un programa del anillo 3, en C)
+  NAVEGA.INI    sus opciones: Inicio=, Idioma=, Descargas=
+  RECURSOS\     las hojas de estilo de NetSurf, sus textos en español, la
+                página de inicio sin red (resource:inicio.htm) y el
+                diccionario de Brotli (para las letras WOFF2 de la web)
+  FUENTES\      las letras DejaVu (recortadas a las de Europa occidental)
+  SURFGAL.TXT   las galletas que dicen hasta cuándo valen (lo escribe él)
+  NAVEGA2.ALM   lo que guardan las páginas (localStorage; lo escribe él)
+Con un archivo SURF.LOG (aunque esté vacío) en esta carpeta, apunta ahí lo que
+hace (y NetSurf en NS.LOG). Las descargas van a C:\DESCARGA.
+
+Cómo está hecho (castel/nucleo32/navega/):
+  frontal.c     la ventana: pestañas, barra, dirección, desplazamiento, estado,
+                ratón, rueda, teclado, portapapeles, menús y cuadros
+  descarga.c    las descargas
+  sistema.c     lo de Windows que piden los fuentes de Hispa-486 (KERNEL32,
+                WSOCK32, HSPTLS), con las llamadas de Hispa-Pentium
+  entrada.asm   la cabecera HPU3; pentium.ld, enlazado para 0x40000000
+  navega.mk     cómo se compila (lo usa hacer.sh)
+  hacer.sh      lo compila y deja la carpeta entera
+y, de Hispa-486 sin tocar (o con cambios marcados [PENTIUM]): w32/surf (el
+Navegador completo: red, letras, imágenes, CSS, JavaScript), w32/navega/http.c
+(HTTP y las galletas), w32/msvcrt.c (la biblioteca de C) y w32/js (QuickJS).
+
+Lleva dentro, de terceros (cada uno con su licencia, en terceros/):
+  - NetSurf 3.11 y sus bibliotecas (libcss, libdom, hubbub, libparserutils,
+    libwapcaplet, libnsutils, libnsfb, libnspsl, libnsbmp, libnsgif,
+    libsvgtiny), de The NetSurf Developers (https://www.netsurf-browser.org/):
+    NetSurf, GPL-2.0; las bibliotecas, MIT. terceros/netsurf/LEEME.txt.
+  - QuickJS, de Fabrice Bellard y Charlie Gordon, licencia MIT
+    (terceros/quickjs/LICENSE).
+  - El descompresor de Brotli, de Google, licencia MIT (terceros/brotli).
+  - stb_truetype y stb_image, de Sean Barrett, dominio público o MIT
+    (terceros/stb).
+  - Las letras DejaVu (Bitstream Vera y sus cambios, de dominio público), con
+    su licencia (terceros/dejavu/LICENSE).
+  - Las conexiones cifradas las hace TLS.BIN (el paquete «tls»), con BearSSL,
+    de Thomas Pornin, licencia MIT (terceros/bearssl/LICENSE.txt).
+El programa entero va con la GPL-2.0 (la de NetSurf).

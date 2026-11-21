@@ -65,6 +65,7 @@ módulo Ventanas
     público constante EV_MENÚ = 10              ; se ha cerrado el menú que pidió: a, la opción elegida (desde 0; SIN_ELEGIR si ninguna); b, su etiqueta
     público constante EV_MENÚ_VENTANA = 11      ; (a la del fondo) el botón secundario en el título de la ventana a, en el punto (b, c) de la pantalla
     público constante EV_UNIDADES = 12          ; (a todas) ha aparecido o desaparecido una unidad (una memoria USB)
+    público constante EV_RUEDA = 13             ; (NAVEGADOR) la rueda del ratón: a, b, dónde; c, los pasos (con signo, en el octeto bajo: arriba, positivos) y las teclas de cambio
     público constante SIN_ELEGIR = 0xFFFFFFFF
     ; en «c» de los sucesos del ratón: abajo, los botones; luego las teclas de
     ; cambio (c >> 8: 1, Mayús; 2, Control) y las veces seguidas (c >> 16: 1, 2 o 3)
@@ -965,6 +966,15 @@ módulo Ventanas
         soltar(cerrojo)
     fin
 
+    ; maximiza la ventana (si no lo estaba ya): la llamada 81 (controles-erp, 21/11)
+    público función maximizar_ventana(id: nat32)
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i >= 0 y ventanas[i].banderas yb MAXIMIZADA = 0 entonces cambia_máximo(i) fin
+        soltar(cerrojo)
+    fin
+
     ; lo que hace el botón de una ventana en la barra de tareas: si está
     ; minimizada, vuelve; si es la activa, se minimiza; si no, pasa delante
     público función botón_de_barra(id: nat32)
@@ -1374,8 +1384,8 @@ módulo Ventanas
     ; -------------------------------------------------------------------------
     público función pulso()
         variable c: Clic
-        variable x, yy: ent32
-        variable k, i, m: nat32
+        variable x, yy, vr, nr: ent32
+        variable k, i, m, lr: nat32
         tomar(cerrojo)
         ; los botones del ratón, cada cambio donde fue
         mientras saca_clic(c) hacer
@@ -1394,6 +1404,17 @@ módulo Ventanas
             flecha_x := x
             flecha_y := yy
             pinta_flecha()
+        fin
+        ; (NAVEGADOR) la rueda: a la ventana de debajo de la flecha
+        nr := saca_rueda()
+        si nr <> 0 entonces
+            si nr > 127 entonces nr := 127 fin
+            si nr < -127 entonces nr := -127 fin
+            lr := 0
+            vr := ventana_o_borde(x, yy, lr)
+            si vr >= 0 y lr = 0 y está_dentro(vr, x, yy) entonces
+                pon_evento(vr, EV_RUEDA, nat32(dentro_x(vr, x)), nat32(dentro_y(vr, yy)), (nat32(nr) yb 0xFF) ob (modificadores() << DESPLAZA_CAMBIO))
+            fin
         fin
         ; las teclas: la del logo, a la barra de tareas; las demás, al menú
         ; que esté abierto o a la ventana activa (en «b», si venía con Mayús)
@@ -1418,6 +1439,83 @@ módulo Ventanas
         fin
         componer()
         soltar(cerrojo)
+    fin
+
+    ; cambia de sitio y de medida una ventana (con marco, la medida es la de
+    ; toda la ventana): la barra de tareas, al cambiar la pantalla. Su dueño
+    ; recibe EV_TAMAÑO y la vuelve a pintar. Falso si no hay memoria.
+    público función recolocar_ventana(id: nat32, x: ent32, yy: ent32, an: ent32, al: ent32): bool
+        variable i: ent32
+        variable r: bool
+        r := falso
+        tomar(cerrojo)
+        i := busca(id)
+        si i >= 0 y an >= 1 y al >= 1 y an <= 4096 y al <= 4096 entonces r := cambia_tamaño(i, x, yy, an, al) fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; la pantalla cambia de medida en marcha (Configuración): el modo nuevo
+    ; (Video.cambia_modo), un doble búfer y un tapiz nuevos (el tapiz, en
+    ; blanco: lo vuelve a pintar el escritorio), y las ventanas dentro: las
+    ; maximizadas, a la medida nueva (su dueño recibe EV_TAMAÑO); las demás,
+    ; donde estaban si caben, y si no, más arriba o más a la izquierda. Falso
+    ; si no se puede (no hay memoria, o la tarjeta no da ese modo): todo
+    ; queda como estaba.
+    público función cambia_pantalla(an: ent32, al: ent32): bool
+        variable m1, m2: puntero a byte
+        variable n: nat32
+        variable i: ent32
+        si no hay_pantalla entonces devolver falso fin
+        n := nat32(an * al * 4)
+        m1 := reservar(n)
+        si m1 = nulo entonces devolver falso fin
+        m2 := reservar(n)
+        si m2 = nulo entonces
+            liberar(m1)
+            devolver falso
+        fin
+        tomar(cerrojo)
+        si no cambia_modo(nat32(an), nat32(al)) entonces
+            soltar(cerrojo)
+            liberar(m1)
+            liberar(m2)
+            devolver falso
+        fin
+        liberar(puntero(trasero.puntos))
+        liberar(puntero(tapiz.puntos))
+        pon_lienzo(trasero, puntero(m1), nat32(an), an, al)
+        pon_lienzo(tapiz, puntero(m2), nat32(an), an, al)
+        rectángulo(tapiz, 0, 0, an, al, 0x154C9C)
+        sucios := 0
+        flecha_pintada := falso
+        pon_medida_ratón(an, al)
+        si flecha_x >= an entonces flecha_x := an - 1 fin
+        si flecha_y >= al entonces flecha_y := al - 1 fin
+        arrastrada := -1
+        estirada := -1
+        mov_suelto := falso
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].banderas yb SIN_MARCO = 0 entonces
+                si ventanas[i].banderas yb MAXIMIZADA <> 0 entonces
+                    si no cambia_tamaño(i, 0, 0, an, al - alto_barra) entonces
+                        ; (sin memoria para la medida nueva: deja de estar maximizada)
+                        ventanas[i].banderas := ventanas[i].banderas yb nob MAXIMIZADA
+                    fin
+                fin
+                ; lo que medía antes de maximizarla, dentro también
+                si ventanas[i].gx > an - 60 entonces ventanas[i].gx := mayor(0, an - ventanas[i].gancho) fin
+                si ventanas[i].gy > al - alto_barra - ALTO_TÍTULO entonces ventanas[i].gy := mayor(0, al - alto_barra - ventanas[i].galto) fin
+                si ventanas[i].banderas yb MAXIMIZADA = 0 entonces
+                    si ventanas[i].px + ventanas[i].ancho > an entonces ventanas[i].px := mayor(0, an - ventanas[i].ancho) fin
+                    si ventanas[i].py + ventanas[i].alto > al - alto_barra entonces ventanas[i].py := mayor(0, al - alto_barra - ventanas[i].alto) fin
+                fin
+            fin
+        fin
+        ensuciar(0, 0, an, al)
+        cambios := cambios + 1
+        soltar(cerrojo)
+        devolver cierto
     fin
 
     ; prepara el gestor: el doble búfer y el tapiz (con la pantalla ya en modo

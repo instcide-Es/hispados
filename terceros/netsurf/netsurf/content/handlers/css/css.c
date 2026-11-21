@@ -36,6 +36,7 @@
 #include "css/css.h"
 #ifdef nshispa
 #include "cssvar.h" /* [HISPA] */
+#include "webletra.h" /* [HISPA] */
 #endif
 #include "css/hints.h"
 #include "css/internal.h"
@@ -303,6 +304,13 @@ bool nscss_convert(struct content *c)
 		size_t n, n2;
 		const uint8_t *d = content__get_source_data(c, &n);
 		char *x = d != NULL ? cssvar_expande((const char *) d, n, &n2) : NULL;
+		/* [HISPA] las letras de la web (@font-face): w32/surf/webletra.c */
+		if (d != NULL) {
+			const char *base = NULL;
+			if (css_stylesheet_get_url(css->data.sheet, &base) != CSS_OK)
+				base = NULL;
+			webletra_hoja((const char *) d, n, base);
+		}
 		if (x != NULL) {
 			error = nscss_process_css_data(&css->data, x, n2);
 			free(x);

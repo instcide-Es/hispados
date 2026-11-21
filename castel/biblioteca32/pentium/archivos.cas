@@ -1,0 +1,252 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; archivos.cas (Hispa-Pentium) - los archivos de biblioteca/archivos.cas para
+; los programas del anillo 3 de Hispa-Pentium: las mismas funciones, con las
+; llamadas al sistema del núcleo (Llamadas) en vez de la 21h del DOS. Así lo
+; escrito para el DOS (el compilador CASTEL, el ensamblador ENSAMBLA) corre
+; igual aquí.
+; Un archivo abierto es un número, su «manejador»: el del núcleo más 16 (los
+; tres de siempre, ENTRADA (0), SALIDA (1) y ERRORES (2), no son archivos del
+; núcleo: SALIDA y ERRORES van adonde va escribir(); ENTRADA no da nada).
+; Cuando algo falla, la función lo dice con lo que devuelve (MAL, falso o 0)
+; y deja en «error_dos» el error del núcleo (Llamadas.NO_HAY...) en sus 16
+; bits de abajo, que no son 0.
+;
+;   importar Archivos
+;   ...
+;   m := abrir("CARTA.TXT", LEER)
+;   si m = MAL entonces ... fin
+;   leídos := leer(m, trozo, 512)
+;   cerrar(m)
+módulo Archivos
+
+    importar Textos, Llamadas
+
+    público constante LEER = 0                  ; los modos de abrir
+    público constante ESCRIBIR = 1
+    público constante LEER_Y_ESCRIBIR = 2
+    público constante ENTRADA = 0               ; los que ya están abiertos
+    público constante SALIDA = 1
+    público constante ERRORES = 2
+    público constante MAL = -1                  ; lo que dan abrir y crear si fallan
+    público constante DESDE_EL_PRINCIPIO = 0    ; desde dónde cuenta situar
+    público constante DESDE_DONDE_VA = 1
+    público constante DESDE_EL_FINAL = 2
+    público constante FIN_DE_ARCHIVO = -1       ; lo que da leer_car cuando no queda nada
+    público constante TROZO = 512               ; de cuánto en cuánto lee un Lector
+
+    constante PRIMERO = 16                      ; el manejador del núcleo 0 es aquí el 16
+
+    público variable error_dos: nat16           ; 0, o el error de la última que falló
+
+    ; lo que da el núcleo: si es un error, se apunta (y falso)
+    función bien(r: nat32): bool
+        si es_error(r) entonces
+            error_dos := nat16(r)
+            devolver falso
+        fin
+        error_dos := 0
+        devolver cierto
+    fin
+
+    función del_núcleo(m: ent16): nat32
+        devolver nat32(m) - PRIMERO
+    fin
+
+    ; abre un archivo que ya existe. Devuelve su manejador, o MAL
+    público función abrir(nombre: puntero a byte, modo: byte): ent16
+        variable r: nat32
+        si modo = LEER entonces r := abrir_para(nombre, PARA_LEER) sino r := abrir_para(nombre, PARA_ESCRIBIR) fin
+        si no bien(r) entonces devolver MAL fin
+        devolver ent16(r + PRIMERO)
+    fin
+
+    ; crea un archivo (si ya existe, lo vacía) y lo deja abierto para escribir
+    público función crear(nombre: puntero a byte): ent16
+        variable r: nat32
+        r := abrir_para(nombre, PARA_CREAR)
+        si no bien(r) entonces devolver MAL fin
+        devolver ent16(r + PRIMERO)
+    fin
+
+    público función cerrar(m: ent16): bool
+        si m < PRIMERO entonces devolver cierto fin
+        Llamadas.cerrar(del_núcleo(m))
+        error_dos := 0
+        devolver cierto
+    fin
+
+    ; lee hasta «cuántos» octetos. Devuelve los que ha leído: menos de los
+    ; pedidos (o 0) al llegar al final. Si falla, 0 y error_dos distinto de 0.
+    público función leer(m: ent16, destino: puntero a byte, cuántos: nat16): nat16
+        variable r: nat32
+        si m < PRIMERO entonces
+            error_dos := 0
+            devolver 0
+        fin
+        r := Llamadas.leer(del_núcleo(m), destino, cuántos)
+        si no bien(r) entonces devolver 0 fin
+        devolver nat16(r)
+    fin
+
+    ; escribe «cuántos» octetos. Devuelve los que ha escrito (menos, si el
+    ; disco se llena)
+    público función grabar(m: ent16, origen: puntero a byte, cuántos: nat16): nat16
+        variable r: nat32
+        si m = SALIDA o m = ERRORES entonces
+            r := escribir_trozo(origen, cuántos)
+        sino si m < PRIMERO entonces
+            r := Llamadas.MAL
+        sino
+            r := escribir_archivo(del_núcleo(m), origen, cuántos)
+        fin
+        si no bien(r) entonces devolver 0 fin
+        devolver nat16(r)
+    fin
+
+    ; escribe un texto (sin su 0). Cierto si ha entrado entero
+    público función grabar_texto(m: ent16, t: puntero a byte): bool
+        variable n: nat16
+        n := longitud(t)
+        si n = 0 entonces devolver cierto fin
+        devolver grabar(m, t, n) = n
+    fin
+
+    público función borrar(nombre: puntero a byte): bool
+        devolver bien(Llamadas.borrar(nombre))
+    fin
+
+    ; se coloca en una posición del archivo, contada desde el principio,
+    ; desde donde va o desde el final (ahí, con un número negativo o 0).
+    ; Devuelve la posición en que queda, contada desde el principio.
+    público función situar(m: ent16, posición: ent32, contando: byte): nat32
+        variable r: nat32
+        si m < PRIMERO entonces devolver 0 fin
+        r := mover(del_núcleo(m), posición, contando)
+        si no bien(r) entonces devolver 0 fin
+        devolver r
+    fin
+
+    ; cuántos octetos tiene un archivo abierto (y lo deja donde iba)
+    público función largo(m: ent16): nat32
+        variable r: nat32
+        si m < PRIMERO entonces devolver 0 fin
+        r := largo_de(del_núcleo(m))
+        si no bien(r) entonces devolver 0 fin
+        devolver r
+    fin
+
+    ; ---- leer letra a letra, sin llamar al DOS cada vez ----
+    ; Un Lector guarda un trozo del archivo y lo va dando:
+    ;   variable l: Lector
+    ;   empezar_lector(l, m)
+    ;   c := leer_car(l)                ; ... hasta FIN_DE_ARCHIVO
+    público tipo Lector = estructura
+        manejador: ent16
+        hay: nat16                      ; cuántos octetos hay en «datos»
+        va: nat16                       ; cuál toca dar
+        acabado: bool
+        datos: arreglo [TROZO] de byte
+    fin
+
+    público función empezar_lector(ref l: Lector, m: ent16)
+        l.manejador := m
+        l.hay := 0
+        l.va := 0
+        l.acabado := falso
+    fin
+
+    ; el octeto siguiente (0 a 255), o FIN_DE_ARCHIVO
+    público función leer_car(ref l: Lector): ent16
+        si l.va >= l.hay entonces
+            si l.acabado entonces devolver FIN_DE_ARCHIVO fin
+            l.hay := leer(l.manejador, l.datos, TROZO)
+            l.va := 0
+            si l.hay = 0 entonces
+                l.acabado := cierto
+                devolver FIN_DE_ARCHIVO
+            fin
+        fin
+        l.va := l.va + 1
+        devolver l.datos[l.va - 1]
+    fin
+
+    ; lee una línea (sin su fin de línea) en destino, donde caben «cabe»
+    ; octetos con el 0; lo que no quepa se pierde. Da falso cuando ya no
+    ; quedan líneas. Para en el 1Ah (el fin de archivo de los textos del DOS).
+    público función leer_línea(ref l: Lector, destino: puntero a byte, cabe: nat16): bool
+        variable c: ent16
+        variable n: nat16
+        n := 0
+        mientras cierto hacer
+            c := leer_car(l)
+            si c = 0x1A entonces l.acabado := cierto fin
+            si c = FIN_DE_ARCHIVO o c = 0x1A entonces
+                destino[n] := 0
+                devolver n > 0
+            fin
+            si c = '\n' entonces romper fin
+            si c <> '\r' y n + 1 < cabe entonces
+                destino[n] := c
+                n := n + 1
+            fin
+        fin
+        destino[n] := 0
+        devolver cierto
+    fin
+
+    ; ---- escribir poco a poco, sin llamar al DOS cada vez ----
+    ; Un Escritor junta lo que se le da y lo manda al archivo de 512 en 512:
+    ;   variable e: Escritor
+    ;   empezar_escritor(e, m)
+    ;   poner_texto(e, "total: ")
+    ;   poner_número(e, 1981)
+    ;   poner_línea(e)
+    ;   vaciar(e)                       ; al acabar, SIEMPRE: manda lo que queda
+    público tipo Escritor = estructura
+        manejador: ent16
+        hay: nat16                      ; cuántos octetos esperan en «datos»
+        mal: bool                       ; algo no se ha podido escribir (disco lleno...)
+        datos: arreglo [TROZO] de byte
+    fin
+
+    público función empezar_escritor(ref e: Escritor, m: ent16)
+        e.manejador := m
+        e.hay := 0
+        e.mal := falso
+    fin
+
+    ; manda al archivo lo que espera. Cierto si todo lo dado hasta ahora ha entrado
+    público función vaciar(ref e: Escritor): bool
+        si e.hay > 0 entonces
+            si grabar(e.manejador, e.datos, e.hay) <> e.hay entonces e.mal := cierto fin
+            e.hay := 0
+        fin
+        devolver no e.mal
+    fin
+
+    público función poner_car(ref e: Escritor, c: byte)
+        si e.hay = TROZO entonces vaciar(e) fin
+        e.datos[e.hay] := c
+        e.hay := e.hay + 1
+    fin
+
+    público función poner_texto(ref e: Escritor, t: puntero a byte)
+        mientras valor(t) <> 0 hacer
+            poner_car(e, valor(t))
+            t := t + 1
+        fin
+    fin
+
+    público función poner_número(ref e: Escritor, n: ent32)
+        variable cifras: arreglo [12] de byte
+        número_a_texto(n, cifras)
+        poner_texto(e, cifras)
+    fin
+
+    ; el fin de línea del DOS: retorno de carro y salto de línea
+    público función poner_línea(ref e: Escritor)
+        poner_car(e, '\r')
+        poner_car(e, '\n')
+    fin
+
+fin Archivos.

@@ -37,6 +37,14 @@ pegar, iconos en el tapiz, «Mi equipo» y ventanas que cambian de tamaño.
 Para él hay una **biblioteca de 32 bits** en Castel (`biblioteca32/`: textos, memoria y
 escribir con formato).
 
+Desde el 20/11/2026, **CASTEL32**: el compilador escrito en Castel (y ENSAMBLA),
+compilado para 32 bits con la memoria plana: un programa del anillo 3 de
+Hispa-Pentium (CASTEL32.BIN, ENSAMB32.BIN) y un programa PE para HW32 en
+Hispa-386/486 (CASTELW.EXE, ENSAMBW.EXE). Hispa-Pentium se compila a sí mismo
+dentro, y CASTEL32 llega al punto fijo dentro de Hispa-Pentium y de Hispa-DOS; sus
+tablas ya no están al límite (el árbol del núcleo, al 16 %). Es el que manda; el de
+16 bits sigue para Hispa-8086 ([docs/CASTEL32.md](docs/CASTEL32.md) §11).
+
 ## Qué hay aquí
 
 - `ccastel.py` — el compilador de la etapa 0, en Python: léxico (UTF-8, palabras clave con
@@ -46,6 +54,12 @@ escribir con formato).
   mismo que `ccastel.py`, parte por parte, para correr dentro de Hispa-8086. Ver más abajo.
   `compilador/pruebas/prueba_frente.sh` prueba aparte su lector y su gramática (el árbol
   que montan, contra el de `ccastel.py`).
+- `compilador/32/` — **CASTEL32**: `medidas.cas` (las tablas de 32 bits),
+  `pentium/castel32.cas` (para Hispa-Pentium) y `hw32/castelw.cas` (para HW32);
+  con `biblioteca32/pentium/` y `biblioteca32/hw32/` (Lejos, Archivos y Argumentos
+  de cada sistema) y `ensamblador/32/` (ENSAMB32 y ENSAMBW).
+- `corre32/` — corre en Linux los programas del anillo 3 de Hispa-Pentium (con
+  ptrace), para probar deprisa: `corre32/corre32.sh PROGRAMA.BIN [args]`.
 - `ensambla.py` y `ensamblador/ensambla.cas` — **el ensamblador propio**: la referencia en
   Python y ENSAMBLA, el de verdad, en Castel. Dan el mismo archivo que NASM
   ([docs/ENSAMBLADOR.md](docs/ENSAMBLADOR.md)).
@@ -309,3 +323,7 @@ Punteros lejanos como tipo y copiar arreglos y estructuras enteros. Ver CASTEL.m
    arranque del disco con GRUB y el asistente del primer arranque). Lo siguiente: probarlo
    instalado en un PC de verdad; y crear nombres largos, tuberías y una caché de disco de
    verdad.
+
+## Licencia de los programas hechos con Castel
+
+Castel y Hispa-DOS son GPL-2.0 o posterior. Las bibliotecas de Castel (`biblioteca/` y `biblioteca32/`) llevan además una **excepción de biblioteca** (`biblioteca/EXCEPCION.TXT`): un programa compilado con Castel que use esas bibliotecas puede tener la licencia que elija su autor, también una no libre. La excepción no cambia la licencia de las bibliotecas ni del compilador.

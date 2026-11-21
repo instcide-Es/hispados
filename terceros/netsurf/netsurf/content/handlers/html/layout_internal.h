@@ -59,6 +59,20 @@ bool layout_table(
 		html_content *content);
 
 /**
+ * [HISPA] Maqueta una rejilla (display: grid; va como BOX_FLEX):
+ * layout_grid.c. Lo llama layout_flex().
+ */
+bool layout_grid(struct box *grid, int available_width,
+		html_content *content);
+
+/**
+ * [HISPA] El ancho mínimo y máximo de una rejilla (de los de sus hijos:
+ * n, el más ancho de cada uno); lo llama layout_minmax_block().
+ */
+void layout_grid_minmax(struct box *grid, const css_unit_ctx *unit_len_ctx,
+		int n, int *min, int *max);
+
+/**
  * Layout a flex container.
  *
  * \param[in] flex             table to layout
@@ -286,6 +300,44 @@ static inline bool lh__box_size_cross_is_auto(
 		return css_computed_width(b->style,
 				&length, &unit) == CSS_WIDTH_AUTO;
 	}
+}
+
+/**
+ * [HISPA] El hueco entre filas (row-gap) o entre columnas (column-gap) de
+ * una caja flex o grid, en puntos («normal», 0; los porcentajes, del ancho
+ * que hay o, para las filas, nada).
+ */
+static inline int lh__gap(
+		const css_unit_ctx *unit_len_ctx,
+		const struct box *b,
+		bool fila,
+		int disponible)
+{
+	css_fixed len = 0;
+	css_unit unit = CSS_UNIT_PX;
+	uint8_t t;
+
+	if (b->style == NULL)
+		return 0;
+	t = fila ? css_computed_row_gap(b->style, &len, &unit) :
+			css_computed_column_gap(b->style, &len, &unit);
+	if (t != CSS_COLUMN_GAP_SET)
+		return 0;
+	if (unit == CSS_UNIT_PCT)
+		return (fila || disponible == AUTO || disponible < 0) ? 0 :
+				FPCT_OF_INT_TOINT(len, disponible);
+	return FIXTOINT(css_unit_len2device_px(b->style, unit_len_ctx,
+			len, unit));
+}
+
+/** [HISPA] ¿es una rejilla (display: grid)? (va como una caja flex: BOX_FLEX) */
+static inline bool lh__box_is_grid(const struct box *b)
+{
+	uint8_t d;
+	if (b->style == NULL)
+		return false;
+	d = css_computed_display(b->style, false);
+	return d == CSS_DISPLAY_GRID || d == CSS_DISPLAY_INLINE_GRID;
 }
 
 static inline enum css_align_self_e lh__box_align_self(
@@ -638,6 +690,13 @@ static inline void layout_find_dimensions(
 			/* Inadmissible */
 			*max_height = -1;
 		}
+
+		/* [HISPA] con box-sizing: border-box, también el alto máximo
+		 * (Bootstrap lo pone a todo: los campos y botones salían altos) */
+		if (*max_height > 0) {
+			layout_handle_box_sizing(unit_len_ctx, box,
+					available_width, false, max_height);
+		}
 	}
 
 	if (min_height) {
@@ -659,6 +718,12 @@ static inline void layout_find_dimensions(
 		} else {
 			/* Inadmissible */
 			*min_height = 0;
+		}
+
+		/* [HISPA] y el mínimo (min-height: 48px de los campos de ClicGest) */
+		if (*min_height > 0) {
+			layout_handle_box_sizing(unit_len_ctx, box,
+					available_width, false, min_height);
 		}
 	}
 

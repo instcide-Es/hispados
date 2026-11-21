@@ -125,7 +125,7 @@ disco=4            ; MiB libres mínimos en el disco de destino
 nivel=0            ; "riqueza" de la edición (mayor = más completa)
 edicion=Hispa-386 (con Hispa Ventanas)
 gama=386           ; la gama: 386 (por omisión) o 486 (Hispa-486)
-paquete=http://actualiza.clicgest.es/hispados-0.9.16.paq
+paquete=http://actualiza.hispados.es/hispados-0.9.16.paq
 nota=Novedades de esta versión
 ```
 
@@ -154,17 +154,17 @@ gamas de la misma versión:
 [0.9.26]
 cpu=386
 edicion=Hispa-386 (con Hispa Ventanas)
-paquete=http://actualiza.clicgest.es/hispados-0.9.26.paq
+paquete=http://actualiza.hispados.es/hispados-0.9.26.paq
 
 [0.9.26]
 gama=486
 cpu=386
 edicion=Hispa-486
-paquete=http://actualiza.clicgest.es/hispa486-0.9.26.paq
+paquete=http://actualiza.hispados.es/hispa486-0.9.26.paq
 ```
 
 Para subir una versión en el servidor: cambia `lib/version.inc` y
-`actualiza.clicgest.es/versiones.txt`, y sube el `.PAQ` generado con
+`actualiza.hispados.es/versiones.txt`, y sube el `.PAQ` generado con
 `tools/paquete.py` (`make paq` hace `build/hispados.paq` de la imagen USB de
 Hispa-386 y `make paq486`, `build/hispa486.paq` de la de Hispa-486).
 
@@ -200,7 +200,7 @@ cuadra antes de aplicar nada. Uso:
 
 La dirección de `versiones.txt` sale, por este orden: (1) la que se escriba en
 la línea de órdenes, (2) la clave `ACTUALIZAR=` de `RED.INI`, (3) una de por
-omisión compilada: `http://actualiza.clicgest.es/versiones.txt` (servidor
+omisión compilada: `http://actualiza.hispados.es/versiones.txt` (servidor
 propio por HTTP).
 
 **Importante**: como `ACTUALIZAR` (de 16 bits) no habla HTTPS y **GitHub es

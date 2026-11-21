@@ -59,6 +59,7 @@
 #include "html/box_inspect.h"
 #include "html/font.h"
 #include "html/form_internal.h"
+#include "guion.h"	/* [HISPA] JavaScript (w32/surf/guion.c) */
 
 #define MAX_SELECT_HEIGHT 210
 #define SELECT_LINE_SPACING 0.2
@@ -2038,6 +2039,13 @@ form_submit(nsurl *page_url,
 	nsurl *query_url;
 
 	assert(form != NULL);
+
+	/* [HISPA] JavaScript: el evento submit; si la página dice
+	 * preventDefault(), no se envía (lo hará ella con fetch) */
+	if (form->node != NULL &&
+	    guion_evento(guion_de(form->node), form->node, "submit",
+			 submit_button != NULL ? submit_button->node : NULL))
+		return NSERROR_OK;
 
 	/* obtain list of controls from DOM */
 	res = form_dom_to_data(form, submit_button, &success);

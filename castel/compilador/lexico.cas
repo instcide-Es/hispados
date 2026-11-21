@@ -23,14 +23,14 @@
 ; =============================================================================
 módulo Lexico
 
-    importar Base, Archivos
+    importar Medidas, Base, Archivos
 
     constante FIN = -1                          ; no quedan letras
     constante NADA = -2
     constante MAX_NOMBRE = 240
-    constante MAX_TEXTO = 2000
-    constante MAX_LIN_ASM = 500
-    constante MAX_ASM = 6000
+    constante MAX_TEXTO = LARGO_TEXTO           ; (de Medidas)
+    constante MAX_LIN_ASM = LARGO_LIN_ASM
+    constante MAX_ASM = LARGO_ASM
 
     constante TOCA_ASM = 1                      ; lo siguiente es el bloque de ensamblador
     constante TOCA_FIN = 2                      ; y luego, su «fin»

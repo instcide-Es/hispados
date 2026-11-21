@@ -12,6 +12,12 @@
 ;  En un PC de verdad sin esa tarjeta el modo lo tiene que poner el cargador
 ;  (PENTIUM.md lo cuenta).
 ;
+;  Con esa tarjeta (aunque el modo lo haya puesto el cargador: su VBE habla
+;  con ella), el modo se puede cambiar en marcha: cambia_modo(). Lo que da
+;  (el máximo, su memoria) y lo que dice la pantalla (su EDID, en QEMU) lo
+;  cuentan máximo_tarjeta(), memoria_tarjeta() y medida_monitor(), para la
+;  lista de modos de Configuración.
+;
 ;  Se dibuja siempre con 32 bits por punto. Si el modo que hay es de 24 o de
 ;  16 (hay tarjetas que no dan otro), «pantalla» es un lienzo de 32 bits en
 ;  la memoria del núcleo, y volcar() pasa a la pantalla de verdad lo que se
@@ -34,7 +40,13 @@ módulo Video
     constante VBE_ALTO = 2
     constante VBE_BITS = 3
     constante VBE_ACTIVAR = 4
+    constante VBE_ANCHO_VIRTUAL = 6
+    constante VBE_DESPLAZA_X = 8
+    constante VBE_DESPLAZA_Y = 9
+    constante VBE_MEMORIA = 0xA                 ; QEMU/Bochs: su memoria, en trozos de 64 K; VirtualBox: en octetos (leída de 32 bits)
     constante VBE_ENCENDIDO = 0x41              ; encendido, con la memoria seguida
+    constante VBE_LO_QUE_DA = 2                 ; con él en VBE_ACTIVAR, el ancho, el alto y los bits que se leen son los máximos
+    público constante VENTANA_PANTALLA = 0x1000000  ; lo más que se pone a la vista de la memoria de la pantalla (GRÁFICOS_TABLAS)
 
     público variable hay_pantalla: bool         ; ya hay un modo gráfico puesto
     público variable pantalla: Lienzo           ; la pantalla de verdad
@@ -43,6 +55,10 @@ módulo Video
     público variable bits_pantalla: nat32       ; los bits por punto del modo (32, 24 o 16)
     variable real: nat32                        ; la pantalla de verdad (si no es de 32 bits)
     variable octetos_fila: nat32                ; de una fila a la siguiente, en ella
+    variable lienzo_aparte: puntero a byte      ; el lienzo de 32 bits (si el modo no lo es), para soltarlo al cambiar
+    variable edid_mirado: bool
+    variable edid_hay: bool
+    variable edid_an, edid_al, edid_max_an, edid_max_al: nat32
 
     función vbe_pon(índice: nat32, dato: nat32)
         ensamblador
@@ -86,19 +102,158 @@ módulo Video
         fin
     fin
 
-    ; la memoria de la pantalla de la VGA de Bochs/QEMU (PCI 1234:1111, su
-    ; primera zona); si no aparece en el PCI, donde la ponía la de ISA
-    función memoria_bochs(): nat32
+    ; la tarjeta con la VBE de Bochs en el PCI: la de QEMU y Bochs (1234:1111),
+    ; la VBoxVGA de VirtualBox (80EE:BEEF) o la VMSVGA (15AD:0405, la de
+    ; VMware que imitan VirtualBox y QEMU: su memoria, en la segunda zona).
+    ; Da su identificador (0 si no está) y dónde está (bus y dispositivo)
+    función tarjeta_bochs(ref bus_: nat32, ref d_: nat32): nat32
         variable bus, d, id: nat32
         para bus desde 0 hasta 3 hacer
             para d desde 0 hasta 31 hacer
                 id := pci_lee(bus, d, 0)
-                si id = 0x11111234 o id = 0xBEEF80EE entonces     ; (la segunda, la de VirtualBox)
-                    devolver pci_lee(bus, d, 0x10) yb 0xFFFFFFF0
+                si id = 0x11111234 o id = 0xBEEF80EE o id = 0x040515AD entonces
+                    bus_ := bus
+                    d_ := d
+                    devolver id
                 fin
             fin
         fin
+        devolver 0
+    fin
+
+    ; la memoria de la pantalla de la VGA de Bochs/QEMU (su primera zona PCI;
+    ; la segunda en la VMSVGA); si no aparece en el PCI, donde la ponía la de ISA
+    función memoria_bochs(): nat32
+        variable bus, d, id: nat32
+        id := tarjeta_bochs(bus, d)
+        si id = 0x040515AD entonces devolver pci_lee(bus, d, 0x14) yb 0xFFFFFFF0 fin
+        si id <> 0 entonces devolver pci_lee(bus, d, 0x10) yb 0xFFFFFFF0 fin
         devolver 0xE0000000
+    fin
+
+    ; ¿se puede cambiar el modo en marcha? (hay escritorio y la VBE de Bochs)
+    público función se_cambia_en_marcha(): bool
+        devolver hay_pantalla y hay_bochs()
+    fin
+
+    ; lo más que da la tarjeta (su ancho y su alto), preguntado a la VBE de
+    ; Bochs (VirtualBox dice 16384 x 16384: lo que cabe lo dice su memoria)
+    público función máximo_tarjeta(ref an: nat32, ref al: nat32)
+        variable antes: nat32
+        an := 0
+        al := 0
+        si no hay_bochs() entonces devolver fin
+        antes := vbe_lee(VBE_ACTIVAR)
+        vbe_pon(VBE_ACTIVAR, antes ob VBE_LO_QUE_DA)
+        an := vbe_lee(VBE_ANCHO)
+        al := vbe_lee(VBE_ALTO)
+        vbe_pon(VBE_ACTIVAR, antes)
+    fin
+
+    ; de cuánto en cuánto va el ancho: la VBE de QEMU y Bochs lo redondea a
+    ; múltiplos de 8 (1366 se queda en 1360); la de VirtualBox (80EE:BEEF), no
+    público función paso_ancho(): nat32
+        variable bus, d: nat32
+        si tarjeta_bochs(bus, d) = 0xBEEF80EE entonces devolver 1 fin
+        devolver 8
+    fin
+
+    ; la memoria de la tarjeta, en octetos (0 si no se sabe): la de QEMU y
+    ; Bochs, en trozos de 64 K; la de VirtualBox, en octetos, leída de 32 bits
+    público función memoria_tarjeta(): nat32
+        variable bus, d, id, n: nat32
+        si no hay_bochs() entonces devolver 0 fin
+        id := tarjeta_bochs(bus, d)
+        si id = 0x11111234 entonces
+            n := vbe_lee(VBE_MEMORIA)
+            si n >= 16 y n <= 0x4000 entonces devolver n * 0x10000 fin
+        sino si id = 0xBEEF80EE entonces
+            ensamblador
+                mov edx, {VBE_ÍNDICE}
+                mov eax, {VBE_MEMORIA}
+                out dx, ax
+                mov edx, {VBE_DATO}
+                in eax, dx
+                mov {n}, eax
+            fin
+            si n >= 0x100000 y n <= 0x40000000 entonces devolver n fin
+        fin
+        devolver 0
+    fin
+
+    ; lo que dice la pantalla de sí misma (su EDID): la medida que prefiere y
+    ; la más grande que sabe mostrar. Solo en QEMU (lo deja en la tercera zona
+    ; PCI de su tarjeta); en VirtualBox y en los PC de verdad no se sabe desde
+    ; aquí (falso)
+    público función medida_monitor(ref pref_an: nat32, ref pref_al: nat32, ref max_an: nat32, ref max_al: nat32): bool
+        variable bus, d, id, física, v, i, a, h, c: nat32
+        variable e: puntero a byte
+        si no edid_mirado entonces
+            edid_mirado := cierto
+            id := tarjeta_bochs(bus, d)
+            si id = 0x11111234 entonces
+                física := pci_lee(bus, d, 0x18)
+                si física yb 1 = 0 y física yb 0xFFFFFFF0 <> 0 entonces
+                    v := mapear_aparato(física yb 0xFFFFFFF0, 256)
+                    si v <> 0 entonces
+                        e := puntero(v)
+                        si e[0] = 0 y e[1] = 0xFF y e[2] = 0xFF y e[7] = 0 entonces
+                            ; la primera medida detallada: la que prefiere
+                            edid_an := nat32(e[56]) ob ((nat32(e[58]) yb 0xF0) << 4)
+                            edid_al := nat32(e[59]) ob ((nat32(e[61]) yb 0xF0) << 4)
+                            edid_max_an := edid_an
+                            edid_max_al := edid_al
+                            ; y las de siempre (bytes 38 a 53): la más grande
+                            para i desde 0 hasta 7 hacer
+                                a := nat32(e[38 + i * 2])
+                                c := nat32(e[39 + i * 2])
+                                si a > 1 entonces
+                                    a := (a + 31) * 8
+                                    según c >> 6
+                                        caso 0: h := a * 10 div 16
+                                        caso 1: h := a * 3 div 4
+                                        caso 2: h := a * 4 div 5
+                                        si no: h := a * 9 div 16
+                                    fin
+                                    si a > edid_max_an entonces edid_max_an := a fin
+                                    si h > edid_max_al entonces edid_max_al := h fin
+                                fin
+                            fin
+                            edid_hay := edid_an >= 640 y edid_al >= 400
+                        fin
+                    fin
+                fin
+            fin
+        fin
+        pref_an := edid_an
+        pref_al := edid_al
+        max_an := edid_max_an
+        max_al := edid_max_al
+        devolver edid_hay
+    fin
+
+    ; pone en la VBE de Bochs ese modo (32 bits por punto si no se dice otra
+    ; cosa); da los octetos de una fila a la siguiente, o 0 si la tarjeta no
+    ; lo da (y la deja apagada)
+    función vbe_modo(ancho: nat32, alto: nat32, bits: nat32): nat32
+        variable virt: nat32
+        vbe_pon(VBE_ACTIVAR, 0)
+        vbe_pon(VBE_ANCHO, ancho)
+        vbe_pon(VBE_ALTO, alto)
+        vbe_pon(VBE_BITS, bits)
+        vbe_pon(VBE_ACTIVAR, VBE_ENCENDIDO)
+        vbe_pon(VBE_ANCHO_VIRTUAL, ancho)
+        vbe_pon(VBE_DESPLAZA_X, 0)
+        vbe_pon(VBE_DESPLAZA_Y, 0)
+        ; (VirtualBox no la enciende si no le cabe en su memoria, y lo dice
+        ; con el bit de encendido: hay que mirarlo también)
+        si vbe_lee(VBE_ANCHO) <> ancho o vbe_lee(VBE_ALTO) <> alto o vbe_lee(VBE_BITS) <> bits o vbe_lee(VBE_ACTIVAR) yb 1 = 0 entonces
+            vbe_pon(VBE_ACTIVAR, 0)
+            devolver 0
+        fin
+        virt := vbe_lee(VBE_ANCHO_VIRTUAL)
+        si virt < ancho entonces virt := ancho fin
+        devolver virt * (bits div 8)
     fin
 
     ; pone la memoria física de la pantalla en la zona de los gráficos
@@ -201,13 +356,8 @@ módulo Video
                 escribir("pantalla: no hay modo gráfico (ni lo ha puesto el cargador ni hay VBE de Bochs/QEMU)\n")
                 devolver falso
             fin
-            vbe_pon(VBE_ACTIVAR, 0)
-            vbe_pon(VBE_ANCHO, ancho)
-            vbe_pon(VBE_ALTO, alto)
-            vbe_pon(VBE_BITS, bits_pedidos)
-            vbe_pon(VBE_ACTIVAR, VBE_ENCENDIDO)
-            si vbe_lee(VBE_ANCHO) <> ancho o vbe_lee(VBE_ALTO) <> alto o vbe_lee(VBE_BITS) <> bits_pedidos entonces
-                vbe_pon(VBE_ACTIVAR, 0)
+            fila := vbe_modo(ancho, alto, bits_pedidos)
+            si fila = 0 entonces
                 escribir("pantalla: la tarjeta no da ", ancho, "x", alto, " con ", bits_pedidos, " bits por punto\n")
                 devolver falso
             fin
@@ -215,7 +365,6 @@ módulo Video
             an := ancho
             al := alto
             bits := bits_pedidos
-            fila := ancho * (bits div 8)
             por_bochs := cierto
         fin
         si no a_la_vista(base, fila * al) entonces
@@ -236,9 +385,40 @@ módulo Video
             fin
             real := GRÁFICOS_INICIO + (base yb 0xFFF)
             octetos_fila := fila
+            lienzo_aparte := m
             pon_lienzo(pantalla, puntero(m), an, an, al)
         fin
         hay_pantalla := cierto
+        devolver cierto
+    fin
+
+    ; cambia el modo en marcha, por la VBE de Bochs (QEMU, Bochs, VirtualBox),
+    ; a ese ancho y ese alto con 32 bits por punto. La memoria de la pantalla
+    ; es la misma (la tarjeta no la mueve): se pone a la vista lo que mida
+    ; ahora y «pantalla» pasa a ser la de la medida nueva (lo que tenga
+    ; dentro, a pintar otra vez). Falso si no se puede: entonces se queda el
+    ; modo de antes, tal cual.
+    público función cambia_modo(ancho: nat32, alto: nat32): bool
+        variable fila, an0, al0, bits0: nat32
+        si no hay_pantalla o no hay_bochs() entonces devolver falso fin
+        si ancho < 640 o alto < 480 o ancho * alto * 4 > VENTANA_PANTALLA entonces devolver falso fin
+        an0 := nat32(pantalla.ancho)
+        al0 := nat32(pantalla.alto)
+        bits0 := bits_pantalla
+        fila := vbe_modo(ancho, alto, 32)
+        si fila = 0 o fila * alto > VENTANA_PANTALLA o no a_la_vista(pantalla_física, fila * alto) entonces
+            escribir("pantalla: la tarjeta no da ", ancho, "x", alto, " con 32 bits por punto: se vuelve a ", an0, "x", al0, "\n")
+            si vbe_modo(an0, al0, bits0) = 0 entonces vbe_modo(an0, al0, 32) fin
+            devolver falso
+        fin
+        si lienzo_aparte <> nulo entonces
+            liberar(lienzo_aparte)
+            lienzo_aparte := nulo
+        fin
+        bits_pantalla := 32
+        por_bochs := cierto
+        pon_lienzo(pantalla, puntero(GRÁFICOS_INICIO + (pantalla_física yb 0xFFF)), fila div 4, ent32(ancho), ent32(alto))
+        escribir("pantalla: ", ancho, "x", alto, " con 32 bits por punto (cambiado en marcha, por la VBE de Bochs)\n")
         devolver cierto
     fin
 

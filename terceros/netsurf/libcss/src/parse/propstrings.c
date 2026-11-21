@@ -80,6 +80,8 @@ const stringmap_entry stringmap[LAST_KNOWN] = {
 	SMAP("disabled"),
 	SMAP("checked"),
 	SMAP("not"),
+	SMAP("focus-within"), /* [HISPA] */
+	SMAP("focus-visible"),
 
 	SMAP("first-line"),
 	SMAP("first-letter"),
@@ -233,6 +235,18 @@ const stringmap_entry stringmap[LAST_KNOWN] = {
 	SMAP("word-spacing"),
 	SMAP("writing-mode"),
 	SMAP("z-index"),
+	/* [HISPA] */
+	SMAP("row-gap"),
+	SMAP("gap"),
+	SMAP("grid-gap"),
+	SMAP("border-radius"),
+	SMAP("border-top-left-radius"),
+	SMAP("border-top-right-radius"),
+	SMAP("border-bottom-right-radius"),
+	SMAP("border-bottom-left-radius"),
+	SMAP("box-shadow"),
+	SMAP("grid-template-columns"),
+	SMAP("grid-column"),
 
 	SMAP("inherit"),
 	SMAP("unset"),

@@ -18,5 +18,9 @@ void rh_suelta(void *r);
 void rh_inicia(const char *idioma);
 void rh_fin(void);
 void rh_galletas_carga(const char *ruta);
+/* [JS] para fetch y XMLHttpRequest (w32/surf/guion.c) */
+void rh_metodo(void *r, const char *metodo);   /* PUT, DELETE...: tras rh_nueva */
+char *rh_galletas_de(const char *url);         /* document.cookie (malloc) o NULL */
+void rh_pon_galleta(const char *url, const char *linea);
 int rh_galletas_guarda(const char *ruta);
 #endif

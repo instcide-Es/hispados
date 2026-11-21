@@ -41,6 +41,26 @@
 #    hpq.py sistema SALIDA CARPETA...  (los paquetes del sistema, con sus
 #               registros .PQI, el catálogo y CARPETAS.TXT para INSTALAR, de
 #               los archivos ya hechos que haya en esas carpetas: usb.sh)
+#    hpq.py opcionales SALIDA CARPETA...  (los que no van con el sistema:
+#               «navega», el Navegador; de lo que deja su hacer.sh)
+#    hpq.py linea PAQUETE.HPQ         (su línea para CATALOGO.TXT)
+#
+#  La firma (Ed25519, RFC 8032): el catálogo lleva las sumas de todos los
+#  paquetes, y cada paquete las de sus archivos; así que basta con firmar el
+#  catálogo. La firma va al lado, en CATALOGO.FIR (una línea: «ed25519 » y
+#  las 128 cifras hexadecimales de la firma). PAQUETES la comprueba con la
+#  clave pública que lleva dentro (castel/nucleo32/clave.cas), y sin ella no
+#  instala nada traído de Internet.
+#    hpq.py clave PRIVADA             (hace una clave nueva: la privada, al
+#               archivo PRIVADA, con permisos 600; dice la pública)
+#    hpq.py publica PRIVADA [clave.cas]  (la pública; con clave.cas, el
+#               módulo de Castel que la lleva)
+#    hpq.py firma CARPETA PRIVADA     (CATALOGO.FIR del CATALOGO.TXT de ahí)
+#    hpq.py catalogo CARPETA [--clave PRIVADA]   (y, con la clave, firmado)
+#    hpq.py comprueba CARPETA PUBLICA (si CATALOGO.FIR es buena; PUBLICA: las
+#               64 cifras, o un clave.cas)
+#  La clave privada NO va en el repositorio (la de Hispa-Pentium está en
+#  /root/.claude/Secretos/hispa-pentium-firma.key, en el VPS).
 # =============================================================================
 
 import hashlib
@@ -59,25 +79,42 @@ MAX_CABECERA = 16384
 
 # Los paquetes del sistema (hpq.py sistema): nombre, versión, descripción,
 # lo que necesita y sus archivos (el archivo hecho y adónde va en el disco)
-VERSION_SISTEMA = '0.8'
+# (la 0.8.1, 20/11/2026: HTTPS —la llamada 99 del núcleo y el paquete tls— y
+# cambiar la resolución desde Configuración; solo suben los paquetes que han
+# cambiado: base, red y tls. Los demás siguen en la 0.8, la del CD)
+VERSION_SISTEMA = '0.8.1'
+# (la 0.8.2, 21/11/2026: los controles de las ventanas —Ctrl+Tab, Alt+letra
+# y la llamada 81, maximizar— en el núcleo, y MUESTRA.BIN en los ejemplos;
+# suben base y ejemplos; y el Administrador de dispositivos —las llamadas
+# 155 y 156, ACPI.BIN que apunta lo de ACPI y DISPOSIT.BIN—)
+VERSION_082 = '0.8.2'
+# (la 0.8.3, 21/11/2026, todo junto: el núcleo con la rueda del ratón, el x87
+# de cada programa y programas de hasta 8 MB, para el Navegador —el paquete
+# «navega», OPCIONALES—, y el Administrador de dispositivos; suben base y equipo)
+VERSION_BASE = '0.8.3'
+VERSION_08 = '0.8'
 SISTEMA = [
-    ('base', VERSION_SISTEMA, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
+    ('base', VERSION_BASE, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
-    ('bloc', VERSION_SISTEMA, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
-    ('consola', VERSION_SISTEMA, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
-    ('equipo', VERSION_SISTEMA, 'Mi equipo: las unidades, las carpetas y los archivos', 'base >= 0.7', [('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN')]),
-    ('ejemplos', VERSION_SISTEMA, 'Programas de ejemplo: HOLA, ECO, PRUEBA y BUCLE', 'base >= 0.7', [
+    ('bloc', VERSION_08, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
+    ('consola', VERSION_08, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
+    # (dispositivos) con el Administrador de dispositivos (DISPOSIT.BIN, la llamada 155 del núcleo)
+    ('equipo', VERSION_BASE, 'Mi equipo y el Administrador de dispositivos', 'base >= 0.8.3', [
+        ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
+    ('ejemplos', VERSION_082, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.2', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
-        ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN')]),
+        ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN'), ('MUESTRA.BIN', r'\HISPA\MUESTRA.BIN')]),
     ('paquetes', '1.0', 'Programas y actualizaciones: PAQUETES y su ventana', 'base >= 0.7, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN')]),
-    ('red', VERSION_SISTEMA, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= 0.8', [
+    ('red', VERSION_SISTEMA, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= 0.8.1', [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
-    ('hvprun', VERSION_SISTEMA, 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio', 'base >= 0.7', [
+    ('tls', VERSION_SISTEMA, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
+        ('TLS.BIN', r'\HISPA\TLS.BIN'), ('HTTPS.BIN', r'\HISPA\HTTPS.BIN')]),
+    ('hvprun', VERSION_08, 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio', 'base >= 0.7', [
         ('HVPRUN.BIN', r'\HISPA\HVPRUN.BIN')]),
     ('oficina', '1.0', 'La oficina de Hispa-386: Facturas, Pluma, Cuentas y Mirador', 'hvprun >= 0.7', [
         ('FACTURAS.HVP', r'\OFICINA\FACTURAS.HVP'), ('PLUMA.HVP', r'\OFICINA\PLUMA.HVP'),
@@ -226,6 +263,56 @@ def busca(nombre, carpetas):
     falla('no está %s en %s' % (nombre, ', '.join(carpetas)))
 
 
+# Los paquetes que no van con el sistema (INSTALAR no los pone: se instalan
+# desde «Programas y actualizaciones» o con PAQUETES INSTALA), hechos con
+# «hpq.py opcionales SALIDA CARPETA...» de lo que deja su hacer.sh (los
+# archivos se buscan por su ruta relativa en esas carpetas). Van en el
+# catálogo de Internet con los del sistema (nucleo32/actualiza.sh).
+NAVEGA_RECURSOS = ['DEFAULT.CSS', 'QUIRKS.CSS', 'ADBLOCK.CSS', 'INTERNAL.CSS', 'MESSAGES', 'BROTLI.DIC', 'INICIO.HTM']
+NAVEGA_FUENTES = ['SANS.TTF', 'SANSN.TTF', 'SERIF.TTF', 'SERIFN.TTF', 'MONO.TTF', 'MONON.TTF']
+OPCIONALES = [
+    ('navega', '0.1', 'El Navegador: la web de hoy (NetSurf con JavaScript), con pestañas y descargas',
+     'base >= 0.8.3, red >= 0.8.1, tls >= 0.8.1', [
+        ('NAVEGA/NAVEGA.BIN', r'\HISPA\NAVEGA\NAVEGA.BIN'), ('NAVEGA/NAVEGA.INI', r'\HISPA\NAVEGA\NAVEGA.INI'),
+        ('NAVEGA/LEEME.TXT', r'\HISPA\NAVEGA\LEEME.TXT')]
+     + [('NAVEGA/RECURSOS/' + n, '\\HISPA\\NAVEGA\\RECURSOS\\' + n) for n in NAVEGA_RECURSOS]
+     + [('NAVEGA/FUENTES/' + n, '\\HISPA\\NAVEGA\\FUENTES\\' + n) for n in NAVEGA_FUENTES]
+     + [('NAVEGA.MNU', r'\HISPA\MENU\NAVEGA.MNU'), ('NAVEGA.ICP', r'\HISPA\MENU\NAVEGA.ICP')]),
+]
+
+
+def opcionales(salida, carpetas, nombres=None):
+    """Los paquetes de OPCIONALES (o los de «nombres») en SALIDA: da cuántos."""
+    os.makedirs(salida, exist_ok=True)
+    n = 0
+    for nombre, version, descripcion, necesita, archivos in OPCIONALES:
+        if nombres and nombre not in nombres:
+            continue
+        lista = [(d, open(busca(o, carpetas), 'rb').read()) for o, d in archivos]
+        haz_paquete(os.path.join(salida, nombre.upper() + '.HPQ'), nombre, version, descripcion, necesita, '', lista)
+        n += 1
+    return n
+
+
+def linea_catalogo(ruta):
+    """La línea del catálogo de un paquete (como la escribe «catalogo»)."""
+    carpeta = os.path.dirname(os.path.abspath(ruta))
+    tmp = os.path.join(carpeta, '.linea')
+    os.makedirs(tmp, exist_ok=True)
+    try:
+        d = os.path.join(tmp, os.path.basename(ruta))
+        if os.path.exists(d):
+            os.remove(d)
+        os.link(ruta, d)
+        catalogo(tmp)
+        with open(os.path.join(tmp, 'CATALOGO.TXT'), 'rb') as f:
+            return f.read().split(b'\r\n')[1]
+    finally:
+        for x in os.listdir(tmp):
+            os.remove(os.path.join(tmp, x))
+        os.rmdir(tmp)
+
+
 def sistema(salida, carpetas):
     """Los paquetes del sistema en SALIDA (con CATALOGO.TXT) y sus registros
     en SALIDA/PQI (con el CARPETAS.TXT que manda cada uno a \\HISPA\\PAQUETES)."""
@@ -241,6 +328,80 @@ def sistema(salida, carpetas):
     with open(os.path.join(salida, 'PQI', 'CARPETAS.TXT'), 'wb') as f:
         f.write(''.join(x + '\r\n' for x in mapa).encode())
     return catalogo(salida)
+
+
+# -------------------------------------------------------------- la firma
+def _ed():
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ed25519
+        from cryptography.hazmat.primitives import serialization
+    except ImportError:
+        falla('para firmar hace falta el módulo «cryptography» de Python (apt install python3-cryptography)')
+    return ed25519, serialization
+
+
+def lee_privada(ruta):
+    ed25519, _ = _ed()
+    t = open(ruta).read().strip()
+    if not re.match(r'^[0-9a-f]{64}$', t):
+        falla('%s no es una clave privada de hpq.py (64 cifras hexadecimales)' % ruta)
+    return ed25519.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(t))
+
+
+def publica_de(priv):
+    _, serialization = _ed()
+    return priv.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+
+
+def haz_clave(ruta):
+    ed25519, serialization = _ed()
+    if os.path.exists(ruta):
+        falla('%s ya existe: no se pisa una clave' % ruta)
+    k = ed25519.Ed25519PrivateKey.generate()
+    semilla = k.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
+    fd = os.open(ruta, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        f.write(semilla.hex() + '\n')
+    return publica_de(k)
+
+
+def modulo_clave(pub):
+    filas = ',\n'.join('        ' + ', '.join('0x%02X' % x for x in pub[i:i + 16]) for i in (0, 16))
+    return ('; =============================================================================\n'
+            ';  clave.cas - la clave pública con la que PAQUETES comprueba la firma de los\n'
+            ';  catálogos (CATALOGO.FIR: Ed25519). La hace «tools/hpq.py publica\n'
+            ';  PRIVADA clave.cas»; la privada no está en el repositorio.\n'
+            ';  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.\n'
+            '; =============================================================================\n'
+            'módulo Clave\n\n'
+            '    público constante HUELLA = "%s"\n\n'
+            '    público variable pública: arreglo [32] de byte = (\n%s)\n\n'
+            'fin Clave.\n') % (pub.hex()[:16], filas)
+
+
+def firma(carpeta, privada):
+    k = lee_privada(privada)
+    datos = open(os.path.join(carpeta, 'CATALOGO.TXT'), 'rb').read()
+    f = k.sign(datos)
+    with open(os.path.join(carpeta, 'CATALOGO.FIR'), 'wb') as s:
+        s.write(b'ed25519 ' + f.hex().encode() + b'\r\n')
+
+
+def comprueba_firma(carpeta, publica):
+    ed25519, _ = _ed()
+    if os.path.isfile(publica):
+        t = open(publica, encoding='utf-8').read()
+        b = re.findall(r'0x([0-9A-Fa-f]{2})', t.split('pública')[-1])[:32]
+        pub = bytes(int(x, 16) for x in b)
+    else:
+        pub = bytes.fromhex(publica)
+    datos = open(os.path.join(carpeta, 'CATALOGO.TXT'), 'rb').read()
+    l = open(os.path.join(carpeta, 'CATALOGO.FIR'), 'rb').read().split()
+    try:
+        ed25519.Ed25519PublicKey.from_public_bytes(pub).verify(bytes.fromhex(l[1].decode()), datos)
+        return True
+    except Exception:
+        return False
 
 
 def principal(a):
@@ -272,7 +433,29 @@ def principal(a):
     if orden == 'catalogo':
         n = catalogo(a[2])
         print('hpq: %s con %d paquetes' % (os.path.join(a[2], 'CATALOGO.TXT'), n))
+        if len(a) > 4 and a[3] == '--clave':
+            firma(a[2], a[4])
+            print('hpq: %s, firmado' % os.path.join(a[2], 'CATALOGO.FIR'))
         return 0
+    if orden == 'clave':
+        pub = haz_clave(a[2])
+        print('hpq: clave privada en %s (no la enseñe ni la suba); la pública: %s' % (a[2], pub.hex()))
+        return 0
+    if orden == 'publica':
+        pub = publica_de(lee_privada(a[2]))
+        if len(a) > 3:
+            with open(a[3], 'w', encoding='utf-8') as f:
+                f.write(modulo_clave(pub))
+        print(pub.hex())
+        return 0
+    if orden == 'firma':
+        firma(a[2], a[3])
+        print('hpq: %s, firmado' % os.path.join(a[2], 'CATALOGO.FIR'))
+        return 0
+    if orden == 'comprueba':
+        bien = comprueba_firma(a[2], a[3])
+        print('hpq: la firma de %s es %s' % (os.path.join(a[2], 'CATALOGO.TXT'), 'buena' if bien else 'MALA'))
+        return 0 if bien else 1
     if orden == 'mira':
         return mira(a[2])
     if orden == 'registro':
@@ -280,11 +463,18 @@ def principal(a):
         with open(a[3], 'wb') as f:
             f.write(datos[:largo])
         return 0
+    if orden == 'opcionales':
+        n = opcionales(a[2], a[3:])
+        print('hpq: %d paquetes opcionales en %s' % (n, a[2]))
+        return 0
+    if orden == 'linea':
+        sys.stdout.buffer.write(linea_catalogo(a[2]) + b'\r\n')
+        return 0
     if orden == 'sistema':
         n = sistema(a[2], a[3:])
         print('hpq: %d paquetes del sistema en %s (con CATALOGO.TXT y sus registros en PQI)' % (n, a[2]))
         return 0
-    falla('no sé qué es «%s»: crea, catalogo, mira, registro o sistema' % orden)
+    falla('no sé qué es «%s»: crea, catalogo, mira, registro, sistema, opcionales, linea, clave, publica, firma o comprueba' % orden)
 
 
 if __name__ == '__main__':
