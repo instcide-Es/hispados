@@ -108,6 +108,19 @@ LA RED (por cable)
   Las tarjetas que lleva: Intel PRO/1000, Realtek RTL8139 y Marvell Yukon
   88E8059. El Wi-Fi, todavía no.
 
+SSH Y TAILSCALE (la red privada de sus equipos)
+  En la Consola:
+    SSH usuario@equipo     entra en la terminal de otro equipo (SSH /LLAVE:
+                           la llave propia, para no escribir la contraseña)
+    SSHD /CLAVE y SSHD /ENCENDER   deja entrar en este desde otros (apagado
+                           hasta que se enciende)
+    TAILSCALE /CONECTAR    lo pone en su red de Tailscale: la primera vez sale
+                           una dirección que se abre en otro equipo para darlo
+                           de alta; luego, cada equipo por su nombre (ssh
+                           usuario@nombre) y su IP 100.x
+    WG /ENCENDER           un túnel WireGuard con el archivo de wg-quick
+  Configuración > «Red y Tailscale...» enseña lo mismo en una ventana.
+
 LA CONSOLA (el intérprete de órdenes)
   AYUDA dice las órdenes: DIR, TYPE, COPY, DEL, REN, MD, CD, RD, PATH, VER,
   MEM, FECHA, CLS... Un programa se lanza por su nombre. C:, X: cambian de
@@ -144,6 +157,8 @@ LA CARPETA \HISPA
                reloj del PC mal, pide la hora a actualiza.hispados.es;
                TLS.CCH y TLS.SEM son suyos. Más autoridades: los .CER de
                la carpeta \HISPA\RAICES
+  SSH, TS, WG  lo de SSH (las llaves y la contraseña, resumida), Tailscale
+               y WireGuard: las llaves secretas no se dan a nadie
   HISPA.INI    los ajustes: usuario, equipo, teclado (es o us) y modo
   GRUB.CFG     el menú de arranque. La línea «set modo=» es la medida de la
                pantalla (por ejemplo 1024x768x32, o auto)

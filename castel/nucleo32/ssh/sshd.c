@@ -919,6 +919,9 @@ int principal(void)
 	h_carpeta(carpeta);
 	if (h_empieza(a, "/SERVICIO"))
 		return servicio();
+	/* (al arrancar el escritorio: solo si se dejó encendido) */
+	if (h_empieza(a, "/ARRANQUE"))
+		return encendido() ? servicio() : 0;
 	if (h_empieza(a, "/PUERTO=")) {
 		u32 p = 0;
 		int i;

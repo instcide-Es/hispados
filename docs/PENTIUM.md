@@ -2832,7 +2832,9 @@ SSHD /PUERTO=n     otro puerto (22 si no se dice)
 ```
 
 **Apagado de fábrica**: no escucha hasta que el usuario lo enciende (aquí, o
-con el botón de la ventana «Red y Tailscale»). La contraseña se guarda
+con el botón de la ventana «Red y Tailscale»); encendido, en un sistema
+instalado vuelve solo en los arranques siguientes (el escritorio lanza
+`SSHD /ARRANQUE`, que mira `SSHD.INI`). La contraseña se guarda
 **resumida** (`\HISPA\SSH\CLAVE.TXT`: PBKDF2-HMAC-SHA-256, 10.000 vueltas, sal de
 16 octetos; nunca en claro) y las llaves que pueden entrar sin ella, en
 `\HISPA\SSH\AUTORIZA.TXT` (o `authorized_keys`), como las de OpenSSH
@@ -2965,9 +2967,9 @@ los paquetes son de 8 letras, por su registro `<NOMBRE>.PQI`), los dos de la
 Lo directo por UDP de Tailscale (disco, STUN, perforar el NAT); IPv6 por el
 túnel; la ruta por defecto por WireGuard; varias sesiones de SSHD a la vez;
 reenviar puertos y `scp`/`sftp`; llaves RSA y ECDSA (solo ssh-ed25519); la
-«tailnet lock»; y que SSHD y Tailscale se pongan en marcha solos al arrancar
-(ahora: `SSHD /ENCENDER` y `TAILSCALE /CONECTAR` lo dejan apuntado, y hay que
-volver a darlo tras reiniciar si no lo lanza el escritorio).
+«tailnet lock»; y ponerlos en marcha al arrancar sin escritorio (con él, en un
+sistema instalado, el escritorio lanza `SSHD /ARRANQUE` y `TAILSCALE /ARRANQUE`,
+que solo se quedan si se dejaron encendidos).
 
 ## 14 bis. Hispa-Pentium se compila a sí mismo (CASTEL32)
 

@@ -1346,8 +1346,10 @@ int principal(void)
 	h_inicia("tailscale");
 	h_ruta(carpeta, sizeof carpeta, "TS");
 	h_carpeta(carpeta);
-	if (h_empieza(a, "/SERVICIO"))
+	if (h_empieza(a, "/SERVICIO") || (h_empieza(a, "/ARRANQUE") && encendido()))
 		return servicio();
+	if (h_empieza(a, "/ARRANQUE"))
+		return 0;	/* (al arrancar el escritorio: solo si se dejó conectado) */
 	lee_ajustes();
 	if (h_empieza(a, "/VENTANA"))
 		return ventana_ts();

@@ -2387,6 +2387,12 @@ módulo Escritorio
             sino
                 t := cargar_archivo("\\HISPA\\ACTUALIZ.BIN", "/BANDEJA", an)
                 si t <> nulo entonces t.padre := 0 fin
+                ; (SSH, TAILSCALE) el servidor SSH y Tailscale, si el usuario los dejó
+                ; encendidos (cada uno mira su .INI y, si no, acaba enseguida)
+                t := cargar_archivo("\\HISPA\\SSHD.BIN", "/ARRANQUE", an)
+                si t <> nulo entonces t.padre := 0 fin
+                t := cargar_archivo("\\HISPA\\TAILSCAL.BIN", "/ARRANQUE", an)
+                si t <> nulo entonces t.padre := 0 fin
             fin
             mira_pantalla_guardada()
         fin
