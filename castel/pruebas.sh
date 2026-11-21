@@ -1272,8 +1272,9 @@ ESCRIBE=1 DISCO=$I $AQUI/nucleo32/probar.sh "" ordenes "echo ¿Dónde está el p
 S=$P/teclado.sal
 bien=1
 saca $I LETRAS.TXT $P/x.txt && printf '¿Dónde está el pingüino? ¡Aquí, señor! Ñandú, cigüeña, garçon, Çédille; áéíóú àèò âêô É Ü ï\r\n' | iconv -f UTF-8 -t CP437 | cmp -s - $P/x.txt || bien=0
-saca $I SIGNOS.TXT $P/y.txt && printf '%s\r\n' "1º 2ª [x] {y} @ # | \\ < ; : _ - + * = % & ( ) \" ' ^ \` ~ ! ? / . , \$ AIOU" | iconv -f UTF-8 -t CP437 | cmp -s - $P/y.txt || bien=0
-if [ $bien = 1 ]; then ok "el teclado español: ñ, ç, ¿ ¡, º ª, los acentos con su tecla muerta (´ \` ^ ¨), Alt Gr ([ ] { } @ # | \\ ~) y los signos, octeto a octeto en la página 437"
+# (0.8.5) las mayúsculas con tilde, en la 437 de Hispa (tools/hispa437.py): Á B6h, Í CFh, Ó D3h, Ú D7h
+saca $I SIGNOS.TXT $P/y.txt && { printf '%s' "1º 2ª [x] {y} @ # | \\ < ; : _ - + * = % & ( ) \" ' ^ \` ~ ! ? / . , \$ " | iconv -f UTF-8 -t CP437; printf '\266\317\323\327\r\n'; } | cmp -s - $P/y.txt || bien=0
+if [ $bien = 1 ]; then ok "el teclado español: ñ, ç, ¿ ¡, º ª, los acentos con su tecla muerta (´ \` ^ ¨; Á Í Ó Ú en la 437 de Hispa), Alt Gr ([ ] { } @ # | \\ ~) y los signos, octeto a octeto en la página 437"
 else ko "el teclado español no da las letras que debe:"; od -c $P/x.txt | head -8 | sed 's/^/        /'; od -c $P/y.txt | head -6 | sed 's/^/        /'; fi
 mira "lo tecleado se ve en la pantalla; TECLADO cambia al de EE. UU. y vuelve; Bloq Mayús" "^¿Dónde está el pingüino? ¡Aquí, señor! Ñandú, cigüeña, garçon, Çédille; áéíóú àèò âêô É Ü ï$" \
   "^Teclado: español (ES)\.$" "^Teclado: de EE\. UU\. (US)\.$" "^\[\];'./$" "^BLOQUEO CON Ñ Y Ç$"
