@@ -1,0 +1,326 @@
+; =============================================================================
+;  rwifi.cas - (WIFI) la tarjeta Wi-Fi para el servicio de red de
+;  Hispa-Pentium (RED.BIN): «una tarjeta más», T_WIFI, que no es un aparato
+;  sino el servicio Wi-Fi (WIFI.BIN, nucleo32/wifi/: la radio, 802.11 y WPA2,
+;  en C). WIFI.BIN da las tramas de Ethernet que llegan y recoge las que hay
+;  que enviar con la orden O_WIFI_CAMBIO (la llamada 90, como un programa
+;  más), en cada vuelta de su bucle; con ella dice también si hay enlace
+;  («asociada y con las claves puestas») y la señal. Aquí está la cola de lo
+;  que espera a salir, lo que dice RED.INI y quién lo pone en marcha.
+;
+;  RED.INI (\HISPA\RED.INI, o \RED.INI sin \HISPA), como en Hispa-486
+;  (docs/RED.md, «Cable o Wi-Fi»):
+;    Preferir=AUTO     el cable si tiene enlace; si no, el Wi-Fi (lo de siempre)
+;    Preferir=CABLE    solo el cable (WIFI.BIN no se pone en marcha)
+;    Preferir=WIFI     el Wi-Fi aunque haya cable
+;    WifiSimulada=SI   (las pruebas) WIFI.BIN con la radio de mentira
+;    WifiSimulada=CHIP (las pruebas) WIFI.BIN aunque no haya tarjeta en el PCI
+;                      (es WIFISIM.BIN, con el modelo de la tarjeta dentro)
+;  Lo cambian Configuración (el escritorio: un aviso del núcleo) y la
+;  ventana del Wi-Fi (REDWIFI.BIN: la orden O_WIFI_PREFERIR); se guarda aquí.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Rwifi
+
+    importar Rbase, Mem32, Textos32, Formato, Llamadas
+
+    público constante PREFIERE_AUTO = 0
+    público constante PREFIERE_CABLE = 1
+    público constante PREFIERE_WIFI = 2
+    constante COLA = 24
+    constante TRAMA = 1518
+
+    público variable preferir: nat32
+    público variable dueño: nat32               ; la tarea de WIFI.BIN (0: no hay tarjeta Wi-Fi)
+    público variable mac_wifi: arreglo [8] de byte
+    público variable nombre_wifi: arreglo [48] de byte
+    público variable pci_wifi, id_wifi: nat32
+    público variable enlace_wifi: bool
+    público variable señal: ent32
+    público variable cambió: bool                ; ha cambiado el enlace (que se mire ya)
+    público variable salidas, entradas, tiradas: nat32
+    variable simulada: bool
+    variable chip: bool                         ; (WifiSimulada=CHIP)
+    variable lanzado: bool
+    variable hay_tarjeta: bool                  ; una de las que lleva WIFI.BIN, en el PCI
+    variable cola: arreglo [COLA] de arreglo [TRAMA] de byte
+    variable cola_largo: arreglo [COLA] de nat32
+    variable cola_ini, cola_n: nat32
+    variable ini: arreglo [4096] de byte
+    variable ini_n: nat32
+    variable ruta_ini: arreglo [24] de byte
+
+    ; las tarjetas que lleva WIFI.BIN (las mismas que wifi/nucleo/radio_*.c)
+    función de_wifi(id: nat32): bool
+        variable v, d: nat32
+        v := id yb 0xFFFF
+        d := id >> 16
+        si v = 0x14E4 y (d = 0x4353 o d = 0x4357 o d = 0x4727 o d = 0x0576 o d = 0xA8D8) entonces devolver cierto fin
+        si v = 0x168C y (d = 0x002B o d = 0x002A o d = 0x002E o d = 0x0029 o d = 0x002D o d = 0x0024 o d = 0x0023 o d = 0x0027 o d = 0x002C) entonces devolver cierto fin
+        devolver falso
+    fin
+
+    función busca_tarjeta(): bool
+        variable bus, ap, fu, a, id: nat32
+        para bus desde 0 hasta 31 hacer
+            para ap desde 0 hasta 31 hacer
+                para fu desde 0 hasta 7 hacer
+                    a := (bus << 16) ob (ap << 11) ob (fu << 8)
+                    id := pci_leer(a, 0)
+                    si id = 0xFFFFFFFF o id = 0 entonces
+                        si fu = 0 entonces romper fin
+                        seguir
+                    fin
+                    si de_wifi(id) entonces
+                        apunta4("Wi-Fi: tarjeta %04X:%04X en el bus PCI %02X:%02X", id yb 0xFFFF, id >> 16, bus, ap)
+                        devolver cierto
+                    fin
+                    si fu = 0 y pci_leer(a, 0x0C) yb 0x00800000 = 0 entonces romper fin
+                fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; ---- RED.INI ----
+    función lee_ini()
+        variable m, n: nat32
+        copiar(ruta_ini, "\\HISPA\\RED.INI")
+        m := abrir("\\HISPA")
+        si es_error(m) entonces copiar(ruta_ini, "\\RED.INI") sino cerrar(m) fin
+        ini_n := 0
+        m := abrir(ruta_ini)
+        si es_error(m) entonces devolver fin
+        n := leer(m, dirección(ini[0]), 4095)
+        cerrar(m)
+        si es_error(n) entonces n := 0 fin
+        ini_n := n
+        ini[n] := 0
+    fin
+
+    ; el valor de la clave (sin mirar mayúsculas), a destino; falso si no está
+    función valor_de(clave: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+        variable i, j, k, l: nat32
+        variable ok: bool
+        l := longitud(clave)
+        i := 0
+        mientras i < ini_n hacer
+            ; el principio de una línea
+            ok := cierto
+            para k desde 0 hasta l - 1 hacer
+                si i + k >= ini_n o mayúscula(ini[i + k]) <> mayúscula(clave[k]) entonces
+                    ok := falso
+                    romper
+                fin
+            fin
+            si ok y i + l < ini_n y ini[i + l] = '=' entonces
+                j := 0
+                k := i + l + 1
+                mientras k < ini_n y ini[k] <> '\r' y ini[k] <> '\n' y j + 1 < cabe hacer
+                    destino[j] := ini[k]
+                    j := j + 1
+                    k := k + 1
+                fin
+                destino[j] := 0
+                devolver cierto
+            fin
+            mientras i < ini_n y ini[i] <> '\n' hacer i := i + 1 fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; RED.INI otra vez, con «Preferir=» como está ahora (lo demás, igual)
+    función guarda_ini()
+        variable nuevo: arreglo [4200] de byte
+        variable i, n, k, m: nat32
+        lee_ini()
+        n := 0
+        i := 0
+        mientras i < ini_n hacer
+            k := i
+            mientras k < ini_n y ini[k] <> '\n' hacer k := k + 1 fin
+            si k < ini_n entonces k := k + 1 fin
+            ; (la línea de «Preferir=» de antes, fuera)
+            si no (k - i >= 9 y mayúscula(ini[i]) = 'P' y mayúscula(ini[i + 1]) = 'R' y mayúscula(ini[i + 2]) = 'E' y mayúscula(ini[i + 3]) = 'F' y mayúscula(ini[i + 8]) = '=') entonces
+                copiar_memoria(dirección(nuevo[n]), dirección(ini[i]), k - i)
+                n := n + k - i
+            fin
+            i := k
+        fin
+        si n > 0 y nuevo[n - 1] <> '\n' entonces
+            nuevo[n] := '\r'
+            nuevo[n + 1] := '\n'
+            n := n + 2
+        fin
+        según nat16(preferir)
+            caso PREFIERE_CABLE: copiar(dirección(nuevo[n]), "Preferir=CABLE\r\n")
+            caso PREFIERE_WIFI: copiar(dirección(nuevo[n]), "Preferir=WIFI\r\n")
+            si no: copiar(dirección(nuevo[n]), "Preferir=AUTO\r\n")
+        fin
+        n := n + longitud(dirección(nuevo[n]))
+        m := crear(ruta_ini)
+        si es_error(m) entonces
+            apunta("Wi-Fi: no se puede escribir RED.INI")
+            devolver
+        fin
+        escribir_archivo(m, dirección(nuevo[0]), n)
+        cerrar(m)
+    fin
+
+    función lanza()
+        variable t: nat32
+        variable args: puntero a byte
+        args := nulo
+        si simulada y no chip entonces args := "/SIMULA" fin
+        t := lanzar_suelto("\\WIFI.BIN", args)
+        si es_error(t) entonces t := lanzar_suelto("\\HISPA\\WIFI.BIN", args) fin
+        si es_error(t) entonces
+            apunta("Wi-Fi: no se puede poner en marcha WIFI.BIN (¿está instalado el paquete «wifi»?)")
+            devolver
+        fin
+        lanzado := cierto
+        si simulada y no chip entonces apunta("Wi-Fi: WIFI.BIN en marcha, con la radio simulada") sino apunta("Wi-Fi: WIFI.BIN en marcha") fin
+    fin
+
+    ; al arrancar RED.BIN: lo que dice RED.INI y, si hay tarjeta Wi-Fi (y no
+    ; se ha elegido solo el cable), WIFI.BIN en marcha
+    público función arrancar()
+        variable v: arreglo [16] de byte
+        lee_ini()
+        preferir := PREFIERE_AUTO
+        si valor_de("Preferir", v, 16) entonces
+            a_mayúsculas(v)
+            si empieza_por(v, "CABLE") entonces preferir := PREFIERE_CABLE fin
+            si empieza_por(v, "WIFI") o empieza_por(v, "WI-FI") entonces preferir := PREFIERE_WIFI fin
+        fin
+        simulada := falso
+        si valor_de("WifiSimulada", v, 16) entonces
+            a_mayúsculas(v)
+            simulada := empieza_por(v, "SI") o empieza_por(v, "1") o empieza_por(v, "CHIP")
+            chip := empieza_por(v, "CHIP")
+        fin
+        hay_tarjeta := busca_tarjeta()
+        si preferir = PREFIERE_CABLE entonces
+            si hay_tarjeta entonces apunta("Wi-Fi: RED.INI dice «Preferir=CABLE»: el Wi-Fi no se pone en marcha") fin
+            devolver
+        fin
+        si hay_tarjeta o simulada entonces lanza() fin
+    fin
+
+    ; lo que se ha elegido (Configuración o la ventana del Wi-Fi): se guarda
+    ; y, si hace falta el Wi-Fi y no está, se pone en marcha
+    público función elegir(v: nat32)
+        si v > PREFIERE_WIFI entonces devolver fin
+        preferir := v
+        guarda_ini()
+        según nat16(v)
+            caso PREFIERE_CABLE: apunta("Wi-Fi: se usa solo el cable (Preferir=CABLE)")
+            caso PREFIERE_WIFI: apunta("Wi-Fi: se usa el Wi-Fi (Preferir=WIFI)")
+            si no: apunta("Wi-Fi: el cable si está enchufado; si no, el Wi-Fi (Preferir=AUTO)")
+        fin
+        cambió := cierto
+        si v <> PREFIERE_CABLE y dueño = 0 y (hay_tarjeta o simulada) entonces lanza() fin
+    fin
+
+    ; ¿conviene ir por el Wi-Fi? (con el cable conectado o no)
+    público función conviene(cable_ok: bool): bool
+        si dueño = 0 o preferir = PREFIERE_CABLE entonces devolver falso fin
+        si preferir = PREFIERE_WIFI entonces devolver cierto fin
+        devolver no cable_ok
+    fin
+
+    ; ---- lo que dice WIFI.BIN ----
+    ; O_WIFI_PONER: soy la tarjeta Wi-Fi (cab[1] y cab[2] la MAC, cab[3] su
+    ; aparato PCI, cab[4] su fabricante y modelo; los octetos, su nombre)
+    público función poner(tarea: nat32, p: puntero a Pedido_red, datos: puntero a byte): nat32
+        variable n: nat32
+        dueño := tarea
+        mac_wifi[0] := byte(p.cab[1])
+        mac_wifi[1] := byte(p.cab[1] >> 8)
+        mac_wifi[2] := byte(p.cab[1] >> 16)
+        mac_wifi[3] := byte(p.cab[1] >> 24)
+        mac_wifi[4] := byte(p.cab[2])
+        mac_wifi[5] := byte(p.cab[2] >> 8)
+        pci_wifi := p.cab[3]
+        id_wifi := p.cab[4]
+        n := p.largo
+        si n > 40 entonces n := 40 fin
+        copiar(nombre_wifi, "Wi-Fi ")
+        copiar_memoria(dirección(nombre_wifi[6]), datos, n)
+        nombre_wifi[6 + n] := 0
+        ; (si ya dice «Wi-Fi», sin repetirlo)
+        si n >= 5 y datos[0] = 'W' y datos[1] = 'i' y datos[2] = '-' y datos[3] = 'F' y datos[4] = 'i' entonces
+            copiar_memoria(dirección(nombre_wifi[0]), datos, n)
+            nombre_wifi[n] := 0
+        fin
+        enlace_wifi := falso
+        cola_n := 0
+        cambió := cierto
+        apunta(nombre_wifi)
+        apunta4("Wi-Fi: MAC %02X:%02X:%02X:%02X", mac_wifi[0], mac_wifi[1], mac_wifi[2], mac_wifi[3])
+        apunta4("Wi-Fi: MAC ...:%02X:%02X", mac_wifi[4], mac_wifi[5], 0, 0)
+        devolver 0
+    fin
+
+    ; O_WIFI_CAMBIO: el enlace y la señal (las tramas que trae las lleva
+    ; ured.cas a la pila)
+    público función estado_de(p: puntero a Pedido_red)
+        variable e: bool
+        e := p.cab[1] yb 1 <> 0
+        si e <> enlace_wifi entonces
+            cambió := cierto
+            si e entonces apunta4("Wi-Fi: enlace (asociada, %d dBm)", p.cab[2], 0, 0, 0) sino apunta("Wi-Fi: sin enlace") fin
+        fin
+        enlace_wifi := e
+        señal := ent32(p.cab[2])
+    fin
+
+    ; lo que espera a salir, a destino ([2 octetos de largo][la trama]...;
+    ; caben MAX_DATOS): los octetos
+    público función lote(destino: puntero a byte): nat32
+        variable n, l: nat32
+        n := 0
+        mientras cola_n > 0 y n + 2 + cola_largo[cola_ini] <= MAX_DATOS hacer
+            l := cola_largo[cola_ini]
+            destino[n] := byte(l)
+            destino[n + 1] := byte(l >> 8)
+            copiar_memoria(destino + n + 2, dirección(cola[cola_ini][0]), l)
+            n := n + 2 + l
+            cola_ini := (cola_ini + 1) mod COLA
+            cola_n := cola_n - 1
+            salidas := salidas + 1
+        fin
+        devolver n
+    fin
+
+    ; una trama para el Wi-Fi: a la cola (la recoge WIFI.BIN en su vuelta)
+    público función enviar(p: puntero a byte, n: nat32): bool
+        variable k: nat32
+        si dueño = 0 o no enlace_wifi o n > TRAMA entonces devolver falso fin
+        si cola_n = COLA entonces
+            tiradas := tiradas + 1
+            devolver falso
+        fin
+        k := (cola_ini + cola_n) mod COLA
+        copiar_memoria(dirección(cola[k][0]), p, n)
+        cola_largo[k] := n
+        cola_n := cola_n + 1
+        devolver cierto
+    fin
+
+    ; ¿hay que decirle a WIFI.BIN que se pare? (se ha elegido el cable)
+    público función que_pare(): bool
+        devolver preferir = PREFIERE_CABLE
+    fin
+
+    público función quitar(tarea: nat32)
+        si tarea <> dueño entonces devolver fin
+        dueño := 0
+        enlace_wifi := falso
+        cola_n := 0
+        cambió := cierto
+        apunta("Wi-Fi: WIFI.BIN ya no está")
+    fin
+
+fin Rwifi.

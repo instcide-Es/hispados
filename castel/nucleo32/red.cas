@@ -44,6 +44,15 @@
 ;        contesta con la 93, igual que RED.BIN: cada hueco sabe a cuál de
 ;        los dos va                                   -> (SIN_TLS: no hay)
 ;
+;   100  (WIFI) pedir al SERVICIO WI-FI (WIFI.BIN, nucleo32/wifi/): como la
+;        90, pero el pedido va a WIFI.BIN (la ventana del Wi-Fi: buscar,
+;        conectar...). WIFI.BIN se apunta con la 91 y, como RED.BIN, tiene
+;        los puertos, su memoria de DMA (la 94, hasta 1024 páginas) y los
+;        registros de su tarjeta (la 95); con la 96 dice cómo está (para el
+;        icono: el estado y las barras de la señal) y su tarjeta. Las tramas
+;        se las pasa a RED.BIN por la 90, como un programa más (rwifi.cas)
+;                                                     -> (SIN_WIFI: no hay)
+;
 ;  Si el servicio se acaba (o lo acaban), el núcleo apaga el DMA de su
 ;  tarjeta antes de devolver su memoria, quita los registros de su vista y
 ;  contesta SIN_RED a los que esperaban.
@@ -62,6 +71,17 @@ módulo Red
 
     público constante SIN_RED = 0xFFFFFFEF      ; no hay servicio de red
     público constante SIN_TLS = 0xFFFFFFE3      ; (TLS) no hay servicio TLS (TLS.BIN)
+    público constante SIN_WIFI = 0xFFFFFFE1     ; (WIFI) no hay servicio Wi-Fi (WIFI.BIN)
+    ; (WIFI) lo que dice WIFI.BIN con la 96 (para el icono de la bandeja)
+    público constante WIFI_NADA = 0             ; no hay servicio Wi-Fi
+    público constante WIFI_SIN_TARJETA = 1      ; no hay tarjeta, o no se ha podido encender
+    público constante WIFI_SIN_CONECTAR = 2
+    público constante WIFI_CONECTANDO = 3
+    público constante WIFI_CONECTADA = 4
+    ; (WIFI) lo que prefiere RED.BIN (RED.INI, «Preferir=»): Automático, Cable o Wi-Fi
+    público constante PREFIERE_AUTO = 0
+    público constante PREFIERE_CABLE = 1
+    público constante PREFIERE_WIFI = 2
     constante NO_VALE = 0xFFFFFFF9
     constante EN_USO = 0xFFFFFFF6
     constante SIN_MEMORIA = 0xFFFFFFFA
@@ -73,6 +93,7 @@ módulo Red
     constante H_EN_SERVICIO = 2                 ; lo tiene el servicio
     constante H_RESPONDIDO = 3
     constante AVISO_ACABÓ = 0xFFFF              ; (la orden de un aviso: ha acabado la tarea tal)
+    constante AVISO_PREFERIR = 0xFFFE           ; (WIFI) el escritorio (Configuración) pide Cable, Wi-Fi o Automático: cab[1]
     constante ZONA_INICIO = 0xA0000000          ; donde ve el servicio la memoria de DMA y los registros
     constante ZONA_FINAL = 0xB0000000
     constante MAX_TROZOS = 8
@@ -80,7 +101,8 @@ módulo Red
     ; (TLS) a qué servicio va un pedido
     constante A_RED = 0
     constante A_TLS = 1
-    constante A_NADIE = 2
+    constante A_WIFI = 2                        ; (WIFI)
+    constante A_NADIE = 3
 
     tipo Hueco = estructura
         estado: nat32
@@ -106,10 +128,10 @@ módulo Red
 
     variable huecos: arreglo [MAX_HUECOS] de Hueco
     variable serie: nat32
-    ; (TLS) lo de los dos servicios: [0, MAX_TAREAS) el de red; detrás, el TLS
-    variable usaron: arreglo [2 * MAX_TAREAS] de nat32  ; las tareas que han usado la red
-    variable avisos: arreglo [2 * MAX_TAREAS] de nat32  ; las que han acabado, para decírselo al servicio
-    variable n_avisos: arreglo [2] de nat32
+    ; (TLS) lo de los servicios: [0, MAX_TAREAS) el de red; detrás, el TLS; (WIFI) y el Wi-Fi
+    variable usaron: arreglo [3 * MAX_TAREAS] de nat32  ; las tareas que han usado la red
+    variable avisos: arreglo [3 * MAX_TAREAS] de nat32  ; las que han acabado, para decírselo al servicio
+    variable n_avisos: arreglo [3] de nat32
 
     público variable servicio: puntero a Tarea          ; nulo: no hay
     variable servicio_id: nat32
@@ -119,15 +141,27 @@ módulo Red
     variable servicio_tls_id: nat32
     variable tls_espera: bool
     público variable sin_tls: bool                       ; no está TLS.BIN: no se vuelve a intentar
+    ; (WIFI) el servicio Wi-Fi (WIFI.BIN)
+    público variable servicio_wifi: puntero a Tarea
+    variable servicio_wifi_id: nat32
+    variable wifi_espera: bool
+    público variable estado_wifi: nat32                  ; WIFI_... (lo que dijo WIFI.BIN con la 96)
+    público variable barras_wifi: nat32                  ; la señal, de 0 a 4 rayitas
+    público variable señal_wifi: ent32                   ; en dBm
+    variable aparato_wifi: nat32
+    público variable por_wifi: bool                      ; RED.BIN va por el Wi-Fi (bit 9 de su 96)
+    público variable preferir_red: nat32                 ; PREFIERE_... (bits 12 y 13 de la 96 de RED.BIN)
+    variable preferencia_pedida: nat32 = 0xFFFFFFFF      ; la que ha pedido el escritorio, para RED.BIN
     público variable estado_red: nat32
     público variable ip_red: nat32                       ; (como va en la red: el primer octeto, abajo)
     público variable cambios_red: nat32                  ; sube cuando cambia (el escritorio repinta el icono)
     público variable apagada: bool                       ; «sinred» en la línea del cargador
     público variable sin_tarjeta: bool                   ; el servicio ya dijo que no hay tarjeta: no se vuelve a lanzar
     variable aparato: nat32
-    variable zona: nat32
-    variable trozo_v, trozo_n: arreglo [MAX_TROZOS] de nat32   ; los registros puestos a la vista (para quitarlos)
-    variable n_trozos: nat32
+    ; (WIFI) lo de la vista de cada servicio: [0] RED.BIN, [1] WIFI.BIN
+    variable zona: arreglo [2] de nat32
+    variable trozo_v, trozo_n: arreglo [2 * MAX_TROZOS] de nat32   ; los registros puestos a la vista (para quitarlos)
+    variable n_trozos: arreglo [2] de nat32
     variable irq_red: nat32
     público variable irqs_red: nat32
 
@@ -150,14 +184,25 @@ módulo Red
     fin
 
     ; (TLS) ¿de cuál de los dos servicios es la tarea actual?
+    ; (WIFI)
+    público función hay_wifi(): bool
+        devolver servicio_wifi <> nulo y servicio_wifi.id = servicio_wifi_id y servicio_wifi.estado <> ACABADA y servicio_wifi.estado <> LIBRE
+    fin
+
+    función es_wifi(): bool
+        devolver hay_wifi() y servicio_wifi = actual
+    fin
+
     función destino_actual(): nat32
         si es_servicio() entonces devolver A_RED fin
         si es_tls() entonces devolver A_TLS fin
+        si es_wifi() entonces devolver A_WIFI fin
         devolver A_NADIE
     fin
 
     función hay_destino(d: nat32): bool
         si d = A_TLS entonces devolver hay_tls() fin
+        si d = A_WIFI entonces devolver hay_wifi() fin
         devolver hay_servicio()
     fin
 
@@ -182,6 +227,8 @@ módulo Red
     función despierta(d: nat32)
         si d = A_TLS entonces
             si tls_espera y hay_tls() entonces despertar_dormida(servicio_tls) fin
+        sino si d = A_WIFI entonces
+            si wifi_espera y hay_wifi() entonces despertar_dormida(servicio_wifi) fin
         sino
             despierta_servicio()
         fin
@@ -207,9 +254,10 @@ módulo Red
         variable i, largo, bi, r, sin: nat32
         sin := SIN_RED
         si d = A_TLS entonces sin := SIN_TLS fin
+        si d = A_WIFI entonces sin := SIN_WIFI fin
         si no hay_destino(d) entonces devolver sin fin
-        ; (el de red no pide a nadie; el TLS, solo al de red)
-        si es_servicio() o (d = A_TLS y es_tls()) entonces devolver NO_VALE fin
+        ; (el de red no pide a nadie; el TLS y el Wi-Fi, solo al de red)
+        si es_servicio() o (d = A_TLS y es_tls()) o (d = A_WIFI y es_wifi()) entonces devolver NO_VALE fin
         si no puede(a, 32, cierto) entonces devolver NO_VALE fin
         cab := puntero(a)
         largo := cab[7]
@@ -273,6 +321,20 @@ módulo Red
         vueltas := 0
         mientras vueltas < 2 hacer
             bi := sin_interrupciones()
+            si d = A_RED y preferencia_pedida <> 0xFFFFFFFF entonces
+                ; (WIFI) lo que ha elegido el escritorio: Cable, Wi-Fi o Automático
+                p.hueco := 0xFFFFFFFF
+                p.serie := 0
+                p.tarea := 0
+                p.cabe := 0
+                p.largo := 0
+                para i desde 0 hasta 7 hacer p.cab[i] := 0 fin
+                p.cab[0] := AVISO_PREFERIR
+                p.cab[1] := preferencia_pedida
+                preferencia_pedida := 0xFFFFFFFF
+                reponer(bi)
+                devolver 1
+            fin
             si n_avisos[d] > 0 entonces
                 n_avisos[d] := n_avisos[d] - 1
                 p.hueco := 0xFFFFFFFF
@@ -304,9 +366,9 @@ módulo Red
                 reponer(bi)
                 devolver 0
             fin
-            si d = A_TLS entonces tls_espera := cierto sino servicio_espera := cierto fin
+            si d = A_TLS entonces tls_espera := cierto sino si d = A_WIFI entonces wifi_espera := cierto sino servicio_espera := cierto fin
             dormir(espera)
-            si d = A_TLS entonces tls_espera := falso sino servicio_espera := falso fin
+            si d = A_TLS entonces tls_espera := falso sino si d = A_WIFI entonces wifi_espera := falso sino servicio_espera := falso fin
             reponer(bi)
             vueltas := vueltas + 1
         fin
@@ -353,10 +415,38 @@ módulo Red
         devolver 0
     fin
 
+    ; (WIFI) WIFI.BIN se apunta como servicio Wi-Fi: con los puertos, como RED.BIN
+    función apuntarse_wifi(): nat32
+        variable p: puntero a nat32
+        si hay_wifi() entonces
+            si servicio_wifi = actual entonces devolver 0 fin
+            devolver EN_USO
+        fin
+        si es_servicio() o es_tls() entonces devolver NO_VALE fin
+        servicio_wifi := actual
+        servicio_wifi_id := actual.id
+        zona[1] := ZONA_INICIO
+        n_trozos[1] := 0
+        aparato_wifi := 0xFFFFFFFF
+        estado_wifi := WIFI_SIN_TARJETA
+        barras_wifi := 0
+        cambios_red := cambios_red + 1
+        p := puntero(actual.pila_tope - 12)
+        valor(p) := valor(p) ob 0x3000
+        devolver 0
+    fin
+
+    ; (WIFI) 0: lo de RED.BIN; 1: lo de WIFI.BIN
+    función de_quién(): nat32
+        si es_wifi() entonces devolver 1 fin
+        devolver 0
+    fin
+
     función apuntarse(): nat32
         variable p: puntero a nat32
         si iguales_sin_caja(actual.nombre, "TLS.BIN") entonces devolver apuntarse_tls() fin
-        si es_tls() entonces devolver NO_VALE fin
+        si iguales_sin_caja(actual.nombre, "WIFI.BIN") entonces devolver apuntarse_wifi() fin       ; (WIFI)
+        si es_tls() o es_wifi() entonces devolver NO_VALE fin
         si hay_servicio() entonces
             si servicio = actual entonces devolver 0 fin
             devolver EN_USO
@@ -364,8 +454,8 @@ módulo Red
         si no iguales_sin_caja(actual.nombre, "RED.BIN") entonces devolver NO_VALE fin
         servicio := actual
         servicio_id := actual.id
-        zona := ZONA_INICIO
-        n_trozos := 0
+        zona[0] := ZONA_INICIO
+        n_trozos[0] := 0
         aparato := 0xFFFFFFFF
         irq_red := 0
         estado_red := RED_SIN_TARJETA
@@ -379,15 +469,16 @@ módulo Red
     fin
 
     función memoria_dma(n: nat32, física: nat32): nat32
-        variable m, i, v: nat32
+        variable m, i, v, z: nat32
         variable f: puntero a nat32
-        si n = 0 o n > 16 entonces devolver NO_VALE fin
-        si zona + n * PÁGINA > ZONA_FINAL entonces devolver SIN_MEMORIA fin
+        z := de_quién()
+        si n = 0 o (n > 16 y z = 0) o n > 1024 entonces devolver NO_VALE fin     ; (WIFI: el montón de brcmsmac, hasta 4 MB)
+        si zona[z] + n * PÁGINA > ZONA_FINAL entonces devolver SIN_MEMORIA fin
         si no puede(física, 4, cierto) entonces devolver NO_VALE fin
         m := reservar_seguidos(n)
         si m = 0 entonces devolver SIN_MEMORIA fin
         para i desde 0 hasta n - 1 hacer
-            si no mapear(actual.cr3, zona + i * PÁGINA, m + i * PÁGINA, ESCRIBIR ob USUARIO) entonces
+            si no mapear(actual.cr3, zona[z] + i * PÁGINA, m + i * PÁGINA, ESCRIBIR ob USUARIO) entonces
                 ; (lo puesto se devolverá con su espacio de direcciones; lo que no, aquí)
                 mientras i < n hacer
                     soltar_marco(m + i * PÁGINA)
@@ -396,29 +487,30 @@ módulo Red
                 devolver SIN_MEMORIA
             fin
         fin
-        v := zona
-        zona := zona + n * PÁGINA
+        v := zona[z]
+        zona[z] := zona[z] + n * PÁGINA
         f := puntero(física)
         valor(f) := m
         devolver v
     fin
 
     función registros(física: nat32, octetos: nat32): nat32
-        variable d, n, i, v: nat32
+        variable d, n, i, v, z: nat32
+        z := de_quién()
         d := física yb (PÁGINA - 1)
         n := (d + octetos + PÁGINA - 1) div PÁGINA
-        si octetos = 0 o n > 64 o n_trozos >= MAX_TROZOS entonces devolver NO_VALE fin
-        si zona + n * PÁGINA > ZONA_FINAL entonces devolver SIN_MEMORIA fin
+        si octetos = 0 o n > 64 o n_trozos[z] >= MAX_TROZOS entonces devolver NO_VALE fin
+        si zona[z] + n * PÁGINA > ZONA_FINAL entonces devolver SIN_MEMORIA fin
         ; (solo lo que no es memoria de verdad: los registros de un aparato)
         si física < límite entonces devolver NO_VALE fin
         para i desde 0 hasta n - 1 hacer
-            si no mapear(actual.cr3, zona + i * PÁGINA, (física yb 0xFFFFF000) + i * PÁGINA, ESCRIBIR ob USUARIO ob 0x18) entonces devolver SIN_MEMORIA fin   ; (0x18: sin caché)
+            si no mapear(actual.cr3, zona[z] + i * PÁGINA, (física yb 0xFFFFF000) + i * PÁGINA, ESCRIBIR ob USUARIO ob 0x18) entonces devolver SIN_MEMORIA fin   ; (0x18: sin caché)
         fin
-        trozo_v[n_trozos] := zona
-        trozo_n[n_trozos] := n
-        n_trozos := n_trozos + 1
-        v := zona + d
-        zona := zona + n * PÁGINA
+        trozo_v[z * MAX_TROZOS + n_trozos[z]] := zona[z]
+        trozo_n[z * MAX_TROZOS + n_trozos[z]] := n
+        n_trozos[z] := n_trozos[z] + 1
+        v := zona[z] + d
+        zona[z] := zona[z] + n * PÁGINA
         devolver v
     fin
 
@@ -517,6 +609,34 @@ módulo Red
             para i desde 0 hasta MAX_TAREAS - 1 hacer usaron[MAX_TAREAS + i] := 0 fin
             reponer(bi)
         fin
+        ; (WIFI) el servicio Wi-Fi: su tarjeta deja de hacer DMA, sus registros
+        ; fuera de su vista, los que le esperaban con SIN_WIFI; y, como ha
+        ; usado la red, se le dice a RED.BIN más abajo
+        si hay_wifi() y servicio_wifi = t entonces
+            si aparato_wifi <> 0xFFFFFFFF entonces pci_escribir16(aparato_wifi, PCI_ORDEN, pci_leer16(aparato_wifi, PCI_ORDEN) yb 0xFFFB) fin
+            para i desde 0 hasta MAX_TROZOS - 1 hacer
+                si i < n_trozos[1] entonces
+                    para j desde 0 hasta trozo_n[MAX_TROZOS + i] - 1 hacer desmapear(t.cr3, trozo_v[MAX_TROZOS + i] + j * PÁGINA) fin
+                fin
+            fin
+            n_trozos[1] := 0
+            bi := sin_interrupciones()
+            servicio_wifi := nulo
+            estado_wifi := WIFI_NADA
+            barras_wifi := 0
+            cambios_red := cambios_red + 1
+            n_avisos[A_WIFI] := 0
+            para i desde 0 hasta MAX_HUECOS - 1 hacer
+                si huecos[i].destino = A_WIFI y (huecos[i].estado = H_PEDIDO o huecos[i].estado = H_EN_SERVICIO) entonces
+                    huecos[i].cab[0] := SIN_WIFI
+                    huecos[i].cab[7] := 0
+                    huecos[i].estado := H_RESPONDIDO
+                    despertar_tarea(huecos[i].tarea)
+                fin
+            fin
+            para i desde 0 hasta MAX_TAREAS - 1 hacer usaron[2 * MAX_TAREAS + i] := 0 fin
+            reponer(bi)
+        fin
         si hay_servicio() y servicio = t entonces
             ; la tarjeta deja de leer y escribir en la memoria (que va a volver
             ; a los marcos libres) y su interrupción, tapada
@@ -527,16 +647,17 @@ módulo Red
             si aparato <> 0xFFFFFFFF entonces pci_escribir16(aparato, PCI_ORDEN, pci_leer16(aparato, PCI_ORDEN) yb 0xFFFB) fin
             ; los registros, fuera de su vista (no son marcos que devolver)
             para i desde 0 hasta MAX_TROZOS - 1 hacer
-                si i < n_trozos entonces
+                si i < n_trozos[0] entonces
                     para j desde 0 hasta trozo_n[i] - 1 hacer desmapear(t.cr3, trozo_v[i] + j * PÁGINA) fin
                 fin
             fin
-            n_trozos := 0
+            n_trozos[0] := 0
             bi := sin_interrupciones()
             servicio := nulo
             si estado_red = RED_SIN_TARJETA entonces sin_tarjeta := cierto fin
             estado_red := RED_NADA
             ip_red := 0
+            por_wifi := falso                       ; (WIFI)
             cambios_red := cambios_red + 1
             n_avisos[A_RED] := 0
             ; los que esperaban, con SIN_RED
@@ -552,7 +673,7 @@ módulo Red
             reponer(bi)
             devolver
         fin
-        para d desde A_RED hasta A_TLS hacer
+        para d desde A_RED hasta A_WIFI hacer      ; (WIFI) también el servicio Wi-Fi
             para i desde 0 hasta MAX_TAREAS - 1 hacer
                 si usaron[d * MAX_TAREAS + i] = t.id entonces
                     usaron[d * MAX_TAREAS + i] := 0
@@ -577,19 +698,32 @@ módulo Red
         según nat16(n)
             caso 90: devolver pedir(a, b, c, A_RED)
             caso 99: devolver pedir(a, b, c, A_TLS)        ; (TLS)
+            caso 100: devolver pedir(a, b, c, A_WIFI)      ; (WIFI)
             caso 91: devolver apuntarse()
             caso 92: devolver siguiente(a, b)
             caso 93: devolver contestar(a, b)
             caso 94:
-                si no es_servicio() entonces devolver NO_VALE fin
+                si no es_servicio() y no es_wifi() entonces devolver NO_VALE fin
                 devolver memoria_dma(a, b)
             caso 95:
-                si no es_servicio() entonces devolver NO_VALE fin
+                si no es_servicio() y no es_wifi() entonces devolver NO_VALE fin
                 devolver registros(a, b)
             caso 96:
+                si es_wifi() entonces
+                    ; (WIFI) WIFI.BIN: el estado (y las barras, bits 8-10), la señal y su tarjeta
+                    si estado_wifi <> (a yb 0xFF) o barras_wifi <> ((a >> 8) yb 7) entonces cambios_red := cambios_red + 1 fin
+                    estado_wifi := a yb 0xFF
+                    barras_wifi := (a >> 8) yb 7
+                    señal_wifi := ent32(b)
+                    aparato_wifi := c
+                    devolver 0
+                fin
                 si no es_servicio() entonces devolver NO_VALE fin
-                si estado_red <> a o ip_red <> b entonces cambios_red := cambios_red + 1 fin
-                estado_red := a
+                ; (WIFI) el bit 9: por el Wi-Fi; los 12 y 13: lo que prefiere
+                si estado_red <> (a yb 0xFF) o ip_red <> b o por_wifi <> ((a >> 9) yb 1 = 1) o preferir_red <> ((a >> 12) yb 3) entonces cambios_red := cambios_red + 1 fin
+                estado_red := a yb 0xFF
+                por_wifi := (a >> 9) yb 1 = 1
+                preferir_red := (a >> 12) yb 3
                 ip_red := b
                 aparato := c
                 devolver 0
@@ -610,6 +744,25 @@ módulo Red
 
     ; (dispositivos) la tarjeta que lleva el servicio de red: su número de PCI
     ; (NO_HAY_PCI si no hay servicio o aún no lo ha dicho)
+    ; (WIFI) la tarjeta Wi-Fi que lleva WIFI.BIN (NO_HAY_PCI si no hay servicio o no tiene tarjeta)
+    público función aparato_de_wifi(): nat32
+        si no hay_wifi() o estado_wifi = WIFI_NADA o estado_wifi = WIFI_SIN_TARJETA entonces devolver NO_HAY_PCI fin
+        devolver aparato_wifi
+    fin
+
+    ; (WIFI) el escritorio (Configuración) pide Cable, Wi-Fi o Automático:
+    ; se le pasa a RED.BIN (que lo guarda en RED.INI y lo aplica)
+    público función pedir_preferencia(v: nat32)
+        variable bi: nat32
+        si v > PREFIERE_WIFI entonces devolver fin
+        bi := sin_interrupciones()
+        preferencia_pedida := v
+        preferir_red := v
+        cambios_red := cambios_red + 1
+        despierta_servicio()
+        reponer(bi)
+    fin
+
     público función aparato_de_red(): nat32
         si no hay_servicio() o estado_red = RED_NADA o estado_red = RED_SIN_TARJETA entonces devolver NO_HAY_PCI fin
         devolver aparato

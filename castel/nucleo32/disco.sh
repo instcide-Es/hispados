@@ -18,6 +18,11 @@
 # Con «navegador» (y «red» y «tls»), también el Navegador (nucleo32/navega/hacer.sh)
 # en \NAVEGA, su acceso en \MENU (NAVEGA.MNU, con el icono en el tapiz) y
 # X87.BIN (la prueba de que cada programa tiene su coma flotante). Con 32,
+# (WIFI) Con «wifi» (y «red»), también el servicio Wi-Fi (WIFI.BIN,
+# nucleo32/wifi/hacer.sh), la ventana del Wi-Fi (REDWIFI.BIN) y el
+# microcódigo de las Broadcom (BCM43XX.FW, BCM43XXH.FW y su licencia,
+# BCM43XX.TXT); con «wifisim», además un RED.INI con «WifiSimulada=SI» (la
+# radio de mentira: las pruebas).
 # que caben (16 MB se quedan cortos).
 # La imagen se le da a QEMU como disco IDE: DISCO=IMAGEN nucleo32/probar.sh ...
 # Necesita python3, nasm, mkfs.fat (dosfstools) y mtools.
@@ -30,8 +35,9 @@ OFICINA=
 RED=
 TLS=
 NAVEGADOR=
+WIFI=
 for o in "${@:3}"; do
-  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; navegador) NAVEGADOR=navegador ;; esac
+  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; navegador) NAVEGADOR=navegador ;; wifi) WIFI=wifi ;; wifisim) WIFI=wifisim ;; esac
 done
 T=$(mktemp -d)
 trap 'rm -rf $T' EXIT
@@ -84,6 +90,20 @@ if [ "$RED" = red ]; then
     python3 -I $AQUI/../ccastel.py $AQUI/uhttps.cas -o $T/uhttps.asm > /dev/null
     nasm -f bin $T/uhttps.asm -o $T/HTTPS.BIN
     mcopy -i $V $T/TLS.BIN $T/HTTPS.BIN ::
+  fi
+  # (WIFI) el servicio Wi-Fi, su ventana y el microcódigo de las Broadcom
+  if [ -n "$WIFI" ]; then
+    bash $AQUI/wifi/hacer.sh $T/WIFI.BIN
+    python3 -I $AQUI/../ccastel.py $AQUI/uredwifi.cas -o $T/uredwifi.asm > /dev/null
+    nasm -f bin $T/uredwifi.asm -o $T/REDWIFI.BIN
+    cp $AQUI/../../wifi/firmware/bcm43xx-0.fw $T/BCM43XX.FW
+    cp $AQUI/../../wifi/firmware/bcm43xx_hdr-0.fw $T/BCM43XXH.FW
+    sed 's/$/\r/' $AQUI/../../wifi/firmware/LICENCE.broadcom_bcm43xx > $T/BCM43XX.TXT
+    mcopy -i $V $T/WIFI.BIN $T/REDWIFI.BIN $T/BCM43XX.FW $T/BCM43XXH.FW $T/BCM43XX.TXT ::
+    if [ "$WIFI" = wifisim ]; then
+      printf 'WifiSimulada=SI\r\n' > $T/RED.INI
+      mcopy -i $V $T/RED.INI ::
+    fi
   fi
 fi
 if [ "$OFICINA" = oficina ]; then

@@ -22,7 +22,13 @@ módulo Rbase
     público constante O_UDP_ENVIAR = 9          ; cab[1] conexión, cab[2] IP, cab[3] puerto; los octetos
     público constante O_RENOVAR = 10            ; pedir la IP otra vez (DHCP)
     público constante O_REGISTRO = 11           ; lo que ha apuntado el servicio -> los octetos
+    ; (WIFI) el servicio Wi-Fi (WIFI.BIN, rwifi.cas) y lo que se prefiere (los números, también en nucleo32/wifi/wifi.h)
+    público constante O_WIFI_PONER = 40         ; (WIFI) soy la tarjeta Wi-Fi: cab[1] y cab[2] la MAC, cab[3] el aparato PCI, cab[4] su id; los octetos, su nombre
+    público constante O_WIFI_CAMBIO = 41        ; (WIFI) cab[1] bit 0 enlace, cab[2] señal; las tramas que han llegado -> las que salen; cab[1] bit 0: que se pare
+    público constante O_WIFI_QUITAR = 42        ; (WIFI) ya no hay tarjeta Wi-Fi
+    público constante O_WIFI_PREFERIR = 43      ; (WIFI) cab[1]: 0 Automático, 1 Cable, 2 Wi-Fi (otro: solo preguntar) -> lo que queda
     público constante AVISO_ACABÓ = 0xFFFF      ; (del núcleo) ha acabado la tarea cab... (la del pedido)
+    público constante AVISO_PREFERIR = 0xFFFE   ; (WIFI) (del núcleo) Configuración pide Automático, Cable o Wi-Fi: cab[1]
 
     ; ---- los errores (los de red.cas y los de aquí; los del núcleo, de 0xFFFFFFF0 para arriba) ----
     público constante SIN_RED = 0xFFFFFFEF      ; no hay servicio de red

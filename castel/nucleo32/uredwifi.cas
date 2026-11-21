@@ -1,0 +1,823 @@
+; =============================================================================
+;  uredwifi.cas - REDWIFI.BIN, la ventana del Wi-Fi de Hispa-Pentium: cómo
+;  está la conexión, las redes a la vista (la de más señal arriba) con su
+;  señal en rayitas (la forma: llenas las de la señal, huecas las demás) y
+;  un candado si piden contraseña, la contraseña (con asteriscos),
+;  «Conectar automáticamente», Conectar, Desconectar, Olvidar y por dónde va
+;  la red (Automático, Cable o Wi-Fi). La abre un clic en el icono de la red
+;  de la bandeja. Habla con el servicio Wi-Fi (WIFI.BIN) por la llamada 100
+;  y con RED.BIN por la 90 (lo que se prefiere); los números, los de
+;  nucleo32/wifi/wifi.h.
+;
+;  Sin escritorio (o con una orden), lo mismo en texto, para la Consola:
+;    REDWIFI /ESTADO                       cómo está
+;    REDWIFI /REDES                        busca y enseña las redes
+;    REDWIFI /CONECTAR red [contraseña] [/AUTO]   («red»: el nombre, entre
+;                                          comillas si lleva espacios, o su
+;                                          número en la lista de /REDES)
+;    REDWIFI /DESCONECTAR | /OLVIDAR red | /REGISTRO | /USAR AUTO|CABLE|WIFI
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UredWifi
+
+    modelo usuario
+
+    importar Llamadas, Controles, Textos32, Formato, Mem32
+
+    ; ---- las órdenes de WIFI.BIN (wifi.h) ----
+    constante WO_ESTADO = 1
+    constante WO_BUSCAR = 2
+    constante WO_REDES = 3
+    constante WO_CONECTAR = 4
+    constante WO_DESCONECTAR = 5
+    constante WO_OLVIDAR = 6
+    constante WO_REGISTRO = 7
+    constante WO_AUTO = 8
+    constante O_WIFI_PREFERIR = 43              ; (a RED.BIN)
+    constante SIN_WIFI = 0xFFFFFFE1
+    ; los estados de w80211 (wifi/nucleo/nucleo.h)
+    constante W_PARADO = 0
+    constante W_BUSCANDO = 1
+    constante W_CONECTADO = 5
+    constante W_SEG_ABIERTA = 0
+    constante W_SEG_WPA2 = 3
+    constante WR_RECORDADA = 1
+    constante WR_AUTO = 2
+    constante WR_CONECTADA = 4
+    constante MAX_REDES = 24
+
+    tipo Estado_wifi = estructura
+        estado, fallo, canal: nat32
+        señal: ent32
+        seguridad, barriendo, nredes, calculando, autom, radio: nat32
+        tx, rx, reconexiones: nat32
+        ssid_n: nat32
+        ssid: arreglo [36] de byte
+        mac: arreglo [8] de byte
+        tarjeta: arreglo [48] de byte
+        aviso: arreglo [96] de byte
+    fin
+    tipo Red_wifi = estructura
+        canal: nat32
+        señal: ent32
+        seguridad, marcas, ssid_n: nat32
+        ssid: arreglo [36] de byte
+        bssid: arreglo [8] de byte
+    fin
+
+    ; ---- los controles ----
+    constante ID_LISTA = 1
+    constante ID_CLAVE = 2
+    constante ID_AUTO = 3
+    constante ID_CONECTAR = 4
+    constante ID_DESCONECTAR = 5
+    constante ID_OLVIDAR = 6
+    constante ID_BUSCAR = 7
+    constante ID_USAR = 10                      ; 10, 11 y 12: Automático, Cable, Wi-Fi
+    constante ID_CERRAR = 13
+
+    variable est: Estado_wifi
+    variable hay_servicio: bool
+    variable redes: arreglo [MAX_REDES] de Red_wifi
+    variable n_redes: nat32
+    variable elegida: ent32 = -1
+    variable primera: ent32                     ; la primera de la lista que se ve
+    variable clave: arreglo [72] de byte
+    variable autom: bool = cierto
+    variable aviso: arreglo [160] de byte
+    variable preferir: nat32 = 0xFF
+    variable por_wifi: bool                     ; RED.BIN va por el Wi-Fi (si no, por el cable)
+    variable ip: nat32
+    variable buf: arreglo [8192] de byte
+    variable resp_largo: nat32
+    variable t: arreglo [200] de byte
+    variable dd: arreglo [6] de nat32
+    variable lista_y, lista_al, fila_al: ent32
+    variable tamaño_: nat32 = T_NORMAL
+
+    ; =========================================================================
+    ;  Hablar con WIFI.BIN y con RED.BIN
+    ; =========================================================================
+    función llamada(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        ensamblador
+            mov eax, {n}
+            mov ebx, {a}
+            mov ecx, {b}
+            mov edx, {c}
+            int 0x80
+        fin
+    fin
+
+    ; un pedido a WIFI.BIN: lo que va, en buf (largo octetos); lo que vuelve,
+    ; también en buf (resp_largo)
+    función pide(orden: nat32, c1: nat32, c2: nat32, c3: nat32, largo: nat32): nat32
+        variable cab: arreglo [8] de nat32
+        variable r, i: nat32
+        para i desde 0 hasta 7 hacer cab[i] := 0 fin
+        cab[0] := orden
+        cab[1] := c1
+        cab[2] := c2
+        cab[3] := c3
+        cab[7] := largo
+        r := llamada(100, nat32(dirección(cab[0])), nat32(dirección(buf[0])), 8192)
+        resp_largo := cab[7]
+        devolver r
+    fin
+
+    función lee_estado(): bool
+        variable r: nat32
+        r := pide(WO_ESTADO, 0, 0, 0, 0)
+        hay_servicio := r <> SIN_WIFI y r < 0xFFFFFFE0
+        si no hay_servicio entonces devolver falso fin
+        si resp_largo > tamaño(Estado_wifi) entonces resp_largo := tamaño(Estado_wifi) fin
+        llenar(puntero(dirección(est)), tamaño(Estado_wifi), 0)
+        copiar_memoria(puntero(dirección(est)), dirección(buf[0]), resp_largo)
+        est.ssid[32] := 0
+        est.aviso[95] := 0
+        est.tarjeta[47] := 0
+        llamada(97, nat32(dirección(ip)), 0, 0)
+        devolver cierto
+    fin
+
+    función lee_redes()
+        variable r, n: nat32
+        r := pide(WO_REDES, 0, 0, 0, 0)
+        si r >= 0xFFFFFFE0 entonces
+            n_redes := 0
+            devolver
+        fin
+        n := resp_largo div tamaño(Red_wifi)
+        si n > MAX_REDES entonces n := MAX_REDES fin
+        copiar_memoria(puntero(dirección(redes[0])), dirección(buf[0]), n * tamaño(Red_wifi))
+        n_redes := n
+        si elegida >= ent32(n_redes) entonces elegida := ent32(n_redes) - 1 fin
+    fin
+
+    ; lo que se prefiere (a RED.BIN): v = 0, 1, 2; otro, solo preguntar
+    función pide_preferir(v: nat32): nat32
+        variable cab: arreglo [8] de nat32
+        variable i, r: nat32
+        para i desde 0 hasta 7 hacer cab[i] := 0 fin
+        cab[0] := O_WIFI_PREFERIR
+        cab[1] := v
+        r := llamada(90, nat32(dirección(cab[0])), nat32(dirección(buf[0])), 0)
+        si r < 3 entonces
+            preferir := r
+            por_wifi := cab[1] = 1
+        fin
+        devolver r
+    fin
+
+    ; las rayitas de la señal (de 1 a 4), como el icono de la bandeja
+    función barras(s: ent32): nat32
+        si s >= -55 entonces devolver 4 fin
+        si s >= -67 entonces devolver 3 fin
+        si s >= -75 entonces devolver 2 fin
+        devolver 1
+    fin
+
+    función nombre_seg(s: nat32): puntero a byte
+        si s = W_SEG_ABIERTA entonces devolver "abierta" fin
+        si s = W_SEG_WPA2 entonces devolver "WPA2" fin
+        si s = 1 entonces devolver "WEP (no admitida)" fin
+        si s = 2 entonces devolver "WPA (no admitida)" fin
+        si s = 5 entonces devolver "WPA2-TKIP (no admitida)" fin
+        devolver "no admitida"
+    fin
+
+    función copia_ssid(destino: puntero a byte, s: puntero a byte, n: nat32)
+        variable i: nat32
+        si n > 32 entonces n := 32 fin
+        para i desde 0 hasta 32 hacer destino[i] := 0 fin
+        si n > 0 entonces
+            para i desde 0 hasta n - 1 hacer
+                destino[i] := s[i]
+                si s[i] < 32 entonces destino[i] := '?' fin
+            fin
+        fin
+        si n = 0 entonces copiar(destino, "(red oculta)") fin
+    fin
+
+    ; cómo está, en una línea
+    función línea_estado(destino: puntero a byte)
+        variable nom: arreglo [40] de byte
+        copia_ssid(nom, est.ssid, est.ssid_n)
+        dd[0] := nat32(dirección(nom[0]))
+        si no hay_servicio entonces
+            copiar(destino, "Wi-Fi: no está en marcha (no hay tarjeta Wi-Fi, o se usa solo el cable).")
+        sino si est.radio = 0 entonces
+            dd[0] := nat32(dirección(est.tarjeta[0]))
+            formatear(destino, 160, "Wi-Fi: la radio no se ha podido encender (%s). Ver WIFI.LOG.", dd)
+        sino si est.calculando <> 0 entonces
+            formatear(destino, 160, "Preparando la clave de «%s»...", dd)
+        sino si est.estado = W_CONECTADO entonces
+            formatear(destino, 160, "Conectado a «%s»", dd)
+        sino si est.estado <> W_PARADO entonces
+            formatear(destino, 160, "Conectando con «%s»...", dd)
+        sino si est.barriendo <> 0 entonces
+            copiar(destino, "Buscando redes...")
+        sino
+            copiar(destino, "Wi-Fi: sin conectar")
+        fin
+    fin
+
+    función línea_detalle(destino: puntero a byte)
+        variable ipt: arreglo [20] de byte
+        si hay_servicio y est.estado = W_CONECTADO entonces
+            dd[0] := nat32(est.señal)
+            dd[1] := est.canal
+            si ip <> 0 entonces
+                dd[2] := ip yb 0xFF
+                dd[3] := (ip >> 8) yb 0xFF
+                dd[4] := (ip >> 16) yb 0xFF
+                dd[5] := ip >> 24
+                formatear(ipt, 20, "%u.%u.%u.%u", puntero(dirección(dd[2])))
+            sino
+                copiar(ipt, "pidiéndola...")
+            fin
+            dd[2] := nat32(dirección(ipt[0]))
+            si por_wifi o ip = 0 entonces
+                formatear(destino, 160, "Señal %d dBm, canal %u; IP %s", dd)
+            sino
+                formatear(destino, 160, "Señal %d dBm, canal %u; la red va por el cable (IP %s)", dd)
+            fin
+        sino si hay_servicio y est.aviso[0] <> 0 entonces
+            copiar_hasta(destino, dirección(est.aviso[0]), 160)
+        sino
+            destino[0] := 0
+        fin
+    fin
+
+    ; =========================================================================
+    ;  En texto (la Consola)
+    ; =========================================================================
+    función escribe_estado()
+        lee_estado()
+        pide_preferir(0xFF)
+        línea_estado(t)
+        escribir(t)
+        escribir("\n")
+        línea_detalle(t)
+        si t[0] <> 0 entonces
+            escribir("  ")
+            escribir(t)
+            escribir("\n")
+        fin
+        si hay_servicio entonces
+            dd[0] := nat32(dirección(est.tarjeta[0]))
+            dd[1] := est.mac[0]
+            dd[2] := est.mac[1]
+            dd[3] := est.mac[2]
+            dd[4] := est.mac[3]
+            formatear(t, 200, "  Tarjeta: %s, MAC %02X:%02X:%02X:%02X", dd)
+            escribir(t)
+            dd[0] := est.mac[4]
+            dd[1] := est.mac[5]
+            formatear(t, 200, ":%02X:%02X\n", dd)
+            escribir(t)
+            dd[0] := est.tx
+            dd[1] := est.rx
+            dd[2] := est.reconexiones
+            formatear(t, 200, "  Tramas: enviadas %u, recibidas %u; reconexiones %u\n", dd)
+            escribir(t)
+        fin
+        pide_preferir(0xFF)
+        según nat16(preferir)
+            caso 1: escribir("  La red: solo por el cable (Usar: Cable)\n")
+            caso 2: escribir("  La red: por el Wi-Fi (Usar: Wi-Fi)\n")
+            caso 0: escribir("  La red: por el cable si está enchufado; si no, por el Wi-Fi (Usar: Automático)\n")
+        fin
+    fin
+
+    función espera_búsqueda()
+        variable k: nat32
+        dormir(30)
+        k := 0
+        mientras k < 60 hacer
+            si no lee_estado() entonces romper fin
+            si est.barriendo = 0 entonces romper fin
+            dormir(10)
+            k := k + 1
+        fin
+    fin
+
+    función escribe_redes()
+        variable i: nat32
+        variable nom: arreglo [40] de byte
+        variable b: arreglo [8] de byte
+        variable k, nb: nat32
+        si no lee_estado() entonces
+            escribir("Wi-Fi: no está en marcha (no hay tarjeta Wi-Fi, o se usa solo el cable).\n")
+            devolver
+        fin
+        escribir("Buscando redes...\n")
+        pide(WO_BUSCAR, 0, 0, 0, 0)
+        espera_búsqueda()
+        lee_redes()
+        si n_redes = 0 entonces
+            escribir("No se ve ninguna red.\n")
+            devolver
+        fin
+        escribir("N.º  Red                               Canal  Señal          Seguridad\n")
+        para i desde 0 hasta n_redes - 1 hacer
+            copia_ssid(nom, redes[i].ssid, redes[i].ssid_n)
+            nb := barras(redes[i].señal)
+            para k desde 0 hasta 3 hacer
+                si k < nb entonces b[k] := 0xDB sino b[k] := 0xB0 fin
+            fin
+            b[4] := 0
+            dd[0] := i + 1
+            dd[1] := nat32(dirección(nom[0]))
+            dd[2] := redes[i].canal
+            dd[3] := nat32(dirección(b[0]))
+            dd[4] := nat32(redes[i].señal)
+            dd[5] := nat32(nombre_seg(redes[i].seguridad))
+            formatear(t, 200, "%3u  %-32s  %5u  %s %d dBm  %s", dd)
+            escribir(t)
+            si redes[i].marcas yb WR_CONECTADA <> 0 entonces escribir("  (conectada)") sino si redes[i].marcas yb WR_RECORDADA <> 0 entonces escribir("  (recordada)") fin
+            escribir("\n")
+        fin
+    fin
+
+    ; la palabra n de los argumentos, con comillas («"Mi red"»): falso si no hay
+    función argumento(args: puntero a byte, n: nat32, destino: puntero a byte, cabe: nat32): bool
+        variable i, k, j: nat32
+        variable c: byte
+        i := 0
+        k := 0
+        mientras cierto hacer
+            mientras args[i] = ' ' hacer i := i + 1 fin
+            si args[i] = 0 entonces devolver falso fin
+            j := 0
+            si args[i] = '"' entonces
+                i := i + 1
+                mientras args[i] <> 0 y args[i] <> '"' hacer
+                    si k = n y j + 1 < cabe entonces
+                        destino[j] := args[i]
+                        j := j + 1
+                    fin
+                    i := i + 1
+                fin
+                si args[i] = '"' entonces i := i + 1 fin
+            sino
+                mientras args[i] <> 0 y args[i] <> ' ' hacer
+                    c := args[i]
+                    si k = n y j + 1 < cabe entonces
+                        destino[j] := c
+                        j := j + 1
+                    fin
+                    i := i + 1
+                fin
+            fin
+            si k = n entonces
+                destino[j] := 0
+                devolver cierto
+            fin
+            k := k + 1
+        fin
+        devolver falso
+    fin
+
+    función dice_resultado(r: nat32, nom: puntero a byte)
+        dd[0] := nat32(nom)
+        según nat16(r)
+            caso 0: formatear(t, 200, "Conectando con «%s»...\n", dd)
+            caso 1: formatear(t, 200, "La red «%s» pide contraseña (WPA2): REDWIFI /CONECTAR red contraseña\n", dd)
+            caso 2: formatear(t, 200, "La red «%s» usa una seguridad que no se admite (hace falta WPA2-Personal con AES, o abierta).\n", dd)
+            caso 3: formatear(t, 200, "No se ve la red «%s» (REDWIFI /REDES dice las que hay).\n", dd)
+            caso 4: formatear(t, 200, "La radio Wi-Fi no está en marcha.\n", dd)
+            caso 5: formatear(t, 200, "La contraseña de WPA2 tiene de 8 a 63 letras.\n", dd)
+            si no: formatear(t, 200, "No se puede conectar con «%s».\n", dd)
+        fin
+        si r >= 0xFFFFFFE0 entonces copiar(t, "Wi-Fi: no está en marcha.\n") fin
+    fin
+
+    ; manda WO_CONECTAR con el nombre y la contraseña de «nom» y «cl»
+    función manda_conectar(nom: puntero a byte, n: nat32, cl: puntero a byte, a: bool): nat32
+        variable nc, r: nat32
+        nc := longitud(cl)
+        si n > 32 entonces n := 32 fin
+        si nc > 64 entonces nc := 64 fin
+        copiar_memoria(dirección(buf[0]), nom, n)
+        si nc > 0 entonces copiar_memoria(dirección(buf[n]), cl, nc) fin
+        r := 0
+        si a entonces r := 1 fin
+        r := pide(WO_CONECTAR, n, nc, r, n + nc)
+        llenar(dirección(buf[0]), n + nc + 8, 0)
+        devolver r
+    fin
+
+    función orden_conectar(args: puntero a byte)
+        variable nom: arreglo [40] de byte
+        variable cl: arreglo [72] de byte
+        variable x: arreglo [16] de byte
+        variable n, k, r: nat32
+        variable a: bool
+        si no argumento(args, 1, nom, 40) entonces
+            escribir("Uso: REDWIFI /CONECTAR red [contraseña] [/AUTO]\n")
+            devolver
+        fin
+        cl[0] := 0
+        a := falso
+        k := 2
+        mientras argumento(args, k, x, 16) hacer
+            a_mayúsculas(x)
+            si iguales(x, "/AUTO") entonces
+                a := cierto
+            sino
+                argumento(args, k, cl, 72)
+            fin
+            k := k + 1
+        fin
+        si no lee_estado() entonces
+            escribir("Wi-Fi: no está en marcha.\n")
+            devolver
+        fin
+        lee_redes()
+        ; un número: el de la lista
+        n := 0
+        si texto_a_natural(nom, n) y n >= 1 y n <= n_redes entonces
+            copiar_memoria(dirección(nom[0]), dirección(redes[n - 1].ssid[0]), redes[n - 1].ssid_n)
+            nom[redes[n - 1].ssid_n] := 0
+        fin
+        r := manda_conectar(nom, longitud(nom), cl, a)
+        llenar(cl, 72, 0)
+        dice_resultado(r, nom)
+        escribir(t)
+        si r <> 0 entonces devolver fin
+        ; espera a que conecte (o falle), hasta 20 s
+        k := 0
+        mientras k < 40 hacer
+            dormir(50)
+            lee_estado()
+            si est.calculando = 0 y est.estado = W_CONECTADO entonces
+                línea_estado(t)
+                escribir(t)
+                escribir(".\n")
+                devolver
+            fin
+            si est.calculando = 0 y est.estado = W_PARADO y est.fallo <> 0 y k > 4 entonces
+                escribir(dirección(est.aviso[0]))
+                escribir("\n")
+                devolver
+            fin
+            k := k + 1
+        fin
+        escribir("Todavía no ha conectado: REDWIFI /ESTADO dice cómo va.\n")
+    fin
+
+    función de_consola(args: puntero a byte, p: puntero a byte): byte
+        variable nom: arreglo [40] de byte
+        variable r: nat32
+        si iguales(p, "/ESTADO") entonces
+            escribe_estado()
+        sino si iguales(p, "/REDES") entonces
+            escribe_redes()
+        sino si iguales(p, "/CONECTAR") entonces
+            orden_conectar(args)
+        sino si iguales(p, "/DESCONECTAR") entonces
+            r := pide(WO_DESCONECTAR, 0, 0, 0, 0)
+            si r >= 0xFFFFFFE0 entonces escribir("Wi-Fi: no está en marcha.\n") sino escribir("Desconectado.\n") fin
+        sino si iguales(p, "/OLVIDAR") entonces
+            si no argumento(args, 1, nom, 40) entonces
+                escribir("Uso: REDWIFI /OLVIDAR red\n")
+                devolver 1
+            fin
+            copiar_memoria(dirección(buf[0]), dirección(nom[0]), longitud(nom))
+            r := pide(WO_OLVIDAR, 0, 0, 0, longitud(nom))
+            dd[0] := nat32(dirección(nom[0]))
+            formatear(t, 200, "La red «%s» queda olvidada.\n", dd)
+            escribir(t)
+        sino si iguales(p, "/REGISTRO") entonces
+            r := pide(WO_REGISTRO, 0, 0, 0, 0)
+            si r >= 0xFFFFFFE0 entonces
+                escribir("Wi-Fi: no está en marcha.\n")
+            sino
+                buf[resp_largo] := 0
+                escribir(dirección(buf[0]))
+            fin
+        sino si iguales(p, "/USAR") entonces
+            argumento(args, 1, nom, 40)
+            a_mayúsculas(nom)
+            r := 0xFF
+            si empieza_por(nom, "AUTO") entonces r := 0 fin
+            si empieza_por(nom, "CABLE") entonces r := 1 fin
+            si empieza_por(nom, "WIFI") o empieza_por(nom, "WI-FI") entonces r := 2 fin
+            si r = 0xFF entonces
+                escribir("Uso: REDWIFI /USAR AUTO|CABLE|WIFI\n")
+                devolver 1
+            fin
+            r := pide_preferir(r)
+            si r >= 0xFFFFFFE0 entonces escribir("No hay servicio de red.\n") sino escribe_estado() fin
+        sino
+            escribir("REDWIFI: la ventana del Wi-Fi. En la Consola:\n")
+            escribir("  REDWIFI /ESTADO | /REDES | /CONECTAR red [contraseña] [/AUTO] | /DESCONECTAR\n")
+            escribir("          /OLVIDAR red | /REGISTRO | /USAR AUTO|CABLE|WIFI\n")
+        fin
+        devolver 0
+    fin
+
+    ; =========================================================================
+    ;  La ventana
+    ; =========================================================================
+    ; las cuatro rayitas en (x, yy): llenas las n primeras; las demás, huecas
+    función pinta_barras(x: ent32, yy: ent32, n: nat32, tinta: nat32, fondo_: nat32)
+        variable i, h, an, bx: ent32
+        an := LA div 2 + 1
+        para i desde 0 hasta 3 hacer
+            h := (LT * (i + 1)) div 4
+            bx := x + i * (an + 2)
+            caja(bx, yy + LT - h, an, h, tinta)
+            si nat32(i) >= n entonces caja(bx + E, yy + LT - h + E, an - 2 * E, h - 2 * E, fondo_) fin
+        fin
+    fin
+
+    ; un candado (las redes con contraseña)
+    función pinta_candado(x: ent32, yy: ent32, tinta: nat32, fondo_: nat32)
+        variable an: ent32
+        an := LA + 2
+        borde(x + 2, yy + 1, an - 4, LT div 2, E, tinta)
+        caja(x, yy + LT div 2 - 1, an, LT div 2 + 1, tinta)
+        caja(x + an div 2 - 1, yy + LT div 2 + 2, 2, 3, fondo_)
+    fin
+
+    ; un botón de «Usar:»; el elegido, verde y con una raya gruesa debajo (la forma, no solo el color)
+    función usar_boton(k: nat32, x: ent32, yy: ent32, t: puntero a byte)
+        botón(ID_USAR + k, x, yy, t, preferir = k, falso)
+        si preferir = k entonces caja(x + LA, yy + alto_botón() + 2 * E, ancho_botón(t) - 2 * LA, 3 * E, C_TINTA) fin
+    fin
+
+    función pinta()
+        variable yy, x, an, i, fila: ent32
+        variable vueltas: nat32
+        variable nom: arreglo [40] de byte
+        variable fondo_, tinta: nat32
+        vueltas := 0
+        mientras vueltas < 2 hacer
+            empezar_controles()
+            caja(0, 0, ancho, alto, C_FONDO)
+            ; arriba: cómo está, con la señal en rayitas
+            yy := 2 * E + LA div 2
+            si hay_servicio y est.estado = W_CONECTADO entonces pinta_barras(LA, yy, barras(est.señal), C_TINTA, C_FONDO) sino pinta_barras(LA, yy, 0, C_SUAVE, C_FONDO) fin
+            línea_estado(t)
+            texto_corto(LA * 5, yy, t, ancho - 6 * LA, C_TINTA, cierto)
+            línea_detalle(t)
+            texto_corto(LA * 5, yy + LT + 2 * E, t, ancho - 6 * LA, C_SUAVE, falso)
+            yy := yy + 2 * LT + 6 * E
+            ; las redes
+            negrita(LA, yy + (alto_botón() - LT) div 2, "Redes a la vista", C_TINTA)
+            botón(ID_BUSCAR, ancho - LA - ancho_botón("Buscar"), yy, "Buscar", falso, no hay_servicio)
+            yy := yy + alto_botón() + 3 * E
+            fila_al := LT + 6 * E
+            lista_y := yy
+            lista_al := 7 * fila_al + 4
+            an := ancho - 2 * LA
+            caja(LA, yy, an, lista_al, C_BORDE)
+            caja(LA + 1, yy + 1, an - 2, lista_al - 2, C_PAPEL)
+            si foco = ID_LISTA entonces marca_foco(LA, yy, an, lista_al) fin
+            apuntar(ID_LISTA, K_LISTA, LA, yy, an, lista_al)
+            si n_redes = 0 entonces
+                si hay_servicio y est.barriendo <> 0 entonces
+                    Controles.texto(2 * LA, yy + 2 * E + 4, "Buscando redes...", C_SUAVE)
+                sino
+                    Controles.texto(2 * LA, yy + 2 * E + 4, "No se ve ninguna red. Pulse «Buscar».", C_SUAVE)
+                fin
+            fin
+            si elegida >= 0 y elegida < primera entonces primera := elegida fin
+            si elegida >= primera + 7 entonces primera := elegida - 6 fin
+            fila := 0
+            mientras fila < 7 y primera + fila < ent32(n_redes) hacer
+                i := primera + fila
+                x := LA + 2
+                fondo_ := C_PAPEL
+                tinta := C_TINTA
+                si i = elegida entonces
+                    fondo_ := C_AZUL
+                    tinta := C_PAPEL
+                    caja(x, yy + 2 + fila * fila_al, an - 4, fila_al, fondo_)
+                    negrita(x + 2, yy + 2 + fila * fila_al + 3 * E, ">", tinta)
+                fin
+                pinta_barras(x + LA + 4, yy + 2 + fila * fila_al + 3 * E, barras(redes[i].señal), tinta, fondo_)
+                si redes[i].seguridad <> W_SEG_ABIERTA entonces pinta_candado(x + 5 * LA, yy + 2 + fila * fila_al + 3 * E, tinta, fondo_) fin
+                copia_ssid(nom, redes[i].ssid, redes[i].ssid_n)
+                texto_corto(x + 7 * LA, yy + 2 + fila * fila_al + 3 * E, nom, an - 36 * LA, tinta, redes[i].marcas yb WR_CONECTADA <> 0)
+                dd[0] := nat32(redes[i].señal)
+                dd[1] := nat32(nombre_seg(redes[i].seguridad))
+                formatear(t, 200, "%d dBm  %s", dd)
+                si redes[i].marcas yb WR_CONECTADA <> 0 entonces concatenar(t, "  conectada") sino si redes[i].marcas yb WR_RECORDADA <> 0 entonces concatenar(t, "  recordada") fin
+                texto_corto(x + an - 28 * LA, yy + 2 + fila * fila_al + 3 * E, t, 27 * LA, tinta, falso)
+                fila := fila + 1
+            fin
+            yy := yy + lista_al + 4 * E
+            ; la contraseña y conectar sola
+            yy := yy + campo(ID_CLAVE, LA, yy, 30 * LA, "Contraseña (si la pide)", clave, cierto) + 4 * E
+            casilla(ID_AUTO, LA, yy, "Conectar automáticamente", autom)
+            yy := yy + LT + 4 * E
+            x := LA
+            x := x + botón(ID_CONECTAR, x, yy, "Conectar", cierto, no hay_servicio o elegida < 0) + LA
+            x := x + botón(ID_DESCONECTAR, x, yy, "Desconectar", falso, no hay_servicio) + LA
+            x := x + botón(ID_OLVIDAR, x, yy, "Olvidar", falso, elegida < 0 o (elegida >= 0 y redes[elegida].marcas yb WR_RECORDADA = 0)) + LA
+            yy := yy + alto_botón() + 4 * E
+            ; lo que pasa
+            si aviso[0] <> 0 entonces texto_corto(LA, yy, aviso, ancho - 2 * LA, C_NARANJA, cierto) fin
+            yy := yy + LT + 3 * E
+            ; por dónde va la red
+            negrita(LA, yy + (alto_botón() - LT) div 2, "Usar:", C_TINTA)
+            x := LA * 7
+            usar_boton(0, x, yy, "Automático")
+            x := x + ancho_botón("Automático") + LA
+            usar_boton(1, x, yy, "Cable")
+            x := x + ancho_botón("Cable") + LA
+            usar_boton(2, x, yy, "Wi-Fi")
+            botón(ID_CERRAR, ancho - LA - ancho_botón("Cerrar"), yy, "Cerrar", falso, falso)
+            si no asegurar_foco() entonces romper fin
+            vueltas := vueltas + 1
+        fin
+        volcar()
+    fin
+
+    función conecta()
+        variable r: nat32
+        variable nom: arreglo [40] de byte
+        si elegida < 0 o elegida >= ent32(n_redes) entonces
+            copiar(aviso, "Elija una red de la lista.")
+            devolver
+        fin
+        copia_ssid(nom, redes[elegida].ssid, redes[elegida].ssid_n)
+        si redes[elegida].seguridad = W_SEG_WPA2 y clave[0] = 0 y redes[elegida].marcas yb WR_RECORDADA = 0 entonces
+            dd[0] := nat32(dirección(nom[0]))
+            formatear(aviso, 160, "Escriba la contraseña de «%s».", dd)
+            foco := ID_CLAVE
+            devolver
+        fin
+        r := manda_conectar(dirección(redes[elegida].ssid[0]), redes[elegida].ssid_n, clave, autom)
+        llenar(clave, 72, 0)
+        dice_resultado(r, nom)
+        copiar_hasta(aviso, t, 160)
+        ; (sin el salto de línea)
+        si longitud(aviso) > 0 y aviso[longitud(aviso) - 1] = '\n' entonces aviso[longitud(aviso) - 1] := 0 fin
+    fin
+
+    función hace(id: nat32)
+        variable r: nat32
+        aviso[0] := 0
+        según nat16(id)
+            caso ID_BUSCAR:
+                pide(WO_BUSCAR, 0, 0, 0, 0)
+                copiar(aviso, "Buscando redes...")
+            caso ID_CONECTAR: conecta()
+            caso ID_DESCONECTAR:
+                pide(WO_DESCONECTAR, 0, 0, 0, 0)
+                copiar(aviso, "Desconectado.")
+            caso ID_OLVIDAR:
+                si elegida >= 0 entonces
+                    copiar_memoria(dirección(buf[0]), dirección(redes[elegida].ssid[0]), redes[elegida].ssid_n)
+                    pide(WO_OLVIDAR, 0, 0, 0, redes[elegida].ssid_n)
+                    copiar(aviso, "Red olvidada: la contraseña ya no se guarda.")
+                fin
+            caso ID_AUTO:
+                autom := no autom
+                si elegida >= 0 y redes[elegida].marcas yb WR_RECORDADA <> 0 entonces
+                    copiar_memoria(dirección(buf[0]), dirección(redes[elegida].ssid[0]), redes[elegida].ssid_n)
+                    r := 0
+                    si autom entonces r := 1 fin
+                    pide(WO_AUTO, r, 0, 0, redes[elegida].ssid_n)
+                fin
+            caso ID_USAR, ID_USAR + 1, ID_USAR + 2:
+                r := pide_preferir(id - ID_USAR)
+                si r >= 0xFFFFFFE0 entonces copiar(aviso, "No hay servicio de red.") fin
+                si r = 1 entonces copiar(aviso, "La red irá solo por el cable: el Wi-Fi se apaga.") fin
+                si r = 2 entonces copiar(aviso, "La red irá por el Wi-Fi.") fin
+                si r = 0 entonces copiar(aviso, "La red irá por el cable si está enchufado; si no, por el Wi-Fi.") fin
+        fin
+    fin
+
+    ; al elegir una red: «Conectar automáticamente», como la tenga guardada
+    función elige(k: ent32)
+        si k < 0 o k >= ent32(n_redes) entonces devolver fin
+        elegida := k
+        si redes[k].marcas yb WR_RECORDADA <> 0 entonces autom := redes[k].marcas yb WR_AUTO <> 0 fin
+    fin
+
+    función clic(x: ent32, yy: ent32, n_veces: nat32)
+        variable id: nat32
+        variable k: ent32
+        id := control_en(x, yy)
+        si id = 0 entonces devolver fin
+        foco := id
+        si id = ID_LISTA entonces
+            k := primera + (yy - lista_y - 2) div fila_al
+            si k >= 0 y k < ent32(n_redes) entonces
+                elige(k)
+                si n_veces >= 2 entonces conecta() fin
+            fin
+            devolver
+        fin
+        si id <> ID_CLAVE entonces hace(id) fin
+    fin
+
+    ; da cierto si hay que cerrar
+    función tecla_pulsada(c: nat32): bool
+        si c = 27 entonces devolver cierto fin
+        si c = '\t' entonces
+            pasar_foco(cierto)
+            devolver falso
+        fin
+        si c = TECLA_MAYÚS_TAB entonces
+            pasar_foco(falso)
+            devolver falso
+        fin
+        si foco = ID_CLAVE entonces
+            si c = '\n' entonces
+                conecta()
+                devolver falso
+            fin
+            campo_tecla(clave, 64, c)
+            devolver falso
+        fin
+        si foco = ID_LISTA entonces
+            si c = TECLA_ARRIBA y elegida > 0 entonces elige(elegida - 1) fin
+            si c = TECLA_ABAJO y elegida + 1 < ent32(n_redes) entonces elige(elegida + 1) fin
+            si c = TECLA_ABAJO y elegida < 0 y n_redes > 0 entonces elige(0) fin
+            si c = '\n' entonces conecta() fin
+            devolver falso
+        fin
+        si c = '\n' o c = ' ' entonces
+            si foco = ID_CERRAR entonces devolver cierto fin
+            hace(foco)
+        fin
+        devolver falso
+    fin
+
+    función ventana_wifi(): byte
+        variable s: Suceso
+        variable visto, último_redes: nat32
+        variable buscaba: bool
+        si no preparar_medida("Wi-Fi", 600, 430, tamaño_) entonces devolver 2 fin
+        lee_estado()
+        pide_preferir(0xFF)
+        lee_redes()
+        si hay_servicio y n_redes = 0 y est.barriendo = 0 entonces pide(WO_BUSCAR, 0, 0, 0, 0) fin
+        foco := ID_LISTA
+        si n_redes > 0 entonces elige(0) fin
+        pinta()
+        visto := tics()
+        último_redes := tics()
+        buscaba := est.barriendo <> 0
+        mientras cierto hacer
+            si suceso(v, s, falso) entonces
+                si s.clase = EV_TECLA entonces
+                    si tecla_pulsada(s.a) entonces romper fin
+                    pinta()
+                sino si s.clase = EV_RATÓN_BAJA entonces
+                    clic(ent32(s.a), ent32(s.b), veces(s.c))
+                    si foco = ID_CERRAR entonces romper fin
+                    pinta()
+                sino si s.clase = EV_TAMAÑO entonces
+                    nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
+                    pinta()
+                sino si s.clase = EV_CERRAR entonces
+                    romper
+                fin
+            sino
+                dormir(5)
+            fin
+            ; cada medio segundo, cómo está; la lista, cada 2 (y al acabar de buscar)
+            si tics() - visto >= 50 entonces
+                visto := tics()
+                lee_estado()
+                pide_preferir(0xFF)
+                si tics() - último_redes >= 200 o (buscaba y est.barriendo = 0) entonces
+                    último_redes := tics()
+                    lee_redes()
+                    si elegida < 0 y n_redes > 0 entonces elige(0) fin
+                fin
+                buscaba := est.barriendo <> 0
+                ; (ya conectada, el «Conectando...» de antes sobra)
+                si hay_servicio y est.estado = W_CONECTADO y empieza_por(aviso, "Conectando") entonces aviso[0] := 0 fin
+                pinta()
+            fin
+        fin
+        llenar(clave, 72, 0)
+        devolver 0
+    fin
+
+    función principal(): byte
+        variable args: arreglo [200] de byte
+        variable p: arreglo [40] de byte
+        variable r: byte
+        argumentos(args, 200)
+        p[0] := 0
+        palabra(args, 0, p, 40)
+        a_mayúsculas(p)
+        si p[0] = '/' entonces devolver de_consola(args, p) fin
+        r := ventana_wifi()
+        si r = 2 entonces
+            ; sin escritorio: cómo está, en texto
+            escribe_estado()
+            devolver 0
+        fin
+        devolver r
+    fin
+
+fin UredWifi.

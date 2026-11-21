@@ -14,7 +14,7 @@ módulo Ured
 
     modelo usuario
 
-    importar Llamadas, Rbase, Rtarjeta, Rpila, Rtcp, Mem32, Textos32
+    importar Llamadas, Rbase, Rtarjeta, Rwifi, Rpila, Rtcp, Mem32, Textos32
 
     ; lo que dice el icono (red.cas)
     constante RED_SIN_TARJETA = 1
@@ -24,6 +24,7 @@ módulo Ured
 
     variable pedido: arreglo [64 + MAX_DATOS] de byte
     variable trama: arreglo [1536] de byte
+    variable salida_wifi: arreglo [MAX_DATOS] de byte   ; (WIFI) lo que sale por el Wi-Fi, para WIFI.BIN
     variable nombre: arreglo [256] de byte
     variable info: Info_red
     variable enlace: bool
@@ -47,9 +48,12 @@ módulo Ured
     función dilo()
         variable e, a: nat32
         e := cómo_está()
+        ; (WIFI) el bit 9: por el Wi-Fi; los 12 y 13: lo que se prefiere (RED.INI)
+        si tarjeta = T_WIFI entonces e := e ob 0x200 fin
+        e := e ob (preferir << 12)
         si e <> estado_dicho o mi_ip <> ip_dicha entonces
-            a := 0xFFFFFFFF
-            si tarjeta <> T_NINGUNA entonces a := pci_tarjeta fin
+            ; (el aparato que hace DMA para RED.BIN: el del cable; el Wi-Fi lo dice WIFI.BIN)
+            a := pci_cable
             decir_estado(e, mi_ip, a)
             estado_dicho := e
             ip_dicha := mi_ip
@@ -66,11 +70,62 @@ módulo Ured
             apunta4("enlace: sí (%u Mbit/s)", velocidad(), 0, 0, 0)
             dhcp_empezar()
         sino
-            apunta("enlace: no (¿el cable?)")
+            si tarjeta = T_WIFI entonces apunta("enlace: no (el Wi-Fi no está conectado)") sino apunta("enlace: no (¿el cable?)") fin    ; (WIFI)
             dhcp_parar()
             pila_sin_cable()
             tcp_sin_red(SIN_CABLE)
         fin
+    fin
+
+    ; (WIFI) quitar lo que había de la red (como al quitar el cable): para cambiar de tarjeta
+    función corta()
+        si enlace entonces
+            enlace := falso
+            dhcp_parar()
+            pila_sin_cable()
+            tcp_sin_red(SIN_CABLE)
+        fin
+    fin
+
+    ; (WIFI) ¿por el cable o por el Wi-Fi? (Rwifi.conviene, con lo que dice RED.INI)
+    función elige_tarjeta()
+        variable cable_ok, w: bool
+        Rwifi.cambió := falso
+        cable_ok := tarjeta_cable <> T_NINGUNA y enlace_de(tarjeta_cable)
+        w := conviene(cable_ok)
+        si w y tarjeta <> T_WIFI entonces
+            corta()
+            usar_wifi(cierto)
+            apunta("la red va por el Wi-Fi")
+        sino si no w y tarjeta = T_WIFI entonces
+            corta()
+            usar_wifi(falso)
+            si tarjeta = T_NINGUNA entonces apunta("la red ya no va por el Wi-Fi (no hay cable)") sino apunta("la red va por el cable") fin
+        fin
+        mira_enlace()
+    fin
+
+    ; (WIFI) O_WIFI_CAMBIO: las tramas que han llegado por el Wi-Fi, a la
+    ; pila (si la red va por él); y las que hay que enviar, de vuelta
+    función cambio_wifi(p: puntero a Pedido_red, datos: puntero a byte)
+        variable i, n, r: nat32
+        estado_de(p)
+        i := 0
+        mientras i + 2 <= p.largo hacer
+            n := nat32(datos[i]) ob (nat32(datos[i + 1]) << 8)
+            si n < 14 o i + 2 + n > p.largo entonces romper fin
+            si tarjeta = T_WIFI entonces
+                recibidas := recibidas + 1
+                entradas := entradas + 1
+                si Rpila.entrada(datos + i + 2, n) = ENTRA_TCP entonces tcp_entra(ent_ip, ent_datos, ent_largo) fin
+            fin
+            i := i + 2 + n
+        fin
+        si Rwifi.cambió entonces elige_tarjeta() fin
+        n := lote(dirección(salida_wifi[0]))
+        r := 0
+        si que_pare() entonces r := 1 fin
+        contestar(p.hueco, p.serie, 0, r, 0, dirección(salida_wifi[0]), n)
     fin
 
     función llena_info()
@@ -102,6 +157,14 @@ módulo Ured
         si orden = AVISO_ACABÓ entonces
             tcp_acabó(p.tarea)
             udp_acabó(p.tarea)
+            Rwifi.quitar(p.tarea)                    ; (WIFI) si era WIFI.BIN
+            si Rwifi.cambió entonces elige_tarjeta() fin
+            devolver
+        fin
+        si orden = AVISO_PREFERIR entonces
+            ; (WIFI) lo elegido en Configuración: Automático, Cable o Wi-Fi
+            Rwifi.elegir(p.cab[1])
+            elige_tarjeta()
             devolver
         fin
         f := falta()
@@ -153,6 +216,25 @@ módulo Ured
             caso O_CERRAR:
                 si es_tcp(p.cab[1]) entonces r := Rtcp.cerrar(p.cab[1], p.tarea) sino r := udp_cerrar(p.cab[1], p.tarea) fin
                 contestar(h, s, r, 0, 0, nulo, 0)
+            ; ---- (WIFI) el servicio Wi-Fi (WIFI.BIN) y lo que se prefiere ----
+            caso O_WIFI_PONER:
+                contestar(h, s, poner(p.tarea, p, datos), 0, 0, nulo, 0)
+                elige_tarjeta()
+            caso O_WIFI_CAMBIO:
+                si p.tarea <> Rwifi.dueño entonces contestar(h, s, NO_VALE_RED, 0, 0, nulo, 0) sino cambio_wifi(p, datos) fin
+            caso O_WIFI_QUITAR:
+                Rwifi.quitar(p.tarea)
+                contestar(h, s, 0, 0, 0, nulo, 0)
+                elige_tarjeta()
+            caso O_WIFI_PREFERIR:
+                ; (en cab[1], 1 si la red va por el Wi-Fi)
+                si p.cab[1] <= PREFIERE_WIFI entonces
+                    Rwifi.elegir(p.cab[1])
+                    elige_tarjeta()
+                fin
+                r := 0
+                si tarjeta = T_WIFI entonces r := 1 fin
+                contestar(h, s, preferir, r, 0, nulo, 0)
             caso O_UDP:
                 si tarjeta = T_NINGUNA entonces
                     contestar(h, s, SIN_TARJETA, 0, 0, nulo, 0)
@@ -179,6 +261,7 @@ módulo Ured
         si no buscar_tarjeta() entonces
             apunta("no hay ninguna tarjeta de red que se sepa llevar")
         fin
+        Rwifi.arrancar()                                ; (WIFI) RED.INI y, si hay tarjeta Wi-Fi, WIFI.BIN
         enlace := falso
         estado_dicho := 0xFFFFFFFF
         mira_enlace()
@@ -188,6 +271,7 @@ módulo Ured
         tic_visto := ahora()
         enlace_visto := ahora()
         mientras cierto hacer
+            vaciar_cable(dirección(trama[0]))                ; (WIFI) la del cable, mientras se va por el Wi-Fi
             si tarjeta <> T_NINGUNA entonces
                 atender_tarjeta()
                 k := 0
@@ -204,7 +288,7 @@ módulo Ured
                 tcp_tic()
                 si ahora() - enlace_visto >= 25 entonces
                     enlace_visto := ahora()
-                    mira_enlace()
+                    elige_tarjeta()                         ; (WIFI) y, dentro, mira_enlace()
                 fin
                 dilo()
             fin

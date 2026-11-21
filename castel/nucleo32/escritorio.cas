@@ -107,6 +107,7 @@ módulo Escritorio
     constante AC_REINICIAR_YA = 36
     constante AC_MÁS_TARDE = 37
     constante AC_MODO = 40                      ; 40 y los siguientes: los modos de la lista
+    constante AC_PREFIERE = 75                  ; (WIFI) 75, 76 y 77: la red por Automático, Cable o Wi-Fi (Configuración)
 
     ; ---- los menús del botón secundario (la etiqueta de cada uno) ----
     constante ME_FONDO = 1                      ; el del tapiz
@@ -561,8 +562,39 @@ módulo Escritorio
     fin
 
     función hueco_red(): ent32
-        si estado_red <> RED_NADA entonces devolver ICONO_RED fin
+        si estado_red <> RED_NADA o estado_wifi <> WIFI_NADA entonces devolver ICONO_RED fin    ; (WIFI)
         devolver 0
+    fin
+
+    ; (WIFI) ¿el icono de la red es el del Wi-Fi? Sí si hay servicio Wi-Fi con
+    ; su tarjeta y la red no va por un cable conectado
+    función icono_wifi(): bool
+        si estado_wifi = WIFI_NADA o estado_wifi = WIFI_SIN_TARJETA entonces devolver falso fin
+        devolver por_wifi o estado_red <> RED_CONECTADA
+    fin
+
+    ; (WIFI) el icono del Wi-Fi: cuatro rayitas de alto creciente; llenas
+    ; (blancas), las de la señal; huecas (solo el borde), las demás. Lo dice
+    ; la forma, no solo el color: conectando, las cuatro huecas; sin
+    ; conectar, las cuatro huecas y un aspa arriba a la izquierda
+    función pinta_icono_wifi(ref l: Lienzo, x: ent32, yy: ent32)
+        variable i, h, bx: ent32
+        para i desde 0 hasta 3 hacer
+            h := 5 + i * 3
+            bx := x + i * 5
+            rectángulo(l, bx, yy + 15 - h, 4, h, 0x14336A)
+            si estado_wifi = WIFI_CONECTADA y nat32(i) < barras_wifi entonces
+                rectángulo(l, bx + 1, yy + 16 - h, 2, h - 2, BLANCO)
+            sino
+                rectángulo(l, bx + 1, yy + 16 - h, 2, h - 2, 0x4F9BE6)
+            fin
+        fin
+        si estado_wifi = WIFI_SIN_CONECTAR entonces
+            línea(l, x, yy, x + 5, yy + 5, 0x14336A)
+            línea(l, x + 1, yy, x + 6, yy + 5, 0x14336A)
+            línea(l, x + 5, yy, x, yy + 5, 0x14336A)
+            línea(l, x + 6, yy, x + 1, yy + 5, 0x14336A)
+        fin
     fin
 
     función hueco_pila(): ent32
@@ -647,7 +679,9 @@ módulo Escritorio
         rectángulo(valor(l), an - bandeja, 2, 1, ALTO_BARRA - 2, 0x1A56AC)
         rectángulo(valor(l), an - bandeja + 1, 2, 1, ALTO_BARRA - 2, 0x9AD4FF)
         si n_usb > 0 entonces icono_memoria(valor(l), an - bandeja + 8, 6) fin
-        si hueco_red() > 0 entonces pinta_icono_red(valor(l), an - bandeja + hueco_usb() + 7, 9) fin
+        si hueco_red() > 0 entonces
+            si icono_wifi() entonces pinta_icono_wifi(valor(l), an - bandeja + hueco_usb() + 3, 8) sino pinta_icono_red(valor(l), an - bandeja + hueco_usb() + 7, 9) fin    ; (WIFI)
+        fin
         si hay_pila() entonces pinta_pila(valor(l), an - bandeja + hueco_usb() + hueco_red() + 8, 0) fin
         red_vista := cambios_red
         ahora(f, h)
@@ -1135,13 +1169,22 @@ módulo Escritorio
         repintada(v_acerca, 0, 0, 440, 214)
     fin
 
+    ; (WIFI) un pulsador de los de elegir uno (verde el elegido, gris los otros)
+    función botón_elegido(x: ent32, yy: ent32, t: puntero a byte, acción: nat32, elegido: bool)
+        si elegido entonces
+            pulsador(v_config, x, yy, 100, 30, t, VERDE_ARRIBA, VERDE_ABAJO, acción)
+        sino
+            pulsador(v_config, x, yy, 100, 30, t, 0xA9BDD8, 0x7C95B8, acción)
+        fin
+    fin
+
     función pinta_config()
         variable l: puntero a Lienzo
         variable d: arreglo [4] de nat32
         l := lienzo_de(v_config)
         si l = nulo entonces devolver fin
         quita_pulsadores(v_config)
-        degradado(valor(l), 0, 0, 460, 280, 0xF4F8FE, 0xD6E6FA)
+        degradado(valor(l), 0, 0, 460, 320, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 14, 10, 48)
         texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.8", TINTA)
         texto(valor(l), 74, 34, "un núcleo de 32 bits escrito en Castel", TINTA_SUAVE)
@@ -1181,15 +1224,20 @@ módulo Escritorio
         sino
             pulsador(v_config, 326, 174, 100, 30, "Verde", 0xA9BDD8, 0x7C95B8, AC_FONDO + 2)
         fin
+        ; (WIFI) la red: por dónde va (lo guarda RED.BIN en RED.INI)
+        texto(valor(l), 20, 224, "Red:", TINTA)
+        botón_elegido(110, 216, "Automático", AC_PREFIERE, preferir_red = PREFIERE_AUTO)
+        botón_elegido(218, 216, "Cable", AC_PREFIERE + 1, preferir_red = PREFIERE_CABLE)
+        botón_elegido(326, 216, "Wi-Fi", AC_PREFIERE + 2, preferir_red = PREFIERE_WIFI)
         ; (dispositivos) lo que hay en el equipo y qué lo lleva
-        pulsador(v_config, 14, 232, 290, 32, "Administrador de dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
-        pulsador(v_config, 346, 232, 100, 32, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
-        repintada(v_config, 0, 0, 460, 280)
+        pulsador(v_config, 14, 272, 290, 32, "Administrador de dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
+        pulsador(v_config, 346, 272, 100, 32, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
+        repintada(v_config, 0, 0, 460, 320)
     fin
 
     función abre_config()
         si v_config <> 0 entonces cierra_cuadro(v_config) fin
-        v_config := cuadro("Configuración", 460, 280)
+        v_config := cuadro("Configuración", 460, 320)
         pinta_config()
     fin
 
@@ -2001,6 +2049,10 @@ módulo Escritorio
             caso AC_TECLADO_US:
                 pon_teclado(falso)
                 pinta_config()
+            caso AC_PREFIERE..AC_PREFIERE + 2:
+                ; (WIFI) por dónde va la red: se lo dice a RED.BIN
+                pedir_preferencia(acción - AC_PREFIERE)
+                pinta_config()
             caso AC_FONDO..AC_FONDO + 2:
                 fondo := acción - AC_FONDO
                 pinta_tapiz()
@@ -2113,8 +2165,8 @@ módulo Escritorio
                     ; el icono de las memorias USB
                     menú_usb(ent32(e.a))
                 sino si hueco_red() > 0 y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() y ent32(e.a) < pantalla.ancho - bandeja + hueco_usb() + ICONO_RED entonces
-                    ; el icono de la red
-                    dice_red()
+                    ; el icono de la red (WIFI: con el servicio Wi-Fi, la ventana del Wi-Fi)
+                    si estado_wifi <> WIFI_NADA entonces lanza("\\REDWIFI.BIN", nulo) sino dice_red() fin
                 sino si ent32(e.a) >= BOTONES_X y ancho_botón > 0 entonces
                     n := (ent32(e.a) - BOTONES_X) div ancho_botón
                     si n < ent32(n_botones) entonces
