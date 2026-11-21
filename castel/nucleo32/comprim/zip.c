@@ -750,6 +750,7 @@ int zip_sacar(zarchivo *z, uint32_t i, const char *destino, const char *clave)
 /* las carpetas ya hechas en esta tanda: la del ZIP y la de aquí */
 typedef struct { char *zip, *local; } zhecha;
 static zhecha *hechas;
+static char *primero;			/* (zcuenta.primero_local de la tanda) */
 static uint32_t n_hechas, cabe_hechas;
 
 static void suelta_hechas(void)
@@ -841,6 +842,8 @@ static int carpeta_de(const char *raiz, const char *rel, char *sale)
 			return r;
 		if (pl_que_es(local) != 2 && pl_hacer_carpeta(local))
 			return ZIP_E_CREAR;
+		if (primero && !primero[0])
+			strcpy(primero, local);
 		if ((r = apunta_hecha(zipdir, local)))
 			return r;
 	}
@@ -865,6 +868,7 @@ int zip_sacar_todo(zarchivo *z, const char *carpeta, const uint8_t *elegidos, co
 	if (pl_que_es(carpeta) != 2 && pl_hacer_carpeta(carpeta))
 		return ZIP_E_CREAR;
 	sacado_total = 0;
+	primero = c->primero_local;
 	for (i = 0; i < z->n; i++) {
 		zmiembro *m = &z->m[i];
 		char *barra;
@@ -910,12 +914,15 @@ int zip_sacar_todo(zarchivo *z, const char *carpeta, const uint8_t *elegidos, co
 				if (!r) {
 					c->sacados++;
 					strcpy(c->ultimo_local, ruta);
+					if (!c->primero_local[0])
+						strcpy(c->primero_local, ruta);
 					continue;
 				}
 			}
 		}
 		if (r == ZIP_E_CORTADO || r == ZIP_E_ESCRIBIR || r == ZIP_E_MEMORIA || r == ZIP_E_BOMBA) {
 			suelta_hechas();
+			primero = NULL;
 			c->fallos++;
 			c->ultimo_error = r;
 			strncpy(c->ultimo, m->nombre, sizeof(c->ultimo) - 1);
@@ -926,6 +933,7 @@ int zip_sacar_todo(zarchivo *z, const char *carpeta, const uint8_t *elegidos, co
 		strncpy(c->ultimo, m->nombre, sizeof(c->ultimo) - 1);
 	}
 	suelta_hechas();
+	primero = NULL;
 	return c->fallos ? c->ultimo_error : 0;
 }
 

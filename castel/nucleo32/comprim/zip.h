@@ -138,6 +138,7 @@ typedef struct {
 	int ultimo_error;
 	char ultimo[ZIP_MAX_NOMBRE];	/* el último que ha fallado */
 	char ultimo_local[ZIP_MAX_RUTA];	/* y el último sacado, con su ruta de aquí */
+	char primero_local[ZIP_MAX_RUTA];	/* lo primero que se ha hecho arriba (un archivo o una carpeta) */
 } zcuenta;
 int zip_sacar_todo(zarchivo *z, const char *carpeta, const uint8_t *elegidos, const char *quita, const char *clave, int reemplazar, zcuenta *c);
 
