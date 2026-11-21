@@ -73,6 +73,7 @@ static inline uint32_t sc(uint32_t n, uint32_t a, uint32_t b, uint32_t c)
 #define E_PROTEGIDO 0xFFFFFFF5u
 #define E_NO_VACIA 0xFFFFFFF4u
 #define E_NOMBRE_MALO 0xFFFFFFF3u
+#define E_DENEGADO 0xFFFFFFF0u	/* (PROTEGE) un archivo del sistema, o un secreto de otro */
 #define E_ES_CARPETA 0xFFFFFFF2u
 #define E_NO_CARPETA 0xFFFFFFF1u
 

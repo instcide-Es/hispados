@@ -718,7 +718,7 @@ módulo Semilla
     función arranca_acpi()
         variable t: puntero a Tarea
         variable e: nat32
-        t := cargar_archivo("\\ACPI.BIN", línea_del_cargador(), e)
+        t := cargar_servicio("ACPI.BIN", línea_del_cargador(), e)      ; (PROTEGE) de la carpeta del sistema
         si t = nulo entonces devolver fin
         pon_servicio_acpi(t)
         imprimir1("acpi: el servicio de ACPI (ACPI.BIN) en marcha, la tarea %u\n", t.id)

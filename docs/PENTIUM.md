@@ -226,6 +226,7 @@ cuarta parte, los discos y el USB).
 | `fecha.cas` (Fecha) | La **fecha y la hora** del reloj de pila del PC (la CMOS), como las guarda la FAT; y **ponerlo en hora**. |
 | `ajustes.cas` (Ajustes) | Los **ajustes de un sistema instalado** (`\HISPA\HISPA.INI`): el nombre del usuario y del equipo y el teclado (sección 12). |
 | `usuario.cas` (Usuario) | Los **programas del anillo 3**: los carga **del disco** (o de los módulos de multiboot) en su espacio de direcciones y atiende la **llamada al sistema** (`int 0x80`, sección 6). |
+| `permisos.cas` (Permisos) | (PROTEGE, 0.8.4) **La zona protegida**: quién puede escribir qué en `\HISPA` (la tabla), los secretos que solo lee su dueño, el **sello** que el núcleo pone a los programas del sistema por la ruta de la que los carga y la marca de **servicio** (sección 14 sexies). |
 | `video.cas` (Video) | El **modo gráfico**: el que haya dejado el cargador (multiboot) o el de la **VBE de Bochs/QEMU**; la memoria de la pantalla, a la vista del núcleo; y, si el modo no es de 32 bits, el volcado a 24 o a 16 (sección 10). |
 | `edid.cas` (Edid) | Lo que dice la **pantalla** de sí misma (su EDID): en QEMU, de su tarjeta; en las Intel, por el DDC con el GMBUS; la nativa, lo más grande y su nombre (sección 10). |
 | `grafico.cas` (Grafico), `letra.cas` (Letra) | **Dibujar**: los lienzos; rectángulos, degradados, esquinas redondas, líneas, círculos, el disquete de la casa, texto con la **letra de 8x16** (la de Hispa Ventanas, hecha por `hazletra.py`) y copiar de un lienzo a otro. |
@@ -466,6 +467,16 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 154 | **la batería**: lo último que ha leído el servicio de ACPI (una `Energía`, `energia.cas`) a EBX | — | 1, o 0 si no hay servicio |
 | 155 | (dispositivos) **la lista de los dispositivos** y qué los lleva: hasta ECX fichas `Dispositivo` (320 octetos, `dispositivos.cas`) a EBX. Solo lee | `lista_dispositivos` | cuántos hay (aunque no quepan) |
 | 156 | (dispositivos; **solo los servicios**: `ACPI.BIN`, `RED.BIN`) apuntar la ficha de EBX (ECX = 0) u olvidar las suyas (ECX = 1) | — | 0 |
+| 157 | (PROTEGE) **el modo administrador**: EBX = 0, pedirlo (lo pregunta el núcleo en la pantalla: sección 14 sexies); 1, dejarlo; 2, ¿se tiene? | `pedir_admin`, `dejar_admin`, `es_admin` | 1 o 0 (`DENEGADO` si no hay a quién preguntar) |
+| 158 | (PROTEGE; **solo los servicios**) el sello de la tarea EBX (los de `permisos.cas`; con el bit 31, es un servicio) | `sello_de_tarea` | el sello, o `NO_VALE` |
+
+Desde la 0.8.4 (PROTEGE), **lo que toca archivos del sistema pasa por
+`permisos.cas`**: la 7 (abrir para escribir; y, para leer, los secretos), la
+21 a la 24, la 133 y la 170 (poner atributos) dan `DENEGADO` (0xFFFFFFF0,
+«acceso denegado») donde el programa no tiene permiso; la 64 y la 65 (los
+sectores en crudo) son solo de INSTALAR o del modo administrador; la 150 a la
+152 y la 156, solo de las tareas que el núcleo ha marcado como servicio
+(sección 14 sexies).
 
 (La 15 con `DATO_ALTO_LIBRE`, el 14, da lo alto de la pantalla sin la barra
 de tareas ni el dock: así una ventana grande puede quedar encima del dock. La
@@ -4344,6 +4355,173 @@ hasta que haya sonido); y Winsock sobre el servicio de red.
 - **Falta**: hilos de verdad (como en HW32, un hilo corre entero al crearlo),
   SEH, escuchar en la red, HTTPS para ellos (por eso NAVEGA2.EXE aún no),
   Direct3D. Ver [pentium/WIN32.md](pentium/WIN32.md).
+
+## 14 sexies. La seguridad: la zona protegida, los secretos y los servicios (PROTEGE)
+
+*21/11/2026, rama `pentium-protege`, por la revisión de seguridad de ese día
+(«es para una asociación de jubilados»). Todo lo cambiado lleva la marca
+«(PROTEGE)»; lo de dentro, en `castel/nucleo32/permisos.cas`.*
+
+**Lo que pasaba.** Cualquier programa del anillo 3 podía reescribir los
+archivos del sistema (`\HISPA\NUCLEO.BIN`, `RED.BIN`, `TLS.BIN`, las
+autoridades de `\HISPA\RAICES`, `GRUB.CFG`, `GRUBENV`, `PANTALLA.ENV`, el menú)
+y leer los secretos (las llaves de SSH, la semilla de TLS, la sesión de
+ClicGest); y los servicios se reconocían por **el nombre** de la tarea: un
+programa cualquiera que se llamara `RED.BIN` y se lanzara antes que el de
+verdad recibía IOPL 3 (todos los puertos), y uno que se llamara `TLS.BIN` veía
+el HTTPS de todos en claro.
+
+### Cómo es ahora
+
+- **El sello.** Al cargar un programa, el núcleo mira **de dónde** lo carga
+  (la ruta de verdad, la del disco: `Fat.forma_de_ruta`): si es uno de la
+  tabla y está en `\HISPA` de la unidad del sistema (o en la raíz de la memoria
+  USB de arranque, que lleva ahí los programas; o en `M:`, los módulos del
+  cargador), le pone su **sello** en la tarea (`Tarea.sello`, y
+  `Tarea.servicio` a los servicios) **antes de que corra**. Su nombre da
+  igual: `C:\OTRA\RED.BIN` es un programa más. El núcleo pone en marcha los
+  servicios (`RED.BIN`, `TLS.BIN`, `ACPI.BIN`) **solo** de su ruta fija
+  (`cargar_servicio`): un `RED.BIN` puesto en la raíz de un sistema instalado
+  no se usa.
+- **Los servicios, por su marca.** La 91 (`apuntarse`) mira el sello
+  (`SELLO_RED`, `SELLO_TLS`), no el nombre; la 94, la 95 y la 98, además de ser
+  la tarea apuntada, la marca de servicio; la 150 a la 152 y la 156, la marca.
+  `RED.BIN` pregunta al núcleo (la 158) quién le pide la **interfaz del túnel**
+  (solo `WG.BIN` y `TAILSCAL.BIN`) y quién quiere **escuchar en un puerto de
+  debajo del 1024** (solo los servicios: que nadie se ponga en el 22 antes que
+  SSHD a recoger contraseñas).
+- **La zona protegida.** En la unidad del sistema: **toda la carpeta `\HISPA`**
+  y, en ella o en la raíz, lo de la tabla (los archivos del arranque, los
+  programas del sistema —también con su nombre en la raíz: un `ORDENES.BIN` ahí
+  haría pasar el disco por una memoria de arranque—, `\RAICES`, `\BOOT`,
+  `\WIN32`...). Ahí solo escriben (crear, escribir, borrar, cambiar de nombre,
+  llevar a otra carpeta, hacer y borrar carpetas, cambiar los atributos)
+  **PAQUETES e INSTALAR** (todo) y **cada servicio lo suyo**. Lo demás
+  (`\DOCUMENT`, `\OFICINA`, la raíz, las otras unidades) es libre: **los
+  datos del usuario van fuera de `\HISPA`**.
+- **Los secretos** (en la tabla, «secreto») **solo los lee su dueño**.
+- **El nombre, de verdad.** Las rutas se comparan como las entiende el disco:
+  cada trozo, con el nombre corto de su entrada. No valen `\HISPA.\NUCLEO.BIN`,
+  `\HISPá\...` (la FAT lleva la á a la A) ni un nombre largo.
+- **Programas normales** (el Navegador fuera de su carpeta, ClicGest fuera de
+  sus dos archivos, `WIN32.BIN` y los `.EXE` que corre, el Bloc de notas, Mi
+  equipo, la Consola, ORDENES...): **«acceso denegado: es del sistema (para
+  cambiarlo a mano: ADMIN)»** (`DENEGADO`, 0xFFFFFFF0; en Win32,
+  `ERROR_ACCESS_DENIED`). Leer `\HISPA` sí pueden (menos los secretos).
+- **El modo administrador.** Para el mantenimiento: la orden **`ADMIN`** de
+  ORDENES (en la Consola; `ADMIN NO` lo deja; mientras dura, la petición dice
+  `(admin) C:\>`) y **Herramientas › Modo administrador...** de Mi equipo (que
+  al entrar en `\HISPA` avisa: «Carpeta del sistema: solo se puede mirar»).
+  **Lo pregunta el núcleo, no el programa**: con el escritorio, una ventanita
+  suya en medio de la pantalla («ORDENES.BIN pide el modo administrador»,
+  «Sí, dárselo» / «No»: solo responden el ratón y el teclado de verdad; nada,
+  en un minuto, es «No»); sin él, en la consola de texto («S» o cualquier otra
+  tecla). Desde una sesión de SSH sin escritorio no hay a quién preguntar: no
+  se da. Sin contraseña (aún no hay usuarios). Lo heredan los programas que
+  lance (el Bloc de notas abierto desde una Consola en modo administrador
+  guarda en `\HISPA`); con él se puede todo, también leer los secretos y los
+  sectores en crudo.
+
+### Quién puede escribir qué
+
+Rutas desde `\HISPA` (o desde la raíz, en la memoria de arranque); vale el
+primer renglón que casa. **PAQUETES e INSTALAR escriben en toda la zona**
+(no leen los secretos). Lo que no está aquí y está en `\HISPA`: solo ellos.
+
+| Ruta | Escriben (además de PAQUETES e INSTALAR) | Secreto (solo lo leen ellos) |
+|---|---|---|
+| `GRUB.CFG` | ASISTE (y el escritorio, que es el núcleo) | |
+| `GRUBENV` | ACTUALIZ | |
+| `HISPA.INI` | ASISTE (y Configuración, del núcleo) | |
+| `INICIO.INI` (rama `pentium-menu`), `DOCK.INI`, `ATAJOS.INI` | nadie (los escribe el núcleo: el menú Inicio y el dock) | |
+| `PANTALLA.ENV`, `NUCLEO.BIN`, `NUCLEO.ANT`, `MBR.ANT`, `SEMILLA.BIN`, `ESCRIT*.BIN`, `BOOT\` | nadie (el escritorio, del núcleo, escribe `PANTALLA.ENV`) | |
+| `TLS.SEM` | TLS | sí |
+| `TLS.CCH`, `TLS.HOR` | TLS | |
+| `TLS.INI`, `RAICES\` | nadie | |
+| `RED.INI` | RED | |
+| `WIFI.INI`, `WIFI.LLV` | WIFI (rama `pentium-wifi`) | sí |
+| `WIFI.LOG` | WIFI | |
+| `SONIDO.INI` | SONIDO (rama `pentium-sonido`) | |
+| `ESCUDO\` | ESCUDO (rama `pentium-escudo`) | |
+| `CUARENTE\`, `CUARENTENA\` | ESCUDO | sí |
+| `SSH\LLAVE.SSH`, `SSH\CLAVE.TXT` | SSHD | sí |
+| `SSH\SSHD.INI`, `SSH\AUTORIZA.TXT` | SSHD | |
+| `SSH\ID_ED.SSH` | SSH | sí |
+| `SSH\ID_ED.PUB`, `SSH\CONOCIDO.TXT` | SSH | |
+| `SSH\` (lo demás, y la carpeta) | SSH y SSHD | |
+| `SSHD.SEM`, `SSH.SEM`, `WG.SEM`, `TAILSCAL.SEM` | cada uno el suyo | sí |
+| `WG\WG0.CNF` | WG | sí |
+| `WG\` | WG | |
+| `TS\CLAVES.TS` | TAILSCAL | sí |
+| `TS\` | TAILSCAL | |
+| `PAQUETES\BAJADAS\` | DESCARGA | |
+| `PAQUETES\AVANCE.TXT` | ACTUALIZ, DESCARGA, PROGRAMA | |
+| `PAQUETES\VENTANA.TXT`, `PAQUETES\BANDEJA.TXT` | ACTUALIZ | |
+| `PAQUETES\PROGRAMA.TXT` | PROGRAMA (rama `pentium-programas`) | |
+| `PAQUETES\`, `MENU\`, `INSTALA\`, `WIN32\` | nadie | |
+| `NAVEGA\SURFGAL.TXT` (las galletas) | NAVEGA | sí |
+| `NAVEGA\NAVEGA.INI`, `CAJAS.TXT`, `SURF.LOG`, `NS.LOG` | NAVEGA | |
+| `NAVEGA\` | nadie | |
+| `CLICGEST.SES` (la sesión guardada) | CLICGEST | sí |
+| `CLICGEST.ANC` | CLICGEST | |
+| `ASOCIA.TXT` | EQUIPO (Mi equipo) | |
+| los programas del sistema (`ORDENES.BIN`, `RED.BIN`, `PAQUETES.BIN`... también en la raíz) y `HISPA\` en la raíz | nadie | |
+
+Los sellos (`Permisos.SELLO_...`) son los de `PAQUETES.BIN`, `ACTUALIZ.BIN`,
+`INSTALAR.BIN`, `ASISTE.BIN`, `DESCARGA.BIN`, `SSH.BIN`, `NAVEGA\NAVEGA.BIN`,
+`CLICGEST.BIN`, `EQUIPO.BIN` y `PROGRAMA.BIN`; y, **servicios**, `RED.BIN`,
+`TLS.BIN`, `ACPI.BIN`, `SSHD.BIN`, `WG.BIN`, `TAILSCAL.BIN`, `WIFI.BIN`,
+`ESCUDO.BIN` y `SONIDO.BIN` (los de las ramas que vienen ya están en la
+tabla: si su programa no está, no casan). ClicGest no cambia: sigue guardando `CLICGEST.SES` y
+`CLICGEST.ANC` en `\HISPA` (o en la raíz sin instalar), que son suyos.
+
+### Lo que cambia para el usuario
+
+- Lo de la asociación (documentos, facturas, fotos) va **fuera de `\HISPA`**
+  (`C:\DOCUMENT`, `C:\OFICINA` o donde se quiera); en `\HISPA`, solo el sistema.
+- Para tocar el sistema a mano (borrar un programa de `\HISPA`, poner un
+  `WG0.CNF` o un `.CER` en `\HISPA\RAICES`, editar `ASOCIA.TXT`): `ADMIN` (o
+  Herramientas › Modo administrador...), con la confirmación en la pantalla.
+- `SSHD /CLAVE`, `WG /ENCENDER` y compañía siguen valiendo desde la Consola:
+  el que escribe es el programa del sistema (con su sello), no la Consola.
+
+### Lo que no cubre (aún)
+
+- **Un programa del sistema lanzado por otro**: el sello va con la ruta, sea
+  quien sea quien lo lance; así, un programa malo puede lanzar
+  `\HISPA\SSHD.BIN /CLAVE` y teclearle una contraseña por un terminal suyo
+  (llamada 37). PAQUETES está a salvo (solo instala lo firmado); SSHD,
+  TAILSCAL y WG, no del todo: cuando haya usuarios, sus órdenes de
+  configuración pedirán el modo administrador.
+- **No hay usuarios ni contraseña** para el modo administrador: lo da quien
+  esté delante del equipo.
+- **La memoria USB de arranque** (con «escritura=usb»): su raíz no es toda
+  zona protegida (sus documentos, sí se escriben), solo lo de la tabla.
+- **Otras unidades** con un `\HISPA` (otro disco, una memoria USB) no están
+  protegidas: no son las del sistema.
+
+### Las pruebas
+
+`SOLO=protege ./pruebas.sh` (la parte 23): un disco SATA instalado (C:\HISPA,
+con un `WIFI.INI` y un `TLS.SEM` de mentira) y un programa «malo» puesto como
+`C:\OTRA\RED.BIN` y `C:\OTRA\TLS.BIN` (y como `C:\RED.BIN`): no se apunta como
+servicio (91), ni le dan memoria de DMA (94), ni dispositivos (156), ni ACPI
+(151), ni el sello de otro (158), ni el disco en crudo (64); no escribe
+`NUCLEO.BIN` (tampoco como `\HISPA.\` ni con la á), ni borra, ni cambia de
+nombre, ni se lleva `RED.BIN`, ni mete nada en `\HISPA`, ni hace o borra
+carpetas, ni oculta archivos, ni pone un `ORDENES.BIN` en la raíz; no lee
+`WIFI.INI` ni `TLS.SEM` (sí `HISPA.INI`) y escribe en `C:\DOCUMENT`. Desde
+ORDENES, lo mismo con COPY, DEL, TYPE y MD. Una copia de PAQUETES en
+`C:\OTRA` no instala; el de `C:\HISPA`, sí. La red arranca con el `RED.BIN` de
+`C:\HISPA` (no el de la raíz), SSHD hace su llave en `C:\HISPA\SSH` y escucha
+en el 22, y su llave no la lee nadie más. `ADMIN` en modo texto (el núcleo
+pregunta, S) deja escribir y leer los secretos, y `ADMIN NO` lo quita. Con el
+escritorio, `ADMIN` en la Consola saca la ventanita del núcleo (captura), «Sí»
+deja hacer `\HISPA` en la memoria de arranque, y Mi equipo avisa en
+`C:\HISPA`. Desde fuera (mtools, fsck.fat): el disco sano, `NUCLEO.BIN` y
+`RED.BIN` intactos, y nada de más. Las demás partes (paquetes, red, TLS,
+SSH, ACPI...) siguen pasando con la zona protegida puesta (en la de los
+paquetes, borrar `DESCARGA.BIN` de `C:\HISPA` se hace ahora con `ADMIN`).
 
 ## 15. Las pruebas
 

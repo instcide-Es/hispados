@@ -22,6 +22,9 @@
 ;    ECHO texto            escribe el texto (ECHO. una línea en blanco)
 ;    REM                   un comentario (en los archivos .BAT)
 ;    PAUSE                 espera una tecla
+;    ADMIN [NO]            (PROTEGE) el modo administrador: tocar los archivos
+;                          del sistema (\HISPA); el núcleo lo pregunta en la
+;                          pantalla. ADMIN NO lo deja
 ;    SALIR                 acaba el intérprete (se vuelve a la consola del núcleo)
 ;
 ;  Cualquier otra cosa es el nombre de un programa (.BIN) o de un archivo de
@@ -197,6 +200,7 @@ módulo UOrdenes
     ; la petición de órdenes: la carpeta de trabajo
     función petición()
         carpeta_actual(aquí, LÍNEA)
+        si es_admin() entonces escribir("(admin) ") fin     ; (PROTEGE)
         imprimir2("%c:%s>", unidad(0), nat32(dirección(aquí[0])))
     fin
 
@@ -224,12 +228,35 @@ módulo UOrdenes
         escribir("                  unidad más; sin nada, lo montado   DESMONTAR D:  la quita\n")
         escribir("  EXPULSAR D:     abre la bandeja del lector de CD o DVD (o desmonta la imagen)\n")
         escribir("  ESCRITORIO      pone en marcha el escritorio (el entorno gráfico)\n")
+        escribir("  ADMIN [NO]      el modo administrador: poder cambiar los archivos del sistema\n")
+        escribir("                  (\\HISPA); el sistema lo pregunta en la pantalla. ADMIN NO lo deja\n")
         escribir("  IPCONFIG, PING, DESCARGAR  la red (IPCONFIG /?, PING, DESCARGAR /?)\n")
         escribir("  SALIR           acaba el intérprete de órdenes\n")
         escribir("Cualquier otro nombre es un programa del disco (PROGRAMA o PROGRAMA.BIN) o un\n")
         escribir("archivo de órdenes (.BAT), con lo que se escriba detrás como sus argumentos.\n")
         escribir("Con «> archivo» detrás, lo que escriba la orden va al archivo (>> lo añade).\n")
         escribir("Ctrl+C acaba el programa que corre. Las flechas traen las órdenes de antes.\n")
+    fin
+
+    ; (PROTEGE) ADMIN: el modo administrador (lo pregunta el núcleo, en la
+    ; pantalla; lo heredan los programas que se lancen desde aquí). ADMIN NO
+    ; lo deja.
+    función orden_admin(qué: puntero a byte)
+        si iguales_sin_caja(qué, "NO") entonces
+            dejar_admin()
+            escribir("Modo administrador: dejado. Los archivos del sistema vuelven a estar protegidos.\n")
+            devolver
+        fin
+        si es_admin() entonces
+            escribir("Ya está en modo administrador (ADMIN NO lo deja).\n")
+            devolver
+        fin
+        si pedir_admin() entonces
+            escribir("Modo administrador: puede cambiar los archivos del sistema (\\HISPA). Con cuidado;\n")
+            escribir("ADMIN NO lo deja (y se deja solo al salir).\n")
+        sino
+            escribir("Modo administrador: no se ha dado (no se ha confirmado en la pantalla del equipo).\n")
+        fin
     fin
 
     ; (CD) MONTAR [imagen]: la monta como una unidad más; sin nada, dice los
@@ -926,6 +953,8 @@ módulo UOrdenes
             ; un comentario
         sino si iguales(mayús, "PAUSE") o iguales(mayús, "PAUSA") entonces
             orden_pause()
+        sino si iguales(mayús, "ADMIN") o iguales(mayús, "ADMINISTRADOR") entonces
+            orden_admin(resto)                          ; (PROTEGE)
         sino si iguales(mayús, "SALIR") o iguales(mayús, "EXIT") entonces
             acabar := cierto
         sino

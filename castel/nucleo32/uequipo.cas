@@ -893,7 +893,33 @@ módulo UEquipo
         si vistos() > 0 entonces g.sel := 0 sino g.sel := -1 fin
         pon_dirección()
         sincroniza_árbol()
+        ; (PROTEGE) la carpeta del sistema: se ve, pero no se cambia
+        si l = L_CARPETA y es_del_sistema(ruta) y no es_admin() entonces
+            copiar(aviso, "Carpeta del sistema: solo se puede mirar (para cambiarla: Herramientas > Modo administrador).")
+        fin
         devolver cierto
+    fin
+
+    ; (PROTEGE) ¿es la ruta (entera, en mayúsculas) la carpeta \HISPA de una
+    ; unidad, o de dentro? (solo para avisar: quien manda es el núcleo)
+    función es_del_sistema(r: puntero a byte): bool
+        si r[0] = 0 o r[1] <> ':' entonces devolver falso fin
+        si no empieza_por(dirección(r[2]), "\\HISPA") entonces devolver falso fin
+        devolver r[8] = 0 o r[8] = '\\'
+    fin
+
+    ; (PROTEGE) Herramientas > Modo administrador: lo pregunta el núcleo en
+    ; la pantalla; lo heredan los programas que se abran desde aquí
+    función cambia_admin()
+        si es_admin() entonces
+            dejar_admin()
+            copiar(aviso, "Modo administrador: dejado. Los archivos del sistema vuelven a estar protegidos.")
+        sino si pedir_admin() entonces
+            copiar(aviso, "Modo administrador: se pueden cambiar los archivos del sistema. Con cuidado.")
+        sino
+            copiar(aviso, "Modo administrador: no se ha dado.")
+        fin
+        pinta()
     fin
 
     función d1(destino: puntero a byte, plantilla: puntero a byte, a: nat32)
@@ -2916,7 +2942,11 @@ módulo UEquipo
                 menú(Controles.v, men_x(k), men_y(), "Atr\xA0s|Adelante|Subir      Retroceso|-|Mi equipo|Papelera|-|Buscar archivos... F3", grises, k ob CON_FLECHAS)
             caso M_HERRAMIENTAS:
                 si lugar <> L_PAPELERA o no hay entonces grises := grises ob 2 fin
-                menú(Controles.v, men_x(k), men_y(), "Vaciar la Papelera|Restaurar lo elegido|-|Las asociaciones (ASOCIA.TXT)", grises, k ob CON_FLECHAS)
+                si es_admin() entonces
+                    menú(Controles.v, men_x(k), men_y(), "Vaciar la Papelera|Restaurar lo elegido|-|Las asociaciones (ASOCIA.TXT)|-|Dejar el modo administrador", grises, k ob CON_FLECHAS)
+                sino
+                    menú(Controles.v, men_x(k), men_y(), "Vaciar la Papelera|Restaurar lo elegido|-|Las asociaciones (ASOCIA.TXT)|-|Modo administrador...", grises, k ob CON_FLECHAS)
+                fin
             si no:
                 menú(Controles.v, men_x(k), men_y(), "Las teclas|Acerca del explorador", 0, k ob CON_FLECHAS)
         fin
@@ -3045,6 +3075,7 @@ módulo UEquipo
                     caso 0: pide_vaciar()
                     caso 1: restaura_elegidos()
                     caso 3: edita_asociaciones()
+                    caso 5: cambia_admin()              ; (PROTEGE)
                 fin
             caso M_AYUDA:
                 si op = 0 entonces
@@ -3119,6 +3150,9 @@ módulo UEquipo
         lee_asociaciones()
         ; (si no está, se escribe con las de siempre, para poder editarlo)
         asociar("TXT", "\\BLOC.BIN", "%1")
+        ; (PROTEGE) es un archivo del sistema (dice qué programa abre cada
+        ; cosa): el Bloc lo cambia en modo administrador, que hereda de aquí
+        si no es_admin() y no pedir_admin() entonces copiar(aviso, "Sin el modo administrador, las asociaciones solo se pueden leer.") fin
         t := lanzar_suelto("\\BLOC.BIN", ruta_asocia)
         si es_error(t) entonces copiar(aviso, "No se puede abrir el Bloc de notas.") fin
     fin

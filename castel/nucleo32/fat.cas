@@ -36,6 +36,7 @@ módulo Fat
     público constante NOMBRE_MALO = 0xFFFFFFF3  ; el nombre no vale (8+3, sin letras raras)
     público constante ES_CARPETA = 0xFFFFFFF2   ; es una carpeta, y hacía falta un archivo
     público constante NO_CARPETA = 0xFFFFFFF1   ; no es una carpeta
+    público constante DENEGADO = 0xFFFFFFF0     ; (PROTEGE) es del sistema, o un secreto de otro: no le toca (permisos.cas)
     público constante PRIMER_ERROR = 0xFFFFFFF0 ; de aquí arriba, todo son errores
 
     ; ---- cómo se abre un archivo ----
@@ -1691,6 +1692,125 @@ módulo Fat
         n := libres
         soltar(cerrojo)
         devolver n
+    fin
+
+    ; (PROTEGE) lo mismo sin mirar el disco (lo de cada vez: sin leer
+    ; carpetas, que en una memoria USB lenta se nota): cada trozo, como lo
+    ; guardaría la FAT en 8+3 (que es como lo busca primero). Vale si todos
+    ; los trozos son de 8+3; si alguno no lo es (un nombre largo), falso, y
+    ; hay que mirar el disco (forma_de_ruta). (Un nombre largo que fuera otra
+    ; forma del de una entrada de 8+3 solo lo puede haber hecho otro sistema:
+    ; esta FAT crea solo nombres de 8+3.)
+    público función forma_sin_disco(ruta: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+        variable p: puntero a byte
+        variable k, n, i: nat32
+        variable once: arreglo [11] de byte
+        variable trozo: arreglo [13] de byte
+        n := 0
+        p := ruta
+        si p[0] <> 0 y p[1] = ':' entonces p := p + 2 fin
+        mientras cierto hacer
+            mientras es_barra(valor(p)) hacer p := p + 1 fin
+            si valor(p) = 0 entonces romper fin
+            k := 0
+            mientras p[k] <> 0 y no es_barra(p[k]) hacer k := k + 1 fin
+            si no a_once(p, k, once) entonces devolver falso fin
+            de_once(once, trozo)
+            si n + 1 >= cabe entonces devolver falso fin
+            destino[n] := '\\'
+            n := n + 1
+            i := 0
+            mientras trozo[i] <> 0 hacer
+                si n + 1 >= cabe entonces devolver falso fin
+                destino[n] := trozo[i]
+                n := n + 1
+                i := i + 1
+            fin
+            p := p + k
+        fin
+        si n = 0 entonces
+            destino[0] := '\\'
+            n := 1
+        fin
+        destino[n] := 0
+        devolver cierto
+    fin
+
+    ; (PROTEGE) la ruta «ruta» del volumen v como la entiende el disco, para
+    ; saber de verdad qué archivo es (permisos.cas): cada trozo que está, con
+    ; su nombre corto, el de su entrada (así no valen otras formas de
+    ; escribir el mismo nombre: «hispa.», «HISP\xA0» con la á, que la FAT
+    ; lleva a la A, o un nombre largo); lo que no está, en mayúsculas, como
+    ; lo guardaría la FAT. Queda en «destino» como «\UNA\OTRA» (la raíz:
+    ; «\»). Falso si no cabe, si no es un volumen FAT o si el disco falla.
+    público función forma_de_ruta(v: nat32, ruta: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+        variable d: Abierto
+        variable h: Hallazgo
+        variable p: puntero a byte
+        variable k, n, i: nat32
+        variable once: arreglo [11] de byte
+        variable trozo: arreglo [13] de byte
+        variable sigue, bien: bool
+        si v >= VOLÚMENES o cabe < 2 entonces devolver falso fin
+        si no volúmenes[v].montado o volúmenes[v].iso entonces devolver falso fin
+        tomar(cerrojo)
+        elige(v)
+        fallo := falso
+        pon_raíz(d)
+        sigue := cierto
+        bien := cierto
+        n := 0
+        p := ruta
+        si p[0] <> 0 y p[1] = ':' entonces p := p + 2 fin
+        mientras bien hacer
+            mientras es_barra(valor(p)) hacer p := p + 1 fin
+            si valor(p) = 0 entonces romper fin
+            k := 0
+            mientras p[k] <> 0 y no es_barra(p[k]) hacer k := k + 1 fin
+            si n + 1 >= cabe entonces
+                bien := falso
+            sino
+                destino[n] := '\\'
+                n := n + 1
+                si sigue y busca_en(d, p, k, h) entonces
+                    de_once(dirección(h.c.nombre[0]), trozo)
+                    si trozo[0] = 0x05 entonces trozo[0] := 0xE5 fin
+                    si h.c.atributos yb CARPETA <> 0 entonces entra(d, h) sino sigue := falso fin
+                sino
+                    si fallo entonces bien := falso fin
+                    sigue := falso
+                    trozo[0] := 0
+                    si a_once(p, k, once) entonces de_once(once, trozo) fin
+                fin
+                si trozo[0] <> 0 entonces
+                    i := 0
+                    mientras trozo[i] <> 0 y n + 1 < cabe hacer
+                        destino[n] := trozo[i]
+                        n := n + 1
+                        i := i + 1
+                    fin
+                    si trozo[i] <> 0 entonces bien := falso fin
+                sino
+                    ; (un nombre que no es de 8+3 y no está: tal cual, en mayúsculas)
+                    i := 0
+                    mientras i < k y n + 1 < cabe hacer
+                        destino[n] := mayúscula(p[i])
+                        n := n + 1
+                        i := i + 1
+                    fin
+                    si i < k entonces bien := falso fin
+                fin
+                p := p + k
+            fin
+        fin
+        si fallo entonces bien := falso fin
+        soltar(cerrojo)
+        si n = 0 entonces
+            destino[0] := '\\'
+            n := 1
+        fin
+        destino[n] := 0
+        devolver bien
     fin
 
     ; ¿se puede escribir en el volumen v? (lo dice su disco: discos.cas)

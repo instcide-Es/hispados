@@ -21,7 +21,10 @@
 ;        dejan los que vuelven); EDX, cuántos caben allí  -> la primera
 ;        palabra de la respuesta (SIN_RED: no hay servicio)
 ;    91  (el servicio) apuntarse como servicio de red: le da los puertos
-;        (IOPL 3). Solo un programa a la vez, y solo RED.BIN
+;        (IOPL 3). Solo un programa a la vez, y solo RED.BIN: (PROTEGE) el
+;        que lleva el sello del servicio de red, que le pone el núcleo al
+;        cargarlo de \HISPA de la unidad del sistema (permisos.cas); no
+;        cualquiera que se llame así. Igual TLS.BIN (SELLO_TLS)
 ;    92  (el servicio) el pedido siguiente, a EBX (Pedido_red y los
 ;        octetos detrás: caben 64 + MAX_DATOS); con ECX tics de espera si no
 ;        hay ninguno                                   -> 1, o 0 si no hay
@@ -51,7 +54,7 @@
 ; =============================================================================
 módulo Red
 
-    importar Tareas, Paginas, Marcos, Monton, Mem32, Cpu, Pci, Textos32
+    importar Tareas, Paginas, Marcos, Monton, Mem32, Cpu, Pci, Textos32, Permisos
 
     ; ---- lo que dice la llamada 97 (y pone el servicio con la 96) ----
     público constante RED_NADA = 0              ; no hay servicio de red
@@ -354,15 +357,19 @@ módulo Red
         devolver 0
     fin
 
+    ; (PROTEGE) quién es quién lo dice el sello que el núcleo le puso al
+    ; cargarlo (de \HISPA de la unidad del sistema: permisos.cas), no su
+    ; nombre: un «RED.BIN» lanzado de otra carpeta no es el servicio de red
     función apuntarse(): nat32
         variable p: puntero a nat32
-        si iguales_sin_caja(actual.nombre, "TLS.BIN") entonces devolver apuntarse_tls() fin
+        si no actual.servicio entonces devolver NO_VALE fin
+        si actual.sello = SELLO_TLS entonces devolver apuntarse_tls() fin
         si es_tls() entonces devolver NO_VALE fin
         si hay_servicio() entonces
             si servicio = actual entonces devolver 0 fin
             devolver EN_USO
         fin
-        si no iguales_sin_caja(actual.nombre, "RED.BIN") entonces devolver NO_VALE fin
+        si actual.sello <> SELLO_RED entonces devolver NO_VALE fin
         servicio := actual
         servicio_id := actual.id
         zona := ZONA_INICIO
@@ -582,10 +589,10 @@ módulo Red
             caso 92: devolver siguiente(a, b)
             caso 93: devolver contestar(a, b)
             caso 94:
-                si no es_servicio() entonces devolver NO_VALE fin
+                si no actual.servicio o no es_servicio() entonces devolver NO_VALE fin
                 devolver memoria_dma(a, b)
             caso 95:
-                si no es_servicio() entonces devolver NO_VALE fin
+                si no actual.servicio o no es_servicio() entonces devolver NO_VALE fin
                 devolver registros(a, b)
             caso 96:
                 si no es_servicio() entonces devolver NO_VALE fin
@@ -604,7 +611,7 @@ módulo Red
                 si no hay_servicio() entonces devolver RED_NADA fin
                 devolver estado_red
             caso 98:
-                si no es_servicio() entonces devolver NO_VALE fin
+                si no actual.servicio o no es_servicio() entonces devolver NO_VALE fin
                 devolver pon_irq(a)
         fin
         devolver NO_VALE

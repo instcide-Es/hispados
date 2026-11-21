@@ -59,7 +59,8 @@ enum {
 	E_NO_PROGRAMA = 0xFFFFFFFB, E_SIN_MEMORIA = 0xFFFFFFFA, E_NO_VALE = 0xFFFFFFF9,
 	E_DISCO_LLENO = 0xFFFFFFF8, E_YA_EXISTE = 0xFFFFFFF7, E_EN_USO = 0xFFFFFFF6,
 	E_PROTEGIDO = 0xFFFFFFF5, E_NO_VACIA = 0xFFFFFFF4, E_NOMBRE_MALO = 0xFFFFFFF3,
-	E_ES_CARPETA = 0xFFFFFFF2, E_NO_CARPETA = 0xFFFFFFF1
+	E_ES_CARPETA = 0xFFFFFFF2, E_NO_CARPETA = 0xFFFFFFF1,
+	E_DENEGADO = 0xFFFFFFF0	/* (PROTEGE) un archivo del sistema, o un secreto de otro */
 };
 /* una entrada de carpeta (la llamada 12/28) */
 typedef struct { char nombre[13]; u8 atributos; u16 reservado; u32 tam; u16 fecha, hora; u32 cluster, libre; } Entrada;

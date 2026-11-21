@@ -95,6 +95,26 @@ módulo Ured
         info.irq := irq_tarjeta
     fin
 
+    ; (PROTEGE) lo que el núcleo dice de la tarea que pide (la llamada 158):
+    ; su sello (los de permisos.cas) y si es un servicio
+    constante SELLO_WG = 10
+    constante SELLO_TAILSCAL = 11
+    constante ES_SERVICIO = 0x80000000
+
+    función es_servicio_tarea(t: nat32): bool
+        variable r: nat32
+        r := sello_de_tarea(t)
+        devolver r <> NO_VALE y r yb ES_SERVICIO <> 0
+    fin
+
+    función es_del_túnel(t: nat32): bool
+        variable r: nat32
+        r := sello_de_tarea(t)
+        si r = NO_VALE o r yb ES_SERVICIO = 0 entonces devolver falso fin
+        r := r yb 0xFF
+        devolver r = SELLO_WG o r = SELLO_TAILSCAL
+    fin
+
     función atiende(p: puntero a Pedido_red, datos: puntero a byte)
         variable h, s, orden, f, n, r: nat32
         h := p.hueco
@@ -162,13 +182,23 @@ módulo Ured
                 fin
                 contestar(h, s, r, 0, 0, nulo, 0)
             caso O_ESCUCHAR:
-                ; (SSH) un puerto TCP en escucha (el servidor SSH)
-                si tarjeta = T_NINGUNA entonces contestar(h, s, SIN_TARJETA, 0, 0, nulo, 0) sino contestar(h, s, escuchar(p.tarea, p.cab[1]), 0, 0, nulo, 0) fin
+                ; (SSH) un puerto TCP en escucha (el servidor SSH); (PROTEGE)
+                ; los de debajo del 1024, solo los servicios (que nadie se
+                ; ponga en el 22 antes que SSHD a recoger contraseñas)
+                si p.cab[1] < 1024 y no es_servicio_tarea(p.tarea) entonces
+                    contestar(h, s, NO_VALE_RED, 0, 0, nulo, 0)
+                sino si tarjeta = T_NINGUNA entonces contestar(h, s, SIN_TARJETA, 0, 0, nulo, 0) sino contestar(h, s, escuchar(p.tarea, p.cab[1]), 0, 0, nulo, 0) fin
             caso O_ACEPTAR:
                 aceptar(p.cab[1], p.tarea, h, s, p.cab[2])
             ; ---- (TÚNEL) la interfaz del túnel (WireGuard, Tailscale) ----
             caso O_TUNEL:
-                contestar(h, s, poner_túnel(p.tarea, p.cab[1], puntero(datos), p.largo div 8), 0, 0, nulo, 0)
+                ; (PROTEGE) la interfaz del túnel (que se lleva lo que va a sus
+                ; redes): solo WG.BIN y TAILSCAL.BIN de la carpeta del sistema
+                si no es_del_túnel(p.tarea) entonces
+                    contestar(h, s, NO_VALE_RED, 0, 0, nulo, 0)
+                sino
+                    contestar(h, s, poner_túnel(p.tarea, p.cab[1], puntero(datos), p.largo div 8), 0, 0, nulo, 0)
+                fin
             caso O_TUNEL_QUITAR:
                 contestar(h, s, quitar_túnel(p.tarea), 0, 0, nulo, 0)
             caso O_TUNEL_LEER:

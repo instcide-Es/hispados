@@ -1,0 +1,446 @@
+; =============================================================================
+;  permisos.cas - (PROTEGE) lo que cada programa puede tocar de los archivos
+;  del sistema de Hispa-Pentium (desde la 0.8.4, por la revisión de
+;  seguridad del 21/11/2026: «es para una asociación de jubilados»).
+;
+;  LA ZONA PROTEGIDA. En la unidad del sistema, la carpeta \HISPA entera y,
+;  en ella o en la raíz, lo que dice la tabla de abajo (los archivos del
+;  arranque, los programas del sistema, las carpetas de los servicios...).
+;  Ahí solo ESCRIBEN (crear, escribir, borrar, cambiar de nombre, hacer y
+;  borrar carpetas, cambiar los atributos) los programas «de confianza», y
+;  cada uno solo lo suyo: PAQUETES e INSTALAR, todo; los demás, lo que dice
+;  su renglón. Los SECRETOS (las llaves de SSH, las semillas del azar, las
+;  galletas del Navegador, la sesión de ClicGest...) solo los LEE su dueño.
+;  Todo lo demás (la raíz, \DOCUMENT, \OFICINA, las otras unidades) es libre.
+;
+;  EL SELLO. Un programa es «de confianza» por la RUTA de la que lo carga el
+;  núcleo, nunca por su nombre: el que está en \HISPA de la unidad del
+;  sistema (o en su raíz, en la memoria USB de arranque, que lleva los
+;  programas ahí; o en la unidad en memoria, M:, los módulos del cargador).
+;  El núcleo lo apunta en su tarea al crearla (Tarea.sello, y Tarea.servicio
+;  para los servicios), antes de que corra una sola instrucción suya. Un
+;  programa que se llame igual, lanzado de otra carpeta, es un programa más.
+;
+;  EL MODO ADMINISTRADOR (Tarea.admin: la orden ADMIN de ORDENES, el menú de
+;  Mi equipo): el usuario lo confirma en la pantalla (el núcleo pregunta, no
+;  el programa) y deja tocarlo todo; lo heredan los programas que lance.
+;
+;  Las comprobaciones las hace la llamada al sistema (usuario.cas), con la
+;  ruta como la entiende el disco (Fat.forma_de_ruta: nada de «hispa.» ni
+;  nombres largos para colarse). Lo que hace el núcleo por su cuenta (el
+;  escritorio, Configuración, el dock) no pasa por aquí.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Permisos
+
+    importar Tareas, Fat, Unidades, Textos32, Formato
+
+    ; ---- los sellos: los programas del sistema (Tarea.sello) ----
+    público constante SELLO_NINGUNO = 0         ; un programa normal
+    público constante SELLO_PAQUETES = 1
+    público constante SELLO_ACTUALIZ = 2        ; Programas y actualizaciones (la ventana de PAQUETES)
+    público constante SELLO_INSTALAR = 3
+    público constante SELLO_ASISTE = 4          ; el asistente del primer arranque
+    público constante SELLO_RED = 5             ; los servicios (con Tarea.servicio): RED.BIN...
+    público constante SELLO_TLS = 6
+    público constante SELLO_ACPI = 7
+    público constante SELLO_SSHD = 8
+    público constante SELLO_SSH = 9             ; el cliente SSH (sus llaves), no es servicio
+    público constante SELLO_WG = 10
+    público constante SELLO_TAILSCAL = 11
+    público constante SELLO_DESCARGA = 12       ; DESCARGA.BIN: lo que baja PAQUETES
+    público constante SELLO_NAVEGA = 13         ; el Navegador: su carpeta (\HISPA\NAVEGA)
+    público constante SELLO_CLICGEST = 14       ; ClicGest: su sesión y sus anchos
+    público constante SELLO_EQUIPO = 15         ; Mi equipo (el explorador): sus asociaciones
+    ; (los de las ramas que vienen, ya en la tabla: si su programa no está, no casan)
+    público constante SELLO_WIFI = 16           ; (pentium-wifi) el servicio Wi-Fi
+    público constante SELLO_ESCUDO = 17         ; (pentium-escudo) el antivirus y el cortafuegos
+    público constante SELLO_PROGRAMA = 18       ; (pentium-programas) «Programas instalados»
+    público constante SELLO_SONIDO = 19         ; (pentium-sonido) el servicio de sonido
+    ; (hasta 31)
+
+    ; un bit por sello, para las listas de quién escribe
+    constante B_PAQUETES = 0x2
+    constante B_ACTUALIZ = 0x4
+    constante B_INSTALAR = 0x8
+    constante B_ASISTE = 0x10
+    constante B_RED = 0x20
+    constante B_TLS = 0x40
+    constante B_ACPI = 0x80
+    constante B_SSHD = 0x100
+    constante B_SSH = 0x200
+    constante B_WG = 0x400
+    constante B_TAILSCAL = 0x800
+    constante B_DESCARGA = 0x1000
+    constante B_NAVEGA = 0x2000
+    constante B_CLICGEST = 0x4000
+    constante B_EQUIPO = 0x8000
+    constante B_WIFI = 0x10000
+    constante B_ESCUDO = 0x20000
+    constante B_PROGRAMA = 0x40000
+    constante B_SONIDO = 0x80000
+    constante NADIE = 0                         ; (solo PAQUETES, INSTALAR y el administrador)
+    constante TODO_EL_SISTEMA = 0xA             ; PAQUETES e INSTALAR: escriben en toda la zona (no leen secretos)
+
+    constante LARGO = 24
+    constante MAX_REGLAS = 128
+    constante MAX_PROGRAMAS = 24
+    constante MAX_FORMA = 160
+
+    tipo Regla = estructura
+        patrón: arreglo [LARGO] de byte         ; desde \HISPA o desde la raíz: «SSH\LLAVE.SSH», o «SSH\» (la carpeta y lo de dentro)
+        carpeta: bool
+        escriben: nat32                         ; los sellos que escriben ahí (un bit cada uno), además de PAQUETES e INSTALAR
+        secreto: bool                           ; solo lo leen los que lo escriben
+    fin
+
+    tipo Programa = estructura
+        ruta: arreglo [LARGO] de byte           ; desde \HISPA (o desde la raíz de la memoria de arranque): «RED.BIN», «NAVEGA\NAVEGA.BIN»
+        sello: nat32
+        servicio: bool
+    fin
+
+    variable reglas: arreglo [MAX_REGLAS] de Regla
+    variable n_reglas: nat32
+    variable programas: arreglo [MAX_PROGRAMAS] de Programa
+    variable n_programas: nat32
+
+    ; lo que se sabe de la unidad del sistema (se mira otra vez si cambian las unidades)
+    variable visto_cambios: nat32 = 0xFFFFFFFF
+    variable visto_sistema: nat32 = 0xFFFFFFFF
+    variable con_hispa: bool                    ; tiene la carpeta \HISPA
+    variable de_arranque: bool                  ; lleva los programas en su raíz (la memoria USB de arranque)
+
+    público variable denegados: nat32           ; las veces que se ha dicho que no (para ver lo que pasa)
+
+    ; -------------------------------------------------------------------------
+    ;  La tabla: quién escribe qué (docs/PENTIUM.md, «La seguridad»)
+    ; -------------------------------------------------------------------------
+    función regla(p: puntero a byte, escriben: nat32, secreto: bool)
+        variable r: puntero a Regla
+        variable n: nat32
+        si n_reglas >= MAX_REGLAS entonces devolver fin
+        r := dirección(reglas[n_reglas])
+        copiar_hasta(dirección(r.patrón[0]), p, LARGO)
+        n := longitud(p)
+        r.carpeta := n > 0 y p[n - 1] = '\\'
+        r.escriben := escriben
+        r.secreto := secreto
+        n_reglas := n_reglas + 1
+    fin
+
+    función programa(ruta: puntero a byte, sello: nat32, servicio: bool)
+        variable p: puntero a Programa
+        si n_programas >= MAX_PROGRAMAS entonces devolver fin
+        p := dirección(programas[n_programas])
+        copiar_hasta(dirección(p.ruta[0]), ruta, LARGO)
+        p.sello := sello
+        p.servicio := servicio
+        n_programas := n_programas + 1
+    fin
+
+    ; la tabla (la llama prepara_usuario, al arrancar). Va del renglón más
+    ; concreto al más general: vale el primero que casa.
+    público función prepara_permisos()
+        n_reglas := 0
+        n_programas := 0
+        ; ---- los programas del sistema y sus sellos ----
+        programa("PAQUETES.BIN", SELLO_PAQUETES, falso)
+        programa("ACTUALIZ.BIN", SELLO_ACTUALIZ, falso)
+        programa("INSTALAR.BIN", SELLO_INSTALAR, falso)
+        programa("ASISTE.BIN", SELLO_ASISTE, falso)
+        programa("RED.BIN", SELLO_RED, cierto)
+        programa("TLS.BIN", SELLO_TLS, cierto)
+        programa("ACPI.BIN", SELLO_ACPI, cierto)
+        programa("SSHD.BIN", SELLO_SSHD, cierto)
+        programa("SSH.BIN", SELLO_SSH, falso)
+        programa("WG.BIN", SELLO_WG, cierto)
+        programa("TAILSCAL.BIN", SELLO_TAILSCAL, cierto)
+        programa("DESCARGA.BIN", SELLO_DESCARGA, falso)
+        programa("NAVEGA\\NAVEGA.BIN", SELLO_NAVEGA, falso)
+        programa("CLICGEST.BIN", SELLO_CLICGEST, falso)
+        programa("EQUIPO.BIN", SELLO_EQUIPO, falso)
+        programa("WIFI.BIN", SELLO_WIFI, cierto)
+        programa("ESCUDO.BIN", SELLO_ESCUDO, cierto)
+        programa("PROGRAMA.BIN", SELLO_PROGRAMA, falso)
+        programa("SONIDO.BIN", SELLO_SONIDO, cierto)
+        ; ---- el arranque ----
+        regla("GRUB.CFG", B_ASISTE, falso)                 ; (y el escritorio, que es el núcleo: la medida de la pantalla)
+        regla("GRUBENV", B_ACTUALIZ, falso)                ; (lo pone PAQUETES; ACTUALIZ da el núcleo nuevo por bueno)
+        regla("PANTALLA.ENV", NADIE, falso)                ; (la escribe el escritorio)
+        regla("HISPA.INI", B_ASISTE, falso)                ; (y Configuración, del núcleo)
+        regla("INICIO.INI", NADIE, falso)                  ; (pentium-menu: lo fijado en el menú Inicio; lo escribe el núcleo)
+        regla("DOCK.INI", NADIE, falso)                    ; (el dock, del núcleo)
+        regla("ATAJOS.INI", NADIE, falso)
+        regla("NUCLEO.BIN", NADIE, falso)
+        regla("NUCLEO.ANT", NADIE, falso)
+        regla("MBR.ANT", NADIE, falso)
+        regla("SEMILLA.BIN", NADIE, falso)
+        regla("ESCRIT6.BIN", NADIE, falso)
+        regla("ESCRIT8.BIN", NADIE, falso)
+        regla("ESCRIT10.BIN", NADIE, falso)
+        regla("ESCRIT13.BIN", NADIE, falso)
+        regla("BOOT\\", NADIE, falso)
+        ; ---- los servicios y lo suyo ----
+        regla("TLS.SEM", B_TLS, cierto)
+        regla("TLS.CCH", B_TLS, falso)
+        regla("TLS.HOR", B_TLS, falso)
+        regla("TLS.INI", NADIE, falso)
+        regla("RAICES\\", NADIE, falso)                    ; las autoridades de más (las lee TLS.BIN, de \HISPA y de la raíz)
+        regla("RED.INI", B_RED, falso)                     ; (lo que prefiere la red: cable o Wi-Fi)
+        regla("WIFI.INI", B_WIFI, cierto)                  ; las redes recordadas y sus claves
+        regla("WIFI.LLV", B_WIFI, cierto)                  ; la llave que las cifra
+        regla("WIFI.LOG", B_WIFI, falso)
+        regla("SONIDO.INI", B_SONIDO, falso)               ; (pentium-sonido) el volumen y los sonidos del sistema
+        regla("ESCUDO\\", B_ESCUDO, falso)                 ; sus opciones, el cortafuegos (CORTAFUE.INI), el registro y las firmas
+        regla("CUARENTE\\", B_ESCUDO, cierto)              ; la cuarentena: lo apartado solo lo vuelve a sacar Escudo
+        regla("CUARENTENA\\", B_ESCUDO, cierto)
+        regla("SSH\\LLAVE.SSH", B_SSHD, cierto)            ; la llave del equipo
+        regla("SSH\\CLAVE.TXT", B_SSHD, cierto)            ; la contraseña, resumida
+        regla("SSH\\SSHD.INI", B_SSHD, falso)
+        regla("SSH\\AUTORIZA.TXT", B_SSHD, falso)
+        regla("SSH\\ID_ED.SSH", B_SSH, cierto)             ; la llave propia del cliente
+        regla("SSH\\ID_ED.PUB", B_SSH, falso)
+        regla("SSH\\CONOCIDO.TXT", B_SSH, falso)
+        regla("SSH\\", B_SSH ob B_SSHD, falso)
+        regla("SSHD.SEM", B_SSHD, cierto)                  ; (las semillas del azar de cada uno)
+        regla("SSH.SEM", B_SSH, cierto)
+        regla("WG.SEM", B_WG, cierto)
+        regla("TAILSCAL.SEM", B_TAILSCAL, cierto)
+        regla("WG\\WG0.CNF", B_WG, cierto)                 ; (lleva la clave privada del túnel)
+        regla("WG\\", B_WG, falso)
+        regla("TS\\CLAVES.TS", B_TAILSCAL, cierto)
+        regla("TS\\", B_TAILSCAL, falso)
+        ; ---- los paquetes ----
+        regla("PAQUETES\\BAJADAS\\", B_DESCARGA, falso)
+        regla("PAQUETES\\AVANCE.TXT", B_ACTUALIZ ob B_DESCARGA ob B_PROGRAMA, falso)
+        regla("PAQUETES\\PROGRAMA.TXT", B_PROGRAMA, falso)
+        regla("PAQUETES\\VENTANA.TXT", B_ACTUALIZ, falso)
+        regla("PAQUETES\\BANDEJA.TXT", B_ACTUALIZ, falso)  ; (lo de PAQUETES ESTADO, para el aviso de la bandeja)
+        regla("PAQUETES\\", NADIE, falso)
+        regla("MENU\\", NADIE, falso)
+        regla("INSTALA\\", NADIE, falso)
+        regla("WIN32\\", NADIE, falso)                     ; (las DLL de los programas de Windows)
+        ; ---- los programas que guardan algo suyo ----
+        regla("NAVEGA\\SURFGAL.TXT", B_NAVEGA, cierto)     ; las galletas (las sesiones abiertas en las webs)
+        regla("NAVEGA\\NAVEGA.INI", B_NAVEGA, falso)
+        regla("NAVEGA\\CAJAS.TXT", B_NAVEGA, falso)
+        regla("NAVEGA\\SURF.LOG", B_NAVEGA, falso)
+        regla("NAVEGA\\NS.LOG", B_NAVEGA, falso)
+        regla("NAVEGA\\", NADIE, falso)
+        regla("CLICGEST.SES", B_CLICGEST, cierto)          ; la sesión guardada («recordarme»)
+        regla("CLICGEST.ANC", B_CLICGEST, falso)
+        regla("ASOCIA.TXT", B_EQUIPO, falso)               ; con qué se abre cada clase de archivo (Mi equipo)
+        ; ---- los programas del sistema (en la raíz de la memoria de arranque;
+        ; en un sistema instalado, que nadie ponga en la raíz uno que se llame
+        ; igual: ORDENES.BIN en la raíz haría pasar el disco por una memoria de arranque) ----
+        regla("ORDENES.BIN", NADIE, falso)
+        regla("BLOC.BIN", NADIE, falso)
+        regla("CONSOLA.BIN", NADIE, falso)
+        regla("EQUIPO.BIN", NADIE, falso)
+        regla("DISPOSIT.BIN", NADIE, falso)
+        regla("PAQUETES.BIN", NADIE, falso)
+        regla("ACTUALIZ.BIN", NADIE, falso)
+        regla("RED.BIN", NADIE, falso)
+        regla("IPCONFIG.BIN", NADIE, falso)
+        regla("PING.BIN", NADIE, falso)
+        regla("DESCARGA.BIN", NADIE, falso)
+        regla("HTTPS.BIN", NADIE, falso)
+        regla("INSTALAR.BIN", NADIE, falso)
+        regla("ASISTE.BIN", NADIE, falso)
+        regla("ACPI.BIN", NADIE, falso)
+        regla("TLS.BIN", NADIE, falso)
+        regla("SSH.BIN", NADIE, falso)
+        regla("SSHD.BIN", NADIE, falso)
+        regla("WG.BIN", NADIE, falso)
+        regla("TAILSCAL.BIN", NADIE, falso)
+        regla("MINIAT.BIN", NADIE, falso)
+        regla("HVPRUN.BIN", NADIE, falso)
+        regla("WIN32.BIN", NADIE, falso)
+        regla("CLICGEST.BIN", NADIE, falso)
+        regla("WIFI.BIN", NADIE, falso)
+        regla("REDWIFI.BIN", NADIE, falso)
+        regla("ESCUDO.BIN", NADIE, falso)
+        regla("PROGRAMA.BIN", NADIE, falso)
+        regla("SONIDO.BIN", NADIE, falso)
+        regla("HISPA\\", NADIE, falso)                     ; (en la raíz: que no se haga una \HISPA donde no la hay)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Mirar una ruta
+    ; -------------------------------------------------------------------------
+    función bit(s: nat32): nat32
+        si s = 0 o s >= 32 entonces devolver 0 fin
+        devolver nat32(1) << s
+    fin
+
+    ; ¿existe esa ruta en la unidad u?
+    función existe(u: nat32, ruta: puntero a byte): bool
+        variable m: nat32
+        m := abrir_archivo(u, ruta, PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        cerrar_archivo(m)
+        devolver cierto
+    fin
+
+    ; lo de la unidad del sistema, al día
+    función mira_sistema()
+        si visto_cambios <> Unidades.cambios o visto_sistema <> del_sistema entonces
+            con_hispa := falso
+            de_arranque := falso
+            si del_sistema < MAX_UNIDADES entonces
+                si unidades[del_sistema].hay y unidades[del_sistema].clase = U_FAT entonces
+                    con_hispa := existe(del_sistema, "\\HISPA")
+                    de_arranque := existe(del_sistema, "\\ORDENES.BIN")
+                fin
+            fin
+            visto_cambios := Unidades.cambios
+            visto_sistema := del_sistema
+        fin
+    fin
+
+    ; ¿casa la regla r con la ruta «rel» (desde \HISPA o desde la raíz)?
+    función casa(r: puntero a Regla, rel: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras r.patrón[i] <> 0 y r.patrón[i] = rel[i] hacer i := i + 1 fin
+        si r.patrón[i] = 0 entonces
+            si r.carpeta entonces devolver cierto fin   ; (lo de dentro de la carpeta)
+            devolver rel[i] = 0
+        fin
+        ; la carpeta misma («SSH» con la regla «SSH\»)
+        devolver r.carpeta y rel[i] = 0 y r.patrón[i] = '\\' y r.patrón[i + 1] = 0
+    fin
+
+    constante LIBRE = 0
+    constante PROTEGIDA = 1
+    constante DUDOSA = 2                        ; no se sabe qué archivo es (el disco falla): se dice que no
+
+    ; lo que dice la tabla de la ruta entera «ruta» de la unidad u: LIBRE,
+    ; PROTEGIDA (y, en «escriben» y «secreto», su renglón) o DUDOSA
+    función mira(u: nat32, ruta: puntero a byte, ref escriben: nat32, ref secreto: bool): nat32
+        variable forma: arreglo [MAX_FORMA] de byte
+        variable rel: puntero a byte
+        variable en_hispa: bool
+        variable i: nat32
+        escriben := NADIE
+        secreto := falso
+        si u >= MAX_UNIDADES o u <> del_sistema entonces devolver LIBRE fin
+        si no unidades[u].hay o unidades[u].clase <> U_FAT entonces devolver LIBRE fin
+        ; (sin leer el disco si todos los trozos son de 8+3: casi siempre)
+        si no forma_sin_disco(ruta, forma, MAX_FORMA) entonces
+            si no forma_de_ruta(u, ruta, forma, MAX_FORMA) entonces devolver DUDOSA fin
+        fin
+        mira_sistema()
+        en_hispa := falso
+        rel := dirección(forma[1])
+        si empieza_por(forma, "\\HISPA") y (forma[6] = 0 o forma[6] = '\\') entonces
+            en_hispa := cierto
+            rel := dirección(forma[6])
+            si rel[0] = '\\' entonces rel := rel + 1 fin
+        fin
+        si rel[0] = 0 entonces
+            si en_hispa entonces devolver PROTEGIDA fin  ; (la carpeta \HISPA misma)
+            devolver LIBRE                              ; (la raíz)
+        fin
+        i := 0
+        mientras i < n_reglas hacer
+            si casa(dirección(reglas[i]), rel) entonces
+                escriben := reglas[i].escriben
+                secreto := reglas[i].secreto
+                devolver PROTEGIDA
+            fin
+            i := i + 1
+        fin
+        si en_hispa entonces devolver PROTEGIDA fin
+        devolver LIBRE
+    fin
+
+    ; ¿puede la tarea que corre escribir (crear, borrar, cambiar de nombre...)
+    ; en la ruta entera «ruta» de la unidad u?
+    público función puede_escribir(u: nat32, ruta: puntero a byte): bool
+        variable escriben, z: nat32
+        variable secreto: bool
+        si actual = nulo entonces devolver cierto fin
+        si no actual.usuario o actual.admin entonces devolver cierto fin
+        z := mira(u, ruta, escriben, secreto)
+        si z = LIBRE entonces devolver cierto fin
+        si z = PROTEGIDA y bit(actual.sello) yb (escriben ob TODO_EL_SISTEMA) <> 0 entonces devolver cierto fin
+        denegados := denegados + 1
+        imprimir2("permisos: acceso denegado a %s para escribir (%s)\n", nat32(ruta), nat32(actual.nombre))
+        devolver falso
+    fin
+
+    ; ¿y leerla? (solo los secretos tienen dueño)
+    público función puede_leer(u: nat32, ruta: puntero a byte): bool
+        variable escriben, z: nat32
+        variable secreto: bool
+        si actual = nulo entonces devolver cierto fin
+        si no actual.usuario o actual.admin entonces devolver cierto fin
+        z := mira(u, ruta, escriben, secreto)
+        si z = LIBRE entonces devolver cierto fin
+        si z = PROTEGIDA y (no secreto o bit(actual.sello) yb escriben <> 0) entonces devolver cierto fin
+        denegados := denegados + 1
+        imprimir2("permisos: acceso denegado a %s para leer (%s)\n", nat32(ruta), nat32(actual.nombre))
+        devolver falso
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El sello de un programa que se carga
+    ; -------------------------------------------------------------------------
+    ; el programa de la tabla que es esa ruta (desde la carpeta del sistema)
+    función busca_programa(rel: puntero a byte, ref servicio: bool): nat32
+        variable i: nat32
+        i := 0
+        mientras i < n_programas hacer
+            si iguales(dirección(programas[i].ruta[0]), rel) entonces
+                servicio := programas[i].servicio
+                devolver programas[i].sello
+            fin
+            i := i + 1
+        fin
+        devolver SELLO_NINGUNO
+    fin
+
+    ; el sello del programa que se carga de la ruta entera «ruta» de la
+    ; unidad u (y, en «servicio», si es un servicio): el de la tabla si está
+    ; en \HISPA de la unidad del sistema, en su raíz si es la memoria de
+    ; arranque (lleva los programas ahí) o en la unidad en memoria (M:, lo
+    ; que trae el cargador); si no, SELLO_NINGUNO
+    público función sello_de_carga(u: nat32, ruta: puntero a byte, ref servicio: bool): nat32
+        variable forma: arreglo [MAX_FORMA] de byte
+        variable i, j: nat32
+        servicio := falso
+        si u >= MAX_UNIDADES entonces devolver SELLO_NINGUNO fin
+        si no unidades[u].hay entonces devolver SELLO_NINGUNO fin
+        si unidades[u].clase = U_MEMORIA entonces
+            ; (los módulos: todos en la raíz, y en mayúsculas)
+            i := 0
+            mientras ruta[i] = '\\' o ruta[i] = '/' hacer i := i + 1 fin
+            j := 0
+            mientras ruta[i] <> 0 y j + 1 < MAX_FORMA hacer
+                forma[j] := mayúscula(ruta[i])
+                i := i + 1
+                j := j + 1
+            fin
+            forma[j] := 0
+            devolver busca_programa(forma, servicio)
+        fin
+        si u <> del_sistema o unidades[u].clase <> U_FAT entonces devolver SELLO_NINGUNO fin
+        si no forma_de_ruta(u, ruta, forma, MAX_FORMA) entonces devolver SELLO_NINGUNO fin
+        mira_sistema()
+        si con_hispa y empieza_por(forma, "\\HISPA\\") entonces devolver busca_programa(dirección(forma[7]), servicio) fin
+        si de_arranque entonces devolver busca_programa(dirección(forma[1]), servicio) fin
+        devolver SELLO_NINGUNO
+    fin
+
+    ; la ruta fija de un programa del sistema («RED.BIN»): «\HISPA\RED.BIN»
+    ; si la unidad del sistema tiene \HISPA y no lleva los programas en la
+    ; raíz; si no, «\RED.BIN». En «destino» (caben «cabe»)
+    público función ruta_del_sistema(nombre: puntero a byte, destino: puntero a byte, cabe: nat32)
+        mira_sistema()
+        si con_hispa y no de_arranque entonces copiar_hasta(destino, "\\HISPA\\", cabe) sino copiar_hasta(destino, "\\", cabe) fin
+        si longitud(destino) + longitud(nombre) < cabe entonces concatenar(destino, nombre) fin
+    fin
+
+fin Permisos.

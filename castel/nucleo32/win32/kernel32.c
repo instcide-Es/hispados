@@ -36,6 +36,7 @@ u32 error_de(u32 r)
 	case E_NOMBRE_MALO: return 123;
 	case E_ES_CARPETA: return 5;
 	case E_NO_CARPETA: return 3;           /* ERROR_PATH_NOT_FOUND */
+	case E_DENEGADO: return 5;             /* (PROTEGE) ERROR_ACCESS_DENIED */
 	}
 	return 31;
 }
