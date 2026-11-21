@@ -18,7 +18,8 @@
 # Con «navegador» (y «red» y «tls»), también el Navegador (nucleo32/navega/hacer.sh)
 # en \NAVEGA, su acceso en \MENU (NAVEGA.MNU, con el icono en el tapiz) y
 # X87.BIN (la prueba de que cada programa tiene su coma flotante). Con 32,
-# que caben (16 MB se quedan cortos).
+# que caben (16 MB se quedan cortos). (ESCUDO) Con «escudo», el antivirus
+# (nucleo32/escudo/hacer.sh): ESCUDO.BIN, \ESCUDO y su acceso en \MENU.
 # La imagen se le da a QEMU como disco IDE: DISCO=IMAGEN nucleo32/probar.sh ...
 # Necesita python3, nasm, mkfs.fat (dosfstools) y mtools.
 set -e
@@ -30,8 +31,9 @@ OFICINA=
 RED=
 TLS=
 NAVEGADOR=
+ESCUDO=
 for o in "${@:3}"; do
-  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; navegador) NAVEGADOR=navegador ;; esac
+  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; navegador) NAVEGADOR=navegador ;; escudo) ESCUDO=escudo ;; esac
 done
 T=$(mktemp -d)
 trap 'rm -rf $T' EXIT
@@ -101,6 +103,16 @@ if [ "$NAVEGADOR" = navegador ]; then
   mmd -i $V ::MENU
   mcopy -i $V $T/nav/NAVEGA.MNU $T/nav/NAVEGA.ICP ::MENU/
   mcopy -i $V $AQUI/../../build/navega-pentium/X87.BIN ::
+fi
+# (ESCUDO) el antivirus, sin instalar: ESCUDO.BIN en la raíz, \ESCUDO (su LEEME;
+# las firmas, en \ESCUDO\FIRMAS, las pone quien lo pruebe) y su acceso en \MENU
+if [ "$ESCUDO" = escudo ]; then
+  ESCUDO_PROGRAMA='\ESCUDO.BIN' ESCUDO_ICONO='\MENU\ESCUDO.ICP' bash $AQUI/escudo/hacer.sh $T/esc
+  mcopy -i $V $T/esc/ESCUDO.BIN ::
+  mmd -i $V ::ESCUDO ::ESCUDO/FIRMAS
+  mcopy -i $V $T/esc/ESCUDO/LEEME.TXT ::ESCUDO/
+  mmd -i $V ::MENU 2> /dev/null || true
+  mcopy -i $V $T/esc/MENU/ESCUDO.MNU $T/esc/MENU/ESCUDO.ICP ::MENU/
 fi
 if [ $CLASE = mbr ]; then
   # una tabla de particiones con una sola, de FAT16 (clase 0x06), desde el sector 63

@@ -188,6 +188,9 @@ módulo Escritorio
     variable cambios_vistos: nat32
     variable red_vista: nat32                   ; (los cambios de la red que ya pinta el icono)
     constante ICONO_RED = 24                    ; lo que se ensancha la bandeja con el icono de la red
+    constante ICONO_ESCUDO = 22                 ; (ESCUDO) y con el del antivirus, si está ESCUDO.BIN
+    variable hay_escudo: bool                   ; (ESCUDO)
+    variable ruta_escudo: arreglo [24] de byte  ; (ESCUDO) \HISPA\ESCUDO.BIN o \ESCUDO.BIN
     variable minuto_visto: nat32 = 0xFFFFFFFF
     variable segundo_visto: nat32
     variable fondo: nat32                       ; el tapiz: 0, 1 o 2
@@ -570,8 +573,46 @@ módulo Escritorio
         devolver 0
     fin
 
+    ; (ESCUDO) el escudo del antivirus, a la derecha de la pila
+    función hueco_escudo(): ent32
+        si hay_escudo entonces devolver ICONO_ESCUDO fin
+        devolver 0
+    fin
+
     función ancho_bandeja(): ent32
-        devolver BANDEJA_ANCHO + hueco_usb() + hueco_red() + hueco_pila()
+        devolver BANDEJA_ANCHO + hueco_usb() + hueco_red() + hueco_pila() + hueco_escudo()
+    fin
+
+    ; (ESCUDO) el icono del antivirus (14 x 18): un escudo azul con su borde y
+    ; una marca blanca; un clic abre su ventana (ESCUDO.BIN /VENTANA)
+    función icono_escudo(ref l: Lienzo, x: ent32, yy: ent32)
+        variable i, w: ent32
+        para i desde 0 hasta 17 hacer
+            w := 14
+            si i > 9 entonces w := 14 - (i - 9) * 7 div 4 fin
+            si w > 0 entonces
+                rectángulo(l, x + (14 - w) div 2, yy + i, w, 1, 0x14336A)
+                si w > 2 y i > 0 y i < 17 entonces rectángulo(l, x + (14 - w) div 2 + 1, yy + i, w - 2, 1, 0x3B82F6) fin
+            fin
+        fin
+        rectángulo(l, x + 3, yy + 8, 2, 2, BLANCO)
+        rectángulo(l, x + 5, yy + 10, 2, 2, BLANCO)
+        rectángulo(l, x + 7, yy + 8, 2, 2, BLANCO)
+        rectángulo(l, x + 9, yy + 6, 2, 2, BLANCO)
+        rectángulo(l, x + 11, yy + 4, 1, 2, BLANCO)
+    fin
+
+    ; (ESCUDO) ¿está el antivirus? (instalado, en \HISPA; o sin instalar, en la raíz)
+    función busca_escudo()
+        variable m: nat32
+        Textos32.copiar(ruta_escudo, "\\HISPA\\ESCUDO.BIN")
+        m := abrir_archivo(del_sistema, ruta_escudo, PARA_LEER)
+        si m >= PRIMER_ERROR entonces
+            Textos32.copiar(ruta_escudo, "\\ESCUDO.BIN")
+            m := abrir_archivo(del_sistema, ruta_escudo, PARA_LEER)
+        fin
+        hay_escudo := m < PRIMER_ERROR
+        si hay_escudo entonces cerrar_archivo(m) fin
     fin
 
     ; el icono de la red: una pantalla con su pie y, abajo a la derecha, una
@@ -649,6 +690,7 @@ módulo Escritorio
         si n_usb > 0 entonces icono_memoria(valor(l), an - bandeja + 8, 6) fin
         si hueco_red() > 0 entonces pinta_icono_red(valor(l), an - bandeja + hueco_usb() + 7, 9) fin
         si hay_pila() entonces pinta_pila(valor(l), an - bandeja + hueco_usb() + hueco_red() + 8, 0) fin
+        si hay_escudo entonces icono_escudo(valor(l), an - bandeja + hueco_usb() + hueco_red() + hueco_pila() + 4, 7) fin   ; (ESCUDO)
         red_vista := cambios_red
         ahora(f, h)
         d[0] := h >> 11
@@ -2115,6 +2157,9 @@ módulo Escritorio
                 sino si hueco_red() > 0 y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() y ent32(e.a) < pantalla.ancho - bandeja + hueco_usb() + ICONO_RED entonces
                     ; el icono de la red
                     dice_red()
+                sino si hay_escudo y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() + hueco_red() + hueco_pila() y ent32(e.a) < pantalla.ancho - BANDEJA_ANCHO entonces
+                    ; (ESCUDO) el del antivirus: su ventana
+                    lanza(ruta_escudo, "/VENTANA")
                 sino si ent32(e.a) >= BOTONES_X y ancho_botón > 0 entonces
                     n := (ent32(e.a) - BOTONES_X) div ancho_botón
                     si n < ent32(n_botones) entonces
@@ -2348,6 +2393,7 @@ módulo Escritorio
         ; la ventana «del fondo» (no se ve): le llega lo que cae en el tapiz
         v_fondo := crear_ventana("fondo", 0, 0, 1, 1, SIN_MARCO ob OCULTA, 0)
         ventana_fondo := v_fondo
+        busca_escudo()                          ; (ESCUDO)
         ; los iconos del tapiz
         nuevo_icono("Mi equipo", AM_EQUIPO)
         nuevo_icono("Bloc de notas", AM_BLOC)
@@ -2390,6 +2436,12 @@ módulo Escritorio
                 si t <> nulo entonces t.padre := 0 fin
             fin
             mira_pantalla_guardada()
+        fin
+        ; (ESCUDO) el antivirus, vigilando: pregunta al conectar una memoria o
+        ; meter un CD (ESCUDO /VIGILAR; con el sistema instalado o sin instalar)
+        si hay_escudo entonces
+            t := cargar_archivo(ruta_escudo, "/VIGILAR", an)
+            si t <> nulo entonces t.padre := 0 fin
         fin
         devolver 1
     fin
