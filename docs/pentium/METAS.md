@@ -16,6 +16,8 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [x] ~~**Administrador de dispositivos** (PCI, USB, ACPI: qué hay, qué controlador lo lleva, recursos y estado)~~ — rama pentium-dispositivos (21/11: DISPOSIT.BIN y la llamada 155; informe en X:\DISPOSIT.TXT)
 
 ## El escritorio
+- [ ] **Menú Inicio**: «Todos los programas» con todo lo instalado (también lo de los paquetes), y «Apagar equipo» siempre a la vista aunque haya muchos programas (pedido de Carlos 21/11)
+- [ ] **Rueda del ratón en todo el entorno**: menús, listas y rejillas, Explorador, Bloc de notas, Consola, cuadros, ClicGest (pedido de Carlos 21/11)
 - [ ] Explorador de archivos: árbol de carpetas, vistas (iconos, lista, detalles), copiar/cortar/pegar, arrastrar y soltar, papelera, buscar, propiedades, abrir con…, miniaturas de imágenes
 - [ ] Dock: barra de lanzamiento con los programas favoritos y los abiertos, que se pueda fijar y quitar
 - [ ] Barra de tareas: agrupar ventanas, vista previa, bandeja con más iconos (sonido, Wi-Fi)
