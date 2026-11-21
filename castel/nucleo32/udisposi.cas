@@ -268,6 +268,7 @@ módulo UDisposi
             caso BUS_CPU: devolver 9
             caso BUS_PLACA:
                 si c = 0x09 entonces devolver 6 fin
+                si c = 0x03 entonces devolver 0 fin     ; (EDID) el monitor, en Pantalla
                 devolver 7
             caso BUS_ACPI:
                 si iguales(lista[i].pnp, "PNP0C0A") o iguales(lista[i].pnp, "ACPI0003") entonces devolver 8 fin
