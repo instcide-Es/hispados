@@ -1355,7 +1355,7 @@ módulo UEquipo
                     d[1] := nat32(dirección(texto_[200]))
                     formatear(dirección(texto_[0]), 100, "%s libres de %s", d)
                     corto_en(x + 54, yy + 22, texto_, an - 58, tinta, falso)
-                    barra_libre(x + 54, yy + 42, an - 64, us[it.unidad])
+                    si us[it.unidad].solo_lectura = 0 entonces barra_libre(x + 54, yy + 42, an - 64, us[it.unidad]) fin
                 sino
                     tamaño_k(us[it.unidad].total_k, t)
                     corto_en(x + 54, yy + 22, t, an - 58, tinta, falso)
@@ -2299,7 +2299,7 @@ módulo UEquipo
         fecha_a_texto(it.fecha, cierto, t)
         pon_prop3("Modificado: %s", nat32(dirección(t[0])))
         fecha_a_texto(it.acceso, falso, t2)
-        si t2[0] <> 0 entonces pon_prop3("\x351ltimo acceso: %s", nat32(dirección(t2[0]))) fin
+        si t2[0] <> 0 entonces pon_prop3("\xE9ltimo acceso: %s", nat32(dirección(t2[0]))) fin
         at_antes := it.atrib
         at_ro := it.atrib yb SOLO_LECTURA <> 0
         at_oculto := it.atrib yb OCULTO <> 0
@@ -2577,7 +2577,12 @@ módulo UEquipo
     ; =========================================================================
     función suelta_miniaturas()
         n_miniaturas := 0
-        si item_min >= 0 entonces item_min := -1 fin
+        si item_min >= 0 entonces
+            ; (la que se estaba haciendo era de lo de antes: se espera y se tira)
+            esperar(tarea_min)
+            borrar(tmp_min)
+            item_min := -1
+        fin
     fin
 
     función pinta_miniatura(h: ent32, x: ent32, yy: ent32)
@@ -2989,6 +2994,27 @@ módulo UEquipo
             caso 24: al_porta(cierto)
             caso 22: pega()
             caso 14: pide_nombre(cierto)
+            si no:
+                ; una letra: al siguiente que empieza por ella
+                si c > ' ' y c < 0x100 entonces salta_a_letra(byte(c)) fin
+        fin
+    fin
+
+    ; al siguiente (desde el cursor, dando la vuelta) cuyo nombre empieza por esa letra
+    función salta_a_letra(c: byte)
+        variable i, k, n: ent32
+        n := vistos()
+        si n = 0 entonces devolver fin
+        k := 1
+        mientras k <= n hacer
+            i := (g.sel + k) mod n
+            si i < 0 entonces i := i + n fin
+            si mayúscula(item(de_vista(i)).largo[0]) = mayúscula(c) entonces
+                elige_solo(i)
+                al_cursor()
+                devolver
+            fin
+            k := k + 1
         fin
     fin
 

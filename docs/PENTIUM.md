@@ -938,7 +938,7 @@ propio, con sus tildes y su eñe).
 - **«Apagar el equipo»**: Apagar, Reiniciar o Cancelar. Apagar deja la pantalla de
   «Ya puede apagar el equipo» (en QEMU, además, lo apaga).
 - **Configuración**: lo que hay (la pantalla, la memoria, las tareas), el teclado
-  (español o de EE. UU.) y el tapiz; y, junto a la pantalla, **«Cambiar...»**: la
+  (español o de EE. UU.), el tapiz y el dock (visible u oculto); y, junto a la pantalla, **«Cambiar...»**: la
   medida de la pantalla, en el momento donde la tarjeta lo deja y, si no, al
   arrancar (más abajo, «La medida de la pantalla»). **Acerca de Hispa-Pentium**: la versión y la
   licencia.
@@ -1364,9 +1364,13 @@ Visible / Oculto». Cómo está hecho (`dock.cas`, en el núcleo, con
 `iconos.cas`): una ventana sin marco, siempre delante y **TRASLÚCIDA**
 (una bandera nueva del gestor: sus puntos con el octeto de arriba puesto no
 se ven ni se pulsan, y dejan ver y pulsar lo de debajo: así el panel es
-redondo y la etiqueta no tapa nada). Lo que ocupa su panel no lo tapan las
-**ventanas maximizadas** (`Ventanas.alto_dock`), y una ventana que se
-centra y cabría encima, no queda debajo. Sabe qué está abierto mirando las
+redondo y la etiqueta no tapa nada). **No tapa nada de nadie**: cuando una
+ventana ocupa el sitio de su panel (una maximizada, un cuadro grande de
+un programa), el dock **se aparta**; vuelve cuando el sitio queda libre, o
+al llevar la flecha a la raya de justo encima de la barra de tareas (y se
+queda mientras la flecha esté encima). Una ventana que se centra y cabe
+encima del dock no se pone debajo (`Ventanas.alto_dock`; un programa lo
+sabe con `DATO_ALTO_LIBRE`). Sabe qué está abierto mirando las
 ventanas y el nombre (y los argumentos) de la tarea de cada una; lo que se
 pulsa se lo pide al escritorio (`Dock.pide`: lanzar o Configuración).
 

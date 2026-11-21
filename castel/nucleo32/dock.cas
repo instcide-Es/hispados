@@ -30,8 +30,10 @@
 ;  escritorio como sus iconos.
 ;
 ;  Es una ventana del núcleo sin marco, siempre delante y TRASLÚCIDA (lo de
-;  fuera de su panel y de la etiqueta no se ve ni se pulsa). Lo que ocupa su
-;  panel no lo tapan las ventanas maximizadas (Ventanas.alto_dock).
+;  fuera de su panel y de la etiqueta no se ve ni se pulsa). No tapa nada de
+;  nadie: cuando una ventana (una maximizada, un cuadro grande) ocupa el sitio
+;  de su panel, se aparta; vuelve cuando el sitio queda libre, o al llevar la
+;  flecha a la raya de encima de la barra de tareas (y mientras esté encima).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Dock
@@ -83,6 +85,8 @@ módulo Dock
     público variable v_dock: nat32
     público variable visible: bool = cierto
     variable ancho_panel: ent32
+    variable dock_x, dock_y, dock_an, dock_al: ent32    ; dónde está su ventana
+    variable apartado: bool                     ; se ha quitado de en medio: una ventana tapa su sitio
     variable debajo_puntero: ent32 = -1         ; el que tiene el puntero encima
     variable cogido: ent32 = -1                 ; el que se está arrastrando (o -1)
     variable cog_x: ent32
@@ -600,7 +604,7 @@ módulo Dock
         fin
         ; el que se arrastra, donde va el puntero
         si cogido >= 0 y movido entonces
-            k := cog_x - LADO div 2
+            k := x + cog_x - LADO div 2
             pinta_icono(valor(l), nat32(cogido), k, ETIQUETA + 3)
         fin
         ; la etiqueta con el nombre del que tiene el puntero encima
@@ -634,6 +638,11 @@ módulo Dock
         sino
             recolocar_ventana(v_dock, x, yy, an, al)
         fin
+        dock_x := x
+        dock_y := yy
+        dock_an := an
+        dock_al := al
+        apartado := falso
         si v_dock <> 0 entonces mostrar(v_dock, visible) fin
         si visible entonces alto_dock := ALTO_RESERVADO sino alto_dock := 0 fin
     fin
@@ -660,7 +669,6 @@ módulo Dock
         coloca()
         pinta_dock()
         guarda_dock()
-        reajusta_maximizadas()
     fin
 
     ; -------------------------------------------------------------------------
@@ -790,7 +798,7 @@ módulo Dock
             según e.clase
                 caso EV_RATÓN_MUEVE:
                     si cogido >= 0 y e.c yb BOTÓN_IZQUIERDO <> 0 entonces
-                        si ent32(e.a) - cog_x > 5 o cog_x - ent32(e.a) > 5 entonces movido := cierto fin
+                        si no movido y (ent32(e.a) - cog_x > 5 o cog_x - ent32(e.a) > 5) entonces movido := cierto fin
                         si movido entonces
                             cog_x := ent32(e.a) - base_x
                             ; el sitio de los fijados que toca
@@ -857,6 +865,35 @@ módulo Dock
             fin
         fin
         si cambia entonces pinta_dock() fin
+        aparta()
+    fin
+
+    ; se quita de en medio cuando una ventana tapa el sitio de su panel (no
+    ; tapa nada de nadie); vuelve cuando no lo tapa ninguna, o al acercar la
+    ; flecha a la raya de encima de la barra de tareas (y se queda mientras
+    ; la flecha esté encima)
+    función aparta()
+        variable px, pan, abajo: ent32
+        variable encima, cerca, quiere_ver: bool
+        si v_dock = 0 o no visible entonces devolver fin
+        px := dock_x + (dock_an - ancho_panel) div 2
+        pan := ancho_panel
+        abajo := dock_y + ETIQUETA + PANEL + MARGEN       ; (la barra de tareas empieza aquí)
+        encima := ratón_x >= px y ratón_x < px + pan y ratón_y >= dock_y + ETIQUETA y ratón_y < abajo
+        cerca := ratón_x >= px y ratón_x < px + pan y ratón_y >= abajo - MARGEN - 3 y ratón_y < abajo
+        si apartado entonces
+            quiere_ver := cerca o no tapado(px, dock_y + ETIQUETA, pan, PANEL)
+        sino
+            quiere_ver := encima o no tapado(px, dock_y + ETIQUETA, pan, PANEL)
+        fin
+        si quiere_ver = apartado entonces
+            apartado := no quiere_ver
+            mostrar(v_dock, quiere_ver)
+            si apartado entonces
+                debajo_puntero := -1
+                cogido := -1
+            fin
+        fin
     fin
 
     ; mira la papelera ya (el explorador acaba de tirar o vaciar)
