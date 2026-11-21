@@ -3772,7 +3772,8 @@ CAPTURAS=$G DISCO=$V/gl.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucle
   ":escribe \\HISPA32\\GLPRUEBA /PRUEBA" ":tecla ret" ":pausa 25" ":captura g1" ":tecla esc" ":pausa 3" \
   ":escribe \\HISPA32\\GLPRUEBA /COMPLETA /PRUEBA" ":tecla ret" ":pausa 25" ":captura g2" ":tecla esc" ":pausa 3" ":captura g3" \
   ":escribe \\HISPA32\\ENGRANA" ":tecla ret" ":pausa 30" ":captura g4" ":tecla esc" ":pausa 3" \
-  ":escribe \\HISPA32\\GLPRUEBA /SALA /ANCHO 320 /ALTO 240" ":tecla ret" ":pausa 30" ":captura g5" ":tecla esc" ":pausa 3" > $V/gl.sal 2>&1
+  ":escribe \\HISPA32\\GLPRUEBA /SALA /ANCHO 320 /ALTO 240" ":tecla ret" ":pausa 30" ":captura g5" ":tecla esc" ":pausa 3" \
+  ":escribe \\PRUEBAS\\WGLGEARS" ":tecla ret" ":pausa 30" ":captura g6" ":tecla esc" ":pausa 3" > $V/gl.sal 2>&1
 S=$V/gl.sal
 glcuenta() { local f=$1; shift; if python3 -I $AQUI/../tests/gl/compara.py --cuenta $G/$f.ppm "$@" > $V/glc.txt; then ok "$(sed 's/^ *OK *//' $V/glc.txt)"; else ko "$(sed 's/^ *FAIL *//' $V/glc.txt)"; fi; }
 glcps() { awk -v p="$1" '/wglCreateContext/{n++} n==p && /cuadros por 10 s/{v=$NF} END{print v}' $S | tr -d '\r'; }
@@ -3784,7 +3785,12 @@ glcuenta g2 0 0 800 60 negro 40000 48000 "y el borde negro de arriba (320×240 a
 glcuenta g4 0 0 800 600 rojo 6000 60000 "ENGRANA: el engranaje rojo (listas, luz, sombreado plano y suave)"
 glcuenta g4 0 0 800 600 verde 1500 30000 "el verde"
 glcuenta g5 0 0 800 600 ladrillo 15000 120000 "la sala de medir: las paredes de ladrillo (multitextura: la pared por su mapa de luz)"
-for p in 3:ENGRANA:300×300 4:"la sala":320×240; do
+GLP=(3:ENGRANA:300×300 4:"la sala":320×240)
+if mdir -i $V/gl.img ::PRUEBAS/WGLGEARS.EXE > /dev/null 2>&1; then
+  glcuenta g6 0 0 800 600 verde 2000 40000 "WGLGEARS (los engranajes de los demos de Mesa, MIT: un programa de otros, con WGL)"
+  GLP+=(5:WGLGEARS:300×300)
+else echo "  (sin wglgears: tests/thirdparty/fetch_gl.sh)"; fi
+for p in "${GLP[@]}"; do
   c=$(glcps ${p%%:*}); q=${p#*:}
   if [ -n "$c" ]; then ok "${q%%:*}: $(( 16#$c / 10 )),$(( 16#$c % 10 )) cuadros por segundo en QEMU (${q#*:}, calidad normal)"
   else ko "${q%%:*}: la traza no dice los cuadros por segundo"; fi

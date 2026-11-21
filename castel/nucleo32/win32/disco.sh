@@ -30,6 +30,10 @@ for p in WINCALC:CALC32 WINHOLA:HOLA32 WINCTL:CTL32 WINMENU:MENU32 WINGUI:AVISO3
 done
 mcopy -i $V build/PEHOLA.EXE build/HOLAC.EXE build/K32PRUE.EXE build/USADLL.EXE build/DLLPRUE.DLL build/REDPRUE.EXE ::PRUEBAS/
 D=tests/thirdparty/dl
+# [GL] wglgears (los engranajes de los demos de Mesa, MIT), si se ha bajado (tests/thirdparty/fetch_gl.sh)
+if [ -f $D/gl/wglgears.c ] && make -s build/WGLGEARS.EXE > /dev/null 2>&1; then
+  mcopy -i $V build/WGLGEARS.EXE ::PRUEBAS/
+fi
 if [ -f $D/win32-nasm/nasm-2.16.03/nasm.exe ]; then
   mmd -i $V ::NASM
   mcopy -i $V $D/win32-nasm/nasm-2.16.03/nasm.exe ::NASM/NASM.EXE

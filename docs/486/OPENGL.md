@@ -8,6 +8,7 @@ posterior.*
 |---|---|
 | ![GLPRUEBA en su ventana, en Hispa-486](opengl/glprueba-486.png) | ![GLPRUEBA a pantalla completa (ChangeDisplaySettingsA + DirectDraw)](opengl/glprueba-completa-486.png) |
 | ![Los engranajes de ENGRANA, con los cuadros por segundo](opengl/engrana-486.png) | ![wglgears, de los demos de Mesa (un programa de otros), en Hispa-486](opengl/wglgears-486.png) |
+| ![GLPRUEBA en Hispa-Pentium (la misma DLL)](opengl/glprueba-pentium.png) | ![GLPRUEBA a pantalla completa en Hispa-Pentium](opengl/glprueba-completa-pentium.png) |
 | ![La sala de medir (GLPRUEBA /SALA): multitextura, como un juego de 1997](opengl/sala-486.png) | ![HispaGL (izquierda) frente a Mesa (derecha): la sala y cinco de las escenas de prueba](opengl/hoja-mesa.png) |
 
 ## Qué es
@@ -113,7 +114,7 @@ OpenGL 3 (con sombreadores): no es lo que usan los programas de 1997-2001.
 | `castel/nucleo32/win32/dx.c`, `user32.c` | [GL] el puente en WIN32.BIN (Hispa-Pentium) |
 
 Tamaños: `OPENGL32.DLL` 128.512 octetos, `GLU32.DLL` 10.752, `GLPRUEBA.EXE`
-14.848, `ENGRANA.EXE` 7.680. `VENTANAS.COM` crece 1.008 octetos (el puente).
+14.848, `ENGRANA.EXE` 7.680. `VENTANAS.COM` crece 512 octetos (el puente: de 184.432 a 184.944).
 
 **Los vértices.** Cada `glVertex` se transforma en el momento: modelo-vista y
 proyección (precalculada la matriz de las dos), la luz por vértice en coma
@@ -203,13 +204,16 @@ veces la pantalla, por lo que se pinta encima).
 |---|---|---|---|---|
 | Este PC (AMD EPYC Milan, una hebra, el código de 32 bits con x87) | 245 c/s | 174 c/s | 93 c/s | 65 c/s |
 | Instrucciones por cuadro (`perf stat`) | 24,0 M | 38,6 M | 79,2 M | 134,8 M |
-| **QEMU** (Hispa-486, sin KVM: emula cada instrucción), `GLPRUEBA /SALA` | — | 22,3 c/s | — | — |
-| **QEMU**, ENGRANA (300×300, 3 engranajes con luz, en una ventana) | — | 24,3 c/s | — | — |
+| **QEMU** (sin KVM: emula cada instrucción), `GLPRUEBA /SALA`, Hispa-486 / Hispa-Pentium | — | 3,6–4,6 / 4,5 c/s | — | — |
+| **QEMU**, ENGRANA (300×300, 3 engranajes con luz, en una ventana), Hispa-486 / Hispa-Pentium | — | 18–24 / 12–17 c/s | — | — |
+| **QEMU**, WGLGEARS (de Mesa, 300×300), Hispa-486 / Hispa-Pentium | — | 26 / 42–44 c/s | — | — |
 | *Estimación* Pentium 133 (CPI ≈ 2) | ≈ 2,8 c/s | ≈ 1,7 c/s | ≈ 0,8 c/s | ≈ 0,5 c/s |
 | *Estimación* Pentium II 300 (CPI ≈ 1) | ≈ 12 c/s | ≈ 8 c/s | ≈ 4 c/s | ≈ 2 c/s |
 | *Estimación* Atom N455 1,66 GHz (HP Mini; CPI ≈ 1,5) | ≈ 46 c/s | ≈ 29 c/s | ≈ 14 c/s | ≈ 8 c/s |
 
-Las estimaciones salen de las instrucciones por cuadro y de cuántos ciclos
+En QEMU las cifras varían bastante según lo ocupado que esté el PC (emula el
+procesador instrucción a instrucción): sirven para comparar, no para saber cómo
+irá un equipo de verdad. Las estimaciones salen de las instrucciones por cuadro y de cuántos ciclos
 gasta de media cada una en ese procesador con este tipo de código (enteros y
 algo de x87; el Pentium no tiene ejecución fuera de orden, el Atom tampoco), y
 no cuentan lo que cuesta llevar el cuadro a la pantalla (`SetDIBitsToDevice`:

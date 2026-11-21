@@ -285,7 +285,8 @@ static int WINAPI proc(HANDLE h, u32 m, u32 w, u32 l)
 {
 	switch (m) {
 	case WM_SIZE:
-		if (l & 0xFFFF) { ancho = (int)(l & 0xFFFF); alto = (int)(l >> 16); }
+		/* (a pantalla completa, el tamaño es el del modo pedido, como en los juegos) */
+		if (!completa && (l & 0xFFFF)) { ancho = (int)(l & 0xFFFF); alto = (int)(l >> 16); }
 		return 0;
 	case WM_KEYDOWN:
 		if (w == 27) salir = 1;

@@ -143,11 +143,17 @@ typedef struct {
 static Ctx *actual_ctx;
 static HDC actual_dc;
 
+static void *dd;
+static HWND dd_v;
+static int modo_w, modo_h;           /* el que ha pedido el programa (ChangeDisplaySettings) */
 static void al_tamano(Ctx *C)
 {
 	Plat *p = C->plat;
 	RECT r;
 	if (!p || !p->v) return;
+	/* a pantalla completa, el búfer es del modo que pidió el juego (en
+	 * Hispa-Pentium su ventana pasa a ser del tamaño de la pantalla de verdad) */
+	if (dd && p->v == dd_v && modo_w) { hgl_tamano(C, modo_w, modo_h); return; }
 	if (GetClientRect(p->v, &r)) hgl_tamano(C, r.right - r.left, r.bottom - r.top);
 }
 
@@ -208,7 +214,6 @@ int WINAPI wglShareLists(HGLRC a, HGLRC b)
 int WINAPI wglCopyContext(HGLRC a, HGLRC b, u32 m) { (void)a; (void)b; (void)m; return 0; }
 
 /* ---- la presentación ---- */
-static int modo_w, modo_h;           /* el que ha pedido el programa (ChangeDisplaySettings) */
 static int solo_ventana;
 /* DirectDraw (de HW32), cargado cuando hace falta */
 typedef i32 (WINAPI *FDDC)(void *, void **, void *);
@@ -224,8 +229,7 @@ typedef struct {
 	u32 pf_tam, pf_flags, pf_cc, pf_bits, pf_r, pf_g, pf_b, pf_a;
 	u32 caps;
 } DDSD;
-static void *dd, *prim;
-static HWND dd_v;
+static void *prim;
 static int dd_w, dd_h, dd_falla;
 static void suelta_dd(void)
 {
