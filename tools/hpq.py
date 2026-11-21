@@ -305,6 +305,12 @@ OPCIONALES = [
      + [('NAVEGA/RECURSOS/' + n, '\\HISPA\\NAVEGA\\RECURSOS\\' + n) for n in NAVEGA_RECURSOS]
      + [('NAVEGA/FUENTES/' + n, '\\HISPA\\NAVEGA\\FUENTES\\' + n) for n in NAVEGA_FUENTES]
      + [('NAVEGA.MNU', r'\HISPA\MENU\NAVEGA.MNU'), ('NAVEGA.ICP', r'\HISPA\MENU\NAVEGA.ICP')]),
+    # (PDF) Hispa-PDF (castel/nucleo32/pdf/paquete.sh): la orden PDF y su
+    # ventana; del tipo «oficina» (en la 0.8.5: TIPOS de hpq.py y tipo_de)
+    ('pdf', '1.0', 'Hispa-PDF: unir, separar, girar, ordenar, comprimir y cifrar PDF; PDF a imágenes y a texto; imágenes a PDF',
+     'base >= 0.8.3', [
+        ('PDF.BIN', r'\HISPA\PDF.BIN'), ('HISPAPDF.BIN', r'\HISPA\HISPAPDF.BIN'), ('PDF/LEEME.TXT', r'\HISPA\PDF\LEEME.TXT'),
+        ('MENU/HISPAPDF.MNU', r'\HISPA\MENU\HISPAPDF.MNU'), ('MENU/HISPAPDF.ICP', r'\HISPA\MENU\HISPAPDF.ICP')]),
 ]
 
 
@@ -314,6 +320,9 @@ def opcionales(salida, carpetas, nombres=None):
     n = 0
     for nombre, version, descripcion, necesita, archivos in OPCIONALES:
         if nombres and nombre not in nombres:
+            continue
+        # (PDF) cada paquete.sh deja solo lo suyo: los que no tienen nada aquí, no se hacen
+        if not nombres and not any(os.path.isfile(os.path.join(c, o)) for o, _ in archivos for c in carpetas):
             continue
         lista = [(d, open(busca(o, carpetas), 'rb').read()) for o, d in archivos]
         haz_paquete(os.path.join(salida, nombre.upper() + '.HPQ'), nombre, version, descripcion, necesita, '', lista)
@@ -491,7 +500,10 @@ def principal(a):
             f.write(datos[:largo])
         return 0
     if orden == 'opcionales':
-        n = opcionales(a[2], a[3:])
+        # (PDF) «opcionales SALIDA CARPETA nombre...»: solo esos paquetes
+        cs = [x for x in a[3:] if os.path.isdir(x)]
+        ns = [x for x in a[3:] if not os.path.isdir(x)]
+        n = opcionales(a[2], cs, ns or None)
         print('hpq: %d paquetes opcionales en %s' % (n, a[2]))
         return 0
     if orden == 'linea':

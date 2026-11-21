@@ -204,6 +204,7 @@
 #   SOLO=ssh ./pruebas.sh         la primera y la 20 (SSH, WireGuard y Tailscale; con HEADSCALE=binario, también Tailscale)
 #   SOLO=lectores ./pruebas.sh    la primera y la 21 (los CD y DVD, y las imágenes de disco)
 #   SOLO=win32 ./pruebas.sh       la primera y la 22 (los programas de Windows y DirectX)
+#   SOLO=pdf ./pruebas.sh         la primera y la 23 (Hispa-PDF: PDF.BIN y su ventana)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -267,7 +268,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|pdf) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -3887,6 +3888,133 @@ kill $NPID 2> /dev/null; wait $NPID 2> /dev/null
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Navegador)"
 fi   # el Navegador
+
+# ---------------------------------------- 23. (PDF) Hispa-PDF: PDF.BIN y su ventana
+# El núcleo en C de castel/nucleo32/pdf, en el anfitrión (con ASan y UBSan:
+# unir, separar, girar, quitar, comprimir con flujos de objetos, cifrar y
+# descifrar con RC4, AES-128 y AES-256, texto, imágenes, crear con fotos; y,
+# si están qpdf y pdftotext, lo que escribe, mirado por ellos), y PDF.BIN en
+# QEMU: la orden PDF en el intérprete de órdenes (lo que deja, mirado luego
+# desde fuera) y la ventana, HISPAPDF.BIN, en el escritorio: las miniaturas,
+# girar con R, arrastrar una página, añadir otro PDF por su ruta, uno con
+# contraseña (la pide), guardar todo junto y verlo en grande. Los PDF de la
+# prueba los hace pdf/pruebas/haz_pdf.py (cada página dice cuál es).
+if parte08 pdf; then
+echo "== Hispa-PDF (PDF.BIN, en C, y su ventana HISPAPDF.BIN) =="
+V=$P/pdf
+mkdir -p $V/a $V/q $G
+export MTOOLS_SKIP_CHECK=1
+HP=$V/pdf-anfitrion
+if bash $AQUI/nucleo32/pdf/anfitrion.sh $HP asan > $V/anf.txt 2>&1 && bash $AQUI/nucleo32/pdf/hacer.sh $V/PDF.BIN > $V/hacer.txt 2>&1; then
+  ok "PDF.BIN se compila (-march=i586, sin CMOV: $(stat -c %s $V/PDF.BIN) octetos) y Hispa-PDF en el anfitrión, con ASan y UBSan"
+  python3 -I $AQUI/nucleo32/pdf/pruebas/haz_pdf.py $V/q/A.PDF A 10
+  python3 -I $AQUI/nucleo32/pdf/pruebas/haz_pdf.py $V/q/B.PDF B 6 objstm
+  python3 -I $AQUI/nucleo32/pdf/pruebas/haz_pdf.py $V/a/c0.pdf C 4
+  python3 -I - $V/q/FOTO.PPM <<'PY'
+import sys
+w, h = 160, 120
+d = bytearray()
+for y in range(h):
+    for x in range(w):
+        d += bytes([x * 255 // w, y * 255 // h, 128])
+open(sys.argv[1], 'wb').write(b'P6 %d %d 255\n' % (w, h) + d)
+PY
+  # 1. en el anfitrión
+  ASAN_OPTIONS=detect_leaks=1 $HP CIFRA $V/a/c0.pdf /CLAVE=hola /SALIDA=$V/q/C.PDF > $V/a/o.txt 2>&1
+  bien=1; por=
+  ord_() { if ! ASAN_OPTIONS=detect_leaks=1 $HP "$@" > $V/a/o.txt 2>&1 || grep -q "Sanitizer\|runtime error" $V/a/o.txt; then bien=0; por="$por | $* -> $(tail -n 2 $V/a/o.txt | tr '\n' ' ')"; fi; }
+  ord_ UNE $V/q/A.PDF $V/q/B.PDF /SALIDA=$V/a/u.pdf
+  ord_ SEPARA $V/q/B.PDF /SALIDA=$V/a/s.pdf
+  ord_ EXTRAE $V/q/A.PDF 3,1,8-10 /SALIDA=$V/a/e.pdf
+  ord_ QUITA $V/q/A.PDF 2-9 /SALIDA=$V/a/qu.pdf
+  ord_ GIRA $V/q/A.PDF 90 2 /SALIDA=$V/a/g.pdf
+  ord_ COMPRIME $V/a/u.pdf /SALIDA=$V/a/co.pdf
+  for m in RC4 AES128 AES256; do ord_ CIFRA $V/q/B.PDF /CLAVE=uno /DUENO=dos /CIFRADO=$m /SALIDA=$V/a/c$m.pdf; ord_ DESCIFRA $V/a/c$m.pdf /CLAVE=dos /SALIDA=$V/a/d$m.pdf; done
+  ord_ CREA $V/q/FOTO.PPM /SALIDA=$V/a/cr.pdf
+  ord_ IMAGENES $V/a/e.pdf /PAGINAS=1 /PUNTOS=50 /SALIDA=$V/a/p.png
+  ord_ TEXTO $V/a/e.pdf /SALIDA=$V/a/e.txt
+  [ $bien = 1 ] && ok "en el anfitrión: unir, separar, sacar, quitar, girar, comprimir, cifrar y descifrar (RC4, AES-128, AES-256), crear, imágenes y texto, sin quejas de ASan" || ko "en el anfitrión:$por"
+  t=$(grep -o "Documento [AB], p.gina [0-9]*" $V/a/e.txt | tr '\n' ';')
+  [ "$t" = "Documento A, página 3;Documento A, página 1;Documento A, página 8;Documento A, página 9;Documento A, página 10;" ] && ok "EXTRAE 3,1,8-10 deja esas páginas en ese orden (su texto)" || ko "EXTRAE: el texto da «$t»"
+  if [ "$(head -c 8 $V/a/p.png | od -An -tx1 | tr -d ' \n')" = 89504e470d0a1a0a ]; then ok "IMAGENES escribe un PNG"; else ko "IMAGENES: no es un PNG"; fi
+  for f in u co cRC4 cAES128 cAES256 dAES256 cr g; do
+    case $f in u) n=16 ;; co) n=16 ;; cr) n=1 ;; g) n=10 ;; *) n=6 ;; esac
+    r=$($HP INFO $V/a/$f.pdf /CLAVE=uno 2> /dev/null | head -1)
+    case "$r" in *", $n páginas"*) ;; *) ko "$f.pdf: «$r» (tenían que ser $n páginas)"; bien=0 ;; esac
+  done
+  if command -v qpdf > /dev/null; then
+    m=0
+    for f in $V/a/*.pdf; do qpdf --check --password=uno $f > /dev/null 2>&1 || { m=1; ko "qpdf no da por bueno $(basename $f)"; }; done
+    [ $m = 0 ] && ok "qpdf --check da por buenos los $(ls $V/a/*.pdf | wc -l) PDF que ha hecho (también los cifrados, con su contraseña)"
+    r=$(qpdf --show-npages $V/a/s16.pdf 2> /dev/null; qpdf --show-npages $V/a/s1.pdf 2> /dev/null)
+    [ -f $V/a/s6.pdf ] && ok "SEPARA: un archivo por página (S1.PDF ... S6.PDF)" || ko "SEPARA: no están sus archivos"
+  fi
+  if command -v pdftotext > /dev/null; then
+    t=$(pdftotext -upw uno -f 1 -l 1 $V/a/cAES256.pdf - 2> /dev/null | head -1)
+    [ "$t" = "Documento B, página 1" ] && ok "pdftotext lee el cifrado con AES-256 (con su contraseña)" || ko "pdftotext con AES-256: «$t»"
+  fi
+  # 2. la orden, en QEMU
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $V/semilla.asm > /dev/null 2>&1 && nasm -f bin $V/semilla.asm -o $V/SEMILLA.BIN
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/uhpdf.cas -o $V/uhpdf.asm > /dev/null && nasm -f bin $V/uhpdf.asm -o $V/HISPAPDF.BIN
+  bash $AQUI/nucleo32/disco.sh $V/d.img 32 > /dev/null
+  mcopy -i $V/d.img $V/PDF.BIN $V/HISPAPDF.BIN $V/q/A.PDF $V/q/B.PDF $V/q/C.PDF $V/q/FOTO.PPM ::
+  ESCRIBE=1 DISCO=$V/d.img ARRANQUE=ordenes MODULOS= MEMORIA=64 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN "PDF INFO B.PDF" ":pausa 3" \
+    "PDF UNE A.PDF B.PDF /SALIDA=U.PDF" ":pausa 12" "PDF GIRA B.PDF 90 1-2 /SALIDA=G.PDF" ":pausa 6" "PDF INFO C.PDF" ":pausa 3" \
+    "PDF TEXTO C.PDF /CLAVE=hola /PAGINAS=2" ":pausa 4" "PDF COMPRIME U.PDF /SALIDA=CO.PDF" ":pausa 15" \
+    "PDF CIFRA B.PDF /CLAVE=uno /CIFRADO=AES256 /SALIDA=CI.PDF" ":pausa 8" "PDF CREA FOTO.PPM /SALIDA=CR.PDF" ":pausa 4" \
+    "PDF IMAGENES A.PDF /PAGINAS=1-2 /PUNTOS=40 /SALIDA=P.PNG" ":pausa 15" > $V/orden.sal 2>&1
+  tr -d '\r' < $V/orden.sal > $V/orden.txt
+  S=$V/orden.txt
+  mira "PDF INFO (un PDF 1.5 con flujos de objetos y la tabla en un flujo)" "^B.PDF: PDF 1.5, 6 p.ginas$" "^  p.gina 1: 216 x 279 mm$"
+  mira "PDF UNE, GIRA, COMPRIME, CIFRA (AES-256), CREA e IMAGENES en Hispa-Pentium" "^Hecho: U.PDF, con 16 p.ginas de 2 archivos\.$" \
+    "^Hecho: G.PDF (2 p.ginas giradas 90 grados)\.$" "^Hecho: CO.PDF: de " "^Hecho: CI.PDF, con contrase.a (AES de 256 bits)\.$" \
+    "^Hecho: CR.PDF, con 1 p.gina\.$" "^  P01.PNG: 340 x 440 puntos$" "^  P02.PNG: 340 x 440 puntos$"
+  mira "un PDF con contraseña: sin ella lo dice; con /CLAVE= se lee (AES-128, el texto de su página 2, con su tilde)" \
+    "^C.PDF: lleva contrase.a: p.ngala con /CLAVE=\.\.\.$" "^Documento C, p.gina 2"
+  m=0
+  for f in U G CO CI CR; do saca $V/d.img $f.PDF $V/a/qemu_$f.pdf || m=1; done
+  for f in U CO; do r=$($HP INFO $V/a/qemu_$f.pdf 2> /dev/null | head -1); case "$r" in *", 16 páginas"*) ;; *) m=1 ;; esac; done
+  r=$($HP INFO $V/a/qemu_CI.pdf /CLAVE=uno 2> /dev/null | sed -n 2p); case "$r" in *AES*256*) ;; *) m=1 ;; esac
+  [ $m = 0 ] && ok "lo que ha escrito en el disco de QEMU se lee bien desde fuera (16 páginas; el cifrado, con AES-256)" || ko "lo escrito en QEMU no está bien"
+  if ! grep -q "excepción\|\*\*\*" $S; then ok "la orden PDF: ni una excepción ni una queja del núcleo"
+  else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+  # 3. la ventana (800 x 600, maximizada: las miniaturas, de 4 en 4 desde (250, 89), cada 112 x 128)
+  bash $AQUI/nucleo32/disco.sh $V/v.img 32 > /dev/null
+  mcopy -i $V/v.img $V/PDF.BIN $V/HISPAPDF.BIN $V/q/A.PDF $V/q/B.PDF $V/q/C.PDF ::
+  CAPTURAS=$G ESCRIBE=1 DISCO=$V/v.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 3" ":doble 60 186" ":pausa 4" \
+    ":escribe HISPAPDF A.PDF" ":tecla ret" ":pausa 30" ":captura hp1" ":clic 418 139" ":tecla r" ":pausa 1" ":captura hp2" \
+    ":arrastra 530 139 262 139" ":pausa 1" ":captura hp3" ":clic 62 64" ":pausa 2" ":escribe B.PDF" ":tecla ret" ":pausa 2" \
+    ":escribe C.PDF" ":tecla ret" ":pausa 25" ":captura hp4" ":escribe hola" ":tecla ret" ":pausa 30" \
+    ":captura hp6" ":clic 165 64" ":pausa 2" ":captura hp7" ":tecla ret" ":pausa 40" ":captura hp8" ":clic 306 139" ":tecla ret" ":pausa 20" ":captura hp9" \
+    ":tecla esc" ":pausa 2" > $V/ventana.sal 2>&1
+  S=$V/ventana.sal
+  miracap "la ventana: A.PDF con sus 10 páginas en miniatura (las pinta PDF.BIN, de seis en seis)" hp1 \
+    negrita 0 0 160 30 "Hispa-PDF" texto 0 100 120 140 "A A.PDF" texto 20 120 120 150 "10 páginas" texto 250 170 380 200 "1 (A1)" texto 250 420 400 460 "9 (A9)"
+  miracap "R gira la página elegida (su miniatura, apaisada; y la marca *)" hp2 texto 360 170 500 200 "2 (A2)*" distinto 362 89 112 100 $G/hp1.ppm
+  miracap "arrastrar la tercera al principio: ahora va la primera" hp3 texto 250 170 380 200 "1 (A3)" texto 360 170 500 200 "2 (A1)" texto 470 170 620 200 "3 (A2)*"
+  miracap "en el cuadro de añadir se escribe la ruta (B.PDF, C.PDF) y se añaden; C.PDF lleva contraseña: la pide" hp4 \
+    texto 0 520 800 600 "Añadido" negrita 0 90 600 130 "C.PDF lleva contraseña" negrita 20 100 400 200 "La contraseña"
+  miracap "con la contraseña, las páginas de los tres (10 + 6 + 4)" hp6 texto 0 520 400 600 "20 páginas" texto 0 100 240 300 "C C.PDF" texto 0 100 240 300 "4 páginas"
+  miracap "Guardar: dónde (al lado del primero: NUEVO.PDF), comprimir, contraseña, uno por página" hp7 \
+    negrita 0 80 300 130 "Guardar como" texto 20 100 600 200 "NUEVO.PDF" negrita 20 150 700 300 "Comprimir" negrita 20 200 700 500 "Cancelar"
+  miracap "guardado" hp8 texto 0 530 800 600 "Guardado: NUEVO.PDF"
+  miracap "Intro: la página, en grande" hp9 texto 0 80 300 110 "Esc o un clic: volver" distinto 300 200 200 200 $G/hp8.ppm
+  if saca $V/v.img NUEVO.PDF $V/a/nuevo.pdf; then
+    t=$($HP TEXTO $V/a/nuevo.pdf /PAGINAS=1-3,11,17,20 2> /dev/null | grep -o "Documento [ABC], p.gina [0-9]*" | tr '\n' ';')
+    g=$($HP INFO $V/a/nuevo.pdf 2> /dev/null | grep -c "girada 90")
+    if [ "$t" = "Documento A, página 3;Documento A, página 1;Documento A, página 2;Documento B, página 1;Documento C, página 1;Documento C, página 4;" ] && [ "$g" = 1 ]; then
+      ok "NUEVO.PDF (hecho en QEMU): 20 páginas en el orden de la ventana (A3, A1, A2 girada, ..., B, C sin contraseña)"
+    else ko "NUEVO.PDF: «$t», giradas $g"; fi
+  else ko "no está NUEVO.PDF"; fi
+  if ! grep -q "excepción\|\*\*\*" $S; then ok "la ventana: ni una excepción ni una queja del núcleo"
+  else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+else
+  ko "no se puede compilar Hispa-PDF: $(tail -n 3 $V/anf.txt $V/hacer.txt)"
+fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin Hispa-PDF)"
+fi   # (PDF) Hispa-PDF
+[ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
 [ -z "${SOLO:-}" ] && parte15

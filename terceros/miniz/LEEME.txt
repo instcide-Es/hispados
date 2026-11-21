@@ -1,0 +1,8 @@
+miniz 3.0.2 de Rich Geldreich y colaboradores (https://github.com/richgel999/miniz,
+la versión publicada miniz-3.0.2.zip: miniz.c y miniz.h, de una pieza), con
+licencia MIT: ver LICENSE.
+SHA-256: miniz.c 0fcdc9888cb3a29ca8f176bac087e5fe6c7258a6ab06b1c271c1e109a11d3740
+         miniz.h 295d1a0041aea09609598c0f1f35c1977ca05ad662acbadcfdaac44c140af37b
+Sin cambios. Lo usa Hispa-PDF (castel/nucleo32/pdf) para el Flate de los PDF
+(descomprimir los flujos y volverlos a comprimir), compilado sin stdio ni
+archivos ZIP (MINIZ_NO_STDIO, MINIZ_NO_ARCHIVE_APIS, MINIZ_NO_TIME).

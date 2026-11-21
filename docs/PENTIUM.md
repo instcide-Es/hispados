@@ -3941,6 +3941,191 @@ hasta que haya sonido); y Winsock sobre el servicio de red.
   SEH, escuchar en la red, HTTPS para ellos (por eso NAVEGA2.EXE aún no),
   Direct3D. Ver [pentium/WIN32.md](pentium/WIN32.md).
 
+## 14 octies. Hispa-PDF (PDF.BIN y su ventana, rama pentium-pdf)
+
+*21/11/2026. Pedido de Carlos («herramienta de PDF propia», en lugar de
+PDF24, que es de 64 bits y no es libre). Todo lo cambiado o nuevo fuera de
+`castel/nucleo32/pdf/` y `uhpdf.cas` lleva la marca «(PDF)».*
+
+| | |
+|---|---|
+| ![La ventana: A.PDF en miniatura](pentium/pdf/hp1.png) | ![La segunda, girada con R; la tercera, arrastrada al principio](pentium/pdf/hp3.png) |
+| ![Tres PDF (uno con contraseña): 20 páginas](pentium/pdf/hp6.png) | ![Guardar: dónde, comprimir, contraseña, uno por página](pentium/pdf/hp7.png) |
+| ![Una página, en grande](pentium/pdf/hp9.png) | |
+
+**Qué hace.** Unir varios PDF; separar (una página por archivo, o por
+trozos); sacar, quitar, ordenar y girar páginas; comprimir (los flujos otra
+vez con Flate, los objetos sueltos en flujos de objetos con su tabla en un
+flujo, y las fotos JPEG más pequeñas y con menos calidad); pasar las páginas
+a imágenes (PNG o JPG) y a texto; hacer un PDF con fotos (JPG, PNG, BMP,
+GIF, TGA, PNM); y poner y quitar contraseñas: lee RC4 de 40 a 128 bits, AES
+de 128 (R4) y de 256 (R5 y R6), con la contraseña del usuario o la del
+dueño; y cifra con AES-128 (de serie), AES-256 o RC4-128.
+
+**La orden PDF** (la Consola; `PDF AYUDA`):
+
+```
+PDF INFO a.pdf                               PDF UNE a.pdf b.pdf ... /SALIDA=c.pdf
+PDF SEPARA a.pdf [1-3,4-9] /SALIDA=p.pdf     (uno por página, o por trozo; /CADA=n) -> P1.PDF...
+PDF EXTRAE a.pdf 3,1,5-7 /SALIDA=b.pdf       (ORDENA es lo mismo; /INVIERTE, al revés)
+PDF QUITA a.pdf 2,4-5 /SALIDA=b.pdf          PDF GIRA a.pdf 90 [páginas] /SALIDA=b.pdf
+PDF COMPRIME a.pdf /SALIDA=b.pdf [/CALIDAD=ALTA|MEDIA|BAJA]
+PDF TEXTO a.pdf [/SALIDA=a.txt] [/PAGINAS=1-3] [/UTF8]
+PDF IMAGENES a.pdf /SALIDA=pag.png [/PUNTOS=150] [/PAGINAS=..]       (o .jpg)
+PDF CREA a.jpg b.png ... /SALIDA=c.pdf [/PAPEL=A4|A3|A5|CARTA|IMAGEN] [/MARGEN=10]
+PDF CIFRA a.pdf /CLAVE=x [/DUENO=y] [/CIFRADO=AES128|AES256|RC4] /SALIDA=b.pdf
+PDF DESCIFRA a.pdf /CLAVE=x /SALIDA=b.pdf
+```
+
+Las páginas: `1-3,5,8-` (`z` o `fin`, la última; `5-1`, al revés). `/CLAVE=`
+abre los que llevan contraseña (con el código 2, si falta). Los nombres que
+hace (P1.PDF, PAG01.PNG...) se cortan para caber en 8+3. El texto sale en la
+página 437 con CR LF (para el Bloc de notas), o en UTF-8 con `/UTF8`.
+
+**La ventana: `HISPAPDF.BIN`** (`uhpdf.cas`, en Castel, con los controles de
+`controles.cas`; en el menú Inicio, «Hispa-PDF», del tipo Oficina; y Mi
+equipo abre con ella los .PDF: la línea `PDF=` nueva de las asociaciones de
+siempre, `exoper.cas`). A la izquierda, los archivos (cada uno con su color);
+a la derecha, sus páginas en miniatura, en el orden en que irán: un clic
+elige (con Control, varias; Espacio también), se arrastran para ordenarlas,
+R y L giran, Supr quita, Intro (o dos clics) la ve en grande. «Añadir PDF»
+abre un cuadro con las carpetas y los PDF (o se escribe la ruta entera);
+«Añadir imágenes» hace de cada foto una página. Si un PDF lleva contraseña,
+la pide. «Guardar» (o Herramientas > Unir y comprimir, Poner contraseña,
+Separar) pregunta dónde (al lado del primero, NUEVO.PDF), si se comprime
+(sin perder calidad, media o baja), una contraseña y si va cada página
+aparte. Herramientas > Sacar el texto o Pasar a imágenes, del PDF de la
+página elegida. El trabajo lo hace PDF.BIN: la ventana le escribe la orden en
+un archivo (`PDF @X:\HPDF.ARG`: así no hay tope de 128 octetos) en la
+primera unidad en la que se puede escribir (X: si la hay) y lo espera sin
+pararse; las miniaturas llegan de seis en seis (`PDF MINIATURAS`, «HPMP»),
+la página grande con `PDF PAGINA` («HPMI», como MINIAT.BIN) y lo de guardar
+con `PDF HAZ lista` (una lista: SALIDA=, ARCHIVO=, CLAVE=, PAGINA=archivo
+página giro, COMPRIME=, CIFRA=, SEPARA=).
+
+### Cómo está hecho
+
+```
+castel/nucleo32/pdf/
+  hpdf.h, so.h     el núcleo (C99 portable) y lo único que se pide al sistema
+  objetos.c        la memoria de cada documento y el analizador (sin recursión: pila propia)
+  documento.c      la tabla de objetos (la de siempre, en flujo, híbrida, /Prev), los
+                   flujos de objetos, rehacer la tabla si miente, el árbol de páginas
+  filtros.c        Flate (miniz), LZW, ASCIIHex, ASCII85, RunLength y los predictores
+  cifra.c          MD5, RC4, AES, SHA-256/384/512 (propios) y el manejador estándar (R2-R6)
+  escribe.c        copiar objetos de otros con su número nuevo, y escribir (tabla de
+                   siempre, o flujos de objetos con la tabla en un flujo; cifrado)
+  paginas.c        componer un documento con unas páginas (unir, separar, girar...)
+  fuente.c         las letras: ToUnicode, codificaciones, anchos; su dibujo (stb_truetype,
+                   con las TrueType comprobadas antes) o la DejaVu que se le parezca
+  pinta.c          el pintor y el recorrido del contenido (también para el texto)
+  texto.c          el texto de una página        imagen.c   fotos a PDF, JPEG más pequeños
+  orden.c          la orden PDF                   util.c     formatear, la página 437
+  so_pentium.c     Hispa-Pentium: la int 0x80, su memoria, el x87, lo de la biblioteca de C
+  so_anfitrion.c   Linux (las pruebas, con ASan; y el modelo para Hispa-64)
+  entrada.asm, pentium.ld, hacer.sh, anfitrion.sh, paquete.sh, haz_fuentes.py
+  pruebas/fuzz.py, pruebas/haz_pdf.py
+castel/nucleo32/uhpdf.cas   la ventana (HISPAPDF.BIN)
+terceros/miniz (nuevo, MIT), terceros/stb/stb_image_write.h (nuevo), terceros/dejavu
+```
+
+**Por qué un núcleo propio en C y no qpdf.** qpdf es C++ con excepciones,
+`std::shared_ptr`, `std::map` y la biblioteca de C++ entera (más zlib, libjpeg
+y gnutls u OpenSSL): llevarlo al anillo 3 sería portar libstdc++ y montar las
+excepciones sin sistema, para algo que en C son unas 11.000 líneas que se
+entienden de cabo a rabo y que van igual en Hispa-64. Se ha usado como
+referencia (y para comprobar lo que hace Hispa-PDF). Del «Lector» de la
+oficina de Hispa-386 (ensamblador, `programas/lector`) se ha tomado la idea
+(un PDF entero en memoria, la tabla rehecha buscando «obj» si miente); el
+código es nuevo, en C.
+
+**Leer un PDF.** El archivo, entero en memoria (hasta 96 MB). Desde
+`startxref`: cada tabla (de siempre, en flujo, o las dos en un híbrido) y las
+de antes por `/Prev` (las más nuevas mandan; un bucle se corta). Los objetos
+se leen cuando hacen falta (y una vez): de su sitio o de su flujo de objetos.
+Si la tabla miente (el objeto no está donde dice, o no hay tabla, o falta
+`/Root`), se rehace buscando cada «N G obj» por todo el archivo, los flujos de
+objetos que haya y el último trailer (o el catálogo). Un flujo cuyo `/Length`
+no acaba en `endstream` se mide buscándolo. El cifrado se prepara antes de
+leer nada más, y lo leído antes se vuelve a leer descifrado.
+
+**La seguridad** (los PDF llegan de Internet): todo tiene su tope —el archivo
+(96 MB), los objetos (4 M), lo anidado (64 niveles: lo más hondo no se lee),
+los elementos de un arreglo, lo que crece un flujo al descomprimirlo (128
+MB: las «bombas» se cortan), las tablas encadenadas (256), las páginas
+(50.000), las órdenes de una página (4 M), los formularios y Type3 uno dentro
+de otro (10), q dentro de q (64), los puntos de una imagen (8 M en Pentium)—
+y nada se recorre con una recursión sin tope (el árbol de páginas y lo
+anidado, con pila propia; las referencias, con su marca de «leyéndose»).
+stb_truetype se fía de lo que lee: antes de usar la TrueType de un PDF se
+comprueban sus tablas, `loca` y cada glifo (con sus compuestos, sin ciclos),
+y el `cmap` se busca con una función propia que mira los límites; las CFF
+van con la DejaVu. Lo que no se puede seguir (sin memoria, un límite) acaba
+la orden con su mensaje (`so_marca`/`so_salta`, el setjmp de entrada.asm).
+`pruebas/fuzz.py` estropea PDF a propósito (octetos, cortes, trozos
+repetidos, números, nombres, «bombas» de Flate, árboles que se apuntan a sí
+mismos, `/Length` que se apunta, q sin fin, formularios que se llaman,
+imágenes de 60.000 x 60.000) y los pasa por INFO, TEXTO, IMAGENES, COMPRIME y
+UNE con ASan y UBSan: 1.900 vueltas (9.500 ejecuciones); las 1.100 últimas,
+sin un fallo, tras arreglar los dos que salieron (la TrueType sin comprobar;
+lo muy anidado, que paraba la orden).
+
+**Escribir.** Se copia lo que hace falta de cada documento con su número
+nuevo; las páginas que no van y los nodos del árbol de páginas no se traen
+(lo que apunte a ellos, a `null`; los enlaces a páginas que no van se
+quitan). Cada página lleva lo que heredaba; el árbol nuevo, en grupos de 32.
+Un documento entero en su orden (comprimir, cifrar, girar) conserva todo su
+catálogo (marcadores, etiquetas, formularios); si no, los marcadores y el
+formulario del primero (y los campos de los demás). `/Producer`: «Hispa-PDF
+1.0 (Hispa-Pentium)».
+
+**El pintor** (miniaturas, verlas en grande, `PDF IMAGENES`): caminos
+rellenos y trazados con suavizado (4 subfilas por fila y lo que cubre cada
+punto a lo ancho; las rayas, rectángulos con sus esquinas y tapas, guiones),
+recortes (un rectángulo, o una máscara), imágenes (JPEG con stb_image; de
+1 a 16 bits, gris, RGB, CMYK, indexadas, ICC, Separation y DeviceN con su
+función —también la calculadora de PostScript—, máscaras, `/SMask` y color
+clave), degradados axiales y radiales, transparencia (`ca`, `CA`), las
+letras (las TrueType que trae el PDF; las demás, la DejaVu más parecida —sans,
+serif o mono, normal o negrita— con el ancho de la suya), las Type3 y el
+aspecto de las anotaciones (los campos rellenos). Lo que no sabe (JPX,
+JBIG2, CCITT, mosaicos) sale en gris claro.
+
+**El texto**: con ToUnicode, con la codificación (WinAnsi, MacRoman, la
+estándar y las `/Differences`, con los nombres de las letras de Europa), en
+el orden del contenido: un renglón nuevo cuando cambia de línea, un espacio
+cuando hay hueco.
+
+**Medidas.** PDF.BIN mide 484 KB (210 KB son las seis DejaVu). En el
+anfitrión: un PDF de 45 páginas de Word, 3 páginas a 80 ppp en 0,6 s; el
+corpus de 64 PDF (23,4 MB) comprimido con la calidad media, 18,8 MB (el 80%).
+En QEMU sin KVM, UNE de 10 + 16 páginas, unos 10 s.
+
+**El paquete** `pdf` 1.0 (OPCIONALES de `tools/hpq.py`, que necesita
+`base >= 0.8.3`): `\HISPA\PDF.BIN`, `\HISPA\HISPAPDF.BIN`,
+`\HISPA\PDF\LEEME.TXT` (con las licencias) y `\HISPA\MENU\HISPAPDF.MNU` y
+`.ICP` (con `tipo=Oficina`); lo hace `castel/nucleo32/pdf/paquete.sh SALIDA`
+(PDF.HPQ y CATALOGO.LIN). `hpq.py opcionales SALIDA CARPETA nombre...` hace
+solo esos; sin nombres, se salta los que no tienen nada en esas carpetas
+(como en la 0.8.5). Para que Mi equipo abra los .PDF con la ventana hace
+falta el `equipo` con el `exoper.cas` de esta rama.
+
+**Probarlo**: `castel/pruebas.sh`, parte 23 (`SOLO=pdf`): en el anfitrión con
+ASan (todas las órdenes, lo escrito mirado por qpdf y pdftotext), la orden
+en QEMU (y lo que deja, mirado desde fuera) y la ventana (miniaturas, girar,
+arrastrar, añadir por la ruta, la contraseña, guardar —NUEVO.PDF, con sus 20
+páginas en el orden de la ventana— y verla en grande): 75 bien, 0 mal (21/11). En el anfitrión, a
+mano: `castel/nucleo32/pdf/anfitrion.sh` (deja `build/pdf-anfitrion/pdf`) y
+`pruebas/fuzz.py PROGRAMA CORPUS VUELTAS`.
+
+**Lo que falta**: las CFF y Type1 que trae el PDF (hoy, la DejaVu: se lee,
+pero no es su letra), JPX/JBIG2/CCITT al pintar, los mosaicos y los
+sombreados de malla, la escritura de derecha a izquierda y vertical en el
+texto, leer las páginas por columnas, el orden de los marcadores al unir
+varios (solo van los del primero), nombres largos al escribir (el núcleo,
+8+3), y que el Lector de la oficina de Hispa-386 vaya en el paquete `oficina`
+de Pentium (hoy no va: los .PDF se abren con Hispa-PDF).
+
 ## 15. Las pruebas
 
 `castel/pruebas.sh` (las partes 8 a 14; `SOLO=32 ./pruebas.sh` hace solo esas y la
