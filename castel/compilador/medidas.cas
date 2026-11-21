@@ -17,7 +17,7 @@ módulo Medidas
     público constante PARRAFOS_AR = 0x2800      ; 160 K de árbol (lo declarado en los 35 módulos del núcleo de Hispa-Pentium 0.6 no cabía en 128)
     público constante CUBOS_AT = 1024
     público constante CUBOS_CAD = 512
-    público constante MÓDULOS = 48              ; por programa (el núcleo de Hispa-Pentium 0.6 tiene 35, con los de la biblioteca)
+    público constante MÓDULOS = 40              ; por programa (era 48, por el núcleo de Hispa-Pentium, que desde el 20/11 compila CASTEL32: con 40, más pila para las cuentas hondas —la pila va en el mismo segmento que los datos—)
 
     ; ---- Tablas: los tipos, lo declarado, los datos, las locales, los puentes ----
     público constante PARRAFOS_TIP = 0x600      ; 24 K

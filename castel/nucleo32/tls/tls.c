@@ -428,6 +428,33 @@ static int contiene(const char *t, const char *b)
 	return 0;
 }
 
+/* (seguridad) el último día en que una cadena de certificados se comprobó
+ * entera y valía con la fecha del reloj del PC (TLS.HOR): de ahí para atrás
+ * no puede ser hoy. Solo sube con una cadena buena, así que no pasa de lo que
+ * dura un certificado de verdad */
+static u32 dia_visto;
+static int dia_leido;
+
+static u32 dia_sabido(void)
+{
+	if (!dia_leido) {
+		u32 d = 0;
+
+		dia_leido = 1;
+		if (lee_archivo("TLS.HOR", &d, sizeof d) == sizeof d && d < dias_de(COMPILADO / 10000 + 30, 1, 1))
+			dia_visto = d;
+	}
+	return dia_visto;
+}
+
+static void dia_bueno(u32 dias)
+{
+	if (dias > dia_sabido()) {
+		dia_visto = dias;
+		escribe_archivo("TLS.HOR", &dia_visto, sizeof dia_visto);
+	}
+}
+
 static int hora_http(void)
 {
 	char pet[160], *p;
@@ -469,6 +496,19 @@ static int hora_http(void)
 	for (p = (char *)trozo; *p; p++)
 		if ((p[0] == '\n') && (p[1] == 'D' || p[1] == 'd') && (p[2] == 'a' || p[2] == 'A') && (p[3] == 't' || p[3] == 'T')
 		    && (p[4] == 'e' || p[4] == 'E') && p[5] == ':' && lee_date(p + 6, &dias, &seg)) {
+			/* (seguridad) esa respuesta va sin cifrar: no se cree una fecha de
+			 * antes del día en que se hizo este TLS.BIN, ni de antes del último
+			 * día en que se comprobó entera una cadena de certificados
+			 * (TLS.HOR): quien la cambie no puede llevar el reloj atrás para
+			 * hacer pasar un certificado caducado hace tiempo */
+			u32 suelo = dias_de(COMPILADO / 10000, COMPILADO / 100 % 100, COMPILADO % 100);
+
+			if (suelo < dia_sabido())
+				suelo = dia_sabido();
+			if (dias < suelo) {
+				apunta("la hora: %s da una fecha de antes de lo que se sabe (¿alguien en medio?): no se cree", servidor_hora);
+				return 0;
+			}
 			h_dias = dias, h_seg = seg, h_tic = tics();
 			return 1;
 		}
@@ -638,6 +678,10 @@ static unsigned xm_end_chain(const br_x509_class **c)
 			k = mem_sig = (mem_sig + 1) % MEM_N;
 		memcpy(memoria[k].h, h, 32);
 		memoria[k].dia = t->dias;
+		/* (solo con la fecha del reloj del PC: con la de Date, quien esté en
+		 * medio podría adelantarla y dejar el equipo sin HTTPS unos meses) */
+		if (fuente_hora == 1)
+			dia_bueno(t->dias);
 		escribe_archivo("TLS.CCH", memoria, sizeof memoria);
 	}
 	return r;
