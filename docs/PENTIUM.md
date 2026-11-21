@@ -3076,6 +3076,38 @@ Tres cambios, marcados «(NAVEGADOR)»:
 - Un campo que el JavaScript hace de texto (su `type`) después de hacer su
   caja tiene su textarea al maquetar (Wikipedia: un fallo de página).
 
+### navega 0.2: position: fixed y sticky (21/11, por la tarde)
+
+Carlos, con la 0.8.3 en VirtualBox: «cuando bajas el ratón para abajo, el
+menú lateral se corta» (en ClicGest, dentro de la sesión). La barra lateral
+de ClicGest es `position: fixed; top: 0; height: 100vh; overflow-y: auto`
+(se ve desde 1025 puntos de ancho: por debajo, ClicGest da su diseño de
+móvil). NetSurf 3.11 trataba `fixed` como `absolute`: se iba con la página y
+debajo no quedaba nada. Arreglado (en el código común: vale también para
+NAVEGA2.EXE de Hispa-486):
+
+- **`position: fixed`**, respecto a la ventana: al pintar (`redraw.c`: la caja
+  fija, donde iría sin desplazar) y al buscar dónde se ha dado con el ratón
+  (`box_inspect.c`: los enlaces de la barra lateral se pulsan donde se ven).
+- **`position: sticky`** (con `top`, cuando lo que se desplaza es la ventana):
+  se pega al borde de arriba sin salirse de su caja de fuera, y se pinta
+  encima de lo que tiene detrás (las cabeceras de tabla de Bootstrap).
+- **`vh` y `vw`, sin redondear** (libcss redondeaba lo que vale una unidad:
+  con 420 puntos de alto, 1vh eran 4 y 100vh, 400: la barra lateral se quedaba
+  16 puntos corta).
+- `frontal.c`: con cajas fijas, al desplazar se pinta la página entera (mover
+  lo ya pintado se llevaba la barra lateral con la página).
+
+| | |
+|---|---|
+| ![ClicGest, Socios, a 1360 x 768, desplazada 600 puntos: arriba la 0.1 (la barra lateral, cortada arriba), en medio la 0.2 y abajo Chrome](pentium/navegador/09_clicgest_fijo.png) | ![La página de las pruebas (cabecera y barra lateral fijas, sticky verde), desplazada 300: el Navegador y Chrome](pentium/navegador/10_fijo_prueba_chrome.png) |
+
+Las pruebas: la parte 18 abre `/fijo.html` del sitio de prueba (una cabecera
+fija, una barra lateral fija como la de ClicGest con un enlace abajo del todo,
+un bloque sticky), la desplaza con la rueda, mira los colores y pulsa el
+enlace de abajo de la barra; y `tests/run_surf_pintado_tests.sh`, en el
+anfitrión, la pinta desplazada (`surfppm -y 300`, nuevo).
+
 ### Comparado con Chrome
 
 A 1024 x 768 (la página, 970 x 588; Chrome a esa medida, `google-chrome
@@ -3094,8 +3126,7 @@ conoce su página sencilla de siempre (a Chrome, que sale de un servidor en
 Alemania, el aviso de las galletas): sin el icono de las aplicaciones (SVG).
 Wikipedia, entera, con su JavaScript (el buscador y los menús de arriba, en
 SVG, no salen). Lo que queda distinto es lo de NAVEGADOR2.md («Lo que queda
-distinto»): sin SVG, sin `position: fixed` de verdad, sin `transform` ni
-animaciones; aquí, en cambio, los colores son los de verdad (32 bits, no la
+distinto»): sin SVG, sin `transform` ni animaciones (`position: fixed` y `sticky`, desde navega 0.2); aquí, en cambio, los colores son los de verdad (32 bits, no la
 paleta de 256 de Hispa Ventanas).
 
 ### Medidas
@@ -3158,7 +3189,7 @@ DISCO=/tmp/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 QEMU_MAS="-nic user,mo
   ese momento: unos 3 s la primera vez en un Pentium 133); pedir varias cosas
   a la vez (hoy, una petición cada vez, como en Hispa-486).
 - Lo de NetSurf que queda (NAVEGADOR2.md, «Lo que falta»): **SVG** (los iconos
-  de Google, de Wikipedia, de Bootstrap), `position: fixed`, `transform`,
+  de Google, de Wikipedia, de Bootstrap), `transform`,
   `<details>`, la cursiva de verdad, los pesos de las letras variables, rehacer
   solo la parte de las cajas que cambia (en las páginas grandes, cada clic que
   cambia el árbol tarda).

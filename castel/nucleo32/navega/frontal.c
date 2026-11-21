@@ -53,6 +53,8 @@
 #include "utils/file.h"
 #include "html/box.h"
 #include "html/box_inspect.h"
+struct hlcache_handle;
+struct box *html_get_box_tree(struct hlcache_handle *h);   /* (html/html_save.h) */
 #include "html/html.h"
 #include "html/private.h"
 #include "utils/corestrings.h"
@@ -69,7 +71,7 @@
 typedef uint32_t u32;
 typedef uint8_t u8;
 
-#define VERSION_NAVEGADOR "0.1"
+#define VERSION_NAVEGADOR "0.2"
 
 /* ---- medidas (puntos) ---- */
 #define PEST_H 30              /* las pestañas */
@@ -758,6 +760,22 @@ static void nuevos_buferes(void)
   ensucia_todo();
 }
 
+/* ¿tiene la página cajas fijas (position: fixed o sticky)? Entonces, al
+ * desplazar, se pinta entera: mover lo ya pintado se llevaría la barra
+ * lateral de ClicGest con la página (y se veía cortada). Se mira una vez por
+ * árbol de cajas (JavaScript lo rehace entero: rehaz.c) */
+static int hay_fijos(void)
+{
+  static const struct box *visto;
+  static int hay;
+  const struct box *b = NULL;
+  if (actual && browser_window_get_content(actual->bw) && content_get_type(browser_window_get_content(actual->bw)) == CONTENT_HTML)
+    b = html_get_box_tree(browser_window_get_content(actual->bw));
+  if (!b) return 0;
+  if (b != visto) { visto = b; hay = box_hispa_hay_fijos(b); }
+  return hay;
+}
+
 /* el desplazamiento: hasta dónde se puede */
 static void desplaza_a(int x, int y)
 {
@@ -771,7 +789,7 @@ static void desplaza_a(int x, int y)
   if (x == actual->sx && y == actual->sy) return;
   {
     int dy = y - actual->sy;
-    if (x == actual->sx && sucio.x0 >= sucio.x1 && lienzo && dy && (dy < 0 ? -dy : dy) < ph * 3 / 4) {
+    if (x == actual->sx && sucio.x0 >= sucio.x1 && lienzo && dy && (dy < 0 ? -dy : dy) < ph * 3 / 4 && !hay_fijos()) {
       /* solo de arriba abajo: lo ya pintado se mueve en el búfer y se pinta
        * solo la franja que entra (en un Pentium, mucho menos que la página) */
       uint8_t *px;
@@ -1432,7 +1450,7 @@ static void tecla(u32 k, u32 con_mayus)
 {
   uint32_t ns = 0, u = 0;
   if (k == T_F6 || k == 12) { foco_a_dir(1); return; }            /* F6, Ctrl+L */
-  if (k == T_F1 && registro && actual && browser_window_get_content(actual->bw)) {
+  if (k == T_F1 && registro && actual && browser_window_get_content(actual->bw) && content_get_type(browser_window_get_content(actual->bw)) == CONTENT_HTML) {
     /* (con SURF.LOG: F1 deja el árbol de cajas de la página en CAJAS.TXT, para ver qué pasa) */
     char n[300];
     FILE *f;

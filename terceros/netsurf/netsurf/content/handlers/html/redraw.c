@@ -1479,14 +1479,53 @@ bool html_redraw_box(const html_content *html, struct box *box,
 
 	/* [HISPA] lo que va por encima (z-index: un menú desplegable, una
 	 * ventana de Bootstrap), al final: html_redraw */
-	if (!hispa_pintando_encima && box_hispa_encima(box) &&
-			hispa_n_encima < HISPA_ENCIMA) {
+	if (!hispa_pintando_encima && (box_hispa_encima(box) ||
+			box_hispa_pegado(box)) && hispa_n_encima < HISPA_ENCIMA) {
 		hispa_encima[hispa_n_encima].box = box;
 		hispa_encima[hispa_n_encima].x = x_parent;
 		hispa_encima[hispa_n_encima].y = y_parent;
 		hispa_encima[hispa_n_encima].fondo = current_background_color;
 		hispa_n_encima++;
 		return true;
+	}
+
+	/* [HISPA] position: fixed: respecto a la ventana, no a la página (la
+	 * barra lateral de ClicGest, las cabeceras fijas): donde iría sin
+	 * desplazar. position: sticky (solo «top», y si nada de alrededor
+	 * tiene desplazamiento propio): se pega al borde de arriba de la
+	 * ventana sin salirse de su caja de fuera */
+	if (box->style != NULL && scale == 1.0) {
+		if (box_hispa_fijo(box)) {
+			x_parent += hispa_fijo_x;
+			y_parent += hispa_fijo_y;
+		} else if (box_hispa_pegado(box) && box->parent != NULL) {
+			css_fixed hispa_top = 0;
+			css_unit hispa_u = CSS_UNIT_PX;
+			struct box *a;
+			/* (las barras de <html> y <body> son las de la ventana) */
+			for (a = box->parent; a != NULL; a = a->parent)
+				if ((a->scroll_x != NULL || a->scroll_y != NULL) &&
+						a->parent != NULL && a->parent->parent != NULL)
+					break;
+			if (a == NULL && css_computed_top(box->style, &hispa_top,
+					&hispa_u) == CSS_TOP_SET) {
+				int t = FIXTOINT(css_unit_len2device_px(box->style,
+						&html->unit_len_ctx, hispa_top, hispa_u));
+				int arriba = y_parent + box->y - box->margin[TOP];
+				int alto = box->margin[TOP] + box->border[TOP].width +
+						box->padding[TOP] + box->height +
+						box->padding[BOTTOM] +
+						box->border[BOTTOM].width +
+						box->margin[BOTTOM];
+				/* (lo más que baja: hasta el final de lo de dentro de su caja de fuera) */
+				int tope = box->parent->height - (box->y - box->margin[TOP]) - alto;
+				int baja = t - arriba;
+				if (baja > tope)
+					baja = tope;
+				if (baja > 0)
+					y_parent += baja;
+			}
+		}
 	}
 
 	if (box->style != NULL) {
@@ -2287,6 +2326,11 @@ bool html_redraw(struct content *c, struct content_redraw_data *data,
 		result &= (ctx->plot->rectangle(ctx, &pstyle_fill_bg, clip) == NSERROR_OK);
 
 		hispa_n_encima = 0;
+		/* [HISPA] lo desplazada que está la ventana (position: fixed) */
+		if (data->scale == 1.0) {
+			hispa_fijo_x = -data->x;
+			hispa_fijo_y = -data->y;
+		}
 		result &= html_redraw_box(html, box, data->x, data->y, clip,
 				data->scale, pstyle_fill_bg.fill_colour, ctx);
 
