@@ -1360,7 +1360,7 @@ módulo UEquipo
                     tamaño_k(us[it.unidad].total_k, t)
                     corto_en(x + 54, yy + 22, t, an - 58, tinta, falso)
                 fin
-                si us[it.unidad].solo_lectura <> 0 entonces corto_en(x + 54, yy + 40, "(de solo lectura)", an - 58, tinta, falso) fin
+                si us[it.unidad].solo_lectura <> 0 entonces corto_en(x + 54, yy + 38, "(de solo lectura)", an - 58, tinta, falso) fin
             sino si it.unidad >= 0 entonces
                 corto_en(x + 54, yy + 22, "sin nada que se pueda leer", an - 58, tinta, falso)
             sino
@@ -3371,6 +3371,17 @@ módulo UEquipo
     ; =========================================================================
     ;  Lo que se hace sin ventana (el tapiz y el dock)
     ; =========================================================================
+    ; pone la ventana v con su esquina en (x, yy) de la pantalla (la llamada 80)
+    función colocar(vv: nat32, x: ent32, yy: ent32)
+        ensamblador
+            mov eax, 80
+            mov ebx, {vv}
+            mov ecx, {x}
+            mov edx, {yy}
+            int 0x80
+        fin
+    fin
+
     función sin_ventana(args: puntero a byte): bool
         variable r: arreglo [MAX_RUTA] de byte
         variable c: bool
@@ -3425,6 +3436,10 @@ módulo UEquipo
             escribir("equipo: no hay escritorio (o no hay memoria para la ventana)\n")
             devolver 1
         fin
+        ; centrada a lo ancho y, a lo alto, justo encima del dock (cabe: se ha pedido así)
+        k := ent32(libre) - alto - 32
+        si k < 0 o libre = 0 entonces k := 0 fin
+        colocar(Controles.v, (ent32(sw) - ancho - 8) div 2, k)
         lee_unidades()
         hace_árbol()
         foco := ID_CONTENIDO

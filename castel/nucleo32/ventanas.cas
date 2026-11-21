@@ -145,7 +145,7 @@ módulo Ventanas
     público variable ventana_inicio: nat32      ; la que recibe la tecla del logo
     público variable ventana_fondo: nat32       ; la que recibe lo que cae en el tapiz y el botón secundario en los títulos
     público variable alto_barra: ent32          ; lo que ocupa abajo la barra de tareas (no lo tapa una maximizada)
-    público variable alto_dock: ent32           ; (dock) lo que ocupa el dock encima de ella (una ventana que se centra y cabe encima, no se pone debajo)
+    público variable alto_dock: ent32           ; (dock) lo que ocupa el dock encima de ella (DATO_ALTO_LIBRE)
     público variable composiciones: nat32       ; las veces que se ha recompuesto un trozo
 
     variable trasero: Lienzo                    ; el doble búfer
@@ -977,8 +977,6 @@ módulo Ventanas
             ensuciar_ventana(ventanas[i])
             ventanas[i].px := mayor(0, (pantalla.ancho - ventanas[i].ancho) div 2)
             ventanas[i].py := mayor(0, (pantalla.alto - alto_barra - ventanas[i].alto) div 2)
-            ; (dock) que no quede debajo del dock, si cabe encima (si no cabe, como siempre)
-            si ventanas[i].alto <= pantalla.alto - alto_barra - alto_dock y ventanas[i].py + ventanas[i].alto > pantalla.alto - alto_barra - alto_dock entonces ventanas[i].py := pantalla.alto - alto_barra - alto_dock - ventanas[i].alto fin
             ensuciar_ventana(ventanas[i])
         fin
         soltar(cerrojo)

@@ -1316,7 +1316,7 @@ else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | se
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":doble 60 186" ":pausa 4" ":doble 150 140" ":raton 400 300" ":captura b1" ":tecla ctrl-c" \
   ":clicd 300 75" ":captura b2" ":clic 320 164" ":pausa 1" ":captura b3" ":clicd 180 585" ":captura b4" ":clic 200 445" ":pausa 1" ":captura b5" ":arrastra 743 523 643 423" \
   ":pausa 1" ":captura b6" ":clic 40 585" ":clic 80 293" ":pausa 2" ":tecla ctrl-v" ":captura b7" ":clicd 300 75" ":clic 320 197" ":pausa 1" ":captura b8" ":doble 60 40" ":pausa 2" \
-  ":captura b9" ":doble 330 160" ":pausa 1" ":captura b10" ":doble 452 310" ":pausa 2" ":captura b11" ":clicd 150 540" ":clic 200 523" ":pausa 1" ":captura b12" > $G/menus2.sal 2>&1
+  ":captura b9" ":doble 330 160" ":pausa 1" ":raton 600 440" ":captura b10" ":doble 356 310" ":pausa 2" ":captura b11" ":clicd 150 540" ":clic 200 523" ":pausa 1" ":captura b12" > $G/menus2.sal 2>&1
 S=$G/menus2.sal
 mira "dos clics en el icono «Consola» la abren" "escritorio: lanzo .CONSOLA.BIN (la tarea [0-9]*)"
 miracap "en la Consola, dos clics seleccionan una palabra de lo que hay en la pantalla" b1 rgb 97 133 $RES rgb 206 146 $RES nrgb 213 133 $RES texto 92 128 100 136 "Hispa-Pentium:"
@@ -1332,7 +1332,7 @@ miracap "«Cerrar», en el menú de la ventana, la cierra: ni ventana ni botón 
   negrita 140 90 152 98 "NOTAS.TXT - Bloc de notas"
 miracap "dos clics en «Mi equipo»: el explorador, con la unidad C: (el disco FAT16) en su mosaico y lo que tiene libre" b9 negrita 30 10 40 20 "Mi equipo" \
   negrita 265 133 275 143 "HISPA (C:)" texto 313 151 323 161 "libres de"
-miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 30 10 40 20 "C:\\" texto 412 322 422 332 LEEME.TXT texto 424 166 434 176 TEXTOS
+miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 30 10 40 20 "C:\\" texto 316 322 326 332 LEEME.TXT texto 428 166 438 176 VACIA
 miracap "y dos clics en un texto lo abren con el Bloc de notas" b11 negrita 198 142 206 150 "\\LEEME.TXT - Bloc de notas" \
   texto 178 224 186 232 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
 miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.8" \
@@ -1482,7 +1482,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 18 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 20 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
@@ -1735,7 +1735,7 @@ saca $N/eu.img NOTAS.TXT $N/notas.txt
 if [ "$(iconv -f CP437 -t UTF-8 $N/notas.txt 2> /dev/null)" = "Guardado en la memoria USB: ¡señor!" ] && sano $N/eu.img; then ok "y lo guardado está en la memoria USB (la unidad del sistema, X:), que queda sana"
 else ko "lo guardado con el Bloc de notas no está en la memoria USB"; fi
 miracap "Mi equipo enseña las unidades con su letra: C: (el disco SATA de dentro, de solo lectura) y X: (la memoria USB)" m3 negrita 20 5 60 25 "Mi equipo" \
-  negrita 313 133 323 143 "(C:)" texto 313 151 323 161 "libres de" texto 313 169 323 179 "(de solo lectura)" negrita 563 133 573 143 "(X:)"
+  negrita 313 133 323 143 "(C:)" texto 313 151 323 161 "libres de" texto 264 169 274 179 "(de solo lectura)" negrita 563 133 573 143 "(X:)"
 miracap "y dos clics en X: enseñan lo que hay en la memoria (con lo recién guardado)" m4 negrita 20 5 60 25 "X:\\" texto 316 322 326 332 "LEEME.TXT" texto 316 400 326 410 "NOTAS.TXT"
 fi   # los discos de prueba
 
@@ -1785,7 +1785,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 18 archivos que ha traído el cargador hacen de unidad M:" $S \
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 20 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
       ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi

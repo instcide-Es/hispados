@@ -460,7 +460,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 154 | **la batería**: lo último que ha leído el servicio de ACPI (una `Energía`, `energia.cas`) a EBX | — | 1, o 0 si no hay servicio |
 
 (La 15 con `DATO_ALTO_LIBRE`, el 14, da lo alto de la pantalla sin la barra
-de tareas ni el dock: así una ventana grande no queda debajo del dock. La
+de tareas ni el dock: así una ventana grande puede quedar encima del dock. La
 12 y la 28 dan además, en lo que antes iba a cero, la fecha del último
 acceso (`reservado`) y la fecha y la hora en que se hizo el archivo (`libre`:
 abajo la fecha, arriba la hora). La 22 lleva también **carpetas** a otra
@@ -1368,9 +1368,9 @@ redondo y la etiqueta no tapa nada). **No tapa nada de nadie**: cuando una
 ventana ocupa el sitio de su panel (una maximizada, un cuadro grande de
 un programa), el dock **se aparta**; vuelve cuando el sitio queda libre, o
 al llevar la flecha a la raya de justo encima de la barra de tareas (y se
-queda mientras la flecha esté encima). Una ventana que se centra y cabe
-encima del dock no se pone debajo (`Ventanas.alto_dock`; un programa lo
-sabe con `DATO_ALTO_LIBRE`). Sabe qué está abierto mirando las
+queda mientras la flecha esté encima). Un programa que quiera caber encima
+del dock lo sabe con `DATO_ALTO_LIBRE` (`Ventanas.alto_dock`): así se
+pone el explorador. Sabe qué está abierto mirando las
 ventanas y el nombre (y los argumentos) de la tarea de cada una; lo que se
 pulsa se lo pide al escritorio (`Dock.pide`: lanzar o Configuración).
 
