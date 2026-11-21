@@ -4024,6 +4024,7 @@ primer renglón que casa. **PAQUETES e INSTALAR escriben en toda la zona**
 | `GRUB.CFG` | ASISTE (y el escritorio, que es el núcleo) | |
 | `GRUBENV` | ACTUALIZ | |
 | `HISPA.INI` | ASISTE (y Configuración, del núcleo) | |
+| `INICIO.INI` (rama `pentium-menu`), `DOCK.INI`, `ATAJOS.INI` | nadie (los escribe el núcleo: el menú Inicio y el dock) | |
 | `PANTALLA.ENV`, `NUCLEO.BIN`, `NUCLEO.ANT`, `MBR.ANT`, `SEMILLA.BIN`, `ESCRIT*.BIN`, `BOOT\` | nadie (el escritorio, del núcleo, escribe `PANTALLA.ENV`) | |
 | `TLS.SEM` | TLS | sí |
 | `TLS.CCH`, `TLS.HOR` | TLS | |
@@ -4031,6 +4032,7 @@ primer renglón que casa. **PAQUETES e INSTALAR escriben en toda la zona**
 | `RED.INI` | RED | |
 | `WIFI.INI`, `WIFI.LLV` | WIFI (rama `pentium-wifi`) | sí |
 | `WIFI.LOG` | WIFI | |
+| `SONIDO.INI` | SONIDO (rama `pentium-sonido`) | |
 | `ESCUDO\` | ESCUDO (rama `pentium-escudo`) | |
 | `CUARENTE\`, `CUARENTENA\` | ESCUDO | sí |
 | `SSH\LLAVE.SSH`, `SSH\CLAVE.TXT` | SSHD | sí |
@@ -4059,8 +4061,9 @@ primer renglón que casa. **PAQUETES e INSTALAR escriben en toda la zona**
 Los sellos (`Permisos.SELLO_...`) son los de `PAQUETES.BIN`, `ACTUALIZ.BIN`,
 `INSTALAR.BIN`, `ASISTE.BIN`, `DESCARGA.BIN`, `SSH.BIN`, `NAVEGA\NAVEGA.BIN`,
 `CLICGEST.BIN`, `EQUIPO.BIN` y `PROGRAMA.BIN`; y, **servicios**, `RED.BIN`,
-`TLS.BIN`, `ACPI.BIN`, `SSHD.BIN`, `WG.BIN`, `TAILSCAL.BIN`, `WIFI.BIN` y
-`ESCUDO.BIN`. ClicGest no cambia: sigue guardando `CLICGEST.SES` y
+`TLS.BIN`, `ACPI.BIN`, `SSHD.BIN`, `WG.BIN`, `TAILSCAL.BIN`, `WIFI.BIN`,
+`ESCUDO.BIN` y `SONIDO.BIN` (los de las ramas que vienen ya están en la
+tabla: si su programa no está, no casan). ClicGest no cambia: sigue guardando `CLICGEST.SES` y
 `CLICGEST.ANC` en `\HISPA` (o en la raíz sin instalar), que son suyos.
 
 ### Lo que cambia para el usuario

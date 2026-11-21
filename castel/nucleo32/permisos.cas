@@ -56,6 +56,7 @@ módulo Permisos
     público constante SELLO_WIFI = 16           ; (pentium-wifi) el servicio Wi-Fi
     público constante SELLO_ESCUDO = 17         ; (pentium-escudo) el antivirus y el cortafuegos
     público constante SELLO_PROGRAMA = 18       ; (pentium-programas) «Programas instalados»
+    público constante SELLO_SONIDO = 19         ; (pentium-sonido) el servicio de sonido
     ; (hasta 31)
 
     ; un bit por sello, para las listas de quién escribe
@@ -77,11 +78,12 @@ módulo Permisos
     constante B_WIFI = 0x10000
     constante B_ESCUDO = 0x20000
     constante B_PROGRAMA = 0x40000
+    constante B_SONIDO = 0x80000
     constante NADIE = 0                         ; (solo PAQUETES, INSTALAR y el administrador)
     constante TODO_EL_SISTEMA = 0xA             ; PAQUETES e INSTALAR: escriben en toda la zona (no leen secretos)
 
     constante LARGO = 24
-    constante MAX_REGLAS = 96
+    constante MAX_REGLAS = 128
     constante MAX_PROGRAMAS = 24
     constante MAX_FORMA = 160
 
@@ -161,11 +163,15 @@ módulo Permisos
         programa("WIFI.BIN", SELLO_WIFI, cierto)
         programa("ESCUDO.BIN", SELLO_ESCUDO, cierto)
         programa("PROGRAMA.BIN", SELLO_PROGRAMA, falso)
+        programa("SONIDO.BIN", SELLO_SONIDO, cierto)
         ; ---- el arranque ----
         regla("GRUB.CFG", B_ASISTE, falso)                 ; (y el escritorio, que es el núcleo: la medida de la pantalla)
         regla("GRUBENV", B_ACTUALIZ, falso)                ; (lo pone PAQUETES; ACTUALIZ da el núcleo nuevo por bueno)
         regla("PANTALLA.ENV", NADIE, falso)                ; (la escribe el escritorio)
         regla("HISPA.INI", B_ASISTE, falso)                ; (y Configuración, del núcleo)
+        regla("INICIO.INI", NADIE, falso)                  ; (pentium-menu: lo fijado en el menú Inicio; lo escribe el núcleo)
+        regla("DOCK.INI", NADIE, falso)                    ; (el dock, del núcleo)
+        regla("ATAJOS.INI", NADIE, falso)
         regla("NUCLEO.BIN", NADIE, falso)
         regla("NUCLEO.ANT", NADIE, falso)
         regla("MBR.ANT", NADIE, falso)
@@ -185,6 +191,7 @@ módulo Permisos
         regla("WIFI.INI", B_WIFI, cierto)                  ; las redes recordadas y sus claves
         regla("WIFI.LLV", B_WIFI, cierto)                  ; la llave que las cifra
         regla("WIFI.LOG", B_WIFI, falso)
+        regla("SONIDO.INI", B_SONIDO, falso)               ; (pentium-sonido) el volumen y los sonidos del sistema
         regla("ESCUDO\\", B_ESCUDO, falso)                 ; sus opciones, el cortafuegos (CORTAFUE.INI), el registro y las firmas
         regla("CUARENTE\\", B_ESCUDO, cierto)              ; la cuarentena: lo apartado solo lo vuelve a sacar Escudo
         regla("CUARENTENA\\", B_ESCUDO, cierto)
@@ -254,6 +261,7 @@ módulo Permisos
         regla("REDWIFI.BIN", NADIE, falso)
         regla("ESCUDO.BIN", NADIE, falso)
         regla("PROGRAMA.BIN", NADIE, falso)
+        regla("SONIDO.BIN", NADIE, falso)
         regla("HISPA\\", NADIE, falso)                     ; (en la raíz: que no se haga una \HISPA donde no la hay)
     fin
 
