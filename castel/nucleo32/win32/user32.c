@@ -3074,8 +3074,9 @@ API(i32) EnumDisplaySettingsA(const char *d, u32 n, u8 *m)
 	*(u32 *)(m + 40) = 0x5C0000;
 	return TRUE;
 }
-API(i32) ChangeDisplaySettingsA(void *m, u32 f) { (void)m; (void)f; return 0; }
-API(i32) ChangeDisplaySettingsExA(const char *d, void *m, HWND h, u32 f, void *x) { (void)d; (void)m; (void)h; (void)f; (void)x; return 0; }
+u32 gl_llama(u32 op, u32 a, u32 b, u32 c);   /* [GL] dx.c: el puente de OPENGL32.DLL (el modo del juego) */
+API(i32) ChangeDisplaySettingsA(void *m, u32 f) { return (i32)gl_llama(6, (u32)m, f, 0); }
+API(i32) ChangeDisplaySettingsExA(const char *d, void *m, HWND h, u32 f, void *x) { (void)d; (void)h; (void)x; return (i32)gl_llama(6, (u32)m, f, 0); }
 API(HANDLE) MonitorFromWindow(HWND h, u32 f) { (void)h; (void)f; return (HANDLE)0x10001; }
 API(HANDLE) MonitorFromPoint(POINT p, u32 f) { (void)p; (void)f; return (HANDLE)0x10001; }
 API(HANDLE) MonitorFromRect(const RECT *r, u32 f) { (void)r; (void)f; return (HANDLE)0x10001; }

@@ -1,0 +1,23 @@
+Disquete «3D» de Hispa-486: HispaGL, OpenGL 1.1 por programa
+==========================================================
+
+Lo que trae:
+  OPENGL32.DLL  OpenGL 1.1 (HispaGL): lo que usaban los juegos de 1997-2001
+  GLU32.DLL     las utilidades de OpenGL (GLU 1.2)
+  GLPRUEBA.EXE  el programa de ejemplo: texturas, luces y transparencias
+                (GLPRUEBA /COMPLETA: a pantalla completa; /SALA: la sala
+                de medir, con los cuadros por segundo)
+  ENGRANA.EXE   los engranajes, con los cuadros por segundo
+  HW32.COM, MSVCRT.DLL, DDRAW.DLL y WINMM.DLL: para abrirlos desde aquí
+
+Instalar en el disco duro (desde Hispa-DOS): A:\INSTALA
+  (las DLL van a C:\HISPADOS y los programas a C:\HISPA32)
+
+Ajustes (en AUTOEXEC.BAT, antes de VENTANAS):
+  SET HISPAGL=RAPIDO   todo al punto más cercano: para los equipos viejos
+  SET HISPAGL=EXACTO   los filtros de verdad (el trilineal)
+  SET HISPAGL=VENTANA  nunca a pantalla completa
+  SET HISPAGL=TRAZA    los cuadros por segundo, por el puerto serie
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+Sin código de nadie más: hecho a partir de la especificación de OpenGL 1.1.

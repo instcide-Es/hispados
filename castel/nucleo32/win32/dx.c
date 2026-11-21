@@ -236,3 +236,20 @@ API(i32) HispaDXTic(void *f)
 	tic_dx_prog = tic;
 	return 1;
 }
+
+/* [GL] El puente de OPENGL32.DLL (HispaGL, w32/gl/; docs/486/OPENGL.md): en
+ * Windows, SwapBuffers y las de los formatos de punto son de GDI32, que llama a
+ * OPENGL32; aquí OPENGL32 da su función al cargarse (HispaGLPuente) y estas le
+ * pasan la llamada (op, a, b, c), como Hispa Ventanas en Hispa-486
+ * (ventanas/win32gl.inc). ChangeDisplaySettingsA (user32.c) también. */
+static u32 (WINAPI *gl_puente)(u32, u32, u32, u32);
+u32 gl_llama(u32 op, u32 a, u32 b, u32 c) { return gl_puente ? gl_puente(op, a, b, c) : 0; }
+/* == GDI32 == */
+API(i32) HispaGLPuente(void *f) { gl_puente = (u32 (WINAPI *)(u32, u32, u32, u32))f; return 1; }
+API(i32) SwapBuffers(HDC h) { return (i32)gl_llama(1, (u32)h, 0, 0); }
+API(i32) ChoosePixelFormat(HDC h, const void *p) { return (i32)gl_llama(2, (u32)h, (u32)p, 0); }
+API(i32) SetPixelFormat(HDC h, i32 n, const void *p) { return (i32)gl_llama(3, (u32)h, (u32)n, (u32)p); }
+API(i32) DescribePixelFormat(HDC h, i32 n, u32 t, void *p) { (void)h; return (i32)gl_llama(4, (u32)n, t, (u32)p); }
+API(i32) GetPixelFormat(HDC h) { return (i32)gl_llama(5, (u32)h, 0, 0); }
+API(i32) GetDeviceGammaRamp(HDC h, void *r) { (void)h; (void)r; return 0; }   /* (el brillo: «no se puede») */
+API(i32) SetDeviceGammaRamp(HDC h, void *r) { (void)h; (void)r; return 0; }

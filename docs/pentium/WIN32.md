@@ -158,9 +158,10 @@ juegos siguen igual), hasta que Hispa-Pentium tenga sonido.
 
 - `\HISPA\WIN32.BIN` (en la memoria USB y en el CD, en la raíz).
 - `\WIN32\`: `MSVCRT.DLL`, `UCRT.DLL`, `COMCTL32.DLL`, `WINMM.DLL`, `DDRAW.DLL`,
-  `DSOUND.DLL`, `DINPUT.DLL`, `OLE32.DLL`.
+  `DSOUND.DLL`, `DINPUT.DLL`, `OLE32.DLL` y (OpenGL, `win32` 1.1) `OPENGL32.DLL` y
+  `GLU32.DLL`.
 - `\HISPA32\`: `CALC32.EXE`, `HOLA32.EXE`, `CTL32.EXE`, `MENU32.EXE`,
-  `AVISO32.EXE` y `NAVES.EXE`.
+  `AVISO32.EXE`, `NAVES.EXE`, `GLPRUEBA.EXE` y `ENGRANA.EXE`.
 - **Los paquetes** (`tools/hpq.py`): `win32` 1.0, nuevo (todo lo de arriba;
   necesita `base >= 0.8.2`); `base` pasa a la 0.8.2 (el núcleo y `ORDENES.BIN`)
   y `equipo` a la 0.8.2 (`EQUIPO.BIN`). INSTALAR los instala con el sistema.
@@ -183,7 +184,10 @@ juegos siguen igual), hasta que Hispa-Pentium tenga sonido.
   256 octetos de texto (las listas muy largas se cortan).
 - El registro (ADVAPI32) dice siempre «no está»; los programas que guardan ahí
   sus ajustes los pierden al acabar (los `.INI` sí van).
-- Direct3D, como en Hispa-486: no (DirectDraw 1 a 7 sí).
+- Direct3D, como en Hispa-486: no (DirectDraw 1 a 7 sí). **OpenGL 1.1, sí**
+  (21/11/2026, rama `opengl`): `OPENGL32.DLL` y `GLU32.DLL` de HispaGL en `\WIN32`,
+  GLPRUEBA y ENGRANA en `\HISPA32`; el puente de GDI32 en `dx.c` y
+  `ChangeDisplaySettingsA` en `user32.c` ([../486/OPENGL.md](../486/OPENGL.md)).
 - El sonido, cuando Hispa-Pentium lo tenga: `HispaDXSonido` (dx.c) es lo único
   que hay que cambiar.
 

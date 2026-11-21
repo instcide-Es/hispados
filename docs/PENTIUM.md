@@ -4344,6 +4344,31 @@ hasta que haya sonido); y Winsock sobre el servicio de red.
   SEH, escuchar en la red, HTTPS para ellos (por eso NAVEGA2.EXE aún no),
   Direct3D. Ver [pentium/WIN32.md](pentium/WIN32.md).
 
+### 14 quater bis. OpenGL (HispaGL, la rama `opengl`)
+
+*21/11/2026: «Dale caña al OpenGL». Todo en [486/OPENGL.md](486/OPENGL.md).*
+
+**`OPENGL32.DLL`** y **`GLU32.DLL`**: OpenGL 1.1 dibujado por programa (sin
+aceleradora), **las mismas DLL que en Hispa-486** (HispaGL, `w32/gl/`, en C), en
+`\WIN32`; con **GLPRUEBA** (texturas con mipmaps, luces, transparencias, niebla,
+el texto con `wglUseFontBitmapsA`; `/COMPLETA`, a pantalla completa; `/SALA`, la
+sala de medir con multitextura) y **ENGRANA** (los engranajes, con los cuadros
+por segundo) en `\HISPA32`. Lo que tuvo que poner WIN32.BIN (marcas `[GL]`):
+
+- `dx.c`: el puente de GDI32 (`HispaGLPuente`, que da OPENGL32 al cargarse, y
+  `SwapBuffers`, `ChoosePixelFormat`, `SetPixelFormat`, `DescribePixelFormat` y
+  `GetPixelFormat`, que le pasan la llamada);
+- `user32.c`: `ChangeDisplaySettingsA`/`ExA` también al puente (el modo que pide
+  el juego: si su ventana lo ocupa, OPENGL32 presenta a pantalla completa con
+  DDRAW.DLL, como los juegos de DirectDraw);
+- `hacer.sh` y `win32/disco.sh`: las dos DLL en `\WIN32` y los dos programas en
+  `\HISPA32`; el paquete **`win32` pasa a la 1.1** (`tools/hpq.py`).
+
+Pruebas: `castel/pruebas.sh`, parte 22 (`SOLO=win32`), el punto 5: GLPRUEBA en
+su ventana y a pantalla completa, ENGRANA y la sala, desde la Consola, con sus
+cuadros por segundo en QEMU (por la traza de HispaGL). Las del PC (contra Mesa)
+y las de Hispa-486, en [486/OPENGL.md](486/OPENGL.md).
+
 ## 14 sexies. La seguridad: la zona protegida, los secretos y los servicios (PROTEGE)
 
 *21/11/2026, rama `pentium-protege`, por la revisión de seguridad de ese día

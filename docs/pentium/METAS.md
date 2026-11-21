@@ -6,6 +6,7 @@ Se tacha lo que se acaba; el detalle técnico de cada cosa va en docs/PENTIUM.md
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 
 ## En marcha (21/11/2026)
+- [x] ~~**OpenGL** (HispaGL: OpenGL 1.1 por programa, en Hispa-486 y en Hispa-Pentium) — rama opengl~~ (21/11: [../486/OPENGL.md](../486/OPENGL.md))
 - [ ] **Navegador web** (NetSurf de Hispa-486 con JavaScript, sobre la red y el HTTPS de Pentium) — rama pentium-navegador
 - [ ] **CD y DVD** (ATAPI por IDE, SATA y USB; ISO 9660 + Joliet; meter y sacar en marcha) y **montar imágenes .ISO como CD virtual** — rama pentium-cd
 - [ ] **Controles de ventana completos** (pestañas, rejillas con columnas, barra de herramientas, recuadros, fechas, listas desplegables) y ClicGest 0.2 — rama controles-erp
@@ -46,6 +47,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 
 ## Programas
 - [x] ~~Programas de Windows de 32 bits (cargador PE) y **DirectX** (DirectDraw, DirectSound, DirectInput), como en Hispa-486~~ (WIN32.BIN: NASM, TCC, FASMW, Naves; [WIN32.md](WIN32.md)). Queda: hilos de verdad, SEH, Direct3D, el sonido de DirectSound
+- [x] ~~**OpenGL 1.1** por programa (OPENGL32.DLL y GLU32.DLL, las mismas que en Hispa-486; GLPRUEBA y ENGRANA)~~ — rama opengl (21/11: [../486/OPENGL.md](../486/OPENGL.md)). Para Half-Life 1 (meta de Carlos) falta lo de HW32: hilos, registro, mutex y eventos, SEH, MSVCRT de VC6 más completa, el CD
 - [ ] Reproductor de música y vídeo (MP3, OGG, WAV; vídeo sencillo)
 - [ ] Visor de imágenes y Pintura
 - [ ] Compresor ZIP

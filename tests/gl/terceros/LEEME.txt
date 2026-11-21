@@ -1,0 +1,40 @@
+tests/gl/terceros/: las cabeceras mínimas para compilar programas de OpenGL de
+otros (escritos para Windows) con gcc -m32 y tools/elf2pe.py, contra
+OPENGL32.DLL de HispaGL y la MSVCRT.DLL de Hispa-486 (docs/486/OPENGL.md).
+Son nuestras (GPL-2.0 o posterior): windows.h y las de C (assert.h, ctype.h,
+math.h, stdio.h, stdlib.h, string.h) dicen lo justo del API documentado; glad/
+sustituye al cargador «glad» (OPENGL32.DLL exporta ya todo OpenGL 1.1).
+
+Lo de otros que se compila con ellas NO va en el repositorio: lo baja
+tests/thirdparty/fetch_gl.sh a tests/thirdparty/dl/gl/ (con su suma SHA-256):
+
+  wglgears.c  de los demos de Mesa, etiqueta mesa-demos-9.0.0
+              (https://gitlab.freedesktop.org/mesa/demos, src/wgl/wglgears.c)
+              Copyright (C) 1999-2001 Brian Paul. Paso a Win32/WGL de Ben
+              Skeggs (2004). Licencia MIT:
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included
+    in all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+    OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+
+La referencia de las pruebas del PC (tests/gl/ref/*.png) son imágenes
+dibujadas por Mesa (llvmpipe) con nuestras escenas (tests/gl/escenas.c): no
+llevan código de Mesa.
+
+HispaGL (w32/gl/) no lleva código de nadie: hecho a partir de la
+especificación pública de OpenGL 1.1 (se miró TinyGL, de Fabrice Bellard y de
+C-Chads, licencia zlib, y no se usó: docs/486/OPENGL.md dice por qué).
