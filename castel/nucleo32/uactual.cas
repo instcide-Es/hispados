@@ -495,6 +495,20 @@ módulo UActual
         si n > 0 y instalada[elegido][0] <> 0 entonces haz("quita", cierto) fin
     fin
 
+    ; (RUEDA) la rueda: la lista, tres renglones por paso, sin mover lo elegido
+    función rueda(c: nat32)
+        variable p, máx, antes: ent32
+        p := ent32(c yb 0xFF)
+        si p > 127 entonces p := p - 256 fin
+        antes := primero
+        máx := ent32(n) - caben
+        si máx < 0 entonces máx := 0 fin
+        primero := primero - p * 3
+        si primero > máx entonces primero := máx fin
+        si primero < 0 entonces primero := 0 fin
+        si primero <> antes entonces pinta() fin
+    fin
+
     función elige(i: ent32)
         si i < 0 o i >= ent32(n) entonces devolver fin
         elegido := i
@@ -732,6 +746,8 @@ módulo UActual
                 fin
             sino si s.clase = EV_RATÓN_BAJA entonces
                 clic(ent32(s.a), ent32(s.b))
+            sino si s.clase = EV_RUEDA entonces
+                rueda(s.c)                      ; (RUEDA)
             sino si s.clase = EV_TAMAÑO entonces
                 medidas(ent32(s.a), ent32(s.b))
                 pinta()

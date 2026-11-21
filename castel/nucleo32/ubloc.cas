@@ -55,6 +55,7 @@ módulo UBloc
     variable ancla: nat32                       ; el otro extremo de lo seleccionado (igual que el cursor: nada)
     variable arrastrando: bool                  ; se está seleccionando con el ratón
     variable primera: ent32                     ; la primera línea que se ve
+    variable suelto: bool                       ; (RUEDA) desplazado con la rueda: lo que se ve no sigue al cursor
     variable nombre: arreglo [64] de byte
     variable rótulo: arreglo [96] de byte
     variable aviso: arreglo [96] de byte
@@ -252,8 +253,10 @@ módulo UBloc
         variable lin, col, clin, ccol: ent32
         ; que el cursor se vea
         sitio(cursor, clin, ccol)
-        si clin < primera entonces primera := clin fin
-        si clin >= primera + filas entonces primera := clin - filas + 1 fin
+        si no suelto entonces                   ; (RUEDA) tras la rueda, no
+            si clin < primera entonces primera := clin fin
+            si clin >= primera + filas entonces primera := clin - filas + 1 fin
+        fin
         rectángulo(v, 0, ARRIBA, ancho, alto - ARRIBA - PIE, PAPEL)
         lin := 0
         col := 0
@@ -276,8 +279,48 @@ módulo UBloc
             col := col + 1
             i := i + 1
         fin
-        ; el cursor: una raya entre dos letras
+        ; el cursor: una raya entre dos letras (si se ve: con la rueda, puede que no)
+        si clin < primera o clin >= primera + filas entonces devolver fin
         rectángulo(v, MARGEN + ccol * ANCHO_LETRA - 1, ARRIBA + 4 + (clin - primera) * ALTO_LETRA, 1, ALTO_LETRA, 0x2468C8)
+    fin
+
+    ; (RUEDA) las líneas que tiene el texto en la pantalla (con las que se parten)
+    función líneas_del_texto(): ent32
+        variable i: nat32
+        variable lin, col: ent32
+        lin := 0
+        col := 0
+        i := 0
+        mientras i < largo hacer
+            si letras[i] = '\n' entonces
+                lin := lin + 1
+                col := 0
+            sino
+                si col = columnas entonces
+                    lin := lin + 1
+                    col := 0
+                fin
+                col := col + 1
+            fin
+            i := i + 1
+        fin
+        devolver lin + 1
+    fin
+
+    ; (RUEDA) la rueda: tres líneas por paso, sin mover el cursor
+    función rueda(c: nat32)
+        variable p, máx, antes: ent32
+        p := ent32(c yb 0xFF)
+        si p > 127 entonces p := p - 256 fin
+        antes := primera
+        máx := líneas_del_texto() - filas
+        si máx < 0 entonces máx := 0 fin
+        primera := primera - p * 3
+        si primera > máx entonces primera := máx fin
+        si primera < 0 entonces primera := 0 fin
+        si primera = antes entonces devolver fin
+        suelto := cierto
+        pinta_texto()
     fin
 
     función pinta_todo()
@@ -679,8 +722,12 @@ módulo UBloc
         pinta_todo()
         mientras suceso(v, s, cierto) hacer
             si s.clase = EV_TECLA entonces
+                suelto := falso                 ; (RUEDA) al teclear, al cursor otra vez
                 tecla_pulsada(s.a, s.b yb TECLA_CON_MAYÚS <> 0)
+            sino si s.clase = EV_RUEDA entonces
+                rueda(s.c)                      ; (RUEDA)
             sino si s.clase = EV_RATÓN_BAJA entonces
+                suelto := falso                 ; (RUEDA)
                 n := nat32(menú_en(menús, ent32(s.a), ent32(s.b)))
                 si ent32(n) >= 0 entonces
                     abre_el_menú(ent32(n))
