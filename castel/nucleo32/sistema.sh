@@ -75,6 +75,8 @@ bash $AQUI/win32/hacer.sh $W/f/WIN32.BIN $W/w32/WIN32 $W/w32/HISPA32 > /dev/null
 rm -f $W/w32/HISPA32/NAVES.ICP
 MODULOS="$MODULOS  module /WIN32.BIN WIN32.BIN
 "
+INSTALA="$INSTALA  module /WIN32.BIN WIN32.BIN
+"
 for f in $W/w32/WIN32/* $W/w32/HISPA32/*; do
   n=$(basename $f); d=$(basename $(dirname $f))
   INSTALA="$INSTALA  module /$d/$n $n
