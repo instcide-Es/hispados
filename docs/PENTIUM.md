@@ -2813,7 +2813,9 @@ sus archivos, así que con firmar el catálogo queda atado todo.
   su **SHA-512** (los números de 64 bits hechos de dos de 32) y las cuentas de la
   curva con los números módulo 2^255 − 19 en **32 trozos de 8 bits**, cada uno en
   un `ent32`: así ninguna cuenta pasa de 32 bits (Castel no tiene números de 64)
-  y no hace falta ensamblador. Comprueba que S < 2^253 y que la clave es un punto
+  y no hace falta ensamblador. Comprueba que S < L (el orden del grupo, como pide la RFC 8032: desde el
+  21/11, la revisión de seguridad; antes solo S < 2^253, y la misma firma con
+  S + L también pasaba) y que la clave es un punto
   de la curva. Tarda unos **0,25 s** en QEMU (24-30 tics).
 - **Cuándo**: lo traído **de Internet** tiene que llevar firma, y buena: si no
   la trae («el catálogo de Internet no trae su firma») o no es buena («la firma
@@ -3193,8 +3195,13 @@ cual (descomprimir costaría un inflado en Castel; no es barato).
   núcleo, llamada 17, la primera vez que hace falta).
 - Lo que pasa lo **apunta** (`tls: ...` por el puerto serie; `HTTPS /TODO`).
 
-`TLS.CCH`, `TLS.SEM` y `TLS.INI` van en `\HISPA` de la unidad del sistema (o en
-su raíz si no hay `\HISPA`).
+`TLS.CCH`, `TLS.SEM`, `TLS.HOR` y `TLS.INI` van en `\HISPA` de la unidad del
+sistema (o en su raíz si no hay `\HISPA`). **`TLS.HOR`** (21/11, la revisión de
+seguridad): el último día en que una cadena se comprobó entera y valía con la
+fecha del reloj del PC. La hora que se pide por HTTP sin cifrar (la cabecera
+`Date`) no se cree si da una fecha anterior a ese día o al de la compilación de
+`TLS.BIN`: quien esté en medio no puede llevar el reloj atrás para colar un
+certificado caducado o revocado.
 
 **La hora.** Para mirar las fechas de un certificado hace falta saber qué día
 es. `TLS.BIN` usa **el reloj del PC** (la CMOS, por la llamada 15) si es
