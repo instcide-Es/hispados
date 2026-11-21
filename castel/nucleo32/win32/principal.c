@@ -160,7 +160,7 @@ int w32_principal(void)
 	{
 		char t[16];
 		if (GetEnvironmentVariableA("HISPA32", t, sizeof t) && (t[0] == 'T' || t[0] == 't'))
-			traza_si = 1;
+			traza_si = t[5] == '3' ? 3 : t[5] == '2' ? 2 : 1;
 	}
 	traza("WIN32: %s (Win32 en %s)", linea_ordenes, carpeta_w32);
 	if (!cargar_exe(ruta_exe, &falta)) {

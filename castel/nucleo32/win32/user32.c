@@ -485,8 +485,7 @@ static void crear_en_nucleo(Wnd *w, int oculta)
 	medida_nucleo(w, &an, &al);
 	if (!w->nucleo_marco)
 		marcas |= V_SIN_MARCO | V_COMPLETA;
-	if (w->exestilo & WS_EX_TOPMOST)
-		marcas |= V_ENCIMA;
+	/* (WS_EX_TOPMOST no es V_ENCIMA: esas no pueden ser la activa, como la barra de tareas) */
 	if (!(w->estilo & WS_THICKFRAME) && w->nucleo_marco)
 		marcas |= V_FIJA;
 	if (marcas_forzadas && marcas_forzadas != 0xFFFFFFFF)
@@ -1331,9 +1330,9 @@ static u32 vk_de(u32 k)
 	}
 	return 0;
 }
-int teclas_mayus(void) { return vk_pulsada[0x10] != 0; }
-int teclas_control(void) { return vk_pulsada[0x11] != 0; }
-int teclas_alt(void) { return vk_pulsada[0x12] != 0; }
+int teclas_mayus(void) { return (vk_pulsada[0x10] & 0x80) != 0; }
+int teclas_control(void) { return (vk_pulsada[0x11] & 0x80) != 0; }
+int teclas_alt(void) { return (vk_pulsada[0x12] & 0x80) != 0; }
 static int modal_activo(void);
 static Wnd *destino_teclas(void)
 {
@@ -1365,6 +1364,7 @@ static void tecla_msg(u32 k, int baja, int repite)
 	m = baja ? WM_KEYDOWN : WM_KEYUP;
 	if (vk == 0x12 || vk == 0x79 || (teclas_alt() && !teclas_control()))
 		m = baja ? WM_SYSKEYDOWN : WM_SYSKEYUP;
+	traza("tecla %x vk %x %s -> %x", k, vk, baja ? "baja" : "sube", (u32)d);
 	if (d)
 		poner_mensaje(d, m, vk, lp);
 }
@@ -1525,6 +1525,7 @@ static void tecla_suceso(Wnd *raiz, Suceso *s)
 {
 	u32 c = s->a;
 	Wnd *d;
+	traza("EV_TECLA %x (activa %x, foco %x, modal %d)", c, (u32)activa, (u32)foco, raiz->modal);
 	if (bloqueada(raiz) || menu_abierto())
 		return;
 	d = destino_teclas();
@@ -1557,6 +1558,7 @@ static void tecla_suceso(Wnd *raiz, Suceso *s)
 static void activar(Wnd *raiz, int si)
 {
 	Wnd *antes = activa;
+	traza("activar %x %d (antes %x)", (u32)raiz, si, (u32)antes);
 	if (si) {
 		if (activa == raiz)
 			return;
@@ -1632,6 +1634,7 @@ void bomba(int esperar)
 	for (w = escritorio->hijas; w; w = sig) {
 		sig = w->sig;
 		while (w->vn && n < 64 && sys_suceso(w->vn, &s) == 1) {
+			traza("suceso %u de %u: %x %x %x", s.clase, w->vn, s.a, s.b, s.c);
 			suceso(w, &s);
 			n++;
 			if (!wnd((HWND)w))
@@ -1765,7 +1768,10 @@ API(BOOL) GetMessageA(MSG *m, HWND h, u32 a, u32 b)
 			return m->message != WM_QUIT;
 		presentar_todo();
 		{
+			static u32 vueltas;
 			u32 f = falta_temp();
+			if (!(++vueltas % 100))
+				traza("GetMessage: %u vueltas", vueltas);
 			sys_dormir(f >= 20 ? 2 : 1);
 		}
 	}
@@ -1815,6 +1821,7 @@ void bucle_modal(Wnd *w, i32 *fin)
 			PostQuitMessage(m.wParam);
 			break;
 		}
+		traza("modal: %x %x %x %x", (u32)m.hwnd, m.message, m.wParam, m.lParam);
 		if (!IsDialogMessageA((HWND)w, &m)) {
 			TranslateMessage(&m);
 			DispatchMessageA(&m);

@@ -355,7 +355,11 @@ API(LRESULT) proc_boton(HWND h, u32 m, WPARAM wp, LPARAM lp)
 		if (wp == ' ' && !b->pulsado) {
 			b->pulsado = 1;
 			InvalidateRect(h, 0, TRUE);
+			return 0;
 		}
+		/* (como en Hispa Ventanas: lo que el botón no quiere, a su madre si no es un cuadro) */
+		if (w->padre && w->padre != escritorio && !w->padre->es_dialogo)
+			return SendMessageA((HWND)w->padre, m, wp, lp);
 		return 0;
 	case WM_KEYUP:
 		if (wp == ' ' && b->pulsado) {
@@ -365,6 +369,12 @@ API(LRESULT) proc_boton(HWND h, u32 m, WPARAM wp, LPARAM lp)
 		}
 		return 0;
 	case WM_CHAR:
+		if (wp == '\r' && (tipo_boton(w) == 0 || tipo_boton(w) == 1) && w->padre && !w->padre->es_dialogo) {
+			clic_boton(w);                                /* (Intro, como en Hispa Ventanas: lo pulsa) */
+			return 0;
+		}
+		if (wp != ' ' && w->padre && w->padre != escritorio && !w->padre->es_dialogo)
+			return SendMessageA((HWND)w->padre, m, wp, lp);
 		return 0;
 	case WM_SETFOCUS:
 		b->foco = 1;

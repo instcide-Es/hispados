@@ -65,6 +65,28 @@ static void *trampolin(const char *dll, const char *f)
 	return p;
 }
 
+/* ---- con HISPA32=TRAZA2, cada llamada a las de dentro sale por el puerto
+ * serie (TRAZA3: también las de las DLL de fuera) ---- */
+static void __attribute__((used)) dice_llamada(const char *n, u32 *pila)
+{
+	/* (pila: lo de pushad; detrás, la vuelta y los argumentos) */
+	aviso_serie("-> %s(%x, %x, %x, %x) desde %x", n, pila[9], pila[10], pila[11], pila[12], pila[8]);
+}
+static void *espia(const char *nombre, void *f)
+{
+	u8 *p = m_pedir(32);
+	char *n = m_pedir(strlen(nombre) + 1);
+	strcpy(n, nombre);
+	p[0] = 0x60;                                   /* pushad */
+	p[1] = 0x54;                                   /* push esp */
+	p[2] = 0x68; *(u32 *)(p + 3) = (u32)n;         /* push nombre */
+	p[7] = 0xE8; *(u32 *)(p + 8) = (u32)dice_llamada - (u32)(p + 12);
+	p[12] = 0x83; p[13] = 0xC4; p[14] = 0x08;      /* add esp, 8 */
+	p[15] = 0x61;                                  /* popad */
+	p[16] = 0xE9; *(u32 *)(p + 17) = (u32)f - (u32)(p + 21);
+	return p;
+}
+
 /* ---- los nombres ---- */
 static void nombre_base(const char *r, char *d, u32 cabe)
 {
@@ -378,6 +400,8 @@ static int importar(Modulo *m, u32 *fl)
 			}
 			if (!p)
 				p = trampolin(o->nombre, fn);
+			else if (traza_si >= 2 && (o->propias || traza_si >= 3))
+				p = espia(fn, p);
 			*iat = (u32)p;
 		}
 	}

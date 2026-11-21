@@ -1015,7 +1015,7 @@ API(BOOL) RestoreDC(HDC h, i32 n)
 		return FALSE;
 	if (n < 0)
 		n = d->nivel + n + 1;
-	while (d->guardado && d->nivel > n) {
+	while (d->guardado && d->nivel >= n) {
 		Dc *g = d->guardado;
 		Dc *sig = g->guardado;
 		i32 nivel = d->nivel - 1;

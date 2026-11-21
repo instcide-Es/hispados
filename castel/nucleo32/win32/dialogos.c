@@ -680,7 +680,7 @@ API(i32) MessageBoxA(HWND padre, const char *texto, const char *titulo, u32 tipo
 	{
 		RECT v = { 0, 0, an, al };
 		AdjustWindowRectEx(&v, WS_POPUP | WS_CAPTION, 0, 0);
-		h = CreateWindowExA(WS_EX_DLGMODALFRAME | WS_EX_TOPMOST, "#32770", titulo ? titulo : "Error", WS_POPUP | WS_CAPTION | WS_SYSMENU,
+		h = CreateWindowExA(WS_EX_DLGMODALFRAME, "#32770", titulo ? titulo : "Error", WS_POPUP | WS_CAPTION | WS_SYSMENU,
 			(pantalla_an - (v.right - v.left)) / 2, (pantalla_al - 36 - (v.bottom - v.top)) / 2, v.right - v.left, v.bottom - v.top, (HWND)dueno, 0, 0, 0);
 	}
 	w = wnd(h);

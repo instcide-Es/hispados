@@ -222,11 +222,12 @@ API(i32) HispaDXSonido(i32 op, u32 a, u32 b, u32 c)
 }
 
 /* ---- la función del programa ---- */
-static void (WINAPI *f_tic)(void);
+/* (la de WINMM: stdcall con cuatro argumentos, que no mira) */
+static i32 (WINAPI *f_tic)(i32, i32, i32, i32);
 static void tic(void)
 {
 	if (f_tic)
-		f_tic();
+		f_tic(0, 0, 0, 0);
 }
 API(i32) HispaDXTic(void *f)
 {

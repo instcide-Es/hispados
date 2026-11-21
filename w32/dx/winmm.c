@@ -22,6 +22,13 @@ void *memset(void *d, int c, u32 n) { u8 *p = d; while (n--) *p++ = c; return d;
 
 /* ======================= la hora ======================= */
 static volatile u32 *tics_bios;     /* 0040:006C */
+#ifdef HISPA_PENTIUM
+/* [WIN32] en Hispa-Pentium no hay tics de la BIOS que corran solos: los de
+ * GetTickCount (castel/nucleo32/win32/), pasados a 18,2 por segundo */
+#define TICS_BIOS() (GetTickCount() / 10 * 182 / 1000)
+#else
+#define TICS_BIOS() (*tics_bios)
+#endif
 static int hay_tsc = -1;
 static u64 tsc0;
 static u32 ms0, ms_ult, tsc_khz, tic_ult, dias;
@@ -38,7 +45,7 @@ static int cpu_tsc(void) {
   return (d >> 4) & 1;
 }
 static u32 tics_ms(void) {          /* los tics de la BIOS, en ms (con los días) */
-  u32 t = *tics_bios;
+  u32 t = TICS_BIOS();
   if (t < tic_ult) dias++;
   tic_ult = t;
   t += dias * 0x1800B0;
@@ -47,15 +54,15 @@ static u32 tics_ms(void) {          /* los tics de la BIOS, en ms (con los días
 static void reloj_ini(void) {
   if (hay_tsc >= 0) return;
   tics_bios = (volatile u32 *)((u8 *)HispaDXEntrada(3, 0, 0) + 0x46C);
-  tic_ult = *tics_bios;
+  tic_ult = TICS_BIOS();
   hay_tsc = cpu_tsc();
   if (hay_tsc) {                    /* se mide el TSC durante dos tics */
-    u32 t = *tics_bios, n = 0; u64 a, b;
-    while (*tics_bios == t && ++n < 200000000) ;
-    a = rdtsc(); t = *tics_bios;
-    while (*tics_bios == t) ;
-    t = *tics_bios;
-    while (*tics_bios == t) ;
+    u32 t = TICS_BIOS(), n = 0; u64 a, b;
+    while (TICS_BIOS() == t && ++n < 200000000) ;
+    a = rdtsc(); t = TICS_BIOS();
+    while (TICS_BIOS() == t) ;
+    t = TICS_BIOS();
+    while (TICS_BIOS() == t) ;
     b = rdtsc();
     tsc_khz = (u32)(b - a) / 110;  /* dos tics = 109,85 ms */
     if (!tsc_khz) hay_tsc = 0;
