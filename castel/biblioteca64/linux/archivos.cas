@@ -1,0 +1,268 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; archivos.cas (Linux x86-64) - los archivos de biblioteca/archivos.cas para
+; los programas de «modelo linux64» (CASTEL64.md): las mismas funciones, con
+; las llamadas al sistema de Linux (módulo Linux) en vez de la 21h del DOS.
+; Así lo escrito para el DOS (el compilador CASTEL, el ensamblador ENSAMBLA)
+; corre igual en Linux. Un archivo abierto es su descriptor de Linux (ENTRADA,
+; SALIDA y ERRORES son los de siempre: 0, 1 y 2).
+; Las rutas, como en el DOS: «\» vale como «/». Si un archivo no está tal cual,
+; se busca también con el último trozo de la ruta en minúsculas (CASTEL.CAS
+; encuentra castel.cas). Cuando algo falla, la función lo dice con lo que
+; devuelve (MAL, falso o 0) y deja en «error_dos» el error de Linux (ENOENT...).
+;
+;   importar Archivos
+;   ...
+;   m := abrir("CARTA.TXT", LEER)
+;   si m = MAL entonces ... fin
+;   leídos := leer(m, trozo, 512)
+;   cerrar(m)
+módulo Archivos
+
+    importar Textos, Linux
+
+    público constante LEER = 0                  ; los modos de abrir
+    público constante ESCRIBIR = 1
+    público constante LEER_Y_ESCRIBIR = 2
+    público constante ENTRADA = 0               ; los que ya están abiertos
+    público constante SALIDA = 1
+    público constante ERRORES = 2
+    público constante MAL = -1                  ; lo que dan abrir y crear si fallan
+    público constante DESDE_EL_PRINCIPIO = 0    ; desde dónde cuenta situar
+    público constante DESDE_DONDE_VA = 1
+    público constante DESDE_EL_FINAL = 2
+    público constante FIN_DE_ARCHIVO = -1       ; lo que da leer_car cuando no queda nada
+    público constante TROZO = 512               ; de cuánto en cuánto lee un Lector
+
+    constante CABE_RUTA = 1024
+    constante O_CREAR = 0x241                   ; O_WRONLY | O_CREAT | O_TRUNC
+
+    público variable error_dos: nat16           ; 0, o el error de Linux de la última que falló
+
+    variable ruta: arreglo [CABE_RUTA] de byte
+
+    función bien(r: ent64): bool
+        si r < 0 entonces
+            error_dos := nat16(0 - r)
+            devolver falso
+        fin
+        error_dos := 0
+        devolver cierto
+    fin
+
+    ; la ruta de Linux de una del DOS (con «\» en vez de «/»), en «ruta»; con
+    ; «minúsculas», el último trozo en minúsculas
+    función a_linux(nombre: puntero a byte, minúsculas: bool)
+        variable i, último: nat16
+        copiar_hasta(ruta, nombre, CABE_RUTA)
+        último := 0
+        i := 0
+        mientras ruta[i] <> 0 hacer
+            si ruta[i] = '\\' entonces ruta[i] := '/' fin
+            si ruta[i] = '/' entonces último := i + 1 fin
+            i := i + 1
+        fin
+        si minúsculas entonces
+            i := último
+            mientras ruta[i] <> 0 hacer
+                ruta[i] := minúscula(ruta[i])
+                i := i + 1
+            fin
+        fin
+    fin
+
+    función abre(nombre: puntero a byte, modo_linux: nat64): ent64
+        variable r: ent64
+        a_linux(nombre, falso)
+        r := sistema(ABRIR, nat64(dirección(ruta)), modo_linux, 0x1A4)
+        si r = NO_EXISTE entonces
+            a_linux(nombre, cierto)
+            r := sistema(ABRIR, nat64(dirección(ruta)), modo_linux, 0x1A4)
+        fin
+        devolver r
+    fin
+
+    público función abrir(nombre: puntero a byte, modo: byte): ent16
+        variable r: ent64
+        r := abre(nombre, modo)
+        si no bien(r) entonces devolver MAL fin
+        devolver ent16(r)
+    fin
+
+    público función crear(nombre: puntero a byte): ent16
+        variable r: ent64
+        a_linux(nombre, falso)
+        r := sistema(ABRIR, nat64(dirección(ruta)), O_CREAR, 0x1A4)
+        si no bien(r) entonces devolver MAL fin
+        devolver ent16(r)
+    fin
+
+    público función cerrar(m: ent16): bool
+        si m <= ERRORES entonces devolver cierto fin
+        devolver bien(sistema(CERRAR, nat64(m), 0, 0))
+    fin
+
+    público función leer(m: ent16, destino: puntero a byte, cuántos: nat16): nat16
+        variable r: ent64
+        r := sistema(LEER, nat64(m), nat64(destino), cuántos)
+        si no bien(r) entonces devolver 0 fin
+        devolver nat16(r)
+    fin
+
+    público función grabar(m: ent16, origen: puntero a byte, cuántos: nat16): nat16
+        variable r: ent64
+        variable hechos: nat16
+        hechos := 0
+        mientras hechos < cuántos hacer
+            r := sistema(ESCRIBIR, nat64(m), nat64(origen + hechos), cuántos - hechos)
+            si no bien(r) entonces devolver hechos fin
+            si r = 0 entonces romper fin
+            hechos := hechos + nat16(r)
+        fin
+        devolver hechos
+    fin
+
+    público función grabar_texto(m: ent16, t: puntero a byte): bool
+        variable n: nat16
+        n := longitud(t)
+        si n = 0 entonces devolver cierto fin
+        devolver grabar(m, t, n) = n
+    fin
+
+    público función borrar(nombre: puntero a byte): bool
+        variable r: ent64
+        a_linux(nombre, falso)
+        r := sistema(BORRAR, nat64(dirección(ruta)), 0, 0)
+        si r = NO_EXISTE entonces
+            a_linux(nombre, cierto)
+            r := sistema(BORRAR, nat64(dirección(ruta)), 0, 0)
+        fin
+        devolver bien(r)
+    fin
+
+    público función situar(m: ent16, posición: ent32, contando: byte): nat32
+        variable r: ent64
+        r := sistema(SITUAR, nat64(m), nat64(posición), contando)
+        si no bien(r) entonces devolver 0 fin
+        devolver nat32(r)
+    fin
+
+    público función largo(m: ent16): nat32
+        variable va, fin_: ent64
+        va := sistema(SITUAR, nat64(m), 0, DESDE_DONDE_VA)
+        si no bien(va) entonces devolver 0 fin
+        fin_ := sistema(SITUAR, nat64(m), 0, DESDE_EL_FINAL)
+        sistema(SITUAR, nat64(m), nat64(va), DESDE_EL_PRINCIPIO)
+        si no bien(fin_) entonces devolver 0 fin
+        devolver nat32(fin_)
+    fin
+
+    público tipo Lector = estructura
+        manejador: ent16
+        hay: nat16                      ; cuántos octetos hay en «datos»
+        va: nat16                       ; cuál toca dar
+        acabado: bool
+        datos: arreglo [TROZO] de byte
+    fin
+
+    público función empezar_lector(ref l: Lector, m: ent16)
+        l.manejador := m
+        l.hay := 0
+        l.va := 0
+        l.acabado := falso
+    fin
+
+    ; el octeto siguiente (0 a 255), o FIN_DE_ARCHIVO
+    público función leer_car(ref l: Lector): ent16
+        si l.va >= l.hay entonces
+            si l.acabado entonces devolver FIN_DE_ARCHIVO fin
+            l.hay := leer(l.manejador, l.datos, TROZO)
+            l.va := 0
+            si l.hay = 0 entonces
+                l.acabado := cierto
+                devolver FIN_DE_ARCHIVO
+            fin
+        fin
+        l.va := l.va + 1
+        devolver l.datos[l.va - 1]
+    fin
+
+    ; lee una línea (sin su fin de línea) en destino, donde caben «cabe»
+    ; octetos con el 0; lo que no quepa se pierde. Da falso cuando ya no
+    ; quedan líneas. Para en el 1Ah (el fin de archivo de los textos del DOS).
+    público función leer_línea(ref l: Lector, destino: puntero a byte, cabe: nat16): bool
+        variable c: ent16
+        variable n: nat16
+        n := 0
+        mientras cierto hacer
+            c := leer_car(l)
+            si c = 0x1A entonces l.acabado := cierto fin
+            si c = FIN_DE_ARCHIVO o c = 0x1A entonces
+                destino[n] := 0
+                devolver n > 0
+            fin
+            si c = '\n' entonces romper fin
+            si c <> '\r' y n + 1 < cabe entonces
+                destino[n] := c
+                n := n + 1
+            fin
+        fin
+        destino[n] := 0
+        devolver cierto
+    fin
+
+    ; ---- escribir poco a poco, sin llamar al DOS cada vez ----
+    ; Un Escritor junta lo que se le da y lo manda al archivo de 512 en 512:
+    ;   variable e: Escritor
+    ;   empezar_escritor(e, m)
+    ;   poner_texto(e, "total: ")
+    ;   poner_número(e, 1981)
+    ;   poner_línea(e)
+    ;   vaciar(e)                       ; al acabar, SIEMPRE: manda lo que queda
+    público tipo Escritor = estructura
+        manejador: ent16
+        hay: nat16                      ; cuántos octetos esperan en «datos»
+        mal: bool                       ; algo no se ha podido escribir (disco lleno...)
+        datos: arreglo [TROZO] de byte
+    fin
+
+    público función empezar_escritor(ref e: Escritor, m: ent16)
+        e.manejador := m
+        e.hay := 0
+        e.mal := falso
+    fin
+
+    ; manda al archivo lo que espera. Cierto si todo lo dado hasta ahora ha entrado
+    público función vaciar(ref e: Escritor): bool
+        si e.hay > 0 entonces
+            si grabar(e.manejador, e.datos, e.hay) <> e.hay entonces e.mal := cierto fin
+            e.hay := 0
+        fin
+        devolver no e.mal
+    fin
+
+    público función poner_car(ref e: Escritor, c: byte)
+        si e.hay = TROZO entonces vaciar(e) fin
+        e.datos[e.hay] := c
+        e.hay := e.hay + 1
+    fin
+
+    público función poner_texto(ref e: Escritor, t: puntero a byte)
+        mientras valor(t) <> 0 hacer
+            poner_car(e, valor(t))
+            t := t + 1
+        fin
+    fin
+
+    público función poner_número(ref e: Escritor, n: ent32)
+        variable cifras: arreglo [12] de byte
+        número_a_texto(n, cifras)
+        poner_texto(e, cifras)
+    fin
+
+    ; el fin de línea del DOS: retorno de carro y salto de línea
+    público función poner_línea(ref e: Escritor)
+        poner_car(e, '\r')
+        poner_car(e, '\n')
+    fin
+
+fin Archivos.

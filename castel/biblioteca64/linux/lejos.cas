@@ -1,0 +1,44 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; lejos.cas (Linux x86-64) - la memoria «lejana» de biblioteca/lejos.cas para
+; los programas de «modelo linux64»: un bloque es memoria que se pide a Linux
+; (mmap, con MAP_32BIT: por debajo de los 2 GB, como el resto del programa) y
+; su «segmento» es su primer párrafo, la dirección entre 16. Con él valen
+; leer_palabra(seg, d) y los suyos, que en 64 bits son la memoria «por
+; párrafos» (CASTEL32.md §5). Así el compilador CASTEL64 guarda sus tablas
+; como el de 16 bits.
+módulo Lejos
+
+    importar Linux
+
+    público tipo Segmento = nat32
+
+    ; un bloque de tantos párrafos: su segmento, o 0 si no hay memoria
+    público función pedir(párrafos: nat16): Segmento
+        variable r: ent64
+        si párrafos = 0 entonces devolver 0 fin
+        ; PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT
+        r := sistema6(MAPEAR, 0, nat64(párrafos) * 16, 3, 0x62, nat64(-1), 0)
+        si r < 0 entonces devolver 0 fin
+        devolver nat32(r >> 4)
+    fin
+
+    ; el bloque más grande que se puede pedir (en párrafos): aquí, siempre lo más
+    público función mayor_bloque(): nat16
+        devolver 0xFFFF
+    fin
+
+    público función devolver_bloque(seg: Segmento)
+    fin
+
+    ; pone a cero las primeras «palabras» palabras del bloque (mmap ya lo da a cero)
+    público función borrar_bloque(seg: Segmento, palabras: nat16)
+        variable i: nat32
+        i := 0
+        mientras palabras > 0 hacer
+            poner_palabra(seg, i, 0)
+            i := i + 2
+            palabras := palabras - 1
+        fin
+    fin
+
+fin Lejos.

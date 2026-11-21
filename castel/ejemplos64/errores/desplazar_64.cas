@@ -1,0 +1,9 @@
+; En 64 bits se desplaza de 0 a 63.
+; ERROR: 7:19: error: se desplaza de 0 a 63 bits
+módulo Error
+    modelo linux64
+    función principal()
+        variable n: nat64
+        n := n << 64
+    fin
+fin Error.

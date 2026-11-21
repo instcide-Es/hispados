@@ -1,0 +1,28 @@
+; =============================================================================
+;  castel64.cas - CASTEL64: el compilador de Castel escrito en Castel, como
+;  programa de Linux para x86-64 («modelo linux64», CASTEL64.md). El mismo
+;  compilador que castel.cas (el de 16 bits) y castel32.cas, módulo a módulo
+;  (Mando y los suyos); solo cambian el modelo, las medidas de las tablas
+;  (../medidas.cas) y lo del sistema, que se importa ANTES que nada para que
+;  sea lo que valga: Lejos, Archivos y Argumentos de biblioteca64/linux, con
+;  las llamadas al sistema de Linux. Saca lo mismo que ccastel.py para los
+;  tres tamaños: 16 bits (Hispa-8086), 32 (Hispa-Pentium, HW32) y 64.
+;
+;      CASTEL64 ENTRADA.CAS [-o SALIDA.ASM] [-I CARPETA]... [--todo] [--gasto]
+;
+;  Se compila (desde castel/) con:
+;      ccastel.py compilador/64/linux/castel64.cas -I compilador/64 -I compilador/32
+;                 -I biblioteca64/linux -I compilador
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Castel64
+
+    modelo linux64
+
+    importar Medidas, Lejos, Archivos, Argumentos, Gen64, Mando
+
+    función principal(): byte
+        devolver mandar()
+    fin
+
+fin Castel64.

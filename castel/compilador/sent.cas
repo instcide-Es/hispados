@@ -7,7 +7,7 @@
 ; =============================================================================
 módulo Sent
 
-    importar Base, Tablas, Cuentas, Tipos, Salida, Expr, Textos
+    importar Base, Tablas, Cuentas, Tipos, Salida, Expr, Textos, Gen64
 
     constante MAX_BUCLES = 32
     constante MAX_CASOS = 200
@@ -88,6 +88,10 @@ módulo Sent
     fin
 
     función gen_asig(dest: nat16, e: nat16)
+        si en64 entonces
+            gen_asig64(dest, e)
+            devolver
+        fin
         si plano entonces
             gen_asig32p(dest, e)
             devolver
@@ -388,6 +392,10 @@ módulo Sent
     fin
 
     función gen_para(s: nat16)
+        si en64 entonces
+            gen_para64(s)
+            devolver
+        fin
         si plano entonces
             gen_para32p(s)
             devolver
@@ -488,6 +496,10 @@ módulo Sent
     fin
 
     función gen_según(s: nat16, ultimo: bool)
+        si en64 entonces
+            gen_segun64(s, ultimo)
+            devolver
+        fin
         si plano entonces
             gen_segun32(s, ultimo)
             devolver
@@ -600,6 +612,10 @@ módulo Sent
         variable c: N64
         variable q: Lugar
         a := átomo(nm, n)
+        si en64 entonces
+            cambia64(a, más, s, lin, col)
+            devolver
+        fin
         si es_var(a) entonces
             var(a, nlin(s), ncol(s), v)
             si v.por_ref entonces
@@ -626,6 +642,57 @@ módulo Sent
         si r <> 0 y (s_clase(r) = S_NUM o s_clase(r) = S_BOOL) entonces
             s_valor(r, c)
             si n_cabe16(c) entonces l_nat((c.bajo + más) yb 0xFFFF) sino l_nat(c.bajo + más) fin
+            devolver
+        fin
+        si r <> 0 y s_clase(r) = S_FUNC entonces
+            f_etq('F', s_a(r), t)
+            l(t)
+            devolver
+        fin
+        m("en el ensamblador, «{")
+        m_at(a)
+        m("}» no es nada declarado en Castel")
+        falla(lin, col)
+    fin
+
+    ; [CASTEL64] lo mismo, en 64 bits: [rbp+n] y los números con su signo
+    función cambia64(a: nat16, más: nat32, s: nat16, lin: nat16, col: nat16)
+        variable r: nat16
+        variable v: Var
+        variable t: arreglo [TXT] de byte
+        variable c, mas_: N64
+        variable q: Lugar
+        si es_var(a) entonces
+            var(a, nlin(s), ncol(s), v)
+            si v.por_ref entonces
+                l(l64_t(T64_RBP_MAS))
+                l_nat(v.off)
+                l("]")
+                devolver
+            fin
+            q.base := v.lugar.base
+            q.sim := v.lugar.sim
+            q.off := v.lugar.off + ent32(más)
+            q.índice := SIN_ÍNDICE
+            q.escala := 1
+            l64_texto_lugar(q, t)
+            l("[")
+            l(t)
+            l("]")
+            devolver
+        fin
+        r := busca(a)
+        si r <> 0 y s_clase(r) = S_CAD entonces
+            l("T_")
+            l_nat(etiqueta_cadena(s_a(r)))
+            devolver
+        fin
+        si r <> 0 y (s_clase(r) = S_NUM o s_clase(r) = S_BOOL) entonces
+            s_valor(r, c)
+            n_nat(mas_, más)
+            n_suma(c, mas_)
+            l64_texto(c, cierto, t)
+            l(t)
             devolver
         fin
         si r <> 0 y s_clase(r) = S_FUNC entonces
@@ -758,7 +825,14 @@ módulo Sent
                         falla(nlin(e), ncol(e))
                     fin
                     compatible(tret, e, "lo que se devuelve", 0)
-                    si plano entonces
+                    si en64 entonces
+                        si de64(tret) entonces
+                            l64_expr64(e)
+                        sino
+                            l64_expr(e)
+                            si no es_const(e) entonces l64_ajusta(tipo_de(e), tret) fin
+                        fin
+                    sino si plano entonces
                         gen_expr(e)
                         si no es_const(e) entonces ajusta32(tipo_de(e), tret) fin
                     sino si es32(tret) entonces
@@ -893,7 +967,13 @@ módulo Sent
                     nm := na(s)
                     mientras nm <> 0 hacer
                         declarado(na(nm), nlin(s), ncol(s), cierto)
-                        si plano entonces marco := marco + ((ttam(t) + 3) yb 0xFFFC) sino marco := marco + ((ttam(t) + 1) yb 0xFFFE) fin
+                        si en64 entonces
+                            marco := marco + ((ttam(t) + 7) yb 0xFFF8)
+                        sino si plano entonces
+                            marco := marco + ((ttam(t) + 3) yb 0xFFFC)
+                        sino
+                            marco := marco + ((ttam(t) + 1) yb 0xFFFE)
+                        fin
                         loc_alta(na(nm), t, falso, 0 - ent16(marco))
                         nm := nsig(nm)
                     fin
@@ -918,7 +998,13 @@ módulo Sent
                             si r <> 0 y s_clase(r) = S_GLOBAL entonces tv := s_a(r) fin
                         fin
                     fin
-                    si plano o (tv <> 0 y es32(tv)) entonces marco := marco + 4 sino marco := marco + 2 fin
+                    si en64 entonces
+                        marco := marco + 8
+                    sino si plano o (tv <> 0 y es32(tv)) entonces
+                        marco := marco + 4
+                    sino
+                        marco := marco + 2
+                    fin
                     pon_t(nc(s), marco)
                 fin
                 locales(nc(nc(s)), fase)
@@ -941,6 +1027,10 @@ módulo Sent
 
     ; genera la función de esa ficha, con ese cuerpo (su primera sentencia)
     público función gen_función(f: nat16, cuerpo: nat16)
+        si en64 entonces
+            gen_función64(f, cuerpo)
+            devolver
+        fin
         si plano entonces
             gen_función32(f, cuerpo)
             devolver
@@ -1381,6 +1471,405 @@ módulo Sent
             si con_marco entonces
                 si marco <> 0 entonces em("mov esp, ebp") fin
                 em("pop ebp")
+            fin
+            ini()
+            l("ret")
+            si nparams <> 0 entonces
+                l(" ")
+                l_nat(f_nbytes(f))
+            fin
+            cruda()
+        fin
+        func_actual := 0
+    fin
+
+    ; =========================================================================
+    ;  [CASTEL64] La generación de 64 bits de las sentencias y de la función
+    ;  entera (CASTEL64.md). Lo mismo que Generador64 de ccastel.py; lo de las
+    ;  expresiones está en Gen64.
+    ; =========================================================================
+    función gen_asig64(dest: nat16, e: nat16)
+        variable td, r: nat16
+        variable tt, reg, ins: puntero a byte
+        variable im, fijo, lug, otro: arreglo [TXT] de byte
+        variable hay_im, hay_fijo, ocho: bool
+        variable n, tam: N64
+        variable v: nat32
+        variable op: byte
+        si no es_lugar(dest) entonces
+            si nk(dest) = K_REF entonces
+                r := busca(na(dest))
+                si r <> 0 y (s_clase(r) = S_NUM o s_clase(r) = S_BOOL o s_clase(r) = S_CAD) entonces
+                    m("«")
+                    m_at(na(dest))
+                    m("» es una constante: no se le asigna")
+                    falla(nlin(dest), ncol(dest))
+                fin
+            fin
+            m("a la izquierda de «:=» va una variable, un elemento o un campo")
+            falla(nlin(dest), ncol(dest))
+        fin
+        td := tipo_de(dest)
+        si nk(dest) = K_REF entonces compatible(td, e, "", na(dest)) sino compatible(td, e, "el destino", 0) fin
+        tt := l64_tam_txt(td)
+        reg := l64_reg_de(td)
+        ocho := ttam(td) = 8
+        si ocho entonces hay_im := l64_inm64(e, im) sino hay_im := l64_inmediato(e, im) fin
+        hay_fijo := l64_lugar_fijo(dest, fijo)
+        si hay_im entonces
+            si es_const(e) y no ocho entonces
+                const(e, n)
+                natural_a_texto(n.bajo yb l64_máscara(td), im)
+            fin
+            si no hay_fijo entonces l64_lugar(dest, fijo) fin
+            ini()
+            l("mov ")
+            l(tt)
+            l(" [")
+            l(fijo)
+            l("], ")
+            l(im)
+            cruda()
+            devolver
+        fin
+        op := 0
+        si nk(e) = K_BIN entonces op := nop(e) fin
+        si hay_fijo y (op = O_MAS o op = O_MENOS o op = O_YB o op = O_OB o op = O_XOB) entonces
+            si es_lugar(na(e)) entonces
+                si l64_lugar_fijo(na(e), otro) entonces
+                    si iguales(otro, fijo) y const(nb(e), n) entonces
+                        tipo_de(e)
+                        si tk(td) = TK_PUNT entonces
+                            n_nat(tam, ttam(tbase(td)))
+                            n_por(n, tam)
+                        fin
+                        si no ocho o l64_cabe_i32(n) entonces
+                            v := n.bajo
+                            si no ocho entonces v := v yb l64_máscara(td) fin
+                            ini()
+                            si (op = O_MAS o op = O_MENOS) y v = 1 y (no ocho o n.alto = 0) entonces
+                                si op = O_MAS entonces l("inc ") sino l("dec ") fin
+                                l(tt)
+                                l(" [")
+                                l(fijo)
+                                l("]")
+                            sino
+                                según op
+                                    caso O_MAS: ins := "add "
+                                    caso O_MENOS: ins := "sub "
+                                    caso O_YB: ins := "and "
+                                    caso O_OB: ins := "or "
+                                    si no: ins := "xor "
+                                fin
+                                l(ins)
+                                l(tt)
+                                l(" [")
+                                l(fijo)
+                                l("], ")
+                                si ocho entonces
+                                    n_texto(n, otro)
+                                    l(otro)
+                                sino
+                                    l_nat(v)
+                                fin
+                            fin
+                            cruda()
+                            devolver
+                        fin
+                    fin
+                fin
+            fin
+        fin
+        si de64(td) entonces
+            l64_expr64(e)
+        sino
+            l64_expr(e)
+            si ttam(td) = 4 y de64(tipo_de(e)) entonces em(l64_t(T64_MOV_EAX_EAX)) fin
+        fin
+        si hay_fijo entonces
+            em4("mov [", fijo, "], ", reg)
+        sino si l64_limpio(dest) entonces
+            l64_lugar(dest, lug)
+            em4("mov [", lug, "], ", reg)
+        sino
+            em(l64_t(T64_PUSH_RAX))
+            l64_lugar(dest, lug)
+            em(l64_t(T64_POP_RAX))
+            em4("mov [", lug, "], ", reg)
+        fin
+    fin
+
+    ; la comparación de la variable del «para» con su final (en 64 bits)
+    función para_compara64(hay_ch: bool, tt: puntero a byte, lug: puntero a byte, ref ch: N64, ocho: bool, reg: puntero a byte, tope: puntero a byte)
+        variable t: arreglo [24] de byte
+        si hay_ch entonces
+            ini()
+            l("cmp ")
+            l(tt)
+            l(" [")
+            l(lug)
+            l("], ")
+            si ocho entonces
+                n_texto(ch, t)
+                l(t)
+            sino
+                l_nat(ch.bajo)
+            fin
+            cruda()
+        sino
+            em5("mov ", reg, ", [", tope, "]")
+            em4("cmp [", lug, "], ", reg)
+        fin
+    fin
+
+    función gen_para64(s: nat16)
+        variable tv, s2, l_cuerpo, l_seguir, l_fin: nat16
+        variable lug, tope: arreglo [TXT] de byte
+        variable el_paso, ch, abs_: N64
+        variable hay_ch, signo, sube, ocho: bool
+        variable tt, reg: puntero a byte
+        variable pasado: byte
+        variable r: Lugar
+        s2 := nc(s)
+        tv := tipo_de(na(s))
+        si no es_num(tv) o no l64_lugar_fijo(na(s), lug) entonces
+            m("la variable del «para» es una variable numérica sencilla")
+            falla(nlin(na(s)), ncol(na(s)))
+        fin
+        número(na(s2), "el final del «para»", 0)
+        n_nat(el_paso, 1)
+        si nb(s2) <> 0 entonces
+            si no const(nb(s2), el_paso) o no es_lit(tipo_de(nb(s2))) entonces
+                m("el «paso» es un número constante")
+                falla(nlin(nb(s2)), ncol(nb(s2)))
+            fin
+            si n_cero(el_paso) entonces
+                m("el «paso» no puede ser 0")
+                falla(nlin(nb(s2)), ncol(nb(s2)))
+            fin
+            n_nat(abs_, n_abs(el_paso))
+            rango(abs_, tv, nlin(nb(s2)), ncol(nb(s2)))
+        fin
+        tt := l64_tam_txt(tv)
+        ocho := ttam(tv) = 8
+        signo := tk(tv) = TK_ENT16 o tk(tv) = TK_ENT32 o tk(tv) = TK_ENT64
+        gen_asig(na(s), nb(s))
+        hay_ch := const(na(s2), ch)
+        si hay_ch y ocho entonces hay_ch := l64_cabe_i32(ch) fin
+        reg := l64_reg_de(tv)
+        si hay_ch entonces
+            rango(ch, tv, nlin(na(s2)), ncol(na(s2)))
+            si no ocho entonces n_nat(ch, ch.bajo yb l64_máscara(tv)) fin
+        sino
+            r.base := B_BP
+            r.sim := 0
+            r.off := 0 - ent32(nt(s2))
+            r.índice := SIN_ÍNDICE
+            r.escala := 1
+            l64_texto_lugar(r, tope)
+            si ocho entonces
+                l64_expr64(na(s2))
+                em3("mov [", tope, l64_t(T64_DE_RAX))
+            sino
+                l64_expr(na(s2))
+                em3("mov [", tope, "], eax")
+            fin
+        fin
+        l_cuerpo := nueva()
+        l_seguir := nueva()
+        l_fin := nueva()
+        sube := no n_negativo(el_paso)
+        si sube entonces
+            pasado := CC_A
+            si signo entonces pasado := CC_G fin
+        sino
+            pasado := CC_B
+            si signo entonces pasado := CC_L fin
+        fin
+        para_compara64(hay_ch, tt, lug, ch, ocho, reg, tope)
+        salto_cc(pasado, l_fin)
+        et(l_cuerpo)
+        mete_bucle(l_seguir, l_fin, s)
+        gen_bloque(nc(s2), falso)
+        n_bucles := n_bucles - 1
+        et(l_seguir)
+        si n_abs(el_paso) = 1 entonces
+            para_compara64(hay_ch, tt, lug, ch, ocho, reg, tope)
+            salto_cc(CC_E, l_fin)
+            si sube entonces em5("inc ", tt, " [", lug, "]") sino em5("dec ", tt, " [", lug, "]") fin
+            jmp(l_cuerpo)
+        sino
+            ini()
+            si sube entonces l("add ") sino l("sub ") fin
+            l(tt)
+            l(" [")
+            l(lug)
+            l("], ")
+            l_nat(n_abs(el_paso))
+            cruda()
+            si signo entonces salto_cc(CC_O, l_fin) sino salto_cc(CC_C, l_fin) fin
+            para_compara64(hay_ch, tt, lug, ch, ocho, reg, tope)
+            salto_no(pasado, l_cuerpo)
+        fin
+        et(l_fin)
+    fin
+
+    ; «cmp» del valor de un caso, en 32 o en 64 bits
+    función cmp_caso(ancho: bool, ref v: N64)
+        variable t: arreglo [16] de byte
+        si no ancho entonces
+            em_n("cmp eax, ", v.bajo, "")
+        sino si l64_cabe_i32(v) entonces
+            n_texto(v, t)
+            em2(l64_t(T64_CMP_RAX), t)
+        sino
+            em_n(l64_t(T64_MOV_ECX), v.bajo, "")
+            em(l64_t(T64_CMP_RAX_RCX))
+        fin
+    fin
+
+    función gen_segun64(s: nat16, ultimo: bool)
+        variable t, l_fin, l_c, l_no, c, v, n_vistos, i: nat16
+        variable signo, ancho: bool
+        variable va, vb: N64
+        variable hay_a, hay_b: bool
+        variable x, y_: ent32
+        t := valor_tipo(na(s))
+        si no es_num(t) entonces
+            m("«según» elige por un número, no por un ")
+            m_tipo(t)
+            falla(nlin(na(s)), ncol(na(s)))
+        fin
+        signo := tk(t) = TK_ENT16 o tk(t) = TK_ENT32 o tk(t) = TK_ENT64
+        ancho := de64(t)
+        l64_expr(na(s))
+        l_fin := nueva()
+        n_vistos := 0
+        c := nb(s)
+        mientras c <> 0 hacer
+            l_c := nueva()
+            pon_t(c, l_c)
+            v := na(c)
+            mientras v <> 0 hacer
+                hay_a := const(na(v), va)
+                si nb(v) = 0 entonces
+                    hay_b := hay_a
+                    n_copia(vb, va)
+                sino
+                    hay_b := const(nb(v), vb)
+                fin
+                si no hay_a o no hay_b entonces
+                    m("los valores de un «caso» son constantes")
+                    si no hay_a entonces falla(nlin(na(v)), ncol(na(v))) fin
+                    falla(nlin(nb(v)), ncol(nb(v)))
+                fin
+                si n_compara(vb, va) < 0 entonces
+                    m("el intervalo del «caso» va de menor a mayor")
+                    falla(nlin(na(v)), ncol(na(v)))
+                fin
+                x := ent32(va.bajo)
+                y_ := ent32(vb.bajo)
+                i := 0
+                mientras i < n_vistos hacer
+                    si x <= caso_hasta[i] y caso_desde[i] <= y_ entonces
+                        m("ese valor ya está en otro «caso»")
+                        falla(nlin(na(v)), ncol(na(v)))
+                    fin
+                    i := i + 1
+                fin
+                si n_vistos >= MAX_CASOS entonces
+                    m("demasiados valores en un «según»")
+                    falla(nlin(na(v)), ncol(na(v)))
+                fin
+                caso_desde[n_vistos] := x
+                caso_hasta[n_vistos] := y_
+                n_vistos := n_vistos + 1
+                si n_igual(va, vb) entonces
+                    cmp_caso(ancho, va)
+                    salto_cc(CC_E, l_c)
+                sino
+                    l_no := nueva()
+                    cmp_caso(ancho, va)
+                    si signo entonces salto_cc(CC_L, l_no) sino salto_cc(CC_B, l_no) fin
+                    cmp_caso(ancho, vb)
+                    si signo entonces salto_cc(CC_LE, l_c) sino salto_cc(CC_BE, l_c) fin
+                    et(l_no)
+                fin
+                v := nsig(v)
+            fin
+            c := nsig(c)
+        fin
+        si nc(s) <> 0 entonces gen_bloque(nc(s), falso) fin
+        jmp(l_fin)
+        c := nb(s)
+        mientras c <> 0 hacer
+            et(nt(c))
+            gen_bloque(nb(c), falso)
+            si no acaba(nb(c)) entonces jmp(l_fin) fin
+            c := nsig(c)
+        fin
+        et(l_fin)
+    fin
+
+    ; la función entera, en 64 bits
+    público función gen_función64(f: nat16, cuerpo: nat16)
+        variable d, p, nparams, i: nat16
+        variable con_marco, atiende: bool
+        variable t: arreglo [TXT] de byte
+        d := f_nudo(f)
+        func_actual := f
+        loc_vacía()
+        fin_usado := falso
+        n_bucles := 0
+        nparams := f_nparams(f)
+        p := nb(d)
+        mientras p <> 0 hacer
+            declarado(na(p), nlin(p), ncol(p), cierto)
+            loc_alta(na(p), nt(p), nmarcas(p) yb M_REF <> 0, nc(p))
+            p := nsig(p)
+        fin
+        marco := 0
+        n_td := 0
+        locales(cuerpo, 1)
+        locales(cuerpo, 2)
+        visto_int := 0
+        visto_devolver := falso
+        visto_asm := falso
+        mira(cuerpo)
+        si f_tret(f) <> T_NADA y no visto_devolver y no visto_asm entonces
+            m_función()
+            m("devuelve un ")
+            m_tipo(f_tret(f))
+            m(", pero no tiene ningún «devolver»")
+            falla(nlin(d), ncol(d))
+        fin
+        atiende := f_marcas(f) yb FM_ATIENDE <> 0
+        con_marco := marco <> 0 o nparams <> 0 o atiende o visto_asm
+        f_etq('X', f, fin_func)
+        blanca()
+        f_etq('F', f, t)
+        et_nombre(t)
+        si atiende entonces                     ; la llama el procesador: se guarda todo
+            para i desde 0 hasta 14 hacer em2("push ", l64_registro(i)) fin
+            em(l64_t(T64_MOV_RBP_RSP))
+            si marco <> 0 entonces em_n(l64_t(T64_SUB_RSP), marco, "") fin
+            em("cld")
+        sino si con_marco entonces
+            em(l64_t(T64_PUSH_RBP))
+            em(l64_t(T64_MOV_RBP_RSP))
+            si marco <> 0 entonces em_n(l64_t(T64_SUB_RSP), marco, "") fin
+        fin
+        gen_bloque(cuerpo, cierto)
+        si fin_usado entonces et(0) fin
+        si atiende entonces
+            si marco <> 0 entonces em(l64_t(T64_MOV_RSP_RBP)) fin
+            para i desde 0 hasta 14 hacer em2("pop ", l64_registro(14 - i)) fin
+            si nparams <> 0 entonces em(l64_t(T64_ADD_RSP_8)) fin
+            em(l64_t(T64_IRETQ))
+        sino
+            si con_marco entonces
+                si marco <> 0 entonces em(l64_t(T64_MOV_RSP_RBP)) fin
+                em(l64_t(T64_POP_RBP))
             fin
             ini()
             l("ret")

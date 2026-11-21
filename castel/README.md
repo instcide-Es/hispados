@@ -45,6 +45,14 @@ dentro, y CASTEL32 llega al punto fijo dentro de Hispa-Pentium y de Hispa-DOS; s
 tablas ya no están al límite (el árbol del núcleo, al 16 %). Es el que manda; el de
 16 bits sigue para Hispa-8086 ([docs/CASTEL32.md](docs/CASTEL32.md) §11).
 
+Desde el 21/11/2026, **Castel de 64 bits** ([docs/CASTEL64.md](docs/CASTEL64.md)):
+x86-64 en modo largo, con `nat64`/`ent64` y punteros de 8 octetos, en los dos
+compiladores y en los dos ensambladores; `modelo linux64` (programas de Linux x86-64)
+y `modelo núcleo64` (el núcleo de Hispa-64: `nucleo64/hola.cas`, el primer ladrillo,
+arranca en QEMU y con GRUB). Y **CASTEL64**: el compilador escrito en Castel como
+programa de Linux x86-64, que se compila a sí mismo hasta el punto fijo y saca lo
+mismo que ccastel.py para 16, 32 y 64 bits: el compilador cruzado de la familia.
+
 ## Qué hay aquí
 
 - `ccastel.py` — el compilador de la etapa 0, en Python: léxico (UTF-8, palabras clave con
@@ -58,6 +66,12 @@ tablas ya no están al límite (el árbol del núcleo, al 16 %). Es el que manda
   `pentium/castel32.cas` (para Hispa-Pentium) y `hw32/castelw.cas` (para HW32);
   con `biblioteca32/pentium/` y `biblioteca32/hw32/` (Lejos, Archivos y Argumentos
   de cada sistema) y `ensamblador/32/` (ENSAMB32 y ENSAMBW).
+- `compilador/64/` — **CASTEL64** (`linux/castel64.cas`, para Linux x86-64) y sus
+  medidas; `compilador/32/gen64.cas`, la parte de atrás de 64 bits (con
+  `apoyo64.cas`), y `compilador/gen64.cas`, la vacía del CASTEL de 16 bits;
+  `biblioteca64/linux/` (Linux, Lejos, Archivos y Argumentos con las llamadas de
+  Linux) y `ensamblador/64/` (ENSAMB64). `ejemplos64/`, `azar64.py` y `nucleo64/`
+  (Hispa-64); las pruebas, en `pruebas64.sh` (`SOLO=castel64 ./pruebas.sh`).
 - `corre32/` — corre en Linux los programas del anillo 3 de Hispa-Pentium (con
   ptrace), para probar deprisa: `corre32/corre32.sh PROGRAMA.BIN [args]`.
 - `ensambla.py` y `ensamblador/ensambla.cas` — **el ensamblador propio**: la referencia en

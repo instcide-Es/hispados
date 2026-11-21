@@ -13,6 +13,7 @@ que tienen que dar siempre lo mismo:
 | `ensambla.py` | La referencia, en Python: `python3 -I ensambla.py ENTRADA.asm [-o SALIDA]` |
 | `ensamblador/ensambla.cas` | **ENSAMBLA**, el de verdad: el anterior pasado a Castel, función por función (por dentro, el módulo `Montador`, `montador.cas`). Corre en Hispa-8086: `ENSAMBLA ENTRADA.ASM [SALIDA]` (sin SALIDA, `ENTRADA.COM`, o `.EXE` si el programa es de «modelo grande») |
 | `ensamblador/32/pentium/ensamb32.cas`, `ensamblador/32/hw32/ensambw.cas` | **ENSAMB32** y **ENSAMBW**: el mismo Montador compilado para 32 bits, para Hispa-Pentium y para HW32 (CASTEL32.md §11). Ensamblan el núcleo de Hispa-Pentium en unos 3 s dentro de él |
+| `ensamblador/64/linux/ensamb64.cas` | **ENSAMB64**: el mismo Montador compilado para Linux x86-64 (CASTEL64.md §9). Ensambla CASTEL64 entero en 0,15 s |
 
 `pruebas.sh` ensambla con NASM, con `ensambla.py` y con ENSAMBLA (dentro de Hispa-8086) los
 ejemplos, la biblioteca entera, `ensamblador/formas.asm` (una muestra de cada forma de
@@ -34,6 +35,10 @@ instrucción) y el propio ENSAMBLA, y compara los archivos.
 - **Cuentas** con números y etiquetas: `+ - * / % << >> & | ^ ~` y paréntesis, en 32 bits.
 - **Etiquetas**: `nombre:` (los dos puntos son obligatorios) y locales `.nombre:`, que son
   de la última etiqueta no local.
+- **x86-64** (`bits 64`, desde el 21/11/2026; CASTEL64.md §8): los registros de 64 bits
+  y `r8`-`r15`, `qword`, el prefijo REX, `movsxd cdqe cqo iretq syscall rdmsr wrmsr
+  cpuid stosq movsq`..., `dq resq`, y las cuentas en 64 bits; `ensamblador/formas64.asm`
+  tiene una muestra de cada forma.
 - **Órdenes**: `db dw dd` (números, cuentas y textos entre comillas), `resb resw resd`,
   `times N ...`, `org`, `absolute` (lo que sigue no va al archivo), `cpu`, `bits`, y lo que
   usa el modelo grande: `section NOMBRE vstart=N align=N` y `align N, db 0`.

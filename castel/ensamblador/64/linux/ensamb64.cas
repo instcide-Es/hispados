@@ -1,0 +1,25 @@
+; =============================================================================
+;  ensamb64.cas - ENSAMB64: ENSAMBLA, el ensamblador propio de Castel, como
+;  programa de Linux para x86-64 («modelo linux64», CASTEL64.md). El mismo de
+;  ensambla.cas (el de 16 bits) y ensamb32.cas, módulo a módulo (Montador):
+;  solo cambian el modelo y lo del sistema, que se importa ANTES que nada para
+;  que sea lo que valga (Lejos, Archivos y Argumentos de biblioteca64/linux).
+;
+;      ENSAMB64 ENTRADA.ASM [SALIDA]
+;
+;  Se compila (desde castel/) con:
+;      ccastel.py ensamblador/64/linux/ensamb64.cas -I biblioteca64/linux
+;                 -I ensamblador
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ensamb64
+
+    modelo linux64
+
+    importar Lejos, Archivos, Argumentos, Montador
+
+    función principal(): byte
+        devolver ensamblar(0xF000)
+    fin
+
+fin Ensamb64.

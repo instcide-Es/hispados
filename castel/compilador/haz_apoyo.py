@@ -110,3 +110,56 @@ lineas += [
 ]
 with open(os.path.join(AQUI, 'apoyo.cas'), 'w', encoding='utf-8') as f:
     f.write('\n'.join(lineas))
+
+# [CASTEL64] las de 64 bits van aparte, en compilador/32/apoyo64.cas (el módulo
+# Apoyo64, que solo importa la parte de atrás de 64 bits de verdad,
+# compilador/32/gen64.cas): el CASTEL de 16 bits no las lleva (CASTEL64.md)
+LINUX64 = dict(ccastel.APOYO64)
+LINUX64.update(ccastel.APOYO_LINUX64)
+NUCLEO64 = dict(ccastel.APOYO64)
+NUCLEO64.update(ccastel.APOYO_NUCLEO64)
+l64 = [
+    "; =============================================================================",
+    ";  apoyo64.cas - [CASTEL64] las rutinas de apoyo de los programas de 64 bits",
+    ";  (modelo linux64 y núcleo64, CASTEL64.md) y su arranque. NO editar a mano: lo",
+    ";  escribe compilador/haz_apoyo.py con el texto de APOYO64, APOYO_LINUX64,",
+    ";  APOYO_NUCLEO64 y ARRANQUE64 de ccastel.py, para que los dos compiladores",
+    ";  pongan lo mismo, letra a letra.",
+    ";  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.",
+    "; =============================================================================",
+    "módulo Apoyo64",
+    "",
+    "    público constante N_APOYO_LINUX64 = %d" % len(LINUX64),
+    "    público constante N_APOYO_NÚCLEO64 = %d" % len(NUCLEO64),
+]
+for letra, tabla in (('L', LINUX64), ('N', NUCLEO64)):
+    for i, (nombre, txt) in enumerate(tabla.items()):
+        l64.append('    constante %sN_%d = "%s"' % (letra, i, nombre))
+        l64.append('    constante %sT_%d = "%s"' % (letra, i, literal(txt.strip('\n') + '\n')))
+for nombre, txt in ccastel.ARRANQUE64.items():
+    clave = {'linux64': 'LINUX64', 'linux64_datos': 'LINUX64_DATOS', 'núcleo64': 'NUCLEO64',
+             'núcleo64_datos': 'NUCLEO64_DATOS'}[nombre]
+    l64.append('    público constante ARRANQUE_%s = "%s"' % (clave, literal(txt.strip('\n') + '\n')))
+l64 += [
+    "",
+    "    variable nombres_l: arreglo [N_APOYO_LINUX64] de puntero a byte = (%s)" % ', '.join('LN_%d' % i for i in range(len(LINUX64))),
+    "    variable textos_l: arreglo [N_APOYO_LINUX64] de puntero a byte = (%s)" % ', '.join('LT_%d' % i for i in range(len(LINUX64))),
+    "    variable nombres_n: arreglo [N_APOYO_NÚCLEO64] de puntero a byte = (%s)" % ', '.join('NN_%d' % i for i in range(len(NUCLEO64))),
+    "    variable textos_n: arreglo [N_APOYO_NÚCLEO64] de puntero a byte = (%s)" % ', '.join('NT_%d' % i for i in range(len(NUCLEO64))),
+    "",
+    "    ; las de linux64 (linux = cierto) o las de núcleo64",
+    "    público función apoyo64_nombre(linux: bool, i: nat16): puntero a byte",
+    "        si linux entonces devolver nombres_l[i] fin",
+    "        devolver nombres_n[i]",
+    "    fin",
+    "",
+    "    público función apoyo64_texto(linux: bool, i: nat16): puntero a byte",
+    "        si linux entonces devolver textos_l[i] fin",
+    "        devolver textos_n[i]",
+    "    fin",
+    "",
+    "fin Apoyo64.",
+    "",
+]
+with open(os.path.join(AQUI, '32', 'apoyo64.cas'), 'w', encoding='utf-8') as f:
+    f.write('\n'.join(l64))

@@ -1,0 +1,8 @@
+abierto: cierto, largo 36
+[línea 1000] [línea 2000] [línea 3000] 
+desde el 6: 1000
+borrado: cierto; otra vez: falso
+abrir uno que no está: -1 (error 2)
+argumentos: 0, el primero: falso
+la ruta del programa acaba como debe: cierto
+lejos: cierto 1234 77 0

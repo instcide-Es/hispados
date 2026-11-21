@@ -273,6 +273,7 @@
 #   SOLO=sonido ./pruebas.sh      la primera y la 29 (el sonido: SONIDO.BIN, la bandeja, DirectSound, HVPRUN)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
+#   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
 #   AZAR=3 ./pruebas.sh           además, tres programas de cuentas al azar
 #                                 de 16 bits (azar.py) y otros tres de 32
@@ -319,10 +320,11 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 }
 
 . $AQUI/pruebas32.sh               # la parte 15 (CASTEL32), como la función parte15
+. $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
 echo "== Castel: los errores se dicen en español, con línea y columna =="
-for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
+for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas $AQUI/ejemplos64/errores/*.cas; do
   n=$(basename $f .cas)
   esperado=$(sed -n 's/^; ERROR: //p' $f | head -1)
   if python3 -I $AQUI/ccastel.py $f -o $T/err.asm -I $AQUI/ejemplos/partes > $T/err.txt 2>&1; then
@@ -343,6 +345,11 @@ if [ "${SOLO:-}" = errores ]; then
 fi
 if [ "${SOLO:-}" = castel32 ]; then
   parte15
+  echo "== $nok bien, $fail mal =="
+  exit $((fail > 0))
+fi
+if [ "${SOLO:-}" = castel64 ]; then
+  parte23
   echo "== $nok bien, $fail mal =="
   exit $((fail > 0))
 fi
@@ -858,8 +865,11 @@ paso() {       # número del paso, el compilador (un .EXE) y cómo se llama en e
   mcopy -i $T/d.img $T/ens/nasm/ensambla.bin ::ENSAMBLA.COM
   for f in $AQUI/compilador/*.cas; do mcopy -i $T/d.img $f ::$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
   for f in $AQUI/biblioteca/*.cas; do mcopy -i $T/d.img $f ::BIB/$(basename $f .cas | tr a-z A-Z | cut -c1-8).CAS; done
-  rm -f $T/b.img; mformat -C -f 1440 -i $T/b.img ::
-  arranca_ab "$3 CASTEL.CAS -o B:C$1.ASM -I BIB > B:P$1.SAL" || ko "el paso $1 del arranque (compilar) no ha llegado al final"
+  # [CASTEL64] B: de 2,88 MB, y se compila desde él: ahí deja CASTEL su archivo
+  # temporal (con la parte de atrás de 64 bits, los fuentes del compilador y el
+  # temporal ya no caben juntos en A:)
+  rm -f $T/b.img; mformat -C -f 2880 -i $T/b.img ::
+  arranca_ab "B:"$'\r\n'"A:\\$3 A:\\CASTEL.CAS -o B:C$1.ASM -I A:\\BIB > B:P$1.SAL"$'\r\n'"A:" || ko "el paso $1 del arranque (compilar) no ha llegado al final"
   arranca_ab "ENSAMBLA B:C$1.ASM B:C$1.EXE > B:E$1.SAL" || ko "el paso $1 del arranque (ensamblar) no ha llegado al final"
   mcopy -n -i $T/b.img "::C$1.*" '::*.SAL' $A/arr/ > /dev/null 2>&1
 }
@@ -5259,6 +5269,7 @@ fi   # el Wi-Fi
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
 [ -z "${SOLO:-}" ] && parte15
+[ -z "${SOLO:-}" ] && parte23
 
 echo "== $nok bien, $fail mal =="
 exit $((fail > 0))

@@ -336,7 +336,7 @@ módulo Sintactico
         fin
         si es_pal(P_TIPO, 0) entonces devolver decl_tipo() fin
         si es_pal(P_ENSAMBLADOR, 0) entonces devolver ensamblador_() fin
-        si es_id(a_modelo, 0) y (es_id(a_grande, 1) o es_id(a_núcleo, 1) o es_id(a_hispa32, 1) o es_id(a_usuario, 1)) entonces
+        si es_id(a_modelo, 0) y (es_id(a_grande, 1) o es_id(a_núcleo, 1) o es_id(a_hispa32, 1) o es_id(a_usuario, 1) o es_id(a_linux64, 1) o es_id(a_núcleo64, 1)) entonces
             d := nudo_aquí(K_MODELO)            ; «modelo grande»: un .EXE de varios segmentos;
             pp := pp + 1                        ; «modelo núcleo», «hispa32» y «usuario»: 32 bits
             pon_a(d, come_id("el modelo"))

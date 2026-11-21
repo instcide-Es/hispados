@@ -19,7 +19,7 @@ módulo Castelw
 
     modelo hispa32
 
-    importar Medidas, Lejos, Archivos, Argumentos, Mando
+    importar Medidas, Lejos, Archivos, Argumentos, Gen64, Mando
 
     función principal(): byte
         devolver mandar()

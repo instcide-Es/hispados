@@ -16,6 +16,10 @@
 ;   - las etiquetas van a memoria lejana (módulo Lejos): L_n y T_n, que son
 ;     casi todas, en dos tablas por su número; las demás, en una tabla de
 ;     dispersión con los nombres.
+;  [CASTEL64] Desde el 21/11/2026 entiende también «bits 64» (CASTEL64.md §8):
+;  lo de x86-64 que saca el compilador (REX, r8-r15, movsxd, cdqe...). Las
+;  cuentas llevan, además, su palabra alta de 32 bits (e_alto), que solo cuenta
+;  en «bits 64».
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Montador
@@ -37,6 +41,7 @@ módulo Montador
     constante K_LEJOS = 6
     constante K_R32 = 7
     constante K_RC = 8                  ; cr0 a cr4
+    constante K_R64 = 9                 ; [CASTEL64] rax... y r8 a r15 (los de 32, 16 y 8 de estos: K_R32...)
     constante SIN_REG = 255
 
     ; las clases de instrucción (TABLA_n)
@@ -71,6 +76,10 @@ módulo Montador
     constante C_SUELTA_W = 29           ; las sueltas de 16 bits (en «bits 32», con 66h delante)
     constante C_SUELTA_D = 30           ; y las de 32 (en «bits 16», con 66h)
     constante C_MOVX = 31               ; movzx y movsx (y lgdt, lidt, sgdt, sidt y ltr: código < 16)
+    ; [CASTEL64] (en las tablas, la clase va detrás del nombre: es lo menor que 48)
+    constante C_SUELTA_Q = 32           ; las sueltas de 64 bits (con REX.W)
+    constante C_SUELTA2 = 33            ; las de dos octetos: 0Fh y el código
+    constante C_MOVSXD = 34
 
     ; las instrucciones y órdenes: nombre, clase y código + 1 (hecha con un guion a partir
     ; de las tablas de ensambla.py; por delante, las más frecuentes)
@@ -79,14 +88,15 @@ módulo Montador
     constante TABLA_3 = "jnge\x05\x0Djge\x05\x0Ejnl\x05\x0Ejle\x05\x0Fjng\x05\x0Fjg\x05\x10jnle\x05\x10loopne\x06\xE1loopnz\x06\xE1loope\x06\xE2loopz\x06\xE2loop\x06\xE3jcxz\x06\xE4rep\x07\xF4repe\x07\xF4repz\x07\xF4repne\x07\xF3repnz\x07\xF3cld\x01\xFDstd\x01\xFEcli\x01\xFBsti\x01\xFCclc\x01\xF9stc\x01\xFAcmc\x01\xF6cwd\x1D\x9Acbw\x1D\x99pushf\x01\x9Dpopf\x01\x9Elodsb\x01\xADlodsw\x1D\xAEstosb\x01\xABstosw\x1D\xACmovsb\x01\xA5movsw\x1D\xA6"
     constante TABLA_4 = "cmpsb\x01\xA7cmpsw\x1D\xA8scasb\x01\xAFscasw\x1D\xB0nop\x01\x91hlt\x01\xF5lahf\x01\xA0sahf\x01\x9Fxlatb\x01\xD8iret\x01\xD0into\x01\xCF"
     constante TABLA_5 = "movzx\x1F\xB7movsx\x1F\xBFsgdt\x1F\x01sidt\x1F\x02lgdt\x1F\x03lidt\x1F\x04ltr\x1F\x0Dcdq\x1E\x9Acwde\x1E\x99lodsd\x1E\xAEstosd\x1E\xACmovsd\x1E\xA6cmpsd\x1E\xA8scasd\x1E\xB0pushad\x1E\x61popad\x1E\x62pushfd\x1E\x9Dpopfd\x1E\x9Eiretd\x1E\xD0pusha\x01\x61popa\x01\x62int3\x01\xCDjecxz\x06\xE5"
-    constante TABLAS = 5
+    constante TABLA_6 = "movsxd\x22\x01cdqe\x20\x99cqo\x20\x9Airetq\x20\xD0lodsq\x20\xAEstosq\x20\xACmovsq\x20\xA6cmpsq\x20\xA8scasq\x20\xB0syscall\x21\x06sysret\x21\x08rdmsr\x21\x33wrmsr\x21\x31cpuid\x21\xA3rdtsc\x21\x32dq\x15\x09resq\x16\x09"
+    constante TABLAS = 6
 
-    variable tablas: arreglo [TABLAS] de puntero a byte = (TABLA_1, TABLA_2, TABLA_3, TABLA_4, TABLA_5)
+    variable tablas: arreglo [TABLAS] de puntero a byte = (TABLA_1, TABLA_2, TABLA_3, TABLA_4, TABLA_5, TABLA_6)
 
     tipo Op = estructura
         k: byte
         reg: byte
-        tam: byte                       ; 1, 2, 4 o 0 (no se sabe)
+        tam: byte                       ; 1, 2, 4, 8 o 0 (no se sabe)
         seg: byte                       ; el prefijo de segmento, o 0
         rm: byte                        ; memoria: 0 a 7, o SIN_REG (dirección sin registros)
         sim: bool                       ; ¿lleva alguna etiqueta la cuenta?
@@ -94,7 +104,9 @@ módulo Montador
         v2: nat32                       ; K_LEJOS: el segmento
         falta: bool                     ; K_INM: ¿alguna etiqueta que aún no se sabe?
         a32: bool                       ; memoria con registros de 32 bits (o sin registros en «bits 32»)
-        base, índice, escala: byte      ; [base+índice*escala]: SIN_REG si no está
+        base, índice, escala: byte      ; [base+índice*escala]: SIN_REG si no está (en 64 bits, de 0 a 15)
+        alto: nat32                     ; [CASTEL64] K_INM: la palabra alta (en «bits 64»)
+        a67: bool                       ; [CASTEL64] en «bits 64», memoria con registros de 32: el prefijo 67h
     fin
 
     variable nombre_ent: arreglo [80] de byte
@@ -116,15 +128,17 @@ módulo Montador
     variable seg_L, seg_T, seg_cubos, seg_sim: Segmento
     variable libre_sim: nat16
     variable seg_LA, seg_TA: Segmento   ; la palabra alta de las L_n y de las T_n
-    variable bits: byte                 ; el modo: 16 o 32 («bits 32»)
+    variable bits: byte                 ; el modo: 16, 32 o 64 («bits 32», «bits 64»)
     variable e_sim, e_falta: bool       ; de la última cuenta
+    variable e_alto: nat32              ; [CASTEL64] y su palabra alta (0, salvo en «bits 64»)
+    variable esc64: bool                ; [CASTEL64] el último registro de escalado() era de 64 bits
     ; el resumen de la primera pasada (ver más abajo)
     constante R_FIN = 0                 ; las marcas del resumen: el final,
     constante R_FIJO = 1                ; un tramo fijo largo: n (2),
     constante R_PC = 4                  ; la dirección pasa a ser otra: valor (4),
     constante R_ALINEA = 5              ; ceros hasta un múltiplo de n (2),
     constante R_ABSOLUTO = 6            ; lo que sigue va o no al archivo: sí (1),
-    constante R_BITS = 7                ; el modo pasa a ser otro: 16 o 32 (1),
+    constante R_BITS = 7                ; el modo pasa a ser otro: 16, 32 o 64 (1),
     constante R_ETIQUETA = 0x10         ; + clase (1 L_n, 2 T_n, 3 con nombre): una etiqueta: cuál (2),
     constante R_SALTO = 0x40            ; + forma * 4 + clase: un salto a esa etiqueta: cuál (2),
     constante R_FIJO_CORTO = 0x80       ; + n: un tramo fijo de menos de 128 octetos
@@ -471,7 +485,7 @@ módulo Montador
                 largo_ := forma yb F_CERCA <> 0 o (forma yb F_CORTO = 0 y no (llega(d) o no está))
                 n := 2
                 si largo_ entonces
-                    si bits = 32 entonces
+                    si bits >= 32 entonces
                         n := 5
                         si forma yb F_JCC <> 0 entonces n := 6 fin
                     sino
@@ -576,7 +590,9 @@ módulo Montador
         apunta_etiqueta(R_ETIQUETA, 0, 3, r)
     fin
 
-    ; ---- las cuentas: | ^ & << >> + - * / % y paréntesis, en 32 bits ----
+    ; ---- las cuentas: | ^ & << >> + - * / % y paréntesis, en 32 bits (y, en
+    ; «bits 64», en 64: la palabra alta, en e_alto; multiplicar, dividir y el
+    ; resto, con los 32 de abajo) ----
     función c_blancos()
         mientras ei < efin y es_blanco(valor(ei)) hacer
             ei := ei + 1
@@ -584,9 +600,10 @@ módulo Montador
     fin
 
     función c_número(p: puntero a byte, n: nat16): nat32
-        variable v: nat32
+        variable v, x, y_: nat32
         variable i, base: nat16
         variable c: byte
+        e_alto := 0
         base := 10
         i := 0
         si n > 2 y p[0] = '0' y minus(p[1]) = 'x' entonces
@@ -606,9 +623,14 @@ módulo Montador
             sino
                 error("número mal escrito")
             fin
-            v := v * base + c
+            ; (e_alto, v) * base + c, en 64 bits (a trozos de 16)
+            x := (v yb 0xFFFF) * base + c
+            y_ := (v >> 16) * base + (x >> 16)
+            e_alto := e_alto * base + (y_ >> 16)
+            v := (y_ << 16) ob (x yb 0xFFFF)
             i := i + 1
         fin
+        si bits <> 64 entonces e_alto := 0 fin
         devolver v
     fin
 
@@ -622,7 +644,12 @@ módulo Montador
         c := valor(ei)
         si c = '-' entonces
             ei := ei + 1
-            devolver 0 - c_unario()
+            v := c_unario()
+            ; 0 - (e_alto, v), en 64 bits
+            e_alto := nob e_alto
+            si v = 0 entonces e_alto := e_alto + 1 fin
+            si bits <> 64 entonces e_alto := 0 fin
+            devolver 0 - v
         fin
         si c = '+' entonces
             ei := ei + 1
@@ -630,7 +657,10 @@ módulo Montador
         fin
         si c = '~' entonces
             ei := ei + 1
-            devolver nob c_unario()
+            v := c_unario()
+            e_alto := nob e_alto
+            si bits <> 64 entonces e_alto := 0 fin
+            devolver nob v
         fin
         si c = '(' entonces
             ei := ei + 1
@@ -640,6 +670,7 @@ módulo Montador
             ei := ei + 1
             devolver v
         fin
+        e_alto := 0
         si c = '\'' entonces
             si ei + 2 >= efin o ei[2] <> '\'' entonces error("carácter mal cerrado") fin
             ei := ei + 3
@@ -692,34 +723,75 @@ módulo Montador
     fin
 
     función c_nivel(nivel: nat16): nat32
-        variable v, w: nat32
+        variable v, w, va, wa, x: nat32
         variable op: byte
         si nivel = 6 entonces devolver c_unario() fin
         v := c_nivel(nivel + 1)
+        va := e_alto
         mientras cierto hacer
             op := c_operador(nivel)
-            si op = 0 entonces devolver v fin
+            si op = 0 entonces
+                e_alto := va
+                devolver v
+            fin
             ei := ei + 1
             si nivel = 3 entonces ei := ei + 1 fin
             w := c_nivel(nivel + 1)
+            wa := e_alto
             según op
-                caso '|': v := v ob w
-                caso '^': v := v xob w
-                caso '&': v := v yb w
+                caso '|':
+                    v := v ob w
+                    va := va ob wa
+                caso '^':
+                    v := v xob w
+                    va := va xob wa
+                caso '&':
+                    v := v yb w
+                    va := va yb wa
                 caso '<':
-                    si w > 31 entonces v := 0 sino v := v << nat16(w) fin
+                    si wa <> 0 o w > 63 entonces
+                        v := 0
+                        va := 0
+                    sino si w > 31 entonces
+                        va := v << nat16(w - 32)
+                        v := 0
+                    sino si w > 0 entonces
+                        va := (va << nat16(w)) ob (v >> nat16(32 - w))
+                        v := v << nat16(w)
+                    fin
                 caso '>':
-                    si w > 31 entonces v := 0 sino v := v >> nat16(w) fin
-                caso '+': v := v + w
-                caso '-': v := v - w
-                caso '*': v := v * w
+                    si wa <> 0 o w > 63 entonces
+                        v := 0
+                        va := 0
+                    sino si w > 31 entonces
+                        v := va >> nat16(w - 32)
+                        va := 0
+                    sino si w > 0 entonces
+                        v := (v >> nat16(w)) ob (va << nat16(32 - w))
+                        va := va >> nat16(w)
+                    fin
+                caso '+':
+                    x := v + w
+                    va := va + wa
+                    si x < v entonces va := va + 1 fin
+                    v := x
+                caso '-':
+                    x := v - w
+                    va := va - wa
+                    si v < w entonces va := va - 1 fin
+                    v := x
+                caso '*':
+                    v := v * w
+                    va := 0
                 si no:
                     si w = 0 entonces
                         si final entonces error("división por cero") fin
                         w := 1
                     fin
                     si op = '/' entonces v := v div w sino v := v mod w fin
+                    va := 0
             fin
+            si bits <> 64 entonces va := 0 fin
         fin
         devolver v
     fin
@@ -731,6 +803,7 @@ módulo Montador
         efin := fin_
         e_sim := falso
         e_falta := falso
+        e_alto := 0
         v := c_nivel(0)
         c_blancos()
         si ei < efin entonces error("cuenta que no entiendo") fin
@@ -762,14 +835,42 @@ módulo Montador
         devolver SIN_REG
     fin
 
+    ; [CASTEL64] el registro de 64 bits de [p, fin): rax... (0 a 7) y r8 a r15 (8 a 15), o SIN_REG
+    función reg64(p: puntero a byte, fin_: puntero a byte): byte
+        variable n: nat16
+        n := fin_ - p
+        si n = 3 entonces
+            si minus(p[0]) = 'r' y p[1] = '1' y p[2] >= '0' y p[2] <= '5' entonces devolver 10 + (p[2] - '0') fin
+            devolver registro3(p, "raxrcxrdxrbxrsprbprsirdi")
+        fin
+        si n = 2 y minus(p[0]) = 'r' y (p[1] = '8' o p[1] = '9') entonces devolver p[1] - '0' fin
+        devolver SIN_REG
+    fin
+
+    ; el de 32 bits en [p, fin) de los de 64 o de los de 32 (con esc64, si es de 64)
+    función reg_dir(p: puntero a byte, fin_: puntero a byte): byte
+        variable r: byte
+        esc64 := falso
+        si bits = 64 entonces
+            r := reg64(p, fin_)
+            si r <> SIN_REG entonces
+                esc64 := cierto
+                devolver r
+            fin
+        fin
+        si fin_ - p = 3 entonces devolver registro3(p, "eaxecxedxebxespebpesiedi") fin
+        devolver SIN_REG
+    fin
+
     ; «esi», «esi*4» o «4*esi» en [t, tf): el registro y la escala (0 si no la lleva)
+    ; (en «bits 64», también los de 64: rsi*4, r12...)
     función escalado(t: puntero a byte, tf: puntero a byte, ref r: byte, ref e: byte): bool
         variable x, a, af, b, bf: puntero a byte
         variable n: nat32
-        si tf - t = 3 entonces
-            r := registro3(t, "eaxecxedxebxespebpesiedi")
+        r := reg_dir(t, tf)
+        si r <> SIN_REG entonces
             e := 0
-            devolver r <> SIN_REG
+            devolver cierto
         fin
         x := corta(t, tf, '*')
         si x >= tf entonces devolver falso fin
@@ -779,7 +880,7 @@ módulo Montador
         b := x + 1
         bf := tf
         recorta(b, bf)
-        si bf - b = 3 entonces              ; «4*esi»: se da la vuelta
+        si reg_dir(b, bf) <> SIN_REG entonces   ; «4*esi»: se da la vuelta
             x := a
             a := b
             b := x
@@ -787,8 +888,8 @@ módulo Montador
             af := bf
             bf := x
         fin
-        si af - a <> 3 o bf <= b entonces devolver falso fin
-        r := registro3(a, "eaxecxedxebxespebpesiedi")
+        si bf <= b entonces devolver falso fin
+        r := reg_dir(a, af)
         si r = SIN_REG entonces devolver falso fin
         n := 0
         mientras b < bf hacer
@@ -840,9 +941,10 @@ módulo Montador
         variable prof: ent16
         variable n: nat16
         variable signo: byte
-        variable hay32: bool
+        variable hay32, hay64: bool
         op.k := K_MEM
         hay32 := falso
+        hay64 := falso
         dos := corta(p, fin_, ':')
         si dos < fin_ entonces
             t := p
@@ -877,7 +979,7 @@ módulo Montador
                 si regs yb (1 << r) <> 0 entonces error("dirección mal escrita") fin
                 regs := regs ob (1 << r)
             sino si signo = '+' y escalado(t, tf, r, e) entonces
-                hay32 := cierto
+                si esc64 entonces hay64 := cierto sino hay32 := cierto fin
                 memoria32(op, r, e)
             sino si tf > t entonces
                 si n + (tf - t) + 2 >= 256 entonces error("dirección demasiado larga") fin
@@ -895,12 +997,14 @@ módulo Montador
             signo := valor(j)
             p := j + 1
         fin
-        si hay32 entonces
+        si hay32 o hay64 entonces
             si regs <> 0 entonces error("no se mezclan registros de 16 y de 32 bits en una dirección") fin
-            si bits <> 32 entonces error("en 16 bits las direcciones van con registros de 16 (bx, bp, si, di)") fin
+            si bits = 16 entonces error("en 16 bits las direcciones van con registros de 16 (bx, bp, si, di)") fin
+            si hay32 y hay64 entonces error("no se mezclan registros de 32 y de 64 bits en una dirección") fin
+            si bits = 64 y hay32 entonces op.a67 := cierto fin
             acaba32(op)
             op.a32 := cierto
-        sino si bits = 32 entonces
+        sino si bits >= 32 entonces
             si regs <> 0 entonces error("en 32 bits las direcciones van con registros de 32 (ebx, esi...)") fin
             op.a32 := cierto
         fin
@@ -939,6 +1043,8 @@ módulo Montador
         op.base := SIN_REG
         op.índice := SIN_REG
         op.escala := 1
+        op.alto := 0
+        op.a67 := falso
         recorta(p, fin_)
         si fin_ - p > 4 y (es_blanco(p[4]) o p[4] = '[') entonces
             si empieza(p, fin_, "byte") entonces op.tam := 1 fin
@@ -952,6 +1058,40 @@ módulo Montador
             op.tam := 4
             p := p + 5
             recorta(p, fin_)
+        fin
+        si fin_ - p > 5 y (es_blanco(p[5]) o p[5] = '[') y empieza(p, fin_, "qword") entonces
+            op.tam := 8
+            p := p + 5
+            recorta(p, fin_)
+        fin
+        ; [CASTEL64] los registros de 64 bits, y los r8 a r15 de cada tamaño
+        si fin_ - p >= 2 y fin_ - p <= 4 y minus(p[0]) = 'r' entonces
+            r := reg64(p, fin_)
+            op.tam := 8
+            op.k := K_R64
+            si r = SIN_REG y fin_ - p >= 3 entonces
+                r := reg64(p, fin_ - 1)
+                si r < 8 entonces r := SIN_REG fin
+                según minus(fin_[-1])
+                    caso 'd':
+                        op.k := K_R32
+                        op.tam := 4
+                    caso 'w':
+                        op.k := K_R16
+                        op.tam := 2
+                    caso 'b':
+                        op.k := K_R8
+                        op.tam := 1
+                    si no: r := SIN_REG
+                fin
+            fin
+            si r <> SIN_REG entonces
+                si bits <> 64 entonces error("es un registro de 64 bits (falta «bits 64»)") fin
+                op.reg := r
+                devolver
+            fin
+            op.k := 0
+            op.tam := 0
         fin
         si fin_ - p = 3 entonces
             r := registro3(p, "eaxecxedxebxespebpesiedi")
@@ -1006,6 +1146,7 @@ módulo Montador
         fin
         op.k := K_INM
         op.v := cuenta(p, fin_)
+        op.alto := e_alto
         op.sim := e_sim
         op.falta := e_falta
     fin
@@ -1033,9 +1174,31 @@ módulo Montador
         w(nat16(v >> 16))
     fin
 
-    ; el prefijo de tamaño (66h) si la operación es de t octetos y no es la del modo
+    ; el prefijo de tamaño (66h) si la operación es de t octetos y no es la del
+    ; modo (en 64 bits, la de las operaciones es de 32)
     función p66(t: byte)
-        si (t = 2 y bits = 32) o (t = 4 y bits = 16) entonces b(0x66) fin
+        si (t = 2 y bits >= 32) o (t = 4 y bits = 16) entonces b(0x66) fin
+    fin
+
+    ; [CASTEL64] el prefijo REX, si hace falta: W (operación de 64 bits), R (el
+    ; registro de ModRM, de 8 a 15), X (el índice) y B (la base, o el registro)
+    función rex(t: byte, r: byte, x: byte, b_: byte)
+        variable v: byte
+        v := 0
+        si t = 8 entonces v := 8 fin
+        si r >= 8 y r <> SIN_REG entonces v := v ob 4 fin
+        si x >= 8 y x <> SIN_REG entonces v := v ob 2 fin
+        si b_ >= 8 y b_ <> SIN_REG entonces v := v ob 1 fin
+        si v <> 0 entonces
+            si bits <> 64 entonces error("eso es de 64 bits (falta «bits 64»)") fin
+            b(0x40 ob v)
+        fin
+    fin
+
+    ; el de tamaño (66h) y el REX, por ese orden
+    función pre(t: byte, r: byte, x: byte, b_: byte)
+        p66(t)
+        rex(t, r, x, b_)
     fin
 
     ; el prefijo de segmento, el de tamaño, el código (de uno o dos octetos: n) y
@@ -1043,14 +1206,16 @@ módulo Montador
     función modrm_n(reg: byte, ref op: Op, n: byte, c1: byte, c2: byte, t: byte)
         variable d: ent32
         si op.k <> K_MEM entonces
-            p66(t)
+            pre(t, reg, 0, op.reg)
             b(c1)
             si n = 2 entonces b(c2) fin
-            b(0xC0 ob (reg << 3) ob op.reg)
+            b(0xC0 ob ((reg yb 7) << 3) ob (op.reg yb 7))
             devolver
         fin
         si op.seg <> 0 entonces b(op.seg) fin
-        p66(t)
+        si op.a67 entonces b(0x67) fin
+        pre(t, reg, op.índice, op.base)
+        reg := reg yb 7
         b(c1)
         si n = 2 entonces b(c2) fin
         d := ent32(op.v)
@@ -1087,30 +1252,35 @@ módulo Montador
         variable largo_: bool
         largo_ := op.sim o d < -128 o d > 127
         si op.base = SIN_REG y op.índice = SIN_REG entonces
-            b(0x05 ob (reg << 3))
+            si bits = 64 entonces           ; en 64 bits, [n] es con SIB (sin él, sería relativo a RIP)
+                b(0x04 ob (reg << 3))
+                b(0x25)
+            sino
+                b(0x05 ob (reg << 3))
+            fin
             d4(op.v)
             devolver
         fin
         si op.base = SIN_REG entonces       ; índice sin base: SIB con 32 bits de desplazamiento
             b(0x04 ob (reg << 3))
-            b(escala_bits(op.escala) ob (op.índice << 3) ob 5)
+            b(escala_bits(op.escala) ob ((op.índice yb 7) << 3) ob 5)
             d4(op.v)
             devolver
         fin
         si largo_ entonces
             modo := 0x80
-        sino si d = 0 y op.base <> 5 entonces
+        sino si d = 0 y op.base yb 7 <> 5 entonces
             modo := 0
         sino
             modo := 0x40
         fin
-        si op.índice = SIN_REG y op.base <> 4 entonces
-            b(modo ob (reg << 3) ob op.base)
+        si op.índice = SIN_REG y op.base yb 7 <> 4 entonces
+            b(modo ob (reg << 3) ob (op.base yb 7))
         sino
             ind := op.índice
             si ind = SIN_REG entonces ind := 4 fin
             b(modo ob (reg << 3) ob 4)
-            b(escala_bits(op.escala) ob (ind << 3) ob op.base)
+            b(escala_bits(op.escala) ob ((ind yb 7) << 3) ob (op.base yb 7))
         fin
         si modo = 0x80 entonces
             d4(op.v)
@@ -1132,6 +1302,9 @@ módulo Montador
             devolver cierto
         fin
         si op.sim entonces devolver falso fin
+        si t = 8 entonces
+            devolver (op.alto = 0 y op.v <= 0x7F) o (op.alto = 0xFFFFFFFF y op.v >= 0xFFFFFF80)
+        fin
         si t = 4 entonces devolver op.v <= 0x7F o op.v >= 0xFFFFFF80 fin
         v := nat16(op.v)
         devolver v <= 0x7F o v >= 0xFF80
@@ -1155,11 +1328,16 @@ módulo Montador
     fin
 
     función es_rm(ref op: Op): bool
-        devolver op.k = K_R16 o op.k = K_R8 o op.k = K_MEM o op.k = K_R32
+        devolver op.k = K_R16 o op.k = K_R8 o op.k = K_MEM o op.k = K_R32 o op.k = K_R64
     fin
 
     función es_reg(ref op: Op): bool
-        devolver op.k = K_R16 o op.k = K_R8 o op.k = K_R32
+        devolver op.k = K_R16 o op.k = K_R8 o op.k = K_R32 o op.k = K_R64
+    fin
+
+    ; [CASTEL64] de 16, 32 o 64 bits
+    función es_r163264(ref op: Op): bool
+        devolver op.k = K_R16 o op.k = K_R32 o op.k = K_R64
     fin
 
     función es_r1632(ref op: Op): bool
@@ -1175,7 +1353,7 @@ módulo Montador
     función inm(v: nat32, t: byte)
         si t = 1 entonces
             b(byte(v))
-        sino si t = 4 entonces
+        sino si t = 4 o t = 8 entonces          ; (en 64 bits, de 32 con su signo)
             d4(v)
         sino
             w(nat16(v))
@@ -1198,12 +1376,24 @@ módulo Montador
     ; ---- las instrucciones ----
     función i_mov(ref a: Op, ref c: Op)
         variable t: byte
-        si es_reg(a) y a.reg = 0 y sin_regs(c) entonces
+        variable r, x: byte
+        si bits = 64 y (a.k = K_R64 o a.k = K_R32) y c.k = K_INM entonces
+            i_mov64(a, c)
+        sino si bits = 64 y ((a.k = K_RC y c.k = K_R64) o (a.k = K_R64 y c.k = K_RC)) entonces
+            b(0x0F)
+            si a.k = K_RC entonces
+                b(0x22)
+                b(0xC0 ob (a.reg << 3) ob c.reg)
+            sino
+                b(0x20)
+                b(0xC0 ob (c.reg << 3) ob a.reg)
+            fin
+        sino si es_reg(a) y a.reg = 0 y sin_regs(c) y bits <> 64 entonces
             si c.seg <> 0 entonces b(c.seg) fin
             p66(a.tam)
             b(0xA0 + ancho(a.tam))
             dir_fija(c)
-        sino si es_reg(c) y c.reg = 0 y sin_regs(a) entonces
+        sino si es_reg(c) y c.reg = 0 y sin_regs(a) y bits <> 64 entonces
             si a.seg <> 0 entonces b(a.seg) fin
             p66(c.tam)
             b(0xA2 + ancho(c.tam))
@@ -1244,6 +1434,39 @@ módulo Montador
         fin
     fin
 
+    ; los octetos que tiene de más el número entero que el de un octeto (con t = 8, de 32)
+    función de_más(t: byte): byte
+        si t = 8 entonces devolver 3 fin
+        devolver t - 1
+    fin
+
+    ; [CASTEL64] mov a un registro de 64 (o de 32) un número: como NASM, el de 32
+    ; bits si vale (pone a cero los de arriba), el de 32 con su signo (C7h) si es
+    ; negativo y cabe, o el de 64 entero; con una etiqueta, el de 64 entero
+    función i_mov64(ref a: Op, ref c: Op)
+        si a.k = K_R32 entonces
+            rex(0, 0, 0, a.reg)
+            b(0xB8 + (a.reg yb 7))
+            d4(c.v)
+            devolver
+        fin
+        si no c.sim y no c.falta y c.alto = 0 entonces
+            rex(0, 0, 0, a.reg)
+            b(0xB8 + (a.reg yb 7))
+            d4(c.v)
+        sino si no c.sim y no c.falta y c.alto = 0xFFFFFFFF y c.v >= 0x80000000 entonces
+            rex(8, 0, 0, a.reg)
+            b(0xC7)
+            b(0xC0 ob (a.reg yb 7))
+            d4(c.v)
+        sino
+            rex(8, 0, 0, a.reg)
+            b(0xB8 + (a.reg yb 7))
+            d4(c.v)
+            d4(c.alto)
+        fin
+    fin
+
     función i_cuenta(i: byte, ref a: Op, ref c: Op)
         variable t: byte
         si es_rm(a) y es_reg(c) entonces
@@ -1254,11 +1477,11 @@ módulo Montador
             modrm(a.reg, c, 8 * i + 2 + ancho(t), t)
         sino si es_rm(a) y c.k = K_INM entonces
             t := tam_de(a, c)
-            si t <> 1 y corto(c, t, t - 1 - byte(a.k <> K_MEM y a.reg = 0)) entonces
+            si t <> 1 y corto(c, t, de_más(t) - byte(a.k <> K_MEM y a.reg = 0)) entonces
                 modrm(i, a, 0x83, t)
                 b(byte(c.v))
             sino si a.k <> K_MEM y a.reg = 0 entonces
-                p66(t)
+                pre(t, 0, 0, 0)
                 b(8 * i + 4 + ancho(t))
                 inm(c.v, t)
             sino
@@ -1281,7 +1504,7 @@ módulo Montador
         sino si es_rm(a) y c.k = K_INM entonces
             t := tam_de(a, c)
             si a.k <> K_MEM y a.reg = 0 entonces
-                p66(t)
+                pre(t, 0, 0, 0)
                 b(0xA8 + ancho(t))
             sino
                 modrm(0, a, 0xF6 + ancho(t), t)
@@ -1294,9 +1517,9 @@ módulo Montador
 
     función i_xchg(ref a: Op, ref c: Op)
         variable t: byte
-        si es_r1632(a) y c.k = a.k y (a.reg = 0 o c.reg = 0) entonces
-            p66(a.tam)
-            b(0x90 + a.reg + c.reg)
+        si es_r163264(a) y c.k = a.k y (a.reg = 0 o c.reg = 0) y no (a.k = K_R32 y bits = 64 y a.reg = c.reg) entonces
+            pre(a.tam, 0, 0, a.reg + c.reg)
+            b(0x90 + ((a.reg + c.reg) yb 7))
         sino si es_reg(a) y es_rm(c) entonces
             t := tam_de(a, c)
             modrm(a.reg, c, 0x86 + ancho(t), t)
@@ -1311,10 +1534,10 @@ módulo Montador
     ; imul de dos o tres operandos (386): registro, r/m e inmediato
     función i_imul(n: nat16, ref a: Op, ref c: Op, ref i: Op)
         variable t: byte
-        si no es_r1632(a) entonces mal("imul") fin
+        si no es_r163264(a) entonces mal("imul") fin
         si n = 2 y c.k = K_INM entonces       ; imul eax, 10 = imul eax, eax, 10
             t := tam_de(a, a)
-            si corto(c, t, t - 1) entonces
+            si corto(c, t, de_más(t)) entonces
                 modrm(a.reg, a, 0x6B, t)
                 b(byte(c.v))
             sino
@@ -1330,7 +1553,7 @@ módulo Montador
             devolver
         fin
         si i.k <> K_INM entonces mal("imul") fin
-        si corto(i, t, t - 1) entonces
+        si corto(i, t, de_más(t)) entonces
             modrm(a.reg, c, 0x6B, t)
             b(byte(i.v))
         sino
@@ -1405,13 +1628,13 @@ módulo Montador
         fin
         si clase = C_JMP o clase = C_CALL entonces
             operando(p, fin_, op_a)
-            si es_r1632(op_a) o op_a.k = K_MEM entonces
+            si es_r163264(op_a) o op_a.k = K_MEM entonces
                 si clase = C_JMP entonces modrm(4, op_a, 0xFF, 0) sino modrm(2, op_a, 0xFF, 0) fin
                 devolver
             fin
             si op_a.k = K_LEJOS entonces
                 si clase = C_JMP entonces b(0xEA) sino b(0x9A) fin
-                si bits = 32 entonces d4(op_a.v) sino w(nat16(op_a.v)) fin
+                si bits >= 32 entonces d4(op_a.v) sino w(nat16(op_a.v)) fin
                 w(nat16(op_a.v2))
                 devolver
             fin
@@ -1425,7 +1648,7 @@ módulo Montador
         llega_ := llega(d) o e_falta              ; (lo que aún no se sabe, se supone cerca)
         si clase = C_CALL entonces
             b(0xE8)
-            si bits = 32 entonces d4(destino - (pc + 4)) sino w(nat16(destino) - (nat16(pc) + 2)) fin
+            si bits >= 32 entonces d4(destino - (pc + 4)) sino w(nat16(destino) - (nat16(pc) + 2)) fin
             devolver
         fin
         si clase = C_BUCLE entonces
@@ -1456,7 +1679,7 @@ módulo Montador
         era := apuntando
         apuntando := falso
         si cerca o (no corto_ y no llega_) entonces
-            si bits = 32 entonces
+            si bits >= 32 entonces
                 si clase = C_JCC entonces
                     b(0x0F)
                     b(0x80 + cod)
@@ -1504,6 +1727,7 @@ módulo Montador
                 para k desde 1 hasta tam hacer
                     b(byte(v))
                     v := v >> 8
+                    si k = 4 entonces v := e_alto fin     ; (dq: la palabra alta)
                 fin
             fin
             si c >= fin_ entonces romper fin
@@ -1578,12 +1802,12 @@ módulo Montador
                 mientras i < n y minus(p[i]) = t[i] hacer
                     i := i + 1
                 fin
-                si i = n y t[i] < 32 entonces
+                si i = n y t[i] < 48 entonces
                     clase := t[i]
                     cod := t[i + 1] - 1
                     devolver cierto
                 fin
-                mientras valor(t) >= 32 hacer
+                mientras valor(t) >= 48 hacer
                     t := t + 1
                 fin
                 t := t + 2
@@ -1631,10 +1855,16 @@ módulo Montador
                     veces := veces - 1
                 fin
                 devolver
-            caso C_SUELTA, C_SUELTA_W, C_SUELTA_D:
+            caso C_SUELTA, C_SUELTA_W, C_SUELTA_D, C_SUELTA_Q:
                 si n <> 0 entonces mal("eso") fin
                 si clase = C_SUELTA_W entonces p66(2) fin
                 si clase = C_SUELTA_D entonces p66(4) fin
+                si clase = C_SUELTA_Q entonces rex(8, 0, 0, 0) fin
+                b(cod)
+                devolver
+            caso C_SUELTA2:
+                si n <> 0 entonces mal("eso") fin
+                b(0x0F)
                 b(cod)
                 devolver
             caso C_JCC, C_BUCLE, C_JMP, C_CALL:
@@ -1657,9 +1887,9 @@ módulo Montador
                 fin
                 devolver
             caso C_NADA:
-                si cod = 1 entonces             ; «bits 16» o «bits 32»
+                si cod = 1 entonces             ; «bits 16», «bits 32» o «bits 64»
                     veces := cuenta(p, fin_)
-                    si veces <> 16 y veces <> 32 entonces error("«bits» es 16 o 32") fin
+                    si veces <> 16 y veces <> 32 y veces <> 64 entonces error("«bits» es 16, 32 o 64") fin
                     bits := byte(veces)
                     si apuntando entonces
                         vuelca_fijo()
@@ -1712,7 +1942,7 @@ módulo Montador
                 i_test(op_a, op_c)
             caso C_INCDEC:
                 si n <> 1 entonces mal("inc y dec") fin
-                si es_r1632(op_a) entonces
+                si es_r1632(op_a) y bits <> 64 entonces
                     p66(op_a.tam)
                     b(0x40 + 8 * cod + op_a.reg)
                 sino si es_rm(op_a) entonces
@@ -1736,7 +1966,7 @@ módulo Montador
                     modrm(cod, op_a, 0xD2 + ancho(t), t)
                 sino si op_c.k = K_INM y op_c.v = 1 y no op_c.sim entonces
                     modrm(cod, op_a, 0xD0 + ancho(t), t)
-                sino si op_c.k = K_INM y bits = 32 entonces
+                sino si op_c.k = K_INM y bits >= 32 entonces
                     modrm(cod, op_a, 0xC0 + ancho(t), t)
                     b(byte(op_c.v))
                 sino
@@ -1753,15 +1983,22 @@ módulo Montador
                     modrm_n(cod, op_a, 2, 0x0F, 0x01, 0)
                     devolver
                 fin
-                si n <> 2 o no es_r1632(op_a) o no es_rm(op_c) entonces mal("movzx y movsx") fin
+                si n <> 2 o no es_r163264(op_a) o no es_rm(op_c) entonces mal("movzx y movsx") fin
                 t := op_c.tam
                 si t = 0 o t = 4 o (t = 2 y op_a.tam = 2) entonces
                     error("movzx y movsx: lo de la derecha es un byte o una palabra (falta «byte» o «word»)")
                 fin
                 modrm_n(op_a.reg, op_c, 2, 0x0F, cod + ancho(t), op_a.tam)
+            caso C_MOVSXD:
+                si n <> 2 o op_a.k <> K_R64 o no (op_c.k = K_R32 o (op_c.k = K_MEM y (op_c.tam = 0 o op_c.tam = 4))) entonces mal("movsxd") fin
+                modrm(op_a.reg, op_c, 0x63, 8)
             caso C_PUSH:
                 si n <> 1 entonces mal("push") fin
-                si es_r1632(op_a) entonces
+                si bits = 64 y (op_a.k = K_R16 o op_a.k = K_R64) entonces
+                    p66(op_a.tam)
+                    rex(0, 0, 0, op_a.reg)
+                    b(0x50 + (op_a.reg yb 7))
+                sino si es_r1632(op_a) y bits <> 64 entonces
                     p66(op_a.tam)
                     b(0x50 + op_a.reg)
                 sino si op_a.k = K_RS y op_a.reg < 4 entonces
@@ -1771,9 +2008,13 @@ módulo Montador
                     b(0xA0 + 8 * (op_a.reg - 4))
                 sino si op_a.k = K_MEM entonces
                     t := op_a.tam
-                    si t = 0 entonces t := bits >> 3 fin
+                    si bits = 64 entonces
+                        si t = 8 entonces t := 0 fin
+                    sino si t = 0 entonces
+                        t := bits >> 3
+                    fin
                     modrm(6, op_a, 0xFF, t)
-                sino si op_a.k = K_INM y bits = 32 entonces
+                sino si op_a.k = K_INM y bits >= 32 entonces
                     si corto(op_a, 4, 3) entonces
                         b(0x6A)
                         b(byte(op_a.v))
@@ -1786,7 +2027,11 @@ módulo Montador
                 fin
             caso C_POP:
                 si n <> 1 entonces mal("pop") fin
-                si es_r1632(op_a) entonces
+                si bits = 64 y (op_a.k = K_R16 o op_a.k = K_R64) entonces
+                    p66(op_a.tam)
+                    rex(0, 0, 0, op_a.reg)
+                    b(0x58 + (op_a.reg yb 7))
+                sino si es_r1632(op_a) y bits <> 64 entonces
                     p66(op_a.tam)
                     b(0x58 + op_a.reg)
                 sino si op_a.k = K_RS y op_a.reg < 4 y op_a.reg <> 1 entonces
@@ -1796,7 +2041,11 @@ módulo Montador
                     b(0xA1 + 8 * (op_a.reg - 4))
                 sino si op_a.k = K_MEM entonces
                     t := op_a.tam
-                    si t = 0 entonces t := bits >> 3 fin
+                    si bits = 64 entonces
+                        si t = 8 entonces t := 0 fin
+                    sino si t = 0 entonces
+                        t := bits >> 3
+                    fin
                     modrm(0, op_a, 0x8F, t)
                 sino
                     mal("pop")
@@ -1805,7 +2054,7 @@ módulo Montador
                 si n <> 2 entonces mal("xchg") fin
                 i_xchg(op_a, op_c)
             caso C_LEA:
-                si n <> 2 o no es_r1632(op_a) o op_c.k <> K_MEM entonces mal("lea") fin
+                si n <> 2 o no es_r163264(op_a) o op_c.k <> K_MEM entonces mal("lea") fin
                 modrm(op_a.reg, op_c, 0x8D, op_a.tam)
             caso C_INT:
                 si n <> 1 o op_a.k <> K_INM entonces mal("int") fin
