@@ -3203,7 +3203,7 @@ CAPTURAS=$G DISCO=$V/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo
   ":tecla$D" ":tecla ret" ":pausa 2" ":captura n0" ":tecla down down down down down down" ":tecla ret" ":pausa 9" ":captura n1" ":tecla spc" ":pausa 3" ":captura n2" \
   ":monitor sendkey left 1000" ":pausa 1" ":captura n3" ":monitor sendkey ctrl 200" ":pausa 0.3" ":captura n4" ":tecla esc" ":pausa 3" ":captura n5" > $V/naves.sal 2>&1
 S=$V/naves.sal
-miracap "Mi equipo ve los .EXE como programas y los abre (los corre WIN32.BIN)" n0 texto 100 120 200 150 "C:\\HISPA32" texto 100 140 200 300 "NAVES.EXE"
+miracap "Mi equipo ve los .EXE como programas y los abre (los corre WIN32.BIN)" n0 negrita 100 110 220 140 "C:\\HISPA32" texto 100 140 200 300 "NAVES.EXE"
 miracap "Naves: DirectDraw a pantalla completa (su modo, 320 x 240 a 8 bits, al doble y en el centro, sin la barra de tareas)" n1 \
   rgb 10 10 000000 rgb 790 590 000000 nrgb 40 585 37A53A 60
 miracap "Espacio (DirectInput): empieza la partida, con las naves enemigas" n2 rgb 10 10 000000 distinto 80 60 640 200 $G/n1.ppm
@@ -3220,7 +3220,7 @@ if [ $HAY_TP = 1 ]; then
   miracap "el ejemplo DDRAW de FASM (ensamblado en Hispa-Pentium): DirectDraw a 640 x 480 con su paleta, en el centro" d1 rgb 10 10 000000 rgb 790 10 000000 nrgb 400 500 000000
   miracap "FASMW, el flat assembler de Windows: su menú (MENUEX), su editor propio, las pestañas y la barra de estado (COMCTL32)" f1 \
     negrita 100 60 200 90 "flat assembler 1.73.32" texto 100 90 140 110 "File" texto 140 90 200 110 "Edit" texto 280 90 400 110 "Options" texto 100 330 200 360 "Untitled"
-  miracap "Ctrl+O (su acelerador): el cuadro de abrir de COMDLG32, con la carpeta y sus archivos" f2 negrita 60 30 300 80 "Abrir" texto 60 60 300 110 "C:\\FASM" texto 60 80 300 160 "HELLO.ASM"
+  miracap "Ctrl+O (su acelerador): el cuadro de abrir de COMDLG32, con la carpeta y sus archivos" f2 negrita 150 90 260 125 "Abrir" texto 150 125 400 160 "C:\\FASM" texto 150 150 300 190 "HELLO.ASM"
   miracap "abre HELLO.ASM (con sus colores) y lo ensambla en otro hilo (Ctrl+F9): «4 passes»" f4 texto 90 320 220 370 "hello.asm" texto 150 100 600 260 "4 passes"
   miracap "y el HELLO.EXE que ha hecho FASMW corre: su MessageBox" f5 texto 250 240 400 290 "May I introduce myself?"
   if ! grep -q "excepción\|\*\*\*" $S; then ok "DDRAW y FASMW: ni una excepción ni una queja del núcleo"
