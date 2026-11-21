@@ -2646,7 +2646,7 @@ $AQUI/nucleo32/disco.sh $C10/d.img 16 > /dev/null 2>&1
 mcopy -i $C10/d.img $C10/MUESTRA.BIN ::
 CAPTURAS=$G DISCO=$C10/d.img MEMORIA=64 MODULOS= ARRANQUE=escritorio $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":doble 40 190" ":pausa 2" ":escribe muestra" ":tecla ret" ":pausa 4" \
   ":raton 620 590" ":captura ct1" ":clic 60 217" ":pausa 1" ":raton 620 590" ":captura ct2" ":clic 30 178" ":escribe angel" ":raton 620 590" ":pausa 1" ":captura ct3" \
-  ":tecla ctrl-tab" ":pausa 1" ":captura ct4" ":tecla alt-v" ":pausa 1" ":captura ct5" > $C10/sal.txt 2>&1
+  ":tecla ctrl-tab" ":pausa 1" ":captura ct4" ":tecla alt-v" ":pausa 1" ":captura ct5" ":tecla esc" ":pausa 1" ":clic 60 112" ":pausa 1" ":raton 620 590" ":captura ct6" > $C10/sal.txt 2>&1
 miracap "MUESTRA.BIN: maximizada (800 x 600), la barra de menús, la de herramientas, las pestañas, la rejilla con sus rótulos y la barra de estado, a vez y media" ct1 \
   tam 800 600 texto15 10 30 140 60 rchivo texto 20 60 120 90 Nuevo texto 90 60 300 90 Guardar negrita15 10 95 120 130 Lista texto15 90 95 300 130 Ficha \
   negrita15 60 195 200 235 Nombre negrita15 400 195 660 235 Importe texto15 0 525 300 560 "Ana (titular)"
@@ -2655,6 +2655,7 @@ miracap "filtrar sin mirar tildes ni mayúsculas: «angel» encuentra «Àngel �
 miracap "Ctrl+Tab: la pestaña Ficha, con su recuadro «Datos generales», los campos, la fecha, la desplegable y la casilla" ct4 \
   negrita15 10 125 300 160 "Datos generales" texto15 20 180 300 215 "Ana Ejemplo" texto15 20 245 300 280 "21/11/2026" texto15 200 245 600 280 "Socio" texto15 40 280 400 320 "Al corriente de pago"
 miracap "Alt+V abre el menú «Ver» de la barra (un menú del escritorio)" ct5 texto 100 40 330 160 "Letra muy grande"
+miracap "y un clic en la pestaña «Lista» vuelve a ella (pestaña_en: la fila de pestañas que hay en ese punto)" ct6 negrita15 60 195 200 235 Nombre
 
 # 9. la firma (Ed25519, firma.cas): el catálogo de prueba va firmado con la
 # clave de prueba (la que lleva este PAQUETES); PAQUETES FIRMA la comprueba;
