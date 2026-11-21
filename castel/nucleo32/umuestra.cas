@@ -1,0 +1,259 @@
+; =============================================================================
+;  umuestra.cas - MUESTRA.BIN: una ventana con todos los controles de
+;  controles.cas (la barra de menús, la de herramientas, las pestañas, una
+;  rejilla con columnas que se ordena y se filtra, recuadros con campos, un
+;  campo de fecha, una lista desplegable, una casilla y la barra de estado).
+;  Es el ejemplo para escribir programas de ventana y lo que prueba
+;  castel/pruebas.sh. Con «normal» en la línea de órdenes, con la letra
+;  normal; con «doble», al doble (si no, vez y media).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UMuestra
+
+    modelo usuario
+
+    importar Llamadas, Controles, Textos32, Formato
+
+    constante ID_PESTAÑAS = 1
+    constante ID_FILTRO = 2
+    constante ID_REJILLA = 3
+    constante ID_NOMBRE = 4
+    constante ID_FECHA = 5
+    constante ID_TIPO = 6
+    constante ID_SOCIO = 7
+    constante ID_GUARDAR = 8
+    constante ID_H_NUEVO = 20                   ; las herramientas: 20 + su icono
+    constante MENÚS = "&Archivo|&Ver|A&yuda"
+    constante TIPOS = "Socio|Socio de honor|No socio|Lector de la biblioteca"
+
+    variable tamaño_: nat32 = T_GRANDE
+    variable pestaña: nat32
+    variable filtro: arreglo [40] de byte
+    variable nombre: arreglo [60] de byte = "Ana Ejemplo"
+    variable fecha: arreglo [12] de byte = "21/11/2026"
+    variable tipo_p: nat32
+    variable socio: bool = cierto
+    variable aviso: arreglo [120] de byte
+    variable g: Rejilla
+    variable abierto: ent32 = -1
+
+    función llena()
+        variable i, k: nat32
+        variable r: ent32
+        variable t: arreglo [48] de byte
+        variable d: arreglo [3] de nat32
+        rejilla_nueva(g, 100)
+        rejilla_columna(g, "N\xA7", 4, cierto)
+        rejilla_columna(g, "Nombre", 0, falso)
+        rejilla_columna(g, "Fecha", 10, falso)
+        rejilla_columna(g, "Importe", 8, cierto)
+        rejilla_columna(g, "Estado", 9, falso)
+        para i desde 1 hasta 30 hacer
+            k := (i * 7) mod 30 + 1
+            si k mod 5 = 0 entonces r := renglón_nuevo(g, R_AVISO, k) sino r := renglón_nuevo(g, R_NORMAL, k) fin
+            d[0] := k
+            formatear(t, 48, "%u", d)
+            celda(g, r, 0, t)
+            d[0] := k
+            formatear(t, 48, "Persona de ejemplo %u", d)
+            si k = 3 entonces copiar(t, "\xB5ngel \xA0lvarez") fin
+            si k = 4 entonces copiar(t, "Zoe Mart\xA1nez") fin
+            celda(g, r, 1, t)
+            d[0] := k mod 28 + 1
+            d[1] := k mod 12 + 1
+            formatear(t, 48, "%02u/%02u/2026", d)
+            celda(g, r, 2, t)
+            d[0] := k * 3
+            d[1] := (k * 25) mod 100
+            formatear(t, 48, "%u,%02u", d)
+            celda(g, r, 3, t)
+            si k mod 5 = 0 entonces celda(g, r, 4, "VENCIDA") sino celda(g, r, 4, "al d\xA1a") fin
+        fin
+        rejilla_lista(g)
+    fin
+
+    función pinta()
+        variable yy, x, an, ar, y2: ent32
+        variable vueltas: nat32
+        variable est: arreglo [200] de byte
+        variable d: arreglo [2] de nat32
+        vueltas := 0
+        mientras vueltas < 2 hacer
+            empezar_controles()
+            caja(0, 0, ancho, alto, C_FONDO)
+            yy := barra_menús(0, 0, ancho, MENÚS, abierto)
+            barra_herramientas(0, yy, ancho)
+            x := 4
+            x := x + herramienta(ID_H_NUEVO + I_NUEVO, x, yy + 2, I_NUEVO, "Nuevo", falso) + 2
+            x := x + herramienta(ID_H_NUEVO + I_GUARDAR, x, yy + 2, I_GUARDAR, "Guardar", falso) + 2
+            x := x + herramienta(ID_H_NUEVO + I_DESHACER, x, yy + 2, I_DESHACER, "Deshacer", cierto) + 2
+            x := x + separador(x, yy)
+            x := x + herramienta(ID_H_NUEVO + I_BUSCAR, x, yy + 2, I_BUSCAR, "Buscar", falso) + 2
+            x := x + herramienta(ID_H_NUEVO + I_IMPRIMIR, x, yy + 2, I_IMPRIMIR, "Imprimir", cierto) + 2
+            x := x + herramienta(ID_H_NUEVO + I_REFRESCAR, x, yy + 2, I_REFRESCAR, "Refrescar", falso) + 2
+            x := x + separador(x, yy)
+            x := x + herramienta(ID_H_NUEVO + I_PRIMERO, x, yy + 2, I_PRIMERO, "", falso) + 2
+            x := x + herramienta(ID_H_NUEVO + I_ANTERIOR, x, yy + 2, I_ANTERIOR, "", falso) + 2
+            x := x + herramienta(ID_H_NUEVO + I_SIGUIENTE, x, yy + 2, I_SIGUIENTE, "", falso) + 2
+            x := x + herramienta(ID_H_NUEVO + I_ÚLTIMO, x, yy + 2, I_ÚLTIMO, "", falso) + 2
+            yy := yy + alto_herramientas() + 4 * E
+            yy := yy + pestañas(ID_PESTAÑAS, 0, yy, ancho, "Lista|Ficha|Apagada", pestaña, 4)
+            ar := alto - alto_estado() - 6 * E
+            an := ancho - 2 * LA
+            si pestaña = 0 entonces
+                yy := yy + 6 * E
+                yy := yy + campo(ID_FILTRO, LA, yy, an div 2, "Filtrar", filtro, falso) + 6 * E
+                rejilla(g, ID_REJILLA, LA, yy, an, ar - yy, "No hay nada que se parezca.")
+            sino
+                yy := yy + 6 * E
+                y2 := recuadro(LA, yy, an, 4 * (LT + 4 * E) + 2 * (alto_caja() + LT + 4 * E), "Datos generales")
+                y2 := y2 + campo(ID_NOMBRE, 2 * LA, y2, an - 2 * LA, "Nombre", nombre, falso) + 4 * E
+                y2 := y2 + campo(ID_FECHA, 2 * LA, y2, 12 * LA, "Fecha de alta", fecha, falso) + 4 * E
+                desplegable(ID_TIPO, 16 * LA + 2 * LA, y2 - alto_caja() - LT - 6 * E, an - 18 * LA, "Tipo", TIPOS, tipo_p, falso)
+                casilla(ID_SOCIO, 2 * LA, y2, "Al corriente de pago", socio)
+                yy := yy + 4 * (LT + 4 * E) + 2 * (alto_caja() + LT + 4 * E) + 6 * E
+                si yy + 3 * LT < ar entonces
+                    y2 := recuadro(LA, yy, an, alto_botón() + LT + 12 * E, "Notas")
+                    botón(ID_GUARDAR, 2 * LA, y2, "Guardar", cierto, falso)
+                fin
+            fin
+            d[0] := nat32(rejilla_vistos(g))
+            formatear(est, 200, "Ana (titular)|Asociaci\xA2n de ejemplo|%u renglones|", d)
+            si aviso[0] <> 0 entonces concatenar(est, aviso) sino concatenar(est, "12:00") fin
+            barra_estado(alto - alto_estado(), est)
+            si no asegurar_foco() entonces romper fin
+            vueltas := vueltas + 1
+        fin
+        volcar()
+    fin
+
+    función hace(id: nat32)
+        variable r: ent32
+        si id = ID_H_NUEVO + I_PRIMERO o id = ID_H_NUEVO + I_ANTERIOR o id = ID_H_NUEVO + I_SIGUIENTE o id = ID_H_NUEVO + I_ÚLTIMO entonces
+            rejilla_ir(g, id - ID_H_NUEVO)
+        sino si id = ID_SOCIO entonces
+            socio := no socio
+        sino si id = ID_TIPO entonces
+            abrir_desplegable(ID_TIPO, TIPOS)
+        sino si id = ID_GUARDAR o id = ID_H_NUEVO + I_GUARDAR entonces
+            si fecha_vale(fecha) entonces copiar(aviso, "Guardado") sino copiar(aviso, "La fecha no vale") fin
+        sino si id = ID_REJILLA entonces
+            r := rejilla_elegido(g)
+            si r >= 0 entonces
+                copiar_hasta(nombre, renglón(g, r).celdas[1], 60)
+                pestaña := 1
+            fin
+        fin
+    fin
+
+    función tecla_pulsada(c: nat32)
+        variable k, n: nat32
+        variable m: ent32
+        si c = '\t' o c = TECLA_MAYÚS_TAB entonces
+            pasar_foco(c = '\t')
+            devolver
+        fin
+        si c = TECLA_CTRL_TAB o c = TECLA_CTRL_MAYÚS_TAB entonces
+            pestaña := otra_pestaña(pestaña, 3, 4, c = TECLA_CTRL_TAB)
+            devolver
+        fin
+        m := menú_de_alt(MENÚS, c)
+        si m >= 0 entonces
+            abre(nat32(m))
+            devolver
+        fin
+        k := clase_de(foco)
+        si k = K_CAMPO entonces
+            si foco = ID_FECHA entonces
+                fecha_tecla(fecha, c)
+            sino si foco = ID_FILTRO entonces
+                si campo_tecla(filtro, 40, c) entonces rejilla_filtrar(g, filtro) fin
+                si c = TECLA_ABAJO entonces foco := ID_REJILLA fin
+            sino
+                campo_tecla(nombre, 60, c)
+            fin
+        sino si k = K_LISTA entonces
+            si no rejilla_tecla(g, c) y c = TECLA_ARRIBA entonces foco := ID_FILTRO fin
+            si c = '\n' entonces hace(foco) fin
+        sino si k = K_DESPLEGABLE entonces
+            si c = '\n' o c = ' ' entonces hace(foco) sino desplegable_tecla(TIPOS, tipo_p, c) fin
+        sino si c = '\n' o c = ' ' entonces
+            hace(foco)
+        fin
+        n := 0
+    fin
+
+    función abre(k: nat32)
+        abierto := ent32(k)
+        según k
+            caso 0: abrir_menú_barra(0, "Nuevo|Guardar|-|Salir", 0)
+            caso 1: abrir_menú_barra(1, "Letra normal|Letra grande|Letra muy grande", 0)
+            si no: abrir_menú_barra(2, "Acerca de", 0)
+        fin
+    fin
+
+    función clic(x: ent32, yy: ent32, veces_: nat32)
+        variable id: nat32
+        variable m, p: ent32
+        m := menú_en_barra(x, yy)
+        si m >= 0 entonces
+            abre(nat32(m))
+            devolver
+        fin
+        id := control_en(x, yy)
+        si id = 0 entonces devolver fin
+        según clase_de(id)
+            caso K_PESTAÑAS:
+                p := pestaña_en(x, yy)
+                si p >= 0 y p < 2 entonces pestaña := nat32(p) fin
+            caso K_LISTA:
+                foco := id
+                si rejilla_clic(g, x, yy) >= 0 y veces_ >= 2 entonces hace(id) fin
+            caso K_HERRAMIENTA:
+                hace(id)
+            caso K_CAMPO:
+                foco := id
+            si no:
+                foco := id
+                hace(id)
+        fin
+    fin
+
+    función principal(): byte
+        variable s: Suceso
+        variable args: arreglo [40] de byte
+        argumentos(args, 40)
+        si iguales_sin_caja(args, "normal") entonces tamaño_ := T_NORMAL fin
+        si iguales_sin_caja(args, "doble") entonces tamaño_ := T_MUY_GRANDE fin
+        si no preparar("Muestra de controles", tamaño_, cierto) entonces
+            escribir("muestra: hace falta el escritorio\n")
+            devolver 1
+        fin
+        llena()
+        foco := ID_FILTRO
+        pinta()
+        mientras suceso(v, s, cierto) hacer
+            si s.clase = EV_TECLA entonces
+                tecla_pulsada(s.a)
+                pinta()
+            sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                clic(ent32(s.a), ent32(s.b), veces(s.c))
+                pinta()
+            sino si s.clase = EV_MENÚ entonces
+                abierto := -1
+                si s.b = 1 entonces tamaño_ := s.a + 1 fin
+                si s.b = 0 y s.a = 3 entonces devolver 0 fin
+                si s.b = ID_TIPO y s.a <> SIN_ELEGIR entonces tipo_p := s.a fin
+                nuevo_tamaño(ancho, alto, tamaño_)
+                pinta()
+            sino si s.clase = EV_TAMAÑO entonces
+                nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
+                pinta()
+            sino si s.clase = EV_CERRAR entonces
+                devolver 0
+            fin
+        fin
+        devolver 0
+    fin
+
+fin UMuestra.

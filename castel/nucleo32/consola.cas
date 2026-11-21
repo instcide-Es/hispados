@@ -38,6 +38,9 @@ módulo Consola
     público constante TECLA_SUPR = 0x153
     público constante TECLA_LOGO = 0x15B         ; la tecla del logo (la que abre el menú Inicio)
     público constante TECLA_MAYÚS_TAB = 0x10F    ; (solo para el escritorio) Mayús+Tab: ir al control de antes
+    público constante TECLA_CTRL_TAB = 0x110     ; (solo para el escritorio) Ctrl+Tab: la pestaña siguiente
+    público constante TECLA_CTRL_MAYÚS_TAB = 0x111   ; Ctrl+Mayús+Tab: la de antes
+    público constante TECLA_ALT = 0x180          ; (solo para el escritorio) Alt+letra: TECLA_ALT + (la letra - 'a'), de la a a la z
     público constante TECLA_CON_MAYÚS = 0x200    ; (solo para el escritorio) la tecla especial llegó con Mayús pulsada
     público constante MOD_MAYÚS = 1              ; lo que da modificadores()
     público constante MOD_CONTROL = 2
@@ -58,6 +61,7 @@ módulo Consola
     variable cola: arreglo [COLA] de nat16
     variable cola_ent, cola_sal: nat32
     variable mayúsculas, control, alt_gr, extendida, bloqueo: bool
+    variable alt: bool                          ; el Alt de la izquierda (para el escritorio: Alt+letra)
     variable bloq_num: bool = cierto             ; Bloq Num: el teclado numérico da números (encendido, como deja la BIOS)
     variable pausa: nat32                       ; los códigos que quedan de la tecla Pausa (E1 1D 45 E1 9D C5)
     variable muerta: nat32                      ; la tecla muerta que espera su vocal (0: ninguna)
@@ -246,6 +250,18 @@ módulo Consola
         sino si código >= 0x3B y código <= 0x53 y código <> 0x45 y código <> 0x46 entonces
             muerta := 0
             a_la_cola(TECLA_ESPECIAL + código)          ; F1 a F10 y el teclado numérico
+        sino si código = 0x38 entonces
+            alt := cierto                               ; el Alt de la izquierda
+        sino si código = 0xB8 entonces
+            alt := falso
+        sino si código = 0x0F y control y desviado entonces
+            ; Ctrl+Tab y Ctrl+Mayús+Tab: las pestañas (controles-erp, 21/11)
+            muerta := 0
+            si mayúsculas entonces a_la_cola(TECLA_CTRL_MAYÚS_TAB) sino a_la_cola(TECLA_CTRL_TAB) fin
+        sino si alt y desviado y código <= 0x39 y us_normal[código] >= 'a' y us_normal[código] <= 'z' entonces
+            ; Alt+letra: los menús de las ventanas (controles-erp, 21/11)
+            muerta := 0
+            a_la_cola(TECLA_ALT + nat32(us_normal[código]) - 'a')
         sino si código = 0x0F y mayúsculas y desviado entonces
             ; Mayús+Tab, para el escritorio: el control de antes (clicgest-pentium, 20/11)
             muerta := 0

@@ -740,7 +740,7 @@ módulo Usuario
                 devolver 0
             caso 32..41:
                 devolver atender_ventanas(n, a, b, c)
-            caso 80:
+            caso 80, 81:
                 devolver atender_ventanas(n, a, b, c)
             caso 42:
                 ; la unidad de trabajo: cambiarla (a: su letra; 0: solo
@@ -1255,6 +1255,11 @@ módulo Usuario
                 yy := ent32(c)
                 si x < -4096 o x > 4096 o yy < -4096 o yy > 4096 entonces devolver NO_VALE fin
                 mover_ventana(a, x, yy)
+                devolver 0
+            caso 81:
+                ; maximizar la ventana a (suya): le llega EV_TAMAÑO con lo que mide
+                si no es_de(a, actual.id) entonces devolver NO_VALE fin
+                maximizar_ventana(a)
                 devolver 0
         fin
         devolver NO_VALE
