@@ -467,6 +467,7 @@ static void coloca(void)
   pw = an - DESP_W; ph = al - ARRIBA_H - ESTADO_H;
   if (pw < 64) pw = 64;
   if (ph < 32) ph = 32;
+  cssvar_ancho = pw; cssvar_alto = ph;          /* (vw y vh en clamp(), cssvar.c) */
   /* las pestañas */
   w = (an - 6 - 40) / n;
   if (w > PEST_MAX) w = PEST_MAX;

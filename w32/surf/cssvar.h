@@ -7,6 +7,8 @@
 char *cssvar_expande(const char *css, size_t n, size_t *sale);
 /* lo mismo para un atributo style */
 char *cssvar_estilo(const char *t, size_t n, size_t *sale);
+/* la medida de la página (para vw y vh en clamp(), min() y max()) */
+extern int cssvar_ancho, cssvar_alto;
 /* olvidar las variables de :root (al empezar otra página) */
 void cssvar_olvida(void);
 #endif

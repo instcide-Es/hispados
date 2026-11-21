@@ -154,6 +154,7 @@ int main(int argc, char **argv) {
     else dir = argv[k];
   }
   if (!dir) { fprintf(stderr, "uso: surfppm [-w ancho] [-h alto] [-entera] [-o salida.ppm] DIRECCION\n"); return 2; }
+  { extern int cssvar_ancho, cssvar_alto; cssvar_ancho = pw; cssvar_alto = ph; }   /* (vw y vh en clamp(): cssvar.c) */
   letras = getenv("SURF_LETRAS") ? getenv("SURF_LETRAS") : "terceros/dejavu";
   recursos = getenv("SURF_RECURSOS") ? getenv("SURF_RECURSOS") : "build/anf/RECURSOS";
   {

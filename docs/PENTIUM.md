@@ -1,6 +1,6 @@
 # Hispa-Pentium — el núcleo de la gama XP, escrito en Castel
 
-*18/11/2026; puesto al día el 20/11/2026 (la 0.8, todo junto: el disco SATA del ICH7, el USB en caliente, los paquetes, la red y apagar de verdad con la batería). Hispa-Pentium es el miembro de la
+*18/11/2026; puesto al día el 20/11/2026 (la 0.8, todo junto: el disco SATA del ICH7, el USB en caliente, los paquetes, la red y apagar de verdad con la batería) y el 21/11/2026 (la 0.8.2: **el Navegador**, la web de hoy con NetSurf y JavaScript, con la rueda del ratón y el x87 de cada programa en el núcleo: sección 14 ter). Hispa-Pentium es el miembro de la
 
 *18/11/2026; puesto al día el 20/11/2026 (la 0.8: la red). Hispa-Pentium es el miembro de la
 familia Hispa-DOS para los PC de 2000 en adelante (la gama de Windows XP, [ROADMAP](ROADMAP.md)): un **núcleo propio
@@ -1290,8 +1290,9 @@ instalado con `-vga std`, «Mantener» que se guarda; y con `-vga vmware`, 1200 
 ### Lo que falta
 
 Hacer carpetas y cambiar nombres desde Mi equipo (y «Nueva carpeta» en el tapiz);
-iconos del tapiz para los documentos; la barra de desplazamiento y la **rueda del
-ratón** (el panel táctil la imita, pero el ratón se enciende como PS/2 sencillo);
+iconos del tapiz para los documentos; la barra de desplazamiento en los
+programas de Castel (la **rueda del ratón** ya llega, desde la 0.8.2: `EV_RUEDA`,
+sección 14 ter; la usa el Navegador);
 que la Consola cambie sus filas y columnas con la ventana, y guarde lo que ha
 pasado hacia arriba; menús que se abren con Alt y submenús; letras de otros
 tamaños y de ancho variable; el ajuste del doble clic; y que el tapiz pueda ser
@@ -2680,7 +2681,8 @@ Escuchar en un puerto (un servidor), reensamblar lo que llega desordenado y la
 retransmisión rápida; IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
 la vez; el Wi-Fi (arriba); TLS 1.3 (BearSSL no lo tiene), gzip en `Https` y la
 hora por NTP; más tarjetas (la RTL8168 del Toshiba NB250,
-la PCnet, NE2000: Hispa-DOS ya las lleva); y, encima de esto, un navegador.
+la PCnet, NE2000: Hispa-DOS ya las lleva). (El navegador, encima de esto, ya
+está: sección 14 ter.)
 (Las **actualizaciones** por la red ya van: sección 13.)
 
 ## 14 bis. Hispa-Pentium se compila a sí mismo (CASTEL32)
@@ -2700,6 +2702,280 @@ sale el mismo NUCLEO.BIN, octeto a octeto, que con ccastel.py y NASM (en QEMU, u
 8 s compilar y 3 ensamblar; el núcleo con sus 19 programas, 21 y 7). Y CASTEL32 se
 compila a sí mismo dentro, hasta el punto fijo. Lo comprueba `castel/pruebas.sh`
 en su parte 15 (`SOLO=castel32`).
+
+## 14 ter. El Navegador (NAVEGA.BIN, la 0.8.2)
+
+*21/11/2026.* Lo que faltaba (Carlos: «todavía le falta el explorador web»):
+**un navegador de verdad**, que abre la web de hoy —ClicGest, hispados.es,
+Google, Wikipedia— con sus hojas de estilo, sus imágenes, sus letras y su
+JavaScript, en una ventana del escritorio, con pestañas, la rueda del ratón,
+el portapapeles del sistema y descargas.
+
+| | |
+|---|---|
+| ![ClicGest: entrar](pentium/navegador/01_clicgest_login.png) | ![hispados.es](pentium/navegador/02_hispados.png) |
+| ![Google](pentium/navegador/03_google.png) | ![Wikipedia, con JavaScript](pentium/navegador/04_wikipedia.png) |
+| ![El sitio de las pruebas: CSS de fuera con variables, JavaScript, fetch con galletas, PNG y JPEG](pentium/navegador/05_prueba.png) | ![El menú del botón derecho sobre un enlace](pentium/navegador/06_menu_enlace.png) |
+
+**Es el Navegador completo de Hispa-486** ([NAVEGADOR2.md](486/NAVEGADOR2.md):
+NetSurf 3.11 con lo nuestro —las variables de CSS, `@font-face` con WOFF y
+WOFF2, grid, `gap`, esquinas redondas, sombras, 96 ppp y JavaScript con
+QuickJS—), con un **frontal nuevo** sobre las llamadas de Hispa-Pentium. Los
+fuentes de `w32/surf` (la red, las letras, las imágenes, el CSS, el
+JavaScript) van **tal cual**; lo único que no sirve es su ventana de Hispa
+Ventanas (`surf.c`). Así, lo que se arregle en uno vale para los dos.
+
+### Cómo se maneja
+
+Arriba, **las pestañas** (cada una con su «×»; la **+** abre otra con la
+página de inicio) y **la barra**: Atrás, Adelante, Recargar (mientras carga,
+Parar), Inicio, **la dirección** (con el candado verde en las cifradas: el
+servidor en negro y lo demás en gris) y **el menú** (≡: Nueva pestaña, Cerrar
+la pestaña, Copiar la dirección, Ver las descargas, Página de inicio, Acerca
+del Navegador, Salir). Abajo, la línea de estado («Cargando…» en ocre,
+«Conexión cifrada» en verde, el enlace de debajo del ratón, lo que lleva una
+descarga). A la derecha, la barra de desplazamiento (el pulgar se arrastra).
+
+| | |
+|---|---|
+| La rueda del ratón | mueve la página (o la caja con desplazamiento que hay debajo); con Mayús, a los lados |
+| El botón derecho | en un enlace: Abrir el enlace en otra pestaña, Copiar la dirección del enlace, Descargar el enlace; siempre: Atrás, Adelante, Recargar, Copiar, Pegar, Seleccionar todo |
+| F6 o Ctrl+L | a la dirección (elegida entera). Lo que no parece una dirección (con espacios, sin punto) se busca en Google; `C:\CARPETA\PAGINA.HTM` abre la del disco |
+| F5 o Ctrl+R | recargar; Esc, parar |
+| Ctrl+T, Ctrl+W | pestaña nueva, cerrar la de ahora (con el núcleo de la rama `controles-erp`, Ctrl+Tab y Ctrl+Mayús+Tab cambian de pestaña) |
+| Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+A | con **el portapapeles del sistema** (lo copiado en el Navegador se pega en el Bloc de notas, y al revés) |
+| Flechas, Re Pág, Av Pág, Inicio, Fin, Espacio | mueven la página (en un campo, el cursor) |
+| Retroceso | fuera de un campo: atrás |
+| Tab, Mayús+Tab | en los formularios, al campo siguiente o al anterior |
+
+`alert()` y `confirm()` de las páginas salen en un cuadro propio (otra
+ventana, en el centro). **Las descargas** (lo que el servidor manda como
+`attachment`, lo que no se puede enseñar, o «Descargar el enlace») van a
+**`C:\DESCARGA`** con un nombre de 8+3 sacado del suyo («Informe anual
+2026.zip» queda `INFORMEA.ZIP`; si ya hay uno, `INFORM~1.ZIP`), y la línea
+de estado dice lo que lleva y, al acabar, dónde está.
+
+**`NAVEGA.INI`** (junto al programa; todas las líneas son opcionales):
+`Inicio=` (la página de arranque y del botón Inicio: `https://www.google.es/`
+si no se dice; `resource:welcome.html` es la que va con el Navegador, sin
+red), `Idioma=` (`es`: lo que se pide a las páginas) y `Descargas=`
+(`C:\DESCARGA`). Las galletas que dicen hasta cuándo valen se guardan al
+cerrar en `SURFGAL.TXT`, y lo de `localStorage` en `NAVEGA2.ALM`. Con un
+`SURF.LOG` (aunque esté vacío) en la carpeta, apunta lo que hace (NetSurf en
+`NS.LOG`, el JavaScript en `SURFJS.LOG`) y **F1** deja en `CAJAS.TXT` el árbol
+de cajas y el de libdom de la página (así se encontró lo de Wikipedia).
+
+### Dónde está: el paquete «navega»
+
+Es un **paquete aparte** (no va con el sistema: el CD y la memoria USB no
+crecen 2,4 MB), **`navega`** («navegador» no cabe: los nombres de paquete son
+de 8 letras, como su registro `.PQI`), versión 0.1, que se instala desde
+**«Programas y actualizaciones»** o con `PAQUETES INSTALA navega`. Necesita
+`base >= 0.8.2` (el núcleo de abajo), `red` y `tls`. Lleva:
+
+| | |
+|---|---|
+| `\HISPA\NAVEGA\NAVEGA.BIN` | el programa (2,0 MB) |
+| `\HISPA\NAVEGA\NAVEGA.INI`, `LEEME.TXT` | las opciones; las licencias |
+| `\HISPA\NAVEGA\RECURSOS\` | las hojas de estilo de NetSurf, sus textos en español, la página de inicio sin red y el diccionario de Brotli (para las letras WOFF2) |
+| `\HISPA\NAVEGA\FUENTES\` | las letras DejaVu (Sans, Serif y Mono, normal y negrita), recortadas a las de Europa occidental (208 KB) |
+| `\HISPA\MENU\NAVEGA.MNU`, `NAVEGA.ICP` | el acceso **«Navegador»** del menú Inicio y del tapiz (un globo con la flecha, de diseño propio: `navega/navega32.png`) |
+
+Lo hace **`castel/nucleo32/navega/paquete.sh SALIDA`** (`NAVEGA.HPQ` y su
+línea del catálogo, `CATALOGO.LIN`), con `tools/hpq.py opcionales` (la lista
+`OPCIONALES`, para los paquetes que no van con el sistema) y `hpq.py linea`;
+y `nucleo32/actualiza.sh` lo mete en el catálogo de Internet con los demás.
+Sin instalar (las pruebas), en `\NAVEGA` y su acceso en `\MENU`
+(`disco.sh ... navegador`).
+
+### Cómo está hecho
+
+```
+castel/nucleo32/navega/
+  frontal.c     la ventana (llamadas 32-36, 39, 40 y 80): pestañas (una ventana
+                de NetSurf cada una), barra, dirección, desplazamiento, estado,
+                ratón y rueda, teclado (de la página 437 a Unicode), portapapeles,
+                menús emergentes, los cuadros de alert/confirm; y el bucle de los
+                sucesos con el planificador de NetSurf
+  descarga.c    las descargas (gui_download_table), con su nombre 8+3
+  sistema.c     lo de Windows que piden los fuentes de Hispa-486, con las
+                llamadas de Hispa-Pentium (abajo)
+  entrada.asm   la cabecera HPU3 y la entrada (fninit); pentium.ld: 0x40000000
+  navega.mk     cómo se compila (make -f, sin -j); hacer.sh: la carpeta entera
+  paquete.sh    el paquete; servidor_pruebas.py: el sitio de las pruebas
+  prueba_x87.c  X87.BIN (abajo)
+w32/surf/       el Navegador completo de Hispa-486, sin su surf.c
+w32/navega/http.c, w32/msvcrt.c, w32/js/ (QuickJS), terceros/netsurf, stb, brotli, dejavu
+```
+
+**Un programa del anillo 3 en C, como `TLS.BIN`**, pero de 2 MB: NetSurf
+(-Os), QuickJS (-O2) y la biblioteca de C, con `gcc -m32 -march=i586
+-ffreestanding` y enlazado con `ld --gc-sections` para `0x40000000`.
+
+**Los fuentes de Hispa-486, sin tocar: `sistema.c`.** NAVEGA2.EXE era un
+programa Win32 para HW32 y llamaba a KERNEL32, WSOCK32, HSPTLS y USER32. En
+vez de reescribir su red, sus archivos y su memoria, `sistema.c` da **esas
+mismas funciones** (con su nombre y su `stdcall`) hechas con las llamadas de
+Hispa-Pentium, y todo lo demás compila igual:
+
+| Lo de Windows | Con qué se hace aquí |
+|---|---|
+| `CreateFileA`, `ReadFile`, `WriteFile`, `SetFilePointer`, `FindFirstFileA`... | los archivos del núcleo (llamadas 7-9, 12, 13, 18-26, 28); 16 abiertos a la vez en todo el sistema |
+| `VirtualAlloc`, `VirtualFree` | la llamada 17 (el final del programa); las zonas sueltas se apuntan y se vuelven a dar, la de arriba se devuelve |
+| `HeapAlloc` (el `malloc` de MSVCRT) | el `malloc` de `w32/surf/memoria.c`: uno solo para todo el programa |
+| `GetSystemTimeAsFileTime`, `GetTickCount`, `Sleep` | el reloj del PC (dato 10) y los tics (como HW32: sin huso) |
+| `socket`, `connect`, `send`, `recv`, `select`, `gethostbyname` | las conexiones TCP de `RED.BIN` (llamada 90) |
+| `TlsAbrir`, `TlsConectar`, `TlsLeer`... (HSPTLS) | las cifradas de `TLS.BIN` (llamada 99), que resuelve, conecta y hace el apretón de manos él: `http.c` dice antes si la que viene es https (un gancho `[PENTIUM]`) |
+| `MessageBoxA` | el cuadro de `frontal.c` |
+
+**La biblioteca de C** es `w32/msvcrt.c` (la MSVCRT.DLL de Hispa-486) con
+su `malloc` con otro nombre (el de todos es el de `memoria.c`); **QuickJS**
+(`w32/js`, la HSPJS.DLL) va dentro como iba en la DLL: se enlaza aparte y solo
+se ve desde fuera lo que exportaba (`objcopy --keep-global-symbols`), así su
+`malloc`, su `fprintf` y sus divisiones de 64 bits no chocan con los demás.
+
+**El dibujo.** NetSurf pinta la página en un búfer de 32 bits (libnsfb) y lo
+de la ventana (las pestañas, la barra, la dirección, el estado) se pinta en
+otros tres, con **las mismas letras DejaVu** de la página (`letra.c`, de
+cualquier tamaño, suavizadas) y rayas suavizadas para los iconos; todo se da
+al núcleo con `OP_MAPA` (llamada 34), **solo lo que ha cambiado**. La rueda y
+las flechas **mueven lo ya pintado** en el búfer y se pinta solo la franja que
+entra.
+
+**La red.** Las conexiones TCP las hace `RED.BIN` y las cifradas `TLS.BIN`
+(con la cadena comprobada, la sesión reanudada y `TLS.CCH`: sección 14). Una
+petición cada vez, por la conexión que se guarda abierta (la de NAVEGA2). El
+apretón de manos se hace de una vez (unos 3 s la primera vez en un Pentium
+133; luego, la sesión reanudada, nada): mientras, la ventana espera. El
+User-Agent es **`HispaSurf/0.2 (NetSurf 3.11; Hispa-Pentium)`**: sin
+«HispaNavegador», «(Hispa-486» ni «Hispa32», así ClicGest da su web normal
+(no la ligera).
+
+### El núcleo 0.8.2 (lo que necesita el Navegador)
+
+Tres cambios, marcados «(NAVEGADOR)»:
+
+- **La rueda del ratón** (`raton.cas`, `usbhid.cas`, `ventanas.cas`): el
+  ratón PS/2 se pone en **IntelliMouse** (las frecuencias 200, 100 y 80; si
+  luego dice que es el 3, manda cuatro octetos: el cuarto, la rueda) y el
+  USB con protocolo de arranque da la suya en el cuarto octeto. El escritorio
+  manda a la ventana que hay debajo de la flecha el suceso nuevo
+  **`EV_RUEDA` (13)**: `a`, `b`, dónde; `c`, los pasos con signo en el octeto
+  bajo (arriba, positivos) y `CON_MAYÚS`/`CON_CONTROL`. Al arrancar dice
+  «escritorio: el ratón PS/2 tiene rueda». (En `llamadas.cas`, `EV_RUEDA`,
+  para los programas de Castel.)
+- **El x87 de cada programa** (`tareas.cas`): hasta ahora el núcleo no
+  guardaba la coma flotante al cambiar de tarea, y dos programas que la
+  usaran a la vez (el Navegador, QuickJS, lo de HVPRUN) se la pisaban. Ahora
+  cada ficha lleva su x87 (108 octetos, `fnsave`/`frstor`) y se reparte **al
+  usarlo**: al cambiar de tarea se enciende `CR0.TS` y, si la nueva usa coma
+  flotante, la excepción 7 (`sin_x87`) guarda la de la otra y pone la suya (o
+  una a estrenar). Lo que no la usa (casi todo, y el núcleo) no paga nada.
+  Las instrucciones van como `db` (`clts`, `fninit`, `fnsave`, `frstor`), para
+  que el núcleo se siga compilando igual con CASTEL32 y ENSAMB32 (sección 14
+  bis). **`X87.BIN`** (`navega/prueba_x87.c`) lo prueba: se lanza a sí mismo
+  dos veces y los tres dejan números distintos en la pila del x87 mientras
+  duermen; con el núcleo de antes dice «MAL», con este «bien».
+- **Programas de hasta 8 MB** (`MAX_PROGRAMA`, `usuario.cas`; antes 2 MB:
+  NAVEGA.BIN mide 2.095.604 octetos).
+
+`tools/hpq.py`: `base` pasa a la **0.8.2** (los demás siguen como estaban).
+
+### Lo que se arregló por el camino (vale también para Hispa-486)
+
+- **`vh` y `vw` estaban cambiados en libcss 0.9.2** (`100vh` daba el ancho de
+  la ventana): la tarjeta de entrar de ClicGest (centrada en un `body` de
+  `min-height: 100vh`) salía muy abajo, también en Hispa-486; ahora sale como
+  en Chrome.
+- **`opacity: 0`** no se pinta (ni lo de dentro): los botones de Google con su
+  capa encima, lo que se enseña poco a poco (las `.reveal` de clicgest.es, que
+  su JavaScript enseña). Lo de en medio (0,5) se sigue pintando entero.
+- **`document.implementation.createHTMLDocument()`** (`w32/navega/dom.js`)
+  daba el documento de la página: jQuery, al arrancar, prueba
+  `body.innerHTML = "<form></form><form></form>"` en él y **se llevaba el
+  cuerpo entero de la página** (Wikipedia salía en blanco con JavaScript).
+  Ahora da uno aparte.
+- Un campo que el JavaScript hace de texto (su `type`) después de hacer su
+  caja tiene su textarea al maquetar (Wikipedia: un fallo de página).
+
+### Comparado con Chrome
+
+A 1024 x 768 (la página, 970 x 588; Chrome a esa medida, `google-chrome
+--headless`), en `pentium/navegador/`:
+
+| Página | El Navegador | Chrome |
+|---|---|---|
+| https://clicgest.es/login | `01_clicgest_login.png` | `01_clicgest_login_chrome.png` |
+| https://hispados.es/ | `02_hispados.png` | `02_hispados_chrome.png` |
+| https://www.google.es/ | `03_google.png` | `03_google_chrome.png` |
+| https://es.wikipedia.org/ | `04_wikipedia.png` | `04_wikipedia_chrome.png` |
+
+ClicGest y hispados.es salen casi iguales (las letras de la web, las
+esquinas, las sombras, los colores de las variables). Google da a quien no
+conoce su página sencilla de siempre (a Chrome, que sale de un servidor en
+Alemania, el aviso de las galletas): sin el icono de las aplicaciones (SVG).
+Wikipedia, entera, con su JavaScript (el buscador y los menús de arriba, en
+SVG, no salen). Lo que queda distinto es lo de NAVEGADOR2.md («Lo que queda
+distinto»): sin SVG, sin `position: fixed` de verdad, sin `transform` ni
+animaciones; aquí, en cambio, los colores son los de verdad (32 bits, no la
+paleta de 256 de Hispa Ventanas).
+
+### Medidas
+
+En QEMU sin KVM (en el VPS va, para este código, como un Pentium de 200-300
+MHz: NAVEGADOR2.md, «Medidas»), 128 MB, 1024 x 768, por la red de QEMU a
+Internet; la memoria, la de `memoria.c` (en uso / lo más) y lo pedido al
+sistema (`VirtualAlloc`), que dice la línea `navega: hecho ...` del puerto
+serie:
+
+MEDIDAS_AQUI
+
+Con el programa (2,1 MB), su pila y los búferes de la ventana (a 1024 x 768,
+unos 3,5 MB), el Navegador **arranca en unos 7 MB**. ClicGest, hispados.es y
+Google caben de sobra en **64 MB** (MEDIDA_64); Wikipedia (1,4 MB de
+JavaScript) pide unos 40 MB: con 64 MB va justa, con 128 MB holgada.
+Un Pentium de verdad a 133 MHz es unas dos veces más lento que este QEMU:
+ClicGest, unos 8 s la primera vez (la cadena de certificados se comprueba una
+vez: luego, `TLS.CCH`); Wikipedia, más de un minuto.
+
+### Probarlo
+
+`castel/pruebas.sh`, **parte 18** (`SOLO=navegador`, unos 3 minutos; sin
+Internet): `navega/servidor_pruebas.py` sirve el mismo sitio por HTTP y por
+HTTPS (con su raíz de prueba en `\RAICES`) y apunta lo que le piden. Se
+comprueba: el acceso del menú y su icono en el tapiz; la página por HTTPS, con
+**la hoja de fuera con variables de CSS, un PNG, un JPEG, JavaScript (el DOM,
+`setTimeout`, `localStorage`), `fetch` con las dos galletas** (la del servidor
+y la de `document.cookie`) y su cabecera; el User-Agent; **la rueda**, Fin,
+un **formulario POST con eñe** y su respuesta, **Atrás**, **el menú del botón
+derecho** (abrir el enlace en otra pestaña), **F6** con una dirección sin
+`http://` (por HTTP), **el portapapeles** (Ctrl+L, Ctrl+C y Ctrl+V en un campo
+de otra pestaña), **una descarga** a `C:\DESCARGA\INFORMEA.ZIP` igual octeto a
+octeto, cerrar la ventana, **las galletas guardadas** (`SURFGAL.TXT`: las que
+duran, no las de sesión) y `localStorage`; y **X87.BIN** (el x87 de cada
+programa). Para mirarlo a mano:
+
+```
+castel/nucleo32/disco.sh /tmp/d.img 32 red tls navegador
+DISCO=/tmp/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 QEMU_MAS="-nic user,model=e1000" \
+  castel/nucleo32/probar.sh "" ":pausa 3" ":doble 62 260" ":pausa 20" ":captura nav"
+```
+
+### Lo que falta
+
+- **Que la ventana no espere** al apretón de manos de TLS (hoy se queda quieta
+  ese momento: unos 3 s la primera vez en un Pentium 133); pedir varias cosas
+  a la vez (hoy, una petición cada vez, como en Hispa-486).
+- Lo de NetSurf que queda (NAVEGADOR2.md, «Lo que falta»): **SVG** (los iconos
+  de Google, de Wikipedia, de Bootstrap), `position: fixed`, `transform`,
+  `<details>`, la cursiva de verdad, los pesos de las letras variables, rehacer
+  solo la parte de las cajas que cambia (en las páginas grandes, cada clic que
+  cambia el árbol tarda).
+- Letras de más escrituras (las DejaVu van recortadas a las de Europa
+  occidental), imprimir, la forma de la flecha (el núcleo no deja cambiarla),
+  arrastrar y soltar, el historial y los marcadores guardados, y preguntar
+  dónde guardar una descarga.
+- Nombres largos al descargar (el núcleo aún crea solo 8+3).
 
 ## 15. Las pruebas
 
@@ -3091,6 +3367,10 @@ reiniciar a lo bruto; e instalado con `-vga std`: «Mantener» guardada; y con `
 vmware`, 1200 x 800 (que su BIOS no da) puesta por el núcleo al arrancar.
 Con ella, `SOLO=32` (rama `pentium-pantalla`, 20/11 por la noche) dio **479 bien,
 0 mal**.
+La **parte 18** (`SOLO=navegador`, unos tres minutos; rama `pentium-navegador`,
+21/11) prueba **el Navegador** (sección 14 ter) contra el sitio de prueba de
+`navega/servidor_pruebas.py` (HTTP y HTTPS) y el x87 de cada programa
+(`X87.BIN`): **22 comprobaciones, 22 bien**.
 
 Con la firma, el núcleo nuevo y el CD, la pasada entera del 20/11 por la tarde (rama
 `pentium-dvd`, con CASTEL32 ya dentro) dio **541 bien, 0 mal**; tras los
@@ -3120,6 +3400,11 @@ oficina), unos diez, y `SOLO=16`, lo que no arranca el núcleo (de la parte 1 a
 la 7, con los dos compiladores y los dos ensambladores), otros siete.
 
 ## 16. Por dónde seguir
+
+Hecho el 21/11 (la 0.8.2, rama `pentium-navegador`): **el Navegador** (sección
+14 ter), con la rueda del ratón, el x87 de cada programa y programas de hasta 8
+MB en el núcleo. Lo siguiente, allí: que la ventana no espere al apretón de
+manos, SVG y probarlo en el HP Mini y en el Toshiba.
 
 Hecho en la del 20/11 (la 0.8, cinco ramas juntas en `pentium-08`): el AHCI
 del ICH7 (sección 7), el USB en caliente y apagar de verdad con la batería

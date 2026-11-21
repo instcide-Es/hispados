@@ -248,6 +248,7 @@ static void coloca(void) {
   pw = an - DESP_W; ph = al - BARRA_H - ESTADO_H;
   if (pw < 64) pw = 64;
   if (ph < 32) ph = 32;
+  cssvar_ancho = pw; cssvar_alto = ph;          /* (vw y vh en clamp(): cssvar.c) */
   for (k = 0; k < B_IR; k++) {
     int w = (strlen(k == B_RECARGA ? "Recargar" : b_texto[k]) + 2) * LW;
     b_rect[k].left = x; b_rect[k].top = 4; b_rect[k].right = x + w; b_rect[k].bottom = 27;
