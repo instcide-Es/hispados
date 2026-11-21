@@ -4047,7 +4047,7 @@ primer renglón que casa. **PAQUETES e INSTALAR escriben en toda la zona**
 | `TS\` | TAILSCAL | |
 | `PAQUETES\BAJADAS\` | DESCARGA | |
 | `PAQUETES\AVANCE.TXT` | ACTUALIZ, DESCARGA, PROGRAMA | |
-| `PAQUETES\VENTANA.TXT` | ACTUALIZ | |
+| `PAQUETES\VENTANA.TXT`, `PAQUETES\BANDEJA.TXT` | ACTUALIZ | |
 | `PAQUETES\PROGRAMA.TXT` | PROGRAMA (rama `pentium-programas`) | |
 | `PAQUETES\`, `MENU\`, `INSTALA\`, `WIN32\` | nadie | |
 | `NAVEGA\SURFGAL.TXT` (las galletas) | NAVEGA | sí |

@@ -33,7 +33,7 @@
 ; =============================================================================
 módulo Permisos
 
-    importar Tareas, Fat, Unidades, Textos32
+    importar Tareas, Fat, Unidades, Textos32, Formato
 
     ; ---- los sellos: los programas del sistema (Tarea.sello) ----
     público constante SELLO_NINGUNO = 0         ; un programa normal
@@ -216,6 +216,7 @@ módulo Permisos
         regla("PAQUETES\\AVANCE.TXT", B_ACTUALIZ ob B_DESCARGA ob B_PROGRAMA, falso)
         regla("PAQUETES\\PROGRAMA.TXT", B_PROGRAMA, falso)
         regla("PAQUETES\\VENTANA.TXT", B_ACTUALIZ, falso)
+        regla("PAQUETES\\BANDEJA.TXT", B_ACTUALIZ, falso)  ; (lo de PAQUETES ESTADO, para el aviso de la bandeja)
         regla("PAQUETES\\", NADIE, falso)
         regla("MENU\\", NADIE, falso)
         regla("INSTALA\\", NADIE, falso)
@@ -363,6 +364,7 @@ módulo Permisos
         si z = LIBRE entonces devolver cierto fin
         si z = PROTEGIDA y bit(actual.sello) yb (escriben ob TODO_EL_SISTEMA) <> 0 entonces devolver cierto fin
         denegados := denegados + 1
+        imprimir2("permisos: acceso denegado a %s para escribir (%s)\n", nat32(ruta), nat32(actual.nombre))
         devolver falso
     fin
 
@@ -376,6 +378,7 @@ módulo Permisos
         si z = LIBRE entonces devolver cierto fin
         si z = PROTEGIDA y (no secreto o bit(actual.sello) yb escriben <> 0) entonces devolver cierto fin
         denegados := denegados + 1
+        imprimir2("permisos: acceso denegado a %s para leer (%s)\n", nat32(ruta), nat32(actual.nombre))
         devolver falso
     fin
 
