@@ -11,10 +11,15 @@
 ;     y, en los portátiles, la batería (energia.cas, con el servicio de
 ;     ACPI): la pila con lo que queda y, con el puntero quieto encima medio
 ;     segundo, su recuadro de ayuda (lo que queda, el cable, la salud);
-;   - el menú Inicio, de dos columnas: a la izquierda (en blanco) los
-;     programas; a la derecha (en azul muy claro) los documentos del disco
-;     (los .TXT de la raíz: se abren con el Bloc de notas) y la
-;     configuración; y abajo, «Apagar el equipo»;
+;   - el menú Inicio (MENÚ: inicio.cas): los programas fijados y los más
+;     usados, «Todos los programas» con sus carpetas, Mis documentos, Mi
+;     equipo, Configuración, el Administrador de dispositivos, Programas
+;     instalados, Actualizar, Ayuda y Ejecutar..., y abajo, siempre a la
+;     vista, Cerrar sesión, Reiniciar y Apagar equipo;
+;   - (MENÚ) los atajos de teclado de todo el sistema: Alt+F4, Alt+Tab,
+;     el logo (o Ctrl+Esc) y Logo+E, D, R y L, Alt+Espacio, Ctrl+Alt+Supr
+;     (el Administrador de tareas), Impr Pant (una captura en \CAPTURAS) y
+;     F1 en el tapiz (la Ayuda);
 ;   - los cuadros «Apagar el equipo» (apagar, reiniciar), «Configuración»
 ;     (el teclado, el tapiz, lo que hay), «Acerca de» y los avisos;
 ;   - los iconos del tapiz (Mi equipo, Bloc de notas, Consola): un clic lo
@@ -42,7 +47,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro, Inicio
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -51,13 +56,7 @@ módulo Escritorio
     constante GLOBO_AL = 58
     constante BOTONES_X = 108
     constante BOTÓN_MÁXIMO = 160
-    constante MENÚ_ANCHO = 330
-    constante MENÚ_ALTO = 380                   ; sin accesos de paquetes (con ellos, más: menú_alto)
-    constante MENÚ_CABEZA = 54
-    constante MENÚ_PIE = 42
-    constante MENÚ_COLUMNA = 172                ; donde empieza la columna de la derecha
-    constante ALTO_OPCIÓN = 34
-    constante ALTO_OFICINA = 28                 ; las de la oficina, más bajas (caben debajo de los programas)
+    ; (MENÚ) las medidas del menú Inicio, en inicio.cas
 
     ; ---- los colores (los propios de Hispa-Pentium) ----
     constante BLANCO = 0xFFFFFF
@@ -84,7 +83,10 @@ módulo Escritorio
     constante AC_CERRAR_AVISO = 10
     constante AM_BLOC = 20
     constante AM_CONSOLA = 21
-    constante AM_DOCUMENTO = 22
+    constante AM_SESIÓN = 15                    ; (MENÚ) Cerrar sesión
+    constante AM_EJECUTAR = 16                  ; (MENÚ) Ejecutar...
+    constante AM_AYUDA = 17                     ; (MENÚ) la Ayuda (MANUAL.TXT, en el Bloc de notas)
+    constante AM_RUTA = 18                      ; (MENÚ) un programa que pide el menú Inicio (Inicio.pedido_programa)
     constante AM_CONFIG = 23
     constante AM_APAGAR = 24
     constante AM_EQUIPO = 25
@@ -103,6 +105,7 @@ módulo Escritorio
     ; ---- la medida de la pantalla (Configuración > Cambiar...) ----
     constante AC_PANTALLA = 30
     constante AC_RED_TS = 70                    ; (TAILSCALE) Configuración > «Red y Tailscale...»
+    constante AC_PROGRAMAS_INST = 95            ; (PROGRAMAS) Configuración > «Programas...» (PROGRAMA.BIN)
     constante AC_CERRAR_PANTALLA = 31
     constante AC_PROBAR = 32
     constante AC_GUARDAR_MODO = 33
@@ -120,18 +123,12 @@ módulo Escritorio
     constante ME_USB = 5                        ; el del icono de las memorias USB de la bandeja
     constante ME_ATAJO = 6                      ; (dock) el de un acceso del tapiz: Abrir, Quitar del escritorio
 
-    tipo Opción = estructura                    ; una opción del menú Inicio
-        x, ye, an, al: ent32
-        acción, dato: nat32
-    fin
     tipo Pulsador = estructura                  ; un botón de un cuadro
         ventana: nat32
         x, ye, an, al: ent32
         acción: nat32
     fin
 
-    constante MAX_OPCIONES = 16
-    constante MAX_DOCUMENTOS = 5
     constante MAX_PULSADORES = 48
     constante MAX_BOTONES = 12
 
@@ -154,8 +151,7 @@ módulo Escritorio
     variable cog_movido: bool
     variable menú_dato, menú_acción: nat32      ; de qué va el menú emergente abierto
 
-    variable menú_alto: ent32 = MENÚ_ALTO        ; lo que mide el menú Inicio (crece con los accesos de los paquetes)
-    variable v_barra, v_menú, v_apagar, v_config, v_aviso, v_fondo, v_acerca: nat32
+    variable v_barra, v_apagar, v_config, v_aviso, v_fondo, v_acerca: nat32
     ; ---- la medida de la pantalla ----
     constante MAX_MODOS = 15
     constante N_CANDIDATOS = 13
@@ -183,13 +179,6 @@ módulo Escritorio
     variable env_prueba: byte
     variable texto_env: arreglo [1100] de byte
     variable texto_grub: arreglo [8200] de byte
-    variable menú_abierto: bool
-    variable menú_cerrado_en: nat32             ; el tic en que se cerró (por un clic fuera)
-    variable opciones: arreglo [MAX_OPCIONES] de Opción
-    variable n_opciones: nat32
-    variable elegida: ent32 = -1
-    variable documentos: arreglo [MAX_DOCUMENTOS] de arreglo [13] de byte
-    variable n_documentos: nat32
     variable pulsadores: arreglo [MAX_PULSADORES] de Pulsador
     variable n_pulsadores: nat32
     variable botones: arreglo [MAX_BOTONES] de nat32    ; la ventana de cada botón de la barra
@@ -202,7 +191,6 @@ módulo Escritorio
     variable segundo_visto: nat32
     variable fondo: nat32                       ; el tapiz: 0, 1 o 2
     variable texto_aviso: arreglo [128] de byte
-    variable saludo: arreglo [40] de byte       ; «Hola, » y el nombre del usuario (el menú Inicio)
     variable renglón: arreglo [96] de byte
     público variable lanzados: nat32            ; los programas que ha lanzado el escritorio
     ; ---- el USB: el icono de la bandeja y el globo de los avisos ----
@@ -717,78 +705,6 @@ módulo Escritorio
     ; -------------------------------------------------------------------------
     ;  El menú Inicio
     ; -------------------------------------------------------------------------
-    ; los documentos: los .TXT de la raíz del disco (los cinco primeros)
-    función lee_documentos()
-        variable m, r, n, i: nat32
-        variable e: Entrada
-        n_documentos := 0
-        si unidad_en_memoria() entonces
-            ; sin disco: los .TXT que ha traído el cargador
-            i := 0
-            mientras i < módulos() y n_documentos < MAX_DOCUMENTOS hacer
-                n := 0
-                mientras n < 12 y módulo_nombre(i)[n] <> 0 y módulo_nombre(i)[n] <> ' ' hacer
-                    documentos[n_documentos][n] := mayúscula(módulo_nombre(i)[n])
-                    n := n + 1
-                fin
-                documentos[n_documentos][n] := 0
-                si n > 4 y documentos[n_documentos][n - 4] = '.' y documentos[n_documentos][n - 3] = 'T' y documentos[n_documentos][n - 2] = 'X' y documentos[n_documentos][n - 1] = 'T' entonces
-                    n_documentos := n_documentos + 1
-                fin
-                i := i + 1
-            fin
-            devolver
-        fin
-        m := abrir_archivo(del_sistema, "\\", PARA_LEER)
-        si m >= PRIMER_ERROR entonces devolver fin
-        r := leer_entrada(m, dirección(e))
-        mientras r = 1 y n_documentos < MAX_DOCUMENTOS hacer
-            n := 0
-            mientras e.nombre[n] <> 0 hacer n := n + 1 fin
-            si e.atributos yb CARPETA = 0 y n > 4 y e.nombre[n - 4] = '.' y e.nombre[n - 3] = 'T' y e.nombre[n - 2] = 'X' y e.nombre[n - 1] = 'T' entonces
-                para i desde 0 hasta n hacer documentos[n_documentos][i] := e.nombre[i] fin
-                n_documentos := n_documentos + 1
-            fin
-            r := leer_entrada(m, dirección(e))
-        fin
-        cerrar_archivo(m)
-    fin
-
-    función nueva_opción(x: ent32, yy: ent32, an: ent32, al: ent32, acción: nat32, dato: nat32): ent32
-        si n_opciones >= MAX_OPCIONES entonces devolver -2 fin
-        opciones[n_opciones].x := x
-        opciones[n_opciones].ye := yy
-        opciones[n_opciones].an := an
-        opciones[n_opciones].al := al
-        opciones[n_opciones].acción := acción
-        opciones[n_opciones].dato := dato
-        n_opciones := n_opciones + 1
-        devolver ent32(n_opciones) - 1
-    fin
-
-    ; una opción del menú: su franja (resaltada si es la elegida) y su texto;
-    ; da el color con que hay que pintar lo demás (su icono lo pinta quien llama)
-    función pinta_opción(ref l: Lienzo, x: ent32, yy: ent32, an: ent32, t: puntero a byte, acción: nat32, dato: nat32, negrita: bool)
-        pinta_opción_de(l, x, yy, an, ALTO_OPCIÓN, t, acción, dato, negrita)
-    fin
-
-    ; lo mismo, de ese alto
-    función pinta_opción_de(ref l: Lienzo, x: ent32, yy: ent32, an: ent32, al: ent32, t: puntero a byte, acción: nat32, dato: nat32, negrita: bool)
-        variable n: ent32
-        variable c: nat32
-        n := nueva_opción(x, yy, an, al, acción, dato)
-        c := TINTA
-        si n = elegida entonces
-            redondeado(l, x + 2, yy + 1, an - 4, al - 2, 4, 0x3F86E0, AZUL_ELEGIDO, TODAS)
-            c := BLANCO
-        fin
-        si negrita entonces
-            texto_negrita(l, x + 38, yy + (al - 16) div 2, t, c)
-        sino
-            texto(l, x + 38, yy + (al - 16) div 2, t, c)
-        fin
-    fin
-
     ; los programas de la oficina: su nombre (o, con «ruta», su .HVP)
     función de_oficina(i: nat32, ruta: bool): puntero a byte
         si ruta entonces
@@ -816,142 +732,24 @@ módulo Escritorio
         devolver 0xC85A9E
     fin
 
-    función pinta_menú()
-        variable l: puntero a Lienzo
-        variable yy: ent32
-        variable i: nat32
-        l := lienzo_de(v_menú)
-        si l = nulo entonces devolver fin
-        n_opciones := 0
-        ; el marco y la cabecera, azul, con el disquete y el nombre
-        rectángulo(valor(l), 0, 0, MENÚ_ANCHO, menú_alto, 0x1A56AC)
-        redondeado(valor(l), 1, 1, MENÚ_ANCHO - 2, MENÚ_CABEZA, 7, 0x4E99EE, 0x1F62C0, ARRIBA)
-        rectángulo(valor(l), 8, 2, MENÚ_ANCHO - 16, 1, 0x9CCBFA)
-        disquete(valor(l), 9, 7, 42)
-        ; (con el nombre del usuario, si se sabe: el saludo)
-        si Ajustes.usuario[0] <> 0 entonces
-            copiar_hasta(saludo, "Hola, ", 40)
-            concatenar(saludo, Ajustes.usuario)
-            texto_negrita(valor(l), 59, 13, saludo, 0x123F85)
-            texto_negrita(valor(l), 58, 12, saludo, BLANCO)
-            texto(valor(l), 58, 30, "Hispa-Pentium, versión 0.8", 0xD3E7FD)
-        sino
-            texto_negrita(valor(l), 59, 13, "Hispa-Pentium", 0x123F85)
-            texto_negrita(valor(l), 58, 12, "Hispa-Pentium", BLANCO)
-            texto(valor(l), 58, 30, "el escritorio, versión 0.8", 0xD3E7FD)
-        fin
-        rectángulo(valor(l), 1, MENÚ_CABEZA, MENÚ_ANCHO - 2, 2, NARANJA)
-        ; las dos columnas
-        rectángulo(valor(l), 2, MENÚ_CABEZA + 2, MENÚ_COLUMNA - 2, menú_alto - MENÚ_CABEZA - MENÚ_PIE - 2, BLANCO)
-        rectángulo(valor(l), MENÚ_COLUMNA, MENÚ_CABEZA + 2, MENÚ_ANCHO - MENÚ_COLUMNA - 2, menú_alto - MENÚ_CABEZA - MENÚ_PIE - 2, AZUL_CLARO)
-        rectángulo(valor(l), MENÚ_COLUMNA, MENÚ_CABEZA + 2, 1, menú_alto - MENÚ_CABEZA - MENÚ_PIE - 2, 0xA9C6EC)
-        ; a la izquierda: los programas
-        yy := MENÚ_CABEZA + 10
-        texto_negrita(valor(l), 12, yy, "Programas", TINTA_SUAVE)
-        rectángulo(valor(l), 12, yy + 19, MENÚ_COLUMNA - 26, 1, 0xC9D8EC)
-        yy := yy + 26
-        pinta_opción(valor(l), 4, yy, MENÚ_COLUMNA - 6, "Bloc de notas", AM_BLOC, 0, cierto)
-        icono_hoja(valor(l), 14, yy + 4, 0x4C97EC)
-        yy := yy + ALTO_OPCIÓN + 2
-        pinta_opción(valor(l), 4, yy, MENÚ_COLUMNA - 6, "Consola", AM_CONSOLA, 0, cierto)
-        icono_consola(valor(l), 13, yy + 6)
-        yy := yy + ALTO_OPCIÓN + 2
-        pinta_opción(valor(l), 4, yy, MENÚ_COLUMNA - 6, "Mi equipo", AM_EQUIPO, 0, cierto)
-        redondeado(valor(l), 13, yy + 6, 24, 17, 2, 0x4F6890, 0x4F6890, TODAS)
-        degradado(valor(l), 15, yy + 8, 20, 13, 0x7FC2FA, 0x2A7AD6)
-        rectángulo(valor(l), 22, yy + 23, 6, 2, 0x7F95B6)
-        rectángulo(valor(l), 17, yy + 25, 16, 3, 0x6F87A8)
-        ; los programas de los paquetes (accesos.cas: \HISPA\MENU\*.MNU)
-        i := 0
-        mientras i < n_accesos hacer
-            yy := yy + ALTO_OPCIÓN + 2
-            pinta_opción(valor(l), 4, yy, MENÚ_COLUMNA - 6, nombre_de(i), AM_ACCESO, i, cierto)
-            icono_acceso(valor(l), 13, yy + 5, i, 2)
-            i := i + 1
-        fin
-        ; y la oficina de Hispa-386 (programas de Hispa Ventanas: HVPRUN.BIN)
-        yy := yy + ALTO_OPCIÓN + 4
-        texto_negrita(valor(l), 12, yy, "Oficina", TINTA_SUAVE)
-        rectángulo(valor(l), 12, yy + 19, MENÚ_COLUMNA - 26, 1, 0xC9D8EC)
-        yy := yy + 22
-        i := 0
-        mientras i < N_OFICINA hacer
-            pinta_opción_de(valor(l), 4, yy, MENÚ_COLUMNA - 6, ALTO_OFICINA, de_oficina(i, falso), AM_OFICINA, i, cierto)
-            icono_hoja(valor(l), 14, yy + 1, color_oficina(i))
-            yy := yy + ALTO_OFICINA
-            i := i + 1
-        fin
-        ; a la derecha: los documentos y la configuración
-        yy := MENÚ_CABEZA + 10
-        texto_negrita(valor(l), MENÚ_COLUMNA + 10, yy, "Documentos", TINTA_SUAVE)
-        rectángulo(valor(l), MENÚ_COLUMNA + 10, yy + 19, MENÚ_ANCHO - MENÚ_COLUMNA - 22, 1, 0xA9C6EC)
-        yy := yy + 24
-        si n_documentos = 0 entonces
-            texto(valor(l), MENÚ_COLUMNA + 14, yy + 6, "(no hay ninguno)", TINTA_SUAVE)
-            yy := yy + 28
-        sino
-            i := 0
-            mientras i < n_documentos hacer
-                pinta_opción(valor(l), MENÚ_COLUMNA + 2, yy, MENÚ_ANCHO - MENÚ_COLUMNA - 4, documentos[i], AM_DOCUMENTO, i, falso)
-                icono_hoja(valor(l), MENÚ_COLUMNA + 12, yy + 4, 0x46C282)
-                yy := yy + ALTO_OPCIÓN
-                i := i + 1
-            fin
-        fin
-        yy := menú_alto - MENÚ_PIE - ALTO_OPCIÓN - 6
-        ; (encima de Configuración, «Actualizar»: los programas y las actualizaciones)
-        pinta_opción_de(valor(l), MENÚ_COLUMNA + 2, yy - 37, MENÚ_ANCHO - MENÚ_COLUMNA - 4, 30, "Actualizar", AM_PROGRAMAS, 0, cierto)
-        redondeado(valor(l), MENÚ_COLUMNA + 13, yy - 31, 18, 17, 2, 0x9A6A1E, 0x9A6A1E, TODAS)
-        redondeado(valor(l), MENÚ_COLUMNA + 14, yy - 30, 16, 15, 1, 0xF2C46C, 0xD69A3A, TODAS)
-        rectángulo(valor(l), MENÚ_COLUMNA + 21, yy - 30, 2, 15, 0xB9822F)
-        rectángulo(valor(l), MENÚ_COLUMNA + 10, yy - 5, MENÚ_ANCHO - MENÚ_COLUMNA - 22, 1, 0xA9C6EC)
-        pinta_opción(valor(l), MENÚ_COLUMNA + 2, yy, MENÚ_ANCHO - MENÚ_COLUMNA - 4, "Configuración", AM_CONFIG, 0, cierto)
-        si elegida >= 0 y opciones[elegida].acción = AM_CONFIG entonces
-            icono_rueda(valor(l), MENÚ_COLUMNA + 11, yy + 5, AZUL_ELEGIDO)
-        sino
-            icono_rueda(valor(l), MENÚ_COLUMNA + 11, yy + 5, AZUL_CLARO)
-        fin
-        ; el pie: «Apagar el equipo»
-        degradado(valor(l), 1, menú_alto - MENÚ_PIE, MENÚ_ANCHO - 2, MENÚ_PIE - 1, 0x3D86E2, 0x1C5CB8)
-        rectángulo(valor(l), 1, menú_alto - MENÚ_PIE, MENÚ_ANCHO - 2, 1, 0x7FB6F4)
-        i := nat32(nueva_opción(MENÚ_ANCHO - 190, menú_alto - MENÚ_PIE + 5, 182, MENÚ_PIE - 10, AM_APAGAR, 0))
-        si ent32(i) = elegida entonces
-            redondeado(valor(l), MENÚ_ANCHO - 190, menú_alto - MENÚ_PIE + 5, 182, MENÚ_PIE - 10, 5, 0x6AAEF6, 0x3A7EDC, TODAS)
-        fin
-        icono_apagar(valor(l), MENÚ_ANCHO - 184, menú_alto - MENÚ_PIE + 10)
-        texto_negrita(valor(l), MENÚ_ANCHO - 153, menú_alto - MENÚ_PIE + 14, "Apagar el equipo", 0x123F85)
-        texto_negrita(valor(l), MENÚ_ANCHO - 154, menú_alto - MENÚ_PIE + 13, "Apagar el equipo", BLANCO)
-        repintada(v_menú, 0, 0, MENÚ_ANCHO, menú_alto)
-    fin
-
     ; vuelve a leer los accesos de los paquetes (accesos.cas); si han
-    ; cambiado, el menú cambia de alto y los iconos del tapiz se rehacen
-    ; (al arrancar, los iconos los pone quien arranca)
-    variable firma_accesos: arreglo [200] de byte
+    ; cambiado, los iconos del tapiz se rehacen (al arrancar, los iconos los
+    ; pone quien arranca). (MENÚ: el menú ya no cambia de alto: inicio.cas)
+    variable firma_accesos: arreglo [600] de byte
     función pon_accesos()
         variable i, k: nat32
-        variable alto_nuevo: ent32
-        variable firma: arreglo [200] de byte
+        variable firma: arreglo [600] de byte
         lee_accesos()
         firma[0] := 0
         i := 0
         mientras i < n_accesos hacer
-            copiar_hasta(dirección(firma[longitud(firma)]), nombre_de(i), 200 - longitud(firma))
+            copiar_hasta(dirección(firma[longitud(firma)]), nombre_de(i), 600 - longitud(firma))
             si en_escritorio(i) entonces añadir_car(firma, '*') fin
             añadir_car(firma, '|')
             i := i + 1
         fin
         si iguales(firma, firma_accesos) entonces devolver fin
         copiar(firma_accesos, firma)
-        ; el menú, más alto (si la pantalla da)
-        alto_nuevo := MENÚ_ALTO + ent32(n_accesos) * (ALTO_OPCIÓN + 2)
-        si alto_nuevo > pantalla.alto - ALTO_BARRA - 8 entonces alto_nuevo := pantalla.alto - ALTO_BARRA - 8 fin
-        si alto_nuevo <> menú_alto y v_menú <> 0 entonces
-            menú_alto := alto_nuevo
-            cerrar_ventana(v_menú, 0)
-            v_menú := crear_ventana("menú", 0, pantalla.alto - ALTO_BARRA - menú_alto, MENÚ_ANCHO, menú_alto, SIN_MARCO ob ENCIMA ob OCULTA ob REDONDA, 0)
-        fin
-        menú_alto := alto_nuevo
         si v_fondo = 0 entonces devolver fin
         ; los iconos del tapiz: los de siempre y los de los accesos que lo piden
         quita_iconos()
@@ -982,38 +780,18 @@ módulo Escritorio
         pon_iconos()
     fin
 
+    ; (MENÚ) el menú Inicio es de inicio.cas
     función abre_menú()
-        lee_documentos()
         pon_accesos()
-        elegida := -1
-        menú_abierto := cierto
-        pinta_menú()
-        mostrar(v_menú, cierto)
-        emergente := v_menú
-        teclas_a := v_menú
+        cierra_alt_tab()
+        abre_inicio()
         pinta_barra()
     fin
 
     función cierra_menú()
         si no menú_abierto entonces devolver fin
-        menú_abierto := falso
-        si emergente = v_menú entonces emergente := 0 fin
-        si teclas_a = v_menú entonces teclas_a := 0 fin
-        mostrar(v_menú, falso)
+        cierra_inicio()
         pinta_barra()
-    fin
-
-    ; la opción del menú que está en ese punto; -1 si no hay
-    función opción_en(x: ent32, yy: ent32): ent32
-        variable i: nat32
-        i := 0
-        mientras i < n_opciones hacer
-            si x >= opciones[i].x y yy >= opciones[i].ye y x < opciones[i].x + opciones[i].an y yy < opciones[i].ye + opciones[i].al entonces
-                devolver ent32(i)
-            fin
-            i := i + 1
-        fin
-        devolver -1
     fin
 
     ; -------------------------------------------------------------------------
@@ -1136,24 +914,13 @@ módulo Escritorio
     fin
 
     función abre_apagar()
-        variable l: puntero a Lienzo
         si v_apagar <> 0 entonces
             cierra_cuadro(v_apagar)
         fin
-        v_apagar := cuadro("Apagar el equipo", 420, 150)
-        l := lienzo_de(v_apagar)
-        si l = nulo entonces
-            v_apagar := 0
-            devolver
-        fin
-        degradado(valor(l), 0, 0, 420, 150, 0xEAF3FE, 0xC4DCF8)
-        disquete(valor(l), 14, 10, 44)
-        texto_negrita(valor(l), 70, 16, "¿Qué quiere hacer con el equipo?", TINTA)
-        texto(valor(l), 70, 38, "Guarde antes lo que tenga a medias.", TINTA_SUAVE)
-        pulsador(v_apagar, 22, 92, 118, 38, "Apagar", 0xF59A5E, 0xD2571E, AC_APAGAR)
-        pulsador(v_apagar, 151, 92, 118, 38, "Reiniciar", VERDE_ARRIBA, VERDE_ABAJO, AC_REINICIAR)
-        pulsador(v_apagar, 280, 92, 118, 38, "Cancelar", 0x5AA6F4, 0x2468C8, AC_CANCELAR)
-        repintada(v_apagar, 0, 0, 420, 150)
+        v_apagar := cuadro("Apagar el equipo", 512, 150)          ; (MENÚ) con «Cerrar sesión» y el teclado
+        si v_apagar = 0 entonces devolver fin
+        foco_apagar := 0
+        pinta_apagar()
     fin
 
     ; «Acerca de Hispa-Pentium»
@@ -1234,6 +1001,8 @@ módulo Escritorio
             pulsador(v_config, 110, 210, 100, 28, "Visible", 0xA9BDD8, 0x7C95B8, AC_DOCK_SÍ)
             pulsador(v_config, 218, 210, 100, 28, "Oculto", VERDE_ARRIBA, VERDE_ABAJO, AC_DOCK_NO)
         fin
+        ; (PROGRAMAS) los programas instalados, por tipos: desinstalar, reparar...
+        pulsador(v_config, 326, 210, 120, 28, "Programas...", 0x5AA6F4, 0x2468C8, AC_PROGRAMAS_INST)
         ; (dispositivos) lo que hay en el equipo y qué lo lleva; (TAILSCALE) la red
         pulsador(v_config, 14, 246, 150, 28, "Dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
         pulsador(v_config, 172, 246, 166, 28, "Red y Tailscale...", 0x5AA6F4, 0x2468C8, AC_RED_TS)
@@ -1697,7 +1466,6 @@ módulo Escritorio
         quita_ayuda()
         si no cambia_pantalla(ent32(an), ent32(al)) entonces devolver falso fin
         recolocar_ventana(v_barra, 0, ent32(al) - ALTO_BARRA, ent32(an), ALTO_BARRA)
-        mover_ventana(v_menú, 0, ent32(al) - ALTO_BARRA - MENÚ_ALTO)
         recoloca_dock()                         ; (dock)
         ; los iconos, dentro (sin quitarlos del tapiz: es nuevo)
         para i desde 0 hasta MAX_ICONOS - 1 hacer
@@ -2216,7 +1984,11 @@ módulo Escritorio
         según acción
             caso AM_BLOC: lanza("\\BLOC.BIN", nulo)
             caso AM_CONSOLA: lanza("\\CONSOLA.BIN", nulo)
-            caso AM_DOCUMENTO: lanza("\\BLOC.BIN", documentos[dato])
+            caso AM_RUTA:                       ; (MENÚ) lo que pide el menú Inicio
+                si pedido_argumentos[0] = 0 entonces lanza(pedido_programa, nulo) sino lanza(pedido_programa, pedido_argumentos) fin
+            caso AM_AYUDA: abre_ayuda()
+            caso AM_EJECUTAR: abre_ejecutar()
+            caso AM_SESIÓN: cierra_sesión()
             caso AM_CONFIG: abre_config()
             caso AM_APAGAR: abre_apagar()
             caso AM_EQUIPO: lanza("\\EQUIPO.BIN", nulo)
@@ -2251,6 +2023,7 @@ módulo Escritorio
             caso AC_APAGAR: apaga(falso)
             caso AC_REINICIAR: apaga(cierto)
             caso AC_CANCELAR: cierra_cuadro(v_apagar)
+            caso AC_SESIÓN_CUADRO: cierra_sesión()     ; (MENÚ)
             caso AC_TECLADO_ES:
                 pon_teclado(cierto)
                 pinta_config()
@@ -2264,6 +2037,7 @@ módulo Escritorio
                 si v_config <> 0 entonces pinta_config() fin
             caso AC_CERRAR_CONFIG: cierra_cuadro(v_config)
             caso AC_RED_TS: lanza("\\TAILSCAL.BIN", "/VENTANA")     ; (TAILSCALE) Configuración > Red y Tailscale
+            caso AC_PROGRAMAS_INST: lanza("\\PROGRAMA.BIN", "/INSTALADAS")    ; (PROGRAMAS) Configuración > Programas
             caso AC_PANTALLA:
                 texto_pantalla[0] := 0
                 abre_pantalla()
@@ -2289,6 +2063,642 @@ módulo Escritorio
     fin
 
     ; -------------------------------------------------------------------------
+    ;  (MENÚ) Los atajos de teclado de todo el sistema y sus cuadros
+    ; -------------------------------------------------------------------------
+    constante AC_EJECUTAR_SÍ = 71
+    constante AC_EJECUTAR_NO = 72
+    constante AC_ENTRAR = 73
+    constante AC_SESIÓN_CUADRO = 74
+    constante AC_T_CAMBIAR = 75
+    constante AC_T_TERMINAR = 76
+    constante AC_T_CERRAR = 77
+    variable v_ejecutar, v_sesión, v_tareas, v_alt: nat32
+    variable texto_ejecutar: arreglo [80] de byte
+    variable foco_apagar: nat32                 ; el botón elegido del cuadro «Apagar el equipo» (0: Apagar)
+
+    ; ---- la Ayuda: MANUAL.TXT, en el Bloc de notas ----
+    función abre_ayuda()
+        si existe("\\HISPA\\MANUAL.TXT") y no unidad_en_memoria() entonces
+            lanza("\\BLOC.BIN", "\\HISPA\\MANUAL.TXT")
+        sino si existe("\\MANUAL.TXT") entonces
+            lanza("\\BLOC.BIN", "MANUAL.TXT")
+        sino
+            aviso("La Ayuda (MANUAL.TXT) no está en este sistema.")
+        fin
+    fin
+
+    ; ---- «Apagar el equipo»: Apagar (elegido), Reiniciar, Cerrar sesión, Cancelar ----
+    función acción_apagar(i: nat32): nat32
+        según i
+            caso 0: devolver AC_APAGAR
+            caso 1: devolver AC_REINICIAR
+            caso 2: devolver AC_SESIÓN_CUADRO
+        fin
+        devolver AC_CANCELAR
+    fin
+
+    función pinta_apagar()
+        variable l: puntero a Lienzo
+        variable i: nat32
+        variable x: ent32
+        l := lienzo_de(v_apagar)
+        si l = nulo entonces devolver fin
+        quita_pulsadores(v_apagar)
+        degradado(valor(l), 0, 0, 512, 150, 0xEAF3FE, 0xC4DCF8)
+        disquete(valor(l), 14, 10, 44)
+        texto_negrita(valor(l), 70, 16, "¿Qué quiere hacer con el equipo?", TINTA)
+        texto(valor(l), 70, 38, "Guarde antes lo que tenga a medias.", TINTA_SUAVE)
+        texto(valor(l), 70, 56, "Intro: lo elegido; las flechas: otro; Esc: nada.", TINTA_SUAVE)
+        ; (el elegido, con un borde oscuro alrededor: no solo un color)
+        x := 20 + ent32(foco_apagar) * 120
+        redondeado(valor(l), x - 4, 88, 120, 46, 8, TINTA, TINTA, TODAS)
+        redondeado(valor(l), x - 2, 90, 116, 42, 7, 0xEAF3FE, 0xD8E8FB, TODAS)
+        pulsador(v_apagar, 20, 92, 112, 38, "Apagar", 0xF59A5E, 0xD2571E, AC_APAGAR)
+        pulsador(v_apagar, 140, 92, 112, 38, "Reiniciar", VERDE_ARRIBA, VERDE_ABAJO, AC_REINICIAR)
+        pulsador(v_apagar, 260, 92, 112, 38, "Cerrar sesión", 0xE8C04A, 0xB98A16, AC_SESIÓN_CUADRO)
+        pulsador(v_apagar, 380, 92, 112, 38, "Cancelar", 0x5AA6F4, 0x2468C8, AC_CANCELAR)
+        i := 0
+        repintada(v_apagar, 0, 0, 512, 150)
+    fin
+
+    función atiende_apagar()
+        variable e: Evento
+        variable a: nat32
+        mientras v_apagar <> 0 y saca_evento(v_apagar, 0, e) hacer
+            si e.clase = EV_CERRAR o (e.clase = EV_TECLA y e.a = 27) entonces
+                cierra_cuadro(v_apagar)
+            sino si e.clase = EV_TECLA y e.a = '\n' entonces
+                haz(acción_apagar(foco_apagar), 0)
+            sino si e.clase = EV_TECLA y (e.a = TECLA_DERECHA o e.a = 9 o e.a = TECLA_ABAJO) entonces
+                foco_apagar := (foco_apagar + 1) mod 4
+                pinta_apagar()
+            sino si e.clase = EV_TECLA y (e.a = TECLA_IZQUIERDA o e.a = TECLA_MAYÚS_TAB o e.a = TECLA_ARRIBA) entonces
+                foco_apagar := (foco_apagar + 3) mod 4
+                pinta_apagar()
+            sino si e.clase = EV_RATÓN_BAJA entonces
+                a := pulsador_en(v_apagar, ent32(e.a), ent32(e.b))
+                si a <> 0 entonces haz(a, 0) fin
+            fin
+        fin
+    fin
+
+    ; ---- Cerrar sesión: se cierran los programas y queda el cuadro de entrar ----
+    función cierra_sesión()
+        variable l: puntero a Lienzo
+        cierra_menú()
+        cierra_cuadro(v_apagar)
+        si no cierra_programas() entonces devolver fin
+        apagar_otra_vez := falso
+        cierra_cuadro(v_sesión)
+        v_sesión := cuadro("Sesión cerrada", 400, 150)
+        l := lienzo_de(v_sesión)
+        si l = nulo entonces
+            v_sesión := 0
+            devolver
+        fin
+        degradado(valor(l), 0, 0, 400, 150, 0xF4F8FE, 0xD6E6FA)
+        disquete(valor(l), 14, 12, 44)
+        si Ajustes.usuario[0] <> 0 entonces
+            copiar(renglón, "Hasta pronto, ")
+            concatenar(renglón, Ajustes.usuario)
+            concatenar(renglón, ".")
+            texto_negrita(valor(l), 70, 18, renglón, TINTA)
+        sino
+            texto_negrita(valor(l), 70, 18, "La sesión se ha cerrado.", TINTA)
+        fin
+        texto(valor(l), 70, 40, "Los programas se han cerrado.", TINTA_SUAVE)
+        texto(valor(l), 70, 58, "Pulse «Entrar» (o Intro) para seguir.", TINTA_SUAVE)
+        pulsador(v_sesión, 150, 96, 100, 34, "Entrar", VERDE_ARRIBA, VERDE_ABAJO, AC_ENTRAR)
+        repintada(v_sesión, 0, 0, 400, 150)
+        escribir("escritorio: sesión cerrada\n")
+    fin
+
+    función atiende_sesión()
+        variable e: Evento
+        mientras v_sesión <> 0 y saca_evento(v_sesión, 0, e) hacer
+            si e.clase = EV_CERRAR o (e.clase = EV_TECLA y (e.a = '\n' o e.a = 27)) o (e.clase = EV_RATÓN_BAJA y pulsador_en(v_sesión, ent32(e.a), ent32(e.b)) = AC_ENTRAR) entonces
+                cierra_cuadro(v_sesión)
+                escribir("escritorio: sesión abierta\n")
+            fin
+        fin
+    fin
+
+    ; ---- Ejecutar... (Logo+R) ----
+    función pinta_ejecutar()
+        variable l: puntero a Lienzo
+        variable x: ent32
+        variable t: puntero a byte
+        l := lienzo_de(v_ejecutar)
+        si l = nulo entonces devolver fin
+        quita_pulsadores(v_ejecutar)
+        degradado(valor(l), 0, 0, 460, 170, 0xF4F8FE, 0xD6E6FA)
+        icono(valor(l), 16, 14, 40, IC_PROGRAMA, 0, 0)
+        texto(valor(l), 70, 14, "Escriba el nombre de un programa, de una", TINTA)
+        texto(valor(l), 70, 32, "carpeta o de un documento, y se abrirá.", TINTA)
+        texto_negrita(valor(l), 16, 72, "Abrir:", TINTA)
+        rectángulo(valor(l), 70, 66, 374, 28, 0x4F6890)
+        rectángulo(valor(l), 72, 68, 370, 24, BLANCO)
+        ; lo que no cabe, por la izquierda
+        t := texto_ejecutar
+        mientras ent32(longitud(t)) * ANCHO_LETRA > 350 hacer t := t + 1 fin
+        texto(valor(l), 78, 72, t, TINTA)
+        x := 78 + ent32(longitud(t)) * ANCHO_LETRA
+        rectángulo(valor(l), x, 71, 2, 18, TINTA)
+        pulsador(v_ejecutar, 232, 118, 100, 34, "Aceptar", 0x5AA6F4, 0x2468C8, AC_EJECUTAR_SÍ)
+        pulsador(v_ejecutar, 344, 118, 100, 34, "Cancelar", 0x8FA6C4, 0x5F7699, AC_EJECUTAR_NO)
+        repintada(v_ejecutar, 0, 0, 460, 170)
+    fin
+
+    función abre_ejecutar()
+        cierra_menú()
+        si v_ejecutar <> 0 entonces
+            traer_ventana(v_ejecutar, 0)
+            devolver
+        fin
+        v_ejecutar := cuadro("Ejecutar", 460, 170)
+        si v_ejecutar = 0 entonces devolver fin
+        pinta_ejecutar()
+    fin
+
+    ; abre lo escrito: un programa (sin extensión: .BIN), una carpeta (en
+    ; Mi equipo) o un documento (.TXT, .INI, .BAT: en el Bloc de notas)
+    variable programa_ej: arreglo [80] de byte
+    función ejecuta()
+        variable t, args: puntero a byte
+        variable n, i: nat32
+        variable punto: bool
+        t := saltar_espacios(texto_ejecutar)
+        n := 0
+        mientras t[n] <> 0 y t[n] <> ' ' y n < 79 hacer
+            programa_ej[n] := mayúscula(t[n])
+            n := n + 1
+        fin
+        programa_ej[n] := 0
+        si n = 0 entonces devolver fin
+        args := saltar_espacios(t + n)
+        si args[0] = 0 entonces args := nulo fin
+        ; ¿una carpeta?
+        si programa_ej[n - 1] = '\\' o programa_ej[n - 1] = ':' o es_carpeta_ruta(programa_ej) entonces
+            copiar(renglón, "/ABRIR ")
+            concatenar(renglón, programa_ej)
+            lanza("\\EQUIPO.BIN", renglón)
+            devolver
+        fin
+        punto := falso
+        i := 0
+        mientras i < n hacer
+            si programa_ej[i] = '.' entonces punto := cierto fin
+            si programa_ej[i] = '\\' entonces punto := falso fin
+            i := i + 1
+        fin
+        si punto y n > 4 y (iguales(dirección(programa_ej[n - 4]), ".TXT") o iguales(dirección(programa_ej[n - 4]), ".INI") o iguales(dirección(programa_ej[n - 4]), ".BAT")) entonces
+            lanza("\\BLOC.BIN", programa_ej)
+            devolver
+        fin
+        si no punto y n < 76 entonces concatenar(programa_ej, ".BIN") fin
+        si programa_ej[1] <> ':' y programa_ej[0] <> '\\' entonces
+            copiar(renglón, "\\")
+            concatenar(renglón, programa_ej)
+            copiar(programa_ej, renglón)
+        fin
+        lanza(programa_ej, args)
+    fin
+
+    función atiende_ejecutar()
+        variable e: Evento
+        variable a, n: nat32
+        mientras v_ejecutar <> 0 y saca_evento(v_ejecutar, 0, e) hacer
+            a := 0
+            si e.clase = EV_CERRAR o (e.clase = EV_TECLA y e.a = 27) entonces
+                a := AC_EJECUTAR_NO
+            sino si e.clase = EV_TECLA y e.a = '\n' entonces
+                a := AC_EJECUTAR_SÍ
+            sino si e.clase = EV_TECLA y e.a = 8 entonces
+                n := longitud(texto_ejecutar)
+                si n > 0 entonces texto_ejecutar[n - 1] := 0 fin
+                pinta_ejecutar()
+            sino si e.clase = EV_TECLA y e.a >= ' ' y e.a < 0x100 entonces
+                n := longitud(texto_ejecutar)
+                si n < 78 entonces
+                    texto_ejecutar[n] := byte(e.a)
+                    texto_ejecutar[n + 1] := 0
+                fin
+                pinta_ejecutar()
+            sino si e.clase = EV_RATÓN_BAJA entonces
+                a := pulsador_en(v_ejecutar, ent32(e.a), ent32(e.b))
+            fin
+            si a = AC_EJECUTAR_NO entonces
+                cierra_cuadro(v_ejecutar)
+            sino si a = AC_EJECUTAR_SÍ entonces
+                cierra_cuadro(v_ejecutar)
+                ejecuta()                       ; (lo escrito se queda para la vez siguiente)
+            fin
+        fin
+    fin
+
+    ; ---- Alt+Tab: la franja con las ventanas ----
+    variable alt_ids: arreglo [MAX_VENTANAS] de nat32
+    variable n_alt, alt_sel: nat32
+    variable alt_an: ent32
+
+    función lista_alt()
+        variable k: ent32
+        variable i: nat32
+        n_alt := 0
+        k := ent32(cuántas) - 1
+        mientras k >= 0 hacer
+            i := orden[k]
+            si ventanas[i].usada y ventanas[i].banderas yb OCULTA = 0 y (ventanas[i].banderas yb SIN_MARCO = 0 o ventanas[i].banderas yb COMPLETA <> 0) y ventanas[i].id <> v_alt entonces
+                alt_ids[n_alt] := ventanas[i].id
+                n_alt := n_alt + 1
+            fin
+            k := k - 1
+        fin
+    fin
+
+    ; el sitio de la ventana de ese número en «ventanas» (-1 si ya no está)
+    función sitio_de(id: nat32): ent32
+        variable i: nat32
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].id = id entonces devolver ent32(i) fin
+        fin
+        devolver -1
+    fin
+
+    constante ALT_CELDA = 76
+    constante ALT_AL = 128
+    función pinta_alt()
+        variable l: puntero a Lienzo
+        variable i, desde_, caben: nat32
+        variable x: ent32
+        variable k: ent32
+        l := lienzo_de(v_alt)
+        si l = nulo entonces devolver fin
+        redondeado(valor(l), 0, 0, alt_an, ALT_AL, 10, 0x1A56AC, 0x1A56AC, TODAS)
+        redondeado(valor(l), 2, 2, alt_an - 4, ALT_AL - 4, 9, 0x4E99EE, 0x1F62C0, TODAS)
+        caben := nat32((alt_an - 24) div ALT_CELDA)
+        desde_ := 0
+        si alt_sel >= caben entonces desde_ := alt_sel - caben + 1 fin
+        i := desde_
+        mientras i < n_alt y i < desde_ + caben hacer
+            x := 12 + ent32(i - desde_) * ALT_CELDA
+            si i = alt_sel entonces
+                redondeado(valor(l), x, 10, ALT_CELDA - 4, 72, 6, BLANCO, BLANCO, TODAS)
+                redondeado(valor(l), x + 2, 12, ALT_CELDA - 8, 68, 5, 0xDCEAFB, 0xB9D4F6, TODAS)
+            fin
+            k := sitio_de(alt_ids[i])
+            si k >= 0 y ventanas[k].dueño = 0 entonces
+                disquete(valor(l), x + 16, 24, 40)
+            sino
+                icono(valor(l), x + 16, 24, 40, IC_PROGRAMA, 0, 0)
+            fin
+            i := i + 1
+        fin
+        k := sitio_de(alt_ids[alt_sel])
+        si k >= 0 entonces
+            copiar_hasta(renglón, ventanas[k].título, nat32((alt_an - 24) div ANCHO_LETRA))
+            texto_negrita(valor(l), (alt_an - ancho_texto(renglón)) div 2 + 1, 95, renglón, 0x123F85)
+            texto_negrita(valor(l), (alt_an - ancho_texto(renglón)) div 2, 94, renglón, BLANCO)
+        fin
+        repintada(v_alt, 0, 0, alt_an, ALT_AL)
+    fin
+
+    función cierra_alt_tab()
+        si v_alt = 0 entonces devolver fin
+        cerrar_ventana(v_alt, 0)
+        v_alt := 0
+        si teclas_a = v_barra entonces teclas_a := 0 fin
+    fin
+
+    función alt_tab(adelante: bool)
+        si v_alt = 0 entonces
+            cierra_menú()
+            cerrar_emergente()
+            lista_alt()
+            si n_alt = 0 entonces devolver fin
+            alt_sel := 0
+            alt_an := ent32(n_alt) * ALT_CELDA + 24
+            si alt_an > pantalla.ancho - 40 entonces alt_an := pantalla.ancho - 40 fin
+            si alt_an < 260 entonces alt_an := 260 fin
+            v_alt := crear_ventana("alt-tab", (pantalla.ancho - alt_an) div 2, (pantalla.alto - ALTO_BARRA - ALT_AL) div 2, alt_an, ALT_AL, SIN_MARCO ob ENCIMA, 0)
+            si v_alt = 0 entonces devolver fin
+            teclas_a := v_barra                 ; (Esc, para no cambiar)
+            imprimir1("escritorio: Alt+Tab, con %u ventanas\n", n_alt)
+        fin
+        ; (la primera vez, a la siguiente de la activa: la de detrás)
+        si adelante entonces alt_sel := (alt_sel + 1) mod n_alt sino alt_sel := (alt_sel + n_alt - 1) mod n_alt fin
+        pinta_alt()
+    fin
+
+    función alt_suelta()
+        variable k: ent32
+        si v_alt = 0 entonces devolver fin
+        k := sitio_de(alt_ids[alt_sel])
+        imprimir1("escritorio: Alt+Tab, a la %u\n", alt_sel)
+        cierra_alt_tab()
+        si k >= 0 entonces traer_ventana(ventanas[k].id, ventanas[k].dueño) fin
+    fin
+
+    ; ---- Logo+D: enseñar el escritorio (lo minimiza todo; otra vez, lo devuelve) ----
+    variable escondidas: arreglo [MAX_VENTANAS] de nat32
+    variable n_escondidas: nat32
+    función enseña_escritorio()
+        variable i: nat32
+        variable k: ent32
+        si n_escondidas > 0 entonces
+            i := 0
+            mientras i < n_escondidas hacer
+                k := sitio_de(escondidas[i])
+                si k >= 0 y ventanas[k].banderas yb MINIMIZADA <> 0 entonces orden_ventana(escondidas[i], PIDE_RESTAURAR) fin
+                i := i + 1
+            fin
+            n_escondidas := 0
+            devolver
+        fin
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].banderas yb (SIN_MARCO ob OCULTA ob MINIMIZADA ob FIJA) = 0 entonces
+                escondidas[n_escondidas] := ventanas[i].id
+                n_escondidas := n_escondidas + 1
+                orden_ventana(ventanas[i].id, PIDE_MINIMIZAR)
+            fin
+        fin
+    fin
+
+    ; ---- Ctrl+Alt+Supr: el Administrador de tareas (los programas con ventana) ----
+    constante MAX_T = 12
+    constante T_AN = 470
+    constante T_AL = 330
+    variable t_ids: arreglo [MAX_T] de nat32    ; la ventana de cada renglón
+    variable n_t: nat32
+    variable t_sel: ent32
+    variable t_visto: nat32
+
+    función lista_tareas()
+        variable i: nat32
+        n_t := 0
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si n_t < MAX_T y ventanas[i].usada y ventanas[i].dueño <> 0 y (ventanas[i].banderas yb SIN_MARCO = 0 o ventanas[i].banderas yb COMPLETA <> 0) entonces
+                t_ids[n_t] := ventanas[i].id
+                n_t := n_t + 1
+            fin
+        fin
+        si t_sel >= ent32(n_t) entonces t_sel := ent32(n_t) - 1 fin
+        si t_sel < 0 y n_t > 0 entonces t_sel := 0 fin
+    fin
+
+    función pinta_tareas()
+        variable l: puntero a Lienzo
+        variable i: nat32
+        variable yy, k: ent32
+        variable c: nat32
+        variable d: arreglo [2] de nat32
+        l := lienzo_de(v_tareas)
+        si l = nulo entonces devolver fin
+        lista_tareas()
+        quita_pulsadores(v_tareas)
+        degradado(valor(l), 0, 0, T_AN, T_AL, 0xF4F8FE, 0xD6E6FA)
+        texto_negrita(valor(l), 16, 12, "Los programas abiertos", TINTA)
+        texto(valor(l), 16, 30, "Intro: ir a él. Supr: terminarlo (se pierde lo no guardado).", TINTA_SUAVE)
+        rectángulo(valor(l), 14, 54, T_AN - 28, 206, 0x4F6890)
+        rectángulo(valor(l), 15, 55, T_AN - 30, 204, BLANCO)
+        si n_t = 0 entonces texto(valor(l), 26, 66, "(no hay ningún programa con ventana)", TINTA_SUAVE) fin
+        i := 0
+        yy := 58
+        mientras i < n_t hacer
+            k := sitio_de(t_ids[i])
+            c := TINTA
+            si ent32(i) = t_sel entonces
+                rectángulo(valor(l), 17, yy, T_AN - 34, 22, AZUL_ELEGIDO)
+                c := BLANCO
+            fin
+            si k >= 0 entonces
+                copiar_hasta(renglón, ventanas[k].título, 40)
+                texto(valor(l), 26, yy + 3, renglón, c)
+                d[0] := ventanas[k].dueño
+                formatear(renglón, 32, "tarea %u", d)
+                texto(valor(l), T_AN - 110, yy + 3, renglón, c)
+                si ventanas[k].banderas yb MINIMIZADA <> 0 entonces texto(valor(l), T_AN - 200, yy + 3, "(recogida)", c) fin
+            fin
+            yy := yy + 22
+            i := i + 1
+        fin
+        pulsador(v_tareas, 16, 276, 120, 34, "Cambiar a", 0x5AA6F4, 0x2468C8, AC_T_CAMBIAR)
+        pulsador(v_tareas, 148, 276, 120, 34, "Terminar", 0xF59A5E, 0xD2571E, AC_T_TERMINAR)
+        pulsador(v_tareas, T_AN - 136, 276, 120, 34, "Cerrar", 0x8FA6C4, 0x5F7699, AC_T_CERRAR)
+        repintada(v_tareas, 0, 0, T_AN, T_AL)
+        t_visto := Ventanas.cambios
+    fin
+
+    función abre_tareas()
+        cierra_menú()
+        si v_tareas <> 0 entonces
+            traer_ventana(v_tareas, 0)
+            devolver
+        fin
+        v_tareas := cuadro("Administrador de tareas", T_AN, T_AL)
+        si v_tareas = 0 entonces devolver fin
+        t_sel := 0
+        pinta_tareas()
+    fin
+
+    función tareas_haz(a: nat32)
+        variable k: ent32
+        variable t: puntero a Tarea
+        si a = AC_T_CERRAR entonces
+            cierra_cuadro(v_tareas)
+            devolver
+        fin
+        si t_sel < 0 o nat32(t_sel) >= n_t entonces devolver fin
+        k := sitio_de(t_ids[t_sel])
+        si k < 0 entonces devolver fin
+        si a = AC_T_CAMBIAR entonces
+            traer_ventana(ventanas[k].id, ventanas[k].dueño)
+        sino si a = AC_T_TERMINAR entonces
+            t := tarea_de(ventanas[k].dueño)
+            si t <> nulo entonces
+                acabar_tarea(t)
+                tomar_consola()
+                imprimir2("escritorio: termino la tarea %u (%s)\n", t.id, nat32(dirección(ventanas[k].título[0])))
+                soltar_consola()
+            fin
+        fin
+    fin
+
+    función atiende_tareas()
+        variable e: Evento
+        variable a: nat32
+        mientras v_tareas <> 0 y saca_evento(v_tareas, 0, e) hacer
+            a := 0
+            si e.clase = EV_CERRAR o (e.clase = EV_TECLA y e.a = 27) entonces
+                a := AC_T_CERRAR
+            sino si e.clase = EV_TECLA y e.a = '\n' entonces
+                a := AC_T_CAMBIAR
+            sino si e.clase = EV_TECLA y e.a = TECLA_SUPR entonces
+                a := AC_T_TERMINAR
+            sino si e.clase = EV_TECLA y e.a = TECLA_ABAJO y t_sel + 1 < ent32(n_t) entonces
+                t_sel := t_sel + 1
+                pinta_tareas()
+            sino si e.clase = EV_TECLA y e.a = TECLA_ARRIBA y t_sel > 0 entonces
+                t_sel := t_sel - 1
+                pinta_tareas()
+            sino si e.clase = EV_RATÓN_BAJA entonces
+                a := pulsador_en(v_tareas, ent32(e.a), ent32(e.b))
+                si a = 0 y ent32(e.b) >= 58 y ent32(e.b) < 58 + ent32(n_t) * 22 entonces
+                    t_sel := (ent32(e.b) - 58) div 22
+                    pinta_tareas()
+                fin
+            fin
+            si a <> 0 entonces tareas_haz(a) fin
+        fin
+        si v_tareas <> 0 y Ventanas.cambios <> t_visto entonces pinta_tareas() fin
+    fin
+
+    ; ---- Impr Pant: una captura de la pantalla (o, con Alt, de la ventana activa) en \CAPTURAS ----
+    función pon32(p: puntero a byte, n: nat32)
+        p[0] := byte(n yb 0xFF)
+        p[1] := byte((n >> 8) yb 0xFF)
+        p[2] := byte((n >> 16) yb 0xFF)
+        p[3] := byte(n >> 24)
+    fin
+
+    variable ruta_captura: arreglo [40] de byte
+    función captura(de_la_activa: bool)
+        variable x, yy, an, al, f, c: ent32
+        variable m, i, fila, n: nat32
+        variable cab: arreglo [54] de byte
+        variable p: puntero a byte
+        variable q: puntero a nat32
+        variable d: arreglo [1] de nat32
+        x := 0
+        yy := 0
+        an := pantalla.ancho
+        al := pantalla.alto
+        si de_la_activa y activa >= 0 y no en_tapiz entonces
+            x := ventanas[activa].px
+            yy := ventanas[activa].py
+            an := ventanas[activa].ancho
+            al := ventanas[activa].alto
+            si x < 0 entonces
+                an := an + x
+                x := 0
+            fin
+            si yy < 0 entonces
+                al := al + yy
+                yy := 0
+            fin
+            si x + an > pantalla.ancho entonces an := pantalla.ancho - x fin
+            si yy + al > pantalla.alto entonces al := pantalla.alto - yy fin
+        fin
+        si an <= 0 o al <= 0 entonces devolver fin
+        si del_sistema = Unidades.NINGUNA o unidad_en_memoria() o no escribible(del_sistema) entonces
+            aviso("No se puede guardar la captura: el disco no deja escribir.")
+            devolver
+        fin
+        crear_carpeta(del_sistema, "\\CAPTURAS")
+        n := 1
+        mientras n < 10000 hacer
+            d[0] := n
+            formatear(ruta_captura, 40, "\\CAPTURAS\\CAPT%04u.BMP", d)
+            m := abrir_archivo(del_sistema, ruta_captura, PARA_LEER)
+            si m >= PRIMER_ERROR entonces romper fin
+            cerrar_archivo(m)
+            n := n + 1
+        fin
+        fila := (nat32(an) * 3 + 3) yb nob 3
+        p := reservar(fila)
+        si p = nulo entonces devolver fin
+        m := abrir_archivo(del_sistema, ruta_captura, PARA_CREAR)
+        si m >= PRIMER_ERROR entonces
+            liberar(p)
+            aviso("No se puede guardar la captura en \\CAPTURAS.")
+            devolver
+        fin
+        ; la cabecera de un BMP de 24 bits, de abajo arriba
+        para i desde 0 hasta 53 hacer cab[i] := 0 fin
+        cab[0] := 'B'
+        cab[1] := 'M'
+        pon32(dirección(cab[2]), 54 + fila * nat32(al))
+        pon32(dirección(cab[10]), 54)
+        pon32(dirección(cab[14]), 40)
+        pon32(dirección(cab[18]), nat32(an))
+        pon32(dirección(cab[22]), nat32(al))
+        cab[26] := 1
+        cab[28] := 24
+        pon32(dirección(cab[34]), fila * nat32(al))
+        pon32(dirección(cab[38]), 2835)
+        pon32(dirección(cab[42]), 2835)
+        escribir_archivo(m, cab, 54)
+        para i desde 0 hasta fila - 1 hacer p[i] := 0 fin
+        f := al - 1
+        mientras f >= 0 hacer
+            q := fila_de_pantalla(yy + f) + nat32(x)
+            c := 0
+            mientras c < an hacer
+                p[nat32(c) * 3] := byte(q[c] yb 0xFF)
+                p[nat32(c) * 3 + 1] := byte((q[c] >> 8) yb 0xFF)
+                p[nat32(c) * 3 + 2] := byte((q[c] >> 16) yb 0xFF)
+                c := c + 1
+            fin
+            escribir_archivo(m, p, fila)
+            f := f - 1
+        fin
+        cerrar_archivo(m)
+        liberar(p)
+        tomar_consola()
+        d[0] := nat32(an)
+        imprimir2("escritorio: captura de %u puntos de ancho en %s\n", d[0], nat32(dirección(ruta_captura[0])))
+        soltar_consola()
+        copiar(texto_aviso, "Guardada en ")
+        concatenar(texto_aviso, ruta_captura)
+        globo_título := "Captura de la pantalla"
+        globo(texto_aviso)
+    fin
+
+    ; ---- lo que llega a la barra de tareas: el logo y los atajos de todo el sistema ----
+    función atajo(k: nat32): bool
+        variable a: nat32
+        si k = TECLA_LOGO entonces
+            cierra_alt_tab()
+            si menú_abierto entonces cierra_menú() sino abre_menú() fin
+        sino si k = TECLA_ALT_TAB o k = TECLA_ALT_MAYÚS_TAB entonces
+            alt_tab(k = TECLA_ALT_TAB)
+        sino si k = TECLA_ALT_SUELTA entonces
+            alt_suelta()
+        sino si k = 27 y v_alt <> 0 entonces
+            cierra_alt_tab()                    ; Esc con la franja: no se cambia
+        sino si k = TECLA_ALT_F4 entonces
+            cierra_menú()
+            cerrar_emergente()
+            si activa < 0 o en_tapiz entonces abre_apagar() sino pedir_cierre(ventanas[activa].id) fin
+        sino si k = TECLA_ALT_ESPACIO entonces
+            cierra_menú()
+            si activa >= 0 y no en_tapiz y ventanas[activa].banderas yb SIN_MARCO = 0 entonces
+                menú_de_ventana(ventanas[activa].id, ventanas[activa].px + BORDE, ventanas[activa].py + ALTO_TÍTULO)
+            fin
+        sino si k = TECLA_TAREAS entonces
+            abre_tareas()
+        sino si k = TECLA_IMPR entonces
+            captura(falso)
+        sino si k = TECLA_ALT_IMPR entonces
+            captura(cierto)
+        sino si k = 0x13B entonces            ; F1, en el tapiz
+            abre_ayuda()
+        sino si k >= TECLA_LOGO_LETRA y k < TECLA_LOGO_LETRA + 26 entonces
+            a := k - TECLA_LOGO_LETRA + 'a'
+            cierra_menú()
+            según a
+                caso 'e': lanza("\\EQUIPO.BIN", nulo)
+                caso 'd': enseña_escritorio()
+                caso 'r': abre_ejecutar()
+                caso 'l': si Ajustes.usuario[0] <> 0 entonces cierra_sesión() fin
+            fin
+        sino
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
     ;  Los sucesos de las ventanas del escritorio
     ; -------------------------------------------------------------------------
     ; el menú de una ventana (el del botón secundario en su título o en su
@@ -2301,60 +2711,22 @@ módulo Escritorio
         grises := 0
         si m yb (MINIMIZADA ob MAXIMIZADA) = 0 entonces grises := grises ob 1 fin
         si m yb (MINIMIZADA ob MAXIMIZADA) <> 0 entonces grises := grises ob 2 fin
-        si m yb (MINIMIZADA ob FIJA) <> 0 entonces grises := grises ob 4 fin
-        si m yb (MAXIMIZADA ob FIJA) <> 0 entonces grises := grises ob 8 fin
+        si m yb (MINIMIZADA ob MAXIMIZADA ob FIJA) <> 0 entonces grises := grises ob 4 fin   ; (MENÚ) «Tamaño»
+        si m yb (MINIMIZADA ob FIJA) <> 0 entonces grises := grises ob 8 fin
+        si m yb (MAXIMIZADA ob FIJA) <> 0 entonces grises := grises ob 16 fin
         menú_dato := id
-        abrir_emergente(x, yy, "Restaurar|Mover|Minimizar|Maximizar|-|Cerrar", grises, 0, ME_VENTANA)
+        abrir_emergente(x, yy, "Restaurar|Mover|Tamaño|Minimizar|Maximizar|-|Cerrar", grises, 0, ME_VENTANA)
     fin
 
+    ; (MENÚ) los sucesos del menú Inicio (inicio.cas) y lo que se ha elegido en él
     función atiende_menú()
-        variable e: Evento
-        variable n: ent32
-        mientras saca_evento(v_menú, 0, e) hacer
-            según e.clase
-                caso EV_FUERA:
-                    cierra_menú()
-                    menú_cerrado_en := tics
-                caso EV_RATÓN_MUEVE:
-                    n := opción_en(ent32(e.a), ent32(e.b))
-                    si n <> elegida y menú_abierto entonces
-                        elegida := n
-                        pinta_menú()
-                    fin
-                caso EV_RATÓN_BAJA:
-                    n := opción_en(ent32(e.a), ent32(e.b))
-                    si n >= 0 y menú_abierto entonces
-                        si e.c yb BOTÓN_DERECHO <> 0 entonces
-                            ; el botón secundario en un programa o un documento: «Abrir»
-                            si opciones[n].acción <> AM_APAGAR entonces
-                                menú_acción := opciones[n].acción
-                                menú_dato := opciones[n].dato
-                                abrir_emergente(ent32(e.a), pantalla.alto - ALTO_BARRA - menú_alto + ent32(e.b), "Abrir", 0, 0, ME_INICIO)
-                            fin
-                        sino
-                            cierra_menú()
-                            haz(opciones[n].acción, opciones[n].dato)
-                        fin
-                    fin
-                caso EV_TECLA:
-                    si menú_abierto entonces
-                        si e.a = 27 entonces
-                            cierra_menú()
-                        sino si e.a = TECLA_ABAJO entonces
-                            elegida := elegida + 1
-                            si elegida >= ent32(n_opciones) entonces elegida := 0 fin
-                            pinta_menú()
-                        sino si e.a = TECLA_ARRIBA entonces
-                            elegida := elegida - 1
-                            si elegida < 0 entonces elegida := ent32(n_opciones) - 1 fin
-                            pinta_menú()
-                        sino si e.a = '\n' y elegida >= 0 entonces
-                            n := elegida
-                            cierra_menú()
-                            haz(opciones[n].acción, opciones[n].dato)
-                        fin
-                    fin
-            fin
+        variable abierto_antes: bool
+        abierto_antes := menú_abierto
+        atiende_inicio()
+        si abierto_antes y no menú_abierto entonces pinta_barra() fin
+        si hay_pedido entonces
+            hay_pedido := falso
+            haz(pedido_acción, pedido_dato)
         fin
     fin
 
@@ -2362,8 +2734,8 @@ módulo Escritorio
         variable e: Evento
         variable n: ent32
         mientras saca_evento(v_barra, 0, e) hacer
-            si e.clase = EV_TECLA y e.a = TECLA_LOGO entonces
-                si menú_abierto entonces cierra_menú() sino abre_menú() fin
+            si e.clase = EV_TECLA entonces
+                atajo(e.a)                      ; (MENÚ) el logo y los atajos de todo el sistema
             sino si e.clase = EV_RATÓN_BAJA entonces
                 si ent32(e.a) < INICIO_ANCHO entonces
                     ; «Inicio»: abre el menú (si no se acaba de cerrar con este mismo clic)
@@ -2458,13 +2830,14 @@ módulo Escritorio
                 según opción
                     caso 0: orden_ventana(menú_dato, PIDE_RESTAURAR)
                     caso 1: orden_ventana(menú_dato, PIDE_MOVER)
-                    caso 2: orden_ventana(menú_dato, PIDE_MINIMIZAR)
-                    caso 3: orden_ventana(menú_dato, PIDE_MAXIMIZAR)
-                    caso 5: orden_ventana(menú_dato, PIDE_CERRAR)
+                    caso 2: orden_ventana(menú_dato, PIDE_TAMAÑO)     ; (MENÚ)
+                    caso 3: orden_ventana(menú_dato, PIDE_MINIMIZAR)
+                    caso 4: orden_ventana(menú_dato, PIDE_MAXIMIZAR)
+                    caso 6: orden_ventana(menú_dato, PIDE_CERRAR)
                 fin
             caso ME_INICIO:
-                cierra_menú()
-                si opción = 0 entonces haz(menú_acción, menú_dato) fin
+                elegido_inicio(opción)          ; (MENÚ)
+                si no menú_abierto entonces pinta_barra() fin
             caso ME_ICONO:
                 si opción = 0 y menú_dato < n_iconos entonces haz(iconos[menú_dato].acción, iconos[menú_dato].dato) fin
                 si opción = 1 y menú_dato < n_iconos entonces haz(AM_DISPOSITIVOS, 0) fin     ; (dispositivos)
@@ -2633,7 +3006,10 @@ módulo Escritorio
             atiende_menú()
             atiende_barra()
             atiende_fondo()
-            atiende_cuadro(v_apagar)
+            atiende_apagar()                    ; (MENÚ) y los cuadros nuevos
+            atiende_sesión()
+            atiende_ejecutar()
+            atiende_tareas()
             atiende_cuadro(v_config)
             atiende_cuadro(v_aviso)
             atiende_cuadro(v_acerca)
@@ -2732,8 +3108,8 @@ módulo Escritorio
         v_barra := crear_ventana("barra", 0, pantalla.alto - ALTO_BARRA, pantalla.ancho, ALTO_BARRA, SIN_MARCO ob ENCIMA, 0)
         prepara_dock()                          ; (dock) encima de la barra
         pon_accesos()
-        v_menú := crear_ventana("menú", 0, pantalla.alto - ALTO_BARRA - menú_alto, MENÚ_ANCHO, menú_alto, SIN_MARCO ob ENCIMA ob OCULTA ob REDONDA, 0)
-        si v_barra = 0 o v_menú = 0 entonces
+        prepara_inicio()                        ; (MENÚ) el menú Inicio se hace al abrirlo (inicio.cas)
+        si v_barra = 0 entonces
             escribir("escritorio: no hay memoria para la barra de tareas\n")
             devolver 0
         fin

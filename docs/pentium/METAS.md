@@ -19,8 +19,12 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] **Rueda del ratón en todo el entorno**: menús, listas y rejillas, Explorador, Bloc de notas, Consola, cuadros, ClicGest (pedido de Carlos 21/11)
 - [x] ~~Explorador de archivos: árbol de carpetas, vistas (iconos, lista, detalles), copiar/cortar/pegar, arrastrar y soltar, papelera, buscar, propiedades, abrir con…, miniaturas de imágenes~~ (21/11; falta escribir nombres largos)
 - [x] ~~Dock: barra de lanzamiento con los programas favoritos y los abiertos, que se pueda fijar y quitar~~ (21/11)
+- [x] ~~Menú Inicio con todos los programas («Todos los programas» con carpetas, por el tipo de cada paquete), fijados y más usados, y Cerrar sesión / Reiniciar / Apagar equipo siempre a la vista~~ — rama pentium-menu (21/11: docs/PENTIUM.md, «El menú Inicio y los atajos de teclado»)
+- [x] ~~La rueda del ratón en todo el entorno: menús y submenús largos, rejillas de controles.cas, Bloc, Consola (historial), Explorador, Administrador de dispositivos, Actualizaciones; Ctrl+rueda, la letra o la vista~~ — ramas pentium-menu y pentium-rueda (21/11; ClicGest, en su versión siguiente)
+- [x] ~~Atajos de teclado de todo el sistema: Alt+F4, Alt+Tab, Logo (E, D, R, L), Ctrl+Esc, Alt+Espacio, Ctrl+Alt+Supr (Administrador de tareas), Impr Pant, F1~~ — rama pentium-menu (21/11)
 - [ ] Barra de tareas: agrupar ventanas, vista previa, bandeja con más iconos (sonido, Wi-Fi)
-- [ ] Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido, ratón, teclado, red y Wi-Fi, energía, usuarios, programas (hecho: actualizaciones)
+- [ ] Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido, ratón, teclado, red y Wi-Fi, energía, usuarios, programas (hecho: actualizaciones y «Programas instalados»)
+- [x] ~~**Gestor de programas instalados** por tipos para desinstalarlos (como «Agregar o quitar programas»): árbol por tipos, tamaño, fecha, dependencias, desinstalar (con lo que lo necesita), reparar, ver archivos, los programas sueltos con «Borrar»; y en la misma ventana, «Programas y actualizaciones» con pestañas Pendientes, Al día, Instaladas y Sin instalar, con búsqueda~~ — rama pentium-programas (21/11: PROGRAMA.BIN, el campo `tipo=` de los paquetes; docs/PENTIUM.md §13)
 - [ ] Temas y fondo de escritorio; letras TrueType del sistema; protector de pantalla
 - [ ] Portapapeles con imágenes y archivos; arrastrar y soltar entre programas
 - [ ] Ayuda del sistema con buscador

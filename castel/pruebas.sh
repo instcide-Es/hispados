@@ -183,6 +183,27 @@
 #      de FASM (ensamblado ahí); FASMW abriendo y ensamblando HELLO.ASM, y
 #      ese HELLO.EXE; Mi equipo abriendo un .EXE; y WSOCK32 (REDPRUE) contra
 #      el servidor HTTP de aquí.
+#  23. (MENÚ, SOLO=menu) El menú Inicio: su forma (fijados, más usados,
+#      Todos los programas, la columna de la derecha y el pie siempre a la
+#      vista, a 800x600, 640x480 y 1024x600), las carpetas por el «tipo» de
+#      los accesos, un submenú más alto que la pantalla (flechas, rueda),
+#      la flecha en diagonal, el teclado (logo, letra inicial, flechas,
+#      Esc), Mis documentos; un menú emergente de 30 opciones; y los atajos
+#      de todo el sistema: Alt+Tab, Alt+Espacio (Tamaño con las flechas),
+#      Ctrl+Alt+Supr, Logo+R, Logo+D, Impr Pant (el BMP en \CAPTURAS),
+#      Alt+F4 (en el tapiz: Apagar, con Cerrar sesión), F1 y Logo+E.
+#  23 bis. (RUEDA, SOLO=rueda) La rueda del ratón en los programas: la
+#      Consola (el historial de lo que ha subido, y vuelve abajo al
+#      teclear), el Bloc de notas (sin mover el cursor), Mi equipo (iconos,
+#      lista y detalles; Ctrl+rueda cambia la vista), el Administrador de
+#      dispositivos y MUESTRA (las rejillas de controles.cas: sin mover lo
+#      elegido; Ctrl+rueda, la letra).
+#  24. (PROGRAMAS, SOLO=programas) «Programas instalados»: los tipos de los
+#      paquetes (tipo=, en la cabecera y en el catálogo), PAQUETES LISTA /TIPO,
+#      los programas sueltos, lo imprescindible, QUITA /DEPENDIENTES, REPARA,
+#      un corte a mitad de quitar, y la ventana PROGRAMA.BIN (desde
+#      Configuración y desde las actualizaciones; desinstalar con su barra,
+#      los archivos, reparar y borrar un suelto a la Papelera), con capturas.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -204,6 +225,9 @@
 #   SOLO=ssh ./pruebas.sh         la primera y la 20 (SSH, WireGuard y Tailscale; con HEADSCALE=binario, también Tailscale)
 #   SOLO=lectores ./pruebas.sh    la primera y la 21 (los CD y DVD, y las imágenes de disco)
 #   SOLO=win32 ./pruebas.sh       la primera y la 22 (los programas de Windows y DirectX)
+#   SOLO=rueda ./pruebas.sh       la primera y la 23 bis (la rueda del ratón en los programas)
+#   SOLO=menu ./pruebas.sh        la primera y la 23 (el menú Inicio, los menús largos y los atajos)
+#   SOLO=programas ./pruebas.sh   la primera y la 24 (PROGRAMAS: «Programas instalados», los tipos, reparar)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -267,7 +291,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -1263,12 +1287,12 @@ echo "== Hispa-Pentium: el escritorio (modo gráfico, ratón, ventanas, barra de
 cp $P/d16.img $G/e.img
 hora1=$(date +%H:%M); hora2=$(date -d "+1 minute" +%H:%M)
 CAPTURAS=$G ESCRIBE=1 DISCO=$G/e.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":captura e1" \
-  ":clic 40 585" ":captura e2" ":clic 80 293" ":pausa 2" ":escribe Querida señora: ¿qué tal está?" ":tecla ret" ":escribe Adiós." ":captura e3" \
+  ":clic 40 585" ":captura e2" ":clic 80 176" ":pausa 2" ":escribe Querida señora: ¿qué tal está?" ":tecla ret" ":escribe Adiós." ":captura e3" \
   ":tecla f2" ":pausa 1" ":captura e4" ":arrastra 300 75 400 175" ":raton 600 450" ":captura e5" ":doble 400 175" ":pausa 1" ":captura e6" \
   ":doble 400 14" ":pausa 1" ":clic 630 176" ":captura e7" ":clic 150 585" ":captura e8" \
-  ":clic 40 585" ":clic 80 329" ":pausa 3" "eco hola desde la ventana" "bucle" ":pausa 1" ":tecla ctrl-c" ":pausa 1" "ver" ":captura e9" \
-  "salir" ":pausa 1" ":captura e10" ":clic 40 585" ":clic 250 500" ":captura e11" ":clic 550 340" ":pausa 2" ":captura e12" ":clic 570 399" \
-  ":clic 678 176" ":pausa 1" ":captura e13" ":clic 40 585" ":clic 230 545" ":captura e14" ":clic 275 327" > $G/escritorio.sal 2>&1
+  ":clic 40 585" ":clic 80 216" ":pausa 3" "eco hola desde la ventana" "bucle" ":pausa 1" ":tecla ctrl-c" ":pausa 1" "ver" ":captura e9" \
+  "salir" ":pausa 1" ":captura e10" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":captura e11" ":clic 550 340" ":pausa 2" ":captura e12" ":clic 570 399" \
+  ":clic 678 176" ":pausa 1" ":captura e13" ":clic 40 585" ":clic 360 545" ":captura e14" ":clic 275 327" > $G/escritorio.sal 2>&1
 S=$G/escritorio.sal
 mira "«escritorio» en la línea del cargador: el núcleo pone el modo gráfico (VBE de Bochs/QEMU, 800x600 con 32 bits) y arranca el escritorio" \
   "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha puesto el núcleo, por la VBE de Bochs/QEMU), tapiz 0"
@@ -1277,10 +1301,10 @@ miracap "el escritorio: el tapiz con el disquete y su nombre, la barra de tareas
 if cap $G/e1.ppm negrita 740 570 752 580 $hora1 || cap $G/e1.ppm negrita 740 570 752 580 $hora2; then ok "el reloj de la bandeja da la hora del PC (la de la CMOS: $hora1)"
 else ko "el reloj de la bandeja no da la hora ($hora1)"; fi
 miracap "la flecha del ratón está pintada donde está el ratón (y solo ahí)" e2 rgb 40 585 10233F rgb 42 589 FFFFFF nrgb 400 300 10233F
-miracap "el menú Inicio: dos columnas (Programas a la izquierda, Documentos y Configuración a la derecha) y «Apagar el equipo» abajo" e2 \
-  negrita 50 195 66 205 Hispa-Pentium negrita 4 244 20 256 Programas negrita 36 280 50 290 "Bloc de notas" negrita 36 316 50 328 Consola \
-  negrita 176 244 190 256 Documentos texto 204 278 220 290 LEEME.TXT negrita 204 488 220 498 "Configuración" negrita 170 532 182 542 "Apagar el equipo" \
-  rgb 100 400 FFFFFF rgb 250 400 DCEAFB
+miracap "el menú Inicio (MENÚ): los fijados a la izquierda, «Todos los programas» abajo, Mis documentos y Configuración a la derecha, y Cerrar sesión, Reiniciar y Apagar equipo en el pie" e2 \
+  negrita 54 104 62 112 Hispa-Pentium negrita 46 155 54 163 "Bloc de notas" negrita 46 195 54 203 Consola negrita 58 492 66 500 "Todos los programas" \
+  negrita 256 159 264 167 "Mis documentos" negrita 256 226 264 234 "Configuración" negrita 68 533 76 541 "Cerrar sesión" negrita 210 533 222 541 Reiniciar \
+  negrita 320 533 328 541 "Apagar equipo" rgb 100 400 FFFFFF rgb 300 450 DCEAFB
 mira "el menú lanza el Bloc de notas (un programa del anillo 3, del disco)" "escritorio: lanzo .BLOC.BIN (la tarea [0-9]*)"
 miracap "el Bloc de notas en su ventana: el título con su nombre, su botón en la barra de tareas, y lo tecleado (con eñe, acentos y ¿?) dentro" e3 \
   negrita 112 64 124 72 "NOTAS.TXT - Bloc de notas" texto 130 572 140 580 "NOTAS.TXT - Blo" texto 94 146 102 156 "Querida señora: ¿qué tal está?" \
@@ -1308,8 +1332,8 @@ miracap "el tapiz se cambia desde Configuración (a «Verde»), y se repinta tod
   negrita 196 126 206 136 "Configuración"
 miracap "el botón de cerrar acaba el Bloc de notas (sin cambios pendientes): ni ventana ni botón en la barra" e13 \
   notexto 180 150 260 180 "NOTAS.TXT - Bloc de notas" notexto 100 570 200 582 "NOTAS.TXT - Blo" notexto 180 120 220 140 "Configuración"
-miracap "«Apagar el equipo»: el cuadro con Apagar, Reiniciar y Cancelar" e14 negrita 216 190 228 200 "Apagar el equipo" \
-  negrita 244 314 258 324 Apagar negrita 360 314 376 324 Reiniciar negrita 494 314 508 324 Cancelar
+miracap "«Apagar el equipo»: el cuadro con Apagar, Reiniciar, Cerrar sesión y Cancelar (MENÚ)" e14 negrita 170 190 180 200 "Apagar el equipo" \
+  negrita 196 315 204 323 Apagar negrita 304 315 312 323 Reiniciar negrita 548 315 556 323 Cancelar
 mira "«Apagar» apaga (el núcleo acaba con su código)" "^escritorio: apagar" "^\[código 5\]"
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda la sesión del escritorio, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado durante la sesión del escritorio:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
@@ -1326,7 +1350,7 @@ CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.
   ":doble 60 110" ":pausa 2" ":escribe Hola mundo cruel" ":tecla ret" ":escribe segunda linea" ":doble 150 158" ":raton 300 300" ":captura a3" ":clicd 155 158" ":captura a4" ":clic 175 175" \
   ":captura a5" ":tecla end" ":tecla ctrl-v" ":tecla shift-left" ":tecla shift-left" ":tecla shift-left" ":captura a6" ":tecla ctrl-c" ":tecla right" ":tecla ctrl-v" \
   ":triple 150 174" ":captura a7" ":escribe X" ":clic 98 158" ":mayusclic 138 158" ":captura a8" ":tecla delete" ":arrastra 98 158 122 160" ":clic 200 100" ":captura a9" ":clic 220 152" \
-  ":arrastra 595 455 695 505" ":pausa 1" ":captura a10" ":clic 40 585" ":clicd 80 329" ":captura a11" ":clic 100 346" ":pausa 3" ":clicd 400 400" ":captura a12" ":clic 420 440" \
+  ":arrastra 595 455 695 505" ":pausa 1" ":captura a10" ":clic 40 585" ":clicd 80 216" ":captura a11" ":clic 100 228" ":pausa 3" ":clicd 400 400" ":captura a12" ":clic 420 440" \
   ":pausa 1" ":captura a13" > $G/menus.sal 2>&1
 S=$G/menus.sal
 miracap "los iconos del tapiz (Mi equipo, Bloc de notas, Consola), con su rótulo en letra normal" a1 texto 24 50 32 58 "Mi equipo" texto 8 126 16 134 "Bloc de notas" \
@@ -1351,7 +1375,7 @@ miracap "la barra de menús del Bloc (Archivo, Edición, Ayuda): «Edición» ab
   texto 178 116 186 124 "Cortar            Ctrl+X" texto 178 140 186 148 "Copiar            Ctrl+C" texto 178 197 186 205 "Seleccionar todo  Ctrl+A" rgb 99 151 $RES
 miracap "arrastrar la esquina de la ventana la cambia de tamaño, y el programa vuelve a pintar lo suyo (el pie, más abajo; el papel, más ancho)" a10 \
   texto 94 480 102 488 "Copiado (3 letras)." texto 118 146 126 154 uelmundondo rgb 650 300 FFFFFF rgb 693 300 1A5AB6 10 notexto 90 430 110 446 NOTAS.TXT
-miracap "el botón secundario en un programa del menú Inicio: «Abrir»" a11 texto 90 334 98 342 Abrir negrita 36 280 50 290 "Bloc de notas"
+miracap "el botón secundario en un programa del menú Inicio: «Abrir» y «Quitar del menú Inicio» (MENÚ)" a11 texto 90 220 98 228 Abrir texto 90 244 98 252 "Quitar del menú Inicio" negrita 46 155 54 163 "Bloc de notas"
 mira "y «Abrir» lo lanza" "^escritorio: lanzo .CONSOLA.BIN (la tarea [0-9]*)"
 miracap "el botón secundario en la Consola: Copiar (en gris: no hay nada seleccionado) y Pegar" a12 texto 410 405 418 413 Copiar texto 410 429 418 437 Pegar
 miracap "el portapapeles es del sistema: lo copiado en el Bloc de notas (con el menú Edición) se pega en la Consola" a13 texto 120 140 132 300 "C:\\> cr"
@@ -1359,16 +1383,16 @@ if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excep
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
 # la Consola: seleccionar y copiar; el menú de una ventana (en el título y en la barra); Mi equipo; Acerca de
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":doble 60 186" ":pausa 4" ":doble 150 140" ":raton 400 300" ":captura b1" ":tecla ctrl-c" \
-  ":clicd 300 75" ":captura b2" ":clic 320 164" ":pausa 1" ":captura b3" ":clicd 180 585" ":captura b4" ":clic 200 445" ":pausa 1" ":captura b5" ":arrastra 743 523 643 423" \
-  ":pausa 1" ":captura b6" ":clic 40 585" ":clic 80 293" ":pausa 2" ":tecla ctrl-v" ":captura b7" ":clicd 300 75" ":clic 320 197" ":pausa 1" ":captura b8" ":doble 60 40" ":pausa 2" \
+  ":clicd 300 75" ":captura b2" ":clic 320 188" ":pausa 1" ":captura b3" ":clicd 180 585" ":captura b4" ":clic 200 421" ":pausa 1" ":captura b5" ":arrastra 743 523 643 423" \
+  ":pausa 1" ":captura b6" ":clic 40 585" ":clic 80 176" ":pausa 2" ":tecla ctrl-v" ":captura b7" ":clicd 300 75" ":clic 320 221" ":pausa 1" ":captura b8" ":doble 60 40" ":pausa 2" \
   ":captura b9" ":doble 330 160" ":pausa 1" ":raton 600 440" ":captura b10" ":doble 356 310" ":pausa 2" ":captura b11" ":clicd 150 540" ":clic 200 523" ":pausa 1" ":captura b12" > $G/menus2.sal 2>&1
 S=$G/menus2.sal
 mira "dos clics en el icono «Consola» la abren" "escritorio: lanzo .CONSOLA.BIN (la tarea [0-9]*)"
 miracap "en la Consola, dos clics seleccionan una palabra de lo que hay en la pantalla" b1 rgb 97 133 $RES rgb 206 146 $RES nrgb 213 133 $RES texto 92 128 100 136 "Hispa-Pentium:"
-miracap "el botón secundario en el título de una ventana: Restaurar, Mover, Minimizar, Maximizar y Cerrar" b2 texto 310 80 318 88 Restaurar texto 310 104 318 112 Mover \
-  texto 310 128 318 136 Minimizar texto 310 152 318 160 Maximizar texto 310 185 318 193 Cerrar
+miracap "el botón secundario en el título de una ventana: Restaurar, Mover, Tamaño (MENÚ), Minimizar, Maximizar y Cerrar" b2 texto 310 80 318 88 Restaurar texto 310 104 318 112 Mover \
+  texto 310 128 318 136 "Tamaño" texto 310 152 318 160 Minimizar texto 310 176 318 184 Maximizar texto 310 209 318 217 Cerrar
 miracap "«Maximizar», desde ese menú, la maximiza" b3 negrita 24 2 36 10 Consola rgb 797 300 1A5AB6 notexto 300 70 330 200 Minimizar
-miracap "el botón secundario en su botón de la barra de tareas saca el mismo menú (hacia arriba)" b4 texto 190 433 198 441 Restaurar texto 190 542 198 550 Cerrar
+miracap "el botón secundario en su botón de la barra de tareas saca el mismo menú (hacia arriba)" b4 texto 190 409 198 417 Restaurar texto 190 542 198 550 Cerrar
 miracap "y «Restaurar» la devuelve a su tamaño" b5 negrita 112 64 124 72 Consola rgb 780 300 154C9C 60 nrgb 780 300 0C1626
 miracap "la Consola también cambia de tamaño por la esquina (su pantalla sigue siendo de 80 x 25: lo que no cabe no se ve)" b6 rgb 600 300 0C1626 nrgb 700 300 0C1626 \
   nrgb 400 480 0C1626 negrita 112 64 124 72 Consola
@@ -1483,8 +1507,8 @@ if sano $G/ex.img; then ok "y el disco, sano (fsck.fat)"; else ko "el disco ha q
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
 # la orden ESCRITORIO del intérprete, y abrir un documento desde el menú
-CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" escritorio ":pausa 2" ":clic 40 585" ":clic 240 291" ":pausa 2" \
-  ":captura o1" ":clic 40 585" ":clic 230 545" ":clic 533 327" ":captura o2" > $G/orden.sal 2>&1
+CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" escritorio ":pausa 2" ":clic 40 585" ":clic 300 171" ":pausa 1" ":clic 500 171" ":pausa 2" \
+  ":captura o1" ":clic 40 585" ":clic 360 545" ":clic 533 327" ":captura o2" > $G/orden.sal 2>&1
 S=$G/orden.sal
 mira "la orden ESCRITORIO del intérprete de órdenes (por la llamada al sistema) pone en marcha el escritorio, y ese intérprete acaba" \
   "^C:.>escritorio$" "^escritorio: en marcha, 800 x 600" "^El escritorio está en marcha\.$" "^ORDENES.BIN ha acabado con el código 0"
@@ -1497,7 +1521,7 @@ CAPTURAS=$G DISCO=$P/d16.img ARRANQUE="escritorio modo=1024x768 bits=24 tapiz=1"
 S=$G/modo.sal
 mira "con «modo=1024x768 bits=24 tapiz=1» en la línea del cargador, ese modo y ese tapiz" "^escritorio: en marcha, 1024 x 768 con 24 bits por punto .*, tapiz 1"
 miracap "a 1024x768 y con 24 bits por punto se ve igual: la barra abajo, el menú Inicio y el tapiz «Azul»" m1 tam 1024 768 negrita 30 738 46 748 Inicio \
-  negrita 36 448 50 458 "Bloc de notas" rgb 500 3 16468E 8
+  negrita 46 323 54 331 "Bloc de notas" rgb 500 3 16468E 8
 # sin tarjeta gráfica que valga, se dice y la consola sigue
 VGA=none $AQUI/nucleo32/probar.sh "" escritorio hora apagar > $G/sinvga.sal 2>&1
 S=$G/sinvga.sal
@@ -1521,17 +1545,17 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     sleep 6; monu "sendkey ret" 12
     monu "mouse_move -360 285" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 0.8; monu "mouse_move 300 -200" 0.6
     monu "screendump $G/u1.ppm" 0.6
-    monu "mouse_move -260 -92" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 2.5; monu "mouse_move 400 200" 0.6
+    monu "mouse_move -130 -105" 0.2; monu "mouse_move -130 -104" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 2.5; monu "mouse_move 400 200" 0.6
     monu "screendump $G/u2.ppm" 0.6
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
     # (SSH, TAILSCALE: 23 programas: SSH, SSHD, WG y TAILSCAL también van como módulos)
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 26 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 27 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
-      negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
+      negrita 30 570 46 580 Inicio negrita 46 155 54 163 "Bloc de notas" negrita 256 159 264 167 "Mis documentos"
     if grep -q "escritorio: lanzo .BLOC.BIN" $S && cap $G/u2.ppm negrita 112 64 124 72 "NOTAS.TXT - Bloc de notas"; then
       ok "y desde su menú se lanza el Bloc de notas (de la memoria USB, la unidad del sistema)"
     else ko "en la memoria USB, el Bloc de notas no se lanza desde el menú:"; sed 's/^/        /' $G/cap.txt | head -3; fi
@@ -1769,12 +1793,12 @@ else ko "«sinusb» no deja el USB sin tocar:"; sed 's/^/        /' $S | head -8
 cp $P/d16.img $N/eu.img
 CAPTURAS=$G ESCRIBE=1 MODULOS= MAQUINA=pc,i8042=off SOLO_LECTURA=1 SATA=$P/d32.img ARRANQUE="escritorio escritura=usb unidad=X" \
   QEMU_MAS="-device usb-ehci,id=u -device usb-kbd,bus=u.0 -device usb-mouse,bus=u.0 -drive id=mu,file=$N/eu.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu" \
-  $AQUI/nucleo32/probar.sh "" ":pausa 2" ":clic 40 585" ":captura m1" ":clic 80 293" ":pausa 2" ":escribe Guardado en la memoria USB: ¡señor!" ":tecla f2" ":pausa 1" ":captura m2" \
+  $AQUI/nucleo32/probar.sh "" ":pausa 2" ":clic 40 585" ":captura m1" ":clic 80 176" ":pausa 2" ":escribe Guardado en la memoria USB: ¡señor!" ":tecla f2" ":pausa 1" ":captura m2" \
   ":clic 578 76" ":pausa 1" ":doble 62 30" ":pausa 2" ":captura m3" ":doble 580 160" ":pausa 1" ":captura m4" > $N/escusb.sal 2>&1
 S=$N/escusb.sal
 mira "el escritorio en un PC sin teclado ni ratón PS/2 (como un Mac): arranca con el ratón y el teclado USB" \
   "^usb: 1 teclados, 1 ratones, 1 memorias\.$" "^escritorio: en marcha, 800 x 600" "escritorio: lanzo .BLOC.BIN" "^bloc: guardado NOTAS.TXT, 35 octetos"
-miracap "el ratón USB mueve la flecha y pulsa: el menú Inicio se abre con un clic" m1 negrita 36 280 50 290 "Bloc de notas" negrita 170 532 182 542 "Apagar el equipo"
+miracap "el ratón USB mueve la flecha y pulsa: el menú Inicio se abre con un clic" m1 negrita 46 155 54 163 "Bloc de notas" negrita 320 533 328 541 "Apagar equipo"
 miracap "el teclado USB escribe en el Bloc de notas (con eñe y «¡»), y F2 guarda" m2 texto 94 146 102 156 "Guardado en la memoria USB: ¡señor!" \
   texto 94 428 104 448 "Guardado en NOTAS.TXT (35 octetos)."
 saca $N/eu.img NOTAS.TXT $N/notas.txt
@@ -1800,7 +1824,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
       for ((i = 0; i < 40; i++)); do [ -S $G/monu ] && break; sleep 0.1; done
       sleep 6; monu "sendkey ret" 14
       monu "mouse_move -360 285" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 0.8
-      monu "mouse_move 40 -292" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 2.5
+      monu "mouse_move 10 -102" 0.1; monu "mouse_move 10 -102" 0.1; monu "mouse_move 10 -102" 0.1; monu "mouse_move 10 -103" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 2.5
       for k in h o l a spc u s b; do monu "sendkey $k" 0.1; done
       monu "sendkey f2" 1.5
       monu "screendump $G/g$hc.ppm" 0.6
@@ -1827,11 +1851,11 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     for ((i = 0; i < 40; i++)); do [ -S $G/monu ] && break; sleep 0.1; done
     sleep 6; for i in 1 2 3 4 5; do monu "sendkey down"; done; monu "sendkey ret" 12
     monu "mouse_move -360 285" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 0.8
-    monu "mouse_move 40 -292" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 2.5
+    monu "mouse_move 10 -102" 0.1; monu "mouse_move 10 -102" 0.1; monu "mouse_move 10 -102" 0.1; monu "mouse_move 10 -103" 0.4; monu "mouse_button 1" 0.2; monu "mouse_button 0" 2.5
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 26 archivos que ha traído el cargador hacen de unidad M:" $S \
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 27 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
       ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
@@ -1843,17 +1867,17 @@ fi
 # 12. la oficina de Hispa-386 (programas de Hispa Ventanas, .HVP) con HVPRUN.BIN
 echo "== Hispa-Pentium: la oficina de Hispa-386 dentro (HVPRUN: Facturas, Pluma, Cuentas y Mirador) =="
 if $AQUI/nucleo32/disco.sh $N/of.img 16 oficina > $N/discoof.txt 2>&1; then
-  CAPTURAS=$G ESCRIBE=1 DISCO=$N/of.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":clic 40 585" ":raton 80 449" ":captura of1" \
-    ":clic 80 420" ":pausa 4" ":captura of2" ":clic 70 83" ":pausa 2" ":clic 440 190" ":escribe Taller Peña" ":clic 456 434" ":escribe Revisión del año" \
+  CAPTURAS=$G ESCRIBE=1 DISCO=$N/of.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":clic 40 585" ":raton 150 470" ":captura of1" \
+    ":clic 80 258" ":pausa 4" ":captura of2" ":clic 70 83" ":pausa 2" ":clic 440 190" ":escribe Taller Peña" ":clic 456 434" ":escribe Revisión del año" \
     ":clic 360 466" ":escribe 121,50" ":pausa 1" ":captura of3" ":clic 356 509" ":pausa 2" ":captura of4" ":clic 734 34" ":pausa 2" ":captura of5" \
-    ":clic 40 585" ":clic 80 420" ":pausa 4" ":captura of6" ":clic 734 34" ":pausa 2" \
-    ":clic 40 585" ":clic 80 448" ":pausa 4" ":escribe Hola, señor Pérez." ":tecla ret" ":escribe Segunda línea." ":clic 186 92" ":pausa 2" ":escribe carta" \
+    ":clic 40 585" ":clic 80 258" ":pausa 4" ":captura of6" ":clic 734 34" ":pausa 2" \
+    ":clic 40 585" ":clic 80 288" ":pausa 4" ":escribe Hola, señor Pérez." ":tecla ret" ":escribe Segunda línea." ":clic 186 92" ":pausa 2" ":escribe carta" \
     ":tecla ret" ":pausa 2" ":captura of7" ":tecla ctrl-e" ":tecla ctrl-c" ":clic 695 44" ":pausa 2" ":doble 64 110" ":pausa 3" ":tecla ctrl-v" ":pausa 1" ":captura of8" \
-    ":clic 40 585" ":clic 80 476" ":pausa 4" ":escribe 12" ":tecla ret" ":escribe 30" ":tecla ret" ":escribe =A1+A2" ":tecla ret" ":pausa 1" ":captura of9" > $N/oficina.sal 2>&1
+    ":clic 40 585" ":clic 80 318" ":pausa 4" ":escribe 12" ":tecla ret" ":escribe 30" ":tecla ret" ":escribe =A1+A2" ":tecla ret" ":pausa 1" ":captura of9" > $N/oficina.sal 2>&1
   S=$N/oficina.sal
   mira "el menú Inicio lanza los programas de la oficina con HVPRUN.BIN" "escritorio: lanzo .HVPRUN.BIN (la tarea [0-9]*)"
-  miracap "el menú Inicio tiene el grupo «Oficina»: Facturas, Pluma, Cuentas y Mirador" of1 negrita 4 380 20 392 Oficina negrita 36 408 48 420 Facturas \
-    negrita 36 464 48 476 Cuentas negrita 36 492 48 504 Mirador negrita 36 280 50 290 "Bloc de notas" negrita 170 532 182 542 "Apagar el equipo"
+  miracap "el menú Inicio tiene la oficina a mano (MENÚ: entre los más usados; y en Todos los programas > Oficina): Facturas, Pluma, Cuentas y Mirador" of1 \
+    texto 38 246 46 254 Facturas texto 38 276 46 284 Pluma texto 38 306 46 314 Cuentas texto 38 336 46 344 Mirador negrita 46 155 54 163 "Bloc de notas" negrita 320 533 328 541 "Apagar equipo"
   miracap "Facturas (FACTURAS.HVP, de Hispa-386) en una ventana de Hispa-Pentium: su barra de menús, sus botones y su lista" of2 negrita 72 22 84 30 Facturas \
     texto 62 126 74 138 "No hay facturas emitidas." texto 206 70 218 80 Emitidas
   miracap "sus cuadros de diálogo salen dentro, con la fecha de hoy (INT 21h), y se escribe en ellos (con eñe y acentos)" of3 negrita 202 76 214 86 "Datos de la factura" \
@@ -2209,11 +2233,11 @@ for hc in xhci ehci; do
     miracap "al aceptar: «Todo listo», con el saludo; y el reloj de la barra ya marca la hora puesta (el reloj del PC)" a3$hc \
       negrita 154 98 162 106 "Todo listo" negrita 112 176 120 184 "¡Hola, Carlos!" negrita 454 427 462 435 "Empezar" negrita 740 570 760 584 "07:45"
     miracap "el menú Inicio saluda con el nombre («Hola, Carlos») y dice la versión; LEEME.TXT, en los documentos" a4$hc \
-      negrita 54 158 62 166 "Hola, Carlos" texto 54 176 62 184 "Hispa-Pentium, versión 0.8" texto 208 243 216 251 "LEEME.TXT" negrita 38 352 46 360 Naves
+      negrita 54 104 62 112 "Hola, Carlos" texto 54 122 62 130 "Hispa-Pentium, versión 0.8" negrita 256 159 264 167 "Mis documentos" texto 38 246 46 254 Naves
     if grep -q "asistente: guardado HISPA.INI (Carlos, Toshiba)$" $S && [ "$(tr -d '\r' < $Z/ini.txt | tr '\n' '|')" = "[hispa]|usuario=Carlos|equipo=Toshiba|teclado=es|modo=1024x600|" ] \
       && grep -q "^set modo=1024x600x32,1024x600,auto$" $Z/cfg.txt && [ "$(grep -c '^set modo=' $Z/cfg.txt)" = 1 ] && [ $sano = 0 ]; then
       ok "lo guardado: C:\\HISPA\\HISPA.INI (usuario, equipo, teclado y modo) y la medida de la pantalla en el menú de arranque (GRUB.CFG); el disco, sano"
-    else ko "el asistente no deja bien HISPA.INI o GRUB.CFG:"; cat $Z/ini.txt | sed 's/^/        /'; grep "set modo" $Z/cfg.txt | sed 's/^/        /'; sed 's/^/        /' $Z/fsck.txt | head -4; fi
+    else ko "el asistente no deja bien HISPA.INI o GRUB.CFG:"; cat $Z/ini.txt | sed 's/^/        /'; grep "set modo" $Z/cfg.txt | sed 's/^/        /'; sed 's/^/        /' $Z/fsck.txt | head -4; grep "asistente:" $S | sed 's/^/        /' | head -4; echo "        (fsck: $sano)"; fi
     # el segundo arranque: ya sin asistente, a 1024 x 600 y con el saludo
     desde_disco $Z/d$hc.img $Z/b$hc.sal
     espera_a "escritorio: en marcha" 50 $Z/b$hc.sal; sleep 3
@@ -2222,7 +2246,7 @@ for hc in xhci ehci; do
     monz quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $Z/b$hc.sal | iconv -f CP437 -t UTF-8 > $Z/b$hc.txt
     S=$Z/b$hc.txt
-    if grep -q "^escritorio: en marcha, 1024 x 600 con 32 bits por punto" $S && ! grep -q "ASISTE.BIN" $S && cap $G/b1$hc.ppm tam 1024 600 negrita 54 158 62 166 "Hola, Carlos"; then
+    if grep -q "^escritorio: en marcha, 1024 x 600 con 32 bits por punto" $S && ! grep -q "ASISTE.BIN" $S && cap $G/b1$hc.ppm tam 1024 600 negrita 54 104 62 112 "Hola, Carlos"; then
       ok "el segundo arranque: sin asistente, el escritorio a 1024 x 600 (la medida elegida, puesta por GRUB) y el menú Inicio con el saludo"
     else ko "el segundo arranque no sale como se dejó:"; grep "escritorio" $S | sed 's/^/        /' | head -4; sed 's/^/        /' $G/cap.txt | head -4; fi
   else
@@ -2254,12 +2278,12 @@ for hc in xhci ehci; do
     espera_a "escritorio: en marcha" 50 $Z/c$hc.sal; sleep 3
     monz "mouse_move -360 285" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 1
     monz "screendump $G/c1$hc.ppm" 0.6
-    monz "mouse_move 40 -165" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 5
+    monz "mouse_move 20 -150" 0.2; monz "mouse_move 20 -147" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 5
     monz "screendump $G/c2$hc.ppm" 0.6
     # (los saltos grandes, en dos: con la rueda, el ratón PS/2 manda cuatro
     # octetos y en la cola de QEMU, de 16, caben 4 paquetes de 127 puntos por
     # suceso; lo que sobra llegaría con el clic siguiente)
-    monz "mouse_move 327 -193" 0.2; monz "mouse_move 327 -193" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 2
+    monz "mouse_move 327 -127" 0.2; monz "mouse_move 327 -127" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 2
     monz "mouse_move -336 -2" 0.2; monz "mouse_move -336 -2" 0.4; monz "mouse_button 1" 0.1; monz "mouse_button 0" 0.1; monz "mouse_button 1" 0.1; monz "mouse_button 0" 3
     teclas ret; sleep 2; teclas o ret; sleep 2
     monz "screendump $G/c3$hc.ppm" 0.6
@@ -2270,7 +2294,7 @@ for hc in xhci ehci; do
     S=$Z/c$hc.txt
     volumen $Z/d$hc.img 2048; sano=$?
     if grep -q "escritorio: lanzo .HVPRUN.BIN (la tarea [0-9]*)" $S && ! grep -q "ASISTE.BIN" $S \
-      && cap $G/c1$hc.ppm negrita 8 382 16 390 Oficina negrita 38 410 46 418 Facturas negrita 54 158 62 166 "Hola, Ana:" \
+      && cap $G/c1$hc.ppm texto 38 276 46 284 Facturas texto 38 246 46 254 Naves negrita 54 104 62 112 "Hola, Ana:" \
       && cap $G/c2$hc.ppm negrita 72 22 84 30 Facturas texto 62 126 74 138 "No hay facturas emitidas."; then
       ok "la oficina en el disco instalado: el menú Inicio (con su saludo) tiene el grupo «Oficina», y Facturas se abre con C:\\HISPA\\HVPRUN.BIN (FACTURAS.HVP, de C:\\OFICINA)"
     else ko "la oficina no se abre desde el menú Inicio del disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; grep "lanzo" $S | sed 's/^/        /' | head -4; fi
@@ -2591,9 +2615,9 @@ cp $Q/sis.img $Q/s8.img
 printf '[hispa]\r\nusuario=Ana\r\nequipo=PRUEBA\r\nteclado=es\r\nmodo=800x600\r\n' > $Q/HISPA.INI
 mcopy -i $Q/s8.img $F/ACTUALIZ.BIN $Q/HISPA.INI ::HISPA/
 CAPTURAS=$G ESCRIBE=1 SATA=$Q/s8.img MEMORIA=64 MODULOS= ARRANQUE=escritorio QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/usb.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
-  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":clic 40 585" ":captura pq0" ":clic 250 466" ":pausa 4" ":captura pq1" ":clic 200 236" ":clic 199 471" ":pausa 5" ":captura pq2" \
+  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":clic 40 585" ":captura pq0" ":clic 300 338" ":pausa 4" ":captura pq1" ":clic 200 236" ":clic 199 471" ":pausa 5" ":captura pq2" \
   ":clic 200 216" ":clic 310 471" ":pausa 4" ":captura pq3" ":clic 600 471" ":pausa 4" ":captura pq4" ":clic 661 71" ":pausa 3" ":captura pq5" > $Q/ventana.sal 2>&1
-miracap "el menú Inicio trae «Actualizar» (encima de Configuración): abre la ventana «Programas y actualizaciones»" pq0 negrita 210 452 214 456 Actualizar
+miracap "el menú Inicio trae «Actualizar» (en la columna de la derecha): abre la ventana «Programas y actualizaciones»" pq0 negrita 256 330 264 338 Actualizar
 miracap "la ventana: lo instalado (base 0.7) y lo del catálogo de la memoria USB, con su firma buena (choque, letras, saludo: «(no)» instalados), cada uno con su versión y lo que es; y el botón «Buscar novedades»" pq1 \
   negrita 150 90 154 94 "Programas y actualizaciones" texto 150 109 154 113 'Los paquetes, de X:\PAQUETES\' negrita 112 163 116 167 base \
   texto 208 183 212 187 "(no)" negrita 112 223 116 227 saludo texto 304 223 308 227 "2.0" negrita 132 458 136 462 Actualizarlo \
@@ -2628,9 +2652,9 @@ $AQUI/nucleo32/disco.sh $A9/d.img 16 > /dev/null 2>&1
 printf 'nombre=Saludo\r\nprograma=\\HOLA.BIN\r\nicono=\\HISPA\\MENU\\SALUDO.ICP\r\nescritorio=si\r\n' > $A9/SALUDO.MNU
 mmd -i $A9/d.img ::HISPA ::HISPA/MENU 2> /dev/null
 mcopy -i $A9/d.img $A9/SALUDO.MNU $A9/SALUDO.ICP ::HISPA/MENU/
-CAPTURAS=$G DISCO=$A9/d.img MODULOS= ARRANQUE=escritorio $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":captura ac0" ":clic 40 585" ":pausa 1" ":captura ac1" ":clic 80 363" ":pausa 2" > $A9/sal.txt 2>&1
+CAPTURAS=$G DISCO=$A9/d.img MODULOS= ARRANQUE=escritorio $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":captura ac0" ":clic 40 585" ":pausa 1" ":captura ac1" ":clic 80 258" ":pausa 2" > $A9/sal.txt 2>&1
 miracap "un acceso de un paquete (\\HISPA\\MENU\\SALUDO.MNU): su icono (el .ICP, rojo) y su nombre en el tapiz, debajo de los de siempre" ac0 texto 30 270 60 295 Saludo rgb 64 259 C82828
-miracap "y en el menú Inicio, debajo de Mi equipo (con el icono a la mitad)" ac1 negrita 30 310 60 330 "Mi equipo" negrita 30 345 60 370 Saludo
+miracap "y en el menú Inicio, el primero de los más usados (MENÚ: mientras no hay cuentas, los de los paquetes)" ac1 texto 38 246 46 254 Saludo negrita 46 155 54 163 "Bloc de notas"
 S=$A9/sal.txt
 mira "elegirlo en el menú lanza su programa (programa=\\HOLA.BIN)" "escritorio: lanzo .HOLA.BIN"
 
@@ -2705,6 +2729,197 @@ else ko "el núcleo nuevo no deja bien el arranque:"; lista_de $Q/s10.img | sed 
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin los paquetes)"
 fi
+
+# ------------------------------------------------- 24. (PROGRAMAS) Programas instalados
+# Los tipos de los paquetes (tipo=, en la cabecera y en el catálogo: si no lo
+# dicen, por su nombre, u «otros»), PAQUETES LISTA /TIPO, los programas
+# sueltos (sin paquete), lo imprescindible (base y red no se quitan), quitar
+# con lo que lo necesita (/DEPENDIENTES, en su orden), REPARA (solo lo
+# dañado: un archivo cambiado y otro que falta), un corte a mitad de quitar
+# (se deshace al volver) y la ventana «Programas instalados» (PROGRAMA.BIN):
+# desde Configuración y desde «Programas y actualizaciones», el árbol por
+# tipos, lo que no se puede quitar, quitar con lo que lo necesita (con la
+# barra), los archivos, reparar y borrar un programa suelto (a la Papelera).
+if parte08 programas; then
+echo "== (PROGRAMAS) Programas instalados: los tipos, lo suelto, lo imprescindible, quitar con lo que lo necesita, reparar y la ventana =="
+Q=$P/n08g
+mkdir -p $Q/f/paq $G
+HPQ="python3 -I $AQUI/../tools/hpq.py"
+export MTOOLS_SKIP_CHECK=1
+hechos=1
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $Q/semilla.asm > /dev/null 2>&1 && nasm -f bin $Q/semilla.asm -o $Q/SEMILLA.BIN || hechos=0
+# (PAQUETES con la clave de prueba, como en la parte 12)
+$HPQ clave $Q/prueba.key > /dev/null 2>&1; $HPQ publica $Q/prueba.key $Q/clave.cas > /dev/null || hechos=0
+cp $AQUI/nucleo32/upaquete.cas $Q/upaquete.cas
+for p in uordenes:ORDENES upaquete:PAQUETES uactual:ACTUALIZ uprogram:PROGRAMA uhola:HOLA uequipo:EQUIPO; do
+  fu=$AQUI/nucleo32/${p%%:*}.cas; [ ${p%%:*} = upaquete ] && fu=$Q/upaquete.cas
+  python3 -I $AQUI/ccastel.py $fu -o $Q/${p%%:*}.asm -I $AQUI/nucleo32 > /dev/null 2>&1 && nasm -f bin $Q/${p%%:*}.asm -o $Q/f/${p##*:}.BIN || hechos=0
+done
+F=$Q/f
+printf 'letras A\r\n' > $F/A.TXT; printf 'letras B\r\n' > $F/B.TXT; printf 'extra\r\n' > $F/E.TXT; printf 'el juego\r\n' > $F/J.TXT
+printf 'la red (de prueba)\r\n' > $F/R.TXT; head -c 70000 /dev/urandom > $F/GRANDE.DAT
+( cd $F
+  $HPQ crea BASE.HPQ --nombre base --version 0.8.4 --tipo sistema --descripcion 'El sistema base (de prueba)' ORDENES.BIN='\HISPA\ORDENES.BIN' PAQUETES.BIN='\HISPA\PAQUETES.BIN' \
+    ACTUALIZ.BIN='\HISPA\ACTUALIZ.BIN' PROGRAMA.BIN='\HISPA\PROGRAMA.BIN' EQUIPO.BIN='\HISPA\EQUIPO.BIN'
+  $HPQ registro BASE.HPQ BASE.PQI
+  $HPQ crea RED.HPQ --nombre red --version 0.8.4 --descripcion 'La red (de prueba)' --necesita 'base' R.TXT='\HISPA\RED.TXT'
+  $HPQ registro RED.HPQ RED.PQI
+  $HPQ crea paq/LETRAS.HPQ --nombre letras --version 1.0 --tipo oficina --descripcion 'Unas letras' A.TXT='\DOCS\LETRAS\A.TXT' B.TXT='\DOCS\LETRAS\B.TXT'
+  $HPQ crea paq/SALUDO.HPQ --nombre saludo --version 1.0 --tipo 'Juegos y emuladores' --descripcion 'Un programa que saluda' --necesita 'letras >= 1.0' HOLA.BIN='\HISPA\SALUDO.BIN' GRANDE.DAT='\HISPA\SALUDO.DAT'
+  $HPQ crea paq/EXTRA.HPQ --nombre extra --version 1.0 --descripcion 'Lo que necesita a saludo' --necesita 'saludo' E.TXT='\EXTRA\E.TXT'
+  $HPQ crea paq/JUEGO.HPQ --nombre juego --version 1.0 --descripcion 'Un juego (su tipo, solo en el catálogo)' J.TXT='\JUEGOS\J.TXT'
+  $HPQ catalogo paq
+  printf 'tipo=juego juegos\r\n' >> paq/CATALOGO.TXT
+  $HPQ firma paq $Q/prueba.key
+  $HPQ registro paq/LETRAS.HPQ LETRAS.PQI ) > $Q/hpq.txt 2>&1 || hechos=0
+# el disco: base y red instalados, y los sueltos (un .EXE en \HISPA32, un .BIN
+# en \HISPA y otro en una subcarpeta de \PROGRAMS; un .TXT, que no es programa)
+printf 'no es un programa\r\n' > $F/LEEME.TXT
+mkfs.fat -F 32 -s 1 -n HISPA -C $Q/sis.img 65536 > /dev/null && mmd -i $Q/sis.img ::HISPA ::HISPA/PAQUETES ::HISPA/MENU ::HISPA32 ::PROGRAMS ::PROGRAMS/COSAS \
+  && mcopy -i $Q/sis.img $F/ORDENES.BIN $F/PAQUETES.BIN $F/ACTUALIZ.BIN $F/PROGRAMA.BIN $F/EQUIPO.BIN $F/R.TXT ::HISPA/ && mren -i $Q/sis.img ::HISPA/R.TXT ::HISPA/RED.TXT \
+  && mcopy -i $Q/sis.img $F/BASE.PQI $F/RED.PQI ::HISPA/PAQUETES/ && mcopy -i $Q/sis.img $F/HOLA.BIN ::HISPA32/MIJUEGO.EXE && mcopy -i $Q/sis.img $F/LEEME.TXT ::HISPA32/ \
+  && mcopy -i $Q/sis.img $F/HOLA.BIN ::HISPA/SUELTO.BIN && mcopy -i $Q/sis.img $F/HOLA.BIN ::PROGRAMS/COSAS/OTRO.BIN || hechos=0
+mkfs.fat -F 16 -n MEMORIA -C $Q/usb.img 16384 > /dev/null && mmd -i $Q/usb.img ::PAQUETES && mcopy -i $Q/usb.img $F/paq/* ::PAQUETES/ || hechos=0
+if [ $hechos = 1 ] && grep -q $'^tipo=sistema\r$' $F/BASE.PQI && grep -q '^tipo=juegos' $F/paq/SALUDO.HPQ && ! grep -aq '^tipo=' $F/paq/JUEGO.HPQ \
+  && grep -q '^tipo=letras oficina' $F/paq/CATALOGO.TXT && ! grep -q '^tipo=extra' $F/paq/CATALOGO.TXT && grep -q '^tipo=juego juegos' $F/paq/CATALOGO.TXT \
+  && $HPQ comprueba $F/paq $Q/clave.cas > /dev/null && [ "$($HPQ tipos | wc -l)" = 11 ]; then
+  ok "tools/hpq.py: el tipo en la cabecera (--tipo, por su código o por su nombre: «Juegos y emuladores» es juegos) y en el catálogo, una línea «tipo=» por paquete (el que no lo dice ni se sabe, sin línea: «otros»)"
+else ko "tools/hpq.py no pone bien los tipos:"; tail -4 $Q/hpq.txt | sed 's/^/        /'; grep '^tipo' $F/paq/CATALOGO.TXT | sed 's/^/        /'; fi
+paq() {
+  local d=$1 n=$2; shift 2
+  ESCRIBE=1 SATA=$d MEMORIA=64 MODULOS= ARRANQUE=ordenes QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/usb.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
+    $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 2" "$@" ":pausa 1" > $Q/$n.sal 2>&1
+  S=$Q/$n.sal
+}
+lista_de() { mdir -/ -b -i $1 :: 2> /dev/null | sort; }
+sin_restos() { ! lista_de $1 | grep -q 'HPQ[0-9]*\.\(NUE\|VIE\)\|DIARIO\.TXT\|HECHO\.TXT'; }
+igual_en() { rm -f $Q/x.bin; mcopy -n -i $1 "::$2" $Q/x.bin > /dev/null 2>&1 && cmp -s $Q/x.bin $3; }
+
+# 1. instalar (con lo que necesitan), la lista por tipos, lo suelto, lo que no se quita
+cp $Q/sis.img $Q/s1.img
+paq $Q/s1.img uno "paquetes instala extra juego" ":pausa 3" "paquetes lista /tipo" "paquetes sueltos" "paquetes quita base" "paquetes quita red /forzar" "paquetes quita letras" "paquetes fichas"
+mira "PAQUETES INSTALA: extra con lo que necesita (saludo, y antes letras) y juego" "^Se va a instalar: letras 1\.0, saludo 1\.0, extra 1\.0, juego 1\.0$" "^  instalado juego 1\.0$"
+mira "PAQUETES LISTA /TIPO: por tipos, en su orden (base por su cabecera, red por su nombre, juego por el catálogo, extra «Otros»), y al final los programas sueltos" \
+  "^Paquetes instalados, por tipos" "^Sistema:$" "^  base      0\.8\.4   El sistema base (de prueba)$" "^Oficina:$" "^  letras    1\.0     Unas letras$" "^Internet y red:$" "^  red       0\.8\.4 " \
+  "^Juegos y emuladores:$" "^  saludo    1\.0 " "^  juego     1\.0 " "^Otros:$" "^  extra     1\.0 " "^6 paquetes\.$" "^Programas de terceros (sin paquete):$"
+mira "PAQUETES SUELTOS: los .EXE y .BIN que no son de ningún paquete (en \\HISPA, \\HISPA32 y las subcarpetas de \\PROGRAMS), con su tamaño y su fecha" \
+  "^  C:.HISPA32.MIJUEGO\.EXE  *[0-9]* octetos  [0-9][0-9]/[0-9][0-9]/20[0-9][0-9]$" "^  C:.HISPA.SUELTO\.BIN " "^  C:.PROGRAMS.COSAS.OTRO\.BIN " "^3 programas sueltos\.$"
+mira "lo imprescindible no se quita (ni con /FORZAR), y se dice por qué; lo que otro necesita, tampoco (y se dice cómo)" \
+  "^paquetes: base no se puede quitar: es imprescindible (es el sistema mismo; sin él, el equipo no arranca)\.$" \
+  "^paquetes: red no se puede quitar: es imprescindible (sin ella no llegan las actualizaciones ni se pueden traer programas)\.$" \
+  "^paquetes: letras no se quita: lo necesita saludo (quite antes saludo, o /FORZAR)$" "^  (o con /DEPENDIENTES, que lo quita también)$"
+mira "PAQUETES FICHAS (para la ventana): el disco, y de cada uno su tipo, lo que ocupa, sus archivos, la fecha, si es imprescindible, lo que necesita y lo que lo necesita; y lo suelto" \
+  "^u|C|[0-9]*|[0-9]*$" "^f|base|0\.8\.4|sistema|[0-9]*|5|[0-9/]*|es el sistema mismo; sin él, el equipo no arranca||red|El sistema base (de prueba)$" \
+  "^f|saludo|1\.0|juegos|70[0-9][0-9][0-9]|2|[0-9][0-9]/[0-9][0-9]/20[0-9][0-9]||letras >= 1\.0|extra|Un programa que saluda$" "^f|juego|1\.0|juegos|" "^f|extra|1\.0|otros|" \
+  "^s|C:.HISPA32.MIJUEGO\.EXE|[0-9]*|[0-9/]*$"
+saca $Q/s1.img HISPA/PAQUETES/JUEGO.PQI $Q/juego.pqi
+if sano $Q/s1.img && sin_restos $Q/s1.img && ! grep -q 'LEEME' $S && grep -aq '^tipo=juegos' $Q/juego.pqi && [ "$(grep -c '^  quitado' $S)" = 0 ] && igual_en $Q/s1.img HISPA/PAQUETES/LETRAS.PQI $F/LETRAS.PQI; then
+  ok "en el disco: sano, sin restos; el registro de juego lleva el tipo que dice el catálogo (tipo=juegos); el de letras, su cabecera tal cual; el .TXT no sale como suelto; y no se ha quitado nada"
+else ko "lo instalado con los tipos no queda bien:"; lista_de $Q/s1.img | sed 's/^/        /' | head -14; sed 's/^/        /' $Q/juego.pqi | head -10; fi
+
+# 2. QUITA letras /DEPENDIENTES: también saludo y extra, cada uno antes de lo que necesita
+cp $Q/s1.img $Q/s2.img
+paq $Q/s2.img dep "paquetes quita letras /dependientes" ":pausa 2" "paquetes lista"
+mira "PAQUETES QUITA letras /DEPENDIENTES: lo que lo necesita (saludo y extra) sale antes que él" "^Se va a quitar: .*letras 1\.0" "^  quitado extra 1\.0$" "^  quitado saludo 1\.0$" "^  quitado letras 1\.0$" "^3 paquetes\.$"
+l1=$(grep -n '^  quitado extra' $S | cut -d: -f1); l2=$(grep -n '^  quitado saludo' $S | cut -d: -f1); l3=$(grep -n '^  quitado letras' $S | cut -d: -f1)
+if [ -n "$l1" ] && [ -n "$l3" ] && [ "$l1" -lt "$l2" ] && [ "$l2" -lt "$l3" ] && sano $Q/s2.img && sin_restos $Q/s2.img && ! lista_de $Q/s2.img | grep -q 'DOCS\|EXTRA\|SALUDO' && lista_de $Q/s2.img | grep -q 'JUEGOS/J.TXT'; then
+  ok "en su orden (extra, saludo, letras) y, en el disco, sano, sin sus archivos ni sus carpetas (\\DOCS, \\EXTRA) y con lo demás (juego)"
+else ko "quitar con lo que lo necesita no queda bien:"; grep '^  quitado' $S | sed 's/^/        /'; lista_de $Q/s2.img | sed 's/^/        /' | head -12; fi
+
+# 3. REPARA: un archivo cambiado (letras) y otro que falta (saludo); solo eso se vuelve a poner
+cp $Q/s1.img $Q/s3.img
+printf 'cambiado a mano\r\n' > $Q/cambiado.txt; mcopy -o -i $Q/s3.img $Q/cambiado.txt ::DOCS/LETRAS/A.TXT; mdel -i $Q/s3.img ::HISPA/SALUDO.DAT
+paq $Q/s3.img repara "paquetes archivos letras" "paquetes repara" ":pausa 3" "paquetes comprueba"
+mira "PAQUETES ARCHIVOS letras: cada archivo, lo que mide y si está como se instaló" "^Archivos de letras 1\.0 (2):$" "^  CAMBIADO  *10  C:.DOCS.LETRAS.A\.TXT$" "^  bien  *10  C:.DOCS.LETRAS.B\.TXT$" \
+  "^1 no están como se instalaron: PAQUETES REPARA letras los vuelve a poner\.$"
+mira "PAQUETES REPARA: comprueba todos; lo dañado (cambiado o que falta) se vuelve a poner del paquete de la misma versión; luego COMPRUEBA, todo bien" \
+  "^base 0\.8\.4 está bien (sus 5 archivos, como se instalaron)\.$" "^letras: .DOCS.LETRAS.A\.TXT (dañados)$" "^saludo: .HISPA.SALUDO\.DAT (dañados)$" "^Se va a reparar (lo dañado, del paquete de la misma versión): letras 1\.0, saludo 1\.0$" \
+  "^  reparado letras 1\.0$" "^  reparado saludo 1\.0$" "^Los archivos de los 6 paquetes instalados están como se instalaron\.$"
+if sano $Q/s3.img && sin_restos $Q/s3.img && igual_en $Q/s3.img DOCS/LETRAS/A.TXT $F/A.TXT && igual_en $Q/s3.img HISPA/SALUDO.DAT $F/GRANDE.DAT && igual_en $Q/s3.img DOCS/LETRAS/B.TXT $F/B.TXT; then
+  ok "lo reparado, desde fuera: sano, sin restos y los archivos otra vez como los del paquete, octeto a octeto"
+else ko "lo reparado no queda bien:"; lista_de $Q/s3.img | sed 's/^/        /' | head -12; fi
+
+# 4. un corte a mitad de quitar (tras el primer cambio): al volver, se deshace
+cp $Q/s1.img $Q/s4.img
+paq $Q/s4.img corte "paquetes quita juego /corte=1" ":pausa 2"
+paq $Q/s4.img vuelta "paquetes lista"
+mira "un corte a mitad de quitar juego: la próxima vez, PAQUETES lo deshace y juego sigue instalado" \
+  "^paquetes: juego 1\.0 se quedó a medias (¿se fue la luz?): se ha deshecho y todo está como antes$" "^  juego     1\.0 "
+if sano $Q/s4.img && [ "$(lista_de $Q/s4.img)" = "$(lista_de $Q/s1.img)" ] && igual_en $Q/s4.img JUEGOS/J.TXT $F/J.TXT; then
+  ok "y en el disco, como antes del corte: los mismos archivos, iguales"
+else ko "después del corte el disco no vuelve a como estaba:"; diff <(lista_de $Q/s4.img) <(lista_de $Q/s1.img) | sed 's/^/        /' | head -8; fi
+
+# 5. la ventana «Programas y actualizaciones» (PROGRAMA.BIN, una sola, con
+# pestañas: Pendientes, Al día, Instaladas y Sin instalar, y la búsqueda), en
+# el escritorio, con otra memoria (su catálogo trae juego 1.1, visor, que no
+# está instalado, y red, para repararlo). Primero: desde Configuración, en
+# «Instaladas» (el árbol por tipos; base, que no se quita; letras, que
+# necesitan otros); desde «Actualizar» del menú, en «Pendientes» (juego 1.1);
+# «Sin instalar» e Instalar (visor); buscar «juego» (en todas las pestañas) y
+# Actualizar. Luego, con un acceso del menú con /LENTO (para ver la barra):
+# quitar letras con lo que lo necesita, los archivos de red (uno cambiado a
+# mano), repararlo, y borrar un programa suelto (a la Papelera)
+( cd $F && printf 'el juego, la 1.1\r\n' > J11.TXT && printf 'un visor\r\n' > V.TXT && mkdir -p paq2 && cp paq/*.HPQ RED.HPQ paq2/ \
+  && $HPQ crea paq2/JUEGO11.HPQ --nombre juego --version 1.1 --tipo juegos --descripcion 'Un juego (la 1.1)' J11.TXT='\JUEGOS\J.TXT' \
+  && $HPQ crea paq2/VISOR.HPQ --nombre visor --version 1.0 --tipo multimedia --descripcion 'Un visor de imágenes' V.TXT='\VISOR\V.TXT' \
+  && $HPQ catalogo paq2 --clave $Q/prueba.key ) >> $Q/hpq.txt 2>&1
+mkfs.fat -F 16 -n MEMORIA -C $Q/usb2.img 16384 > /dev/null && mmd -i $Q/usb2.img ::PAQUETES && mcopy -i $Q/usb2.img $F/paq2/* ::PAQUETES/
+cp $Q/s1.img $Q/s5.img
+printf '[hispa]\r\nusuario=Ana\r\nequipo=PRUEBA\r\nteclado=es\r\nmodo=800x600\r\n' > $Q/HISPA.INI
+printf 'nombre=Programas (prueba)\r\nprograma=\\HISPA\\PROGRAMA.BIN\r\nargumentos=/LENTO /INSTALADAS\r\n' > $Q/PRUEBA.MNU
+printf 'red cambiada\r\n' > $Q/rc.txt
+mcopy -i $Q/s5.img $Q/HISPA.INI ::HISPA/ && mcopy -i $Q/s5.img $Q/PRUEBA.MNU ::HISPA/MENU/ && mcopy -o -i $Q/s5.img $Q/rc.txt ::HISPA/RED.TXT
+CAPTURAS=$G ESCRIBE=1 SATA=$Q/s5.img MEMORIA=64 MODULOS= ARRANQUE=escritorio QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/usb2.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
+  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":clic 40 585" ":pausa 1" ":clic 300 238" ":pausa 1" ":captura pg0" ":clic 556 374" ":pausa 5" ":raton 790 300" ":captura pg1" \
+  ":tecla down" ":tecla delete" ":pausa 1" ":captura pg2" ":tecla esc" ":tecla down" ":tecla down" ":tecla delete" ":pausa 1" ":captura pg3" ":tecla esc" ":tecla esc" ":pausa 1" \
+  ":clic 40 585" ":pausa 1" ":clic 290 338" ":pausa 5" ":captura pg4" ":tecla ctrl-tab" ":tecla ctrl-tab" ":tecla ctrl-tab" ":pausa 1" ":captura pg5" ":tecla down" ":tecla ret" ":pausa 5" ":captura pg6" \
+  ":tecla ctrl-tab" ":pausa 1" ":escribe juego" ":pausa 1" ":captura pg7" ":tecla ret" ":tecla down" ":clic 720 374" ":pausa 5" ":captura pg8" ":tecla esc" ":tecla esc" ":pausa 1" \
+  ":clic 40 585" ":pausa 1" ":captura pgm" ":clic 330 308" ":pausa 5" ":captura pgi" ":tecla esc" ":pausa 1" ":clic 40 585" ":pausa 1" ":captura pgm2" ":clic 100 348" ":pausa 5" ":tecla down" ":tecla down" ":tecla down" ":tecla delete" ":pausa 1" ":captura pg9" ":tecla tab" ":tecla ret" ":pausa 1" ":captura pg10" ":pausa 6" ":captura pg11" \
+  ":tecla home" ":tecla down" ":tecla down" ":tecla down" ":tecla ret" ":pausa 3" ":captura pg12" ":clic 720 403" ":pausa 5" ":captura pg13" \
+  ":tecla end" ":tecla up" ":tecla delete" ":pausa 1" ":captura pg14" ":tecla tab" ":tecla ret" ":pausa 4" ":captura pg15" > $Q/ventana.sal 2>&1
+miracap "Configuración trae «Programas...»" pg0 negrita 160 120 700 160 "Configuración" negrita 490 360 580 385 "Programas..."
+miracap "«Programas...» abre la ventana en «Instaladas (9)» (con las otras pestañas y su cuenta), la búsqueda con su lupa, el árbol por tipos, la ficha, los botones y lo libre en el disco" pg1 \
+  negrita 0 0 400 30 "Programas y actualizaciones" negrita 240 120 380 140 "Instaladas (9)" texto 10 120 150 140 "Pendientes (1)" texto 140 120 250 140 "Al día (5)" texto 370 120 520 140 "Sin instalar (1)" \
+  texto 30 88 320 110 "Buscar por nombre, qué es o tipo" negrita 20 170 130 195 "[-] Sistema" negrita 40 195 120 220 base negrita 20 265 220 290 "[-] Internet y red" \
+  negrita 10 340 120 360 Detalles negrita 640 360 790 390 "Desinstalar..." negrita 640 390 790 415 Reparar negrita 640 420 790 445 "Ver archivos" \
+  texto 630 465 790 490 "Libre en el disco:" texto 5 538 200 560 "6 paquetes"
+miracap "base no se puede desinstalar: lo dice, y por qué" pg2 texto 140 220 660 320 "base no se puede desinstalar: es imprescindible (es el" negrita 400 260 660 360 Entendido \
+  negrita 10 360 640 530 "Lo necesitan:"
+miracap "letras: hay otros que lo necesitan (saludo y extra): se dice, y se ofrece quitarlos también" pg3 texto 140 220 660 320 "Hay programas que necesitan letras: saludo, extra. Sin" \
+  negrita 380 270 660 370 "Quitar los 3" negrita 380 270 660 370 Cancelar
+miracap "«Actualizar» del menú abre la misma ventana en «Pendientes (1)»: juego, de la 1.0 a la 1.1, con «Actualizar» y «Actualizar todo»" pg4 \
+  negrita 10 120 150 140 "Pendientes (1)" negrita 20 170 330 195 "[-] Juegos y emuladores" negrita 50 195 120 220 juego texto 330 195 420 220 "1.0" texto 410 195 480 220 "1.1" \
+  negrita 640 360 790 390 Actualizar negrita 640 390 790 415 "Actualizar todo"
+miracap "Ctrl+Tab hasta «Sin instalar (1)»: visor (Multimedia), con «Instalar»" pg5 negrita 370 120 530 140 "Sin instalar (1)" negrita 20 170 250 195 "[-] Multimedia" negrita 50 195 120 220 visor \
+  negrita 640 360 790 390 Instalar
+miracap "Instalar visor: hecho, y ya no queda nada sin instalar" pg6 texto 400 538 795 560 "visor instalado." negrita 370 120 530 140 "Sin instalar (0)" texto 10 170 400 200 "Todo lo del catálogo está instalado."
+miracap "buscar «juego» (sin tildes ni mayúsculas) filtra todas las pestañas: Pendientes (1: juego), Al día (1: saludo, por su tipo, Juegos), Instaladas (3: y MIJUEGO.EXE)" pg7 \
+  texto 30 88 320 110 juego negrita 10 120 150 140 "Pendientes (1)" texto 140 120 250 140 "Al día (1)" texto 220 120 380 140 "Instaladas (3)"
+miracap "y «Actualizar» con juego elegido: juego 1.1, y ya no hay pendientes" pg8 texto 300 538 795 560 "juego actualizado a la 1.1." negrita 10 120 150 140 "Pendientes (0)"
+miracap "el menú Inicio nuevo: «Programas instalados» y «Actualizar» en la columna de la derecha" pgm negrita 250 295 430 320 "Programas instalados" negrita 250 325 400 350 Actualizar
+# (los más usados del menú suben: «Programas (prueba)», el cuarto de ellos)
+miracap "«Programas instalados» del menú abre la ventana en «Instaladas»" pgi negrita 240 120 380 140 "Instaladas (10)" negrita 20 170 130 195 "[-] Sistema"
+miracap "desde el acceso con /LENTO (en Instaladas): lo mismo con letras" pg9 negrita 380 270 660 370 "Quitar los 3"
+miracap "al decir que sí, la barra de avance mientras se quita (archivo a archivo)" pg10 negrita 150 230 650 300 "Quitando" rgb 200 301 166534 40
+miracap "y luego, la lista sin letras, saludo ni extra; «Desinstalado.»" pg11 texto 500 538 795 560 "Desinstalado." notexto 20 160 630 330 letras notexto 20 160 630 330 saludo \
+  negrita 20 160 400 330 "[-] Juegos y emuladores" negrita 20 160 400 330 "[-] Multimedia"
+miracap "Ver archivos (Intro en red): su archivo, CAMBIADO (en naranja y con su palabra)" pg12 negrita 90 335 200 360 Archivos negrita 15 380 200 420 CAMBIADO negrita 100 380 420 420 'C:\HISPA\RED.TXT' \
+  texto 250 538 795 560 "Un archivo dañado"
+miracap "Reparar: lo vuelve a poner, y luego está bien" pg13 negrita 15 380 200 420 bien texto 250 538 795 560 "red reparado"
+miracap "un programa suelto (sin paquete): «Borrar...» pregunta, y dice que va a la Papelera" pg14 texto 140 220 660 320 'C:\HISPA32\MIJUEGO.EXE (760 octetos)? Va a la' \
+  negrita 640 360 790 390 "Borrar..."
+miracap "borrado: ya no sale, y «Está en la Papelera.»" pg15 texto 500 538 795 560 "Está en la Papelera." notexto 20 160 630 330 MIJUEGO
+if sano $Q/s5.img && sin_restos $Q/s5.img && ! lista_de $Q/s5.img | grep -q 'DOCS\|EXTRA\|HISPA/SALUDO\|HISPA32/MIJUEGO' && igual_en $Q/s5.img JUEGOS/J.TXT $F/J11.TXT \
+  && igual_en $Q/s5.img HISPA/RED.TXT $F/R.TXT && igual_en $Q/s5.img VISOR/V.TXT $F/V.TXT \
+  && lista_de $Q/s5.img | grep -qi 'PAPELERA/' && ! lista_de $Q/s5.img | grep -q 'PROGRAMA\.TXT\|AVANCE\.TXT'; then
+  ok "lo hecho desde la ventana, desde fuera: el disco sano, visor instalado, juego en la 1.1, sin letras, saludo ni extra, red reparado (octeto a octeto), MIJUEGO.EXE en la Papelera, y sin restos (ni PROGRAMA.TXT ni AVANCE.TXT)"
+else ko "lo hecho desde la ventana no queda bien en el disco:"; lista_de $Q/s5.img | sed 's/^/        /' | head -16; fi
+# (GUARDA_CAPTURAS=carpeta: las capturas de la ventana se quedan ahí)
+[ -n "${GUARDA_CAPTURAS:-}" ] && mkdir -p "$GUARDA_CAPTURAS" && cp $G/pg*.ppm "$GUARDA_CAPTURAS/"
+if ! grep -q "excepción\|\*\*\*" $Q/ventana.sal; then ok "ni una excepción del núcleo"; else ko "hay excepciones:"; grep "excepción\|\*\*\*" $Q/ventana.sal | head -3 | sed 's/^/        /'; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin los programas instalados)"
+fi   # (PROGRAMAS)
 
 # ------------------------------------------------- 13. Hispa-Pentium 0.8: la red
 # La red: el servicio de red (RED.BIN, en el anillo 3) con las tarjetas que
@@ -2930,8 +3145,8 @@ CAPTURAS=$G MODULOS=$Y/ACPI.BIN,$Y/BLOC.BIN ARRANQUE="escritorio acpicada=1" QEM
   "${PUESTA[@]}" ":monitor cont" ":pausa 5" ":captura a1" ":raton 690 585" ":pausa 1.5" ":captura a2" \
   "${ENCHUFA[@]}" ":pausa 3" ":captura a3" ":clic 690 585" ":pausa 1" ":captura a4" ":raton 400 300" \
   "${GASTADA[@]}" ":pausa 3" ":raton 690 585" ":pausa 1.5" ":captura a5" ":raton 400 300" \
-  ":clic 40 585" ":clic 80 293" ":pausa 2" ":escribe sin guardar" ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 3" ":captura a6" \
-  ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 4" > $Y/apagar.sal 2>&1
+  ":clic 40 585" ":clic 80 176" ":pausa 2" ":escribe sin guardar" ":clic 40 585" ":clic 360 545" ":clic 275 327" ":pausa 3" ":captura a6" \
+  ":clic 40 585" ":clic 360 545" ":clic 275 327" ":pausa 4" > $Y/apagar.sal 2>&1
 S=$Y/apagar.sal
 mira "el núcleo lanza el servicio de ACPI al arrancar, y este lee las tablas de QEMU y la batería de la SSDT de prueba (_BIF, _BIX, _BST)" \
   "^acpi: el servicio de ACPI (ACPI.BIN) en marcha, la tarea [0-9]*" "^ACPI: SSDT .*HISPA  BATPRUEB" "^Batería 1: ._SB_.HBAT" \
@@ -2957,15 +3172,15 @@ if ! grep -q "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $S; then ok "ni un
 else ko "hay excepciones o errores de ACPICA:"; grep "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $S | head -4 | sed 's/^/        /'; fi
 # 2. reiniciar (con -no-reboot, QEMU termina al reiniciarse): con PIIX4 la
 # FADT no trae registro de reinicio: el teclado
-MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="$SSDT" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":clic 40 585" ":clic 230 545" \
-  ":clic 400 327" ":pausa 3" > $Y/reiniciar.sal 2>&1
+MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="$SSDT" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":clic 40 585" ":clic 360 545" \
+  ":clic 340 327" ":pausa 3" > $Y/reiniciar.sal 2>&1
 S=$Y/reiniciar.sal
 mira "«Reiniciar»: el servicio avisa al controlador embebido (_REG 3, 0) y el núcleo reinicia (PIIX4: por el teclado)" \
   "^escritorio: reiniciar" "^ACPI: el núcleo va a reiniciar el equipo" "^energía: reiniciar por el teclado (8042)" "^\[código 0\]"
 # 3. con ICH9 (q35): apagar y reiniciar (aquí la FADT sí trae el registro de reinicio: CF9h)
-for q in 275:apagar 400:reiniciar; do
+for q in 275:apagar 340:reiniciar; do
   MAQUINA=q35 MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="$SSDT" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":clic 40 585" \
-    ":clic 230 545" ":clic ${q%%:*} 327" ":pausa 3" > $Y/q35${q##*:}.sal 2>&1
+    ":clic 360 545" ":clic ${q%%:*} 327" ":pausa 3" > $Y/q35${q##*:}.sal 2>&1
 done
 S=$Y/q35apagar.sal
 mira "ICH9 (QEMU q35): «Apagar» apaga por ACPI (SMI_CMD B2h <- 02h) y QEMU termina" "^ACPI: modo ACPI (SMI_CMD B2h <- 2h): AE_OK" "^\[código 0\]"
@@ -2974,14 +3189,14 @@ mira "ICH9: «Reiniciar» por el registro de reinicio de la FADT (E/S CF9h <- 0F
   "^ACPI: para reiniciar: el registro de la FADT (E/S CF9h) <- Fh" "^energía: reiniciar por el registro de la FADT" "^\[código 0\]"
 # 4. sin ACPI (-machine acpi=off; -no-acpi ya no está en QEMU 10): el servicio lo dice, no hay pila y «Apagar» es lo de antes (en QEMU, su puerto de pruebas)
 CAPTURAS=$G MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="-machine acpi=off" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":captura a7" \
-  ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 2" > $Y/sinacpi.sal 2>&1
+  ":clic 40 585" ":clic 360 545" ":clic 275 327" ":pausa 2" > $Y/sinacpi.sal 2>&1
 S=$Y/sinacpi.sal
 mira "sin ACPI: el servicio lo dice y «Apagar» hace lo de antes (en QEMU, el código 5 de su puerto de pruebas)" \
   "^ACPI: el equipo no tiene ACPI" "escritorio: apagar" "^energía: el equipo no se ha apagado" "^\[código 5\]"
 miracap "sin ACPI no hay pila en la bandeja (solo el reloj)" a7 notexto 670 570 740 590 "%" nrgb 695 580 EAF3FD
 # 5. un sobremesa (ACPI sin batería): ni pila; apagar, por ACPI
 CAPTURAS=$G MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":captura a8" \
-  ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 3" > $Y/sobremesa.sal 2>&1
+  ":clic 40 585" ":clic 360 545" ":clic 275 327" ":pausa 3" > $Y/sobremesa.sal 2>&1
 S=$Y/sobremesa.sal
 mira "un sobremesa (ACPI sin batería): el servicio lo dice, y apaga por ACPI" "^El equipo no declara baterías" "^energía: apagar (S5) por el servicio de ACPI" "^\[código 0\]"
 miracap "y en la bandeja no hay pila" a8 notexto 670 570 740 590 "%"
@@ -3128,15 +3343,19 @@ PY
 }
 AQUI=$AQUI sube_base 0.9
 DISCO="-drive file=$V/sata.img,format=raw,if=none,id=d -device ide-hd,drive=d,bus=ide.0 -boot c"
-maquina act1 "$VBOX_Q35 $DISCO" ":espera 60 aviso en la bandeja: Hay una actualización" ":pausa 1" ":captura u1" ":clic 478 526" ":pausa 6" ":captura u2" \
-  ":clic 443 467" ":pausa 12" ":captura u3" ":clic 240 467" ":espera 90 aviso en la bandeja: El núcleo de Hispa-Pentium El núcleo nuevo ha arrancado bien" ":pausa 1" ":captura u4"
+# (PROGRAMAS) «Verlas» abre la ventana de PROGRAMA.BIN en «Pendientes»;
+# «Actualizar todo» es el segundo botón de la derecha; «Reiniciar ahora», Intro
+maquina act1 "$VBOX_Q35 $DISCO" ":espera 60 aviso en la bandeja: Hay una actualización" ":pausa 1" ":captura u1" ":clic 478 526" ":pausa 8" ":captura u2" \
+  ":clic 720 403" ":pausa 12" ":captura u3" ":tecla ret" ":espera 90 aviso en la bandeja: El núcleo de Hispa-Pentium El núcleo nuevo ha arrancado bien" ":pausa 1" ":captura u4"
 mira "al arrancar, con red, ACTUALIZ /BANDEJA mira solo si hay actualizaciones (el catálogo firmado del servidor) y lo dice; tras actualizar el núcleo y reiniciar, que el nuevo ha arrancado bien" \
   "^actualiz: aviso en la bandeja: Hay una actualización\.$" "^reiniciar$" "^actualiz: aviso en la bandeja: El núcleo de Hispa-Pentium El núcleo nuevo ha arrancado bien\.$"
 miracap "el aviso de la bandeja: una ventanita abajo a la derecha, «Hay una actualización», con «Verlas» y «Ahora no»" u1 negrita 400 460 480 480 "Hay una actualización." negrita 420 510 520 530 Verlas
-miracap "«Verlas» abre «Programas y actualizaciones»: base, con la 0.9 nueva, y el catálogo de Internet con su firma buena" u2 \
-  negrita 112 140 116 340 base negrita 300 140 310 340 "0.9 (nueva)" texto 140 105 160 113 "Los paquetes, de http://10.0.2.2:" negrita 300 107 700 113 "(firma buena)"
-miracap "«Actualizar todo»: con el núcleo nuevo, «Reiniciar ahora» o «Más tarde»" u3 negrita 150 456 260 462 "Reiniciar ahora" negrita 400 456 520 462 "Más tarde" \
-  texto 112 390 116 420 "Reinicie para usar el núcleo nuevo; si no arranca, vuelve el de antes."
+[ -n "${GUARDA_CAPTURAS:-}" ] && mkdir -p "$GUARDA_CAPTURAS" && cp $G/u[23].ppm "$GUARDA_CAPTURAS/"
+miracap "«Verlas» abre «Programas y actualizaciones» en «Pendientes (1)»: base, de la 0.8.4 a la 0.9, y el catálogo de Internet con su firma buena" u2 \
+  negrita 10 120 150 140 "Pendientes (1)" negrita 40 190 120 230 base texto 330 190 420 230 "0.8.4" texto 400 190 480 230 "0.9" texto 300 88 790 110 "Paquetes de http://10.0.2.2:" \
+  texto 300 88 790 110 "(firma buena)"
+miracap "«Actualizar todo»: con el núcleo nuevo, ofrece «Reiniciar ahora» o «Más tarde»" u3 negrita 150 200 660 400 "Reiniciar ahora" negrita 150 200 660 400 "Más tarde" \
+  texto 140 200 660 320 "Se ha puesto un núcleo nuevo: se usa al reiniciar"
 miracap "tras reiniciar, el aviso: el núcleo nuevo ha arrancado bien" u4 texto 400 480 600 500 "El núcleo nuevo ha arrancado bien."
 mcopy -n -i $V/sata.img@@1M ::HISPA/GRUBENV $V/grubenv1 > /dev/null 2>&1; mcopy -n -i $V/sata.img@@1M ::HISPA/NUCLEO.ANT $V/ant1 > /dev/null 2>&1
 mcopy -n -i $V/sata.img@@1M ::HISPA/PAQUETES/BASE.PQI $V/base1.pqi > /dev/null 2>&1
@@ -3149,7 +3368,7 @@ printf 'bits 32\norg 0x100000\ncab: dd 0x1BADB002, 0x00010000, -(0x1BADB002 + 0x
 nasm -f bin $V/colgado.asm -o $V/COLGADO.BIN
 AQUI=$AQUI sube_base 0.9.1 $V/COLGADO.BIN
 mcopy -n -i $V/sata.img@@1M ::HISPA/NUCLEO.BIN $V/NUCLEO09.BIN
-maquina act2 "$VBOX_Q35 $DISCO" ":espera 60 aviso en la bandeja: Hay una actualización" ":pausa 1" ":clic 478 526" ":pausa 6" ":clic 443 467" ":pausa 12" ":clic 240 467" \
+maquina act2 "$VBOX_Q35 $DISCO" ":espera 60 aviso en la bandeja: Hay una actualización" ":pausa 1" ":clic 478 526" ":pausa 8" ":clic 720 403" ":pausa 12" ":tecla ret" \
   ":espera 30 ^reiniciar$" ":pausa 25" ":monitor system_reset" ":pausa 4" ":texto g5" ":espera 90 aviso en la bandeja: El núcleo de Hispa-Pentium El nuevo no" ":pausa 1" ":captura u6"
 mira "con un núcleo nuevo que se cuelga, al reiniciar a mano GRUB arranca solo el de antes, y el sistema lo dice" \
   "^actualiz: aviso en la bandeja: El núcleo de Hispa-Pentium El nuevo no llegó a arrancar: se usa el de antes\.$"
@@ -3181,7 +3400,7 @@ python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $V/semilla.asm > /dev/
 # maximizado; Configuración > Cambiar...; 1024 x 768 a prueba y «Mantener»;
 # luego 1280 x 800 a prueba, sin tocar nada: a los 15 s vuelve sola
 CAPTURAS=$G MEMORIA=128 DISCO=$P/d16.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 110" ":pausa 2" ":clic 553 76" ":pausa 1" \
-  ":clic 40 585" ":clic 250 500" ":captura m0" ":clic 572 236" ":pausa 1" ":captura m1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":captura m2" ":clic 431 418" ":pausa 1" ":captura m3" \
+  ":clic 40 585" ":clic 300 238" ":raton 700 470" ":captura m0" ":clic 572 236" ":pausa 1" ":captura m1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":captura m2" ":clic 431 418" ":pausa 1" ":captura m3" \
   ":clic 495 347" ":clic 341 525" ":pausa 2" ":captura m4" ":pausa 17" ":captura m5" > $V/marcha.sal 2>&1
 S=$V/marcha.sal
 mira "con la VBE de Bochs (QEMU -vga std), «Probar...» pone la medida en el momento; «Mantener» la deja; sin tocar nada, a los 15 s vuelve sola la de antes" \
@@ -3212,7 +3431,7 @@ for vga in std vmware; do
   # (EDID) con -vga std, la lista llega hasta lo que dice su EDID (1280 x 800, la quinta); con vmware, sin EDID, la sexta
   if [ $vga = std ]; then x=403; else x=565; fi
   maquina cd$vga "$VBOX_PC -vga $vga -cdrom $CD -drive file=$V/ide.img,format=raw,if=ide,index=0 -boot d" ":espera 40 ^escritorio: en marcha" ":pausa 3" \
-    ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":captura cd$vga" ":clic $x 263" ":clic 229 441" ":pausa 2" ":captura cd${vga}2" ":clic 559 434" ":pausa 1"
+    ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 572 236" ":pausa 1" ":captura cd$vga" ":clic $x 263" ":clic 229 441" ":pausa 2" ":captura cd${vga}2" ":clic 559 434" ":pausa 1"
   mira "el CD en un «pc» como VirtualBox con -vga $vga: el modo de GRUB (800 x 600) se cambia en marcha (1280 x 800) y se mantiene" \
     "escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)" "^pantalla: 1280x800 con 32 bits por punto (cambiado en marcha" \
     "^escritorio: Se queda a 1280 x 800 (hasta que se apague)\."
@@ -3231,7 +3450,7 @@ cp $V/inst.img $V/inst0.img
 python3 -I -c "import sys; t='# GRUB Environment Block\npantalla=\nantes=\nprueba=0\nnativa=1024x768\n'; open(sys.argv[1],'w').write(t+'#'*(1024-len(t)))" $V/envn
 mcopy -o -i $V/inst.img@@1M $V/envn ::HISPA/PANTALLA.ENV
 CIRRUS="$VBOX_PC -vga cirrus -drive file=$V/inst.img,format=raw,if=ide,index=0"
-maquina pc1 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":captura pc1" \
+maquina pc1 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 572 236" ":pausa 1" ":captura pc1" \
   ":clic 565 229" ":clic 274 441" ":pausa 1" ":captura pc2" ":clic 314 336" ":pausa 6"
 mira "sin la VBE de Bochs (cirrus), instalado: la medida se guarda en \\HISPA\\PANTALLA.ENV (a prueba), GRUB.CFG la lee, y «Reiniciar ahora» reinicia" \
   "^escritorio: GRUB.CFG lee ahora PANTALLA.ENV" "^escritorio: .*PANTALLA.ENV: pantalla=1024x768 antes= prueba=1" "^escritorio: reiniciar"
@@ -3256,7 +3475,7 @@ if head -c 100 $V/env2 | grep -q '^prueba=0$' && head -c 100 $V/env2 | grep -q '
 else ko "PANTALLA.ENV no queda bien tras «Mantener»:"; head -c 70 $V/env2 | sed 's/^/        /'; fi
 # otra, 1024 x 600: se reinicia y, en la prueba, se reinicia otra vez a lo
 # bruto (como con la pantalla a oscuras): GRUB vuelve sola a 1024 x 768
-maquina pc3 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":centro 512 384" ":clic 40 753" ":clic 250 668" ":clic 688 320" ":pausa 1" \
+maquina pc3 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":centro 512 384" ":clic 40 753" ":clic 300 406" ":clic 688 320" ":pausa 1" \
   ":clic 515 313" ":clic 386 525" ":pausa 1" ":clic 426 420" ":pausa 6"
 mira "desde 1024 x 768, 1024 x 600 guardada a prueba (la de antes, apuntada)" "^escritorio: .*PANTALLA.ENV: pantalla=1024x600 antes=1024x768 prueba=1" "^escritorio: reiniciar"
 maquina pc4 "$CIRRUS" ":espera 40 está a prueba" ":pausa 2" ":monitor system_reset" ":pausa 3" ":espera 40 en marcha, 1024 x 768" ":pausa 4"
@@ -3272,7 +3491,7 @@ else ko "tras reiniciar sin darla por buena, PANTALLA.ENV no queda bien:"; head 
 # para ella y va por la VBE de la BIOS, que no la da) la pone el núcleo al arrancar
 cp $V/inst0.img $V/inst.img
 STD="$VBOX_PC -vga std -drive file=$V/inst.img,format=raw,if=ide,index=0"
-maquina vb1 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 250 500" ":clic 572 236" ":pausa 1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":clic 431 418" ":pausa 2"
+maquina vb1 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 572 236" ":pausa 1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":clic 431 418" ":pausa 2"
 mira "instalado, con la VBE de Bochs: «Mantener» la guarda también para los próximos arranques" "^escritorio: .*PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" \
   "^escritorio: Se queda a 1024 x 768, también al arrancar\."
 maquina vb2 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3"
@@ -3292,7 +3511,7 @@ cp $P/d16.img $V/de.img; mcopy -o -i $V/de.img $V/DISPOSIT.BIN ::DISPOSIT.BIN
 for e in 1024:600 1366:768 no; do
   if [ $e = no ]; then o="edid=off"; else o="xres=${e%:*},yres=${e#*:}"; fi
   CAPTURAS=$G MEMORIA=128 DISCO=$V/de.img ARRANQUE=escritorio MODULOS= VGA=none QEMU_MAS="-device VGA,$o" $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" \
-    ":clic 40 585" ":clic 250 500" ":clic 576 236" ":pausa 1" ":captura ed${e%:*}" ":clic 594 441" ":clic 333 399" ":pausa 3" ":captura dv${e%:*}" > $V/edid$e.sal 2>&1
+    ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 576 236" ":pausa 1" ":captura ed${e%:*}" ":clic 594 441" ":clic 333 399" ":pausa 3" ":captura dv${e%:*}" > $V/edid$e.sal 2>&1
 done
 S=$V/edid1024:600.sal
 mira "con un EDID de 1024 x 600 (un netbook), el núcleo lo lee y lo apunta en el registro del arranque" "pantalla: EDID: «QEMU Monitor», hecha para 1024 x 600 (la tarjeta de QEMU)"
@@ -3312,7 +3531,7 @@ miracap "y en una máquina virtual (su pantalla es una ventana) la lista sigue s
 if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && command -v parted > /dev/null; then
   $AQUI/nucleo32/usb.sh $V/usb.img > $V/usb.txt 2>&1
   USBQ="-machine pc -m 256 -vga cirrus -nic none -device qemu-xhci,id=u -drive file=$V/usb.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1"
-  maquina us1 "$USBQ -no-reboot" ":espera 60 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 250 500" ":clic 576 236" ":pausa 1" ":captura us1" \
+  maquina us1 "$USBQ -no-reboot" ":espera 60 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 576 236" ":pausa 1" ":captura us1" \
     ":clic 403 229" ":clic 274 441" ":pausa 1" ":clic 314 336" ":pausa 6"
   mira "desde la memoria USB (sin EDID): nada mayor que la de ahora, «A la medida», y se guarda en X:\\PANTALLA.ENV" \
     "la pantalla no dice su medida" "^escritorio: \\\\PANTALLA.ENV: pantalla=auto antes= prueba=1" "^escritorio: reiniciar"
@@ -3370,7 +3589,7 @@ CAPTURAS=$G ESCRIBE=1 SATA=$Y/sata.img SOLO_LECTURA=1 MODULOS=$Y/ACPI.BIN,$Y/DIS
   ":tecla down" ":tecla ret" ":pausa 4" ":captura dv4" ":clic 228 140" ":raton 400 450" ":pausa 1" ":captura dv5" ":clic 323 140" ":raton 400 450" ":pausa 1" ":captura dv6" \
   ":tecla esc" ":pausa 1" ":clic 245 81" ":pausa 2" ":captura dv7" \
   ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":pausa 1" ":captura dv10" ":clic 742 31" ":pausa 1" \
-  ":clic 40 585" ":pausa 1" ":clic 250 500" ":pausa 1" ":captura dv8" ":clic 300 398" ":pausa 4" ":captura dv9" > $Y/pc.sal 2>&1
+  ":clic 40 585" ":pausa 1" ":clic 300 238" ":raton 700 470" ":pausa 1" ":captura dv8" ":clic 300 398" ":pausa 4" ":captura dv9" > $Y/pc.sal 2>&1
 S=$Y/pc.sal
 mira "ACPI.BIN apunta lo que hay en el espacio de nombres de ACPI (la llamada 156)" "^ACPI: [0-9]* dispositivos del espacio de nombres, apuntados para el Administrador de dispositivos"
 mira "Mi equipo > Propiedades, Configuración > «Administrador de dispositivos...» y las propiedades lanzan DISPOSIT.BIN" \
@@ -3887,6 +4106,162 @@ kill $NPID 2> /dev/null; wait $NPID 2> /dev/null
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Navegador)"
 fi   # el Navegador
+
+# ------------------------------------- 23 bis. (RUEDA) la rueda en los programas
+if parte08 rueda; then
+echo "== Hispa-Pentium: la rueda del ratón en los programas (RUEDA) =="
+W=$P/rueda
+rm -rf $W; mkdir -p $W $G
+export MTOOLS_SKIP_CHECK=1
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $W/semilla.asm > /dev/null && nasm -f bin $W/semilla.asm -o $W/SEMILLA.BIN || ko "semilla.cas no compila"
+for u in udisposi:DISPOSIT umuestra:MUESTRA; do
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/${u%%:*}.cas -o $W/x.asm > /dev/null && nasm -f bin $W/x.asm -o $W/${u##*:}.BIN || ko "${u%%:*}.cas no compila"
+done
+# (y Programas y actualizaciones, que solo se compila: su rueda se ve con un catálogo)
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/uactual.cas -o $W/x.asm > /dev/null && nasm -f bin $W/x.asm -o $W/ACTUALIZ.BIN \
+  && ok "ACTUALIZ.BIN (Programas y actualizaciones, con la rueda en su lista) compila" || ko "uactual.cas no compila"
+if $AQUI/nucleo32/disco.sh $W/d.img 32 > $W/disco.txt 2>&1; then
+  python3 -c "
+import sys
+for i in range(1, 401): sys.stdout.write('linea %03d de un texto largo\r\n' % i)" > $W/LARGO.TXT
+  mmd -i $W/d.img ::MUCHOS
+  for i in $(seq -w 1 80); do printf 'archivo %s\r\n' $i > $W/A$i.TXT; done
+  mcopy -i $W/d.img $W/A*.TXT ::MUCHOS/
+  mcopy -i $W/d.img $W/LARGO.TXT $W/DISPOSIT.BIN $W/MUESTRA.BIN ::/
+  # la Consola (dos clics en su icono): 400 líneas, y la rueda hacia arriba
+  # (cada «mouse_move 0 0 N» de QEMU es un paso: tres líneas); luego el
+  # Bloc, Mi equipo, el Administrador de dispositivos y MUESTRA, lanzados desde ella
+  CAPTURAS=$G DISCO=$W/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $W/SEMILLA.BIN \
+    ":pausa 3" ":doble 62 185" ":pausa 3" "type largo.txt" ":pausa 3" ":raton 300 300" \
+    ":monitor mouse_move 0 0 1" ":pausa 1" ":monitor mouse_move 0 0 1" ":pausa 1" ":captura ru1" \
+    "bloc largo.txt" ":pausa 3" ":captura ru2" ":raton 300 300" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru3" \
+    ":tecla right" ":pausa 1" ":captura ru4" ":clic 606 102" ":pausa 1" \
+    "equipo c:\\muchos" ":pausa 4" ":raton 400 300" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru5" \
+    ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 -1" ":pausa 2" ":captura ru6" \
+    ":tecla f8" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru7" ":clic 775 21" ":pausa 1" \
+    "disposit" ":pausa 4" ":raton 400 300" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru8" ":clic 745 31" ":pausa 1" \
+    "muestra normal" ":pausa 4" ":raton 400 350" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru9" \
+    ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 1" ":pausa 2" ":captura ru10" ":tecla down" ":pausa 1" ":tecla down" ":pausa 1" ":captura ru11" > $W/r.sal 2>&1
+  tr -d '\r' < $W/r.sal > $W/r.txt
+  S=$W/r.txt
+  mira "la Consola, el Bloc, Mi equipo y el Administrador de dispositivos, lanzados" \
+    "escritorio: lanzo .CONSOLA.BIN" 
+  miracap "la Consola: la rueda hacia arriba enseña lo que había subido (dos pasos, seis líneas: la 371 arriba, en otro azul) y el título lo dice" ru1 \
+    negrita 90 60 600 90 "Consola - historial: 6 l" texto 90 110 400 130 "linea 371 de un texto largo"
+  miracap "el Bloc de notas con LARGO.TXT (y la Consola, al escribir, otra vez abajo)" ru2 texto 110 170 400 200 "linea 001 de un texto largo" notexto 80 60 600 90 "historial"
+  miracap "el Bloc: dos pasos de rueda hacia abajo, seis líneas (la 007 arriba), y el cursor donde estaba (Lín 1)" ru3 \
+    texto 110 170 400 200 "linea 007 de un texto largo" texto 110 455 400 480 "Lín 1, Col 1"
+  miracap "y con una tecla (la flecha), otra vez al cursor" ru4 texto 110 170 400 200 "linea 001 de un texto largo" texto 110 455 400 480 "Lín 1, Col 2"
+  miracap "Mi equipo: un paso de rueda, una fila de iconos (A06 arriba), sin elegir nada" ru5 texto 210 160 300 200 A06.TXT notexto 210 160 300 200 A01.TXT texto 10 478 300 500 "Nada elegido"
+  miracap "Ctrl+rueda hacia abajo: la vista, más pequeña (de los iconos a la lista)" ru6 texto 210 130 320 160 A01.TXT texto 440 130 560 160 A16.TXT
+  miracap "en los detalles (F8), la rueda baja seis renglones de la rejilla" ru7 negrita 220 150 320 180 A07.TXT notexto 210 130 320 470 A01.TXT
+  miracap "el Administrador de dispositivos: la rueda baja la lista y la elegida («Pantalla», arriba) se queda elegida, aunque ya no se vea" ru8 \
+    notexto 40 120 400 520 "[-] Pantalla (1)" negrita 40 120 400 520 "[-] Procesador (1)" texto 40 520 300 545 "16 dispositivos"
+  miracap "MUESTRA: la rueda baja la rejilla seis renglones (el 20, arriba) sin mover la elegida (la 8, que ya no se ve)" ru9 \
+    negrita 0 0 400 30 "Muestra de controles" texto 60 195 300 220 "Persona de ejemplo 20" notexto 0 190 800 520 "Persona de ejemplo 8"
+  miracap "MUESTRA: Ctrl+rueda hacia arriba, la letra más grande (vez y media)" ru10 negrita15 0 150 800 300 "Nombre"
+  miracap "y con la flecha abajo (la primera lleva el teclado a la rejilla), la elegida pasa a la siguiente (la 15) y se ve otra vez" ru11 negrita15 0 150 800 400 "Persona de ejemplo 15"
+  [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/ru*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
+else ko "no se puede hacer el disco: $(tail -2 $W/disco.txt)"; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin la rueda)"
+fi   # la rueda
+
+# ---------------------------------------------- 23. (MENÚ) el menú Inicio y los atajos
+if parte08 menu; then
+echo "== Hispa-Pentium: el menú Inicio, los menús largos y los atajos de teclado de todo el sistema (MENÚ) =="
+W=$P/menu
+rm -rf $W; mkdir -p $W/mnu $G
+export MTOOLS_SKIP_CHECK=1
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $W/semilla.asm > /dev/null && nasm -f bin $W/semilla.asm -o $W/SEMILLA.BIN || ko "semilla.cas no compila"
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/ularga.cas -o $W/x.asm > /dev/null && nasm -f bin $W/x.asm -o $W/LARGA.BIN || ko "ularga.cas no compila"
+if $AQUI/nucleo32/disco.sh $W/d.img 32 oficina > $W/disco.txt 2>&1; then
+  # 24 juegos (más de los que caben a lo alto: el submenú se desplaza), un
+  # acceso de «Herramientas» (a Accesorios) y uno sin tipo (el Navegador:
+  # a Internet, por su programa); 8 documentos más en la raíz
+  for i in $(seq -w 1 24); do printf 'nombre=Juego %s\r\nprograma=\\HOLA.BIN\r\ntipo=Juegos y emuladores\r\n' $i > $W/mnu/J$i.MNU; done
+  printf 'nombre=Saludo\r\nprograma=\\HOLA.BIN\r\ntipo=Herramientas\r\n' > $W/mnu/SALUDO.MNU
+  printf 'nombre=Navegador\r\nprograma=\\HISPA\\NAVEGA\\NAVEGA.BIN\r\n' > $W/mnu/NAVEGA.MNU
+  for i in 1 2 3 4 5 6 7 8; do printf 'documento %s\r\n' $i > $W/DOC$i.TXT; done
+  mmd -i $W/d.img ::MENU
+  mcopy -i $W/d.img $W/mnu/*.MNU ::MENU/
+  mcopy -i $W/d.img $W/DOC*.TXT $W/LARGA.BIN ::/
+  # 1. el menú: su forma, Todos los programas, una carpeta larga (con la
+  # flecha en diagonal: no se cierra), la rueda, el teclado y Mis documentos
+  CAPTURAS=$G DISCO=$W/d.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh $W/SEMILLA.BIN \
+    ":pausa 3" ":clic 40 585" ":pausa 1" ":captura mn1" ":raton 100 502" ":pausa 1" ":captura mn2" ":raton 300 454" ":pausa 1" ":captura mn3" \
+    ":raton 560 300" ":monitor mouse_move 0 0 -4" ":pausa 0.5" ":monitor mouse_move 0 0 -4" ":pausa 1" ":captura mn4" ":tecla esc" ":tecla esc" ":tecla esc" ":pausa 1" ":captura mn5" \
+    ":tecla meta_l" ":pausa 1" ":tecla t" ":tecla right" ":tecla a" ":tecla right" ":pausa 1" ":captura mn6" ":tecla s" ":tecla ret" ":pausa 2" \
+    ":clic 40 585" ":clic 300 171" ":pausa 1" ":captura mn7" ":clic 500 171" ":pausa 2" ":captura mn8" > $W/m.sal 2>&1
+  tr -d '\r' < $W/m.sal > $W/m.txt
+  S=$W/m.txt
+  miracap "el menú Inicio: los fijados (Bloc de notas y Consola, con su explicación), los más usados (los de los paquetes), «Todos los programas», la columna de la derecha y el pie con Cerrar sesión, Reiniciar y Apagar equipo" mn1 \
+    negrita 46 155 54 163 "Bloc de notas" texto 46 175 54 183 "Escribir un texto" texto 38 246 46 254 "Juego 01" negrita 58 492 66 500 "Todos los programas" \
+    negrita 256 159 264 167 "Mis documentos" negrita 256 192 264 200 "Mi equipo" negrita 256 226 264 234 "Configuración" negrita 256 256 264 264 "Administrador de" \
+    negrita 256 296 264 304 "Programas instalados" negrita 256 330 264 338 "Actualizar" negrita 256 363 264 371 "Ayuda" negrita 256 393 264 401 "Ejecutar..." \
+    negrita 68 533 76 541 "Cerrar sesión" negrita 210 533 222 541 Reiniciar negrita 320 533 328 541 "Apagar equipo"
+  miracap "«Todos los programas» (con la flecha encima) abre sus carpetas: Accesorios, Internet (el Navegador, por su programa), Juegos (por su «tipo»), Oficina y Sistema" mn2 \
+    texto 250 390 258 398 Accesorios texto 250 416 258 424 Internet texto 250 442 258 450 Juegos texto 250 468 258 476 Oficina texto 250 494 258 502 Sistema
+  miracap "una carpeta con más de los que caben a lo alto: el submenú no crece más que la pantalla y lleva sus flechas (el 01 arriba, el 24 no se ve)" mn3 \
+    texto 486 30 494 40 "Juego 01" notexto 460 0 700 570 "Juego 24" negrita 320 533 328 541 "Apagar equipo"
+  miracap "la flecha, en diagonal hasta él, no lo cierra; y la rueda lo baja: el 24, a la vista" mn4 texto 460 0 700 570 "Juego 24" notexto 460 0 700 570 "Juego 01"
+  miracap "Esc cierra un submenú cada vez, y luego el menú" mn5 notexto 0 90 440 570 "Todos los programas"
+  miracap "con el teclado: el logo, la «t» (Todos los programas), la flecha a la derecha, la «a» (Accesorios) y otra vez a la derecha: su submenú, la primera elegida" mn6 \
+    texto 486 390 494 398 "Bloc de notas" texto 486 468 494 476 "Saludo"
+  mira "y la «s» e Intro lanzan «Saludo» (un acceso de un paquete)" "escritorio: lanzo .HOLA.BIN"
+  miracap "«Mis documentos» abre su submenú con los .TXT de la raíz" mn7 texto 460 160 480 182 "LEEME.TXT" texto 460 0 700 570 "DOC8.TXT"
+  mira "y uno de ellos se abre con el Bloc de notas" "escritorio: lanzo .BLOC.BIN"
+  # 2. a 640 x 480 y a 1024 x 600: el pie, siempre a la vista
+  for m in 640x480 1024x600; do
+    al=${m#*x}
+    CAPTURAS=$G DISCO=$W/d.img ARRANQUE="escritorio modo=$m" PANTALLA=$m MODULOS= $AQUI/nucleo32/probar.sh $W/SEMILLA.BIN ":pausa 3" ":clic 40 $((al - 15))" ":pausa 1" ":captura mp$m" > $W/p$m.sal 2>&1
+    miracap "a $m: el menú cabe encima de la barra, con «Todos los programas» y «Apagar equipo» a la vista" mp$m \
+      negrita 58 $((al - 108)) 66 $((al - 100)) "Todos los programas" negrita 320 $((al - 67)) 328 $((al - 59)) "Apagar equipo" negrita 46 0 54 $((al - 120)) "Bloc de notas"
+  done
+  # 3. los atajos de teclado de todo el sistema
+  cp $W/d.img $W/e.img
+  CAPTURAS=$G ESCRIBE=1 DISCO=$W/e.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh $W/SEMILLA.BIN \
+    ":pausa 3" ":doble 60 110" ":pausa 2" ":doble 60 190" ":pausa 2" ":tecla alt-tab" ":pausa 1" ":captura at1" \
+    ":tecla alt-spc" ":pausa 1" ":captura at2" ":tecla down" ":tecla down" ":tecla ret" ":tecla right" ":tecla right" ":tecla right" ":tecla down" ":tecla ret" ":pausa 1" ":captura at3" \
+    ":tecla ctrl-alt-delete" ":pausa 1" ":captura at4" ":tecla esc" ":tecla meta_l-r" ":pausa 1" ":escribe larga" ":captura at5" ":tecla ret" ":pausa 2" \
+    ":clic 300 200" ":pausa 1" ":captura at6" ":raton 380 300" ":monitor mouse_move 0 0 -5" ":pausa 1" ":captura at7" ":tecla end" ":tecla ret" ":pausa 1" \
+    ":tecla print" ":pausa 5" ":captura at8" ":tecla meta_l-d" ":pausa 1" ":captura at9" ":tecla meta_l-d" ":pausa 1" ":captura at10" \
+    ":tecla alt-f4" ":pausa 2" ":clic 792 300" ":tecla alt-f4" ":pausa 1" ":captura at11" ":tecla right" ":tecla right" ":pausa 1" ":captura at12" ":tecla ret" ":pausa 3" ":captura at13" \
+    ":tecla ret" ":pausa 1" ":clic 792 300" ":tecla f1" ":pausa 1" ":tecla ret" ":tecla meta_l-e" ":pausa 3" ":captura at14" > $W/a.sal 2>&1
+  tr -d '\r' < $W/a.sal > $W/a.txt
+  S=$W/a.txt
+  mira "Alt+Tab: la franja con las dos ventanas, y al soltar Alt se queda la de detrás (el Bloc de notas)" "^escritorio: Alt+Tab, con 2 ventanas$" "^escritorio: Alt+Tab, a la 1$"
+  miracap "Alt+Tab trae delante el Bloc de notas (estaba detrás de la Consola)" at1 negrita 100 60 130 80 "NOTAS.TXT - Bloc de notas"
+  miracap "Alt+Espacio: el menú de la ventana (Restaurar, Mover, Tamaño, Minimizar, Maximizar y Cerrar)" at2 texto 90 80 140 110 Restaurar texto 90 120 140 160 "Tamaño" texto 90 210 140 240 Cerrar
+  miracap "«Tamaño» con las flechas: la ventana, más ancha y 16 puntos más alta (la barra de estado del Bloc, más abajo)" at3 negrita 100 60 130 80 "NOTAS.TXT - Bloc de notas" texto 94 446 102 470 NOTAS.TXT
+  miracap "Ctrl+Alt+Supr: el Administrador de tareas, con los programas abiertos" at4 negrita 160 60 300 200 "Los programas abiertos" texto 180 180 300 220 "NOTAS.TXT - Bloc de notas" texto 180 200 300 240 Consola
+  miracap "Logo+R: «Ejecutar», con lo que se escribe" at5 negrita 140 200 260 300 "Abrir:" texto 200 250 300 300 larga
+  mira "y lanza LARGA.BIN (sin .BIN: se pone solo)" "escritorio: lanzo .LARGA.BIN"
+  miracap "un menú emergente de 30 opciones (más de las que caben): se ve lo que cabe, con sus flechas" at6 texto 250 0 450 60 "Opción número 01" notexto 250 0 450 600 "Opción número 30"
+  miracap "y la rueda lo desplaza" at7 notexto 250 0 450 60 "Opción número 01" texto 250 0 450 80 "Opción número 0"
+  mira "Fin e Intro eligen la última (la 30)" "^larga: elegida 30$"
+  mira "Impr Pant: una captura de toda la pantalla en \\CAPTURAS (un BMP)" "^escritorio: captura de 800 puntos de ancho en .CAPTURAS.CAPT0001.BMP$"
+  miracap "y lo dice en un globo encima de la bandeja" at8 negrita 450 500 800 570 "Captura de la pantalla"
+  rm -f $W/capt.bmp; mcopy -n -i $W/e.img ::CAPTURAS/CAPT0001.BMP $W/capt.bmp > /dev/null 2>&1
+  if [ "$(head -c 2 $W/capt.bmp 2> /dev/null)" = BM ] && [ "$(stat -c %s $W/capt.bmp 2> /dev/null)" = 1440054 ] && fsck.fat -n $W/e.img > /dev/null 2>&1; then
+    ok "el BMP está en el disco: 800 x 600 con 24 bits (1.440.054 octetos), y el disco, sano (fsck.fat)"
+  else ko "la captura no está bien en el disco ($(stat -c %s $W/capt.bmp 2> /dev/null) octetos)"; fi
+  miracap "Logo+D enseña el escritorio (lo minimiza todo)" at9 notexto 80 60 700 100 "NOTAS.TXT - Bloc de notas" notexto 80 60 700 100 "Menú largo"
+  miracap "y otra vez Logo+D lo devuelve" at10 negrita 80 60 700 120 "NOTAS.TXT - Bloc de notas"
+  miracap "Alt+F4 con el tapiz elegido: «Apagar el equipo», con Apagar elegido (Apagar, Reiniciar, Cerrar sesión y Cancelar)" at11 \
+    negrita 192 312 208 326 Apagar negrita 300 312 316 326 Reiniciar negrita 404 312 420 326 "Cerrar sesión" negrita 544 312 560 326 Cancelar rgb 166 306 14294A 30
+  miracap "las flechas llevan lo elegido a «Cerrar sesión» (el borde oscuro, alrededor)" at12 negrita 404 312 420 326 "Cerrar sesión" rgb 406 306 14294A 30 nrgb 166 306 14294A 30
+  mira "Intro cierra la sesión (se cierran los programas) y vuelve con «Entrar»" "^escritorio: sesión cerrada$" "^escritorio: sesión abierta$"
+  miracap "el cuadro de la sesión cerrada" at13 negrita 200 200 600 300 "La sesión se ha cerrado." negrita 200 200 600 400 "Entrar"
+  mira "F1 en el tapiz: la Ayuda (en este disco no hay MANUAL.TXT: lo dice)" "^escritorio: aviso: La Ayuda (MANUAL.TXT) no está en este sistema.$"
+  mira "Logo+E: el explorador (Mi equipo)" "escritorio: lanzo .EQUIPO.BIN"
+  if ! grep -q "excepción\|\*\*\*" $W/m.txt $W/a.txt; then ok "en esas sesiones, ni una excepción ni una queja del núcleo"
+  else ko "el núcleo se ha quejado:"; grep -h "excepción\|\*\*\*" $W/m.txt $W/a.txt | head -4 | sed 's/^/        /'; fi
+  [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/mn*.ppm $G/mp*.ppm $G/at*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
+else ko "no se puede hacer el disco: $(tail -2 $W/disco.txt)"; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin el menú Inicio)"
+fi   # el menú Inicio
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
 [ -z "${SOLO:-}" ] && parte15

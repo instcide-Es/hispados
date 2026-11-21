@@ -11,6 +11,12 @@
 ;  que sea «-» es una raya; «inactivas» dice (un bit por opción, contando las
 ;  rayas) las que salen en gris y no se pueden elegir.
 ;
+;  (MENÚ, RUEDA) Hasta MAX_OPCIONES; si no cabe a lo alto de la pantalla, se
+;  ve lo que cabe y se desplaza: con sus flechas (arriba y abajo: un clic, o
+;  la flecha quieta encima), con la rueda del ratón y con el teclado (las
+;  flechas, Re Pág, Av Pág, Inicio, Fin y la letra inicial: la opción
+;  siguiente que empieza por ella).
+;
 ;  Lo pide el escritorio (para él: «destino» 0; el resultado queda en
 ;  hay_resultado, resultado y resultado_etiqueta) o un programa, por la
 ;  llamada al sistema 39 (para una ventana suya: al cerrarse el menú le llega
@@ -23,10 +29,11 @@
 ; =============================================================================
 módulo Emergente
 
-    importar Tareas, Grafico, Letra, Video, Ventanas, Consola
+    importar Tareas, Grafico, Letra, Video, Ventanas, Consola, Raton
 
-    público constante MAX_OPCIONES = 12
-    constante MAX_TEXTO = 256
+    público constante MAX_OPCIONES = 32         ; (MENÚ) eran 12 (y «inactivas» tiene 32 bits)
+    constante MAX_TEXTO = 1024                  ; (MENÚ) eran 256
+    constante FLECHA = 14                       ; (MENÚ) las franjas de las flechas, si se desplaza
     constante ALTO_OPCIÓN = 24
     constante ALTO_RAYA = 9
     constante ARRIBA_LIBRE = 5                  ; lo que queda por encima de la primera
@@ -50,6 +57,12 @@ módulo Emergente
     variable elegida: ent32 = -1
     variable ancho, alto: ent32
     variable cerrojo: Cerrojo
+    ; (MENÚ) si no cabe: se desplaza
+    variable con_flechas: bool
+    variable primera: nat32                     ; la primera opción que se ve
+    variable alto_vista: ent32                  ; lo que mide lo de entre las flechas
+    variable auto_tic: nat32
+    variable pos_x, pos_y: ent32                ; dónde está en la pantalla
 
     función es_raya(i: nat32): bool
         devolver largo[i] = 1 y textos[inicio[i]] = '-'
@@ -73,32 +86,93 @@ módulo Emergente
         si l = nulo entonces devolver fin
         redondeado(valor(l), 0, 0, ancho, alto, 8, 0x1A56AC, 0x1A56AC, ARRIBA)
         redondeado(valor(l), 1, 1, ancho - 2, alto - 2, 7, BLANCO, 0xF1F6FD, ARRIBA)
+        si con_flechas entonces pinta_flechas(valor(l)) fin
         i := 0
         mientras i < n hacer
-            si es_raya(i) entonces
-                rectángulo(valor(l), 8, arriba[i] + 4, ancho - 16, 1, 0xB9CDE8)
+            si con_flechas y (i < primera o arriba[i] + alto_de(i) - desplazado() > ARRIBA_LIBRE + FLECHA + alto_vista) entonces
+                ; (no se ve)
+            sino si es_raya(i) entonces
+                rectángulo(valor(l), 8, y_de(i) + 4, ancho - 16, 1, 0xB9CDE8)
             sino
                 c := TINTA
                 si no se_puede(ent32(i)) entonces
                     c := TINTA_GRIS
                 sino si ent32(i) = elegida entonces
-                    redondeado(valor(l), 3, arriba[i] + 1, ancho - 6, ALTO_OPCIÓN - 2, 4, 0x3F86E0, 0x2F74D0, TODAS)
+                    redondeado(valor(l), 3, y_de(i) + 1, ancho - 6, ALTO_OPCIÓN - 2, 4, 0x3F86E0, 0x2F74D0, TODAS)
                     c := BLANCO
                 fin
-                texto_n(valor(l), 14, arriba[i] + 4, dirección(textos[inicio[i]]), largo[i], c)
+                texto_n(valor(l), 14, y_de(i) + 4, dirección(textos[inicio[i]]), largo[i], c)
             fin
             i := i + 1
         fin
         repintada(v, 0, 0, ancho, alto)
     fin
 
-    ; la opción que está a esa altura; -1 si no hay (o es una raya)
+    ; (MENÚ) lo que se ha desplazado (en puntos) y dónde se pinta la opción i
+    función desplazado(): ent32
+        si no con_flechas entonces devolver 0 fin
+        devolver arriba[primera] - ARRIBA_LIBRE - FLECHA
+    fin
+
+    función y_de(i: nat32): ent32
+        devolver arriba[i] - desplazado()
+    fin
+
+    ; ¿se ve entera la opción i?
+    función se_ve(i: nat32): bool
+        si no con_flechas entonces devolver cierto fin
+        devolver i >= primera y y_de(i) + alto_de(i) <= ARRIBA_LIBRE + FLECHA + alto_vista
+    fin
+
+    función pinta_flechas(ref l: Lienzo)
+        variable i: ent32
+        variable c: nat32
+        rectángulo(l, 4, ARRIBA_LIBRE, ancho - 8, FLECHA - 2, 0xE4EEFB)
+        rectángulo(l, 4, alto - ABAJO_LIBRE - FLECHA + 2, ancho - 8, FLECHA - 2, 0xE4EEFB)
+        c := TINTA
+        si primera = 0 entonces c := TINTA_GRIS fin
+        para i desde 0 hasta 4 hacer rectángulo(l, ancho div 2 - i, ARRIBA_LIBRE + 3 + i, 2 * i + 1, 1, c) fin
+        c := TINTA
+        si se_ve(n - 1) entonces c := TINTA_GRIS fin
+        para i desde 0 hasta 4 hacer rectángulo(l, ancho div 2 - 4 + i, alto - ABAJO_LIBRE - FLECHA + 4 + i, 9 - 2 * i, 1, c) fin
+    fin
+
+    ; desplaza «k» opciones (hacia abajo si es positivo); cierto si se ha movido
+    función desplaza(k: ent32): bool
+        variable p: ent32
+        si no con_flechas entonces devolver falso fin
+        p := ent32(primera)
+        mientras k > 0 y no se_ve(n - 1) hacer
+            primera := primera + 1
+            k := k - 1
+        fin
+        mientras k < 0 y primera > 0 hacer
+            primera := primera - 1
+            k := k + 1
+        fin
+        devolver ent32(primera) <> p
+    fin
+
+    ; que se vea la elegida
+    función a_la_vista()
+        si elegida < 0 o no con_flechas entonces devolver fin
+        si nat32(elegida) < primera entonces primera := nat32(elegida) fin
+        mientras no se_ve(nat32(elegida)) y primera < n - 1 hacer primera := primera + 1 fin
+    fin
+
+    ; la opción que está a esa altura; -1 si no hay (o es una raya); con
+    ; flechas, -2 en la de arriba y -3 en la de abajo
     función opción_en(x: ent32, yy: ent32): ent32
         variable i: nat32
         si x < 0 o x >= ancho entonces devolver -1 fin
+        si con_flechas entonces
+            si yy < ARRIBA_LIBRE + FLECHA entonces devolver -2 fin
+            si yy >= alto - ABAJO_LIBRE - FLECHA entonces devolver -3 fin
+            yy := yy + desplazado()
+        fin
         i := 0
         mientras i < n hacer
-            si yy >= arriba[i] y yy < arriba[i] + alto_de(i) entonces
+            si (no con_flechas o se_ve(i)) y yy >= arriba[i] y yy < arriba[i] + alto_de(i) entonces
                 si es_raya(i) entonces devolver -1 fin
                 devolver ent32(i)
             fin
@@ -186,11 +260,21 @@ módulo Emergente
             i := i + 1
         fin
         alto := alto + ABAJO_LIBRE
+        ; (MENÚ) si no cabe a lo alto, lo que quepa, con flechas
+        con_flechas := falso
+        primera := 0
+        si alto > pantalla.alto - 8 entonces
+            con_flechas := cierto
+            alto_vista := pantalla.alto - 8 - ARRIBA_LIBRE - ABAJO_LIBRE - 2 * FLECHA
+            alto := alto_vista + ARRIBA_LIBRE + ABAJO_LIBRE + 2 * FLECHA
+        fin
         si x + ancho + 6 > pantalla.ancho entonces x := pantalla.ancho - ancho - 6 fin
         si yy + alto + 6 > pantalla.alto entonces yy := yy - alto fin
         si x < 0 entonces x := 0 fin
         si yy < 0 entonces yy := 0 fin
         v := crear_ventana("emergente", x, yy, ancho, alto, SIN_MARCO ob ENCIMA ob REDONDA, 0)
+        pos_x := x
+        pos_y := yy
         si v = 0 entonces
             soltar(cerrojo)
             devolver falso
@@ -218,10 +302,42 @@ módulo Emergente
             si i >= ent32(n) entonces i := 0 fin
             si se_puede(i) entonces
                 elegida := i
+                a_la_vista()
                 pinta()
                 devolver
             fin
             vueltas := vueltas + 1
+        fin
+    fin
+
+    ; (MENÚ) la letra sin tilde y en minúscula
+    función llana(c: byte): byte
+        si c >= 'A' y c <= 'Z' entonces devolver c + 32 fin
+        según c
+            caso 0xA0, 0x85, 0x83, 0x84, 0xB5: devolver 'a'
+            caso 0x82, 0x8A, 0x88, 0x89, 0x90: devolver 'e'
+            caso 0xA1, 0x8D, 0x8C, 0x8B, 0xD6: devolver 'i'
+            caso 0xA2, 0x95, 0x93, 0x94, 0xE0: devolver 'o'
+            caso 0xA3, 0x97, 0x96, 0x81, 0x9A, 0xE9: devolver 'u'
+            caso 0xA5: devolver 0xA4
+        fin
+        devolver c
+    fin
+
+    ; la opción siguiente que empieza por esa letra
+    función por_letra(c: byte)
+        variable i, k: ent32
+        k := 1
+        mientras k <= ent32(n) hacer
+            i := (elegida + k) mod ent32(n)
+            si i < 0 entonces i := i + ent32(n) fin
+            si se_puede(i) y llana(textos[inicio[i]]) = llana(c) entonces
+                elegida := i
+                a_la_vista()
+                pinta()
+                devolver
+            fin
+            k := k + 1
         fin
     fin
 
@@ -251,7 +367,23 @@ módulo Emergente
                     fin
                 caso EV_RATÓN_BAJA:
                     k := opción_en(ent32(e.a), ent32(e.b))
-                    si se_puede(k) entonces cierra(nat32(k)) fin
+                    si k = -2 entonces
+                        si desplaza(-3) entonces pinta() fin
+                    sino si k = -3 entonces
+                        si desplaza(3) entonces pinta() fin
+                    sino si se_puede(k) entonces
+                        cierra(nat32(k))
+                    fin
+                caso EV_RUEDA:
+                    ; (RUEDA) la rueda lo desplaza (si no cabe); hacia arriba, lo de antes
+                    k := ent32(e.c yb 0xFF)
+                    si k > 127 entonces k := k - 256 fin
+                    si desplaza(-2 * k) entonces
+                        k := opción_en(ent32(e.a), ent32(e.b))
+                        si k >= 0 y no se_puede(k) entonces k := -1 fin
+                        si k >= -1 entonces elegida := k fin
+                        pinta()
+                    fin
                 caso EV_TECLA:
                     si e.a = 27 entonces
                         cierra(SIN_ELEGIR)
@@ -262,13 +394,35 @@ módulo Emergente
                         anda(-1)
                     sino si e.a = '\n' y se_puede(elegida) entonces
                         cierra(nat32(elegida))
+                    sino si e.a = 0x149 o e.a = TECLA_INICIO entonces
+                        ; (MENÚ) Re Pág e Inicio: la primera
+                        elegida := -1
+                        anda(1)
+                    sino si e.a = 0x151 o e.a = TECLA_FIN entonces
+                        elegida := 0
+                        anda(-1)
+                    sino si e.a > ' ' y e.a < 0x100 entonces
+                        por_letra(byte(e.a))      ; (MENÚ) la letra inicial
                     sino si (e.a = TECLA_IZQUIERDA o e.a = TECLA_DERECHA) y destino <> 0 y etiqueta yb CON_FLECHAS <> 0 entonces
                         ; (explorador) en una barra de menús que lo pide: al menú de al lado
                         si e.a = TECLA_IZQUIERDA entonces cierra(A_LA_IZQUIERDA) sino cierra(A_LA_DERECHA) fin
                     fin
             fin
         fin
+        ; (MENÚ) con la flecha quieta encima de una de sus flechas, se desplaza solo
+        si abierto y con_flechas y tics - auto_tic >= 10 entonces
+            auto_tic := tics
+            si ventana_en_punto_ya(ratón_x, ratón_y) entonces
+                k := opción_en(ratón_x - pos_x, ratón_y - pos_y)
+                si (k = -2 y desplaza(-1)) o (k = -3 y desplaza(1)) entonces pinta() fin
+            fin
+        fin
         soltar(cerrojo)
+    fin
+
+    ; ¿está el punto dentro del menú? (sin el cerrojo del gestor: solo mira su rectángulo)
+    función ventana_en_punto_ya(x: ent32, yy: ent32): bool
+        devolver x >= pos_x y yy >= pos_y y x < pos_x + ancho y yy < pos_y + alto
     fin
 
 fin Emergente.

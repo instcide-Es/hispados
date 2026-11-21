@@ -11,8 +11,15 @@
 ;      argumentos=
 ;      icono=\HISPA\MENU\AGENDA.ICP
 ;      escritorio=si
+;      tipo=Oficina
 ;
-;  «nombre» y «programa» hacen falta; lo demás no. El icono es un .ICP: la
+;  «nombre» y «programa» hacen falta; lo demás no. (MENÚ) «tipo» es la
+;  carpeta de «Todos los programas» (Sistema, Oficina, Internet y red,
+;  Juegos y emuladores, Multimedia, Seguridad, Programas de Windows,
+;  Herramientas, Desarrollo, Programas de terceros: la tabla de
+;  docs/PENTIUM.md §13); si el .MNU no lo dice, el «tipo=» de la cabecera
+;  del paquete que lo trae (su registro, \HISPA\PAQUETES\*.PQI); y si
+;  tampoco, el menú lo deduce por el programa (o «Otros»). El icono es un .ICP: la
 ;  magia «HPIC», el ancho y el alto (32 y 32, en dos palabras de 32 bits, la
 ;  baja primero) y 32 x 32 puntos 0xAARRGGBB (A = 0: transparente; lo hace
 ;  tools/hpicono.py). Sin icono, uno de programa genérico. Como mucho
@@ -24,7 +31,7 @@ módulo Accesos
 
     importar Fat, Unidades, Monton, Usuario, Textos32
 
-    público constante MAX_ACCESOS = 6
+    público constante MAX_ACCESOS = 32          ; (MENÚ) eran 6: ahora van en «Todos los programas»
     público constante LADO_ICONO = 32
 
     tipo Acceso = estructura
@@ -33,6 +40,8 @@ módulo Accesos
         argumentos: arreglo [80] de byte
         en_escritorio: bool
         icono: puntero a nat32                  ; 32 x 32 puntos (o nulo)
+        clase_menú: arreglo [32] de byte        ; (MENÚ) su carpeta de «Todos los programas» («»: no se sabe)
+        mnu: arreglo [16] de byte               ; (MENÚ) el nombre de su .MNU (para buscar su paquete)
     fin
     variable accesos: arreglo [MAX_ACCESOS] de Acceso
     público variable n_accesos: nat32
@@ -60,6 +69,11 @@ módulo Accesos
 
     público función icono_de(i: nat32): puntero a nat32
         devolver accesos[i].icono
+    fin
+
+    ; (MENÚ) su tipo (la carpeta de «Todos los programas»); «» si no se sabe
+    público función tipo_de(i: nat32): puntero a byte
+        devolver dirección(accesos[i].clase_menú[0])
     fin
 
     ; el valor de «clave=» en el texto leído (falso si no está)
@@ -123,6 +137,8 @@ módulo Accesos
         k := n_accesos
         si no valor_de("nombre", accesos[k].nombre, 32) o no valor_de("programa", accesos[k].programa, 80) entonces devolver fin
         valor_de("argumentos", accesos[k].argumentos, 80)
+        valor_de("tipo", accesos[k].clase_menú, 32)           ; (MENÚ)
+        copiar_hasta(accesos[k].mnu, archivo, 16)
         accesos[k].en_escritorio := valor_de("escritorio", valor_, 80) y (valor_[0] = 's' o valor_[0] = 'S')
         accesos[k].icono := nulo
         si valor_de("icono", valor_, 80) entonces accesos[k].icono := lee_icono(valor_) fin
@@ -165,7 +181,100 @@ módulo Accesos
         si del_sistema = 0xFFFFFFFF o unidad_en_memoria() entonces devolver 0 fin
         lee_carpeta("\\HISPA\\MENU")
         lee_carpeta("\\MENU")
+        tipos_de_paquetes()
         devolver n_accesos
+    fin
+
+    ; (MENÚ) los accesos sin «tipo=» toman el de la cabecera del paquete que
+    ; trae su .MNU (lo instalado: \HISPA\PAQUETES\*.PQI, «tipo=» y las
+    ; líneas «archivo=\HISPA\MENU\X.MNU ...»)
+    variable pqi: arreglo [4097] de byte
+    variable tipo_pqi: arreglo [32] de byte
+    función tipos_de_paquetes()
+        variable m, r, n, i, k, j: nat32
+        variable e: Entrada
+        variable falta: bool
+        variable nombre: arreglo [16] de byte
+        falta := falso
+        i := 0
+        mientras i < n_accesos hacer
+            si accesos[i].clase_menú[0] = 0 entonces falta := cierto fin
+            i := i + 1
+        fin
+        si no falta entonces devolver fin
+        m := abrir_archivo(del_sistema, "\\HISPA\\PAQUETES", PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver fin
+        r := leer_entrada(m, dirección(e))
+        mientras r = 1 hacer
+            n := 0
+            mientras e.nombre[n] <> 0 y n < 12 hacer
+                nombre[n] := e.nombre[n]
+                n := n + 1
+            fin
+            nombre[n] := 0
+            si e.atributos yb CARPETA = 0 y n > 4 y nombre[n - 3] = 'P' y nombre[n - 2] = 'Q' y nombre[n - 1] = 'I' entonces
+                copiar(ruta, "\\HISPA\\PAQUETES\\")
+                concatenar(ruta, nombre)
+                k := abrir_archivo(del_sistema, ruta, PARA_LEER)
+                si k < PRIMER_ERROR entonces
+                    j := leer_archivo(k, pqi, 4096)
+                    cerrar_archivo(k)
+                    si j <= 4096 entonces
+                        pqi[j] := 0
+                        tipo_pqi[0] := 0
+                        busca_tipo()
+                        si tipo_pqi[0] <> 0 entonces
+                            i := 0
+                            mientras i < n_accesos hacer
+                                si accesos[i].clase_menú[0] = 0 y lleva_mnu(dirección(accesos[i].mnu[0])) entonces
+                                    copiar_hasta(accesos[i].clase_menú, tipo_pqi, 32)
+                                fin
+                                i := i + 1
+                            fin
+                        fin
+                    fin
+                fin
+            fin
+            r := leer_entrada(m, dirección(e))
+        fin
+        cerrar_archivo(m)
+    fin
+
+    ; el «tipo=» de la cabecera leída (en tipo_pqi)
+    función busca_tipo()
+        variable i, k: nat32
+        i := 0
+        mientras pqi[i] <> 0 hacer
+            si (i = 0 o pqi[i - 1] = '\n') y empieza_por(dirección(pqi[i]), "tipo=") entonces
+                i := i + 5
+                k := 0
+                mientras pqi[i] <> 0 y pqi[i] <> '\r' y pqi[i] <> '\n' y k < 31 hacer
+                    tipo_pqi[k] := pqi[i]
+                    i := i + 1
+                    k := k + 1
+                fin
+                tipo_pqi[k] := 0
+                devolver
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; ¿trae la cabecera leída ese .MNU? (una línea «archivo=...\NOMBRE.MNU »)
+    función lleva_mnu(mnu: puntero a byte): bool
+        variable i, k, n: nat32
+        n := longitud(mnu)
+        si n = 0 entonces devolver falso fin
+        i := 0
+        mientras pqi[i] <> 0 hacer
+            si pqi[i] = '\\' entonces
+                k := 0
+                mientras k < n y mayúscula(pqi[i + 1 + k]) = mayúscula(mnu[k]) hacer k := k + 1 fin
+                si k = n y pqi[i + 1 + n] = ' ' entonces devolver cierto fin
+            fin
+            i := i + 1
+        fin
+        devolver falso
     fin
 
 fin Accesos.

@@ -11,6 +11,14 @@
 ;    PAQUETES COMPRUEBA                si los archivos instalados siguen iguales
 ;    /DESDE=carpeta o /DESDE=http://...  de dónde se traen los paquetes
 ;    PAQUETES FIRMA ARCHIVO            si ARCHIVO.FIR es su firma buena
+;    (PROGRAMAS, 21/11/2026)
+;    PAQUETES LISTA /TIPO              lo instalado, por tipos (y lo suelto)
+;    PAQUETES REPARA [nombre...]       comprueba sus sumas y vuelve a poner lo dañado
+;    PAQUETES ARCHIVOS nombre          sus archivos, y si están como se instalaron
+;    PAQUETES SUELTOS                  los programas sin paquete (.EXE, .BIN, .HVP)
+;    PAQUETES FICHAS                   lo instalado con todo, para «Programas instalados»
+;    PAQUETES QUITA nombre /DEPENDIENTES   y lo que lo necesite, antes
+;    (base, red y paquetes no se quitan nunca: son imprescindibles)
 ;    /FORZAR                           quitar aunque lo necesite otro; poner
 ;                                      una versión más vieja o la misma
 ;
@@ -31,6 +39,11 @@
 ;  El avance (para la ventana, con /AVANCE): en C:\HISPA\PAQUETES\AVANCE.TXT,
 ;  una línea «hecho total texto», que se reescribe (DESCARGA la pone al día
 ;  mientras trae un paquete: /AVANCE=). La ventana la lee y luego la borra.
+;
+;  El tipo (PROGRAMAS): «tipo=» en la cabecera (sistema, oficina, internet...:
+;  TIPOS); si no lo trae, el del catálogo («tipo=nombre código», una línea
+;  aparte) se apunta en el registro al instalarlo; y si no, se deduce del
+;  nombre (tipo_por_nombre), o es «otros».
 ;
 ;  Un paquete (.HPQ, tools/hpq.py) es una cabecera de texto (nombre, versión,
 ;  descripción, lo que necesita, con lo que choca y sus archivos, cada uno
@@ -65,6 +78,21 @@ módulo UPaquetes
     constante RUTA = 160
     constante NINGUNO = 0xFFFFFFFF
     constante URL_POR_DEFECTO = "http://actualiza.hispados.es/pentium/"
+    constante VERSIÓN_PAQUETES = "1.2"
+
+    ; (PROGRAMAS) los tipos: el código y su nombre, en el orden en que salen
+    ; (los mismos que TIPOS en tools/hpq.py; docs/PENTIUM.md, sección 13)
+    constante N_TIPOS = 11
+    constante CÓDIGOS_TIPO = "sistema|oficina|internet|juegos|multimedia|seguridad|windows|herramientas|desarrollo|terceros|otros"
+    constante NOMBRES_TIPO = "Sistema|Oficina|Internet y red|Juegos y emuladores|Multimedia|Seguridad|Programas de Windows|Herramientas|Desarrollo|Programas de terceros|Otros"
+    constante TIPO_OTROS = 10
+    ; el de los paquetes que no lo dicen (los de antes de la 0.8.4): como TIPO_POR_NOMBRE de hpq.py
+    constante TIPO_POR_NOMBRE = "\nbase sistema\npaquetes sistema\nequipo sistema\nhvprun sistema\nred internet\ntls internet\nnavega internet\nssh internet\ntailscal internet\nwifi internet\nbloc oficina\noficina oficina\nconsola herramientas\nejemplos desarrollo\nwin32 windows\nescudo seguridad\nclicgest terceros\n"
+    ; los que no se quitan nunca, y por qué
+    constante IMPRESCINDIBLES = "\nbase es el sistema mismo; sin él, el equipo no arranca\nred sin ella no llegan las actualizaciones ni se pueden traer programas\npaquetes es el que instala, repara y quita los programas\n"
+    ; dónde se buscan los programas sueltos (sin paquete); con «*», también sus subcarpetas
+    constante CARPETAS_SUELTOS = "|\\HISPA|\\HISPA32*|\\PROGRAMS*"
+    constante MAX_SUELTOS = 64
 
     ; ---------------------------------------------------------------------
     ;  EL GANCHO DE LA RED. Para traer los paquetes de Internet, PAQUETES no
@@ -152,6 +180,22 @@ módulo UPaquetes
     variable firmado: bool                      ; el catálogo lleva firma, y es buena
     variable núcleo_nuevo: bool                 ; se ha cambiado \HISPA\NUCLEO.BIN
     variable con_avance: bool                   ; /AVANCE: lo pide la ventana
+    ; (PROGRAMAS)
+    variable por_tipo: bool                     ; /TIPO
+    variable con_dependientes: bool             ; /DEPENDIENTES
+    variable reparando: bool                    ; REPARA: solo se vuelve a poner lo dañado
+    variable quitando: bool                     ; (el avance, archivo a archivo)
+    variable av_h, av_t: nat32
+    variable lento: bool                        ; (las pruebas) /LENTO: cada archivo quitado, un poco de espera
+    variable con_catálogo: bool                 ; FICHAS /CATALOGO: también lo del catálogo
+    variable ins_fecha: arreglo [MAX_PAQ] de nat32  ; la fecha de su registro (la de la FAT): cuándo se instaló
+    variable cat_tipos_n: nat32
+    variable cat_tipo_nombre: arreglo [MAX_PAQ] de arreglo [12] de byte
+    variable cat_tipo: arreglo [MAX_PAQ] de arreglo [16] de byte
+    variable sueltos_n: nat32
+    variable suelto_ruta: arreglo [MAX_SUELTOS] de arreglo [RUTA] de byte
+    variable suelto_tamaño: arreglo [MAX_SUELTOS] de nat32
+    variable suelto_fecha: arreglo [MAX_SUELTOS] de nat32
 
     ; -------------------------------------------------------------------------
     ;  Lo de siempre
@@ -401,6 +445,138 @@ módulo UPaquetes
     fin
 
     ; -------------------------------------------------------------------------
+    ;  (PROGRAMAS) Los tipos de los paquetes
+    ; -------------------------------------------------------------------------
+    ; el trozo k de una lista «a|b|c», a destino
+    función trozo_de(lista: puntero a byte, k: nat32, destino: puntero a byte, cabe: nat32)
+        variable i: nat32
+        mientras k > 0 y valor(lista) <> 0 hacer
+            si valor(lista) = '|' entonces k := k - 1 fin
+            lista := lista + 1
+        fin
+        i := 0
+        mientras valor(lista) <> 0 y valor(lista) <> '|' y i + 1 < cabe hacer
+            destino[i] := valor(lista)
+            i := i + 1
+            lista := lista + 1
+        fin
+        destino[i] := 0
+    fin
+
+    ; lo que va tras «\nclave » en una tabla («\nbase sistema\n...»), a destino
+    función en_tabla(tabla: puntero a byte, clave: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+        variable patrón: arreglo [24] de byte
+        variable p: puntero a byte
+        variable i: nat32
+        une(patrón, "\n", clave)
+        concatenar(patrón, " ")
+        p := buscar(tabla, patrón)
+        destino[0] := 0
+        si p = nulo entonces devolver falso fin
+        p := p + longitud(patrón)
+        i := 0
+        mientras valor(p) <> '\n' y valor(p) <> 0 y i + 1 < cabe hacer
+            destino[i] := valor(p)
+            i := i + 1
+            p := p + 1
+        fin
+        destino[i] := 0
+        devolver cierto
+    fin
+
+    ; el número de un tipo (su código, o su nombre: «Internet y red»); TIPO_OTROS si no es ninguno
+    función número_tipo(t: puntero a byte): nat32
+        variable k: nat32
+        variable x: arreglo [32] de byte
+        para k desde 0 hasta N_TIPOS - 1 hacer
+            trozo_de(CÓDIGOS_TIPO, k, x, 32)
+            si iguales_sin_caja(t, x) entonces devolver k fin
+            trozo_de(NOMBRES_TIPO, k, x, 32)
+            si iguales_sin_caja(t, x) entonces devolver k fin
+        fin
+        devolver TIPO_OTROS
+    fin
+
+    ; el tipo que dice el catálogo de ese paquete (las líneas «tipo=nombre código»)
+    función tipo_del_catálogo(nombre: puntero a byte, destino: puntero a byte): bool
+        variable i: nat32
+        para i desde 1 hasta cat_tipos_n hacer
+            si iguales(cat_tipo_nombre[i - 1], nombre) entonces
+                Textos32.copiar(destino, cat_tipo[i - 1])
+                devolver cierto
+            fin
+        fin
+        destino[0] := 0
+        devolver falso
+    fin
+
+    ; el tipo de un paquete (su número): el de su cabecera; si no lo trae, el
+    ; del catálogo (si está cargado) y, si no, el de su nombre; si no, «otros»
+    función tipo_de(cab: puntero a byte, nombre: puntero a byte): nat32
+        variable x: arreglo [32] de byte
+        si cab <> nulo y campo(cab, "tipo", x, 32) y x[0] <> 0 entonces devolver número_tipo(x) fin
+        si tipo_del_catálogo(nombre, x) entonces devolver número_tipo(x) fin
+        si en_tabla(TIPO_POR_NOMBRE, nombre, x, 32) entonces devolver número_tipo(x) fin
+        devolver TIPO_OTROS
+    fin
+
+    función código_tipo(k: nat32, destino: puntero a byte)
+        trozo_de(CÓDIGOS_TIPO, k, destino, 16)
+    fin
+
+    función nombre_tipo(k: nat32, destino: puntero a byte)
+        trozo_de(NOMBRES_TIPO, k, destino, 32)
+    fin
+
+    ; ¿es imprescindible? (base, red, paquetes, o «imprescindible=si» en su
+    ; cabecera): por qué, a destino
+    función imprescindible(i: nat32, destino: puntero a byte): bool
+        variable x: arreglo [8] de byte
+        si en_tabla(IMPRESCINDIBLES, ins_nombre[i], destino, 100) entonces devolver cierto fin
+        si campo(ins_cab[i], "imprescindible", x, 8) y (x[0] = 's' o x[0] = 'S') entonces
+            Textos32.copiar(destino, "lo dice su paquete")
+            devolver cierto
+        fin
+        destino[0] := 0
+        devolver falso
+    fin
+
+    ; una fecha de la FAT, «dd/mm/aaaa»
+    función fecha_texto(f: nat32, destino: puntero a byte)
+        variable d: arreglo [3] de nat32
+        d[0] := f yb 31
+        d[1] := (f >> 5) yb 15
+        d[2] := ((f >> 9) yb 127) + 1980
+        si f = 0 entonces
+            destino[0] := 0
+            devolver
+        fin
+        formatear(destino, 12, "%02u/%02u/%u", d)
+    fin
+
+    ; lo que ocupan los archivos de una cabecera
+    función ocupa(cab: puntero a byte): nat32
+        variable n, a, t: nat32
+        n := lee_archivos(cab, viejos)
+        t := 0
+        para a desde 1 hasta n hacer t := t + viejos[a - 1].tamaño fin
+        devolver t
+    fin
+
+    ; ¿está ese archivo como se instaló? 0 bien, 1 falta, 2 cambiado
+    función estado_archivo(ruta: puntero a byte, mide: nat32, sha: puntero a byte): nat32
+        variable m: nat32
+        variable s: arreglo [68] de byte
+        variable bien: bool
+        m := abrir(ruta)
+        si es_error(m) entonces devolver 1 fin
+        bien := largo_de(m) = mide y resume(m, mide, s) y iguales(s, sha)
+        cerrar(m)
+        si bien entonces devolver 0 fin
+        devolver 2
+    fin
+
+    ; -------------------------------------------------------------------------
     ;  Las cabeceras
     ; -------------------------------------------------------------------------
     ; lee la cabecera de un paquete (o de un registro .PQI): da una copia,
@@ -521,6 +697,7 @@ módulo UPaquetes
                 si cab <> nulo y campo(cab, "nombre", ins_nombre[ins_n], 12) entonces
                     campo(cab, "version", ins_versión[ins_n], 16)
                     ins_cab[ins_n] := cab
+                    ins_fecha[ins_n] := nat32(e.fecha)
                     ins_n := ins_n + 1
                 sino
                     imprimir1("paquetes: el registro %s no se puede leer (no cuenta)\n", pt(r))
@@ -566,6 +743,7 @@ módulo UPaquetes
         Textos32.copiar(ins_nombre[i], nombre)
         Textos32.copiar(ins_versión[i], versión)
         ins_cab[i] := cab
+        ins_fecha[i] := dato(DATO_FECHA) >> 16
     fin
 
     función olvida_instalado(nombre: puntero a byte)
@@ -576,6 +754,7 @@ módulo UPaquetes
             Textos32.copiar(ins_nombre[j - 1], ins_nombre[j])
             Textos32.copiar(ins_versión[j - 1], ins_versión[j])
             ins_cab[j - 1] := ins_cab[j]
+            ins_fecha[j - 1] := ins_fecha[j]
         fin
         ins_n := ins_n - 1
     fin
@@ -819,11 +998,18 @@ módulo UPaquetes
             si cat[k - 1] = '\r' o cat[k - 1] = '\n' entonces cat[k - 1] := 0 fin
         fin
         cat_n := 0
+        cat_tipos_n := 0
         p := cat
         mientras p < cat + n y cat_n < MAX_PAQ hacer
             l := p
             mientras valor(p) <> 0 hacer p := p + 1 fin
             p := p + 1
+            ; (PROGRAMAS) «tipo=nombre código»
+            si empieza_por(l, "tipo=") y cat_tipos_n < MAX_PAQ entonces
+                palabra(l + 5, 0, cat_tipo_nombre[cat_tipos_n], 12)
+                palabra(l + 5, 1, cat_tipo[cat_tipos_n], 16)
+                si cat_tipo[cat_tipos_n][0] <> 0 entonces cat_tipos_n := cat_tipos_n + 1 fin
+            fin
             si empieza_por(l, "paquete=") entonces
                 l := l + 8
                 palabra(l, 0, cat_nombre[cat_n], 12)
@@ -1161,10 +1347,62 @@ módulo UPaquetes
         fin
         txn_cab := plan_cab[i]
         txn_largo := plan_largo[i]
+        con_tipo(i)
+        pasos[k].tamaño := txn_largo
         copiar_hasta(txn_paquete, plan_ruta[i], RUTA)
         une(txn_nombre, plan_nombre[i], " ")
         concatenar(txn_nombre, plan_versión[i])
         devolver cierto
+    fin
+
+    ; (PROGRAMAS) si la cabecera no dice su tipo y el catálogo sí, el registro
+    ; lo lleva: la cabecera, con «tipo=...» antes de su «fin» (txn_cab)
+    función con_tipo(i: nat32)
+        variable x: arreglo [32] de byte
+        variable t: arreglo [48] de byte
+        variable p: puntero a byte
+        variable k, f: nat32
+        si campo(plan_cab[i], "tipo", x, 32) y x[0] <> 0 entonces devolver fin
+        si no tipo_del_catálogo(plan_nombre[i], x) entonces devolver fin
+        código_tipo(número_tipo(x), x)
+        une(t, "tipo=", x)
+        concatenar(t, "\r\n")
+        k := plan_largo[i]
+        ; dónde empieza su «fin»
+        f := k - 4
+        si k >= 5 y plan_cab[i][k - 2] = '\r' entonces f := k - 5 fin
+        p := más_memoria(k + longitud(t) + 1)
+        si p = nulo entonces devolver fin
+        copiar_memoria(p, plan_cab[i], f)
+        copiar_memoria(p + f, t, longitud(t))
+        copiar_memoria(p + f + longitud(t), plan_cab[i] + f, k - f)
+        txn_largo := k + longitud(t)
+        p[txn_largo] := 0
+        txn_cab := p
+    fin
+
+    ; (PROGRAMAS) al reparar, lo que ya está bien no se toca: fuera de los
+    ; pasos los archivos que están como dice su cabecera (el registro sí se
+    ; vuelve a escribir: así lleva su tipo)
+    función quita_los_sanos()
+        variable i, j: nat32
+        j := 0
+        para i desde 1 hasta n_pasos hacer
+            si pasos[i - 1].clase = P_NUEVO y pasos[i - 1].origen_ <> NINGUNO y pasos[i - 1].existía = 1 y estado_archivo(pasos[i - 1].destino, pasos[i - 1].tamaño, pasos[i - 1].sha) = 0 entonces
+                ; (bien: no se pone otra vez)
+            sino
+                si j <> i - 1 entonces
+                    pasos[j].clase := pasos[i - 1].clase
+                    pasos[j].existía := pasos[i - 1].existía
+                    pasos[j].origen_ := pasos[i - 1].origen_
+                    pasos[j].tamaño := pasos[i - 1].tamaño
+                    Textos32.copiar(pasos[j].sha, pasos[i - 1].sha)
+                    Textos32.copiar(pasos[j].destino, pasos[i - 1].destino)
+                fin
+                j := j + 1
+            fin
+        fin
+        n_pasos := j
     fin
 
     ; lo que hay que hacer para quitar el paquete instalado número j
@@ -1385,6 +1623,12 @@ módulo UPaquetes
         fin
         para i desde 1 hasta n_pasos hacer
             si pasos[i - 1].clase = P_BORRA entonces
+                ; (PROGRAMAS) el avance, archivo a archivo, al quitar
+                si quitando entonces
+                    av_h := av_h + 1
+                    di_avance(av_h, av_t, "Quitando", txn_nombre)
+                    si lento entonces dormir(60) fin
+                fin
                 temporal(i - 1, "VIE", v)
                 borrar(v)
                 r := renombrar(pasos[i - 1].destino, v)
@@ -1546,13 +1790,16 @@ módulo UPaquetes
     ;  Las órdenes
     ; -------------------------------------------------------------------------
     función ayuda()
-        escribir("PAQUETES ", "1.0", ": instalar, actualizar y quitar programas en Hispa-Pentium.\n")
-        escribir("  PAQUETES LISTA                lo que está instalado\n")
+        escribir("PAQUETES ", VERSIÓN_PAQUETES, ": instalar, actualizar, reparar y quitar programas en Hispa-Pentium.\n")
+        escribir("  PAQUETES LISTA [/TIPO]        lo que está instalado (/TIPO: por tipos, y lo suelto)\n")
         escribir("  PAQUETES CATALOGO             lo que se puede instalar\n")
         escribir("  PAQUETES INSTALA nombre       instala un paquete (y lo que necesite)\n")
         escribir("  PAQUETES INSTALA X.HPQ        instala ese archivo de paquete\n")
         escribir("  PAQUETES ACTUALIZA [nombre]   pone al día lo instalado\n")
-        escribir("  PAQUETES QUITA nombre         lo quita\n")
+        escribir("  PAQUETES QUITA nombre         lo quita (/DEPENDIENTES: y lo que lo necesite)\n")
+        escribir("  PAQUETES REPARA [nombre]      comprueba sus archivos y vuelve a poner lo dañado\n")
+        escribir("  PAQUETES ARCHIVOS nombre      sus archivos, y si están como se instalaron\n")
+        escribir("  PAQUETES SUELTOS              los programas que no son de ningún paquete\n")
         escribir("  PAQUETES MIRA X.HPQ           lo que lleva un paquete, y si está sano\n")
         escribir("  PAQUETES COMPRUEBA            si lo instalado sigue igual\n")
         escribir("  PAQUETES FIRMA ARCHIVO        si ARCHIVO.FIR es su firma buena (la de Hispa-Pentium)\n")
@@ -1561,21 +1808,316 @@ módulo UPaquetes
     fin
 
     función di_lista()
-        variable i: nat32
+        variable i, k, h: nat32
         variable d: arreglo [200] de byte
+        variable x: arreglo [32] de byte
         si ins_n = 0 entonces
             imprimir1("No hay ningún paquete apuntado en %s.\n", pt(base))
+            si no por_tipo entonces devolver fin
+        fin
+        si no por_tipo entonces
+            imprimir1("Paquetes instalados (%s):\n", pt(base))
+            para i desde 1 hasta ins_n hacer
+                escribir("  ")
+                columna(ins_nombre[i - 1], 10)
+                columna(ins_versión[i - 1], 8)
+                campo(ins_cab[i - 1], "descripcion", d, 200)
+                escribir(d, "\n")
+            fin
+            imprimir1("%u paquetes.\n", ins_n)
             devolver
         fin
-        imprimir1("Paquetes instalados (%s):\n", pt(base))
-        para i desde 1 hasta ins_n hacer
-            escribir("  ")
-            columna(ins_nombre[i - 1], 10)
-            columna(ins_versión[i - 1], 8)
-            campo(ins_cab[i - 1], "descripcion", d, 200)
-            escribir(d, "\n")
+        ; (PROGRAMAS) /TIPO: por tipos, en su orden, y al final lo suelto
+        si ins_n > 0 entonces imprimir1("Paquetes instalados, por tipos (%s):\n", pt(base)) fin
+        para k desde 0 hasta N_TIPOS - 1 hacer
+            h := 0
+            para i desde 1 hasta ins_n hacer
+                si tipo_de(ins_cab[i - 1], ins_nombre[i - 1]) = k entonces
+                    si h = 0 entonces
+                        nombre_tipo(k, x)
+                        escribir(x, ":\n")
+                    fin
+                    h := h + 1
+                    escribir("  ")
+                    columna(ins_nombre[i - 1], 10)
+                    columna(ins_versión[i - 1], 8)
+                    campo(ins_cab[i - 1], "descripcion", d, 200)
+                    escribir(d, "\n")
+                fin
+            fin
         fin
-        imprimir1("%u paquetes.\n", ins_n)
+        si ins_n > 0 entonces imprimir1("%u paquetes.\n", ins_n) fin
+        busca_sueltos()
+        si sueltos_n > 0 entonces
+            escribir("Programas de terceros (sin paquete):\n")
+            di_sueltos()
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  (PROGRAMAS) Los programas sueltos: los .EXE, .BIN y .HVP que no son de
+    ;  ningún paquete, en la raíz, \HISPA, \HISPA32 y \PROGRAMS (y en las
+    ;  subcarpetas de estos dos)
+    ; -------------------------------------------------------------------------
+    ; ¿es de algún paquete instalado?
+    función de_paquete(ruta: puntero a byte): bool
+        variable i, n, a: nat32
+        para i desde 1 hasta ins_n hacer
+            n := lee_archivos(ins_cab[i - 1], viejos)
+            para a desde 1 hasta n hacer
+                si iguales_sin_caja(viejos[a - 1].destino, ruta) entonces devolver cierto fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    función es_programa(n: puntero a byte): bool
+        devolver acaba_en(n, ".EXE") o acaba_en(n, ".BIN") o acaba_en(n, ".HVP")
+    fin
+
+    ; los de una carpeta («C:\HISPA32»; «C:» es la raíz); con «hondo», también los de sus subcarpetas
+    función sueltos_de(carpeta: puntero a byte, hondo: bool)
+        variable m: nat32
+        variable e: Entrada
+        variable r: arreglo [RUTA] de byte
+        variable c: arreglo [RUTA] de byte
+        une(c, carpeta, "\\")
+        si longitud(carpeta) > 2 entonces m := abrir(carpeta) sino m := abrir(c) fin
+        si es_error(m) entonces devolver fin
+        mientras sueltos_n < MAX_SUELTOS y entrada(m, e) hacer
+            si e.nombre[0] <> '.' y longitud(carpeta) + longitud(e.nombre) + 2 < RUTA entonces
+                une(r, c, e.nombre)
+                si e.atributos yb CARPETA <> 0 entonces
+                    si hondo entonces sueltos_de(r, falso) fin
+                sino si es_programa(e.nombre) y no empieza_por(e.nombre, "HPQ") y no de_paquete(r) entonces
+                    Textos32.copiar(suelto_ruta[sueltos_n], r)
+                    suelto_tamaño[sueltos_n] := e.tamaño
+                    suelto_fecha[sueltos_n] := nat32(e.fecha)
+                    sueltos_n := sueltos_n + 1
+                fin
+            fin
+        fin
+        cerrar(m)
+    fin
+
+    función busca_sueltos()
+        variable k, n: nat32
+        variable x: arreglo [24] de byte
+        variable c: arreglo [40] de byte
+        sueltos_n := 0
+        para k desde 0 hasta 3 hacer
+            trozo_de(CARPETAS_SUELTOS, k, x, 24)
+            n := longitud(x)
+            c[0] := sis
+            c[1] := ':'
+            c[2] := 0
+            si n > 0 y x[n - 1] = '*' entonces
+                x[n - 1] := 0
+                concatenar(c, x)
+                sueltos_de(c, cierto)
+            sino
+                concatenar(c, x)
+                sueltos_de(c, falso)
+            fin
+        fin
+    fin
+
+    función di_sueltos()
+        variable i: nat32
+        variable f: arreglo [12] de byte
+        para i desde 1 hasta sueltos_n hacer
+            escribir("  ")
+            columna(suelto_ruta[i - 1], 30)
+            escribir(suelto_tamaño[i - 1], " octetos  ")
+            fecha_texto(suelto_fecha[i - 1], f)
+            escribir(f, "\n")
+        fin
+    fin
+
+    función sueltos(): bool
+        busca_sueltos()
+        si sueltos_n = 0 entonces
+            escribir("No hay programas sueltos (sin paquete) en \\HISPA, \\HISPA32 ni \\PROGRAMS.\n")
+            devolver cierto
+        fin
+        escribir("Programas de terceros (sin paquete):\n")
+        di_sueltos()
+        imprimir1("%u programas sueltos.\n", sueltos_n)
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  (PROGRAMAS) Para la ventana «Programas instalados» (PROGRAMA.BIN): una
+    ;  línea por paquete, «f|nombre|versión|tipo|octetos|archivos|fecha|imprescindible
+    ;  (por qué, o nada)|necesita|lo necesitan|descripción»; una por programa
+    ;  suelto, «s|ruta|octetos|fecha»; y antes, «u|letra|total K|libre K».
+    ; -------------------------------------------------------------------------
+    función fichas()
+        variable i, j, q, op: nat32
+        variable u: Info_unidad
+        variable d: arreglo [200] de byte
+        variable x: arreglo [16] de byte
+        variable f: arreglo [12] de byte
+        variable r: arreglo [100] de byte
+        variable lista: arreglo [256] de byte
+        variable n: arreglo [12] de byte
+        variable v: arreglo [16] de byte
+        variable alguno: bool
+        i := 0
+        mientras info_unidad(i, u) hacer
+            si u.letra = sis entonces
+                d[0] := sis
+                d[1] := 0
+                escribir("u|", d, "|", u.total_k, "|", u.libre_k, "\n")
+            fin
+            i := i + 1
+        fin
+        para i desde 1 hasta ins_n hacer
+            código_tipo(tipo_de(ins_cab[i - 1], ins_nombre[i - 1]), x)
+            fecha_texto(ins_fecha[i - 1], f)
+            escribir("f|", ins_nombre[i - 1], "|", ins_versión[i - 1], "|", x, "|", ocupa(ins_cab[i - 1]), "|")
+            escribir(lee_archivos(ins_cab[i - 1], viejos), "|", f, "|")
+            imprescindible(i - 1, r)
+            campo(ins_cab[i - 1], "necesita", lista, 256)
+            escribir(r, "|", lista, "|")
+            ; lo necesitan
+            alguno := falso
+            para j desde 1 hasta ins_n hacer
+                si j <> i entonces
+                    campo(ins_cab[j - 1], "necesita", lista, 256)
+                    q := 0
+                    mientras requisito(lista, q, n, op, v) hacer
+                        si iguales(n, ins_nombre[i - 1]) entonces
+                            si alguno entonces escribir(", ") fin
+                            escribir(ins_nombre[j - 1])
+                            alguno := cierto
+                            romper
+                        fin
+                        q := q + 1
+                    fin
+                fin
+            fin
+            campo(ins_cab[i - 1], "descripcion", d, 200)
+            escribir("|", d, "\n")
+        fin
+        busca_sueltos()
+        para i desde 1 hasta sueltos_n hacer
+            fecha_texto(suelto_fecha[i - 1], f)
+            escribir("s|", suelto_ruta[i - 1], "|", suelto_tamaño[i - 1], "|", f, "\n")
+        fin
+        ; (/CATALOGO) de dónde, y la más nueva de cada uno del catálogo:
+        ; «o|de dónde|firmado» y «c|nombre|versión|tipo|octetos del paquete|descripción»
+        si con_catálogo y carga_catálogo() entonces
+            escribir("o|", origen, "|")
+            si firmado entonces escribir("firmado") fin
+            escribir("\n")
+            para i desde 1 hasta cat_n hacer
+                si mejor_del_catálogo(cat_nombre[i - 1], 0, "") = i - 1 entonces
+                    código_tipo(tipo_de(nulo, cat_nombre[i - 1]), x)
+                    escribir("c|", cat_nombre[i - 1], "|", cat_versión[i - 1], "|", x, "|", cat_tamaño[i - 1], "|", cat_desc[i - 1], "\n")
+                fin
+            fin
+        fin
+    fin
+
+    ; PAQUETES ARCHIVOS nombre: sus archivos, y cómo están
+    función archivos(): bool
+        variable j, n, a, e, malos: nat32
+        variable d: arreglo [3] de nat32
+        si no palabra(args, 1, palabra_, RUTA) entonces devolver mal("¿de qué paquete? PAQUETES ARCHIVOS nombre") fin
+        a_minúsculas(palabra_)
+        j := instalado(palabra_)
+        si j = NINGUNO entonces
+            imprimir1("paquetes: %s no está instalado\n", pt(palabra_))
+            devolver falso
+        fin
+        n := lee_archivos(ins_cab[j], viejos)
+        d[0] := pt(ins_nombre[j])
+        d[1] := pt(ins_versión[j])
+        d[2] := n
+        imprimir("Archivos de %s %s (%u):\n", dirección(d[0]))
+        malos := 0
+        para a desde 1 hasta n hacer
+            e := estado_archivo(viejos[a - 1].destino, viejos[a - 1].tamaño, viejos[a - 1].sha)
+            si e = 0 entonces escribir("  bien      ") sino si e = 1 entonces escribir("  FALTA     ") sino escribir("  CAMBIADO  ") fin
+            si e <> 0 entonces malos := malos + 1 fin
+            d[0] := viejos[a - 1].tamaño
+            formatear(palabra_, 16, "%9u  ", dirección(d[0]))
+            escribir(palabra_, viejos[a - 1].destino, "\n")
+        fin
+        si malos = 0 entonces
+            escribir("Todos están como se instalaron.\n")
+        sino
+            imprimir2("%u no están como se instalaron: PAQUETES REPARA %s los vuelve a poner.\n", malos, pt(ins_nombre[j]))
+        fin
+        devolver cierto
+    fin
+
+    ; PAQUETES REPARA [nombre...]: lo dañado (lo que falta o ha cambiado), del
+    ; paquete de la misma versión (del catálogo), y solo eso
+    función repara(): bool
+        variable k, j, n, a, malos, c, largo: nat32
+        variable r: arreglo [RUTA] de byte
+        variable cab: puntero a byte
+        variable alguno, todos: bool
+        alguno := falso
+        k := 1
+        mientras palabra(args, k, palabra_, RUTA) hacer
+            k := k + 1
+            si palabra_[0] <> '/' entonces alguno := cierto fin
+        fin
+        todos := no alguno
+        reparando := cierto
+        para j desde 1 hasta ins_n hacer
+            alguno := todos
+            si no todos entonces
+                k := 1
+                mientras palabra(args, k, palabra_, RUTA) hacer
+                    k := k + 1
+                    a_minúsculas(palabra_)
+                    si iguales(palabra_, ins_nombre[j - 1]) entonces alguno := cierto fin
+                fin
+            fin
+            si alguno entonces
+                n := lee_archivos(ins_cab[j - 1], viejos)
+                malos := 0
+                para a desde 1 hasta n hacer
+                    si estado_archivo(viejos[a - 1].destino, viejos[a - 1].tamaño, viejos[a - 1].sha) <> 0 entonces
+                        si malos = 0 entonces imprimir1("%s:", pt(ins_nombre[j - 1])) fin
+                        escribir(" ", dirección(viejos[a - 1].destino[2]))
+                        malos := malos + 1
+                    fin
+                fin
+                si malos = 0 entonces
+                    imprimir3("%s %s está bien (sus %u archivos, como se instalaron).\n", pt(ins_nombre[j - 1]), pt(ins_versión[j - 1]), n)
+                sino
+                    escribir(" (dañados)\n")
+                    ; el paquete de esa misma versión
+                    si no carga_catálogo() entonces
+                        imprimir1("paquetes: para reparar %s hace falta su paquete, y no hay catálogo\n", pt(ins_nombre[j - 1]))
+                        devolver falso
+                    fin
+                    c := mejor_del_catálogo(ins_nombre[j - 1], 3, ins_versión[j - 1])
+                    si c = NINGUNO entonces
+                        imprimir2("paquetes: la %s de %s no está en el catálogo: actualícelo (PAQUETES ACTUALIZA) o\n", pt(ins_versión[j - 1]), pt(ins_nombre[j - 1]))
+                        escribir("  instale su paquete a mano (PAQUETES INSTALA X:\\...\\A.HPQ /FORZAR)\n")
+                        devolver falso
+                    fin
+                    si no trae(cat_archivo[c], r) entonces devolver falso fin
+                    cab := lee_cabecera(r, largo)
+                    si cab = nulo entonces
+                        imprimir1("paquetes: %s no es un paquete\n", pt(r))
+                        devolver falso
+                    fin
+                    si no añade(r, cab, largo, c, 0) entonces devolver falso fin
+                fin
+            fin
+        fin
+        si orden_n = 0 entonces
+            escribir("No hay nada que reparar.\n")
+            devolver cierto
+        fin
+        devolver hace_plan()
     fin
 
     función di_catálogo()
@@ -1616,6 +2158,7 @@ módulo UPaquetes
     función di_estado()
         variable i, c: nat32
         variable d: arreglo [200] de byte
+        variable x: arreglo [16] de byte
         carga_catálogo()
         escribir("origen|", origen)
         si firmado entonces escribir("|firmado") fin
@@ -1625,11 +2168,14 @@ módulo UPaquetes
             escribir("p|", ins_nombre[i - 1], "|", ins_versión[i - 1], "|")
             c := mejor_del_catálogo(ins_nombre[i - 1], 0, "")
             si c <> NINGUNO entonces escribir(cat_versión[c]) fin
-            escribir("|", d, "\n")
+            ; (PROGRAMAS) y detrás, su tipo
+            código_tipo(tipo_de(ins_cab[i - 1], ins_nombre[i - 1]), x)
+            escribir("|", d, "|", x, "\n")
         fin
         para i desde 1 hasta cat_n hacer
             si instalado(cat_nombre[i - 1]) = NINGUNO y mejor_del_catálogo(cat_nombre[i - 1], 0, "") = i - 1 entonces
-                escribir("p|", cat_nombre[i - 1], "||", cat_versión[i - 1], "|", cat_desc[i - 1], "\n")
+                código_tipo(tipo_de(nulo, cat_nombre[i - 1]), x)
+                escribir("p|", cat_nombre[i - 1], "||", cat_versión[i - 1], "|", cat_desc[i - 1], "|", x, "\n")
             fin
         fin
     fin
@@ -1642,12 +2188,12 @@ módulo UPaquetes
             escribir("No hay nada que instalar.\n")
             devolver cierto
         fin
-        escribir("Se va a instalar:")
+        si reparando entonces escribir("Se va a reparar (lo dañado, del paquete de la misma versión):") sino escribir("Se va a instalar:") fin
         para i desde 1 hasta orden_n hacer
             k := orden[i - 1]
             escribir(" ", plan_nombre[k], " ", plan_versión[k])
             j := instalado(plan_nombre[k])
-            si j <> NINGUNO entonces escribir(" (en lugar de la ", ins_versión[j], ")") fin
+            si j <> NINGUNO y no reparando entonces escribir(" (en lugar de la ", ins_versión[j], ")") fin
             si i < orden_n entonces escribir(",") fin
         fin
         escribir("\n")
@@ -1668,12 +2214,17 @@ módulo UPaquetes
             k := orden[i - 1]
             di_avance(i - 1, orden_n, "Instalando", plan_nombre[k])
             si no pasos_de_instalar(k) entonces devolver falso fin
+            si reparando entonces quita_los_sanos() fin
             si no ejecuta() entonces
                 si i > 1 entonces escribir("(lo de antes en la lista sí ha quedado instalado)\n") fin
                 devolver falso
             fin
             apunta_instalado(plan_nombre[k], plan_versión[k], plan_cab[k])
-            imprimir2("  instalado %s %s\n", pt(plan_nombre[k]), pt(plan_versión[k]))
+            si reparando entonces
+                imprimir2("  reparado %s %s\n", pt(plan_nombre[k]), pt(plan_versión[k]))
+            sino
+                imprimir2("  instalado %s %s\n", pt(plan_nombre[k]), pt(plan_versión[k]))
+            fin
         fin
         di_avance(orden_n, orden_n, "Hecho", "")
         si núcleo_nuevo entonces prepara_arranque() fin
@@ -1781,12 +2332,34 @@ módulo UPaquetes
         devolver hace_plan()
     fin
 
-    función quita(): bool
-        variable k, i, j, q, op: nat32
+    ; ¿necesita el instalado i al instalado j?
+    función necesita_a(i: nat32, j: nat32): bool
+        variable q, op: nat32
         variable lista: arreglo [256] de byte
         variable n: arreglo [12] de byte
         variable v: arreglo [16] de byte
-        variable alguno: bool
+        campo(ins_cab[i], "necesita", lista, 256)
+        q := 0
+        mientras requisito(lista, q, n, op, v) hacer
+            si iguales(n, ins_nombre[j]) entonces devolver cierto fin
+            q := q + 1
+        fin
+        devolver falso
+    fin
+
+    ; PAQUETES QUITA nombre... [/DEPENDIENTES]: lo que se pide (y, con
+    ; /DEPENDIENTES, lo que lo necesite, antes que él), cada uno su todo o nada
+    función quita(): bool
+        variable k, i, j, w, a: nat32
+        variable sale: arreglo [MAX_PAQ] de bool
+        variable hecho_: arreglo [MAX_PAQ] de bool
+        variable r: arreglo [100] de byte
+        variable nombre: arreglo [12] de byte
+        variable alguno, más, puede: bool
+        para i desde 1 hasta ins_n hacer
+            sale[i - 1] := falso
+            hecho_[i - 1] := falso
+        fin
         alguno := falso
         k := 1
         mientras palabra(args, k, palabra_, RUTA) hacer
@@ -1799,28 +2372,92 @@ módulo UPaquetes
                 imprimir1("paquetes: %s no está instalado\n", pt(palabra_))
                 devolver falso
             fin
-            ; ¿lo necesita otro?
-            si no forzar entonces
+            sale[j] := cierto
+        fin
+        si no alguno entonces devolver mal("¿qué paquete? PAQUETES QUITA nombre") fin
+        ; (PROGRAMAS) con /DEPENDIENTES, también lo que necesite lo que sale (hasta que no haya más)
+        si con_dependientes entonces
+            más := cierto
+            mientras más hacer
+                más := falso
                 para i desde 1 hasta ins_n hacer
-                    si i - 1 <> j entonces
-                        campo(ins_cab[i - 1], "necesita", lista, 256)
-                        q := 0
-                        mientras requisito(lista, q, n, op, v) hacer
-                            si iguales(n, palabra_) entonces
-                                imprimir3("paquetes: %s no se quita: lo necesita %s (quite antes %s, o /FORZAR)\n", pt(palabra_), pt(ins_nombre[i - 1]), pt(ins_nombre[i - 1]))
-                                devolver falso
+                    si no sale[i - 1] entonces
+                        para j desde 1 hasta ins_n hacer
+                            si sale[j - 1] y no sale[i - 1] y necesita_a(i - 1, j - 1) entonces
+                                sale[i - 1] := cierto
+                                más := cierto
                             fin
-                            q := q + 1
                         fin
                     fin
                 fin
             fin
-            si no pasos_de_quitar(j) entonces devolver falso fin
-            si no ejecuta() entonces devolver falso fin
-            imprimir1("  quitado %s\n", pt(txn_nombre))
-            olvida_instalado(palabra_)
         fin
-        si no alguno entonces devolver mal("¿qué paquete? PAQUETES QUITA nombre") fin
+        ; lo imprescindible no sale nunca; y (sin /FORZAR) nada que necesite otro que se queda
+        para j desde 1 hasta ins_n hacer
+            si sale[j - 1] y imprescindible(j - 1, r) entonces
+                imprimir2("paquetes: %s no se puede quitar: es imprescindible (%s).\n", pt(ins_nombre[j - 1]), pt(r))
+                si con_dependientes entonces escribir("  (y para quitar lo otro, lo que lo necesita, hay que dejarlo: no se quita nada)\n") fin
+                devolver falso
+            fin
+            si sale[j - 1] y no forzar entonces
+                para i desde 1 hasta ins_n hacer
+                    si i <> j y no sale[i - 1] y necesita_a(i - 1, j - 1) entonces
+                        imprimir3("paquetes: %s no se quita: lo necesita %s (quite antes %s, o /FORZAR)\n", pt(ins_nombre[j - 1]), pt(ins_nombre[i - 1]), pt(ins_nombre[i - 1]))
+                        escribir("  (o con /DEPENDIENTES, que lo quita también)\n")
+                        devolver falso
+                    fin
+                fin
+            fin
+        fin
+        ; lo que se va a quitar, y el avance: los archivos de todos
+        av_h := 0
+        av_t := 0
+        w := 0
+        escribir("Se va a quitar:")
+        para j desde 1 hasta ins_n hacer
+            si sale[j - 1] entonces
+                si w > 0 entonces escribir(",") fin
+                escribir(" ", ins_nombre[j - 1], " ", ins_versión[j - 1])
+                w := w + 1
+                av_t := av_t + lee_archivos(ins_cab[j - 1], viejos) + 1
+            fin
+        fin
+        escribir("\n")
+        quitando := cierto
+        ; de uno en uno: primero el que no necesita ninguno de los que quedan por quitar
+        a := 0
+        mientras a < w hacer
+            puede := falso
+            j := 1
+            mientras j <= ins_n y no puede hacer
+                si sale[j - 1] y no hecho_[j - 1] entonces
+                    puede := cierto
+                    para i desde 1 hasta ins_n hacer
+                        si i <> j y sale[i - 1] y no hecho_[i - 1] y necesita_a(i - 1, j - 1) entonces puede := falso fin
+                    fin
+                fin
+                si no puede entonces j := j + 1 fin
+            fin
+            si no puede entonces
+                ; (en círculo: el primero que quede)
+                j := 1
+                mientras j <= ins_n y (no sale[j - 1] o hecho_[j - 1]) hacer j := j + 1 fin
+            fin
+            hecho_[j - 1] := cierto
+            Textos32.copiar(nombre, ins_nombre[j - 1])
+            si no pasos_de_quitar(j - 1) entonces devolver falso fin
+            si no ejecuta() entonces
+                si a > 0 entonces escribir("(lo de antes en la lista sí se ha quitado)\n") fin
+                devolver falso
+            fin
+            imprimir1("  quitado %s\n", pt(txn_nombre))
+            a := a + 1
+        fin
+        ; (la lista de lo instalado, al final: los números de arriba son de antes)
+        para j desde ins_n hasta 1 paso -1 hacer
+            si sale[j - 1] entonces olvida_instalado(ins_nombre[j - 1]) fin
+        fin
+        di_avance(av_t, av_t, "Hecho", "")
         escribir("Hecho.\n")
         devolver cierto
     fin
@@ -1951,6 +2588,10 @@ módulo UPaquetes
         mientras palabra(args, i, palabra_, RUTA) hacer
             si iguales_sin_caja(palabra_, "/FORZAR") entonces forzar := cierto fin
             si iguales_sin_caja(palabra_, "/AVANCE") entonces con_avance := cierto fin
+            si iguales_sin_caja(palabra_, "/TIPO") o iguales_sin_caja(palabra_, "/TIPOS") entonces por_tipo := cierto fin
+            si iguales_sin_caja(palabra_, "/DEPENDIENTES") entonces con_dependientes := cierto fin
+            si iguales_sin_caja(palabra_, "/LENTO") entonces lento := cierto fin
+            si iguales_sin_caja(palabra_, "/CATALOGO") entonces con_catálogo := cierto fin
             si empieza_por(palabra_, "/CORTE=") o empieza_por(palabra_, "/corte=") entonces
                 texto_a_natural(dirección(palabra_[7]), corte)
             fin
@@ -2034,6 +2675,14 @@ módulo UPaquetes
             bien := comprueba()
         sino si iguales(orden_, "estado") entonces
             di_estado()
+        sino si iguales(orden_, "repara") entonces
+            bien := repara()
+        sino si iguales(orden_, "archivos") entonces
+            bien := archivos()
+        sino si iguales(orden_, "sueltos") entonces
+            bien := sueltos()
+        sino si iguales(orden_, "fichas") entonces
+            fichas()
         sino
             imprimir1("paquetes: no sé qué es «%s» (PAQUETES AYUDA)\n", pt(orden_))
             bien := falso

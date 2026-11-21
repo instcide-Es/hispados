@@ -31,7 +31,7 @@ módulo Ventanas
 
     importar Cpu, Tareas, Monton, Grafico, Letra, Video, Raton, Consola
 
-    público constante MAX_VENTANAS = 20
+    público constante MAX_VENTANAS = 24              ; (MENÚ) eran 20: el menú Inicio abre dos más (sus submenús)
     público constante MAX_TÍTULO = 64
 
     ; ---- las banderas de una ventana ----
@@ -81,6 +81,7 @@ módulo Ventanas
     público constante PIDE_MINIMIZAR = 3
     público constante PIDE_MAXIMIZAR = 4
     público constante PIDE_CERRAR = 5
+    público constante PIDE_TAMAÑO = 6           ; (MENÚ) cambiarla de tamaño con las flechas (Alt+Espacio, «Tamaño»)
 
     ; ---- lo que se puede dibujar desde un programa (la llamada «dibujar») ----
     público constante OP_RECTÁNGULO = 1
@@ -109,7 +110,7 @@ módulo Ventanas
 
     constante COLA_EV = 32
     constante LEJOS = 8192                      ; ninguna medida de un dibujo pasa de aquí
-    constante DEL_NÚCLEO = 10                   ; las ventanas que se guardan para el núcleo (la barra, el menú, el fondo, los cuadros, un menú emergente, el globo de los avisos)
+    constante DEL_NÚCLEO = 14                   ; (MENÚ: eran 10) las ventanas que se guardan para el núcleo (la barra, el menú, el fondo, los cuadros, un menú emergente, el globo de los avisos)
 
     público tipo Ventana = estructura
         usada: bool
@@ -149,6 +150,8 @@ módulo Ventanas
     público variable alto_barra: ent32          ; lo que ocupa abajo la barra de tareas (no lo tapa una maximizada)
     público variable alto_dock: ent32           ; (dock) lo que ocupa el dock encima de ella (DATO_ALTO_LIBRE)
     público variable composiciones: nat32       ; las veces que se ha recompuesto un trozo
+    público variable en_tapiz: bool             ; (MENÚ) lo último que se ha pulsado es el tapiz (Alt+F4: «Apagar el equipo»)
+    variable tam_teclas: ent32 = -1             ; (MENÚ) la ventana que cambia de tamaño con las flechas
 
     variable trasero: Lienzo                    ; el doble búfer
     variable siguiente_id: nat32
@@ -570,6 +573,7 @@ módulo Ventanas
         si nueva = activa entonces devolver fin
         vieja := activa
         activa := nueva
+        si nueva >= 0 entonces en_tapiz := falso fin  ; (MENÚ)
         cambios := cambios + 1
         si vieja >= 0 y ventanas[vieja].usada entonces
             pinta_marco(ventanas[vieja], falso)
@@ -951,7 +955,10 @@ módulo Ventanas
         tomar(cerrojo)
         i := busca(id)
         si i >= 0 entonces
-            si visible entonces enseña(i, OCULTA) sino esconde(i, OCULTA) fin
+            ; (MENÚ) si ya se veía, se queda donde está (el dock, al recolocarse,
+            ; no se pone delante de un menú abierto)
+            si visible y ventanas[i].banderas yb OCULTA <> 0 entonces enseña(i, OCULTA) fin
+            si no visible entonces esconde(i, OCULTA) fin
         fin
         soltar(cerrojo)
     fin
@@ -1102,6 +1109,13 @@ módulo Ventanas
                     si ventanas[i].banderas yb MAXIMIZADA = 0 entonces cambia_máximo(i) fin
                 caso PIDE_CERRAR:
                     pon_evento(i, EV_CERRAR, 0, 0, 0)
+                caso PIDE_TAMAÑO:
+                    ; (MENÚ) con las flechas, hasta Intro o Esc (o un clic)
+                    si elástica(ventanas[i]) y ventanas[i].banderas yb OCULTA = 0 entonces
+                        al_frente(i)
+                        mira_activa()
+                        tam_teclas := i
+                    fin
                 caso PIDE_MOVER:
                     ; la flecha va a su título y la ventana la sigue, sin
                     ; botón pulsado, hasta el clic siguiente (o Intro, o Esc)
@@ -1261,6 +1275,9 @@ módulo Ventanas
         i := ventana_o_borde(x, yy, lados)
         si emergente <> 0 y i <> busca(emergente) entonces pon_evento(busca(emergente), EV_FUERA, 0, 0, 0) fin
         c := b ob (modificadores() << DESPLAZA_CAMBIO)
+        tam_teclas := -1                        ; (MENÚ) un clic acaba lo de cambiar el tamaño con las flechas
+        si i < 0 entonces en_tapiz := cierto fin    ; (MENÚ)
+        si i >= 0 y ventanas[i].banderas yb SIN_MARCO = 0 entonces en_tapiz := falso fin
         si i < 0 entonces
             ; en el tapiz: a la ventana del fondo (la del escritorio), con el
             ; punto de la pantalla
@@ -1473,11 +1490,28 @@ módulo Ventanas
                 m := MOD_MAYÚS
                 k := k - TECLA_CON_MAYÚS
             fin
-            si mov_suelto y (k = 27 o k = '\n') entonces
+            si tam_teclas >= 0 y (no ventanas[tam_teclas].usada o k = 27 o k = '\n') entonces
+                tam_teclas := -1                ; (MENÚ) acaba lo de cambiar el tamaño con las flechas
+            sino si tam_teclas >= 0 y (k = TECLA_IZQUIERDA o k = TECLA_DERECHA o k = TECLA_ARRIBA o k = TECLA_ABAJO) entonces
+                tamaño_con_flecha(tam_teclas, k)
+            sino si tam_teclas >= 0 entonces
+                ; (lo demás no hace nada mientras)
+            sino si mov_suelto y (k = TECLA_IZQUIERDA o k = TECLA_DERECHA o k = TECLA_ARRIBA o k = TECLA_ABAJO) entonces
+                ; (MENÚ) «Mover» con las flechas: la flecha del ratón lleva la ventana
+                según k
+                    caso TECLA_IZQUIERDA: pon_ratón(x - PASO_TECLAS, yy)
+                    caso TECLA_DERECHA: pon_ratón(x + PASO_TECLAS, yy)
+                    caso TECLA_ARRIBA: pon_ratón(x, yy - PASO_TECLAS)
+                    caso TECLA_ABAJO: pon_ratón(x, yy + PASO_TECLAS)
+                fin
+            sino si mov_suelto y (k = 27 o k = '\n') entonces
                 mov_suelto := falso
                 arrastrada := -1
-            sino si k = TECLA_LOGO entonces
+            sino si k = TECLA_LOGO o (k >= TECLA_ALT_F4 y k <= TECLA_ALT_IMPR) o (k >= TECLA_LOGO_LETRA y k < TECLA_LOGO_LETRA + 26) entonces
+                ; (MENÚ) los atajos de todo el sistema: los atiende el escritorio
                 pon_evento(busca(ventana_inicio), EV_TECLA, k, 0, 0)
+            sino si k = TECLA_F1_ y (activa < 0 o en_tapiz) y teclas_a = 0 entonces
+                pon_evento(busca(ventana_inicio), EV_TECLA, k, 0, 0)     ; (MENÚ) F1 en el tapiz: la Ayuda
             sino si teclas_a <> 0 entonces
                 pon_evento(busca(teclas_a), EV_TECLA, k, m, 0)
             sino
@@ -1492,6 +1526,33 @@ módulo Ventanas
     ; cambia de sitio y de medida una ventana (con marco, la medida es la de
     ; toda la ventana): la barra de tareas, al cambiar la pantalla. Su dueño
     ; recibe EV_TAMAÑO y la vuelve a pintar. Falso si no hay memoria.
+    ; (MENÚ) la fila yy de la pantalla compuesta (el doble búfer, sin la
+    ; flecha del ratón): para las capturas (Impr Pant)
+    público función fila_de_pantalla(yy: ent32): puntero a nat32
+        devolver trasero.puntos + yy * ent32(trasero.salto)
+    fin
+
+    ; (MENÚ) Alt+Espacio, «Tamaño»: una flecha estira o encoge la ventana
+    ; (por la derecha y por abajo)
+    constante PASO_TECLAS = 16
+    constante TECLA_F1_ = 0x13B
+    función tamaño_con_flecha(i: ent32, k: nat32)
+        variable an, al: ent32
+        an := ventanas[i].ancho
+        al := ventanas[i].alto
+        según k
+            caso TECLA_IZQUIERDA: an := an - PASO_TECLAS
+            caso TECLA_DERECHA: an := an + PASO_TECLAS
+            caso TECLA_ARRIBA: al := al - PASO_TECLAS
+            caso TECLA_ABAJO: al := al + PASO_TECLAS
+        fin
+        si an < 160 entonces an := 160 fin
+        si al < ALTO_TÍTULO + 60 entonces al := ALTO_TÍTULO + 60 fin
+        si ventanas[i].px + an > pantalla.ancho entonces an := pantalla.ancho - ventanas[i].px fin
+        si ventanas[i].py + al > pantalla.alto - alto_barra entonces al := pantalla.alto - alto_barra - ventanas[i].py fin
+        si an <> ventanas[i].ancho o al <> ventanas[i].alto entonces cambia_tamaño(i, ventanas[i].px, ventanas[i].py, an, al) fin
+    fin
+
     público función recolocar_ventana(id: nat32, x: ent32, yy: ent32, an: ent32, al: ent32): bool
         variable i: ent32
         variable r: bool
