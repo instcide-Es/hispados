@@ -113,6 +113,30 @@ módulo Controles
         devolver cierto
     fin
 
+    ; (dispositivos) lo mismo, de esa medida (si cabe en la pantalla) y en el centro
+    público función preparar_medida(nombre: puntero a byte, an: nat32, al: nat32, tamaño_: nat32): bool
+        variable sw, sh: nat32
+        variable p: puntero a byte
+        sw := dato(DATO_ANCHO_PANTALLA)
+        sh := dato(DATO_ALTO_PANTALLA)
+        si sw = 0 o sh = 0 entonces devolver falso fin
+        si an > sw - 16 entonces an := sw - 16 fin
+        si al > sh - 70 entonces al := sh - 70 fin
+        p := más_memoria(sw * sh * 4)
+        si p = nulo entonces devolver falso fin
+        memoria := puntero(p)
+        máx_an := ent32(sw)
+        máx_al := ent32(sh)
+        v := ventana(nombre, an, al)
+        si es_error(v) entonces devolver falso fin
+        al_centro(v)
+        ancho := ent32(an)
+        alto := ent32(al)
+        pon_lienzo(lz, memoria, an, ancho, alto)
+        escala(tamaño_)
+        devolver cierto
+    fin
+
     función al_centro(vv: nat32)
         ensamblador
             mov eax, 80

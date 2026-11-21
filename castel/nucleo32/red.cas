@@ -608,4 +608,11 @@ módulo Red
         devolver NO_VALE
     fin
 
+    ; (dispositivos) la tarjeta que lleva el servicio de red: su número de PCI
+    ; (NO_HAY_PCI si no hay servicio o aún no lo ha dicho)
+    público función aparato_de_red(): nat32
+        si no hay_servicio() o estado_red = RED_NADA o estado_red = RED_SIN_TARJETA entonces devolver NO_HAY_PCI fin
+        devolver aparato
+    fin
+
 fin Red.

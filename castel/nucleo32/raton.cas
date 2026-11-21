@@ -30,6 +30,7 @@ módulo Raton
 
     público variable hay_ratón: bool
     público variable hay_ratón_usb: bool        ; hay un ratón USB (lo dice usbhid.cas)
+    público variable ratón_ps2: bool            ; (dispositivos) hay un ratón PS/2 (ha contestado)
     público variable ratón_x, ratón_y: ent32    ; dónde está la flecha
     público variable ratón_botones: nat32       ; los que están pulsados
     público variable paquetes: nat32            ; los movimientos que han llegado
@@ -245,6 +246,7 @@ módulo Raton
             r := al_ratón(0xF4)                 ; y que cuente lo que se mueve
         fin
         hay_ratón := r = 0xFA o hay_ratón_usb
+        ratón_ps2 := r = 0xFA                   ; (dispositivos)
         si r = 0xFA entonces
             cuántos := 0
             pon_puerta(0x2C, nat32(dirección(ratón)), PUERTA_NÚCLEO)

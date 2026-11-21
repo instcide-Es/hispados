@@ -151,6 +151,13 @@
 #      derecho y las pestañas, la dirección, el portapapeles, una descarga a
 #      C:\DESCARGA (igual octeto a octeto) y las galletas al cerrar; y el x87
 #      de cada programa (X87.BIN).
+#  19. Hispa-Pentium 0.8.3: el Administrador de dispositivos (DISPOSIT.BIN y
+#      la llamada 155, dispositivos.cas; lo de ACPI lo apunta ACPI.BIN con la
+#      156): en un «pc» con e1000, EHCI (teclado, ratón, tableta y memoria),
+#      SATA y la batería de mentira, en el escritorio (Mi equipo > Propiedades,
+#      Configuración, las pestañas de las propiedades, copiar y guardar el
+#      informe en X:); en un «q35» (RTL8139, xHCI con concentrador) el
+#      informe en texto; y con «sinusb» y «sinacpi», lo desactivado.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -168,6 +175,7 @@
 #   SOLO=cd ./pruebas.sh          la primera y la decimosexta (el CD y las actualizaciones por Internet)
 #   SOLO=pantalla ./pruebas.sh    la primera y la decimoséptima (la medida de la pantalla)
 #   SOLO=navegador ./pruebas.sh   la primera y la decimoctava (el Navegador: NAVEGA.BIN)
+#   SOLO=dispositivos ./pruebas.sh  la primera y la 19 (el Administrador de dispositivos)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -181,7 +189,7 @@ set -u
 AQUI=$(dirname "$(readlink -f "$0")")
 H=$AQUI/../h8086
 # los programas de usuario de Hispa-Pentium (usuario.cas y llamadas.cas son módulos)
-USU="$AQUI/nucleo32/uinstala.cas $AQUI/nucleo32/uasiste.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas $AQUI/nucleo32/uequipo.cas $AQUI/nucleo32/upaquete.cas $AQUI/nucleo32/uactual.cas"
+USU="$AQUI/nucleo32/uinstala.cas $AQUI/nucleo32/uasiste.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas $AQUI/nucleo32/uequipo.cas $AQUI/nucleo32/udisposi.cas $AQUI/nucleo32/upaquete.cas $AQUI/nucleo32/uactual.cas"
 # y los de la red (la 0.8): el servicio, RED.BIN, y sus programas (con sus
 # módulos: rbase, rtarjeta, ryukon, rpila, rtcp y redes); van en su tanda
 RED_USU="$AQUI/nucleo32/ured.cas $AQUI/nucleo32/uipconf.cas $AQUI/nucleo32/uping.cas $AQUI/nucleo32/udescarg.cas"
@@ -231,7 +239,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -1407,7 +1415,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 19 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 20 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
@@ -1711,7 +1719,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 19 archivos que ha traído el cargador hacen de unidad M:" $S \
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 20 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
       ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
@@ -3158,6 +3166,117 @@ else ko "el núcleo se ha quejado:"; cat $V/pc*.txt $V/vb*.txt $V/cd*.txt | grep
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin la medida de la pantalla)"
 fi   # la pantalla
+# ------------------------------- 19. Hispa-Pentium 0.8.3: el Administrador de dispositivos
+# (dispositivos) DISPOSIT.BIN (udisposi.cas) y la llamada 155 del núcleo
+# (dispositivos.cas): todo lo del PCI, lo USB, lo de ACPI (que apunta
+# ACPI.BIN con la 156), los discos, lo de siempre y el procesador, con el
+# controlador que lleva cada cosa. En un «pc» (PIIX) con la e1000, EHCI con
+# teclado, ratón, tableta (sin controlador: no es de arranque) y una memoria,
+# un disco SATA (AHCI) y la batería de mentira de la parte 14; y en un «q35»
+# (ICH9) con la RTL8139, xHCI, el disco en el AHCI de la placa y la batería.
+if parte08 dispositivos; then
+echo "== Hispa-Pentium 0.8.3: el Administrador de dispositivos (DISPOSIT.BIN y la llamada 155) =="
+Y=$P/disp
+mkdir -p $Y $G
+bash $AQUI/../acpi/pentium/hacer.sh $Y/ACPI.BIN > $Y/hacer.txt 2>&1 || ko "acpi/pentium/hacer.sh no hace ACPI.BIN: $(tail -1 $Y/hacer.txt)"
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $Y/semilla.asm > /dev/null && nasm -f bin $Y/semilla.asm -o $Y/SEMILLA.BIN
+for u in udisposi:DISPOSIT uequipo:EQUIPO uordenes:ORDENES ured:RED; do
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/${u%%:*}.cas -o $Y/${u%%:*}.asm > /dev/null && nasm -f bin $Y/${u%%:*}.asm -o $Y/${u##*:}.BIN \
+    || ko "${u%%:*}.cas no compila"
+done
+SSDT="-acpitable file=$AQUI/../tests/acpi/bateria-qemu.aml"
+cmosq() { echo ":monitor o /b 0x70 0x$1"; echo ":monitor o /b 0x71 0x$2"; }
+mapfile -t PUESTA < <(cmosq 60 37; cmosq 61 03; cmosq 62 00)
+rm -f $Y/mem.img $Y/sata.img
+mkfs.fat -C -F 16 -n MEMORIA $Y/mem.img 32768 > /dev/null
+mkfs.fat -C -F 16 -n SATA $Y/sata.img 65536 > /dev/null
+# 1. «pc», en el escritorio: Mi equipo > Propiedades; guardar el informe en la
+# memoria (X:); las propiedades (General, Controlador, Recursos); copiar el
+# informe; e Inicio > Configuración > «Administrador de dispositivos...»
+USBS="-device usb-ehci,id=e -device usb-kbd,bus=e.0 -device usb-mouse,bus=e.0 -device usb-tablet,bus=e.0 -drive id=mu,file=$Y/mem.img,format=raw,if=none -device usb-storage,bus=e.0,drive=mu"
+CAPTURAS=$G ESCRIBE=1 SATA=$Y/sata.img SOLO_LECTURA=1 MODULOS=$Y/ACPI.BIN,$Y/DISPOSIT.BIN,$Y/EQUIPO.BIN,$Y/RED.BIN ARRANQUE="escritorio escritura=usb unidad=M acpicada=1" \
+  QEMU_MAS="-S $SSDT -nic user,model=e1000 $USBS" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN "${PUESTA[@]}" ":monitor cont" ":pausa 7" \
+  ":clicd 63 40" ":pausa 1" ":captura dv1" ":clic 100 70" ":pausa 4" ":captura dv2" ":clic 395 81" ":pausa 3" ":captura dv3" \
+  ":tecla down" ":tecla ret" ":pausa 4" ":captura dv4" ":clic 228 140" ":raton 400 450" ":pausa 1" ":captura dv5" ":clic 323 140" ":raton 400 450" ":pausa 1" ":captura dv6" \
+  ":tecla esc" ":pausa 1" ":clic 245 81" ":pausa 2" ":captura dv7" \
+  ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":pausa 1" ":captura dv10" ":clic 742 31" ":pausa 1" \
+  ":clic 40 585" ":pausa 1" ":clic 250 500" ":pausa 1" ":captura dv8" ":clic 300 398" ":pausa 4" ":captura dv9" > $Y/pc.sal 2>&1
+S=$Y/pc.sal
+mira "ACPI.BIN apunta lo que hay en el espacio de nombres de ACPI (la llamada 156)" "^ACPI: [0-9]* dispositivos del espacio de nombres, apuntados para el Administrador de dispositivos"
+mira "Mi equipo > Propiedades, Configuración > «Administrador de dispositivos...» y las propiedades lanzan DISPOSIT.BIN" \
+  "^escritorio: lanzo .DISPOSIT.BIN (la tarea [0-9]*)$"
+[ "$(grep -c '^escritorio: lanzo .DISPOSIT.BIN' $S)" = 2 ] && ok "(dos veces: desde Mi equipo y desde Configuración)" || ko "DISPOSIT.BIN no se lanza dos veces: $(grep -c '^escritorio: lanzo .DISPOSIT' $S)"
+miracap "el botón secundario en Mi equipo: «Abrir» y «Propiedades»" dv1 texto 60 30 200 100 Abrir texto 60 30 200 100 Propiedades
+miracap "la ventana: el árbol por categorías, con el controlador de cada cosa" dv2 \
+  negrita 30 15 400 40 "Administrador de dispositivos" negrita 40 120 400 520 "[-] Pantalla (1)" negrita 40 120 500 520 "Intel PRO/1000 MT (82540EM)" \
+  texto 400 120 760 520 RED.BIN texto 400 120 760 520 ahci.cas texto 30 60 700 100 "Guardar informe"
+miracap "las categorías se cierran con la flecha izquierda; la tableta USB, «SIN CONTROLADOR» con su «!», fondo naranja y su franja" dv10 \
+  negrita 40 120 400 520 "[+] Discos (2)" negrita 40 120 400 520 "[+] Red (1)" negrita 40 120 760 520 "! QEMU USB Tablet" texto 400 120 560 520 "SIN CONTROLADOR"
+miracap "«Guardar informe»: dónde lo ha dejado (la memoria USB, X:)" dv3 texto 30 520 760 545 "Informe guardado en X:\\DISPOSIT.TXT"
+mcopy -n -i $Y/mem.img ::DISPOSIT.TXT $Y/disposit.437 > /dev/null 2>&1
+iconv -f CP437 -t UTF-8 < $Y/disposit.437 2> /dev/null | tr -d '\r' > $Y/disposit.txt
+S=$Y/disposit.txt
+mira "el informe (X:\\DISPOSIT.TXT): el equipo, el resumen y, lo primero, lo que no tiene controlador" \
+  "^Administrador de dispositivos de Hispa-Pentium$" "^Resumen: [0-9]* dispositivos; [0-9]* funcionan, [1-9][0-9]* SIN CONTROLADOR" \
+  "^Lo que falta (sin controlador o con error):$" "^  \[!\]  QEMU USB Tablet  \[0627:0001; Teclado y ratón\]$"
+mira "el PCI: cada aparato con su nombre, su identificador, su controlador, sus zonas medidas y su IRQ" \
+  "^  \[OK\] Intel 440FX: puente al procesador  \[8086:1237\]$" "^  \[OK\] QEMU/Bochs: tarjeta gráfica (VBE de Bochs)  \[1234:1111\]$" \
+  "^       Memoria: FD000000-FDFFFFFF (16 MB)$" "^       Controlador: video.cas (en el núcleo)$" "^  \[OK\] Intel ICH4: USB 2.0 (EHCI)  \[8086:24CD\]$" \
+  "^       Controlador: ehci.cas (en el núcleo)$" "^       Clase: 010601 (Controladora SATA (AHCI))$" "^       Controlador: ahci.cas (en el núcleo)$" \
+  "^       Interrupción (IRQ): [0-9]*$"
+mira "la red: la e1000 la lleva RED.BIN, con su MAC, el enlace y la IP" "^  \[OK\] Intel PRO/1000 MT (82540EM)  \[8086:100E\]$" \
+  "^       Controlador: RED.BIN (un servicio del anillo 3)$" "^       MAC: 52:54:00:12:34:56$" "^       Enlace: sí, a 1000 Mbit/s$" "^       Detalle: conectada: IP 10.0.2.15$" \
+  "^       Puertos: C0[0-9A-F]*-C0[0-9A-F]* (64 octetos)$"
+mira "el USB: el teclado y el ratón (usbhid.cas), la memoria (usbalm.cas), con su nombre de verdad (sus descriptores de cadena) y de qué controladora cuelgan" \
+  "^  \[OK\] QEMU USB Keyboard  \[0627:0001\]$" "^  \[OK\] QEMU USB Mouse  \[0627:0001\]$" "^       Controlador: usbhid.cas (en el núcleo)$" \
+  "^  \[OK\] QEMU USB HARDDRIVE  \[46F4:0001\]$" "^       Controlador: usbalm.cas (en el núcleo)$" "^       Cuelga de: Intel ICH4: USB 2.0 (EHCI)$"
+mira "los discos: el SATA y la memoria, con su tamaño y sus unidades" "^  \[OK\] QEMU HARDDISK (64 MB)$" "^       Detalle: 64 MB; unidades C:; de solo lectura$" \
+  "^       Detalle: 32 MB; unidades X:; se puede escribir$" "^       Cuelga de: QEMU USB HARDDRIVE$"
+mira "lo de siempre: el teclado y el ratón PS/2, el reloj, el 8253, los 8259 y COM1, con lo que dice ACPI de ellos" \
+  "^  \[OK\] Teclado PS/2  \[PNP0303\]$" "^       En ACPI: .*KBD_$" "^  \[OK\] Ratón PS/2  \[PNP0F13\]$" "^  \[OK\] Reloj de la CMOS (fecha y hora)  \[PNP0B00\]$" \
+  "^  \[OK\] Puerto serie COM1  \[PNP0501\]$" "^       Puertos: 03F8-03FF (8 octetos)$"
+mira "ACPI: el sistema (ACPI.BIN), la batería con su carga y su salud, el adaptador, y lo que no tiene controlador (la disquetera, el puerto paralelo, el HPET)" \
+  "^  \[OK\] Sistema ACPI (apagar, reiniciar y la batería)  \[ACPI\]$" "^  \[OK\] Batería  \[PNP0C0A\]$" "^       Carga: 55 %, cargando$" \
+  "^       Salud: 68 % (guarda 5000 de 7350 mAh" "^  \[OK\] Adaptador de corriente  \[ACPI0003\]$" "^       Corriente: enchufado$" "^  \[!\]  Controladora de disquetes  \[PNP0700\]$" \
+  "^  \[OK\] Bus PCI  \[PNP0A03\]$"
+mira "el procesador (CPUID)" "^== Procesador ==$" "^  \[OK\] QEMU Virtual CPU" "^       Firma: [0-9A-F]* (CPUID 1)$"
+miracap "las propiedades (Intro en la tarjeta gráfica): General, con su signo y su estado" dv4 negrita 100 60 700 100 "Propiedades: QEMU/Bochs" \
+  negrita 100 120 400 160 General texto 100 120 400 160 Controlador texto 100 120 400 160 Recursos texto 100 150 700 400 "Funciona: lo lleva video.cas." \
+  texto 100 150 700 400 "800 x 600, 32 bits"
+miracap "la pestaña Controlador: el controlador, el identificador, el subsistema y la clase" dv5 negrita 100 120 400 160 Controlador \
+  texto 100 150 700 400 "video.cas (en el núcleo)" texto 100 150 700 400 "PCI 1234:1111" texto 100 150 700 400 "030000 (Tarjeta gráfica (VGA))"
+miracap "la pestaña Recursos: sus zonas de memoria, con lo que miden" dv6 negrita 100 120 400 160 Recursos texto 100 150 700 400 "FD000000-FDFFFFFF (16 MB)"
+miracap "«Copiar informe»: al portapapeles" dv7 texto 30 520 760 545 "Informe copiado al portapapeles"
+miracap "Configuración, con «Administrador de dispositivos...»" dv8 negrita 160 120 700 160 "Configuración" negrita 170 380 480 420 "Administrador de dispositivos..."
+miracap "y desde ahí, la ventana otra vez" dv9 negrita 30 15 400 40 "Administrador de dispositivos"
+if ! grep -q "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $Y/pc.sal; then ok "ni una excepción del núcleo ni un error de ACPICA (recorriendo el espacio de nombres y los _CRS)"
+else ko "hay excepciones o errores:"; grep "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $Y/pc.sal | head -4 | sed 's/^/        /'; fi
+# 2. «q35» (ICH9), sin escritorio: el informe, en texto, por la salida
+QXHCI="-device qemu-xhci,id=x -device usb-kbd,bus=x.0 -device usb-hub,bus=x.0,id=h,port=2 -device usb-mouse,bus=x.0,port=2.1"
+MAQUINA=q35 MODULOS=$Y/ACPI.BIN,$Y/DISPOSIT.BIN,$Y/ORDENES.BIN,$Y/RED.BIN ARRANQUE="ordenes conred acpicada=1" \
+  QEMU_MAS="-S $SSDT -netdev user,id=n0 -device rtl8139,netdev=n0 -drive id=d0,file=$Y/sata.img,format=raw,if=none,snapshot=on -device ide-hd,drive=d0,bus=ide.0 $QXHCI" \
+  $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN "${PUESTA[@]}" ":monitor cont" ":pausa 8" "disposit /informe" ":pausa 6" > $Y/q35.sal 2>&1
+tr -d '\r' < $Y/q35.sal > $Y/q35.txt
+S=$Y/q35.txt
+mira "q35: el informe en texto (sin escritorio), con la ICH9: el puente al procesador, el LPC, el AHCI de la placa con su disco y el SMBus sin controlador" \
+  "^  \[OK\] Intel Q35: puente al procesador  \[8086:29C0\]$" "^  \[OK\] Intel ICH9: puente LPC  \[8086:2918\]$" "^  \[OK\] Intel ICH9: SATA (AHCI)  \[8086:2922\]$" \
+  "^       Detalle: 1 discos SATA" "^  \[!\]  Intel ICH9: SMBus  \[8086:2930\]$" "^  \[OK\] QEMU HARDDISK (64 MB)$"
+mira "q35: la RTL8139 (RED.BIN), la xHCI con el teclado y, detrás de un concentrador, el ratón" "^  \[OK\] Realtek RTL8139 (Fast Ethernet)  \[10EC:8139\]$" \
+  "^       Controlador: RED.BIN (un servicio del anillo 3)$" "^  \[OK\] QEMU: controladora USB 3 (xHCI)  \[1B36:000D\]$" "^       Controlador: xhci.cas (en el núcleo)$" \
+  "^  \[OK\] QEMU USB Hub  \[0409:55AA\]$" "^       Controlador: usb.cas (en el núcleo)$" "^       Cuelga de: QEMU USB Hub$" "^  \[OK\] QEMU USB Mouse  \[0627:0001\]$"
+mira "q35: y la batería de ACPI" "^  \[OK\] Batería  \[PNP0C0A\]$" "^       Carga: 55 %, cargando$"
+# 3. con «sinusb» y «sinacpi»: lo que no se usa, desactivado (y dicho así)
+MODULOS=$Y/ACPI.BIN,$Y/DISPOSIT.BIN,$Y/ORDENES.BIN ARRANQUE="ordenes sinusb sinacpi" QEMU_MAS="-device usb-ehci,id=e" \
+  $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 3" "disposit /informe" ":pausa 5" > $Y/sin.sal 2>&1
+tr -d '\r' < $Y/sin.sal > $Y/sin.txt
+S=$Y/sin.txt
+mira "con «sinusb» y «sinacpi»: la controladora USB y ACPI, desactivadas (con el porqué)" "^  \[--\] Intel ICH4: USB 2.0 (EHCI)  \[8086:24CD\]$" \
+  "^       Detalle: «sinusb» en la línea del cargador$" "^  \[--\] Sistema ACPI (apagar, reiniciar y la batería)  \[ACPI\]$" "^       Detalle: «sinacpi» en la línea del cargador$"
+if ! cat $Y/q35.sal $Y/sin.sal | grep -q "excepción\|\*\*\*"; then ok "y ni una excepción del núcleo en el q35 ni sin USB"
+else ko "el núcleo se ha quejado:"; cat $Y/q35.sal $Y/sin.sal | grep "excepción\|\*\*\*" | head -3 | sed 's/^/        /'; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin el Administrador de dispositivos)"
+fi   # el Administrador de dispositivos
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ---------------------------------------------- 18. el Navegador (NAVEGA.BIN)

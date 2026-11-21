@@ -236,6 +236,7 @@ cuarta parte, los discos y el USB).
 | `red.cas` (Red) | **La red**, lo que pone el núcleo (sección 14): el cartero entre los programas y el servicio de red (`RED.BIN`) —y el servicio TLS (`TLS.BIN`), con la llamada 99—, y lo que solo el servicio de red puede pedir: los puertos, memoria física seguida para el DMA, los registros de la tarjeta y su interrupción. |
 
 | `energia.cas` (Energia) | **Apagar de verdad, reiniciar y la batería**: las llamadas del servicio de ACPI (`ACPI.BIN`, un programa del anillo 3 con ACPICA) y la 154; apagar por ACPI (S5) y reiniciar (FADT, 8042, CF9h); la pila de la bandeja y su recuadro de ayuda (sección 11). |
+| `dispositivos.cas` (Dispositivos) | **Lo que hay en el equipo y qué lo lleva** (desde la 0.8.3): las llamadas 155 (la lista, de solo lectura) y 156 (lo que apuntan los servicios del anillo 3), para el Administrador de dispositivos (sección 10). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
 
 Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
@@ -251,6 +252,7 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `uasiste.cas` | `ASISTE.BIN` | El **asistente del primer arranque** de un sistema instalado (sección 12). |
 | `ubloc.cas` | `BLOC.BIN` | El **Bloc de notas** del escritorio (sección 10). |
 | `uequipo.cas` | `EQUIPO.BIN` | **Mi equipo**: las unidades (con su letra, de qué son y lo que cabe en ellas) y lo que hay dentro (sección 10). |
+| `udisposi.cas` | `DISPOSIT.BIN` | El **Administrador de dispositivos**: el PCI, el USB, ACPI, los discos, lo de siempre y el procesador, con el controlador de cada cosa, sus recursos y un informe (sección 10). |
 | `uconsola.cas` | `CONSOLA.BIN` | La **Consola** del escritorio: el intérprete de órdenes dentro de una ventana (sección 10). |
 | `uordenes.cas` | `ORDENES.BIN` | El **intérprete de órdenes** (sección 8). |
 | `uhola.cas` | `HOLA.BIN` | Escribe, suma, duerme, pide su número de tarea y prueba que la llamada al sistema no le deja enseñar la memoria del núcleo. |
@@ -456,6 +458,8 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 
 | 150-153 | **solo el servicio de ACPI** (`ACPI.BIN`): puertos, memoria física, configuración PCI, y dar la batería y esperar órdenes (sección 11, «Apagar de verdad y la batería») | — | |
 | 154 | **la batería**: lo último que ha leído el servicio de ACPI (una `Energía`, `energia.cas`) a EBX | — | 1, o 0 si no hay servicio |
+| 155 | (dispositivos) **la lista de los dispositivos** y qué los lleva: hasta ECX fichas `Dispositivo` (320 octetos, `dispositivos.cas`) a EBX. Solo lee | `lista_dispositivos` | cuántos hay (aunque no quepan) |
+| 156 | (dispositivos; **solo los servicios**: `ACPI.BIN`, `RED.BIN`) apuntar la ficha de EBX (ECX = 0) u olvidar las suyas (ECX = 1) | — | 0 |
 
 (La 11, con ECX = 1, no se queda esperando: da `SIGUE` si la tarea no ha acabado
 —`acabada`—. La 15 da además el ancho y el alto de la pantalla gráfica y si el
@@ -1162,6 +1166,98 @@ acaban todos.
 
 **Lo que dice el núcleo** con el escritorio en marcha (lo que lanza, los avisos, una
 excepción) sale por el **puerto serie**, como siempre.
+
+### El Administrador de dispositivos (21/11, la 0.8.3)
+
+Lo pidió Carlos el 21/11: qué hay en cada equipo, qué controlador de
+Hispa-Pentium lo lleva y qué falta, y **un informe para mandarlo** desde
+cada portátil del taller. Se abre desde **Inicio › Configuración ›
+«Administrador de dispositivos...»** y desde **el botón secundario en «Mi
+equipo» › Propiedades** (`DISPOSIT.BIN`, `udisposi.cas`, hecho con los
+controles de `controles.cas`).
+
+![El Administrador de dispositivos (QEMU «pc»)](pentium/dispositivos-arbol.png)
+
+- **El árbol, por categorías**: Pantalla, Discos, Controladoras de disco, USB,
+  Red, Sonido, Teclado y ratón, Sistema y ACPI, Batería, Procesador y Otros
+  dispositivos (una rejilla con «[-]»/«[+]»: un clic ahí, Intro, dos clics o
+  las flechas izquierda y derecha la abren y la cierran). Cada dispositivo con
+  su **nombre**, su **estado en palabra** («funciona», «SIN CONTROLADOR», «CON
+  ERROR», «desactivado», «no le hace falta»), el **controlador** y el
+  **identificador** (`8086:100E`, `PNP0303`). Lo que no tiene controlador o
+  tiene un error va con un **«!»** (o una «X») delante, **fondo naranja y una
+  franja** a la izquierda, y su palabra: **nada depende solo del color**
+  (Carlos es daltónico). Lo que funciona lleva un «+» (la letra del sistema no
+  tiene «√»).
+- **Las propiedades** (Intro o dos clics): otra ventana (el mismo programa, con
+  `/P BUS DIRECCIÓN`), con las pestañas **General** (tipo, fabricante, dónde
+  está, el estado en una frase y el detalle: la MAC y el enlace de la tarjeta
+  de red, la carga, la salud y los ciclos de la batería), **Controlador** (quién
+  lo lleva —en el núcleo o un servicio del anillo 3—, el identificador, el
+  subsistema, la revisión, la clase, lo que dice de sí un aparato USB, la ruta
+  en ACPI, de qué cuelga) y **Recursos** (la IRQ, los puertos y la memoria, con
+  lo que miden). «Copiar estos datos» y «Cerrar» (o Esc; Ctrl+Tab cambia de pestaña).
+- **«Copiar informe»** (al portapapeles: se pega en el Bloc de notas) y
+  **«Guardar informe»**: a `X:\DISPOSIT.TXT` (la memoria USB), o a la primera
+  memoria USB o el primer disco en los que se pueda escribir. El informe
+  empieza por el equipo, la fecha, la memoria, la pantalla, un resumen y **lo
+  que falta** (sin controlador o con error), y luego cada categoría con cada
+  dispositivo y todos sus datos (`[OK]`, `[!]`, `[X]`, `[--]` delante, para
+  buscarlo a ojo). Sin escritorio, `DISPOSIT` lo escribe en la pantalla;
+  `DISPOSIT /INFORME > A.TXT` y `DISPOSIT /GUARDAR [RUTA]`, desde las órdenes.
+
+| | |
+|---|---|
+| ![Las propiedades: General](pentium/dispositivos-general.png) | ![Las propiedades: Recursos](pentium/dispositivos-recursos.png) |
+
+**La llamada 155** (`dispositivos.cas`, de solo lectura) hace la lista cada vez
+que se pide, en fichas `Dispositivo` de 320 octetos (la misma en
+`llamadas.cas` y en `acpi/pentium/pentium.h`): el bus (`BUS_PCI`, `BUS_USB`,
+`BUS_ACPI`, `BUS_PLACA`, `BUS_DISCO`, `BUS_CPU`), la dirección, de quién cuelga
+(su número en la lista), el fabricante y el modelo, la clase al estilo del PCI,
+el subsistema, la revisión, el estado (`EST_...`), la IRQ, hasta seis
+recursos (clase, base y largo), el nombre PnP, el controlador, el nombre (el
+modelo del disco, lo que dice el aparato USB, la ruta ACPI), la marca y un
+detalle. Mira:
+
+- **el bus PCI entero** (también detrás de los puentes), cada función con sus
+  zonas: **medidas una vez** (se escriben unos en el BAR con el aparato sin
+  atender en la memoria ni en los puertos y las interrupciones cerradas, y se
+  pone como estaba: lo de todos los sistemas), su IRQ y lo que dicen de él los
+  controladores: `ahci.cas` (su controladora), `ata.cas` (el canal primario),
+  `xhci/ehci/uhci.cas` (las que han tomado; las que no se han dejado, «con
+  error»; con `sinusb`, desactivadas), `video.cas` (la tarjeta que tiene la
+  memoria de la pantalla; sin modo gráfico, la pantalla de texto),
+  `RED.BIN` (la tarjeta que lleva el servicio de red), `pci.cas` (los puentes);
+- **los aparatos USB** de `usb.cas`, con **su nombre y su marca de verdad**
+  (sus descriptores de cadena, preguntados una vez a cada uno) y qué módulo los
+  atiende (`usbhid.cas`, `usbalm.cas`, `usb.cas` los concentradores), colgados
+  de su controladora o de su concentrador; y lo que no se ha dejado enumerar;
+- **los discos** de `discos.cas`, colgados de su controladora, con su tamaño,
+  sus unidades y si se puede escribir en ellos;
+- **lo de siempre**: el teclado y el ratón PS/2 (si contestan), el reloj de la
+  CMOS, el 8253, los 8259 y los puertos serie que dice la BIOS (COM1 es el
+  registro del núcleo); y **el procesador** (CPUID: su nombre, su familia y lo
+  que tiene);
+- **ACPI**: el sistema (`ACPI.BIN`) y **lo que apunta el servicio con la 156**:
+  después de la primera lectura de la batería, con la tarea quieta, `ACPI.BIN`
+  recorre el espacio de nombres (los dispositivos con `_HID` y `_STA` presente,
+  sin los enlaces de interrupción `PNP0C0F`), con su ruta y lo que dice su
+  `_CRS`, y dice quién lo lleva (la batería, el adaptador y el controlador
+  embebido, él; los buses PCI, `pci.cas`; los recursos de la placa y los
+  contenedores, nadie: no les hace falta). Con `acpisindisp` en la línea del
+  cargador no lo hace. Lo de ACPI que ya sale como «lo de siempre» (el teclado,
+  el ratón, el reloj, COM1) va con ello (su ruta, en sus propiedades), no aparte.
+- **Para un controlador nuevo** (los lectores de CD de `pentium-cd`, una
+  tarjeta): `Dispositivos.apuntar(ficha, 1)` desde el núcleo; si es un aparato
+  PCI (bus `BUS_PCI` y su dirección), su estado, su controlador y sus textos se
+  juntan con la ficha del PCI. Lo que apunta un servicio que se acaba ya no sale.
+
+Los nombres (los fabricantes y los modelos del PCI y del USB, las clases y los
+nombres PnP) van en unas tablas de texto de `udisposi.cas`: lo que se conoce
+(QEMU, VirtualBox, VMware, Intel PIIX/ICH7/ICH9/NM10/Bay Trail, las Wi-Fi de
+Intel, Broadcom y Atheros, Realtek, Marvell, VIA, SiS...) y, si no está, el
+fabricante y la clase («Realtek: Tarjeta de red (Ethernet)»).
 
 ### La medida de la pantalla, desde Configuración (20/11)
 
@@ -2236,7 +2332,7 @@ python3 tools/hpq.py sistema SALIDA CARPETA...   # los paquetes del sistema (lo 
 | `base` | 0.8.3 | `NUCLEO.BIN`, `ORDENES.BIN`, `ASISTE.BIN`, `INSTALAR.BIN`, `LEEME.TXT` (en `\HISPA` y en la raíz), `MANUAL.TXT`, `BOOT.IMG`, `CORE.IMG` | — |
 | `bloc` | 0.7 | `BLOC.BIN` | base >= 0.7 |
 | `consola` | 0.7 | `CONSOLA.BIN` | base >= 0.7 |
-| `equipo` | 0.7 | `EQUIPO.BIN` (Mi equipo) | base >= 0.7 |
+| `equipo` | 0.8.3 | `EQUIPO.BIN` (Mi equipo) y `DISPOSIT.BIN` (el Administrador de dispositivos) | base >= 0.8.3 |
 | `ejemplos` | 0.8.2 | `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN`, `MUESTRA.BIN` (los controles de las ventanas) | base >= 0.8.2 |
 | `paquetes` | 1.0 | `PAQUETES.BIN`, `ACTUALIZ.BIN` (su ventana) | base >= 0.7, nucleo >= 0.7 |
 | `hvprun` | 0.7 | `HVPRUN.BIN` | base >= 0.7 |
@@ -2947,7 +3043,7 @@ Tres cambios, marcados «(NAVEGADOR)»:
 - **Programas de hasta 8 MB** (`MAX_PROGRAMA`, `usuario.cas`; antes 2 MB:
   NAVEGA.BIN mide 2.095.604 octetos).
 
-`tools/hpq.py`: `base` pasa a la **0.8.3** (sobre la 0.8.2 de los controles; los demás siguen como estaban).
+`tools/hpq.py`: `base` y `equipo` (con el Administrador de dispositivos) pasan a la **0.8.3** (sobre la 0.8.2 de los controles; los demás siguen como estaban).
 
 ### Lo que se arregló por el camino (vale también para Hispa-486)
 
@@ -3436,6 +3532,16 @@ de la bandeja al arrancar, «Verlas», «Actualizar todo» con un núcleo nuevo,
 «Reiniciar ahora», «El núcleo nuevo ha arrancado bien» (`nuevo=0`); y con un
 núcleo que se queda en `hlt`, reiniciar a mano: GRUB elige solo el de antes,
 el sistema lo dice y `GRUBENV` queda en `nuevo=4`.
+La **parte 19** (`SOLO=dispositivos`, unos dos minutos) prueba el
+**Administrador de dispositivos**: en un «pc» con la e1000, EHCI con teclado,
+ratón, tableta (sin controlador) y una memoria, un disco SATA y la batería de
+mentira, desde Mi equipo › Propiedades y desde Configuración; guardar el
+informe en la memoria (y lo que dice: el PCI con sus zonas medidas, la red con
+su MAC, el USB con sus nombres de verdad, los discos, lo de siempre con lo de
+ACPI, la batería, lo que falta); las tres pestañas de las propiedades;
+copiarlo. Y en un «q35» (ICH9, la RTL8139, xHCI con un concentrador), el
+informe en texto; y con `sinusb` y `sinacpi`, lo desactivado.
+
 La **parte 17** (`SOLO=pantalla`, unos seis minutos) prueba la medida de la
 pantalla desde Configuración (sección 10): con `-kernel` (-vga std), la lista
 (con lo que dice el EDID de QEMU), «Probar...», «Mantener», el Bloc de notas
@@ -3460,7 +3566,7 @@ a la 14 y la 16) dio **156 bien, 0 mal**.
 
 Antes, `pruebas.sh` tenía **508 comprobaciones** (423 hasta la 0.7;
 de la 0.8, los paquetes, el USB en caliente, la red, apagar de verdad y la
-batería, y las del AHCI del ICH7). La memoria USB trae ahora **19 programas** (18 hasta la 0.8.1; la 0.8.2 añade MUESTRA.BIN)
+batería, y las del AHCI del ICH7). La memoria USB trae ahora **20 programas** (18 hasta la 0.8.1; la 0.8.2 añade MUESTRA.BIN y la 0.8.3, DISPOSIT.BIN)
 como módulos (eran 9: PAQUETES y ACTUALIZ, RED, IPCONFIG, PING y DESCARGA,
 ACPI.BIN y, desde el 20/11, TLS.BIN y HTTPS), y 10 paquetes del sistema (con
 «red» y «tls»). Algo más de una hora

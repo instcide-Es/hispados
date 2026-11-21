@@ -78,6 +78,11 @@
 ;   150 a 154: apagar de verdad, reiniciar y la batería (energia.cas): las
 ;       150 a 153 solo para el servicio de ACPI (ACPI.BIN); la 154, la
 ;       batería, para todos
+;  155  (dispositivos) la lista de los dispositivos y qué los lleva, a EBX
+;       (hasta ECX fichas de 320 octetos: Dispositivo, dispositivos.cas)
+;       -> cuántos hay. Solo lee
+;  156  (dispositivos; solo los servicios: ACPI.BIN, RED.BIN) apuntar la
+;       ficha de EBX (ECX = 0), u olvidar las suyas (ECX = 1)
 ;
 ;  Los nombres de archivo que no empiezan por una barra se entienden desde la
 ;  carpeta de trabajo de la tarea (la hereda de quien la lanza); «.» y «..»
@@ -100,7 +105,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Red, Energia
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Red, Energia, Dispositivos
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -762,6 +767,9 @@ módulo Usuario
                 devolver r
             caso 150..154:
                 devolver atender_energía(n, a, b, c)
+            caso 155, 156:
+                ; (dispositivos) la lista de los dispositivos, y lo que apuntan los servicios
+                devolver atender_dispositivos(n, a, b, c)
         fin
         devolver NO_VALE
     fin
