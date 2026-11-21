@@ -6,6 +6,7 @@ Se tacha lo que se acaba; el detalle técnico de cada cosa va en docs/PENTIUM.md
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 
 ## En marcha (21/11/2026)
+- [x] ~~**Sonido** (HD Audio, AC'97, Sound Blaster 16; mezcla, volumen, bandeja, Configuración > Sonido, sonidos del sistema, DirectSound y HVPRUN) — rama pentium-sonido~~ (21/11: docs/PENTIUM.md §14 sexies; falta probarlo en los equipos)
 - [ ] **Navegador web** (NetSurf de Hispa-486 con JavaScript, sobre la red y el HTTPS de Pentium) — rama pentium-navegador
 - [ ] **CD y DVD** (ATAPI por IDE, SATA y USB; ISO 9660 + Joliet; meter y sacar en marcha) y **montar imágenes .ISO como CD virtual** — rama pentium-cd
 - [ ] **Controles de ventana completos** (pestañas, rejillas con columnas, barra de herramientas, recuadros, fechas, listas desplegables) y ClicGest 0.2 — rama controles-erp
@@ -17,14 +18,14 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 ## El escritorio
 - [x] ~~Explorador de archivos: árbol de carpetas, vistas (iconos, lista, detalles), copiar/cortar/pegar, arrastrar y soltar, papelera, buscar, propiedades, abrir con…, miniaturas de imágenes~~ (21/11; falta escribir nombres largos)
 - [x] ~~Dock: barra de lanzamiento con los programas favoritos y los abiertos, que se pueda fijar y quitar~~ (21/11)
-- [ ] Barra de tareas: agrupar ventanas, vista previa, bandeja con más iconos (sonido, Wi-Fi)
-- [ ] Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido, ratón, teclado, red y Wi-Fi, energía, usuarios, programas (hecho: actualizaciones)
+- [ ] Barra de tareas: agrupar ventanas, vista previa, bandeja con más iconos (Wi-Fi; el del sonido, hecho el 21/11: volumen con la rueda, silencio)
+- [ ] Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido (hecho el 21/11: Configuración > Sonido), ratón, teclado, red y Wi-Fi, energía, usuarios, programas (hecho: actualizaciones)
 - [ ] Temas y fondo de escritorio; letras TrueType del sistema; protector de pantalla
 - [ ] Portapapeles con imágenes y archivos; arrastrar y soltar entre programas
 - [ ] Ayuda del sistema con buscador
 
 ## El sistema
-- [ ] Sonido: HD Audio y AC'97, mezclador, sonidos del sistema
+- [x] ~~Sonido: HD Audio y AC'97, mezclador, sonidos del sistema~~ (21/11, rama pentium-sonido: SONIDO.BIN con HD Audio, AC'97 y Sound Blaster 16, varios programas a la vez, el volumen general y el de cada uno, los auriculares, los sonidos del sistema; docs/PENTIUM.md §14 sexies). Queda: probarlo en el HP Mini, el Toshiba y el MacBook 2017; grabar
 - [ ] Wi-Fi (el núcleo de C de Hispa-486: Broadcom y Atheros) con su ventanita
 - [ ] Usuarios con contraseña y carpetas propias; permisos
 - [ ] Suspender e hibernar (ACPI S3/S4)
@@ -36,12 +37,12 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] TLS 1.3 y descompresión gzip
 
 ## Programas
-- [x] ~~Programas de Windows de 32 bits (cargador PE) y **DirectX** (DirectDraw, DirectSound, DirectInput), como en Hispa-486~~ (WIN32.BIN: NASM, TCC, FASMW, Naves; [WIN32.md](WIN32.md)). Queda: hilos de verdad, SEH, Direct3D, el sonido de DirectSound
+- [x] ~~Programas de Windows de 32 bits (cargador PE) y **DirectX** (DirectDraw, DirectSound, DirectInput), como en Hispa-486~~ (WIN32.BIN: NASM, TCC, FASMW, Naves; [WIN32.md](WIN32.md)). Queda: hilos de verdad, SEH, Direct3D (el sonido de DirectSound y WinMM, hecho el 21/11)
 - [ ] Reproductor de música y vídeo (MP3, OGG, WAV; vídeo sencillo)
 - [ ] Visor de imágenes y Pintura
 - [ ] Compresor ZIP
 - [ ] Calculadora, Reloj, Mapa de caracteres
-- [ ] Juegos: los emuladores (Hispa-Nes, Hispa-System, Hispa-Snes, Hispa-Drive) con sonido en Pentium
+- [ ] Juegos: los emuladores (Hispa-Nes, Hispa-System, Hispa-Snes, Hispa-Drive) con sonido en Pentium (21/11: HVPRUN pasa el sonido; Hispa-Snes, Hispa-Nes e Hispa-System corren en HVPRUN y suenan; falta Hispa-Drive y los mandos)
 - [ ] Correo
 - [ ] ClicGest (programa de ClicGest, licencia propia): 0.1 publicado; 0.2 con pestañas en marcha
 

@@ -88,6 +88,13 @@ mkdir -p $W/m/JUEGOS $W/sn
 python3 -I $RAIZ/tools/mkhvp.py $RAIZ/programas/hispasnes.asm $W/sn/HISPASNS.HVP > /dev/null
 python3 -I $RAIZ/tools/asm816.py $RAIZ/tests/hispasnes/demo.s $W/sn/PRUEBA.SFC
 cp $W/sn/HISPASNS.HVP $W/sn/PRUEBA.SFC $W/m/JUEGOS/
+# (SONIDO) y los de 8 bits, que desde el 21/11 corren en HVPRUN (y suenan):
+# Hispa-Nes con HISPA1.NES e Hispa-System con BUZO.SMS, nuestras
+python3 -I $RAIZ/tools/mkhvp.py $RAIZ/programas/hispanes.asm $W/sn/HISPANES.HVP > /dev/null
+python3 -I $RAIZ/tools/asm6502.py $RAIZ/nes/hispa1/hispa1.s $W/sn/HISPA1.NES > /dev/null
+python3 -I $RAIZ/tools/mkhvp.py $RAIZ/programas/hispasms.asm $W/sn/HISPASMS.HVP > /dev/null
+python3 -I $RAIZ/tools/asmz80.py $RAIZ/sms/buzo/buzo.s $W/sn/BUZO.SMS > /dev/null
+cp $W/sn/HISPANES.HVP $W/sn/HISPA1.NES $W/sn/HISPASMS.HVP $W/sn/BUZO.SMS $W/m/JUEGOS/
 mkdir -p $W/m/boot/grub
 { cat <<'G'
 set timeout=8

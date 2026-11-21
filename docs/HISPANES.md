@@ -184,6 +184,17 @@ siempre igual.
 Los siguientes (plataformas, puzles) irán en `nes/` y en `NESROMS` del
 Makefile.
 
+## En Hispa-Pentium (HVPRUN)
+
+(SONIDO, 21/11/2026) Hispa-Nes corre también dentro de Hispa-Pentium, con HVPRUN
+(`HVPRUN \JUEGOS\HISPANES.HVP \JUEGOS\HISPA1.NES`, o con dos clics desde Mi equipo; en la memoria USB,
+en `\JUEGOS` con `HISPA1.NES`), como Hispa-Snes (docs/HISPASNES.md): si
+`aj_leer 13` (el texto de la versión de Ventanas) da 0, está en HVPRUN y no
+pide el DPMI, ni HSPJOY, ni lee el 8254: toma el reloj fino de HVPRUN
+(`aj_leer 20`). El sonido va por el de Hispa-Pentium (docs/PENTIUM.md §14
+sexies: HVPRUN lo pasa de `snd_pcm` y `snd_orden` a un canal). Sin mandos,
+de momento. Lo prueba `SOLO=sonido castel/pruebas.sh` (la parte 23).
+
 ## Pruebas
 
 `tests/run_hispanes_tests.sh` (unos seis minutos):

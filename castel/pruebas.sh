@@ -3927,6 +3927,27 @@ if bash $AQUI/nucleo32/hvprun/hacer.sh $Y/of > /dev/null 2>&1 && make -s -C $AQU
 else
   ko "no se pueden hacer HVPRUN.BIN, HISPASNS.HVP o PRUEBA.SFC"
 fi
+# 5. Hispa-Nes (HISPA1.NES) e Hispa-System (BUZO.SMS) en HVPRUN: desde el 21/11
+# corren allí como Hispa-Snes (sin DPMI ni puertos: el reloj fino de HVPRUN) y
+# suenan (la «fin de la partida» de BUZO tiene su música; HISPA1, sus golpes)
+if [ -f $Y/of/HVPRUN.BIN ] && make -s -C $AQUI/.. build/HISPANES.HVP build/HISPA1.NES build/HISPASMS.HVP build/BUZO.SMS > /dev/null 2>&1; then
+  for emu in HISPANES:HISPA1.NES:Hispa-Nes HISPASMS:BUZO.SMS:Hispa-System; do
+    h=${emu%%:*}; r=${emu#*:}; r=${r%%:*}; nom=${emu##*:}
+    rm -f "${Y:?}/$h.wav"
+    CAPTURAS=$G MODULOS=$Y/ORDENES.BIN,$Y/CONSOLA.BIN,$Y/of/HVPRUN.BIN,$AQUI/../build/$h.HVP,$AQUI/../build/$r,$SIS ARRANQUE=escritorio MEMORIA=64 \
+      QEMU_MAS="-audiodev wav,id=snd0,path=$Y/$h.wav -device intel-hda -device hda-duplex,audiodev=snd0" \
+      $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 6" ":doble 60 186" ":pausa 4" ":escribe hvprun M:\\$h.HVP M:\\$r" ":tecla ret" ":pausa 10" \
+      ":clic 400 300" ":tecla ret" ":pausa 10" ":captura so-$h" > $Y/$h.sal 2>&1
+    python3 -I $AQUI/nucleo32/sonido/oye.py $Y/$h.wav > $Y/$h.oye 2>&1
+    cumple $Y/$h.oye 1 'izq > 1000' "$nom en HVPRUN: corre (sin DPMI ni puertos) y suena por la tarjeta"
+    miracap "$nom en HVPRUN: su ventana (el título, y en la barra de abajo, «c/s»: los cuadros por segundo)" so-$h negrita 280 120 460 190 "$nom" texto 270 380 530 430 "c/s"
+    S=$Y/$h.sal
+    if ! grep -q "excepción\|\*\*\*" $S; then ok "$nom en HVPRUN: ni una excepción ni una queja del núcleo"
+    else ko "$nom en HVPRUN: el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+  done
+else
+  ko "no se pueden hacer HISPANES.HVP, HISPA1.NES, HISPASMS.HVP o BUZO.SMS"
+fi
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el sonido)"
 fi   # (SONIDO) el sonido

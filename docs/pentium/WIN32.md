@@ -26,7 +26,7 @@ cualquier programa**: escribiendo su nombre en la Consola (o en el intérprete d
   aceleradores, pestañas y barra de estado (COMCTL32), el cuadro de abrir,
   ensamblar en «otro hilo» con su barra de progreso; y el `.EXE` que hace.
 - **DirectX**: **«Naves»** (DirectDraw a pantalla completa con su paleta,
-  DirectInput con el teclado, DirectSound en silencio): se juega a 50 cuadros
+  DirectInput con el teclado, DirectSound: desde el 21/11 suena, con la rama pentium-sonido): se juega a 50 cuadros
   por segundo en QEMU; y el **ejemplo DDRAW del flat assembler** (ensamblado en
   Hispa-Pentium con FASM).
 - **La red**: **WSOCK32/WS2_32** (Winsock 1.1 de cliente: TCP con y sin bloqueo,
@@ -135,9 +135,11 @@ ventana del juego pasa a ser una del núcleo sin marco, encima de todo y del
 tamaño de la pantalla; su lienzo es el «marco lineal» donde DDRAW pinta (el
 modo del juego, agrandado y en el centro, como en Hispa-486), y en cada vuelta
 de mensajes se le da al núcleo lo que ha cambiado (la caja del juego). DirectInput
-lee el mapa de las teclas. **DirectSound suena en silencio**: una tarjeta de
+lee el mapa de las teclas. **DirectSound y WinMM suenan** (SONIDO, 21/11):
+`HispaDXSonido` les da un canal del sonido de Hispa-Pentium (48 kHz, 16 bits,
+estéreo; docs/PENTIUM.md §14 sexies); sin tarjeta, la de antes: una de
 mentira de 8 bits a 22.050 Hz por la que el tiempo pasa como si sonara (los
-juegos siguen igual), hasta que Hispa-Pentium tenga sonido.
+juegos siguen igual).
 
 ## Cómo se usa
 
