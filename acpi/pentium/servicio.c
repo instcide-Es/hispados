@@ -194,6 +194,143 @@ static void cocina(void)
 	}
 }
 
+/* ---- (dispositivos) lo que hay en el espacio de nombres, para el
+ * Administrador de dispositivos del escritorio (la llamada 156) ----
+ * Se recorren los dispositivos que tienen _HID (sin los enlaces de
+ * interrupción, PNP0C0F, que son muchos y no dicen nada), con su _STA (los
+ * que dicen que no están, fuera), su ruta y lo que dice su _CRS (la IRQ,
+ * los puertos y la memoria). Se hace una vez, con la tarea quieta, después
+ * de la primera lectura de la batería (así va también su marca y su
+ * modelo). Con «acpisindisp» en la línea del cargador, no se hace. */
+static struct pe_dispositivo disp;
+static u32 n_disp;
+
+static void pon_texto(char *d, const char *o, u32 cabe)
+{
+	u32 i;
+
+	for (i = 0; i + 1 < cabe && o[i]; i++)
+		d[i] = o[i];
+	d[i] = 0;
+}
+
+static void recurso(u32 clase, u32 base, u32 largo)
+{
+	if (disp.n_recursos >= 6 || !largo)
+		return;
+	disp.recursos[disp.n_recursos].clase = clase;
+	disp.recursos[disp.n_recursos].base = base;
+	disp.recursos[disp.n_recursos].largo = largo;
+	disp.n_recursos++;
+}
+
+static ACPI_STATUS un_recurso(ACPI_RESOURCE *r, void *ctx)
+{
+	(void)ctx;
+	switch (r->Type) {
+	case ACPI_RESOURCE_TYPE_IRQ:
+		if (disp.irq == 0xFFFFFFFFu && r->Data.Irq.InterruptCount)
+			disp.irq = r->Data.Irq.Interrupts[0];
+		break;
+	case ACPI_RESOURCE_TYPE_EXTENDED_IRQ:
+		if (disp.irq == 0xFFFFFFFFu && r->Data.ExtendedIrq.InterruptCount)
+			disp.irq = r->Data.ExtendedIrq.Interrupts[0];
+		break;
+	case ACPI_RESOURCE_TYPE_IO:
+		recurso(DISP_PUERTOS, r->Data.Io.Minimum, r->Data.Io.AddressLength);
+		break;
+	case ACPI_RESOURCE_TYPE_FIXED_IO:
+		recurso(DISP_PUERTOS, r->Data.FixedIo.Address, r->Data.FixedIo.AddressLength);
+		break;
+	case ACPI_RESOURCE_TYPE_MEMORY32:
+		recurso(DISP_MEMORIA, r->Data.Memory32.Minimum, r->Data.Memory32.AddressLength);
+		break;
+	case ACPI_RESOURCE_TYPE_FIXED_MEMORY32:
+		recurso(DISP_MEMORIA, r->Data.FixedMemory32.Address, r->Data.FixedMemory32.AddressLength);
+		break;
+	}
+	return AE_OK;
+}
+
+static int es(const char *a, const char *b)
+{
+	return !strcmp(a, b);
+}
+
+static ACPI_STATUS un_dispositivo(ACPI_HANDLE h, UINT32 nivel, void *ctx, void **ret)
+{
+	ACPI_PNP_DEVICE_ID *hid;
+	ACPI_BUFFER b;
+	ACPI_OBJECT o;
+	UINT64 sta = 0x0F;
+	char ruta[64];
+	int i;
+
+	(void)nivel; (void)ctx; (void)ret;
+	if (n_disp >= 60)
+		return AE_CTRL_TERMINATE;
+	if (ACPI_FAILURE(AcpiUtExecute_HID((ACPI_NAMESPACE_NODE *)h, &hid)))
+		return AE_OK;
+	memset(&disp, 0, sizeof disp);
+	pon_texto(disp.pnp, hid->String, sizeof disp.pnp);
+	ACPI_FREE(hid);
+	if (es(disp.pnp, "PNP0C0F"))
+		return AE_OK;
+	/* _STA: si no está (bit 0), fuera; las baterías, con su bit 4 */
+	b.Length = sizeof o;
+	b.Pointer = &o;
+	if (ACPI_SUCCESS(AcpiEvaluateObjectTyped(h, "_STA", NULL, &b, ACPI_TYPE_INTEGER)))
+		sta = o.Integer.Value;
+	if (!(sta & 1))
+		return AE_OK;
+	b.Length = sizeof ruta;
+	b.Pointer = ruta;
+	if (ACPI_FAILURE(AcpiGetName(h, ACPI_FULL_PATHNAME, &b)))
+		ruta[0] = 0;
+	disp.bus = DISP_BUS_ACPI;
+	disp.direccion = ++n_disp;
+	disp.padre = 0xFFFFFFFFu;
+	disp.irq = 0xFFFFFFFFu;
+	disp.dato1 = (u32)sta;
+	pon_texto(disp.nombre, ruta, sizeof disp.nombre);
+	AcpiWalkResources(h, METHOD_NAME__CRS, un_recurso, NULL);
+	/* quién lo lleva */
+	if (es(disp.pnp, "PNP0C0A")) {
+		pon_texto(disp.controlador, "ACPI.BIN", sizeof disp.controlador);
+		disp.estado = DISP_FUNCIONA;
+		for (i = 0; i < LL_NBAT; i++)
+			if (estado.bat[i].hay && !strcmp(estado.bat[i].ruta, ruta)) {
+				pon_texto(disp.marca, estado.bat[i].marca, sizeof disp.marca);
+				snprintf(disp.detalle, sizeof disp.detalle, "%s%s%s%s", estado.bat[i].modelo,
+					 estado.bat[i].tipo[0] ? " (" : "", estado.bat[i].tipo, estado.bat[i].tipo[0] ? ")" : "");
+			}
+		if (!(sta & 0x10))
+			pon_texto(disp.detalle, "el hueco está vacío (no hay batería puesta)", sizeof disp.detalle);
+	} else if (es(disp.pnp, "ACPI0003") || es(disp.pnp, "PNP0C09")) {
+		pon_texto(disp.controlador, "ACPI.BIN", sizeof disp.controlador);
+		disp.estado = DISP_FUNCIONA;
+	} else if (es(disp.pnp, "PNP0A03") || es(disp.pnp, "PNP0A08")) {
+		pon_texto(disp.controlador, "pci.cas", sizeof disp.controlador);
+		disp.estado = DISP_FUNCIONA;
+	} else if (es(disp.pnp, "PNP0C02") || es(disp.pnp, "PNP0C01") || es(disp.pnp, "PNP0A05") ||
+		   es(disp.pnp, "PNP0A06") || es(disp.pnp, "ACPI0010") || es(disp.pnp, "ACPI0004") ||
+		   es(disp.pnp, "ACPI0006") || es(disp.pnp, "QEMU0002") || es(disp.pnp, "PNP0C04") ||
+		   es(disp.pnp, "PNP0200") || es(disp.pnp, "PNP0800") || es(disp.pnp, "ACPI0007") ||
+		   es(disp.pnp, "PNP0C80") || es(disp.pnp, "INT0800"))
+		disp.estado = DISP_NO_HACE_FALTA;
+	else
+		disp.estado = DISP_SIN_CONTROLADOR;
+	sc(SC_DISPOSITIVO, (u32)&disp, 0, 0);
+	return AE_OK;
+}
+
+static void apunta_dispositivos(void)
+{
+	n_disp = 0;
+	AcpiWalkNamespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT, ACPI_UINT32_MAX, un_dispositivo, NULL, NULL, NULL);
+	reg("ACPI: %u dispositivos del espacio de nombres, apuntados para el Administrador de dispositivos\n", n_disp);
+}
+
 /* deja correr la tarea hasta que esté quieta (fuera de los métodos del
  * equipo): como mucho, unos segundos */
 static void hasta_quieta(u32 ms)
@@ -311,6 +448,12 @@ int servicio_principal(void)
 			if (apm.fase != FASE_ERROR || mq_rsdp())
 				prepara_energia();
 			reg("ACPI: el núcleo ha puesto a la vista %u KB de memoria física\n", mq_puestos >> 10);
+		}
+		/* (dispositivos) una vez, con la tarea quieta y ya leída la batería */
+		if (preparado == 1 && apm.fase != FASE_EMPEZANDO && apm.fase != FASE_ERROR && tarea_quieta()) {
+			preparado = 2;
+			if (!tiene(args, "acpisindisp"))
+				apunta_dispositivos();
 		}
 		if (apm.lecturas != vistas || apm.fase != fase) {
 			vistas = apm.lecturas;

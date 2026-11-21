@@ -91,6 +91,7 @@ módulo Escritorio
     constante AM_OFICINA = 26                   ; un programa de la oficina (dato: cuál)
     constante AM_PROGRAMAS = 27                 ; «Programas y actualizaciones» (ACTUALIZ.BIN)
     constante AM_ACCESO = 28                    ; un programa de un paquete (accesos.cas; dato: cuál)
+    constante AM_DISPOSITIVOS = 29              ; (dispositivos) el Administrador de dispositivos (DISPOSIT.BIN)
     constante N_OFICINA = 4                     ; los que hay: Facturas, Pluma, Cuentas y Mirador
     constante AC_CERRAR_ACERCA = 11
     constante AC_ACERCA = 12
@@ -1180,6 +1181,8 @@ módulo Escritorio
         sino
             pulsador(v_config, 326, 174, 100, 30, "Verde", 0xA9BDD8, 0x7C95B8, AC_FONDO + 2)
         fin
+        ; (dispositivos) lo que hay en el equipo y qué lo lleva
+        pulsador(v_config, 14, 232, 290, 32, "Administrador de dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
         pulsador(v_config, 346, 232, 100, 32, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
         repintada(v_config, 0, 0, 460, 280)
     fin
@@ -1974,6 +1977,7 @@ módulo Escritorio
             caso AM_CONFIG: abre_config()
             caso AM_APAGAR: abre_apagar()
             caso AM_EQUIPO: lanza("\\EQUIPO.BIN", nulo)
+            caso AM_DISPOSITIVOS: lanza("\\DISPOSIT.BIN", nulo)       ; (dispositivos)
             caso AM_PROGRAMAS: lanza("\\ACTUALIZ.BIN", nulo)
             caso AM_ACCESO: si dato < n_accesos entonces lanza(programa_de(dato), argumentos_de(dato)) fin
             caso AM_OFICINA: lanza("\\HVPRUN.BIN", de_oficina(dato, cierto))
@@ -2143,7 +2147,12 @@ módulo Escritorio
                     si e.c yb BOTÓN_DERECHO <> 0 entonces
                         si k >= 0 entonces
                             menú_dato := nat32(k)
-                            abrir_emergente(x, yy, "Abrir", 0, 0, ME_ICONO)
+                            ; (dispositivos) Mi equipo, con sus «Propiedades»: el Administrador de dispositivos
+                            si iconos[k].acción = AM_EQUIPO entonces
+                                abrir_emergente(x, yy, "Abrir|Propiedades", 0, 0, ME_ICONO)
+                            sino
+                                abrir_emergente(x, yy, "Abrir", 0, 0, ME_ICONO)
+                            fin
                         sino
                             abrir_emergente(x, yy, "Configuración|Cambiar el tapiz|Organizar iconos|-|Acerca de Hispa-Pentium", 0, 0, ME_FONDO)
                         fin
@@ -2193,6 +2202,7 @@ módulo Escritorio
                 si opción = 0 entonces haz(menú_acción, menú_dato) fin
             caso ME_ICONO:
                 si opción = 0 y menú_dato < n_iconos entonces haz(iconos[menú_dato].acción, iconos[menú_dato].dato) fin
+                si opción = 1 y menú_dato < n_iconos entonces haz(AM_DISPOSITIVOS, 0) fin     ; (dispositivos)
             caso ME_USB:
                 si opción < n_usb y opción < 3 entonces quitar(usb_letras[opción]) fin
         fin

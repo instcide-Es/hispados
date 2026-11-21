@@ -1,0 +1,1016 @@
+; =============================================================================
+;  dispositivos.cas - lo que hay en el equipo y qué lo lleva, para el
+;  Administrador de dispositivos (DISPOSIT.BIN, udisposi.cas): la llamada
+;  155, de solo lectura, que da la lista de los dispositivos, y la 156, por
+;  la que los servicios del anillo 3 (ACPI.BIN) apuntan lo que han hallado.
+;
+;  Cada dispositivo es una ficha (Dispositivo, 320 octetos: la misma en
+;  llamadas.cas y en acpi/pentium/pentium.h): en qué bus está (PCI, USB,
+;  ACPI, «lo de siempre» de la placa, un disco, el procesador), sus números
+;  (fabricante, modelo, clase al estilo del PCI), de quién cuelga (su número
+;  en la lista), su estado, el controlador de Hispa-Pentium que lo lleva (un
+;  nombre: «ahci.cas», «RED.BIN»...), sus recursos (la IRQ, los puertos y la
+;  memoria, con su largo) y unos textos (su nombre, su marca y un detalle).
+;
+;  La lista se hace cada vez que se pide, mirando:
+;    - el bus PCI entero (también detrás de los puentes), cada función con
+;      sus zonas (los BAR, medidos una vez con las interrupciones cerradas y
+;      el aparato sin atender un momento, como hacen todos los sistemas) y lo
+;      que dicen de ella los controladores (ahci.cas, ata.cas, xhci/ehci/
+;      uhci.cas, video.cas, el servicio de red);
+;    - los aparatos USB de usb.cas (con su nombre y su marca, que se le
+;      preguntan una vez a cada uno), y qué módulo los atiende;
+;    - los discos de discos.cas, colgados de su controladora;
+;    - lo de siempre (el teclado y el ratón PS/2, el reloj de la CMOS, el
+;      reloj 8253, los 8259 y los puertos serie que dice la BIOS) y el
+;      procesador (CPUID);
+;    - el sistema ACPI (energia.cas) y lo que hayan apuntado los
+;      controladores y los servicios (apuntar(), la 156): lo de un servicio
+;      que se ha acabado ya no sale.
+;  Un controlador nuevo (los lectores de CD, una tarjeta) que quiera salir
+;  con su nombre llama a apuntar() con la ficha de lo que lleva (si es un
+;  aparato PCI, con bus = BUS_PCI y su dirección: se junta con la del PCI).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Dispositivos
+
+    importar Cpu, Pci, Tareas, Paginas, Mem32, Textos32, Formato, Multiboot, Ata, Ahci, Discos, Unidades, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Video, Raton, Red, Energia
+
+    ; ---- los buses ----
+    público constante BUS_PCI = 1
+    público constante BUS_USB = 2
+    público constante BUS_ACPI = 3
+    público constante BUS_PLACA = 4             ; lo de siempre de la placa (ISA): teclado PS/2, reloj, puertos serie
+    público constante BUS_DISCO = 5             ; un disco, colgado de su controladora
+    público constante BUS_CPU = 6               ; el procesador
+
+    ; ---- el estado ----
+    público constante EST_SIN_CONTROLADOR = 0   ; no hay controlador de Hispa-Pentium que lo lleve
+    público constante EST_FUNCIONA = 1
+    público constante EST_ERROR = 2             ; hay controlador, pero no ha podido con él
+    público constante EST_APAGADO = 3           ; se ha pedido que no se use («sinusb», «sinred», «sinacpi»)
+    público constante EST_NO_HACE_FALTA = 4     ; no necesita controlador (recursos de la placa, contenedores)
+
+    ; ---- los recursos ----
+    público constante REC_PUERTOS = 1
+    público constante REC_MEMORIA = 2
+    público constante REC_MEMORIA64 = 3         ; memoria por encima de los 4 GB (base: la parte baja)
+    público constante MAX_RECURSOS = 6
+    público constante SIN_PADRE = 0xFFFFFFFF
+    público constante SIN_IRQ = 0xFFFFFFFF
+
+    público tipo Recurso = estructura
+        clase, base, largo: nat32               ; (largo 0: no se sabe)
+    fin
+
+    ; la ficha de un dispositivo (320 octetos; la misma en llamadas.cas y en
+    ; acpi/pentium/pentium.h: si cambia una, las otras)
+    público tipo Dispositivo = estructura
+        bus: nat32                              ; BUS_...
+        dirección: nat32                        ; PCI: bus << 16, aparato << 11, función << 8; USB: su número en usb.cas; disco: el de discos.cas
+        padre: nat32                            ; el número en la lista del que cuelga (SIN_PADRE)
+        fabricante, producto: nat32             ; PCI y USB: los dos números (VID y PID)
+        clase: nat32                            ; 0xCCSSII, como en el PCI (en USB, la de su interfaz)
+        subsistema: nat32                       ; PCI: el fabricante (abajo) y el modelo (arriba) del subsistema
+        revisión: nat32
+        estado: nat32                           ; EST_...
+        irq: nat32                              ; SIN_IRQ: ninguna
+        n_recursos: nat32
+        dato1, dato2, dato3: nat32              ; según el bus (disco: sus sectores; USB: la velocidad; PCI: el pin de la interrupción)
+        recursos: arreglo [MAX_RECURSOS] de Recurso
+        pnp: arreglo [16] de byte               ; el nombre PnP (ACPI _HID: «PNP0303»)
+        controlador: arreglo [16] de byte       ; quién lo lleva («ahci.cas», «RED.BIN»; vacío: nadie)
+        nombre: arreglo [48] de byte            ; lo que dice el propio aparato o su controlador (el modelo, la ruta ACPI)
+        marca: arreglo [32] de byte             ; su fabricante, si lo dice él (USB, la batería)
+        detalle: arreglo [80] de byte           ; un poco más (los puertos, las letras de sus unidades, la IP...)
+    fin
+
+    constante NO_VALE = 0xFFFFFFF9              ; (el de usuario.cas)
+    constante MAX_APUNTADOS = 64
+    constante MAX_PCI = 64
+
+    variable apuntados: arreglo [MAX_APUNTADOS] de Dispositivo
+    variable dueños: arreglo [MAX_APUNTADOS] de nat32   ; 0: libre; 1: el núcleo; si no, la tarea más uno
+    variable cerrojo: Cerrojo
+
+    ; lo que miden las zonas de cada aparato PCI (se mide una vez)
+    variable medidos: arreglo [MAX_PCI] de nat32        ; su dirección más uno (0: libre)
+    variable tallas: arreglo [MAX_PCI] de arreglo [6] de nat32
+
+    ; los nombres de los aparatos USB, preguntados una vez a cada uno
+    variable usb_clave: arreglo [MAX_APARATOS] de nat32 ; VID, PID y dirección USB juntos (0: sin preguntar)
+    variable usb_nombre: arreglo [MAX_APARATOS] de arreglo [48] de byte
+    variable usb_marca: arreglo [MAX_APARATOS] de arreglo [32] de byte
+
+    ; mientras se hace la lista: adónde va y cuántas van
+    variable destino: puntero a Dispositivo
+    variable cabe, n: nat32
+    variable uno: Dispositivo                   ; la que se está llenando
+    variable dd: arreglo [6] de nat32
+    variable cpu_r: arreglo [4] de nat32
+    variable buf: arreglo [256] de byte
+    variable vga_vista: bool
+
+    ; -------------------------------------------------------------------------
+    ;  Los puertos (leer el 8042 y la zona de datos de la BIOS)
+    ; -------------------------------------------------------------------------
+    función entra8(p: nat32): nat32
+        ensamblador
+            mov edx, {p}
+            xor eax, eax
+            in al, dx
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Apuntar (los controladores y los servicios)
+    ; -------------------------------------------------------------------------
+    ; apunta la ficha d como de «dueño» (1: el núcleo; una tarea: su número
+    ; más uno). Si ya había una suya del mismo bus y dirección (y, en ACPI,
+    ; del mismo nombre), la cambia. Falso si no cabe.
+    público función apuntar(ref d: Dispositivo, dueño: nat32): bool
+        variable i, libre: nat32
+        libre := MAX_APUNTADOS
+        tomar(cerrojo)
+        para i desde 0 hasta MAX_APUNTADOS - 1 hacer
+            si dueños[i] = dueño y apuntados[i].bus = d.bus y apuntados[i].dirección = d.dirección y (d.bus <> BUS_ACPI o iguales(apuntados[i].nombre, d.nombre)) entonces
+                libre := i
+                romper
+            fin
+            si dueños[i] = 0 y libre = MAX_APUNTADOS entonces libre := i fin
+        fin
+        si libre = MAX_APUNTADOS entonces
+            soltar(cerrojo)
+            devolver falso
+        fin
+        copiar_memoria(puntero(dirección(apuntados[libre])), puntero(dirección(d)), tamaño(Dispositivo))
+        dueños[libre] := dueño
+        soltar(cerrojo)
+        devolver cierto
+    fin
+
+    ; olvida todo lo apuntado por ese dueño
+    público función olvidar(dueño: nat32)
+        variable i: nat32
+        tomar(cerrojo)
+        para i desde 0 hasta MAX_APUNTADOS - 1 hacer
+            si dueños[i] = dueño entonces dueños[i] := 0 fin
+        fin
+        soltar(cerrojo)
+    fin
+
+    ; ¿sigue vivo el dueño de lo apuntado?
+    función vivo(dueño: nat32): bool
+        variable t: puntero a Tarea
+        si dueño = 0 entonces devolver falso fin
+        si dueño = 1 entonces devolver cierto fin
+        t := tarea_de(dueño - 1)
+        devolver t <> nulo y t.estado <> ACABADA
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Ayudantes para llenar la ficha
+    ; -------------------------------------------------------------------------
+    función empieza(bus: nat32, dir: nat32)
+        llenar(puntero(dirección(uno)), tamaño(Dispositivo), 0)
+        uno.bus := bus
+        uno.dirección := dir
+        uno.padre := SIN_PADRE
+        uno.irq := SIN_IRQ
+    fin
+
+    función recurso(clase: nat32, base: nat32, largo: nat32)
+        si uno.n_recursos >= MAX_RECURSOS entonces devolver fin
+        uno.recursos[uno.n_recursos].clase := clase
+        uno.recursos[uno.n_recursos].base := base
+        uno.recursos[uno.n_recursos].largo := largo
+        uno.n_recursos := uno.n_recursos + 1
+    fin
+
+    función pon(t: puntero a byte, origen: puntero a byte, cabe_: nat32)
+        copiar_hasta(t, origen, cabe_)
+    fin
+
+    función lleva(estado: nat32, controlador: puntero a byte)
+        uno.estado := estado
+        copiar_hasta(uno.controlador, controlador, 16)
+    fin
+
+    ; la ficha, a la lista (si cabe); da su número
+    función añade(): nat32
+        variable k: nat32
+        k := n
+        si n < cabe entonces copiar_memoria(puntero(nat32(destino) + n * tamaño(Dispositivo)), puntero(dirección(uno)), tamaño(Dispositivo)) fin
+        n := n + 1
+        devolver k
+    fin
+
+    ; la ficha número k de la lista (nulo si no cabía)
+    función ficha(k: nat32): puntero a Dispositivo
+        si k >= n o k >= cabe entonces devolver nulo fin
+        devolver puntero(nat32(destino) + k * tamaño(Dispositivo))
+    fin
+
+    ; el número en la lista del aparato PCI «a» (SIN_PADRE si no está)
+    función de_pci(a: nat32): nat32
+        variable k: nat32
+        variable f: puntero a Dispositivo
+        para k desde 0 hasta n - 1 hacer
+            f := ficha(k)
+            si f <> nulo y f.bus = BUS_PCI y f.dirección = a entonces devolver k fin
+        fin
+        devolver SIN_PADRE
+    fin
+
+    función de_bus(bus: nat32, dir: nat32): nat32
+        variable k: nat32
+        variable f: puntero a Dispositivo
+        para k desde 0 hasta n - 1 hacer
+            f := ficha(k)
+            si f <> nulo y f.bus = bus y f.dirección = dir entonces devolver k fin
+        fin
+        devolver SIN_PADRE
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El PCI
+    ; -------------------------------------------------------------------------
+    ; lo que mide la zona del registro «reg» (0x10, 0x14...) del aparato a:
+    ; se escriben unos y se lee lo que queda (con el aparato sin atender en
+    ; la memoria ni en los puertos, y las interrupciones cerradas: nadie lo
+    ; toca mientras tanto), y se pone como estaba
+    función mide_zona(a: nat32, reg: nat32): nat32
+        variable b, orden, v, m, alto_v, alto_m: nat32
+        b := sin_interrupciones()
+        orden := pci_leer(a, PCI_ORDEN)
+        pci_escribir(a, PCI_ORDEN, orden yb 0xFFFFFFFC)
+        v := pci_leer(a, reg)
+        pci_escribir(a, reg, 0xFFFFFFFF)
+        m := pci_leer(a, reg)
+        pci_escribir(a, reg, v)
+        alto_m := 0xFFFFFFFF
+        si v yb 7 = 4 y reg < 0x24 entonces
+            alto_v := pci_leer(a, reg + 4)
+            pci_escribir(a, reg + 4, 0xFFFFFFFF)
+            alto_m := pci_leer(a, reg + 4)
+            pci_escribir(a, reg + 4, alto_v)
+        fin
+        pci_escribir(a, PCI_ORDEN, orden yb 0xFFFF)
+        reponer(b)
+        si m = 0 o m = 0xFFFFFFFF y v = 0xFFFFFFFF entonces devolver 0 fin
+        si v yb 1 <> 0 entonces
+            m := (m yb 0xFFFFFFFC) ob 0xFFFF0000
+            devolver (nob m) + 1
+        fin
+        m := m yb 0xFFFFFFF0
+        si m = 0 entonces devolver 0 fin            ; (de 4 GB o más: no cabe en 32 bits)
+        si alto_m <> 0xFFFFFFFF entonces devolver 0 fin
+        devolver (nob m) + 1
+    fin
+
+    ; las zonas del aparato a, a la ficha (medidas la primera vez)
+    función zonas(a: nat32, cuántas: nat32)
+        variable i, k, reg, v, libre: nat32
+        k := MAX_PCI
+        libre := MAX_PCI
+        para i desde 0 hasta MAX_PCI - 1 hacer
+            si medidos[i] = a + 1 entonces
+                k := i
+                romper
+            fin
+            si medidos[i] = 0 y libre = MAX_PCI entonces libre := i fin
+        fin
+        si k = MAX_PCI y libre < MAX_PCI entonces
+            k := libre
+            medidos[k] := a + 1
+            i := 0
+            mientras i < cuántas hacer
+                tallas[k][i] := mide_zona(a, PCI_BAR0 + i * 4)
+                v := pci_leer(a, PCI_BAR0 + i * 4)
+                si v yb 7 = 4 y i + 1 < cuántas entonces
+                    tallas[k][i + 1] := 0
+                    i := i + 1
+                fin
+                i := i + 1
+            fin
+        fin
+        i := 0
+        mientras i < cuántas hacer
+            reg := PCI_BAR0 + i * 4
+            v := pci_leer(a, reg)
+            si v yb 1 <> 0 entonces
+                si v yb 0xFFFC <> 0 entonces
+                    si k < MAX_PCI entonces recurso(REC_PUERTOS, v yb 0xFFFC, tallas[k][i]) sino recurso(REC_PUERTOS, v yb 0xFFFC, 0) fin
+                fin
+            sino si v yb 0xFFFFFFF0 <> 0 o (v yb 7 = 4 y i + 1 < cuántas y pci_leer(a, reg + 4) <> 0) entonces
+                si v yb 7 = 4 y i + 1 < cuántas y pci_leer(a, reg + 4) <> 0 entonces
+                    recurso(REC_MEMORIA64, v yb 0xFFFFFFF0, 0)
+                sino si k < MAX_PCI entonces
+                    recurso(REC_MEMORIA, v yb 0xFFFFFFF0, tallas[k][i])
+                sino
+                    recurso(REC_MEMORIA, v yb 0xFFFFFFF0, 0)
+                fin
+            fin
+            si v yb 1 = 0 y v yb 7 = 4 entonces i := i + 1 fin
+            i := i + 1
+        fin
+    fin
+
+    ; ¿va la memoria de la pantalla en una de las zonas de la ficha?
+    función lleva_pantalla(): bool
+        variable i: nat32
+        si no hay_pantalla o pantalla_física = 0 entonces devolver falso fin
+        para i desde 1 hasta uno.n_recursos hacer
+            si uno.recursos[i - 1].clase = REC_MEMORIA y pantalla_física >= uno.recursos[i - 1].base entonces
+                si uno.recursos[i - 1].largo = 0 o pantalla_física - uno.recursos[i - 1].base < uno.recursos[i - 1].largo entonces devolver cierto fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; ¿se ha pedido eso en la línea del cargador?
+    función pedido(t: puntero a byte): bool
+        devolver buscar(línea_del_cargador(), t) <> nulo
+    fin
+
+    ; lo que dicen de ese aparato los controladores del núcleo
+    función quién_lo_lleva(a: nat32)
+        variable c, k, sub: nat32
+        c := uno.clase >> 8
+        sub := uno.clase >> 16
+        ; los puentes (al procesador, ISA/LPC, PCI): los lleva el propio bus
+        si sub = 0x06 entonces
+            lleva(EST_FUNCIONA, "pci.cas")
+            devolver
+        fin
+        ; SATA (AHCI)
+        si uno.clase = 0x010601 entonces
+            si hay_ahci y Ahci.aparato = a entonces
+                lleva(EST_FUNCIONA, "ahci.cas")
+                dd[0] := Ahci.cuántos
+                dd[1] := Ahci.puertos_con_algo
+                formatear(uno.detalle, 80, "%u discos SATA; puertos con algo: %X", dd)
+            sino si hay_ahci entonces
+                lleva(EST_SIN_CONTROLADOR, "")
+                Textos32.copiar(uno.detalle, "ahci.cas lleva solo una controladora (otra)")
+            sino si pedido("sindisco") entonces
+                lleva(EST_APAGADO, "ahci.cas")
+                Textos32.copiar(uno.detalle, "«sindisco» en la línea del cargador")
+            sino
+                lleva(EST_ERROR, "ahci.cas")
+                Textos32.copiar(uno.detalle, "la controladora no se ha dejado poner en marcha")
+            fin
+            devolver
+        fin
+        ; IDE: ata.cas lleva el canal primario, por sus puertos de siempre
+        si c = 0x0101 entonces
+            si pedido("sindisco") entonces
+                lleva(EST_APAGADO, "ata.cas")
+            sino
+                lleva(EST_FUNCIONA, "ata.cas")
+                k := 0
+                si Ata.discos[0].hay entonces k := k + 1 fin
+                si Ata.discos[1].hay entonces k := k + 1 fin
+                dd[0] := k
+                formatear(uno.detalle, 80, "el canal primario (1F0h, IRQ 14): %u discos", dd)
+            fin
+            devolver
+        fin
+        ; USB
+        si uno.clase = 0x0C0330 o uno.clase = 0x0C0320 o uno.clase = 0x0C0300 entonces
+            k := 0
+            si uno.clase = 0x0C0330 entonces
+                mientras k < Xhci.cuántas y xhcis[k].pci <> a hacer k := k + 1 fin
+                si k < Xhci.cuántas entonces
+                    lleva(EST_FUNCIONA, "xhci.cas")
+                    dd[0] := xhcis[k].puertos
+                    formatear(uno.detalle, 80, "USB 3 (xHCI), %u puertos", dd)
+                    devolver
+                fin
+                Textos32.copiar(uno.controlador, "xhci.cas")
+            sino si uno.clase = 0x0C0320 entonces
+                mientras k < Ehci.cuántas y ehcis[k].pci <> a hacer k := k + 1 fin
+                si k < Ehci.cuántas entonces
+                    lleva(EST_FUNCIONA, "ehci.cas")
+                    dd[0] := ehcis[k].puertos
+                    dd[1] := ehcis[k].cedidos
+                    si ehcis[k].cedidos <> 0 entonces
+                        formatear(uno.detalle, 80, "USB 2.0 (EHCI), %u puertos (%u cedidos a las compañeras)", dd)
+                    sino
+                        formatear(uno.detalle, 80, "USB 2.0 (EHCI), %u puertos", dd)
+                    fin
+                    devolver
+                fin
+                Textos32.copiar(uno.controlador, "ehci.cas")
+            sino
+                mientras k < Uhci.cuántas y uhcis[k].pci <> a hacer k := k + 1 fin
+                si k < Uhci.cuántas entonces
+                    lleva(EST_FUNCIONA, "uhci.cas")
+                    dd[0] := uhcis[k].puertos
+                    formatear(uno.detalle, 80, "USB 1.1 (UHCI), %u puertos", dd)
+                    devolver
+                fin
+                Textos32.copiar(uno.controlador, "uhci.cas")
+            fin
+            si pedido("sinusb") entonces
+                uno.estado := EST_APAGADO
+                Textos32.copiar(uno.detalle, "«sinusb» en la línea del cargador")
+            sino
+                uno.estado := EST_ERROR
+                Textos32.copiar(uno.detalle, "la controladora no se ha dejado tomar")
+            fin
+            devolver
+        fin
+        ; la pantalla: la tarjeta que tiene la memoria de la pantalla
+        si sub = 0x03 entonces
+            si lleva_pantalla() entonces
+                lleva(EST_FUNCIONA, "video.cas")
+                dd[0] := nat32(pantalla.ancho)
+                dd[1] := nat32(pantalla.alto)
+                dd[2] := bits_pantalla
+                si por_bochs entonces
+                    formatear(uno.detalle, 80, "%u x %u, %u bits; el modo lo pone el núcleo (VBE de Bochs)", dd)
+                sino
+                    formatear(uno.detalle, 80, "%u x %u, %u bits; el modo lo ha puesto el cargador", dd)
+                fin
+            fin
+            ; sin modo gráfico, la pantalla de texto de siempre (la primera VGA)
+            si no hay_pantalla y uno.clase = 0x030000 y no vga_vista entonces
+                vga_vista := cierto
+                lleva(EST_FUNCIONA, "consola.cas")
+                Textos32.copiar(uno.detalle, "la pantalla de texto de siempre (80 x 25, VGA)")
+            fin
+            devolver
+        fin
+        ; la red: la tarjeta del servicio de red (RED.BIN)
+        si sub = 0x02 entonces
+            si Red.hay_servicio() y aparato_de_red() = a entonces
+                lleva(EST_FUNCIONA, "RED.BIN")
+                según nat16(estado_red)
+                    caso RED_SIN_CABLE: Textos32.copiar(uno.detalle, "sin cable (no hay enlace)")
+                    caso RED_BUSCANDO: Textos32.copiar(uno.detalle, "pidiendo la IP (DHCP)")
+                    caso RED_CONECTADA:
+                        dd[0] := ip_red yb 0xFF
+                        dd[1] := (ip_red >> 8) yb 0xFF
+                        dd[2] := (ip_red >> 16) yb 0xFF
+                        dd[3] := ip_red >> 24
+                        formatear(uno.detalle, 80, "conectada: IP %u.%u.%u.%u", dd)
+                fin
+            sino si apagada entonces
+                lleva(EST_APAGADO, "RED.BIN")
+                Textos32.copiar(uno.detalle, "«sinred» en la línea del cargador")
+            sino si Red.hay_servicio() y estado_red = RED_SIN_TARJETA entonces
+                lleva(EST_SIN_CONTROLADOR, "")
+            sino si no Red.hay_servicio() y no sin_tarjeta entonces
+                lleva(EST_SIN_CONTROLADOR, "")
+                Textos32.copiar(uno.detalle, "el servicio de red (RED.BIN) no está en marcha")
+            fin
+            devolver
+        fin
+    fin
+
+    ; todo el bus PCI
+    función mira_pci()
+        variable a, cab, k, bus2, c: nat32
+        variable puentes: arreglo [32] de nat32     ; el número en la lista del puente de cada bus
+        para k desde 0 hasta 31 hacer puentes[k] := SIN_PADRE fin
+        a := pci_busca(0, 0, NO_HAY_PCI)
+        mientras a <> NO_HAY_PCI hacer
+            empieza(BUS_PCI, a)
+            uno.fabricante := pci_leer(a, 0) yb 0xFFFF
+            uno.producto := pci_leer(a, 0) >> 16
+            c := pci_leer(a, PCI_CLASE)
+            uno.clase := c >> 8
+            uno.revisión := c yb 0xFF
+            cab := pci_leer8(a, 0x0E) yb 0x7F
+            si cab = 0 entonces uno.subsistema := pci_leer(a, 0x2C) fin
+            si cab = 2 entonces uno.subsistema := pci_leer(a, 0x40) fin
+            k := pci_leer(a, PCI_IRQ)
+            uno.dato1 := (k >> 8) yb 0xFF               ; el pin (1 = INTA#; 0: ninguno)
+            si uno.dato1 <> 0 y k yb 0xFF <> 0xFF y k yb 0xFF <> 0 entonces uno.irq := k yb 0xFF fin
+            si cab = 0 entonces zonas(a, 6) sino si cab = 1 entonces zonas(a, 2) sino zonas(a, 1) fin
+            uno.padre := puentes[(a >> 16) yb 31]
+            quién_lo_lleva(a)
+            k := añade()
+            ; un puente PCI-PCI: lo de su bus de detrás cuelga de él
+            si cab = 1 entonces
+                bus2 := pci_leer8(a, 0x19)
+                si bus2 < 32 entonces puentes[bus2] := k fin
+            fin
+            a := pci_busca(0, 0, a)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El USB
+    ; -------------------------------------------------------------------------
+    ; un texto del aparato i (un descriptor de cadena, en UTF-16), a la
+    ; página 437 (lo que no está en ella, «?»)
+    función cadena(i: nat32, índice: nat32, t: puntero a byte, cabe_: nat32)
+        variable r: ent32
+        variable k, m, c, idioma: nat32
+        t[0] := 0
+        si índice = 0 entonces devolver fin
+        idioma := 0x0409
+        r := Usb.control(i, 0x80, PIDE_DESCRIPTOR, 0x0300 ob índice, idioma, dirección(buf[0]), 255)
+        si r < 4 o buf[1] <> 3 entonces
+            ; el idioma que diga él (su cadena 0)
+            r := Usb.control(i, 0x80, PIDE_DESCRIPTOR, 0x0300, 0, dirección(buf[0]), 255)
+            si r < 4 entonces devolver fin
+            idioma := buf[2] ob (nat32(buf[3]) << 8)
+            r := Usb.control(i, 0x80, PIDE_DESCRIPTOR, 0x0300 ob índice, idioma, dirección(buf[0]), 255)
+            si r < 4 o buf[1] <> 3 entonces devolver fin
+        fin
+        m := nat32(r)
+        si buf[0] < m entonces m := buf[0] fin
+        k := 2
+        c := 0
+        mientras k + 1 < m y c + 1 < cabe_ hacer
+            t[c] := a_437(buf[k] ob (nat32(buf[k + 1]) << 8))
+            c := c + 1
+            k := k + 2
+        fin
+        t[c] := 0
+        ; sin espacios al final
+        mientras c > 0 y t[c - 1] = ' ' hacer
+            c := c - 1
+            t[c] := 0
+        fin
+    fin
+
+    función a_437(u: nat32): byte
+        si u >= 32 y u < 127 entonces devolver u fin
+        según nat16(u)
+            caso 0xE1: devolver 0xA0       ; á
+            caso 0xE9: devolver 0x82
+            caso 0xED: devolver 0xA1
+            caso 0xF3: devolver 0xA2
+            caso 0xFA: devolver 0xA3
+            caso 0xF1: devolver 0xA4       ; ñ
+            caso 0xD1: devolver 0xA5
+            caso 0xFC: devolver 0x81       ; ü
+            caso 0xE7: devolver 0x87       ; ç
+            caso 0xC9: devolver 0x90       ; É
+            caso 0xAE: devolver 'R'        ; ®
+            caso 0x2122: devolver ' '      ; ™
+        fin
+        devolver '?'
+    fin
+
+    ; el nombre y la marca del aparato i (preguntados una vez)
+    función nombres_usb(i: nat32)
+        variable clave: nat32
+        variable r: ent32
+        variable desc: arreglo [20] de byte
+        clave := (aparatos[i].fabricante << 16) xob aparatos[i].producto xob (aparatos[i].dir << 8) ob 1
+        si usb_clave[i] = clave entonces devolver fin
+        usb_nombre[i][0] := 0
+        usb_marca[i][0] := 0
+        r := Usb.control(i, 0x80, PIDE_DESCRIPTOR, 0x0100, 0, dirección(desc[0]), 18)
+        si r >= 16 entonces
+            cadena(i, desc[14], usb_marca[i], 32)
+            cadena(i, desc[15], usb_nombre[i], 48)
+        fin
+        usb_clave[i] := clave
+    fin
+
+    función nombre_velocidad(v: nat32): puntero a byte
+        según nat16(v)
+            caso V_BAJA: devolver "baja (1,5 Mbit/s)"
+            caso V_PLENA: devolver "plena (12 Mbit/s)"
+            caso V_ALTA: devolver "alta (480 Mbit/s)"
+        fin
+        devolver "súper (5 Gbit/s)"
+    fin
+
+    ; la controladora del aparato i: su número en la lista
+    función controladora_de(i: nat32): nat32
+        variable hc: nat32
+        hc := aparatos[i].hc
+        si aparatos[i].hc_clase = HC_XHCI y hc < Xhci.cuántas entonces devolver de_pci(xhcis[hc].pci) fin
+        si aparatos[i].hc_clase = HC_EHCI y hc < Ehci.cuántas entonces devolver de_pci(ehcis[hc].pci) fin
+        si aparatos[i].hc_clase = HC_UHCI y hc < Uhci.cuántas entonces devolver de_pci(uhcis[hc].pci) fin
+        devolver SIN_PADRE
+    fin
+
+    función nombre_hc(c: nat32): puntero a byte
+        según nat16(c)
+            caso HC_XHCI: devolver "xHCI"
+            caso HC_EHCI: devolver "EHCI"
+        fin
+        devolver "UHCI"
+    fin
+
+    función mira_usb()
+        variable i, k, ifz, h, primero: nat32
+        variable f: puntero a Dispositivo
+        primero := n
+        para i desde 0 hasta MAX_APARATOS - 1 hacer
+            si aparatos[i].usado y no aparatos[i].ido entonces
+                empieza(BUS_USB, i)
+                uno.fabricante := aparatos[i].fabricante
+                uno.producto := aparatos[i].producto
+                uno.dato1 := aparatos[i].velocidad
+                uno.dato2 := aparatos[i].n_interfaces
+                uno.dato3 := aparatos[i].dir
+                ; la clase: la de la primera interfaz que no sea un concentrador
+                ifz := 0
+                si aparatos[i].es_concentrador entonces
+                    uno.clase := 0x090000
+                sino si aparatos[i].n_interfaces > 0 entonces
+                    uno.clase := (aparatos[i].interfaces[0].clase << 16) ob (aparatos[i].interfaces[0].subclase << 8) ob aparatos[i].interfaces[0].protocolo
+                sino
+                    uno.clase := aparatos[i].clase << 16
+                fin
+                nombres_usb(i)
+                pon(uno.nombre, usb_nombre[i], 48)
+                pon(uno.marca, usb_marca[i], 32)
+                ; quién lo lleva
+                si aparatos[i].es_concentrador entonces
+                    lleva(EST_FUNCIONA, "usb.cas")
+                    dd[0] := aparatos[i].puertos
+                    formatear(uno.detalle, 80, "concentrador de %u puertos", dd)
+                sino
+                    h := Usbhid.lleva(i)
+                    si h = 1 entonces
+                        lleva(EST_FUNCIONA, "usbhid.cas")
+                        Textos32.copiar(uno.detalle, "teclado")
+                    sino si h = 2 entonces
+                        lleva(EST_FUNCIONA, "usbhid.cas")
+                        Textos32.copiar(uno.detalle, "ratón")
+                    sino si h = 3 entonces
+                        lleva(EST_FUNCIONA, "usbhid.cas")
+                        Textos32.copiar(uno.detalle, "teclado y ratón")
+                    sino
+                        para k desde 0 hasta MAX_MEMORIAS - 1 hacer
+                            si memorias[k].hay y memorias[k].aparato = i entonces
+                                lleva(EST_FUNCIONA, "usbalm.cas")
+                                dd[0] := memorias[k].sectores div 2048
+                                formatear(uno.detalle, 80, "almacenamiento: %u MB", dd)
+                            fin
+                        fin
+                    fin
+                fin
+                ; dónde está
+                dd[0] := nat32(dirección(uno.detalle[0]))
+                dd[1] := aparatos[i].puerto_raíz
+                dd[2] := nat32(nombre_hc(aparatos[i].hc_clase))
+                dd[3] := nat32(nombre_velocidad(aparatos[i].velocidad))
+                si aparatos[i].padre <> SIN_APARATO entonces
+                    dd[1] := aparatos[i].puerto
+                    dd[2] := aparatos[i].padre
+                    si uno.detalle[0] <> 0 entonces
+                        formatear(buf, 200, "%s; puerto %u del concentrador %u; velocidad %s", dd)
+                    sino
+                        formatear(buf, 200, "puerto %u del concentrador %u; velocidad %s", puntero(dirección(dd[1])))
+                    fin
+                sino
+                    si uno.detalle[0] <> 0 entonces
+                        formatear(buf, 200, "%s; puerto %u (%s); velocidad %s", dd)
+                    sino
+                        formatear(buf, 200, "puerto %u (%s); velocidad %s", puntero(dirección(dd[1])))
+                    fin
+                fin
+                copiar_hasta(uno.detalle, buf, 80)
+                uno.padre := controladora_de(i)
+                añade()
+            fin
+        fin
+        ; los que cuelgan de un concentrador, de él
+        para k desde primero hasta n - 1 hacer
+            f := ficha(k)
+            si f <> nulo y f.dirección < MAX_APARATOS entonces
+                i := f.dirección
+                si aparatos[i].padre <> SIN_APARATO y aparatos[i].padre < MAX_APARATOS entonces
+                    h := de_bus(BUS_USB, aparatos[i].padre)
+                    si h <> SIN_PADRE entonces f.padre := h fin
+                fin
+            fin
+        fin
+        ; y lo que no se ha dejado enumerar
+        para i desde 1 hasta n_fallos hacer
+            empieza(BUS_USB, 0x100 + i)
+            lleva(EST_ERROR, "usb.cas")
+            Textos32.copiar(uno.nombre, "Aparato USB que no se deja enumerar")
+            Textos32.copiar(uno.detalle, "no contesta como debe al enumerarlo (se ha apuntado en el registro)")
+            añade()
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los discos
+    ; -------------------------------------------------------------------------
+    función mira_discos()
+        variable d, u, k, p: nat32
+        variable f: puntero a Dispositivo
+        para d desde 0 hasta MAX_DISCOS - 1 hacer
+            si Discos.discos[d].hay entonces
+                empieza(BUS_DISCO, d)
+                uno.dato1 := Discos.discos[d].sectores
+                uno.dato2 := Discos.discos[d].clase
+                pon(uno.nombre, Discos.discos[d].modelo, 48)
+                p := SIN_PADRE
+                si Discos.discos[d].clase = DE_ATA entonces
+                    lleva(EST_FUNCIONA, "ata.cas")
+                    para k desde 0 hasta n - 1 hacer
+                        f := ficha(k)
+                        si p = SIN_PADRE y f <> nulo entonces
+                            si f.bus = BUS_PCI y (f.clase >> 8) = 0x0101 entonces p := k fin
+                        fin
+                    fin
+                sino si Discos.discos[d].clase = DE_AHCI entonces
+                    lleva(EST_FUNCIONA, "ahci.cas")
+                    p := de_pci(Ahci.aparato)
+                sino
+                    lleva(EST_FUNCIONA, "usbalm.cas")
+                    si Discos.discos[d].cuál < MAX_MEMORIAS entonces p := de_bus(BUS_USB, memorias[Discos.discos[d].cuál].aparato) fin
+                fin
+                uno.padre := p
+                ; sus unidades
+                buf[0] := 0
+                para u desde 0 hasta MAX_UNIDADES - 1 hacer
+                    si unidades[u].hay y unidades[u].clase = U_FAT y unidades[u].disco = d entonces
+                        si buf[0] <> 0 entonces concatenar(buf, " ") fin
+                        añadir_car(buf, unidades[u].letra)
+                        añadir_car(buf, ':')
+                    fin
+                fin
+                dd[0] := Discos.discos[d].sectores div 2048
+                dd[1] := nat32(dirección(buf[0]))
+                dd[2] := nat32("de solo lectura")
+                si Discos.discos[d].escribible entonces dd[2] := nat32("se puede escribir") fin
+                si buf[0] <> 0 entonces
+                    formatear(uno.detalle, 80, "%u MB; unidades %s; %s", dd)
+                sino
+                    dd[1] := dd[2]
+                    formatear(uno.detalle, 80, "%u MB; sin ninguna unidad FAT; %s", dd)
+                fin
+                añade()
+            fin
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo de siempre de la placa, el procesador y ACPI
+    ; -------------------------------------------------------------------------
+    función de_placa(clase: nat32, pnp: puntero a byte, nombre: puntero a byte, controlador: puntero a byte, irq: nat32)
+        empieza(BUS_PLACA, n)
+        uno.clase := clase
+        pon(uno.pnp, pnp, 16)
+        pon(uno.nombre, nombre, 48)
+        lleva(EST_FUNCIONA, controlador)
+        uno.irq := irq
+    fin
+
+    función mira_placa()
+        variable k, base: nat32
+        variable bda: puntero a nat16
+        ; el 8042 (sin él, un Mac o un PC «sin legado», su puerto lee FFh)
+        si entra8(0x64) <> 0xFF entonces
+            de_placa(0x090000, "PNP0303", "Teclado PS/2", "consola.cas", 1)
+            recurso(REC_PUERTOS, 0x60, 1)
+            recurso(REC_PUERTOS, 0x64, 1)
+            añade()
+            si ratón_ps2 entonces
+                de_placa(0x090200, "PNP0F13", "Ratón PS/2", "raton.cas", 12)
+                recurso(REC_PUERTOS, 0x60, 1)
+                recurso(REC_PUERTOS, 0x64, 1)
+                añade()
+            fin
+        fin
+        de_placa(0x080300, "PNP0B00", "Reloj de la CMOS (fecha y hora)", "fecha.cas", 8)
+        recurso(REC_PUERTOS, 0x70, 2)
+        Textos32.copiar(uno.detalle, "la fecha y la hora del PC, con su pila")
+        añade()
+        de_placa(0x080200, "PNP0100", "Reloj del sistema (8253)", "cpu.cas", 0)
+        recurso(REC_PUERTOS, 0x40, 4)
+        Textos32.copiar(uno.detalle, "100 tics por segundo: reparte el procesador")
+        añade()
+        de_placa(0x080000, "PNP0000", "Controladoras de interrupciones (8259)", "cpu.cas", SIN_IRQ)
+        recurso(REC_PUERTOS, 0x20, 2)
+        recurso(REC_PUERTOS, 0xA0, 2)
+        añade()
+        ; los puertos serie, como los dejó la BIOS (su zona de datos, en 400h)
+        bda := puntero(0x400)
+        para k desde 0 hasta 3 hacer
+            base := bda[k]
+            si base <> 0 y base < 0x1000 entonces
+                dd[0] := k + 1
+                formatear(buf, 48, "Puerto serie COM%u", dd)
+                si k = 0 entonces
+                    de_placa(0x070002, "PNP0501", buf, "consola.cas", 4)
+                    Textos32.copiar(uno.detalle, "lo que dice el núcleo sale por aquí (su registro)")
+                sino
+                    de_placa(0x070002, "PNP0501", buf, "", 3)
+                    uno.estado := EST_SIN_CONTROLADOR
+                    si k = 2 entonces uno.irq := 4 fin
+                fin
+                recurso(REC_PUERTOS, base, 8)
+                añade()
+            fin
+        fin
+    fin
+
+    función cpuid(hoja: nat32)
+        ensamblador
+            mov eax, {hoja}
+            xor ecx, ecx
+            db 0x0F, 0xA2                       ; cpuid (NASM va con «cpu 386»)
+            mov {cpu_r}, eax
+            mov {cpu_r+4}, ebx
+            mov {cpu_r+8}, ecx
+            mov {cpu_r+12}, edx
+        fin
+    fin
+
+    ; ¿tiene el procesador la instrucción CPUID? (el bit 21 de EFLAGS se deja cambiar)
+    función hay_cpuid(): bool
+        variable r: nat32
+        ensamblador
+            pushfd
+            pop eax
+            mov ecx, eax
+            xor eax, 0x200000
+            push eax
+            popfd
+            pushfd
+            pop eax
+            push ecx
+            popfd
+            xor eax, ecx
+            and eax, 0x200000
+            mov {r}, eax
+        fin
+        devolver r <> 0
+    fin
+
+    función mira_procesador()
+        variable máx, k, j, fam, mod_, paso_: nat32
+        variable p: puntero a nat32
+        variable fab: arreglo [16] de byte
+        empieza(BUS_CPU, 0)
+        uno.clase := 0x0B0000
+        lleva(EST_FUNCIONA, "cpu.cas")
+        si no hay_cpuid() entonces
+            Textos32.copiar(uno.nombre, "Procesador sin CPUID (un 486 o anterior)")
+            añade()
+            devolver
+        fin
+        cpuid(0)
+        máx := cpu_r[0]
+        p := puntero(dirección(fab[0]))
+        p[0] := cpu_r[1]
+        p[1] := cpu_r[3]
+        p[2] := cpu_r[2]
+        fab[12] := 0
+        pon(uno.marca, fab, 32)
+        cpuid(1)
+        uno.fabricante := cpu_r[0]                  ; la firma (familia, modelo, paso)
+        uno.producto := cpu_r[3]                    ; lo que tiene (EDX)
+        uno.dato1 := cpu_r[2]                       ; (ECX)
+        paso_ := cpu_r[0] yb 0xF
+        mod_ := (cpu_r[0] >> 4) yb 0xF
+        fam := (cpu_r[0] >> 8) yb 0xF
+        si fam = 0xF entonces fam := fam + ((cpu_r[0] >> 20) yb 0xFF) fin
+        si fam = 6 o fam >= 0xF entonces mod_ := mod_ + ((cpu_r[0] >> 12) yb 0xF0) fin
+        ; el nombre largo (si lo tiene)
+        cpuid(0x80000000)
+        si cpu_r[0] >= 0x80000004 entonces
+            para k desde 0 hasta 2 hacer
+                cpuid(0x80000002 + k)
+                p := puntero(dirección(buf[k * 16]))
+                para j desde 0 hasta 3 hacer p[j] := cpu_r[j] fin
+            fin
+            buf[48] := 0
+            ; sin los espacios de delante
+            k := 0
+            mientras buf[k] = ' ' hacer k := k + 1 fin
+            pon(uno.nombre, dirección(buf[k]), 48)
+        sino
+            dd[0] := nat32(dirección(fab[0]))
+            formatear(uno.nombre, 48, "Procesador %s", dd)
+        fin
+        dd[0] := fam
+        dd[1] := mod_
+        dd[2] := paso_
+        formatear(buf, 200, "familia %u, modelo %u, paso %u", dd)
+        si uno.producto yb 0x800000 <> 0 entonces concatenar(buf, "; MMX") fin
+        si uno.producto yb 0x2000000 <> 0 entonces concatenar(buf, ", SSE") fin
+        si uno.producto yb 0x4000000 <> 0 entonces concatenar(buf, ", SSE2") fin
+        si uno.dato1 yb 1 <> 0 entonces concatenar(buf, ", SSE3") fin
+        cpuid(0x80000000)
+        si cpu_r[0] >= 0x80000001 entonces
+            cpuid(0x80000001)
+            si cpu_r[3] yb 0x20000000 <> 0 entonces concatenar(buf, "; de 64 bits") fin
+        fin
+        pon(uno.detalle, buf, 80)
+        añade()
+    fin
+
+    ; el sistema ACPI (el servicio, ACPI.BIN)
+    función mira_acpi()
+        empieza(BUS_ACPI, 0)
+        Textos32.copiar(uno.pnp, "ACPI")
+        Textos32.copiar(uno.nombre, "Sistema ACPI (apagar, reiniciar y la batería)")
+        Textos32.copiar(uno.controlador, "ACPI.BIN")
+        si pedido("sinacpi") entonces
+            uno.estado := EST_APAGADO
+            Textos32.copiar(uno.detalle, "«sinacpi» en la línea del cargador")
+        sino si no servicio_acpi_vivo() entonces
+            uno.estado := EST_SIN_CONTROLADOR
+            uno.controlador[0] := 0
+            Textos32.copiar(uno.detalle, "el servicio de ACPI (ACPI.BIN) no está en marcha")
+        sino si hay_energía y energía.fase = 3 entonces
+            uno.estado := EST_APAGADO
+            Textos32.copiar(uno.detalle, "el equipo no tiene ACPI (o no se ha podido leer)")
+        sino
+            uno.estado := EST_FUNCIONA
+            si hay_energía y energía.s5 <> 0 entonces
+                recurso(REC_PUERTOS, energía.pm1a_cnt, 2)
+                si energía.pm1b_cnt <> 0 entonces recurso(REC_PUERTOS, energía.pm1b_cnt, 2) fin
+                si energía.smi_cmd <> 0 entonces recurso(REC_PUERTOS, energía.smi_cmd, 1) fin
+                Textos32.copiar(uno.detalle, "sabe apagar (S5) y reiniciar el equipo")
+            sino si hay_energía entonces
+                Textos32.copiar(uno.detalle, "no sabe apagar este equipo por ACPI")
+            fin
+        fin
+        añade()
+    fin
+
+    ; lo apuntado por los controladores y los servicios: lo de un aparato PCI
+    ; se junta con su ficha; lo demás va detrás
+    función mira_apuntados()
+        variable i, k: nat32
+        variable f: puntero a Dispositivo
+        tomar(cerrojo)
+        para i desde 0 hasta MAX_APUNTADOS - 1 hacer
+            si dueños[i] <> 0 y no vivo(dueños[i]) entonces dueños[i] := 0 fin
+            si dueños[i] <> 0 entonces
+                k := SIN_PADRE
+                si apuntados[i].bus = BUS_PCI entonces k := de_pci(apuntados[i].dirección) fin
+                f := ficha(k)
+                si f <> nulo entonces
+                    f.estado := apuntados[i].estado
+                    Textos32.copiar(f.controlador, apuntados[i].controlador)
+                    si apuntados[i].nombre[0] <> 0 entonces Textos32.copiar(f.nombre, apuntados[i].nombre) fin
+                    si apuntados[i].detalle[0] <> 0 entonces Textos32.copiar(f.detalle, apuntados[i].detalle) fin
+                sino si k = SIN_PADRE entonces
+                    copiar_memoria(puntero(dirección(uno)), puntero(dirección(apuntados[i])), tamaño(Dispositivo))
+                    uno.padre := SIN_PADRE
+                    añade()
+                fin
+            fin
+        fin
+        soltar(cerrojo)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La lista
+    ; -------------------------------------------------------------------------
+    ; hace la lista en «a» (caben «c» fichas). Da cuántas hay (aunque no quepan)
+    público función lista(a: puntero a Dispositivo, c: nat32): nat32
+        destino := a
+        cabe := c
+        n := 0
+        vga_vista := falso
+        mira_pci()
+        mira_usb()
+        mira_discos()
+        mira_placa()
+        mira_procesador()
+        mira_acpi()
+        mira_apuntados()
+        devolver n
+    fin
+
+    ; las llamadas 155 y 156 (usuario.cas)
+    ;  155  la lista: a EBX, hasta ECX fichas (Dispositivo, 320 octetos cada
+    ;       una)                                    -> cuántas hay
+    ;  156  (los servicios del anillo 3: ACPI.BIN, RED.BIN) apuntar la ficha
+    ;       de EBX (ECX = 0); con ECX = 1, olvidar todas las suyas -> 0
+    público función atender_dispositivos(nn: nat32, a: nat32, b: nat32, c: nat32): nat32
+        variable d: Dispositivo
+        si nn = 155 entonces
+            si b > 256 entonces b := 256 fin
+            si b <> 0 y no usuario_puede(actual.cr3, a, b * tamaño(Dispositivo), cierto) entonces devolver NO_VALE fin
+            devolver lista(puntero(a), b)
+        fin
+        si actual.id <> servicio_acpi() y (Red.servicio = nulo o actual <> Red.servicio) entonces devolver NO_VALE fin
+        si b = 1 entonces
+            olvidar(actual.id + 1)
+            devolver 0
+        fin
+        si no usuario_puede(actual.cr3, a, tamaño(Dispositivo), falso) entonces devolver NO_VALE fin
+        copiar_memoria(puntero(dirección(d)), puntero(a), tamaño(Dispositivo))
+        ; (los textos, acabados en 0 aunque no lo traigan)
+        d.pnp[15] := 0
+        d.controlador[15] := 0
+        d.nombre[47] := 0
+        d.marca[31] := 0
+        d.detalle[79] := 0
+        si d.n_recursos > MAX_RECURSOS entonces d.n_recursos := MAX_RECURSOS fin
+        si no apuntar(d, actual.id + 1) entonces devolver NO_VALE fin
+        devolver 0
+    fin
+
+fin Dispositivos.

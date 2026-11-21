@@ -472,4 +472,17 @@ módulo Usbhid
         apunta0("\n")
     fin
 
+    ; (dispositivos) ¿atiende este módulo el aparato USB a? 1: como teclado;
+    ; 2: como ratón; 3: las dos cosas; 0: no
+    público función lleva(a: nat32): nat32
+        variable i, r: nat32
+        r := 0
+        para i desde 0 hasta MAX_HID - 1 hacer
+            si hids[i].usado y hids[i].aparato = a entonces
+                si hids[i].teclado entonces r := r ob 1 sino r := r ob 2 fin
+            fin
+        fin
+        devolver r
+    fin
+
 fin Usbhid.

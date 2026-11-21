@@ -861,4 +861,54 @@ módulo Llamadas
         devolver llamada(131, 0, 0, 0)
     fin
 
+    ; ---- (dispositivos) el Administrador de dispositivos: la llamada 155 ----
+    ; (la ficha es la de dispositivos.cas, Dispositivo: si cambia una, la otra)
+    público constante BUS_PCI = 1
+    público constante BUS_USB = 2
+    público constante BUS_ACPI = 3
+    público constante BUS_PLACA = 4             ; lo de siempre de la placa (teclado PS/2, reloj, puertos serie)
+    público constante BUS_DISCO = 5
+    público constante BUS_CPU = 6
+    público constante EST_SIN_CONTROLADOR = 0
+    público constante EST_FUNCIONA = 1
+    público constante EST_ERROR = 2
+    público constante EST_APAGADO = 3
+    público constante EST_NO_HACE_FALTA = 4
+    público constante REC_PUERTOS = 1
+    público constante REC_MEMORIA = 2
+    público constante REC_MEMORIA64 = 3
+    público constante SIN_PADRE = 0xFFFFFFFF
+    público constante SIN_IRQ = 0xFFFFFFFF
+    público tipo Recurso = estructura
+        clase, base, largo: nat32
+    fin
+    público tipo Dispositivo = estructura
+        bus, dirección, padre, fabricante, producto, clase, subsistema, revisión: nat32
+        estado, irq, n_recursos, dato1, dato2, dato3: nat32
+        recursos: arreglo [6] de Recurso
+        pnp: arreglo [16] de byte
+        controlador: arreglo [16] de byte
+        nombre: arreglo [48] de byte
+        marca: arreglo [32] de byte
+        detalle: arreglo [80] de byte
+    fin
+
+    ; la lista de los dispositivos del equipo, a «destino» (caben «cabe»):
+    ; da cuántos hay (aunque no quepan)
+    público función lista_dispositivos(destino: puntero a Dispositivo, cabe: nat32): nat32
+        devolver llamada(155, nat32(destino), cabe, 0)
+    fin
+
+    ; la batería, como la da el servicio de ACPI (la llamada 154; la misma
+    ; estructura que Energía de energia.cas). Falso si no hay servicio
+    público tipo Energía = estructura
+        versión, fase, nbat, pct, ca, cargando, minutos, estado, lecturas: nat32
+        salud_pct, salud_n, unidad, diseño, llena, ciclos1, ciclos2: nat32
+        s5, pm1a_cnt, pm1b_cnt, slp_typa, slp_typb, smi_cmd, acpi_enable: nat32
+        reset_esp, reset_dir, reset_valor, respuesta, sin_archivos: nat32
+    fin
+    público función batería(ref e: Energía): bool
+        devolver llamada(154, nat32(dirección(e)), 0, 0) = 1
+    fin
+
 fin Llamadas.
