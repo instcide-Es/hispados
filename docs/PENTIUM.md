@@ -3224,6 +3224,14 @@ con sus avisos, y `EXPULSAR`; `MONTAR` la misma ISO, un disquete `.IMG` y una
 imagen dentro del CD y otra en una memoria USB que se desenchufa (se desmontan
 solas al irse su disco); y Mi equipo: el CD con su disco dibujado, una `.ISO`
 montada con dos clics, el CD virtual en su marco de puntos y «Expulsar».
+Desde esta rama, el lector de CD vacío que QEMU pone de serie (IDE secundario
+maestro) sale en todas las pruebas: es un disco más (detrás de los discos y
+las memorias del arranque: una memoria enchufada en marcha pasa a ser el disco
+2), y la tarea `cd-cambios`, una tarea más del núcleo (las cuentas de tareas y
+del montón de las partes 8 y 13 suben en una). Con ella, `SOLO=32` (rama
+`pentium-cd`, 21/11) dio **517 bien, 1 mal**: el que falla es una línea del
+servicio de red pegada a la petición del intérprete (`> red: DHCP...`) en la
+parte 16, con la máquina cargada (tres suites a la vez); suelta (`SOLO=cd`), 72 bien, 0 mal.
 Con ella, `SOLO=32` (rama `pentium-pantalla`, 20/11 por la noche) dio **479 bien,
 0 mal**.
 
