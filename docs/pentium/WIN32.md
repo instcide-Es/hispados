@@ -15,7 +15,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 
 En Hispa-Pentium un `.EXE` de Windows de 32 bits (PE de 386) **se abre como
 cualquier programa**: escribiendo su nombre en la Consola (o en el intérprete de
-órdenes), con dos clics en Mi equipo o desde un acceso del menú Inicio. Lo corre
+órdenes) o con dos clics en Mi equipo. Lo corre
 `WIN32.BIN`. Lo que se ha probado:
 
 - **Consola**: los de las pruebas de HW32 (PEHOLA, HOLAC, K32PRUE con lo que da
@@ -145,7 +145,11 @@ juegos siguen igual), hasta que Hispa-Pentium tenga sonido.
   escriben en la Consola. Los de ventanas abren la suya (la Consola los espera:
   vuelve cuando se cierran).
 - En Mi equipo, dos clics en un `.EXE`.
-- En el menú Inicio, **Naves** (el acceso que pone el paquete `win32`).
+- En el menú Inicio, de momento, no: un acceso más alarga el menú y movía lo
+  que miran las pruebas de los demás (y las de otras ramas). `win32/hacer.sh`
+  ya sabe hacer el de Naves (`NAVES.MNU` y su icono `NAVES.ICP`, de
+  `hazicono.py`) con su cuarto argumento: cuando se quiera, basta con
+  añadirlo al paquete.
 - `HISPA32=TRAZA` en `\WIN32\ENTORNO.TXT` (una variable por línea): lo que hace
   WIN32.BIN sale por el puerto serie; `TRAZA2`, además, cada llamada a las DLL de
   dentro con sus argumentos; `TRAZA3`, también las de las DLL de fuera.
@@ -156,8 +160,7 @@ juegos siguen igual), hasta que Hispa-Pentium tenga sonido.
 - `\WIN32\`: `MSVCRT.DLL`, `UCRT.DLL`, `COMCTL32.DLL`, `WINMM.DLL`, `DDRAW.DLL`,
   `DSOUND.DLL`, `DINPUT.DLL`, `OLE32.DLL`.
 - `\HISPA32\`: `CALC32.EXE`, `HOLA32.EXE`, `CTL32.EXE`, `MENU32.EXE`,
-  `AVISO32.EXE`, `NAVES.EXE` y `NAVES.ICP` (su icono); el acceso, en
-  `\HISPA\MENU\NAVES.MNU` (`\MENU` en la memoria USB).
+  `AVISO32.EXE` y `NAVES.EXE`.
 - **Los paquetes** (`tools/hpq.py`): `win32` 1.0, nuevo (todo lo de arriba;
   necesita `base >= 0.8.2`); `base` pasa a la 0.8.2 (el núcleo y `ORDENES.BIN`)
   y `equipo` a la 0.8.2 (`EQUIPO.BIN`). INSTALAR los instala con el sistema.

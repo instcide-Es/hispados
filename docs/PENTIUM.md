@@ -2713,8 +2713,8 @@ en su parte 15 (`SOLO=castel32`).
 |---|---|
 | ![HOLA32, como ventana de Hispa-Pentium](pentium/win32-hola32.png) | ![Naves: DirectDraw a pantalla completa](pentium/win32-naves.png) |
 
-Un `.EXE` de Windows de 32 bits se abre como cualquier programa (la Consola, Mi
-equipo, el menú Inicio): el núcleo ve que empieza por «MZ» y lo corre
+Un `.EXE` de Windows de 32 bits se abre como cualquier programa (la Consola o
+Mi equipo): el núcleo ve que empieza por «MZ» y lo corre
 **`WIN32.BIN`** (`castel/nucleo32/win32/`, en C), que hace de cargador de PE y de
 KERNEL32, USER32, GDI32, COMDLG32, ADVAPI32, SHELL32 y WSOCK32, con las DLL de
 Hispa-486 que valen tal cual (MSVCRT, UCRT, COMCTL32 y DirectX: DDRAW, DSOUND,

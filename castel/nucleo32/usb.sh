@@ -78,8 +78,8 @@ cp $W/paq/*.HPQ $W/paq/CATALOGO.TXT $W/m/PAQUETES/
 cp $W/of/HVPRUN.BIN $W/m/
 mkdir -p $W/m/OFICINA
 cp $W/of/*.HVP $W/of/*.DAT $W/m/OFICINA/
-# [WIN32] las DLL de los programas de Windows, sus ejemplos y el acceso de Naves
-cp -r $W/w32/WIN32 $W/w32/HISPA32 $W/w32/MENU $W/m/
+# [WIN32] las DLL de los programas de Windows y sus ejemplos
+cp -r $W/w32/WIN32 $W/w32/HISPA32 $W/m/
 # [HISPA-SNES] el emulador de la consola de 16 bits (docs/HISPASNES.md: un
 # programa de Hispa Ventanas, como la oficina) en \JUEGOS, con PRUEBA.SFC, la
 # ROM nuestra: se abre desde Mi equipo con HVPRUN (solo en la memoria USB)
