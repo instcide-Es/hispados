@@ -286,6 +286,11 @@ módulo Consola
             a_la_cola(TECLA_LOGO)                       ; (MENÚ) Ctrl+Esc: el menú Inicio
         sino si desviado y código = 0x3E y alt entonces
             muerta := 0
+            ; (MENÚ) Alt+F4 lo atiende el escritorio: el mapa de las teclas
+            ; ([WIN32]) no la apunta, o el programa de Windows siguiente la
+            ; vería «pulsada entremedias» y se cerraría
+            pulsadas[0x3E >> 5] := pulsadas[0x3E >> 5] yb nob (nat32(1) << (0x3E yb 31))
+            pulsadas_antes[0x3E >> 5] := pulsadas_antes[0x3E >> 5] yb nob (nat32(1) << (0x3E yb 31))
             a_la_cola(TECLA_ALT_F4)                     ; (MENÚ) Alt+F4
         sino si desviado y código = 0x54 entonces
             a_la_cola(TECLA_ALT_IMPR)                   ; (MENÚ) Alt+Impr Pant (llega como Pet Sis)
