@@ -241,7 +241,7 @@ módulo UMuestra
                 pinta()
             sino si s.clase = EV_MENÚ entonces
                 abierto := -1
-                si s.b = 1 entonces tamaño_ := s.a + 1 fin
+                si s.b = 1 y s.a <> SIN_ELEGIR entonces tamaño_ := s.a + 1 fin
                 si s.b = 0 y s.a = 3 entonces devolver 0 fin
                 si s.b = ID_TIPO y s.a <> SIN_ELEGIR entonces tipo_p := s.a fin
                 nuevo_tamaño(ancho, alto, tamaño_)

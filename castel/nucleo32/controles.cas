@@ -577,6 +577,7 @@ módulo Controles
     ; =========================================================================
     público función empezar_controles()
         n_ctl := 0
+        n_filas_pes := 0                        ; (las filas de pestañas, también: las de esta vez)
     fin
 
     público función apuntar(id: nat32, clase: nat32, x: ent32, yy: ent32, an: ent32, al: ent32)
@@ -1047,18 +1048,41 @@ módulo Controles
     ;  Las pestañas: una fila de rótulos («Inicio|Socios|Cuotas»); la activa,
     ; unida a lo de debajo, en blanco y en negrita; las apagadas, en gris
     ; (bit k de «apagadas»). Ctrl+Tab y Ctrl+Mayús+Tab: la siguiente y la de antes.
+    ; Puede haber varias filas en la misma ventana (las de los módulos y,
+    ; dentro, las de una ficha): de cada una se guarda dónde quedó cada
+    ; rótulo, por su id, para saber luego en cuál se ha hecho clic.
     ; =========================================================================
-    variable pes_x: arreglo [16] de ent32
-    variable pes_an: arreglo [16] de ent32
-    variable pes_n: nat32
-    variable pes_y, pes_al: ent32
+    constante MAX_FILAS_PES = 4
+    tipo Fila_pestañas = estructura
+        id: nat32
+        n: nat32
+        ye, al: ent32
+        x: arreglo [16] de ent32
+        an: arreglo [16] de ent32
+    fin
+    variable filas_pes: arreglo [MAX_FILAS_PES] de Fila_pestañas
+    variable n_filas_pes: nat32
+
+    ; la fila de pestañas de ese id (una nueva si aún no estaba)
+    función fila_pes(id: nat32): nat32
+        variable i: nat32
+        i := 0
+        mientras i < n_filas_pes hacer
+            si filas_pes[i].id = id entonces devolver i fin
+            i := i + 1
+        fin
+        si n_filas_pes < MAX_FILAS_PES entonces n_filas_pes := n_filas_pes + 1 fin
+        i := n_filas_pes - 1
+        filas_pes[i].id := id
+        devolver i
+    fin
 
     público función alto_pestañas(): ent32
         devolver LT + 12 * E
     fin
 
     público función pestañas(id: nat32, x: ent32, yy: ent32, an: ent32, nombres: puntero a byte, activa: nat32, apagadas: nat32): ent32
-        variable k, n: nat32
+        variable k, n, f: nat32
         variable px, al, w: ent32
         variable t: arreglo [40] de byte
         variable tinta: nat32
@@ -1067,15 +1091,16 @@ módulo Controles
         si n > 16 entonces n := 16 fin
         caja(x, yy + al - 2, an, 2, C_BORDE)
         px := x + LA div 2
-        pes_n := n
-        pes_y := yy
-        pes_al := al
+        f := fila_pes(id)
+        filas_pes[f].n := n
+        filas_pes[f].ye := yy
+        filas_pes[f].al := al
         k := 0
         mientras k < n hacer
             opción_de(nombres, k, t, 40)
             w := ancho_negrita(t) + 2 * LA
-            pes_x[k] := px
-            pes_an[k] := w
+            filas_pes[f].x[k] := px
+            filas_pes[f].an[k] := w
             tinta := C_TINTA
             si (apagadas >> k) yb 1 <> 0 entonces tinta := 0x8A919C fin
             si k = activa entonces
@@ -1092,18 +1117,42 @@ módulo Controles
             px := px + w + 2 * E
             k := k + 1
         fin
-        si id = foco y activa < n entonces marca_foco(pes_x[activa], yy, pes_an[activa], al) fin
+        si id = foco y activa < n entonces marca_foco(filas_pes[f].x[activa], yy, filas_pes[f].an[activa], al) fin
         apuntar(id, K_PESTAÑAS, x, yy, an, al)
         devolver al
     fin
 
-    ; la pestaña en ese punto (-1 si ninguna)
+    ; la pestaña en ese punto (-1 si ninguna), en la fila que esté ahí (si
+    ; hay varias filas, la de cada una por su lado: con pestaña_de)
     público función pestaña_en(x: ent32, yy: ent32): ent32
+        variable i: nat32
+        variable k: ent32
+        i := 0
+        mientras i < n_filas_pes hacer
+            k := en_fila(i, x, yy)
+            si k >= 0 entonces devolver k fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    ; la pestaña de la fila «id» en ese punto (-1 si ninguna)
+    público función pestaña_de(id: nat32, x: ent32, yy: ent32): ent32
+        variable i: nat32
+        i := 0
+        mientras i < n_filas_pes hacer
+            si filas_pes[i].id = id entonces devolver en_fila(i, x, yy) fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    función en_fila(i: nat32, x: ent32, yy: ent32): ent32
         variable k: nat32
-        si yy < pes_y o yy >= pes_y + pes_al entonces devolver -1 fin
+        si yy < filas_pes[i].ye o yy >= filas_pes[i].ye + filas_pes[i].al entonces devolver -1 fin
         k := 0
-        mientras k < pes_n hacer
-            si x >= pes_x[k] y x < pes_x[k] + pes_an[k] entonces devolver ent32(k) fin
+        mientras k < filas_pes[i].n hacer
+            si x >= filas_pes[i].x[k] y x < filas_pes[i].x[k] + filas_pes[i].an[k] entonces devolver ent32(k) fin
             k := k + 1
         fin
         devolver -1
