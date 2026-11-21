@@ -3736,7 +3736,8 @@ una con lo suyo del formato) y lo mismo desde FIRMAS.ESC; la firma digital del
 octeto); en el escritorio, una memoria USB en caliente con EICAR suelto, en un
 ZIP y un `AUTORUN.INF`: el escudo de la bandeja, «¿Revisar la memoria?», lo
 encontrado, la cuarentena y su pestaña; `ESCUDO /DESCARGA` con su cuadro; y lo
-que tarda (MB/s, en Linux y en QEMU).
+que tarda (MB/s, en Linux y en QEMU): **24 comprobaciones, 24 bien**. Con ella,
+`SOLO=32` (rama `pentium-escudo`, 21/11) dio **577 bien, 0 mal**.
 
 Con la firma, el núcleo nuevo y el CD, la pasada entera del 20/11 por la tarde (rama
 `pentium-dvd`, con CASTEL32 ya dentro) dio **541 bien, 0 mal**; tras los
