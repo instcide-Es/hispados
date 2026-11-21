@@ -1,0 +1,42 @@
+; =============================================================================
+;  medidas.cas (32 bits) - el tamaño de las tablas de CASTEL32, el compilador
+;  de Castel escrito en Castel compilado para 32 bits: las mismas constantes
+;  que compilador/medidas.cas (la de 16 bits), con la memoria plana de megas
+;  en vez de lo que deja libre Hispa-8086 en 640 K. Las referencias siguen
+;  siendo de 16 bits (párrafos de 16 octetos dentro de cada tabla): cada una
+;  puede llegar a casi 1 MB; ver CASTEL32.md §11, y el camino a las de 32.
+;  La importan primero los programas de CASTEL32 (castel32.cas, castelw.cas),
+;  así que es la que vale para todos sus módulos.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Medidas
+
+    ; ---- Base: los nombres, los textos y el árbol (en párrafos de 16 octetos) ----
+    público constante PARRAFOS_AT = 0xF000      ; 960 K de nombres
+    público constante PARRAFOS_CAD = 0xF000     ; 960 K de textos
+    público constante PARRAFOS_AR = 0xF000      ; 960 K de árbol: 61.440 nudos
+    público constante CUBOS_AT = 4096
+    público constante CUBOS_CAD = 4096
+    público constante MÓDULOS = 200             ; por programa (lo más: 255, se guardan en un octeto)
+
+    ; ---- Tablas: los tipos, lo declarado, los datos, las locales, los puentes ----
+    público constante PARRAFOS_TIP = 0xF000
+    público constante PARRAFOS_SIM = 0xF000
+    público constante CUBOS_SIM = 4096
+    público constante PARRAFOS_ORD = 0x1F00     ; 31.738 datos y otras tantas etiquetas (lo más: 0x7FFF)
+    público constante LOCALES = 1000
+    público constante PUENTES = 4000
+
+    ; ---- Salida: el ensamblador de una función, mientras se genera ----
+    público constante PARRAFOS_LIN = 0x1000     ; 64 K de texto por función (lo más, con desplazamientos de 16 bits)
+    público constante TEXTO_FUNCIÓN = 0xFE00
+    público constante LÍNEAS_FUNCIÓN = 16000
+    público constante NOMBRE_TEMPORAL = "CASTEL.TMP"
+
+    ; ---- Lexico y Sintactico ----
+    público constante LARGO_TEXTO = 16000
+    público constante LARGO_LIN_ASM = 2000
+    público constante LARGO_ASM = 60000
+    público constante VENTANA = 4096
+
+fin Medidas.

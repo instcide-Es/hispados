@@ -1,0 +1,7 @@
+; Ni en 16 bits.
+; ERROR: 5:18: error: ent64() es de 64 bits (modelo linux64 o núcleo64)
+módulo Error
+    función principal()
+        escribir(ent64(3))
+    fin
+fin Error.

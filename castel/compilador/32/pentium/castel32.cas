@@ -20,7 +20,7 @@ módulo Castel32
 
     modelo usuario
 
-    importar Medidas, Lejos, Archivos, Argumentos, Mando
+    importar Medidas, Lejos, Archivos, Argumentos, Gen64, Mando
 
     función principal(): byte
         devolver mandar()

@@ -13,7 +13,7 @@
 ; =============================================================================
 módulo Expr
 
-    importar Base, Tablas, Cuentas, Tipos, Salida, Textos
+    importar Base, Tablas, Cuentas, Tipos, Salida, Textos, Gen64
 
     público constante TXT = 120                 ; lo que ocupa un texto de operando
     constante MAX_ARGS = 40
@@ -73,6 +73,10 @@ módulo Expr
     ; el texto de un lugar: «bp-2», «G_x+4», «bx»...
     público función texto_lugar(ref r: Lugar, t: puntero a byte)
         variable n: nat16
+        si en64 entonces                       ; [CASTEL64] (Gen64)
+            l64_texto_lugar(r, t)
+            devolver
+        fin
         t[0] := 0
         si plano entonces
             según r.base
@@ -205,6 +209,7 @@ módulo Expr
 
     público función lugar_de(e: nat16, emitir: bool, ref r: Lugar): bool
         variable k: byte
+        si en64 entonces devolver l64_lugar_de(e, emitir, r) fin
         si plano entonces devolver lugar32_de(e, emitir, r) fin
         variable v: Var
         variable to, est, obj, idx, tam, off, tc: nat16
@@ -352,6 +357,7 @@ módulo Expr
     ; ¿se llega al lugar de e sin gastar AX?
     público función limpio(e: nat16): bool
         variable k: byte
+        si en64 entonces devolver l64_limpio(e) fin
         si plano entonces devolver limpio32(e) fin
         variable obj, idx: nat16
         k := nk(e)
@@ -391,6 +397,7 @@ módulo Expr
         variable r, a: nat16
         variable q: Lugar
         variable buf: arreglo [TXT] de byte
+        si en64 entonces devolver l64_inmediato(e, t) fin
         si const(e, c) entonces
             si plano entonces n2t(c.bajo, t) sino n2t(c.bajo yb 0xFFFF, t) fin
             devolver cierto
@@ -447,6 +454,7 @@ módulo Expr
     ; su tamaño); -1 si e no es tan sencillo
     público función opnd(e: nat16, t: puntero a byte): ent16
         variable r: arreglo [TXT] de byte
+        si en64 entonces devolver l64_opnd(e, t) fin
         si plano entonces devolver opnd32p(e, t) fin
         variable tt: nat16
         si inmediato(e, t) entonces devolver 0 fin
@@ -511,6 +519,10 @@ módulo Expr
     ; salta a destino si la condición e vale «si»; si no, sigue
     público función salta(e: nat16, destino: nat16, si_: bool)
         variable t, l_: nat16
+        si en64 entonces
+            l64_salta(e, destino, si_)
+            devolver
+        fin
         si plano entonces
             salta32(e, destino, si_)
             devolver
@@ -786,6 +798,10 @@ módulo Expr
     fin
 
     público función gen_expr(e: nat16)
+        si en64 entonces
+            l64_expr(e)
+            devolver
+        fin
         si plano entonces
             gen_expr32p(e)
             devolver
@@ -1622,6 +1638,10 @@ módulo Expr
 
     público función gen_llamada(e: nat16, solo_al: bool)
         variable nm, r, a0, a1, a2: nat16
+        si en64 entonces
+            l64_llamada(e)
+            devolver
+        fin
         si plano entonces
             gen_llamada32(e, solo_al)
             devolver

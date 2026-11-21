@@ -1,0 +1,8 @@
+; interrupción() tampoco está en 64 bits.
+; ERROR: 6:9: error: interrupción() es del modo real (BIOS y DOS): en 64 bits no está (se usa un bloque «ensamblador»)
+módulo Error
+    modelo linux64
+    función principal()
+        interrupción(0x21, ah: 2, dl: 65)
+    fin
+fin Error.

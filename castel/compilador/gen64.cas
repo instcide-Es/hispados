@@ -1,0 +1,120 @@
+; =============================================================================
+;  gen64.cas - [CASTEL64] el Gen64 VACÍO: el que lleva el CASTEL de 16 bits
+;  (castel.cas), que no saca código de 64 bits. La parte de atrás de 64 bits
+;  de verdad es compilador/32/gen64.cas, la que importan antes que nada
+;  CASTEL32, CASTELW y CASTEL64; en los 64 K de datos (con la pila) del CASTEL
+;  de 16 bits no caben sus textos. Tiene lo mismo público que aquella (para que
+;  Expr, Sent y Programa se compilen igual), sin hacer nada: Programa, con
+;  hay_64() falso, dice que los modelos de 64 bits no están (CASTEL64.md).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Gen64
+
+    importar Base, Tablas, Cuentas
+
+    público variable l64_principal: nat16
+
+    público función hay_64(): bool
+        devolver falso
+    fin
+
+    público función l64_texto(ref c: N64, con_signo: bool, t: puntero a byte)
+        t[0] := 0
+    fin
+
+    público función l64_cabe_i32(ref c: N64): bool
+        devolver falso
+    fin
+
+    público función de64(t: nat16): bool
+        devolver falso
+    fin
+
+    público función l64_tam_txt(t: nat16): puntero a byte
+        devolver nulo
+    fin
+
+    público función l64_reg_de(t: nat16): puntero a byte
+        devolver nulo
+    fin
+
+    público función l64_máscara(t: nat16): nat32
+        devolver 0
+    fin
+
+    público función l64_registro(i: nat16): puntero a byte
+        devolver nulo
+    fin
+
+    público función l64_texto_lugar(ref r: Lugar, t: puntero a byte)
+        t[0] := 0
+    fin
+
+    público función l64_lugar_de(e: nat16, emitir: bool, ref r: Lugar): bool
+        devolver falso
+    fin
+
+    público función l64_lugar(e: nat16, t: puntero a byte)
+        t[0] := 0
+    fin
+
+    público función l64_lugar_fijo(e: nat16, t: puntero a byte): bool
+        devolver falso
+    fin
+
+    público función l64_limpio(e: nat16): bool
+        devolver falso
+    fin
+
+    público función l64_inmediato(e: nat16, t: puntero a byte): bool
+        devolver falso
+    fin
+
+    público función l64_inm64(e: nat16, t: puntero a byte): bool
+        devolver falso
+    fin
+
+    público función l64_opnd(e: nat16, t: puntero a byte): ent16
+        devolver -1
+    fin
+
+    público función l64_ajusta(te: nat16, t: nat16)
+    fin
+
+    público función l64_salta(e: nat16, destino: nat16, si_: bool)
+    fin
+
+    público función l64_expr(e: nat16)
+    fin
+
+    público función l64_expr64(e: nat16)
+    fin
+
+    público función l64_llamada(e: nat16)
+    fin
+
+    público función l64_napoyo(): nat16
+        devolver 0
+    fin
+
+    público función l64_apoyo_nombre(i: nat16): puntero a byte
+        devolver nulo
+    fin
+
+    público función l64_apoyo_texto(i: nat16): puntero a byte
+        devolver nulo
+    fin
+
+    público función l64_arranque(): puntero a byte
+        devolver nulo
+    fin
+
+    público función l64_arranque_datos(): puntero a byte
+        devolver nulo
+    fin
+
+    público función l64_pila(): nat32
+        devolver 0
+    fin
+
+fin Gen64.

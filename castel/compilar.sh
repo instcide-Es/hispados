@@ -4,7 +4,8 @@
 # Compila un fuente Castel a ensamblador (ccastel.py) y lo ensambla a un .COM
 # de DOS (NASM). Sin SALIDA, deja NOMBRE.COM (en mayúsculas) al lado del fuente
 # (NOMBRE.EXE si el programa dice «modelo grande» o «modelo hispa32»;
-# NOMBRE.BIN si dice «modelo núcleo» o «modelo usuario»).
+# NOMBRE.BIN si dice «modelo núcleo», «modelo usuario» o «modelo núcleo64»;
+# y, si dice «modelo linux64», un programa de Linux: nombre, sin extensión).
 # El ensamblador intermedio (NOMBRE.asm) queda al lado del .COM.
 # Los módulos que el programa importa se buscan en su carpeta, en las que se
 # den con -I y en biblioteca/ (la biblioteca de Castel).
@@ -31,6 +32,9 @@ grep -q '^C_cab:' "$ASM" && EXT=EXE
 grep -q '^P_mz:' "$ASM" && EXT=EXE           # «modelo hispa32»: un programa Win32 (PE)
 grep -q '^C_multiboot:' "$ASM" && EXT=BIN    # «modelo núcleo»: un núcleo multiboot
 grep -q '^C_usuario:' "$ASM" && EXT=BIN      # «modelo usuario»: un programa del anillo 3 de Hispa-Pentium
+# [CASTEL64] «modelo linux64»: un programa de Linux (sin extensión, en minúsculas)
+if grep -q '^C_pila_linux:' "$ASM"; then COM=${COM:-$DIR/$(echo "$BASE" | tr 'A-Z' 'a-z')}; fi
 COM=${COM:-$DIR/$(echo "$BASE" | tr 'a-z' 'A-Z').$EXT}
 nasm -f bin "$ASM" -o "$COM"
+grep -q '^C_pila_linux:' "$ASM" && chmod +x "$COM"
 echo "compilar: $ENT -> $COM"

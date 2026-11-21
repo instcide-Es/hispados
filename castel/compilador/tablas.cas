@@ -46,6 +46,8 @@ módulo Tablas
     público constante TK_PUNT = 10
     público constante TK_ARR = 11
     público constante TK_EST = 12
+    público constante TK_NAT64 = 13             ; [CASTEL64] solo en los modelos de 64 bits
+    público constante TK_ENT64 = 14
     ; los tipos de siempre (con estos números: se dan de alta en este orden)
     público constante T_NAT8 = 1
     público constante T_NAT16 = 2
@@ -58,6 +60,8 @@ módulo Tablas
     público constante T_NADA = 9
     público constante T_PUNT_U = 10             ; puntero «universal»: nulo y puntero(n)
     público constante T_TEXTO = 11              ; puntero a byte: un texto escrito
+    público constante T_NAT64 = 12              ; [CASTEL64]
+    público constante T_ENT64 = 13
 
     público variable seg_tip: Segmento
     variable tip_abajo, tip_arriba: nat16
@@ -92,6 +96,9 @@ módulo Tablas
     público variable plano: bool                ; «modelo núcleo» o «modelo hispa32»: 32 bits (CASTEL32.md)
     público variable es_núcleo: bool            ; «modelo núcleo»
     público variable es_usuario: bool           ; «modelo usuario» (un programa del anillo 3 de Hispa-Pentium)
+    ; [CASTEL64] «modelo linux64» o «núcleo64»: 64 bits (CASTEL64.md); con «en64», también «plano»
+    público variable en64: bool
+    público variable es_linux: bool             ; «modelo linux64»
     ; de la última búsqueda: los módulos importados que traen ese nombre (si son dos o más)
     público variable amb_n: nat16
     público variable amb_mod: arreglo [MAX_MODULOS] de byte
@@ -177,8 +184,9 @@ módulo Tablas
         devolver t < tip_abajo
     fin
 
-    ; lo que ocupa un puntero: 2 octetos, o 4 en 32 bits
+    ; lo que ocupa un puntero: 2 octetos, 4 en 32 bits u 8 en 64
     público función tam_punt(): nat16
+        si en64 entonces devolver 8 fin
         si plano entonces devolver 4 fin
         devolver 2
     fin
@@ -275,7 +283,12 @@ módulo Tablas
     público función es_num(t: nat16): bool
         variable k: byte
         k := tk(t)
-        devolver k = TK_NAT8 o k = TK_NAT16 o k = TK_ENT16 o k = TK_LIT o k = TK_NAT32 o k = TK_ENT32 o k = TK_LIT32
+        devolver k = TK_NAT8 o k = TK_NAT16 o k = TK_ENT16 o k = TK_LIT o k = TK_NAT32 o k = TK_ENT32 o k = TK_LIT32 o k = TK_NAT64 o k = TK_ENT64
+    fin
+
+    ; [CASTEL64] ¿es un nat64 o un ent64?
+    público función es64(t: nat16): bool
+        devolver tk(t) = TK_NAT64 o tk(t) = TK_ENT64
     fin
 
     ; ¿es un número de 32 bits (va en DX:AX)?
@@ -500,6 +513,8 @@ módulo Tablas
             caso I_BOOL: devolver T_BOOL
             caso I_NAT32: devolver T_NAT32
             caso I_ENT32: devolver T_ENT32
+            caso I_NAT64: devolver T_NAT64
+            caso I_ENT64: devolver T_ENT64
         fin
         r := busca(a)
         si r <> 0 y s_clase(r) = S_TIPO entonces devolver s_a(r) fin
@@ -842,6 +857,8 @@ módulo Tablas
         tip_nuevo(TK_PUNT, 2)
         t := tip_nuevo(TK_PUNT, 2)
         t_pon_base(t, 2, T_NAT8)
+        tip_nuevo(TK_NAT64, 8)
+        tip_nuevo(TK_ENT64, 8)
     fin
 
     público función gasto_tipos(): nat16

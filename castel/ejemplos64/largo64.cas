@@ -1,0 +1,106 @@
+; largo64.cas - lo propio de los 64 bits («modelo linux64», CASTEL64.md): nat64
+; y ent64 (las cuentas en 64 bits en cuanto hay uno por medio; si no, en 32,
+; como en el modelo plano), punteros de 8 octetos, estructuras y arreglos con
+; ellos, textos en una tabla, el ensamblador con los registros nuevos (r8 a
+; r15), la dirección de una función, «para» y «según» con números de 64
+; bits, y una llamada al sistema de Linux.
+; código de salida: 42
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo Largo64
+
+    modelo linux64
+
+    importar Linux
+
+    tipo Nudo = estructura
+        valor: ent64
+        letra: byte
+        sig: puntero a Nudo
+    fin
+
+    variable nombres: arreglo [3] de puntero a byte = ("uno", "dos", "tres")
+    variable nudos: arreglo [4] de Nudo
+    variable grande: nat64
+    variable cuenta32: nat32 = 4000000000
+
+    ; 2^n, en 64 bits
+    función potencia(n: nat32): nat64
+        variable r: nat64
+        r := 1
+        mientras n > 0 hacer
+            r := r * 2
+            n := n - 1
+        fin
+        devolver r
+    fin
+
+    función suma(a: ent64, b: ent32, ref total: ent64)
+        total := a + b
+    fin
+
+    ; con los registros de 64 bits, a mano: (a + b) * 3 en r8 y r9
+    función a_mano(a: nat64, b: nat64): nat64
+        ensamblador
+            mov r8, {a}
+            mov r9, {b}
+            add r8, r9
+            lea rax, [r8+r8*2]
+        fin
+    fin
+
+    función clase(n: nat64): puntero a byte
+        según n
+            caso 0: devolver "cero"
+            caso 1, 2, 3: devolver "pocos"
+            caso 4000000000: devolver "cuatro mil millones"
+            si no: devolver "muchos"
+        fin
+    fin
+
+    función principal(): byte
+        variable i: nat64
+        variable j: ent64
+        variable p: puntero a Nudo
+        variable t: ent64
+        variable k: nat32
+        escribir(tamaño(p), " ", tamaño(Nudo), " ", tamaño(nudos), " ", tamaño(nat64), "\n")
+        grande := potencia(40) + 5
+        escribir(grande, " ", grande >> 20, " ", grande div 1000000, "\n")
+        escribir(potencia(63), " ", ent64(potencia(63)), " ", nob nat64(0), "\n")
+        ; cuentas de 32 bits (dan la vuelta) y de 64 (no)
+        escribir(cuenta32 + cuenta32, " ", nat64(cuenta32) + cuenta32, "\n")
+        j := -5
+        escribir(j * 1000000000, " ", j div 2, " ", j mod 2, " ", j >> 1, "\n")
+        suma(ent64(-1500000000) * 2, -7, t)
+        escribir(t, "\n")
+        ; una lista enlazada con punteros de 8 octetos
+        para k desde 0 hasta 3 hacer
+            nudos[k].valor := ent64(k) * 1000000 * 1000000 - 1
+            nudos[k].letra := 'A' + k
+            si k < 3 entonces nudos[k].sig := dirección(nudos[k + 1]) sino nudos[k].sig := nulo fin
+        fin
+        p := dirección(nudos[0])
+        mientras p <> nulo hacer
+            escribir_car(p.letra)
+            escribir("=", p.valor, " ")
+            p := p.sig
+        fin
+        escribir("\n")
+        para i desde 0 hasta 2 hacer
+            escribir(nombres[i], " ")
+        fin
+        escribir("\n")
+        para j desde 3 hasta -3 paso -3 hacer
+            escribir(j, " ")
+        fin
+        escribir("\n")
+        escribir(a_mano(potencia(32) + 705032704, 1), " ", nat64(dirección(potencia)) > 0x400000, "\n")
+        escribir(clase(0), ", ", clase(2), ", ", clase(4000000000), ", ", clase(potencia(33)), "\n")
+        ; las comparaciones, en 64 bits si alguno lo es
+        escribir(grande > cuenta32, " ", ent64(-1) < nat32(1), " ", potencia(32) = nat64(65536) * 65536, "\n")
+        ; una llamada al sistema: getpid (39), que no es 0
+        escribir(sistema(39, 0, 0, 0) > 0, "\n")
+        devolver 42
+    fin
+
+fin Largo64.

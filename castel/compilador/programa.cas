@@ -15,7 +15,7 @@
 ; =============================================================================
 módulo Programa
 
-    importar Medidas, Base, Tablas, Cuentas, Tipos, Salida, Expr, Sent, Lexico, Sintactico, Apoyo, Textos, Archivos
+    importar Medidas, Base, Tablas, Cuentas, Tipos, Salida, Expr, Sent, Lexico, Sintactico, Apoyo, Textos, Archivos, Gen64
 
     constante MAX_LN = 320
     constante N_R = 7
@@ -123,6 +123,7 @@ módulo Programa
     ; el número de la rutina de apoyo de ese nombre, o -1
     ; el número de rutinas de apoyo y la i-ésima: las de 32 bits en el modelo plano
     función napoyo(): nat16
+        si en64 entonces devolver l64_napoyo() fin      ; [CASTEL64]
         si plano entonces
             si es_núcleo entonces devolver N_APOYO_NÚCLEO fin
             si es_usuario entonces devolver N_APOYO_USUARIO fin
@@ -132,11 +133,13 @@ módulo Programa
     fin
 
     función ap_nombre(i: nat16): puntero a byte
+        si en64 entonces devolver l64_apoyo_nombre(i) fin
         si plano entonces devolver apoyo32_nombre(es_núcleo, es_usuario, i) fin
         devolver apoyo_nombre(i)
     fin
 
     función ap_texto(i: nat16): puntero a byte
+        si en64 entonces devolver l64_apoyo_texto(i) fin
         si plano entonces devolver apoyo32_texto(es_núcleo, es_usuario, i) fin
         devolver apoyo_texto(i)
     fin
@@ -302,9 +305,26 @@ módulo Programa
             dp_nat(c.bajo)
             devolver
         fin
-        ; en 32 bits, el valor cabe en lo que ocupa el campo (dw, db, dd)
+        ; en 32 bits, el valor cabe en lo que ocupa el campo (dw, db, dd; en 64, dq)
         si plano y const(e, c) entonces
-            si ttam(t) = 1 entonces dp_nat(c.bajo yb 0xFF) sino si ttam(t) = 2 entonces dp_nat(c.bajo yb 0xFFFF) sino dp_nat(c.bajo) fin
+            si ttam(t) = 1 entonces
+                dp_nat(c.bajo yb 0xFF)
+            sino si ttam(t) = 2 entonces
+                dp_nat(c.bajo yb 0xFFFF)
+            sino si ttam(t) = 8 entonces
+                l64_texto(c, falso, im)
+                dp(im)
+            sino
+                dp_nat(c.bajo)
+            fin
+            devolver
+        fin
+        si en64 entonces
+            si no l64_inmediato(e, im) entonces
+                m("el valor inicial de una variable global tiene que ser constante")
+                falla(nlin(e), ncol(e))
+            fin
+            dp(im)
             devolver
         fin
         si no inmediato(e, im) entonces
@@ -319,6 +339,8 @@ módulo Programa
             dp("db ")
         sino si tam = 2 entonces
             dp("dw ")
+        sino si tam = 8 entonces
+            dp("dq ")
         sino
             dp("dd ")
         fin
@@ -479,6 +501,40 @@ módulo Programa
         f_pon_nbytes(f, 4 * n)
     fin
 
+    ; [CASTEL64] los de una función de 64 bits: ocho octetos cada uno, desde
+    ; [rbp+16]. La de una interrupción, como mucho uno: el número de error que
+    ; deja el procesador (en [rbp+120], detrás de los quince registros)
+    función declara_func64(d: nat16, f: nat16, m_: nat16)
+        variable p, off, n: nat16
+        si es_programa(m_) entonces f_marca(f, FM_VIVO) fin
+        off := 16
+        n := f_nparams(f)
+        si nmarcas(d) yb M_ATIENDE <> 0 entonces
+            f_marca(f, FM_ATIENDE)
+            si f_tret(f) <> T_NADA entonces
+                m("una función de interrupción no devuelve nada")
+                falla(nlin(nc(d)), ncol(nc(d)))
+            fin
+            p := nb(d)
+            si n > 1 o (n = 1 y (nmarcas(p) yb M_REF <> 0 o no es_num(nt(p)))) entonces
+                m("una función de interrupción lleva como mucho un parámetro: el número de error que deja el procesador")
+                falla(nlin(d), ncol(d))
+            fin
+            off := 120
+        fin
+        p := nb(d)
+        mientras p <> 0 hacer
+            si (tk(nt(p)) = TK_ARR o tk(nt(p)) = TK_EST) y nmarcas(p) yb M_REF = 0 entonces
+                m("los arreglos y las estructuras se pasan con «ref»")
+                falla(nlin(p), ncol(p))
+            fin
+            pon_c(p, off)
+            off := off + 8
+            p := nsig(p)
+        fin
+        f_pon_nbytes(f, 8 * n)
+    fin
+
     función declara(m_: nat16)
         variable d, nm, t, r, f, p, off, n: nat16
         variable lejos: bool
@@ -561,6 +617,11 @@ módulo Programa
                 mientras p <> 0 hacer
                     pon_t(p, resuelve(nb(p)))
                     p := nsig(p)
+                fin
+                si en64 entonces
+                    declara_func64(d, f, m_)
+                    d := nsig(d)
+                    seguir
                 fin
                 si plano entonces
                     declara_func32(d, f, m_)
@@ -1021,10 +1082,104 @@ módulo Programa
         si fin_programa_usado entonces sl("_fin_programa:") fin
     fin
 
+    ; [CASTEL64] escribir el programa de 64 bits (modelo linux64: un ELF de Linux;
+    ; modelo núcleo64: el núcleo de Hispa-64, multiboot)
+    función escribe64(pr: nat16)
+        variable k, i, n, v, r, m_, d, nm: nat16
+        variable t: arreglo [TXT] de byte
+        sl("; -----------------------------------------------------------------")
+        s("; Generado por ccastel desde el m\xC3\xB3dulo ")
+        at_texto(mod_nombre[prog], t)
+        s(t)
+        sl(". NO editar a mano.")
+        si es_linux entonces
+            sl("; Ensamblar:  nasm -f bin ESTE.asm -o PROGRAMA")
+        sino
+            sl("; Ensamblar:  nasm -f bin ESTE.asm -o NUCLEO64.BIN")
+        fin
+        sl("; -----------------------------------------------------------------")
+        sl("cpu x64")
+        s(l64_arranque())
+        sl("    call F_principal")
+        si f_tret(pr) = T_NADA entonces sl("    xor eax, eax") fin
+        sl("    jmp castel_salir")
+        código_de(prog)
+        m_ := 0
+        mientras m_ + 1 < n_modulos hacer
+            código_de(m_)
+            m_ := m_ + 1
+        fin
+        apoyo_de(1)
+        sl("")
+        sl("; ---- datos ----")
+        destino := A_SALIDA
+        i := 0
+        mientras i < n_datos hacer
+            v := dato(i)
+            si v yb DATO_GLOBAL <> 0 entonces
+                r := v yb 0x7FFF
+                si s_marcas(r) yb SM_VIVO <> 0 entonces línea_global(r) fin
+            sino si tx_vivo(v) entonces
+                s("T_")
+                s_nat(tx_etiqueta(v))
+                s(": db ")
+                n := tx_largo(v)
+                k := 0
+                mientras k < n hacer
+                    s_nat(tx_byte(v, k))
+                    s(",")
+                    k := k + 1
+                fin
+                sl("0")
+            fin
+            i := i + 1
+        fin
+        s(l64_arranque_datos())
+        sl("    align 8, db 0")
+        sl("_datos_fin:")
+        sl("")
+        sl("; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----")
+        sl("_vacio:")
+        sl("    absolute _vacio")
+        sl("C_pila:")
+        s("    resb ")
+        s_nat(l64_pila())
+        s("\n")
+        sl("C_pila_fin:")
+        m_ := 0
+        mientras m_ < n_modulos hacer
+            d := nb(mod_arbol[m_])
+            mientras d <> 0 hacer
+                si nk(d) = K_VAR y nc(d) = 0 entonces
+                    nm := na(d)
+                    mientras nm <> 0 hacer
+                        r := sim_propio(m_, na(nm))
+                        si s_marcas(r) yb SM_VIVO <> 0 entonces
+                            etq_nombre('G', m_, na(nm), t)
+                            s(t)
+                            s(": resb ")
+                            s_nat(ttam(s_a(r)))
+                            s("\n")
+                        fin
+                        nm := nsig(nm)
+                    fin
+                fin
+                d := nsig(d)
+            fin
+            m_ := m_ + 1
+        fin
+        sl("_vacio_fin:")
+        si fin_programa_usado entonces sl("_fin_programa:") fin
+    fin
+
     función escribe(pr: nat16)
         variable k, i, n, v, r, m_, d, nm: nat16
         variable t: arreglo [TXT] de byte
         variable vacío, hay_datos: bool
+        si en64 entonces
+            escribe64(pr)
+            devolver
+        fin
         si plano entonces
             escribe32(pr)
             devolver
@@ -1234,6 +1389,8 @@ módulo Programa
         plano := falso
         es_núcleo := falso
         es_usuario := falso
+        en64 := falso
+        es_linux := falso
         d := nb(mod_arbol[prog])
         mientras d <> 0 hacer
             si nk(d) = K_MODELO entonces
@@ -1242,10 +1399,21 @@ módulo Programa
                 es_núcleo := na(d) = a_núcleo
                 es_usuario := na(d) = a_usuario
                 plano := es_núcleo o es_usuario o na(d) = a_hispa32
+                ; [CASTEL64] «modelo linux64» o «núcleo64»: 64 bits (CASTEL64.md)
+                es_linux := na(d) = a_linux64
+                en64 := es_linux o na(d) = a_núcleo64
+                plano := plano o en64
+                si en64 y no hay_64() entonces
+                    m("los modelos de 64 bits no están en el CASTEL de 16 bits: se compilan con CASTEL32 o CASTEL64")
+                    falla(nlin(d), ncol(d))
+                fin
             fin
             d := nsig(d)
         fin
-        si plano entonces
+        si en64 entonces
+            t_pon_tam(T_PUNT_U, 8)
+            t_pon_tam(T_TEXTO, 8)
+        sino si plano entonces
             t_pon_tam(T_PUNT_U, 4)
             t_pon_tam(T_TEXTO, 4)
         fin
@@ -1267,6 +1435,7 @@ módulo Programa
             falla(nlin(f_nudo(f)), ncol(f_nudo(f)))
         fin
         la_principal := f
+        l64_principal := f
         ; el código: primero el programa; detrás, los módulos
         abre_temporal()
         para orden desde 0 hasta n_modulos - 1 hacer

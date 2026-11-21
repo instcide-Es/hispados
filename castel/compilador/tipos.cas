@@ -74,6 +74,8 @@ módulo Tipos
             caso TK_BOOL: m("bool")
             caso TK_NAT32: m("nat32")
             caso TK_ENT32: m("ent32")
+            caso TK_NAT64: m("nat64")
+            caso TK_ENT64: m("ent64")
         fin
     fin
 
@@ -106,6 +108,7 @@ módulo Tipos
 
     público función con_signo(ta: nat16, tb: nat16): bool
         si tk(ta) = TK_ENT16 o tk(tb) = TK_ENT16 o tk(ta) = TK_ENT32 o tk(tb) = TK_ENT32 entonces devolver cierto fin
+        si tk(ta) = TK_ENT64 o tk(tb) = TK_ENT64 entonces devolver cierto fin
         devolver es_lit(ta) y es_lit(tb)
     fin
 
@@ -156,6 +159,11 @@ módulo Tipos
             caso K_TNOM:
                 r := tipo_de_nombre(na(t))
                 si r = 0 entonces no_está("tipo desconocido", na(t), nlin(t), ncol(t)) fin
+                si (r = T_NAT64 o r = T_ENT64) y no en64 entonces
+                    m_at(na(t))
+                    m(" es de 64 bits (modelo linux64 o núcleo64)")
+                    falla(nlin(t), ncol(t))
+                fin
                 devolver r
             caso K_TPUNT:
                 r := tip_nuevo(TK_PUNT, tam_punt())     ; lo apuntado se mira más tarde, pero en este módulo
@@ -544,6 +552,10 @@ módulo Tipos
                     const(e, v)
                     devolver tipo_lit(v)
                 fin
+                si es64(t) entonces             ; [CASTEL64]
+                    si nop(e) = O_MENOS entonces devolver T_ENT64 fin
+                    devolver t
+                fin
                 si nop(e) = O_MENOS entonces
                     si es32(t) o plano entonces devolver T_ENT32 fin
                     devolver T_ENT16
@@ -689,6 +701,7 @@ módulo Tipos
                 m("solo se restan dos punteros a byte")
                 falla(nlin(e), ncol(e))
             fin
+            si en64 entonces devolver T_NAT64 fin
             si plano entonces devolver T_NAT32 fin
             devolver T_NAT16
         fin
@@ -699,6 +712,7 @@ módulo Tipos
             devolver tipo_lit(v)
         fin
         si op = O_IZQ o op = O_DER entonces     ; manda el que se desplaza
+            si es64(ta) entonces devolver ta fin
             si es32(ta) o plano entonces
                 si tk(ta) = TK_ENT32 o tk(ta) = TK_ENT16 entonces devolver T_ENT32 fin
                 devolver T_NAT32
@@ -707,6 +721,10 @@ módulo Tipos
             devolver T_NAT16
         fin
         signo := tk(ta) = TK_ENT16 o tk(tb) = TK_ENT16 o tk(ta) = TK_ENT32 o tk(tb) = TK_ENT32
+        si es64(ta) o es64(tb) entonces         ; [CASTEL64]
+            si signo o tk(ta) = TK_ENT64 o tk(tb) = TK_ENT64 entonces devolver T_ENT64 fin
+            devolver T_NAT64
+        fin
         si es32(ta) o es32(tb) o plano entonces
             si signo entonces devolver T_ENT32 fin
             devolver T_NAT32
@@ -888,7 +906,11 @@ módulo Tipos
         si plano entonces
             si i = I_INTERRUPCION o (i >= I_ACARREO y i <= I_REG_ES) entonces
                 m_at(nm)
-                m("() es del modo real (BIOS y DOS): en 32 bits no está (se usa un bloque «ensamblador»)")
+                si en64 entonces
+                    m("() es del modo real (BIOS y DOS): en 64 bits no está (se usa un bloque «ensamblador»)")
+                sino
+                    m("() es del modo real (BIOS y DOS): en 32 bits no está (se usa un bloque «ensamblador»)")
+                fin
                 falla(nlin(e), ncol(e))
             fin
         fin
@@ -1008,7 +1030,12 @@ módulo Tipos
                     falla(nlin(a), ncol(a))
                 fin
                 devolver T_PUNT_U
-            caso I_NAT8, I_BYTE, I_NAT16, I_ENT16, I_NAT32, I_ENT32:
+            caso I_NAT8, I_BYTE, I_NAT16, I_ENT16, I_NAT32, I_ENT32, I_NAT64, I_ENT64:
+                si (i = I_NAT64 o i = I_ENT64) y no en64 entonces
+                    m_at(nm)
+                    m("() es de 64 bits (modelo linux64 o núcleo64)")
+                    falla(nlin(e), ncol(e))
+                fin
                 args_simples(e, 1, 0)
                 a := arg(e, 0)
                 t := valor_tipo(a)

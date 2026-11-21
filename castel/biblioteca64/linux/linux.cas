@@ -1,0 +1,54 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; linux.cas (Linux x86-64) - las llamadas al sistema de Linux para los
+; programas de «modelo linux64» (CASTEL64.md): «syscall» con el número en RAX
+; y los argumentos en RDI, RSI, RDX, R10, R8 y R9. Lo que dan: el resultado o,
+; si falla, el error en negativo (-ENOENT...). Lo usan Lejos, Archivos y
+; Argumentos de esta carpeta, que son los de biblioteca/ (la misma forma de
+; usarlos) sobre Linux.
+módulo Linux
+
+    público constante LEER = 0                  ; los números de las llamadas
+    público constante ESCRIBIR = 1
+    público constante ABRIR = 2
+    público constante CERRAR = 3
+    público constante SITUAR = 8
+    público constante MAPEAR = 9
+    público constante BORRAR = 87
+    público constante LEER_ENLACE = 89
+
+    público constante NO_EXISTE = -2            ; ENOENT
+
+    ; la llamada n con tres argumentos
+    público función sistema(n: nat64, a: nat64, b: nat64, c: nat64): ent64
+        ensamblador
+            mov rax, {n}
+            mov rdi, {a}
+            mov rsi, {b}
+            mov rdx, {c}
+            syscall
+        fin
+    fin
+
+    ; la llamada n con seis argumentos
+    público función sistema6(n: nat64, a: nat64, b: nat64, c: nat64, d: nat64, e: nat64, f: nat64): ent64
+        ensamblador
+            mov rax, {n}
+            mov rdi, {a}
+            mov rsi, {b}
+            mov rdx, {c}
+            mov r10, {d}
+            mov r8, {e}
+            mov r9, {f}
+            syscall
+        fin
+    fin
+
+    ; dónde dejó Linux la pila al empezar: el número de argumentos y, detrás,
+    ; la dirección de cada uno (la guarda el arranque de linux64)
+    público función pila_inicial(): puntero a nat64
+        ensamblador
+            mov rax, [C_pila_linux]
+        fin
+    fin
+
+fin Linux.

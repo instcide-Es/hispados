@@ -1,0 +1,42 @@
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; argumentos.cas (Linux x86-64) - los argumentos de biblioteca/argumentos.cas
+; para los programas de «modelo linux64»: los que Linux deja en la pila al
+; empezar (el número y la dirección de cada uno). La misma forma de usarlo
+; que en DOS.
+módulo Argumentos
+
+    importar Linux, Textos
+
+    ; los argumentos (sin contar el nombre del programa)
+    público función cuántos_argumentos(): nat16
+        variable p: puntero a nat64
+        p := pila_inicial()
+        si p[0] = 0 entonces devolver 0 fin
+        devolver nat16(p[0] - 1)
+    fin
+
+    ; copia en destino el argumento número n (el primero es el 1), acabado en
+    ; 0; «cabe» es el sitio que hay, con el 0. Da falso si no hay tantos.
+    público función argumento(n: nat16, destino: puntero a byte, cabe: nat16): bool
+        variable p: puntero a nat64
+        si cabe > 0 entonces valor(destino) := 0 fin
+        p := pila_inicial()
+        si n = 0 o cabe = 0 o nat64(n) >= p[0] entonces devolver falso fin
+        copiar_hasta(destino, puntero(p[n + 1]), cabe)
+        devolver cierto
+    fin
+
+    ; la ruta del archivo del programa (la de /proc/self/exe)
+    público función ruta_del_programa(destino: puntero a byte, cabe: nat16): bool
+        variable r: ent64
+        si cabe = 0 entonces devolver falso fin
+        r := sistema(LEER_ENLACE, nat64("/proc/self/exe"), nat64(destino), cabe - 1)
+        si r <= 0 entonces
+            valor(destino) := 0
+            devolver falso
+        fin
+        destino[r] := 0
+        devolver cierto
+    fin
+
+fin Argumentos.

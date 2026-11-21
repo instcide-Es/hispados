@@ -1,0 +1,8 @@
+; nat64 y ent64 solo están en los modelos de 64 bits.
+; ERROR: 5:17: error: nat64 es de 64 bits (modelo linux64 o núcleo64)
+módulo Error
+    modelo núcleo
+    variable n: nat64
+    función principal()
+    fin
+fin Error.

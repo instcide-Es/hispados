@@ -1,0 +1,63 @@
+; sistema64.cas - la biblioteca de Castel sobre Linux (biblioteca64/linux,
+; CASTEL64.md): los archivos (crear, grabar, leer por líneas con un Lector,
+; situar, el largo, borrar, uno que no está), las rutas del DOS («\» y las
+; mayúsculas), los argumentos y la memoria «lejana» por párrafos (Lejos).
+; código de salida: 3
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo Sistema64
+
+    modelo linux64
+
+    importar Archivos, Argumentos, Lejos, Textos
+
+    variable lector: Lector
+    variable escritor: Escritor
+    variable línea: arreglo [100] de byte
+    variable trozo: arreglo [16] de byte
+
+    función principal(): byte
+        variable m: ent16
+        variable n, i: nat16
+        variable s: Segmento
+        variable ruta: arreglo [300] de byte
+        ; un archivo nuevo, con un Escritor
+        m := crear("/tmp/castel64_prueba.txt")
+        si m = MAL entonces
+            escribir("no se puede crear\n")
+            devolver 1
+        fin
+        empezar_escritor(escritor, m)
+        para i desde 1 hasta 3 hacer
+            poner_texto(escritor, "línea ")
+            poner_número(escritor, i * 1000)
+            poner_línea(escritor)
+        fin
+        vaciar(escritor)
+        cerrar(m)
+        ; se lee: con las barras del DOS y en mayúsculas (el último trozo)
+        m := abrir("\\tmp\\CASTEL64_PRUEBA.TXT", LEER)
+        escribir("abierto: ", m <> MAL, ", largo ", largo(m), "\n")
+        empezar_lector(lector, m)
+        mientras leer_línea(lector, línea, 100) hacer
+            escribir("[", línea, "] ")
+        fin
+        escribir("\n")
+        situar(m, 6, DESDE_EL_PRINCIPIO)
+        n := leer(m, trozo, 4)
+        trozo[n] := 0
+        escribir("desde el 6: ", trozo, "\n")
+        cerrar(m)
+        escribir("borrado: ", borrar("/tmp/castel64_prueba.txt"), "; otra vez: ", borrar("/tmp/castel64_prueba.txt"), "\n")
+        escribir("abrir uno que no está: ", abrir("/tmp/no/esta.txt", LEER), " (error ", error_dos, ")\n")
+        ; los argumentos (el guion de pruebas no le da ninguno)
+        escribir("argumentos: ", cuántos_argumentos(), ", el primero: ", argumento(1, línea, 100), "\n")
+        escribir("la ruta del programa acaba como debe: ", ruta_del_programa(ruta, 300) y longitud(ruta) > 1, "\n")
+        ; la memoria lejana: un bloque de 4096 párrafos (64 K)
+        s := pedir(4096)
+        poner_palabra(s, 0, 1234)
+        poner_byte(s + 4095, 15, 77)
+        escribir("lejos: ", s <> 0, " ", leer_palabra(s, 0), " ", leer_byte(s + 4095, 15), " ", leer_palabra(s, 2), "\n")
+        devolver 3
+    fin
+
+fin Sistema64.
