@@ -35,11 +35,11 @@
 #    (otras plataformas, o lo que no llega por una memoria). Y fuera también
 #    lo que Escudo no sabe mirar (objetivos 2, 3, 4, 5, 6, 7, 9, 11; PCRE...).
 #  - De cada subfirma hexadecimal sin comodines (y sin sitio fijo) de una
-#    lógica, los 32 octetos seguidos que más dicen (no los primeros: muchas
-#    empiezan con relleno). Las lógicas piden varias a la vez (casi todas,
-#    cinco), así que no casan por casualidad; las del cuerpo (.ndb) van
-#    enteras: una sola cadena recortada sí puede estar en un programa limpio
-#    (probado: 32 octetos de una de Win.Trojan.Startpage están en gcc).
+#    lógica que pide todas a la vez y son tres o más («0&1&2&3&4»: casi todas),
+#    los 24 octetos seguidos que más dicen (no los primeros: muchas empiezan
+#    con relleno). Las demás, enteras: una sola cadena recortada sí puede
+#    estar en un programa limpio (probado: 32 octetos de una de
+#    Win.Trojan.Startpage están en gcc; y «OriginalFilename», en todos).
 #  - Las sumas no gastan memoria en el equipo (van en el disco, por tamaño),
 #    pero sí disco y descarga: van todas las de las plataformas elegidas
 #    hasta --max-sumas (de 8 octetos cada una): primero las limpias, las del
@@ -162,7 +162,12 @@ def ventana(h, n):
             s += peso[i + n - 1] - peso[i]
         if s > mejor:
             mejor, donde = s, i
-    return b[donde:donde + n].hex()
+    v = b[donde:donde + n]
+    # (si ni así es variada —una tabla, «1 1$1(1,1...», como las de reubicación
+    # de cualquier programa—, entera: recortada casaría con lo que no es)
+    if len(set(v)) < n * 3 // 4:
+        return h
+    return v.hex()
 
 
 def corta(sub):
@@ -189,6 +194,11 @@ def elige_cuerpo(clase, l):
     if any('/' in s for s in p[3:]):       # PCRE: no
         return None
     p[1] = p[1].replace('Engine:51-255,', '').replace('Engine:81-255,', '')
+    # (solo si la expresión pide TODAS a la vez, y son tres o más: «0&1&2...».
+    # Con «0|1», con una sola o con «=0», una subfirma recortada casa sola con
+    # lo que no es: probado, con los programas de Windows de Open Watcom)
+    if not re.fullmatch(r'\d+(&\d+){2,}', p[2]):
+        return ';'.join(p)
     return ';'.join(p[:3] + [corta(s) for s in p[3:]])
 
 
@@ -302,7 +312,7 @@ def main():
     a.add_argument('--clave')
     a.add_argument('--actualiza', action='store_true')
     a.add_argument('--corpus', action='append', default=[])
-    a.add_argument('--corte', type=int, default=16)
+    a.add_argument('--corte', type=int, default=24)
     o = a.parse_args()
     if not o.corpus:
         o.corpus = [c for c in CORPUS if os.path.isdir(c)]

@@ -229,7 +229,7 @@ static void ordena_sumas(suma *v, u32 n)
 
 static u32 le32(const u8 *p) { return p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24; }
 static u16 le16(const u8 *p) { return (u16)(p[0] | p[1] << 8); }
-static void pon32(u8 *p, u32 v) { p[0] = (u8)v, p[1] = (u8)(v >> 8), p[2] = (u8)(v >> 16), p[3] = (u8)(v >> 24); }
+static __attribute__((unused)) void pon32(u8 *p, u32 v) { p[0] = (u8)v, p[1] = (u8)(v >> 8), p[2] = (u8)(v >> 16), p[3] = (u8)(v >> 24); }
 
 /* el bit del mapa de los tamaños (de «bits» bits: 21 en uno grande, 16 en uno pequeño) */
 static u32 bit_tam2(u32 tam, u32 bits) { return (tam * 2654435761u) >> (32 - bits); }
@@ -1709,7 +1709,7 @@ static void vuelve_a(const marca *m)
 
 /* lee una línea sola (sin apuntar su nombre ni contarla): 1 si ha quedado una
  * firma (la última de «firmas»), con sus patrones desde m->pats */
-static int linea_temporal(int clase, const char *t, u32 n, marca *m)
+static __attribute__((unused)) int linea_temporal(int clase, const char *t, u32 n, marca *m)
 {
 	static info_firmas falsa;
 	info_firmas *antes = inf_actual;
@@ -1861,7 +1861,7 @@ static int requeridas(const firma *f, u64 *sale, const u32 *coste)
 
 /* los disparadores de la firma que acaba de quedar (desde «m»): cuántos, o
  * -1 si tiene que ir siempre en memoria */
-static int disparadores_de(const marca *m, disp *d, int max)
+static __attribute__((unused)) int disparadores_de(const marca *m, disp *d, int max)
 {
 	const firma *f = &firmas[n_firmas - 1];
 	u64 req;
@@ -3139,7 +3139,7 @@ int motor_revisa_archivo(const char *ruta, const char *nombre, resultado *r)
  * línea no pasa de un bloque a otro. Con «familias», el nombre de una suma
  * pierde su número («Win.Trojan.Agent-123456» queda «Win.Trojan.Agent»).
  * Solo lo hace escudo-anfitrion (con la zlib del sistema, para comprimir). */
-static u32 familia(const char *s, u32 n)
+static __attribute__((unused)) u32 familia(const char *s, u32 n)
 {
 	u32 i, vueltas;
 	for (vueltas = 0; vueltas < 2; vueltas++) {
