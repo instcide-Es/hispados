@@ -1,0 +1,329 @@
+; =============================================================================
+;  iconos.cas - los iconos de Hispa-Pentium, dibujados (sin archivos): los
+;  del explorador de archivos (EQUIPO.BIN, uequipo.cas) y los del dock
+;  (dock.cas, en el núcleo). Diseño propio: azules y verdes, esquinas
+;  redondas, y cada clase con su FORMA (no solo su color: hay quien no
+;  distingue los colores): la carpeta, la hoja con renglones (un texto), la
+;  hoja con un monte (una imagen), la ventanita (un programa), la hoja con
+;  su letra (los documentos de la oficina), el disco duro, la memoria USB,
+;  el CD, la memoria, el equipo, la papelera (vacía o con papeles)...
+;
+;  Se dibujan en un lienzo (grafico.cas) de cualquier lado: las medidas
+;  están pensadas para 32 puntos y se escalan (16 para las listas, 32 para
+;  los iconos, 48 para las miniaturas y el dock).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Iconos
+
+    importar Grafico, Letra
+
+    ; ---- las clases de icono ----
+    público constante IC_CARPETA = 1
+    público constante IC_CARPETA_ARRIBA = 2     ; «..»: subir
+    público constante IC_TEXTO = 3              ; .TXT, .BAT, .INI...
+    público constante IC_IMAGEN = 4             ; .BMP, .PNG, .JPG...
+    público constante IC_PROGRAMA = 5           ; .BIN, .HVP, .EXE
+    público constante IC_DOCUMENTO = 6          ; uno de la oficina (con su letra)
+    público constante IC_ARCHIVO = 7            ; los demás
+    público constante IC_DISCO = 8
+    público constante IC_USB = 9
+    público constante IC_CD = 10
+    público constante IC_MEMORIA = 11
+    público constante IC_EQUIPO = 12
+    público constante IC_PAPELERA = 13
+    público constante IC_PAPELERA_LLENA = 14
+    público constante IC_CONSOLA = 15
+    público constante IC_RUEDA = 16             ; Configuración
+    público constante IC_BUSCAR = 17
+    público constante IC_PAQUETE = 18           ; «Programas y actualizaciones»
+    público constante IC_DISCO_SIN = 19         ; un disco sin nada que se pueda leer
+
+    constante BLANCO = 0xFFFFFF
+    constante TRAZO = 0x2C4468                  ; el borde de casi todos (oscuro: se ve sobre claro y sobre azul)
+
+    variable lz: puntero a Lienzo
+    variable ox, oy, ld: ent32
+
+    ; medida de 32 a la del icono
+    función m(v: ent32): ent32
+        devolver v * ld div 32
+    fin
+
+    ; las piezas, en medidas de 32
+    función r(x: ent32, yy: ent32, an: ent32, al: ent32, c: nat32)
+        variable a, b: ent32
+        a := m(an)
+        b := m(al)
+        si a < 1 y an > 0 entonces a := 1 fin
+        si b < 1 y al > 0 entonces b := 1 fin
+        rectángulo(valor(lz), ox + m(x), oy + m(yy), a, b, c)
+    fin
+
+    función rr(x: ent32, yy: ent32, an: ent32, al: ent32, radio: ent32, arriba: nat32, abajo: nat32)
+        variable k: ent32
+        k := m(radio)
+        si k < 1 entonces k := 1 fin
+        redondeado(valor(lz), ox + m(x), oy + m(yy), m(an), m(al), k, arriba, abajo, TODAS)
+    fin
+
+    función ci(x: ent32, yy: ent32, radio: ent32, col: nat32)
+        círculo(valor(lz), ox + m(x), oy + m(yy), m(radio), col)
+    fin
+
+    función li(x1: ent32, y1: ent32, x2: ent32, y2: ent32, col: nat32)
+        línea(valor(lz), ox + m(x1), oy + m(y1), ox + m(x2), oy + m(y2), col)
+    fin
+
+    ; ---- los dibujos ----
+    función carpeta(arriba: bool)
+        rr(1, 5, 13, 7, 2, 0xA86E0C, 0xA86E0C)
+        rr(1, 8, 30, 21, 3, 0xA86E0C, 0xA86E0C)
+        rr(2, 9, 28, 19, 2, 0xFFDA7A, 0xF0A92E)
+        r(2, 11, 28, 1, 0xFFF0C0)
+        si arriba entonces
+            ; una flecha hacia arriba, oscura, en medio
+            r(15, 14, 3, 11, TRAZO)
+            li(11, 18, 16, 13, TRAZO)
+            li(12, 18, 16, 14, TRAZO)
+            li(21, 18, 16, 13, TRAZO)
+            li(20, 18, 16, 14, TRAZO)
+        fin
+    fin
+
+    ; una hoja con su esquina doblada; lo de dentro lo pone quien llama
+    función hoja()
+        r(5, 1, 18, 30, TRAZO)
+        r(5, 1, 23, 1, TRAZO)
+        r(27, 7, 1, 24, TRAZO)
+        r(5, 30, 23, 1, TRAZO)
+        r(6, 2, 17, 28, BLANCO)
+        r(6, 7, 21, 23, BLANCO)
+        li(22, 1, 27, 6, TRAZO)
+        r(22, 2, 1, 5, 0xB7C7DE)
+        r(22, 6, 5, 1, 0xB7C7DE)
+    fin
+
+    función renglones()
+        variable i: ent32
+        para i desde 0 hasta 4 hacer
+            r(9, 10 + i * 4, 15 - (i mod 2) * 5, 2, 0x5A7396)
+        fin
+    fin
+
+    ; un monte y un sol, sobre azul
+    función paisaje()
+        r(8, 9, 17, 17, 0x8FD0FF)
+        ci(20, 13, 3, 0xFFC93C)
+        li(8, 25, 14, 15, 0x1F7A3A)
+        li(14, 15, 20, 25, 0x1F7A3A)
+        r(9, 22, 15, 4, 0x2F9E4F)
+        r(11, 19, 6, 3, 0x2F9E4F)
+        r(8, 26, 17, 1, TRAZO)
+    fin
+
+    ; una ventanita: el título verde con su botón, y lo de dentro blanco
+    función ventanita()
+        rr(1, 4, 30, 24, 3, TRAZO, TRAZO)
+        rr(2, 5, 28, 6, 2, 0x5CC45E, 0x2A8A3C)
+        r(2, 10, 28, 17, BLANCO)
+        r(24, 6, 4, 4, BLANCO)
+        r(5, 14, 10, 2, 0x5A7396)
+        r(5, 18, 16, 2, 0x5A7396)
+        r(5, 22, 7, 2, 0x5A7396)
+    fin
+
+    función disco_duro(con_nada: bool)
+        rr(1, 9, 30, 16, 3, TRAZO, TRAZO)
+        rr(2, 10, 28, 14, 2, 0xE4ECF7, 0xAEC0DA)
+        r(5, 19, 14, 2, 0x4F6890)
+        si con_nada entonces
+            ; sin nada que leer: un aspa en vez de la luz
+            li(23, 15, 28, 21, 0xB8441A)
+            li(28, 15, 23, 21, 0xB8441A)
+        sino
+            r(24, 17, 4, 4, 0x2E9E4F)
+            r(25, 18, 2, 2, 0x9AF0B0)
+        fin
+        r(4, 12, 24, 1, BLANCO)
+    fin
+
+    función memoria_usb()
+        r(11, 1, 10, 9, TRAZO)
+        r(12, 2, 8, 8, 0xE4ECF7)
+        r(14, 4, 1, 3, TRAZO)
+        r(17, 4, 1, 3, TRAZO)
+        rr(8, 9, 16, 22, 3, 0x14408A, 0x14408A)
+        rr(9, 10, 14, 20, 2, 0x5DA8F5, 0x2463C2)
+        r(12, 16, 8, 2, BLANCO)
+        r(12, 21, 8, 2, BLANCO)
+    fin
+
+    función cd()
+        ci(16, 16, 15, TRAZO)
+        ci(16, 16, 14, 0xD9E4F2)
+        ci(16, 16, 10, 0xEEF4FB)
+        li(8, 9, 13, 13, BLANCO)
+        ci(16, 16, 5, 0x8DA3C4)
+        ci(16, 16, 3, BLANCO)
+        ci(16, 16, 2, TRAZO)
+    fin
+
+    ; un peine de memoria: la placa verde con sus chips y sus patas
+    función memoria()
+        rr(1, 9, 30, 14, 2, 0x1D5E35, 0x1D5E35)
+        r(2, 10, 28, 12, 0x2F9E4F)
+        r(4, 12, 6, 7, 0x1B2B44)
+        r(13, 12, 6, 7, 0x1B2B44)
+        r(22, 12, 6, 7, 0x1B2B44)
+        r(3, 23, 26, 3, 0xD9B44A)
+        r(15, 23, 2, 3, 0x1D5E35)
+    fin
+
+    función equipo()
+        rr(1, 1, 30, 22, 3, TRAZO, TRAZO)
+        rr(2, 2, 28, 20, 2, 0xE4ECF7, 0xB7C7DE)
+        degradado(valor(lz), ox + m(4), oy + m(4), m(24), m(15), 0x7FC2FA, 0x2A7AD6)
+        disquete(valor(lz), ox + m(11), oy + m(6), m(11))
+        r(13, 23, 6, 3, 0x7F95B6)
+        rr(5, 26, 22, 5, 2, TRAZO, TRAZO)
+        r(6, 27, 20, 3, 0xDCE6F3)
+    fin
+
+    función papelera(llena: bool)
+        si llena entonces
+            ; papeles que asoman, arrugados
+            r(8, 3, 9, 7, TRAZO)
+            r(9, 4, 7, 5, BLANCO)
+            r(16, 1, 9, 8, TRAZO)
+            r(17, 2, 7, 6, 0xFFF4D6)
+            li(18, 4, 22, 4, 0x5A7396)
+        fin
+        rr(4, 8, 24, 4, 2, TRAZO, TRAZO)
+        r(13, 6, 6, 3, TRAZO)
+        r(5, 9, 22, 2, 0xC9D7EA)
+        ; el cubo, más estrecho abajo
+        rr(6, 12, 20, 19, 3, TRAZO, TRAZO)
+        rr(7, 12, 18, 18, 2, 0xE4ECF7, 0xA9BBD6)
+        r(11, 15, 2, 12, 0x6F87A8)
+        r(15, 15, 2, 12, 0x6F87A8)
+        r(19, 15, 2, 12, 0x6F87A8)
+    fin
+
+    función consola()
+        rr(1, 3, 30, 26, 4, TRAZO, TRAZO)
+        rr(2, 4, 28, 24, 3, 0xDCE6F3, 0xA9BBD6)
+        rr(4, 6, 24, 20, 2, 0x1B2B44, 0x0D1626)
+        li(8, 11, 13, 16, 0x7CE88A)
+        li(8, 12, 13, 17, 0x7CE88A)
+        li(13, 16, 8, 21, 0x7CE88A)
+        li(13, 17, 8, 22, 0x7CE88A)
+        r(16, 20, 8, 2, 0x7CE88A)
+    fin
+
+    función rueda()
+        r(14, 2, 4, 28, 0x3A5F94)
+        r(2, 14, 28, 4, 0x3A5F94)
+        li(6, 6, 26, 26, 0x3A5F94)
+        li(7, 6, 27, 26, 0x3A5F94)
+        li(26, 6, 6, 26, 0x3A5F94)
+        li(27, 6, 7, 26, 0x3A5F94)
+        ci(16, 16, 10, 0x3A5F94)
+        ci(16, 16, 8, 0x8FB2E0)
+        ci(16, 16, 4, BLANCO)
+    fin
+
+    función lupa()
+        ci(13, 13, 11, TRAZO)
+        ci(13, 13, 9, 0xCFE7FF)
+        ci(10, 10, 3, BLANCO)
+        li(21, 21, 29, 29, TRAZO)
+        li(22, 21, 30, 29, TRAZO)
+        li(21, 22, 29, 30, TRAZO)
+        li(22, 22, 30, 30, TRAZO)
+    fin
+
+    ; una caja con su cinta (un paquete)
+    función paquete()
+        rr(3, 9, 26, 21, 2, 0x7A4E14, 0x7A4E14)
+        r(4, 10, 24, 19, 0xD9A04A)
+        r(4, 10, 24, 5, 0xE8B866)
+        r(14, 10, 4, 19, 0x2A6BC8)
+        li(16, 9, 10, 3, 0x2A6BC8)
+        li(16, 9, 22, 3, 0x2A6BC8)
+    fin
+
+    ; el color de la cabecera de un documento, por su letra (la de la oficina)
+    público función tinte_de(letra_: nat32): nat32
+        según nat16(letra_)
+            caso 'P': devolver 0x2F74D0        ; Pluma
+            caso 'C': devolver 0x2A8A3C        ; Cuentas
+            caso 'F': devolver 0xCC531C        ; Facturas
+        fin
+        devolver 0x8E5BD8
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo de fuera
+    ; -------------------------------------------------------------------------
+    ; el icono de clase «clase» en (x, yy) de l, de «lado» puntos; «letra_»:
+    ; la letra que lleva un documento (IC_DOCUMENTO: la P de Pluma...) y
+    ; «tinte», el color de su cabecera
+    público función icono(ref l: Lienzo, x: ent32, yy: ent32, lado: ent32, clase: nat32, letra_: nat32, tinte: nat32)
+        lz := dirección(l)
+        ox := x
+        oy := yy
+        ld := lado
+        según nat16(clase)
+            caso IC_CARPETA: carpeta(falso)
+            caso IC_CARPETA_ARRIBA: carpeta(cierto)
+            caso IC_TEXTO:
+                hoja()
+                renglones()
+            caso IC_IMAGEN:
+                hoja()
+                paisaje()
+            caso IC_PROGRAMA: ventanita()
+            caso IC_DOCUMENTO:
+                si tinte = 0 entonces tinte := tinte_de(letra_) fin
+                hoja()
+                r(6, 2, 16, 6, tinte)
+                si lado >= 24 entonces
+                    ; la letra, en negrita y oscura, en medio
+                    letra(l, ox + m(12), oy + m(12), letra_, TRAZO)
+                    letra(l, ox + m(12) + 1, oy + m(12), letra_, TRAZO)
+                sino
+                    renglones()
+                fin
+            caso IC_DISCO: disco_duro(falso)
+            caso IC_DISCO_SIN: disco_duro(cierto)
+            caso IC_USB: memoria_usb()
+            caso IC_CD: cd()
+            caso IC_MEMORIA: memoria()
+            caso IC_EQUIPO: equipo()
+            caso IC_PAPELERA: papelera(falso)
+            caso IC_PAPELERA_LLENA: papelera(cierto)
+            caso IC_CONSOLA: consola()
+            caso IC_RUEDA: rueda()
+            caso IC_BUSCAR: lupa()
+            caso IC_PAQUETE: paquete()
+            si no:
+                hoja()
+        fin
+    fin
+
+    ; la flechita de los accesos (abajo a la izquierda del icono): un
+    ; cuadro blanco con su borde y una flecha que sube a la derecha
+    público función marca_acceso(ref l: Lienzo, x: ent32, yy: ent32, lado: ent32)
+        lz := dirección(l)
+        ox := x
+        oy := yy
+        ld := lado
+        r(0, 20, 12, 12, TRAZO)
+        r(1, 21, 10, 10, BLANCO)
+        li(3, 29, 9, 23, TRAZO)
+        li(4, 29, 10, 23, TRAZO)
+        r(6, 23, 4, 1, TRAZO)
+        r(9, 23, 1, 4, TRAZO)
+    fin
+
+fin Iconos.

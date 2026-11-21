@@ -1349,7 +1349,7 @@ else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | se
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":doble 60 186" ":pausa 4" ":doble 150 140" ":raton 400 300" ":captura b1" ":tecla ctrl-c" \
   ":clicd 300 75" ":captura b2" ":clic 320 164" ":pausa 1" ":captura b3" ":clicd 180 585" ":captura b4" ":clic 200 445" ":pausa 1" ":captura b5" ":arrastra 743 523 643 423" \
   ":pausa 1" ":captura b6" ":clic 40 585" ":clic 80 293" ":pausa 2" ":tecla ctrl-v" ":captura b7" ":clicd 300 75" ":clic 320 197" ":pausa 1" ":captura b8" ":doble 60 40" ":pausa 2" \
-  ":captura b9" ":doble 250 230" ":pausa 1" ":captura b10" ":doble 250 348" ":pausa 2" ":captura b11" ":clicd 700 300" ":clic 650 398" ":pausa 1" ":captura b12" > $G/menus2.sal 2>&1
+  ":captura b9" ":doble 330 160" ":pausa 1" ":raton 600 440" ":captura b10" ":doble 356 310" ":pausa 2" ":captura b11" ":clicd 150 540" ":clic 200 523" ":pausa 1" ":captura b12" > $G/menus2.sal 2>&1
 S=$G/menus2.sal
 mira "dos clics en el icono «Consola» la abren" "escritorio: lanzo .CONSOLA.BIN (la tarea [0-9]*)"
 miracap "en la Consola, dos clics seleccionan una palabra de lo que hay en la pantalla" b1 rgb 97 133 $RES rgb 206 146 $RES nrgb 213 133 $RES texto 92 128 100 136 "Hispa-Pentium:"
@@ -1363,10 +1363,9 @@ miracap "la Consola también cambia de tamaño por la esquina (su pantalla sigue
 miracap "lo copiado en la Consola (Ctrl+C con algo seleccionado) se pega en el Bloc de notas" b7 texto 122 172 130 180 "Hispa-Pentium:"
 miracap "«Cerrar», en el menú de la ventana, la cierra: ni ventana ni botón en la barra" b8 notexto 100 60 200 80 Consola notexto 120 570 300 582 Consola \
   negrita 140 90 152 98 "NOTAS.TXT - Bloc de notas"
-miracap "dos clics en «Mi equipo»: las unidades (C:, el disco FAT16, con lo que mide)" b9 negrita 168 116 180 124 "Mi equipo" negrita 154 167 162 175 "Las unidades de este equipo" \
-  negrita 220 204 228 212 "Unidad C:" texto 220 222 228 230 "disco duro, FAT16"
-miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 178 167 186 175 "C:\\" texto 180 336 188 344 LEEME.TXT texto 180 396 188 404 TEXTOS \
-  texto 180 196 188 204 ".."
+miracap "dos clics en «Mi equipo»: el explorador, con la unidad C: (el disco FAT16) en su mosaico y lo que tiene libre" b9 negrita 30 10 40 20 "Mi equipo" \
+  negrita 265 133 275 143 "HISPA (C:)" texto 313 151 323 161 "libres de"
+miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 30 10 40 20 "C:\\" texto 316 322 326 332 LEEME.TXT texto 428 166 438 176 VACIA
 miracap "y dos clics en un texto lo abren con el Bloc de notas" b11 negrita 198 142 206 150 "\\LEEME.TXT - Bloc de notas" \
   texto 178 224 186 232 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
 miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.8" \
@@ -1386,6 +1385,91 @@ miracap "«Organizar iconos» los devuelve a su sitio" c3 texto 32 202 40 210 Co
 miracap "Configuración dice la medida de la pantalla" c4 texto 302 225 310 233 "Pantalla:  1024 x 600, 32 bits por punto"
 miracap "«Mover», en el menú de una ventana: la flecha va a su título y la ventana la sigue hasta el clic siguiente" c5 negrita 348 185 356 193 "Configuración" \
   notexto 300 120 330 140 "Configuración"
+# (explorador, 21/11) el explorador de archivos (EQUIPO.BIN: el árbol, las
+# vistas, las miniaturas con MINIAT.BIN, copiar y pegar, cambiar el nombre,
+# carpeta nueva, la Papelera, el menú del botón secundario, elegir varios,
+# buscar) y el dock (soltar en el tapiz y en el dock, el punto de los
+# abiertos, su menú, ocultarlo); el disco lo miran luego mtools y fsck.fat
+echo "== Hispa-Pentium: el explorador de archivos y el dock =="
+cp $P/d16.img $G/ex.img
+export MTOOLS_SKIP_CHECK=1
+mmd -i $G/ex.img ::FOTOS
+python3 - $G <<'PY'
+import struct, sys, zlib, base64
+g = sys.argv[1]
+def png(w, h, f):
+    raw = b''.join(b'\0' + b''.join(bytes(f(x, y)) for x in range(w)) for y in range(h))
+    ch = lambda t, d: struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d))
+    return b'\x89PNG\r\n\x1a\n' + ch(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) + ch(b'IDAT', zlib.compress(raw)) + ch(b'IEND', b'')
+open(g + '/FLOR.PNG', 'wb').write(png(160, 120, lambda x, y: (255, 122, 51) if (x - 80) ** 2 + (y - 60) ** 2 < 35 ** 2 else (47, 116, 208)))
+w, h = 64, 96
+filas = b''.join(bytes((255, 255, 255) if 10 <= x < 54 and 56 <= y < 86 else (0x4A, 0x29, 0x14)) * 1 for y in range(h) for x in range(w))
+bmp = b'BM' + struct.pack('<IHHI', 54 + len(filas), 0, 0, 54) + struct.pack('<IiiHHIIiiII', 40, w, h, 1, 24, 0, len(filas), 2835, 2835, 0, 0) + filas
+open(g + '/CASA.BMP', 'wb').write(bmp)
+open(g + '/PAISAJE.JPG', 'wb').write(base64.b64decode('/9j/4AAQSkZJRgABAQAAAAAAAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAgADADASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAYH/8QAFhAAAwAAAAAAAAAAAAAAAAAAABRh/8QAFwEBAQEBAAAAAAAAAAAAAAAAAAYFB//EABcRAQEBAQAAAAAAAAAAAAAAAAATFGH/2gAMAwEAAhEDEQA/ANQfofpKP0P04rgWkVW/Q/SUfofowEVW/Q/SUfofowEUo/Q/SUfofpa4ONWKrfofpKP0P0YOEVW/Q/SUfofowcIv/9k='))
+PY
+mcopy -i $G/ex.img $G/CASA.BMP $G/FLOR.PNG $G/PAISAJE.JPG ::FOTOS/
+miniat=no
+if bash $AQUI/nucleo32/miniat/hacer.sh $G/MINIAT.BIN > $G/miniat.txt 2>&1; then mcopy -i $G/ex.img $G/MINIAT.BIN ::; miniat=si; fi
+SES=(":pausa 2" ":captura ex1" ":doble 60 40" ":pausa 3" ":captura ex2" ":doble 330 160" ":pausa 2" ":raton 600 440" ":captura ex3"
+ ":tecla alt-v" ":tecla down down down down ret" ":pausa 1" ":captura ex4"
+ ":tecla ret" ":pausa 1" ":tecla alt-v" ":tecla down ret" ":pausa 6" ":captura ex5"
+ ":tecla alt-v" ":tecla down down ret" ":tecla backspace" ":pausa 1"
+ ":clic 452 310" ":tecla ctrl-c" ":doble 548 155" ":pausa 1" ":tecla ctrl-v" ":pausa 2" ":raton 600 440" ":captura ex6"
+ ":clic 260 160" ":tecla f2" ":pausa 1" ":captura ex7" ":escribe NUEVO.TXT" ":tecla ret" ":pausa 1" ":tecla f7" ":pausa 1" ":captura ex8"
+ ":tecla ret" ":pausa 1" ":raton 600 440" ":captura ex9" ":clic 260 160" ":tecla delete" ":pausa 2" ":raton 600 440" ":captura ex10"
+ ":clic 84 260" ":pausa 2" ":raton 600 440" ":captura ex11" ":clic 260 160" ":tecla alt-h" ":tecla down down ret" ":pausa 2" ":captura ex12"
+ ":tecla f4" ":escribe C:\\" ":tecla ret" ":pausa 1" ":clicd 452 310" ":pausa 1" ":captura ex13" ":tecla esc"
+ ":clic 260 260" ":ctrlclic 356 260" ":pausa 1" ":captura ex14" ":arrastra 600 455 380 290" ":pausa 1" ":captura ex15"
+ ":clic 452 310" ":arrastra 452 310 120 540" ":pausa 2" ":clic 260 410" ":arrastra 260 410 400 535" ":pausa 2" ":captura ex16"
+ ":tecla f3" ":escribe pir" ":tecla ret" ":pausa 3" ":captura ex17" ":doble 100 525" ":pausa 3" ":captura ex18" ":arrastra 292 530 400 530" ":pausa 1"
+ ":clicd 320 530" ":pausa 1" ":captura ex19" ":clic 380 513" ":pausa 1" ":captura ex20")
+CAPTURAS=$G ESCRIBE=1 DISCO=$G/ex.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" "${SES[@]}" > $G/explorador.sal 2>&1
+S=$G/explorador.sal
+miracap "el dock: centrado abajo, encima de la barra de tareas, con el borde del panel" ex1 rgb 400 504 0F3F8A 20 negrita 30 570 46 580 Inicio
+miracap "«Mi equipo» es el explorador: el árbol (Mi equipo), la unidad C: en su mosaico, con lo libre, y la Papelera" ex2 negrita 30 10 40 20 "Mi equipo" \
+  negrita 265 133 275 143 "HISPA (C:)" negrita 515 133 525 143 Papelera texto 313 151 323 161 "libres de" texto 48 127 58 137 "Mi equipo"
+miracap "dos clics en la unidad: sus carpetas y sus archivos, en iconos, y lo libre en la barra de estado" ex3 texto 236 166 246 176 FOTOS \
+  texto 412 322 422 332 LEEME.TXT texto 687 475 697 485 "Libre:"
+miracap "la vista de detalles: la rejilla de los controles, con su nombre, su tamaño, su tipo y su fecha (las carpetas, delante)" ex4 \
+  negrita 221 127 231 137 Nombre negrita 629 127 639 137 Modificado texto 477 177 487 187 Carpeta texto 477 249 487 259 Programa
+if [ $miniat = si ]; then
+  miracap "las miniaturas (MINIAT.BIN, con stb_image): un BMP, un PNG y un JPG en pequeño, con su nombre" ex5 texto 344 204 354 214 FLOR.PNG \
+    texto 444 204 454 214 PAISAJE.JPG rgb 381 170 FF7A33 24 rgb 270 150 FFFFFF 10 nrgb 493 170 FFFFFF 30
+else ko "no se ha podido hacer MINIAT.BIN (¿gcc con -m32?): $(tail -1 $G/miniat.txt)"; fi
+miracap "copiar (Ctrl+C) en una carpeta y pegar (Ctrl+V) en otra: el archivo, y «Hecho» en la barra de estado" ex6 texto 220 166 230 176 LEEME.TXT \
+  texto 159 475 169 485 "copiados 1"
+miracap "F2: el cuadro para cambiar el nombre, con el que tiene" ex7 negrita 187 170 197 180 Cambiar texto 194 225 204 235 LEEME.TXT texto 191 253 201 263 "Hasta 8 letras"
+miracap "F7: la carpeta nueva, con su nombre (CARPETA)" ex8 texto 194 225 204 235 CARPETA
+miracap "el nombre cambiado y la carpeta nueva, en la carpeta" ex9 texto 228 166 238 176 CARPETA texto 316 166 326 176 NUEVO.TXT
+miracap "Supr manda lo elegido a la Papelera (y lo dice)" ex10 texto 220 166 230 176 NUEVO.TXT notexto 210 160 400 180 CARPETA texto 207 475 217 485 Papelera
+miracap "la Papelera, en el árbol: lo que se ha tirado" ex11 negrita 30 10 40 20 Papelera texto 228 166 238 176 CARPETA
+miracap "Herramientas > Restaurar lo elegido: lo devuelve a su sitio, y la Papelera queda vacía" ex12 texto 217 135 227 145 "La Papelera est"
+miracap "el botón secundario en un archivo: Abrir, Abrir con..., Mandar a la Papelera, Propiedades..." ex13 texto 461 338 471 348 "Abrir con..." \
+  texto 461 452 471 462 "Mandar a la Papelera" texto 461 509 471 519 Propiedades
+miracap "Control y un clic eligen dos" ex14 texto 111 475 121 485 "2 elegidos"
+miracap "y un recuadro con el ratón, los que toca" ex15 texto 111 475 121 485 "7 elegidos"
+mira "arrastrar un archivo al tapiz deja en él un acceso" "^escritorio: un acceso nuevo en el tapiz: C:.LEEME.TXT"
+miracap "el acceso en el tapiz (con su flechita), y un programa soltado en el dock queda fijado" ex16 texto 79 541 89 551 LEEME.TXT texto 615 529 625 539 "Fijado en el dock."
+miracap "buscar (F3) «pir» en la carpeta y las de dentro: lo encontrado, con su carpeta" ex17 negrita 236 172 256 192 PIRATA.TXT texto 373 177 383 187 "C:\\TEXTOS" \
+  texto 103 475 113 485 "Encontrados: 2."
+miracap "dos clics en el acceso del tapiz lo abren con lo suyo (EQUIPO /ABRIR: el Bloc de notas)" ex18 negrita 149 89 159 99 "LEEME.TXT"
+miracap "el botón secundario en el dock: Abrir, Abrir otra ventana, Fijar, Quitar, Cerrar y Ocultar el dock" ex19 texto 329 501 339 511 "Ocultar el dock"
+miracap "«Ocultar el dock» lo quita (y lo de debajo se ve)" ex20 nrgb 400 504 0F3F8A 20
+saca $G/ex.img VACIA/NUEVO.TXT $G/nuevo.txt; saca $G/ex.img LEEME.TXT $G/leeme.txt
+if cmp -s $G/nuevo.txt $G/leeme.txt && mdir -i $G/ex.img ::VACIA/CARPETA > /dev/null 2>&1; then ok "en el disco: la copia, con su nombre nuevo, igual que el original, y la carpeta restaurada en su sitio"
+else ko "en el disco no está lo que se ha hecho en el explorador:"; mdir -i $G/ex.img ::VACIA 2>&1 | head -6 | sed 's/^/        /'; fi
+saca $G/ex.img PAPELERA/INDICE.TXT $G/indice.txt
+if [ -f $G/indice.txt ] && [ ! -s $G/indice.txt ] && mattrib -i $G/ex.img ::PAPELERA 2>/dev/null | grep -q "H"; then ok "la Papelera (\\PAPELERA, oculta) queda con su índice vacío"
+else ko "la Papelera no ha quedado bien: $(cat $G/indice.txt 2>/dev/null | head -2)"; fi
+saca $G/ex.img ATAJOS.INI $G/atajos.ini; saca $G/ex.img DOCK.INI $G/dock.ini
+if grep -q "^atajo=C:.LEEME.TXT|LEEME.TXT|" $G/atajos.ini 2>/dev/null && grep -q "^fijado=.MINIAT.BIN||MINIAT.BIN|" $G/dock.ini 2>/dev/null && grep -q "^visible=no" $G/dock.ini \
+  && [ "$(grep "^fijado=" $G/dock.ini | sed -n 4p | cut -d'|' -f1)" = 'fijado=\BLOC.BIN' ]; then
+  ok "ATAJOS.INI guarda el acceso del tapiz, y DOCK.INI el orden (el Bloc, arrastrado al cuarto sitio), el programa fijado y que está oculto"
+else ko "ATAJOS.INI o DOCK.INI no guardan lo que tocaba:"; cat $G/atajos.ini $G/dock.ini 2>&1 | head -12 | sed 's/^/        /'; fi
+if sano $G/ex.img; then ok "y el disco, sano (fsck.fat)"; else ko "el disco ha quedado mal:"; sed 's/^/        /' $P/fsck.txt | head -5; fi
+if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
 # la orden ESCRITORIO del intérprete, y abrir un documento desde el menú
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" escritorio ":pausa 2" ":clic 40 585" ":clic 240 291" ":pausa 2" \
   ":captura o1" ":clic 40 585" ":clic 230 545" ":clic 533 327" ":captura o2" > $G/orden.sal 2>&1
@@ -1432,7 +1516,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     S=$G/usb.txt2
     # (SSH, TAILSCALE: 23 programas: SSH, SSHD, WG y TAILSCAL también van como módulos)
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 25 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 27 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 36 280 50 290 "Bloc de notas" texto 204 278 220 290 LEEME.TXT
@@ -1674,7 +1758,7 @@ cp $P/d16.img $N/eu.img
 CAPTURAS=$G ESCRIBE=1 MODULOS= MAQUINA=pc,i8042=off SOLO_LECTURA=1 SATA=$P/d32.img ARRANQUE="escritorio escritura=usb unidad=X" \
   QEMU_MAS="-device usb-ehci,id=u -device usb-kbd,bus=u.0 -device usb-mouse,bus=u.0 -drive id=mu,file=$N/eu.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu" \
   $AQUI/nucleo32/probar.sh "" ":pausa 2" ":clic 40 585" ":captura m1" ":clic 80 293" ":pausa 2" ":escribe Guardado en la memoria USB: ¡señor!" ":tecla f2" ":pausa 1" ":captura m2" \
-  ":clic 578 76" ":pausa 1" ":doble 62 30" ":pausa 2" ":captura m3" ":doble 300 290" ":pausa 1" ":captura m4" > $N/escusb.sal 2>&1
+  ":clic 578 76" ":pausa 1" ":doble 62 30" ":pausa 2" ":captura m3" ":doble 580 160" ":pausa 1" ":captura m4" > $N/escusb.sal 2>&1
 S=$N/escusb.sal
 mira "el escritorio en un PC sin teclado ni ratón PS/2 (como un Mac): arranca con el ratón y el teclado USB" \
   "^usb: 1 teclados, 1 ratones, 1 memorias\.$" "^escritorio: en marcha, 800 x 600" "escritorio: lanzo .BLOC.BIN" "^bloc: guardado NOTAS.TXT, 35 octetos"
@@ -1684,10 +1768,9 @@ miracap "el teclado USB escribe en el Bloc de notas (con eñe y «¡»), y F2 gu
 saca $N/eu.img NOTAS.TXT $N/notas.txt
 if [ "$(iconv -f CP437 -t UTF-8 $N/notas.txt 2> /dev/null)" = "Guardado en la memoria USB: ¡señor!" ] && sano $N/eu.img; then ok "y lo guardado está en la memoria USB (la unidad del sistema, X:), que queda sana"
 else ko "lo guardado con el Bloc de notas no está en la memoria USB"; fi
-miracap "Mi equipo enseña las unidades con su letra: C: (el disco SATA de dentro, de solo lectura) y X: (la memoria USB)" m3 negrita 126 141 134 149 "Las unidades de este equipo" \
-  negrita 192 178 200 186 "Unidad C:" texto 192 196 200 204 "disco duro (SATA), FAT32" texto 192 212 200 220 "39 MB, 39 MB libres (de solo lectura)" \
-  negrita 192 238 200 246 "Unidad X:" texto 192 256 200 264 "memoria USB, FAT16"
-miracap "y dos clics en X: enseñan lo que hay en la memoria (con lo recién guardado)" m4 negrita 150 141 158 149 "X:\\" texto 152 190 160 198 "ORDENES.BIN"
+miracap "Mi equipo enseña las unidades con su letra: C: (el disco SATA de dentro, de solo lectura) y X: (la memoria USB)" m3 negrita 20 5 60 25 "Mi equipo" \
+  negrita 313 133 323 143 "(C:)" texto 313 151 323 161 "libres de" texto 264 169 274 179 "(de solo lectura)" negrita 563 133 573 143 "(X:)"
+miracap "y dos clics en X: enseñan lo que hay en la memoria (con lo recién guardado)" m4 negrita 20 5 60 25 "X:\\" texto 316 322 326 332 "LEEME.TXT" texto 316 400 326 410 "NOTAS.TXT"
 fi   # los discos de prueba
 
 # 11. la memoria USB con GRUB, como la arranca un PC: el núcleo la lee él (X:)
@@ -1736,7 +1819,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 25 archivos que ha traído el cargador hacen de unidad M:" $S \
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 27 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
       ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
@@ -1774,7 +1857,8 @@ if $AQUI/nucleo32/disco.sh $N/of.img 16 oficina > $N/discoof.txt 2>&1; then
   if [ -s $N/facturas.dat ] && LC_ALL=C grep -qa "Taller Pe.a" $N/facturas.dat && LC_ALL=C grep -qa "Hola, se.or P.rez" $N/carta.plu && sano $N/of.img; then
     ok "lo guardado está en el disco: OFICINA\\FACTURAS.DAT (con la factura) y CARTA.PLU (lo de Pluma), y el disco queda sano"
   else ko "lo guardado por Facturas o Pluma no está en el disco, o no queda sano:"; sed 's/^/        /' $P/fsck.txt | head -6; fi
-  # Mi equipo: un documento de Pluma y una imagen (Mirador), con dos clics o Intro
+  # Mi equipo: un documento de Pluma y una imagen (Mirador), con el teclado:
+  # Intro entra en C:, una letra va al primero que empieza por ella, Intro abre
   python3 - $N/FOTO.BMP <<'PY'
 import struct, sys
 an, al = 160, 100
@@ -1790,7 +1874,7 @@ open(sys.argv[1], 'wb').write(cab + datos)
 PY
   MTOOLS_SKIP_CHECK=1 mcopy -i $N/of.img $N/FOTO.BMP ::
   CAPTURAS=$G DISCO=$N/of.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":doble 62 30" ":pausa 3" ":tecla ret" ":pausa 2" \
-    ":tecla pgdn pgdn pgdn" ":pausa 1" ":tecla ret" ":pausa 5" ":raton 400 450" ":captura of10" ":clic 180 582" ":pausa 1" ":tecla up" ":tecla ret" ":pausa 5" ":captura of11" > $N/oficina2.sal 2>&1
+    ":tecla f" ":pausa 1" ":tecla ret" ":pausa 5" ":raton 400 450" ":captura of10" ":clic 180 582" ":pausa 1" ":tecla c" ":tecla ret" ":pausa 5" ":captura of11" > $N/oficina2.sal 2>&1
   miracap "Mi equipo abre una imagen con Mirador (MIRADOR.HVP): su nombre, lo que mide y la imagen" of10 negrita 30 20 42 32 "Mirador - FOTO.BMP" \
     texto 10 520 20 535 "FOTO.BMP" texto 108 519 120 531 "160 x 100"
   miracap "y un documento de Pluma (.PLU) con Pluma: lo guardado antes, con sus acentos" of11 negrita 110 30 122 42 "Pluma - \\CARTA.PLU" \
@@ -2165,9 +2249,9 @@ for hc in xhci ehci; do
     # suceso; lo que sobra llegaría con el clic siguiente)
     monz "mouse_move 327 -193" 0.2; monz "mouse_move 327 -193" 0.4; monz "mouse_button 1" 0.2; monz "mouse_button 0" 2
     monz "mouse_move -336 -2" 0.2; monz "mouse_move -336 -2" 0.4; monz "mouse_button 1" 0.1; monz "mouse_button 0" 0.1; monz "mouse_button 1" 0.1; monz "mouse_button 0" 3
-    teclas ret; sleep 2; teclas down down ret; sleep 2
+    teclas ret; sleep 2; teclas o ret; sleep 2
     monz "screendump $G/c3$hc.ppm" 0.6
-    teclas down ret; sleep 5
+    teclas c ret; sleep 5
     monz "screendump $G/c4$hc.ppm" 0.6
     monz quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $Z/c$hc.sal | iconv -f CP437 -t UTF-8 > $Z/c$hc.txt
@@ -2178,7 +2262,7 @@ for hc in xhci ehci; do
       && cap $G/c2$hc.ppm negrita 72 22 84 30 Facturas texto 62 126 74 138 "No hay facturas emitidas."; then
       ok "la oficina en el disco instalado: el menú Inicio (con su saludo) tiene el grupo «Oficina», y Facturas se abre con C:\\HISPA\\HVPRUN.BIN (FACTURAS.HVP, de C:\\OFICINA)"
     else ko "la oficina no se abre desde el menú Inicio del disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; grep "lanzo" $S | sed 's/^/        /' | head -4; fi
-    if cap $G/c3$hc.ppm negrita 142 90 150 98 "Mi equipo" negrita 150 141 158 149 "C:\\OFICINA" texto 152 190 160 198 "CUENTAS.HVP" texto 152 270 160 278 "DICCIO.DAT" \
+    if cap $G/c3$hc.ppm negrita 29 9 39 19 "C:\\OFICINA" texto 213 166 223 176 "CUENTAS.HV" texto 311 166 321 176 "DICCIO.DAT" \
       && cap $G/c4$hc.ppm negrita 80 16 110 36 "Cuentas - (sin nombre)" && [ $sano = 0 ]; then
       ok "y Mi equipo entra en C:\\OFICINA y abre CUENTAS.HVP (Cuentas, con HVPRUN); el disco queda sano"
     else ko "Mi equipo no abre la oficina de C:\\OFICINA en el disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; sed 's/^/        /' $Z/fsck.txt | head -3; fi
@@ -2269,17 +2353,17 @@ cp $P/d16.img $Q/ce.img; cp $Q/m1.img $Q/ea.img; memoria $Q/eb.img MEMORIA3
 CAPTURAS=$G ESCRIBE=1 DISCO=$Q/ce.img MODULOS= MAQUINA=pc,i8042=off ARRANQUE="escritorio escritura" QEMU_MAS="-device usb-ehci,id=u -device usb-kbd,bus=u.0" \
   $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":monitor device_add usb-mouse,bus=u.0,id=r1" ":pausa 2" ":doble 62 30" ":pausa 2" \
   ":monitor drive_add 0 if=none,id=ma,file=$Q/ea.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=ma,id=mema" ":pausa 2.5" ":captura u1" \
-  ":clicd 300 240" ":pausa 0.5" ":captura u2" ":clic 360 281" ":pausa 1.5" ":captura u3" ":monitor device_del mema" ":pausa 2" \
+  ":clicd 580 160" ":pausa 0.5" ":captura u2" ":clic 620 195" ":pausa 1.5" ":captura u3" ":monitor device_del mema" ":pausa 2" \
   ":monitor drive_add 0 if=none,id=mb,file=$Q/eb.img,format=raw" ":monitor device_add usb-storage,bus=u.0,drive=mb,id=memb" ":pausa 2.5" ":raton 600 450" ":pausa 6" \
   ":clic 720 583" ":pausa 0.5" ":captura u4" ":clic 680 549" ":pausa 1.5" ":captura u5" ":monitor device_del memb" ":pausa 2" > $Q/escritorio.sal 2>&1
 S=$Q/escritorio.sal
 mira "escritorio: un ratón USB enchufado en marcha mueve la flecha y abre Mi equipo con dos clics" \
   "usb: se enchufa el aparato 1, 0627:0001, velocidad alta, en el puerto 2 (EHCI); ratón$" "^escritorio: lanzo .EQUIPO.BIN"
 miracap "escritorio: la memoria que llega sale en el globo de los avisos, en la bandeja (su icono) y en Mi equipo, que se pone al día solo" u1 \
-  texto 570 532 590 548 "Memoria USB conectada: W:" negrita 570 510 590 526 "USB" negrita 160 210 175 225 "Unidad W:" rgb 721 585 2463C2 40
-miracap "escritorio: Mi equipo, botón secundario en la memoria: «Abrir» y «Quitar con seguridad»" u2 texto 305 270 320 290 "Quitar con seguridad"
+  texto 570 532 590 548 "Memoria USB conectada: W:" negrita 570 510 590 526 "USB" negrita 466 128 760 148 "(W:)" rgb 721 585 2463C2 40
+miracap "escritorio: Mi equipo, botón secundario en la memoria: «Abrir» y «Quitar con seguridad»" u2 texto 585 180 605 205 "Quitar con seguridad"
 miracap "escritorio: quitada con seguridad desde Mi equipo: el globo «Ya puede quitar la memoria W:», y en Mi equipo ya no está" u3 \
-  texto 540 532 600 548 "Ya puede quitar la memoria W:" texto 90 392 110 410 "Ya puede quitar la memoria W:." notexto 150 140 200 400 "Unidad W:"
+  texto 540 532 600 548 "Ya puede quitar la memoria W:" texto 100 474 130 490 "Ya puede quitar la memoria W:." notexto 466 128 760 148 "(W:)"
 miracap "escritorio: el icono de la bandeja saca «Quitar con seguridad W:» de la otra memoria" u4 texto 580 535 600 560 "Quitar con seguridad W:"
 mira "escritorio: y desde la bandeja también se quita con seguridad; las dos memorias quedan sanas" \
   "^escritorio: globo: Ya puede quitar la memoria W:$" "^disco 2: quitado con seguridad\.$"

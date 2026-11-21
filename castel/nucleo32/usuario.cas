@@ -140,11 +140,23 @@ módulo Usuario
     público constante DATO_ANCHO_PANTALLA = 11  ; el ancho de la pantalla gráfica (0 si no hay)
     público constante DATO_ALTO_PANTALLA = 12
     público constante DATO_ESCRITORIO = 13      ; 1 si el escritorio está en marcha
+    público constante DATO_ALTO_LIBRE = 14      ; (explorador) lo alto de la pantalla sin la barra de tareas ni el dock
 
     ; la función (sin argumentos; da 1 o 0) que pone en marcha el escritorio:
     ; la pone escritorio.cas, y se la llama por su dirección
     público variable al_escritorio: nat32
     público variable escritorio_en_marcha: bool
+
+    ; (explorador) lo que un programa ha soltado fuera de su ventana (la
+    ; llamada 171): la ruta y el punto de la pantalla. Lo recoge el
+    ; escritorio (un acceso en el tapiz, o fijarlo en el dock)
+    público variable suelta_pedida: bool
+    público variable suelta_x, suelta_y: ent32
+    público variable suelta_ruta: arreglo [128] de byte
+    tipo Suelta = estructura
+        x, ye: ent32
+        ruta: nat32
+    fin
 
     constante MAX_PROGRAMA = 0x800000           ; lo más que mide un programa en el disco (8 MB desde la 0.8.3: el Navegador)
     constante MAX_RUTA = 128
@@ -592,6 +604,11 @@ módulo Usuario
             caso DATO_ESCRITORIO:
                 si escritorio_en_marcha entonces devolver 1 fin
                 devolver 0
+            caso DATO_ALTO_LIBRE:
+                ; (explorador) lo que queda a lo alto sin la barra de tareas ni el dock
+                si hay_pantalla y escritorio_en_marcha entonces devolver nat32(pantalla.alto - alto_barra - alto_dock) fin
+                si hay_pantalla entonces devolver nat32(pantalla.alto) fin
+                devolver 0
         fin
         devolver NO_VALE
     fin
@@ -695,6 +712,8 @@ módulo Usuario
                 devolver cortar_archivo(a)
             caso 21..24:
                 devolver atender_carpetas(n, a, b)
+            caso 170, 171:
+                devolver atender_explorador(n, a, b)
             caso 25:
                 si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
                 devolver cambiar_carpeta(u, ruta)
@@ -1080,6 +1099,38 @@ módulo Usuario
         fin
         si es_carpeta_de_alguien(u, ruta) entonces devolver EN_USO fin
         devolver borrar_carpeta(u, ruta)
+    fin
+
+    ; (explorador) 170: los atributos del archivo a (b = 0xFFFFFFFF: solo
+    ; leerlos); 171: lo soltado fuera de la ventana a (suya), como dice b
+    ; (una Suelta: el punto, dentro de la ventana, y la ruta)
+    función atender_explorador(n: nat32, a: nat32, b: nat32): nat32
+        variable ruta: arreglo [MAX_RUTA] de byte
+        variable u: nat32
+        variable x, yy: ent32
+        variable s: puntero a Suelta
+        si n = 170 entonces
+            si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
+            si u >= MAX_UNIDADES entonces devolver SIN_DISCO fin
+            si en_memoria(u) entonces
+                si b <> 0xFFFFFFFF entonces devolver PROTEGIDO fin
+                devolver SOLO_LECTURA
+            fin
+            devolver poner_atributos(u, ruta, b)
+        fin
+        si no escritorio_en_marcha o no es_de(a, actual.id) o no puede(b, tamaño(Suelta), falso) entonces devolver NO_VALE fin
+        s := puntero(b)
+        x := s.x
+        yy := s.ye
+        si x < -4096 o x > 4096 o yy < -4096 o yy > 4096 entonces devolver NO_VALE fin
+        si suelta_pedida entonces devolver EN_USO fin
+        si no texto_de_usuario(s.ruta, ruta, MAX_RUTA) entonces devolver NO_VALE fin
+        a_pantalla(a, x, yy)
+        copiar(suelta_ruta, ruta)
+        suelta_x := x
+        suelta_y := yy
+        suelta_pedida := cierto
+        devolver 0
     fin
 
     ; el portapapeles del sistema: un texto (en la página 437, con sus

@@ -1,746 +1,3577 @@
 ; =============================================================================
-;  uequipo.cas - «Mi equipo», del escritorio de Hispa-Pentium (EQUIPO.BIN en
-;  el disco): un programa del anillo 3 que enseña las unidades del equipo y lo
-;  que hay en ellas.
+;  uequipo.cas - el explorador de archivos de Hispa-Pentium (EQUIPO.BIN en el
+;  disco: el «Mi equipo» del escritorio, que desde el 21/11/2026 es esto), un
+;  programa del anillo 3 con los controles de las ventanas (controles.cas):
 ;
-;    EQUIPO [CARPETA]    abre ya en esa carpeta (sin ella: las unidades)
+;   - a la izquierda, el árbol: Mi equipo con sus unidades (cada una con su
+;     icono: disco, memoria USB, CD, memoria) y sus carpetas, y la Papelera;
+;     a la derecha, lo que hay donde se está;
+;   - arriba, la barra de menús (Alt y su letra), la de herramientas (Atrás,
+;     Adelante, Subir, Buscar, Cortar, Copiar, Pegar, Borrar, Carpeta nueva,
+;     Vistas) y la dirección (C:\...), que se puede escribir;
+;   - cuatro vistas: miniaturas (las imágenes en pequeño: MINIAT.BIN),
+;     iconos, lista y detalles (la rejilla de controles.cas: nombre,
+;     tamaño, tipo y fecha; un clic en el rótulo ordena);
+;   - elegir varios (Control y un clic, Mayús y un clic, o un recuadro con el
+;     ratón; Espacio y Mayús con las flechas), el menú del botón secundario,
+;     Propiedades (tamaño, fechas, atributos), Abrir con... y las
+;     asociaciones (ASOCIA.TXT: exoper.cas), buscar por el nombre;
+;   - copiar, cortar y pegar (por el portapapeles del sistema: de una
+;     ventana a otra también), cambiar el nombre, carpeta nueva y mandar a
+;     la Papelera (\PAPELERA en cada unidad: restaurar y vaciar), con su
+;     barra de progreso y «¿Reemplazar?»; arrastrar y soltar en una carpeta,
+;     en el árbol, en el tapiz (un acceso) y en el dock (fijar un programa,
+;     o tirarlo a su Papelera);
+;   - las unidades que aparecen y desaparecen en marcha (memorias USB, CD:
+;     EV_UNIDADES), y el permiso de escritura de cada una.
 ;
-;  Primero, las unidades, con su letra (C: el disco de dentro, X: la memoria
-;  USB, M: lo que ha traído el cargador, en memoria) y los discos en los que
-;  no hay nada que se pueda leer; antes, solo una (C:, el disco FAT o, sin disco, lo
-;  que ha traído el cargador, en memoria), con lo que miden y lo que les
-;  queda libre. Con dos clics (o Intro) se entra: salen sus carpetas y sus
-;  archivos. Dos clics en una carpeta entran en ella; en «..», se vuelve; en
-;  un texto (.TXT, .BAT), lo abre el Bloc de notas; en un programa (.BIN), lo
-;  lanza; un programa de Hispa Ventanas (.HVP) y los documentos de la oficina
-;  (.PLU, de Pluma; .HOJ, de Cuentas; las imágenes, con Mirador) los abre
-;  HVPRUN.BIN. Las flechas, Re Pág, Av Pág, Intro y Retroceso también valen. El
-;  botón secundario saca «Abrir» (y, en una unidad, «Quitar con seguridad»: la
-;  de una memoria USB, desde la 0.8). Arriba, la barra de menús. Cuando se
-;  enchufa o se quita una memoria USB, la lista se pone al día sola (le llega
-;  EV_UNIDADES). (CD) Los lectores de CD y DVD salen con su letra aunque no
-;  tengan disco, con un disco dibujado; su menú, «Abrir|Expulsar». Una
-;  imagen de disco (.ISO, .CUE, .IMG) se monta con dos clics (o «Montar» en
-;  su menú) y se entra en ella; sale como «CD virtual», con el disco dentro
-;  de un marco de puntos, y «Expulsar» la desmonta.
+;    EQUIPO                 Mi equipo
+;    EQUIPO C:\CARPETA      abre ahí (también sin la letra)
+;    EQUIPO /PAPELERA       la Papelera
+;    EQUIPO /ABRIR RUTA     abre ese archivo con lo suyo (una carpeta: ahí); sin ventana
+;    EQUIPO /BORRAR RUTA    lo manda a la Papelera, sin ventana (el dock)
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UEquipo
 
     modelo usuario
 
-    importar Llamadas, Barramenu, Textos32, Formato
+    importar Llamadas, Controles, Iconos, Exoper, Grafico, Textos32, Formato, Mem32
 
-    constante MAX_ENTRADAS = 160
-    constante MAX_RUTA = 100
-    constante CABEZA = 30                       ; la franja de «dónde estoy», bajo los menús
-    constante ARRIBA = ALTO_MENÚS + CABEZA
-    constante PIE = 22
-    constante RENGLÓN = 20
-    constante PAPEL = 0xFFFFFF
-    constante TINTA = 0x14294A
-    constante SUAVE = 0x5A7396
-    constante RESALTE = 0x2F74D0
+    ; ---- dónde se está ----
+    constante L_EQUIPO = 0
+    constante L_CARPETA = 1
+    constante L_PAPELERA = 2
+    constante L_BUSCAR = 3
+
+    ; ---- las vistas ----
+    constante V_MINIATURAS = 0
+    constante V_ICONOS = 1
+    constante V_LISTA = 2
+    constante V_DETALLES = 3
+
+    ; ---- los controles ----
+    constante ID_DIRECCIÓN = 1
+    constante ID_IR = 2
+    constante ID_ÁRBOL = 3
+    constante ID_CONTENIDO = 4
+    constante ID_B_CAMPO = 5
+    constante ID_B_SUB = 6
+    constante ID_B_BUSCAR = 7
+    constante ID_B_VOLVER = 8
+    constante ID_H = 20                         ; las herramientas: 20 + su icono
+    constante ID_D = 60                         ; los de los cuadros: 60 y siguientes
+
+    constante MENÚS = "&Archivo|&Edici\xA2n|&Ver|&Ir|&Herramientas|A&yuda"
     constante M_ARCHIVO = 0
-    constante M_VER = 1
-    constante M_AYUDA = 2
-    constante M_CONTEXTO = 100
-    constante M_UNIDAD = 101                    ; el del botón secundario en una unidad
+    constante M_EDICIÓN = 1
+    constante M_VER = 2
+    constante M_IR = 3
+    constante M_HERRAMIENTAS = 4
+    constante M_AYUDA = 5
+    constante M_CONTEXTO = 20                   ; el del botón secundario en lo elegido
+    constante M_FONDO = 21                      ; en un sitio sin nada
+    constante M_ÁRBOL = 22
 
-    variable v: nat32
-    variable ancho, alto: ent32
-    variable dentro: bool                       ; falso: se ven las unidades; cierto: una carpeta
-    variable ruta: arreglo [MAX_RUTA] de byte   ; la carpeta que se ve («\» es la raíz)
-    variable nombres: arreglo [MAX_ENTRADAS] de arreglo [13] de byte
-    variable tamaños: arreglo [MAX_ENTRADAS] de nat32
-    variable carpetas: arreglo [MAX_ENTRADAS] de bool
-    variable cuántas: ent32
-    variable elegida, primera, caben: ent32
-    variable aviso: arreglo [100] de byte
-    variable renglón: arreglo [120] de byte
-    variable otra: arreglo [MAX_RUTA + 16] de byte
-    variable con_args: arreglo [MAX_RUTA + 48] de byte  ; lo que se le da a HVPRUN
-    variable menús: arreglo [20] de byte = "Archivo|Ver|Ayuda"
-    variable menú_abierto: ent32 = -1
-    constante MAX_UNIDADES = 8
-    constante ALTO_UNIDAD = 60                  ; lo que ocupa cada unidad en la lista
+    ; ---- las medidas ----
+    constante PANEL = 196                       ; el panel de la izquierda
+    constante RENGLÓN_ÁRBOL = 20
+    constante C_TEXTO = 0x14294A                ; la tinta de lo de dentro (azul muy oscuro)
+    constante C_ELEGIDO = 0x1D4ED8              ; lo elegido: blanco sobre este azul
+    constante C_CLARO = 0xEEF4FD
+    constante C_PANEL = 0xE4EEFB
+
+    ; ---- lo que hay ----
+    constante MAX_ITEMS = 1500
+    constante LARGO = 96
+    tipo Item = estructura
+        corto: arreglo [13] de byte
+        largo: arreglo [LARGO] de byte          ; el nombre que se ve
+        atrib: byte
+        carpeta: bool
+        tamaño: nat32
+        fecha: nat32                            ; (la fecha << 16) ob la hora, como en la FAT
+        alta: nat32
+        acceso: nat32
+        clase, letra: nat32                     ; su icono
+        ruta: arreglo [MAX_RUTA] de byte        ; la ruta entera
+        extra: arreglo [MAX_RUTA] de byte       ; (papelera) de dónde era; (buscar) su carpeta
+        unidad: ent32                           ; (Mi equipo) su sitio en «us»
+        miniatura: ent32                        ; -1: sin mirar; -2: no hay; -3: haciéndose; si no, su hueco
+    fin
+    variable items: puntero a Item
+    variable n_items: nat32
+    variable g: Rejilla
+
+    constante MAX_UNIDADES = 10
     variable us: arreglo [MAX_UNIDADES] de Info_unidad
-    variable n_unidades: ent32
-    variable letra: nat32 = 'C'                 ; la unidad que se está viendo
+    variable n_us: nat32
 
-    ; -------------------------------------------------------------------------
-    ;  Leer la carpeta
-    ; -------------------------------------------------------------------------
+    variable lugar: nat32 = L_EQUIPO
+    variable ruta: arreglo [MAX_RUTA] de byte   ; la carpeta (L_CARPETA)
+    variable dirección_: arreglo [MAX_RUTA] de byte   ; lo que dice (o se escribe en) la dirección
+    variable vista: nat32 = V_ICONOS
+    variable ocultos: bool                      ; enseñar los ocultos y los de sistema
+    variable aviso: arreglo [200] de byte
+    variable abierto_m: ent32 = -1              ; el menú de la barra que está abierto
+    variable ancla: ent32                       ; desde dónde se elige con Mayús
+
+    ; la historia (Atrás, Adelante)
+    constante MAX_HISTORIA = 16
+    variable historia: arreglo [MAX_HISTORIA] de arreglo [MAX_RUTA] de byte
+    variable h_lugar: arreglo [MAX_HISTORIA] de nat32
+    variable n_historia, en_historia: nat32
+
+    ; ---- el árbol ----
+    constante MAX_NODOS = 220
+    tipo Nodo = estructura
+        ruta: arreglo [MAX_RUTA] de byte        ; («» Mi equipo; «*» la Papelera)
+        nombre: arreglo [40] de byte
+        nivel: nat32
+        abierto: bool
+        sin_hijos: bool                         ; mirado, y no tiene carpetas
+        clase: nat32
+    fin
+    variable nodos: puntero a Nodo
+    variable n_nodos: nat32
+    variable nodo_cursor: ent32
+    variable primer_nodo: ent32
+
+    ; ---- la geometría de lo de dentro ----
+    variable cx, cy, can, cal: ent32            ; el sitio de lo que hay
+    variable ax, ay, aan, aal: ent32            ; el del árbol
+    variable primera: ent32                     ; la primera fila (o columna, en la lista) que se ve
+    variable columnas, filas: ent32
+
+    ; ---- el ratón ----
+    variable pulsado: bool
+    variable pul_x, pul_y: ent32
+    variable pul_item: ent32                    ; el sitio (en lo que se ve) donde se pulsó
+    variable pul_mods: nat32
+    variable arrastrando: bool
+    variable destino_arr: ent32                 ; la carpeta (en lo que se ve) donde caería (-1: ninguna)
+    variable destino_nodo: ent32
+    variable banda: bool
+    variable bx0, by0, bx1, by1: ent32
+    variable ratón_x, ratón_y: ent32
+
+    ; ---- los cuadros (dentro de la ventana) ----
+    constante D_NADA = 0
+    constante D_PROGRESO = 1
+    constante D_PREGUNTA = 2
+    constante D_NOMBRE = 3                      ; cambiar el nombre, o la carpeta nueva
+    constante D_PROPIEDADES = 4
+    constante D_ABRIR_CON = 5
+    constante D_CONFIRMA = 6
+    constante D_AYUDA = 7
+    variable cuadro: nat32
+    variable cuadro_título: arreglo [80] de byte
+    variable nombre_nuevo: arreglo [16] de byte
+    variable es_nueva: bool                     ; (D_NOMBRE) carpeta nueva, no cambiar el nombre
+    variable reemplaza: bool                    ; (D_NOMBRE) lo primero que se escriba sustituye al nombre
+    variable de_quién: ent32                    ; (D_NOMBRE, D_PROPIEDADES) el item
+    variable confirma: nat32                    ; (D_CONFIRMA) lo que se hará con «Sí»
+    variable confirma_texto: arreglo [160] de byte
+    constante CF_BORRAR = 1
+    constante CF_VACIAR = 2
+    variable at_ro, at_oculto, at_archivo, at_sistema: bool
+    variable at_antes: nat32
+    variable prop_texto: arreglo [12] de arreglo [100] de byte
+    variable n_prop: nat32
+    variable go: Rejilla                        ; (D_ABRIR_CON) los programas
+    variable siempre: bool
+    variable ext_abrir: arreglo [8] de byte
+    variable otro_prog: arreglo [80] de byte
+    variable tics_pinta: nat32
+
+    ; ---- buscar ----
+    variable buscando: bool                     ; el panel de la izquierda es el de buscar
+    variable que_buscar: arreglo [40] de byte
+    variable en_subcarpetas: bool = cierto
+    variable buscado_en: arreglo [MAX_RUTA] de byte
+
+    ; ---- las miniaturas ----
+    constante LADO_MIN = 64
+    constante MAX_MINIATURAS = 120
+    variable miniaturas: puntero a nat32
+    variable n_miniaturas: nat32
+    variable sin_miniaturas: bool               ; no hay MINIAT.BIN (o sitio para su archivo)
+    variable tarea_min: nat32
+    variable item_min: ent32 = -1
+    variable tmp_min: arreglo [32] de byte
+
+    variable texto_: arreglo [300] de byte
+    variable sale: bool
+
+    ; =========================================================================
+    ;  Las piezas
+    ; =========================================================================
+    función rect(x: ent32, yy: ent32, an: ent32, al: ent32, c: nat32)
+        Grafico.rectángulo(lz, x, yy, an, al, c)
+    fin
+
+    función redondo(x: ent32, yy: ent32, an: ent32, al: ent32, radio: ent32, c: nat32, c2: nat32)
+        Grafico.redondeado(lz, x, yy, an, al, radio, c, c2, TODAS)
+    fin
+
+    función letras(x: ent32, yy: ent32, t: puntero a byte, tinta: nat32)
+        Grafico.texto(lz, x, yy, t, tinta)
+    fin
+
+    función letras_n(x: ent32, yy: ent32, t: puntero a byte, n: nat32, tinta: nat32)
+        Grafico.texto_n(lz, x, yy, t, n, tinta)
+    fin
+
+    ; lo que cabe de t en an puntos (con «...» si no cabe)
+    función corto_en(x: ent32, yy: ent32, t: puntero a byte, an: ent32, tinta: nat32, negrita_: bool)
+        texto_corto(x, yy, t, an, tinta, negrita_)
+    fin
+
+    ; los octetos, para leerlos: «123 bytes», «12 K», «3,4 MB»
+    función tamaño_a_texto(n: nat32, destino: puntero a byte)
+        variable d: arreglo [2] de nat32
+        si n < 1024 entonces
+            d[0] := n
+            formatear(destino, 24, "%u bytes", d)
+        sino si n < 10 * 1024 * 1024 entonces
+            d[0] := (n + 1023) div 1024
+            formatear(destino, 24, "%u K", d)
+            con_puntos(destino)
+        sino
+            d[0] := n div (1024 * 1024)
+            d[1] := (n mod (1024 * 1024)) * 10 div (1024 * 1024)
+            formatear(destino, 24, "%u,%u MB", d)
+        fin
+    fin
+
+    ; los miles con su punto: «12345 K» -> «12.345 K»
+    función con_puntos(t: puntero a byte)
+        variable n, i, k: nat32
+        variable b: arreglo [32] de byte
+        n := 0
+        mientras t[n] >= '0' y t[n] <= '9' hacer n := n + 1 fin
+        si n <= 3 entonces devolver fin
+        k := 0
+        para i desde 0 hasta n - 1 hacer
+            b[k] := t[i]
+            k := k + 1
+            si (n - 1 - i) mod 3 = 0 y i < n - 1 entonces
+                b[k] := '.'
+                k := k + 1
+            fin
+        fin
+        b[k] := 0
+        concatenar(b, dirección(t[n]))
+        copiar(t, b)
+    fin
+
+    ; la fecha y la hora de la FAT ((fecha << 16) ob hora) como «21/11/2026 10:05»
+    función fecha_a_texto(fh: nat32, con_hora: bool, destino: puntero a byte)
+        variable d: arreglo [5] de nat32
+        variable f, h: nat32
+        f := fh >> 16
+        h := fh yb 0xFFFF
+        si f = 0 entonces
+            destino[0] := 0
+            devolver
+        fin
+        d[0] := f yb 31
+        d[1] := (f >> 5) yb 15
+        d[2] := 1980 + (f >> 9)
+        d[3] := h >> 11
+        d[4] := (h >> 5) yb 63
+        si con_hora entonces formatear(destino, 24, "%02u/%02u/%u %02u:%02u", d) sino formatear(destino, 24, "%02u/%02u/%u", d) fin
+    fin
+
+    función item(k: ent32): puntero a Item
+        devolver items + nat32(k)
+    fin
+
+    ; el item que se ve en el sitio i (-1 si ninguno)
+    función de_vista(i: ent32): ent32
+        devolver rejilla_de_vista(g, i)
+    fin
+
+    función vistos(): ent32
+        devolver ent32(rejilla_vistos(g))
+    fin
+
+    función marcado(k: ent32): bool
+        devolver renglón(g, k).marcado
+    fin
+
+    función marca(k: ent32, sí: bool)
+        renglón(g, k).marcado := sí
+    fin
+
+    función cuántos_marcados(): nat32
+        variable k, n: nat32
+        n := 0
+        k := 0
+        mientras k < n_items hacer
+            si marcado(ent32(k)) entonces n := n + 1 fin
+            k := k + 1
+        fin
+        devolver n
+    fin
+
+    función desmarca_todos()
+        variable k: nat32
+        k := 0
+        mientras k < n_items hacer
+            marca(ent32(k), falso)
+            k := k + 1
+        fin
+    fin
+
+    ; el primero de los elegidos (o el del cursor), o -1
+    función primero_marcado(): ent32
+        variable i: ent32
+        i := 0
+        mientras i < vistos() hacer
+            si marcado(de_vista(i)) entonces devolver de_vista(i) fin
+            i := i + 1
+        fin
+        si g.sel >= 0 entonces devolver de_vista(g.sel) fin
+        devolver -1
+    fin
+
+    ; la clase de icono, el tipo y la letra de un archivo por su nombre
+    función clase_archivo(nombre: puntero a byte, carpeta: bool, ref letra: nat32): nat32
+        variable e: arreglo [8] de byte
+        letra := 0
+        si carpeta entonces devolver IC_CARPETA fin
+        extensión(nombre, e)
+        si iguales(e, "TXT") o iguales(e, "BAT") o iguales(e, "INI") o iguales(e, "MNU") o iguales(e, "CFG") entonces devolver IC_TEXTO fin
+        si iguales(e, "BIN") o iguales(e, "HVP") o iguales(e, "EXE") o iguales(e, "COM") entonces devolver IC_PROGRAMA fin
+        si iguales(e, "BMP") o iguales(e, "PNG") o iguales(e, "JPG") o iguales(e, "JPEG") o iguales(e, "GIF") o iguales(e, "PCX") o iguales(e, "TGA") o iguales(e, "PPM") o iguales(e, "ICO") entonces devolver IC_IMAGEN fin
+        si iguales(e, "PLU") entonces
+            letra := 'P'
+            devolver IC_DOCUMENTO
+        fin
+        si iguales(e, "HOJ") entonces
+            letra := 'C'
+            devolver IC_DOCUMENTO
+        fin
+        si iguales(e, "FAC") entonces
+            letra := 'F'
+            devolver IC_DOCUMENTO
+        fin
+        devolver IC_ARCHIVO
+    fin
+
+    función tipo_de(ref it: Item, destino: puntero a byte)
+        variable e: arreglo [8] de byte
+        variable d: arreglo [1] de nat32
+        si it.carpeta entonces
+            copiar(destino, "Carpeta")
+            devolver
+        fin
+        extensión(dirección(it.corto[0]), e)
+        según nat16(it.clase)
+            caso IC_TEXTO:
+                si iguales(e, "BAT") entonces copiar(destino, "Archivo de \xA2rdenes") sino copiar(destino, "Texto") fin
+            caso IC_PROGRAMA:
+                si iguales(e, "HVP") entonces copiar(destino, "Programa de Ventanas") sino copiar(destino, "Programa") fin
+            caso IC_DOCUMENTO:
+                si it.letra = 'P' entonces copiar(destino, "Documento de Pluma") fin
+                si it.letra = 'C' entonces copiar(destino, "Hoja de Cuentas") fin
+                si it.letra = 'F' entonces copiar(destino, "Factura") fin
+            caso IC_IMAGEN:
+                d[0] := nat32(dirección(e[0]))
+                formatear(destino, 40, "Imagen %s", d)
+            si no:
+                si e[0] = 0 entonces
+                    copiar(destino, "Archivo")
+                sino
+                    d[0] := nat32(dirección(e[0]))
+                    formatear(destino, 40, "Archivo %s", d)
+                fin
+        fin
+    fin
+
+    ; ---- las unidades ----
+    función lee_unidades()
+        n_us := 0
+        mientras n_us < MAX_UNIDADES y info_unidad(n_us, us[n_us]) hacer n_us := n_us + 1 fin
+    fin
+
+    función clase_unidad(ref u: Info_unidad): nat32
+        si u.letra = 0 entonces devolver IC_DISCO_SIN fin
+        según nat16(u.medio)
+            caso MEDIO_USB: devolver IC_USB
+            caso MEDIO_CD: devolver IC_CD
+            caso MEDIO_IMAGEN: devolver IC_CD           ; (CD) una imagen montada
+            caso MEDIO_MEMORIA: devolver IC_MEMORIA
+        fin
+        si u.clase = 1 entonces devolver IC_MEMORIA fin
+        devolver IC_DISCO
+    fin
+
+    función tipo_unidad(ref u: Info_unidad): puntero a byte
+        si u.letra = 0 entonces devolver "Disco sin nada que se pueda leer" fin
+        si u.clase = 1 entonces devolver "En memoria (lo que ha tra\xA1do el cargador)" fin
+        según nat16(u.medio)
+            caso MEDIO_IDE: devolver "Disco duro (IDE)"
+            caso MEDIO_SATA: devolver "Disco duro (SATA)"
+            caso MEDIO_USB: devolver "Memoria USB"
+            caso MEDIO_CD:
+                ; (CD) lo que hay en el lector
+                si u.clase <> 0 entonces devolver "CD o DVD" fin
+                si u.relleno[0] = 2 entonces devolver "CD o DVD: un CD de m\xA3sica (escucharlo, m\xA0s adelante)" fin
+                si u.relleno[0] = 3 entonces devolver "CD o DVD: el disco no se puede leer (no es ISO 9660)" fin
+                devolver "CD o DVD: sin disco"
+            caso MEDIO_IMAGEN:
+                si u.clase = 9 entonces devolver "CD virtual (una imagen montada)" fin
+                devolver "Disco virtual (una imagen montada)"
+        fin
+        devolver "En memoria"
+    fin
+
+    función nombre_unidad(ref u: Info_unidad, destino: puntero a byte)
+        variable d: arreglo [2] de nat32
+        d[0] := u.letra
+        si u.letra = 0 entonces
+            copiar_hasta(destino, dirección(u.nombre[0]), LARGO)
+            devolver
+        fin
+        si u.etiqueta[0] <> 0 entonces
+            d[0] := nat32(dirección(u.etiqueta[0]))
+            d[1] := u.letra
+            formatear(destino, LARGO, "%s (%c:)", d)
+            devolver
+        fin
+        según nat16(clase_unidad(u))
+            caso IC_USB: formatear(destino, LARGO, "Memoria USB (%c:)", d)
+            caso IC_CD:
+                si u.medio = MEDIO_IMAGEN entonces formatear(destino, LARGO, "CD virtual (%c:)", d) sino formatear(destino, LARGO, "CD (%c:)", d) fin
+            caso IC_MEMORIA: formatear(destino, LARGO, "En memoria (%c:)", d)
+            si no: formatear(destino, LARGO, "Disco local (%c:)", d)
+        fin
+    fin
+
+    ; la unidad de esa letra (su sitio en «us»), o -1
+    función unidad_de(letra: byte): ent32
+        variable i: nat32
+        i := 0
+        mientras i < n_us hacer
+            si us[i].letra = mayúscula(letra) entonces devolver ent32(i) fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    ; ¿se puede escribir en la unidad de esa ruta?
+    función escribible(r: puntero a byte): bool
+        variable u: ent32
+        u := unidad_de(r[0])
+        si u < 0 entonces devolver falso fin
+        devolver us[u].solo_lectura = 0 y us[u].clase <> 1
+    fin
+
+    ; =========================================================================
+    ;  Leer lo que hay
+    ; =========================================================================
+    función memoria(): bool
+        variable p: puntero a byte
+        si items <> nulo entonces devolver cierto fin
+        p := más_memoria(MAX_ITEMS * tamaño(Item) + MAX_NODOS * tamaño(Nodo))
+        si p = nulo entonces devolver falso fin
+        items := puntero(p)
+        nodos := puntero(p + MAX_ITEMS * tamaño(Item))
+        devolver cierto
+    fin
+
+    función nuevo_item(): ent32
+        variable k: nat32
+        si n_items >= MAX_ITEMS entonces devolver -1 fin
+        k := n_items
+        llenar(puntero(items + k), tamaño(Item), 0)
+        items[k].unidad := -1
+        items[k].miniatura := -1
+        n_items := n_items + 1
+        devolver ent32(k)
+    fin
+
+    ; las columnas de la rejilla, según dónde se está
+    función columnas_de()
+        rejilla_nueva(g, MAX_ITEMS)
+        g.con_iconos := cierto
+        g.varios := cierto
+        según nat16(lugar)
+            caso L_EQUIPO:
+                rejilla_columna(g, "Nombre", 0, falso)
+                rejilla_columna(g, "Tipo", 22, falso)
+                rejilla_columna(g, "Tama\xA4o", 10, cierto)
+                rejilla_columna(g, "Libre", 10, cierto)
+                g.col_clave := 2
+                g.col_clave2 := 3
+            caso L_PAPELERA:
+                rejilla_columna(g, "Nombre", 0, falso)
+                rejilla_columna(g, "Estaba en", 20, falso)
+                rejilla_columna(g, "Borrado", 16, falso)
+                rejilla_columna(g, "Tama\xA4o", 10, cierto)
+                g.col_clave := 3
+                g.col_clave2 := 2
+            caso L_BUSCAR:
+                rejilla_columna(g, "Nombre", 0, falso)
+                rejilla_columna(g, "Carpeta", 20, falso)
+                rejilla_columna(g, "Tama\xA4o", 10, cierto)
+                rejilla_columna(g, "Modificado", 16, falso)
+                g.col_clave := 2
+                g.col_clave2 := 3
+            si no:
+                rejilla_columna(g, "Nombre", 0, falso)
+                rejilla_columna(g, "Tama\xA4o", 11, cierto)
+                rejilla_columna(g, "Tipo", 18, falso)
+                rejilla_columna(g, "Modificado", 16, falso)
+                g.col_clave := 1
+                g.col_clave2 := 3
+        fin
+        g.orden_col := 0
+    fin
+
+    ; el renglón de la rejilla del item k (con sus celdas, según dónde se está)
+    función renglón_de(k: ent32)
+        variable r: ent32
+        variable t: arreglo [48] de byte
+        variable it: puntero a Item
+        it := item(k)
+        r := renglón_nuevo(g, R_NORMAL, nat32(k))
+        si r < 0 entonces devolver fin
+        renglón(g, r).icono := it.clase
+        renglón(g, r).letra := it.letra
+        si it.carpeta entonces renglón(g, r).grupo := 0 sino renglón(g, r).grupo := 1 fin
+        renglón(g, r).clave := it.tamaño
+        renglón(g, r).id2 := it.fecha
+        si it.atrib yb (OCULTO ob DE_SISTEMA) <> 0 entonces renglón(g, r).clase := R_GRIS fin
+        celda(g, r, 0, dirección(it.largo[0]))
+        según nat16(lugar)
+            caso L_EQUIPO:
+                renglón(g, r).grupo := 0
+                si it.unidad >= 0 entonces
+                    celda(g, r, 1, tipo_unidad(us[it.unidad]))
+                    si us[it.unidad].letra <> 0 entonces
+                        tamaño_k(us[it.unidad].total_k, t)
+                        celda(g, r, 2, t)
+                        si us[it.unidad].libre_k <> 0xFFFFFFFF entonces
+                            tamaño_k(us[it.unidad].libre_k, t)
+                            celda(g, r, 3, t)
+                        fin
+                    fin
+                    renglón(g, r).clave := us[it.unidad].total_k
+                    renglón(g, r).id2 := us[it.unidad].libre_k
+                sino
+                    celda(g, r, 1, "Lo borrado, por si hace falta")
+                    renglón(g, r).grupo := 1
+                fin
+            caso L_PAPELERA:
+                celda(g, r, 1, dirección(it.extra[0]))
+                fecha_a_texto(it.fecha, cierto, t)
+                celda(g, r, 2, t)
+                si no it.carpeta entonces
+                    tamaño_a_texto(it.tamaño, t)
+                    celda(g, r, 3, t)
+                fin
+            caso L_BUSCAR:
+                celda(g, r, 1, dirección(it.extra[0]))
+                si no it.carpeta entonces
+                    tamaño_a_texto(it.tamaño, t)
+                    celda(g, r, 2, t)
+                fin
+                fecha_a_texto(it.fecha, cierto, t)
+                celda(g, r, 3, t)
+            si no:
+                si no it.carpeta entonces
+                    tamaño_a_texto(it.tamaño, t)
+                    celda(g, r, 1, t)
+                fin
+                tipo_de(valor(it), t)
+                celda(g, r, 2, t)
+                fecha_a_texto(it.fecha, cierto, t)
+                celda(g, r, 3, t)
+        fin
+    fin
+
+    ; los K de una unidad, para leerlos
+    función tamaño_k(k: nat32, destino: puntero a byte)
+        variable d: arreglo [2] de nat32
+        si k < 10240 entonces
+            d[0] := k
+            formatear(destino, 24, "%u K", d)
+            con_puntos(destino)
+        sino si k < 10 * 1024 * 1024 entonces
+            d[0] := k div 1024
+            formatear(destino, 24, "%u MB", d)
+            con_puntos(destino)
+        sino
+            d[0] := k div (1024 * 1024)
+            d[1] := (k mod (1024 * 1024)) * 10 div (1024 * 1024)
+            formatear(destino, 24, "%u,%u GB", d)
+        fin
+    fin
+
+    ; pone los renglones de todos los items y lo que se ve
+    función rehaz_rejilla()
+        variable k: nat32
+        variable col: ent32
+        variable baja: bool
+        col := g.orden_col
+        baja := g.orden_baja
+        columnas_de()
+        si col >= 0 y nat32(col) < g.n_cols entonces
+            g.orden_col := col
+            g.orden_baja := baja
+        fin
+        k := 0
+        mientras k < n_items hacer
+            renglón_de(ent32(k))
+            k := k + 1
+        fin
+        rejilla_lista(g)
+        primera := 0
+        ancla := 0
+    fin
+
+    ; un item de la carpeta que se lee
+    función item_de_entrada(ref e: Entrada, largo: puntero a byte, carpeta: puntero a byte): ent32
+        variable k: ent32
+        variable it: puntero a Item
+        k := nuevo_item()
+        si k < 0 entonces devolver -1 fin
+        it := item(k)
+        copiar_hasta(dirección(it.corto[0]), dirección(e.nombre[0]), 13)
+        copiar_hasta(dirección(it.largo[0]), largo, LARGO)
+        si it.largo[0] = 0 entonces copiar(dirección(it.largo[0]), dirección(it.corto[0])) fin
+        it.atrib := e.atributos
+        it.carpeta := e.atributos yb CARPETA <> 0
+        it.tamaño := e.tamaño
+        it.fecha := (nat32(e.fecha) << 16) ob nat32(e.hora)
+        it.alta := ((e.libre yb 0xFFFF) << 16) ob (e.libre >> 16)
+        it.acceso := nat32(e.reservado) << 16
+        it.clase := clase_archivo(dirección(it.corto[0]), it.carpeta, it.letra)
+        une(dirección(it.ruta[0]), carpeta, dirección(it.corto[0]))
+        devolver k
+    fin
+
     función lee_carpeta()
         variable m: nat32
         variable e: Entrada
-        variable i: nat32
-        cuántas := 0
-        elegida := 0
-        primera := 0
-        ; lo primero, «..»: volver (a la carpeta de arriba o a las unidades)
-        Textos32.copiar(nombres[0], "..")
-        carpetas[0] := cierto
-        tamaños[0] := 0
-        cuántas := 1
+        variable largo: arreglo [MAX_LARGO] de byte
+        n_items := 0
         m := abrir(ruta)
         si es_error(m) entonces
-            Textos32.copiar(aviso, "No se puede leer la carpeta: ")
+            copiar(aviso, "No se puede leer la carpeta: ")
             concatenar(aviso, texto_error(m))
+        sino
+            mientras entrada_larga(m, e, largo) hacer
+                si e.nombre[0] = '.' o e.atributos yb 0x08 <> 0 entonces seguir fin
+                si no ocultos y e.atributos yb (OCULTO ob DE_SISTEMA) <> 0 entonces seguir fin
+                si iguales(dirección(e.nombre[0]), "MINIAT.TMP") entonces seguir fin
+                si item_de_entrada(e, largo, ruta) < 0 entonces romper fin
+            fin
+            cerrar(m)
+        fin
+        rehaz_rejilla()
+    fin
+
+    función lee_equipo()
+        variable i: nat32
+        variable k: ent32
+        variable it: puntero a Item
+        lee_unidades()
+        n_items := 0
+        i := 0
+        mientras i < n_us hacer
+            k := nuevo_item()
+            si k < 0 entonces romper fin
+            it := item(k)
+            nombre_unidad(us[i], dirección(it.largo[0]))
+            it.clase := clase_unidad(us[i])
+            it.unidad := ent32(i)
+            it.carpeta := us[i].letra <> 0
+            si us[i].letra <> 0 entonces
+                it.ruta[0] := us[i].letra
+                it.ruta[1] := ':'
+                it.ruta[2] := '\\'
+                it.ruta[3] := 0
+            fin
+            i := i + 1
+        fin
+        ; y la Papelera
+        k := nuevo_item()
+        si k >= 0 entonces
+            it := item(k)
+            copiar(dirección(it.largo[0]), "Papelera")
+            it.clase := IC_PAPELERA
+            si papelera_llena() entonces it.clase := IC_PAPELERA_LLENA fin
+            copiar(dirección(it.ruta[0]), "*")
+            it.carpeta := cierto
+        fin
+        rehaz_rejilla()
+    fin
+
+    ; ¿hay algo en alguna papelera?
+    función papelera_llena(): bool
+        variable i: nat32
+        i := 0
+        mientras i < n_us hacer
+            si us[i].letra <> 0 y us[i].clase <> 1 y lee_índice(us[i].letra) entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    función lee_papelera()
+        variable i, pos, cuándo: nat32
+        variable k: ent32
+        variable it: puntero a Item
+        variable dentro: arreglo [16] de byte
+        variable origen: arreglo [MAX_RUTA] de byte
+        variable nombre: arreglo [96] de byte
+        variable p: arreglo [16] de byte
+        variable c: bool
+        lee_unidades()
+        n_items := 0
+        i := 0
+        mientras i < n_us hacer
+            si us[i].letra <> 0 y us[i].clase <> 1 y lee_índice(us[i].letra) entonces
+                pos := 0
+                mientras línea_índice(pos, dentro, origen, nombre, cuándo) hacer
+                    k := nuevo_item()
+                    si k < 0 entonces romper fin
+                    it := item(k)
+                    papelera_de(us[i].letra, p)
+                    une(dirección(it.ruta[0]), p, dentro)
+                    si no existe(dirección(it.ruta[0]), c) entonces
+                        ; (ya no está: fuera)
+                        n_items := n_items - 1
+                    sino
+                        copiar_hasta(dirección(it.corto[0]), dentro, 13)
+                        copiar_hasta(dirección(it.largo[0]), nombre, LARGO)
+                        copiar_hasta(dirección(it.extra[0]), origen, MAX_RUTA)
+                        padre_de(origen, dirección(it.extra[0]))
+                        it.carpeta := c
+                        it.fecha := cuándo
+                        it.clase := clase_archivo(dirección(it.corto[0]), c, it.letra)
+                        si no c entonces it.tamaño := largo_de_ruta(dirección(it.ruta[0])) fin
+                    fin
+                fin
+            fin
+            i := i + 1
+        fin
+        rehaz_rejilla()
+    fin
+
+    función largo_de_ruta(r: puntero a byte): nat32
+        variable m, n: nat32
+        m := abrir(r)
+        si es_error(m) entonces devolver 0 fin
+        n := largo_de(m)
+        cerrar(m)
+        devolver n
+    fin
+
+    ; de dónde era lo de la papelera (el item k): su ruta entera
+    función origen_de(k: ent32, destino: puntero a byte)
+        une(destino, dirección(item(k).extra[0]), dirección(item(k).largo[0]))
+    fin
+
+    ; vuelve a leer lo que hay donde se está
+    función relee()
+        variable antes: ent32
+        antes := g.sel
+        aviso_si_vacío()
+        según nat16(lugar)
+            caso L_EQUIPO: lee_equipo()
+            caso L_PAPELERA: lee_papelera()
+            caso L_BUSCAR: busca()
+            si no: lee_carpeta()
+        fin
+        si antes >= 0 y antes < vistos() entonces g.sel := antes fin
+        suelta_miniaturas()
+    fin
+
+    función aviso_si_vacío()
+    fin
+
+    ; =========================================================================
+    ;  Ir a un sitio
+    ; =========================================================================
+    función a_la_historia()
+        variable i: nat32
+        si n_historia > 0 y en_historia + 1 < n_historia entonces n_historia := en_historia + 1 fin
+        si n_historia >= MAX_HISTORIA entonces
+            para i desde 1 hasta MAX_HISTORIA - 1 hacer
+                copiar(historia[i - 1], historia[i])
+                h_lugar[i - 1] := h_lugar[i]
+            fin
+            n_historia := MAX_HISTORIA - 1
+        fin
+        copiar(historia[n_historia], ruta)
+        h_lugar[n_historia] := lugar
+        en_historia := n_historia
+        n_historia := n_historia + 1
+    fin
+
+    función pon_dirección()
+        según nat16(lugar)
+            caso L_EQUIPO: copiar(dirección_, "Mi equipo")
+            caso L_PAPELERA: copiar(dirección_, "Papelera")
+            caso L_BUSCAR:
+                copiar(dirección_, "Buscar: ")
+                concatenar(dirección_, que_buscar)
+            si no: copiar(dirección_, ruta)
+        fin
+    fin
+
+    ; va al sitio (lugar y ruta); «historia»: apuntarlo para Atrás
+    función ve_a(l: nat32, r: puntero a byte, con_historia: bool): bool
+        variable m: nat32
+        variable u: ent32
+        variable nueva: arreglo [MAX_RUTA] de byte
+        aviso[0] := 0
+        si l = L_CARPETA entonces
+            copiar_hasta(nueva, r, MAX_RUTA)
+            a_mayúsculas(nueva)
+            si nueva[1] <> ':' entonces
+                ; sin la letra: la de la unidad que se ve, o la de trabajo
+                copiar(texto_, "C:")
+                texto_[0] := byte(unidad(0))
+                si lugar = L_CARPETA entonces texto_[0] := ruta[0] fin
+                si nueva[0] <> '\\' entonces concatenar(texto_, "\\") fin
+                concatenar(texto_, nueva)
+                copiar_hasta(nueva, texto_, MAX_RUTA)
+            fin
+            si nueva[2] = 0 entonces concatenar(nueva, "\\") fin
+            ; (sin la barra del final, salvo en la raíz)
+            m := longitud(nueva)
+            si m > 3 y nueva[m - 1] = '\\' entonces nueva[m - 1] := 0 fin
+            u := unidad_de(nueva[0])
+            si u < 0 entonces
+                d1(aviso, "No hay ninguna unidad %c:.", nueva[0])
+                devolver falso
+            fin
+            m := abrir(nueva)
+            si es_error(m) entonces
+                copiar(aviso, "No se puede abrir esa carpeta: ")
+                concatenar(aviso, texto_error(m))
+                devolver falso
+            fin
+            cerrar(m)
+            copiar(ruta, nueva)
+            unidad(nueva[0])
+        sino
+            ruta[0] := 0
+        fin
+        lugar := l
+        si con_historia entonces a_la_historia() fin
+        relee()
+        si vistos() > 0 entonces g.sel := 0 sino g.sel := -1 fin
+        pon_dirección()
+        sincroniza_árbol()
+        devolver cierto
+    fin
+
+    función d1(destino: puntero a byte, plantilla: puntero a byte, a: nat32)
+        variable d: arreglo [1] de nat32
+        d[0] := a
+        formatear(destino, 200, plantilla, d)
+    fin
+
+    función sube()
+        variable arriba: arreglo [MAX_RUTA] de byte
+        si lugar = L_CARPETA entonces
+            si longitud(ruta) <= 3 entonces
+                ve_a(L_EQUIPO, "", cierto)
+            sino
+                padre_de(ruta, arriba)
+                ve_a(L_CARPETA, arriba, cierto)
+            fin
+        sino si lugar <> L_EQUIPO entonces
+            ve_a(L_EQUIPO, "", cierto)
+        fin
+    fin
+
+    función atrás()
+        si en_historia = 0 o n_historia = 0 entonces devolver fin
+        en_historia := en_historia - 1
+        ve_a(h_lugar[en_historia], historia[en_historia], falso)
+    fin
+
+    función adelante()
+        si en_historia + 1 >= n_historia entonces devolver fin
+        en_historia := en_historia + 1
+        ve_a(h_lugar[en_historia], historia[en_historia], falso)
+    fin
+
+    ; lo escrito en la dirección
+    función ir_a_dirección()
+        variable t: arreglo [MAX_RUTA] de byte
+        copiar_hasta(t, saltar_espacios(dirección_), MAX_RUTA)
+        si t[0] = 0 o iguales_sin_caja(t, "Mi equipo") entonces
+            ve_a(L_EQUIPO, "", cierto)
+        sino si iguales_sin_caja(t, "Papelera") entonces
+            ve_a(L_PAPELERA, "", cierto)
+        sino si no ve_a(L_CARPETA, t, cierto) entonces
+            pon_dirección()
             devolver
         fin
-        mientras cuántas < MAX_ENTRADAS y entrada(m, e) hacer
-            si e.nombre[0] <> '.' y e.atributos yb 0x08 = 0 entonces
-                para i desde 0 hasta 12 hacer nombres[cuántas][i] := e.nombre[i] fin
-                carpetas[cuántas] := e.atributos yb CARPETA <> 0
-                tamaños[cuántas] := e.tamaño
-                cuántas := cuántas + 1
+        foco := ID_CONTENIDO
+    fin
+
+    ; =========================================================================
+    ;  Abrir
+    ; =========================================================================
+    ; abre el archivo «r» con lo que tenga asociado; falso (y por qué en aviso) si no
+    función abre_archivo(r: puntero a byte): bool
+        variable e: arreglo [8] de byte
+        variable prog: arreglo [80] de byte
+        variable plantilla: arreglo [80] de byte
+        variable t: nat32
+        ; (CD) una imagen de disco (.ISO, .CUE, .IMG): se monta y se entra en ella
+        si es_imagen_de_disco(r) entonces devolver monta(r) fin
+        extensión(r, e)
+        si no asociado(e, prog, plantilla) entonces
+            copiar(aviso, "No hay con qu\x82 abrir esa clase de archivo: Archivo > Abrir con...")
+            devolver falso
+        fin
+        t := abre_con(prog, plantilla, r)
+        si es_error(t) entonces
+            copiar(aviso, "No se puede abrir: ")
+            concatenar(aviso, texto_error(t))
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+    ; (CD) ¿es una imagen de disco que se pueda montar?
+    función es_imagen_de_disco(n: puntero a byte): bool
+        devolver acaba_en(n, ".ISO") o acaba_en(n, ".CUE") o acaba_en(n, ".IMG") o acaba_en(n, ".IMA")
+    fin
+
+    ; (CD) monta la imagen de esa ruta (con su letra) como una unidad más y entra en ella
+    función monta(r: puntero a byte): bool
+        variable m: nat32
+        variable d: arreglo [2] de nat32
+        variable raíz: arreglo [4] de byte
+        m := montar_imagen(r)
+        si es_error(m) o m < 'A' entonces
+            copiar(aviso, "No se puede montar: ")
+            si es_error(m) entonces concatenar(aviso, texto_error(m)) sino concatenar(aviso, texto_imagen(m)) fin
+            devolver falso
+        fin
+        raíz[0] := byte(m)
+        raíz[1] := ':'
+        raíz[2] := '\\'
+        raíz[3] := 0
+        lee_unidades()
+        refresca_árbol()
+        ve_a(L_CARPETA, raíz, cierto)
+        d[0] := nat32(r)
+        d[1] := m
+        formatear(aviso, 200, "%s, montada como %c:", d)
+        devolver cierto
+    fin
+
+    ; (CD) ¿lo elegido en Mi equipo es un lector de CD o una imagen montada?
+    función es_de_expulsar(): bool
+        variable k: ent32
+        k := primero_marcado()
+        devolver k >= 0 y item(k).unidad >= 0 y us[item(k).unidad].quitable = 2
+    fin
+
+    ; (CD) «Expulsar» la unidad elegida: el lector abre la bandeja; la imagen se desmonta
+    función expulsa_unidad()
+        variable k: ent32
+        variable r: nat32
+        variable d: arreglo [1] de nat32
+        variable imagen: bool
+        k := primero_marcado()
+        si k < 0 o item(k).unidad < 0 entonces devolver fin
+        d[0] := us[item(k).unidad].letra
+        imagen := us[item(k).unidad].medio = MEDIO_IMAGEN
+        r := expulsar(us[item(k).unidad].letra)
+        si r = EXPULSADA y imagen entonces
+            formatear(aviso, 200, "La imagen de %c: est\xA0 desmontada.", d)
+        sino si r = EXPULSADA entonces
+            formatear(aviso, 200, "Ya puede sacar el disco de %c:.", d)
+        sino
+            formatear(aviso, 200, "%c: no se puede expulsar.", d)
+        fin
+        relee_conservando()
+        refresca_árbol()
+    fin
+
+    función abre_item(k: ent32)
+        variable it: puntero a Item
+        variable r: arreglo [MAX_RUTA] de byte
+        si k < 0 entonces devolver fin
+        it := item(k)
+        si lugar = L_EQUIPO entonces
+            si it.ruta[0] = '*' entonces
+                ve_a(L_PAPELERA, "", cierto)
+            sino si it.unidad >= 0 y us[it.unidad].letra = 0 entonces
+                copiar(aviso, "En ese disco no hay nada que se pueda leer (ninguna partici\xA2n FAT).")
+            sino si it.unidad >= 0 y us[it.unidad].medio = MEDIO_CD y us[it.unidad].clase = 0 entonces
+                ; (CD) un lector sin disco que se pueda leer
+                si us[it.unidad].relleno[0] = 2 entonces
+                    copiar(aviso, "Es un CD de m\xA3sica: escucharlo, m\xA0s adelante.")
+                sino si us[it.unidad].relleno[0] = 3 entonces
+                    copiar(aviso, "El disco no se puede leer (no es ISO 9660).")
+                sino
+                    copiar(aviso, "No hay ning\xA3n disco en el lector.")
+                fin
+            sino
+                ve_a(L_CARPETA, dirección(it.ruta[0]), cierto)
+            fin
+            devolver
+        fin
+        si lugar = L_PAPELERA entonces
+            copiar(aviso, "Lo de la Papelera no se abre: Herramientas > Restaurar lo devuelve a su sitio.")
+            devolver
+        fin
+        si it.carpeta entonces
+            copiar(r, dirección(it.ruta[0]))
+            ve_a(L_CARPETA, r, cierto)
+            devolver
+        fin
+        abre_archivo(dirección(it.ruta[0]))
+    fin
+
+    ; Intro o dos clics: lo elegido (si son varios archivos, cada uno)
+    función abre_elegidos()
+        variable i: ent32
+        variable n: nat32
+        n := cuántos_marcados()
+        si n <= 1 entonces
+            abre_item(primero_marcado())
+            devolver
+        fin
+        i := 0
+        mientras i < vistos() hacer
+            si marcado(de_vista(i)) y no item(de_vista(i)).carpeta entonces abre_archivo(dirección(item(de_vista(i)).ruta[0])) fin
+            i := i + 1
+        fin
+    fin
+
+    ; =========================================================================
+    ;  El árbol
+    ; =========================================================================
+    función nodo_nuevo(en: nat32, r: puntero a byte, nombre: puntero a byte, nivel: nat32, clase: nat32): bool
+        variable i: nat32
+        si n_nodos >= MAX_NODOS entonces devolver falso fin
+        i := n_nodos
+        mientras i > en hacer
+            copiar_memoria(puntero(nodos + i), puntero(nodos + (i - 1)), tamaño(Nodo))
+            i := i - 1
+        fin
+        copiar_hasta(dirección(nodos[en].ruta[0]), r, MAX_RUTA)
+        copiar_hasta(dirección(nodos[en].nombre[0]), nombre, 40)
+        nodos[en].nivel := nivel
+        nodos[en].abierto := falso
+        nodos[en].sin_hijos := falso
+        nodos[en].clase := clase
+        n_nodos := n_nodos + 1
+        devolver cierto
+    fin
+
+    función hace_árbol()
+        variable i, k: nat32
+        variable nombre: arreglo [LARGO] de byte
+        variable r: arreglo [8] de byte
+        n_nodos := 0
+        nodo_nuevo(0, "", "Mi equipo", 0, IC_EQUIPO)
+        nodos[0].abierto := cierto
+        k := 1
+        i := 0
+        mientras i < n_us hacer
+            si us[i].letra <> 0 entonces
+                nombre_unidad(us[i], nombre)
+                r[0] := us[i].letra
+                r[1] := ':'
+                r[2] := '\\'
+                r[3] := 0
+                si nodo_nuevo(k, r, nombre, 1, clase_unidad(us[i])) entonces k := k + 1 fin
+            fin
+            i := i + 1
+        fin
+        nodo_nuevo(k, "*", "Papelera", 0, IC_PAPELERA)
+        nodos[k].sin_hijos := cierto
+        nodo_cursor := 0
+        primer_nodo := 0
+    fin
+
+    ; abre el nodo n: sus carpetas, debajo
+    función abre_nodo(n: nat32)
+        variable m: nat32
+        variable e: Entrada
+        variable largo: arreglo [MAX_LARGO] de byte
+        variable r: arreglo [MAX_RUTA] de byte
+        variable k, pos: nat32
+        si n >= n_nodos o nodos[n].abierto o nodos[n].sin_hijos o nodos[n].ruta[0] = 0 o nodos[n].ruta[0] = '*' entonces devolver fin
+        nodos[n].abierto := cierto
+        m := abrir(dirección(nodos[n].ruta[0]))
+        si es_error(m) entonces
+            nodos[n].sin_hijos := cierto
+            devolver
+        fin
+        k := n + 1
+        mientras entrada_larga(m, e, largo) hacer
+            si e.nombre[0] = '.' o e.atributos yb CARPETA = 0 o e.atributos yb 0x08 <> 0 entonces seguir fin
+            si no ocultos y e.atributos yb (OCULTO ob DE_SISTEMA) <> 0 entonces seguir fin
+            une(r, dirección(nodos[n].ruta[0]), dirección(e.nombre[0]))
+            ; (en su sitio, por orden alfabético)
+            pos := n + 1
+            mientras pos < k y comparar_llano(largo, dirección(nodos[pos].nombre[0])) > 0 hacer pos := pos + 1 fin
+            si no nodo_nuevo(pos, r, largo, nodos[n].nivel + 1, IC_CARPETA) entonces romper fin
+            k := k + 1
+        fin
+        cerrar(m)
+        si k = n + 1 entonces
+            nodos[n].sin_hijos := cierto
+            nodos[n].abierto := falso
+        fin
+    fin
+
+    ; compara sin mirar mayúsculas (<0, 0, >0)
+    función comparar_llano(a: puntero a byte, b: puntero a byte): ent32
+        variable i: nat32
+        i := 0
+        mientras a[i] <> 0 y mayúscula(a[i]) = mayúscula(b[i]) hacer i := i + 1 fin
+        devolver ent32(mayúscula(a[i])) - ent32(mayúscula(b[i]))
+    fin
+
+    ; cierra el nodo n (quita los de debajo)
+    función cierra_nodo(n: nat32)
+        variable k, quitar, i: nat32
+        si n >= n_nodos o no nodos[n].abierto entonces devolver fin
+        nodos[n].abierto := falso
+        si n = 0 entonces devolver fin             ; (Mi equipo: sus unidades se quedan)
+        k := n + 1
+        mientras k < n_nodos y nodos[k].nivel > nodos[n].nivel hacer k := k + 1 fin
+        quitar := k - n - 1
+        si quitar = 0 entonces devolver fin
+        i := n + 1
+        mientras i + quitar < n_nodos hacer
+            copiar_memoria(puntero(nodos + i), puntero(nodos + (i + quitar)), tamaño(Nodo))
+            i := i + 1
+        fin
+        n_nodos := n_nodos - quitar
+        si nodo_cursor > ent32(n) y nodo_cursor <= ent32(n + quitar) entonces nodo_cursor := ent32(n) fin
+        si nodo_cursor > ent32(n + quitar) entonces nodo_cursor := nodo_cursor - ent32(quitar) fin
+    fin
+
+    ; el nodo del sitio en que se está (abriendo los de arriba si hace falta)
+    función sincroniza_árbol()
+        variable i: nat32
+        variable buscado: arreglo [MAX_RUTA] de byte
+        variable vueltas: nat32
+        si lugar = L_EQUIPO entonces
+            nodo_cursor := 0
+            devolver
+        fin
+        si lugar = L_PAPELERA entonces
+            i := 0
+            mientras i < n_nodos hacer
+                si nodos[i].ruta[0] = '*' entonces nodo_cursor := ent32(i) fin
+                i := i + 1
+            fin
+            devolver
+        fin
+        si lugar <> L_CARPETA entonces devolver fin
+        vueltas := 0
+        mientras vueltas < 16 hacer
+            ; el más largo que es de arriba (o el mismo)
+            i := 0
+            nodo_cursor := 0
+            mientras i < n_nodos hacer
+                si nodos[i].ruta[0] <> 0 y nodos[i].ruta[0] <> '*' y dentro_de(ruta, dirección(nodos[i].ruta[0])) entonces
+                    si iguales_sin_caja(dirección(nodos[i].ruta[0]), ruta) entonces
+                        nodo_cursor := ent32(i)
+                        devolver
+                    fin
+                    nodo_cursor := ent32(i)
+                fin
+                i := i + 1
+            fin
+            si nodo_cursor = 0 o nodos[nodo_cursor].abierto entonces devolver fin
+            abre_nodo(nat32(nodo_cursor))
+            vueltas := vueltas + 1
+        fin
+        copiar(buscado, ruta)
+    fin
+
+    función va_al_nodo(n: ent32)
+        si n < 0 o n >= ent32(n_nodos) entonces devolver fin
+        nodo_cursor := n
+        si nodos[n].ruta[0] = 0 entonces
+            ve_a(L_EQUIPO, "", cierto)
+        sino si nodos[n].ruta[0] = '*' entonces
+            ve_a(L_PAPELERA, "", cierto)
+        sino
+            ve_a(L_CARPETA, dirección(nodos[n].ruta[0]), cierto)
+        fin
+        nodo_cursor := n
+    fin
+
+    ; el nodo en ese punto (-1 si ninguno); «en_signo»: se ha pulsado en su [+]
+    función nodo_en(x: ent32, yy: ent32, ref en_signo: bool): ent32
+        variable n: ent32
+        en_signo := falso
+        si x < ax o x >= ax + aan o yy < ay o yy >= ay + aal entonces devolver -1 fin
+        n := primer_nodo + (yy - ay - 2) div RENGLÓN_ÁRBOL
+        si n < 0 o n >= ent32(n_nodos) entonces devolver -1 fin
+        en_signo := x < ax + 6 + ent32(nodos[n].nivel) * 14 + 12
+        devolver n
+    fin
+
+    función pinta_árbol()
+        variable i, yy, x, caben: ent32
+        variable tinta: nat32
+        rect(ax, ay, aan, aal, C_BORDE)
+        rect(ax + 1, ay + 1, aan - 2, aal - 2, C_PAPEL)
+        caben := (aal - 4) div RENGLÓN_ÁRBOL
+        si nodo_cursor < primer_nodo entonces primer_nodo := nodo_cursor fin
+        si nodo_cursor >= primer_nodo + caben entonces primer_nodo := nodo_cursor - caben + 1 fin
+        si primer_nodo < 0 entonces primer_nodo := 0 fin
+        i := primer_nodo
+        mientras i < ent32(n_nodos) y i < primer_nodo + caben hacer
+            yy := ay + 2 + (i - primer_nodo) * RENGLÓN_ÁRBOL
+            x := ax + 6 + ent32(nodos[i].nivel) * 14
+            tinta := C_TEXTO
+            si es_el_sitio(i) entonces
+                rect(x + 30, yy, aan - (x + 30 - ax) - 3, RENGLÓN_ÁRBOL, C_ELEGIDO)
+                tinta := C_PAPEL
+            fin
+            si i = destino_nodo y arrastrando entonces Controles.borde(x + 28, yy, aan - (x + 28 - ax) - 2, RENGLÓN_ÁRBOL, 2, 0x15803D) fin
+            si i = nodo_cursor y foco = ID_ÁRBOL entonces Controles.borde(x + 29, yy + 1, aan - (x + 29 - ax) - 4, RENGLÓN_ÁRBOL - 2, 1, C_TEXTO) fin
+            ; el [+] o el [-]: un cuadrito con su signo (no solo un color)
+            si no nodos[i].sin_hijos y nodos[i].ruta[0] <> '*' y i > 0 entonces
+                rect(x, yy + 5, 11, 11, 0x6B7280)
+                rect(x + 1, yy + 6, 9, 9, C_PAPEL)
+                rect(x + 3, yy + 10, 5, 1, C_TEXTO)
+                si no nodos[i].abierto entonces rect(x + 5, yy + 8, 1, 5, C_TEXTO) fin
+            fin
+            icono(lz, x + 13, yy + 2, 16, nodos[i].clase, 0, 0)
+            corto_en(x + 33, yy + 2, dirección(nodos[i].nombre[0]), ax + aan - x - 38, tinta, falso)
+            i := i + 1
+        fin
+        si foco = ID_ÁRBOL entonces marca_foco(ax, ay, aan, aal) fin
+        apuntar(ID_ÁRBOL, K_LISTA, ax, ay, aan, aal)
+    fin
+
+    función es_el_sitio(n: ent32): bool
+        si nodos[n].ruta[0] = 0 entonces devolver lugar = L_EQUIPO fin
+        si nodos[n].ruta[0] = '*' entonces devolver lugar = L_PAPELERA fin
+        devolver lugar = L_CARPETA y iguales_sin_caja(dirección(nodos[n].ruta[0]), ruta)
+    fin
+
+    función tecla_árbol(c: nat32)
+        variable n: ent32
+        n := nodo_cursor
+        si c = TECLA_ARRIBA y n > 0 entonces
+            va_al_nodo(n - 1)
+        sino si c = TECLA_ABAJO y n + 1 < ent32(n_nodos) entonces
+            va_al_nodo(n + 1)
+        sino si c = TECLA_DERECHA entonces
+            si nodos[n].abierto entonces
+                si n + 1 < ent32(n_nodos) y nodos[n + 1].nivel > nodos[n].nivel entonces va_al_nodo(n + 1) fin
+            sino
+                abre_nodo(nat32(n))
+            fin
+        sino si c = TECLA_IZQUIERDA entonces
+            si nodos[n].abierto y n > 0 entonces
+                cierra_nodo(nat32(n))
+            sino
+                ; al de arriba
+                mientras n > 0 y nodos[n - 1].nivel >= nodos[nodo_cursor].nivel hacer n := n - 1 fin
+                si n > 0 entonces va_al_nodo(n - 1) fin
+            fin
+        sino si c = '\n' entonces
+            va_al_nodo(n)
+            foco := ID_CONTENIDO
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Lo de dentro: cómo se ve cada cosa
+    ; =========================================================================
+    función celda_an(): ent32
+        según nat16(vista)
+            caso V_MINIATURAS: devolver 112
+            caso V_LISTA: devolver 230
+        fin
+        si lugar = L_EQUIPO entonces devolver 250 fin
+        devolver 96
+    fin
+
+    función celda_al(): ent32
+        según nat16(vista)
+            caso V_MINIATURAS: devolver 112
+            caso V_LISTA: devolver 22
+        fin
+        si lugar = L_EQUIPO entonces devolver 62 fin
+        devolver 78
+    fin
+
+    función calcula_rejilla()
+        columnas := (can - 8) div celda_an()
+        si columnas < 1 entonces columnas := 1 fin
+        filas := (cal - 8) div celda_al()
+        si filas < 1 entonces filas := 1 fin
+    fin
+
+    ; dónde se pinta el que se ve en el sitio i (falso si no se ve)
+    función sitio_de(i: ent32, ref x: ent32, ref yy: ent32): bool
+        variable f, c: ent32
+        si vista = V_LISTA entonces
+            c := i div filas - primera
+            f := i mod filas
+            si c < 0 o c >= (can - 8) div celda_an() + 1 entonces devolver falso fin
+        sino
+            f := i div columnas - primera
+            c := i mod columnas
+            si f < 0 o f > filas entonces devolver falso fin
+        fin
+        x := cx + 6 + c * celda_an()
+        yy := cy + 6 + f * celda_al()
+        devolver x < cx + can y yy < cy + cal
+    fin
+
+    ; el que se ve en ese punto (su sitio en lo que se ve), o -1
+    función en_punto(x: ent32, yy: ent32): ent32
+        variable i, f, c: ent32
+        si x < cx o yy < cy o x >= cx + can o yy >= cy + cal entonces devolver -1 fin
+        si vista = V_DETALLES entonces
+            i := rejilla_en(g, x, yy)
+            devolver i
+        fin
+        c := (x - cx - 6) div celda_an()
+        f := (yy - cy - 6) div celda_al()
+        si x < cx + 6 o yy < cy + 6 entonces devolver -1 fin
+        si vista = V_LISTA entonces
+            i := (c + primera) * filas + f
+            si f >= filas entonces devolver -1 fin
+        sino
+            si c >= columnas entonces devolver -1 fin
+            i := (f + primera) * columnas + c
+        fin
+        si i >= vistos() entonces devolver -1 fin
+        ; (solo si cae en lo que ocupa de verdad)
+        si vista = V_LISTA y x - cx - 6 - c * celda_an() > 24 + 8 * ent32(longitud(dirección(item(de_vista(i)).largo[0]))) entonces devolver -1 fin
+        devolver i
+    fin
+
+    ; que se vea el del cursor
+    función al_cursor()
+        variable f: ent32
+        si g.sel < 0 o vista = V_DETALLES entonces devolver fin
+        calcula_rejilla()
+        si vista = V_LISTA entonces
+            f := g.sel div filas
+            si f < primera entonces primera := f fin
+            si f >= primera + (can - 8) div celda_an() entonces primera := f - (can - 8) div celda_an() + 1 fin
+        sino
+            f := g.sel div columnas
+            si f < primera entonces primera := f fin
+            si f >= primera + filas entonces primera := f - filas + 1 fin
+        fin
+        si primera < 0 entonces primera := 0 fin
+    fin
+
+    ; la barra de lo libre de una unidad (con su texto al lado: no solo el color)
+    función barra_libre(x: ent32, yy: ent32, an: ent32, ref u: Info_unidad)
+        variable usado: ent32
+        si u.total_k = 0 o u.libre_k = 0xFFFFFFFF entonces devolver fin
+        rect(x, yy, an, 10, 0x1F3A5F)
+        rect(x + 1, yy + 1, an - 2, 8, C_PAPEL)
+        usado := ent32(((u.total_k - u.libre_k) div 64) * nat32(an - 2) div (u.total_k div 64 + 1))
+        si usado > an - 2 entonces usado := an - 2 fin
+        si usado > 0 entonces rect(x + 1, yy + 1, usado, 8, 0x2F74D0) fin
+    fin
+
+    función pinta_item(i: ent32, x: ent32, yy: ent32)
+        variable k: ent32
+        variable it: puntero a Item
+        variable tinta, fondo_: nat32
+        variable elegido, es_cursor: bool
+        variable n, an, l1, tx, cab: ent32
+        variable t: arreglo [48] de byte
+        variable d: arreglo [2] de nat32
+        k := de_vista(i)
+        it := item(k)
+        elegido := marcado(k)
+        es_cursor := i = g.sel y foco = ID_CONTENIDO
+        tinta := C_TEXTO
+        an := celda_an() - 6
+        si vista = V_LISTA entonces
+            n := ent32(longitud(dirección(it.largo[0]))) * 8
+            si n > an - 26 entonces n := an - 26 fin
+            si elegido entonces
+                rect(x + 20, yy, n + 6, 20, C_ELEGIDO)
+                tinta := C_PAPEL
+            fin
+            si i = destino_arr y arrastrando entonces Controles.borde(x, yy, n + 28, 20, 2, 0x15803D) fin
+            si es_cursor entonces Controles.borde(x + 19, yy, n + 8, 20, 1, C_TEXTO) fin
+            icono(lz, x, yy + 2, 16, it.clase, it.letra, 0)
+            corto_en(x + 23, yy + 2, dirección(it.largo[0]), an - 26, tinta, falso)
+            devolver
+        fin
+        si lugar = L_EQUIPO y vista = V_ICONOS entonces
+            ; las unidades, en mosaico: su icono grande y, al lado, el nombre, lo libre y la barra
+            si elegido entonces redondo(x, yy, an, celda_al() - 6, 6, C_ELEGIDO, C_ELEGIDO) fin
+            si es_cursor entonces Controles.borde(x, yy, an, celda_al() - 6, 1, C_TEXTO) fin
+            si i = destino_arr y arrastrando entonces Controles.borde(x, yy, an, celda_al() - 6, 2, 0x15803D) fin
+            si elegido entonces tinta := C_PAPEL fin
+            icono(lz, x + 6, yy + 8, 40, it.clase, 0, 0)
+            corto_en(x + 54, yy + 4, dirección(it.largo[0]), an - 58, tinta, cierto)
+            si it.unidad >= 0 y us[it.unidad].letra <> 0 entonces
+                si us[it.unidad].libre_k <> 0xFFFFFFFF entonces
+                    tamaño_k(us[it.unidad].libre_k, t)
+                    d[0] := nat32(dirección(t[0]))
+                    tamaño_k(us[it.unidad].total_k, dirección(texto_[200]))
+                    d[1] := nat32(dirección(texto_[200]))
+                    formatear(dirección(texto_[0]), 100, "%s libres de %s", d)
+                    corto_en(x + 54, yy + 22, texto_, an - 58, tinta, falso)
+                    si us[it.unidad].solo_lectura = 0 entonces barra_libre(x + 54, yy + 42, an - 64, us[it.unidad]) fin
+                sino
+                    tamaño_k(us[it.unidad].total_k, t)
+                    corto_en(x + 54, yy + 22, t, an - 58, tinta, falso)
+                fin
+                si us[it.unidad].solo_lectura <> 0 entonces corto_en(x + 54, yy + 38, "(de solo lectura)", an - 58, tinta, falso) fin
+            sino si it.unidad >= 0 entonces
+                corto_en(x + 54, yy + 22, "sin nada que se pueda leer", an - 58, tinta, falso)
+            sino
+                corto_en(x + 54, yy + 22, "lo borrado, por si hace falta", an - 58, tinta, falso)
+            fin
+            devolver
+        fin
+        ; iconos y miniaturas: el dibujo arriba y el nombre debajo (en dos renglones)
+        cab := 36
+        si vista = V_MINIATURAS entonces cab := 74 fin
+        si i = destino_arr y arrastrando entonces Controles.borde(x + 2, yy, an - 4, cab + 4, 2, 0x15803D) fin
+        si vista = V_MINIATURAS entonces
+            rect(x + (an - 72) div 2, yy, 72, 72, 0x9CA3AF)
+            rect(x + (an - 72) div 2 + 1, yy + 1, 70, 70, C_PAPEL)
+            si it.miniatura >= 0 entonces
+                pinta_miniatura(it.miniatura, x + (an - LADO_MIN) div 2, yy + 4)
+            sino
+                icono(lz, x + (an - 48) div 2, yy + 12, 48, it.clase, it.letra, 0)
+            fin
+        sino
+            icono(lz, x + (an - 32) div 2, yy + 2, 32, it.clase, it.letra, 0)
+        fin
+        ; el nombre: hasta dos renglones de an/8 letras
+        n := ent32(longitud(dirección(it.largo[0])))
+        l1 := (an - 4) div 8
+        si l1 < 4 entonces l1 := 4 fin
+        si n > l1 entonces
+            fondo_ := 2
+        sino
+            fondo_ := 1
+        fin
+        si elegido entonces
+            tinta := C_PAPEL
+            si fondo_ = 1 entonces rect(x + (an - n * 8) div 2 - 2, yy + cab, n * 8 + 4, 18, C_ELEGIDO) sino rect(x, yy + cab, an, 34, C_ELEGIDO) fin
+        fin
+        si fondo_ = 1 entonces
+            tx := x + (an - n * 8) div 2
+            letras(tx, yy + cab + 1, dirección(it.largo[0]), tinta)
+            si es_cursor entonces Controles.borde(tx - 3, yy + cab - 1, n * 8 + 6, 20, 1, C_TEXTO) fin
+        sino
+            letras_n(x + 2, yy + cab + 1, dirección(it.largo[0]), nat32(l1), tinta)
+            corto_en(x + 2, yy + cab + 17, dirección(it.largo[l1]), an - 4, tinta, falso)
+            si es_cursor entonces Controles.borde(x - 1, yy + cab - 1, an + 2, 36, 1, C_TEXTO) fin
+        fin
+        si it.atrib yb (OCULTO ob DE_SISTEMA) <> 0 entonces
+            ; oculto: una raya de puntos debajo (además del gris)
+            rect(x + 4, yy + cab - 3, an - 8, 1, 0x9CA3AF)
+        fin
+    fin
+
+    función pinta_contenido()
+        variable i, x, yy: ent32
+        variable vacío: puntero a byte
+        vacío := "Esta carpeta est\xA0 vac\xA1a."
+        si lugar = L_PAPELERA entonces vacío := "La Papelera est\xA0 vac\xA1a." fin
+        si lugar = L_BUSCAR entonces vacío := "No se ha encontrado nada con ese nombre." fin
+        si vista = V_DETALLES entonces
+            rejilla(g, ID_CONTENIDO, cx, cy, can, cal, vacío)
+        sino
+            rect(cx, cy, can, cal, C_BORDE)
+            rect(cx + 1, cy + 1, can - 2, cal - 2, C_PAPEL)
+            calcula_rejilla()
+            si vistos() = 0 entonces letras(cx + 12, cy + 12, vacío, C_SUAVE) fin
+            i := 0
+            mientras i < vistos() hacer
+                si sitio_de(i, x, yy) entonces pinta_item(i, x, yy) fin
+                i := i + 1
+            fin
+            si foco = ID_CONTENIDO entonces marca_foco(cx, cy, can, cal) fin
+            apuntar(ID_CONTENIDO, K_LISTA, cx, cy, can, cal)
+        fin
+        ; el recuadro del ratón
+        si banda entonces
+            x := bx0
+            si bx1 < x entonces x := bx1 fin
+            yy := by0
+            si by1 < yy entonces yy := by1 fin
+            Controles.borde(x, yy, abs(bx1 - bx0) + 1, abs(by1 - by0) + 1, 1, C_ELEGIDO)
+        fin
+        ; lo que se arrastra: un rótulo junto al puntero
+        si arrastrando entonces
+            d1(texto_, "%u elementos", cuántos_marcados())
+            si cuántos_marcados() = 1 y primero_marcado() >= 0 entonces copiar_hasta(texto_, dirección(item(primero_marcado()).largo[0]), 40) fin
+            x := ratón_x + 14
+            yy := ratón_y + 10
+            i := ent32(longitud(texto_)) * 8 + 30
+            si x + i > ancho entonces x := ancho - i fin
+            redondo(x, yy, i, 22, 4, C_TEXTO, C_TEXTO)
+            redondo(x + 1, yy + 1, i - 2, 20, 3, 0xFFFBEA, 0xFFF1C2)
+            si primero_marcado() >= 0 entonces icono(lz, x + 4, yy + 3, 16, item(primero_marcado()).clase, item(primero_marcado()).letra, 0) fin
+            letras(x + 24, yy + 3, texto_, C_TEXTO)
+        fin
+    fin
+
+    función abs(n: ent32): ent32
+        si n < 0 entonces devolver -n fin
+        devolver n
+    fin
+
+    ; =========================================================================
+    ;  Pintar la ventana
+    ; =========================================================================
+    función pinta_herramientas(yy: ent32)
+        variable x: ent32
+        variable puede, hay_algo: bool
+        barra_herramientas(0, yy, ancho)
+        puede := lugar = L_CARPETA y escribible(ruta)
+        hay_algo := cuántos_marcados() > 0 o g.sel >= 0
+        x := 4
+        x := x + herramienta(ID_H + I_ANTERIOR, x, yy + 2, I_ANTERIOR, "Atr\xA0s", en_historia = 0) + 2
+        x := x + herramienta(ID_H + I_SIGUIENTE, x, yy + 2, I_SIGUIENTE, "", en_historia + 1 >= n_historia) + 2
+        x := x + herramienta(ID_H + I_SUBIR, x, yy + 2, I_SUBIR, "Subir", lugar = L_EQUIPO) + 2
+        x := x + separador(x, yy)
+        x := x + herramienta(ID_H + I_BUSCAR, x, yy + 2, I_BUSCAR, "Buscar", falso) + 2
+        x := x + separador(x, yy)
+        x := x + herramienta(ID_H + I_CORTAR, x, yy + 2, I_CORTAR, "", no (puede y hay_algo)) + 2
+        x := x + herramienta(ID_H + I_COPIAR, x, yy + 2, I_COPIAR, "", no (hay_algo y lugar <> L_EQUIPO y lugar <> L_PAPELERA)) + 2
+        x := x + herramienta(ID_H + I_PEGAR, x, yy + 2, I_PEGAR, "", no puede) + 2
+        x := x + herramienta(ID_H + I_BORRAR, x, yy + 2, I_BORRAR, "", no (hay_algo y (lugar = L_PAPELERA o puede o (lugar = L_BUSCAR)))) + 2
+        x := x + separador(x, yy)
+        x := x + herramienta(ID_H + I_CARPETA, x, yy + 2, I_CARPETA, "", no puede) + 2
+        x := x + herramienta(ID_H + I_VISTAS, x, yy + 2, I_VISTAS, "Vistas", falso) + 2
+    fin
+
+    función pinta_buscar()
+        variable yy: ent32
+        rect(ax, ay, aan, aal, C_PANEL)
+        Controles.borde(ax, ay, aan, aal, 1, C_BORDE)
+        yy := ay + 6
+        icono(lz, ax + 8, yy, 24, IC_BUSCAR, 0, 0)
+        Controles.negrita(ax + 40, yy + 4, "Buscar", C_TEXTO)
+        yy := yy + 30
+        yy := yy + campo(ID_B_CAMPO, ax + 8, yy, aan - 16, "El nombre (o un trozo)", que_buscar, falso) + 4
+        letras(ax + 8, yy, "Valen * y ?", C_SUAVE)
+        yy := yy + 20
+        yy := yy + casilla(ID_B_SUB, ax + 8, yy, "Tambi\x82n dentro", en_subcarpetas) + 6
+        botón(ID_B_BUSCAR, ax + 8, yy, "Buscar", cierto, que_buscar[0] = 0)
+        botón(ID_B_VOLVER, ax + 16 + ancho_botón("Buscar"), yy, "Carpetas", falso, falso)
+        yy := yy + alto_botón() + 10
+        si buscado_en[0] <> 0 entonces
+            letras(ax + 8, yy, "Buscado en:", C_SUAVE)
+            corto_en(ax + 8, yy + 18, buscado_en, aan - 16, C_TEXTO, falso)
+        fin
+    fin
+
+    función pinta_estado()
+        variable n, libre: nat32
+        variable t: arreglo [40] de byte
+        variable tam: nat32
+        variable k: nat32
+        variable u: ent32
+        variable d: arreglo [2] de nat32
+        n := cuántos_marcados()
+        d[0] := nat32(vistos())
+        formatear(texto_, 300, "%u elementos", d)
+        concatenar(texto_, "|")
+        si aviso[0] <> 0 entonces
+            concatenar(texto_, aviso)
+        sino si n > 0 entonces
+            tam := 0
+            k := 0
+            mientras k < n_items hacer
+                si marcado(ent32(k)) y no items[k].carpeta entonces tam := tam + items[k].tamaño fin
+                k := k + 1
+            fin
+            tamaño_a_texto(tam, t)
+            d[0] := n
+            d[1] := nat32(dirección(t[0]))
+            si lugar = L_EQUIPO entonces formatear(dirección(texto_[longitud(texto_)]), 100, "%u elegidos", d) sino formatear(dirección(texto_[longitud(texto_)]), 100, "%u elegidos (%s)", d) fin
+        sino
+            concatenar(texto_, "Nada elegido")
+        fin
+        concatenar(texto_, "|")
+        si lugar = L_CARPETA entonces
+            u := unidad_de(ruta[0])
+            si u >= 0 entonces
+                si us[u].solo_lectura <> 0 o us[u].clase = 1 entonces
+                    concatenar(texto_, "De solo lectura")
+                sino si us[u].libre_k <> 0xFFFFFFFF entonces
+                    tamaño_k(us[u].libre_k, t)
+                    concatenar(texto_, "Libre: ")
+                    concatenar(texto_, t)
+                fin
+            fin
+        sino
+            concatenar(texto_, "Hispa-Pentium")
+        fin
+        libre := 0
+        barra_estado(alto - alto_estado(), texto_)
+    fin
+
+    función pinta_ventana()
+        variable yy, an_ir: ent32
+        caja(0, 0, ancho, alto, C_FONDO)
+        yy := barra_menús(0, 0, ancho, MENÚS, abierto_m)
+        pinta_herramientas(yy)
+        yy := yy + alto_herramientas()
+        ; la dirección
+        rect(0, yy, ancho, alto_caja() + 8, C_BARRA)
+        letras(8, yy + 4 + (alto_caja() - 16) div 2, "Direcci\xA2n", C_SUAVE)
+        an_ir := ancho_botón("Ir")
+        si foco <> ID_DIRECCIÓN entonces pon_dirección() fin
+        campo(ID_DIRECCIÓN, 96, yy + 4, ancho - 96 - an_ir - 16, "", dirección_, falso)
+        botón(ID_IR, ancho - an_ir - 8, yy + 4 + (alto_caja() - alto_botón()) div 2, "Ir", falso, falso)
+        yy := yy + alto_caja() + 12
+        ; el panel de la izquierda y lo de dentro
+        ax := 6
+        ay := yy
+        aan := PANEL - 6
+        aal := alto - alto_estado() - yy - 6
+        cx := PANEL + 6
+        cy := yy
+        can := ancho - cx - 6
+        cal := aal
+        si buscando entonces pinta_buscar() sino pinta_árbol() fin
+        pinta_contenido()
+        pinta_estado()
+    fin
+
+    ; ---- los cuadros ----
+    variable dx, dy, dan, dal: ent32            ; el sitio del cuadro abierto
+
+    función marco_cuadro(an: ent32, al: ent32)
+        dan := an
+        dal := al
+        dx := (ancho - an) div 2
+        dy := (alto - al) div 2
+        si dy < 4 entonces dy := 4 fin
+        ; lo de debajo, más apagado (y que no se pulse: los controles se apuntan otra vez)
+        Grafico.oscurecer(lz, 0, 0, ancho, alto, 70)
+        empezar_controles()
+        rect(dx + 4, dy + 4, an, al, 0x5B6472)
+        rect(dx, dy, an, al, 0x1F3A5F)
+        rect(dx + 2, dy + 2, an - 4, al - 4, C_PAPEL)
+        Grafico.degradado(lz, dx + 2, dy + 2, an - 4, 26, 0x3F8DEA, 0x1A5AB6)
+        Controles.negrita(dx + 12, dy + 7, cuadro_título, C_PAPEL)
+    fin
+
+    función pinta_progreso()
+        variable an, yy, lleno: ent32
+        variable porc: nat32
+        variable d: arreglo [3] de nat32
+        marco_cuadro(440, 170)
+        yy := dy + 40
+        d[0] := hecho + 1
+        si d[0] > n_pasos entonces d[0] := n_pasos fin
+        d[1] := n_pasos
+        d[2] := nat32(de_ahora())
+        formatear(texto_, 200, "%u de %u: %s", d)
+        corto_en(dx + 16, yy, texto_, dan - 32, C_TEXTO, falso)
+        yy := yy + 26
+        an := dan - 32
+        si total_octetos > 0 entonces
+            porc := (octetos_hechos div 16) * 100 div (total_octetos div 16 + 1)
+        sino si n_pasos > 0 entonces
+            porc := hecho * 100 div n_pasos
+        sino
+            porc := 100
+        fin
+        si porc > 100 entonces porc := 100 fin
+        rect(dx + 16, yy, an, 22, 0x1F3A5F)
+        rect(dx + 17, yy + 1, an - 2, 20, C_PAPEL)
+        lleno := ent32(porc) * (an - 2) div 100
+        si lleno > 0 entonces rect(dx + 17, yy + 1, lleno, 20, 0x2A8A3C) fin
+        d[0] := porc
+        formatear(texto_, 40, "%u %%", d)
+        rect(dx + dan div 2 - 26, yy + 3, 52, 16, C_PAPEL)
+        Controles.negrita(dx + dan div 2 - ent32(longitud(texto_)) * 4, yy + 3, texto_, C_TEXTO)
+        yy := yy + 36
+        botón(ID_D, dx + dan - ancho_botón("Cancelar") - 16, yy, "Cancelar", falso, falso)
+        foco := ID_D
+    fin
+
+    función pinta_pregunta()
+        variable x, yy: ent32
+        variable d: arreglo [1] de nat32
+        marco_cuadro(560, 170)
+        d[0] := nat32(base_de(preguntado))
+        formatear(texto_, 200, "Ya hay un archivo que se llama \xAE%s\xAF donde va.", d)
+        corto_en(dx + 16, dy + 40, texto_, dan - 32, C_TEXTO, falso)
+        corto_en(dx + 16, dy + 62, "\xA8Se reemplaza por el que llega?", dan - 32, C_TEXTO, cierto)
+        yy := dy + 100
+        x := dx + 16
+        x := x + botón(ID_D, x, yy, "Reemplazar", cierto, falso) + 8
+        x := x + botón(ID_D + 1, x, yy, "Saltar", falso, falso) + 8
+        x := x + botón(ID_D + 2, x, yy, "A todos", falso, falso) + 8
+        x := x + botón(ID_D + 3, x, yy, "Saltar todos", falso, falso) + 8
+        botón(ID_D + 4, x, yy, "Cancelar", falso, falso)
+    fin
+
+    función pinta_nombre()
+        variable yy: ent32
+        marco_cuadro(440, 200)
+        yy := dy + 38
+        yy := yy + campo(ID_D, dx + 16, yy, dan - 32, "El nombre", nombre_nuevo, falso) + 6
+        corto_en(dx + 16, yy, "Hasta 8 letras, un punto y 3 m\xA0s (CARTA.TXT).", dan - 32, C_SUAVE, falso)
+        corto_en(dx + 16, yy + 18, "Los nombres largos a\xA3n no se pueden poner.", dan - 32, C_SUAVE, falso)
+        yy := dy + dal - alto_botón() - 14
+        botón(ID_D + 1, dx + dan - ancho_botón("Aceptar") - ancho_botón("Cancelar") - 24, yy, "Aceptar", cierto, nombre_nuevo[0] = 0)
+        botón(ID_D + 2, dx + dan - ancho_botón("Cancelar") - 16, yy, "Cancelar", falso, falso)
+    fin
+
+    función pinta_propiedades()
+        variable yy, i: ent32
+        variable k: nat32
+        marco_cuadro(500, 120 + ent32(n_prop) * 20 + 120)
+        yy := dy + 38
+        si de_quién >= 0 entonces icono(lz, dx + 16, yy, 32, item(de_quién).clase, item(de_quién).letra, 0) fin
+        k := 0
+        mientras k < n_prop hacer
+            si k = 0 entonces
+                corto_en(dx + 60, yy + 8, prop_texto[0], dan - 76, C_TEXTO, cierto)
+                yy := yy + 40
+            sino
+                corto_en(dx + 16, yy, prop_texto[k], dan - 32, C_TEXTO, falso)
+                yy := yy + 20
+            fin
+            k := k + 1
+        fin
+        yy := yy + 8
+        i := dx + 16
+        si de_quién >= 0 y lugar <> L_EQUIPO entonces
+            letras(dx + 16, yy, "Atributos:", C_SUAVE)
+            yy := yy + 22
+            casilla(ID_D, dx + 16, yy, "De solo lectura", at_ro)
+            casilla(ID_D + 1, dx + 240, yy, "Oculto", at_oculto)
+            yy := yy + 26
+            casilla(ID_D + 2, dx + 16, yy, "Archivo (cambiado)", at_archivo)
+            si at_sistema entonces letras(dx + 240, yy + 4, "Es del sistema", C_SUAVE) fin
+        fin
+        yy := dy + dal - alto_botón() - 14
+        botón(ID_D + 3, dx + dan - ancho_botón("Aceptar") - ancho_botón("Cancelar") - 24, yy, "Aceptar", cierto, falso)
+        botón(ID_D + 4, dx + dan - ancho_botón("Cancelar") - 16, yy, "Cancelar", falso, falso)
+    fin
+
+    función pinta_abrir_con()
+        variable yy: ent32
+        variable d: arreglo [1] de nat32
+        marco_cuadro(520, 380)
+        yy := dy + 36
+        corto_en(dx + 16, yy, "\xA8Con qu\x82 programa se abre?", dan - 32, C_TEXTO, cierto)
+        yy := yy + 22
+        rejilla(go, ID_D, dx + 16, yy, dan - 32, 170, "No hay programas.")
+        yy := yy + 178
+        yy := yy + campo_izq(ID_D + 1, dx + 16, yy, 64, dan - 32, "Otro:", otro_prog, falso) + 8
+        d[0] := nat32(dirección(ext_abrir[0]))
+        formatear(texto_, 100, "Abrir siempre los .%s con este", d)
+        casilla(ID_D + 2, dx + 16, yy, texto_, siempre)
+        yy := dy + dal - alto_botón() - 14
+        botón(ID_D + 3, dx + dan - ancho_botón("Abrir") - ancho_botón("Cancelar") - 24, yy, "Abrir", cierto, falso)
+        botón(ID_D + 4, dx + dan - ancho_botón("Cancelar") - 16, yy, "Cancelar", falso, falso)
+    fin
+
+    función pinta_confirma()
+        variable yy: ent32
+        marco_cuadro(480, 150)
+        Controles.párrafo(dx + 16, dy + 40, dan - 32, confirma_texto, C_TEXTO, falso, cierto)
+        yy := dy + dal - alto_botón() - 14
+        botón(ID_D, dx + dan - ancho_botón("S\xA1") - ancho_botón("No") - 24, yy, "S\xA1", cierto, falso)
+        botón(ID_D + 1, dx + dan - ancho_botón("No") - 16, yy, "No", falso, falso)
+    fin
+
+    función pinta_ayuda()
+        marco_cuadro(560, 400)
+        Controles.párrafo(dx + 16, dy + 38, dan - 32, "Flechas, Inicio, Fin, Re P\xA0g y Av P\xA0g: andar. Con May\xA3s: elegir varios. Espacio: elegir o soltar uno. Intro: abrir. Retroceso: subir. Tab: el panel siguiente. Alt y la letra: los men\xA3s (con las flechas, al de al lado).\nCtrl+C, Ctrl+X, Ctrl+V: copiar, cortar y pegar. Ctrl+A: todo. Supr: a la Papelera (May\xA3s+Supr: del todo). F2: cambiar el nombre. F3 o Ctrl+F: buscar. F4 o Ctrl+L: la direcci\xA2n. F5: actualizar. F7 o Ctrl+N: carpeta nueva. F8: otra vista. F9: el men\xA3 de lo elegido. F10: el men\xA3 Archivo.\nCon el rat\xA2n: Ctrl y un clic, o May\xA3s y un clic, eligen varios; un recuadro, los de dentro. Arrastrando se lleva a otra carpeta (con Ctrl, se copia), al tapiz o al dock.", C_TEXTO, falso, cierto)
+        botón(ID_D, dx + dan - ancho_botón("Cerrar") - 16, dy + dal - alto_botón() - 14, "Cerrar", cierto, falso)
+    fin
+
+    función pinta()
+        variable vueltas: nat32
+        vueltas := 0
+        ; (sin cuadro, el foco no puede quedarse en uno de sus controles)
+        si cuadro = D_NADA y foco >= ID_D entonces foco := ID_CONTENIDO fin
+        mientras vueltas < 2 hacer
+            empezar_controles()
+            pinta_ventana()
+            según nat16(cuadro)
+                caso D_PROGRESO: pinta_progreso()
+                caso D_PREGUNTA: pinta_pregunta()
+                caso D_NOMBRE: pinta_nombre()
+                caso D_PROPIEDADES: pinta_propiedades()
+                caso D_ABRIR_CON: pinta_abrir_con()
+                caso D_CONFIRMA: pinta_confirma()
+                caso D_AYUDA: pinta_ayuda()
+            fin
+            si no asegurar_foco() entonces romper fin
+            vueltas := vueltas + 1
+        fin
+        volcar()
+        tics_pinta := tics()
+    fin
+
+    ; =========================================================================
+    ;  Elegir
+    ; =========================================================================
+    función elige_solo(i: ent32)
+        desmarca_todos()
+        si i >= 0 y i < vistos() entonces
+            marca(de_vista(i), cierto)
+            g.sel := i
+            ancla := i
+        fin
+    fin
+
+    función elige_hasta(i: ent32)
+        variable a, b, j: ent32
+        desmarca_todos()
+        a := ancla
+        b := i
+        si a > b entonces
+            a := i
+            b := ancla
+        fin
+        j := a
+        mientras j <= b hacer
+            si j >= 0 y j < vistos() entonces marca(de_vista(j), cierto) fin
+            j := j + 1
+        fin
+        g.sel := i
+    fin
+
+    función elige_todos()
+        variable i: ent32
+        i := 0
+        mientras i < vistos() hacer
+            marca(de_vista(i), cierto)
+            i := i + 1
+        fin
+    fin
+
+    función invierte()
+        variable i: ent32
+        i := 0
+        mientras i < vistos() hacer
+            marca(de_vista(i), no marcado(de_vista(i)))
+            i := i + 1
+        fin
+    fin
+
+    ; los del recuadro del ratón
+    función elige_banda(añadir: bool)
+        variable i, x, yy, x0, y0, x1, y1, an, al: ent32
+        x0 := bx0
+        x1 := bx1
+        si x1 < x0 entonces
+            x0 := bx1
+            x1 := bx0
+        fin
+        y0 := by0
+        y1 := by1
+        si y1 < y0 entonces
+            y0 := by1
+            y1 := by0
+        fin
+        si no añadir entonces desmarca_todos() fin
+        si vista = V_DETALLES entonces
+            ; los renglones que toca
+            i := 0
+            mientras i < vistos() hacer
+                yy := g.ye + alto_renglón() + 2 + (i - g.primero) * alto_renglón()
+                si i >= g.primero y yy + alto_renglón() > y0 y yy < y1 entonces marca(de_vista(i), cierto) fin
+                i := i + 1
+            fin
+            devolver
+        fin
+        an := celda_an() - 6
+        al := celda_al() - 6
+        i := 0
+        mientras i < vistos() hacer
+            si sitio_de(i, x, yy) y x + an > x0 y x < x1 y yy + al > y0 y yy < y1 entonces marca(de_vista(i), cierto) fin
+            i := i + 1
+        fin
+    fin
+
+    ; mueve el cursor «n» sitios (con Mayús: eligiendo desde el ancla)
+    función mueve(n: ent32, con_mayús: bool)
+        variable i: ent32
+        si vistos() = 0 entonces devolver fin
+        i := g.sel
+        si i < 0 entonces i := 0 sino i := i + n fin
+        si i < 0 entonces i := 0 fin
+        si i >= vistos() entonces i := vistos() - 1 fin
+        si con_mayús entonces elige_hasta(i) sino elige_solo(i) fin
+        al_cursor()
+    fin
+
+    ; =========================================================================
+    ;  Copiar, cortar, pegar, borrar
+    ; =========================================================================
+    constante MARCA_PORTAPAPELES = "\x01ARCHIVOS "
+    variable porta: arreglo [16384] de byte
+
+    función al_porta(cortar: bool)
+        variable i: ent32
+        variable n: nat32
+        si lugar = L_EQUIPO o lugar = L_PAPELERA entonces devolver fin
+        copiar(porta, MARCA_PORTAPAPELES)
+        si cortar entonces concatenar(porta, "CORTAR\n") sino concatenar(porta, "COPIAR\n") fin
+        n := 0
+        i := 0
+        mientras i < vistos() hacer
+            si marcado(de_vista(i)) y longitud(porta) + MAX_RUTA + 2 < 16384 entonces
+                concatenar(porta, dirección(item(de_vista(i)).ruta[0]))
+                concatenar(porta, "\n")
+                n := n + 1
+            fin
+            i := i + 1
+        fin
+        si n = 0 entonces devolver fin
+        al_portapapeles(porta, longitud(porta))
+        si cortar entonces d1(aviso, "Cortados %u: P\x82guelos donde vayan (Ctrl+V).", n) sino d1(aviso, "Copiados %u.", n) fin
+    fin
+
+    función pega()
+        variable n, i, j: nat32
+        variable cortar: bool
+        variable r: arreglo [MAX_RUTA] de byte
+        si lugar <> L_CARPETA entonces devolver fin
+        si no escribible(ruta) entonces
+            copiar(aviso, "En esta unidad no se puede escribir.")
+            devolver
+        fin
+        n := del_portapapeles(porta, 16383)
+        porta[n] := 0
+        si no empieza_por(porta, MARCA_PORTAPAPELES) entonces
+            copiar(aviso, "En el portapapeles no hay archivos.")
+            devolver
+        fin
+        cortar := empieza_por(dirección(porta[10]), "CORTAR")
+        si cortar entonces empieza(TR_MOVER) sino empieza(TR_COPIAR) fin
+        i := 10
+        mientras porta[i] <> 0 y porta[i] <> '\n' hacer i := i + 1 fin
+        mientras porta[i] <> 0 hacer
+            i := i + 1
+            j := 0
+            mientras porta[i] <> 0 y porta[i] <> '\n' y j < MAX_RUTA - 1 hacer
+                r[j] := porta[i]
+                i := i + 1
+                j := j + 1
+            fin
+            r[j] := 0
+            si j > 0 entonces añade_copia(r, ruta, cortar) fin
+        fin
+        ; lo cortado, una vez pegado, ya no está en el portapapeles
+        si cortar entonces al_portapapeles("", 0) fin
+        trabaja()
+    fin
+
+    ; a la Papelera (o, «del_todo», sin ella) lo elegido
+    función borra(del_todo: bool)
+        variable i: ent32
+        variable n: nat32
+        si lugar = L_EQUIPO entonces devolver fin
+        si lugar = L_CARPETA y no escribible(ruta) entonces
+            copiar(aviso, "En esta unidad no se puede borrar nada: es de solo lectura.")
+            devolver
+        fin
+        n := 0
+        si del_todo o lugar = L_PAPELERA entonces empieza(TR_BORRAR) sino empieza(TR_PAPELERA) fin
+        i := 0
+        mientras i < vistos() hacer
+            si marcado(de_vista(i)) entonces
+                si lugar = L_PAPELERA entonces
+                    añade_borrado(dirección(item(de_vista(i)).ruta[0]))
+                sino si no escribible(dirección(item(de_vista(i)).ruta[0])) entonces
+                    d1(aviso, "En %c: no se puede borrar nada.", item(de_vista(i)).ruta[0])
+                sino si del_todo entonces
+                    añade_borrado(dirección(item(de_vista(i)).ruta[0]))
+                sino
+                    añade_a_papelera(dirección(item(de_vista(i)).ruta[0]))
+                fin
+                n := n + 1
+            fin
+            i := i + 1
+        fin
+        trabaja()
+    fin
+
+    ; Supr: a la Papelera; del todo (o en la Papelera), preguntando antes
+    función pide_borrar(del_todo: bool)
+        variable n: nat32
+        si cuántos_marcados() = 0 y g.sel >= 0 entonces marca(de_vista(g.sel), cierto) fin
+        n := cuántos_marcados()
+        si n = 0 entonces devolver fin
+        si del_todo o lugar = L_PAPELERA entonces
+            d1(confirma_texto, "\xA8Se borran del todo %u elementos? No se podr\xA0n recuperar.", n)
+            confirma := CF_BORRAR
+            abre_cuadro(D_CONFIRMA, "Borrar del todo")
+            devolver
+        fin
+        borra(falso)
+    fin
+
+    función restaura_elegidos()
+        variable i: ent32
+        variable ro: arreglo [MAX_RUTA] de byte
+        si lugar <> L_PAPELERA entonces devolver fin
+        empieza(TR_RESTAURAR)
+        i := 0
+        mientras i < vistos() hacer
+            si marcado(de_vista(i)) entonces
+                origen_de(de_vista(i), ro)
+                añade_restaurar(dirección(item(de_vista(i)).ruta[0]), ro)
+            fin
+            i := i + 1
+        fin
+        trabaja()
+    fin
+
+    función vacía()
+        variable i: nat32
+        lee_unidades()
+        empieza(TR_VACIAR)
+        i := 0
+        mientras i < n_us hacer
+            si us[i].letra <> 0 y us[i].solo_lectura = 0 y us[i].clase <> 1 y lee_índice(us[i].letra) entonces añade_vaciado(us[i].letra) fin
+            i := i + 1
+        fin
+        trabaja()
+        i := 0
+        mientras i < n_us hacer
+            si us[i].letra <> 0 y us[i].solo_lectura = 0 y us[i].clase <> 1 y lee_índice(us[i].letra) entonces índice_vacío(us[i].letra) fin
+            i := i + 1
+        fin
+        relee()
+    fin
+
+    ; lleva lo elegido a la carpeta «a» (moverlo, o con «copiar», copiarlo)
+    función lleva_a(a: puntero a byte, copia: bool)
+        variable i: ent32
+        si a[0] = '*' entonces
+            ; a la Papelera
+            borra(falso)
+            devolver
+        fin
+        si no escribible(a) entonces
+            copiar(aviso, "Ah\xA1 no se puede escribir.")
+            devolver
+        fin
+        si copia entonces empieza(TR_COPIAR) sino empieza(TR_MOVER) fin
+        i := 0
+        mientras i < vistos() hacer
+            si marcado(de_vista(i)) entonces añade_copia(dirección(item(de_vista(i)).ruta[0]), a, no copia) fin
+            i := i + 1
+        fin
+        trabaja()
+    fin
+
+    ; hace el trabajo apuntado, con su barra de progreso (sale cuando acaba)
+    función trabaja()
+        variable s: Suceso
+        variable r, t0: nat32
+        variable id: nat32
+        si n_pasos = 0 entonces
+            en_marcha := falso
+            si errores > 0 entonces copiar(aviso, primer_error) fin
+            devolver
+        fin
+        abre_cuadro(D_PROGRESO, título_trabajo())
+        pinta()
+        mientras en_marcha hacer
+            ; los sucesos (sin esperar): Cancelar, Esc, el tamaño
+            mientras suceso(Controles.v, s, falso) hacer
+                si s.clase = EV_TECLA y (s.a = 27 o ((s.a = '\n' o s.a = ' ') y cuadro = D_PROGRESO)) entonces
+                    responde(R_CANCELAR)
+                sino si s.clase = EV_RATÓN_BAJA entonces
+                    id := control_en(ent32(s.a), ent32(s.b))
+                    si cuadro = D_PROGRESO y id = ID_D entonces responde(R_CANCELAR) fin
+                    si cuadro = D_PREGUNTA y id >= ID_D y id <= ID_D + 4 entonces
+                        responde(id - ID_D + 1)
+                        abre_cuadro(D_PROGRESO, título_trabajo())
+                    fin
+                sino si s.clase = EV_TECLA y cuadro = D_PREGUNTA entonces
+                    si s.a = '\t' o s.a = TECLA_MAYÚS_TAB entonces pasar_foco(s.a = '\t') fin
+                    si s.a = '\n' y foco >= ID_D y foco <= ID_D + 4 entonces
+                        responde(foco - ID_D + 1)
+                        abre_cuadro(D_PROGRESO, título_trabajo())
+                    fin
+                sino si s.clase = EV_TAMAÑO entonces
+                    nuevo_tamaño(ent32(s.a), ent32(s.b), T_NORMAL)
+                sino si s.clase = EV_CERRAR entonces
+                    responde(R_CANCELAR)
+                    sale := cierto
+                fin
+                pinta()
+            fin
+            si cuadro = D_PREGUNTA entonces
+                dormir(2)
+            sino
+                t0 := tics()
+                r := Exoper.SIGUE
+                mientras r = Exoper.SIGUE y tics() - t0 < 8 hacer r := un_paso() fin
+                si r = PREGUNTA entonces
+                    abre_cuadro(D_PREGUNTA, "\xA8Reemplazar?")
+                    foco := ID_D
+                fin
+                si tics() - tics_pinta > 10 o r <> Exoper.SIGUE entonces pinta() fin
+            fin
+        fin
+        cuadro := D_NADA
+        si errores > 0 entonces
+            si errores > 1 entonces
+                d1(aviso, "No todo ha ido bien (%u cosas). ", errores)
+                concatenar(aviso, primer_error)
+            sino
+                copiar(aviso, primer_error)
+            fin
+        sino
+            según nat16(clase_trabajo)
+                caso TR_COPIAR: d1(aviso, "Hecho: copiados %u.", hecho)
+                caso TR_MOVER: copiar(aviso, "Hecho: llevado a su sitio.")
+                caso TR_PAPELERA: copiar(aviso, "Mandado a la Papelera (se puede restaurar).")
+                caso TR_RESTAURAR: copiar(aviso, "Devuelto a su sitio.")
+                caso TR_BORRAR: copiar(aviso, "Borrado del todo.")
+                caso TR_VACIAR: copiar(aviso, "La Papelera, vac\xA1a.")
+            fin
+        fin
+        lee_unidades()
+        relee_conservando()
+        refresca_árbol()
+    fin
+
+    función título_trabajo(): puntero a byte
+        según nat16(clase_trabajo)
+            caso TR_COPIAR: devolver "Copiando..."
+            caso TR_MOVER: devolver "Moviendo..."
+            caso TR_PAPELERA: devolver "Mandando a la Papelera..."
+            caso TR_BORRAR: devolver "Borrando..."
+            caso TR_RESTAURAR: devolver "Restaurando..."
+        fin
+        devolver "Vaciando la Papelera..."
+    fin
+
+    ; vuelve a leer, sin perder el aviso
+    función relee_conservando()
+        variable a: arreglo [200] de byte
+        copiar(a, aviso)
+        relee()
+        copiar(aviso, a)
+    fin
+
+    ; el árbol, al día (las carpetas abiertas se vuelven a leer)
+    función refresca_árbol()
+        variable i: nat32
+        variable abiertos: arreglo [16] de arreglo [MAX_RUTA] de byte
+        variable n: nat32
+        n := 0
+        i := 1
+        mientras i < n_nodos hacer
+            si nodos[i].abierto y n < 16 entonces
+                copiar(abiertos[n], dirección(nodos[i].ruta[0]))
+                n := n + 1
+            fin
+            i := i + 1
+        fin
+        hace_árbol()
+        ; (se vuelven a abrir, de arriba abajo)
+        i := 0
+        mientras i < n hacer
+            abre_ruta(abiertos[i])
+            i := i + 1
+        fin
+        sincroniza_árbol()
+    fin
+
+    función abre_ruta(r: puntero a byte)
+        variable i: nat32
+        i := 0
+        mientras i < n_nodos hacer
+            si iguales_sin_caja(dirección(nodos[i].ruta[0]), r) entonces
+                abre_nodo(i)
+                devolver
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Los cuadros
+    ; =========================================================================
+    función abre_cuadro(c: nat32, título_: puntero a byte)
+        cuadro := c
+        copiar_hasta(cuadro_título, título_, 80)
+        foco := ID_D
+    fin
+
+    función pide_nombre(nueva: bool)
+        variable k: ent32
+        si lugar <> L_CARPETA entonces devolver fin
+        si no escribible(ruta) entonces
+            copiar(aviso, "En esta unidad no se puede escribir.")
+            devolver
+        fin
+        es_nueva := nueva
+        si nueva entonces
+            une(texto_, ruta, "CARPETA")
+            si existe(texto_, es_nueva) entonces nombre_libre(ruta, "CARPETA", nombre_nuevo) sino copiar(nombre_nuevo, "CARPETA") fin
+            es_nueva := cierto
+            abre_cuadro(D_NOMBRE, "Carpeta nueva")
+        sino
+            k := primero_marcado()
+            si k < 0 entonces devolver fin
+            de_quién := k
+            copiar_hasta(nombre_nuevo, dirección(item(k).corto[0]), 13)
+            abre_cuadro(D_NOMBRE, "Cambiar el nombre")
+        fin
+        Controles.cursor := longitud(nombre_nuevo)
+        reemplaza := cierto
+    fin
+
+    función acepta_nombre()
+        variable r, n: arreglo [MAX_RUTA] de byte
+        variable e: nat32
+        si nombre_nuevo[0] = 0 entonces devolver fin
+        une(n, ruta, nombre_nuevo)
+        si es_nueva entonces
+            e := crear_carpeta(n)
+        sino
+            copiar(r, dirección(item(de_quién).ruta[0]))
+            e := renombrar(r, n)
+        fin
+        si es_error(e) entonces
+            copiar(aviso, "No se puede: ")
+            concatenar(aviso, texto_error(e))
+            si e = NOMBRE_MALO entonces concatenar(aviso, " (8 letras, un punto y 3 m\xA0s)") fin
+            devolver
+        fin
+        cuadro := D_NADA
+        relee()
+        refresca_árbol()
+        ; el nuevo, elegido
+        elige_por_nombre(nombre_nuevo)
+    fin
+
+    función elige_por_nombre(t: puntero a byte)
+        variable i: ent32
+        i := 0
+        mientras i < vistos() hacer
+            si iguales_sin_caja(dirección(item(de_vista(i)).corto[0]), t) entonces
+                elige_solo(i)
+                al_cursor()
+                devolver
+            fin
+            i := i + 1
+        fin
+    fin
+
+    función pon_prop(t: puntero a byte)
+        si n_prop < 12 entonces
+            copiar_hasta(prop_texto[n_prop], t, 100)
+            n_prop := n_prop + 1
+        fin
+    fin
+
+    función pide_propiedades()
+        variable k: ent32
+        variable it: puntero a Item
+        variable t, t2: arreglo [48] de byte
+        variable d: arreglo [3] de nat32
+        variable archivos, carpetas, total: nat32
+        variable u: ent32
+        n_prop := 0
+        k := primero_marcado()
+        de_quién := k
+        si k < 0 entonces
+            ; las de la carpeta en que se está
+            si lugar <> L_CARPETA entonces devolver fin
+            pon_prop(ruta)
+            archivos := 0
+            carpetas := 0
+            total := medir(ruta, archivos, carpetas, 0)
+            tamaño_a_texto(total, t)
+            d[0] := nat32(dirección(t[0]))
+            d[1] := archivos
+            d[2] := carpetas
+            formatear(texto_, 200, "Tama\xA4o: %s (%u archivos y %u carpetas)", d)
+            pon_prop(texto_)
+            abre_cuadro(D_PROPIEDADES, "Propiedades")
+            devolver
+        fin
+        it := item(k)
+        pon_prop(dirección(it.largo[0]))
+        si lugar = L_EQUIPO entonces
+            si it.unidad >= 0 entonces
+                u := it.unidad
+                d[0] := nat32(tipo_unidad(us[u]))
+                formatear(texto_, 200, "Tipo: %s", d)
+                pon_prop(texto_)
+                si us[u].letra <> 0 entonces
+                    d[0] := us[u].clase
+                    si us[u].clase = 1 entonces pon_prop("Sistema de archivos: el del cargador") sino si us[u].clase = 9 entonces pon_prop("Sistema de archivos: ISO 9660 (de solo lectura)") sino si us[u].clase = 0 entonces pon_prop("Sin disco") sino pon_prop2("Sistema de archivos: FAT%u", d) fin
+                    tamaño_k(us[u].total_k, t)
+                    pon_prop3("Capacidad: %s", nat32(dirección(t[0])))
+                    si us[u].libre_k <> 0xFFFFFFFF entonces
+                        tamaño_k(us[u].libre_k, t)
+                        pon_prop3("Libre: %s", nat32(dirección(t[0])))
+                        tamaño_k(us[u].total_k - us[u].libre_k, t)
+                        pon_prop3("Ocupado: %s", nat32(dirección(t[0])))
+                    fin
+                    pon_prop3("Disco: %s", nat32(dirección(us[u].nombre[0])))
+                    si us[u].solo_lectura <> 0 o us[u].clase = 1 entonces pon_prop("De solo lectura") sino pon_prop("Se puede escribir en ella") fin
+                    si us[u].quitable = 2 entonces pon_prop("Se puede expulsar (el bot\xA2n secundario)") sino si us[u].quitable <> 0 entonces pon_prop("Se puede quitar con seguridad (el bot\xA2n secundario)") fin
+                fin
+            fin
+            abre_cuadro(D_PROPIEDADES, "Propiedades de la unidad")
+            devolver
+        fin
+        si it.corto[0] <> 0 y no iguales(dirección(it.corto[0]), dirección(it.largo[0])) entonces pon_prop3("Nombre corto: %s", nat32(dirección(it.corto[0]))) fin
+        tipo_de(valor(it), t)
+        pon_prop3("Tipo: %s", nat32(dirección(t[0])))
+        si lugar = L_PAPELERA entonces pon_prop3("Estaba en: %s", nat32(dirección(it.extra[0]))) sino padre_de(dirección(it.ruta[0]), texto_) fin
+        si lugar <> L_PAPELERA entonces
+            copiar(dirección(texto_[200]), texto_)
+            pon_prop3("Est\xA0 en: %s", nat32(dirección(texto_[200])))
+        fin
+        si it.carpeta entonces
+            archivos := 0
+            carpetas := 0
+            total := medir(dirección(it.ruta[0]), archivos, carpetas, 0)
+            tamaño_a_texto(total, t)
+            d[0] := nat32(dirección(t[0]))
+            d[1] := archivos
+            d[2] := carpetas
+            formatear(texto_, 200, "Tama\xA4o: %s (%u archivos y %u carpetas)", d)
+            pon_prop(texto_)
+        sino
+            tamaño_a_texto(it.tamaño, t)
+            d[0] := nat32(dirección(t[0]))
+            d[1] := it.tamaño
+            formatear(texto_, 200, "Tama\xA4o: %s (%u bytes)", d)
+            con_puntos(dirección(texto_[0]))
+            pon_prop(texto_)
+        fin
+        fecha_a_texto(it.alta, cierto, t)
+        si t[0] <> 0 entonces pon_prop3("Creado: %s", nat32(dirección(t[0]))) fin
+        fecha_a_texto(it.fecha, cierto, t)
+        pon_prop3("Modificado: %s", nat32(dirección(t[0])))
+        fecha_a_texto(it.acceso, falso, t2)
+        si t2[0] <> 0 entonces pon_prop3("\xE9ltimo acceso: %s", nat32(dirección(t2[0]))) fin
+        at_antes := it.atrib
+        at_ro := it.atrib yb SOLO_LECTURA <> 0
+        at_oculto := it.atrib yb OCULTO <> 0
+        at_archivo := it.atrib yb ARCHIVADO <> 0
+        at_sistema := it.atrib yb DE_SISTEMA <> 0
+        abre_cuadro(D_PROPIEDADES, "Propiedades")
+    fin
+
+    función pon_prop2(plantilla: puntero a byte, ref d: arreglo [3] de nat32)
+        formatear(texto_, 200, plantilla, dirección(d[0]))
+        pon_prop(texto_)
+    fin
+
+    función pon_prop3(plantilla: puntero a byte, a: nat32)
+        variable d: arreglo [1] de nat32
+        d[0] := a
+        formatear(texto_, 200, plantilla, d)
+        pon_prop(texto_)
+    fin
+
+    función acepta_propiedades()
+        variable nuevos, e: nat32
+        cuadro := D_NADA
+        si de_quién < 0 o lugar = L_EQUIPO entonces devolver fin
+        nuevos := at_antes yb DE_SISTEMA
+        si at_ro entonces nuevos := nuevos ob SOLO_LECTURA fin
+        si at_oculto entonces nuevos := nuevos ob OCULTO fin
+        si at_archivo entonces nuevos := nuevos ob ARCHIVADO fin
+        si nuevos = at_antes yb 0x27 entonces devolver fin
+        e := poner_atributos(dirección(item(de_quién).ruta[0]), nuevos)
+        si es_error(e) entonces
+            copiar(aviso, "No se pueden cambiar los atributos: ")
+            concatenar(aviso, texto_error(e))
+            devolver
+        fin
+        copiar(aviso, "Atributos cambiados.")
+        relee_conservando()
+    fin
+
+    ; ---- Abrir con... ----
+    función programa_en_lista(nombre: puntero a byte, prog: puntero a byte, plantilla: puntero a byte)
+        variable r: ent32
+        r := renglón_nuevo(go, R_NORMAL, 0)
+        si r < 0 entonces devolver fin
+        celda(go, r, 0, nombre)
+        celda(go, r, 1, prog)
+        celda(go, r, 2, plantilla)
+        renglón(go, r).icono := IC_PROGRAMA
+    fin
+
+    ; los programas que dejan los paquetes (los .MNU de \HISPA\MENU o \MENU)
+    función programas_de_paquetes(carpeta: puntero a byte)
+        variable m, mm, n: nat32
+        variable e: Entrada
+        variable r: arreglo [MAX_RUTA] de byte
+        variable t: arreglo [600] de byte
+        variable nombre, prog: arreglo [80] de byte
+        m := abrir(carpeta)
+        si es_error(m) entonces devolver fin
+        mientras entrada(m, e) hacer
+            si e.atributos yb CARPETA = 0 y acaba_en(dirección(e.nombre[0]), ".MNU") entonces
+                une(r, carpeta, dirección(e.nombre[0]))
+                mm := abrir(r)
+                si no es_error(mm) entonces
+                    n := leer(mm, t, 599)
+                    cerrar(mm)
+                    si no es_error(n) entonces
+                        t[n] := 0
+                        si valor_de(t, "nombre=", nombre) y valor_de(t, "programa=", prog) entonces programa_en_lista(nombre, prog, "%1") fin
+                    fin
+                fin
             fin
         fin
         cerrar(m)
     fin
 
-    ; -------------------------------------------------------------------------
-    ;  Pintar
-    ; -------------------------------------------------------------------------
-    ; una unidad de disco (40 x 30)
-    función dibujo_unidad(x: ent32, yy: ent32)
-        redondeado(v, x, yy + 6, 40, 22, 4, 0x4F6890, 0x4F6890)
-        redondeado(v, x + 1, yy + 7, 38, 20, 3, 0xE4ECF7, 0xAEC0DA)
-        rectángulo(v, x + 6, yy + 19, 20, 3, 0x4F6890)
-        rectángulo(v, x + 31, yy + 18, 4, 4, 0x46C282)
-        disquete(v, x + 12, yy, 16)
-    fin
-
-    ; (CD) un disco (40 x 30): plateado, con su agujero; el de una imagen
-    ; («virtual»), dentro de un marco de puntos
-    función dibujo_cd(x: ent32, yy: ent32, virtual: bool)
-        variable i: ent32
-        si virtual entonces
-            i := 0
-            mientras i < 40 hacer
-                rectángulo(v, x + i, yy, 3, 1, 0x4F6890)
-                rectángulo(v, x + i, yy + 29, 3, 1, 0x4F6890)
-                i := i + 6
-            fin
-            i := 0
-            mientras i < 30 hacer
-                rectángulo(v, x, yy + i, 1, 3, 0x4F6890)
-                rectángulo(v, x + 39, yy + i, 1, 3, 0x4F6890)
-                i := i + 6
-            fin
-        fin
-        redondeado(v, x + 7, yy + 2, 26, 26, 13, 0x6F7F96, 0x6F7F96)
-        redondeado(v, x + 8, yy + 3, 24, 24, 12, 0xF2F5FA, 0xB9C6D8)
-        redondeado(v, x + 12, yy + 7, 9, 9, 4, 0xFFFFFF, 0xDCE6F2)
-        redondeado(v, x + 16, yy + 11, 8, 8, 4, 0x6F7F96, 0x6F7F96)
-        redondeado(v, x + 17, yy + 12, 6, 6, 3, PAPEL, PAPEL)
-    fin
-
-    ; una carpeta (18 x 14)
-    función dibujo_carpeta(x: ent32, yy: ent32)
-        redondeado(v, x, yy, 9, 5, 2, 0xC98A1C, 0xC98A1C)
-        redondeado(v, x, yy + 2, 18, 12, 2, 0xC98A1C, 0xC98A1C)
-        redondeado(v, x + 1, yy + 3, 16, 10, 1, 0xFFD778, 0xF2B23A)
-    fin
-
-    ; una hoja (12 x 15), con la cabecera de ese color
-    función dibujo_hoja(x: ent32, yy: ent32, cabecera: nat32)
-        rectángulo(v, x, yy, 12, 15, 0x6F87A8)
-        rectángulo(v, x + 1, yy + 1, 10, 13, PAPEL)
-        rectángulo(v, x + 1, yy + 1, 10, 3, cabecera)
-        rectángulo(v, x + 3, yy + 6, 6, 1, 0x7D93B2)
-        rectángulo(v, x + 3, yy + 9, 6, 1, 0x7D93B2)
-    fin
-
-    ; ¿acaba el nombre en esa extensión (tres letras)?
-    función acaba_en(t: puntero a byte, ext: puntero a byte): bool
-        variable n: nat32
+    función acaba_en(t: puntero a byte, fin_: puntero a byte): bool
+        variable n, k: nat32
         n := longitud(t)
-        devolver n > 4 y t[n - 4] = '.' y t[n - 3] = ext[0] y t[n - 2] = ext[1] y t[n - 1] = ext[2]
+        k := longitud(fin_)
+        devolver n >= k y iguales_sin_caja(dirección(t[n - k]), fin_)
     fin
 
-    función pinta_cabeza()
-        variable d: arreglo [2] de nat32
-        pinta_menús(v, ancho, menús, menú_abierto)
-        degradado(v, 0, ALTO_MENÚS, ancho, CABEZA, 0xF4F8FE, 0xD3E3F8)
-        rectángulo(v, 0, ARRIBA - 1, ancho, 1, 0x9DBBE4)
-        si dentro entonces
-            d[0] := letra
-            d[1] := nat32(dirección(ruta[0]))
-            formatear(renglón, 120, "%c:%s", d)
-            dibujo_carpeta(8, ALTO_MENÚS + 8)
-            texto_negrita(v, 34, ALTO_MENÚS + 7, renglón, TINTA)
+    función valor_de(t: puntero a byte, clave: puntero a byte, destino: puntero a byte): bool
+        variable p: puntero a byte
+        variable j: nat32
+        p := buscar(t, clave)
+        si p = nulo entonces devolver falso fin
+        p := p + longitud(clave)
+        j := 0
+        mientras p[j] <> 0 y p[j] <> '\r' y p[j] <> '\n' y j < 79 hacer
+            destino[j] := p[j]
+            j := j + 1
+        fin
+        destino[j] := 0
+        devolver j > 0
+    fin
+
+    función pide_abrir_con()
+        variable k: ent32
+        variable prog, plantilla: arreglo [80] de byte
+        variable i: nat32
+        k := primero_marcado()
+        si k < 0 o item(k).carpeta o lugar = L_EQUIPO o lugar = L_PAPELERA entonces devolver fin
+        de_quién := k
+        extensión(dirección(item(k).corto[0]), ext_abrir)
+        rejilla_nueva(go, 24)
+        go.con_iconos := cierto
+        rejilla_columna(go, "Programa", 0, falso)
+        rejilla_columna(go, "Archivo", 0, falso)
+        rejilla_columna(go, "Args", 0, falso)
+        go.n_cols := 1                          ; (se ve solo el nombre)
+        programa_en_lista("Bloc de notas", "\\BLOC.BIN", "%1")
+        programa_en_lista("Mirador (im\xA0genes)", "\\HVPRUN.BIN", "\\OFICINA\\MIRADOR.HVP %1")
+        programa_en_lista("Pluma (textos)", "\\HVPRUN.BIN", "\\OFICINA\\PLUMA.HVP %1")
+        programa_en_lista("Cuentas (hojas de c\xA0lculo)", "\\HVPRUN.BIN", "\\OFICINA\\CUENTAS.HVP %1")
+        programa_en_lista("Facturas", "\\HVPRUN.BIN", "\\OFICINA\\FACTURAS.HVP %1")
+        programas_de_paquetes("\\HISPA\\MENU")
+        programas_de_paquetes("\\MENU")
+        rejilla_lista(go)
+        ; el que tiene ahora, elegido
+        si asociado(ext_abrir, prog, plantilla) entonces
+            i := 0
+            mientras i < go.n hacer
+                si iguales_sin_caja(dirección(renglón(go, ent32(i)).celdas[1][0]), prog) y iguales_sin_caja(dirección(renglón(go, ent32(i)).celdas[2][0]), plantilla) entonces go.sel := ent32(i) fin
+                i := i + 1
+            fin
+        fin
+        otro_prog[0] := 0
+        siempre := falso
+        abre_cuadro(D_ABRIR_CON, "Abrir con...")
+    fin
+
+    función acepta_abrir_con()
+        variable prog, plantilla: arreglo [80] de byte
+        variable r: ent32
+        variable e: nat32
+        si otro_prog[0] <> 0 entonces
+            copiar(prog, otro_prog)
+            copiar(plantilla, "%1")
         sino
-            texto_negrita(v, 10, ALTO_MENÚS + 7, "Las unidades de este equipo", TINTA)
+            r := rejilla_elegido(go)
+            si r < 0 entonces devolver fin
+            copiar(prog, dirección(renglón(go, r).celdas[1][0]))
+            copiar(plantilla, dirección(renglón(go, r).celdas[2][0]))
         fin
-    fin
-
-    función pinta_pie()
-        variable d: arreglo [1] de nat32
-        degradado(v, 0, alto - PIE, ancho, PIE, 0xE6EFFB, 0xCADDF6)
-        rectángulo(v, 0, alto - PIE, ancho, 1, 0x9DBBE4)
-        si aviso[0] <> 0 entonces
-            texto(v, 6, alto - PIE + 4, aviso, 0xB8441A)
-        sino si dentro entonces
-            d[0] := nat32(cuántas - 1)
-            formatear(renglón, 120, "%u archivos y carpetas", d)
-            texto(v, 6, alto - PIE + 4, renglón, TINTA)
-        sino
-            texto(v, 6, alto - PIE + 4, "Dos clics en una unidad, para ver lo que tiene", SUAVE)
-        fin
-    fin
-
-    ; pregunta al núcleo por las unidades (y los discos sin ninguna)
-    función lee_unidades()
-        n_unidades := 0
-        mientras n_unidades < MAX_UNIDADES y info_unidad(nat32(n_unidades), us[n_unidades]) hacer
-            n_unidades := n_unidades + 1
-        fin
-    fin
-
-    ; las unidades han cambiado (se ha enchufado o quitado una memoria USB):
-    ; se leen otra vez; si la que se estaba viendo ya no está, a la lista
-    función unidades_cambiadas()
-        variable i: ent32
-        variable sigue: bool
-        variable d: arreglo [1] de nat32
-        lee_unidades()
-        si elegida >= n_unidades entonces elegida := n_unidades - 1 fin
-        si elegida < 0 entonces elegida := 0 fin
-        si no dentro entonces devolver fin
-        sigue := falso
-        i := 0
-        mientras i < n_unidades hacer
-            si us[i].letra = letra entonces sigue := cierto fin
-            i := i + 1
-        fin
-        si no sigue entonces
-            dentro := falso
-            elegida := 0
-            d[0] := letra
-            formatear(aviso, 100, "La unidad %c: ya no está (se ha quitado su disco).", d)
-        fin
-    fin
-
-    ; «Quitar con seguridad» la memoria de la unidad elegida
-    función quita_elegida()
-        variable r: nat32
-        variable d: arreglo [1] de nat32
-        si dentro o elegida < 0 o elegida >= n_unidades entonces devolver fin
-        d[0] := us[elegida].letra
-        r := quitar_memoria(us[elegida].letra)
-        si r = QUITADA entonces
-            formatear(aviso, 100, "Ya puede quitar la memoria %c:.", d)
-        sino si r = ES_DEL_SISTEMA entonces
-            formatear(aviso, 100, "%c: es la memoria del sistema: no se puede quitar.", d)
-        sino
-            formatear(aviso, 100, "%c: no es una memoria USB que se pueda quitar.", d)
-        fin
-        lee_unidades()
-        si elegida >= n_unidades entonces elegida := n_unidades - 1 fin
-        si elegida < 0 entonces elegida := 0 fin
-    fin
-
-    ; de qué es la unidad: «disco duro (SATA)», «memoria USB»...
-    función texto_medio(medio: nat32): puntero a byte
-        según medio
-            caso MEDIO_IDE: devolver "disco duro (IDE)"
-            caso MEDIO_SATA: devolver "disco duro (SATA)"
-            caso MEDIO_USB: devolver "memoria USB"
-            caso MEDIO_CD: devolver "CD o DVD"
-            caso MEDIO_IMAGEN: devolver "CD virtual"
-        fin
-        devolver "en memoria"
-    fin
-
-    ; las unidades, una debajo de otra: su letra, de qué son y lo que cabe
-    función pinta_unidades()
-        variable d: arreglo [3] de nat32
-        variable i, yy: ent32
-        rectángulo(v, 0, ARRIBA, ancho, alto - ARRIBA - PIE, PAPEL)
-        i := 0
-        mientras i < n_unidades y ARRIBA + 8 + (i + 1) * ALTO_UNIDAD <= alto - PIE + 4 hacer
-            yy := ARRIBA + i * ALTO_UNIDAD
-            si elegida = i entonces redondeado(v, 8, yy + 8, ancho - 16, 58, 6, 0xDCEAFB, 0xC6DCF8) fin
-            si us[i].medio = MEDIO_CD o us[i].medio = MEDIO_IMAGEN entonces
-                dibujo_cd(20, yy + 20, us[i].medio = MEDIO_IMAGEN)
-            sino
-                dibujo_unidad(20, yy + 20)
-            fin
-            si us[i].medio = MEDIO_CD o us[i].medio = MEDIO_IMAGEN entonces
-                pinta_cd(i, yy)                         ; (CD)
-            sino si us[i].letra = 0 entonces
-                ; un disco sin nada que se pueda leer
-                d[0] := nat32(texto_medio(us[i].medio))
-                formatear(renglón, 120, "Un %s", d)
-                texto_negrita(v, 76, yy + 14, renglón, TINTA)
-                texto(v, 76, yy + 32, us[i].nombre, TINTA)
-                d[0] := us[i].total_k div 1024
-                formatear(renglón, 120, "%u MB; sin ninguna partición FAT: no se puede leer", d)
-                texto(v, 76, yy + 48, renglón, SUAVE)
-            sino
-                d[0] := us[i].letra
-                d[1] := nat32(dirección(us[i].etiqueta[0]))
-                si us[i].etiqueta[0] <> 0 entonces
-                    formatear(renglón, 120, "Unidad %c:  %s", d)
-                sino
-                    formatear(renglón, 120, "Unidad %c:", d)
-                fin
-                texto_negrita(v, 76, yy + 14, renglón, TINTA)
-                si us[i].clase = 1 entonces
-                    texto(v, 76, yy + 32, "en memoria: lo que ha traído el cargador", TINTA)
-                    texto(v, 76, yy + 48, "(de solo lectura)", SUAVE)
-                sino
-                    d[0] := nat32(texto_medio(us[i].medio))
-                    d[1] := us[i].clase
-                    si us[i].medio = MEDIO_IDE entonces
-                        d[0] := us[i].clase
-                        formatear(renglón, 120, "disco duro, FAT%u", d)
-                    sino
-                        formatear(renglón, 120, "%s, FAT%u", d)
-                    fin
-                    texto(v, 76, yy + 32, renglón, TINTA)
-                    d[0] := us[i].total_k div 1024
-                    d[1] := us[i].libre_k div 1024
-                    d[2] := nat32("")
-                    si us[i].solo_lectura <> 0 entonces d[2] := nat32(" (de solo lectura)") fin
-                    si us[i].libre_k = 0xFFFFFFFF entonces
-                        d[1] := d[2]
-                        formatear(renglón, 120, "%u MB%s", d)
-                    sino
-                        formatear(renglón, 120, "%u MB, %u MB libres%s", d)
-                    fin
-                    texto(v, 76, yy + 48, renglón, SUAVE)
-                fin
-            fin
-            i := i + 1
-        fin
-    fin
-
-    ; (CD) lo de un lector de CD o DVD, o de una imagen montada
-    función pinta_cd(i: ent32, yy: ent32)
-        variable d: arreglo [3] de nat32
-        d[0] := us[i].letra
-        d[1] := nat32(dirección(us[i].etiqueta[0]))
-        si us[i].etiqueta[0] <> 0 entonces
-            formatear(renglón, 120, "Unidad %c:  %s", d)
-        sino
-            formatear(renglón, 120, "Unidad %c:", d)
-        fin
-        texto_negrita(v, 76, yy + 14, renglón, TINTA)
-        d[0] := nat32(dirección(us[i].nombre[0]))
-        si us[i].medio = MEDIO_IMAGEN entonces
-            si us[i].clase = 9 entonces
-                formatear(renglón, 120, "CD virtual: la imagen %s", d)
-            sino
-                formatear(renglón, 120, "disco virtual: la imagen %s", d)
-            fin
-        sino
-            formatear(renglón, 120, "lector de CD o DVD: %s", d)
-        fin
-        texto(v, 76, yy + 32, renglón, TINTA)
-        si us[i].clase <> 0 entonces
-            d[0] := us[i].total_k div 1024
-            si us[i].clase = 9 y us[i].total_k < 1024 entonces
-                d[0] := us[i].total_k
-                formatear(renglón, 120, "%u K, ISO 9660 (de solo lectura)", d)
-            sino si us[i].clase = 9 entonces
-                formatear(renglón, 120, "%u MB, ISO 9660 (de solo lectura)", d)
-            sino
-                d[1] := us[i].clase
-                formatear(renglón, 120, "%u MB, FAT%u (de solo lectura)", d)
-            fin
-            texto(v, 76, yy + 48, renglón, SUAVE)
-        sino si us[i].relleno[0] = 2 entonces
-            texto(v, 76, yy + 48, "un CD de música (escucharlo, más adelante)", SUAVE)
-        sino si us[i].relleno[0] = 3 entonces
-            texto(v, 76, yy + 48, "el disco no se puede leer (no es ISO 9660)", SUAVE)
-        sino
-            texto(v, 76, yy + 48, "sin disco", SUAVE)
-        fin
-    fin
-
-    ; (CD) «Expulsar» la unidad elegida: el lector abre la bandeja; la imagen se desmonta
-    función expulsa_elegida()
-        variable r: nat32
-        variable d: arreglo [1] de nat32
-        variable imagen: bool
-        si dentro o elegida < 0 o elegida >= n_unidades entonces devolver fin
-        d[0] := us[elegida].letra
-        imagen := us[elegida].medio = MEDIO_IMAGEN
-        r := expulsar(us[elegida].letra)
-        si r = EXPULSADA y imagen entonces
-            formatear(aviso, 100, "La imagen de %c: está desmontada.", d)
-        sino si r = EXPULSADA entonces
-            formatear(aviso, 100, "Ya puede sacar el disco de %c:.", d)
-        sino
-            formatear(aviso, 100, "%c: no se puede expulsar.", d)
-        fin
-        lee_unidades()
-        si elegida >= n_unidades entonces elegida := n_unidades - 1 fin
-        si elegida < 0 entonces elegida := 0 fin
-    fin
-
-    ; (CD) ¿es una imagen de disco que se pueda montar?
-    función es_imagen_de_disco(n: puntero a byte): bool
-        devolver acaba_en(n, "ISO") o acaba_en(n, "CUE") o acaba_en(n, "IMG") o acaba_en(n, "IMA")
-    fin
-
-    ; (CD) monta la imagen elegida (en «otra») y entra en su unidad
-    función monta_elegida()
-        variable r: nat32
-        variable d: arreglo [2] de nat32
-        con_args[0] := letra
-        con_args[1] := ':'
-        con_args[2] := 0
-        concatenar(con_args, otra)
-        r := montar_imagen(con_args)
-        si es_error(r) o r < 'A' entonces
-            Textos32.copiar(aviso, "No se puede montar: ")
-            si es_error(r) entonces concatenar(aviso, texto_error(r)) sino concatenar(aviso, texto_imagen(r)) fin
-            devolver
-        fin
-        lee_unidades()
-        si es_error(unidad(r)) entonces devolver fin
-        letra := r
-        dentro := cierto
-        Textos32.copiar(ruta, "\\")
-        lee_carpeta()
-        d[0] := nat32(dirección(con_args[0]))
-        d[1] := r
-        formatear(aviso, 100, "%s, montada como %c:", d)
-    fin
-
-    ; lo que hay en la carpeta: un renglón por cada cosa
-    función pinta_lista()
-        variable i, yy: ent32
-        variable c: nat32
-        variable d: arreglo [1] de nat32
-        rectángulo(v, 0, ARRIBA, ancho, alto - ARRIBA - PIE, PAPEL)
-        caben := (alto - ARRIBA - PIE - 6) div RENGLÓN
-        si caben < 1 entonces caben := 1 fin
-        si elegida < primera entonces primera := elegida fin
-        si elegida >= primera + caben entonces primera := elegida - caben + 1 fin
-        i := primera
-        mientras i < cuántas y i < primera + caben hacer
-            yy := ARRIBA + 4 + (i - primera) * RENGLÓN
-            c := TINTA
-            si i = elegida entonces
-                redondeado(v, 4, yy, ancho - 8, RENGLÓN, 4, 0x3F86E0, RESALTE)
-                c := PAPEL
-            fin
-            si carpetas[i] entonces
-                dibujo_carpeta(10, yy + 3)
-            sino si acaba_en(nombres[i], "BIN") entonces
-                dibujo_hoja(13, yy + 2, 0x46C282)
-            sino
-                dibujo_hoja(13, yy + 2, 0x4C97EC)
-            fin
-            texto(v, 36, yy + 2, nombres[i], c)
-            si i = 0 entonces
-                texto(v, 36 + 4 * ANCHO_LETRA, yy + 2, "(volver)", c)
-            sino si carpetas[i] entonces
-                texto(v, ancho - 14 - 7 * ANCHO_LETRA, yy + 2, "carpeta", c)
-            sino
-                d[0] := tamaños[i]
-                formatear(renglón, 120, "%10u", d)
-                texto(v, ancho - 14 - 10 * ANCHO_LETRA, yy + 2, renglón, c)
-            fin
-            i := i + 1
-        fin
-    fin
-
-    función pinta_todo()
-        pinta_cabeza()
-        si dentro entonces pinta_lista() sino pinta_unidades() fin
-        pinta_pie()
-    fin
-
-    ; -------------------------------------------------------------------------
-    ;  Andar por las carpetas y abrir
-    ; -------------------------------------------------------------------------
-    función entra_en_unidad()
-        si elegida < 0 o elegida >= n_unidades entonces devolver fin
-        si us[elegida].letra = 0 entonces
-            Textos32.copiar(aviso, "En ese disco no hay ninguna partición FAT.")
-            devolver
-        fin
-        si us[elegida].medio = MEDIO_CD y us[elegida].clase = 0 entonces
-            ; (CD) un lector sin disco que se pueda leer
-            si us[elegida].relleno[0] = 2 entonces
-                Textos32.copiar(aviso, "Es un CD de música: escucharlo, más adelante.")
-            sino si us[elegida].relleno[0] = 3 entonces
-                Textos32.copiar(aviso, "El disco no se puede leer (no es ISO 9660).")
-            sino
-                Textos32.copiar(aviso, "No hay ningún disco en el lector.")
-            fin
-            devolver
-        fin
-        si es_error(unidad(us[elegida].letra)) entonces devolver fin
-        letra := us[elegida].letra
-        dentro := cierto
-        Textos32.copiar(ruta, "\\")
-        lee_carpeta()
-    fin
-
-    ; a la carpeta de arriba; desde la raíz, a las unidades
-    función sube()
-        variable n: nat32
-        n := longitud(ruta)
-        si n <= 1 entonces
-            dentro := falso
-            elegida := 0
-            lee_unidades()
-            devolver
-        fin
-        mientras n > 1 y ruta[n - 1] <> '\\' hacer n := n - 1 fin
-        si n > 1 entonces n := n - 1 fin
-        ruta[n] := 0
-        lee_carpeta()
-    fin
-
-    ; la ruta entera de lo elegido, en «otra»
-    función ruta_de_elegida()
-        Textos32.copiar(otra, ruta)
-        si longitud(otra) > 1 entonces concatenar(otra, "\\") fin
-        concatenar(otra, nombres[elegida])
-    fin
-
-    ; abre lo elegido (en «otra») con HVPRUN: es un .HVP (hvp = nulo) o un
-    ; documento de ese programa de la oficina
-    función con_hvprun(hvp: puntero a byte)
-        variable r: nat32
-        con_args[0] := 0
-        si hvp <> nulo entonces
-            Textos32.copiar(con_args, hvp)
-            concatenar(con_args, " ")
-        fin
-        concatenar(con_args, otra)
-        r := lanzar_suelto("\\HVPRUN.BIN", con_args)
-        si es_error(r) entonces
-            Textos32.copiar(aviso, "No se puede abrir con HVPRUN: ")
-            concatenar(aviso, texto_error(r))
-        fin
-    fin
-
-    ; ¿es una imagen de las que enseña Mirador?
-    función es_imagen(n: puntero a byte): bool
-        devolver acaba_en(n, "BMP") o acaba_en(n, "PCX") o acaba_en(n, "GIF") o acaba_en(n, "PNG") o acaba_en(n, "JPG") o acaba_en(n, "TGA") o acaba_en(n, "ICO") o acaba_en(n, "PPM")
-    fin
-
-    ; abre lo elegido: una unidad, una carpeta, un texto o un programa
-    función abre()
-        variable r: nat32
-        aviso[0] := 0
-        si no dentro entonces
-            entra_en_unidad()
-            devolver
-        fin
-        si elegida < 0 o elegida >= cuántas entonces devolver fin
-        si elegida = 0 entonces
-            sube()
-            devolver
-        fin
-        ruta_de_elegida()
-        si carpetas[elegida] entonces
-            si longitud(otra) < MAX_RUTA - 14 entonces
-                Textos32.copiar(ruta, otra)
-                lee_carpeta()
-            fin
-        sino si acaba_en(nombres[elegida], "TXT") o acaba_en(nombres[elegida], "BAT") entonces
-            r := lanzar_suelto("\\BLOC.BIN", otra)
-            si es_error(r) entonces
-                Textos32.copiar(aviso, "No se puede abrir el Bloc de notas: ")
-                concatenar(aviso, texto_error(r))
-            fin
-        sino si acaba_en(nombres[elegida], "BIN") entonces
-            r := lanzar_suelto(otra, nulo)
-            si es_error(r) entonces
-                Textos32.copiar(aviso, "No se puede lanzar: ")
-                concatenar(aviso, texto_error(r))
-            fin
-        sino si acaba_en(nombres[elegida], "HVP") entonces
-            con_hvprun(nulo)
-        sino si acaba_en(nombres[elegida], "PLU") entonces
-            con_hvprun("\\OFICINA\\PLUMA.HVP")
-        sino si acaba_en(nombres[elegida], "HOJ") entonces
-            con_hvprun("\\OFICINA\\CUENTAS.HVP")
-        sino si es_imagen(nombres[elegida]) entonces
-            con_hvprun("\\OFICINA\\MIRADOR.HVP")
-        sino si es_imagen_de_disco(nombres[elegida]) entonces
-            monta_elegida()                             ; (CD)
-        sino
-            Textos32.copiar(aviso, "No hay con qué abrir esa clase de archivo.")
-        fin
-    fin
-
-    ; lo que hay en ese punto: su número, o -1
-    función cosa_en(x: ent32, yy: ent32): ent32
-        variable i: ent32
-        si yy < ARRIBA o yy >= alto - PIE entonces devolver -1 fin
-        si no dentro entonces
-            i := (yy - ARRIBA - 8) div ALTO_UNIDAD
-            si yy >= ARRIBA + 8 y i < n_unidades entonces devolver i fin
-            devolver -1
-        fin
-        si yy < ARRIBA + 4 entonces devolver -1 fin
-        i := primera + (yy - ARRIBA - 4) div RENGLÓN
-        si i >= cuántas o i >= primera + caben entonces devolver -1 fin
-        devolver i
-    fin
-
-    función tecla_pulsada(c: nat32)
-        aviso[0] := 0
-        si c = '\n' entonces
-            abre()
-        sino si c = 8 entonces
-            si dentro entonces sube() fin
-        sino si no dentro entonces
-            si c = TECLA_ARRIBA y elegida > 0 entonces elegida := elegida - 1 fin
-            si c = TECLA_ABAJO y elegida < n_unidades - 1 entonces elegida := elegida + 1 fin
-        sino
-            si c = TECLA_ARRIBA y elegida > 0 entonces
-                elegida := elegida - 1
-            sino si c = TECLA_ABAJO y elegida < cuántas - 1 entonces
-                elegida := elegida + 1
-            sino si c = TECLA_RE_PÁG entonces
-                elegida := elegida - caben
-                si elegida < 0 entonces elegida := 0 fin
-            sino si c = TECLA_AV_PÁG entonces
-                elegida := elegida + caben
-                si elegida >= cuántas entonces elegida := cuántas - 1 fin
-            sino si c = TECLA_INICIO entonces
-                elegida := 0
-            sino si c = TECLA_FIN entonces
-                elegida := cuántas - 1
+        cuadro := D_NADA
+        si siempre y ext_abrir[0] <> 0 entonces
+            e := asociar(ext_abrir, prog, plantilla)
+            si es_error(e) entonces
+                copiar(aviso, "No se ha podido guardar en ")
+                concatenar(aviso, ruta_asocia)
+                concatenar(aviso, ": ")
+                concatenar(aviso, texto_error(e))
             fin
         fin
-        pinta_todo()
-    fin
-
-    función abre_el_menú(cuál: ent32)
-        menú_abierto := cuál
-        pinta_menús(v, ancho, menús, menú_abierto)
-        según cuál
-            caso M_ARCHIVO: abre_menú(v, menús, M_ARCHIVO, "Abrir|-|Cerrar", 0)
-            caso M_VER: abre_menú(v, menús, M_VER, "Las unidades|Subir una carpeta|-|Actualizar", 0)
-            caso M_AYUDA: abre_menú(v, menús, M_AYUDA, "Acerca de Mi equipo", 0)
+        e := abre_con(prog, plantilla, dirección(item(de_quién).ruta[0]))
+        si es_error(e) entonces
+            copiar(aviso, "No se puede abrir: ")
+            concatenar(aviso, texto_error(e))
         fin
     fin
 
-    ; lo elegido en un menú: cierto si hay que cerrar
-    función elegido(cuál: nat32, opción: nat32): bool
-        si ent32(cuál) = menú_abierto entonces
-            menú_abierto := -1
-            pinta_menús(v, ancho, menús, menú_abierto)
-        fin
-        si opción = SIN_ELEGIR entonces devolver falso fin
-        aviso[0] := 0
-        si cuál = M_ARCHIVO entonces
-            si opción = 2 entonces devolver cierto fin
-            abre()
-        sino si cuál = M_CONTEXTO entonces
-            abre()                                      ; (y «Montar», en una imagen de disco: lo mismo)
-        sino si cuál = M_UNIDAD entonces
-            si opción = 0 entonces
-                abre()
-            sino si us[elegida].quitable = 2 entonces
-                expulsa_elegida()                       ; (CD)
-            sino
-                quita_elegida()
+    ; =========================================================================
+    ;  Buscar
+    ; =========================================================================
+    ; ¿vale el nombre con lo buscado? (* y ?, o un trozo si no los lleva; sin mirar mayúsculas)
+    función casa(nombre: puntero a byte, patrón: puntero a byte): bool
+        si buscar_car(patrón, '*') = nulo y buscar_car(patrón, '?') = nulo entonces devolver Controles.contiene(nombre, patrón) fin
+        devolver comodín(nombre, patrón)
+    fin
+
+    función comodín(t: puntero a byte, p: puntero a byte): bool
+        si p[0] = 0 entonces devolver t[0] = 0 fin
+        si p[0] = '*' entonces
+            mientras cierto hacer
+                si comodín(t, p + 1) entonces devolver cierto fin
+                si t[0] = 0 entonces devolver falso fin
+                t := t + 1
             fin
-        sino si cuál = M_VER entonces
-            según opción
-                caso 0:
-                    dentro := falso
-                    elegida := 0
-                    lee_unidades()
-                caso 1:
-                    si dentro entonces sube() fin
-                caso 3:
-                    si dentro entonces lee_carpeta() fin
-            fin
-        sino
-            Textos32.copiar(aviso, "Mi equipo, de Hispa-Pentium 0.8: las unidades y sus archivos.")
         fin
-        pinta_todo()
+        si t[0] = 0 entonces devolver falso fin
+        si p[0] = '?' o mayúscula(p[0]) = mayúscula(t[0]) entonces devolver comodín(t + 1, p + 1) fin
         devolver falso
     fin
 
+    variable corte_buscar: bool
+
+    función busca_en(carpeta: puntero a byte, nivel: nat32)
+        variable m: nat32
+        variable e: Entrada
+        variable largo: arreglo [MAX_LARGO] de byte
+        variable hijos: puntero a byte
+        variable n_hijos, i: nat32
+        variable r: arreglo [MAX_RUTA] de byte
+        variable k: ent32
+        variable s: Suceso
+        si nivel > 10 o corte_buscar o n_items >= MAX_ITEMS entonces devolver fin
+        ; Esc corta
+        si suceso(Controles.v, s, falso) y s.clase = EV_TECLA y s.a = 27 entonces corte_buscar := cierto fin
+        hijos := más_memoria(64 * 13)
+        n_hijos := 0
+        m := abrir(carpeta)
+        si es_error(m) entonces
+            si hijos <> nulo entonces menos_memoria(64 * 13) fin
+            devolver
+        fin
+        mientras entrada_larga(m, e, largo) hacer
+            si e.nombre[0] = '.' o e.atributos yb 0x08 <> 0 entonces seguir fin
+            si no ocultos y e.atributos yb (OCULTO ob DE_SISTEMA) <> 0 entonces seguir fin
+            si casa(largo, que_buscar) o casa(dirección(e.nombre[0]), que_buscar) entonces
+                k := item_de_entrada(e, largo, carpeta)
+                si k >= 0 entonces copiar_hasta(dirección(item(k).extra[0]), carpeta, MAX_RUTA) fin
+            fin
+            si e.atributos yb CARPETA <> 0 y hijos <> nulo y n_hijos < 64 entonces
+                copiar_hasta(hijos + n_hijos * 13, dirección(e.nombre[0]), 13)
+                n_hijos := n_hijos + 1
+            fin
+        fin
+        cerrar(m)
+        si en_subcarpetas entonces
+            i := 0
+            mientras i < n_hijos hacer
+                une(r, carpeta, hijos + i * 13)
+                busca_en(r, nivel + 1)
+                i := i + 1
+            fin
+        fin
+        si hijos <> nulo entonces menos_memoria(64 * 13) fin
+    fin
+
+    función busca()
+        variable i: nat32
+        variable r: arreglo [8] de byte
+        n_items := 0
+        corte_buscar := falso
+        si buscado_en[0] = 0 entonces
+            ; en todas las unidades
+            lee_unidades()
+            i := 0
+            mientras i < n_us hacer
+                si us[i].letra <> 0 entonces
+                    r[0] := us[i].letra
+                    r[1] := ':'
+                    r[2] := '\\'
+                    r[3] := 0
+                    busca_en(r, 0)
+                fin
+                i := i + 1
+            fin
+        sino
+            busca_en(buscado_en, 0)
+        fin
+        rehaz_rejilla()
+    fin
+
+    función empieza_busca()
+        si que_buscar[0] = 0 entonces devolver fin
+        si lugar = L_CARPETA entonces copiar(buscado_en, ruta) sino si lugar <> L_BUSCAR entonces buscado_en[0] := 0 fin
+        copiar(aviso, "Buscando... (Esc para)")
+        pinta()
+        lugar := L_BUSCAR
+        a_la_historia()
+        relee()
+        si corte_buscar entonces d1(aviso, "Parado: %u encontrados hasta ahora.", n_items) sino d1(aviso, "Encontrados: %u.", n_items) fin
+        si vista <> V_DETALLES entonces vista := V_DETALLES fin
+        pon_dirección()
+        foco := ID_CONTENIDO
+        si vistos() > 0 entonces g.sel := 0 fin
+    fin
+
+    ; =========================================================================
+    ;  Las miniaturas (MINIAT.BIN: con stb_image, en C; deja la imagen en
+    ;  pequeño en un archivo: «HPMI», el ancho, el alto y sus puntos)
+    ; =========================================================================
+    función suelta_miniaturas()
+        n_miniaturas := 0
+        si item_min >= 0 entonces
+            ; (la que se estaba haciendo era de lo de antes: se espera y se tira)
+            esperar(tarea_min)
+            borrar(tmp_min)
+            item_min := -1
+        fin
+    fin
+
+    función pinta_miniatura(h: ent32, x: ent32, yy: ent32)
+        variable mp: Lienzo
+        pon_lienzo(mp, miniaturas + nat32(h) * LADO_MIN * LADO_MIN, LADO_MIN, LADO_MIN, LADO_MIN)
+        copiar_lienzo(lz, x, yy, mp, 0, 0, LADO_MIN, LADO_MIN)
+    fin
+
+    ; dónde deja MINIAT.BIN lo suyo: la primera unidad en la que se puede escribir
+    función sitio_temporal(): bool
+        variable i: nat32
+        i := 0
+        mientras i < n_us hacer
+            si us[i].letra <> 0 y us[i].solo_lectura = 0 y us[i].clase <> 1 y us[i].medio <> MEDIO_CD entonces
+                tmp_min[0] := us[i].letra
+                tmp_min[1] := 0
+                concatenar(tmp_min, ":\\MINIAT.TMP")
+                devolver cierto
+            fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; lo que ha dejado MINIAT.BIN, al hueco h
+    función lee_miniatura(h: nat32): bool
+        variable m, n: nat32
+        variable cab: arreglo [3] de nat32
+        variable fila: arreglo [LADO_MIN] de nat32
+        variable p: puntero a nat32
+        variable f, an, al, x0, y0: nat32
+        m := abrir(tmp_min)
+        si es_error(m) entonces devolver falso fin
+        n := leer(m, puntero(dirección(cab[0])), 12)
+        si n <> 12 o cab[0] <> 0x494D5048 o cab[1] = 0 o cab[2] = 0 o cab[1] > LADO_MIN o cab[2] > LADO_MIN entonces
+            cerrar(m)
+            devolver falso
+        fin
+        an := cab[1]
+        al := cab[2]
+        p := miniaturas + h * LADO_MIN * LADO_MIN
+        llenar32(p, LADO_MIN * LADO_MIN, C_PAPEL)
+        x0 := (LADO_MIN - an) div 2
+        y0 := (LADO_MIN - al) div 2
+        para f desde 0 hasta al - 1 hacer
+            si leer(m, puntero(dirección(fila[0])), an * 4) <> an * 4 entonces
+                cerrar(m)
+                devolver falso
+            fin
+            copiar_memoria(puntero(p + (y0 + f) * LADO_MIN + x0), puntero(dirección(fila[0])), an * 4)
+        fin
+        cerrar(m)
+        devolver cierto
+    fin
+
+    ; un poco de trabajo de las miniaturas: cierto si queda algo por hacer
+    función trabaja_miniaturas(): bool
+        variable i, x, yy, k: ent32
+        variable r: nat32
+        variable args: arreglo [MAX_RUTA + 48] de byte
+        si vista <> V_MINIATURAS o sin_miniaturas o cuadro <> D_NADA entonces devolver falso fin
+        si item_min >= 0 entonces
+            r := acabada(tarea_min)
+            si r = Llamadas.SIGUE entonces
+                dormir(1)
+                devolver cierto
+            fin
+            si item_min < ent32(n_items) entonces
+                si r = 0 y n_miniaturas < MAX_MINIATURAS y lee_miniatura(n_miniaturas) entonces
+                    item(item_min).miniatura := ent32(n_miniaturas)
+                    n_miniaturas := n_miniaturas + 1
+                sino
+                    item(item_min).miniatura := -2
+                fin
+            fin
+            borrar(tmp_min)
+            item_min := -1
+            pinta()
+            devolver cierto
+        fin
+        ; la siguiente imagen que se ve sin miniatura
+        si miniaturas = nulo entonces
+            miniaturas := puntero(más_memoria(MAX_MINIATURAS * LADO_MIN * LADO_MIN * 4))
+            si miniaturas = nulo entonces
+                sin_miniaturas := cierto
+                devolver falso
+            fin
+        fin
+        i := 0
+        mientras i < vistos() hacer
+            k := de_vista(i)
+            si item(k).clase = IC_IMAGEN y item(k).miniatura = -1 y sitio_de(i, x, yy) entonces
+                si n_miniaturas >= MAX_MINIATURAS o no sitio_temporal() entonces
+                    item(k).miniatura := -2
+                    devolver cierto
+                fin
+                copiar(args, dirección(item(k).ruta[0]))
+                concatenar(args, " ")
+                concatenar(args, tmp_min)
+                concatenar(args, " 64")
+                tarea_min := lanzar("\\MINIAT.BIN", args)
+                si es_error(tarea_min) entonces
+                    sin_miniaturas := cierto
+                    devolver falso
+                fin
+                item(k).miniatura := -3
+                item_min := k
+                devolver cierto
+            fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; =========================================================================
+    ;  Los menús
+    ; =========================================================================
+    función marca_vista(v_: nat32): puntero a byte
+        si vista = v_ entonces devolver "\xAF " fin
+        devolver "  "
+    fin
+
+    función abre_menú(k: nat32)
+        variable grises: nat32
+        variable puede, hay: bool
+        abierto_m := ent32(k)
+        puede := lugar = L_CARPETA y escribible(ruta)
+        hay := cuántos_marcados() > 0
+        grises := 0
+        según k
+            caso M_ARCHIVO:
+                si no hay entonces grises := grises ob 1 ob 2 ob 32 ob 64 ob 128 fin
+                si lugar = L_EQUIPO o lugar = L_PAPELERA entonces grises := grises ob 2 fin
+                si no puede entonces grises := grises ob 8 ob 32 fin
+                si lugar = L_EQUIPO entonces grises := grises ob 64 ob 128 fin
+                texto_[0] := 0
+                menú(Controles.v, men_x(k), men_y(), "Abrir|Abrir con...|-|Carpeta nueva|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades|-|Cerrar", grises, k ob CON_FLECHAS)
+            caso M_EDICIÓN:
+                si no puede entonces grises := grises ob 1 ob 4 fin
+                si no hay o lugar = L_EQUIPO o lugar = L_PAPELERA entonces grises := grises ob 1 ob 2 fin
+                menú(Controles.v, men_x(k), men_y(), "Cortar           Ctrl+X|Copiar           Ctrl+C|Pegar            Ctrl+V|-|Seleccionar todo Ctrl+A|Invertir la selecci\xA2n", grises, k ob CON_FLECHAS)
+            caso M_VER:
+                copiar(texto_, marca_vista(V_MINIATURAS))
+                concatenar(texto_, "Miniaturas|")
+                concatenar(texto_, marca_vista(V_ICONOS))
+                concatenar(texto_, "Iconos|")
+                concatenar(texto_, marca_vista(V_LISTA))
+                concatenar(texto_, "Lista|")
+                concatenar(texto_, marca_vista(V_DETALLES))
+                concatenar(texto_, "Detalles|-|Ordenar por el nombre|Ordenar por el tama\xA4o|Ordenar por el tipo|Ordenar por la fecha|-|")
+                si ocultos entonces concatenar(texto_, "Esconder los ocultos") sino concatenar(texto_, "Ense\xA4ar los ocultos") fin
+                concatenar(texto_, "|-|Actualizar       F5")
+                menú(Controles.v, men_x(k), men_y(), texto_, 0, k ob CON_FLECHAS)
+            caso M_IR:
+                si en_historia = 0 entonces grises := grises ob 1 fin
+                si en_historia + 1 >= n_historia entonces grises := grises ob 2 fin
+                si lugar = L_EQUIPO entonces grises := grises ob 4 fin
+                menú(Controles.v, men_x(k), men_y(), "Atr\xA0s|Adelante|Subir      Retroceso|-|Mi equipo|Papelera|-|Buscar archivos... F3", grises, k ob CON_FLECHAS)
+            caso M_HERRAMIENTAS:
+                si lugar <> L_PAPELERA o no hay entonces grises := grises ob 2 fin
+                menú(Controles.v, men_x(k), men_y(), "Vaciar la Papelera|Restaurar lo elegido|-|Las asociaciones (ASOCIA.TXT)", grises, k ob CON_FLECHAS)
+            si no:
+                menú(Controles.v, men_x(k), men_y(), "Las teclas|Acerca del explorador", 0, k ob CON_FLECHAS)
+        fin
+    fin
+
+    ; (dónde va cada menú de la barra: los guarda barra_menús)
+    función men_x(k: nat32): ent32
+        variable i, n, x: ent32
+        variable t: arreglo [40] de byte
+        x := LA div 2
+        i := 0
+        mientras i < ent32(k) hacer
+            opción_de(MENÚS, nat32(i), t, 40)
+            n := ent32(longitud(t)) - 1
+            x := x + n * LA + 2 * LA
+            i := i + 1
+        fin
+        devolver x
+    fin
+
+    función men_y(): ent32
+        devolver alto_menús()
+    fin
+
+    ; el menú del botón secundario (en lo elegido o en el fondo)
+    función menú_contexto(x: ent32, yy: ent32, en_algo: bool)
+        variable grises: nat32
+        variable puede: bool
+        puede := lugar = L_CARPETA y escribible(ruta)
+        si lugar = L_EQUIPO entonces
+            grises := 0
+            si no en_algo entonces grises := 1 ob 4 fin
+            si primero_marcado() < 0 o item(primero_marcado()).unidad < 0 o us[item(primero_marcado()).unidad].quitable = 0 entonces grises := grises ob 2 fin
+            si en_algo y primero_marcado() >= 0 y item(primero_marcado()).unidad >= 0 y us[item(primero_marcado()).unidad].quitable = 2 entonces
+                menú(Controles.v, x, yy, "Abrir|Expulsar|Propiedades", grises, M_CONTEXTO)      ; (CD)
+            sino
+                menú(Controles.v, x, yy, "Abrir|Quitar con seguridad|Propiedades", grises, M_CONTEXTO)
+            fin
+            devolver
+        fin
+        si lugar = L_PAPELERA entonces
+            si no en_algo entonces grises := 1 ob 2 sino grises := 0 fin
+            menú(Controles.v, x, yy, "Restaurar|Borrar del todo|-|Vaciar la Papelera", grises, M_CONTEXTO)
+            devolver
+        fin
+        si en_algo entonces
+            grises := 0
+            si no puede entonces grises := grises ob 8 ob 64 ob 128 ob 256 fin
+            si item(primero_marcado()).carpeta entonces grises := grises ob 2 fin
+            si no item(primero_marcado()).carpeta y es_imagen_de_disco(dirección(item(primero_marcado()).ruta[0])) entonces
+                ; (CD) una imagen de disco: «Montar» (lo mismo que abrirla)
+                menú(Controles.v, x, yy, "Montar|Abrir con...|-|Cortar|Copiar|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades", grises, M_CONTEXTO)
+            sino
+                menú(Controles.v, x, yy, "Abrir|Abrir con...|-|Cortar|Copiar|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades", grises, M_CONTEXTO)
+            fin
+        sino
+            grises := 0
+            si no puede entonces grises := 1 ob 4 fin
+            menú(Controles.v, x, yy, "Pegar|-|Carpeta nueva|-|Actualizar|Propiedades", grises, M_FONDO)
+        fin
+    fin
+
+    ; lo elegido en un menú
+    función elegido_menú(cuál: nat32, op: nat32)
+        variable k: nat32
+        variable c: ent32
+        k := cuál yb nob CON_FLECHAS
+        si ent32(k) = abierto_m entonces abierto_m := -1 fin
+        si op = A_LA_IZQUIERDA o op = A_LA_DERECHA entonces
+            ; al menú de al lado (con las flechas)
+            si op = A_LA_IZQUIERDA entonces k := (k + 5) mod 6 sino k := (k + 1) mod 6 fin
+            pinta()
+            abre_menú(k)
+            devolver
+        fin
+        si op = SIN_ELEGIR entonces devolver fin
+        aviso[0] := 0
+        según k
+            caso M_ARCHIVO:
+                según op
+                    caso 0: abre_elegidos()
+                    caso 1: pide_abrir_con()
+                    caso 3: pide_nombre(cierto)
+                    caso 5: pide_nombre(falso)
+                    caso 6: pide_borrar(falso)
+                    caso 7: pide_borrar(cierto)
+                    caso 9: pide_propiedades()
+                    caso 11: sale := cierto
+                fin
+            caso M_EDICIÓN:
+                según op
+                    caso 0: al_porta(cierto)
+                    caso 1: al_porta(falso)
+                    caso 2: pega()
+                    caso 4: elige_todos()
+                    caso 5: invierte()
+                fin
+            caso M_VER:
+                según op
+                    caso 0, 1, 2, 3:
+                        vista := op
+                        primera := 0
+                        al_cursor()
+                    caso 5, 6, 7, 8:
+                        c := ent32(op) - 5
+                        ordena(nat32(c))
+                    caso 10:
+                        ocultos := no ocultos
+                        relee()
+                        refresca_árbol()
+                    caso 12:
+                        relee()
+                        refresca_árbol()
+                fin
+            caso M_IR:
+                según op
+                    caso 0: atrás()
+                    caso 1: adelante()
+                    caso 2: sube()
+                    caso 4: ve_a(L_EQUIPO, "", cierto)
+                    caso 5: ve_a(L_PAPELERA, "", cierto)
+                    caso 7: empieza_a_buscar()
+                fin
+            caso M_HERRAMIENTAS:
+                según op
+                    caso 0: pide_vaciar()
+                    caso 1: restaura_elegidos()
+                    caso 3: edita_asociaciones()
+                fin
+            caso M_AYUDA:
+                si op = 0 entonces
+                    abre_cuadro(D_AYUDA, "Las teclas del explorador")
+                sino
+                    copiar(aviso, "El explorador de archivos de Hispa-Pentium (Mi equipo). GPL-2.0 o posterior.")
+                fin
+            caso M_CONTEXTO:
+                si lugar = L_EQUIPO entonces
+                    según op
+                        caso 0: abre_elegidos()
+                        caso 1: si es_de_expulsar() entonces expulsa_unidad() sino quita_memoria() fin     ; (CD)
+                        caso 2: pide_propiedades()
+                    fin
+                sino si lugar = L_PAPELERA entonces
+                    según op
+                        caso 0: restaura_elegidos()
+                        caso 1: pide_borrar(cierto)
+                        caso 3: pide_vaciar()
+                    fin
+                sino
+                    según op
+                        caso 0: abre_elegidos()
+                        caso 1: pide_abrir_con()
+                        caso 3: al_porta(cierto)
+                        caso 4: al_porta(falso)
+                        caso 6: pide_nombre(falso)
+                        caso 7: pide_borrar(falso)
+                        caso 8: pide_borrar(cierto)
+                        caso 10: pide_propiedades()
+                    fin
+                fin
+            caso M_FONDO:
+                según op
+                    caso 0: pega()
+                    caso 2: pide_nombre(cierto)
+                    caso 4:
+                        relee()
+                        refresca_árbol()
+                    caso 5:
+                        desmarca_todos()
+                        g.sel := -1
+                        pide_propiedades()
+                fin
+            caso M_ÁRBOL:
+                si op = 0 entonces va_al_nodo(nodo_cursor) fin
+        fin
+    fin
+
+    función ordena(c: nat32)
+        ; (la columna del orden, según dónde se está: nombre, tamaño, tipo y fecha)
+        si lugar = L_CARPETA entonces
+            según c
+                caso 0: rejilla_ordenar(g, 0)
+                caso 1: rejilla_ordenar(g, 1)
+                caso 2: rejilla_ordenar(g, 2)
+                si no: rejilla_ordenar(g, 3)
+            fin
+        sino
+            si c < g.n_cols entonces rejilla_ordenar(g, c) fin
+        fin
+    fin
+
+    función pide_vaciar()
+        copiar(confirma_texto, "\xA8Se vac\xA1a la Papelera? Lo que hay en ella se borra del todo.")
+        confirma := CF_VACIAR
+        abre_cuadro(D_CONFIRMA, "Vaciar la Papelera")
+    fin
+
+    función edita_asociaciones()
+        variable t: nat32
+        lee_asociaciones()
+        ; (si no está, se escribe con las de siempre, para poder editarlo)
+        asociar("TXT", "\\BLOC.BIN", "%1")
+        t := lanzar_suelto("\\BLOC.BIN", ruta_asocia)
+        si es_error(t) entonces copiar(aviso, "No se puede abrir el Bloc de notas.") fin
+    fin
+
+    función quita_memoria()
+        variable k: ent32
+        variable r: nat32
+        variable d: arreglo [1] de nat32
+        k := primero_marcado()
+        si k < 0 o item(k).unidad < 0 entonces devolver fin
+        d[0] := us[item(k).unidad].letra
+        r := Llamadas.quitar_memoria(us[item(k).unidad].letra)
+        si r = QUITADA entonces formatear(aviso, 200, "Ya puede quitar la memoria %c:.", d) sino si r = ES_DEL_SISTEMA entonces formatear(aviso, 200, "%c: es la memoria del sistema: no se puede quitar.", d) sino formatear(aviso, 200, "%c: no es una memoria USB que se pueda quitar.", d) fin
+        relee_conservando()
+        refresca_árbol()
+    fin
+
+    función empieza_a_buscar()
+        buscando := cierto
+        foco := ID_B_CAMPO
+    fin
+
+    ; =========================================================================
+    ;  El teclado
+    ; =========================================================================
+    función tecla_contenido(c: nat32, mayús: bool)
+        variable paso_: ent32
+        paso_ := 1
+        si vista = V_ICONOS o vista = V_MINIATURAS entonces paso_ := columnas fin
+        según c
+            caso TECLA_ARRIBA:
+                si vista = V_LISTA o vista = V_DETALLES entonces mueve(-1, mayús) sino mueve(-paso_, mayús) fin
+            caso TECLA_ABAJO:
+                si vista = V_LISTA o vista = V_DETALLES entonces mueve(1, mayús) sino mueve(paso_, mayús) fin
+            caso TECLA_IZQUIERDA:
+                si vista = V_LISTA entonces mueve(-filas, mayús) sino si vista <> V_DETALLES entonces mueve(-1, mayús) fin
+            caso TECLA_DERECHA:
+                si vista = V_LISTA entonces mueve(filas, mayús) sino si vista <> V_DETALLES entonces mueve(1, mayús) fin
+            caso TECLA_INICIO: mueve(-100000, mayús)
+            caso TECLA_FIN: mueve(100000, mayús)
+            caso TECLA_RE_PÁG:
+                si vista = V_DETALLES entonces mueve(-rejilla_caben(g), mayús) sino mueve(-paso_ * filas, mayús) fin
+            caso TECLA_AV_PÁG:
+                si vista = V_DETALLES entonces mueve(rejilla_caben(g), mayús) sino mueve(paso_ * filas, mayús) fin
+            caso ' ':
+                si g.sel >= 0 entonces
+                    marca(de_vista(g.sel), no marcado(de_vista(g.sel)))
+                    ancla := g.sel
+                fin
+            caso '\n': abre_elegidos()
+            caso 8: sube()
+            caso TECLA_SUPR: pide_borrar(mayús)
+            caso 1: elige_todos()
+            caso 3: al_porta(falso)
+            caso 24: al_porta(cierto)
+            caso 22: pega()
+            caso 14: pide_nombre(cierto)
+            si no:
+                ; una letra: al siguiente que empieza por ella
+                si c > ' ' y c < 0x100 entonces salta_a_letra(byte(c)) fin
+        fin
+    fin
+
+    ; al siguiente (desde el cursor, dando la vuelta) cuyo nombre empieza por esa letra
+    función salta_a_letra(c: byte)
+        variable i, k, n: ent32
+        n := vistos()
+        si n = 0 entonces devolver fin
+        k := 1
+        mientras k <= n hacer
+            i := (g.sel + k) mod n
+            si i < 0 entonces i := i + n fin
+            si mayúscula(item(de_vista(i)).largo[0]) = mayúscula(c) entonces
+                elige_solo(i)
+                al_cursor()
+                devolver
+            fin
+            k := k + 1
+        fin
+    fin
+
+    función tecla_cuadro(c: nat32)
+        variable k: nat32
+        si c = 27 entonces
+            cuadro := D_NADA
+            foco := ID_CONTENIDO
+            devolver
+        fin
+        si c = '\t' o c = TECLA_MAYÚS_TAB entonces
+            pasar_foco(c = '\t')
+            devolver
+        fin
+        k := clase_de(foco)
+        si cuadro = D_NOMBRE y foco = ID_D entonces
+            ; (lo primero que se escribe sustituye al nombre, como si estuviera elegido)
+            si reemplaza y c >= ' ' y c < 0x100 entonces
+                nombre_nuevo[0] := 0
+                Controles.cursor := 0
+            fin
+            reemplaza := falso
+            si c = '\n' entonces acepta_nombre() sino campo_tecla(nombre_nuevo, 13, c) fin
+            devolver
+        fin
+        si cuadro = D_ABRIR_CON y foco = ID_D + 1 entonces
+            si c = '\n' entonces acepta_abrir_con() sino campo_tecla(otro_prog, 80, c) fin
+            devolver
+        fin
+        si cuadro = D_ABRIR_CON y foco = ID_D entonces
+            si c = '\n' entonces acepta_abrir_con() sino rejilla_tecla(go, c) fin
+            devolver
+        fin
+        si c = '\n' o c = ' ' entonces pulsa_cuadro(foco) fin
+    fin
+
+    ; lo que hace un control de un cuadro
+    función pulsa_cuadro(id: nat32)
+        según nat16(cuadro)
+            caso D_NOMBRE:
+                si id = ID_D + 1 entonces acepta_nombre() fin
+                si id = ID_D + 2 entonces cuadro := D_NADA fin
+            caso D_PROPIEDADES:
+                si id = ID_D entonces at_ro := no at_ro fin
+                si id = ID_D + 1 entonces at_oculto := no at_oculto fin
+                si id = ID_D + 2 entonces at_archivo := no at_archivo fin
+                si id = ID_D + 3 entonces acepta_propiedades() fin
+                si id = ID_D + 4 entonces cuadro := D_NADA fin
+            caso D_ABRIR_CON:
+                si id = ID_D + 2 entonces siempre := no siempre fin
+                si id = ID_D + 3 entonces acepta_abrir_con() fin
+                si id = ID_D + 4 entonces cuadro := D_NADA fin
+            caso D_CONFIRMA:
+                cuadro := D_NADA
+                si id = ID_D entonces
+                    si confirma = CF_BORRAR entonces borra(cierto) fin
+                    si confirma = CF_VACIAR entonces vacía() fin
+                fin
+            caso D_AYUDA:
+                cuadro := D_NADA
+        fin
+        si cuadro = D_NADA entonces foco := ID_CONTENIDO fin
+    fin
+
+    función tecla_pulsada(c: nat32, b: nat32)
+        variable m: ent32
+        variable k: nat32
+        variable mayús: bool
+        mayús := b yb TECLA_CON_MAYÚS <> 0
+        si cuadro <> D_NADA entonces
+            tecla_cuadro(c)
+            devolver
+        fin
+        m := menú_de_alt(MENÚS, c)
+        si m >= 0 entonces
+            abre_menú(nat32(m))
+            devolver
+        fin
+        si c = '\t' o c = TECLA_MAYÚS_TAB entonces
+            si foco = ID_DIRECCIÓN entonces pon_dirección() fin
+            pasar_foco(c = '\t')
+            devolver
+        fin
+        ; las teclas de siempre, estén donde estén
+        según c
+            caso TECLA_F1:
+                abre_cuadro(D_AYUDA, "Las teclas del explorador")
+                devolver
+            caso TECLA_F1 + 1:
+                pide_nombre(falso)
+                devolver
+            caso TECLA_F3, 6:
+                empieza_a_buscar()
+                devolver
+            caso TECLA_F1 + 3, 12:
+                foco := ID_DIRECCIÓN
+                Controles.cursor := longitud(dirección_)
+                reemplaza := cierto
+                devolver
+            caso TECLA_F1 + 4:
+                aviso[0] := 0
+                relee()
+                refresca_árbol()
+                devolver
+            caso TECLA_F1 + 5:
+                si foco = ID_ÁRBOL entonces foco := ID_CONTENIDO sino foco := ID_ÁRBOL fin
+                devolver
+            caso TECLA_F1 + 6:
+                pide_nombre(cierto)
+                devolver
+            caso TECLA_F8:
+                vista := (vista + 1) mod 4
+                primera := 0
+                al_cursor()
+                devolver
+            caso TECLA_F1 + 8:
+                menú_contexto(cx + 40, cy + 40, cuántos_marcados() > 0)
+                devolver
+            caso TECLA_F1 + 9:
+                abre_menú(M_ARCHIVO)
+                devolver
+        fin
+        k := clase_de(foco)
+        si foco = ID_DIRECCIÓN entonces
+            si c = '\n' entonces
+                ir_a_dirección()
+            sino si c = 27 entonces
+                pon_dirección()
+                foco := ID_CONTENIDO
+            sino
+                ; (con F4 o Ctrl+L, lo primero que se escribe sustituye a lo que había)
+                si reemplaza y c >= ' ' y c < 0x100 entonces
+                    dirección_[0] := 0
+                    Controles.cursor := 0
+                fin
+                reemplaza := falso
+                campo_tecla(dirección_, MAX_RUTA, c)
+            fin
+        sino si foco = ID_B_CAMPO entonces
+            si c = '\n' entonces empieza_busca() sino campo_tecla(que_buscar, 40, c) fin
+        sino si foco = ID_ÁRBOL entonces
+            tecla_árbol(c)
+        sino si foco = ID_CONTENIDO entonces
+            aviso[0] := 0
+            tecla_contenido(c, mayús)
+        sino si c = '\n' o c = ' ' entonces
+            pulsa(foco)
+        fin
+    fin
+
+    ; lo que hace un control de la ventana (botón o herramienta)
+    función pulsa(id: nat32)
+        según nat16(id)
+            caso ID_IR: ir_a_dirección()
+            caso ID_B_SUB: en_subcarpetas := no en_subcarpetas
+            caso ID_B_BUSCAR: empieza_busca()
+            caso ID_B_VOLVER:
+                buscando := falso
+                foco := ID_ÁRBOL
+            caso ID_H + I_ANTERIOR: atrás()
+            caso ID_H + I_SIGUIENTE: adelante()
+            caso ID_H + I_SUBIR: sube()
+            caso ID_H + I_BUSCAR:
+                si buscando entonces buscando := falso sino empieza_a_buscar() fin
+            caso ID_H + I_CORTAR: al_porta(cierto)
+            caso ID_H + I_COPIAR: al_porta(falso)
+            caso ID_H + I_PEGAR: pega()
+            caso ID_H + I_BORRAR: pide_borrar(falso)
+            caso ID_H + I_CARPETA: pide_nombre(cierto)
+            caso ID_H + I_VISTAS:
+                vista := (vista + 1) mod 4
+                primera := 0
+                al_cursor()
+        fin
+    fin
+
+    ; =========================================================================
+    ;  El ratón
+    ; =========================================================================
+    función ratón_baja(x: ent32, yy: ent32, c: nat32)
+        variable id: nat32
+        variable m, i, n: ent32
+        variable en_signo: bool
+        variable veces_, mods: nat32
+        veces_ := veces(c)
+        mods := c yb (CON_MAYÚS ob CON_CONTROL)
+        si cuadro <> D_NADA entonces
+            id := control_en(x, yy)
+            si id = 0 entonces devolver fin
+            si cuadro = D_ABRIR_CON y id = ID_D entonces
+                foco := id
+                si rejilla_clic(go, x, yy) >= 0 entonces
+                    otro_prog[0] := 0
+                    si veces_ >= 2 entonces acepta_abrir_con() fin
+                fin
+                devolver
+            fin
+            foco := id
+            si clase_de(id) <> K_CAMPO entonces pulsa_cuadro(id) fin
+            devolver
+        fin
+        m := menú_en_barra(x, yy)
+        si m >= 0 entonces
+            abre_menú(nat32(m))
+            devolver
+        fin
+        ; el árbol
+        n := nodo_en(x, yy, en_signo)
+        si n >= 0 y no buscando entonces
+            foco := ID_ÁRBOL
+            si en_signo entonces
+                si nodos[n].abierto entonces cierra_nodo(nat32(n)) sino abre_nodo(nat32(n)) fin
+            sino si c yb BOTÓN_DERECHO = 0 entonces
+                si nodo_cursor <> n o no es_el_sitio(n) entonces va_al_nodo(n) fin
+            fin
+            devolver
+        fin
+        ; lo de dentro
+        si x >= cx y yy >= cy y x < cx + can y yy < cy + cal entonces
+            foco := ID_CONTENIDO
+            aviso[0] := 0
+            i := en_punto(x, yy)
+            si i = -2 entonces
+                ; el rótulo de una columna: ordenar
+                rejilla_clic(g, x, yy)
+                devolver
+            fin
+            si c yb BOTÓN_DERECHO <> 0 entonces
+                si i >= 0 entonces
+                    si no marcado(de_vista(i)) entonces elige_solo(i) fin
+                    g.sel := i
+                    pinta()
+                    menú_contexto(x, yy, cierto)
+                sino
+                    desmarca_todos()
+                    pinta()
+                    menú_contexto(x, yy, falso)
+                fin
+                devolver
+            fin
+            si i >= 0 entonces
+                si mods yb CON_CONTROL <> 0 entonces
+                    marca(de_vista(i), no marcado(de_vista(i)))
+                    g.sel := i
+                    ancla := i
+                sino si mods yb CON_MAYÚS <> 0 entonces
+                    elige_hasta(i)
+                sino si no marcado(de_vista(i)) entonces
+                    elige_solo(i)
+                sino
+                    g.sel := i
+                fin
+                si veces_ >= 2 y mods = 0 entonces
+                    elige_solo(i)
+                    abre_elegidos()
+                    devolver
+                fin
+                pulsado := cierto
+                pul_x := x
+                pul_y := yy
+                pul_item := i
+                pul_mods := mods
+            sino
+                ; en un sitio sin nada: el recuadro
+                si mods yb CON_CONTROL = 0 entonces desmarca_todos() fin
+                banda := cierto
+                bx0 := x
+                by0 := yy
+                bx1 := x
+                by1 := yy
+                pul_mods := mods
+            fin
+            devolver
+        fin
+        ; los controles (la dirección, el Ir, las herramientas, los de buscar)
+        id := control_en(x, yy)
+        si id = 0 entonces devolver fin
+        si clase_de(id) = K_CAMPO entonces
+            foco := id
+        sino
+            si clase_de(id) <> K_HERRAMIENTA entonces foco := id fin
+            pulsa(id)
+        fin
+    fin
+
+    ; la carpeta en la que caería lo que se arrastra (en lo de dentro o en el árbol)
+    función mira_destino(x: ent32, yy: ent32)
+        variable i, n: ent32
+        variable en_signo: bool
+        destino_arr := -1
+        destino_nodo := -1
+        i := en_punto(x, yy)
+        si i >= 0 y item(de_vista(i)).carpeta y no marcado(de_vista(i)) entonces destino_arr := i fin
+        n := nodo_en(x, yy, en_signo)
+        si n > 0 y no buscando entonces destino_nodo := n fin
+    fin
+
+    función ratón_mueve(x: ent32, yy: ent32, c: nat32)
+        ratón_x := x
+        ratón_y := yy
+        si c yb BOTÓN_IZQUIERDO = 0 entonces devolver fin
+        si banda entonces
+            bx1 := x
+            by1 := yy
+            si bx1 < cx entonces bx1 := cx fin
+            si by1 < cy entonces by1 := cy fin
+            si bx1 >= cx + can entonces bx1 := cx + can - 1 fin
+            si by1 >= cy + cal entonces by1 := cy + cal - 1 fin
+            elige_banda(pul_mods yb CON_CONTROL <> 0)
+            pinta()
+            devolver
+        fin
+        si pulsado y no arrastrando y (abs(x - pul_x) > 5 o abs(yy - pul_y) > 5) y lugar <> L_EQUIPO entonces arrastrando := cierto fin
+        si arrastrando entonces
+            mira_destino(x, yy)
+            pinta()
+        fin
+    fin
+
+    función ratón_sube(x: ent32, yy: ent32, c: nat32)
+        variable k: ent32
+        variable r: nat32
+        si banda entonces
+            banda := falso
+            pinta()
+            devolver
+        fin
+        si arrastrando entonces
+            arrastrando := falso
+            pulsado := falso
+            si x < 0 o yy < 0 o x >= ancho o yy >= alto entonces
+                ; fuera de la ventana: al tapiz o al dock (lo primero de lo elegido)
+                k := primero_marcado()
+                si k >= 0 entonces
+                    r := soltar_fuera(Controles.v, x, yy, dirección(item(k).ruta[0]))
+                    si es_error(r) entonces copiar(aviso, "No se ha podido soltar ah\xA1.") fin
+                fin
+            sino si destino_arr >= 0 entonces
+                lleva_a(dirección(item(de_vista(destino_arr)).ruta[0]), c yb CON_CONTROL <> 0 o pul_mods yb CON_CONTROL <> 0 o mayúscula(item(de_vista(destino_arr)).ruta[0]) <> mayúscula(item(primero_marcado()).ruta[0]))
+            sino si destino_nodo >= 0 entonces
+                lleva_a(dirección(nodos[destino_nodo].ruta[0]), c yb CON_CONTROL <> 0 o pul_mods yb CON_CONTROL <> 0 o (nodos[destino_nodo].ruta[0] <> '*' y mayúscula(nodos[destino_nodo].ruta[0]) <> mayúscula(item(primero_marcado()).ruta[0])))
+            fin
+            destino_arr := -1
+            destino_nodo := -1
+            devolver
+        fin
+        si pulsado entonces
+            pulsado := falso
+            ; un clic sin mover en uno de varios elegidos: solo ese
+            si pul_mods = 0 y pul_item >= 0 y cuántos_marcados() > 1 entonces elige_solo(pul_item) fin
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Lo que se hace sin ventana (el tapiz y el dock)
+    ; =========================================================================
+    ; pone la ventana v con su esquina en (x, yy) de la pantalla (la llamada 80)
+    función colocar(vv: nat32, x: ent32, yy: ent32)
+        ensamblador
+            mov eax, 80
+            mov ebx, {vv}
+            mov ecx, {x}
+            mov edx, {yy}
+            int 0x80
+        fin
+    fin
+
+    función sin_ventana(args: puntero a byte): bool
+        variable r: arreglo [MAX_RUTA] de byte
+        variable c: bool
+        si empieza_por(args, "/ABRIR ") entonces
+            copiar_hasta(r, saltar_espacios(dirección(args[7])), MAX_RUTA)
+            si existe(r, c) y c entonces
+                copiar(args, r)
+                devolver falso                  ; una carpeta: se abre la ventana en ella
+            fin
+            lee_unidades()
+            abre_archivo(r)
+            devolver cierto
+        fin
+        si empieza_por(args, "/BORRAR ") entonces
+            copiar_hasta(r, saltar_espacios(dirección(args[8])), MAX_RUTA)
+            lee_unidades()
+            si escribible(r) y empieza(TR_PAPELERA) y añade_a_papelera(r) entonces
+                mientras un_paso() = Exoper.SIGUE hacer fin
+            fin
+            devolver cierto
+        fin
+        devolver falso
+    fin
+
+    ; =========================================================================
+    ;  El principio
+    ; =========================================================================
     función principal(): byte
         variable s: Suceso
+        variable args: arreglo [MAX_RUTA + 16] de byte
         variable k: ent32
-        ancho := 440
-        alto := 320
-        v := ventana("Mi equipo", nat32(ancho), nat32(alto))
-        si es_error(v) entonces
+        variable libre, sw: nat32
+        argumentos(args, MAX_RUTA + 8)
+        k := ent32(longitud(args))
+        mientras k > 0 y es_espacio(args[k - 1]) hacer
+            k := k - 1
+            args[k] := 0
+        fin
+        si args[0] = '/' entonces a_mayúsculas(args) fin
+        si sin_ventana(args) entonces devolver 0 fin
+        si no memoria() entonces
+            escribir("equipo: no hay memoria\n")
+            devolver 1
+        fin
+        ; la ventana: lo que quepa encima de la barra de tareas y del dock
+        libre := dato(DATO_ALTO_LIBRE)
+        sw := dato(DATO_ANCHO_PANTALLA)
+        si libre > 140 entonces alto_pedido := libre - 40 fin
+        si alto_pedido > 560 entonces alto_pedido := 560 fin
+        si sw > 900 entonces ancho_pedido := 880 fin
+        si no preparar("Mi equipo", T_NORMAL, falso) entonces
             escribir("equipo: no hay escritorio (o no hay memoria para la ventana)\n")
             devolver 1
         fin
-        argumentos(ruta, MAX_RUTA - 14)
-        k := ent32(longitud(ruta))
-        mientras k > 0 y es_espacio(ruta[k - 1]) hacer
-            k := k - 1
-            ruta[k] := 0
-        fin
-        letra := unidad(0)
+        ; centrada a lo ancho y, a lo alto, justo encima del dock (cabe: se ha pedido así)
+        k := ent32(libre) - alto - 32
+        si k < 0 o libre = 0 entonces k := 0 fin
+        colocar(Controles.v, (ent32(sw) - ancho - 8) div 2, k)
         lee_unidades()
-        si k > 0 entonces
-            a_mayúsculas(ruta)
-            ; (con la letra de la unidad delante: se entra en ella)
-            si ruta[1] = ':' entonces
-                si no es_error(unidad(ruta[0])) entonces letra := ruta[0] fin
-                Textos32.copiar(ruta, dirección(ruta[2]))
-                si ruta[0] = 0 entonces Textos32.copiar(ruta, "\\") fin
-            fin
-            dentro := cierto
-            lee_carpeta()
+        hace_árbol()
+        foco := ID_CONTENIDO
+        si iguales(args, "/PAPELERA") entonces
+            ve_a(L_PAPELERA, "", cierto)
+            vista := V_DETALLES
+        sino si args[0] <> 0 entonces
+            a_mayúsculas(args)
+            si no ve_a(L_CARPETA, args, cierto) entonces ve_a(L_EQUIPO, "", cierto) fin
+        sino
+            ve_a(L_EQUIPO, "", cierto)
         fin
-        pinta_todo()
-        mientras suceso(v, s, cierto) hacer
-            si s.clase = EV_TECLA entonces
-                tecla_pulsada(s.a)
-            sino si s.clase = EV_RATÓN_BAJA entonces
-                k := menú_en(menús, ent32(s.a), ent32(s.b))
-                si k >= 0 entonces
-                    abre_el_menú(k)
-                sino
-                    k := cosa_en(ent32(s.a), ent32(s.b))
-                    si k >= 0 entonces
-                        aviso[0] := 0
-                        elegida := k
-                        si s.c yb BOTÓN_DERECHO <> 0 entonces
-                            pinta_todo()
-                            si dentro y elegida > 0 y es_imagen_de_disco(nombres[elegida]) entonces
-                                menú(v, ent32(s.a), ent32(s.b), "Montar", 0, M_CONTEXTO)    ; (CD)
-                            sino si dentro entonces
-                                menú(v, ent32(s.a), ent32(s.b), "Abrir", 0, M_CONTEXTO)
-                            sino si us[elegida].quitable = 2 entonces
-                                menú(v, ent32(s.a), ent32(s.b), "Abrir|Expulsar", 0, M_UNIDAD)    ; (CD)
-                            sino si us[elegida].quitable <> 0 entonces
-                                menú(v, ent32(s.a), ent32(s.b), "Abrir|Quitar con seguridad", 0, M_UNIDAD)
-                            sino
-                                menú(v, ent32(s.a), ent32(s.b), "Abrir|Quitar con seguridad", 2, M_UNIDAD)
-                            fin
-                        sino
-                            si veces(s.c) = 2 entonces abre() fin
-                            pinta_todo()
-                        fin
-                    fin
-                fin
-            sino si s.clase = EV_MENÚ entonces
-                si elegido(s.b, s.a) entonces devolver 0 fin
-            sino si s.clase = EV_UNIDADES entonces
-                unidades_cambiadas()
-                pinta_todo()
-            sino si s.clase = EV_TAMAÑO entonces
-                ancho := ent32(s.a)
-                alto := ent32(s.b)
-                pinta_todo()
-            sino si s.clase = EV_CERRAR entonces
-                devolver 0
+        si lugar = L_CARPETA entonces título(Controles.v, ruta) fin
+        pinta()
+        mientras no sale hacer
+            si trabaja_miniaturas() entonces
+                si no suceso(Controles.v, s, falso) entonces seguir fin
+            sino
+                si no suceso(Controles.v, s, cierto) entonces romper fin
             fin
+            según nat16(s.clase)
+                caso EV_TECLA: tecla_pulsada(s.a, s.b)
+                caso EV_RATÓN_BAJA: ratón_baja(ent32(s.a), ent32(s.b), s.c)
+                caso EV_RATÓN_MUEVE:
+                    ratón_mueve(ent32(s.a), ent32(s.b), s.c)
+                    seguir
+                caso EV_RATÓN_SUBE: ratón_sube(ent32(s.a), ent32(s.b), s.c)
+                caso EV_MENÚ: elegido_menú(s.b, s.a)
+                caso EV_UNIDADES:
+                    lee_unidades()
+                    si lugar = L_CARPETA y unidad_de(ruta[0]) < 0 entonces
+                        d1(aviso, "La unidad %c: ya no est\xA0 (se ha quitado).", ruta[0])
+                        ve_a(L_EQUIPO, "", falso)
+                        d1(aviso, "La unidad %c: ya no est\xA0 (se ha quitado).", historia[en_historia][0])
+                    sino si lugar = L_EQUIPO entonces
+                        relee()
+                    fin
+                    refresca_árbol()
+                caso EV_TAMAÑO: nuevo_tamaño(ent32(s.a), ent32(s.b), T_NORMAL)
+                caso EV_CERRAR: sale := cierto
+            fin
+            si sale entonces romper fin
+            si lugar = L_CARPETA entonces título(Controles.v, ruta) sino título(Controles.v, dirección_) fin
+            pinta()
         fin
         devolver 0
     fin

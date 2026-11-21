@@ -47,6 +47,11 @@ for N in SSH SSHD WG TAILSCAL; do
   MODULOS="$MODULOS  module /$N.BIN $N.BIN
 "
 done
+# (explorador) las miniaturas del explorador (nucleo32/miniat/: stb_image),
+# otro programa: en la raíz, como módulo y, al instalar, a \HISPA
+bash $AQUI/miniat/hacer.sh $W/f/MINIAT.BIN
+MODULOS="$MODULOS  module /MINIAT.BIN MINIAT.BIN
+"
 # lo que se instala en el disco: el núcleo (con el nombre que tendrá allí), los
 # programas, los textos del sistema instalado y el arranque del disco
 INSTALA="  module /ESCRIT8.BIN NUCLEO.BIN

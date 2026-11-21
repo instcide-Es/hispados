@@ -93,35 +93,38 @@ VERSION_082 = '0.8.2'
 # «navega», OPCIONALES—, y el Administrador de dispositivos; suben base y equipo)
 VERSION_BASE = '0.8.3'
 VERSION_08 = '0.8'
-# (la 0.8.3, 21/11/2026, rama pentium-tailscale: TCP en escucha y la interfaz
-# del túnel en RED.BIN, ORDENES /C, la marca del túnel en la bandeja y
-# Configuración > «Red y Tailscale...»; suben base y red, y salen ssh y tailscal —Tailscale: los nombres
-# de paquete son de 8 letras, por el registro <NOMBRE>.PQI—)
-VERSION_TS = '0.8.3'
+# (la 0.8.4, 21/11/2026, tres ramas juntas en pentium-084: los CD y DVD
+# —las llamadas 132 y 133, MONTAR y EXPULSAR—, SSH y Tailscale —TCP en
+# escucha y la interfaz del túnel en RED.BIN, ORDENES /C, la marca del túnel
+# en la bandeja y Configuración > «Red y Tailscale...»— y el explorador de
+# archivos con el dock —las llamadas 170 y 171—; suben base, red y equipo
+# (0.9, con MINIAT.BIN), y salen ssh y tailscal —Tailscale: los nombres de
+# paquete son de 8 letras, por el registro <NOMBRE>.PQI—)
+VERSION_084 = '0.8.4'
 SISTEMA = [
-    ('base', VERSION_TS, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
+    ('base', VERSION_084, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
     ('bloc', VERSION_08, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
     ('consola', VERSION_08, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
-    # (dispositivos) con el Administrador de dispositivos (DISPOSIT.BIN, la llamada 155 del núcleo)
-    ('equipo', VERSION_BASE, 'Mi equipo y el Administrador de dispositivos', 'base >= 0.8.3', [
-        ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
+    # (explorador, dispositivos) el explorador de archivos, sus miniaturas y el Administrador de dispositivos
+    ('equipo', '0.9', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
+        ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('MINIAT.BIN', r'\HISPA\MINIAT.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
     ('ejemplos', VERSION_082, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.2', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
         ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN'), ('MUESTRA.BIN', r'\HISPA\MUESTRA.BIN')]),
     ('paquetes', '1.0', 'Programas y actualizaciones: PAQUETES y su ventana', 'base >= 0.7, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN')]),
-    ('red', VERSION_TS, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= 0.8.1', [
+    ('red', VERSION_084, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= 0.8.1', [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
     ('tls', VERSION_SISTEMA, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
         ('TLS.BIN', r'\HISPA\TLS.BIN'), ('HTTPS.BIN', r'\HISPA\HTTPS.BIN')]),
-    ('ssh', VERSION_TS, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, apagado hasta que se encienda)', 'base >= 0.8.3, red >= 0.8.3', [
+    ('ssh', VERSION_084, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, apagado hasta que se encienda)', 'base >= 0.8.4, red >= 0.8.4', [
         ('SSH.BIN', r'\HISPA\SSH.BIN'), ('SSHD.BIN', r'\HISPA\SSHD.BIN')]),
-    ('tailscal', VERSION_TS, 'Tailscale y WireGuard: la red privada de sus equipos, cada uno con su nombre y su IP 100.x', 'base >= 0.8.3, red >= 0.8.3, tls >= 0.8.1', [
+    ('tailscal', VERSION_084, 'Tailscale y WireGuard: la red privada de sus equipos, cada uno con su nombre y su IP 100.x', 'base >= 0.8.3, red >= 0.8.3, tls >= 0.8.1', [
         ('TAILSCAL.BIN', r'\HISPA\TAILSCAL.BIN'), ('WG.BIN', r'\HISPA\WG.BIN')]),
     ('hvprun', VERSION_08, 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio', 'base >= 0.7', [
         ('HVPRUN.BIN', r'\HISPA\HVPRUN.BIN')]),

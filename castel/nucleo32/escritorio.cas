@@ -42,7 +42,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -92,6 +92,9 @@ módulo Escritorio
     constante AM_PROGRAMAS = 27                 ; «Programas y actualizaciones» (ACTUALIZ.BIN)
     constante AM_ACCESO = 28                    ; un programa de un paquete (accesos.cas; dato: cuál)
     constante AM_DISPOSITIVOS = 29              ; (dispositivos) el Administrador de dispositivos (DISPOSIT.BIN)
+    constante AM_ATAJO = 19                     ; (dock) un acceso del tapiz que se ha soltado desde el explorador (dato: cuál)
+    constante AC_DOCK_SÍ = 38                   ; (dock) verlo o no (Configuración)
+    constante AC_DOCK_NO = 39
     constante N_OFICINA = 4                     ; los que hay: Facturas, Pluma, Cuentas y Mirador
     constante AC_CERRAR_ACERCA = 11
     constante AC_ACERCA = 12
@@ -115,6 +118,7 @@ módulo Escritorio
     constante ME_INICIO = 3                     ; «Abrir» en una opción del menú Inicio
     constante ME_ICONO = 4                      ; «Abrir» en un icono del tapiz
     constante ME_USB = 5                        ; el del icono de las memorias USB de la bandeja
+    constante ME_ATAJO = 6                      ; (dock) el de un acceso del tapiz: Abrir, Quitar del escritorio
 
     tipo Opción = estructura                    ; una opción del menú Inicio
         x, ye, an, al: ent32
@@ -132,7 +136,7 @@ módulo Escritorio
     constante MAX_BOTONES = 12
 
     ; ---- los iconos del tapiz ----
-    constante MAX_ICONOS = 4 + MAX_ACCESOS
+    constante MAX_ICONOS = 4 + MAX_ACCESOS + MAX_ATAJOS   ; (dock) con los accesos soltados en el tapiz
     constante CELDA_AN = 112                    ; lo que ocupa uno, con su rótulo
     constante CELDA_AL = 62
     tipo Icono = estructura
@@ -412,6 +416,10 @@ módulo Escritorio
                 caso AM_EQUIPO: icono_equipo(tapiz, x + (CELDA_AN - 32) div 2, yy + 3)
                 caso AM_BLOC: icono_hoja_grande(tapiz, x + (CELDA_AN - 26) div 2, yy + 3)
                 caso AM_ACCESO: icono_acceso(tapiz, x + (CELDA_AN - LADO_ICONO) div 2, yy + 3, iconos[i].dato, 1)
+                caso AM_ATAJO:
+                    ; (dock) el icono de su clase, con la flechita de los accesos
+                    icono(tapiz, x + (CELDA_AN - 32) div 2, yy + 3, 32, atajos[iconos[i].dato].clase, 0, 0)
+                    marca_acceso(tapiz, x + (CELDA_AN - 32) div 2, yy + 3, 32)
                 si no: icono_consola_grande(tapiz, x + (CELDA_AN - 32) div 2, yy + 5)
             fin
             ; el rótulo, con letra normal: blanco con su sombra; el del elegido, sobre azul
@@ -1045,6 +1053,7 @@ módulo Escritorio
         v_globo := 0
     fin
 
+    variable globo_título: puntero a byte       ; (dock) el título del globo que viene (nulo: «USB»)
     función globo(t: puntero a byte)
         variable l: puntero a Lienzo
         variable an: ent32
@@ -1064,8 +1073,12 @@ módulo Escritorio
         fin
         rectángulo(valor(l), 0, 0, an, GLOBO_AL, 0x1A56AC)
         redondeado(valor(l), 1, 1, an - 2, GLOBO_AL - 2, 6, 0xFFFDF2, 0xF1EACB, TODAS)
-        si de_cd entonces
-            ; (CD) un disco plateado con su agujero
+        ; (dock) el globo de lo que se suelta desde el explorador lleva otro título
+        si globo_título <> nulo entonces
+            disquete(valor(l), 10, 14, 24)
+            texto_negrita(valor(l), 44, 9, globo_título, TINTA)
+            globo_título := nulo
+        sino si de_cd entonces
             redondeado(valor(l), 10, 14, 24, 24, 12, 0x6F7F96, 0x6F7F96, TODAS)
             redondeado(valor(l), 11, 15, 22, 22, 11, 0xF2F5FA, 0xB9C6D8, TODAS)
             redondeado(valor(l), 18, 22, 8, 8, 4, 0x6F7F96, 0x6F7F96, TODAS)
@@ -1202,10 +1215,19 @@ módulo Escritorio
         sino
             pulsador(v_config, 326, 174, 100, 30, "Verde", 0xA9BDD8, 0x7C95B8, AC_FONDO + 2)
         fin
+        ; (dock) verlo o no
+        texto(valor(l), 20, 216, "Dock:", TINTA)
+        si Dock.visible entonces
+            pulsador(v_config, 110, 210, 100, 28, "Visible", VERDE_ARRIBA, VERDE_ABAJO, AC_DOCK_SÍ)
+            pulsador(v_config, 218, 210, 100, 28, "Oculto", 0xA9BDD8, 0x7C95B8, AC_DOCK_NO)
+        sino
+            pulsador(v_config, 110, 210, 100, 28, "Visible", 0xA9BDD8, 0x7C95B8, AC_DOCK_SÍ)
+            pulsador(v_config, 218, 210, 100, 28, "Oculto", VERDE_ARRIBA, VERDE_ABAJO, AC_DOCK_NO)
+        fin
         ; (dispositivos) lo que hay en el equipo y qué lo lleva; (TAILSCALE) la red
-        pulsador(v_config, 14, 232, 150, 32, "Dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
-        pulsador(v_config, 172, 232, 166, 32, "Red y Tailscale...", 0x5AA6F4, 0x2468C8, AC_RED_TS)
-        pulsador(v_config, 346, 232, 100, 32, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
+        pulsador(v_config, 14, 246, 150, 28, "Dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
+        pulsador(v_config, 172, 246, 166, 28, "Red y Tailscale...", 0x5AA6F4, 0x2468C8, AC_RED_TS)
+        pulsador(v_config, 346, 246, 100, 28, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
         repintada(v_config, 0, 0, 460, 280)
     fin
 
@@ -1557,6 +1579,7 @@ módulo Escritorio
         si no cambia_pantalla(ent32(an), ent32(al)) entonces devolver falso fin
         recolocar_ventana(v_barra, 0, ent32(al) - ALTO_BARRA, ent32(an), ALTO_BARRA)
         mover_ventana(v_menú, 0, ent32(al) - ALTO_BARRA - MENÚ_ALTO)
+        recoloca_dock()                         ; (dock)
         ; los iconos, dentro (sin quitarlos del tapiz: es nuevo)
         para i desde 0 hasta MAX_ICONOS - 1 hacer
             si i < n_iconos entonces
@@ -2002,6 +2025,19 @@ módulo Escritorio
             caso AM_DISPOSITIVOS: lanza("\\DISPOSIT.BIN", nulo)       ; (dispositivos)
             caso AM_PROGRAMAS: lanza("\\ACTUALIZ.BIN", nulo)
             caso AM_ACCESO: si dato < n_accesos entonces lanza(programa_de(dato), argumentos_de(dato)) fin
+            caso AM_ATAJO:
+                ; (dock) lo abre el explorador, con lo suyo
+                si dato < n_atajos entonces
+                    copiar(renglón, "/ABRIR ")
+                    concatenar(renglón, dirección(atajos[dato].ruta[0]))
+                    lanza("\\EQUIPO.BIN", renglón)
+                fin
+            caso AC_DOCK_SÍ:
+                pon_visible(cierto)
+                pinta_config()
+            caso AC_DOCK_NO:
+                pon_visible(falso)
+                pinta_config()
             caso AM_OFICINA: lanza("\\HVPRUN.BIN", de_oficina(dato, cierto))
             caso AC_ACERCA: abre_acerca()
             caso AC_CERRAR_ACERCA: cierra_cuadro(v_acerca)
@@ -2168,7 +2204,11 @@ módulo Escritorio
                     k := icono_en(x, yy)
                     elige_icono(k)
                     si e.c yb BOTÓN_DERECHO <> 0 entonces
-                        si k >= 0 entonces
+                        si k >= 0 y iconos[k].acción = AM_ATAJO entonces
+                            ; (dock) un acceso soltado: también se puede quitar
+                            menú_dato := nat32(k)
+                            abrir_emergente(x, yy, "Abrir|Quitar del escritorio", 0, 0, ME_ATAJO)
+                        sino si k >= 0 entonces
                             menú_dato := nat32(k)
                             ; (dispositivos) Mi equipo, con sus «Propiedades»: el Administrador de dispositivos
                             si iconos[k].acción = AM_EQUIPO entonces
@@ -2197,6 +2237,8 @@ módulo Escritorio
                         si cog_movido entonces mueve_icono(icono_cogido, x - cog_dx, yy - cog_dy) fin
                     fin
                 caso EV_RATÓN_SUBE:
+                    ; (dock) un acceso soltado que se ha llevado a otro sitio: se guarda dónde
+                    si icono_cogido >= 0 y cog_movido y iconos[icono_cogido].acción = AM_ATAJO entonces mueve_atajo(iconos[icono_cogido].dato, iconos[icono_cogido].x, iconos[icono_cogido].ye) fin
                     icono_cogido := -1
             fin
         fin
@@ -2228,6 +2270,11 @@ módulo Escritorio
                 si opción = 1 y menú_dato < n_iconos entonces haz(AM_DISPOSITIVOS, 0) fin     ; (dispositivos)
             caso ME_USB:
                 si opción < n_usb y opción < 3 entonces quitar(usb_letras[opción]) fin
+            caso ME_ATAJO:
+                ; (dock)
+                si opción = 0 y menú_dato < n_iconos entonces haz(iconos[menú_dato].acción, iconos[menú_dato].dato) fin
+                si opción = 1 y menú_dato < n_iconos entonces quita_atajo_del_tapiz(menú_dato) fin
+            caso ME_DOCK: elegido_dock(opción)
         fin
     fin
 
@@ -2261,6 +2308,118 @@ módulo Escritorio
         fin
     fin
 
+    ; -------------------------------------------------------------------------
+    ;  (dock) Los accesos que se sueltan en el tapiz desde el explorador
+    ; -------------------------------------------------------------------------
+    ; cada acceso soltado, donde se dejó (si cabe en la pantalla)
+    función pon_atajos()
+        variable i: nat32
+        i := 0
+        mientras i < n_iconos hacer
+            si iconos[i].acción = AM_ATAJO y iconos[i].dato < n_atajos entonces
+                si atajos[iconos[i].dato].x >= 0 y atajos[iconos[i].dato].ye >= 0 y atajos[iconos[i].dato].x <= tapiz.ancho - CELDA_AN y atajos[iconos[i].dato].ye <= tapiz.alto - ALTO_BARRA - CELDA_AL entonces
+                    iconos[i].x := atajos[iconos[i].dato].x
+                    iconos[i].ye := atajos[iconos[i].dato].ye
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; quita el icono k (un acceso soltado) del tapiz y de ATAJOS.INI
+    función quita_atajo_del_tapiz(k: nat32)
+        variable i, a: nat32
+        si k >= n_iconos o iconos[k].acción <> AM_ATAJO entonces devolver fin
+        quita_iconos()
+        a := iconos[k].dato
+        liberar(puntero(iconos[k].debajo))
+        i := k
+        mientras i + 1 < n_iconos hacer
+            iconos[i].x := iconos[i + 1].x
+            iconos[i].ye := iconos[i + 1].ye
+            iconos[i].acción := iconos[i + 1].acción
+            iconos[i].dato := iconos[i + 1].dato
+            iconos[i].nombre := iconos[i + 1].nombre
+            iconos[i].debajo := iconos[i + 1].debajo
+            i := i + 1
+        fin
+        n_iconos := n_iconos - 1
+        quita_atajo(a)
+        ; los de detrás, a su sitio nuevo de la lista
+        i := 0
+        mientras i < n_iconos hacer
+            si iconos[i].acción = AM_ATAJO entonces
+                si iconos[i].dato > a entonces iconos[i].dato := iconos[i].dato - 1 fin
+                iconos[i].nombre := dirección(atajos[iconos[i].dato].nombre[0])
+            fin
+            i := i + 1
+        fin
+        icono_elegido := -1
+        pon_iconos()
+    fin
+
+    ; ¿es una carpeta la ruta (con su letra)?
+    función es_carpeta_ruta(r: puntero a byte): bool
+        variable u, m: nat32
+        variable c: bool
+        si r[0] = 0 o r[1] <> ':' entonces devolver falso fin
+        si r[2] = 0 o (r[2] = '\\' y r[3] = 0) entonces devolver cierto fin
+        u := por_letra(r[0])
+        si u = Unidades.NINGUNA entonces devolver falso fin
+        m := abrir_archivo(u, dirección(r[2]), PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        c := es_carpeta(m)
+        cerrar_archivo(m)
+        devolver c
+    fin
+
+    ; lo que ha soltado el explorador fuera de su ventana: en el dock, se
+    ; fija (o va a la Papelera); en el tapiz, un acceso nuevo
+    función atiende_suelta()
+        variable id, r: nat32
+        variable k: ent32
+        variable x, yy: ent32
+        suelta_pedida := falso
+        id := ventana_en_punto(suelta_x, suelta_y)
+        si id <> 0 y id = v_dock entonces
+            r := soltado_en_dock(suelta_ruta, suelta_x)
+            si r = 2 entonces
+                copiar(renglón, "/BORRAR ")
+                concatenar(renglón, suelta_ruta)
+                lanza("\\EQUIPO.BIN", renglón)
+                mira_ya()
+            sino si r = 1 entonces
+                globo_título := "Dock"
+                globo("Fijado en el dock.")
+            sino
+                globo_título := "Dock"
+                globo("En el dock se fijan los programas (.BIN).")
+            fin
+            devolver
+        fin
+        si id <> 0 entonces devolver fin
+        x := suelta_x - CELDA_AN div 2
+        yy := suelta_y - 20
+        si x < 0 entonces x := 0 fin
+        si yy < 0 entonces yy := 0 fin
+        si x > tapiz.ancho - CELDA_AN entonces x := tapiz.ancho - CELDA_AN fin
+        si yy > tapiz.alto - ALTO_BARRA - CELDA_AL entonces yy := tapiz.alto - ALTO_BARRA - CELDA_AL fin
+        k := nuevo_atajo(suelta_ruta, es_carpeta_ruta(suelta_ruta), x, yy)
+        si k < 0 o n_iconos >= MAX_ICONOS entonces
+            globo_título := "Escritorio"
+            globo("En el tapiz ya no caben m\xA0s accesos.")
+            devolver
+        fin
+        quita_iconos()
+        nuevo_icono_de(dirección(atajos[k].nombre[0]), AM_ATAJO, nat32(k))
+        iconos[n_iconos - 1].x := x
+        iconos[n_iconos - 1].ye := yy
+        pon_iconos()
+        tomar_consola()
+        imprimir1("escritorio: un acceso nuevo en el tapiz: %s\n", nat32(dirección(suelta_ruta[0])))
+        soltar_consola()
+    fin
+
     ; la tarea del escritorio: el pulso del gestor y lo suyo, cien veces por segundo
     función tarea_escritorio(n: nat32)
         variable f, h: nat32
@@ -2284,6 +2443,16 @@ módulo Escritorio
             atiende_prueba()
             atiende_globo()
             vigila_ayuda()
+            ; (dock) el dock, lo que pide y lo que se suelta desde el explorador
+            atiende_dock()
+            si pide <> PIDE_NADA entonces
+                si pide = PIDE_CONFIG entonces abre_config() fin
+                si pide = PIDE_LANZAR entonces
+                    si pide_argumentos[0] = 0 entonces lanza(pide_programa, nulo) sino lanza(pide_programa, pide_argumentos) fin
+                fin
+                pide := PIDE_NADA
+            fin
+            si suelta_pedida entonces atiende_suelta() fin
             si Ventanas.cambios <> cambios_vistos o cambios_red <> red_vista o cambios_energía <> energía_vista entonces pinta_barra() fin
             ; cada segundo: el reloj (si ha cambiado el minuto) y las tareas acabadas
             si tics div HZ <> segundo_visto entonces
@@ -2361,6 +2530,7 @@ módulo Escritorio
         unidades_vistas := Unidades.cambios
         pinta_tapiz()
         v_barra := crear_ventana("barra", 0, pantalla.alto - ALTO_BARRA, pantalla.ancho, ALTO_BARRA, SIN_MARCO ob ENCIMA, 0)
+        prepara_dock()                          ; (dock) encima de la barra
         pon_accesos()
         v_menú := crear_ventana("menú", 0, pantalla.alto - ALTO_BARRA - menú_alto, MENÚ_ANCHO, menú_alto, SIN_MARCO ob ENCIMA ob OCULTA ob REDONDA, 0)
         si v_barra = 0 o v_menú = 0 entonces
@@ -2402,6 +2572,22 @@ módulo Escritorio
         d[4] := fondo
         imprimir("escritorio: en marcha, %u x %u con %u bits por punto (el modo %s), tapiz %u\n", d)
         soltar_consola()
+        ; (dock) lo guardado del dock y los accesos soltados en el tapiz (se
+        ; leen del disco ya con el escritorio en marcha)
+        lee_ajustes_dock()
+        lee_atajos()
+        si n_atajos > 0 entonces
+            quita_iconos()
+            i := 0
+            mientras i < n_atajos hacer
+                nuevo_icono_de(dirección(atajos[i].nombre[0]), AM_ATAJO, i)
+                i := i + 1
+            fin
+            organiza_iconos()
+            pon_atajos()
+            pon_iconos()
+            repintar_todo()
+        fin
         ; un sistema instalado en el disco: sus ajustes (HISPA.INI); si aún
         ; no los tiene, es su primer arranque: el asistente. Si no, mirar sin
         ; molestar si hay actualizaciones (ACTUALIZ /BANDEJA; si no está, nada)
