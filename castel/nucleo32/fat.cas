@@ -1694,6 +1694,48 @@ módulo Fat
         devolver n
     fin
 
+    ; (PROTEGE) lo mismo sin mirar el disco (lo de cada vez: sin leer
+    ; carpetas, que en una memoria USB lenta se nota): cada trozo, como lo
+    ; guardaría la FAT en 8+3 (que es como lo busca primero). Vale si todos
+    ; los trozos son de 8+3; si alguno no lo es (un nombre largo), falso, y
+    ; hay que mirar el disco (forma_de_ruta). (Un nombre largo que fuera otra
+    ; forma del de una entrada de 8+3 solo lo puede haber hecho otro sistema:
+    ; esta FAT crea solo nombres de 8+3.)
+    público función forma_sin_disco(ruta: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+        variable p: puntero a byte
+        variable k, n, i: nat32
+        variable once: arreglo [11] de byte
+        variable trozo: arreglo [13] de byte
+        n := 0
+        p := ruta
+        si p[0] <> 0 y p[1] = ':' entonces p := p + 2 fin
+        mientras cierto hacer
+            mientras es_barra(valor(p)) hacer p := p + 1 fin
+            si valor(p) = 0 entonces romper fin
+            k := 0
+            mientras p[k] <> 0 y no es_barra(p[k]) hacer k := k + 1 fin
+            si no a_once(p, k, once) entonces devolver falso fin
+            de_once(once, trozo)
+            si n + 1 >= cabe entonces devolver falso fin
+            destino[n] := '\\'
+            n := n + 1
+            i := 0
+            mientras trozo[i] <> 0 hacer
+                si n + 1 >= cabe entonces devolver falso fin
+                destino[n] := trozo[i]
+                n := n + 1
+                i := i + 1
+            fin
+            p := p + k
+        fin
+        si n = 0 entonces
+            destino[0] := '\\'
+            n := 1
+        fin
+        destino[n] := 0
+        devolver cierto
+    fin
+
     ; (PROTEGE) la ruta «ruta» del volumen v como la entiende el disco, para
     ; saber de verdad qué archivo es (permisos.cas): cada trozo que está, con
     ; su nombre corto, el de su entrada (así no valen otras formas de

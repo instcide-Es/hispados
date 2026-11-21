@@ -327,7 +327,10 @@ módulo Permisos
         secreto := falso
         si u >= MAX_UNIDADES o u <> del_sistema entonces devolver LIBRE fin
         si no unidades[u].hay o unidades[u].clase <> U_FAT entonces devolver LIBRE fin
-        si no forma_de_ruta(u, ruta, forma, MAX_FORMA) entonces devolver DUDOSA fin
+        ; (sin leer el disco si todos los trozos son de 8+3: casi siempre)
+        si no forma_sin_disco(ruta, forma, MAX_FORMA) entonces
+            si no forma_de_ruta(u, ruta, forma, MAX_FORMA) entonces devolver DUDOSA fin
+        fin
         mira_sistema()
         en_hispa := falso
         rel := dirección(forma[1])
