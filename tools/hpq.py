@@ -81,15 +81,19 @@ MAX_CABECERA = 16384
 # cambiado: base, red y tls. Los demás siguen en la 0.8, la del CD)
 VERSION_SISTEMA = '0.8.1'
 VERSION_08 = '0.8'
+# [WIN32] (21/11/2026) los programas de Windows: el núcleo nuevo (los
+# segmentos de Win32, las llamadas 180 a 182, el coprocesador de cada
+# tarea), ORDENES (los .EXE) y Mi equipo (los abre); y el paquete win32
+VERSION_WIN32 = '0.8.2'
 SISTEMA = [
-    ('base', VERSION_SISTEMA, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
+    ('base', VERSION_WIN32, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
     ('bloc', VERSION_08, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
     ('consola', VERSION_08, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
-    ('equipo', VERSION_08, 'Mi equipo: las unidades, las carpetas y los archivos', 'base >= 0.7', [('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN')]),
+    ('equipo', VERSION_WIN32, 'Mi equipo: las unidades, las carpetas y los archivos', 'base >= 0.7', [('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN')]),
     ('ejemplos', VERSION_08, 'Programas de ejemplo: HOLA, ECO, PRUEBA y BUCLE', 'base >= 0.7', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
         ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN')]),
@@ -106,6 +110,15 @@ SISTEMA = [
         ('FACTURAS.HVP', r'\OFICINA\FACTURAS.HVP'), ('PLUMA.HVP', r'\OFICINA\PLUMA.HVP'),
         ('CUENTAS.HVP', r'\OFICINA\CUENTAS.HVP'), ('MIRADOR.HVP', r'\OFICINA\MIRADOR.HVP'),
         ('TIPOS.DAT', r'\OFICINA\TIPOS.DAT'), ('DICCIO.DAT', r'\OFICINA\DICCIO.DAT')]),
+    # [WIN32] los programas de Windows de 32 bits y DirectX (docs/pentium/WIN32.md)
+    ('win32', '1.0', 'Programas de Windows de 32 bits y DirectX: WIN32.BIN, sus DLL y los ejemplos (Naves)', 'base >= ' + VERSION_WIN32, [
+        ('WIN32.BIN', r'\HISPA\WIN32.BIN'),
+        ('MSVCRT.DLL', r'\WIN32\MSVCRT.DLL'), ('UCRT.DLL', r'\WIN32\UCRT.DLL'), ('COMCTL32.DLL', r'\WIN32\COMCTL32.DLL'),
+        ('WINMM.DLL', r'\WIN32\WINMM.DLL'), ('DDRAW.DLL', r'\WIN32\DDRAW.DLL'), ('DSOUND.DLL', r'\WIN32\DSOUND.DLL'),
+        ('DINPUT.DLL', r'\WIN32\DINPUT.DLL'), ('OLE32.DLL', r'\WIN32\OLE32.DLL'),
+        ('CALC32.EXE', r'\HISPA32\CALC32.EXE'), ('HOLA32.EXE', r'\HISPA32\HOLA32.EXE'), ('CTL32.EXE', r'\HISPA32\CTL32.EXE'),
+        ('MENU32.EXE', r'\HISPA32\MENU32.EXE'), ('AVISO32.EXE', r'\HISPA32\AVISO32.EXE'), ('NAVES.EXE', r'\HISPA32\NAVES.EXE'),
+        ('NAVES.ICP', r'\HISPA32\NAVES.ICP'), ('NAVES.MNU', r'\HISPA\MENU\NAVES.MNU')]),
 ]
 
 

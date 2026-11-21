@@ -143,6 +143,17 @@
 #      arranque a prueba y «Mantener»; y si se reinicia sin darla por buena,
 #      GRUB vuelve solo a la de antes. Y, con la VBE de Bochs, la medida
 #      guardada que la BIOS no tiene (1200 x 800) la pone el núcleo al arrancar.
+#  18. [WIN32] Los programas de Windows de 32 bits y DirectX (WIN32.BIN,
+#      nucleo32/win32/, docs/pentium/WIN32.md): los de consola de las pruebas
+#      de HW32 (PEHOLA, HOLAC, K32PRUE con lo que da Windows 98, una DLL),
+#      NASM, TCC (compila un «hola» que luego corre) y FASM, de otros
+#      (tests/thirdparty/fetch_win32.sh; si no están, se saltan); los de
+#      ventanas de \HISPA32 (HOLA32, AVISO32 con sus MessageBox, CALC32 con
+#      el ratón y su menú, MENU32, CTL32) como ventanas de Hispa-Pentium; Naves
+#      (DirectDraw a pantalla completa, DirectInput) jugando; el ejemplo DDRAW
+#      de FASM (ensamblado ahí); FASMW abriendo y ensamblando HELLO.ASM, y
+#      ese HELLO.EXE; Mi equipo abriendo un .EXE; y WSOCK32 (REDPRUE) contra
+#      el servidor HTTP de aquí.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -159,6 +170,7 @@
 #   SOLO=tls ./pruebas.sh         la primera y la 13 bis (HTTPS: el servicio TLS, TLS.BIN)
 #   SOLO=cd ./pruebas.sh          la primera y la decimosexta (el CD y las actualizaciones por Internet)
 #   SOLO=pantalla ./pruebas.sh    la primera y la decimoséptima (la medida de la pantalla)
+#   SOLO=win32 ./pruebas.sh       la primera y la decimoctava (los programas de Windows y DirectX)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -222,7 +234,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|win32) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac    # [WIN32] (y win32)
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -2032,9 +2044,9 @@ for hc in xhci ehci; do
   # lo instalado, apuntado para PAQUETES: los registros de los paquetes del sistema, en \HISPA\PAQUETES
   rm -rf $Z/pqi $Z/pqu; mkdir $Z/pqi $Z/pqu
   mcopy -n -i $Z/vol.img '::HISPA/PAQUETES/*' $Z/pqi/ > /dev/null 2>&1; mcopy -n -i $G/usb.img@@1M '::INSTALA/PAQUETES/*' $Z/pqu/ > /dev/null 2>&1
-  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI TLS.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
+  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI TLS.PQI WIN32.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
     && mcopy -n -i $Z/vol.img ::HISPA/PAQUETES.BIN $Z/f.bin > /dev/null 2>&1; then
-    ok "$que: INSTALAR apunta lo que instala: los registros de los 10 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
+    ok "$que: INSTALAR apunta lo que instala: los registros de los 11 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
   else ko "$que: lo instalado no queda apuntado en C:\\HISPA\\PAQUETES:"; ls $Z/pqi | sed 's/^/        /' | head -10; fi
   # SOLO el disco: el primer arranque
   desde_disco $Z/d$hc.img $Z/a$hc.sal
@@ -2114,9 +2126,9 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -8; fi
-    if grep -q "^|  base      0.8.1   El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|10 paquetes\.$" $Z/b2$hc.txt \
-      && grep -q "^|Los archivos de los 10 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
-      ok "PAQUETES en el sistema recién instalado: LISTA dice los 10 paquetes del sistema (base, oficina...) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
+    if grep -q "^|  base      0.8.2   El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|11 paquetes\.$" $Z/b2$hc.txt \
+      && grep -q "^|Los archivos de los 11 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
+      ok "PAQUETES en el sistema recién instalado: LISTA dice los 11 paquetes del sistema (base, oficina, win32...) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -12; fi
     # la oficina, en el disco instalado: el grupo «Oficina» del menú Inicio
     # (Facturas, con C:\\HISPA\\HVPRUN.BIN) y Mi equipo abriendo Cuentas de C:\\OFICINA
@@ -3124,6 +3136,117 @@ else ko "el núcleo se ha quejado:"; cat $V/pc*.txt $V/vb*.txt $V/cd*.txt | grep
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin la medida de la pantalla)"
 fi   # la pantalla
+
+# ------------------------------- 18. [WIN32] Los programas de Windows y DirectX
+# WIN32.BIN (nucleo32/win32/): el cargador de PE y KERNEL32, USER32, GDI32...
+# en C, con las DLL de Hispa-486 (MSVCRT, COMCTL32, DDRAW, DSOUND, DINPUT,
+# WINMM); el disco, de nucleo32/win32/disco.sh (FAT32, con lo de las pruebas)
+if parte08 win32; then
+echo "== Hispa-Pentium: los programas de Windows de 32 bits y DirectX (WIN32.BIN: consola, ventanas, Naves, FASMW, red) =="
+V=$P/w32
+mkdir -p $V $G
+export MTOOLS_SKIP_CHECK=1
+if bash $AQUI/nucleo32/win32/disco.sh $V/d.img > $V/disco.txt 2>&1; then
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $V/semilla.asm > /dev/null 2>&1 && nasm -f bin $V/semilla.asm -o $V/SEMILLA.BIN
+HAY_TP=0; mdir -i $V/d.img ::NASM > /dev/null 2>&1 && HAY_TP=1
+# 1. los de consola, en el intérprete de órdenes (modo texto)
+O=("cd \\PRUEBAS" "PEHOLA uno dos" ":pausa 2" "HOLAC tres" ":pausa 3" "K32PRUE" ":pausa 6" "USADLL" ":pausa 2")
+[ $HAY_TP = 1 ] && O+=("cd \\NASM" "nasm -v" ":pausa 4" "nasm -f win32 hola.asm -o hola.obj" ":pausa 8" "dir hola.obj" ":pausa 1" \
+  "cd \\TCC" "tcc hola.c -o hola.exe" ":pausa 12" "hola" ":pausa 3" "cd \\FASM\\DDRAW" "\\FASM\\FASM DDRAW.ASM" ":pausa 12" "dir ddraw.exe" ":pausa 1")
+ESCRIBE=1 DISCO=$V/d.img ARRANQUE=ordenes MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN "${O[@]}" > $V/consola.sal 2>&1
+tr -d '\r' < $V/consola.sal > $V/consola.txt
+S=$V/consola.txt
+mira "un .EXE se lanza por su nombre: el núcleo ve «MZ» y lo corre WIN32.BIN (PEHOLA: KERNEL32 a mano, su línea de órdenes y su código de salida)" \
+  "^Hola desde Win32$" "^Linea: C:.PRUEBAS.PEHOLA.EXE uno dos$" "(PEHOLA.EXE ha acabado con el código 42)"
+mira "HOLAC, en C (gcc y tools/elf2pe.py), con MSVCRT.DLL de Hispa-486" "^Hola desde C (gcc) en Hispa-486$" "^Primo 100: 541$" "^Suma: 704982704$" "(HOLAC.EXE ha acabado con el código 7)"
+mira "K32PRUE: KERNEL32 de consola da lo que da Windows 98 (versión, archivos, búsquedas, carpetas, la hora, el montón, el entorno, TLS, los módulos)" \
+  "^version: C0000A04$" "^versionex: 4.10 plataforma 1 build 1998$" "^escritos: 22$" "^leer3: uno$" "^crear_nuevo_existe: si error 80$" "^fin_busqueda: 18$" \
+  "^ft_1970: 019DB1DED53E8000$" "^ida_y_vuelta: 2026-11-17 12:34:56.789 semana 2$" "^realloc: conservado 5000 0$" "^20000_vueltas: si$" "^tls: si 1234$" \
+  "^getprocaddress: si 6$" "^modulo_propio: 00400000$" "^FIN K32PRUE$"
+mira "una DLL propia (DLLPRUE.DLL, con su DllMain y sus datos exportados)" "^Doble(20) = 41$" "^contador = 42$"
+if [ $HAY_TP = 1 ]; then
+  mira "NASM 2.16 para Win32 (MinGW) dice su versión y ensambla un .ASM a un .OBJ de Win32" "^NASM version 2.16.03" "^hola.obj es un archivo de 196 octetos\.$"
+  mira "TCC 0.9.27, el compilador de C de Windows, compila un «hola» (con su libtcc.dll) y el .EXE que hace corre" "^Hola desde TCC en Hispa-Pentium$" "(HOLA.EXE ha acabado con el código 7)"
+  mira "FASM (el de consola) ensambla el ejemplo DDRAW de DirectDraw" "^flat assembler  version 1.73.32" "passes, .* seconds, 4608 bytes\.$" "^ddraw.exe es un archivo de 4608 octetos\.$"
+else
+  echo "  (sin NASM, TCC ni FASM: tests/thirdparty/fetch_win32.sh)"
+fi
+if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+# 2. los de ventanas, desde la Consola del escritorio: cada uno, su ventana
+CAPTURAS=$G DISCO=$V/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 186" ":pausa 4" \
+  ":escribe \\HISPA32\\HOLA32" ":tecla ret" ":pausa 5" ":captura w1" ":tecla alt-f4" ":pausa 2" \
+  ":escribe \\HISPA32\\AVISO32" ":tecla ret" ":pausa 4" ":captura w2" ":tecla ret" ":pausa 2" ":captura w3" ":tecla ret" ":pausa 2" \
+  ":escribe \\HISPA32\\CALC32" ":tecla ret" ":pausa 5" ":clic 99 152" ":clic 156 152" ":clic 270 252" ":clic 156 186" ":clic 213 252" ":pausa 1" ":captura w4" \
+  ":clic 175 88" ":pausa 1" ":captura w5" ":tecla esc" ":pausa 1" ":tecla alt-f4" ":pausa 2" \
+  ":escribe \\HISPA32\\MENU32" ":tecla ret" ":pausa 5" ":captura w6" ":tecla alt-f4" ":pausa 2" \
+  ":escribe \\HISPA32\\CTL32" ":tecla ret" ":pausa 5" ":captura w7" ":tecla alt-f4" ":pausa 2" > $V/ventanas.sal 2>&1
+S=$V/ventanas.sal
+miracap "HOLA32: un programa de Windows de ventanas es una ventana de Hispa-Pentium (su clase, su WM_PAINT, el texto y los dibujos de GDI, un temporizador)" w1 \
+  negrita 100 60 140 90 "Hola desde Win32" texto 90 90 130 115 "¡Hola, mundo de Win32!" texto 90 150 130 175 "Temporizador: bien" texto 90 190 130 215 "Todo bien."
+miracap "AVISO32: MessageBoxA es un cuadro de Hispa-Pentium, con sus botones en español" w2 \
+  negrita 270 210 320 240 "Prueba de Win32" texto 280 250 320 275 "¿Le gusta Hispa-486?" texto 280 300 360 340 "Sí" texto 400 300 470 340 "No"
+miracap "Intro: «Sí» (el botón de antes) y el cuadro siguiente con la respuesta" w3 texto 280 250 320 280 "Ha dicho que sí." texto 280 280 320 310 "Todo bien."
+miracap "CALC32: los botones con el ratón (78 + 5 = 83) y la caja (EDIT)" w4 negrita 60 50 100 75 "Calculadora" texto 60 100 120 130 "83"
+miracap "su menú (de los recursos), con el menú emergente del núcleo" w5 texto 60 80 200 100 "Archivo" texto 100 100 220 140 "Raíz cuadrada"
+miracap "MENU32: los menús y los recursos (textos, iconos, menús de los recursos)" w6 negrita 40 40 100 70 "Menús y recursos" texto 40 60 120 90 "Archivo"
+miracap "CTL32: los controles de serie (botones, casillas, opciones, una lista con sus cuatro colores, una lista desplegable, una caja de varias líneas)" w7 \
+  negrita 40 40 100 70 "Controles de Win32" texto 40 70 120 100 "Nombre:" texto 260 70 340 100 "Saludar" texto 40 130 100 160 "Rojo" texto 40 160 100 190 "Azul" texto 40 170 100 200 "Amarillo"
+if ! grep -q "excepción\|\*\*\*" $S; then ok "con todos esos, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+# 3. Naves (DirectDraw a pantalla completa, DirectInput) desde Mi equipo: se
+# juega; y el ejemplo DDRAW de FASM; y FASMW
+# (HISPA32, en el orden de la raíz del disco, como la enseña Mi equipo: «..» y lo demás)
+NH=$(mdir -b -i $V/d.img :: 2> /dev/null | grep -n "/HISPA32/*$" | cut -d: -f1)
+D=""; for _ in $(seq ${NH:-23}); do D="$D down"; done
+CAPTURAS=$G DISCO=$V/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 40" ":pausa 3" ":tecla ret" ":pausa 2" \
+  ":tecla$D" ":tecla ret" ":pausa 2" ":captura n0" ":tecla down down down down down down" ":tecla ret" ":pausa 9" ":captura n1" ":tecla spc" ":pausa 3" ":captura n2" \
+  ":monitor sendkey left 1000" ":pausa 1" ":captura n3" ":monitor sendkey ctrl 200" ":pausa 0.3" ":captura n4" ":tecla esc" ":pausa 3" ":captura n5" > $V/naves.sal 2>&1
+S=$V/naves.sal
+miracap "Mi equipo ve los .EXE como programas y los abre (los corre WIN32.BIN)" n0 texto 100 120 200 150 "C:\\HISPA32" texto 100 140 200 300 "NAVES.EXE"
+miracap "Naves: DirectDraw a pantalla completa (su modo, 320 x 240 a 8 bits, al doble y en el centro, sin la barra de tareas)" n1 \
+  rgb 10 10 000000 rgb 790 590 000000 nrgb 40 585 37A53A 60
+miracap "Espacio (DirectInput): empieza la partida, con las naves enemigas" n2 rgb 10 10 000000 distinto 80 60 640 200 $G/n1.ppm
+miracap "la nave se mueve con las flechas (mantenidas) y dispara con Control" n3 distinto 80 380 640 100 $G/n2.ppm
+miracap "Esc acaba el juego y vuelve el escritorio" n5 negrita 30 570 70 590 Inicio
+if ! grep -q "excepción\|\*\*\*" $S; then ok "Naves: ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+if [ $HAY_TP = 1 ]; then
+  CAPTURAS=$G DISCO=$V/d.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 186" ":pausa 4" \
+    ":escribe cd \\FASM\\DDRAW" ":tecla ret" ":escribe \\FASM\\FASM DDRAW.ASM" ":tecla ret" ":pausa 12" ":escribe DDRAW" ":tecla ret" ":pausa 10" ":captura d1" ":tecla esc" ":pausa 3" \
+    ":escribe cd \\FASM" ":tecla ret" ":escribe FASMW" ":tecla ret" ":pausa 12" ":captura f1" ":tecla ctrl-o" ":pausa 3" ":captura f2" ":escribe hello.asm" ":tecla ret" ":pausa 4" \
+    ":captura f3" ":tecla ctrl-f9" ":pausa 10" ":captura f4" ":tecla ret" ":pausa 2" ":tecla alt-f4" ":pausa 3" ":escribe hello" ":tecla ret" ":pausa 4" ":captura f5" > $V/fasm.sal 2>&1
+  S=$V/fasm.sal
+  miracap "el ejemplo DDRAW de FASM (ensamblado en Hispa-Pentium): DirectDraw a 640 x 480 con su paleta, en el centro" d1 rgb 10 10 000000 rgb 790 10 000000 nrgb 400 500 000000
+  miracap "FASMW, el flat assembler de Windows: su menú (MENUEX), su editor propio, las pestañas y la barra de estado (COMCTL32)" f1 \
+    negrita 100 60 200 90 "flat assembler 1.73.32" texto 100 90 140 110 "File" texto 140 90 200 110 "Edit" texto 280 90 400 110 "Options" texto 100 330 200 360 "Untitled"
+  miracap "Ctrl+O (su acelerador): el cuadro de abrir de COMDLG32, con la carpeta y sus archivos" f2 negrita 60 30 300 80 "Abrir" texto 60 60 300 110 "C:\\FASM" texto 60 80 300 160 "HELLO.ASM"
+  miracap "abre HELLO.ASM (con sus colores) y lo ensambla en otro hilo (Ctrl+F9): «4 passes»" f4 texto 90 320 220 370 "hello.asm" texto 150 100 600 260 "4 passes"
+  miracap "y el HELLO.EXE que ha hecho FASMW corre: su MessageBox" f5 texto 250 240 400 290 "May I introduce myself?"
+  if ! grep -q "excepción\|\*\*\*" $S; then ok "DDRAW y FASMW: ni una excepción ni una queja del núcleo"
+  else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+fi
+# 4. la red de los programas de Windows: WSOCK32 (REDPRUE) contra el servidor de aquí
+mkdir -p $V/srv
+python3 -I $AQUI/nucleo32/servidor_prueba.py $V/srv > $V/srv.txt 2>&1 &
+SPID=$!
+for _ in $(seq 50); do [ -s $V/srv/puerto ] && break; sleep 0.1; done
+PU=$(cat $V/srv/puerto 2> /dev/null)
+DISCO=$V/d.img ARRANQUE=ordenes MODULOS= MEMORIA=64 QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN "cd \\PRUEBAS" ":pausa 3" \
+  "REDPRUE 10.0.2.2 $PU /grande.bin" ":pausa 20" "REDPRUE 10.0.2.2 $PU /trozos.bin P" ":pausa 20" > $V/red.sal 2>&1
+kill $SPID 2> /dev/null
+tr -d '\r' < $V/red.sal > $V/red.txt
+S=$V/red.txt
+SUMA=$(python3 -c "import sys; d=open(sys.argv[1],'rb').read(); print(len(d), sum(d))" $V/srv/grande.bin 2> /dev/null)
+mira "WSOCK32 sobre el servicio de red: la IP (HispaRedConfig), el DNS, una descarga de 400 KB por TCP con su suma (la del archivo: $SUMA)" \
+  "^IP 10.0.2.15 puerta 10.0.2.2 MAC 52:54:00:12:34:56$" "^Respuesta: HTTP/1.1 200 OK$" "^Cuerpo: ${SUMA% *} octetos, suma ${SUMA#* }$"
+mira "y sin bloqueo: un puerto cerrado (WSAECONNREFUSED), connect y select, y otra descarga" "^Puerto cerrado: -1, error 10061$" "^select: 1 (escribir 1, fallo 0)$" "^Cuerpo: 150508 octetos"
+else
+  ko "nucleo32/win32/disco.sh no puede hacer el disco: $(tail -2 $V/disco.txt)"
+fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin los programas de Windows)"
+fi   # [WIN32] los programas de Windows
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)

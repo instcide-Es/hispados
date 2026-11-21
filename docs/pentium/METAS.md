@@ -11,7 +11,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] **Controles de ventana completos** (pestañas, rejillas con columnas, barra de herramientas, recuadros, fechas, listas desplegables) y ClicGest 0.2 — rama controles-erp
 - [ ] **Disco SATA del Toshiba NB250** (ICH7) — rama pentium-sata, a falta de la prueba de Carlos
 - [ ] **Explorador de archivos** y **dock** — rama pentium-explorador
-- [ ] **Programas de Windows y DirectX** (HW32 de Hispa-486 llevado a Pentium) — rama pentium-win32
+- [x] ~~**Programas de Windows y DirectX** (HW32 de Hispa-486 llevado a Pentium) — rama pentium-win32~~ (21/11/2026: [WIN32.md](WIN32.md))
 
 ## El escritorio
 - [ ] Explorador de archivos: árbol de carpetas, vistas (iconos, lista, detalles), copiar/cortar/pegar, arrastrar y soltar, papelera, buscar, propiedades, abrir con…, miniaturas de imágenes
@@ -34,7 +34,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] TLS 1.3 y descompresión gzip
 
 ## Programas
-- [ ] Programas de Windows de 32 bits (cargador PE) y **DirectX** (DirectDraw, DirectSound, DirectInput), como en Hispa-486
+- [x] ~~Programas de Windows de 32 bits (cargador PE) y **DirectX** (DirectDraw, DirectSound, DirectInput), como en Hispa-486~~ (WIN32.BIN: NASM, TCC, FASMW, Naves; [WIN32.md](WIN32.md)). Queda: hilos de verdad, SEH, Direct3D, el sonido de DirectSound
 - [ ] Reproductor de música y vídeo (MP3, OGG, WAV; vídeo sencillo)
 - [ ] Visor de imágenes y Pintura
 - [ ] Compresor ZIP

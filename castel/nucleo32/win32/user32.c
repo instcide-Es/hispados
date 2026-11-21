@@ -1421,20 +1421,20 @@ static void mira_teclas(void)
 		memset(teclas, 0, sizeof teclas);
 		return;
 	}
+	/* primero las que bajan (también las de pulsar y soltar entre dos
+	 * miradas) y luego las que suben: Alt+F4 llega como Alt, F4 */
 	for (k = 0; k < 256; k++) {
 		u32 b = 1u << (k & 31), ahora = m[k >> 5] & b, antes = teclas[k >> 5] & b, entremedias = m[8 + (k >> 5)] & b;
-		if (ahora && !antes) {
+		if ((ahora && !antes) || (!ahora && !antes && entremedias)) {
 			tecla_msg(k, 1, 0);
-			if (credito[k] < 4)
-				credito[k]++;
-		} else if (!ahora && antes)
-			tecla_msg(k, 0, 0);
-		else if (!ahora && !antes && entremedias) {
-			tecla_msg(k, 1, 0);
-			tecla_msg(k, 0, 0);
 			if (credito[k] < 4)
 				credito[k]++;
 		}
+	}
+	for (k = 0; k < 256; k++) {
+		u32 b = 1u << (k & 31), ahora = m[k >> 5] & b, antes = teclas[k >> 5] & b, entremedias = m[8 + (k >> 5)] & b;
+		if (!ahora && (antes || entremedias))
+			tecla_msg(k, 0, 0);
 	}
 	memcpy(teclas, m, sizeof teclas);
 	(void)teclas_antes;
@@ -1947,7 +1947,7 @@ API(LRESULT) DefWindowProcA(HWND h, u32 m, WPARAM wp, LPARAM lp)
 	case WM_GETTEXTLENGTH:
 		return w->texto ? strlen(w->texto) : 0;
 	case WM_SYSKEYDOWN:
-		if (wp == 0x73 && teclas_alt()) {      /* Alt+F4 */
+		if (wp == 0x73 && (lp & (1 << 29))) {  /* Alt+F4 (Alt, según el mensaje) */
 			PostMessageA((HWND)raiz_de(w), WM_SYSCOMMAND, 0xF060, 0);
 			return 0;
 		}

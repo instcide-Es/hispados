@@ -10,6 +10,9 @@
 #            BOOT.IMG, CORE.IMG, CARPETAS.TXT y los registros de los paquetes
 #            (PAQUETES/*.PQI)
 #   $W/of    la oficina (HVPRUN.BIN, los .HVP y los .DAT)
+#   $W/w32   [WIN32] lo de los programas de Windows: WIN32/ (las DLL),
+#            HISPA32/ (los ejemplos) y MENU/ (el acceso de Naves); WIN32.BIN,
+#            en $W/f
 #   $W/paq   los paquetes del sistema (.HPQ) y su CATALOGO.TXT
 #   $MODULOS los «module» de GRUB de las entradas de siempre (la unidad M:)
 #   $INSTALA los de la entrada de instalar
@@ -62,6 +65,20 @@ for f in $W/of/*.HVP $W/of/*.DAT; do
 "
   printf '%s=OFICINA\r\n' $n >> $W/i/CARPETAS.TXT
 done
+# [WIN32] los programas de Windows (nucleo32/win32/hacer.sh, docs/pentium/
+# WIN32.md): WIN32.BIN con los programas (en la raíz, como módulo y, al
+# instalar, a \HISPA); sus DLL en \WIN32 (C:\WIN32), los ejemplos de
+# Hispa-486 en \HISPA32 (C:\HISPA32) y el acceso de Naves en \MENU
+# (C:\HISPA\MENU): lo dice CARPETAS.TXT
+bash $AQUI/win32/hacer.sh $W/f/WIN32.BIN $W/w32/WIN32 $W/w32/HISPA32 $W/w32/MENU > /dev/null
+MODULOS="$MODULOS  module /WIN32.BIN WIN32.BIN
+"
+for f in $W/w32/WIN32/* $W/w32/HISPA32/* $W/w32/MENU/*; do
+  n=$(basename $f); d=$(basename $(dirname $f))
+  INSTALA="$INSTALA  module /$d/$n $n
+"
+  case $d in MENU) printf '%s=HISPA\\MENU\r\n' $n ;; *) printf '%s=%s\r\n' $n $d ;; esac >> $W/i/CARPETAS.TXT
+done
 iconv -f UTF-8 -t CP437 > $W/i/LEEME.TXT <<'L'
 Hispa-Pentium 0.8, instalado en el disco duro.
 
@@ -105,6 +122,13 @@ LA CONSOLA (el intérprete de órdenes)
   MEM, FECHA, CLS... Un programa se lanza por su nombre. C:, X: cambian de
   unidad (X: es una memoria USB). Hay archivos de órdenes (.BAT).
 
+LOS PROGRAMAS DE WINDOWS
+  Los programas de Windows de 32 bits (.EXE) se abren como los demás: por
+  su nombre en la Consola o con dos clics en Mi equipo. Los corre
+  WIN32.BIN, con sus DLL en C:\WIN32 (y DirectX: DirectDraw, DirectInput
+  y DirectSound, de momento en silencio). En C:\HISPA32 hay unos de
+  ejemplo, y en el menú Inicio, el juego «Naves».
+
 PROGRAMAS Y ACTUALIZACIONES (PAQUETES)
   Inicio > Actualizar abre la ventana «Programas y actualizaciones»: lo
   instalado, lo que hay, «Buscar novedades» y los botones para instalar,
@@ -132,6 +156,7 @@ LA CARPETA \HISPA
   *.BIN        los programas
   ACPI.BIN     el servicio de ACPI: apagar de verdad y la batería de los
                portátiles (sin él, «Apagar» solo dice que ya se puede)
+  WIN32.BIN    el que corre los programas de Windows (sus DLL, en C:\WIN32)
   TLS.BIN      el servicio TLS: las conexiones cifradas (https). Con el
                reloj del PC mal, pide la hora a actualiza.hispados.es;
                TLS.CCH y TLS.SEM son suyos. Más autoridades: los .CER de
@@ -171,7 +196,7 @@ printf '\x90\x90' | dd of=$W/i/BOOT.IMG bs=1 seek=102 conv=notrunc status=none
 # van en \PAQUETES de la memoria, con su CATALOGO.TXT (PAQUETES los encuentra
 # ahí); y sus registros (.PQI), con lo que se instala: INSTALAR los deja en
 # C:\HISPA\PAQUETES (lo dice CARPETAS.TXT), y así PAQUETES sabe luego qué hay
-python3 -I $AQUI/../../tools/hpq.py sistema $W/paq $W/i $W/f $W/of > /dev/null
+python3 -I $AQUI/../../tools/hpq.py sistema $W/paq $W/i $W/f $W/of $W/w32/WIN32 $W/w32/HISPA32 $W/w32/MENU > /dev/null    # [WIN32] (y lo de Win32)
 mkdir $W/i/PAQUETES
 for f in $W/paq/PQI/*.PQI; do
   n=$(basename $f)

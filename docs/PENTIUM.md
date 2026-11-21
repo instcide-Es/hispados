@@ -236,6 +236,7 @@ cuarta parte, los discos y el USB).
 | `red.cas` (Red) | **La red**, lo que pone el núcleo (sección 14): el cartero entre los programas y el servicio de red (`RED.BIN`) —y el servicio TLS (`TLS.BIN`), con la llamada 99—, y lo que solo el servicio de red puede pedir: los puertos, memoria física seguida para el DMA, los registros de la tarjeta y su interrupción. |
 
 | `energia.cas` (Energia) | **Apagar de verdad, reiniciar y la batería**: las llamadas del servicio de ACPI (`ACPI.BIN`, un programa del anillo 3 con ACPICA) y la 154; apagar por ACPI (S5) y reiniciar (FADT, 8042, CF9h); la pila de la bandeja y su recuadro de ayuda (sección 11). |
+| `win32.cas` (Win32) | [WIN32] **Lo de los programas de Windows** (sección 14 ter): las llamadas 180 a 182 (páginas en cualquier sitio de la zona del programa, el mapa de las teclas, las ventanas sin marco o a pantalla completa). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
 
 Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
@@ -453,6 +454,8 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 131 | las veces que han **aparecido o desaparecido unidades** (además, a las ventanas de los programas les llega `EV_UNIDADES`) | `cambios_unidades` | ese número |
 | 80 | **colocar la ventana** EBX (suya) con su esquina en (ECX, EDX) de la pantalla; con ECX = 0xFFFFFFFF, en el centro (encima de la barra de tareas). La usa HVPRUN (sección 10, «La oficina de Hispa-386») | — | 0 |
 | 90-98 | **la red**: pedir al servicio de red (90) y lo del propio servicio (91 a 96, 98); cómo está (97). Las cuenta la sección 14 | `redes.cas` | |
+
+| 180-182 | [WIN32] **los programas de Windows** (`WIN32.BIN`, sección 14 ter): poner y quitar páginas en cualquier sitio de la zona del programa (180), las teclas pulsadas ahora y desde la última vez (181), y las ventanas: hacerlas sin marco o a pantalla completa, colocarlas, traerlas delante, dónde están, el ratón (182) | — | |
 
 | 150-153 | **solo el servicio de ACPI** (`ACPI.BIN`): puertos, memoria física, configuración PCI, y dar la batería y esperar órdenes (sección 11, «Apagar de verdad y la batería») | — | |
 | 154 | **la batería**: lo último que ha leído el servicio de ACPI (una `Energía`, `energia.cas`) a EBX | — | 1, o 0 si no hay servicio |
@@ -2701,6 +2704,40 @@ sale el mismo NUCLEO.BIN, octeto a octeto, que con ccastel.py y NASM (en QEMU, u
 compila a sí mismo dentro, hasta el punto fijo. Lo comprueba `castel/pruebas.sh`
 en su parte 15 (`SOLO=castel32`).
 
+## 14 ter. Los programas de Windows de 32 bits y DirectX (WIN32.BIN)
+
+*21/11/2026, la rama `pentium-win32`. Todo, con la arquitectura y por qué, en
+[pentium/WIN32.md](pentium/WIN32.md).*
+
+| | |
+|---|---|
+| ![HOLA32, como ventana de Hispa-Pentium](pentium/win32-hola32.png) | ![Naves: DirectDraw a pantalla completa](pentium/win32-naves.png) |
+
+Un `.EXE` de Windows de 32 bits se abre como cualquier programa (la Consola, Mi
+equipo, el menú Inicio): el núcleo ve que empieza por «MZ» y lo corre
+**`WIN32.BIN`** (`castel/nucleo32/win32/`, en C), que hace de cargador de PE y de
+KERNEL32, USER32, GDI32, COMDLG32, ADVAPI32, SHELL32 y WSOCK32, con las DLL de
+Hispa-486 que valen tal cual (MSVCRT, UCRT, COMCTL32 y DirectX: DDRAW, DSOUND,
+DINPUT, WINMM, OLE32) en `\WIN32`. Corren NASM, TCC, FASM y FASMW, los ejemplos
+de `\HISPA32` (CALC32, HOLA32, CTL32, MENU32, AVISO32) y **«Naves»**, que se
+juega a pantalla completa con DirectDraw y DirectInput (DirectSound, en silencio
+hasta que haya sonido); y Winsock sobre el servicio de red.
+
+- **Cómo**: los programas de Windows corren con sus propios segmentos del anillo
+  3, de base `0x40000000` (`cpu.cas`: `0x33`, `0x3B` y la TEB en `0x43`), así que
+  su `0x400000` es la `0x40400000` de verdad; las interrupciones ponen los DS y ES
+  planos al entrar y los del programa al volver (los dos compiladores de Castel);
+  las llamadas 180 a 182 (`win32.cas`); el coprocesador se guarda en cada cambio
+  de tarea del anillo 3 (`tareas.cas`); el mapa de las teclas (`consola.cas`);
+  `V_COMPLETA` (`ventanas.cas`). Todo lo cambiado lleva la marca `[WIN32]`.
+- **Cada ventana de Windows de primer nivel es una de Hispa-Pentium**; dentro, un
+  lienzo de 32 bits donde WIN32.BIN pinta ella y sus controles. Los menús son el
+  emergente del núcleo.
+- **Los paquetes**: `win32` 1.0 (nuevo), `base` 0.8.2 y `equipo` 0.8.2.
+- **Falta**: hilos de verdad (como en HW32, un hilo corre entero al crearlo),
+  SEH, escuchar en la red, HTTPS para ellos (por eso NAVEGA2.EXE aún no),
+  Direct3D. Ver [pentium/WIN32.md](pentium/WIN32.md).
+
 ## 15. Las pruebas
 
 `castel/pruebas.sh` (las partes 8 a 14; `SOLO=32 ./pruebas.sh` hace solo esas y la
@@ -3119,6 +3156,16 @@ disco) son unos cinco minutos; `SOLO=06` (la parte 9, lo de la 0.6 y la
 oficina), unos diez, y `SOLO=16`, lo que no arranca el núcleo (de la parte 1 a
 la 7, con los dos compiladores y los dos ensambladores), otros siete.
 
+**[WIN32] Los programas de Windows** (la parte 18, `SOLO=win32`; también con
+`SOLO=32` y `SOLO=08`): con el disco de `nucleo32/win32/disco.sh`, los de
+consola de HW32 en el intérprete de órdenes (PEHOLA, HOLAC, K32PRUE con lo que da
+Windows 98, una DLL), NASM, TCC y FASM (si se han bajado); en el escritorio,
+HOLA32, AVISO32, CALC32 con el ratón y su menú, MENU32 y CTL32, mirando las
+capturas; Naves desde Mi equipo, jugando (DirectDraw a pantalla completa,
+DirectInput); el ejemplo DDRAW y FASMW abriendo y ensamblando HELLO.ASM; y
+WSOCK32 (REDPRUE) contra el servidor HTTP de aquí. Ver
+[pentium/WIN32.md](pentium/WIN32.md).
+
 ## 16. Por dónde seguir
 
 Hecho en la del 20/11 (la 0.8, cinco ramas juntas en `pentium-08`): el AHCI
@@ -3197,5 +3244,7 @@ arranque. Lo siguiente:
 7. **El lenguaje**: llamar a funciones por su dirección, sumar a un arreglo como a
    un puntero y funciones de interrupción públicas (CASTEL32.md §10), que hoy se
    rodean a mano.
-8. **Más tarde**: el cargador de PE (los programas Win32 de Hispa-486, HW32) sobre
-   este núcleo, que es la base de la gama XP.
+8. ~~**Más tarde**: el cargador de PE (los programas Win32 de Hispa-486, HW32) sobre
+   este núcleo, que es la base de la gama XP.~~ Hecho (21/11/2026): WIN32.BIN,
+   sección 14 ter. Lo que le falta: varias tareas por espacio de direcciones
+   (los hilos) y pasarle al programa sus excepciones (SEH).
