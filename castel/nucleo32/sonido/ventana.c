@@ -234,6 +234,7 @@ int ventana_ajustes(void)
 	vn = h_ventana("Sonido", AN, AL);
 	if (ES_ERROR(vn))
 		return 1;
+	sc(80, vn, 0xFFFFFFFF, 0);		/* en el centro (como un cuadro de Configuración) */
 	lee();
 	pinta_ajustes();
 	for (;;) {

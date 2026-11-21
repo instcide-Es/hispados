@@ -3875,7 +3875,7 @@ rm -f "${Y:?}/esc.wav"
 CAPTURAS=$G MODULOS=$Y/ORDENES.BIN,$Y/CONSOLA.BIN,$SIS ARRANQUE=escritorio QEMU_MAS="-audiodev wav,id=snd0,path=$Y/esc.wav -device intel-hda -device hda-duplex,audiodev=snd0" \
   $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 6" ":captura so1" ":raton 720 583" ":monitor mouse_move 0 0 1" ":pausa 1" ":monitor mouse_move 0 0 1" ":pausa 1" \
   ":clic 720 583" ":pausa 3" ":captura so2" ":tecla esc" ":pausa 1" ":clicd 720 583" ":pausa 1" ":captura so3" ":tecla esc" ":pausa 1" \
-  ":clic 40 585" ":pausa 1" ":clic 250 500" ":pausa 1" ":clic 565 375" ":pausa 4" ":captura so4" ":clic 277 325" ":pausa 2" ":clic 437 325" ":pausa 2" \
+  ":clic 40 585" ":pausa 1" ":clic 250 500" ":pausa 1" ":clic 565 375" ":pausa 4" ":captura so4" ":clic 355 330" ":pausa 2" ":clic 515 330" ":pausa 2" \
   ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 6" > $Y/esc.sal 2>&1
 S=$Y/esc.sal
 python3 -I $AQUI/nucleo32/sonido/oye.py $Y/esc.wav > $Y/esc.oye 2>&1
@@ -3886,8 +3886,8 @@ cumple $Y/esc.oye 2 'hz >= 820 && hz <= 940 && izq > c1 * 1.05' "y otra vez, má
 miracap "un clic en el altavoz: la ventanita del volumen, encima de la bandeja (90 %, el silencio, «Ajustes...»)" so2 negrita 500 380 800 520 Volumen texto 500 400 800 520 "90 %" \
   texto 500 420 800 540 Silencio texto 500 420 800 540 "Ajustes..."
 miracap "el botón secundario en el altavoz: «Silenciar» y «Configuración de sonido...»" so3 texto 500 450 800 580 Silenciar texto 500 450 800 580 "Configuración de sonido..."
-miracap "Configuración > «Sonido...»: la tarjeta, el códec, el volumen, probar y los sonidos del sistema" so4 negrita 80 60 400 90 Sonido texto 150 150 500 190 "Intel HD Audio (ICH6)" \
-  texto 150 170 500 210 "QEMU HDA (dúplex)" texto 400 240 560 280 "90 %" negrita 180 300 360 340 Izquierdo negrita 340 300 520 340 Derecho texto 100 330 560 380 "Sonidos del sistema"
+miracap "Configuración > «Sonido...»: la tarjeta, el códec, el volumen, probar y los sonidos del sistema" so4 negrita 150 60 480 90 Sonido texto 230 150 580 190 "Intel HD Audio (ICH6)" \
+  texto 230 170 580 210 "QEMU HDA (dúplex)" texto 480 240 640 280 "90 %" negrita 260 300 440 340 Izquierdo negrita 420 300 600 340 Derecho texto 180 330 640 380 "Sonidos del sistema"
 cumple $Y/esc.oye 3 'hz >= 490 && hz <= 560 && izq > 3000 && der < 200' "«Izquierdo»: el altavoz izquierdo (un do, solo por ese lado)"
 cumple $Y/esc.oye 4 'hz >= 620 && hz <= 700 && der > 3000 && izq < 200' "«Derecho»: el derecho (un mi)"
 cumple $Y/esc.oye 5 'hz >= 700 && hz <= 870 && dura >= 800 && dura <= 1500' "Apagar: suena APAGAR.WAV (sol, mi, do: empieza en 784 Hz) antes de apagar"
