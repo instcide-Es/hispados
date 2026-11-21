@@ -1521,7 +1521,7 @@ llamada 132). Un lector sin disco dice «sin disco» (o «un CD de música», o
 que no se lee) en su tipo y al abrirlo. **Una imagen de disco** (`.ISO`,
 `.CUE`, `.IMG`, `.IMA`) se **monta** al abrirla (dos clics, Intro, o
 «Montar» en su menú: la llamada 133) y se entra en ella: sale en Mi equipo
-como «CD virtual (E:)».
+con su nombre y «CD virtual: 670 K, ISO 9660» (si no tiene nombre, «CD virtual (E:)»).
 
 **El teclado entero**: Tab y Mayús+Tab (la dirección, Ir, el árbol, lo de
 dentro), las flechas, Intro (abrir), Retroceso (subir), Supr y Mayús+Supr,

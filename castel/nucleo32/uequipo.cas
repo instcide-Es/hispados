@@ -977,7 +977,9 @@ módulo UEquipo
         variable m: nat32
         variable d: arreglo [2] de nat32
         variable raíz: arreglo [4] de byte
-        m := montar_imagen(r)
+        variable imagen: arreglo [MAX_RUTA] de byte
+        copiar_hasta(imagen, r, MAX_RUTA)        ; (r puede ser de un Item, que se rehace al entrar)
+        m := montar_imagen(imagen)
         si es_error(m) o m < 'A' entonces
             copiar(aviso, "No se puede montar: ")
             si es_error(m) entonces concatenar(aviso, texto_error(m)) sino concatenar(aviso, texto_imagen(m)) fin
@@ -990,7 +992,7 @@ módulo UEquipo
         lee_unidades()
         refresca_árbol()
         ve_a(L_CARPETA, raíz, cierto)
-        d[0] := nat32(r)
+        d[0] := nat32(dirección(imagen[0]))
         d[1] := m
         formatear(aviso, 200, "%s, montada como %c:", d)
         devolver cierto

@@ -3604,15 +3604,15 @@ else ko "el núcleo se ha quejado:"; cat $L/*.sal | grep "excepción\|\*\*\*" | 
 cp $P/d16.img $L/e.img; mmd -i $L/e.img ::DISCOS; mcopy -i $L/e.img $L/joliet.iso ::DISCOS/PRUEBA.ISO
 CAPTURAS=$G ESCRIBE=1 DISCO=$L/e.img ARRANQUE=escritorio MODULOS= QEMU_MAS="-drive id=cd,file=$L/joliet.iso,media=cdrom,if=none -device ide-cd,drive=cd,id=lector,bus=ide.1,unit=0" \
   $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN ":pausa 3" ":doble 62 30" ":pausa 3" ":captura cd18a" ":tecla f4" ":escribe C:\\DISCOS" ":tecla ret" ":pausa 2" \
-  ":tecla ret" ":pausa 3" ":raton 600 440" ":captura cd18b" ":tecla backspace" ":pausa 2" ":clicd 330 222" ":pausa 1" ":captura cd18c" ":clic 370 257" ":pausa 2" \
+  ":tecla ret" ":pausa 3" ":raton 600 440" ":captura cd18b" ":tecla backspace" ":pausa 2" ":raton 600 440" ":captura cd18e" ":clicd 330 222" ":pausa 1" ":captura cd18c" ":clic 370 257" ":pausa 2" \
   ":raton 600 440" ":captura cd18d" > $L/escritorio.sal 2>&1
 S=$L/escritorio.sal
 miracap "Mi equipo (el explorador) enseña el CD con su nombre y su letra, lo que tiene y que es de solo lectura" cd18a negrita 265 133 275 143 "HISPA (C:)" \
   negrita 515 133 525 143 "PRUEBA_CD (D:)" texto 515 151 525 161 "670 K, ISO 9660" texto 515 167 525 177 "(de solo lectura)"
-miracap "abrir una .ISO la monta (E:) y entra en ella; el aviso de la bandeja es de los CD y DVD" cd18b texto 100 98 130 112 "E:\\" texto 200 130 700 400 "GRANDE.BIN" \
-  texto 10 474 700 490 "montada como E:" negrita 570 505 640 520 "CD y DVD"
-miracap "el CD virtual sale en Mi equipo («CD virtual», con lo que tiene), y su menú, «Expulsar»" cd18c negrita 265 195 275 205 "PRUEBA_CD (E:)" \
-  texto 265 213 275 223 "CD virtual: 670 K" texto 335 242 355 267 "Expulsar"
+miracap "abrir una .ISO la monta (E:) y entra en ella; el aviso de la bandeja es de los CD y DVD" cd18b texto 100 98 130 112 "E:\\" texto 200 130 700 400 "grande.bin" \
+  texto 10 474 700 490 "PRUEBA.ISO, montada como E:" negrita 570 505 640 520 "CD y DVD"
+miracap "el CD virtual sale en Mi equipo («CD virtual», con lo que tiene)" cd18e negrita 265 195 275 205 "PRUEBA_CD (E:)" texto 265 213 275 223 "CD virtual: 670 K"
+miracap "y su menú (el botón secundario): «Expulsar»" cd18c texto 335 242 355 267 "Expulsar"
 miracap "y «Expulsar» la quita de Mi equipo" cd18d notexto 216 190 460 212 "(E:)" texto 10 474 700 490 "desmontada"
 mira "y «Expulsar» la desmonta" "cd: E: la imagen C:.DISCOS.PRUEBA\.ISO (sectores de 2048)$" "cd: E: imagen desmontada\.$" "escritorio: globo: Imagen desmontada: E:"
 fi   # la ISO de prueba
