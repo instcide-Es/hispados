@@ -165,14 +165,22 @@ VERSION_084 = '0.8.4'
 # segmentos de Win32, las llamadas 180 a 182; el coprocesador de cada tarea
 # es el de la 0.8.3), ORDENES (los .EXE) y Mi equipo (los abre); y el
 # paquete win32 (1.0, que pide la base 0.8.4)
+# (RUEDA) (21/11/2026) la rueda del ratón en los programas: el Bloc de notas
+# (desplaza el texto sin mover el cursor), la Consola (el historial de lo que
+# sube: rueda y Mayús+Re Pág) y Programas y actualizaciones (su lista) suben
+# a la 0.8.4 / 1.1 (paquetes: con la revisión de seguridad). (Mi equipo y el Administrador de dispositivos —equipo
+# 0.9— y MUESTRA —ejemplos 0.8.4— también la llevan: van en la 0.8.4, que aún
+# no se ha publicado.) (MENÚ) el menú Inicio nuevo, los menús largos y los
+# atajos de todo el sistema van en el núcleo (base 0.8.4, sin publicar).
+VERSION_RUEDA = VERSION_084
 SISTEMA = [
     ('base', VERSION_084, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
-    ('bloc', VERSION_08, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
-    ('consola', VERSION_08, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
+    ('bloc', VERSION_RUEDA, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
+    ('consola', VERSION_RUEDA, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
     # (explorador, dispositivos) el explorador de archivos, sus miniaturas y el Administrador de dispositivos
     ('equipo', '0.9', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
         ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('MINIAT.BIN', r'\HISPA\MINIAT.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
@@ -184,7 +192,7 @@ SISTEMA = [
     # «Programas y actualizaciones» (PROGRAMA.BIN, con los controles: base 0.8.2)
     ('paquetes', '1.2', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
-        ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN'), ('PROGRAMA.MNU', r'\HISPA\MENU\PROGRAMA.MNU')]),
+        ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN')]),
     ('red', VERSION_084, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= 0.8.4', [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),

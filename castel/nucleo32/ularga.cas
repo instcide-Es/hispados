@@ -1,0 +1,44 @@
+; =============================================================================
+;  ularga.cas - (MENÚ) un programa de prueba para pruebas.sh: una ventana que,
+;  con un clic, pide un menú emergente de 30 opciones (más de las que caben a
+;  lo alto de la pantalla: se tiene que desplazar con sus flechas, la rueda y
+;  el teclado) y escribe lo que se ha elegido («larga: elegida N»).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo ULarga
+
+    modelo usuario
+
+    importar Llamadas, Textos32
+
+    variable opciones: arreglo [700] de byte
+
+    función principal(): byte
+        variable v, i: nat32
+        variable s: Suceso
+        variable n: arreglo [4] de byte
+        opciones[0] := 0
+        para i desde 1 hasta 30 hacer
+            si i > 1 entonces concatenar(opciones, "|") fin
+            concatenar(opciones, "Opción número ")
+            n[0] := byte('0' + i div 10)
+            n[1] := byte('0' + i mod 10)
+            n[2] := 0
+            concatenar(opciones, n)
+        fin
+        v := ventana("Menú largo", 300, 120)
+        si v = 0 entonces devolver 1 fin
+        rectángulo(v, 0, 0, 300, 120, 0xFFFFFF)
+        texto(v, 10, 10, "Un clic: el menú de 30 opciones", 0x14294A)
+        mientras suceso(v, s, cierto) hacer
+            si s.clase = EV_CERRAR entonces romper fin
+            si s.clase = EV_RATÓN_BAJA entonces menú(v, ent32(s.a), ent32(s.b), opciones, 0, 7) fin
+            si s.clase = EV_MENÚ entonces
+                si s.a = SIN_ELEGIR entonces escribir("larga: nada\n") sino escribir("larga: elegida ", s.a + 1, "\n") fin
+            fin
+        fin
+        cerrar_ventana(v)
+        devolver 0
+    fin
+
+fin ULarga.

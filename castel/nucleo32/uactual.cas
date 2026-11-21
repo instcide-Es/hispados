@@ -508,6 +508,20 @@ módulo UActual
         si n > 0 y instalada[elegido][0] <> 0 entonces haz("quita", cierto) fin
     fin
 
+    ; (RUEDA) la rueda: la lista, tres renglones por paso, sin mover lo elegido
+    función rueda(c: nat32)
+        variable p, máx, antes: ent32
+        p := ent32(c yb 0xFF)
+        si p > 127 entonces p := p - 256 fin
+        antes := primero
+        máx := ent32(n) - caben
+        si máx < 0 entonces máx := 0 fin
+        primero := primero - p * 3
+        si primero > máx entonces primero := máx fin
+        si primero < 0 entonces primero := 0 fin
+        si primero <> antes entonces pinta() fin
+    fin
+
     función elige(i: ent32)
         si i < 0 o i >= ent32(n) entonces devolver fin
         elegido := i
@@ -707,6 +721,7 @@ módulo UActual
         variable u: Info_unidad
         variable i: nat32
         variable a: arreglo [64] de byte
+        variable pes: arreglo [16] de byte
         sis := 'C'
         i := 0
         mientras info_unidad(i, u) hacer
@@ -724,7 +739,13 @@ módulo UActual
         ; (PROGRAMAS) la ventana es ya la de PROGRAMA.BIN («Programas y
         ; actualizaciones», con sus pestañas), en «Pendientes»; esta de aquí,
         ; solo si no está (un sistema a medio actualizar)
-        si no es_error(lanzar_suelto("\\HISPA\\PROGRAMA.BIN", "/PENDIENTES")) entonces devolver 0 fin
+        ; (con /INSTALADAS, /ALDIA o /SININSTALAR, en esa pestaña: ACTUALIZ /INSTALADAS)
+        Textos32.copiar(pes, "/PENDIENTES")
+        a_mayúsculas(a)
+        si buscar(a, "/INSTALADAS") <> nulo entonces Textos32.copiar(pes, "/INSTALADAS") fin
+        si buscar(a, "/ALDIA") <> nulo entonces Textos32.copiar(pes, "/ALDIA") fin
+        si buscar(a, "/SININSTALAR") <> nulo entonces Textos32.copiar(pes, "/SININSTALAR") fin
+        si no es_error(lanzar_suelto("\\HISPA\\PROGRAMA.BIN", pes)) entonces devolver 0 fin
         medidas(ANCHO_INICIAL, ALTO_INICIAL)
         v := ventana("Programas y actualizaciones", ANCHO_INICIAL, ALTO_INICIAL)
         si es_error(v) entonces
@@ -756,6 +777,8 @@ módulo UActual
                 fin
             sino si s.clase = EV_RATÓN_BAJA entonces
                 clic(ent32(s.a), ent32(s.b))
+            sino si s.clase = EV_RUEDA entonces
+                rueda(s.c)                      ; (RUEDA)
             sino si s.clase = EV_TAMAÑO entonces
                 medidas(ent32(s.a), ent32(s.b))
                 pinta()

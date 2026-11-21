@@ -1188,7 +1188,7 @@ módulo Usuario
     ; las llamadas del entorno gráfico (32 a 41)
     función atender_ventanas(n: nat32, a: nat32, b: nat32, c: nat32): nat32
         variable nombre: arreglo [MAX_TÍTULO] de byte
-        variable opciones: arreglo [256] de byte
+        variable opciones: arreglo [768] de byte       ; (MENÚ) eran 256: menús más largos
         variable ruta: arreglo [MAX_RUTA] de byte
         variable t: puntero a Tarea
         variable ord: puntero a Orden
@@ -1278,7 +1278,7 @@ módulo Usuario
                 ; un menú emergente para la ventana a (suya), como dice lo de b
                 si no puede(b, tamaño(PideMenú), falso) entonces devolver NO_VALE fin
                 pm := puntero(b)
-                si no es_de(a, actual.id) o no texto_de_usuario(nat32(pm.opciones), opciones, 256) entonces devolver NO_VALE fin
+                si no es_de(a, actual.id) o no texto_de_usuario(nat32(pm.opciones), opciones, 768) entonces devolver NO_VALE fin
                 x := pm.x
                 yy := pm.ye
                 si x < -4096 o x > 4096 o yy < -4096 o yy > 4096 entonces devolver NO_VALE fin

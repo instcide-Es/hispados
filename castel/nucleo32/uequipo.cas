@@ -136,6 +136,7 @@ módulo UEquipo
     variable n_nodos: nat32
     variable nodo_cursor: ent32
     variable primer_nodo: ent32
+    variable árbol_suelto: bool                 ; (RUEDA) desplazado con la rueda: no sigue al cursor
 
     ; ---- la geometría de lo de dentro ----
     variable cx, cy, can, cal: ent32            ; el sitio de lo que hay
@@ -1256,8 +1257,10 @@ módulo UEquipo
         rect(ax, ay, aan, aal, C_BORDE)
         rect(ax + 1, ay + 1, aan - 2, aal - 2, C_PAPEL)
         caben := (aal - 4) div RENGLÓN_ÁRBOL
-        si nodo_cursor < primer_nodo entonces primer_nodo := nodo_cursor fin
-        si nodo_cursor >= primer_nodo + caben entonces primer_nodo := nodo_cursor - caben + 1 fin
+        si no árbol_suelto entonces             ; (RUEDA) tras la rueda, no
+            si nodo_cursor < primer_nodo entonces primer_nodo := nodo_cursor fin
+            si nodo_cursor >= primer_nodo + caben entonces primer_nodo := nodo_cursor - caben + 1 fin
+        fin
         si primer_nodo < 0 entonces primer_nodo := 0 fin
         i := primer_nodo
         mientras i < ent32(n_nodos) y i < primer_nodo + caben hacer
@@ -1401,6 +1404,54 @@ módulo UEquipo
             si f < primera entonces primera := f fin
             si f >= primera + filas entonces primera := f - filas + 1 fin
         fin
+        si primera < 0 entonces primera := 0 fin
+    fin
+
+    ; (RUEDA) la rueda del ratón: en el árbol, tres renglones por paso; en lo
+    ; de dentro, una fila de iconos (o una columna, en la lista) por paso, o
+    ; tres renglones en los detalles; nada de eso mueve lo elegido. Con
+    ; Ctrl, la vista: hacia arriba, más grande (de los detalles a la lista,
+    ; a los iconos y a las miniaturas); hacia abajo, más pequeña.
+    función rueda_equipo(x: ent32, yy: ent32, c: nat32)
+        variable p, máx, caben, n: ent32
+        p := pasos_rueda(c)
+        si p = 0 entonces devolver fin
+        si c yb CON_CONTROL <> 0 entonces
+            n := ent32(vista)
+            si p > 0 y n > ent32(V_MINIATURAS) entonces n := n - 1 fin
+            si p < 0 y n < ent32(V_DETALLES) entonces n := n + 1 fin
+            si n <> ent32(vista) entonces
+                vista := nat32(n)
+                primera := 0
+                g.suelta := falso
+                al_cursor()
+            fin
+            devolver
+        fin
+        si x >= ax y x < ax + aan y yy >= ay y yy < ay + aal entonces
+            caben := (aal - 4) div RENGLÓN_ÁRBOL
+            máx := ent32(n_nodos) - caben
+            si máx < 0 entonces máx := 0 fin
+            primer_nodo := primer_nodo - p * RENGLONES_RUEDA
+            si primer_nodo > máx entonces primer_nodo := máx fin
+            si primer_nodo < 0 entonces primer_nodo := 0 fin
+            árbol_suelto := cierto
+            devolver
+        fin
+        si x < cx o x >= cx + can o yy < cy o yy >= cy + cal entonces devolver fin
+        si vista = V_DETALLES entonces
+            rejilla_rueda(g, p)
+            devolver
+        fin
+        calcula_rejilla()
+        si vista = V_LISTA entonces
+            máx := (vistos() + filas - 1) div filas - (can - 8) div celda_an()
+        sino
+            máx := (vistos() + columnas - 1) div columnas - filas
+        fin
+        si máx < 0 entonces máx := 0 fin
+        primera := primera - p
+        si primera > máx entonces primera := máx fin
         si primera < 0 entonces primera := 0 fin
     fin
 
@@ -3592,8 +3643,14 @@ módulo UEquipo
                 si no suceso(Controles.v, s, cierto) entonces romper fin
             fin
             según nat16(s.clase)
-                caso EV_TECLA: tecla_pulsada(s.a, s.b)
-                caso EV_RATÓN_BAJA: ratón_baja(ent32(s.a), ent32(s.b), s.c)
+                caso EV_TECLA:
+                    árbol_suelto := falso       ; (RUEDA) con las teclas, lo que se ve sigue al cursor
+                    g.suelta := falso
+                    tecla_pulsada(s.a, s.b)
+                caso EV_RUEDA: rueda_equipo(ent32(s.a), ent32(s.b), s.c)       ; (RUEDA)
+                caso EV_RATÓN_BAJA:
+                    árbol_suelto := falso       ; (RUEDA)
+                    ratón_baja(ent32(s.a), ent32(s.b), s.c)
                 caso EV_RATÓN_MUEVE:
                     ratón_mueve(ent32(s.a), ent32(s.b), s.c)
                     seguir

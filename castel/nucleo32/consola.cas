@@ -42,6 +42,16 @@ módulo Consola
     público constante TECLA_CTRL_MAYÚS_TAB = 0x111   ; Ctrl+Mayús+Tab: la de antes
     público constante TECLA_ALT = 0x180          ; (solo para el escritorio) Alt+letra: TECLA_ALT + (la letra - 'a'), de la a a la z
     público constante TECLA_CON_MAYÚS = 0x200    ; (solo para el escritorio) la tecla especial llegó con Mayús pulsada
+    ; (MENÚ) los atajos de todo el sistema (solo para el escritorio: van a la barra de tareas)
+    público constante TECLA_ALT_F4 = 0x112       ; Alt+F4: cerrar la ventana activa (en el tapiz: «Apagar el equipo»)
+    público constante TECLA_ALT_TAB = 0x113      ; Alt+Tab: la ventana siguiente (con la franja mientras se tiene Alt)
+    público constante TECLA_ALT_MAYÚS_TAB = 0x114    ; Alt+Mayús+Tab: la de antes
+    público constante TECLA_ALT_SUELTA = 0x115   ; se ha soltado Alt después de un Alt+Tab
+    público constante TECLA_ALT_ESPACIO = 0x116  ; Alt+Espacio: el menú de la ventana
+    público constante TECLA_TAREAS = 0x117       ; Ctrl+Alt+Supr o Ctrl+Mayús+Esc: el Administrador de tareas
+    público constante TECLA_IMPR = 0x118         ; Impr Pant: la pantalla entera
+    público constante TECLA_ALT_IMPR = 0x119     ; Alt+Impr Pant: la ventana activa
+    público constante TECLA_LOGO_LETRA = 0x1A0   ; el logo y una letra: TECLA_LOGO_LETRA + (la letra - 'a')
     público constante MOD_MAYÚS = 1              ; lo que da modificadores()
     público constante MOD_CONTROL = 2
     público constante CTRL_C = 3
@@ -62,6 +72,8 @@ módulo Consola
     variable cola_ent, cola_sal: nat32
     variable mayúsculas, control, alt_gr, extendida, bloqueo: bool
     variable alt: bool                          ; el Alt de la izquierda (para el escritorio: Alt+letra)
+    variable alt_tab: bool                      ; (MENÚ) se ha pulsado Alt+Tab y aún no se ha soltado Alt
+    variable logo_abajo, logo_usado: bool       ; (MENÚ) la tecla del logo está pulsada; y con ella, otra (Logo+E...)
     variable bloq_num: bool = cierto             ; Bloq Num: el teclado numérico da números (encendido, como deja la BIOS)
     variable pausa: nat32                       ; los códigos que quedan de la tecla Pausa (E1 1D 45 E1 9D C5)
     variable muerta: nat32                      ; la tecla muerta que espera su vocal (0: ninguna)
@@ -224,6 +236,8 @@ módulo Consola
                 llega('\n')                             ; el Intro del teclado numérico
             sino si código = 0x35 entonces
                 llega('/')
+            sino si código = 0x53 y desviado y control y alt entonces
+                a_la_cola(TECLA_TAREAS)                 ; (MENÚ) Ctrl+Alt+Supr
             sino si código >= 0x47 y código <= 0x53 entonces
                 muerta := 0
                 ; las flechas, Inicio, Fin, Supr... (para el escritorio, con
@@ -233,8 +247,19 @@ módulo Consola
                 sino
                     a_la_cola(TECLA_ESPECIAL + código)
                 fin
+            sino si (código = 0x5B o código = 0x5C) y desviado entonces
+                ; (MENÚ) el logo, con el escritorio: el menú Inicio sale al
+                ; soltarlo, si no se ha pulsado otra tecla con él (Logo+E...)
+                si no logo_abajo entonces logo_usado := falso fin
+                logo_abajo := cierto
+            sino si (código = 0xDB o código = 0xDC) y desviado entonces
+                si logo_abajo y no logo_usado entonces a_la_cola(TECLA_LOGO) fin
+                logo_abajo := falso
             sino si código = 0x5B o código = 0x5C entonces
                 a_la_cola(TECLA_LOGO)                   ; la tecla del logo
+            sino si código = 0x37 y desviado entonces
+                ; (MENÚ) Impr Pant (con Alt: la ventana activa)
+                si alt entonces a_la_cola(TECLA_ALT_IMPR) sino a_la_cola(TECLA_IMPR) fin
             fin
         sino si código = 0x2A o código = 0x36 entonces
             mayúsculas := cierto
@@ -248,6 +273,35 @@ módulo Consola
             bloqueo := no bloqueo
         sino si código = 0x45 entonces
             bloq_num := no bloq_num                     ; Bloq Num
+        sino si desviado y logo_abajo y código < 0x80 y us_normal[código] >= 'a' y us_normal[código] <= 'z' entonces
+            ; (MENÚ) el logo y una letra: Logo+E, Logo+D, Logo+R, Logo+L
+            muerta := 0
+            logo_usado := cierto
+            a_la_cola(TECLA_LOGO_LETRA + nat32(us_normal[código]) - 'a')
+        sino si desviado y código = 0x53 y control y alt entonces
+            a_la_cola(TECLA_TAREAS)                     ; (MENÚ) Ctrl+Alt+Supr (el del teclado numérico)
+        sino si desviado y código = 0x01 y control y mayúsculas entonces
+            a_la_cola(TECLA_TAREAS)                     ; (MENÚ) Ctrl+Mayús+Esc
+        sino si desviado y código = 0x01 y control entonces
+            a_la_cola(TECLA_LOGO)                       ; (MENÚ) Ctrl+Esc: el menú Inicio
+        sino si desviado y código = 0x3E y alt entonces
+            muerta := 0
+            ; (MENÚ) Alt+F4 lo atiende el escritorio: el mapa de las teclas
+            ; ([WIN32]) no la apunta, o el programa de Windows siguiente la
+            ; vería «pulsada entremedias» y se cerraría
+            pulsadas[0x3E >> 5] := pulsadas[0x3E >> 5] yb nob (nat32(1) << (0x3E yb 31))
+            pulsadas_antes[0x3E >> 5] := pulsadas_antes[0x3E >> 5] yb nob (nat32(1) << (0x3E yb 31))
+            a_la_cola(TECLA_ALT_F4)                     ; (MENÚ) Alt+F4
+        sino si desviado y código = 0x54 entonces
+            a_la_cola(TECLA_ALT_IMPR)                   ; (MENÚ) Alt+Impr Pant (llega como Pet Sis)
+        sino si desviado y código = 0x0F y alt entonces
+            ; (MENÚ) Alt+Tab y Alt+Mayús+Tab: de una ventana a otra
+            muerta := 0
+            alt_tab := cierto
+            si mayúsculas entonces a_la_cola(TECLA_ALT_MAYÚS_TAB) sino a_la_cola(TECLA_ALT_TAB) fin
+        sino si desviado y código = 0x39 y alt entonces
+            muerta := 0
+            a_la_cola(TECLA_ALT_ESPACIO)                ; (MENÚ) Alt+Espacio: el menú de la ventana
         sino si bloq_num y no mayúsculas y código >= 0x47 y código <= 0x53 y código <> 0x4A y código <> 0x4E entonces
             muerta := 0
             llega(cifra_numérica(código))               ; el teclado numérico con Bloq Num: 7 8 9 4 5 6 1 2 3 0 y el punto
@@ -262,6 +316,11 @@ módulo Consola
             alt := cierto                               ; el Alt de la izquierda
         sino si código = 0xB8 entonces
             alt := falso
+            ; (MENÚ) al soltar Alt tras un Alt+Tab: se queda la ventana elegida
+            si alt_tab entonces
+                alt_tab := falso
+                a_la_cola(TECLA_ALT_SUELTA)
+            fin
         sino si código = 0x0F y control y desviado entonces
             ; Ctrl+Tab y Ctrl+Mayús+Tab: las pestañas (controles-erp, 21/11)
             muerta := 0

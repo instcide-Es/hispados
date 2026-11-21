@@ -99,12 +99,6 @@ INSTALA="$INSTALA  module /INSTALA/NAVES.MNU NAVES.MNU
 "
 printf 'NAVES.MNU=HISPA\\MENU\r\n' >> $W/i/CARPETAS.TXT
 cp $W/w32/MENU/NAVES.MNU $W/i/
-# (PROGRAMAS) el acceso de «Programas instalados» (PROGRAMA.BIN, del paquete
-# «paquetes»), en \HISPA\MENU; «tipo=sistema»: el menú Inicio lo pone en Sistema
-printf 'nombre=Programas instalados\r\nprograma=\\HISPA\\PROGRAMA.BIN\r\nargumentos=/INSTALADAS\r\ntipo=sistema\r\nmenu=todos\r\nescritorio=no\r\n' > $W/i/PROGRAMA.MNU
-INSTALA="$INSTALA  module /INSTALA/PROGRAMA.MNU PROGRAMA.MNU
-"
-printf 'PROGRAMA.MNU=HISPA\\MENU\r\n' >> $W/i/CARPETAS.TXT
 iconv -f UTF-8 -t CP437 > $W/i/LEEME.TXT <<'L'
 Hispa-Pentium 0.8, instalado en el disco duro.
 
@@ -120,9 +114,15 @@ Hispa-Pentium es un sistema de 32 bits escrito en Castel, de la familia
 Hispa-DOS. Este es el sistema instalado en el disco duro.
 
 EL ESCRITORIO
-  Inicio (abajo a la izquierda) abre el menú: el Bloc de notas, la Consola,
-  Mi equipo, los documentos (.TXT) de la raíz del disco, Configuración y
-  Apagar el equipo. Los iconos del tapiz se abren con dos clics.
+  Inicio (abajo a la izquierda, o la tecla del logo) abre el menú: a la
+  izquierda, lo fijado y lo que más se usa, y «Todos los programas», con
+  sus carpetas (Accesorios, Internet, Juegos, Oficina, Sistema...: todo lo
+  instalado); a la derecha, Mis documentos, Mi equipo, Configuración, el
+  Administrador de dispositivos, Programas instalados, Actualizar, Ayuda y
+  Ejecutar...; abajo, siempre, Cerrar sesión, Reiniciar y Apagar equipo.
+  Con el botón secundario en un programa: Anclar al menú Inicio. Las listas
+  largas se mueven con sus flechas o con la rueda del ratón.
+  Los iconos del tapiz se abren con dos clics.
   Las ventanas se mueven por su título, cambian de tamaño por el borde y
   tienen sus botones de minimizar, maximizar y cerrar. El botón secundario
   del ratón abre un menú en casi todas partes.
@@ -130,6 +130,23 @@ EL ESCRITORIO
   Ctrl+V (el portapapeles es de todo el sistema).
   En los portátiles, la bandeja enseña la batería: con el puntero quieto
   encima, lo que queda, si está enchufado y la salud de la batería.
+
+LOS ATAJOS DE TECLADO
+  Logo o Ctrl+Esc      abre y cierra el menú Inicio
+  Logo+E               Mi equipo (el explorador)
+  Logo+D               enseña el escritorio (otra vez: lo devuelve)
+  Logo+R               Ejecutar... (un programa, una carpeta o un texto)
+  Logo+L               cierra la sesión (si hay usuario)
+  Alt+Tab              a la ventana siguiente (Alt+Mayús+Tab: la de antes);
+                       mientras se tiene Alt, una franja con todas
+  Alt+F4               cierra la ventana (en el tapiz: Apagar el equipo)
+  Alt+Espacio          el menú de la ventana (Mover y Tamaño, con flechas)
+  Ctrl+Alt+Supr        el Administrador de tareas (también Ctrl+Mayús+Esc)
+  Impr Pant            guarda la pantalla en \CAPTURAS (Alt+Impr Pant: solo
+                       la ventana activa), como .BMP
+  F1                   la Ayuda (en el tapiz: este resumen)
+  La rueda del ratón mueve lo que hay debajo de la flecha (no hace falta
+  pulsar antes); con Ctrl, cambia el tamaño de la letra o de la vista.
 
 LA RED (por cable)
   Con el cable enchufado, el sistema pide la IP solo (DHCP) y el icono de la
@@ -181,7 +198,11 @@ PROGRAMAS Y ACTUALIZACIONES (PAQUETES)
   USB, si la hay, y si no, en Internet (http://actualiza.hispados.es/
   pentium/): lo de Internet solo se usa si lleva la firma de Hispa-Pentium.
   Si se va la luz a mitad, la próxima vez se deshace lo que quedó a medias.
-  Configuración > «Programas...» (o «Programas instalados» en el menú)
+  La ventana «Programas y actualizaciones» tiene cuatro pestañas:
+  Pendientes (lo que tiene versión nueva: Actualizar, Actualizar todo), Al
+  día, Instaladas y Sin instalar (Instalar), y arriba una búsqueda.
+  «Actualizar» del menú la abre en Pendientes; Configuración > «Programas...»
+  y «Programas instalados» del menú, en Instaladas, que
   enseña lo instalado por tipos (Sistema, Oficina, Internet y red...), con
   su tamaño, su fecha y de qué depende: Desinstalar (si otros lo necesitan,
   lo dice y ofrece quitarlos también; base, red y paquetes no se quitan),

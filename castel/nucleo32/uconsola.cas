@@ -15,13 +15,18 @@
 ;  botón secundario, o Ctrl+C si hay algo seleccionado); Pegar teclea lo del
 ;  portapapeles, como si se escribiera. Lo seleccionado se suelta en cuanto
 ;  se escribe algo en la pantalla.
+;
+;  (RUEDA) Lo que sube por arriba se guarda (las últimas 500 líneas): la
+;  rueda del ratón, o Mayús+Re Pág y Mayús+Av Pág, lo enseñan (en un azul
+;  algo más claro, y el título dice cuántas líneas se ha subido); al escribir
+;  algo, al teclear o con un clic, se vuelve a la pantalla de ahora.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UConsola
 
     modelo usuario
 
-    importar Llamadas, Barramenu
+    importar Llamadas, Barramenu, Formato           ; (RUEDA) Formato: el título con el historial
 
     constante COLUMNAS = 80
     constante FILAS = 25
@@ -53,6 +58,13 @@ módulo UConsola
     variable por_pegar, pegados: nat32
     variable menús: arreglo [24] de byte = "Archivo|Edición|Ayuda"
     variable menú_abierto: ent32 = -1
+    ; (RUEDA) el historial: las líneas que han subido por arriba de la
+    ; pantalla (en anillo), para verlas con la rueda o con Mayús+Re Pág
+    constante HISTORIA = 500
+    variable pasado: arreglo [HISTORIA * COLUMNAS] de byte
+    variable n_pasado, cabeza: nat32            ; las que hay y el sitio de la siguiente
+    variable atrás: ent32                       ; las líneas que se ha subido (0: la pantalla de ahora)
+    variable rótulo: arreglo [64] de byte
 
     función sel_inicio(): ent32
         si ancla < extremo entonces devolver ancla fin
@@ -123,7 +135,7 @@ módulo UConsola
     función pinta_todo()
         pinta_menús(v, ancho, menús, menú_abierto)
         rectángulo(v, 0, ALTO_MENÚS, ancho, alto - ALTO_MENÚS, FONDO)
-        pinta_filas()
+        si atrás > 0 entonces pinta_vista() sino pinta_filas() fin       ; (RUEDA)
     fin
 
     ; deja de haber nada seleccionado
@@ -143,6 +155,10 @@ módulo UConsola
             cy := cy + 1
             devolver
         fin
+        ; (RUEDA) la de arriba, al historial
+        para i desde 0 hasta COLUMNAS - 1 hacer pasado[cabeza * COLUMNAS + i] := letras[i] fin
+        cabeza := (cabeza + 1) mod HISTORIA
+        si n_pasado < HISTORIA entonces n_pasado := n_pasado + 1 fin
         para i desde 0 hasta COLUMNAS * (FILAS - 1) - 1 hacer letras[i] := letras[i + COLUMNAS] fin
         para i desde COLUMNAS * (FILAS - 1) hasta CELDAS - 1 hacer letras[i] := ' ' fin
         desplazar(v, MARGEN, ARRIBA, COLUMNAS * ANCHO_LETRA, FILAS * ALTO_LETRA, ALTO_LETRA)
@@ -157,10 +173,60 @@ módulo UConsola
         si cx = COLUMNAS entonces baja_línea() fin
     fin
 
+    ; -------------------------------------------------------------------------
+    ;  (RUEDA) El historial de la pantalla
+    ; -------------------------------------------------------------------------
+    ; pinta lo que se ve subiendo «atrás» líneas: arriba, las del historial
+    función pinta_vista()
+        variable f, k: ent32
+        variable sitio: nat32
+        para f desde 0 hasta FILAS - 1 hacer
+            k := ent32(n_pasado) - atrás + f
+            si k < ent32(n_pasado) entonces
+                sitio := (cabeza + HISTORIA - n_pasado + nat32(k)) mod HISTORIA
+                texto_fondo(v, MARGEN, ARRIBA + f * ALTO_LETRA, dirección(pasado[sitio * COLUMNAS]), COLUMNAS, 0xAFC3DA, 0x16233A)
+            sino
+                texto_fondo(v, MARGEN, ARRIBA + f * ALTO_LETRA, dirección(letras[(k - ent32(n_pasado)) * COLUMNAS]), COLUMNAS, TINTA, FONDO)
+            fin
+        fin
+    fin
+
+    función pon_rótulo()
+        variable d: arreglo [1] de nat32
+        si atrás = 0 entonces
+            título(v, "Consola")
+        sino
+            d[0] := nat32(atrás)
+            formatear(rótulo, 64, "Consola - historial: %u líneas más arriba", d)
+            título(v, rótulo)
+        fin
+    fin
+
+    ; sube (pasos > 0) o baja por el historial, de tres en tres líneas por paso
+    función mueve_historia(líneas: ent32)
+        variable antes: ent32
+        antes := atrás
+        atrás := atrás + líneas
+        si atrás > ent32(n_pasado) entonces atrás := ent32(n_pasado) fin
+        si atrás < 0 entonces atrás := 0 fin
+        si atrás = antes entonces devolver fin
+        si atrás = 0 entonces pinta_filas() sino pinta_vista() fin
+        pon_rótulo()
+    fin
+
+    ; a la pantalla de ahora (al escribir o al teclear)
+    función vuelve_abajo()
+        si atrás = 0 entonces devolver fin
+        atrás := 0
+        pinta_filas()
+        pon_rótulo()
+    fin
+
     ; lo que han escrito los de dentro: n octetos
     función escribe(p: puntero a byte, n: nat32)
         variable i: nat32
         variable c: byte
+        vuelve_abajo()                          ; (RUEDA)
         suelta_selección()
         pinta_cursor(falso)
         i := 0
@@ -387,7 +453,15 @@ módulo UConsola
             algo := falso
             mientras suceso(v, s, falso) hacer
                 algo := cierto
-                si s.clase = EV_TECLA entonces
+                si s.clase = EV_TECLA y (s.a = TECLA_RE_PÁG o s.a = TECLA_AV_PÁG) y s.b yb TECLA_CON_MAYÚS <> 0 entonces
+                    ; (RUEDA) Mayús+Re Pág y Mayús+Av Pág: el historial, de pantalla en pantalla
+                    si s.a = TECLA_RE_PÁG entonces mueve_historia(FILAS - 1) sino mueve_historia(1 - FILAS) fin
+                sino si s.clase = EV_RUEDA entonces
+                    k := ent32(s.c yb 0xFF)     ; (RUEDA) tres líneas por paso
+                    si k > 127 entonces k := k - 256 fin
+                    mueve_historia(k * 3)
+                sino si s.clase = EV_TECLA entonces
+                    vuelve_abajo()              ; (RUEDA)
                     si s.a = CTRL_C y hay_selección() entonces
                         ; con algo seleccionado, Ctrl+C lo copia
                         copia()
@@ -408,6 +482,7 @@ módulo UConsola
                         si en_portapapeles() = 0 entonces n := n ob 2 fin
                         menú(v, ent32(s.a), ent32(s.b), "Copiar|Pegar", n, M_CONTEXTO)
                     sino si s.c yb BOTÓN_IZQUIERDO <> 0 y ent32(s.b) >= ALTO_MENÚS entonces
+                        vuelve_abajo()          ; (RUEDA) se selecciona en la pantalla de ahora
                         clic(ent32(s.a), ent32(s.b), s.c)
                     fin
                 sino si s.clase = EV_RATÓN_MUEVE entonces

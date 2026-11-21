@@ -20,6 +20,9 @@
 ;      preparar("Mi programa", cierto, cierto)        ; grande y maximizada
 ;      ... en cada suceso: empezar_controles(), pintar, volcar()
 ;      ... con las teclas: campo_tecla(), rejilla_tecla()...
+;  (RUEDA) La rueda del ratón: rueda(s) desplaza la rejilla que haya debajo
+;  de la flecha sin mover la elegida, y rueda_letra(s) dice si con Ctrl se
+;  quiere la letra más grande o más pequeña.
 ;  Las teclas del escritorio para esto (Llamadas): TECLA_MAYÚS_TAB,
 ;  TECLA_CTRL_TAB, TECLA_CTRL_MAYÚS_TAB y TECLA_ALT + letra.
 ;  Ver docs/PENTIUM.md, «Los controles de las ventanas».
@@ -349,6 +352,7 @@ módulo Controles
     ; =========================================================================
     público función empezar_controles()
         n_ctl := 0
+        n_rejs := 0                             ; (RUEDA) las rejillas de esta vez
         n_filas_pes := 0                        ; (las filas de pestañas, también: las de esta vez)
     fin
 
@@ -1281,6 +1285,7 @@ módulo Controles
         con_iconos: bool                        ; los renglones llevan su icono (Renglón.icono)
         varios: bool                            ; se eligen varios (Renglón.marcado); «sel» es donde está el cursor
         col_clave, col_clave2: ent32            ; las columnas que se ordenan por Renglón.clave (y .id2); -1: ninguna
+        suelta: bool                            ; (RUEDA) desplazada con la rueda: lo que se ve ya no sigue a la elegida
     fin
 
     ; prepara una rejilla de hasta «máximo» renglones (la memoria se pide
@@ -1322,6 +1327,7 @@ módulo Controles
         g.n_vista := 0
         g.sel := -1
         g.primero := 0
+        g.suelta := falso                       ; (RUEDA)
     fin
 
     ; un renglón nuevo: da su número (-1 si no caben más)
@@ -1484,12 +1490,14 @@ módulo Controles
 
     ; tras llenar los renglones: que se vean (con el filtro y el orden que haya)
     público función rejilla_lista(ref g: Rejilla)
+        g.suelta := falso                       ; (RUEDA)
         rehacer_vista(g)
         si g.sel < 0 y g.n_vista > 0 entonces g.sel := 0 fin
     fin
 
     público función rejilla_filtrar(ref g: Rejilla, t: puntero a byte)
         copiar_hasta(g.filtro, t, 64)
+        g.suelta := falso                       ; (RUEDA)
         rehacer_vista(g)
         si g.sel < 0 y g.n_vista > 0 entonces g.sel := 0 fin
     fin
@@ -1527,6 +1535,7 @@ módulo Controles
         mientras k < g.n_vista hacer
             si g.r[g.vista[k]].id = id entonces
                 g.sel := ent32(k)
+                g.suelta := falso               ; (RUEDA)
                 devolver cierto
             fin
             k := k + 1
@@ -1537,6 +1546,7 @@ módulo Controles
     ; ir al primero, al de antes, al siguiente o al último (los botones ◀◀ ◀ ▶ ▶▶)
     público función rejilla_ir(ref g: Rejilla, cuál: nat32): bool
         si g.n_vista = 0 entonces devolver falso fin
+        g.suelta := falso                       ; (RUEDA)
         según cuál
             caso I_PRIMERO: g.sel := 0
             caso I_ANTERIOR:
@@ -1578,6 +1588,7 @@ módulo Controles
             caso TECLA_FIN: n := 100000
             si no: devolver falso
         fin
+        g.suelta := falso                       ; (RUEDA) con las teclas, lo que se ve vuelve a seguir a la elegida
         g.sel := g.sel + n
         si g.sel < 0 entonces g.sel := 0 fin
         si g.sel >= ent32(g.n_vista) entonces g.sel := ent32(g.n_vista) - 1 fin
@@ -1637,6 +1648,7 @@ módulo Controles
             si c > 0 entonces caja(g.col_x[c] - LA div 2 - E, yy + 2, 1, ar - 3, C_GRIS) fin
             c := c + 1
         fin
+        apunta_rejilla(g)                       ; (RUEDA)
         si g.n_vista = 0 entonces
             párrafo(x + LA, yy + ar + 6 * E, an - 2 * LA, vacía, C_SUAVE, falso, cierto)
             si id = foco entonces marca_foco(x, yy, an, al) fin
@@ -1644,7 +1656,7 @@ módulo Controles
             devolver
         fin
         caben := caben_renglones(g)
-        si g.sel >= 0 entonces
+        si g.sel >= 0 y no g.suelta entonces       ; (RUEDA) tras la rueda, no
             si g.sel < g.primero entonces g.primero := g.sel fin
             si g.sel >= g.primero + caben entonces g.primero := g.sel - caben + 1 fin
         fin
@@ -1692,6 +1704,7 @@ módulo Controles
         fin
         si id = foco entonces marca_foco(x, yy, an, al) fin
         apuntar(id, K_LISTA, x, yy, an, al)
+        apunta_rejilla(g)                       ; (RUEDA)
     fin
 
     función mayor(a: ent32, b: ent32): ent32
@@ -1741,7 +1754,89 @@ módulo Controles
         i := g.primero + (yy - g.ye - alto_renglón() - 2) div alto_renglón()
         si i < 0 o i >= ent32(g.n_vista) entonces devolver -1 fin
         g.sel := i
+        g.suelta := falso                       ; (RUEDA)
         devolver i
+    fin
+
+    ; =========================================================================
+    ;  (RUEDA) La rueda del ratón
+    ; =========================================================================
+    ; Cada rejilla pintada se apunta (en esta vuelta de empezar_controles):
+    ; así rueda() sabe cuál está debajo de la flecha. En el bucle del
+    ; programa:
+    ;     sino si s.clase = EV_RUEDA entonces
+    ;         si rueda(s) entonces pinta() fin
+    ; Con Ctrl, la rueda no desplaza: rueda_letra(s) dice si hay que poner la
+    ; letra más grande (1) o más pequeña (-1), como en los programas de hoy.
+    constante MAX_REJS = 16
+    público constante RENGLONES_RUEDA = 3        ; los renglones por paso (como en Windows)
+    variable rejs: arreglo [MAX_REJS] de puntero a Rejilla
+    variable n_rejs: nat32
+
+    función apunta_rejilla(ref g: Rejilla)
+        variable i: nat32
+        i := 0
+        mientras i < n_rejs hacer
+            si rejs[i] = dirección(g) entonces devolver fin
+            i := i + 1
+        fin
+        si n_rejs >= MAX_REJS entonces devolver fin
+        rejs[n_rejs] := dirección(g)
+        n_rejs := n_rejs + 1
+    fin
+
+    ; los pasos de la rueda de un EV_RUEDA (con signo: hacia arriba, positivos)
+    público función pasos_rueda(c: nat32): ent32
+        variable p: ent32
+        p := ent32(c yb 0xFF)
+        si p > 127 entonces p := p - 256 fin
+        devolver p
+    fin
+
+    ; desplaza lo que se ve de la rejilla, sin mover la elegida. Cierto si se ha movido
+    público función rejilla_rueda(ref g: Rejilla, pasos: ent32): bool
+        variable antes, máx: ent32
+        si g.n_vista = 0 o pasos = 0 entonces devolver falso fin
+        antes := g.primero
+        máx := ent32(g.n_vista) - caben_renglones(g)
+        si máx < 0 entonces máx := 0 fin
+        g.primero := g.primero - pasos * RENGLONES_RUEDA
+        si g.primero > máx entonces g.primero := máx fin
+        si g.primero < 0 entonces g.primero := 0 fin
+        si g.primero = antes entonces devolver falso fin
+        g.suelta := cierto
+        devolver cierto
+    fin
+
+    ; la rejilla pintada que hay en ese punto (nulo si ninguna)
+    público función rejilla_bajo(x: ent32, yy: ent32): puntero a Rejilla
+        variable i: ent32
+        variable g: puntero a Rejilla
+        i := ent32(n_rejs) - 1
+        mientras i >= 0 hacer
+            g := rejs[i]
+            si x >= g.x y x < g.x + g.an y yy >= g.ye y yy < g.ye + g.al entonces devolver g fin
+            i := i - 1
+        fin
+        devolver nulo
+    fin
+
+    ; un EV_RUEDA: desplaza la rejilla que hay debajo de la flecha (sin Ctrl).
+    ; Cierto si hay que volver a pintar
+    público función rueda(ref s: Suceso): bool
+        variable g: puntero a Rejilla
+        si s.clase <> EV_RUEDA o s.c yb CON_CONTROL <> 0 entonces devolver falso fin
+        g := rejilla_bajo(ent32(s.a), ent32(s.b))
+        si g = nulo entonces devolver falso fin
+        devolver rejilla_rueda(valor(g), pasos_rueda(s.c))
+    fin
+
+    ; Ctrl+rueda: 1, la letra más grande; -1, más pequeña; 0, nada (sin Ctrl)
+    público función rueda_letra(ref s: Suceso): ent32
+        si s.clase <> EV_RUEDA o s.c yb CON_CONTROL = 0 entonces devolver 0 fin
+        si pasos_rueda(s.c) > 0 entonces devolver 1 fin
+        si pasos_rueda(s.c) < 0 entonces devolver -1 fin
+        devolver 0
     fin
 
 fin Controles.
