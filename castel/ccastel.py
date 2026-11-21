@@ -3360,6 +3360,11 @@ class Generador32(Generador):
         self.et(d.etq)
         if atiende:                             # la llama el procesador: se guarda todo
             self.em('pushad')
+            # [WIN32] DS y ES, los planos de siempre (el programa Win32 que
+            # se haya parado lleva los suyos, con base: docs/pentium/WIN32.md)
+            self.em('mov ax, 35')
+            self.em('mov ds, ax')
+            self.em('mov es, ax')
             self.em('mov ebp, esp')
             if marco:
                 self.em(f'sub esp, {marco}')
@@ -3378,6 +3383,17 @@ class Generador32(Generador):
             self.em('popad')
             if nparams:
                 self.em('add esp, 4')           # el número de error
+            # [WIN32] los DS y ES de a quien se vuelve: los del programa Win32
+            # (0x3B) si su CS es el suyo (0x33); si no, los planos (0x23)
+            self.em('push eax')
+            self.em('mov eax, [esp+8]')
+            self.em('and eax, 32')
+            self.em('imul eax, eax, 3')
+            self.em('shr eax, 2')
+            self.em('add eax, 35')
+            self.em('mov ds, ax')
+            self.em('mov es, ax')
+            self.em('pop eax')
             self.em('iretd')
         else:
             if con_marco:

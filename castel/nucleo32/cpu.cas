@@ -14,6 +14,14 @@ módulo Cpu
     público constante CÓDIGO_USUARIO = 0x1B      ; 0x18, con el anillo 3 en sus dos bits bajos
     público constante DATOS_USUARIO = 0x23       ; 0x20 | 3
     público constante SEL_TSS = 0x28
+    ; [WIN32] los de los programas de Windows (win32.cas, docs/pentium/WIN32.md):
+    ; código y datos del anillo 3 con base 0x40000000 (la dirección 0 del
+    ; programa es la 0x40000000 de verdad) y su TEB (FS)
+    público constante CÓDIGO_WIN32 = 0x33
+    público constante DATOS_WIN32 = 0x3B
+    público constante TEB_WIN32 = 0x43
+    público constante BASE_WIN32 = 0x40000000
+    público constante TEB_LINEAL = 0xBFBF0000   ; (por debajo de la zona de la pila)
 
     ; ---- las clases de puerta de la IDT ----
     público constante PUERTA_NÚCLEO = 0x8E       ; interrupción de 32 bits, presente, anillo 0
@@ -43,7 +51,7 @@ módulo Cpu
     variable idt: arreglo [256] de Puerta
     variable idtr: Registro_tabla
     ; la GDT: cada descriptor, dos palabras de 32 bits
-    variable gdt: arreglo [12] de nat32
+    variable gdt: arreglo [18] de nat32         ; [WIN32] 18: tres más
     variable gdtr: Registro_tabla
     ; el TSS: de él solo se usan ESP0 y SS0 (la pila del anillo 0 que el
     ; procesador toma al entrar desde el anillo 3)
@@ -72,6 +80,14 @@ módulo Cpu
         b := nat32(dirección(tss))              ; 0x28: el TSS (de 32 bits, libre), 104 octetos
         gdt[10] := (b << 16) ob (tamaño(tss) - 1)
         gdt[11] := (b yb 0xFF000000) ob 0x00008900 ob ((b >> 16) yb 0xFF)
+        ; [WIN32] 0x30, 0x38: código y datos del anillo 3 desde 0x40000000,
+        ; 2 GB (hasta 0xBFFFFFFF); 0x40: la TEB de los programas Win32, 4 K
+        gdt[12] := 0x0000FFFF
+        gdt[13] := 0x40C7FA00
+        gdt[14] := 0x0000FFFF
+        gdt[15] := 0x40C7F200
+        gdt[16] := 0x00000FFF
+        gdt[17] := 0xBF40F2BF
         tss[2] := DATOS_NÚCLEO                  ; SS0
         tss[25] := nat32(tamaño(tss)) << 16     ; sin mapa de puertos (cae fuera del TSS)
         gdtr.límite := tamaño(gdt) - 1

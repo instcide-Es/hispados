@@ -42,6 +42,7 @@ módulo Ventanas
     público constante MAXIMIZADA = 16
     público constante FIJA = 32                 ; no se maximiza (un cuadro de diálogo)
     público constante REDONDA = 64              ; sin marco, pero con las esquinas de arriba redondas y sombra (un menú)
+    público constante COMPLETA = 128            ; [WIN32] sin marco, pero puede ser la activa (las teclas): la pantalla completa de un juego (win32.cas)
 
     ; ---- las medidas del marco ----
     público constante BORDE = 4
@@ -545,7 +546,7 @@ módulo Ventanas
         nueva := -1
         k := ent32(cuántas) - 1
         mientras k >= 0 y nueva < 0 hacer
-            si se_ve(ventanas[orden[k]]) y ventanas[orden[k]].banderas yb (SIN_MARCO ob ENCIMA) = 0 entonces nueva := orden[k] fin
+            si se_ve(ventanas[orden[k]]) y (ventanas[orden[k]].banderas yb (SIN_MARCO ob ENCIMA) = 0 o ventanas[orden[k]].banderas yb COMPLETA <> 0) entonces nueva := orden[k] fin    ; [WIN32] (o COMPLETA)
             k := k - 1
         fin
         si nueva = activa entonces devolver fin
@@ -1213,7 +1214,7 @@ módulo Ventanas
             fin
             devolver
         fin
-        si ventanas[i].banderas yb (SIN_MARCO ob ENCIMA) = 0 y (cuántas = 0 o i <> activa) entonces
+        si (ventanas[i].banderas yb (SIN_MARCO ob ENCIMA) = 0 o ventanas[i].banderas yb COMPLETA <> 0) y (cuántas = 0 o i <> activa) entonces    ; [WIN32] (o COMPLETA)
             al_frente(i)
             mira_activa()
         fin
@@ -1495,6 +1496,98 @@ módulo Ventanas
         cambios := cambios + 1
         soltar(cerrojo)
         devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  [WIN32] Lo que piden los programas de Windows (win32.cas)
+    ; -------------------------------------------------------------------------
+    ; coloca una ventana suya con lo de dentro en (x, yy) de la pantalla y de
+    ; an x al (con marco, el marco va por fuera). Falso si no es suya o no
+    ; hay memoria; si cambia la medida, le llega EV_TAMAÑO.
+    público función colocar_dentro(id: nat32, dueño: nat32, x: ent32, yy: ent32, an: ent32, al: ent32): bool
+        variable i: ent32
+        variable r: bool
+        tomar(cerrojo)
+        i := busca(id)
+        si i < 0 o ventanas[i].dueño <> dueño o an < 1 o al < 1 o an > 4096 o al > 4096 entonces
+            soltar(cerrojo)
+            devolver falso
+        fin
+        si con_marco(ventanas[i]) entonces
+            x := x - BORDE
+            yy := yy - ALTO_TÍTULO
+            an := an + 2 * BORDE
+            al := al + ALTO_TÍTULO + BORDE
+            si an < 120 entonces an := 120 fin
+        fin
+        r := cierto
+        si an = ventanas[i].ancho y al = ventanas[i].alto entonces
+            ensuciar_ventana(ventanas[i])
+            ventanas[i].px := x
+            ventanas[i].py := yy
+            ensuciar_ventana(ventanas[i])
+        sino
+            ventanas[i].banderas := ventanas[i].banderas yb nob MAXIMIZADA
+            r := cambia_tamaño(i, x, yy, an, al)
+        fin
+        cambios := cambios + 1
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; la trae delante (y la saca si estaba minimizada): pasa a ser la activa
+    público función traer_ventana(id: nat32, dueño: nat32)
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i >= 0 y ventanas[i].dueño = dueño entonces
+            ventanas[i].banderas := ventanas[i].banderas yb nob MINIMIZADA
+            al_frente(i)
+            cambios := cambios + 1
+            mira_activa()
+        fin
+        soltar(cerrojo)
+    fin
+
+    ; dónde está lo de dentro de una ventana suya: d[0], d[1] en la pantalla;
+    ; d[2], d[3] lo que mide; d[4] sus banderas; d[5] 1 si es la activa.
+    ; Falso si no es suya.
+    público función dónde_está(id: nat32, dueño: nat32, d: puntero a ent32): bool
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i < 0 o ventanas[i].dueño <> dueño entonces
+            soltar(cerrojo)
+            devolver falso
+        fin
+        d[0] := ventanas[i].px
+        d[1] := ventanas[i].py
+        si con_marco(ventanas[i]) entonces
+            d[0] := d[0] + BORDE
+            d[1] := d[1] + ALTO_TÍTULO
+        fin
+        d[2] := ventanas[i].dentro.ancho
+        d[3] := ventanas[i].dentro.alto
+        d[4] := ent32(ventanas[i].banderas)
+        d[5] := 0
+        si i = activa entonces d[5] := 1 fin
+        soltar(cerrojo)
+        devolver cierto
+    fin
+
+    ; de quién es la ventana activa (0: de nadie, o del núcleo)
+    público función dueño_de_activa(): nat32
+        variable r: nat32
+        r := 0
+        tomar(cerrojo)
+        si activa >= 0 y ventanas[activa].usada entonces r := ventanas[activa].dueño fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; los botones del ratón que el gestor ha visto pulsados
+    público función botones_vistos(): nat32
+        devolver botones_antes
     fin
 
     ; prepara el gestor: el doble búfer y el tapiz (con la pantalla ya en modo

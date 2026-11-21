@@ -146,6 +146,7 @@ módulo Semilla
             mov eax, [ebp+48]
             mov {esp_u}, eax
         fin
+        si cs_ yb 0xFFFF = CÓDIGO_WIN32 entonces esp_u := esp_u + BASE_WIN32 fin   ; [WIN32] su pila, con base (win32.cas)
         si código yb 4 = 0 y atender_demanda(dir) entonces devolver fin
         ; un programa cuya pila baja a una página que aún no tiene: se le pone
         si código yb 5 = 4 y atender_pila(actual.cr3, dir, esp_u) entonces devolver fin

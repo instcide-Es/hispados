@@ -1334,6 +1334,11 @@ módulo Sent
         et_nombre(t)
         si atiende entonces
             em("pushad")
+            ; [WIN32] DS y ES, los planos de siempre (el programa Win32 que se
+            ; haya parado lleva los suyos, con base: docs/pentium/WIN32.md)
+            em("mov ax, 35")
+            em("mov ds, ax")
+            em("mov es, ax")
             em("mov ebp, esp")
             si marco <> 0 entonces em_n("sub esp, ", marco, "") fin
             em("cld")
@@ -1348,6 +1353,17 @@ módulo Sent
             si marco <> 0 entonces em("mov esp, ebp") fin
             em("popad")
             si nparams <> 0 entonces em("add esp, 4") fin
+            ; [WIN32] los DS y ES de a quien se vuelve: los del programa Win32
+            ; (0x3B) si su CS es el suyo (0x33); si no, los planos (0x23)
+            em("push eax")
+            em("mov eax, [esp+8]")
+            em("and eax, 32")
+            em("imul eax, eax, 3")
+            em("shr eax, 2")
+            em("add eax, 35")
+            em("mov ds, ax")
+            em("mov es, ax")
+            em("pop eax")
             em("iretd")
         sino
             si con_marco entonces

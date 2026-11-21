@@ -63,6 +63,12 @@ módulo Consola
     variable muerta: nat32                      ; la tecla muerta que espera su vocal (0: ninguna)
     variable español: bool = cierto
     variable esperando_tecla: puntero a Tarea
+    ; [WIN32] las teclas pulsadas, por su código (el bit k: el código k; de
+    ; 128 en adelante, las que llevan 0xE0 delante), y las que se han pulsado
+    ; desde que se miró (para no perder una que se pulsa y se suelta entre dos
+    ; miradas): DirectInput y GetAsyncKeyState (win32.cas)
+    público variable pulsadas: arreglo [8] de nat32
+    público variable pulsadas_antes: arreglo [8] de nat32
     ; el teclado español: sin nada, con Mayús y con Alt Gr (por el código de la tecla)
     variable es_normal: arreglo [59] de byte = "\0\e1234567890'\xAD\x08\tqwertyuiop\x02+\n\0asdfghjkl\xA4\x01\xA7\0\x87zxcvbnm,.-\0*\0 "
     variable es_mayús: arreglo [59] de byte = "\0\e!\"\xFA$%&/()=?\xA8\x08\tQWERTYUIOP\x03*\n\0ASDFGHJKL\xA5\x04\xA6\0\x80ZXCVBNM;:_\0*\0 "
@@ -195,6 +201,8 @@ módulo Consola
             pausa := 5                                  ; la tecla Pausa (E1 1D 45 E1 9D C5): no es Control ni Bloq Num
             devolver
         fin
+        ; [WIN32] el mapa de las teclas pulsadas
+        si código <> 0xE0 entonces apunta_tecla(código, extendida) fin
         era_extendida := extendida
         extendida := código = 0xE0
         si código = 0xE0 entonces
@@ -278,6 +286,24 @@ módulo Consola
         si esperando_tecla <> nulo y no desviado entonces
             despertar_tarea(esperando_tecla)
             esperando_tecla := nulo
+        fin
+    fin
+
+    ; [WIN32] apunta en el mapa la tecla que se pulsa o se suelta (el
+    ; código sin 0xE0; «ext», si venía detrás de un 0xE0). Los Mayús de
+    ; mentira que mete el teclado delante de algunas teclas (0xE0 0x2A), no.
+    función apunta_tecla(código: nat32, ext: bool)
+        variable k: nat32
+        k := código yb 0x7F
+        si ext entonces
+            si k = 0x2A o k = 0x36 entonces devolver fin
+            k := k + 128
+        fin
+        si código yb 0x80 = 0 entonces
+            pulsadas[k >> 5] := pulsadas[k >> 5] ob (1 << (k yb 31))
+            pulsadas_antes[k >> 5] := pulsadas_antes[k >> 5] ob (1 << (k yb 31))
+        sino
+            pulsadas[k >> 5] := pulsadas[k >> 5] yb nob (1 << (k yb 31))
         fin
     fin
 
