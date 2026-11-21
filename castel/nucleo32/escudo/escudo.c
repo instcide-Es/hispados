@@ -606,50 +606,229 @@ int borra_archivo(const char *ruta, const char *nombre)
 	return 0;
 }
 
-/* ------------------------------------------------------------ la red
- * Lo que puede escuchar en la red Hispa-Pentium: solo el servidor SSH
- * (SSHD.BIN, apagado de fábrica). Lo demás (el Navegador, las
- * actualizaciones, la hora, DHCP, DNS, Tailscale) solo llama hacia fuera. */
-void lo_que_escucha(char *d, int cabe, int *ssh)
+/* ------------------------------------------------------------ (CORTAFUEGOS)
+ * Las reglas van en CORTAFUE.INI (las escribe esto; RED.BIN las lee al
+ * arrancar y cuando se le pide: rcorta.cas); lo que pasa en la red lo dice
+ * RED.BIN con O_CORTAFUEGOS (28): su informe, en texto. */
+cortafuegos cf;
+#define O_CORTAFUEGOS 28
+#define SC_RED 90
+#define SC_ESTADO_RED 97
+
+/* un pedido al servicio de red (como redes.cas: la llamada 90) */
+static u32 pide_red(u32 orden, u32 a, u32 b, void *datos, u32 cabe)
 {
-	char r[RUTA], t[512], v[16];
-	int n, ts = 0, hay_ssh, hay_ts;
-	u32 puerto = 22;
-	char u = (char)unidad_sistema();
-	formatear(r, RUTA, "%c:\\HISPA\\SSHD.BIN", u);
-	hay_ssh = existe(r);
-	formatear(r, RUTA, "%c:\\HISPA\\SSH\\SSHD.INI", u);
+	u32 cab[8];
+	memset(cab, 0, sizeof cab);
+	cab[0] = orden, cab[1] = a, cab[2] = b;
+	return sc(SC_RED, (u32)cab, (u32)datos, cabe);
+}
+
+/* ¿está el servicio de red? (sin ponerlo en marcha: la 97 solo pregunta) */
+static int hay_servicio_red(void)
+{
+	u32 ip;
+	return sc(SC_ESTADO_RED, (u32)&ip, 0, 0) != 0;
+}
+
+const char *nombre_puerto(u32 p)
+{
+	switch (p) {
+	case 21: return "FTP";
+	case 22: return "SSH";
+	case 23: return "Telnet";
+	case 25: return "correo";
+	case 53: return "DNS";
+	case 80: return "web";
+	case 443: return "web segura";
+	case 445: return "carpetas de Windows";
+	case 3389: return "escritorio remoto";
+	case 41641: return "Tailscale";
+	case 51820: return "WireGuard";
+	}
+	return "";
+}
+
+const char *texto_de(u32 de)
+{
+	switch (de) {
+	case CF_TODOS: return "desde cualquier sitio";
+	case CF_RED: return "desde la red local y Tailscale";
+	case CF_LOCAL: return "solo desde la red local";
+	case CF_TAILSCALE: return "solo desde Tailscale";
+	case CF_IP: return "desde una red";
+	}
+	return "no entra";
+}
+
+static void ruta_cf(char *r)
+{
+	ruta_en(r, dir_escudo, "CORTAFUE.INI");
+}
+
+static u32 de_texto(const char *p)
+{
+	if (!strncasecmp_es(p, "todos", 5))
+		return CF_TODOS;
+	if (!strncasecmp_es(p, "red", 3))
+		return CF_RED;
+	if (!strncasecmp_es(p, "local", 5))
+		return CF_LOCAL;
+	if (!strncasecmp_es(p, "tailscale", 9))
+		return CF_TAILSCALE;
+	if (*p >= '0' && *p <= '9')
+		return CF_IP;
+	return CF_NADIE;
+}
+
+void lee_cortafuegos(void)
+{
+	static char t[8192];
+	char r[RUTA], *p;
+	int n;
+	/* lo de fábrica (como RED.BIN sin el archivo) */
+	memset(&cf, 0, sizeof cf);
+	cf.activo = 1, cf.avisar = 1, cf.ping = 1;
+	cf.reglas[0].puerto = 22, cf.reglas[0].de = CF_RED, cf.n_reglas = 1;
+	ruta_cf(r);
 	n = lee_todo(r, t, sizeof t - 1);
-	t[n > 0 ? n : 0] = 0;
-	*ssh = hay_ssh && n > 0 && valor_ini(t, "encendido", v, sizeof v) && v[0] == '1';
-	if (valor_ini(t, "puerto", v, sizeof v) && numero(v))
-		puerto = numero(v);
-	formatear(r, RUTA, "%c:\\HISPA\\TAILSCALE.BIN", u);
-	hay_ts = existe(r);
-	formatear(r, RUTA, "%c:\\HISPA\\TS\\TS.INI", u);
-	n = lee_todo(r, t, sizeof t - 1);
-	t[n > 0 ? n : 0] = 0;
-	ts = hay_ts && n > 0 && valor_ini(t, "encendido", v, sizeof v) && v[0] == '1';
-	formatear(d, cabe,
-		  "%s\n%s\n"
-		  "Lo demás no escucha en ningún puerto: el Navegador, las actualizaciones, la hora, DHCP y DNS solo llaman hacia fuera.\n"
-		  "Hispa-Pentium no abre nada solo: ni AUTORUN.INF de las memorias o los CD, ni los adjuntos.",
-		  !hay_ssh ? "[ ] SSH (entrar en la Consola desde otro equipo): no está instalado." :
-		  *ssh ? "[!] SSH: ENCENDIDO, escucha en el puerto TCP %u. Solo entra quien tenga la contraseña o una llave autorizada." :
-			 "[ ] SSH (entrar en la Consola desde otro equipo): apagado (así viene de fábrica).",
-		  !hay_ts ? "[ ] Tailscale: no está instalado." :
-		  ts ? "[i] Tailscale: encendido. No abre puertos: llama hacia fuera; lo que entra por la red privada lo filtran sus reglas (ACL)." :
-		       "[ ] Tailscale: apagado.");
-	/* (el %u del puerto: se pone aparte para no liar formatear con dos niveles) */
-	if (*ssh) {
-		char *p = strstr(d, "%u");
-		if (p) {
-			char resto[1024], num[12];
-			formatear(num, sizeof num, "%u", puerto);
-			formatear(resto, sizeof resto, "%s", p + 2);
-			formatear(p, cabe - (int)(p - d), "%s%s", num, resto);
+	if (n > 0) {
+		t[n] = 0;
+		cf.n_reglas = 0;
+		for (p = t; *p;) {
+			char *q = p;
+			while (*q && *q != '\n')
+				q++;
+			if (!strncasecmp_es(p, "activo=", 7))
+				cf.activo = (p[7] | 32) != 'n';
+			else if (!strncasecmp_es(p, "avisar=", 7))
+				cf.avisar = (p[7] | 32) != 'n';
+			else if (!strncasecmp_es(p, "ping=", 5))
+				cf.ping = (p[5] | 32) == 's' ? 2 : (p[5] | 32) == 'r' ? 1 : 0;
+			else if (!strncasecmp_es(p, "regla=tcp ", 10) && cf.n_reglas < MAX_CF) {
+				regla_cf *g = &cf.reglas[cf.n_reglas];
+				char *x = p + 10;
+				g->puerto = numero(x);
+				while (*x >= '0' && *x <= '9')
+					x++;
+				while (*x == ' ')
+					x++;
+				g->de = de_texto(x);
+				if (g->de == CF_IP) {
+					int k = 0;
+					while (k < 23 && x[k] && x[k] != '\r' && x[k] != '\n' && x[k] != ' ')
+						g->ip[k] = x[k], k++;
+					g->ip[k] = 0;
+				}
+				if (g->puerto)
+					cf.n_reglas++;
+			}
+			p = *q ? q + 1 : q;
 		}
 	}
+	/* lo de RED.BIN */
+	cf.hay_red = 0;
+	if (hay_servicio_red()) {
+		u32 m = pide_red(O_CORTAFUEGOS, 1, 0, t, sizeof t - 1);
+		if (!ES_ERROR(m) && m < 0xFFFFFFE0u && m < sizeof t) {
+			t[m] = 0;
+			cf.hay_red = 1;
+			for (p = t; *p;) {
+				char *q = p;
+				while (*q && *q != '\n')
+					q++;
+				if (!strncasecmp_es(p, "bloqueados=", 11))
+					cf.bloqueados = numero(p + 11);
+				else if (!strncasecmp_es(p, "escucha=", 8) && cf.n_escuchas < MAX_CF) {
+					escucha_cf *e = &cf.escuchas[cf.n_escuchas++];
+					char *x = p + 12;
+					e->udp = (p[8] | 32) == 'u';
+					e->puerto = numero(x);
+					while (*x >= '0' && *x <= '9')
+						x++;
+					e->tarea = numero(x + 1);
+				} else if (!strncasecmp_es(p, "pendiente=", 10) && cf.n_pendientes < 4) {
+					escucha_cf *e = &cf.pendientes[cf.n_pendientes++];
+					char *x = p + 10;
+					e->puerto = numero(x);
+					while (*x >= '0' && *x <= '9')
+						x++;
+					e->tarea = numero(x + 1);
+				} else if (!strncasecmp_es(p, "bloqueado=", 10) && cf.n_ultimos < 8) {
+					bloqueo_cf *b = &cf.ultimos[cf.n_ultimos++];
+					char *x = p + 10;
+					int k = 0;
+					b->hora = numero(x);
+					while (*x && *x != ' ')
+						x++;
+					b->proto = numero(++x);
+					while (*x && *x != ' ')
+						x++;
+					x++;
+					while (k < 15 && *x && *x != ' ')
+						b->ip[k++] = *x++;
+					b->ip[k] = 0;
+					b->puerto = numero(x + 1);
+				}
+				p = *q ? q + 1 : q;
+			}
+		}
+	}
+}
+
+int guarda_cortafuegos(void)
+{
+	char t[2048], r[RUTA];
+	int n;
+	u32 i;
+	static const char *const de[] = { "nadie", "todos", "red", "local", "tailscale" };
+	hacer_carpeta(dir_escudo);
+	n = formatear(t, sizeof t,
+		      "; El cortafuegos de Hispa-Pentium (lo escribe Escudo; lo lee RED.BIN)\r\n"
+		      "activo=%s\r\nping=%s\r\navisar=%s\r\n",
+		      cf.activo ? "si" : "no", cf.ping == 2 ? "si" : cf.ping == 1 ? "red" : "no", cf.avisar ? "si" : "no");
+	for (i = 0; i < cf.n_reglas; i++)
+		n += formatear(t + n, (int)sizeof t - n, "regla=tcp %u %s\r\n", cf.reglas[i].puerto,
+			       cf.reglas[i].de == CF_IP ? cf.reglas[i].ip : de[cf.reglas[i].de < 5 ? cf.reglas[i].de : 0]);
+	ruta_cf(r);
+	if (escribe_todo(r, t, (u32)n))
+		return -1;
+	if (hay_servicio_red())
+		pide_red(O_CORTAFUEGOS, 0, 0, 0, 0);
+	apunta("cortafuegos: %s; ping %s; %u reglas", cf.activo ? "encendido" : "APAGADO",
+	       cf.ping == 2 ? "de todos" : cf.ping == 1 ? "de la red" : "de nadie", cf.n_reglas);
+	return 0;
+}
+
+void pon_regla_cf(u32 puerto, u32 de)
+{
+	u32 i;
+	for (i = 0; i < cf.n_reglas && cf.reglas[i].puerto != puerto; i++) ;
+	if (i == cf.n_reglas) {
+		if (cf.n_reglas >= MAX_CF)
+			return;
+		cf.n_reglas++;
+	}
+	cf.reglas[i].puerto = puerto;
+	cf.reglas[i].de = de;
+	cf.reglas[i].ip[0] = 0;
+	guarda_cortafuegos();
+	if (hay_servicio_red())
+		pide_red(O_CORTAFUEGOS, 2, puerto, 0, 0);
+	apunta("cortafuegos: el puerto TCP %u%s%s: %s", puerto, nombre_puerto(puerto)[0] ? " de " : "", nombre_puerto(puerto),
+	       texto_de(de));
+}
+
+int ssh_encendido(void)
+{
+	char r[RUTA], t[512], v[16];
+	int n;
+	formatear(r, RUTA, "%c:\\HISPA\\SSH\\SSHD.INI", unidad_sistema());
+	n = lee_todo(r, t, sizeof t - 1);
+	if (n <= 0)
+		return 0;
+	t[n] = 0;
+	return valor_ini(t, "encendido", v, sizeof v) && v[0] == '1';
 }
 
 int apaga_ssh(void)
@@ -702,10 +881,14 @@ int actualiza_firmas(void)
 static int vigilar(void)
 {
 	char vistas[32], ahora[32];
-	u32 cambios = cambios_unidades(), i;
+	u32 cambios = cambios_unidades(), i, preguntado = 0, bloq_vistos = 0;
 	struct info_unidad u;
 	int nv = 0;
 	serie("escudo: vigilando las unidades (memorias USB y CD)");
+	if (hay_servicio_red()) {	/* (lo bloqueado antes de arrancar Escudo no se cuenta otra vez) */
+		lee_cortafuegos();
+		bloq_vistos = cf.bloqueados;
+	}
 	for (i = 0; info_unidad(i, &u) && nv < 31; i++)
 		if (u.letra)
 			vistas[nv++] = (char)u.letra;
@@ -733,6 +916,32 @@ static int vigilar(void)
 			}
 			ahora[na] = 0;
 			memcpy(vistas, ahora, (u32)na + 1);
+		}
+		/* (CORTAFUEGOS) lo que dice RED.BIN: un programa que quiere recibir
+		 * conexiones (se pregunta: ESCUDO /PERMITIR) y lo bloqueado (al registro) */
+		if (hay_servicio_red() && (tics() / hz()) % 2 == 0) {
+			u32 k;
+			lee_cortafuegos();
+			for (k = 0; k < cf.n_pendientes; k++)
+				if (cf.pendientes[k].puerto != preguntado) {
+					char a[32];
+					preguntado = cf.pendientes[k].puerto;
+					formatear(a, sizeof a, "/PERMITIR %u %u", cf.pendientes[k].puerto, cf.pendientes[k].tarea);
+					sc(SC_LANZAR_SUELTO, (u32)prog_escudo, (u32)a, 0);
+				}
+			if (cf.bloqueados > bloq_vistos) {
+				u32 nuevos = cf.bloqueados - bloq_vistos;
+				for (k = 0; k < nuevos && k < cf.n_ultimos && k < 4; k++) {
+					bloqueo_cf *b = &cf.ultimos[k];
+					if (b->proto == 6)
+						apunta("cortafuegos: bloqueada una conexión TCP desde %s al puerto %u", b->ip, b->puerto);
+					else
+						apunta("cortafuegos: bloqueado un ping desde %s", b->ip);
+				}
+				if (nuevos > 4)
+					apunta("cortafuegos: y %u más", nuevos - 4);
+				bloq_vistos = cf.bloqueados;
+			}
 		}
 		/* las firmas, una vez al día (como mucho: el día que no se ha intentado) */
 		if (op.actualizar_solo && op.ultima_act != fecha_hoy() && (tics() / hz()) % 600 == 300) {
@@ -822,7 +1031,7 @@ static void apunta_revisado(const char *clave)
 
 static void ayuda(void)
 {
-	escribe("Escudo " ESCUDO_VERSION ", el antivirus de Hispa-Pentium (con las firmas de ClamAV).\n"
+	escribe("Escudo " ESCUDO_VERSION ", el antivirus y el cortafuegos de Hispa-Pentium (con las firmas de ClamAV).\n"
 		"  ESCUDO RUTA...          revisa archivos, carpetas o unidades (X:); * revisa todo\n"
 		"  ESCUDO /LISTA RUTA...   lo mismo, con una línea por archivo\n"
 		"  ESCUDO /CUARENTENA RUTA revisa y pone en cuarentena lo que encuentre\n"
@@ -830,6 +1039,9 @@ static void ayuda(void)
 		"  ESCUDO /ACTUALIZA       trae las firmas nuevas\n"
 		"  ESCUDO /RESTAURA n      devuelve a su sitio lo n.º n de la cuarentena\n"
 		"  ESCUDO /BORRA n         borra para siempre lo n.º n de la cuarentena\n"
+		"  ESCUDO /CORTAFUEGOS     el cortafuegos: cómo está, lo que escucha y lo bloqueado\n"
+		"  ESCUDO /CORTAFUEGOS 22 red   deja entrar al puerto TCP 22 (red, todos, local, tailscale o no)\n"
+		"  ESCUDO /CORTAFUEGOS SI|NO    lo enciende o lo apaga\n"
 		"  ESCUDO                  (con el escritorio) la ventana\n");
 }
 
@@ -951,6 +1163,57 @@ int escudo_principal(void)
 			escribef("Devuelto a %s.\n", donde);
 		else
 			escribe("Borrado para siempre.\n");
+		return 0;
+	}
+	if (!strncasecmp_es(a, "/PERMITIR", 10)) {	/* (CORTAFUEGOS) */
+		u32 puerto, tarea = 0;
+		int r;
+		if (!arg_siguiente(&p, a, sizeof a))
+			return 2;
+		puerto = numero(a);
+		if (arg_siguiente(&p, a, sizeof a))
+			tarea = numero(a);
+		lee_cortafuegos();
+		r = pregunta_puerto(puerto, tarea);
+		if (r >= 0)
+			pon_regla_cf(puerto, (u32)r);
+		else if (hay_servicio_red())
+			pide_red(O_CORTAFUEGOS, 2, puerto, 0, 0);
+		return 0;
+	}
+	if (!strncasecmp_es(a, "/CORTAFUEGOS", 13)) {	/* (CORTAFUEGOS) en la Consola: cómo está, o una regla */
+		u32 k;
+		lee_cortafuegos();
+		if (arg_siguiente(&p, a, sizeof a)) {
+			/* ESCUDO /CORTAFUEGOS PUERTO red|todos|local|tailscale|no ; o SI|NO (encenderlo, apagarlo) */
+			if (!strncasecmp_es(a, "si", 3) || !strncasecmp_es(a, "no", 3)) {
+				cf.activo = (a[0] | 32) == 's';
+				guarda_cortafuegos();
+			} else if (numero(a)) {
+				u32 puerto = numero(a);
+				char d[16];
+				if (!arg_siguiente(&p, d, sizeof d)) {
+					escribe("Diga de dónde: red, todos, local, tailscale o no.\n");
+					return 2;
+				}
+				pon_regla_cf(puerto, (d[0] | 32) == 'n' ? CF_NADIE : de_texto(d));
+			}
+			lee_cortafuegos();
+		}
+		escribef("Cortafuegos: %s. Ping: %s. Bloqueado desde que arrancó la red: %u.\n",
+			 cf.activo ? "encendido (no entra nada que no pida el equipo, salvo lo de las reglas)" : "APAGADO (entra todo)",
+			 cf.ping == 2 ? "de todos" : cf.ping == 1 ? "de la red local y Tailscale" : "de nadie", cf.bloqueados);
+		for (k = 0; k < cf.n_reglas; k++)
+			escribef("  regla: TCP %u%s%s%s: %s\n", cf.reglas[k].puerto, nombre_puerto(cf.reglas[k].puerto)[0] ? " (" : "",
+				 nombre_puerto(cf.reglas[k].puerto), nombre_puerto(cf.reglas[k].puerto)[0] ? ")" : "",
+				 cf.reglas[k].de == CF_IP ? cf.reglas[k].ip : texto_de(cf.reglas[k].de));
+		if (!cf.hay_red)
+			escribe("  (el servicio de red no está en marcha)\n");
+		for (k = 0; k < cf.n_escuchas; k++)
+			escribef("  escucha: %s %u (la tarea %u)\n", cf.escuchas[k].udp ? "UDP" : "TCP", cf.escuchas[k].puerto, cf.escuchas[k].tarea);
+		for (k = 0; k < cf.n_ultimos; k++)
+			escribef("  bloqueado: %s desde %s%s\n", cf.ultimos[k].proto == 6 ? "TCP" : "ping", cf.ultimos[k].ip,
+				 cf.ultimos[k].proto == 6 ? "" : "");
 		return 0;
 	}
 	if (!strncasecmp_es(a, "/PREGUNTA", 10)) {

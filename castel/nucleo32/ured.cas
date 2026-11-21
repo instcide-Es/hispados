@@ -14,7 +14,7 @@ módulo Ured
 
     modelo usuario
 
-    importar Llamadas, Rbase, Rtarjeta, Rpila, Rtcp, Mem32, Textos32
+    importar Llamadas, Rbase, Rtarjeta, Rpila, Rtcp, Mem32, Textos32, Rcorta
 
     ; lo que dice el icono (red.cas)
     constante RED_SIN_TARJETA = 1
@@ -166,6 +166,22 @@ módulo Ured
                 si tarjeta = T_NINGUNA entonces contestar(h, s, SIN_TARJETA, 0, 0, nulo, 0) sino contestar(h, s, escuchar(p.tarea, p.cab[1]), 0, 0, nulo, 0) fin
             caso O_ACEPTAR:
                 aceptar(p.cab[1], p.tarea, h, s, p.cab[2])
+            ; ---- (CORTAFUEGOS) el cortafuegos (Escudo) ----
+            caso O_CORTAFUEGOS:
+                si p.cab[1] = 0 entonces
+                    carga_reglas()
+                    contestar(h, s, 0, 0, 0, nulo, 0)
+                sino si p.cab[1] = 1 entonces
+                    informe(dirección(pedido[64]), MAX_DATOS)
+                    lista_escuchas(dirección(pedido[64]), MAX_DATOS)
+                    lista_udp(dirección(pedido[64]), MAX_DATOS)
+                    n := longitud(dirección(pedido[64]))
+                    si n > p.cabe entonces n := p.cabe fin
+                    contestar(h, s, n, 0, 0, dirección(pedido[64]), n)
+                sino
+                    olvida_pendiente(p.cab[2])
+                    contestar(h, s, 0, 0, 0, nulo, 0)
+                fin
             ; ---- (TÚNEL) la interfaz del túnel (WireGuard, Tailscale) ----
             caso O_TUNEL:
                 contestar(h, s, poner_túnel(p.tarea, p.cab[1], puntero(datos), p.largo div 8), 0, 0, nulo, 0)
@@ -210,6 +226,7 @@ módulo Ured
         si no buscar_tarjeta() entonces
             apunta("no hay ninguna tarjeta de red que se sepa llevar")
         fin
+        carga_reglas()                          ; (CORTAFUEGOS)
         enlace := falso
         estado_dicho := 0xFFFFFFFF
         mira_enlace()

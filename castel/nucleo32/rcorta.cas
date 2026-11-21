@@ -1,0 +1,346 @@
+; =============================================================================
+;  rcorta.cas - (CORTAFUEGOS) el cortafuegos del servicio de red de
+;  Hispa-Pentium (RED.BIN): lo que deja entrar desde la red. Lo pidió Carlos
+;  el 21/11/2026 («si se llama Escudo, añádele un cortafuegos»); lo maneja la
+;  ventana de Escudo (pestaña «Cortafuegos»).
+;
+;  Lo que sale (lo que pide el equipo: el Navegador, las actualizaciones, DHCP,
+;  DNS, Tailscale...) y sus respuestas entran siempre: eso no lo mira. Lo que
+;  mira es lo que llega SIN que se haya pedido:
+;    - una conexión TCP nueva (un SYN) a un puerto: entra solo si hay una
+;      regla que la deje (por el puerto y por de dónde viene); si no, se tira
+;      sin contestar (tampoco a los puertos donde no escucha nadie: desde
+;      fuera no se ve ni que el equipo está) y se apunta.
+;    - un ping (eco de ICMP): «ping=si», a todos; «red», solo a la red local
+;      y a la de Tailscale; «no», a nadie.
+;  Lo que llega por UDP solo entra a un puerto que haya abierto un programa
+;  (eso ya lo hacía la pila); se cuenta en la lista de lo que escucha.
+;
+;  Las reglas, en \HISPA\ESCUDO\CORTAFUE.INI (o \ESCUDO\CORTAFUE.INI, sin
+;  instalar), que escribe Escudo; RED.BIN las lee al arrancar y cuando se le
+;  pide (O_CORTAFUEGOS):
+;      activo=si             (no: deja entrar todo, como antes)
+;      ping=red              (si, red o no)
+;      avisar=si             (que Escudo pregunte cuando un programa escuche
+;                             en un puerto sin regla)
+;      regla=tcp 22 red      (el puerto y de dónde: todos, red —la local y la
+;                             de Tailscale—, local, tailscale, nadie, o una red
+;                             a.b.c.d/n)
+;  Sin el archivo: activo, ping a la red, avisar, y «regla=tcp 22 red» (el
+;  servidor SSH, apagado de fábrica, si se enciende, desde la red local y
+;  Tailscale: como se usa ahora).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Rcorta
+
+    importar Rbase, Llamadas, Mem32, Textos32, Formato
+
+    constante MAX_REGLAS = 16
+    constante MAX_PENDIENTES = 4
+    constante MAX_BLOQUEADOS = 24
+
+    ; de dónde
+    constante D_NADIE = 0
+    constante D_TODOS = 1
+    constante D_RED = 2                         ; la local y la de Tailscale
+    constante D_LOCAL = 3
+    constante D_TAILSCALE = 4
+    constante D_IP = 5                          ; una red: ip y máscara
+
+    constante PING_NO = 0
+    constante PING_RED = 1
+    constante PING_SI = 2
+
+    tipo Regla = estructura
+        puerto, de, ip, máscara: nat32
+    fin
+    tipo Bloqueado = estructura
+        hora, proto, ip, puerto: nat32
+    fin
+    tipo Pendiente = estructura
+        puerto, dueño: nat32
+    fin
+
+    público variable activo: bool = cierto
+    variable ping: nat32 = PING_RED
+    variable avisar: bool = cierto
+    variable reglas: arreglo [MAX_REGLAS] de Regla
+    variable n_reglas: nat32
+    variable bloqueados: arreglo [MAX_BLOQUEADOS] de Bloqueado
+    variable n_bloq: nat32                      ; los que se han bloqueado en total
+    variable pendientes: arreglo [MAX_PENDIENTES] de Pendiente
+    variable n_pend: nat32
+    variable texto: arreglo [2048] de byte
+    variable línea: arreglo [64] de byte
+
+    ; ---- leer las reglas ----
+    función pon_regla(puerto: nat32, de: nat32, ip: nat32, máscara: nat32)
+        si n_reglas >= MAX_REGLAS entonces devolver fin
+        reglas[n_reglas].puerto := puerto
+        reglas[n_reglas].de := de
+        reglas[n_reglas].ip := ip
+        reglas[n_reglas].máscara := máscara
+        n_reglas := n_reglas + 1
+    fin
+
+    función de_fábrica()
+        activo := cierto
+        ping := PING_RED
+        avisar := cierto
+        n_reglas := 0
+        pon_regla(22, D_RED, 0, 0)
+    fin
+
+    ; un número desde p (avanza p)
+    función número(ref p: puntero a byte): nat32
+        variable n: nat32
+        n := 0
+        mientras valor(p) >= '0' y valor(p) <= '9' hacer
+            n := n * 10 + (valor(p) - '0')
+            p := p + 1
+        fin
+        devolver n
+    fin
+
+    función empieza(t: puntero a byte, por: puntero a byte): bool
+        mientras valor(por) <> 0 hacer
+            si minúscula(valor(t)) <> valor(por) entonces devolver falso fin
+            t := t + 1
+            por := por + 1
+        fin
+        devolver cierto
+    fin
+
+    ; «tcp 22 red» (lo de detrás de «regla=»)
+    función lee_regla(p: puntero a byte)
+        variable puerto, de, ip, máscara, k, b, bits: nat32
+        si no empieza(p, "tcp") entonces devolver fin       ; (de momento, solo TCP)
+        p := p + 3
+        mientras valor(p) = ' ' hacer p := p + 1 fin
+        puerto := número(p)
+        si puerto = 0 o puerto > 65535 entonces devolver fin
+        mientras valor(p) = ' ' hacer p := p + 1 fin
+        ip := 0
+        máscara := 0
+        de := D_NADIE
+        si empieza(p, "todos") entonces
+            de := D_TODOS
+        sino si empieza(p, "red") entonces
+            de := D_RED
+        sino si empieza(p, "local") entonces
+            de := D_LOCAL
+        sino si empieza(p, "tailscale") entonces
+            de := D_TAILSCALE
+        sino si valor(p) >= '0' y valor(p) <= '9' entonces
+            ; a.b.c.d/n (como va en la red: el primer octeto, el más bajo)
+            k := 0
+            mientras k < 4 hacer
+                b := número(p)
+                ip := ip ob ((b yb 255) << (k * 8))
+                si valor(p) = '.' entonces p := p + 1 fin
+                k := k + 1
+            fin
+            bits := 32
+            si valor(p) = '/' entonces
+                p := p + 1
+                bits := número(p)
+            fin
+            si bits > 32 entonces bits := 32 fin
+            k := 0
+            mientras k < bits hacer
+                ; (el bit k, contando desde el alto del primer octeto)
+                b := nat32(0x80) >> (k yb 7)
+                máscara := máscara ob (b << ((k div 8) * 8))
+                k := k + 1
+            fin
+            ip := ip yb máscara
+            de := D_IP
+        fin
+        pon_regla(puerto, de, ip, máscara)
+    fin
+
+    función lee_línea(l: puntero a byte)
+        si empieza(l, "activo=") entonces
+            activo := minúscula(l[7]) <> 'n'
+        sino si empieza(l, "ping=") entonces
+            si minúscula(l[5]) = 's' entonces ping := PING_SI
+            sino si minúscula(l[5]) = 'r' entonces ping := PING_RED
+            sino ping := PING_NO fin
+        sino si empieza(l, "avisar=") entonces
+            avisar := minúscula(l[7]) <> 'n'
+        sino si empieza(l, "regla=") entonces
+            lee_regla(l + 6)
+        fin
+    fin
+
+    ; lee CORTAFUE.INI (si no está, lo de fábrica)
+    público función carga_reglas()
+        variable m, n, i, k: nat32
+        m := abrir("\\HISPA\\ESCUDO\\CORTAFUE.INI")
+        si es_error(m) entonces m := abrir("\\ESCUDO\\CORTAFUE.INI") fin
+        si es_error(m) entonces
+            de_fábrica()
+            apunta("cortafuegos: sin CORTAFUE.INI: lo de fábrica (solo entra SSH desde la red local y Tailscale; ping, desde la red)")
+            devolver
+        fin
+        n := leer(m, dirección(texto[0]), 2047)
+        cerrar(m)
+        si es_error(n) entonces n := 0 fin
+        texto[n] := 0
+        activo := cierto
+        ping := PING_RED
+        avisar := cierto
+        n_reglas := 0
+        i := 0
+        mientras i < n hacer
+            k := 0
+            mientras i < n y texto[i] <> '\n' y texto[i] <> '\r' hacer
+                si k < 63 entonces
+                    línea[k] := texto[i]
+                    k := k + 1
+                fin
+                i := i + 1
+            fin
+            línea[k] := 0
+            si k > 0 y línea[0] <> ';' entonces lee_línea(dirección(línea[0])) fin
+            i := i + 1
+        fin
+        si activo entonces
+            apunta4("cortafuegos: activo, con %u reglas", n_reglas, 0, 0, 0)
+        sino
+            apunta("cortafuegos: apagado (CORTAFUE.INI: activo=no): entra todo")
+        fin
+    fin
+
+    ; ---- lo que se mira ----
+    función de_la_red(de: nat32, ip: nat32, local: bool, túnel: bool, r_ip: nat32, r_máscara: nat32): bool
+        según nat16(de)
+            caso D_TODOS: devolver cierto
+            caso D_RED: devolver local o túnel
+            caso D_LOCAL: devolver local
+            caso D_TAILSCALE: devolver túnel
+            caso D_IP: devolver (ip yb r_máscara) = r_ip
+        fin
+        devolver falso
+    fin
+
+    función apunta_bloqueado(proto: nat32, ip: nat32, puerto: nat32)
+        variable k: nat32
+        variable t: arreglo [16] de byte
+        k := n_bloq mod MAX_BLOQUEADOS
+        bloqueados[k].hora := dato(10) yb 0xFFFF
+        bloqueados[k].proto := proto
+        bloqueados[k].ip := ip
+        bloqueados[k].puerto := puerto
+        n_bloq := n_bloq + 1
+        ; (al registro, las primeras y luego una de cada 50: que no se llene)
+        si n_bloq <= 20 o n_bloq mod 50 = 0 entonces
+            ip_texto(ip, dirección(t[0]))
+            si proto = 6 entonces
+                apunta4("cortafuegos: bloqueada una conexión TCP desde %s al puerto %u (%u en total)", nat32(dirección(t[0])), puerto, n_bloq, 0)
+            sino
+                apunta4("cortafuegos: bloqueado un ping desde %s (%u en total)", nat32(dirección(t[0])), n_bloq, 0, 0)
+            fin
+        fin
+    fin
+
+    ; ¿entra una conexión TCP nueva (un SYN) de «ip» al «puerto»? (local: de
+    ; la red local; túnel: de la de Tailscale)
+    público función deja_tcp(ip: nat32, puerto: nat32, local: bool, túnel: bool): bool
+        variable i: nat32
+        si no activo entonces devolver cierto fin
+        para i desde 0 hasta MAX_REGLAS - 1 hacer
+            si i < n_reglas y reglas[i].puerto = puerto entonces
+                si de_la_red(reglas[i].de, ip, local, túnel, reglas[i].ip, reglas[i].máscara) entonces devolver cierto fin
+            fin
+        fin
+        apunta_bloqueado(6, ip, puerto)
+        devolver falso
+    fin
+
+    ; ¿se contesta a este ping?
+    público función deja_ping(ip: nat32, local: bool, túnel: bool): bool
+        si no activo o ping = PING_SI entonces devolver cierto fin
+        si ping = PING_RED y (local o túnel) entonces devolver cierto fin
+        apunta_bloqueado(1, ip, 0)
+        devolver falso
+    fin
+
+    ; un programa se pone a escuchar en un puerto: si no hay regla para él,
+    ; queda pendiente (Escudo pregunta si se le deja recibir conexiones)
+    público función escucha_nueva(puerto: nat32, dueño: nat32)
+        variable i: nat32
+        si no activo o no avisar entonces devolver fin
+        para i desde 0 hasta MAX_REGLAS - 1 hacer
+            si i < n_reglas y reglas[i].puerto = puerto entonces devolver fin
+        fin
+        para i desde 0 hasta MAX_PENDIENTES - 1 hacer
+            si i < n_pend y pendientes[i].puerto = puerto entonces devolver fin
+        fin
+        si n_pend >= MAX_PENDIENTES entonces devolver fin
+        pendientes[n_pend].puerto := puerto
+        pendientes[n_pend].dueño := dueño
+        n_pend := n_pend + 1
+        apunta4("cortafuegos: la tarea %u quiere recibir conexiones en el puerto TCP %u, y no hay regla: no entra nada hasta que se diga", dueño, puerto, 0, 0)
+    fin
+
+    ; ya se ha preguntado por ese puerto
+    público función olvida_pendiente(puerto: nat32)
+        variable i, k: nat32
+        k := 0
+        para i desde 0 hasta MAX_PENDIENTES - 1 hacer
+            si i < n_pend y pendientes[i].puerto <> puerto entonces
+                pendientes[k].puerto := pendientes[i].puerto
+                pendientes[k].dueño := pendientes[i].dueño
+                k := k + 1
+            fin
+        fin
+        n_pend := k
+    fin
+
+    ; ---- el informe (para Escudo): líneas de texto ----
+    función añade(destino: puntero a byte, cabe: nat32, plantilla: puntero a byte, a: nat32, b: nat32, c: nat32, d: nat32)
+        variable datos: arreglo [4] de nat32
+        variable n: nat32
+        datos[0] := a
+        datos[1] := b
+        datos[2] := c
+        datos[3] := d
+        n := longitud(destino)
+        si n + 80 >= cabe entonces devolver fin
+        formatear(destino + n, cabe - n, plantilla, dirección(datos[0]))
+    fin
+
+    público función informe(destino: puntero a byte, cabe: nat32)
+        variable i, k, j: nat32
+        variable t: arreglo [16] de byte
+        variable de: puntero a byte
+        destino[0] := 0
+        añade(destino, cabe, "activo=%u\nping=%u\navisar=%u\nbloqueados=%u\n", nat32(activo), ping, nat32(avisar), n_bloq)
+        para i desde 0 hasta MAX_REGLAS - 1 hacer
+            si i < n_reglas entonces
+                de := "nadie"
+                según nat16(reglas[i].de)
+                    caso D_TODOS: de := "todos"
+                    caso D_RED: de := "red"
+                    caso D_LOCAL: de := "local"
+                    caso D_TAILSCALE: de := "tailscale"
+                    caso D_IP: de := "ip"
+                fin
+                añade(destino, cabe, "regla=tcp %u %s\n", reglas[i].puerto, nat32(de), 0, 0)
+            fin
+        fin
+        para i desde 0 hasta MAX_PENDIENTES - 1 hacer
+            si i < n_pend entonces añade(destino, cabe, "pendiente=%u %u\n", pendientes[i].puerto, pendientes[i].dueño, 0, 0) fin
+        fin
+        ; los últimos bloqueados, del más nuevo al más viejo
+        k := 0
+        mientras k < MAX_BLOQUEADOS y k < n_bloq hacer
+            j := (n_bloq - 1 - k) mod MAX_BLOQUEADOS
+            ip_texto(bloqueados[j].ip, dirección(t[0]))
+            añade(destino, cabe, "bloqueado=%u %u %s %u\n", bloqueados[j].hora, bloqueados[j].proto, nat32(dirección(t[0])), bloqueados[j].puerto)
+            k := k + 1
+        fin
+    fin
+
+fin Rcorta.

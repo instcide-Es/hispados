@@ -326,6 +326,25 @@ int ventana_pregunta(char letra_u, const char *que)
 	return r == 0;
 }
 
+/* (CORTAFUEGOS) un programa quiere recibir conexiones: CF_RED, CF_TODOS,
+ * CF_NADIE (que no) o -1 (sin contestar) */
+int pregunta_puerto(u32 puerto, u32 tarea)
+{
+	char t[600];
+	static const char *const b[] = { "Desde la red", "Desde todos", "No" };
+	const char *np = nombre_puerto(puerto);
+	int r;
+	formatear(t, sizeof t,
+		  "¿Dejar que un programa reciba conexiones?\nUn programa (la tarea %u) quiere recibir conexiones por el puerto TCP %u%s%s%s. "
+		  "Hasta que se diga, el cortafuegos no deja entrar nada.\n«Desde la red»: solo desde la red local y desde Tailscale (lo prudente). "
+		  "«Desde todos»: también desde Internet.",
+		  tarea, puerto, np[0] ? " (el de " : "", np, np[0] ? ")" : "");
+	serie("escudo: cortafuegos: pregunta por el puerto %u", puerto);
+	r = cuadro("Escudo: cortafuegos", t, b, 3, 1);
+	serie("escudo: cortafuegos: puerto %u: %s", puerto, r == 0 ? "desde la red" : r == 1 ? "desde todos" : r == 2 ? "no" : "sin contestar");
+	return r == 0 ? CF_RED : r == 1 ? CF_TODOS : r == 2 ? CF_NADIE : -1;
+}
+
 int ventana_hallazgo(const char *ruta, const char *nombre, const char *dentro, int antes)
 {
 	char t[900];
@@ -354,7 +373,7 @@ int ventana_hallazgo(const char *ruta, const char *nombre, const char *dentro, i
 #define P_HISTORIAL 2
 #define P_RED 3
 #define P_OPCIONES 4
-static const char *const nombres_p[5] = { "Revisar", "Cuarentena", "Historial", "Red", "Opciones" };
+static const char *const nombres_p[5] = { "Revisar", "Cuarentena", "Historial", "Cortafuegos", "Opciones" };
 #define M_INICIO 0
 #define M_UNIDAD 1
 #define M_CARPETA 2
@@ -488,6 +507,7 @@ static const char *fila_reg(int i, u32 *tinta)
 enum {
 	B_TODO = 1, B_UNIDAD, B_CARPETA, B_ACTUALIZAR, B_VOLVER, B_REVISAR_U, B_REVISAR_C, B_CANCELAR, B_CUARENTENA,
 	B_BORRAR, B_DEJAR, B_RESTAURAR, B_BORRAR_C, B_APAGAR_SSH, B_MENOS, B_MAS, B_OTRA,
+	B_CF_RED, B_CF_TODOS, B_CF_NO, B_CF_PING, K_CF_ACTIVO, K_CF_AVISAR,
 	L_LISTA = 30,
 	K_PREGUNTAR = 40, K_DESCARGAS, K_ANTES, K_ZIP, K_SOLA, K_SOLO,
 	PEST = 60
@@ -687,15 +707,98 @@ static void pinta_historial(void)
 	pie("Flechas, RePág y AvPág: moverse por el historial.");
 }
 
+/* (CORTAFUEGOS) la lista: lo que escucha y las reglas (de cada puerto, una fila) */
+typedef struct fila_cf { u32 puerto, tarea, de; int udp, escucha, con_regla; } fila_cf;
+static fila_cf filas_cf[2 * MAX_CF];
+static int n_filas_cf;
+static void junta_cf(void)
+{
+	u32 i, k;
+	n_filas_cf = 0;
+	for (i = 0; i < cf.n_escuchas; i++) {
+		fila_cf *f = &filas_cf[n_filas_cf++];
+		f->puerto = cf.escuchas[i].puerto, f->tarea = cf.escuchas[i].tarea, f->udp = cf.escuchas[i].udp;
+		f->escucha = 1, f->con_regla = 0, f->de = CF_NADIE;
+		for (k = 0; !f->udp && k < cf.n_reglas; k++)
+			if (cf.reglas[k].puerto == f->puerto)
+				f->con_regla = 1, f->de = cf.reglas[k].de;
+	}
+	for (k = 0; k < cf.n_reglas; k++) {
+		for (i = 0; i < (u32)n_filas_cf; i++)
+			if (!filas_cf[i].udp && filas_cf[i].puerto == cf.reglas[k].puerto)
+				break;
+		if (i < (u32)n_filas_cf)
+			continue;
+		filas_cf[n_filas_cf].puerto = cf.reglas[k].puerto, filas_cf[n_filas_cf].udp = 0, filas_cf[n_filas_cf].escucha = 0;
+		filas_cf[n_filas_cf].con_regla = 1, filas_cf[n_filas_cf].de = cf.reglas[k].de, filas_cf[n_filas_cf].tarea = 0;
+		n_filas_cf++;
+	}
+}
+static const char *fila_cf_texto(int i, u32 *tinta)
+{
+	static char t[200];
+	const fila_cf *f = &filas_cf[i];
+	const char *np = nombre_puerto(f->puerto);
+	char quien[40];
+	if (f->escucha)
+		formatear(quien, sizeof quien, "escucha (tarea %u)", f->tarea);
+	else
+		formatear(quien, sizeof quien, "nadie escucha");
+	if (f->udp)
+		formatear(t, sizeof t, "[i] UDP %u%s%s%s: %s; solo entran respuestas a lo que pide", f->puerto, np[0] ? " (" : "", np, np[0] ? ")" : "", quien);
+	else {
+		*tinta = f->de != CF_NADIE ? C_NARANJA : C_TINTA;
+		formatear(t, sizeof t, "%s TCP %u%s%s%s: %s; %s", f->de != CF_NADIE ? "[!]" : "[OK]", f->puerto, np[0] ? " (" : "", np,
+			  np[0] ? ")" : "", quien, f->con_regla ? texto_de(f->de) : "no entra (sin regla)");
+	}
+	return t;
+}
+
 static void pinta_red(void)
 {
-	char t[1200];
-	int y = arriba_contenido + 10, ssh;
-	lo_que_escucha(t, sizeof t, &ssh);
-	texto_n(20, y, "Cortafuegos: lo que escucha en la red", -1, C_TINTA, 1);
-	parrafo(20, y + 28, 74, t, C_TINTA);
-	boton(20, L.al - 66, 200, "Apagar SSH", B_APAGAR_SSH, 0, ssh);
-	pie("Con todo apagado, desde fuera no se puede entrar en este equipo.");
+	char t[400];
+	int y = arriba_contenido + 8, hay, i;
+	const fila_cf *f;
+	lee_cortafuegos();
+	junta_cf();
+	if (!cf.activo)
+		formatear(t, sizeof t, "[!] El cortafuegos está APAGADO: entra todo lo que llegue a un puerto donde escuche un programa.");
+	else
+		formatear(t, sizeof t, "[OK] Cortafuegos encendido: no entra nada que no haya pedido el equipo, salvo lo que digan las reglas. Bloqueado desde que arrancó la red: %u.%s",
+			  cf.bloqueados, cf.hay_red ? "" : " (La red no está en marcha.)");
+	caja(20, y, L.an - 40, 38, cf.activo ? C_VERDE_CLARO : C_NARANJA_CLARO);
+	parrafo(28, y + 2, (L.an - 56) / 8, t, C_TINTA);
+	y += 44;
+	casilla(20, y, "Encendido", cf.activo, K_CF_ACTIVO);
+	casilla(150, y, "Avisar si un programa quiere recibir", cf.avisar, K_CF_AVISAR);
+	formatear(t, sizeof t, "Ping: %s", cf.ping == 2 ? "de todos" : cf.ping == 1 ? "de la red" : "de nadie");
+	boton(L.an - 20 - 160, y - 2, 160, t, B_CF_PING, 0, 1);
+	y += 28;
+	texto_n(20, y, "Lo que escucha en la red, y lo que dejan entrar las reglas:", -1, C_TINTA, 1);
+	if (elegida >= n_filas_cf)
+		elegida = n_filas_cf - 1;
+	lista(20, y + 20, L.an - 40, 6, n_filas_cf, elegida, primera, fila_cf_texto, L_LISTA);
+	y += 20 + 6 * 20 + 8;
+	f = elegida >= 0 && elegida < n_filas_cf ? &filas_cf[elegida] : 0;
+	hay = f && !f->udp;
+	boton(20, y, 210, "Desde la red y Tailscale", B_CF_RED, 0, hay);
+	boton(240, y, 180, "Desde cualquier sitio", B_CF_TODOS, 0, hay);
+	boton(430, y, 140, "Que no entre", B_CF_NO, 0, hay);
+	y += 36;
+	texto_n(20, y, "Lo último bloqueado:", -1, C_TINTA, 1);
+	if (!cf.n_ultimos)
+		texto(200, y, "nada", C_SUAVE);
+	for (i = 0; i < (int)cf.n_ultimos && i < 3; i++) {
+		u32 h = cf.ultimos[i].hora;
+		if (cf.ultimos[i].proto == 6)
+			formatear(t, sizeof t, "%02u:%02u  TCP desde %s al puerto %u%s%s", h >> 11, (h >> 5) & 63, cf.ultimos[i].ip, cf.ultimos[i].puerto,
+				  nombre_puerto(cf.ultimos[i].puerto)[0] ? " de " : "", nombre_puerto(cf.ultimos[i].puerto));
+		else
+			formatear(t, sizeof t, "%02u:%02u  ping desde %s", h >> 11, (h >> 5) & 63, cf.ultimos[i].ip);
+		texto_n(28, y + 18 + 18 * i, t, (L.an - 160) / 8, C_SUAVE, 0);
+	}
+	boton(L.an - 20 - 130, L.al - 66, 130, "Apagar SSH", B_APAGAR_SSH, 0, ssh_encendido());
+	pie("Entra solo lo que pide el equipo. Las reglas: por puerto, y de dónde puede venir.");
 }
 
 static void pinta_opciones(void)
@@ -765,12 +868,16 @@ static int filas_lista(void)
 		return 15;
 	if (pestana == P_CUARENTENA)
 		return 13;
+	if (pestana == P_RED)
+		return 6;
 	return modo == M_HECHO ? 8 : 12;
 }
 static int largo_lista(void)
 {
 	if (pestana == P_CUARENTENA)
 		return (int)n_cua;
+	if (pestana == P_RED)
+		return n_filas_cf;
 	if (pestana == P_HISTORIAL)
 		return n_reg;
 	if (modo == M_UNIDAD)
@@ -926,6 +1033,26 @@ static void haz(int id)
 		}
 		break;
 	case B_APAGAR_SSH: apaga_ssh(); break;
+	case B_CF_RED:
+	case B_CF_TODOS:
+	case B_CF_NO:
+		if (elegida >= 0 && elegida < n_filas_cf && !filas_cf[elegida].udp)
+			pon_regla_cf(filas_cf[elegida].puerto, id == B_CF_RED ? CF_RED : id == B_CF_TODOS ? CF_TODOS : CF_NADIE);
+		break;
+	case B_CF_PING:
+		cf.ping = (cf.ping + 2) % 3;	/* de la red -> de nadie -> de todos */
+		guarda_cortafuegos();
+		break;
+	case K_CF_ACTIVO:
+		if (cf.activo) {
+			static const char *const b[] = { "Apagarlo", "No" };
+			if (cuadro("Escudo: cortafuegos", "¿Apagar el cortafuegos?\nEntrará todo lo que llegue a un puerto donde escuche un programa. Mejor dejarlo encendido y añadir una regla.", b, 2, 0) != 0)
+				break;
+		}
+		cf.activo = !cf.activo;
+		guarda_cortafuegos();
+		break;
+	case K_CF_AVISAR: cf.avisar = !cf.avisar, guarda_cortafuegos(); break;
 	case B_MENOS:
 		if (op.max_mb > 1)
 			op.max_mb = op.max_mb > 8 ? op.max_mb / 2 : op.max_mb - 1;

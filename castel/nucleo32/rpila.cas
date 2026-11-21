@@ -13,7 +13,7 @@
 ; =============================================================================
 módulo Rpila
 
-    importar Rbase, Rtarjeta, Llamadas, Mem32, Textos32
+    importar Rbase, Rtarjeta, Llamadas, Mem32, Textos32, Rcorta, Formato
 
     público constante ENTRA_NADA = 0
     público constante ENTRA_TCP = 6             ; un segmento TCP para nosotros: ent_ip, ent_datos, ent_largo
@@ -457,6 +457,8 @@ módulo Rpila
         variable i, t: nat32
         si n < 8 o suma_ip(p, n) <> 0 entonces devolver fin
         si p[0] = 8 y n <= 1480 entonces
+            ; (CORTAFUEGOS) ¿se le contesta?
+            si no deja_ping(de, (de yb máscara) = (mi_ip yb máscara), por_túnel(de)) entonces devolver fin
             ; un ping para nosotros: la misma cosa, de vuelta
             copiar_memoria(dirección(icmp[0]), p, n)
             icmp[0] := 0
@@ -616,6 +618,21 @@ módulo Rpila
                 u.n := u.n + largo + 12
                 udp_entrega(u)
                 devolver
+            fin
+        fin
+    fin
+
+    ; (CORTAFUEGOS) los puertos UDP abiertos, para el informe: «escucha=udp PUERTO TAREA»
+    público función lista_udp(destino: puntero a byte, cabe: nat32)
+        variable i, n: nat32
+        variable d: arreglo [2] de nat32
+        para i desde 0 hasta MAX_UDP - 1 hacer
+            n := 0
+            mientras destino[n] <> 0 hacer n := n + 1 fin
+            si udps[i].usado y n + 40 < cabe entonces
+                d[0] := udps[i].puerto
+                d[1] := udps[i].dueño
+                formatear(destino + n, cabe - n, "escucha=udp %u %u\n", dirección(d[0]))
             fin
         fin
     fin

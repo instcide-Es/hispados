@@ -12,7 +12,7 @@
 ; =============================================================================
 módulo Rtcp
 
-    importar Rbase, Rpila, Llamadas, Mem32
+    importar Rbase, Rpila, Llamadas, Mem32, Rcorta, Formato
 
     constante MAX_CONEX = 8
     constante CABE_TX = 16384
@@ -312,6 +312,7 @@ módulo Rtcp
         escuchas[k].puerto := puerto
         escuchas[k].espera := falso
         apunta4("tcp: escuchando en el puerto %u", puerto, 0, 0, 0)
+        escucha_nueva(puerto, dueño)                ; (CORTAFUEGOS) ¿hay regla para él?
         devolver PRIMERA_ESCUCHA + k
     fin
 
@@ -447,6 +448,21 @@ módulo Rtcp
         c.reloj := ahora() + c.rto
         apunta4("tcp: llega una conexión al puerto %u (desde el %u)", pl, c.puerto_r, 0, 0)
         devolver cierto
+    fin
+
+    ; (CORTAFUEGOS) lo que escucha, para el informe: «escucha=tcp PUERTO TAREA»
+    público función lista_escuchas(destino: puntero a byte, cabe: nat32)
+        variable i, n: nat32
+        variable d: arreglo [2] de nat32
+        para i desde 0 hasta MAX_ESCUCHAS - 1 hacer
+            n := 0
+            mientras destino[n] <> 0 hacer n := n + 1 fin
+            si escuchas[i].usada y n + 40 < cabe entonces
+                d[0] := escuchas[i].puerto
+                d[1] := escuchas[i].dueño
+                formatear(destino + n, cabe - n, "escucha=tcp %u %u\n", dirección(d[0]))
+            fin
+        fin
     fin
 
     función conexión_de(s: nat32, dueño: nat32): puntero a Conexión
@@ -623,8 +639,12 @@ módulo Rtcp
             si conex[i].usada y conex[i].estado <> CERRADA y conex[i].ip = ip y conex[i].puerto_l = pl y conex[i].puerto_r = pr entonces c := dirección(conex[i]) fin
         fin
         si c = nulo y señal yb (F_SYN ob F_ACK ob F_RST) = F_SYN entonces
+            ; (CORTAFUEGOS) una conexión que no se ha pedido: ¿la deja entrar?
+            si no deja_tcp(ip, pl, (ip yb máscara) = (mi_ip yb máscara), por_túnel(ip)) entonces devolver fin
             si llega_syn(ip, p, n) entonces devolver fin     ; (SSH) a un puerto en escucha
         fin
+        ; (CORTAFUEGOS) a lo que no es de ninguna conexión, nada (ni que no hay nadie)
+        si c = nulo y Rcorta.activo entonces devolver fin
         si c = nulo o c.estado = ROTA entonces
             manda_rst(ip, p, n)
             devolver

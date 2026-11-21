@@ -75,8 +75,41 @@ int borra_archivo(const char *ruta, const char *nombre);
 void apunta(const char *f, ...);	/* al registro (REGISTRO.TXT) y al puerto serie */
 int lee_registro(char *d, u32 cabe);	/* las últimas líneas */
 
-/* la red: lo que escucha */
-void lo_que_escucha(char *d, int cabe, int *ssh_encendido);
+/* (CORTAFUEGOS) el cortafuegos: las reglas (CORTAFUE.INI, las escribe Escudo
+ * y las lee RED.BIN) y lo que dice RED.BIN (O_CORTAFUEGOS) */
+#define CF_NADIE 0
+#define CF_TODOS 1
+#define CF_RED 2
+#define CF_LOCAL 3
+#define CF_TAILSCALE 4
+#define CF_IP 5
+#define MAX_CF 16
+typedef struct regla_cf { u32 puerto, de; char ip[24]; } regla_cf;
+typedef struct escucha_cf { u32 puerto, tarea; int udp; } escucha_cf;
+typedef struct bloqueo_cf { u32 hora, proto, puerto; char ip[16]; } bloqueo_cf;
+typedef struct cortafuegos {
+	int activo, avisar;
+	u32 ping;			/* 0 no, 1 red, 2 todos */
+	regla_cf reglas[MAX_CF];
+	u32 n_reglas;
+	/* lo de RED.BIN (si está en marcha) */
+	int hay_red;
+	u32 bloqueados;
+	escucha_cf escuchas[MAX_CF];
+	u32 n_escuchas;
+	escucha_cf pendientes[4];
+	u32 n_pendientes;
+	bloqueo_cf ultimos[8];
+	u32 n_ultimos;
+} cortafuegos;
+extern cortafuegos cf;
+void lee_cortafuegos(void);		/* CORTAFUE.INI y, si hay red, el informe de RED.BIN */
+int guarda_cortafuegos(void);		/* escribe CORTAFUE.INI y se lo dice a RED.BIN */
+void pon_regla_cf(u32 puerto, u32 de);	/* (CF_NADIE: que no entre; y la guarda) */
+const char *nombre_puerto(u32 puerto);	/* «SSH»... o «» */
+const char *texto_de(u32 de);
+int pregunta_puerto(u32 puerto, u32 tarea);	/* (ventana.c) «¿Dejar que...?»: CF_... o -1 */
+int ssh_encendido(void);
 int apaga_ssh(void);
 int actualiza_firmas(void);		/* lanza PAQUETES ACTUALIZA: 0 si ha ido bien */
 
