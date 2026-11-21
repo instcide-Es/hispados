@@ -96,7 +96,7 @@ wg)
     echo "=== ping"; ip netns exec $ESP ping -c 3 -W 2 10.9.0.2
     echo "=== wg"; ip netns exec $ESP wg show wg0
     echo "=== ssh"
-    ip netns exec $ESP timeout 60 ssh -p 22 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o BatchMode=yes -i $D/../clave \
+    ip netns exec $ESP timeout 60 ssh -p 22 -o StrictHostKeyChecking=no -o UserKnownHostsFile=$D/../conocidos -o UpdateHostKeys=no -o IdentitiesOnly=yes -o BatchMode=yes -i $D/../clave \
       prueba@10.9.0.2 "echo hola por wireguard" < /dev/null
     echo "código $?"
   ) > $D/fuera.txt 2>&1 &
@@ -212,7 +212,7 @@ EOF
     HIP=$(ip netns exec $ESP $TSC status | awk '/hispa/{print $1}' | head -1)
     echo "=== ping $HIP"; ip netns exec $ESP timeout 20 $TSC ping -c 3 $HIP
     echo "=== ssh"
-    ip netns exec $ESP timeout 60 ssh -o "ProxyCommand=$TSC nc %h %p" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    ip netns exec $ESP timeout 60 ssh -o "ProxyCommand=$TSC nc %h %p" -o StrictHostKeyChecking=no -o UserKnownHostsFile=$D/../conocidos -o UpdateHostKeys=no \
       -o IdentitiesOnly=yes -o BatchMode=yes -i $D/../clave prueba@$HIP "echo hola por tailscale" < /dev/null
     echo "código $?"
   ) > $D/fuera.txt 2>&1 &

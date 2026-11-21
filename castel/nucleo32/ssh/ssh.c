@@ -177,7 +177,9 @@ static int paquete(struct ssh *s, const u8 **pl, u32 *n, u32 espera)
 					crypto_chacha20_djb(s->ent + 4, s->ent + 4, largo, s->k_ent, nonce, 1);
 				}
 				relleno = s->ent[4];
-				if (relleno + 1 > largo) {
+				/* (seguridad) sin mensaje dentro (ni su número) tampoco: quien
+				 * lo lee cuenta con un octeto al menos, y «n - 1» daría la vuelta */
+				if (relleno + 2 > largo) {
 					formatear(s->error, sizeof s->error, "paquete mal hecho");
 					return -1;
 				}

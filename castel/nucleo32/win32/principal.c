@@ -43,6 +43,15 @@ static void busca_carpeta(void)
 		fmt(carpeta_w32, sizeof carpeta_w32, "%c:\\HISPA\\WIN32\\", l);
 		return;
 	}
+	/* la de la unidad del programa (el CD sin instalar: el sistema es M:, en
+	   memoria, y \WIN32 está en el CD) */
+	if (ruta_exe[0] && ruta_exe[1] == ':' && ruta_exe[0] != l) {
+		fmt(c, sizeof c, "%c:\\WIN32", ruta_exe[0]);
+		if (entrada_de(c, &e, 0) && (e.atributos & 0x10)) {
+			fmt(carpeta_w32, sizeof carpeta_w32, "%c:\\WIN32\\", ruta_exe[0]);
+			return;
+		}
+	}
 	/* sin carpeta: al lado del programa */
 	copia_n(carpeta_w32, ruta_exe, sizeof carpeta_w32);
 	{
