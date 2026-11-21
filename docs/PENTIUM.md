@@ -2948,6 +2948,20 @@ instalar: base 0.8.3 (en lugar de la 0.8.2), navega 0.1», comprueba las sumas,
 los pone (con las carpetas de `\HISPA\NAVEGA`) y `PAQUETES COMPRUEBA` los da
 por buenos; con el núcleo nuevo hay que reiniciar (sección 13).
 
+**La 0.8.3 entera, por Internet** (21/11): el catálogo firmado con base y
+equipo 0.8.3 (el núcleo del Navegador y el Administrador de dispositivos),
+navega 0.1, clicgest 0.2.1 y los demás como estaban (iguales octeto a octeto a
+los publicados). Probado en QEMU desde un sistema con lo publicado de la 0.8.2
+(base 0.8.2, equipo 0.8, clicgest 0.2.1...), sirviendo el catálogo por HTTP
+(`PAQUETES ... /DESDE=http://10.0.2.2:...`): la firma, buena; `PAQUETES
+ACTUALIZA` pone base y equipo 0.8.3 («Reinicie para usar el núcleo nuevo»),
+`PAQUETES INSTALA navega` lo baja (2,4 MB) y lo pone; los 49 archivos de
+`\HISPA` cuadran con sus registros; y con el núcleo nuevo, el menú Inicio
+trae ClicGest y el Navegador, el Navegador abre Google y DISPOSIT, el
+Administrador de dispositivos:
+
+![Tras actualizar a la 0.8.3: el Navegador y el Administrador de dispositivos](pentium/navegador/08_actualizado_083.png)
+
 ### Cómo está hecho
 
 ```
