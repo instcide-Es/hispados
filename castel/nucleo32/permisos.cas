@@ -227,6 +227,9 @@ módulo Permisos
         regla("NAVEGA\\CAJAS.TXT", B_NAVEGA, falso)
         regla("NAVEGA\\SURF.LOG", B_NAVEGA, falso)
         regla("NAVEGA\\NS.LOG", B_NAVEGA, falso)
+        regla("NAVEGA\\SURFJS.LOG", B_NAVEGA, falso)     ; (0.8.5) la consola de las páginas y sus errores
+        regla("NAVEGA\\NAVEGA2.ALM", B_NAVEGA, cierto)   ; (0.8.5) localStorage de las webs (como las galletas: secreto)
+        regla("NAVEGA\\NAVEGA2.INI", B_NAVEGA, falso)
         regla("NAVEGA\\", NADIE, falso)
         regla("CLICGEST.SES", B_CLICGEST, cierto)          ; la sesión guardada («recordarme»)
         regla("CLICGEST.ANC", B_CLICGEST, falso)
