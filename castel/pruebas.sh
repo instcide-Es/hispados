@@ -1284,7 +1284,7 @@ CAPTURAS=$G ESCRIBE=1 DISCO=$G/e.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32
   ":tecla f2" ":pausa 1" ":captura e4" ":arrastra 300 75 400 175" ":raton 600 450" ":captura e5" ":doble 400 175" ":pausa 1" ":captura e6" \
   ":doble 400 14" ":pausa 1" ":clic 630 176" ":captura e7" ":clic 150 585" ":captura e8" \
   ":clic 40 585" ":clic 80 216" ":pausa 3" "eco hola desde la ventana" "bucle" ":pausa 1" ":tecla ctrl-c" ":pausa 1" "ver" ":captura e9" \
-  "salir" ":pausa 1" ":captura e10" ":clic 40 585" ":clic 300 238" ":captura e11" ":clic 550 340" ":pausa 2" ":captura e12" ":clic 570 399" \
+  "salir" ":pausa 1" ":captura e10" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":captura e11" ":clic 550 340" ":pausa 2" ":captura e12" ":clic 570 399" \
   ":clic 678 176" ":pausa 1" ":captura e13" ":clic 40 585" ":clic 360 545" ":captura e14" ":clic 275 327" > $G/escritorio.sal 2>&1
 S=$G/escritorio.sal
 mira "«escritorio» en la línea del cargador: el núcleo pone el modo gráfico (VBE de Bochs/QEMU, 800x600 con 32 bits) y arranca el escritorio" \
@@ -1325,8 +1325,8 @@ miracap "el tapiz se cambia desde Configuración (a «Verde»), y se repinta tod
   negrita 196 126 206 136 "Configuración"
 miracap "el botón de cerrar acaba el Bloc de notas (sin cambios pendientes): ni ventana ni botón en la barra" e13 \
   notexto 180 150 260 180 "NOTAS.TXT - Bloc de notas" notexto 100 570 200 582 "NOTAS.TXT - Blo" notexto 180 120 220 140 "Configuración"
-miracap "«Apagar el equipo»: el cuadro con Apagar, Reiniciar y Cancelar" e14 negrita 216 190 228 200 "Apagar el equipo" \
-  negrita 244 314 258 324 Apagar negrita 360 314 376 324 Reiniciar negrita 494 314 508 324 Cancelar
+miracap "«Apagar el equipo»: el cuadro con Apagar, Reiniciar, Cerrar sesión y Cancelar (MENÚ)" e14 negrita 170 190 180 200 "Apagar el equipo" \
+  negrita 196 315 204 323 Apagar negrita 304 315 312 323 Reiniciar negrita 548 315 556 323 Cancelar
 mira "«Apagar» apaga (el núcleo acaba con su código)" "^escritorio: apagar" "^\[código 5\]"
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda la sesión del escritorio, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado durante la sesión del escritorio:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
@@ -3198,7 +3198,7 @@ python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $V/semilla.asm > /dev/
 # maximizado; Configuración > Cambiar...; 1024 x 768 a prueba y «Mantener»;
 # luego 1280 x 800 a prueba, sin tocar nada: a los 15 s vuelve sola
 CAPTURAS=$G MEMORIA=128 DISCO=$P/d16.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 110" ":pausa 2" ":clic 553 76" ":pausa 1" \
-  ":clic 40 585" ":clic 300 238" ":captura m0" ":clic 572 236" ":pausa 1" ":captura m1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":captura m2" ":clic 431 418" ":pausa 1" ":captura m3" \
+  ":clic 40 585" ":clic 300 238" ":raton 700 470" ":captura m0" ":clic 572 236" ":pausa 1" ":captura m1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":captura m2" ":clic 431 418" ":pausa 1" ":captura m3" \
   ":clic 495 347" ":clic 341 525" ":pausa 2" ":captura m4" ":pausa 17" ":captura m5" > $V/marcha.sal 2>&1
 S=$V/marcha.sal
 mira "con la VBE de Bochs (QEMU -vga std), «Probar...» pone la medida en el momento; «Mantener» la deja; sin tocar nada, a los 15 s vuelve sola la de antes" \
@@ -3229,7 +3229,7 @@ for vga in std vmware; do
   # (EDID) con -vga std, la lista llega hasta lo que dice su EDID (1280 x 800, la quinta); con vmware, sin EDID, la sexta
   if [ $vga = std ]; then x=403; else x=565; fi
   maquina cd$vga "$VBOX_PC -vga $vga -cdrom $CD -drive file=$V/ide.img,format=raw,if=ide,index=0 -boot d" ":espera 40 ^escritorio: en marcha" ":pausa 3" \
-    ":clic 40 585" ":clic 300 238" ":clic 572 236" ":pausa 1" ":captura cd$vga" ":clic $x 263" ":clic 229 441" ":pausa 2" ":captura cd${vga}2" ":clic 559 434" ":pausa 1"
+    ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 572 236" ":pausa 1" ":captura cd$vga" ":clic $x 263" ":clic 229 441" ":pausa 2" ":captura cd${vga}2" ":clic 559 434" ":pausa 1"
   mira "el CD en un «pc» como VirtualBox con -vga $vga: el modo de GRUB (800 x 600) se cambia en marcha (1280 x 800) y se mantiene" \
     "escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)" "^pantalla: 1280x800 con 32 bits por punto (cambiado en marcha" \
     "^escritorio: Se queda a 1280 x 800 (hasta que se apague)\."
@@ -3248,7 +3248,7 @@ cp $V/inst.img $V/inst0.img
 python3 -I -c "import sys; t='# GRUB Environment Block\npantalla=\nantes=\nprueba=0\nnativa=1024x768\n'; open(sys.argv[1],'w').write(t+'#'*(1024-len(t)))" $V/envn
 mcopy -o -i $V/inst.img@@1M $V/envn ::HISPA/PANTALLA.ENV
 CIRRUS="$VBOX_PC -vga cirrus -drive file=$V/inst.img,format=raw,if=ide,index=0"
-maquina pc1 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":clic 572 236" ":pausa 1" ":captura pc1" \
+maquina pc1 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 572 236" ":pausa 1" ":captura pc1" \
   ":clic 565 229" ":clic 274 441" ":pausa 1" ":captura pc2" ":clic 314 336" ":pausa 6"
 mira "sin la VBE de Bochs (cirrus), instalado: la medida se guarda en \\HISPA\\PANTALLA.ENV (a prueba), GRUB.CFG la lee, y «Reiniciar ahora» reinicia" \
   "^escritorio: GRUB.CFG lee ahora PANTALLA.ENV" "^escritorio: .*PANTALLA.ENV: pantalla=1024x768 antes= prueba=1" "^escritorio: reiniciar"
@@ -3289,7 +3289,7 @@ else ko "tras reiniciar sin darla por buena, PANTALLA.ENV no queda bien:"; head 
 # para ella y va por la VBE de la BIOS, que no la da) la pone el núcleo al arrancar
 cp $V/inst0.img $V/inst.img
 STD="$VBOX_PC -vga std -drive file=$V/inst.img,format=raw,if=ide,index=0"
-maquina vb1 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":clic 572 236" ":pausa 1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":clic 431 418" ":pausa 2"
+maquina vb1 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 572 236" ":pausa 1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":clic 431 418" ":pausa 2"
 mira "instalado, con la VBE de Bochs: «Mantener» la guarda también para los próximos arranques" "^escritorio: .*PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" \
   "^escritorio: Se queda a 1024 x 768, también al arrancar\."
 maquina vb2 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3"
@@ -3309,7 +3309,7 @@ cp $P/d16.img $V/de.img; mcopy -o -i $V/de.img $V/DISPOSIT.BIN ::DISPOSIT.BIN
 for e in 1024:600 1366:768 no; do
   if [ $e = no ]; then o="edid=off"; else o="xres=${e%:*},yres=${e#*:}"; fi
   CAPTURAS=$G MEMORIA=128 DISCO=$V/de.img ARRANQUE=escritorio MODULOS= VGA=none QEMU_MAS="-device VGA,$o" $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" \
-    ":clic 40 585" ":clic 300 238" ":clic 576 236" ":pausa 1" ":captura ed${e%:*}" ":clic 594 441" ":clic 333 399" ":pausa 3" ":captura dv${e%:*}" > $V/edid$e.sal 2>&1
+    ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 576 236" ":pausa 1" ":captura ed${e%:*}" ":clic 594 441" ":clic 333 399" ":pausa 3" ":captura dv${e%:*}" > $V/edid$e.sal 2>&1
 done
 S=$V/edid1024:600.sal
 mira "con un EDID de 1024 x 600 (un netbook), el núcleo lo lee y lo apunta en el registro del arranque" "pantalla: EDID: «QEMU Monitor», hecha para 1024 x 600 (la tarjeta de QEMU)"
@@ -3329,7 +3329,7 @@ miracap "y en una máquina virtual (su pantalla es una ventana) la lista sigue s
 if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && command -v parted > /dev/null; then
   $AQUI/nucleo32/usb.sh $V/usb.img > $V/usb.txt 2>&1
   USBQ="-machine pc -m 256 -vga cirrus -nic none -device qemu-xhci,id=u -drive file=$V/usb.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1"
-  maquina us1 "$USBQ -no-reboot" ":espera 60 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":clic 576 236" ":pausa 1" ":captura us1" \
+  maquina us1 "$USBQ -no-reboot" ":espera 60 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 576 236" ":pausa 1" ":captura us1" \
     ":clic 403 229" ":clic 274 441" ":pausa 1" ":clic 314 336" ":pausa 6"
   mira "desde la memoria USB (sin EDID): nada mayor que la de ahora, «A la medida», y se guarda en X:\\PANTALLA.ENV" \
     "la pantalla no dice su medida" "^escritorio: \\\\PANTALLA.ENV: pantalla=auto antes= prueba=1" "^escritorio: reiniciar"
@@ -3387,7 +3387,7 @@ CAPTURAS=$G ESCRIBE=1 SATA=$Y/sata.img SOLO_LECTURA=1 MODULOS=$Y/ACPI.BIN,$Y/DIS
   ":tecla down" ":tecla ret" ":pausa 4" ":captura dv4" ":clic 228 140" ":raton 400 450" ":pausa 1" ":captura dv5" ":clic 323 140" ":raton 400 450" ":pausa 1" ":captura dv6" \
   ":tecla esc" ":pausa 1" ":clic 245 81" ":pausa 2" ":captura dv7" \
   ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":pausa 1" ":captura dv10" ":clic 742 31" ":pausa 1" \
-  ":clic 40 585" ":pausa 1" ":clic 300 238" ":pausa 1" ":captura dv8" ":clic 300 398" ":pausa 4" ":captura dv9" > $Y/pc.sal 2>&1
+  ":clic 40 585" ":pausa 1" ":clic 300 238" ":raton 700 470" ":pausa 1" ":captura dv8" ":clic 300 398" ":pausa 4" ":captura dv9" > $Y/pc.sal 2>&1
 S=$Y/pc.sal
 mira "ACPI.BIN apunta lo que hay en el espacio de nombres de ACPI (la llamada 156)" "^ACPI: [0-9]* dispositivos del espacio de nombres, apuntados para el Administrador de dispositivos"
 mira "Mi equipo > Propiedades, Configuración > «Administrador de dispositivos...» y las propiedades lanzan DISPOSIT.BIN" \
