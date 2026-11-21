@@ -4633,12 +4633,20 @@ if $AQUI/nucleo32/disco.sh $W/d.img 32 oficina > $W/disco.txt 2>&1; then
   mira "y la «s» e Intro lanzan «Saludo» (un acceso de un paquete)" "escritorio: lanzo .HOLA.BIN"
   miracap "«Mis documentos» abre su submenú con los .TXT de la raíz" mn7 texto 460 160 480 182 "LEEME.TXT" texto 460 0 700 570 "DOC8.TXT"
   mira "y uno de ellos se abre con el Bloc de notas" "escritorio: lanzo .BLOC.BIN"
-  # 2. a 640 x 480 y a 1024 x 600: el pie, siempre a la vista
-  for m in 640x480 1024x600; do
+  # 2. a 640 x 480, a 1024 x 600 y a 1280 x 724 (0.8.5: la pantalla de Carlos
+  # en VirtualBox, 1282 x 724, donde el menú de la 0.8.4 tapaba la barra y
+  # «Apagar»): el pie, siempre a la vista, y la barra de tareas con «Inicio»
+  # sin tapar; también con una carpeta de más programas de los que caben
+  # (los 24 juegos, y 30 y tantos en «Todos los programas»)
+  for m in 640x480 1024x600 1280x724; do
     al=${m#*x}
-    CAPTURAS=$G DISCO=$W/d.img ARRANQUE="escritorio modo=$m" PANTALLA=$m MODULOS= $AQUI/nucleo32/probar.sh $W/SEMILLA.BIN ":pausa 3" ":clic 40 $((al - 15))" ":pausa 1" ":captura mp$m" > $W/p$m.sal 2>&1
-    miracap "a $m: el menú cabe encima de la barra, con «Todos los programas» y «Apagar equipo» a la vista" mp$m \
-      negrita 58 $((al - 108)) 66 $((al - 100)) "Todos los programas" negrita 320 $((al - 67)) 328 $((al - 59)) "Apagar equipo" negrita 46 0 54 $((al - 120)) "Bloc de notas"
+    CAPTURAS=$G DISCO=$W/d.img ARRANQUE="escritorio modo=$m" PANTALLA=$m MODULOS= $AQUI/nucleo32/probar.sh $W/SEMILLA.BIN ":pausa 3" ":clic 40 $((al - 15))" ":pausa 1" ":raton 470 $((al - 200))" ":pausa 1" ":captura mp$m" \
+      ":raton 100 $((al - 104))" ":pausa 1" ":raton 300 $((al - 104))" ":pausa 1" ":raton 300 $((al - 156))" ":pausa 1" ":raton 450 $((al - 156))" ":pausa 1" ":captura mq$m" > $W/p$m.sal 2>&1
+    miracap "a $m: el menú cabe encima de la barra, con «Todos los programas» y «Apagar equipo» a la vista, y la barra con «Inicio» sin tapar" mp$m \
+      negrita 58 $((al - 108)) 66 $((al - 100)) "Todos los programas" negrita 320 $((al - 67)) 328 $((al - 59)) "Apagar equipo" negrita 46 0 54 $((al - 120)) "Bloc de notas" \
+      negrita 30 $((al - 30)) 80 $((al - 5)) Inicio
+    miracap "a $m, con la carpeta de los 24 juegos abierta: no baja de la barra; «Apagar equipo» e «Inicio», a la vista" mq$m \
+      texto 0 0 ${m%x*} $((al - 28)) "Juego 01" negrita 320 $((al - 67)) 328 $((al - 59)) "Apagar equipo" negrita 30 $((al - 30)) 80 $((al - 5)) Inicio
   done
   # 3. los atajos de teclado de todo el sistema
   cp $W/d.img $W/e.img
