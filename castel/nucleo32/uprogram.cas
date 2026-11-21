@@ -148,6 +148,9 @@ módulo UProgram
     variable salida: arreglo [SALIDA + 1] de byte
     variable archivo: arreglo [64] de byte      ; C:\HISPA\PAQUETES\PROGRAMA.TXT
     variable fich_avance: arreglo [64] de byte  ; C:\HISPA\PAQUETES\AVANCE.TXT
+    variable fich_cancela: arreglo [64] de byte ; (RÁPIDO) C:\HISPA\PAQUETES\CANCELA.TXT: «Cancelar»
+    variable cx_, cy_, cw_, ch_: ent32          ; (RÁPIDO) dónde está el botón «Cancelar» del avance
+    variable cancelando: bool
     variable sis: byte
     variable ocupado, lento: bool
     variable av_hecho, av_total: nat32
@@ -277,6 +280,15 @@ módulo UProgram
         trozo(q, 0, av_texto, 80)
     fin
 
+    ; (RÁPIDO) «Cancelar»: el aviso a PAQUETES (y a DESCARGA) es un archivo
+    función pide_cancelar()
+        variable m: nat32
+        si cancelando entonces devolver fin
+        m := crear(fich_cancela)
+        si no es_error(m) entonces cerrar(m) fin
+        cancelando := cierto
+    fin
+
     ; lanza «PAQUETES args /AVANCE» con lo que escriba mandado a PROGRAMA.TXT;
     ; mientras trabaja, la barra; deja lo escrito en «salida»; da su código
     función paquetes(args: puntero a byte): nat32
@@ -291,6 +303,8 @@ módulo UProgram
         une(a, args, " /AVANCE")
         si lento entonces concatenar(a, " /LENTO") fin
         borrar(fich_avance)
+        borrar(fich_cancela)
+        cancelando := falso
         av_hecho := 0
         av_total := 0
         Textos32.copiar(av_texto, "Un momento...")
@@ -305,6 +319,9 @@ módulo UProgram
                 pinta()
                 mientras suceso(v, s, falso) hacer
                     si s.clase = EV_TAMAÑO entonces nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_) fin
+                    ; (RÁPIDO) «Cancelar» (o Esc): PAQUETES para en cuanto puede y lo deshace
+                    si s.clase = EV_TECLA y s.a = 27 entonces pide_cancelar() fin
+                    si s.clase = EV_RATÓN_BAJA y ent32(s.a) >= cx_ y ent32(s.a) < cx_ + cw_ y ent32(s.b) >= cy_ y ent32(s.b) < cy_ + ch_ entonces pide_cancelar() fin
                 fin
                 dormir(10)
                 c := acabada(tarea)
@@ -753,20 +770,27 @@ módulo UProgram
         variable an, al, x, yy, bw, w, q: ent32
         an := 56 * LA
         si an > ancho - 2 * LA entonces an := ancho - 2 * LA fin
-        al := 2 * LT + 30 * E
+        al := 3 * LT + 40 * E                   ; (RÁPIDO) con el botón «Cancelar»
         x := (ancho - an) div 2
         yy := (alto - al) div 2
         caja(x + 4 * E, yy + 4 * E, an, al, 0x9CA3AF)
         caja(x, yy, an, al, C_BORDE)
         caja(x + 2 * E, yy + 2 * E, an - 4 * E, al - 4 * E, C_PAPEL)
         Textos32.copiar(t, av_texto)
-        si av_total > 0 entonces
+        si av_total > 100 entonces
+            ; (RÁPIDO) dentro de un paquete grande (en K): el tanto por ciento
+            dd[0] := nat32(dirección(av_texto[0]))
+            dd[1] := av_hecho div (av_total div 100)
+            si dd[1] > 100 entonces dd[1] := 100 fin
+            formatear(t, 200, "%s: %u %%", dd)
+        sino si av_total > 0 entonces
             dd[0] := nat32(dirección(av_texto[0]))
             dd[1] := av_hecho
             dd[2] := av_total
             si dd[1] > dd[2] entonces dd[1] := dd[2] fin
             formatear(t, 200, "%s (%u de %u)", dd)
         fin
+        si cancelando entonces Textos32.copiar(t, "Cancelando: se deja todo como estaba...") fin
         texto_corto(x + 2 * LA, yy + 6 * E, t, an - 4 * LA, C_TINTA, cierto)
         bw := an - 4 * LA
         caja(x + 2 * LA, yy + LT + 14 * E, bw, LT, C_BORDE)
@@ -778,6 +802,14 @@ módulo UProgram
             q := ent32((tics() div 3) mod 100)
             caja(x + 2 * LA + 2 + ((bw - 4 - 12 * LA) * q) div 100, yy + LT + 14 * E + 2, 12 * LA, LT - 4, C_AZUL)
         fin
+        ; (RÁPIDO) «Cancelar», abajo a la derecha
+        cw_ := 16 * LA
+        ch_ := LT + 6 * E
+        cx_ := x + an - 2 * LA - cw_
+        cy_ := yy + 2 * LT + 22 * E
+        caja(cx_, cy_, cw_, ch_, C_BORDE)
+        caja(cx_ + 1, cy_ + 1, cw_ - 2, ch_ - 2, C_GRIS)
+        texto_corto(cx_ + 2 * LA, cy_ + 3 * E, "Cancelar (Esc)", cw_ - 3 * LA, C_TINTA, falso)
     fin
 
     función en_lista(lista: puntero a byte, n: puntero a byte): bool
@@ -1496,6 +1528,9 @@ módulo UProgram
         fich_avance[0] := sis
         fich_avance[1] := 0
         concatenar(fich_avance, ":\\HISPA\\PAQUETES\\AVANCE.TXT")
+        fich_cancela[0] := sis
+        fich_cancela[1] := 0
+        concatenar(fich_cancela, ":\\HISPA\\PAQUETES\\CANCELA.TXT")
         equipo_bin[0] := sis
         equipo_bin[1] := 0
         concatenar(equipo_bin, ":\\HISPA\\EQUIPO.BIN")

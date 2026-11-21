@@ -112,6 +112,15 @@ int pregunta_puerto(u32 puerto, u32 tarea);	/* (ventana.c) «¿Dejar que...?»: 
 int ssh_encendido(void);
 int apaga_ssh(void);
 int actualiza_firmas(void);		/* lanza PAQUETES ACTUALIZA: 0 si ha ido bien */
+/* lo mismo sin dejar la ventana parada: «cada» se llama unas diez veces por
+ * segundo (pinta y atiende la ventana) y da 1 si se ha pulsado «Cancelar»;
+ * mientras, act_hecho/act_total/act_texto dicen por dónde va (AVANCE.TXT de
+ * PAQUETES) y, al acabar, act_dice es lo último que ha dicho. 0 bien, -1
+ * mal, -2 sin PAQUETES, -3 cancelado */
+int actualiza_firmas_con(int (*cada)(void));
+extern u32 act_hecho, act_total;
+extern char act_texto[100], act_dice[200];
+extern int act_cancelando;
 
 /* ventana.c */
 int ventana_principal(const char *revisar_ya, int pestana);

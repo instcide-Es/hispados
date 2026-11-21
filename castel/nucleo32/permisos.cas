@@ -215,6 +215,7 @@ módulo Permisos
         regla("PAQUETES\\BAJADAS\\", B_DESCARGA, falso)
         regla("PAQUETES\\AVANCE.TXT", B_ACTUALIZ ob B_DESCARGA ob B_PROGRAMA, falso)
         regla("PAQUETES\\PROGRAMA.TXT", B_PROGRAMA, falso)
+        regla("PAQUETES\\CANCELA.TXT", B_ACTUALIZ ob B_PROGRAMA ob B_ESCUDO, falso)     ; (RÁPIDO) «Cancelar» de las ventanas
         regla("PAQUETES\\VENTANA.TXT", B_ACTUALIZ, falso)
         regla("PAQUETES\\BANDEJA.TXT", B_ACTUALIZ, falso)  ; (lo de PAQUETES ESTADO, para el aviso de la bandeja)
         regla("PAQUETES\\", NADIE, falso)
