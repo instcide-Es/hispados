@@ -503,6 +503,16 @@ módulo Firma
         fin
     fin
 
+    ; ¿es s (32 octetos, de menor a mayor) menor que L?
+    función menor_que_l(s: puntero a byte): bool
+        variable i: nat32
+        para i desde 31 hasta 0 paso -1 hacer
+            si ent32(s[i]) < c_l[i] entonces devolver cierto fin
+            si ent32(s[i]) > c_l[i] entonces devolver falso fin
+        fin
+        devolver falso
+    fin
+
     variable preparado: bool
 
     función prepara()
@@ -527,8 +537,9 @@ módulo Firma
         variable h, r: arreglo [32] de byte
         variable i: nat32
         prepara()
-        ; S tiene que ser menor que L (si no, la misma firma tendría otras formas)
-        si firma[63] yb 0xE0 <> 0 entonces devolver falso fin
+        ; S tiene que ser menor que L, el orden del grupo (RFC 8032, 5.1.7): si
+        ; no, la misma firma tendría otras formas (S + L también pasaría)
+        si no menor_que_l(firma + 32) entonces devolver falso fin
         si no desempaqueta_neg(dirección(q[0]), clave) entonces devolver falso fin
         sha512_empezar()
         sha512_añadir(firma, 32)

@@ -115,7 +115,7 @@ $(B)/PEFALTA.EXE: tests/progs/pehola.asm | $(B)
 	$(NASM) -f bin -DFALTA -o $@ $<
 # un Win32 hecho en C (gcc -m32 y tools/elf2pe.py); si no hay gcc de 32 bits,
 # la prueba lo salta
-CC32 = gcc -m32 -std=gnu11 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-builtin -fno-tree-loop-distribute-patterns
+CC32 = gcc -m32 -march=i486 -std=gnu11 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-builtin -fno-tree-loop-distribute-patterns
 $(B)/HOLAC.EXE: tests/progs/holac.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/holac.o
 	python3 tools/elf2pe.py -o $@ $(B)/holac.o

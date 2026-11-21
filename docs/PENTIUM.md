@@ -2811,7 +2811,7 @@ terceros (sin paquete)»**, los programas copiados a mano.
 **Una sola ventana** para todo lo de los programas (petición de Carlos del
 21/11: lo instalado por tipos para desinstalarlo, y las actualizaciones
 organizadas): `PROGRAMA.BIN` (`uprogram.cas`, con los controles del sistema:
-pestañas y rejilla; del paquete `paquetes` 1.1). Cuatro pestañas, cada una
+pestañas y rejilla; del paquete `paquetes` 1.2). Cuatro pestañas, cada una
 con **cuántos tiene** («Pendientes (3)»):
 
 | Pestaña | Qué tiene | Botones |
@@ -2891,7 +2891,7 @@ pruebas) hace que PAQUETES vaya despacio al quitar, para ver la barra.
 
 ### La ventana de antes: ACTUALIZ.BIN
 
-*(PROGRAMAS, 21/11: desde la 1.1 de `paquetes`, `ACTUALIZ.BIN` abre la ventana
+*(PROGRAMAS, 21/11: desde la 1.2 de `paquetes`, `ACTUALIZ.BIN` abre la ventana
 unificada de arriba, `PROGRAMA.BIN`, en «Pendientes»; lo que sigue es la
 ventana de antes, que queda solo si `PROGRAMA.BIN` no está, y `ACTUALIZ
 /BANDEJA`, que no cambia.)*
@@ -2934,7 +2934,7 @@ python3 tools/hpq.py sistema SALIDA CARPETA...   # los paquetes del sistema (lo 
 | `consola` | 0.7 | `CONSOLA.BIN` | base >= 0.7 |
 | `equipo` | 0.8.3 | `EQUIPO.BIN` (Mi equipo) y `DISPOSIT.BIN` (el Administrador de dispositivos) | base >= 0.8.3 |
 | `ejemplos` | 0.8.2 | `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN`, `MUESTRA.BIN` (los controles de las ventanas) | base >= 0.8.2 |
-| `paquetes` | 1.1 | `PAQUETES.BIN`, `ACTUALIZ.BIN` (su ventana), `PROGRAMA.BIN` («Programas instalados») y su acceso `\HISPA\MENU\PROGRAMA.MNU` | base >= 0.8.2, nucleo >= 0.7 |
+| `paquetes` | 1.2 | `PAQUETES.BIN`, `ACTUALIZ.BIN` (su ventana), `PROGRAMA.BIN` («Programas instalados») y su acceso `\HISPA\MENU\PROGRAMA.MNU` | base >= 0.8.2, nucleo >= 0.7 |
 | `hvprun` | 0.7 | `HVPRUN.BIN` | base >= 0.7 |
 | `oficina` | 1.0 | `\OFICINA\`: `FACTURAS.HVP`, `PLUMA.HVP`, `CUENTAS.HVP`, `MIRADOR.HVP`, `TIPOS.DAT`, `DICCIO.DAT` | hvprun >= 0.7 |
 
@@ -2985,7 +2985,9 @@ sus archivos, así que con firmar el catálogo queda atado todo.
   su **SHA-512** (los números de 64 bits hechos de dos de 32) y las cuentas de la
   curva con los números módulo 2^255 − 19 en **32 trozos de 8 bits**, cada uno en
   un `ent32`: así ninguna cuenta pasa de 32 bits (Castel no tiene números de 64)
-  y no hace falta ensamblador. Comprueba que S < 2^253 y que la clave es un punto
+  y no hace falta ensamblador. Comprueba que S < L (el orden del grupo, como pide la RFC 8032: desde el
+  21/11, la revisión de seguridad; antes solo S < 2^253, y la misma firma con
+  S + L también pasaba) y que la clave es un punto
   de la curva. Tarda unos **0,25 s** en QEMU (24-30 tics).
 - **Cuándo**: lo traído **de Internet** tiene que llevar firma, y buena: si no
   la trae («el catálogo de Internet no trae su firma») o no es buena («la firma
@@ -3365,8 +3367,13 @@ cual (descomprimir costaría un inflado en Castel; no es barato).
   núcleo, llamada 17, la primera vez que hace falta).
 - Lo que pasa lo **apunta** (`tls: ...` por el puerto serie; `HTTPS /TODO`).
 
-`TLS.CCH`, `TLS.SEM` y `TLS.INI` van en `\HISPA` de la unidad del sistema (o en
-su raíz si no hay `\HISPA`).
+`TLS.CCH`, `TLS.SEM`, `TLS.HOR` y `TLS.INI` van en `\HISPA` de la unidad del
+sistema (o en su raíz si no hay `\HISPA`). **`TLS.HOR`** (21/11, la revisión de
+seguridad): el último día en que una cadena se comprobó entera y valía con la
+fecha del reloj del PC. La hora que se pide por HTTP sin cifrar (la cabecera
+`Date`) no se cree si da una fecha anterior a ese día o al de la compilación de
+`TLS.BIN`: quien esté en medio no puede llevar el reloj atrás para colar un
+certificado caducado o revocado.
 
 **La hora.** Para mirar las fechas de un certificado hace falta saber qué día
 es. `TLS.BIN` usa **el reloj del PC** (la CMOS, por la llamada 15) si es
@@ -3783,16 +3790,30 @@ instalar: base 0.8.3 (en lugar de la 0.8.2), navega 0.1», comprueba las sumas,
 los pone (con las carpetas de `\HISPA\NAVEGA`) y `PAQUETES COMPRUEBA` los da
 por buenos; con el núcleo nuevo hay que reiniciar (sección 13).
 
+**Las pruebas de la 0.8.4** (21/11, en el PC de Albinyana con
+`tools/pruebas_castel_pc.sh`, cada parte en su copia; y en el VPS): `SOLO=32`
+621 bien; `castel32` 62/0 (CASTEL32 igual que ccastel.py y el punto fijo);
+`acpi`, `dispositivos`, `lectores`, `win32`, `caliente`, `paquetes`, `red`,
+`tls` y `ssh`, sin fallos; `pantalla` y `cd`, sin fallos en el VPS (en el PC,
+con QEMU 10 y el `tail` de uutils, la memoria USB sin EDID y `cd.sh` salen
+mal por el entorno). Lo que se ha arreglado al juntar: `ensambla.py` y
+ENSAMBLA/ENSAMB32 aceptan hasta 1000 pasadas (el núcleo de la 0.8.4 pide unas
+300 para asentar los saltos); el explorador ordena las unidades por la letra
+(el lector de CD que QEMU pone de serie ya no sale delante de C:); el menú
+Inicio del sistema instalado trae Naves (36 puntos más alto); «sin ACPI» con
+`-machine acpi=off` (QEMU 10 ya no tiene `-no-acpi`); WINMM.DLL de Pentium y
+las DLL de Hispa-486 sin CMOV ni FCOMI (`-march=i586` / `i486`).
+
 **La 0.8.4, por Internet** (21/11, rama `pentium-084`: las ramas `pentium-cd`,
-`pentium-tailscale`, `pentium-explorador`, `pentium-win32`, `pestanas-raton` y
-`navega-fijo` juntas): el catálogo firmado con base, red y ejemplos 0.8.4,
+`pentium-tailscale`, `pentium-explorador`, `pentium-win32`, `pestanas-raton`,
+`navega-fijo` y `pentium-edid` juntas): el catálogo firmado con base, red y ejemplos 0.8.4,
 equipo 0.9 (el explorador, `MINIAT.BIN` y `DISPOSIT.BIN`; pide base >= 0.8.4),
-ssh, tailscal 0.8.4 y win32 1.0 (nuevos), navega 0.2 y clicgest 0.2.2 tal como
-están publicados, y los demás iguales octeto a octeto a lo publicado (bloc,
-consola, hvprun, oficina, paquetes, tls). Probado en QEMU (`q35`) desde un
+ssh, tailscal 0.8.4 y win32 1.0 (nuevos), navega 0.2 y clicgest 0.2.3 tal como
+están publicados, paquetes 1.1 y tls 0.8.4 (la revisión de seguridad), y los
+demás iguales octeto a octeto a lo publicado (bloc, consola, hvprun, oficina). Probado en QEMU (`q35`) desde un
 sistema instalado con el CD de la 0.8.3 y lo publicado de la 0.8.3 (navega
 0.1, clicgest 0.2.1), con el catálogo por HTTP: la firma, buena; `PAQUETES
-ACTUALIZA` pone base, ejemplos, equipo, red, navega y clicgest; `PAQUETES
+ACTUALIZA` pone base, ejemplos, equipo, red, paquetes, tls, navega y clicgest; `PAQUETES
 INSTALA ssh tailscal win32`; `PAQUETES COMPRUEBA`: los 15 paquetes cuadran. Y
 tras reiniciar: «El núcleo nuevo ha arrancado bien», el dock, Naves en el menú
 Inicio, el explorador con el CD del lector (IDE en el `q35`, `ide-cd`), una

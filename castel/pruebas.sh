@@ -2216,7 +2216,7 @@ for hc in xhci ehci; do
     miracap "al aceptar: «Todo listo», con el saludo; y el reloj de la barra ya marca la hora puesta (el reloj del PC)" a3$hc \
       negrita 154 98 162 106 "Todo listo" negrita 112 176 120 184 "¡Hola, Carlos!" negrita 454 427 462 435 "Empezar" negrita 740 570 760 584 "07:45"
     miracap "el menú Inicio saluda con el nombre («Hola, Carlos») y dice la versión; LEEME.TXT, en los documentos" a4$hc \
-      negrita 54 158 62 166 "Hola, Carlos" texto 54 176 62 184 "Hispa-Pentium, versión 0.8" texto 208 243 216 251 "LEEME.TXT" negrita 36 355 50 366 Naves
+      negrita 54 158 62 166 "Hola, Carlos" texto 54 176 62 184 "Hispa-Pentium, versión 0.8" texto 208 243 216 251 "LEEME.TXT" negrita 38 352 46 360 Naves
     if grep -q "asistente: guardado HISPA.INI (Carlos, Toshiba)$" $S && [ "$(tr -d '\r' < $Z/ini.txt | tr '\n' '|')" = "[hispa]|usuario=Carlos|equipo=Toshiba|teclado=es|modo=1024x600|" ] \
       && grep -q "^set modo=1024x600x32,1024x600,auto$" $Z/cfg.txt && [ "$(grep -c '^set modo=' $Z/cfg.txt)" = 1 ] && [ $sano = 0 ]; then
       ok "lo guardado: C:\\HISPA\\HISPA.INI (usuario, equipo, teclado y modo) y la medida de la pantalla en el menú de arranque (GRUB.CFG); el disco, sano"

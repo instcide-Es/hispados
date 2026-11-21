@@ -157,7 +157,8 @@ VERSION_08 = '0.8'
 # en la bandeja y Configuración > «Red y Tailscale...»— y el explorador de
 # archivos con el dock —las llamadas 170 y 171—; suben base, red, equipo
 # (0.9, con MINIAT.BIN) y ejemplos (MUESTRA, con los controles nuevos), y
-# salen ssh y tailscal —Tailscale: los nombres de
+# salen ssh y tailscal; y, por la revisión de seguridad, paquetes 1.1 (la
+# firma con S < L, los destinos) y tls 0.8.4 (TLS.HOR) —Tailscale: los nombres de
 # paquete son de 8 letras, por el registro <NOMBRE>.PQI—)
 VERSION_084 = '0.8.4'
 # [WIN32] (21/11/2026) los programas de Windows: en el núcleo (los
@@ -178,15 +179,16 @@ SISTEMA = [
     ('ejemplos', VERSION_084, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.4', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
         ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN'), ('MUESTRA.BIN', r'\HISPA\MUESTRA.BIN')]),
-    # (PROGRAMAS) la 1.1: los tipos, REPARA, ARCHIVOS, SUELTOS, QUITA /DEPENDIENTES y
-    # la ventana «Programas instalados» (PROGRAMA.BIN, con los controles: base 0.8.2)
-    ('paquetes', '1.1', 'Programas y actualizaciones: PAQUETES, su ventana y «Programas instalados»', 'base >= 0.8.2, nucleo >= 0.7', [
+    # (PROGRAMAS) la 1.2 (sobre la 1.1, la de la revisión de seguridad): los tipos,
+    # REPARA, ARCHIVOS, SUELTOS, QUITA /DEPENDIENTES y la ventana unificada
+    # «Programas y actualizaciones» (PROGRAMA.BIN, con los controles: base 0.8.2)
+    ('paquetes', '1.2', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
         ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN'), ('PROGRAMA.MNU', r'\HISPA\MENU\PROGRAMA.MNU')]),
     ('red', VERSION_084, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= 0.8.4', [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
-    ('tls', VERSION_SISTEMA, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
+    ('tls', VERSION_084, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
         ('TLS.BIN', r'\HISPA\TLS.BIN'), ('HTTPS.BIN', r'\HISPA\HTTPS.BIN')]),
     ('ssh', VERSION_084, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, apagado hasta que se encienda)', 'base >= 0.8.4, red >= 0.8.4', [
         ('SSH.BIN', r'\HISPA\SSH.BIN'), ('SSHD.BIN', r'\HISPA\SSHD.BIN')]),

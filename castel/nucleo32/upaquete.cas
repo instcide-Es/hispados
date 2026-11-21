@@ -78,7 +78,7 @@ módulo UPaquetes
     constante RUTA = 160
     constante NINGUNO = 0xFFFFFFFF
     constante URL_POR_DEFECTO = "http://actualiza.hispados.es/pentium/"
-    constante VERSIÓN_PAQUETES = "1.1"
+    constante VERSIÓN_PAQUETES = "1.2"
 
     ; (PROGRAMAS) los tipos: el código y su nombre, en el orden en que salen
     ; (los mismos que TIPOS en tools/hpq.py; docs/PENTIUM.md, sección 13)
@@ -662,6 +662,9 @@ módulo UPaquetes
             Textos32.copiar(x, dirección(nuevos[i - 1].destino[2]))
             a_mayúsculas(x)
             bien := bien y no empieza_por(x, "\\HISPA\\PAQUETES\\") y buscar(x, "..") = nulo
+            ; (seguridad) el núcleo toma «/» por «\» y junta las barras seguidas y los «\.\»:
+            ; con ellas se llegaba a \HISPA\PAQUETES sin que se notara
+            bien := bien y buscar_car(x, '/') = nulo y buscar(x, "\\\\") = nulo y buscar(x, "\\.\\") = nulo
             si no bien entonces
                 imprimir2("paquetes: %s: el archivo %s no vale\n", pt(ruta), pt(nuevos[i - 1].destino))
                 devolver falso
