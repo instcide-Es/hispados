@@ -1738,7 +1738,7 @@ contraseña»); cuando las haya, ese cuadro será el de entrar.
 **«Reiniciar»** del pie del menú reinicia sin más preguntas (como el del
 cuadro: antes cierra los programas, y el que tenga algo sin guardar lo dice).
 
-Las pruebas: `SOLO=menu ./pruebas.sh` (la parte 23).
+Las pruebas: `SOLO=menu ./pruebas.sh` (la parte 23: 86 bien, 0 mal). Con el menú nuevo se pusieron al día las de antes que lo usan (las coordenadas del menú, del menú de la ventana con «Tamaño» y del cuadro de apagar). `SOLO=32` entera (21/11, con cinco pasadas de otras ramas a la vez en la misma máquina): 694 bien y 4 mal, ninguna del menú: dos del EHCI de la parte 9 (la memoria no llega a tiempo con la máquina tan cargada; en la pasada anterior, bien), el túnel de WireGuard desde Linux (falla igual en las otras ramas) y la línea del asistente que llega detrás del «> » de la consola (la prueba ya lo admite).
 
 ### La medida de la pantalla, desde Configuración (20/11)
 
