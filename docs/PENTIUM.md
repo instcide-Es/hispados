@@ -3456,7 +3456,7 @@ a la 14 y la 16) dio **156 bien, 0 mal**.
 
 Antes, `pruebas.sh` tenía **508 comprobaciones** (423 hasta la 0.7;
 de la 0.8, los paquetes, el USB en caliente, la red, apagar de verdad y la
-batería, y las del AHCI del ICH7). La memoria USB trae ahora **18 programas**
+batería, y las del AHCI del ICH7). La memoria USB trae ahora **19 programas** (18 hasta la 0.8.1; la 0.8.2 añade MUESTRA.BIN)
 como módulos (eran 9: PAQUETES y ACTUALIZ, RED, IPCONFIG, PING y DESCARGA,
 ACPI.BIN y, desde el 20/11, TLS.BIN y HTTPS), y 10 paquetes del sistema (con
 «red» y «tls»). Algo más de una hora
