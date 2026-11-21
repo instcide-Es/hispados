@@ -14,7 +14,8 @@
 # nucleo32/hvprun/hacer.sh. Con «red», también el servicio de red (RED.BIN) y
 # sus programas: IPCONFIG.BIN, PING.BIN y DESCARGA.BIN (la orden DESCARGAR).
 # Con «tls» (y «red»), también el servicio TLS (TLS.BIN, nucleo32/tls/hacer.sh:
-# necesita gcc con -m32) y HTTPS.BIN (la orden HTTPS).
+# necesita gcc con -m32) y HTTPS.BIN (la orden HTTPS). Con «ssh» (y «red»),
+# también SSH.BIN y SSHD.BIN (el cliente y el servidor SSH: nucleo32/ssh/hacer.sh).
 # La imagen se le da a QEMU como disco IDE: DISCO=IMAGEN nucleo32/probar.sh ...
 # Necesita python3, nasm, mkfs.fat (dosfstools) y mtools.
 set -e
@@ -25,8 +26,9 @@ CLASE=${2:-16}
 OFICINA=
 RED=
 TLS=
+SSH=
 for o in "${@:3}"; do
-  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; esac
+  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; ssh) SSH=ssh ;; esac
 done
 T=$(mktemp -d)
 trap 'rm -rf $T' EXIT
@@ -79,6 +81,11 @@ if [ "$RED" = red ]; then
     python3 -I $AQUI/../ccastel.py $AQUI/uhttps.cas -o $T/uhttps.asm > /dev/null
     nasm -f bin $T/uhttps.asm -o $T/HTTPS.BIN
     mcopy -i $V $T/TLS.BIN $T/HTTPS.BIN ::
+  fi
+  # (SSH) el cliente y el servidor SSH
+  if [ "$SSH" = ssh ]; then
+    bash $AQUI/ssh/hacer.sh $T/ssh
+    mcopy -i $V $T/ssh/SSH.BIN $T/ssh/SSHD.BIN ::
   fi
 fi
 if [ "$OFICINA" = oficina ]; then

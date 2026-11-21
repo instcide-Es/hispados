@@ -906,6 +906,7 @@ módulo UOrdenes
 
     función principal(): byte
         variable p: puntero a byte
+        variable na: nat32
         atender_corte(cierto)
         camino[0] := unidad(0)                  ; el PATH de fábrica: la raíz de la unidad de trabajo
         ; (y, en el sistema instalado, su carpeta \HISPA: los programas que
@@ -915,6 +916,12 @@ módulo UOrdenes
         si es_carpeta(carpeta) entonces
             concatenar(camino, ";")
             concatenar(camino, carpeta)
+        fin
+        ; (SSH) «ORDENES /C orden»: hace esa orden y acaba (lo de «ssh equipo orden»)
+        na := argumentos(dirección(cruda[0]), LÍNEA)
+        si na > 3 y cruda[0] = '/' y (cruda[1] = 'C' o cruda[1] = 'c') y cruda[2] = ' ' entonces
+            haz(dirección(cruda[3]))
+            devolver 0
         fin
         escribir("\nHispa-Pentium: intérprete de órdenes (un programa del anillo 3, la tarea ", mi_tarea(), ").\n")
         escribir("Escriba AYUDA para ver las órdenes.\n")

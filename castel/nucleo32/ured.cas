@@ -151,8 +151,19 @@ módulo Ured
                     udp_recibir(p.cab[1], p.tarea, h, s, p.cab[2], p.cabe)
                 fin
             caso O_CERRAR:
-                si es_tcp(p.cab[1]) entonces r := Rtcp.cerrar(p.cab[1], p.tarea) sino r := udp_cerrar(p.cab[1], p.tarea) fin
+                si es_tcp(p.cab[1]) entonces
+                    r := Rtcp.cerrar(p.cab[1], p.tarea)
+                sino si es_escucha(p.cab[1]) entonces
+                    r := no_escuchar(p.cab[1], p.tarea)          ; (SSH)
+                sino
+                    r := udp_cerrar(p.cab[1], p.tarea)
+                fin
                 contestar(h, s, r, 0, 0, nulo, 0)
+            caso O_ESCUCHAR:
+                ; (SSH) un puerto TCP en escucha (el servidor SSH)
+                si tarjeta = T_NINGUNA entonces contestar(h, s, SIN_TARJETA, 0, 0, nulo, 0) sino contestar(h, s, escuchar(p.tarea, p.cab[1]), 0, 0, nulo, 0) fin
+            caso O_ACEPTAR:
+                aceptar(p.cab[1], p.tarea, h, s, p.cab[2])
             caso O_UDP:
                 si tarjeta = T_NINGUNA entonces
                     contestar(h, s, SIN_TARJETA, 0, 0, nulo, 0)

@@ -6,7 +6,8 @@
 ;  en orden, hasta que el programa lo recoge. La ventana que se anuncia es lo
 ;  que queda libre de lo recibido; la de la otra punta manda en lo que se
 ;  envía. Lo que llega desordenado se tira (la otra punta lo vuelve a
-;  mandar). Sin escuchar en un puerto (de momento solo se conecta).
+;  mandar). (SSH, 21/11) También se escucha en un puerto (O_ESCUCHAR) y
+;  se aceptan las conexiones que llegan (O_ACEPTAR): las del servidor SSH.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Rtcp
@@ -31,6 +32,12 @@ módulo Rtcp
     constante ÚLTIMO_ACK = 7
     constante TIEMPO_ESPERA = 8
     constante ROTA = 9                          ; cortada (RST, o sin contestar): el programa aún no la ha cerrado
+    constante SYN_RECIBIDO = 10                 ; (SSH) ha llegado un SYN a un puerto en escucha; se ha contestado SYN+ACK
+
+    ; (SSH) los puertos en escucha: el número que ve el programa es PRIMERA_ESCUCHA + su sitio
+    público constante PRIMERA_ESCUCHA = 0x40
+    constante MAX_ESCUCHAS = 4
+    constante MAX_PENDIENTES = 2                ; las que pueden esperar a que se acepten, por puerto
 
     ; lo que espera el programa
     constante P_NADA = 0
@@ -63,8 +70,19 @@ módulo Rtcp
         error: nat32
         ventana_dicha: nat32
         p_clase, p_hueco, p_serie, p_límite, p_cabe: nat32
+        de_escucha: nat32                       ; (SSH) llegó a ese puerto en escucha (su sitio + 1; 0: la abrió el programa)
+        aceptada: bool                          ; (SSH) el programa ya la tiene (O_ACEPTAR)
     fin
     variable conex: arreglo [MAX_CONEX] de Conexión
+
+    ; (SSH) un puerto en escucha, y el programa que espera a que llegue alguien
+    tipo Escucha = estructura
+        usada: bool
+        dueño, puerto: nat32
+        espera: bool
+        p_hueco, p_serie, p_límite: nat32
+    fin
+    variable escuchas: arreglo [MAX_ESCUCHAS] de Escucha
     variable seg: arreglo [1500] de byte
     variable sale: arreglo [1480] de byte
     variable puerto_libre: nat32
@@ -239,6 +257,8 @@ módulo Rtcp
         c.suelta := falso
         c.dueño := dueño
         c.ip := ip
+        c.de_escucha := 0
+        c.aceptada := cierto
         puerto_libre := puerto_libre + 1
         si puerto_libre < 49152 o puerto_libre > 65000 entonces puerto_libre := 49152 + ((ahora() * 7) yb 4095) fin
         c.puerto_l := puerto_libre
@@ -266,6 +286,165 @@ módulo Rtcp
         c.p_límite := ahora() + espera
         manda(c, F_SYN, c.iss, 0, 0)
         c.reloj := ahora() + c.rto
+    fin
+
+    ; ---- (SSH) escuchar en un puerto y aceptar lo que llega ----
+    público función es_escucha(s: nat32): bool
+        devolver s >= PRIMERA_ESCUCHA y s < PRIMERA_ESCUCHA + MAX_ESCUCHAS
+    fin
+
+    ; O_ESCUCHAR: da el número del puerto en escucha (o un error: NO_VALE_RED si ya lo escucha otro)
+    público función escuchar(dueño: nat32, puerto: nat32): nat32
+        variable i, k: nat32
+        si puerto = 0 o puerto > 65535 entonces devolver NO_VALE_RED fin
+        k := MAX_ESCUCHAS
+        para i desde 0 hasta MAX_ESCUCHAS - 1 hacer
+            si escuchas[i].usada y escuchas[i].puerto = puerto entonces
+                apunta4("tcp: el puerto %u ya está en escucha", puerto, 0, 0, 0)
+                devolver NO_VALE_RED
+            fin
+            si no escuchas[i].usada entonces k := i fin
+        fin
+        si k = MAX_ESCUCHAS entonces devolver NO_CONEXIÓN fin
+        escuchas[k].usada := cierto
+        escuchas[k].dueño := dueño
+        escuchas[k].puerto := puerto
+        escuchas[k].espera := falso
+        apunta4("tcp: escuchando en el puerto %u", puerto, 0, 0, 0)
+        devolver PRIMERA_ESCUCHA + k
+    fin
+
+    función escucha_de(s: nat32, dueño: nat32): puntero a Escucha
+        si no es_escucha(s) entonces devolver nulo fin
+        si no escuchas[s - PRIMERA_ESCUCHA].usada o escuchas[s - PRIMERA_ESCUCHA].dueño <> dueño entonces devolver nulo fin
+        devolver dirección(escuchas[s - PRIMERA_ESCUCHA])
+    fin
+
+    ; da al programa que espera en ese puerto una conexión ya hecha, si la hay
+    función entrega_aceptada(k: nat32)
+        variable i: nat32
+        variable c: puntero a Conexión
+        si no escuchas[k].espera entonces devolver fin
+        para i desde 0 hasta MAX_CONEX - 1 hacer
+            c := dirección(conex[i])
+            si c.usada y c.de_escucha = k + 1 y no c.aceptada y (c.estado = ESTABLECIDA o c.estado = CIERRE_ESPERA) entonces
+                c.aceptada := cierto
+                escuchas[k].espera := falso
+                contestar(escuchas[k].p_hueco, escuchas[k].p_serie, i + 1, c.ip, c.puerto_r, nulo, 0)
+                devolver
+            fin
+        fin
+    fin
+
+    ; O_ACEPTAR: espera (hasta «espera» tics) a que llegue una conexión; da su
+    ; número, y la IP y el puerto de la otra punta
+    público función aceptar(s: nat32, dueño: nat32, hueco: nat32, serie: nat32, espera: nat32)
+        variable e: puntero a Escucha
+        e := escucha_de(s, dueño)
+        si e = nulo entonces
+            contestar(hueco, serie, NO_CONEXIÓN, 0, 0, nulo, 0)
+            devolver
+        fin
+        si e.espera entonces contestar(e.p_hueco, e.p_serie, TIEMPO, 0, 0, nulo, 0) fin
+        e.espera := cierto
+        e.p_hueco := hueco
+        e.p_serie := serie
+        e.p_límite := ahora() + espera
+        entrega_aceptada(s - PRIMERA_ESCUCHA)
+    fin
+
+    ; deja de escuchar: lo que estaba sin aceptar, cortado
+    público función no_escuchar(s: nat32, dueño: nat32): nat32
+        variable e: puntero a Escucha
+        variable i: nat32
+        e := escucha_de(s, dueño)
+        si e = nulo entonces devolver NO_CONEXIÓN fin
+        si e.espera entonces contestar(e.p_hueco, e.p_serie, CORTADA_RED, 0, 0, nulo, 0) fin
+        para i desde 0 hasta MAX_CONEX - 1 hacer
+            si conex[i].usada y conex[i].de_escucha = s - PRIMERA_ESCUCHA + 1 y no conex[i].aceptada entonces
+                si conex[i].estado <> CERRADA y conex[i].estado <> ROTA entonces manda(dirección(conex[i]), F_RST ob F_ACK, conex[i].snd_nxt, 0, 0) fin
+                libera(dirección(conex[i]))
+            fin
+        fin
+        e.usada := falso
+        e.espera := falso
+        devolver 0
+    fin
+
+    ; ha llegado un SYN a un puerto: si se escucha en él (y cabe), una conexión
+    ; nueva que contesta SYN+ACK. Cierto si se ha hecho
+    función llega_syn(ip: nat32, p: puntero a byte, n: nat32): bool
+        variable i, k, l, pl, hl, op, ol, pendientes: nat32
+        variable c: puntero a Conexión
+        pl := lee16(p + 2)
+        l := MAX_ESCUCHAS
+        para i desde 0 hasta MAX_ESCUCHAS - 1 hacer
+            si escuchas[i].usada y escuchas[i].puerto = pl entonces l := i fin
+        fin
+        si l = MAX_ESCUCHAS entonces devolver falso fin
+        pendientes := 0
+        k := MAX_CONEX
+        para i desde 0 hasta MAX_CONEX - 1 hacer
+            si conex[i].usada y conex[i].de_escucha = l + 1 y no conex[i].aceptada entonces pendientes := pendientes + 1 fin
+            si no conex[i].usada entonces k := i fin
+        fin
+        si pendientes >= MAX_PENDIENTES o k = MAX_CONEX entonces
+            apunta4("tcp: SYN al puerto %u sin sitio (%u esperando)", pl, pendientes, 0, 0)
+            devolver falso
+        fin
+        c := dirección(conex[k])
+        si c.tx = nulo entonces
+            c.tx := más_memoria(CABE_TX)
+            c.rx := más_memoria(CABE_RX)
+            si c.tx = nulo o c.rx = nulo entonces devolver falso fin
+        fin
+        c.usada := cierto
+        c.suelta := falso
+        c.dueño := escuchas[l].dueño
+        c.de_escucha := l + 1
+        c.aceptada := falso
+        c.ip := ip
+        c.puerto_l := pl
+        c.puerto_r := lee16(p)
+        c.iss := ahora() * 64000 + c.puerto_r * 1000003 + lee32(p + 4) * 2654435761
+        c.snd_una := c.iss
+        c.snd_nxt := c.iss + 1
+        c.snd_wnd := lee16(p + 14)
+        c.rcv_nxt := lee32(p + 4) + 1
+        c.mss := 536
+        hl := (nat32(p[12]) >> 4) * 4
+        i := 20
+        mientras i < hl y i < n hacer
+            op := p[i]
+            si op = 0 entonces romper fin
+            si op = 1 entonces
+                i := i + 1
+                seguir
+            fin
+            si i + 1 >= hl entonces romper fin
+            ol := p[i + 1]
+            si ol < 2 entonces romper fin
+            si op = 2 y ol = 4 entonces c.mss := mín(lee16(p + i + 2), 1460) fin
+            i := i + ol
+        fin
+        si c.mss < 64 entonces c.mss := 536 fin
+        c.rto := RTO_INICIAL
+        c.intentos := 0
+        c.tx_ini := 0
+        c.tx_n := 0
+        c.rx_ini := 0
+        c.rx_n := 0
+        c.fin_recibido := falso
+        c.fin_enviado := falso
+        c.cerrar := falso
+        c.error := 0
+        c.p_clase := P_NADA
+        c.estado := SYN_RECIBIDO
+        c.límite := ahora() + 3000                  ; (si en 30 s no se acepta, fuera)
+        manda(c, F_SYN ob F_ACK, c.iss, 0, 0)
+        c.reloj := ahora() + c.rto
+        apunta4("tcp: llega una conexión al puerto %u (desde el %u)", pl, c.puerto_r, 0, 0)
+        devolver cierto
     fin
 
     función conexión_de(s: nat32, dueño: nat32): puntero a Conexión
@@ -387,6 +566,10 @@ módulo Rtcp
     público función tcp_acabó(dueño: nat32)
         variable i: nat32
         variable c: puntero a Conexión
+        ; (SSH) sus puertos en escucha, y lo que llegó a ellos sin aceptar
+        para i desde 0 hasta MAX_ESCUCHAS - 1 hacer
+            si escuchas[i].usada y escuchas[i].dueño = dueño entonces no_escuchar(PRIMERA_ESCUCHA + i, dueño) fin
+        fin
         para i desde 0 hasta MAX_CONEX - 1 hacer
             c := dirección(conex[i])
             si c.usada y no c.suelta y c.dueño = dueño entonces
@@ -437,9 +620,37 @@ módulo Rtcp
         para i desde 0 hasta MAX_CONEX - 1 hacer
             si conex[i].usada y conex[i].estado <> CERRADA y conex[i].ip = ip y conex[i].puerto_l = pl y conex[i].puerto_r = pr entonces c := dirección(conex[i]) fin
         fin
+        si c = nulo y señal yb (F_SYN ob F_ACK ob F_RST) = F_SYN entonces
+            si llega_syn(ip, p, n) entonces devolver fin     ; (SSH) a un puerto en escucha
+        fin
         si c = nulo o c.estado = ROTA entonces
             manda_rst(ip, p, n)
             devolver
+        fin
+        ; ---- (SSH) SYN_RECIBIDO: esperando el ACK de nuestro SYN+ACK ----
+        si c.estado = SYN_RECIBIDO entonces
+            si señal yb F_RST <> 0 entonces
+                libera(c)
+                devolver
+            fin
+            si señal yb F_SYN <> 0 entonces
+                manda(c, F_SYN ob F_ACK, c.iss, 0, 0)       ; (el SYN otra vez: el SYN+ACK se perdió)
+                devolver
+            fin
+            si señal yb F_ACK = 0 entonces devolver fin
+            si ak <> c.iss + 1 entonces
+                manda_rst(ip, p, n)
+                devolver
+            fin
+            c.estado := ESTABLECIDA
+            c.snd_una := ak
+            c.snd_wnd := ven
+            c.reloj := 0
+            c.intentos := 0
+            c.rto := RTO_INICIAL
+            c.límite := ahora() + 3000                  ; (la que no se acepta en 30 s, fuera)
+            si c.de_escucha <> 0 entonces entrega_aceptada(c.de_escucha - 1) fin
+            ; (y sigue: puede traer datos)
         fin
         ; ---- SYN_ENVIADO: esperando el SYN+ACK ----
         si c.estado = SYN_ENVIADO entonces
@@ -573,8 +784,21 @@ módulo Rtcp
         variable i, t, vuelo: nat32
         variable c: puntero a Conexión
         t := ahora()
+        ; (SSH) quien espera en un puerto en escucha, a su hora
+        para i desde 0 hasta MAX_ESCUCHAS - 1 hacer
+            si escuchas[i].usada y escuchas[i].espera y t >= escuchas[i].p_límite entonces
+                escuchas[i].espera := falso
+                contestar(escuchas[i].p_hueco, escuchas[i].p_serie, TIEMPO, 0, 0, nulo, 0)
+            fin
+        fin
         para i desde 0 hasta MAX_CONEX - 1 hacer
             c := dirección(conex[i])
+            ; (SSH) lo que llegó y nadie acepta
+            si c.usada y no c.aceptada y t >= c.límite entonces
+                si c.estado <> SYN_RECIBIDO entonces manda(c, F_RST ob F_ACK, c.snd_nxt, 0, 0) fin
+                libera(c)
+                seguir
+            fin
             si c.usada entonces
                 ; lo que espera el programa, a su hora
                 si c.p_clase <> P_NADA y t >= c.p_límite entonces
@@ -597,7 +821,9 @@ módulo Rtcp
                 si c.reloj <> 0 y t >= c.reloj entonces
                     c.intentos := c.intentos + 1
                     si c.intentos > MAX_INTENTOS entonces
-                        si c.estado = SYN_ENVIADO entonces
+                        si c.estado = SYN_RECIBIDO entonces
+                            libera(c)
+                        sino si c.estado = SYN_ENVIADO entonces
                             contesta_pendiente(c, TIEMPO, nulo, 0)
                             libera(c)
                         sino
@@ -610,6 +836,8 @@ módulo Rtcp
                     c.reloj := t + c.rto
                     si c.estado = SYN_ENVIADO entonces
                         manda(c, F_SYN, c.iss, 0, 0)
+                    sino si c.estado = SYN_RECIBIDO entonces
+                        manda(c, F_SYN ob F_ACK, c.iss, 0, 0)
                     sino
                         vuelo := c.snd_nxt - c.snd_una
                         si vuelo = 0 y c.tx_n > 0 entonces
