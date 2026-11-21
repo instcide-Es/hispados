@@ -1,0 +1,167 @@
+ESCUDO.BIN - Escudo, el antivirus de Hispa-Pentium (docs/PENTIUM.md, «Escudo»).
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+Para qué
+  - Proteger el propio Hispa-Pentium: lo que se descarga con el Navegador, las
+    memorias USB y los CD que se conectan, y los programas de Windows (.EXE)
+    antes de abrirlos con WIN32.BIN.
+  - Ser la «estación» donde se revisan las memorias USB y los archivos antes
+    de llevarlos a los ordenadores con Windows de la asociación.
+  Los virus de Windows no funcionan en Hispa-Pentium tal cual (es otro
+  sistema); pero Hispa-Pentium sí abre programas de Windows de 32 bits, y
+  lo que pasa por él acaba en otros equipos: por eso se mira todo.
+
+Cómo se usa
+  - Inicio > Escudo, o el escudo de la bandeja (abajo a la derecha): la
+    ventana, con sus pestañas Revisar (todo, una unidad o una carpeta, con
+    su barra y «Cancelar»), Cuarentena (devolver o borrar), Historial, Red
+    (lo que escucha en la red) y Opciones.
+  - Al conectar una memoria USB o meter un CD: «¿Revisar la memoria?».
+  - Desde la Consola:
+      ESCUDO RUTA...          revisa archivos, carpetas o unidades (X:); * todo
+      ESCUDO /LISTA RUTA...   lo mismo, una línea por archivo
+      ESCUDO /CUARENTENA RUTA revisa y pone en cuarentena lo encontrado
+      ESCUDO /ESTADO          las firmas y lo que hay en cuarentena
+      ESCUDO /ACTUALIZA       trae las firmas nuevas (PAQUETES ACTUALIZA escbase escdia)
+      ESCUDO /RESTAURA n      devuelve a su sitio lo n.º n de la cuarentena
+      ESCUDO /BORRA n         lo borra para siempre
+    Da 0 si no hay nada, 1 si encuentra algo y 2 si algo falla.
+  - Los avisos dicen qué archivo, qué firma y qué se puede hacer, con su
+    signo y su palabra ([OK], [!], [i]): nada se dice solo con el color.
+
+Lo que hay en \HISPA (el paquete «escudo»)
+  ESCUDO.BIN              el programa (anillo 3, en C)
+  ESCUDO\LEEME.TXT        esto
+  ESCUDO\ESCUDO.INI       sus opciones (las escribe la ventana)
+  ESCUDO\REGISTRO.TXT     lo que ha hecho (el historial)
+  ESCUDO\FIRMAS\          las firmas: BASE.ESC y COPYING.TXT (el paquete
+                          «escbase»), DIA.ESC y ORIGEN.TXT («escdia»); y, si
+                          se quiere, firmas propias en el formato de ClamAV
+                          (.hdb .hsb .mdb .msb .ndb .ldb .fp .sfp .ign2) o un
+                          .cvd de ClamAV traído a mano (se comprueba su firma)
+  CUARENTE\               la cuarentena (la FAT de Hispa-Pentium escribe
+                          nombres de 8+3: «CUARENTENA» queda CUARENTE; si ya
+                          hay una CUARENTENA con su nombre largo, se usa esa):
+                          Qnnnnnnn.CUA (el archivo con sus octetos cambiados:
+                          no se puede abrir ni lo «encuentra» otro antivirus)
+                          e INDICE.TXT (de dónde salió, qué firma, cuándo)
+  MENU\ESCUDO.MNU y .ICP  el acceso del menú Inicio
+
+El motor (motor.c, inflar.c, cvd.c, sumas.c): propio, pequeño
+  Lee las firmas en el formato de ClamAV (docs.clamav.net, «Signatures»; la
+  referencia del formato es libclamav, de Cisco Talos, GPL-2: NO lleva nada
+  de su código). Mira:
+  - las sumas del archivo entero: .hdb (MD5), .hsb (MD5, SHA-1, SHA-256; con
+    tamaño o de cualquier tamaño); las de las secciones de un ejecutable PE:
+    .mdb/.msb; y las de «no es un virus»: .fp/.sfp, que mandan. Solo se
+    calcula una suma si hay alguna firma de ese tamaño.
+  - los patrones del cuerpo (.ndb), en hexadecimal con sus comodines (??, a?,
+    ?a, *, {n}, {n-m}, {-n}, {n-}, [n-m], (aa|bb), !(aa|bb), (aaaa|bbbb), las
+    alternativas de largo variable, (B), (L), (W)), su clase de archivo
+    (cualquiera, PE, ELF, Mach-O, PDF, Java) y su sitio (*, n, n,m, EOF-n,
+    EP+n, EP-n, Sx+n, SEx, SL+n).
+  - las lógicas (.ldb): subfirmas como las del cuerpo, con ::i ::w ::a ::f,
+    la expresión (& | ( ) y las cuentas =n >n <n con «,m»), y de la cabecera
+    Target, Engine, FileSize, EntryPoint, NumberOfSections y
+    Container:CL_TYPE_ZIP.
+  - .ign2 (las firmas que ClamAV retira: no se dicen).
+  - dentro de los ZIP (guardados y deflate), hasta tres niveles; los miembros
+    cifrados se cuentan y se dice que no se han podido mirar.
+  - EICAR (el archivo de prueba de todos los antivirus) siempre, aunque no
+    haya firmas.
+  - los .cvd de ClamAV: la cabecera, su firma digital (la «de siempre»: RSA
+    de 1024 bits con la clave pública de ClamAV sobre la MD5 de lo de
+    detrás; la cuenta la hace BearSSL) y el .tar.gz de dentro.
+
+Lo que se pierde frente a ClamAV (y por qué)
+  - Las firmas de bytecode (bytecode.cvd, .cbc): necesitan la máquina virtual
+    de ClamAV (LLVM o su intérprete): enormes. Se dejan enteras.
+  - Lo que pide normalizar o desmontar antes: HTML y correo (objetivos 3 y 4),
+    texto normalizado (7), gráficos (5), Flash (11), las macros de Office
+    (OLE2, objetivo 2), los iconos (.idb), la información de versión de los
+    PE (VI), las expresiones regulares (PCRE), las comparaciones de octetos,
+    las macros de las lógicas, los «fuzzy hash» de imágenes, YARA, las
+    firmas de phishing (.pdb, .wdb, .gdb) y las de certificados (.crb, .cat).
+    Esas firmas se cuentan («no soportadas») y se dejan.
+  - Los contenedores que no son ZIP: RAR, 7z, CAB, los instaladores, los
+    ejecutables comprimidos (UPX...), PDF por dentro (sus «streams»), los
+    correos con adjuntos, ISO. Un virus dentro de un RAR no se ve.
+  - Las firmas de «programas no deseados» (PUA: .hdu, .ndu...): ClamAV
+    tampoco las mira si no se le pide; no se cargan.
+  - De un archivo de más de max_mb (16 MB de fábrica; la ventana deja de 1 a
+    128), los patrones solo miran el principio; las sumas, todo.
+  - La firma digital nueva de ClamAV (los .cvd.sign, con certificados X.509)
+    no se mira: se mira la de siempre, que va dentro de cada .cvd.
+  - En FIRMAS.ESC las sumas guardan 8 de sus octetos (no la suma entera) y su
+    tamaño: que un archivo limpio dé lo mismo por casualidad es del orden de
+    una vez en 10^13. Y sus nombres van sin el número de ClamAV (de
+    «Win.Trojan.Agent-1234567-0» queda «Win.Trojan.Agent»).
+  Lo importante para la asociación (ejecutables de Windows, documentos y
+  memorias con virus conocidos) sí se mira: sumas, patrones del cuerpo y
+  lógicas son casi todas las firmas de ClamAV.
+
+Las firmas: de dónde y cuánto
+  Los equipos NO las traen del CDN de ClamAV: ClamAV solo admite bajarlas con
+  freshclam o cvdupdate (lo demás se deniega: 403/429; probado). Se hace como
+  pide ClamAV para muchos equipos: un espejo propio en el VPS, puesto al día
+  con cvdupdate una vez al día, y tools/escudo_firmas.py hace con él los
+  paquetes «escbase» (de main.cvd) y «escdia» (de daily.cvd), que van con el
+  catálogo firmado de http://actualiza.hispados.es/pentium/ (lo publica la
+  sesión que publica Hispa-Pentium). Escudo los trae con PAQUETES, desde la
+  ventana o solo, una vez al día como mucho.
+  Desde diciembre de 2025 (ClamAV retiró las firmas viejas) main.cvd mide
+  unos 85 MiB y daily.cvd unos 22 MiB (comprimidos): son millones de sumas y
+  unas decenas de miles de patrones. En FIRMAS.ESC cada suma ocupa 16 octetos
+  en el disco (y no se cargan en memoria: se lee la página que hace falta); lo
+  que va a memoria son los patrones (unos 200 octetos cada uno: 35.000
+  patrones, unos 7 MB). Si no cabe en el límite (48 MB la base, 24 el día:
+  tools/escudo_firmas.py), se dejan primero las sumas de main (de archivo y
+  luego de sección); los patrones van siempre.
+
+Lo que tarda
+  En QEMU (sin KVM), de 1 a 1,8 MB/s leyendo del disco IDE (16 MB con 20.000
+  patrones, 5.000 lógicas y 100.000 sumas); el mismo motor en un PC de hoy,
+  de 85 a 200 MB/s. En un Pentium a 133 MHz, por la cuenta de ciclos del bucle
+  de las anclas (unos 30 por octeto; sin multiplicar: «imul» son 10 ciclos en
+  un Pentium), del orden de 2 a 4 MB/s: una memoria de 1 GB llena, unos
+  5 minutos; los documentos de siempre, segundos.
+
+Lo que no hace Hispa-Pentium (y no hace falta mirar)
+  - No hay «autorun»: al conectar una memoria o meter un CD, el sistema solo
+    la monta y lo dice (y Escudo pregunta si se revisa); un AUTORUN.INF no se
+    lee nunca. Escudo lo señala como aviso ([i]), porque en un Windows viejo
+    podría abrir un programa solo.
+  - Escuchar en la red: solo el servidor SSH (SSHD.BIN), apagado de fábrica;
+    la pestaña Red lo dice y lo apaga. Lo demás solo llama hacia fuera.
+
+Los ganchos (marcados «(ESCUDO)» en los archivos de todos)
+  - escritorio.cas: el escudo de la bandeja (un clic: la ventana) y, al
+    arrancar, «ESCUDO /VIGILAR».
+  - navega/descarga.c: al acabar una descarga, «ESCUDO /DESCARGA RUTA» (solo
+    dice algo si encuentra un virus).
+  - WIN32.BIN (rama pentium-win32): antes de cargar el .EXE,
+    «ESCUDO /ANTES RUTA» (da 1 si no se debe abrir): gancho_win32.h.
+
+Cómo está hecho (castel/nucleo32/escudo/)
+  escudo.h       lo que se dicen el motor y la plataforma
+  motor.c        las firmas, los índices, buscar, los ZIP, FIRMAS.ESC
+  inflar.c       deflate y gzip; cvd.c los .cvd y su firma; sumas.c MD5/SHA
+  escudo.c       las órdenes, revisar, la cuarentena, el registro, vigilar
+  ventana.c      la ventana y sus cuadros (con la letra de letra.cas)
+  plataforma.c   las llamadas al sistema, la memoria, la biblioteca
+  anfitrion.c    el mismo motor en Linux (pruebas; hacer FIRMAS.ESC)
+  gancho_win32.h el gancho de WIN32.BIN
+  prueba/        la base pequeña de prueba (hazprueba.py), compara.py y
+                 hazcarga.py (para medir)
+  hacer.sh, paquete.sh, entrada.asm, pentium.ld
+
+Lleva dentro, de terceros:
+  - De BearSSL 0.6, de Thomas Pornin (https://bearssl.org/), licencia MIT
+    (terceros/bearssl/LICENSE.txt), solo la cuenta de RSA (rsa_i31_pub e
+    i31_*). Copyright (c) 2016 Thomas Pornin <pornin@bolet.org>.
+  - La clave pública de ClamAV (su módulo y su exponente: son públicos), para
+    comprobar la firma digital de los .cvd.
+Las firmas (paquetes escbase y escdia) son las de ClamAV, de Cisco Systems y
+Cisco Talos, con su licencia (GPL-2: COPYING.TXT, el que va dentro de sus
+.cvd), cambiadas de formato y con ORIGEN.TXT, que dice de qué versiones
+salen. ClamAV es una marca de Cisco; Escudo no es ClamAV ni es de Cisco.

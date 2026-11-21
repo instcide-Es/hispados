@@ -631,8 +631,9 @@ static void pinta_revisar(void)
 		for (k = 0; k < rev.n_hallados; k++)
 			if (!rev.h[k].aviso)
 				malos++;
-		formatear(t, sizeof t, "%s %s: %S archivos (%S %s) en %u s.", rev.cortada ? "Cancelado, en" : "Revisado",
-			  strcmp(rev.raiz, "*") ? rev.raiz : "todo el equipo", rev.revisados,
+		formatear(t, sizeof t, "%s %s%s %S archivos (%S %s) en %u s.", rev.cortada ? "Cancelado, en" : "Revisado",
+			  strcmp(rev.raiz, "*") ? rev.raiz : "todo el equipo",
+			  rev.raiz[0] && rev.raiz[strlen(rev.raiz) - 1] == ':' ? "" : ":", rev.revisados,
 			  rev.octetos >= (1u << 20) ? rev.octetos >> 20 : (rev.octetos + 1023) / 1024, rev.octetos >= (1u << 20) ? "MB" : "K",
 			  rev.ms / 1000);
 		texto_n(20, y, t, (L.an - 40) / 8, C_TINTA, 1);

@@ -9,7 +9,8 @@
  *       tarda (MB/s); -z no mira dentro de los ZIP
  *   escudo-anfitrion -f ... -o FIRMAS.ESC [-F] [-d AAAAMMDD] [-l MB]
  *       hace FIRMAS.ESC con lo cargado (-F: los nombres de las sumas, por familia;
- *       -l: que no pase de tantos MB, dejando primero las sumas de main)
+ *       -l: que no pase de tantos MB, dejando primero las sumas de main;
+ *       -O main|dia: solo lo que viene de main.cvd, o solo lo demás)
  *   escudo-anfitrion -c ARCHIVO.cvd
  *       solo comprueba la firma digital de un .cvd y dice su cabecera
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
@@ -123,6 +124,7 @@ int main(int argc, char **argv)
 	const char *salida = 0;
 	int familias = 0, tiempo = 0, i, n_rutas = 0;
 	u32 fecha = 0, t0, limite = 0;
+	int origen = 0;
 	const char *rutas[4096];
 	memset(&inf, 0, sizeof inf);
 	motor_inicia();
@@ -143,7 +145,10 @@ int main(int argc, char **argv)
 			familias = 1;
 		else if (!strcmp(argv[i], "-l") && i + 1 < argc)
 			limite = (u32)atoi(argv[++i]) << 20;
-		else if (!strcmp(argv[i], "-q"))
+		else if (!strcmp(argv[i], "-O") && i + 1 < argc) {
+			i++;
+			origen = !strcmp(argv[i], "main") ? 1 : !strcmp(argv[i], "dia") ? 2 : 0;
+		} else if (!strcmp(argv[i], "-q"))
 			callado = 1;
 		else if (!strcmp(argv[i], "-d") && i + 1 < argc)
 			fecha = (u32)atoi(argv[++i]);
@@ -178,7 +183,7 @@ int main(int argc, char **argv)
 	if (salida) {
 		if (!fecha)
 			fecha = inf.fecha;
-		if (motor_escribe_esc(salida, familias, fecha, limite)) {
+		if (motor_escribe_esc(salida, familias, fecha, limite, origen)) {
 			fprintf(stderr, "escudo: no se puede escribir %s\n", salida);
 			return 2;
 		}

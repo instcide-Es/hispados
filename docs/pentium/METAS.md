@@ -12,6 +12,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] **Disco SATA del Toshiba NB250** (ICH7) — rama pentium-sata, a falta de la prueba de Carlos
 - [ ] **Explorador de archivos** y **dock** — rama pentium-explorador
 - [ ] **Programas de Windows y DirectX** (HW32 de Hispa-486 llevado a Pentium) — rama pentium-win32
+- [x] ~~**Antivirus «Escudo»** (pedido por el presidente de la asociación): motor propio con las firmas de ClamAV, la ventana, la cuarentena, «¿Revisar la memoria?» al conectar una memoria USB o un CD, las descargas del Navegador, el cortafuegos (lo que escucha) y las firmas por Internet desde actualiza.hispados.es~~ — rama pentium-escudo (21/11: ESCUDO.BIN; falta el gancho de WIN32.BIN cuando entre la rama, y medir con las bases de verdad)
 - [x] ~~**Administrador de dispositivos** (PCI, USB, ACPI: qué hay, qué controlador lo lleva, recursos y estado)~~ — rama pentium-dispositivos (21/11: DISPOSIT.BIN y la llamada 155; informe en X:\DISPOSIT.TXT)
 
 ## El escritorio
@@ -32,6 +33,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] Compartir carpetas en red (SMB) y FTP
 - [ ] **Tailscale** (WireGuard + su red privada: cada equipo localizado por su nombre) y **SSH** (entrar en la terminal de Hispa-Pentium desde otro equipo y desde él en los demás) — rama pentium-tailscale
 - [ ] Más tarjetas de red y controladoras (las que vaya trayendo el taller)
+- [ ] Escudo: RAR y UPX por dentro, el interior de los PDF, revisar en segundo plano, que la red diga qué puertos escucha
 - [ ] NTP: la hora por Internet (y quitar el riesgo de la hora sin cifrar de TLS)
 - [ ] TLS 1.3 y descompresión gzip
 

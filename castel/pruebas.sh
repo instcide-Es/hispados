@@ -158,6 +158,16 @@
 #      Configuración, las pestañas de las propiedades, copiar y guardar el
 #      informe en X:); en un «q35» (RTL8139, xHCI con concentrador) el
 #      informe en texto; y con «sinusb» y «sinacpi», lo desactivado.
+#  20. (ESCUDO) Escudo, el antivirus (ESCUDO.BIN, nucleo32/escudo/): el motor en
+#      Linux con la base pequeña de prueba (escudo/prueba/hazprueba.py: sumas,
+#      patrones con comodines y desplazamientos, PE, lógicas, ZIP dentro de
+#      ZIP, limpias e ignoradas), lo mismo desde FIRMAS.ESC, y la firma
+#      digital de un .cvd de verdad (el de las pruebas de ClamAV, si hay red:
+#      buena, y mala si se toca un octeto); en Hispa-Pentium, desde el
+#      intérprete (ESCUDO /LISTA, la cuarentena y vuelta), y en el escritorio
+#      una memoria USB enchufada en caliente con EICAR (suelto, en un ZIP y un
+#      AUTORUN.INF): «¿Revisar la memoria?», la revisión, la cuarentena;
+#      «ESCUDO /DESCARGA» (lo que lanza el Navegador) y lo que tarda (MB/s).
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -176,6 +186,7 @@
 #   SOLO=pantalla ./pruebas.sh    la primera y la decimoséptima (la medida de la pantalla)
 #   SOLO=navegador ./pruebas.sh   la primera y la decimoctava (el Navegador: NAVEGA.BIN)
 #   SOLO=dispositivos ./pruebas.sh  la primera y la 19 (el Administrador de dispositivos)
+#   SOLO=escudo ./pruebas.sh      la primera y la 20 (Escudo, el antivirus)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -239,7 +250,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|escudo) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (ESCUDO)
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -3366,6 +3377,125 @@ kill $NPID 2> /dev/null; wait $NPID 2> /dev/null
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Navegador)"
 fi   # el Navegador
+
+# ------------------------------------------------- 20. (ESCUDO) Escudo, el antivirus
+# ESCUDO.BIN (nucleo32/escudo/): el motor propio con las firmas de ClamAV. La
+# base pequeña de prueba (escudo/prueba/hazprueba.py) y sus archivos, con lo
+# que tiene que decir de cada uno (ESPERADO.TXT; escudo/prueba/compara.py).
+if parte08 escudo; then
+echo "== Hispa-Pentium: Escudo, el antivirus (ESCUDO.BIN, con las firmas de ClamAV) =="
+E=$P/escudo
+rm -rf $E; mkdir -p $E $G
+export MTOOLS_SKIP_CHECK=1
+python3 -I $AQUI/nucleo32/escudo/prueba/hazprueba.py $E/p > /dev/null
+CMP="python3 -I $AQUI/nucleo32/escudo/prueba/compara.py $E/p/ESPERADO.TXT"
+FIRMAS=$(for f in $E/p/FIRMAS/*; do echo "-f $f"; done)
+if bash $AQUI/nucleo32/escudo/hacer.sh --anfitrion $E/anf > $E/hacer.txt 2>&1; then
+  # 1. el motor, en Linux
+  # shellcheck disable=SC2086
+  $E/anf $FIRMAS $E/p/ARCHIVOS > $E/l1.txt 2> $E/l1.err
+  if $CMP $E/l1.txt > $E/c1.txt; then ok "el motor (en Linux): $(tail -1 $E/c1.txt | sed 's/^compara.py: //'): sumas MD5/SHA-1/SHA-256 (y de cualquier tamaño), de sección PE, comodines, desplazamientos, punto de entrada, lógicas con cuentas y ::iwaf, ZIP dentro de ZIP, limpias (.fp) e ignoradas (.ign2)"
+  else ko "el motor (en Linux) no dice lo que tiene que decir:"; sed 's/^/        /' $E/c1.txt | head -8; fi
+  S=$E/l1.err
+  mira "lo que no sabe mirar se cuenta y se deja (el objetivo HTML, la PCRE); y la del nivel 240 no se carga" "^escudo: firmas: 4 sumas, 1 limpias, 8 del cuerpo, 4 lógicas .*; 2 no soportadas"
+  # shellcheck disable=SC2086
+  $E/anf -q $FIRMAS -o $E/PRUEBA.ESC -F && $E/anf -q -f $E/PRUEBA.ESC $E/p/ARCHIVOS > $E/l2.txt 2>&1
+  if $CMP $E/l2.txt > $E/c2.txt; then ok "y lo mismo desde FIRMAS.ESC (el índice propio: las sumas se leen del disco por páginas)"
+  else ko "desde FIRMAS.ESC no dice lo mismo:"; sed 's/^/        /' $E/c2.txt | head -6; fi
+  # un .cvd de verdad, firmado con la clave de ClamAV (el de sus pruebas): si hay red
+  if curl -sf --max-time 20 -o $E/test-3.cvd https://raw.githubusercontent.com/Cisco-Talos/clamav/main/unit_tests/input/freshclam_testfiles/test-3.cvd; then
+    cp $E/test-3.cvd $E/toca.cvd
+    python3 -I -c "import sys; d=bytearray(open(sys.argv[1],'rb').read()); d[3000]^=0x5A; open(sys.argv[1],'wb').write(d)" $E/toca.cvd
+    if $E/anf -c $E/test-3.cvd | grep -q "firma digital BUENA" && ! $E/anf -c $E/toca.cvd > $E/toca.txt && grep -q "firma digital MALA" $E/toca.txt; then
+      ok "un .cvd de ClamAV (test-3.cvd, de sus pruebas): su firma digital (RSA de la clave de ClamAV sobre la MD5) es buena; tocado un octeto, mala"
+    else ko "la firma digital del .cvd: $($E/anf -c $E/test-3.cvd) / $(cat $E/toca.txt)"; fi
+    $E/anf -f $E/test-3.cvd $E/p/ARCHIVOS/EICAR.COM > $E/l3.txt 2>&1
+    $E/anf -f $E/toca.cvd $E/p/ARCHIVOS/EICAR.COM > $E/l4.txt 2>&1
+    S=$E/l3.txt
+    mira "y se descomprime (tar.gz) y se carga: sus sumas, las limpias y las de PUA (que no se cargan)" "firma digital de ClamAV buena (versión 3, 11 firmas, de raynman)" "^escudo: firmas: 5 sumas, 2 limpias, .* 4 PUA sin cargar"
+    S=$E/l4.txt
+    mira "el tocado no se usa" "la firma digital NO es buena"
+  else echo "  (sin red: sin el .cvd de las pruebas de ClamAV)"; fi
+else ko "escudo/hacer.sh --anfitrion: $(tail -3 $E/hacer.txt)"; fi
+# 2. en Hispa-Pentium, desde el intérprete de órdenes: ESCUDO /LISTA, la
+# cuarentena (/CUARENTENA), /ESTADO, /RESTAURA (igual octeto a octeto)
+if $AQUI/nucleo32/disco.sh $E/d.img 32 escudo > $E/disco.txt 2>&1 && mmd -i $E/d.img ::ARCH && mcopy -i $E/d.img $E/p/ARCHIVOS/* ::ARCH/ \
+   && mcopy -i $E/d.img $E/p/FIRMAS/* ::ESCUDO/FIRMAS/; then
+  cp $E/d.img $E/o.img
+  ESCRIBE=1 DISCO=$E/o.img ARRANQUE="ordenes escritura" MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 3" "escudo /lista C:\\ARCH" ":pausa 10" \
+    "escudo /cuarentena C:\\ARCH\\EICAR.COM" ":pausa 3" "escudo /estado" ":pausa 3" "dir C:\\ARCH\\EICAR.COM" ":pausa 1" \
+    "escudo /restaura 1" ":pausa 3" "escudo /estado" ":pausa 3" > $E/o.sal 2>&1
+  tr -d '\r' < $E/o.sal > $E/o.txt
+  if $CMP $E/o.txt > $E/c3.txt; then ok "en Hispa-Pentium (ESCUDO /LISTA C:\\ARCH): $(tail -1 $E/c3.txt | sed 's/^compara.py: //'), lo mismo que en Linux"
+  else ko "ESCUDO /LISTA en Hispa-Pentium:"; sed 's/^/        /' $E/c3.txt | head -8; fi
+  S=$E/o.txt
+  mira "el resumen y el código de salida (1: hay algo)" "^Revisados: 35 archivos" "Encontrados: 21\.$" "(ESCUDO.BIN ha acabado con el código 1)"
+  mira "ESCUDO /CUARENTENA: el archivo sale de su sitio y va a la cuarentena (CUARENTE: la FAT escribe 8+3)" \
+    "^escudo: en cuarentena: C:.ARCH.EICAR.COM (Eicar-Test-Signature) -> Q0000001.CUA$" "^En cuarentena (C:.CUARENTE): 1\.$" \
+    "^  1\. 20[0-9-]* [0-9:]*  Eicar-Test-Signature  (de C:.ARCH.EICAR.COM)$"
+  mira "ESCUDO /RESTAURA 1: vuelve a su sitio" "^Devuelto a C:.ARCH.EICAR.COM\.$" "^En cuarentena (C:.CUARENTE): 0\.$"
+  if saca $E/o.img ARCH/EICAR.COM $E/eicar.vuelto && cmp -s $E/eicar.vuelto $E/p/ARCHIVOS/EICAR.COM && saca $E/o.img ESCUDO/REGISTRO.TXT $E/reg.txt \
+     && grep -q "restaurado de la cuarentena: C:.ARCH.EICAR.COM" $E/reg.txt; then
+    ok "lo devuelto es igual octeto a octeto, y queda apuntado en el registro (\\ESCUDO\\REGISTRO.TXT)"
+  else ko "lo devuelto no está, no es igual o no está en el registro"; fi
+  sano $E/o.img
+  grep -q "^$E/o.img: [0-9]* files" $P/fsck.txt && ok "y el disco queda sano (fsck.fat)" || { ko "el disco no queda sano:"; head -4 $P/fsck.txt | sed 's/^/        /'; }
+  # 3. en el escritorio: una memoria USB en caliente (EHCI) con EICAR suelto,
+  # en un ZIP y un AUTORUN.INF; «¿Revisar la memoria?», Intro, la revisión;
+  # a la cuarentena los dos; y la pestaña Cuarentena. Y ESCUDO /DESCARGA (lo
+  # que lanza el Navegador al acabar una descarga), desde la Consola.
+  cp $E/d.img $E/e.img
+  rm -f $E/m.img; dd if=/dev/zero of=$E/m.img bs=1M count=16 status=none; mkfs.fat -F 16 -n MEMORIA $E/m.img > /dev/null
+  printf '[autorun]\r\nopen=EICAR.COM\r\n' > $E/AUTORUN.INF
+  mcopy -i $E/m.img $E/p/ARCHIVOS/EICAR.COM $E/p/ARCHIVOS/EICAR.ZIP $E/p/ARCHIVOS/LIMPIO.TXT $E/AUTORUN.INF ::
+  CAPTURAS=$G ESCRIBE=1 DISCO=$E/e.img ARRANQUE="escritorio escritura" MODULOS= QEMU_MAS="-device usb-ehci,id=u" \
+    $AQUI/nucleo32/probar.sh "" ":pausa 4" ":captura es0" ":monitor drive_add 0 if=none,id=ma,file=$E/m.img,format=raw" \
+    ":monitor device_add usb-storage,bus=u.0,drive=ma,id=mema" ":pausa 5" ":captura es1" ":tecla ret" ":pausa 6" ":captura es2" \
+    ":tecla ret" ":pausa 2" ":tecla ret" ":pausa 2" ":clic 300 146" ":pausa 2" ":captura es3" ":clic 710 40" ":pausa 2" \
+    ":doble 62 185" ":pausa 3" "escudo /descarga C:\\ARCH\\SUMAZIP.ZIP" ":pausa 4" ":captura es4" ":tecla ret" ":pausa 3" > $E/e.sal 2>&1
+  tr -d '\r' < $E/e.sal > $E/e.txt
+  S=$E/e.txt
+  mira "el escritorio lanza ESCUDO /VIGILAR, que ve la memoria enchufada y pregunta (ESCUDO /PREGUNTA W:)" \
+    "escudo: vigilando las unidades (memorias USB y CD)$" "^escudo: unidad nueva W: (MEMORIA, medio 3)$" "^escudo: pregunta W: revisar$"
+  miracap "el escudo en la bandeja (a la derecha, junto al reloj)" es0 rgb 721 576 3b82f6 rgb 721 581 ffffff
+  miracap "«¿Revisar la memoria USB W: (MEMORIA)?», con «Revisar» y «Ahora no»" es1 negrita 150 180 700 240 "¿Revisar la memoria USB W: (MEMORIA)?" \
+    negrita 300 340 700 400 "Revisar" texto 300 340 700 400 "Ahora no"
+  mira "la revisión de la memoria: EICAR suelto y en el ZIP, y el aviso de AUTORUN.INF" "^escudo: encontrado: W:.EICAR.COM: Eicar-Test-Signature$" \
+    "^escudo: encontrado: W:.EICAR.ZIP > prueba/eicar.com: Eicar-Test-Signature$" "^escudo: ventana: revisión de W: acabada: 4 archivos, 3 encontrados$"
+  miracap "lo encontrado, con su signo y su palabra ([!], [i]), y qué hacer con cada uno" es2 negrita 80 180 720 260 "[!] Encontrados: 3 (2 con firmas de virus)." \
+    texto 80 230 720 320 "[!] W:\\EICAR.COM: Eicar-Test-Signature" texto 80 230 720 320 "[i] W:\\AUTORUN.INF: aviso: AUTORUN.INF" \
+    negrita 80 450 300 500 "A cuarentena" texto 80 450 720 500 "Dejarlo"
+  mira "Intro, Intro: los dos a la cuarentena" "^escudo: en cuarentena: W:.EICAR.COM (Eicar-Test-Signature) -> Q0000001.CUA$" \
+    "^escudo: en cuarentena: W:.EICAR.ZIP (Eicar-Test-Signature) -> Q0000002.CUA$"
+  miracap "la pestaña Cuarentena, con lo que ha entrado" es3 negrita 80 130 400 160 "Cuarentena (2)" texto 80 190 720 260 "Eicar-Test-Signature  (de W:\\EICAR.COM)"
+  mira "ESCUDO /DESCARGA (lo que lanza el Navegador): encontrado, se avisa en su cuadro y va a la cuarentena con Intro" \
+    "^escudo: descarga C:.ARCH.SUMAZIP.ZIP: Hispa.Prueba.SumaMD5-1$" "^escudo: aviso: C:.ARCH.SUMAZIP.ZIP: Hispa.Prueba.SumaMD5-1$" \
+    "^escudo: en cuarentena: C:.ARCH.SUMAZIP.ZIP (Hispa.Prueba.SumaMD5-1) -> Q0000003.CUA$"
+  miracap "el cuadro del aviso: dónde, qué firma, y «A cuarentena», «Borrarlo», «Dejarlo»" es4 negrita 100 150 720 240 "[!] Escudo ha encontrado algo en un archivo." \
+    texto 100 150 720 320 "Hispa.Prueba.SumaMD5-1" negrita 100 300 720 460 "A cuarentena"
+  if mdir -i $E/m.img ::EICAR.COM > /dev/null 2>&1 || mdir -i $E/m.img ::EICAR.ZIP > /dev/null 2>&1 || ! mdir -i $E/m.img ::LIMPIO.TXT > /dev/null 2>&1; then
+    ko "en la memoria siguen EICAR.COM o EICAR.ZIP (o falta LIMPIO.TXT)"
+  elif saca $E/e.img CUARENTE/Q0000001.CUA $E/q1 && python3 -I -c "import sys; d=open(sys.argv[1],'rb').read(); e=open(sys.argv[2],'rb').read(); sys.exit(bytes(b^0xA5 for b in d)!=e)" $E/q1 $E/p/ARCHIVOS/EICAR.COM; then
+    ok "en la memoria ya no están (LIMPIO.TXT, sí); en la cuarentena del disco, con sus octetos cambiados (no se puede abrir ni lo encuentra otro antivirus)"
+  else ko "la cuarentena no tiene lo que tiene que tener"; fi
+  sano $E/m.img
+  grep -q "^$E/m.img: [0-9]* files" $P/fsck.txt && ok "y la memoria queda sana" || { ko "la memoria no queda sana:"; head -4 $P/fsck.txt | sed 's/^/        /'; }
+  if ! grep -q "excepción\|\*\*\*" $E/e.txt $E/o.txt; then ok "ni una excepción ni una queja del núcleo"; else ko "el núcleo se ha quejado:"; grep -h "excepción\|\*\*\*" $E/e.txt $E/o.txt | head -3 | sed 's/^/        /'; fi
+  # 4. lo que tarda: 16 MB al azar con 20.000 patrones, 5.000 lógicas y 100.000 sumas
+  if [ -x $E/anf ]; then
+    python3 -I $AQUI/nucleo32/escudo/prueba/hazcarga.py $E/c 16 > /dev/null
+    $E/anf -q -f $E/c/CARGA.NDB -f $E/c/CARGA.LDB -f $E/c/CARGA.HDB -o $E/c/CARGA.ESC -F
+    LIN=$($E/anf -f $E/c/CARGA.ESC -t $E/c/GRANDE.BIN 2>&1 | sed -n 's/.* \([0-9.]* MB\/s\)$/\1/p')
+    $AQUI/nucleo32/disco.sh $E/r.img 32 escudo > /dev/null 2>&1 && mcopy -i $E/r.img $E/c/CARGA.ESC ::ESCUDO/FIRMAS/ && mcopy -i $E/r.img $E/c/GRANDE.BIN ::
+    DISCO=$E/r.img ARRANQUE=ordenes MODULOS= MEMORIA=96 $AQUI/nucleo32/probar.sh "" ":pausa 3" "escudo C:\\GRANDE.BIN" ":pausa 60" > $E/r.sal 2>&1
+    MS=$(tr -d '\r' < $E/r.sal | sed -n 's/^escudo: 16777216 octetos en \([0-9]*\) ms$/\1/p')
+    if [ -n "$MS" ]; then ok "lo que tarda, 16 MB al azar con 20.000 patrones, 5.000 lógicas y 100.000 sumas: en Linux, $LIN; en QEMU (sin KVM), $(python3 -c "print('%.1f MB/s' % (16000/$MS))") (leyendo del disco IDE)"
+    else ko "no se ha podido medir en QEMU"; fi
+  fi
+else ko "no se puede hacer el disco: $(tail -3 $E/disco.txt)"; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin Escudo)"
+fi   # Escudo
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
 [ -z "${SOLO:-}" ] && parte15

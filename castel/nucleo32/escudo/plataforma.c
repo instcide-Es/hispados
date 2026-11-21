@@ -540,28 +540,29 @@ void escribef(const char *f, ...)
 	va_end(va);
 	escribe(b);
 }
-/* al puerto serie, en UTF-8 tal cual (lo leen las pruebas) */
+/* al puerto serie (lo leen las pruebas), en la 437 como todo el sistema */
+static void a_serie(const char *f, va_list va)
+{
+	char b[600], c[600];
+	u32 n;
+	vformatear(b, sizeof b, f, va);
+	n = a437(c, sizeof c - 1, b);
+	c[n++] = '\n';
+	sc(SC_SERIE, (u32)c, n, 0);
+}
 void serie(const char *f, ...)
 {
-	char b[600];
 	va_list va;
-	int n;
 	va_start(va, f);
-	n = vformatear(b, sizeof b - 2, f, va);
+	a_serie(f, va);
 	va_end(va);
-	b[n++] = '\n';
-	sc(SC_SERIE, (u32)b, (u32)n, 0);
 }
 void pl_apunta(const char *f, ...)
 {
-	char b[600];
 	va_list va;
-	int n;
 	va_start(va, f);
-	n = vformatear(b, sizeof b - 2, f, va);
+	a_serie(f, va);
 	va_end(va);
-	b[n++] = '\n';
-	sc(SC_SERIE, (u32)b, (u32)n, 0);
 }
 int pl_cortar(void)
 {

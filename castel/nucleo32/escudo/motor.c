@@ -403,7 +403,8 @@ static u32 n_a3, n_a2;
 static u32 *fijos;			/* los patrones con desplazamiento fijo */
 static u32 n_fijos;
 
-static u32 h3(u32 k) { return (k * 2654435761u) >> (32 - BITS3); }
+/* (sin multiplicar: en un Pentium, «imul» son 10 ciclos y esto va por cada octeto) */
+static u32 h3(u32 k) { return (k ^ (k >> 4) ^ (k >> 12)) & ((1u << BITS3) - 1); }
 
 /* ---- leer un patrón en hexadecimal ---- */
 typedef struct hexp {
@@ -864,7 +865,7 @@ static int guarda_linea(char clase, const char *s, u32 n)
 		return 1;
 	if (!CRECE(lineas, cap_lineas, n_lineas + n + 3))
 		return 0;
-	lineas[n_lineas++] = clase;
+	lineas[n_lineas++] = marca_origen ? (char)(clase & ~32) : clase;	/* (en mayúscula, las de main) */
 	lineas[n_lineas++] = '|';
 	memcpy(lineas + n_lineas, s, n);
 	n_lineas += n;
@@ -1481,7 +1482,8 @@ static int carga_esc(const char *ruta, info_firmas *inf)
 			if (!q)
 				q = p + strlen(p);
 			if (q - p > 2 && p[1] == '|') {
-				int cl = p[0] == 'n' ? B_NDB : p[0] == 'l' ? B_LDB : p[0] == 'i' ? B_IGN2 : B_NADA;
+				int c0 = p[0] | 32;
+				int cl = c0 == 'n' ? B_NDB : c0 == 'l' ? B_LDB : c0 == 'i' ? B_IGN2 : B_NADA;
 				r = una_linea(cl, p + 2, (u32)(q - p - 2));
 			}
 			if (!*q)
@@ -2528,7 +2530,7 @@ static u32 familia(const char *s, u32 n)
 	return i - 1;
 }
 
-int motor_escribe_esc(const char *ruta, int familias, u32 fecha, u32 limite)
+int motor_escribe_esc(const char *ruta, int familias, u32 fecha, u32 limite, int origen)
 {
 	int h = pl_crear(ruta);
 	u8 c[64];
@@ -2538,6 +2540,41 @@ int motor_escribe_esc(const char *ruta, int familias, u32 fecha, u32 limite)
 	u32 off_sumas = 64, off_bits, off_idx, off_blob, off_cuerpo;
 	if (h < 0)
 		return -1;
+	/* solo lo de main (origen 1) o lo demás (2); y fuera las sumas de los
+	 * nombres de .ign2 (los nombres de las sumas pueden quedar sin su número) */
+	{
+		u32 j, k, q;
+		for (j = k = 0; j < n_sumas; j++) {
+			int es_main = (sumas[j].nt & S_MAIN) != 0, fuera = 0;
+			if ((origen == 1 && !es_main) || (origen == 2 && es_main))
+				fuera = 1;
+			for (q = 0; !fuera && q < n_ignorar; q++)
+				if (ignorar[q] == sumas[j].nt >> 8)
+					fuera = 1;
+			if (!fuera)
+				sumas[k++] = sumas[j];
+		}
+		n_sumas = k;
+		if (origen) {
+			char *d = lineas, *p = lineas, *fin = lineas + n_lineas;
+			while (p < fin) {
+				char *q2 = p;
+				int es_main;
+				while (q2 < fin && *q2 != '\n')
+					q2++;
+				es_main = p[0] >= 'A' && p[0] <= 'Z';
+				/* (las .ign2 van con las dos) */
+				if ((p[0] | 32) == 'i' || (origen == 1) == es_main) {
+					u32 l = (u32)(q2 - p) + (q2 < fin ? 1 : 0);
+					memmove(d, p, l);
+					d[0] = (char)(d[0] | 32);
+					d += l;
+				}
+				p = q2 + 1;
+			}
+			n_lineas = (u32)(d - lineas);
+		}
+	}
 	/* si no cabe en «limite»: se dejan sumas, primero las de main (de archivo
 	 * MD5, SHA-1, SHA-256 y luego las de sección), luego las del día */
 	if (limite) {

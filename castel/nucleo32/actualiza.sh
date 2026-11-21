@@ -24,6 +24,10 @@ MEDIO=usb
 # los que no van con el sistema (el Navegador: navega/paquete.sh), al
 # catálogo con los demás
 bash $AQUI/navega/paquete.sh $W/paq > /dev/null
+# (ESCUDO) el antivirus; y sus firmas si se dice dónde están los .cvd de ClamAV
+# (ESCUDO_CVD=carpeta: la del espejo de cvdupdate; tools/escudo_firmas.py)
+bash $AQUI/escudo/paquete.sh $W/paq > /dev/null
+[ -n "${ESCUDO_CVD:-}" ] && python3 -I $AQUI/../../tools/escudo_firmas.py --cvd "$ESCUDO_CVD" --sal $W/paq > /dev/null
 rm -f $W/paq/CATALOGO.LIN
 python3 -I $AQUI/../../tools/hpq.py catalogo $W/paq > /dev/null
 mkdir -p "$SAL"

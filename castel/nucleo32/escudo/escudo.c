@@ -407,7 +407,8 @@ void revisa(const char *ruta, int lista)
 		revisa_ruta(ruta);
 	rev.acabada = 1;
 	rev.ms = pl_ms() - rev.empezo_ms;
-	apunta("revisado %s: %u archivos (%u K) en %u s; %u encontrados%s", ruta, rev.revisados, rev.octetos / 1024,
+	apunta("revisado %s%s %u archivos (%u K) en %u s; %u encontrados%s", ruta, ruta[strlen(ruta) - 1] == ':' ? "" : ":",
+	       rev.revisados, rev.octetos / 1024,
 	       rev.ms / 1000, rev.n_hallados, rev.cortada ? " (cancelado)" : "");
 	serie("escudo: %u octetos en %u ms", rev.octetos, rev.ms);
 	avanza();
@@ -876,7 +877,8 @@ int escudo_principal(void)
 		formatear(que, sizeof que, "la unidad %c:", a[0]);
 		for (i = 0; info_unidad(i, &u); i++)
 			if (u.letra == (u8)(a[0] & ~32))
-				formatear(que, sizeof que, "%s %c:%s%s%s", u.medio == MEDIO_USB || u.quitable ? "la memoria USB" : "el disco",
+				formatear(que, sizeof que, "%s %c:%s%s%s",
+					  u.medio == MEDIO_USB || u.quitable ? "la memoria USB" : u.medio > MEDIO_USB ? "el CD o DVD" : "el disco",
 					  u.letra, u.etiqueta[0] ? " (" : "", u.etiqueta, u.etiqueta[0] ? ")" : "");
 		if (ventana_pregunta((char)(a[0] & ~32), que)) {
 			char x[4];

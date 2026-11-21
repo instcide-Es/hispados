@@ -146,7 +146,7 @@ int motor_revisa_memoria(const u8 *d, u32 n, const char *nombre, resultado *r);
 extern u32 motor_max_archivo;
 extern int motor_zip;			/* mirar dentro de los ZIP */
 /* hacer FIRMAS.ESC con lo cargado (anfitrion.c y ESCUDO /CONVIERTE) */
-int motor_escribe_esc(const char *ruta, int familias, u32 fecha, u32 limite);	/* limite: octetos (0: sin)*/
+int motor_escribe_esc(const char *ruta, int familias, u32 fecha, u32 limite, int origen);	/* limite: octetos (0: sin)*/
 
 /* ---- los .cvd (cvd.c) ---- */
 typedef struct cabecera_cvd {
