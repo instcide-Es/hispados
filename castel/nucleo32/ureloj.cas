@@ -18,7 +18,7 @@
 ;
 ;  La hora es la del reloj del PC (DATO_FECHA, de dos en dos segundos);
 ;  los segundos de en medio, por los tics. Poner en hora usa la llamada 67
-;  (poner_reloj), que en la 0.8.5 no pide el modo administrador.
+;  (poner_reloj), que desde la 0.8.5 pide el modo administrador (la 157).
 ;
 ;  En la línea de órdenes: RELOJ /CALENDARIO [mm/aaaa] (el calendario del
 ;  mes, en texto), RELOJ /FESTIVOS [aaaa], RELOJ /HOY; y para abrirlo con
@@ -683,7 +683,7 @@ módulo UReloj
     fin
 
     función pon_en_hora()
-        variable d, m, a, s: nat32
+        variable d, m, a, s, r: nat32
         variable x: arreglo [2] de nat32
         si campo_fecha[0] = 0 o no fecha_vale(campo_fecha) entonces
             copiar(aviso, "La fecha no vale (dd/mm/aaaa)")
@@ -700,9 +700,18 @@ módulo UReloj
             copiar(aviso, "El a\xA4o tiene que ir de 1980 a 2107")
             devolver
         fin
-        ; (la 0.8.5 no pide el modo administrador para esto; si algún día
-        ; lo pidiera, aquí: pedir_admin(), la llamada 157)
-        poner_reloj(((a - 1980) << 9) ob (m << 5) ob d, ((s div 3600) << 11) ob (((s div 60) mod 60) << 5) ob ((s mod 60) div 2))
+        ; (PROTEGE, 0.8.5) poner el reloj del sistema pide el modo
+        ; administrador (la 157: lo pregunta el núcleo en la pantalla)
+        si no pedir_admin() entonces
+            copiar(aviso, "Sin el modo administrador no se cambia la hora")
+            devolver
+        fin
+        r := poner_reloj(((a - 1980) << 9) ob (m << 5) ob d, ((s div 3600) << 11) ob (((s div 60) mod 60) << 5) ob ((s mod 60) div 2))
+        dejar_admin()
+        si r <> 0 entonces
+            copiar(aviso, "No se ha podido poner en hora (acceso denegado)")
+            devolver
+        fin
         crudo_ant := 0xFFFFFFFF
         mira_reloj()
         seg_ant := segundo_del_día()

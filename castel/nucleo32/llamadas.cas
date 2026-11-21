@@ -846,8 +846,10 @@ módulo Llamadas
     fin
 
     ; pone en hora el reloj del PC: la fecha y la hora como las guarda la FAT
-    público función poner_reloj(fecha: nat32, hora: nat32)
-        llamada(67, fecha, hora, 0)
+    ; (PROTEGE, 0.8.5) solo los servicios, el asistente, INSTALAR o el modo
+    ; administrador: si no, DENEGADO
+    público función poner_reloj(fecha: nat32, hora: nat32): nat32
+        devolver llamada(67, fecha, hora, 0)
     fin
 
     ; el núcleo lee otra vez los ajustes (\HISPA\HISPA.INI). Falso si no están.

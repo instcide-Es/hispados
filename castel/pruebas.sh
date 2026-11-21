@@ -4566,6 +4566,7 @@ módulo UFalso
         dice("memoria de DMA (la 94)", sc(94, 1, nat32(dirección(dma[0])), 0))
         dice("apuntar un dispositivo (la 156)", sc(156, 0, 1, 0))
         dice("la memoria física de ACPI (la 151)", sc(151, 0, 4096, 0))
+        dice("poner el reloj del sistema (la 67)", sc(67, (20 << 9) ob (1 << 5) ob 1, 0, 0))   ; (0.8.5) atrasarlo al 1/1/2000
         dice("el sello de otra tarea (la 158)", sc(158, 1, 0, 0))
         pedido[0] := 0
         pedido[1] := 1
@@ -4626,6 +4627,8 @@ if [ $hechos = 1 ]; then
   mira "un programa que se llama RED.BIN (o TLS.BIN), lanzado de C:\\OTRA, no es un servicio: ni se apunta (91), ni memoria de DMA (94), ni dispositivos (156), ni ACPI (151), ni el sello de otro (158)" \
     "^falso: apuntarse como servicio (la 91): no (" "^falso: memoria de DMA (la 94): no (" "^falso: apuntar un dispositivo (la 156): no (" \
     "^falso: la memoria física de ACPI (la 151): no (" "^falso: el sello de otra tarea (la 158): no ("
+  mira "(0.8.5) ni poner el reloj del sistema (la 67: atrasarlo haría pasar certificados caducados): acceso denegado" \
+    "^falso: poner el reloj del sistema (la 67): no (acceso denegado" "permisos: acceso denegado a poner el reloj del sistema"
   if [ "$(grep -c '^falso: apuntarse como servicio (la 91): no' $S)" = 2 ] && ! grep -q "SE PUEDE.*la 9[14]\|la 91.*SE PUEDE" $S; then ok "ni el RED.BIN de mentira ni el TLS.BIN de mentira (los dos se apuntarían por su nombre antes de la 0.8.4)"
   else ko "un programa de otra carpeta se ha podido apuntar como servicio:"; grep "^falso" $S | head -4 | sed 's/^/        /'; fi
   mira "un programa normal no puede escribir NUCLEO.BIN (ni como «\\HISPA.\\» ni con la «á» que la FAT lleva a la A), ni abrir RED.BIN para escribir, ni borrarlo, ni cambiarle el nombre, ni llevárselo, ni meter nada en \\HISPA, ni hacer o borrar carpetas, ni ocultar archivos, ni poner un ORDENES.BIN en la raíz: acceso denegado" \

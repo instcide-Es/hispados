@@ -1114,6 +1114,14 @@ módulo Usuario
                 soltar_consola()
                 reiniciar_equipo()
             caso 67:
+                ; (PROTEGE, 0.8.5) poner el reloj del sistema: atrasarlo haría
+                ; pasar por buenos los certificados caducados (TLS). Solo los
+                ; servicios, el asistente, INSTALAR y el modo administrador
+                ; (el Reloj lo pide con la 157); Configuración es del núcleo
+                si no actual.servicio y actual.sello <> SELLO_ASISTE y actual.sello <> SELLO_INSTALAR y no actual.admin entonces
+                    imprimir2("permisos: acceso denegado a poner el reloj del sistema (%s, la tarea %u)\n", nat32(actual.nombre), actual.id)
+                    devolver DENEGADO
+                fin
                 pon_reloj(a, b)
                 devolver 0
             caso 68:
