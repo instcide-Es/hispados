@@ -2986,12 +2986,25 @@ Internet; la memoria, la de `memoria.c` (en uso / lo más) y lo pedido al
 sistema (`VirtualAlloc`), que dice la línea `navega: hecho ...` del puerto
 serie:
 
-MEDIDAS_AQUI
+| Página (por orden, en la misma pestaña) | Tiempo («Hecho») | En uso (KB) | Lo más (KB) | Del sistema (KB) |
+|---|---|---|---|---|
+| (al abrirlo: `about:blank`) | — | 3.196 | 3.253 | 3.264 |
+| https://clicgest.es/login (la primera conexión cifrada: la cadena se comprueba; Bootstrap, sus dos letras de la web) | 4,1 s | 7.452 | 10.677 | 9.664 |
+| https://hispados.es/ | 2,3 s | 8.877 | 12.092 | 11.200 |
+| https://www.google.es/ (lleva a google.com) | 3,4 s | 7.066 | 12.105 | 16.340 |
+| https://es.wikipedia.org/ (con 1,4 MB de JavaScript) | 33,5 s | 34.423 | 40.003 | 50.836 |
+
+(Con la pestaña de Wikipedia abierta, una nueva con ClicGest: 3,5 s.) Lo que
+cuesta el cifrado lo apunta `TLS.BIN`: el apretón de manos con la cadena ya
+comprobada, 25 M instrucciones; con la sesión reanudada, menos de 1 M; los 1,4
+MB del JavaScript de Wikipedia, 235 M (ChaCha20-Poly1305).
 
 Con el programa (2,1 MB), su pila y los búferes de la ventana (a 1024 x 768,
 unos 3,5 MB), el Navegador **arranca en unos 7 MB**. ClicGest, hispados.es y
-Google caben de sobra en **64 MB** (MEDIDA_64); Wikipedia (1,4 MB de
-JavaScript) pide unos 40 MB: con 64 MB va justa, con 128 MB holgada.
+Google caben de sobra en **64 MB** (probado: tras las tres, 7.827 marcos
+libres, 31 MB); Wikipedia (1,4 MB de JavaScript) pide unos 50 MB al sistema:
+con 64 MB sale entera, pero justísima (quedan 43 marcos libres: 172 KB); con
+128 MB, holgada.
 Un Pentium de verdad a 133 MHz es unas dos veces más lento que este QEMU:
 ClicGest, unos 8 s la primera vez (la cadena de certificados se comprueba una
 vez: luego, `TLS.CCH`); Wikipedia, más de un minuto.
