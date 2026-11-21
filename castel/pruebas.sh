@@ -4024,8 +4024,8 @@ if $AQUI/nucleo32/disco.sh $W/d.img 32 oficina > $W/disco.txt 2>&1; then
     ":tecla ctrl-alt-delete" ":pausa 1" ":captura at4" ":tecla esc" ":tecla meta_l-r" ":pausa 1" ":escribe larga" ":captura at5" ":tecla ret" ":pausa 2" \
     ":clic 300 200" ":pausa 1" ":captura at6" ":raton 380 300" ":monitor mouse_move 0 0 -5" ":pausa 1" ":captura at7" ":tecla end" ":tecla ret" ":pausa 1" \
     ":tecla print" ":pausa 5" ":captura at8" ":tecla meta_l-d" ":pausa 1" ":captura at9" ":tecla meta_l-d" ":pausa 1" ":captura at10" \
-    ":tecla alt-f4" ":pausa 2" ":clic 720 400" ":tecla alt-f4" ":pausa 1" ":captura at11" ":tecla right" ":tecla right" ":pausa 1" ":captura at12" ":tecla ret" ":pausa 3" ":captura at13" \
-    ":tecla ret" ":pausa 1" ":clic 720 400" ":tecla f1" ":pausa 1" ":tecla ret" ":tecla meta_l-e" ":pausa 3" ":captura at14" > $W/a.sal 2>&1
+    ":tecla alt-f4" ":pausa 2" ":clic 792 300" ":tecla alt-f4" ":pausa 1" ":captura at11" ":tecla right" ":tecla right" ":pausa 1" ":captura at12" ":tecla ret" ":pausa 3" ":captura at13" \
+    ":tecla ret" ":pausa 1" ":clic 792 300" ":tecla f1" ":pausa 1" ":tecla ret" ":tecla meta_l-e" ":pausa 3" ":captura at14" > $W/a.sal 2>&1
   tr -d '\r' < $W/a.sal > $W/a.txt
   S=$W/a.txt
   mira "Alt+Tab: la franja con las dos ventanas, y al soltar Alt se queda la de detrás (el Bloc de notas)" "^escritorio: Alt+Tab, con 2 ventanas$" "^escritorio: Alt+Tab, a la 1$"
