@@ -11,7 +11,9 @@ Lo que hay en C:\HISPA:
   BCM43XX.FW, BCM43XXH.FW  el microcódigo de las tarjetas Broadcom (de
                Broadcom: ver más abajo y BCM43XX.TXT)
   WIFI.INI     las redes recordadas: el nombre y la clave ya preparada (no la
-               contraseña), cifrada con la llave de este equipo (WIFI.LLV)
+               contraseña), cifrada y firmada con la llave de este equipo
+               (WIFI.LLV). Como la llave está al lado, es una ofuscación:
+               quien tenga los dos archivos puede entrar en esas redes
   WIFI.LOG     lo que ha hecho el Wi-Fi la última vez que arrancó (si algo no
                va, es el archivo que hay que mandar)
 

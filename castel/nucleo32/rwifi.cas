@@ -14,6 +14,8 @@
 ;    Preferir=CABLE    solo el cable (WIFI.BIN no se pone en marcha)
 ;    Preferir=WIFI     el Wi-Fi aunque haya cable
 ;    WifiSimulada=SI   (las pruebas) WIFI.BIN con la radio de mentira
+;    WifiSimulada=GEMELA (las pruebas) la radio de mentira y, además, una red
+;                      ABIERTA que se llama como la WPA2 (una falsa)
 ;    WifiSimulada=CHIP (las pruebas) WIFI.BIN aunque no haya tarjeta en el PCI
 ;                      (es WIFISIM.BIN, con el modelo de la tarjeta dentro)
 ;  Lo cambian Configuración (el escritorio: un aviso del núcleo) y la
@@ -41,6 +43,7 @@ módulo Rwifi
     público variable salidas, entradas, tiradas: nat32
     variable simulada: bool
     variable chip: bool                         ; (WifiSimulada=CHIP)
+    variable gemela: bool                       ; (WifiSimulada=GEMELA)
     variable lanzado: bool
     variable hay_tarjeta: bool                  ; una de las que lleva WIFI.BIN, en el PCI
     variable cola: arreglo [COLA] de arreglo [TRAMA] de byte
@@ -173,6 +176,7 @@ módulo Rwifi
         variable args: puntero a byte
         args := nulo
         si simulada y no chip entonces args := "/SIMULA" fin
+        si gemela entonces args := "/SIMULA /GEMELA" fin
         t := lanzar_suelto("\\WIFI.BIN", args)
         si es_error(t) entonces t := lanzar_suelto("\\HISPA\\WIFI.BIN", args) fin
         si es_error(t) entonces
@@ -199,6 +203,8 @@ módulo Rwifi
             a_mayúsculas(v)
             simulada := empieza_por(v, "SI") o empieza_por(v, "1") o empieza_por(v, "CHIP")
             chip := empieza_por(v, "CHIP")
+            gemela := empieza_por(v, "GEMELA")
+            si gemela entonces simulada := cierto fin
         fin
         hay_tarjeta := busca_tarjeta()
         si preferir = PREFIERE_CABLE entonces

@@ -384,10 +384,20 @@ static void empieza_conexion(void)
 {
 	struct w_red *r, *m = NULL;
 
+	/* primero, los de la seguridad que se pide (con clave, WPA2; sin ella,
+	 * abierta): una red abierta con el mismo nombre que una WPA2 (una falsa)
+	 * no se coge aunque se oiga mejor; si no hay ninguno así, el que mejor se
+	 * oiga, para decir por qué no se puede */
 	for (r = w.redes; r < w.redes + w.nredes; r++)
 		if (r->ssid_n == w.ssid_n && memcmp(r->ssid, w.ssid, w.ssid_n) == 0 &&
+		    (w.con_clave ? r->seguridad == W_SEG_WPA2 : r->seguridad == W_SEG_ABIERTA) &&
 		    (!m || r->senal > m->senal))
 			m = r;
+	if (!m)
+		for (r = w.redes; r < w.redes + w.nredes; r++)
+			if (r->ssid_n == w.ssid_n && memcmp(r->ssid, w.ssid, w.ssid_n) == 0 &&
+			    (!m || r->senal > m->senal))
+				m = r;
 	if (!m) {
 		hl_log(1, "802.11: la red «%s» no aparece\n", w.ssid);
 		w.fallo = W_F_NO_ESTA;
@@ -661,7 +671,8 @@ static void datos(o8 *t, int n)
 			return;
 		nr = wpa_eapol(&w.wpa, e + 14, ne, r);
 		if (nr < 0) {
-			falla(W_F_CLAVE, "la contraseña no es la de esta red");
+			/* (con el MIC bueno: lo manda el punto de acceso, pero no cuadra) */
+			falla(W_F_ACUERDO, "el acuerdo de claves con el punto de acceso no sale bien");
 			return;
 		}
 		/* las respuestas del acuerdo de 4 pasos van en claro (el punto
@@ -741,7 +752,12 @@ void w80211_tic(void)
 		}
 		break;
 	case W_CLAVES:
-		if ((int)(ya - w.t_limite) >= 0)
+		if ((int)(ya - w.t_limite) < 0)
+			break;
+		if (w.wpa.fallos_mic)
+			falla(W_F_ACUERDO, "el acuerdo de claves no termina y han llegado mensajes con la firma mal "
+			      "(¿otro equipo haciéndose pasar por el punto de acceso?)");
+		else
 			falla(W_F_CLAVE, w.wpa.paso ?
 			      "el acuerdo de claves no termina (¿la contraseña no es la de esta red?)" :
 			      "el punto de acceso no empieza el acuerdo de claves");

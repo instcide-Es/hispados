@@ -12,9 +12,12 @@
 ;  Sin escritorio (o con una orden), lo mismo en texto, para la Consola:
 ;    REDWIFI /ESTADO                       cómo está
 ;    REDWIFI /REDES                        busca y enseña las redes
-;    REDWIFI /CONECTAR red [contraseña] [/AUTO]   («red»: el nombre, entre
-;                                          comillas si lleva espacios, o su
-;                                          número en la lista de /REDES)
+;    REDWIFI /CONECTAR red [/AUTO] [/ABIERTA] [/NORECORDAR]   («red»: el
+;                                          nombre, entre comillas si lleva
+;                                          espacios, o su número en la lista de
+;                                          /REDES). La contraseña la pregunta
+;                                          sin enseñarla (no va en la orden:
+;                                          así no queda en ninguna lista)
 ;    REDWIFI /DESCONECTAR | /OLVIDAR red | /REGISTRO | /USAR AUTO|CABLE|WIFI
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
@@ -75,6 +78,7 @@ módulo UredWifi
     constante ID_BUSCAR = 7
     constante ID_USAR = 10                      ; 10, 11 y 12: Automático, Cable, Wi-Fi
     constante ID_CERRAR = 13
+    constante ID_RECORDAR = 14
 
     variable est: Estado_wifi
     variable hay_servicio: bool
@@ -84,6 +88,7 @@ módulo UredWifi
     variable primera: ent32                     ; la primera de la lista que se ve
     variable clave: arreglo [72] de byte
     variable autom: bool = cierto
+    variable recordar: bool = cierto            ; «Recordar la red» (si no, no se guarda en WIFI.INI)
     variable aviso: arreglo [160] de byte
     variable preferir: nat32 = 0xFF
     variable por_wifi: bool                     ; RED.BIN va por el Wi-Fi (si no, por el cable)
@@ -394,51 +399,92 @@ módulo UredWifi
         dd[0] := nat32(nom)
         según nat16(r)
             caso 0: formatear(t, 200, "Conectando con «%s»...\n", dd)
-            caso 1: formatear(t, 200, "La red «%s» pide contraseña (WPA2): REDWIFI /CONECTAR red contraseña\n", dd)
+            caso 1: formatear(t, 200, "La red «%s» pide contraseña (WPA2).\n", dd)
             caso 2: formatear(t, 200, "La red «%s» usa una seguridad que no se admite (hace falta WPA2-Personal con AES, o abierta).\n", dd)
             caso 3: formatear(t, 200, "No se ve la red «%s» (REDWIFI /REDES dice las que hay).\n", dd)
             caso 4: formatear(t, 200, "La radio Wi-Fi no está en marcha.\n", dd)
             caso 5: formatear(t, 200, "La contraseña de WPA2 tiene de 8 a 63 letras.\n", dd)
+            caso 6: formatear(t, 200, "Hay una red ABIERTA que se llama «%s», como una que se recordó con contraseña: puede ser falsa y no se usa (si de verdad es la suya, olvide antes la recordada).\n", dd)
             si no: formatear(t, 200, "No se puede conectar con «%s».\n", dd)
         fin
         si r >= 0xFFFFFFE0 entonces copiar(t, "Wi-Fi: no está en marcha.\n") fin
     fin
 
     ; manda WO_CONECTAR con el nombre y la contraseña de «nom» y «cl»
-    función manda_conectar(nom: puntero a byte, n: nat32, cl: puntero a byte, a: bool): nat32
+    función manda_conectar(nom: puntero a byte, n: nat32, cl: puntero a byte, a: bool, seg: ent32, guardar: bool): nat32
         variable nc, r: nat32
         nc := longitud(cl)
         si n > 32 entonces n := 32 fin
         si nc > 64 entonces nc := 64 fin
         copiar_memoria(dirección(buf[0]), nom, n)
         si nc > 0 entonces copiar_memoria(dirección(buf[n]), cl, nc) fin
+        ; (cab[3]: bit 0, automáticamente; bit 1, no recordarla; bits 8-15, la seguridad + 1)
         r := 0
         si a entonces r := 1 fin
+        si no guardar entonces r := r ob 2 fin
+        si seg >= 0 entonces r := r ob (nat32(seg + 1) << 8) fin
         r := pide(WO_CONECTAR, n, nc, r, n + nc)
         llenar(dirección(buf[0]), n + nc + 8, 0)
         devolver r
+    fin
+
+    ; la contraseña, sin enseñarla (asteriscos); falso si se corta (Ctrl+C o Esc)
+    función pide_clave(destino: puntero a byte, cabe: nat32): bool
+        variable c, n: nat32
+        variable atrás: arreglo [4] de byte
+        escribir("Contraseña de la red: ")
+        n := 0
+        mientras cierto hacer
+            c := tecla()
+            si c = '\n' entonces
+                escribir("\n")
+                destino[n] := 0
+                devolver cierto
+            fin
+            si c = 3 o c = 27 entonces
+                escribir("\n")
+                llenar(destino, cabe, 0)
+                devolver falso
+            fin
+            si c = 8 entonces
+                si n > 0 entonces
+                    n := n - 1
+                    destino[n] := 0
+                    atrás[0] := 8
+                    atrás[1] := ' '
+                    atrás[2] := 8
+                    escribir_trozo(dirección(atrás[0]), 3)
+                fin
+            sino si c >= ' ' y c < 0x100 y n + 1 < cabe entonces
+                destino[n] := byte(c)
+                n := n + 1
+                escribir("*")
+            fin
+        fin
+        devolver falso
     fin
 
     función orden_conectar(args: puntero a byte)
         variable nom: arreglo [40] de byte
         variable cl: arreglo [72] de byte
         variable x: arreglo [16] de byte
-        variable n, k, r: nat32
-        variable a: bool
+        variable n, k, r, i: nat32
+        variable a, abierta, guardar: bool
+        variable seg, elegida_: ent32
         si no argumento(args, 1, nom, 40) entonces
-            escribir("Uso: REDWIFI /CONECTAR red [contraseña] [/AUTO]\n")
+            escribir("Uso: REDWIFI /CONECTAR red [/AUTO] [/ABIERTA] [/NORECORDAR]\n")
             devolver
         fin
         cl[0] := 0
         a := falso
+        abierta := falso
+        guardar := cierto
         k := 2
         mientras argumento(args, k, x, 16) hacer
             a_mayúsculas(x)
-            si iguales(x, "/AUTO") entonces
-                a := cierto
-            sino
-                argumento(args, k, cl, 72)
-            fin
+            si iguales(x, "/AUTO") entonces a := cierto fin
+            si iguales(x, "/ABIERTA") entonces abierta := cierto fin
+            si iguales(x, "/NORECORDAR") entonces guardar := falso fin
             k := k + 1
         fin
         si no lee_estado() entonces
@@ -446,13 +492,33 @@ módulo UredWifi
             devolver
         fin
         lee_redes()
-        ; un número: el de la lista
+        ; la de la lista: por su número, o por el nombre (con /ABIERTA, la abierta;
+        ; si no, la WPA2 si la hay)
+        elegida_ := -1
         n := 0
         si texto_a_natural(nom, n) y n >= 1 y n <= n_redes entonces
+            elegida_ := ent32(n - 1)
             copiar_memoria(dirección(nom[0]), dirección(redes[n - 1].ssid[0]), redes[n - 1].ssid_n)
             nom[redes[n - 1].ssid_n] := 0
+        sino si n_redes > 0 entonces
+            para i desde 0 hasta n_redes - 1 hacer
+                si redes[i].ssid_n = longitud(nom) y comparar_memoria(dirección(redes[i].ssid[0]), nom, redes[i].ssid_n) = 0 entonces
+                    si abierta y redes[i].seguridad = W_SEG_ABIERTA entonces elegida_ := ent32(i) fin
+                    si no abierta y redes[i].seguridad <> W_SEG_ABIERTA y elegida_ < 0 entonces elegida_ := ent32(i) fin
+                fin
+            fin
         fin
-        r := manda_conectar(nom, longitud(nom), cl, a)
+        seg := -1
+        si abierta entonces seg := W_SEG_ABIERTA fin
+        si elegida_ >= 0 entonces seg := ent32(redes[elegida_].seguridad) fin
+        ; WPA2 y no recordada: la contraseña, preguntada (no va en la orden)
+        si elegida_ >= 0 y redes[elegida_].seguridad = W_SEG_WPA2 y redes[elegida_].marcas yb WR_RECORDADA = 0 entonces
+            si no pide_clave(cl, 72) entonces
+                escribir("No se conecta.\n")
+                devolver
+            fin
+        fin
+        r := manda_conectar(nom, longitud(nom), cl, a, seg, guardar)
         llenar(cl, 72, 0)
         dice_resultado(r, nom)
         escribir(t)
@@ -523,7 +589,7 @@ módulo UredWifi
             si r >= 0xFFFFFFE0 entonces escribir("No hay servicio de red.\n") sino escribe_estado() fin
         sino
             escribir("REDWIFI: la ventana del Wi-Fi. En la Consola:\n")
-            escribir("  REDWIFI /ESTADO | /REDES | /CONECTAR red [contraseña] [/AUTO] | /DESCONECTAR\n")
+            escribir("  REDWIFI /ESTADO | /REDES | /CONECTAR red [/AUTO] [/ABIERTA] [/NORECORDAR] | /DESCONECTAR\n")
             escribir("          /OLVIDAR red | /REGISTRO | /USAR AUTO|CABLE|WIFI\n")
         fin
         devolver 0
@@ -623,7 +689,8 @@ módulo UredWifi
             yy := yy + lista_al + 4 * E
             ; la contraseña y conectar sola
             yy := yy + campo(ID_CLAVE, LA, yy, 30 * LA, "Contraseña (si la pide)", clave, cierto) + 4 * E
-            casilla(ID_AUTO, LA, yy, "Conectar automáticamente", autom)
+            x := casilla(ID_AUTO, LA, yy, "Conectar automáticamente", autom)
+            casilla(ID_RECORDAR, LA + x + 2 * LA, yy, "Recordar la red", recordar)
             yy := yy + LT + 4 * E
             x := LA
             x := x + botón(ID_CONECTAR, x, yy, "Conectar", cierto, no hay_servicio o elegida < 0) + LA
@@ -662,7 +729,7 @@ módulo UredWifi
             foco := ID_CLAVE
             devolver
         fin
-        r := manda_conectar(dirección(redes[elegida].ssid[0]), redes[elegida].ssid_n, clave, autom)
+        r := manda_conectar(dirección(redes[elegida].ssid[0]), redes[elegida].ssid_n, clave, autom, ent32(redes[elegida].seguridad), recordar)
         llenar(clave, 72, 0)
         dice_resultado(r, nom)
         copiar_hasta(aviso, t, 160)
@@ -695,6 +762,9 @@ módulo UredWifi
                     si autom entonces r := 1 fin
                     pide(WO_AUTO, r, 0, 0, redes[elegida].ssid_n)
                 fin
+            caso ID_RECORDAR:
+                recordar := no recordar
+                si no recordar entonces copiar(aviso, "No se guardará: habrá que escribir la contraseña cada vez.") fin
             caso ID_USAR, ID_USAR + 1, ID_USAR + 2:
                 r := pide_preferir(id - ID_USAR)
                 si r >= 0xFFFFFFE0 entonces copiar(aviso, "No hay servicio de red.") fin

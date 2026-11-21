@@ -127,7 +127,8 @@ EL WI-FI
   en WIFI.INI (sin la contraseña) y el equipo se conecta solo a ellas.
   «Usar:» (en esa ventana y en Configuración) dice por dónde va la red:
   Automático (el cable si está enchufado; si no, el Wi-Fi), Cable o Wi-Fi.
-  En la Consola: REDWIFI /REDES, REDWIFI /CONECTAR red contraseña,
+  En la Consola: REDWIFI /REDES, REDWIFI /CONECTAR red (pregunta la
+  contraseña),
   REDWIFI /ESTADO. Si no va, mande el archivo C:\HISPA\WIFI.LOG.
 
 LA CONSOLA (el intérprete de órdenes)

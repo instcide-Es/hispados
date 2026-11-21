@@ -47,8 +47,9 @@
 #define WO_ESTADO 1		/* -> struct w_estado_ui */
 #define WO_BUSCAR 2		/* buscar redes (unos 2 s) */
 #define WO_REDES 3		/* -> struct w_red_ui[], cab[0] cuántas */
-#define WO_CONECTAR 4		/* los octetos: el nombre (cab[1] octetos) y detrás la contraseña (cab[2]); cab[3] = 1:
-				   conectar automáticamente -> 0, o W_R_... */
+#define WO_CONECTAR 4		/* los octetos: el nombre (cab[1] octetos) y detrás la contraseña (cab[2]); cab[3]: bit 0,
+				   conectar automáticamente; bit 1, no recordarla; bits 8-15, la seguridad + 1 (0: la que
+				   haya) -> 0, o W_R_... */
 #define WO_DESCONECTAR 5
 #define WO_OLVIDAR 6		/* los octetos: el nombre */
 #define WO_REGISTRO 7		/* -> lo último que ha apuntado */
@@ -61,6 +62,7 @@
 #define W_R_NO_SE_VE 3		/* no está en la lista */
 #define W_R_SIN_RADIO 4
 #define W_R_CLAVE_CORTA 5	/* WPA2: de 8 a 63 letras */
+#define W_R_GEMELA 6		/* abierta con el nombre de una WPA2 recordada: puede ser falsa; no se usa */
 
 #define SIN_WIFI 0xFFFFFFE1u	/* (el núcleo) no hay servicio Wi-Fi */
 #define AVISO_ACABO 0xFFFF

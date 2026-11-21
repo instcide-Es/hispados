@@ -77,7 +77,8 @@ enum w_estado {
 enum w_fallo {
 	W_F_NADA, W_F_NO_ESTA, W_F_SIN_RESPUESTA_AUT, W_F_AUT_RECHAZADA,
 	W_F_SIN_RESPUESTA_ASOC, W_F_ASOC_RECHAZADA, W_F_CLAVE, W_F_SEGURIDAD,
-	W_F_EXPULSADO, W_F_PERDIDA
+	W_F_EXPULSADO, W_F_PERDIDA,
+	W_F_ACUERDO		/* el acuerdo de claves no acaba y han llegado mensajes con el MIC mal: no se culpa a la contraseña */
 };
 struct w_info {
 	o8 estado;
@@ -159,5 +160,6 @@ struct radio *sim_radio(void);
 void sim_configura(const char *ssid, const char *clave, int canal);
 extern void (*sim_entrega)(const o8 *trama, int n, int senal, int canal);
 extern int sim_fallos;		/* para las pruebas: tramas que se «pierden» */
+extern int sim_gemela;		/* para las pruebas: una red abierta falsa con el mismo nombre */
 
 #endif

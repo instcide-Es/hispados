@@ -278,8 +278,15 @@ static struct recordada {
 	u8 abierta, autom;
 } rec[MAX_RECORDADAS];
 static int n_rec;
+/* (las claves de WIFI.INI) dos llaves sacadas de la de WIFI.LLV: una para
+ * cifrar (AES-128 en modo contador) y otra para firmar (HMAC-SHA1): una
+ * clave cambiada en el archivo no se acepta. Como la llave está en el mismo
+ * equipo, esto protege de quien vea solo WIFI.INI (una copia, una foto), no
+ * de quien tenga el disco entero: es una ofuscación, y así se dice */
 static struct aes llave;
+static u8 llave_firma[20];
 static int hay_llave;
+static struct aes llave_vieja;		/* (la del formato del principio: AES por bloques, sin firma) */
 
 static void pon_llave(void)
 {
@@ -298,7 +305,14 @@ static void pon_llave(void)
 		escribe_archivo("WIFI.LLV", k, 16, 0);
 		hl_log(2, "WIFI.LLV: llave nueva para cifrar las claves de WIFI.INI\n");
 	}
-	aes_clave(&llave, k);
+	{
+		u8 d[20];
+		hmac_sha1(k, 16, (const o8 *)"WIFI.INI cifrar", 15, d);
+		aes_clave(&llave, d);
+		hmac_sha1(k, 16, (const o8 *)"WIFI.INI firmar", 15, llave_firma);
+		memset(d, 0, sizeof d);
+	}
+	aes_clave(&llave_vieja, k);
 	memset(k, 0, sizeof k);
 	hay_llave = 1;
 }
@@ -335,14 +349,43 @@ static char *a_hex(char *d, const u8 *s, int n)
 	return d;
 }
 
-/* WIFI.INI: una línea «Red=AUTO,nombre en hexadecimal,clave cifrada en
- * hexadecimal» por red (la clave, vacía: abierta), con un comentario
- * delante con el nombre a la vista */
+/* AES-128 en modo contador: n (8) y el número de bloque, cifrados, por XOR */
+static void ctr(const u8 *n, const u8 *e, u8 *s, int largo)
+{
+	u8 b[16], k[16];
+	int i, j;
+
+	for (i = 0; i < largo; i += 16) {
+		memcpy(b, n, 8);
+		memset(b + 8, 0, 8);
+		b[15] = i / 16;
+		aes_cifra(&llave, b, k);
+		for (j = 0; j < 16 && i + j < largo; j++)
+			s[i + j] = e[i + j] ^ k[j];
+	}
+}
+
+/* la firma (16 octetos) del nombre, el número de un solo uso y lo cifrado */
+static void firma(const u8 *ssid, int ns, const u8 *n, const u8 *c, u8 *f)
+{
+	const o8 *v[3] = { ssid, n, c };
+	const size_t l[3] = { ns, 8, 32 };
+	u8 m[20];
+
+	hmac_sha1_v(llave_firma, 20, 3, v, l, m);
+	memcpy(f, m, 16);
+}
+
+/* WIFI.INI: una línea «Red=AUTO,nombre en hexadecimal,clave» por red (la
+ * clave, vacía: abierta; si no, «2:» y en hexadecimal el número de un solo
+ * uso (8), la clave preparada cifrada (32) y la firma (16)), con un
+ * comentario delante con el nombre a la vista */
 static void lee_recordadas(void)
 {
 	static char b[6000];
-	int n = lee_archivo("WIFI.INI", b, sizeof b - 1), i;
+	int n = lee_archivo("WIFI.INI", b, sizeof b - 1), i, viejas = 0;
 	char *l, *s;
+	void guarda_recordadas(void);
 
 	n_rec = 0;
 	if (n <= 0)
@@ -371,9 +414,26 @@ static void lee_recordadas(void)
 				s++;
 			if (*s == ',')
 				s++;
-			if (de_hex(s, c, 32) == 32) {
-				aes_descifra(&llave, c, r->pmk);
-				aes_descifra(&llave, c + 16, r->pmk + 16);
+			if (s[0] == '2' && s[1] == ':') {
+				u8 t[56], f[16];
+				if (de_hex(s + 2, t, 56) != 56) {
+					hl_log(0, "WIFI.INI: la clave de «%s» está incompleta: no se usa\n", r->ssid);
+					l = fin;
+					continue;
+				}
+				firma(r->ssid, r->ssid_n, t, t + 8, f);
+				if (memcmp(f, t + 40, 16) != 0) {
+					hl_log(0, "WIFI.INI: la clave de «%s» no lleva la firma de este equipo (cambiada, o de otro WIFI.LLV): no se usa\n", r->ssid);
+					l = fin;
+					continue;
+				}
+				ctr(t, t + 8, r->pmk, 32);
+				memset(t, 0, sizeof t);
+			} else if (de_hex(s, c, 32) == 32) {
+				/* (el formato del principio: se lee y se guarda en el nuevo) */
+				aes_descifra(&llave_vieja, c, r->pmk);
+				aes_descifra(&llave_vieja, c + 16, r->pmk + 16);
+				viejas++;
 			} else {
 				r->abierta = 1;
 			}
@@ -386,9 +446,12 @@ static void lee_recordadas(void)
 	hl_log(2, "WIFI.INI: %d redes recordadas\n", n_rec);
 	for (i = 0; i < n_rec; i++)
 		hl_log(2, "  «%s»%s%s\n", rec[i].ssid, rec[i].abierta ? " (abierta)" : " (WPA2)", rec[i].autom ? ", se conecta sola" : "");
+	if (viejas)
+		guarda_recordadas();
+	memset(b, 0, sizeof b);
 }
 
-static void guarda_recordadas(void)
+void guarda_recordadas(void)
 {
 	static char b[6000];
 	char *p = b;
@@ -397,7 +460,9 @@ static void guarda_recordadas(void)
 	pon_llave();
 	p += snprintf(p, 400, "; WIFI.INI: las redes Wi-Fi que recuerda Hispa-Pentium (WIFI.BIN).\r\n"
 		      "; No se guarda la contrase\xa4""a: se guarda la clave ya preparada de la red,\r\n"
-		      "; cifrada con la llave de este equipo (WIFI.LLV). No tocar a mano.\r\n");
+		      "; cifrada y firmada con la llave de este equipo (WIFI.LLV), que est\xa0 al lado:\r\n"
+		      "; ofuscada (quien tenga los dos archivos puede entrar en esas redes).\r\n"
+		      "; No tocar a mano.\r\n");
 	for (i = 0; i < n_rec; i++) {
 		struct recordada *r = &rec[i];
 		u8 c[32];
@@ -408,9 +473,19 @@ static void guarda_recordadas(void)
 		p = a_hex(p, r->ssid, r->ssid_n);
 		*p++ = ',';
 		if (!r->abierta) {
-			aes_cifra(&llave, r->pmk, c);
-			aes_cifra(&llave, r->pmk + 16, c + 16);
-			p = a_hex(p, c, 32);
+			u8 t[56];
+			u32 a;
+			int j;
+			for (j = 0; j < 8; j += 4) {
+				a = hl_azar() ^ hl_pentium_tics();
+				memcpy(t + j, &a, 4);
+			}
+			ctr(t, r->pmk, t + 8, 32);
+			firma(r->ssid, r->ssid_n, t, t + 8, t + 40);
+			*p++ = '2';
+			*p++ = ':';
+			p = a_hex(p, t, 56);
+			memset(t, 0, sizeof t);
 			memset(c, 0, sizeof c);
 		}
 		p += snprintf(p, 4, "\r\n");
@@ -432,6 +507,14 @@ static struct recordada *busca_rec(const u8 *ssid, int n)
 static void recuerda(const u8 *ssid, int n, const u8 *pmk, int autom)
 {
 	struct recordada *r = busca_rec(ssid, n);
+
+	if (r && !r->abierta && !pmk) {
+		/* una red recordada con contraseña no pasa a abierta por conectar
+		 * con otra abierta del mismo nombre (sería una falsa): hay que
+		 * olvidarla antes, a propósito */
+		hl_log(1, "«%s» está recordada con contraseña: no se cambia a abierta\n", r->ssid);
+		return;
+	}
 
 	if (!r) {
 		if (n_rec == MAX_RECORDADAS) {
@@ -497,19 +580,26 @@ static struct pbkdf2 pb;
 static int calculando;			/* preparando la clave (PBKDF2) */
 static u8 c_ssid[33], c_ssid_n, c_autom, c_pmk[32];
 static int c_nueva;			/* conectando a una red que aún no está en WIFI.INI */
+static int c_abierta;			/* la que se ha pedido es abierta */
+static int c_recordar = 1;		/* recordarla al conectar (no: «Recordar la red» quitado) */
 static int a_mano;			/* «Desconectar»: no conectarse sola hasta que se pida */
 static u32 t_auto;			/* cuándo se mira otra vez si hay una red recordada a la vista */
 
-static struct w_red *red_vista(const u8 *ssid, int n)
+/* la que mejor se oye con ese nombre y esa seguridad (seg < 0: cualquiera).
+ * Una red se elige por el nombre Y la seguridad: una abierta con el nombre
+ * de una WPA2 no es la misma red (puede ser una falsa) */
+static struct w_red *red_vista_seg(const u8 *ssid, int n, int seg)
 {
 	struct w_red *l, *m = NULL;
 	int k = w80211_redes(&l), i;
 
 	for (i = 0; i < k; i++)
-		if (l[i].ssid_n == n && memcmp(l[i].ssid, ssid, n) == 0 && (!m || l[i].senal > m->senal))
+		if (l[i].ssid_n == n && memcmp(l[i].ssid, ssid, n) == 0 && (seg < 0 || l[i].seguridad == seg) &&
+		    (!m || l[i].senal > m->senal))
 			m = &l[i];
 	return m;
 }
+#define red_vista(s, n) red_vista_seg(s, n, -1)
 
 static void empieza(const u8 *ssid, int n, const u8 *pmk, int nueva, int autom)
 {
@@ -518,6 +608,7 @@ static void empieza(const u8 *ssid, int n, const u8 *pmk, int nueva, int autom)
 	c_ssid_n = n;
 	c_nueva = nueva;
 	c_autom = autom;
+	c_abierta = pmk == NULL;
 	if (pmk)
 		memcpy(c_pmk, pmk, 32);
 	a_mano = 0;
@@ -538,14 +629,15 @@ static void conecta_sola(void)
 	if (i.estado != W_PARADO)
 		return;
 	/* si ya se está intentando una que se ve, se deja a w80211.c */
-	if (i.ssid_n && i.fallo != W_F_NO_ESTA && red_vista(i.ssid, i.ssid_n))
+	if (i.ssid_n && i.fallo != W_F_NO_ESTA && red_vista_seg(i.ssid, i.ssid_n, c_abierta ? W_SEG_ABIERTA : W_SEG_WPA2))
 		return;
 	for (k = 0; k < n_rec; k++) {
 		struct w_red *v;
 		if (!rec[k].autom)
 			continue;
-		v = red_vista(rec[k].ssid, rec[k].ssid_n);
-		if (v && v->senal > mejor && (v->seguridad == W_SEG_WPA2 || (v->seguridad == W_SEG_ABIERTA && rec[k].abierta))) {
+		/* (con la seguridad con la que se recordó: nunca una abierta por una WPA2) */
+		v = red_vista_seg(rec[k].ssid, rec[k].ssid_n, rec[k].abierta ? W_SEG_ABIERTA : W_SEG_WPA2);
+		if (v && v->senal > mejor) {
 			mejor = v->senal;
 			m = &rec[k];
 		}
@@ -558,8 +650,9 @@ static void conecta_sola(void)
 		}
 		return;
 	}
-	if (i.ssid_n == m->ssid_n && memcmp(i.ssid, m->ssid, m->ssid_n) == 0)
+	if (i.ssid_n == m->ssid_n && memcmp(i.ssid, m->ssid, m->ssid_n) == 0 && c_abierta == m->abierta)
 		return;
+	c_recordar = 1;
 	hl_log(2, "Se conecta sola a la red recordada «%s» (%d dBm)\n", m->ssid, mejor);
 	empieza(m->ssid, m->ssid_n, m->abierta ? NULL : m->pmk, 0, 1);
 }
@@ -590,10 +683,13 @@ static void sigue_conexion(void)
 		avisa("Conectado a «%s».", i.ssid);
 		if (c_ssid_n && i.ssid_n == c_ssid_n && memcmp(i.ssid, c_ssid, c_ssid_n) == 0 && c_nueva) {
 			/* la primera vez que conecta: se recuerda */
-			struct w_red *v = red_vista(c_ssid, c_ssid_n);
-			recuerda(c_ssid, c_ssid_n, v && v->seguridad == W_SEG_ABIERTA ? NULL : c_pmk, c_autom);
+			if (c_recordar) {
+				recuerda(c_ssid, c_ssid_n, (c_abierta || i.seguridad == W_SEG_ABIERTA) ? NULL : c_pmk, c_autom);
+				hl_log(2, "La red «%s» queda recordada en WIFI.INI%s\n", c_ssid, c_autom ? " (se conectará sola)" : "");
+			} else {
+				hl_log(2, "La red «%s» no se recuerda (así se ha pedido)\n", c_ssid);
+			}
 			c_nueva = 0;
-			hl_log(2, "La red «%s» queda recordada en WIFI.INI%s\n", c_ssid, c_autom ? " (se conectará sola)" : "");
 		}
 		vuelca_registro();
 		return;
@@ -603,9 +699,10 @@ static void sigue_conexion(void)
 			"", "la red no se ve", "el punto de acceso no contesta", "el punto de acceso no deja entrar",
 			"el punto de acceso no contesta a la asociación", "el punto de acceso no acepta la asociación",
 			"la contraseña no es la de esta red", "la red usa una seguridad que no se admite (hace falta WPA2-Personal con AES)",
-			"el punto de acceso nos ha echado", "se ha perdido la red"
+			"el punto de acceso nos ha echado", "se ha perdido la red",
+			"el acuerdo de claves no sale bien y han llegado mensajes con la firma mal (¿otro equipo haciéndose pasar por el punto de acceso?)"
 		};
-		avisa("No se conecta a «%s»: %s.", i.ssid, i.fallo < 10 ? por[i.fallo] : "?");
+		avisa("No se conecta a «%s»: %s.", i.ssid, i.fallo < 11 ? por[i.fallo] : "?");
 		if (c_nueva && (i.fallo == W_F_CLAVE || i.fallo == W_F_SEGURIDAD)) {
 			/* una red nueva con la contraseña mal: no se insiste */
 			w80211_desconectar();
@@ -791,16 +888,37 @@ static int conectar(const struct pedido *p, const u8 *d)
 	struct w_red *v;
 	struct recordada *r;
 	char clave[64];
+	int seg;
 
 	if (!listo)
 		return W_R_SIN_RADIO;
 	if (n == 0 || n > 32 || n + nc > p->largo || nc > 64)
 		return W_R_NO_SE_VE;
-	v = red_vista(d, n);
+	/* cab[3]: bit 0, conectar automáticamente; bit 1, no recordarla; bits 8
+	 * a 15, la seguridad de la que se ha elegido en la lista, más 1 (0: la
+	 * que haya, como en la Consola) */
+	seg = (int)((p->cab[3] >> 8) & 0xff) - 1;
+	c_recordar = !(p->cab[3] & 2);
 	r = busca_rec(d, n);
+	if (seg >= 0)
+		v = red_vista_seg(d, n, seg);
+	else if (nc > 0 || (r && !r->abierta))
+		v = red_vista_seg(d, n, W_SEG_WPA2);	/* con contraseña (o recordada así): la WPA2 */
+	else
+		v = red_vista(d, n);
+	if (!v && seg < 0 && nc == 0)
+		v = red_vista(d, n);
 	if (v && v->seguridad != W_SEG_ABIERTA && v->seguridad != W_SEG_WPA2)
 		return W_R_NO_ADMITIDA;
 	if (v && v->seguridad == W_SEG_ABIERTA) {
+		if (r && !r->abierta) {
+			/* una red abierta con el nombre de una WPA2 recordada: puede
+			 * ser una falsa; no se conecta (para usarla, hay que olvidar
+			 * antes la recordada) */
+			hl_log(1, "«%s» está recordada con contraseña (WPA2) y esta es abierta: no se conecta (¿una red falsa?)\n", r->ssid);
+			avisa("Hay una red abierta que se llama como «%s», que se recordó con contraseña: puede ser falsa y no se usa.", r->ssid);
+			return W_R_GEMELA;
+		}
 		empieza(d, n, NULL, 1, p->cab[3] & 1);
 		return W_R_BIEN;
 	}
@@ -870,9 +988,14 @@ static void atiende(struct pedido *p, u8 *d)
 		for (k = 0; k < n && (m + 1) * (int)sizeof(*u) <= (int)sizeof resp_b; k++) {
 			struct recordada *r = busca_rec(l[k].ssid, l[k].ssid_n);
 			int j, ya = 0;
-			/* una red con varios puntos de acceso: una vez, con el que mejor se oye */
+			/* (recordada solo si es con la misma seguridad: una abierta con
+			 * el nombre de una WPA2 recordada sale aparte, sin candado) */
+			if (r && (r->abierta != (l[k].seguridad == W_SEG_ABIERTA)))
+				r = NULL;
+			/* una red con varios puntos de acceso: una vez, con el que mejor
+			 * se oye; pero por el nombre Y la seguridad */
 			for (j = 0; j < m; j++)
-				if (u[j].ssid_n == l[k].ssid_n && memcmp(u[j].ssid, l[k].ssid, l[k].ssid_n) == 0) {
+				if (u[j].ssid_n == l[k].ssid_n && memcmp(u[j].ssid, l[k].ssid, l[k].ssid_n) == 0 && u[j].seguridad == l[k].seguridad) {
 					ya = 1;
 					if (l[k].senal > u[j].senal) {
 						u[j].senal = l[k].senal;
@@ -891,7 +1014,7 @@ static void atiende(struct pedido *p, u8 *d)
 			memcpy(u[m].bssid, l[k].bssid, 6);
 			if (r)
 				u[m].marcas |= WR_RECORDADA | (r->autom ? WR_AUTO : 0);
-			if (i.estado == W_CONECTADO && i.ssid_n == l[k].ssid_n && memcmp(i.ssid, l[k].ssid, i.ssid_n) == 0)
+			if (i.estado == W_CONECTADO && i.ssid_n == l[k].ssid_n && memcmp(i.ssid, l[k].ssid, i.ssid_n) == 0 && i.seguridad == l[k].seguridad)
 				u[m].marcas |= WR_CONECTADA;
 			m++;
 		}
@@ -1164,6 +1287,9 @@ int servicio_wifi(void)
 		for (a = args; *a; a++)
 			if ((a[0] == '/' || a[0] == '-') && (a[1] | 32) == 's' && (a[2] | 32) == 'i' && (a[3] | 32) == 'm')
 				simulada = 1;
+		for (a = args; *a; a++)
+			if ((a[0] == '/' || a[0] == '-') && (a[1] | 32) == 'g' && (a[2] | 32) == 'e' && (a[3] | 32) == 'm')
+				sim_gemela = 1;
 	}
 	if (sc(SC_APUNTARSE, 0, 0, 0) != 0)
 		return 1;

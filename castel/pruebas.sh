@@ -3402,7 +3402,7 @@ if $AQUI/nucleo32/disco.sh $Wf/d.img 16 red wifisim > $Wf/disco.txt 2>&1 && bash
 # 1. sin cable, la radio de mentira: buscar, conectar (WPA2), DHCP y PING por RED.BIN
 cp $Wf/d.img $Wf/e.img
 MEMORIA=64 ESCRIBE=1 DISCO=$Wf/e.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "redwifi /estado" ":pausa 6" "redwifi /redes" ":pausa 2" \
-  "redwifi /conectar HispaPrueba otra_clave" ":pausa 2" "redwifi /conectar 2 \"clave de prueba\" /auto" ":pausa 2" "ipconfig" ":pausa 2" "ping -n 3 192.168.77.1" ":pausa 4" \
+  "redwifi /conectar HispaPrueba" "otra_clave" ":pausa 2" "redwifi /conectar 2 /auto" "clave de prueba" ":pausa 2" "ipconfig" ":pausa 2" "ping -n 3 192.168.77.1" ":pausa 4" \
   "redwifi /estado" "redwifi /registro" > $Wf/sim.sal 2>&1
 tr -d '\r' < $Wf/sim.sal > $Wf/sim.txt
 S=$Wf/sim.txt
@@ -3411,6 +3411,9 @@ mira "RED.BIN pone en marcha WIFI.BIN (WifiSimulada=SI en RED.INI), que se apunt
   "^red: Wi-Fi simulada (pruebas)$" "^red: la red va por el Wi-Fi$"
 mira "REDWIFI /REDES: busca y dice las redes, con la señal en rayitas y la seguridad" "^N.º  Red  " \
   "^  [123]  HispaPrueba  *6  ████ -47 dBm  WPA2$" "^  [123]  Vecina abierta  *11  ████ -47 dBm  abierta$" "^  [123]  Vecina vieja  *3  ████ -47 dBm  WPA (no admitida)$"
+mira "la contraseña se pregunta sin enseñarla (asteriscos; no va en la orden, así no queda en ninguna lista)" "^Contraseña de la red: \*\*\*\*\*\*\*\*\*\*$" \
+  "^Contraseña de la red: \*\*\*\*\*\*\*\*\*\*\*\*\*\*\*$"
+if grep -q "clave de prueba\|otra_clave" $S; then ko "la contraseña sale escrita en la pantalla"; else ok "y la contraseña no sale escrita en ningún sitio"; fi
 mira "la contraseña equivocada: no conecta, lo dice y no la recuerda" "^No se conecta a «HispaPrueba»: la contraseña no es la de esta red\.$" "^wifi: No se recuerda «HispaPrueba»: la contraseña no es la de esta red$"
 mira "con la buena (por su número en la lista): WPA2 (los 4 pasos), y la recuerda en WIFI.INI; RED.BIN ve el enlace y pide la IP (DHCP)" \
   "^wifi: WPA: paso 3 de 4 correcto; se manda el 4\. Claves puestas" "^wifi: 802\.11: CONECTADO a «HispaPrueba»$" "^Conectado a «HispaPrueba»\.$" \
@@ -3421,16 +3424,26 @@ mira "IPCONFIG y PING, por el Wi-Fi (la pila TCP/IP de siempre)" "^  Tarjeta . .
 mira "REDWIFI /ESTADO y /REGISTRO: conectada, con la señal, la IP y lo que se prefiere" "^Conectado a «HispaPrueba»$" "^  Señal -47 dBm, canal 6; IP 192\.168\.77\.10$" \
   "^  La red: por el cable si está enchufado; si no, por el Wi-Fi (Usar: Automático)$" "^WIFI.BIN 0\.1: Wi-Fi simulada (pruebas); radio en marcha; estado 5"
 saca $Wf/e.img WIFI.INI $Wf/wifi.ini; saca $Wf/e.img WIFI.LOG $Wf/wifi.log; saca $Wf/e.img WIFI.LLV $Wf/wifi.llv
-if [ -f $Wf/wifi.ini ] && ! grep -q "clave de prueba" $Wf/wifi.ini && grep -q "^Red=1,4869737061507275656261,[0-9A-F]\{64\}.$" $Wf/wifi.ini \
+if [ -f $Wf/wifi.ini ] && ! grep -q "clave de prueba" $Wf/wifi.ini && grep -q "^Red=1,4869737061507275656261,2:[0-9A-F]\{112\}.$" $Wf/wifi.ini && grep -q "ofuscada" $Wf/wifi.ini \
   && [ "$(stat -c %s $Wf/wifi.llv 2> /dev/null)" = 16 ] && grep -q "CONECTADO a" $Wf/wifi.log; then
-  ok "WIFI.INI: la red (en hexadecimal) y su clave preparada, cifrada (64 cifras): la contraseña no está escrita; WIFI.LLV (la llave, 16 octetos) y WIFI.LOG en el disco"
+  ok "WIFI.INI: la red (en hexadecimal) y su clave preparada, cifrada y firmada (AES-CTR y HMAC-SHA1; y dice que es una ofuscación): la contraseña no está escrita; WIFI.LLV (la llave, 16 octetos) y WIFI.LOG en el disco"
 else ko "WIFI.INI, WIFI.LLV o WIFI.LOG no son como deben:"; cat $Wf/wifi.ini 2> /dev/null | sed 's/^/        /'; fi
 # 2. otra vez (el mismo disco): se conecta sola a la red recordada
 MEMORIA=64 DISCO=$Wf/e.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "ipconfig" ":pausa 8" "redwifi /estado" > $Wf/otra.sal 2>&1
 tr -d '\r' < $Wf/otra.sal > $Wf/otra.txt
 S=$Wf/otra.txt
-mira "al arrancar otra vez, se conecta sola a la red recordada (WIFI.INI) y RED.BIN pide la IP" "^wifi: WIFI.INI: 1 redes recordadas$" \
-  "^wifi: Se conecta sola a la red recordada «HispaPrueba» (-47 dBm)$" "red: DHCP: IP 192\.168\.77\.10" "^Conectado a «HispaPrueba»$"
+mira "al arrancar otra vez, se conecta sola a la red recordada (WIFI.INI) y RED.BIN pide la IP" "wifi: WIFI.INI: 1 redes recordadas$" \
+  "wifi: Se conecta sola a la red recordada «HispaPrueba» (-47 dBm)$" "red: DHCP: IP 192\.168\.77\.10" "^Conectado a «HispaPrueba»$"
+# 2 bis. WIFI.INI cambiado a mano (una cifra de la clave): la firma no cuadra y no se usa
+cp $Wf/e.img $Wf/t.img
+python3 -I -c 'import sys; t=open(sys.argv[1],"rb").read(); i=t.index(b",2:")+20; c=b"0" if t[i:i+1]!=b"0" else b"1"; open(sys.argv[2],"wb").write(t[:i]+c+t[i+1:])' $Wf/wifi.ini $Wf/wifi2.ini
+mcopy -o -i $Wf/t.img $Wf/wifi2.ini ::WIFI.INI
+MEMORIA=64 DISCO=$Wf/t.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "ipconfig" ":pausa 6" > $Wf/t.sal 2>&1
+tr -d '\r' < $Wf/t.sal > $Wf/t.txt
+S=$Wf/t.txt
+mira "WIFI.INI cambiado a mano: la clave no lleva la firma de este equipo y no se usa (ni se conecta sola con ella)" \
+  "WIFI.INI: la clave de «HispaPrueba» no lleva la firma de este equipo" "WIFI.INI: 0 redes recordadas"
+if grep -q "Se conecta sola" $S; then ko "con WIFI.INI cambiado se conecta sola"; else ok "y no se conecta sola"; fi
 # 3. con la e1000 (el cable) y el Wi-Fi: Automático (el cable), Wi-Fi y Cable (RED.INI)
 cp $Wf/e.img $Wf/c.img
 MEMORIA=64 ESCRIBE=1 DISCO=$Wf/c.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 8" "redwifi /estado" \
@@ -3452,7 +3465,7 @@ else ko "con «Preferir=CABLE» se pone en marcha el Wi-Fi"; fi
 cp $Wf/d.img $Wf/k.img
 printf 'WifiSimulada=CHIP\r\n' > $Wf/RED.INI
 mcopy -o -i $Wf/k.img $Wf/WIFISIM.BIN ::WIFI.BIN && mcopy -o -i $Wf/k.img $Wf/RED.INI ::
-MEMORIA=64 DISCO=$Wf/k.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "redwifi /estado" ":pausa 8" "redwifi /conectar HispaPrueba \"clave de prueba\"" ":pausa 2" \
+MEMORIA=64 DISCO=$Wf/k.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "redwifi /estado" ":pausa 8" "redwifi /conectar HispaPrueba" "clave de prueba" ":pausa 2" \
   "ping -n 5 192.168.77.1" ":pausa 5" > $Wf/k.sal 2>&1
 tr -d '\r' < $Wf/k.sal > $Wf/k.txt
 S=$Wf/k.txt
@@ -3461,6 +3474,34 @@ mira "WIFISIM.BIN: brcmsmac y bcma de Linux en el anillo 3, con los anillos de D
   "BCM43XX\.FW: 96224 octetos$" "^wifi: PASO 3 de 3 hecho: radio en marcha" "^red: Wi-Fi Broadcom BCM43224$"
 mira "y con él: WPA2, DHCP y cinco PING sin perder ninguno" "^wifi: brcmsmac: brcms_ops_bss_info_changed: associated$" "^wifi: 802\.11: CONECTADO a «HispaPrueba»$" \
   "red: DHCP: IP 192\.168\.77\.10" "^    Paquetes: enviados = 5, recibidos = 5, perdidos = 0"
+# 4 bis. (seguridad) una red ABIERTA falsa con el nombre de la WPA2 (WifiSimulada=GEMELA:
+# en el canal 1, se ve antes): se conecta a la WPA2, la lista enseña las dos
+# por separado, la abierta no se usa ni rebaja la recordada, y al arrancar
+# otra vez, se conecta sola a la WPA2
+cp $Wf/d.img $Wf/g.img
+printf 'WifiSimulada=GEMELA\r\n' > $Wf/RED.INI
+mcopy -o -i $Wf/g.img $Wf/RED.INI ::
+MEMORIA=64 ESCRIBE=1 DISCO=$Wf/g.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "ipconfig" ":pausa 6" "redwifi /conectar HispaPrueba /auto" "clave de prueba" ":pausa 2" \
+  "redwifi /redes" ":pausa 2" "redwifi /conectar HispaPrueba /abierta" ":pausa 2" "redwifi /estado" > $Wf/g.sal 2>&1
+tr -d '\r' < $Wf/g.sal > $Wf/g.txt
+S=$Wf/g.txt
+mira "una «HispaPrueba» ABIERTA falsa al lado: se conecta a la de WPA2 (02:48:53:aa:00:01), no a la abierta (:04)" \
+  "802.11: conectando con «HispaPrueba» (02:48:53:aa:00:01, canal 6" "^Conectado a «HispaPrueba»\.$"
+mira "la lista enseña las dos por separado: la WPA2, recordada; la abierta, sin candado ni «recordada»" \
+  "^  [1-4]  HispaPrueba  *6  ████ -47 dBm  WPA2  (conectada)$" "^  [1-4]  HispaPrueba  *1  ████ -47 dBm  abierta$"
+mira "pedir la abierta a propósito: no se usa (puede ser falsa) y lo dice; sigue conectada a la WPA2" \
+  "^Hay una red ABIERTA que se llama «HispaPrueba», como una que se recordó con contraseña: puede ser falsa y no se usa" \
+  "«HispaPrueba» está recordada con contraseña (WPA2) y esta es abierta: no se conecta" "^Conectado a «HispaPrueba»$"
+if grep -q "conectando con «HispaPrueba» (02:48:53:aa:00:04" $S; then ko "se ha conectado a la abierta falsa"; else ok "ni un intento con la abierta falsa"; fi
+saca $Wf/g.img WIFI.INI $Wf/g.ini
+if grep -q "^Red=1,4869737061507275656261,2:[0-9A-F]\{112\}.$" $Wf/g.ini; then ok "WIFI.INI sigue con la clave de la WPA2 (no se ha rebajado a abierta)"
+else ko "WIFI.INI ha cambiado la red recordada:"; sed 's/^/        /' $Wf/g.ini; fi
+MEMORIA=64 DISCO=$Wf/g.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "ipconfig" ":pausa 8" "redwifi /estado" > $Wf/g2.sal 2>&1
+tr -d '\r' < $Wf/g2.sal > $Wf/g2.txt
+S=$Wf/g2.txt
+mira "al arrancar otra vez, con la falsa al lado, se conecta sola a la WPA2" "Se conecta sola a la red recordada «HispaPrueba»" \
+  "802.11: conectando con «HispaPrueba» (02:48:53:aa:00:01" "^Conectado a «HispaPrueba»$"
+if grep -q "conectando con «HispaPrueba» (02:48:53:aa:00:04" $S; then ko "al arrancar, se ha ido a la abierta falsa"; else ok "y ni lo intenta con la falsa"; fi
 # 5. el escritorio: el icono (con el aspa, sin conectar), la ventana del Wi-Fi, la contraseña con asteriscos, conectar; Configuración
 cp $Wf/d.img $Wf/v.img
 CAPTURAS=$G MEMORIA=64 DISCO=$Wf/v.img ARRANQUE="escritorio conred" MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 8" ":captura wf1" ":clic 720 583" ":pausa 4" ":captura wf2" \

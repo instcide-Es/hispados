@@ -3185,7 +3185,8 @@ programa del anillo 3 con `-DHL_PENTIUM`, como `TLS.BIN` con BearSSL.
   señal arriba, cada una con su señal en rayitas, un **candado** si pide
   contraseña, los dBm, la seguridad («WPA2», «abierta», «WPA (no admitida)»...)
   y «conectada» o «recordada»; el campo **Contraseña** (con asteriscos), la
-  casilla **«Conectar automáticamente»**, **Buscar**, **Conectar** (o dos clics,
+  casillas **«Conectar automáticamente»** y **«Recordar la red»** (quitada, la
+  red no se guarda: la contraseña se escribe cada vez), **Buscar**, **Conectar** (o dos clics,
   o Intro), **Desconectar** y **Olvidar**; y **«Usar: Automático / Cable /
   Wi-Fi»** (el elegido, verde y subrayado).
 - **Configuración** tiene la misma fila, **«Red: Automático, Cable, Wi-Fi»**.
@@ -3194,9 +3195,11 @@ programa del anillo 3 con `-DHL_PENTIUM`, como `TLS.BIN` con BearSSL.
   conectar, la IP la pide `RED.BIN` por DHCP, como con el cable: `IPCONFIG`,
   `PING`, `DESCARGAR`, el Navegador... van igual.
 - En la Consola, lo mismo en texto: `REDWIFI /REDES`, `REDWIFI /CONECTAR red
-  [contraseña] [/AUTO]` (la red por su nombre, entre comillas si lleva
-  espacios, o por su número en la lista), `/ESTADO`, `/DESCONECTAR`, `/OLVIDAR
-  red`, `/REGISTRO` y `/USAR AUTO|CABLE|WIFI`.
+  [/AUTO] [/ABIERTA] [/NORECORDAR]` (la red por su nombre, entre comillas si
+  lleva espacios, o por su número en la lista; **la contraseña la pregunta**,
+  con asteriscos: no va en la orden, para que no quede en ninguna lista de
+  tareas), `/ESTADO`, `/DESCONECTAR`, `/OLVIDAR red`, `/REGISTRO` y `/USAR
+  AUTO|CABLE|WIFI`.
 
 **Cable, Wi-Fi o Automático** (`Preferir=` en `RED.INI`, como en Hispa-486,
 docs/RED.md «Cable o Wi-Fi»): con **Automático** (lo de siempre), la red va por
@@ -3264,14 +3267,33 @@ hacían el residente (`drivers/hspwifi.asm`) y `wifi/nucleo/nucleo.c`:
   vueltas— **a trozos**, sin parar el servicio; la contraseña se borra de la
   memoria en cuanto se usa), `WO_DESCONECTAR`, `WO_OLVIDAR`, `WO_AUTO` y
   `WO_REGISTRO` (los números, en `wifi/wifi.h`).
-- **`WIFI.INI`**: una línea por red, `Red=1,<el nombre en hexadecimal>,<la
+- **`WIFI.INI`**: una línea por red, `Red=1,<el nombre en hexadecimal>,2:<la
   clave>`, con un comentario delante con el nombre a la vista. **No se guarda
   la contraseña**: se guarda la clave ya preparada (la PMK, que solo vale para
-  esa red), y además **cifrada con AES** con una llave de este equipo
-  (`WIFI.LLV`, 16 octetos hechos al azar la primera vez). Quien tenga los dos
-  archivos puede entrar en esa red: son archivos que cuidar. Una red nueva se
+  esa red), **cifrada (AES-128 en modo contador) y firmada (HMAC-SHA1)** con
+  dos llaves sacadas de la de este equipo (`WIFI.LLV`, 16 octetos hechos al
+  azar la primera vez): una clave cambiada en el archivo no se usa. **Esto es
+  una ofuscación, no una protección de verdad**: la llave está en el mismo
+  disco, así que protege de quien vea solo `WIFI.INI` (una copia, una foto),
+  no de quien tenga el disco entero; y lo dice el propio archivo. Para no
+  guardar nada, «Recordar la red» quitado (o `/NORECORDAR`). Una red nueva se
   recuerda **cuando conecta**: con la contraseña mal, ni se recuerda ni se
-  insiste.
+  insiste. (Los `WIFI.INI` del formato del principio, AES por bloques sin
+  firma, se leen y se guardan en el nuevo.)
+- **Una red se elige por el nombre Y la seguridad** (revisión de seguridad,
+  21/11): una red **abierta** que se llame como una **WPA2 recordada** (una
+  falsa, para que el equipo se conecte a ella) **no se usa nunca**: ni al
+  conectarse solo, ni pidiéndola (dice que puede ser falsa: para usarla, hay
+  que olvidar antes la recordada), ni rebaja la recordada a abierta; la
+  ventana enseña las dos por separado (la abierta, sin candado). Y en
+  `w80211.c` (también para Hispa-486): con contraseña se elige el punto de
+  acceso WPA2 aunque la abierta se oiga mejor. En `wpa.c`: un mensaje del
+  acuerdo de claves **con el MIC mal se ignora** (cualquiera puede mandarlo)
+  en vez de cortar y culpar a la contraseña; si el acuerdo no acaba y han
+  llegado así, se dice eso (fallo `W_F_ACUERDO`); y **la misma clave de grupo
+  otra vez no se vuelve a poner** ni vuelve su contador a cero (la variante
+  de «KRACK» contra la clave de grupo); la nueva se pone con el contador que
+  trae el mensaje (Key RSC).
 - Le dice al núcleo con la **96** cómo está (sin tarjeta, sin conectar,
   conectando, conectada), **las barras** (de 1 a 4: -55, -67 y -75 dBm, las de
   `WIFI REDES` de Hispa-486) y su tarjeta PCI: si el servicio se acaba (o lo
@@ -3335,16 +3357,21 @@ memoria de la 94, WPA2, DHCP y PING):
 ```
 castel/nucleo32/disco.sh /tmp/d.img 16 red wifisim
 MEMORIA=64 DISCO=/tmp/d.img ARRANQUE=ordenes castel/nucleo32/probar.sh "" "redwifi /redes" ":pausa 2" \
-  "redwifi /conectar HispaPrueba \"clave de prueba\"" ":pausa 2" "ping 192.168.77.1"
+  "redwifi /conectar HispaPrueba" "clave de prueba" ":pausa 2" "ping 192.168.77.1"
 ```
 
 `castel/pruebas.sh`, parte 23 (`SOLO=wifi`): en el anfitrión, las normas y la
 gestión de Hispa-486 (`build/prueba_wifi`: SHA-1, HMAC, PBKDF2, la PMK, PRF,
-AES, el envoltorio de claves y CCMP con el vector de IEEE 802.11) y brcmsmac
-contra el modelo (`build/chip_sim`); con la radio de mentira y sin cable:
-buscar, la contraseña equivocada, conectar, DHCP, IPCONFIG y PING por
-`RED.BIN`, `WIFI.INI` sin la contraseña y, al arrancar otra vez, conectarse
-solo; con la e1000: Automático (el cable), Wi-Fi (la IP otra vez y el PING por
+AES, el envoltorio de claves y CCMP con el vector de IEEE 802.11; y lo de la
+revisión de seguridad: el MIC falso ignorado, la clave de grupo repetida sin
+reinstalar, la WPA2 elegida con una abierta falsa al lado) y brcmsmac contra
+el modelo (`build/chip_sim`); con la radio de mentira y sin cable: buscar, la
+contraseña preguntada con asteriscos (y en ningún sitio escrita), la
+equivocada, conectar, DHCP, IPCONFIG y PING por `RED.BIN`, `WIFI.INI` sin la
+contraseña (y uno cambiado a mano, que no se usa) y, al arrancar otra vez,
+conectarse solo; con una red abierta falsa con el mismo nombre
+(`WifiSimulada=GEMELA`): conecta a la WPA2, la lista enseña las dos, la
+abierta no se usa ni rebaja la recordada, y al arrancar otra vez, a la WPA2; con la e1000: Automático (el cable), Wi-Fi (la IP otra vez y el PING por
 el Wi-Fi) y Cable (`WIFI.BIN` se para y `RED.INI` lo guarda; al arrancar, ni
 se pone en marcha); `WIFISIM.BIN`; y el escritorio: el icono (las rayitas
 huecas con el aspa, y llenas al conectar), la ventana (la lista, la contraseña

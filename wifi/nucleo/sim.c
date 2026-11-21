@@ -45,9 +45,11 @@ void (*sim_entrega)(const o8 *trama, int n, int senal, int canal) = w80211_rx;
 int sim_renovar_grupo;		/* las pruebas lo ponen a 1 */
 int sim_echar;			/* las pruebas: mandar una desautenticación */
 int sim_silencio;		/* las pruebas: el punto de acceso desaparece */
+int sim_gemela;			/* las pruebas: otra red, ABIERTA, con el mismo nombre (una falsa), en el canal 1 */
 static const o8 ap_mac[6] = { 0x02, 0x48, 0x53, 0xaa, 0x00, 0x01 };
 static const o8 otra_mac[6] = { 0x02, 0x48, 0x53, 0xaa, 0x00, 0x02 };
 static const o8 tkip_mac[6] = { 0x02, 0x48, 0x53, 0xaa, 0x00, 0x03 };
+static const o8 gemela_mac[6] = { 0x02, 0x48, 0x53, 0xaa, 0x00, 0x04 };
 static const o8 ip_ap[4] = { 192, 168, 77, 1 };
 static const o8 todos[6] = { 255, 255, 255, 255, 255, 255 };
 static struct radio sim;
@@ -109,6 +111,8 @@ static void balizas(int sub, const o8 *a1)
 		baliza(sub, a1, otra_mac, "Vecina abierta", 11, 0);
 	if (s.canal_sta == 3)
 		baliza(sub, a1, tkip_mac, "Vecina vieja", 3, W_SEG_WPA);
+	if (sim_gemela && s.canal_sta == 1)
+		baliza(sub, a1, gemela_mac, s.ssid, 1, 0);
 }
 
 /* datos del punto de acceso a la estación (Ethernet II -> 802.11, cifrado) */
