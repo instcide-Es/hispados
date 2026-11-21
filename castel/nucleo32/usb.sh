@@ -1,7 +1,7 @@
 #!/bin/bash
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 # nucleo32/usb.sh IMAGEN
-# Hace la imagen de una memoria USB (64 MB, FAT16, arranque BIOS con GRUB) con
+# Hace la imagen de una memoria USB (64 MB, o USB_MB; FAT16, arranque BIOS con GRUB) con
 # Hispa-Pentium, para probarlo en un PC de verdad: se graba tal cual en la
 # memoria (dd, Rufus en modo «imagen DD», balenaEtcher...) y se arranca de ella.
 # GRUB carga el núcleo por multiboot. Desde la 0.6 el núcleo lee él la
@@ -57,7 +57,7 @@ mkdir $W/f $W/m $W/i
 MEDIO=usb
 . $AQUI/sistema.sh
 IMG=$W/usb.img
-truncate -s 64M $IMG
+truncate -s ${USB_MB:-64}M $IMG   # (USB_MB=256: con sitio para las firmas de Escudo)
 parted -s $IMG mklabel msdos mkpart primary fat16 1MiB 100% set 1 boot on
 L=$(losetup -fP --show $IMG)
 # (la partición tarda un momento en aparecer)

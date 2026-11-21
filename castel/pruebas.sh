@@ -1318,7 +1318,7 @@ CAPTURAS=$G ESCRIBE=1 DISCO=$G/e.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32
   ":tecla f2" ":pausa 1" ":captura e4" ":arrastra 300 75 400 175" ":raton 600 450" ":captura e5" ":doble 400 175" ":pausa 1" ":captura e6" \
   ":doble 400 14" ":pausa 1" ":clic 630 176" ":captura e7" ":clic 150 585" ":captura e8" \
   ":clic 40 585" ":clic 80 216" ":pausa 3" "eco hola desde la ventana" "bucle" ":pausa 1" ":tecla ctrl-c" ":pausa 1" "ver" ":captura e9" \
-  "salir" ":pausa 1" ":captura e10" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":captura e11" ":clic 550 340" ":pausa 2" ":captura e12" ":clic 570 399" \
+  "salir" ":pausa 1" ":captura e10" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":captura e11" ":clic 550 340" ":pausa 2" ":captura e12" ":clic 570 431" \
   ":clic 678 176" ":pausa 1" ":captura e13" ":clic 40 585" ":clic 360 545" ":captura e14" ":clic 275 327" > $G/escritorio.sal 2>&1
 S=$G/escritorio.sal
 mira "«escritorio» en la línea del cargador: el núcleo pone el modo gráfico (VBE de Bochs/QEMU, 800x600 con 32 bits) y arranca el escritorio" \
@@ -3551,7 +3551,7 @@ cp $P/d16.img $V/de.img; mcopy -o -i $V/de.img $V/DISPOSIT.BIN ::DISPOSIT.BIN
 for e in 1024:600 1366:768 no; do
   if [ $e = no ]; then o="edid=off"; else o="xres=${e%:*},yres=${e#*:}"; fi
   CAPTURAS=$G MEMORIA=128 DISCO=$V/de.img ARRANQUE=escritorio MODULOS= VGA=none QEMU_MAS="-device VGA,$o" $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" \
-    ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 576 236" ":pausa 1" ":captura ed${e%:*}" ":clic 594 441" ":clic 333 399" ":pausa 3" ":captura dv${e%:*}" > $V/edid$e.sal 2>&1
+    ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 576 236" ":pausa 1" ":captura ed${e%:*}" ":clic 594 441" ":clic 90 431" ":pausa 3" ":captura dv${e%:*}" > $V/edid$e.sal 2>&1
 done
 S=$V/edid1024:600.sal
 mira "con un EDID de 1024 x 600 (un netbook), el núcleo lo lee y lo apunta en el registro del arranque" "pantalla: EDID: «QEMU Monitor», hecha para 1024 x 600 (la tarjeta de QEMU)"
