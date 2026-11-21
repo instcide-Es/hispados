@@ -1,0 +1,475 @@
+; =============================================================================
+;  cdcal.cas - los CD y DVD «en caliente» del núcleo de Hispa-Pentium: meter
+;  y sacar el disco con el equipo en marcha, expulsarlo, y las imágenes de
+;  disco (.ISO, .CUE/.BIN, .IMG) que se montan como una unidad más.
+;
+;  Una tarea del núcleo, «cd-cambios», le pregunta a cada lector cada dos
+;  segundos qué tiene (cdrom.cas: TEST UNIT READY, y el «atención» del
+;  lector cuando se ha cambiado el disco). Si llega un disco de datos, su
+;  ISO 9660 se monta con la letra del lector (unidades.cas); si se va (o se
+;  cambia por otro), su unidad deja de estar: los archivos abiertos en ella
+;  dan error y los programas que trabajaban en ella pasan a la unidad del
+;  sistema. Un CD de música se reconoce (no se cuelga nada: se dice que lo
+;  es; escucharlo, más adelante). Lo que pasa queda como aviso para la
+;  bandeja del escritorio («CD insertado: D:», «CD retirado: D:»: lo saca
+;  usbcal.cas con los suyos) y les llega EV_UNIDADES a las ventanas.
+;
+;  Las imágenes: montar_imagen() apunta dónde está el archivo en su disco
+;  (fat.cas: trozos_archivo) y lo hace un disco más (discos.cas, DE_IMAGEN),
+;  con la primera letra libre. Si el disco donde está el archivo se va (la
+;  memoria USB se desenchufa, se saca el CD), la imagen se desmonta sola.
+;  Expulsar una imagen es desmontarla.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Cdcal
+
+    importar Tareas, Discos, Cdrom, Fat, Iso, Unidades, Ventanas, Registro, Textos32, Formato, Mem32
+
+    constante CADA = 200                        ; cada cuántos tics se miran los lectores (dos segundos)
+    constante MAX_AVISOS = 4
+    constante LARGO_AVISO = 80
+
+    ; ---- lo que da expulsar() ----
+    público constante E_BIEN = 0
+    público constante E_NO_HAY = 1              ; no hay tal unidad
+    público constante E_NO_CD = 2               ; no es un CD ni una imagen
+    ; ---- lo que da montar_imagen() (si no, la letra) ----
+    público constante MI_NO_HAY = 1             ; no está ese archivo
+    público constante MI_NO_VALE = 2            ; no es una imagen que se pueda leer
+    público constante MI_TROCEADA = 3           ; el archivo está en demasiados trozos
+    público constante MI_LLENO = 4              ; no caben más unidades o imágenes
+    público constante MI_EN_MEMORIA = 5         ; está en la unidad en memoria (M:)
+
+    variable cerrojo: Cerrojo
+    variable en_marcha: bool
+    variable estados: arreglo [MAX_DISCOS] de nat32
+    variable avisos: arreglo [MAX_AVISOS] de arreglo [LARGO_AVISO] de byte
+    variable av_ent, av_sal: nat32
+    variable cerrojo_avisos: Cerrojo
+    variable texto: arreglo [LARGO_AVISO] de byte
+    variable letras: arreglo [8] de byte
+    variable dd: arreglo [4] de nat32
+    variable ruta2: arreglo [100] de byte
+    variable cue: arreglo [512] de byte
+
+    ; -------------------------------------------------------------------------
+    ;  Los avisos
+    ; -------------------------------------------------------------------------
+    función avisa(t: puntero a byte)
+        apunta1("cd: aviso: %s\n", nat32(t))
+        tomar(cerrojo_avisos)
+        si av_ent - av_sal < MAX_AVISOS entonces
+            ; (con un 1 delante: el escritorio lo enseña como de los CD y DVD)
+            avisos[av_ent mod MAX_AVISOS][0] := 1
+            copiar_hasta(dirección(avisos[av_ent mod MAX_AVISOS][1]), t, LARGO_AVISO - 1)
+            av_ent := av_ent + 1
+        fin
+        soltar(cerrojo_avisos)
+    fin
+
+    ; el aviso más antiguo que quede, a destino (lo saca usbcal.cas, con los
+    ; suyos, para el escritorio). Falso si no hay ninguno.
+    público función saca_aviso_cd(destino: puntero a byte, cabe: nat32): bool
+        variable hay: bool
+        hay := falso
+        tomar(cerrojo_avisos)
+        si av_ent <> av_sal entonces
+            copiar_hasta(destino, avisos[av_sal mod MAX_AVISOS], cabe)
+            av_sal := av_sal + 1
+            hay := cierto
+        fin
+        soltar(cerrojo_avisos)
+        devolver hay
+    fin
+
+    ; «CD» o «DVD», según lo que mide (un CD llega a unos 800 MB)
+    función cd_o_dvd(d: nat32): puntero a byte
+        si discos[d].sectores > 420000 entonces devolver "DVD" fin
+        devolver "CD"
+    fin
+
+    función di_letra(plantilla: puntero a byte, a: nat32, b: nat32)
+        dd[0] := a
+        dd[1] := b
+        formatear(texto, LARGO_AVISO, plantilla, dd)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las imágenes que se van con su disco
+    ; -------------------------------------------------------------------------
+    ; el disco d (una memoria USB que se va, o que se quita con seguridad:
+    ; lo dice usbcal.cas) deja de estar: las imágenes que están en él se
+    ; desmontan (y las que estén en ellas)
+    público función base_ida(d: nat32)
+        tomar(cerrojo)
+        imágenes_idas(d)
+        soltar(cerrojo)
+        a_todas(EV_UNIDADES)
+    fin
+
+    ; lo mismo, con el cerrojo ya tomado
+    función imágenes_idas(d: nat32)
+        variable e, n: nat32
+        para e desde 0 hasta MAX_DISCOS - 1 hacer
+            si discos[e].hay y discos[e].clase = DE_IMAGEN entonces
+                si imágenes[discos[e].cuál].disco = d entonces
+                    imágenes_idas(e)
+                    n := quita_disco(e, falso, letras)
+                    olvida_imagen(e)
+                    si n > 0 entonces
+                        di_letra("Imagen desmontada: %c: (su disco se ha ido)", letras[0], 0)
+                        avisa(texto)
+                    fin
+                fin
+            fin
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los lectores
+    ; -------------------------------------------------------------------------
+    ; el disco del lector (el disco d) se ha ido, o se ha cambiado: su
+    ; unidad deja de estar. Da su letra (0 si no tenía unidad).
+    función saca(d: nat32): nat32
+        variable n: nat32
+        imágenes_idas(d)
+        n := quita_disco(d, falso, letras)
+        discos[d].sectores := 0
+        si n = 0 entonces devolver 0 fin
+        devolver letras[0]
+    fin
+
+    ; lo que hay ahora en el lector del disco d: si es un disco de datos, se
+    ; monta. Con «avisar», se dice en la bandeja. Da el estado nuevo.
+    función mete(d: nat32, e: nat32, avisar: bool): nat32
+        variable l, u: nat32
+        l := discos[d].cuál
+        si e = CD_DATOS entonces
+            discos[d].sectores := lectores[l].bloques
+            si monta_cd(d) entonces
+                u := unidad_de_disco(d)
+                dd[0] := letra_de_cd(d)
+                dd[1] := nat32(cd_o_dvd(d))
+                dd[2] := nat32(dirección(volúmenes[u].etiqueta[0]))
+                dd[3] := nat32(nombres_iso(u))
+                apunta("cd: %c: %s de datos: «%s», ISO 9660 %s", dd)
+                apunta1(", %u MB.\n", (discos[d].sectores + 511) div 512)
+                si avisar entonces
+                    di_letra("%s insertado: %c:", nat32(cd_o_dvd(d)), letra_de_cd(d))
+                    avisa(texto)
+                fin
+                devolver CD_DATOS
+            fin
+            discos[d].sectores := 0
+            apunta1("cd: %c: un disco sin ISO 9660 (no se puede leer).\n", letra_de_cd(d))
+            si avisar entonces
+                di_letra("El disco de %c: no se puede leer (no es ISO 9660)", letra_de_cd(d), 0)
+                avisa(texto)
+            fin
+            devolver CD_ILEGIBLE
+        fin
+        si e = CD_MÚSICA entonces
+            apunta1("cd: %c: un CD de música.\n", letra_de_cd(d))
+            si avisar entonces
+                di_letra("CD de música en %c: (escucharlo, más adelante)", letra_de_cd(d), 0)
+                avisa(texto)
+            fin
+        fin
+        devolver e
+    fin
+
+    ; mira el lector del disco d y, si ha cambiado lo que tiene, lo pone al
+    ; día (con el cerrojo tomado). Cierto si ha cambiado algo.
+    función mira_lector(d: nat32, avisar: bool): bool
+        variable l, e, antes, letra: nat32
+        variable cambiado: bool
+        l := discos[d].cuál
+        e := mira_disco(l)
+        cambiado := lectores[l].cambiado
+        lectores[l].cambiado := falso
+        antes := estados[d]
+        si e = CD_GIRANDO entonces devolver falso fin        ; (aún no se sabe: a la próxima)
+        ; ¿sigue igual?
+        si no cambiado y (e = antes o (e = CD_DATOS y antes = CD_ILEGIBLE)) entonces devolver falso fin
+        ; lo que había, fuera
+        si antes = CD_DATOS o antes = CD_ILEGIBLE o antes = CD_MÚSICA entonces
+            letra := saca(d)
+            si e = CD_VACÍO entonces
+                si letra = 0 entonces letra := letra_de_cd(d) fin
+                apunta1("cd: %c: sin disco.\n", letra)
+                si avisar entonces
+                    di_letra("CD retirado: %c:", letra, 0)
+                    avisa(texto)
+                fin
+            fin
+        fin
+        estados[d] := mete(d, e, avisar)
+        devolver cierto
+    fin
+
+    función atiende(nada: nat32)
+        variable d: nat32
+        variable algo: bool
+        mientras cierto hacer
+            dormir(CADA)
+            tomar(cerrojo)
+            algo := falso
+            para d desde 0 hasta MAX_DISCOS - 1 hacer
+                si discos[d].hay y discos[d].clase = DE_CD entonces
+                    si mira_lector(d, cierto) entonces algo := cierto fin
+                fin
+            fin
+            soltar(cerrojo)
+            si algo entonces a_todas(EV_UNIDADES) fin
+        fin
+    fin
+
+    ; al arrancar (después de montar los discos): lo que tiene cada lector,
+    ; y la tarea que los mira desde ahora
+    público función prepara_cd()
+        variable d, n: nat32
+        n := 0
+        tomar(cerrojo)
+        para d desde 0 hasta MAX_DISCOS - 1 hacer
+            si discos[d].hay y discos[d].clase = DE_CD entonces
+                n := n + 1
+                estados[d] := CD_VACÍO
+                dd[0] := letra_de_cd(d)
+                dd[1] := nat32(dirección(discos[d].modelo[0]))
+                dd[2] := nat32(nombre_de_vía(discos[d].cuál))
+                apunta("cd: %c: el lector %s (%s)\n", dd)
+                mira_lector(d, falso)
+            fin
+        fin
+        soltar(cerrojo)
+        si n > 0 y no en_marcha entonces
+            si crear_tarea("cd-cambios", nat32(dirección(atiende)), 0) <> nulo entonces en_marcha := cierto fin
+        fin
+    fin
+
+    ; un lector de CD de USB se acaba de enchufar (la memoria m de usbalm.cas)
+    público función lector_usb_nuevo(m: nat32)
+        variable d: nat32
+        tomar(cerrojo)
+        d := añade_cd_usb(m)
+        si d <> 0xFFFFFFFF entonces
+            estados[d] := CD_VACÍO
+            di_letra("Lector de CD conectado: %c:", letra_de_cd(d), 0)
+            avisa(texto)
+            mira_lector(d, cierto)
+        fin
+        soltar(cerrojo)
+        si d <> 0xFFFFFFFF y no en_marcha entonces
+            si crear_tarea("cd-cambios", nat32(dirección(atiende)), 0) <> nulo entonces en_marcha := cierto fin
+        fin
+        a_todas(EV_UNIDADES)
+    fin
+
+    ; el lector de CD de USB de la memoria m se ha desenchufado. Cierto si lo era.
+    público función lector_usb_ido(m: nat32): bool
+        variable l, d, letra: nat32
+        tomar(cerrojo)
+        l := olvida_lector_usb(m)
+        d := 0xFFFFFFFF
+        si l <> NINGUNO_CD entonces d := de_lector(l) fin
+        si d <> 0xFFFFFFFF entonces
+            letra := letra_de_cd(d)
+            saca(d)
+            olvida_disco(d)
+            suelta_letra_cd(d)
+            estados[d] := CD_VACÍO
+            di_letra("Lector de CD desconectado: %c:", letra, 0)
+            avisa(texto)
+        fin
+        soltar(cerrojo)
+        si d = 0xFFFFFFFF entonces devolver falso fin
+        a_todas(EV_UNIDADES)
+        devolver cierto
+    fin
+
+    ; «Expulsar» la unidad de esa letra: la de un lector de CD (aunque no
+    ; tenga disco) abre la bandeja; la de una imagen, la desmonta. Da E_BIEN,
+    ; E_NO_HAY o E_NO_CD (y lo deja dicho en un aviso).
+    público función expulsar(letra: nat32): nat32
+        variable d, u, l: nat32
+        si letra >= 'a' y letra <= 'z' entonces letra := letra - 32 fin
+        tomar(cerrojo)
+        d := lector_de_letra(letra)
+        si d <> 0xFFFFFFFF entonces
+            saca(d)
+            l := discos[d].cuál
+            Cdrom.expulsar(l)
+            lectores[l].cambiado := falso
+            estados[d] := CD_VACÍO
+            apunta1("cd: %c: expulsado.\n", letra)
+            di_letra("Ya puede sacar el disco de %c:", letra, 0)
+            avisa(texto)
+            soltar(cerrojo)
+            a_todas(EV_UNIDADES)
+            devolver E_BIEN
+        fin
+        u := por_letra(letra)
+        si u = Unidades.NINGUNA entonces
+            soltar(cerrojo)
+            devolver E_NO_HAY
+        fin
+        si unidades[u].clase <> U_FAT entonces
+            soltar(cerrojo)
+            devolver E_NO_CD
+        fin
+        d := unidades[u].disco
+        si discos[d].clase <> DE_IMAGEN entonces
+            soltar(cerrojo)
+            devolver E_NO_CD
+        fin
+        imágenes_idas(d)
+        quita_disco(d, falso, letras)
+        olvida_imagen(d)
+        apunta1("cd: %c: imagen desmontada.\n", letra)
+        di_letra("Imagen desmontada: %c:", letra, 0)
+        avisa(texto)
+        soltar(cerrojo)
+        a_todas(EV_UNIDADES)
+        devolver E_BIEN
+    fin
+
+    ; lo que se sabe del lector del disco d (CD_VACÍO, CD_DATOS, CD_MÚSICA,
+    ; CD_ILEGIBLE)
+    público función estado_de_lector(d: nat32): nat32
+        si d >= MAX_DISCOS entonces devolver CD_VACÍO fin
+        devolver estados[d]
+    fin
+
+    ; ¿acaba la ruta en esa extensión (tres letras, en mayúsculas)?
+    función acaba_en(t: puntero a byte, ext: puntero a byte): bool
+        variable n: nat32
+        n := longitud(t)
+        devolver n > 4 y t[n - 4] = '.' y mayúscula(t[n - 3]) = ext[0] y mayúscula(t[n - 2]) = ext[1] y mayúscula(t[n - 1]) = ext[2]
+    fin
+
+    ; (las .CUE) el archivo de datos que dice la hoja (FILE "ALGO.BIN"
+    ; BINARY), en la misma carpeta, a ruta2. Falso si no lo dice.
+    función lee_cue(v: nat32, ruta: puntero a byte): bool
+        variable m, n, i, k, barra: nat32
+        variable p: puntero a byte
+        m := abrir_archivo(v, ruta, PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        n := leer_archivo(m, cue, 511)
+        cerrar_archivo(m)
+        si n >= PRIMER_ERROR entonces devolver falso fin
+        cue[n] := 0
+        p := buscar(cue, "FILE \"")
+        si p = nulo entonces p := buscar(cue, "file \"") fin
+        si p = nulo entonces devolver falso fin
+        p := p + 6
+        ; la carpeta de la hoja, y detrás el nombre
+        barra := 0
+        i := 0
+        mientras ruta[i] <> 0 hacer
+            si ruta[i] = '\\' entonces barra := i + 1 fin
+            i := i + 1
+        fin
+        si barra >= 90 entonces devolver falso fin
+        copiar_memoria(ruta2, ruta, barra)
+        k := barra
+        mientras valor(p) <> 0 y valor(p) <> '"' y k < 98 hacer
+            ruta2[k] := valor(p)
+            k := k + 1
+            p := p + 1
+        fin
+        ruta2[k] := 0
+        devolver k > barra
+    fin
+
+    ; monta la imagen de disco de esa ruta (entera, de la unidad v): una
+    ; .ISO (sectores de 2048), una .BIN (de 2352, en crudo: MODE1 o MODE2),
+    ; su hoja .CUE, o una .IMG (de 512, con FAT: un disquete o un disco duro).
+    ; Da la letra de su unidad, o MI_NO_HAY, MI_NO_VALE, MI_TROCEADA, MI_LLENO
+    ; o MI_EN_MEMORIA.
+    público función montar_imagen(v: nat32, ruta: puntero a byte): nat32
+        variable i, r, n, tam, de, ss, d, bloque, sectores, intento, u: nat32
+        variable ruta_bin: puntero a byte
+        si v >= MAX_UNIDADES entonces devolver MI_NO_HAY fin
+        si no unidades[v].hay entonces devolver MI_NO_HAY fin
+        si unidades[v].clase <> U_FAT entonces devolver MI_EN_MEMORIA fin
+        tomar(cerrojo)
+        ruta_bin := ruta
+        si acaba_en(ruta, "CUE") entonces
+            si no lee_cue(v, ruta) entonces
+                soltar(cerrojo)
+                devolver MI_NO_VALE
+            fin
+            ruta_bin := ruta2
+        fin
+        i := imagen_libre()
+        si i = 0xFFFFFFFF entonces
+            soltar(cerrojo)
+            devolver MI_LLENO
+        fin
+        r := trozos_archivo(v, ruta_bin, dirección(imágenes[i].inicios[0]), dirección(imágenes[i].cuentas[0]), MAX_TROZOS, n, tam, de, ss)
+        si r <> 0 entonces
+            soltar(cerrojo)
+            si r = Fat.LLENO entonces devolver MI_TROCEADA fin
+            si r = Fat.MAL entonces devolver MI_NO_VALE fin
+            devolver MI_NO_HAY
+        fin
+        imágenes[i].disco := de
+        imágenes[i].sector := ss
+        imágenes[i].trozos := n
+        imágenes[i].ruta[0] := unidades[v].letra
+        imágenes[i].ruta[1] := ':'
+        copiar_hasta(dirección(imágenes[i].ruta[2]), ruta, 98)
+        ; las .IMG, de 512 y con FAT; lo demás, un CD: de 2048, o en crudo
+        ; (2352: los datos desde el 16, o desde el 24 en MODE2)
+        u := Unidades.NINGUNA
+        intento := 0
+        mientras intento < 3 y u = Unidades.NINGUNA hacer
+            imágenes[i].salto := 0
+            si acaba_en(ruta_bin, "IMG") o acaba_en(ruta_bin, "IMA") o acaba_en(ruta_bin, "VFD") entonces
+                bloque := 512
+                imágenes[i].zancada := 512
+                intento := 3
+            sino si intento = 0 y no (tam mod 2352 = 0 y tam mod 2048 <> 0) entonces
+                bloque := 2048
+                imágenes[i].zancada := 2048
+            sino si intento <= 1 entonces
+                bloque := 2048
+                imágenes[i].zancada := 2352
+                imágenes[i].salto := 16
+                intento := 1
+            sino
+                bloque := 2048
+                imágenes[i].zancada := 2352
+                imágenes[i].salto := 24
+            fin
+            si tam mod 2352 <> 0 y imágenes[i].zancada = 2352 entonces romper fin
+            sectores := tam div imágenes[i].zancada
+            d := añade_imagen(i, sectores, bloque)
+            si d = 0xFFFFFFFF entonces
+                soltar(cerrojo)
+                devolver MI_LLENO
+            fin
+            si monta_disco(d) > 0 entonces
+                u := unidad_de_disco(d)
+            sino
+                olvida_imagen(d)
+            fin
+            intento := intento + 1
+        fin
+        si u = Unidades.NINGUNA entonces
+            soltar(cerrojo)
+            devolver MI_NO_VALE
+        fin
+        dd[0] := unidades[u].letra
+        dd[1] := nat32(dirección(imágenes[i].ruta[0]))
+        dd[2] := imágenes[i].zancada
+        apunta("cd: %c: la imagen %s (sectores de %u)\n", dd)
+        di_letra("Imagen montada: %c:", unidades[u].letra, 0)
+        avisa(texto)
+        r := unidades[u].letra
+        soltar(cerrojo)
+        a_todas(EV_UNIDADES)
+        devolver r
+    fin
+
+fin Cdcal.

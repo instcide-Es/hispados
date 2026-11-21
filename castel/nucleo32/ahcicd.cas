@@ -1,0 +1,209 @@
+; =============================================================================
+;  ahcicd.cas - los lectores de CD y DVD de una controladora AHCI (SATA):
+;  los puertos con la firma de ATAPI (EB140101), que ahci.cas apunta (y para)
+;  al buscar los discos.
+;
+;  A cada lector se le da su página de tablas (la lista de órdenes, el
+;  sitio de los FIS que llegan y la tabla de la orden) y ocho páginas para
+;  los datos (16 sectores de 2048 por orden: la tabla de la orden lleva un
+;  trozo, PRD, por página). Una orden ATAPI es la orden PACKET (A0h) en el
+;  FIS, con el bit «A» en su cabecera y el paquete SCSI de 12 octetos en
+;  ACMD (en 0x40 de la tabla de la orden); los datos, por DMA. Para saber
+;  quién es, IDENTIFY PACKET DEVICE (A1h). Si una orden falla, el registro
+;  de error (en TFD) dice la clave del porqué, y el puerto se para y se
+;  vuelve a arrancar, listo para otra.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ahcicd
+
+    importar Ahci, Marcos, Tareas, Mem32
+
+    constante P_CLB = 0x00
+    constante P_FB = 0x08
+    constante P_IS = 0x10
+    constante P_IE = 0x14
+    constante P_CMD = 0x18
+    constante P_TFD = 0x20
+    constante P_SERR = 0x30
+    constante P_CI = 0x38
+    constante CMD_ST = 0x0001
+    constante CMD_FRE = 0x0010
+    constante CMD_FR = 0x4000
+    constante CMD_CR = 0x8000
+    constante IS_TFES = 0x40000000
+
+    constante PÁGINAS = 8                       ; las de los datos de cada lector
+    público constante MAX_OCTETOS_SATA = 32768  ; lo más que trae una orden
+
+    público tipo Lector_sata = estructura
+        hay: bool
+        puerto: nat32
+        tablas: nat32
+        datos: arreglo [PÁGINAS] de nat32
+        modelo: arreglo [41] de byte
+    fin
+
+    público variable lectores_sata: arreglo [MAX_SATA_CD] de Lector_sata
+    público variable cuántos_sata_cd: nat32
+    público variable error_sata: nat32          ; el registro de error de la última orden que ha fallado
+
+    variable cerrojo: Cerrojo
+
+    función espera(p: nat32, d: nat32, máscara: nat32, valor_: nat32, cs: nat32): bool
+        variable tope, vueltas: nat32
+        tope := tics + cs + 1
+        vueltas := 0
+        mientras (reg_atapi(p, d) yb máscara) <> valor_ hacer
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 60000000 entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; el puerto, parado y vuelto a arrancar (tras un fallo)
+    función rearranca(p: nat32)
+        pon_reg_atapi(p, P_CMD, reg_atapi(p, P_CMD) yb nob CMD_ST)
+        espera(p, P_CMD, CMD_CR, 0, 60)
+        pon_reg_atapi(p, P_SERR, 0xFFFFFFFF)
+        pon_reg_atapi(p, P_IS, 0xFFFFFFFF)
+        pon_reg_atapi(p, P_CMD, reg_atapi(p, P_CMD) ob CMD_ST)
+    fin
+
+    ; manda al lector l una orden: con «cdb», un paquete ATAPI (A0h); si no,
+    ; la orden ATA «orden». Trae hasta «octetos» a destino.
+    función manda(l: nat32, orden: nat32, cdb: puntero a byte, octetos: nat32, destino: puntero a byte): bool
+        variable cab, prd: puntero a nat32
+        variable fis: puntero a byte
+        variable p, b, k, n, i, tope: nat32
+        variable bien: bool
+        p := lectores_sata[l].puerto
+        b := lectores_sata[l].tablas
+        error_sata := 0
+        si octetos > MAX_OCTETOS_SATA entonces devolver falso fin
+        si no espera(p, P_TFD, 0x88, 0, 300) entonces rearranca(p) fin
+        llenar(puntero(b + 0x500), 0x100 + PÁGINAS * 16, 0)
+        n := (octetos + 4095) div 4096                  ; los trozos de memoria
+        cab := puntero(b)
+        cab[0] := 5 ob (n << 16)
+        si cdb <> nulo entonces cab[0] := cab[0] ob 0x20 fin       ; ATAPI
+        cab[1] := 0
+        cab[2] := b + 0x500
+        cab[3] := 0
+        fis := puntero(b + 0x500)
+        fis[0] := 0x27
+        fis[1] := 0x80
+        si cdb <> nulo entonces
+            fis[2] := 0xA0
+            si octetos <> 0 entonces fis[3] := 1 fin        ; los datos, por DMA
+            fis[5] := 0xFE                                  ; (la cuenta de octetos de PIO: no se usa)
+            fis[6] := 0xFF
+            copiar_memoria(puntero(b + 0x540), cdb, 12)
+        sino
+            fis[2] := orden
+        fin
+        prd := puntero(b + 0x580)
+        para i desde 1 hasta n hacer
+            k := 4096
+            si i = n entonces k := octetos - (n - 1) * 4096 fin
+            prd[(i - 1) * 4] := lectores_sata[l].datos[i - 1]
+            prd[(i - 1) * 4 + 1] := 0
+            prd[(i - 1) * 4 + 2] := 0
+            prd[(i - 1) * 4 + 3] := k - 1
+        fin
+        pon_reg_atapi(p, P_IS, 0xFFFFFFFF)
+        pon_reg_atapi(p, P_CI, 1)
+        bien := cierto
+        tope := tics + 1000                             ; (diez segundos: puede estar poniéndose a girar)
+        k := 0
+        mientras reg_atapi(p, P_CI) yb 1 <> 0 y bien hacer
+            k := k + 1
+            si reg_atapi(p, P_IS) yb IS_TFES <> 0 o tics > tope o k > 200000000 entonces bien := falso fin
+        fin
+        si reg_atapi(p, P_IS) yb IS_TFES <> 0 o reg_atapi(p, P_TFD) yb 0x01 <> 0 entonces bien := falso fin
+        si no bien entonces
+            error_sata := (reg_atapi(p, P_TFD) >> 8) yb 0xFF
+            rearranca(p)
+            devolver falso
+        fin
+        ; lo traído, de las páginas a destino
+        i := 0
+        mientras octetos > 0 hacer
+            k := octetos
+            si k > 4096 entonces k := 4096 fin
+            copiar_memoria(destino, puntero(lectores_sata[l].datos[i]), k)
+            destino := destino + k
+            octetos := octetos - k
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; prepara el lector del puerto p: sus tablas, el puerto en marcha y
+    ; quién es. Cierto si es un lector de CD o DVD.
+    función prepara_puerto(l: nat32, p: nat32): bool
+        variable i: nat32
+        variable id: arreglo [256] de nat16
+        lectores_sata[l].hay := falso
+        lectores_sata[l].puerto := p
+        si lectores_sata[l].tablas = 0 entonces lectores_sata[l].tablas := reservar_marco() fin
+        si lectores_sata[l].tablas = 0 entonces devolver falso fin
+        para i desde 0 hasta PÁGINAS - 1 hacer
+            si lectores_sata[l].datos[i] = 0 entonces lectores_sata[l].datos[i] := reservar_marco() fin
+            si lectores_sata[l].datos[i] = 0 entonces devolver falso fin
+        fin
+        ; parado (ST y FRE), sus tablas, FRE = 1, limpio, ST = 1
+        pon_reg_atapi(p, P_CMD, reg_atapi(p, P_CMD) yb nob CMD_ST)
+        espera(p, P_CMD, CMD_CR, 0, 60)
+        pon_reg_atapi(p, P_CMD, reg_atapi(p, P_CMD) yb nob CMD_FRE)
+        espera(p, P_CMD, CMD_FR, 0, 60)
+        llenar(puntero(lectores_sata[l].tablas), 4096, 0)
+        pon_reg_atapi(p, P_CLB, lectores_sata[l].tablas)
+        pon_reg_atapi(p, P_CLB + 4, 0)
+        pon_reg_atapi(p, P_FB, lectores_sata[l].tablas + 0x400)
+        pon_reg_atapi(p, P_FB + 4, 0)
+        pon_reg_atapi(p, P_IE, 0)
+        pon_reg_atapi(p, P_CMD, reg_atapi(p, P_CMD) ob CMD_FRE)
+        espera(p, P_CMD, CMD_FR, CMD_FR, 50)
+        pon_reg_atapi(p, P_SERR, 0xFFFFFFFF)
+        pon_reg_atapi(p, P_IS, 0xFFFFFFFF)
+        pon_reg_atapi(p, P_CMD, reg_atapi(p, P_CMD) ob CMD_ST)
+        si no manda(l, 0xA1, nulo, 512, puntero(dirección(id))) entonces devolver falso fin
+        si id[0] >> 14 <> 2 o (id[0] >> 8) yb 0x1F <> 5 entonces devolver falso fin
+        para i desde 0 hasta 19 hacer
+            lectores_sata[l].modelo[i * 2] := id[27 + i] >> 8
+            lectores_sata[l].modelo[i * 2 + 1] := id[27 + i]
+        fin
+        i := 40
+        mientras i > 0 y (lectores_sata[l].modelo[i - 1] = ' ' o lectores_sata[l].modelo[i - 1] = 0) hacer i := i - 1 fin
+        lectores_sata[l].modelo[i] := 0
+        lectores_sata[l].hay := cierto
+        devolver cierto
+    fin
+
+    ; prepara los lectores que ha visto ahci.cas (después de Ahci.identificar).
+    ; Da cuántos hay.
+    público función prepara_sata_cd(): nat32
+        variable i: nat32
+        cuántos_sata_cd := 0
+        si no hay_ahci entonces devolver 0 fin
+        tomar(cerrojo)
+        para i desde 1 hasta cuántos_atapi hacer
+            si prepara_puerto(cuántos_sata_cd, puertos_atapi[i - 1]) entonces cuántos_sata_cd := cuántos_sata_cd + 1 fin
+        fin
+        soltar(cerrojo)
+        devolver cuántos_sata_cd
+    fin
+
+    ; manda al lector l el paquete «cdb» (12 octetos) y trae a destino hasta
+    ; «octetos» (MAX_OCTETOS_SATA como mucho). Falso si falla (error_sata).
+    público función paquete_sata(l: nat32, cdb: puntero a byte, octetos: nat32, destino: puntero a byte): bool
+        variable bien: bool
+        si l >= MAX_SATA_CD entonces devolver falso fin
+        si no lectores_sata[l].hay entonces devolver falso fin
+        tomar(cerrojo)
+        bien := manda(l, 0, cdb, octetos, destino)
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+fin Ahcicd.

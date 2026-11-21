@@ -80,6 +80,8 @@ módulo Llamadas
     público constante MEDIO_IDE = 1
     público constante MEDIO_SATA = 2
     público constante MEDIO_USB = 3
+    público constante MEDIO_CD = 4              ; (CD) un lector de CD o DVD (clase 9: ISO 9660)
+    público constante MEDIO_IMAGEN = 5          ; (CD) una imagen de disco montada (.ISO, .IMG...)
     público tipo Info_unidad = estructura
         letra: byte                             ; 0: un disco sin ningún volumen que se pueda leer
         clase: byte                             ; 12, 16 o 32 (FAT); 1: en memoria; 0: nada
@@ -89,8 +91,8 @@ módulo Llamadas
         del_sistema: nat32                      ; 1: es la unidad del sistema
         nombre: arreglo [41] de byte            ; el modelo del disco
         etiqueta: arreglo [12] de byte          ; el nombre del volumen
-        quitable: byte                          ; 1: una memoria USB que se puede quitar con seguridad (130)
-        relleno: arreglo [2] de byte
+        quitable: byte                          ; 1: una memoria USB que se puede quitar con seguridad (130); 2: (CD) se puede expulsar (132)
+        relleno: arreglo [2] de byte            ; (CD) [0]: lo que hay en el lector (0: nada; 1: datos; 2: música; 3: no se lee)
     fin
 
     ; ---- lo que se sabe de un disco: info_disco(n, ...) ----
@@ -910,6 +912,41 @@ módulo Llamadas
     fin
     público función batería(ref e: Energía): bool
         devolver llamada(154, nat32(dirección(e)), 0, 0) = 1
+    fin
+
+    ; (CD) «Expulsar» la unidad de esa letra: un lector de CD o DVD abre la
+    ; bandeja; una imagen montada se desmonta. Da EXPULSADA, o NO_EXPULSABLE
+    ; (no hay tal unidad, o no es un CD ni una imagen).
+    público constante EXPULSADA = 0
+    público constante NO_EXPULSABLE = 2
+    público función expulsar(letra: nat32): nat32
+        devolver llamada(132, letra, 0, 0)
+    fin
+
+    ; (CD) monta la imagen de disco (.ISO, .CUE/.BIN, .IMG) de ese archivo
+    ; como una unidad más: da su letra ('E'), o IMAGEN_NO_HAY (no está),
+    ; IMAGEN_NO_VALE (no es una imagen que se pueda leer), IMAGEN_TROCEADA
+    ; (el archivo está en demasiados trozos), IMAGEN_LLENO (no caben más) o
+    ; IMAGEN_EN_MEMORIA (está en M:)
+    público constante IMAGEN_NO_HAY = 1
+    público constante IMAGEN_NO_VALE = 2
+    público constante IMAGEN_TROCEADA = 3
+    público constante IMAGEN_LLENO = 4
+    público constante IMAGEN_EN_MEMORIA = 5
+    público función montar_imagen(ruta: puntero a byte): nat32
+        devolver llamada(133, nat32(ruta), 0, 0)
+    fin
+
+    ; (CD) lo que quiere decir lo que da montar_imagen, si no es una letra
+    público función texto_imagen(r: nat32): puntero a byte
+        según r
+            caso IMAGEN_NO_HAY: devolver "no está ese archivo"
+            caso IMAGEN_NO_VALE: devolver "no es una imagen de disco que se pueda leer (ISO 9660, o FAT en una .IMG)"
+            caso IMAGEN_TROCEADA: devolver "el archivo está en demasiados trozos en el disco"
+            caso IMAGEN_LLENO: devolver "no caben más unidades"
+            caso IMAGEN_EN_MEMORIA: devolver "no se monta desde la unidad en memoria (M:)"
+        fin
+        devolver "no se puede"
     fin
 
 fin Llamadas.

@@ -33,6 +33,7 @@ módulo Usbalm
         entra, sale: nat32                      ; sus dos extremos a granel
         sectores: nat32
         modelo: arreglo [41] de byte
+        cd: bool                                ; (CD) es un lector de CD o DVD: lo lleva cdrom.cas
     fin
 
     público variable memorias: arreglo [MAX_MEMORIAS] de Memoria
@@ -168,6 +169,17 @@ módulo Usbalm
         i := 24
         mientras i > 0 y (memorias[m].modelo[i - 1] = ' ' o memorias[m].modelo[i - 1] = 0) hacer i := i - 1 fin
         memorias[m].modelo[i] := 0
+        ; (CD) un lector de CD o DVD (la clase 5 de SCSI): sin disco puede no
+        ; estar listo ni decir cuánto mide; lo lleva cdrom.cas
+        memorias[m].cd := falso
+        si p[0] yb 0x1F = 5 entonces
+            memorias[m].cd := cierto
+            memorias[m].sectores := 0
+            memorias[m].hay := cierto
+            cuántas := cuántas + 1
+            encontrada := m
+            devolver
+        fin
         ; ¿está lista? (una memoria recién enchufada puede tardar)
         bien := falso
         lista := 0
@@ -196,6 +208,13 @@ módulo Usbalm
         encontrada := m
     fin
 
+    ; (CD) la subclase de la interfaz: SCSI (06) y, en los lectores de CD de
+    ; USB de antes, las órdenes de ATAPI (02, MMC) o las de SFF-8070i (05),
+    ; que son las mismas en un paquete de 12
+    función es_de_órdenes(subclase: nat32): bool
+        devolver subclase = 6 o subclase = 2 o subclase = 5
+    fin
+
     ; busca las memorias entre los aparatos que ha enumerado usb.cas. Da
     ; cuántas hay.
     público función prepara(): nat32
@@ -207,7 +226,7 @@ módulo Usbalm
         para a desde 0 hasta MAX_APARATOS - 1 hacer
             si aparatos[a].usado entonces
                 para k desde 1 hasta aparatos[a].n_interfaces hacer
-                    si aparatos[a].interfaces[k - 1].clase = 8 y aparatos[a].interfaces[k - 1].subclase = 6 y aparatos[a].interfaces[k - 1].protocolo = 0x50 entonces
+                    si aparatos[a].interfaces[k - 1].clase = 8 y es_de_órdenes(aparatos[a].interfaces[k - 1].subclase) y aparatos[a].interfaces[k - 1].protocolo = 0x50 entonces
                         mira(a, k - 1)
                     fin
                 fin
@@ -225,7 +244,7 @@ módulo Usbalm
         tomar(cerrojo)
         encontrada := NINGUNO
         para k desde 1 hasta aparatos[a].n_interfaces hacer
-            si encontrada = NINGUNO y aparatos[a].interfaces[k - 1].clase = 8 y aparatos[a].interfaces[k - 1].subclase = 6 y aparatos[a].interfaces[k - 1].protocolo = 0x50 entonces
+            si encontrada = NINGUNO y aparatos[a].interfaces[k - 1].clase = 8 y es_de_órdenes(aparatos[a].interfaces[k - 1].subclase) y aparatos[a].interfaces[k - 1].protocolo = 0x50 entonces
                 mira(a, k - 1)
             fin
         fin
@@ -343,6 +362,24 @@ módulo Usbalm
         si no orden(s, 10, 0, falso) entonces pregunta_fallo(s) fin
         soltar(cerrojo)
         devolver cierto
+    fin
+
+    ; (CD) manda la orden SCSI «cdb» (de «largo» octetos) al lector de CD m
+    ; y trae a destino lo que dé, hasta «octetos» (4096 como mucho: una
+    ; página). Falso si falla (luego se le pregunta por qué: REQUEST SENSE).
+    público constante MAX_OCTETOS_USB = 4096
+    público función paquete_usb(m: nat32, cdb: puntero a byte, largo: nat32, octetos: nat32, destino: puntero a byte): bool
+        variable i: nat32
+        variable bien: bool
+        si m >= MAX_MEMORIAS o octetos > MAX_OCTETOS_USB o largo > 16 entonces devolver falso fin
+        si no memorias[m].hay o no memorias[m].cd entonces devolver falso fin
+        tomar(cerrojo)
+        llenar(scsi, 16, 0)
+        para i desde 1 hasta largo hacer scsi[i - 1] := cdb[i - 1] fin
+        bien := orden(m, largo, octetos, cierto)
+        si bien y octetos > 0 entonces copiar_memoria(destino, puntero(datos), octetos) fin
+        soltar(cerrojo)
+        devolver bien
     fin
 
 fin Usbalm.

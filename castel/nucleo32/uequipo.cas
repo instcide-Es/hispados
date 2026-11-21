@@ -18,7 +18,11 @@
 ;  botón secundario saca «Abrir» (y, en una unidad, «Quitar con seguridad»: la
 ;  de una memoria USB, desde la 0.8). Arriba, la barra de menús. Cuando se
 ;  enchufa o se quita una memoria USB, la lista se pone al día sola (le llega
-;  EV_UNIDADES).
+;  EV_UNIDADES). (CD) Los lectores de CD y DVD salen con su letra aunque no
+;  tengan disco, con un disco dibujado; su menú, «Abrir|Expulsar». Una
+;  imagen de disco (.ISO, .CUE, .IMG) se monta con dos clics (o «Montar» en
+;  su menú) y se entra en ella; sale como «CD virtual», con el disco dentro
+;  de un marco de puntos, y «Expulsar» la desmonta.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UEquipo
@@ -108,6 +112,31 @@ módulo UEquipo
         disquete(v, x + 12, yy, 16)
     fin
 
+    ; (CD) un disco (40 x 30): plateado, con su agujero; el de una imagen
+    ; («virtual»), dentro de un marco de puntos
+    función dibujo_cd(x: ent32, yy: ent32, virtual: bool)
+        variable i: ent32
+        si virtual entonces
+            i := 0
+            mientras i < 40 hacer
+                rectángulo(v, x + i, yy, 3, 1, 0x4F6890)
+                rectángulo(v, x + i, yy + 29, 3, 1, 0x4F6890)
+                i := i + 6
+            fin
+            i := 0
+            mientras i < 30 hacer
+                rectángulo(v, x, yy + i, 1, 3, 0x4F6890)
+                rectángulo(v, x + 39, yy + i, 1, 3, 0x4F6890)
+                i := i + 6
+            fin
+        fin
+        redondeado(v, x + 7, yy + 2, 26, 26, 13, 0x6F7F96, 0x6F7F96)
+        redondeado(v, x + 8, yy + 3, 24, 24, 12, 0xF2F5FA, 0xB9C6D8)
+        redondeado(v, x + 12, yy + 7, 9, 9, 4, 0xFFFFFF, 0xDCE6F2)
+        redondeado(v, x + 16, yy + 11, 8, 8, 4, 0x6F7F96, 0x6F7F96)
+        redondeado(v, x + 17, yy + 12, 6, 6, 3, PAPEL, PAPEL)
+    fin
+
     ; una carpeta (18 x 14)
     función dibujo_carpeta(x: ent32, yy: ent32)
         redondeado(v, x, yy, 9, 5, 2, 0xC98A1C, 0xC98A1C)
@@ -190,7 +219,7 @@ módulo UEquipo
             dentro := falso
             elegida := 0
             d[0] := letra
-            formatear(aviso, 100, "La unidad %c: ya no está (se ha quitado la memoria).", d)
+            formatear(aviso, 100, "La unidad %c: ya no está (se ha quitado su disco).", d)
         fin
     fin
 
@@ -219,6 +248,8 @@ módulo UEquipo
             caso MEDIO_IDE: devolver "disco duro (IDE)"
             caso MEDIO_SATA: devolver "disco duro (SATA)"
             caso MEDIO_USB: devolver "memoria USB"
+            caso MEDIO_CD: devolver "CD o DVD"
+            caso MEDIO_IMAGEN: devolver "CD virtual"
         fin
         devolver "en memoria"
     fin
@@ -232,8 +263,14 @@ módulo UEquipo
         mientras i < n_unidades y ARRIBA + 8 + (i + 1) * ALTO_UNIDAD <= alto - PIE + 4 hacer
             yy := ARRIBA + i * ALTO_UNIDAD
             si elegida = i entonces redondeado(v, 8, yy + 8, ancho - 16, 58, 6, 0xDCEAFB, 0xC6DCF8) fin
-            dibujo_unidad(20, yy + 20)
-            si us[i].letra = 0 entonces
+            si us[i].medio = MEDIO_CD o us[i].medio = MEDIO_IMAGEN entonces
+                dibujo_cd(20, yy + 20, us[i].medio = MEDIO_IMAGEN)
+            sino
+                dibujo_unidad(20, yy + 20)
+            fin
+            si us[i].medio = MEDIO_CD o us[i].medio = MEDIO_IMAGEN entonces
+                pinta_cd(i, yy)                         ; (CD)
+            sino si us[i].letra = 0 entonces
                 ; un disco sin nada que se pueda leer
                 d[0] := nat32(texto_medio(us[i].medio))
                 formatear(renglón, 120, "Un %s", d)
@@ -279,6 +316,100 @@ módulo UEquipo
             fin
             i := i + 1
         fin
+    fin
+
+    ; (CD) lo de un lector de CD o DVD, o de una imagen montada
+    función pinta_cd(i: ent32, yy: ent32)
+        variable d: arreglo [3] de nat32
+        d[0] := us[i].letra
+        d[1] := nat32(dirección(us[i].etiqueta[0]))
+        si us[i].etiqueta[0] <> 0 entonces
+            formatear(renglón, 120, "Unidad %c:  %s", d)
+        sino
+            formatear(renglón, 120, "Unidad %c:", d)
+        fin
+        texto_negrita(v, 76, yy + 14, renglón, TINTA)
+        d[0] := nat32(dirección(us[i].nombre[0]))
+        si us[i].medio = MEDIO_IMAGEN entonces
+            si us[i].clase = 9 entonces
+                formatear(renglón, 120, "CD virtual: la imagen %s", d)
+            sino
+                formatear(renglón, 120, "disco virtual: la imagen %s", d)
+            fin
+        sino
+            formatear(renglón, 120, "lector de CD o DVD: %s", d)
+        fin
+        texto(v, 76, yy + 32, renglón, TINTA)
+        si us[i].clase <> 0 entonces
+            d[0] := us[i].total_k div 1024
+            si us[i].clase = 9 y us[i].total_k < 1024 entonces
+                d[0] := us[i].total_k
+                formatear(renglón, 120, "%u K, ISO 9660 (de solo lectura)", d)
+            sino si us[i].clase = 9 entonces
+                formatear(renglón, 120, "%u MB, ISO 9660 (de solo lectura)", d)
+            sino
+                d[1] := us[i].clase
+                formatear(renglón, 120, "%u MB, FAT%u (de solo lectura)", d)
+            fin
+            texto(v, 76, yy + 48, renglón, SUAVE)
+        sino si us[i].relleno[0] = 2 entonces
+            texto(v, 76, yy + 48, "un CD de música (escucharlo, más adelante)", SUAVE)
+        sino si us[i].relleno[0] = 3 entonces
+            texto(v, 76, yy + 48, "el disco no se puede leer (no es ISO 9660)", SUAVE)
+        sino
+            texto(v, 76, yy + 48, "sin disco", SUAVE)
+        fin
+    fin
+
+    ; (CD) «Expulsar» la unidad elegida: el lector abre la bandeja; la imagen se desmonta
+    función expulsa_elegida()
+        variable r: nat32
+        variable d: arreglo [1] de nat32
+        variable imagen: bool
+        si dentro o elegida < 0 o elegida >= n_unidades entonces devolver fin
+        d[0] := us[elegida].letra
+        imagen := us[elegida].medio = MEDIO_IMAGEN
+        r := expulsar(us[elegida].letra)
+        si r = EXPULSADA y imagen entonces
+            formatear(aviso, 100, "La imagen de %c: está desmontada.", d)
+        sino si r = EXPULSADA entonces
+            formatear(aviso, 100, "Ya puede sacar el disco de %c:.", d)
+        sino
+            formatear(aviso, 100, "%c: no se puede expulsar.", d)
+        fin
+        lee_unidades()
+        si elegida >= n_unidades entonces elegida := n_unidades - 1 fin
+        si elegida < 0 entonces elegida := 0 fin
+    fin
+
+    ; (CD) ¿es una imagen de disco que se pueda montar?
+    función es_imagen_de_disco(n: puntero a byte): bool
+        devolver acaba_en(n, "ISO") o acaba_en(n, "CUE") o acaba_en(n, "IMG") o acaba_en(n, "IMA")
+    fin
+
+    ; (CD) monta la imagen elegida (en «otra») y entra en su unidad
+    función monta_elegida()
+        variable r: nat32
+        variable d: arreglo [2] de nat32
+        con_args[0] := letra
+        con_args[1] := ':'
+        con_args[2] := 0
+        concatenar(con_args, otra)
+        r := montar_imagen(con_args)
+        si es_error(r) o r < 'A' entonces
+            Textos32.copiar(aviso, "No se puede montar: ")
+            si es_error(r) entonces concatenar(aviso, texto_error(r)) sino concatenar(aviso, texto_imagen(r)) fin
+            devolver
+        fin
+        lee_unidades()
+        si es_error(unidad(r)) entonces devolver fin
+        letra := r
+        dentro := cierto
+        Textos32.copiar(ruta, "\\")
+        lee_carpeta()
+        d[0] := nat32(dirección(con_args[0]))
+        d[1] := r
+        formatear(aviso, 100, "%s, montada como %c:", d)
     fin
 
     ; lo que hay en la carpeta: un renglón por cada cosa
@@ -333,6 +464,17 @@ módulo UEquipo
         si elegida < 0 o elegida >= n_unidades entonces devolver fin
         si us[elegida].letra = 0 entonces
             Textos32.copiar(aviso, "En ese disco no hay ninguna partición FAT.")
+            devolver
+        fin
+        si us[elegida].medio = MEDIO_CD y us[elegida].clase = 0 entonces
+            ; (CD) un lector sin disco que se pueda leer
+            si us[elegida].relleno[0] = 2 entonces
+                Textos32.copiar(aviso, "Es un CD de música: escucharlo, más adelante.")
+            sino si us[elegida].relleno[0] = 3 entonces
+                Textos32.copiar(aviso, "El disco no se puede leer (no es ISO 9660).")
+            sino
+                Textos32.copiar(aviso, "No hay ningún disco en el lector.")
+            fin
             devolver
         fin
         si es_error(unidad(us[elegida].letra)) entonces devolver fin
@@ -426,6 +568,8 @@ módulo UEquipo
             con_hvprun("\\OFICINA\\CUENTAS.HVP")
         sino si es_imagen(nombres[elegida]) entonces
             con_hvprun("\\OFICINA\\MIRADOR.HVP")
+        sino si es_imagen_de_disco(nombres[elegida]) entonces
+            monta_elegida()                             ; (CD)
         sino
             Textos32.copiar(aviso, "No hay con qué abrir esa clase de archivo.")
         fin
@@ -497,9 +641,15 @@ módulo UEquipo
             si opción = 2 entonces devolver cierto fin
             abre()
         sino si cuál = M_CONTEXTO entonces
-            abre()
+            abre()                                      ; (y «Montar», en una imagen de disco: lo mismo)
         sino si cuál = M_UNIDAD entonces
-            si opción = 0 entonces abre() sino quita_elegida() fin
+            si opción = 0 entonces
+                abre()
+            sino si us[elegida].quitable = 2 entonces
+                expulsa_elegida()                       ; (CD)
+            sino
+                quita_elegida()
+            fin
         sino si cuál = M_VER entonces
             según opción
                 caso 0:
@@ -562,8 +712,12 @@ módulo UEquipo
                         elegida := k
                         si s.c yb BOTÓN_DERECHO <> 0 entonces
                             pinta_todo()
-                            si dentro entonces
+                            si dentro y elegida > 0 y es_imagen_de_disco(nombres[elegida]) entonces
+                                menú(v, ent32(s.a), ent32(s.b), "Montar", 0, M_CONTEXTO)    ; (CD)
+                            sino si dentro entonces
                                 menú(v, ent32(s.a), ent32(s.b), "Abrir", 0, M_CONTEXTO)
+                            sino si us[elegida].quitable = 2 entonces
+                                menú(v, ent32(s.a), ent32(s.b), "Abrir|Expulsar", 0, M_UNIDAD)    ; (CD)
                             sino si us[elegida].quitable <> 0 entonces
                                 menú(v, ent32(s.a), ent32(s.b), "Abrir|Quitar con seguridad", 0, M_UNIDAD)
                             sino

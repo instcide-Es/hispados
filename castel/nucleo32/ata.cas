@@ -285,4 +285,14 @@ módulo Ata
         devolver bien
     fin
 
+    ; ---- (CD) el canal primario, para atapi.cas: un lector de CD en él (el
+    ; esclavo, o el maestro sin disco) usa el mismo cerrojo que los discos ----
+    público función toma_canal()
+        tomar(cerrojo)
+    fin
+
+    público función suelta_canal()
+        soltar(cerrojo)
+    fin
+
 fin Ata.

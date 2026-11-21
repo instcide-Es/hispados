@@ -75,6 +75,14 @@
 ;       desde ella (no se quita)
 ;  131  las veces que han aparecido o desaparecido unidades (para saber si
 ;       hay que mirarlas otra vez; a las ventanas les llega EV_UNIDADES)
+;   (CD) Los CD, los DVD y las imágenes de disco (cdcal.cas):
+;  132  expulsar la unidad de letra EBX: la de un lector de CD o DVD (aunque
+;       no tenga disco) abre la bandeja; la de una imagen, la desmonta -> 0;
+;       1, no hay tal unidad; 2, no es un CD ni una imagen
+;  133  montar la imagen de disco (.ISO, .CUE/.BIN, .IMG) del archivo EBX
+;       -> la letra de su unidad; 1, no está; 2, no es una imagen que se
+;       pueda leer; 3, está en demasiados trozos; 4, no caben más; 5, está
+;       en la unidad en memoria (M:)
 ;   150 a 154: apagar de verdad, reiniciar y la batería (energia.cas): las
 ;       150 a 153 solo para el servicio de ACPI (ACPI.BIN); la 154, la
 ;       batería, para todos
@@ -105,7 +113,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Red, Energia, Dispositivos
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -152,8 +160,8 @@ módulo Usuario
         del_sistema: nat32                      ; 1: es la unidad del sistema
         nombre: arreglo [41] de byte            ; el modelo del disco
         etiqueta: arreglo [12] de byte          ; el nombre del volumen
-        quitable: byte                          ; 1: una memoria USB que se puede quitar con seguridad (130)
-        relleno: arreglo [2] de byte
+        quitable: byte                          ; 1: una memoria USB que se puede quitar con seguridad (130); 2: (CD) se puede expulsar (132)
+        relleno: arreglo [2] de byte            ; (CD) [0]: lo que hay en el lector (0: nada; 1: datos; 2: música; 3: no se lee)
     fin
 
     ; lo que se da de un disco (la llamada 63; es la misma de llamadas.cas)
@@ -757,6 +765,12 @@ módulo Usuario
                 devolver Usbcal.quitar(a)
             caso 131:
                 devolver Unidades.cambios
+            caso 132:
+                devolver Cdcal.expulsar(a)                     ; (CD)
+            caso 133:
+                ; (CD) montar una imagen de disco
+                si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
+                devolver montar_imagen(u, ruta)
             caso 90..99:
                 r := atender_red(n, a, b, c)
                 ; si no hay servicio de red, se pone en marcha (una vez) y se
@@ -923,6 +937,7 @@ módulo Usuario
                 si no puede(b, tamaño(Info_disco), cierto) entonces devolver NO_VALE fin
                 si a >= MAX_DISCOS entonces devolver 0 fin
                 si no discos[a].hay entonces devolver 0 fin
+                si discos[a].bloque <> SECTOR entonces devolver 0 fin      ; (CD) los CD y sus imágenes no son para instalar
                 i := puntero(b)
                 llenar(puntero(b), tamaño(Info_disco), 0)
                 i.clase := discos[a].clase
@@ -937,6 +952,7 @@ módulo Usuario
                 si no puede(b, tamaño(Pedido_disco), falso) entonces devolver NO_VALE fin
                 pd := puntero(b)
                 si pd.n = 0 o pd.n > 128 o no puede(pd.datos, pd.n * SECTOR, n = 64) entonces devolver NO_VALE fin
+                si discos[a].bloque <> SECTOR entonces devolver NO_VALE fin   ; (CD)
                 si n = 64 entonces
                     si no leer_sectores(a, pd.lba, pd.n, puntero(pd.datos)) entonces devolver MAL fin
                     devolver 0
@@ -969,6 +985,15 @@ módulo Usuario
         devolver NO_VALE
     fin
 
+    ; (CD) lo que hay en el lector del disco d (sin unidad): 0, nada; 2, un CD
+    ; de música; 3, un disco que no se puede leer
+    función estado_cd(d: nat32): byte
+        variable e: nat32
+        e := estado_de_lector(d)
+        si e = 2 o e = 3 entonces devolver e fin
+        devolver 0
+    fin
+
     ; lo que se sabe de la unidad (o del disco sin unidad) número «cuál»,
     ; para Mi equipo: primero van las unidades, por su letra; detrás, los
     ; discos en los que no se ha encontrado ningún volumen que se pueda
@@ -995,7 +1020,13 @@ módulo Usuario
                     sino
                         d := unidades[u].disco
                         i.clase := volúmenes[u].clase
+                        si volúmenes[u].iso entonces
+                            i.clase := 9                        ; (CD) ISO 9660
+                            i.quitable := 2
+                            i.relleno[0] := 1
+                        fin
                         i.medio := discos[d].clase
+                        si discos[d].clase = DE_IMAGEN entonces i.quitable := 2 fin      ; (CD) se desmonta con «Expulsar»
                         si escribible(u) entonces i.solo_lectura := 0 fin
                         si quitable(u) entonces i.quitable := 1 fin
                         i.total_k := volúmenes[u].clusters * volúmenes[u].sectores_cluster div 2
@@ -1015,6 +1046,13 @@ módulo Usuario
                     i.medio := discos[d].clase
                     i.solo_lectura := 1
                     i.total_k := discos[d].sectores div 2
+                    si discos[d].clase = DE_CD entonces
+                        ; (CD) un lector sin disco que se pueda leer: con su letra
+                        i.letra := letra_de_cd(d)
+                        i.quitable := 2
+                        i.total_k := 0
+                        i.relleno[0] := estado_cd(d)
+                    fin
                     copiar_memoria(dirección(i.nombre[0]), dirección(discos[d].modelo[0]), 40)
                     devolver 1
                 fin

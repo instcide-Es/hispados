@@ -29,7 +29,7 @@
 ; =============================================================================
 módulo Usbcal
 
-    importar Tareas, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Discos, Fat, Unidades, Ventanas, Registro, Textos32, Formato
+    importar Tareas, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Discos, Fat, Unidades, Ventanas, Registro, Textos32, Formato, Cdcal
 
     ; ---- lo que da quitar() ----
     público constante Q_BIEN = 0                ; ya se puede quitar
@@ -76,6 +76,7 @@ módulo Usbcal
             hay := cierto
         fin
         soltar(cerrojo_avisos)
+        si no hay entonces hay := saca_aviso_cd(destino, cabe) fin       ; (CD) y los de los CD y DVD
         devolver hay
     fin
 
@@ -107,6 +108,10 @@ módulo Usbcal
     ; unidades
     función memoria_nueva(m: nat32)
         variable d, n, u: nat32
+        si memorias[m].cd entonces                     ; (CD) un lector de CD o DVD
+            lector_usb_nuevo(m)
+            devolver
+        fin
         d := añade_usb(m)
         si d = 0xFFFFFFFF entonces
             avisa("Memoria USB conectada, pero no caben más discos")
@@ -137,7 +142,11 @@ módulo Usbcal
     función memoria_ida(m: nat32)
         variable d, n: nat32
         d := de_memoria(m)
-        si d = 0xFFFFFFFF entonces devolver fin
+        si d = 0xFFFFFFFF entonces
+            lector_usb_ido(m)                           ; (CD) si era un lector de CD
+            devolver
+        fin
+        base_ida(d)                                     ; (CD) las imágenes montadas desde ella
         n := quita_disco(d, falso, letras)
         olvida_disco(d)
         apunta1("disco %u: se ha desenchufado.\n", d)
@@ -331,6 +340,7 @@ módulo Usbcal
             devolver Q_SISTEMA
         fin
         m := discos[d].cuál
+        base_ida(d)                                     ; (CD) las imágenes montadas desde ella
         n := quita_disco(d, cierto, letras)
         expulsa(m)
         olvida_disco(d)

@@ -144,7 +144,14 @@ PROGRAMAS Y ACTUALIZACIONES (PAQUETES)
 
 LAS UNIDADES
   C:, D:...  los discos de dentro del equipo (con formato FAT)
+  D:, E:...  los lectores de CD y DVD (la primera letra libre tras los
+             discos): el disco se mete y se saca en marcha; en Mi equipo,
+             su menú tiene «Expulsar» (en la Consola: EXPULSAR D:)
   X:, Y:     las memorias USB
+  Imágenes   una .ISO (o .CUE/.BIN, o .IMG de disquete) se monta como una
+             unidad más: dos clics en ella en Mi equipo, o en la Consola
+             MONTAR C:\DISCOS\ALGO.ISO (MONTAR sin nada dice lo montado;
+             DESMONTAR E: la quita)
   M:         los archivos que trae el cargador (solo en el arranque de
              emergencia)
 
