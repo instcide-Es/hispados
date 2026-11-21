@@ -20,12 +20,12 @@ trap 'rm -rf $T' EXIT
 bash $AQUI/../disco.sh $T/base.img 32 red > /dev/null
 bash $AQUI/hacer.sh $T/WIN32.BIN $T/w32
 cd "$RAIZ"
-make -s build/PEHOLA.EXE build/HOLAC.EXE build/K32PRUE.EXE build/USADLL.EXE build/DLLPRUE.DLL build/REDPRUE.EXE > /dev/null
+make -s build/GLPRUEBA.EXE build/ENGRANA.EXE build/PEHOLA.EXE build/HOLAC.EXE build/K32PRUE.EXE build/USADLL.EXE build/DLLPRUE.DLL build/REDPRUE.EXE > /dev/null
 V=$T/base.img
 mcopy -i $V $T/WIN32.BIN ::
 mmd -i $V ::WIN32 ::HISPA32 ::PRUEBAS
 mcopy -i $V $T/w32/* ::WIN32/
-for p in WINCALC:CALC32 WINHOLA:HOLA32 WINCTL:CTL32 WINMENU:MENU32 WINGUI:AVISO32 NAVES:NAVES; do
+for p in WINCALC:CALC32 WINHOLA:HOLA32 WINCTL:CTL32 WINMENU:MENU32 WINGUI:AVISO32 NAVES:NAVES GLPRUEBA:GLPRUEBA ENGRANA:ENGRANA; do   # [GL] los de HispaGL
   mcopy -i $V build/${p%%:*}.EXE ::HISPA32/${p##*:}.EXE
 done
 mcopy -i $V build/PEHOLA.EXE build/HOLAC.EXE build/K32PRUE.EXE build/USADLL.EXE build/DLLPRUE.DLL build/REDPRUE.EXE ::PRUEBAS/

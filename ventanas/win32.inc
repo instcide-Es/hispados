@@ -103,7 +103,8 @@ PE_CAR_DIB  equ PE_CAR_N + 4        ;     y si está en la pantalla
 PE_SICO     equ PE_CAR_DIB + 4      ;   los iconos de serie (6)
 PE_TEC_ULT  equ PE_SICO + 6 * 4     ;   el carácter de la última tecla (ToAscii)
 PE_DXTIC    equ PE_TEC_ULT + 4      ; [DX] la función de HispaDXTic (suya)
-PE_TAM      equ PE_DXTIC + 4
+PE_GL       equ PE_DXTIC + 4        ; [GL] el puente de OPENGL32.DLL (win32gl.inc)
+PE_TAM      equ PE_GL + 4
 
 PT_TAM      equ 28                  ; un trampolín: push (5), jmp lejos (7) y
 PT_PE       equ 12                  ;   la ficha del programa,
@@ -1169,6 +1170,18 @@ w32_tabla:
         W32F u_uno, 16, 1, 'InsertMenuItemA'                ;   tocar el menú (los menús por posición
         W32F u_uno, 12, 1, 'RemoveMenu'                     ;   y MENUITEMINFO, más adelante)
         W32F u_cero, 12, 1, 'GetKeyNameTextA'               ; [DX]
+        W32F u_HispaGLPuente, 4, 2, 'HispaGLPuente'         ; [GL] OpenGL (win32gl.inc)
+        W32F g_SwapBuffers, 4, 2, 'SwapBuffers'             ; [GL]
+        W32F g_ChoosePixelFormat, 8, 2, 'ChoosePixelFormat' ; [GL]
+        W32F g_SetPixelFormat, 12, 2, 'SetPixelFormat'      ; [GL]
+        W32F g_DescribePixelFormat, 16, 2, 'DescribePixelFormat' ; [GL]
+        W32F g_GetPixelFormat, 4, 2, 'GetPixelFormat'       ; [GL]
+        W32F u_ChangeDisplaySettingsA, 8, 1, 'ChangeDisplaySettingsA'   ; [GL]
+        W32F u_ChangeDisplaySettingsExA, 20, 1, 'ChangeDisplaySettingsExA' ; [GL]
+        W32F u_EnumDisplaySettingsA, 12, 1, 'EnumDisplaySettingsA'     ; [GL]
+        W32F u_WindowFromDC, 4, 1, 'WindowFromDC'           ; [GL]
+        W32F u_cero, 8, 2, 'GetDeviceGammaRamp'             ; [GL] (los juegos de OpenGL: el brillo;
+        W32F u_cero, 8, 2, 'SetDeviceGammaRamp'             ;   «no se puede», y siguen)
         ; fase 3b: USER32 (win32u.inc)
         W32F u_RegisterClassA, 4, 1, 'RegisterClassA'
         W32F u_RegisterClassExA, 4, 1, 'RegisterClassExA'

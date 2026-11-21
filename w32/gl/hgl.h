@@ -332,7 +332,7 @@ int hgl_tamano(Ctx *C, int an, int al);  /* el búfer, del tamaño de la ventana
 void hgl_estado_cambia(Ctx *C);           /* tras glEnable, glFog... */
 
 /* las listas: grabar una llamada (la función de dentro y sus argumentos) */
-void hgl_graba(Ctx *C, void *fn, int n, ...);          /* n argumentos de 32 bits */
+void hgl_graba(Ctx *C, void *fn, int n, ...) __attribute__((noinline));          /* n argumentos de 32 bits */
 void hgl_graba_v(Ctx *C, void *fn, const void *p, u32 palabras);  /* fn(copia de p) */
 #define F(x) hgl_fu(x)
 #define LISTA(fn, n, ...) do { if (C->lista_n) { hgl_graba(C, (void *)(fn), n, __VA_ARGS__); if (C->lista_modo == GL_COMPILE) return; } } while (0)
@@ -357,12 +357,12 @@ void i_vista(int x, int y, int w, int h);
 void i_prof_rango(float n, float f);
 
 /* vertice.c */
-void i_empieza(u32 modo);
-void i_acaba(void);
-void i_vertice(float x, float y, float z, float w);
-void i_color(float r, float g, float b, float a);
-void i_normal(float x, float y, float z);
-void i_texc(u32 unidad, float s, float t, float r, float q);
+void i_empieza(u32 modo) __attribute__((noinline));
+void i_acaba(void) __attribute__((noinline));
+void i_vertice(float x, float y, float z, float w) __attribute__((noinline));
+void i_color(float r, float g, float b, float a) __attribute__((noinline));
+void i_normal(float x, float y, float z) __attribute__((noinline));
+void i_texc(u32 unidad, float s, float t, float r, float q) __attribute__((noinline));
 void i_borde(u32 b);
 void hgl_elemento(Ctx *C, int i, int graba);
 void hgl_luz_vertice(Ctx *C, const float *eye, const float *n, float *col, float *colb);
@@ -394,7 +394,7 @@ void hgl_ejecuta_lista(Ctx *C, u32 n);
 void hgl_estado_ini(Ctx *C);
 
 /* pixeles.c */
-void i_raster_pos(float x, float y, float z, float w);
+void i_raster_pos(float x, float y, float z, float w) __attribute__((noinline));
 
 /* las extensiones que se dan (estado.c) */
 extern const char hgl_extensiones[];

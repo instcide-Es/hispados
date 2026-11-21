@@ -141,7 +141,8 @@ void i_raster_pos(float x, float y, float z, float w)
 	for (u = 0; u < 4; u++) C->cur.rcol[u] = v.col[u];
 	for (u = 0; u < 4; u++) C->cur.rtc[u] = v.t[0][u];
 }
-#define RP(x, y, z, w) do { CTX(); LISTA(i_raster_pos, 4, F(x), F(y), F(z), F(w)); i_raster_pos(x, y, z, w); } while (0)
+static void __attribute__((noinline)) rp_(float x, float y, float z, float w) { CTX(); LISTA(i_raster_pos, 4, F(x), F(y), F(z), F(w)); i_raster_pos(x, y, z, w); }
+#define RP(x, y, z, w) rp_(x, y, z, w)
 void APIENTRY glRasterPos2f(GLfloat x, GLfloat y) { RP(x, y, 0.0f, 1.0f); }
 void APIENTRY glRasterPos3f(GLfloat x, GLfloat y, GLfloat z) { RP(x, y, z, 1.0f); }
 void APIENTRY glRasterPos4f(GLfloat x, GLfloat y, GLfloat z, GLfloat w) { RP(x, y, z, w); }

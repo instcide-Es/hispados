@@ -159,8 +159,9 @@ LOS PROGRAMAS DE WINDOWS
   Los programas de Windows de 32 bits (.EXE) se abren como los demás: por
   su nombre en la Consola o con dos clics en Mi equipo. Los corre
   WIN32.BIN, con sus DLL en C:\WIN32 (y DirectX: DirectDraw, DirectInput
-  y DirectSound, de momento en silencio). En C:\HISPA32 hay unos de
-  ejemplo, como el juego «Naves» (NAVES.EXE).
+  y DirectSound, de momento en silencio; y OpenGL 1.1 dibujado por
+  programa). En C:\HISPA32 hay unos de ejemplo, como el juego «Naves»
+  (NAVES.EXE), GLPRUEBA (OpenGL) y ENGRANA (los engranajes).
 
 PROGRAMAS Y ACTUALIZACIONES (PAQUETES)
   Inicio > Actualizar abre la ventana «Programas y actualizaciones»: lo

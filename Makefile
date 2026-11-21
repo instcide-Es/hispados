@@ -158,6 +158,43 @@ $(B)/OLE32.DLL: w32/dx/ole32.c w32/dx/dx.h tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/ole32.o
 	python3 tools/elf2pe.py --dll -o $@ $(B)/ole32.o
 DXDLL = $(B)/WINMM.DLL $(B)/DDRAW.DLL $(B)/DSOUND.DLL $(B)/DINPUT.DLL $(B)/OLE32.DLL
+# [GL] OPENGL32.DLL (HispaGL, w32/gl/; docs/486/OPENGL.md): OpenGL 1.1 por
+# programa, la misma para Hispa-486 e Hispa-Pentium. Para 486 (-march=i486:
+# sin CMOV ni FCOMI) y afinada para el Pentium. Las de OpenGL 1.1 que no
+# hace salen vacías de w32/gl/hazstubs.py (que también hace la lista de lo
+# que exporta)
+CCGL = $(CC32) -march=i486 -mtune=pentium -fno-strict-aliasing -Iw32/gl
+GLSRC = w32/gl/mates.c w32/gl/matriz.c w32/gl/estado.c w32/gl/vertice.c w32/gl/textura.c w32/gl/listas.c w32/gl/raster.c w32/gl/pixeles.c w32/gl/wgl.c
+GLOBJ = $(patsubst w32/gl/%.c,$(B)/gl/%.o,$(GLSRC))
+$(B)/OPENGL32.DLL: $(GLSRC) w32/gl/hgl.h w32/gl/GL/gl.h w32/gl/hazstubs.py tools/elf2pe.py ventanas/win32.inc | $(B)
+	mkdir -p $(B)/gl
+	# (-Os menos el rasterizado y los vértices, que es lo que corre en cada cuadro)
+	for f in $(GLSRC); do o=-Os; case $$f in *raster.c|*vertice.c) o=-O2;; esac; $(CCGL) $$o -c $$f -o $(B)/gl/$$(basename $$f .c).o || exit 1; done
+	python3 w32/gl/hazstubs.py w32/gl/GL/gl.h $(B)/gl/stubs.c $(B)/gl/exporta.txt $(GLOBJ)
+	$(CCGL) -c $(B)/gl/stubs.c -o $(B)/gl/stubs.o
+	python3 tools/elf2pe.py --dll --exp $$(cat $(B)/gl/exporta.txt) -t ventanas/win32.inc -o $@ $(GLOBJ) $(B)/gl/stubs.o
+# GLU32.DLL (w32/gl/glu.c): lo de GLU 1.2 que usan los programas de la época
+$(B)/GLU32.DLL: w32/gl/glu.c w32/gl/GL/gl.h $(B)/OPENGL32.DLL tools/elf2pe.py | $(B)
+	$(CCGL) -c $< -o $(B)/gl/glu.o
+	python3 tools/elf2pe.py --dll --exp $$(nm -g --defined-only $(B)/gl/glu.o | awk '$$2=="T"{print $$3}' | grep '^glu' | paste -sd,) -l $(B)/OPENGL32.DLL -o $@ $(B)/gl/glu.o
+# GLPRUEBA.EXE (w32/gl/glprueba.c), el programa de ejemplo de HispaGL, y
+# ENGRANA.EXE (w32/gl/engrana.c): los engranajes de siempre, con los cuadros por segundo
+GLL = -l $(B)/OPENGL32.DLL -l $(B)/GLU32.DLL -t ventanas/win32.inc
+$(B)/GLPRUEBA.EXE: w32/gl/glprueba.c w32/gl/sala.c w32/gl/sala.h w32/gl/GL/gl.h tests/progs/win32min.h $(B)/OPENGL32.DLL $(B)/GLU32.DLL tools/elf2pe.py | $(B)
+	$(CCGL) -Os -c $< -o $(B)/gl/glprueba.o
+	$(CCGL) -Os -c w32/gl/sala.c -o $(B)/gl/sala.o
+	python3 tools/elf2pe.py --gui -o $@ $(GLL) $(B)/gl/glprueba.o $(B)/gl/sala.o
+$(B)/ENGRANA.EXE: w32/gl/engrana.c w32/gl/GL/gl.h tests/progs/win32min.h $(B)/OPENGL32.DLL $(B)/GLU32.DLL tools/elf2pe.py | $(B)
+	$(CCGL) -c $< -o $(B)/gl/engrana.o
+	python3 tools/elf2pe.py --gui -o $@ $(GLL) $(B)/gl/engrana.o
+# WGLGEARS.EXE: los engranajes de los demos de Mesa (MIT), de otros, si se han
+# bajado (tests/thirdparty/fetch_gl.sh), con las cabeceras de tests/gl/terceros/
+$(B)/WGLGEARS.EXE: tests/thirdparty/dl/gl/wglgears.c $(wildcard tests/gl/terceros/*.h tests/gl/terceros/glad/*.h) $(B)/OPENGL32.DLL $(B)/WINMM.DLL $(B)/MSVCRT.DLL $(B)/crt0.o tools/elf2pe.py | $(B)
+	$(CC32) -march=i486 -Os -w -nostdinc -Itests/gl/terceros -Iw32/gl -c $< -o $(B)/gl/wglgears.o
+	python3 tools/elf2pe.py --gui -o $@ -l $(B)/OPENGL32.DLL -l $(B)/WINMM.DLL -l $(B)/MSVCRT.DLL -t ventanas/win32.inc $(B)/crt0.o $(B)/gl/wglgears.o
+GLDLL = $(B)/OPENGL32.DLL $(B)/GLU32.DLL
+GLEXE = $(B)/GLPRUEBA.EXE $(B)/ENGRANA.EXE
+gl: $(GLDLL) $(GLEXE)
 $(B)/DLLPRUE.DLL: tests/progs/dllprue.c tools/elf2pe.py | $(B)
 	$(CC32) -c $< -o $(B)/dllprue.o
 	python3 tools/elf2pe.py --dll -o $@ $(B)/dllprue.o
@@ -230,6 +267,20 @@ $(B)/internet.img: $(INTERNET) w32/navega/NAVEGA.INI w32/navega/LEEME.TXT
 	iconv -f UTF-8 -t CP437 w32/navega/LEEME.TXT | sed 's/$$/\r/' > $(B)/internet_leeme.txt
 	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/internet_leeme.txt ::LEEME.TXT
 internet: $(B)/internet.img
+# [GL] El disquete «3D» de Hispa-486 (HispaGL: docs/486/OPENGL.md): OPENGL32,
+# GLU32, GLPRUEBA y ENGRANA, con HW32.COM, MSVCRT, DDRAW y WINMM al lado para
+# que se puedan abrir desde él, su LEEME.TXT e INSTALA.BAT (al disco duro)
+DISCO3D = $(GLDLL) $(GLEXE) $(B)/HW32.COM $(B)/MSVCRT.DLL $(B)/DDRAW.DLL $(B)/WINMM.DLL
+$(B)/3d.img: $(DISCO3D) w32/gl/LEEME.TXT
+	rm -f $@
+	dd if=/dev/zero of=$@ bs=1474560 count=1 2>/dev/null
+	MTOOLS_SKIP_CHECK=1 mformat -i $@ -f 1440 -v 3D ::
+	for f in $(DISCO3D); do MTOOLS_SKIP_CHECK=1 mcopy -i $@ $$f :: || exit 1; done
+	iconv -f UTF-8 -t CP437 w32/gl/LEEME.TXT | sed 's/$$/\r/' > $(B)/gl/3d_leeme.txt
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/gl/3d_leeme.txt ::LEEME.TXT
+	printf '@ECHO OFF\r\nREM HispaGL (OpenGL) al disco duro\r\nCOPY A:\\OPENGL32.DLL C:\\HISPADOS\r\nCOPY A:\\GLU32.DLL C:\\HISPADOS\r\nIF NOT EXIST C:\\HISPA32\\NUL MD C:\\HISPA32\r\nCOPY A:\\GLPRUEBA.EXE C:\\HISPA32\r\nCOPY A:\\ENGRANA.EXE C:\\HISPA32\r\nECHO HispaGL instalado: C:\\HISPA32\\GLPRUEBA y C:\\HISPA32\\ENGRANA\r\n' > $(B)/gl/instala.bat
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(B)/gl/instala.bat ::INSTALA.BAT
+3d: $(B)/3d.img
 # [NETSURF] el Navegador completo (NetSurf): NAVEGA2.EXE y el disquete «Internet 2»
 include w32/surf/surf.mk
 # [JS] HSPJS.DLL: JavaScript para los programas Hispa32 (QuickJS, que va en
@@ -969,8 +1020,8 @@ usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) 
 # ejemplo en \HISPA32, el Navegador en \HISPADOS\INTERNET (lo del disquete
 # «Internet») y la red puesta sola al arrancar (HSPRED y HSPWIFI /AUTO). Todo por tools/mkusb.py (docs/486/HISPA-486.md, «La
 # imagen»). Hacen falta gcc -m32 (los programas en C) y mtools.
-H32EXE = $(B)/WINCALC.EXE $(B)/WINHOLA.EXE $(B)/WINCTL.EXE $(B)/WINMENU.EXE $(B)/WINGUI.EXE $(B)/NAVES.EXE
-usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(DXDLL) $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
+H32EXE = $(B)/WINCALC.EXE $(B)/WINHOLA.EXE $(B)/WINCTL.EXE $(B)/WINMENU.EXE $(B)/WINGUI.EXE $(B)/NAVES.EXE $(GLEXE)
+usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(DXDLL) $(GLDLL) $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py 486
 
 # [CD] las imágenes de CD (docs/CD.md): lo mismo que la imagen USB de cada

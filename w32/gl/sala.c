@@ -1,4 +1,5 @@
-/* tests/gl/escena_juego.c - la escena de medir de HispaGL: una sala como las
+/* sala.c - la escena de medir de HispaGL (tests/run_gl_tests.sh en el PC,
+ * GLPRUEBA /SALA en Hispa-486 e Hispa-Pentium): una sala como las
  * de los juegos de 1997-1999 (al estilo del renderizador de GLQuake, pero
  * propia): paredes con textura y mipmaps, el mapa de luz con la segunda
  * unidad (GL_ARB_multitexture, MODULATE), unos modelos con luz por vértice
@@ -7,7 +8,7 @@
  * La cámara da vueltas: «cuadro» es el número de fotograma.
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include "GL/gl.h"
-#include "escenas.h"
+#include "sala.h"
 
 #define PI 3.14159265358979f
 static float sen(float x)

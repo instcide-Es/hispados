@@ -46,7 +46,7 @@ Cada fase, un hito pequeño y comprobable, con su prueba automática.
 | 2 | KERNEL32 de consola completo: archivos (CreateFile, ReadFile, WriteFile, SetFilePointer, FindFirstFile...), directorios, hora y fecha, entorno, consola (colores, cursor, eventos de teclado) | **hecha (17/11/2026)**: KERNEL32 de consola (unas 180 funciones; K32PRUE da lo de Windows 98), carga de DLL y MSVCRT.DLL propia; **NASM 2.16 para Win32 ensambla en Hispa-DOS** |
 | 3 | USER32/GDI32 sobre Hispa Ventanas: ventanas, mensajes, controles, menús, diálogos, dibujo | un programa Win32 de ventanas sencillo (el «Hola, mundo» de ventana). **3a hecha (17/11/2026)**: un Win32 de ventanas corre dentro de Hispa Ventanas y su `MessageBoxA` es un cuadro de Hispa Ventanas. **3b hecha (17/11/2026)**: el «Hola, mundo» de ventana (clase, ventana, bucle de mensajes, `WndProc`, `WM_PAINT` con texto y dibujos). **3c hecha (17/11/2026)**: KERNEL32 entero y carga de DLL dentro de Hispa Ventanas (MSVCRT.DLL), los controles de serie, los menús, los recursos y los diálogos de plantilla: una calculadora de Windows en C que se maneja con el ratón y el teclado. **3d hecha (18/11/2026)**: GDI completo (figuras, letras de cualquier tamaño, mapas de bits y DIB, regiones, ROP, paletas), barras de desplazamiento, caret, aceleradores, iconos y cursores, portapapeles, diálogos comunes y COMCTL32.DLL: **FASMW 1.73, el flat assembler de Windows, abre, edita y ensambla dentro de Hispa Ventanas** |
 | 4 | El escritorio de Hispa-486: menú de inicio, barra de tareas, escritorio con iconos, «Mi PC» (Hispa Ventanas 2) | arranca a su escritorio. **4a hecha (18/11/2026)**: la barra de tareas y el menú Inicio (`VENTANAS /486` o `Escritorio=486` en VENTANAS.INI); el escritorio empieza despejado, con todos los programas en el menú. **4b (18/11/2026)**: iconos grandes en el escritorio (los grupos con `Escritorio=1`; el de la imagen, «Biblioteca»), con un clic; y el estilo del escritorio se cambia en marcha desde Configuración (clásico o barra). Falta: «Mi PC» |
-| 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98. **Hecha sin Direct3D (18/11/2026)**: `WINMM.DLL`, `DDRAW.DLL` (DirectDraw 1-7), `DSOUND.DLL` (3-7) y `DINPUT.DLL` (3-7) en C; «Naves», el juego de ejemplo de Hispa32; y tres programas de otros que van: el ejemplo de DirectDraw del flat assembler (ensamblado dentro de Hispa-DOS), TinyPTC (UPX, en pantalla completa y en ventana) y el emulador FCE Ultra (DirectDraw 7, DirectInput 7, DirectSound). Ver «Fase 5: DirectX». Falta Direct3D (su plan, ahí) |
+| 5 | DirectX hasta el 7 (el del 98): DirectDraw (pantalla completa y doble búfer), DirectSound (sobre HSPSND), DirectInput (teclado, ratón, mandos); Direct3D por programa (sin aceleradora), luego con aceleradoras de la época | un juego DirectX sencillo; después, juegos 2D del 98. **Hecha sin Direct3D (18/11/2026)**: `WINMM.DLL`, `DDRAW.DLL` (DirectDraw 1-7), `DSOUND.DLL` (3-7) y `DINPUT.DLL` (3-7) en C; «Naves», el juego de ejemplo de Hispa32; y tres programas de otros que van: el ejemplo de DirectDraw del flat assembler (ensamblado dentro de Hispa-DOS), TinyPTC (UPX, en pantalla completa y en ventana) y el emulador FCE Ultra (DirectDraw 7, DirectInput 7, DirectSound). Ver «Fase 5: DirectX». Falta Direct3D (su plan, ahí). **OpenGL 1.1 por programa, hecho (21/11/2026)**: `OPENGL32.DLL` y `GLU32.DLL` (HispaGL), GLPRUEBA y ENGRANA; ver «OpenGL» y [OPENGL.md](OPENGL.md) |
 | 6 | Navegador web (HTML 3.2 y CSS sencillo, imágenes; HTTP y, con la red cifrada, HTTPS) | hispados.es en el navegador. **6a hecha (18/11/2026)**, adelantada por un pedido de Carlos («ya lo podemos usar para la biblio»): la red de los programas Hispa32 (`WSOCK32.DLL`: TCP/IP y Winsock 1.1), HTTPS (`HSPTLS.DLL`: TLS 1.2 con certificados) y **el Navegador** (`NAVEGA.EXE`), con el que se usa la biblioteca de ClicGest: [NAVEGADOR.md](NAVEGADOR.md). Después, ClicGest entero: imágenes, subir y bajar archivos, galletas guardadas. Falta: hojas de estilo de fuera |
 | 7 | Consolas de su época: Hispa-Drive, Hispa-SNes, Hispa-BoyColor (con juegos propios) | los tres con un juego cada uno |
 | 8 | Arranque UEFI nativo (cargador propio, disco y pantalla sin BIOS) | arranca en un PC sin CSM |
@@ -266,8 +266,9 @@ pocos archivos; los programas y el núcleo son los mismos.
 | `\HISPADOS\INTERNET\` | **el Navegador** (docs/486/NAVEGADOR.md): `NAVEGA.EXE`, `HTTPS.EXE`, `HSPTLS.DLL`, `WSOCK32.DLL`, `MSVCRT.DLL`, `NAVEGA.INI` y `LEEME.TXT` (lo del disquete «Internet» menos `HW32.COM`, que ya está en `\HISPADOS`) | `build/` y `w32/navega/` (la tabla `INTERNET` de `tools/mkusb.py`) |
 | `\HISPADOS\COMCTL32.DLL`, `UCRT.DLL` | las DLL de la fase 3d, al lado de `HW32.COM` y `MSVCRT.DLL`: los controles comunes y el CRT de Visual C++ 2015 | `build/` (la tabla `DLL486` de `tools/mkusb.py`; también en el disquete «Hispa-486») |
 | `\HISPADOS\WINMM.DLL`, `DDRAW.DLL`, `DSOUND.DLL`, `DINPUT.DLL`, `OLE32.DLL` | las DLL de la fase 5 (DirectX sin Direct3D, 63,5 KB las cinco) | `build/` (la misma tabla `DLL486`) |
+| `\HISPADOS\OPENGL32.DLL`, `GLU32.DLL` | [GL] OpenGL 1.1 por programa (HispaGL, [OPENGL.md](OPENGL.md)): 126 KB y 11 KB | `build/` (la misma tabla `DLL486`; en el disquete, en el suyo: «3D») |
 | `\HISPADOS\EDICION.INI` | `[Edicion]` `Gama=486` `Nombre=Hispa-486`: la **edición** instalada | `sistema/486/EDICION.INI` |
-| `\HISPA32\` | los programas de 32 bits de ejemplo: `CALC32.EXE`, `HOLA32.EXE`, `CTL32.EXE`, `MENU32.EXE`, `AVISO32.EXE` y (fase 5) el juego `NAVES.EXE` | `build/WINCALC.EXE`, `WINHOLA`, `WINCTL`, `WINMENU`, `WINGUI` (se renombran al copiarlos) y `NAVES.EXE` |
+| `\HISPA32\` | los programas de 32 bits de ejemplo: `CALC32.EXE`, `HOLA32.EXE`, `CTL32.EXE`, `MENU32.EXE`, `AVISO32.EXE`, (fase 5) el juego `NAVES.EXE` y ([GL]) `GLPRUEBA.EXE` y `ENGRANA.EXE` | `build/WINCALC.EXE`, `WINHOLA`, `WINCTL`, `WINMENU`, `WINGUI` (se renombran al copiarlos) y `NAVES.EXE` |
 
 En lo visible se dice **«Hispa32»**, no «Windows» ni «Win32» (decisión de
 Carlos). Los programas se siguen llamando `WIN*.EXE` en `build/`, en sus
@@ -1653,6 +1654,22 @@ aceleradora) y sobre lo de ahora:
 Lo que costará: el rasterizador con texturas a 320×240 en un Pentium a
 100 MHz va justo (la época lo hacía igual: Direct3D por programa era
 lento); en un 486, solo lo plano.
+
+## OpenGL (HispaGL, hecho el 21/11/2026)
+
+Encargo de Carlos (21/11/2026): «Dale caña al OpenGL». **`OPENGL32.DLL`**:
+OpenGL 1.1 dibujado por programa, en C (`w32/gl/`), la misma DLL en Hispa-486 y
+en Hispa-Pentium; con **`GLU32.DLL`**, el ejemplo **GLPRUEBA** (Inicio › Hispa32
+› OpenGL) y los engranajes **ENGRANA**. Lo de Hispa Ventanas está en
+`ventanas/win32gl.inc` (marcas `[GL]` en `win32.inc` y `ventanas.asm`): el
+puente de GDI32 (`SwapBuffers` y los formatos de punto, que en Windows son de
+GDI32 y llaman a OPENGL32: aquí OPENGL32 da su función al cargarse y se la
+llama con `pe_llamar`), `ChangeDisplaySettingsA`/`ExA` y `EnumDisplaySettingsA`
+(no estaban) y `WindowFromDC`. A pantalla completa presenta con DDRAW.DLL. En
+el disquete «Hispa-486» no caben: van en uno nuevo, **«3D»** (`make 3d`). Todo
+(el diseño, por qué no TinyGL, el rendimiento, lo que le falta a HW32 para
+Half-Life, las pruebas) en **[OPENGL.md](OPENGL.md)**. Prueba:
+`tests/run_gl486_tests.sh` (y en el PC, contra Mesa, `tests/run_gl_tests.sh`).
 
 ## Red inalámbrica (Wi-Fi)
 

@@ -10,7 +10,6 @@
 #include "hgl.h"
 #include "escenas.h"
 
-void juego_filtro(int min, int mag);
 extern int hgl_calidad;
 
 static int sc(int n, int a, int b, int c)

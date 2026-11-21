@@ -536,7 +536,9 @@ void hgl_vertice_ini(Ctx *C) { C->prim = -1; }
 void APIENTRY glBegin(GLenum m) { CTX(); LISTA(i_empieza, 1, m); i_empieza(m); }
 void APIENTRY glEnd(void) { CTX(); LISTA0(i_acaba); i_acaba(); }
 
-#define VERT(x, y, z, w) do { CTX(); LISTA(i_vertice, 4, F(x), F(y), F(z), F(w)); i_vertice(x, y, z, w); } while (0)
+/* (todas las variantes pasan por una: la DLL queda más pequeña) */
+static void __attribute__((noinline)) vert_(float x, float y, float z, float w) { CTX(); LISTA(i_vertice, 4, F(x), F(y), F(z), F(w)); i_vertice(x, y, z, w); }
+#define VERT(x, y, z, w) vert_(x, y, z, w)
 void APIENTRY glVertex2f(GLfloat x, GLfloat y) { VERT(x, y, 0.0f, 1.0f); }
 void APIENTRY glVertex3f(GLfloat x, GLfloat y, GLfloat z) { VERT(x, y, z, 1.0f); }
 void APIENTRY glVertex4f(GLfloat x, GLfloat y, GLfloat z, GLfloat w) { VERT(x, y, z, w); }
@@ -562,7 +564,8 @@ void APIENTRY glVertex2sv(const GLshort *v) { VERT((float)v[0], (float)v[1], 0.0
 void APIENTRY glVertex3sv(const GLshort *v) { VERT((float)v[0], (float)v[1], (float)v[2], 1.0f); }
 void APIENTRY glVertex4sv(const GLshort *v) { VERT((float)v[0], (float)v[1], (float)v[2], (float)v[3]); }
 
-#define COL(r, g, b, a) do { CTX(); LISTA(i_color, 4, F(r), F(g), F(b), F(a)); i_color(r, g, b, a); } while (0)
+static void __attribute__((noinline)) col_(float r, float g, float b, float a) { CTX(); LISTA(i_color, 4, F(r), F(g), F(b), F(a)); i_color(r, g, b, a); }
+#define COL(r, g, b, a) col_(r, g, b, a)
 #define UB(x) ((float)(x) * (1.0f / 255.0f))
 #define B_(x) (((float)(x) * 2 + 1) * (1.0f / 255.0f))
 #define US(x) ((float)(x) * (1.0f / 65535.0f))
@@ -602,7 +605,8 @@ void APIENTRY glColor4i(GLint r, GLint g, GLint b, GLint a) { COL(I_(r), I_(g), 
 void APIENTRY glColor3iv(const GLint *v) { COL(I_(v[0]), I_(v[1]), I_(v[2]), 1.0f); }
 void APIENTRY glColor4iv(const GLint *v) { COL(I_(v[0]), I_(v[1]), I_(v[2]), I_(v[3])); }
 
-#define NOR(x, y, z) do { CTX(); LISTA(i_normal, 3, F(x), F(y), F(z)); i_normal(x, y, z); } while (0)
+static void __attribute__((noinline)) nor_(float x, float y, float z) { CTX(); LISTA(i_normal, 3, F(x), F(y), F(z)); i_normal(x, y, z); }
+#define NOR(x, y, z) nor_(x, y, z)
 void APIENTRY glNormal3f(GLfloat x, GLfloat y, GLfloat z) { NOR(x, y, z); }
 void APIENTRY glNormal3fv(const GLfloat *v) { NOR(v[0], v[1], v[2]); }
 void APIENTRY glNormal3d(GLdouble x, GLdouble y, GLdouble z) { NOR((float)x, (float)y, (float)z); }
@@ -614,7 +618,8 @@ void APIENTRY glNormal3sv(const GLshort *v) { NOR(S_(v[0]), S_(v[1]), S_(v[2]));
 void APIENTRY glNormal3i(GLint x, GLint y, GLint z) { NOR(I_(x), I_(y), I_(z)); }
 void APIENTRY glNormal3iv(const GLint *v) { NOR(I_(v[0]), I_(v[1]), I_(v[2])); }
 
-#define TC(u, s, t, r, q) do { CTX(); LISTA(i_texc, 5, u, F(s), F(t), F(r), F(q)); i_texc(u, s, t, r, q); } while (0)
+static void __attribute__((noinline)) tc_(u32 u, float s, float t, float r, float q) { CTX(); LISTA(i_texc, 5, u, F(s), F(t), F(r), F(q)); i_texc(u, s, t, r, q); }
+#define TC(u, s, t, r, q) tc_(u, s, t, r, q)
 void APIENTRY glTexCoord1f(GLfloat s) { TC(0, s, 0.0f, 0.0f, 1.0f); }
 void APIENTRY glTexCoord2f(GLfloat s, GLfloat t) { TC(0, s, t, 0.0f, 1.0f); }
 void APIENTRY glTexCoord3f(GLfloat s, GLfloat t, GLfloat r) { TC(0, s, t, r, 1.0f); }

@@ -88,8 +88,39 @@ def compara(a, b, umbral):
             dif[i * 3] = dif[i * 3 + 1] = dif[i * 3 + 2] = min(255, m * 8)
     return malos * 100.0 / n, suma / (3.0 * n), bytes(dif)
 
+# clases de color para las capturas de QEMU (la pantalla de Hispa Ventanas
+# puede ser de 8 bits: los colores se acercan a su paleta)
+CLASES = {
+    'rojo': lambda r, g, b: r > 130 and g < 100 and b < 100 and r > g * 2,
+    'amarillo': lambda r, g, b: r > 170 and g > 140 and b < 120,
+    'verde': lambda r, g, b: g > 110 and r < 120 and b < 130 and g > r + 40,
+    'azul': lambda r, g, b: b > 140 and r < 130 and g < 140 and b > r + 50,
+    'baldosa': lambda r, g, b: r > 90 and g > 60 and b > 40 and r >= b + 15 and r < 250,
+    'ladrillo': lambda r, g, b: r > 60 and r >= g + 25 and r >= b + 25,
+    'negro': lambda r, g, b: r < 20 and g < 20 and b < 20,
+    'claro': lambda r, g, b: r > 200 and g > 200 and b > 200,
+}
+
+def cuenta(args):
+    # --cuenta CAPTURA.ppm X Y ANCHO ALTO CLASE MIN MAX NOMBRE
+    w, h, d = lee(args[0])
+    x0, y0, an, al = (int(v) for v in args[1:5])
+    clase, mn, mx, nom = args[5], int(args[6]), int(args[7]), ' '.join(args[8:])
+    f = CLASES[clase]
+    n = 0
+    for y in range(max(0, y0), min(h, y0 + al)):
+        for x in range(max(0, x0), min(w, x0 + an)):
+            i = (y * w + x) * 3
+            if f(d[i], d[i + 1], d[i + 2]):
+                n += 1
+    ok = mn <= n <= mx
+    print('  %s %s: %d puntos %s en (%d,%d) %dx%d (entre %d y %d)' % ('OK  ' if ok else 'FAIL', nom, n, clase, x0, y0, an, al, mn, mx))
+    return 0 if ok else 1
+
 def main():
     args = sys.argv[1:]
+    if args and args[0] == '--cuenta':
+        return cuenta(args[1:])
     if args and args[0] == '--png':
         w, h, d = lee_ppm(args[1]); escribe_png(args[2], w, h, d); return 0
     if args and args[0] == '--ppm':

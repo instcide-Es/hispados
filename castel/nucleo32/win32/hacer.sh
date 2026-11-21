@@ -6,10 +6,12 @@
 # USER32, GDI32, COMDLG32, ADVAPI32, SHELL32 y WSOCK32 en C, enlazado para
 # la dirección 0 de los segmentos de Win32 (base 0x40000000). Con
 # CARPETA_DLL, deja ahí además lo de la carpeta \WIN32: las DLL de Hispa-486
-# que valen tal cual (MSVCRT, UCRT, COMCTL32, DDRAW, DSOUND, DINPUT, OLE32;
+# que valen tal cual (MSVCRT, UCRT, COMCTL32, DDRAW, DSOUND, DINPUT, OLE32,
+# OPENGL32 y GLU32 [GL];
 # WINMM, la de Pentium: su hora sale de GetTickCount). Con
 # CARPETA_EJEMPLOS, los programas de ejemplo de \HISPA32 (CALC32, HOLA32,
-# CTL32, MENU32, AVISO32 y NAVES, con su icono NAVES.ICP); con
+# CTL32, MENU32, AVISO32 y NAVES, con su icono NAVES.ICP; y GLPRUEBA y
+# ENGRANA [GL]); con
 # CARPETA_MENU, el acceso de Naves para el menú Inicio (NAVES.MNU). Los
 # objetos, en build/win32-pentium/. Necesita gcc (con -m32), nasm, ld,
 # objcopy, make y python3. Sin «make -j».
@@ -46,17 +48,20 @@ objcopy -O binary $O/win32.elf "$SAL"
 if [ -n "$CAR" ]; then
   mkdir -p "$CAR"
   make -s build/MSVCRT.DLL build/UCRT.DLL build/COMCTL32.DLL build/DDRAW.DLL build/DSOUND.DLL build/DINPUT.DLL build/OLE32.DLL \
+    build/OPENGL32.DLL build/GLU32.DLL \
     build/WINCALC.EXE build/WINHOLA.EXE build/WINCTL.EXE build/WINMENU.EXE build/WINGUI.EXE build/NAVES.EXE > /dev/null
   # WINMM.DLL de Pentium: la misma, con la hora de GetTickCount (no hay tics de la BIOS)
   gcc -m32 -std=gnu11 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-builtin \
     -fno-tree-loop-distribute-patterns -DHISPA_PENTIUM -c w32/dx/winmm.c -o $O/winmm.o
   python3 tools/elf2pe.py --dll --exp "$(nm -g --defined-only $O/winmm.o | awk '$2=="T"{print $3}' | grep -v '^mem' | paste -sd,)" -t ventanas/win32.inc -o "$CAR/WINMM.DLL" $O/winmm.o
-  for d in MSVCRT UCRT COMCTL32 DDRAW DSOUND DINPUT OLE32; do cp build/$d.DLL "$CAR/"; done
+  # [GL] OPENGL32 y GLU32 (HispaGL, w32/gl/): las mismas de Hispa-486
+  for d in MSVCRT UCRT COMCTL32 DDRAW DSOUND DINPUT OLE32 OPENGL32 GLU32; do cp build/$d.DLL "$CAR/"; done
 fi
 if [ -n "$EJE" ]; then
   mkdir -p "$EJE"
-  make -s build/WINCALC.EXE build/WINHOLA.EXE build/WINCTL.EXE build/WINMENU.EXE build/WINGUI.EXE build/NAVES.EXE > /dev/null
-  for p in WINCALC:CALC32 WINHOLA:HOLA32 WINCTL:CTL32 WINMENU:MENU32 WINGUI:AVISO32 NAVES:NAVES; do
+  make -s build/WINCALC.EXE build/WINHOLA.EXE build/WINCTL.EXE build/WINMENU.EXE build/WINGUI.EXE build/NAVES.EXE \
+    build/GLPRUEBA.EXE build/ENGRANA.EXE > /dev/null
+  for p in WINCALC:CALC32 WINHOLA:HOLA32 WINCTL:CTL32 WINMENU:MENU32 WINGUI:AVISO32 NAVES:NAVES GLPRUEBA:GLPRUEBA ENGRANA:ENGRANA; do
     cp build/${p%%:*}.EXE "$EJE/${p##*:}.EXE"
   done
   python3 -I $AQUI/hazicono.py "$EJE/NAVES.ICP"

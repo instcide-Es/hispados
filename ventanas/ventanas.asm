@@ -2178,6 +2178,7 @@ alto_ini:
 %include "win32x.inc"               ; [HISPA-486]   USER32 de más, COMDLG32, ADVAPI32, SHELL32
 %include "win32n.inc"               ; [NAVEGADOR] WinExec (lo demás, en la fase 3d)
 %include "win32dx.inc"              ; [DX] fase 5: lo que piden DDRAW, DSOUND, DINPUT y WINMM
+%include "win32gl.inc"              ; [GL] lo que pide OPENGL32.DLL (el puente de GDI32 y USER32)
 %include "reloj.inc"                ; (en la parte alta desde [PANTALLA]: abajo no cabía más)
 %include "pantalla.inc"             ; [PANTALLA] [ICONOS] la resolución y el tamaño de los iconos
 %endif

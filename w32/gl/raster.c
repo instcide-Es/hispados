@@ -41,7 +41,7 @@ static void caja(Ctx *C, Caja *k)
 }
 
 /* ---- las texturas: leer un punto ---- */
-static inline u32 deco(u16 p, int fmt)   /* → 0xAARRGGBB */
+static inline __attribute__((always_inline)) u32 deco(u16 p, int fmt)   /* → 0xAARRGGBB */
 {
 	u32 r, g, b, a;
 	switch (fmt) {
@@ -67,13 +67,13 @@ typedef struct {
 } UT;
 enum { M_MOD, M_REP_RGB, M_REP_RGBA, M_REP_A, M_DECAL, M_BLEND, M_BLEND_I, M_ADD, M_ADD_I };
 
-static inline u32 lee(const Nivel *n, int fmt, int x, int y, int rs, int rt)
+static inline __attribute__((always_inline)) u32 lee(const Nivel *n, int fmt, int x, int y, int rs, int rt)
 {
 	if (rs) x &= n->w - 1; else x = x < 0 ? 0 : x >= n->w ? n->w - 1 : x;
 	if (rt) y &= n->h - 1; else y = y < 0 ? 0 : y >= n->h ? n->h - 1 : y;
 	return deco(n->p[(y << n->lw) + x], fmt);
 }
-static inline u32 mezcla4(u32 a, u32 b, u32 c, u32 d, int fx, int fy)  /* fx, fy: 0..256 */
+static inline __attribute__((always_inline)) u32 mezcla4(u32 a, u32 b, u32 c, u32 d, int fx, int fy)  /* fx, fy: 0..256 */
 {
 	u32 r = 0;
 	int k;
@@ -86,7 +86,7 @@ static inline u32 mezcla4(u32 a, u32 b, u32 c, u32 d, int fx, int fy)  /* fx, fy
 	return r;
 }
 /* s, t: en puntos del nivel 0, 16.16; nivel: el de mipmap; fil: 0 punto, 1 bilineal */
-static inline u32 muestra(const UT *u, i32 s, i32 t, int nivel, int fil)
+static inline __attribute__((always_inline)) u32 muestra(const UT *u, i32 s, i32 t, int nivel, int fil)
 {
 	const Nivel *n = &u->t->niv[nivel];
 	int fmt = u->t->fmt;
@@ -128,7 +128,7 @@ static inline int div255(int x) { return (x + 1 + (x >> 8)) >> 8; }
 static inline int lim8(int v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
 
 /* aplica el modo de la unidad: f = el fragmento, t = el punto de la textura (0xAARRGGBB) */
-static inline void entorno(const UT *u, int *c, u32 t)
+static inline __attribute__((always_inline)) void entorno(const UT *u, int *c, u32 t)
 {
 	int tr = (t >> 16) & 255, tg = (t >> 8) & 255, tb = t & 255, ta = t >> 24;
 	switch (u->modo) {
@@ -186,6 +186,8 @@ typedef struct {
 	int col_k[4];                    /* (liso) el color, 0..255 */
 	int persp;                       /* hay que dividir por w (texturas) */
 	float wx, wy, w0;                /* el plano de 1/w */
+	float ultQ[UNIDADES], ultq[UNIDADES];
+	int fino; float dws;             /* tramos más cortos donde 1/w cambia mucho (dws: lo que cambia en uno) */
 	int pcol;                        /* el color y la niebla, con perspectiva (sus planos son c/w) */
 	int seg;
 	/* lo de los fragmentos */
@@ -198,7 +200,7 @@ typedef struct {
 	int gris;
 } Tri;
 
-enum { MZ_NADA, MZ_ALFA, MZ_SUMA, MZ_MULT, MZ_ALFA_SUMA, MZ_OTRA };
+enum { MZ_NADA, MZ_ALFA, MZ_SUMA, MZ_MULT, MZ_ALFA_SUMA, MZ_MULT_INV, MZ_OTRA };
 
 static Tri T;
 
@@ -260,6 +262,7 @@ static inline void escribe(u16 *p, const int *c)
 		case MZ_SUMA: r = lim8(r + dr); g = lim8(g + dg); b = lim8(b + db); break;
 		case MZ_MULT: r = mul8(dr, r); g = mul8(dg, g); b = mul8(db, b); break;
 		case MZ_ALFA_SUMA: r = lim8(dr + mul8(r, a)); g = lim8(dg + mul8(g, a)); b = lim8(db + mul8(b, a)); break;
+		case MZ_MULT_INV: r = mul8(dr, 255 - r); g = mul8(dg, 255 - g); b = mul8(db, 255 - b); break;
 		default: {
 			int s0 = factor(T.m_or, 0, 0, r, a, dr, 0), s1 = factor(T.m_or, 0, 0, g, a, dg, 1), s2 = factor(T.m_or, 0, 0, b, a, db, 2);
 			int d0 = factor(T.m_de, 0, 0, r, a, dr, 0), d1 = factor(T.m_de, 0, 0, g, a, dg, 1), d2 = factor(T.m_de, 0, 0, b, a, db, 2);
@@ -277,6 +280,23 @@ static inline void escribe(u16 *p, const int *c)
 	}
 }
 
+/* 1/m sin dividir (las divisiones del x87 son caras en el 486 y el Pentium) */
+static const float inversos[33] = { 0, 1.0f / 1, 1.0f / 2, 1.0f / 3, 1.0f / 4, 1.0f / 5, 1.0f / 6, 1.0f / 7, 1.0f / 8, 1.0f / 9, 1.0f / 10, 1.0f / 11, 1.0f / 12, 1.0f / 13, 1.0f / 14, 1.0f / 15, 1.0f / 16, 1.0f / 17, 1.0f / 18, 1.0f / 19, 1.0f / 20, 1.0f / 21, 1.0f / 22, 1.0f / 23, 1.0f / 24, 1.0f / 25, 1.0f / 26, 1.0f / 27, 1.0f / 28, 1.0f / 29, 1.0f / 30, 1.0f / 31, 1.0f / 32 };
+static inline float inv_m(int m) { return m <= 32 ? inversos[m] : 1.0f / (float)m; }
+
+/* la longitud del segmento que empieza en (fx, fy): la de siempre, o más
+ * corta si 1/w cambia mucho en él (las paredes muy de lado, lo lejano) */
+static inline int largo(int n, float fx, float fy)
+{
+	int m = T.seg;
+	if (m < 4096 && T.fino) {
+		float W = T.w0 + T.wx * fx + T.wy * fy;
+		if (T.dws > W * 0.2f) m = 4;
+		else if (T.dws > W * 0.1f) m = 8;
+	}
+	return n < m ? n : m;
+}
+
 /* el color y la niebla de un segmento de m puntos que empieza en (fx, fy):
  * el valor del principio y lo que avanza por punto, en 8.16 */
 typedef struct { i32 c[4], dc[4], f, df; } Seg;
@@ -284,13 +304,14 @@ static inline i32 lim16(float v) { return v <= 0 ? 0 : v >= 255.0f ? 255 << 16 :
 static void seg_color(Seg *g, float fx, float fy, int m)
 {
 	int k;
+	float im = inv_m(m);
 	if (T.liso) {
 		for (k = 0; k < 4; k++) { g->c[k] = T.col_k[k] << 16; g->dc[k] = 0; }
 	} else if (!T.pcol) {
 		for (k = 0; k < 4; k++) {
 			float a = T.c0[k] + T.cx[k] * fx + T.cy[k] * fy;
 			g->c[k] = lim16(a);
-			g->dc[k] = (lim16(a + T.cx[k] * m) - g->c[k]) / m;
+			g->dc[k] = hgl_red((float)(lim16(a + T.cx[k] * m) - g->c[k]) * im);
 		}
 	} else {
 		float W0 = T.w0 + T.wx * fx + T.wy * fy, W1 = W0 + T.wx * m, i0, i1;
@@ -299,7 +320,7 @@ static void seg_color(Seg *g, float fx, float fy, int m)
 		for (k = 0; k < 4; k++) {
 			float a = T.c0[k] + T.cx[k] * fx + T.cy[k] * fy;
 			g->c[k] = lim16(a * i0);
-			g->dc[k] = (lim16((a + T.cx[k] * m) * i1) - g->c[k]) / m;
+			g->dc[k] = hgl_red((float)(lim16((a + T.cx[k] * m) * i1) - g->c[k]) * im);
 		}
 	}
 	if (T.niebla) {
@@ -308,13 +329,16 @@ static void seg_color(Seg *g, float fx, float fy, int m)
 			float W0 = T.w0 + T.wx * fx + T.wy * fy, W1 = W0 + T.wx * m;
 			if (W1 <= 0) W1 = W0;
 			g->f = lim16(a / W0);
-			g->df = (lim16((a + T.fx * m) / W1) - g->f) / m;
+			g->df = hgl_red((float)(lim16((a + T.fx * m) / W1) - g->f) * im);
 		} else {
 			g->f = lim16(a);
-			g->df = (lim16(a + T.fx * m) - g->f) / m;
+			g->df = hgl_red((float)(lim16(a + T.fx * m) - g->f) * im);
 		}
 	}
 }
+
+typedef struct { i32 s, t, ds, dt; int nv, nv2, fr, fil; float s0, t0, s1, t1; } SegT;
+static void seg_tex(int u, float *S, float *Tt, float *Q, int m, SegT *o);
 
 /* ---- el camino general: punto a punto ---- */
 static void tramo_todo(u16 *pc, u16 *pz, int x, int y, int n, float fx, float fy)
@@ -329,45 +353,17 @@ static void tramo_todo(u16 *pc, u16 *pz, int x, int y, int n, float fx, float fy
 		Q[u] = T.q0[u] + T.qx[u] * fx + T.qy[u] * fy;
 	}
 	while (n > 0) {
-		int m = n < T.seg ? n : T.seg, i;
+		int m = largo(n, fx, fy), i;
 		i32 s[UNIDADES], t[UNIDADES], ds[UNIDADES], dt[UNIDADES];
 		int nv[UNIDADES], nv2[UNIDADES], fr[UNIDADES], fil[UNIDADES];
 		Seg g;
 		seg_color(&g, fx, fy, m);
 		fx += m;
 		for (u = 0; u < T.nu; u++) {
-			const UT *U = &T.u[u];
-			float q0 = 1.0f / Q[u], s0 = S[u] * q0 * U->W, t0 = Tt[u] * q0 * U->H, s1, t1;
-			float S1 = S[u] + T.sx[u] * m, T1 = Tt[u] + T.tx[u] * m, Q1 = Q[u] + T.qx[u] * m, q1;
-			float off_s = 0, off_t = 0;
-			if (Q1 <= 0) Q1 = Q[u];
-			q1 = 1.0f / Q1;
-			s1 = S1 * q1 * U->W; t1 = T1 * q1 * U->H;
-			/* para que la coma fija no se salga: se quita un múltiplo del tamaño */
-			if (U->repite_s && (s0 > 16384 || s0 < -16384)) off_s = (float)hgl_suelo(s0 / U->W) * U->W;
-			if (U->repite_t && (t0 > 16384 || t0 < -16384)) off_t = (float)hgl_suelo(t0 / U->H) * U->H;
-			if (!U->repite_s) { if (s0 < -16384) s0 = -16384; if (s0 > 16384) s0 = 16384; if (s1 < -16384) s1 = -16384; if (s1 > 16384) s1 = 16384; }
-			if (!U->repite_t) { if (t0 < -16384) t0 = -16384; if (t0 > 16384) t0 = 16384; if (t1 < -16384) t1 = -16384; if (t1 > 16384) t1 = 16384; }
-			s[u] = hgl_red((s0 - off_s) * 65536.0f);
-			t[u] = hgl_red((t0 - off_t) * 65536.0f);
-			ds[u] = hgl_red((s1 - s0) * 65536.0f / m);
-			dt[u] = hgl_red((t1 - t0) * 65536.0f / m);
-			nv[u] = 0; nv2[u] = 0; fr[u] = 0;
-			fil[u] = U->fmag;
-			if (U->mip || U->fmin != U->fmag) {
-				/* rho²: lo que avanza la textura por punto, en x y en y */
-				float dsx = (s1 - s0) / m, dtx = (t1 - t0) / m;
-				float dsy = (T.sy[u] - S[u] * q0 * T.qy[u]) * q0 * U->W, dty = (T.ty[u] - Tt[u] * q0 * T.qy[u]) * q0 * U->H;
-				float rx = dsx * dsx + dtx * dtx, ry = dsy * dsy + dty * dty, r2 = rx > ry ? rx : ry;
-				if (r2 > 1.0f) {
-					fil[u] = U->fmin;
-					if (U->mip) {
-						nv[u] = nivel_de(r2, U->t->nniv, U->mip == 2 ? &fr[u] : NULL);
-						nv2[u] = nv[u] + 1 < U->t->nniv ? nv[u] + 1 : nv[u];
-					}
-				}
-			}
-			S[u] = S1; Tt[u] = T1; Q[u] = Q1;
+			SegT g2;
+			seg_tex(u, &S[u], &Tt[u], &Q[u], m, &g2);
+			s[u] = g2.s; t[u] = g2.t; ds[u] = g2.ds; dt[u] = g2.dt;
+			nv[u] = g2.nv; nv2[u] = g2.nv2; fr[u] = g2.fr; fil[u] = g2.fil;
 		}
 		for (i = 0; i < m; i++, x++, pc++, pz++) {
 			u32 zz = z >> 15;
@@ -408,6 +404,256 @@ static void tramo_todo(u16 *pc, u16 *pz, int x, int y, int n, float fx, float fy
 	}
 }
 
+/* 1/Q, recordando los dos últimos: el final de un segmento es el principio
+ * del siguiente, y las dos unidades suelen tener el mismo Q (q = 1) */
+static inline float recip(float Q)
+{
+	if (Q == T.ultQ[0]) return T.ultq[0];
+	if (Q == T.ultQ[1]) return T.ultq[1];
+	T.ultQ[1] = T.ultQ[0]; T.ultq[1] = T.ultq[0];
+	T.ultQ[0] = Q;
+	return T.ultq[0] = 1.0f / Q;
+}
+
+/* ---- lo de una unidad de textura en un segmento de m puntos (perspectiva,
+ * nivel de mipmap y filtro); S, Tt, Q pasan al final del segmento ---- */
+static void seg_tex(int u, float *S, float *Tt, float *Q, int m, SegT *o)
+{
+	const UT *U = &T.u[u];
+	float q0 = recip(*Q), s0 = *S * q0 * U->W, t0 = *Tt * q0 * U->H, s1, t1, im;
+	float S1 = *S + T.sx[u] * m, T1 = *Tt + T.tx[u] * m, Q1 = *Q + T.qx[u] * m, q1;
+	float off_s = 0, off_t = 0;
+	if (Q1 <= 0) Q1 = *Q;
+	q1 = recip(Q1);
+	s1 = S1 * q1 * U->W; t1 = T1 * q1 * U->H;
+	/* para que la coma fija no se salga: se quita un múltiplo del tamaño */
+	if (U->repite_s && (s0 > 16384 || s0 < -16384)) off_s = (float)hgl_suelo(s0 / U->W) * U->W;
+	if (U->repite_t && (t0 > 16384 || t0 < -16384)) off_t = (float)hgl_suelo(t0 / U->H) * U->H;
+	if (!U->repite_s) { if (s0 < -16384) s0 = -16384; if (s0 > 16384) s0 = 16384; if (s1 < -16384) s1 = -16384; if (s1 > 16384) s1 = 16384; }
+	if (!U->repite_t) { if (t0 < -16384) t0 = -16384; if (t0 > 16384) t0 = 16384; if (t1 < -16384) t1 = -16384; if (t1 > 16384) t1 = 16384; }
+	o->s0 = s0 - off_s; o->t0 = t0 - off_t; o->s1 = s1 - off_s; o->t1 = t1 - off_t;
+	o->s = hgl_red(o->s0 * 65536.0f);
+	o->t = hgl_red(o->t0 * 65536.0f);
+	im = inv_m(m);
+	o->ds = hgl_red((s1 - s0) * 65536.0f * im);
+	o->dt = hgl_red((t1 - t0) * 65536.0f * im);
+	o->nv = 0; o->nv2 = 0; o->fr = 0;
+	o->fil = U->fmag;
+	if (U->mip || U->fmin != U->fmag) {
+		/* rho²: lo que avanza la textura por punto, en x y en y */
+		float dsx = (s1 - s0) * im, dtx = (t1 - t0) * im;
+		float dsy = (T.sy[u] - *S * q0 * T.qy[u]) * q0 * U->W, dty = (T.ty[u] - *Tt * q0 * T.qy[u]) * q0 * U->H;
+		float rx = dsx * dsx + dtx * dtx, ry = dsy * dsy + dty * dty, r2 = rx > ry ? rx : ry;
+		if (r2 > 1.0f) {
+			o->fil = U->fmin;
+			if (U->mip) {
+				o->nv = nivel_de(r2, U->t->nniv, U->mip == 2 ? &o->fr : NULL);
+				o->nv2 = o->nv + 1 < U->t->nniv ? o->nv + 1 : o->nv;
+			}
+		}
+	}
+	*S = S1; *Tt = T1; *Q = Q1;
+}
+
+/* el color de la unidad u en los dos extremos del segmento, para interpolarlo
+ * dentro (el mapa de luz: cambia despacio; en la calidad exacta no se usa) */
+static void luz_extremos(int u, const SegT *g, int m, i32 *c, i32 *dc)
+{
+	const UT *U = &T.u[u];
+	u32 a = muestra(U, g->s, g->t, g->nv, g->fil);
+	u32 b = muestra(U, hgl_red(g->s1 * 65536.0f), hgl_red(g->t1 * 65536.0f), g->nv, g->fil);
+	int k;
+	float im = inv_m(m);
+	for (k = 0; k < 3; k++) {
+		int va = (a >> (16 - 8 * k)) & 255, vb = (b >> (16 - 8 * k)) & 255;
+		c[k] = va << 16;
+		dc[k] = hgl_red((float)((vb - va) << 16) * im);
+	}
+}
+
+/* ---- la pared y su mapa de luz (dos unidades: GL_ARB_multitexture) ----
+ * la unidad 0: 5-6-5, punto más cercano (con o sin mipmaps), GL_REPEAT,
+ * REPLACE (o MODULATE con blanco); la 1: MODULATE, la que sea, tomada en los
+ * extremos de cada segmento */
+/* un punto de una textura 5-6-5 (GL_REPEAT), bilineal; s y t ya con −0,5 */
+static inline __attribute__((always_inline)) u32 bil565(const u16 *tex, int lw, int wm, int hm, i32 s, i32 t)
+{
+	int x0 = (s >> 16) & wm, y0 = ((t >> 16) & hm) << lw, x1 = (x0 + 1) & wm, y1 = (((t >> 16) + 1) & hm) << lw;
+	u32 wx = ((u32)s >> 11) & 31, wy = ((u32)t >> 11) & 31, p, q, a0, a1, v;
+	p = tex[y0 | x0]; a0 = (p | (p << 16)) & 0x07E0F81Fu;
+	p = tex[y0 | x1]; q = (p | (p << 16)) & 0x07E0F81Fu;
+	a0 = ((a0 * (32 - wx) + q * wx + 0x02008010u) >> 5) & 0x07E0F81Fu;
+	p = tex[y1 | x0]; a1 = (p | (p << 16)) & 0x07E0F81Fu;
+	p = tex[y1 | x1]; q = (p | (p << 16)) & 0x07E0F81Fu;
+	a1 = ((a1 * (32 - wx) + q * wx + 0x02008010u) >> 5) & 0x07E0F81Fu;
+	v = ((a0 * (32 - wy) + a1 * wy + 0x02008010u) >> 5) & 0x07E0F81Fu;
+	return (v | (v >> 16)) & 0xFFFF;
+}
+static void tramo_luz(u16 *pc, u16 *pz, int x, int y, int n, float fx, float fy)
+{
+	float S[2], Tt[2], Q[2];
+	u32 z = (u32)hgl_red((T.z0 + T.zx * fx + T.zy * fy) * 32768.0f), dz = (u32)hgl_red(T.zx * 32768.0f);
+	int zk = T.zk, ez = T.escribe_z, u;
+	(void)x; (void)y;
+	T.C->n_pix += n;
+	for (u = 0; u < 2; u++) {
+		S[u] = T.s0[u] + T.sx[u] * fx + T.sy[u] * fy;
+		Tt[u] = T.t0[u] + T.tx[u] * fx + T.ty[u] * fy;
+		Q[u] = T.q0[u] + T.qx[u] * fx + T.qy[u] * fy;
+	}
+	while (n > 0) {
+		int m = largo(n, fx, fy), sh, wm, hm, gris;
+		SegT a, b;
+		i32 c[3], dc[3], s, t, ds, dt;
+		const Nivel *nv;
+		const u16 *tex;
+		seg_tex(0, &S[0], &Tt[0], &Q[0], m, &a);
+		seg_tex(1, &S[1], &Tt[1], &Q[1], m, &b);
+		luz_extremos(1, &b, m, c, dc);
+		fx += m;
+		gris = c[0] == c[1] && c[1] == c[2] && dc[0] == dc[1] && dc[1] == dc[2];
+		nv = &T.u[0].t->niv[a.nv];
+		tex = nv->p;
+		wm = nv->w - 1; hm = (nv->h - 1) << nv->lw;
+		sh = 16 - nv->lw;
+		s = a.s >> a.nv; t = a.t >> a.nv; ds = a.ds >> a.nv; dt = a.dt >> a.nv;
+		n -= m;
+		if (a.fil) {
+			/* la pared bilineal (la calidad normal) */
+			int lw = nv->lw, hm2 = nv->h - 1;
+			s -= 0x8000; t -= 0x8000;
+			while (m--) {
+				int zz = (int)(z >> 15);
+				if (zz <= (int)*pz - zk) {
+					u32 p = bil565(tex, lw, wm, hm2, s, t);
+					if (gris) {
+						u32 v = (p | (p << 16)) & 0x07E0F81Fu, k = c[0] <= 0 ? 0 : (((u32)c[0] >> 8) * 33 + 0x8000) >> 16;
+						v = ((v * k + 0x02008010u) >> 5) & 0x07E0F81Fu;   /* (redondeando) */
+						*pc = (u16)(v | (v >> 16));
+					} else {
+						u32 rr = ((p >> 11) * ((u32)(c[0] >> 16) + 1)) >> 8, gg = (((p >> 5) & 63) * ((u32)(c[1] >> 16) + 1)) >> 8, bb = ((p & 31) * ((u32)(c[2] >> 16) + 1)) >> 8;
+						*pc = (u16)((rr << 11) | (gg << 5) | bb);
+					}
+					if (ez) *pz = (u16)zz;
+				}
+				pc++; pz++; z += dz; s += ds; t += dt; c[0] += dc[0]; c[1] += dc[1]; c[2] += dc[2];
+			}
+		} else if (gris) {
+			i32 l = c[0], dl = dc[0];
+			while (m--) {
+				int zz = (int)(z >> 15);
+				if (zz <= (int)*pz - zk) {
+					u32 p = tex[((t >> sh) & hm) | ((s >> 16) & wm)];
+					u32 v = (p | (p << 16)) & 0x07E0F81Fu, k = l <= 0 ? 0 : (((u32)l >> 8) * 33 + 0x8000) >> 16;
+					v = ((v * k + 0x02008010u) >> 5) & 0x07E0F81Fu;   /* (redondeando) */
+					*pc = (u16)(v | (v >> 16));
+					if (ez) *pz = (u16)zz;
+				}
+				pc++; pz++; z += dz; s += ds; t += dt; l += dl;
+			}
+		} else {
+			while (m--) {
+				int zz = (int)(z >> 15);
+				if (zz <= (int)*pz - zk) {
+					u32 p = tex[((t >> sh) & hm) | ((s >> 16) & wm)];
+					u32 rr = ((p >> 11) * ((u32)(c[0] >> 16) + 1)) >> 8, gg = (((p >> 5) & 63) * ((u32)(c[1] >> 16) + 1)) >> 8, bb = ((p & 31) * ((u32)(c[2] >> 16) + 1)) >> 8;
+					*pc = (u16)((rr << 11) | (gg << 5) | bb);
+					if (ez) *pz = (u16)zz;
+				}
+				pc++; pz++; z += dz; s += ds; t += dt; c[0] += dc[0]; c[1] += dc[1]; c[2] += dc[2];
+			}
+		}
+	}
+}
+
+/* ---- la pasada del mapa de luz de los juegos sin multitextura:
+ * (GL_ZERO, GL_SRC_COLOR) o (GL_ZERO, GL_ONE_MINUS_SRC_COLOR): el búfer por
+ * la textura, tomada en los extremos de cada segmento ---- */
+static void tramo_mult(u16 *pc, u16 *pz, int x, int y, int n, float fx, float fy)
+{
+	float S = T.s0[0] + T.sx[0] * fx + T.sy[0] * fy, Tt = T.t0[0] + T.tx[0] * fx + T.ty[0] * fy, Q = T.q0[0] + T.qx[0] * fx + T.qy[0] * fy;
+	u32 z = (u32)hgl_red((T.z0 + T.zx * fx + T.zy * fy) * 32768.0f), dz = (u32)hgl_red(T.zx * 32768.0f);
+	int zk = T.zk, ez = T.escribe_z, inv = T.mtipo == MZ_MULT_INV;
+	(void)x; (void)y;
+	T.C->n_pix += n;
+	while (n > 0) {
+		int m = largo(n, fx, fy), k;
+		SegT a;
+		i32 c[3], dc[3];
+		seg_tex(0, &S, &Tt, &Q, m, &a);
+		luz_extremos(0, &a, m, c, dc);
+		fx += m;
+		if (T.u[0].modo == M_MOD && (T.col_k[0] != 255 || T.col_k[1] != 255 || T.col_k[2] != 255))   /* (MODULATE: liso) */
+			for (k = 0; k < 3; k++) {
+				int ck = T.col_k[k];
+				c[k] = (i32)(((long long)c[k] * (ck + 1)) >> 8);
+				dc[k] = (i32)(((long long)dc[k] * (ck + 1)) >> 8);
+			}
+		if (inv) for (k = 0; k < 3; k++) { c[k] = (255 << 16) - c[k]; dc[k] = -dc[k]; }
+		n -= m;
+		while (m--) {
+			int zz = (int)(z >> 15);
+			if (zz <= (int)*pz - zk) {
+				u32 p = *pc;
+				u32 rr = ((p >> 11) * ((u32)(c[0] >> 16) + 1)) >> 8, gg = (((p >> 5) & 63) * ((u32)(c[1] >> 16) + 1)) >> 8, bb = ((p & 31) * ((u32)(c[2] >> 16) + 1)) >> 8;
+				*pc = (u16)((rr << 11) | (gg << 5) | bb);
+				if (ez) *pz = (u16)zz;
+			}
+			pc++; pz++; z += dz; c[0] += dc[0]; c[1] += dc[1]; c[2] += dc[2];
+		}
+	}
+}
+
+/* ---- una textura 5-6-5, bilineal, GL_REPEAT (MODULATE o REPLACE) ----
+ * los cuatro puntos, abiertos en 32 bits (0x07E0F81F: cada color con sitio
+ * para multiplicarlo por un peso de 0 a 32 sin pisar al de al lado) */
+static void tramo_texb(u16 *pc, u16 *pz, int x, int y, int n, float fx, float fy)
+{
+	const UT *U = &T.u[0];
+	float S = T.s0[0] + T.sx[0] * fx + T.sy[0] * fy, Tt = T.t0[0] + T.tx[0] * fx + T.ty[0] * fy, Q = T.q0[0] + T.qx[0] * fx + T.qy[0] * fy;
+	u32 z = (u32)hgl_red((T.z0 + T.zx * fx + T.zy * fy) * 32768.0f), dz = (u32)hgl_red(T.zx * 32768.0f);
+	int zk = T.zk, ez = T.escribe_z, blanco = T.liso && T.col_k[0] == 255 && T.col_k[1] == 255 && T.col_k[2] == 255;
+	int reemplaza = U->modo == M_REP_RGB || U->modo == M_REP_RGBA || blanco;
+	(void)x; (void)y;
+	T.C->n_pix += n;
+	while (n > 0) {
+		int m = largo(n, fx, fy), lw, wm, hm, fil;
+		SegT a;
+		Seg g;
+		const Nivel *nv;
+		const u16 *tex;
+		i32 s, t, ds, dt, r = 255 << 16, gg = 255 << 16, b = 255 << 16, dr = 0, dg = 0, db = 0;
+		seg_tex(0, &S, &Tt, &Q, m, &a);
+		if (!reemplaza) {
+			seg_color(&g, fx, fy, m);
+			r = g.c[0]; gg = g.c[1]; b = g.c[2]; dr = g.dc[0]; dg = g.dc[1]; db = g.dc[2];
+		}
+		fx += m;
+		fil = a.fil;
+		nv = &U->t->niv[a.nv];
+		tex = nv->p;
+		lw = nv->lw; wm = nv->w - 1; hm = nv->h - 1;
+		s = a.s >> a.nv; t = a.t >> a.nv; ds = a.ds >> a.nv; dt = a.dt >> a.nv;
+		if (fil) { s -= 0x8000; t -= 0x8000; }
+		n -= m;
+		while (m--) {
+			int zz = (int)(z >> 15);
+			if (zz <= (int)*pz - zk) {
+				u32 v;
+				if (fil) v = bil565(tex, lw, wm, hm, s, t);
+				else v = tex[(((t >> 16) & hm) << lw) | ((s >> 16) & wm)];
+				if (!reemplaza) {
+					u32 rr = ((v >> 11) * ((u32)(r >> 16) + 1)) >> 8, g6 = (((v >> 5) & 63) * ((u32)(gg >> 16) + 1)) >> 8, bb = ((v & 31) * ((u32)(b >> 16) + 1)) >> 8;
+					v = (rr << 11) | (g6 << 5) | bb;
+				}
+				*pc = (u16)v;
+				if (ez) *pz = (u16)zz;
+			}
+			pc++; pz++; z += dz; s += ds; t += dt; r += dr; gg += dg; b += db;
+		}
+	}
+}
+
 /* ---- sin textura, sin mezcla ni niebla ---- */
 static void tramo_color(u16 *pc, u16 *pz, int x, int y, int n, float fx, float fy)
 {
@@ -426,7 +672,7 @@ static void tramo_color(u16 *pc, u16 *pz, int x, int y, int n, float fx, float f
 		return;
 	}
 	while (n > 0) {
-		int m = n < T.seg ? n : T.seg;
+		int m = largo(n, fx, fy);
 		Seg g;
 		i32 r, gg, b, dr, dg, db;
 		seg_color(&g, fx, fy, m);
@@ -456,7 +702,7 @@ static void tramo_tex(u16 *pc, u16 *pz, int x, int y, int n, float fx, float fy)
 	(void)x; (void)y;
 	T.C->n_pix += n;
 	while (n > 0) {
-		int m = n < T.seg ? n : T.seg, nivel = 0, sh, wm, hm, lw;
+		int m = largo(n, fx, fy), nivel = 0, sh, wm, hm, lw;
 		float S1 = S + T.sx[0] * m, T1 = Tt + T.tx[0] * m, Q1 = Q + T.qx[0] * m, q1, s0, t0, s1, t1, os, ot;
 		const Nivel *nv;
 		const u16 *tex;
@@ -466,7 +712,7 @@ static void tramo_tex(u16 *pc, u16 *pz, int x, int y, int n, float fx, float fy)
 		s0 = S * q0 * U->W; t0 = Tt * q0 * U->H;
 		s1 = S1 * q1 * U->W; t1 = T1 * q1 * U->H;
 		if (U->mip) {
-			float dsx = (s1 - s0) / m, dtx = (t1 - t0) / m;
+			float dsx = (s1 - s0) * inv_m(m), dtx = (t1 - t0) * inv_m(m);
 			float dsy = (T.sy[0] - S * q0 * T.qy[0]) * q0 * U->W, dty = (T.ty[0] - Tt * q0 * T.qy[0]) * q0 * U->H;
 			float rx = dsx * dsx + dtx * dtx, ry = dsy * dsy + dty * dty, r2 = rx > ry ? rx : ry;
 			if (r2 > 1.0f) nivel = nivel_de(r2, U->t->nniv, NULL);
@@ -488,7 +734,7 @@ static void tramo_tex(u16 *pc, u16 *pz, int x, int y, int n, float fx, float fy)
 		}
 		os = (float)(hgl_suelo(s0) & ~wm); ot = (float)(hgl_suelo(t0) & ~hm);
 		s = hgl_red((s0 - os) * 65536.0f); t = hgl_red((t0 - ot) * 65536.0f);
-		ds = hgl_red((s1 - s0) * (65536.0f / m)); dt = hgl_red((t1 - t0) * (65536.0f / m));
+		ds = hgl_red((s1 - s0) * (65536.0f * inv_m(m))); dt = hgl_red((t1 - t0) * (65536.0f * inv_m(m)));
 		hm <<= lw;
 		n -= m;
 		if (reemplaza) {
@@ -506,8 +752,8 @@ static void tramo_tex(u16 *pc, u16 *pz, int x, int y, int n, float fx, float fy)
 				int zz = (int)(z >> 15);
 				if (zz <= (int)*pz - zk) {
 					u32 p = tex[((t >> sh) & hm) | ((s >> 16) & wm)];
-					u32 v = (p | (p << 16)) & 0x07E0F81Fu, k = ((u32)r * 33) >> 24;   /* 0..32 */
-					v = ((v * k) >> 5) & 0x07E0F81Fu;
+					u32 v = (p | (p << 16)) & 0x07E0F81Fu, k = (((u32)r >> 8) * 33 + 0x8000) >> 16;   /* 0..32 */
+					v = ((v * k + 0x02008010u) >> 5) & 0x07E0F81Fu;   /* (redondeando) */
 					*pc = (u16)(v | (v >> 16));
 					if (ez) *pz = (u16)zz;
 				}
@@ -620,13 +866,8 @@ void hgl_triangulo(Ctx *C, const Vtx *a, const Vtx *b, const Vtx *c, int lado, c
 		T.nu++;
 	}
 	T.seg = T.persp || T.pcol ? (C->sug[0] == GL_FASTEST ? SEG * 2 : SEG) : 4096;
-	if (T.seg <= SEG * 2 && C->sug[0] != GL_FASTEST) {
-		/* las paredes muy de lado: tramos más cortos si 1/w cambia mucho en uno */
-		float mn = a->iw < b->iw ? a->iw : b->iw, d = hgl_abs(T.wx) * T.seg;
-		mn = c->iw < mn ? c->iw : mn;
-		if (d > mn * 0.5f) T.seg = 4;
-		else if (d > mn * 0.25f) T.seg = 8;
-	}
+	T.fino = C->sug[0] != GL_FASTEST;
+	T.dws = hgl_abs(T.wx) * T.seg;
 	/* la niebla */
 	T.niebla = C->hab.niebla;
 	if (T.niebla) {
@@ -651,6 +892,7 @@ void hgl_triangulo(Ctx *C, const Vtx *a, const Vtx *b, const Vtx *c, int lado, c
 	else if (T.m_or == GL_ONE && T.m_de == GL_ONE) T.mtipo = MZ_SUMA;
 	else if ((T.m_or == GL_ZERO && T.m_de == GL_SRC_COLOR) || (T.m_or == GL_DST_COLOR && T.m_de == GL_ZERO)) T.mtipo = MZ_MULT;
 	else if (T.m_or == GL_SRC_ALPHA && T.m_de == GL_ONE) T.mtipo = MZ_ALFA_SUMA;
+	else if (T.m_or == GL_ZERO && T.m_de == GL_ONE_MINUS_SRC_COLOR) T.mtipo = MZ_MULT_INV;
 	else T.mtipo = MZ_OTRA;
 	T.masc = (u16)((C->colb.mascara[0] ? 0xF800 : 0) | (C->colb.mascara[1] ? 0x07E0 : 0) | (C->colb.mascara[2] ? 0x001F : 0));
 	if (!C->colb.mascara[0] && !C->colb.mascara[1] && !C->colb.mascara[2]) T.masc = 0;
@@ -663,6 +905,18 @@ void hgl_triangulo(Ctx *C, const Vtx *a, const Vtx *b, const Vtx *c, int lado, c
 			 !T.u[0].fmag && !T.u[0].fmin && T.u[0].mip != 2 &&
 			 (T.u[0].modo == M_MOD || T.u[0].modo == M_REP_RGB || T.u[0].modo == M_REP_RGBA))
 			fn = tramo_tex;
+		else if (simple && T.nu == 2 && hgl_calidad <= 1 && T.u[0].t->fmt == TF_565 && T.u[0].repite_s && T.u[0].repite_t &&
+			 T.u[0].mip != 2 && T.u[1].modo == M_MOD && T.u[1].mip != 2 &&
+			 (T.u[0].modo == M_REP_RGB || T.u[0].modo == M_REP_RGBA ||
+			  (T.u[0].modo == M_MOD && T.liso && T.col_k[0] == 255 && T.col_k[1] == 255 && T.col_k[2] == 255)))
+			fn = tramo_luz;
+		else if ((T.mtipo == MZ_MULT || T.mtipo == MZ_MULT_INV) && hgl_calidad <= 1 && T.alfa_f == GL_ALWAYS && !T.niebla &&
+			 T.zk != 99 && T.masc == 0xFFFF && !T.punteo && T.nu == 1 && T.u[0].mip != 2 &&
+			 (T.u[0].modo == M_REP_RGB || T.u[0].modo == M_REP_RGBA || (T.u[0].modo == M_MOD && T.liso)))
+			fn = tramo_mult;
+		else if (simple && T.nu == 1 && T.u[0].t->fmt == TF_565 && T.u[0].repite_s && T.u[0].repite_t && T.u[0].mip != 2 &&
+			 (T.u[0].modo == M_MOD || T.u[0].modo == M_REP_RGB || T.u[0].modo == M_REP_RGBA))
+			fn = tramo_texb;
 		else fn = tramo_todo;
 	}
 	/* las filas: el de arriba, el del medio y el de abajo */
@@ -675,23 +929,33 @@ void hgl_triangulo(Ctx *C, const Vtx *a, const Vtx *b, const Vtx *c, int lado, c
 	if (y0 < K.y0) y0 = K.y0;
 	if (y1 > K.y1) y1 = K.y1;
 	{
+		/* los bordes en 16.16: el largo (de arriba abajo) y los dos cortos;
+		 * x de la fila en el centro del punto; el primer punto es techo(x − ½)
+		 * = (x + 0x7FFF) >> 16. Con pendientes enormes (bordes casi
+		 * horizontales, de menos de un punto de alto) se recorta: solo tocan
+		 * una fila */
 		float dxl = (Y[bot] != Y[top]) ? (X[bot] - X[top]) / (Y[bot] - Y[top]) : 0;
 		float dx1 = (Y[mid] != Y[top]) ? (X[mid] - X[top]) / (Y[mid] - Y[top]) : 0;
 		float dx2 = (Y[bot] != Y[mid]) ? (X[bot] - X[mid]) / (Y[bot] - Y[mid]) : 0;
+		int ym = hgl_techo(Y[mid] - 0.5f), x0, x1, an = C->an;
+		i32 xa, xb, dxa, dxb;
+		u16 *fc = C->color, *fz = C->prof;
+		if (ym < y0) ym = y0;
+		if (ym > y1) ym = y1;
+#define FIJO(v) ((v) > 30000.0f ? 30000 * 65536 : (v) < -30000.0f ? -30000 * 65536 : hgl_red((v) * 65536.0f))
+		xa = FIJO(X[top] + (y0 + 0.5f - Y[top]) * dxl); dxa = FIJO(dxl);
+		xb = FIJO(X[top] + (y0 + 0.5f - Y[top]) * dx1); dxb = FIJO(dx1);
 		for (yi = y0; yi < y1; yi++) {
-			float yc = yi + 0.5f, xa, xb, xl, xr;
-			int x0, x1;
-			xa = X[top] + (yc - Y[top]) * dxl;
-			if (yc < Y[mid]) xb = X[top] + (yc - Y[top]) * dx1;
-			else xb = X[mid] + (yc - Y[mid]) * dx2;
-			if (xa < xb) { xl = xa; xr = xb; } else { xl = xb; xr = xa; }
-			x0 = hgl_techo(xl - 0.5f);
-			x1 = hgl_techo(xr - 0.5f);
+			if (yi == ym) { xb = FIJO(X[mid] + (yi + 0.5f - Y[mid]) * dx2); dxb = FIJO(dx2); }
+			if (xa < xb) { x0 = (xa + 0x7FFF) >> 16; x1 = (xb + 0x7FFF) >> 16; }
+			else { x0 = (xb + 0x7FFF) >> 16; x1 = (xa + 0x7FFF) >> 16; }
+			xa += dxa; xb += dxb;
 			if (x0 < K.x0) x0 = K.x0;
 			if (x1 > K.x1) x1 = K.x1;
 			if (x0 >= x1) continue;
-			fn(C->color + yi * C->an + x0, C->prof ? C->prof + yi * C->an + x0 : NULL, x0, yi, x1 - x0, (float)x0, (float)yi);
+			fn(fc + yi * an + x0, fz + yi * an + x0, x0, yi, x1 - x0, (float)x0, (float)yi);
 		}
+#undef FIJO
 	}
 }
 

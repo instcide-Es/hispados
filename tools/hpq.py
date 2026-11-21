@@ -106,6 +106,8 @@ VERSION_084 = '0.8.4'
 # segmentos de Win32, las llamadas 180 a 182; el coprocesador de cada tarea
 # es el de la 0.8.3), ORDENES (los .EXE) y Mi equipo (los abre); y el
 # paquete win32 (1.0, que pide la base 0.8.4)
+# [GL] (21/11/2026) win32 1.1: con OpenGL (HispaGL: OPENGL32.DLL y GLU32.DLL,
+# GLPRUEBA y ENGRANA; docs/486/OPENGL.md)
 SISTEMA = [
     ('base', VERSION_084, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
@@ -138,13 +140,15 @@ SISTEMA = [
         ('CUENTAS.HVP', r'\OFICINA\CUENTAS.HVP'), ('MIRADOR.HVP', r'\OFICINA\MIRADOR.HVP'),
         ('TIPOS.DAT', r'\OFICINA\TIPOS.DAT'), ('DICCIO.DAT', r'\OFICINA\DICCIO.DAT')]),
     # [WIN32] los programas de Windows de 32 bits y DirectX (docs/pentium/WIN32.md)
-    ('win32', '1.0', 'Programas de Windows de 32 bits y DirectX: WIN32.BIN, sus DLL y los ejemplos (Naves)', 'base >= ' + VERSION_084, [
+    ('win32', '1.1', 'Programas de Windows de 32 bits, DirectX y OpenGL: WIN32.BIN, sus DLL y los ejemplos (Naves, GLPRUEBA)', 'base >= ' + VERSION_084, [
         ('WIN32.BIN', r'\HISPA\WIN32.BIN'),
         ('MSVCRT.DLL', r'\WIN32\MSVCRT.DLL'), ('UCRT.DLL', r'\WIN32\UCRT.DLL'), ('COMCTL32.DLL', r'\WIN32\COMCTL32.DLL'),
         ('WINMM.DLL', r'\WIN32\WINMM.DLL'), ('DDRAW.DLL', r'\WIN32\DDRAW.DLL'), ('DSOUND.DLL', r'\WIN32\DSOUND.DLL'),
         ('DINPUT.DLL', r'\WIN32\DINPUT.DLL'), ('OLE32.DLL', r'\WIN32\OLE32.DLL'),
+        ('OPENGL32.DLL', r'\WIN32\OPENGL32.DLL'), ('GLU32.DLL', r'\WIN32\GLU32.DLL'),   # [GL]
         ('CALC32.EXE', r'\HISPA32\CALC32.EXE'), ('HOLA32.EXE', r'\HISPA32\HOLA32.EXE'), ('CTL32.EXE', r'\HISPA32\CTL32.EXE'),
         ('MENU32.EXE', r'\HISPA32\MENU32.EXE'), ('AVISO32.EXE', r'\HISPA32\AVISO32.EXE'), ('NAVES.EXE', r'\HISPA32\NAVES.EXE'),
+        ('GLPRUEBA.EXE', r'\HISPA32\GLPRUEBA.EXE'), ('ENGRANA.EXE', r'\HISPA32\ENGRANA.EXE'),   # [GL]
         ('NAVES.ICP', r'\HISPA32\NAVES.ICP'), ('NAVES.MNU', r'\HISPA\MENU\NAVES.MNU')]),
 ]
 

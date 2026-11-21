@@ -2244,7 +2244,7 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -8; fi
-    if grep -q "^|  win32     1.0     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0.8.4   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|13 paquetes\.$" $Z/b2$hc.txt \
+    if grep -q "^|  win32     1.1     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0.8.4   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|13 paquetes\.$" $Z/b2$hc.txt \
       && grep -q "^|Los archivos de los 13 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
       ok "PAQUETES en el sistema recién instalado: LISTA dice los 13 paquetes del sistema (..., ssh, tailscal, tls y win32: con 13, base ya no cabe en la pantalla) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -12; fi
@@ -3760,6 +3760,37 @@ if [ $HAY_TP = 1 ]; then
   if ! grep -q "excepción\|\*\*\*" $S; then ok "DDRAW y FASMW: ni una excepción ni una queja del núcleo"
   else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
 fi
+# [GL] 5. OpenGL (HispaGL: OPENGL32.DLL y GLU32.DLL de Hispa-486, las mismas):
+# GLPRUEBA en su ventana y a pantalla completa (ChangeDisplaySettingsA y el
+# DirectDraw de HW32), los engranajes y la sala de medir; los cuadros por
+# segundo, por la traza de HispaGL (HISPAGL=TRAZA en \WIN32\ENTORNO.TXT, en
+# una copia del disco); los colores, por clases (tests/gl/compara.py --cuenta)
+cp $V/d.img $V/gl.img
+printf 'HISPA32=TRAZA\r\nHISPAGL=TRAZA\r\n' > $V/ENTORNO.TXT
+mcopy -o -i $V/gl.img $V/ENTORNO.TXT ::WIN32/ENTORNO.TXT
+CAPTURAS=$G DISCO=$V/gl.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" ":doble 60 186" ":pausa 4" \
+  ":escribe \\HISPA32\\GLPRUEBA /PRUEBA" ":tecla ret" ":pausa 25" ":captura g1" ":tecla esc" ":pausa 3" \
+  ":escribe \\HISPA32\\GLPRUEBA /COMPLETA /PRUEBA" ":tecla ret" ":pausa 25" ":captura g2" ":tecla esc" ":pausa 3" ":captura g3" \
+  ":escribe \\HISPA32\\ENGRANA" ":tecla ret" ":pausa 30" ":captura g4" ":tecla esc" ":pausa 3" \
+  ":escribe \\HISPA32\\GLPRUEBA /SALA /ANCHO 320 /ALTO 240" ":tecla ret" ":pausa 30" ":captura g5" ":tecla esc" ":pausa 3" > $V/gl.sal 2>&1
+S=$V/gl.sal
+glcuenta() { local f=$1; shift; if python3 -I $AQUI/../tests/gl/compara.py --cuenta $G/$f.ppm "$@" > $V/glc.txt; then ok "$(sed 's/^ *OK *//' $V/glc.txt)"; else ko "$(sed 's/^ *FAIL *//' $V/glc.txt)"; fi; }
+glcps() { awk -v p="$1" '/wglCreateContext/{n++} n==p && /cuadros por 10 s/{v=$NF} END{print v}' $S | tr -d '\r'; }
+glcuenta g1 0 0 800 600 rojo 300 8000 "GLPRUEBA en su ventana: la esfera roja (luz, brillo; gluSphere de GLU32)"
+glcuenta g1 0 0 800 600 amarillo 300 8000 "la estrella amarilla (prueba de alfa) y el texto (wglUseFontBitmapsA)"
+glcuenta g1 0 0 800 600 baldosa 15000 200000 "el suelo de baldosas (gluBuild2DMipmaps, niebla)"
+glcuenta g2 80 60 640 480 rojo 1000 20000 "GLPRUEBA a pantalla completa (ChangeDisplaySettingsA + DirectDraw): la esfera, al doble"
+glcuenta g2 0 0 800 60 negro 40000 48000 "y el borde negro de arriba (320×240 al doble, en el centro)"
+glcuenta g4 0 0 800 600 rojo 6000 60000 "ENGRANA: el engranaje rojo (listas, luz, sombreado plano y suave)"
+glcuenta g4 0 0 800 600 verde 1500 30000 "el verde"
+glcuenta g5 0 0 800 600 ladrillo 15000 120000 "la sala de medir: las paredes de ladrillo (multitextura: la pared por su mapa de luz)"
+for p in 3:ENGRANA:300×300 4:"la sala":320×240; do
+  c=$(glcps ${p%%:*}); q=${p#*:}
+  if [ -n "$c" ]; then ok "${q%%:*}: $(( 16#$c / 10 )),$(( 16#$c % 10 )) cuadros por segundo en QEMU (${q#*:}, calidad normal)"
+  else ko "${q%%:*}: la traza no dice los cuadros por segundo"; fi
+done
+if ! grep -q "excepción\|\*\*\*" $S; then ok "OpenGL: ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
 # 4. la red de los programas de Windows: WSOCK32 (REDPRUE) contra el servidor de aquí
 mkdir -p $V/srv
 python3 -I $AQUI/nucleo32/servidor_prueba.py $V/srv > $V/srv.txt 2>&1 &

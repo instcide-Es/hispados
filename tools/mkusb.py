@@ -25,14 +25,19 @@ OUT486 = os.path.join(B, 'hispa486-usb.img')
 # build/ (el de sus reglas y sus pruebas) y el que llevan en la imagen
 HISPA32 = (('WINCALC.EXE', 'CALC32.EXE'), ('WINHOLA.EXE', 'HOLA32.EXE'),
            ('WINCTL.EXE', 'CTL32.EXE'), ('WINMENU.EXE', 'MENU32.EXE'),
-           ('WINGUI.EXE', 'AVISO32.EXE'), ('NAVES.EXE', 'NAVES.EXE'))   # [DX] el juego de ejemplo
+           ('WINGUI.EXE', 'AVISO32.EXE'), ('NAVES.EXE', 'NAVES.EXE'),   # [DX] el juego de ejemplo
+           ('GLPRUEBA.EXE', 'GLPRUEBA.EXE'), ('ENGRANA.EXE', 'ENGRANA.EXE'))   # [GL] los de HispaGL
 # y lo que la edición pone en \HISPADOS (en sistema/486/, en UTF-8)
 SIS486 = ('EDICION.INI', 'VENTANAS.INI', 'CENTRO.INI')
 # [HISPA-486] fase 3d: las DLL de Win32 que van en \HISPADOS al lado de
 # MSVCRT.DLL (HW32 busca las DLL en su carpeta): los controles comunes y el
 # CRT de Visual C++ 2015 (docs/486/HISPA-486.md, «Cómo está hecho (fase 3d)»)
 # [DX] fase 5: DirectX (DDRAW, DSOUND, DINPUT), WINMM y una OLE32 mínima
-DLL486 = ('COMCTL32.DLL', 'UCRT.DLL', 'WINMM.DLL', 'DDRAW.DLL', 'DSOUND.DLL', 'DINPUT.DLL', 'OLE32.DLL')
+DLL486 = ('COMCTL32.DLL', 'UCRT.DLL', 'WINMM.DLL', 'DDRAW.DLL', 'DSOUND.DLL', 'DINPUT.DLL', 'OLE32.DLL',
+          'OPENGL32.DLL', 'GLU32.DLL')     # [GL] HispaGL (docs/486/OPENGL.md)
+# [GL] lo de HispaGL no cabe en el disquete «Hispa-486»: va en el suyo, «3D»
+# (make 3d: build/3d.img); en el disquete «Hispa-486» no se pone
+GL486 = ('OPENGL32.DLL', 'GLU32.DLL', 'GLPRUEBA.EXE', 'ENGRANA.EXE')
 # [FONDO] y la imagen de fondo del escritorio de Hispa-486, también en
 # \HISPADOS: un BMP de 800x600 ya con los colores de Hispa Ventanas, que
 # tools/mkfondo.py saca de sistema/486/HISPADOS.JPG («make fondo486»); la
@@ -334,15 +339,19 @@ def mkdisq486(en_imagen):
     run('mmd', '-i', out, '::HISPADOS', '::HISPA32')
     txt = autoexec486(open(os.path.join('floppy', 'AUTOEXEC.BAT'), encoding='utf-8').read(), 'A')
     pon = [('AUTOEXEC.BAT', txt, 'AUTOEXEC.BAT')]
-    pon += [(f, t, 'HISPADOS/' + f) for f, t in sis486(en_imagen)]
+    # [GL] sin los accesos de lo que va en el disquete «3D» (se instala aparte)
+    sin_gl = {f for f in en_imagen if f.rsplit('\\', 1)[-1] not in GL486}
+    pon += [(f, t, 'HISPADOS/' + f) for f, t in sis486(sin_gl)]
     for f, t, dst in pon:
         with open(os.path.join(d, f), 'wb') as o:
             o.write(dos(t))
         run('mcopy', '-i', out, os.path.join(d, f), '::' + dst)
     for src, dst in HISPA32:
-        run('mcopy', '-i', out, os.path.join(B, src), '::HISPA32/' + dst)
+        if src not in GL486:                 # [GL] (en el disquete «3D»)
+            run('mcopy', '-i', out, os.path.join(B, src), '::HISPA32/' + dst)
     for f in DLL486:
-        run('mcopy', '-i', out, os.path.join(B, f), '::HISPADOS/' + f)
+        if f not in GL486:
+            run('mcopy', '-i', out, os.path.join(B, f), '::HISPADOS/' + f)
     run('mcopy', '-i', out, FONDO486, '::HISPADOS/FONDO.BMP')
     print(out)
 

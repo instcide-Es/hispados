@@ -6,7 +6,6 @@ typedef struct { const char *nombre; void (*dibuja)(int w, int h); } Escena;
 extern const Escena escenas[];
 void escenas_ini(void);
 void escenas_engranajes(float ang);
-/* la de medir: una sala como las de los juegos de 1997 (escena_juego.c) */
-void juego_ini(void);
-void juego_dibuja(int w, int h, int cuadro);
+/* la de medir: una sala como las de los juegos de 1997 (w32/gl/sala.c) */
+#include "sala.h"
 #endif
