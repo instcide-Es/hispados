@@ -257,6 +257,22 @@ ClicGest). Sin tocar ClicGest:
   degradados casi transparentes (sin manchas de color); una imagen con su
   alto y `width: auto` (el logotipo) guarda la proporción.
 
+### Lo que se arregló el 21/11/2026 (con el Navegador de Hispa-Pentium)
+
+El Navegador de Hispa-Pentium ([PENTIUM.md](../PENTIUM.md), sección 14 ter) es
+este mismo NetSurf con otra ventana; lo arreglado allí vale aquí:
+
+- **`vh` y `vw`** estaban cambiados en libcss (`100vh` era el ancho): la
+  tarjeta de entrar de ClicGest salía muy abajo (`03_clicgest_login.png`);
+  ahora, arriba, como en Chrome.
+- **`clamp()`, `min()`, `max()` y `env()`** (cssvar.c): los títulos grandes de
+  hispados.es y sus márgenes (`max(20px, env(safe-area-inset-left, 0px))`).
+- **`opacity: 0`** no se pinta (los botones de Google con su capa encima).
+- **`document.implementation.createHTMLDocument()`** (dom.js) da un documento
+  aparte: con el de la página, jQuery se llevaba el cuerpo entero al arrancar
+  (Wikipedia en blanco).
+- Un campo que JavaScript hace de texto tras hacer su caja tiene su textarea.
+
 ### Lo que queda distinto, de más a menos visible
 
 1. ~~**JavaScript**~~: hecho el 20/11 (ver «JavaScript»): ClicGest ya no

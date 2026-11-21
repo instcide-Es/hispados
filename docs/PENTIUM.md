@@ -2846,6 +2846,12 @@ y `nucleo32/actualiza.sh` lo mete en el catálogo de Internet con los demás.
 Sin instalar (las pruebas), en `\NAVEGA` y su acceso en `\MENU`
 (`disco.sh ... navegador`).
 
+Probado con PAQUETES (en QEMU: un sistema con base 0.8.2, red y tls, y una
+memoria USB con el catálogo): `PAQUETES INSTALA navega` dice «Se va a
+instalar: base 0.8.3 (en lugar de la 0.8.2), navega 0.1», comprueba las sumas,
+los pone (con las carpetas de `\HISPA\NAVEGA`) y `PAQUETES COMPRUEBA` los da
+por buenos; con el núcleo nuevo hay que reiniciar (sección 13).
+
 ### Cómo está hecho
 
 ```
