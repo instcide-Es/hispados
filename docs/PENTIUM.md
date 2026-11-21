@@ -2806,6 +2806,7 @@ terceros (sin paquete)»**, los programas copiados a mano.
 ![Pendientes](pentium/programas-pendientes.png)
 ![Sin instalar](pentium/programas-sininstalar.png)
 ![Buscar](pentium/programas-buscar.png)
+![Actualizar todo con un núcleo nuevo: reiniciar](pentium/programas-reiniciar.png)
 
 **Una sola ventana** para todo lo de los programas (petición de Carlos del
 21/11: lo instalado por tipos para desinstalarlo, y las actualizaciones
