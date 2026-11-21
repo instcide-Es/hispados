@@ -1,0 +1,251 @@
+; =============================================================================
+;  atapi.cas - los lectores de CD y DVD del canal IDE clásico (ATAPI), en
+;  los dos canales: el primario (puertos 0x1F0-0x1F7 y 0x3F6) y el
+;  secundario (0x170-0x177 y 0x376), maestro y esclavo. VirtualBox pone su
+;  lector en el secundario maestro; muchos PC de los 2000, en el primario
+;  esclavo o en el secundario.
+;
+;  Un lector ATAPI no entiende las órdenes de los discos: se le manda la
+;  orden PACKET (A0h) y, detrás, por el puerto de datos, un «paquete» de 12
+;  octetos con una orden SCSI (la lleva cdrom.cas: TEST UNIT READY, READ
+;  CAPACITY, READ(10)...). Los datos vienen por PIO, de palabra en palabra,
+;  en tandas: el lector dice en LBA_MEDIO/LBA_ALTO cuántos octetos trae cada
+;  vez. Se le pregunta quién es con IDENTIFY PACKET DEVICE (A1h). Sin
+;  interrupciones: se mira el estado (con un tope de tiempo, que un lector
+;  que se pone a girar tarda unos segundos).
+;  En el canal primario se usa el cerrojo de ata.cas (los discos están ahí).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Atapi
+
+    importar Ata, Tareas
+
+    público constante MAX_IDE_CD = 4
+
+    constante OCUPADO = 0x80
+    constante FALLO = 0x20
+    constante PIDE_DATOS = 0x08
+    constante ERROR = 0x01
+    constante ORDEN_PAQUETE = 0xA0
+    constante ORDEN_IDENTIFICAR_PAQUETE = 0xA1
+    constante TANDA = 0xF800                    ; lo más que se le deja traer de cada vez (31 sectores de 2048)
+
+    público tipo Lector_ide = estructura
+        hay: bool
+        canal: nat32                            ; 0: primario; 1: secundario
+        unidad: nat32                           ; 0: maestro; 1: esclavo
+        modelo: arreglo [41] de byte
+    fin
+
+    público variable lectores_ide: arreglo [MAX_IDE_CD] de Lector_ide
+    público variable cuántos_ide: nat32
+    público variable error_ide: nat32           ; el registro de error de la última orden que ha fallado
+    público variable traídos_ide: nat32         ; los octetos que ha traído la última orden
+
+    variable cerrojo2: Cerrojo                  ; el del canal secundario
+    variable identidad: arreglo [256] de nat16
+
+    función base(c: nat32): nat32
+        si c = 0 entonces devolver 0x1F0 fin
+        devolver 0x170
+    fin
+
+    función control(c: nat32): nat32
+        si c = 0 entonces devolver 0x3F6 fin
+        devolver 0x376
+    fin
+
+    función toma(c: nat32)
+        si c = 0 entonces Ata.toma_canal() sino tomar(cerrojo2) fin
+    fin
+
+    función suelta(c: nat32)
+        si c = 0 entonces Ata.suelta_canal() sino soltar(cerrojo2) fin
+    fin
+
+    ; lo que tarda el lector en poner su estado al día (400 ns)
+    función pausa(c: nat32)
+        variable i: nat32
+        variable e: byte
+        para i desde 1 hasta 5 hacer e := meter_puerto(control(c)) fin
+    fin
+
+    ; espera hasta «cs» centésimas a que el lector no esté ocupado
+    función espera_libre(c: nat32, cs: nat32): bool
+        variable tope, vueltas: nat32
+        tope := tics + cs + 1
+        vueltas := 0
+        mientras meter_puerto(control(c)) yb OCUPADO <> 0 hacer
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 60000000 entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; n palabras del puerto «puerto» a destino
+    función trae_palabras(puerto: nat32, destino: puntero a byte, n: nat32)
+        si n = 0 entonces devolver fin
+        ensamblador
+            mov edi, {destino}
+            mov ecx, {n}
+            mov edx, {puerto}
+        .otra:
+            in ax, dx
+            stosw
+            loop .otra
+        fin
+    fin
+
+    ; n palabras del puerto que no se quieren (lo que sobra de una tanda)
+    función tira_palabras(puerto: nat32, n: nat32)
+        si n = 0 entonces devolver fin
+        ensamblador
+            mov ecx, {n}
+            mov edx, {puerto}
+        .otra:
+            in ax, dx
+            loop .otra
+        fin
+    fin
+
+    función lleva_palabras(puerto: nat32, origen: puntero a byte, n: nat32)
+        si n = 0 entonces devolver fin
+        ensamblador
+            mov esi, {origen}
+            mov ecx, {n}
+            mov edx, {puerto}
+        .otra:
+            lodsw
+            out dx, ax
+            loop .otra
+        fin
+    fin
+
+    ; ¿hay un lector ATAPI de CD o DVD en ese canal y esa unidad? Si lo hay,
+    ; lo apunta.
+    función mira(c: nat32, u: nat32)
+        variable b, i, n: nat32
+        variable e: byte
+        b := base(c)
+        sacar_puerto(b + 6, 0xA0 ob (u << 4))
+        pausa(c)
+        e := meter_puerto(b + 7)
+        si e = 0xFF entonces devolver fin               ; nada en el cable
+        ; ¿hay registros? (lo que se escribe se vuelve a leer)
+        sacar_puerto(b + 2, 0x55)
+        sacar_puerto(b + 3, 0xAA)
+        si meter_puerto(b + 2) <> 0x55 o meter_puerto(b + 3) <> 0xAA entonces devolver fin
+        si no espera_libre(c, 50) entonces devolver fin
+        sacar_puerto(b + 7, ORDEN_IDENTIFICAR_PAQUETE)
+        pausa(c)
+        si meter_puerto(b + 7) = 0 entonces devolver fin   ; no hay nadie
+        si no espera_libre(c, 100) entonces devolver fin
+        e := meter_puerto(b + 7)
+        si e yb (ERROR ob FALLO) <> 0 o e yb PIDE_DATOS = 0 entonces devolver fin   ; un disco duro (o nada)
+        trae_palabras(b, puntero(dirección(identidad)), 256)
+        ; ATAPI (bits 15-14 = 10) y de la clase 5: CD o DVD
+        si identidad[0] >> 14 <> 2 o (identidad[0] >> 8) yb 0x1F <> 5 entonces devolver fin
+        si cuántos_ide >= MAX_IDE_CD entonces devolver fin
+        n := cuántos_ide
+        lectores_ide[n].canal := c
+        lectores_ide[n].unidad := u
+        para i desde 0 hasta 19 hacer
+            lectores_ide[n].modelo[i * 2] := identidad[27 + i] >> 8
+            lectores_ide[n].modelo[i * 2 + 1] := identidad[27 + i]
+        fin
+        i := 40
+        mientras i > 0 y (lectores_ide[n].modelo[i - 1] = ' ' o lectores_ide[n].modelo[i - 1] = 0) hacer i := i - 1 fin
+        lectores_ide[n].modelo[i] := 0
+        lectores_ide[n].hay := cierto
+        cuántos_ide := cuántos_ide + 1
+    fin
+
+    ; busca los lectores de CD y DVD de los dos canales (en el primario, solo
+    ; donde ata.cas no ha visto un disco). Da cuántos.
+    público función busca_ide(): nat32
+        variable c, u: nat32
+        cuántos_ide := 0
+        para c desde 0 hasta 1 hacer
+            toma(c)
+            sacar_puerto(control(c), 2)                 ; sin interrupciones: se mira el estado
+            para u desde 0 hasta 1 hacer
+                si c = 1 o no Ata.discos[u].hay entonces mira(c, u) fin
+            fin
+            suelta(c)
+        fin
+        devolver cuántos_ide
+    fin
+
+    ; manda al lector l el paquete «cdb» (12 octetos) y trae a destino lo que
+    ; dé, hasta «octetos». Falso si el lector dice que ha fallado (en
+    ; error_ide, su registro de error: la clave del porqué, en los 4 bits de
+    ; arriba) o no contesta.
+    público función paquete_ide(l: nat32, cdb: puntero a byte, octetos: nat32, destino: puntero a byte): bool
+        variable c, b, n, w, k, hecho, límite: nat32
+        variable e: byte
+        variable bien: bool
+        traídos_ide := 0
+        si l >= MAX_IDE_CD entonces devolver falso fin
+        si no lectores_ide[l].hay entonces devolver falso fin
+        c := lectores_ide[l].canal
+        b := base(c)
+        toma(c)
+        error_ide := 0
+        bien := espera_libre(c, 100)
+        si bien entonces
+            sacar_puerto(b + 6, 0xA0 ob (lectores_ide[l].unidad << 4))
+            pausa(c)
+            bien := espera_libre(c, 100)
+        fin
+        si bien entonces
+            límite := octetos
+            si límite = 0 o límite > TANDA entonces límite := TANDA fin
+            sacar_puerto(b + 1, 0)                      ; por PIO
+            sacar_puerto(b + 4, límite)
+            sacar_puerto(b + 5, límite >> 8)
+            sacar_puerto(b + 7, ORDEN_PAQUETE)
+            pausa(c)
+            ; hasta que pide el paquete
+            bien := espera_libre(c, 100)
+            si bien entonces
+                e := meter_puerto(b + 7)
+                bien := e yb (ERROR ob FALLO) = 0 y e yb PIDE_DATOS <> 0
+            fin
+        fin
+        si bien entonces lleva_palabras(b, cdb, 6) fin
+        hecho := 0
+        mientras bien hacer
+            pausa(c)
+            ; (hasta 10 segundos: el lector puede estar poniéndose a girar)
+            si no espera_libre(c, 1000) entonces
+                bien := falso
+                romper
+            fin
+            e := meter_puerto(b + 7)
+            si e yb (ERROR ob FALLO) <> 0 entonces
+                error_ide := meter_puerto(b + 1)
+                bien := falso
+                romper
+            fin
+            si e yb PIDE_DATOS = 0 entonces romper fin    ; ya ha acabado
+            n := meter_puerto(b + 4) ob (nat32(meter_puerto(b + 5)) << 8)
+            si n = 0 entonces
+                bien := falso
+                romper
+            fin
+            w := (n + 1) div 2
+            k := 0
+            si hecho < octetos entonces
+                k := (octetos - hecho) div 2
+                si k > w entonces k := w fin
+            fin
+            trae_palabras(b, destino + hecho, k)
+            hecho := hecho + k * 2
+            tira_palabras(b, w - k)
+        fin
+        traídos_ide := hecho
+        suelta(c)
+        devolver bien
+    fin
+
+fin Atapi.

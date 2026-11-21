@@ -58,7 +58,7 @@ de verdad** (ACPI, S5), reiniciar por la FADT y la **batería en la bandeja**
 con su recuadro de ayuda, con el núcleo ACPI de Hispa-DOS (ACPICA) como
 servicio del anillo 3, `ACPI.BIN` (sección 11). En la bandeja caben a la vez,
 de izquierda a derecha, la memoria USB, la red, la pila y el reloj. Todo está
-en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`). Y la tarde del 20/11: las **actualizaciones por Internet** (`actualiza.hispados.es/pentium/`), con el catálogo **firmado** (Ed25519, en Castel), la ventana con su barra, el aviso al arrancar y el **núcleo nuevo con vuelta sola al de antes** si no arranca (sección 13); y el **CD (o DVD) de instalación**, que vale para VirtualBox (sección 12).*
+en `castel/nucleo32/` (y el servicio de ACPI, en `acpi/pentium/`). Y la tarde del 20/11: las **actualizaciones por Internet** (`actualiza.hispados.es/pentium/`), con el catálogo **firmado** (Ed25519, en Castel), la ventana con su barra, el aviso al arrancar y el **núcleo nuevo con vuelta sola al de antes** si no arranca (sección 13); y el **CD (o DVD) de instalación**, que vale para VirtualBox (sección 12). Y el 21/11: **los CD y los DVD** (ATAPI por IDE y por AHCI, y los lectores USB; ISO 9660 con Joliet y Rock Ridge, meter y sacar el disco en marcha, «Expulsar») y **las imágenes de disco** (.ISO, .CUE/.BIN, .IMG) montadas como una unidad más (sección 7, «Los CD y los DVD»).*
 
 ![El escritorio de Hispa-Pentium](pentium/escritorio-ventanas.png)
 
@@ -740,6 +740,127 @@ pasan de Unicode a la página 437 (lo que no está en ella sale como `_`). `DIR`
 enseña a la derecha, y un archivo o una carpeta se puede **abrir por su nombre
 largo** (sin distinguir mayúsculas) igual que por el corto. Al borrar o cambiar de
 nombre, los trozos se tachan con la entrada (que no queden sueltos).
+
+### Los CD y los DVD, y las imágenes de disco (21/11)
+
+Carlos, con la 0.8.1 en VirtualBox: «Hispa-Pentium no reconoce los DVD». Hasta
+aquí el CD de instalación lo cargaba GRUB entero en la memoria (la unidad M:) y
+el núcleo no sabía leer un lector. Ahora lee **CD y DVD de datos**, por las tres
+vías, y **monta imágenes de disco** como si fueran un CD más.
+
+**Los lectores** (todos hablan las órdenes SCSI de los lectores, MMC, que arma
+`cdrom.cas`):
+
+- **IDE** (`atapi.cas`): los **dos canales** (el primario, `0x1F0`/`0x3F6`, y el
+  secundario, `0x170`/`0x376`), maestro y esclavo: donde no hay un disco duro se
+  pregunta con **IDENTIFY PACKET DEVICE** (A1h), y si es ATAPI de la clase 5
+  (CD/DVD), se apunta con su modelo. Cada orden es **PACKET** (A0h) y, detrás,
+  el paquete de 12 octetos por el puerto de datos; los datos vienen por **PIO**
+  en tandas (el lector dice en LBA_MEDIO/ALTO cuántos octetos trae cada vez; lo
+  que no se quiere se tira). En el canal primario se usa el cerrojo de
+  `ata.cas` (`toma_canal`/`suelta_canal`). Es donde pone **VirtualBox** su lector
+  (el secundario maestro), y muchos PC de los 2000.
+- **SATA** (`ahcicd.cas`): los puertos con la firma **EB140101**. `ahci.cas` solo
+  los apunta (y los para, que no usen las tablas de los discos: una línea en
+  `mira_puerto` y tres funciones al final, para que la fusión con la rama del
+  SATA sea fácil); `ahcicd.cas` les da sus tablas y ocho páginas para los datos
+  (16 sectores de 2048 por orden, un PRD por página) y manda **PACKET con el bit
+  «A»** en la cabecera de la orden y el paquete en **ACMD** (0x40 de la tabla),
+  con los datos por **DMA**. Si falla, el registro de error (en TFD) dice la
+  clave, y el puerto se para y se vuelve a arrancar.
+- **USB** (`usbalm.cas`): un aparato de almacenamiento cuyo INQUIRY dice
+  **clase 5** es un lector (sin disco puede no estar listo ni decir cuánto mide:
+  no se le pregunta al enchufarlo); se aceptan también las subclases 02 (ATAPI)
+  y 05 (SFF-8070i) de los lectores USB de antes. Las órdenes van en el mismo
+  envoltorio (CBW) que las de las memorias, con su largo de verdad (6, 10 o 12),
+  dos sectores por orden. Enchufar y desenchufar en marcha va por
+  `usbcal.cas`, como las memorias («Lector de CD conectado: F:»).
+
+**Las órdenes** (`cdrom.cas`): TEST UNIT READY (¿hay disco y está listo?),
+REQUEST SENSE (por qué no: 02/3A «no hay disco», 02/04 «se está poniendo a
+girar», **06/28 «se ha cambiado el disco»**), READ CAPACITY, **READ TOC** (si la
+primera pista es de sonido, es un **CD de música**: se dice, y no se cuelga
+nada; escucharlo, otro día), READ(10) (de 16 en 16 sectores por IDE y SATA, de
+2 en 2 por USB; con tres intentos, salvo si el disco ya no está) y, para
+**expulsar**, PREVENT ALLOW MEDIUM REMOVAL y START STOP UNIT (LoEj).
+
+**La capa de discos**: un lector es un disco más, de la clase **DE_CD**, con
+sectores de **2048** (el campo nuevo `bloque` de cada disco) y tantos como el
+disco que tenga (0 sin disco). No se escribe en él nunca (ni con «escritura»),
+INSTALAR no lo ve (la llamada 63 lo salta) y la 64 no lee de él.
+
+**ISO 9660** (`iso.cas`), de solo lectura, como un volumen más de `fat.cas`
+(que sigue llevando todos los archivos abiertos: un volumen ISO lleva «iso» en
+su ficha y, para él, `fat.cas` pide a `iso.cas` lo suyo; los cambios en
+`fat.cas` van marcados con «(CD)»). Se miran los descriptores desde el sector
+16: el primario (su nombre, lo que mide, la raíz) y, si lo hay, el
+suplementario de **Joliet** (escapes `%/@`, `%/C`, `%/E`): con él, los nombres
+largos (UCS-2, a la página 437) y el nombre del volumen. Sin Joliet, **Rock
+Ridge** si lo hay (el «SP» del «.» de la raíz; los nombres de las entradas
+**NM**, de UTF-8 a la 437); si no, los nombres de siempre (sin el `;1` ni el
+punto del final). Cada entrada lleva además un **nombre corto** hecho del largo
+como Windows (`documento-de-prueba-largo.txt` es `DOCUME~1.TXT`), y se abre por
+los dos. Las fechas pasan a las de la FAT; todo sale con el atributo de solo
+lectura. Se lee de sector en sector (con uno guardado) y, los sectores enteros,
+derechos a donde se piden, de 32 en 32.
+
+**Las letras** (`unidades.cas`): cada lector tiene **la primera letra libre tras
+los discos de dentro** (D: si hay un disco duro, aunque no tenga FAT; la C: si
+no hay ninguno), como en Hispa-DOS, y **se le queda aunque no tenga disco**. Un
+CD nunca es la unidad del sistema (el CD de instalar sigue siendo M:, en la
+memoria; su lector, además, es D:).
+
+**Meter y sacar el disco** (`cdcal.cas`): una tarea del núcleo, `cd-cambios`, le
+pregunta a cada lector **cada dos segundos** qué tiene. Si llega un disco de
+datos, se monta con la letra del lector; si se va, o se cambia por otro (el
+«06/28»), su unidad deja de estar (los archivos abiertos en ella dan error y los
+programas que trabajaban en ella pasan a la unidad del sistema) y, si es otro,
+se monta el nuevo. Se avisa en la **bandeja** («CD insertado: D:», «DVD
+insertado: D:», «CD retirado: D:», «CD de música en D:», «El disco de D: no se
+puede leer»): los avisos llegan con los del USB (los saca `usbcal.cas`), con un
+disco dibujado y «CD y DVD» de título; y a las ventanas les llega EV_UNIDADES.
+**Expulsar** (la llamada 132, la orden `EXPULSAR D:` o el menú de la unidad en
+Mi equipo): la unidad deja de estar y se abre la bandeja.
+
+**Las imágenes de disco**: `MONTAR X:\DISCOS\ALGO.ISO` (o dos clics en el
+archivo en Mi equipo, o «Montar» en su menú) la monta como una unidad más, con
+la **primera letra libre**, y Mi equipo entra en ella. Valen las **.ISO**
+(sectores de 2048), las **.BIN en crudo** (de 2352: MODE1, los datos desde el
+16, o MODE2, desde el 24) y su hoja **.CUE** (se lee el `FILE "..." BINARY`), y
+las **.IMG** (.IMA, .VFD) de disquete o de disco duro, con FAT. Cómo: se apunta
+dónde está el archivo **en su disco** (`fat.cas`, `trozos_archivo`: la cadena de
+clusters, hecha trozos seguidos; en un CD, un trozo) y la imagen es un disco
+más, de la clase **DE_IMAGEN** (`discos.cas`), que lee de esos sectores por
+debajo de la FAT (sin abrir el archivo: la FAT no se llama a sí misma). Vale con
+la imagen en cualquier unidad (C:, una memoria USB, un CD, otra imagen); un
+archivo en más de 96 trozos no se monta (se dice). **Si se va el disco donde
+está el archivo** (se desenchufa la memoria, se saca el CD, se quita con
+seguridad), la imagen **se desmonta sola** («Imagen desmontada: F: (su disco se
+ha ido)»). `DESMONTAR F:` (o «Expulsar») la quita; `MONTAR` sin nada dice los
+lectores (con lo que tienen) y las imágenes montadas.
+
+**Mi equipo**: los lectores salen con su letra aunque no tengan disco (detrás de
+las unidades), con un **disco dibujado**: «Unidad D:  PRUEBA_CD», «lector de CD o
+DVD: QEMU DVD-ROM», «670 K, ISO 9660 (de solo lectura)», o «sin disco», «un CD
+de música», «el disco no se puede leer». Una imagen sale como **«CD virtual: la
+imagen C:\DISCOS\PRUEBA.ISO»** (o «disco virtual», una .IMG), con el disco
+dentro de un **marco de puntos** (se distingue por la forma y por el texto, no
+solo por el color). El menú de una unidad de CD o de una imagen: «Abrir|Expulsar».
+
+Las llamadas nuevas: **132** (expulsar la unidad de la letra EBX: el lector abre
+la bandeja; la imagen se desmonta) y **133** (montar la imagen del archivo EBX:
+da su letra, o 1 no está, 2 no es una imagen que se pueda leer, 3 demasiados
+trozos, 4 no caben más, 5 está en M:). En `Info_unidad` (la 43): `medio` 4 es un
+lector de CD (MEDIO_CD) y 5 una imagen (MEDIO_IMAGEN); `clase` 9 es ISO 9660;
+`quitable` 2, que se puede expulsar; y `relleno[0]`, lo que tiene el lector (0
+nada, 1 datos, 2 música, 3 no se lee).
+
+**Lo que falta**: escuchar los CD de música (READ CD y el sonido); UDF (los
+DVD que solo lo llevan; los de vídeo y casi todos los de datos llevan también
+ISO 9660); los archivos de varios trozos (de más de 4 GB) de ISO 9660 y las
+entradas CE de Rock Ridge; GET EVENT STATUS NOTIFICATION (hoy, TEST UNIT READY
+cada dos segundos, que vale en todos); grabar. Y probarlo en VirtualBox y en un
+PC de verdad con un lector IDE y uno SATA.
 
 ## 8. El intérprete de órdenes
 
@@ -1962,7 +2083,7 @@ BIOS. En VirtualBox, «Habilitar EFI» tiene que estar quitado (lo está, para
 | Pieza | En VirtualBox | Hispa-Pentium |
 |---|---|---|
 | el disco | SATA AHCI (ICH9) o IDE (PIIX3/PIIX4) | los dos (`ahci.cas`, `ata.cas`); el CD en AHCI (ATAPI) se ve y no se toca |
-| el CD/DVD | en el mismo SATA o en el IDE secundario | lo lee GRUB por la BIOS |
+| el CD/DVD | en el mismo SATA o en el IDE secundario | GRUB lo carga para arrancar (M:); desde el 21/11 el núcleo lo lee también: es D: (`atapi.cas`, `ahcicd.cas`, sección 7) |
 | la red | Intel PRO/1000 MT Desktop (82540EM, `8086:100E`) | la e1000 de `RED.BIN` (ya estaba en la lista) |
 | el USB | OHCI (USB 1.1), con la tableta USB si se elige | OHCI no lo lleva: se deja quieto; teclado y ratón, por PS/2 (el ratón «PS/2» de VirtualBox) |
 | la gráfica | VMSVGA o VBoxVGA, con VBE | el modo lo pone GRUB por la VBE; desde Configuración se cambia **en marcha** (las dos llevan la VBE de Bochs: sección 10) |
@@ -3089,6 +3210,20 @@ Bochs): `PANTALLA.ENV` y `GRUB.CFG`, «Reiniciar ahora», la prueba al arrancar 
 «Mantener», y otra medida que no se da por buena y que GRUB deshace al
 reiniciar a lo bruto; e instalado con `-vga std`: «Mantener» guardada; y con `-vga
 vmware`, 1200 x 800 (que su BIOS no da) puesta por el núcleo al arrancar.
+La **parte 18** (`SOLO=lectores`, unos cuatro minutos; 21/11) prueba los CD
+y DVD y las imágenes de disco (sección 7) con una ISO de prueba hecha allí
+mismo (genisoimage o xorriso, con Joliet y Rock Ridge: una carpeta con nombre
+largo, otra dentro y un archivo de 300 K): como **VirtualBox** (`pc`, el disco
+en SATA y el lector en el IDE secundario maestro), por **AHCI** (el `q35`, el
+lector en un puerto SATA) y por **USB** (`usb-storage` con la ISO, al arrancar
+y enchufado en marcha con `device_add`): DIR y TYPE con los nombres largos, y
+lo copiado al disco, **comparado octeto a octeto** con lo de la ISO; sacar,
+cambiar y volver a meter el disco con el monitor de QEMU (`eject`, `change`),
+con sus avisos, y `EXPULSAR`; `MONTAR` la misma ISO, un disquete `.IMG` y una
+`.CUE` con su `.BIN` en crudo (comparados también con lo de la ISO), una
+imagen dentro del CD y otra en una memoria USB que se desenchufa (se desmontan
+solas al irse su disco); y Mi equipo: el CD con su disco dibujado, una `.ISO`
+montada con dos clics, el CD virtual en su marco de puntos y «Expulsar».
 Con ella, `SOLO=32` (rama `pentium-pantalla`, 20/11 por la noche) dio **479 bien,
 0 mal**.
 
@@ -3120,6 +3255,11 @@ oficina), unos diez, y `SOLO=16`, lo que no arranca el núcleo (de la parte 1 a
 la 7, con los dos compiladores y los dos ensambladores), otros siete.
 
 ## 16. Por dónde seguir
+
+**Metas** (21/11): ~~**CD y DVD**~~ (hecho el 21/11: IDE, SATA y USB, ISO 9660
+con Joliet, meter y sacar en marcha, «Expulsar»; sección 7) · **montar
+imágenes** de disco (.ISO, .CUE/.BIN, .IMG): hecho el 21/11 · escuchar los CD
+de música · UDF.
 
 Hecho en la del 20/11 (la 0.8, cinco ramas juntas en `pentium-08`): el AHCI
 del ICH7 (sección 7), el USB en caliente y apagar de verdad con la batería

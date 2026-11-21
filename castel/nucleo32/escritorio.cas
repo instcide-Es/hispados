@@ -1039,7 +1039,11 @@ módulo Escritorio
     función globo(t: puntero a byte)
         variable l: puntero a Lienzo
         variable an: ent32
+        variable de_cd: bool
         cierra_globo()
+        ; (CD) los avisos de los CD y DVD (cdcal.cas) llegan con un 1 delante
+        de_cd := t[0] = 1
+        si de_cd entonces t := t + 1 fin
         an := ancho_texto(t) + 60
         si an < 220 entonces an := 220 fin
         si an > pantalla.ancho - 8 entonces an := pantalla.ancho - 8 fin
@@ -1051,8 +1055,17 @@ módulo Escritorio
         fin
         rectángulo(valor(l), 0, 0, an, GLOBO_AL, 0x1A56AC)
         redondeado(valor(l), 1, 1, an - 2, GLOBO_AL - 2, 6, 0xFFFDF2, 0xF1EACB, TODAS)
-        icono_memoria(valor(l), 15, 17)
-        texto_negrita(valor(l), 44, 9, "USB", TINTA)
+        si de_cd entonces
+            ; (CD) un disco plateado con su agujero
+            redondeado(valor(l), 10, 14, 24, 24, 12, 0x6F7F96, 0x6F7F96, TODAS)
+            redondeado(valor(l), 11, 15, 22, 22, 11, 0xF2F5FA, 0xB9C6D8, TODAS)
+            redondeado(valor(l), 18, 22, 8, 8, 4, 0x6F7F96, 0x6F7F96, TODAS)
+            redondeado(valor(l), 19, 23, 6, 6, 3, 0xF1EACB, 0xF1EACB, TODAS)
+            texto_negrita(valor(l), 44, 9, "CD y DVD", TINTA)
+        sino
+            icono_memoria(valor(l), 15, 17)
+            texto_negrita(valor(l), 44, 9, "USB", TINTA)
+        fin
         texto(valor(l), 44, 30, t, TINTA)
         repintada(v_globo, 0, 0, an, GLOBO_AL)
         globo_hasta := tics + 6 * HZ

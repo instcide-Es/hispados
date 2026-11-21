@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -487,6 +487,10 @@ módulo Semilla
                 d[0] := letra
                 si unidades[u].clase = U_MEMORIA entonces
                     apunta(" %c: (en memoria)", d)
+                sino si volúmenes[u].iso entonces
+                    d[1] := unidades[u].disco
+                    d[2] := nat32(nombre_de_clase(discos[unidades[u].disco].clase))
+                    apunta(" %c: (disco %u, %s, ISO 9660)", d)          ; (CD)
                 sino
                     d[1] := unidades[u].disco
                     d[2] := nat32(nombre_de_clase(discos[unidades[u].disco].clase))
@@ -506,7 +510,18 @@ módulo Semilla
         variable u, libres: nat32
         variable d: arreglo [4] de nat32
         para u desde 0 hasta MAX_DISCOS - 1 hacer
-            si discos[u].hay entonces
+            si discos[u].hay y discos[u].clase = DE_CD entonces
+                ; (CD) un lector: lo que mide el disco que tiene
+                d[0] := u
+                d[1] := nat32(dirección(discos[u].modelo[0]))
+                d[2] := nat32(nombre_de_vía(discos[u].cuál))
+                d[3] := discos[u].sectores
+                si d[3] = 0 entonces
+                    imprimir("disco %u: %s, lector de CD o DVD (%s), sin disco\n", d)
+                sino
+                    imprimir("disco %u: %s, lector de CD o DVD (%s), con un disco de %u sectores de 2048\n", d)
+                fin
+            sino si discos[u].hay entonces
                 d[0] := u
                 d[1] := nat32(dirección(discos[u].modelo[0]))
                 d[2] := discos[u].sectores
@@ -635,9 +650,18 @@ módulo Semilla
                 Usbcal.prepara()
             fin
         fin
+        ; (CD) los lectores de CD y DVD (detrás de los discos y las memorias)
+        si buscar(línea_del_cargador(), "sindisco") = nulo entonces busca_cd() fin
         n := 0
         para d desde 0 hasta MAX_DISCOS - 1 hacer
-            si discos[d].hay entonces
+            si discos[d].hay y discos[d].clase = DE_CD entonces
+                ; (CD) un lector de CD o DVD: su letra (y su disco, luego)
+                monta_disco(d)
+                dd[0] := d
+                dd[1] := nat32(dirección(discos[d].modelo[0]))
+                dd[2] := nat32(nombre_de_vía(discos[d].cuál))
+                apunta("disco %u: %s, lector de CD o DVD (%s).\n", dd)
+            sino si discos[d].hay entonces
                 monta_disco(d)
                 dd[0] := d
                 dd[1] := nat32(dirección(discos[d].modelo[0]))
@@ -661,6 +685,7 @@ módulo Semilla
                 escribir("el disco es de solo lectura (para escribir en él: «escritura» en la línea del cargador).\n")
             fin
         fin
+        prepara_cd()                                    ; (CD) los discos de los lectores, y la tarea que los mira
         arranque_a_x()
         monta_memoria()
         pedida := 0

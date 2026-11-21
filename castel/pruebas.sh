@@ -132,6 +132,16 @@
 #      firmado): el aviso de la bandeja al arrancar, la ventana, actualizar
 #      el núcleo, reiniciar, que arranque el nuevo; y con un núcleo que se
 #      cuelga, que GRUB vuelva solo al de antes.
+#  18. (CD) Hispa-Pentium: los lectores de CD y DVD y las imágenes de disco.
+#      Una ISO de prueba con Joliet (genisoimage o xorriso): por IDE (como
+#      VirtualBox: el lector en el secundario maestro, el disco en SATA), por
+#      AHCI (el q35) y por USB (usb-storage con la ISO, también enchufado en
+#      marcha); sus archivos, copiados al disco y comparados octeto a octeto;
+#      sacar, cambiar y meter el disco con el monitor de QEMU (eject, change)
+#      y EXPULSAR; MONTAR la misma ISO (y una .IMG de disquete y una
+#      .CUE/.BIN en crudo) desde C:, desde el CD y desde una memoria USB que
+#      se quita (la imagen se desmonta sola); y Mi equipo, con el CD y el CD
+#      virtual, montado con dos clics.
 #  17. Hispa-Pentium 0.8: la medida de la pantalla, desde Configuración
 #      (Cambiar...). Con la VBE de Bochs (QEMU -vga std; y el CD con el modo
 #      de GRUB, en un «pc» como VirtualBox, con -vga std y con -vga vmware,
@@ -159,6 +169,7 @@
 #   SOLO=tls ./pruebas.sh         la primera y la 13 bis (HTTPS: el servicio TLS, TLS.BIN)
 #   SOLO=cd ./pruebas.sh          la primera y la decimosexta (el CD y las actualizaciones por Internet)
 #   SOLO=pantalla ./pruebas.sh    la primera y la decimoséptima (la medida de la pantalla)
+#   SOLO=lectores ./pruebas.sh    la primera y la decimoctava (los CD y DVD, y las imágenes de disco)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -222,7 +233,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|lectores) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -933,7 +944,7 @@ DISCO=$P/d16.img $AQUI/nucleo32/probar.sh "" disco dir "dir textos" "dir nada" "
   "lanzar noprog.bin" "lanzar nada.bin" disco apagar > $P/disco.sal 2>&1
 S=$P/disco.sal
 mira "el controlador ATA (PIO): IDENTIFY dice qué disco hay en el canal primario, y cuántos sectores" \
-  "^disco 0: QEMU HARDDISK, 16 MB, FAT16\.$" "^disco 0: QEMU HARDDISK, 32768 sectores (16 MB), LBA" "^disco 1: no hay"
+  "^disco 0: QEMU HARDDISK, 16 MB, FAT16\.$" "^disco 0: QEMU HARDDISK, 32768 sectores (16 MB), LBA" "^disco 1: QEMU DVD-ROM, lector de CD o DVD (IDE), sin disco$"
 mira "la FAT16 se monta y se lee su raíz (los nombres largos se saltan; queda el corto)" \
   "^sistema de archivos: FAT16, desde el sector 0, [0-9]* clusters de 2048 octetos, [0-9]* libres" \
   "^ORDENES.BIN  *[0-9]*$" "^LEEME.TXT  *118$" "^NOMBRE~1.TXT  *32$" "^TEXTOS  *<carpeta>" "^20 entradas"
@@ -955,7 +966,7 @@ mira "el intérprete de órdenes es un programa del anillo 3 cargado del disco, 
   "^lanzo ORDENES.BIN del disco (la tarea [0-9]*, en el anillo 3)" "^Hispa-Pentium: intérprete de órdenes (un programa del anillo 3" \
   "^C:.>ayuda$" "^Las órdenes de Hispa-Pentium:" "^  TYPE archivo "
 mira "VER y MEM" "^Hispa-Pentium 0\.8: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
-  "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 3\.$"
+  "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 4\.$"
 mira "DIR: la raíz y una carpeta, con sus tamaños, sus fechas y lo que queda libre" "^ Directorio de C:.$" "^LEEME    TXT  *118  [0-9/]*  [0-9:]*$" \
   "^TEXTOS  *<DIR>  " "^ *17 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
   "^LARGO    TXT  *17600  " "^ *3 archivos  *18[0-9]* octetos$" "^No puedo abrir nada: no existe\.$"
@@ -997,9 +1008,9 @@ m1=$(grep "^ORDENES.BIN ha acabado" $S | awk '{print $10, $13}')
 mira "al salir, el núcleo ha recogido lo que dejó PRUEBA sin cerrar ni esperar (un archivo abierto y un programa)" \
   "^prueba: acabo con el código 7, un archivo abierto y un programa sin esperar$" "^(PRUEBA.BIN ha acabado con el código 7)$" \
   "soy el que nadie espera: he dormido y acabo solo$" \
-  "^Hasta luego\.$" "^ORDENES.BIN ha acabado con el código 0; marcos libres" "; archivos abiertos: 0$" "^montón: 1 bloques ocupados con 8192 octetos"
-if [ -n "$m1" ] && [ "$(echo $m1 | awk '{print $1}')" = "$(echo $m1 | awk '{print $2}')" ] && [ "$(grep -c '^ *[0-9]*  [A-Za-z.-]*  *[a-z]*  *[03]  ' $S)" = 2 ]; then
-  ok "y no queda nada: los mismos marcos libres que antes de lanzar el intérprete ($m1) y solo las dos tareas del núcleo"
+  "^Hasta luego\.$" "^ORDENES.BIN ha acabado con el código 0; marcos libres" "; archivos abiertos: 0$" "^montón: 2 bloques ocupados con 16384 octetos"
+if [ -n "$m1" ] && [ "$(echo $m1 | awk '{print $1}')" = "$(echo $m1 | awk '{print $2}')" ] && [ "$(grep -c '^ *[0-9]*  [A-Za-z.-]*  *[a-z]*  *[03]  ' $S)" = 3 ]; then
+  ok "y no queda nada: los mismos marcos libres que antes de lanzar el intérprete ($m1) y solo las tres tareas del núcleo (con cd-cambios, la del lector de CD de QEMU)"
 else ko "tras el intérprete queda memoria o tareas sin recoger: «$m1»"; grep -A6 "^> tareas" $S | sed 's/^/        /'; fi
 # CLS: se mira la pantalla (lo que hay justo antes de la última orden)
 VER=1 DISCO=$P/d16.img $AQUI/nucleo32/probar.sh "" ordenes dir cls apagar > $P/cls.sal 2>&1
@@ -1024,7 +1035,7 @@ mira "si el cargador se lo dice (-append ordenes), el núcleo arranca con el int
   "^C:.>ver$" "^Hispa-Pentium 0\.8" "^ORDENES.BIN ha acabado con el código 0" "^\[código 5\]"
 MODULOS= $AQUI/nucleo32/probar.sh "" disco dir ordenes apagar > $P/sindisco.sal 2>&1
 S=$P/sindisco.sal
-mira "sin disco (y sin nada que traiga el cargador), el núcleo lo dice y sigue" "^disco 0: no hay" "^sistema de archivos: no hay" "^no puedo lanzar ORDENES.BIN: no hay disco" "^\[código 5\]"
+mira "sin disco (y sin nada que traiga el cargador), el núcleo lo dice y sigue" "^disco 0: QEMU DVD-ROM, lector de CD o DVD (IDE), sin disco$" "^sistema de archivos: no hay" "^no puedo lanzar ORDENES.BIN: no hay disco" "^\[código 5\]"
 
 # ---- escribir en el disco: ATA, la FAT (12, 16, 32 y con particiones) y las órdenes ----
 # (cada prueba escribe en una copia del disco, con ESCRIBE=1; luego la miran fsck.fat y mtools)
@@ -1144,9 +1155,9 @@ if [ -n "$t" ] && [ "$t" -gt 0 ] && [ $((t % 1000)) = 0 ] && sano $I && saca $I 
 else ko "el archivo del programa cortado no queda bien: «$t»"; sed 's/^/        /' $P/fsck.txt | head -8; fi
 m1=$(grep "^ORDENES.BIN ha acabado" $S | awk '{print $10, $13}')
 mira "al cortar, el núcleo lo recoge todo: ni archivos abiertos ni tareas de más; y Ctrl+C también desde la consola del núcleo" \
-  "^ORDENES.BIN ha acabado con el código 0; marcos libres" "; archivos abiertos: 0$" "^montón: 1 bloques ocupados con 8192 octetos" \
+  "^ORDENES.BIN ha acabado con el código 0; marcos libres" "; archivos abiertos: 0$" "^montón: 2 bloques ocupados con 16384 octetos" \
   "^bucle.bin ha acabado con el código 254; marcos libres" "^\[código 5\]"
-if [ -n "$m1" ] && [ "$(echo $m1 | awk '{print $1}')" = "$(echo $m1 | awk '{print $2}')" ] && [ "$(grep -c '^ *[0-9]*  [A-Za-z.-]*  *[a-z]*  *[03]  ' $S)" = 4 ]; then
+if [ -n "$m1" ] && [ "$(echo $m1 | awk '{print $1}')" = "$(echo $m1 | awk '{print $2}')" ] && [ "$(grep -c '^ *[0-9]*  [A-Za-z.-]*  *[a-z]*  *[03]  ' $S)" = 6 ]; then
   ok "y la memoria vuelve entera ($m1 marcos libres antes y después)"
 else ko "tras Ctrl+C queda memoria o tareas sin recoger: «$m1»"; grep -A6 "^> tareas" $S | sed 's/^/        /'; fi
 
@@ -1633,7 +1644,7 @@ else ko "con «escritura=usb», o el disco de dentro ha cambiado o la memoria no
 MODULOS= QEMU_MAS="-device qemu-xhci,id=u -drive id=mu,file=$P/d16.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" ARRANQUE=sinusb \
   $AQUI/nucleo32/probar.sh "" disco apagar > $N/sinusb.sal 2>&1
 S=$N/sinusb.sal
-if ! grep -q "^usb:" $S && grep -q "^disco 0: no hay" $S && grep -q "^\[código 5\]" $S; then ok "con «sinusb» el núcleo ni toca el USB (se teclea por el teclado PS/2, y la memoria no se ve)"
+if ! grep -q "^usb:" $S && grep -q "^disco 0: QEMU DVD-ROM, lector de CD o DVD (IDE), sin disco$" $S && grep -q "^\[código 5\]" $S; then ok "con «sinusb» el núcleo ni toca el USB (se teclea por el teclado PS/2, y la memoria no se ve)"
 else ko "«sinusb» no deja el USB sin tocar:"; sed 's/^/        /' $S | head -8; fi
 # 10. el escritorio, sin teclado ni ratón PS/2: el ratón y el teclado USB, guardar en la memoria, y Mi equipo con sus unidades
 cp $P/d16.img $N/eu.img
@@ -2190,7 +2201,7 @@ for hc in xhci ehci; do
   mira "$que: un teclado USB enchufado con el intérprete en marcha teclea al momento" \
     "usb: se enchufa el aparato 0, 0627:0001, velocidad [a-z]*, en el puerto [0-9] ($que); teclado$" "eco uno$" "^uno$"
   mira "$que: una memoria enchufada en marcha sale como W: (y el aviso) y se lee" \
-    "($que); almacenamiento$" "^disco 1: QEMU    QEMU HARDDISK, 16 MB (USB), recién enchufado, W: (FAT16)\.$" "usb: aviso: Memoria USB conectada: W:$" \
+    "($que); almacenamiento$" "^disco 2: QEMU    QEMU HARDDISK, 16 MB (USB), recién enchufado, W: (FAT16)\.$" "usb: aviso: Memoria USB conectada: W:$" \
     "^hola desde la memoria enchufada$"
   mira "$que: quitada a lo bruto con un archivo abierto: el programa ve errores y sigue, y la unidad ya no está" \
     "^abierto: leídos 16 octetos; pulse una tecla$" "usb: aviso: Memoria USB desconectada sin «quitar con seguridad»: W:$" "^abierto: al leer otra vez: el disco falla$" \
@@ -2203,7 +2214,7 @@ for hc in xhci ehci; do
     mira "$que: el teclado sigue tecleando después de quitar y enchufar memorias" "^tres$"
   fi
   mira "$que: la otra memoria (W: otra vez) se escribe y se quita con seguridad: «Ya puede quitar la memoria W:»" \
-    "^ *1 archivo(s) copiado(s)\.$" "^> quitar w$" "^disco 1: quitado con seguridad\.$" "usb: aviso: Ya puede quitar la memoria W:$"
+    "^ *1 archivo(s) copiado(s)\.$" "^> quitar w$" "^disco 2: quitado con seguridad\.$" "usb: aviso: Ya puede quitar la memoria W:$"
   saca $Q/b$hc.img LARGO.TXT $Q/largo$hc.txt; saca $Q/b$hc.img NUEVA/LEEME.TXT $Q/leeme$hc.txt
   if sano $Q/b$hc.img && sano $Q/a$hc.img && [ "$(wc -c < $Q/largo$hc.txt 2> /dev/null)" = 17600 ] && [ -s $Q/leeme$hc.txt ] && [ "$(grep -c "sin «quitar con seguridad»" $S)" = 1 ]; then
     ok "$que: lo escrito está en la memoria quitada con seguridad, y las dos quedan sanas (fsck.fat)"
@@ -2245,7 +2256,7 @@ miracap "escritorio: quitada con seguridad desde Mi equipo: el globo «Ya puede 
   texto 540 532 600 548 "Ya puede quitar la memoria W:" texto 90 392 110 410 "Ya puede quitar la memoria W:." notexto 150 140 200 400 "Unidad W:"
 miracap "escritorio: el icono de la bandeja saca «Quitar con seguridad W:» de la otra memoria" u4 texto 580 535 600 560 "Quitar con seguridad W:"
 mira "escritorio: y desde la bandeja también se quita con seguridad; las dos memorias quedan sanas" \
-  "^escritorio: globo: Ya puede quitar la memoria W:$" "^disco 1: quitado con seguridad\.$"
+  "^escritorio: globo: Ya puede quitar la memoria W:$" "^disco 2: quitado con seguridad\.$"
 if [ "$(grep -c "^escritorio: globo: Ya puede quitar la memoria W:$" $S)" = 2 ] && ! grep -q "sin «quitar con seguridad»" $S && sano $Q/ea.img && sano $Q/eb.img; then
   ok "escritorio: las dos memorias se han quitado con seguridad (ninguna «a lo bruto») y quedan sanas (fsck.fat)"
 else ko "escritorio: las memorias no se han quitado con seguridad, o no quedan sanas:"; grep "globo\|aviso" $S | sed 's/^/        /' | head -8; fi
@@ -2587,7 +2598,7 @@ mira "DESCARGAR: con Content-Length, en trozos (chunked), hasta que se cierra, u
   "^Redirigido a /ultima.txt$" "^version=0.8$" "^DESCARGAR: no se ha bajado nada (el servidor ha dicho 404)\.$" "^Hecho: c:.textos.otra.txt, 41 octetos" \
   "^DESCARGAR: no hay conexión segura con 10.0.2.2: no hay servicio TLS (falta TLS.BIN): no se pueden hacer conexiones cifradas\.$" "^Uso: DESCARGAR http\[s\]://servidor\[:puerto\]/camino \[archivo\]$"
 mira "Ctrl+C en medio de una descarga que no llega: el programa acaba, y la red sigue (IPCONFIG /TODO, con lo que ha apuntado el servicio)" \
-  "^Guardando LENTO.BIN (1000000 octetos)^C$" "^Lo que ha apuntado el servicio de red:$" "^red: DHCP: IP 10.0.2.15" "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 4\.$"
+  "^Guardando LENTO.BIN (1000000 octetos)^C$" "^Lo que ha apuntado el servicio de red:$" "^red: DHCP: IP 10.0.2.15" "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 5\.$"
 iguales=1
 for f in GRANDE.BIN:grande.bin TROZOS.BIN:trozos.bin CIERRA.BIN:cierra.bin TEXTOS/OTRA.TXT:ultima.txt; do
   saca $R/e.img ${f%%:*} $R/x.bin && cmp -s $R/x.bin $R/srv/${f##*:} || { iguales=0; echo "        ${f%%:*} no es igual"; }
@@ -2914,6 +2925,8 @@ maquina vivo "$VBOX_PC -cdrom $V/cd.iso -drive file=$V/ide.img,format=raw,if=ide
 mira "el CD en un «pc» como el de VirtualBox (IDE, USB OHCI, la e1000 82540EM): GRUB arranca solo la primera entrada, el escritorio sin instalar, con la red" \
   "escritorio: en marcha, 800 x 600" "red: tarjeta 8086:100E" "^red: DHCP: IP 10\.0\.2\.15"
 miracap "y el escritorio, desde la memoria (la unidad M:)" cd1 texto 20 50 110 70 "Mi equipo" negrita 30 570 80 590 Inicio
+mira "(CD) y el núcleo lee el propio CD: el lector del IDE secundario maestro (el de VirtualBox) es D:, con su ISO 9660" \
+  "^disco 1: QEMU DVD-ROM, lector de CD o DVD (IDE)\.$" "cd: D: CD de datos: «HISPA_PENTI[A-Z_0-9]*», ISO 9660"
 if ! grep -q "excepción\|\*\*\*" $S; then ok "ni una excepción del núcleo (con el controlador OHCI y su tableta USB, que no se usan)"; else ko "hay excepciones:"; grep "excepción\|\*\*\*" $S | head -3 | sed 's/^/        /'; fi
 # 3. instalar desde el CD: en el «pc» (IDE) y en el «q35» (SATA: AHCI, con el CD en AHCI también)
 truncate -s 2G $V/sata.img
@@ -3124,6 +3137,122 @@ else ko "el núcleo se ha quejado:"; cat $V/pc*.txt $V/vb*.txt $V/cd*.txt | grep
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin la medida de la pantalla)"
 fi   # la pantalla
+
+# --------------------------------- 18. (CD) los lectores de CD y DVD y las imágenes
+if parte08 lectores; then
+echo "== Hispa-Pentium: los CD y DVD (IDE, AHCI y USB; ISO 9660 con Joliet), meter y sacar el disco, y las imágenes de disco =="
+L=$P/cd18
+mkdir -p $L $G
+export MTOOLS_SKIP_CHECK=1
+if command -v genisoimage > /dev/null; then HAZISO="genisoimage -quiet"; else HAZISO="xorriso -as mkisofs -quiet"; fi
+[ -f $P/d16.img ] || $AQUI/nucleo32/disco.sh $P/d16.img 16 > $P/disco16.txt 2>&1
+[ -f $P/d32.img ] || $AQUI/nucleo32/disco.sh $P/d32.img 32 > $P/disco32.txt 2>&1
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $L/semilla.asm > /dev/null 2>&1 && nasm -f bin $L/semilla.asm -o $L/SEMILLA.BIN
+# la ISO de prueba: nombres largos (Joliet, y Rock Ridge), una carpeta dentro de otra y un archivo de 300 K
+rm -rf $L/iso $L/iso2; mkdir -p "$L/iso/Carpeta con nombre largo/sub" $L/iso2
+printf 'Hola desde el CD de prueba\r\n' > $L/iso/LEEME.TXT
+printf 'Texto con nombre largo, en Joliet.\r\n' > "$L/iso/Carpeta con nombre largo/documento-de-prueba-largo.txt"
+printf 'dentro\r\n' > "$L/iso/Carpeta con nombre largo/sub/hondo.txt"
+python3 -I -c "import random; random.seed(18); open('$L/iso/grande.bin', 'wb').write(bytes(random.randrange(256) for _ in range(300000)))"
+$HAZISO -J -r -V PRUEBA_CD -o $L/joliet.iso $L/iso
+$HAZISO -J -V OTRO -o $L/otro.iso $L/iso/LEEME.TXT
+cp $L/joliet.iso $L/iso2/dentro.iso; $HAZISO -J -V CONTIENE -o $L/contiene.iso $L/iso2
+LARGO="$L/iso/Carpeta con nombre largo/documento-de-prueba-largo.txt"
+# ¿lo copiado al disco es igual que lo del CD? (la imagen y los archivos de ella)
+igual_cd() { local img=$1 f; shift; for f in "$@"; do rm -f $L/sacado; mcopy -n -i $img ::$f $L/sacado 2> /dev/null || return 1
+  case $f in DOC*) cmp -s $L/sacado "$LARGO" ;; *) cmp -s $L/sacado $L/iso/grande.bin ;; esac || return 1; done; }
+if [ ! -f $L/joliet.iso ] || [ ! -f $L/SEMILLA.BIN ]; then ko "no se puede hacer la ISO de prueba (genisoimage o xorriso) o el núcleo"; else
+# 1. como VirtualBox: un «pc» con el disco en SATA (AHCI) y el lector en el IDE secundario maestro
+cp $P/d32.img $L/c.img
+ESCRIBE=1 SATA=$L/c.img MAQUINA=pc ARRANQUE=ordenes MODULOS= QEMU_MAS="-drive id=cd,file=$L/joliet.iso,media=cdrom,if=none -device ide-cd,drive=cd,id=lector,bus=ide.1,unit=0" \
+  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN "dir d:\\" "type d:\\leeme.txt" "dir d:\\carpet~1" "type d:\\carpet~1\\sub\\hondo.txt" "copy d:\\grande.bin c:\\grande.bin" \
+  "copy d:\\carpet~1\\docume~1.txt c:\\doc.txt" ":monitor eject -f cd" ":pausa 3" "dir d:\\" ":monitor change cd $L/otro.iso" ":pausa 3" "dir d:\\" \
+  ":monitor change cd $L/joliet.iso" ":pausa 3" "type d:\\leeme.txt" "expulsar d:" "montar" salir disco apagar > $L/vbox.sal 2>&1
+S=$L/vbox.sal
+mira "como VirtualBox (el disco en SATA, el lector en el IDE secundario maestro): ATAPI por PIO, el lector es D: y su ISO 9660 se monta" \
+  "^disco 0: QEMU HARDDISK, 40 MB, FAT32 (SATA)\.$" "^disco 1: QEMU DVD-ROM, lector de CD o DVD (IDE)\.$" "cd: D: el lector QEMU DVD-ROM (IDE)$" \
+  "cd: D: CD de datos: «PRUEBA_CD», ISO 9660 Joliet, 1 MB\.$" "^unidades: C: (disco 0, SATA, FAT32) D: (disco 1, CD, ISO 9660); la del sistema, C:"
+mira "DIR y TYPE en el CD: los nombres largos de Joliet (y el corto que les toca, CARPET~1), carpetas dentro de carpetas" \
+  "^ Directorio de D:.$" "^CARPET~1 *<DIR> .*Carpeta con nombre largo$" "^GRANDE   BIN      300000 " "^Hola desde el CD de prueba$" \
+  "^DOCUME~1 TXT          36 .*documento-de-prueba-largo\.txt$" "^dentro$"
+if igual_cd $L/c.img GRANDE.BIN DOC.TXT; then ok "lo copiado del CD al disco es igual que lo de la ISO, octeto a octeto (300 K y el del nombre largo)"
+else ko "lo copiado del CD (IDE) no es igual que lo de la ISO"; fi
+mira "sacar el disco, meter otro y volver al primero (el monitor de QEMU: eject y change): la unidad se va y vuelve sola, con aviso" \
+  "cd: D: sin disco\.$" "cd: aviso: CD retirado: D:$" "^No puedo abrir d:.: no hay disco" "cd: D: CD de datos: «OTRO», ISO 9660 Joliet" "cd: aviso: CD insertado: D:$"
+mira "EXPULSAR D: abre la bandeja; MONTAR dice lo que hay en el lector" "cd: D: expulsado\.$" "^Ya puede sacar el disco de D:\.$" "^  D:  lector de CD o DVD QEMU DVD-ROM: sin disco$"
+# 2. por AHCI: el q35, con el lector en un puerto SATA (la firma EB140101)
+cp $P/d16.img $L/q.img
+ESCRIBE=1 DISCO=$L/q.img MAQUINA=q35 ARRANQUE=ordenes MODULOS= QEMU_MAS="-drive id=cd,file=$L/joliet.iso,media=cdrom,if=none -device ide-cd,drive=cd,id=lector,bus=ide.2" \
+  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN "copy d:\\grande.bin c:\\grande.bin" "copy d:\\carpet~1\\docume~1.txt c:\\doc.txt" ":monitor change cd $L/otro.iso" ":pausa 3" "dir d:\\" salir apagar > $L/ahci.sal 2>&1
+S=$L/ahci.sal
+mira "por AHCI (el q35): el puerto con la firma EB140101 es un lector, ATAPI por DMA (PACKET con el bit A y el paquete en ACMD)" \
+  "^disco 1: QEMU DVD-ROM, lector de CD o DVD (SATA)\.$" "cd: D: CD de datos: «PRUEBA_CD», ISO 9660 Joliet" "^ *1 archivo(s) copiado(s)\.$" "cd: D: CD de datos: «OTRO»"
+if igual_cd $L/q.img GRANDE.BIN DOC.TXT; then ok "y lo copiado del CD por AHCI es igual que lo de la ISO"; else ko "lo copiado del CD (AHCI) no es igual que lo de la ISO"; fi
+# 3. por USB: un lector de CD (usb-storage con la ISO: SCSI, clase 5) al arrancar, y otro enchufado en marcha
+cp $P/d16.img $L/u.img
+ESCRIBE=1 DISCO=$L/u.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-device qemu-xhci,id=u -drive id=ucd,file=$L/joliet.iso,media=cdrom,if=none -device usb-storage,bus=u.0,drive=ucd,id=ulector -drive id=ucd2,file=$L/otro.iso,media=cdrom,if=none" \
+  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN "copy e:\\grande.bin c:\\grande.bin" "copy e:\\carpet~1\\docume~1.txt c:\\doc.txt" ":monitor eject -f ucd" ":pausa 3" \
+  ":monitor device_add usb-storage,bus=u.0,drive=ucd2,id=ulector2" ":pausa 4" "type f:\\leeme.txt" ":monitor device_del ulector" ":pausa 3" "montar" salir apagar > $L/usb.sal 2>&1
+S=$L/usb.sal
+mira "por USB: un lector de CD (almacenamiento masivo, SCSI de la clase 5) es una unidad de CD más (E:; D: es el lector vacío de QEMU)" \
+  "^disco 2: QEMU    QEMU CD-ROM, lector de CD o DVD (USB)\.$" "cd: E: CD de datos: «PRUEBA_CD», ISO 9660 Joliet" "cd: aviso: CD retirado: E:$"
+mira "y enchufado en marcha, se lee al momento; desenchufado, se va (y su letra)" "cd: aviso: Lector de CD conectado: F:$" "^Hola desde el CD de prueba$" \
+  "cd: aviso: Lector de CD desconectado: E:$" "^  F:  lector de CD o DVD QEMU    QEMU CD-ROM: «OTRO»$"
+if igual_cd $L/u.img GRANDE.BIN DOC.TXT; then ok "y lo copiado del CD por USB es igual que lo de la ISO"; else ko "lo copiado del CD (USB) no es igual que lo de la ISO"; fi
+# 4. las imágenes de disco: la misma ISO, un disquete (.IMG, FAT12) y la ISO en crudo (.CUE y .BIN, MODE1/2352), desde C:
+cp $P/d16.img $L/i.img
+mmd -i $L/i.img ::DISCOS; mcopy -i $L/i.img $L/joliet.iso ::DISCOS/PRUEBA.ISO
+rm -f $L/flop.img; mformat -C -f 1440 -i $L/flop.img ::; printf 'en el disquete\r\n' > $L/disq.txt; mcopy -i $L/flop.img $L/disq.txt ::DISQUETE.TXT; mcopy -i $L/i.img $L/flop.img ::DISCOS/FLOP.IMG
+python3 -I - $L <<'PY'
+import sys
+L = sys.argv[1]
+d = open(L + '/joliet.iso', 'rb').read()
+o = bytearray()
+for i in range(len(d) // 2048):
+    o += b'\x00' + b'\xff' * 10 + b'\x00' + bytes(3) + b'\x01' + d[i * 2048:(i + 1) * 2048] + bytes(288)
+open(L + '/crudo.bin', 'wb').write(o)
+open(L + '/crudo.cue', 'w').write('FILE "CRUDO.BIN" BINARY\r\n  TRACK 01 MODE1/2352\r\n    INDEX 01 00:00:00\r\n')
+PY
+mcopy -i $L/i.img $L/crudo.bin ::DISCOS/CRUDO.BIN; mcopy -i $L/i.img $L/crudo.cue ::DISCOS/CRUDO.CUE
+ESCRIBE=1 DISCO=$L/i.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-drive id=cd,file=$L/joliet.iso,media=cdrom,if=none -device ide-cd,drive=cd,id=lector,bus=ide.1,unit=0" \
+  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN "montar c:\\discos\\prueba.iso" "montar c:\\discos\\flop.img" "montar c:\\discos\\crudo.cue" "montar" "type f:\\disquete.txt" \
+  "copy e:\\grande.bin c:\\grande.bin" "copy g:\\carpet~1\\docume~1.txt c:\\doc.txt" "copy g:\\grande.bin c:\\crudo.bin" "type e:\\carpet~1\\sub\\hondo.txt" \
+  "desmontar e:" "desmontar f:" "montar" "montar c:\\leeme.txt" "desmontar c:" salir apagar > $L/imagen.sal 2>&1
+S=$L/imagen.sal
+mira "MONTAR una imagen de disco: la .ISO (la misma del lector), un disquete .IMG (FAT12) y una .CUE con su .BIN en crudo, cada una con la primera letra libre" \
+  "^c:.discos.prueba\.iso está montada como la unidad E:\.$" "^c:.discos.flop\.img está montada como la unidad F:\.$" "^c:.discos.crudo\.cue está montada como la unidad G:\.$" \
+  "^  E:  imagen C:.discos.prueba\.iso  «PRUEBA_CD»$" "^  F:  imagen C:.discos.flop\.img$" "^en el disquete$" "^dentro$"
+if igual_cd $L/i.img GRANDE.BIN DOC.TXT CRUDO.BIN; then ok "lo leído de las imágenes (la .ISO y la .BIN en crudo) es igual que lo de la ISO del lector"; else ko "lo leído de una imagen montada no es igual que lo de la ISO"; fi
+mira "DESMONTAR la quita; lo que no es una imagen, o no es una imagen montada, se dice" "^La unidad E: está desmontada\.$" "^La unidad F: está desmontada\.$" \
+  "^No puedo montar c:.leeme\.txt: no es una imagen de disco que se pueda leer" "^C: no es un CD ni una imagen montada\.$"
+# 5. una imagen dentro del CD y otra en una memoria USB que se desenchufa: se desmontan solas
+cp $P/d16.img $L/m.img; mcopy -i $L/m.img $L/joliet.iso ::PRUEBA.ISO
+DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-drive id=cd,file=$L/contiene.iso,media=cdrom,if=none -device ide-cd,drive=cd,id=lector,bus=ide.1,unit=0 -device qemu-xhci,id=u -drive id=mu,file=$L/m.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu,id=memo" \
+  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN "montar d:\\dentro.iso" "montar x:\\prueba.iso" "type e:\\leeme.txt" "type f:\\leeme.txt" ":monitor device_del memo" ":pausa 3" "montar" \
+  ":monitor eject -f cd" ":pausa 3" "montar" salir apagar > $L/base.sal 2>&1
+S=$L/base.sal
+mira "una imagen dentro del CD y otra en la memoria USB: si se va la memoria, o se saca el CD, su imagen se desmonta sola (sin colgarse)" \
+  "^d:.dentro\.iso está montada como la unidad E:\.$" "^x:.prueba\.iso está montada como la unidad F:\.$" "cd: aviso: Imagen desmontada: F: (su disco se ha ido)$" \
+  "^  E:  imagen D:.dentro\.iso  «PRUEBA_CD»$" "cd: aviso: Imagen desmontada: E: (su disco se ha ido)$" "^  D:  lector de CD o DVD QEMU DVD-ROM: sin disco$"
+if ! cat $L/*.sal | grep -q "excepción\|\*\*\*"; then ok "en todo eso, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; cat $L/*.sal | grep "excepción\|\*\*\*" | head -3 | sed 's/^/        /'; fi
+# 6. el escritorio: Mi equipo con el CD (D:), y una .ISO montada con dos clics (el CD virtual, E:)
+cp $P/d16.img $L/e.img; mmd -i $L/e.img ::DISCOS; mcopy -i $L/e.img $L/joliet.iso ::DISCOS/PRUEBA.ISO
+CAPTURAS=$G ESCRIBE=1 DISCO=$L/e.img ARRANQUE=escritorio MODULOS= QEMU_MAS="-drive id=cd,file=$L/joliet.iso,media=cdrom,if=none -device ide-cd,drive=cd,id=lector,bus=ide.1,unit=0" \
+  $AQUI/nucleo32/probar.sh $L/SEMILLA.BIN ":pausa 3" ":doble 62 30" ":pausa 2" ":captura cd18a" ":tecla ret" ":pausa 1" ":tecla end ret" ":pausa 1" ":tecla down ret" ":pausa 2" \
+  ":captura cd18b" ":tecla backspace" ":pausa 1" ":clicd 300 300" ":pausa 1" ":captura cd18c" ":clic 340 341" ":pausa 2" ":captura cd18d" > $L/escritorio.sal 2>&1
+S=$L/escritorio.sal
+miracap "Mi equipo enseña el CD con su letra, su nombre y su lector, con un disco dibujado" cd18a negrita 160 150 180 170 "Unidad C:" negrita 160 210 180 230 "Unidad D:  PRUEBA_CD" \
+  texto 160 228 180 248 "lector de CD o DVD: QEMU DVD-ROM" texto 160 244 180 264 "670 K, ISO 9660 (de solo lectura)"
+miracap "dos clics en una .ISO la montan (E:) y entran en ella; el aviso de la bandeja es de los CD y DVD" cd18b negrita 110 110 140 130 "E:\\" texto 120 200 140 220 "GRANDE.BIN" \
+  texto 90 385 300 400 "montada como E:" negrita 610 505 640 520 "CD y DVD"
+miracap "el CD virtual sale en Mi equipo (en un marco de puntos, y lo dice: «CD virtual»), y su menú, «Expulsar»" cd18c negrita 160 270 180 290 "Unidad E:  PRUEBA_CD" \
+  texto 300 320 330 345 "Expulsar" rgb 112 282 4F6890 rgb 112 300 4F6890 nrgb 112 222 4F6890
+mira "y «Expulsar» la desmonta" "cd: E: la imagen C:.DISCOS.PRUEBA\.ISO (sectores de 2048)$" "cd: E: imagen desmontada\.$" "escritorio: globo: Imagen desmontada: E:"
+fi   # la ISO de prueba
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin los CD y DVD)"
+fi   # los lectores
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
