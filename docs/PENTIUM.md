@@ -3527,6 +3527,25 @@ instalar: base 0.8.3 (en lugar de la 0.8.2), navega 0.1», comprueba las sumas,
 los pone (con las carpetas de `\HISPA\NAVEGA`) y `PAQUETES COMPRUEBA` los da
 por buenos; con el núcleo nuevo hay que reiniciar (sección 13).
 
+**La 0.8.4, por Internet** (21/11, rama `pentium-084`: las ramas `pentium-cd`,
+`pentium-tailscale`, `pentium-explorador`, `pentium-win32`, `pestanas-raton` y
+`navega-fijo` juntas): el catálogo firmado con base, red y ejemplos 0.8.4,
+equipo 0.9 (el explorador, `MINIAT.BIN` y `DISPOSIT.BIN`; pide base >= 0.8.4),
+ssh, tailscal 0.8.4 y win32 1.0 (nuevos), navega 0.2 y clicgest 0.2.2 tal como
+están publicados, y los demás iguales octeto a octeto a lo publicado (bloc,
+consola, hvprun, oficina, paquetes, tls). Probado en QEMU (`q35`) desde un
+sistema instalado con el CD de la 0.8.3 y lo publicado de la 0.8.3 (navega
+0.1, clicgest 0.2.1), con el catálogo por HTTP: la firma, buena; `PAQUETES
+ACTUALIZA` pone base, ejemplos, equipo, red, navega y clicgest; `PAQUETES
+INSTALA ssh tailscal win32`; `PAQUETES COMPRUEBA`: los 15 paquetes cuadran. Y
+tras reiniciar: «El núcleo nuevo ha arrancado bien», el dock, Naves en el menú
+Inicio, el explorador con el CD del lector (IDE en el `q35`, `ide-cd`), una
+`.ISO` del CD montada con dos clics (E:) y Configuración > «Red y Tailscale...»:
+
+| | | |
+|---|---|---|
+| ![El menú Inicio, con Naves](pentium/actualizado-084-menu.png) | ![Una .ISO del CD, montada](pentium/actualizado-084-iso.png) | ![Red y Tailscale](pentium/actualizado-084-tailscale.png) |
+
 **La 0.8.3 entera, por Internet** (21/11): el catálogo firmado con base y
 equipo 0.8.3 (el núcleo del Navegador y el Administrador de dispositivos),
 navega 0.1, clicgest 0.2.1 y los demás como estaban (iguales octeto a octeto a
