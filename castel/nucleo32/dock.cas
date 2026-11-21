@@ -647,13 +647,22 @@ módulo Dock
         si visible entonces alto_dock := ALTO_RESERVADO sino alto_dock := 0 fin
     fin
 
-    ; al arrancar el escritorio (después de la barra de tareas)
+    ; al arrancar el escritorio (después de la barra de tareas): la ventana,
+    ; con lo de siempre; lo guardado (DOCK.INI) y la papelera se leen luego
+    ; (lee_ajustes_dock), cuando el escritorio ya está en marcha
     público función prepara_dock()
+        de_siempre()
+        mira_abiertos()
+        coloca()
+        cambios_vistos := Ventanas.cambios
+        pinta_dock()
+    fin
+
+    público función lee_ajustes_dock()
         lee_dock()
         papelera_llena := mira_papelera()
         mira_abiertos()
         coloca()
-        cambios_vistos := Ventanas.cambios
         pinta_dock()
     fin
 

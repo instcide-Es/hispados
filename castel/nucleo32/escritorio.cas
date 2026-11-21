@@ -2519,15 +2519,7 @@ módulo Escritorio
             si en_escritorio(i) entonces nuevo_icono_de(nombre_de(i), AM_ACCESO, i) fin
             i := i + 1
         fin
-        ; (dock) los accesos soltados en el tapiz
-        lee_atajos()
-        i := 0
-        mientras i < n_atajos hacer
-            nuevo_icono_de(dirección(atajos[i].nombre[0]), AM_ATAJO, i)
-            i := i + 1
-        fin
         organiza_iconos()
-        pon_atajos()
         pon_iconos()
         pinta_barra()
         repintar_todo()
@@ -2549,6 +2541,22 @@ módulo Escritorio
         d[4] := fondo
         imprimir("escritorio: en marcha, %u x %u con %u bits por punto (el modo %s), tapiz %u\n", d)
         soltar_consola()
+        ; (dock) lo guardado del dock y los accesos soltados en el tapiz (se
+        ; leen del disco ya con el escritorio en marcha)
+        lee_ajustes_dock()
+        lee_atajos()
+        si n_atajos > 0 entonces
+            quita_iconos()
+            i := 0
+            mientras i < n_atajos hacer
+                nuevo_icono_de(dirección(atajos[i].nombre[0]), AM_ATAJO, i)
+                i := i + 1
+            fin
+            organiza_iconos()
+            pon_atajos()
+            pon_iconos()
+            repintar_todo()
+        fin
         ; un sistema instalado en el disco: sus ajustes (HISPA.INI); si aún
         ; no los tiene, es su primer arranque: el asistente. Si no, mirar sin
         ; molestar si hay actualizaciones (ACTUALIZ /BANDEJA; si no está, nada)
