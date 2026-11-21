@@ -135,7 +135,8 @@ struct pide_ventana { const char *nombre; int32_t x, y, ancho, alto; uint32_t ma
 #define T_F11 0x157
 #define T_MAYUS_TAB 0x10F
 #define T_TAB 9
-#define T_INTRO 13
+#define T_INTRO 10
+#define ES_INTRO(k) ((k) == 10 || (k) == 13)
 #define T_ESC 27
 #define T_BORRAR 8
 

@@ -62,7 +62,7 @@ const char *pl_pide_clave(const char *archivo)
 	pl_escribe(": ");
 	for (;;) {
 		k = sc(SC_TECLA, 0, 0, 0);
-		if (k == T_INTRO || k == '\n')
+		if (ES_INTRO(k))
 			break;
 		if (k == 3 || k == T_ESC) {
 			pl_escribe("\r\n");
@@ -424,8 +424,8 @@ static void pinta(void)
 	if (abierto && n_filas == 0)
 		ui_texto(34, ARRIBA_LISTA + 8, "Esta carpeta del ZIP est\xA0 vac\xA1" "a.", 60, C_SUAVE);
 	if (!abierto) {
-		ui_texto(34, ARRIBA_LISTA + 8, "Abra un .ZIP con dos clics en Mi equipo, o con \xAB" "Abrir...\xBB.", (an - 50) / ANCHO_LETRA, C_SUAVE);
-		ui_texto(34, ARRIBA_LISTA + 28, "\xABNuevo...\xBB hace uno vac\xA1o, para meterle cosas con \xAB" "A\xA4" "adir...\xBB.", (an - 50) / ANCHO_LETRA, C_SUAVE);
+		ui_texto(34, ARRIBA_LISTA + 8, "Abra un .ZIP con dos clics en Mi equipo, o con \xAE" "Abrir...\xAF.", (an - 50) / ANCHO_LETRA, C_SUAVE);
+		ui_texto(34, ARRIBA_LISTA + 28, "\xAENuevo...\xAF hace uno vac\xA1o, para meterle cosas con \xAE" "A\xA4" "adir...\xAF.", (an - 50) / ANCHO_LETRA, C_SUAVE);
 	}
 	for (i = 0; i < vis && primera + i < n_filas; i++) {
 		fila *f = &filas[primera + i];
@@ -474,14 +474,15 @@ static void pinta(void)
 	else if (abierto) {
 		tamano(z.total_tam, a);
 		tamano(z.largo, b);
-		snprintf(t, sizeof(t), "%d elementos aqu\xA1%s%s; en todo el ZIP, %u archivos: %s (ocupa %s)%s", n_filas, sel ? ", " : "",
-			 "", z.n, a, b, z.cifrados ? "; con contrase\xA4" "a" : "");
-		if (sel) {
+		{
 			char u[40];
 
-			snprintf(u, sizeof(u), "%d elegidos", sel);
-			snprintf(t, sizeof(t), "%d elementos aqu\xA1, %s; en todo el ZIP, %u archivos: %s (ocupa %s)%s", n_filas, u, z.n, a, b,
-				 z.cifrados ? "; con contrase\xA4" "a" : "");
+			if (sel)
+				snprintf(u, sizeof(u), ", %d elegido%s", sel, sel == 1 ? "" : "s");
+			else
+				u[0] = 0;
+			snprintf(t, sizeof(t), "%d elemento%s aqu\xA1%s; en todo el ZIP, %u archivo%s: %s (ocupa %s)%s", n_filas, n_filas == 1 ? "" : "s", u,
+				 z.n, z.n == 1 ? "" : "s", a, b, z.cifrados ? "; con contrase\xA4" "a" : "");
 		}
 		pinta_estado(t);
 	} else
@@ -677,7 +678,7 @@ static void extraer(int todo)
 		return;
 	}
 	if (pl_que_es(destino) == 2) {
-		snprintf(t, sizeof(t), "La carpeta %s ya est\xA0. Si hay archivos con los mismos nombres, \xBFse reemplazan?", destino);
+		snprintf(t, sizeof(t), "La carpeta %s ya est\xA0. Si hay archivos con los mismos nombres, \xA8se reemplazan?", destino);
 		q = ui_pregunta("Extraer", t, "No reemplazar", "Reemplazar", "Cancelar");
 		if (q < 0 || q == 2) {
 			free(marca);
@@ -690,7 +691,7 @@ static void extraer(int todo)
 	free(marca);
 	if (c.sacados && r != ZIP_E_CORTADO) {
 		pinta();
-		snprintf(t, sizeof(t), "%s\n\n\xBF" "Abrir la carpeta?", aviso);
+		snprintf(t, sizeof(t), "%s\n\n\xA8" "Abrir la carpeta?", aviso);
 		if (ui_pregunta("Extraer", t, "Abrirla", "No", NULL) == 0)
 			lanza_suelto("\\EQUIPO.BIN", destino);
 	}
@@ -811,7 +812,7 @@ static void quitar(void)
 		return;
 	for (i = 0; i < z.n; i++)
 		n += marca[i];
-	snprintf(t, sizeof(t), "\xBFQuitar del ZIP lo elegido (%u archivos y carpetas)? Lo de fuera del ZIP no se toca.", n);
+	snprintf(t, sizeof(t), "\xA8Quitar del ZIP lo elegido (%u entre archivos y carpetas)? Lo de fuera del ZIP no se toca.", n);
 	if (ui_pregunta("Quitar", t, "Quitar", "Cancelar", NULL) == 0) {
 		r = rehace(marca, NULL, "Quitando");
 		if (r)
@@ -969,7 +970,8 @@ static void tecla(uint32_t k, uint32_t b)
 	case T_AV_PAG: cursor += vis; break;
 	case T_INICIO: cursor = 0; break;
 	case T_FIN: cursor = n_filas - 1; break;
-	case T_INTRO: abre_uno(cursor); return;
+	case T_INTRO:
+	case 13: abre_uno(cursor); return;
 	case T_BORRAR: sube(); return;
 	case T_SUPR: quitar(); return;
 	case ' ':
@@ -1096,6 +1098,7 @@ static int ventana(const char *ruta)
 		return 1;
 	}
 	ui_al_repintar(pinta);
+	sc(SC_COLOCAR, ui_v, 0xFFFFFFFFu, 0);	/* en el centro */
 	if (ruta && ruta[0])
 		abre_zip(ruta);
 	for (;;) {
@@ -1246,6 +1249,7 @@ static int comprimir(const char *lista)
 	con_ventana = 1;
 	if (ui_ventana("Comprimiendo - Comprimidos", 480, 120))
 		return 1;
+	sc(SC_COLOCAR, ui_v, 0xFFFFFFFFu, 0);
 	ui_al_repintar(pinta);
 	ui_rect(0, 0, ui_an, ui_al, C_FONDO);
 	snprintf(t, sizeof(t), "Haciendo %s", destino);
@@ -1277,6 +1281,7 @@ static int extraer_todo(const char *ruta)
 	con_ventana = 1;
 	if (ui_ventana("Extrayendo - Comprimidos", 480, 120))
 		return 1;
+	sc(SC_COLOCAR, ui_v, 0xFFFFFFFFu, 0);
 	ui_al_repintar(pinta);
 	r = abre_zip(ruta);
 	if (r) {
@@ -1296,6 +1301,32 @@ static int extraer_todo(const char *ruta)
 		lanza_suelto("\\EQUIPO.BIN", destino);
 	zip_cerrar(&z);
 	return r ? 1 : 0;
+}
+
+/* la ruta entera, con su letra: el explorador da «\CARPETA\X.ZIP» con la
+ * unidad de trabajo ya puesta en la suya; una relativa, desde la carpeta de trabajo */
+static void ruta_entera(const char *r, char *t, int cabe)
+{
+	char c[ZIP_MAX_RUTA];
+	uint32_t u, n;
+
+	if (r[0] && r[1] == ':') {
+		snprintf(t, (size_t)cabe, "%s", r);
+	} else if (r[0] == '\\') {
+		u = sc(SC_UNIDAD, 0, 0, 0);
+		snprintf(t, (size_t)cabe, "%c:%s", (u >= 'A' && u <= 'Z') || (u >= 'a' && u <= 'z') ? (char)u : 'C', r);
+	} else {
+		n = sc(SC_CARPETA, (uint32_t)c, sizeof(c) - 1, 0);
+		if (ES_ERROR(n) || n == 0 || n >= sizeof(c)) {
+			snprintf(t, (size_t)cabe, "%s", r);
+			return;
+		}
+		c[n] = 0;
+		snprintf(t, (size_t)cabe, "%s%s%s", c, c[n - 1] == '\\' ? "" : "\\", r);
+	}
+	for (n = 0; t[n]; n++)
+		if (t[n] >= 'a' && t[n] <= 'z')
+			t[n] = (char)(t[n] - 32);
 }
 
 int principal(void)
@@ -1320,7 +1351,11 @@ int principal(void)
 	}
 	if (argc > 1 && !strcmp(argv[0], "/COMPRIMIR"))
 		return comprimir(argv[1]);
-	if (argc > 1 && !strcmp(argv[0], "/EXTRAER"))
-		return extraer_todo(argv[1]);
-	return ventana(argc > 0 ? argv[0] : NULL);
+	if (argc > 1 && !strcmp(argv[0], "/EXTRAER")) {
+		ruta_entera(argv[1], ruta_zip, sizeof(ruta_zip));
+		return extraer_todo(ruta_zip);
+	}
+	if (argc > 0)
+		ruta_entera(argv[0], ruta_zip, sizeof(ruta_zip));
+	return ventana(argc > 0 ? ruta_zip : NULL);
 }

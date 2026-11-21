@@ -32,7 +32,7 @@ const char *zip_texto_error(int e)
 	case ZIP_E_ROTO: return "el ZIP est\x82 roto (su directorio no cuadra)";
 	case ZIP_E_MEMORIA: return "no hay memoria bastante";
 	case ZIP_E_DEMASIADOS: return "tiene demasiados archivos dentro";
-	case ZIP_E_BOMBA: return "descomprimido medir\xA1" "a demasiado (\xBFuna bomba ZIP?)";
+	case ZIP_E_BOMBA: return "descomprimido medir\xA1" "a demasiado (\xA8una bomba ZIP?)";
 	case ZIP_E_SOLAPADO: return "unos datos pisan los de otro archivo (una bomba ZIP)";
 	case ZIP_E_RUTA: return "nombre peligroso (con .. o una ruta entera): no se saca";
 	case ZIP_E_METODO: return "comprimido de una forma que no se sabe leer";
@@ -40,7 +40,7 @@ const char *zip_texto_error(int e)
 	case ZIP_E_CRC: return "los datos est\xA0n mal (no dan su CRC)";
 	case ZIP_E_DATOS: return "los datos comprimidos est\xA0n mal";
 	case ZIP_E_LEER: return "no se puede leer";
-	case ZIP_E_ESCRIBIR: return "no se puede escribir (\xBF" "disco lleno?)";
+	case ZIP_E_ESCRIBIR: return "no se puede escribir (\xA8" "disco lleno?)";
 	case ZIP_E_CREAR: return "no se puede crear";
 	case ZIP_E_YA_ESTA: return "ya est\xA0 (no se reemplaza)";
 	case ZIP_E_GRANDE: return "mide m\xA0s de 4 GB (no cabe en FAT)";
@@ -48,7 +48,7 @@ const char *zip_texto_error(int e)
 	case ZIP_E_HONDO: return "demasiadas carpetas unas dentro de otras";
 	case ZIP_E_ENLACE: return "es un enlace simb\xA2lico: no se saca";
 	case ZIP_E_NO_HAY: return "no est\xA0";
-	case ZIP_E_FUERTE: return "cifrado con el m\x82todo \xAB" "fuerte\xBB de PKWARE (no se sabe)";
+	case ZIP_E_FUERTE: return "cifrado con el m\x82todo \xAE" "fuerte\xAF de PKWARE (no se sabe)";
 	}
 	return "error";
 }

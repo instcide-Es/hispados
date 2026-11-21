@@ -230,7 +230,7 @@ int ui_pregunta(const char *titulo, const char *texto, const char *b1, const cha
 		if (s.clase == EV_TECLA) {
 			if (s.a == T_ESC)
 				return -1;
-			if (s.a == T_INTRO || s.a == ' ')
+			if (ES_INTRO(s.a) || s.a == 32)
 				return elegido;
 			if (s.a == T_DERECHA || s.a == T_TAB)
 				elegido = (elegido + 1) % 3;
@@ -307,7 +307,7 @@ int ui_pide_texto(const char *titulo, const char *pregunta, char *t, int cabe, i
 		if (s.clase != EV_TECLA)
 			continue;
 		k = (int)s.a;
-		if (k == T_INTRO)
+		if (ES_INTRO(k))
 			return 1;
 		if (k == T_ESC)
 			return 0;

@@ -24,7 +24,7 @@ int lanza(void)
 	/* (el núcleo lo busca también en \HISPA, en un sistema instalado) */
 	t = sc(SC_LANZAR, (uint32_t)"\\COMPRIM.BIN", (uint32_t)args, 0);
 	if (ES_ERROR(t)) {
-		static const char m[] = "Falta COMPRIM.BIN (el paquete \xAB" "comprim\xBB: Programas y actualizaciones)\r\n";
+		static const char m[] = "Falta COMPRIM.BIN (el paquete \xAE" "comprim\xAF: Programas y actualizaciones)\r\n";
 
 		sc(SC_ESCRIBIR, (uint32_t)m, sizeof(m) - 1, 0);
 		return 1;
