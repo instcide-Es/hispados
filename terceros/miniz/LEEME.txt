@@ -1,0 +1,8 @@
+miniz 3.0.2 de Rich Geldreich y colaboradores
+(https://github.com/richgel999/miniz, el miniz-3.0.2.zip de su versión 3.0.2:
+el miniz.c y el miniz.h de una pieza), con licencia MIT: ver LICENSE.
+SHA-256: miniz.c 0fcdc9888cb3a29ca8f176bac087e5fe6c7258a6ab06b1c271c1e109a11d3740
+         miniz.h 295d1a0041aea09609598c0f1f35c1977ca05ad662acbadcfdaac44c140af37b
+Sin cambios. Lo usan COMPRIM.BIN, Comprimidos (castel/nucleo32/comprim/):
+solo deflate y inflate (tdefl y tinfl) y su CRC-32; la lectura y la escritura
+de los ZIP (con sus comprobaciones de seguridad) son nuestras (zip.c).
