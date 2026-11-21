@@ -3041,7 +3041,8 @@ API(BOOL) ClipCursor(const RECT *r) { (void)r; return TRUE; }
 API(BOOL) GetClipCursor(RECT *r) { r->left = r->top = 0; r->right = pantalla_an; r->bottom = pantalla_al; return TRUE; }
 API(u32) GetDoubleClickTime(void) { return 450; }
 API(BOOL) SetDoubleClickTime(u32 t) { (void)t; return TRUE; }
-API(BOOL) MessageBeep(u32 t) { (void)t; return TRUE; }
+/* (SONIDO) el sonido del sistema: el de error con MB_ICONHAND; si no, el de aviso */
+API(BOOL) MessageBeep(u32 t) { sc(193, 3, 0, (t & 0xF0) == 0x10 ? 3 : 2); return TRUE; }
 API(BOOL) FlashWindow(HWND h, BOOL b) { (void)h; (void)b; return TRUE; }
 API(BOOL) FlashWindowEx(void *f) { (void)f; return TRUE; }
 API(HANDLE) SetWindowsHookExA(i32 i, void *f, HINSTANCE m, u32 t) { (void)i; (void)f; (void)m; (void)t; return (HANDLE)0x5555; }

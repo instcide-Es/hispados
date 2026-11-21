@@ -34,7 +34,7 @@
 ; =============================================================================
 módulo Dispositivos
 
-    importar Cpu, Pci, Tareas, Paginas, Mem32, Textos32, Formato, Multiboot, Ata, Ahci, Discos, Unidades, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Video, Raton, Red, Energia, Edid
+    importar Cpu, Pci, Tareas, Paginas, Mem32, Textos32, Formato, Multiboot, Ata, Ahci, Discos, Unidades, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Video, Raton, Red, Energia, Edid, Sonido
 
     ; ---- los buses ----
     público constante BUS_PCI = 1
@@ -445,6 +445,25 @@ módulo Dispositivos
             fin
             devolver
         fin
+        ; (SONIDO) la tarjeta de sonido: la lleva el servicio de sonido (SONIDO.BIN)
+        si sub = 0x04 entonces
+            si aparato_de_sonido() = a entonces
+                lleva(EST_FUNCIONA, "SONIDO.BIN")
+                dd[0] := nat32(dirección(estado_sonido.códec[0]))
+                dd[1] := nat32("los altavoces")
+                si estado_sonido.salida = 1 entonces dd[1] := nat32("los auriculares") fin
+                si estado_sonido.salida = 2 entonces dd[1] := nat32("la línea") fin
+                dd[2] := estado_sonido.hz
+                formatear(uno.detalle, 80, "%s; por %s, a %u Hz", dd)
+            sino si sin_sonido entonces
+                lleva(EST_APAGADO, "SONIDO.BIN")
+                Textos32.copiar(uno.detalle, "«sinsonido» en la línea del cargador")
+            sino si c = 0x0401 o c = 0x0403 entonces
+                lleva(EST_SIN_CONTROLADOR, "")
+                si no hay_servicio_sonido() y no sin_tarjeta_sonido entonces Textos32.copiar(uno.detalle, "el servicio de sonido (SONIDO.BIN) no está en marcha") fin
+            fin
+            devolver
+        fin
         ; la red: la tarjeta del servicio de red (RED.BIN)
         si sub = 0x02 entonces
             si Red.hay_servicio() y aparato_de_red() = a entonces
@@ -800,6 +819,15 @@ módulo Dispositivos
                 recurso(REC_PUERTOS, 0x64, 1)
                 añade()
             fin
+        fin
+        ; (SONIDO) la Sound Blaster 16 (ISA), si la lleva el servicio de sonido
+        si hay_tarjeta() y estado_sonido.tarjeta = TARJETA_SB16 entonces
+            de_placa(0x040100, "PNPB003", "Sound Blaster 16", "SONIDO.BIN", estado_sonido.irq)
+            recurso(REC_PUERTOS, estado_sonido.puertos, 16)
+            dd[0] := nat32(dirección(estado_sonido.códec[0]))
+            dd[1] := estado_sonido.hz
+            formatear(uno.detalle, 80, "%s; DMA 5 (16 bits), a %u Hz", dd)
+            añade()
         fin
         de_placa(0x080300, "PNP0B00", "Reloj de la CMOS (fecha y hora)", "fecha.cas", 8)
         recurso(REC_PUERTOS, 0x70, 2)

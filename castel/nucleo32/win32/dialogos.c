@@ -638,6 +638,7 @@ static LRESULT WINAPI proc_msg(HWND h, u32 m, WPARAM wp, LPARAM lp)
 	}
 	return DefWindowProcA(h, m, wp, lp);
 }
+BOOL WINAPI MessageBeep(u32 t);           /* (SONIDO) user32.c */
 API(i32) MessageBoxA(HWND padre, const char *texto, const char *titulo, u32 tipo)
 {
 	static const char *nombres[8] = { "", "Aceptar", "Cancelar", "Anular", "Reintentar", "Omitir", "Sí", "No" };
@@ -650,6 +651,8 @@ API(i32) MessageBoxA(HWND padre, const char *texto, const char *titulo, u32 tipo
 	HDC d;
 	prepara_user();
 	traza("MessageBoxA(%s, %s)", titulo ? titulo : "", texto ? texto : "");
+	if (hay_icono)
+		MessageBeep(tipo & 0xF0);           /* (SONIDO) */
 	if (sys_dato(13) != 1) {
 		/* sin escritorio: por la consola */
 		char b[600];

@@ -6,7 +6,8 @@
 # y $MEDIO («usb» o «cd»). Deja:
 #   $W/f     el núcleo (SEMILLA.BIN y sus copias ESCRIT*.BIN que piden el modo
 #            gráfico), los programas, ACPI.BIN, TLS.BIN, SSH.BIN, SSHD.BIN,
-#            WG.BIN, TAILSCAL.BIN y LEEME.TXT
+#            WG.BIN, TAILSCAL.BIN, SONIDO.BIN (y los sonidos del sistema:
+#            INICIO.WAV, APAGAR.WAV, AVISO.WAV y ERROR.WAV) y LEEME.TXT
 #   $W/i     lo que solo vale para instalar: los textos del sistema instalado,
 #            BOOT.IMG, CORE.IMG, CARPETAS.TXT y los registros de los paquetes
 #            (PAQUETES/*.PQI)
@@ -38,6 +39,14 @@ done
 bash $AQUI/../../acpi/pentium/hacer.sh $W/f/ACPI.BIN
 MODULOS="$MODULOS  module /ACPI.BIN ACPI.BIN
 "
+# (SONIDO) el servicio de sonido (nucleo32/sonido/: HD Audio, AC'97 y Sound
+# Blaster 16) y los sonidos del sistema, igual: en la raíz, como módulos y, al
+# instalar, a \HISPA
+bash $AQUI/sonido/hacer.sh $W/f
+for N in SONIDO.BIN INICIO.WAV APAGAR.WAV AVISO.WAV ERROR.WAV; do
+  MODULOS="$MODULOS  module /$N $N
+"
+done
 # (TLS) el servicio TLS (nucleo32/tls/: BearSSL, HTTPS), igual: en la raíz,
 # como módulo y, al instalar, a \HISPA
 bash $AQUI/tls/hacer.sh $W/f/TLS.BIN
@@ -150,6 +159,18 @@ SSH Y TAILSCALE (la red privada de sus equipos)
     WG /ENCENDER           un túnel WireGuard con el archivo de wg-quick
   Configuración > «Red y Tailscale...» enseña lo mismo en una ventana.
 
+EL SONIDO
+  Las tarjetas HD Audio (las de casi todos los portátiles), AC'97 y Sound
+  Blaster 16 (la de los emuladores). El altavoz de la bandeja: con un clic,
+  el volumen y el silencio; con la rueda del ratón encima, más alto o más
+  bajo; con el botón secundario, «Silenciar» y la configuración.
+  Configuración > «Sonido...»: la tarjeta, la salida (con los auriculares
+  enchufados, los altavoces se callan), el volumen general y el de cada
+  programa, probar el altavoz izquierdo y el derecho, y los sonidos del
+  sistema (al arrancar, al apagar, los avisos y los errores), que se
+  pueden quitar. En la Consola, SONIDO dice cómo está (SONIDO /? para lo
+  demás: tocar un .WAV, un tono, el volumen).
+
 LA CONSOLA (el intérprete de órdenes)
   AYUDA dice las órdenes: DIR, TYPE, COPY, DEL, REN, MD, CD, RD, PATH, VER,
   MEM, FECHA, CLS... Un programa se lanza por su nombre. C:, X: cambian de
@@ -159,7 +180,7 @@ LOS PROGRAMAS DE WINDOWS
   Los programas de Windows de 32 bits (.EXE) se abren como los demás: por
   su nombre en la Consola o con dos clics en Mi equipo. Los corre
   WIN32.BIN, con sus DLL en C:\WIN32 (y DirectX: DirectDraw, DirectInput
-  y DirectSound, de momento en silencio). En C:\HISPA32 hay unos de
+  y DirectSound, que suena por la tarjeta del equipo). En C:\HISPA32 hay unos de
   ejemplo, como el juego «Naves» (NAVES.EXE).
 
 PROGRAMAS Y ACTUALIZACIONES (PAQUETES)
@@ -196,6 +217,9 @@ LA CARPETA \HISPA
   *.BIN        los programas
   ACPI.BIN     el servicio de ACPI: apagar de verdad y la batería de los
                portátiles (sin él, «Apagar» solo dice que ya se puede)
+  SONIDO.BIN   el servicio de sonido (y la orden SONIDO); SONIDO.INI, el
+               volumen guardado; INICIO, APAGAR, AVISO y ERROR.WAV, los
+               sonidos del sistema (se pueden cambiar por otros .WAV)
   WIN32.BIN    el que corre los programas de Windows (sus DLL, en C:\WIN32)
   TLS.BIN      el servicio TLS: las conexiones cifradas (https). Con el
                reloj del PC mal, pide la hora a actualiza.hispados.es;

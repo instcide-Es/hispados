@@ -1,7 +1,8 @@
 ; =============================================================================
 ;  HVPRUN - lo que el gestor, los menús y los diálogos de Ventanas esperan
-;  del resto de Hispa Ventanas (el escritorio, el Centro, la barra de tareas,
-;  el sonido...), que aquí no está: lo que no hace falta no hace nada
+;  del resto de Hispa Ventanas (el escritorio, el Centro, la barra de tareas...),
+;  que aquí no está: lo que no hace falta no hace nada. (SONIDO) El sonido sí
+;  está: psonido.inc
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 
@@ -131,26 +132,28 @@ tj_dc_nombre db "Entre en la carpeta (doble clic) y pulse Aceptar.", 0
 aj_leer:
         cmp eax, 20                 ; [HISPA-SNES] 20: el reloj fino
         je p_reloj_fino
+        cmp eax, AJ_HAY_SONIDO      ; (SONIDO) 9: ¿hay tarjeta de sonido? (psonido.inc)
+        je .sonido
         xor eax, eax
+        ret
+.sonido:
+        call snd_mira
+        inc eax                     ; (-1: no hay)
+        jz .x
+        mov eax, 1
+.x:
         ret
 aj_poner:
 esc_fondo:
 tec_suscribir:
         ret
-snd_pcm:
-snd_pcm2:
-snd_orden:
-snd_mezcla:
+snd_mezcla:                         ; (el mezclador por fuentes de HSPSND: no hay)
 prog_abrir:
 tar_activar:
 tar_cerrar:
 esc_imagen:
         stc
         ret
-snd_info:
-        or eax, -1
-        ret
-snd_campana:
 tar_reiniciar:
         ret
 tar_lista:

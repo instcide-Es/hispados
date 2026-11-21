@@ -106,6 +106,13 @@ VERSION_084 = '0.8.4'
 # segmentos de Win32, las llamadas 180 a 182; el coprocesador de cada tarea
 # es el de la 0.8.3), ORDENES (los .EXE) y Mi equipo (los abre); y el
 # paquete win32 (1.0, que pide la base 0.8.4)
+# (SONIDO, 21/11/2026) el sonido: en el núcleo (las llamadas 190 a 199,
+# sonido.cas; el altavoz de la bandeja y Configuración > Sonido), y el
+# paquete sonido (1.0): el servicio, SONIDO.BIN, y los sonidos del sistema;
+# suben win32 (1.1: DirectSound y WinMM suenan) y hvprun (0.9: el sonido de
+# los programas de Hispa Ventanas). Pide la base con las llamadas del sonido
+# (la que salga con esta rama; ver docs/PENTIUM.md, «El sonido»)
+VERSION_SONIDO = VERSION_084
 SISTEMA = [
     ('base', VERSION_084, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
@@ -131,14 +138,18 @@ SISTEMA = [
         ('SSH.BIN', r'\HISPA\SSH.BIN'), ('SSHD.BIN', r'\HISPA\SSHD.BIN')]),
     ('tailscal', VERSION_084, 'Tailscale y WireGuard: la red privada de sus equipos, cada uno con su nombre y su IP 100.x', 'base >= 0.8.4, red >= 0.8.4, tls >= 0.8.1', [
         ('TAILSCAL.BIN', r'\HISPA\TAILSCAL.BIN'), ('WG.BIN', r'\HISPA\WG.BIN')]),
-    ('hvprun', VERSION_08, 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio', 'base >= 0.7', [
+    ('sonido', '1.0', 'El sonido: el servicio de sonido (HD Audio, AC\'97 y Sound Blaster 16; SONIDO.BIN y la orden SONIDO) y los sonidos del sistema',
+     'base >= ' + VERSION_SONIDO, [
+        ('SONIDO.BIN', r'\HISPA\SONIDO.BIN'), ('INICIO.WAV', r'\HISPA\INICIO.WAV'), ('APAGAR.WAV', r'\HISPA\APAGAR.WAV'),
+        ('AVISO.WAV', r'\HISPA\AVISO.WAV'), ('ERROR.WAV', r'\HISPA\ERROR.WAV')]),
+    ('hvprun', '0.9', 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio (con su sonido)', 'base >= 0.7', [
         ('HVPRUN.BIN', r'\HISPA\HVPRUN.BIN')]),
     ('oficina', '1.0', 'La oficina de Hispa-386: Facturas, Pluma, Cuentas y Mirador', 'hvprun >= 0.7', [
         ('FACTURAS.HVP', r'\OFICINA\FACTURAS.HVP'), ('PLUMA.HVP', r'\OFICINA\PLUMA.HVP'),
         ('CUENTAS.HVP', r'\OFICINA\CUENTAS.HVP'), ('MIRADOR.HVP', r'\OFICINA\MIRADOR.HVP'),
         ('TIPOS.DAT', r'\OFICINA\TIPOS.DAT'), ('DICCIO.DAT', r'\OFICINA\DICCIO.DAT')]),
     # [WIN32] los programas de Windows de 32 bits y DirectX (docs/pentium/WIN32.md)
-    ('win32', '1.0', 'Programas de Windows de 32 bits y DirectX: WIN32.BIN, sus DLL y los ejemplos (Naves)', 'base >= ' + VERSION_084, [
+    ('win32', '1.1', 'Programas de Windows de 32 bits y DirectX: WIN32.BIN, sus DLL y los ejemplos (Naves)', 'base >= ' + VERSION_084, [
         ('WIN32.BIN', r'\HISPA\WIN32.BIN'),
         ('MSVCRT.DLL', r'\WIN32\MSVCRT.DLL'), ('UCRT.DLL', r'\WIN32\UCRT.DLL'), ('COMCTL32.DLL', r'\WIN32\COMCTL32.DLL'),
         ('WINMM.DLL', r'\WIN32\WINMM.DLL'), ('DDRAW.DLL', r'\WIN32\DDRAW.DLL'), ('DSOUND.DLL', r'\WIN32\DSOUND.DLL'),

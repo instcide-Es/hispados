@@ -198,7 +198,7 @@ t_noabre    db "No se ha podido abrir el archivo.", 0
 t_mala      db "Este archivo no es una ROM de la consola (.SFC o .SMC).", 0
 t_nomem     db "No hay memoria para un cartucho tan grande.", 0
 t_nosnd     db "No hay sonido: falta HSPSND o no ha encontrado tarjeta.", 0
-t_nosnd2    db "Aquí no hay sonido todavía (Hispa-Pentium).", 0
+t_nosnd2    db "Hispa-Pentium no tiene tarjeta de sonido que sepa llevar.", 0
 t_chip1     db "Este cartucho lleva ", 0
 t_chip2     db ",", 10, "que Hispa-Snes todavía no emula: puede que no", 10
             db "arranque o que se vea o suene mal.", 0
@@ -360,13 +360,8 @@ entrada:
         mov [p_mapa], eax
         mov eax, AJ_HAY_SONIDO
         HV aj_leer
-        mov [snd_hay], al
-        mov [snd_si], al
-        cmp byte [en_hvprun], 0
-        je .sh
-        mov byte [snd_hay], 0
-        mov byte [snd_si], 0
-.sh:
+        mov [snd_hay], al           ; (SONIDO) en HVPRUN también: lo dice él (y lo
+        mov [snd_si], al            ; toca Hispa-Pentium); en uno de antes, 0
         call snd_busca
         mov eax, [a_prueba]
         or al, [a_pasos]

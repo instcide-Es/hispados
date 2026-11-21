@@ -183,6 +183,14 @@
 #      de FASM (ensamblado ahí); FASMW abriendo y ensamblando HELLO.ASM, y
 #      ese HELLO.EXE; Mi equipo abriendo un .EXE; y WSOCK32 (REDPRUE) contra
 #      el servidor HTTP de aquí.
+#  23. (SONIDO, SOLO=sonido) El sonido: SONIDO.BIN con las tres tarjetas de
+#      QEMU (HD Audio, AC'97 y Sound Blaster 16), grabando lo que suena
+#      (-audiodev wav) y mirando cada sonido (nucleo32/sonido/oye.py): los
+#      altavoces izquierdo y derecho, dos programas a la vez, un WAV de 8
+#      bits, el volumen y el silencio; el Administrador de dispositivos; el
+#      altavoz de la bandeja con la rueda, Configuración > Sonido, los
+#      sonidos de inicio y de apagar; DirectSound (WINDX.EXE) y Hispa-Snes en
+#      HVPRUN.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -204,6 +212,7 @@
 #   SOLO=ssh ./pruebas.sh         la primera y la 20 (SSH, WireGuard y Tailscale; con HEADSCALE=binario, también Tailscale)
 #   SOLO=lectores ./pruebas.sh    la primera y la 21 (los CD y DVD, y las imágenes de disco)
 #   SOLO=win32 ./pruebas.sh       la primera y la 22 (los programas de Windows y DirectX)
+#   SOLO=sonido ./pruebas.sh      la primera y la 23 (el sonido: SONIDO.BIN, la bandeja, DirectSound, HVPRUN)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -267,7 +276,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|sonido) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -2162,9 +2171,9 @@ for hc in xhci ehci; do
   # lo instalado, apuntado para PAQUETES: los registros de los paquetes del sistema, en \HISPA\PAQUETES
   rm -rf $Z/pqi $Z/pqu; mkdir $Z/pqi $Z/pqu
   mcopy -n -i $Z/vol.img '::HISPA/PAQUETES/*' $Z/pqi/ > /dev/null 2>&1; mcopy -n -i $G/usb.img@@1M '::INSTALA/PAQUETES/*' $Z/pqu/ > /dev/null 2>&1
-  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI SSH.PQI TAILSCAL.PQI TLS.PQI WIN32.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
+  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI SONIDO.PQI SSH.PQI TAILSCAL.PQI TLS.PQI WIN32.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
     && mcopy -n -i $Z/vol.img ::HISPA/PAQUETES.BIN $Z/f.bin > /dev/null 2>&1; then
-    ok "$que: INSTALAR apunta lo que instala: los registros de los 13 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
+    ok "$que: INSTALAR apunta lo que instala: los registros de los 14 paquetes del sistema (SONIDO: el sonido), en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
   else ko "$que: lo instalado no queda apuntado en C:\\HISPA\\PAQUETES:"; ls $Z/pqi | sed 's/^/        /' | head -10; fi
   # SOLO el disco: el primer arranque
   desde_disco $Z/d$hc.img $Z/a$hc.sal
@@ -2244,9 +2253,9 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -n 8; fi
-    if grep -q "^|  win32     1.0     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0.8.4   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|13 paquetes\.$" $Z/b2$hc.txt \
-      && grep -q "^|Los archivos de los 13 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
-      ok "PAQUETES en el sistema recién instalado: LISTA dice los 13 paquetes del sistema (..., ssh, tailscal, tls y win32: con 13, base ya no cabe en la pantalla) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
+    if grep -q "^|  win32     1.1     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0.8.4   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|14 paquetes\.$" $Z/b2$hc.txt \
+      && grep -q "^|Los archivos de los 14 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
+      ok "PAQUETES en el sistema recién instalado: LISTA dice los 14 paquetes del sistema (..., sonido, ssh, tailscal, tls y win32: con 14, base ya no cabe en la pantalla) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -n 12; fi
     # la oficina, en el disco instalado: el grupo «Oficina» del menú Inicio
     # (Facturas, con C:\\HISPA\\HVPRUN.BIN) y Mi equipo abriendo Cuentas de C:\\OFICINA
@@ -3781,6 +3790,146 @@ fi
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin los programas de Windows)"
 fi   # [WIN32] los programas de Windows
+# ------------------------------------------------- 23. (SONIDO) el sonido
+# (SONIDO, SOLO=sonido) El servicio de sonido (SONIDO.BIN, nucleo32/sonido/:
+# HD Audio, AC'97 y la Sound Blaster 16, en C en el anillo 3) y sonido.cas
+# (las llamadas 190 a 199). QEMU graba lo que sale por la tarjeta
+# (-audiodev wav) y nucleo32/sonido/oye.py lo parte en ráfagas: lo que dura
+# cada sonido, su frecuencia, su nivel por cada lado, los cortes y el nivel
+# de las frecuencias que se le piden (Goertzel). Con las tres tarjetas de
+# QEMU (intel-hda con hda-duplex, AC97 y sb16), desde la orden SONIDO: el
+# estado; un tono solo por la izquierda y otro solo por la derecha; dos
+# programas sonando a la vez (la mezcla); un WAV de 8 bits, mono, a
+# 11.025 Hz; el volumen al 40 % (lo que baja); el silencio (nada); y un WAV
+# que toca el servicio solo (la llamada 194). Con HD Audio, el
+# Administrador de dispositivos (SONIDO.BIN lleva la tarjeta). En el
+# escritorio: el sonido de inicio, el altavoz de la bandeja (la rueda sube
+# el volumen, con su «clic»; un clic, la ventanita), Configuración > Sonido
+# (la tarjeta, probar el altavoz izquierdo y el derecho) y el sonido de
+# apagar. DirectSound de WIN32.BIN (WINDX.EXE, la prueba de DirectX de
+# Hispa-486) y Hispa-Snes en HVPRUN (PRUEBA.SFC, con su música).
+if parte08 sonido; then
+echo "== (SONIDO) Hispa-Pentium: el sonido (SONIDO.BIN, las llamadas 190 a 199, la bandeja, DirectSound y HVPRUN) =="
+Y=$P/son
+mkdir -p $Y $G
+export MTOOLS_SKIP_CHECK=1
+if bash $AQUI/nucleo32/sonido/hacer.sh $Y > $Y/hacer.txt 2>&1; then
+  ok "nucleo32/sonido/hacer.sh: SONIDO.BIN ($(stat -c %s $Y/SONIDO.BIN) octetos) y los sonidos del sistema (INICIO, APAGAR, AVISO y ERROR.WAV, hechos por hazwav.py)"
+else ko "nucleo32/sonido/hacer.sh no hace SONIDO.BIN: $(tail -n 2 $Y/hacer.txt)"; fi
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $Y/semilla.asm > /dev/null && nasm -f bin $Y/semilla.asm -o $Y/SEMILLA.BIN
+for u in uordenes:ORDENES uconsola:CONSOLA udisposi:DISPOSIT; do
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/${u%%:*}.cas -o $Y/${u%%:*}.asm > /dev/null && nasm -f bin $Y/${u%%:*}.asm -o $Y/${u##*:}.BIN
+done
+python3 -I $AQUI/../tests/tools/audio.py make $Y/P8.WAV 750 1000 11025 8 1
+SIS=$Y/SONIDO.BIN,$Y/INICIO.WAV,$Y/APAGAR.WAV,$Y/AVISO.WAV,$Y/ERROR.WAV
+# cumple ARCHIVO N 'condición de awk' qué [-v variable=valor...]: la ráfaga N
+# de oye.py cumple la condición (con ini, fin, dura, hz, izq, der, cortes y
+# f[1], f[2]...: el nivel de las frecuencias pedidas)
+cumple() {
+  local a=$1 n=$2 e=$3 q=$4 l; shift 4
+  l=$(grep "^ráfaga $n " $a)
+  if [ -n "$l" ] && echo "$l" | awk "$@" "{ ini=\$3; fin=\$4; dura=\$5; hz=\$6; izq=\$7; der=\$8; cortes=\$9; for (i = 10; i <= NF; i++) { split(\$i, x, \"=\"); f[i - 9] = x[2] + 0 } } END { exit !($e) }"
+  then ok "$q"; else ko "$q: ${l:-no hay esa ráfaga} (se esperaba $e)"; sed 's/^/        /' $a | head -10; fi
+}
+campo() { grep "^ráfaga $2 " $1 | awk -v c=$3 '{ print $c }'; }
+for tarjeta in "hda:-device intel-hda -device hda-duplex,audiodev=snd0" "ac97:-device AC97,audiodev=snd0" "sb16:-device sb16,audiodev=snd0"; do
+  n=${tarjeta%%:*}; dev=${tarjeta#*:}
+  O=("sonido" ":pausa 2" "sonido /tono 440 1200 I" ":pausa 1" "sonido /tono 660 1200 D" ":pausa 1" "sonido /tono 523 9000 /suelto" ":pausa 1" "sonido /tono 1000 1500" ":pausa 4"
+     "sonido M:\\P8.WAV" ":pausa 2" "sonido /volumen 40" "sonido /tono 440 800" ":pausa 1" "sonido /silencio si" "sonido /tono 440 800" ":pausa 1" "sonido /silencio no"
+     "sonido /volumen 80" "sonido /fondo M:\\AVISO.WAV" ":pausa 2")
+  [ $n = hda ] && O+=("disposit /informe" ":pausa 6")
+  rm -f "${Y:?}/$n.wav"
+  MODULOS=$Y/ORDENES.BIN,$Y/DISPOSIT.BIN,$Y/P8.WAV,$SIS ARRANQUE=ordenes QEMU_MAS="-audiodev wav,id=snd0,path=$Y/$n.wav $dev" \
+    $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN "${O[@]}" > $Y/$n.sal 2>&1
+  tr -d '\r' < $Y/$n.sal > $Y/$n.txt
+  S=$Y/$n.txt
+  case $n in
+    hda) mira "HD Audio (intel-hda con hda-duplex): SONIDO dice la tarjeta, el códec, la salida y el volumen" "^Tarjeta:   Intel HD Audio (ICH6) (HD Audio)$" \
+           "^Códec:     QEMU HDA (dúplex)$" "^Salida:    línea; 48000 Hz, 16 bits, estéreo$" "^Volumen:   80 %$" "^Sonidos del sistema: sí$" "^sonido: HD Audio: el pin 3 (línea) suena, desde el DAC 2$" ;;
+    ac97) mira "AC'97 (la ICH de Intel con el SigmaTel STAC9700 de QEMU): la tarjeta y el códec" "^Tarjeta:   Intel AC'97 (ICH) (AC'97)$" "^Códec:     SigmaTel STAC9700$" \
+           "^Salida:    altavoces; 48000 Hz, 16 bits, estéreo$" ;;
+    sb16) mira "la Sound Blaster 16 (en 220h, DSP 4.05; la DMA por el canal 5, por debajo de los 16 MB)" "^Tarjeta:   Sound Blaster 16 (220) (Sound Blaster 16)$" \
+           "^Códec:     DSP 4.05$" "^Salida:    altavoces; 44100 Hz, 16 bits, estéreo$" "^sonido: Sound Blaster 16 en 220: DSP 4.5; la DMA, en el canal 5 ([0-9a-f]*)$" ;;
+  esac
+  python3 -I $AQUI/nucleo32/sonido/oye.py $Y/$n.wav 523,1000 > $Y/$n.oye 2>&1
+  r0=$(campo $Y/$n.oye 0 7); r0=${r0:-1}
+  cumple $Y/$n.oye 0 'hz >= 420 && hz <= 460 && dura >= 1100 && dura <= 1400 && izq > 3000 && der < 200 && cortes == 0' "$n: «SONIDO /TONO 440 1200 I»: 440 Hz, 1,2 s, solo por la izquierda y sin cortes"
+  cumple $Y/$n.oye 1 'hz >= 630 && hz <= 690 && dura >= 1100 && dura <= 1400 && der > 3000 && izq < 200 && cortes == 0' "$n: «/TONO 660 1200 D»: 660 Hz, solo por la derecha"
+  cumple $Y/$n.oye 2 'dura >= 8500 && f[1] > 0.6 * r0 && f[2] > 0.6 * r0 && izq > 1.6 * r0 && cortes == 0' "$n: dos programas a la vez (523 Hz 9 s, suelto, y 1.000 Hz encima): los dos se oyen y se suman, sin cortes" -v r0=$r0
+  cumple $Y/$n.oye 3 'hz >= 700 && hz <= 800 && dura >= 900 && dura <= 1200 && izq > 1000 && der > 1000' "$n: un WAV de 8 bits, mono, a 11.025 Hz (SONIDO M:\\P8.WAV), a su frecuencia y lo que dura"
+  cumple $Y/$n.oye 4 'hz >= 420 && hz <= 460 && izq < 0.2 * r0 && izq > 0.05 * r0' "$n: con el volumen al 40 %, unos 19 dB más bajo (la curva de HSPSND: 0,47 dB por punto)" -v r0=$r0
+  cumple $Y/$n.oye 5 'hz >= 780 && hz <= 980 && dura >= 400 && dura <= 800' "$n: en silencio no suena nada; y AVISO.WAV, que toca el servicio solo (la llamada 194, «SONIDO /FONDO»)"
+  if [ "$(grep -c '^ráfaga' $Y/$n.oye)" = 6 ]; then ok "$n: ni una ráfaga de más (el tono en silencio no ha sonado)"; else ko "$n: $(grep -c '^ráfaga' $Y/$n.oye) ráfagas (se esperaban 6)"; fi
+  if [ $n = hda ]; then
+    mira "el Administrador de dispositivos: la tarjeta de sonido, con controlador (SONIDO.BIN, un servicio del anillo 3), el códec y la salida" \
+      "^  \[OK\] Intel ICH6: sonido HD Audio  \[8086:2668\]$" "^       Estado: Funciona: lo lleva SONIDO.BIN.$" "^       Detalle: QEMU HDA (dúplex); por la línea, a 48000 Hz$" \
+      "^       Controlador: SONIDO.BIN (un servicio del anillo 3)$"
+  fi
+  if ! grep -q "excepción\|\*\*\*" $S; then ok "$n: ni una excepción ni una queja del núcleo"
+  else ko "$n: el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+done
+# 2. el escritorio (HD Audio): el sonido de inicio, el altavoz de la bandeja (la
+# rueda, dos pasos arriba: 80 % -> 90 %, con su «clic» cada vez; un clic: la
+# ventanita del volumen), Configuración > Sonido y sus botones de probar, y apagar
+rm -f "${Y:?}/esc.wav"
+CAPTURAS=$G MODULOS=$Y/ORDENES.BIN,$Y/CONSOLA.BIN,$SIS ARRANQUE=escritorio QEMU_MAS="-audiodev wav,id=snd0,path=$Y/esc.wav -device intel-hda -device hda-duplex,audiodev=snd0" \
+  $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 6" ":captura so1" ":raton 720 583" ":monitor mouse_move 0 0 1" ":pausa 1" ":monitor mouse_move 0 0 1" ":pausa 1" \
+  ":clic 720 583" ":pausa 3" ":captura so2" ":tecla esc" ":pausa 1" ":clicd 720 583" ":pausa 1" ":captura so3" ":tecla esc" ":pausa 1" \
+  ":clic 40 585" ":pausa 1" ":clic 250 500" ":pausa 1" ":clic 565 375" ":pausa 4" ":captura so4" ":clic 277 325" ":pausa 2" ":clic 437 325" ":pausa 2" \
+  ":clic 40 585" ":clic 230 545" ":clic 275 327" ":pausa 6" > $Y/esc.sal 2>&1
+S=$Y/esc.sal
+python3 -I $AQUI/nucleo32/sonido/oye.py $Y/esc.wav > $Y/esc.oye 2>&1
+cumple $Y/esc.oye 0 'hz >= 480 && hz <= 570 && dura >= 1200 && dura <= 1700' "el escritorio arranca el servicio («/ARRANQUE») y suena INICIO.WAV (do, mi, sol, do: empieza en 523 Hz)"
+miracap "el altavoz en la bandeja, a la izquierda del reloj (con el volumen al 80 %: tres ondas)" so1 rgb 715 582 F4F8FE rgb 731 582 FFFFFF
+cumple $Y/esc.oye 1 'hz >= 820 && hz <= 940 && dura >= 30 && dura <= 150' "la rueda sobre el altavoz sube el volumen: su «clic» (880 Hz)"
+cumple $Y/esc.oye 2 'hz >= 820 && hz <= 940 && izq > c1 * 1.05' "y otra vez, más fuerte (85 % -> 90 %)" -v c1=$(campo $Y/esc.oye 1 7)
+miracap "un clic en el altavoz: la ventanita del volumen, encima de la bandeja (90 %, el silencio, «Ajustes...»)" so2 negrita 500 380 800 520 Volumen texto 500 400 800 520 "90 %" \
+  texto 500 420 800 540 Silencio texto 500 420 800 540 "Ajustes..."
+miracap "el botón secundario en el altavoz: «Silenciar» y «Configuración de sonido...»" so3 texto 500 450 800 580 Silenciar texto 500 450 800 580 "Configuración de sonido..."
+miracap "Configuración > «Sonido...»: la tarjeta, el códec, el volumen, probar y los sonidos del sistema" so4 negrita 80 60 400 90 Sonido texto 150 150 500 190 "Intel HD Audio (ICH6)" \
+  texto 150 170 500 210 "QEMU HDA (dúplex)" texto 400 240 560 280 "90 %" negrita 180 300 360 340 Izquierdo negrita 340 300 520 340 Derecho texto 100 330 560 380 "Sonidos del sistema"
+cumple $Y/esc.oye 3 'hz >= 490 && hz <= 560 && izq > 3000 && der < 200' "«Izquierdo»: el altavoz izquierdo (un do, solo por ese lado)"
+cumple $Y/esc.oye 4 'hz >= 620 && hz <= 700 && der > 3000 && izq < 200' "«Derecho»: el derecho (un mi)"
+cumple $Y/esc.oye 5 'hz >= 700 && hz <= 870 && dura >= 800 && dura <= 1500' "Apagar: suena APAGAR.WAV (sol, mi, do: empieza en 784 Hz) antes de apagar"
+mira "y el escritorio espera a que acabe, para la tarjeta sin ruido y apaga" "^escritorio: el sonido de apagar, tocado$" "^escritorio: apagar$"
+if ! grep -q "excepción\|\*\*\*" $S; then ok "en el escritorio, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado en el escritorio:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+# 3. DirectSound de WIN32.BIN: WINDX.EXE (la prueba de DirectX de Hispa-486)
+# toca un la (440 Hz) en bucle con un búfer de DirectSound y luego cambia su
+# frecuencia (SetFrequency: 660 Hz); WINMM lo mezcla y lo da a un canal
+if bash $AQUI/nucleo32/win32/disco.sh $Y/w32.img > $Y/w32disco.txt 2>&1 && make -s -C $AQUI/.. build/WINDX.EXE > /dev/null 2>&1; then
+  mcopy -o -i $Y/w32.img $AQUI/../build/WINDX.EXE ::PRUEBAS/ && mcopy -o -i $Y/w32.img $Y/SONIDO.BIN $Y/INICIO.WAV $Y/APAGAR.WAV $Y/AVISO.WAV $Y/ERROR.WAV ::
+  rm -f "${Y:?}/dx.wav"
+  CAPTURAS=$G DISCO=$Y/w32.img ARRANQUE=escritorio MODULOS= MEMORIA=128 QEMU_MAS="-audiodev wav,id=snd0,path=$Y/dx.wav -device intel-hda -device hda-duplex,audiodev=snd0" \
+    $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 6" ":doble 60 186" ":pausa 4" ":escribe \\PRUEBAS\\WINDX" ":tecla ret" ":pausa 8" ":tecla spc" ":pausa 5" ":tecla spc" ":pausa 3" \
+    ":tecla esc" ":pausa 2" > $Y/dx.sal 2>&1
+  python3 -I $AQUI/nucleo32/sonido/oye.py $Y/dx.wav 440,660 > $Y/dx.oye 2>&1
+  cumple $Y/dx.oye 1 'dura >= 4000 && f[1] > 1500 && f[2] > 1500 && izq > 2000' "DirectSound (WINDX.EXE): el la en bucle de su búfer y, con SetFrequency, a 660 Hz, por la tarjeta"
+  S=$Y/dx.sal
+  if ! grep -q "excepción\|\*\*\*" $S; then ok "WINDX: ni una excepción ni una queja del núcleo"
+  else ko "WINDX: el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+else
+  ko "no se puede hacer el disco de los programas de Windows o WINDX.EXE: $(tail -n 2 $Y/w32disco.txt)"
+fi
+# 4. Hispa-Snes en HVPRUN: PRUEBA.SFC con su música, por la tarjeta (HVPRUN
+# pasa su snd_pcm2 y su snd_orden al sonido de Hispa-Pentium)
+if bash $AQUI/nucleo32/hvprun/hacer.sh $Y/of > /dev/null 2>&1 && make -s -C $AQUI/.. build/HISPASNS.HVP build/PRUEBA.SFC > /dev/null 2>&1; then
+  rm -f "${Y:?}/snes.wav"
+  CAPTURAS=$G MODULOS=$Y/ORDENES.BIN,$Y/CONSOLA.BIN,$Y/of/HVPRUN.BIN,$AQUI/../build/HISPASNS.HVP,$AQUI/../build/PRUEBA.SFC,$SIS ARRANQUE=escritorio MEMORIA=64 \
+    QEMU_MAS="-audiodev wav,id=snd0,path=$Y/snes.wav -device intel-hda -device hda-duplex,audiodev=snd0" \
+    $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 6" ":doble 60 186" ":pausa 4" ":escribe hvprun M:\\HISPASNS.HVP M:\\PRUEBA.SFC" ":tecla ret" ":pausa 12" \
+    ":clic 400 300" ":pausa 12" ":captura so5" > $Y/snes.sal 2>&1
+  python3 -I $AQUI/nucleo32/sonido/oye.py $Y/snes.wav > $Y/snes.oye 2>&1
+  cumple $Y/snes.oye 1 'dura >= 5000 && izq > 1500' "Hispa-Snes en HVPRUN: la música de PRUEBA.SFC suena por la tarjeta (snd_pcm2 y snd_orden, sobre las llamadas del sonido)"
+  S=$Y/snes.sal
+  if ! grep -q "excepción\|\*\*\*" $S; then ok "Hispa-Snes en HVPRUN: ni una excepción ni una queja del núcleo"
+  else ko "Hispa-Snes en HVPRUN: el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+else
+  ko "no se pueden hacer HVPRUN.BIN, HISPASNS.HVP o PRUEBA.SFC"
+fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin el sonido)"
+fi   # (SONIDO) el sonido
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ---------------------------------------------- 18. el Navegador (NAVEGA.BIN)
