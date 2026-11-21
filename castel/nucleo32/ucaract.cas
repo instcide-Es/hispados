@@ -1,0 +1,420 @@
+; =============================================================================
+;  ucaract.cas - (ACCESORIOS) CARACTER.BIN, el Mapa de caracteres de
+;  Hispa-Pentium: la rejilla con todas las letras de la letra del sistema
+;  (la página 437 de Hispa, con Á, Í, Ó, Ú, € y las demás de más: las que
+;  tienen dibujo, caracnom.cas), la elegida en grande con su nombre, su
+;  código (en decimal y en hexadecimal), su código Unicode y cómo se escribe
+;  con el teclado español (si se puede: «tecla del acento y luego a»...).
+;  «Copiar» (Ctrl+C) la deja en el portapapeles; Intro o dos clics la añaden
+;  al texto de abajo, que se copia entero con «Copiar el texto».
+;  Con el teclado: las flechas, Inicio, Fin, Re Pág y Av Pág por la
+;  rejilla; una letra tecleada va a esa letra; Tab, al texto.
+;  En la línea de órdenes: CARACTER /INFO código (o la letra) y
+;  CARACTER /LISTA (todas, en texto).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UCaract
+
+    modelo usuario
+
+    importar Llamadas, Controles, Textos32, Formato, CaracNom
+
+    constante ID_REJ = 2
+    constante ID_TEXTO = 3
+    constante ID_COPIAR = 4
+    constante ID_AÑADIR = 5
+    constante ID_COPIAR_TEXTO = 6
+    constante ID_BORRAR_TEXTO = 7
+    constante MENÚS = "&Archivo|&Edici\xA2n|&Ver|A&yuda"
+    constante COLUMNAS = 16
+
+    variable tamaño_: nat32 = T_GRANDE
+    variable abierto: ent32 = -1
+    variable sel: nat32 = 65 - 32               ; la A
+    variable para_copiar: arreglo [120] de byte
+    variable aviso: arreglo [120] de byte
+    variable rx, ry, rcel, ralto: ent32
+    variable códigos: puntero a byte
+
+    ; ---- lo que se sabe de la letra número i ----
+    función código_de(i: nat32): nat32
+        devolver códigos[i]
+    fin
+
+    ; la letra de ese código (-1 si no tiene dibujo)
+    función índice_de(c: nat32): ent32
+        variable i: nat32
+        para i desde 0 hasta N_LETRAS - 1 hacer
+            si códigos[i] = c entonces devolver ent32(i) fin
+        fin
+        devolver -1
+    fin
+
+    función unicode_de(i: nat32, t: puntero a byte)
+        variable p: puntero a byte
+        p := UNICODE
+        copiar(t, "U+")
+        t[2] := p[4 * i]
+        t[3] := p[4 * i + 1]
+        t[4] := p[4 * i + 2]
+        t[5] := p[4 * i + 3]
+        t[6] := 0
+    fin
+
+    función teclas_de(i: nat32, t: puntero a byte)
+        opción_de(TECLAS, i, t, 80)
+    fin
+
+    función nombre_de(i: nat32, t: puntero a byte)
+        opción_de(NOMBRES, i, t, 60)
+        t[0] := mayúscula(t[0])
+    fin
+
+    ; «Código 164 (A4h), U+00F1»
+    función códigos_texto(i: nat32, t: puntero a byte)
+        variable u: arreglo [8] de byte
+        variable x: arreglo [3] de nat32
+        unicode_de(i, u)
+        x[0] := código_de(i)
+        x[1] := código_de(i)
+        x[2] := nat32(dirección(u[0]))
+        formatear(t, 80, "C\xA2digo %u (%02Xh), Unicode %s", x)
+    fin
+
+    función copia_letra()
+        variable t: arreglo [2] de byte
+        variable u: arreglo [8] de byte
+        t[0] := byte(código_de(sel))
+        t[1] := 0
+        si no al_portapapeles(t, 1) entonces
+            copiar(aviso, "No se ha podido copiar")
+            devolver
+        fin
+        unicode_de(sel, u)
+        copiar(aviso, "Copiado al portapapeles: ")
+        concatenar(aviso, t)
+        imprimir3("caracter: copiado %u (%s, %s)\n", código_de(sel), nat32(dirección(t[0])), nat32(dirección(u[0])))
+    fin
+
+    función añade_letra()
+        si longitud(para_copiar) + 2 < 120 entonces añadir_car(para_copiar, byte(código_de(sel))) fin
+    fin
+
+    función copia_texto()
+        si para_copiar[0] = 0 entonces
+            copiar(aviso, "El texto para copiar est\xA0 vac\xA1o")
+            devolver
+        fin
+        al_portapapeles(para_copiar, longitud(para_copiar))
+        copiar(aviso, "Texto copiado al portapapeles")
+        imprimir1("caracter: copiado el texto %s\n", nat32(dirección(para_copiar[0])))
+    fin
+
+    ; =========================================================================
+    ;  Pintar
+    ; =========================================================================
+    función pinta_rejilla(x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable i, filas: nat32
+        variable cx, cy, gx, gy: ent32
+        variable fondo_, tinta: nat32
+        filas := (N_LETRAS + COLUMNAS - 1) div COLUMNAS
+        rcel := an div COLUMNAS
+        ralto := al div ent32(filas)
+        si ralto > rcel + rcel div 2 entonces ralto := rcel + rcel div 2 fin
+        rx := x
+        ry := yy
+        caja(x - 2, yy - 2, rcel * COLUMNAS + 4, ralto * ent32(filas) + 4, C_BORDE)
+        caja(x, yy, rcel * COLUMNAS, ralto * ent32(filas), C_PAPEL)
+        para i desde 0 hasta N_LETRAS - 1 hacer
+            cx := x + ent32(i mod COLUMNAS) * rcel
+            cy := yy + ent32(i div COLUMNAS) * ralto
+            fondo_ := C_PAPEL
+            tinta := C_TINTA
+            si i = sel entonces
+                fondo_ := C_AZUL
+                tinta := C_PAPEL
+            fin
+            caja(cx, cy, rcel, ralto, C_GRIS)
+            caja(cx + 1, cy + 1, rcel - 1, ralto - 1, fondo_)
+            gx := cx + (rcel - 4 * M) div 2
+            gy := cy + (ralto - 8 * M) div 2
+            letra_m(gx, gy, código_de(i), tinta, M)
+            si i = sel entonces
+                si foco = ID_REJ entonces borde(cx - 2, cy - 2, rcel + 4, ralto + 4, 3, C_TINTA) sino borde(cx - 1, cy - 1, rcel + 2, ralto + 2, 2, C_TINTA) fin
+            fin
+        fin
+        apuntar(ID_REJ, K_LISTA, x, yy, rcel * COLUMNAS, ralto * ent32(filas))
+        si foco = ID_REJ entonces marca_foco(x - 2, yy - 2, rcel * COLUMNAS + 4, ralto * ent32(filas) + 4) fin
+    fin
+
+    función pinta_ficha(x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable t: arreglo [100] de byte
+        variable lado, m, y2: ent32
+        ; la letra, grande, en su recuadro (con la raya de la base)
+        m := 12 * M div 2
+        lado := 8 * m + 8 * E
+        si lado > an entonces
+            m := (an - 8 * E) div 8
+            lado := 8 * m + 8 * E
+        fin
+        caja(x + (an - lado) div 2, yy, lado, lado, C_BORDE)
+        caja(x + (an - lado) div 2 + 2, yy + 2, lado - 4, lado - 4, C_PAPEL)
+        letra_m(x + (an - 4 * m) div 2, yy + 4 * E, código_de(sel), C_TINTA, m)
+        y2 := yy + lado + 4 * E
+        nombre_de(sel, t)
+        y2 := y2 + párrafo(x, y2, an, t, C_TINTA, cierto, cierto) + 2 * E
+        códigos_texto(sel, t)
+        y2 := y2 + párrafo(x, y2, an, t, C_SUAVE, falso, cierto) + 4 * E
+        negrita(x, y2, "Con el teclado:", C_TINTA)
+        y2 := y2 + LT + E
+        teclas_de(sel, t)
+        si t[0] = 0 entonces copiar(t, "no se puede escribir: c\xA2piela.") fin
+        y2 := y2 + párrafo(x, y2, an, t, C_TINTA, falso, cierto) + 4 * E
+        botón(ID_COPIAR, x, y2, "Copiar", cierto, falso)
+    fin
+
+    función pinta()
+        variable yy, abajo, an_rej, x2, y2: ent32
+        variable est: arreglo [200] de byte
+        variable x: arreglo [2] de nat32
+        variable vueltas: nat32
+        vueltas := 0
+        mientras vueltas < 2 hacer
+            empezar_controles()
+            caja(0, 0, ancho, alto, C_FONDO)
+            yy := barra_menús(0, 0, ancho, MENÚS, abierto) + 6 * E
+            abajo := alto - alto_estado()
+            an_rej := (ancho - 3 * LA) * 3 div 5
+            an_rej := an_rej - an_rej mod COLUMNAS
+            y2 := abajo - alto_caja() - LT - 8 * E
+            pinta_rejilla(LA, yy, an_rej, y2 - yy - 6 * E)
+            campo(ID_TEXTO, LA, y2, an_rej, "Texto para copiar", para_copiar, falso)
+            x2 := 2 * LA + an_rej
+            pinta_ficha(x2, yy, ancho - 3 * LA - an_rej, y2 - yy)
+            y2 := y2 + LT + 2 * E
+            x2 := x2 + botón(ID_AÑADIR, x2, y2, "A\xA4adir", falso, falso) + LA div 2
+            botón(ID_COPIAR_TEXTO, x2, y2, "Copiar texto", falso, para_copiar[0] = 0)
+            x[0] := N_LETRAS
+            formatear(est, 200, "%u caracteres|Intro: a\xA4adir al texto|", x)
+            si aviso[0] <> 0 entonces concatenar(est, aviso) sino concatenar(est, "Ctrl+C: copiar") fin
+            barra_estado(abajo, est)
+            si no asegurar_foco() entonces romper fin
+            vueltas := vueltas + 1
+        fin
+        volcar()
+    fin
+
+    ; =========================================================================
+    ;  El teclado y el ratón
+    ; =========================================================================
+    función mueve(k: ent32)
+        variable n: ent32
+        n := ent32(sel) + k
+        si n < 0 entonces n := 0 fin
+        si n >= ent32(N_LETRAS) entonces n := ent32(N_LETRAS) - 1 fin
+        sel := nat32(n)
+    fin
+
+    función hace(id: nat32)
+        aviso[0] := 0
+        según nat16(id)
+            caso ID_COPIAR: copia_letra()
+            caso ID_AÑADIR, ID_REJ: añade_letra()
+            caso ID_COPIAR_TEXTO: copia_texto()
+            caso ID_BORRAR_TEXTO: para_copiar[0] := 0
+        fin
+    fin
+
+    función tecla_pulsada(c: nat32)
+        variable m, k: ent32
+        variable n: nat32
+        variable t: arreglo [80] de byte
+        aviso[0] := 0
+        si c = '\t' o c = TECLA_MAYÚS_TAB entonces
+            pasar_foco(c = '\t')
+            devolver
+        fin
+        m := menú_de_alt(MENÚS, c)
+        si m >= 0 entonces
+            abre(nat32(m))
+            devolver
+        fin
+        si foco = ID_REJ entonces
+            según nat16(c)
+                caso TECLA_IZQUIERDA: mueve(-1)
+                caso TECLA_DERECHA: mueve(1)
+                caso TECLA_ARRIBA: mueve(0 - COLUMNAS)
+                caso TECLA_ABAJO: mueve(COLUMNAS)
+                caso TECLA_RE_PÁG: mueve(-4 * COLUMNAS)
+                caso TECLA_AV_PÁG: mueve(4 * COLUMNAS)
+                caso TECLA_INICIO: sel := 0
+                caso TECLA_FIN: sel := N_LETRAS - 1
+                caso '\n': hace(ID_AÑADIR)
+                caso CTRL_C: copia_letra()
+                si no:
+                    ; una letra: a ella
+                    si c >= ' ' y c < 0x100 entonces
+                        k := índice_de(c)
+                        si k >= 0 entonces sel := nat32(k) fin
+                    fin
+            fin
+            devolver
+        fin
+        si foco = ID_TEXTO entonces
+            si c = CTRL_C o c = '\n' entonces
+                copia_texto()
+            sino si c = 22 entonces
+                n := del_portapapeles(t, 79)
+                t[n] := 0
+                si longitud(para_copiar) + n + 1 < 120 entonces concatenar(para_copiar, t) fin
+            sino
+                campo_tecla(para_copiar, 120, c)
+            fin
+            devolver
+        fin
+        si c = CTRL_C entonces
+            copia_letra()
+        sino si c = '\n' o c = ' ' entonces
+            hace(foco)
+        fin
+    fin
+
+    función abre(k: nat32)
+        abierto := ent32(k)
+        según nat16(k)
+            caso 0: abrir_menú_barra(0, "Salir", 0)
+            caso 1: abrir_menú_barra(1, "Copiar el car\xA0cter    Ctrl+C|A\xA4adir al texto        Intro|Copiar el texto|Borrar el texto", 0)
+            caso 2: abrir_menú_barra(2, "Letra normal|Letra grande|Letra muy grande", 0)
+            si no: abrir_menú_barra(3, "Acerca del Mapa de caracteres", 0)
+        fin
+    fin
+
+    función clic(x: ent32, yy: ent32, veces_: nat32)
+        variable id: nat32
+        variable m, i: ent32
+        m := menú_en_barra(x, yy)
+        si m >= 0 entonces
+            abre(nat32(m))
+            devolver
+        fin
+        id := control_en(x, yy)
+        si id = 0 entonces devolver fin
+        foco := id
+        si id = ID_REJ entonces
+            i := ((yy - ry) div ralto) * COLUMNAS + (x - rx) div rcel
+            si i >= 0 y i < ent32(N_LETRAS) entonces
+                sel := nat32(i)
+                si veces_ >= 2 entonces añade_letra() fin
+            fin
+        sino si clase_de(id) <> K_CAMPO entonces
+            hace(id)
+        fin
+    fin
+
+    ; =========================================================================
+    ;  La línea de órdenes
+    ; =========================================================================
+    función línea(i: nat32)
+        variable t, n, c: arreglo [100] de byte
+        variable u: arreglo [8] de byte
+        variable x: arreglo [6] de nat32
+        nombre_de(i, n)
+        unicode_de(i, u)
+        teclas_de(i, t)
+        si t[0] = 0 entonces copiar(t, "(no se puede escribir)") fin
+        c[0] := byte(código_de(i))
+        c[1] := 0
+        x[0] := código_de(i)
+        x[1] := código_de(i)
+        x[2] := nat32(dirección(u[0]))
+        x[3] := nat32(dirección(c[0]))
+        x[4] := nat32(dirección(n[0]))
+        x[5] := nat32(dirección(t[0]))
+        imprimir("caracter: %u %02Xh %s %s %s | %s\n", x)
+    fin
+
+    función por_consola(args: puntero a byte, p: puntero a byte): byte
+        variable q: arreglo [40] de byte
+        variable i: nat32
+        variable n: nat32
+        variable k: ent32
+        si iguales_sin_caja(p, "/LISTA") entonces
+            para i desde 0 hasta N_LETRAS - 1 hacer línea(i) fin
+            devolver 0
+        fin
+        si iguales_sin_caja(p, "/INFO") y palabra(args, 1, q, 40) entonces
+            n := 0
+            si es_cifra(q[0]) y q[1] <> 0 entonces
+                texto_a_natural(q, n)
+            sino
+                n := q[0]
+            fin
+            k := índice_de(n)
+            si k < 0 entonces
+                imprimir1("caracter: el %u no tiene dibujo en la letra del sistema\n", n)
+                devolver 1
+            fin
+            línea(nat32(k))
+            devolver 0
+        fin
+        escribir("caracter: CARACTER [/INFO c\xA2digo | /LISTA]\n")
+        devolver 0
+    fin
+
+    función principal(): byte
+        variable s: Suceso
+        variable args: arreglo [160] de byte
+        variable p: arreglo [40] de byte
+        códigos := CÓDIGOS
+        argumentos(args, 160)
+        si palabra(args, 0, p, 40) entonces
+            si iguales_sin_caja(p, "/NORMAL") entonces
+                tamaño_ := T_NORMAL
+            sino si iguales_sin_caja(p, "/DOBLE") entonces
+                tamaño_ := T_MUY_GRANDE
+            sino si p[0] = '/' entonces
+                devolver por_consola(args, p)
+            fin
+        fin
+        si no preparar_medida("Mapa de caracteres", 784, 560, tamaño_) entonces
+            escribir("caracter: hace falta el escritorio (sin \x82l: CARACTER /LISTA)\n")
+            devolver 1
+        fin
+        escribir("caracter: Mapa de caracteres 1.0\n")
+        foco := ID_REJ
+        pinta()
+        mientras suceso(v, s, cierto) hacer
+            si s.clase = EV_TECLA entonces
+                tecla_pulsada(s.a)
+                pinta()
+            sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                clic(ent32(s.a), ent32(s.b), veces(s.c))
+                pinta()
+            sino si s.clase = EV_MENÚ entonces
+                abierto := -1
+                si s.b = 0 y s.a = 0 entonces devolver 0 fin
+                si s.b = 1 y s.a <> SIN_ELEGIR entonces
+                    según nat16(s.a)
+                        caso 0: copia_letra()
+                        caso 1: añade_letra()
+                        caso 2: copia_texto()
+                        caso 3: para_copiar[0] := 0
+                    fin
+                fin
+                si s.b = 2 y s.a <> SIN_ELEGIR entonces
+                    tamaño_ := s.a + 1
+                    nuevo_tamaño(ancho, alto, tamaño_)
+                fin
+                si s.b = 3 y s.a = 0 entonces copiar(aviso, "Mapa de caracteres 1.0 de Hispa-Pentium") fin
+                pinta()
+            sino si s.clase = EV_TAMAÑO entonces
+                nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
+                pinta()
+            sino si s.clase = EV_CERRAR entonces
+                devolver 0
+            fin
+        fin
+        devolver 0
+    fin
+
+fin UCaract.

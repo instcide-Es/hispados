@@ -24,7 +24,7 @@ python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT10.BIN 1024 768 32 
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT6.BIN 1024 600 32 > /dev/null
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT13.BIN 1366 768 32 > /dev/null
 MODULOS=
-for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO udisposi:DISPOSIT upaquete:PAQUETES uactual:ACTUALIZ uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE umuestra:MUESTRA ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uhttps:HTTPS uinstala:INSTALAR uasiste:ASISTE; do
+for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO udisposi:DISPOSIT upaquete:PAQUETES uactual:ACTUALIZ uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE umuestra:MUESTRA ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uhttps:HTTPS uinstala:INSTALAR uasiste:ASISTE ucalc:CALC ureloj:RELOJ ucaract:CARACTER; do
   f=${p%%:*}; N=${p##*:}
   python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $W/$f.asm > /dev/null
   nasm -f bin $W/$f.asm -o $W/f/$N.BIN
@@ -99,6 +99,17 @@ INSTALA="$INSTALA  module /INSTALA/NAVES.MNU NAVES.MNU
 "
 printf 'NAVES.MNU=HISPA\\MENU\r\n' >> $W/i/CARPETAS.TXT
 cp $W/w32/MENU/NAVES.MNU $W/i/
+# (ACCESORIOS) los accesos de la Calculadora, el Reloj y el Mapa de
+# caracteres (CALC.BIN, RELOJ.BIN y CARACTER.BIN, arriba con los demás
+# programas): sus .MNU y sus iconos (nucleo32/accesorios.py), a \HISPA\MENU
+# del sistema instalado, como NAVES.MNU
+python3 -I $AQUI/accesorios.py $W/acc
+for n in CALC.MNU RELOJ.MNU CARACTER.MNU CALC.ICP RELOJ.ICP CARACT.ICP; do
+  cp $W/acc/$n $W/i/
+  INSTALA="$INSTALA  module /INSTALA/$n $n
+"
+  printf '%s=HISPA\\MENU\r\n' $n >> $W/i/CARPETAS.TXT
+done
 iconv -f UTF-8 -t CP437 > $W/i/LEEME.TXT <<'L'
 Hispa-Pentium 0.8, instalado en el disco duro.
 

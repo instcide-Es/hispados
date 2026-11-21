@@ -121,6 +121,13 @@ SISTEMA = [
     ('ejemplos', VERSION_084, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.4', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
         ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN'), ('MUESTRA.BIN', r'\HISPA\MUESTRA.BIN')]),
+    # (ACCESORIOS, 21/11/2026) la Calculadora, el Reloj y el Mapa de caracteres,
+    # con sus accesos en Accesorios (tipo herramientas: con el hpq.py de la
+    # 0.8.5, «--tipo herramientas»; su .MNU dice «tipo=Accesorios»)
+    ('accesori', '1.0', 'Accesorios: la Calculadora (científica y de oficina: euros, IVA y cinta), el Reloj (calendario, alarma, cronómetro y cuenta atrás) y el Mapa de caracteres', 'base >= 0.8.4', [
+        ('CALC.BIN', r'\HISPA\CALC.BIN'), ('RELOJ.BIN', r'\HISPA\RELOJ.BIN'), ('CARACTER.BIN', r'\HISPA\CARACTER.BIN'),
+        ('CALC.MNU', r'\HISPA\MENU\CALC.MNU'), ('RELOJ.MNU', r'\HISPA\MENU\RELOJ.MNU'), ('CARACTER.MNU', r'\HISPA\MENU\CARACTER.MNU'),
+        ('CALC.ICP', r'\HISPA\MENU\CALC.ICP'), ('RELOJ.ICP', r'\HISPA\MENU\RELOJ.ICP'), ('CARACT.ICP', r'\HISPA\MENU\CARACT.ICP')]),
     ('paquetes', '1.1', 'Programas y actualizaciones: PAQUETES y su ventana', 'base >= 0.7, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN')]),
     ('red', VERSION_084, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= 0.8.4', [
