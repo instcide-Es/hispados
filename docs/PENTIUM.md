@@ -4076,7 +4076,7 @@ elegida); lo quitan las teclas, el clic, `rejilla_ir`, `rejilla_elegir_id`,
 **ClicGest** (repositorio aparte, rama `rueda`): sus rejillas (socios,
 cuotas, salidas, inscritos, biblioteca, tesorería) se desplazan con la rueda
 y Ctrl+rueda cambia la letra (como Ver > Letra, y lo guarda); le hace falta
-una línea en su bucle (la de arriba), así que sale en su versión siguiente.
+una línea en su bucle (la de arriba), así que sale en su versión siguiente. Es la **0.2.4** (sobre la 0.2.3 de las letras suavizadas; compilada con controles.cas de la rama menu-letras, que junta pentium-menu y pentium-letras; sus pruebas, 57 bien y 0 mal; el paquete, sin publicar).
 Sus fichas no se desplazan (caben en la ventana, con sus subpestañas).
 
 Los paquetes: `bloc` y `consola` 0.8.4, `paquetes` 1.1 (con la revisión de seguridad de pentium-084); `equipo` (Mi
