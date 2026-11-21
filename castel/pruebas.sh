@@ -4089,8 +4089,8 @@ if $AQUI/nucleo32/disco.sh $E/d.img 32 escudo > $E/disco.txt 2>&1 && mmd -i $E/d
     S=$E/cfc.txt
     mira "(CORTAFUEGOS) un programa se pone a escuchar sin regla: RED.BIN lo deja pendiente y Escudo pregunta (ESCUDO /PERMITIR)" \
       "red: cortafuegos: la tarea [0-9]* quiere recibir conexiones en el puerto TCP 22, y no hay regla" "escudo: cortafuegos: pregunta por el puerto 22$"
-    miracap "«¿Dejar que un programa reciba conexiones?», con «Desde la red», «Desde todos» y «No»" ef1 negrita 120 180 720 220 "¿Dejar que un programa reciba conexiones?" \
-      negrita 120 360 720 420 "Desde la red" texto 120 360 720 420 "Desde todos"
+    miracap "«¿Dejar que un programa reciba conexiones?», con «Desde la red», «Desde todos» y «No»" ef1 negrita 120 120 720 240 "¿Dejar que un programa reciba conexiones?" \
+      negrita 120 320 720 480 "Desde la red" texto 120 320 720 480 "Desde todos" texto 120 160 720 400 "Wi-Fi"
     mira "«Desde la red»: la regla, a CORTAFUE.INI, y RED.BIN la lee" "escudo: cortafuegos: puerto 22: desde la red$" "red: cortafuegos: activo, con 1 reglas$"
     if saca $E/cfc.img ESCUDO/CORTAFUE.INI $E/cf.ini && grep -q '^regla=tcp 22 red' $E/cf.ini; then ok "CORTAFUE.INI lleva «regla=tcp 22 red»"
     else ko "CORTAFUE.INI no lleva la regla"; fi
