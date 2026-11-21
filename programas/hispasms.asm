@@ -16,8 +16,9 @@
 ;
 ;  Las piezas (programas/hispasms/):
 ;    z80.inc    el procesador (Z80, con lo no documentado), con sus ciclos
+;               (en programas/comun/: lo comparte con Hispa-Drive)
 ;    vdp.inc    la imagen, línea a línea, los puertos y los mandos
-;    psg.inc    el sonido: tres tonos y un ruido
+;    psg.inc    el sonido: tres tonos y un ruido (también en programas/comun/)
 ;    mapas.inc  los cartuchos (mapeador de Sega y de Codemasters) y su RAM
 ;    datos.inc  las variables de la consola
 ;  y aquí, lo que la une a Hispa Ventanas: la ventana y el menú, el reloj

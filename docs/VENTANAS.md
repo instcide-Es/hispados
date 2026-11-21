@@ -2042,6 +2042,11 @@ pero como módulo .HVP (ver «Programas aparte: los módulos .HVP»).
   solo en la imagen USB y en los .PAQ: no cabe en el disquete): el emulador
   de la consola de 16 bits de 1990 (.SFC y .SMC), con una ROM de muestra
   (`PRUEBA.SFC`). Tiene su documento: [HISPASNES.md](HISPASNES.md).
+- **Hispa-Drive** (`programas/hispadrv.asm`, `HISPADRV.HVP`, en «Juegos»,
+  solo en la imagen USB y en los .PAQ): el emulador de la consola de 16
+  bits de 1988 (.MD, .BIN, .GEN y .SMD, en `\HISPADOS\JUEGOS\MD`), con
+  una ROM nuestra (`PRUEBA.MD`). Tiene su documento:
+  [HISPADRIVE.md](HISPADRIVE.md).
 
 ## Programas aparte: los módulos .HVP
 
@@ -2760,8 +2765,9 @@ Pedido de Carlos: «En ventanas, ¿tenemos explorador de archivos?».
   Administrador se abre otra vez solo (`/R`: con lo que se ejecutó
   marcado). Un texto (TXT, INI, LOG, CFG, ASM, INC, DIZ, NFO, LST, CSV, ME,
   1ST, MD) va al Bloc de notas; un .BMP a Pintura; un .WAV al Reproductor
-  de sonido; un .NES a Hispa-Nes, un .SMS a Hispa-System y un .SFC o .SMC
-  a Hispa-Snes (los buscan en
+  de sonido; un .NES a Hispa-Nes, un .SMS a Hispa-System, un .SFC o .SMC
+  a Hispa-Snes y un .GEN o .SMD a Hispa-Drive (también un .MD o un .BIN que
+  estén en una carpeta `JUEGOS\MD`; fuera de ella, un .MD es texto) (los buscan en
   `\HISPADOS\PROGS` y `\HISPADOS\JUEGOS`); un .HVP se abre. Lo demás
   pregunta si se quiere ver en el Bloc de notas. «Editar» abre cualquier
   archivo en el Bloc de notas (también un .BAT).

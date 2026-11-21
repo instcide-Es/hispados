@@ -1510,6 +1510,11 @@ abre; **Mi equipo** abre con HVPRUN los `.HVP`, los documentos de Pluma
 memoria USB) y `disco.sh IMAGEN 16 oficina`. Facturas guarda sus datos al lado
 de su módulo (`\OFICINA\FACTURAS.DAT`).
 
+Los **emuladores** que corren con HVPRUN (Hispa-Snes e Hispa-Drive) están en
+`\JUEGOS` de la memoria USB y se abren desde Mi equipo: notan que están en
+HVPRUN porque `aj_leer AJ_TXT_VERSION` da 0 y entonces usan el reloj fino
+(`aj_leer 20`) y no tocan puertos (docs/HISPADRIVE.md).
+
 Lo que falta: imprimir; el sonido; las teclas con Alt (el núcleo aún no las
 da: los menús se abren con F10 o con el ratón) y F11-F12; la forma del cursor
 que pide el programa (la flecha es siempre la del sistema); que cada cuadro de

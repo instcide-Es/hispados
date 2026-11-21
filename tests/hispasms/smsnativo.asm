@@ -20,7 +20,7 @@
 ;    plana de 64 KB, el programa en 100h y las funciones 2 y 9 del sistema
 ;    (escribir), que salen por la salida normal; acaba al saltar a 0
 ;  Se hace solo con NASM (la cabecera ELF va escrita aquí; sin enlazador ni
-;  biblioteca de C):  nasm -f bin -i programas/hispasms/ -o smsnativo ...
+;  biblioteca de C):  nasm -f bin -i programas/hispasms/ -i programas/comun/ -o smsnativo ...
 ; =============================================================================
         bits 32
 BASE        equ 0x08048000
