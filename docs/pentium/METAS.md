@@ -30,6 +30,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] Suspender e hibernar (ACPI S3/S4)
 - [ ] Impresoras (USB y de red)
 - [ ] Compartir carpetas en red (SMB) y FTP
+- [ ] **Tailscale** (WireGuard + su red privada: cada equipo localizado por su nombre) y **SSH** (entrar en la terminal de Hispa-Pentium desde otro equipo y desde él en los demás) — rama pentium-tailscale
 - [ ] Más tarjetas de red y controladoras (las que vaya trayendo el taller)
 - [ ] NTP: la hora por Internet (y quitar el riesgo de la hora sin cifrar de TLS)
 - [ ] TLS 1.3 y descompresión gzip
