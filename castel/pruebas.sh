@@ -183,6 +183,12 @@
 #      de FASM (ensamblado ahí); FASMW abriendo y ensamblando HELLO.ASM, y
 #      ese HELLO.EXE; Mi equipo abriendo un .EXE; y WSOCK32 (REDPRUE) contra
 #      el servidor HTTP de aquí.
+#  23. (PROGRAMAS, SOLO=programas) «Programas instalados»: los tipos de los
+#      paquetes (tipo=, en la cabecera y en el catálogo), PAQUETES LISTA /TIPO,
+#      los programas sueltos, lo imprescindible, QUITA /DEPENDIENTES, REPARA,
+#      un corte a mitad de quitar, y la ventana PROGRAMA.BIN (desde
+#      Configuración y desde las actualizaciones; desinstalar con su barra,
+#      los archivos, reparar y borrar un suelto a la Papelera), con capturas.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -204,6 +210,7 @@
 #   SOLO=ssh ./pruebas.sh         la primera y la 20 (SSH, WireGuard y Tailscale; con HEADSCALE=binario, también Tailscale)
 #   SOLO=lectores ./pruebas.sh    la primera y la 21 (los CD y DVD, y las imágenes de disco)
 #   SOLO=win32 ./pruebas.sh       la primera y la 22 (los programas de Windows y DirectX)
+#   SOLO=programas ./pruebas.sh   la primera y la 23 (PROGRAMAS: «Programas instalados», los tipos, reparar)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -267,7 +274,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|programas) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -2705,6 +2712,175 @@ else ko "el núcleo nuevo no deja bien el arranque:"; lista_de $Q/s10.img | sed 
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin los paquetes)"
 fi
+
+# ------------------------------------------------- 23. (PROGRAMAS) Programas instalados
+# Los tipos de los paquetes (tipo=, en la cabecera y en el catálogo: si no lo
+# dicen, por su nombre, u «otros»), PAQUETES LISTA /TIPO, los programas
+# sueltos (sin paquete), lo imprescindible (base y red no se quitan), quitar
+# con lo que lo necesita (/DEPENDIENTES, en su orden), REPARA (solo lo
+# dañado: un archivo cambiado y otro que falta), un corte a mitad de quitar
+# (se deshace al volver) y la ventana «Programas instalados» (PROGRAMA.BIN):
+# desde Configuración y desde «Programas y actualizaciones», el árbol por
+# tipos, lo que no se puede quitar, quitar con lo que lo necesita (con la
+# barra), los archivos, reparar y borrar un programa suelto (a la Papelera).
+if parte08 programas; then
+echo "== (PROGRAMAS) Programas instalados: los tipos, lo suelto, lo imprescindible, quitar con lo que lo necesita, reparar y la ventana =="
+Q=$P/n08g
+mkdir -p $Q/f/paq $G
+HPQ="python3 -I $AQUI/../tools/hpq.py"
+export MTOOLS_SKIP_CHECK=1
+hechos=1
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $Q/semilla.asm > /dev/null 2>&1 && nasm -f bin $Q/semilla.asm -o $Q/SEMILLA.BIN || hechos=0
+# (PAQUETES con la clave de prueba, como en la parte 12)
+$HPQ clave $Q/prueba.key > /dev/null 2>&1; $HPQ publica $Q/prueba.key $Q/clave.cas > /dev/null || hechos=0
+cp $AQUI/nucleo32/upaquete.cas $Q/upaquete.cas
+for p in uordenes:ORDENES upaquete:PAQUETES uactual:ACTUALIZ uprogram:PROGRAMA uhola:HOLA uequipo:EQUIPO; do
+  fu=$AQUI/nucleo32/${p%%:*}.cas; [ ${p%%:*} = upaquete ] && fu=$Q/upaquete.cas
+  python3 -I $AQUI/ccastel.py $fu -o $Q/${p%%:*}.asm -I $AQUI/nucleo32 > /dev/null 2>&1 && nasm -f bin $Q/${p%%:*}.asm -o $Q/f/${p##*:}.BIN || hechos=0
+done
+F=$Q/f
+printf 'letras A\r\n' > $F/A.TXT; printf 'letras B\r\n' > $F/B.TXT; printf 'extra\r\n' > $F/E.TXT; printf 'el juego\r\n' > $F/J.TXT
+printf 'la red (de prueba)\r\n' > $F/R.TXT; head -c 70000 /dev/urandom > $F/GRANDE.DAT
+( cd $F
+  $HPQ crea BASE.HPQ --nombre base --version 0.8.4 --tipo sistema --descripcion 'El sistema base (de prueba)' ORDENES.BIN='\HISPA\ORDENES.BIN' PAQUETES.BIN='\HISPA\PAQUETES.BIN' \
+    ACTUALIZ.BIN='\HISPA\ACTUALIZ.BIN' PROGRAMA.BIN='\HISPA\PROGRAMA.BIN' EQUIPO.BIN='\HISPA\EQUIPO.BIN'
+  $HPQ registro BASE.HPQ BASE.PQI
+  $HPQ crea RED.HPQ --nombre red --version 0.8.4 --descripcion 'La red (de prueba)' --necesita 'base' R.TXT='\HISPA\RED.TXT'
+  $HPQ registro RED.HPQ RED.PQI
+  $HPQ crea paq/LETRAS.HPQ --nombre letras --version 1.0 --tipo oficina --descripcion 'Unas letras' A.TXT='\DOCS\LETRAS\A.TXT' B.TXT='\DOCS\LETRAS\B.TXT'
+  $HPQ crea paq/SALUDO.HPQ --nombre saludo --version 1.0 --tipo 'Juegos y emuladores' --descripcion 'Un programa que saluda' --necesita 'letras >= 1.0' HOLA.BIN='\HISPA\SALUDO.BIN' GRANDE.DAT='\HISPA\SALUDO.DAT'
+  $HPQ crea paq/EXTRA.HPQ --nombre extra --version 1.0 --descripcion 'Lo que necesita a saludo' --necesita 'saludo' E.TXT='\EXTRA\E.TXT'
+  $HPQ crea paq/JUEGO.HPQ --nombre juego --version 1.0 --descripcion 'Un juego (su tipo, solo en el catálogo)' J.TXT='\JUEGOS\J.TXT'
+  $HPQ catalogo paq
+  sed -i 's/^tipo=juego otros/tipo=juego juegos/' paq/CATALOGO.TXT
+  $HPQ firma paq $Q/prueba.key
+  $HPQ registro paq/LETRAS.HPQ LETRAS.PQI ) > $Q/hpq.txt 2>&1 || hechos=0
+# el disco: base y red instalados, y los sueltos (un .EXE en \HISPA32, un .BIN
+# en \HISPA y otro en una subcarpeta de \PROGRAMS; un .TXT, que no es programa)
+printf 'no es un programa\r\n' > $F/LEEME.TXT
+mkfs.fat -F 32 -s 1 -n HISPA -C $Q/sis.img 65536 > /dev/null && mmd -i $Q/sis.img ::HISPA ::HISPA/PAQUETES ::HISPA/MENU ::HISPA32 ::PROGRAMS ::PROGRAMS/COSAS \
+  && mcopy -i $Q/sis.img $F/ORDENES.BIN $F/PAQUETES.BIN $F/ACTUALIZ.BIN $F/PROGRAMA.BIN $F/EQUIPO.BIN $F/R.TXT ::HISPA/ && mren -i $Q/sis.img ::HISPA/R.TXT ::HISPA/RED.TXT \
+  && mcopy -i $Q/sis.img $F/BASE.PQI $F/RED.PQI ::HISPA/PAQUETES/ && mcopy -i $Q/sis.img $F/HOLA.BIN ::HISPA32/MIJUEGO.EXE && mcopy -i $Q/sis.img $F/LEEME.TXT ::HISPA32/ \
+  && mcopy -i $Q/sis.img $F/HOLA.BIN ::HISPA/SUELTO.BIN && mcopy -i $Q/sis.img $F/HOLA.BIN ::PROGRAMS/COSAS/OTRO.BIN || hechos=0
+mkfs.fat -F 16 -n MEMORIA -C $Q/usb.img 16384 > /dev/null && mmd -i $Q/usb.img ::PAQUETES && mcopy -i $Q/usb.img $F/paq/* ::PAQUETES/ || hechos=0
+if [ $hechos = 1 ] && grep -q $'^tipo=sistema\r$' $F/BASE.PQI && grep -q '^tipo=juegos' $F/paq/SALUDO.HPQ && ! grep -aq '^tipo=' $F/paq/JUEGO.HPQ \
+  && grep -q '^tipo=letras oficina' $F/paq/CATALOGO.TXT && grep -q '^tipo=extra otros' $F/paq/CATALOGO.TXT && grep -q '^tipo=juego juegos' $F/paq/CATALOGO.TXT \
+  && $HPQ comprueba $F/paq $Q/clave.cas > /dev/null && [ "$($HPQ tipos | wc -l)" = 11 ]; then
+  ok "tools/hpq.py: el tipo en la cabecera (--tipo, por su código o por su nombre: «Juegos y emuladores» es juegos) y en el catálogo, una línea «tipo=» por paquete (el que no lo dice, «otros»)"
+else ko "tools/hpq.py no pone bien los tipos:"; tail -4 $Q/hpq.txt | sed 's/^/        /'; grep '^tipo' $F/paq/CATALOGO.TXT | sed 's/^/        /'; fi
+paq() {
+  local d=$1 n=$2; shift 2
+  ESCRIBE=1 SATA=$d MEMORIA=64 MODULOS= ARRANQUE=ordenes QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/usb.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
+    $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 2" "$@" ":pausa 1" > $Q/$n.sal 2>&1
+  S=$Q/$n.sal
+}
+lista_de() { mdir -/ -b -i $1 :: 2> /dev/null | sort; }
+sin_restos() { ! lista_de $1 | grep -q 'HPQ[0-9]*\.\(NUE\|VIE\)\|DIARIO\.TXT\|HECHO\.TXT'; }
+igual_en() { rm -f $Q/x.bin; mcopy -n -i $1 "::$2" $Q/x.bin > /dev/null 2>&1 && cmp -s $Q/x.bin $3; }
+
+# 1. instalar (con lo que necesitan), la lista por tipos, lo suelto, lo que no se quita
+cp $Q/sis.img $Q/s1.img
+paq $Q/s1.img uno "paquetes instala extra juego" ":pausa 3" "paquetes lista /tipo" "paquetes sueltos" "paquetes quita base" "paquetes quita red /forzar" "paquetes quita letras" "paquetes fichas"
+mira "PAQUETES INSTALA: extra con lo que necesita (saludo, y antes letras) y juego" "^Se va a instalar: letras 1\.0, saludo 1\.0, extra 1\.0, juego 1\.0$" "^  instalado juego 1\.0$"
+mira "PAQUETES LISTA /TIPO: por tipos, en su orden (base por su cabecera, red por su nombre, juego por el catálogo, extra «Otros»), y al final los programas sueltos" \
+  "^Paquetes instalados, por tipos" "^Sistema:$" "^  base      0\.8\.4   El sistema base (de prueba)$" "^Oficina:$" "^  letras    1\.0     Unas letras$" "^Internet y red:$" "^  red       0\.8\.4 " \
+  "^Juegos y emuladores:$" "^  saludo    1\.0 " "^  juego     1\.0 " "^Otros:$" "^  extra     1\.0 " "^6 paquetes\.$" "^Programas de terceros (sin paquete):$"
+mira "PAQUETES SUELTOS: los .EXE y .BIN que no son de ningún paquete (en \\HISPA, \\HISPA32 y las subcarpetas de \\PROGRAMS), con su tamaño y su fecha" \
+  "^  C:.HISPA32.MIJUEGO\.EXE  *[0-9]* octetos  [0-9][0-9]/[0-9][0-9]/20[0-9][0-9]$" "^  C:.HISPA.SUELTO\.BIN " "^  C:.PROGRAMS.COSAS.OTRO\.BIN " "^3 programas sueltos\.$"
+mira "lo imprescindible no se quita (ni con /FORZAR), y se dice por qué; lo que otro necesita, tampoco (y se dice cómo)" \
+  "^paquetes: base no se puede quitar: es imprescindible (es el sistema mismo; sin él, el equipo no arranca)\.$" \
+  "^paquetes: red no se puede quitar: es imprescindible (sin ella no llegan las actualizaciones ni se pueden traer programas)\.$" \
+  "^paquetes: letras no se quita: lo necesita saludo (quite antes saludo, o /FORZAR)$" "^  (o con /DEPENDIENTES, que lo quita también)$"
+mira "PAQUETES FICHAS (para la ventana): el disco, y de cada uno su tipo, lo que ocupa, sus archivos, la fecha, si es imprescindible, lo que necesita y lo que lo necesita; y lo suelto" \
+  "^u|C|[0-9]*|[0-9]*$" "^f|base|0\.8\.4|sistema|[0-9]*|5|[0-9/]*|es el sistema mismo; sin él, el equipo no arranca||red|El sistema base (de prueba)$" \
+  "^f|saludo|1\.0|juegos|70[0-9][0-9][0-9]|2|[0-9][0-9]/[0-9][0-9]/20[0-9][0-9]||letras >= 1\.0|extra|Un programa que saluda$" "^f|juego|1\.0|juegos|" "^f|extra|1\.0|otros|" \
+  "^s|C:.HISPA32.MIJUEGO\.EXE|[0-9]*|[0-9/]*$"
+saca $Q/s1.img HISPA/PAQUETES/JUEGO.PQI $Q/juego.pqi
+if sano $Q/s1.img && sin_restos $Q/s1.img && ! grep -q 'LEEME' $S && grep -aq '^tipo=juegos' $Q/juego.pqi && [ "$(grep -c '^  quitado' $S)" = 0 ] && igual_en $Q/s1.img HISPA/PAQUETES/LETRAS.PQI $F/LETRAS.PQI; then
+  ok "en el disco: sano, sin restos; el registro de juego lleva el tipo que dice el catálogo (tipo=juegos); el de letras, su cabecera tal cual; el .TXT no sale como suelto; y no se ha quitado nada"
+else ko "lo instalado con los tipos no queda bien:"; lista_de $Q/s1.img | sed 's/^/        /' | head -14; sed 's/^/        /' $Q/juego.pqi | head -10; fi
+
+# 2. QUITA letras /DEPENDIENTES: también saludo y extra, cada uno antes de lo que necesita
+cp $Q/s1.img $Q/s2.img
+paq $Q/s2.img dep "paquetes quita letras /dependientes" ":pausa 2" "paquetes lista"
+mira "PAQUETES QUITA letras /DEPENDIENTES: lo que lo necesita (saludo y extra) sale antes que él" "^Se va a quitar: .*letras 1\.0" "^  quitado extra 1\.0$" "^  quitado saludo 1\.0$" "^  quitado letras 1\.0$" "^3 paquetes\.$"
+l1=$(grep -n '^  quitado extra' $S | cut -d: -f1); l2=$(grep -n '^  quitado saludo' $S | cut -d: -f1); l3=$(grep -n '^  quitado letras' $S | cut -d: -f1)
+if [ -n "$l1" ] && [ -n "$l3" ] && [ "$l1" -lt "$l2" ] && [ "$l2" -lt "$l3" ] && sano $Q/s2.img && sin_restos $Q/s2.img && ! lista_de $Q/s2.img | grep -q 'DOCS\|EXTRA\|SALUDO' && lista_de $Q/s2.img | grep -q 'JUEGOS/J.TXT'; then
+  ok "en su orden (extra, saludo, letras) y, en el disco, sano, sin sus archivos ni sus carpetas (\\DOCS, \\EXTRA) y con lo demás (juego)"
+else ko "quitar con lo que lo necesita no queda bien:"; grep '^  quitado' $S | sed 's/^/        /'; lista_de $Q/s2.img | sed 's/^/        /' | head -12; fi
+
+# 3. REPARA: un archivo cambiado (letras) y otro que falta (saludo); solo eso se vuelve a poner
+cp $Q/s1.img $Q/s3.img
+printf 'cambiado a mano\r\n' > $Q/cambiado.txt; mcopy -o -i $Q/s3.img $Q/cambiado.txt ::DOCS/LETRAS/A.TXT; mdel -i $Q/s3.img ::HISPA/SALUDO.DAT
+paq $Q/s3.img repara "paquetes archivos letras" "paquetes repara" ":pausa 3" "paquetes comprueba"
+mira "PAQUETES ARCHIVOS letras: cada archivo, lo que mide y si está como se instaló" "^Archivos de letras 1\.0 (2):$" "^  CAMBIADO  *10  C:.DOCS.LETRAS.A\.TXT$" "^  bien  *10  C:.DOCS.LETRAS.B\.TXT$" \
+  "^1 no están como se instalaron: PAQUETES REPARA letras los vuelve a poner\.$"
+mira "PAQUETES REPARA: comprueba todos; lo dañado (cambiado o que falta) se vuelve a poner del paquete de la misma versión; luego COMPRUEBA, todo bien" \
+  "^base 0\.8\.4 está bien (sus 5 archivos, como se instalaron)\.$" "^letras: .DOCS.LETRAS.A\.TXT (dañados)$" "^saludo: .HISPA.SALUDO\.DAT (dañados)$" "^Se va a reparar (lo dañado, del paquete de la misma versión): letras 1\.0, saludo 1\.0$" \
+  "^  reparado letras 1\.0$" "^  reparado saludo 1\.0$" "^Los archivos de los 6 paquetes instalados están como se instalaron\.$"
+if sano $Q/s3.img && sin_restos $Q/s3.img && igual_en $Q/s3.img DOCS/LETRAS/A.TXT $F/A.TXT && igual_en $Q/s3.img HISPA/SALUDO.DAT $F/GRANDE.DAT && igual_en $Q/s3.img DOCS/LETRAS/B.TXT $F/B.TXT; then
+  ok "lo reparado, desde fuera: sano, sin restos y los archivos otra vez como los del paquete, octeto a octeto"
+else ko "lo reparado no queda bien:"; lista_de $Q/s3.img | sed 's/^/        /' | head -12; fi
+
+# 4. un corte a mitad de quitar (tras el primer cambio): al volver, se deshace
+cp $Q/s1.img $Q/s4.img
+paq $Q/s4.img corte "paquetes quita juego /corte=1" ":pausa 2"
+paq $Q/s4.img vuelta "paquetes lista"
+mira "un corte a mitad de quitar juego: la próxima vez, PAQUETES lo deshace y juego sigue instalado" \
+  "^paquetes: juego 1\.0 se quedó a medias (¿se fue la luz?): se ha deshecho y todo está como antes$" "^  juego     1\.0 "
+if sano $Q/s4.img && [ "$(lista_de $Q/s4.img)" = "$(lista_de $Q/s1.img)" ] && igual_en $Q/s4.img JUEGOS/J.TXT $F/J.TXT; then
+  ok "y en el disco, como antes del corte: los mismos archivos, iguales"
+else ko "después del corte el disco no vuelve a como estaba:"; diff <(lista_de $Q/s4.img) <(lista_de $Q/s1.img) | sed 's/^/        /' | head -8; fi
+
+# 5. la ventana «Programas instalados» (PROGRAMA.BIN), en el escritorio: desde
+# Configuración (el árbol por tipos; base, que no se quita; letras, que
+# necesitan otros), desde «Programas y actualizaciones» (Instalados...) y desde
+# un acceso del menú con /LENTO (para ver la barra): quitar letras con lo que
+# lo necesita, los archivos de juego (uno cambiado a mano), repararlo, y
+# borrar un programa suelto (a la Papelera del explorador)
+cp $Q/s1.img $Q/s5.img
+printf '[hispa]\r\nusuario=Ana\r\nequipo=PRUEBA\r\nteclado=es\r\nmodo=800x600\r\n' > $Q/HISPA.INI
+printf 'nombre=Programas (prueba)\r\nprograma=\\HISPA\\PROGRAMA.BIN\r\nargumentos=/LENTO\r\n' > $Q/PRUEBA.MNU
+printf 'juego cambiado\r\n' > $Q/jc.txt
+mcopy -i $Q/s5.img $Q/HISPA.INI ::HISPA/ && mcopy -i $Q/s5.img $Q/PRUEBA.MNU ::HISPA/MENU/ && mcopy -o -i $Q/s5.img $Q/jc.txt ::JUEGOS/J.TXT
+CAPTURAS=$G ESCRIBE=1 SATA=$Q/s5.img MEMORIA=64 MODULOS= ARRANQUE=escritorio QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/usb.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
+  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":clic 40 585" ":pausa 1" ":clic 250 500" ":pausa 1" ":captura pg0" ":clic 556 374" ":pausa 4" ":raton 790 300" ":captura pg1" \
+  ":tecla down" ":tecla delete" ":pausa 1" ":captura pg2" ":tecla esc" ":tecla down" ":tecla down" ":tecla delete" ":pausa 1" ":captura pg3" ":tecla esc" ":tecla esc" ":pausa 1" \
+  ":clic 40 585" ":pausa 1" ":clic 250 461" ":pausa 4" ":captura pg4" ":clic 627 99" ":pausa 4" ":captura pg5" ":tecla esc" ":pausa 1" \
+  ":clic 40 585" ":pausa 1" ":clic 100 364" ":pausa 4" ":tecla down" ":tecla down" ":tecla down" ":tecla delete" ":pausa 1" ":captura pg6" ":tecla tab" ":tecla ret" ":pausa 1" ":captura pg7" ":pausa 5" ":captura pg8" \
+  ":tecla home" ":tecla down" ":tecla down" ":tecla down" ":tecla down" ":tecla down" ":tecla ret" ":pausa 3" ":captura pg9" ":clic 700 390" ":pausa 4" ":captura pg10" \
+  ":tecla end" ":tecla up" ":tecla delete" ":pausa 1" ":captura pg11" ":tecla tab" ":tecla ret" ":pausa 4" ":captura pg12" > $Q/ventana.sal 2>&1
+miracap "Configuración trae «Programas...»" pg0 negrita 160 120 700 160 "Configuración" negrita 490 360 580 385 "Programas..."
+miracap "«Programas instalados»: un árbol por tipos (cada uno con cuántos tiene y lo que ocupan), su versión, su tamaño y qué es; la ficha del elegido; los botones; lo que ocupan los programas y lo libre en el disco" pg1 \
+  negrita 30 105 120 130 "[-] Sistema" negrita 500 105 790 130 "1 programa" negrita 60 130 130 160 base negrita 30 200 200 280 "[-] Internet y red" \
+  negrita 20 320 120 345 Detalles negrita 630 345 790 370 "Desinstalar..." negrita 630 375 790 400 Reparar negrita 630 405 790 430 "Ver archivos" \
+  texto 620 455 790 480 "Libre en el disco:" texto 20 535 200 560 "6 paquetes" texto 100 535 300 560 "3 sueltos"
+miracap "base no se puede desinstalar: lo dice, y por qué" pg2 texto 150 240 650 300 "base no se puede desinstalar: es imprescindible (es el" negrita 400 300 650 345 Entendido \
+  negrita 20 350 620 535 "Lo necesitan:"
+miracap "letras: hay otros que lo necesitan (saludo y extra): se dice, y se ofrece quitarlos también" pg3 texto 150 240 650 300 "Hay programas que necesitan letras: saludo, extra. Sin" \
+  negrita 380 300 650 350 "Quitar los 3" negrita 380 300 650 350 Cancelar
+miracap "«Programas y actualizaciones» lleva «Instalados...» arriba a la derecha" pg4 texto 560 85 700 110 "Instalados..." negrita 140 85 400 110 "Programas y actualizaciones"
+miracap "y desde ahí se abre «Programas instalados»" pg5 negrita 30 105 120 130 "[-] Sistema"
+miracap "desde el acceso con /LENTO: lo mismo con letras" pg6 negrita 380 300 650 350 "Quitar los 3"
+miracap "al decir que sí, la barra de avance mientras se quita (archivo a archivo)" pg7 negrita 150 250 650 300 "Quitando" rgb 200 301 166534 30
+miracap "y luego, la lista sin letras, saludo ni extra; «Desinstalado.»" pg8 texto 500 535 795 560 "Desinstalado." notexto 20 100 620 320 letras notexto 20 100 620 320 saludo \
+  negrita 30 100 400 320 "[-] Juegos y emuladores" negrita 30 100 400 320 "[-] Programas de terceros (sin paquete)"
+miracap "Ver archivos (Intro en juego): su archivo, CAMBIADO (en naranja y con su palabra)" pg9 negrita 20 320 200 345 Archivos negrita 25 375 200 400 CAMBIADO negrita 100 375 400 400 'C:\JUEGOS\J.TXT' \
+  texto 250 535 795 560 "Un archivo dañado"
+miracap "Reparar: lo vuelve a poner, y luego está bien" pg10 negrita 25 375 200 400 bien texto 250 535 795 560 "juego reparado"
+miracap "un programa suelto (sin paquete): «Borrar...» pregunta, y dice que va a la Papelera" pg11 texto 150 240 650 300 'C:\HISPA32\MIJUEGO.EXE (760 octetos)? Va a la' \
+  negrita 630 345 790 370 "Borrar..."
+miracap "borrado: ya no sale, y «Está en la Papelera.»" pg12 texto 500 535 795 560 "Está en la Papelera." notexto 20 100 620 320 MIJUEGO
+if sano $Q/s5.img && sin_restos $Q/s5.img && ! lista_de $Q/s5.img | grep -q 'DOCS\|EXTRA\|HISPA/SALUDO\|HISPA32/MIJUEGO' && igual_en $Q/s5.img JUEGOS/J.TXT $F/J.TXT \
+  && lista_de $Q/s5.img | grep -qi 'PAPELERA/' && ! lista_de $Q/s5.img | grep -q 'PROGRAMA\.TXT\|AVANCE\.TXT'; then
+  ok "lo hecho desde la ventana, desde fuera: el disco sano, sin letras, saludo ni extra, juego reparado (octeto a octeto), MIJUEGO.EXE en la Papelera, y sin restos (ni PROGRAMA.TXT ni AVANCE.TXT)"
+else ko "lo hecho desde la ventana no queda bien en el disco:"; lista_de $Q/s5.img | sed 's/^/        /' | head -16; fi
+# (GUARDA_CAPTURAS=carpeta: las capturas de la ventana se quedan ahí)
+[ -n "${GUARDA_CAPTURAS:-}" ] && mkdir -p "$GUARDA_CAPTURAS" && cp $G/pg*.ppm "$GUARDA_CAPTURAS/"
+if ! grep -q "excepción\|\*\*\*" $Q/ventana.sal; then ok "ni una excepción del núcleo"; else ko "hay excepciones:"; grep "excepción\|\*\*\*" $Q/ventana.sal | head -3 | sed 's/^/        /'; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin los programas instalados)"
+fi   # (PROGRAMAS)
 
 # ------------------------------------------------- 13. Hispa-Pentium 0.8: la red
 # La red: el servicio de red (RED.BIN, en el anillo 3) con las tarjetas que

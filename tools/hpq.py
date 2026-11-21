@@ -13,6 +13,7 @@
 #        nombre=oficina                 (hasta 8 letras: a-z, 0-9, «-» y «_»)
 #        version=1.0                    (números separados por puntos)
 #        descripcion=La oficina de Hispa-386
+#        tipo=oficina                   (PROGRAMAS: de qué tipo es; los de TIPOS)
 #        necesita=hvprun >= 0.7, nucleo >= 0.7     (puede ir vacío)
 #        choca=                         (los que no pueden estar a la vez)
 #        archivo=\OFICINA\PLUMA.HVP 45678 <SHA-256 en 64 cifras hex>
@@ -28,13 +29,22 @@
 #  El catálogo (CATALOGO.TXT, al lado de los paquetes):
 #        HPQ-CATALOGO 1
 #        paquete=<nombre> <versión> <ARCHIVO.HPQ> <octetos> <SHA-256 del .HPQ> <descripción>
+#        tipo=<nombre> <tipo>           (PROGRAMAS: una por paquete; un PAQUETES
+#                                        de antes no la mira, y la línea de cada
+#                                        paquete sigue como era)
+#
+#  (PROGRAMAS) El tipo: uno de los códigos de TIPOS (sistema, oficina,
+#  internet...: docs/PENTIUM.md, sección 13, «El tipo de cada paquete»). Si
+#  la cabecera no lo trae, se deduce del nombre (TIPO_POR_NOMBRE) o es
+#  «otros». En el catálogo puede ir aunque el paquete no lo lleve dentro (así
+#  no hay que rehacer un paquete que no cambia: clicgest).
 #
 #  Lo instalado, en C:\HISPA\PAQUETES\<NOMBRE>.PQI: la cabecera del paquete,
 #  tal cual (con «registro» se saca de un .HPQ: así lo apunta INSTALAR).
 #
 #  Uso:
 #    hpq.py crea SALIDA.HPQ --nombre N --version V [--descripcion D]
-#               [--necesita "a >= 1, b"] [--choca "c"] ORIGEN=\DESTINO ...
+#               [--tipo T] [--necesita "a >= 1, b"] [--choca "c"] ORIGEN=\DESTINO ...
 #    hpq.py catalogo CARPETA          (CATALOGO.TXT con los .HPQ de la carpeta)
 #    hpq.py mira PAQUETE.HPQ          (lo que lleva, y comprueba sus sumas)
 #    hpq.py registro PAQUETE.HPQ SALIDA.PQI
@@ -43,7 +53,9 @@
 #               los archivos ya hechos que haya en esas carpetas: usb.sh)
 #    hpq.py opcionales SALIDA CARPETA...  (los que no van con el sistema:
 #               «navega», el Navegador; de lo que deja su hacer.sh)
-#    hpq.py linea PAQUETE.HPQ         (su línea para CATALOGO.TXT)
+#    hpq.py linea PAQUETE.HPQ         (sus líneas para CATALOGO.TXT: la del
+#               paquete y la de su tipo)
+#    hpq.py tipos                     (PROGRAMAS: la tabla de los tipos)
 #
 #  La firma (Ed25519, RFC 8032): el catálogo lleva las sumas de todos los
 #  paquetes, y cada paquete las de sus archivos; así que basta con firmar el
@@ -76,6 +88,52 @@ TROZO_83 = re.compile(r'^[A-Z0-9_$~!#%&@^(){}\'`-]{1,8}(\.[A-Z0-9_$~!#%&@^(){}\'
 LISTA = re.compile(r'^\s*([a-z0-9_-]{1,8})\s*(?:(>=|<=|=|>|<)\s*([0-9]+(?:\.[0-9]+)*))?\s*$')
 MAX_ARCHIVOS = 64
 MAX_CABECERA = 16384
+
+# (PROGRAMAS) los tipos de los paquetes: el código (lo que va en «tipo=») y
+# cómo se llama (la carpeta del menú Inicio, el apartado de «Programas
+# instalados»). En este orden salen. «otros», si no se sabe.
+TIPOS = [
+    ('sistema', 'Sistema'),
+    ('oficina', 'Oficina'),
+    ('internet', 'Internet y red'),
+    ('juegos', 'Juegos y emuladores'),
+    ('multimedia', 'Multimedia'),
+    ('seguridad', 'Seguridad'),
+    ('windows', 'Programas de Windows'),
+    ('herramientas', 'Herramientas'),
+    ('desarrollo', 'Desarrollo'),
+    ('terceros', 'Programas de terceros'),
+    ('otros', 'Otros'),
+]
+# el tipo de los que no lo dicen (los paquetes hechos antes de la 0.8.5 y
+# los de otros repositorios): lo mismo que sabe PAQUETES (upaquete.cas, tipo_por_nombre)
+TIPO_POR_NOMBRE = {
+    'base': 'sistema', 'paquetes': 'sistema', 'equipo': 'sistema', 'hvprun': 'sistema',
+    'red': 'internet', 'tls': 'internet', 'navega': 'internet', 'ssh': 'internet',
+    'tailscal': 'internet', 'wifi': 'internet',
+    'bloc': 'oficina', 'oficina': 'oficina',
+    'consola': 'herramientas',
+    'ejemplos': 'desarrollo',
+    'win32': 'windows',
+    'escudo': 'seguridad',
+    'clicgest': 'terceros',
+}
+
+
+def tipo_valido(t):
+    """El código de un tipo (también vale su nombre: «Internet y red»)."""
+    t = (t or '').strip().lower()
+    for c, n in TIPOS:
+        if t == c or t == n.lower():
+            return c
+    falla('el tipo «%s» no vale: %s' % (t, ', '.join(c for c, _ in TIPOS)))
+
+
+def tipo_de(nombre, campos=None):
+    """El tipo de un paquete: el de su cabecera, o el de su nombre, u «otros»."""
+    if campos and campos.get('tipo'):
+        return tipo_valido(campos['tipo'])
+    return TIPO_POR_NOMBRE.get(nombre, 'otros')
 
 # Los paquetes del sistema (hpq.py sistema): nombre, versión, descripción,
 # lo que necesita y sus archivos (el archivo hecho y adónde va en el disco)
@@ -120,8 +178,11 @@ SISTEMA = [
     ('ejemplos', VERSION_084, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.4', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
         ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN'), ('MUESTRA.BIN', r'\HISPA\MUESTRA.BIN')]),
-    ('paquetes', '1.0', 'Programas y actualizaciones: PAQUETES y su ventana', 'base >= 0.7, nucleo >= 0.7', [
-        ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN')]),
+    # (PROGRAMAS) la 1.1: los tipos, REPARA, ARCHIVOS, SUELTOS, QUITA /DEPENDIENTES y
+    # la ventana «Programas instalados» (PROGRAMA.BIN, con los controles: base 0.8.2)
+    ('paquetes', '1.1', 'Programas y actualizaciones: PAQUETES, su ventana y «Programas instalados»', 'base >= 0.8.2, nucleo >= 0.7', [
+        ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
+        ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN'), ('PROGRAMA.MNU', r'\HISPA\MENU\PROGRAMA.MNU')]),
     ('red', VERSION_084, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= 0.8.4', [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
@@ -191,7 +252,7 @@ def sha(datos):
     return hashlib.sha256(datos).hexdigest()
 
 
-def cabecera(nombre, version, descripcion, necesita, choca, archivos):
+def cabecera(nombre, version, descripcion, necesita, choca, archivos, tipo=''):
     """archivos: [(destino, datos)]. Da la cabecera (en octetos)."""
     if not NOMBRE.match(nombre):
         falla('el nombre «%s» no vale (hasta 8 letras: a-z, 0-9, - y _)' % nombre)
@@ -201,8 +262,10 @@ def cabecera(nombre, version, descripcion, necesita, choca, archivos):
         falla('demasiados archivos en un paquete (hasta %d)' % MAX_ARCHIVOS)
     vistos = set()
     lineas = [MAGIA, 'nombre=' + nombre, 'version=' + version,
-              'descripcion=' + descripcion.replace('\n', ' ')[:200],
-              'necesita=' + comprueba_lista(necesita, 'necesita'),
+              'descripcion=' + descripcion.replace('\n', ' ')[:200]]
+    if tipo:
+        lineas.append('tipo=' + tipo_valido(tipo))    # (PROGRAMAS)
+    lineas += ['necesita=' + comprueba_lista(necesita, 'necesita'),
               'choca=' + comprueba_lista(choca, 'choca')]
     for d, datos in archivos:
         comprueba_destino(d)
@@ -217,8 +280,8 @@ def cabecera(nombre, version, descripcion, necesita, choca, archivos):
     return c
 
 
-def haz_paquete(salida, nombre, version, descripcion, necesita, choca, archivos):
-    c = cabecera(nombre, version, descripcion, necesita, choca, archivos)
+def haz_paquete(salida, nombre, version, descripcion, necesita, choca, archivos, tipo=''):
+    c = cabecera(nombre, version, descripcion, necesita, choca, archivos, tipo)
     with open(salida, 'wb') as f:
         f.write(c)
         for _, datos in archivos:
@@ -248,6 +311,7 @@ def lee_paquete(ruta):
 def mira(ruta):
     campos, archivos, largo, datos = lee_paquete(ruta)
     print('%s: %s %s — %s' % (os.path.basename(ruta), campos.get('nombre'), campos.get('version'), campos.get('descripcion')))
+    print('  tipo:     %s' % tipo_de(campos.get('nombre'), campos))
     print('  necesita: %s' % (campos.get('necesita') or '(nada)'))
     print('  choca:    %s' % (campos.get('choca') or '(nada)'))
     malos = 0
@@ -265,6 +329,7 @@ def mira(ruta):
 
 def catalogo(carpeta):
     filas = []
+    tipos = {}
     for n in sorted(os.listdir(carpeta)):
         if not n.upper().endswith('.HPQ'):
             continue
@@ -274,11 +339,14 @@ def catalogo(carpeta):
             falla('el paquete %s tiene que llamarse en 8+3 y en mayúsculas' % n)
         filas.append('paquete=%s %s %s %d %s %s' % (campos['nombre'], campos['version'], n, len(datos), sha(datos),
                                                     campos.get('descripcion', '')))
+        tipos[campos['nombre']] = tipo_de(campos['nombre'], campos)
+    # (PROGRAMAS) y el tipo de cada uno, aparte (un PAQUETES de antes no lo mira)
+    filas += ['tipo=%s %s' % (k, tipos[k]) for k in sorted(tipos)]
     with open(os.path.join(carpeta, 'CATALOGO.TXT'), 'wb') as f:
         f.write(a437(MAGIA_CATALOGO) + b'\r\n')
         for x in filas:
             f.write(a437(x) + b'\r\n')
-    return len(filas)
+    return len(filas) - len(tipos)
 
 
 def busca(nombre, carpetas):
@@ -315,7 +383,8 @@ def opcionales(salida, carpetas, nombres=None):
         if nombres and nombre not in nombres:
             continue
         lista = [(d, open(busca(o, carpetas), 'rb').read()) for o, d in archivos]
-        haz_paquete(os.path.join(salida, nombre.upper() + '.HPQ'), nombre, version, descripcion, necesita, '', lista)
+        haz_paquete(os.path.join(salida, nombre.upper() + '.HPQ'), nombre, version, descripcion, necesita, '', lista,
+                    tipo_de(nombre))
         n += 1
     return n
 
@@ -332,7 +401,8 @@ def linea_catalogo(ruta):
         os.link(ruta, d)
         catalogo(tmp)
         with open(os.path.join(tmp, 'CATALOGO.TXT'), 'rb') as f:
-            return f.read().split(b'\r\n')[1]
+            # (y la de su tipo: PROGRAMAS)
+            return b'\r\n'.join(f.read().split(b'\r\n')[1:3])
     finally:
         for x in os.listdir(tmp):
             os.remove(os.path.join(tmp, x))
@@ -347,7 +417,8 @@ def sistema(salida, carpetas):
     for nombre, version, descripcion, necesita, archivos in SISTEMA:
         lista = [(d, open(busca(o, carpetas), 'rb').read()) for o, d in archivos]
         N = nombre.upper()
-        c = haz_paquete(os.path.join(salida, N + '.HPQ'), nombre, version, descripcion, necesita, '', lista)
+        c = haz_paquete(os.path.join(salida, N + '.HPQ'), nombre, version, descripcion, necesita, '', lista,
+                        tipo_de(nombre))
         with open(os.path.join(salida, 'PQI', N + '.PQI'), 'wb') as f:
             f.write(c)
         mapa.append('%s.PQI=HISPA\\PAQUETES' % N)
@@ -438,7 +509,7 @@ def principal(a):
     orden = a[1]
     if orden == 'crea':
         salida = a[2]
-        op = {'--nombre': None, '--version': None, '--descripcion': '', '--necesita': '', '--choca': ''}
+        op = {'--nombre': None, '--version': None, '--descripcion': '', '--necesita': '', '--choca': '', '--tipo': ''}
         archivos = []
         i = 3
         while i < len(a):
@@ -453,7 +524,8 @@ def principal(a):
             i += 1
         if not op['--nombre'] or not op['--version']:
             falla('faltan --nombre y --version')
-        haz_paquete(salida, op['--nombre'], op['--version'], op['--descripcion'], op['--necesita'], op['--choca'], archivos)
+        haz_paquete(salida, op['--nombre'], op['--version'], op['--descripcion'], op['--necesita'], op['--choca'], archivos,
+                    op['--tipo'])
         print('hpq: %s (%s %s, %d archivos, %d octetos)' % (salida, op['--nombre'], op['--version'], len(archivos), os.path.getsize(salida)))
         return 0
     if orden == 'catalogo':
@@ -495,6 +567,10 @@ def principal(a):
         return 0
     if orden == 'linea':
         sys.stdout.buffer.write(linea_catalogo(a[2]) + b'\r\n')
+        return 0
+    if orden == 'tipos':
+        for c, n in TIPOS:
+            print('%-13s %s' % (c, n))
         return 0
     if orden == 'sistema':
         n = sistema(a[2], a[3:])

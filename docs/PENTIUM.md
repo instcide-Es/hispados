@@ -2590,7 +2590,13 @@ En el intérprete de órdenes (o en la Consola del escritorio):
 | `PAQUETES QUITA nombre...` | lo quita: sus archivos, su registro y las carpetas que se queden vacías; no, si otro lo necesita |
 | `PAQUETES MIRA A.HPQ` | lo que lleva un paquete, y si está sano |
 | `PAQUETES COMPRUEBA` | si los archivos instalados siguen como se instalaron (su SHA-256) |
-| `PAQUETES ESTADO` | lo instalado y lo del catálogo, una línea por paquete, para otro programa (la ventana) |
+| `PAQUETES ESTADO` | lo instalado y lo del catálogo, una línea por paquete, para otro programa (la ventana); desde la 1.1, con su tipo al final |
+| `PAQUETES LISTA /TIPO` | (PROGRAMAS) lo instalado, por tipos (Sistema, Oficina, Internet y red...), y al final los programas sueltos |
+| `PAQUETES REPARA [nombre...]` | (PROGRAMAS) comprueba las sumas de lo instalado (todo, o eso) y vuelve a poner **solo lo dañado** (lo cambiado y lo que falta), del paquete de la misma versión |
+| `PAQUETES ARCHIVOS nombre` | (PROGRAMAS) sus archivos: lo que mide cada uno y si está `bien`, `CAMBIADO` o `FALTA` |
+| `PAQUETES SUELTOS` | (PROGRAMAS) los programas que no son de ningún paquete (`.EXE`, `.BIN`, `.HVP` en la raíz, `\HISPA`, `\HISPA32` y `\PROGRAMS`, con sus subcarpetas) |
+| `PAQUETES FICHAS` | (PROGRAMAS) todo lo de lo instalado y lo suelto, una línea cada uno, para «Programas instalados» |
+| `PAQUETES QUITA nombre /DEPENDIENTES` | (PROGRAMAS) lo quita, y antes lo que lo necesite (y lo que necesite a eso), cada uno su todo o nada |
 | `/DESDE=carpeta` o `/DESDE=http://...` | de dónde traer los paquetes |
 | `/FORZAR` | quitar aunque otro lo necesite; poner una versión igual o más vieja que la instalada |
 
@@ -2638,6 +2644,132 @@ URL y ECX = el archivo de destino, y un error es lo de siempre. Lo traído se
 comprueba igual (el SHA-256 del catálogo y los de los archivos). Las pruebas lo
 ejercitan con un `DESCARGA` de mentira que copia de la memoria USB.
 
+### El tipo de cada paquete (PROGRAMAS, 21/11/2026)
+
+Cada paquete dice **de qué tipo es**: con eso, «Programas instalados» los
+agrupa y el menú Inicio («Todos los programas», rama pentium-menu) hace sus
+carpetas. Es un campo más de la cabecera del `.HPQ` (y, por tanto, del
+registro `.PQI`):
+
+```
+HPQ 1
+nombre=navega
+version=0.2
+descripcion=El Navegador: la web de hoy (NetSurf con JavaScript)...
+tipo=internet
+necesita=base >= 0.8.3, red >= 0.8.1, tls >= 0.8.1
+...
+```
+
+y, en el catálogo, **una línea aparte por paquete**, detrás de las de
+`paquete=` (un PAQUETES de antes no la mira, y la línea de cada paquete sigue
+como era):
+
+```
+HPQ-CATALOGO 1
+paquete=navega 0.2 NAVEGA.HPQ 9123456 3f0a... El Navegador: ...
+paquete=clicgest 0.2.3 CLICGEST.HPQ 412345 9b1c... ClicGest: ...
+tipo=clicgest terceros
+tipo=navega internet
+```
+
+**Los tipos** (el código es lo que se escribe; en este orden salen):
+
+| Código (`tipo=`) | Nombre (carpeta del menú, apartado de la ventana) | Paquetes |
+|---|---|---|
+| `sistema` | Sistema | base, paquetes, equipo, hvprun |
+| `oficina` | Oficina | bloc, oficina |
+| `internet` | Internet y red | red, tls, navega, ssh, tailscal, wifi |
+| `juegos` | Juegos y emuladores | (los emuladores, cuando lleguen) |
+| `multimedia` | Multimedia | |
+| `seguridad` | Seguridad | escudo |
+| `windows` | Programas de Windows | win32 |
+| `herramientas` | Herramientas | consola |
+| `desarrollo` | Desarrollo | ejemplos |
+| `terceros` | Programas de terceros | clicgest |
+| `otros` | Otros | (el que no dice nada ni se sabe) |
+
+Y aparte, solo en la ventana (no es un tipo de paquete): **«Programas de
+terceros (sin paquete)»**, los programas copiados a mano.
+
+- **Compatible hacia atrás.** Vale el código o el nombre (`tipo=Internet y
+  red`), sin mirar mayúsculas. Si la cabecera no lo trae (los paquetes de antes
+  de la 0.8.4, los de otros repositorios), vale el del catálogo y, al
+  instalarlo, **PAQUETES lo apunta en su registro** (`tipo=...` antes del
+  `fin` del `.PQI`); si tampoco, **se deduce del nombre** (la tabla de arriba:
+  `TIPO_POR_NOMBRE` en `tools/hpq.py` y en `upaquete.cas`); y si no, `otros`.
+  Así, en un sistema instalado antes, todo sale en su sitio sin reinstalar.
+- **Para el menú Inicio** (pentium-menu): la carpeta de un programa es el
+  `tipo=` del registro `.PQI` del paquete que deja su `.MNU` (o, si no lo
+  dice, la tabla por nombre; si no, «Otros»). Un `.MNU` puede llevar su propio
+  `tipo=` (el mismo código), que manda: el de «Programas instalados»
+  (`\HISPA\MENU\PROGRAMA.MNU`) dice `tipo=sistema`.
+- **El tipo puede ir solo en el catálogo**: `hpq.py catalogo` pone la línea
+  `tipo=` de cada paquete (de su cabecera o de la tabla), así que un paquete
+  que no cambia (ClicGest 0.2.3) no hay que rehacerlo ni subirle la versión.
+- `hpq.py crea ... --tipo internet` lo pone en la cabecera; `hpq.py tipos`
+  dice la tabla; `hpq.py mira` dice el tipo; `hpq.py linea` da las dos líneas
+  (la del paquete y la de su tipo). Los paquetes del sistema y los opcionales
+  lo llevan todos (del nombre, con la tabla).
+- **Imprescindibles**: `base`, `red` y `paquetes` no se quitan nunca (ni con
+  `/FORZAR`): PAQUETES lo dice y por qué. Un paquete de otro puede pedirlo con
+  `imprescindible=si` en su cabecera.
+
+### La ventana: «Programas instalados» (PROGRAMA.BIN)
+
+![Programas instalados](pentium/programas1.png)
+
+`PROGRAMA.BIN` (`uprogram.cas`, con los controles del sistema, del paquete
+`paquetes` 1.1): en **Configuración › «Programas...»**, en el menú Inicio
+(«Programas instalados», su `.MNU` con `tipo=sistema`: en la carpeta Sistema
+de «Todos los programas») y en «Programas y actualizaciones» (el botón
+«Instalados...» de arriba a la derecha, o F6). Arriba, **un árbol por tipos**
+(cada uno con cuántos tiene y lo que ocupan; `[+]`/`[-]` lo abre y lo cierra)
+con cada programa, su versión, su tamaño y qué es; abajo, en «Detalles», el
+elegido: su paquete, su tipo, su versión, **lo que ocupa en el disco** (y
+cuántos archivos), **cuándo se instaló** (la fecha de su registro), **lo que
+necesita** y **lo que lo necesita**; y a la derecha sus botones y **lo que
+ocupan todos los programas y lo libre en el disco** (con su barra).
+
+- **Desinstalar...** pide confirmarlo. Si otros lo necesitan, lo dice y
+  ofrece quitarlos también («Hay programas que necesitan letras: saludo,
+  extra... ¿Quitarlos también?» › «Quitar los 3»: `PAQUETES QUITA letras
+  /DEPENDIENTES`). Lo imprescindible (base, red, paquetes, y lo que lo
+  necesite) no se puede quitar, y se explica. Mientras se quita, **una barra**
+  con lo hecho (archivo a archivo: `AVANCE.TXT`); si se corta, el diario de
+  PAQUETES lo deshace la próxima vez.
+- **Reparar**: `PAQUETES REPARA nombre` (comprueba las sumas y vuelve a poner
+  lo dañado).
+- **Ver archivos**: la pestaña «Archivos», con cada uno y su estado
+  (`PAQUETES ARCHIVOS`): lo cambiado o lo que falta, en naranja y con su
+  palabra.
+- **Los programas sueltos** (los `.EXE` de Windows, los `.BIN` y `.HVP`
+  copiados a mano en la raíz, `\HISPA`, `\HISPA32` y `\PROGRAMS`, con sus
+  subcarpetas, que no son de ningún paquete) salen en «Programas de terceros
+  (sin paquete)», con **Borrar...**: a la Papelera del explorador
+  (`EQUIPO /BORRAR`); sin Mi equipo instalado, se borra del todo (y se avisa
+  antes).
+
+![Desinstalar letras: otros lo necesitan](pentium/programas-dependen.png)
+![La barra mientras se quita](pentium/programas-barra.png)
+![Los archivos de un paquete: uno cambiado](pentium/programas-archivos.png)
+![base no se puede quitar](pentium/programas-imprescindible.png)
+![Un programa suelto: a la Papelera](pentium/programas-suelto.png)
+
+Probado en QEMU (`castel/pruebas.sh`, parte 23, `SOLO=programas`: 16
+comprobaciones de la Consola y del disco desde fuera y 13 capturas de la
+ventana).
+
+Con el teclado: las flechas andan por el árbol (izquierda y derecha cierran y
+abren un tipo), Supr desinstala o borra, Intro abre un tipo o enseña los
+archivos, Ctrl+Tab cambia de pestaña, F5 vuelve a mirar, Alt+P/V/Y los menús;
+el botón derecho, el menú del programa. Como la de las actualizaciones, no sabe
+de paquetes: lanza `PAQUETES FICHAS` (una línea por paquete:
+`f|nombre|versión|tipo|octetos|archivos|fecha|imprescindible (por qué)|necesita|lo necesitan|descripción`;
+una por suelto, `s|ruta|octetos|fecha`; y `u|letra|total K|libre K`) con su
+salida a `C:\HISPA\PAQUETES\PROGRAMA.TXT`. `PROGRAMA /LENTO` (para las
+pruebas) hace que PAQUETES vaya despacio al quitar, para ver la barra.
+
 ### La ventana: «Programas y actualizaciones»
 
 ![Programas y actualizaciones](pentium/actualizaciones.png)
@@ -2678,7 +2810,7 @@ python3 tools/hpq.py sistema SALIDA CARPETA...   # los paquetes del sistema (lo 
 | `consola` | 0.7 | `CONSOLA.BIN` | base >= 0.7 |
 | `equipo` | 0.8.3 | `EQUIPO.BIN` (Mi equipo) y `DISPOSIT.BIN` (el Administrador de dispositivos) | base >= 0.8.3 |
 | `ejemplos` | 0.8.2 | `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN`, `MUESTRA.BIN` (los controles de las ventanas) | base >= 0.8.2 |
-| `paquetes` | 1.0 | `PAQUETES.BIN`, `ACTUALIZ.BIN` (su ventana) | base >= 0.7, nucleo >= 0.7 |
+| `paquetes` | 1.1 | `PAQUETES.BIN`, `ACTUALIZ.BIN` (su ventana), `PROGRAMA.BIN` («Programas instalados») y su acceso `\HISPA\MENU\PROGRAMA.MNU` | base >= 0.8.2, nucleo >= 0.7 |
 | `hvprun` | 0.7 | `HVPRUN.BIN` | base >= 0.7 |
 | `oficina` | 1.0 | `\OFICINA\`: `FACTURAS.HVP`, `PLUMA.HVP`, `CUENTAS.HVP`, `MIRADOR.HVP`, `TIPOS.DAT`, `DICCIO.DAT` | hvprun >= 0.7 |
 

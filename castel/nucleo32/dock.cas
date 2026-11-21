@@ -475,6 +475,7 @@ módulo Dock
         si iguales_sin_caja(nombre, "BLOC.BIN") entonces devolver IC_TEXTO fin
         si iguales_sin_caja(nombre, "CONSOLA.BIN") entonces devolver IC_CONSOLA fin
         si iguales_sin_caja(nombre, "ACTUALIZ.BIN") entonces devolver IC_PAQUETE fin
+        si iguales_sin_caja(nombre, "PROGRAMA.BIN") entonces devolver IC_PAQUETE fin   ; (PROGRAMAS)
         si iguales_sin_caja(nombre, "HVPRUN.BIN") entonces devolver IC_DOCUMENTO fin
         devolver 0
     fin

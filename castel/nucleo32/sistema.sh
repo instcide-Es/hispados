@@ -24,7 +24,7 @@ python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT10.BIN 1024 768 32 
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT6.BIN 1024 600 32 > /dev/null
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT13.BIN 1366 768 32 > /dev/null
 MODULOS=
-for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO udisposi:DISPOSIT upaquete:PAQUETES uactual:ACTUALIZ uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE umuestra:MUESTRA ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uhttps:HTTPS uinstala:INSTALAR uasiste:ASISTE; do
+for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO udisposi:DISPOSIT upaquete:PAQUETES uactual:ACTUALIZ uprogram:PROGRAMA uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE umuestra:MUESTRA ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uhttps:HTTPS uinstala:INSTALAR uasiste:ASISTE; do
   f=${p%%:*}; N=${p##*:}
   python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $W/$f.asm > /dev/null
   nasm -f bin $W/$f.asm -o $W/f/$N.BIN
@@ -99,6 +99,12 @@ INSTALA="$INSTALA  module /INSTALA/NAVES.MNU NAVES.MNU
 "
 printf 'NAVES.MNU=HISPA\\MENU\r\n' >> $W/i/CARPETAS.TXT
 cp $W/w32/MENU/NAVES.MNU $W/i/
+# (PROGRAMAS) el acceso de «Programas instalados» (PROGRAMA.BIN, del paquete
+# «paquetes»), en \HISPA\MENU; «tipo=sistema»: el menú Inicio lo pone en Sistema
+printf 'nombre=Programas instalados\r\nprograma=\\HISPA\\PROGRAMA.BIN\r\ntipo=sistema\r\nescritorio=no\r\n' > $W/i/PROGRAMA.MNU
+INSTALA="$INSTALA  module /INSTALA/PROGRAMA.MNU PROGRAMA.MNU
+"
+printf 'PROGRAMA.MNU=HISPA\\MENU\r\n' >> $W/i/CARPETAS.TXT
 iconv -f UTF-8 -t CP437 > $W/i/LEEME.TXT <<'L'
 Hispa-Pentium 0.8, instalado en el disco duro.
 
@@ -175,6 +181,14 @@ PROGRAMAS Y ACTUALIZACIONES (PAQUETES)
   USB, si la hay, y si no, en Internet (http://actualiza.hispados.es/
   pentium/): lo de Internet solo se usa si lleva la firma de Hispa-Pentium.
   Si se va la luz a mitad, la próxima vez se deshace lo que quedó a medias.
+  Configuración > «Programas...» (o «Programas instalados» en el menú)
+  enseña lo instalado por tipos (Sistema, Oficina, Internet y red...), con
+  su tamaño, su fecha y de qué depende: Desinstalar (si otros lo necesitan,
+  lo dice y ofrece quitarlos también; base, red y paquetes no se quitan),
+  Reparar (vuelve a poner lo dañado) y Ver archivos. Y los programas
+  copiados a mano (sin paquete), con «Borrar» (a la Papelera).
+  PAQUETES LISTA /TIPO lo dice por tipos; PAQUETES REPARA, PAQUETES
+  ARCHIVOS nombre y PAQUETES SUELTOS, en la Consola.
   Si se pone al día el núcleo, hay que reiniciar; si el nuevo no llegara a
   arrancar, el equipo vuelve solo al de antes (NUCLEO.ANT).
 

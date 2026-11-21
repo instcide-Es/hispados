@@ -1,0 +1,1165 @@
+; =============================================================================
+;  uprogram.cas - PROGRAMA.BIN, «Programas instalados» de Hispa-Pentium
+;  (PROGRAMAS, 21/11/2026): lo instalado por paquetes, en un árbol por tipos
+;  (Sistema, Oficina, Internet y red...: el «tipo=» de cada paquete,
+;  docs/PENTIUM.md, sección 13) y, al final, los programas sueltos (los .EXE,
+;  .BIN y .HVP copiados a mano, que no son de ningún paquete). De cada uno:
+;  qué es, su versión, lo que ocupa, cuándo se instaló, de qué depende y qué
+;  depende de él; y sus botones:
+;
+;    Desinstalar    pide confirmarlo; si otros lo necesitan, lo dice y ofrece
+;                   quitarlos también (PAQUETES QUITA ... /DEPENDIENTES); lo
+;                   imprescindible (base, red y paquetes) no se quita, y se
+;                   explica por qué. Con su barra de avance; si se corta (se
+;                   va la luz), PAQUETES lo deshace la próxima vez.
+;    Reparar        comprueba las sumas (SHA-256) y vuelve a poner lo dañado
+;                   del paquete de la misma versión (PAQUETES REPARA)
+;    Ver archivos   la pestaña «Archivos»: cada uno, con lo que mide y si
+;                   está como se instaló (PAQUETES ARCHIVOS)
+;    Borrar         (un programa suelto) a la Papelera del explorador (EQUIPO
+;                   /BORRAR); sin Mi equipo instalado, del todo
+;
+;  Abajo, lo que ocupan los programas y lo libre en el disco. Como la ventana
+;  de las actualizaciones (uactual.cas), no sabe de paquetes: se lo pide a
+;  PAQUETES (PAQUETES FICHAS, una línea por paquete), con lo que escribe
+;  mandado a C:\HISPA\PAQUETES\PROGRAMA.TXT.
+;
+;    PROGRAMA            la ventana
+;    PROGRAMA /LENTO     (las pruebas) PAQUETES va despacio al quitar: se ve la barra
+;
+;  Con el teclado: las flechas andan por el árbol (izquierda y derecha cierran
+;  y abren un tipo), Supr desinstala (o borra), F5 vuelve a mirar, Ctrl+Tab
+;  cambia de pestaña, Intro abre y cierra un tipo o enseña los archivos.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UProgram
+
+    modelo usuario
+
+    importar Llamadas, Controles, Textos32, Formato
+
+    constante MAX_P = 64
+    constante MAX_S = 64
+    constante N_TIPOS = 11
+    constante CAT_SUELTOS = 11                  ; el apartado de los sueltos (después de los tipos)
+    constante N_CAT = 12
+    constante CÓDIGOS_TIPO = "sistema|oficina|internet|juegos|multimedia|seguridad|windows|herramientas|desarrollo|terceros|otros"
+    constante NOMBRES_TIPO = "Sistema|Oficina|Internet y red|Juegos y emuladores|Multimedia|Seguridad|Programas de Windows|Herramientas|Desarrollo|Programas de terceros|Otros|Programas de terceros (sin paquete)"
+    constante SALIDA = 24576
+    constante ID_ÁRBOL = 1
+    constante ID_ARCHIVOS = 2
+    constante ID_PESTAÑAS = 3
+    constante ID_DESINSTALAR = 10
+    constante ID_REPARAR = 11
+    constante ID_VER = 12
+    constante ID_ACTUALIZACIONES = 13
+    constante ID_REFRESCAR = 14
+    constante ID_SÍ = 20
+    constante ID_NO = 21
+    constante ES_CATEGORÍA = 0x10000
+    constante ES_SUELTO = 0x20000
+    constante MENÚS = "&Programa|&Ver|A&yuda"
+    constante TECLA_F5 = 0x13F
+    ; lo que se pregunta
+    constante PR_NADA = 0
+    constante PR_QUITAR = 1
+    constante PR_NO_SE_PUEDE = 2
+    constante PR_BORRAR = 3
+
+    ; ---- lo instalado (PAQUETES FICHAS) ----
+    variable p_n: nat32
+    variable p_nombre: arreglo [MAX_P] de arreglo [12] de byte
+    variable p_versión: arreglo [MAX_P] de arreglo [16] de byte
+    variable p_tipo: arreglo [MAX_P] de nat32
+    variable p_octetos: arreglo [MAX_P] de nat32
+    variable p_archivos: arreglo [MAX_P] de nat32
+    variable p_fecha: arreglo [MAX_P] de arreglo [12] de byte
+    variable p_impres: arreglo [MAX_P] de arreglo [100] de byte
+    variable p_necesita: arreglo [MAX_P] de arreglo [160] de byte
+    variable p_necesitan: arreglo [MAX_P] de arreglo [160] de byte
+    variable p_desc: arreglo [MAX_P] de arreglo [200] de byte
+    variable s_n: nat32
+    variable s_ruta: arreglo [MAX_S] de arreglo [160] de byte
+    variable s_octetos: arreglo [MAX_S] de nat32
+    variable s_fecha: arreglo [MAX_S] de arreglo [12] de byte
+    variable d_letra: byte
+    variable d_total_k, d_libre_k: nat32
+    variable abierta: arreglo [N_CAT] de bool
+
+    ; ---- la ventana ----
+    variable g: Rejilla                         ; el árbol
+    variable ga: Rejilla                        ; los archivos del elegido
+    variable ga_de: arreglo [12] de byte        ; de qué paquete son
+    variable ga_malos: nat32
+    variable pestaña: nat32
+    variable abierto_m: ent32 = -1
+    variable tamaño_: nat32 = T_NORMAL
+    variable aviso: arreglo [200] de byte
+    variable t: arreglo [400] de byte
+    variable t2: arreglo [200] de byte
+    variable dicho: arreglo [200] de byte
+    variable dd: arreglo [6] de nat32
+    ; lo que se pregunta (una ventanita encima)
+    variable pregunta: nat32
+    variable preg_texto: arreglo [700] de byte
+    variable preg_sí: arreglo [48] de byte
+    variable preg_orden: arreglo [400] de byte  ; lo que se le manda a PAQUETES si se dice que sí
+    variable sale: arreglo [MAX_P] de bool
+    ; PAQUETES, por debajo
+    variable salida: arreglo [SALIDA + 1] de byte
+    variable archivo: arreglo [64] de byte      ; C:\HISPA\PAQUETES\PROGRAMA.TXT
+    variable fich_avance: arreglo [64] de byte  ; C:\HISPA\PAQUETES\AVANCE.TXT
+    variable sis: byte
+    variable ocupado, lento: bool
+    variable av_hecho, av_total: nat32
+    variable av_texto: arreglo [80] de byte
+    variable equipo_bin: arreglo [32] de byte   ; C:\HISPA\EQUIPO.BIN (el de la Papelera)
+
+    ; =========================================================================
+    ;  Lo de siempre
+    ; =========================================================================
+    función trozo(l: puntero a byte, i: nat32, destino: puntero a byte, cabe: nat32)
+        variable k: nat32
+        mientras i > 0 y valor(l) <> 0 y valor(l) <> '\n' hacer
+            si valor(l) = '|' entonces i := i - 1 fin
+            l := l + 1
+        fin
+        k := 0
+        mientras valor(l) <> 0 y valor(l) <> '|' y valor(l) <> '\r' y valor(l) <> '\n' y k + 1 < cabe hacer
+            destino[k] := valor(l)
+            k := k + 1
+            l := l + 1
+        fin
+        destino[k] := 0
+    fin
+
+    función siguiente_línea(p: puntero a byte): puntero a byte
+        mientras valor(p) <> 0 y valor(p) <> '\n' hacer p := p + 1 fin
+        si valor(p) = '\n' entonces p := p + 1 fin
+        devolver p
+    fin
+
+    función número_tipo(c: puntero a byte): nat32
+        variable k: nat32
+        variable x: arreglo [32] de byte
+        para k desde 0 hasta N_TIPOS - 1 hacer
+            opción_de(CÓDIGOS_TIPO, k, x, 32)
+            si iguales_sin_caja(c, x) entonces devolver k fin
+        fin
+        devolver N_TIPOS - 1
+    fin
+
+    función une(destino: puntero a byte, a: puntero a byte, b: puntero a byte)
+        Textos32.copiar(destino, a)
+        concatenar(destino, b)
+    fin
+
+    ; lo que mide (en octetos), en llano: «512 octetos», «34 K», «1,2 MB»
+    función tamaño_texto(n: nat32, destino: puntero a byte)
+        variable m: nat32
+        si n < 1024 entonces
+            dd[0] := n
+            formatear(destino, 24, "%u octetos", dd)
+        sino si n < 1048576 entonces
+            dd[0] := (n + 1023) div 1024
+            formatear(destino, 24, "%u K", dd)
+        sino
+            m := (n + 52428) div 104858
+            dd[0] := m div 10
+            dd[1] := m mod 10
+            formatear(destino, 24, "%u,%u MB", dd)
+        fin
+    fin
+
+    ; (la columna del árbol) lo mismo, en K como poco: «1 K» (como el explorador)
+    función tamaño_corto(n: nat32, destino: puntero a byte)
+        si n > 0 y n < 1024 entonces n := 1024 fin
+        tamaño_texto(n, destino)
+    fin
+
+    ; lo mismo, de K
+    función k_texto(k: nat32, destino: puntero a byte)
+        variable m: nat32
+        si k < 1024 entonces
+            dd[0] := k
+            formatear(destino, 24, "%u K", dd)
+        sino si k < 1048576 entonces
+            m := (k * 10 + 512) div 1024
+            dd[0] := m div 10
+            dd[1] := m mod 10
+            formatear(destino, 24, "%u,%u MB", dd)
+        sino
+            m := (k + 52428) div 104858
+            dd[0] := m div 10
+            dd[1] := m mod 10
+            formatear(destino, 24, "%u,%u GB", dd)
+        fin
+    fin
+
+    función existe(ruta: puntero a byte): bool
+        variable m: nat32
+        m := abrir(ruta)
+        si es_error(m) entonces devolver falso fin
+        cerrar(m)
+        devolver cierto
+    fin
+
+    ; el paquete de ese nombre (MAX_P si no está)
+    función de_nombre(n: puntero a byte): nat32
+        variable i: nat32
+        para i desde 1 hasta p_n hacer
+            si iguales(p_nombre[i - 1], n) entonces devolver i - 1 fin
+        fin
+        devolver MAX_P
+    fin
+
+    ; =========================================================================
+    ;  PAQUETES, por debajo (como en uactual.cas)
+    ; =========================================================================
+    función lee_avance()
+        variable m, k, n: nat32
+        variable x: arreglo [120] de byte
+        variable w: arreglo [16] de byte
+        variable q: puntero a byte
+        m := abrir(fich_avance)
+        si es_error(m) entonces devolver fin
+        k := leer(m, x, 119)
+        cerrar(m)
+        si es_error(k) o k < 5 entonces devolver fin
+        x[k] := 0
+        si no palabra(x, 0, w, 16) o no texto_a_natural(w, av_hecho) entonces devolver fin
+        si no palabra(x, 1, w, 16) o no texto_a_natural(w, av_total) entonces av_total := 0 fin
+        q := x
+        n := 0
+        mientras valor(q) <> 0 y n < 2 hacer
+            si valor(q) = ' ' entonces n := n + 1 fin
+            q := q + 1
+        fin
+        trozo(q, 0, av_texto, 80)
+    fin
+
+    ; lanza «PAQUETES args /AVANCE» con lo que escriba mandado a PROGRAMA.TXT;
+    ; mientras trabaja, la barra; deja lo escrito en «salida»; da su código
+    función paquetes(args: puntero a byte): nat32
+        variable m, tarea, c, k, r: nat32
+        variable s: Suceso
+        variable a: arreglo [460] de byte
+        m := crear(archivo)
+        si es_error(m) entonces
+            Textos32.copiar(salida, "No se puede escribir en C:\\HISPA\\PAQUETES.")
+            devolver 1
+        fin
+        une(a, args, " /AVANCE")
+        si lento entonces concatenar(a, " /LENTO") fin
+        borrar(fich_avance)
+        av_hecho := 0
+        av_total := 0
+        Textos32.copiar(av_texto, "Un momento...")
+        redirigir(m)
+        tarea := lanzar("PAQUETES.BIN", a)
+        c := 255
+        si no es_error(tarea) entonces
+            ocupado := cierto
+            c := SIGUE
+            mientras c = SIGUE hacer
+                lee_avance()
+                pinta()
+                mientras suceso(v, s, falso) hacer
+                    si s.clase = EV_TAMAÑO entonces nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_) fin
+                fin
+                dormir(10)
+                c := acabada(tarea)
+            fin
+            ocupado := falso
+        fin
+        redirigir(SIN_SALIDA)
+        borrar(fich_avance)
+        cerrar(m)
+        salida[0] := 0
+        si es_error(tarea) entonces
+            Textos32.copiar(salida, "No está PAQUETES.BIN (el paquete «paquetes»).")
+            devolver 1
+        fin
+        m := abrir(archivo)
+        si no es_error(m) entonces
+            k := 0
+            mientras k < SALIDA hacer
+                r := leer(m, dirección(salida[k]), SALIDA - k)
+                si es_error(r) o r = 0 entonces romper fin
+                k := k + r
+            fin
+            salida[k] := 0
+            cerrar(m)
+        fin
+        borrar(archivo)
+        devolver c
+    fin
+
+    ; la última línea que dice algo de lo que ha dicho PAQUETES (sin «paquetes: »), al aviso
+    función aviso_de_salida()
+        variable p: puntero a byte
+        variable x: arreglo [200] de byte
+        p := salida
+        mientras valor(p) <> 0 hacer
+            si valor(p) <> '\r' y valor(p) <> '\n' y no empieza_por(p, "  ") y no empieza_por(p, "Trayendo ") y no empieza_por(p, "descarga") entonces
+                trozo(p, 0, x, 200)
+                si empieza_por(x, "paquetes: ") entonces Textos32.copiar(aviso, dirección(x[10])) sino Textos32.copiar(aviso, x) fin
+            fin
+            p := siguiente_línea(p)
+        fin
+    fin
+
+    ; ¿ha dicho PAQUETES esa línea?
+    función ha_dicho(trozo_: puntero a byte): bool
+        devolver buscar(salida, trozo_) <> nulo
+    fin
+
+    ; =========================================================================
+    ;  Lo que hay: PAQUETES FICHAS
+    ; =========================================================================
+    función lee()
+        variable p: puntero a byte
+        variable x: arreglo [16] de byte
+        paquetes("fichas")
+        p_n := 0
+        s_n := 0
+        p := salida
+        mientras valor(p) <> 0 hacer
+            trozo(p, 0, x, 16)
+            si iguales(x, "f") y p_n < MAX_P entonces
+                trozo(p, 1, p_nombre[p_n], 12)
+                trozo(p, 2, p_versión[p_n], 16)
+                trozo(p, 3, x, 16)
+                p_tipo[p_n] := número_tipo(x)
+                trozo(p, 4, x, 16)
+                si no texto_a_natural(x, p_octetos[p_n]) entonces p_octetos[p_n] := 0 fin
+                trozo(p, 5, x, 16)
+                si no texto_a_natural(x, p_archivos[p_n]) entonces p_archivos[p_n] := 0 fin
+                trozo(p, 6, p_fecha[p_n], 12)
+                trozo(p, 7, p_impres[p_n], 100)
+                trozo(p, 8, p_necesita[p_n], 160)
+                trozo(p, 9, p_necesitan[p_n], 160)
+                trozo(p, 10, p_desc[p_n], 200)
+                p_n := p_n + 1
+            sino si iguales(x, "s") y s_n < MAX_S entonces
+                trozo(p, 1, s_ruta[s_n], 160)
+                trozo(p, 2, x, 16)
+                si no texto_a_natural(x, s_octetos[s_n]) entonces s_octetos[s_n] := 0 fin
+                trozo(p, 3, s_fecha[s_n], 12)
+                s_n := s_n + 1
+            sino si iguales(x, "u") entonces
+                trozo(p, 1, x, 16)
+                d_letra := x[0]
+                trozo(p, 2, x, 16)
+                si no texto_a_natural(x, d_total_k) entonces d_total_k := 0 fin
+                trozo(p, 3, x, 16)
+                si no texto_a_natural(x, d_libre_k) entonces d_libre_k := 0xFFFFFFFF fin
+            fin
+            p := siguiente_línea(p)
+        fin
+        si p_n = 0 y s_n = 0 y salida[0] <> 0 y no empieza_por(salida, "u|") entonces aviso_de_salida() fin
+    fin
+
+    ; el árbol: cada tipo (con lo que tiene) y, debajo, sus programas
+    función llena_árbol()
+        variable c, i, h, antes, total: nat32
+        variable r: ent32
+        variable x: arreglo [24] de byte
+        antes := rejilla_id(g)
+        rejilla_vaciar(g)
+        para c desde 0 hasta N_CAT - 1 hacer
+            h := 0
+            total := 0
+            si c = CAT_SUELTOS entonces
+                h := s_n
+                para i desde 1 hasta s_n hacer total := total + s_octetos[i - 1] fin
+            sino
+                para i desde 1 hasta p_n hacer
+                    si p_tipo[i - 1] = c entonces
+                        h := h + 1
+                        total := total + p_octetos[i - 1]
+                    fin
+                fin
+            fin
+            si h > 0 entonces
+                r := renglón_nuevo(g, R_NORMAL, ES_CATEGORÍA + c)
+                opción_de(NOMBRES_TIPO, c, t2, 200)
+                dd[0] := nat32("[-]")
+                si no abierta[c] entonces dd[0] := nat32("[+]") fin
+                dd[1] := nat32(dirección(t2[0]))
+                formatear(t, 200, "%s %s", dd)
+                celda(g, r, 0, t)
+                tamaño_corto(total, x)
+                celda(g, r, 2, x)
+                dd[0] := h
+                si h = 1 entonces Textos32.copiar(t, "1 programa") sino formatear(t, 200, "%u programas", dd) fin
+                celda(g, r, 3, t)
+                si abierta[c] entonces
+                    si c = CAT_SUELTOS entonces
+                        para i desde 1 hasta s_n hacer
+                            r := renglón_nuevo(g, R_NORMAL, ES_SUELTO + i - 1)
+                            une(t, "    ", s_ruta[i - 1])
+                            celda(g, r, 0, t)
+                            celda(g, r, 1, "-")
+                            tamaño_corto(s_octetos[i - 1], x)
+                            celda(g, r, 2, x)
+                            celda(g, r, 3, "copiado a mano, sin paquete")
+                        fin
+                    sino
+                        para i desde 1 hasta p_n hacer
+                            si p_tipo[i - 1] = c entonces
+                                r := renglón_nuevo(g, R_NORMAL, i)
+                                une(t, "    ", p_nombre[i - 1])
+                                celda(g, r, 0, t)
+                                celda(g, r, 1, p_versión[i - 1])
+                                tamaño_corto(p_octetos[i - 1], x)
+                                celda(g, r, 2, x)
+                                celda(g, r, 3, p_desc[i - 1])
+                            fin
+                        fin
+                    fin
+                fin
+            fin
+        fin
+        rejilla_lista(g)
+        si antes <> 0 entonces rejilla_elegir_id(g, antes) fin
+        si rejilla_id(g) = 0 entonces rejilla_ir(g, 0) fin
+    fin
+
+    ; lo que ocupan todos (octetos)
+    función total_programas(): nat32
+        variable i, n: nat32
+        n := 0
+        para i desde 1 hasta p_n hacer n := n + p_octetos[i - 1] fin
+        para i desde 1 hasta s_n hacer n := n + s_octetos[i - 1] fin
+        devolver n
+    fin
+
+    ; =========================================================================
+    ;  Pintar
+    ; =========================================================================
+    ; un renglón de la ficha: el rótulo y lo que dice (que puede ocupar varias líneas)
+    función fila(x: ent32, ref yy: ent32, an: ent32, rótulo: puntero a byte, val: puntero a byte, tinta: nat32, límite: ent32)
+        si yy + LT > límite entonces devolver fin
+        texto_corto(x, yy, rótulo, 17 * LA, C_SUAVE, cierto)
+        yy := yy + párrafo(x + 18 * LA, yy, an - 18 * LA, val, tinta, falso, cierto) + 2 * E
+    fin
+
+    función ficha(x: ent32, yy: ent32, an: ent32, límite: ent32)
+        variable id, i, c, h, total: nat32
+        variable x2: arreglo [40] de byte
+        id := rejilla_id(g)
+        si id = 0 entonces
+            párrafo(x, yy, an, "Elija un programa de la lista.", C_SUAVE, falso, cierto)
+            devolver
+        fin
+        si id >= ES_SUELTO entonces
+            i := id - ES_SUELTO
+            texto_corto(x, yy, s_ruta[i], an, C_TINTA, cierto)
+            yy := yy + LT + 4 * E
+            fila(x, yy, an, "Tipo:", "Programas de terceros (sin paquete)", C_TINTA, límite)
+            tamaño_texto(s_octetos[i], x2)
+            fila(x, yy, an, "Tamaño en disco:", x2, C_TINTA, límite)
+            fila(x, yy, an, "Fecha:", s_fecha[i], C_TINTA, límite)
+            si existe(equipo_bin) entonces
+                fila(x, yy, an, "Qué es:", "Un programa copiado a mano: no es de ningún paquete. «Borrar» lo manda a la Papelera (se puede recuperar desde Mi equipo).", C_TINTA, límite)
+            sino
+                fila(x, yy, an, "Qué es:", "Un programa copiado a mano: no es de ningún paquete. «Borrar» lo borra del todo (sin Mi equipo no hay Papelera).", C_TINTA, límite)
+            fin
+            devolver
+        fin
+        si id >= ES_CATEGORÍA entonces
+            c := id - ES_CATEGORÍA
+            opción_de(NOMBRES_TIPO, c, t2, 200)
+            texto_corto(x, yy, t2, an, C_TINTA, cierto)
+            yy := yy + LT + 4 * E
+            h := 0
+            total := 0
+            si c = CAT_SUELTOS entonces
+                h := s_n
+                para i desde 1 hasta s_n hacer total := total + s_octetos[i - 1] fin
+            sino
+                para i desde 1 hasta p_n hacer
+                    si p_tipo[i - 1] = c entonces
+                        h := h + 1
+                        total := total + p_octetos[i - 1]
+                    fin
+                fin
+            fin
+            dd[0] := h
+            formatear(t, 200, "%u", dd)
+            fila(x, yy, an, "Programas:", t, C_TINTA, límite)
+            tamaño_texto(total, x2)
+            fila(x, yy, an, "Ocupan:", x2, C_TINTA, límite)
+            párrafo(x, yy, an, "Intro, o un clic en [+] / [-], abre o cierra el apartado.", C_SUAVE, falso, cierto)
+            devolver
+        fin
+        i := id - 1
+        texto_corto(x, yy, p_desc[i], an, C_TINTA, cierto)
+        yy := yy + LT + 4 * E
+        fila(x, yy, an, "Paquete:", p_nombre[i], C_TINTA, límite)
+        opción_de(NOMBRES_TIPO, p_tipo[i], t2, 200)
+        fila(x, yy, an, "Tipo:", t2, C_TINTA, límite)
+        fila(x, yy, an, "Versión:", p_versión[i], C_TINTA, límite)
+        tamaño_texto(p_octetos[i], x2)
+        dd[0] := nat32(dirección(x2[0]))
+        dd[1] := p_archivos[i]
+        si p_archivos[i] = 1 entonces formatear(t, 200, "%s (un archivo)", dd) sino formatear(t, 200, "%s (%u archivos)", dd) fin
+        fila(x, yy, an, "Tamaño en disco:", t, C_TINTA, límite)
+        si p_fecha[i][0] <> 0 entonces fila(x, yy, an, "Instalado el:", p_fecha[i], C_TINTA, límite) fin
+        si p_necesita[i][0] <> 0 entonces fila(x, yy, an, "Necesita:", p_necesita[i], C_TINTA, límite) sino fila(x, yy, an, "Necesita:", "nada más", C_TINTA, límite) fin
+        si p_necesitan[i][0] <> 0 entonces fila(x, yy, an, "Lo necesitan:", p_necesitan[i], C_TINTA, límite) sino fila(x, yy, an, "Lo necesitan:", "ninguno", C_TINTA, límite) fin
+        si p_impres[i][0] <> 0 entonces
+            une(t, "No: es imprescindible (", p_impres[i])
+            concatenar(t, ").")
+            fila(x, yy, an, "Se puede quitar:", t, C_NARANJA, límite)
+        fin
+    fin
+
+    ; la ventanita de lo que se pregunta, encima de todo (solo ella tiene controles)
+    función pinta_pregunta()
+        variable an, al, x, yy, hb, bx: ent32
+        an := 60 * LA
+        si an > ancho - 2 * LA entonces an := ancho - 2 * LA fin
+        hb := párrafo(0, 0, an - 4 * LA, preg_texto, C_TINTA, falso, falso)
+        al := hb + alto_botón() + LT + 18 * E
+        x := (ancho - an) div 2
+        yy := (alto - al) div 2
+        empezar_controles()
+        caja(x + 4 * E, yy + 4 * E, an, al, 0x9CA3AF)
+        caja(x, yy, an, al, C_BORDE)
+        caja(x + 2 * E, yy + 2 * E, an - 4 * E, al - 4 * E, C_PAPEL)
+        si pregunta = PR_NO_SE_PUEDE entonces
+            caja(x + 2 * E, yy + 2 * E, an - 4 * E, 4 * E, C_NARANJA)
+        sino
+            caja(x + 2 * E, yy + 2 * E, an - 4 * E, 4 * E, C_ROJO)
+        fin
+        párrafo(x + 2 * LA, yy + LT div 2 + 6 * E, an - 4 * LA, preg_texto, C_TINTA, falso, cierto)
+        bx := x + an - 2 * LA
+        si pregunta = PR_NO_SE_PUEDE entonces
+            bx := bx - ancho_botón("Entendido")
+            botón(ID_NO, bx, yy + al - alto_botón() - 6 * E, "Entendido", cierto, falso)
+        sino
+            bx := bx - ancho_botón("Cancelar")
+            botón(ID_NO, bx, yy + al - alto_botón() - 6 * E, "Cancelar", falso, falso)
+            bx := bx - LA - ancho_botón(preg_sí)
+            botón(ID_SÍ, bx, yy + al - alto_botón() - 6 * E, preg_sí, cierto, falso)
+        fin
+    fin
+
+    ; mientras PAQUETES trabaja: lo que hace y la barra (con total, lo hecho; sin él, una franja que corre)
+    función pinta_avance()
+        variable an, al, x, yy, bw, w, q: ent32
+        an := 56 * LA
+        si an > ancho - 2 * LA entonces an := ancho - 2 * LA fin
+        al := 2 * LT + 30 * E
+        x := (ancho - an) div 2
+        yy := (alto - al) div 2
+        caja(x + 4 * E, yy + 4 * E, an, al, 0x9CA3AF)
+        caja(x, yy, an, al, C_BORDE)
+        caja(x + 2 * E, yy + 2 * E, an - 4 * E, al - 4 * E, C_PAPEL)
+        Textos32.copiar(t, av_texto)
+        si av_total > 0 entonces
+            dd[0] := nat32(dirección(av_texto[0]))
+            dd[1] := av_hecho
+            dd[2] := av_total
+            si dd[1] > dd[2] entonces dd[1] := dd[2] fin
+            formatear(t, 200, "%s (%u de %u)", dd)
+        fin
+        texto_corto(x + 2 * LA, yy + 6 * E, t, an - 4 * LA, C_TINTA, cierto)
+        bw := an - 4 * LA
+        caja(x + 2 * LA, yy + LT + 14 * E, bw, LT, C_BORDE)
+        caja(x + 2 * LA + 1, yy + LT + 14 * E + 1, bw - 2, LT - 2, C_GRIS)
+        si av_total > 0 entonces
+            si av_hecho >= av_total entonces w := bw - 4 sino w := ((bw - 4) * ent32(av_hecho)) div ent32(av_total) fin
+            si w > 0 entonces caja(x + 2 * LA + 2, yy + LT + 14 * E + 2, w, LT - 4, C_VERDE) fin
+        sino
+            q := ent32((tics() div 3) mod 100)
+            caja(x + 2 * LA + 2 + ((bw - 4 - 12 * LA) * q) div 100, yy + LT + 14 * E + 2, 12 * LA, LT - 4, C_AZUL)
+        fin
+    fin
+
+    función pinta()
+        variable yy, x, y2, an, al, bx, bw, ar, límite: ent32
+        variable vueltas, id: nat32
+        variable est: arreglo [240] de byte
+        variable x1: arreglo [24] de byte
+        variable x2: arreglo [24] de byte
+        variable x3: arreglo [24] de byte
+        variable nada, es_suelto, es_paq: bool
+        vueltas := 0
+        mientras vueltas < 2 hacer
+            empezar_controles()
+            caja(0, 0, ancho, alto, C_FONDO)
+            id := rejilla_id(g)
+            nada := id = 0 o (id >= ES_CATEGORÍA y id < ES_SUELTO)
+            es_suelto := id >= ES_SUELTO
+            es_paq := no nada y no es_suelto
+            yy := barra_menús(0, 0, ancho, MENÚS, abierto_m)
+            barra_herramientas(0, yy, ancho)
+            x := 4
+            si es_suelto entonces
+                x := x + herramienta(ID_DESINSTALAR, x, yy + 2, I_BORRAR, "Borrar", ocupado) + 2
+            sino
+                x := x + herramienta(ID_DESINSTALAR, x, yy + 2, I_BORRAR, "Desinstalar", nada o ocupado) + 2
+            fin
+            x := x + herramienta(ID_REPARAR, x, yy + 2, I_EDITAR, "Reparar", no es_paq o ocupado) + 2
+            x := x + herramienta(ID_VER, x, yy + 2, I_CARPETA, "Ver archivos", no es_paq o ocupado) + 2
+            x := x + separador(x, yy)
+            x := x + herramienta(ID_ACTUALIZACIONES, x, yy + 2, I_SUBIR, "Actualizaciones", ocupado) + 2
+            x := x + herramienta(ID_REFRESCAR, x, yy + 2, I_REFRESCAR, "Actualizar", ocupado) + 2
+            yy := yy + alto_herramientas() + 4 * E
+            ; el árbol, arriba
+            límite := alto - alto_estado() - 4 * E
+            al := ((límite - yy) * 52) div 100
+            rejilla(g, ID_ÁRBOL, LA div 2, yy, ancho - LA, al, "No hay ningún programa apuntado (¿no está instalado en el disco?).")
+            yy := yy + al + 4 * E
+            ; abajo: las pestañas, la ficha o los archivos, y los botones a la derecha
+            bw := 18 * LA
+            an := ancho - LA - bw - LA
+            yy := yy + pestañas(ID_PESTAÑAS, LA div 2, yy, an, "Detalles|Archivos", pestaña, 0)
+            ar := límite - yy
+            si pestaña = 0 entonces
+                caja(LA div 2, yy, an, ar, C_PAPEL)
+                borde(LA div 2, yy, an, ar, 1, C_BORDE)
+                ficha(LA + LA div 2, yy + 4 * E, an - 2 * LA, yy + ar - 2 * E)
+            sino
+                si ga_de[0] = 0 entonces
+                    rejilla_vaciar(ga)
+                    rejilla_lista(ga)
+                fin
+                rejilla(ga, ID_ARCHIVOS, LA div 2, yy, an, ar, "Elija un paquete y «Ver archivos».")
+            fin
+            ; los botones
+            bx := ancho - bw - LA div 2
+            y2 := yy
+            si es_suelto entonces
+                botón_ancho(ID_DESINSTALAR, bx, y2, bw, "Borrar...", falso, ocupado)
+            sino
+                botón_ancho(ID_DESINSTALAR, bx, y2, bw, "Desinstalar...", falso, nada o ocupado)
+            fin
+            y2 := y2 + alto_botón() + 3 * E
+            botón_ancho(ID_REPARAR, bx, y2, bw, "Reparar", falso, no es_paq o ocupado)
+            y2 := y2 + alto_botón() + 3 * E
+            botón_ancho(ID_VER, bx, y2, bw, "Ver archivos", falso, no es_paq o ocupado)
+            ; el disco
+            y2 := y2 + alto_botón() + 8 * E
+            si d_letra <> 0 entonces
+                tamaño_texto(total_programas(), x1)
+                une(t, "Programas: ", x1)
+                texto_corto(bx, y2, t, bw, C_TINTA, falso)
+                y2 := y2 + LT + 2 * E
+                si d_libre_k <> 0xFFFFFFFF entonces
+                    k_texto(d_libre_k, x2)
+                    k_texto(d_total_k, x3)
+                    dd[0] := nat32(dirección(x2[0]))
+                    texto_corto(bx, y2, "Libre en el disco:", bw, C_SUAVE, falso)
+                    y2 := y2 + LT + 2 * E
+                    dd[1] := nat32(dirección(x3[0]))
+                    formatear(t, 200, "%s de %s", dd)
+                    texto_corto(bx, y2, t, bw, C_TINTA, cierto)
+                    y2 := y2 + LT + 2 * E
+                    ; (la barra del disco: lo ocupado)
+                    si d_total_k > 0 entonces
+                        caja(bx, y2, bw, LT div 2, C_BORDE)
+                        caja(bx + 1, y2 + 1, bw - 2, LT div 2 - 2, C_VERDE_CLARO)
+                        caja(bx + 1, y2 + 1, ent32(((nat32(bw) - 2) * ((d_total_k - d_libre_k) div 64)) div ((d_total_k div 64) + 1)), LT div 2 - 2, C_AZUL)
+                    fin
+                fin
+            fin
+            ; la barra de estado
+            tamaño_texto(total_programas(), x1)
+            dd[0] := p_n
+            dd[1] := s_n
+            dd[2] := nat32(dirección(x1[0]))
+            formatear(est, 240, "%u paquetes|%u sueltos|ocupan %s|", dd)
+            si d_libre_k <> 0xFFFFFFFF y d_letra <> 0 entonces
+                k_texto(d_libre_k, x2)
+                dd[0] := d_letra
+                dd[1] := nat32(dirección(x2[0]))
+                formatear(t, 200, "%c: %s libres|", dd)
+                concatenar(est, t)
+            fin
+            si aviso[0] <> 0 entonces concatenar(est, aviso) sino concatenar(est, "Supr: desinstalar   F5: actualizar") fin
+            barra_estado(alto - alto_estado(), est)
+            si ocupado entonces
+                pinta_avance()
+                romper
+            fin
+            si pregunta <> PR_NADA entonces
+                pinta_pregunta()
+            fin
+            si no asegurar_foco() entonces romper fin
+            vueltas := vueltas + 1
+        fin
+        volcar()
+    fin
+
+    ; =========================================================================
+    ;  Hacer
+    ; =========================================================================
+    ; ¿está el nombre «n» en la lista «a, b, c»?
+    función en_lista(lista: puntero a byte, n: puntero a byte): bool
+        variable k: nat32
+        variable x: arreglo [16] de byte
+        variable p: puntero a byte
+        p := lista
+        mientras valor(p) <> 0 hacer
+            p := saltar_espacios(p)
+            k := 0
+            mientras valor(p) <> 0 y valor(p) <> ',' y valor(p) <> ' ' y k < 15 hacer
+                x[k] := valor(p)
+                k := k + 1
+                p := p + 1
+            fin
+            x[k] := 0
+            si x[0] <> 0 y iguales(x, n) entonces devolver cierto fin
+            mientras valor(p) <> 0 y valor(p) <> ',' hacer p := p + 1 fin
+            si valor(p) = ',' entonces p := p + 1 fin
+        fin
+        devolver falso
+    fin
+
+    ; Desinstalar (o, si es suelto, Borrar): lo que se va a hacer, y que se confirme
+    función pide_quitar()
+        variable id, i, j, n, k, octetos: nat32
+        variable más: bool
+        variable x: arreglo [24] de byte
+        id := rejilla_id(g)
+        aviso[0] := 0
+        si id = 0 o (id >= ES_CATEGORÍA y id < ES_SUELTO) entonces devolver fin
+        si id >= ES_SUELTO entonces
+            i := id - ES_SUELTO
+            une(preg_texto, "¿Borrar ", s_ruta[i])
+            tamaño_texto(s_octetos[i], x)
+            concatenar(preg_texto, " (")
+            concatenar(preg_texto, x)
+            si existe(equipo_bin) entonces
+                concatenar(preg_texto, ")? Va a la Papelera: se puede recuperar desde Mi equipo.")
+            sino
+                concatenar(preg_texto, ")? Sin Mi equipo no hay Papelera: se borra del todo.")
+            fin
+            Textos32.copiar(preg_sí, "Borrar")
+            Textos32.copiar(preg_orden, s_ruta[i])
+            pregunta := PR_BORRAR
+            foco := ID_NO
+            devolver
+        fin
+        i := id - 1
+        ; lo que sale: él y lo que lo necesite (y lo que necesite a eso...)
+        para j desde 1 hasta p_n hacer sale[j - 1] := falso fin
+        sale[i] := cierto
+        más := cierto
+        mientras más hacer
+            más := falso
+            para j desde 1 hasta p_n hacer
+                si sale[j - 1] entonces
+                    para k desde 1 hasta p_n hacer
+                        si no sale[k - 1] y en_lista(p_necesitan[j - 1], p_nombre[k - 1]) entonces
+                            sale[k - 1] := cierto
+                            más := cierto
+                        fin
+                    fin
+                fin
+            fin
+        fin
+        ; lo imprescindible no se quita (ni él ni lo que lo necesita)
+        para j desde 1 hasta p_n hacer
+            si sale[j - 1] y p_impres[j - 1][0] <> 0 entonces
+                si j - 1 = i entonces
+                    une(preg_texto, p_nombre[i], " no se puede desinstalar: es imprescindible (")
+                sino
+                    une(preg_texto, p_nombre[i], " no se puede desinstalar: lo necesita ")
+                    concatenar(preg_texto, p_nombre[j - 1])
+                    concatenar(preg_texto, ", que es imprescindible (")
+                fin
+                concatenar(preg_texto, p_impres[j - 1])
+                concatenar(preg_texto, ").")
+                pregunta := PR_NO_SE_PUEDE
+                foco := ID_NO
+                devolver
+            fin
+        fin
+        n := 0
+        octetos := 0
+        para j desde 1 hasta p_n hacer
+            si sale[j - 1] entonces
+                n := n + 1
+                octetos := octetos + p_octetos[j - 1]
+            fin
+        fin
+        tamaño_texto(octetos, x)
+        une(preg_orden, "quita ", p_nombre[i])
+        si n = 1 entonces
+            dd[0] := nat32(dirección(p_nombre[i][0]))
+            dd[1] := nat32(dirección(p_versión[i][0]))
+            dd[2] := p_archivos[i]
+            dd[3] := nat32(dirección(x[0]))
+            formatear(preg_texto, 700, "¿Desinstalar %s %s? Se quitan sus %u archivos (%s). Si se corta a mitad, la próxima vez queda como estaba.", dd)
+            Textos32.copiar(preg_sí, "Desinstalar")
+        sino
+            dd[0] := nat32(dirección(p_nombre[i][0]))
+            formatear(preg_texto, 700, "Hay programas que necesitan %s: ", dd)
+            k := 0
+            para j desde 1 hasta p_n hacer
+                si sale[j - 1] y j - 1 <> i entonces
+                    si k > 0 entonces concatenar(preg_texto, ", ") fin
+                    concatenar(preg_texto, p_nombre[j - 1])
+                    k := k + 1
+                fin
+            fin
+            dd[0] := nat32(dirección(p_nombre[i][0]))
+            dd[1] := n
+            dd[2] := nat32(dirección(x[0]))
+            formatear(t, 200, ". Sin %s no funcionarían. ¿Quitarlos también? Se quitan los %u (%s).", dd)
+            concatenar(preg_texto, t)
+            dd[0] := n
+            formatear(preg_sí, 48, "Quitar los %u", dd)
+            concatenar(preg_orden, " /DEPENDIENTES")
+        fin
+        pregunta := PR_QUITAR
+        foco := ID_NO
+    fin
+
+    ; se ha dicho que sí
+    función hace_pregunta()
+        variable p: nat32
+        variable a: arreglo [200] de byte
+        p := pregunta
+        pregunta := PR_NADA
+        si p = PR_QUITAR entonces
+            paquetes(preg_orden)
+            aviso_de_salida()
+            si ha_dicho("Hecho.") entonces Textos32.copiar(aviso, "Desinstalado.") fin
+            ga_de[0] := 0
+            lee()
+            llena_árbol()
+        sino si p = PR_BORRAR entonces
+            si existe(equipo_bin) entonces
+                une(a, "/BORRAR ", preg_orden)
+                p := lanzar(equipo_bin, a)
+                si no es_error(p) entonces esperar(p) fin
+            sino
+                borrar(preg_orden)
+            fin
+            si existe(preg_orden) entonces
+                une(aviso, "No se ha podido borrar ", preg_orden)
+            sino si existe(equipo_bin) entonces
+                Textos32.copiar(aviso, "Está en la Papelera.")
+            sino
+                Textos32.copiar(aviso, "Borrado.")
+            fin
+            lee()
+            llena_árbol()
+        fin
+    fin
+
+    función repara()
+        variable id: nat32
+        id := rejilla_id(g)
+        si id = 0 o id >= ES_CATEGORÍA entonces devolver fin
+        une(t, "repara ", p_nombre[id - 1])
+        paquetes(t)
+        aviso_de_salida()
+        si ha_dicho("  reparado ") entonces
+            une(dicho, p_nombre[id - 1], " reparado: lo dañado se ha vuelto a poner.")
+        sino si ha_dicho(" está bien (sus ") entonces
+            une(dicho, p_nombre[id - 1], " está bien: todos sus archivos, como se instalaron.")
+        sino
+            Textos32.copiar(dicho, aviso)
+        fin
+        si pestaña = 1 entonces ver_archivos() fin
+        Textos32.copiar(aviso, dicho)
+        lee()
+        llena_árbol()
+    fin
+
+    ; la pestaña «Archivos»: PAQUETES ARCHIVOS nombre
+    función ver_archivos()
+        variable id: nat32
+        variable p: puntero a byte
+        variable r: ent32
+        variable e: arreglo [16] de byte
+        variable m: arreglo [16] de byte
+        variable x: arreglo [24] de byte
+        variable n: nat32
+        id := rejilla_id(g)
+        si id = 0 o id >= ES_CATEGORÍA entonces devolver fin
+        une(t, "archivos ", p_nombre[id - 1])
+        paquetes(t)
+        Textos32.copiar(ga_de, p_nombre[id - 1])
+        rejilla_vaciar(ga)
+        ga_malos := 0
+        p := salida
+        mientras valor(p) <> 0 hacer
+            si empieza_por(p, "  ") entonces
+                palabra(p, 0, e, 16)
+                palabra(p, 1, m, 16)
+                palabra(p, 2, t2, 200)
+                si iguales(e, "FALTA") o iguales(e, "CAMBIADO") entonces
+                    r := renglón_nuevo(ga, R_AVISO, 1)
+                    ga_malos := ga_malos + 1
+                sino
+                    r := renglón_nuevo(ga, R_NORMAL, 1)
+                fin
+                si iguales(e, "bien") entonces celda(ga, r, 0, "bien") sino si iguales(e, "FALTA") entonces celda(ga, r, 0, "FALTA") sino celda(ga, r, 0, "CAMBIADO") fin
+                si texto_a_natural(m, n) entonces tamaño_texto(n, x) sino x[0] := 0 fin
+                celda(ga, r, 1, x)
+                celda(ga, r, 2, t2)
+            fin
+            p := siguiente_línea(p)
+        fin
+        rejilla_lista(ga)
+        pestaña := 1
+        si ga_malos = 0 entonces
+            une(aviso, p_nombre[id - 1], ": todos sus archivos están como se instalaron.")
+        sino
+            dd[0] := ga_malos
+            dd[1] := nat32(dirección(p_nombre[id - 1][0]))
+            si ga_malos = 1 entonces
+                formatear(aviso, 200, "Un archivo dañado: «Reparar» lo vuelve a poner (%s).", dirección(dd[1]))
+            sino
+                formatear(aviso, 200, "%u archivos dañados: «Reparar» los vuelve a poner (%s).", dd)
+            fin
+        fin
+    fin
+
+    función hace(id: nat32)
+        si id = ID_DESINSTALAR entonces pide_quitar()
+        sino si id = ID_REPARAR entonces repara()
+        sino si id = ID_VER entonces ver_archivos()
+        sino si id = ID_ACTUALIZACIONES entonces lanzar_suelto("\\HISPA\\ACTUALIZ.BIN", "")
+        sino si id = ID_REFRESCAR entonces
+            lee()
+            llena_árbol()
+            si aviso[0] = 0 entonces Textos32.copiar(aviso, "Lista puesta al día") fin
+        sino si id = ID_SÍ entonces hace_pregunta()
+        sino si id = ID_NO entonces pregunta := PR_NADA
+        fin
+    fin
+
+    ; un tipo: abrirlo o cerrarlo
+    función abre_cierra(id: nat32)
+        si id >= ES_CATEGORÍA y id < ES_SUELTO entonces
+            abierta[id - ES_CATEGORÍA] := no abierta[id - ES_CATEGORÍA]
+            llena_árbol()
+        fin
+    fin
+
+    función todas(sí: bool)
+        variable c: nat32
+        para c desde 0 hasta N_CAT - 1 hacer abierta[c] := sí fin
+        llena_árbol()
+    fin
+
+    función abre_menú_n(k: nat32)
+        abierto_m := ent32(k)
+        según k
+            caso 0: abrir_menú_barra(0, "Desinstalar...|Reparar|Ver archivos|-|Programas y actualizaciones...|-|Cerrar", 0)
+            caso 1: abrir_menú_barra(1, "Actualizar|Abrir todos|Cerrar todos|-|Letra normal|Letra grande", 0)
+            si no: abrir_menú_barra(2, "Acerca de Programas instalados", 0)
+        fin
+    fin
+
+    ; lo elegido en un menú: cierto si hay que cerrar
+    función elegido(cuál: nat32, op: nat32): bool
+        abierto_m := -1
+        si op = SIN_ELEGIR entonces devolver falso fin
+        si cuál = 0 entonces
+            según nat16(op)
+                caso 0: pide_quitar()
+                caso 1: repara()
+                caso 2: ver_archivos()
+                caso 4: hace(ID_ACTUALIZACIONES)
+                caso 6: devolver cierto
+            fin
+        sino si cuál = 1 entonces
+            según nat16(op)
+                caso 0: hace(ID_REFRESCAR)
+                caso 1: todas(cierto)
+                caso 2: todas(falso)
+                caso 4:
+                    tamaño_ := T_NORMAL
+                    nuevo_tamaño(ancho, alto, tamaño_)
+                caso 5:
+                    tamaño_ := T_GRANDE
+                    nuevo_tamaño(ancho, alto, tamaño_)
+            fin
+        sino si cuál = 2 entonces
+            Textos32.copiar(aviso, "Programas instalados de Hispa-Pentium (GPL-2.0 o posterior)")
+        sino si cuál = 3 entonces
+            ; el menú de un programa (botón derecho)
+            según nat16(op)
+                caso 0: pide_quitar()
+                caso 1: repara()
+                caso 2: ver_archivos()
+            fin
+        fin
+        devolver falso
+    fin
+
+    función tecla_pulsada(c: nat32): bool
+        variable m: ent32
+        variable id: nat32
+        si pregunta <> PR_NADA entonces
+            si c = 27 entonces
+                pregunta := PR_NADA
+            sino si c = '\t' o c = TECLA_MAYÚS_TAB o c = TECLA_IZQUIERDA o c = TECLA_DERECHA entonces
+                si pregunta = PR_NO_SE_PUEDE entonces foco := ID_NO sino si foco = ID_SÍ entonces foco := ID_NO sino foco := ID_SÍ fin
+            sino si c = '\n' o c = ' ' entonces
+                hace(foco)
+            fin
+            devolver falso
+        fin
+        aviso[0] := 0
+        m := menú_de_alt(MENÚS, c)
+        si m >= 0 entonces
+            abre_menú_n(nat32(m))
+            devolver falso
+        fin
+        id := rejilla_id(g)
+        si c = TECLA_CTRL_TAB o c = TECLA_CTRL_MAYÚS_TAB entonces
+            pestaña := 1 - pestaña
+        sino si c = '\t' o c = TECLA_MAYÚS_TAB entonces
+            pasar_foco(c = '\t')
+        sino si c = '\n' entonces
+            si foco = ID_ÁRBOL o foco = ID_ARCHIVOS o foco = ID_PESTAÑAS entonces
+                si id >= ES_CATEGORÍA y id < ES_SUELTO entonces abre_cierra(id) sino si id <> 0 y id < ES_CATEGORÍA entonces ver_archivos() fin
+            sino
+                hace(foco)
+            fin
+        sino si c = ' ' y foco >= ID_DESINSTALAR entonces
+            hace(foco)
+        sino si (c = TECLA_IZQUIERDA o c = TECLA_DERECHA) y foco = ID_PESTAÑAS entonces
+            pestaña := 1 - pestaña
+        sino si (c = TECLA_IZQUIERDA o c = TECLA_DERECHA) y id >= ES_CATEGORÍA y id < ES_SUELTO entonces
+            abierta[id - ES_CATEGORÍA] := c = TECLA_DERECHA
+            llena_árbol()
+        sino si c = TECLA_SUPR entonces
+            pide_quitar()
+        sino si c = TECLA_F5 entonces
+            hace(ID_REFRESCAR)
+        sino si c = 27 entonces
+            devolver cierto
+        sino si foco = ID_ARCHIVOS entonces
+            rejilla_tecla(ga, c)
+        sino
+            si rejilla_tecla(g, c) entonces ga_de[0] := 0 fin
+        fin
+        devolver falso
+    fin
+
+    función clic(x: ent32, yy: ent32, veces_: nat32, derecho: bool)
+        variable id, antes: nat32
+        variable m, r: ent32
+        si pregunta <> PR_NADA entonces
+            id := control_en(x, yy)
+            si id = ID_SÍ o id = ID_NO entonces hace(id) fin
+            devolver
+        fin
+        aviso[0] := 0
+        m := menú_en_barra(x, yy)
+        si m >= 0 entonces
+            abre_menú_n(nat32(m))
+            devolver
+        fin
+        id := control_en(x, yy)
+        si id = 0 entonces devolver fin
+        si id = ID_ÁRBOL entonces
+            foco := id
+            antes := rejilla_id(g)
+            r := rejilla_clic(g, x, yy)
+            si r = -2 entonces
+                ; (el árbol no se ordena: va como está)
+                g.orden_col := -1
+                llena_árbol()
+                devolver
+            fin
+            si r < 0 entonces devolver fin
+            si rejilla_id(g) <> antes entonces ga_de[0] := 0 fin
+            si derecho entonces
+                si rejilla_id(g) > 0 y rejilla_id(g) < ES_CATEGORÍA entonces menú(v, x, yy, "Desinstalar...|Reparar|Ver archivos", 0, 3) fin
+                si rejilla_id(g) >= ES_SUELTO entonces menú(v, x, yy, "Borrar...", 0, 3) fin
+                devolver
+            fin
+            si rejilla_id(g) >= ES_CATEGORÍA y rejilla_id(g) < ES_SUELTO y (x < g.col_x[0] + 3 * LA o veces_ >= 2) entonces
+                abre_cierra(rejilla_id(g))
+            sino si veces_ >= 2 y rejilla_id(g) < ES_CATEGORÍA entonces
+                ver_archivos()
+            fin
+        sino si id = ID_ARCHIVOS entonces
+            foco := id
+            rejilla_clic(ga, x, yy)
+        sino si id = ID_PESTAÑAS entonces
+            foco := id
+            m := pestaña_de(ID_PESTAÑAS, x, yy)
+            si m >= 0 entonces pestaña := nat32(m) fin
+        sino si no derecho entonces
+            hace(id)
+        fin
+    fin
+
+    función principal(): byte
+        variable s: Suceso
+        variable u: Info_unidad
+        variable c, i: nat32
+        variable a: arreglo [64] de byte
+        sis := 'C'
+        i := 0
+        mientras info_unidad(i, u) hacer
+            si u.del_sistema = 1 entonces sis := u.letra fin
+            i := i + 1
+        fin
+        archivo[0] := sis
+        archivo[1] := 0
+        concatenar(archivo, ":\\HISPA\\PAQUETES\\PROGRAMA.TXT")
+        fich_avance[0] := sis
+        fich_avance[1] := 0
+        concatenar(fich_avance, ":\\HISPA\\PAQUETES\\AVANCE.TXT")
+        equipo_bin[0] := sis
+        equipo_bin[1] := 0
+        concatenar(equipo_bin, ":\\HISPA\\EQUIPO.BIN")
+        argumentos(a, 64)
+        a_mayúsculas(a)
+        lento := buscar(a, "/LENTO") <> nulo
+        si no preparar_medida("Programas instalados", 760, 540, tamaño_) entonces
+            escribir("programa: no hay escritorio: PAQUETES LISTA /TIPO lo dice en texto\n")
+            devolver 1
+        fin
+        para c desde 0 hasta N_CAT - 1 hacer abierta[c] := cierto fin
+        rejilla_nueva(g, MAX_P + MAX_S + N_CAT + 4)
+        rejilla_columna(g, "Programa", 40, falso)
+        rejilla_columna(g, "Versión", 7, falso)
+        rejilla_columna(g, "Tamaño", 9, cierto)
+        rejilla_columna(g, "Qué es", 0, falso)
+        rejilla_nueva(ga, 80)
+        rejilla_columna(ga, "Estado", 9, falso)
+        rejilla_columna(ga, "Tamaño", 11, cierto)
+        rejilla_columna(ga, "Archivo", 0, falso)
+        foco := ID_ÁRBOL
+        Textos32.copiar(aviso, "Mirando lo instalado...")
+        lee()
+        llena_árbol()
+        si aviso[0] <> 0 y empieza_por(aviso, "Mirando") entonces aviso[0] := 0 fin
+        pinta()
+        mientras suceso(v, s, cierto) hacer
+            si s.clase = EV_TECLA entonces
+                si tecla_pulsada(s.a) entonces devolver 0 fin
+                pinta()
+            sino si s.clase = EV_RATÓN_BAJA entonces
+                clic(ent32(s.a), ent32(s.b), veces(s.c), s.c yb BOTÓN_DERECHO <> 0)
+                pinta()
+            sino si s.clase = EV_MENÚ entonces
+                si elegido(s.b, s.a) entonces devolver 0 fin
+                pinta()
+            sino si s.clase = EV_TAMAÑO entonces
+                nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
+                pinta()
+            sino si s.clase = EV_CERRAR entonces
+                devolver 0
+            fin
+        fin
+        devolver 0
+    fin
+
+fin UProgram.

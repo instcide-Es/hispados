@@ -103,6 +103,7 @@ módulo Escritorio
     ; ---- la medida de la pantalla (Configuración > Cambiar...) ----
     constante AC_PANTALLA = 30
     constante AC_RED_TS = 70                    ; (TAILSCALE) Configuración > «Red y Tailscale...»
+    constante AC_PROGRAMAS_INST = 74            ; (PROGRAMAS) Configuración > «Programas...» (PROGRAMA.BIN)
     constante AC_CERRAR_PANTALLA = 31
     constante AC_PROBAR = 32
     constante AC_GUARDAR_MODO = 33
@@ -1224,6 +1225,8 @@ módulo Escritorio
             pulsador(v_config, 110, 210, 100, 28, "Visible", 0xA9BDD8, 0x7C95B8, AC_DOCK_SÍ)
             pulsador(v_config, 218, 210, 100, 28, "Oculto", VERDE_ARRIBA, VERDE_ABAJO, AC_DOCK_NO)
         fin
+        ; (PROGRAMAS) los programas instalados, por tipos: desinstalar, reparar...
+        pulsador(v_config, 326, 210, 120, 28, "Programas...", 0x5AA6F4, 0x2468C8, AC_PROGRAMAS_INST)
         ; (dispositivos) lo que hay en el equipo y qué lo lleva; (TAILSCALE) la red
         pulsador(v_config, 14, 246, 150, 28, "Dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
         pulsador(v_config, 172, 246, 166, 28, "Red y Tailscale...", 0x5AA6F4, 0x2468C8, AC_RED_TS)
@@ -2066,6 +2069,7 @@ módulo Escritorio
                 si v_config <> 0 entonces pinta_config() fin
             caso AC_CERRAR_CONFIG: cierra_cuadro(v_config)
             caso AC_RED_TS: lanza("\\TAILSCAL.BIN", "/VENTANA")     ; (TAILSCALE) Configuración > Red y Tailscale
+            caso AC_PROGRAMAS_INST: lanza("\\PROGRAMA.BIN", nulo)    ; (PROGRAMAS) Configuración > Programas
             caso AC_PANTALLA:
                 texto_pantalla[0] := 0
                 abre_pantalla()
