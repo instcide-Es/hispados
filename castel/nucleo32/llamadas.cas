@@ -57,6 +57,12 @@ módulo Llamadas
     público constante TECLA_F3 = 0x13D
     público constante TECLA_F8 = 0x142
     público constante TECLA_MAYÚS_TAB = 0x10F   ; Mayús+Tab (en una ventana del escritorio): el control de antes
+    público constante TECLA_CTRL_TAB = 0x110    ; Ctrl+Tab (en una ventana del escritorio): la pestaña siguiente
+    público constante TECLA_CTRL_MAYÚS_TAB = 0x111  ; Ctrl+Mayús+Tab: la pestaña de antes
+    público constante TECLA_ALT = 0x180         ; Alt+letra: TECLA_ALT + (la letra - 'a'), de la a a la z (los menús)
+    público constante TECLA_F2 = 0x13C
+    público constante TECLA_F4 = 0x13E
+    público constante TECLA_F5 = 0x13F
     público constante CTRL_C = 3
 
     público constante CORTADA = 254             ; el código de un programa acabado con Ctrl+C
@@ -682,6 +688,12 @@ módulo Llamadas
     ; el disquete de la casa, de ese lado
     público función disquete(v: nat32, x: ent32, yy: ent32, lado: ent32)
         dibuja(v, OP_DISQUETE, x, yy, lado, lado, 0, 0)
+    fin
+
+    ; maximiza la ventana (como dos clics en su título): llega luego
+    ; EV_TAMAÑO con lo que mide lo de dentro (la llamada 81)
+    público función maximizar(v: nat32)
+        llamada(81, v, 0, 0)
     fin
 
     ; las veces seguidas que se ha pulsado el ratón ahí (1; 2, el doble clic;

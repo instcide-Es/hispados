@@ -2123,7 +2123,7 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -8; fi
-    if grep -q "^|  base      0.8.1   El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|10 paquetes\.$" $Z/b2$hc.txt \
+    if grep -q "^|  base      0.8.2   El sistema base" $Z/b2$hc.txt && grep -q "^|  oficina   1.0     La oficina de Hispa-386" $Z/b2$hc.txt && grep -q "^|10 paquetes\.$" $Z/b2$hc.txt \
       && grep -q "^|Los archivos de los 10 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
       ok "PAQUETES en el sistema recién instalado: LISTA dice los 10 paquetes del sistema (base, oficina...) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -12; fi
@@ -2509,6 +2509,28 @@ miracap "un acceso de un paquete (\\HISPA\\MENU\\SALUDO.MNU): su icono (el .ICP,
 miracap "y en el menú Inicio, debajo de Mi equipo (con el icono a la mitad)" ac1 negrita 30 310 60 330 "Mi equipo" negrita 30 345 60 370 Saludo
 S=$A9/sal.txt
 mira "elegirlo en el menú lanza su programa (programa=\\HOLA.BIN)" "escritorio: lanzo .HOLA.BIN"
+
+# 10. los controles de las ventanas (controles.cas; controles-erp, 21/11):
+# MUESTRA.BIN, maximizada y con la letra a vez y media: la barra de menús
+# (Alt+V), la de herramientas, las pestañas (Ctrl+Tab), una rejilla que se
+# ordena (un clic en un rótulo) y se filtra (sin tildes), recuadros, un
+# campo de fecha, una desplegable y la barra de estado
+C10=$Q/ctl
+mkdir -p $C10
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/umuestra.cas -o $C10/m.asm > /dev/null 2>&1 && nasm -f bin $C10/m.asm -o $C10/MUESTRA.BIN
+$AQUI/nucleo32/disco.sh $C10/d.img 16 > /dev/null 2>&1
+mcopy -i $C10/d.img $C10/MUESTRA.BIN ::
+CAPTURAS=$G DISCO=$C10/d.img MEMORIA=64 MODULOS= ARRANQUE=escritorio $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":doble 40 190" ":pausa 2" ":escribe muestra" ":tecla ret" ":pausa 4" \
+  ":raton 620 590" ":captura ct1" ":clic 60 217" ":pausa 1" ":raton 620 590" ":captura ct2" ":clic 30 178" ":escribe angel" ":raton 620 590" ":pausa 1" ":captura ct3" \
+  ":tecla ctrl-tab" ":pausa 1" ":captura ct4" ":tecla alt-v" ":pausa 1" ":captura ct5" > $C10/sal.txt 2>&1
+miracap "MUESTRA.BIN: maximizada (800 x 600), la barra de menús, la de herramientas, las pestañas, la rejilla con sus rótulos y la barra de estado, a vez y media" ct1 \
+  tam 800 600 texto15 10 30 140 60 rchivo texto 20 60 120 90 Nuevo texto 90 60 300 90 Guardar negrita15 10 95 120 130 Lista texto15 90 95 300 130 Ficha \
+  negrita15 60 195 200 235 Nombre negrita15 400 195 660 235 Importe texto15 0 525 300 560 "Ana (titular)"
+miracap "un clic en el rótulo «Nº» ordena la rejilla por él (de menos a más: la 1 arriba)" ct2 texto15 90 230 420 270 "Persona de ejemplo 1"
+miracap "filtrar sin mirar tildes ni mayúsculas: «angel» encuentra «Àngel álvarez»" ct3 negrita15 90 230 420 270 "ngel álvarez" texto15 200 525 800 560 "1 renglones"
+miracap "Ctrl+Tab: la pestaña Ficha, con su recuadro «Datos generales», los campos, la fecha, la desplegable y la casilla" ct4 \
+  negrita15 10 125 300 160 "Datos generales" texto15 20 180 300 215 "Ana Ejemplo" texto15 20 245 300 280 "21/11/2026" texto15 200 245 600 280 "Socio" texto15 40 280 400 320 "Al corriente de pago"
+miracap "Alt+V abre el menú «Ver» de la barra (un menú del escritorio)" ct5 texto 100 40 330 160 "Letra muy grande"
 
 # 9. la firma (Ed25519, firma.cas): el catálogo de prueba va firmado con la
 # clave de prueba (la que lleva este PAQUETES); PAQUETES FIRMA la comprueba;

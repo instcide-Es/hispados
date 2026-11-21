@@ -966,6 +966,15 @@ módulo Ventanas
         soltar(cerrojo)
     fin
 
+    ; maximiza la ventana (si no lo estaba ya): la llamada 81 (controles-erp, 21/11)
+    público función maximizar_ventana(id: nat32)
+        variable i: ent32
+        tomar(cerrojo)
+        i := busca(id)
+        si i >= 0 y ventanas[i].banderas yb MAXIMIZADA = 0 entonces cambia_máximo(i) fin
+        soltar(cerrojo)
+    fin
+
     ; lo que hace el botón de una ventana en la barra de tareas: si está
     ; minimizada, vuelve; si es la activa, se minimiza; si no, pasa delante
     público función botón_de_barra(id: nat32)

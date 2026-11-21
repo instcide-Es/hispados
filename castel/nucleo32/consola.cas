@@ -38,6 +38,9 @@ módulo Consola
     público constante TECLA_SUPR = 0x153
     público constante TECLA_LOGO = 0x15B         ; la tecla del logo (la que abre el menú Inicio)
     público constante TECLA_MAYÚS_TAB = 0x10F    ; (solo para el escritorio) Mayús+Tab: ir al control de antes
+    público constante TECLA_CTRL_TAB = 0x110     ; (solo para el escritorio) Ctrl+Tab: la pestaña siguiente
+    público constante TECLA_CTRL_MAYÚS_TAB = 0x111   ; Ctrl+Mayús+Tab: la de antes
+    público constante TECLA_ALT = 0x180          ; (solo para el escritorio) Alt+letra: TECLA_ALT + (la letra - 'a'), de la a a la z
     público constante TECLA_CON_MAYÚS = 0x200    ; (solo para el escritorio) la tecla especial llegó con Mayús pulsada
     público constante MOD_MAYÚS = 1              ; lo que da modificadores()
     público constante MOD_CONTROL = 2
@@ -58,6 +61,9 @@ módulo Consola
     variable cola: arreglo [COLA] de nat16
     variable cola_ent, cola_sal: nat32
     variable mayúsculas, control, alt_gr, extendida, bloqueo: bool
+    variable alt: bool                          ; el Alt de la izquierda (para el escritorio: Alt+letra)
+    variable bloq_num: bool = cierto             ; Bloq Num: el teclado numérico da números (encendido, como deja la BIOS)
+    variable pausa: nat32                       ; los códigos que quedan de la tecla Pausa (E1 1D 45 E1 9D C5)
     variable muerta: nat32                      ; la tecla muerta que espera su vocal (0: ninguna)
     variable español: bool = cierto
     variable esperando_tecla: puntero a Tarea
@@ -159,6 +165,23 @@ módulo Consola
         devolver c
     fin
 
+    ; la cifra del teclado numérico (con Bloq Num) de un código de 0x47 a 0x53
+    función cifra_numérica(código: nat32): nat32
+        según código
+            caso 0x47: devolver '7'
+            caso 0x48: devolver '8'
+            caso 0x49: devolver '9'
+            caso 0x4B: devolver '4'
+            caso 0x4C: devolver '5'
+            caso 0x4D: devolver '6'
+            caso 0x4F: devolver '1'
+            caso 0x50: devolver '2'
+            caso 0x51: devolver '3'
+            caso 0x52: devolver '0'
+        fin
+        devolver '.'                                    ; 0x53: el punto (Supr sin Bloq Num)
+    fin
+
     ; cada tecla, de su código a su letra, a la cola; y si alguien estaba
     ; esperando, se le despierta
     ; un código de rastreo del teclado (los del teclado PS/2, «juego 1»: la
@@ -168,6 +191,14 @@ módulo Consola
     función llega_código(código: nat32)
         variable c: nat32
         variable era_extendida: bool
+        si pausa > 0 entonces
+            pausa := pausa - 1                          ; lo que queda de la tecla Pausa: nada
+            devolver
+        fin
+        si código = 0xE1 entonces
+            pausa := 5                                  ; la tecla Pausa (E1 1D 45 E1 9D C5): no es Control ni Bloq Num
+            devolver
+        fin
         era_extendida := extendida
         extendida := código = 0xE0
         si código = 0xE0 entonces
@@ -207,6 +238,11 @@ módulo Consola
             control := falso
         sino si código = 0x3A entonces
             bloqueo := no bloqueo
+        sino si código = 0x45 entonces
+            bloq_num := no bloq_num                     ; Bloq Num
+        sino si bloq_num y no mayúsculas y código >= 0x47 y código <= 0x53 y código <> 0x4A y código <> 0x4E entonces
+            muerta := 0
+            llega(cifra_numérica(código))               ; el teclado numérico con Bloq Num: 7 8 9 4 5 6 1 2 3 0 y el punto
         sino si código = 0x4A entonces
             llega('-')                                  ; el teclado numérico: - y +; lo demás, como las flechas
         sino si código = 0x4E entonces
@@ -214,6 +250,18 @@ módulo Consola
         sino si código >= 0x3B y código <= 0x53 y código <> 0x45 y código <> 0x46 entonces
             muerta := 0
             a_la_cola(TECLA_ESPECIAL + código)          ; F1 a F10 y el teclado numérico
+        sino si código = 0x38 entonces
+            alt := cierto                               ; el Alt de la izquierda
+        sino si código = 0xB8 entonces
+            alt := falso
+        sino si código = 0x0F y control y desviado entonces
+            ; Ctrl+Tab y Ctrl+Mayús+Tab: las pestañas (controles-erp, 21/11)
+            muerta := 0
+            si mayúsculas entonces a_la_cola(TECLA_CTRL_MAYÚS_TAB) sino a_la_cola(TECLA_CTRL_TAB) fin
+        sino si alt y desviado y código <= 0x39 y us_normal[código] >= 'a' y us_normal[código] <= 'z' entonces
+            ; Alt+letra: los menús de las ventanas (controles-erp, 21/11)
+            muerta := 0
+            a_la_cola(TECLA_ALT + nat32(us_normal[código]) - 'a')
         sino si código = 0x0F y mayúsculas y desviado entonces
             ; Mayús+Tab, para el escritorio: el control de antes (clicgest-pentium, 20/11)
             muerta := 0

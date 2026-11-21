@@ -15,7 +15,7 @@
  *    - lo de la ventana también se pinta en búferes de 32 bits, con las
  *      letras DejaVu de la página (letra.c), y se da al núcleo con la
  *      llamada 34 (OP_MAPA), solo lo que ha cambiado;
- *    - el ratón (la rueda: el suceso EV_RUEDA del núcleo 0.8.2), el teclado
+ *    - el ratón (la rueda: el suceso EV_RUEDA del núcleo 0.8.3), el teclado
  *      (de la página 437 a Unicode), el portapapeles del sistema, el menú
  *      del botón derecho, los cuadros de alert/confirm (otra ventana) y el
  *      planificador de NetSurf en el bucle de los sucesos.

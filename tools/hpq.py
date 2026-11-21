@@ -83,12 +83,17 @@ MAX_CABECERA = 16384
 # cambiar la resolución desde Configuración; solo suben los paquetes que han
 # cambiado: base, red y tls. Los demás siguen en la 0.8, la del CD)
 VERSION_SISTEMA = '0.8.1'
-VERSION_08 = '0.8'
-# (la 0.8.2, 21/11/2026: el núcleo con la rueda del ratón, el x87 de cada
-# programa y programas de hasta 8 MB, para el Navegador; solo sube «base»)
+# (la 0.8.2, 21/11/2026: los controles de las ventanas —Ctrl+Tab, Alt+letra
+# y la llamada 81, maximizar— en el núcleo, y MUESTRA.BIN en los ejemplos;
+# suben base y ejemplos)
 VERSION_082 = '0.8.2'
+# (la 0.8.3, 21/11/2026: el núcleo con la rueda del ratón, el x87 de cada
+# programa y programas de hasta 8 MB, para el Navegador —el paquete «navega»,
+# OPCIONALES—; sube base)
+VERSION_BASE = '0.8.3'
+VERSION_08 = '0.8'
 SISTEMA = [
-    ('base', VERSION_082, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
+    ('base', VERSION_BASE, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
@@ -96,9 +101,9 @@ SISTEMA = [
     ('bloc', VERSION_08, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
     ('consola', VERSION_08, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
     ('equipo', VERSION_08, 'Mi equipo: las unidades, las carpetas y los archivos', 'base >= 0.7', [('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN')]),
-    ('ejemplos', VERSION_08, 'Programas de ejemplo: HOLA, ECO, PRUEBA y BUCLE', 'base >= 0.7', [
+    ('ejemplos', VERSION_082, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.2', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
-        ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN')]),
+        ('PRUEBA.BIN', r'\HISPA\PRUEBA.BIN'), ('BUCLE.BIN', r'\HISPA\BUCLE.BIN'), ('MUESTRA.BIN', r'\HISPA\MUESTRA.BIN')]),
     ('paquetes', '1.0', 'Programas y actualizaciones: PAQUETES y su ventana', 'base >= 0.7, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN')]),
     ('red', VERSION_SISTEMA, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= 0.8.1', [
@@ -264,7 +269,7 @@ NAVEGA_RECURSOS = ['DEFAULT.CSS', 'QUIRKS.CSS', 'ADBLOCK.CSS', 'INTERNAL.CSS', '
 NAVEGA_FUENTES = ['SANS.TTF', 'SANSN.TTF', 'SERIF.TTF', 'SERIFN.TTF', 'MONO.TTF', 'MONON.TTF']
 OPCIONALES = [
     ('navega', '0.1', 'El Navegador: la web de hoy (NetSurf con JavaScript), con pestañas y descargas',
-     'base >= 0.8.2, red >= 0.8.1, tls >= 0.8.1', [
+     'base >= 0.8.3, red >= 0.8.1, tls >= 0.8.1', [
         ('NAVEGA/NAVEGA.BIN', r'\HISPA\NAVEGA\NAVEGA.BIN'), ('NAVEGA/NAVEGA.INI', r'\HISPA\NAVEGA\NAVEGA.INI'),
         ('NAVEGA/LEEME.TXT', r'\HISPA\NAVEGA\LEEME.TXT')]
      + [('NAVEGA/RECURSOS/' + n, '\\HISPA\\NAVEGA\\RECURSOS\\' + n) for n in NAVEGA_RECURSOS]

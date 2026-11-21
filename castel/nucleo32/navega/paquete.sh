@@ -6,7 +6,7 @@
 # de 8 letras, como su registro .PQI): hace el Navegador (hacer.sh) y deja en SALIDA
 # NAVEGA.HPQ y su línea del catálogo, CATALOGO.LIN (para añadirla a
 # CATALOGO.TXT y firmarlo otra vez; nucleo32/actualiza.sh lo hace solo).
-# Necesita base >= 0.8.2 (el núcleo con la rueda, el x87 de cada programa y
+# Necesita base >= 0.8.3 (el núcleo con la rueda, el x87 de cada programa y
 # programas de hasta 8 MB), red y tls.
 set -e
 AQUI=$(dirname "$(readlink -f "$0")")
