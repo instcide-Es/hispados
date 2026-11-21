@@ -39,6 +39,12 @@ módulo Emergente
     público variable hay_resultado: bool        ; (para el escritorio) se ha cerrado un menú suyo
     público variable resultado: nat32           ; la opción elegida (desde 0), o SIN_ELEGIR
     público variable resultado_etiqueta: nat32
+    ; (PROTEGE) las preguntas del núcleo (el modo administrador: usuario.cas):
+    ; con este destino, lo elegido queda en respuesta y hay_respuesta (no va a
+    ; ninguna ventana: ningún programa lo ve ni lo puede contestar)
+    público constante PARA_EL_NÚCLEO = 0xFFFFFFFF
+    público variable hay_respuesta: bool
+    público variable respuesta: nat32
 
     variable v: nat32                           ; su ventana
     variable destino, etiqueta: nat32
@@ -119,6 +125,9 @@ módulo Emergente
             resultado := opción
             resultado_etiqueta := etiqueta
             hay_resultado := cierto
+        sino si destino = PARA_EL_NÚCLEO entonces
+            respuesta := opción                 ; (PROTEGE)
+            hay_respuesta := cierto
         sino
             avisar(destino, EV_MENÚ, opción, etiqueta, 0)
         fin
@@ -232,7 +241,7 @@ módulo Emergente
         si no abierto entonces devolver fin
         tomar(cerrojo)
         ; si la ventana que lo pidió ya no está, sobra
-        si abierto y destino <> 0 y marcas_de(destino) = 0xFFFFFFFF entonces cierra(SIN_ELEGIR) fin
+        si abierto y destino <> 0 y destino <> PARA_EL_NÚCLEO y marcas_de(destino) = 0xFFFFFFFF entonces cierra(SIN_ELEGIR) fin
         mientras abierto y saca_evento(v, 0, e) hacer
             según e.clase
                 caso EV_FUERA:

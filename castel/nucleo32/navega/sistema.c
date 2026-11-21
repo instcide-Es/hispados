@@ -42,7 +42,7 @@ static u32 ultimo_error;
 static void pon_error(u32 e)
 {
 	ultimo_error = e == E_NO_HAY ? 2 : e == E_LLENO ? 4 : e == E_MAL ? 6 : e == E_SIN_MEMORIA ? 8 : e == E_DISCO_LLENO ? 112
-	    : e == E_YA_EXISTE ? 80 : e == E_EN_USO ? 32 : e == E_PROTEGIDO ? 5 : e == E_NO_VACIA ? 145 : e == E_NOMBRE_MALO ? 123
+	    : e == E_YA_EXISTE ? 80 : e == E_EN_USO ? 32 : e == E_PROTEGIDO || e == E_DENEGADO ? 5 : e == E_NO_VACIA ? 145 : e == E_NOMBRE_MALO ? 123
 	    : e == E_ES_CARPETA ? 5 : e == E_NO_CARPETA ? 3 : e == E_SIN_DISCO ? 21 : 87;
 }
 u32 WINAPI GetLastError(void) { return ultimo_error; }

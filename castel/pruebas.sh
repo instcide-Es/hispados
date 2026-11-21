@@ -204,6 +204,7 @@
 #   SOLO=ssh ./pruebas.sh         la primera y la 20 (SSH, WireGuard y Tailscale; con HEADSCALE=binario, también Tailscale)
 #   SOLO=lectores ./pruebas.sh    la primera y la 21 (los CD y DVD, y las imágenes de disco)
 #   SOLO=win32 ./pruebas.sh       la primera y la 22 (los programas de Windows y DirectX)
+#   SOLO=protege ./pruebas.sh     la primera y la 23 (PROTEGE: la zona protegida, los secretos y los servicios por su sello)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SIN_ARRANQUE=1 ./pruebas.sh   sin el arranque en tres pasos
@@ -267,7 +268,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas; do
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|protege) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -2576,7 +2577,8 @@ else ko "después del corte el disco no vuelve a como estaba:"; diff <(lista_de 
 # 7. el gancho de la red: con /DESDE=http://..., PAQUETES lanza DESCARGA
 # (aquí, uno de mentira) para el catálogo y cada paquete; sin DESCARGA, lo dice
 cp $Q/sis.img $Q/s7.img
-paq $Q/s7.img red "paquetes instala letras /desde=http://prueba/" ":pausa 2" "del \\hispa\\descarga.bin" "paquetes catalogo /desde=http://actualiza.hispados.es/pentium/"
+# (PROTEGE: borrar DESCARGA.BIN de C:\HISPA es tocar el sistema: en modo administrador, que se confirma con la S)
+paq $Q/s7.img red "paquetes instala letras /desde=http://prueba/" ":pausa 2" "admin" ":pausa 1" "s" "del \\hispa\\descarga.bin" "admin no" "paquetes catalogo /desde=http://actualiza.hispados.es/pentium/"
 mira "el gancho de la red: con /DESDE=http://..., el catálogo y los paquetes los trae DESCARGA (DESCARGA.BIN, la orden de la red) a C:\\HISPA\\PAQUETES\\BAJADAS, y se instalan igual" \
   "^Trayendo http://prueba/CATALOGO\.TXT\.\.\.$" "^descarga (de prueba): http://prueba/LETRAS11\.HPQ -> C:.HISPA.PAQUETES.BAJADAS.LETRAS11\.HPQ$" "^  instalado letras 1\.1$" \
   "^paquetes: para traer http://actualiza\.hispados\.es/pentium/CATALOGO\.TXT de Internet hace falta la red (el programa DESCARGA),$"
@@ -3887,6 +3889,169 @@ kill $NPID 2> /dev/null; wait $NPID 2> /dev/null
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Navegador)"
 fi   # el Navegador
+
+# ------------------------------------------------- 23. (PROTEGE) la zona protegida
+# La revisión de seguridad del 21/11/2026 (nucleo32/permisos.cas): en un
+# sistema instalado (C:\HISPA en un disco SATA), un programa normal no puede
+# escribir, borrar ni cambiar de nombre los archivos del sistema, ni con otras
+# formas de escribir su nombre («\HISPA.», la «á» que la FAT lleva a la A);
+# no lee los secretos de los servicios; y, aunque se llame RED.BIN o TLS.BIN,
+# lanzado de otra carpeta no es un servicio (ni IOPL 3, ni memoria de DMA,
+# ni el túnel, ni ACPI). PAQUETES (el de C:\HISPA) instala bien; una copia
+# suya en otra carpeta, no. Los servicios siguen: la red (con un RED.BIN de
+# mentira puesto en la raíz, que no se usa) y SSHD con sus llaves. Y el modo
+# administrador (ADMIN), que el núcleo pregunta en la pantalla: en modo texto
+# y con el escritorio (una ventanita suya).
+if parte08 protege; then
+echo "== Hispa-Pentium: la zona protegida (\\HISPA), los secretos, los servicios por su sello y el modo administrador =="
+X=$P/protege
+rm -rf $X; mkdir -p $X/f/paq $X/v
+export MTOOLS_SKIP_CHECK=1
+HPQ="python3 -I $AQUI/../tools/hpq.py"
+hechos=1
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $X/semilla.asm > /dev/null 2>&1 && nasm -f bin $X/semilla.asm -o $X/SEMILLA.BIN || hechos=0
+# PAQUETES con una clave de prueba (como en la parte de los paquetes)
+$HPQ clave $X/prueba.key > /dev/null && $HPQ publica $X/prueba.key $X/clave.cas > /dev/null || hechos=0
+cp $AQUI/nucleo32/upaquete.cas $X/upaquete.cas
+python3 -I $AQUI/ccastel.py $X/upaquete.cas -o $X/upaquete.asm -I $AQUI/nucleo32 > /dev/null 2>&1 && nasm -f bin $X/upaquete.asm -o $X/f/PAQUETES.BIN || hechos=0
+# el programa «malo»: lo que no debe poder (se pone como RED.BIN y TLS.BIN en C:\OTRA)
+cat > $X/ufalso.cas <<'CAS'
+módulo UFalso
+    modelo usuario
+    importar Llamadas, Textos32
+    variable dma: arreglo [4] de nat32
+    variable pedido: arreglo [3] de nat32
+    variable sector: arreglo [512] de byte
+    función sc(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        ensamblador
+            mov eax, {n}
+            mov ebx, {a}
+            mov ecx, {b}
+            mov edx, {c}
+            int 0x80
+        fin
+    fin
+    función dice(qué: puntero a byte, r: nat32)
+        si es_error(r) entonces escribir("falso: ", qué, ": no (", texto_error(r), ")\n") sino escribir("falso: ", qué, ": SE PUEDE\n") fin
+    fin
+    función abre(qué: puntero a byte, r: nat32)
+        dice(qué, r)
+        si no es_error(r) entonces cerrar(r) fin
+    fin
+    función principal(): byte
+        dice("apuntarse como servicio (la 91)", sc(91, 0, 0, 0))
+        dice("memoria de DMA (la 94)", sc(94, 1, nat32(dirección(dma[0])), 0))
+        dice("apuntar un dispositivo (la 156)", sc(156, 0, 1, 0))
+        dice("la memoria física de ACPI (la 151)", sc(151, 0, 4096, 0))
+        dice("el sello de otra tarea (la 158)", sc(158, 1, 0, 0))
+        pedido[0] := 0
+        pedido[1] := 1
+        pedido[2] := nat32(dirección(sector[0]))
+        dice("leer el disco en crudo (la 64)", sc(64, 0, nat32(dirección(pedido[0])), 0))
+        abre("escribir \\HISPA\\NUCLEO.BIN", crear("\\HISPA\\NUCLEO.BIN"))
+        abre("escribir \\HISPA.\\NUCLEO.BIN", crear("\\HISPA.\\NUCLEO.BIN"))
+        abre("escribir \\hisp\xA0\\nucleo.bin", crear("\\hisp\xA0\\nucleo.bin"))
+        abre("abrir \\HISPA\\RED.BIN para escribir", abrir_para("\\HISPA\\RED.BIN", PARA_ESCRIBIR))
+        dice("borrar \\HISPA\\RED.BIN", borrar("\\HISPA\\RED.BIN"))
+        dice("cambiar el nombre de \\HISPA\\RED.BIN", renombrar("\\HISPA\\RED.BIN", "\\HISPA\\RED.ANT"))
+        dice("llevarse \\HISPA\\RED.BIN a la raíz", renombrar("\\HISPA\\RED.BIN", "\\R.BIN"))
+        dice("meter un archivo en \\HISPA", renombrar("\\DOCUMENT\\LEEME.TXT", "\\HISPA\\LEEME.TXT"))
+        dice("hacer la carpeta \\HISPA\\NUEVA", crear_carpeta("\\HISPA\\NUEVA"))
+        dice("borrar la carpeta \\HISPA\\PAQUETES", borrar_carpeta("\\HISPA\\PAQUETES"))
+        dice("ocultar \\HISPA\\RED.BIN", poner_atributos("\\HISPA\\RED.BIN", 2))
+        abre("poner un ORDENES.BIN en la raíz", crear("\\ORDENES.BIN"))
+        abre("leer \\HISPA\\WIFI.INI", abrir("\\HISPA\\WIFI.INI"))
+        abre("leer \\HISPA\\TLS.SEM", abrir("\\HISPA\\TLS.SEM"))
+        abre("leer \\HISPA\\HISPA.INI", abrir("\\HISPA\\HISPA.INI"))
+        abre("escribir \\DOCUMENT\\NOTA.TXT", crear("\\DOCUMENT\\NOTA.TXT"))
+        devolver 0
+    fin
+fin UFalso.
+CAS
+python3 -I $AQUI/ccastel.py $X/ufalso.cas -o $X/ufalso.asm -I $AQUI/nucleo32 > /dev/null 2>&1 && nasm -f bin $X/ufalso.asm -o $X/FALSO.BIN || hechos=0
+# el disco «de arranque» (los programas en la raíz: disco.sh, con la red y SSH)
+$AQUI/nucleo32/disco.sh $X/vivo.img 32 red ssh > $X/disco.txt 2>&1 || hechos=0
+# un paquete de prueba (NOTA: \HISPA\NOTA.TXT) en una memoria USB con su catálogo firmado
+printf 'una nota del paquete\r\n' > $X/f/NOTA.TXT
+( cd $X/f && $HPQ crea paq/NOTA.HPQ --nombre nota --version 1.0 --descripcion 'Una nota' NOTA.TXT='\HISPA\NOTA.TXT' && $HPQ catalogo paq --clave $X/prueba.key \
+  && $HPQ crea BASE.HPQ --nombre base --version 0.8 --descripcion 'El sistema base (de prueba)' PAQUETES.BIN='\HISPA\PAQUETES.BIN' && $HPQ registro BASE.HPQ BASE.PQI ) > $X/hpq.txt 2>&1 || hechos=0
+mkfs.fat -F 16 -n MEMORIA -C $X/usb.img 16384 > /dev/null && mmd -i $X/usb.img ::PAQUETES && mcopy -i $X/usb.img $X/f/paq/* ::PAQUETES/ || hechos=0
+# el sistema instalado: los programas de la memoria de arranque, en C:\HISPA
+mkdir -p $X/v && mcopy -n -i $X/vivo.img '::*.BIN' $X/v/ > /dev/null 2>&1 || hechos=0
+printf '[hispa]\r\nusuario=Ana\r\nequipo=PRUEBA\r\nteclado=es\r\n' > $X/HISPA.INI
+printf 'Red=AUTO,4361736100,secreto-de-la-wifi\r\n' > $X/WIFI.INI
+printf 'semilla secreta de TLS\r\n' > $X/TLS.SEM
+printf 'un documento\r\n' > $X/LEEME.TXT
+mkfs.fat -F 32 -s 1 -n HISPA -C $X/sis.img 65536 > /dev/null && mmd -i $X/sis.img ::HISPA ::HISPA/PAQUETES ::OTRA ::DOCUMENT \
+  && mcopy -i $X/sis.img $X/v/ORDENES.BIN $X/v/RED.BIN $X/v/IPCONFIG.BIN $X/v/PING.BIN $X/v/SSHD.BIN $X/v/SSH.BIN $X/f/PAQUETES.BIN $X/HISPA.INI $X/WIFI.INI $X/TLS.SEM ::HISPA/ \
+  && mcopy -i $X/sis.img $X/f/BASE.PQI ::HISPA/PAQUETES/ && mcopy -i $X/sis.img $X/FALSO.BIN ::OTRA/RED.BIN && mcopy -i $X/sis.img $X/FALSO.BIN ::OTRA/TLS.BIN \
+  && mcopy -i $X/sis.img $X/f/PAQUETES.BIN ::OTRA/PAQUETES.BIN && mcopy -i $X/sis.img $X/FALSO.BIN ::RED.BIN && mcopy -i $X/sis.img $X/LEEME.TXT ::DOCUMENT/ || hechos=0
+cp $X/v/NUCLEO.BIN $X/NUCLEO.BIN 2> /dev/null || cp $X/SEMILLA.BIN $X/NUCLEO.BIN
+mcopy -i $X/sis.img $X/NUCLEO.BIN ::HISPA/NUCLEO.BIN || hechos=0
+if [ $hechos = 1 ]; then
+  ok "el disco instalado de las pruebas: C:\\HISPA con los programas, sus secretos (WIFI.INI, TLS.SEM) y PAQUETES; C:\\OTRA con un RED.BIN, un TLS.BIN y un PAQUETES.BIN que no son del sistema"
+  # 1. en modo texto (ORDENES), con la red y la memoria USB de los paquetes
+  cp $X/sis.img $X/s1.img
+  ESCRIBE=1 SATA=$X/s1.img MEMORIA=64 MODULOS= ARRANQUE=ordenes QEMU_MAS="-nic user,model=e1000 -device usb-ehci,id=u -drive id=mu,file=$X/usb.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
+    $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 3" "\\otra\\red" ":pausa 2" "\\otra\\tls" ":pausa 2" \
+    "copy \\document\\leeme.txt \\hispa\\nucleo.bin" "del \\hispa\\red.bin" "type \\hispa\\wifi.ini" "md \\hispa\\otra" "type \\hispa\\hispa.ini" \
+    "\\otra\\paquetes instala x:\\paquetes\\nota.hpq" ":pausa 3" "paquetes instala x:\\paquetes\\nota.hpq" ":pausa 4" \
+    "ipconfig" ":pausa 8" "sshd /encender" ":pausa 25" "type \\hispa\\ssh\\llave.ssh" "type \\hispa\\ssh\\sshd.ini" \
+    "admin" ":pausa 1" "s" "copy \\document\\leeme.txt \\hispa\\admin.txt" "type \\hispa\\wifi.ini" "admin no" "del \\hispa\\admin.txt" ":pausa 1" > $X/t.sal 2>&1
+  tr -d '\r' < $X/t.sal > $X/t.txt
+  S=$X/t.txt
+  mira "un programa que se llama RED.BIN (o TLS.BIN), lanzado de C:\\OTRA, no es un servicio: ni se apunta (91), ni memoria de DMA (94), ni dispositivos (156), ni ACPI (151), ni el sello de otro (158)" \
+    "^falso: apuntarse como servicio (la 91): no (" "^falso: memoria de DMA (la 94): no (" "^falso: apuntar un dispositivo (la 156): no (" \
+    "^falso: la memoria física de ACPI (la 151): no (" "^falso: el sello de otra tarea (la 158): no ("
+  if [ "$(grep -c '^falso: apuntarse como servicio (la 91): no' $S)" = 2 ] && ! grep -q "SE PUEDE.*la 9[14]\|la 91.*SE PUEDE" $S; then ok "ni el RED.BIN de mentira ni el TLS.BIN de mentira (los dos se apuntarían por su nombre antes de la 0.8.4)"
+  else ko "un programa de otra carpeta se ha podido apuntar como servicio:"; grep "^falso" $S | head -4 | sed 's/^/        /'; fi
+  mira "un programa normal no puede escribir NUCLEO.BIN (ni como «\\HISPA.\\» ni con la «á» que la FAT lleva a la A), ni abrir RED.BIN para escribir, ni borrarlo, ni cambiarle el nombre, ni llevárselo, ni meter nada en \\HISPA, ni hacer o borrar carpetas, ni ocultar archivos, ni poner un ORDENES.BIN en la raíz: acceso denegado" \
+    "^falso: escribir \\\\HISPA\\\\NUCLEO.BIN: no (acceso denegado" "^falso: escribir \\\\HISPA.\\\\NUCLEO.BIN: no (acceso denegado" "^falso: escribir .hisp.\\\\nucleo.bin: no (acceso denegado" \
+    "^falso: abrir \\\\HISPA\\\\RED.BIN para escribir: no (acceso denegado" "^falso: borrar \\\\HISPA\\\\RED.BIN: no (acceso denegado" "^falso: cambiar el nombre de \\\\HISPA\\\\RED.BIN: no (acceso denegado" \
+    "^falso: llevarse \\\\HISPA\\\\RED.BIN a la raíz: no (acceso denegado" "^falso: meter un archivo en \\\\HISPA: no (acceso denegado" "^falso: hacer la carpeta \\\\HISPA\\\\NUEVA: no (acceso denegado" \
+    "^falso: borrar la carpeta \\\\HISPA\\\\PAQUETES: no (acceso denegado" "^falso: ocultar \\\\HISPA\\\\RED.BIN: no (acceso denegado" "^falso: poner un ORDENES.BIN en la raíz: no (acceso denegado"
+  mira "ni leer los secretos (WIFI.INI, TLS.SEM) ni el disco en crudo (64); lo que no es secreto (HISPA.INI) sí se lee, y los datos del usuario (C:\\DOCUMENT) se escriben" \
+    "^falso: leer \\\\HISPA\\\\WIFI.INI: no (acceso denegado" "^falso: leer \\\\HISPA\\\\TLS.SEM: no (acceso denegado" "^falso: leer el disco en crudo (la 64): no (acceso denegado" \
+    "^falso: leer \\\\HISPA\\\\HISPA.INI: SE PUEDE$" "^falso: escribir \\\\DOCUMENT\\\\NOTA.TXT: SE PUEDE$"
+  mira "y desde el intérprete de órdenes (COPY, DEL, TYPE, MD): el mismo «acceso denegado», con lo que hay que hacer (ADMIN)" \
+    "^No puedo .*nucleo.bin: acceso denegado: es del sistema (para cambiarlo a mano: ADMIN)" "^No puedo borrar .*red.bin: acceso denegado" \
+    "acceso denegado" "^usuario=Ana$"
+  mira "una copia de PAQUETES en C:\\OTRA no instala nada (acceso denegado); el de C:\\HISPA, sí (NOTA, en \\HISPA)" \
+    "^paquetes: acceso denegado a C:.HISPA.PAQUETES: solo instala el PAQUETES del sistema" "^  instalado nota 1\.0$"
+  mira "los servicios siguen: la red (el RED.BIN de C:\\HISPA, aunque haya otro en la raíz) y SSHD (su llave, nueva, en C:\\HISPA\\SSH; escucha en el 22)" \
+    "^red: Hispa-Pentium 0.8: el servicio de red (RED.BIN)$" "^  Dirección IP  . . . . : 10.0.2.15$" "^Servidor SSH encendido (puerto 22)" "sshd: llave del equipo nueva (ssh-ed25519)$" "red: tcp: escuchando en el puerto 22$"
+  if ! grep -q "^falso: apuntarse" <(sed -n '/^C:.>ipconfig/,$p' $S); then ok "el RED.BIN de mentira de la raíz no se lanza: el servicio sale de C:\\HISPA"
+  else ko "el núcleo ha lanzado el RED.BIN de la raíz"; fi
+  mira "la llave del servidor SSH no la lee nadie más (TYPE: acceso denegado); su SSHD.INI, sí" "^No puedo .*llave.ssh: acceso denegado" "^encendido=1$"
+  mira "ADMIN: el núcleo pregunta (S o N) y, con S, se pueden cambiar los archivos del sistema y leer los secretos; ADMIN NO lo deja" \
+    "El núcleo pregunta: ORDENES.BIN pide el MODO ADMINISTRADOR" "^permisos: modo administrador para ORDENES.BIN" "^Modo administrador: puede cambiar los archivos del sistema" \
+    "^Red=AUTO,4361736100,secreto-de-la-wifi$" "^Modo administrador: dejado" "^No puedo borrar .*admin.txt: acceso denegado"
+  if sano $X/s1.img && saca $X/s1.img HISPA/NUCLEO.BIN $X/n.bin && cmp -s $X/n.bin $X/NUCLEO.BIN && saca $X/s1.img HISPA/RED.BIN $X/r.bin && cmp -s $X/r.bin $X/v/RED.BIN \
+    && saca $X/s1.img HISPA/NOTA.TXT $X/nota.txt && cmp -s $X/nota.txt $X/f/NOTA.TXT && saca $X/s1.img HISPA/ADMIN.TXT $X/a.txt && saca $X/s1.img DOCUMENT/NOTA.TXT $X/d.txt \
+    && saca $X/s1.img HISPA/SSH/LLAVE.SSH $X/l.bin && ! mdir -i $X/s1.img ::HISPA/NUEVA > /dev/null 2>&1 && ! mdir -i $X/s1.img ::HISPA/OTRA > /dev/null 2>&1 && ! saca $X/s1.img ORDENES.BIN $X/o.bin; then
+    ok "y en el disco, desde fuera: sano; NUCLEO.BIN y RED.BIN, intactos; la nota de PAQUETES, el archivo del administrador, la nota del usuario y la llave de SSHD, puestos; nada más en \\HISPA"
+  else ko "el disco no queda como tiene que quedar:"; mdir -/ -b -i $X/s1.img :: 2> /dev/null | head -20 | sed 's/^/        /'; fi
+  # 2. con el escritorio: ADMIN en la Consola saca la pregunta del núcleo (una ventanita suya, no del programa)
+  cp $X/vivo.img $X/e.img
+  CAPTURAS=$X ESCRIBE=1 DISCO=$X/e.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 2" ":doble 60 186" ":pausa 4" "md \\hispa" ":pausa 1" \
+    "admin" ":pausa 2" ":captura ad1" ":tecla down" ":tecla ret" ":pausa 1" "md \\hispa" ":pausa 1" ":captura ad2" \
+    "admin no" ":doble 60 40" ":pausa 3" ":tecla f4" ":escribe C:\\HISPA" ":tecla ret" ":pausa 2" ":captura ad3" > $X/e.sal 2>&1
+  tr -d '\r' < $X/e.sal > $X/e.txt
+  S=$X/e.txt
+  G=$X
+  miracap "con el escritorio, ADMIN saca la pregunta del núcleo en medio de la pantalla: quién lo pide, para qué, «Sí, dárselo» y «No»" ad1 \
+    texto 200 220 320 260 "ORDENES.BIN pide el modo administrador" texto 200 280 320 320 "Sí, dárselo" texto 200 300 320 340 "No"
+  mira "elegido «Sí», ORDENES (en la Consola) tiene el modo administrador" "^permisos: modo administrador para ORDENES.BIN"
+  miracap "Mi equipo, en C:\\HISPA: avisa de que la carpeta del sistema solo se mira (y de cómo cambiarla: Herramientas > Modo administrador)" ad3 \
+    texto 0 300 800 600 "Carpeta del sistema: solo se puede mirar"
+  if mdir -i $X/e.img ::HISPA > /dev/null 2>&1; then ok "y entonces, solo entonces, puede hacer C:\\HISPA (antes: acceso denegado)"
+  else ko "con el modo administrador no se ha hecho \\HISPA"; fi
+  if ! cat $X/t.txt $X/e.txt | grep -q "excepción\|\*\*\*"; then ok "en esos arranques, ni una excepción ni una queja del núcleo"
+  else ko "el núcleo se ha quejado:"; cat $X/t.txt $X/e.txt | grep "excepción\|\*\*\*" | head -3 | sed 's/^/        /'; fi
+else ko "no se han podido hacer los programas o los discos de las pruebas de la zona protegida: $(tail -n 2 $X/disco.txt) $(tail -n 2 $X/hpq.txt)"; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin la zona protegida)"
+fi   # la zona protegida
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
 [ -z "${SOLO:-}" ] && parte15

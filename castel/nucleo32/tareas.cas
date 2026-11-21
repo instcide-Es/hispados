@@ -68,6 +68,12 @@ módulo Tareas
         terminal: nat32                         ; el terminal por el que escribe y lee (terminal.cas), o 0: la consola
         x87: arreglo [108] de byte              ; (NAVEGADOR) su coma flotante, guardada (fnsave) mientras la usa otra
         x87_usado: bool                         ; (NAVEGADOR) la ha usado alguna vez
+        ; (PROTEGE) quién es, para lo que puede tocar del sistema (permisos.cas):
+        ; lo pone el núcleo al cargarla, por la ruta de la que la carga (la
+        ; carpeta del sistema), nunca por su nombre
+        sello: nat32                            ; el programa del sistema que es (Permisos.SELLO_...; 0: uno normal)
+        servicio: bool                          ; es uno de los servicios (RED.BIN, TLS.BIN, ACPI.BIN...)
+        admin: bool                             ; el modo administrador (la orden ADMIN, confirmado en la pantalla)
     fin
 
     público tipo Cola = estructura
@@ -398,6 +404,9 @@ módulo Tareas
         t.aguanta := falso
         t.matar := falso
         t.corte := falso
+        t.sello := 0                            ; (PROTEGE) lo pone quien la carga (usuario.cas)
+        t.servicio := falso
+        t.admin := falso
         devolver t
     fin
 

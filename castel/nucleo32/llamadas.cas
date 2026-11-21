@@ -29,6 +29,7 @@ módulo Llamadas
     público constante NOMBRE_MALO = 0xFFFFFFF3  ; el nombre no vale (8+3, sin letras raras)
     público constante ES_CARPETA = 0xFFFFFFF2   ; es una carpeta, y hacía falta un archivo
     público constante NO_CARPETA = 0xFFFFFFF1   ; no es una carpeta
+    público constante DENEGADO = 0xFFFFFFF0     ; (PROTEGE) acceso denegado: es del sistema, o un secreto de otro
     público constante PRIMER_ERROR = 0xFFFFFFF0
 
     ; ---- cómo se abre un archivo: abrir_para(nombre, ...) ----
@@ -225,8 +226,30 @@ módulo Llamadas
             caso NOMBRE_MALO: devolver "el nombre no vale (son 8 letras, un punto y 3; y no CON, NUL, PRN...)"
             caso ES_CARPETA: devolver "es una carpeta"
             caso NO_CARPETA: devolver "no es una carpeta"
+            caso DENEGADO: devolver "acceso denegado: es del sistema (para cambiarlo a mano: ADMIN)"
         fin
         devolver "no puede ser"
+    fin
+
+    ; ---- (PROTEGE) el modo administrador y los sellos (permisos.cas) ----
+    ; pide el modo administrador: el núcleo pregunta en la pantalla. Cierto
+    ; si se ha dado (o ya se tenía); falso si no (o no se puede preguntar)
+    público función pedir_admin(): bool
+        devolver llamada(157, 0, 0, 0) = 1
+    fin
+
+    público función dejar_admin()
+        llamada(157, 1, 0, 0)
+    fin
+
+    público función es_admin(): bool
+        devolver llamada(157, 2, 0, 0) = 1
+    fin
+
+    ; (solo los servicios) el sello de la tarea t (con el bit 31, si es un
+    ; servicio), o NO_VALE
+    público función sello_de_tarea(t: nat32): nat32
+        devolver llamada(158, t, 0, 0)
     fin
 
     ; ---- las tareas y el reloj ----

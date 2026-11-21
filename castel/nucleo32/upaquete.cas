@@ -1214,12 +1214,17 @@ módulo UPaquetes
 
     ; el diario: «HPQ-DIARIO 1», el paquete y un paso por línea, en orden
     ; (c=carpeta; n=existía destino; b=destino)
+    variable diario_denegado: bool              ; (PROTEGE) el núcleo no deja escribir en C:\HISPA\PAQUETES
+
     función escribe_diario(): bool
         variable m, i: nat32
         variable bien: bool
         variable x: arreglo [8] de byte
         m := crear(diario)
-        si es_error(m) entonces devolver falso fin
+        si es_error(m) entonces
+            diario_denegado := m = DENEGADO       ; (PROTEGE)
+            devolver falso
+        fin
         bien := escribe_todo(m, "HPQ-DIARIO 1\r\npaquete=", longitud("HPQ-DIARIO 1\r\npaquete=")) y escribe_todo(m, txn_nombre, longitud(txn_nombre)) y escribe_todo(m, "\r\n", 2)
         para i desde 1 hasta n_pasos hacer
             si pasos[i - 1].clase = P_CARPETA entonces
@@ -1511,6 +1516,8 @@ módulo UPaquetes
         borrar(hecho)
         si no escribe_diario() entonces
             borrar(diario)
+            ; (PROTEGE) solo escribe en el sistema el PAQUETES.BIN del sistema
+            si diario_denegado entonces devolver mal("acceso denegado a C:\\HISPA\\PAQUETES: solo instala el PAQUETES del sistema (el de C:\\HISPA), no una copia de otra carpeta") fin
             devolver mal("no se puede escribir en C:\\HISPA\\PAQUETES (¿se ha arrancado con «escritura»?)")
         fin
         si no cambia() entonces

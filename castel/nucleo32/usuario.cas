@@ -91,6 +91,17 @@
 ;       -> cuántos hay. Solo lee
 ;  156  (dispositivos; solo los servicios: ACPI.BIN, RED.BIN) apuntar la
 ;       ficha de EBX (ECX = 0), u olvidar las suyas (ECX = 1)
+;   (PROTEGE) La zona protegida y el modo administrador (permisos.cas):
+;  157  el modo administrador: EBX = 0, pedirlo (el núcleo pregunta en la
+;       pantalla: con el escritorio, una ventanita suya; sin él, en la
+;       consola de texto, «S» o «N») -> 1, concedido; 0, no (DENEGADO si no
+;       se puede preguntar: una sesión de SSH sin escritorio); 1, dejarlo
+;       -> 0; 2, preguntar si se tiene -> 1 o 0
+;  158  (solo los servicios) el sello de la tarea EBX (Permisos.SELLO_...)
+;       -> su sello, o NO_VALE; con el bit 31 de lo devuelto, es un servicio
+;  Lo que se escribe, se borra o se cambia de nombre en la zona protegida
+;  (\HISPA de la unidad del sistema y lo que dice la tabla), y lo que se lee
+;  de un secreto, solo lo puede quien tiene permiso: si no, DENEGADO.
 ;
 ;  Los nombres de archivo que no empiezan por una barra se entienden desde la
 ;  carpeta de trabajo de la tarea (la hereda de quien la lanza); «.» y «..»
@@ -113,7 +124,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -646,6 +657,9 @@ módulo Usuario
             caso 7:
                 si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
                 si en_memoria(u) entonces devolver abrir_módulo(ruta, b) fin
+                ; (PROTEGE) la zona protegida y los secretos
+                si b = PARA_LEER y no puede_leer(u, ruta) entonces devolver DENEGADO fin
+                si b <> PARA_LEER y no puede_escribir(u, ruta) entonces devolver DENEGADO fin
                 devolver abrir_archivo(u, ruta, b)
             caso 8:
                 si no puede(b, c, cierto) entonces devolver NO_VALE fin
@@ -789,6 +803,7 @@ módulo Usuario
             caso 133:
                 ; (CD) montar una imagen de disco
                 si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
+                si no puede_leer(u, ruta) entonces devolver DENEGADO fin       ; (PROTEGE)
                 devolver montar_imagen(u, ruta)
             caso 90..99:
                 r := atender_red(n, a, b, c)
@@ -799,10 +814,22 @@ módulo Usuario
                 si r = SIN_TLS y n = 99 y lanza_tls() entonces r := atender_red(n, a, b, c) fin
                 devolver r
             caso 150..154:
+                si n <= 152 y no actual.servicio entonces devolver NO_VALE fin  ; (PROTEGE) solo los servicios
                 devolver atender_energía(n, a, b, c)
             caso 155, 156:
                 ; (dispositivos) la lista de los dispositivos, y lo que apuntan los servicios
+                si n = 156 y no actual.servicio entonces devolver NO_VALE fin  ; (PROTEGE)
                 devolver atender_dispositivos(n, a, b, c)
+            caso 157:
+                devolver pide_admin(a)                  ; (PROTEGE) el modo administrador
+            caso 158:
+                ; (PROTEGE) el sello de una tarea, para los servicios (RED.BIN
+                ; mira así quién le pide la interfaz del túnel)
+                si no actual.servicio entonces devolver NO_VALE fin
+                t := tarea_de(a)
+                si t = nulo o no t.usuario entonces devolver NO_VALE fin
+                si t.servicio entonces devolver t.sello ob 0x80000000 fin
+                devolver t.sello
             caso 180..189:
                 devolver atender_win32(n, a, b, c)     ; [WIN32] los programas de Windows (win32.cas)
         fin
@@ -817,7 +844,7 @@ módulo Usuario
         variable e, k, id: nat32
         si apagada o sin_tarjeta entonces devolver falso fin
         si hay_servicio() entonces devolver cierto fin
-        t := cargar_archivo("\\RED.BIN", nulo, e)
+        t := cargar_servicio("RED.BIN", nulo, e)          ; (PROTEGE) de la carpeta del sistema, y nada más
         si t = nulo entonces
             sin_tarjeta := cierto                  ; (no está: no se vuelve a intentar)
             devolver falso
@@ -846,7 +873,7 @@ módulo Usuario
         variable e, k, id: nat32
         si apagada o sin_tls entonces devolver falso fin
         si hay_tls() entonces devolver cierto fin
-        t := cargar_archivo("\\TLS.BIN", nulo, e)
+        t := cargar_servicio("TLS.BIN", nulo, e)          ; (PROTEGE)
         si t = nulo entonces
             sin_tls := cierto
             devolver falso
@@ -865,6 +892,100 @@ módulo Usuario
             si t = nulo o t.estado = ACABADA entonces romper fin
         fin
         devolver hay_tls()
+    fin
+
+    ; (PROTEGE) pone en marcha un servicio del sistema («RED.BIN») de su ruta
+    ; fija: la carpeta \HISPA de la unidad del sistema (o su raíz, en la
+    ; memoria de arranque; o la unidad en memoria). Nunca de otra carpeta: un
+    ; RED.BIN puesto en la raíz de un sistema instalado no es el servicio.
+    público función cargar_servicio(nombre: puntero a byte, args: puntero a byte, ref error: nat32): puntero a Tarea
+        variable r: arreglo [40] de byte
+        si del_sistema >= MAX_UNIDADES entonces
+            error := SIN_DISCO
+            devolver nulo
+        fin
+        si en_memoria(del_sistema) entonces
+            copiar_hasta(r, "\\", 40)
+            concatenar(r, nombre)
+        sino
+            ruta_del_sistema(nombre, r, 40)
+        fin
+        devolver carga_de(del_sistema, r, args, error)
+    fin
+
+    ; (PROTEGE) el modo administrador (la llamada 157): a = 0, pedirlo; 1,
+    ; dejarlo; 2, ¿se tiene? Lo pregunta el núcleo, en la pantalla, al que
+    ; está delante: el programa no puede contestar por él
+    variable cerrojo_admin: Cerrojo
+
+    función pregunta_en_consola(): bool
+        variable c: nat32
+        tomar_consola()
+        imprimir1("\nEl núcleo pregunta: %s", nat32(actual.nombre))
+        escribir(" pide el MODO ADMINISTRADOR: podrá cambiar y borrar los archivos del sistema (\\HISPA) y leer sus secretos.\n")
+        escribir("    ¿Se lo da? Pulse S para sí; cualquier otra tecla, no: ")
+        soltar_consola()
+        c := leer_tecla()
+        tomar_consola()
+        si c = 's' o c = 'S' entonces escribir("sí\n") sino escribir("no\n") fin
+        soltar_consola()
+        devolver c = 's' o c = 'S'
+    fin
+
+    función pregunta_en_pantalla(): bool
+        variable opciones: arreglo [200] de byte
+        variable k: nat32
+        variable x, yy: ent32
+        copiar_hasta(opciones, actual.nombre, 200)
+        concatenar(opciones, " pide el modo administrador|(cambiar y borrar los archivos del sistema)|-|Sí, dárselo|No")
+        x := ent32(pantalla.ancho div 2) - 180
+        yy := ent32(pantalla.alto div 2) - 70
+        hay_respuesta := falso
+        ; (los dos primeros renglones son el título: en gris, no se eligen)
+        si no abrir_emergente(x, yy, opciones, 3, PARA_EL_NÚCLEO, 0) entonces devolver falso fin
+        k := 0
+        mientras no hay_respuesta y k < 60 * HZ y no actual.matar hacer
+            dormir(5)
+            k := k + 5
+        fin
+        si no hay_respuesta entonces
+            cerrar_emergente()
+            devolver falso
+        fin
+        devolver respuesta = 3
+    fin
+
+    función pide_admin(a: nat32): nat32
+        variable sí: bool
+        según a
+            caso 1:
+                actual.admin := falso
+                devolver 0
+            caso 2:
+                si actual.admin entonces devolver 1 fin
+                devolver 0
+            caso 0:
+                si actual.admin entonces devolver 1 fin
+                tomar(cerrojo_admin)
+                si escritorio_en_marcha y hay_pantalla entonces
+                    sí := pregunta_en_pantalla()
+                sino si actual.terminal = 0 entonces
+                    sí := pregunta_en_consola()
+                sino
+                    ; (un terminal sin escritorio: una sesión de SSH; no hay
+                    ; nadie delante a quien preguntar)
+                    soltar(cerrojo_admin)
+                    devolver DENEGADO
+                fin
+                soltar(cerrojo_admin)
+                si sí entonces
+                    actual.admin := cierto
+                    imprimir2("permisos: modo administrador para %s (la tarea %u)\n", nat32(actual.nombre), actual.id)
+                    devolver 1
+                fin
+                devolver 0
+        fin
+        devolver NO_VALE
     fin
 
     ; ¿puede el programa INSTALAR escribir sector a sector en el disco d?
@@ -970,6 +1091,9 @@ módulo Usuario
                 copiar_memoria(dirección(i.modelo[0]), dirección(discos[a].modelo[0]), 40)
                 devolver 1
             caso 64, 65:
+                ; (PROTEGE) los sectores en crudo (se saltan la zona protegida y
+                ; los secretos): solo INSTALAR, o en modo administrador
+                si actual.sello <> SELLO_INSTALAR y no actual.admin entonces devolver DENEGADO fin
                 si no puede(b, tamaño(Pedido_disco), falso) entonces devolver NO_VALE fin
                 pd := puntero(b)
                 si pd.n = 0 o pd.n > 128 o no puede(pd.datos, pd.n * SECTOR, n = 64) entonces devolver NO_VALE fin
@@ -1091,11 +1215,14 @@ módulo Usuario
         si u >= MAX_UNIDADES entonces devolver SIN_DISCO fin
         ; (en la unidad en memoria no se borra ni se crea nada)
         si en_memoria(u) entonces devolver PROTEGIDO fin
+        ; (PROTEGE) en la zona protegida, solo quien tiene permiso
+        si no puede_escribir(u, ruta) entonces devolver DENEGADO fin
         según n
             caso 21: devolver borrar_archivo(u, ruta)
             caso 22:
                 si no ruta_de_usuario(b, ruta2, u2) entonces devolver NO_VALE fin
                 si u2 <> u entonces devolver NO_VALE fin       ; (de una unidad a otra no se cambia de nombre: se copia)
+                si no puede_escribir(u2, ruta2) entonces devolver DENEGADO fin     ; (PROTEGE) y adonde va
                 devolver renombrar(u, ruta, ruta2)
             caso 23: devolver crear_carpeta(u, ruta)
         fin
@@ -1118,6 +1245,7 @@ módulo Usuario
                 si b <> 0xFFFFFFFF entonces devolver PROTEGIDO fin
                 devolver SOLO_LECTURA
             fin
+            si b <> 0xFFFFFFFF y no puede_escribir(u, ruta) entonces devolver DENEGADO fin     ; (PROTEGE)
             devolver poner_atributos(u, ruta, b)
         fin
         si no escritorio_en_marcha o no es_de(a, actual.id) o no puede(b, tamaño(Suelta), falso) entonces devolver NO_VALE fin
@@ -1380,6 +1508,7 @@ módulo Usuario
     fin
 
     público función prepara_usuario()
+        prepara_permisos()                      ; (PROTEGE) la tabla de quién escribe qué
         pon_puerta(0x80, nat32(dirección(llamada_al_sistema)), PUERTA_USUARIO)
         al_cortar := nat32(dirección(cortar_actual))
     fin
@@ -1425,6 +1554,7 @@ módulo Usuario
             caso NOMBRE_MALO: devolver "el nombre no vale"
             caso ES_CARPETA: devolver "es una carpeta"
             caso NO_CARPETA: devolver "no es una carpeta"
+            caso DENEGADO: devolver "acceso denegado: es del sistema, o un secreto de un servicio (para cambiarlo a mano: ADMIN)"
         fin
         devolver "no se puede"
     fin
@@ -1432,7 +1562,9 @@ módulo Usuario
     ; carga el programa que está en la memoria, en «ini», en un espacio de
     ; direcciones nuevo y hace su tarea (que entra en la cola), con ese nombre
     ; y esos argumentos (o nulo). Da la tarea; o nulo, y en «error» por qué.
-    función cargar_imagen(nombre: puntero a byte, ini: nat32, largo: nat32, args: puntero a byte, ref error: nat32): puntero a Tarea
+    ; (PROTEGE) «sello» y «servicio»: lo que es (Permisos.sello_de_carga):
+    ; se pone en su ficha antes de que pueda correr
+    función cargar_imagen(nombre: puntero a byte, ini: nat32, largo: nat32, args: puntero a byte, ref error: nat32, sello: nat32, servicio: bool): puntero a Tarea
         variable c: puntero a Cabecera
         variable d, v, m, origen, cuánto, n, b: nat32
         variable t: puntero a Tarea
@@ -1483,7 +1615,14 @@ módulo Usuario
         ; la tarea y sus argumentos, de una vez (que no empiece sin ellos)
         b := sin_interrupciones()
         t := crear_tarea_usuario(nombre, d, c.entrada, PILA_FINAL - 16, v)
-        si t <> nulo entonces t.args := copia fin
+        si t <> nulo entonces
+            t.args := copia
+            ; (PROTEGE) su sello, y el modo administrador de quien la lanza
+            ; (si es un programa que lo tiene; el núcleo no lo da)
+            t.sello := sello
+            t.servicio := servicio
+            t.admin := actual <> nulo y actual.usuario y actual.admin
+        fin
         reponer(b)
         si t = nulo entonces
             si copia <> nulo entonces liberar(copia) fin
@@ -1498,7 +1637,7 @@ módulo Usuario
     público función cargar(i: nat32): puntero a Tarea
         variable t: puntero a Tarea
         variable e: nat32
-        t := cargar_imagen(módulo_nombre(i), módulo_inicio(i), módulo_final(i) - módulo_inicio(i), nulo, e)
+        t := cargar_imagen(módulo_nombre(i), módulo_inicio(i), módulo_final(i) - módulo_inicio(i), nulo, e, 0, falso)
         si t = nulo entonces imprimir1("%s\n", nat32(texto_error(e))) fin
         devolver t
     fin
@@ -1524,6 +1663,9 @@ módulo Usuario
         variable imagen, nombre, p: puntero a byte
         variable t: puntero a Tarea
         variable en_hispa: arreglo [24] de byte
+        variable de_dónde: puntero a byte
+        variable sello: nat32
+        variable servicio: bool
         si u >= MAX_UNIDADES entonces
             error := SIN_DISCO
             devolver nulo
@@ -1535,9 +1677,11 @@ módulo Usuario
                 error := NO_HAY
                 devolver nulo
             fin
-            devolver cargar_imagen(módulo_nombre(m), módulo_inicio(m), módulo_final(m) - módulo_inicio(m), args, error)
+            sello := sello_de_carga(u, ruta, servicio)      ; (PROTEGE)
+            devolver cargar_imagen(módulo_nombre(m), módulo_inicio(m), módulo_final(m) - módulo_inicio(m), args, error, sello, servicio)
         fin
         m := abrir_archivo(u, ruta, PARA_LEER)
+        de_dónde := ruta                        ; (PROTEGE) de dónde se carga de verdad
         si m = NO_HAY y del_sistema < MAX_UNIDADES y no en_memoria(del_sistema) entonces
             ; los programas de un sistema instalado en el disco están en su
             ; carpeta \HISPA: lo que no está donde se pide se busca allí
@@ -1551,11 +1695,15 @@ módulo Usuario
             copiar_hasta(dirección(en_hispa[7]), nombre, 13)
             u := del_sistema
             m := abrir_archivo(u, en_hispa, PARA_LEER)
+            de_dónde := dirección(en_hispa[0])
         fin
         si m >= PRIMER_ERROR entonces
             error := m
             devolver nulo
         fin
+        ; (PROTEGE) lo que es, por la ruta de la que se carga, no por su
+        ; nombre (antes de que en_hispa sirva para otra cosa)
+        sello := sello_de_carga(u, de_dónde, servicio)
         ; [WIN32] un programa de Windows (empieza por «MZ»): lo corre
         ; WIN32.BIN, con su ruta entera delante de sus argumentos
         si no es_carpeta(m) y tamaño_archivo(m) > 64 entonces
@@ -1591,7 +1739,7 @@ módulo Usuario
             si valor(p) = '\\' o valor(p) = '/' o valor(p) = ':' entonces nombre := p + 1 fin
             p := p + 1
         fin
-        t := cargar_imagen(nombre, nat32(imagen), largo, args, error)
+        t := cargar_imagen(nombre, nat32(imagen), largo, args, error, sello, servicio)
         liberar(imagen)
         devolver t
     fin
