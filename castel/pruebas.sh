@@ -3131,7 +3131,7 @@ else ko "PANTALLA.ENV o GRUB.CFG no quedan bien:"; head -c 80 $V/env1 | sed 's/^
 maquina pc2 "$CIRRUS -no-reboot" ":espera 40 está a prueba" ":pausa 2" ":captura pc3" ":centro 512 384" ":clic 431 418" ":pausa 2"
 mcopy -n -i $V/inst.img@@1M ::HISPA/PANTALLA.ENV $V/env2
 mira "al arrancar, GRUB la pone (1024 x 768) y el escritorio pregunta; «Mantener» la deja para siempre" \
-  "escritorio: en marcha, 1024 x 768 con [0-9]* bits por punto (el modo lo ha dejado puesto el cargador)" "^pantalla: está a prueba" \
+  "escritorio: en marcha, 1024 x 768 con [0-9]* bits por punto (el modo lo ha dejado puesto el cargador)" "pantalla: está a prueba" \
   "^escritorio: .*PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" "^escritorio: Se queda a 1024 x 768\."
 miracap "«¿Se ve bien la pantalla?», a 1024 x 768, con la cuenta atrás «vuelve la de antes»" pc3 negrita 334 305 342 313 "¿Se ve bien la pantalla?" \
   texto 334 347 342 355 "Si no la da por buena, vuelve la de antes en 1"
@@ -3144,9 +3144,9 @@ maquina pc3 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" 
 mira "desde 1024 x 768, 1024 x 600 guardada a prueba (la de antes, apuntada)" "^escritorio: .*PANTALLA.ENV: pantalla=1024x600 antes=1024x768 prueba=1" "^escritorio: reiniciar"
 maquina pc4 "$CIRRUS" ":espera 40 está a prueba" ":pausa 2" ":monitor system_reset" ":pausa 3" ":espera 40 en marcha, 1024 x 768" ":pausa 4"
 mcopy -n -i $V/inst.img@@1M ::HISPA/PANTALLA.ENV $V/env3
-mira "si se reinicia sin darla por buena, GRUB vuelve solo a la de antes (1024 x 768), sin preguntar" "escritorio: en marcha, 1024 x 600" "^pantalla: está a prueba" \
+mira "si se reinicia sin darla por buena, GRUB vuelve solo a la de antes (1024 x 768), sin preguntar" "escritorio: en marcha, 1024 x 600" "pantalla: está a prueba" \
   "escritorio: en marcha, 1024 x 768"
-if [ $(grep -c "^pantalla: está a prueba" $S) = 1 ] && head -c 100 $V/env3 | grep -q '^pantalla=1024x768$' && head -c 100 $V/env3 | grep -q '^antes=$' && head -c 100 $V/env3 | grep -q '^prueba=0$' && sano $V/inst.img 2048; then
+if [ $(grep -c "pantalla: está a prueba" $S) = 1 ] && head -c 100 $V/env3 | grep -q '^pantalla=1024x768$' && head -c 100 $V/env3 | grep -q '^antes=$' && head -c 100 $V/env3 | grep -q '^prueba=0$' && sano $V/inst.img 2048; then
   ok "y PANTALLA.ENV lo dice (GRUB lo ha escrito con save_env): pantalla=1024x768, antes vacío, prueba=0; el disco, sano"
 else ko "tras reiniciar sin darla por buena, PANTALLA.ENV no queda bien:"; head -c 70 $V/env3 | sed 's/^/        /'; fi
 # 4. instalado, con la VBE de Bochs (-vga std, como VirtualBox): «Mantener»
@@ -3178,16 +3178,16 @@ for e in 1024:600 1366:768 no; do
     ":clic 40 585" ":clic 250 500" ":clic 576 236" ":pausa 1" ":captura ed${e%:*}" ":clic 594 441" ":clic 333 399" ":pausa 3" ":captura dv${e%:*}" > $V/edid$e.sal 2>&1
 done
 S=$V/edid1024:600.sal
-mira "con un EDID de 1024 x 600 (un netbook), el núcleo lo lee y lo apunta en el registro del arranque" "^pantalla: EDID: «QEMU Monitor», hecha para 1024 x 600 (la tarjeta de QEMU)"
+mira "con un EDID de 1024 x 600 (un netbook), el núcleo lo lee y lo apunta en el registro del arranque" "pantalla: EDID: «QEMU Monitor», hecha para 1024 x 600 (la tarjeta de QEMU)"
 miracap "y la lista ofrece solo lo que cabe en la pantalla: 800 x 600 y 1024 x 600, la recomendada" ed1024 negrita 200 218 210 224 "800 x 600" negrita 355 218 365 224 "1024 x 600 *" \
   texto 160 249 168 257 "* La de la pantalla (recomendada): 1024 x 600." notexto 0 0 800 600 "1024 x 768"
 miracap "el Administrador de dispositivos dice el monitor en Pantalla, colgado de la tarjeta (lo lleva edid.cas)" dv1024 texto 544 175 552 183 "edid.cas"
 S=$V/edid1366:768.sal
-mira "con un EDID de 1366 x 768" "^pantalla: EDID: «QEMU Monitor», hecha para 1366 x 768"
+mira "con un EDID de 1366 x 768" "pantalla: EDID: «QEMU Monitor», hecha para 1366 x 768"
 miracap "nada mayor que 1366 x 768 (y 1366 no, que la VBE de QEMU no la da: la deja en 1360)" ed1366 negrita 0 0 800 600 "1280 x 720" texto 160 200 168 400 "* La de la pantalla (recomendada): 1366 x 768." \
   notexto 0 0 800 600 "1440 x 900" notexto 0 0 800 600 "1366 x 768 *"
 S=$V/edidno.sal
-mira "sin EDID, lo dice" "^pantalla: la pantalla no dice su medida"
+mira "sin EDID, lo dice" "la pantalla no dice su medida"
 miracap "y en una máquina virtual (su pantalla es una ventana) la lista sigue sin tope" edno negrita 0 0 800 600 "1920 x 1080"
 # 6. (EDID) la memoria USB (usb.sh, como root), en un PC sin la VBE de
 # Bochs ni EDID (-vga cirrus, como el HP Mini): se guarda en X:\PANTALLA.ENV
@@ -3198,17 +3198,17 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && command -v parte
   maquina us1 "$USBQ -no-reboot" ":espera 60 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 250 500" ":clic 576 236" ":pausa 1" ":captura us1" \
     ":clic 403 229" ":clic 274 441" ":pausa 1" ":clic 314 336" ":pausa 6"
   mira "desde la memoria USB (sin EDID): nada mayor que la de ahora, «A la medida», y se guarda en X:\\PANTALLA.ENV" \
-    "^pantalla: la pantalla no dice su medida" "^escritorio: \\\\PANTALLA.ENV: pantalla=auto antes= prueba=1" "^escritorio: reiniciar"
+    "la pantalla no dice su medida" "^escritorio: \\\\PANTALLA.ENV: pantalla=auto antes= prueba=1" "^escritorio: reiniciar"
   miracap "«No se sabe su medida: nada mayor que la de ahora.»" us1 texto 160 249 168 257 "No se sabe su medida: nada mayor que la de ahora." negrita 350 218 370 226 "A la medida"
   maquina us2 "$USBQ -no-reboot" ":espera 60 está a prueba" ":pausa 2" ":clic 431 418" ":pausa 2"
-  mira "y al arrancar, GRUB la pone (a la medida) desde la primera entrada y pregunta" "^pantalla: .PANTALLA.ENV pide «auto» (prueba=2)" "^pantalla: está a prueba"
+  mira "y al arrancar, GRUB la pone (a la medida) desde la primera entrada y pregunta" "PANTALLA.ENV pide «auto» (prueba=2)" "pantalla: está a prueba"
   python3 -I -c "import sys; t='# GRUB Environment Block\npantalla=1600x900\nantes=\nprueba=0\nnativa=\n'; open(sys.argv[1],'w').write(t+'#'*(1024-len(t)))" $V/envu
   mcopy -o -i $V/usb.img@@1M $V/envu ::PANTALLA.ENV
   maquina us3 "$USBQ -no-reboot" ":espera 60 no permite" ":pausa 3" ":captura us3"
   mcopy -n -i $V/usb.img@@1M ::ARRANQUE.TXT $V/arranque.txt; mcopy -n -i $V/usb.img@@1M ::PANTALLA.ENV $V/envu2
-  mira "si la BIOS no da la pedida (1600 x 900 en cirrus), GRUB pone otra y el núcleo lo dice" "^pantalla: Este equipo no permite 1600 x 900: se queda en 800 x 600\."
+  mira "si la BIOS no da la pedida (1600 x 900 en cirrus), GRUB pone otra y el núcleo lo dice" "Este equipo no permite 1600 x 900: se queda en 800 x 600\."
   miracap "con un aviso" us3 texto 0 0 800 600 "Este equipo no permite 1600 x 900: se queda en 800 x 600."
-  if tr -d '\r' < $V/arranque.txt | iconv -f CP437 -t UTF-8 | grep -q "^pantalla: Este equipo no permite 1600 x 900" && head -c 60 $V/envu2 | grep -q '^pantalla=800x600$'; then
+  if tr -d '\r' < $V/arranque.txt | iconv -f CP437 -t UTF-8 | grep -q "Este equipo no permite 1600 x 900" && head -c 60 $V/envu2 | grep -q '^pantalla=800x600$'; then
     ok "y queda en X:\\ARRANQUE.TXT (para mandarlo), y PANTALLA.ENV pasa a la que hay"
   else ko "ARRANQUE.TXT o PANTALLA.ENV no lo dicen:"; head -c 60 $V/envu2 | sed 's/^/        /'; fi
 else
