@@ -3407,7 +3407,7 @@ MEMORIA=64 ESCRIBE=1 DISCO=$Wf/e.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/pr
 tr -d '\r' < $Wf/sim.sal > $Wf/sim.txt
 S=$Wf/sim.txt
 mira "RED.BIN pone en marcha WIFI.BIN (WifiSimulada=SI en RED.INI), que se apunta como tarjeta Wi-Fi: la red va por él" \
-  "^red: Wi-Fi: WIFI.BIN en marcha, con la radio simulada$" "wifi: Hispa-Pentium: el servicio Wi-Fi (WIFI.BIN" "^wifi: Memoria para la tarjeta: 2048 KB en " \
+  "^red: Wi-Fi: WIFI.BIN en marcha, con la radio simulada$" "wifi: Hispa-Pentium: el servicio Wi-Fi (WIFI.BIN" "wifi: Memoria para la tarjeta: 2048 KB en " \
   "^red: Wi-Fi simulada (pruebas)$" "^red: la red va por el Wi-Fi$"
 mira "REDWIFI /REDES: busca y dice las redes, con la señal en rayitas y la seguridad" "^N.º  Red  " \
   "^  [123]  HispaPrueba  *6  ████ -47 dBm  WPA2$" "^  [123]  Vecina abierta  *11  ████ -47 dBm  abierta$" "^  [123]  Vecina vieja  *3  ████ -47 dBm  WPA (no admitida)$"
