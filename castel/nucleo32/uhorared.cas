@@ -31,10 +31,13 @@ módulo UHorared
     variable texto: arreglo [200] de byte
     variable servidores: arreglo [120] de byte
 
+    ; una línea, de una vez (que no se mezcle con lo que dice otro a la vez)
+    variable línea_di: arreglo [240] de byte
     función di(t: puntero a byte)
-        escribir("hora: ")
-        escribir(t)
-        escribir("\n")
+        copiar(línea_di, "hora: ")
+        copiar_hasta(dirección(línea_di[6]), t, 232)
+        concatenar(línea_di, "\n")
+        escribir(línea_di)
     fin
 
     ; apunta en el núcleo cómo ha ido (lo que enseña el Panel de control)

@@ -39,6 +39,26 @@ static int al_archivo, detalle;
 static char trozo[512];
 
 /* ---- el registro, al puerto serie y (con «registro») a \ACPI.TXT ---- */
+/* (PANEL) al puerto serie, de línea en línea (cada una de una vez: la
+ * llamada 61 toma el cerrojo de la consola), para que lo que dice el núcleo
+ * a la vez («escritorio: en marcha...») no caiga en medio de una línea; lo
+ * que queda sin su fin de línea espera a la vez siguiente */
+static char linea_serie[256];
+static u32 n_linea;
+
+static void serie_por_lineas(const char *t, u32 n)
+{
+	u32 i;
+
+	for (i = 0; i < n; i++) {
+		linea_serie[n_linea++] = t[i];
+		if (t[i] == '\n' || n_linea == sizeof linea_serie) {
+			sc(SC_SERIE, (u32)linea_serie, n_linea, 0);
+			n_linea = 0;
+		}
+	}
+}
+
 static void vacia_registro(int archivo)
 {
 	u32 n, m = 0xFFFFFFFFu;
@@ -49,7 +69,7 @@ static void vacia_registro(int archivo)
 			m = 0xFFFFFFFFu;
 	}
 	while ((n = reg_saca(trozo, sizeof trozo)) != 0) {
-		sc(SC_SERIE, (u32)trozo, n, 0);
+		serie_por_lineas(trozo, n);	/* (PANEL) */
 		if (m != 0xFFFFFFFFu)
 			sc(SC_ESCRIBIR_ARCHIVO, m, (u32)trozo, n);
 	}

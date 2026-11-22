@@ -171,10 +171,13 @@ módulo Ntp
         devolver ((fracción >> 16) * 1000) >> 16
     fin
 
+    ; una línea, de una vez (que no se mezcle con lo que dice otro a la vez)
+    variable línea_apunte: arreglo [240] de byte
     función apunta(t: puntero a byte)
-        escribir("hora: ")
-        escribir(t)
-        escribir("\n")
+        copiar(línea_apunte, "hora: ")
+        copiar_hasta(dirección(línea_apunte[6]), t, 232)
+        concatenar(línea_apunte, "\n")
+        escribir(línea_apunte)
     fin
 
     ; pregunta al servidor i por el puerto UDP s: cierto si contesta bien
