@@ -52,7 +52,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] Reproductor de música y vídeo (MP3, OGG, WAV; vídeo sencillo)
 - [ ] Visor de imágenes y Pintura
 - [ ] Compresor ZIP
-- [ ] **Herramienta de PDF propia** (en lugar de PDF24, que es de 64 bits y no libre): unir y separar, girar/ordenar/quitar páginas, comprimir, PDF ↔ imágenes, PDF a texto, poner y quitar contraseña; con piezas libres (qpdf…) y el Lector de la oficina; al ser nuestra, se compila tal cual para Hispa-64 (pedido de Carlos 21/11)
+- [x] ~~**Herramienta de PDF propia** (en lugar de PDF24, que es de 64 bits y no libre): unir y separar, girar/ordenar/quitar páginas, comprimir, PDF ↔ imágenes, PDF a texto, poner y quitar contraseña; al ser nuestra, se compila tal cual para Hispa-64 (pedido de Carlos 21/11)~~ — rama pentium-pdf (21/11: **Hispa-PDF**, la orden PDF y la ventana HISPAPDF.BIN, paquete `pdf`; docs/PENTIUM.md §14 undecies). Queda: las letras CFF/Type1 del PDF, JPX/JBIG2 al pintar
 - [x] ~~Calculadora, Reloj, Mapa de caracteres~~ (21/11, rama pentium-accesorios: la Calculadora estándar, científica y de oficina —IVA, cinta, euros— con cuentas decimales; el Reloj con calendario, festivos, alarma, cronómetro, cuenta atrás y poner en hora; el Mapa de caracteres con copiar y la tecla de cada letra; paquete «accesori»: docs/PENTIUM.md §14 sexies)
 - [ ] Juegos: los emuladores (Hispa-Nes, Hispa-System, Hispa-Snes, Hispa-Drive) con sonido en Pentium (21/11: HVPRUN pasa el sonido; Hispa-Snes, Hispa-Nes e Hispa-System corren en HVPRUN y suenan; falta Hispa-Drive y los mandos)
 - [ ] Correo

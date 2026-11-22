@@ -6,3 +6,9 @@ SHA-256: stb_truetype.h ecd30b05e0dd4fea3a13c26810dd9e1992dc379049482c393d5a19e6
 Sin cambios. Los usa NAVEGA2.EXE, el Navegador completo (w32/surf):
 w32/surf/letra.c pinta las letras TrueType (en vez de FreeType) y
 w32/surf/imagen.c lee PNG y JPEG (en vez de libpng y libjpeg).
+
+(PDF) stb_image_write.h 1.19 (el mismo repositorio, rama master del
+21/11/2026), de dominio público o MIT a elegir (va en su LICENSE, la misma).
+SHA-256: stb_image_write.h 5d89edc8bffd848f3e138b2a1dbec67aadbed591894bde16ade7c83dc233af9b
+Sin cambios. Lo usa Hispa-PDF (castel/nucleo32/pdf): escribe los JPG y PNG
+de «PDF IMAGENES» y recomprime las imágenes al comprimir un PDF.

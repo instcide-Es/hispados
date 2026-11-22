@@ -112,7 +112,7 @@ TIPO_POR_NOMBRE = {
     'base': 'sistema', 'paquetes': 'sistema', 'equipo': 'sistema', 'hvprun': 'sistema',
     'red': 'internet', 'tls': 'internet', 'navega': 'internet', 'ssh': 'internet',
     'tailscal': 'internet', 'wifi': 'internet',
-    'bloc': 'oficina', 'oficina': 'oficina',
+    'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina',
     'consola': 'herramientas', 'accesori': 'herramientas',
     'ejemplos': 'desarrollo',
     'win32': 'windows',
@@ -434,6 +434,12 @@ OPCIONALES = [
      'base >= 0.8.3, red >= 0.8.1, tls >= 0.8.1', [
         ('ESCUDO.BIN', r'\HISPA\ESCUDO.BIN'), ('ESCUDO/LEEME.TXT', r'\HISPA\ESCUDO\LEEME.TXT'),
         ('MENU/ESCUDO.MNU', r'\HISPA\MENU\ESCUDO.MNU'), ('MENU/ESCUDO.ICP', r'\HISPA\MENU\ESCUDO.ICP')]),
+    # (PDF) Hispa-PDF (castel/nucleo32/pdf/paquete.sh): la orden PDF y su
+    # ventana; del tipo «oficina» (en la 0.8.5: TIPOS de hpq.py y tipo_de)
+    ('pdf', '1.0', 'Hispa-PDF: unir, separar, girar, ordenar, comprimir y cifrar PDF; PDF a imágenes y a texto; imágenes a PDF',
+     'base >= 0.8.3', [
+        ('PDF.BIN', r'\HISPA\PDF.BIN'), ('HISPAPDF.BIN', r'\HISPA\HISPAPDF.BIN'), ('PDF/LEEME.TXT', r'\HISPA\PDF\LEEME.TXT'),
+        ('MENU/HISPAPDF.MNU', r'\HISPA\MENU\HISPAPDF.MNU'), ('MENU/HISPAPDF.ICP', r'\HISPA\MENU\HISPAPDF.ICP')]),
 ]
 
 
@@ -633,7 +639,10 @@ def principal(a):
             f.write(datos[:largo])
         return 0
     if orden == 'opcionales':
-        n = opcionales(a[2], a[3:])
+        # (PDF) «opcionales SALIDA CARPETA nombre...»: solo esos paquetes
+        cs = [x for x in a[3:] if os.path.isdir(x)]
+        ns = [x for x in a[3:] if not os.path.isdir(x)]
+        n = opcionales(a[2], cs, ns or None)
         print('hpq: %d paquetes opcionales en %s' % (n, a[2]))
         return 0
     if orden == 'linea':

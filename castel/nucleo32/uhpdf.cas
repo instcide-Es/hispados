@@ -1,0 +1,1345 @@
+; =============================================================================
+;  uhpdf.cas - HISPAPDF.BIN, la ventana de Hispa-PDF (docs/PENTIUM.md,
+;  «Hispa-PDF»): los PDF que se van añadiendo, a la izquierda; sus páginas en
+;  miniatura, a la derecha, en el orden en que irán. Se eligen (con Control,
+;  varias), se arrastran para ordenarlas, se giran, se quitan y se ven en
+;  grande; y se guarda todo junto (unir), cada página aparte (separar),
+;  comprimido o con contraseña. También: hacer un PDF con imágenes, sacar
+;  el texto y pasar las páginas a imágenes. El trabajo lo hace PDF.BIN (en
+;  C, castel/nucleo32/pdf): esta ventana se lo pide con un archivo de
+;  órdenes («PDF @archivo») en la unidad de los temporales, y lo espera sin
+;  pararse (las miniaturas llegan de seis en seis).
+;
+;      HISPAPDF [ARCHIVO.PDF]         (lo que abre Mi equipo con un .PDF)
+;
+;  Con los controles de controles.cas (la letra normal, la barra de menús,
+;  la de herramientas, campos, casillas y la barra de estado).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UHpdf
+
+    modelo usuario
+
+    importar Llamadas, Controles, Grafico, Textos32, Formato, Mem32
+
+    constante MAX_RUTA = 100
+    constante MAX_ARCH = 16
+    constante MAX_PÁG = 300
+    constante LADO = 88                         ; lo que mide una miniatura (lo más)
+    constante CELDA_AN = 112
+    constante CELDA_AL = 128
+    constante LOTE = 6                          ; las miniaturas que se piden de una vez
+    constante ARCH_AN = 236                     ; la lista de archivos, a la izquierda
+
+    constante MENÚS = "&Archivo|&P\xA0ginas|&Herramientas|A&yuda"
+    constante M_ARCHIVO = "A\xA4adir PDF...|A\xA4adir im\xA0genes...|-|Guardar como...|-|Quitar todo|-|Salir"
+    constante M_PÁGINAS = "Girar a la derecha (R)|Girar a la izquierda (L)|Quitar (Supr)|-|Mover a la izquierda|Mover a la derecha|-|Ver en grande (Intro)|Elegir todas"
+    constante M_HERRAM = "Sacar el texto del PDF elegido|Pasar sus p\xA0ginas a im\xA0genes|-|Unir y comprimir...|Poner contrase\xA4a...|Separar: una p\xA0gina por archivo..."
+
+    ; los modos de la ventana
+    constante M_LISTA = 0
+    constante M_ABRIR = 1
+    constante M_GUARDAR = 2
+    constante M_CLAVE = 3
+    constante M_VER = 4
+
+    ; los controles
+    constante ID_H = 20                         ; las herramientas: ID_H + n
+    constante ID_CARPETA = 2
+    constante ID_REJILLA = 3
+    constante ID_AÑADIR = 4
+    constante ID_SUBIR = 5
+    constante ID_CERRAR = 6
+    constante ID_RUTA = 7
+    constante ID_COMPRIME = 8
+    constante ID_CLAVE = 9
+    constante ID_SEPARA = 10
+    constante ID_GUARDAR = 11
+    constante ID_CANCELAR = 12
+    constante ID_PÁGINAS = 13
+    constante ID_CLAVE_ABRIR = 14
+    constante ID_VALE = 15
+    constante COMPRESIONES = "No|Sin perder calidad|Calidad media (fotos m\xA0s peque\xA4as)|Calidad baja (lo m\xA0s peque\xA4o)"
+
+    tipo Archivo = estructura
+        ruta: arreglo [MAX_RUTA] de byte
+        páginas: nat32                          ; 0: aún no se sabe
+        hechas: nat32                           ; las páginas ya puestas en la lista
+        estado: nat32                           ; 0 leyéndose; 1 bien; 2 lleva contraseña; 3 no se puede leer
+        clave: arreglo [64] de byte
+        color: nat32
+    fin
+
+    tipo Página = estructura
+        archivo, número, giro: nat32
+        mini: ent32                             ; su miniatura (-1: no hay)
+        an, al: nat32
+        elegida: bool
+    fin
+
+    variable arch: arreglo [MAX_ARCH] de Archivo
+    variable n_arch: nat32
+    variable pág: arreglo [MAX_PÁG] de Página
+    variable n_pág: nat32
+    variable minis: puntero a nat32
+    variable n_minis: nat32
+    variable actual: ent32 = -1                 ; la página con el cursor
+    variable primera_fila: ent32                ; el desplazamiento de las miniaturas
+    variable modo: nat32 = M_LISTA
+    variable abierto: ent32 = -1
+    variable aviso: arreglo [200] de byte
+    variable sale: bool
+
+    ; el trabajo de PDF.BIN que se está esperando
+    constante T_NADA = 0
+    constante T_MINI = 1
+    constante T_GUARDA = 2
+    constante T_OTRO = 3
+    constante T_VER = 4
+    variable trabajo: nat32
+    variable tarea: nat32
+    variable t_arch, t_desde: nat32
+    variable tmp: arreglo [24] de byte          ; «X:\»
+    variable programa: arreglo [40] de byte = "\\HISPA\\PDF.BIN"
+    variable hecho_al_acabar: arreglo [160] de byte
+
+    ; el cuadro de abrir
+    variable carpeta: arreglo [MAX_RUTA] de byte = "C:\\"
+    variable g: Rejilla
+    variable de_imágenes: bool
+    variable nombres: arreglo [200] de arreglo [13] de byte
+    variable es_carpeta_: arreglo [200] de bool
+    variable n_nombres: nat32
+    ; el de guardar
+    variable salida: arreglo [MAX_RUTA] de byte
+    variable compresión: nat32
+    variable clave_nueva: arreglo [64] de byte
+    variable separa: bool
+    variable para_qué: nat32                    ; 0 guardar; 1 unir y comprimir; 2 contraseña; 3 separar
+    ; el de la contraseña de abrir
+    variable clave_de: nat32
+    variable clave_t: arreglo [64] de byte
+    ; ver en grande
+    variable grande: puntero a nat32
+    variable g_an, g_al: nat32
+    ; arrastrar
+    variable pulsado, arrastrando: bool
+    variable pul_x, pul_y, destino: ent32
+
+    ; -------------------------------------------------------------------------
+    ;  Lo de fuera: los temporales y PDF.BIN
+    ; -------------------------------------------------------------------------
+    función busca_temporal(): bool
+        variable i: nat32
+        variable iu: Info_unidad
+        variable mejor: byte
+        mejor := 0
+        i := 0
+        mientras i < 26 y info_unidad(i, iu) hacer
+            si iu.letra <> 0 y iu.solo_lectura = 0 y iu.clase <> 1 y iu.medio <> MEDIO_CD y iu.medio <> MEDIO_IMAGEN entonces
+                si mejor = 0 o iu.letra = 'X' entonces mejor := iu.letra fin
+            fin
+            i := i + 1
+        fin
+        si mejor = 0 entonces devolver falso fin
+        tmp[0] := mejor
+        tmp[1] := 0
+        concatenar(tmp, ":\\")
+        devolver cierto
+    fin
+
+    función temporal(nombre: puntero a byte, destino: puntero a byte)
+        copiar(destino, tmp)
+        concatenar(destino, nombre)
+    fin
+
+    ; escribe la orden en HPDF.ARG y lanza PDF.BIN con «@HPDF.ARG»
+    función lanza(orden: puntero a byte): bool
+        variable ruta: arreglo [40] de byte
+        variable args: arreglo [44] de byte
+        variable m, t: nat32
+        temporal("HPDF.ARG", ruta)
+        m := crear(ruta)
+        si es_error(m) entonces
+            copiar(aviso, "No se puede escribir en la unidad de los temporales.")
+            devolver falso
+        fin
+        escribir_archivo(m, orden, longitud(orden))
+        cerrar(m)
+        copiar(args, "@")
+        concatenar(args, ruta)
+        t := lanzar(programa, args)
+        si es_error(t) entonces
+            copiar(programa, "\\PDF.BIN")
+            t := lanzar(programa, args)
+        fin
+        si es_error(t) entonces
+            copiar(aviso, "No est\xA0 PDF.BIN (el paquete \xABpdf\xBB).")
+            devolver falso
+        fin
+        tarea := t
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los archivos y sus miniaturas
+    ; -------------------------------------------------------------------------
+    función color_de(k: nat32): nat32
+        según k mod 6
+            caso 0: devolver 0x1D4ED8
+            caso 1: devolver 0xB45309
+            caso 2: devolver 0x166534
+            caso 3: devolver 0x7C3AED
+            caso 4: devolver 0x991B1B
+            si no: devolver 0x0E7490
+        fin
+    fin
+
+    función añade_archivo(ruta: puntero a byte)
+        variable i: nat32
+        si n_arch >= MAX_ARCH entonces
+            copiar(aviso, "Caben 16 archivos a la vez.")
+            devolver
+        fin
+        para i desde 0 hasta n_arch hacer
+            si i < n_arch y iguales_sin_caja(dirección(arch[i].ruta[0]), ruta) entonces
+                copiar(aviso, "Ese archivo ya est\xA0 en la lista.")
+                devolver
+            fin
+        fin
+        copiar_hasta(dirección(arch[n_arch].ruta[0]), ruta, MAX_RUTA)
+        a_mayúsculas(dirección(arch[n_arch].ruta[0]))
+        arch[n_arch].páginas := 0
+        arch[n_arch].hechas := 0
+        arch[n_arch].estado := 0
+        arch[n_arch].clave[0] := 0
+        arch[n_arch].color := color_de(n_arch)
+        n_arch := n_arch + 1
+        aviso[0] := 0
+    fin
+
+    ; pide el lote siguiente de miniaturas (del primer archivo que tenga algo pendiente)
+    función pide_miniaturas(): bool
+        variable i, primera_p: nat32
+        variable orden: arreglo [300] de byte
+        variable sal: arreglo [40] de byte
+        variable d: arreglo [6] de nat32
+        si trabajo <> T_NADA entonces devolver falso fin
+        para i desde 0 hasta MAX_ARCH - 1 hacer
+            si i < n_arch y arch[i].estado = 0 entonces
+                primera_p := arch[i].hechas + 1
+                temporal("HPDF.MIN", sal)
+                d[0] := nat32(dirección(arch[i].ruta[0]))
+                d[1] := primera_p
+                d[2] := primera_p + LOTE - 1
+                d[3] := nat32(dirección(sal[0]))
+                formatear(orden, 300, "MINIATURAS \"%s\" /LADO=88 /DESDE=%u /HASTA=%u /SALIDA=%s", d)
+                si arch[i].clave[0] <> 0 entonces
+                    concatenar(orden, " /CLAVE=")
+                    concatenar(orden, dirección(arch[i].clave[0]))
+                fin
+                si no lanza(orden) entonces
+                    arch[i].estado := 3
+                    devolver falso
+                fin
+                trabajo := T_MINI
+                t_arch := i
+                t_desde := primera_p
+                devolver cierto
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; lo que ha dejado PDF.BIN en HPDF.MIN: «HPMP», cuántas tiene, la primera,
+    ; cuántas van; y de cada una, ancho, alto, giro y sus puntos
+    función lee_miniaturas(código: nat32)
+        variable sal: arreglo [40] de byte
+        variable m, n, k, f: nat32
+        variable cab: arreglo [4] de nat32
+        variable c: arreglo [3] de nat32
+        variable a: nat32
+        variable p: puntero a nat32
+        a := t_arch
+        si código = 2 entonces
+            arch[a].estado := 2
+            si arch[a].clave[0] <> 0 entonces copiar(aviso, "La contrase\xA4a no es la suya.") fin
+            arch[a].clave[0] := 0
+            pide_clave(a)
+            devolver
+        fin
+        temporal("HPDF.MIN", sal)
+        m := abrir(sal)
+        si código <> 0 o es_error(m) entonces
+            si no es_error(m) entonces cerrar(m) fin
+            arch[a].estado := 3
+            copiar(aviso, "Ese archivo no es un PDF que se pueda leer.")
+            devolver
+        fin
+        n := leer(m, puntero(dirección(cab[0])), 16)
+        si n <> 16 o cab[0] <> 0x504D5048 entonces
+            cerrar(m)
+            arch[a].estado := 3
+            devolver
+        fin
+        arch[a].páginas := cab[1]
+        para k desde 1 hasta cab[3] hacer
+            si leer(m, puntero(dirección(c[0])), 12) <> 12 entonces romper fin
+            si c[0] > LADO o c[1] > LADO entonces romper fin
+            si n_pág < MAX_PÁG entonces
+                pág[n_pág].archivo := a
+                pág[n_pág].número := cab[2] + k - 1
+                pág[n_pág].giro := 0
+                pág[n_pág].elegida := falso
+                pág[n_pág].an := c[0]
+                pág[n_pág].al := c[1]
+                pág[n_pág].mini := -1
+                si c[0] > 0 y n_minis < MAX_PÁG entonces
+                    p := minis + n_minis * LADO * LADO
+                    para f desde 0 hasta c[1] - 1 hacer
+                        leer(m, puntero(p + f * LADO), c[0] * 4)
+                    fin
+                    pág[n_pág].mini := ent32(n_minis)
+                    n_minis := n_minis + 1
+                fin
+                n_pág := n_pág + 1
+                si actual < 0 entonces actual := 0 fin
+            sino
+                copiar(aviso, "Caben 300 p\xA0ginas a la vez: las dem\xA0s no se ponen.")
+                arch[a].estado := 1
+            fin
+            arch[a].hechas := cab[2] + k - 1
+        fin
+        cerrar(m)
+        borrar(sal)
+        si arch[a].hechas >= arch[a].páginas o cab[3] = 0 entonces arch[a].estado := 1 fin
+    fin
+
+    ; un poco de trabajo: cierto si se espera algo
+    función trabaja(): bool
+        variable r: nat32
+        variable ruta: arreglo [40] de byte
+        si trabajo = T_NADA entonces
+            devolver pide_miniaturas()
+        fin
+        r := acabada(tarea)
+        si r = Llamadas.SIGUE entonces
+            dormir(2)
+            devolver cierto
+        fin
+        si trabajo = T_MINI entonces
+            trabajo := T_NADA
+            lee_miniaturas(r)
+            pinta()
+            devolver pide_miniaturas()
+        fin
+        si trabajo = T_VER entonces
+            trabajo := T_NADA
+            si r = 0 y lee_grande() entonces
+                modo := M_VER
+            sino
+                copiar(aviso, "No se ha podido pintar esa p\xA0gina.")
+            fin
+            pinta()
+            devolver falso
+        fin
+        ; guardar y lo demás
+        trabajo := T_NADA
+        si r = 0 entonces
+            copiar(aviso, dirección(hecho_al_acabar[0]))
+        sino si r = 2 entonces
+            copiar(aviso, "Hace falta la contrase\xA4a de alg\xA3n archivo.")
+        sino
+            copiar(aviso, "No se ha podido hacer (\xBFel disco, lleno? \xBFel nombre, en 8+3?).")
+        fin
+        temporal("HPDF.LST", ruta)
+        borrar(ruta)
+        pinta()
+        devolver falso
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las páginas: elegir, girar, quitar, mover
+    ; -------------------------------------------------------------------------
+    función hay_elegidas(): bool
+        variable i: nat32
+        para i desde 0 hasta MAX_PÁG - 1 hacer
+            si i < n_pág y pág[i].elegida entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    función toca(i: nat32): bool
+        si hay_elegidas() entonces devolver pág[i].elegida fin
+        devolver ent32(i) = actual
+    fin
+
+    función gira(grados: nat32)
+        variable i: nat32
+        si n_pág = 0 entonces devolver fin
+        para i desde 0 hasta n_pág - 1 hacer
+            si toca(i) entonces pág[i].giro := (pág[i].giro + grados) mod 360 fin
+        fin
+    fin
+
+    ; (las estructuras se copian enteras con copiar_memoria)
+    variable pág_tmp: Página
+    función copia_pág(d: ent32, org: ent32)
+        si d < 0 entonces
+            copiar_memoria(puntero(dirección(pág_tmp)), puntero(dirección(pág[org])), tamaño(Página))
+        sino si org < 0 entonces
+            copiar_memoria(puntero(dirección(pág[d])), puntero(dirección(pág_tmp)), tamaño(Página))
+        sino
+            copiar_memoria(puntero(dirección(pág[d])), puntero(dirección(pág[org])), tamaño(Página))
+        fin
+    fin
+
+    función quita()
+        variable i, k: nat32
+        variable hab: bool
+        si n_pág = 0 entonces devolver fin
+        hab := hay_elegidas()
+        k := 0
+        para i desde 0 hasta n_pág - 1 hacer
+            si (hab y pág[i].elegida) o (no hab y ent32(i) = actual) entonces
+                seguir
+            fin
+            copia_pág(ent32(k), ent32(i))
+            k := k + 1
+        fin
+        n_pág := k
+        si actual >= ent32(n_pág) entonces actual := ent32(n_pág) - 1 fin
+    fin
+
+    ; mueve la página «de» al sitio «a» (las de en medio se corren)
+    función mueve(origen_: ent32, hacia: ent32)
+        variable i: ent32
+        si origen_ < 0 o hacia < 0 o origen_ >= ent32(n_pág) entonces devolver fin
+        si hacia >= ent32(n_pág) entonces hacia := ent32(n_pág) - 1 fin
+        si origen_ = hacia entonces devolver fin
+        copia_pág(-1, origen_)
+        si origen_ < hacia entonces
+            para i desde origen_ hasta hacia - 1 hacer copia_pág(i, i + 1) fin
+        sino
+            i := origen_
+            mientras i > hacia hacer
+                copia_pág(i, i - 1)
+                i := i - 1
+            fin
+        fin
+        copia_pág(hacia, -1)
+        actual := hacia
+    fin
+
+    función quita_todo()
+        n_arch := 0
+        n_pág := 0
+        n_minis := 0
+        actual := -1
+        primera_fila := 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Dónde va cada cosa
+    ; -------------------------------------------------------------------------
+    función zona_y(): ent32
+        devolver alto_menús() + alto_herramientas() + 4 * E
+    fin
+
+    función zona_alto(): ent32
+        devolver alto - zona_y() - alto_estado()
+    fin
+
+    función columnas(): ent32
+        variable c: ent32
+        c := (ancho - ARCH_AN - 16) div CELDA_AN
+        si c < 1 entonces c := 1 fin
+        devolver c
+    fin
+
+    ; la página que hay en (x, y) de la ventana (o -1)
+    función página_en(x: ent32, yy: ent32): ent32
+        variable c, f, k: ent32
+        si x < ARCH_AN + 8 o yy < zona_y() + 4 entonces devolver -1 fin
+        c := (x - ARCH_AN - 8) div CELDA_AN
+        f := (yy - zona_y() - 4) div CELDA_AL + primera_fila
+        si c >= columnas() entonces devolver -1 fin
+        k := f * columnas() + c
+        si k < 0 entonces devolver -1 fin
+        devolver k
+    fin
+
+    función a_la_vista()
+        variable f, filas: ent32
+        si actual < 0 entonces devolver fin
+        f := actual div columnas()
+        filas := zona_alto() div CELDA_AL
+        si filas < 1 entonces filas := 1 fin
+        si f < primera_fila entonces primera_fila := f fin
+        si f >= primera_fila + filas entonces primera_fila := f - filas + 1 fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Pintar
+    ; -------------------------------------------------------------------------
+    ; la miniatura k, girada, en (x, y) de la celda (centrada en LADO x LADO)
+    función pinta_mini(i: nat32, x0: ent32, y0: ent32)
+        variable m: puntero a nat32
+        variable an, al, w, h, x, yy, sx, sy: ent32
+        variable giro: nat32
+        an := ent32(pág[i].an)
+        al := ent32(pág[i].al)
+        giro := pág[i].giro
+        si giro = 90 o giro = 270 entonces
+            w := al
+            h := an
+        sino
+            w := an
+            h := al
+        fin
+        x0 := x0 + (LADO - w) div 2
+        y0 := y0 + (LADO - h) div 2
+        ; el papel y su sombra
+        caja(x0 + 3, y0 + 3, w, h, C_GRIS)
+        caja(x0, y0, w, h, C_PAPEL)
+        si pág[i].mini < 0 entonces
+            borde(x0, y0, w, h, 1, C_BORDE)
+            devolver
+        fin
+        m := minis + nat32(pág[i].mini) * LADO * LADO
+        para yy desde 0 hasta h - 1 hacer
+            si y0 + yy < 0 o y0 + yy >= alto entonces seguir fin
+            para x desde 0 hasta w - 1 hacer
+                según giro
+                    caso 90:
+                        sx := yy
+                        sy := al - 1 - x
+                    caso 180:
+                        sx := an - 1 - x
+                        sy := al - 1 - yy
+                    caso 270:
+                        sx := an - 1 - yy
+                        sy := x
+                    si no:
+                        sx := x
+                        sy := yy
+                fin
+                lz.puntos[(y0 + yy) * ent32(lz.salto) + x0 + x] := m[sy * LADO + sx]
+            fin
+        fin
+        borde(x0, y0, w, h, 1, C_BORDE)
+    fin
+
+    función pinta_páginas()
+        variable i, x, yy, c, f, filas: ent32
+        variable t: arreglo [32] de byte
+        variable d: arreglo [3] de nat32
+        variable y0: ent32
+        y0 := zona_y()
+        caja(ARCH_AN, y0, ancho - ARCH_AN, zona_alto(), 0xD7DCE3)
+        si n_pág = 0 entonces
+            si n_arch = 0 entonces
+                Controles.texto(ARCH_AN + 24, y0 + 24, "Para empezar: Archivo > A\xA4adir PDF... (o A\xA4adir im\xA0genes...).", C_SUAVE)
+                Controles.texto(ARCH_AN + 24, y0 + 48, "Las p\xA0ginas salen aqu\xA1: se eligen con un clic (con Control, varias),", C_SUAVE)
+                Controles.texto(ARCH_AN + 24, y0 + 66, "se arrastran para ordenarlas, se giran con R y L, se quitan con Supr", C_SUAVE)
+                Controles.texto(ARCH_AN + 24, y0 + 84, "y se ven en grande con Intro (o con dos clics).", C_SUAVE)
+            sino
+                Controles.texto(ARCH_AN + 24, y0 + 24, "Leyendo las p\xA0ginas...", C_SUAVE)
+            fin
+            devolver
+        fin
+        filas := zona_alto() div CELDA_AL + 1
+        para f desde 0 hasta filas - 1 hacer
+            para c desde 0 hasta columnas() - 1 hacer
+                i := (f + primera_fila) * columnas() + c
+                si i < 0 o i >= ent32(n_pág) entonces seguir fin
+                x := ARCH_AN + 8 + c * CELDA_AN
+                yy := y0 + 4 + f * CELDA_AL
+                si yy + CELDA_AL > y0 + zona_alto() entonces seguir fin
+                si pág[i].elegida entonces caja_redonda(x + 2, yy, CELDA_AN - 4, CELDA_AL - 2, 6, C_AZUL_CLARO) fin
+                pinta_mini(nat32(i), x + (CELDA_AN - LADO) div 2, yy + 4)
+                ; de qué archivo (su color) y qué página
+                caja(x + 8, yy + LADO + 10, 10, 10, arch[pág[i].archivo].color)
+                d[0] := nat32(i) + 1
+                d[1] := pág[i].archivo + 'A'
+                d[2] := pág[i].número
+                formatear(t, 32, "%u (%c%u)", d)
+                si pág[i].giro <> 0 entonces añadir_car(t, '*') fin
+                Controles.texto(x + 22, yy + LADO + 8, t, C_TINTA)
+                si i = actual entonces
+                    borde(x + 2, yy, CELDA_AN - 4, CELDA_AL - 2, 2, C_AZUL)
+                fin
+                si arrastrando y i = destino entonces
+                    caja(x, yy, 3, CELDA_AL - 4, C_NARANJA)
+                fin
+            fin
+        fin
+    fin
+
+    función pinta_archivos()
+        variable i, yy: ent32
+        variable t: arreglo [48] de byte
+        variable d: arreglo [2] de nat32
+        variable nombre: puntero a byte
+        variable k: nat32
+        yy := zona_y()
+        caja(0, yy, ARCH_AN, zona_alto(), C_FONDO)
+        Controles.negrita(8, yy + 6, "Archivos", C_TINTA)
+        yy := yy + 28
+        para i desde 0 hasta ent32(n_arch) - 1 hacer
+            ; el nombre sin la carpeta
+            nombre := dirección(arch[i].ruta[0])
+            k := 0
+            mientras arch[i].ruta[k] <> 0 hacer
+                si arch[i].ruta[k] = '\\' o arch[i].ruta[k] = ':' entonces nombre := dirección(arch[i].ruta[k + 1]) fin
+                k := k + 1
+            fin
+            caja(8, yy + 3, 10, 10, arch[i].color)
+            d[0] := nat32(i) + 'A'
+            d[1] := nat32(nombre)
+            formatear(t, 48, "%c %s", d)
+            texto_corto(24, yy, t, ARCH_AN - 30, C_TINTA, falso)
+            según arch[i].estado
+                caso 0: copiar(t, "leyendo...")
+                caso 2: copiar(t, "lleva contrase\xA4a")
+                caso 3: copiar(t, "no se puede leer")
+                si no:
+                    d[0] := arch[i].páginas
+                    formatear(t, 48, "%u p\xA0ginas", d)
+            fin
+            Controles.texto(24, yy + 17, t, C_SUAVE)
+            yy := yy + 40
+        fin
+    fin
+
+    función pinta_abrir()
+        variable yy, an: ent32
+        yy := zona_y() + 8
+        caja(0, zona_y(), ancho, zona_alto(), C_FONDO)
+        si de_imágenes entonces
+            Controles.negrita(16, yy, "A\xA4adir im\xA0genes (JPG, PNG, BMP, GIF): cada una, una p\xA0gina nueva", C_TINTA)
+        sino
+            Controles.negrita(16, yy, "A\xA4adir un PDF", C_TINTA)
+        fin
+        yy := yy + 28
+        an := ancho - 32
+        yy := yy + campo(ID_CARPETA, 16, yy, an - ancho_botón("Subir") - 8, "Carpeta (Intro para ir)", carpeta, falso) + 8
+        botón(ID_SUBIR, 16 + an - ancho_botón("Subir"), yy - alto_caja() - 8, "Subir", falso, falso)
+        rejilla(g, ID_REJILLA, 16, yy, an, zona_alto() - (yy - zona_y()) - alto_botón() - 24, "No hay nada que se pueda a\xA4adir en esta carpeta.")
+        yy := zona_y() + zona_alto() - alto_botón() - 10
+        botón(ID_AÑADIR, 16, yy, "A\xA4adir", cierto, falso)
+        botón(ID_CERRAR, 16 + ancho_botón("A\xA4adir") + 12, yy, "Cerrar", falso, falso)
+    fin
+
+    función pinta_guardar()
+        variable yy, an, y2: ent32
+        yy := zona_y() + 8
+        caja(0, zona_y(), ancho, zona_alto(), C_FONDO)
+        an := ancho - 64
+        si an > 640 entonces an := 640 fin
+        según para_qué
+            caso 1: copiar(hecho_al_acabar, "Unir y comprimir")
+            caso 2: copiar(hecho_al_acabar, "Poner contrase\xA4a")
+            caso 3: copiar(hecho_al_acabar, "Separar: una p\xA0gina por archivo")
+            si no: copiar(hecho_al_acabar, "Guardar como")
+        fin
+        y2 := recuadro(16, yy, an + 32, 3 * (LT + alto_caja() + 10) + 3 * LT + alto_botón() + 60, hecho_al_acabar)
+        y2 := y2 + campo(ID_RUTA, 32, y2, an, "D\xA2nde (un nombre de 8+3: \\DOCUMENT\\NUEVO.PDF)", salida, falso) + 10
+        y2 := y2 + desplegable(ID_COMPRIME, 32, y2, an, "Comprimir", COMPRESIONES, compresión, falso) + 10
+        y2 := y2 + campo(ID_CLAVE, 32, y2, an div 2, "Contrase\xA4a para abrirlo (vac\xA1a: sin contrase\xA4a)", clave_nueva, falso) + 10
+        casilla(ID_SEPARA, 32, y2, "Cada p\xA0gina, en un archivo aparte (NUEVO1.PDF, NUEVO2.PDF...)", separa)
+        y2 := y2 + LT + 14
+        d_páginas(32, y2)
+        y2 := y2 + LT + 10
+        botón(ID_GUARDAR, 32, y2, "Guardar", cierto, n_pág = 0)
+        botón(ID_CANCELAR, 32 + ancho_botón("Guardar") + 12, y2, "Cancelar", falso, falso)
+    fin
+
+    función d_páginas(x: ent32, yy: ent32)
+        variable t: arreglo [80] de byte
+        variable d: arreglo [2] de nat32
+        d[0] := n_pág
+        d[1] := n_arch
+        formatear(t, 80, "Van %u p\xA0ginas de %u archivos, en el orden de la lista.", d)
+        Controles.texto(x, yy, t, C_SUAVE)
+    fin
+
+    función pinta_clave()
+        variable yy, y2: ent32
+        variable t: arreglo [140] de byte
+        yy := zona_y() + 16
+        caja(0, zona_y(), ancho, zona_alto(), C_FONDO)
+        copiar(t, dirección(arch[clave_de].ruta[0]))
+        concatenar(t, " lleva contrase\xA4a")
+        y2 := recuadro(16, yy, 520, alto_caja() + LT + alto_botón() + 40, t)
+        y2 := y2 + campo(ID_CLAVE_ABRIR, 32, y2, 300, "La contrase\xA4a", clave_t, cierto) + 10
+        botón(ID_VALE, 32, y2, "Abrir", cierto, falso)
+        botón(ID_CANCELAR, 32 + ancho_botón("Abrir") + 12, y2, "Quitarlo de la lista", falso, falso)
+    fin
+
+    función pinta_grande()
+        variable mp, ld: Lienzo
+        variable x, yy: ent32
+        caja(0, zona_y(), ancho, zona_alto(), 0x4B5563)
+        x := (ancho - ent32(g_an)) div 2
+        yy := zona_y() + (zona_alto() - ent32(g_al)) div 2
+        si x < 0 entonces x := 0 fin
+        si yy < zona_y() entonces yy := zona_y() fin
+        pon_lienzo(mp, grande, g_an, ent32(g_an), ent32(g_al))
+        copiar_lienzo(lz, x, yy, mp, 0, 0, ent32(g_an), ent32(g_al))
+        Controles.texto(8, zona_y() + 4, "Esc o un clic: volver", 0xFFFFFF)
+    fin
+
+    función pinta()
+        variable yy, x: ent32
+        variable est: arreglo [260] de byte
+        variable d: arreglo [3] de nat32
+        empezar_controles()
+        caja(0, 0, ancho, alto, C_FONDO)
+        yy := barra_menús(0, 0, ancho, MENÚS, abierto)
+        barra_herramientas(0, yy, ancho)
+        x := 4
+        x := x + herramienta(ID_H + 0, x, yy + 2, I_CARPETA, "A\xA4adir PDF", modo <> M_LISTA) + 2
+        x := x + herramienta(ID_H + 1, x, yy + 2, I_GUARDAR, "Guardar", modo <> M_LISTA o n_pág = 0) + 2
+        x := x + separador(x, yy)
+        x := x + herramienta(ID_H + 2, x, yy + 2, I_DESHACER, "Izq.", modo <> M_LISTA o n_pág = 0) + 2
+        x := x + herramienta(ID_H + 3, x, yy + 2, I_REFRESCAR, "Der.", modo <> M_LISTA o n_pág = 0) + 2
+        x := x + herramienta(ID_H + 4, x, yy + 2, I_BORRAR, "Quitar", modo <> M_LISTA o n_pág = 0) + 2
+        x := x + herramienta(ID_H + 5, x, yy + 2, I_BUSCAR, "Ver", modo <> M_LISTA o n_pág = 0) + 2
+        x := x + separador(x, yy)
+        x := x + herramienta(ID_H + 6, x, yy + 2, I_VISTAS, "Comprimir", modo <> M_LISTA o n_pág = 0) + 2
+        x := x + herramienta(ID_H + 7, x, yy + 2, I_EDITAR, "Clave", modo <> M_LISTA o n_pág = 0) + 2
+        según modo
+            caso M_ABRIR: pinta_abrir()
+            caso M_GUARDAR: pinta_guardar()
+            caso M_CLAVE: pinta_clave()
+            caso M_VER: pinta_grande()
+            si no:
+                pinta_archivos()
+                pinta_páginas()
+        fin
+        d[0] := n_pág
+        d[1] := n_arch
+        formatear(est, 260, "%u p\xA0ginas|%u archivos|", d)
+        si trabajo <> T_NADA entonces
+            concatenar(est, "Trabajando...")
+        sino si aviso[0] <> 0 entonces
+            concatenar(est, aviso)
+        sino
+            concatenar(est, "Hispa-PDF")
+        fin
+        barra_estado(alto - alto_estado(), est)
+        asegurar_foco()
+        volcar()
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El cuadro de abrir
+    ; -------------------------------------------------------------------------
+    función acaba_en(t: puntero a byte, e: puntero a byte): bool
+        variable a, b: nat32
+        a := longitud(t)
+        b := longitud(e)
+        si a < b entonces devolver falso fin
+        devolver iguales_sin_caja(dirección(t[a - b]), e)
+    fin
+
+    función vale_para_abrir(n: puntero a byte): bool
+        si de_imágenes entonces
+            devolver acaba_en(n, ".JPG") o acaba_en(n, ".JPEG") o acaba_en(n, ".PNG") o acaba_en(n, ".BMP") o acaba_en(n, ".GIF")
+        fin
+        devolver acaba_en(n, ".PDF")
+    fin
+
+    función lee_carpeta()
+        variable m: nat32
+        variable e: Entrada
+        variable r: ent32
+        variable t: arreglo [24] de byte
+        variable d: arreglo [1] de nat32
+        rejilla_nueva(g, 200)
+        rejilla_columna(g, "Nombre", 0, falso)
+        rejilla_columna(g, "Tama\xA4o", 12, cierto)
+        n_nombres := 0
+        m := abrir(carpeta)
+        si no es_error(m) entonces
+            mientras n_nombres < 200 y entrada(m, e) hacer
+                si e.nombre[0] = '.' entonces seguir fin
+                si e.atributos yb CARPETA <> 0 o vale_para_abrir(dirección(e.nombre[0])) entonces
+                    copiar(dirección(nombres[n_nombres][0]), dirección(e.nombre[0]))
+                    es_carpeta_[n_nombres] := e.atributos yb CARPETA <> 0
+                    r := renglón_nuevo(g, R_NORMAL, n_nombres)
+                    si es_carpeta_[n_nombres] entonces
+                        copiar(t, "[")
+                        concatenar(t, dirección(e.nombre[0]))
+                        concatenar(t, "]")
+                        celda(g, r, 0, t)
+                        celda(g, r, 1, "carpeta")
+                    sino
+                        celda(g, r, 0, dirección(e.nombre[0]))
+                        d[0] := (e.tamaño + 1023) div 1024
+                        formatear(t, 24, "%u KB", d)
+                        celda(g, r, 1, t)
+                    fin
+                    n_nombres := n_nombres + 1
+                fin
+            fin
+            cerrar(m)
+        fin
+        rejilla_lista(g)
+    fin
+
+    función abre_cuadro(imágenes: bool)
+        de_imágenes := imágenes
+        modo := M_ABRIR
+        lee_carpeta()
+        foco := ID_CARPETA                      ; (se puede escribir la ruta entera)
+    fin
+
+    función con_barra(t: puntero a byte)
+        variable n: nat32
+        n := longitud(t)
+        si n > 0 y t[n - 1] <> '\\' entonces concatenar(t, "\\") fin
+    fin
+
+    ; (la carpeta tenía un archivo: se le quita)
+    función sube_de_archivo()
+        variable n: ent32
+        n := ent32(longitud(carpeta))
+        mientras n > 0 y carpeta[n - 1] <> '\\' y carpeta[n - 1] <> ':' hacer n := n - 1 fin
+        carpeta[n] := 0
+        si n = 2 entonces concatenar(carpeta, "\\") fin
+    fin
+
+    función sube()
+        variable n: ent32
+        con_barra(carpeta)
+        n := ent32(longitud(carpeta)) - 2
+        mientras n > 2 y carpeta[n] <> '\\' hacer n := n - 1 fin
+        si n >= 2 entonces carpeta[n + 1] := 0 fin
+        lee_carpeta()
+    fin
+
+    ; lo elegido en el cuadro: entrar en la carpeta o añadir el archivo
+    función elige_en_cuadro()
+        variable k: nat32
+        variable ruta: arreglo [MAX_RUTA] de byte
+        si rejilla_elegido(g) < 0 entonces devolver fin
+        k := rejilla_id(g)
+        si k >= n_nombres entonces devolver fin
+        copiar_hasta(ruta, carpeta, MAX_RUTA)
+        con_barra(ruta)
+        si longitud(ruta) + longitud(dirección(nombres[k][0])) + 2 >= MAX_RUTA entonces devolver fin
+        concatenar(ruta, dirección(nombres[k][0]))
+        si es_carpeta_[k] entonces
+            copiar(carpeta, ruta)
+            con_barra(carpeta)
+            lee_carpeta()
+            devolver
+        fin
+        si de_imágenes entonces
+            crea_de_imagen(ruta)
+        sino
+            añade_archivo(ruta)
+            copiar(aviso, "A\xA4adido. (Puede a\xA4adir m\xA0s, o Cerrar.)")
+        fin
+    fin
+
+    ; una imagen: PDF.BIN hace un PDF con ella (en los temporales) y se añade
+    variable n_imágenes: nat32
+    función crea_de_imagen(ruta: puntero a byte)
+        variable orden: arreglo [300] de byte
+        variable sal: arreglo [40] de byte
+        variable d: arreglo [3] de nat32
+        variable r: nat32
+        si trabajo <> T_NADA entonces
+            copiar(aviso, "Espere a que acabe lo de ahora.")
+            devolver
+        fin
+        n_imágenes := n_imágenes + 1
+        d[0] := n_imágenes
+        formatear(sal, 40, "HPDFIM%u.PDF", d)
+        temporal(sal, dirección(orden[200]))
+        copiar(sal, dirección(orden[200]))
+        d[0] := nat32(ruta)
+        d[1] := nat32(dirección(sal[0]))
+        formatear(orden, 200, "CREA \"%s\" /SALIDA=%s", d)
+        si no lanza(orden) entonces devolver fin
+        r := esperar(tarea)
+        si r = 0 entonces
+            añade_archivo(sal)
+            copiar(aviso, "La imagen va como una p\xA0gina m\xA0s.")
+        sino
+            copiar(aviso, "Esa imagen no se puede leer.")
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Guardar: la lista para «PDF HAZ»
+    ; -------------------------------------------------------------------------
+    función línea_lst(m: nat32, clave: puntero a byte, val_: puntero a byte)
+        escribir_archivo(m, clave, longitud(clave))
+        escribir_archivo(m, "=", 1)
+        escribir_archivo(m, val_, longitud(val_))
+        escribir_archivo(m, "\r\n", 2)
+    fin
+
+    función guarda()
+        variable ruta: arreglo [40] de byte
+        variable orden: arreglo [60] de byte
+        variable t: arreglo [60] de byte
+        variable d: arreglo [3] de nat32
+        variable m, i: nat32
+        si n_pág = 0 o salida[0] = 0 entonces devolver fin
+        temporal("HPDF.LST", ruta)
+        m := crear(ruta)
+        si es_error(m) entonces
+            copiar(aviso, "No se puede escribir en la unidad de los temporales.")
+            devolver
+        fin
+        línea_lst(m, "SALIDA", salida)
+        para i desde 0 hasta n_arch - 1 hacer
+            línea_lst(m, "ARCHIVO", dirección(arch[i].ruta[0]))
+            si arch[i].clave[0] <> 0 entonces línea_lst(m, "CLAVE", dirección(arch[i].clave[0])) fin
+        fin
+        para i desde 0 hasta n_pág - 1 hacer
+            d[0] := pág[i].archivo
+            d[1] := pág[i].número
+            d[2] := pág[i].giro
+            formatear(t, 60, "%u %u %u", d)
+            línea_lst(m, "PAGINA", t)
+        fin
+        d[0] := compresión
+        formatear(t, 60, "%u", d)
+        línea_lst(m, "COMPRIME", t)
+        si clave_nueva[0] <> 0 entonces línea_lst(m, "CIFRA", clave_nueva) fin
+        si separa entonces línea_lst(m, "SEPARA", "1") fin
+        cerrar(m)
+        copiar(orden, "HAZ ")
+        concatenar(orden, ruta)
+        si no lanza(orden) entonces devolver fin
+        trabajo := T_GUARDA
+        copiar(hecho_al_acabar, "Guardado: ")
+        concatenar(hecho_al_acabar, salida)
+        si separa entonces concatenar(hecho_al_acabar, " (uno por p\xA0gina)") fin
+        modo := M_LISTA
+    fin
+
+    función abre_guardar(qué: nat32)
+        variable k: nat32
+        aviso[0] := 0
+        para_qué := qué
+        si salida[0] = 0 y n_arch > 0 entonces
+            ; junto al primero: NUEVO.PDF en su carpeta
+            copiar(salida, dirección(arch[0].ruta[0]))
+            k := longitud(salida)
+            mientras k > 0 y salida[k - 1] <> '\\' y salida[k - 1] <> ':' hacer k := k - 1 fin
+            salida[k] := 0
+            concatenar(salida, "NUEVO.PDF")
+        fin
+        si qué = 1 y compresión = 0 entonces compresión := 2 fin
+        separa := qué = 3
+        modo := M_GUARDAR
+        foco := ID_RUTA
+        si qué = 2 entonces foco := ID_CLAVE fin
+    fin
+
+    ; sacar el texto, o las imágenes, del PDF de la página que tiene el cursor
+    función de_un_archivo(texto_: bool)
+        variable orden: arreglo [300] de byte
+        variable sal: arreglo [MAX_RUTA] de byte
+        variable d: arreglo [3] de nat32
+        variable a, k, b: nat32
+        si actual < 0 o trabajo <> T_NADA entonces devolver fin
+        a := pág[actual].archivo
+        copiar(sal, dirección(arch[a].ruta[0]))
+        k := longitud(sal)
+        si k > 4 y sal[k - 4] = '.' entonces sal[k - 4] := 0 fin
+        si texto_ entonces
+            concatenar(sal, ".TXT")
+        sino
+            ; NOMBRE -> NOMBR + P.PNG: la cifra la pone PDF.BIN
+            k := longitud(sal)
+            b := k
+            mientras b > 0 y sal[b - 1] <> '\\' y sal[b - 1] <> ':' hacer b := b - 1 fin
+            si k - b > 5 entonces sal[b + 5] := 0 fin
+            concatenar(sal, ".PNG")
+        fin
+        d[0] := nat32(dirección(arch[a].ruta[0]))
+        d[1] := nat32(dirección(sal[0]))
+        si texto_ entonces
+            formatear(orden, 300, "TEXTO \"%s\" /SALIDA=%s", d)
+        sino
+            formatear(orden, 300, "IMAGENES \"%s\" /PUNTOS=120 /SALIDA=%s", d)
+        fin
+        si arch[a].clave[0] <> 0 entonces
+            concatenar(orden, " /CLAVE=")
+            concatenar(orden, dirección(arch[a].clave[0]))
+        fin
+        si no lanza(orden) entonces devolver fin
+        trabajo := T_OTRO
+        si texto_ entonces copiar(hecho_al_acabar, "El texto, en ") sino copiar(hecho_al_acabar, "Las im\xA0genes, como ") fin
+        concatenar(hecho_al_acabar, sal)
+    fin
+
+    función pide_clave(a: nat32)
+        clave_de := a
+        clave_t[0] := 0
+        modo := M_CLAVE
+        foco := ID_CLAVE_ABRIR
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Ver en grande
+    ; -------------------------------------------------------------------------
+    función ver()
+        variable orden: arreglo [300] de byte
+        variable sal: arreglo [40] de byte
+        variable d: arreglo [4] de nat32
+        variable a: nat32
+        si actual < 0 o trabajo <> T_NADA entonces devolver fin
+        a := pág[actual].archivo
+        temporal("HPDF.VER", sal)
+        d[0] := nat32(dirección(arch[a].ruta[0]))
+        d[1] := pág[actual].número
+        d[2] := nat32(zona_alto() - 8)
+        d[3] := nat32(dirección(sal[0]))
+        formatear(orden, 300, "PAGINA \"%s\" %u /LADO=%u /SALIDA=%s", d)
+        si arch[a].clave[0] <> 0 entonces
+            concatenar(orden, " /CLAVE=")
+            concatenar(orden, dirección(arch[a].clave[0]))
+        fin
+        si lanza(orden) entonces trabajo := T_VER fin
+    fin
+
+    función lee_grande(): bool
+        variable sal: arreglo [40] de byte
+        variable m: nat32
+        variable cab: arreglo [3] de nat32
+        temporal("HPDF.VER", sal)
+        m := abrir(sal)
+        si es_error(m) entonces devolver falso fin
+        si leer(m, puntero(dirección(cab[0])), 12) <> 12 o cab[0] <> 0x494D5048 o cab[1] = 0 o cab[2] = 0 o cab[1] * cab[2] > g_cabe entonces
+            cerrar(m)
+            devolver falso
+        fin
+        g_an := cab[1]
+        g_al := cab[2]
+        leer(m, puntero(grande), g_an * g_al * 4)
+        cerrar(m)
+        borrar(sal)
+        devolver cierto
+    fin
+    variable g_cabe: nat32
+
+    ; -------------------------------------------------------------------------
+    ;  Los menús, las teclas y el ratón
+    ; -------------------------------------------------------------------------
+    función abre_menú(k: nat32)
+        abierto := ent32(k)
+        según k
+            caso 0: abrir_menú_barra(0, M_ARCHIVO, 0)
+            caso 1: abrir_menú_barra(1, M_PÁGINAS, 0)
+            caso 2: abrir_menú_barra(2, M_HERRAM, 0)
+            si no: abrir_menú_barra(3, "Acerca de Hispa-PDF", 0)
+        fin
+    fin
+
+    función elegido_menú(etiqueta: nat32, k: nat32)
+        variable i: nat32
+        abierto := -1
+        si k = SIN_ELEGIR entonces devolver fin
+        aviso[0] := 0
+        según etiqueta
+            caso 0:
+                según k
+                    caso 0: abre_cuadro(falso)
+                    caso 1: abre_cuadro(cierto)
+                    caso 3: si n_pág > 0 entonces abre_guardar(0) fin
+                    caso 5: quita_todo()
+                    caso 7: sale := cierto
+                fin
+            caso 1:
+                si modo <> M_LISTA entonces devolver fin
+                según k
+                    caso 0: gira(90)
+                    caso 1: gira(270)
+                    caso 2: quita()
+                    caso 4: mueve(actual, actual - 1)
+                    caso 5: mueve(actual, actual + 1)
+                    caso 7: ver()
+                    caso 8:
+                        si n_pág > 0 entonces
+                            para i desde 0 hasta n_pág - 1 hacer pág[i].elegida := cierto fin
+                        fin
+                fin
+            caso 2:
+                según k
+                    caso 0: de_un_archivo(cierto)
+                    caso 1: de_un_archivo(falso)
+                    caso 3: si n_pág > 0 entonces abre_guardar(1) fin
+                    caso 4: si n_pág > 0 entonces abre_guardar(2) fin
+                    caso 5: si n_pág > 0 entonces abre_guardar(3) fin
+                fin
+            caso 3:
+                copiar(aviso, "Hispa-PDF 1.0: unir, separar, girar, ordenar, comprimir y cifrar PDF. GPL-2.0 o posterior.")
+            caso ID_COMPRIME:
+                compresión := k
+        fin
+    fin
+
+    función hace(id: nat32)
+        variable r: ent32
+        según id
+            caso ID_H: abre_cuadro(falso)
+            caso ID_H + 1: abre_guardar(0)
+            caso ID_H + 2: gira(270)
+            caso ID_H + 3: gira(90)
+            caso ID_H + 4: quita()
+            caso ID_H + 5: ver()
+            caso ID_H + 6: abre_guardar(1)
+            caso ID_H + 7: abre_guardar(2)
+            caso ID_SUBIR: sube()
+            caso ID_AÑADIR: elige_en_cuadro()
+            caso ID_CERRAR: modo := M_LISTA
+            caso ID_REJILLA: elige_en_cuadro()
+            caso ID_COMPRIME: abrir_desplegable(ID_COMPRIME, COMPRESIONES)
+            caso ID_SEPARA: separa := no separa
+            caso ID_GUARDAR: guarda()
+            caso ID_CANCELAR:
+                si modo = M_CLAVE entonces
+                    arch[clave_de].estado := 3
+                fin
+                modo := M_LISTA
+            caso ID_VALE:
+                copiar_hasta(dirección(arch[clave_de].clave[0]), clave_t, 64)
+                arch[clave_de].estado := 0
+                modo := M_LISTA
+            si no:
+                r := 0
+        fin
+    fin
+
+    función tecla_pulsada(c: nat32)
+        variable m: ent32
+        variable k: nat32
+        m := menú_de_alt(MENÚS, c)
+        si m >= 0 entonces
+            abre_menú(nat32(m))
+            devolver
+        fin
+        si modo = M_VER entonces
+            si c = 27 o c = '\n' o c = ' ' entonces modo := M_LISTA fin
+            devolver
+        fin
+        si c = '\t' o c = TECLA_MAYÚS_TAB entonces
+            pasar_foco(c = '\t')
+            devolver
+        fin
+        si modo = M_LISTA entonces
+            si n_pág = 0 entonces devolver fin
+            si actual < 0 entonces actual := 0 fin
+            según c
+                caso TECLA_DERECHA: si actual + 1 < ent32(n_pág) entonces actual := actual + 1 fin
+                caso TECLA_IZQUIERDA: si actual > 0 entonces actual := actual - 1 fin
+                caso TECLA_ABAJO: si actual + columnas() < ent32(n_pág) entonces actual := actual + columnas() fin
+                caso TECLA_ARRIBA: si actual - columnas() >= 0 entonces actual := actual - columnas() fin
+                caso TECLA_INICIO: actual := 0
+                caso TECLA_FIN: actual := ent32(n_pág) - 1
+                caso TECLA_SUPR: quita()
+                caso 'r', 'R': gira(90)
+                caso 'l', 'L': gira(270)
+                caso '\n': ver()
+                caso ' ': pág[actual].elegida := no pág[actual].elegida
+                caso 27:
+                    para k desde 0 hasta n_pág - 1 hacer pág[k].elegida := falso fin
+            fin
+            a_la_vista()
+            devolver
+        fin
+        si c = 27 entonces
+            si modo = M_CLAVE entonces arch[clave_de].estado := 3 fin
+            modo := M_LISTA
+            devolver
+        fin
+        k := clase_de(foco)
+        si k = K_CAMPO entonces
+            si foco = ID_CARPETA entonces
+                si c = '\n' entonces
+                    a_mayúsculas(carpeta)
+                    si vale_para_abrir(carpeta) entonces
+                        ; (un archivo entero: se añade, y la carpeta se queda en la suya)
+                        si de_imágenes entonces crea_de_imagen(carpeta) sino añade_archivo(carpeta) fin
+                        sube_de_archivo()
+                        si no de_imágenes entonces copiar(aviso, "A\xA4adido. (Puede a\xA4adir m\xA0s, o Cerrar.)") fin
+                        lee_carpeta()
+                    sino
+                        con_barra(carpeta)
+                        lee_carpeta()
+                        foco := ID_REJILLA
+                    fin
+                sino
+                    campo_tecla(carpeta, MAX_RUTA, c)
+                fin
+            sino si foco = ID_RUTA entonces
+                si c = '\n' entonces guarda() sino campo_tecla(salida, MAX_RUTA, c) fin
+            sino si foco = ID_CLAVE entonces
+                si c = '\n' entonces guarda() sino campo_tecla(clave_nueva, 64, c) fin
+            sino si foco = ID_CLAVE_ABRIR entonces
+                si c = '\n' entonces hace(ID_VALE) sino campo_tecla(clave_t, 64, c) fin
+            fin
+        sino si k = K_LISTA entonces
+            rejilla_tecla(g, c)
+            si c = '\n' entonces elige_en_cuadro() fin
+            si c = 8 entonces sube() fin
+        sino si k = K_DESPLEGABLE entonces
+            si c = '\n' o c = ' ' entonces hace(foco) sino desplegable_tecla(COMPRESIONES, compresión, c) fin
+        sino si c = '\n' o c = ' ' entonces
+            hace(foco)
+        fin
+    fin
+
+    función clic(x: ent32, yy: ent32, c: nat32)
+        variable id: nat32
+        variable m, k: ent32
+        m := menú_en_barra(x, yy)
+        si m >= 0 entonces
+            abre_menú(nat32(m))
+            devolver
+        fin
+        si modo = M_VER entonces
+            modo := M_LISTA
+            devolver
+        fin
+        id := control_en(x, yy)
+        si id <> 0 entonces
+            según clase_de(id)
+                caso K_HERRAMIENTA: hace(id)
+                caso K_LISTA:
+                    foco := id
+                    si rejilla_clic(g, x, yy) >= 0 y veces(c) >= 2 entonces elige_en_cuadro() fin
+                caso K_CAMPO: foco := id
+                si no:
+                    foco := id
+                    hace(id)
+            fin
+            devolver
+        fin
+        si modo <> M_LISTA entonces devolver fin
+        k := página_en(x, yy)
+        si k < 0 o k >= ent32(n_pág) entonces devolver fin
+        si c yb CON_CONTROL <> 0 entonces
+            pág[k].elegida := no pág[k].elegida
+        sino si veces(c) >= 2 entonces
+            actual := k
+            ver()
+            devolver
+        sino
+            si no pág[k].elegida entonces
+                para id desde 0 hasta n_pág - 1 hacer pág[id].elegida := falso fin
+            fin
+        fin
+        actual := k
+        pulsado := cierto
+        pul_x := x
+        pul_y := yy
+    fin
+
+    función ratón_mueve(x: ent32, yy: ent32, c: nat32)
+        variable k: ent32
+        si no pulsado o c yb BOTÓN_IZQUIERDO = 0 entonces devolver fin
+        si no arrastrando y (x - pul_x > 6 o pul_x - x > 6 o yy - pul_y > 6 o pul_y - yy > 6) entonces arrastrando := cierto fin
+        si arrastrando entonces
+            k := página_en(x + CELDA_AN div 2, yy)
+            si k > ent32(n_pág) entonces k := ent32(n_pág) fin
+            destino := k
+            pinta()
+        fin
+    fin
+
+    función ratón_sube(x: ent32, yy: ent32)
+        variable k: ent32
+        si arrastrando entonces
+            k := página_en(x + CELDA_AN div 2, yy)
+            si k >= 0 entonces
+                si k > actual entonces k := k - 1 fin
+                mueve(actual, k)
+            fin
+        fin
+        pulsado := falso
+        arrastrando := falso
+        destino := -1
+    fin
+
+    función rueda(c: nat32)
+        variable p: ent32
+        p := ent32(c yb 0xFF)
+        si p > 127 entonces p := p - 256 fin
+        si modo <> M_LISTA entonces devolver fin
+        primera_fila := primera_fila - p
+        si primera_fila < 0 entonces primera_fila := 0 fin
+        si primera_fila * columnas() >= ent32(n_pág) entonces primera_fila := (ent32(n_pág) - 1) div columnas() fin
+        si primera_fila < 0 entonces primera_fila := 0 fin
+    fin
+
+    función principal(): byte
+        variable s: Suceso
+        variable args: arreglo [MAX_RUTA + 8] de byte
+        variable k: ent32
+        argumentos(args, MAX_RUTA)
+        k := ent32(longitud(args))
+        mientras k > 0 y es_espacio(args[k - 1]) hacer
+            k := k - 1
+            args[k] := 0
+        fin
+        minis := puntero(más_memoria(MAX_PÁG * LADO * LADO * 4))
+        g_cabe := 1100 * 1100
+        grande := puntero(más_memoria(g_cabe * 4))
+        si minis = nulo o grande = nulo entonces
+            escribir("hispapdf: no hay memoria\n")
+            devolver 1
+        fin
+        si no preparar("Hispa-PDF", T_NORMAL, cierto) entonces
+            escribir("hispapdf: hace falta el escritorio\n")
+            devolver 1
+        fin
+        si no busca_temporal() entonces
+            copiar(aviso, "No hay ninguna unidad en la que se pueda escribir: no se puede trabajar.")
+        fin
+        si args[0] <> 0 entonces
+            si args[0] = '"' entonces
+                k := ent32(longitud(args))
+                si k > 1 y args[k - 1] = '"' entonces args[k - 1] := 0 fin
+                añade_archivo(dirección(args[1]))
+            sino
+                añade_archivo(args)
+            fin
+        fin
+        destino := -1
+        pinta()
+        mientras no sale hacer
+            si trabaja() entonces
+                si no suceso(Controles.v, s, falso) entonces seguir fin
+            sino
+                si no suceso(Controles.v, s, cierto) entonces romper fin
+            fin
+            según nat16(s.clase)
+                caso EV_TECLA: tecla_pulsada(s.a)
+                caso EV_RATÓN_BAJA:
+                    si s.c yb BOTÓN_IZQUIERDO <> 0 entonces clic(ent32(s.a), ent32(s.b), s.c) fin
+                caso EV_RATÓN_MUEVE:
+                    ratón_mueve(ent32(s.a), ent32(s.b), s.c)
+                    seguir
+                caso EV_RATÓN_SUBE: ratón_sube(ent32(s.a), ent32(s.b))
+                caso EV_RUEDA: rueda(s.c)
+                caso EV_MENÚ: elegido_menú(s.b, s.a)
+                caso EV_TAMAÑO: nuevo_tamaño(ent32(s.a), ent32(s.b), T_NORMAL)
+                caso EV_CERRAR: sale := cierto
+            fin
+            si sale entonces romper fin
+            pinta()
+        fin
+        devolver 0
+    fin
+
+fin UHpdf.
