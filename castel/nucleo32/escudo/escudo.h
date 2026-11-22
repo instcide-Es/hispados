@@ -18,7 +18,7 @@ typedef uint32_t u32;
 typedef int32_t i32;
 typedef uint64_t u64;
 
-#define ESCUDO_VERSION "0.2"
+#define ESCUDO_VERSION "0.2.1"
 /* el «nivel de funciones» de ClamAV que dice tener el motor: las firmas que
  * piden uno mayor se dejan (como hace ClamAV); las de uno menor se leen si
  * su formato se entiende (lo que no, se cuenta como «no soportado») */
@@ -132,6 +132,8 @@ void motor_inicia(void);
  * de ClamAV), .cvd/.cld (comprobando su firma digital) o FIRMAS.ESC (el
  * índice propio). Da 0 si bien. */
 int motor_carga(const char *ruta, info_firmas *inf);
+/* (RÁPIDO) si se da: lo libre de la memoria (K); un FIRMAS.ESC que no deje 8 MB libres no se carga */
+extern u32 (*motor_memoria_libre)(void);
 int motor_carga_como(const char *ruta, const char *nombre, info_firmas *inf);
 /* cargar desde un texto ya en memoria (el nombre dice qué es: «x.ndb») */
 int motor_carga_texto(const char *nombre, const char *t, u32 n, info_firmas *inf);

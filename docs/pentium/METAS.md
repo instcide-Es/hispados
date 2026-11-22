@@ -29,7 +29,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] Barra de tareas: agrupar ventanas, vista previa (la bandeja ya lleva el Wi-Fi, el sonido —volumen con la rueda, silencio— y Escudo)
 - [ ] Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido (hecho el 21/11: Configuración > Sonido), ratón, teclado, red y Wi-Fi, energía, usuarios, programas (hecho: actualizaciones y «Programas instalados»)
 - [x] ~~**Gestor de programas instalados** por tipos para desinstalarlos (como «Agregar o quitar programas»): árbol por tipos, tamaño, fecha, dependencias, desinstalar (con lo que lo necesita), reparar, ver archivos, los programas sueltos con «Borrar»; y en la misma ventana, «Programas y actualizaciones» con pestañas Pendientes, Al día, Instaladas y Sin instalar, con búsqueda~~ — rama pentium-programas (21/11: PROGRAMA.BIN, el campo `tipo=` de los paquetes; docs/PENTIUM.md §13)
-- [ ] Temas y fondo de escritorio; letras TrueType del sistema; protector de pantalla
+- [ ] Temas y fondo de escritorio (una imagen de fondo, ya: el Mirador, la llamada 172); letras TrueType del sistema; protector de pantalla
 - [ ] Portapapeles con imágenes y archivos; arrastrar y soltar entre programas
 - [ ] Ayuda del sistema con buscador
 
@@ -50,9 +50,9 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [x] ~~Programas de Windows de 32 bits (cargador PE) y **DirectX** (DirectDraw, DirectSound, DirectInput), como en Hispa-486~~ (WIN32.BIN: NASM, TCC, FASMW, Naves; [WIN32.md](WIN32.md)). Queda: hilos de verdad, SEH, Direct3D, el sonido de DirectSound
 - [x] ~~**OpenGL 1.1** por programa (OPENGL32.DLL y GLU32.DLL, las mismas que en Hispa-486; GLPRUEBA y ENGRANA)~~ — rama opengl (21/11: [../486/OPENGL.md](../486/OPENGL.md)). Para Half-Life 1 (meta de Carlos) falta lo de HW32: hilos, registro, mutex y eventos, SEH, MSVCRT de VC6 más completa, el CD
 - [ ] Reproductor de música y vídeo (MP3, OGG, WAV; vídeo sencillo)
-- [ ] Visor de imágenes y Pintura
-- [ ] Compresor ZIP
-- [ ] **Herramienta de PDF propia** (en lugar de PDF24, que es de 64 bits y no libre): unir y separar, girar/ordenar/quitar páginas, comprimir, PDF ↔ imágenes, PDF a texto, poner y quitar contraseña; con piezas libres (qpdf…) y el Lector de la oficina; al ser nuestra, se compila tal cual para Hispa-64 (pedido de Carlos 21/11)
+- [x] ~~**Visor de imágenes**: el Mirador (BMP, PNG, JPG, GIF animado, ICO; ajustar, rueda, girar, diapositivas, pantalla completa, fondo de escritorio)~~ — rama pentium-zipvisor (21/11: docs/PENTIUM.md §14 duodecies). Queda: **Pintura**
+- [x] ~~**Compresor ZIP**: Comprimidos (el ZIP como una carpeta, Comprimir en ZIP y Extraer todo en el explorador, ZipCrypto y AES para leer, ZIP64, ZIP y UNZIP en la Consola)~~ — rama pentium-zipvisor (21/11: docs/PENTIUM.md §14 duodecies). Queda: escribir con contraseña, nombres largos al sacar (cuando el núcleo los escriba)
+- [x] ~~**Herramienta de PDF propia** (en lugar de PDF24, que es de 64 bits y no libre): unir y separar, girar/ordenar/quitar páginas, comprimir, PDF ↔ imágenes, PDF a texto, poner y quitar contraseña; al ser nuestra, se compila tal cual para Hispa-64 (pedido de Carlos 21/11)~~ — rama pentium-pdf (21/11: **Hispa-PDF**, la orden PDF y la ventana HISPAPDF.BIN, paquete `pdf`; docs/PENTIUM.md §14 undecies). Queda: las letras CFF/Type1 del PDF, JPX/JBIG2 al pintar
 - [x] ~~Calculadora, Reloj, Mapa de caracteres~~ (21/11, rama pentium-accesorios: la Calculadora estándar, científica y de oficina —IVA, cinta, euros— con cuentas decimales; el Reloj con calendario, festivos, alarma, cronómetro, cuenta atrás y poner en hora; el Mapa de caracteres con copiar y la tecla de cada letra; paquete «accesori»: docs/PENTIUM.md §14 sexies)
 - [ ] Juegos: los emuladores (Hispa-Nes, Hispa-System, Hispa-Snes, Hispa-Drive) con sonido en Pentium (21/11: HVPRUN pasa el sonido; Hispa-Snes, Hispa-Nes e Hispa-System corren en HVPRUN y suenan; falta Hispa-Drive y los mandos)
 - [ ] Correo

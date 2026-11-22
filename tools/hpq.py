@@ -32,6 +32,9 @@
 #        tipo=<nombre> <tipo>           (PROGRAMAS: una por paquete; un PAQUETES
 #                                        de antes no la mira, y la línea de cada
 #                                        paquete sigue como era)
+#        sistema=<nombre>               (0.8.6: es del sistema; PAQUETES ACTUALIZA
+#                                        lo instala si no está, salvo si se ha
+#                                        quitado a propósito: QUITADOS.TXT)
 #
 #  (PROGRAMAS) El tipo: uno de los códigos de TIPOS (sistema, oficina,
 #  internet...: docs/PENTIUM.md, sección 13, «El tipo de cada paquete»). Si
@@ -112,12 +115,12 @@ TIPO_POR_NOMBRE = {
     'base': 'sistema', 'paquetes': 'sistema', 'equipo': 'sistema', 'hvprun': 'sistema',
     'red': 'internet', 'tls': 'internet', 'navega': 'internet', 'ssh': 'internet',
     'tailscal': 'internet', 'wifi': 'internet',
-    'bloc': 'oficina', 'oficina': 'oficina',
-    'consola': 'herramientas', 'accesori': 'herramientas',
+    'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina',
+    'consola': 'herramientas', 'accesori': 'herramientas', 'comprim': 'herramientas',
     'ejemplos': 'desarrollo',
     'win32': 'windows',
     'escudo': 'seguridad', 'escbase': 'seguridad', 'escmes': 'seguridad', 'escdia': 'seguridad',
-    'sonido': 'multimedia',
+    'sonido': 'multimedia', 'mirador': 'multimedia',
     'clicgest': 'terceros',
 }
 
@@ -193,8 +196,14 @@ VERSION_WIFI = VERSION_085
 # los programas de Hispa Ventanas). Pide la base con las llamadas del sonido
 # (la que salga con esta rama; ver docs/PENTIUM.md, «El sonido»)
 VERSION_SONIDO = VERSION_085
+# (RÁPIDO, 22/11/2026, escudo-rapido) la 0.8.6: fat.cas lee y escribe los
+# sectores seguidos de una vez (antes, una orden al disco por sector), la
+# memoria USB va de 16 K en 16 K (antes 4 K), PAQUETES 1.3 (el avance dentro
+# de un paquete grande, «Cancelar», mira si cabe antes de bajar y borra lo
+# bajado) y DESCARGAR /CANCELA=. Suben base, red y paquetes
+VERSION_086 = '0.8.6'
 SISTEMA = [
-    ('base', VERSION_085, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
+    ('base', VERSION_086, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
@@ -202,7 +211,7 @@ SISTEMA = [
     ('bloc', VERSION_085, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
     ('consola', VERSION_085, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
     # (explorador, dispositivos) el explorador de archivos, sus miniaturas y el Administrador de dispositivos
-    ('equipo', '0.9.1', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
+    ('equipo', '0.9.2', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
         ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('MINIAT.BIN', r'\HISPA\MINIAT.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
     ('ejemplos', VERSION_085, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.4', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
@@ -217,10 +226,10 @@ SISTEMA = [
     # (PROGRAMAS) la 1.2 (sobre la 1.1, la de la revisión de seguridad): los tipos,
     # REPARA, ARCHIVOS, SUELTOS, QUITA /DEPENDIENTES y la ventana unificada
     # «Programas y actualizaciones» (PROGRAMA.BIN, con los controles: base 0.8.2)
-    ('paquetes', '1.2', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
+    ('paquetes', '1.3', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
         ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN')]),
-    ('red', VERSION_085, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
+    ('red', VERSION_086, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
     ('tls', VERSION_085, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
@@ -392,11 +401,18 @@ def catalogo(carpeta):
     # (PROGRAMAS) y el tipo de cada uno, aparte (un PAQUETES de antes no lo mira;
     # «otros», el de no saberlo, no se escribe)
     filas += ['tipo=%s %s' % (k, tipos[k]) for k in sorted(tipos)]
+    # (0.8.6) los que son del sistema: un sistema que se pone al día
+    # (PAQUETES ACTUALIZA) los instala también si no los tiene (los que salen
+    # en una versión nueva: accesori, sonido, wifi, escudo...), salvo los que
+    # se han quitado a propósito (QUITADOS.TXT); un PAQUETES de antes no mira
+    # estas líneas
+    hay = {x.split()[0][len('paquete='):] for x in filas if x.startswith('paquete=')}
+    filas += ['sistema=%s' % n for n in sorted(DEL_SISTEMA) if n in hay]
     with open(os.path.join(carpeta, 'CATALOGO.TXT'), 'wb') as f:
         f.write(a437(MAGIA_CATALOGO) + b'\r\n')
         for x in filas:
             f.write(a437(x) + b'\r\n')
-    return len(filas) - len(tipos)
+    return len([x for x in filas if x.startswith('paquete=')])
 
 
 def busca(nombre, carpetas):
@@ -424,11 +440,31 @@ OPCIONALES = [
      + [('NAVEGA.MNU', r'\HISPA\MENU\NAVEGA.MNU'), ('NAVEGA.ICP', r'\HISPA\MENU\NAVEGA.ICP')]),
     # (ESCUDO) el antivirus (castel/nucleo32/escudo/paquete.sh). Sus firmas, aparte
     # (los paquetes «escbase», «escmes» y «escdia», que hace tools/escudo_firmas.py)
-    ('escudo', '0.2', 'Escudo: el antivirus (con las firmas de ClamAV), para el equipo y para revisar memorias USB',
+    ('escudo', '0.2.1', 'Escudo: el antivirus (con las firmas de ClamAV), para el equipo y para revisar memorias USB',
      'base >= 0.8.3, red >= 0.8.1, tls >= 0.8.1', [
         ('ESCUDO.BIN', r'\HISPA\ESCUDO.BIN'), ('ESCUDO/LEEME.TXT', r'\HISPA\ESCUDO\LEEME.TXT'),
         ('MENU/ESCUDO.MNU', r'\HISPA\MENU\ESCUDO.MNU'), ('MENU/ESCUDO.ICP', r'\HISPA\MENU\ESCUDO.ICP')]),
+    # (PDF) Hispa-PDF (castel/nucleo32/pdf/paquete.sh): la orden PDF y su
+    # ventana; del tipo «oficina» (en la 0.8.5: TIPOS de hpq.py y tipo_de)
+    ('pdf', '1.0', 'Hispa-PDF: unir, separar, girar, ordenar, comprimir y cifrar PDF; PDF a imágenes y a texto; imágenes a PDF',
+     'base >= 0.8.3', [
+        ('PDF.BIN', r'\HISPA\PDF.BIN'), ('HISPAPDF.BIN', r'\HISPA\HISPAPDF.BIN'), ('PDF/LEEME.TXT', r'\HISPA\PDF\LEEME.TXT'),
+        ('MENU/HISPAPDF.MNU', r'\HISPA\MENU\HISPAPDF.MNU'), ('MENU/HISPAPDF.ICP', r'\HISPA\MENU\HISPAPDF.ICP')]),
+    # (ZIP) Comprimidos y las órdenes ZIP y UNZIP (castel/nucleo32/comprim/paquete.sh; tipo «herramientas»)
+    ('comprim', '1.0', 'Comprimidos: los .ZIP como una carpeta (sacar, añadir y quitar, con contraseña) y las órdenes ZIP y UNZIP', 'base >= 0.8.4', [
+        ('BIN/COMPRIM.BIN', r'\HISPA\COMPRIM.BIN'), ('BIN/ZIP.BIN', r'\HISPA\ZIP.BIN'), ('BIN/UNZIP.BIN', r'\HISPA\UNZIP.BIN'),
+        ('COMPRIM.TXT', r'\HISPA\COMPRIM.TXT'), ('COMPRIM.MNU', r'\HISPA\MENU\COMPRIM.MNU'), ('COMPRIM.ICP', r'\HISPA\MENU\COMPRIM.ICP')]),
+    # (MIRADOR) el Mirador, el visor de imágenes (castel/nucleo32/mirador/paquete.sh; tipo «multimedia»)
+    ('mirador', '1.0', 'El Mirador: ver imágenes (BMP, PNG, JPG, GIF animados, ICO...), girar, diapositivas, pantalla completa y fondo de escritorio', 'base >= 0.8.6', [
+        ('BIN/MIRADOR.BIN', r'\HISPA\MIRADOR.BIN'), ('MIRADOR.TXT', r'\HISPA\MIRADOR.TXT'),
+        ('MIRADOR.MNU', r'\HISPA\MENU\MIRADOR.MNU'), ('MIRADOR.ICP', r'\HISPA\MENU\MIRADOR.ICP')]),
 ]
+
+# (0.8.6) los que el catálogo marca del sistema («sistema=nombre»): los que
+# van con él (SISTEMA) y Escudo, el antivirus (no sus firmas: las trae
+# Escudo con «Actualizar las firmas»). No: los opcionales (navega, pdf,
+# comprim, mirador, clicgest...)
+DEL_SISTEMA = [n for n, *_ in SISTEMA] + ['escudo']
 
 
 def opcionales(salida, carpetas, nombres=None):
@@ -627,7 +663,10 @@ def principal(a):
             f.write(datos[:largo])
         return 0
     if orden == 'opcionales':
-        n = opcionales(a[2], a[3:])
+        # (PDF) «opcionales SALIDA CARPETA nombre...»: solo esos paquetes
+        cs = [x for x in a[3:] if os.path.isdir(x)]
+        ns = [x for x in a[3:] if not os.path.isdir(x)]
+        n = opcionales(a[2], cs, ns or None)
         print('hpq: %d paquetes opcionales en %s' % (n, a[2]))
         return 0
     if orden == 'linea':

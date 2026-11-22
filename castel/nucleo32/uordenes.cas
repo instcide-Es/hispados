@@ -45,7 +45,7 @@ módulo UOrdenes
     importar Llamadas, Textos32, Formato
 
     constante LÍNEA = 128
-    constante TROZO = 4096
+    constante TROZO = 32768                    ; (RÁPIDO) COPY, de 32 K en 32 K (antes 4 K: una orden al disco por cluster)
     constante NINGUNO = 0xFFFFFFFF
 
     variable línea: arreglo [LÍNEA] de byte         ; la que se teclea (o la del archivo de órdenes)

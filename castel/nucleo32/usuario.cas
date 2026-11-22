@@ -133,6 +133,10 @@ módulo Usuario
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
     público constante VERSIÓN = 0x0008          ; la 0.8
+    ; la versión de verdad, la del paquete «base» (tools/hpq.py, SISTEMA): la
+    ; que dicen el menú Inicio, Configuración y «Acerca de» (la primera parte
+    ; de las pruebas mira que sea la misma que la de hpq.py)
+    público constante VERSIÓN_TEXTO = "0.8.6"
     público constante SIGUE = 0xFFFFFF00        ; (esperar sin quedarse) la tarea no ha acabado todavía
 
     ; ---- más errores (los de los archivos, en fat.cas) ----
@@ -171,6 +175,15 @@ módulo Usuario
     tipo Suelta = estructura
         x, ye: ent32
         ruta: nat32
+    fin
+
+    ; (MIRADOR) el tapiz con una imagen (la llamada 172): la guarda el
+    ; núcleo en FONDO.HPM (al lado de DOCK.INI) y la pinta el escritorio.
+    ; 0: nada que hacer; 1: volver al de siempre; 2: poner la de FONDO.HPM
+    público variable tapiz_pedido: nat32
+    tipo Imagen_tapiz = estructura
+        ancho, alto: nat32
+        puntos: nat32                           ; 0x00RRGGBB, fila a fila
     fin
 
     constante MAX_PROGRAMA = 0x800000           ; lo más que mide un programa en el disco (8 MB desde la 0.8.3: el Navegador)
@@ -732,6 +745,8 @@ módulo Usuario
                 devolver atender_carpetas(n, a, b)
             caso 170, 171:
                 devolver atender_explorador(n, a, b)
+            caso 172:
+                devolver atender_tapiz(a, b)             ; (MIRADOR) una imagen como tapiz
             caso 25:
                 si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
                 devolver cambiar_carpeta(u, ruta)
@@ -1336,6 +1351,52 @@ módulo Usuario
         suelta_y := yy
         suelta_pedida := cierto
         devolver 0
+    fin
+
+    ; (MIRADOR) 172: el tapiz del escritorio. a = 1: una imagen del programa
+    ; (b, una Imagen_tapiz: su ancho, su alto y sus puntos, ya a la medida
+    ; de la pantalla), que se guarda en FONDO.HPM, en la unidad del sistema
+    ; (\HISPA\FONDO.HPM instalado; si no, en la raíz: como DOCK.INI), con la
+    ; cabecera de las miniaturas («HPMI», ancho y alto), y se pone; a = 0: se
+    ; quita y vuelve el de siempre. Da 0 o el error
+    función atender_tapiz(a: nat32, b: nat32): nat32
+        variable s: puntero a Imagen_tapiz
+        variable ruta: arreglo [24] de byte
+        variable cab: arreglo [3] de nat32
+        variable m, n, an, al, pts: nat32
+        si no escritorio_en_marcha entonces devolver NO_VALE fin
+        si del_sistema >= MAX_UNIDADES o en_memoria(del_sistema) o no escribible(del_sistema) entonces devolver PROTEGIDO fin
+        ruta_del_tapiz(ruta)
+        si a = 0 entonces
+            borrar_archivo(del_sistema, ruta)
+            tapiz_pedido := 1
+            devolver 0
+        fin
+        si a <> 1 o no puede(b, tamaño(Imagen_tapiz), falso) entonces devolver NO_VALE fin
+        s := puntero(b)
+        an := s.ancho
+        al := s.alto
+        pts := s.puntos
+        si an < 1 o al < 1 o an > 4096 o al > 4096 o no puede(pts, an * al * 4, falso) entonces devolver NO_VALE fin
+        m := abrir_archivo(del_sistema, ruta, PARA_CREAR)
+        si m >= PRIMER_ERROR entonces devolver m fin
+        cab[0] := 0x494D5048                    ; «HPMI»
+        cab[1] := an
+        cab[2] := al
+        n := escribir_archivo(m, puntero(nat32(dirección(cab[0]))), 12)
+        si n = 12 entonces n := escribir_archivo(m, puntero(pts), an * al * 4) fin
+        cerrar_archivo(m)
+        si n <> an * al * 4 entonces
+            borrar_archivo(del_sistema, ruta)
+            devolver DISCO_LLENO
+        fin
+        tapiz_pedido := 2
+        devolver 0
+    fin
+
+    ; (MIRADOR) dónde va el tapiz con imagen: «\HISPA\FONDO.HPM» o «\FONDO.HPM»
+    público función ruta_del_tapiz(ruta: puntero a byte)
+        si instalado() entonces copiar(ruta, "\\HISPA\\FONDO.HPM") sino copiar(ruta, "\\FONDO.HPM") fin
     fin
 
     ; el portapapeles del sistema: un texto (en la página 437, con sus

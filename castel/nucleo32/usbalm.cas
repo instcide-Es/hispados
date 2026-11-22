@@ -24,7 +24,8 @@ módulo Usbalm
 
     público constante MAX_MEMORIAS = 4
     constante SECTOR = 512
-    constante POR_VEZ = 8                       ; los sectores de cada orden (una página)
+    constante POR_VEZ_MAX = 32                  ; (RÁPIDO) los sectores de cada orden: 16 K (antes, 8: una página)
+    variable por_vez: nat32                     ; 32, o 8 si no hay 4 páginas seguidas
 
     público tipo Memoria = estructura
         hay: bool
@@ -219,7 +220,19 @@ módulo Usbalm
     ; cuántas hay.
     público función prepara(): nat32
         variable a, k: nat32
-        si datos = 0 entonces datos := reservar_marco() fin
+        si datos = 0 entonces
+            ; (RÁPIDO) 16 K seguidos y alineados a 16 K (no cruzan una frontera
+            ; de 64 K, como pide la xHCI; la EHCI lo lleva en un solo qTD): con
+            ; una orden por cada 4 K, una memoria USB escribía a trocitos
+            datos := reservar_seguidos(8)
+            si datos <> 0 entonces
+                datos := (datos + 0x3FFF) yb 0xFFFFC000
+                por_vez := POR_VEZ_MAX
+            sino
+                datos := reservar_marco()
+                por_vez := 8
+            fin
+        fin
         si sobres = 0 entonces sobres := reservar_marco() fin
         si datos = 0 o sobres = 0 entonces devolver 0 fin
         tomar(cerrojo)
@@ -298,7 +311,7 @@ módulo Usbalm
         bien := cierto
         mientras bien y n > 0 hacer
             k := n
-            si k > POR_VEZ entonces k := POR_VEZ fin
+            si k > por_vez entonces k := por_vez fin
             intentos := 0
             bien := falso
             mientras no bien y intentos < 3 y memorias[s].hay hacer
@@ -330,7 +343,7 @@ módulo Usbalm
         bien := cierto
         mientras bien y n > 0 hacer
             k := n
-            si k > POR_VEZ entonces k := POR_VEZ fin
+            si k > por_vez entonces k := por_vez fin
             intentos := 0
             bien := falso
             mientras no bien y intentos < 3 y memorias[s].hay hacer

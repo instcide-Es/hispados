@@ -117,6 +117,7 @@ módulo UProgram
     variable c_tipo: arreglo [MAX_C] de nat32
     variable c_octetos: arreglo [MAX_C] de nat32
     variable c_desc: arreglo [MAX_C] de arreglo [200] de byte
+    variable c_nuevo: arreglo [MAX_C] de bool    ; (SISTEMA, 0.8.6) nuevo del sistema: «Actualizar todo» lo instala
     variable origen: arreglo [120] de byte
     variable firmado: bool
     variable d_letra: byte
@@ -148,6 +149,9 @@ módulo UProgram
     variable salida: arreglo [SALIDA + 1] de byte
     variable archivo: arreglo [64] de byte      ; C:\HISPA\PAQUETES\PROGRAMA.TXT
     variable fich_avance: arreglo [64] de byte  ; C:\HISPA\PAQUETES\AVANCE.TXT
+    variable fich_cancela: arreglo [64] de byte ; (RÁPIDO) C:\HISPA\PAQUETES\CANCELA.TXT: «Cancelar»
+    variable cx_, cy_, cw_, ch_: ent32          ; (RÁPIDO) dónde está el botón «Cancelar» del avance
+    variable cancelando: bool
     variable sis: byte
     variable ocupado, lento: bool
     variable av_hecho, av_total: nat32
@@ -277,6 +281,15 @@ módulo UProgram
         trozo(q, 0, av_texto, 80)
     fin
 
+    ; (RÁPIDO) «Cancelar»: el aviso a PAQUETES (y a DESCARGA) es un archivo
+    función pide_cancelar()
+        variable m: nat32
+        si cancelando entonces devolver fin
+        m := crear(fich_cancela)
+        si no es_error(m) entonces cerrar(m) fin
+        cancelando := cierto
+    fin
+
     ; lanza «PAQUETES args /AVANCE» con lo que escriba mandado a PROGRAMA.TXT;
     ; mientras trabaja, la barra; deja lo escrito en «salida»; da su código
     función paquetes(args: puntero a byte): nat32
@@ -291,6 +304,8 @@ módulo UProgram
         une(a, args, " /AVANCE")
         si lento entonces concatenar(a, " /LENTO") fin
         borrar(fich_avance)
+        borrar(fich_cancela)
+        cancelando := falso
         av_hecho := 0
         av_total := 0
         Textos32.copiar(av_texto, "Un momento...")
@@ -305,6 +320,9 @@ módulo UProgram
                 pinta()
                 mientras suceso(v, s, falso) hacer
                     si s.clase = EV_TAMAÑO entonces nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_) fin
+                    ; (RÁPIDO) «Cancelar» (o Esc): PAQUETES para en cuanto puede y lo deshace
+                    si s.clase = EV_TECLA y s.a = 27 entonces pide_cancelar() fin
+                    si s.clase = EV_RATÓN_BAJA y ent32(s.a) >= cx_ y ent32(s.a) < cx_ + cw_ y ent32(s.b) >= cy_ y ent32(s.b) < cy_ + ch_ entonces pide_cancelar() fin
                 fin
                 dormir(10)
                 c := acabada(tarea)
@@ -423,6 +441,8 @@ módulo UProgram
                 trozo(p, 4, x, 16)
                 si no texto_a_natural(x, c_octetos[c_n]) entonces c_octetos[c_n] := 0 fin
                 trozo(p, 5, c_desc[c_n], 200)
+                trozo(p, 6, x, 16)
+                c_nuevo[c_n] := iguales(x, "nuevo")
                 c_n := c_n + 1
             sino si iguales(x, "o") entonces
                 trozo(p, 1, origen, 120)
@@ -485,8 +505,9 @@ módulo UProgram
         devolver v = V_INSTALADAS y casa(s_ruta[i], "", CAT_SUELTOS)
     fin
 
+    ; (SISTEMA) los nuevos del sistema salen también en Pendientes
     función sale_c(j: nat32, v: nat32): bool
-        devolver v = V_SIN_INSTALAR y no está_instalado(c_nombre[j]) y casa(c_nombre[j], c_desc[j], c_tipo[j])
+        devolver (v = V_SIN_INSTALAR o (v = V_PENDIENTES y c_nuevo[j])) y no está_instalado(c_nombre[j]) y casa(c_nombre[j], c_desc[j], c_tipo[j])
     fin
 
     ; cuántos hay en la pestaña v (con la búsqueda)
@@ -574,7 +595,7 @@ módulo UProgram
                                 r := renglón_nuevo(g, R_NORMAL, ES_CATÁLOGO + i - 1)
                                 une(t, "    ", c_nombre[i - 1])
                                 celda(g, r, 0, t)
-                                celda(g, r, 1, "-")
+                                si c_nuevo[i - 1] entonces celda(g, r, 1, "(nuevo)") sino celda(g, r, 1, "-") fin
                                 celda(g, r, 2, c_versión[i - 1])
                                 tamaño_corto(c_octetos[i - 1], x)
                                 celda(g, r, 3, x)
@@ -654,7 +675,11 @@ módulo UProgram
             fila(x, yy, an, "Versión:", c_versión[i], C_TINTA, límite)
             tamaño_texto(c_octetos[i], x2)
             fila(x, yy, an, "Lo que se trae:", x2, C_TINTA, límite)
-            fila(x, yy, an, "Estado:", "No está instalado. «Instalar» lo trae, con lo que necesite, y comprueba sus sumas.", C_TINTA, límite)
+            si c_nuevo[i] entonces
+                fila(x, yy, an, "Estado:", "Nuevo del sistema (de esta versión): no está instalado. «Actualizar» o «Actualizar todo» lo trae, con lo que necesite, y comprueba sus sumas.", C_TINTA, límite)
+            sino
+                fila(x, yy, an, "Estado:", "No está instalado. «Instalar» lo trae, con lo que necesite, y comprueba sus sumas.", C_TINTA, límite)
+            fin
             devolver
         fin
         si es_cat(id) entonces
@@ -756,17 +781,25 @@ módulo UProgram
         al := 2 * LT + 30 * E
         x := (ancho - an) div 2
         yy := (alto - al) div 2
+        al := al + LT + 10 * E                  ; (RÁPIDO) y debajo, el botón «Cancelar» (la barra, donde estaba)
         caja(x + 4 * E, yy + 4 * E, an, al, 0x9CA3AF)
         caja(x, yy, an, al, C_BORDE)
         caja(x + 2 * E, yy + 2 * E, an - 4 * E, al - 4 * E, C_PAPEL)
         Textos32.copiar(t, av_texto)
-        si av_total > 0 entonces
+        si av_total > 100 entonces
+            ; (RÁPIDO) dentro de un paquete grande (en K): el tanto por ciento
+            dd[0] := nat32(dirección(av_texto[0]))
+            dd[1] := av_hecho div (av_total div 100)
+            si dd[1] > 100 entonces dd[1] := 100 fin
+            formatear(t, 200, "%s: %u %%", dd)
+        sino si av_total > 0 entonces
             dd[0] := nat32(dirección(av_texto[0]))
             dd[1] := av_hecho
             dd[2] := av_total
             si dd[1] > dd[2] entonces dd[1] := dd[2] fin
             formatear(t, 200, "%s (%u de %u)", dd)
         fin
+        si cancelando entonces Textos32.copiar(t, "Cancelando: se deja todo como estaba...") fin
         texto_corto(x + 2 * LA, yy + 6 * E, t, an - 4 * LA, C_TINTA, cierto)
         bw := an - 4 * LA
         caja(x + 2 * LA, yy + LT + 14 * E, bw, LT, C_BORDE)
@@ -778,6 +811,14 @@ módulo UProgram
             q := ent32((tics() div 3) mod 100)
             caja(x + 2 * LA + 2 + ((bw - 4 - 12 * LA) * q) div 100, yy + LT + 14 * E + 2, 12 * LA, LT - 4, C_AZUL)
         fin
+        ; (RÁPIDO) «Cancelar», abajo a la derecha
+        cw_ := 16 * LA
+        ch_ := LT + 6 * E
+        cx_ := x + an - 2 * LA - cw_
+        cy_ := yy + 2 * LT + 22 * E
+        caja(cx_, cy_, cw_, ch_, C_BORDE)
+        caja(cx_ + 1, cy_ + 1, cw_ - 2, ch_ - 2, C_GRIS)
+        texto_corto(cx_ + 2 * LA, cy_ + 3 * E, "Cancelar (Esc)", cw_ - 3 * LA, C_TINTA, falso)
     fin
 
     función en_lista(lista: puntero a byte, n: puntero a byte): bool
@@ -1018,6 +1059,7 @@ módulo UProgram
     función hay_pendientes(): bool
         variable i: nat32
         para i desde 1 hasta p_n hacer si p_nueva[i - 1][0] <> 0 entonces devolver cierto fin fin
+        para i desde 1 hasta c_n hacer si c_nuevo[i - 1] y no está_instalado(c_nombre[i - 1]) entonces devolver cierto fin fin     ; (SISTEMA)
         devolver falso
     fin
 
@@ -1034,7 +1076,9 @@ módulo UProgram
         b_pri := falso
         si vista = V_PENDIENTES entonces
             Textos32.copiar(b_lab[0], "Actualizar")
-            b_sí[0] := inst y p_nueva[id - 1][0] <> 0
+            b_sí[0] := falso
+            si inst entonces b_sí[0] := p_nueva[id - 1][0] <> 0 fin
+            si nuevo entonces b_sí[0] := c_nuevo[id - ES_CATÁLOGO] fin       ; (SISTEMA)
             b_pri := cierto
             Textos32.copiar(b_lab[1], "Actualizar todo")
             b_sí[1] := hay_pendientes()
@@ -1232,6 +1276,15 @@ módulo UProgram
             Textos32.copiar(t, "actualiza")
             Textos32.copiar(hecho_txt, "Todo al día.")
         sino
+            ; (SISTEMA) uno nuevo del sistema: PAQUETES ACTUALIZA lo instala
+            si es_nuevo(id) entonces
+                si no c_nuevo[id - ES_CATÁLOGO] entonces devolver fin
+                une(t, "actualiza ", c_nombre[id - ES_CATÁLOGO])
+                une(hecho_txt, c_nombre[id - ES_CATÁLOGO], " instalado.")
+                paquetes(t)
+                tras_instalar()
+                devolver
+            fin
             si id = 0 o id > MAX_P entonces devolver fin
             si p_nueva[id - 1][0] = 0 entonces devolver fin
             une(t, "actualiza ", p_nombre[id - 1])
@@ -1496,6 +1549,9 @@ módulo UProgram
         fich_avance[0] := sis
         fich_avance[1] := 0
         concatenar(fich_avance, ":\\HISPA\\PAQUETES\\AVANCE.TXT")
+        fich_cancela[0] := sis
+        fich_cancela[1] := 0
+        concatenar(fich_cancela, ":\\HISPA\\PAQUETES\\CANCELA.TXT")
         equipo_bin[0] := sis
         equipo_bin[1] := 0
         concatenar(equipo_bin, ":\\HISPA\\EQUIPO.BIN")

@@ -379,6 +379,7 @@ static const char *const nombres_p[5] = { "Revisar", "Cuarentena", "Historial", 
 #define M_CARPETA 2
 #define M_REVISANDO 3
 #define M_HECHO 4
+#define M_ACTUALIZANDO 5		/* (RÁPIDO) trayendo las firmas: la barra y «Cancelar» */
 static int pestana, modo, elegida, primera, cerrar_ya;
 static char aviso_abajo[200];
 static int aviso_bien;
@@ -573,6 +574,9 @@ static void parrafo(int x, int y, int cabe, const char *t, u32 tinta)
 		texto(x, y + i * 18, l[i], tinta);
 }
 
+static int movible(const hallado *h);
+static void foco_hallado(void);
+
 static void pinta_revisar(void)
 {
 	int y = arriba_contenido + 10, i;
@@ -645,6 +649,37 @@ static void pinta_revisar(void)
 		pie("Esc o «Cancelar»: parar la revisión.");
 		break;
 	}
+	case M_ACTUALIZANDO: {
+		int w = L.an - 40, hecho = 0;
+		u32 pc = 0;
+		texto_n(20, y, "Actualizando las firmas", -1, C_TINTA, 1);
+		if (act_total > 100) {	/* (en K: dentro de un paquete grande) */
+			pc = act_hecho / (act_total / 100);
+			if (pc > 100)
+				pc = 100;
+			formatear(t, sizeof t, "%u %%", pc);
+			hecho = (int)((u32)(w - 4) * pc / 100);
+		} else if (act_total) {
+			formatear(t, sizeof t, "%u de %u", act_hecho, act_total);
+			hecho = (int)((u32)(w - 4) * (act_hecho > act_total ? act_total : act_hecho) / act_total);
+		} else
+			formatear(t, sizeof t, "Un momento...");
+		caja(20, y + 30, w, 28, C_PAPEL);
+		borde(20, y + 30, w, 28, 1, C_BORDE);
+		caja(22, y + 32, hecho, 24, C_AZUL);
+		caja(20 + w / 2 - largo437(t) * 4 - 6, y + 34, largo437(t) * 8 + 12, 20, C_PAPEL);
+		texto(20 + w / 2 - largo437(t) * 4, y + 36, t, C_TINTA);
+		texto(20, y + 72, "Ahora:", C_SUAVE);
+		texto_n(80, y + 72, act_cancelando ? "Cancelando: se deja todo como estaba..." : act_texto[0] ? act_texto : "Preparando",
+			(L.an - 100) / 8, C_TINTA, 0);
+		parrafo(20, y + 104, 74,
+			"Se traen de actualiza.hispados.es (la primera vez, unos 47 MB: puede tardar). Se puede seguir usando el equipo; "
+			"si se cancela, todo queda como estaba.",
+			C_SUAVE);
+		boton(L.an - 20 - 150, L.al - 66, 150, "Cancelar", B_CANCELAR, 1, 1);
+		pie("Esc o «Cancelar»: parar (lo traído a medias no se usa).");
+		break;
+	}
 	case M_HECHO: {
 		int malos = 0;
 		u32 k;
@@ -667,13 +702,21 @@ static void pinta_revisar(void)
 			texto_n(30, y + 35, t, (L.an - 60) / 8, malos ? C_ROJO : C_NARANJA, 1);
 			lista(20, y + 66, L.an - 40, 8, (int)rev.n_hallados, elegida, primera, fila_hallado, L_LISTA);
 			i = elegida >= 0 && elegida < (int)rev.n_hallados && !rev.h[elegida].hecho;
-			boton(20, L.al - 66, 160, "A cuarentena", B_CUARENTENA, 1, i);
-			boton(190, L.al - 66, 120, "Borrarlo", B_BORRAR, 0, i);
-			boton(320, L.al - 66, 120, "Dejarlo", B_DEJAR, 0, i);
+			{
+				/* (RÁPIDO) en un CD o una ISO no se puede mover ni borrar; y un
+				 * aviso ([i]) se deja por omisión */
+				int mv = i && movible(&rev.h[elegida]), dejar = i && (rev.h[elegida].aviso || !mv);
+				boton(20, L.al - 66, 160, "A cuarentena", B_CUARENTENA, !dejar, mv);
+				boton(190, L.al - 66, 120, "Borrarlo", B_BORRAR, 0, mv);
+				boton(320, L.al - 66, 120, "Dejarlo", B_DEJAR, dejar, i);
+			}
 		}
 		for (k = 0; k < rev.n_hallados; k++)
 			if (rev.h[k].aviso) {
-				texto_n(20, L.al - 112, "[i] AUTORUN.INF: aquí no hace nada; en un Windows viejo podría abrir un programa solo.", (L.an - 40) / 8, C_SUAVE, 0);
+				/* (RÁPIDO) en dos líneas si no cabe (antes se cortaba: «podría abrir un ...») */
+				parrafo(20, L.al - 130, (L.an - 40) / 8,
+					"[i] AUTORUN.INF: aquí no hace nada; en un Windows viejo podría abrir un programa solo al meter el disco o la memoria.",
+					C_SUAVE);
 				break;
 			}
 		if (rev.cifrados) {
@@ -851,7 +894,7 @@ static void a_pestana(int p)
 {
 	pestana = p;
 	elegida = 0, primera = 0;
-	if (p == P_REVISAR && modo != M_REVISANDO && modo != M_HECHO)
+	if (p == P_REVISAR && modo != M_REVISANDO && modo != M_HECHO && modo != M_ACTUALIZANDO)
 		modo = M_INICIO;
 	if (p == P_CUARENTENA)
 		lee_cuarentena();
@@ -910,6 +953,7 @@ static void mueve_lista(int d)
 		primera = elegida;
 	if (elegida >= primera + f)
 		primera = elegida - f + 1;
+	foco_hallado();	/* (RÁPIDO) */
 }
 
 static void entra_carpeta(int i)
@@ -934,6 +978,32 @@ static void entra_carpeta(int i)
 	elegida = 0, primera = 0;
 }
 
+/* (RÁPIDO) ¿se puede mover o borrar? (no en un CD, una ISO o lo de solo leer) */
+static int movible(const hallado *h)
+{
+	struct info_unidad u;
+	u32 k;
+	char l = (char)(h->ruta[0] & ~32);
+	if (h->ruta[1] != ':')
+		return 1;
+	for (k = 0; info_unidad(k, &u); k++)
+		if (u.letra == (u8)l)
+			return !u.solo_lectura && u.medio <= MEDIO_USB;
+	return 1;
+}
+
+/* el botón con el foco según lo elegido: «Dejarlo» si es un aviso o no se puede mover */
+static void foco_hallado(void)
+{
+	const hallado *h;
+	if (modo != M_HECHO || elegida < 0 || elegida >= (int)rev.n_hallados)
+		return;
+	h = &rev.h[elegida];
+	if (foco_id == B_CUARENTENA || foco_id == B_DEJAR || foco_id == B_BORRAR || foco_id == L_LISTA)
+		if (foco_id != L_LISTA)
+			foco_id = h->aviso || !movible(h) ? B_DEJAR : B_CUARENTENA;
+}
+
 static void haz_hallado(int accion)
 {
 	hallado *h;
@@ -954,10 +1024,13 @@ static void haz_hallado(int accion)
 		h->hecho = 3;
 		apunta("dejado donde estaba (lo ha pedido el usuario): %s (%s)", h->ruta, h->nombre);
 	}
-	if (h->hecho && elegida + 1 < (int)rev.n_hallados)
+	if (h->hecho && elegida + 1 < (int)rev.n_hallados) {
 		mueve_lista(1);
+		foco_hallado();
+	}
 }
 
+static int cada_actualiza(void);
 static void haz(int id)
 {
 	if (id >= PEST && id < PEST + 5) {
@@ -981,16 +1054,27 @@ static void haz(int id)
 		break;
 	case B_ACTUALIZAR: {
 		int r;
-		formatear(aviso_abajo, sizeof aviso_abajo, "Trayendo las firmas...");
-		aviso_bien = 1;
+		/* (RÁPIDO) sin dejar la ventana parada: la barra y «Cancelar» */
+		modo = M_ACTUALIZANDO;
+		foco_id = B_CANCELAR;
 		pinta();
-		r = actualiza_firmas();
+		r = actualiza_firmas_con(cada_actualiza);
+		modo = M_INICIO;
+		foco_id = B_TODO;
 		if (!r) {
+			formatear(aviso_abajo, sizeof aviso_abajo, "Cargando las firmas nuevas...");
+			aviso_bien = 1;
+			pinta();
 			carga_firmas();
 			formatear(aviso_abajo, sizeof aviso_abajo, "[OK] Firmas puestas al día.");
-		} else
-			formatear(aviso_abajo, sizeof aviso_abajo, r == -2 ? "[!] Sin PAQUETES: el sistema no está instalado en el disco." :
-								      "[!] No se han podido traer (¿hay red? Mire la red en Configuración).");
+		} else if (r == -3)
+			formatear(aviso_abajo, sizeof aviso_abajo, "[i] Cancelado: las firmas siguen como estaban.");
+		else if (r == -2)
+			formatear(aviso_abajo, sizeof aviso_abajo, "[!] Sin PAQUETES: el sistema no está instalado en el disco.");
+		else if (act_dice[0])
+			formatear(aviso_abajo, sizeof aviso_abajo, "[!] No se han podido poner: %s", act_dice);
+		else
+			formatear(aviso_abajo, sizeof aviso_abajo, "[!] No se han podido traer (¿hay red? Mire la red en Configuración).");
 		aviso_bien = r == 0;
 		break;
 	}
@@ -1158,6 +1242,7 @@ static int atiende(const struct suceso *s, int revisando)
 					if (pestana != P_HISTORIAL && primera + fila < n && fila >= 0) {
 						int ya = elegida == primera + fila;
 						elegida = primera + fila;
+						foco_hallado();
 						if (ya && (modo == M_CARPETA || modo == M_UNIDAD))
 							haz(L_LISTA);	/* un segundo clic: entrar */
 					}
@@ -1178,6 +1263,20 @@ static int atiende(const struct suceso *s, int revisando)
 
 /* (desde pl_cortar, mientras se revisa): 1 si hay que parar */
 static u32 ultimo_pintado;
+/* (RÁPIDO) mientras PAQUETES trae las firmas: la ventana atendida y pintada; 1: «Cancelar» */
+static int cada_actualiza(void)
+{
+	struct suceso e;
+	int parar = 0;
+	while (sc(SC_SUCESO, ventana_n, (u32)&e, 0) == 1)
+		if (atiende(&e, 1))
+			parar = 1;
+	if (tics() - ultimo_pintado >= hz() / 4) {
+		ultimo_pintado = tics();
+		pinta();
+	}
+	return parar;
+}
 int atiende_ventana(void)
 {
 	struct suceso s;
@@ -1220,10 +1319,13 @@ static void empieza_revision(const char *ruta)
 	elegida = rev.n_hallados ? 0 : -1;
 	primera = 0;
 	foco_id = rev.n_hallados ? B_CUARENTENA : B_VOLVER;
+	foco_hallado();
 	serie("escudo: ventana: revisión de %s acabada: %u archivos, %u encontrados%s", r, rev.revisados, rev.n_hallados,
 	      rev.cortada ? " (cancelada)" : "");
-	if (rev.n_hallados && !rev.h[0].hecho)
+	if (rev.n_hallados && !rev.h[0].hecho) {
 		foco_id = B_CUARENTENA;
+		foco_hallado();
+	}
 }
 
 int ventana_principal(const char *revisar_ya, int pest)

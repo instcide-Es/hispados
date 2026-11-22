@@ -52,7 +52,10 @@ static void *crece(void *p, u32 *cap, u32 n, u32 tam)
 	*cap = c;
 	return q;
 }
-#define CRECE(arr, cap, n) ((tmp_ = crece((arr), &(cap), (n), sizeof *(arr))) ? ((arr) = tmp_, 1) : 0)
+/* (0.8.6) si ya cabe, bien aunque aún no haya nada reservado (un .ESC sin
+ * disparadores, como el DIA.ESC de un día sin firmas nuevas, cargado el
+ * primero: crece() daba el puntero nulo y salía «no hay memoria») */
+#define CRECE(arr, cap, n) ((n) <= (cap) ? 1 : (tmp_ = crece((arr), &(cap), (n), sizeof *(arr))) ? ((arr) = tmp_, 1) : 0)
 static void *tmp_;
 
 static u8 fold[256];
@@ -1642,6 +1645,8 @@ static int clase_linea(int c) { return c == 'n' ? B_NDB : c == 'l' ? B_LDB : c =
 /* un FIRMAS.ESC: no se fía de nada de su cabecera (puede venir de una memoria
  * USB o estar roto): todo se mide contra lo que mide el archivo; si algo no
  * cuadra, o falta memoria, se deja entero (no se queda contado a medias) */
+u32 (*motor_memoria_libre)(void);
+
 static int carga_esc(const char *ruta, info_firmas *inf)
 {
 	u8 c[128];
@@ -1685,6 +1690,19 @@ static int carga_esc(const char *ruta, info_firmas *inf)
 	    E->blob > largo || !cabe_en(off_bloques, E->n_bloques + 1, 4, largo) || !cabe_en(off_disp, n_disp, 12, largo) ||
 	    !cabe_en(off_siempre, n_siempre, 4, largo))
 		goto roto;
+	/* (RÁPIDO) ¿cabe en la memoria, dejando 8 MB para lo demás? Si no, este
+	 * .ESC no se carga (los otros, sí: lo más nuevo se carga antes) */
+	if (motor_memoria_libre) {
+		u64 hace = (u64)(1u << (E->nbits - 3)) + (u64)(E->n_bloques + 1) * 4 + (u64)E->n_comodin * sizeof(tramo) +
+			   (u64)n_disp * sizeof(disp) + 512 * 1024;
+		u32 libre = motor_memoria_libre();
+		if ((u64)libre < hace / 1024 + 8192) {
+			r = -2;
+			formatear(inf->error, sizeof inf->error, "%s no cabe en la memoria (hacen falta %u K y quedan %u K): no se usa",
+				  ruta, (u32)(hace / 1024), libre);
+			goto fuera_sin_msg;
+		}
+	}
 	E->bits = pl_reserva(1u << (E->nbits - 3));
 	E->bloques = pl_reserva((E->n_bloques + 1) * 4);
 	E->comodin = pl_reserva(E->n_comodin * sizeof(tramo) + 1);
@@ -1777,6 +1795,7 @@ roto:
 fuera:
 	if (r == -2)
 		formatear(inf->error, sizeof inf->error, "no hay memoria para %s: no se usa", ruta);
+fuera_sin_msg:
 	/* fuera entero: ni sus disparadores, ni lo que haya cargado, ni sus cuentas */
 	vuelve_a(&mk);
 	n_disps = disps_antes;

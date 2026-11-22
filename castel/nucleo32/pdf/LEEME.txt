@@ -1,0 +1,40 @@
+Hispa-PDF 1.0 - trabajar con PDF en Hispa-Pentium (docs/PENTIUM.md,
+«Hispa-PDF»): unir, separar, sacar, quitar, ordenar y girar páginas;
+comprimir; pasar a imágenes (PNG o JPG) y a texto; hacer un PDF con fotos;
+y poner y quitar contraseñas (RC4 y AES de 128 y 256 bits). Propio, en
+lugar de PDF24 (que es de 64 bits y no es libre), y en C portable: se
+compila tal cual para Hispa-64.
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+Lo que pone el paquete «pdf»:
+  \HISPA\PDF.BIN         el programa (la orden PDF de la Consola; PDF AYUDA)
+  \HISPA\HISPAPDF.BIN    la ventana (menú Inicio > Oficina > Hispa-PDF;
+                         y Mi equipo abre con ella los .PDF)
+  \HISPA\MENU\HISPAPDF.MNU, HISPAPDF.ICP   el acceso del menú y su icono
+  \HISPA\PDF\LEEME.TXT   esto
+
+La orden:
+  PDF INFO a.pdf
+  PDF UNE a.pdf b.pdf ... /SALIDA=c.pdf
+  PDF SEPARA a.pdf [1-3,4-9] /SALIDA=parte.pdf     (/CADA=n)
+  PDF EXTRAE a.pdf 3,1,5-7 /SALIDA=b.pdf           (ORDENA, /INVIERTE)
+  PDF QUITA a.pdf 2,4-5 /SALIDA=b.pdf
+  PDF GIRA a.pdf 90 [páginas] /SALIDA=b.pdf
+  PDF COMPRIME a.pdf /SALIDA=b.pdf [/CALIDAD=ALTA|MEDIA|BAJA]
+  PDF TEXTO a.pdf [/SALIDA=a.txt] [/PAGINAS=1-3] [/UTF8]
+  PDF IMAGENES a.pdf /SALIDA=pag.png [/PUNTOS=150] [/PAGINAS=..]
+  PDF CREA a.jpg b.png ... /SALIDA=c.pdf [/PAPEL=A4|A3|A5|CARTA|IMAGEN] [/MARGEN=10]
+  PDF CIFRA a.pdf /CLAVE=x [/DUENO=y] [/CIFRADO=AES128|AES256|RC4] /SALIDA=b.pdf
+  PDF DESCIFRA a.pdf /CLAVE=x /SALIDA=b.pdf
+Las páginas: 1-3,5,8- (z o fin: la última). /CLAVE= abre los que llevan
+contraseña. Los documentos, mejor fuera de \HISPA (en \DOCUMENT, por ejemplo).
+
+Lo de otros que lleva dentro (todo libre):
+  miniz 3.0.2 (Rich Geldreich y otros; licencia MIT): el Flate.
+  stb_image 2.30, stb_image_write 1.19 y stb_truetype 1.26 (Sean Barrett y
+    otros; de dominio público o MIT, a elegir): leer y escribir las
+    imágenes y las letras TrueType.
+  Las letras DejaVu (recortadas a Europa occidental; la licencia de
+    Bitstream Vera, con las de DejaVu): para lo que no trae su letra.
+Sus licencias, enteras, en terceros/ del código fuente (terceros/miniz,
+terceros/stb y terceros/dejavu).
