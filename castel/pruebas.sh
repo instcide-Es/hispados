@@ -2353,7 +2353,7 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -n 8; fi
-    if grep -q "^|  win32     1.1     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0.8.4   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|16 paquetes\.$" $Z/b2$hc.txt \
+    if grep -q "^|  win32     1.1     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0\.8\.[0-9]   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|16 paquetes\.$" $Z/b2$hc.txt \
       && grep -q "^|Los archivos de los 16 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
       ok "PAQUETES en el sistema recién instalado: LISTA dice los 16 paquetes del sistema (..., ssh, tailscal, sonido, tls, wifi y win32: con 16, base ya no cabe en la pantalla) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -n 12; fi
@@ -2842,7 +2842,7 @@ mira "la firma (Ed25519, en Castel): PAQUETES FIRMA dice si es buena; el catálo
   "^La firma de X:.paquetes.catalogo\.txt NO es buena\.$" "^paquetes: la firma del catálogo NO es buena: no se usa nada de él$" \
   "^paquetes: el catálogo de Internet no trae su firma (CATALOGO.FIR): no se usa$" "^  letras    1\.1  *Unas letras, mejores$" \
   "^Todavía no hay actualizaciones publicadas en el servidor\.$"
-if [ "$(grep -c '^paquetes: la firma del catálogo NO es buena' $S)" = 2 ] && ! grep -q '^  instalado' $S && sano $Q/s9.img && [ "$(mdir -/ -b -i $Q/s9.img ::HISPA/PAQUETES 2> /dev/null | grep -v BAJADAS | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI " ]; then
+if [ "$(grep -c '^paquetes: la firma del catálogo NO es buena' $S)" = 2 ] && ! grep -q '^  instalado' $S && sano $Q/s9.img && [ "$(mdir -/ -b -i $Q/s9.img ::HISPA/PAQUETES 2> /dev/null | grep -v 'BAJADAS\|/SERIE.TXT$' | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI " ]; then    # ((USUARIOS) SERIE.TXT: la del catálogo bueno)
   ok "y con la firma mala, nada: ni de Internet ni de la carpeta (que trae CATALOGO.FIR); el disco sano, con lo de antes"
 else ko "con la firma mala se ha usado algo:"; lista_de $Q/s9.img | sed 's/^/        /' | head -10; fi
 
