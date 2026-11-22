@@ -815,6 +815,20 @@ void ui_pantalla(int *an, int *al)
 
 void ui_maximiza(void) { sc(SC_MAXIMIZAR, vent, 0, 0); }
 
+/* (0.8.7) lo soltado desde Mi equipo en la ventana (tras EV_SOLTADO): la
+ * llamada 173, una sola en el núcleo para todos los programas */
+int ui_soltado(char *ruta, int cabe)
+{
+	char t[RUTA];
+	u32 n = sc(173, (u32)t, sizeof t, 0);
+
+	if (ES_ERROR(n) || n == 0 || n >= sizeof t)
+		return 0;
+	t[n] = 0;
+	de437(t, ruta, (u32)cabe);
+	return ruta[0] != 0;
+}
+
 int ui_suceso(Suceso *s, u32 espera_ms)
 {
 	struct suceso x;

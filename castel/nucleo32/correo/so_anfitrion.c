@@ -547,6 +547,7 @@ void ui_cierra(void) {}
 void ui_titulo(const char *t) { (void)t; }
 void ui_pantalla(int *an, int *al) { *an = 1024; *al = 570; }
 void ui_maximiza(void) {}
+int ui_soltado(char *ruta, int cabe) { (void)cabe; ruta[0] = 0; return 0; }
 int ui_suceso(Suceso *s, u32 espera_ms) { (void)s; if (espera_ms) usleep(espera_ms * 1000); return 0; }
 void ui_rect(int x, int y, int an, int al, u32 c) { (void)x, (void)y, (void)an, (void)al, (void)c; }
 void ui_degradado(int x, int y, int an, int al, u32 a, u32 b) { (void)x, (void)y, (void)an, (void)al, (void)a, (void)b; }

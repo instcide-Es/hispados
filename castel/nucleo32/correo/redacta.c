@@ -691,9 +691,10 @@ static void guarda_borrador(void)
 	}
 }
 
-static void adjunta(void)
+/* adjunta el archivo de la ruta r (con «Adjuntar...» o soltado desde Mi
+ * equipo en la ventana: (0.8.7) EV_SOLTADO y la llamada 173) */
+static void adjunta_ruta(const char *r)
 {
-	char r[260] = "";
 	u32 n;
 	int c;
 
@@ -701,8 +702,6 @@ static void adjunta(void)
 		aviso("Adjuntar", "No caben m\xc3\xa1s adjuntos.");
 		return;
 	}
-	if (!elige_archivo("Adjuntar un archivo", r, sizeof r, 0, NULL))
-		return;
 	if (!so_existe(r, &c) || c) {
 		aviso("Adjuntar", "Eso no es un archivo.");
 		return;
@@ -728,6 +727,19 @@ static void adjunta(void)
 	R.nadj++;
 	R.cambiado = 1;
 	so_apunta("adjuntado: %s (%u octetos)", r, (unsigned)n);
+}
+
+static void adjunta(void)
+{
+	char r[260] = "";
+
+	if (R.nadj >= MAX_ADJ) {
+		aviso("Adjuntar", "No caben m\xc3\xa1s adjuntos.");
+		return;
+	}
+	if (!elige_archivo("Adjuntar un archivo", r, sizeof r, 0, NULL))
+		return;
+	adjunta_ruta(r);
 }
 
 /* ---- el autocompletado ---- */
@@ -1018,6 +1030,13 @@ static int bucle(void)
 		if (s.clase == UE_TAMANO) {
 			van = (int)s.a;
 			val = (int)s.b;
+			continue;
+		}
+		if (s.clase == UE_SOLTADO) {		/* (0.8.7) un archivo soltado desde Mi equipo: adjunto */
+			char r[260];
+
+			if (ui_soltado(r, sizeof r))
+				adjunta_ruta(r);		/* (el bucle lo pinta) */
 			continue;
 		}
 		if (s.clase == UE_CERRAR)

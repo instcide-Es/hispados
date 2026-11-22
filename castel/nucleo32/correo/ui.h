@@ -23,6 +23,7 @@
 #define UE_MENU 10		/* a: la opción (desde 0; UI_NINGUNA), b: la etiqueta */
 #define UE_UNIDADES 12
 #define UE_RUEDA 13		/* a, b: dónde; c: los pasos (con signo en el octeto bajo; arriba, positivos) */
+#define UE_SOLTADO 14		/* (0.8.7) se ha soltado algo de Mi equipo en la ventana: a, b, dónde; la ruta, con ui_soltado() */
 #define UI_NINGUNA 0xFFFFFFFFu
 #define UB_IZQ 1
 #define UB_DER 2
@@ -59,6 +60,9 @@ void ui_maximiza(void);
 /* el suceso siguiente, esperando como mucho espera_ms (0: sin esperar): 1
  * si hay */
 int ui_suceso(Suceso *s, u32 espera_ms);
+/* (0.8.7) tras UE_SOLTADO, la ruta de lo soltado (UTF-8; la llamada 173 de
+ * Hispa-Pentium, la misma del Bloc de notas y del Reproductor): 1 si hay */
+int ui_soltado(char *ruta, int cabe);
 void ui_rect(int x, int y, int an, int al, u32 c);
 void ui_degradado(int x, int y, int an, int al, u32 a, u32 b);
 void ui_redondo(int x, int y, int an, int al, int r, u32 a, u32 b);

@@ -2596,6 +2596,15 @@ módulo Escritorio
 
     ; ha entrado alguien: lo suyo (el dock, los accesos del tapiz, lo fijado
     ; en el menú Inicio, de sus ajustes), y su saludo
+    ; (CORREO, 0.8.7) CORREO /BANDEJA: el aviso del correo nuevo, del que está
+    ; delante (lo lanza el núcleo: su usuario es el de la sesión)
+    función lanza_bandeja_correo()
+        variable t: puntero a Tarea
+        variable an: nat32
+        t := cargar_archivo("\\HISPA\\CORREO.BIN", "/BANDEJA", an)
+        si t <> nulo entonces t.padre := 0 fin
+    fin
+
     función lo_del_usuario()
         variable i: nat32
         olvida_inicio()
@@ -2634,6 +2643,7 @@ módulo Escritorio
         pon_iconos()
         pinta_barra()
         repintar_todo()
+        si instalado() y hay_ajustes entonces lanza_bandeja_correo() fin     ; (CORREO, 0.8.7) el suyo
         escribir("escritorio: sesión abierta\n")
     fin
 
@@ -3818,9 +3828,10 @@ módulo Escritorio
                 si t <> nulo entonces t.padre := 0 fin
                 t := cargar_archivo("\\HISPA\\TAILSCAL.BIN", "/ARRANQUE", an)
                 si t <> nulo entonces t.padre := 0 fin
-                ; (CORREO) el aviso del correo nuevo, si el usuario lo quiere (CORREO.INI: si no, acaba enseguida)
-                t := cargar_archivo("\\HISPA\\CORREO.BIN", "/BANDEJA", an)
-                si t <> nulo entonces t.padre := 0 fin
+                ; (CORREO) el aviso del correo nuevo, si el usuario lo quiere (CORREO.INI: si no, acaba enseguida).
+                ; (0.8.7) Con usuarios, al entrar cada uno (lo_del_usuario): así es suyo (su
+                ; \USUARIOS\<u>\CORREO) y se acaba al cerrar su sesión
+                si no hay_cuentas entonces lanza_bandeja_correo() fin
             fin
         fin
         ; (PANEL) los ajustes del Panel de control (PANEL.INI): el ratón, el
