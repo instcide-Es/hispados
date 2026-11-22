@@ -590,6 +590,14 @@ módulo Inicio
     ; (OFICINA2) su módulo (los cuatro primeros los lanza el escritorio por
     ; su número: AM_OFICINA; los demás, por su ruta: P_RUTA)
     constante OF_PROGRAMAS = 9
+    ; (PINTURA32, 0.8.8) ¿es el programa de Pintura 2 («...\PINTURA.BIN»)?
+    función acaba_en_pintura(p: puntero a byte): bool
+        variable n: nat32
+        n := longitud(p)
+        si n < 12 entonces devolver falso fin
+        devolver iguales(p + (n - 12), "\\PINTURA.BIN")
+    fin
+
     función hvp_de_oficina(i: nat32): puntero a byte
         según i
             caso 0: devolver "\\OFICINA\\FACTURAS.HVP"
@@ -669,7 +677,9 @@ módulo Inicio
                 ; (0.8.5) los accesorios (la Calculadora, el Reloj...) no entran de
                 ; salida entre los más usados (dejarían fuera la oficina): salen
                 ; cuando se usan, y siempre en Todos los programas > Accesorios
-                si progs[k].carpeta = C_ACCESORIOS entonces progs[k].rango := SIN_RANGO sino rango := rango + 1 fin
+                ; (PINTURA32, 0.8.8) y Pintura 2, del sistema, como la Pintura de la
+                ; oficina de antes: en Todos los programas > Multimedia
+                si progs[k].carpeta = C_ACCESORIOS o acaba_en_pintura(programa_de(i)) entonces progs[k].rango := SIN_RANGO sino rango := rango + 1 fin
             fin
             i := i + 1
         fin
