@@ -2566,11 +2566,14 @@ del sistema (con la memoria USB, `X:\ACPI.TXT`).
 **Apagar, en orden** (`escritorio.cas`, `apaga`; `energia.cas`):
 
 1. **Avisar a los programas**: a cada ventana de un programa, «cerrar» (como el
-   botón de la ventana), y hasta 2 s para que se cierren, sin dejar de mover
-   el escritorio. Si alguno no se cierra (el Bloc de notas con cambios sin
-   guardar avisa y se queda), **no se apaga**: un aviso lo dice («Hay un
-   programa sin cerrar: ¿algo sin guardar?»); al pedirlo **otra vez**, se le
-   cierra (como el Bloc al cerrar otra vez).
+   botón de la ventana), y hasta 3 s para que se cierren, sin dejar de mover
+   el escritorio. (CORTES) Si alguno no se cierra (el Bloc de notas con
+   cambios sin guardar pregunta; uno colgado ni lo lee), el cuadro **«Estos
+   programas no se han cerrado»**, con cada uno («no responde» o «espera una
+   respuesta»), **«Forzar el cierre»** y **«Cancelar»**; sin elegir nada, a
+   los 15 s se fuerza (a los 60 si alguno pregunta algo): sección 14 vicies.
+   (Antes: «Hay un programa sin cerrar: ¿algo sin guardar?» y no se apagaba
+   hasta pedirlo otra vez.)
 2. La pantalla del final («Apagando el equipo...»), y los programas que
    queden (sin ventana) se acaban: sus archivos se cierran y lo escrito queda.
 3. **Vaciar los discos** (`asentar` de cada uno).

@@ -3367,8 +3367,8 @@ CAPTURAS=$G MODULOS=$Y/ACPI.BIN,$Y/BLOC.BIN ARRANQUE="escritorio acpicada=1" QEM
   "${PUESTA[@]}" ":monitor cont" ":pausa 5" ":captura a1" ":raton 690 585" ":pausa 1.5" ":captura a2" \
   "${ENCHUFA[@]}" ":pausa 3" ":captura a3" ":clic 690 585" ":pausa 1" ":captura a4" ":raton 400 300" \
   "${GASTADA[@]}" ":pausa 3" ":raton 690 585" ":pausa 1.5" ":captura a5" ":raton 400 300" \
-  ":clic 40 585" ":clic 80 176" ":pausa 2" ":escribe sin guardar" ":clic 40 585" ":clic 360 545" ":clic 275 327" ":pausa 3" ":captura a6" \
-  ":clic 40 585" ":clic 360 545" ":clic 275 327" ":pausa 4" > $Y/apagar.sal 2>&1
+  ":clic 40 585" ":clic 80 176" ":pausa 2" ":escribe sin guardar" ":clic 40 585" ":clic 360 545" ":clic 275 327" ":pausa 5" ":captura a6" \
+  ":tecla ret" ":pausa 4" > $Y/apagar.sal 2>&1
 S=$Y/apagar.sal
 mira "el núcleo lanza el servicio de ACPI al arrancar, y este lee las tablas de QEMU y la batería de la SSDT de prueba (_BIF, _BIX, _BST)" \
   "^acpi: el servicio de ACPI (ACPI.BIN) en marcha, la tarea [0-9]*" "^ACPI: SSDT .*HISPA  BATPRUEB" "^Batería 1: ._SB_.HBAT" \
@@ -3385,9 +3385,12 @@ miracap "al enchufar el cargador (con el recuadro abierto), se pone al día solo
 miracap "un clic en la pila quita el recuadro" a4 notexto 300 500 790 560 "Enchufado"
 miracap "con la batería gastada (la salud al 40 %), el aviso en terracota" a5 texto 300 480 790 560 "Salud: 40 % (guarda 5.000 de 12.500 mAh de cuando era nueva)" \
   texto 300 480 790 560 "La batería está gastada: dura menos de la mitad que nueva"
-miracap "«Apagar» con el Bloc de notas sin guardar: el Bloc avisa, no se apaga y el escritorio lo dice" a6 \
-  texto 100 100 700 500 "Hay un programa sin cerrar: ¿algo sin guardar?"
-mira "«Apagar» otra vez: se cierran los programas, se vacían los discos y el servicio apaga por ACPI (S5: _PTS, el modo ACPI, SLP_EN) y QEMU termina" \
+# (CORTES) ya no es «Hay un programa sin cerrar» y apagar otra vez: el cuadro
+# «Estos programas no se han cerrado», con «Forzar el cierre» (Intro)
+miracap "«Apagar» con el Bloc de notas sin guardar: el Bloc pregunta y el escritorio, «Estos programas no se han cerrado» (el Bloc espera una respuesta), con «Forzar el cierre»" a6 \
+  negrita 100 100 700 500 "Estos programas no se han cerrado:" texto 100 100 700 500 "(espera una respuesta)" negrita 100 100 700 500 "Forzar el cierre"
+mira "«Forzar el cierre»: se cierran los programas, se vacían los discos y el servicio apaga por ACPI (S5: _PTS, el modo ACPI, SLP_EN) y QEMU termina" \
+  "^escritorio: se fuerza el cierre de la tarea [0-9]* (.*Bloc de notas" \
   "^escritorio: apagar" "^energía: apagar (S5) por el servicio de ACPI" "^ACPI: preparar S5 (._S5, _PTS, _SST): AE_OK" \
   "^ACPI: modo ACPI (SMI_CMD B2h <- F1h): AE_OK" "^\[código 0\]"
 if ! grep -q "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $S; then ok "ni una excepción del núcleo ni un error de ACPICA en toda la sesión"
