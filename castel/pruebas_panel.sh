@@ -114,7 +114,7 @@ RELOJ=$(relojes "+5 min") CAPTURAS=$G ESCRIBE=1 DISCO=$K/e.img ARRANQUE="escrito
   ":clic 100 193" ":pausa 1" ":tecla tab" ":tecla tab" ":tecla tab" ":tecla tab" ":tecla down" ":pausa 1" ":clic 500 335" ":tecla apostrophe" ":tecla semicolon" ":tecla shift-equal" ":pausa 1" ":captura pn4" \
   ":clic 100 193" ":tecla tab" ":tecla tab" ":tecla tab" ":tecla tab" ":tecla up" ":pausa 1" \
   ":clic 100 317" ":pausa 1" ":tecla tab" ":tecla tab" ":tecla down" ":tecla tab" ":tecla tab" ":tecla down" ":pausa 1" ":captura pn5" \
-  ":clic 100 379" ":pausa 1" ":tecla tab" ":tecla down" ":tecla down" ":tecla down" ":pausa 2" ":clic 551 239" ":pausa 2" ":raton 400 450" ":captura pn6" \
+  ":clic 100 379" ":pausa 1" ":tecla tab" ":tecla down" ":tecla down" ":tecla down" ":pausa 5" ":clic 551 239" ":pausa 2" ":raton 400 450" ":captura pn6" \
   ":clic 100 69" ":pausa 1" ":raton 400 450" ":captura pn7" ":clic 728 508" ":pausa 1" ":clic 620 486" ":pausa 70" ":captura pn8" ":raton 300 300" ":pausa 1" ":captura pn9" \
   ":monitor system_powerdown" ":pausa 3" ":captura pn10" ":tecla esc" ":pausa 1" > $K/e.sal 2>&1
 S=$K/e.sal
