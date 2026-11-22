@@ -198,6 +198,7 @@ módulo UPaquetes
     variable av_h, av_t: nat32
     variable lento: bool                        ; (las pruebas) /LENTO: cada archivo quitado, un poco de espera
     variable con_catálogo: bool                 ; FICHAS /CATALOGO: también lo del catálogo
+    variable con_limpia: bool                   ; (0.8.6) ESTADO /LIMPIA: antes, lo viejo de BAJADAS
     variable ins_fecha: arreglo [MAX_PAQ] de nat32  ; la fecha de su registro (la de la FAT): cuándo se instaló
     variable cat_tipos_n: nat32
     variable cat_tipo_nombre: arreglo [MAX_PAQ] de arreglo [12] de byte
@@ -1017,6 +1018,35 @@ módulo UPaquetes
         en_base("BAJADAS\\", b)
         para i desde 1 hasta plan_n hacer
             si empieza_con(plan_ruta[i - 1], b) entonces borrar(plan_ruta[i - 1]) fin
+        fin
+    fin
+
+    ; (0.8.6) lo que dejaron en BAJADAS los PAQUETES de antes de la 0.8.6 (no
+    ; lo borraban: con las firmas de Escudo, unos 50 MB que, además, Escudo
+    ; revisaba cada vez): fuera los .HPQ, antes de instalar o actualizar
+    variable viejas: arreglo [MAX_PAQ] de arreglo [16] de byte
+    función limpia_bajadas()
+        variable m, n, i: nat32
+        variable e: Entrada
+        variable b: arreglo [RUTA] de byte
+        variable r: arreglo [RUTA] de byte
+        si base[0] = 0 entonces devolver fin
+        en_base("BAJADAS", b)
+        m := abrir(b)
+        si es_error(m) entonces devolver fin
+        n := 0
+        ; (primero los nombres; se borran luego, con la carpeta cerrada)
+        mientras n < MAX_PAQ y entrada(m, e) hacer
+            si e.atributos yb CARPETA = 0 y acaba_en(e.nombre, ".HPQ") entonces
+                copiar_hasta(viejas[n], e.nombre, 16)
+                n := n + 1
+            fin
+        fin
+        cerrar(m)
+        para i desde 1 hasta n hacer
+            une(r, b, "\\")
+            concatenar(r, viejas[i - 1])
+            borrar(r)
         fin
     fin
 
@@ -2838,6 +2868,7 @@ módulo UPaquetes
             si iguales_sin_caja(palabra_, "/LENTO") entonces lento := cierto fin
             si empieza_por(palabra_, "/CANCELA_EN=") entonces texto_a_natural(dirección(palabra_[12]), cancela_en) fin
             si iguales_sin_caja(palabra_, "/CATALOGO") entonces con_catálogo := cierto fin
+            si iguales_sin_caja(palabra_, "/LIMPIA") entonces con_limpia := cierto fin
             si empieza_por(palabra_, "/CORTE=") o empieza_por(palabra_, "/corte=") entonces
                 texto_a_natural(dirección(palabra_[7]), corte)
             fin
@@ -2916,16 +2947,21 @@ módulo UPaquetes
         sino si iguales(orden_, "catalogo") o iguales(orden_, "catálogo") entonces
             di_catálogo()
         sino si iguales(orden_, "instala") entonces
+            limpia_bajadas()                        ; (0.8.6)
             bien := instala()
         sino si iguales(orden_, "actualiza") entonces
+            limpia_bajadas()
             bien := actualiza()
         sino si iguales(orden_, "quita") entonces
             bien := quita()
         sino si iguales(orden_, "comprueba") entonces
             bien := comprueba()
         sino si iguales(orden_, "estado") entonces
+            ; (0.8.6) ACTUALIZ /BANDEJA, al arrancar: «estado /limpia» (lo de BAJADAS de antes)
+            si con_limpia entonces limpia_bajadas() fin
             di_estado()
         sino si iguales(orden_, "repara") entonces
+            limpia_bajadas()
             bien := repara()
         sino si iguales(orden_, "archivos") entonces
             bien := archivos()

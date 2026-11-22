@@ -653,7 +653,9 @@ módulo UActual
             archivo[longitud(archivo) - 11] := 0
             concatenar(archivo, "BANDEJA.TXT")
             fich_avance[0] := 0
-            paquetes("estado")
+            ; (0.8.6) /limpia: lo que dejaron en BAJADAS los PAQUETES de antes
+            ; (al arrancar, cuando aún no se está instalando nada)
+            paquetes("estado /limpia")
             p := salida
             mientras valor(p) <> 0 hacer
                 trozo(p, 0, t, 8)

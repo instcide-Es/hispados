@@ -2642,6 +2642,8 @@ cp $F/paq/LETRAS1.HPQ $F/paq/LETRAS11.HPQ $F/paq/SALUDO1.HPQ $F/paq/SALUDO2.HPQ 
   $HPQ catalogo paq2 && printf 'sistema=letras\r\nsistema=nuevo\r\n' >> paq2/CATALOGO.TXT && $HPQ firma paq2 $Q/prueba.key ) > $Q/hpq2.txt 2>&1
 mkfs.fat -F 16 -n MEMORIA -C $Q/usb2.img 16384 > /dev/null && mmd -i $Q/usb2.img ::PAQUETES && mcopy -i $Q/usb2.img $F/paq2/* ::PAQUETES/
 cp $Q/s1.img $Q/s3.img
+# (y lo que dejaba en BAJADAS un PAQUETES de antes de la 0.8.6: se borra)
+mmd -i $Q/s3.img ::HISPA/PAQUETES/BAJADAS 2> /dev/null; mcopy -i $Q/s3.img $F/paq/LETRAS1.HPQ ::HISPA/PAQUETES/BAJADAS/VIEJO.HPQ
 USB_IMG=$Q/usb2.img paq $Q/s3.img sistema "paquetes estado" "paquetes actualiza" ":pausa 2" "paquetes lista" "paquetes quita nuevo" "paquetes estado" "paquetes actualiza" ":pausa 1"
 mira "PAQUETES ESTADO dice cuál es nuevo del sistema («|nuevo»: la bandeja lo cuenta); ACTUALIZA pone también el paquete nuevo del sistema (no estaba), no el opcional; y quitado a propósito, ACTUALIZA ya no lo pone" \
   "^p|nuevo||1\.0|Nuevo del sistema (de prueba)|otros|nuevo$" "^p|extra||1\.0|Opcional (de prueba)|otros$" "^Nuevo del sistema: nuevo$" \
@@ -2649,8 +2651,8 @@ mira "PAQUETES ESTADO dice cuál es nuevo del sistema («|nuevo»: la bandeja lo
   "^  quitado nuevo 1\.0$" "^p|nuevo||1\.0|Nuevo del sistema (de prueba)|otros$" "^Todo está al día\.$"
 if grep -q "instalado extra\|^p|letras||" $S; then ko "ACTUALIZA ha puesto el opcional (extra) o da letras por no instalado"; else ok "el opcional (extra) se queda sin instalar"; fi
 if sano $Q/s3.img && sin_restos $Q/s3.img && saca $Q/s3.img HISPA/PAQUETES/QUITADOS.TXT $Q/quitados.txt && [ "$(cat $Q/quitados.txt)" = "$(printf 'nuevo\r')" ] \
-  && ! igual_en $Q/s3.img HISPA/NUEVO.TXT $F/A.TXT && ! igual_en $Q/s3.img HISPA/EXTRA.TXT $F/A.TXT; then
-  ok "en el disco: sano, sin «nuevo» (quitado) ni «extra», y QUITADOS.TXT dice «nuevo»"
+  && ! igual_en $Q/s3.img HISPA/NUEVO.TXT $F/A.TXT && ! igual_en $Q/s3.img HISPA/EXTRA.TXT $F/A.TXT && ! saca $Q/s3.img HISPA/PAQUETES/BAJADAS/VIEJO.HPQ $Q/viejo.hpq; then
+  ok "en el disco: sano, sin «nuevo» (quitado) ni «extra», QUITADOS.TXT dice «nuevo» y lo viejo de BAJADAS (de un PAQUETES de antes), borrado"
 else ko "lo de los nuevos del sistema no queda bien en el disco:"; lista_de $Q/s3.img | sed 's/^/        /' | head -14; fi
 USB_IMG=$Q/usb2.img paq $Q/s3.img sistema2 "paquetes instala nuevo" ":pausa 1" "paquetes actualiza" ":pausa 1"
 mira "y PAQUETES INSTALA nuevo lo pone otra vez (y lo olvida de QUITADOS.TXT)" "^  instalado nuevo 1\.0$" "^Todo está al día\.$"
@@ -4945,6 +4947,11 @@ if bash $AQUI/nucleo32/escudo/hacer.sh --anfitrion $E/anf > $E/hacer.txt 2>&1; t
   $E/anf -q $FIRMAS -o $E/PRUEBA.ESC && $E/anf -q -f $E/PRUEBA.ESC $E/p/ARCHIVOS > $E/l2.txt 2>&1
   if $CMP $E/l2.txt > $E/c2.txt; then ok "y lo mismo desde FIRMAS.ESC (el índice propio: las sumas en el disco por tramos; el cuerpo en bloques comprimidos y, en memoria, sus disparadores)"
   else ko "desde FIRMAS.ESC no dice lo mismo:"; sed 's/^/        /' $E/c2.txt | head -6; fi
+  # (0.8.6) un .ESC sin nada (el DIA.ESC de un día sin firmas nuevas), cargado el
+  # primero (Escudo carga primero DIA.ESC): antes salía «no hay memoria» y no se usaba
+  $E/anf -q -o $E/VACIO.ESC > /dev/null 2>&1 && $E/anf -f $E/VACIO.ESC -f $E/PRUEBA.ESC $E/p/ARCHIVOS > $E/l3.txt 2> $E/l3.err
+  if ! grep -q "no hay memoria" $E/l3.err && $CMP $E/l3.txt > $E/c3.txt; then ok "un .ESC vacío (un DIA.ESC sin firmas) cargado el primero: se usa, sin «no hay memoria», y lo demás dice lo mismo"
+  else ko "un .ESC vacío cargado el primero no va:"; cat $E/l3.err $E/c3.txt 2> /dev/null | sed 's/^/        /' | head -6; fi
   # lo de la revisión de seguridad (21/11): los casos que encontró (FIRMAS.ESC
   # con la cabecera mentirosa, una tabla de bloques al revés, paréntesis sin
   # fin, variantes que piden 1 GB, una bomba ZIP de miembros solapados, un PE

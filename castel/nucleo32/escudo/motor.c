@@ -52,7 +52,10 @@ static void *crece(void *p, u32 *cap, u32 n, u32 tam)
 	*cap = c;
 	return q;
 }
-#define CRECE(arr, cap, n) ((tmp_ = crece((arr), &(cap), (n), sizeof *(arr))) ? ((arr) = tmp_, 1) : 0)
+/* (0.8.6) si ya cabe, bien aunque aún no haya nada reservado (un .ESC sin
+ * disparadores, como el DIA.ESC de un día sin firmas nuevas, cargado el
+ * primero: crece() daba el puntero nulo y salía «no hay memoria») */
+#define CRECE(arr, cap, n) ((n) <= (cap) ? 1 : (tmp_ = crece((arr), &(cap), (n), sizeof *(arr))) ? ((arr) = tmp_, 1) : 0)
 static void *tmp_;
 
 static u8 fold[256];

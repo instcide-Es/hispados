@@ -13,6 +13,11 @@
 # tarjeta de tests/wifi/tarjeta_sim.c dentro (el controlador de verdad contra
 # una BCM43224 de mentira; en build/wifi-pentium-chip/).
 set -e
+# (0.8.6) la fecha que pone __DATE__ (servicio.c y wifi/nucleo/nucleo.c): la
+# del paquete wifi 0.8.5, para que WIFI.BIN salga igual octeto a octeto cada
+# vez que se compila (si no, cada día cambia un octeto y el CD no lleva el
+# mismo paquete que el catálogo). Al subir la versión del paquete, poner aquí su día
+export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1795262400}    # 21/11/2026 12:00 UTC
 AQUI=$(dirname "$(readlink -f "$0")")
 RAIZ=$(readlink -f "$AQUI/../../..")
 SAL=$(readlink -f "${1:?uso: hacer.sh SALIDA}")
