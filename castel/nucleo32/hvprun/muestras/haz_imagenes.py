@@ -9,7 +9,9 @@ en HVPRUN), hechas aquí sin nada de fuera:
   COLOR.PCX  lo mismo en PCX de color verdadero (tres planos de 8 bits)
   EGA.PCX    96 x 64, cuatro planos de un bit (16 colores, la paleta de la
              cabecera): cuatro franjas de colores
-Para que Pintura las abra («Editar» en Mi equipo) y el Mirador las vea.
+Para que Pintura las abra («Editar» en Mi equipo) y el Mirador las vea. Al
+lado, documentos hechos por los programas en HVPRUN (la parte 40 con
+OFICINA_MUESTRAS): CARTEL.PUB, FIESTA.PRE, DATOS.BDD y .BDJ, PAGINA2.TXT.
 """
 import os
 import struct

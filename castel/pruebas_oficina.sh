@@ -194,6 +194,6 @@ if [ -n "${OFICINA_MUESTRAS:-}" ]; then
   mkdir -p "$OFICINA_MUESTRAS"
   cp $Y/cartel.pub "$OFICINA_MUESTRAS/CARTEL.PUB" 2> /dev/null; cp $Y/fiesta2.pre "$OFICINA_MUESTRAS/FIESTA.PRE" 2> /dev/null
   cp $Y/datos.bdd "$OFICINA_MUESTRAS/DATOS.BDD" 2> /dev/null; cp $Y/datos.bdj "$OFICINA_MUESTRAS/DATOS.BDJ" 2> /dev/null
-  cp $Y/dibujo.bmp "$OFICINA_MUESTRAS/DIBUJO.BMP" 2> /dev/null; cp $Y/pagina2.txt "$OFICINA_MUESTRAS/PAGINA2.TXT" 2> /dev/null
+  cp $Y/pagina2.txt "$OFICINA_MUESTRAS/PAGINA2.TXT" 2> /dev/null
 fi
 }
