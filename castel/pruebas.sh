@@ -302,6 +302,13 @@
 #      conserva, el flipper golpea), los niveles de Almacén, el paquete, el
 #      menú Inicio > Juegos y cada juego en QEMU con teclas grabadas, sus
 #      récords, el sonido, y lo que gastan en un Atom N270 de QEMU.
+#  40. (OFICINA2, SOLO=oficina) La oficina 1.1 en HVPRUN (pruebas_oficina.sh):
+#      Datos, el Lector, Publicaciones, Presentaciones y Pintura (abrir,
+#      escribir con eñe, tildes y euro, guardar, cerrar y volver a abrir; y lo
+#      guardado, mirado en el disco), el menú Inicio (Oficina y Multimedia, sin
+#      dos Miradores), las clases de Mi equipo (.BDD, .PUB, .PRE, .PDF y
+#      «Editar con Pintura» en BMP y PCX), la rueda, Alt+letra, el
+#      portapapeles, maximizar, una ruta larga, \DOCUMENT y la zona protegida.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 #  38. (USUARIOS, SOLO=usuarios) Los usuarios (pruebas_usuarios.sh): ARGON2
 #      con ASan en Linux, la serie de tools/hpq.py; un sistema de antes que
@@ -349,6 +356,7 @@
 #   SOLO=win32juegos ./pruebas.sh la primera y la 33 ((JUEGOS) lo que pide un juego de Windows: hilos, SEH, registro, VC6, ratón, UDP, sonido y CD)
 #   SOLO=juegos ./pruebas.sh      la primera y la 39 (JUEGOS: los juegos; pruebas_juegos.sh)
 #   SOLO=pluma ./pruebas.sh       la primera y la 41 (PLUMA32: Pluma 2; pruebas_pluma.sh)
+#   SOLO=oficina ./pruebas.sh     la primera y la 40 (OFICINA2: la oficina 1.1 en HVPRUN; pruebas_oficina.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -404,6 +412,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_reproductor.sh     # (REPRODUCTOR) la parte 36, como parte_reproductor
 . $AQUI/pruebas_juegos.sh          # (JUEGOS2) la parte 39, como parte_juegos
 . $AQUI/pruebas_pluma.sh           # (PLUMA32) la parte 41, como parte_pluma
+. $AQUI/pruebas_oficina.sh         # (OFICINA2) la parte 40, como parte_oficina
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -426,7 +435,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -2332,9 +2341,9 @@ for hc in xhci ehci; do
   # lo instalado, apuntado para PAQUETES: los registros de los paquetes del sistema, en \HISPA\PAQUETES
   rm -rf $Z/pqi $Z/pqu; mkdir $Z/pqi $Z/pqu
   mcopy -n -i $Z/vol.img '::HISPA/PAQUETES/*' $Z/pqi/ > /dev/null 2>&1; mcopy -n -i $G/usb.img@@1M '::INSTALA/PAQUETES/*' $Z/pqu/ > /dev/null 2>&1
-  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "ACCESORI.PQI BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI RED.PQI SONIDO.PQI SSH.PQI TAILSCAL.PQI TLS.PQI WIFI.PQI WIN32.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
+  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "ACCESORI.PQI BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI PINTURA.PQI RED.PQI SONIDO.PQI SSH.PQI TAILSCAL.PQI TLS.PQI WIFI.PQI WIN32.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
     && mcopy -n -i $Z/vol.img ::HISPA/PAQUETES.BIN $Z/f.bin > /dev/null 2>&1; then
-    ok "$que: INSTALAR apunta lo que instala: los registros de los 16 paquetes del sistema, en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
+    ok "$que: INSTALAR apunta lo que instala: los registros de los 17 paquetes del sistema (OFICINA2: con pintura), en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
   else ko "$que: lo instalado no queda apuntado en C:\\HISPA\\PAQUETES:"; ls $Z/pqi | sed 's/^/        /' | head -10; fi
   # SOLO el disco: el primer arranque
   desde_disco $Z/d$hc.img $Z/a$hc.sal
@@ -2414,9 +2423,9 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium $VERSION_BASE: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -n 8; fi
-    if grep -q "^|  win32     1.2     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0\.8\.[0-9]   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|16 paquetes\.$" $Z/b2$hc.txt \
-      && grep -q "^|Los archivos de los 16 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
-      ok "PAQUETES en el sistema recién instalado: LISTA dice los 16 paquetes del sistema (..., ssh, tailscal, sonido, tls, wifi y win32: con 16, base ya no cabe en la pantalla) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
+    if grep -q "^|  win32     1.2     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0\.8\.[0-9]   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|17 paquetes\.$" $Z/b2$hc.txt \
+      && grep -q "^|Los archivos de los 17 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
+      ok "PAQUETES en el sistema recién instalado: LISTA dice los 17 paquetes del sistema (..., ssh, tailscal, sonido, tls, wifi y win32: con 17, base ya no cabe en la pantalla; (OFICINA2) con pintura) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -n 12; fi
     # la oficina, en el disco instalado: el grupo «Oficina» del menú Inicio
     # (Facturas, con C:\\HISPA\\HVPRUN.BIN) y Mi equipo abriendo Cuentas de C:\\OFICINA
@@ -2444,7 +2453,7 @@ for hc in xhci ehci; do
       && cap $G/c2$hc.ppm negrita 72 22 84 30 Facturas texto 62 126 74 138 "No hay facturas emitidas."; then
       ok "la oficina en el disco instalado: el menú Inicio (con su saludo) tiene el grupo «Oficina», y Facturas se abre con C:\\HISPA\\HVPRUN.BIN (FACTURAS.HVP, de C:\\OFICINA)"
     else ko "la oficina no se abre desde el menú Inicio del disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; grep "lanzo" $S | sed 's/^/        /' | head -4; fi
-    if cap $G/c3$hc.ppm negrita 29 9 39 19 "C:\\OFICINA" texto 213 166 223 176 "CUENTAS.HV" texto 311 166 321 176 "DICCIO.DAT" \
+    if cap $G/c3$hc.ppm negrita 29 9 39 19 "C:\\OFICINA" texto 213 166 223 176 "CUENTAS.HV" texto 311 166 321 176 "DATOS.HVP" \
       && cap $G/c4$hc.ppm negrita 80 16 110 36 "Cuentas - (sin nombre)" && [ $sano = 0 ]; then
       ok "y Mi equipo entra en C:\\OFICINA y abre CUENTAS.HVP (Cuentas, con HVPRUN); el disco queda sano"
     else ko "Mi equipo no abre la oficina de C:\\OFICINA en el disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; sed 's/^/        /' $Z/fsck.txt | head -3; fi
@@ -4942,7 +4951,7 @@ if $AQUI/nucleo32/disco.sh $W/d.img 32 oficina > $W/disco.txt 2>&1; then
   # 1. el menú: su forma, Todos los programas, una carpeta larga (con la
   # flecha en diagonal: no se cierra), la rueda, el teclado y Mis documentos
   CAPTURAS=$G DISCO=$W/d.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh $W/SEMILLA.BIN \
-    ":pausa 3" ":clic 40 585" ":pausa 1" ":captura mn1" ":raton 100 502" ":pausa 1" ":captura mn2" ":raton 300 454" ":pausa 1" ":captura mn3" \
+    ":pausa 3" ":clic 40 585" ":pausa 1" ":captura mn1" ":raton 100 502" ":pausa 1" ":captura mn2" ":raton 300 428" ":pausa 1" ":captura mn3" \
     ":raton 560 300" ":monitor mouse_move 0 0 -4" ":pausa 0.5" ":monitor mouse_move 0 0 -4" ":pausa 1" ":captura mn4" ":tecla esc" ":tecla esc" ":tecla esc" ":pausa 1" ":captura mn5" \
     ":tecla meta_l" ":pausa 1" ":tecla t" ":tecla right" ":tecla a" ":tecla right" ":pausa 1" ":captura mn6" ":tecla s" ":tecla ret" ":pausa 2" \
     ":clic 40 585" ":clic 300 171" ":pausa 1" ":captura mn7" ":clic 500 171" ":pausa 2" ":captura mn8" > $W/m.sal 2>&1
@@ -4953,14 +4962,15 @@ if $AQUI/nucleo32/disco.sh $W/d.img 32 oficina > $W/disco.txt 2>&1; then
     negrita 256 159 264 167 "Mis documentos" negrita 256 192 264 200 "Mi equipo" negrita 256 226 264 234 "Configuración" negrita 256 256 264 264 "Administrador de" \
     negrita 256 296 264 304 "Programas instalados" negrita 256 330 264 338 "Actualizar" negrita 256 363 264 371 "Ayuda" negrita 256 393 264 401 "Ejecutar..." \
     negrita 68 533 76 541 "Cerrar sesión" negrita 210 533 222 541 Reiniciar negrita 320 533 328 541 "Apagar equipo"
-  miracap "«Todos los programas» (con la flecha encima) abre sus carpetas: Accesorios, Internet (el Navegador, por su programa), Juegos (por su «tipo»), Oficina y Sistema" mn2 \
-    texto 250 390 258 398 Accesorios texto 250 416 258 424 Internet texto 250 442 258 450 Juegos texto 250 468 258 476 Oficina texto 250 494 258 502 Sistema
+  # ((OFICINA2) con Pintura, también Multimedia: las demás, una más arriba)
+  miracap "«Todos los programas» (con la flecha encima) abre sus carpetas: Accesorios, Internet (el Navegador, por su programa), Juegos (por su «tipo»), Multimedia (Pintura), Oficina y Sistema" mn2 \
+    texto 250 364 258 372 Accesorios texto 250 390 258 398 Internet texto 250 416 258 424 Juegos texto 250 442 258 450 Multimedia texto 250 468 258 476 Oficina texto 250 494 258 502 Sistema
   miracap "una carpeta con más de los que caben a lo alto: el submenú no crece más que la pantalla y lleva sus flechas (el 01 arriba, el 24 no se ve)" mn3 \
     texto 486 30 494 40 "Juego 01" notexto 460 0 700 570 "Juego 24" negrita 320 533 328 541 "Apagar equipo"
   miracap "la flecha, en diagonal hasta él, no lo cierra; y la rueda lo baja: el 24, a la vista" mn4 texto 460 0 700 570 "Juego 24" notexto 460 0 700 570 "Juego 01"
   miracap "Esc cierra un submenú cada vez, y luego el menú" mn5 notexto 0 90 440 570 "Todos los programas"
   miracap "con el teclado: el logo, la «t» (Todos los programas), la flecha a la derecha, la «a» (Accesorios) y otra vez a la derecha: su submenú, la primera elegida" mn6 \
-    texto 486 390 494 398 "Bloc de notas" texto 486 468 494 476 "Saludo"
+    texto 486 364 494 372 "Bloc de notas" texto 486 442 494 450 "Saludo"
   mira "y la «s» e Intro lanzan «Saludo» (un acceso de un paquete)" "escritorio: lanzo .HOLA.BIN"
   miracap "«Mis documentos» abre su submenú con los .TXT de la raíz" mn7 texto 460 160 480 182 "LEEME.TXT" texto 460 0 700 570 "DOC8.TXT"
   mira "y uno de ellos se abre con el Bloc de notas" "escritorio: lanzo .BLOC.BIN"
@@ -5774,6 +5784,8 @@ if parte08 panel; then parte_panel; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el 
 if parte08 reproductor; then parte_reproductor; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Reproductor)"; fi     # (REPRODUCTOR)
 if parte08 juegos; then parte_juegos; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los juegos)"; fi     # (JUEGOS2)
 if parte08 pluma; then parte_pluma; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Pluma 2)"; fi   # (PLUMA32) la 41
+# ---------------------------------------- 40. (OFICINA2) la oficina 1.1 en HVPRUN
+if parte08 oficina; then parte_oficina; else echo "  (SOLO=${SOLO08:-$SOLO}: sin la oficina 1.1)"; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------- 35. (BLOC) el Bloc de notas 1.0

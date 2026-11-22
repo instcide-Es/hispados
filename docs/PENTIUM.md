@@ -2147,22 +2147,128 @@ En el **menú Inicio**, el grupo **«Oficina»** (debajo de los programas) los
 abre; **Mi equipo** abre con HVPRUN los `.HVP`, los documentos de Pluma
 (`.PLU`), las hojas de Cuentas (`.HOJ`) y las imágenes (`.BMP`, `.PCX`, `.GIF`,
 `.PNG`, `.JPG`, `.TGA`, `.ICO`, `.PPM`, con Mirador). En el disco van
-`\HVPRUN.BIN` y la carpeta `\OFICINA` (los cuatro `.HVP`, `TIPOS.DAT` y
-`DICCIO.DAT`): los pone `nucleo32/hvprun/hacer.sh`, y de ahí `usb.sh` (la
+`\HVPRUN.BIN` y la carpeta `\OFICINA` (los `.HVP`, `TIPOS.DAT`, sus otros
+tamaños y `DICCIO.DAT`): los pone `nucleo32/hvprun/hacer.sh`, y de ahí `usb.sh` (la
 memoria USB) y `disco.sh IMAGEN 16 oficina`. Facturas guarda sus datos al lado
-de su módulo (`\OFICINA\FACTURAS.DAT`).
+de su módulo (`\OFICINA\FACTURAS.DAT`), y Datos su base de siempre
+(`\OFICINA\DATOS.BDD`). Desde la oficina 1.1 van también Datos, el Lector,
+Publicaciones, Presentaciones y Pintura: el apartado siguiente.
 
 Los **emuladores** que corren con HVPRUN (Hispa-Snes e Hispa-Drive) están en
 `\JUEGOS` de la memoria USB y se abren desde Mi equipo: notan que están en
 HVPRUN porque `aj_leer AJ_TXT_VERSION` da 0 y entonces usan el reloj fino
 (`aj_leer 20`) y no tocan puertos (docs/HISPADRIVE.md).
 
-Lo que falta: imprimir; el sonido; las teclas con Alt (el núcleo aún no las
-da: los menús se abren con F10 o con el ratón) y F11-F12; la forma del cursor
-que pide el programa (la flecha es siempre la del sistema); que cada cuadro de
-diálogo sea una ventana de Hispa-Pentium aparte; abrir otros programas desde
-uno de Ventanas (`prog_abrir`); y probar los otros de la oficina (Datos, el
-Lector, Publicaciones y Presentaciones), que deberían ir igual.
+Lo que falta: imprimir; la forma del cursor que pide el programa (la flecha
+es siempre la del sistema); que cada cuadro de diálogo sea una ventana de
+Hispa-Pentium aparte; y abrir otros programas desde uno de Ventanas
+(`prog_abrir`). (El sonido llegó con hvprun 0.9; Alt+letra, la rueda y los
+otros cuatro de la oficina, con la 0.10: abajo.)
+
+### La oficina 1.1 entera (rama pentium-oficina, «(OFICINA2)»)
+
+| | |
+|---|---|
+| ![Todos los programas > Oficina, con los ocho](pentium/oficina/ofi1.png) | ![Datos: un socio con eñe, tildes y euro](pentium/oficina/ofd2.png) |
+| ![El Lector con un PDF de Mi equipo](pentium/oficina/ofl1.png) | ![Publicaciones maximizada](pentium/oficina/ofp2.png) |
+| ![Presentaciones: el título con los tipos de 48 puntos](pentium/oficina/ofr1.png) | ![Una ruta larga, con el título acortado](pentium/oficina/ofg2.png) |
+| ![«Editar con Pintura» de un PCX de 16 colores](pentium/oficina/ofn5.png) | ![Guardar en \HISPA: no se puede, y lo dice](pentium/oficina/ofr2.png) |
+
+Los cuatro que faltaban de la oficina de Hispa-386 y Pintura corren ya en
+HVPRUN, comprobados uno por uno en QEMU (abrir, escribir, guardar, cerrar y
+volver a abrir; la parte 40 de las pruebas):
+
+- **Datos** (`DATOS.HVP`, tipo Access): bases `.BDD` con sus tablas, la
+  rejilla y la ficha. Su base de siempre, `DATOS.BDD`, va al lado del programa
+  (`\OFICINA`, fuera de la zona protegida).
+- **El Lector** (`LECTOR.HVP`): los PDF, con la rueda, Av Pág, buscar, copiar
+  el texto de la página y «Guardar el texto de la página» (`.TXT`).
+- **Publicaciones** (`PUBLICA.HVP`, tipo Publisher, `.PUB`) y
+  **Presentaciones** (`PRESENTA.HVP`, tipo PowerPoint, `.PRE`), con los
+  tipos de letra de la oficina en todos sus tamaños: el paquete `oficina` no
+  llevaba `TIPOS12.DAT`, `TIPOS24.DAT` ni `TIPOS32.DAT`, y lo de 9, 18, 24, 36 y
+  48 puntos salía con la letra «Hispa» a escala; ahora van (unos 500 K más).
+- **Pintura** (`PINTURA.HVP`, el paquete aparte `pintura`, tipo Multimedia,
+  como el Mirador: es de imágenes, y así se puede quitar sin quitar la
+  oficina; se instala de serie, como en Hispa-386 y en Windows). Guarda en BMP;
+  **ahora lee también PCX** (un plano de 8 bits con la paleta del final o
+  grises, color verdadero en tres planos, blanco y negro, y 16 colores en
+  planos o en un plano de 2 o 4 bits; con RLE o sin comprimir), para
+  «Editar» los PCX: lo abierto se guarda al lado como `.BMP` (el PCX no se
+  pisa). En Hispa-386 sigue igual (su prueba, `tests/run_pintura_tests.sh`).
+
+**El menú Inicio** (`inicio.cas`, «(OFICINA2)»): en Todos los programas >
+Oficina, Datos, Lector de PDF, Publicaciones y Presentaciones (y Pintura en
+Multimedia) **si está su `.HVP`** (una oficina 1.0 no los enseña), fuera de
+los más usados de salida (salen cuando se usan; los cuatro de siempre no
+cambian de sitio). **Cada uno con su icono, el de su `.HVP`** (32 x 32 a 4
+bits, desde el octeto 64, con los 16 colores de Hispa Ventanas; se lee una vez;
+si no se puede, la hoja con su letra). **Con el Mirador de Pentium**
+(el paquete `mirador`: un acceso a `MIRADOR.BIN`), **el Mirador de la oficina
+no sale** (ni en el menú ni en «Abrir con...»): no dos Miradores; el `.HVP`
+sigue en el paquete para los sistemas sin el de Pentium.
+
+**Mi equipo** (`exoper.cas` y `uequipo.cas`, «(OFICINA2)»): `.BDD` con Datos,
+`.PUB` con Publicaciones, `.PRE` con Presentaciones y **`.PDF` con Hispa-PDF si
+está instalado** (`\HISPA\HISPAPDF.BIN`) **y, si no, con el Lector**. Un
+`ASOCIA.TXT` de antes (sin esas clases) usa las de siempre para lo que no
+dice; y si el `.HVP` de una clase no está (una oficina de antes), es como si no
+hubiera nada («Abrir con...»). En el menú del botón secundario de un `.BMP` o
+un `.PCX`, **«Editar con Pintura»** (si está; «Abrir» sigue siendo el Mirador,
+el nativo si está). En «Abrir con...», los de la oficina 1.1 que estén.
+
+**HVPRUN 0.10** (`nucleo32/hvprun/poficina.inc`, y dos líneas en
+`ppantalla.inc` y `hvprun.asm`), lo que les faltaba:
+
+- **La rueda del ratón**: el suceso 13 de Hispa-Pentium no lo atendía; ahora
+  llega a Ventanas (`ges_rueda`, `WM_MOUSEWHEEL` a la ventana de debajo).
+- **Alt+letra** abre el menú que la tiene marcada: Hispa-Pentium da
+  `TECLA_ALT` + la letra (0x180...) y HVPRUN lo pasaba como un código que
+  Ventanas no conocía; ahora llega como en DOS (AL = 0, AH = el código de la
+  tecla).
+- **Los títulos largos**: el núcleo no acepta uno de 64 letras o más
+  (`MAX_TÍTULO`): con un documento de una ruta larga el título no cambiaba y,
+  si el primero ya era largo, **la ventana ni se hacía**. Ahora se acorta:
+  «Presentaciones - ...\ASOCIACI\FIESTAS\2026\PROGRAMA\FIESTA.PRE» (el nombre
+  del programa, «...» y el final de la ruta, desde una «\»).
+- **El programa, en la unidad del sistema**: Mi equipo abre un documento de
+  otra unidad (una memoria USB, `D:\CARTA.PLU`) con la unidad de trabajo en
+  la suya, y `\OFICINA\PLUMA.HVP` se buscaba en `D:`. Si no está donde se dice
+  (y se ha dado sin letra), se busca en la del sistema.
+- **Dónde se trabaja** (lo que enseñan Abrir y Guardar como, y donde va lo
+  que se guarda sin ruta): con un documento, su carpeta; sin él, **los
+  documentos del usuario**: con usuarios (la llamada 200 de la rama
+  `usuarios`: la ficha que es la suya), `\USUARIOS\<SU CARPETA>\DOCUMENT`; sin
+  ellos, `\DOCUMENT` si está; si no, la de siempre (la raíz). Nunca `\HISPA`:
+  ahí el núcleo no deja escribir a ningún programa de la oficina («acceso
+  denegado», y el programa lo dice: «No se ha podido guardar...»).
+
+**En los programas** («(OFICINA2)», sin cambiar nada en Hispa-386 más que
+esto): tras un «Guardar como» que no se puede (en `\HISPA`, o un disco
+lleno), Pluma, Cuentas, Publicaciones, Presentaciones y Pintura se quedaban
+con ese nombre, y Ctrl+G volvía a fallar sin preguntar; ahora vuelven al
+nombre de antes y Guardar pregunta otra vez dónde (`programas/pluma.asm`,
+`cuentas/archivo.inc`, `comun/lamina_ed.inc`, `pintura.asm`). Sus pruebas de
+Hispa-386 siguen pasando (`tests/run_pintura_tests.sh`, `run_pluma_tests.sh`,
+`run_cuentas_tests.sh`, `run_publica_tests.sh`, `run_presenta_tests.sh`).
+
+Comprobado también: el teclado español (tildes, ñ y el euro con Alt Gr+E),
+el portapapeles con el Bloc de notas (Ctrl+C en Datos o en el Lector, Ctrl+V
+en el Bloc), maximizar (Publicaciones se recoloca), y una ruta de 57 letras
+(`C:\USUARIOS\CARLOSSA\DOCUMENT\ASOCIACI\FIESTAS\2026\PROGRAMA`): abrir de
+ahí, guardar y «Guardar como» a esa misma carpeta.
+
+**Los paquetes**: `oficina` 1.1 (los ocho `.HVP` con `TIPOS12/24/32.DAT`;
+necesita hvprun >= 0.10), `pintura` 1.0 (`\OFICINA\PINTURA.HVP`, del sistema,
+tipo multimedia) y `hvprun` 0.10. El menú y las clases nuevas son del núcleo
+(`inicio.cas`) y de Mi equipo (`exoper.cas`, `uequipo.cas`): llegan con la
+base y el paquete `equipo` que salgan con esta rama; sin ellos, los programas
+nuevos se abren igual desde Mi equipo (dos clics en su `.HVP`).
+
+**Probarlo**: `SOLO=oficina ./pruebas.sh` (la parte 40, `castel/pruebas_oficina.sh`;
+con `OFICINA_CAPTURAS=carpeta`, deja sus capturas en PNG). Las muestras se
+hacen ahí: `nucleo32/hvprun/muestras/haz_imagenes.py` (BMP y tres PCX) y
+`nucleo32/pdf/pruebas/haz_pdf.py` (el PDF).
 
 ## 11. En un PC de verdad: GRUB, la memoria USB y el USB
 
@@ -3013,7 +3119,7 @@ tipo=navega internet
 | `oficina` | Oficina | bloc, oficina, pdf |
 | `internet` | Internet y red | red, tls, navega, ssh, tailscal, wifi |
 | `juegos` | Juegos y emuladores | (los emuladores, cuando lleguen) |
-| `multimedia` | Multimedia | sonido, mirador |
+| `multimedia` | Multimedia | sonido, mirador, pintura |
 | `seguridad` | Seguridad | escudo |
 | `windows` | Programas de Windows | win32 |
 | `herramientas` | Herramientas | consola, accesori, comprim |
@@ -3185,8 +3291,9 @@ python3 tools/hpq.py sistema SALIDA CARPETA...   # los paquetes del sistema (lo 
 | `equipo` | 0.8.3 | `EQUIPO.BIN` (Mi equipo) y `DISPOSIT.BIN` (el Administrador de dispositivos) | base >= 0.8.3 |
 | `ejemplos` | 0.8.2 | `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN`, `MUESTRA.BIN` (los controles de las ventanas) | base >= 0.8.2 |
 | `paquetes` | 1.2 | `PAQUETES.BIN`, `ACTUALIZ.BIN` (su ventana), `PROGRAMA.BIN` (la ventana con pestañas) | base >= 0.8.2, nucleo >= 0.7 |
-| `hvprun` | 0.7 | `HVPRUN.BIN` | base >= 0.7 |
-| `oficina` | 1.0 | `\OFICINA\`: `FACTURAS.HVP`, `PLUMA.HVP`, `CUENTAS.HVP`, `MIRADOR.HVP`, `TIPOS.DAT`, `DICCIO.DAT` | hvprun >= 0.7 |
+| `hvprun` | 0.10 | `HVPRUN.BIN` | base >= 0.7 |
+| `oficina` | 1.1 | `\OFICINA\`: `FACTURAS.HVP`, `PLUMA.HVP`, `CUENTAS.HVP`, `MIRADOR.HVP`, `DATOS.HVP`, `LECTOR.HVP`, `PUBLICA.HVP`, `PRESENTA.HVP`, `TIPOS.DAT`, `TIPOS12.DAT`, `TIPOS24.DAT`, `TIPOS32.DAT`, `DICCIO.DAT` | hvprun >= 0.10 |
+| `pintura` | 1.0 | `\OFICINA\PINTURA.HVP` | hvprun >= 0.10 |
 
 Y uno que no va con el sistema (`hpq.py opcionales`, la lista `OPCIONALES`: se
 instala desde «Programas y actualizaciones»): `navega` 0.1, **el Navegador**
@@ -5940,8 +6047,8 @@ pero no es su letra), JPX/JBIG2/CCITT al pintar, los mosaicos y los
 sombreados de malla, la escritura de derecha a izquierda y vertical en el
 texto, leer las páginas por columnas, el orden de los marcadores al unir
 varios (solo van los del primero), nombres largos al escribir (el núcleo,
-8+3), y que el Lector de la oficina de Hispa-386 vaya en el paquete `oficina`
-de Pentium (hoy no va: los .PDF se abren con Hispa-PDF).
+8+3). (El Lector de la oficina de Hispa-386 va ya en el paquete `oficina` 1.1:
+los .PDF se abren con Hispa-PDF si está y, si no, con el Lector.)
 ## 14 duodecies. Comprimidos y el Mirador (rama pentium-zipvisor)
 
 *21/11/2026, la rama `pentium-zipvisor`: dos programas de la lista de metas

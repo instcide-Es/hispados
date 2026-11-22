@@ -578,8 +578,76 @@ módulo Inicio
             caso 0: devolver "Facturas"
             caso 1: devolver "Pluma"
             caso 2: devolver "Cuentas"
+            caso 4: devolver "Datos"                    ; (OFICINA2) los de la oficina 1.1
+            caso 5: devolver "Lector de PDF"
+            caso 6: devolver "Publicaciones"
+            caso 7: devolver "Presentaciones"
+            caso 8: devolver "Pintura"                  ; (OFICINA2) el paquete «pintura»
         fin
         devolver "Mirador"
+    fin
+
+    ; (OFICINA2) su módulo (los cuatro primeros los lanza el escritorio por
+    ; su número: AM_OFICINA; los demás, por su ruta: P_RUTA)
+    constante OF_PROGRAMAS = 9
+    función hvp_de_oficina(i: nat32): puntero a byte
+        según i
+            caso 0: devolver "\\OFICINA\\FACTURAS.HVP"
+            caso 1: devolver "\\OFICINA\\PLUMA.HVP"
+            caso 2: devolver "\\OFICINA\\CUENTAS.HVP"
+            caso 4: devolver "\\OFICINA\\DATOS.HVP"
+            caso 5: devolver "\\OFICINA\\LECTOR.HVP"
+            caso 6: devolver "\\OFICINA\\PUBLICA.HVP"
+            caso 7: devolver "\\OFICINA\\PRESENTA.HVP"
+            caso 8: devolver "\\OFICINA\\PINTURA.HVP"
+        fin
+        devolver "\\OFICINA\\MIRADOR.HVP"
+    fin
+
+    ; (OFICINA2) el icono de un programa de la oficina: el suyo, el que trae
+    ; su .HVP (32 x 32 a 4 bits, desde el octeto 64: ventanas/hvp.inc; el
+    ; color 3 es el transparente) con los 16 colores de Hispa Ventanas. Se lee
+    ; una vez; nulo si no se puede (entonces, la hoja con su letra)
+    variable icono_of: arreglo [OF_PROGRAMAS] de puntero a nat32
+    variable paleta_of: arreglo [16] de nat32 = (0x1A1410, 0x3B2A20, 0x1F4E5A, 0x2C6675, 0xC2542D, 0xE07B4F, 0xC9B79C, 0x8F7F68,
+        0xFBF3E0, 0xFFFFFF, 0xE8B33A, 0x6B8E3D, 0x2F4B8F, 0x9E2B2B, 0x7FC6BF, 0xD8D2C4)
+    función icono_de_oficina(i: nat32): puntero a nat32
+        variable m, n, k, c: nat32
+        variable cab: arreglo [576] de byte
+        variable p: puntero a nat32
+        si i >= OF_PROGRAMAS entonces devolver nulo fin
+        si icono_of[i] <> nulo entonces devolver icono_of[i] fin
+        si del_sistema = 0xFFFFFFFF o unidad_en_memoria() entonces devolver nulo fin
+        m := abrir_archivo(del_sistema, hvp_de_oficina(i), PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver nulo fin
+        n := leer_archivo(m, dirección(cab[0]), 576)
+        cerrar_archivo(m)
+        si n <> 576 o cab[0] <> 'H' o cab[1] <> 'V' o cab[2] <> 'P' entonces devolver nulo fin
+        p := puntero(reservar(LADO_ICONO * LADO_ICONO * 4))
+        si p = nulo entonces devolver nulo fin
+        para k desde 0 hasta 1023 hacer
+            c := nat32(cab[64 + k div 2])
+            si k yb 1 = 1 entonces c := c >> 4 fin
+            c := c yb 15
+            si c = 3 entonces p[k] := 0 sino p[k] := 0xFF000000 ob paleta_of[c] fin
+        fin
+        icono_of[i] := p
+        devolver p
+    fin
+
+    ; (OFICINA2) ¿está el Mirador de Pentium (el paquete «mirador»: su acceso,
+    ; MIRADOR.BIN)? Entonces el de la oficina (MIRADOR.HVP) no sale: no dos
+    función hay_mirador_nativo(): bool
+        variable i: nat32
+        variable a: arreglo [80] de byte
+        i := 0
+        mientras i < n_accesos hacer
+            copiar_hasta(a, programa_de(i), 80)
+            a_mayúsculas(a)
+            si buscar(a, "MIRADOR.BIN") <> nulo entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
     fin
 
     función hace_lista()
@@ -605,16 +673,37 @@ módulo Inicio
             fin
             i := i + 1
         fin
-        ; la oficina de Hispa-386 (HVPRUN.BIN)
+        ; la oficina de Hispa-386 (HVPRUN.BIN). (OFICINA2) Con el icono de cada
+        ; uno; sin el Mirador de la oficina si está el de Pentium; y los de la
+        ; oficina 1.1 (Datos, el Lector, Publicaciones y Presentaciones) y
+        ; Pintura, si están, en Todos los programas (no entre los más usados de
+        ; salida: salen cuando se usan)
         i := 0
-        mientras i < 4 hacer
-            ; (PLUMA32) con Pluma 2 (el paquete «pluma»: \HISPA\PLUMA.BIN, con su
-            ; acceso en Oficina), el Pluma de Hispa-386 no sale aquí
-            si i <> 1 o no existe("\\PLUMA.BIN") entonces
-                k := nuevo(de_oficina(i), nulo, P_OFICINA, i, C_OFICINA, IC_DOCUMENTO, rango)
-                si k >= 0 entonces progs[k].letra := nat32(de_oficina(i)[0]) fin
+        mientras i < OF_PROGRAMAS hacer
+            si i < 4 entonces
+                ; (PLUMA32) con Pluma 2 (el paquete «pluma»: \HISPA\PLUMA.BIN, con su
+                ; acceso en Oficina), el Pluma de Hispa-386 no sale aquí
+                si (i <> 3 o no hay_mirador_nativo()) y (i <> 1 o no existe("\\PLUMA.BIN")) entonces
+                    k := nuevo(de_oficina(i), nulo, P_OFICINA, i, C_OFICINA, IC_DOCUMENTO, rango)
+                    rango := rango + 1
+                sino
+                    k := -1
+                fin
+            sino si existe(hvp_de_oficina(i)) entonces
+                si i = 8 entonces k := nuevo(de_oficina(i), nulo, P_RUTA, 0, C_MULTIMEDIA, IC_DOCUMENTO, SIN_RANGO)
+                sino k := nuevo(de_oficina(i), nulo, P_RUTA, 0, C_OFICINA, IC_DOCUMENTO, SIN_RANGO) fin
+                si k >= 0 entonces
+                    copiar(progs[k].programa, "\\HVPRUN.BIN")
+                    copiar(progs[k].argumentos, hvp_de_oficina(i))
+                fin
+            sino
+                k := -1
             fin
-            rango := rango + 1
+            si k >= 0 entonces
+                progs[k].letra := nat32(de_oficina(i)[0])
+                progs[k].icp := icono_de_oficina(i)
+                si progs[k].icp <> nulo entonces progs[k].icono := 0 fin
+            fin
             i := i + 1
         fin
         ; los programas de Windows de ejemplo (el paquete win32)

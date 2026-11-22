@@ -3682,6 +3682,7 @@ pt_txt      resb 20
 edt_buf     resb CEL_MAX + 4        ; lo que se escribe
 nombre      resb 80                 ; el nombre del archivo
 nom_tmp     resb 80
+nom_ant     resb 80                 ; (OFICINA2) el nombre de antes de «Guardar como»
 titulo      resb 120
 BARRA_BSS
 

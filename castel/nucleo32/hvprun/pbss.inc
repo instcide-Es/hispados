@@ -32,5 +32,7 @@ dos_dta     resb 128                ; la zona de transferencia de Ventanas
 p_linea     resb 256
 p_aux       resb 128
 p_aux2      resb 128
+p_ficha     resb 64                 ; (OFICINA2) la ficha de un usuario (llamada 200)
+p_titulo    resb 68                 ; (OFICINA2) el título, acortado
         alignb 16
 pres_buf    resd PRES_MAX           ; una tira de la superficie, en 32 bits
