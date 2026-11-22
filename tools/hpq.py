@@ -124,7 +124,7 @@ TIPO_POR_NOMBRE = {
     'base': 'sistema', 'paquetes': 'sistema', 'equipo': 'sistema', 'hvprun': 'sistema',
     'red': 'internet', 'tls': 'internet', 'navega': 'internet', 'ssh': 'internet',
     'tailscal': 'internet', 'wifi': 'internet', 'correo': 'internet',  # (CORREO)
-    'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina', 'pluma': 'oficina',   # (PLUMA32: pluma)
+    'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina', 'pluma': 'oficina', 'agenda': 'oficina',   # (PLUMA32: pluma) (AGENDA)
     'consola': 'herramientas', 'accesori': 'herramientas', 'comprim': 'herramientas',
     'ejemplos': 'desarrollo',
     'win32': 'windows',
@@ -244,7 +244,9 @@ SISTEMA = [
     # (ACCESORIOS, 21/11/2026) la Calculadora, el Reloj y el Mapa de caracteres,
     # con sus accesos en Accesorios (tipo herramientas: con el hpq.py de la
     # 0.8.5, «--tipo herramientas»; su .MNU dice «tipo=Accesorios»)
-    ('accesori', '1.0', 'Accesorios: la Calculadora (científica y de oficina: euros, IVA y cinta), el Reloj (calendario, alarma, cronómetro y cuenta atrás) y el Mapa de caracteres', 'base >= 0.8.4', [
+    # (AGENDA) la 1.1: el Reloj, con los festivos de festivos.cas (los de la
+    # comunidad y los locales) y dos clics en un día abren la Agenda
+    ('accesori', '1.1', 'Accesorios: la Calculadora (científica y de oficina: euros, IVA y cinta), el Reloj (calendario con festivos, alarma, cronómetro y cuenta atrás) y el Mapa de caracteres', 'base >= 0.8.4', [
         ('CALC.BIN', r'\HISPA\CALC.BIN'), ('RELOJ.BIN', r'\HISPA\RELOJ.BIN'), ('CARACTER.BIN', r'\HISPA\CARACTER.BIN'),
         ('CALC.MNU', r'\HISPA\MENU\CALC.MNU'), ('RELOJ.MNU', r'\HISPA\MENU\RELOJ.MNU'), ('CARACTER.MNU', r'\HISPA\MENU\CARACTER.MNU'),
         ('CALC.ICP', r'\HISPA\MENU\CALC.ICP'), ('RELOJ.ICP', r'\HISPA\MENU\RELOJ.ICP'), ('CARACT.ICP', r'\HISPA\MENU\CARACT.ICP')]),
@@ -506,6 +508,11 @@ OPCIONALES = [
         ('BIN/COMPRIM.BIN', r'\HISPA\COMPRIM.BIN'), ('BIN/ZIP.BIN', r'\HISPA\ZIP.BIN'), ('BIN/UNZIP.BIN', r'\HISPA\UNZIP.BIN'),
         ('COMPRIM.TXT', r'\HISPA\COMPRIM.TXT'), ('COMPRIM.MNU', r'\HISPA\MENU\COMPRIM.MNU'), ('COMPRIM.ICP', r'\HISPA\MENU\COMPRIM.ICP')]),
     # (MIRADOR) el Mirador, el visor de imágenes (castel/nucleo32/mirador/paquete.sh; tipo «multimedia»)
+    # (AGENDA) la Agenda (castel/nucleo32/agenda/paquete.sh; tipo «oficina»)
+    ('agenda', '1.0', 'Agenda: citas, tareas y cumpleaños con avisos (aunque esté cerrada), festivos de España y de cada comunidad, repeticiones e importar y exportar .ICS',
+     'base >= 0.8.4', [
+        ('AGENDA.BIN', r'\HISPA\AGENDA.BIN'), ('AGENDA/LEEME.TXT', r'\HISPA\AGENDA\LEEME.TXT'),
+        ('MENU/AGENDA.MNU', r'\HISPA\MENU\AGENDA.MNU'), ('MENU/AGENDA.ICP', r'\HISPA\MENU\AGENDA.ICP')]),
     ('mirador', '1.0', 'El Mirador: ver imágenes (BMP, PNG, JPG, GIF animados, ICO...), girar, diapositivas, pantalla completa y fondo de escritorio', 'base >= 0.8.6', [
         ('BIN/MIRADOR.BIN', r'\HISPA\MIRADOR.BIN'), ('MIRADOR.TXT', r'\HISPA\MIRADOR.TXT'),
         ('MIRADOR.MNU', r'\HISPA\MENU\MIRADOR.MNU'), ('MIRADOR.ICP', r'\HISPA\MENU\MIRADOR.ICP')]),
