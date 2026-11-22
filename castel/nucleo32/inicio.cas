@@ -1244,6 +1244,17 @@ módulo Inicio
                 abre_todos(n)
                 si de_teclado entonces entra(0) fin
             caso O_DOCUMENTOS:
+                si n_documentos = 0 y carpeta_docs[0] <> 0 entonces
+                    ; (USUARIOS) sin documentos, con usuarios: el explorador, en los suyos
+                    cierra_inicio()
+                    pedido_acción := P_RUTA
+                    copiar(pedido_programa, "\\EQUIPO.BIN")
+                    copiar(pedido_argumentos, "/ABRIR C:")
+                    si del_sistema < MAX_UNIDADES entonces pedido_argumentos[7] := byte(unidades[del_sistema].letra) fin
+                    concatenar(pedido_argumentos, carpeta_docs)
+                    hay_pedido := cierto
+                    devolver
+                fin
                 si n_documentos = 0 entonces
                     ; sin documentos: el explorador, en la raíz
                     lanza_prog(nat32(p_equipo))
