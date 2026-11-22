@@ -197,6 +197,27 @@ G
   echo "por UEFI, todavia no. Sin Legacy/CSM, siga usando la memoria USB."
   sleep 5'
     cat <<'G'
+menuentry "Diagnostico (UEFI): la pantalla, la memoria, el PCI y ACPI (para hacer una foto)" {
+  set pager=1
+  echo "== Hispa-Pentium: diagnostico del arranque por UEFI =="
+  echo "-- la pantalla (GOP): los modos y el de ahora (su direccion) --"
+  videoinfo
+  echo "-- el procesador (cpuid -l: 64 bits) --"
+  if cpuid -l; then echo "64 bits: si"; else echo "64 bits: no"; fi
+  echo "-- las tablas de ACPI (HPET: el reloj que sustituye al 8254) --"
+  lsacpi
+  echo "-- la tabla del sistema de EFI --"
+  lsefisystab
+  echo "-- el PCI (clase 0300: la pantalla; 0C03: USB; 0108: NVMe) --"
+  lspci
+  echo "-- el mapa de memoria --"
+  lsmmap
+  echo
+  echo "Haga una foto de cada pantalla. Pulse Intro para volver."
+  read nada
+}
+G
+    cat <<'G'
 menuentry "Volver a la configuracion del firmware (UEFI)" {
   fwsetup
 }

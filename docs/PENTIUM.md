@@ -2876,6 +2876,32 @@ RSDP). GRUB sale de los servicios de arranque del firmware antes de entrar.
   la línea del cargador (que dice la entrada del menú elegida). También en
   Acerca de («Arrancado por UEFI...»).
 
+- **La pantalla negra de los PC de ahora** (ThinkPad E14 con i7-1355U,
+  Raptor Lake; otro con i3-1115G4, Tiger Lake): GRUB sí, el núcleo nada. Las
+  dos causas que se han arreglado (en QEMU no se pueden dar las dos de verdad):
+  1. **El GOP por encima de los 4 GB** (0x4000000000...): `pantalla_del_cargador`
+     la rechazaba, y sin pantalla ni la consola de texto se pintaba. Ahora
+     (`Video.prepara_pantalla_alta`, desde `textouefi.cas`) las cuatro entradas
+     del directorio de la zona de los gráficos pasan a ser **páginas de 4 MB con
+     PSE-36** (los bits 32-39 de la dirección en los 13-20 de la entrada; CR4.PSE),
+     sin PAE; `Video.vista()` da el desplazamiento dentro de la página de 4 MB.
+     Probado con la RAM de por encima de 4 GB (`pruebapse36` en la línea, QEMU
+     `-m 5G`: lo escrito llega a 0x100001234).
+  2. **Sin 8254** (el firmware lo para con el CSM apagado): al encender las
+     interrupciones, `relojhpet.cas` mira si llegan los tics; si no, el **HPET**
+     (tabla «HPET» de ACPI) en modo de sustitución (su temporizador 0 por la
+     IRQ 0, 100 por segundo); y si no hay HPET, el **temporizador del APIC
+     local** (xAPIC o x2APIC), medido contra el reloj de ACPI (PM timer de la
+     FADT), con el vector de la IRQ 0 y su «fin de interrupción» en el reloj
+     de `tareas.cas` (`eoi_apic`). Probado en QEMU con `pit=off` y con
+     `pit=off,hpet=off`.
+  Y para saber dónde se queda: la consola de texto se pinta ya en cada paso
+  del arranque (`pinta_ahora()`, también sin tic), y el menú de UEFI tiene
+  **«Diagnóstico (UEFI)»**: `videoinfo`, `cpuid -l`, `lsacpi` (¿hay HPET?),
+  `lsefisystab`, `lspci` y `lsmmap`, con paginador, para hacer fotos.
+- **ia32**: con `grub-efi-ia32-bin` ya en el VPS, `usb.sh` y `cd.sh` ponen
+  `BOOTIA32.EFI` solos y la parte 48 arranca la memoria con el OVMF de 32 bits.
+
 **Lo que no se ha hecho:**
 
 - **El disco instalado arranca solo por la BIOS.** INSTALAR se puede lanzar
@@ -2884,10 +2910,6 @@ RSDP). GRUB sale de los servicios de arranque del firmware antes de entrar.
   lo avisa antes. Para UEFI haría falta una partición EFI (o `\EFI\BOOT` en la
   FAT32), el GRUB EFI que busque `\HISPA\GRUB.CFG` y un `GRUB.CFG` con las dos
   maneras, y tocar lo que lo cambia (el asistente, PAQUETES, ACTUALIZ).
-- **ia32**: hecho igual que el de 64 bits (el mismo `grub.cfg`, `BOOTIA32.EFI`
-  con `grub-mkimage -O i386-efi`), pero en el VPS no está `grub-efi-ia32-bin`:
-  sin él no se pone ni se prueba (la parte 48 lo dice y lo salta). Con el
-  paquete puesto sale solo.
 - No firmado (sin shim): hay que apagar el Secure Boot.
 
 **Probado** (parte 48, `SOLO=uefi`, `pruebas_uefi.sh`, 77 bien): con OVMF de 64 bits

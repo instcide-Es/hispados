@@ -72,11 +72,37 @@ módulo Textouefi
         fin
     fin
 
-    función vigila(n: nat32)
+    ; pinta lo que ha cambiado (y, con «todo», todo)
+    función pinta_cambios(todo: bool)
         variable t: puntero a nat16
         variable i, c: nat32
-        variable enc, todo: bool
+        variable enc: bool
         t := puntero(TEXTO)
+        c := cursor_texto()
+        enc := (tics div 25) yb 1 = 0
+        para i desde 0 hasta CELDAS - 1 hacer
+            si t[i] <> visto[i] o todo entonces
+                visto[i] := t[i]
+                pinta_celda(i, t[i], enc y i = c)
+            fin
+        fin
+        si c <> cursor_visto o enc <> cursor_encendido entonces
+            si cursor_visto < CELDAS entonces pinta_celda(cursor_visto, visto[cursor_visto], falso) fin
+            si c < CELDAS entonces pinta_celda(c, visto[c], enc) fin
+            cursor_visto := c
+            cursor_encendido := enc
+        fin
+    fin
+
+    ; pinta ya, sin esperar a la tarea (semilla.cas, en cada paso del
+    ; arranque: si el núcleo se queda parado, en la pantalla se ve dónde;
+    ; también sin tic, que es cuando la tarea no corre)
+    público función pinta_ahora()
+        si texto_en_marcha y no hay_pantalla entonces pinta_cambios(falso) fin
+    fin
+
+    función vigila(n: nat32)
+        variable todo: bool
         todo := falso
         mientras cierto hacer
             dormir(4)
@@ -88,21 +114,8 @@ módulo Textouefi
                     todo := cierto
                     era_gráfico := falso
                 fin
-                c := cursor_texto()
-                enc := (tics div 25) yb 1 = 0
-                para i desde 0 hasta CELDAS - 1 hacer
-                    si t[i] <> visto[i] o todo entonces
-                        visto[i] := t[i]
-                        pinta_celda(i, t[i], enc y i = c)
-                    fin
-                fin
+                pinta_cambios(todo)
                 todo := falso
-                si c <> cursor_visto o enc <> cursor_encendido entonces
-                    si cursor_visto < CELDAS entonces pinta_celda(cursor_visto, visto[cursor_visto], falso) fin
-                    si c < CELDAS entonces pinta_celda(c, visto[c], enc) fin
-                    cursor_visto := c
-                    cursor_encendido := enc
-                fin
             fin
         fin
     fin
@@ -115,6 +128,7 @@ módulo Textouefi
         variable q: puntero a nat16
         variable e2, j, k: nat32
         si no arrancado_por_uefi() entonces devolver fin
+        prepara_pantalla_alta()                 ; (si está por encima de 4 GB)
         si no pantalla_del_cargador(t_base, t_fila, t_an, t_al, t_bits) entonces
             escribir("uefi: el cargador no ha dejado pantalla: la consola de texto solo sale por el puerto serie\n")
             devolver
@@ -130,7 +144,7 @@ módulo Textouefi
         marco_texto := reservar_marco()
         si marco_texto = 0 entonces devolver fin
         rgb := pantalla_al_revés()
-        lienzo_t := GRÁFICOS_INICIO + (t_base yb 0xFFF)
+        lienzo_t := vista(t_base)
         escala := t_an div 640
         e2 := t_al div 400
         si e2 < escala entonces escala := e2 fin

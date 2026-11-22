@@ -30,7 +30,7 @@ for _p in x86_64-efi i386-efi; do
 done
 EFI_PLAT=${EFI_PLAT# }
 [ -n "${SIN_UEFI:-}" ] && EFI_PLAT=      # (para las pruebas: la imagen de antes, solo BIOS)
-EFI_MODULOS="normal configfile part_msdos part_gpt fat iso9660 multiboot2 efi_gop efi_uga video_fb videoinfo read echo test loadenv search search_fs_uuid sleep ls cat reboot halt efifwsetup"
+EFI_MODULOS="normal configfile part_msdos part_gpt fat iso9660 multiboot2 efi_gop efi_uga video_fb videoinfo read echo test loadenv search search_fs_uuid sleep ls cat reboot halt efifwsetup lsmmap lspci lsacpi lsefisystab cpuid"
 
 haz_efi() {
   local d=$1/EFI/BOOT p n

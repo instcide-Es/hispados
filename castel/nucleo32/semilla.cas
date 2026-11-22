@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32, Textouefi     ; (UEFI) Textouefi
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32, Textouefi, Relojhpet, Video     ; (UEFI) Textouefi, Relojhpet, Video
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -830,6 +830,7 @@ módulo Semilla
 
     función principal(): byte
         variable malo: puntero a nat32
+        variable pse: puntero a nat32           ; (UEFI) pruebapse36
         prepara_gdt()
         prepara_excepciones()
         prepara_pic()
@@ -852,9 +853,22 @@ módulo Semilla
         prepara_usuario()
         prepara_escritorio()
         permitir_interrupciones()
+        pinta_ahora()                           ; (UEFI) lo dicho hasta aquí, ya en la pantalla
+        mira_reloj()                            ; (UEFI) ¿cuenta el 8254? Si no, el HPET (relojhpet.cas)
+        pinta_ahora()
         imprimir3("memoria: %u MB, %u marcos libres; paginación activa; %u programas de usuario.\n",
                   (límite + 0xFFFFF) div 0x100000, marcos_libres(), módulos())
         busca_discos()
+        pinta_ahora()                           ; (UEFI)
+        ; (UEFI, para las pruebas) «pruebapse36»: lo de poner a la vista la
+        ; pantalla de por encima de 4 GB, con la RAM de 4 GB (QEMU -m 5G):
+        ; se escribe CAFEBABE en 0x100001234 y la prueba lo mira desde fuera
+        si buscar(línea_del_cargador(), "pruebapse36") <> nulo y no arrancado_por_uefi() entonces
+            mapea_alta(1, 0)
+            pse := puntero(GRÁFICOS_INICIO + 0x1234)
+            valor(pse) := 0xCAFEBABE
+            imprimir1("pse36: escrito 0x%08X en 0x100001234 (por una página de 4 MB)\n", valor(pse))
+        fin
         ; si el cargador lo pide («ordenes» en su línea), el intérprete de
         ; órdenes del anillo 3, ya
         ; un sistema instalado en el disco: sus ajustes (\\HISPA\\HISPA.INI: el

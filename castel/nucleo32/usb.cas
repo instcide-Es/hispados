@@ -86,7 +86,7 @@ módulo Usb
         p[7] := n >> 8
         r := T_FALLO
         intentos := 0
-        si n <> 0 entonces llenar(puntero(página + DATOS), 8, 0) fin      ; (UEFI) para ver luego lo que llega
+        si n <> 0 y pide yb 0x80 <> 0 entonces llenar(puntero(página + DATOS), 8, 0) fin      ; (UEFI) para ver luego lo que llega (solo si entra: si sale, son los datos)
         mientras r = T_FALLO y intentos < 3 hacer
             si a.hc_clase = HC_XHCI entonces
                 r := Xhci.control(a.hc, a, página, página + DATOS, n, pide yb 0x80 <> 0)

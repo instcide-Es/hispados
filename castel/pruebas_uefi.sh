@@ -89,7 +89,7 @@ mdir -b -i $V/usb.img@@1M ::EFI/BOOT > $V/efi.txt 2>&1
 mcopy -n -i $V/usb.img@@1M ::boot/grub/grub.cfg $V/grub.cfg 2> /dev/null
 if grep -q 'BOOTX64.EFI' $V/efi.txt && mdir -i $V/usb.img@@1M ::LEEME-UEFI.TXT > /dev/null 2>&1 && mdir -i $V/usb.img@@1M ::boot/grub/i386-pc/normal.mod > /dev/null 2>&1 \
   && grep -q '^if \[ "$grub_platform" = efi \]; then$' $V/grub.cfg && grep -q '^  multiboot2 /ESCRIT8.BIN escritorio' $V/grub.cfg && grep -q '^  module2 /ORDENES.BIN ORDENES.BIN$' $V/grub.cfg \
-  && grep -q '^  multiboot /ESCRIT8.BIN escritorio' $V/grub.cfg; then
+  && grep -q '^  multiboot /ESCRIT8.BIN escritorio' $V/grub.cfg && grep -q '^menuentry "Diagnostico (UEFI)' $V/grub.cfg && grep -q '^  lsacpi$' $V/grub.cfg; then
   ok "en la misma partición FAT (tabla del MBR): \\EFI\\BOOT\\BOOTX64.EFI$(grep -q BOOTIA32 $V/efi.txt && echo ' y BOOTIA32.EFI'), LEEME-UEFI.TXT, el GRUB de la BIOS; y el menú, con multiboot2/module2 por UEFI y multiboot por la BIOS"
 else ko "a la memoria le falta algo de UEFI:"; cat $V/efi.txt | sed 's/^/        /' | head -5; fi
 if grep -q 'Secure Boot' $AQUI/nucleo32/uefi/LEEME-UEFI.TXT && grep -q 'Disabled' $AQUI/nucleo32/uefi/LEEME-UEFI.TXT && grep -q 'volver a encender' $AQUI/nucleo32/uefi/LEEME-UEFI.TXT; then
@@ -148,6 +148,27 @@ maquina_uefi qemu-system-x86_64 conf "$Q64 $DISCOS" ":espera 90 ^escritorio: en 
 mira "la medida guardada en PANTALLA.ENV (800 x 600) se la pide GRUB al firmware (GOP) al arrancar" "^escritorio: en marcha, 800 x 600 con 32 bits"
 miracap "Configuración > Pantalla, por UEFI: no se cambia en marcha (aunque QEMU tenga la VBE de Bochs), lo dice, y se guarda para el próximo arranque" uefi6 \
   texto 150 160 175 180 "Arrancado por UEFI: no se cambia en marcha, la pone el" texto 150 178 175 198 "firmware al arrancar. Se guarda para el próximo arranque."
+# 2c. sin 8254 (como los Intel de 2015 en adelante con el CSM apagado: el
+# firmware lo para): el tic, del HPET; y sin HPET tampoco, del APIC local
+for m in "pit=off:HPET de 0xFED00000" "pit=off,hpet=off:temporizador del APIC local"; do
+  cp $OV/OVMF_VARS_4M.fd $V/vars64.fd
+  cp $V/usb.img $V/u1.img
+  maquina_uefi qemu-system-x86_64 sinpit "-machine q35,${m%%:*} -m 512 $SIN64 -drive if=pflash,format=raw,readonly=on,file=$F64 -drive if=pflash,format=raw,file=$V/vars64.fd -device qemu-xhci,id=x -drive if=none,id=u,file=$V/u1.img,format=raw -device usb-storage,bus=x.0,drive=u" \
+    ":espera 100 ^escritorio: en marcha" ":pausa 2"
+  mira "sin 8254 (QEMU ${m%%:*}): el núcleo lo ve y el tic lo da el ${m#*:}; el escritorio se pone" "^reloj: el 8254 no da su tic" "^reloj: .*el tic, del ${m#*:}" "^reloj: ya llega el tic" "^escritorio: en marcha"
+done
+# 2d. la pantalla por encima de 4 GB (los PC de ahora): en QEMU el GOP no se
+# puede poner allí; se prueba lo que la pone a la vista (páginas de 4 MB,
+# PSE-36) con la RAM de por encima de 4 GB: escribe y QEMU lo lee
+mcopy -n -i $V/usb.img@@1M ::SEMILLA.BIN $V/SEMILLA.BIN
+rm -f $V/mon
+qemu-system-i386 -kernel $V/SEMILLA.BIN -append "pruebapse36" -m 5G -display none -serial file:$V/pse.sal -monitor unix:$V/mon,server,nowait > /dev/null 2>&1 &
+QPID=$!
+for ((i = 0; i < 100; i++)); do grep -q '^pse36:' $V/pse.sal 2> /dev/null && break; sleep 0.5; done
+printf 'xp /1wx 0x100001234\n' | socat - UNIX-CONNECT:$V/mon 2> /dev/null | tr -d '\r' > $V/pse.txt
+printf 'quit\n' | socat - UNIX-CONNECT:$V/mon > /dev/null 2>&1; wait $QPID 2> /dev/null; QPID=
+if grep -q '0000000100001234: 0xcafebabe' $V/pse.txt; then ok "la memoria por encima de 4 GB, a la vista con una página de 4 MB (PSE-36), como la pantalla del GOP alta: lo escrito llega a 0x100001234"
+else ko "PSE-36: lo escrito no llega a 0x100001234: $(tail -1 $V/pse.txt)"; fi
 # 3. la consola del núcleo, en modo texto, por UEFI: la entrada 9 del menú
 cp $OV/OVMF_VARS_4M.fd $V/vars64.fd
 cp $V/usb.img $V/u1.img
