@@ -6222,7 +6222,9 @@ la 33 es la de win32-juegos): con servidores NTP de mentira
   el español); Energía (la pantalla, negra al minuto y encendida con el
   ratón; el botón de encendido de QEMU, que pregunta); Personalización (el
   tema Grafito y el tapiz verde, con capturas); `PANEL.INI` con todo y la
-  línea `ntp=`; y **al arrancar otra vez**, el tema y el tapiz. Con la
+  línea `ntp=`; el **horario de verano** sin red (el 25/10/2026 a las 3:00,
+  las 2:00; el 28/03/2027 a las 2:00, las 3:00; y `verano_puesto` en
+  PANEL.INI); y **al arrancar otra vez**, el tema y el tapiz. Con la
   batería de mentira al 4 % y sin cable, el equipo se apaga solo (S5). Y el
   contraste de los cinco temas nuevos, medido con la tabla de
   `preferencias.cas`.

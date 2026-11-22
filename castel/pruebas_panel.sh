@@ -189,6 +189,28 @@ mira "«No» la deja; «Ponerla» pide el modo administrador, y sin él (el núc
 miracap "el núcleo pregunta el modo administrador para PANEL.BIN" pn13 texto 200 220 600 260 "PANEL.BIN pide el modo administrador"
 miracap "y sin él, el reloj sigue como estaba (lo dice abajo)" pn14 texto15 130 530 800 560 "Sin el modo administrador no se pone esa hora"
 
+# 3 ter. el horario de verano, sin red: el último domingo de octubre, a las
+# 3:00 (las 2:00 otra vez, en la península); el último de marzo, a las 2:00
+# (las 3:00). PANEL.INI dice lo que lleva el reloj (verano_puesto)
+cp $K/d.img $K/v1.img
+printf 'verano_puesto=1\r\nzona=0\r\n' > $K/PANEL.INI
+mcopy -o -i $K/v1.img $K/PANEL.INI ::
+cp $K/d.img $K/v2.img
+printf 'verano_puesto=0\r\nzona=0\r\n' > $K/PANEL.INI
+mcopy -o -i $K/v2.img $K/PANEL.INI ::
+RELOJ=2026-10-25T02:59:40 ESCRIBE=1 DISCO=$K/v1.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 30" > $K/v1.sal 2>&1 &
+local V1=$!
+RELOJ=2027-03-28T01:59:40 ESCRIBE=1 DISCO=$K/v2.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 30" > $K/v2.sal 2>&1
+wait $V1
+S=$K/v1.sal
+mira "el último domingo de octubre, a las 3:00 de verano, HORARED pasa el reloj a las 2:00 (el horario de invierno), sin red" \
+  "hora: al horario de invierno: de 25/10/2026 03:00:0[0-9] a 25/10/2026 02:00:0[0-9]$"
+S=$K/v2.sal
+mira "y el último de marzo, a las 2:00, a las 3:00 (el de verano)" "hora: al horario de verano: de 28/03/2027 02:00:0[0-9] a 28/03/2027 03:00:0[0-9]$"
+if saca $K/v1.img PANEL.INI $K/v1.ini && grep -q "^verano_puesto=0" $K/v1.ini && saca $K/v2.img PANEL.INI $K/v2.ini && grep -q "^verano_puesto=1" $K/v2.ini; then
+  ok "y PANEL.INI apunta lo que lleva ahora el reloj (verano_puesto): si el equipo está apagado al cambiar, se cambia al arrancar"
+else ko "PANEL.INI no apunta el horario: $(tr -d '\r' < $K/v1.ini | grep verano) / $(tr -d '\r' < $K/v2.ini | grep verano)"; fi
+
 # 4. al arrancar otra vez: el tema, el tapiz y lo demás, como se dejó
 RELOJ=$(relojes "+0 min") CAPTURAS=$G DISCO=$K/e.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 4" ":captura pn11" > $K/r.sal 2>&1
 S=$K/r.sal
