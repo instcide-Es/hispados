@@ -99,6 +99,7 @@ tecla() {
     '[') echo alt_r-bracket_left ;; ']') echo alt_r-bracket_right ;; '{') echo alt_r-apostrophe ;; '}') echo alt_r-backslash ;;
     'ñ') echo semicolon ;; 'Ñ') echo shift-semicolon ;; 'ç') echo backslash ;; 'Ç') echo shift-backslash ;;
     'º') echo grave_accent ;; 'ª') echo shift-grave_accent ;;
+    '€') echo alt_r-e ;;                           # (OFICINA2) Alt Gr+E
     'á') echo apostrophe a ;; 'é') echo apostrophe e ;; 'í') echo apostrophe i ;; 'ó') echo apostrophe o ;; 'ú') echo apostrophe u ;;
     'Á') echo apostrophe shift-a ;; 'É') echo apostrophe shift-e ;; 'Í') echo apostrophe shift-i ;; 'Ó') echo apostrophe shift-o ;; 'Ú') echo apostrophe shift-u ;;
     'à') echo bracket_left a ;; 'è') echo bracket_left e ;; 'ò') echo bracket_left o ;;

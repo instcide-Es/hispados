@@ -120,7 +120,7 @@ TIPO_POR_NOMBRE = {
     'ejemplos': 'desarrollo',
     'win32': 'windows',
     'escudo': 'seguridad', 'escbase': 'seguridad', 'escmes': 'seguridad', 'escdia': 'seguridad',
-    'sonido': 'multimedia', 'mirador': 'multimedia',
+    'sonido': 'multimedia', 'mirador': 'multimedia', 'pintura': 'multimedia',     # (OFICINA2) pintura
     'clicgest': 'terceros',
 }
 
@@ -247,12 +247,25 @@ SISTEMA = [
      'base >= ' + VERSION_SONIDO, [
         ('SONIDO.BIN', r'\HISPA\SONIDO.BIN'), ('INICIO.WAV', r'\HISPA\INICIO.WAV'), ('APAGAR.WAV', r'\HISPA\APAGAR.WAV'),
         ('AVISO.WAV', r'\HISPA\AVISO.WAV'), ('ERROR.WAV', r'\HISPA\ERROR.WAV')]),
-    ('hvprun', '0.9', 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio (con su sonido)', 'base >= 0.7', [
+    # (OFICINA2) hvprun 0.10: la rueda, Alt+letra, los títulos largos (con más
+    # de 63 letras el núcleo no hacía la ventana), el módulo en la unidad del
+    # sistema y la carpeta de los documentos (castel/nucleo32/hvprun/poficina.inc)
+    ('hvprun', '0.10', 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio (con su sonido, la rueda y Alt+letra)', 'base >= 0.7', [
         ('HVPRUN.BIN', r'\HISPA\HVPRUN.BIN')]),
-    ('oficina', '1.0', 'La oficina de Hispa-386: Facturas, Pluma, Cuentas y Mirador', 'hvprun >= 0.7', [
+    # (OFICINA2) la oficina 1.1: con Datos, el Lector, Publicaciones y
+    # Presentaciones, y los tipos de letra en todos sus tamaños (TIPOS12/24/32)
+    ('oficina', '1.1', 'La oficina de Hispa-386: Pluma, Cuentas, Facturas, Datos, Presentaciones, Publicaciones y Lector', 'hvprun >= 0.10', [
         ('FACTURAS.HVP', r'\OFICINA\FACTURAS.HVP'), ('PLUMA.HVP', r'\OFICINA\PLUMA.HVP'),
         ('CUENTAS.HVP', r'\OFICINA\CUENTAS.HVP'), ('MIRADOR.HVP', r'\OFICINA\MIRADOR.HVP'),
-        ('TIPOS.DAT', r'\OFICINA\TIPOS.DAT'), ('DICCIO.DAT', r'\OFICINA\DICCIO.DAT')]),
+        ('DATOS.HVP', r'\OFICINA\DATOS.HVP'), ('LECTOR.HVP', r'\OFICINA\LECTOR.HVP'),
+        ('PUBLICA.HVP', r'\OFICINA\PUBLICA.HVP'), ('PRESENTA.HVP', r'\OFICINA\PRESENTA.HVP'),
+        ('TIPOS.DAT', r'\OFICINA\TIPOS.DAT'), ('TIPOS12.DAT', r'\OFICINA\TIPOS12.DAT'),
+        ('TIPOS24.DAT', r'\OFICINA\TIPOS24.DAT'), ('TIPOS32.DAT', r'\OFICINA\TIPOS32.DAT'),
+        ('DICCIO.DAT', r'\OFICINA\DICCIO.DAT')]),
+    # (OFICINA2) Pintura, aparte (tipo multimedia, como el Mirador): el
+    # programa de dibujo de Hispa-386 (BMP; abre también PCX: «Editar» en Mi equipo)
+    ('pintura', '1.0', 'Pintura: dibujar y retocar imágenes (guarda en BMP y abre también PCX)', 'hvprun >= 0.10', [
+        ('PINTURA.HVP', r'\OFICINA\PINTURA.HVP')]),
     # [WIN32] los programas de Windows de 32 bits y DirectX (docs/pentium/WIN32.md)
     ('win32', '1.1', 'Programas de Windows de 32 bits, DirectX (con sonido) y OpenGL: WIN32.BIN, sus DLL y los ejemplos (Naves, GLPRUEBA)', 'base >= ' + VERSION_084, [
         ('WIN32.BIN', r'\HISPA\WIN32.BIN'),

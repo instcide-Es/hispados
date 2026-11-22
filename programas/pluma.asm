@@ -4211,6 +4211,10 @@ guardar_como:
         HV dlg_archivo
         test eax, eax
         jz .no
+        mov esi, nombre             ; (OFICINA2) el de antes, por si no se puede
+        mov edi, nom_ant
+        mov ecx, 96
+        rep movsb
         mov esi, nom_tmp            ; sin extensión, .PLU
         mov edi, nombre
         xor edx, edx
@@ -4236,7 +4240,17 @@ guardar_como:
 .f2:
         mov byte [edi], 0
         popad
-        jmp guarda_escribe
+        call guarda_escribe
+        jnc .x
+        pushad                      ; (OFICINA2) no se ha podido (la zona
+        mov esi, nom_ant            ; protegida de Hispa-Pentium, un disco
+        mov edi, nombre             ; lleno): el nombre de antes, y Guardar
+        mov ecx, 96                 ; preguntará otra vez dónde
+        rep movsb
+        popad
+        stc
+.x:
+        ret
 .no:
         popad
         stc
@@ -5720,6 +5734,7 @@ rl          resb RL_TAM
 titulo      resb 100
 nombre      resb 96
 nom_tmp     resb 96
+nom_ant     resb 96                 ; (OFICINA2) el nombre de antes de «Guardar como»
 busca_txt   resb 44
 reemp_txt   resb 44
 num_txt     resb 12

@@ -114,6 +114,7 @@ módulo UEquipo
     variable ocultos: bool                      ; enseñar los ocultos y los de sistema
     variable aviso: arreglo [200] de byte
     variable abierto_m: ent32 = -1              ; el menú de la barra que está abierto
+    variable menú_con_editar: bool              ; (OFICINA2) el del botón secundario lleva «Editar con Pintura»
     variable ancla: ent32                       ; desde dónde se elige con Mayús
 
     ; la historia (Atrás, Adelante)
@@ -2550,6 +2551,11 @@ módulo UEquipo
         renglón(go, r).icono := IC_PROGRAMA
     fin
 
+    ; (OFICINA2) uno de la oficina (con HVPRUN), si está su .HVP
+    función de_oficina_en_lista(nombre: puntero a byte, plantilla: puntero a byte)
+        si hay_de_oficina(plantilla) entonces programa_en_lista(nombre, "\\HVPRUN.BIN", plantilla) fin
+    fin
+
     ; los programas que dejan los paquetes (los .MNU de \HISPA\MENU o \MENU)
     función programas_de_paquetes(carpeta: puntero a byte)
         variable m, mm, n: nat32
@@ -2613,10 +2619,17 @@ módulo UEquipo
         rejilla_columna(go, "Args", 0, falso)
         go.n_cols := 1                          ; (se ve solo el nombre)
         programa_en_lista("Bloc de notas", "\\BLOC.BIN", "%1")
-        programa_en_lista("Mirador (im\xA0genes)", "\\HVPRUN.BIN", "\\OFICINA\\MIRADOR.HVP %1")
+        ; (OFICINA2) el Mirador de la oficina, si no está el de Pentium (que sale
+        ; con los de los paquetes); y los de la oficina 1.1 y Pintura, si están
+        si no hay_programa("\\MIRADOR.BIN") entonces programa_en_lista("Mirador (im\xA0genes)", "\\HVPRUN.BIN", "\\OFICINA\\MIRADOR.HVP %1") fin
         programa_en_lista("Pluma (textos)", "\\HVPRUN.BIN", "\\OFICINA\\PLUMA.HVP %1")
         programa_en_lista("Cuentas (hojas de c\xA0lculo)", "\\HVPRUN.BIN", "\\OFICINA\\CUENTAS.HVP %1")
         programa_en_lista("Facturas", "\\HVPRUN.BIN", "\\OFICINA\\FACTURAS.HVP %1")
+        de_oficina_en_lista("Datos (bases de datos)", "\\OFICINA\\DATOS.HVP %1")
+        de_oficina_en_lista("Lector de PDF", "\\OFICINA\\LECTOR.HVP %1")
+        de_oficina_en_lista("Publicaciones", "\\OFICINA\\PUBLICA.HVP %1")
+        de_oficina_en_lista("Presentaciones", "\\OFICINA\\PRESENTA.HVP %1")
+        de_oficina_en_lista("Pintura (dibujo)", "\\OFICINA\\PINTURA.HVP %1")
         programas_de_paquetes("\\HISPA\\MENU")
         programas_de_paquetes("\\MENU")
         rejilla_lista(go)
@@ -2995,6 +3008,7 @@ módulo UEquipo
         fin
         si en_algo entonces
             grises := 0
+            menú_con_editar := falso                ; (OFICINA2)
             si no puede entonces grises := grises ob 8 ob 64 ob 128 ob 256 fin
             si item(primero_marcado()).carpeta entonces grises := grises ob 2 fin
             si no item(primero_marcado()).carpeta y es_imagen_de_disco(dirección(item(primero_marcado()).ruta[0])) entonces
@@ -3003,6 +3017,10 @@ módulo UEquipo
             sino si no item(primero_marcado()).carpeta y acaba_en(dirección(item(primero_marcado()).ruta[0]), ".ZIP") entonces
                 ; (ZIP) un .ZIP: también «Extraer todo...» (Comprimidos)
                 menú(Controles.v, x, yy, "Abrir|Abrir con...|-|Cortar|Copiar|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades|-|Comprimir en ZIP|Extraer todo...", grises ob (grises yb 8) * 512 ob (grises yb 8) * 1024, M_CONTEXTO)
+            sino si no item(primero_marcado()).carpeta y se_edita_con_pintura(dirección(item(primero_marcado()).ruta[0])) entonces
+                ; (OFICINA2) una imagen BMP o PCX, con Pintura: también «Editar»
+                menú_con_editar := cierto
+                menú(Controles.v, x, yy, "Abrir|Abrir con...|-|Cortar|Copiar|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades|-|Comprimir en ZIP|Editar con Pintura", grises ob (grises yb 8) * 512, M_CONTEXTO)
             sino
                 menú(Controles.v, x, yy, "Abrir|Abrir con...|-|Cortar|Copiar|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades|-|Comprimir en ZIP", grises ob (grises yb 8) * 512, M_CONTEXTO)    ; (ZIP)
             fin
@@ -3111,7 +3129,7 @@ módulo UEquipo
                         caso 8: pide_borrar(cierto)
                         caso 10: pide_propiedades()
                         caso 12: comprime_elegidos()          ; (ZIP)
-                        caso 13: extrae_zip()                 ; (ZIP)
+                        caso 13: si menú_con_editar entonces edita_con_pintura() sino extrae_zip() fin     ; (ZIP) (OFICINA2)
                     fin
                 fin
             caso M_FONDO:
@@ -3638,6 +3656,25 @@ módulo UEquipo
     fin
 
     ; el .ZIP elegido, sacado entero a una carpeta de al lado (COMPRIM /EXTRAER)
+    ; (OFICINA2) «Editar» de las imágenes que sabe leer Pintura (BMP y PCX), si
+    ; está (\OFICINA\PINTURA.HVP, con HVPRUN); «Abrir» sigue siendo el Mirador
+    función se_edita_con_pintura(r: puntero a byte): bool
+        devolver (acaba_en(r, ".BMP") o acaba_en(r, ".PCX")) y hay_de_oficina("\\OFICINA\\PINTURA.HVP")
+    fin
+
+    función edita_con_pintura()
+        variable k: ent32
+        variable t: nat32
+        menú_con_editar := falso
+        k := primero_marcado()
+        si k < 0 entonces devolver fin
+        t := abre_con("\\HVPRUN.BIN", "\\OFICINA\\PINTURA.HVP %1", dirección(item(k).ruta[0]))
+        si es_error(t) entonces
+            copiar(aviso, "No se puede abrir: ")
+            concatenar(aviso, texto_error(t))
+        fin
+    fin
+
     función extrae_zip()
         variable args: arreglo [MAX_RUTA + 16] de byte
         variable k: ent32

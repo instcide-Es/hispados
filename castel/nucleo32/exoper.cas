@@ -832,7 +832,10 @@ módulo Exoper
     variable asocia: arreglo [MAX_ASOCIA] de byte
     variable asocia_leída: bool
     público variable ruta_asocia: arreglo [40] de byte
-    variable de_siempre: arreglo [700] de byte = "; con qu\x82 se abre cada clase de archivo: EXT=programa|argumentos (%1 es el archivo)\r\nTXT=\\BLOC.BIN|%1\r\nBAT=\\BLOC.BIN|%1\r\nINI=\\BLOC.BIN|%1\r\nMNU=\\BLOC.BIN|%1\r\nBIN=%1|\r\nEXE=%1|\r\nHVP=\\HVPRUN.BIN|%1\r\nPLU=\\HVPRUN.BIN|\\OFICINA\\PLUMA.HVP %1\r\nHOJ=\\HVPRUN.BIN|\\OFICINA\\CUENTAS.HVP %1\r\nFAC=\\HVPRUN.BIN|\\OFICINA\\FACTURAS.HVP %1\r\nBMP=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nPCX=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nGIF=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nPNG=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nJPG=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nTGA=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nICO=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nPPM=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\n"
+    ; (OFICINA2) con los de la oficina 1.1: las bases de Datos (.BDD), las
+    ; publicaciones (.PUB), las presentaciones (.PRE) y los PDF con el Lector
+    ; (con Hispa-PDF, si está: de_paquetes)
+    variable de_siempre: arreglo [900] de byte = "; con qu\x82 se abre cada clase de archivo: EXT=programa|argumentos (%1 es el archivo)\r\nTXT=\\BLOC.BIN|%1\r\nBAT=\\BLOC.BIN|%1\r\nINI=\\BLOC.BIN|%1\r\nMNU=\\BLOC.BIN|%1\r\nBIN=%1|\r\nEXE=%1|\r\nHVP=\\HVPRUN.BIN|%1\r\nPLU=\\HVPRUN.BIN|\\OFICINA\\PLUMA.HVP %1\r\nHOJ=\\HVPRUN.BIN|\\OFICINA\\CUENTAS.HVP %1\r\nFAC=\\HVPRUN.BIN|\\OFICINA\\FACTURAS.HVP %1\r\nBMP=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nPCX=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nGIF=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nPNG=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nJPG=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nTGA=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nICO=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nPPM=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nBDD=\\HVPRUN.BIN|\\OFICINA\\DATOS.HVP %1\r\nPUB=\\HVPRUN.BIN|\\OFICINA\\PUBLICA.HVP %1\r\nPRE=\\HVPRUN.BIN|\\OFICINA\\PRESENTA.HVP %1\r\nPDF=\\HVPRUN.BIN|\\OFICINA\\LECTOR.HVP %1\r\n"
 
     ; (ZIP) (MIRADOR) los programas de los paquetes «comprim» (Comprimidos) y
     ; «mirador» (el Mirador de Pentium), y (PDF) los .PDF con Hispa-PDF (el
@@ -842,7 +845,7 @@ módulo Exoper
     variable de_paquetes: arreglo [400] de byte = "PDF=\\HISPAPDF.BIN|%1\r\nZIP=\\COMPRIM.BIN|%1\r\nBMP=\\MIRADOR.BIN|%1\r\nPNG=\\MIRADOR.BIN|%1\r\nJPG=\\MIRADOR.BIN|%1\r\nJPE=\\MIRADOR.BIN|%1\r\nGIF=\\MIRADOR.BIN|%1\r\nICO=\\MIRADOR.BIN|%1\r\nTGA=\\MIRADOR.BIN|%1\r\nPSD=\\MIRADOR.BIN|%1\r\nPPM=\\MIRADOR.BIN|%1\r\nPGM=\\MIRADOR.BIN|%1\r\nPNM=\\MIRADOR.BIN|%1\r\n"
 
     ; ¿está ese programa (en la unidad del sistema o en su \HISPA)?
-    función hay_programa(prog: puntero a byte): bool
+    público función hay_programa(prog: puntero a byte): bool          ; ((OFICINA2) público: Mi equipo)
         variable r: arreglo [MAX_RUTA] de byte
         variable c: bool
         si ruta_asocia[0] = 0 entonces busca_asocia() fin
@@ -922,14 +925,39 @@ módulo Exoper
         variable hay: bool
         si no asocia_leída entonces lee_asociaciones() fin
         hay := asociado_en(dirección(asocia[0]), ext, programa, plantilla)
+        ; (OFICINA2) un ASOCIA.TXT de antes no tiene las clases nuevas (.BDD,
+        ; .PUB, .PRE, .PDF): las de siempre
+        si no hay entonces hay := asociado_en(dirección(de_siempre[0]), ext, programa, plantilla) fin
         ; (ZIP) (MIRADOR) lo de los paquetes, si están: donde no hay nada o
         ; donde está lo de fábrica de antes (el Mirador de la oficina)
-        si (no hay o (iguales(programa, "\\HVPRUN.BIN") y empieza_por(plantilla, "\\OFICINA\\MIRADOR.HVP"))) y asociado_en(dirección(de_paquetes[0]), ext, p2, t2) y hay_programa(p2) entonces
+        ; (OFICINA2) y donde está el Lector de la oficina (lo de fábrica de los .PDF)
+        si (no hay o (iguales(programa, "\\HVPRUN.BIN") y (empieza_por(plantilla, "\\OFICINA\\MIRADOR.HVP") o empieza_por(plantilla, "\\OFICINA\\LECTOR.HVP")))) y asociado_en(dirección(de_paquetes[0]), ext, p2, t2) y hay_programa(p2) entonces
             copiar(programa, p2)
             copiar(plantilla, t2)
             devolver cierto
         fin
+        ; (OFICINA2) un programa de la oficina que no está (una oficina de antes,
+        ; sin Datos, el Lector...): como si no hubiera nada (Abrir con...)
+        si hay y iguales(programa, "\\HVPRUN.BIN") y empieza_por(plantilla, "\\OFICINA\\") y no hay_de_oficina(plantilla) entonces devolver falso fin
         devolver hay
+    fin
+
+    ; (OFICINA2) ¿está el .HVP de la plantilla («\OFICINA\LECTOR.HVP %1»), en la
+    ; unidad del sistema?
+    público función hay_de_oficina(plantilla: puntero a byte): bool
+        variable r: arreglo [MAX_RUTA] de byte
+        variable i: nat32
+        variable c: bool
+        si ruta_asocia[0] = 0 entonces busca_asocia() fin
+        r[0] := ruta_asocia[0]
+        r[1] := ':'
+        i := 0
+        mientras plantilla[i] <> 0 y plantilla[i] <> ' ' y i + 3 < MAX_RUTA hacer
+            r[i + 2] := plantilla[i]
+            i := i + 1
+        fin
+        r[i + 2] := 0
+        devolver existe(r, c) y no c
     fin
 
     función asociado_en(t: puntero a byte, ext: puntero a byte, programa: puntero a byte, plantilla: puntero a byte): bool
