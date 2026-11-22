@@ -19,6 +19,7 @@
 #include "../lista.h"
 #include "../motor.h"
 #include "../util.h"
+#include "../vista.h"
 
 void anfitrion_argumentos(int argc, char **argv);
 
@@ -315,6 +316,20 @@ int main(int argc, char **argv)
 		for (i = 2; i < argc; i++)
 			fuzz(argv[i]);
 		return 0;
+	}
+	if (argc >= 2 && !strcmp(argv[1], "ventana")) {
+		/* la ventana (con REPRO_VENTANA=1, REPRO_SUCESOS y REPRO_CAPTURA): para las capturas */
+		char a[1000] = "";
+		int i, r;
+		void anfitrion_captura(void);
+
+		for (i = 2; i < argc; i++) {
+			strncat(a, argv[i], sizeof a - strlen(a) - 2);
+			strncat(a, " ", sizeof a - strlen(a) - 1);
+		}
+		r = vista_principal(a);
+		anfitrion_captura();
+		return r;
 	}
 	if (argc >= 2 && !strcmp(argv[1], "dsp")) {
 		prueba_dsp();

@@ -42,11 +42,26 @@ def main():
         i = args.index('--desfase')
         max_d = int(args[i + 1])
         del args[i:i + 2]
+    if '--desde-sonido' in args:
+        args.remove('--desde-sonido')
+    if '--ganancia' in args:
+        args.remove('--ganancia')
     if '--sin-alinear' in args:
         args.remove('--sin-alinear')
         alinear = False
     ha, a = lee(args[0])
     hb, b = lee(args[1])
+    if '--desde-sonido' in sys.argv:
+        # (lo grabado por QEMU: se quita lo de delante hasta que suena, en los dos)
+        def primero(x):
+            i = 0
+            while i < len(x) // 2 and abs(x[2 * i]) < 300 and abs(x[2 * i + 1]) < 300:
+                i += 1
+            return max(0, i - 200)
+        a = a[2 * primero(a):]
+        b = b[2 * primero(b):]
+        # y lo de detrás del final de la referencia
+        a = a[:len(b) + 2 * max_d]
     na, nb = len(a) // 2, len(b) // 2
     # el desfase: con el lado izquierdo, por trozos de 4096 tramas desde la
     # primera parte con sonido
@@ -57,28 +72,55 @@ def main():
             ini += 1
         ini = min(ini + 2000, max(0, nb - 5000))
         L = min(4096, nb - ini - 1)
-        def ssd(d):
-            if ini + d < 0 or ini + d + L >= na:
-                return 1e300
-            return sum((a[2 * (ini + d + i)] - b[2 * (ini + i)]) ** 2 for i in range(0, L, 8))
-        todos = [(ssd(d), d) for d in range(-max_d, max_d + 1)]
-        minimo = min(t[0] for t in todos)
-        # (de los que casan casi igual de bien, el más cercano: con un tono
-        # puro casan todos los periodos)
-        mejor = min((abs(d), d) for s, d in todos if s <= minimo * 1.05 + 1)[1]
+        # (primero a grandes rasgos, con las dos diezmadas de 8 en 8 y un
+        # segundo largo: así no se confunde un periodo de un tono con otro;
+        # luego fino, punto a punto)
+        def diezma(x, desde, n):
+            return [sum(x[2 * (desde + 8 * k + j)] for j in range(8)) for k in range(n)]
+        n8 = min(6000, (nb - ini) // 8 - 1, (na - ini - max_d) // 8 - 1)
+        bd = diezma(b, ini, n8)
+        mejor8, cmax = 0, -2
+        for d8 in range(-(max_d // 8), max_d // 8 + 1):
+            if ini + 8 * d8 < 0 or ini + 8 * d8 + 8 * n8 >= na:
+                continue
+            ad = diezma(a, ini + 8 * d8, n8)
+            sab = sum(x * y for x, y in zip(ad, bd)); saa = sum(x * x for x in ad); sbb = sum(y * y for y in bd)
+            c = sab / math.sqrt(saa * sbb) if saa and sbb else -2
+            if c > cmax:
+                cmax, mejor8 = c, d8
+        cmax = -2
+        for d in range(8 * mejor8 - 12, 8 * mejor8 + 13):
+            if ini + d < 0 or ini + d + 16000 >= na or ini + 16000 >= nb:
+                continue
+            sab = saa = sbb = 0.0
+            for i in range(0, 16000, 2):
+                x, y = a[2 * (ini + d + i)], b[2 * (ini + i)]
+                sab += x * y; saa += x * x; sbb += y * y
+            c = sab / math.sqrt(saa * sbb) if saa and sbb else -2
+            if c > cmax:
+                cmax, mejor = c, d
+    # la ganancia que mejor casa (lo grabado puede ir con otro volumen)
+    g = 1.0
+    if '--ganancia' in sys.argv:
+        num = den = 0.0
+        for i in range(max(0, -mejor), min(nb, na - mejor), 3):
+            x = b[2 * i]; y = a[2 * (i + mejor)]
+            num += x * y; den += y * y
+        g = num / den if den else 1.0
+        print('ganancia=%.4f (%.2f dB)' % (g, 20 * math.log10(abs(g) + 1e-12)))
     sen = ruido = 0.0
     dmax = 0
     n = 0
     for i in range(max(0, -mejor), min(nb, na - mejor)):
         for c in (0, 1):
             x = b[2 * i + c]
-            y = a[2 * (i + mejor) + c]
+            y = a[2 * (i + mejor) + c] * g
             sen += x * x
             ruido += (x - y) ** 2
             dmax = max(dmax, abs(x - y))
             n += 1
     snr = 999.0 if ruido == 0 else 10 * math.log10(max(sen, 1) / ruido)
-    print('hz=%d/%d tramas=%d/%d desfase=%d snr=%.1f dif_max=%d comunes=%d' % (ha, hb, na, nb, mejor, snr, dmax, n // 2))
+    print('hz=%d/%d tramas=%d/%d desfase=%d snr=%.1f dif_max=%d comunes=%d' % (ha, hb, na, nb, mejor, snr, int(dmax), n // 2))
 
 
 main()

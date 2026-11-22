@@ -209,6 +209,7 @@ int so_tecla(void) { return 0; }
 static FILE *wav;
 static u64 tramas_wav;
 static u32 hz_wav;
+static u32 ms_ultimo;
 
 static void cabecera_wav(void)
 {
@@ -242,6 +243,7 @@ int so_sonido_abre(u32 hz)
 	const char *r = getenv("REPRO_WAV");
 
 	hz_wav = hz;
+	ms_ultimo = so_ms();
 	if (!r)
 		return 1;
 	wav = fopen(r, "wb+");
@@ -259,10 +261,34 @@ u32 so_sonido_da(const i16 *d, u32 n)
 	return n;
 }
 
-u32 so_sonido_en_cola(void) { return 0; }
-u64 so_sonido_tocadas(void) { return tramas_wav; }
-void so_sonido_vacia(void) {}
-void so_sonido_pausa(int si) { (void)si; }
+/* (con la ventana, la «tarjeta» va a su paso: lo dado suena en su tiempo) */
+static u64 tocadas_tiempo(void);
+static int pausa_sim;
+static u32 ms_sim;
+static u64 vaciadas;
+
+static u64 tocadas_tiempo(void)
+{
+	u32 ahora = so_ms();
+
+	if (!pausa_sim)
+		ms_sim += ahora - ms_ultimo;
+	ms_ultimo = ahora;
+	{
+		u64 t = (u64)ms_sim * hz_wav / 1000 + vaciadas;
+
+		return t > tramas_wav ? tramas_wav : t;
+	}
+}
+
+u32 so_sonido_en_cola(void) { return getenv("REPRO_VENTANA") ? (u32)(tramas_wav - tocadas_tiempo()) : 0; }
+u64 so_sonido_tocadas(void) { return getenv("REPRO_VENTANA") ? tocadas_tiempo() : tramas_wav; }
+void so_sonido_vacia(void)
+{
+	if (getenv("REPRO_VENTANA"))
+		vaciadas += tramas_wav - tocadas_tiempo();
+}
+void so_sonido_pausa(int si) { tocadas_tiempo(); pausa_sim = si; }
 void so_sonido_volumen(int v) { (void)v; }
 int so_sonido_volumen_general(int v) { return v < 0 ? 80 : v; }
 
@@ -326,6 +352,7 @@ int so_cd_expulsa(char letra) { (void)letra; return 0; }
 
 /* ---- la ventana: un lienzo ---- */
 static lienzo pantalla;
+static int pendiente_an, pendiente_al;
 static FILE *sucesos;
 static u32 espera_hasta;
 
@@ -387,6 +414,15 @@ int so_suceso_de(u32 v, so_suceso *s)
 	char r[300];
 
 	(void)v;
+	if (pendiente_an) {
+		/* (el cambio de tamaño que se pidió: como lo haría el escritorio) */
+		s->clase = EV_TAMANO;
+		s->a = (u32)pendiente_an;
+		s->b = (u32)pendiente_al;
+		s->c = 0;
+		pendiente_an = 0;
+		return 1;
+	}
 	if (!sucesos)
 		return 0;
 	if (espera_hasta && (int)(so_ms() - espera_hasta) < 0)
@@ -420,7 +456,7 @@ int so_suceso_de(u32 v, so_suceso *s)
 	return 1;
 }
 
-void so_cambia_tamano(u32 v, int an, int al) { (void)v; (void)an; (void)al; }
+void so_cambia_tamano(u32 v, int an, int al) { (void)v; pendiente_an = an; pendiente_al = al; }
 void so_trae(u32 v) { (void)v; }
 int so_menu(u32 v, int x, int y, const char *o, u32 g, u32 e) { (void)v; (void)x; (void)y; (void)o; (void)g; (void)e; return 0; }
 

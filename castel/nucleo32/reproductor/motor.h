@@ -66,6 +66,7 @@ typedef struct {
 	u32 ciclos_dsp, ciclos_dec, ms_medidos;	/* (para medir) */
 	u64 tramas_medidas;
 	int objetivo_ms;
+	int cebando;			/* (al empezar y tras buscar) la tarjeta en pausa hasta que haya cola */
 	float *tmp1, *tmp2, *tmp3;
 	int tmp_n;
 	i16 *s16;

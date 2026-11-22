@@ -478,7 +478,14 @@ void motor_ciclo(motor *m, u32 presupuesto)
 		if (b->cancion >= 0 && !b->lista && b->abierta && !b->fallo)
 			voz_paso(m, b);
 		/* ¿cabe más en la cola? */
-		if (motor_cola_ms(m) >= m->objetivo_ms || so_ms() - t0 >= presupuesto)
+		if (motor_cola_ms(m) >= m->objetivo_ms) {
+			if (m->cebando) {
+				m->cebando = 0;
+				so_sonido_pausa(0);
+			}
+			return;
+		}
+		if (so_ms() - t0 >= presupuesto)
 			return;
 		n = TROZO;
 		hechas = voz_saca(m, a, s, n);
@@ -546,6 +553,10 @@ void motor_ciclo(motor *m, u32 presupuesto)
 				voz_cierra(a);
 				m->estado = M_PARADO;
 				m->l->actual = -1;
+				if (m->cebando) {
+					m->cebando = 0;
+					so_sonido_pausa(0);
+				}
 				return;
 			}
 			if (so_ms() - t0 >= presupuesto)
@@ -573,7 +584,10 @@ void motor_toca(motor *m, int c)
 	eq_vacia(&m->eq);
 	voz_empieza(m, &m->v[0], c);
 	m->estado = M_SONANDO;
-	so_sonido_pausa(0);
+	/* la tarjeta, en pausa hasta que haya cola: así no suena un silencio
+	 * entre el primer trozo y los siguientes */
+	so_sonido_pausa(1);
+	m->cebando = 1;
 	m->oida = c;
 	m->pos_oida_ms = 0;
 	m->cambio++;
@@ -586,7 +600,8 @@ void motor_pausa(motor *m)
 		so_sonido_pausa(1);
 	} else if (m->estado == M_PAUSA) {
 		m->estado = M_SONANDO;
-		so_sonido_pausa(0);
+		if (!m->cebando)
+			so_sonido_pausa(0);
 	} else if (m->l->n)
 		motor_toca(m, m->l->actual >= 0 ? m->l->actual : (m->oida >= 0 && m->oida < m->l->n ? m->oida : 0));
 }
@@ -650,6 +665,10 @@ void motor_busca_ms(motor *m, u32 ms)
 	m->n_marcas = 0;
 	pon_marca(m, a->cancion, a->d.pos - (a->d.o.tramo_desde ? (u64)a->d.o.tramo_desde * a->d.hz / 75 : 0), a->d.hz);
 	m->pos_oida_ms = ms;
+	if (m->estado == M_SONANDO) {
+		so_sonido_pausa(1);
+		m->cebando = 1;
+	}
 }
 
 void motor_velocidad(motor *m, float v)
