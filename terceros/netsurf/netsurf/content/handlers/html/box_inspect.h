@@ -69,6 +69,18 @@ void box_bounds(struct box *box, struct rect *r);
  */
 struct box *box_at_point(const css_unit_ctx *unit_len_ctx, struct box *box, const int x, const int y, int *box_x, int *box_y);
 
+/**
+ * [HISPA] Lo de encima (position: absolute o fixed con z-index: un menú
+ * desplegable, la hoja «Más» del modo teléfono de ClicGest, una ventana de
+ * Bootstrap) que está en el punto: el de z-index más alto (con el mismo, el
+ * último). Lo de debajo no cuenta para los clics, el botón derecho ni la
+ * rueda, venga antes o después en el árbol. NULL si no hay; si hay, box_x y
+ * box_y (con lo que se empieza, como en box_at_point) quedan en su sitio.
+ */
+struct box *box_hispa_arriba(const css_unit_ctx *unit_len_ctx, struct box *raiz, int x, int y, int *box_x, int *box_y);
+/** [HISPA] ¿b es a o está dentro de a? */
+bool box_hispa_dentro(const struct box *b, const struct box *a);
+
 
 /**
  * Find a box based upon its id attribute.

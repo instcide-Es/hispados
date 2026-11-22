@@ -6,6 +6,10 @@
  *  y tools/surf_compara.sh. La red, con curl (anfitrion_rh.c).
  *    surfppm [-w ancho] [-h alto] [-y desplazada] [-entera] [-o salida.ppm] DIRECCION
  *  (-entera: la página entera de alto, no solo lo que se ve)
+ *    -enlace X Y (las veces que haga falta): tras pintar, dice por la salida
+ *  el enlace que hay en ese punto de la ventana («enlace X Y DIRECCION», o
+ *  «-» si no hay), como el clic del Navegador: para probar los clics en lo
+ *  fijo (position: fixed) y en lo desplazado sin QEMU
  *  Las letras y los recursos: SURF_LETRAS (terceros/dejavu) y SURF_RECURSOS.
  *  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
  * ============================================================================= */
@@ -136,7 +140,7 @@ int main(int argc, char **argv) {
   };
   const char *sal = "pagina.ppm", *dir = NULL, *letras, *recursos;
   char b[600];
-  int k, entera = 0, alto;
+  int k, entera = 0, alto, n_enl = 0, enl[16][2];
   nsurl *u = NULL;
   struct browser_window *bw;
   nsfb_t *lienzo;
@@ -153,6 +157,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[k], "-y") && k + 1 < argc) desp_y = atoi(argv[++k]);
     else if (!strcmp(argv[k], "-o") && k + 1 < argc) sal = argv[++k];
     else if (!strcmp(argv[k], "-entera")) entera = 1;
+    else if (!strcmp(argv[k], "-enlace") && k + 2 < argc && n_enl < 16) { enl[n_enl][0] = atoi(argv[++k]); enl[n_enl++][1] = atoi(argv[++k]); }
     else dir = argv[k];
   }
   if (!dir) { fprintf(stderr, "uso: surfppm [-w ancho] [-h alto] [-entera] [-o salida.ppm] DIRECCION\n"); return 2; }
@@ -230,6 +235,13 @@ int main(int argc, char **argv) {
     nsfb_plot_set_clip(lienzo, &c);
     nsfb_plot_rectangle_fill(lienzo, &c, 0xFFFFFFFF);
     browser_window_redraw(ventana->bw, 0, -desp_y, &clip, &ctx);
+  }
+  for (k = 0; k < n_enl; k++) {
+    struct browser_window_features ft;
+    memset(&ft, 0, sizeof ft);
+    if (browser_window_get_features(ventana->bw, enl[k][0], enl[k][1] + desp_y, &ft) == NSERROR_OK && ft.link)
+      printf("enlace %d %d %s\n", enl[k][0], enl[k][1], nsurl_access(ft.link));
+    else printf("enlace %d %d -\n", enl[k][0], enl[k][1]);
   }
   nsfb_get_buffer(lienzo, &px, &paso);
   f = fopen(sal, "wb");

@@ -138,9 +138,10 @@ nserror nsjpeg_init(void) {
     e = content_factory_register_handler(tipos_jpeg[k], &im_manejo);
   return e;
 }
+nserror surf_svg_inicia(void);    /* (svgimagen.c: las imágenes SVG, con NanoSVG) */
 nserror nspng_init(void) {
   unsigned k;
-  nserror e = NSERROR_OK;
+  nserror e = surf_svg_inicia();
   for (k = 0; k < sizeof tipos_png / sizeof tipos_png[0] && e == NSERROR_OK; k++)
     e = content_factory_register_handler(tipos_png[k], &im_manejo);
   return e;

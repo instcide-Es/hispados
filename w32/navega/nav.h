@@ -173,6 +173,7 @@ void http_suelta(Pet *p);
 const char *http_cabecera(const Pet *p, const char *nombre);  /* hasta el CR */
 const char *http_cifrado(void);  /* de la conexión en uso: "" si no va cifrada */
 extern char http_idioma[32];
+extern const char *(*http_agente)(const char *servidor);
 u32 http_fecha(const char *t, const char *fin);    /* fecha de HTTP -> segundos desde 1970 */
 u32 http_ahora(void);
 int http_galletas_guarda(const char *ruta);

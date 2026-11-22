@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<!-- navega 0.2.2 (tests/run_surf_pintado_tests.sh): como el modo teléfono de
+     ClicGest, con la hoja «Más» ya abierta: la barra de abajo fija (bottom: 0),
+     la hoja, un <dialog open> fijo abajo con inset, max-height en dvh,
+     overflow-y: auto y z-index, con un <details> cerrado (lo de dentro, con
+     display: grid) y la salida al final; debajo, en la página, enlaces largos
+     que no deben llevarse los clics; y un botón con un icono SVG en un data:.
+     Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. -->
+<html lang="es"><head><meta charset="utf-8"><title>Movil</title><style>
+body { margin: 0; font-family: sans-serif; background: #fff; }
+.fondo { display: block; height: 100px; background: #dddddd; }
+.toggler { position: absolute; top: 8px; right: 8px; z-index: 1; border: 0; padding: 0; background-color: transparent; }
+.icono { display: inline-block; width: 30px; height: 30px; background-size: 100%; background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%2833, 37, 41, 0.75%29' stroke-linecap='round' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e"); }
+.pestanas { position: fixed; left: 0; right: 0; bottom: 0; height: 40px; display: flex; background: #0b6e4f; z-index: 1030; }
+.pestanas a { flex: 1 1 0; color: #fff; }
+dialog.hoja { position: fixed; inset: auto 0 0 0; margin: 0; width: 100%; max-width: 100%; max-height: 80dvh; padding: 0; border: 0;
+  background: #fff3c4; overflow-y: auto; z-index: 1045; }
+dialog.hoja:not([open]) { display: none; }
+.lista { display: grid; grid-template-columns: 1fr 1fr; }
+.item { display: flex; height: 40px; align-items: center; color: #14294a; }
+.plegado .item { background: #ffd0d0; }
+#ordenador { background: #c0306a; color: #fff; }
+</style></head><body>
+<button class="toggler" type="button" aria-label="Abrir el menu"><span class="icono"></span></button>
+<a class="fondo" href="/fondo0">fondo 0</a><a class="fondo" href="/fondo1">fondo 1</a><a class="fondo" href="/fondo2">fondo 2</a><a class="fondo" href="/fondo3">fondo 3</a><a class="fondo" href="/fondo4">fondo 4</a><a class="fondo" href="/fondo5">fondo 5</a><a class="fondo" href="/fondo6">fondo 6</a><a class="fondo" href="/fondo7">fondo 7</a><a class="fondo" href="/fondo8">fondo 8</a><a class="fondo" href="/fondo9">fondo 9</a><a class="fondo" href="/fondo10">fondo 10</a><a class="fondo" href="/fondo11">fondo 11</a>
+<nav class="pestanas"><a href="/inicio">Inicio</a><a href="/mas">Mas</a></nav>
+<dialog open class="hoja"><div class="lista"><a class="item" href="/seccion0">Seccion 0</a><a class="item" href="/seccion1">Seccion 1</a><a class="item" href="/seccion2">Seccion 2</a><a class="item" href="/seccion3">Seccion 3</a><a class="item" href="/seccion4">Seccion 4</a><a class="item" href="/seccion5">Seccion 5</a></div>
+<details class="plegado"><summary class="item">Papeles</summary><div class="lista"><a class="item" href="/escondida0">Escondida 0</a><a class="item" href="/escondida1">Escondida 1</a><a class="item" href="/escondida2">Escondida 2</a><a class="item" href="/escondida3">Escondida 3</a></div></details>
+<a class="item" id="ordenador" href="/vista?modo=pc">Ver version de ordenador</a></dialog>
+</body></html>

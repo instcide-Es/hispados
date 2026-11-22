@@ -1036,6 +1036,17 @@ css_error css__parse_unit_keyword(const char *ptr, size_t len, uint32_t *unit)
 			*unit = UNIT_REM;
 		else if (strncasecmp(ptr, "dpi", 3) == 0)
 			*unit = UNIT_DPI;
+		/* [HISPA] las de la ventana «dinámica», «pequeña» y «grande» de
+		 * los móviles (dvh, svh, lvh...): aquí la ventana no cambia, son
+		 * vh y vw (la hoja «Más» de ClicGest, max-height: 86dvh) */
+		else if ((ptr[0] == 'd' || ptr[0] == 'D' || ptr[0] == 's' ||
+				ptr[0] == 'S' || ptr[0] == 'l' || ptr[0] == 'L') &&
+				strncasecmp(ptr + 1, "vh", 2) == 0)
+			*unit = UNIT_VH;
+		else if ((ptr[0] == 'd' || ptr[0] == 'D' || ptr[0] == 's' ||
+				ptr[0] == 'S' || ptr[0] == 'l' || ptr[0] == 'L') &&
+				strncasecmp(ptr + 1, "vw", 2) == 0)
+			*unit = UNIT_VW;
 		else
 			return CSS_INVALID;
 	} else if (len == 2) {

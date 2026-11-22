@@ -3996,6 +3996,51 @@ instalar: base 0.8.3 (en lugar de la 0.8.2), navega 0.1», comprueba las sumas,
 los pone (con las carpetas de `\HISPA\NAVEGA`) y `PAQUETES COMPRUEBA` los da
 por buenos; con el núcleo nuevo hay que reiniciar (sección 13).
 
+### navega 0.2.2: «Acceder» y «Ver versión de ordenador» en clicgest.es
+
+*22/11/2026, rama `navega-movil`.* Carlos, en el HP Mini (1024x600), no
+encontraba en clicgest.es **dónde entrar** ni, tras pasar a la versión móvil,
+**cómo volver a la de ordenador**. ClicGest no se toca: lo arregla el
+Navegador. Las causas, todas del Navegador:
+
+- **Sin SVG**: con menos de 1200 puntos, la cabecera de la portada
+  (`navbar-expand-xl` de Bootstrap) pliega el menú, con «Acceder», tras el
+  botón de las tres rayas, que es un **SVG en un `data:`**
+  (`navbar-toggler-icon`): no se pintaba, el botón no se veía. Ahora las
+  imágenes SVG se pintan con **NanoSVG** (`terceros/nanosvg`, zlib;
+  `w32/surf/svgimagen.c`; `rgba()` se lee como `rgb()`). Al ponerlo salió un
+  fallo viejo de la biblioteca de C: `truncf` y `roundf` (`w32/surf/apoyo.c`)
+  se llamaban a sí mismas para siempre (gcc cambiaba `(float)trunc(x)` por
+  `truncf(x)`): el Navegador se colgaba al pintar un trazo.
+- **`position: fixed` con `bottom`**: lo fijo se colocaba respecto a la
+  página, no a la ventana (`layout.c`, `layout_hispa_fijo`): la barra de abajo
+  del modo teléfono (con «Más») y su hoja caían al final de la página y,
+  como lo fijo se pinta respecto a la ventana, **no se veían nunca**.
+- **`inset`** (libcss no lo conocía: `cssvar.c` lo cambia por top, right,
+  bottom y left) y **`dvh`, `svh`, `lvh`** (y `*vw`: como `vh` y `vw`).
+- **`<details>` cerrado**: salía desplegado si su hoja le daba `display`
+  (`box_construct.c`: lo de dentro que no es `<summary>` no tiene caja); y
+  `dialog:not([open])` no se ve (`default.css`).
+- **Los clics sobre lo que está encima** (la hoja «Más», con `z-index`): se
+  los llevaban los enlaces de la página de debajo que venían después en el
+  árbol. Ahora `box_hispa_arriba` (`box_inspect.c`) busca primero lo de encima
+  que está en el punto (el de `z-index` más alto) y solo cuenta lo suyo, para
+  los clics, el botón derecho y la rueda (que, sobre algo fijo, ya no mueve
+  la página de debajo).
+
+Y, como red de seguridad, **el propio Navegador** ofrece en el menú ≡ y en el
+botón derecho **«Ver la versión para móvil» / «Ver la versión de
+escritorio»**: cambia el User-Agent de ese sitio (con `; Mobile`, también
+`navigator.userAgent`), recarga y lo recuerda por servidor en `NAVEGA2.INI`
+(`Movil=servidor`). En ClicGest manda su galleta `cg_vista` (la de su enlace),
+así que allí se vuelve con «Ver versión de ordenador» de la hoja «Más».
+
+Pruebas: `tests/run_surf_pintado_tests.sh` (en el anfitrión,
+`tests/surf/movil.html`, con `surfppm -enlace X Y`, que dice el enlace de un
+punto) y la parte `navegador` de `castel/pruebas.sh` a 1024x600
+(`servidor_pruebas.py`: `/portada`, `/panel`, `/vista`, `/ua`, `/svg.html`).
+Probado también contra clicgest.es y su demo, solo mirando.
+
 **La 0.8.5** (21/11, rama `pentium-085`: las ramas `pentium-programas` —con
 `pentium-menu` y `pentium-rueda`—, `pentium-letras` —por `menu-letras`—,
 `pentium-protege`, `pentium-escudo`, `pentium-wifi`, `opengl`,

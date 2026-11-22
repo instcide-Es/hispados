@@ -31,17 +31,17 @@ Form_Reset:Restablecer
 Form_None:
 Form_Many:(Varios)
 Form_Drop:Suelte aquí el archivo
-FormSelect:Click to choose a form item
-FormCheckbox:Click to check this option
-FormRadio:Click to choose this option
-FormSubmit:Send form to %s
+FormSelect:Pulse para elegir
+FormCheckbox:Pulse para marcar esta opción
+FormRadio:Pulse para elegir esta opción
+FormSubmit:Enviar el formulario a %s
 FormBadSubmit:Aviso: el formulario no se puede enviar
-FormButton:Warning: button can not be activated
-FormTextarea:Click to edit the text
-FormTextbox:Click to edit this field
-FormReset:Reset form (not implemented)
-FormFile:Drop a file here to upload it
-SelectMenu:Select
+FormButton:Botón
+FormTextarea:Pulse para escribir
+FormTextbox:Pulse para escribir en este campo
+FormReset:Vaciar el formulario
+FormFile:Suelte aquí un archivo para subirlo
+SelectMenu:Elegir
 BMPTitle:%s (imagen BMP de %lux%lu puntos)
 GIFTitle:%s (imagen GIF de %lux%lu puntos)
 ICOTitle:%s (icono de %lux%lu puntos)

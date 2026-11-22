@@ -4588,6 +4588,56 @@ if [ -n "$HS" ] && $AQUI/nucleo32/disco.sh $Q/d.img 32 red tls navegador > $Q/di
     rgb 300 128 e03030 rgb 60 130 305080 rgb 60 524 305080 rgb 300 163 20a060 nrgb 300 360 20a060
   S=$Q/srv/pedidos.txt
   mira "y el enlace de abajo de la barra lateral fija, con la página desplazada, se pulsa (donde se ve)" "^GET /eco?lateral |"
+  # (navega 0.2.2) en la pantalla del HP Mini (1024x600), lo que Carlos no
+  # encontraba en clicgest.es: «Acceder» (el menú plegado de la portada, que
+  # se abre con el botón de las tres rayas, un SVG en un data:) y, en el modo
+  # teléfono, «Ver versión de ordenador» (en la hoja «Más»: un <dialog> fijo
+  # abajo, con inset, 86dvh, overflow-y: auto y un <details> cerrado; la
+  # barra de abajo, fija con bottom: 0); y la versión para móvil o de
+  # escritorio del propio Navegador (el botón derecho), que se recuerda
+  printf 'Inicio=https://10.0.2.2:%s/portada\r\n' $HS > $Q/NAVEGA.INI
+  cp $Q/d.img $Q/m.img
+  mcopy -o -i $Q/m.img $Q/NAVEGA.INI ::NAVEGA/
+  : > $Q/srv/pedidos.txt
+  RU=":monitor mouse_move 0 0 -1"
+  CAPTURAS=$G ESCRIBE=1 DISCO=$Q/m.img ARRANQUE="escritorio modo=1024x600" PANTALLA=1024x600 MODULOS= MEMORIA=128 QEMU_MAS="-nic user,model=e1000" \
+    $AQUI/nucleo32/probar.sh "" ":pausa 3" ":doble 62 260" ":pausa 14" ":captura nvm0" \
+    ":clic 955 133" ":pausa 3" ":captura nvm1" ":clic 88 243" ":pausa 4" ":captura nvm2" \
+    ":tecla f6" ":escribe https://10.0.2.2:$HS/panel" ":tecla ret" ":pausa 4" ":clic 100 190" ":pausa 5" ":captura nvm3" \
+    ":clic 828 502" ":pausa 3" ":captura nvm4" ":raton 400 400" "$RU" ":pausa 1" "$RU" ":pausa 1" "$RU" ":pausa 1" "$RU" ":pausa 1" "$RU" ":pausa 2" \
+    ":captura nvm5" ":clic 400 497" ":pausa 5" ":captura nvm6" \
+    ":tecla f6" ":escribe https://10.0.2.2:$HS/ua" ":tecla ret" ":pausa 4" ":clicd 300 250" ":pausa 1" ":captura nvm7" ":clic 340 429" ":pausa 4" ":captura nvm8" \
+    ":clicd 300 250" ":pausa 1" ":clic 340 429" ":pausa 4" ":captura nvm9" ":clicd 300 250" ":pausa 1" ":clic 340 429" ":pausa 4" \
+    ":clic 990 26" ":pausa 3" ":doble 62 260" ":pausa 12" ":tecla f6" ":escribe https://10.0.2.2:$HS/ua" ":tecla ret" ":pausa 4" ":captura nvm10" \
+    ":clic 990 26" ":pausa 3" > $Q/m.sal 2>&1
+  miracap "la portada a 1024x600: el botón de las tres rayas se ve (navbar-toggler-icon: un SVG con trazos en un data:, con NanoSVG)" nvm0 \
+    rgb 950 125 212529 24 rgb 950 133 212529 24 rgb 950 141 212529 24 rgb 950 129 ffffff 8
+  miracap "al pulsarlo se abre el menú (JavaScript: .collapse.show) con «Acceder»" nvm1 rgb 45 232 1f6feb 8
+  S=$Q/srv/pedidos.txt
+  mira "«Acceder» lleva a /login" "^GET /login |"
+  miracap "y se ve la página de entrar" nvm2 rgb 300 200 6a5acd 8
+  miracap "el modo teléfono (galleta vista=movil): la barra de abajo, fija con bottom: 0, se ve abajo de la ventana (antes, al final de la página: nunca)" nvm3 \
+    rgb 300 490 0b6e4f 8 rgb 900 490 f59e0b 8
+  miracap "«Más» abre la hoja (showModal), pegada abajo (inset: auto 0 0 0) y de 86dvh, con el <details> cerrado (lo de dentro no se ve)" nvm4 \
+    rgb 300 200 fff3c4 8 rgb 300 480 ffd0d0 8 nrgb 300 130 fff3c4 8
+  miracap "la rueda sobre la hoja la desplaza a ella (y no la página de debajo): «Ver versión de ordenador», al final, a la vista" nvm5 \
+    rgb 300 500 c0306a 8 rgb 300 125 0f172a 8
+  S=$Q/srv/pedidos.txt
+  mira "y se pulsa (el clic es para la hoja, que está encima, y no para lo de debajo): la galleta vista=pc y la versión de ordenador otra vez" \
+    "^GET /vista?modo=movil&volver=/panel |" "^GET /panel | .* | vista=movil |" "^GET /vista?modo=pc&volver=/panel | .* | vista=movil |" "^GET /panel | .* | vista=pc |"
+  miracap "la versión de ordenador" nvm6 rgb 300 130 1f4e79 8
+  miracap "el botón derecho ofrece «Ver la versión para móvil»" nvm7 texto 300 400 500 440 "Ver la versi"
+  mira "el Navegador pide la versión para móvil (el User-Agent con «Mobile»), vuelve a la de escritorio y otra vez la de móvil; y la recuerda al abrirlo otra vez" \
+    "^GET /ua | HispaSurf/0.2 (NetSurf 3.11; Hispa-Pentium) |" "^GET /ua | HispaSurf/0.2 (NetSurf 3.11; Hispa-Pentium; Mobile) |"
+  if [ "$(grep -c '^GET /ua |' $S)" -ge 5 ] && grep '^GET /ua |' $S | sed -n '2p;4p;5p' | grep -c 'Mobile' | grep -q '^3$' \
+     && grep '^GET /ua |' $S | sed -n '3p' | grep -vq 'Mobile'; then
+    ok "en orden: escritorio, móvil, escritorio, móvil y, al abrirlo otra vez, móvil"
+  else ko "el orden de las versiones no es el esperado:"; grep '^GET /ua |' $S | cut -c1-80 | sed 's/^/        /'; fi
+  miracap "con la versión para móvil, la página y su JavaScript (navigator.userAgent) lo saben" nvm8 rgb 300 150 daa520 8 rgb 300 250 c71585 8
+  miracap "y con la de escritorio, también" nvm9 rgb 300 150 008b8b 8 rgb 300 250 1e90ff 8
+  if saca $Q/m.img NAVEGA/NAVEGA2.INI $Q/n2.ini && [ "$(tr -d '\r' < $Q/n2.ini)" = "Movil=10.0.2.2" ]; then
+    ok "lo elegido se guarda por sitio en NAVEGA2.INI («Movil=10.0.2.2»)"
+  else ko "NAVEGA2.INI no tiene «Movil=10.0.2.2»: $(cat -A $Q/n2.ini 2> /dev/null | head -3)"; fi
   # el x87: dos programas con coma flotante a la vez
   DISCO=$Q/d.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "x87" ":pausa 6" > $Q/x.sal 2>&1
   tr -d '\r' < $Q/x.sal > $Q/x.txt

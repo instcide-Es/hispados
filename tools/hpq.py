@@ -431,7 +431,7 @@ def busca(nombre, carpetas):
 NAVEGA_RECURSOS = ['DEFAULT.CSS', 'QUIRKS.CSS', 'ADBLOCK.CSS', 'INTERNAL.CSS', 'MESSAGES', 'BROTLI.DIC', 'INICIO.HTM']
 NAVEGA_FUENTES = ['SANS.TTF', 'SANSN.TTF', 'SERIF.TTF', 'SERIFN.TTF', 'MONO.TTF', 'MONON.TTF']
 OPCIONALES = [
-    ('navega', '0.2.1', 'El Navegador: la web de hoy (NetSurf con JavaScript), con pestañas y descargas',
+    ('navega', '0.2.2', 'El Navegador: la web de hoy (NetSurf con JavaScript), con pestañas y descargas',
      'base >= 0.8.3, red >= 0.8.1, tls >= 0.8.1', [
         ('NAVEGA/NAVEGA.BIN', r'\HISPA\NAVEGA\NAVEGA.BIN'), ('NAVEGA/NAVEGA.INI', r'\HISPA\NAVEGA\NAVEGA.INI'),
         ('NAVEGA/LEEME.TXT', r'\HISPA\NAVEGA\LEEME.TXT')]
