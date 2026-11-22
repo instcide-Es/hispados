@@ -6387,7 +6387,10 @@ bolas por la mesa de verdad, desde sitios y en direcciones al azar, de 100 a
 paredes de fuera, cruza la del lanzador ni se mete en un poste o una pared;
 en una caja sin roce y con rebote 1, la rapidez sigue igual tras 30 s y más
 de 120 choques; con la gravedad, la energía no se va más de un 3 %; con rebote
-0,5, de frente sale a la mitad; una bola quieta en cada flipper sale
+0,5, de frente sale a la mitad; 2.000 bolas soltadas por la mesa (una de
+cada diez, encima del canal de la rampa), con los flippers abajo, caen todas
+(no hay rincones ni repisas donde se quede quieta: así se encontraron dos, la
+tapa del canal y el final de las guías de los pasillos); una bola quieta en cada flipper sale
 disparada al pulsarlo; y 300 bolas de 1.500 a 4.200 por segundo contra el
 flipper que sube, sin atravesarlo—, la música de `sintes.c` y los 24 niveles
 de Almacén con solución. Luego los programas (sin CMOV ni FCOMI) y el
