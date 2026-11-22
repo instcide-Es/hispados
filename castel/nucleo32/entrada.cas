@@ -1,0 +1,394 @@
+; =============================================================================
+;  entrada.cas - (USUARIOS) la pantalla de entrada de Hispa-Pentium (desde la
+;  0.9, 22/11/2026): elegir el usuario y, si tiene, escribir su contraseña.
+;
+;  CON EL ESCRITORIO. Una ventana del núcleo de toda la pantalla, por
+;  delante de todas (Ventanas.cortina: también de las que se abran después)
+;  y que se lleva todas las teclas (ni el logo, ni Alt+Tab, ni
+;  Ctrl+Alt+Supr la saltan). Cada usuario, con su cara, su nombre y su tipo;
+;  el elegido, con un borde grueso, una flecha y su nombre en negrita (nada
+;  depende solo del color). Las flechas cambian de usuario; con contraseña,
+;  se escribe (salen puntos) e Intro o «Entrar»; sin ella, Intro o «Entrar».
+;  Abajo, «Apagar» y «Reiniciar». La contraseña no la ve ningún programa: la
+;  recoge el núcleo y la resume ARGON2.BIN (usuario.cas, «argon2»). Tres
+;  intentos malos y espera (cuentas.cas: dobla cada vez, hasta un minuto).
+;
+;  SIN ESCRITORIO (la consola de texto: «ordenes» en la línea del cargador,
+;  o la consola del núcleo después de SALIR): «Usuario:» y «Contraseña:»
+;  (con asteriscos). La consola del núcleo es para un administrador: uno
+;  normal entra derecho al intérprete de órdenes y, al salir, sale.
+;
+;  Se salta si un usuario entra solo (cuentas.cas: «entra_solo», sin
+;  contraseña: la biblioteca del HP Mini; y el usuario de antes de la 0.9,
+;  hasta que se ponga una contraseña) y si no hay usuarios (sin instalar).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Entrada
+
+    importar Cpu, Tareas, Consola, Grafico, Video, Ventanas, Usuario, Cuentas, Textos32, Formato, Mem32
+
+    público constante E_SIGUE = 0               ; (lo que dice atiende_entrada)
+    público constante E_DENTRO = 1              ; ha entrado alguien
+    público constante E_APAGAR = 2
+    público constante E_REINICIAR = 3
+
+    constante TINTA = 0x14294A
+    constante BLANCO = 0xFFFFFF
+    constante AZUL = 0x1D4ED8
+    constante ROJO = 0x991B1B
+    constante FICHA_AN = 132
+    constante FICHA_AL = 150
+
+    público variable v_entrada: nat32
+    variable an, al: ent32
+    variable ids: arreglo [MAX_CUENTAS] de nat32
+    variable n_ids: nat32
+    variable elegido: nat32
+    variable clave: arreglo [128] de byte
+    variable n_clave: nat32
+    variable aviso: puntero a byte
+    variable fichas_x, fichas_y: ent32          ; dónde empieza la primera ficha
+    variable por_fila: nat32
+    variable campo_y: ent32
+
+    ; ---- las caras (la imagen de cada usuario): un color y una forma (los
+    ; dos: no depende solo del color) ----
+    variable colores: arreglo [10] de nat32 = (0x2F74D0, 0x2A8A3C, 0xB45309, 0x7C3AED, 0xBE185D, 0x0E7490, 0x4D7C0F, 0x9A3412, 0x334155, 0xA16207)
+
+    público función cara(ref l: Lienzo, x: ent32, yy: ent32, lado: ent32, imagen: nat32)
+        variable c: nat32
+        variable r, k: ent32
+        si imagen > MAX_IMAGEN entonces imagen := 0 fin
+        c := colores[imagen]
+        redondeado(l, x, yy, lado, lado, lado div 6, mezcla(c, BLANCO, 96), c, TODAS)
+        ; la cabeza y los hombros
+        r := lado div 6
+        círculo(l, x + lado div 2, yy + lado * 2 div 5, r, BLANCO)
+        redondeado(l, x + lado div 4, yy + lado * 3 div 5, lado div 2, lado * 3 div 10, lado div 8, BLANCO, mezcla(BLANCO, c, 40), ARRIBA)
+        ; y su señal (una por imagen): puntos en la esquina, de 1 a 10
+        k := 0
+        mientras k <= ent32(imagen) hacer
+            rectángulo(l, x + 4 + (k mod 5) * 5, yy + 4 + (k div 5) * 5, 3, 3, BLANCO)
+            k := k + 1
+        fin
+    fin
+
+    función rect_ficha(i: nat32, ref x: ent32, ref yy: ent32)
+        x := fichas_x + ent32(i mod por_fila) * (FICHA_AN + 16)
+        yy := fichas_y + ent32(i div por_fila) * (FICHA_AL + 16)
+    fin
+
+    función pinta_botón(ref l: Lienzo, x: ent32, yy: ent32, w: ent32, t: puntero a byte, arriba: nat32, abajo: nat32)
+        rectángulo(l, x - 2, yy - 2, w + 4, 40, TINTA)
+        redondeado(l, x, yy, w, 36, 6, arriba, abajo, TODAS)
+        texto_negrita(l, x + w div 2 - ancho_texto(t) div 2, yy + 10, t, BLANCO)
+    fin
+
+    función pinta_entrada()
+        variable l: puntero a Lienzo
+        variable i: nat32
+        variable x, yy, k: ent32
+        variable c: puntero a Cuenta
+        variable r: arreglo [96] de byte
+        l := lienzo_de(v_entrada)
+        si l = nulo entonces devolver fin
+        degradado(valor(l), 0, 0, an, al, 0x2D6BC4, 0x0F3A7A)
+        disquete(valor(l), 24, 20, 48)
+        texto_negrita(valor(l), 86, 26, "Hispa-Pentium", BLANCO)
+        copiar_hasta(r, "versión ", 96)
+        concatenar(r, VERSIÓN_TEXTO)
+        texto(valor(l), 86, 46, r, 0xD3E7FD)
+        texto_negrita(valor(l), an div 2 - ancho_texto("Elija su usuario") div 2, fichas_y - 40, "Elija su usuario", BLANCO)
+        para i desde 1 hasta n_ids hacer
+            c := de_id(ids[i - 1])
+            si c <> nulo entonces
+                rect_ficha(i - 1, x, yy)
+                si i - 1 = elegido entonces
+                    ; el elegido: borde grueso blanco y una flecha
+                    rectángulo(valor(l), x - 5, yy - 5, FICHA_AN + 10, FICHA_AL + 10, BLANCO)
+                    rectángulo(valor(l), x - 2, yy - 2, FICHA_AN + 4, FICHA_AL + 4, AZUL)
+                    redondeado(valor(l), x, yy, FICHA_AN, FICHA_AL, 8, 0xFFFFFF, 0xDCEAFB, TODAS)
+                    texto_negrita(valor(l), x - 22, yy + FICHA_AL div 2 - 8, ">", BLANCO)
+                sino
+                    redondeado(valor(l), x, yy, FICHA_AN, FICHA_AL, 8, 0xE6EEF9, 0xC4D6EE, TODAS)
+                fin
+                cara(valor(l), x + (FICHA_AN - 72) div 2, yy + 10, 72, c.imagen)
+                k := ancho_texto(dirección(c.nombre[0]))
+                si k > FICHA_AN - 8 entonces k := FICHA_AN - 8 fin
+                si i - 1 = elegido entonces
+                    texto_negrita(valor(l), x + FICHA_AN div 2 - k div 2, yy + 90, dirección(c.nombre[0]), TINTA)
+                sino
+                    texto(valor(l), x + FICHA_AN div 2 - k div 2, yy + 90, dirección(c.nombre[0]), TINTA)
+                fin
+                si c.admin entonces copiar(r, "Administrador") sino copiar(r, "Normal") fin
+                texto(valor(l), x + FICHA_AN div 2 - ancho_texto(r) div 2, yy + 110, r, 0x40506A)
+                si c.clave[0] <> 0 entonces texto(valor(l), x + FICHA_AN div 2 - ancho_texto("con contraseña") div 2, yy + 128, "con contraseña", 0x40506A) fin
+            fin
+        fin
+        ; la contraseña del elegido (si la tiene) y «Entrar»
+        c := nulo
+        si elegido < n_ids entonces c := de_id(ids[elegido]) fin
+        x := an div 2 - 190
+        yy := campo_y
+        si c <> nulo y c.clave[0] <> 0 entonces
+            copiar_hasta(r, "Contraseña de ", 96)
+            concatenar(r, dirección(c.nombre[0]))
+            concatenar(r, ":")
+            texto_negrita(valor(l), x, yy, r, BLANCO)
+            rectángulo(valor(l), x, yy + 22, 260, 34, AZUL)
+            rectángulo(valor(l), x + 3, yy + 25, 254, 28, BLANCO)
+            para i desde 1 hasta n_clave hacer
+                si i <= 28 entonces círculo(valor(l), x + 14 + ent32(i - 1) * 9, yy + 39, 3, TINTA) fin
+            fin
+            si n_clave <= 28 entonces rectángulo(valor(l), x + 10 + ent32(n_clave) * 9, yy + 30, 2, 18, TINTA) fin
+            pinta_botón(valor(l), x + 276, yy + 21, 104, "Entrar", 0x5CC45E, 0x2A8A3C)
+        sino si c <> nulo entonces
+            texto_negrita(valor(l), x, yy, "Sin contraseña: pulse «Entrar» (o Intro).", BLANCO)
+            pinta_botón(valor(l), x + 276, yy + 21, 104, "Entrar", 0x5CC45E, 0x2A8A3C)
+        fin
+        si aviso <> nulo entonces
+            rectángulo(valor(l), x - 4, yy + 64, ancho_texto(aviso) + 16, 26, 0xFEE2E2)
+            texto_negrita(valor(l), x + 4, yy + 69, aviso, ROJO)
+        fin
+        texto(valor(l), 24, al - 74, "Flechas: otro usuario. Intro: entrar.", 0xD3E7FD)
+        ; abajo a la derecha: apagar y reiniciar
+        pinta_botón(valor(l), an - 252, al - 56, 110, "Reiniciar", 0x8FA6C4, 0x5F7699)
+        pinta_botón(valor(l), an - 128, al - 56, 110, "Apagar", 0xE06A4A, 0xB0391C)
+        repintada(v_entrada, 0, 0, an, al)
+    fin
+
+    ; abre la pantalla de entrada (el escritorio, al arrancar y al cerrar la sesión)
+    público función abre_entrada(): bool
+        variable i: nat32
+        variable filas: ent32
+        si v_entrada <> 0 entonces devolver cierto fin
+        an := ent32(pantalla.ancho)
+        al := ent32(pantalla.alto)
+        n_ids := 0
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            si cuentas[i].usada entonces
+                ids[n_ids] := cuentas[i].id
+                n_ids := n_ids + 1
+            fin
+        fin
+        si n_ids = 0 entonces devolver falso fin
+        por_fila := nat32((an - 80) div (FICHA_AN + 16))
+        si por_fila < 1 entonces por_fila := 1 fin
+        si por_fila > n_ids entonces por_fila := n_ids fin
+        filas := ent32((n_ids + por_fila - 1) div por_fila)
+        fichas_x := an div 2 - (ent32(por_fila) * (FICHA_AN + 16) - 16) div 2
+        fichas_y := 120
+        campo_y := fichas_y + filas * (FICHA_AL + 16) + 12
+        si campo_y > al - 170 entonces campo_y := al - 170 fin
+        elegido := 0
+        n_clave := 0
+        aviso := nulo
+        v_entrada := crear_ventana("Entrada", 0, 0, an, al, SIN_MARCO ob ENCIMA, 0)
+        si v_entrada = 0 entonces devolver falso fin
+        cortina := v_entrada
+        traer_ventana(v_entrada, 0)
+        pinta_entrada()
+        escribir("entrada: la pantalla de entrada\n")
+        devolver cierto
+    fin
+
+    función cierra_entrada()
+        llenar(clave, 128, 0)
+        n_clave := 0
+        cortina := 0
+        si v_entrada <> 0 entonces cerrar_ventana(v_entrada, 0) fin
+        v_entrada := 0
+    fin
+
+    ; intenta entrar con el elegido: cierto si ha entrado
+    función entra(): bool
+        variable c: puntero a Cuenta
+        variable l: puntero a Lienzo
+        si elegido >= n_ids entonces devolver falso fin
+        c := de_id(ids[elegido])
+        si c = nulo entonces devolver falso fin
+        si c.clave[0] <> 0 entonces
+            si espera_por_fallos() > 0 entonces
+                aviso := "Demasiados intentos: espere un poco y pruebe otra vez."
+                llenar(clave, 128, 0)
+                n_clave := 0
+                devolver falso
+            fin
+            ; (lo que tarda Argon2id: que se vea que se está comprobando)
+            l := lienzo_de(v_entrada)
+            si l <> nulo entonces
+                rectángulo(valor(l), an div 2 - 194, campo_y + 64, 360, 26, 0xDCEAFB)
+                texto_negrita(valor(l), an div 2 - 186, campo_y + 69, "Comprobando la contraseña...", TINTA)
+                repintada(v_entrada, 0, 0, an, al)
+                pulso()
+            fin
+            si no comprueba_clave(c, clave, n_clave, falso) entonces
+                apunta_fallo()
+                llenar(clave, 128, 0)
+                n_clave := 0
+                si falta_argon entonces aviso := "No se puede comprobar: falta ARGON2.BIN." sino aviso := "La contraseña no es esa. Pruebe otra vez." fin
+                escribir("entrada: contraseña que no vale\n")
+                devolver falso
+            fin
+            apunta_acierto()
+        fin
+        cierra_entrada()
+        abre_sesión(c.id)
+        devolver cierto
+    fin
+
+    ; los sucesos de la pantalla de entrada (desde el bucle del escritorio):
+    ; E_DENTRO si ha entrado alguien (el escritorio pone lo suyo), E_APAGAR o
+    ; E_REINICIAR si se ha pedido; si no, E_SIGUE
+    público función atiende_entrada(): nat32
+        variable e: Evento
+        variable i: nat32
+        variable x, yy, bx, fx, fy: ent32
+        variable cambia: bool
+        si v_entrada = 0 entonces devolver E_SIGUE fin
+        mientras v_entrada <> 0 y saca_evento(v_entrada, 0, e) hacer
+            cambia := falso
+            si e.clase = EV_TECLA entonces
+                si e.a = TECLA_IZQUIERDA o e.a = TECLA_ARRIBA o e.a = TECLA_MAYÚS_TAB entonces
+                    si elegido > 0 entonces elegido := elegido - 1 sino elegido := n_ids - 1 fin
+                    llenar(clave, 128, 0)
+                    n_clave := 0
+                    aviso := nulo
+                    cambia := cierto
+                sino si e.a = TECLA_DERECHA o e.a = TECLA_ABAJO o e.a = 9 entonces
+                    elegido := (elegido + 1) mod n_ids
+                    llenar(clave, 128, 0)
+                    n_clave := 0
+                    aviso := nulo
+                    cambia := cierto
+                sino si e.a = '\n' entonces
+                    si entra() entonces devolver E_DENTRO fin
+                    cambia := cierto
+                sino si e.a = 27 entonces
+                    llenar(clave, 128, 0)
+                    n_clave := 0
+                    cambia := cierto
+                sino si e.a = 8 entonces
+                    si n_clave > 0 entonces
+                        n_clave := n_clave - 1
+                        clave[n_clave] := 0
+                    fin
+                    cambia := cierto
+                sino si e.a >= ' ' y e.a < 0x100 y n_clave < 127 entonces
+                    clave[n_clave] := byte(e.a)
+                    n_clave := n_clave + 1
+                    aviso := nulo
+                    cambia := cierto
+                fin
+            sino si e.clase = EV_RATÓN_BAJA entonces
+                x := ent32(e.a)
+                yy := ent32(e.b)
+                ; ¿una ficha?
+                i := 0
+                mientras i < n_ids hacer
+                    rect_ficha(i, fx, fy)
+                    si x >= fx y x < fx + FICHA_AN y yy >= fy y yy < fy + FICHA_AL entonces
+                        si elegido <> i entonces
+                            elegido := i
+                            llenar(clave, 128, 0)
+                            n_clave := 0
+                            aviso := nulo
+                        fin
+                        cambia := cierto
+                    fin
+                    i := i + 1
+                fin
+                ; «Entrar»
+                bx := an div 2 - 190 + 276
+                si x >= bx y x < bx + 104 y yy >= campo_y + 21 y yy < campo_y + 57 entonces
+                    si entra() entonces devolver E_DENTRO fin
+                    cambia := cierto
+                fin
+                ; «Reiniciar» y «Apagar»
+                si yy >= al - 56 y yy < al - 20 entonces
+                    si x >= an - 252 y x < an - 142 entonces
+                        cierra_entrada()
+                        devolver E_REINICIAR
+                    fin
+                    si x >= an - 128 y x < an - 18 entonces
+                        cierra_entrada()
+                        devolver E_APAGAR
+                    fin
+                fin
+            fin
+            si cambia y v_entrada <> 0 entonces pinta_entrada() fin
+        fin
+        devolver E_SIGUE
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Sin escritorio: en la consola de texto
+    ; -------------------------------------------------------------------------
+    ; pregunta usuario y contraseña en la consola hasta que entra alguien (o,
+    ; con «solo», si hay uno que entra solo, entra sin preguntar). Da su número
+    público función entra_en_texto(solo: bool): nat32
+        variable nombre: arreglo [40] de byte
+        variable n, k, c: nat32
+        variable cu: puntero a Cuenta
+        si no hay_cuentas entonces devolver 0 fin
+        k := 0
+        si solo entonces k := el_que_entra_solo() fin
+        si k <> 0 entonces
+            abre_sesión(k)
+            imprimir1("Entra %s (sin contraseña).\n", nat32(nombre_de_sesión()))
+            devolver k
+        fin
+        mientras cierto hacer
+            escribir("\nHispa-Pentium. Los usuarios:")
+            para k desde 0 hasta MAX_CUENTAS - 1 hacer
+                si cuentas[k].usada entonces imprimir1(" %s", nat32(dirección(cuentas[k].nombre[0]))) fin
+            fin
+            escribir("\nUsuario: ")
+            n := 0
+            mientras cierto hacer
+                c := leer_tecla()
+                si c = '\n' o c = '\r' entonces romper fin
+                si c = 8 entonces
+                    si n > 0 entonces
+                        n := n - 1
+                        escribir("\x08 \x08")
+                    fin
+                sino si c >= ' ' y c < 0x100 y n < 38 entonces
+                    nombre[n] := byte(c)
+                    n := n + 1
+                    escribir_car(c)
+                fin
+            fin
+            nombre[n] := 0
+            escribir("\n")
+            cu := por_nombre(nombre)
+            si cu = nulo entonces
+                escribir("No hay ningún usuario que se llame así.\n")
+                apunta_fallo()
+            sino si cu.clave[0] = 0 entonces
+                abre_sesión(cu.id)
+                devolver cu.id
+            sino
+                si espera_por_fallos() > 0 entonces
+                    escribir("Demasiados intentos: un momento...\n")
+                    dormir(espera_por_fallos())
+                fin
+                escribir("Contraseña: ")
+                si lee_clave_texto(0, clave, 128, n_clave) entonces
+                    escribir("Comprobando...\n")
+                    si comprueba_clave(cu, clave, n_clave, falso) entonces
+                        llenar(clave, 128, 0)
+                        apunta_acierto()
+                        abre_sesión(cu.id)
+                        devolver cu.id
+                    fin
+                    apunta_fallo()
+                    si falta_argon entonces escribir("No se puede comprobar: falta ARGON2.BIN.\n") sino escribir("La contraseña no es esa.\n") fin
+                fin
+                llenar(clave, 128, 0)
+            fin
+        fin
+        devolver 0
+    fin
+
+fin Entrada.

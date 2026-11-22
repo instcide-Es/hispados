@@ -1,0 +1,8 @@
+/* hoja */
+@media screen {
+  body .a, #b:hover {
+    color: #1D4ED8;
+    margin: 0 auto !important;
+    font-family: "DejaVu Sans";
+  }
+}

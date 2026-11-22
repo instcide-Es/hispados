@@ -105,6 +105,7 @@ hpu_salto:
 %include "pdos.inc"                 ; los archivos y las interrupciones de DOS
 %include "pfaltan.inc"              ; lo que el gestor espera del escritorio
 %include "psonido.inc"              ; (SONIDO) el sonido, sobre el de Hispa-Pentium
+%include "poficina.inc"             ; (OFICINA2) la carpeta de los documentos, la rueda y Alt+letra
 
 ; ---- la tabla de la interfaz, en el orden de api.inc ----
 ; (las de nombre HVA_x, si las hay, sustituyen a las de Ventanas)
@@ -139,6 +140,8 @@ arranque:
         jc .sin_escritorio
         call p_args                 ; el .HVP y su archivo, de los argumentos
         jc .uso
+        call p_modulo_del_sistema   ; (OFICINA2) el .HVP, en la unidad del sistema si no está en esta
+        call p_carpeta_docs         ; (OFICINA2) dónde se trabaja: poficina.inc
         call p_mem_iniciar          ; el montón de Ventanas
         jc .sin_memoria
         call pan_iniciar            ; la superficie y la paleta

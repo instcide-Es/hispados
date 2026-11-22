@@ -1,0 +1,15 @@
+; =============================================================================
+;  HTML.LEN - las páginas web (HTML), para el Bloc de notas: las etiquetas,
+;  sus atributos, las entidades (&aacute;) y los comentarios
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+;  El formato, en CASTEL.LEN.
+; =============================================================================
+nombre=HTML
+extensiones=HTM HTML XHTML XML SVG
+distingue=no
+modo=html
+bloque=<!-- -->
+letras=-
+plegado=bloques
+; las que no se cierran: no abren un bloque
+sueltas=br img meta link input hr area base col embed source track wbr param keygen

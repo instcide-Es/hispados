@@ -240,6 +240,8 @@ cuarta parte, los discos y el USB).
 | `energia.cas` (Energia) | **Apagar de verdad, reiniciar y la batería**: las llamadas del servicio de ACPI (`ACPI.BIN`, un programa del anillo 3 con ACPICA) y la 154; apagar por ACPI (S5) y reiniciar (FADT, 8042, CF9h); la pila de la bandeja y su recuadro de ayuda (sección 11). |
 | `dispositivos.cas` (Dispositivos) | **Lo que hay en el equipo y qué lo lleva** (desde la 0.8.3): las llamadas 155 (la lista, de solo lectura) y 156 (lo que apuntan los servicios del anillo 3), para el Administrador de dispositivos (sección 10). |
 | `sonido.cas` (Sonido) | (SONIDO) **El sonido**, lo que pone el núcleo (sección 14 decies): los canales de los programas (sus colas), el volumen general, el silencio, los sonidos del sistema y las órdenes para el servicio de sonido (`SONIDO.BIN`); las llamadas 190 a 199. |
+| `preferencias.cas` (Preferencias) | (PANEL) **Los ajustes del Panel de control** (sección 14 quattuordecies): la llamada 174, aplicarlos (el ratón, el teclado, el tema, el tapiz...) y `PANEL.INI`, que escribe solo el núcleo. |
+| `iconpanel.cas` (Iconpanel) | (PANEL) **Los iconos del Panel de control** (Configuración y PANEL.BIN), dibujados, cada uno con su forma. |
 | `win32.cas` (Win32) | [WIN32] **Lo de los programas de Windows** (sección 14 quater): las llamadas 180 a 182 (páginas en cualquier sitio de la zona del programa, el mapa de las teclas, las ventanas sin marco o a pantalla completa). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
 
@@ -254,7 +256,7 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `upaquete.cas` | `PAQUETES.BIN` | **PAQUETES**: instala, actualiza y quita paquetes `.HPQ`, con sus dependencias, sus sumas y deshaciendo lo que quede a medias (sección 13). |
 | `uactual.cas` | `ACTUALIZ.BIN` | La ventana **«Programas y actualizaciones»** del escritorio: la de PAQUETES (sección 13). |
 | `uasiste.cas` | `ASISTE.BIN` | El **asistente del primer arranque** de un sistema instalado (sección 12). |
-| `ubloc.cas` | `BLOC.BIN` | El **Bloc de notas** del escritorio (sección 10). |
+| `ubloc.cas` | `BLOC.BIN` | El **Bloc de notas** 1.0 del escritorio (sección 14 quindecies), con sus módulos: `bloctxt.cas` (el texto: búfer con hueco y la historia), `blocvis.cas` (lo que se ve), `blocarc.cas` (leer y guardar), `blocbus.cas` (buscar), `blocexp.cas` (expresiones regulares), `blocpag.cas` (las páginas), `blocdif.cas` (comparar), `bloclen.cas` con `bloc/lenguajes/*.LEN` y `blocdef.cas` (los lenguajes), `letramono.cas` (la letra de ancho fijo) y `blocmem.cas` (la memoria). |
 | `uequipo.cas` | `EQUIPO.BIN` | **Mi equipo**: las unidades (con su letra, de qué son y lo que cabe en ellas) y lo que hay dentro (sección 10). |
 | `udisposi.cas` | `DISPOSIT.BIN` | El **Administrador de dispositivos**: el PCI, el USB, ACPI, los discos, lo de siempre y el procesador, con el controlador de cada cosa, sus recursos y un informe (sección 10). |
 | `uconsola.cas` | `CONSOLA.BIN` | La **Consola** del escritorio: el intérprete de órdenes dentro de una ventana (sección 10). |
@@ -270,6 +272,9 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `sonido/*.c` (en C: `sonido/hacer.sh`) | `SONIDO.BIN` | (SONIDO) El **servicio de sonido** (HD Audio, AC'97 y Sound Blaster 16; la mezcla; los sonidos del sistema) y la orden **SONIDO** (sección 14 decies). |
 | `uhttps.cas` (con `biblioteca32/https.cas`) | `HTTPS.BIN` | La orden **HTTPS**: pedir direcciones con la biblioteca `Https` (sección 14). |
 | `uipconf.cas`, `uping.cas`, `udescarg.cas` | `IPCONFIG.BIN`, `PING.BIN`, `DESCARGA.BIN` | **IPCONFIG**, **PING** y **DESCARGAR** (sección 14). |
+| `upanel.cas` | `PANEL.BIN` | (PANEL) **El Panel de control**: Fecha y hora, Ratón, Teclado, Red y Wi-Fi, Energía y Personalización (sección 14 quattuordecies). |
+| `uhorared.cas` con `ntp.cas` y `zonas.cas` | `HORARED.BIN` | (NTP) **La hora por Internet** (SNTP) y el horario de verano; la orden HORARED (sección 14 quattuordecies). |
+| `panelaj.cas` (Panelaj) | — | (PANEL) Las llamadas 174 (los ajustes) y 175 (la hora exacta) para los programas. |
 | `ubucle.cas` | `BUCLE.BIN` | El que no acaba nunca (da vueltas, duerme, espera teclas o escribe sin parar): para probar **Ctrl+C**. |
 
 ---
@@ -458,6 +463,8 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 68 | **los ajustes** (`HISPA.INI`): EBX = 0, leerlos otra vez; 1, el nombre del usuario, a ECX; 2, ¿está el sistema instalado en el disco?; 3, el nombre del equipo | `releer_ajustes`, `nombre_usuario`, `sistema_instalado`, `nombre_equipo` | |
 | 130 | **quitar con seguridad** la memoria USB de la unidad de letra EBX (desde la 0.8): lo pendiente se escribe, la memoria se para y sus unidades dejan de estar | `quitar_memoria` | 0 (`QUITADA`), ya se puede quitar; 1, no hay tal unidad; 2, no es una memoria USB; 3 (`ES_DEL_SISTEMA`), el sistema corre desde ella |
 | 131 | las veces que han **aparecido o desaparecido unidades** (además, a las ventanas de los programas les llega `EV_UNIDADES`) | `cambios_unidades` | ese número |
+| 134 | (REPRODUCTOR) **el CD de música** del lector de la letra EBX: ECX = 0, la tabla de las pistas (una `Toc_cd`) a EDX; 1, leer sectores de sonido (una `Pide_sonido` en EDX: el lba, cuántos —hasta 64—, adónde; 2.352 octetos cada uno); 2, en crudo (sección 14 sexdecies) | `cd_pistas`, `cd_sonido` | 0, `NO_HAY` o `MAL` |
+| 135 | (REPRODUCTOR) **el icono de la ventana** EBX (suya) **en la bandeja**: ECX, 16 x 16 puntos, la ayuda y las opciones de su menú; 0, quitarlo. Los clics le llegan como `EV_BANDEJA` | — | 0 |
 | 170 | (explorador, 21/11) **los atributos** del archivo o la carpeta de nombre EBX: con ECX = 0xFFFFFFFF, solo leerlos; si no, poner los de solo lectura, oculto, de sistema y archivo (`0x27`: los de carpeta y volumen no se tocan) | `atributos_de`, `poner_atributos` | los que quedan, o un error |
 | 171 | (explorador) **lo soltado fuera de la ventana**: EBX, la ventana (suya); ECX, una `Suelta` (el punto, dentro de la ventana, y una ruta entera con su letra). Lo recoge el escritorio: en el dock, se fija (o va a la Papelera); en el tapiz, un acceso nuevo | `soltar_fuera` | 0 (`EN_USO` si aún no ha recogido el de antes) |
 | 172 | (MIRADOR) **una imagen como tapiz**: EBX = 1, la de ECX (una `Imagen_tapiz`: el ancho, el alto y sus puntos 0x00RRGGBB, ya a la medida de la pantalla), que el núcleo guarda en `FONDO.HPM` (al lado de `DOCK.INI`: `\HISPA` instalado, la raíz si no) y pinta el escritorio; EBX = 0, quitarla (vuelve el de siempre) | — | 0, o el error |
@@ -465,13 +472,17 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 90-98 | **la red**: pedir al servicio de red (90) y lo del propio servicio (91 a 96, 98); cómo está (97). Las cuenta la sección 14 | `redes.cas` | |
 
 | 190-199 | (SONIDO) **el sonido**: abrir un canal (190), darle muestras (191), el canal (192), el volumen y lo de todos (193), tocar un .WAV (194); y lo del servicio de sonido (195 a 199). Las cuenta la sección 14 decies | `abrir_canal`, `dar_muestras`, `orden_canal`, `tocar_wav`, `volumen_general`, `sonar` | |
-| 180-182 | [WIN32] **los programas de Windows** (`WIN32.BIN`, sección 14 ter): poner y quitar páginas en cualquier sitio de la zona del programa (180), las teclas pulsadas ahora y desde la última vez (181), y las ventanas: hacerlas sin marco o a pantalla completa, colocarlas, traerlas delante, dónde están, el ratón (182) | — | |
+| 180-182 | [WIN32] **los programas de Windows** (`WIN32.BIN`, sección 14 ter): poner y quitar páginas en cualquier sitio de la zona del programa (180), las teclas pulsadas ahora y desde la última vez (181: EBX el búfer, ECX lo que cabe —desde la 0.8.7—: 32 octetos, solo las pulsadas ahora; 64 o más, también las de desde la última vez; 0, los 64 de antes —WIN32 1.1, juegos 1.0 y Pluma 2.0 lo dan así, con un búfer de 64—; menos de 32, `NO_VALE`. Antes escribía siempre 64: un búfer de 32 en la pila se pisaba), y las ventanas: hacerlas sin marco o a pantalla completa, colocarlas, traerlas delante, dónde están, el ratón; (JUEGOS) llevar la flecha, lo movido de verdad y esconderla (182) | — | |
+| 183-185 | (JUEGOS) **lo que pide un juego** (sección 14 quater ter): los hilos de un proceso de Windows, su TEB, el despachador de SEH, ceder y quitar las primeras 64 K (183); esperar mientras en una dirección haya un valor (184) y despertar a los que esperan (185). (El CD de sonido de los juegos es la 134, la del Reproductor, con la letra 0: el primer lector; la 186 queda libre) | `crear_hilo`, `acaba_hilos`, `a_su_despachador` | |
 
 | 150-153 | **solo el servicio de ACPI** (`ACPI.BIN`): puertos, memoria física, configuración PCI, y dar la batería y esperar órdenes (sección 11, «Apagar de verdad y la batería») | — | |
 | 154 | **la batería**: lo último que ha leído el servicio de ACPI (una `Energía`, `energia.cas`) a EBX | — | 1, o 0 si no hay servicio |
 | 155 | (dispositivos) **la lista de los dispositivos** y qué los lleva: hasta ECX fichas `Dispositivo` (320 octetos, `dispositivos.cas`) a EBX. Solo lee | `lista_dispositivos` | cuántos hay (aunque no quepan) |
 | 156 | (dispositivos; **solo los servicios**: `ACPI.BIN`, `RED.BIN`) apuntar la ficha de EBX (ECX = 0) u olvidar las suyas (ECX = 1) | — | 0 |
 | 157 | (PROTEGE) **el modo administrador**: EBX = 0, pedirlo (lo pregunta el núcleo en la pantalla: sección 14 sexies); 1, dejarlo; 2, ¿se tiene? | `pedir_admin`, `dejar_admin`, `es_admin` | 1 o 0 (`DENEGADO` si no hay a quién preguntar) |
+| 173 | (BLOC, REPRODUCTOR; la 0.8.7) **lo soltado desde Mi equipo** en una ventana suya (tras `EV_SOLTADO` = 14, que lleva el punto, visto desde dentro): la ruta, a EBX (caben ECX, con su 0). Una sola para todos: el Bloc de notas la abre en una pestaña, el Reproductor la pone en la lista. Se da una vez | `lo_soltado` | su largo; `NO_HAY` (nada para ella) o `NO_VALE` |
+| 174 | (PANEL) **un ajuste del Panel de control**: EBX la clave, ECX el valor nuevo (0xFFFFFFFF: leerlo). Cambiarlo, el Panel de control o el modo administrador (sección 14 quattuordecies) | `ajuste`, `poner_ajuste` (`panelaj.cas`) | el que queda, o `DENEGADO` |
+| 175 | (PANEL, NTP) **la hora exacta**: EBX = 0, el reloj del PC en segundos desde el 1/1/2000; EBX = 1, ponerlo a ECX (como la 67, y HORARED.BIN sin atrasarlo más de 2 horas) | `hora_exacta`, `poner_hora_exacta` | el reloj, o 0 / `DENEGADO` |
 | 158 | (PROTEGE; **solo los servicios**) el sello de la tarea EBX (los de `permisos.cas`; con el bit 31, es un servicio) | `sello_de_tarea` | el sello, o `NO_VALE` |
 | 100 | (WIFI) **pedir al servicio Wi-Fi** (`WIFI.BIN`), como la 90 (sección 14 octies) | — | la primera palabra de la respuesta (`SIN_WIFI` si no hay servicio) |
 
@@ -483,7 +494,9 @@ sectores en crudo) son solo de INSTALAR o del modo administrador; la 150 a la
 152 y la 156, solo de las tareas que el núcleo ha marcado como servicio
 (sección 14 sexies).
 
-(La 15 con `DATO_ALTO_LIBRE`, el 14, da lo alto de la pantalla sin la barra
+(La 15 con `DATO_TERMINAL`, el 15, (REPRODUCTOR) dice si el programa va en un
+terminal (la Consola, SSH); con `DATO_MIS_TICS`, el 16, los tics en que el
+reloj lo ha pillado corriendo. Con `DATO_ALTO_LIBRE`, el 14, da lo alto de la pantalla sin la barra
 de tareas ni el dock: así una ventana grande puede quedar encima del dock. La
 12 y la 28 dan además, en lo que antes iba a cero, la fecha del último
 acceso (`reservado`) y la fecha y la hora en que se hizo el archivo (`libre`:
@@ -888,7 +901,8 @@ lector de CD (MEDIO_CD) y 5 una imagen (MEDIO_IMAGEN); `clase` 9 es ISO 9660;
 `quitable` 2, que se puede expulsar; y `relleno[0]`, lo que tiene el lector (0
 nada, 1 datos, 2 música, 3 no se lee).
 
-**Lo que falta**: escuchar los CD de música (READ CD y el sonido); UDF (los
+**Lo que falta**: (escuchar los CD de música: hecho, READ CD y la llamada 134,
+§14 sexdecies) UDF (los
 DVD que solo lo llevan; los de vídeo y casi todos los de datos llevan también
 ISO 9660); los archivos de varios trozos (de más de 4 GB) de ISO 9660 y las
 entradas CE de Rock Ridge; GET EVENT STATUS NOTIFICATION (hoy, TEST UNIT READY
@@ -1082,12 +1096,16 @@ propio, con sus tildes y su eñe).
   pega en cualquier otro (del Bloc a la Consola, y al revés). Es un texto.
 - **«Apagar el equipo»**: Apagar, Reiniciar o Cancelar. Apagar deja la pantalla de
   «Ya puede apagar el equipo» (en QEMU, además, lo apaga).
-- **Configuración**: lo que hay (la pantalla, la memoria, las tareas), el teclado
-  (español o de EE. UU.), el tapiz y el dock (visible u oculto); y, junto a la pantalla, **«Cambiar...»**: la
-  medida de la pantalla, en el momento donde la tarjeta lo deja y, si no, al
-  arrancar (más abajo, «La medida de la pantalla»). **Acerca de Hispa-Pentium**: la versión y la
+- **Configuración**: (PANEL, la 0.8.7) **el Panel de control**: lo que hay
+  (la pantalla, la memoria, las tareas) y un icono por sección (Fecha y hora,
+  Pantalla, Sonido, Ratón, Teclado, Red y Wi-Fi, Energía, Programas,
+  Personalización, Dispositivos y Acerca de: sección 14 quattuordecies). El de
+  **Pantalla** es la medida de la pantalla, en el momento donde la tarjeta lo
+  deja y, si no, al arrancar (más abajo, «La medida de la pantalla»). **Acerca de Hispa-Pentium**: la versión y la
   licencia.
-- **El Bloc de notas** (`BLOC.BIN`, `ubloc.cas`): escribir un texto con el teclado
+- **El Bloc de notas** (`BLOC.BIN`, `ubloc.cas`; desde el 22/11/2026, la **1.0**:
+  pestañas, buscar y reemplazar con expresiones, colores según el lenguaje,
+  UTF-8, comparar... en la sección 14 quindecies): escribir un texto con el teclado
   español y **guardarlo en el disco** («Guardar», F2 o Ctrl+S; en la página 437 y
   con los finales de línea del DOS). Las flechas, Inicio, Fin, Re Pág, Av Pág,
   Supr, Retroceso; un clic pone el cursor; las líneas largas siguen debajo.
@@ -2129,22 +2147,128 @@ En el **menú Inicio**, el grupo **«Oficina»** (debajo de los programas) los
 abre; **Mi equipo** abre con HVPRUN los `.HVP`, los documentos de Pluma
 (`.PLU`), las hojas de Cuentas (`.HOJ`) y las imágenes (`.BMP`, `.PCX`, `.GIF`,
 `.PNG`, `.JPG`, `.TGA`, `.ICO`, `.PPM`, con Mirador). En el disco van
-`\HVPRUN.BIN` y la carpeta `\OFICINA` (los cuatro `.HVP`, `TIPOS.DAT` y
-`DICCIO.DAT`): los pone `nucleo32/hvprun/hacer.sh`, y de ahí `usb.sh` (la
+`\HVPRUN.BIN` y la carpeta `\OFICINA` (los `.HVP`, `TIPOS.DAT`, sus otros
+tamaños y `DICCIO.DAT`): los pone `nucleo32/hvprun/hacer.sh`, y de ahí `usb.sh` (la
 memoria USB) y `disco.sh IMAGEN 16 oficina`. Facturas guarda sus datos al lado
-de su módulo (`\OFICINA\FACTURAS.DAT`).
+de su módulo (`\OFICINA\FACTURAS.DAT`), y Datos su base de siempre
+(`\OFICINA\DATOS.BDD`). Desde la oficina 1.1 van también Datos, el Lector,
+Publicaciones, Presentaciones y Pintura: el apartado siguiente.
 
 Los **emuladores** que corren con HVPRUN (Hispa-Snes e Hispa-Drive) están en
 `\JUEGOS` de la memoria USB y se abren desde Mi equipo: notan que están en
 HVPRUN porque `aj_leer AJ_TXT_VERSION` da 0 y entonces usan el reloj fino
 (`aj_leer 20`) y no tocan puertos (docs/HISPADRIVE.md).
 
-Lo que falta: imprimir; el sonido; las teclas con Alt (el núcleo aún no las
-da: los menús se abren con F10 o con el ratón) y F11-F12; la forma del cursor
-que pide el programa (la flecha es siempre la del sistema); que cada cuadro de
-diálogo sea una ventana de Hispa-Pentium aparte; abrir otros programas desde
-uno de Ventanas (`prog_abrir`); y probar los otros de la oficina (Datos, el
-Lector, Publicaciones y Presentaciones), que deberían ir igual.
+Lo que falta: imprimir; la forma del cursor que pide el programa (la flecha
+es siempre la del sistema); que cada cuadro de diálogo sea una ventana de
+Hispa-Pentium aparte; y abrir otros programas desde uno de Ventanas
+(`prog_abrir`). (El sonido llegó con hvprun 0.9; Alt+letra, la rueda y los
+otros cuatro de la oficina, con la 0.10: abajo.)
+
+### La oficina 1.1 entera (rama pentium-oficina, «(OFICINA2)»)
+
+| | |
+|---|---|
+| ![Todos los programas > Oficina, con los ocho](pentium/oficina/ofi1.png) | ![Datos: un socio con eñe, tildes y euro](pentium/oficina/ofd2.png) |
+| ![El Lector con un PDF de Mi equipo](pentium/oficina/ofl1.png) | ![Publicaciones maximizada](pentium/oficina/ofp2.png) |
+| ![Presentaciones: el título con los tipos de 48 puntos](pentium/oficina/ofr1.png) | ![Una ruta larga, con el título acortado](pentium/oficina/ofg2.png) |
+| ![«Editar con Pintura» de un PCX de 16 colores](pentium/oficina/ofn5.png) | ![Guardar en \HISPA: no se puede, y lo dice](pentium/oficina/ofr2.png) |
+
+Los cuatro que faltaban de la oficina de Hispa-386 y Pintura corren ya en
+HVPRUN, comprobados uno por uno en QEMU (abrir, escribir, guardar, cerrar y
+volver a abrir; la parte 40 de las pruebas):
+
+- **Datos** (`DATOS.HVP`, tipo Access): bases `.BDD` con sus tablas, la
+  rejilla y la ficha. Su base de siempre, `DATOS.BDD`, va al lado del programa
+  (`\OFICINA`, fuera de la zona protegida).
+- **El Lector** (`LECTOR.HVP`): los PDF, con la rueda, Av Pág, buscar, copiar
+  el texto de la página y «Guardar el texto de la página» (`.TXT`).
+- **Publicaciones** (`PUBLICA.HVP`, tipo Publisher, `.PUB`) y
+  **Presentaciones** (`PRESENTA.HVP`, tipo PowerPoint, `.PRE`), con los
+  tipos de letra de la oficina en todos sus tamaños: el paquete `oficina` no
+  llevaba `TIPOS12.DAT`, `TIPOS24.DAT` ni `TIPOS32.DAT`, y lo de 9, 18, 24, 36 y
+  48 puntos salía con la letra «Hispa» a escala; ahora van (unos 500 K más).
+- **Pintura** (`PINTURA.HVP`, el paquete aparte `pintura`, tipo Multimedia,
+  como el Mirador: es de imágenes, y así se puede quitar sin quitar la
+  oficina; se instala de serie, como en Hispa-386 y en Windows). Guarda en BMP;
+  **ahora lee también PCX** (un plano de 8 bits con la paleta del final o
+  grises, color verdadero en tres planos, blanco y negro, y 16 colores en
+  planos o en un plano de 2 o 4 bits; con RLE o sin comprimir), para
+  «Editar» los PCX: lo abierto se guarda al lado como `.BMP` (el PCX no se
+  pisa). En Hispa-386 sigue igual (su prueba, `tests/run_pintura_tests.sh`).
+
+**El menú Inicio** (`inicio.cas`, «(OFICINA2)»): en Todos los programas >
+Oficina, Datos, Lector de PDF, Publicaciones y Presentaciones (y Pintura en
+Multimedia) **si está su `.HVP`** (una oficina 1.0 no los enseña), fuera de
+los más usados de salida (salen cuando se usan; los cuatro de siempre no
+cambian de sitio). **Cada uno con su icono, el de su `.HVP`** (32 x 32 a 4
+bits, desde el octeto 64, con los 16 colores de Hispa Ventanas; se lee una vez;
+si no se puede, la hoja con su letra). **Con el Mirador de Pentium**
+(el paquete `mirador`: un acceso a `MIRADOR.BIN`), **el Mirador de la oficina
+no sale** (ni en el menú ni en «Abrir con...»): no dos Miradores; el `.HVP`
+sigue en el paquete para los sistemas sin el de Pentium.
+
+**Mi equipo** (`exoper.cas` y `uequipo.cas`, «(OFICINA2)»): `.BDD` con Datos,
+`.PUB` con Publicaciones, `.PRE` con Presentaciones y **`.PDF` con Hispa-PDF si
+está instalado** (`\HISPA\HISPAPDF.BIN`) **y, si no, con el Lector**. Un
+`ASOCIA.TXT` de antes (sin esas clases) usa las de siempre para lo que no
+dice; y si el `.HVP` de una clase no está (una oficina de antes), es como si no
+hubiera nada («Abrir con...»). En el menú del botón secundario de un `.BMP` o
+un `.PCX`, **«Editar con Pintura»** (si está; «Abrir» sigue siendo el Mirador,
+el nativo si está). En «Abrir con...», los de la oficina 1.1 que estén.
+
+**HVPRUN 0.10** (`nucleo32/hvprun/poficina.inc`, y dos líneas en
+`ppantalla.inc` y `hvprun.asm`), lo que les faltaba:
+
+- **La rueda del ratón**: el suceso 13 de Hispa-Pentium no lo atendía; ahora
+  llega a Ventanas (`ges_rueda`, `WM_MOUSEWHEEL` a la ventana de debajo).
+- **Alt+letra** abre el menú que la tiene marcada: Hispa-Pentium da
+  `TECLA_ALT` + la letra (0x180...) y HVPRUN lo pasaba como un código que
+  Ventanas no conocía; ahora llega como en DOS (AL = 0, AH = el código de la
+  tecla).
+- **Los títulos largos**: el núcleo no acepta uno de 64 letras o más
+  (`MAX_TÍTULO`): con un documento de una ruta larga el título no cambiaba y,
+  si el primero ya era largo, **la ventana ni se hacía**. Ahora se acorta:
+  «Presentaciones - ...\ASOCIACI\FIESTAS\2026\PROGRAMA\FIESTA.PRE» (el nombre
+  del programa, «...» y el final de la ruta, desde una «\»).
+- **El programa, en la unidad del sistema**: Mi equipo abre un documento de
+  otra unidad (una memoria USB, `D:\CARTA.PLU`) con la unidad de trabajo en
+  la suya, y `\OFICINA\PLUMA.HVP` se buscaba en `D:`. Si no está donde se dice
+  (y se ha dado sin letra), se busca en la del sistema.
+- **Dónde se trabaja** (lo que enseñan Abrir y Guardar como, y donde va lo
+  que se guarda sin ruta): con un documento, su carpeta; sin él, **los
+  documentos del usuario**: con usuarios (la llamada 200 de la rama
+  `usuarios`: la ficha que es la suya), `\USUARIOS\<SU CARPETA>\DOCUMENT`; sin
+  ellos, `\DOCUMENT` si está; si no, la de siempre (la raíz). Nunca `\HISPA`:
+  ahí el núcleo no deja escribir a ningún programa de la oficina («acceso
+  denegado», y el programa lo dice: «No se ha podido guardar...»).
+
+**En los programas** («(OFICINA2)», sin cambiar nada en Hispa-386 más que
+esto): tras un «Guardar como» que no se puede (en `\HISPA`, o un disco
+lleno), Pluma, Cuentas, Publicaciones, Presentaciones y Pintura se quedaban
+con ese nombre, y Ctrl+G volvía a fallar sin preguntar; ahora vuelven al
+nombre de antes y Guardar pregunta otra vez dónde (`programas/pluma.asm`,
+`cuentas/archivo.inc`, `comun/lamina_ed.inc`, `pintura.asm`). Sus pruebas de
+Hispa-386 siguen pasando (`tests/run_pintura_tests.sh`, `run_pluma_tests.sh`,
+`run_cuentas_tests.sh`, `run_publica_tests.sh`, `run_presenta_tests.sh`).
+
+Comprobado también: el teclado español (tildes, ñ y el euro con Alt Gr+E),
+el portapapeles con el Bloc de notas (Ctrl+C en Datos o en el Lector, Ctrl+V
+en el Bloc), maximizar (Publicaciones se recoloca), y una ruta de 57 letras
+(`C:\USUARIOS\CARLOSSA\DOCUMENT\ASOCIACI\FIESTAS\2026\PROGRAMA`): abrir de
+ahí, guardar y «Guardar como» a esa misma carpeta.
+
+**Los paquetes**: `oficina` 1.1 (los ocho `.HVP` con `TIPOS12/24/32.DAT`;
+necesita hvprun >= 0.10), `pintura` 1.0 (`\OFICINA\PINTURA.HVP`, del sistema,
+tipo multimedia) y `hvprun` 0.10. El menú y las clases nuevas son del núcleo
+(`inicio.cas`) y de Mi equipo (`exoper.cas`, `uequipo.cas`): llegan con la
+base y el paquete `equipo` que salgan con esta rama; sin ellos, los programas
+nuevos se abren igual desde Mi equipo (dos clics en su `.HVP`).
+
+**Probarlo**: `SOLO=oficina ./pruebas.sh` (la parte 40, `castel/pruebas_oficina.sh`;
+con `OFICINA_CAPTURAS=carpeta`, deja sus capturas en PNG). Las muestras se
+hacen ahí: `nucleo32/hvprun/muestras/haz_imagenes.py` (BMP y tres PCX) y
+`nucleo32/pdf/pruebas/haz_pdf.py` (el PDF).
 
 ## 11. En un PC de verdad: GRUB, la memoria USB y el USB
 
@@ -2860,6 +2984,19 @@ instalado. Un PAQUETES de antes no mira esas líneas: un equipo con la 1.2 se
 pone al día en dos veces (la primera trae PAQUETES 1.3; tras reiniciar, la
 bandeja avisa de los nuevos del sistema y «Actualizar todo» los pone).
 
+**La serie** (22/11/2026, rama `usuarios`, por la revisión de seguridad: M3).
+La segunda línea del catálogo firmado es `serie=N`: la pone `hpq.py firma` (y
+`catalogo --clave`), dentro de lo firmado, y la sube cada vez (la de antes más
+uno y, como poco, los segundos desde 1970: sube aunque `catalogo` haya rehecho
+el archivo; `--serie N` para las pruebas). PAQUETES 1.4 apunta la más alta que
+ha visto en `C:\HISPA\PAQUETES\SERIE.TXT` y **no usa un catálogo de Internet
+con la serie más baja** (o sin serie, si ya ha visto una): «el catálogo de
+Internet es más viejo (serie 50) que el último que se ha usado (serie 100): no
+se usa». Así nadie le puede servir otra vez un catálogo viejo, firmado de
+verdad, con versiones que tenían fallos ya arreglados. Uno de una carpeta del
+equipo (el CD, una memoria USB) más viejo se usa, con un aviso (lo ha puesto ahí
+quien está delante). Un PAQUETES de antes no mira esa línea.
+
 ### Lo instalado: C:\HISPA\PAQUETES
 
 Un **registro por paquete**, `NOMBRE.PQI`: **la cabecera de su paquete, tal
@@ -2982,7 +3119,7 @@ tipo=navega internet
 | `oficina` | Oficina | bloc, oficina, pdf |
 | `internet` | Internet y red | red, tls, navega, ssh, tailscal, wifi |
 | `juegos` | Juegos y emuladores | (los emuladores, cuando lleguen) |
-| `multimedia` | Multimedia | sonido, mirador |
+| `multimedia` | Multimedia | sonido, mirador, pintura |
 | `seguridad` | Seguridad | escudo |
 | `windows` | Programas de Windows | win32 |
 | `herramientas` | Herramientas | consola, accesori, comprim |
@@ -3149,13 +3286,14 @@ python3 tools/hpq.py sistema SALIDA CARPETA...   # los paquetes del sistema (lo 
 | Paquete | Versión | Lleva | Necesita |
 |---|---|---|---|
 | `base` | 0.8.3 | `NUCLEO.BIN`, `ORDENES.BIN`, `ASISTE.BIN`, `INSTALAR.BIN`, `LEEME.TXT` (en `\HISPA` y en la raíz), `MANUAL.TXT`, `BOOT.IMG`, `CORE.IMG` | — |
-| `bloc` | 0.7 | `BLOC.BIN` | base >= 0.7 |
+| `bloc` | 1.0 (BLOC: el Bloc de notas 1.0, sección 14 quindecies) | `BLOC.BIN` | base >= 0.7 |
 | `consola` | 0.7 | `CONSOLA.BIN` | base >= 0.7 |
 | `equipo` | 0.8.3 | `EQUIPO.BIN` (Mi equipo) y `DISPOSIT.BIN` (el Administrador de dispositivos) | base >= 0.8.3 |
 | `ejemplos` | 0.8.2 | `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN`, `MUESTRA.BIN` (los controles de las ventanas) | base >= 0.8.2 |
 | `paquetes` | 1.2 | `PAQUETES.BIN`, `ACTUALIZ.BIN` (su ventana), `PROGRAMA.BIN` (la ventana con pestañas) | base >= 0.8.2, nucleo >= 0.7 |
-| `hvprun` | 0.7 | `HVPRUN.BIN` | base >= 0.7 |
-| `oficina` | 1.0 | `\OFICINA\`: `FACTURAS.HVP`, `PLUMA.HVP`, `CUENTAS.HVP`, `MIRADOR.HVP`, `TIPOS.DAT`, `DICCIO.DAT` | hvprun >= 0.7 |
+| `hvprun` | 0.10 | `HVPRUN.BIN` | base >= 0.7 |
+| `oficina` | 1.1 | `\OFICINA\`: `FACTURAS.HVP`, `PLUMA.HVP`, `CUENTAS.HVP`, `MIRADOR.HVP`, `DATOS.HVP`, `LECTOR.HVP`, `PUBLICA.HVP`, `PRESENTA.HVP`, `TIPOS.DAT`, `TIPOS12.DAT`, `TIPOS24.DAT`, `TIPOS32.DAT`, `DICCIO.DAT` | hvprun >= 0.10 |
+| `pintura` | 1.0 | `\OFICINA\PINTURA.HVP` | hvprun >= 0.10 |
 
 Y uno que no va con el sistema (`hpq.py opcionales`, la lista `OPCIONALES`: se
 instala desde «Programas y actualizaciones»): `navega` 0.1, **el Navegador**
@@ -3219,8 +3357,9 @@ sus archivos, así que con firmar el catálogo queda atado todo.
   es su firma buena, con la clave del sistema.
 - **`tools/hpq.py`**: `clave PRIVADA` (una nueva: la privada al archivo, 600, y
   dice la pública), `publica PRIVADA [clave.cas]` (y el módulo de Castel),
-  `firma CARPETA PRIVADA`, `catalogo CARPETA --clave PRIVADA` (hace el catálogo y
-  lo firma) y `comprueba CARPETA PUBLICA`. Usa el módulo `cryptography` de Python.
+  `firma CARPETA PRIVADA [--serie N]` (antes pone la serie: arriba),
+  `catalogo CARPETA --clave PRIVADA` (hace el catálogo y lo firma) y
+  `comprueba CARPETA PUBLICA`. Usa el módulo `cryptography` de Python.
 - **Cambiar de clave** (si la privada se perdiera o se supiera): una nueva con
   `hpq.py clave`, `hpq.py publica ... clave.cas`, y sacar un `paquetes` nuevo
   firmado aún con la vieja (que lleva ya la clave nueva); luego, todo con la
@@ -3591,8 +3730,11 @@ una línea `hora=servidor[:puerto]` de `TLS.INI`) y toma la de su cabecera
 `Date`. **Es un riesgo, y se apunta**: quien pueda cambiar esa respuesta (en la
 red de en medio) puede hacer pasar por bueno un certificado caducado o aún no
 válido —no uno falso: la firma y el nombre se siguen comprobando—. Lo mejor es
-poner el reloj en hora (el asistente del primer arranque, llamada 67). Si
-tampoco hay respuesta, no hay conexión: `TLS_SIN_HORA`.
+poner el reloj en hora (el asistente del primer arranque, llamada 67) y,
+desde la 0.8.7, **la hora por Internet** (HORARED.BIN, NTP: sección 14
+terdecies). (NTP) **Tampoco se fía de un reloj del PC de antes de TLS.HOR**:
+si NTP mintiera y se le hiciera caso, no colaría un certificado caducado
+antes de ese día. Si tampoco hay respuesta, no hay conexión: `TLS_SIN_HORA`.
 
 **Lo que cuesta.** Medido en QEMU con `-icount shift=0` (el contador de ciclos
 cuenta entonces instrucciones: es lo que `TLS.BIN` apunta como «M ciclos» de
@@ -3647,7 +3789,7 @@ demás del sistema en el catálogo firmado de `actualiza.sh`.
 Reensamblar lo que llega desordenado y la retransmisión rápida (escuchar en un
 puerto ya va: sección 14 ter); IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
 la vez (con el Wi-Fi, una u otra: sección 14 octies); TLS 1.3 (BearSSL no lo tiene), gzip en `Https` y la
-hora por NTP; más tarjetas (la RTL8168 del Toshiba NB250,
+hora por NTP (hecho: la 0.8.7, sección 14 quattuordecies); más tarjetas (la RTL8168 del Toshiba NB250,
 la PCnet, NE2000: Hispa-DOS ya las lleva). (El navegador, encima de esto, ya
 está: sección 14 ter.)
 (Las **actualizaciones** por la red ya van: sección 13.)
@@ -4096,6 +4238,127 @@ alarma del Reloj (suena), «Poner en hora» (pregunta el modo
 administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
 
+**La 0.8.7** (22/11, rama `pentium-087`: las ramas `usuarios`, `panel-control`,
+`bloc-avanzado`, `reproductor`, `win32-juegos`, `pentium-oficina` y `correo`,
+y la principal con `pentium-juegos` y `pluma32`; la `agenda` queda para la
+0.8.8). Lo que se tocó al juntar:
+
+- **Una sola versión**: `VERSION_087` en `hpq.py` (base, red, tls, ssh,
+  tailscal y wifi 0.8.7); `Usuario.VERSIÓN_TEXTO` («0.8.7») la dicen el menú
+  Inicio, Configuración, «Acerca de» y ahora también **la orden VER**
+  («Hispa-Pentium 0.8.7: ...»): el dato `DATO_ARREGLO` (17) da el tercer
+  número, sacado de `VERSIÓN_TEXTO` (un núcleo de antes da un error y VER
+  dice «0.8» como siempre).
+- **Soltar desde Mi equipo**: el Bloc (llamada 173) y el Reproductor (136)
+  traían cada uno su llamada para el mismo `EV_SOLTADO` = 14. Se queda **una**:
+  la **173** (`lo_soltado`, en `usuario.cas`; la ruta se da una vez y luego se
+  olvida), con `suelta_en` de `ventanas.cas` (el punto, visto desde dentro).
+  `so_pentium.c` del Reproductor pide la 173; **la 136 queda libre**.
+- **El CD de música**: el Reproductor (llamada 134: `leer_toc` y `leer_sonido`
+  de `cdrom.cas`, con la `Toc_cd`) y WIN32 (la 186, con su `toc()` y otro
+  `leer_sonido` en `cdrom.cas`, que chocaban de nombre). Se queda **la 134**,
+  que ahora acepta la letra 0 («el primer lector que haya»); `HispaCDAudio`
+  (`win32/dx.c`) la pide y le pasa a WINMM.DLL la tabla como la da READ TOC
+  (no cambia `winmm.c`). **La 186 queda libre.**
+- **Los hilos (JUEGOS) y los usuarios**: un hilo de un programa de Windows
+  hereda del proceso `uid`, `uid_hijo` y `remota` (si no, un hilo era «del
+  sistema» y cerrar la sesión no lo acababa).
+- **Los sellos** (`permisos.cas`): 20 REPRODUC, 21 PANEL, 22 HORA, 23 ARGON2,
+  24 USUARIOS (en la rama `usuarios` eran 20 y 21; sus bits `B_ARGON2` y
+  `B_USUARIOS`, 0x800000 y 0x1000000).
+- **El Panel de control** gana el icono **Usuarios** (dos personas; abre
+  USUARIOS.BIN), antes de «Acerca de»: 12 iconos; el botón «Usuarios...» de la
+  Configuración de antes ya no está. El texto de abajo, sin taparse con «Cerrar».
+- **Los iconos del tapiz al entrar un usuario**: `lo_del_usuario` los quitaba
+  de la pantalla pero no de la lista, y salían dos veces (visto al actualizar
+  desde la 0.8.6). Arreglado; y lee otra vez los accesos de los paquetes
+  (lo instalado en la sesión de antes sale ya en el tapiz).
+- **La llamada 181** (las teclas): escribía siempre 64 octetos (un búfer de 32
+  en la pila se pisaba; lo encontró Pluma). Ahora ECX dice lo que cabe: 32, un
+  mapa; 64 o más, los dos; 0, los 64 de antes (WIN32 1.1, juegos 1.0 y Pluma
+  2.0 dan 0 con un búfer de 64: siguen valiendo). WIN32 1.2 da 64.
+- **F11 y F12** llegan como teclas propias (`TECLA_F11` = 0x157, `TECLA_F12` =
+  0x158; antes, nada). Ctrl+I, Ctrl+J y Ctrl+H siguen llegando como 9, 10 y 8,
+  pero con `CON_CONTROL` en «c» de `EV_TECLA` (lo del Bloc), y Pluma lo mira
+  en el mapa de la 181: se distinguen de Tab, Intro y Retroceso.
+- **Pluma 2 y la oficina 1.1** (`exoper.cas`, `inicio.cas`): con el paquete
+  `pluma` instalado, el Pluma del menú Oficina y los .PLU/.ODT/.DOCX/.RTF de
+  Mi equipo abren Pluma 2, no el .HVP; con la oficina 1.1, Datos, Lector,
+  Publicaciones, Presentaciones y Pintura (paquete del sistema).
+- **Correo** (sección 14 undevicies): su sello es el 25 (`B_CORREO` 0x2000000;
+  `CORREO\` secreto); los .EML se abren con él; adjunta también lo que se
+  suelta desde Mi equipo en la ventana de redactar (`UE_SOLTADO` y
+  `ui_soltado()`, la llamada 173: la misma de todos); y `CORREO /BANDEJA`, con
+  usuarios, lo lanza el escritorio al entrar cada uno (`lanza_bandeja_correo`
+  en `lo_del_usuario`: es suyo, guarda en `\USUARIOS\<u>\CORREO` y se acaba
+  al cerrar su sesión); sin usuarios, al arrancar, como en su rama. El
+  paquete pide base y tls 0.8.7 (STARTTLS va en TLS.BIN).
+- **La tabla de los programas con sello** (`permisos.cas`): eran 24 como
+  mucho; con CORREO.BIN son 25 y el último se quedaba sin el suyo (Correo no
+  podía usar `\CORREO`). Ahora 32 (hay hasta 31 sellos).
+- **Las pruebas que cambian por lo que hay ahora en la raíz**: con USUARIOS,
+  ARGON2, PANEL y HORARED la entrada «como la 0.5» trae 43 archivos y en la
+  lista de X: los archivos cambian de sitio (parte 06); en `C:\` sale también
+  `AZAR.SEM` (la semilla del azar) y LINUX.ZIP baja una fila (parte 31). La
+  del Panel espera 5 s tras cambiar el tema antes del clic en «Verde».
+- **El Navegador**: la MSVCRT de WIN32 1.2 trae `asin`, `acos`, `frexp` y
+  `strcoll`, que `w32/surf/apoyo.c` también definía: en Pentium, solo las de
+  la MSVCRT (`#ifndef HISPA_PENTIUM`). Se publica el navega 0.2.2 de siempre.
+- **Las partes de las pruebas**: 33 `win32juegos` (era `juegos` en su rama),
+  34 `panel`, 35 `bloc`, 36 `reproductor`, 38 `usuarios`, 39 `juegos` (el
+  paquete), 40 `oficina`, 41 `pluma`, 42 `correo`; libre la 37 (y la 43, para
+  la `agenda`). La
+  prueba del Panel acepta el reloj de 3 a 5 minutos adelantado (con el PC
+  cargado QEMU tarda en arrancar).
+- **La serie del catálogo**: desde esta versión todo catálogo firmado lleva
+  `serie=` (los segundos desde 1970, o la de antes más uno). PAQUETES 1.3 (la
+  0.8.6) no conoce la línea y la salta; la 1.4 apunta la más alta vista y no
+  usa un catálogo de Internet con una menor (ni sin serie). El cron de Escudo
+  (`escudo_firmas.py --publica`, que llama a `hpq.py catalogo --clave`) la pone
+  sola **si usa el `hpq.py` de esta versión**: hay que fusionar en la
+  principal antes de publicar.
+
+Los paquetes: base, red, tls, ssh, tailscal y wifi **0.8.7**; paquetes 1.4;
+bloc 1.0 (pide base 0.8.7); equipo 0.9.3; win32 1.2; hvprun 0.10; oficina
+1.1; nuevos reproduc 1.0 (pide base 0.8.7), correo 1.0 (pide base y tls
+0.8.7) y pintura 1.0 (del sistema); de lo
+publicado, tal cual: accesori, consola, ejemplos, escudo, sonido, comprim,
+mirador, pdf, navega 0.2.2, clicgest, juegos 1.0, pluma 2.0 y las firmas de
+Escudo.
+
+**Las pruebas de la 0.8.7** (22/11; el PC de Albinyana se apagó a media
+batería, y lo que faltaba se pasó en el VPS, sin `make -j`, y luego otra vez
+en el PC): en el VPS, `06` 168/0, `16` 139/0, `07` 102/0, `cd` 77/0,
+`paquetes` 108/0, `menu` 95/0, `protege` 76/0, `programas` 92/0, `pantalla`
+98/0, `correo` 185/0, `tls` 72/0, `red` 72/0, `caliente` 79/0, `acpi` 78/0,
+`win32` 90/0, `win32juegos` 100/0, `sonido` 109/0, `accesorios` 81/0, `wifi`
+96/0, `mirador` 75/0, `zip` 118/0, `pdf` 80/0, `castel64` 72/0, `castel32`
+67/0, `oficina` 101/0, `bloc` 119/0, `panel` 108/0, `escudo` 103/0,
+`navegador` 98/0 y `pluma` 79/0 (el PC no tiene qpdf ni pdftotext); en el PC,
+`dispositivos` 85/0, `ssh` 70/0, `lectores` 79/0, `rueda` 71/0, `juegos`
+98/0, `reproductor` 111/0, `usuarios` 93/0 y `panel` 108/0.
+
+**La 0.8.7, por Internet** (22/11, en QEMU `pc` con el disco en IDE, como el
+VirtualBox de Carlos): un disco instalado con el CD publicado de la 0.8.6 y,
+con PAQUETES (1.3), navega, clicgest, escudo, escbase, escmes y escdia de lo
+publicado; el catálogo de la 0.8.7 (firmado, con `serie=`: la 1.3 salta la
+línea) por HTTP: «Hay 13 actualizaciones» > «Actualizar todo» (base, bloc,
+equipo, hvprun, oficina, paquetes, red, ssh, tailscal, tls, wifi, win32 y la
+nueva del sistema, pintura) > «Reiniciar ahora» > «El núcleo nuevo ha
+arrancado bien»; entra solo el usuario de antes («el usuario de HISPA.INI
+(Carlos), administrador, sin contraseña»), con los iconos una vez; la hora,
+de un NTP de mentira (el reloj iba 5 minutos adelantado: «puesta en hora: -298
+s»); VER, «Hispa-Pentium 0.8.7»; `PAQUETES INSTALA reproduc juegos pluma
+correo`; el Panel con el icono Usuarios; el Bloc 1.0; el Reproductor con un
+MP3 (en su ventana y en la Consola); `WIN32 COMPRUEBA C:\HISPA32`: los 8,
+«no falta nada»; Naves suena (grabado con `-audiodev wav`); `USUARIOS /CLAVE
+Carlos`, Logo+L, la pantalla de entrada y otra vez dentro con la contraseña:
+los récords de Campo de minas en `C:\USUARIOS\CARLOS\AJUSTES\JUEGOS` y Correo
+(su bandeja, lanzada al entrar) en `\USUARIOS\CARLOS\CORREO`. Y la serie: con
+la 1.4 ya puesta, el catálogo firmado otra vez como lo hace el cron de Escudo
+(`hpq.py catalogo --clave`: la serie, los segundos de ahora) se usa, y uno
+firmado con la serie 100 no («más viejo... no se usa»).
+
 **La 0.8.6** (22/11, rama `pentium-086`: las ramas `escudo-rapido`,
 `pentium-pdf` y `pentium-zipvisor` juntas). Lo que se tocó al juntar y lo nuevo:
 
@@ -4482,7 +4745,7 @@ se ve vuelve a seguir a lo elegido.
 | Dónde | La rueda | Ctrl+rueda |
 |---|---|---|
 | Las **rejillas y listas** de `controles.cas` (MUESTRA, el Administrador de dispositivos, ClicGest...) | la rejilla que hay debajo de la flecha, tres renglones por paso | la letra: hacia arriba, más grande (normal, vez y media, doble); hacia abajo, más pequeña |
-| El **Bloc de notas** | el texto, tres líneas por paso (el cursor se queda donde estaba; «Lín» no cambia) | — (el Bloc tiene una sola letra) |
+| El **Bloc de notas** | el texto, tres líneas por paso (el cursor se queda donde estaba; «Lín» no cambia) | (desde la 1.0) la letra: la del sistema y la de ancho fijo de 20, 24 y 32 |
 | La **Consola** | el **historial**: lo que ha subido por arriba de la pantalla (las últimas 500 líneas), en un azul algo más claro, y el título dice cuántas líneas se ha subido («Consola - historial: 6 líneas más arriba»); al escribir algo el programa, al teclear o con un clic, otra vez abajo. También con **Mayús+Re Pág** y **Mayús+Av Pág** | — |
 | **Mi equipo** (el explorador) | en el árbol, tres renglones; en los iconos y las miniaturas, una fila; en la lista, una columna; en los detalles, tres renglones de la rejilla | la vista, como en Windows: hacia arriba, más grande (detalles, lista, iconos, miniaturas); hacia abajo, más pequeña |
 | **Programas y actualizaciones** | la lista de los paquetes | — |
@@ -4549,9 +4812,9 @@ desde el 21/11: sección 14 decies); y Winsock sobre el servicio de red.
   lienzo de 32 bits donde WIN32.BIN pinta ella y sus controles. Los menús son el
   emergente del núcleo.
 - **Los paquetes**: `win32` 1.0 (nuevo), que pide `base` 0.8.4 (en la 0.8.4, con el CD, SSH y el explorador: `base` 0.8.4 y `equipo` 0.9); Naves, en el menú Inicio del sistema instalado.
-- **Falta**: hilos de verdad (como en HW32, un hilo corre entero al crearlo),
-  SEH, escuchar en la red, HTTPS para ellos (por eso NAVEGA2.EXE aún no),
-  Direct3D. Ver [pentium/WIN32.md](pentium/WIN32.md).
+- **Falta**: escuchar en la red por TCP, HTTPS para ellos (por eso NAVEGA2.EXE
+  aún no), Direct3D. (Los hilos de verdad, SEH, el registro y lo demás que
+  pide un juego: sección 14 quater ter.) Ver [pentium/WIN32.md](pentium/WIN32.md).
 
 ### 14 quater bis. OpenGL (HispaGL, la rama `opengl`)
 
@@ -4577,6 +4840,61 @@ Pruebas: `castel/pruebas.sh`, parte 22 (`SOLO=win32`), el punto 5: GLPRUEBA en
 su ventana y a pantalla completa, ENGRANA y la sala, desde la Consola, con sus
 cuadros por segundo en QEMU (por la traza de HispaGL). Las del PC (contra Mesa)
 y las de Hispa-486, en [486/OPENGL.md](486/OPENGL.md).
+
+### 14 quater ter. Lo que pide un juego de Windows (JUEGOS, la rama `win32-juegos`)
+
+*22/11/2026. Carlos probó su Half-Life 1 (de su CD) en la 0.8.5 y no
+arrancaba: faltaban piezas. Lo que pide un juego de 1998-2000 (Win32, Visual
+C++ 6, OpenGL o DirectDraw), hecho y probado con programas propios
+(`tests/juegos/`), sin el juego. Todo, con el porqué, en
+[pentium/WIN32.md](pentium/WIN32.md), «Lo que pide un juego».*
+
+- **Qué falta, dicho claro**: si un programa llama a una función que aún no
+  hay, un cuadro dice cuál (`WINMM.DLL!mixerOpen`) y desde dónde
+  (`HW.DLL+0x1234`), y lo apunta en **`\USUARIOS\<usuario>\WIN32.LOG`** (también
+  lo que importa y no hay, las DLL que no están, lo que se pide por
+  `GetProcAddress` y no está, y las excepciones que nadie recoge). Y la orden
+  **`WIN32 COMPRUEBA programa.exe`** (o una carpeta entera: todos sus `.EXE` y
+  `.DLL`, también los de dentro) dice lo que falta sin ejecutarlo.
+- **Hilos de verdad**: cada hilo es una tarea del núcleo en el mismo espacio
+  (llamada 183), con el número de su proceso (sus archivos, ventanas, sonido y
+  red son del proceso) y su propia TEB (el núcleo pone la base del descriptor
+  0x43 de FS en cada cambio de tarea); `MAX_TAREAS` pasa a 32. Esperar en una
+  dirección y despertar (184 y 185, como un «futex»). En WIN32.BIN, un cerrojo
+  grande (cada función exportada entra por un trampolín que lo toma; las que
+  esperan lo sueltan); CRITICAL_SECTION, mutex (con nombre, abandonados),
+  eventos (también `PulseEvent`), semáforos, `WaitForMultipleObjects`, TLS
+  por hilo y `__declspec(thread)`, `Interlocked*` atómicas.
+- **SEH**: las excepciones del procesador de un programa de Windows van a su
+  despachador (`seh.c`): la cadena de FS:[0], `RtlUnwind`, `RaiseException`,
+  `SetUnhandledExceptionFilter`; `_except_handler3`, `_local_unwind2` y
+  `_global_unwind2` de VC6 en MSVCRT. WIN32.BIN va desde 64 K y quita la
+  primera página: un puntero nulo falla, como en Windows.
+- **El registro** (ADVAPI32): HKCU en `\USUARIOS\<usuario>\REGISTRO.REG`, HKLM en
+  `\USUARIOS\EQUIPO.REG` (fuera de la zona protegida; de texto, como REGEDIT4).
+- **MSVCRT de VC6**: `_ftol`, las `_CI...`, new y delete de C++, `_findfirst`,
+  `_beginthreadex`, `_splitpath`, lo de Unicode y unas 140 funciones más.
+- **El juego**: `SetCursorPos` lleva la flecha (mirar con el ratón volviendo
+  al centro), `ClipCursor`, `ShowCursor` la esconde, el ratón y
+  `GetSystemMetrics` en el modo del juego a pantalla completa, DirectInput con
+  lo movido de verdad, `QueryPerformanceCounter` y `timeGetTime` a 1 MHz que no
+  se van, `LoadLibrary` con carpeta relativa a la del `.EXE`.
+- **UDP** de cliente y de servidor (`bind`, sin bloqueo, `select`, la
+  difusión); **el sonido**: la mezcla en su hilo (DirectSound en bucle no se
+  corta), waveOut con sus avisos, y **el CD de sonido** por MCI («cdaudio»:
+  READ TOC y READ CD del lector, la llamada 134 del Reproductor desde la 0.8.7).
+- **Las llamadas nuevas** (win32.cas): 182, 8 a 10 (la flecha, lo movido de
+  verdad, esconderla); 183 (los hilos, el despachador de SEH, ceder, quitar las
+  primeras 64 K); 184 y 185 (esperar y despertar); la 186 (el CD de sonido) pasó al juntar
+  la 0.8.7 a ser la 134, la del Reproductor: una sola para los dos.
+  Todo lo cambiado lleva la marca **(JUEGOS)**; con un núcleo de antes,
+  WIN32.BIN hace lo de siempre (un hilo corre entero, una excepción acaba el
+  programa).
+- **Pruebas**: la parte 33 de `castel/pruebas.sh` (`SOLO=win32juegos`; `SOLO=juegos` es la 39, la del paquete «juegos»).
+- **Falta**: lo de C++ (`__CxxFrameHandler` no destruye los objetos al
+  deshacer; un `throw` acaba el programa), MIDI, el CD de sonido probado en un
+  lector de verdad (QEMU no tiene CD de música), las prioridades de los hilos
+  (se guardan, no cambian el reparto), Direct3D.
 
 ## 14 sexies. La seguridad: la zona protegida, los secretos y los servicios (PROTEGE)
 
@@ -4655,6 +4973,7 @@ primer renglón que casa. **PAQUETES e INSTALAR escriben en toda la zona**
 | `GRUB.CFG` | ASISTE (y el escritorio, que es el núcleo) | |
 | `GRUBENV` | ACTUALIZ | |
 | `HISPA.INI` | ASISTE (y Configuración, del núcleo) | |
+| `PANEL.INI` | nadie (lo escribe el núcleo: los ajustes del Panel de control, la llamada 174; rama `panel-control`) | |
 | `INICIO.INI` (rama `pentium-menu`), `DOCK.INI`, `ATAJOS.INI` | nadie (los escribe el núcleo: el menú Inicio y el dock) | |
 | `PANTALLA.ENV`, `NUCLEO.BIN`, `NUCLEO.ANT`, `MBR.ANT`, `SEMILLA.BIN`, `ESCRIT*.BIN`, `BOOT\` | nadie (el escritorio, del núcleo, escribe `PANTALLA.ENV`) | |
 | `TLS.SEM` | TLS | sí |
@@ -4687,13 +5006,15 @@ primer renglón que casa. **PAQUETES e INSTALAR escriben en toda la zona**
 | `CLICGEST.SES` (la sesión guardada) | CLICGEST | sí |
 | `CLICGEST.ANC` | CLICGEST | |
 | `ASOCIA.TXT` | EQUIPO (Mi equipo) | |
+| `CORREO\` (las cuentas, sus contraseñas guardadas y los mensajes; rama `correo`, «(CORREO)») | CORREO | sí |
 | los programas del sistema (`ORDENES.BIN`, `RED.BIN`, `PAQUETES.BIN`... también en la raíz) y `HISPA\` en la raíz | nadie | |
 
 Los sellos (`Permisos.SELLO_...`) son los de `PAQUETES.BIN`, `ACTUALIZ.BIN`,
 `INSTALAR.BIN`, `ASISTE.BIN`, `DESCARGA.BIN`, `SSH.BIN`, `NAVEGA\NAVEGA.BIN`,
 `CLICGEST.BIN`, `EQUIPO.BIN` y `PROGRAMA.BIN`; y, **servicios**, `RED.BIN`,
 `TLS.BIN`, `ACPI.BIN`, `SSHD.BIN`, `WG.BIN`, `TAILSCAL.BIN`, `WIFI.BIN`,
-`ESCUDO.BIN` y `SONIDO.BIN` (los de las ramas que vienen ya están en la
+`ESCUDO.BIN` y `SONIDO.BIN` (y, de la rama `panel-control`, sin ser servicios,
+`PANEL.BIN` —la 174— y `HORARED.BIN` —la 174 y la 175—; los de las ramas que vienen ya están en la
 tabla: si su programa no está, no casan). ClicGest no cambia: sigue guardando `CLICGEST.SES` y
 `CLICGEST.ANC` en `\HISPA` (o en la raíz sin instalar), que son suyos.
 
@@ -4713,10 +5034,13 @@ tabla: si su programa no está, no casan). ClicGest no cambia: sigue guardando `
   quien sea quien lo lance; así, un programa malo puede lanzar
   `\HISPA\SSHD.BIN /CLAVE` y teclearle una contraseña por un terminal suyo
   (llamada 37). PAQUETES está a salvo (solo instala lo firmado); SSHD,
-  TAILSCAL y WG, no del todo: cuando haya usuarios, sus órdenes de
-  configuración pedirán el modo administrador.
-- **No hay usuarios ni contraseña** para el modo administrador: lo da quien
-  esté delante del equipo.
+  TAILSCAL y WG, no del todo. (USUARIOS) Con usuarios: lo que escriben
+  PAQUETES e INSTALAR en toda la zona y la configuración de SSHD, WG y
+  TAILSCAL valen solo si quien los lanza es administrador (o el sistema);
+  SSHD dice que no a /ENCENDER, /APAGAR, /PUERTO y /CLAVE de un usuario normal.
+- ~~**No hay usuarios ni contraseña** para el modo administrador: lo da quien
+  esté delante del equipo.~~ Desde la rama `usuarios` (22/11), con usuarios,
+  solo lo pide un administrador y con **su** contraseña (sección 14 tredecies).
 - **La memoria USB de arranque** (con «escritura=usb»): su raíz no es toda
   zona protegida (sus documentos, sí se escriben), solo lo de la tabla.
 - **Otras unidades** con un `\HISPA` (otro disco, una memoria USB) no están
@@ -5083,7 +5407,8 @@ programa del anillo 3 con `-DHL_PENTIUM`, como `TLS.BIN` con BearSSL.
   red no se guarda: la contraseña se escribe cada vez), **Buscar**, **Conectar** (o dos clics,
   o Intro), **Desconectar** y **Olvidar**; y **«Usar: Automático / Cable /
   Wi-Fi»** (el elegido, verde y subrayado).
-- **Configuración** tiene la misma fila, **«Red: Automático, Cable, Wi-Fi»**.
+- **Configuración** tiene la misma fila, **«Red: Automático, Cable, Wi-Fi»**
+  (desde la 0.8.7, en el Panel de control > Red y Wi-Fi: «Por dónde va la red»).
 - Las redes conectadas se **recuerdan** y el equipo **se conecta solo** a la
   mejor que se vea (si se pierde, vuelve a buscarla cada 5 segundos). Tras
   conectar, la IP la pide `RED.BIN` por DHCP, como con el cable: `IPCONFIG`,
@@ -5577,7 +5902,7 @@ En Castel (`llamadas.cas`): `abrir_canal(hz, canales, bits)`,
   arrastrar, la rueda, las flechas, «Silencio» y «Ajustes...»; se va al
   pinchar fuera); **el botón secundario**, «Silenciar» (o «Quitar el
   silencio») y «Configuración de sonido...».
-- **Configuración > «Sonido...»** (`SONIDO /VENTANA`): la tarjeta, el códec y
+- **Configuración > «Sonido...»** (`SONIDO /VENTANA`; desde la 0.8.7, el icono Sonido del Panel de control): la tarjeta, el códec y
   la salida (con los auriculares: «enchufados» o no), el volumen general
   (arrastrando, con la rueda o con las flechas), el silencio, «Probar:
   Izquierdo / Derecho» (un do por la izquierda; un mi por la derecha), los
@@ -5659,8 +5984,8 @@ QEMU_MAS="-audiodev wav,id=s,path=/tmp/sale.wav -device intel-hda -device hda-du
   STAC9221 y AC'97 con el AD1980); y la VIA, que no tiene emulador.
 - Grabar (el micrófono y la línea); el mezclador por fuentes de HSPSND
   (`snd_mezcla`); el HDMI; más de un códec a la vez; cambiar de salida a mano.
-- Los mandos (HSPJOY) en HVPRUN; un reproductor de música (MP3, OGG) y el
-  CD de música.
+- Los mandos (HSPJOY) en HVPRUN. (El reproductor de música y el CD de música:
+  el Reproductor, §14 sexdecies.)
 
 ## 14 undecies. Hispa-PDF (PDF.BIN y su ventana, rama pentium-pdf)
 
@@ -5844,8 +6169,8 @@ pero no es su letra), JPX/JBIG2/CCITT al pintar, los mosaicos y los
 sombreados de malla, la escritura de derecha a izquierda y vertical en el
 texto, leer las páginas por columnas, el orden de los marcadores al unir
 varios (solo van los del primero), nombres largos al escribir (el núcleo,
-8+3), y que el Lector de la oficina de Hispa-386 vaya en el paquete `oficina`
-de Pentium (hoy no va: los .PDF se abren con Hispa-PDF).
+8+3). (El Lector de la oficina de Hispa-386 va ya en el paquete `oficina` 1.1:
+los .PDF se abren con Hispa-PDF si está y, si no, con el Lector.)
 ## 14 duodecies. Comprimidos y el Mirador (rama pentium-zipvisor)
 
 *21/11/2026, la rama `pentium-zipvisor`: dos programas de la lista de metas
@@ -6011,7 +6336,1132 @@ sacado, igual octeto a octeto que lo de Linux, y el ZIP hecho allí, bueno para
 el `unzip` de Linux) y la ventana desde el explorador, con capturas; y el
 Mirador con sus seis imágenes de prueba, el tapiz y otro arranque.
 
-## 14 quaterdecies. Los juegos (el paquete «juegos», rama pentium-juegos)
+## 14 tredecies. Los usuarios, sus contraseñas y sus carpetas (USUARIOS)
+
+*22/11/2026, rama `usuarios` («usuarios con contraseña y carpetas propias»,
+METAS; y lo que quedaba de la revisión de seguridad del 21/11: la serie del
+catálogo, el pozo del azar y SSHD con los usuarios). Lo cambiado en archivos
+de todos lleva la marca «(USUARIOS)»; lo nuevo, en `cuentas.cas` (los
+usuarios y la sesión), `entrada.cas` (la pantalla de entrada), `pozo.cas` (el
+azar), `ucuentas.cas` (`USUARIOS.BIN`) y `hispac/argon2.c` (`ARGON2.BIN`).*
+
+### Cómo se usa
+
+- **La pantalla de entrada.** Con el escritorio: los usuarios, cada uno con su
+  cara (un color y una señal de 1 a 10 puntos), su nombre y su tipo; el elegido,
+  con un borde grueso, una flecha y su nombre en negrita (nada depende solo
+  del color). Las flechas cambian de usuario; con contraseña se escribe (salen
+  puntos) e Intro o «Entrar»; sin ella, Intro. Abajo, «Reiniciar» y «Apagar».
+  Va por delante de todas las ventanas (también de las que salgan luego) y se
+  lleva todas las teclas: ni el logo, ni Alt+Tab, ni Ctrl+Alt+Supr la saltan
+  (`Ventanas.cortina`).
+- **Entra solo** el usuario que lo tiene marcado y no tiene contraseña (la
+  biblioteca del HP Mini: un usuario «Biblioteca», normal, sin contraseña y
+  «Entra solo al encender»). Si no hay ninguno así, la pantalla.
+- **Cerrar sesión** (menú Inicio, «Apagar el equipo» › Cerrar sesión, o
+  logo+L): se cierran sus programas (los que queden se acaban: los suyos, no
+  los del sistema) y sale la pantalla de entrada, para él o para otro (aunque
+  haya uno que entra solo). Al entrar, lo suyo: el dock, lo fijado en el menú
+  Inicio, los accesos del tapiz (de su carpeta de ajustes) y «Hola, Bea».
+- **Configuración › «Usuarios...»** (`USUARIOS.BIN`; una sección aparte: el
+  Panel de control la abre con `\USUARIOS.BIN`): la lista (nombre, tipo, si
+  tiene contraseña, si entra solo; «(usted)» detrás del suyo), y del elegido: el nombre, el
+  tipo, la imagen, entrar solo, guardar y quitar; la contraseña (la de ahora,
+  si es la suya; la nueva dos veces), «Quitarla»; y «Usuario nuevo». Un
+  administrador lo hace todo; uno normal, su contraseña y su imagen.
+- **En la Consola** (y por SSH), las mismas cosas: `USUARIOS` (la lista; con el
+  escritorio, la ventana), `USUARIOS /LISTA`, `USUARIOS /NUEVO nombre [/ADMIN]
+  [/SOLO]` (pregunta la contraseña con asteriscos; Intro, sin ella), `USUARIOS
+  /CLAVE nombre`, `/QUITA nombre`, `/TIPO nombre ADMIN|NORMAL`, `/IMAGEN nombre
+  N`, `/SOLO nombre SI|NO`.
+- **Sin escritorio** (`ordenes` en la línea del cargador): «Usuario:» y
+  «Contraseña:» (con asteriscos) en la consola de texto (si entra uno solo, sin
+  preguntar). Al acabar el intérprete (SALIR) se sale, y otra vez la entrada.
+  **La consola del núcleo** (la de `lanzar`, `dir`... sección 9) es para un
+  administrador: uno normal entra derecho al intérprete y, al salir, sale.
+- **La migración**: un sistema de antes (sin `USUARIOS.TXT`) tiene el usuario de
+  `HISPA.INI` como administrador, sin contraseña y entrando solo: todo sigue
+  como estaba. `USUARIOS.TXT` no se escribe hasta que se cambia algo; entonces
+  cada uno recibe su carpeta. Sin sistema instalado (la memoria USB de
+  arranque, el CD) no hay usuarios.
+
+### Lo de cada uno
+
+- **Su carpeta**: `\USUARIOS\<CARPETA>\` (las letras y cifras del nombre, en
+  mayúsculas, hasta 8: `ANA`, `BIBLIOTE`), con `DOCUMENT` (Mis documentos: el
+  menú Inicio los busca ahí y, si no hay ninguno, abre esa carpeta en Mi
+  equipo), `ESCRITOR` y `AJUSTES` (`DOCK.INI`, `INICIO.INI`,
+  `ATAJOS.INI`, y `AUTORIZA.TXT`: sus llaves de SSH). **Solo la leen y la
+  escriben su dueño y el modo administrador** (permisos.cas: «acceso
+  denegado» al abrirla, verla, escribir, borrar, llevarse algo, lanzar un
+  programa de ella); `\USUARIOS` se mira, pero solo el núcleo hace carpetas en
+  él. Quitar un usuario no borra su carpeta.
+- **Tipos**: el **administrador** instala y quita programas (PAQUETES:
+  «solo un administrador puede instalar, actualizar o quitar programas»; y el
+  núcleo, además, no deja a un PAQUETES lanzado por uno normal escribir en
+  `\HISPA`, salvo su serie y lo bajado), cambia la hora (la 67), pide el modo
+  administrador (la 157, **con su contraseña**: en la ventanita del núcleo,
+  en la consola o en el terminal de SSH; sin contraseña, el «Sí, dárselo» de
+  antes), da de alta a los demás y enciende SSHD. El **normal**, lo suyo. Siempre
+  queda al menos un administrador. Lo que escribe un programa del sistema
+  lanzado por un usuario normal tampoco vale en lo delicado: `GRUB.CFG`,
+  `GRUBENV` (qué núcleo arranca) y `HISPA.INI` (ASISTE, ACTUALIZ:
+  `regla_admin`), la configuración de SSHD, WG y TAILSCAL, toda la zona de
+  PAQUETES e INSTALAR; ni la hora (la 67) ni el disco en crudo (la 64) de
+  ASISTE e INSTALAR.
+- **Quién es cada programa**: `Tarea.uid` (tareas.cas): el de quien lo lanza;
+  lo que lanza el escritorio, del que ha entrado; lo que pone en marcha el
+  núcleo (los servicios, lo del arranque), 0, el sistema (que no entra en
+  ninguna carpeta de usuario).
+
+### Las contraseñas
+
+- **Nunca se guardan**: en `\HISPA\USUARIOS.TXT` (un secreto: solo lo lee el
+  núcleo; con el modo administrador se ve) va su resumen **Argon2id** (RFC
+  9106; 12 MB de memoria, 3 pasadas, un hilo: lo que pide la OWASP), con una
+  sal de 16 octetos del pozo del azar: `u=1|A|0|0|ANA|Ana|argon2id$12288$3$<sal>$<resumen>`.
+  Cada resumen lleva su memoria y sus pasadas (se pueden subir sin perder las
+  de antes). Se escribe por `USUARIOS.NUE` (si se va la luz, queda uno entero).
+- **Las resume `ARGON2.BIN`** (C, Monocypher 4: el núcleo es de Castel, sin
+  números de 64 bits): el núcleo lo pone en marcha de `\HISPA` cada vez,
+  le da el pedido por la llamada 209 (solo a esa tarea, con su sello: un
+  ARGON2.BIN lanzado a mano no recibe nada) y recoge los 32 octetos; no toca
+  el disco, y borra la memoria al acabar. La contraseña se resume en UTF-8
+  (desde la pantalla, en la página 437, la pasa él): la misma por SSH. En QEMU
+  tarda unos 0,7 s; en un Pentium M, algo menos.
+- **Los intentos malos** (la pantalla, el modo administrador, SSH, todos
+  juntos): desde el tercero seguido, una espera que dobla cada vez (hasta un
+  minuto).
+- **Sin `ARGON2.BIN`** no se puede entrar con contraseña («falta ARGON2.BIN»);
+  sin contraseña, sí.
+
+### Lo que no cubre (y por qué)
+
+- **El disco leído desde otro sistema.** Las carpetas y `USUARIOS.TXT` los
+  guarda el núcleo de Hispa-Pentium: quien saque el disco y lo lea en otro
+  equipo (o arranque otro sistema desde una memoria USB, o cambie la línea de
+  GRUB) lo lee todo, porque **no hay cifrado**. Las contraseñas no se pueden
+  sacar del resumen (Argon2id, con su sal), pero los documentos están en
+  claro. Para eso haría falta cifrar el disco o las carpetas (queda por hacer).
+- **ClicGest**: su sesión guardada (`\HISPA\CLICGEST.SES`) es una para todo
+  el equipo: quien abra ClicGest con otro usuario entra con la sesión de quien
+  marcó «recordarme» (habría que llevarla a la carpeta de cada uno: en
+  ClicGest, que tiene su repositorio). Y «Salir» no corta la sesión en el
+  servidor: la API de ClicGest no tiene `/api/v1/admin/logout` (se corta desde la
+  web, en las sesiones por equipo).
+- Un servicio que lanza a mano un usuario (TAILSCALE /VENTANA desde la bandeja)
+  es de ese usuario: si es normal, no cambia la configuración del túnel.
+
+### El azar del núcleo (pozo.cas)
+
+Cada interrupción (el reloj, el teclado, el ratón, la red) y cada lectura del
+disco echan el momento exacto (el contador de ciclos) a un anillo; al pedir
+azar se mezcla con SHA-256 con el estado de antes, el contador de ciclos,
+RDRAND (si el procesador lo tiene), los tics y la fecha; lo que sale es el
+SHA-256 del estado con un contador, y el estado cambia detrás. La semilla de
+una vez a otra va en `\HISPA\AZAR.SEM` (secreto: solo el núcleo): se hace en
+el primer arranque y se cambia al apagar (en los demás arranques el disco no se
+toca: las pruebas que comparan el disco octeto a octeto siguen valiendo); dos
+arranques con la misma semilla no dan el mismo azar, por el momento de cada
+interrupción y RDRAND. Los programas lo piden con la **llamada 210**
+(hasta 256 octetos); lo usan TLS.BIN (con lo suyo), SSH, SSHD, WG y TAILSCAL
+(`h_azar`, en hispac/hispa.c), WIFI.BIN (las claves de WPA2: la SNonce;
+`hl_azar`) y las sales de las contraseñas. Con un núcleo de antes, cada uno
+sigue con su azar de siempre.
+
+### SSH con los usuarios
+
+`SSHD` (sección 14 quinquies), con usuarios: se entra con el nombre de un
+usuario y **su** contraseña (la comprueba el núcleo, la llamada 202), o con
+una llave de su `\USUARIOS\<CARPETA>\AJUSTES\AUTORIZA.TXT` (un administrador,
+también con las de `\HISPA\SSH\AUTORIZA.TXT` de antes); los que no tienen
+contraseña, solo con llave. El intérprete que se lanza es de ese usuario. La
+contraseña de `SSHD /CLAVE` de antes vale solo para un administrador que aún no
+tiene la suya (la migración); con usuarios, `SSHD /CLAVE` dice que se use la de
+cada uno. Encender, apagar y el puerto, solo un administrador.
+
+### Las llamadas (usuario.cas)
+
+| | |
+|---|---|
+| 200 | lo de los usuarios: 0, cuántos (0: sin usuarios); 1, la ficha número ECX (64 octetos: `Ficha_usuario`) a EDX; 2, el número del de la tarea; 3, ¿administrador?; 4, su carpeta; 5, el que ha entrado |
+| 201 | (solo `USUARIOS.BIN`) crear, quitar, cambiar, la contraseña: un `Pedido_usuario` |
+| 202 | (solo `SSHD.BIN`) ¿es esa su contraseña? / el de una llave ya comprobada: el siguiente programa que lance será suyo |
+| 209 | (solo el `ARGON2.BIN` que pone el núcleo) el pedido y el resumen |
+| 210 | azar del pozo del núcleo (hasta 256 octetos) |
+
+Los envoltorios, en `llamadas.cas` (`hay_usuarios`, `ficha_usuario`,
+`mi_usuario`, `soy_administrador`, `mi_carpeta`, `pedir_usuarios`,
+`azar_del_sistema`) y en `hispac/hispa.h` (`SC_USUARIOS`, `SC_ENTRAR_SSH`,
+`SC_AZAR`).
+
+### Las pruebas
+
+`SOLO=usuarios castel/pruebas.sh` (la parte 38, `pruebas_usuarios.sh`):
+ARGON2 en Linux con ASan y UBSan (el vector de la RFC 9106, la página 437 y
+UTF-8, 2.000 pedidos al azar) y la serie de `hpq.py`; un sistema de antes que
+da de alta usuarios (y el resumen de Ana hecho en QEMU es el mismo que el de
+Linux; ni rastro de las contraseñas en el disco); el usuario normal que no lee
+ni escribe la carpeta de otro, ni lanza sus programas, ni lee `USUARIOS.TXT`
+ni `AZAR.SEM` ni el disco en crudo, ni pone la hora, ni pide el modo
+administrador, ni instala, ni enciende SSHD; la entrada en texto (mala y
+buena) y el modo administrador con su contraseña; el catálogo con la serie 50
+rechazado tras el de la 100; el azar distinto en cada arranque; la pantalla de
+entrada con el escritorio (capturas: Ctrl+Alt+Supr y el logo no la saltan; la
+contraseña mala; cerrar la sesión y entrar como Bea, «Hola, Bea»); y SSH con
+OpenSSH (Bea con su contraseña entra y es Bea, y no lee lo de Ana; con otra,
+no; Biblioteca sin contraseña, no; Ana con la llave de su carpeta).
+
+## 14 quattuordecies. El Panel de control y la hora por Internet (PANEL)
+
+*22/11/2026. Todo lo cambiado lleva la marca «(PANEL)»; lo de la hora,
+también «(NTP)». Lo pidió Carlos con la hoja de ruta (docs/pentium/METAS.md:
+«Panel de control completo» y «NTP: la hora por Internet»).*
+
+| | |
+|---|---|
+| ![Configuración: el Panel de control, con un icono por sección](pentium/panel/configuracion.png) | ![Fecha y hora: la zona, el horario de verano y la hora por Internet](pentium/panel/fecha.png) |
+| ![Ratón: la velocidad, el doble clic con su prueba, zurdos y la rueda](pentium/panel/raton.png) | ![Personalización: el tema Grafito, con su contraste, y el tapiz verde](pentium/panel/personaliza.png) |
+| ![«¡Ojo!»: Internet dice una hora muy distinta (aquí, un servidor que miente)](pentium/panel/salto.png) | ![Energía: apagar la pantalla, la batería baja y el botón de encendido](pentium/panel/energia.png) |
+| ![Teclado: el latinoamericano, con «{ñ¡» en el campo de prueba](pentium/panel/teclado.png) | ![El botón de encendido (en QEMU, system_powerdown): «Apagar el equipo»](pentium/panel/boton.png) |
+
+### Configuración es el Panel de control
+
+**Configuración** (el menú Inicio, el del tapiz, el dock) ya no es un cuadro
+de botones: es el **Panel de control**, un icono grande con su nombre por
+sección (cada icono con su forma, `iconpanel.cas`: el calendario, la
+pantalla, el altavoz, el ratón, el teclado, las rayitas de la señal, la
+pila, la caja, la paleta, el chip y la «i»), con lo que hay arriba (la
+versión, la pantalla y la memoria, como antes). Se abre con un clic, o con
+las **flechas** (el borde azul grueso va de icono en icono) e **Intro**; Esc
+lo cierra.
+
+| Icono | Lo que abre |
+|---|---|
+| Fecha y hora | el Panel de control (`PANEL /FECHA`) |
+| Pantalla | la medida de la pantalla, del núcleo (sección 10, como «Cambiar...» antes) |
+| Sonido | `SONIDO /VENTANA` (sección 14 decies) |
+| Ratón, Teclado, Red y Wi-Fi, Energía, Personalización | el Panel de control en esa sección (`/RATON`, `/TECLADO`, `/RED`, `/ENERGIA`, `/PERSONALIZA`) |
+| Programas | «Programas y actualizaciones», en Instaladas (`PROGRAMA /INSTALADAS`, sección 13) |
+| Dispositivos | el Administrador de dispositivos (`DISPOSIT.BIN`) |
+| Acerca de | «Acerca de Hispa-Pentium», del núcleo |
+
+El **Panel de control** (`PANEL.BIN`, `upanel.cas`, con `controles.cas` y la
+letra grande) tiene las secciones a la izquierda (también con Ctrl+Tab, o
+arriba y abajo) y lo de cada una a la derecha. **Todo se pone al momento y
+se guarda**: el núcleo lo aplica y lo escribe en `PANEL.INI`, y lo vuelve a
+poner al arrancar (`preferencias.cas`). Nada va solo por el color: lo
+elegido lleva «(elegido)» o un borde grueso; las casillas, su X; la
+velocidad, sus casillas y «5 de 10».
+
+- **Fecha y hora**: la hora de ahora; la **zona horaria** (13: Europa/Madrid
+  —la de siempre—, Canarias, Lisboa, Londres, París/Roma/Berlín, Atenas, UTC,
+  Ciudad de México, Bogotá/Lima/Quito, Caracas, Buenos Aires/Montevideo,
+  Nueva York y Los Ángeles: `zonas.cas`), **cambiar solo al horario de
+  verano** (el de la UE o el de EE. UU.), **poner en hora por Internet**
+  (al arrancar y cada 4 horas), **«Sincronizar ahora»**, cómo fue la última
+  vez y **ponerla a mano** (dd/mm/aaaa y hh:mm:ss, con «Ahora»). Lo que mueve
+  el reloj (la zona, el horario de verano, ponerla a mano y una hora de
+  Internet muy distinta) **pide el modo administrador** (la 157: lo pregunta
+  el núcleo). Al cambiar de zona, el reloj se mueve con ella (sigue siendo la
+  misma hora universal).
+- **Ratón**: la **velocidad de la flecha** (de 1 a 10: cada punto, de 2 a 22
+  octavos, con lo que sobra guardado para el siguiente; `raton.cas`), el
+  **doble clic** (de 0,2 a 0,9 s: `Ventanas.tics_doble`) con **una carpeta
+  de prueba** que se abre con dos clics, **para zurdos** (los botones
+  cambiados en el núcleo: para todos los programas) y **la rueda**: 3, 6, 9,
+  12 o 15 renglones por paso (los programas desplazan tres por paso; el
+  núcleo les da dos, tres... pasos por cada uno del ratón: vale para todos
+  sin tocarlos, también el Navegador y los de Windows).
+- **Teclado**: la **distribución** (española, **latinoamericana** —nueva en
+  `consola.cas`: la ñ en su sitio, el acento a la derecha de la P, ¿ junto
+  al 0, @ con Alt Gr y la Q— o de EE. UU.), el **retardo** y la **velocidad
+  de repetición** (en el teclado PS/2, la orden F3h; en los USB,
+  `usbhid.cas`), **Bloq Num al arrancar** (con su luz) y un campo para
+  probarlo.
+- **Red y Wi-Fi**: cómo está la red (con su IP), **por dónde va**
+  (Automático, Cable o Wi-Fi: lo de la fila «Red» de antes, que guarda
+  RED.BIN en RED.INI) y los botones «Redes Wi-Fi...» (REDWIFI.BIN) y
+  «Tailscale...».
+- **Energía**: **apagar la pantalla** tras 1, 5, 10, 15, 30 o 60 minutos sin
+  tocar nada (o nunca, lo de siempre: se pone negra con una ventana encima
+  de todo —sin DPMS aún: la luz de la pantalla sigue encendida— y vuelve con
+  el ratón o una tecla); **con la batería baja, sin cable, apagar el
+  equipo** (al 3, 5 —lo de siempre—, 10 o 15 %; avisa 5 puntos antes; dos
+  lecturas seguidas, para que una mala no lo apague; el apagado de siempre,
+  que espera a los programas sin guardar) y **el botón de encendido**:
+  apagar (lo de siempre), preguntar («Apagar el equipo») o nada. El botón lo
+  mira **ACPI.BIN** (la versión 2 de su `pe_energia`, con `boton`): PWRBTN_EN
+  puesto y PWRBTN_STS mirado y borrado en cada vuelta. En QEMU va
+  (`system_powerdown`); en los equipos que no pasan al modo ACPI hasta
+  apagar, el botón lo atiende la BIOS (SMI) y no llega.
+- **Personalización**: el **tema** de los colores —el título de la ventana
+  activa, la barra de tareas, la bandeja y sus botones—: **Azul** (el de
+  siempre, tal cual), **Azul intenso**, **Verde bosque**, **Grafito**,
+  **Granate** y **Alto contraste** (negro, letra blanca, la ventana activa
+  con su borde amarillo en la barra), con una muestra y **el contraste de la
+  letra medido** (WCAG: la blanca sobre el color más claro de cada
+  degradado, la barra, la bandeja y sus botones: 4,6 a 1 el que menos de los nuevos, 17,4 el alto contraste; el de
+  siempre, 4,7 en medio del título y 3,4 arriba, se deja como estaba); el
+  **tapiz** (Olas, Azul, Verde, o **«Una imagen...»**: abre el Mirador, que
+  la pone con «Usar como fondo de escritorio») y **ver el dock**.
+
+### Lo que pone el núcleo: `preferencias.cas` y la llamada 174
+
+| EAX | Qué | Devuelve |
+|---|---|---|
+| 174 | (PANEL) **un ajuste del Panel de control**: EBX la clave (`AJ_...`), ECX el valor nuevo (0xFFFFFFFF: solo leerlo). Leer, cualquiera; cambiar, el Panel de control (su sello, `SELLO_PANEL`) o el modo administrador; la zona horaria y el horario de verano, solo el modo administrador; lo de la hora por Internet que enseña el Panel, también HORARED.BIN (`SELLO_HORA`) | el valor que queda, `DENEGADO` o `NO_VALE` |
+| 175 | (PANEL, NTP) **la hora exacta**: EBX = 0, el reloj del PC en segundos desde el 1/1/2000 a las 0:00 (la FAT va de dos en dos); EBX = 1, ponerlo a ECX: lo de la 67 (los servicios, el asistente, INSTALAR y el modo administrador) y HORARED.BIN, que **no lo puede atrasar más de 2 horas** sin el modo administrador (una, el cambio al horario de invierno) | el reloj, o 0 / `DENEGADO` |
+
+Las claves (`preferencias.cas` y, para los programas, `panelaj.cas`, aparte
+de `llamadas.cas` para que los que no lo usan no cambien):
+
+| Clave | | Valores (lo de siempre) | En PANEL.INI |
+|---|---|---|---|
+| 1 | velocidad del ratón | 1 a 10 (5) | `raton_velocidad` |
+| 2 | doble clic | 20 a 90 centésimas (45) | `raton_doble` |
+| 3 | zurdos | 0 o 1 (0) | `raton_zurdo` |
+| 4 | renglones de la rueda | 3, 6, 9, 12, 15 (3) | `raton_rueda` |
+| 5 | distribución del teclado | 0 EE. UU., 1 española, 2 latinoamericana (la de HISPA.INI) | `teclado` |
+| 6, 7 | retardo y velocidad de repetición | 0 a 3 (1: 500 ms); 2 a 30 por segundo (25) | `teclado_retardo`, `teclado_ritmo` |
+| 8 | Bloq Num al arrancar | 0 o 1 (1) | `bloq_num` |
+| 9 | apagar la pantalla | minutos (0: nunca) | `pantalla_apagar` |
+| 10 | apagar con la batería baja | % (5; 0: nunca) | `bateria_apagar` |
+| 11 | el botón de encendido | 0 apagar, 1 preguntar, 2 nada (0) | `boton_encendido` |
+| 12 | el tema | 0 a 5 (0) | `tema` |
+| 13 | el tapiz | 0 olas, 1 azul, 2 verde (al leer, 3: una imagen) | `tapiz` (la línea del cargador, `tapiz=`, va antes) |
+| 14, 15 | el dock; por dónde va la red | (en DOCK.INI y en RED.INI, como antes) | — |
+| 16, 17, 18 | la zona; la hora por Internet; el horario de verano solo | 0 a 12 (0); 0 o 1 (1); 0 o 1 (1) | `zona`, `hora_internet`, `verano_automatico` |
+| 19 | el reloj lleva el horario de verano | 0, 1 (2: no se sabe aún) | `verano_puesto` |
+| 20, 21, 22 | la última puesta en hora, cómo fue, lo que iba mal | (solo en memoria) | — |
+
+`PANEL.INI` va en `\HISPA` (sin instalar, en la raíz de la memoria) y **lo
+escribe solo el núcleo** (en la zona protegida, `PANEL.INI`: nadie); guarda
+también tal cual la línea **`ntp=`** (los servidores de la hora,
+`nombre[:puerto],...`), que lee HORARED.BIN. El escritorio lo lee al
+arrancar (`lee_preferencias`), después de `HISPA.INI` (su teclado va antes
+que el del asistente). Los colores del tema van a `Ventanas` (el título) y a
+`Preferencias.tema` (la barra, que pinta el escritorio); el ratón, a
+`Raton.velocidad` y `Raton.zurdo`; el doble clic, a `Ventanas.tics_doble`;
+la rueda, a `Ventanas.pasos_por_paso`; el teclado, a
+`Consola.pon_distribución`, `pon_repetición` y `pon_bloq_num` y a
+`Usbhid.repite_tras` y `repite_cada`.
+
+### La hora por Internet: HORARED.BIN
+
+`HORARED.BIN` (`uhorared.cas`, con `ntp.cas` y `zonas.cas`; el nombre, para
+no chocar con la orden HORA del intérprete) es un cliente **SNTP** (RFC 4330:
+NTP por UDP, el puerto 123) sobre los puertos UDP que RED.BIN ya daba a los
+programas (`Redes.udp_abrir`, `udp_enviar`, `udp_recibir` y
+`cerrar_conexión`: no ha hecho falta tocar RED.BIN; quien haga winsock UDP
+—la rama win32-juegos— usa lo mismo). **No es un servicio**: tiene su sello
+(`SELLO_HORA`, por la ruta, como los demás programas del sistema), que solo
+le deja poner la hora (la 175) y apuntar lo suyo en el Panel (la 174).
+
+- **El escritorio lo pone en marcha al arrancar** (`HORARED /VIGILAR`, de
+  la carpeta del sistema; si no está, nada). En cuanto hay red (lo mira con
+  la 97, sin despertar a RED.BIN), pregunta la hora y la pone; luego, **cada
+  4 horas** (si falla, a los 15 minutos; sin red, mira cada 10 s); y **cada
+  minuto mira el horario de verano** (en la UE, el último domingo de marzo a
+  la 1:00 UTC y el de octubre: una hora más o una menos, justo al cambiar el
+  segundo), aunque no haya red. Si el equipo estaba apagado al cambiar, lo
+  pone al arrancar (lo que lleva el reloj se guarda: `verano_puesto`).
+- **Los servidores**: `hora.roa.es` y `minuto.roa.es` (la hora oficial de
+  España, del Real Instituto y Observatorio de la Armada), `es.pool.ntp.org`
+  y `pool.ntp.org`; o los de la línea `ntp=` de PANEL.INI. Se pregunta a
+  todos (2 s cada uno como mucho), con una galleta en el «transmit» que la
+  respuesta tiene que traer en el «originate» (modo 4, estrato de 1 a 15,
+  sin «no sincronizado»); la hora es la de su «transmit» más la mitad de la
+  ida y vuelta (sin lo que tardó él).
+- **El reloj del PC lleva la hora de aquí** (como el DOS y Windows: la FAT y
+  la barra de tareas la usan tal cual): la universal más la zona y, en
+  verano, una hora. **Se guarda en la CMOS** (la llamada 175, con los
+  segundos de uno en uno, justo al empezar el segundo: un segundo arriba o
+  abajo, lo que da la CMOS).
+- **Ajuste suave**: hasta 2 minutos, un segundo cada diez (al cambiar el
+  segundo del reloj, uno más o uno menos); más, de una vez.
+- **En la Consola**: `HORARED` (cómo está: la zona, el verano, la última
+  vez), `HORARED /AHORA [servidor[:puerto],...]` (ya; si la red no está en
+  marcha, la pone), `HORARED /AHORA /FORZAR` (con ADMIN: aunque vaya muy
+  distinta) y, para las pruebas, `HORARED /ATRASA h`. Lo que hace lo dice por
+  la salida (`hora: ...`; en el escritorio, el puerto serie).
+
+### NTP puede mentir: lo que se hace (la seguridad)
+
+NTP va **sin cifrar ni firmar** (NTS, con TLS, sería lo siguiente): quien
+esté en medio, o un servidor malo, puede decir la hora que quiera. Y la hora
+la usa TLS.BIN para mirar las fechas de los certificados: **llevar el
+reloj atrás haría pasar uno caducado** (o revocado y caducado); llevarlo
+adelante, que ninguno valga. Lo que se hace, por capas:
+
+1. **Varios servidores, y de acuerdo.** Si contestan dos o más, al menos dos
+   tienen que decir lo mismo (2 s arriba o abajo); si no, **no se toca nada**
+   («los servidores no dicen lo mismo»). Con uno solo (los demás callados), se
+   le cree solo dentro de lo de abajo.
+2. **Un suelo y un techo.** Nada de antes del día en que se hizo esta versión
+   (`Zonas.DÍA_HECHO`, el 22/11/2026: como la fecha de compilación de
+   TLS.BIN) **ni del último día en que TLS comprobó una cadena buena**
+   (`TLS.HOR`), ni de 30 años después: «no puede ser: no se cree».
+3. **Solo, poco.** Con el reloj del PC creíble (de después de ese suelo), la
+   hora de Internet **solo se pone sola si va 15 minutos o menos** (arriba o
+   abajo: un reloj de verdad no se va más, y el cambio de verano es aparte).
+   Más, la decide quien está delante: **Panel de control > Fecha y hora >
+   «Sincronizar ahora»** dice «Internet dice ...: el reloj del equipo va
+   atrasado 2 d 0 h. ¿Ponerla? (Si no la espera, puede ser un engaño)», y
+   «Ponerla» **pide el modo administrador**. Con el reloj del PC no creíble
+   (la pila gastada: arranca en el 2000), se le cree a Internet (con el suelo
+   de arriba): es el mismo riesgo que ya tenía TLS con la cabecera `Date`, y
+   menor (varios servidores, el suelo de TLS.HOR).
+4. **El núcleo, por si acaso.** La 175 no deja a HORARED.BIN atrasar el reloj
+   **más de 2 horas** sin el modo administrador, aunque HORARED tuviera un
+   fallo; y un HORARED.BIN que no sea el de la carpeta del sistema no tiene
+   sello: ni pone la hora ni apunta nada.
+5. **TLS no se fía de un reloj de antes de TLS.HOR** (nuevo en `tls.c`,
+   marcado «(NTP)»): si el reloj del PC dice un día de antes del último con
+   una cadena buena, no lo cree (lo apunta) y pide la hora por la cabecera
+   `Date`, que tampoco puede ser de antes. Así, **aunque NTP mintiera y se
+   le hiciera caso, no colaría un certificado caducado antes de ese día**.
+
+Lo que queda: entre el último día bueno de TLS.HOR y hoy, un NTP que mienta
+podría atrasar el reloj hasta 15 minutos (o lo que diga quien tenga el modo
+administrador); y lo que se adelanta no tiene suelo (como mucho, que no
+valga ningún certificado hasta que se arregle a mano). NTS (NTP con TLS) o
+pedir la hora por HTTPS a actualiza.hispados.es (con la cadena ya
+comprobada) lo cerrarían.
+
+### Las pruebas
+
+`SOLO=panel castel/pruebas.sh`, la **parte 34** (`castel/pruebas_panel.sh`;
+la 33 es la de win32-juegos): con servidores NTP de mentira
+(`nucleo32/ntp_prueba.py`: dos que dicen la hora de verdad, uno el
+1/1/2001, uno dos días por delante y uno que no contesta) y los HTTPS de
+`tls/servidor_https.py`, y el reloj de QEMU cinco minutos adelantado:
+
+- **En la Consola**: una copia de HORARED.BIN fuera de la carpeta del
+  sistema no pone la hora ni apunta (sin sello); dos de acuerdo la ponen
+  (`-253 s`) y otra vez ya está en hora; el del 2001, no se cree; el de dos
+  días, no se pone solo; uno bueno y uno malo, no se ponen de acuerdo; el
+  callado; atrasar 3 horas, el núcleo no deja (1, sí; y para volver hace
+  falta ADMIN y /FORZAR); y **HTTPS sigue yendo**. Con un TLS.HOR de dentro
+  de diez días y el reloj dentro de cinco, **TLS no se fía del reloj** y
+  HORARED no cree a quien diga hoy.
+- **En el escritorio**: HORARED la pone sola al arrancar; Configuración con
+  sus iconos (y las flechas); Fecha y hora; Ratón (más rápida y otra vez
+  normal, el doble clic «Lento» de la lista, la prueba con dos clics, para
+  zurdos —el izquierdo deja de pulsar y el derecho pulsa— y la rueda a 9);
+  Teclado (el latinoamericano: «{ñ¡» con las teclas de «´ ñ ¡¿», y otra vez
+  el español); Energía (la pantalla, negra al minuto y encendida con el
+  ratón; el botón de encendido de QEMU, que pregunta); Personalización (el
+  tema Grafito y el tapiz verde, con capturas); `PANEL.INI` con todo y la
+  línea `ntp=`; el **horario de verano** sin red (el 25/10/2026 a las 3:00,
+  las 2:00; el 28/03/2027 a las 2:00, las 3:00; y `verano_puesto` en
+  PANEL.INI); y **al arrancar otra vez**, el tema y el tapiz. Con la
+  batería de mentira al 4 % y sin cable, el equipo se apaga solo (S5). Y el
+  contraste de los cinco temas nuevos, medido con la tabla de
+  `preferencias.cas`.
+- Las partes que usaban la Configuración de antes (el escritorio y la 0.5,
+  la pantalla, los programas, los dispositivos, el sonido y el Wi-Fi) van
+  ahora por sus iconos; la memoria USB y la unidad M: llevan 41 programas.
+- **Lo que dieron** (22/11): la 34, 108 bien y 0 mal; en el PC de Albinyana,
+  06 (168), 07 (102), caliente (79), paquetes (108), red (72), tls (72),
+  acpi (78), cd (77), menu (95), protege (76) y castel32 (67: el núcleo se
+  sigue compilando a sí mismo, con las tablas lejos del tope), todas sin un
+  fallo; aquí, pantalla (98), dispositivos (85), sonido (109), programas
+  (92), wifi, rueda (71) y accesorios (81), también.
+
+### Los paquetes
+
+`base` **0.8.7** (el núcleo con las llamadas 174 y 175, `PANEL.BIN` y
+`HORARED.BIN` en `\HISPA`, ACPI.BIN con el botón de encendido) y `tls`
+**0.8.7** (TLS.HOR también para el reloj del PC). `sistema.sh` los pone en
+la memoria USB y en el CD; `disco.sh ... panel`, en los discos de prueba.
+
+### Lo que falta
+
+- **Usuarios** (otra sesión): cuando los haya, los ajustes podrán ser de
+  cada uno (el ratón, el teclado, el tema) y los del equipo (la hora, la
+  energía), del administrador.
+- Apagar la pantalla de verdad (DPMS: en las Intel, por sus registros); la
+  hibernación y suspender (ACPI S3/S4) en Energía; el botón de encendido en
+  los equipos que no pasan solos al modo ACPI.
+- NTS (NTP con TLS), o la hora por HTTPS de actualiza.hispados.es.
+- Más zonas horarias (una tabla de la base tz), y más distribuciones del
+  teclado (portugués, francés, catalán con su ŀl).
+- Que el Bloc de notas, la Consola y los demás lean los renglones de la
+  rueda (ahora, de tres en tres para todos).
+
+## 14 quindecies. El Bloc de notas 1.0 (BLOC.BIN, BLOC)
+
+*22/11/2026, pedido de Carlos: «actualizar nuestro Bloc de notas al nivel de
+Notepad++».* Sin una línea ni un dibujo de Notepad++ (ni de Scintilla): todo
+escrito aquí, en Castel, y en español. Sigue llamándose **Bloc de notas**, se
+abre igual (`BLOC [ARCHIVO]`, dos clics en un .TXT, el menú Inicio) y un .TXT
+de siempre se abre, se ve y se guarda **como antes** (en la 437, con CR LF, sin
+números de línea y con las líneas largas partidas): las pruebas de antes que
+lo usan siguen pasando sin tocarlas.
+
+| | |
+|---|---|
+| ![Castel con sus colores, la negrita de las palabras clave, los números y los pliegues](pentium/bloc/bloc-colores.png) | ![Buscar (Ctrl+F) con sus casillas](pentium/bloc/bloc-buscar.png) |
+| ![Pestañas: « *» en la que tiene cambios](pentium/bloc/bloc-pestanas.png) | ![Comparar: «-», «+» y «*» en el margen, el hueco rayado](pentium/bloc/bloc-comparar.png) |
+| ![Buscar en una carpeta: la pestaña de lo encontrado](pentium/bloc/bloc-carpeta.png) | ![En columna: lo tecleado, en las tres líneas](pentium/bloc/bloc-columna.png) |
+| ![Ctrl+rueda: la letra de ancho fijo, más grande](pentium/bloc/bloc-letra-grande.png) | ![Abrir (Ctrl+O): la carpeta y la ruta](pentium/bloc/bloc-abrir.png) |
+| ![Plegado: el módulo entero, con «...»](pentium/bloc/bloc-plegado.png) | ![Al salir con cambios, la pregunta](pentium/bloc/bloc-salir.png) |
+
+### Cómo se maneja
+
+**La ventana**: la barra de menús (Archivo, Edición, Buscar, Ver, Formato,
+Lenguaje, Ayuda; también con **Alt** y su inicial: Alt+A, Alt+E, Alt+B, Alt+V,
+Alt+F, Alt+L, Alt+Y), los botones (Nuevo y Guardar, en su sitio de siempre, y
+Abrir, Deshacer, Rehacer y Buscar si caben; Deshacer y Rehacer, en gris cuando
+no hay nada), las **pestañas** (solo con dos o más documentos: con uno, el Bloc
+se ve como siempre), el texto, el **panel de abajo** (buscar, reemplazar, ir a,
+abrir...) y la barra de estado: el nombre, **«Lín L, Col C»** (de la línea del
+archivo, no de la pantalla), «(sin guardar)», y a la derecha el lenguaje, la
+página y los finales de línea («Castel | UTF-8 | LF»). Los menús llevan sus
+atajos escritos al lado; **F1** abre la ayuda en una pestaña para leer.
+
+| Tecla | Lo que hace |
+|---|---|
+| Ctrl+N, Ctrl+O, Ctrl+S (o F2), Ctrl+W | nuevo (otra pestaña), abrir, guardar (sin nombre: Guardar como), cerrar la pestaña (si tiene cambios: «¿Guardar los cambios de X?» con Guardar, No guardar y Cancelar) |
+| Ctrl+Tab, Ctrl+Mayús+Tab | la pestaña siguiente y la de antes |
+| Ctrl+Z, Ctrl+Y (o Ctrl+Mayús+Z) | deshacer y rehacer, **sin límite** (lo tecleado, palabra a palabra; un pegar, un «Reemplazar todas», de una vez); deshecho todo hasta lo guardado, el documento vuelve a estar «sin cambios» |
+| Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V | con el **portapapeles del sistema** (en la 437, hasta 64 K); dentro del Bloc se guarda además entero y en UTF-8: lo que no cabe en la 437, o lo de más de 64 K, se pega sin perder nada |
+| Mayús+flechas, arrastrar, dos clics, tres clics, Mayús+clic | seleccionar (letra, palabra, línea); un clic en los números, la línea entera |
+| Ctrl+flechas, Ctrl+Inicio, Ctrl+Fin | de palabra en palabra; al principio y al final (con Mayús, seleccionando) |
+| Inicio | en los programas, a la primera letra de la línea (otra vez: al principio) |
+| Intro | en los programas, con la sangría de la línea de arriba |
+| Tab, Mayús+Tab | espacios hasta la columna siguiente (o un tabulador: Formato); con varias líneas elegidas, las mete o las saca |
+| Alt+arrastrar, Alt+Mayús+flechas | seleccionar **en columna** (en bloque): lo que se teclea va en todas las líneas (las cortas se rellenan con espacios); Retroceso y Supr, en todas; copiar un bloque y pegarlo, una línea en cada línea |
+| Ctrl+D | duplicar la línea (o lo seleccionado) |
+| Alt+Arriba, Alt+Abajo | subir o bajar las líneas elegidas |
+| Ctrl+Q | comentar o descomentar las líneas, con el comentario del lenguaje (`;`, `//`, `#`, `'`, `REM`, `::`; en HTML y CSS, `<!-- -->` y `/* */` alrededor) |
+| Ctrl+U, Ctrl+Mayús+U | minúsculas y MAYÚSCULAS (con tildes, ñ, ç...) |
+| Ctrl+Mayús+R, Ctrl+Mayús+P | grabar una macro (otra vez: parar; arriba sale «GRABANDO» con letras) y repetirla |
+| Ctrl+F, F3, Mayús+F3, Ctrl+H | buscar, lo siguiente, lo de antes, reemplazar |
+| Ctrl+Mayús+F | buscar en los archivos de una carpeta |
+| Ctrl+G, Ctrl+B | ir a la línea; ir al paréntesis pareja |
+| Ctrl+rueda | la letra más grande o más pequeña (cuatro tamaños) |
+| F8, Mayús+F8, Esc | comparando: lo distinto siguiente y el de antes; dejar de comparar |
+| Esc | cierra el panel de abajo; deja la selección en bloque |
+
+**Archivo**: Nuevo, Abrir..., Guardar, Guardar como..., Guardar todo, Cerrar,
+Cerrar todo, Leer otra vez, **Vista de impresión** (en gris: «aún no hay
+impresoras»; el sitio está hecho para cuando las haya) y Salir. **Abrir** y
+**Guardar como** usan el panel de abajo: la ruta, y encima, en el sitio del
+texto, la carpeta (las carpetas primero, con «[carpeta]» delante); las flechas
+eligen, Intro abre (o entra en la carpeta), dos clics también. Guardar encima
+de un archivo que ya está pide Guardar otra vez. **Edición**: Cortar, Copiar,
+Pegar, Seleccionar todo, Deshacer, Rehacer, Duplicar línea, Subir y Bajar
+líneas, (Des)comentar, Grabar y Repetir macro (el botón secundario saca casi lo
+mismo). **Ver**: los números de línea, el ajuste de línea, los espacios y
+tabuladores (· y ») y los finales de línea (¬), con «[x]» delante de lo que
+está puesto; la letra; plegar y desplegar todo; comparar. **Formato**: las
+páginas, los finales de línea, tabuladores y espacios, mayúsculas y ordenar.
+**Lenguaje**: «Texto normal» y los que haya.
+
+**Lo que se recuerda** (Carlos: «lo que el usuario confirma, el sistema lo
+guarda y lo aplica solo»): las opciones de Ver y Formato y **los archivos
+abiertos** (con su cursor y cuál estaba delante) van a `BLOC.INI`, en
+`\USUARIOS\<usuario>\` de la unidad de trabajo (como el registro de WIN32:
+fuera de la zona protegida). `BLOC` sin nada los vuelve a abrir. Lo de
+siempre (NOTAS.TXT sola y las opciones de fábrica) no se escribe: así no
+aparece `\USUARIOS` en un disco sin haber hecho nada.
+
+**Arrastrar desde Mi equipo**: un archivo arrastrado y soltado encima del Bloc
+se abre en otra pestaña (EV_SOLTADO, más abajo).
+
+### Lo que se ve
+
+- **Los números de línea**, en un margen gris a la izquierda (el de la línea
+  del cursor, en negrita); por omisión, en los programas (en un .TXT, como
+  antes, no salen: Ver > Números de línea los pone en todos, y se recuerda).
+- **Los colores según el lenguaje**, y **nada solo por el color**: las palabras
+  clave, los tipos, las directivas y las etiquetas van además **en negrita**;
+  los comentarios, las cadenas, los números y las funciones de la biblioteca,
+  cada uno de su color (con buen contraste sobre blanco).
+- **Plegar**: un [-] en el margen donde empieza un bloque; un clic lo pliega
+  (sale [+] y, detrás de la línea, «...» en un recuadro) y otro lo despliega.
+  Buscar, ir a una línea o moverse dentro despliega lo que esconda el cursor.
+- **El paréntesis pareja** del que está junto al cursor ( ) [ ] { }: los dos,
+  dentro de un recuadro azul (no solo de color); solo cuentan los de fuera de
+  cadenas y comentarios.
+- **Las pestañas**: la de delante, blanca, con el nombre en negrita y una raya
+  azul arriba; las que tienen cambios, con **« *»** detrás del nombre; cada una
+  con su «x» para cerrarla; si no caben, ◄ y ► en los lados.
+- **Lo que no se puede pintar** (un carácter que no está en la letra de Hispa,
+  un octeto que no es UTF-8) sale como «?» dentro de un recuadro; los de
+  control (^A...), con su dibujo en un recuadro gris.
+- **La letra**: la del sistema (8x16, la de siempre) y, con Ctrl+rueda, la de
+  **ancho fijo suavizada** (DejaVu Sans Mono, en renglones de 20, 24 y 32
+  puntos, con su negrita: `letramono.cas`, hecho por `hazletramono.py` con
+  FreeType en tiempo de compilación, como `letrasuave.cas`).
+
+### Los archivos y las páginas
+
+Al abrir se mira la página: **BOM de UTF-8**; todo ASCII (la 437: da igual);
+**UTF-8** válido; y si no, por puntos entre **la 437 de Hispa** y **la 1252**
+de Windows pensando en textos en español (`blocpag.cas`, `pag_detectar`). Y los
+finales de línea: **CR LF** o **LF** (los que más haya; si hay de las dos
+clases, se dice abajo y se guardarán todos iguales). Dentro, el texto va en
+UTF-8; lo que no es UTF-8 válido se guarda «escapado» (U+DC00 + el octeto, como
+el *surrogateescape* de Python) y al guardar vuelve a ser ese octeto: **no se
+pierde nada**. Un ^Z al final (de los textos del DOS) se quita. Un documento
+nuevo es de la 437 con CR LF (como los de siempre).
+
+**Formato > Convertir a** UTF-8, UTF-8 con BOM, la 437 o la 1252: el texto no
+cambia y se guardará en esa página; si hay letras que no caben, al guardar se
+dice cuántas y **no se guarda**: Guardar otra vez las deja como «?» (o se elige
+UTF-8). **Leer otra vez como**: lee el archivo con otra página (si no la ha
+acertado). **Finales de línea** CR LF o LF; **tabuladores a espacios** (a sus
+columnas) y **espacios de delante a tabuladores**; «El tabulador pone
+espacios».
+
+**Archivos grandes**: el texto está en un **búfer con hueco** (meter o quitar
+en el mismo sitio no mueve nada), con un arreglo de dónde empieza cada línea
+(cientos de miles), que se pone al día solo con lo que cambia (y se rehace de
+una vez, en ensamblador, al leer). Un archivo de 11 MB (250.000 líneas) se lee
+de una vez, sin copiarlo si ya está en UTF-8 o es ASCII. Las líneas de más de
+1 MB se enseñan cortadas (el resto sigue ahí); las de más de 64 K, sin colores.
+
+| Con 11 MB (250.000 líneas) | corre32 (el servidor) | QEMU sin aceleración |
+|---|---|---|
+| abrir, ir al final, buscar, reemplazar 250.000 de una vez y deshacerlo | menos de 1 s todo (873 ms) | abrir: 3,4 s (lo dice por el puerto serie: «bloc: abierto GRANDE.TXT, 10750000 octetos, en 3440 ms»); en un PC de verdad, mucho menos |
+
+### Buscar y reemplazar
+
+**Ctrl+F** abre abajo el panel: «Buscar:», Siguiente, Anterior, **Todos** (la
+lista de lo encontrado) y las casillas **Mayúsculas** (que cuenten),
+**Palabra entera**, **Expresión** (regular) y **Todos los abiertos**. Lo
+seleccionado (si es corto) pasa al campo; lo que hay en el campo sale elegido,
+y lo que se teclea lo sustituye. Intro (o F3) busca lo siguiente, Mayús+Intro (o
+Mayús+F3) lo de antes; al llegar al final **vuelve a empezar por arriba** (y lo
+dice). **Ctrl+H** añade «Por:», Reemplazar (si lo seleccionado es lo que se
+busca, se cambia; y se busca lo siguiente) y **Todas** (en todo el documento;
+con varias líneas elegidas, solo en ellas; con «Todos los abiertos», en todos):
+un solo cambio en la historia, así que **un Ctrl+Z lo deshace entero**.
+**Ctrl+Mayús+F**: buscar en los archivos de una carpeta («En:» y «Archivos:»,
+con `*` y `?`, varios separados por espacios; «Con sus carpetas»). Lo
+encontrado (en los abiertos o en la carpeta) va a una pestaña **«Encontrado»**,
+para leer: la búsqueda, y de cada archivo su ruta y sus líneas («  12: lo que
+pone»); **dos clics o Intro** en una de ellas abre el archivo, va a esa línea y
+elige lo buscado. Los archivos con ceros al principio no se miran (no son
+textos); hasta 20.000 líneas encontradas.
+
+**Las expresiones regulares** (`blocexp.cas`, un motor propio: una máquina de
+Pike, sin vuelta atrás exponencial, con un tope de pasos): `.` (un carácter
+entero, no el salto de línea), `*`, `+`, `?`, `{n}`, `{n,}`, `{n,m}` y sus
+perezosos (`*?`...), `[a-zá-ú]`, `[^0-9]`, `^` y `$` (principio y final de
+línea), `( )`, `(?: )`, `|`, `\b`, `\d \w \s \D \W \S`, `\n \t \\ \. \(`... En
+el reemplazo, `\0` a `\9` (lo de cada paréntesis), `\n` y `\t`. Sin
+mayúsculas, valen la ñ, las tildes y lo de Latin-1 y Latin Extended-A. Una
+expresión mal escrita lo dice («La expresión no vale: un «[» sin cerrar»). No
+hay referencias atrás en el patrón (`\1` solo en el reemplazo) ni miradas
+adelante.
+
+### Los lenguajes
+
+Diez, con sus colores y su manera de plegar: **Castel**; **Hispa-BASIC /
+GW-BASIC / QBasic** (los números de línea, `REM` y `'`, `IF ... THEN` de una
+línea y de bloque, `END SUB`); **ensamblador NASM**; **C**; **HTML**, **CSS** y
+**JavaScript**; **.BAT y CONFIG.SYS** (`REM`, `::`, las etiquetas, `%VARIABLES%`);
+**INI** (las secciones); y **Python** (la sangría, las cadenas triples). Se
+eligen por la **extensión** (o el nombre entero: CONFIG.SYS, AUTOEXEC.BAT) y
+desde el menú **Lenguaje**. Cada uno es un **archivo de texto** `.LEN` (en
+UTF-8), en `castel/nucleo32/bloc/lenguajes/`; los diez van además **dentro de
+BLOC.BIN** (`blocdef.cas`, hecho por `hazblocdef.py`: así colorea aunque no
+estén los archivos), y se leen antes los de **`\HISPA\BLOC\LENGUAJE\`** (los
+del sistema) y **`\BLOC\LENGUAJE\`** (los que añada cada uno, fuera de la zona
+protegida): si uno se llama igual que otro, vale el primero. (`LENGUAJES` no
+cabe en un nombre 8+3, que es lo único que sabe hacer el FAT de Hispa-Pentium:
+de ahí `LENGUAJE`; un `\HISPA\BLOC\LENGUAJES` hecho desde otro sistema, con su
+nombre largo, también se lee.) **Para añadir uno**: copiar un `.LEN` y
+cambiarlo. El formato (`bloclen.cas`; viene explicado entero en la cabecera de
+CASTEL.LEN):
+
+- UTF-8, una `clave=valor` por línea; las que empiezan por `;`, comentarios;
+  las listas, separadas por espacios y repartidas en varias líneas con la
+  misma clave.
+- **Qué es**: `nombre`, `extensiones`, `archivos` (nombres enteros),
+  `distingue=si|no` (las mayúsculas).
+- **Comentarios**: `comentario` (de línea, hasta 4), `comentario_palabra` (REM),
+  `al_principio=si`, `bloque=ABRE CIERRA`, `anida=si`.
+- **Cadenas**: `comillas`, `largas` (las de varias líneas: `"""`, `'''`, la
+  `` ` `` de JS), `escape`.
+- **Palabras**: `claves` y `tipos` (en negrita), `propias` (la biblioteca),
+  `letras` (las que van dentro de una palabra, como los `$%!#&` de BASIC),
+  `inicio`; `operadores`, `numeros=si`, `prefijos` (&H, &O, &B).
+- **Lo especial**: `directiva` (la línea entera: `#` de C, `%` de NASM),
+  `directiva_palabra` (`@`), `etiquetas` (`dospuntos`, «x:»; `delante`, «:x»;
+  `numeros`, los números de línea; `secciones`, «[x]»), `variables=%`,
+  `modo=html|css|ini`.
+- **Plegar**: `plegado=bloques|sangria|secciones`; `abre` y `cierra` (palabras),
+  `signos_abre` y `signos_cierra` ({ }); `cierra_doble` (END SUB, END IF: el
+  END y la palabra de detrás no abren otra vez), `abre_al_final` (el THEN de un
+  IF de bloque), `no_abre_tras` (el «si» de «sino si»), `no_abre_ante`,
+  `sueltas` (las etiquetas de HTML que no se cierran).
+- El estado entre líneas (comentario de bloque con su anidamiento, cadena
+  larga, dentro de una etiqueta o de unas llaves) cabe en 16 bits y se guarda
+  de cada línea: colorear la que se ve no obliga a leer desde el principio
+  más que una vez.
+
+### Comparar, en columna y las macros
+
+**Ver > Comparar con la de al lado**: la pestaña de ahora con la siguiente (o
+la de antes), **lado a lado**, por líneas (`blocdif.cas`: Myers, el mínimo de
+líneas tocadas, con un tope para no tardar; se compara el resumen de cada
+línea). Lo quitado, con **«-»** y fondo rosa; lo añadido, con **«+»** y fondo
+verde; lo cambiado, con **«*»** y fondo amarillo; donde a una le faltan líneas,
+un hueco gris **rayado**. F8 y Mayús+F8 van de una diferencia a otra; la rueda
+y las flechas mueven las dos a la vez; abajo, cuántos trozos distintos hay;
+Esc lo deja (comparando no se escribe).
+
+**En columna**: Alt y arrastrar (o Alt+Mayús y las flechas) elige un
+rectángulo; abajo pone «(en bloque)». Lo que se teclea va en cada línea en esa
+columna; Retroceso y Supr, en todas; Ctrl+C copia sus líneas; un Intro o una
+flecha sin Alt lo deja.
+
+**Las macros**: Ctrl+Mayús+R empieza a grabar las teclas (arriba,
+«GRABANDO»), otra vez para; Ctrl+Mayús+P las repite (hasta 4.096 teclas).
+
+### Lo que cambia en el núcleo (BLOC)
+
+- **Las teclas de cambio, con cada tecla**: en `c` de `EV_TECLA` llegan ahora
+  las que estaban pulsadas al repartirla (`MOD_MAYÚS` 1, `MOD_CONTROL` 2,
+  `MOD_ALT` 4: el Alt de la izquierda; `modificadores()` de consola.cas lo
+  dice ya). Así se distingue **Ctrl+H de Retroceso** (los dos daban 8),
+  Ctrl+Mayús+R de Ctrl+R, Mayús+F3 de F3, Alt+flechas y Ctrl+flechas. Los
+  programas de antes no miraban `c`: les da igual. En los sucesos del ratón,
+  `CON_ALT` (0x400), para Alt+arrastrar.
+- **Soltar en una ventana lo arrastrado desde Mi equipo**: el escritorio
+  (`atiende_suelta`) ya no lo tira si cae encima de la ventana de un programa:
+  le manda **`EV_SOLTADO`** (14, con el punto) y guarda la ruta, que el
+  programa pide con **`lo_soltado(destino, cabe)`** (la llamada **173**; solo
+  el dueño de esa ventana). (La 172 es la del fondo del escritorio, de la 0.8.6.)
+
+### Cómo está hecho
+
+| Módulo | Qué |
+|---|---|
+| `ubloc.cas` (BLOC.BIN) | el programa: las pestañas, los paneles, los menús, las teclas y el ratón, guardar, la sesión, las líneas (duplicar, mover, comentar, ordenar...), en columna, las macros, la ayuda; y el modo sin ventana para las pruebas (`BLOC /PRUEBA GUION`) |
+| `bloctxt.cas` | el texto de un documento: el búfer con hueco, las líneas, el estado de cada línea (para colorear y plegar), los pliegues y la historia sin límite |
+| `blocvis.cas` | lo que se ve: el lienzo, la letra, dónde cae cada letra (las filas, con el ajuste), el margen, los colores, la selección (también en bloque), la pareja y las dos columnas de comparar |
+| `blocarc.cas` | leer y guardar (páginas y finales de línea), `BLOC.INI` y la lista de una carpeta |
+| `blocbus.cas` | buscar, contar, reemplazar uno y todas; la lista de lo encontrado en los abiertos y en una carpeta |
+| `blocexp.cas` | las expresiones regulares |
+| `blocpag.cas` (+ `hazblocpag.py`) | las páginas: detectar, de y a UTF-8, la letra de cada carácter, mayúsculas y minúsculas |
+| `blocdif.cas` | comparar por líneas (Myers) |
+| `bloclen.cas`, `bloc/lenguajes/*.LEN`, `blocdef.cas` (+ `hazblocdef.py`) | los lenguajes: leer los .LEN, colorear una línea, lo que abre y cierra cada una |
+| `letramono.cas` (+ `hazletramono.py`) | la letra de ancho fijo suavizada |
+| `blocmem.cas` | la memoria: pedir y soltar trozos (con su lista de libres) sobre `más_memoria`, que solo crece |
+
+BLOC.BIN mide unos 250 K (la letra grande y los lenguajes de serie, dentro);
+arranca enseguida: lee el archivo de una vez y pinta solo lo que se ve. El
+paquete **bloc** pasa a la **1.0** (solo BLOC.BIN: los lenguajes van dentro;
+INSTALAR no hace carpetas dentro de las de `\HISPA`).
+
+### Las pruebas (la parte 34, `SOLO=bloc`)
+
+En Linux, con corre32: `blocprueba/prueba_bloc.sh` (BlocMem y BlocTxt al azar
+—miles de cambios comparados con una copia, deshacer y rehacer todo—; el Bloc
+sin ventana con seis guiones, cada uno con su `.ESP`: escribir y deshacer,
+buscar y reemplazar, las páginas, las líneas, el código, las pestañas; y 11
+MB), `prueba_exp.sh` (73 casos a mano, el tope con los patrones patológicos y
+un **fuzz contra el `re` de Python**: miles de patrones al azar), `prueba_pag.sh`
+(las 256 de cada página de ida y vuelta y un **fuzz** de octetos al azar,
+también UTF-8 roto: vuelve idéntico), `prueba_dif.sh` (al azar contra Python:
+el mínimo) y `prueba_len.sh` (las muestras de los diez lenguajes con lo que
+tiene que salir, un .LEN roto y uno enorme); y CASTEL32 saca lo mismo que
+ccastel.py. En el escritorio, con capturas (en `docs/pentium/bloc/`): lo de
+arriba, la sesión otra vez, soltar desde Mi equipo y abrir 11 MB.
+
+### Lo que falta
+
+- Imprimir (cuando haya impresoras: el menú ya tiene su sitio).
+- Los nombres largos al guardar (el FAT de Hispa-Pentium solo hace 8+3).
+- Una sola ventana para todo (abrir un archivo desde Mi equipo con el Bloc ya
+  abierto abre otro Bloc; arrastrarlo encima, una pestaña).
+- Colorear JS y CSS dentro de un HTML; las expresiones regulares literales de
+  JS; plegar por la sangría las líneas en blanco del medio, como Notepad++.
+- La edición en columna con la letra proporcional (con la de ancho fijo va).
+- Las líneas de más de 1 MB se enseñan cortadas.
+
+## 14 sexdecies. El Reproductor (REPRODUC.BIN, rama reproductor)
+
+*22/11/2026, la rama `reproductor` (sobre `worktree-v0.1-nucleo` con la
+0.8.6). Carlos: «un Reproductor al estilo VLC para Hispa-Pentium, empezando
+por la música» y, para el ecualizador, «Winamp tenía ecualizador». Nombre y
+diseño propios (ni la marca ni el cono de VLC, ni el aspecto ni las pieles de
+Winamp): **Reproductor**, con su icono (una corchea blanca sobre azul y el
+triángulo verde de reproducir). Esta entrega es **la fase de la música**; el
+vídeo, la siguiente (más abajo, «La fase del vídeo»). Lo cambiado fuera de su
+carpeta lleva la marca «(REPRODUCTOR)».*
+
+| | | |
+|---|---|---|
+| ![La lista sonando, con la carátula y el espectro](pentium/reproductor/lista.png) | ![El ecualizador: 10 bandas, el preamplificador y los preajustes](pentium/reproductor/ecualizador.png) | ![Añadir: las unidades y las carpetas](pentium/reproductor/anadir.png) |
+| ![Opciones: sin huecos, el fundido, ReplayGain, la visualización, la velocidad](pentium/reproductor/opciones.png) | ![El modo pequeño](pentium/reproductor/pequeno.png) | ![En el escritorio de Hispa-Pentium (QEMU), con la nota en la bandeja](pentium/reproductor/escritorio.png) |
+
+### Qué suena
+
+- **MP3** (y MP2 y MP1) con **minimp3** (`terceros/minimp3`, CC0): trama a
+  trama, leyendo el archivo a trozos de 32 K (un MP3 de una hora no va entero
+  a la memoria). Lo de alrededor es nuestro (`dmp3.c`): el ID3v2 de delante y
+  el ID3v1 de detrás, la cabecera **Xing/Info** (o VBRI) para la duración de los
+  de tasa variable y su tabla para buscar, y la **etiqueta LAME** (el retraso y
+  el relleno del codificador) para que no haya hueco entre canciones. Buscar
+  en uno de tasa fija cae **en la muestra justa** (se mira dónde ha caído de
+  verdad y se tiran dos tramas: la reserva de bits y el solape del IMDCT); en
+  uno de tasa variable, por la tabla de Xing (una trama arriba o abajo).
+- **OGG Vorbis** con **stb_vorbis** (`terceros/stb_vorbis`, dominio público o
+  MIT): el archivo va entero a la memoria, de 64 K en 64 K mientras suena lo
+  de antes.
+- **FLAC** (y OGG FLAC) con **dr_flac** (`terceros/dr_flac`, dominio público o
+  MIT-0), a trozos; de 8 a 24 bits, de 1 a 8 canales.
+- **WAV**: PCM de 8, 16, 24 y 32 bits, coma flotante (32 y 64), **IMA-ADPCM**
+  y **MS-ADPCM** (`decod.c`, nuestro).
+- **Los módulos de los «trackers»**: **MOD, XM, S3M e IT** con **libxmp-lite**
+  4.6.0 (`terceros/libxmp-lite`, MIT), a la frecuencia de la tarjeta (sin
+  remuestrear), una vez (sin dar vueltas para siempre).
+- **Los CD de música** (más abajo) y sus **imágenes**: una hoja **.CUE** con su
+  **.BIN** en crudo (las pistas de sonido; MOTOROLA, al revés), o con un
+  **FLAC o un WAV enteros** (el disco en un archivo: cada pista, su trozo).
+- Más de dos canales, mezclados a estéreo; mono, a los dos lados.
+- **Opus**, no en esta fase (libopus es grande: con el vídeo); los `.OPUS`
+  no se añaden a la lista.
+
+Las **etiquetas** (`etiquetas.c`): ID3v1, **ID3v2.2, 2.3 y 2.4** (con la
+desincronización, los marcos comprimidos o cifrados saltados, Latin-1, UTF-16 y
+UTF-8; `TXXX` del ReplayGain; `APIC`/`PIC`), los **comentarios de Vorbis** (de
+los OGG Vorbis, los Opus y los FLAC; `METADATA_BLOCK_PICTURE` en base64), el
+bloque **PICTURE** de FLAC y el **INFO** de los WAV (y su `id3 `). La
+**carátula** (JPEG, PNG, GIF o BMP, con stb_image), la de dentro o, si no
+lleva, `FOLDER.JPG`, `COVER.JPG`, `CARATULA.JPG` o `FRONT.JPG` de su carpeta,
+a 128 x 128 con la media de los puntos. Todo se mira antes de tocarlo (los
+largos, los finales, las codificaciones): el fuzz con ASan, abajo.
+
+### Cómo está hecho: un programa en C portable (como Hispa-PDF)
+
+`castel/nucleo32/reproductor/`, en C99: lo único del sistema va en **`so.h`**
+(la memoria, los archivos a trozos, las carpetas, el tiempo, el sonido, el CD,
+las ventanas, la bandeja y lo soltado), con **`so_pentium.c`** (la int 0x80, la
+poca biblioteca de C y la coma flotante del x87) y **`so_anfitrion.c`** (Linux:
+el sonido a un .WAV y la ventana a un lienzo con capturas; lo mismo valdrá
+para empezar en **Hispa-64**). Lo demás no sabe dónde corre:
+
+```
+  decod.c (el origen, el formato, WAV, CD) · dmp3.c · dvorbis.c · dflac.c · dmod.c
+        │  tramas de coma flotante, en estéreo, a su frecuencia
+        ▼
+  motor.c   ReplayGain -> velocidad (WSOLA) -> remuestrear a la de la tarjeta
+            (seno cardinal con ventana de Kaiser, 16 coeficientes, 256 fases)
+            => dos voces: la que suena y la siguiente (sin huecos y el fundido)
+            -> ecualizador -> lo oído (para la visualización) -> 16 bits
+        │  la cola del canal: SONIDO.BIN (las llamadas 190 a 193)
+        ▼
+  la tarjeta (HD Audio, AC'97, Sound Blaster 16)
+
+  vista.c (la ventana) · dibujo.c (el lienzo y las letras) · imagen.c (la carátula)
+  lista.c (la lista, M3U/PLS/CUE) · etiquetas.c · dsp.c · principal.c (REPRODUCE)
+```
+
+- **Un solo hilo, de a poco.** `motor_ciclo()` se llama en cada vuelta del
+  bucle y llena la cola del sonido por delante (400 ms al empezar; si se queda
+  casi vacía —otro programa gasta el procesador—, crece de 200 en 200 ms hasta
+  1,2 s) a trozos de 1.024 tramas, sin pasar de lo que le dejan (30 ms); abrir
+  la canción siguiente es también de a poco (`dec_paso`: leer 64 K de un OGG,
+  buscar la primera trama de un MP3...), y lo que tarda (las etiquetas, la
+  carátula, las duraciones de la lista, mirar las carpetas que se añaden) se
+  hace solo con la cola llena. Al empezar y tras buscar, la tarjeta espera en
+  pausa a que haya cola (sin ese silencio entre el primer trozo y el segundo).
+- **Lo que se oye, de verdad**: cada trozo que se da lleva su marca (de qué
+  canción, por dónde, a qué velocidad); lo que ha salido por la tarjeta (la
+  llamada 192, «los octetos sacados») dice qué marca suena: el título, la
+  barra, la carátula y la visualización cambian cuando se oye, no cuando se
+  decodifica.
+- **Sin huecos** (gapless): la siguiente se abre a falta de 12 s; al acabarse
+  la de antes, si va a la misma frecuencia, el remuestreador y el estirador
+  pasan a la siguiente con lo que tenían dentro (sigue como si fuera una sola);
+  si no, se saca lo de dentro con ceros detrás, hasta lo que tocaba. Las dos
+  mitades de un seno en WAV o FLAC salen como el seno entero (67 dB, lo del
+  remuestreador).
+- **El fundido** entre canciones (de 2 a 10 s, en Opciones): las dos voces a
+  la vez, con ganancias de potencia constante (seno y coseno).
+- **ReplayGain** (por canción o por disco, de la etiqueta), sin pasar del pico.
+- **La velocidad** de 0,5× a 2× **sin cambiar el tono**: WSOLA (trozos de
+  40 ms con la ventana de Hann, solapados por la mitad; cada uno, donde mejor
+  casa con lo que seguía al de antes, con la correlación normalizada, de ocho
+  en ocho y luego fina).
+- **El ecualizador**: diez filtros de pico (biquad, los de Robert
+  Bristow-Johnson, Q de 1,4) en **60, 170, 310, 600 Hz, 1, 3, 6, 12, 14 y
+  16 kHz**, de -12 a +12 dB, y el **preamplificador**; las bandas a 0 dB no se
+  calculan; los números desnormalizados, a cero (en el x87 son lentísimos).
+  **18 preajustes** con nombre (Plano, Rock, Pop, Clásica, Jazz, Voz, Graves,
+  Agudos, Graves y agudos, Baile, Directo, Fiesta, Suave, Reggae, Ska, Techno,
+  Auriculares, Altavoz pequeño: valores nuestros), los **propios** («Guardar...»
+  con un nombre, «Borrar») y el **automático por el género** de la canción
+  (Rock, Pop, Classical, Jazz, Dance, Techno, Reggae...).
+- **La visualización** (`espectro()`: FFT de 512 con la ventana de Hann):
+  **24 barras** de 50 Hz a 16 kHz en escala logarítmica, de -60 a 0 dB, hechas
+  de trocitos de 3 puntos (la altura se ve por la forma, no solo por el color:
+  verde, amarillo, naranja) con su pico blanco que cae despacio; o la **onda**
+  (el osciloscopio); un clic cambia, y **apagada** no gasta nada. A 20 cuadros
+  por segundo, solo si suena, se ve y la cola va holgada.
+- **Las letras**: DejaVu Sans y DejaVu Sans Bold (`terceros/dejavu`) a cinco
+  tamaños, hechas puntos **al compilar** (`haz_letras.c` con stb_truetype, en el
+  anfitrión): en marcha no se rasteriza nada.
+
+### La ventana
+
+- **La «pantalla»**, arriba (azul oscuro): la carátula (o un disco con su
+  nota), el título, «artista — disco (año)», el formato («MP3 · 44,1 kHz ·
+  estéreo · 192 kbit/s · ReplayGain -6,5 dB»), el estado con su símbolo
+  («Sonando · canción 2 de 12») y la visualización.
+- **La posición**: el tiempo, la barra (se arrastra; la rueda, 5 s) y el total
+  (un clic: lo que falta).
+- **Los botones grandes** (redondeados, con su **símbolo y su texto**: el
+  daltonismo): Anterior, **Reproducir o Pausa** (verde, el principal), Parar
+  (gris si no hay nada) y Siguiente; el **volumen** (un deslizador en cuña, con
+  las ondas del altavoz y el número): es el de este programa en el mezclador
+  de SONIDO.BIN (la llamada 192, el volumen del canal; sale en Configuración >
+  Sonido). Debajo, **Aleatorio** («sí»/«no») y **Repetir** («no», «todo»,
+  «una», con un 1 en el símbolo), encendidos con un borde claro además del
+  color; **la velocidad** (1×, 1,25×... un clic, la siguiente) y **Pequeño**.
+- **Las pestañas** (la elegida, en negrita y con una raya encima):
+  - **Lista**: Añadir..., CD (las pistas del CD de música que haya), Abrir
+    lista, Guardar lista (.M3U con `#EXTINF`, en UTF-8, con las rutas relativas
+    a su carpeta; o .PLS), Quitar (Supr), Vaciar y Ordenar (por título, por
+    artista, por carpeta). Las columnas: el número, el título, el artista y la
+    duración; **lo que suena, en negrita con su triángulo**; lo elegido, con
+    **una franja** a la izquierda; las que no se pueden tocar, «(no se puede
+    tocar)» detrás. Dos clics, tocar; **arrastrar una fila, cambiarla de sitio**
+    (una raya con su flecha dice dónde irá); Mayús y Control con el ratón;
+    el botón secundario: Tocar, Quitar de la lista, Subir, Bajar. Las
+    duraciones y las etiquetas se van rellenando solas.
+  - **Ecualizador**: «Ecualizador activado», «Automático (por el género)»,
+    «Todo a 0 dB»; la lista de los preajustes (el puesto, con su franja y su
+    triángulo); y los once **deslizadores verticales** (el preamplificador en
+    verde), con su valor encima, sus rayas de ±12 y 0 dB y lo subido en azul
+    (lo bajado en naranja: además, se ve hacia dónde va). Arrastrar, la rueda
+    (1 dB), dos clics (0 dB).
+  - **Añadir**: las unidades (botones con su letra; los CD con su disco),
+    «Subir», la carpeta, las carpetas (amarillas, con su pestaña y
+    «(carpeta)») y las canciones y listas (con su nota y su tamaño): «Añadir
+    lo elegido», «Añadir la carpeta» (con lo de dentro: de a poco, la barra de
+    estado lo dice; con una hoja .CUE en la carpeta, sus pistas y no el .BIN o
+    el FLAC entero) y «Tocar ahora». Para guardar la lista, aquí: el nombre y
+    «Guardar aquí».
+  - **Opciones**: sin huecos, el fundido (No, 2, 4, 6, 8, 10 s), el volumen
+    igualado (No, Por canción, Por disco), la visualización (Espectro, Onda,
+    Apagada), la velocidad (de 0,5× a 2×) y las teclas.
+- **La barra de estado**: cuántas canciones y lo que duran, «mirando las
+  carpetas...»; el ecualizador puesto; y los avisos (en naranja claro **con su
+  franja**): lo que no se puede tocar, lo añadido, lo soltado, la lista
+  guardada.
+- **El modo pequeño** (Ctrl+M o «Pequeño»): una tira de 520 x 76 con el título
+  que se desplaza, el tiempo, una raya con la posición (se pulsa), los cuatro
+  botones con su símbolo, el volumen y «Grande».
+- **Las teclas**: Espacio (tocar o pausa), N y P (siguiente, anterior), S
+  (parar), las flechas izquierda y derecha (5 s; con Mayús, 30 s), arriba y
+  abajo (la lista), Intro (tocar), + y - (el volumen), Ctrl+O
+  (Añadir), Ctrl+S (guardar la lista), Ctrl+M (pequeño), Ctrl+L y Ctrl+E (la
+  lista, el ecualizador), Ctrl+A (todas), Supr (quitar), Tab (otra pestaña),
+  F1 (las teclas, en Opciones). **La rueda en todo**: la lista, las carpetas,
+  los preajustes, cada banda, la posición y, en lo demás, el volumen.
+- **Una sola copia**: dos clics en otra canción en Mi equipo con el
+  Reproductor abierto la añaden y la tocan en el que hay (el que llega deja lo
+  pedido en `REPRODUC.BUZ` y se va; el que está tiene `REPRODUC.LCK` abierto
+  para escribir —nadie más puede abrirlo: «está en uso»— y mira el buzón cada
+  medio segundo).
+- **Minimizada sigue sonando**, con **la nota en la bandeja** (la llamada 135):
+  un clic, la ventana; el botón secundario, «Reproducir» o «Pausa»,
+  «Siguiente», «Anterior», «Parar», «Mostrar la ventana» y «Salir».
+- **Lo guardado** (`\HISPA\REPRODUC\`, o `\REPRODUC\` sin instalar; el sello de
+  REPRODUC.BIN en `permisos.cas`): `REPRODUC.INI` (el volumen, aleatorio,
+  repetir, el ecualizador y sus bandas, la velocidad, el fundido, sin huecos,
+  ReplayGain, la visualización, el modo, la pestaña, lo que mide la ventana y
+  la canción y el punto en que se quedó), `ECUALIZA.TXT` (los preajustes
+  propios) y `LISTA.M3U` (la lista de la última vez), a los dos segundos de un
+  cambio y al cerrar.
+
+### El CD de música (la llamada 134, para el Reproductor y para WIN32)
+
+`cdrom.cas` (marcado «(REPRODUCTOR)») sabe ya **READ TOC entera** (formato 0,
+en LBA, desde la pista 1: todas y el final del disco) y **READ CD** (BEh: la
+clase esperada, CD-DA; lo de dentro de cada sector, que en uno de sonido son
+los 2.352 octetos), por las tres vías (IDE: 13 sectores por orden, 32 K; SATA:
+también; USB: uno). La llamada:
+
+| EAX | EBX | ECX | EDX | Devuelve |
+|---|---|---|---|---|
+| 134 | la letra del lector | 0: la tabla de las pistas | una `Toc_cd` (808 octetos: `pistas`, `primera` y 100 `Pista_cd` de 8: el LBA, el control —bit 2: de datos— y el número; la de después de la última, 0xAA, es el final) | 0; `NO_HAY` (no es un lector); `MAL` (no contesta o no hay disco) |
+| | | 1: leer sonido | una `Pide_sonido` (`lba`, `n` —de 1 a 64—, `destino`): `n` x 2.352 octetos, PCM de 16 bits estéreo a 44.100 Hz | 0; `NO_VALE`; `MAL` (un rayón: dos intentos) |
+| | | 2: leer en crudo | lo mismo, sin mirar la clase del sector (los de datos salen enteros, con su sincronía y su cabecera: para las pruebas en QEMU, que no tiene CD de música) | |
+
+En Castel, `cd_pistas(letra, destino)` y `cd_sonido(letra, lba, n, destino)`
+(`llamadas.cas`). **Para WIN32.BIN** (la rama `win32-juegos`, el CD de música de
+los juegos por MCI: `mciSendString("play cdaudio from 3")`): con la 134, ECX =
+0, se sabe dónde empieza cada pista y, con ECX = 1, se leen sus sectores y se
+dan a un canal de sonido (190 y 191), como hace `decod.c` (`dcdda_abre`). El
+cerrojo de `cdrom.cas` deja que la tarea `cd-cambios` siga mirando el lector a
+la vez. En el Reproductor, la pestaña Lista > «CD» (o `REPRODUCE D:`) añade
+las pistas de sonido («Pista 1»...); al tocarlas se leen de 13 en 13 sectores
+(75 ms) y un sector que no se lee suena a silencio y se sigue.
+
+### Mi equipo, la bandeja y la Consola
+
+- **Dos clics** en un `.MP3`, `.MP2`, `.OGG`, `.OGA`, `.FLA`, `.FLAC`, `.WAV`,
+  `.M3U`, `.M3U8`, `.PLS`, `.CUE`, `.MOD`, `.XM`, `.S3M` o `.IT` en Mi equipo lo
+  abren con el Reproductor si está instalado (`exoper.cas`, `de_reproductor`,
+  como las de los paquetes de la 0.8.6: donde `ASOCIA.TXT` no dice otra cosa).
+  Los nombres largos con espacios llegan sin comillas: se juntan los trozos
+  hasta que existe.
+- **Soltar en su ventana** lo que se arrastra desde Mi equipo (una canción, una
+  carpeta, una lista): el escritorio (`escritorio.cas`, `atiende_suelta`), que
+  antes solo lo ponía en el tapiz o en el dock, ahora se lo dice a la ventana
+  que hay debajo (`EV_SOLTADO` = 14, con el punto dentro de ella) y el programa
+  recoge la ruta con la **llamada 173** (EBX adónde, ECX cuánto cabe: da su
+  largo, o un error). Sirve para cualquier programa. (En la rama era la 136;
+  al juntar la 0.8.7 se quedó la 173 del Bloc de notas: un evento y una
+  llamada para todos.)
+- **La bandeja**: la **llamada 135** pone el icono de una ventana (suya) en la
+  bandeja, a la izquierda del reloj (16 x 16 puntos `0xAARRGGBB`, una ayuda de
+  48 y las opciones de su menú, hasta 160 con «|»; EBX la ventana, ECX el icono
+  o 0 para quitarlo; dos como mucho); un clic le llega como `EV_BANDEJA` = 15
+  con `a` = `SIN_ELEGIR`, y lo elegido en el menú del botón secundario, con su
+  número. Al acabar el programa, su icono se va (`recoge_lo_suyo`).
+- **La orden `REPRODUCE`** (la Consola: el nombre largo se queda en
+  `REPRODUC.BIN`, como hace el intérprete con los de más de ocho letras):
+  `REPRODUCE archivo|carpeta|lista|D: ... [/ALEATORIO] [/REPITE] [/VOLUMEN n]
+  [/EQ Rock] [/VELOCIDAD 1,5] [/FUNDIDO s] [/VENTANA] [/MIDE]`: en una línea,
+  «03:12 / 04:56  Artista - Título  80 %»; Espacio, N, P, las flechas, + y -, Q.
+  En un terminal (la Consola, SSH: el **dato 15**, `DATO_TERMINAL`, nuevo) va
+  así; desde el escritorio, la ventana (o con `/VENTANA`). `/MIDE` decodifica
+  sin sonar y dice lo que cuesta cada segundo de sonido.
+
+### Que no se corte
+
+La cola de cada canal de `sonido.cas` es ahora de **256 K** (eran 64 K: 1,4 s
+a 48 kHz en vez de 0,34 s; marcado «(REPRODUCTOR)»; los demás programas no lo
+notan: DirectSound y HVPRUN ya miden lo que dejan ir por delante). Con eso y
+el objetivo que crece, el Reproductor no se corta **con otro programa
+gastando todo el procesador** (en la prueba, otra Consola con `REPRODUCE
+/OCUPA 70`, que da vueltas sin parar 70 s) **y la ventana arrastrándose
+por la pantalla**: lo que graba QEMU de la tarjeta es lo del anfitrión, trozo a
+trozo, sin un salto (`pruebas/sigue.py`: 50 s, 500 trozos de 100 ms, la peor
+correlación 0,99998). Se prueba con KVM (un procesador de verdad) o, donde no
+lo hay (el WSL del PC de Albinyana), con el Atom N270 de QEMU y `-icount`: el
+sonido de QEMU va entonces con el reloj de las instrucciones y lo que se mira
+es si un Atom llega (el QEMU normal emula el x87 tan despacio que ahí sí se
+corta: no es lo que pasará en el HP Mini).
+
+### Lo que cuesta (el HP Mini 5103, Atom N455)
+
+Medido en QEMU con **`-cpu n270 -icount shift=0`**: un Atom N270 (el mismo
+núcleo Bonnell que el N455 del HP Mini 5103, sin CMOV de más: REPRODUC.BIN es
+`-march=i586` y `hacer.sh` comprueba con `objdump` que no lleva CMOV ni FCOMI)
+que hace **mil millones de instrucciones por segundo**: lo que dice es lo que
+cuesta en instrucciones. El N455 va a 1,66 GHz; con lo que tarda su x87
+(sin reordenar), cuente entre una y dos veces estos números.
+
+| Qué | Lo que gasta |
+|---|---|
+| Decodificar MP3 de 192 kbit/s (`REPRODUCE /MIDE`) | 1,5-1,7 % |
+| OGG Vorbis | 1,5 % |
+| FLAC | 1,0 % |
+| Un módulo MOD (a 48 kHz) | 0,5 % |
+| **La ventana sonando, con el espectro** (decodificar, remuestrear a 48 kHz, pintar 20 cuadros por segundo, la barra y la lista) | **3,4-4,5 %** |
+| El modo pequeño (el título que se desplaza y el tiempo) | 1,1-1,2 % |
+| La Consola (`REPRODUCE`), sonando | menos del 1 % |
+
+(Sin `-icount`, el QEMU normal emula el x87 con coma flotante «de programa»,
+decenas de veces más despacio que un Atom: allí un MP3 cuesta el 30 %; por eso
+la prueba de «con el procesador ocupado» se hace con KVM, abajo.)
+
+### Probarlo
+
+`SOLO=reproductor castel/pruebas.sh` (la parte 33, en `castel/pruebas_reproductor.sh`;
+unos 11 minutos en el PC de Albinyana). En el anfitrión, con ASan y UBSan: los
+13 formatos de prueba frente a ffmpeg (los sin pérdida, iguales octeto a
+octeto; MP3, MP2 y Vorbis, por encima de 78 dB; IMA-ADPCM, 48 dB: la cuenta
+de Microsoft, no la de ffmpeg), el 5.1 a estéreo, sin huecos en WAV, FLAC, MP3
+y OGG, las imágenes de CD (.BIN y FLAC con su .CUE), el fundido, el MOD, buscar
+(FLAC y MP3 de tasa fija, a la muestra justa), el ecualizador (+6 dB en cada
+banda), el remuestreador, la velocidad, las etiquetas, las listas y **el fuzz**
+(`pruebas/fuzz.py`: archivos cambiados al azar por los decodificadores, las
+etiquetas, las listas y las hojas .CUE; encontró dos fallos de stb_vorbis con
+archivos malos —se miran sus comentarios antes y su memoria es de un sitio
+propio— y uno nuestro, ya arreglados). En QEMU: las tres tarjetas, el Atom, el
+CD por IDE y por SATA, el escritorio con otro programa gastando el procesador,
+Mi equipo (dos clics, soltar) y la bandeja. En el anfitrión, a mano:
+
+```
+castel/nucleo32/reproductor/anfitrion.sh /tmp/repro asan
+python3 -I castel/nucleo32/reproductor/pruebas/haz_pruebas.py /tmp/p
+/tmp/repro decodifica /tmp/p/escala.mp3 /tmp/o.wav       # a su frecuencia, para compararlo
+REPRO_RG=1 /tmp/repro motor /tmp/m.wav /tmp/p/seno_a.flac /tmp/p/seno_b.mp3   # como suena (48 kHz)
+/tmp/repro etiquetas /tmp/p/esc_vbr.mp3 ; /tmp/repro lista /tmp/p/TONOS.CUE ; /tmp/repro dsp
+python3 -I castel/nucleo32/reproductor/pruebas/fuzz.py /tmp/repro /tmp/p 1000
+REPRO_VENTANA=1 REPRO_SUCESOS=sucesos.txt REPRO_CAPTURA=v.ppm /tmp/repro ventana /tmp/p/esc_vbr.mp3
+```
+
+y en QEMU:
+
+```
+QEMU_MAS="-audiodev wav,id=s,path=/tmp/sale.wav,out.frequency=48000 -device intel-hda -device hda-duplex,audiodev=s" \
+  MODULOS=ORDENES.BIN,SONIDO.BIN,REPRODUC.BIN,ESCALA.OGG ARRANQUE=ordenes castel/nucleo32/probar.sh SEMILLA.BIN "reproduce M:\ESCALA.OGG"
+```
+
+### Lo que falta (de la música)
+
+- **Las radios de Internet** (Icecast y SHOUTcast en MP3 y OGG, por HTTP y
+  HTTPS con RED.BIN y TLS.BIN, con los metadatos «StreamTitle»): no han dado
+  tiempo en esta fase; van en la siguiente (las listas las saltan ya).
+- **Opus** (libopus) y extraer un CD a WAV o FLAC.
+- Probarlo en el HP Mini 5103 de verdad (el IDT y el Atom) y con un CD de
+  música en un lector de verdad (IDE y SATA): en QEMU solo se ha podido
+  probar READ CD en crudo sobre un CD de datos.
+- La búsqueda exacta en los MP3 de tasa variable (hoy, por la tabla de Xing:
+  una trama arriba o abajo).
+- **La Sound Blaster 16 de QEMU**: con lo que da el Reproductor, el servicio
+  repite de vez en cuando un trozo de 602 tramas (13,7 ms; siempre en los
+  mismos sitios, también con KVM y con `-icount`: no es que no llegue el
+  procesador); con `SONIDO archivo.wav` (el mismo canal, la misma frecuencia)
+  no pasa. Con HD Audio y AC'97, nada. Queda mirarlo en `SONIDO.BIN`
+  (`sb16.c`, la posición del 8237, y `rellena()`); la prueba lo dice y mira que
+  suene todo.
+
+### La fase del vídeo (el plan)
+
+1. **Los decodificadores**: o **FFmpeg recortado** (libavcodec y libavformat
+   con `--disable-everything` y solo MPEG-1/2 de vídeo, MPEG-4 parte 2 (DivX,
+   Xvid), H.264 en Baseline/Main, VP8, MJPEG, AAC, AC-3 y Opus; los
+   contenedores AVI, MP4/MOV, MKV/WebM, MPEG-PS/TS y OGG; LGPL 2.1, enlazado
+   en un programa aparte), o **decodificadores sueltos** (pl_mpeg para
+   MPEG-1 y MP2, de dominio público; libvpx o un VP8 propio; libmpeg2; un
+   H.264 Baseline pequeño). Lo primero da casi todo de una vez y pesa (unos
+   2-3 MB para el Pentium); lo segundo es más ligero y nuestro, pero no
+   llega a lo de hoy (H.264 High). La propuesta: **pl_mpeg primero** (un .MPG
+   y los VCD el primer día, en el Atom sin sudar) y luego **FFmpeg recortado**
+   como paquete «multimedia» aparte, con `-march=i586` y sin ensamblador
+   (en el Atom N455, H.264 a 480p va justo: medirlo con `/MIDE`).
+2. **Dibujar el vídeo**: el YUV a RGB (por tablas) y escalado en el anillo 3,
+   y a la ventana con `mapa` (la llamada 34) a trozos; luego, una llamada
+   para dibujar directamente en el lienzo de la ventana (sin copiar dos
+   veces); la pantalla completa (la 182 de WIN32, `COMPLETA`).
+3. **La sincronía**: el reloj es el del sonido (las marcas y «los octetos
+   sacados», como ahora); el vídeo, cuadro a cuadro detrás, tirando cuadros si
+   no llega.
+4. **DVD**: el lector ya lee los DVD de datos (UDF falta: `iso.cas` lee ISO
+   9660, que casi todos los de vídeo llevan también); los `VIDEO_TS` (IFO y
+   VOB: MPEG-2 y AC-3 o MP2), los menús sencillos y los capítulos; sin CSS
+   (los discos protegidos no: no se puede ni se debe).
+5. **Los subtítulos**: SRT y SSA/ASS (el texto) y los de DVD (VobSub), con las
+   letras DejaVu y su borde; elegir la pista de sonido y la de subtítulos.
+6. Las mismas piezas de esta fase: la lista, las teclas, la bandeja, el modo
+   pequeño, la ventana en Hispa-64.
+
+## 14 septendecies. Los juegos (el paquete «juegos», rama pentium-juegos)
 
 *22/11/2026, la rama `pentium-juegos` (sobre la 0.8.6 con navega 0.2.2).
 Carlos: «Los juegos tipo tetris, bloques... se quedaron atrás. También echo de
@@ -6413,7 +7863,7 @@ a mano, con el lanzador mantenido, a 1024 x 600 y a pantalla completa), los
 - Pintura (en Hispa-386 es un `.HVP`): con HVPRUN ya se puede abrir; hacerla
   de aquí, como los juegos.
 - Las vibraciones de la pantalla al empujar la mesa del pinball.
-## 14 terdecies. Pluma 2 y la oficina de 32 bits (PLUMA.BIN, rama pluma32)
+## 14 duodevicies. Pluma 2 y la oficina de 32 bits (PLUMA.BIN, rama pluma32)
 
 *22/11/2026. Carlos: «Ya que funcionarán los programas de oficina en 32
 bits, podríamos darles una cara nueva y actualizarlos con funciones propias
@@ -6615,6 +8065,222 @@ PDF), **Datos 2**, **Presentaciones 2** (ODP/PPTX y pase a pantalla
 completa), **Publicaciones 2** (marcos sobre la maqueta de Pluma) y
 **Facturas 2** (con el PDF de `pdfsal`). Los `.HVP` siguen para Hispa-386.
 Ver docs/pentium/METAS.md.
+
+## 14 undevicies. Correo (CORREO.BIN, rama correo)
+
+*22/11/2026. Lo pidió Carlos («ya que tenemos conexión segura, podemos empezar
+con el cliente de correo»). Todo lo nuevo, en `castel/nucleo32/correo/`; lo
+cambiado fuera lleva la marca «(CORREO)»: `tls/tls.c` (STARTTLS),
+`permisos.cas` (el sello y el secreto), `exoper.cas` (los .EML),
+`escritorio.cas` (el aviso al arrancar), `tools/hpq.py` (el paquete) y
+`pruebas.sh` (la parte 42).*
+
+| | |
+|---|---|
+| ![El asistente: los servidores, encontrados solos](pentium/correo/asistente.png) | ![Tres paneles a 1024 x 600 (el HP Mini)](pentium/correo/tres-paneles.png) |
+| ![La suplantación: «[!] Cuidado»](pentium/correo/suplantacion.png) | ![Un adjunto con EICAR: Escudo no lo deja abrir](pentium/correo/escudo.png) |
+| ![Escribir: la libreta completa «lu»](pentium/correo/escribir.png) | ![Sin red, a 800 x 600: dos paneles y lo guardado](pentium/correo/sin-red.png) |
+| ![El enlace engañoso, avisado arriba](pentium/correo/enlace.png) | ![Un adjunto, con su clip (se quita con la X)](pentium/correo/adjuntar.png) |
+| ![El asistente (1 de 2): la contraseña de aplicación](pentium/correo/asistente-1.png) | |
+
+**Qué hace.** Varias cuentas **IMAP4rev1** (con IDLE —el correo nuevo llega
+solo—, UIDPLUS, MOVE, SPECIAL-USE y LITERAL+ si el servidor los tiene) o
+**POP3**, y **SMTP** para enviar (AUTH PLAIN o LOGIN). **Siempre cifrado**:
+TLS desde el principio (993, 995, 465) o **STARTTLS** (143, 110, 587), con el
+certificado y el nombre comprobados por `TLS.BIN` y su almacén de autoridades;
+si no vale, se dice por qué (el texto de TLS.BIN) y **la contraseña no sale**.
+«Permitir sin cifrar» solo para un servidor de la red de casa (10.x, 192.168.x,
+172.16-31.x, 127.x, .local, .lan), con su aviso rojo y con «[!]». Los
+servidores se **buscan solos**: los proveedores de siempre (Gmail, Outlook,
+Yahoo, iCloud, GMX, AOL, Zoho, Telefónica), el autoconfig del dominio
+(`autoconfig.dominio` y su `.well-known`), la **ISPDB de Mozilla** (la de
+Thunderbird; `ispdb=` en `CORREO.INI` la cambia), los **SRV** del DNS (RFC
+6186/8314: `_imaps._tcp`, `_submissions._tcp`, por UDP con el DNS del equipo) y,
+si no, probando `imap.`, `mail.` y el dominio (993/143) y `smtp.`, `mail.`
+(465/587). El asistente explica que **Gmail, Outlook, Yahoo e iCloud piden una
+«contraseña de aplicación»**; **OAuth2 queda para más adelante**.
+
+- **Los mensajes por dentro** (`mime.c`, `juegos.c`, `construye.c`; el agente
+  de esta rama): multipart mixed/alternative/related/digest, message/rfc822,
+  base64, quoted-printable y uuencode, cabeceras RFC 2047 (también partidas,
+  con lenguaje, mal hechas o con 8 bits crudos), parámetros RFC 2231 (con sus
+  trozos y su juego), direcciones con comillas, comentarios y grupos, fechas
+  raras; **30 juegos de caracteres** (UTF-8, ISO-8859-1 a 16, Windows-1250 a
+  1258, IBM437, CP850, KOI8-R/U, Mac; como los navegadores, el latin1 se lee
+  como 1252); y hacer los mensajes (RFC 5322, CRLF, el texto en QP, los
+  adjuntos en base64, los nombres en RFC 2231 y RFC 2047).
+- **El HTML, seguro** (`html.c`): **sin JavaScript** (los `<script>`, los
+  `on...=`, `javascript:`, `vbscript:`, `data:text/html` y los `<iframe>`
+  fuera), **sin las imágenes de fuera** hasta pulsar «Mostrar imágenes» (así el
+  píxel de rastreo no dice que se ha leído; los 1x1, los ocultos, ni así); las
+  de dentro (`cid:`) se pintan (stb_image). Es un conversor propio a «texto con
+  formato» (negrita, cursiva, títulos, listas, citas, tablas, enlaces,
+  imágenes), no el motor de NetSurf: NetSurf con su CSS es mucho para un
+  Atom con poca memoria, y así no hay ni una línea de JavaScript que
+  desactivar. El texto: las citas con «>», `format=flowed`, las direcciones
+  como enlaces.
+- **La seguridad**: el remitente que no cuadra («Banco Santander
+  <soporte@bancosantander.es>» <alerta@malo.ejemplo>, varios From, un
+  Reply-To de otro dominio) sale en un recuadro con **«[!] Cuidado:»** y su
+  porqué, y con un dibujo de aviso en la lista; **un enlace que dice una
+  dirección y lleva a otra** se avisa arriba y, al pulsarlo, se pregunta
+  enseñando adónde va de verdad (también `https://banco.es@malo.ejemplo/` y las
+  IP); un enlace se abre en el Navegador solo tras preguntar. **Los adjuntos
+  pasan por Escudo** antes de abrirse (`ESCUDO /DESCARGA`: si encuentra algo,
+  su cuadro —cuarentena, borrarlo o dejarlo— y no se abre); un programa
+  (.EXE, .COM, .BAT, .SCR, .JS, .VBS, .MSI, .LNK...) se pregunta además en
+  rojo; sin Escudo instalado, se avisa. Se sacan a `X:\CORREO.TMP` (o
+  `C:\CORREO.TMP`) con un nombre de 8+3 y se abren con lo suyo (`EQUIPO
+  /ABRIR`). Los nombres con carpetas (`../../etc/passwd`) se quedan sin ellas.
+- **La ventana** (`ventana.c`, `vista.c`, `redacta.c`, `dialogos.c`,
+  `iconos.c`; en C sobre las llamadas 32 a 40, con los colores y la forma de
+  `controles.cas`): **tres paneles** —las carpetas de cada cuenta (los sin leer
+  **en negrita y con su número**; la cuenta conectada, con su candado), la
+  lista y el mensaje— que se adaptan al ancho (a 1024 x 600, el HP Mini: 180 +
+  400 + lo demás) y, **por debajo de 900 puntos, dos**: la lista o el mensaje,
+  con «< Volver a la lista». La lista: columnas De, Asunto, Fecha y Tamaño
+  (por debajo de 560 puntos, sin el tamaño), **ordenar** pulsando la cabecera
+  (con su ▲/▼ dibujado), **hilos** opcionales (por In-Reply-To y References;
+  cada hilo por lo más nuevo), sin leer con un sobre y en negrita, **destacado
+  con una estrella** (que se pulsa), adjuntos con un clip, respondido con su
+  flecha; **nada solo con el color**. **Buscar** en el servidor (UID SEARCH
+  TEXT, con CHARSET UTF-8 y literal si lleva tildes) y, sin red, en lo bajado
+  (asunto, remitente y el texto, sin tildes ni mayúsculas). Marcar leído,
+  destacar, **mover** (UID MOVE, o COPY + \Deleted + UID EXPUNGE), **borrar a la
+  papelera** (y en la papelera, del todo, preguntando), varios a la vez
+  (Control y Mayús). **Escribir**: Para, CC y CCO con el **autocompletado de la
+  libreta** (por el nombre o la dirección, sin tildes, primero los más usados),
+  asunto, el texto (cursor, seleccionar, copiar y pegar con el portapapeles del
+  sistema), **adjuntar** (un cuadro con las unidades y las carpetas, que busca
+  al teclear), la **firma** de la cuenta, **responder** (con «Re:», la cita «> »
+  y el In-Reply-To/References), **a todos** (sin uno mismo), **reenviar** (con
+  sus adjuntos), y **HTML sencillo** si se quiere (*negrita*, _cursiva_,
+  listas con «- », [enlaces](https://...)); **borradores en el servidor**
+  (APPEND a Borradores con \Draft; «Seguir el borrador») y lo enviado en
+  **Enviados**. Arrastrar desde Mi equipo, aún no: la principal no tiene
+  `EV_SOLTADO` (está el botón «Adjuntar...»). La **libreta** (`libreta.c`,
+  `vcard.c`): nuevo, cambiar, quitar, **importar y exportar vCard** (2.1, 3.0
+  y 4.0; escribe 3.0). Los **avisos**: arriba, «Correo nuevo: N mensajes» (y en
+  el título), y con el escritorio, **`CORREO /BANDEJA`** (lo lanza el
+  escritorio al arrancar un sistema instalado; si `CORREO.INI` dice
+  `avisar=no` o no hay cuentas con la contraseña guardada, acaba): mira cada
+  tantos minutos (STATUS, sin tocar lo guardado) y saca una ventanita abajo a
+  la derecha con «Leerlo» y «Ahora no», como `ACTUALIZ /BANDEJA`.
+- **Sin conexión** (`almacen.c`): lo bajado se guarda en la carpeta del correo
+  —`\USUARIOS\<USUARIO>\CORREO` si hay usuarios (la llamada 200 de la rama
+  `usuarios`), y si no **`\HISPA\CORREO`** (o `\CORREO` en la memoria de
+  arranque), que es **un secreto de CORREO.BIN** (`permisos.cas`: el sello
+  `SELLO_CORREO` = 25 y la regla `CORREO\`): **ni ORDENES, ni Mi equipo, ni
+  otro programa lo leen** (las contraseñas guardadas tampoco). Con un `base`
+  de antes de esta rama no hay sello: entonces va en la raíz, sin secreto, y se
+  apunta. Por cuenta, `Cn`; por carpeta, `Fnnn` con **`INDICE.IDX`** (las fichas
+  de 192 octetos por orden de UID: remitente, asunto, fecha, tamaño,
+  banderas, dónde está el mensaje, los resúmenes del hilo; se escribe solo lo
+  cambiado) y **`CUERPOS.DAT`** (los mensajes bajados, uno detrás de otro; lo
+  borrado se quita al compactar): **50.000 mensajes son 9 MB de índice y no
+  50.000 archivos en una carpeta FAT**. Poner al día una carpeta: SELECT, UID
+  SEARCH ALL (lo que ya no está se quita), las banderas de lo que se tenía (de
+  20.000 para arriba, de los 2.000 últimos) y **las fichas que faltan de las más
+  nuevas a las más viejas, en tramos de 300**, guardando y repintando detrás de
+  cada tramo. Los cambios hechos sin red (leído, destacado) se suben al
+  conectar; lo que se envía sin red queda en la **bandeja de salida**
+  (`Cn\SALIDA`) y sale al conectar. Topes en `CORREO.INI`: lo más grande que
+  se baja (25 MB), lo más que se guarda por carpeta, cada cuántos minutos se
+  mira.
+
+**STARTTLS en TLS.BIN («(CORREO)» en `tls.c`).** La orden de conectar lleva en
+`cab[4]` el protocolo (1 IMAP, 2 SMTP, 3 POP3): el servicio conecta, espera el
+saludo, manda `STARTTLS` (en SMTP, tras su `EHLO`; en POP3, `STLS`) y, si el
+servidor dice que sí, sigue con el apretón de manos de siempre. Lo plano lo hace
+el servicio y no el programa: **el programa no ve nunca la conexión sin cifrar**
+y no puede mandar nada por ella. Si el servidor no ofrece STARTTLS, el error
+lleva la marca `0x5354` en `cab[1]` (Correo lo dice como tal: «la conexión
+iría sin cifrar»), y si manda algo de más detrás de su «sí» (la inyección de
+órdenes de antes del cifrado), no se sigue.
+
+**Cómo está hecho** (como Hispa-PDF: un núcleo en C99 portable que se compila
+tal cual en Linux —las pruebas con ASan— y en Hispa-64):
+
+```
+castel/nucleo32/correo/
+  so.h, ui.h        lo único que se pide al sistema (archivos, tiempo, red, programas) y a la ventana
+  so_pentium.c      Hispa-Pentium: la int 0x80, RED.BIN (90), TLS.BIN (99), las ventanas (32-40, 80)
+  libc_pentium.c    la memoria (la de Hispa-PDF) y lo poco de la biblioteca de C (snprintf con «%.*s»)
+  so_anfitrion.c    Linux: POSIX y OpenSSL, con el STARTTLS como el de TLS.BIN (el modelo para Hispa-64)
+  red.c             la conexión con su búfer (renglones con tope, literales), HTTP pequeño, SRV del DNS
+  imap.c            IMAP4rev1 (respuestas enteras con sus literales, un analizador sin recursión, UTF-7)
+  smtp.c, pop3.c    enviar (relleno de puntos) y POP3 (UIDL, RETR, DELE)
+  autocfg.c         los servidores de una dirección; cuentas.c: CUENTAS.INI, CORREO.INI
+  almacen.c         INDICE.IDX y CUERPOS.DAT; motor.c: poner al día, bajar, mover, enviar, borradores, IDLE, POP3
+  mime.c, juegos.c, construye.c, html.c, vcard.c, interno.h, juegos_tablas.h (haz_juegos.py)
+  libreta.c, imagenes.c (stb_image), orden.c (CORREO /ORDEN), principal.c
+  ventana.c, vista.c, redacta.c, dialogos.c, iconos.c, correo32.png
+  hacer.sh, anfitrion.sh, paquete.sh, FUENTES, LEEME.txt
+  pruebas/          servidor_correo.py, haz_buzones.py, prueba_servidor.py, pruebas_mime.sh,
+                    prueba_mime.c, so_minimo.c, fuzz.py, fuzz_imap.py, compara_email.py, casos/
+```
+
+**Lo que se aguanta** (lo que dice el servidor es hostil): un renglón de más de
+1 MB o un literal de más del tope (25 MB) cortan la conexión; las respuestas se
+miran con un analizador sin recursión (los paréntesis anidados, con su
+cuenta); MIME con sus topes (512 partes, 24 niveles, 256 cabeceras, 64 MB), sin
+recursión, en tiempo lineal (un mensaje de 2 MB o un HTML de 1 MB, en décimas de
+segundo con ASan); los registros del DNS, mirando cada octeto (y los punteros
+que se apuntan, con tope).
+
+**Las órdenes** (en la Consola; las usan las pruebas): `CORREO /ORDEN cuenta
+CORREO CLAVE [ENTRADA PUERTO MODO SALIDA PUERTO MODO] [/POP3] [/SINCIFRAR]`
+(sin los servidores, los busca), `autocfg`, `cuentas`, `carpetas [N]`, `al-dia
+[N] [CARPETA]`, `lista`, `lee UID`, `envia PARA ASUNTO TEXTO [ADJUNTO...]`,
+`busca TEXTO`, `mueve UID CARPETA`, `marca UID leido|noleido|destacado`.
+Teclas de la ventana: F5 recibir, Ctrl+N escribir, Ctrl+R responder, Ctrl+T a
+todos, Ctrl+L reenviar, Supr borrar, Ctrl+K mover, Ctrl+F buscar, S destacar, M
+leído; al escribir, Ctrl+E (o Ctrl+Intro) enviar, Ctrl+S guardar el borrador,
+Ctrl+B negrita (con HTML).
+
+**Medidas.** `CORREO.BIN` mide 333 KB. **Un buzón de 10.000 mensajes en un
+Atom N455** (QEMU `-cpu n270 -icount shift=0`: una instrucción, un
+nanosegundo; el servidor de pruebas, en Python, en la misma máquina): la
+primera vez, traer las 10.000 fichas lleva **42 s** —en tramos de 300: los
+300 más nuevos se ven en algo más de un segundo, y se puede leer mientras
+llegan; en Linux, el programa gasta 0,34 s de procesador para lo mismo, así
+que casi todo es esperar al servidor y descifrar (AES-GCM: unos 5 MB)—, y
+**abrirlo otra vez, con lo guardado, 0,26 s** (UID SEARCH ALL, las banderas y
+el índice de 1,9 MB). El índice de 50.000 mensajes mide 9,6 MB en memoria.
+Conectar con la cadena ya comprobada, 0,2 M ciclos de BearSSL (sesión
+reanudada).
+
+**El paquete** `correo` 1.0 (OPCIONALES de `tools/hpq.py`, tipo
+`internet`): `\HISPA\CORREO.BIN`, `\HISPA\CORREO.TXT` (el LEEME, con la
+licencia de stb_image) y `\HISPA\MENU\CORREO.MNU` y `.ICP` (con su icono, un
+sobre con un sello verde; también en el escritorio). Lo hace
+`castel/nucleo32/correo/paquete.sh SALIDA`. Necesita `base >= 0.8.6`, `red` y
+`tls`; **el secreto de `\HISPA\CORREO` y el STARTTLS llegan con el `base` y el
+`tls` de esta rama** (al publicarlos, subir sus versiones y que `correo` los
+pida): con los de antes, Correo va igual por TLS en 993/995/465, guarda en la
+raíz y STARTTLS no se puede.
+
+**Probarlo**: `SOLO=correo castel/pruebas.sh` (la parte 42,
+`castel/pruebas_correo.sh`, unos 15 minutos). **No usa ningún servidor ni
+cuenta de verdad**: el servidor es el de pruebas en Python
+(`pruebas/servidor_correo.py`: IMAP4rev1 con IDLE, UIDPLUS, MOVE,
+SPECIAL-USE; SMTP con STARTTLS y AUTH; POP3 con STLS; la autoconfiguración por
+HTTPS; su raíz de prueba en `\RAICES` del disco; puertos para lo que no se debe
+dejar: sin STARTTLS, de otro nombre, de una raíz que no conoce nadie), con
+los buzones de `haz_buzones.py` (49 casos en la entrada: juegos de caracteres,
+RFC 2047/2231, HTML con scripts, imágenes de fuera y píxel de rastreo, cid:,
+enlace engañoso, suplantación, adjuntos con EICAR, PDF, PNG, ZIP, reenviados,
+hilos, fechas raras, malformados, uno de 2 MB; y un buzón de 10.000 —o 50.000—
+hecho al vuelo). **184 bien, 0 mal** (22/11; con el Atom, que se pasa sin `SIN_ATOM=1`, uno más), con 1.500 vueltas del fuzz de MIME/HTML/vCard y 1.000 del de IMAP (el agente dio además 5.200 de MIME sin un fallo).
+
+**Lo que falta**: OAuth2 (Gmail y Microsoft lo piden cada vez más); arrastrar
+adjuntos desde Mi equipo (cuando la principal tenga `EV_SOLTADO`); S/MIME y
+OpenPGP; los juegos de caracteres de varios octetos (gb2312, big5, shift_jis,
+iso-2022-jp, utf-16: se leen como UTF-8 o 1252); una imagen dentro de un
+enlace no lleva el enlace; carpetas nuevas, renombrar y borrar carpetas del
+servidor; las reglas (filtros); el HTML con su CSS de verdad (para eso, «Abrir
+en el Navegador» sin scripts); nombres largos al guardar adjuntos (el núcleo,
+8+3); las cuentas de Exchange (EWS) y JMAP.
 
 ## 15. Las pruebas
 
@@ -7102,6 +8768,25 @@ capturas; Naves desde Mi equipo, jugando (DirectDraw a pantalla completa,
 DirectInput); el ejemplo DDRAW y FASMW abriendo y ensamblando HELLO.ASM; y
 WSOCK32 (REDPRUE) contra el servidor HTTP de aquí. Ver
 [pentium/WIN32.md](pentium/WIN32.md).
+
+**(BLOC) El Bloc de notas 1.0** (la parte 35, `SOLO=bloc`; también con `SOLO=08`):
+en Linux con corre32, los módulos (la memoria y el texto al azar, el fuzz de
+las expresiones regulares contra Python y el de las páginas, comparar, los
+diez lenguajes) y el Bloc sin ventana con sus guiones y 11 MB; en el
+escritorio, lo de cada fase con sus capturas, la sesión, soltar desde Mi
+equipo y abrir 11 MB (sección 14 quindecies). Las partes que ya abrían el Bloc
+(el escritorio, la memoria USB, apagar, la pantalla, los accesorios, la
+rueda, el menú) pasan sin tocarlas.
+
+**(JUEGOS) Lo que pide un juego de Windows** (la parte 33, `SOLO=win32juegos`): los
+programas de `tests/juegos/` (hechos por `nucleo32/win32/juegos.sh`): el
+diagnóstico (FALTA, SINDLL, `WIN32 COMPRUEBA` y `WIN32.LOG`), los hilos y lo que
+los sincroniza (HILOS), SEH (SEH, con el marco de VC6 a mano), el registro (REG,
+dos veces, y los `.REG` del disco), MSVCRT de VC6 (CRT); en el escritorio, la
+ventana del juego a pantalla completa con el ratón de QEMU (JUEGOV); UDP con un
+eco y un cliente de aquí (REDUDP, `tests/juegos/eco_udp.py`), y el sonido
+grabado (SONJ: DirectSound sin cortes aunque el programa no haga nada, waveOut,
+el CD por MCI).
 
 ## 16. Por dónde seguir
 

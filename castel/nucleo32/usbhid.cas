@@ -29,8 +29,9 @@ módulo Usbhid
     importar Usb, Usbbase, Consola, Raton, Tareas, Registro, Mem32
 
     constante MAX_HID = 6
-    constante REPITE_TRAS = 50                  ; centésimas hasta que una tecla empieza a repetirse
-    constante REPITE_CADA = 4                   ; y cada cuántas se repite
+    ; (PANEL) lo que dice el Panel de control (Teclado: el retardo y la velocidad de repetición)
+    público variable repite_tras: nat32 = 50    ; centésimas hasta que una tecla empieza a repetirse
+    público variable repite_cada: nat32 = 4     ; y cada cuántas se repite
 
     tipo Hid = estructura
         usado: bool
@@ -128,7 +129,7 @@ módulo Usbhid
             si p[i] > 3 y no está(h.anterior, p[i]) entonces
                 tecla(código_de(h, p[i]), falso)
                 repite := código_de(h, p[i])
-                repite_cuándo := tics + REPITE_TRAS
+                repite_cuándo := tics + repite_tras
             fin
         fin
         para i desde 0 hasta 7 hacer h.anterior[i] := p[i] fin
@@ -374,7 +375,7 @@ módulo Usbhid
             ; la tecla que sigue pulsada se repite
             si repite <> 0 y tics >= repite_cuándo entonces
                 tecla(repite, falso)
-                repite_cuándo := tics + REPITE_CADA
+                repite_cuándo := tics + repite_cada
             fin
             dormir(1)
         fin

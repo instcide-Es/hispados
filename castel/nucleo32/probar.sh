@@ -29,6 +29,7 @@
 # RELOJ_A=archivo, apunta la hora: para medir); «:reloj NOMBRE», la hora ya.
 # «:monitor ORDEN» le da esa orden al monitor de QEMU (como «o /b 0x70 0x60»:
 # escribir en un puerto; con QEMU_MAS="-S", antes de arrancar, y «cont»).
+# (PANEL) «:esquina» lleva la flecha arriba a la izquierda y cuenta desde ahí.
 # «:texto NOMBRE» deja la pantalla de texto (sus 25 líneas) en
 # $CAPTURAS/NOMBRE.txt (para el programa que instala, que la pinta entera).
 # Con DISCO=imagen, esa imagen como disco duro IDE (el maestro del canal
@@ -99,6 +100,7 @@ tecla() {
     '[') echo alt_r-bracket_left ;; ']') echo alt_r-bracket_right ;; '{') echo alt_r-apostrophe ;; '}') echo alt_r-backslash ;;
     'ñ') echo semicolon ;; 'Ñ') echo shift-semicolon ;; 'ç') echo backslash ;; 'Ç') echo shift-backslash ;;
     'º') echo grave_accent ;; 'ª') echo shift-grave_accent ;;
+    '€') echo alt_r-e ;;                           # (OFICINA2) Alt Gr+E
     'á') echo apostrophe a ;; 'é') echo apostrophe e ;; 'í') echo apostrophe i ;; 'ó') echo apostrophe o ;; 'ú') echo apostrophe u ;;
     'Á') echo apostrophe shift-a ;; 'É') echo apostrophe shift-e ;; 'Í') echo apostrophe shift-i ;; 'Ó') echo apostrophe shift-o ;; 'Ú') echo apostrophe shift-u ;;
     'à') echo bracket_left a ;; 'è') echo bracket_left e ;; 'ò') echo bracket_left o ;;
@@ -156,6 +158,10 @@ for orden in "${ORDENES[@]}"; do
     ":reloj "*) [ -n "${RELOJ_A:-}" ] && echo "${orden:7} $(date +%s.%N)" >> "$RELOJ_A"; continue ;;
     ":monitor "*) mon "${orden:9}" 0.3; continue ;;
     ":raton "*) set -- ${orden:7}; ir $1 $2; continue ;;
+    # (PANEL) «:esquina»: la flecha, arriba a la izquierda del todo (el núcleo
+    # la para en el borde), y se cuenta desde ahí: tras cambiar la velocidad del
+    # ratón en el Panel de control, lo que se mueve ya no es punto a punto
+    ":esquina") for _ in $(seq 40); do mon "mouse_move -60 -60" 0.03; done; RX=0; RY=0; sleep 0.3; continue ;;
     ":clic "*) set -- ${orden:6}; ir $1 $2; mon "mouse_button 1" 0.2; mon "mouse_button 0" 0.4; continue ;;
     ":doble "*) set -- ${orden:7}; ir $1 $2; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.1; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.5; continue ;;
     ":triple "*) set -- ${orden:8}; ir $1 $2; for _ in 1 2; do mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.1; done; mon "mouse_button 1" 0.1; mon "mouse_button 0" 0.5; continue ;;

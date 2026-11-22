@@ -1,0 +1,69 @@
+; =============================================================================
+;  CASTEL.LEN - el lenguaje Castel (el de Hispa-Pentium), para el Bloc de notas
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+;
+;  Así es un .LEN (en UTF-8; una «clave=valor» por línea; las líneas que
+;  empiezan por «;» son comentarios; las listas, separadas por espacios, se
+;  pueden repartir en varias líneas con la misma clave). Para un lenguaje
+;  nuevo, otro .LEN en \HISPA\BLOC\LENGUAJES\, sin tocar el programa:
+;
+;    nombre=             lo que sale en el menú «Lenguaje»
+;    extensiones=        las de sus archivos (CAS BAS ...)
+;    archivos=           nombres enteros (CONFIG.SYS AUTOEXEC.BAT)
+;    distingue=si|no     si las palabras distinguen mayúsculas
+;    comentario=         los de línea (; // # ::), hasta cuatro
+;    comentario_palabra= los que son una palabra (REM NOTA)
+;    al_principio=si     los comentarios, solo al principio de la línea (INI, BAT)
+;    bloque=ABRE CIERRA  el de bloque ((* *), /* */, <!-- -->)
+;    anida=si            si se puede abrir uno dentro de otro
+;    comillas=           las de las cadenas de una línea (" ')
+;    largas=             las de las cadenas de varias líneas (""" ''' `)
+;    escape=             lo que va delante de una letra especial (\)
+;    claves=             palabras clave (en negrita)
+;    tipos=              los tipos (en negrita)
+;    propias=            funciones y órdenes de la biblioteca
+;    letras=             lo que también va dentro de una palabra ($%!#&)
+;    inicio=             lo que también puede empezarla (. _ ?)
+;    operadores=         los signos (los ( ) [ ] { } lo son siempre)
+;    numeros=si          colorear los números
+;    prefijos=           los de los números (&H #)
+;    directiva=          la de toda la línea, al principio (# de C, % de NASM)
+;    directiva_palabra=  la de una palabra en cualquier sitio (@ de Python y CSS)
+;    etiquetas=          dospuntos («x:» al principio), delante («:x»),
+;                        numeros (los números de línea), secciones («[x]»)
+;    variables=          la de las variables de las órdenes (%PATH%, %1)
+;    modo=html|css|ini   lo especial de esos tres
+;    plegado=bloques|sangria|secciones
+;    abre= cierra=       las palabras que abren y cierran un bloque (con la
+;                        directiva delante si son de las suyas: #if %macro)
+;    signos_abre= signos_cierra=  los signos que abren y cierran ({ })
+;    cierra_doble=       cierra si lleva otra palabra detrás (END SUB): la de
+;                        detrás no abre
+;    abre_al_final=      abre si es lo último de la línea (THEN)
+;    no_abre_tras=       la palabra de detrás no abre (el «si» de «sino si»)
+;    no_abre_ante=       no abre si detrás va esto («si no:» de Castel)
+;    sueltas=            (HTML) las etiquetas que no se cierran (br img)
+; =============================================================================
+nombre=Castel
+extensiones=CAS
+distingue=si
+comentario=;
+bloque=(* *)
+anida=si
+comillas=" '
+escape=\
+numeros=si
+operadores=+-*=<>:,.^&|
+claves=módulo fin constante variable función devolver tipo si entonces sino
+claves=mientras hacer para desde hasta paso romper seguir según caso
+claves=ensamblador arreglo estructura puntero público importar ref
+claves=y o no yb ob xob nob div mod cierto falso nulo modelo interrupción
+tipos=byte nat8 nat16 ent16 nat32 ent32 nat64 ent64 bool
+propias=escribir escribir_car salir dirección valor puntero tamaño
+propias=meter_puerto sacar_puerto leer_byte poner_byte leer_palabra poner_palabra
+propias=fin_programa principal usuario núcleo hispa32 linux64 núcleo64 grande
+plegado=bloques
+abre=función si mientras para según estructura módulo ensamblador
+cierra=fin
+no_abre_tras=sino
+no_abre_ante=no:

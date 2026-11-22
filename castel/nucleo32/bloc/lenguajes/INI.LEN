@@ -1,0 +1,14 @@
+; =============================================================================
+;  INI.LEN - los archivos de ajustes (.INI), para el Bloc de notas: las
+;  secciones, las claves y sus valores
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+;  El formato, en CASTEL.LEN.
+; =============================================================================
+nombre=INI
+extensiones=INI CFG INF MNU REG
+distingue=no
+modo=ini
+comentario=; #
+al_principio=si
+etiquetas=secciones
+plegado=secciones

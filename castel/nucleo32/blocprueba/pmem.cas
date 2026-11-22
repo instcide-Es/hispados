@@ -1,0 +1,80 @@
+; =============================================================================
+;  pmem.cas - prueba de BlocMem (blocmem.cas): pedir, soltar y recrecer al
+;  azar, comprobando que lo de cada trozo no lo pisa nadie. Con corre32.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo PMem
+    modelo usuario
+    importar Llamadas, BlocMem
+
+    constante N = 400
+    variable trozos: arreglo [N] de puntero a byte
+    variable largos: arreglo [N] de nat32
+    variable semilla: nat32 = 12345
+
+    función azar(): nat32
+        semilla := semilla * 1103515245 + 12345
+        devolver (semilla >> 8) yb 0xFFFFFF
+    fin
+
+    función llena(i: nat32)
+        variable k: nat32
+        para k desde 0 hasta largos[i] - 1 hacer trozos[i][k] := byte((i * 7 + k) yb 255) fin
+    fin
+
+    función bien(i: nat32): bool
+        variable k: nat32
+        si largos[i] = 0 entonces devolver cierto fin
+        para k desde 0 hasta largos[i] - 1 hacer
+            si trozos[i][k] <> byte((i * 7 + k) yb 255) entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    función principal(): byte
+        variable vuelta, i, n, malos: nat32
+        malos := 0
+        para vuelta desde 1 hasta 20000 hacer
+            i := azar() mod N
+            si trozos[i] <> nulo entonces
+                si no bien(i) entonces malos := malos + 1 fin
+                si azar() mod 3 = 0 entonces
+                    n := azar() mod 5000 + 1
+                    si azar() mod 50 = 0 entonces n := n * 200 fin
+                    trozos[i] := recrecer(trozos[i], largos[i], n)
+                    si n > largos[i] entonces
+                        ; lo de antes sigue; lo nuevo se llena
+                        si largos[i] > 0 y no bien(i) entonces malos := malos + 1 fin
+                    fin
+                    largos[i] := n
+                    llena(i)
+                sino
+                    soltar(trozos[i])
+                    trozos[i] := nulo
+                fin
+            sino
+                n := azar() mod 3000 + 1
+                trozos[i] := pedir(n)
+                si trozos[i] = nulo entonces
+                    escribir("mal: sin memoria\n")
+                    devolver 1
+                fin
+                si nat32(trozos[i]) yb 15 <> 0 entonces malos := malos + 1 fin
+                largos[i] := n
+                llena(i)
+            fin
+        fin
+        para i desde 0 hasta N - 1 hacer
+            si trozos[i] <> nulo entonces
+                si no bien(i) entonces malos := malos + 1 fin
+                soltar(trozos[i])
+            fin
+        fin
+        si malos > 0 o en_uso <> 0 entonces
+            escribir("mal: ", malos, " trozos pisados; en uso al final: ", en_uso, "\n")
+            devolver 1
+        fin
+        escribir("bien: 20000 vueltas de pedir, soltar y recrecer, sin pisarse; al final, todo suelto\n")
+        devolver 0
+    fin
+fin PMem.

@@ -1,0 +1,26 @@
+contactos: 2
+nombre=<Ana María García> correos=<ana@trabajo.es|ana@x.es|> tel=<600 111 222> org=<Asociación, Jubilats, Junta> nota=<Primera línea
+Segunda; con punto y coma\ y barra> usado=0
+nombre=<Un nombre muy largo para ver que se parte bien a setenta y cinco octetos sin cortar ñandús ni águilas> correos=<largo@x.es||> tel=<> org=<> nota=<> usado=0
+--- escrito ---
+BEGIN:VCARD
+VERSION:3.0
+FN:Ana María García
+N:María García;Ana;;;
+EMAIL;TYPE=INTERNET,PREF:ana@trabajo.es
+EMAIL;TYPE=INTERNET:ana@x.es
+TEL:600 111 222
+ORG:Asociación\, Jubilats\, Junta
+NOTE:Primera línea\nSegunda\; con punto y coma\\ y barra
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+FN:Un nombre muy largo para ver que se parte bien a setenta y cinco octetos
+  sin cortar ñandús ni águilas
+N:nombre muy largo para ver que se parte bien a setenta y cinco octetos sin
+  cortar ñandús ni águilas;Un;;;
+EMAIL;TYPE=INTERNET,PREF:largo@x.es
+END:VCARD
+--- fin ---
+bien: renglones de 75 como mucho
+bien: los mismos contactos al volverlos a leer

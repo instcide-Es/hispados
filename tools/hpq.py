@@ -35,6 +35,11 @@
 #        sistema=<nombre>               (0.8.6: es del sistema; PAQUETES ACTUALIZA
 #                                        lo instala si no está, salvo si se ha
 #                                        quitado a propósito: QUITADOS.TXT)
+#        serie=<N>                      (USUARIOS, 22/11/2026: la pone «firma», detrás
+#                                        de la primera línea, y la sube cada vez:
+#                                        PAQUETES no usa un catálogo de Internet con
+#                                        la serie más baja que la última que vio,
+#                                        contra la vuelta atrás a versiones viejas)
 #
 #  (PROGRAMAS) El tipo: uno de los códigos de TIPOS (sistema, oficina,
 #  internet...: docs/PENTIUM.md, sección 13, «El tipo de cada paquete»). Si
@@ -71,7 +76,10 @@
 #               archivo PRIVADA, con permisos 600; dice la pública)
 #    hpq.py publica PRIVADA [clave.cas]  (la pública; con clave.cas, el
 #               módulo de Castel que la lleva)
-#    hpq.py firma CARPETA PRIVADA     (CATALOGO.FIR del CATALOGO.TXT de ahí)
+#    hpq.py firma CARPETA PRIVADA [--serie N]   (CATALOGO.FIR del CATALOGO.TXT de
+#               ahí; antes le pone «serie=N»: la de ahora más uno, y como poco
+#               los segundos desde 1970, así sube aunque el catálogo se rehaga;
+#               --serie, para las pruebas)
 #    hpq.py catalogo CARPETA [--clave PRIVADA]   (y, con la clave, firmado)
 #    hpq.py comprueba CARPETA PUBLICA (si CATALOGO.FIR es buena; PUBLICA: las
 #               64 cifras, o un clave.cas)
@@ -83,6 +91,7 @@ import hashlib
 import os
 import re
 import sys
+import time
 
 MAGIA = 'HPQ 1'
 MAGIA_CATALOGO = 'HPQ-CATALOGO 1'
@@ -114,13 +123,13 @@ TIPOS = [
 TIPO_POR_NOMBRE = {
     'base': 'sistema', 'paquetes': 'sistema', 'equipo': 'sistema', 'hvprun': 'sistema',
     'red': 'internet', 'tls': 'internet', 'navega': 'internet', 'ssh': 'internet',
-    'tailscal': 'internet', 'wifi': 'internet',
+    'tailscal': 'internet', 'wifi': 'internet', 'correo': 'internet',  # (CORREO)
     'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina', 'pluma': 'oficina',   # (PLUMA32: pluma)
     'consola': 'herramientas', 'accesori': 'herramientas', 'comprim': 'herramientas',
     'ejemplos': 'desarrollo',
     'win32': 'windows',
     'escudo': 'seguridad', 'escbase': 'seguridad', 'escmes': 'seguridad', 'escdia': 'seguridad',
-    'sonido': 'multimedia', 'mirador': 'multimedia',
+    'sonido': 'multimedia', 'mirador': 'multimedia', 'reproduc': 'multimedia', 'pintura': 'multimedia',     # (REPRODUCTOR) reproduc, (OFICINA2) pintura
     'juegos': 'juegos',     # (JUEGOS2)
     'clicgest': 'terceros',
 }
@@ -203,16 +212,31 @@ VERSION_SONIDO = VERSION_085
 # de un paquete grande, «Cancelar», mira si cabe antes de bajar y borra lo
 # bajado) y DESCARGAR /CANCELA=. Suben base, red y paquetes
 VERSION_086 = '0.8.6'
+# (USUARIOS, 22/11/2026, rama usuarios) la 0.8.7: los usuarios con contraseña
+# (la pantalla de entrada, \USUARIOS, Configuración > Usuarios: USUARIOS.BIN;
+# las contraseñas, con Argon2id: ARGON2.BIN) y el pozo del azar del núcleo
+# (las llamadas 200 a 210) en la base; SSHD con los usuarios (ssh); el azar del
+# núcleo en TLS.BIN (tls), WIFI.BIN (wifi), SSH, WG y TAILSCAL (hispac/hispa.c:
+# ssh y tailscal); PAQUETES 1.4 (la serie del catálogo, solo el administrador instala)
+# (PANEL, 22/11/2026, rama panel-control) la 0.8.7: el Panel de control
+# (Configuración con sus iconos; PANEL.BIN: la fecha y la hora, el ratón, el
+# teclado, la red, la energía y la personalización; las llamadas 174 y 175,
+# PANEL.INI) y la hora por Internet (HORARED.BIN, NTP); ACPI.BIN con el botón
+# de encendido. Suben base y tls (TLS.BIN no se fía de un reloj de antes de TLS.HOR)
+VERSION_087 = '0.8.7'
 SISTEMA = [
-    ('base', VERSION_086, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
+    ('base', VERSION_087, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
+        ('USUARIOS.BIN', r'\HISPA\USUARIOS.BIN'), ('ARGON2.BIN', r'\HISPA\ARGON2.BIN'),
+        ('PANEL.BIN', r'\HISPA\PANEL.BIN'), ('HORARED.BIN', r'\HISPA\HORARED.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
-    ('bloc', VERSION_085, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
+    ('bloc', '1.0', 'El Bloc de notas: pestañas, buscar y reemplazar (con expresiones), colores según el lenguaje, UTF-8 y comparar', 'base >= ' + VERSION_087, [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),    # (BLOC) la 1.0: el Bloc al nivel de un editor serio
     ('consola', VERSION_085, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
     # (explorador, dispositivos) el explorador de archivos, sus miniaturas y el Administrador de dispositivos
-    ('equipo', '0.9.2', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
+    # (REPRODUCTOR) la 0.9.3: la música (.MP3, .OGG, .FLAC, .WAV, .CUE...) se abre con el Reproductor si está
+    ('equipo', '0.9.3', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
         ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('MINIAT.BIN', r'\HISPA\MINIAT.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
     ('ejemplos', VERSION_085, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.4', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
@@ -227,20 +251,21 @@ SISTEMA = [
     # (PROGRAMAS) la 1.2 (sobre la 1.1, la de la revisión de seguridad): los tipos,
     # REPARA, ARCHIVOS, SUELTOS, QUITA /DEPENDIENTES y la ventana unificada
     # «Programas y actualizaciones» (PROGRAMA.BIN, con los controles: base 0.8.2)
-    ('paquetes', '1.3', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
+    ('paquetes', '1.4', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
         ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN')]),
-    ('red', VERSION_086, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
+    # (JUEGOS) la 0.8.7: UDP sin esperar (rpila.cas: un juego lo pregunta en cada cuadro)
+    ('red', VERSION_087, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
-    ('tls', VERSION_085, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
+    ('tls', VERSION_087, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
         ('TLS.BIN', r'\HISPA\TLS.BIN'), ('HTTPS.BIN', r'\HISPA\HTTPS.BIN')]),
-    ('ssh', VERSION_084, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, apagado hasta que se encienda)', 'base >= 0.8.4, red >= 0.8.4', [
+    ('ssh', VERSION_087, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, con los usuarios del equipo; apagado hasta que se encienda)', 'base >= ' + VERSION_087 + ', red >= 0.8.4', [
         ('SSH.BIN', r'\HISPA\SSH.BIN'), ('SSHD.BIN', r'\HISPA\SSHD.BIN')]),
-    ('tailscal', VERSION_084, 'Tailscale y WireGuard: la red privada de sus equipos, cada uno con su nombre y su IP 100.x', 'base >= 0.8.4, red >= 0.8.4, tls >= 0.8.1', [
+    ('tailscal', VERSION_087, 'Tailscale y WireGuard: la red privada de sus equipos, cada uno con su nombre y su IP 100.x', 'base >= 0.8.4, red >= 0.8.4, tls >= 0.8.1', [
         ('TAILSCAL.BIN', r'\HISPA\TAILSCAL.BIN'), ('WG.BIN', r'\HISPA\WG.BIN')]),
     # (WIFI) el Wi-Fi (castel/nucleo32/wifi/, docs/PENTIUM.md «El Wi-Fi»); el microcódigo, con su licencia
-    ('wifi', VERSION_WIFI, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
+    ('wifi', VERSION_087, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
      'base >= ' + VERSION_WIFI + ', red >= ' + VERSION_WIFI, [
         ('WIFI.BIN', r'\HISPA\WIFI.BIN'), ('REDWIFI.BIN', r'\HISPA\REDWIFI.BIN'), ('WIFI.TXT', r'\HISPA\WIFI.TXT'),
         ('BCM43XX.FW', r'\HISPA\BCM43XX.FW'), ('BCM43XXH.FW', r'\HISPA\BCM43XXH.FW'), ('BCM43XX.TXT', r'\HISPA\BCM43XX.TXT')]),
@@ -248,14 +273,32 @@ SISTEMA = [
      'base >= ' + VERSION_SONIDO, [
         ('SONIDO.BIN', r'\HISPA\SONIDO.BIN'), ('INICIO.WAV', r'\HISPA\INICIO.WAV'), ('APAGAR.WAV', r'\HISPA\APAGAR.WAV'),
         ('AVISO.WAV', r'\HISPA\AVISO.WAV'), ('ERROR.WAV', r'\HISPA\ERROR.WAV')]),
-    ('hvprun', '0.9', 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio (con su sonido)', 'base >= 0.7', [
+    # (OFICINA2) hvprun 0.10: la rueda, Alt+letra, los títulos largos (con más
+    # de 63 letras el núcleo no hacía la ventana), el módulo en la unidad del
+    # sistema y la carpeta de los documentos (castel/nucleo32/hvprun/poficina.inc)
+    ('hvprun', '0.10', 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio (con su sonido, la rueda y Alt+letra)', 'base >= 0.7', [
         ('HVPRUN.BIN', r'\HISPA\HVPRUN.BIN')]),
-    ('oficina', '1.0', 'La oficina de Hispa-386: Facturas, Pluma, Cuentas y Mirador', 'hvprun >= 0.7', [
+    # (OFICINA2) la oficina 1.1: con Datos, el Lector, Publicaciones y
+    # Presentaciones, y los tipos de letra en todos sus tamaños (TIPOS12/24/32)
+    ('oficina', '1.1', 'La oficina de Hispa-386: Pluma, Cuentas, Facturas, Datos, Presentaciones, Publicaciones y Lector', 'hvprun >= 0.10', [
         ('FACTURAS.HVP', r'\OFICINA\FACTURAS.HVP'), ('PLUMA.HVP', r'\OFICINA\PLUMA.HVP'),
         ('CUENTAS.HVP', r'\OFICINA\CUENTAS.HVP'), ('MIRADOR.HVP', r'\OFICINA\MIRADOR.HVP'),
-        ('TIPOS.DAT', r'\OFICINA\TIPOS.DAT'), ('DICCIO.DAT', r'\OFICINA\DICCIO.DAT')]),
+        ('DATOS.HVP', r'\OFICINA\DATOS.HVP'), ('LECTOR.HVP', r'\OFICINA\LECTOR.HVP'),
+        ('PUBLICA.HVP', r'\OFICINA\PUBLICA.HVP'), ('PRESENTA.HVP', r'\OFICINA\PRESENTA.HVP'),
+        ('TIPOS.DAT', r'\OFICINA\TIPOS.DAT'), ('TIPOS12.DAT', r'\OFICINA\TIPOS12.DAT'),
+        ('TIPOS24.DAT', r'\OFICINA\TIPOS24.DAT'), ('TIPOS32.DAT', r'\OFICINA\TIPOS32.DAT'),
+        ('DICCIO.DAT', r'\OFICINA\DICCIO.DAT')]),
+    # (OFICINA2) Pintura, aparte (tipo multimedia, como el Mirador): el
+    # programa de dibujo de Hispa-386 (BMP; abre también PCX: «Editar» en Mi equipo)
+    ('pintura', '1.0', 'Pintura: dibujar y retocar imágenes (guarda en BMP y abre también PCX)', 'hvprun >= 0.10', [
+        ('PINTURA.HVP', r'\OFICINA\PINTURA.HVP')]),
     # [WIN32] los programas de Windows de 32 bits y DirectX (docs/pentium/WIN32.md)
-    ('win32', '1.1', 'Programas de Windows de 32 bits, DirectX (con sonido) y OpenGL: WIN32.BIN, sus DLL y los ejemplos (Naves, GLPRUEBA)', 'base >= ' + VERSION_084, [
+    # (JUEGOS, 22/11/2026) win32 1.2: lo que pide un juego (hilos de verdad, SEH,
+    # el registro, MSVCRT de VC6, el ratón de los juegos, UDP, la mezcla en su
+    # hilo, el CD de sonido; WIN32 COMPRUEBA y WIN32.LOG). Vale con la base de
+    # antes (sin las llamadas 183 a 186 hace lo de siempre); con todo, la base
+    # que las lleve (la rama win32-juegos)
+    ('win32', '1.2', 'Programas de Windows de 32 bits y juegos: hilos, SEH, registro, DirectX (con sonido y CD), OpenGL; WIN32.BIN, sus DLL y los ejemplos', 'base >= ' + VERSION_084, [
         ('WIN32.BIN', r'\HISPA\WIN32.BIN'),
         ('MSVCRT.DLL', r'\WIN32\MSVCRT.DLL'), ('UCRT.DLL', r'\WIN32\UCRT.DLL'), ('COMCTL32.DLL', r'\WIN32\COMCTL32.DLL'),
         ('WINMM.DLL', r'\WIN32\WINMM.DLL'), ('DDRAW.DLL', r'\WIN32\DDRAW.DLL'), ('DSOUND.DLL', r'\WIN32\DSOUND.DLL'),
@@ -466,12 +509,23 @@ OPCIONALES = [
     ('mirador', '1.0', 'El Mirador: ver imágenes (BMP, PNG, JPG, GIF animados, ICO...), girar, diapositivas, pantalla completa y fondo de escritorio', 'base >= 0.8.6', [
         ('BIN/MIRADOR.BIN', r'\HISPA\MIRADOR.BIN'), ('MIRADOR.TXT', r'\HISPA\MIRADOR.TXT'),
         ('MIRADOR.MNU', r'\HISPA\MENU\MIRADOR.MNU'), ('MIRADOR.ICP', r'\HISPA\MENU\MIRADOR.ICP')]),
+    # (REPRODUCTOR) el Reproductor de música (castel/nucleo32/reproductor/paquete.sh; tipo «multimedia»)
+    ('reproduc', '1.0', 'El Reproductor: música (MP3, OGG, FLAC, WAV, MOD, XM, S3M, IT) y CD de música, con lista, ecualizador de 10 bandas y visualización',
+     'base >= ' + VERSION_087 + ', sonido >= 1.0', [
+        ('BIN/REPRODUC.BIN', r'\HISPA\REPRODUC.BIN'), ('REPRODUC.TXT', r'\HISPA\REPRODUC.TXT'),
+        ('REPRODUC.MNU', r'\HISPA\MENU\REPRODUC.MNU'), ('REPRODUC.ICP', r'\HISPA\MENU\REPRODUC.ICP')]),
     # (JUEGOS2) los juegos (castel/nucleo32/juegos/paquete.sh; tipo «juegos»)
     ('juegos', '1.0', 'Los juegos: Hispa-Pinball (La Feria), Bloques, Rompemuros, Culebra, Campo de minas, Solitario, Tragabolas y Almacén', 'base >= 0.8.4',
      [(o + '/' + j + '.' + e if o else j + '.' + e, '\\HISPA\\' + d + '\\' + j + '.' + e)
       for j in ('BLOQUES', 'ROMPEMUR', 'PINBALL', 'CULEBRA', 'MINAS', 'SOLITARI', 'TRAGABOL', 'ALMACEN')
       for o, d, e in (('BIN', 'JUEGOS', 'BIN'), ('', 'MENU', 'MNU'), ('', 'MENU', 'ICP'))]
      + [('JUEGOS.TXT', r'\HISPA\JUEGOS\LEEME.TXT')]),
+    # (CORREO) Correo, el cliente de correo (castel/nucleo32/correo/paquete.sh; tipo «internet»). El
+    # secreto de \HISPA\CORREO y el STARTTLS llegan con el base y el tls de la 0.8.7
+    ('correo', '1.0', 'Correo: el cliente de correo (IMAP, POP3 y SMTP, siempre cifrado; HTML sin scripts, adjuntos por Escudo, sin conexión)',
+     'base >= ' + VERSION_087 + ', red >= 0.8.1, tls >= ' + VERSION_087, [
+        ('CORREO.BIN', r'\HISPA\CORREO.BIN'), ('CORREO.TXT', r'\HISPA\CORREO.TXT'),
+        ('CORREO.MNU', r'\HISPA\MENU\CORREO.MNU'), ('CORREO.ICP', r'\HISPA\MENU\CORREO.ICP')]),
 ]
 
 # (0.8.6) los que el catálogo marca del sistema («sistema=nombre»): los que
@@ -586,8 +640,33 @@ def modulo_clave(pub):
             'fin Clave.\n') % (pub.hex()[:16], filas)
 
 
-def firma(carpeta, privada):
+def pon_serie(carpeta, serie=None):
+    """(USUARIOS) «serie=N» en CATALOGO.TXT, detrás de la primera línea: N, la
+    que se diga o la de antes más uno (y, como poco, los segundos desde 1970:
+    sube aunque «catalogo» haya rehecho el archivo sin ella). Da N."""
+    ruta = os.path.join(carpeta, 'CATALOGO.TXT')
+    filas = open(ruta, 'rb').read().split(b'\r\n')
+    vieja = 0
+    for x in filas:
+        if x.startswith(b'serie='):
+            try:
+                vieja = int(x[6:].decode())
+            except ValueError:
+                pass
+    filas = [x for x in filas if not x.startswith(b'serie=')]
+    if serie is None:
+        serie = max(vieja + 1, int(time.time()))
+    if serie < 1 or serie > 0xFFFFFFFF:
+        falla('la serie %d no vale (de 1 a 4294967295)' % serie)
+    filas.insert(1, b'serie=%d' % serie)
+    with open(ruta, 'wb') as f:
+        f.write(b'\r\n'.join(filas))
+    return serie
+
+
+def firma(carpeta, privada, serie=None):
     k = lee_privada(privada)
+    pon_serie(carpeta, serie)
     datos = open(os.path.join(carpeta, 'CATALOGO.TXT'), 'rb').read()
     f = k.sign(datos)
     with open(os.path.join(carpeta, 'CATALOGO.FIR'), 'wb') as s:
@@ -647,7 +726,7 @@ def principal(a):
         n = catalogo(a[2])
         print('hpq: %s con %d paquetes' % (os.path.join(a[2], 'CATALOGO.TXT'), n))
         if len(a) > 4 and a[3] == '--clave':
-            firma(a[2], a[4])
+            firma(a[2], a[4], int(a[6]) if len(a) > 6 and a[5] == '--serie' else None)
             print('hpq: %s, firmado' % os.path.join(a[2], 'CATALOGO.FIR'))
         return 0
     if orden == 'clave':
@@ -662,7 +741,7 @@ def principal(a):
         print(pub.hex())
         return 0
     if orden == 'firma':
-        firma(a[2], a[3])
+        firma(a[2], a[3], int(a[5]) if len(a) > 5 and a[4] == '--serie' else None)
         print('hpq: %s, firmado' % os.path.join(a[2], 'CATALOGO.FIR'))
         return 0
     if orden == 'comprueba':

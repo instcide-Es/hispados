@@ -1,0 +1,10 @@
+módulo M
+    función f(a: nat32): nat32
+        si a > 0 entonces
+            devolver (a + 1) * 2
+        sino si a = 0 entonces
+            devolver 0
+        fin
+        devolver 1
+    fin
+fin M.

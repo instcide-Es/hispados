@@ -47,7 +47,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro, Inicio, Sonido
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro, Inicio, Sonido, Cuentas, Entrada, Preferencias, Iconpanel
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -107,7 +107,10 @@ módulo Escritorio
     constante AC_RED_TS = 70                    ; (TAILSCALE) Configuración > «Red y Tailscale...»
     constante AC_PROGRAMAS_INST = 95            ; (PROGRAMAS) Configuración > «Programas...» (PROGRAMA.BIN)
     constante AC_SONIDO = 97                    ; (SONIDO) Configuración > «Sonido...»
+    ; (el 99 era «Usuarios...» de la Configuración de antes: ahora es el icono «Usuarios» del Panel de control)
     constante ME_SONIDO = 47                    ; (SONIDO) el menú del icono del altavoz de la bandeja
+    constante ME_PROGRAMA = 48                  ; (REPRODUCTOR) el del icono de un programa en la bandeja (la llamada 135)
+    constante ICONO_PROGRAMA = 22               ; (REPRODUCTOR) lo que se ensancha la bandeja con cada uno
     constante ICONO_SONIDO = 24                 ; (SONIDO) lo que se ensancha la bandeja con el altavoz
     constante AC_CERRAR_PANTALLA = 31
     constante AC_PROBAR = 32
@@ -118,6 +121,8 @@ módulo Escritorio
     constante AC_MÁS_TARDE = 37
     constante AC_MODO = 40                      ; 40 y los siguientes: los modos de la lista
     constante AC_PREFIERE = 75                  ; (WIFI) 75, 76 y 77: la red por Automático, Cable o Wi-Fi (Configuración)
+    constante AC_PANEL = 120                    ; (PANEL) 120 a 131: los iconos del Panel de control (Configuración)
+    constante N_PANEL = 12                      ; (USUARIOS) con Usuarios, antes de Acerca de
 
     ; ---- los menús del botón secundario (la etiqueta de cada uno) ----
     constante ME_FONDO = 1                      ; el del tapiz
@@ -198,6 +203,16 @@ módulo Escritorio
     variable minuto_visto: nat32 = 0xFFFFFFFF
     variable segundo_visto: nat32
     variable fondo: nat32                       ; el tapiz: 0, 1 o 2
+    ; (PANEL) el Panel de control: el icono con el teclado, y lo de la energía
+    variable foco_panel: nat32
+    variable prefs_vistas: nat32                ; los cambios de Preferencias ya pintados
+    variable v_negra: nat32                     ; la pantalla apagada (una ventana negra encima de todo)
+    variable quieto_desde: nat32                ; los tics de la última tecla o el último movimiento
+    variable teclas_vistas, paquetes_vistos, usb_vistos: nat32
+    variable batería_baja: nat32                ; las lecturas seguidas con la batería por debajo (sin cable)
+    variable lecturas_vistas: nat32
+    variable avisado_batería: bool
+    variable botones_vistos: nat32 = 0xFFFFFFFF ; las veces que ha dicho el servicio de ACPI que se ha pulsado el botón de encendido
     variable con_imagen: bool                   ; (MIRADOR) el tapiz es una imagen (FONDO.HPM: la llamada 172)
     variable texto_aviso: arreglo [128] de byte
     variable renglón: arreglo [96] de byte
@@ -297,6 +312,7 @@ módulo Escritorio
         con_imagen := tapiz_pedido = 2
         tapiz_pedido := 0
         pinta_tapiz()
+        anota_tapiz(falso)                      ; (PANEL)
         repintar_todo()
         si v_config <> 0 entonces pinta_config() fin
         si con_imagen entonces d[0] := nat32("una imagen (FONDO.HPM)") sino d[0] := nat32("el de siempre") fin
@@ -306,6 +322,13 @@ módulo Escritorio
     fin
 
     ; (MIRADOR) se elige un tapiz de los de siempre: fuera la imagen
+    ; (PANEL) el tapiz de ahora, para el Panel de control (3: una imagen); y,
+    ; si se dice, a PANEL.INI
+    función anota_tapiz(guardar: bool)
+        si con_imagen entonces tapiz_de_ahora := 3 sino tapiz_de_ahora := fondo fin
+        anota(AJ_TAPIZ, fondo, guardar)
+    fin
+
     función sin_imagen()
         variable ruta: arreglo [24] de byte
         si con_imagen y del_sistema <> NINGUNA entonces
@@ -611,6 +634,18 @@ módulo Escritorio
         n_pulsadores := n_pulsadores + 1
     fin
 
+    ; (PANEL) un sitio que se pulsa, sin pintar nada (los iconos del Panel)
+    función zona(ventana: nat32, x: ent32, yy: ent32, an: ent32, al: ent32, acción: nat32)
+        si n_pulsadores >= MAX_PULSADORES entonces devolver fin
+        pulsadores[n_pulsadores].ventana := ventana
+        pulsadores[n_pulsadores].x := x
+        pulsadores[n_pulsadores].ye := yy
+        pulsadores[n_pulsadores].an := an
+        pulsadores[n_pulsadores].al := al
+        pulsadores[n_pulsadores].acción := acción
+        n_pulsadores := n_pulsadores + 1
+    fin
+
     ; lo que hace el pulsador de esa ventana que está en ese punto (0: ninguno)
     función pulsador_en(ventana: nat32, x: ent32, yy: ent32): nat32
         variable i: nat32
@@ -701,7 +736,58 @@ módulo Escritorio
     fin
 
     función ancho_bandeja(): ent32
-        devolver BANDEJA_ANCHO + hueco_usb() + hueco_red() + hueco_sonido() + hueco_pila() + hueco_escudo()
+        devolver BANDEJA_ANCHO + hueco_usb() + hueco_red() + hueco_sonido() + hueco_pila() + hueco_escudo() + hueco_programas()
+    fin
+
+    ; (REPRODUCTOR) los iconos de los programas (la llamada 135: el mando del
+    ; Reproductor), justo a la izquierda del reloj
+    variable iconos_vistos: nat32
+    función hueco_programas(): ent32
+        variable i: nat32
+        variable n: ent32
+        n := 0
+        para i desde 0 hasta MAX_ICONOS_PROGRAMA - 1 hacer
+            si iconos_programa[i].ventana <> 0 entonces n := n + ICONO_PROGRAMA fin
+        fin
+        devolver n
+    fin
+
+    función pinta_iconos_programas(ref l: Lienzo, x: ent32)
+        variable i, k, f, c: nat32
+        para i desde 0 hasta MAX_ICONOS_PROGRAMA - 1 hacer
+            si iconos_programa[i].ventana <> 0 entonces
+                para f desde 0 hasta 15 hacer
+                    para k desde 0 hasta 15 hacer
+                        c := iconos_programa[i].puntos[f * 16 + k]
+                        si c >= 0x80000000 entonces rectángulo(l, x + 3 + ent32(k), 12 + ent32(f), 1, 1, c yb 0xFFFFFF) fin
+                    fin
+                fin
+                x := x + ICONO_PROGRAMA
+            fin
+        fin
+    fin
+
+    ; un clic en el icono de un programa: el principal, a su ventana
+    ; (EV_BANDEJA, SIN_ELEGIR); el secundario, su menú (lo elegido, también)
+    función clic_programa(x: ent32, botones: nat32)
+        variable i, k: nat32
+        variable x0: ent32
+        x0 := pantalla.ancho - BANDEJA_ANCHO - hueco_programas()
+        k := 0
+        para i desde 0 hasta MAX_ICONOS_PROGRAMA - 1 hacer
+            si iconos_programa[i].ventana <> 0 entonces
+                si x >= x0 y x < x0 + ICONO_PROGRAMA entonces
+                    si botones yb BOTÓN_DERECHO <> 0 y iconos_programa[i].opciones[0] <> 0 entonces
+                        menú_dato := i
+                        abrir_emergente(x, pantalla.alto - ALTO_BARRA, dirección(iconos_programa[i].opciones[0]), 0, 0, ME_PROGRAMA)
+                    sino
+                        avisar(iconos_programa[i].ventana, EV_BANDEJA, 0xFFFFFFFF, 0, 0)
+                    fin
+                    devolver
+                fin
+                x0 := x0 + ICONO_PROGRAMA
+            fin
+        fin
     fin
 
     ; (ESCUDO) el icono del antivirus (14 x 18): un escudo azul con su borde y
@@ -813,9 +899,10 @@ módulo Escritorio
         si l = nulo entonces devolver fin
         an := l.ancho
         energía_vista := cambios_energía
-        degradado(valor(l), 0, 0, an, ALTO_BARRA, BARRA_ARRIBA, BARRA_ABAJO)
-        rectángulo(valor(l), 0, 0, an, 1, 0x8FC4FA)
-        rectángulo(valor(l), 0, 1, an, 1, 0x62A8F2)
+        ; (PANEL) los colores, los del tema (Preferencias.tema; el 0, los de siempre)
+        degradado(valor(l), 0, 0, an, ALTO_BARRA, tema.b_arriba, tema.b_abajo)
+        rectángulo(valor(l), 0, 0, an, 1, tema.raya1)
+        rectángulo(valor(l), 0, 1, an, 1, tema.raya2)
         ; «Inicio»: verde, redondeado por la derecha (más claro con el menú abierto)
         si menú_abierto entonces
             redondeado(valor(l), -16, 2, INICIO_ANCHO + 16, ALTO_BARRA - 3, 14, 0x3FA24C, 0x1F7532, TODAS)
@@ -830,9 +917,9 @@ módulo Escritorio
         ; izquierda a derecha: las memorias USB, la red y la pila)
         n_usb := letras_usb(usb_letras)
         bandeja := ancho_bandeja()
-        degradado(valor(l), an - bandeja, 2, bandeja, ALTO_BARRA - 2, BANDEJA_ARRIBA, BANDEJA_ABAJO)
-        rectángulo(valor(l), an - bandeja, 2, 1, ALTO_BARRA - 2, 0x1A56AC)
-        rectángulo(valor(l), an - bandeja + 1, 2, 1, ALTO_BARRA - 2, 0x9AD4FF)
+        degradado(valor(l), an - bandeja, 2, bandeja, ALTO_BARRA - 2, tema.j_arriba, tema.j_abajo)
+        rectángulo(valor(l), an - bandeja, 2, 1, ALTO_BARRA - 2, tema.j_borde1)
+        rectángulo(valor(l), an - bandeja + 1, 2, 1, ALTO_BARRA - 2, tema.j_borde2)
         si n_usb > 0 entonces icono_memoria(valor(l), an - bandeja + 8, 6) fin
         si hueco_red() > 0 entonces
             si icono_wifi() entonces pinta_icono_wifi(valor(l), an - bandeja + hueco_usb() + 3, 8) sino pinta_icono_red(valor(l), an - bandeja + hueco_usb() + 7, 9) fin    ; (WIFI)
@@ -840,6 +927,8 @@ módulo Escritorio
         si hueco_sonido() > 0 entonces pinta_icono_sonido(valor(l), an - bandeja + hueco_usb() + hueco_red() + 6, 9) fin   ; (SONIDO)
         si hay_pila() entonces pinta_pila(valor(l), an - bandeja + hueco_usb() + hueco_red() + hueco_sonido() + 8, 0) fin
         si hay_escudo entonces icono_escudo(valor(l), an - bandeja + hueco_usb() + hueco_red() + hueco_sonido() + hueco_pila() + 4, 7) fin   ; (ESCUDO)
+        pinta_iconos_programas(valor(l), an - BANDEJA_ANCHO - hueco_programas())      ; (REPRODUCTOR)
+        iconos_vistos := cambios_iconos
         red_vista := cambios_red
         sonido_visto := cambios_sonido
         ahora(f, h)
@@ -847,8 +936,8 @@ módulo Escritorio
         d[1] := (h >> 5) yb 63
         minuto_visto := d[1]
         formatear(hora, 8, "%02u:%02u", d)
-        texto_negrita(valor(l), an - BANDEJA_ANCHO + 15, 10, hora, 0x1E5CA8)
-        texto_negrita(valor(l), an - BANDEJA_ANCHO + 14, 9, hora, BLANCO)
+        texto_negrita(valor(l), an - BANDEJA_ANCHO + 15, 10, hora, tema.sombra)
+        texto_negrita(valor(l), an - BANDEJA_ANCHO + 14, 9, hora, tema.tinta)
         ; un botón por cada ventana con marco (también las minimizadas)
         n_botones := 0
         para i desde 0 hasta MAX_VENTANAS - 1 hacer
@@ -865,18 +954,18 @@ módulo Escritorio
                 x := BOTONES_X + ent32(i) * ancho_botón
                 si ent32(botones[i]) = activa entonces
                     ; la activa: hundido, más oscuro
-                    redondeado(valor(l), x, 4, ancho_botón - 4, ALTO_BARRA - 7, 5, 0x0F3F8A, 0x0F3F8A, TODAS)
-                    redondeado(valor(l), x + 1, 5, ancho_botón - 6, ALTO_BARRA - 9, 4, 0x1A52A6, 0x2B6FCC, TODAS)
+                    redondeado(valor(l), x, 4, ancho_botón - 4, ALTO_BARRA - 7, 5, tema.a_borde, tema.a_borde, TODAS)
+                    redondeado(valor(l), x + 1, 5, ancho_botón - 6, ALTO_BARRA - 9, 4, tema.a_arriba, tema.a_abajo, TODAS)
                 sino
-                    redondeado(valor(l), x, 4, ancho_botón - 4, ALTO_BARRA - 7, 5, 0x2A6BC8, 0x2A6BC8, TODAS)
-                    redondeado(valor(l), x + 1, 5, ancho_botón - 6, ALTO_BARRA - 9, 4, 0x6DB4F8, 0x3E86E2, TODAS)
+                    redondeado(valor(l), x, 4, ancho_botón - 4, ALTO_BARRA - 7, 5, tema.k_borde, tema.k_borde, TODAS)
+                    redondeado(valor(l), x + 1, 5, ancho_botón - 6, ALTO_BARRA - 9, 4, tema.k_arriba, tema.k_abajo, TODAS)
                 fin
                 disquete(valor(l), x + 5, 8, 18)
                 caben := (ancho_botón - 36) div ANCHO_LETRA
                 n := 0
                 mientras ventanas[botones[i]].título[n] <> 0 hacer n := n + 1 fin
                 si n > caben entonces n := caben fin
-                si n > 0 entonces texto_n(valor(l), x + 27, 9, ventanas[botones[i]].título, nat32(n), BLANCO) fin
+                si n > 0 entonces texto_n(valor(l), x + 27, 9, ventanas[botones[i]].título, nat32(n), tema.tinta) fin
                 botones[i] := ventanas[botones[i]].id
                 i := i + 1
             fin
@@ -1146,86 +1235,155 @@ módulo Escritorio
         fin
     fin
 
+    ; (PANEL) Configuración es el Panel de control: un icono grande con su
+    ; nombre por sección. Pantalla, Acerca de y Apagar son del núcleo; Sonido,
+    ; Programas y Dispositivos, sus programas; lo demás (la fecha y la hora,
+    ; el ratón, el teclado, la red, la energía, la personalización), el
+    ; Panel de control (PANEL.BIN) en esa sección
+    constante PANEL_AN = 560
+    constante CONFIG_AL = 404
+    constante CELDA_P_AN = 128
+    constante CELDA_P_AL = 96
+    constante PANEL_Y = 76
+
+    función nombre_panel(i: nat32): puntero a byte
+        según nat16(i)
+            caso 0: devolver "Fecha y hora"
+            caso 1: devolver "Pantalla"
+            caso 2: devolver "Sonido"
+            caso 3: devolver "Rat\xA2n"
+            caso 4: devolver "Teclado"
+            caso 5: devolver "Red y Wi-Fi"
+            caso 6: devolver "Energ\xA1a"
+            caso 7: devolver "Programas"
+            caso 8: devolver "Personalizaci\xA2n"
+            caso 9: devolver "Dispositivos"
+            caso 10: devolver "Usuarios"
+        fin
+        devolver "Acerca de"
+    fin
+
+    función icono_de_panel(i: nat32): nat32
+        según nat16(i)
+            caso 0: devolver IP_FECHA
+            caso 1: devolver IP_PANTALLA
+            caso 2: devolver IP_SONIDO
+            caso 3: devolver IP_RATÓN
+            caso 4: devolver IP_TECLADO
+            caso 5: devolver IP_RED
+            caso 6: devolver IP_ENERGÍA
+            caso 7: devolver IP_PROGRAMAS
+            caso 8: devolver IP_PERSONALIZA
+            caso 9: devolver IP_DISPOSITIVOS
+            caso 10: devolver IP_USUARIOS
+        fin
+        devolver IP_ACERCA
+    fin
+
     función pinta_config()
         variable l: puntero a Lienzo
         variable d: arreglo [4] de nat32
+        variable i: nat32
+        variable x, yy, w: ent32
+        variable t: puntero a byte
         l := lienzo_de(v_config)
         si l = nulo entonces devolver fin
         quita_pulsadores(v_config)
-        degradado(valor(l), 0, 0, 460, CONFIG_AL, 0xF4F8FE, 0xD6E6FA)
+        degradado(valor(l), 0, 0, PANEL_AN, CONFIG_AL, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 14, 10, 48)
         une_versión(renglón, "Hispa-Pentium ")
-        texto_negrita(valor(l), 74, 14, renglón, TINTA)
-        texto(valor(l), 74, 34, "un núcleo de 32 bits escrito en Castel", TINTA_SUAVE)
-        rectángulo(valor(l), 14, 66, 432, 1, 0xA9C6EC)
+        concatenar(renglón, ": Panel de control")
+        texto_negrita(valor(l), 74, 12, renglón, TINTA)
+        ; lo que hay (lo de la Configuración de antes)
         d[0] := nat32(pantalla.ancho)
         d[1] := nat32(pantalla.alto)
         d[2] := bits_pantalla
         formatear(renglón, 96, "Pantalla:  %u x %u, %u bits por punto", d)
-        texto(valor(l), 20, 78, renglón, TINTA)
-        pulsador(v_config, 358, 72, 88, 26, "Cambiar...", 0x5AA6F4, 0x2468C8, AC_PANTALLA)
+        texto(valor(l), 74, 31, renglón, TINTA_SUAVE)
         d[0] := (límite + 0xFFFFF) div 0x100000
         d[1] := marcos_libres() * 4 div 1024
         d[2] := cuántas_tareas()
         formatear(renglón, 96, "Memoria:   %u MB (%u MB libres); %u tareas", d)
-        texto(valor(l), 20, 100, renglón, TINTA)
-        texto(valor(l), 20, 136, "Teclado:", TINTA)
-        si teclado_español() entonces
-            pulsador(v_config, 110, 128, 110, 30, "Español", VERDE_ARRIBA, VERDE_ABAJO, AC_TECLADO_ES)
-            pulsador(v_config, 228, 128, 110, 30, "EE. UU.", 0xA9BDD8, 0x7C95B8, AC_TECLADO_US)
-        sino
-            pulsador(v_config, 110, 128, 110, 30, "Español", 0xA9BDD8, 0x7C95B8, AC_TECLADO_ES)
-            pulsador(v_config, 228, 128, 110, 30, "EE. UU.", VERDE_ARRIBA, VERDE_ABAJO, AC_TECLADO_US)
+        texto(valor(l), 74, 48, renglón, TINTA_SUAVE)
+        rectángulo(valor(l), 14, 68, PANEL_AN - 28, 1, 0xA9C6EC)
+        para i desde 0 hasta N_PANEL - 1 hacer
+            x := 24 + ent32(i mod 4) * CELDA_P_AN
+            yy := PANEL_Y + ent32(i div 4) * CELDA_P_AL
+            si i = foco_panel entonces
+                ; el que tiene el teclado: un borde grueso (no solo el color)
+                redondeado(valor(l), x, yy, CELDA_P_AN - 8, CELDA_P_AL - 6, 6, 0x1D4ED8, 0x1D4ED8, TODAS)
+                redondeado(valor(l), x + 3, yy + 3, CELDA_P_AN - 14, CELDA_P_AL - 12, 4, 0xDBEAFE, 0xDBEAFE, TODAS)
+            fin
+            icono_panel(valor(l), x + (CELDA_P_AN - 8 - 48) div 2, yy + 8, 48, icono_de_panel(i))
+            t := nombre_panel(i)
+            w := ancho_texto(t)
+            texto_negrita(valor(l), x + (CELDA_P_AN - 8 - w) div 2, yy + 62, t, TINTA)
+            zona(v_config, x, yy, CELDA_P_AN - 8, CELDA_P_AL - 6, AC_PANEL + i)
         fin
-        texto(valor(l), 20, 182, "Tapiz:", TINTA)
-        si fondo = 0 y no con_imagen entonces          ; (MIRADOR: con una imagen, ninguno)
-            pulsador(v_config, 110, 174, 100, 30, "Olas", VERDE_ARRIBA, VERDE_ABAJO, AC_FONDO)
-        sino
-            pulsador(v_config, 110, 174, 100, 30, "Olas", 0xA9BDD8, 0x7C95B8, AC_FONDO)
-        fin
-        si fondo = 1 y no con_imagen entonces
-            pulsador(v_config, 218, 174, 100, 30, "Azul", VERDE_ARRIBA, VERDE_ABAJO, AC_FONDO + 1)
-        sino
-            pulsador(v_config, 218, 174, 100, 30, "Azul", 0xA9BDD8, 0x7C95B8, AC_FONDO + 1)
-        fin
-        si fondo = 2 y no con_imagen entonces
-            pulsador(v_config, 326, 174, 100, 30, "Verde", VERDE_ARRIBA, VERDE_ABAJO, AC_FONDO + 2)
-        sino
-            pulsador(v_config, 326, 174, 100, 30, "Verde", 0xA9BDD8, 0x7C95B8, AC_FONDO + 2)
-        fin
-        ; (dock) verlo o no
-        texto(valor(l), 20, 216, "Dock:", TINTA)
-        si Dock.visible entonces
-            pulsador(v_config, 110, 210, 100, 28, "Visible", VERDE_ARRIBA, VERDE_ABAJO, AC_DOCK_SÍ)
-            pulsador(v_config, 218, 210, 100, 28, "Oculto", 0xA9BDD8, 0x7C95B8, AC_DOCK_NO)
-        sino
-            pulsador(v_config, 110, 210, 100, 28, "Visible", 0xA9BDD8, 0x7C95B8, AC_DOCK_SÍ)
-            pulsador(v_config, 218, 210, 100, 28, "Oculto", VERDE_ARRIBA, VERDE_ABAJO, AC_DOCK_NO)
-        fin
-        ; (PROGRAMAS) los programas instalados, por tipos: desinstalar, reparar...
-        pulsador(v_config, 326, 210, 120, 28, "Programas...", 0x5AA6F4, 0x2468C8, AC_PROGRAMAS_INST)
-        ; (WIFI) la red: por dónde va (lo guarda RED.BIN en RED.INI)
-        texto(valor(l), 20, 250, "Red:", TINTA)
-        botón_elegido(110, 246, "Automático", AC_PREFIERE, preferir_red = PREFIERE_AUTO)
-        botón_elegido(218, 246, "Cable", AC_PREFIERE + 1, preferir_red = PREFIERE_CABLE)
-        botón_elegido(326, 246, "Wi-Fi", AC_PREFIERE + 2, preferir_red = PREFIERE_WIFI)
-        ; (SONIDO) el volumen y los sonidos del sistema (SONIDO.BIN /VENTANA)
-        texto(valor(l), 20, 282, "Sonido:", TINTA)
-        pulsador(v_config, 110, 276, 208, 26, "Volumen y sonidos...", 0x5AA6F4, 0x2468C8, AC_SONIDO)
-        ; (dispositivos) lo que hay en el equipo y qué lo lleva; (TAILSCALE) la red
-        pulsador(v_config, 14, 312, 150, 28, "Dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
-        pulsador(v_config, 172, 312, 166, 28, "Red y Tailscale...", 0x5AA6F4, 0x2468C8, AC_RED_TS)
-        pulsador(v_config, 346, 312, 100, 28, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
-        repintada(v_config, 0, 0, 460, CONFIG_AL)
+        texto(valor(l), 24, CONFIG_AL - 34, "Elija una sección (o con las flechas e Intro)", TINTA_SUAVE)
+        pulsador(v_config, PANEL_AN - 114, CONFIG_AL - 42, 100, 30, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
+        repintada(v_config, 0, 0, PANEL_AN, CONFIG_AL)
     fin
 
-    ; (WIFI, SONIDO) 348 de alto (con las filas «Red:» y «Sonido:»), donde
-    ; estaba la de 280: lo de arriba, en su sitio
-    constante CONFIG_AL = 348
     función abre_config()
         si v_config <> 0 entonces cierra_cuadro(v_config) fin
-        v_config := crear_ventana("Configuración", (pantalla.ancho - 460) div 2, (pantalla.alto - ALTO_BARRA - 280) div 2 - 20, 460, CONFIG_AL, FIJA, 0)
+        v_config := crear_ventana("Configuraci\xA2n", (pantalla.ancho - PANEL_AN) div 2, (pantalla.alto - ALTO_BARRA - CONFIG_AL) div 2, PANEL_AN, CONFIG_AL, FIJA, 0)
         pinta_config()
+    fin
+
+    ; (PANEL) lo que hace cada icono del Panel de control
+    función abre_panel(i: nat32)
+        tomar_consola()
+        imprimir1("escritorio: Panel de control > %s\n", nat32(nombre_panel(i)))
+        soltar_consola()
+        según nat16(i)
+            caso 0: lanza("\\PANEL.BIN", "/FECHA")
+            caso 1:
+                texto_pantalla[0] := 0
+                abre_pantalla()
+            caso 2: lanza("\\SONIDO.BIN", "/VENTANA")
+            caso 3: lanza("\\PANEL.BIN", "/RATON")
+            caso 4: lanza("\\PANEL.BIN", "/TECLADO")
+            caso 5: lanza("\\PANEL.BIN", "/RED")
+            caso 6: lanza("\\PANEL.BIN", "/ENERGIA")
+            caso 7: lanza("\\PROGRAMA.BIN", "/INSTALADAS")
+            caso 8: lanza("\\PANEL.BIN", "/PERSONALIZA")
+            caso 9: lanza("\\DISPOSIT.BIN", nulo)
+            caso 10: lanza("\\USUARIOS.BIN", nulo)       ; (USUARIOS) Configuración > Usuarios
+            si no: abre_acerca()
+        fin
+    fin
+
+    ; (PANEL) Configuración con el teclado: las flechas mueven el borde de
+    ; icono en icono; Intro o Espacio lo abre; Esc cierra
+    función atiende_config()
+        variable e: Evento
+        variable a: nat32
+        mientras v_config <> 0 y saca_evento(v_config, 0, e) hacer
+            si e.clase = EV_CERRAR o (e.clase = EV_TECLA y e.a = 27) entonces
+                cierra_cuadro(v_config)
+            sino si e.clase = EV_TECLA entonces
+                a := foco_panel
+                según nat16(e.a)
+                    caso TECLA_DERECHA: si foco_panel + 1 < N_PANEL entonces foco_panel := foco_panel + 1 fin
+                    caso TECLA_IZQUIERDA: si foco_panel > 0 entonces foco_panel := foco_panel - 1 fin
+                    caso TECLA_ABAJO: si foco_panel + 4 < N_PANEL entonces foco_panel := foco_panel + 4 fin
+                    caso TECLA_ARRIBA: si foco_panel >= 4 entonces foco_panel := foco_panel - 4 fin
+                    caso '\t': foco_panel := (foco_panel + 1) mod N_PANEL
+                    caso '\n', ' ': abre_panel(foco_panel)
+                fin
+                si v_config <> 0 y a <> foco_panel entonces pinta_config() fin
+            sino si e.clase = EV_RATÓN_BAJA entonces
+                a := pulsador_en(v_config, ent32(e.a), ent32(e.b))
+                si a >= AC_PANEL y a < AC_PANEL + N_PANEL entonces
+                    foco_panel := a - AC_PANEL
+                    pinta_config()
+                    abre_panel(a - AC_PANEL)
+                sino si a <> 0 entonces
+                    haz(a, 0)
+                fin
+            fin
+        fin
     fin
 
     ; -------------------------------------------------------------------------
@@ -2071,6 +2229,7 @@ módulo Escritorio
         texto(pantalla, (pantalla.ancho - 13 * 8) div 2, pantalla.alto div 2 + 28, "Hispa-Pentium", 0xBFDCFA)
         volcar(0, 0, pantalla.ancho, pantalla.alto)
         apaga_sonido()                          ; (SONIDO)
+        guarda_semilla(falso)                   ; (USUARIOS) la semilla del azar, nueva, para el arranque siguiente
         acabar_programas(200)
         recoger_huérfanas()
         vaciar_discos()
@@ -2249,6 +2408,7 @@ módulo Escritorio
                 sin_imagen()                    ; (MIRADOR)
                 fondo := (fondo + 1) mod 3
                 pinta_tapiz()
+                anota_tapiz(cierto)             ; (PANEL) se guarda en PANEL.INI
                 repintar_todo()
                 si v_config <> 0 entonces pinta_config() fin
             caso AC_APAGAR: apaga(falso)
@@ -2269,6 +2429,7 @@ módulo Escritorio
                 sin_imagen()                    ; (MIRADOR)
                 fondo := acción - AC_FONDO
                 pinta_tapiz()
+                anota_tapiz(cierto)             ; (PANEL)
                 repintar_todo()
                 si v_config <> 0 entonces pinta_config() fin
             caso AC_CERRAR_CONFIG: cierra_cuadro(v_config)
@@ -2386,6 +2547,14 @@ módulo Escritorio
         cierra_cuadro(v_apagar)
         si no cierra_programas() entonces devolver fin
         apagar_otra_vez := falso
+        ; (USUARIOS) con usuarios: se acaba lo que quede suyo y sale la
+        ; pantalla de entrada (para él o para otro)
+        si hay_cuentas entonces
+            cierra_sesión_de_cuentas()
+            tras_salir := cierto
+            escribir("escritorio: sesión cerrada\n")
+            devolver
+        fin
         cierra_cuadro(v_sesión)
         v_sesión := cuadro("Sesión cerrada", 400, 150)
         l := lienzo_de(v_sesión)
@@ -2397,7 +2566,7 @@ módulo Escritorio
         disquete(valor(l), 14, 12, 44)
         si Ajustes.usuario[0] <> 0 entonces
             copiar(renglón, "Hasta pronto, ")
-            concatenar(renglón, Ajustes.usuario)
+            concatenar(renglón, nombre_de_sesión())      ; (USUARIOS)
             concatenar(renglón, ".")
             texto_negrita(valor(l), 70, 18, renglón, TINTA)
         sino
@@ -2416,6 +2585,99 @@ módulo Escritorio
             si e.clase = EV_CERRAR o (e.clase = EV_TECLA y (e.a = '\n' o e.a = 27)) o (e.clase = EV_RATÓN_BAJA y pulsador_en(v_sesión, ent32(e.a), ent32(e.b)) = AC_ENTRAR) entonces
                 cierra_cuadro(v_sesión)
                 escribir("escritorio: sesión abierta\n")
+            fin
+        fin
+    fin
+
+    ; ---- (USUARIOS) entrar y cambiar de usuario (entrada.cas, cuentas.cas) ----
+    variable arranque_hecho: bool               ; arranca() ha acabado (lo que lanza es del sistema)
+    variable tras_salir: bool                   ; se ha cerrado la sesión: la pantalla, aunque alguien entre solo
+    variable cuentas_vistas: nat32
+
+    ; ha entrado alguien: lo suyo (el dock, los accesos del tapiz, lo fijado
+    ; en el menú Inicio, de sus ajustes), y su saludo
+    ; (CORREO, 0.8.7) CORREO /BANDEJA: el aviso del correo nuevo, del que está
+    ; delante (lo lanza el núcleo: su usuario es el de la sesión)
+    función lanza_bandeja_correo()
+        variable t: puntero a Tarea
+        variable an: nat32
+        t := cargar_archivo("\\HISPA\\CORREO.BIN", "/BANDEJA", an)
+        si t <> nulo entonces t.padre := 0 fin
+    fin
+
+    función lo_del_usuario()
+        variable i: nat32
+        olvida_inicio()
+        cierra_menú()
+        lee_ajustes_dock()
+        lee_atajos()
+        quita_iconos()
+        ; (0.8.7) y fuera de la lista: si no, los del arranque se quedaban y
+        ; los del usuario salían otra vez detrás (Mi equipo, el Bloc... dos veces)
+        i := 0
+        mientras i < n_iconos hacer
+            liberar(puntero(iconos[i].debajo))
+            i := i + 1
+        fin
+        n_iconos := 0
+        icono_elegido := -1
+        si n_atajos > 0 entonces
+            i := 0
+            mientras i < n_atajos hacer
+                nuevo_icono_de(dirección(atajos[i].nombre[0]), AM_ATAJO, i)
+                i := i + 1
+            fin
+            organiza_iconos()
+            pon_atajos()
+        sino
+            nuevo_icono("Mi equipo", AM_EQUIPO)
+            nuevo_icono("Bloc de notas", AM_BLOC)
+            nuevo_icono("Consola", AM_CONSOLA)
+            lee_accesos()                       ; (0.8.7) los de los paquetes de ahora (lo instalado en la sesión de antes, también)
+            i := 0
+            mientras i < n_accesos hacer
+                si en_escritorio(i) entonces nuevo_icono_de(nombre_de(i), AM_ACCESO, i) fin
+                i := i + 1
+            fin
+            organiza_iconos()
+        fin
+        pon_iconos()
+        pinta_barra()
+        repintar_todo()
+        si instalado() y hay_ajustes entonces lanza_bandeja_correo() fin     ; (CORREO, 0.8.7) el suyo
+        escribir("escritorio: sesión abierta\n")
+    fin
+
+    función atiende_usuarios()
+        variable k: nat32
+        si no arranque_hecho entonces devolver fin
+        si v_entrada <> 0 entonces
+            k := atiende_entrada()
+            si k = E_DENTRO entonces
+                tras_salir := falso
+                lo_del_usuario()
+            sino si k = E_APAGAR entonces
+                apaga(falso)
+            sino si k = E_REINICIAR entonces
+                apaga(cierto)
+            fin
+            devolver
+        fin
+        ; nadie dentro, con usuarios: el que entra solo (si no se acaba de
+        ; salir) o la pantalla de entrada
+        si hay_cuentas y sesión = 0 entonces
+            k := 0
+            si no tras_salir entonces k := el_que_entra_solo() fin
+            si k <> 0 entonces
+                abre_sesión(k)
+                lo_del_usuario()
+            sino
+                cierra_menú()
+                cerrar_emergente()
+                si no abre_entrada() entonces
+                    ; (sin memoria para la pantalla: el primero que entre solo, o nadie)
+                    tras_salir := falso
+                fin
             fin
         fin
     fin
@@ -2927,7 +3189,7 @@ módulo Escritorio
                 caso 'e': lanza("\\EQUIPO.BIN", nulo)
                 caso 'd': enseña_escritorio()
                 caso 'r': abre_ejecutar()
-                caso 'l': si Ajustes.usuario[0] <> 0 entonces cierra_sesión() fin
+                caso 'l': si Ajustes.usuario[0] <> 0 o hay_cuentas entonces cierra_sesión() fin     ; (USUARIOS)
             fin
         sino
             devolver falso
@@ -2988,6 +3250,8 @@ módulo Escritorio
                 sino si hueco_red() > 0 y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() y ent32(e.a) < pantalla.ancho - bandeja + hueco_usb() + ICONO_RED entonces
                     ; el icono de la red (TAILSCALE: con el túnel, la ventana de Tailscale; WIFI: con el servicio Wi-Fi, la del Wi-Fi)
                     si túnel_red <> 0 entonces lanza("\\TAILSCAL.BIN", "/VENTANA") sino si estado_wifi <> WIFI_NADA entonces lanza("\\REDWIFI.BIN", nulo) sino dice_red() fin
+                sino si hueco_programas() > 0 y ent32(e.a) >= pantalla.ancho - BANDEJA_ANCHO - hueco_programas() y ent32(e.a) < pantalla.ancho - BANDEJA_ANCHO entonces
+                    clic_programa(ent32(e.a), e.c)      ; (REPRODUCTOR) el icono de un programa
                 sino si hay_escudo y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() + hueco_red() + hueco_sonido() + hueco_pila() y ent32(e.a) < pantalla.ancho - BANDEJA_ANCHO entonces
                     ; (ESCUDO) el del antivirus: su ventana
                     lanza(ruta_escudo, "/VENTANA")
@@ -3108,6 +3372,11 @@ módulo Escritorio
                 ; (SONIDO) el menú del altavoz de la bandeja
                 si opción = 0 entonces pon_silencio(no silencio) fin
                 si opción = 1 entonces lanza("\\SONIDO.BIN", "/VENTANA") fin
+            caso ME_PROGRAMA:
+                ; (REPRODUCTOR) lo elegido en el menú del icono de un programa, a su ventana
+                si menú_dato < MAX_ICONOS_PROGRAMA y iconos_programa[menú_dato].ventana <> 0 y opción <> 0xFFFFFFFF entonces
+                    avisar(iconos_programa[menú_dato].ventana, EV_BANDEJA, opción, 0, 0)
+                fin
         fin
     fin
 
@@ -3230,7 +3499,14 @@ módulo Escritorio
             fin
             devolver
         fin
-        si id <> 0 entonces devolver fin
+        si id <> 0 entonces
+            ; (BLOC, REPRODUCTOR) encima de la ventana de un programa: se lo dice a
+            ; él (EV_SOLTADO; la ruta, con la llamada 173: el Bloc la abre, el Reproductor la pone en la lista)
+            copiar(soltado_ruta, suelta_ruta)
+            soltado_para := id
+            si suelta_en(id, suelta_x, suelta_y) = 0 entonces soltado_para := 0 fin
+            devolver
+        fin
         x := suelta_x - CELDA_AN div 2
         yy := suelta_y - 20
         si x < 0 entonces x := 0 fin
@@ -3253,6 +3529,111 @@ módulo Escritorio
         soltar_consola()
     fin
 
+    ; -------------------------------------------------------------------------
+    ;  (PANEL) Lo del Panel de control que hace el escritorio
+    ; -------------------------------------------------------------------------
+    ; lo que ha cambiado el Panel de control: el tema, el tapiz, el dock
+    función atiende_preferencias()
+        prefs_vistas := Preferencias.cambios
+        si tapiz_del_panel <> 0xFFFFFFFF entonces
+            sin_imagen()
+            fondo := tapiz_del_panel mod 3
+            tapiz_del_panel := 0xFFFFFFFF
+            pinta_tapiz()
+            anota_tapiz(falso)
+        fin
+        si dock_del_panel <> 0xFFFFFFFF entonces
+            pon_visible(dock_del_panel = 1)
+            dock_del_panel := 0xFFFFFFFF
+        fin
+        repinta_activa()
+        pinta_barra()
+        repintar_todo()
+        tomar_consola()
+        imprimir2("escritorio: los ajustes del Panel de control (el tema %u, el tapiz %u)\n", ajuste(AJ_TEMA), tapiz_de_ahora)
+        soltar_consola()
+    fin
+
+    ; apagar la pantalla tras tantos minutos sin tocar nada (Panel de
+    ; control > Energía): se pone negra (una ventana encima de todo; sin
+    ; DPMS, la luz de la pantalla sigue encendida) hasta que se mueve el
+    ; ratón o se pulsa una tecla
+    función vigila_pantalla()
+        variable n, min: nat32
+        variable d: arreglo [1] de nat32
+        variable l: puntero a Lienzo
+        n := teclas + paquetes
+        si n <> teclas_vistas entonces
+            teclas_vistas := n
+            quieto_desde := tics
+            si v_negra <> 0 entonces
+                cerrar_ventana(v_negra, 0)
+                v_negra := 0
+                repintar_todo()
+                tomar_consola()
+                escribir("escritorio: la pantalla, encendida otra vez\n")
+                soltar_consola()
+            fin
+            devolver
+        fin
+        min := ajuste(AJ_PANTALLA_APAGAR)
+        si min = 0 o v_negra <> 0 o tics - quieto_desde < min * 60 * HZ entonces devolver fin
+        v_negra := crear_ventana("pantalla apagada", 0, 0, pantalla.ancho, pantalla.alto, SIN_MARCO ob ENCIMA, 0)
+        si v_negra = 0 entonces devolver fin
+        l := lienzo_de(v_negra)
+        si l <> nulo entonces rectángulo(valor(l), 0, 0, pantalla.ancho, pantalla.alto, 0) fin
+        repintada(v_negra, 0, 0, pantalla.ancho, pantalla.alto)
+        d[0] := min
+        tomar_consola()
+        imprimir("escritorio: la pantalla, apagada (tras %u min sin tocar nada)\n", d)
+        soltar_consola()
+    fin
+
+    ; cada segundo: la batería baja (sin cable) apaga el equipo, y el botón
+    ; de encendido hace lo que diga el Panel de control (Energía)
+    función vigila_energía()
+        variable u, n: nat32
+        variable d: arreglo [2] de nat32
+        n := pulsaciones_botón()
+        si botones_vistos = 0xFFFFFFFF entonces
+            botones_vistos := n
+        sino si n <> botones_vistos entonces
+            botones_vistos := n
+            tomar_consola()
+            imprimir1("escritorio: el botón de encendido (Panel de control: %u)\n", ajuste(AJ_BOTÓN))
+            soltar_consola()
+            según nat16(ajuste(AJ_BOTÓN))
+                caso 0: apaga(falso)
+                caso 1: abre_apagar()
+            fin
+        fin
+        si no hay_energía o energía.fase <> FASE_LISTO o energía.lecturas = lecturas_vistas entonces devolver fin
+        lecturas_vistas := energía.lecturas
+        u := ajuste(AJ_BATERÍA_APAGAR)
+        si u = 0 o energía.nbat = 0 o energía.ca <> 0 o energía.pct > 100 entonces
+            batería_baja := 0
+            si energía.ca = 1 entonces avisado_batería := falso fin
+            devolver
+        fin
+        d[0] := energía.pct
+        d[1] := u
+        si energía.pct <= u + 5 y no avisado_batería entonces
+            avisado_batería := cierto
+            formatear(texto_globo, 80, "Bater\xA1a al %u %%: se apaga sola al %u %%. Enchufe el cargador.", d)
+            globo_título := "Energ\xA1a"
+            globo(texto_globo)
+        fin
+        si energía.pct <= u entonces batería_baja := batería_baja + 1 sino batería_baja := 0 fin
+        ; (dos lecturas seguidas: que una mala no apague el equipo)
+        si batería_baja >= 2 entonces
+            batería_baja := 0
+            tomar_consola()
+            imprimir("escritorio: la batería, al %u %% (el Panel de control apaga al %u %%): se apaga el equipo\n", d)
+            soltar_consola()
+            apaga(falso)
+        fin
+    fin
+
     ; la tarea del escritorio: el pulso del gestor y lo suyo, cien veces por segundo
     función tarea_escritorio(n: nat32)
         variable f, h: nat32
@@ -3268,9 +3649,10 @@ módulo Escritorio
             atiende_fondo()
             atiende_apagar()                    ; (MENÚ) y los cuadros nuevos
             atiende_sesión()
+            atiende_usuarios()                  ; (USUARIOS) la pantalla de entrada
             atiende_ejecutar()
             atiende_tareas()
-            atiende_cuadro(v_config)
+            atiende_config()                    ; (PANEL)
             atiende_cuadro(v_aviso)
             atiende_cuadro(v_acerca)
             atiende_cuadro(v_pantalla)
@@ -3290,13 +3672,17 @@ módulo Escritorio
             fin
             si suelta_pedida entonces atiende_suelta() fin
             si tapiz_pedido <> 0 entonces atiende_tapiz() fin     ; (MIRADOR)
-            si Ventanas.cambios <> cambios_vistos o cambios_red <> red_vista o cambios_energía <> energía_vista o cambios_sonido <> sonido_visto entonces pinta_barra() fin
+            si Preferencias.cambios <> prefs_vistas entonces atiende_preferencias() fin    ; (PANEL)
+            vigila_pantalla()                   ; (PANEL) apagar la pantalla
+            si Ventanas.cambios <> cambios_vistos o cambios_red <> red_vista o cambios_energía <> energía_vista o cambios_sonido <> sonido_visto o cambios_iconos <> iconos_vistos entonces pinta_barra() fin     ; (REPRODUCTOR) y los iconos de los programas
             ; cada segundo: el reloj (si ha cambiado el minuto) y las tareas acabadas
             si tics div HZ <> segundo_visto entonces
                 segundo_visto := tics div HZ
                 ahora(f, h)
                 si (h >> 5) yb 63 <> minuto_visto entonces pinta_barra() fin
                 recoger_huérfanas()
+                vigila_energía()                ; (PANEL) la batería baja y el botón de encendido
+                si visible entonces dock_de_ahora := 1 sino dock_de_ahora := 0 fin
             fin
             dormir(1)
         fin
@@ -3443,8 +3829,28 @@ módulo Escritorio
                 si t <> nulo entonces t.padre := 0 fin
                 t := cargar_archivo("\\HISPA\\TAILSCAL.BIN", "/ARRANQUE", an)
                 si t <> nulo entonces t.padre := 0 fin
+                ; (CORREO) el aviso del correo nuevo, si el usuario lo quiere (CORREO.INI: si no, acaba enseguida).
+                ; (0.8.7) Con usuarios, al entrar cada uno (lo_del_usuario): así es suyo (su
+                ; \USUARIOS\<u>\CORREO) y se acaba al cerrar su sesión
+                si no hay_cuentas entonces lanza_bandeja_correo() fin
             fin
         fin
+        ; (PANEL) los ajustes del Panel de control (PANEL.INI): el ratón, el
+        ; teclado, el tema, el tapiz (si la línea del cargador no dice otro)...
+        si lee_preferencias() yb (nat32(1) << AJ_TAPIZ) <> 0 y buscar(línea_del_cargador(), "tapiz=") = nulo entonces
+            fondo := ajuste_leído(AJ_TAPIZ) mod 3
+            pinta_tapiz()
+        fin
+        anota_tapiz(falso)
+        prefs_vistas := Preferencias.cambios
+        repinta_activa()
+        pinta_barra()
+        repintar_todo()
+        quieto_desde := tics
+        ; (PANEL, NTP) la hora por Internet (HORARED.BIN /VIGILAR, de la carpeta
+        ; del sistema: con su sello; si no está, nada)
+        t := cargar_servicio("HORARED.BIN", "/VIGILAR", an)
+        si t <> nulo entonces t.padre := 0 fin
         mira_pantalla_guardada()      ; (EDID) también desde la memoria USB
         ; (ESCUDO) el antivirus, vigilando: pregunta al conectar una memoria o
         ; meter un CD (ESCUDO /VIGILAR; con el sistema instalado o sin instalar)
@@ -3453,6 +3859,7 @@ módulo Escritorio
             si t <> nulo entonces t.padre := 0 fin
         fin
         arranca_sonido()              ; (SONIDO) el servicio de sonido (y el sonido de inicio)
+        arranque_hecho := cierto      ; (USUARIOS) ya se puede entrar (atiende_usuarios): lo de arriba es del sistema
         ; (TERMO) la memoria del Termómetro: con «termo» en la línea del cargador, se abre solo
         si buscar(línea_del_cargador(), "termo") <> nulo entonces lanza("\\TERMO.BIN", "/ARRANQUE") fin
         devolver 1

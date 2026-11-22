@@ -7,6 +7,7 @@
 #   SSHD.BIN       el servidor SSH (ssh/sshd.c)
 #   WG.BIN         un túnel WireGuard, como wg-quick (wg/wgmain.c)
 #   TAILSCAL.BIN   el cliente de Tailscale (tailscale/ts.c, con wg/wg.c; la orden TAILSCALE)
+#   ARGON2.BIN     (USUARIOS) el que resume las contraseñas de los usuarios (hispac/argon2.c)
 # Con lo común de hispac/ (hispa.c, cripto.c), la libc de TLS.BIN
 # (tls/libc.c) y Monocypher 4.0.2 (terceros/monocypher, BSD-2 o CC0),
 # enlazados para 0x40000000 como programas del anillo 3 (como TLS.BIN). Los
@@ -47,6 +48,7 @@ objeto $HC/cripto.c $O/cripto.o
 for f in ssh/ssh ssh/sshd ssh/sshc wg/wg wg/wgmain; do
   objeto $N/$f.c $O/$(basename $f).o -fexec-charset=CP437
 done
+objeto $HC/argon2.c $O/argon2.o -fexec-charset=CP437       # (USUARIOS)
 nasm -f elf32 $HC/entrada.asm -o $O/entrada.o
 COMUN="$O/entrada.o $O/hispa.o $O/cripto.o $O/libc.o $O/monocypher.o $O/monocypher-ed25519.o"
 LIBGCC=$(gcc -m32 -print-libgcc-file-name)
@@ -60,6 +62,7 @@ enlaza() {
 enlaza SSHD $O/ssh.o $O/sshd.o
 enlaza SSH $O/ssh.o $O/sshc.o
 enlaza WG $O/wg.o $O/wgmain.o
+enlaza ARGON2 $O/argon2.o                                   # (USUARIOS)
 if [ -f $N/tailscale/ts.c ]; then
   for f in ts json derp control; do
     [ -f $N/tailscale/$f.c ] && objeto $N/tailscale/$f.c $O/ts_$f.o -fexec-charset=CP437

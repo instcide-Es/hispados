@@ -39,7 +39,7 @@
 ; =============================================================================
 módulo Inicio
 
-    importar Tareas, Consola, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Fat, Unidades, Usuario, Multiboot, Ajustes, Textos32, Accesos, Iconos
+    importar Tareas, Consola, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Fat, Unidades, Usuario, Multiboot, Ajustes, Textos32, Accesos, Iconos, Cuentas
 
     ; ---- las acciones (las de escritorio.cas, con los mismos números) ----
     público constante P_SESIÓN = 15             ; Cerrar sesión
@@ -284,7 +284,9 @@ módulo Inicio
         devolver cierto
     fin
 
-    ; los documentos: los .TXT de la raíz del disco
+    ; los documentos: los .TXT de la raíz del disco; (USUARIOS) con usuarios,
+    ; los de sus documentos (\USUARIOS\CARLOS\DOCUMENT)
+    variable carpeta_docs: arreglo [48] de byte
     función lee_documentos()
         variable m, r, n, i: nat32
         variable e: Entrada
@@ -307,7 +309,12 @@ módulo Inicio
             fin
             devolver
         fin
-        m := abrir_archivo(del_sistema, "\\", PARA_LEER)
+        si documentos_de_sesión(carpeta_docs, 48) entonces
+            m := abrir_archivo(del_sistema, carpeta_docs, PARA_LEER)
+        sino
+            carpeta_docs[0] := 0
+            m := abrir_archivo(del_sistema, "\\", PARA_LEER)
+        fin
         si m >= PRIMER_ERROR entonces devolver fin
         r := leer_entrada(m, dirección(e))
         mientras r = 1 y n_documentos < MAX_DOCUMENTOS hacer
@@ -323,7 +330,9 @@ módulo Inicio
     fin
 
     ; ---- INICIO.INI ----
+    ; (USUARIOS) lo fijado y lo más usado, de cada usuario (en sus ajustes, si tiene carpeta)
     función ruta_ini()
+        si ajuste_de_sesión("INICIO.INI", ruta, 96) entonces devolver fin
         si instalado() entonces copiar(ruta, "\\HISPA\\INICIO.INI") sino copiar(ruta, "\\INICIO.INI") fin
     fin
 
@@ -569,8 +578,76 @@ módulo Inicio
             caso 0: devolver "Facturas"
             caso 1: devolver "Pluma"
             caso 2: devolver "Cuentas"
+            caso 4: devolver "Datos"                    ; (OFICINA2) los de la oficina 1.1
+            caso 5: devolver "Lector de PDF"
+            caso 6: devolver "Publicaciones"
+            caso 7: devolver "Presentaciones"
+            caso 8: devolver "Pintura"                  ; (OFICINA2) el paquete «pintura»
         fin
         devolver "Mirador"
+    fin
+
+    ; (OFICINA2) su módulo (los cuatro primeros los lanza el escritorio por
+    ; su número: AM_OFICINA; los demás, por su ruta: P_RUTA)
+    constante OF_PROGRAMAS = 9
+    función hvp_de_oficina(i: nat32): puntero a byte
+        según i
+            caso 0: devolver "\\OFICINA\\FACTURAS.HVP"
+            caso 1: devolver "\\OFICINA\\PLUMA.HVP"
+            caso 2: devolver "\\OFICINA\\CUENTAS.HVP"
+            caso 4: devolver "\\OFICINA\\DATOS.HVP"
+            caso 5: devolver "\\OFICINA\\LECTOR.HVP"
+            caso 6: devolver "\\OFICINA\\PUBLICA.HVP"
+            caso 7: devolver "\\OFICINA\\PRESENTA.HVP"
+            caso 8: devolver "\\OFICINA\\PINTURA.HVP"
+        fin
+        devolver "\\OFICINA\\MIRADOR.HVP"
+    fin
+
+    ; (OFICINA2) el icono de un programa de la oficina: el suyo, el que trae
+    ; su .HVP (32 x 32 a 4 bits, desde el octeto 64: ventanas/hvp.inc; el
+    ; color 3 es el transparente) con los 16 colores de Hispa Ventanas. Se lee
+    ; una vez; nulo si no se puede (entonces, la hoja con su letra)
+    variable icono_of: arreglo [OF_PROGRAMAS] de puntero a nat32
+    variable paleta_of: arreglo [16] de nat32 = (0x1A1410, 0x3B2A20, 0x1F4E5A, 0x2C6675, 0xC2542D, 0xE07B4F, 0xC9B79C, 0x8F7F68,
+        0xFBF3E0, 0xFFFFFF, 0xE8B33A, 0x6B8E3D, 0x2F4B8F, 0x9E2B2B, 0x7FC6BF, 0xD8D2C4)
+    función icono_de_oficina(i: nat32): puntero a nat32
+        variable m, n, k, c: nat32
+        variable cab: arreglo [576] de byte
+        variable p: puntero a nat32
+        si i >= OF_PROGRAMAS entonces devolver nulo fin
+        si icono_of[i] <> nulo entonces devolver icono_of[i] fin
+        si del_sistema = 0xFFFFFFFF o unidad_en_memoria() entonces devolver nulo fin
+        m := abrir_archivo(del_sistema, hvp_de_oficina(i), PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver nulo fin
+        n := leer_archivo(m, dirección(cab[0]), 576)
+        cerrar_archivo(m)
+        si n <> 576 o cab[0] <> 'H' o cab[1] <> 'V' o cab[2] <> 'P' entonces devolver nulo fin
+        p := puntero(reservar(LADO_ICONO * LADO_ICONO * 4))
+        si p = nulo entonces devolver nulo fin
+        para k desde 0 hasta 1023 hacer
+            c := nat32(cab[64 + k div 2])
+            si k yb 1 = 1 entonces c := c >> 4 fin
+            c := c yb 15
+            si c = 3 entonces p[k] := 0 sino p[k] := 0xFF000000 ob paleta_of[c] fin
+        fin
+        icono_of[i] := p
+        devolver p
+    fin
+
+    ; (OFICINA2) ¿está el Mirador de Pentium (el paquete «mirador»: su acceso,
+    ; MIRADOR.BIN)? Entonces el de la oficina (MIRADOR.HVP) no sale: no dos
+    función hay_mirador_nativo(): bool
+        variable i: nat32
+        variable a: arreglo [80] de byte
+        i := 0
+        mientras i < n_accesos hacer
+            copiar_hasta(a, programa_de(i), 80)
+            a_mayúsculas(a)
+            si buscar(a, "MIRADOR.BIN") <> nulo entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
     fin
 
     función hace_lista()
@@ -596,16 +673,37 @@ módulo Inicio
             fin
             i := i + 1
         fin
-        ; la oficina de Hispa-386 (HVPRUN.BIN)
+        ; la oficina de Hispa-386 (HVPRUN.BIN). (OFICINA2) Con el icono de cada
+        ; uno; sin el Mirador de la oficina si está el de Pentium; y los de la
+        ; oficina 1.1 (Datos, el Lector, Publicaciones y Presentaciones) y
+        ; Pintura, si están, en Todos los programas (no entre los más usados de
+        ; salida: salen cuando se usan)
         i := 0
-        mientras i < 4 hacer
-            ; (PLUMA32) con Pluma 2 (el paquete «pluma»: \HISPA\PLUMA.BIN, con su
-            ; acceso en Oficina), el Pluma de Hispa-386 no sale aquí
-            si i <> 1 o no existe("\\PLUMA.BIN") entonces
-                k := nuevo(de_oficina(i), nulo, P_OFICINA, i, C_OFICINA, IC_DOCUMENTO, rango)
-                si k >= 0 entonces progs[k].letra := nat32(de_oficina(i)[0]) fin
+        mientras i < OF_PROGRAMAS hacer
+            si i < 4 entonces
+                ; (PLUMA32) con Pluma 2 (el paquete «pluma»: \HISPA\PLUMA.BIN, con su
+                ; acceso en Oficina), el Pluma de Hispa-386 no sale aquí
+                si (i <> 3 o no hay_mirador_nativo()) y (i <> 1 o no existe("\\PLUMA.BIN")) entonces
+                    k := nuevo(de_oficina(i), nulo, P_OFICINA, i, C_OFICINA, IC_DOCUMENTO, rango)
+                    rango := rango + 1
+                sino
+                    k := -1
+                fin
+            sino si existe(hvp_de_oficina(i)) entonces
+                si i = 8 entonces k := nuevo(de_oficina(i), nulo, P_RUTA, 0, C_MULTIMEDIA, IC_DOCUMENTO, SIN_RANGO)
+                sino k := nuevo(de_oficina(i), nulo, P_RUTA, 0, C_OFICINA, IC_DOCUMENTO, SIN_RANGO) fin
+                si k >= 0 entonces
+                    copiar(progs[k].programa, "\\HVPRUN.BIN")
+                    copiar(progs[k].argumentos, hvp_de_oficina(i))
+                fin
+            sino
+                k := -1
             fin
-            rango := rango + 1
+            si k >= 0 entonces
+                progs[k].letra := nat32(de_oficina(i)[0])
+                progs[k].icp := icono_de_oficina(i)
+                si progs[k].icp <> nulo entonces progs[k].icono := 0 fin
+            fin
             i := i + 1
         fin
         ; los programas de Windows de ejemplo (el paquete win32)
@@ -867,9 +965,9 @@ módulo Inicio
         redondeado(valor(l), 1, 1, ancho - 2, CABEZA, 7, 0x4E99EE, 0x1F62C0, ARRIBA)
         rectángulo(valor(l), 8, 2, ancho - 16, 1, 0x9CCBFA)
         disquete(valor(l), 9, 7, 42)
-        si Ajustes.usuario[0] <> 0 entonces
+        si nombre_de_sesión()[0] <> 0 entonces              ; (USUARIOS) el que ha entrado
             copiar_hasta(saludo, "Hola, ", 40)
-            concatenar(saludo, Ajustes.usuario)
+            concatenar(saludo, nombre_de_sesión())
             texto_negrita(valor(l), 59, 13, saludo, 0x123F85)
             texto_negrita(valor(l), 58, 12, saludo, BLANCO)
             copiar_hasta(saludo, "Hispa-Pentium, versión ", 40)
@@ -1220,7 +1318,14 @@ módulo Inicio
         cierra_inicio()
         pedido_acción := P_RUTA
         copiar(pedido_programa, "\\BLOC.BIN")
-        copiar(pedido_argumentos, documentos[i])
+        si carpeta_docs[0] <> 0 entonces
+            ; (USUARIOS) de sus documentos
+            copiar(pedido_argumentos, carpeta_docs)
+            concatenar(pedido_argumentos, "\\")
+            concatenar(pedido_argumentos, documentos[i])
+        sino
+            copiar(pedido_argumentos, documentos[i])
+        fin
         hay_pedido := cierto
     fin
 
@@ -1232,6 +1337,17 @@ módulo Inicio
                 abre_todos(n)
                 si de_teclado entonces entra(0) fin
             caso O_DOCUMENTOS:
+                si n_documentos = 0 y carpeta_docs[0] <> 0 entonces
+                    ; (USUARIOS) sin documentos, con usuarios: el explorador, en los suyos
+                    cierra_inicio()
+                    pedido_acción := P_RUTA
+                    copiar(pedido_programa, "\\EQUIPO.BIN")
+                    copiar(pedido_argumentos, "/ABRIR C:")
+                    si del_sistema < MAX_UNIDADES entonces pedido_argumentos[7] := byte(unidades[del_sistema].letra) fin
+                    concatenar(pedido_argumentos, carpeta_docs)
+                    hay_pedido := cierto
+                    devolver
+                fin
                 si n_documentos = 0 entonces
                     ; sin documentos: el explorador, en la raíz
                     lanza_prog(nat32(p_equipo))
@@ -1638,6 +1754,11 @@ módulo Inicio
                 fin
             fin
         fin
+    fin
+
+    ; (USUARIOS) ha entrado otro usuario: lo suyo se lee otra vez al abrir el menú
+    público función olvida_inicio()
+        ini_leído := falso
     fin
 
     público función prepara_inicio()

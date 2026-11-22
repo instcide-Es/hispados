@@ -1,0 +1,15 @@
+BEGIN:VCARD
+VERSION:3.0
+FN:Ana María García
+N:García;Ana;María;;
+ORG:Asociación\, Jubilats;Junta
+EMAIL;TYPE=INTERNET,HOME:ana@x.es
+EMAIL;TYPE=WORK,pref:ana@trabajo.es
+NOTE:Primera línea\nSegunda\; con punto y coma\\ y barra
+item1.TEL;TYPE=CELL:600 111 222
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+FN:Un nombre muy largo para ver que se parte bien a setenta y cinco octetos sin cortar ñandús ni águilas
+EMAIL:largo@x.es
+END:VCARD

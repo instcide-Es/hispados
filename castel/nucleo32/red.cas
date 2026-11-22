@@ -63,7 +63,7 @@
 ; =============================================================================
 módulo Red
 
-    importar Tareas, Paginas, Marcos, Monton, Mem32, Cpu, Pci, Textos32, Permisos
+    importar Tareas, Paginas, Marcos, Monton, Mem32, Cpu, Pci, Textos32, Permisos, Pozo
 
     ; ---- lo que dice la llamada 97 (y pone el servicio con la 96) ----
     público constante RED_NADA = 0              ; no hay servicio de red
@@ -546,6 +546,7 @@ módulo Red
 
     función llegó_irq()
         irqs_red := irqs_red + 1
+        ruido(R_RED, irqs_red)                  ; (USUARIOS) el pozo del azar
         si irq_red <> 0 entonces tapa_irq(irq_red) fin
         si irq_red >= 8 entonces sacar_puerto(0xA0, 0x20) fin
         sacar_puerto(0x20, 0x20)

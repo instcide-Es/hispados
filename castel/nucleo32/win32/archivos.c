@@ -124,6 +124,10 @@ API(BOOL) CloseHandle(HANDLE h)
 		sys_cerrar(o->fd);
 	if (o->tipo == O_MAPA)
 		m_soltar(o->f);
+	if (o->tipo == O_HILO)          /* (JUEGOS) */
+		hilo_cierra(o);
+	if ((o->tipo == O_EVENTO || o->tipo == O_MUTEX || o->tipo == O_SEMAFORO) && !sinc_cierra(o))
+		return TRUE;            /* (abierto otra vez por su nombre: sigue) */
 	o->tipo = 0;
 	return TRUE;
 }

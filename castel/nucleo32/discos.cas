@@ -17,7 +17,7 @@
 ; =============================================================================
 módulo Discos
 
-    importar Ata, Ahci, Usbalm, Cdrom, Tareas, Textos32, Mem32
+    importar Ata, Ahci, Usbalm, Cdrom, Tareas, Textos32, Mem32, Pozo
 
     público constante SECTOR = 512
     público constante MAX_DISCOS = 8
@@ -321,6 +321,7 @@ módulo Discos
     ; no hay tal disco, si se sale de él o si el disco da un error.
     público función leer_sectores(d: nat32, lba: nat32, n: nat32, destino: puntero a byte): bool
         si no vale(d, lba, n) entonces devolver falso fin
+        ruido(R_DISCO, lba)                     ; (USUARIOS) lo que tarda el disco, al pozo del azar
         según discos[d].clase
             caso DE_ATA: devolver Ata.leer_sectores(discos[d].cuál, lba, n, destino)
             caso DE_AHCI: devolver Ahci.leer_sectores(discos[d].cuál, lba, n, destino)

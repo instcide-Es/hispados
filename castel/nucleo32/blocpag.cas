@@ -1,0 +1,632 @@
+; =============================================================================
+;  blocpag.cas - los juegos de caracteres del Bloc de notas (BLOC.BIN): la
+;  437 de casa (la de Hispa: la 437 con Á, Í, Ó, Ú, €...; tools/hispa437.py),
+;  la Windows-1252 y UTF-8.
+;
+;  Dentro del Bloc el texto va siempre en UTF-8. Para no perder nada al abrir
+;  y guardar, un octeto que no es UTF-8 válido (de 0x80 a 0xFF) se guarda
+;  como el carácter U+DC00 + el octeto (un «sustituto escapado», como el
+;  surrogateescape de Python: ED B2 80 .. ED B3 BF) y, al guardar, vuelve a
+;  ser ese octeto. Los cinco huecos de la 1252 (81, 8D, 8F, 90, 9D) van a
+;  U+0081.. (los de control C1). Así, abrir y guardar sin tocar nada deja el
+;  archivo igual octeto a octeto, en las tres.
+;
+;      cp := pag_detectar(datos, n, bom)        ; CP_437, CP_UTF8 o CP_1252
+;      m := pag_largo_utf8(cp, datos, n)        ; lo que ocupará dentro
+;      pag_a_utf8(cp, datos, n, dentro)
+;      pag_de_utf8(cp, dentro, m, fuera, perdidas)   ; lo que no cabe, «?»
+;      k := pag_decodifica(p, n, u)             ; un carácter: los octetos que gasta
+;      c := pag_letra(u)                        ; la letra de Hispa que lo pinta
+;
+;  Las tablas (entre sus marcas) las hace nucleo32/hazblocpag.py.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo BlocPag
+
+    importar BlocMem
+
+    público constante CP_437 = 0
+    público constante CP_UTF8 = 1
+    público constante CP_1252 = 2
+    público constante SIN_LETRA = 0xFFFFFFFF
+
+    constante UN_MEGA = 1048576
+
+    ; (lo que sigue lo hace hazblocpag.py: no se edita a mano)
+    ; la 437 de casa y la 1252, a Unicode
+    variable t437: arreglo [256] de nat16 = (
+        0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000A, 0x000B,
+        0x000C, 0x000D, 0x000E, 0x000F, 0x0010, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017,
+        0x0018, 0x0019, 0x001A, 0x001B, 0x001C, 0x001D, 0x001E, 0x001F, 0x0020, 0x0021, 0x0022, 0x0023,
+        0x0024, 0x0025, 0x0026, 0x0027, 0x0028, 0x0029, 0x002A, 0x002B, 0x002C, 0x002D, 0x002E, 0x002F,
+        0x0030, 0x0031, 0x0032, 0x0033, 0x0034, 0x0035, 0x0036, 0x0037, 0x0038, 0x0039, 0x003A, 0x003B,
+        0x003C, 0x003D, 0x003E, 0x003F, 0x0040, 0x0041, 0x0042, 0x0043, 0x0044, 0x0045, 0x0046, 0x0047,
+        0x0048, 0x0049, 0x004A, 0x004B, 0x004C, 0x004D, 0x004E, 0x004F, 0x0050, 0x0051, 0x0052, 0x0053,
+        0x0054, 0x0055, 0x0056, 0x0057, 0x0058, 0x0059, 0x005A, 0x005B, 0x005C, 0x005D, 0x005E, 0x005F,
+        0x0060, 0x0061, 0x0062, 0x0063, 0x0064, 0x0065, 0x0066, 0x0067, 0x0068, 0x0069, 0x006A, 0x006B,
+        0x006C, 0x006D, 0x006E, 0x006F, 0x0070, 0x0071, 0x0072, 0x0073, 0x0074, 0x0075, 0x0076, 0x0077,
+        0x0078, 0x0079, 0x007A, 0x007B, 0x007C, 0x007D, 0x007E, 0x007F, 0x00C7, 0x00FC, 0x00E9, 0x00E2,
+        0x00E4, 0x00E0, 0x00E5, 0x00E7, 0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+        0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9, 0x00FF, 0x00D6, 0x00DC, 0x00A2,
+        0x00A3, 0x00A5, 0x20A7, 0x0192, 0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA,
+        0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB, 0x2591, 0x2592, 0x2593, 0x2502,
+        0x2524, 0x00C0, 0x00C1, 0x00C2, 0x00C3, 0x2563, 0x2551, 0x2557, 0x255D, 0x00C8, 0x00CA, 0x2510,
+        0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x00CB, 0x00CC, 0x255A, 0x2554, 0x2569, 0x2566,
+        0x2560, 0x2550, 0x256C, 0x00CD, 0x00CE, 0x00CF, 0x00D2, 0x00D3, 0x00D4, 0x00D5, 0x00D9, 0x00DA,
+        0x00DB, 0x2518, 0x250C, 0x2588, 0x2584, 0x00E3, 0x00F5, 0x2580, 0x03B1, 0x00DF, 0x0152, 0x03C0,
+        0x03A3, 0x0153, 0x00B5, 0x00A9, 0x00AE, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
+        0x2261, 0x00B1, 0x2265, 0x2264, 0x20AC, 0x2026, 0x00F7, 0x2248, 0x00B0, 0x2219, 0x00B7, 0x221A,
+        0x207F, 0x00B2, 0x25A0, 0x00A0)
+    variable t1252: arreglo [256] de nat16 = (
+        0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000A, 0x000B,
+        0x000C, 0x000D, 0x000E, 0x000F, 0x0010, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017,
+        0x0018, 0x0019, 0x001A, 0x001B, 0x001C, 0x001D, 0x001E, 0x001F, 0x0020, 0x0021, 0x0022, 0x0023,
+        0x0024, 0x0025, 0x0026, 0x0027, 0x0028, 0x0029, 0x002A, 0x002B, 0x002C, 0x002D, 0x002E, 0x002F,
+        0x0030, 0x0031, 0x0032, 0x0033, 0x0034, 0x0035, 0x0036, 0x0037, 0x0038, 0x0039, 0x003A, 0x003B,
+        0x003C, 0x003D, 0x003E, 0x003F, 0x0040, 0x0041, 0x0042, 0x0043, 0x0044, 0x0045, 0x0046, 0x0047,
+        0x0048, 0x0049, 0x004A, 0x004B, 0x004C, 0x004D, 0x004E, 0x004F, 0x0050, 0x0051, 0x0052, 0x0053,
+        0x0054, 0x0055, 0x0056, 0x0057, 0x0058, 0x0059, 0x005A, 0x005B, 0x005C, 0x005D, 0x005E, 0x005F,
+        0x0060, 0x0061, 0x0062, 0x0063, 0x0064, 0x0065, 0x0066, 0x0067, 0x0068, 0x0069, 0x006A, 0x006B,
+        0x006C, 0x006D, 0x006E, 0x006F, 0x0070, 0x0071, 0x0072, 0x0073, 0x0074, 0x0075, 0x0076, 0x0077,
+        0x0078, 0x0079, 0x007A, 0x007B, 0x007C, 0x007D, 0x007E, 0x007F, 0x20AC, 0x0081, 0x201A, 0x0192,
+        0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+        0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A,
+        0x0153, 0x009D, 0x017E, 0x0178, 0x00A0, 0x00A1, 0x00A2, 0x00A3, 0x00A4, 0x00A5, 0x00A6, 0x00A7,
+        0x00A8, 0x00A9, 0x00AA, 0x00AB, 0x00AC, 0x00AD, 0x00AE, 0x00AF, 0x00B0, 0x00B1, 0x00B2, 0x00B3,
+        0x00B4, 0x00B5, 0x00B6, 0x00B7, 0x00B8, 0x00B9, 0x00BA, 0x00BB, 0x00BC, 0x00BD, 0x00BE, 0x00BF,
+        0x00C0, 0x00C1, 0x00C2, 0x00C3, 0x00C4, 0x00C5, 0x00C6, 0x00C7, 0x00C8, 0x00C9, 0x00CA, 0x00CB,
+        0x00CC, 0x00CD, 0x00CE, 0x00CF, 0x00D0, 0x00D1, 0x00D2, 0x00D3, 0x00D4, 0x00D5, 0x00D6, 0x00D7,
+        0x00D8, 0x00D9, 0x00DA, 0x00DB, 0x00DC, 0x00DD, 0x00DE, 0x00DF, 0x00E0, 0x00E1, 0x00E2, 0x00E3,
+        0x00E4, 0x00E5, 0x00E6, 0x00E7, 0x00E8, 0x00E9, 0x00EA, 0x00EB, 0x00EC, 0x00ED, 0x00EE, 0x00EF,
+        0x00F0, 0x00F1, 0x00F2, 0x00F3, 0x00F4, 0x00F5, 0x00F6, 0x00F7, 0x00F8, 0x00F9, 0x00FA, 0x00FB,
+        0x00FC, 0x00FD, 0x00FE, 0x00FF)
+    ; de Latin-1 (U+0000..00FF) a la 437 de casa (0xFFFF: no está)
+    variable l1_437: arreglo [256] de nat16 = (
+        0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000A, 0x000B,
+        0x000C, 0x000D, 0x000E, 0x000F, 0x0010, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017,
+        0x0018, 0x0019, 0x001A, 0x001B, 0x001C, 0x001D, 0x001E, 0x001F, 0x0020, 0x0021, 0x0022, 0x0023,
+        0x0024, 0x0025, 0x0026, 0x0027, 0x0028, 0x0029, 0x002A, 0x002B, 0x002C, 0x002D, 0x002E, 0x002F,
+        0x0030, 0x0031, 0x0032, 0x0033, 0x0034, 0x0035, 0x0036, 0x0037, 0x0038, 0x0039, 0x003A, 0x003B,
+        0x003C, 0x003D, 0x003E, 0x003F, 0x0040, 0x0041, 0x0042, 0x0043, 0x0044, 0x0045, 0x0046, 0x0047,
+        0x0048, 0x0049, 0x004A, 0x004B, 0x004C, 0x004D, 0x004E, 0x004F, 0x0050, 0x0051, 0x0052, 0x0053,
+        0x0054, 0x0055, 0x0056, 0x0057, 0x0058, 0x0059, 0x005A, 0x005B, 0x005C, 0x005D, 0x005E, 0x005F,
+        0x0060, 0x0061, 0x0062, 0x0063, 0x0064, 0x0065, 0x0066, 0x0067, 0x0068, 0x0069, 0x006A, 0x006B,
+        0x006C, 0x006D, 0x006E, 0x006F, 0x0070, 0x0071, 0x0072, 0x0073, 0x0074, 0x0075, 0x0076, 0x0077,
+        0x0078, 0x0079, 0x007A, 0x007B, 0x007C, 0x007D, 0x007E, 0x007F, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
+        0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
+        0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
+        0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0x00FF, 0x00AD, 0x009B, 0x009C, 0xFFFF, 0x009D, 0xFFFF, 0xFFFF,
+        0xFFFF, 0x00E7, 0x00A6, 0x00AE, 0x00AA, 0xFFFF, 0x00E8, 0xFFFF, 0x00F8, 0x00F1, 0x00FD, 0xFFFF,
+        0xFFFF, 0x00E6, 0xFFFF, 0x00FA, 0xFFFF, 0xFFFF, 0x00A7, 0x00AF, 0x00AC, 0x00AB, 0xFFFF, 0x00A8,
+        0x00B5, 0x00B6, 0x00B7, 0x00B8, 0x008E, 0x008F, 0x0092, 0x0080, 0x00BD, 0x0090, 0x00BE, 0x00C6,
+        0x00C7, 0x00CF, 0x00D0, 0x00D1, 0xFFFF, 0x00A5, 0x00D2, 0x00D3, 0x00D4, 0x00D5, 0x0099, 0xFFFF,
+        0xFFFF, 0x00D6, 0x00D7, 0x00D8, 0x009A, 0xFFFF, 0xFFFF, 0x00E1, 0x0085, 0x00A0, 0x0083, 0x00DD,
+        0x0084, 0x0086, 0x0091, 0x0087, 0x008A, 0x0082, 0x0088, 0x0089, 0x008D, 0x00A1, 0x008C, 0x008B,
+        0xFFFF, 0x00A4, 0x0095, 0x00A2, 0x0093, 0x00DE, 0x0094, 0x00F6, 0xFFFF, 0x0097, 0x00A3, 0x0096,
+        0x0081, 0xFFFF, 0xFFFF, 0x0098)
+    ; lo demás de la 437 y de la 1252, por orden de Unicode: el carácter y su código
+    constante N437 = 53
+    variable o437_u: arreglo [53] de nat16 = (
+        0x0152, 0x0153, 0x0192, 0x0398, 0x03A3, 0x03A9, 0x03B1, 0x03B4, 0x03B5, 0x03C0, 0x03C6, 0x2026,
+        0x207F, 0x20A7, 0x20AC, 0x2219, 0x221A, 0x221E, 0x2229, 0x2248, 0x2261, 0x2264, 0x2265, 0x2310,
+        0x2500, 0x2502, 0x250C, 0x2510, 0x2514, 0x2518, 0x251C, 0x2524, 0x252C, 0x2534, 0x253C, 0x2550,
+        0x2551, 0x2554, 0x2557, 0x255A, 0x255D, 0x2560, 0x2563, 0x2566, 0x2569, 0x256C, 0x2580, 0x2584,
+        0x2588, 0x2591, 0x2592, 0x2593, 0x25A0)
+    variable o437_c: arreglo [53] de nat16 = (
+        0x00E2, 0x00E5, 0x009F, 0x00E9, 0x00E4, 0x00EA, 0x00E0, 0x00EB, 0x00EE, 0x00E3, 0x00ED, 0x00F5,
+        0x00FC, 0x009E, 0x00F4, 0x00F9, 0x00FB, 0x00EC, 0x00EF, 0x00F7, 0x00F0, 0x00F3, 0x00F2, 0x00A9,
+        0x00C4, 0x00B3, 0x00DA, 0x00BF, 0x00C0, 0x00D9, 0x00C3, 0x00B4, 0x00C2, 0x00C1, 0x00C5, 0x00CD,
+        0x00BA, 0x00C9, 0x00BB, 0x00C8, 0x00BC, 0x00CC, 0x00B9, 0x00CB, 0x00CA, 0x00CE, 0x00DF, 0x00DC,
+        0x00DB, 0x00B0, 0x00B1, 0x00B2, 0x00FE)
+    constante N1252 = 27
+    variable o1252_u: arreglo [27] de nat16 = (
+        0x0152, 0x0153, 0x0160, 0x0161, 0x0178, 0x017D, 0x017E, 0x0192, 0x02C6, 0x02DC, 0x2013, 0x2014,
+        0x2018, 0x2019, 0x201A, 0x201C, 0x201D, 0x201E, 0x2020, 0x2021, 0x2022, 0x2026, 0x2030, 0x2039,
+        0x203A, 0x20AC, 0x2122)
+    variable o1252_c: arreglo [27] de nat16 = (
+        0x008C, 0x009C, 0x008A, 0x009A, 0x009F, 0x008E, 0x009E, 0x0083, 0x0088, 0x0098, 0x0096, 0x0097,
+        0x0091, 0x0092, 0x0082, 0x0093, 0x0094, 0x0084, 0x0086, 0x0087, 0x0095, 0x0085, 0x0089, 0x008B,
+        0x009B, 0x0080, 0x0099)
+    ; (hasta aquí, hazblocpag.py)
+
+    ; -------------------------------------------------------------------------
+    ;  Lo de cada octeto
+    ; -------------------------------------------------------------------------
+    ; cuántos de los n primeros octetos de p son ASCII (menos de 0x80), de
+    ; cuatro en cuatro
+    función ascii_hasta(p: puntero a byte, n: nat32): nat32
+        ensamblador
+            mov esi, {p}
+            mov ecx, {n}
+            xor eax, eax
+        .cuatro:
+            cmp ecx, 4
+            jb .uno
+            mov edx, [esi+eax]
+            test edx, 0x80808080
+            jnz .uno
+            add eax, 4
+            sub ecx, 4
+            jmp .cuatro
+        .uno:
+            test ecx, ecx
+            jz .fin
+            test byte [esi+eax], 0x80
+            jnz .fin
+            inc eax
+            dec ecx
+            jmp .uno
+        .fin:
+        fin
+    fin
+
+    función es_seguida(b: byte): bool
+        devolver b >= 0x80 y b <= 0xBF
+    fin
+
+    ; ¿empieza en p una ristra de UTF-8 válida (de verdad: sin sustitutos, sin
+    ; formas demasiado largas, hasta U+10FFFF)? Da cuántos octetos (2..4) o 0
+    ; (p[0] no es ASCII; hay n octetos)
+    función válida(p: puntero a byte, n: nat32): nat32
+        variable b, c: byte
+        b := p[0]
+        si b >= 0xC2 y b <= 0xDF entonces
+            si n >= 2 y es_seguida(p[1]) entonces devolver 2 fin
+            devolver 0
+        fin
+        si b >= 0xE0 y b <= 0xEF entonces
+            si n < 3 entonces devolver 0 fin
+            c := p[1]
+            si b = 0xE0 entonces
+                si c < 0xA0 o c > 0xBF entonces devolver 0 fin
+            sino si b = 0xED entonces
+                si c < 0x80 o c > 0x9F entonces devolver 0 fin
+            sino
+                si no es_seguida(c) entonces devolver 0 fin
+            fin
+            si es_seguida(p[2]) entonces devolver 3 fin
+            devolver 0
+        fin
+        si b >= 0xF0 y b <= 0xF4 entonces
+            si n < 4 entonces devolver 0 fin
+            c := p[1]
+            si b = 0xF0 entonces
+                si c < 0x90 o c > 0xBF entonces devolver 0 fin
+            sino si b = 0xF4 entonces
+                si c < 0x80 o c > 0x8F entonces devolver 0 fin
+            sino
+                si no es_seguida(c) entonces devolver 0 fin
+            fin
+            si es_seguida(p[2]) y es_seguida(p[3]) entonces devolver 4 fin
+        fin
+        devolver 0
+    fin
+
+    ; el carácter de una ristra válida de k octetos
+    función valor_de(p: puntero a byte, k: nat32): nat32
+        si k = 2 entonces devolver ((nat32(p[0]) yb 0x1F) << 6) ob (nat32(p[1]) yb 0x3F) fin
+        si k = 3 entonces devolver ((nat32(p[0]) yb 0x0F) << 12) ob ((nat32(p[1]) yb 0x3F) << 6) ob (nat32(p[2]) yb 0x3F) fin
+        devolver ((nat32(p[0]) yb 0x07) << 18) ob ((nat32(p[1]) yb 0x3F) << 12) ob ((nat32(p[2]) yb 0x3F) << 6) ob (nat32(p[3]) yb 0x3F)
+    fin
+
+    ; un octeto que no vale, escapado: U+DC00 + b, en sus tres octetos (ED B2/B3 xx)
+    función escapa(b: byte, destino: puntero a byte)
+        destino[0] := 0xED
+        destino[1] := byte(0xB0 ob (nat32(b) >> 6))
+        destino[2] := byte(0x80 ob (nat32(b) yb 0x3F))
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Un carácter de UTF-8
+    ; -------------------------------------------------------------------------
+    público función pag_decodifica(p: puntero a byte, n: nat32, ref u: nat32): nat32
+        variable b: byte
+        variable k: nat32
+        b := p[0]
+        si b < 0x80 entonces
+            u := b
+            devolver 1
+        fin
+        k := válida(p, n)
+        si k > 0 entonces
+            u := valor_de(p, k)
+            devolver k
+        fin
+        ; un escapado: ED B2 80 .. ED B3 BF
+        si b = 0xED y n >= 3 y (p[1] = 0xB2 o p[1] = 0xB3) y es_seguida(p[2]) entonces
+            u := 0xD000 ob ((nat32(p[1]) yb 0x3F) << 6) ob (nat32(p[2]) yb 0x3F)
+            devolver 3
+        fin
+        u := 0xDC00 + nat32(b)
+        devolver 1
+    fin
+
+    ; dónde empieza el carácter de antes de pos (en p[0..pos)): el primero de
+    ; los cuatro de antes que no sea «de seguida» y llegue justo a pos; si no,
+    ; pos - 1 (un octeto suelto)
+    público función pag_anterior(p: puntero a byte, pos: nat32): nat32
+        variable s, lejos, u: nat32
+        si pos = 0 entonces devolver 0 fin
+        si p[pos - 1] < 0x80 entonces devolver pos - 1 fin
+        lejos := 4
+        si pos < 4 entonces lejos := pos fin
+        s := pos - 1
+        mientras cierto hacer
+            si no es_seguida(p[s]) entonces
+                si pag_decodifica(dirección(p[s]), pos - s, u) = pos - s entonces devolver s fin
+                devolver pos - 1
+            fin
+            si pos - s >= lejos entonces devolver pos - 1 fin
+            s := s - 1
+        fin
+        devolver pos - 1
+    fin
+
+    público función pag_codifica(u: nat32, destino: puntero a byte): nat32
+        si u < 0x80 entonces
+            destino[0] := byte(u)
+            devolver 1
+        fin
+        si u < 0x800 entonces
+            destino[0] := byte(0xC0 ob (u >> 6))
+            destino[1] := byte(0x80 ob (u yb 0x3F))
+            devolver 2
+        fin
+        si u < 0x10000 entonces
+            destino[0] := byte(0xE0 ob (u >> 12))
+            destino[1] := byte(0x80 ob ((u >> 6) yb 0x3F))
+            destino[2] := byte(0x80 ob (u yb 0x3F))
+            devolver 3
+        fin
+        si u > 0x10FFFF entonces u := 0xFFFD fin
+        si u < 0x10000 entonces devolver pag_codifica(u, destino) fin
+        destino[0] := byte(0xF0 ob (u >> 18))
+        destino[1] := byte(0x80 ob ((u >> 12) yb 0x3F))
+        destino[2] := byte(0x80 ob ((u >> 6) yb 0x3F))
+        destino[3] := byte(0x80 ob (u yb 0x3F))
+        devolver 4
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las páginas de un octeto
+    ; -------------------------------------------------------------------------
+    público función pag_de_437(c: nat32): nat32
+        devolver t437[c yb 255]
+    fin
+
+    público función pag_de_1252(c: nat32): nat32
+        devolver t1252[c yb 255]
+    fin
+
+    ; buscar por la mitad en una tabla ordenada (u, c): el código, o SIN_LETRA
+    función busca(tu: puntero a nat16, tc: puntero a nat16, n: nat32, u: nat32): nat32
+        variable a, b, m: nat32
+        a := 0
+        b := n
+        mientras a < b hacer
+            m := (a + b) >> 1
+            si nat32(tu[m]) = u entonces devolver tc[m] fin
+            si nat32(tu[m]) < u entonces a := m + 1 sino b := m fin
+        fin
+        devolver SIN_LETRA
+    fin
+
+    ; la letra de Hispa (el código de la 437 de casa) que pinta u
+    público función pag_letra(u: nat32): nat32
+        si u < 0x80 entonces devolver u fin
+        si u < 0x100 entonces
+            si l1_437[u] = 0xFFFF entonces devolver SIN_LETRA fin
+            devolver l1_437[u]
+        fin
+        si u > 0xFFFF entonces devolver SIN_LETRA fin
+        devolver busca(dirección(o437_u[0]), dirección(o437_c[0]), N437, u)
+    fin
+
+    ; el código de u en la 1252, o SIN_LETRA
+    función en_1252(u: nat32): nat32
+        si u < 0x80 entonces devolver u fin
+        si u < 0xA0 entonces
+            si u = 0x81 o u = 0x8D o u = 0x8F o u = 0x90 o u = 0x9D entonces devolver u fin
+            devolver SIN_LETRA
+        fin
+        si u < 0x100 entonces devolver u fin
+        si u > 0xFFFF entonces devolver SIN_LETRA fin
+        devolver busca(dirección(o1252_u[0]), dirección(o1252_c[0]), N1252, u)
+    fin
+
+    función en_página(cp: nat32, u: nat32): nat32
+        si cp = CP_1252 entonces devolver en_1252(u) fin
+        devolver pag_letra(u)
+    fin
+
+    función a_unicode(cp: nat32, c: byte): nat32
+        si cp = CP_1252 entonces devolver t1252[c] fin
+        devolver t437[c]
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  De fuera adentro (a UTF-8) y de dentro afuera
+    ; -------------------------------------------------------------------------
+    público función pag_largo_utf8(cp: nat32, origen: puntero a byte, n: nat32): nat32
+        variable i, k, total: nat32
+        total := 0
+        i := 0
+        mientras i < n hacer
+            k := ascii_hasta(dirección(origen[i]), n - i)
+            i := i + k
+            total := total + k
+            si i >= n entonces romper fin
+            si cp = CP_UTF8 entonces
+                k := válida(dirección(origen[i]), n - i)
+                si k > 0 entonces
+                    total := total + k
+                    i := i + k
+                sino
+                    total := total + 3
+                    i := i + 1
+                fin
+            sino
+                si a_unicode(cp, origen[i]) < 0x800 entonces total := total + 2 sino total := total + 3 fin
+                i := i + 1
+            fin
+        fin
+        devolver total
+    fin
+
+    público función pag_a_utf8(cp: nat32, origen: puntero a byte, n: nat32, destino: puntero a byte): nat32
+        variable i, k, j: nat32
+        j := 0
+        i := 0
+        mientras i < n hacer
+            k := ascii_hasta(dirección(origen[i]), n - i)
+            si k > 0 entonces
+                mover_memoria(dirección(destino[j]), dirección(origen[i]), k)
+                i := i + k
+                j := j + k
+            fin
+            si i >= n entonces romper fin
+            si cp = CP_UTF8 entonces
+                k := válida(dirección(origen[i]), n - i)
+                si k > 0 entonces
+                    mientras k > 0 hacer
+                        destino[j] := origen[i]
+                        j := j + 1
+                        i := i + 1
+                        k := k - 1
+                    fin
+                sino
+                    escapa(origen[i], dirección(destino[j]))
+                    j := j + 3
+                    i := i + 1
+                fin
+            sino
+                j := j + pag_codifica(a_unicode(cp, origen[i]), dirección(destino[j]))
+                i := i + 1
+            fin
+        fin
+        devolver j
+    fin
+
+    público función pag_largo_de_utf8(cp: nat32, origen: puntero a byte, n: nat32): nat32
+        variable i, k, total, u: nat32
+        total := 0
+        i := 0
+        mientras i < n hacer
+            k := ascii_hasta(dirección(origen[i]), n - i)
+            i := i + k
+            total := total + k
+            si i >= n entonces romper fin
+            k := pag_decodifica(dirección(origen[i]), n - i, u)
+            si u >= 0xDC80 y u <= 0xDCFF entonces
+                total := total + 1
+            sino si cp = CP_UTF8 entonces
+                total := total + k
+            sino
+                total := total + 1
+            fin
+            i := i + k
+        fin
+        devolver total
+    fin
+
+    público función pag_de_utf8(cp: nat32, origen: puntero a byte, n: nat32, destino: puntero a byte, ref perdidas: nat32): nat32
+        variable i, k, j, u, c: nat32
+        j := 0
+        i := 0
+        mientras i < n hacer
+            k := ascii_hasta(dirección(origen[i]), n - i)
+            si k > 0 entonces
+                mover_memoria(dirección(destino[j]), dirección(origen[i]), k)
+                i := i + k
+                j := j + k
+            fin
+            si i >= n entonces romper fin
+            k := pag_decodifica(dirección(origen[i]), n - i, u)
+            si u >= 0xDC80 y u <= 0xDCFF entonces
+                destino[j] := byte(u - 0xDC00)
+                j := j + 1
+            sino si cp = CP_UTF8 entonces
+                mover_memoria(dirección(destino[j]), dirección(origen[i]), k)
+                j := j + k
+            sino
+                c := en_página(cp, u)
+                si c = SIN_LETRA entonces
+                    c := '?'
+                    perdidas := perdidas + 1
+                fin
+                destino[j] := byte(c)
+                j := j + 1
+            fin
+            i := i + k
+        fin
+        devolver j
+    fin
+
+    ; de UTF-8 a la 437 de casa, para enseñarlo (los nombres, el portapapeles):
+    ; lo que no está, «?»; acaba en 0 si cabe. Da las letras escritas
+    público función pag_a_437(t: puntero a byte, n: nat32, destino: puntero a byte, cabe: nat32): nat32
+        variable i, j, k, u, c: nat32
+        j := 0
+        i := 0
+        mientras i < n y j < cabe hacer
+            k := pag_decodifica(dirección(t[i]), n - i, u)
+            c := pag_letra(u)
+            si c = SIN_LETRA entonces c := '?' fin
+            destino[j] := byte(c)
+            j := j + 1
+            i := i + k
+        fin
+        si j < cabe entonces destino[j] := 0 fin
+        devolver j
+    fin
+
+    ; de la 437 de casa a UTF-8 (lo que quepa entero); acaba en 0 si cabe
+    público función pag_437_a_utf8(t: puntero a byte, n: nat32, destino: puntero a byte, cabe: nat32): nat32
+        variable i, j, k: nat32
+        variable trozo: arreglo [4] de byte
+        j := 0
+        i := 0
+        mientras i < n hacer
+            k := pag_codifica(t437[t[i]], dirección(trozo[0]))
+            si j + k > cabe entonces romper fin
+            mover_memoria(dirección(destino[j]), dirección(trozo[0]), k)
+            j := j + k
+            i := i + 1
+        fin
+        si j < cabe entonces destino[j] := 0 fin
+        devolver j
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Adivinar de qué página es un archivo
+    ; -------------------------------------------------------------------------
+    ; los puntos de un octeto (de 0x80 para arriba) para la 437 y para la 1252,
+    ; pensando en textos en español
+    función puntos_437(b: byte): nat32
+        según b
+            caso 0xA0..0xA8, 0x80, 0x81, 0x82, 0x87, 0x90, 0x9A: devolver 3
+            caso 0xAD, 0xAE, 0xAF: devolver 2
+            caso 0x83..0x86, 0x88..0x8F, 0x91..0x99, 0x9B..0x9F: devolver 1
+            caso 0xB0..0xDF: devolver 1
+        fin
+        devolver 0
+    fin
+
+    función puntos_1252(b: byte): nat32
+        según b
+            caso 0x81, 0x8D, 0x8F, 0x90, 0x9D: devolver 0
+            caso 0xF7: devolver 0
+            caso 0xE0..0xF6, 0xF8..0xFF: devolver 3
+            caso 0xA1, 0xAA, 0xAB, 0xB0, 0xBA, 0xBB, 0xBF: devolver 2
+            caso 0x80, 0x85, 0x91..0x94, 0x96, 0x97: devolver 2
+            caso 0xC0..0xDF: devolver 1
+        fin
+        devolver 0
+    fin
+
+    público función pag_detectar(p: puntero a byte, n: nat32, ref bom: bool): nat32
+        variable i, k, multi, a, b, tope: nat32
+        variable bien: bool
+        bom := falso
+        si n >= 3 y p[0] = 0xEF y p[1] = 0xBB y p[2] = 0xBF entonces
+            bom := cierto
+            devolver CP_UTF8
+        fin
+        multi := 0
+        bien := cierto
+        i := 0
+        mientras i < n hacer
+            i := i + ascii_hasta(dirección(p[i]), n - i)
+            si i >= n entonces romper fin
+            k := válida(dirección(p[i]), n - i)
+            si k = 0 entonces
+                bien := falso
+                romper
+            fin
+            multi := multi + 1
+            i := i + k
+        fin
+        si bien entonces
+            si multi > 0 entonces devolver CP_UTF8 fin
+            devolver CP_437
+        fin
+        ; por puntos, en el primer mega
+        tope := n
+        si tope > UN_MEGA entonces tope := UN_MEGA fin
+        a := 0
+        b := 0
+        i := 0
+        mientras i < tope hacer
+            i := i + ascii_hasta(dirección(p[i]), tope - i)
+            si i >= tope entonces romper fin
+            si p[i] = 0x81 o p[i] = 0x8D o p[i] = 0x8F o p[i] = 0x90 o p[i] = 0x9D entonces a := a + 4 fin
+            a := a + puntos_437(p[i])
+            b := b + puntos_1252(p[i])
+            i := i + 1
+        fin
+        si b > a entonces devolver CP_1252 fin
+        devolver CP_437
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Mayúsculas, minúsculas y letras de palabra
+    ; -------------------------------------------------------------------------
+    público función pag_minúscula(u: nat32): nat32
+        si u < 0x80 entonces
+            si u >= 'A' y u <= 'Z' entonces devolver u + 32 fin
+            devolver u
+        fin
+        si u >= 0xC0 y u <= 0xDE y u <> 0xD7 entonces devolver u + 32 fin
+        si u < 0x100 entonces devolver u fin
+        si u = 0x178 entonces devolver 0xFF fin
+        si u = 0x130 entonces devolver 'i' fin
+        si u >= 0x100 y u <= 0x137 y u yb 1 = 0 entonces devolver u + 1 fin
+        si u >= 0x139 y u <= 0x148 y u yb 1 = 1 entonces devolver u + 1 fin
+        si u >= 0x14A y u <= 0x177 y u yb 1 = 0 entonces devolver u + 1 fin
+        si u >= 0x179 y u <= 0x17E y u yb 1 = 1 entonces devolver u + 1 fin
+        si u >= 0x391 y u <= 0x3A9 y u <> 0x3A2 entonces devolver u + 32 fin
+        si u = 0x386 entonces devolver 0x3AC fin
+        si u >= 0x388 y u <= 0x38A entonces devolver u + 37 fin
+        si u = 0x38C entonces devolver 0x3CC fin
+        si u = 0x38E o u = 0x38F entonces devolver u + 63 fin
+        devolver u
+    fin
+
+    público función pag_mayúscula(u: nat32): nat32
+        si u < 0x80 entonces
+            si u >= 'a' y u <= 'z' entonces devolver u - 32 fin
+            devolver u
+        fin
+        si u >= 0xE0 y u <= 0xFE y u <> 0xF7 entonces devolver u - 32 fin
+        si u = 0xFF entonces devolver 0x178 fin
+        si u < 0x100 entonces devolver u fin
+        si u = 0x131 entonces devolver 'I' fin
+        si u = 0x17F entonces devolver 'S' fin
+        si u >= 0x101 y u <= 0x137 y u yb 1 = 1 entonces devolver u - 1 fin
+        si u >= 0x13A y u <= 0x148 y u yb 1 = 0 entonces devolver u - 1 fin
+        si u >= 0x14B y u <= 0x177 y u yb 1 = 1 entonces devolver u - 1 fin
+        si u >= 0x17A y u <= 0x17E y u yb 1 = 0 entonces devolver u - 1 fin
+        si u = 0x3C2 entonces devolver 0x3A3 fin
+        si u >= 0x3B1 y u <= 0x3C9 entonces devolver u - 32 fin
+        si u = 0x3AC entonces devolver 0x386 fin
+        si u >= 0x3AD y u <= 0x3AF entonces devolver u - 37 fin
+        si u = 0x3CC entonces devolver 0x38C fin
+        si u = 0x3CD o u = 0x3CE entonces devolver u - 63 fin
+        devolver u
+    fin
+
+    público función pag_es_palabra(u: nat32): bool
+        si u < 0x80 entonces
+            devolver (u >= 'a' y u <= 'z') o (u >= 'A' y u <= 'Z') o (u >= '0' y u <= '9') o u = '_'
+        fin
+        si u < 0x100 entonces
+            si u = 0xAA o u = 0xB5 o u = 0xBA entonces devolver cierto fin
+            devolver u >= 0xC0 y u <> 0xD7 y u <> 0xF7
+        fin
+        si u <= 0x24F entonces devolver cierto fin                 ; Latin Extended-A y B
+        si u >= 0x370 y u <= 0x3FF entonces devolver u <> 0x37E y u <> 0x387 fin    ; griego (sin su «;» ni su «·»)
+        si u >= 0x400 y u <= 0x4FF entonces devolver cierto fin    ; cirílico
+        devolver falso
+    fin
+
+fin BlocPag.

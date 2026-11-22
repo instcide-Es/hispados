@@ -14,7 +14,9 @@
 u32 ultimo_error;
 
 /* ---- la TEB ---- */
-#define TEB ((u32 *)TEB_DIR)
+/* (JUEGOS) la del hilo que corre (cada hilo tiene la suya: FS) */
+static inline u32 *teb_de_fs(void) { u32 *t; __asm__ volatile("movl %%fs:0x18, %0" : "=r"(t)); return t; }
+#define TEB teb_de_fs()
 void pon_error(u32 e) { TEB[0x34 / 4] = e; }
 static u32 da_error(void) { return TEB[0x34 / 4]; }
 
@@ -397,9 +399,17 @@ extern void (*al_salir_user)(void);
 void w32_salir(u32 c)
 {
 	static int saliendo;
+	if (k_hilos) {
+		/* (JUEGOS) como Windows: los otros hilos acaban antes que las DLL */
+		u32 n = gc_suelta_todo();
+		sc(183, 8, 0, 0);
+		gc_retoma(n ? n : 1);
+	}
 	if (!saliendo) {
+		void registro_guarda(void);
 		saliendo = 1;
 		mods_acabar();
+		registro_guarda();          /* (JUEGOS) lo que haya cambiado del registro */
 		cerrar_todo();
 		if (al_salir_user)
 			al_salir_user();
@@ -415,9 +425,7 @@ API(BOOL) TerminateProcess(HANDLE h, u32 c)
 	return FALSE;
 }
 API(HANDLE) GetCurrentProcess(void) { return (HANDLE)-1; }
-API(HANDLE) GetCurrentThread(void) { return (HANDLE)-2; }
 API(u32) GetCurrentProcessId(void) { return sys_tarea(); }
-API(u32) GetCurrentThreadId(void) { return sys_tarea() + hilo_n * 0x10000; }
 API(HMODULE) GetModuleHandleA(const char *n)
 {
 	Modulo *m;
@@ -472,6 +480,8 @@ API(HMODULE) LoadLibraryA(const char *n)
 	m = mod_cargar(n, &f);
 	traza("LoadLibraryA(%s) = %x", n, m ? m->base : 0);
 	if (!m) {
+		void diag_apunta(const char *f, ...);   /* (JUEGOS) */
+		diag_apunta("LoadLibrary(%s): %s", n, f == 1 ? "no se encuentra" : f == 4 ? "le falta una DLL" : f == 3 ? "no hay memoria" : "no es una DLL de 32 bits");
 		pon_error(f == 1 ? 126 : 193);
 		return 0;
 	}
@@ -500,8 +510,14 @@ API(void *) GetProcAddress(HMODULE h, const char *n)
 		traza("GetProcAddress(%s, #%u) = %x", m ? m->nombre : "?", (u32)n, (u32)p);
 	else
 		traza("GetProcAddress(%s, %s) = %x", m ? m->nombre : "?", n, (u32)p);
-	if (!p)
+	if (!p) {
+		void diag_getprocaddress(const char *dll, const char *f);   /* (JUEGOS) */
+		char num[12];
+		if ((u32)n < 0x10000)
+			fmt(num, sizeof num, "#%u", (u32)n);
+		diag_getprocaddress(m ? m->nombre : "?", (u32)n < 0x10000 ? num : n);
 		pon_error(127);
+	}
 	return p;
 }
 API(char *) GetCommandLineA(void) { return linea_ordenes; }
@@ -714,23 +730,10 @@ API(u32) ExpandEnvironmentStringsA(const char *s, char *d, u32 cabe)
 API(u32) GetLastError(void) { return da_error(); }
 API(void) SetLastError(u32 e) { pon_error(e); }
 API(u32) SetErrorMode(u32 m) { static u32 v; u32 a = v; v = m; return a; }
-API(void *) SetUnhandledExceptionFilter(void *f) { static void *v; void *a = v; v = f; return a; }
-API(i32) UnhandledExceptionFilter(void *p) { (void)p; return 0; }
 API(BOOL) IsDebuggerPresent(void) { return FALSE; }
 API(void) OutputDebugStringA(const char *s) { traza("depuración: %s", s); }
-API(void) DebugBreak(void) { }
-API(void) RaiseException(u32 c, u32 f, u32 n, const u32 *a)
-{
-	(void)f; (void)n; (void)a;
-	aviso_serie("RaiseException(%x): se acaba el programa", c);
-	w32_salir(255);
-}
-API(void) RtlUnwind(void *a, void *b, void *c, void *d) { (void)a; (void)b; (void)c; (void)d; }
+/* (JUEGOS) SetUnhandledExceptionFilter, RaiseException, RtlUnwind, IsBad*Ptr...: seh.c */
 API(BOOL) IsProcessorFeaturePresent(u32 f) { return f == 0 || f == 2 || f == 3; }  /* FPU, RDTSC... */
-API(BOOL) IsBadReadPtr(const void *p, u32 n) { return p == 0 && n; }
-API(BOOL) IsBadWritePtr(void *p, u32 n) { return p == 0 && n; }
-API(BOOL) IsBadCodePtr(void *p) { return p == 0; }
-API(BOOL) IsBadStringPtrA(const char *p, u32 n) { return p == 0 && n; }
 API(void) SetHandleCount(u32 n) { (void)n; }
 /* (SONIDO) Beep: un tono de verdad (cuadrado, suave), por un canal propio; sin
  * tarjeta, solo el tiempo */
@@ -782,23 +785,41 @@ static void mide_tsc(void)
 	if (!tsc_hz)
 		tsc_hz = 1;
 }
-API(BOOL) QueryPerformanceFrequency(u64 *f) { mide_tsc(); *f = tsc_hz; return TRUE; }
-API(BOOL) QueryPerformanceCounter(u64 *c) { mide_tsc(); *c = rdtsc(); return TRUE; }
-API(void) Sleep(u32 ms)
+/* (JUEGOS) el contador fino: en microsegundos (1 MHz), con los tics del
+ * núcleo (10 ms, que no se adelantan ni se atrasan) y, entre tic y tic, lo
+ * que ha corrido el TSC (con su ritmo medido en los tics de antes); nunca
+ * va hacia atrás. Así un juego que mide sus cuadros con él va bien aunque
+ * el TSC no corra igual que el reloj (QEMU, ahorro de energía). */
+static u32 qpc_tic, qpc_hz = 0;
+static u64 qpc_tsc, qpc_ult, qpc_ref_tsc;
+static u32 qpc_ref_tic;
+static u64 contador_us(void)
 {
-	u32 fin = tics_ms() + ms;
-	dx_tic();
-	if (!ms) {
-		sys_dormir(0);
-		return;
+	u32 t = sys_tics();
+	u64 x = rdtsc(), us;
+	if (!qpc_ref_tic && !qpc_ref_tsc) {
+		qpc_ref_tic = t;
+		qpc_ref_tsc = x;
 	}
-	while ((i32)(fin - tics_ms()) > 0) {
-		u32 q = (fin - tics_ms() + 9) / 10;
-		sys_dormir(q > 2 ? 2 : (q ? q : 1));
-		dx_tic();
+	if (t != qpc_tic) {
+		/* un tic nuevo: el ritmo del TSC, desde el primero que se vio */
+		if (t - qpc_ref_tic >= 2)
+			qpc_hz = (u32)((x - qpc_ref_tsc) / (t - qpc_ref_tic));
+		qpc_tic = t;
+		qpc_tsc = x;
 	}
+	us = (u64)t * 10000u;
+	if (qpc_hz) {
+		u64 dentro = (x - qpc_tsc) * 10000u / qpc_hz;
+		us += dentro > 9999 ? 9999 : dentro;
+	}
+	if (us < qpc_ult)
+		us = qpc_ult;
+	qpc_ult = us;
+	return us;
 }
-API(u32) SleepEx(u32 ms, BOOL a) { (void)a; Sleep(ms); return 0; }
+API(BOOL) QueryPerformanceFrequency(u64 *f) { (void)mide_tsc; *f = 1000000; return TRUE; }
+API(BOOL) QueryPerformanceCounter(u64 *c) { *c = contador_us(); return TRUE; }
 API(void) GetSystemTime(SYSTEMTIME *s) { ahora(s); }
 API(void) GetLocalTime(SYSTEMTIME *s) { ahora(s); }
 API(BOOL) SetLocalTime(const SYSTEMTIME *s) { (void)s; return TRUE; }
@@ -1100,161 +1121,7 @@ API(i32) GetLocaleInfoW(u32 lc, u32 t, WCHAR *d, i32 cabe)
 	return r;
 }
 
-/* ---- los cerrojos, los eventos y los hilos (uno solo) ---- */
-API(void) InitializeCriticalSection(void *c) { memset(c, 0, 24); }
-API(BOOL) InitializeCriticalSectionAndSpinCount(void *c, u32 n) { (void)n; memset(c, 0, 24); return TRUE; }
-API(BOOL) InitializeCriticalSectionEx(void *c, u32 n, u32 f) { (void)n; (void)f; memset(c, 0, 24); return TRUE; }
-API(void) EnterCriticalSection(void *c) { (void)c; }
-API(void) LeaveCriticalSection(void *c) { (void)c; }
-API(BOOL) TryEnterCriticalSection(void *c) { (void)c; return TRUE; }
-API(void) DeleteCriticalSection(void *c) { (void)c; }
-API(i32) InterlockedIncrement(volatile i32 *p) { return ++*p; }
-API(i32) InterlockedDecrement(volatile i32 *p) { return --*p; }
-API(i32) InterlockedExchange(volatile i32 *p, i32 v) { i32 a = *p; *p = v; return a; }
-API(i32) InterlockedExchangeAdd(volatile i32 *p, i32 v) { i32 a = *p; *p += v; return a; }
-API(i32) InterlockedCompareExchange(volatile i32 *p, i32 v, i32 c) { i32 a = *p; if (a == c) *p = v; return a; }
-API(HANDLE) CreateEventA(void *s, BOOL manual, BOOL ini, const char *n)
-{
-	HANDLE h = nuevo_obj(O_EVENTO);
-	(void)s; (void)n;
-	if (h) { obj(h)->a = ini; obj(h)->b = manual; }
-	return h;
-}
-API(HANDLE) CreateEventW(void *s, BOOL manual, BOOL ini, const WCHAR *n) { (void)n; return CreateEventA(s, manual, ini, 0); }
-API(BOOL) SetEvent(HANDLE h) { Obj *o = obj(h); if (o) o->a = 1; return o != 0; }
-API(BOOL) ResetEvent(HANDLE h) { Obj *o = obj(h); if (o) o->a = 0; return o != 0; }
-API(BOOL) PulseEvent(HANDLE h) { (void)h; return TRUE; }
-API(HANDLE) CreateMutexA(void *s, BOOL d, const char *n) { (void)s; (void)d; (void)n; return nuevo_obj(O_MUTEX); }
-API(HANDLE) CreateMutexW(void *s, BOOL d, const WCHAR *n) { (void)s; (void)d; (void)n; return nuevo_obj(O_MUTEX); }
-API(HANDLE) OpenMutexA(u32 a, BOOL h, const char *n) { (void)a; (void)h; (void)n; pon_error(2); return 0; }
-API(BOOL) ReleaseMutex(HANDLE h) { (void)h; return TRUE; }
-API(HANDLE) CreateSemaphoreA(void *s, i32 ini, i32 max, const char *n) { HANDLE h = nuevo_obj(O_SEMAFORO); (void)s; (void)max; (void)n; if (h) obj(h)->a = ini; return h; }
-API(BOOL) ReleaseSemaphore(HANDLE h, i32 n, i32 *antes) { Obj *o = obj(h); if (antes) *antes = o ? (i32)o->a : 0; if (o) o->a += n; return TRUE; }
-
-int hilo_n;
-static void *hilo_vuelta[5];
-static u32 hilo_codigo;
-typedef u32 (WINAPI *HILO)(void *);
-static int corre_hilo(HANDLE h);
-API(HANDLE) CreateThread(void *s, u32 pila, HILO f, void *arg, u32 fl, u32 *id)
-{
-	HANDLE h = nuevo_obj(O_HILO);
-	Obj *o = obj(h);
-	(void)s; (void)pila;
-	if (!o)
-		return 0;
-	o->f = (void *)f;
-	o->arg = arg;
-	o->codigo = 259;              /* STILL_ACTIVE */
-	if (id)
-		*id = sys_tarea() + (hilo_n + 1) * 0x10000;
-	traza("CreateThread(%x, %x)%s", (u32)f, (u32)arg, fl & 4 ? " (dormido)" : "");
-	if (!(fl & 4))
-		corre_hilo(h);
-	return h;
-}
-/* corre el hilo entero (ExitThread vuelve aquí) */
-static int corre_hilo(HANDLE h)
-{
-	Obj *o = obj(h);
-	u32 c;
-	if (!o || o->hecho || hilo_n >= 8)
-		return 0;
-	o->hecho = 1;
-	{
-		void *guarda[5];
-		memcpy(guarda, hilo_vuelta, sizeof guarda);
-		hilo_n++;
-		if (__builtin_setjmp(hilo_vuelta) == 0)
-			c = ((HILO)o->f)(o->arg);
-		else
-			c = hilo_codigo;
-		hilo_n--;
-		memcpy(hilo_vuelta, guarda, sizeof guarda);
-	}
-	o = obj(h);
-	if (o)
-		o->codigo = c;
-	return 1;
-}
-API(void) ExitThread(u32 c)
-{
-	if (!hilo_n)
-		w32_salir(c);
-	hilo_codigo = c;
-	__builtin_longjmp(hilo_vuelta, 1);
-}
-API(u32) ResumeThread(HANDLE h) { corre_hilo(h); return 1; }
-API(u32) SuspendThread(HANDLE h) { (void)h; return 0; }
-API(BOOL) TerminateThread(HANDLE h, u32 c) { Obj *o = obj(h); if (o) { o->hecho = 1; o->codigo = c; } return TRUE; }
-API(BOOL) GetExitCodeThread(HANDLE h, u32 *c) { Obj *o = obj(h); *c = o ? o->codigo : 0; return o != 0; }
-API(BOOL) SetThreadPriority(HANDLE h, i32 p) { (void)h; (void)p; return TRUE; }
-API(i32) GetThreadPriority(HANDLE h) { (void)h; return 0; }
-API(BOOL) SetPriorityClass(HANDLE h, u32 p) { (void)h; (void)p; return TRUE; }
-API(u32) GetPriorityClass(HANDLE h) { (void)h; return 0x20; }
-API(BOOL) SwitchToThread(void) { sys_dormir(0); return TRUE; }
-API(u32) WaitForSingleObject(HANDLE h, u32 ms)
-{
-	Obj *o = obj(h);
-	(void)ms;
-	if (o && o->tipo == O_PROCESO) {
-		if (!o->hecho) {
-			if (ms == 0) {
-				u32 r = sys_esperar(o->a, 1);
-				if (r == 0xFFFFFF00u)
-					return 258;          /* WAIT_TIMEOUT */
-				o->codigo = r;
-			} else
-				o->codigo = sys_esperar(o->a, 0);
-			o->hecho = 1;
-		}
-		return 0;
-	}
-	if (o && o->tipo == O_HILO && !o->hecho)
-		corre_hilo(h);
-	if (o && o->tipo == O_EVENTO && !o->a && ms == 0)
-		return 258;
-	if (o && o->tipo == O_EVENTO && !o->b)
-		o->a = 0;
-	return 0;                        /* WAIT_OBJECT_0 */
-}
-API(u32) WaitForSingleObjectEx(HANDLE h, u32 ms, BOOL a) { (void)a; return WaitForSingleObject(h, ms); }
-API(u32) WaitForMultipleObjects(u32 n, const HANDLE *h, BOOL todos, u32 ms)
-{
-	u32 k;
-	for (k = 0; k < n; k++)
-		if (WaitForSingleObject(h[k], todos ? ms : 0) == 0 && !todos)
-			return k;
-	return todos ? 0 : 258;
-}
-API(u32) MsgWaitForMultipleObjects(u32 n, const HANDLE *h, BOOL todos, u32 ms, u32 m)
-{
-	(void)m;
-	if (n)
-		return WaitForMultipleObjects(n, h, todos, 0) == 258 ? n : 0;
-	if (ms)
-		Sleep(ms > 10 ? 10 : ms);
-	return n;
-}
-u32 tls_usados[2];
-API(u32) TlsAlloc(void)
-{
-	u32 k;
-	for (k = 0; k < 64; k++)
-		if (!(tls_usados[k / 32] & (1u << (k % 32)))) {
-			tls_usados[k / 32] |= 1u << (k % 32);
-			TEB[0xE10 / 4 + k] = 0;
-			return k;
-		}
-	return 0xFFFFFFFF;
-}
-API(BOOL) TlsFree(u32 k) { if (k < 64) tls_usados[k / 32] &= ~(1u << (k % 32)); return k < 64; }
-API(void *) TlsGetValue(u32 k) { pon_error(0); return k < 64 ? (void *)TEB[0xE10 / 4 + k] : 0; }
-API(BOOL) TlsSetValue(u32 k, void *v) { if (k >= 64) return FALSE; TEB[0xE10 / 4 + k] = (u32)v; return TRUE; }
-API(u32) FlsAlloc(void *f) { (void)f; return TlsAlloc(); }
-API(BOOL) FlsFree(u32 k) { return TlsFree(k); }
-API(void *) FlsGetValue(u32 k) { return TlsGetValue(k); }
-API(BOOL) FlsSetValue(u32 k, void *v) { return TlsSetValue(k, v); }
+/* ---- (JUEGOS) los cerrojos, los eventos, los hilos y TLS: hilos.c ---- */
 
 /* ---- los procesos ---- */
 typedef struct { HANDLE proc, hilo; u32 pid, tid; } PROCESS_INFORMATION;

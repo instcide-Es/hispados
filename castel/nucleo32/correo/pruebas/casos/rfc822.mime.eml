@@ -1,0 +1,26 @@
+From: Luis <l@x.es>
+Subject: Fwd: algo
+Content-Type: multipart/mixed; boundary=xx
+
+--xx
+Content-Type: text/plain
+
+Te reenvío esto.
+--xx
+Content-Type: message/rfc822
+
+From: Otra <o@y.es>
+Subject: =?utf-8?Q?El_mensaje_reenviado?=
+Content-Type: multipart/mixed; boundary=yy
+
+--yy
+Content-Type: text/plain
+
+dentro
+--yy
+Content-Type: application/zip; name=dentro.zip
+Content-Transfer-Encoding: base64
+
+UEsDBA==
+--yy--
+--xx--

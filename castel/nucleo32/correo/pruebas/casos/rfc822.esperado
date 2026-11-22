@@ -1,0 +1,18 @@
+partes: 6 cortado=0 malformado=0
+[0] multipart/mixed juego="" cod=0 nombre="" id="" disp="" tam=338 adjunto=0
+[1]   text/plain juego="" cod=0 nombre="" id="" disp="" tam=17 adjunto=0
+[2]   message/rfc822 juego="" cod=0 nombre="El mensaje reenviado.eml" id="" disp="" tam=246 adjunto=1
+[3]     multipart/mixed juego="" cod=0 nombre="" id="" disp="" tam=140 adjunto=0
+[4]       text/plain juego="" cod=0 nombre="" id="" disp="" tam=6 adjunto=0
+[5]       application/zip juego="" cod=1 nombre="dentro.zip" id="" disp="" tam=6 adjunto=0
+From: Luis <l@x.es>
+To: (no está)
+Subject: Fwd: algo
+Date: (no está)
+principal: html=1 texto=1
+--- texto (17) ---
+Te reenvío esto.
+--- fin ---
+adjuntos: 1
+adjunto 0: parte=2 nombre="El mensaje reenviado.eml" tipo=message/rfc822 largo=246 sha256=a783cdb3f4102b16
+suplantacion: 0 

@@ -246,6 +246,9 @@ bt_colocar:
         jnz .t
         mov ebx, t_sin_titulo
 .t:
+        mov esi, ebx                ; (OFICINA2) que quepa: con más de 63 letras,
+        call p_titulo_corto         ; el núcleo no hace la ventana
+        mov ebx, esi
         PSIS PS_VENTANA
         pop edx
         pop ecx
@@ -366,9 +369,12 @@ p_ven_texto:
         push eax
         push ebx
         push ecx
+        push esi
+        call p_titulo_corto         ; (OFICINA2) que quepa (63 letras): poficina.inc
         mov ebx, [pan_ven]
         mov ecx, esi
         PSIS PS_TITULO
+        pop esi
         pop ecx
         pop ebx
         pop eax
@@ -473,6 +479,8 @@ pan_uno:
         je pan_tamano
         cmp eax, EVP_FOCO
         je pan_foco
+        cmp eax, EVP_RUEDA          ; (OFICINA2) la rueda: poficina.inc
+        je pan_rueda
         ret
 
 ; ---- el portapapeles ----
@@ -703,6 +711,8 @@ pan_tecla:
         mov [tec_mayus], cl
         cmp eax, 0x100
         jb .letra
+        call pan_alt_letra          ; (OFICINA2) Alt+letra: los menús
+        jnc .va
         sub eax, 0x100              ; no es una letra: AL=0, AH=su código
         cmp eax, 0xFF
         ja .x

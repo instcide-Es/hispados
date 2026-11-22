@@ -20,9 +20,9 @@
 ; =============================================================================
 módulo Tareas
 
-    importar Cpu, Monton, Paginas, Formato
+    importar Cpu, Monton, Paginas, Formato, Pozo
 
-    público constante MAX_TAREAS = 16
+    público constante MAX_TAREAS = 32           ; (JUEGOS) 32: los hilos de los programas de Windows también son tareas
     público constante PILA = 8192               ; la pila del núcleo de cada tarea
 
     ; los estados de una tarea
@@ -74,6 +74,25 @@ módulo Tareas
         sello: nat32                            ; el programa del sistema que es (Permisos.SELLO_...; 0: uno normal)
         servicio: bool                          ; es uno de los servicios (RED.BIN, TLS.BIN, ACPI.BIN...)
         admin: bool                             ; el modo administrador (la orden ADMIN, confirmado en la pantalla)
+        ; (USUARIOS) de quién es (cuentas.cas): el número del usuario (0: del
+        ; sistema, lo que pone en marcha el núcleo al arrancar y sus
+        ; servicios); la hereda de quien la lanza, y el escritorio da la del
+        ; que ha entrado. Lo dice qué carpeta de \USUARIOS puede tocar y si
+        ; puede instalar, poner la hora o pedir el modo administrador
+        uid: nat32
+        uid_hijo: nat32                         ; (SSHD) el que tendrá el próximo programa que lance (0: el suyo)
+        remota: bool                            ; (SSHD) de una sesión de SSH (y lo que lance): no la acaba cerrar la sesión de la pantalla
+        ; (JUEGOS) los hilos de los programas de Windows (win32.cas): un hilo
+        ; es una tarea más del mismo espacio de direcciones, con el mismo
+        ; número (id) que su proceso, para que sus archivos, sus ventanas, su
+        ; sonido y su red sean los del proceso; su número de hilo, aparte
+        líder: puntero a Tarea                  ; la tarea del proceso del que es hilo (nulo: no es un hilo)
+        hilo_id: nat32                          ; su número de hilo (el de la tarea, si no es un hilo)
+        teb: nat32                              ; dónde está su TEB, de verdad (FS, 0x43); 0: no se toca
+        despachador: nat32                      ; (SEH) adónde se le mandan sus excepciones (del programa); 0: se acaba
+        espera_dir: nat32                       ; la dirección a la que espera (la 184), mientras espera
+        salir_pedido: bool                      ; uno de sus hilos ha pedido acabar el proceso...
+        salir_con: nat32                        ; ...con este código
     fin
 
     público tipo Cola = estructura
@@ -105,6 +124,7 @@ módulo Tareas
     ; y QuickJS cuentan con doble precisión, HVPRUN con lo suyo) y lo que no
     ; usa coma flotante (casi todo, y el núcleo) no paga nada.
     público variable dueño_x87: puntero a Tarea
+    variable teb_puesta: nat32                  ; (JUEGOS) la TEB del descriptor 0x43 (cpu.cas, pon_teb)
     variable pantalla: puntero a nat16 = puntero(0xB8000)
     público variable sin_segundos: bool         ; no se enseñan los segundos (la pantalla es de un programa: INSTALAR)
     ; la función (sin argumentos) que acaba la tarea que corre cuando se la
@@ -217,6 +237,11 @@ módulo Tareas
         si t = dueño_x87 entonces quita_ts() sino pon_ts() fin
         pon_pila_núcleo(t.pila_tope)
         si leer_cr3() <> t.cr3 entonces poner_cr3(t.cr3) fin
+        ; (JUEGOS) la TEB de cada hilo de Windows (FS): su descriptor, si cambia
+        si t.teb <> 0 y t.teb <> teb_puesta entonces
+            pon_teb(t.teb)
+            teb_puesta := t.teb
+        fin
         devolver t.marco
     fin
 
@@ -272,6 +297,7 @@ módulo Tareas
         variable marco, s, i: nat32
         variable t, sig: puntero a Tarea
         tics := tics + 1
+        ruido(R_RELOJ, tics)                    ; (USUARIOS) el pozo del azar: el momento exacto
         si tics mod HZ = 0 y no sin_segundos entonces
             s := tics div HZ
             para i desde 0 hasta 5 hacer
@@ -407,6 +433,16 @@ módulo Tareas
         t.sello := 0                            ; (PROTEGE) lo pone quien la carga (usuario.cas)
         t.servicio := falso
         t.admin := falso
+        t.uid := 0                              ; (USUARIOS) lo pone quien la carga (usuario.cas)
+        t.uid_hijo := 0
+        t.remota := falso
+        t.líder := nulo                         ; (JUEGOS)
+        t.hilo_id := t.id
+        t.teb := 0
+        t.despachador := 0
+        t.espera_dir := 0
+        t.salir_pedido := falso
+        t.salir_con := 0
         devolver t
     fin
 
@@ -581,9 +617,12 @@ módulo Tareas
         variable b, i: nat32
         b := sin_interrupciones()
         ; las tareas que hizo y no ha recogido se quedan huérfanas: las
-        ; recogerá el núcleo cuando acaben
-        para i desde 0 hasta MAX_TAREAS - 1 hacer
-            si tareas[i].estado <> LIBRE y tareas[i].padre = actual.id entonces tareas[i].padre := 0 fin
+        ; recogerá el núcleo cuando acaben ((JUEGOS) si acaba un hilo, no: las
+        ; del proceso siguen siendo de él)
+        si actual.líder = nulo entonces
+            para i desde 0 hasta MAX_TAREAS - 1 hacer
+                si tareas[i].estado <> LIBRE y tareas[i].padre = actual.id y tareas[i].líder = nulo entonces tareas[i].padre := 0 fin
+            fin
         fin
         actual.código := código
         actual.estado := ACABADA
@@ -613,7 +652,8 @@ módulo Tareas
             liberar(t.args)
             t.args := nulo
         fin
-        si t.usuario entonces soltar_espacio(t.cr3) fin
+        ; (JUEGOS) el espacio de un hilo es el de su proceso: no se suelta
+        si t.usuario y t.líder = nulo entonces soltar_espacio(t.cr3) fin
         si dueño_x87 = t entonces dueño_x87 := nulo fin     ; (NAVEGADOR)
         t.estado := LIBRE
         reponer(b)
@@ -679,9 +719,144 @@ módulo Tareas
     público función tarea_de(id: nat32): puntero a Tarea
         variable i: nat32
         para i desde 0 hasta MAX_TAREAS - 1 hacer
-            si tareas[i].estado <> LIBRE y tareas[i].id = id entonces devolver dirección(tareas[i]) fin
+            ; ((JUEGOS) la del proceso, no uno de sus hilos, que llevan su número)
+            si tareas[i].estado <> LIBRE y tareas[i].id = id y tareas[i].líder = nulo entonces devolver dirección(tareas[i]) fin
         fin
         devolver nulo
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  (JUEGOS) Los hilos de los programas de Windows
+    ; -------------------------------------------------------------------------
+    ; un hilo nuevo del proceso de la tarea que corre: empieza en «entrada»
+    ; con la pila en «pila» (con los segmentos «cs» y «ss»: los de Win32) y su
+    ; TEB en «teb» (de verdad). Comparte el espacio de direcciones, el número
+    ; de tarea y lo demás del proceso; entra en la cola. Da su ficha, o nulo.
+    público función crear_hilo(entrada: nat32, pila: nat32, cs_: nat32, ss_: nat32, teb: nat32): puntero a Tarea
+        variable t, l: puntero a Tarea
+        variable p: puntero a nat32
+        variable b, i: nat32
+        l := actual
+        si l.líder <> nulo entonces l := l.líder fin
+        b := sin_interrupciones()
+        t := nueva(l.nombre)
+        si t = nulo entonces
+            reponer(b)
+            devolver nulo
+        fin
+        p := puntero(t.pila_tope)
+        p := p - 13
+        para i desde 0 hasta 7 hacer p[i] := 0 fin
+        p[8] := entrada
+        p[9] := cs_
+        p[10] := 0x202
+        p[11] := pila
+        p[12] := ss_
+        t.marco := nat32(p)
+        t.cr3 := l.cr3
+        t.usuario := cierto
+        t.x87_usado := falso
+        t.quiebre_inicio := l.quiebre_inicio
+        t.quiebre := l.quiebre
+        t.esp_usuario := pila
+        t.líder := l
+        t.hilo_id := t.id                       ; (el número nuevo, el suyo de hilo)
+        t.id := l.id                            ; y el del proceso, para todo lo demás
+        t.padre := 0                            ; (lo recoge el núcleo cuando acabe)
+        t.teb := teb
+        t.despachador := l.despachador
+        t.sello := l.sello                      ; (PROTEGE) lo que es el proceso
+        t.servicio := l.servicio
+        t.admin := l.admin
+        t.uid := l.uid                          ; (USUARIOS) de quién es: el usuario del proceso (si no, un hilo
+        t.uid_hijo := l.uid_hijo                ; sería «del sistema»); y cerrar la sesión acaba también sus hilos
+        t.remota := l.remota
+        t.terminal := l.terminal
+        t.salida := l.salida
+        t.salida_serie := l.salida_serie
+        meter(listas, t)
+        reponer(b)
+        devolver t
+    fin
+
+    ; acaba los otros hilos del proceso de la tarea que corre (no a ella ni
+    ; al principal) y espera a que acaben: ExitProcess, antes de soltar lo
+    ; de las DLL
+    público función acaba_hermanos()
+        variable i, b, vueltas: nat32
+        variable t, l: puntero a Tarea
+        variable quedan: bool
+        l := actual
+        si l.líder <> nulo entonces l := l.líder fin
+        vueltas := 0
+        mientras vueltas < 300 hacer
+            quedan := falso
+            b := sin_interrupciones()
+            para i desde 0 hasta MAX_TAREAS - 1 hacer
+                t := dirección(tareas[i])
+                si t.estado <> LIBRE y t.estado <> ACABADA y t.líder = l y t <> actual entonces
+                    si no t.matar entonces acabar_tarea(t) fin
+                    quedan := cierto
+                fin
+            fin
+            reponer(b)
+            si no quedan entonces devolver fin
+            dormir(1)
+            vueltas := vueltas + 1
+        fin
+    fin
+
+    ; la TEB de la tarea que corre (de verdad): se apunta y se pone ya
+    público función pon_mi_teb(lin: nat32)
+        variable b: nat32
+        b := sin_interrupciones()
+        actual.teb := lin
+        pon_teb(lin)
+        teb_puesta := lin
+        reponer(b)
+    fin
+
+    ; el hilo de la tarea que corre (o de su proceso) con ese número de hilo
+    público función hilo_de(hid: nat32): puntero a Tarea
+        variable i: nat32
+        variable l: puntero a Tarea
+        l := actual
+        si l.líder <> nulo entonces l := l.líder fin
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            si tareas[i].estado <> LIBRE y tareas[i].hilo_id = hid y (dirección(tareas[i]) = l o tareas[i].líder = l) entonces devolver dirección(tareas[i]) fin
+        fin
+        devolver nulo
+    fin
+
+    ; acaba (y recoge) los hilos de la tarea que corre, si es un proceso que
+    ; los tiene: se les marca para acabar y se espera a que acaben (antes de
+    ; soltar lo del proceso, que usan). La llaman las salidas de usuario.cas.
+    público función acaba_hilos()
+        variable i, b: nat32
+        variable t: puntero a Tarea
+        variable quedan: bool
+        si actual = nulo o actual.líder <> nulo entonces devolver fin
+        mientras cierto hacer
+            quedan := falso
+            b := sin_interrupciones()
+            para i desde 0 hasta MAX_TAREAS - 1 hacer
+                t := dirección(tareas[i])
+                si t.estado <> LIBRE y t.líder = actual entonces
+                    si t.estado = ACABADA entonces
+                        liberar(t.pila)
+                        si dueño_x87 = t entonces dueño_x87 := nulo fin
+                        t.líder := nulo
+                        t.estado := LIBRE
+                    sino
+                        si no t.matar entonces acabar_tarea(t) fin
+                        quedan := cierto
+                    fin
+                fin
+            fin
+            reponer(b)
+            si no quedan entonces devolver fin
+            dormir(1)
+        fin
     fin
 
     ; -------------------------------------------------------------------------

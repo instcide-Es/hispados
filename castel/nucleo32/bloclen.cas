@@ -1,0 +1,1261 @@
+; =============================================================================
+;  bloclen.cas - los lenguajes del Bloc de notas (BLOC.BIN): los colores
+;  según el lenguaje y lo que abre y cierra cada línea (para plegar).
+;
+;  Los lenguajes no están en el programa: cada uno es un archivo de texto
+;  (UTF-8) con su descripción, en \HISPA\BLOC\LENGUAJES\ (CASTEL.LEN,
+;  BASIC.LEN, NASM.LEN, C.LEN...). Para añadir uno, basta con dejar ahí otro
+;  .LEN. El formato (una «clave=valor» por línea; las que empiezan por «;»
+;  son comentarios; las listas de palabras se pueden repartir en varias
+;  líneas con la misma clave) está explicado en CASTEL.LEN y en
+;  docs/PENTIUM.md («El Bloc de notas»).
+;
+;  Se colorea una línea cada vez (en UTF-8, sin su final): un estilo por
+;  octeto (E_CLAVE, E_CADENA...) y un «estado» para la línea siguiente (un
+;  comentario de bloque abierto, con su anidamiento; una cadena de varias
+;  líneas; dentro de una etiqueta de HTML o de unas llaves de CSS). Las
+;  palabras van en una tabla con hash hecha al cargar. A la vez se cuenta
+;  lo que abre y lo que cierra la línea (len_abre, len_cierra): con eso el
+;  Bloc pliega los bloques.
+;
+;      len_cargar("C:\\HISPA\\BLOC\\LENGUAJES\\")
+;      l := len_de_archivo("PROGRAMA.CAS")
+;      estado := len_colorea(l, línea, n, estado, estilos)
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo BlocLen
+
+    importar Llamadas, BlocMem, Textos32
+
+    ; ---- los estilos (uno por octeto del texto) ----
+    público constante E_NORMAL = 0
+    público constante E_CLAVE = 1               ; palabra clave (el Bloc la pinta en negrita y de color)
+    público constante E_TIPO = 2                ; (negrita)
+    público constante E_PROPIA = 3              ; funciones u órdenes de la biblioteca
+    público constante E_COMENTARIO = 4
+    público constante E_CADENA = 5
+    público constante E_NÚMERO = 6
+    público constante E_OPERADOR = 7            ; los ( ) [ ] { } fuera de cadenas y comentarios, siempre
+    público constante E_DIRECTIVA = 8
+    público constante E_ETIQUETA = 9
+    público constante E_ATRIBUTO = 10
+    público constante E_ESPECIAL = 11           ; escapes, entidades, %VARIABLES%
+
+    ; ---- cómo se pliega ----
+    público constante P_NADA = 0
+    público constante P_BLOQUES = 1
+    público constante P_SANGRÍA = 2
+    público constante P_SECCIONES = 3
+
+    ; lo que abre y lo que cierra la última línea coloreada
+    público variable len_abre, len_cierra: nat32
+
+    ; ---- los topes ----
+    constante MAX_LEN = 32                      ; lenguajes (con los que se descartan)
+    constante MAX_ARCHIVO = 262144              ; lo que se lee de un .LEN
+    constante HUECOS = 16384                    ; la tabla de las palabras (potencia de 2)
+    constante MAX_PALABRAS = 12000
+    constante MAX_DE_UNO = 2000                 ; las de un lenguaje (que uno enorme no deje sin sitio a los demás)
+    constante MAX_SITIO = 524288                ; las letras de todas las palabras
+    constante MAX_PALABRA = 63
+
+    ; los modos especiales
+    constante M_NADA = 0
+    constante M_HTML = 1
+    constante M_CSS = 2
+    constante M_INI = 3
+
+    ; las clases de cada octeto (en Len.clase)
+    constante C_LETRA = 1                       ; va dentro de una palabra
+    constante C_INICIO = 2                      ; puede empezarla
+    constante C_OPERADOR = 4
+    constante C_COMILLA = 8
+
+    ; lo que lleva una palabra de la tabla
+    constante F_ABRE = 1
+    constante F_CIERRA = 2
+    constante F_DOBLE = 4                       ; cierra si lleva otra palabra detrás (END SUB)
+    constante F_AL_FINAL = 8                    ; abre si es lo último de la línea (el THEN de un IF de bloque)
+    constante F_NO_TRAS = 16                    ; la palabra de detrás no abre («sino» si, DECLARE SUB)
+    constante F_COMENTARIO = 32                 ; lo que sigue es un comentario (REM)
+    constante F_SUELTA = 64                     ; (HTML) una etiqueta que no se cierra (br, img...)
+
+    ; las etiquetas (Len.etiquetas)
+    constante T_DOSPUNTOS = 1                   ; «nombre:» al principio de la línea (NASM)
+    constante T_DELANTE = 2                     ; «:nombre» al principio (BAT)
+    constante T_NÚMEROS = 4                     ; un número al principio (GW-BASIC)
+    constante T_SECCIONES = 8                   ; «[sección]» al principio (INI)
+
+    ; los estados (16 bits): la clase abajo, el dato en 4..11 y lo del modo en 12..15
+    constante K_NORMAL = 0
+    constante K_BLOQUE = 1                      ; dentro de un comentario de bloque (dato: el anidamiento)
+    constante K_LARGA = 2                       ; dentro de una cadena de varias líneas (dato: cuál)
+
+    tipo Len = estructura
+        nombre: arreglo [40] de byte            ; en la 437
+        ext: arreglo [80] de byte               ; « CAS BAS » (en mayúsculas, con espacios a los lados)
+        arch: arreglo [120] de byte             ; « CONFIG.SYS AUTOEXEC.BAT »
+        distingue, anida, números, al_principio, vivo: bool
+        modo, plegado, escape, directiva, dir_palabra, variables: byte
+        etiquetas: nat32
+        com: arreglo [4] de arreglo [8] de byte
+        n_com: nat32
+        bl_abre, bl_cierra: arreglo [8] de byte
+        largas: arreglo [4] de arreglo [8] de byte
+        n_largas: nat32
+        prefijos: arreglo [4] de arreglo [6] de byte
+        n_prefijos: nat32
+        no_ante: arreglo [4] de arreglo [8] de byte
+        n_no_ante: nat32
+        signos_abre, signos_cierra: arreglo [8] de byte
+        clase: arreglo [256] de byte
+    fin
+
+    tipo Palabra = estructura
+        hash, sitio: nat32
+        largo, len, estilo, marcas: byte
+    fin
+
+    variable lens: arreglo [MAX_LEN] de Len
+    variable n_lens: nat32                      ; los que se han leído (también los descartados)
+    variable orden: arreglo [MAX_LEN] de nat32  ; los vivos, por su nombre
+    variable n_orden: nat32
+    variable tabla: puntero a Palabra
+    variable n_palabras: nat32
+    variable palabras_de: arreglo [MAX_LEN] de nat32
+    variable letras: puntero a byte
+    variable n_letras, cabe_letras: nat32
+    variable palabra_com: arreglo [16] de byte  ; (len_comentario: «REM »)
+
+    ; de la U+00A0 a la U+00FF, su código en la página de Hispa (la 437 con Á, €...)
+    variable latín: arreglo [96] de byte = (255,173,155,156,63,157,63,63,63,231,166,174,170,63,232,63,248,241,253,63,63,230,63,250,63,63,167,175,172,171,63,168,181,182,183,184,142,143,146,128,189,144,190,198,199,207,208,209,63,165,210,211,212,213,153,63,63,214,215,216,154,63,63,225,133,160,131,221,132,134,145,135,138,130,136,137,141,161,140,139,63,164,149,162,147,222,148,246,63,151,163,150,129,63,63,152)
+
+    ; los que se buscan si la carpeta no se puede recorrer
+    variable de_siempre: arreglo [120] de byte = "CASTEL BASIC NASM C HTML CSS JS BAT INI PYTHON"
+
+    ; =========================================================================
+    ;  Lo pequeño
+    ; =========================================================================
+    función minús(c: byte): byte
+        si c >= 'A' y c <= 'Z' entonces devolver c + 32 fin
+        devolver c
+    fin
+
+    función mayús(c: byte): byte
+        si c >= 'a' y c <= 'z' entonces devolver c - 32 fin
+        devolver c
+    fin
+
+    ; de UTF-8 a la 437 (lo que no está, «?»), lo que quepa
+    función a_437(destino: puntero a byte, cabe: nat32, t: puntero a byte, n: nat32)
+        variable i, k, u: nat32
+        i := 0
+        k := 0
+        mientras i < n y k + 1 < cabe hacer
+            si t[i] < 0x80 entonces
+                destino[k] := t[i]
+                i := i + 1
+            sino si (t[i] = 0xC2 o t[i] = 0xC3) y i + 1 < n entonces
+                u := ((nat32(t[i]) yb 0x1F) << 6) ob (nat32(t[i + 1]) yb 0x3F)
+                destino[k] := '?'
+                si u >= 0xA0 entonces destino[k] := latín[u - 0xA0] fin
+                i := i + 2
+            sino
+                destino[k] := '?'
+                i := i + 1
+                mientras i < n y t[i] yb 0xC0 = 0x80 hacer i := i + 1 fin
+            fin
+            k := k + 1
+        fin
+        destino[k] := 0
+    fin
+
+    ; ¿empieza t (desde i, con n letras en total) por s (acabado en 0)? Da su largo, o 0
+    función empieza(t: puntero a byte, n: nat32, i: nat32, s: puntero a byte, sin_caja: bool): nat32
+        variable k: nat32
+        si s[0] = 0 entonces devolver 0 fin
+        k := 0
+        mientras s[k] <> 0 hacer
+            si i + k >= n entonces devolver 0 fin
+            si sin_caja entonces
+                si minús(t[i + k]) <> minús(s[k]) entonces devolver 0 fin
+            sino si t[i + k] <> s[k] entonces
+                devolver 0
+            fin
+            k := k + 1
+        fin
+        devolver k
+    fin
+
+    ; las letras de una palabra, como se guardan (sin distinguir: en minúsculas,
+    ; también las de dos octetos del latín, À..Þ)
+    función normaliza(t: puntero a byte, n: nat32, destino: puntero a byte, distingue: bool)
+        variable i: nat32
+        para i desde 0 hasta n - 1 hacer
+            destino[i] := t[i]
+            si no distingue entonces
+                si t[i] >= 'A' y t[i] <= 'Z' entonces
+                    destino[i] := t[i] + 32
+                sino si i > 0 y t[i - 1] = 0xC3 y t[i] >= 0x80 y t[i] <= 0x9E y t[i] <> 0x97 entonces
+                    destino[i] := t[i] + 32
+                fin
+            fin
+        fin
+    fin
+
+    función hash_de(t: puntero a byte, n: nat32, l: nat32): nat32
+        variable h, i: nat32
+        h := 2166136261 xob l
+        i := 0
+        mientras i < n hacer
+            h := (h xob nat32(t[i])) * 16777619
+            i := i + 1
+        fin
+        devolver h
+    fin
+
+    ; =========================================================================
+    ;  La tabla de las palabras
+    ; =========================================================================
+    función prepara_tabla(): bool
+        si tabla <> nulo entonces devolver cierto fin
+        tabla := puntero(pedir(HUECOS * tamaño(Palabra)))
+        si tabla = nulo entonces devolver falso fin
+        llenar_memoria(puntero(tabla), HUECOS * tamaño(Palabra), 0)
+        cabe_letras := 16384
+        letras := pedir(cabe_letras)
+        si letras = nulo entonces devolver falso fin
+        devolver cierto
+    fin
+
+    ; el hueco de la palabra (ya normalizada) del lenguaje l, o el vacío donde iría
+    función hueco_de(t: puntero a byte, n: nat32, l: nat32, h: nat32): nat32
+        variable k: nat32
+        variable p: puntero a Palabra
+        k := h yb (HUECOS - 1)
+        mientras cierto hacer
+            p := dirección(tabla[k])
+            si p.largo = 0 entonces devolver k fin
+            si p.hash = h y nat32(p.largo) = n y nat32(p.len) = l entonces
+                si comparar_memoria_(dirección(letras[p.sitio]), t, n) entonces devolver k fin
+            fin
+            k := (k + 1) yb (HUECOS - 1)
+        fin
+        devolver 0
+    fin
+
+    función comparar_memoria_(a: puntero a byte, b: puntero a byte, n: nat32): bool
+        variable i: nat32
+        i := 0
+        mientras i < n hacer
+            si a[i] <> b[i] entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; apunta una palabra (UTF-8) del lenguaje l con ese estilo (0: el que tuviera) y esas marcas
+    función apunta(l: nat32, t: puntero a byte, n: nat32, estilo: byte, marcas: byte)
+        variable norm: arreglo [MAX_PALABRA + 1] de byte
+        variable h, k: nat32
+        variable p: puntero a Palabra
+        variable q: puntero a byte
+        si n = 0 o n > MAX_PALABRA entonces devolver fin
+        normaliza(t, n, norm, lens[l].distingue)
+        h := hash_de(norm, n, l)
+        k := hueco_de(norm, n, l, h)
+        p := dirección(tabla[k])
+        si p.largo = 0 entonces
+            si n_palabras >= MAX_PALABRAS o palabras_de[l] >= MAX_DE_UNO entonces devolver fin
+            palabras_de[l] := palabras_de[l] + 1
+            si n_letras + n > cabe_letras entonces
+                si cabe_letras * 2 > MAX_SITIO entonces devolver fin
+                q := recrecer(letras, n_letras, cabe_letras * 2)
+                si q = nulo entonces devolver fin
+                letras := q
+                cabe_letras := cabe_letras * 2
+            fin
+            mover_memoria(dirección(letras[n_letras]), norm, n)
+            p.hash := h
+            p.sitio := n_letras
+            p.largo := byte(n)
+            p.len := byte(l)
+            p.estilo := 0
+            p.marcas := 0
+            n_letras := n_letras + n
+            n_palabras := n_palabras + 1
+        fin
+        si estilo <> 0 entonces p.estilo := estilo fin
+        p.marcas := p.marcas ob marcas
+    fin
+
+    ; la palabra (tal como va en el texto) del lenguaje l: nulo si no está
+    función busca(l: nat32, t: puntero a byte, n: nat32): puntero a Palabra
+        variable norm: arreglo [MAX_PALABRA + 1] de byte
+        variable h, k: nat32
+        si n = 0 o n > MAX_PALABRA o tabla = nulo entonces devolver nulo fin
+        normaliza(t, n, norm, lens[l].distingue)
+        h := hash_de(norm, n, l)
+        k := hueco_de(norm, n, l, h)
+        si tabla[k].largo = 0 entonces devolver nulo fin
+        devolver dirección(tabla[k])
+    fin
+
+    ; =========================================================================
+    ;  Leer un .LEN
+    ; =========================================================================
+    ; ¿es «clave» (ASCII) lo que hay en t (n letras)?
+    función es_clave(t: puntero a byte, n: nat32, clave: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras i < n hacer
+            si clave[i] = 0 o minús(t[i]) <> clave[i] entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver clave[n] = 0
+    fin
+
+    ; ¿«si»?
+    función es_sí(t: puntero a byte, n: nat32): bool
+        devolver n > 0 y (minús(t[0]) = 's' o minús(t[0]) = 'y' o t[0] = '1' o minús(t[0]) = 'c')
+    fin
+
+    ; copia la palabra número «cuál» (separadas por espacios) de t a destino (lo que quepa); da su largo
+    función trozo(t: puntero a byte, n: nat32, ref i: nat32, destino: puntero a byte, cabe: nat32): nat32
+        variable k: nat32
+        mientras i < n y (t[i] = ' ' o t[i] = '\t') hacer i := i + 1 fin
+        k := 0
+        mientras i < n y t[i] <> ' ' y t[i] <> '\t' hacer
+            si k + 1 < cabe entonces
+                destino[k] := t[i]
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        destino[k] := 0
+        devolver k
+    fin
+
+    ; apunta cada palabra de la lista (separadas por espacios)
+    función lista_de_palabras(l: nat32, t: puntero a byte, n: nat32, estilo: byte, marcas: byte)
+        variable i, a: nat32
+        i := 0
+        mientras i < n hacer
+            mientras i < n y (t[i] = ' ' o t[i] = '\t') hacer i := i + 1 fin
+            a := i
+            mientras i < n y t[i] <> ' ' y t[i] <> '\t' hacer i := i + 1 fin
+            si i > a entonces apunta(l, dirección(t[a]), i - a, estilo, marcas) fin
+        fin
+    fin
+
+    ; « CAS BAS »: cada palabra en mayúsculas, con espacios a los lados
+    función lista_de_nombres(destino: puntero a byte, cabe: nat32, t: puntero a byte, n: nat32)
+        variable i, k: nat32
+        k := longitud(destino)
+        si k = 0 entonces
+            destino[0] := ' '
+            k := 1
+        fin
+        i := 0
+        mientras i < n hacer
+            mientras i < n y (t[i] = ' ' o t[i] = '\t' o t[i] = ',') hacer i := i + 1 fin
+            si i >= n entonces romper fin
+            mientras i < n y t[i] <> ' ' y t[i] <> '\t' y t[i] <> ',' hacer
+                si k + 2 < cabe entonces
+                    si t[i] = '.' y (k = 0 o destino[k - 1] = ' ') entonces
+                        ; «.cas»: sin el punto
+                    sino
+                        destino[k] := mayús(t[i])
+                        k := k + 1
+                    fin
+                fin
+                i := i + 1
+            fin
+            si k + 1 < cabe entonces
+                destino[k] := ' '
+                k := k + 1
+            fin
+        fin
+        destino[k] := 0
+    fin
+
+    ; las cosas del lenguaje L: una línea «clave=valor»
+    función lee_línea(l: nat32, t: puntero a byte, n: nat32)
+        variable L: puntero a Len
+        variable e, i, k, v: nat32
+        variable w: arreglo [16] de byte
+        variable r: puntero a byte
+        L := dirección(lens[l])
+        e := 0
+        mientras e < n y t[e] <> '=' hacer e := e + 1 fin
+        si e >= n entonces devolver fin
+        k := e
+        mientras k > 0 y (t[k - 1] = ' ' o t[k - 1] = '\t') hacer k := k - 1 fin
+        v := e + 1
+        mientras v < n y (t[v] = ' ' o t[v] = '\t') hacer v := v + 1 fin
+        r := dirección(t[v])
+        n := n - v
+        ; (los espacios del final, fuera)
+        mientras n > 0 y (r[n - 1] = ' ' o r[n - 1] = '\t') hacer n := n - 1 fin
+        si es_clave(t, k, "nombre") entonces
+            a_437(dirección(L.nombre[0]), 40, r, n)
+        sino si es_clave(t, k, "extensiones") entonces
+            lista_de_nombres(dirección(L.ext[0]), 80, r, n)
+        sino si es_clave(t, k, "archivos") entonces
+            lista_de_nombres(dirección(L.arch[0]), 120, r, n)
+        sino si es_clave(t, k, "distingue") entonces
+            L.distingue := es_sí(r, n)
+        sino si es_clave(t, k, "anida") entonces
+            L.anida := es_sí(r, n)
+        sino si es_clave(t, k, "numeros") entonces
+            L.números := es_sí(r, n)
+        sino si es_clave(t, k, "al_principio") entonces
+            L.al_principio := es_sí(r, n)
+        sino si es_clave(t, k, "comentario") entonces
+            i := 0
+            mientras L.n_com < 4 y trozo(r, n, i, dirección(L.com[L.n_com][0]), 8) > 0 hacer L.n_com := L.n_com + 1 fin
+        sino si es_clave(t, k, "comentario_palabra") entonces
+            lista_de_palabras(l, r, n, E_COMENTARIO, F_COMENTARIO)
+        sino si es_clave(t, k, "bloque") entonces
+            i := 0
+            trozo(r, n, i, dirección(L.bl_abre[0]), 8)
+            trozo(r, n, i, dirección(L.bl_cierra[0]), 8)
+            si L.bl_cierra[0] = 0 entonces L.bl_abre[0] := 0 fin
+        sino si es_clave(t, k, "comillas") entonces
+            i := 0
+            mientras trozo(r, n, i, w, 16) > 0 hacer L.clase[w[0]] := L.clase[w[0]] ob C_COMILLA fin
+        sino si es_clave(t, k, "largas") entonces
+            i := 0
+            mientras L.n_largas < 4 y trozo(r, n, i, dirección(L.largas[L.n_largas][0]), 8) > 0 hacer L.n_largas := L.n_largas + 1 fin
+        sino si es_clave(t, k, "escape") entonces
+            si n > 0 entonces L.escape := r[0] fin
+        sino si es_clave(t, k, "claves") entonces
+            lista_de_palabras(l, r, n, E_CLAVE, 0)
+        sino si es_clave(t, k, "tipos") entonces
+            lista_de_palabras(l, r, n, E_TIPO, 0)
+        sino si es_clave(t, k, "propias") entonces
+            lista_de_palabras(l, r, n, E_PROPIA, 0)
+        sino si es_clave(t, k, "letras") entonces
+            para i desde 1 hasta n hacer
+                si r[i - 1] <> ' ' entonces L.clase[r[i - 1]] := L.clase[r[i - 1]] ob C_LETRA fin
+            fin
+        sino si es_clave(t, k, "inicio") entonces
+            para i desde 1 hasta n hacer
+                si r[i - 1] <> ' ' entonces L.clase[r[i - 1]] := L.clase[r[i - 1]] ob C_LETRA ob C_INICIO fin
+            fin
+        sino si es_clave(t, k, "operadores") entonces
+            para i desde 1 hasta n hacer
+                si r[i - 1] <> ' ' entonces L.clase[r[i - 1]] := L.clase[r[i - 1]] ob C_OPERADOR fin
+            fin
+        sino si es_clave(t, k, "directiva") entonces
+            si n > 0 entonces
+                L.directiva := r[0]
+                L.dir_palabra := 0
+            fin
+        sino si es_clave(t, k, "directiva_palabra") entonces
+            si n > 0 entonces
+                L.directiva := r[0]
+                L.dir_palabra := 1
+            fin
+        sino si es_clave(t, k, "variables") entonces
+            si n > 0 entonces L.variables := r[0] fin
+        sino si es_clave(t, k, "etiquetas") entonces
+            i := 0
+            mientras trozo(r, n, i, w, 16) > 0 hacer
+                si es_clave(w, longitud(w), "dospuntos") entonces L.etiquetas := L.etiquetas ob T_DOSPUNTOS fin
+                si es_clave(w, longitud(w), "delante") entonces L.etiquetas := L.etiquetas ob T_DELANTE fin
+                si es_clave(w, longitud(w), "numeros") entonces L.etiquetas := L.etiquetas ob T_NÚMEROS fin
+                si es_clave(w, longitud(w), "secciones") entonces L.etiquetas := L.etiquetas ob T_SECCIONES fin
+            fin
+        sino si es_clave(t, k, "prefijos") entonces
+            i := 0
+            mientras L.n_prefijos < 4 y trozo(r, n, i, dirección(L.prefijos[L.n_prefijos][0]), 6) > 0 hacer L.n_prefijos := L.n_prefijos + 1 fin
+        sino si es_clave(t, k, "modo") entonces
+            si es_clave(r, n, "html") entonces L.modo := M_HTML fin
+            si es_clave(r, n, "css") entonces L.modo := M_CSS fin
+            si es_clave(r, n, "ini") entonces L.modo := M_INI fin
+        sino si es_clave(t, k, "plegado") entonces
+            si es_clave(r, n, "bloques") entonces L.plegado := P_BLOQUES fin
+            si es_clave(r, n, "sangria") entonces L.plegado := P_SANGRÍA fin
+            si es_clave(r, n, "secciones") entonces L.plegado := P_SECCIONES fin
+        sino si es_clave(t, k, "abre") entonces
+            lista_de_palabras(l, r, n, 0, F_ABRE)
+        sino si es_clave(t, k, "cierra") entonces
+            lista_de_palabras(l, r, n, 0, F_CIERRA)
+        sino si es_clave(t, k, "cierra_doble") entonces
+            lista_de_palabras(l, r, n, 0, F_DOBLE)
+        sino si es_clave(t, k, "abre_al_final") entonces
+            lista_de_palabras(l, r, n, 0, F_AL_FINAL)
+        sino si es_clave(t, k, "no_abre_tras") entonces
+            lista_de_palabras(l, r, n, 0, F_NO_TRAS)
+        sino si es_clave(t, k, "no_abre_ante") entonces
+            i := 0
+            mientras L.n_no_ante < 4 y trozo(r, n, i, dirección(L.no_ante[L.n_no_ante][0]), 8) > 0 hacer L.n_no_ante := L.n_no_ante + 1 fin
+        sino si es_clave(t, k, "sueltas") entonces
+            lista_de_palabras(l, r, n, 0, F_SUELTA)
+        sino si es_clave(t, k, "signos_abre") entonces
+            i := 0
+            trozo(r, n, i, dirección(L.signos_abre[0]), 8)
+        sino si es_clave(t, k, "signos_cierra") entonces
+            i := 0
+            trozo(r, n, i, dirección(L.signos_cierra[0]), 8)
+        fin
+    fin
+
+    ; el lenguaje nuevo número l, en blanco
+    función empieza_len(l: nat32)
+        variable L: puntero a Len
+        variable c: nat32
+        L := dirección(lens[l])
+        llenar_memoria(puntero(L), tamaño(Len), 0)
+        para c desde 'a' hasta 'z' hacer L.clase[c] := C_LETRA ob C_INICIO fin
+        para c desde 'A' hasta 'Z' hacer L.clase[c] := C_LETRA ob C_INICIO fin
+        para c desde '0' hasta '9' hacer L.clase[c] := C_LETRA fin
+        L.clase['_'] := C_LETRA ob C_INICIO
+        para c desde 0x80 hasta 0xFF hacer L.clase[c] := C_LETRA ob C_INICIO fin
+        L.clase['('] := C_OPERADOR
+        L.clase[')'] := C_OPERADOR
+        L.clase['['] := C_OPERADOR
+        L.clase[']'] := C_OPERADOR
+        L.clase['{'] := C_OPERADOR
+        L.clase['}'] := C_OPERADOR
+    fin
+
+    ; lee el .LEN de esa ruta (437): cierto si es un lenguaje nuevo
+    función lee_len(ruta: puntero a byte): bool
+        variable m, n, k: nat32
+        variable t: puntero a byte
+        variable r: bool
+        si n_lens >= MAX_LEN o no prepara_tabla() entonces devolver falso fin
+        m := abrir(ruta)
+        si es_error(m) entonces devolver falso fin
+        t := pedir(MAX_ARCHIVO)
+        si t = nulo entonces
+            cerrar(m)
+            devolver falso
+        fin
+        n := 0
+        mientras n < MAX_ARCHIVO hacer
+            k := leer(m, dirección(t[n]), MAX_ARCHIVO - n)
+            si es_error(k) o k = 0 entonces romper fin
+            n := n + k
+        fin
+        cerrar(m)
+        r := analiza(t, n)
+        soltar(t)
+        devolver r
+    fin
+
+    ; (BLOC) un lenguaje que ya está en la memoria (los de serie, que lleva
+    ; el propio Bloc por si no están los archivos): cierto si es nuevo
+    público función len_cargar_texto(t: puntero a byte, n: nat32): bool
+        si n_lens >= MAX_LEN o no prepara_tabla() entonces devolver falso fin
+        si n > MAX_ARCHIVO entonces n := MAX_ARCHIVO fin
+        devolver analiza(t, n)
+    fin
+
+    ; lo de un .LEN (n octetos en t): cierto si es un lenguaje nuevo
+    función analiza(t: puntero a byte, n: nat32): bool
+        variable i, a, l, k: nat32
+        variable L: puntero a Len
+        l := n_lens
+        n_lens := n_lens + 1
+        empieza_len(l)
+        L := dirección(lens[l])
+        i := 0
+        ; (la marca de UTF-8 del principio, fuera)
+        si n >= 3 y t[0] = 0xEF y t[1] = 0xBB y t[2] = 0xBF entonces i := 3 fin
+        mientras i < n hacer
+            a := i
+            mientras i < n y t[i] <> '\n' y t[i] <> '\r' hacer i := i + 1 fin
+            ; la línea: de «a» a «i»
+            mientras a < i y (t[a] = ' ' o t[a] = '\t') hacer a := a + 1 fin
+            si a < i y t[a] <> ';' entonces lee_línea(l, dirección(t[a]), i - a) fin
+            mientras i < n y (t[i] = '\n' o t[i] = '\r') hacer i := i + 1 fin
+        fin
+        ; sin nombre, o con el de otro que ya estaba: no vale
+        si L.nombre[0] = 0 entonces devolver falso fin
+        para k desde 1 hasta n_orden hacer
+            si iguales_sin_caja(dirección(lens[orden[k - 1]].nombre[0]), dirección(L.nombre[0])) entonces devolver falso fin
+        fin
+        L.vivo := cierto
+        ; en su sitio, por orden alfabético
+        k := n_orden
+        mientras k > 0 y comparar_sin_caja(dirección(lens[orden[k - 1]].nombre[0]), dirección(L.nombre[0])) > 0 hacer
+            orden[k] := orden[k - 1]
+            k := k - 1
+        fin
+        orden[k] := l
+        n_orden := n_orden + 1
+        devolver cierto
+    fin
+
+    función comparar_sin_caja(a: puntero a byte, b: puntero a byte): ent32
+        variable i: nat32
+        i := 0
+        mientras a[i] <> 0 y minús(a[i]) = minús(b[i]) hacer i := i + 1 fin
+        devolver ent32(minús(a[i])) - ent32(minús(b[i]))
+    fin
+
+    ; lee los .LEN de una carpeta (en la 437, con su «\» al final): da cuántos hay en total
+    público función len_cargar(carpeta: puntero a byte): nat32
+        variable ruta: arreglo [160] de byte
+        variable nombre: arreglo [16] de byte
+        variable c: arreglo [160] de byte
+        variable e: Entrada
+        variable m, n, i, vistos: nat32
+        n := longitud(carpeta)
+        si n > 120 entonces devolver n_orden fin
+        copiar(c, carpeta)
+        si n > 0 y c[n - 1] <> '\\' entonces
+            c[n] := '\\'
+            c[n + 1] := 0
+            n := n + 1
+        fin
+        ; para abrirla, sin la «\» del final (salvo que sea la raíz)
+        copiar(ruta, c)
+        si n > 1 y ruta[n - 2] <> ':' entonces ruta[n - 1] := 0 fin
+        vistos := 0
+        m := abrir(ruta)
+        si no es_error(m) entonces
+            mientras entrada(m, e) hacer
+                i := 0
+                mientras e.nombre[i] <> 0 y i < 12 hacer
+                    nombre[i] := e.nombre[i]
+                    i := i + 1
+                fin
+                nombre[i] := 0
+                si e.atributos yb CARPETA = 0 y i > 4 y nombre[i - 4] = '.' y mayús(nombre[i - 3]) = 'L' y mayús(nombre[i - 2]) = 'E' y mayús(nombre[i - 1]) = 'N' entonces
+                    copiar(ruta, c)
+                    concatenar(ruta, nombre)
+                    lee_len(ruta)
+                    vistos := vistos + 1
+                fin
+            fin
+            cerrar(m)
+        fin
+        ; si no se ha podido recorrer, los de siempre
+        si vistos = 0 entonces
+            i := 0
+            mientras trozo(de_siempre, longitud(de_siempre), i, nombre, 12) > 0 hacer
+                copiar(ruta, c)
+                concatenar(ruta, nombre)
+                concatenar(ruta, ".LEN")
+                lee_len(ruta)
+            fin
+        fin
+        devolver n_orden
+    fin
+
+    público función len_cuántos(): nat32
+        devolver n_orden
+    fin
+
+    público función len_nombre(l: nat32): puntero a byte
+        si l >= n_orden entonces devolver "" fin
+        devolver dirección(lens[orden[l]].nombre[0])
+    fin
+
+    ; por la extensión o por el nombre entero; -1: ninguno
+    público función len_de_archivo(nombre: puntero a byte): ent32
+        variable base: arreglo [48] de byte
+        variable i, k, punto: nat32
+        variable p: puntero a byte
+        i := 0
+        k := 0
+        punto := 0xFFFFFFFF
+        mientras nombre[i] <> 0 hacer
+            si nombre[i] = '\\' o nombre[i] = '/' o nombre[i] = ':' entonces
+                k := 0
+                punto := 0xFFFFFFFF
+            sino si k + 3 < 48 entonces
+                si k = 0 entonces base[0] := ' ' fin
+                si k = 0 entonces k := 1 fin
+                si nombre[i] = '.' entonces punto := k fin
+                base[k] := mayús(nombre[i])
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        si k = 0 entonces devolver -1 fin
+        base[k] := ' '
+        base[k + 1] := 0
+        ; el nombre entero
+        para i desde 1 hasta n_orden hacer
+            si buscar(dirección(lens[orden[i - 1]].arch[0]), base) <> nulo entonces devolver ent32(i - 1) fin
+        fin
+        si punto = 0xFFFFFFFF entonces devolver -1 fin
+        ; la extensión
+        p := dirección(base[punto])
+        p[0] := ' '
+        para i desde 1 hasta n_orden hacer
+            si buscar(dirección(lens[orden[i - 1]].ext[0]), p) <> nulo entonces devolver ent32(i - 1) fin
+        fin
+        devolver -1
+    fin
+
+    público función len_por_nombre(nombre: puntero a byte): ent32
+        variable i: nat32
+        para i desde 1 hasta n_orden hacer
+            si iguales_sin_caja(dirección(lens[orden[i - 1]].nombre[0]), nombre) entonces devolver ent32(i - 1) fin
+        fin
+        devolver -1
+    fin
+
+    función interno(l: ent32): puntero a Len
+        si l < 0 o nat32(l) >= n_orden entonces devolver nulo fin
+        devolver dirección(lens[orden[nat32(l)]])
+    fin
+
+    público función len_plegado(l: ent32): nat32
+        variable L: puntero a Len
+        L := interno(l)
+        si L = nulo entonces devolver P_NADA fin
+        devolver nat32(L.plegado)
+    fin
+
+    público función len_comentario(l: ent32): puntero a byte
+        variable L: puntero a Len
+        variable k: nat32
+        variable p: puntero a Palabra
+        L := interno(l)
+        si L = nulo entonces devolver nulo fin
+        si L.n_com > 0 entonces devolver dirección(L.com[0][0]) fin
+        ; si no, la primera palabra de comentario (REM, con su espacio)
+        si tabla = nulo entonces devolver nulo fin
+        para k desde 0 hasta HUECOS - 1 hacer
+            p := dirección(tabla[k])
+            si p.largo > 0 y p.largo < 15 y nat32(p.len) = orden[nat32(l)] y p.marcas yb F_COMENTARIO <> 0 entonces
+                mover_memoria(dirección(palabra_com[0]), dirección(letras[p.sitio]), nat32(p.largo))
+                palabra_com[p.largo] := ' '
+                palabra_com[p.largo + 1] := 0
+                si no L.distingue entonces normaliza_mayús(dirección(palabra_com[0])) fin
+                devolver dirección(palabra_com[0])
+            fin
+        fin
+        devolver nulo
+    fin
+    ; (las palabras de comentario sin distinguir se guardan en minúsculas: se dan en mayúsculas, «REM »)
+    función normaliza_mayús(t: puntero a byte)
+        variable i: nat32
+        i := 0
+        mientras t[i] <> 0 hacer
+            t[i] := mayús(t[i])
+            i := i + 1
+        fin
+    fin
+
+    público función len_bloque(l: ent32, ref abre: puntero a byte, ref cierra: puntero a byte): bool
+        variable L: puntero a Len
+        L := interno(l)
+        si L = nulo o L.bl_abre[0] = 0 entonces devolver falso fin
+        abre := dirección(L.bl_abre[0])
+        cierra := dirección(L.bl_cierra[0])
+        devolver cierto
+    fin
+
+    público función len_distingue(l: ent32): bool
+        variable L: puntero a Len
+        L := interno(l)
+        si L = nulo entonces devolver cierto fin
+        devolver L.distingue
+    fin
+
+    ; =========================================================================
+    ;  Colorear una línea
+    ; =========================================================================
+    función pon(estilos: puntero a byte, a: nat32, b: nat32, e: byte)
+        mientras a < b hacer
+            estilos[a] := e
+            a := a + 1
+        fin
+    fin
+
+    ; lo que va detrás de la palabra (saltando espacios) empieza por alguno de los «no_ante»
+    función ante(L: puntero a Len, t: puntero a byte, n: nat32, i: nat32): bool
+        variable k: nat32
+        si L.n_no_ante = 0 entonces devolver falso fin
+        mientras i < n y (t[i] = ' ' o t[i] = '\t') hacer i := i + 1 fin
+        para k desde 0 hasta L.n_no_ante - 1 hacer
+            si empieza(t, n, i, dirección(L.no_ante[k][0]), no L.distingue) > 0 entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; ¿es de una palabra la letra (con las de más del lenguaje)?
+    función de_palabra(L: puntero a Len, c: byte): bool
+        devolver L.clase[c] yb C_LETRA <> 0
+    fin
+
+    público función len_colorea(l: ent32, t: puntero a byte, n: nat32, estado: nat32, estilos: puntero a byte): nat32
+        variable L: puntero a Len
+        variable p: puntero a Palabra
+        variable i, a, k, c, q, clase, prof, cual, h, css_prof, css_valor: nat32
+        variable solo_espacios, en_directiva, al_final, doble, no_tras, primera, selector, contada: bool
+        len_abre := 0
+        len_cierra := 0
+        L := interno(l)
+        si L = nulo entonces
+            si n > 0 entonces llenar_memoria(estilos, n, E_NORMAL) fin
+            devolver 0
+        fin
+        si n > 0 entonces llenar_memoria(estilos, n, E_NORMAL) fin
+        clase := estado yb 15
+        prof := (estado >> 4) yb 0xFF
+        h := (estado >> 12) yb 3                ; (HTML) 0: texto; 1: en una etiqueta; 2 y 3: en un valor con " o '
+        css_prof := (estado >> 12) yb 3         ; (CSS) dentro de cuántas llaves (hasta 3)
+        css_valor := (estado >> 14) yb 1
+        si L.modo = M_HTML entonces
+            css_prof := 0
+            css_valor := 0
+        sino si L.modo = M_CSS entonces
+            h := 0
+        sino
+            h := 0
+            css_prof := 0
+            css_valor := 0
+        fin
+        ; (CSS) una línea con «{» y sin «;» delante es de selectores, aunque vaya dentro de @media
+        selector := falso
+        si L.modo = M_CSS y clase = K_NORMAL entonces
+            i := 0
+            mientras i < n y t[i] <> '{' y t[i] <> ';' hacer i := i + 1 fin
+            selector := i < n y t[i] = '{'
+        fin
+        i := 0
+        solo_espacios := cierto
+        en_directiva := falso
+        al_final := falso
+        doble := falso
+        no_tras := falso
+        primera := cierto
+        contada := falso
+        mientras i < n hacer
+            c := t[i]
+            ; ---- dentro de un comentario de bloque ----
+            si clase = K_BLOQUE entonces
+                si L.anida y empieza(t, n, i, dirección(L.bl_abre[0]), falso) > 0 entonces
+                    k := empieza(t, n, i, dirección(L.bl_abre[0]), falso)
+                    pon(estilos, i, i + k, E_COMENTARIO)
+                    i := i + k
+                    si prof < 255 entonces prof := prof + 1 fin
+                    seguir
+                fin
+                k := empieza(t, n, i, dirección(L.bl_cierra[0]), falso)
+                si k > 0 entonces
+                    pon(estilos, i, i + k, E_COMENTARIO)
+                    i := i + k
+                    prof := prof - 1
+                    si prof = 0 o no L.anida entonces
+                        clase := K_NORMAL
+                        prof := 0
+                    fin
+                    seguir
+                fin
+                estilos[i] := E_COMENTARIO
+                i := i + 1
+                seguir
+            fin
+            ; ---- dentro de una cadena de varias líneas ----
+            si clase = K_LARGA entonces
+                si L.escape <> 0 y c = L.escape y i + 1 < n entonces
+                    pon(estilos, i, i + 2, E_ESPECIAL)
+                    i := i + 2
+                    seguir
+                fin
+                k := 0
+                si prof < L.n_largas entonces k := empieza(t, n, i, dirección(L.largas[prof][0]), falso) fin
+                estilos[i] := E_CADENA
+                si k > 0 entonces
+                    pon(estilos, i, i + k, E_CADENA)
+                    i := i + k
+                    clase := K_NORMAL
+                    prof := 0
+                    al_final := falso
+                    seguir
+                fin
+                i := i + 1
+                seguir
+            fin
+            ; ---- los espacios ----
+            si c = ' ' o c = '\t' entonces
+                i := i + 1
+                seguir
+            fin
+            ; ---- (HTML) dentro de una etiqueta: atributos, «=», valores, «>» ----
+            si L.modo = M_HTML y h > 0 entonces
+                si h >= 2 entonces
+                    estilos[i] := E_CADENA
+                    si (h = 2 y c = '"') o (h = 3 y c = '\'') entonces h := 1 fin
+                    i := i + 1
+                    seguir
+                fin
+                si c = '>' entonces
+                    estilos[i] := E_ETIQUETA
+                    h := 0
+                    i := i + 1
+                    seguir
+                fin
+                si c = '/' y i + 1 < n y t[i + 1] = '>' entonces
+                    pon(estilos, i, i + 2, E_ETIQUETA)
+                    ; «<br/>»: se cierra ella sola
+                    si contada y len_abre > 0 entonces len_abre := len_abre - 1 fin
+                    contada := falso
+                    h := 0
+                    i := i + 2
+                    seguir
+                fin
+                si c = '"' entonces
+                    estilos[i] := E_CADENA
+                    h := 2
+                    i := i + 1
+                    seguir
+                fin
+                si c = '\'' entonces
+                    estilos[i] := E_CADENA
+                    h := 3
+                    i := i + 1
+                    seguir
+                fin
+                si c = '=' entonces
+                    estilos[i] := E_OPERADOR
+                    i := i + 1
+                    seguir
+                fin
+                a := i
+                mientras i < n y t[i] <> ' ' y t[i] <> '\t' y t[i] <> '=' y t[i] <> '>' y t[i] <> '"' y t[i] <> '\'' y no (t[i] = '/' y i + 1 < n y t[i + 1] = '>') hacer i := i + 1 fin
+                si i = a entonces i := i + 1 fin
+                pon(estilos, a, i, E_ATRIBUTO)
+                seguir
+            fin
+            ; ---- un comentario de bloque que empieza ----
+            si L.bl_abre[0] <> 0 entonces
+                k := empieza(t, n, i, dirección(L.bl_abre[0]), falso)
+                si k > 0 entonces
+                    pon(estilos, i, i + k, E_COMENTARIO)
+                    i := i + k
+                    clase := K_BLOQUE
+                    prof := 1
+                    seguir
+                fin
+            fin
+            ; ---- un comentario de línea ----
+            si L.n_com > 0 y (solo_espacios o no L.al_principio) entonces
+                para k desde 0 hasta L.n_com - 1 hacer
+                    si empieza(t, n, i, dirección(L.com[k][0]), falso) > 0 entonces
+                        pon(estilos, i, n, E_COMENTARIO)
+                        i := n
+                        romper
+                    fin
+                fin
+                si i >= n entonces romper fin
+            fin
+            ; ---- una cadena de varias líneas que empieza ----
+            si L.n_largas > 0 entonces
+                cual := 0
+                k := 0
+                mientras cual < L.n_largas y k = 0 hacer
+                    k := empieza(t, n, i, dirección(L.largas[cual][0]), falso)
+                    si k = 0 entonces cual := cual + 1 fin
+                fin
+                si k > 0 entonces
+                    pon(estilos, i, i + k, E_CADENA)
+                    i := i + k
+                    clase := K_LARGA
+                    prof := cual
+                    solo_espacios := falso
+                    al_final := falso
+                    no_tras := falso
+                    seguir
+                fin
+            fin
+            ; ---- (HTML) las etiquetas y las entidades ----
+            si L.modo = M_HTML entonces
+                si c = '<' y i + 1 < n y (de_palabra(L, t[i + 1]) o t[i + 1] = '/' o t[i + 1] = '!') entonces
+                    a := i
+                    i := i + 1
+                    si t[i] = '!' entonces
+                        ; <!DOCTYPE ...>
+                        mientras i < n y t[i] <> '>' hacer i := i + 1 fin
+                        si i < n entonces i := i + 1 fin
+                        pon(estilos, a, i, E_DIRECTIVA)
+                        seguir
+                    fin
+                    k := 0
+                    si t[i] = '/' entonces
+                        k := 1
+                        i := i + 1
+                    fin
+                    q := i
+                    mientras i < n y (de_palabra(L, t[i]) o t[i] = '-' o t[i] = ':') hacer i := i + 1 fin
+                    pon(estilos, a, i, E_ETIQUETA)
+                    p := busca(orden[nat32(l)], dirección(t[q]), i - q)
+                    si i > q entonces
+                        si k = 1 entonces
+                            len_cierra := len_cierra + 1
+                        sino si p = nulo o p.marcas yb F_SUELTA = 0 entonces
+                            len_abre := len_abre + 1
+                            contada := cierto
+                        sino
+                            contada := falso
+                        fin
+                    fin
+                    h := 1
+                    seguir
+                fin
+                si c = '&' entonces
+                    a := i
+                    i := i + 1
+                    mientras i < n y i - a < 12 y (de_palabra(L, t[i]) o t[i] = '#') hacer i := i + 1 fin
+                    si i < n y t[i] = ';' entonces
+                        i := i + 1
+                        pon(estilos, a, i, E_ESPECIAL)
+                    sino
+                        i := a + 1
+                    fin
+                    seguir
+                fin
+                ; el texto, tal cual
+                i := i + 1
+                seguir
+            fin
+            ; ---- una cadena ----
+            si L.clase[c] yb C_COMILLA <> 0 entonces
+                estilos[i] := E_CADENA
+                i := i + 1
+                mientras i < n hacer
+                    si L.escape <> 0 y t[i] = L.escape y i + 1 < n entonces
+                        pon(estilos, i, i + 2, E_ESPECIAL)
+                        i := i + 2
+                    sino si t[i] = c entonces
+                        estilos[i] := E_CADENA
+                        i := i + 1
+                        romper
+                    sino
+                        estilos[i] := E_CADENA
+                        i := i + 1
+                    fin
+                fin
+                solo_espacios := falso
+                al_final := falso
+                no_tras := falso
+                doble := falso
+                seguir
+            fin
+            ; ---- la directiva (#include, %define, @decorador) ----
+            si L.directiva <> 0 y c = L.directiva y (L.dir_palabra = 1 o solo_espacios) entonces
+                a := i
+                i := i + 1
+                mientras i < n y (de_palabra(L, t[i]) o t[i] = '-') hacer i := i + 1 fin
+                pon(estilos, a, i, E_DIRECTIVA)
+                ; (lo que abre y cierra: #if...#endif, %macro...%endmacro)
+                p := busca(orden[nat32(l)], dirección(t[a]), i - a)
+                si p <> nulo entonces
+                    si p.marcas yb F_ABRE <> 0 entonces len_abre := len_abre + 1 fin
+                    si p.marcas yb F_CIERRA <> 0 entonces len_cierra := len_cierra + 1 fin
+                fin
+                si L.dir_palabra = 0 entonces en_directiva := cierto fin
+                solo_espacios := falso
+                al_final := falso
+                seguir
+            fin
+            ; ---- las etiquetas del principio de la línea ----
+            si solo_espacios y L.etiquetas <> 0 entonces
+                si L.etiquetas yb T_SECCIONES <> 0 y c = '[' entonces
+                    a := i
+                    mientras i < n y t[i] <> ']' hacer i := i + 1 fin
+                    si i < n entonces i := i + 1 fin
+                    pon(estilos, a, i, E_ETIQUETA)
+                    solo_espacios := falso
+                    seguir
+                fin
+                si L.etiquetas yb T_DELANTE <> 0 y c = ':' y i + 1 < n y t[i + 1] <> ':' entonces
+                    a := i
+                    i := i + 1
+                    mientras i < n y t[i] <> ' ' y t[i] <> '\t' hacer i := i + 1 fin
+                    pon(estilos, a, i, E_ETIQUETA)
+                    solo_espacios := falso
+                    seguir
+                fin
+                si L.etiquetas yb T_NÚMEROS <> 0 y c >= '0' y c <= '9' entonces
+                    a := i
+                    mientras i < n y t[i] >= '0' y t[i] <= '9' hacer i := i + 1 fin
+                    pon(estilos, a, i, E_ETIQUETA)
+                    solo_espacios := falso
+                    seguir
+                fin
+            fin
+            ; ---- (INI) la clave de «clave=valor» ----
+            si L.modo = M_INI y solo_espacios entonces
+                a := i
+                mientras i < n y t[i] <> '=' hacer i := i + 1 fin
+                si i < n entonces
+                    k := i
+                    mientras k > a y (t[k - 1] = ' ' o t[k - 1] = '\t') hacer k := k - 1 fin
+                    pon(estilos, a, k, E_ATRIBUTO)
+                    estilos[i] := E_OPERADOR
+                    i := i + 1
+                    solo_espacios := falso
+                    seguir
+                fin
+                i := a
+            fin
+            ; ---- las variables (%PATH%, %1, %%a) ----
+            si L.variables <> 0 y c = L.variables y i + 1 < n entonces
+                a := i
+                i := i + 1
+                si t[i] = c entonces i := i + 1 fin
+                si t[i] >= '0' y t[i] <= '9' o t[i] = '*' entonces
+                    i := i + 1
+                sino si a + 2 = i y de_palabra(L, t[i]) entonces
+                    ; %%a: una letra
+                    i := i + 1
+                sino
+                    mientras i < n y t[i] <> c y t[i] <> ' ' y i - a < 64 hacer i := i + 1 fin
+                    si i < n y t[i] = c entonces i := i + 1 sino i := a + 1 fin
+                fin
+                pon(estilos, a, i, E_ESPECIAL)
+                solo_espacios := falso
+                al_final := falso
+                seguir
+            fin
+            ; ---- un número ----
+            si L.números y (c >= '0' y c <= '9' o (c = '.' y i + 1 < n y t[i + 1] >= '0' y t[i + 1] <= '9')) y (i = 0 o no de_palabra(L, t[i - 1])) entonces
+                a := i
+                mientras i < n y (t[i] < 0x80 y (de_palabra(L, t[i]) o t[i] = '.')) hacer
+                    ; 1e+5
+                    si (t[i] = 'e' o t[i] = 'E') y i + 1 < n y (t[i + 1] = '+' o t[i + 1] = '-') y t[a] <> '0' entonces i := i + 1 fin
+                    i := i + 1
+                fin
+                si en_directiva entonces pon(estilos, a, i, E_DIRECTIVA) sino pon(estilos, a, i, E_NÚMERO) fin
+                solo_espacios := falso
+                al_final := falso
+                no_tras := falso
+                doble := falso
+                seguir
+            fin
+            ; (los prefijos de número: &H1F de BASIC, #FFF de CSS)
+            si L.números y L.n_prefijos > 0 entonces
+                k := 0
+                para q desde 0 hasta L.n_prefijos - 1 hacer
+                    si k = 0 entonces k := empieza(t, n, i, dirección(L.prefijos[q][0]), cierto) fin
+                fin
+                si k > 0 y i + k < n y es_hex(t[i + k]) entonces
+                    a := i
+                    i := i + k
+                    mientras i < n y (es_hex(t[i]) o (t[i] < 0x80 y de_palabra(L, t[i]))) hacer i := i + 1 fin
+                    pon(estilos, a, i, E_NÚMERO)
+                    solo_espacios := falso
+                    al_final := falso
+                    seguir
+                fin
+            fin
+            ; ---- una palabra ----
+            si L.clase[c] yb C_INICIO <> 0 entonces
+                a := i
+                i := i + 1
+                mientras i < n y de_palabra(L, t[i]) hacer i := i + 1 fin
+                ; (CSS: las propiedades llevan guiones; NASM, sus puntos: con «letras=»)
+                si en_directiva entonces
+                    pon(estilos, a, i, E_DIRECTIVA)
+                    solo_espacios := falso
+                    seguir
+                fin
+                ; «etiqueta:» al principio (NASM)
+                si primera y solo_espacios y L.etiquetas yb T_DOSPUNTOS <> 0 y i < n y t[i] = ':' entonces
+                    pon(estilos, a, i + 1, E_ETIQUETA)
+                    i := i + 1
+                    solo_espacios := falso
+                    primera := falso
+                    seguir
+                fin
+                p := busca(orden[nat32(l)], dirección(t[a]), i - a)
+                si L.modo = M_CSS entonces
+                    si t[a] = '#' y css_valor = 1 entonces
+                        pon(estilos, a, i, E_NÚMERO)            ; un color: #1D4ED8
+                    sino si p <> nulo y p.estilo <> 0 y css_valor = 1 entonces
+                        pon(estilos, a, i, p.estilo)
+                    sino si css_prof = 0 o (selector y css_valor = 0) entonces
+                        pon(estilos, a, i, E_ETIQUETA)
+                    sino si css_valor = 0 entonces
+                        pon(estilos, a, i, E_ATRIBUTO)
+                    fin
+                sino si p <> nulo y p.estilo <> 0 y p.marcas yb F_COMENTARIO = 0 entonces
+                    pon(estilos, a, i, p.estilo)
+                fin
+                si p <> nulo y p.marcas yb F_COMENTARIO <> 0 y (solo_espacios o no L.al_principio) entonces
+                    pon(estilos, a, n, E_COMENTARIO)
+                    i := n
+                    romper
+                fin
+                ; lo que abre y lo que cierra
+                si doble entonces
+                    ; END SUB: el END cierra, y esta no abre
+                    len_cierra := len_cierra + 1
+                    doble := falso
+                    no_tras := falso
+                    si p <> nulo entonces no_tras := p.marcas yb F_NO_TRAS <> 0 fin
+                    al_final := falso
+                    solo_espacios := falso
+                    primera := falso
+                    seguir
+                fin
+                al_final := falso
+                si p <> nulo entonces
+                    si p.marcas yb F_ABRE <> 0 y no no_tras y no ante(L, t, n, i) entonces len_abre := len_abre + 1 fin
+                    si p.marcas yb F_CIERRA <> 0 entonces len_cierra := len_cierra + 1 fin
+                    si p.marcas yb F_DOBLE <> 0 entonces doble := cierto fin
+                    si p.marcas yb F_AL_FINAL <> 0 entonces al_final := cierto fin
+                    no_tras := p.marcas yb F_NO_TRAS <> 0
+                sino
+                    no_tras := falso
+                fin
+                solo_espacios := falso
+                primera := falso
+                seguir
+            fin
+            ; ---- los signos ----
+            si L.signos_abre[0] <> 0 y buscar_car(dirección(L.signos_abre[0]), byte(c)) <> nulo entonces len_abre := len_abre + 1 fin
+            si L.signos_cierra[0] <> 0 y buscar_car(dirección(L.signos_cierra[0]), byte(c)) <> nulo entonces len_cierra := len_cierra + 1 fin
+            si L.modo = M_CSS entonces
+                si c = '{' entonces
+                    si css_prof < 3 entonces css_prof := css_prof + 1 fin
+                    css_valor := 0
+                sino si c = '}' entonces
+                    si css_prof > 0 entonces css_prof := css_prof - 1 fin
+                    css_valor := 0
+                sino si c = ':' y css_prof > 0 y no selector entonces
+                    css_valor := 1
+                sino si c = ';' entonces
+                    css_valor := 0
+                fin
+            fin
+            si L.clase[c] yb C_OPERADOR <> 0 entonces
+                si en_directiva y c <> '(' y c <> ')' y c <> '[' y c <> ']' y c <> '{' y c <> '}' entonces estilos[i] := E_DIRECTIVA sino estilos[i] := E_OPERADOR fin
+            sino si en_directiva entonces
+                estilos[i] := E_DIRECTIVA
+            fin
+            si c <> '@' entonces solo_espacios := falso fin
+            ; (en BASIC, «:» separa sentencias: lo que viene detrás puede ser un REM)
+            si c = ':' y no L.al_principio entonces primera := falso fin
+            al_final := falso
+            no_tras := falso
+            doble := falso
+            i := i + 1
+        fin
+        si al_final entonces len_abre := len_abre + 1 fin
+        ; el estado para la línea siguiente
+        si L.modo = M_HTML entonces
+            devolver clase ob (prof << 4) ob (h << 12)
+        fin
+        si L.modo = M_CSS entonces
+            devolver clase ob (prof << 4) ob (css_prof << 12) ob (css_valor << 14)
+        fin
+        devolver clase ob (prof << 4)
+    fin
+
+    función es_hex(c: byte): bool
+        devolver (c >= '0' y c <= '9') o (c >= 'a' y c <= 'f') o (c >= 'A' y c <= 'F')
+    fin
+
+fin BlocLen.

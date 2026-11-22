@@ -1,0 +1,15 @@
+partes: 1 cortado=0 malformado=0
+[0] text/plain juego="utf-8" cod=0 nombre="" id="" disp="" tam=28 adjunto=0
+From: Ana Pérez <ana@x.es>
+To: luis@y.es
+Subject: Hola
+Date: Sun, 22 Nov 2026 10:05:00 +0100
+fecha: 1795338300 (Sun, 22 Nov 2026 10:05:00 +0100)
+principal: html=0 texto=0
+--- texto (26) ---
+Hola, ¿qué tal?
+Adiós.
+
+--- fin ---
+adjuntos: 0
+suplantacion: 0 

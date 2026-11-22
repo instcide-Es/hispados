@@ -1,0 +1,15 @@
+parrafos: 5 tramos: 7 enlaces: 1 imagenes: 0 scripts=0 remotas=0 enganosos=0 cortado=0
+P0 n0 h0 a0: [0]raro < no es etiqueta <3 &noexiste; &am <  [10#0]sin cerrar
+P0 n0 h0 a0: [10#0]dentro
+P0 n0 h0 a0: [10#0]celda suelta
+P2 n1 h0 a0: [0]• [10#0] item suelto
+P0 n0 h1 a0: [1]hondo
+enlace 0: href=<x> visible=<sin cerrardentrocelda suelta• item suelto> enganoso=0 
+--- texto ---
+raro < no es etiqueta <3 &noexiste; &am < sin cerrar <x>
+dentro <x>
+celda suelta <x>
+• item suelto <x>
+
+hondo
+--- fin ---

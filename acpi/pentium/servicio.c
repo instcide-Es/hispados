@@ -45,6 +45,26 @@ static int al_archivo, detalle;
 static char trozo[512];
 
 /* ---- el registro, al puerto serie y (con «registro») a \ACPI.TXT ---- */
+/* (PANEL) al puerto serie, de línea en línea (cada una de una vez: la
+ * llamada 61 toma el cerrojo de la consola), para que lo que dice el núcleo
+ * a la vez («escritorio: en marcha...») no caiga en medio de una línea; lo
+ * que queda sin su fin de línea espera a la vez siguiente */
+static char linea_serie[256];
+static u32 n_linea;
+
+static void serie_por_lineas(const char *t, u32 n)
+{
+	u32 i;
+
+	for (i = 0; i < n; i++) {
+		linea_serie[n_linea++] = t[i];
+		if (t[i] == '\n' || n_linea == sizeof linea_serie) {
+			sc(SC_SERIE, (u32)linea_serie, n_linea, 0);
+			n_linea = 0;
+		}
+	}
+}
+
 static void vacia_registro(int archivo)
 {
 	u32 n, m = 0xFFFFFFFFu;
@@ -55,7 +75,7 @@ static void vacia_registro(int archivo)
 			m = 0xFFFFFFFFu;
 	}
 	while ((n = reg_saca(trozo, sizeof trozo)) != 0) {
-		sc(SC_SERIE, (u32)trozo, n, 0);
+		serie_por_lineas(trozo, n);	/* (PANEL) */
 		if (m != 0xFFFFFFFFu)
 			sc(SC_ESCRIBIR_ARCHIVO, m, (u32)trozo, n);
 	}
@@ -67,6 +87,38 @@ static void vacia_registro(int archivo)
 static u32 gas_es(const ACPI_GENERIC_ADDRESS *g)
 {
 	return g->SpaceId == ACPI_ADR_SPACE_SYSTEM_IO && g->Address < 0x10000 ? (u32)g->Address : 0;
+}
+
+/* (PANEL) el botón de encendido: PWRBTN_STS (el bit 8 de PM1a_STS) se mira
+ * en cada vuelta del servicio (como mucho, cada segundo) y se borra
+ * escribiendo un 1; para que el equipo lo apunte hace falta PWRBTN_EN (el
+ * bit 8 de PM1a_EN, la segunda mitad del bloque). Sin el modo ACPI, en
+ * muchos equipos el botón lo atiende la BIOS (SMI) y aquí no llega; en
+ * QEMU (system_powerdown) y en los que ya arrancan en modo ACPI, sí. El
+ * núcleo decide qué hacer (Panel de control > Energía) */
+static u32 pm1a_evt, pm1_largo;
+
+static void prepara_boton(void)
+{
+	u32 en;
+
+	if (!pm1a_evt || pm1_largo < 4)
+		return;
+	en = mq_es_lee(pm1a_evt + pm1_largo / 2, 2);
+	mq_es_escribe(pm1a_evt + pm1_largo / 2, 2, en | 0x100);
+	mq_es_escribe(pm1a_evt, 2, 0x100);	/* lo que hubiera de antes, fuera */
+	reg("ACPI: el botón de encendido, en PM1a_EVT %xh (PWRBTN_EN puesto)\n", pm1a_evt);
+}
+
+static void mira_boton(void)
+{
+	if (!pm1a_evt || pm1_largo < 4)
+		return;
+	if (mq_es_lee(pm1a_evt, 2) & 0x100) {
+		mq_es_escribe(pm1a_evt, 2, 0x100);
+		pe.boton++;
+		reg("ACPI: se ha pulsado el botón de encendido (%u)\n", pe.boton);
+	}
 }
 
 /* si ACPICA no ha podido con \_S5 (o con la DSDT), se busca a mano, como
@@ -122,6 +174,9 @@ static void prepara_energia(void)
 		return;
 	}
 	pe.pm1a_cnt = gas_es(&AcpiGbl_FADT.XPm1aControlBlock);
+	pm1a_evt = gas_es(&AcpiGbl_FADT.XPm1aEventBlock);	/* (PANEL) el botón de encendido */
+	pm1_largo = AcpiGbl_FADT.Pm1EventLength;
+	prepara_boton();
 	pe.pm1b_cnt = gas_es(&AcpiGbl_FADT.XPm1bControlBlock);
 	pe.smi_cmd = AcpiGbl_FADT.SmiCommand < 0x10000 ? AcpiGbl_FADT.SmiCommand : 0;
 	pe.acpi_enable = AcpiGbl_FADT.AcpiEnable;
@@ -703,6 +758,8 @@ int servicio_principal(void)
 			fase = apm.fase;
 			cocina();
 		}
+		if (preparado)
+			mira_boton();	/* (PANEL) */
 		ta_vuelta();			/* (TERMO) */
 		vacia_registro(1);
 		/* un tic de HSPACPI son 54,9 ms; uno de Hispa-Pentium, 10 */

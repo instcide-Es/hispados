@@ -1,0 +1,26 @@
+# pestañas: nuevo, cambiar, cerrar con pregunta; comparar; la lista de lo encontrado y saltar
+abre A1.TXT
+abre A2.TXT
+menu 3 12
+estado
+teclas {f8}{esc}
+estado
+teclas {ctrl-f}c{tab}{tab}{tab}{intro}
+estado
+muestra
+teclas {esc}{abajo}{abajo}{intro}
+estado
+teclas {ctrl-n}
+estado
+teclas hola{ctrl-w}
+estado
+teclas {tab}{intro}
+estado
+teclas {ctrl-tab}xx{ctrl-w}
+teclas {esc}
+estado
+teclas {ctrl-w}
+teclas {intro}
+estado
+teclas {f1}
+estado

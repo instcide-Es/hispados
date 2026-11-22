@@ -10,7 +10,8 @@
 # con mbr, un disco con tabla de particiones y la FAT16 en su primera
 # partición (desde el sector 63). Con «oficina» detrás, también HVPRUN.BIN (el
 # ejecutor de los programas de Hispa Ventanas) y la carpeta OFICINA con los de
-# la oficina de Hispa-386 (FACTURAS.HVP, PLUMA.HVP, CUENTAS.HVP, MIRADOR.HVP):
+# la oficina de Hispa-386 (FACTURAS.HVP, PLUMA.HVP, CUENTAS.HVP, MIRADOR.HVP;
+# (OFICINA2) DATOS, LECTOR, PUBLICA, PRESENTA y PINTURA.HVP y TIPOS12/24/32.DAT):
 # nucleo32/hvprun/hacer.sh. Con «red», también el servicio de red (RED.BIN) y
 # sus programas: IPCONFIG.BIN, PING.BIN y DESCARGA.BIN (la orden DESCARGAR).
 # Con «tls» (y «red»), también el servicio TLS (TLS.BIN, nucleo32/tls/hacer.sh:
@@ -27,6 +28,8 @@
 # microcódigo de las Broadcom (BCM43XX.FW, BCM43XXH.FW y su licencia,
 # BCM43XX.TXT); con «wifisim», además un RED.INI con «WifiSimulada=SI» (la
 # radio de mentira: las pruebas).
+# (PANEL) Con «panel», también el Panel de control (PANEL.BIN) y la hora por
+# Internet (HORARED.BIN), que el escritorio pone en marcha al arrancar.
 # La imagen se le da a QEMU como disco IDE: DISCO=IMAGEN nucleo32/probar.sh ...
 # Necesita python3, nasm, mkfs.fat (dosfstools) y mtools.
 set -e
@@ -41,8 +44,9 @@ NAVEGADOR=
 ESCUDO=
 SSH=
 WIFI=
+PANEL=
 for o in "${@:3}"; do
-  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; navegador) NAVEGADOR=navegador ;; ssh) SSH=ssh ;; escudo) ESCUDO=escudo ;; wifi) WIFI=wifi ;; wifisim) WIFI=wifisim ;; esac
+  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; navegador) NAVEGADOR=navegador ;; ssh) SSH=ssh ;; escudo) ESCUDO=escudo ;; wifi) WIFI=wifi ;; wifisim) WIFI=wifisim ;; panel) PANEL=panel ;; esac
 done
 T=$(mktemp -d)
 trap 'rm -rf $T' EXIT
@@ -116,11 +120,21 @@ if [ "$RED" = red ]; then
     fi
   fi
 fi
+# (PANEL) el Panel de control y la hora por Internet
+if [ "$PANEL" = panel ]; then
+  for p in upanel:PANEL uhorared:HORARED; do
+    f=${p%%:*}; N=${p##*:}
+    python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $T/$f.asm > /dev/null
+    nasm -f bin $T/$f.asm -o $T/$N.BIN
+  done
+  mcopy -i $V $T/PANEL.BIN $T/HORARED.BIN ::
+fi
 if [ "$OFICINA" = oficina ]; then
   bash $AQUI/hvprun/hacer.sh $T/of > /dev/null
   mcopy -i $V $T/of/HVPRUN.BIN ::
   mmd -i $V ::OFICINA
-  mcopy -i $V $T/of/FACTURAS.HVP $T/of/PLUMA.HVP $T/of/CUENTAS.HVP $T/of/MIRADOR.HVP $T/of/TIPOS.DAT $T/of/DICCIO.DAT ::OFICINA/
+  # (OFICINA2) todos los de la oficina 1.1 (y Pintura) con sus tipos de letra
+  mcopy -i $V $T/of/*.HVP $T/of/*.DAT ::OFICINA/
 fi
 # (NAVEGADOR) el Navegador, sin instalar: en \NAVEGA y su acceso en \MENU
 if [ "$NAVEGADOR" = navegador ]; then

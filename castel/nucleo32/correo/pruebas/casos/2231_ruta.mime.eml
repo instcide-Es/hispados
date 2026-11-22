@@ -1,0 +1,6 @@
+From: a@b.es
+Content-Type: application/octet-stream; name="../../etc/passwd"
+Content-Disposition: attachment; filename="C:\Windows\malo.exe"
+Content-Transfer-Encoding: base64
+
+aG9sYQ==

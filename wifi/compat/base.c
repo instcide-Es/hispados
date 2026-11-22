@@ -205,7 +205,22 @@ u32 prandom_u32(void)
 	semilla ^= semilla << 13; semilla ^= semilla >> 17; semilla ^= semilla << 5;
 	return semilla;
 }
+#if defined(HL_PENTIUM) && !defined(ANFITRION)
+/* (USUARIOS) en Hispa-Pentium, del pozo del azar del núcleo (pozo.cas, la
+ * llamada 210: castel/nucleo32/wifi/servicio.c): las claves de WPA2 (la
+ * SNonce) y la de WIFI.LLV; con un núcleo de antes, lo de siempre */
+int hl_pentium_azar(u32 *v);
+u32 hl_azar(void)
+{
+	u32 v;
+
+	if (hl_pentium_azar(&v))
+		return v;
+	return prandom_u32();
+}
+#else
 u32 hl_azar(void) { return prandom_u32(); }
+#endif
 
 /* ---------------------------------------------------------------- montón */
 struct trozo { u32 tam; u32 libre; struct trozo *sig, *ant; };	/* 16 octetos */

@@ -17,7 +17,7 @@ set -e
 # del paquete wifi 0.8.5, para que WIFI.BIN salga igual octeto a octeto cada
 # vez que se compila (si no, cada día cambia un octeto y el CD no lleva el
 # mismo paquete que el catálogo). Al subir la versión del paquete, poner aquí su día
-export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1795262400}    # 21/11/2026 12:00 UTC
+export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1795348800}    # 22/11/2026 12:00 UTC (USUARIOS: wifi 0.8.7)
 AQUI=$(dirname "$(readlink -f "$0")")
 RAIZ=$(readlink -f "$AQUI/../../..")
 SAL=$(readlink -f "${1:?uso: hacer.sh SALIDA}")

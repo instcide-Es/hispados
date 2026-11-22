@@ -1,0 +1,18 @@
+partes: 2 cortado=0 malformado=0
+[0] text/plain juego="" cod=0 nombre="" id="" disp="" tam=61 adjunto=0
+[1]   text/plain juego="" cod=3 nombre="hola.txt" id="" disp="attachment" tam=21 adjunto=1
+From: a@b.es
+To: (no está)
+Subject: uu
+Date: (no está)
+principal: html=0 texto=0
+--- texto (30) ---
+Hola, va un adjunto:
+
+
+Adios.
+
+--- fin ---
+adjuntos: 1
+adjunto 0: parte=1 nombre="hola.txt" tipo=text/plain largo=3 sha256=cdc2def9aec4576c
+suplantacion: 0 

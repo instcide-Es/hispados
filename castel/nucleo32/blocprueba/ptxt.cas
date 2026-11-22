@@ -1,0 +1,141 @@
+; =============================================================================
+;  ptxt.cas - prueba de BlocTxt (bloctxt.cas): miles de cambios al azar
+;  (meter, quitar, deshacer y rehacer) comparados con una copia sencilla
+;  del texto; las líneas, letra(), copia(), y que deshacer todo deja el
+;  texto del principio y «sin cambios». Con corre32.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo PTxt
+    modelo usuario
+    importar Llamadas, BlocMem, BlocTxt
+
+    constante MÁX = 200000
+    variable copia_: puntero a byte          ; lo que debería haber
+    variable n_copia: nat32
+    variable fotos: puntero a byte            ; cómo estaba después de cada grupo (para deshacer)
+    variable semilla: nat32 = 777
+    variable malos: nat32
+
+    función azar(): nat32
+        semilla := semilla * 1103515245 + 12345
+        devolver (semilla >> 8) yb 0xFFFFFF
+    fin
+
+    función mal(t: puntero a byte)
+        malos := malos + 1
+        si malos < 10 entonces escribir("mal: ", t, "\n") fin
+    fin
+
+    función compara(que: puntero a byte)
+        variable i, l, k: nat32
+        variable b: arreglo [64] de byte
+        si largo() <> n_copia entonces
+            mal(que)
+            escribir("   largo ", largo(), " y debía ", n_copia, "\n")
+            devolver
+        fin
+        i := 0
+        mientras i < n_copia hacer
+            si letra(i) <> copia_[i] entonces
+                mal(que)
+                devolver
+            fin
+            i := i + 1
+        fin
+        ; las líneas
+        l := 0
+        i := 0
+        mientras i <= n_copia hacer
+            si inicio(l) <> i entonces
+                mal("las líneas no casan")
+                devolver
+            fin
+            mientras i < n_copia y copia_[i] <> 10 hacer i := i + 1 fin
+            si final(l) <> i entonces
+                mal("el final de una línea no casa")
+                devolver
+            fin
+            i := i + 1
+            l := l + 1
+        fin
+        si n_líneas() <> l entonces mal("cuántas líneas") fin
+        ; copia() de un trozo al azar
+        si n_copia > 10 entonces
+            i := azar() mod (n_copia - 5)
+            k := copia(i, 40, b)
+            si k > 40 entonces mal("copia de más") fin
+            l := 0
+            mientras l < k hacer
+                si b[l] <> copia_[i + l] entonces
+                    mal("copia")
+                    devolver
+                fin
+                l := l + 1
+            fin
+            si línea_de(i) > 0 y inicio(línea_de(i)) > i entonces mal("línea_de") fin
+        fin
+    fin
+
+    función principal(): byte
+        variable vuelta, pos, n, i, grupos: nat32
+        variable t: arreglo [64] de byte
+        variable x: puntero a Doc
+        copia_ := pedir(MÁX)
+        x := doc_nuevo()
+        d := x
+        n_copia := 0
+        grupos := 0
+        para vuelta desde 1 hasta 6000 hacer
+            si azar() mod 5 = 0 entonces corte() fin
+            si azar() mod 3 <> 0 o n_copia < 10 entonces
+                ; meter
+                n := azar() mod 30 + 1
+                si azar() mod 40 = 0 entonces n := 2000 fin
+                para i desde 0 hasta 63 hacer
+                    si azar() mod 6 = 0 entonces t[i] := 10 sino t[i] := byte('a' + azar() mod 26) fin
+                fin
+                pos := azar() mod (n_copia + 1)
+                si n_copia + n < MÁX - 10 entonces
+                    i := 0
+                    mientras i < n hacer
+                        si no meter(pos + i, dirección(t[i mod 64]), 1) entonces mal("meter") fin
+                        i := i + 1
+                    fin
+                    mover_memoria(copia_ + pos + n, copia_ + pos, n_copia - pos)
+                    para i desde 0 hasta n - 1 hacer copia_[pos + i] := t[i mod 64] fin
+                    n_copia := n_copia + n
+                fin
+            sino
+                pos := azar() mod n_copia
+                n := azar() mod 50 + 1
+                si pos + n > n_copia entonces n := n_copia - pos fin
+                si no quitar(pos, n) entonces mal("quitar") fin
+                mover_memoria(copia_ + pos, copia_ + pos + n, n_copia - pos - n)
+                n_copia := n_copia - n
+            fin
+            si vuelta mod 97 = 0 entonces compara("después de cambiar") fin
+        fin
+        compara("al final")
+        si no cambiado() entonces mal("cambiado() tenía que ser cierto") fin
+        ; deshacer y rehacer todo
+        n := 0
+        mientras deshacer() hacer n := n + 1 fin
+        si largo() <> 0 entonces mal("deshacer todo no deja el texto vacío") fin
+        si cambiado() entonces mal("deshecho todo, sigue «cambiado»") fin
+        i := 0
+        mientras rehacer() hacer i := i + 1 fin
+        si i <> n entonces mal("rehacer no da los mismos grupos") fin
+        compara("rehecho todo")
+        ; deshacer a medias y escribir: lo rehecho se pierde
+        deshacer()
+        deshacer()
+        corte()
+        meter(0, "x", 1)
+        si puede_rehacer() entonces mal("tras escribir, no se rehace") fin
+        si malos = 0 entonces
+            escribir("bien: BlocTxt: 6000 cambios al azar con sus líneas; deshacer (", n, " grupos) y rehacer todo; ", n_líneas(), " líneas al final\n")
+            devolver 0
+        fin
+        devolver 1
+    fin
+fin PTxt.

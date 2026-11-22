@@ -1,0 +1,177 @@
+; =============================================================================
+;  pexp.cas - prueba de BlocExp (blocexp.cas), con corre32: lee un archivo
+;  de casos, uno por línea, y dice lo que da cada uno (lo compara
+;  prueba_exp.sh con lo esperado o con el «re» de Python):
+;
+;    B|opciones|tope|patrón|texto|desde|      exp_buscar
+;    A|opciones|tope|patrón|texto|antes|      exp_buscar_antes
+;    S|opciones|tope|patrón|texto|desde|plantilla     y exp_sustituto
+;    V|opciones|tope|patrón|relleno|tamaño|   buscar en un texto de «tamaño»
+;                                             octetos (el relleno repetido): y lo que tarda
+;
+;  (el patrón, el texto, el relleno y la plantilla, en hexadecimal; tope 0:
+;  el de siempre). Saca «E columna» si el patrón no vale, «- agotado» si no
+;  encuentra, o «ini fin g1ini g1fin agotado» (x x si el grupo 1 no está),
+;  y en S, detrás, lo sustituido en hexadecimal; en V, «tiempo N» al final.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo PExp
+    modelo usuario
+    importar Llamadas, BlocMem, BlocExp
+
+    variable todo: puntero a byte
+    variable largo_todo: nat32
+    variable i: nat32                           ; por dónde se lee
+
+    función lee_archivo(nombre: puntero a byte): bool
+        variable m, n, cabe: nat32
+        m := abrir(nombre)
+        si es_error(m) entonces devolver falso fin
+        cabe := 65536
+        todo := pedir(cabe)
+        largo_todo := 0
+        mientras cierto hacer
+            si largo_todo + 32768 > cabe entonces
+                todo := recrecer(todo, largo_todo, cabe * 2)
+                cabe := cabe * 2
+            fin
+            n := leer(m, todo + largo_todo, 32768)
+            si n = 0 o es_error(n) entonces romper fin
+            largo_todo := largo_todo + n
+        fin
+        cerrar(m)
+        devolver cierto
+    fin
+
+    ; un campo hasta «|» (o el final de la línea): sus octetos, de hexadecimal
+    función campo_hex(ref n: nat32): puntero a byte
+        variable p: puntero a byte
+        variable a, k: nat32
+        a := i
+        mientras i < largo_todo y todo[i] <> '|' y todo[i] <> '\n' hacer i := i + 1 fin
+        p := pedir((i - a) div 2 + 1)
+        n := 0
+        k := a
+        mientras k + 1 < i hacer
+            p[n] := byte(cifra(todo[k]) * 16 + cifra(todo[k + 1]))
+            n := n + 1
+            k := k + 2
+        fin
+        si i < largo_todo y todo[i] = '|' entonces i := i + 1 fin
+        devolver p
+    fin
+
+    función cifra(c: byte): nat32
+        si c >= 'a' entonces devolver c - 'a' + 10 fin
+        devolver c - '0'
+    fin
+
+    función campo_número(): nat32
+        variable n: nat32
+        n := 0
+        mientras i < largo_todo y todo[i] >= '0' y todo[i] <= '9' hacer
+            n := n * 10 + (todo[i] - '0')
+            i := i + 1
+        fin
+        si i < largo_todo y todo[i] = '|' entonces i := i + 1 fin
+        devolver n
+    fin
+
+    función escribe_hex(p: puntero a byte, n: nat32)
+        variable k: nat32
+        variable d: arreglo [3] de byte
+        variable h: puntero a byte
+        h := "0123456789abcdef"
+        d[2] := 0
+        k := 0
+        mientras k < n hacer
+            d[0] := h[p[k] >> 4]
+            d[1] := h[p[k] yb 15]
+            escribir(d)
+            k := k + 1
+        fin
+    fin
+
+    función resultado(r: bool)
+        variable a, b: nat32
+        si r entonces
+            exp_grupo(0, a, b)
+            escribir(a, " ", b)
+            si exp_grupo(1, a, b) entonces escribir(" ", a, " ", b) sino escribir(" x x") fin
+            si exp_agotado entonces escribir(" 1") sino escribir(" 0") fin
+        sino
+            si exp_agotado entonces escribir("- 1") sino escribir("- 0") fin
+        fin
+    fin
+
+    función principal(): byte
+        variable nombre: arreglo [128] de byte
+        variable k: byte
+        variable opc, tope, np, nt, pos, nr, tam, a, b, t0, j: nat32
+        variable pat, tex, pla, sal, rel: puntero a byte
+        variable r: bool
+        argumentos(nombre, 128)
+        si no lee_archivo(nombre) entonces
+            escribir("pexp: no puedo leer ", nombre, "\n")
+            devolver 2
+        fin
+        i := 0
+        mientras i < largo_todo hacer
+            k := todo[i]
+            si k = '\n' entonces
+                i := i + 1
+                seguir
+            fin
+            i := i + 2
+            opc := campo_número()
+            tope := campo_número()
+            si tope = 0 entonces tope := 2000000 fin
+            exp_tope := tope
+            pat := campo_hex(np)
+            si k = 'V' entonces
+                rel := campo_hex(nr)
+                tam := campo_número()
+                tex := pedir(tam + 1)
+                j := 0
+                mientras j < tam hacer
+                    tex[j] := rel[j mod nr]
+                    j := j + 1
+                fin
+                nt := tam
+                pos := 0
+                soltar(rel)
+            sino
+                tex := campo_hex(nt)
+                pos := campo_número()
+            fin
+            pla := campo_hex(nr)
+            mientras i < largo_todo y todo[i] <> '\n' hacer i := i + 1 fin
+            si no exp_compilar(pat, np, opc) entonces
+                escribir("E ", exp_columna_error(), "\n")
+            sino
+                t0 := tics()
+                si k = 'A' entonces
+                    r := exp_buscar_antes(tex, nt, pos, a, b)
+                sino
+                    r := exp_buscar(tex, nt, pos, a, b)
+                fin
+                t0 := tics() - t0
+                resultado(r)
+                si k = 'S' y r entonces
+                    j := exp_largo_sustituto(pla, nr, tex)
+                    sal := pedir(j + 1)
+                    si exp_sustituto(pla, nr, tex, sal, j) <> j entonces escribir(" MAL-LARGO") fin
+                    escribir(" ")
+                    escribe_hex(sal, j)
+                    soltar(sal)
+                fin
+                si k = 'V' entonces escribir(" tiempo ", t0) fin
+                escribir("\n")
+            fin
+            soltar(pat)
+            soltar(tex)
+            soltar(pla)
+        fin
+        devolver 0
+    fin
+fin PExp.

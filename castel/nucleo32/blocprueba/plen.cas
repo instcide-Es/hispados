@@ -1,0 +1,130 @@
+; =============================================================================
+;  plen.cas - prueba de BlocLen (bloclen.cas), con corre32:
+;    PLEN /LISTA CARPETA\ NOMBRE...   los lenguajes que hay y el de cada nombre
+;    PLEN /COLOREA CARPETA\ ARCHIVO   cada línea: lo que abre y cierra, y una
+;                                     letra por octeto con su estilo
+;    PLEN /TIEMPO CARPETA\ ARCHIVO    lo que tarda colorearlo entero (ms)
+;    PLEN /VARIAS C1\ C2\ ARCHIVO     carga las dos carpetas (dice los que hay) y lo colorea
+;  Las letras de los estilos: . normal, K clave, T tipo, P propia,
+;  c comentario, s cadena, n número, o operador, d directiva, e etiqueta,
+;  a atributo, x especial.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo PLen
+    modelo usuario
+    importar Llamadas, BlocMem, BlocLen, Textos32
+
+    variable args: arreglo [512] de byte
+    variable orden: arreglo [32] de byte
+    variable carpeta: arreglo [160] de byte
+    variable nombre: arreglo [160] de byte
+    variable letras_estilo: arreglo [16] de byte = ".KTPcsnodeax"
+    variable estilos: puntero a byte
+    variable salida: puntero a byte
+
+    ; lee el archivo entero: da dónde (nulo si no se puede) y cuánto
+    función lee(ruta: puntero a byte, ref n: nat32): puntero a byte
+        variable m, k, cabe: nat32
+        variable t: puntero a byte
+        m := abrir(ruta)
+        si es_error(m) entonces devolver nulo fin
+        cabe := largo_de(m) + 1
+        t := pedir(cabe)
+        si t = nulo entonces devolver nulo fin
+        n := 0
+        mientras n < cabe hacer
+            k := leer(m, dirección(t[n]), cabe - n)
+            si es_error(k) o k = 0 entonces romper fin
+            n := n + k
+        fin
+        cerrar(m)
+        devolver t
+    fin
+
+    función colorea(l: ent32, t: puntero a byte, n: nat32, enseña: bool)
+        variable i, a, b, k, estado, total_abre, total_cierra: nat32
+        variable d: arreglo [24] de byte
+        estado := 0
+        total_abre := 0
+        total_cierra := 0
+        i := 0
+        mientras i < n hacer
+            a := i
+            mientras i < n y t[i] <> '\n' hacer i := i + 1 fin
+            b := i
+            si b > a y t[b - 1] = '\r' entonces b := b - 1 fin
+            estado := len_colorea(l, dirección(t[a]), b - a, estado, estilos)
+            total_abre := total_abre + len_abre
+            total_cierra := total_cierra + len_cierra
+            si enseña entonces
+                natural_a_texto(len_abre, d)
+                escribir(d, "-")
+                natural_a_texto(len_cierra, d)
+                escribir(d, " ")
+                k := 0
+                mientras k < b - a hacer
+                    salida[k] := letras_estilo[estilos[k]]
+                    k := k + 1
+                fin
+                salida[k] := '\n'
+                escribir_trozo(salida, k + 1)
+            fin
+            si i < n entonces i := i + 1 fin
+        fin
+        si enseña entonces escribir("total: abre ", total_abre, ", cierra ", total_cierra, "\n") fin
+    fin
+
+    función principal(): byte
+        variable n, k, t0: nat32
+        variable t: puntero a byte
+        variable l: ent32
+        variable ab, ci: puntero a byte
+        argumentos(args, 512)
+        palabra(args, 0, orden, 32)
+        palabra(args, 1, carpeta, 160)
+        estilos := pedir(1048576)
+        salida := pedir(1048576)
+        n := len_cargar(carpeta)
+        si iguales(orden, "/LISTA") entonces
+            escribir("lenguajes: ", n, "\n")
+            para k desde 1 hasta n hacer
+                escribir("  ", k - 1, " ", len_nombre(k - 1), " (", len_plegado(ent32(k - 1)), ")")
+                si len_comentario(ent32(k - 1)) <> nulo entonces escribir(" «", len_comentario(ent32(k - 1)), "»") fin
+                si len_bloque(ent32(k - 1), ab, ci) entonces escribir(" «", ab, "» «", ci, "»") fin
+                si len_distingue(ent32(k - 1)) entonces escribir(" distingue") fin
+                escribir("\n")
+            fin
+            k := 2
+            mientras palabra(args, k, nombre, 160) hacer
+                l := len_de_archivo(nombre)
+                si l < 0 entonces escribir(nombre, " -> ninguno\n") sino escribir(nombre, " -> ", len_nombre(nat32(l)), "\n") fin
+                k := k + 1
+            fin
+            devolver 0
+        fin
+        si iguales(orden, "/VARIAS") entonces
+            ; la segunda carpeta, y el archivo detrás
+            palabra(args, 2, nombre, 160)
+            n := len_cargar(nombre)
+            escribir("lenguajes: ", n, "\n")
+            para k desde 1 hasta n hacer escribir("  ", len_nombre(k - 1), "\n") fin
+            palabra(args, 3, nombre, 160)
+        sino
+            palabra(args, 2, nombre, 160)
+        fin
+        t := lee(nombre, n)
+        si t = nulo entonces
+            escribir("mal: no puedo leer ", nombre, "\n")
+            devolver 1
+        fin
+        l := len_de_archivo(nombre)
+        si iguales(orden, "/TIEMPO") entonces
+            t0 := tics()
+            colorea(l, t, n, falso)
+            escribir("tiempo: ", (tics() - t0) * 10, " ms para ", n, " octetos\n")
+            devolver 0
+        fin
+        colorea(l, t, n, cierto)
+        devolver 0
+    fin
+fin PLen.

@@ -1,0 +1,14 @@
+parrafos: 1 tramos: 9 enlaces: 2 imagenes: 7 scripts=0 remotas=5 enganosos=0 cortado=0
+P0 n0 h0 a0: [80#0]￼ [0]  [80#2]￼ [0]  [80#5]￼ [0]  [80#6]￼ [0]  [10#1]relativo
+enlace 0: href=<https://ejemplo.es/pagina> visible=<> enganoso=0 
+enlace 1: href=<https://ejemplo.es/correo/otra.html> visible=<relativo> enganoso=0 
+imagen 0: src=<cid:logo@x> alt=<Logo> 100x50 remota=0 rastreo=0
+imagen 1: src=<https://rastreo.ejemplo/p.gif> alt=<> 1x1 remota=1 rastreo=1
+imagen 2: src=<//cdn.ejemplo/a.png> alt=<cdn> 0x0 remota=1 rastreo=0
+imagen 3: src=<http://x.ejemplo/b.png> alt=<> 0x0 remota=1 rastreo=1
+imagen 4: src=<https://ejemplo.es/correo/foto.jpg> alt=<relativa> 200x0 remota=1 rastreo=1
+imagen 5: src=<data:image/png;base64,AAAA> alt=<datos> 0x0 remota=0 rastreo=0
+imagen 6: src=<https://ejemplo.es/correo/x.png> alt=<enlazada> 0x0 remota=1 rastreo=0
+--- texto ---
+[Logo] [cdn] [datos] [enlazada] relativo <https://ejemplo.es/correo/otra.html>
+--- fin ---

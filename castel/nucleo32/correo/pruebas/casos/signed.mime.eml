@@ -1,0 +1,15 @@
+From: a@b.es
+Subject: firmado
+Content-Type: multipart/signed; protocol="application/pgp-signature"; boundary=s
+
+--s
+Content-Type: text/plain
+
+firmado
+--s
+Content-Type: application/pgp-signature; name=signature.asc
+
+-----BEGIN PGP SIGNATURE-----
+xx
+-----END PGP SIGNATURE-----
+--s--

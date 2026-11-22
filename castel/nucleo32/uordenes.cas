@@ -251,9 +251,16 @@ módulo UOrdenes
             escribir("Ya está en modo administrador (ADMIN NO lo deja).\n")
             devolver
         fin
+        si hay_usuarios() > 0 y no soy_administrador() entonces
+            ; (USUARIOS) uno normal: no se le pregunta (el núcleo diría que no)
+            escribir("Modo administrador: solo para un usuario administrador (entre con el suyo).\n")
+            devolver
+        fin
         si pedir_admin() entonces
             escribir("Modo administrador: puede cambiar los archivos del sistema (\\HISPA). Con cuidado;\n")
             escribir("ADMIN NO lo deja (y se deja solo al salir).\n")
+        sino si hay_usuarios() > 0 entonces
+            escribir("Modo administrador: no se ha dado (la contraseña no se ha escrito bien, o no se ha confirmado).\n")
         sino
             escribir("Modo administrador: no se ha dado (no se ha confirmado en la pantalla del equipo).\n")
         fin
@@ -326,8 +333,14 @@ módulo UOrdenes
 
     función orden_ver()
         variable v: nat32
+        variable a: nat32
         v := dato(DATO_VERSIÓN)
-        imprimir2("Hispa-Pentium %u.%u: un núcleo de 32 bits escrito en Castel.\n", v >> 8, v yb 0xFF)
+        a := dato(DATO_ARREGLO)                 ; (0.8.7) la versión entera, la del menú Inicio
+        si a < 1000 entonces
+            imprimir3("Hispa-Pentium %u.%u.%u: un núcleo de 32 bits escrito en Castel.\n", v >> 8, v yb 0xFF, a)
+        sino
+            imprimir2("Hispa-Pentium %u.%u: un núcleo de 32 bits escrito en Castel.\n", v >> 8, v yb 0xFF)
+        fin
         escribir("Intérprete de órdenes del anillo 3 (ORDENES.BIN).\n")
     fin
 

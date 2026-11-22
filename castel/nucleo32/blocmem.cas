@@ -1,0 +1,231 @@
+; =============================================================================
+;  blocmem.cas - la memoria del Bloc de notas (BLOC.BIN): pedir y soltar
+;  trozos de cualquier tamaño, encima de más_memoria() (que solo crece).
+;
+;  Cada trozo lleva delante y detrás su tamaño (con el bit 0 puesto si está
+;  libre): así, al soltarlo, se junta con los libres de al lado. Los libres
+;  van en una lista doble; se da el primero que quepa, partido si sobra.
+;  Cuando no hay, se pide más al sistema (de 256 K en 256 K, o lo que haga
+;  falta). Todo se da alineado a 16 y a cero no: quien lo pide lo llena.
+;
+;      p := pedir(n)              ; nulo si no hay memoria
+;      p := recrecer(p, viejo, n) ; el mismo contenido (los «viejo» primeros), más grande
+;      soltar(p)
+;      mover_memoria(destino, origen, n)   ; aunque se pisen (rep movs)
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo BlocMem
+
+    importar Llamadas
+
+    constante CABEZA = 16                       ; lo que va delante de cada trozo: tamaño, anterior y siguiente libres
+    constante PIE = 4                           ; y detrás: el tamaño otra vez
+    constante MÍNIMO = 32                       ; un trozo libre, lo menos
+    constante TANDA = 262144                    ; lo que se pide al sistema cada vez, lo menos
+
+    tipo Trozo = estructura
+        tamaño: nat32                           ; con la cabeza y el pie; bit 0: libre
+        anterior, siguiente: puntero a Trozo    ; (solo si está libre)
+        relleno: nat32
+    fin
+
+    variable libres: puntero a Trozo            ; la lista de los libres
+    variable final_: nat32                      ; la marca del final del último tramo
+    variable quiebre: nat32                     ; donde acaba lo pedido al sistema
+    público variable en_uso: nat32              ; los octetos dados (para la barra de estado y las pruebas)
+
+    función pie_de(t: puntero a Trozo): puntero a nat32
+        devolver puntero(nat32(t) + (t.tamaño yb 0xFFFFFFF0) - PIE)
+    fin
+
+    función quita_de_libres(t: puntero a Trozo)
+        si t.anterior <> nulo entonces t.anterior.siguiente := t.siguiente sino libres := t.siguiente fin
+        si t.siguiente <> nulo entonces t.siguiente.anterior := t.anterior fin
+    fin
+
+    función pon_en_libres(t: puntero a Trozo, tam: nat32)
+        variable p: puntero a nat32
+        t.tamaño := tam ob 1
+        p := pie_de(t)
+        valor(p) := tam ob 1
+        t.anterior := nulo
+        t.siguiente := libres
+        si libres <> nulo entonces libres.anterior := t fin
+        libres := t
+    fin
+
+    función marca_usado(t: puntero a Trozo, tam: nat32)
+        variable p: puntero a nat32
+        t.tamaño := tam
+        p := pie_de(t)
+        valor(p) := tam
+    fin
+
+    ; más sitio del sistema, detrás de lo que había: lo menos «falta» octetos.
+    ; Cada tramo acaba en una marca (un trozo «usado» de tamaño 0) y empieza
+    ; detrás de un pie a 0: así nadie se junta con lo que no es suyo
+    función crece(falta: nat32): bool
+        variable n, b, e: nat32
+        variable p: puntero a byte
+        variable t: puntero a Trozo
+        variable c: puntero a nat32
+        n := TANDA
+        si falta + 64 > n entonces n := (falta + 64 + TANDA - 1) yb (0 - TANDA) fin
+        p := más_memoria(n)
+        si p = nulo entonces devolver falso fin
+        si final_ <> 0 y nat32(p) = quiebre entonces
+            b := final_                         ; lo nuevo empieza donde estaba la marca
+        sino
+            b := ((nat32(p) + 15) yb 0xFFFFFFF0) + 16
+            c := puntero(b - PIE)
+            valor(c) := 0
+        fin
+        quiebre := nat32(p) + n
+        e := (quiebre - 16) yb 0xFFFFFFF0
+        t := puntero(b)
+        ; con el último del tramo, si estaba libre
+        c := puntero(b - PIE)
+        si valor(c) yb 1 <> 0 entonces
+            t := puntero(b - (valor(c) yb 0xFFFFFFF0))
+            quita_de_libres(t)
+        fin
+        pon_en_libres(t, e - nat32(t))
+        c := puntero(e)
+        valor(c) := 0
+        final_ := e
+        devolver cierto
+    fin
+
+    ; n octetos: dónde empiezan (alineados a 16), o nulo
+    público función pedir(n: nat32): puntero a byte
+        variable t, r: puntero a Trozo
+        variable tam, sobra: nat32
+        si n > 0x7FFF0000 entonces devolver nulo fin
+        tam := (n + CABEZA + PIE + 15) yb 0xFFFFFFF0
+        mientras cierto hacer
+            t := libres
+            mientras t <> nulo hacer
+                si (t.tamaño yb 0xFFFFFFF0) >= tam entonces
+                    quita_de_libres(t)
+                    sobra := (t.tamaño yb 0xFFFFFFF0) - tam
+                    si sobra >= MÍNIMO entonces
+                        r := puntero(nat32(t) + tam)
+                        pon_en_libres(r, sobra)
+                    sino
+                        tam := t.tamaño yb 0xFFFFFFF0
+                    fin
+                    marca_usado(t, tam)
+                    en_uso := en_uso + tam
+                    devolver puntero(nat32(t) + CABEZA)
+                fin
+                t := t.siguiente
+            fin
+            si no crece(tam) entonces devolver nulo fin
+        fin
+        devolver nulo
+    fin
+
+    ; lo que cabe en el trozo de p
+    público función cabe_en(p: puntero a byte): nat32
+        variable t: puntero a Trozo
+        si p = nulo entonces devolver 0 fin
+        t := puntero(nat32(p) - CABEZA)
+        devolver (t.tamaño yb 0xFFFFFFF0) - CABEZA - PIE
+    fin
+
+    público función soltar(p: puntero a byte)
+        variable t, w: puntero a Trozo
+        variable tam: nat32
+        variable c: puntero a nat32
+        si p = nulo entonces devolver fin
+        t := puntero(nat32(p) - CABEZA)
+        tam := t.tamaño yb 0xFFFFFFF0
+        si t.tamaño yb 1 <> 0 o tam = 0 entonces devolver fin      ; (ya estaba suelto)
+        en_uso := en_uso - tam
+        ; con el de detrás, si está libre
+        w := puntero(nat32(t) + tam)
+        si w.tamaño yb 1 <> 0 entonces
+            quita_de_libres(w)
+            tam := tam + (w.tamaño yb 0xFFFFFFF0)
+        fin
+        ; y con el de delante
+        c := puntero(nat32(t) - PIE)
+        si valor(c) yb 1 <> 0 entonces
+            w := puntero(nat32(t) - (valor(c) yb 0xFFFFFFF0))
+            quita_de_libres(w)
+            tam := tam + (w.tamaño yb 0xFFFFFFF0)
+            t := w
+        fin
+        pon_en_libres(t, tam)
+    fin
+
+    ; otro trozo de n octetos con los «viejo» primeros de p (p puede ser nulo)
+    público función recrecer(p: puntero a byte, viejo: nat32, n: nat32): puntero a byte
+        variable q: puntero a byte
+        si p <> nulo y cabe_en(p) >= n entonces devolver p fin
+        q := pedir(n)
+        si q = nulo entonces devolver nulo fin
+        si p <> nulo entonces
+            si viejo > n entonces viejo := n fin
+            mover_memoria(q, p, viejo)
+            soltar(p)
+        fin
+        devolver q
+    fin
+
+    ; n octetos de origen a destino, aunque se pisen
+    público función mover_memoria(destino: puntero a byte, origen: puntero a byte, n: nat32)
+        ensamblador
+            mov edi, {destino}
+            mov esi, {origen}
+            mov ecx, {n}
+            test ecx, ecx
+            jz .fin
+            cmp edi, esi
+            je .fin
+            ja .atras
+            mov edx, ecx
+            shr ecx, 2
+            rep movsd
+            mov ecx, edx
+            and ecx, 3
+            rep movsb
+            jmp .fin
+        .atras:
+            lea esi, [esi+ecx-1]
+            lea edi, [edi+ecx-1]
+            std
+            rep movsb
+            cld
+        .fin:
+        fin
+    fin
+
+    ; n octetos con «c»
+    público función llenar_memoria(p: puntero a byte, n: nat32, c: byte)
+        ensamblador
+            mov edi, {p}
+            mov ecx, {n}
+            movzx eax, byte {c}
+            rep stosb
+        fin
+    fin
+
+    ; n palabras de 32 bits, de p, más «d» (para mover las líneas detrás de un cambio)
+    público función sumar_a_todas(p: puntero a nat32, n: nat32, d: nat32)
+        ensamblador
+            mov esi, {p}
+            mov ecx, {n}
+            mov edx, {d}
+            test ecx, ecx
+            jz .fin
+        .otra:
+            add [esi], edx
+            add esi, 4
+            dec ecx
+            jnz .otra
+        .fin:
+        fin
+    fin
+
+fin BlocMem.

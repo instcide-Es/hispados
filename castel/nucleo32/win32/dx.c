@@ -151,6 +151,75 @@ API(i32) HispaDXPantalla(i32 op, u32 a, u32 b, u32 c)
 	return 0;
 }
 
+/* ---- (JUEGOS) la pantalla del juego: con una ventana a pantalla completa
+ * (DirectDraw u OpenGL con ChangeDisplaySettings), para el programa la
+ * pantalla es la de su modo (640 x 480...), aunque se vea agrandada y en
+ * el centro: el ratón, GetSystemMetrics y lo de su ventana, en ese modo ---- */
+int en_modo_juego(void) { return juego && wnd((HWND)juego) && geo[0] > 0 && geo[1] > 0 && geo[4] > 0 && geo[5] > 0; }
+int es_del_juego(Wnd *w) { return en_modo_juego() && w && raiz_de(w) == juego; }
+void modo_medida(i32 *an, i32 *al) { *an = geo[0]; *al = geo[1]; }
+void real_a_modo(i32 *x, i32 *y)
+{
+	*x = (*x - geo[2]) * geo[0] / geo[4];
+	*y = (*y - geo[3]) * geo[1] / geo[5];
+	if (*x < 0) *x = 0;
+	if (*y < 0) *y = 0;
+	if (*x >= geo[0]) *x = geo[0] - 1;
+	if (*y >= geo[1]) *y = geo[1] - 1;
+}
+void modo_a_real(i32 *x, i32 *y)
+{
+	*x = geo[2] + (*x * geo[4] + geo[4] / 2) / geo[0];
+	*y = geo[3] + (*y * geo[5] + geo[5] / 2) / geo[1];
+}
+
+/* ---- (JUEGOS) el CD de sonido y si hay hilos de verdad: para WINMM.DLL de
+ * Pentium (MCI «cdaudio», la mezcla en otro hilo). El CD es la llamada 134,
+ * la del CD de música del núcleo (la misma del Reproductor; letra 0: el
+ * primer lector). op 0: las pistas, a destino, como las da READ TOC (4
+ * octetos y 8 por pista, con la del final, la AA): da los octetos, o un
+ * error; op 1: n sectores de sonido (hasta 64) desde lba: da n * 2352 ---- */
+struct toc_cd { u32 pistas, primera; struct { u32 lba; u8 control, numero, r1, r2; } e[100]; };
+API(u32) HispaCDAudio(u32 op, u32 letra, void *destino, u32 lba, u32 n)
+{
+	u32 r, k = gc_suelta_todo();       /* (leer el CD tarda: los demás hilos, que sigan) */
+	if (op == 0) {
+		static struct toc_cd t;
+		u8 *o = destino;
+		u32 i, p;
+		r = sc(134, letra, 0, LIN(&t));
+		if (r == 0 && t.pistas > 0 && t.pistas < 100) {
+			o[2] = (u8)t.e[0].numero;
+			o[3] = (u8)t.e[t.pistas - 1].numero;
+			for (i = 0, p = 4; i <= t.pistas; i++, p += 8) {
+				o[p] = 0;
+				o[p + 1] = 0x10 | (t.e[i].control & 0x0F);
+				o[p + 2] = i == t.pistas ? 0xAA : t.e[i].numero;
+				o[p + 3] = 0;
+				o[p + 4] = (u8)(t.e[i].lba >> 24);
+				o[p + 5] = (u8)(t.e[i].lba >> 16);
+				o[p + 6] = (u8)(t.e[i].lba >> 8);
+				o[p + 7] = (u8)t.e[i].lba;
+			}
+			o[0] = (u8)((p - 2) >> 8);
+			o[1] = (u8)(p - 2);
+			r = p;
+		} else if (r == 0)
+			r = E_NO_VALE;            /* (sin pistas) */
+	} else {
+		u32 dd[3];
+		if (n == 0 || n > 64) r = E_NO_VALE;
+		else {
+			dd[0] = lba; dd[1] = n; dd[2] = LIN(destino);
+			r = sc(134, letra, 1, LIN(dd));
+			if (r == 0) r = n * 2352;
+		}
+	}
+	gc_retoma(k);
+	return r;
+}
+API(BOOL) HispaHilosDeVerdad(void) { return k_hilos; }
+
 /* ---- las teclas y el ratón ---- */
 static u8 mapa_bios[128];
 static u8 bios[0x500];
@@ -189,6 +258,11 @@ API(u32) HispaDXEntrada(i32 op, u32 a, u32 b)
 	case 2:                                   /* un mando: no hay */
 		(void)b;
 		return 0;
+	case 5: {                                 /* (JUEGOS) lo movido de verdad (dx, dy), sin el borde */
+		extern BOOL WINAPI HispaRatonMovido(i32 *dx, i32 *dy);
+		i32 *r = (i32 *)a;
+		return HispaRatonMovido(&r[0], &r[1]) ? 1 : 0;
+	}
 	case 3:                                   /* «la memoria de la BIOS» (la hora: 0x46C) */
 		*(u32 *)(bios + 0x46C) = sys_tics() * 182 / 1000;
 		return (u32)bios;

@@ -1,0 +1,29 @@
+# los lenguajes: detectarlos, comentar y descomentar, la pareja, plegar, la sangría de Intro
+abre M.CAS
+estado
+menu 3 9
+estado
+menu 3 10
+teclas {ctrl-g}4{intro}{ctrl-q}
+muestra
+teclas {ctrl-q}
+teclas {ctrl-f}({intro}{esc}{izq}{ctrl-b}
+estado
+teclas {ctrl-g}3{intro}{fin}{intro}x
+muestra
+abre P.C
+estado
+teclas {ctrl-a}{ctrl-q}
+muestra
+abre P.HTM
+estado
+teclas {ctrl-q}
+muestra
+teclas {ctrl-q}
+muestra
+abre P.BAS
+estado
+teclas {ctrl-q}
+muestra
+menu 5 0
+estado

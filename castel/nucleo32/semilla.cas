@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -71,60 +71,69 @@ módulo Semilla
     fin
 
     interrupción función división_por_cero()
-        variable cs_, eip: nat32
+        variable cs_, eip, m: nat32
         ensamblador
             mov eax, [ebp+32]
             mov {eip}, eax
             mov eax, [ebp+36]
             mov {cs_}, eax
+            mov {m}, ebp
         fin
+        si a_su_despachador(m, 0, 0, 0, falso) entonces devolver fin   ; (JUEGOS, SEH) al programa de Windows
         escribir("\n*** excepción 0: división por cero")
         no_sigue(cs_, eip, 9)
     fin
 
     interrupción función instrucción_mala()
-        variable cs_, eip: nat32
+        variable cs_, eip, m: nat32
         ensamblador
             mov eax, [ebp+32]
             mov {eip}, eax
             mov eax, [ebp+36]
             mov {cs_}, eax
+            mov {m}, ebp
         fin
+        si a_su_despachador(m, 6, 0, 0, falso) entonces devolver fin   ; (JUEGOS, SEH)
         escribir("\n*** excepción 6: instrucción que no existe")
         no_sigue(cs_, eip, 10)
     fin
 
     interrupción función excepción()
-        variable cs_, eip: nat32
+        variable cs_, eip, m: nat32
         ensamblador
             mov eax, [ebp+32]
             mov {eip}, eax
             mov eax, [ebp+36]
             mov {cs_}, eax
+            mov {m}, ebp
         fin
+        si a_su_despachador(m, 255, 0, 0, falso) entonces devolver fin   ; (JUEGOS, SEH)
         escribir("\n*** excepción del procesador")
         no_sigue(cs_, eip, 10)
     fin
 
     interrupción función excepción_con_código(código: nat32)
-        variable cs_, eip: nat32
+        variable cs_, eip, m: nat32
         ensamblador
             mov eax, [ebp+36]
             mov {eip}, eax
             mov eax, [ebp+40]
             mov {cs_}, eax
+            mov {m}, ebp
         fin
+        si a_su_despachador(m, 254, código, 0, cierto) entonces devolver fin   ; (JUEGOS, SEH)
         imprimir1("\n*** excepción del procesador (código %u)", código)
         no_sigue(cs_, eip, 11)
     fin
 
     interrupción función protección_general(código: nat32)
-        variable cs_, eip: nat32
+        variable cs_, eip, m: nat32
         ensamblador
             mov eax, [ebp+36]
             mov {eip}, eax
             mov eax, [ebp+40]
             mov {cs_}, eax
+            mov {m}, ebp
         fin
         ; (TERMO) el rdmsr «seguro» de termo.cas: el registro no está; se sigue detrás
         si cs_ yb 3 = 0 y recupera(eip) <> 0 entonces
@@ -135,6 +144,7 @@ módulo Semilla
             fin
             devolver
         fin
+        si a_su_despachador(m, 13, código, 0, cierto) entonces devolver fin   ; (JUEGOS, SEH)
         imprimir1("\n*** excepción 13: protección general (código %u)", código)
         no_sigue(cs_, eip, 13)
     fin
@@ -160,6 +170,11 @@ módulo Semilla
         si código yb 4 = 0 y atender_demanda(dir) entonces devolver fin
         ; un programa cuya pila baja a una página que aún no tiene: se le pone
         si código yb 5 = 4 y atender_pila(actual.cr3, dir, esp_u) entonces devolver fin
+        ; (JUEGOS, SEH) un programa de Windows: a su despachador
+        ensamblador
+            mov {esp_u}, ebp
+        fin
+        si código yb 4 <> 0 y a_su_despachador(esp_u, 14, código, dir, cierto) entonces devolver fin
         d[0] := dir
         si código yb 2 <> 0 entonces d[1] := nat32("escritura") sino d[1] := nat32("lectura") fin
         si código yb 4 <> 0 entonces d[2] := nat32("anillo 3") sino d[2] := nat32("núcleo") fin
@@ -764,6 +779,7 @@ módulo Semilla
         ; un sistema instalado en el disco: sus ajustes (\\HISPA\\HISPA.INI: el
         ; teclado, el nombre del usuario); lo que diga el cargador manda
         lee_ajustes()
+        arranca_cuentas()                       ; (USUARIOS) los usuarios y la semilla del azar
         si buscar(línea_del_cargador(), "teclado=us") <> nulo entonces pon_teclado(falso) fin
         si buscar(línea_del_cargador(), "sinacpi") = nulo y buscar(línea_del_cargador(), "instalar") = nulo entonces arranca_acpi() fin
         ; o el escritorio (el entorno gráfico): esta consola se queda esperando
@@ -788,11 +804,21 @@ módulo Semilla
         sino si buscar(línea_del_cargador(), "escritorio") <> nulo entonces
             arranca()
         sino si buscar(línea_del_cargador(), "ordenes") <> nulo entonces
-            lanza("ORDENES.BIN", nulo)
+            ordenes_de_usuario(cierto)          ; (USUARIOS) del que entre
         fin
         escribir("Escriba «ayuda».\n")
         mientras cierto hacer
             recoger_huérfanas()
+            ; (USUARIOS) con usuarios, esta consola es para un administrador
+            ; (y la del escritorio no se alcanza: las teclas son de las ventanas)
+            si hay_cuentas y no escritorio_en_marcha y (sesión = 0 o no es_admin_uid(sesión)) entonces
+                si sesión = 0 entonces entra_en_texto(falso) fin
+                si sesión <> 0 y no es_admin_uid(sesión) entonces
+                    escribir("(La consola del núcleo es para un administrador: el intérprete de órdenes.)\n")
+                    ordenes_de_usuario(falso)
+                    seguir
+                fin
+            fin
             escribir("> ")
             lee_línea()
             palabra(línea, 0, palabra1, 40)
@@ -832,7 +858,7 @@ módulo Semilla
             sino si iguales(palabra1, "lanzar") entonces
                 orden_lanzar()
             sino si es("ordenes") entonces
-                lanza("ORDENES.BIN", nulo)
+                ordenes_de_usuario(falso)          ; (USUARIOS)
             sino si es("toca") entonces
                 orden_toca()
             sino si es("teclas") entonces
@@ -863,6 +889,15 @@ módulo Semilla
                 escribir("no conozco «", línea, "»\n")
             fin
         fin
+    fin
+
+    ; (USUARIOS) el intérprete de órdenes de la pantalla de texto, del que
+    ; entre (con «entra_solo», el que entra solo, sin preguntar); al acabar
+    ; (SALIR), sale (salvo si ha puesto en marcha el escritorio)
+    función ordenes_de_usuario(entra_solo: bool)
+        si hay_cuentas y sesión = 0 entonces entra_en_texto(entra_solo) fin
+        lanza("ORDENES.BIN", nulo)
+        si hay_cuentas y no escritorio_en_marcha entonces cierra_sesión_de_cuentas() fin
     fin
 
     función divide(a: nat32, b: nat32): nat32

@@ -54,6 +54,9 @@ typedef uint64_t u64;
 #define SC_RED 90
 #define SC_ESTADO_RED 97
 #define SC_TLS 99
+#define SC_USUARIOS 200		/* (USUARIOS) 0 cuántos, 1 una ficha, 2 el mío, 3 ¿administrador?, 4 mi carpeta */
+#define SC_ENTRAR_SSH 202	/* (USUARIOS) SSHD: 0 la contraseña de un usuario, 1 el de una llave */
+#define SC_AZAR 210		/* (USUARIOS) el pozo del azar del núcleo: EBX destino, ECX octetos (hasta 256) */
 
 #define DATO_VERSION 3
 #define DATO_HZ 9

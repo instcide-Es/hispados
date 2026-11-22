@@ -1,0 +1,6 @@
+dr_flac.h (v0.13.x) de David Reid (https://github.com/mackron/dr_libs,
+commit 09e1d68709127b32e74c0029e04198df6ee0b4b2), de dominio público o MIT-0 a
+elegir: la licencia va al final del archivo.
+SHA-256: dr_flac.h bd569c910a7c465e481fd50af84e2871e81e2154e30ac510d98f953cc0d5a546
+Sin cambios. Lo usa el Reproductor de Hispa-Pentium (castel/nucleo32/reproductor):
+los FLAC (también los de los OGG FLAC).

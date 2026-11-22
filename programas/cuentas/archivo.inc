@@ -309,6 +309,10 @@ guarda_como:
         HV dlg_archivo
         test eax, eax
         jz .no
+        mov esi, nombre             ; (OFICINA2) el de antes, por si no se puede
+        mov edi, nom_ant
+        mov ecx, 80
+        rep movsb
         mov esi, nom_tmp            ; el nombre, con .HOJ si no trae extensión
         mov edi, nombre
         xor edx, edx
@@ -335,7 +339,17 @@ guarda_como:
         mov byte [edi], 0
         mov byte [csv_avisado], 0
         popad
-        jmp guarda_escribe
+        call guarda_escribe
+        jnc .x
+        pushad                      ; (OFICINA2) no se ha podido (la zona
+        mov esi, nom_ant            ; protegida de Hispa-Pentium, un disco
+        mov edi, nombre             ; lleno): el nombre de antes, y Guardar
+        mov ecx, 80                 ; preguntará otra vez dónde
+        rep movsb
+        popad
+        stc
+.x:
+        ret
 .no:
         popad
         stc

@@ -1,0 +1,14 @@
+partes: 3 cortado=0 malformado=0
+[0] multipart/signed juego="" cod=0 nombre="" id="" disp="" tam=170 adjunto=0
+[1]   text/plain juego="" cod=0 nombre="" id="" disp="" tam=7 adjunto=0
+[2]   application/pgp-signature juego="" cod=0 nombre="signature.asc" id="" disp="" tam=60 adjunto=0
+From: a@b.es
+To: (no está)
+Subject: firmado
+Date: (no está)
+principal: html=1 texto=1
+--- texto (7) ---
+firmado
+--- fin ---
+adjuntos: 0
+suplantacion: 0 

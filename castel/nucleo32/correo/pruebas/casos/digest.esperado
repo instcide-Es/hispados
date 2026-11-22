@@ -1,0 +1,15 @@
+partes: 5 cortado=0 malformado=0
+[0] multipart/digest juego="" cod=0 nombre="" id="" disp="" tam=96 adjunto=0
+[1]   message/rfc822 juego="" cod=0 nombre="Uno.eml" id="" disp="" tam=39 adjunto=1
+[2]     text/plain juego="" cod=0 nombre="" id="" disp="" tam=10 adjunto=0
+[3]   message/rfc822 juego="" cod=0 nombre="Dos.eml" id="" disp="" tam=39 adjunto=1
+[4]     text/plain juego="" cod=0 nombre="" id="" disp="" tam=10 adjunto=0
+From: lista@x.es
+To: (no está)
+Subject: digest
+Date: (no está)
+principal: html=-1 texto=-1
+adjuntos: 2
+adjunto 0: parte=1 nombre="Uno.eml" tipo=message/rfc822 largo=39 sha256=d69a70fbca6ed01f
+adjunto 1: parte=3 nombre="Dos.eml" tipo=message/rfc822 largo=39 sha256=91e6cc299faa2606
+suplantacion: 0 

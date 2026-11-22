@@ -93,6 +93,8 @@ static char carpeta[16] = "\\";		/* «\HISPA\» o «\» */
 
 /* ============================================================== el tiempo */
 u32 hl_pentium_tics(void) { return sc(SC_TICS, 0, 0, 0); }
+/* (USUARIOS) cuatro octetos del pozo del azar del núcleo (la llamada 210): 1 si los ha dado */
+int hl_pentium_azar(u32 *v) { return sc(210, (u32)v, 4, 0) == 4; }
 u32 hl_pentium_hz(void) { return hz; }
 
 /* ========================================== el registro: serie y WIFI.LOG */

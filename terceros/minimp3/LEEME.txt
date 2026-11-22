@@ -1,0 +1,7 @@
+minimp3 (minimp3.h y minimp3_ex.h) de lieff y colaboradores
+(https://github.com/lieff/minimp3, commit afb604c06bc8beb145fecd42c0ceb5bda8795144),
+dado al dominio público (CC0 1.0): ver LICENSE.
+SHA-256: minimp3.h    5fb296a790734772b65a5514438cc06d14f24e539c13475ff2a7f737681c82c0
+         minimp3_ex.h bb001301b8666ea7a45ae057b62b17074483213b0d410555d97cc4d076e110df
+Sin cambios. Lo usa el Reproductor de Hispa-Pentium (castel/nucleo32/reproductor):
+los MP3 (MPEG-1/2/2.5, capas I, II y III).

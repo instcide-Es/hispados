@@ -1,0 +1,16 @@
+estado: A2.TXT l¡n 1 col 1 sel 0-0 l¡neas 6 p gina 437 lf pesta¤as 2 pliegues 0
+aviso: 3 trozos distintos: - quitado, + a¤adido, * cambiado. F8 el siguiente, May£s+F8 el de antes; Esc lo deja.
+estado: A2.TXT l¡n 1 col 1 sel 0-0 l¡neas 6 p gina 437 lf pesta¤as 2 pliegues 0
+estado: Encontrado l¡n 1 col 1 sel 0-0 l¡neas 4 p gina UTF-8 crlf pesta¤as 3 pliegues 0
+aviso: Encontradas 1 l¡neas en 1 archivos. Dos clics o Intro en una, a ese sitio.
+texto: Buscar Â«cÂ» en este documento\nA2.TXT\n  3: c\n
+estado: A2.TXT l¡n 3 col 2 sel 4-5 l¡neas 6 p gina 437 lf pesta¤as 3 pliegues 0
+estado: Nuevo 2 l¡n 1 col 1 sel 0-0 l¡neas 1 p gina 437 crlf pesta¤as 4 pliegues 0
+estado: Nuevo 2 l¡n 1 col 5 sel 4-4 l¡neas 1 p gina 437 crlf cambiado pesta¤as 4 pliegues 0
+estado: Encontrado l¡n 3 col 1 sel 38-38 l¡neas 4 p gina UTF-8 crlf pesta¤as 3 pliegues 0
+estado: A1.TXT l¡n 1 col 3 sel 2-2 l¡neas 6 p gina 437 lf cambiado pesta¤as 3 pliegues 0
+bloc: guardado A1.TXT, 12 octetos
+estado: A2.TXT l¡n 3 col 2 sel 4-5 l¡neas 6 p gina 437 lf pesta¤as 2 pliegues 0
+aviso: Guardado en A1.TXT (12 octetos).
+estado: Ayuda l¡n 1 col 1 sel 0-0 l¡neas 56 p gina UTF-8 crlf pesta¤as 3 pliegues 0
+archivo A1.TXT:  x x a \n b \n c \n d \n e \n

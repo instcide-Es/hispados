@@ -217,6 +217,8 @@ t_cambios   db "La imagen tiene cambios sin guardar.", 10, "¿Quiere guardarlos?
 t_no_abrir  db "No se ha podido abrir el archivo.", 0
 t_no_bmp    db "El archivo no es una imagen BMP de 1, 4, 8 o 24 bits", 10
             db "sin compresión.", 0
+t_no_pcx    db "Es un PCX que Pintura no sabe leer (de 8 bits en", 10    ; (OFICINA2)
+            db "uno o tres planos, o de 1, 2 o 4 bits).", 0
 t_grande    db "La imagen es demasiado grande: Pintura llega", 10
             db "hasta 1024 x 768 puntos.", 0
 t_corto     db "El archivo está incompleto: falta parte de la imagen.", 0
@@ -3058,6 +3060,10 @@ guardar_como:
         HV dlg_archivo
         test eax, eax
         jz .no
+        mov esi, nombre             ; (OFICINA2) el de antes, por si no se puede
+        mov edi, nom_ant
+        mov ecx, 80
+        rep movsb
         mov esi, nom_tmp            ; sin extensión: .BMP
         mov edi, nombre
         xor edx, edx
@@ -3083,7 +3089,17 @@ guardar_como:
 .f2:
         mov byte [edi], 0
         popad
-        jmp escribir
+        call escribir
+        jnc .x
+        pushad                      ; (OFICINA2) no se ha podido (la zona
+        mov esi, nom_ant            ; protegida de Hispa-Pentium, un disco
+        mov edi, nombre             ; lleno): el nombre de antes, y Guardar
+        mov ecx, 80                 ; preguntará otra vez dónde
+        rep movsb
+        popad
+        stc
+.x:
+        ret
 .no:
         popad
         stc
@@ -3275,6 +3291,7 @@ rgb_a_ind:
 cargar:
         pushad
         mov [c_nom], esi
+        mov byte [c_pcx], 0         ; (OFICINA2)
         xor al, al
         HV dos_abrir
         jc .noabre
@@ -3286,6 +3303,8 @@ cargar:
         jc .malo
         cmp eax, 54
         jne .malo
+        cmp byte [cab], 10          ; (OFICINA2) un PCX: cargar_pcx
+        je cargar_pcx
         cmp word [cab], 'BM'
         jne .malo
         cmp dword [cab+14], 40
@@ -3489,6 +3508,10 @@ cargar:
         jnz .n
         mov byte [edi], 0
 .listo:
+        cmp byte [c_pcx], 0         ; (OFICINA2) un PCX se guarda en BMP, al lado:
+        je .listo2                  ; FOTO.PCX -> FOTO.BMP (el PCX no se pisa)
+        call nombre_bmp
+.listo2:
         mov byte [modif], 0
         call pon_titulo
         call medidas
@@ -3512,6 +3535,377 @@ cargar:
         mov esi, t_no_abrir
 .aviso:
         call mensaje
+        popad
+        ret
+
+; =============================================================================
+;  (OFICINA2) Los PCX (PC Paintbrush), para «Editar» desde Mi equipo de
+;  Hispa-Pentium: un plano de 8 bits (256 colores con la paleta del final, o
+;  grises sin ella), tres planos de 8 bits (color verdadero), un plano de un
+;  bit (blanco y negro), de dos a cuatro planos de un bit y un plano de 2 o 4
+;  bits (16 colores, con la paleta de la cabecera). Con las tiradas de
+;  siempre (RLE) o sin comprimir; cada color, al más parecido de los 256.
+;  Se entra desde cargar (con su pushad y los primeros 54 octetos en cab) y
+;  se sale por sus etiquetas. Lo que se guarda después es un BMP (nombre_bmp).
+; =============================================================================
+cargar_pcx:
+        mov byte [c_pcx], 1
+        mov ebx, [c_arch]
+        mov edi, cab + 54           ; la cabecera entera (128 octetos)
+        mov ecx, 74
+        HV dos_leer
+        jc pcx_malo
+        cmp eax, 74
+        jne pcx_malo
+        cmp byte [cab+2], 1         ; 0: sin comprimir; 1: RLE
+        ja pcx_malo
+        movzx eax, word [cab+8]     ; el ancho y el alto
+        movzx ecx, word [cab+4]
+        sub eax, ecx
+        jb pcx_malo
+        inc eax
+        movzx edx, word [cab+10]
+        movzx ecx, word [cab+6]
+        sub edx, ecx
+        jb pcx_malo
+        inc edx
+        cmp eax, MAXAN
+        ja cargar.grande
+        cmp edx, MAXAL
+        ja cargar.grande
+        mov [c_an], eax
+        mov [c_al], edx
+        movzx eax, byte [cab+3]
+        mov [pcx_bits], eax
+        movzx ecx, byte [cab+65]
+        mov [pcx_planos], ecx
+        movzx edx, word [cab+66]
+        mov [pcx_opl], edx
+        ; las combinaciones que se saben: 8x1, 8x3, 1x1-4, 2x1, 4x1
+        cmp eax, 8
+        jne .no8
+        cmp ecx, 1
+        je .comb
+        cmp ecx, 3
+        je .comb
+        jmp pcx_malo
+.no8:
+        cmp eax, 1
+        jne .no1
+        test ecx, ecx
+        jz pcx_malo
+        cmp ecx, 4
+        ja pcx_malo
+        jmp .comb
+.no1:
+        cmp ecx, 1
+        jne pcx_malo
+        cmp eax, 2
+        je .comb
+        cmp eax, 4
+        jne pcx_malo
+.comb:
+        imul eax, [c_an]            ; que la fila de un plano quepa en lo dicho
+        add eax, 7
+        shr eax, 3
+        cmp edx, eax
+        jb pcx_malo
+        imul edx, ecx               ; y la fila entera, en «fila»
+        cmp edx, 3084
+        ja pcx_malo
+        mov [c_fila], edx
+        ; los colores
+        mov dword [rgb_ult], -1
+        cmp dword [pcx_planos], 3
+        je .sinpal
+        cmp dword [pcx_bits], 8
+        jne .ega
+        mov ebx, [c_arch]           ; 256: la paleta del final (12 y 768 octetos)
+        mov al, 2
+        xor edx, edx
+        HV dos_puntero
+        jc .grises
+        cmp eax, 128 + 769
+        jb .grises
+        lea edx, [eax-769]
+        xor al, al
+        HV dos_puntero
+        jc .grises
+        mov edi, fila
+        mov ecx, 769
+        HV dos_leer
+        jc .grises
+        cmp eax, 769
+        jne .grises
+        cmp byte [fila], 12
+        jne .grises
+        mov esi, fila + 1
+        mov ecx, 256
+        call pcx_paleta
+        jmp .sinpal
+.grises:
+        xor ecx, ecx
+.g:
+        mov al, cl                  ; R = G = B
+        mov [fila+ecx*2+ecx], al
+        mov [fila+ecx*2+ecx+1], al
+        mov [fila+ecx*2+ecx+2], al
+        inc ecx
+        cmp ecx, 256
+        jb .g
+        mov esi, fila
+        mov ecx, 256
+        call pcx_paleta
+        jmp .sinpal
+.ega:
+        cmp dword [pcx_bits], 1     ; un plano de un bit: blanco y negro
+        jne .ega16
+        cmp dword [pcx_planos], 1
+        jne .ega16
+        mov dword [fila], 0
+        mov word [fila+3], 0xFFFF
+        mov byte [fila+5], 0xFF
+        mov esi, fila
+        mov ecx, 2
+        call pcx_paleta
+        jmp .sinpal
+.ega16:
+        mov esi, cab + 16           ; los 16 de la cabecera
+        mov ecx, 16
+        call pcx_paleta
+.sinpal:
+        ; la imagen, desde el octeto 128
+        mov ebx, [c_arch]
+        mov edx, 128
+        xor al, al
+        HV dos_puntero
+        jc pcx_malo
+        mov eax, [c_an]
+        mov ebx, [c_al]
+        call lienzo_nuevo
+        jc cargar.sinmem
+        xor eax, eax
+        mov [pcx_n], eax
+        mov [pcx_i], eax
+        mov [pcx_rep], eax
+        xor edx, edx                ; EDX=la fila
+.fila:
+        cmp edx, [c_al]
+        jae cargar.fin
+        mov edi, fila               ; los planos de la fila, descomprimidos
+        mov ecx, [c_fila]
+.d:
+        cmp dword [pcx_rep], 0
+        je .d1
+        dec dword [pcx_rep]
+        mov al, [pcx_val]
+        jmp .d3
+.d1:
+        call pcx_octeto
+        jc cargar.corto
+        cmp byte [cab+2], 0
+        je .d3
+        mov ah, al
+        and ah, 0xC0
+        cmp ah, 0xC0
+        jne .d3
+        and eax, 0x3F               ; una tirada: cuántas veces y qué
+        jz .d
+        dec eax
+        mov [pcx_rep], eax
+        call pcx_octeto
+        jc cargar.corto
+        mov [pcx_val], al
+.d3:
+        stosb
+        dec ecx
+        jnz .d
+        ; a la fila del lienzo
+        mov edi, edx
+        imul edi, [lz_an]
+        add edi, [lz]
+        push edx
+        xor ecx, ecx                ; ECX=x
+        cmp dword [pcx_planos], 3
+        je .p24
+        cmp dword [pcx_bits], 8
+        je .p8
+        cmp dword [pcx_bits], 1
+        je .p1
+.pk:                                ; un plano de 2 o 4 bits, juntos (el alto primero)
+        mov eax, ecx
+        imul eax, [pcx_bits]        ; el bit donde empieza
+        mov ebx, eax
+        shr ebx, 3
+        movzx edx, byte [fila+ebx]
+        and eax, 7
+        add eax, [pcx_bits]
+        push ecx
+        mov ecx, 8
+        sub ecx, eax
+        shr edx, cl
+        pop ecx
+        mov eax, 1
+        push ecx
+        mov ecx, [pcx_bits]
+        shl eax, cl
+        pop ecx
+        dec eax
+        and edx, eax
+        mov al, [mapa+edx]
+        stosb
+        inc ecx
+        cmp ecx, [c_an]
+        jb .pk
+        jmp .sig
+.p8:
+        movzx ebx, byte [fila+ecx]
+        mov al, [mapa+ebx]
+        stosb
+        inc ecx
+        cmp ecx, [c_an]
+        jb .p8
+        jmp .sig
+.p24:
+        mov ebx, [pcx_opl]
+        movzx eax, byte [fila+ecx]          ; rojo
+        lea edx, [fila+ecx]
+        mov ah, [edx+ebx]                   ; verde
+        movzx edx, byte [edx+ebx*2]         ; azul
+        shl edx, 16
+        or eax, edx
+        call rgb_a_ind
+        stosb
+        inc ecx
+        cmp ecx, [c_an]
+        jb .p24
+        jmp .sig
+.p1:                                ; de uno a cuatro planos de un bit
+        mov ebx, ecx
+        shr ebx, 3
+        push ecx
+        and ecx, 7
+        mov ah, 0x80
+        shr ah, cl
+        pop ecx
+        xor edx, edx
+        mov esi, [pcx_planos]
+.p1p:
+        dec esi
+        shl edx, 1
+        push ebx
+        push eax
+        mov eax, esi
+        imul eax, [pcx_opl]
+        add ebx, eax
+        pop eax
+        test [fila+ebx], ah
+        pop ebx
+        jz .p1n
+        or edx, 1
+.p1n:
+        test esi, esi
+        jnz .p1p
+        mov al, [mapa+edx]
+        stosb
+        inc ecx
+        cmp ecx, [c_an]
+        jb .p1
+.sig:
+        pop edx
+        inc edx
+        jmp .fila
+
+; (desde cargar_pcx, como cargar.malo) un PCX que no se sabe leer
+pcx_malo:
+        mov esi, t_no_pcx
+        jmp cargar.cierra
+
+; (interna) ESI=colores (R, G, B) ECX=cuántos: el más parecido de cada uno, a mapa
+pcx_paleta:
+        pushad
+        xor edi, edi
+.c:
+        movzx eax, byte [esi]       ; 0x00BBGGRR, como los de un BMP
+        mov ah, [esi+1]
+        movzx edx, byte [esi+2]
+        shl edx, 16
+        or eax, edx
+        call rgb_a_ind
+        mov [mapa+edi], al
+        add esi, 3
+        inc edi
+        cmp edi, ecx
+        jb .c
+        popad
+        ret
+
+; (interna) -> AL=el octeto siguiente del archivo (de 2 K en 2 K); CF=1 si no hay
+pcx_octeto:
+        push ebx
+        push ecx
+        push edi
+        mov ebx, [pcx_i]
+        cmp ebx, [pcx_n]
+        jb .hay
+        mov ebx, [c_arch]
+        mov edi, pcx_buf
+        mov ecx, 2048
+        HV dos_leer
+        jc .no
+        test eax, eax
+        jz .no
+        mov [pcx_n], eax
+        xor ebx, ebx
+.hay:
+        mov al, [pcx_buf+ebx]
+        inc ebx
+        mov [pcx_i], ebx
+        pop edi
+        pop ecx
+        pop ebx
+        clc
+        ret
+.no:
+        pop edi
+        pop ecx
+        pop ebx
+        stc
+        ret
+
+; (interna) el nombre, con .BMP en vez de su extensión (o detrás, si no tiene)
+nombre_bmp:
+        pushad
+        mov esi, nombre
+        xor edx, edx                ; EDX=dónde está el último «.» del nombre
+.b:
+        mov al, [esi]
+        test al, al
+        jz .f
+        cmp al, '.'
+        jne .b1
+        mov edx, esi
+.b1:
+        cmp al, '\'
+        jne .b2
+        xor edx, edx
+.b2:
+        inc esi
+        jmp .b
+.f:
+        test edx, edx
+        jnz .p
+        mov edx, esi
+.p:
+        lea eax, [edx+5]
+        cmp eax, nombre + 80
+        ja .x
+        mov byte [edx], '.'         ; «.BMP»
+        mov byte [edx+1], 'B'
+        mov byte [edx+2], 'M'
+        mov byte [edx+3], 'P'
+        mov byte [edx+4], 0
+.x:
         popad
         ret
 
@@ -3607,7 +4001,16 @@ c_an        resd 1
 c_al        resd 1
 c_ncol      resd 1
 c_fila      resd 1
-cab         resb 56
+cab         resb 128                ; (OFICINA2) 128: la cabecera de un PCX
+pcx_bits    resd 1                  ; (OFICINA2) leer un PCX
+pcx_planos  resd 1
+pcx_opl     resd 1
+pcx_n       resd 1
+pcx_i       resd 1
+pcx_rep     resd 1
+pcx_val     resb 1
+c_pcx       resb 1                  ; 1: lo abierto era un PCX
+pcx_buf     resb 2048
 tinta       resb 1
 s_cuad      resb 1
 hay_int     resb 1
@@ -3619,6 +4022,7 @@ r_nuevo     resb 1
 c_arriba    resb 1
 nombre      resb 80
 nom_tmp     resb 80
+nom_ant     resb 80                 ; (OFICINA2) el nombre de antes de «Guardar como»
 titulo      resb 100
 est_txt     resb 64
 txt         resb 64

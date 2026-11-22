@@ -69,6 +69,8 @@ módulo Ventanas
     público constante EV_MENÚ_VENTANA = 11      ; (a la del fondo) el botón secundario en el título de la ventana a, en el punto (b, c) de la pantalla
     público constante EV_UNIDADES = 12          ; (a todas) ha aparecido o desaparecido una unidad (una memoria USB)
     público constante EV_RUEDA = 13             ; (NAVEGADOR) la rueda del ratón: a, b, dónde; c, los pasos (con signo, en el octeto bajo: arriba, positivos) y las teclas de cambio
+    público constante EV_SOLTADO = 14           ; (BLOC, REPRODUCTOR) se ha soltado en ella algo arrastrado desde Mi equipo: a, b, dónde (la ruta, con la llamada 173)
+    público constante EV_BANDEJA = 15           ; (REPRODUCTOR) su icono de la bandeja (la 135): a, lo elegido de su menú (0xFFFFFFFF: un clic)
     público constante SIN_ELEGIR = 0xFFFFFFFF
     ; en «c» de los sucesos del ratón: abajo, los botones; luego las teclas de
     ; cambio (c >> 8: 1, Mayús; 2, Control) y las veces seguidas (c >> 16: 1, 2 o 3)
@@ -151,6 +153,10 @@ módulo Ventanas
     público variable alto_dock: ent32           ; (dock) lo que ocupa el dock encima de ella (DATO_ALTO_LIBRE)
     público variable composiciones: nat32       ; las veces que se ha recompuesto un trozo
     público variable en_tapiz: bool             ; (MENÚ) lo último que se ha pulsado es el tapiz (Alt+F4: «Apagar el equipo»)
+    ; (USUARIOS) la pantalla de entrada (entrada.cas): mientras está, va por
+    ; delante de todas (también de las que se hagan luego) y se lleva todas
+    ; las teclas (ni el logo ni Alt+Tab ni Ctrl+Alt+Supr la saltan)
+    público variable cortina: nat32
     variable tam_teclas: ent32 = -1             ; (MENÚ) la ventana que cambia de tamaño con las flechas
 
     variable trasero: Lienzo                    ; el doble búfer
@@ -163,6 +169,7 @@ módulo Ventanas
     ; el ratón
     variable flecha_x, flecha_y: ent32          ; dónde está pintada la flecha
     variable flecha_pintada: bool
+    público variable flecha_escondida: nat32    ; (JUEGOS) la tarea que la esconde mientras su ventana es la activa (0: nadie)
     variable botones_antes: nat32
     variable arrastrada: ent32 = -1             ; la ventana que se está moviendo
     variable arr_dx, arr_dy: ent32
@@ -180,6 +187,12 @@ módulo Ventanas
     variable est_lados: nat32
     variable est_x, est_y, est_px, est_py, est_an, est_al: ent32
     ; los clics seguidos (el doble y el triple)
+    público variable tics_doble: nat32 = 45     ; (PANEL) lo que puede tardar el segundo clic (Panel de control > Ratón)
+    público variable pasos_por_paso: ent32 = 1  ; (PANEL) los pasos de la rueda por cada uno del ratón (los renglones del Panel, de tres en tres)
+    ; (PANEL) el color del título de la ventana activa (Panel de control > Personalización: el tema)
+    público variable título_arriba: nat32 = AZUL_ARRIBA
+    público variable título_abajo: nat32 = AZUL_ABAJO
+    público variable título_tinta: nat32 = BLANCO
     variable clic_ventana, clic_botones, clic_tic, clic_veces: nat32
     variable clic_x, clic_y: ent32
     variable capturada: ent32 = -1              ; la que recibió el clic (hasta que se suelte)
@@ -334,6 +347,11 @@ módulo Ventanas
         variable i, j, an, al: ent32
         variable c: byte
         variable p: puntero a byte
+        ; (JUEGOS) un juego que la ha escondido (ShowCursor), con su ventana delante
+        si flecha_escondida <> 0 y activa >= 0 y ventanas[activa].usada y ventanas[activa].dueño = flecha_escondida entonces
+            flecha_pintada := falso
+            devolver
+        fin
         según forma
             caso 1:
                 p := dirección(flecha_h[0])
@@ -468,8 +486,8 @@ módulo Ventanas
         variable caben, n: ent32
         si no con_marco(v) entonces devolver fin
         si es_activa entonces
-            arriba := AZUL_ARRIBA
-            abajo := AZUL_ABAJO
+            arriba := título_arriba             ; (PANEL) el tema
+            abajo := título_abajo
         sino
             arriba := GRIS_ARRIBA
             abajo := GRIS_ABAJO
@@ -500,8 +518,8 @@ módulo Ventanas
             texto_n(v.todo, 31, 7, v.título, n, oscuro)
             texto_n(v.todo, 32, 7, v.título, n, oscuro)
             si es_activa entonces
-                texto_n(v.todo, 30, 6, v.título, n, BLANCO)
-                texto_n(v.todo, 31, 6, v.título, n, BLANCO)
+                texto_n(v.todo, 30, 6, v.título, n, título_tinta)      ; (PANEL) el tema
+                texto_n(v.todo, 31, 6, v.título, n, título_tinta)
             sino
                 texto_n(v.todo, 30, 6, v.título, n, 0xE6EEF8)
                 texto_n(v.todo, 31, 6, v.título, n, 0xE6EEF8)
@@ -617,6 +635,16 @@ módulo Ventanas
         orden[k] := i
         cuántas := cuántas + 1
         ensuciar_ventana(ventanas[i])
+        ; (USUARIOS) la pantalla de entrada, siempre la de más adelante
+        si cortina <> 0 y ventanas[i].id <> cortina entonces
+            k := nat32(busca(cortina))
+            si ent32(k) >= 0 entonces
+                quita_del_orden(ent32(k))
+                orden[cuántas] := k
+                cuántas := cuántas + 1
+                ensuciar_ventana(ventanas[k])
+            fin
+        fin
     fin
 
     ; cambia el tamaño de la ventana entera: memoria nueva, el marco pintado
@@ -1026,6 +1054,16 @@ módulo Ventanas
         soltar(cerrojo)
     fin
 
+    ; (PANEL) el marco de la ventana activa, otra vez (ha cambiado el tema)
+    público función repinta_activa()
+        tomar(cerrojo)
+        si activa >= 0 y ventanas[activa].usada entonces
+            pinta_marco(ventanas[activa], cierto)
+            ensuciar_ventana(ventanas[activa])
+        fin
+        soltar(cerrojo)
+    fin
+
     ; todo el escritorio, a recomponer (ha cambiado el tapiz)
     público función repintar_todo()
         tomar(cerrojo)
@@ -1056,6 +1094,23 @@ módulo Ventanas
         i := busca(id)
         r := 0xFFFFFFFF
         si i >= 0 entonces r := ventanas[i].banderas fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; (BLOC) lo arrastrado desde el explorador se ha soltado en el punto (x,
+    ; yy) de la pantalla, encima de la ventana id: si es de un programa, le
+    ; llega EV_SOLTADO (con el punto, visto desde dentro). Da su dueño (0: no)
+    público función suelta_en(id: nat32, x: ent32, yy: ent32): nat32
+        variable i: ent32
+        variable r: nat32
+        tomar(cerrojo)
+        i := busca(id)
+        r := 0
+        si i >= 0 y ventanas[i].dueño <> 0 entonces
+            r := ventanas[i].dueño
+            pon_evento(i, EV_SOLTADO, nat32(dentro_x(i, x)), nat32(dentro_y(i, yy)), 0)
+        fin
         soltar(cerrojo)
         devolver r
     fin
@@ -1249,7 +1304,7 @@ módulo Ventanas
     ; las veces seguidas que se ha pulsado ahí (1, 2 o 3): mismo sitio, mismos
     ; botones y menos de medio segundo
     función cuenta_clic(id: nat32, x: ent32, yy: ent32, nuevos: nat32): nat32
-        si id = clic_ventana y nuevos = clic_botones y tics - clic_tic < 45 y x - clic_x < 5 y clic_x - x < 5 y yy - clic_y < 5 y clic_y - yy < 5 y clic_veces < 3 entonces
+        si id = clic_ventana y nuevos = clic_botones y tics - clic_tic < tics_doble y x - clic_x < 5 y clic_x - x < 5 y yy - clic_y < 5 y clic_y - yy < 5 y clic_veces < 3 entonces
             clic_veces := clic_veces + 1
         sino
             clic_veces := 1
@@ -1472,6 +1527,13 @@ módulo Ventanas
         fin
         ; (NAVEGADOR) la rueda: a la ventana de debajo de la flecha
         nr := saca_rueda()
+        ; (PANEL) los renglones por paso (Panel de control > Ratón): los
+        ; programas desplazan tres por paso; con 6, 9, 12 o 15, más pasos
+        si pasos_por_paso > 1 y nr <> 0 entonces
+            nr := nr * pasos_por_paso
+            si nr > 120 entonces nr := 120 fin
+            si nr < -120 entonces nr := -120 fin
+        fin
         si nr <> 0 entonces
             si nr > 127 entonces nr := 127 fin
             si nr < -127 entonces nr := -127 fin
@@ -1490,7 +1552,9 @@ módulo Ventanas
                 m := MOD_MAYÚS
                 k := k - TECLA_CON_MAYÚS
             fin
-            si tam_teclas >= 0 y (no ventanas[tam_teclas].usada o k = 27 o k = '\n') entonces
+            si cortina <> 0 y busca(cortina) >= 0 entonces
+                pon_evento(busca(cortina), EV_TECLA, k, m, 0)       ; (USUARIOS) todas, a la pantalla de entrada
+            sino si tam_teclas >= 0 y (no ventanas[tam_teclas].usada o k = 27 o k = '\n') entonces
                 tam_teclas := -1                ; (MENÚ) acaba lo de cambiar el tamaño con las flechas
             sino si tam_teclas >= 0 y (k = TECLA_IZQUIERDA o k = TECLA_DERECHA o k = TECLA_ARRIBA o k = TECLA_ABAJO) entonces
                 tamaño_con_flecha(tam_teclas, k)
@@ -1513,9 +1577,9 @@ módulo Ventanas
             sino si k = TECLA_F1_ y (activa < 0 o en_tapiz) y teclas_a = 0 entonces
                 pon_evento(busca(ventana_inicio), EV_TECLA, k, 0, 0)     ; (MENÚ) F1 en el tapiz: la Ayuda
             sino si teclas_a <> 0 entonces
-                pon_evento(busca(teclas_a), EV_TECLA, k, m, 0)
+                pon_evento(busca(teclas_a), EV_TECLA, k, m, modificadores())     ; (BLOC) en «c», las teclas de cambio
             sino
-                pon_evento(activa, EV_TECLA, k, m, 0)
+                pon_evento(activa, EV_TECLA, k, m, modificadores())
             fin
             k := saca_tecla()
         fin

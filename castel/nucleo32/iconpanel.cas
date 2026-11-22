@@ -1,0 +1,231 @@
+; =============================================================================
+;  iconpanel.cas - (PANEL) los iconos del Panel de control de Hispa-Pentium
+;  (Configuración, en el escritorio, y PANEL.BIN), dibujados como los de
+;  iconos.cas: medidas de 32 que se escalan (48 en el Panel), un borde
+;  oscuro y cada uno con su FORMA (el calendario, la pantalla, el altavoz,
+;  el ratón, el teclado, las ondas de la red, la pila, la caja de los
+;  programas, la paleta, el chip, las dos personas de los usuarios y la «i»): no se distinguen solo por el
+;  color. Aparte de iconos.cas para que el explorador no cambie.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Iconpanel
+
+    importar Grafico
+
+    público constante IP_FECHA = 1
+    público constante IP_PANTALLA = 2
+    público constante IP_SONIDO = 3
+    público constante IP_RATÓN = 4
+    público constante IP_TECLADO = 5
+    público constante IP_RED = 6
+    público constante IP_ENERGÍA = 7
+    público constante IP_PROGRAMAS = 8
+    público constante IP_PERSONALIZA = 9
+    público constante IP_DISPOSITIVOS = 10
+    público constante IP_ACERCA = 11
+    público constante IP_USUARIOS = 12          ; (USUARIOS) dos personas
+
+    constante BLANCO = 0xFFFFFF
+    constante TRAZO = 0x2C4468
+
+    variable lz: puntero a Lienzo
+    variable ox, oy, ld: ent32
+
+    función m(v: ent32): ent32
+        devolver v * ld div 32
+    fin
+
+    función r(x: ent32, yy: ent32, an: ent32, al: ent32, c: nat32)
+        variable a, b: ent32
+        a := m(an)
+        b := m(al)
+        si a < 1 y an > 0 entonces a := 1 fin
+        si b < 1 y al > 0 entonces b := 1 fin
+        rectángulo(valor(lz), ox + m(x), oy + m(yy), a, b, c)
+    fin
+
+    función rr(x: ent32, yy: ent32, an: ent32, al: ent32, radio: ent32, arriba: nat32, abajo: nat32)
+        variable k: ent32
+        k := m(radio)
+        si k < 1 entonces k := 1 fin
+        redondeado(valor(lz), ox + m(x), oy + m(yy), m(an), m(al), k, arriba, abajo, TODAS)
+    fin
+
+    función ci(x: ent32, yy: ent32, radio: ent32, col: nat32)
+        círculo(valor(lz), ox + m(x), oy + m(yy), m(radio), col)
+    fin
+
+    función li(x1: ent32, y1: ent32, x2: ent32, y2: ent32, col: nat32)
+        línea(valor(lz), ox + m(x1), oy + m(y1), ox + m(x2), oy + m(y2), col)
+    fin
+
+    ; una raya gruesa (de dos de 32)
+    función li2(x1: ent32, y1: ent32, x2: ent32, y2: ent32, col: nat32)
+        li(x1, y1, x2, y2, col)
+        li(x1 + 1, y1, x2 + 1, y2, col)
+        li(x1, y1 + 1, x2, y2 + 1, col)
+    fin
+
+    ; el calendario con su reloj
+    función fecha()
+        rr(2, 4, 24, 24, 3, TRAZO, TRAZO)
+        rr(3, 5, 22, 22, 2, BLANCO, 0xE8EEF7)
+        r(3, 5, 22, 6, 0xD9483B)
+        r(7, 2, 2, 6, TRAZO)
+        r(19, 2, 2, 6, TRAZO)
+        r(6, 14, 3, 3, 0x5A7396)
+        r(11, 14, 3, 3, 0x5A7396)
+        r(16, 14, 3, 3, 0x5A7396)
+        r(6, 19, 3, 3, 0x5A7396)
+        r(11, 19, 3, 3, 0x5A7396)
+        ci(23, 23, 8, TRAZO)
+        ci(23, 23, 7, 0xFFF6D6)
+        r(23, 17, 1, 7, TRAZO)
+        r(23, 23, 5, 1, TRAZO)
+    fin
+
+    función pantalla()
+        rr(1, 4, 30, 20, 2, TRAZO, TRAZO)
+        r(3, 6, 26, 16, 0x8FD0FF)
+        r(3, 16, 26, 6, 0x4E9BE0)
+        r(13, 24, 6, 3, TRAZO)
+        rr(8, 27, 16, 3, 1, TRAZO, TRAZO)
+    fin
+
+    función sonido()
+        r(3, 12, 6, 8, TRAZO)
+        r(4, 13, 4, 6, 0x9DB7D9)
+        li2(9, 12, 16, 5, TRAZO)
+        li2(9, 20, 16, 27, TRAZO)
+        r(15, 5, 2, 23, TRAZO)
+        li2(20, 11, 23, 16, 0x1D4ED8)
+        li2(23, 16, 20, 21, 0x1D4ED8)
+        li2(24, 7, 28, 16, 0x1D4ED8)
+        li2(28, 16, 24, 25, 0x1D4ED8)
+    fin
+
+    función ratón()
+        rr(8, 3, 16, 26, 7, TRAZO, TRAZO)
+        rr(9, 4, 14, 24, 6, BLANCO, 0xD6E2F2)
+        r(15, 4, 1, 10, TRAZO)
+        r(9, 13, 14, 1, TRAZO)
+        r(14, 7, 3, 4, 0x1D4ED8)
+        li(16, 3, 16, 0, TRAZO)
+    fin
+
+    función teclado()
+        variable i: ent32
+        rr(1, 9, 30, 15, 2, TRAZO, TRAZO)
+        r(2, 10, 28, 13, 0xE8EEF7)
+        para i desde 0 hasta 7 hacer
+            r(3 + i * 3, 12, 2, 2, TRAZO)
+            r(4 + i * 3, 15, 2, 2, TRAZO)
+        fin
+        r(8, 19, 16, 2, TRAZO)
+    fin
+
+    ; las rayitas de la señal (de menos a más) y el enchufe de red
+    función red()
+        r(2, 20, 5, 9, TRAZO)
+        r(3, 21, 3, 7, 0x1D4ED8)
+        r(9, 15, 5, 14, TRAZO)
+        r(10, 16, 3, 12, 0x1D4ED8)
+        r(16, 10, 5, 19, TRAZO)
+        r(17, 11, 3, 17, 0x1D4ED8)
+        r(23, 4, 5, 25, TRAZO)
+        r(24, 5, 3, 23, 0x1D4ED8)
+        r(0, 29, 32, 2, TRAZO)
+    fin
+
+    ; la pila con el rayo
+    función energía()
+        rr(3, 8, 24, 16, 2, TRAZO, TRAZO)
+        r(27, 13, 3, 6, TRAZO)
+        r(5, 10, 20, 12, BLANCO)
+        r(5, 10, 9, 12, 0x3FAE49)
+        li2(17, 10, 12, 17, 0xE0A800)
+        li2(12, 16, 19, 16, 0xE0A800)
+        li2(19, 15, 14, 22, 0xE0A800)
+    fin
+
+    ; la caja de los programas
+    función programas()
+        li(4, 10, 16, 4, TRAZO)
+        li(16, 4, 28, 10, TRAZO)
+        rr(4, 10, 24, 19, 1, TRAZO, TRAZO)
+        r(5, 11, 22, 17, 0xF0C070)
+        r(5, 11, 22, 4, 0xD9A04A)
+        r(14, 11, 4, 17, 0xB37A2A)
+        r(8, 19, 4, 1, TRAZO)
+        r(8, 22, 4, 1, TRAZO)
+    fin
+
+    ; la paleta con sus colores (y cada uno con su sitio)
+    función personaliza()
+        ci(15, 16, 14, TRAZO)
+        ci(15, 16, 13, 0xF4E2C0)
+        ci(22, 22, 4, TRAZO)
+        ci(22, 22, 3, BLANCO)
+        ci(9, 11, 3, 0xD9483B)
+        ci(16, 8, 3, 0x1D4ED8)
+        ci(23, 12, 3, 0x2F9E4F)
+        ci(8, 19, 3, 0xE0A800)
+    fin
+
+    función dispositivos()
+        variable i: ent32
+        para i desde 0 hasta 4 hacer
+            r(9 + i * 3, 3, 1, 4, TRAZO)
+            r(9 + i * 3, 25, 1, 4, TRAZO)
+            r(3, 9 + i * 3, 4, 1, TRAZO)
+            r(25, 9 + i * 3, 4, 1, TRAZO)
+        fin
+        rr(7, 7, 18, 18, 2, TRAZO, TRAZO)
+        r(9, 9, 14, 14, 0x5A6775)
+        r(12, 12, 8, 8, 0x8FA0B4)
+    fin
+
+    ; (USUARIOS) dos personas: una delante (azul) y otra detrás (verde)
+    función usuarios()
+        ci(21, 10, 6, TRAZO)
+        ci(21, 10, 5, 0x2F9E4F)
+        rr(12, 17, 18, 13, 6, TRAZO, TRAZO)
+        rr(13, 18, 16, 11, 5, 0x2F9E4F, 0x237A3C)
+        ci(12, 12, 7, TRAZO)
+        ci(12, 12, 6, 0x5AA6F4)
+        rr(2, 20, 20, 11, 6, TRAZO, TRAZO)
+        rr(3, 21, 18, 9, 5, 0x5AA6F4, 0x2468C8)
+    fin
+
+    función acerca()
+        ci(16, 16, 14, TRAZO)
+        ci(16, 16, 13, 0x1D4ED8)
+        r(14, 7, 4, 4, BLANCO)
+        r(14, 13, 4, 12, BLANCO)
+        r(12, 13, 4, 2, BLANCO)
+        r(12, 23, 8, 2, BLANCO)
+    fin
+
+    ; pinta el icono «cuál» (IP_...) en el lienzo, en (x, yy), de lado «lado»
+    público función icono_panel(ref l: Lienzo, x: ent32, yy: ent32, lado: ent32, cuál: nat32)
+        lz := dirección(l)
+        ox := x
+        oy := yy
+        ld := lado
+        según nat16(cuál)
+            caso IP_FECHA: fecha()
+            caso IP_PANTALLA: pantalla()
+            caso IP_SONIDO: sonido()
+            caso IP_RATÓN: ratón()
+            caso IP_TECLADO: teclado()
+            caso IP_RED: red()
+            caso IP_ENERGÍA: energía()
+            caso IP_PROGRAMAS: programas()
+            caso IP_PERSONALIZA: personaliza()
+            caso IP_DISPOSITIVOS: dispositivos()
+            caso IP_ACERCA: acerca()
+            caso IP_USUARIOS: usuarios()
+        fin
+    fin
+
+fin Iconpanel.

@@ -1,0 +1,68 @@
+; =============================================================================
+;  panelaj.cas - (PANEL) los ajustes del Panel de control y la hora exacta,
+;  para los programas («modelo usuario»): las llamadas 174 y 175 del núcleo
+;  (preferencias.cas y usuario.cas). Aparte de llamadas.cas para que los
+;  programas que no lo usan no cambien.
+;
+;    ajuste(AJ_...)               lo que vale (cualquiera)
+;    poner_ajuste(AJ_..., v)      cambiarlo: lo que queda, o DENEGADO (solo el
+;                                 Panel de control o el modo administrador; la
+;                                 zona y el horario de verano, solo este)
+;    hora_exacta()                el reloj del PC en segundos desde el 1/1/2000
+;    poner_hora_exacta(s)         ponerlo (como la 67, y HORARED.BIN)
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Panelaj
+
+    público constante AJ_RATÓN_VELOCIDAD = 1    ; 1 (lenta) a 10 (rápida); 5, como llega
+    público constante AJ_RATÓN_DOBLE = 2        ; el doble clic, en centésimas (20 a 90; 45)
+    público constante AJ_RATÓN_ZURDO = 3        ; 1: los botones, cambiados
+    público constante AJ_RATÓN_RUEDA = 4        ; los renglones por paso de la rueda (3, 6, 9, 12 o 15)
+    público constante AJ_TECLADO = 5            ; 0 EE. UU., 1 español, 2 latinoamericano
+    público constante AJ_TECLADO_RETARDO = 6    ; 0 a 3: 250, 500, 750 o 1.000 ms
+    público constante AJ_TECLADO_RITMO = 7      ; las letras por segundo al repetir (2 a 30)
+    público constante AJ_BLOQ_NUM = 8           ; Bloq Num al arrancar
+    público constante AJ_PANTALLA_APAGAR = 9    ; minutos sin tocar nada para apagar la pantalla (0: nunca)
+    público constante AJ_BATERÍA_APAGAR = 10    ; % de batería (sin cable) al que se apaga el equipo (0: nunca)
+    público constante AJ_BOTÓN = 11             ; el botón de encendido: 0 apagar, 1 preguntar, 2 nada
+    público constante AJ_TEMA = 12              ; el tema de los colores
+    público constante AJ_TAPIZ = 13             ; 0 olas, 1 azul, 2 verde (3, al leer: una imagen)
+    público constante AJ_DOCK = 14              ; 1 visible
+    público constante AJ_RED = 15               ; 0 automático, 1 cable, 2 Wi-Fi
+    público constante AJ_HORA_ZONA = 16         ; la zona horaria (zonas.cas)
+    público constante AJ_HORA_INTERNET = 17     ; 1: la hora por Internet
+    público constante AJ_HORA_VERANO = 18       ; 1: el horario de verano, solo
+    público constante AJ_HORA_VERANO_PUESTO = 19    ; 1: el reloj lleva el horario de verano (2: no se sabe)
+    público constante AJ_HORA_ÚLTIMA = 20       ; la última puesta en hora por Internet (segundos desde el 1/1/2000)
+    público constante AJ_HORA_ESTADO = 21       ; cómo fue (HORA_... de zonas.cas)
+    público constante AJ_HORA_DESFASE = 22      ; lo que iba mal el reloj, en segundos (con signo)
+    público constante MAX_TEMAS = 6
+    público constante SOLO_LEER = 0xFFFFFFFF
+
+    función llamada(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        ensamblador
+            mov eax, {n}
+            mov ebx, {a}
+            mov ecx, {b}
+            mov edx, {c}
+            int 0x80
+        fin
+    fin
+
+    público función ajuste(k: nat32): nat32
+        devolver llamada(174, k, SOLO_LEER, 0)
+    fin
+
+    público función poner_ajuste(k: nat32, v: nat32): nat32
+        devolver llamada(174, k, v, 0)
+    fin
+
+    público función hora_exacta(): nat32
+        devolver llamada(175, 0, 0, 0)
+    fin
+
+    público función poner_hora_exacta(s: nat32): nat32
+        devolver llamada(175, 1, s, 0)
+    fin
+
+fin Panelaj.
