@@ -1,0 +1,15 @@
+contactos: 1
+nombre=<José Pérez> correos=<pepe@y.es|jose@x.es|> tel=<+34 600 000 000> org=<> nota=<Una nota ñ muy larga que sigue en otro renglón> usado=0
+--- escrito ---
+BEGIN:VCARD
+VERSION:3.0
+FN:José Pérez
+N:Pérez;José;;;
+EMAIL;TYPE=INTERNET,PREF:pepe@y.es
+EMAIL;TYPE=INTERNET:jose@x.es
+TEL:+34 600 000 000
+NOTE:Una nota ñ muy larga que sigue en otro renglón
+END:VCARD
+--- fin ---
+bien: renglones de 75 como mucho
+bien: los mismos contactos al volverlos a leer

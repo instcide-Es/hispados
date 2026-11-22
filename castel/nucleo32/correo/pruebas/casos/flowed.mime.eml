@@ -1,0 +1,12 @@
+From: a@b.es
+Subject: flowed
+Content-Type: text/plain; charset=utf-8; format=flowed; delsp=no
+
+Este es un párrafo 
+que sigue aquí.
+> cita que 
+> sigue
+>> otra 
+
+-- 
+firma

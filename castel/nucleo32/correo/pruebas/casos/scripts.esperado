@@ -1,0 +1,17 @@
+parrafos: 3 tramos: 23 enlaces: 6 imagenes: 0 scripts=4 remotas=0 enganosos=4 cortado=0
+P0 n0 h0 a0: [0]Hola  [1]mundo [0] & [2] todos [0]… €5 © é€€��
+P0 n0 h1 a0: [0]clic otro  [10#0]www.banco.es [0]  [10#1]https://banco.es/entrar [0]  [10#2]entrar [0]  [10#3]router [0]  [10#4]x.co.uk [0]  [10#5]tienda.co.uk [0] sin js
+P0 n0 h1 a0: [0]Ves <esto> [40] tachado [4] sub [8] mono espacios [100] peq
+enlace 0: href=<https://www.banco.es/entrar> visible=<www.banco.es> enganoso=0 
+enlace 1: href=<https://malo.ejemplo/banco> visible=<https://banco.es/entrar> enganoso=1 El enlace dice «banco.es» pero lleva a «malo.ejemplo».
+enlace 2: href=<http://banco.es@malo.ejemplo/> visible=<entrar> enganoso=1 El enlace lleva «banco.es@» delante del sitio: en verdad va a «malo.ejemplo».
+enlace 3: href=<http://192.168.1.1/> visible=<router> enganoso=1 El enlace lleva a una dirección numérica («192.168.1.1»), no a un nombre.
+enlace 4: href=<https://a.b.co.uk/> visible=<x.co.uk> enganoso=1 El enlace dice «x.co.uk» pero lleva a «a.b.co.uk».
+enlace 5: href=<https://ventas.tienda.co.uk/> visible=<tienda.co.uk> enganoso=0 
+--- texto ---
+Hola mundo & todos… €5 © é€€��
+
+clic otro www.banco.es <https://www.banco.es/entrar> https://banco.es/entrar <https://malo.ejemplo/banco> entrar <http://banco.es@malo.ejemplo/> router <http://192.168.1.1/> x.co.uk <https://a.b.co.uk/> tienda.co.uk <https://ventas.tienda.co.uk/> sin js
+
+Ves <esto> tachado sub mono espacios peq
+--- fin ---

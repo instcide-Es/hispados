@@ -1,0 +1,14 @@
+parrafos: 5 tramos: 5 enlaces: 0 imagenes: 0 scripts=0 remotas=0 enganosos=0 cortado=0
+P0 n0 h0 a0: [0]	tab	dentro
+P0 n0 h0 a0: [0]   espacios   
+P0 n0 h0 a0: [0]www.sinpunto y @ suelta y a@b sin dominio
+P0 n0 h0 a0: [0]� malo
+P3 n31 h1 a0: [0]hondo
+--- texto ---
+	tab	dentro
+   espacios   
+www.sinpunto y @ suelta y a@b sin dominio
+� malo
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> hondo
+--- fin ---

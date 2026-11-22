@@ -1,0 +1,27 @@
+parrafos: 8 tramos: 17 enlaces: 6 imagenes: 0 scripts=0 remotas=0 enganosos=0 cortado=0
+P0 n0 h0 a0: [0]Hola, mira  [10#0]https://ejemplo.es/a?b=1 [0]. y  [10#1]www.otro.es [0], escribe a  [10#2]ana@x.es [0].
+P3 n1 h1 a0: [0]Lo que dijiste
+P3 n2 h0 a0: [0]lo de antes
+P3 n2 h0 a0: [0]tambien
+P0 n0 h1 a0: [0](enlace  [10#3]http://x.es/p_(1) [0]) y  [10#4]mailto:luis@y.es
+P0 n0 h0 a0: [100]-- 
+P0 n0 h0 a0: [100]Carlos
+P0 n0 h0 a0: [110#5]http://firma.es
+enlace 0: href=<https://ejemplo.es/a?b=1> visible=<https://ejemplo.es/a?b=1> enganoso=0 
+enlace 1: href=<http://www.otro.es> visible=<www.otro.es> enganoso=0 
+enlace 2: href=<mailto:ana@x.es> visible=<ana@x.es> enganoso=0 
+enlace 3: href=<http://x.es/p_(1)> visible=<http://x.es/p_(1)> enganoso=0 
+enlace 4: href=<mailto:luis@y.es> visible=<mailto:luis@y.es> enganoso=0 
+enlace 5: href=<http://firma.es> visible=<http://firma.es> enganoso=0 
+--- texto ---
+Hola, mira https://ejemplo.es/a?b=1. y www.otro.es, escribe a ana@x.es.
+
+> Lo que dijiste
+>> lo de antes
+>> tambien
+
+(enlace http://x.es/p_(1)) y mailto:luis@y.es
+-- 
+Carlos
+http://firma.es
+--- fin ---

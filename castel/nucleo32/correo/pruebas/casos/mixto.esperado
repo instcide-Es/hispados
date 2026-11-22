@@ -1,0 +1,24 @@
+partes: 6 cortado=0 malformado=0
+[0] multipart/mixed juego="" cod=0 nombre="" id="" disp="" tam=609 adjunto=0
+[1]   multipart/alternative juego="" cod=0 nombre="" id="" disp="" tam=266 adjunto=0
+[2]     text/plain juego="iso-8859-15" cod=2 nombre="" id="" disp="" tam=44 adjunto=0
+[3]     text/html juego="utf-8" cod=1 nombre="" id="" disp="" tam=27 adjunto=0
+[4]   application/pdf juego="" cod=1 nombre="factura noviembre.pdf" id="" disp="attachment" tam=15 adjunto=1
+[5]   image/png juego="" cod=0 nombre="" id="" disp="inline" tam=12 adjunto=1
+From: Banco <soporte@banco.es>
+To: x@y.es
+Subject: Factura de noviembre
+Date: 22 Nov 2026 10:05 +0100
+fecha: 1795338300 (Sun, 22 Nov 2026 10:05:00 +0100)
+principal: html=3 texto=2
+--- texto (38) ---
+Importe: 12 € 
+Línea partida aquí.
+--- fin ---
+--- html (25) ---
+<p>Importe: 12 &euro;</p>
+--- fin ---
+adjuntos: 2
+adjunto 0: parte=4 nombre="factura noviembre.pdf" tipo=application/pdf largo=15 sha256=14bcd090baf31edb
+adjunto 1: parte=5 nombre="" tipo=image/png largo=12 sha256=929e08d597feae56
+suplantacion: 0 

@@ -34,7 +34,7 @@ typedef unsigned char u8;
 /* ---- las órdenes (cab[0]): las de RED.BIN (rbase.cas) y las de aquí ---- */
 #define O_ESTADO 1		/* (TLS) cómo está: un texto */
 #define O_RESOLVER 2
-#define O_CONECTAR 4		/* (TLS) los octetos: el nombre; cab[1] IP (0: se busca), cab[2] puerto, cab[3] espera */
+#define O_CONECTAR 4		/* (TLS) los octetos: el nombre; cab[1] IP (0: se busca), cab[2] puerto, cab[3] espera; (CORREO) cab[4] STARTTLS: 1 IMAP, 2 SMTP, 3 POP3 */
 #define O_ENVIAR 5
 #define O_RECIBIR 6
 #define O_CERRAR 7
@@ -91,6 +91,7 @@ static inline u32 sc(u32 n, u32 a, u32 b, u32 c)
 int formatear(char *d, int cabe, const char *p, ...);
 void *memcpy(void *, const void *, size_t);
 void *memset(void *, int, size_t);
+void *memmove(void *, const void *, size_t);	/* (CORREO) */
 int memcmp(const void *, const void *, size_t);
 size_t strlen(const char *);
 int strcmp(const char *, const char *);

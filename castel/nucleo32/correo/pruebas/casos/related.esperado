@@ -1,0 +1,16 @@
+partes: 4 cortado=0 malformado=0
+[0] multipart/related juego="" cod=0 nombre="" id="" disp="" tam=275 adjunto=0
+[1]   text/html juego="utf-8" cod=0 nombre="" id="" disp="" tam=36 adjunto=0
+[2]   image/gif juego="" cod=1 nombre="" id="logo123" disp="" tam=6 adjunto=0
+[3]   image/gif juego="" cod=1 nombre="" id="nousada" disp="" tam=6 adjunto=1
+From: a@b.es
+To: (no está)
+Subject: related
+Date: (no está)
+principal: html=1 texto=1
+--- texto (36) ---
+<p>Logo: <img src="cid:logo123"></p>
+--- fin ---
+adjuntos: 1
+adjunto 0: parte=3 nombre="" tipo=image/gif largo=6 sha256=610f5ae4d76e3326
+suplantacion: 0 

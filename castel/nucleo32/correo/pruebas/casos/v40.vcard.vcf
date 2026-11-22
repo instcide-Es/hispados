@@ -1,0 +1,15 @@
+BEGIN:VCARD
+VERSION:4.0
+FN:Luis
+  Sanz
+EMAIL;PREF=1:luis@x.es
+TEL;VALUE=uri;TYPE="voice,cell":tel:+34-600-222-333
+X-HISPA-USADO:7
+END:VCARD
+BEGIN:VCARD
+VERSION:4.0
+N:;;;;
+EMAIL:solo@correo.es
+END:VCARD
+BEGIN:VCARD
+FN:sin end

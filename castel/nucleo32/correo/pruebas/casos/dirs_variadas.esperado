@@ -1,0 +1,11 @@
+direcciones: 10
+nombre=<Ana Pérez> dir=<ana@x.es> valida=1 cabecera=<=?UTF-8?Q?Ana_P=C3=A9rez?= <ana@x.es>>
+nombre=<Luis, el de Albinyana> dir=<l@y.es> valida=1 cabecera=<"Luis, el de Albinyana" <l@y.es>>
+nombre=<> dir=<a@b.es> valida=1 cabecera=<a@b.es>
+nombre=<> dir=<c@d.es> valida=1 cabecera=<c@d.es>
+nombre=<Eva Ruiz> dir=<e@f.es> valida=1 cabecera=<Eva Ruiz <e@f.es>>
+nombre=<> dir=<g@h.es> valida=1 cabecera=<g@h.es>
+nombre=<José> dir=<jose@i.es> valida=1 cabecera=<=?UTF-8?Q?Jos=C3=A9?= <jose@i.es>>
+nombre=<Ñandú> dir=<n@j.es> valida=1 cabecera=<=?UTF-8?B?w5FhbmTDug==?= <n@j.es>>
+nombre=<> dir=<sin@arroba> valida=0 cabecera=<sin@arroba>
+nombre=<Solo Nombre> dir=<> valida=0 cabecera=<Solo Nombre>

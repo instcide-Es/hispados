@@ -1,0 +1,20 @@
+partes: 5 cortado=0 malformado=1
+[0] multipart/mixed juego="" cod=0 nombre="" id="" disp="" tam=257 adjunto=0
+[1]   multipart/alternative juego="" cod=0 nombre="" id="" disp="" tam=90 adjunto=0
+[2]     text/plain juego="" cod=0 nombre="" id="" disp="" tam=15 adjunto=0
+[3]     text/html juego="" cod=0 nombre="" id="" disp="" tam=11 adjunto=0
+[4]   text/plain juego="" cod=0 nombre="nota.txt" id="" disp="attachment" tam=26 adjunto=1
+From: a@b.es
+To: (no está)
+Subject: sin cerrar
+Date: (no está)
+principal: html=3 texto=2
+--- texto (15) ---
+texto de dentro
+--- fin ---
+--- html (11) ---
+<b>html</b>
+--- fin ---
+adjuntos: 1
+adjunto 0: parte=4 nombre="nota.txt" tipo=text/plain largo=26 sha256=cd9d67156407417e
+suplantacion: 0 

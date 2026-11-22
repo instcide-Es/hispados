@@ -1,0 +1,21 @@
+From: a@b.es
+Subject: related
+Content-Type: multipart/related; boundary="r"; type="text/html"
+
+--r
+Content-Type: text/html; charset=utf-8
+
+<p>Logo: <img src="cid:logo123"></p>
+--r
+Content-Type: image/gif
+Content-ID: <logo123>
+Content-Transfer-Encoding: base64
+
+R0lGODlh
+--r
+Content-Type: image/gif
+Content-ID: <nousada>
+Content-Transfer-Encoding: base64
+
+R0lGODlh
+--r--
