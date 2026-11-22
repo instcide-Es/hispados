@@ -4242,6 +4242,67 @@ alarma del Reloj (suena), «Poner en hora» (pregunta el modo
 administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
 
+**La 0.8.8** (22/11, rama `pentium-088`, corta: las ramas `agenda`, `cuentas32`,
+`pintura32` y, al final, `red-cortes`; `termometro` va aparte). Lo que se
+tocó al juntar:
+
+- **Una sola versión**: `VERSION_088` en `hpq.py` (la base) y
+  `Usuario.VERSIÓN_TEXTO` («0.8.8»: el menú, «Acerca de» y VER).
+- **La Agenda con usuarios** (sección 14 vicies): el vigilante (`AGENDA
+  /VIGILAR`) lo lanza el escritorio al entrar cada usuario
+  (`lanza_vigilante_agenda` en `lo_del_usuario`, como `CORREO /BANDEJA`): es
+  suyo, usa su `\USUARIOS\<u>\AGENDA` (`Festivos.carpeta_agenda`, la llamada
+  200, 4) y se acaba al cerrar su sesión; sin usuarios, al arrancar. El
+  recuadro del reloj (`ayuda_agenda`) lee el `PROXIMA.TXT` de quien ha
+  entrado (`Cuentas.carpeta_de(sesión)`); con usuarios, `busca_agenda` mira si
+  está para que el reloj la abra. El paquete `agenda` pide la base 0.8.8.
+- **Mi equipo** (`exoper.cas`, `de_paquetes`): .ICS y .VCF con la Agenda;
+  .HOJ, .XLSX, .XLS, .ODS y .CSV con Cuentas 2 (también donde ASOCIA.TXT dice
+  el `CUENTAS.HVP` de antes); .PCX con Pintura 2. El menú Inicio: con
+  `\CUENTAS.BIN`, el Cuentas de Hispa-386 no sale en Oficina (como Pluma).
+- **Pintura 2 sustituye a la 1.0 del sistema**: el paquete del sistema
+  `pintura` 2.0 (`PINTURA.BIN` y `PINTURA.TXT` en `\HISPA`, `PINTURA.MNU`
+  —tipo Multimedia, sin icono en el tapiz— y su icono en `\HISPA\MENU`); lo
+  instala `sistema.sh` (solo en el sistema instalado, como la oficina) y ya no
+  instala `PINTURA.HVP`; al actualizar desde la 0.8.7, PAQUETES quita el .HVP
+  (no está en la 2.0). En el menú Inicio, la tabla fija de la oficina no
+  enseña el .HVP de Pintura si existe `\PINTURA.BIN`, y Pintura 2 no entra de
+  salida entre los más usados (desplazaba a Facturas: la parte 07). En Mi
+  equipo, **una sola** «Editar con Pintura» (`uequipo.cas`): Pintura 2 si
+  está (PNG, JPG, BMP, GIF, PCX, ICO, TGA) y, si no, la de la oficina (BMP y
+  PCX); en «Abrir con...», el .HVP solo sin Pintura 2. equipo 0.9.4.
+- **La biblioteca común** (`oficina/comun`): Cuentas añade sus iconos al enum
+  de `ui.h` detrás de los de Pluma; Pintura dibuja los suyos aparte
+  (`iconos_p.c`), así que no se pisan. Lo demás de las dos (memchr y
+  strrchr; las TGA y `imagen_lee_max`; el fondo con la llamada 172) entra
+  junto. **/Producer** de los PDF: era siempre «Pluma 2.0» (también los de
+  Cuentas y Pintura); ahora `pdf_productor` (Pluma 2.0.1, Cuentas 2.0, Pintura
+  2.0). Los tres se compilan con la biblioteca final: Pluma cambia de binario
+  y sube a **2.0.1** (el ODT dice `PLUMA_VERSION`).
+- **F11 y F12**: `so_pentium.c` da `SO_T_F11`/`SO_T_F12` con las teclas 0x157
+  y 0x158 del núcleo (la 0.8.7); no había apaños que quitar.
+- **Pintura: el asa de la esquina** (petición de Carlos): sección 14
+  duovicies, «El asa de la esquina».
+- **Los cortes de la red** (`red-cortes`, el HP Mini por Wi-Fi: la descarga
+  colgada tras un corte, «Cancelar» que no cortaba, reiniciar que esperaba
+  para siempre): su sección pasa a la **14 tervicies** (en su rama era la 14
+  vicies, la de la Agenda); `VERSION_CORTES` y `VERSION_088` son la misma
+  0.8.8; parte 37 (`cortes`). Se juntó sin más choques que `pruebas.sh` y
+  `hpq.py` (escritorio.cas, usuario.cas y llamadas.cas, solos).
+- **Las secciones**: la Agenda es la 14 vicies, Cuentas 2 la 14 unvicies y
+  Pintura 2 la 14 duovicies (en sus ramas, 14 terdecies y 14 quindecies, ya
+  ocupadas). Las partes de las pruebas: 43 `agenda`, 44 `cuentas`, 45
+  `pintura`. La de Pintura, «Editar con Pintura» en FIGURAS.PNG un sitio más
+  allá (con `AZAR.SEM` en `C:\`).
+
+Los paquetes: base, red, tls y wifi **0.8.8**, paquetes 1.5, equipo 0.9.4,
+accesori 1.1 (el Reloj con los festivos de `festivos.cas`), pintura 2.0 (del
+sistema), pluma 2.0.1; nuevos agenda 1.0 y cuentas 2.0; lo demás, tal cual
+lo publicado (también correo 1.0.1, que se publicó aparte, y las firmas de
+Escudo del día).
+
+@@PRUEBAS088@@
+
 **La 0.8.7** (22/11, rama `pentium-087`: las ramas `usuarios`, `panel-control`,
 `bloc-avanzado`, `reproductor`, `win32-juegos`, `pentium-oficina` y `correo`,
 y la principal con `pentium-juegos` y `pluma32`; la `agenda` queda para la
