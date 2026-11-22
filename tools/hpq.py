@@ -561,7 +561,8 @@ OPCIONALES = [
     # (CORREO) Correo, el cliente de correo (castel/nucleo32/correo/paquete.sh; tipo «internet»). El
     # secreto de \HISPA\CORREO y el STARTTLS llegan con el base y el tls de la 0.8.7
     # (PARPADEO) 1.0.1: sin parpadeo (el lienzo propio, un vuelco; nada por el ratón que solo pasa); comprim y mirador 1.0.1, tampoco repintan por él
-    ('correo', '1.0.1', 'Correo: el cliente de correo (IMAP, POP3 y SMTP, siempre cifrado; HTML sin scripts, adjuntos por Escudo, sin conexión)',
+    # (CORREO) 1.0.2: dos clics (o Intro) en la lista, el mensaje a toda la ventana, con sus botones; Esc vuelve
+    ('correo', '1.0.2', 'Correo: el cliente de correo (IMAP, POP3 y SMTP, siempre cifrado; HTML sin scripts, adjuntos por Escudo, sin conexión)',
      'base >= ' + VERSION_087 + ', red >= 0.8.1, tls >= ' + VERSION_087, [
         ('CORREO.BIN', r'\HISPA\CORREO.BIN'), ('CORREO.TXT', r'\HISPA\CORREO.TXT'),
         ('CORREO.MNU', r'\HISPA\MENU\CORREO.MNU'), ('CORREO.ICP', r'\HISPA\MENU\CORREO.ICP')]),
