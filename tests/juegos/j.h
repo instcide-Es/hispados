@@ -54,6 +54,7 @@ void exit(int);
 void qsort(void *, u32, u32, int (*)(const void *, const void *));
 i32 time(i32 *);
 double atof(const char *);
+int atoi(const char *);
 double sqrt(double);
 struct _finddata_t { u32 attrib; i32 time_create, time_access, time_write; u32 size; char name[260]; };
 i32 _findfirst(const char *, struct _finddata_t *);

@@ -701,6 +701,12 @@ módulo Rpila
         u.p_límite := ahora() + espera
         u.esperando := cierto
         udp_entrega(u)
+        ; (JUEGOS) sin esperar (espera 0) y sin nada en la cola: «no hay» ya,
+        ; sin aguardar a la vuelta del reloj (un juego lo pregunta en cada cuadro)
+        si u.esperando y espera = 0 entonces
+            contestar(hueco, serie, TIEMPO, 0, 0, nulo, 0)
+            u.esperando := falso
+        fin
     fin
 
     público función udp_cerrar(s: nat32, dueño: nat32): nat32
