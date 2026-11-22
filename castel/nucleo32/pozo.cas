@@ -18,9 +18,9 @@
 ;
 ;  DE UN ARRANQUE A OTRO. En \HISPA\AZAR.SEM (un secreto: solo lo lee el
 ;  núcleo, permisos.cas) se guardan 32 octetos sacados del pozo: al arrancar
-;  se echan al pozo y se escribe otra semilla enseguida (así, dos arranques
-;  seguidos no empiezan igual aunque el equipo sea siempre el mismo y no se
-;  toque nada); y otra vez al apagar.
+;  se echan al pozo (si no la hay, se hace) y al apagar se escribe otra (el
+;  disco no se toca en cada arranque). Dos arranques con la misma semilla no
+;  empiezan igual: llevan también el momento de cada interrupción y RDRAND.
 ;
 ;  QUIÉN LO USA. El núcleo (las sales de las contraseñas: cuentas.cas) y los
 ;  programas por la llamada 210 (hasta 256 octetos cada vez): TLS.BIN,

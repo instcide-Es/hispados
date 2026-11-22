@@ -1233,7 +1233,6 @@ módulo UPaquetes
                 cerrar(m)
             fin
         fin
-        si cat_serie > 0 entonces imprimir1("La serie del catálogo: %u.\n", cat_serie) fin
         devolver cierto
     fin
 

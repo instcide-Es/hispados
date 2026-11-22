@@ -1667,14 +1667,17 @@ módulo Usuario
 
     ; (USUARIOS) al arrancar, con los discos ya vistos (semilla.cas): los
     ; usuarios del sistema instalado y la semilla del azar de la vez de antes
-    ; (AZAR.SEM, que se cambia enseguida: dos arranques no empiezan igual)
+    ; (AZAR.SEM; si no la hay, se hace. Se cambia al apagar: el disco no se
+    ; toca en cada arranque. Dos arranques con la misma semilla no dan el
+    ; mismo azar: lleva también el momento de cada interrupción y RDRAND)
     público función arranca_cuentas()
         carga_cuentas()
         guarda_semilla(cierto)
     fin
 
-    ; (USUARIOS) la semilla del pozo: con «leer», se echa al pozo la que
-    ; hay; luego se escribe otra (si se puede escribir en el disco)
+    ; (USUARIOS) la semilla del pozo: con «leer» (al arrancar), se echa al
+    ; pozo la que hay y, si no la hay, se hace; sin «leer» (al apagar), se
+    ; escribe otra (si se puede escribir en el disco)
     público función guarda_semilla(leer: bool)
         variable r: arreglo [40] de byte
         variable sem: arreglo [32] de byte
@@ -1691,6 +1694,8 @@ módulo Usuario
                 si n > 0 y n <= 32 entonces
                     echar(sem, n, tics, (f << 16) xob h)
                     con_semilla := cierto
+                    llenar(sem, 32, 0)
+                    devolver
                 fin
             fin
         fin

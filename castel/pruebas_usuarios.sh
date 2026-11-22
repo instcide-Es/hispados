@@ -151,7 +151,7 @@ mira "USUARIOS /NUEVO: Bea (normal, con contraseña) y Biblioteca (normal, sin c
   "^cuentas: USUARIOS.BIN da de alta a Bea$" "^  Bea  normal, con contraseña, carpeta .USUARIOS.BEA$" "^  Biblioteca  normal, sin contraseña, entra solo, carpeta .USUARIOS.BIBLIOTE$" \
   "^ANA  *<DIR>" "^BEA  *<DIR>" "^BIBLIOTE  *<DIR>"
 mira "PAQUETES por Internet: el catálogo firmado con la serie 100 se usa (y se apunta); el de la serie 50, firmado igual, no (la vuelta atrás)" \
-  "^La firma del catálogo es buena" "^La serie del catálogo: 100\.$" \
+  "^La firma del catálogo es buena" \
   "^paquetes: el catálogo de Internet es más viejo (serie 50) que el último que se ha usado (serie 100): no se usa$"
 if sano $X/s1.img && saca $X/s1.img HISPA/USUARIOS.TXT $X/U1.TXT && [ "$(grep -c '^u=.*|argon2id\$12288\$3\$[0-9a-f]\{32\}\$[0-9a-f]\{64\}' $X/U1.TXT)" = 2 ] \
    && grep -q '^u=3|N|0|1|BIBLIOTE|Biblioteca|' $X/U1.TXT && python3 -c "import sys; d=open(sys.argv[1],'rb').read(); sys.exit(1 if b'uno2tres' in d or b'secreta' in d else 0)" $X/s1.img; then
@@ -189,8 +189,8 @@ mira "SALIR: sale; la entrada en texto (Usuario, Contraseña con asteriscos): co
 mira "ADMIN: el núcleo pide la contraseña de Ana (no un Sí); con ella, el modo administrador lee USUARIOS.TXT" \
   "^Contraseña de Ana (Esc: no): \*\*\*\*\*\*\*\*$" "^permisos: modo administrador para ORDENES.BIN" "^u=2|N|0|0|BEA|Bea|argon2id"
 sal1=$(sed -n 's/^espia: azar //p' $X/t2.txt)
-if saca $X/s2.img HISPA/AZAR.SEM $X/azar2.sem && ! cmp -s $X/azar1.sem $X/azar2.sem; then ok "AZAR.SEM (la semilla del pozo del azar) cambia en cada arranque"
-else ko "AZAR.SEM no cambia de un arranque a otro"; fi
+if saca $X/s2.img HISPA/AZAR.SEM $X/azar2.sem && cmp -s $X/azar1.sem $X/azar2.sem; then ok "AZAR.SEM (la semilla del pozo del azar) se hace en el primer arranque y no se toca en los demás (se cambia al apagar: el disco no cambia en cada arranque)"
+else ko "AZAR.SEM ha cambiado al arrancar (o no está)"; fi
 if saca $X/s2.img USUARIOS/BIBLIOTE/DOCUMENT/MIO.TXT $X/m.txt && ! mdir -i $X/s2.img ::USUARIOS/ANA/DOCUMENT/MALO.TXT > /dev/null 2>&1 \
    && saca $X/s2.img USUARIOS/ANA/DOCUMENT/SECRETO.TXT $X/sec2.txt && ! mdir -i $X/s2.img ::USUARIOS/OTRO > /dev/null 2>&1 && sano $X/s2.img; then
   ok "y en el disco: lo de Biblioteca en su carpeta; el secreto de Ana, en su sitio; nada suyo en la de Ana; ni \\USUARIOS\\OTRO"

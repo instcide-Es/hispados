@@ -6106,8 +6106,11 @@ disco echan el momento exacto (el contador de ciclos) a un anillo; al pedir
 azar se mezcla con SHA-256 con el estado de antes, el contador de ciclos,
 RDRAND (si el procesador lo tiene), los tics y la fecha; lo que sale es el
 SHA-256 del estado con un contador, y el estado cambia detrás. La semilla de
-una vez a otra va en `\HISPA\AZAR.SEM` (secreto: solo el núcleo), que se
-cambia al arrancar y al apagar. Los programas lo piden con la **llamada 210**
+una vez a otra va en `\HISPA\AZAR.SEM` (secreto: solo el núcleo): se hace en
+el primer arranque y se cambia al apagar (en los demás arranques el disco no se
+toca: las pruebas que comparan el disco octeto a octeto siguen valiendo); dos
+arranques con la misma semilla no dan el mismo azar, por el momento de cada
+interrupción y RDRAND. Los programas lo piden con la **llamada 210**
 (hasta 256 octetos); lo usan TLS.BIN (con lo suyo), SSH, SSHD, WG y TAILSCAL
 (`h_azar`, en hispac/hispa.c), WIFI.BIN (las claves de WPA2: la SNonce;
 `hl_azar`) y las sales de las contraseñas. Con un núcleo de antes, cada uno
