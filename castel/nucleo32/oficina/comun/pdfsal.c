@@ -371,6 +371,63 @@ void pdf_rect(pdfsal *s, double x, double y, double an, double al, u32 col)
 	buf_txt(&s->c, "re f\n");
 }
 
+/* (CUENTAS32) polígonos rellenos y recortes (Cuentas 2: sectores, marcadores, tramas) */
+static void camino(pdfsal *s, const double *xy, int n)
+{
+	int i;
+
+	for (i = 0; i < n; i++) {
+		num(&s->c, xy[2 * i]);
+		num(&s->c, s->al - xy[2 * i + 1]);
+		buf_txt(&s->c, i ? "l " : "m ");
+	}
+	buf_txt(&s->c, "h ");
+}
+
+void pdf_poligono(pdfsal *s, const double *xy, int n, u32 col)
+{
+	if (!s->en_pagina || n < 3)
+		return;
+	color(&s->c, col, "rg");
+	camino(s, xy, n);
+	buf_txt(&s->c, "f\n");
+}
+
+void pdf_guarda(pdfsal *s)
+{
+	if (s->en_pagina)
+		buf_txt(&s->c, "q\n");
+}
+
+void pdf_restaura(pdfsal *s)
+{
+	if (s->en_pagina)
+		buf_txt(&s->c, "Q\n");
+}
+
+void pdf_recorta_rect(pdfsal *s, double x, double y, double an, double al)
+{
+	if (!s->en_pagina)
+		return;
+	if (an < 0)
+		an = 0;
+	if (al < 0)
+		al = 0;
+	num(&s->c, x);
+	num(&s->c, s->al - y - al);
+	num(&s->c, an);
+	num(&s->c, al);
+	buf_txt(&s->c, "re W n\n");
+}
+
+void pdf_recorta_poligono(pdfsal *s, const double *xy, int n)
+{
+	if (!s->en_pagina || n < 3)
+		return;
+	camino(s, xy, n);
+	buf_txt(&s->c, "W n\n");
+}
+
 void pdf_raya(pdfsal *s, double x0, double y0, double x1, double y1, double g, u32 col)
 {
 	if (!s->en_pagina)

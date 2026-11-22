@@ -126,6 +126,29 @@ char *strcpy(char *d, const char *o)
 	return r;
 }
 
+/* (CUENTAS32) las dos que pide Cuentas 2 */
+void *memchr(const void *s, int c, size_t n)
+{
+	const u8 *p = s;
+
+	for (; n; n--, p++)
+		if (*p == (u8)c)
+			return (void *)p;
+	return NULL;
+}
+
+char *strrchr(const char *s, int c)
+{
+	const char *u = NULL;
+
+	for (;; s++) {
+		if (*s == (char)c)
+			u = s;
+		if (!*s)
+			return (char *)u;
+	}
+}
+
 int abs(int x)
 {
 	return x < 0 ? -x : x;
@@ -712,6 +735,8 @@ static u32 tecla_unicode(u32 k, int *mods)
 	case 0x152: return SO_T_INSERTAR;
 	case 0x10F: return SO_T_MAYUS_TAB;
 	case 0x110: return SO_T_CTRL_TAB;
+	case 0x157: return SO_T_F11;	/* (CUENTAS32) F11 y F12, si el núcleo los da */
+	case 0x158: return SO_T_F12;
 	}
 	if (k >= 0x13B && k <= 0x144)
 		return SO_T_F1 + (k - 0x13B);

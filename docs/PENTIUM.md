@@ -8063,11 +8063,11 @@ la cursiva de verdad de las DejaVu (hoy, inclinada).
 
 Con el mismo patrón (núcleo en C portable sobre `oficina/comun`, la misma
 cara, sus pruebas en el anfitrión y en QEMU, su paquete): **Cuentas 2**
-(hoja de cálculo, ODS/XLSX con `zip`/`xml`/`f_xmlcomun`, gráficos, exportar a
-PDF), **Datos 2**, **Presentaciones 2** (ODP/PPTX y pase a pantalla
-completa), **Publicaciones 2** (marcos sobre la maqueta de Pluma) y
-**Facturas 2** (con el PDF de `pdfsal`). Los `.HVP` siguen para Hispa-386.
-Ver docs/pentium/METAS.md.
+(hecha: la sección siguiente), **Datos 2**, **Presentaciones 2** (ODP/PPTX y
+pase a pantalla completa), **Publicaciones 2** (marcos sobre la maqueta de
+Pluma) y **Facturas 2** (con el PDF de `pdfsal`; y las tablas y los formatos
+de número de Cuentas 2). Los `.HVP` siguen para Hispa-386. Ver
+docs/pentium/METAS.md.
 
 ## 14 undevicies. Correo (CORREO.BIN, rama correo)
 
@@ -8531,6 +8531,253 @@ horas dentro de las reglas (BYHOUR, BYMINUTE, HOURLY: hoy, una vez al día
 como mucho), arrastrar una cita a otro día, imprimir el mes, la semana con
 las horas en filas (hoy, una lista por día), y la libreta de direcciones del
 Correo (hoy, los cumpleaños se importan de un .VCF).
+
+## 14 unvicies. Cuentas 2, la hoja de cálculo de 32 bits (CUENTAS.BIN, rama cuentas32)
+
+*22/11/2026. Carlos (16/11): Cuentas, «acercarlo lo más posible a Excel
+5.0»; y (22/11) la oficina de 32 bits con cara nueva. Lo cambiado fuera de
+`castel/nucleo32/oficina/cuentas/` lleva la marca «(CUENTAS32)».*
+
+| | |
+|---|---|
+| ![Cuentas 2 en QEMU: números, fórmulas, € y un gráfico](pentium/cuentas/cu1.png) | ![Exportado a PDF](pentium/cuentas/cu2.png) |
+| ![El cuadro Formato de celdas (Alt+F)](pentium/cuentas/cu3.png) | ![Vuelto a abrir: PRUEBA.HOJ](pentium/cuentas/cu4.png) |
+| ![Y el .XLSX (PRUEBA.XLS por el 8+3)](pentium/cuentas/cu5.png) | ![En el anfitrión: combinar y centrar, €, gráfico con tramas, formato condicional](pentium/cuentas/h1.png) |
+| ![Formato de celdas, pestaña Número](pentium/cuentas/h2.png) | ![La vista preliminar](pentium/cuentas/h3.png) |
+| ![El autofiltro: solo «Peras» (el botón lleva un embudo)](pentium/cuentas/h4.png) | ![Ordenado por Datos > Ordenar: la fila de títulos queda arriba](pentium/cuentas/h5.png) |
+| ![Ordenado, con la primera fila inmovilizada y a 120%](pentium/cuentas/h6.png) | |
+
+**Qué es.** Cuentas 2 es la hoja de cálculo nativa de Hispa-Pentium: un
+programa del anillo 3 de 32 bits (`\HISPA\CUENTAS.BIN`, unos 820 KB con las
+seis DejaVu dentro), sin HVPRUN, en **C portable** sobre la biblioteca común
+de la oficina (`oficina/comun`): el mismo código se compila para Hispa-64
+cambiando solo `comun/so_*.c`. El Cuentas de Hispa-386 (`CUENTAS.HVP`)
+sigue para Hispa-386 y para quien no tenga el paquete; con el paquete
+`cuentas` instalado, el menú Inicio (Oficina) y Mi equipo (los `.HOJ`,
+`.XLSX`, `.XLS`, `.ODS` y `.CSV`) usan Cuentas 2.
+
+**La cara, la de Excel 5 en español**: la barra de menús (Archivo, Edición,
+Ver, Insertar, Formato, Herramientas, Datos, Ventana, ?; lo que aún no hay,
+en gris; Deshacer y Rehacer dicen qué deshacen), la barra **Estándar**
+(nuevo, abrir, guardar, imprimir, vista preliminar, cortar, copiar, pegar,
+copiar formato, deshacer, rehacer, **Σ autosuma**, **fx** asistente para
+funciones, ordenar A→Z y Z→A, **asistente para gráficos**, autofiltro, PDF,
+zoom, ayuda) y la de **Formato** (fuente, tamaño, N K S, alineación,
+combinar y centrar, **moneda €**, **porcentaje**, millares, más y menos
+decimales, bordes, relleno, color de la letra, comentario, inmovilizar), con
+**iconos propios** nuevos en `comun/iconos.c` (Σ, fx, ordenar, gráfico, €,
+%, 000, decimales, combinar, relleno, filtro, comentario, inmovilizar); la
+**barra de fórmulas** con el **cuadro de nombres** (la celda, «3F x 2C»
+mientras se elige, los nombres definidos con su flecha; escribir una
+referencia o un nombre lleva a ella) y ✗ ✓ fx; los rótulos de columnas
+(A... IV) y de filas (1... 65536); las **pestañas** de las hojas con sus
+flechas y la de «+»; la barra de estado (Listo, Introducir, Modificar,
+Señalar, Copiar formato; **Suma, Promedio y Recuento** de lo elegido; la
+referencia circular, si la hay; el zoom). Nada depende solo del color: lo
+elegido lleva un marco grueso y sus rótulos van hundidos y en negrita; la
+pestaña activa, blanca, sin raya y en negrita; lo cortado, un marco de
+trazos; lo señalado al escribir una fórmula, trazos y un borde doble; el
+autofiltro activo, un embudo en su botón; el comentario, un triángulo; el
+formato condicional, un **símbolo** (▲ ▼ ✓ ✗ ! ★ ● =) delante del número;
+las series de los gráficos, **tramas y marcadores** distintos; los rellenos,
+**tramas** además del color.
+
+**Las teclas**: las de Excel en español: flechas, Tab y Mayús+Tab, Intro y
+Mayús+Intro (tras escribir con Tab, Intro vuelve a la columna del primer
+Tab), Inicio, Ctrl+Inicio, Ctrl+Fin, **Ctrl+flechas** (al borde de los
+datos), Re Pág y Av Pág, Ctrl+Re Pág y Ctrl+Av Pág (las hojas), Mayús para
+elegir, Ctrl+E todo, F2 corregir, **F4** ($A$1 → A$1 → $A1 → A1), F5 ir a,
+F9 calcular, F11 gráfico, Mayús+F11 hoja nueva, F12 guardar como, Supr,
+Ctrl+Intro (lo escrito, en todo lo elegido), Ctrl+1 formato de celdas,
+Ctrl+; la fecha de hoy, Ctrl+U/A/G/P/B/L, Ctrl+N/K/S, Ctrl+Q/T/D
+(alineación), Ctrl+X/C/V, Ctrl+Z/Y, Alt+letra los menús. **El ratón**:
+elegir arrastrando (y con Mayús), los rótulos eligen filas y columnas
+enteras, su borde se arrastra (ancho y alto; doble clic: autoajustar), el
+**cuadradito de rellenar** se arrastra (series: números con la recta que
+mejor pasa, fechas, meses y días en español o en inglés, «Producto 7»...;
+y las fórmulas, corridas), el borde de lo elegido se arrastra para
+**moverlo** (las fórmulas que lo piden se van con él), los gráficos se
+eligen, se arrastran y se agrandan por su esquina (doble clic: el
+asistente), el botón derecho da el menú de las celdas, de las columnas, de
+las filas, de las pestañas o del gráfico, la rueda baja y sube (con Mayús,
+a los lados; **con Ctrl, el zoom**). Escribiendo una fórmula, las flechas y
+el ratón **señalan** las celdas (con Mayús, el rango; también de otra hoja).
+
+**La hoja** (`cuentas/libro.h`): **65.536 filas por 256 columnas**, como
+Excel 5, guardadas **dispersas**: solo las celdas que tienen algo, en un
+montón con una tabla de dispersión por la clave fila·256+columna y un
+**índice por columnas** (las celdas de cada columna, por filas: un rango se
+recorre seguido, sin buscar), que se rehace solo cuando cambia qué celdas
+hay. Varias hojas por libro (meter, quitar, cambiar el nombre, mover y
+copiar; las fórmulas llevan el id de la hoja, no su posición); ancho de
+columnas y alto de filas, ocultar; estilos de columnas y filas enteras (dar
+formato a la columna A no crea 65.536 celdas); inmovilizar paneles;
+combinar celdas; **formatos de número** con los códigos de siempre (General,
+número, moneda €, porcentaje, fechas y horas en español —«d "de" mmmm "de"
+aaaa», «dddd», «[h]:mm»—, científica, texto, personalizados con secciones,
+colores y condiciones), guardados en inglés como en los .XLSX y enseñados con
+la coma y el punto de quien usa Cuentas (`cuentas/numeros.c`); la letra (las
+TrueType de `comun/letras`), alineación horizontal y vertical, ajustar el
+texto, sangría, bordes (fino, medio, grueso, doble, puntos, guiones),
+**relleno con trama** (11 tramas) y color; **formato condicional sencillo**
+(mayor, menor, entre, igual, distinto, contiene) con negrita, color, relleno
+y su símbolo; **comentarios** (con autor; se ven al pasar el ratón).
+Lo tecleado se lee en español: 1.234,5; 12%; 3,50 €; (100); 22/11/2026;
+22-nov-26; 14:30; 1,5E3; VERDADERO; 'texto; y si trae formato (%, €, fecha,
+hora, millares) y la celda no tiene ninguno, se le pone.
+
+**Las fórmulas** (`cuentas/formula.c`, `calculo.c`, `funciones.c`): se leen a
+piezas en notación polaca inversa y se escriben de vuelta en español
+(=SUMA(A1:A3;2,5)) o en inglés (=SUM(A1:A3,2.5)): Herramientas > Opciones;
+**las dos se entienden siempre al escribir** (también `_xlfn.`). Prioridades
+de siempre (-2^2 es 4), %, &, comparaciones; referencias relativas,
+absolutas y mixtas (y F4), rangos, columnas y filas enteras, **de otras
+hojas** ('Mi hoja'!A1:B5), el operador «:» entre referencias
+(=SUMA(A1:INDICE(A:A;5))), **nombres definidos** (Insertar > Nombre; en el
+cuadro de nombres). Al copiar se corren las referencias sin «$»; al meter o
+quitar filas y columnas, o mover con el ratón o cortar y pegar, se arreglan
+en todo el libro (las que desaparecen, #¡REF!). **Unas 160 funciones** con su
+nombre en español y en inglés: SUMA, PROMEDIO, CONTAR, CONTARA,
+CONTAR.BLANCO, MAX, MIN, PRODUCTO, MEDIANA, MODA, VAR, VARP, DESVEST,
+DESVESTP, K.ESIMO.MAYOR, K.ESIMO.MENOR, JERARQUIA, SUMA.CUADRADOS,
+SUMAPRODUCTO, SUMAR.SI, CONTAR.SI, PROMEDIO.SI, SUMAR.SI.CONJUNTO,
+CONTAR.SI.CONJUNTO, SUBTOTALES; REDONDEAR, REDONDEAR.MAS, REDONDEAR.MENOS,
+TRUNCAR, ENTERO, ABS, RAIZ, POTENCIA, RESIDUO, COCIENTE, SIGNO, PI,
+ALEATORIO, ALEATORIO.ENTRE, EXP, LN, LOG, LOG10, las trigonométricas, FACT,
+COMBINAT, MULTIPLO.SUPERIOR/INFERIOR, REDOND.MULT, M.C.D, M.C.M,
+NUMERO.ROMANO; SI, Y, O, NO, VERDADERO, FALSO, SI.ERROR y las ES...;
+BUSCARV, BUSCARH, BUSCAR, COINCIDIR, INDICE, ELEGIR, FILA, COLUMNA, FILAS,
+COLUMNAS, INDIRECTO, DESREF, DIRECCION; CONCATENAR, IZQUIERDA, DERECHA,
+EXTRAE, LARGO, MAYUSC, MINUSC, NOMPROPIO, ESPACIOS, ENCONTRAR, HALLAR (con
+comodines), SUSTITUIR, REEMPLAZAR, REPETIR, TEXTO (con el código en
+español: «#.##0,00», «dd/mm/aaaa»), VALOR, CARACTER, CODIGO, IGUAL, DECIMAL,
+MONEDA, T, LIMPIAR; HOY, AHORA, FECHA, NSHORA, AÑO, MES, DIA, HORA,
+MINUTO, SEGUNDO, DIASEM, DIAS360, FECHANUMERO, HORANUMERO, FIN.MES,
+FECHA.MES, DIAS.LAB, DIA.LAB, NUM.DE.SEMANA, SIFECHA, DIAS; PAGO, VA, VF,
+TASA, NPER, VNA, TIR, PAGOINT, PAGOPRIN, SLN, SYD, DDB (todas las del Cuentas
+de Hispa-386 están). Errores #¡DIV/0!, #¡REF!, #¿NOMBRE?, #N/A, #¡VALOR!,
+#¡NUM!, #¡NULO! y **#¡CIRC!** para las referencias circulares (y la barra de
+estado dice cuál). Las fechas, los días desde el 30/12/1899 (como Excel y
+LibreOffice: el 1/3/1900 es el 61).
+
+**El recálculo por dependencias** (`calculo.c`): cada fórmula apunta de qué
+depende (las celdas sueltas en una tabla de dispersión; los rangos, en una
+lista por columna de la hoja, o en la de los anchos); al cambiar una celda
+se marca lo que depende de ella (y lo que depende de eso), se cuenta cuántas
+pendientes pide cada una y se calculan **solo esas, en el orden de sus
+dependencias** (de Kahn); lo que queda está en un círculo y se calcula a
+demanda, viendo el círculo (#¡CIRC!). Las volátiles (HOY, AHORA,
+ALEATORIO, INDIRECTO, DESREF) se calculan cada vez. Al meter o quitar filas,
+ordenar o abrir, se rehace todo. Coma flotante de 64 bits (como Excel; 0,1
++ 0,2 = 0,3 al compararlo y al verlo: 15 cifras).
+
+**Gráficos** (`cuentas/grafico.c`): columnas (y apiladas), barras (y
+apiladas), líneas, sectores y dispersión (X Y), **dentro de la hoja**
+(anclados a una celda; se mueven y se agrandan con el ratón), con título,
+rótulos de los ejes, escala «bonita» con números en español, rayas guía y
+leyenda (a la derecha o abajo) con la muestra de cada serie: **su trama, su
+marcador y su raya**, distintos en cada una. El asistente (F11) enseña el
+gráfico mientras se cambia.
+
+**Datos**: **ordenar** por hasta tres columnas (con la fila de títulos; las
+fórmulas se corren con su fila; lo vacío, al final), **autofiltro** (el
+botón de cada título: todas, las 10 más altas o más bajas, vacías, no
+vacías o un valor; las filas que no casan se ocultan y SUBTOTALES no las
+cuenta), **rellenar series** (el cuadradito, y Edición > Rellenar series:
+lineal, geométrica, días, laborables, meses, años, con límite), **buscar y
+reemplazar** (mayúsculas, celda entera, en fórmulas o en valores, por
+filas o columnas), **pegado especial** (todo, fórmulas, valores, formatos,
+comentarios; transponer) y el portapapeles del sistema (lo copiado va como
+texto con tabuladores; lo de otros programas se pega por celdas), y
+**deshacer y rehacer sin límite** (`cuentas/deshacer.c`: cada paso guarda
+regiones de celdas y lo de la hoja; deshacer lo cambia por lo guardado y lo
+guarda, y rehacer es lo mismo al revés; también las hojas y los nombres).
+
+**Formatos** (`cuentas/archivo.c` y `f_*.c`; se conocen por lo de dentro):
+
+| | Leer | Escribir |
+|---|---|---|
+| `.HOJ` | los de Cuentas de Hispa-386 (texto 437: celdas como se teclearon, formatos, anchos, altos, paneles, el gráfico, varias hojas, también las «plegadas») y los de Cuentas 2 | delante, lo que entiende Cuentas de 386 (que salta lo que no conoce: sus 64 columnas y 1000 filas, los bits de formato que tiene); detrás, en líneas «2x» en UTF-8, **todo** lo de Cuentas 2: no se pierde nada, y guardar dos veces da el mismo archivo |
+| `.XLSX` | hojas, valores, textos compartidos, fórmulas (también las compartidas), estilos (letras, rellenos con sus tramas, bordes, alineación, formatos de número), anchos, altos, ocultas, combinadas, paneles, nombres, área de impresión, autofiltro, comentarios, condicionales, página, fechas de 1904 | lo mismo (con los comentarios en VML para Excel); los gráficos aún no |
+| `.ODS` | hojas, valores (número, porcentaje, moneda, fecha, hora, lógico, texto en varias líneas), fórmulas `of:=`, estilos de celda y de número, anchos, altos, ocultas, unidas, anotaciones, nombres, área, autofiltro, paneles (las repeticiones enormes de filas vacías no se recorren) | lo mismo; las tramas quedan en su color, sin condicionales ni gráficos |
+| `.CSV` | separador `;`, `,` o tabulador (el que más salga), UTF-8 (con o sin marca), Windows-1252 o 437 (la de Hispa), comillas y saltos de línea dentro | lo que se ve o las fórmulas, con el separador y la codificación que se elijan (cuadro al guardar) |
+| `.PDF` | (no: Hispa-PDF) | **exportar**: papel (A4, carta, A3, A5, legal), apaisado, márgenes, escala o en N páginas, centrar, cuadrícula, encabezado y pie (&P, &N, &A, &F, &D), el **área de impresión** y los **saltos de página** puestos a mano, primero hacia abajo y luego a la derecha; las celdas y los gráficos pintados con lo mismo que la pantalla (`cuentas/pintor.c`, `celdas.c`), las TrueType incrustadas |
+
+La **vista preliminar** (Archivo) enseña las páginas del PDF en la ventana.
+Los `.XLS` binarios de Excel 97-2003 no se abren (se dice por qué). El núcleo
+aún crea solo nombres 8+3: «Guardar como ventas.xlsx» queda `VENTAS.XLS`
+(se vuelve a abrir como XLSX, por lo de dentro). **Imprimir**: aún no hay
+impresoras; Archivo > Imprimir lo explica y lleva al PDF.
+
+**Lo añadido a la biblioteca común** (marcado «(CUENTAS32)»): 15 iconos en
+`iconos.c` (y su `enum` en `ui.h`, detrás de los de Pluma); en `pdfsal`,
+polígonos y recortes (`pdf_poligono`, `pdf_guarda`, `pdf_recorta_rect`,
+`pdf_recorta_poligono`, `pdf_restaura`); `memchr` y `strrchr` en
+`so_pentium.c` e `inc/string.h`. Pluma 2 sigue igual (su `pdf.sh`, bien).
+
+### Cómo está hecho Cuentas 2 (`castel/nucleo32/oficina/cuentas`)
+
+```
+libro.h, libro.c     el libro, las hojas dispersas (tabla de dispersión e índice por
+                     columnas), los estilos sin repetir, los nombres, combinadas, comentarios...
+numeros.c            leer lo tecleado, los códigos de formato, las fechas, los números de C exactos
+formula.c            leer y escribir las fórmulas (español, inglés, .XLSX, .ODS), copiarlas, ajustarlas
+calculo.c            las dependencias, el recálculo de lo que cambia y el evaluador
+funciones.c          las ~160 funciones (con sus dos nombres: una lista X)
+deshacer.c, operar.c deshacer sin límite y todo lo que se hace (filas, pegar, rellenar, ordenar...)
+archivo.c, f_hoj.c, f_csv.c, f_xlsx.c, f_ods.c, f_pdf.c   los formatos
+pintor.c, celdas.c, grafico.c   pintar en la pantalla y en el PDF lo mismo
+vista.c, ventana.c, dialogos.c  la hoja en la ventana, la ventana y los cuadros
+prueba.c             los guiones de prueba (CUENTAS --guion)      principal.c   las órdenes
+hacer.sh, anfitrion.sh, paquete.sh, fuentes.lst, LEEME.txt, cuentas32.png, pruebas/
+```
+
+**Medidas.** En QEMU con la CPU de un Atom (`-cpu n270 -icount shift=1`) y
+una hoja de **10.000 fórmulas** que dependen unas de otras (`CUENTAS --mide
+10000`: B = A·2 + la B de antes, C = SUMA($A$1:A) acumulada, D = un SI):
+la hoja se hace en 380 ms; **recalcularla entera, 960 ms**; cambiar A1, de la que
+dependen todas, 930 ms (y escribir en A1, recalcular y pintar, un segundo);
+cambiar la última fila, 3 fórmulas en menos de 1 ms (solo lo que depende);
+**desplazarse con Av Pág, 64 ms** (pintar la ventana, 60 ms) y con las
+flechas, lo mismo; unos 5 MB de memoria. En el anfitrión: recalcular las 10.000, 33 ms (eran 131 antes
+del índice por columnas). La suma acumulada es cuadrática (como en Excel): la
+mayor parte del tiempo es suya.
+
+**El paquete** `cuentas` 2.0 (OPCIONALES de `tools/hpq.py`, tipo oficina,
+`base >= 0.8.3`): `\HISPA\CUENTAS.BIN`, `\HISPA\CUENTAS\LEEME.TXT` y
+`\HISPA\MENU\CUENTAS.MNU` y `.ICP`; `castel/nucleo32/oficina/cuentas/paquete.sh
+SALIDA`. Para que el menú y Mi equipo lo usen en vez del de 386 hace falta
+el núcleo (`inicio.cas`) y el `equipo` (`exoper.cas`) de esta rama.
+
+**Probarlo**: `castel/pruebas.sh`, parte 44 (`SOLO=cuentas`,
+`castel/pruebas_cuentas.sh`): en el anfitrión con ASan y UBSan, la batería
+de fórmulas a mano (`cuentas/pruebas/formulas.txt`: 295 casos de
+prioridades, errores, circulares, referencias, nombres, funciones, filas y
+columnas, deshacer, series, ordenar y pegado especial) y la calculada con
+Python (`pruebas/haz_formulas.py`: unos 2.300 casos de dinero, estadística,
+redondeos con `decimal`, fechas con `datetime` y textos), el **fuzz** del
+analizador de fórmulas (`pruebas/fuzz_formulas.py`: miles de fórmulas al
+azar; lo que se lee bien tiene que escribirse y leerse igual: encontró dos
+fallos de verdad, ya arreglados), los formatos (`pruebas/formatos.sh`: .HOJ
+de 386 hechos a mano, .XLSX y .ODS de referencia hechos con Python como los
+de Excel y LibreOffice —en el VPS no está LibreOffice Calc ni openpyxl—, ida
+y vuelta por los cuatro, la validez de los ZIP y XML, y su fuzz), el PDF
+(`pruebas/pdf.sh` y `prueba_dibujo.c`: qpdf, pdftotext, pdffonts, páginas,
+área y saltos; las celdas y los gráficos pintados), la ventana con un guion
+(escribir, formatos con la barra, combinar, gráfico, formato condicional,
+comentario, autoajustar, guardar en los cuatro formatos, PDF, deshacer,
+vista preliminar) y lo guardado mirado desde fuera; en QEMU, escribir
+números y fórmulas, negrita, €, un gráfico, guardar .HOJ y .XLSX, exportar a
+PDF, el cuadro Formato de celdas, cerrar y volver a abrir los dos, y lo del
+disco mirado desde fuera; y la medida en el Atom. Las capturas, en
+`docs/pentium/cuentas/`.
+
+**Lo que falta**: imprimir (cuando haya impresoras); los gráficos en .XLSX y
+.ODS; validación de datos, tablas dinámicas, subtotales automáticos,
+autoformatos, proteger hojas, dividir la ventana y las matrices ({1;2;3} y
+las fórmulas matriciales); el formulario de datos; las macros; los nombres
+largos al guardar (el núcleo); los `.XLS` binarios; el corrector de
+ortografía en las celdas (está en `comun/orto`).
 
 ## 15. Las pruebas
 

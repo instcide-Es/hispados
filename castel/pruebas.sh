@@ -256,6 +256,10 @@
 #  41. (PLUMA32, SOLO=pluma) Pluma 2 (PLUMA.BIN, el procesador de textos de 32 bits en C
 #      portable: nucleo32/oficina; pruebas_pluma.sh): formatos, PDF, RTF, corrector, la
 #      ventana con un guion, en QEMU (escribir, tabla, imagen, guardar, PDF) y en un Atom.
+#  44. (CUENTAS32, SOLO=cuentas) Cuentas 2 (CUENTAS.BIN, la hoja de cálculo de 32 bits en C
+#      portable: nucleo32/oficina/cuentas; pruebas_cuentas.sh): las fórmulas (a mano, con
+#      Python y fuzz), los formatos (.HOJ, .XLSX, .ODS, .CSV), el PDF, la ventana con un
+#      guion, en QEMU (escribir, gráfico, guardar, PDF, volver a abrir) y en un Atom.
 #      animado e ICO desde el explorador, las flechas, la rueda, girar,
 #      pantalla completa, diapositivas y «Usar como fondo de escritorio» (la
 #      llamada 172: FONDO.HPM), que sigue al arrancar otra vez.
@@ -368,6 +372,7 @@
 #   SOLO=oficina ./pruebas.sh     la primera y la 40 (OFICINA2: la oficina 1.1 en HVPRUN; pruebas_oficina.sh)
 #   SOLO=correo ./pruebas.sh      la primera y la 42 (CORREO: el cliente de correo; pruebas_correo.sh)
 #   SOLO=agenda ./pruebas.sh      la primera y la 43 (AGENDA: la Agenda; pruebas_agenda.sh)
+#   SOLO=cuentas ./pruebas.sh     la primera y la 44 (CUENTAS32: Cuentas 2; pruebas_cuentas.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -426,6 +431,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_oficina.sh         # (OFICINA2) la parte 40, como parte_oficina
 . $AQUI/pruebas_correo.sh          # (CORREO) la parte 42, como parte_correo
 . $AQUI/pruebas_agenda.sh          # (AGENDA) la parte 43, como parte_agenda
+. $AQUI/pruebas_cuentas.sh         # (CUENTAS32) la parte 44, como parte_cuentas
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -448,7 +454,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -5803,6 +5809,7 @@ if parte08 pluma; then parte_pluma; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Plu
 if parte08 oficina; then parte_oficina; else echo "  (SOLO=${SOLO08:-$SOLO}: sin la oficina 1.1)"; fi
 if parte08 correo; then parte_correo; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Correo)"; fi   # (CORREO)
 if parte08 agenda; then parte_agenda; else echo "  (SOLO=${SOLO08:-$SOLO}: sin la Agenda)"; fi   # (AGENDA) la parte 43
+if parte08 cuentas; then parte_cuentas; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Cuentas 2)"; fi   # (CUENTAS32) la 44
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------- 35. (BLOC) el Bloc de notas 1.0
