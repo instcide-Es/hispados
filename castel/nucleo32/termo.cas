@@ -305,10 +305,17 @@ módulo Termo
         fin_ := b
         alto := c
     fin
+    ; esperar, por el reloj del núcleo (las interrupciones van en las
+    ; llamadas): n microsegundos, de 10 ms en 10 ms (lo corto, un tic entero:
+    ; esperar de más no estorba). Por el puerto 80h (lo de siempre) en QEMU con
+    ; KVM eran más de 6 s; con tope de vueltas por si el reloj no corre
     función espera_us(n: nat32)
-        variable i: nat32
-        para i desde 1 hasta n hacer
-            escribe_puerto(0x80, 1, 0)
+        variable t0, ticks, i: nat32
+        ticks := (n + 9999) div 10000 + 1
+        t0 := tics
+        i := 0
+        mientras tics - t0 < ticks y i < 200000000 hacer
+            i := i + 1
         fin
     fin
 
@@ -383,15 +390,21 @@ módulo Termo
     ; los para y los deja como estaban (INIT), y repone la memoria baja
     función duerme_ap()
         variable p: puntero a nat32
-        variable i, n, parados: nat32
-        si ap_base = 0 entonces devolver fin
-        p := puntero(ap_base + 0x440)
+        variable i, n, parados, b, x: nat32
+        ; (la llaman el Termómetro y su tarea de carga, quizá a la vez: solo una)
+        x := sin_interrupciones()
+        b := ap_base
+        ap_base := 0
+        reponer(x)
+        si b = 0 entonces devolver fin
+        p := puntero(b + 0x440)
         p[0] := 0
         n := 0
+        parados := 0
         mientras n < 30 hacer
             parados := 0
             para i desde 0 hasta AP_MAX - 1 hacer
-                p := puntero(ap_base + 0x800 + i * 32 + 4)
+                p := puntero(b + 0x800 + i * 32 + 4)
                 si p[0] <> 1 entonces parados := parados + 1 fin
             fin
             si parados = AP_MAX entonces n := 30 sino espera_us(5000) fin
@@ -399,9 +412,8 @@ módulo Termo
         fin
         ipi_todos(0x000C4500)                   ; INIT: esperando otra vez, como los deja la BIOS
         espera_us(10000)
-        copiar_memoria(puntero(ap_base), puntero(dirección(ap_guardado)), 8192)
+        copiar_memoria(puntero(b), puntero(dirección(ap_guardado)), 8192)
         imprimir2("termo: AP: dormidos otra vez (%u; parados %u)\n", ap_activos, parados)
-        ap_base := 0
         ap_activos := 0
     fin
 
@@ -770,8 +782,8 @@ módulo Termo
                 si a = 1 entonces
                     carga := b yb 1
                     si carga = 1 entonces
-                        visto := tics
                         despierta_ap()                  ; (TERMO) los demás procesadores, a cargar también
+                        visto := tics
                     sino
                         duerme_ap()
                     fin
