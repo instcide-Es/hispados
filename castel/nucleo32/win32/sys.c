@@ -56,7 +56,7 @@ u32 sys_esperar(u32 t, int sin_quedarse)
 	return r;
 }
 u32 sys_memoria(u32 dir, u32 n, int quitar) { return sc(180, LIN(dir), n, quitar ? 1 : 0); }
-u32 sys_teclas(u32 *mapa) { return sc(181, LIN(mapa), 0, 0); }
+u32 sys_teclas(u32 *mapa) { return sc(181, LIN(mapa), 64, 0); }   /* (0.8.7) mapa: 16 u32 (64 octetos, los dos mapas) */
 u32 sys_ventana_op(u32 op, u32 id, u32 dato) { return sc(182, op, id, dato); }
 
 /* la 182, 0 y 1: lo que se pide (win32.cas, Pide_ventana) */

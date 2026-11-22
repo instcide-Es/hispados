@@ -1320,7 +1320,7 @@ módulo Escritorio
             texto_negrita(valor(l), x + (CELDA_P_AN - 8 - w) div 2, yy + 62, t, TINTA)
             zona(v_config, x, yy, CELDA_P_AN - 8, CELDA_P_AL - 6, AC_PANEL + i)
         fin
-        texto(valor(l), 24, CONFIG_AL - 34, "Elija lo que quiere cambiar (o con las flechas e Intro)", TINTA_SUAVE)
+        texto(valor(l), 24, CONFIG_AL - 34, "Elija una sección (o con las flechas e Intro)", TINTA_SUAVE)
         pulsador(v_config, PANEL_AN - 114, CONFIG_AL - 42, 100, 30, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
         repintada(v_config, 0, 0, PANEL_AN, CONFIG_AL)
     fin

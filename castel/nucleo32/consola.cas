@@ -326,6 +326,9 @@ módulo Consola
         sino si código >= 0x3B y código <= 0x53 y código <> 0x45 y código <> 0x46 entonces
             muerta := 0
             a_la_cola(TECLA_ESPECIAL + código)          ; F1 a F10 y el teclado numérico
+        sino si código = 0x57 o código = 0x58 entonces
+            muerta := 0
+            a_la_cola(TECLA_ESPECIAL + código)          ; (0.8.7) F11 y F12 (0x157 y 0x158: TECLA_F11 y TECLA_F12), propias
         sino si código = 0x38 entonces
             alt := cierto                               ; el Alt de la izquierda
         sino si código = 0xB8 entonces

@@ -64,6 +64,8 @@ módulo Llamadas
     público constante TECLA_F2 = 0x13C
     público constante TECLA_F4 = 0x13E
     público constante TECLA_F5 = 0x13F
+    público constante TECLA_F11 = 0x157         ; (0.8.7) F11 y F12 llegan como teclas propias (antes, nada)
+    público constante TECLA_F12 = 0x158
     público constante CTRL_C = 3
 
     público constante CORTADA = 254             ; el código de un programa acabado con Ctrl+C
