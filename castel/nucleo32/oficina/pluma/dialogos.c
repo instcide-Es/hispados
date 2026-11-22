@@ -1966,7 +1966,7 @@ void dlg_ayuda(void)
 		  "Ctrl+Z deshacer · Ctrl+Y rehacer · Ctrl+X, Ctrl+C, Ctrl+V · Ctrl+E todo\n"
 		  "Ctrl+N negrita · Ctrl+K cursiva · Ctrl+S subrayado · Ctrl+O/W letra más grande/pequeña\n"
 		  "Ctrl+Q izquierda · Ctrl+T centro · Ctrl+D derecha · Ctrl+R salto de página\n"
-		  "Ctrl+B buscar · Ctrl+L reemplazar · F5 ir a · F7 ortografía · F12 guardar como\n"
+		  "Ctrl+B buscar · Ctrl+L reemplazar · F5 ir a · F7 ortografía\n"
 		  "Mayús+Intro: salto de línea · Tab en una tabla: la celda siguiente (al final, una fila)\n"
 		  "Ctrl+rueda: zoom · Alt+letra: los menús · botón derecho: propuestas y más");
 }

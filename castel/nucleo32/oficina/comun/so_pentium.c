@@ -715,10 +715,6 @@ static u32 tecla_unicode(u32 k, int *mods)
 	}
 	if (k >= 0x13B && k <= 0x144)
 		return SO_T_F1 + (k - 0x13B);
-	if (k == 0x185)
-		return SO_T_F11;
-	if (k == 0x186)
-		return SO_T_F12;
 	return 0;
 }
 
@@ -791,7 +787,7 @@ void so_menu(int v, int x, int y, const char *opciones, u32 grises, u32 etiqueta
 
 int so_control(void)
 {
-	u32 mapa[8];
+	u32 mapa[16];	/* (la 181 da dos mapas: las pulsadas ahora y desde la última vez) */
 
 	memset(mapa, 0, sizeof mapa);
 	if (ES_ERROR(llamada(181, (u32)mapa, 0, 0)))

@@ -642,6 +642,7 @@ int pl_guarda(const char *ruta, int formato)
 {
 	char e[300], real[600];
 
+	e[0] = 0;
 	if (arch_guarda(P.d, ruta, formato, real, sizeof real, e, sizeof e)) {
 		dlg_aviso("No se ha podido guardar", e);
 		return -1;

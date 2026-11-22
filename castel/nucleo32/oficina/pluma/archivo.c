@@ -196,6 +196,7 @@ int arch_guarda(documento *d, const char *ruta, int formato, char *ruta_real, u3
 	const char *e = NULL;
 	void *f;
 
+	error[0] = 0;
 	switch (formato) {
 	case FMT_PLU: r = plu_escribe(d, &b); break;
 	case FMT_ODT: r = odt_escribe(d, &b); break;
