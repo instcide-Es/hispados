@@ -216,6 +216,7 @@ módulo Permisos
         regla("INICIO.INI", NADIE, falso)                  ; (pentium-menu: lo fijado en el menú Inicio; lo escribe el núcleo)
         regla("DOCK.INI", NADIE, falso)                    ; (el dock, del núcleo)
         regla("ATAJOS.INI", NADIE, falso)
+        regla("ICONOS.INI", NADIE, falso)                  ; (ICONOS) cómo se organizan los iconos del tapiz y dónde están: los escribe el núcleo
         regla("PANEL.INI", NADIE, falso)                   ; (PANEL) los ajustes del Panel de control: los escribe el núcleo (la llamada 174)
         regla("FONDO.HPM", NADIE, falso)                   ; (MIRADOR) el tapiz con imagen: solo el núcleo (la llamada 172)
         regla("NUCLEO.BIN", NADIE, falso)

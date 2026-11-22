@@ -1576,6 +1576,8 @@ módulo Ventanas
                 pon_evento(busca(ventana_inicio), EV_TECLA, k, 0, 0)
             sino si k = TECLA_F1_ y (activa < 0 o en_tapiz) y teclas_a = 0 entonces
                 pon_evento(busca(ventana_inicio), EV_TECLA, k, 0, 0)     ; (MENÚ) F1 en el tapiz: la Ayuda
+            sino si teclas_a = 0 y busca(ventana_fondo) >= 0 y (activa < 0 o (en_tapiz y ventanas[activa].banderas yb SIN_MARCO = 0)) entonces
+                pon_evento(busca(ventana_fondo), EV_TECLA, k, m, modificadores())    ; (ICONOS) en el tapiz: los iconos, con el teclado
             sino si teclas_a <> 0 entonces
                 pon_evento(busca(teclas_a), EV_TECLA, k, m, modificadores())     ; (BLOC) en «c», las teclas de cambio
             sino

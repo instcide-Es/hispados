@@ -455,10 +455,12 @@ módulo Dock
             fin
         fin
         cambia := n_el <> n_antes
-        para k desde 0 hasta n_el - 1 hacer
+        k := 0
+        mientras k < n_el hacer                 ; (ICONOS) con el dock vacío (n_el = 0), «hasta n_el - 1» daba la vuelta
             i := el[k].ventana
             si el[k].activa entonces i := i ob 0x80000000 fin
             si i <> antes[k] entonces cambia := cierto fin
+            k := k + 1
         fin
         devolver cambia
     fin

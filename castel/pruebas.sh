@@ -252,6 +252,10 @@
 #  42. (CORREO, SOLO=correo) Correo, el cliente de correo (CORREO.BIN; pruebas_correo.sh): el
 #      núcleo MIME/HTML/vCard y el IMAP con ASan y fuzz, el servidor de pruebas propio
 #      (IMAP, SMTP, POP3 con TLS), las órdenes y la ventana en QEMU, y lo que tarda en un Atom.
+#  47. (ICONOS, SOLO=iconos) Los iconos del tapiz (pruebas_iconos.sh): 30 a 1024 x 600 y
+#      a 800 x 600, ninguno en la barra ni en el dock (mira_iconos.py); organizar por
+#      nombre, tipo, tamaño y fecha; arrastrar; la cuadrícula, la automática, el teclado,
+#      ICONOS.INI; cambiar la medida en marcha; 47 a 640 x 480, en dos páginas; sin dock.
 #  32. (MIRADOR, SOLO=mirador) El Mirador (MIRADOR.BIN): PNG, BMP, JPG, GIF
 #  41. (PLUMA32, SOLO=pluma) Pluma 2 (PLUMA.BIN, el procesador de textos de 32 bits en C
 #      portable: nucleo32/oficina; pruebas_pluma.sh): formatos, PDF, RTF, corrector, la
@@ -385,6 +389,7 @@
 #   SOLO=agenda ./pruebas.sh      la primera y la 43 (AGENDA: la Agenda; pruebas_agenda.sh)
 #   SOLO=cuentas ./pruebas.sh     la primera y la 44 (CUENTAS32: Cuentas 2; pruebas_cuentas.sh)
 #   SOLO=pintura ./pruebas.sh     la primera y la 45 (PINTURA32: Pintura 2; pruebas_pintura.sh)
+#   SOLO=iconos ./pruebas.sh      la primera y la 47 (ICONOS: los iconos del tapiz; pruebas_iconos.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -446,6 +451,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_cuentas.sh         # (CUENTAS32) la parte 44, como parte_cuentas
 . $AQUI/pruebas_pintura.sh         # (PINTURA32) la parte 45, como parte_pintura
 . $AQUI/pruebas_cortes.sh          # (CORTES) la parte 37, como parte_cortes
+. $AQUI/pruebas_iconos.sh          # (ICONOS) la parte 47, como parte_iconos
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -468,7 +474,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -1597,14 +1603,15 @@ if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excep
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
 # a la medida de un netbook (1024 x 600); llevar un icono a otro sitio y organizarlos; mover una ventana desde su menú
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE="escritorio modo=1024x600" PANTALLA=1024x600 MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":captura c1" ":arrastra 60 190 500 300" \
-  ":raton 700 100" ":captura c2" ":clicd 600 200" ":clic 620 265" ":captura c3" ":clicd 600 200" ":clic 620 215" ":pausa 1" ":captura c4" ":clicd 400 95" ":clic 420 131" \
+  ":raton 700 100" ":captura c2" ":clicd 600 200" ":clic 620 265" ":pausa 1" ":clic 620 313" ":captura c3" ":clicd 600 200" ":clic 620 215" ":pausa 1" ":captura c4" ":clicd 400 95" ":clic 420 131" \
   ":raton 460 233" ":clic 460 233" ":raton 700 400" ":captura c5" > $G/medida.sal 2>&1
 S=$G/medida.sal
 mira "con «modo=1024x600» en la línea del cargador, el escritorio arranca a esa medida" "^escritorio: en marcha, 1024 x 600 con 32 bits por punto"
 miracap "a 1024 x 600 (la pantalla de un netbook): la barra de tareas abajo, de lado a lado, el reloj a la derecha y los iconos" c1 tam 1024 600 negrita 30 570 46 580 Inicio \
   rgb 1019 597 3393E0 12 rgb 600 598 1D5DBA 10 texto 24 50 32 58 "Mi equipo" negrita 854 505 869 520 Hispa-Pentium
-miracap "un icono del tapiz se lleva a otro sitio arrastrándolo" c2 texto 472 312 480 320 Consola notexto 20 196 60 214 Consola texto 24 50 32 58 "Mi equipo"
-miracap "«Organizar iconos» los devuelve a su sitio" c3 texto 32 202 40 210 Consola notexto 460 300 500 330 Consola
+# (ICONOS) arrastrado, va a la celda más cercana de la rejilla; «Organizar iconos...» es un submenú: «Como al principio»
+miracap "un icono del tapiz se lleva a otro sitio arrastrándolo (a la celda de la rejilla más cercana)" c2 texto 480 278 488 286 Consola notexto 20 196 60 214 Consola texto 24 50 32 58 "Mi equipo"
+miracap "«Organizar iconos...» > «Como al principio» los devuelve a su sitio" c3 texto 32 202 40 210 Consola notexto 470 270 500 300 Consola
 miracap "Configuración dice la medida de la pantalla" c4 texto 300 135 320 145 "Pantalla:  1024 x 600, 32 bits por punto"
 miracap "«Mover», en el menú de una ventana: la flecha va a su título y la ventana la sigue hasta el clic siguiente" c5 negrita 298 185 306 193 "Configuración" \
   notexto 255 80 270 95 "Configuración"
@@ -1645,7 +1652,7 @@ SES=(":pausa 2" ":captura ex1" ":doble 60 40" ":pausa 3" ":captura ex2" ":doble 
  ":tecla f4" ":escribe C:\\" ":tecla ret" ":pausa 1" ":clicd 452 310" ":pausa 1" ":captura ex13" ":tecla esc"
  ":clic 260 260" ":ctrlclic 356 260" ":pausa 1" ":captura ex14" ":arrastra 600 455 380 290" ":pausa 1" ":captura ex15"
  ":clic 452 310" ":arrastra 452 310 120 540" ":pausa 2" ":clic 260 410" ":arrastra 260 410 400 535" ":pausa 2" ":captura ex16"
- ":tecla f3" ":escribe pir" ":tecla ret" ":pausa 3" ":captura ex17" ":doble 100 525" ":pausa 3" ":captura ex18" ":arrastra 292 530 400 530" ":pausa 1"
+ ":tecla f3" ":escribe pir" ":tecla ret" ":pausa 3" ":captura ex17" ":tecla meta_l-d" ":pausa 1" ":doble 176 420" ":pausa 3" ":captura ex18" ":arrastra 292 530 400 530" ":pausa 1"
  ":clicd 320 530" ":pausa 1" ":captura ex19" ":clic 380 513" ":pausa 1" ":captura ex20")
 CAPTURAS=$G ESCRIBE=1 DISCO=$G/ex.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" "${SES[@]}" > $G/explorador.sal 2>&1
 S=$G/explorador.sal
@@ -1673,10 +1680,12 @@ miracap "el botón secundario en un archivo: Abrir, Abrir con..., Mandar a la Pa
 miracap "Control y un clic eligen dos" ex14 texto 111 475 121 485 "2 elegidos"
 miracap "y un recuadro con el ratón, los que toca" ex15 texto 111 475 121 485 "7 elegidos"
 mira "arrastrar un archivo al tapiz deja en él un acceso" "^escritorio: un acceso nuevo en el tapiz: C:.LEEME.TXT"
-miracap "el acceso en el tapiz (con su flechita), y un programa soltado en el dock queda fijado" ex16 texto 79 541 89 551 LEEME.TXT texto 615 529 625 539 "Fijado en el dock."
+# (ICONOS) soltado debajo de la zona de los iconos (a la altura del dock), el acceso va a la celda libre más cercana (120, 392), detrás de la ventana
+mira "el acceso, en la zona de los iconos: a la celda libre más cercana (no a la altura del dock)" "escritorio: iconos (acceso nuevo): .* LEEME.TXT@120,392/1;"
+miracap "un programa soltado en el dock queda fijado" ex16 texto 615 529 625 539 "Fijado en el dock."
 miracap "buscar (F3) «pir» en la carpeta y las de dentro: lo encontrado, con su carpeta" ex17 negrita 236 172 256 192 PIRATA.TXT texto 290 172 560 192 "C:\\TEXTOS" \
   texto 103 475 113 485 "Encontrados: 2."
-miracap "dos clics en el acceso del tapiz lo abren con lo suyo (EQUIPO /ABRIR: el Bloc de notas)" ex18 negrita 149 89 159 99 "LEEME.TXT"
+miracap "dos clics en el acceso del tapiz (con Logo+D, que enseña el escritorio) lo abren con lo suyo (EQUIPO /ABRIR: el Bloc de notas)" ex18 negrita 149 89 159 99 "LEEME.TXT"
 miracap "el botón secundario en el dock: Abrir, Abrir otra ventana, Fijar, Quitar, Cerrar y Ocultar el dock" ex19 texto 329 501 339 511 "Ocultar el dock"
 miracap "«Ocultar el dock» lo quita (y lo de debajo se ve)" ex20 nrgb 400 504 0F3F8A 20
 saca $G/ex.img VACIA/NUEVO.TXT $G/nuevo.txt; saca $G/ex.img LEEME.TXT $G/leeme.txt
@@ -5829,6 +5838,8 @@ if parte08 agenda; then parte_agenda; else echo "  (SOLO=${SOLO08:-$SOLO}: sin l
 if parte08 cuentas; then parte_cuentas; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Cuentas 2)"; fi   # (CUENTAS32) la 44
 if parte08 pintura; then parte_pintura; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Pintura 2)"; fi   # (PINTURA32) la 45
 if parte08 cortes; then parte_cortes; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los cortes de la red)"; fi   # (CORTES)
+# ------------------------- 47. (ICONOS) los iconos del tapiz (pruebas_iconos.sh)
+if parte08 iconos; then parte_iconos; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los iconos del tapiz)"; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------- 35. (BLOC) el Bloc de notas 1.0
