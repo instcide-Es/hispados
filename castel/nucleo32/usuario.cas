@@ -773,6 +773,13 @@ módulo Usuario
                 t := tarea_de(a)
                 si t = nulo o t.padre <> actual.id entonces devolver NO_VALE fin
                 si b = 1 y t.estado <> ACABADA entonces devolver SIGUE fin     ; sin quedarse esperando
+                si b = 2 entonces
+                    ; (CORTES) acabar un programa que ha lanzado este (y los que
+                    ; ha lanzado él): «Cancelar», o un programa que no responde.
+                    ; Luego se recoge con acabada() o esperar()
+                    acaba_con_hijos(t, 0)
+                    devolver 0
+                fin
                 devolver esperar(t)
             caso 12:
                 si no puede(b, tamaño(Entrada), cierto) entonces devolver NO_VALE fin
@@ -1690,6 +1697,20 @@ módulo Usuario
         actual.uid_hijo := c.id
         imprimir1("cuentas: SSH: entra %s (con su contraseña)\n", nat32(dirección(c.nombre[0])))
         devolver c.id
+    fin
+
+    ; (CORTES) acaba la tarea t y las que ha lanzado ella (hasta 4 niveles)
+    función acaba_con_hijos(t: puntero a Tarea, nivel: nat32)
+        variable i: nat32
+        variable h: puntero a Tarea
+        si t.estado = Tareas.LIBRE o t.estado = ACABADA entonces devolver fin
+        si nivel < 4 entonces
+            para i desde 0 hasta MAX_TAREAS - 1 hacer
+                h := dirección(tareas[i])
+                si h.estado <> Tareas.LIBRE y h.estado <> ACABADA y h.padre = t.id y h <> t entonces acaba_con_hijos(h, nivel + 1) fin
+            fin
+        fin
+        si t.usuario y no t.servicio entonces acabar_tarea(t) fin
     fin
 
     función atender_usuarios(n: nat32, a: nat32, b: nat32, c: nat32): nat32

@@ -18,8 +18,19 @@ módulo Rtcp
     constante CABE_TX = 16384
     constante CABE_RX = 32768
     constante RTO_INICIAL = 100                 ; tics (1 s)
-    constante RTO_MÁXIMO = 3200
-    constante MAX_INTENTOS = 8
+    ; (CORTES) con tope: 1, 2, 4, 8, 16, 16 y 16 s; al séptimo sin respuesta
+    ; (unos 63 s desde que se mandó), cortada. Antes, hasta 32 s y ocho
+    ; intentos: más de dos minutos con el camino muerto
+    constante RTO_MÁXIMO = 1600
+    constante MAX_INTENTOS = 6
+    ; (CORTES) sin oír nada de la otra punta durante KA_INACTIVO (con nada
+    ; por confirmar), se le pregunta (un «keepalive»: un ACK con el número
+    ; de antes, que obliga a contestar); cada KA_INTERVALO otra vez y, a los
+    ; KA_SONDEOS sin respuesta (35 s en total), la conexión está muerta (el
+    ; Wi-Fi se ha ido sin decirlo, el router se ha reiniciado...): cortada
+    constante KA_INACTIVO = 1500                ; tics (15 s)
+    constante KA_INTERVALO = 500                ; (5 s)
+    constante KA_SONDEOS = 4
 
     ; los estados
     constante CERRADA = 0
@@ -72,6 +83,8 @@ módulo Rtcp
         p_clase, p_hueco, p_serie, p_límite, p_cabe: nat32
         de_escucha: nat32                       ; (SSH) llegó a ese puerto en escucha (su sitio + 1; 0: la abrió el programa)
         aceptada: bool                          ; (SSH) el programa ya la tiene (O_ACEPTAR)
+        oído: nat32                             ; (CORTES) el tic en que llegó algo de la otra punta
+        sondeos: nat32                          ; (CORTES) los «keepalive» mandados sin respuesta
     fin
     variable conex: arreglo [MAX_CONEX] de Conexión
 
@@ -280,6 +293,8 @@ módulo Rtcp
         c.fin_enviado := falso
         c.cerrar := falso
         c.error := 0
+        c.oído := ahora()                       ; (CORTES)
+        c.sondeos := 0
         c.estado := SYN_ENVIADO
         c.p_clase := P_CONECTAR
         c.p_hueco := hueco
@@ -442,6 +457,8 @@ módulo Rtcp
         c.cerrar := falso
         c.error := 0
         c.p_clase := P_NADA
+        c.oído := ahora()                       ; (CORTES)
+        c.sondeos := 0
         c.estado := SYN_RECIBIDO
         c.límite := ahora() + 3000                  ; (si en 30 s no se acepta, fuera)
         manda(c, F_SYN ob F_ACK, c.iss, 0, 0)
@@ -649,6 +666,8 @@ módulo Rtcp
             manda_rst(ip, p, n)
             devolver
         fin
+        c.oído := ahora()                       ; (CORTES) la otra punta sigue ahí
+        c.sondeos := 0
         ; ---- (SSH) SYN_RECIBIDO: esperando el ACK de nuestro SYN+ACK ----
         si c.estado = SYN_RECIBIDO entonces
             si señal yb F_RST <> 0 entonces
@@ -840,6 +859,18 @@ módulo Rtcp
                     libera(c)
                     seguir
                 fin
+                ; (CORTES) ¿sigue viva la otra punta? (sin nada por confirmar: si
+                ; lo hay, ya pregunta el reloj de volver a mandar)
+                si c.reloj = 0 y no c.suelta y (c.estado = ESTABLECIDA o c.estado = FIN_ESPERA_1 o c.estado = FIN_ESPERA_2 o c.estado = CIERRE_ESPERA) y t - c.oído >= KA_INACTIVO + c.sondeos * KA_INTERVALO entonces
+                    si c.sondeos >= KA_SONDEOS entonces
+                        apunta4("tcp: la conexión con el puerto %u no contesta desde hace %u s: cortada", c.puerto_r, (t - c.oído) div 100, 0, 0)
+                        manda(c, F_RST ob F_ACK, c.snd_nxt, 0, 0)
+                        rompe(c, CORTADA_RED)
+                        seguir
+                    fin
+                    manda(c, F_ACK, c.snd_una - 1, 0, 0)
+                    c.sondeos := c.sondeos + 1
+                fin
                 ; volver a mandar
                 si c.reloj <> 0 y t >= c.reloj entonces
                     c.intentos := c.intentos + 1
@@ -850,6 +881,7 @@ módulo Rtcp
                             contesta_pendiente(c, TIEMPO, nulo, 0)
                             libera(c)
                         sino
+                            apunta4("tcp: lo mandado al puerto %u no llega (%u intentos): cortada", c.puerto_r, MAX_INTENTOS + 1, 0, 0)    ; (CORTES)
                             manda(c, F_RST ob F_ACK, c.snd_nxt, 0, 0)
                             rompe(c, CORTADA_RED)
                         fin
@@ -897,6 +929,21 @@ módulo Rtcp
         para i desde 0 hasta MAX_CONEX - 1 hacer
             si conex[i].usada entonces rompe(dirección(conex[i]), e) fin
         fin
+    fin
+
+    ; (CORTES) la red ha cambiado (otra IP u otra puerta de enlace, por
+    ; DHCP): las conexiones que iban por la tarjeta ya no pueden seguir (la
+    ; otra punta manda a la IP de antes); las del túnel, sí
+    público función tcp_red_cambió(e: nat32)
+        variable i, n: nat32
+        n := 0
+        para i desde 0 hasta MAX_CONEX - 1 hacer
+            si conex[i].usada y conex[i].estado <> ROTA y no por_túnel(conex[i].ip) entonces
+                si no conex[i].suelta entonces n := n + 1 fin
+                rompe(dirección(conex[i]), e)
+            fin
+        fin
+        si n > 0 entonces apunta4("tcp: la red ha cambiado: %u conexiones cortadas", n, 0, 0, 0) fin
     fin
 
     público función conexiones_abiertas(): nat32

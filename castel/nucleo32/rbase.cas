@@ -50,6 +50,7 @@ módulo Rbase
     público constante CORTADA_RED = 0xFFFFFFE8  ; la conexión se ha cortado
     público constante NO_CONEXIÓN = 0xFFFFFFE7  ; esa conexión no existe (o no quedan)
     público constante INALCANZABLE = 0xFFFFFFE6 ; no se llega (nadie contesta por esa IP en la red)
+    público constante RED_CAMBIADA = 0xFFFFFFE0 ; (CORTES) la red ha cambiado (otra IP u otra puerta): la conexión, cortada
     público constante NO_VALE_RED = 0xFFFFFFF9  ; (el NO_VALE del núcleo)
 
     ; ---- lo que contesta O_ESTADO (es el mismo tipo de redes.cas) ----
