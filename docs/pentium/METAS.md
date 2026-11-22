@@ -36,7 +36,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 ## El sistema
 - [x] ~~Sonido: HD Audio y AC'97, mezclador, sonidos del sistema~~ (21/11, rama pentium-sonido: SONIDO.BIN con HD Audio, AC'97 y Sound Blaster 16, varios programas a la vez, el volumen general y el de cada uno, los auriculares, los sonidos del sistema; docs/PENTIUM.md §14 sexies). Queda: probarlo en el HP Mini, el Toshiba y el MacBook 2017; grabar
 - [x] ~~Wi-Fi (el núcleo de C de Hispa-486: Broadcom y Atheros) con su ventanita~~ — rama pentium-wifi (21/11: WIFI.BIN, REDWIFI.BIN, el icono con rayitas, Configuración › Red; a falta de probarlo en el HP Mini)
-- [ ] Usuarios con contraseña y carpetas propias; permisos
+- [x] ~~Usuarios con contraseña y carpetas propias; permisos~~ — rama usuarios (22/11: la pantalla de entrada, contraseñas con Argon2id, `\USUARIOS\<nombre>` solo para su dueño, administrador y normal, Configuración › Usuarios —USUARIOS.BIN, una sección aparte para el Panel—, la entrada en texto, SSH con los usuarios; y de la revisión de seguridad: la serie del catálogo y el pozo del azar del núcleo; docs/PENTIUM.md §14 tredecies). Queda: cifrar el disco o las carpetas (leído desde otro sistema se ve todo), la sesión de ClicGest por usuario, una contraseña en el asistente del primer arranque
 - [ ] Suspender e hibernar (ACPI S3/S4)
 - [ ] Impresoras (USB y de red)
 - [ ] Compartir carpetas en red (SMB) y FTP

@@ -19,7 +19,8 @@
 #      contraseña mala y con la buena; el modo administrador con SU
 #      contraseña. El azar del núcleo no se repite de un arranque a otro.
 #   3. Con el escritorio: la pantalla de entrada (Ctrl+Alt+Supr y el logo no
-#      la saltan), la contraseña mala, la buena, cerrar la sesión y entrar
+#      la saltan), la contraseña mala, la buena, ADMIN en la Consola (la
+#      ventanita del núcleo pide la contraseña), cerrar la sesión y entrar
 #      como Bea («Hola, Bea»).
 #   4. SSH con los usuarios (OpenSSH de aquí, por QEMU): Bea con su
 #      contraseña entra y es Bea; con otra, no; Biblioteca (sin contraseña),
@@ -29,7 +30,7 @@ parte_usuarios() {
 echo "== Hispa-Pentium: los usuarios (la entrada, Argon2id, las carpetas), la serie del catálogo, el azar del núcleo y SSH con los usuarios =="
 local X=$P/usuarios HC=$AQUI/nucleo32/hispac S hechos=1 sal1 sal2 a1 a2 PS SPID FUERA
 local HPQ="python3 -I $AQUI/../tools/hpq.py"
-rm -rf $X; mkdir -p $X/v $X/raiz/pentium/nuevo $X/raiz/pentium/viejo $X/f
+rm -rf $X; mkdir -p $X/v $X/raiz/pentium/nuevo $X/raiz/pentium/viejo $X/f $X/srv
 export MTOOLS_SKIP_CHECK=1
 G=$X
 # ---- 0. en Linux ----
@@ -131,7 +132,7 @@ if [ $hechos != 1 ]; then ko "no se han podido hacer los programas o los discos 
 ok "el disco de las pruebas: un sistema de antes (HISPA.INI con «usuario=Ana», sin USUARIOS.TXT) con USUARIOS.BIN, ARGON2.BIN, PAQUETES (la clave de prueba), la red y SSHD"
 python3 -I $AQUI/nucleo32/servidor_prueba.py $X/srv $X/raiz > $X/srv.txt 2>&1 &
 SPID=$!
-for _ in $(seq 50); do [ -s $X/srv/puerto ] && break; sleep 0.1; done
+for _ in $(seq 100); do [ -s $X/srv/puerto ] && break; sleep 0.1; done
 local U="http://10.0.2.2:$(cat $X/srv/puerto 2> /dev/null)/pentium"
 # ---- 1. el sistema de antes: sus usuarios nuevos ----
 cp $X/sis.img $X/s1.img
@@ -139,7 +140,7 @@ ESCRIBE=1 SATA=$X/s1.img MEMORIA=128 MODULOS= ARRANQUE=ordenes QEMU_MAS="-nic us
   $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 3" "usuarios" ":pausa 1" "usuarios /clave Ana" ":pausa 1" "uno2tres" "uno2tres" ":pausa 12" \
   "usuarios /nuevo Bea" ":pausa 1" "secreta" "secreta" ":pausa 12" "usuarios /nuevo Biblioteca /solo" ":pausa 1" "" ":pausa 4" \
   "echo secreto de Ana > \\usuarios\\ana\\document\\secreto.txt" "copy \\hispa\\hola.bin \\usuarios\\ana\\hola.bin" "dir \\usuarios" ":pausa 1" \
-  "ipconfig" ":pausa 8" "paquetes catalogo /desde=$U/nuevo/" ":pausa 8" "paquetes catalogo /desde=$U/viejo/" ":pausa 8" "espia" ":pausa 2" > $X/t1.sal 2>&1
+  "ipconfig" ":pausa 8" "paquetes catalogo /desde=$U/nuevo/" ":pausa 8" "paquetes catalogo /desde=$U/viejo/" ":pausa 8" > $X/t1.sal 2>&1
 tr -d '\r' < $X/t1.sal > $X/t1.txt
 S=$X/t1.txt
 mira "un sistema de antes: su usuario (el de HISPA.INI) es administrador, sin contraseña, y entra solo, como siempre" \
@@ -152,7 +153,6 @@ mira "USUARIOS /NUEVO: Bea (normal, con contraseña) y Biblioteca (normal, sin c
 mira "PAQUETES por Internet: el catálogo firmado con la serie 100 se usa (y se apunta); el de la serie 50, firmado igual, no (la vuelta atrás)" \
   "^La firma del catálogo es buena" "^La serie del catálogo: 100\.$" \
   "^paquetes: el catálogo de Internet es más viejo (serie 50) que el último que se ha usado (serie 100): no se usa$"
-sal1=$(sed -n 's/^espia: azar //p' $X/t1.txt)
 if sano $X/s1.img && saca $X/s1.img HISPA/USUARIOS.TXT $X/U1.TXT && [ "$(grep -c '^u=.*|argon2id\$12288\$3\$[0-9a-f]\{32\}\$[0-9a-f]\{64\}' $X/U1.TXT)" = 2 ] \
    && grep -q '^u=3|N|0|1|BIBLIOTE|Biblioteca|' $X/U1.TXT && python3 -c "import sys; d=open(sys.argv[1],'rb').read(); sys.exit(1 if b'uno2tres' in d or b'secreta' in d else 0)" $X/s1.img; then
   ok "desde fuera: el disco sano; USUARIOS.TXT con Ana y Bea resumidas con Argon2id (su sal y su resumen) y Biblioteca sin contraseña; ni rastro de las contraseñas en todo el disco"
@@ -188,20 +188,25 @@ mira "SALIR: sale; la entrada en texto (Usuario, Contraseña con asteriscos): co
   "^cuentas: sale el usuario 3" "^Usuario: Ana$" "^La contraseña no es esa\.$" "^cuentas: entra Ana (el usuario 1)$" "^> ordenes$" "^secreto de Ana$"
 mira "ADMIN: el núcleo pide la contraseña de Ana (no un Sí); con ella, el modo administrador lee USUARIOS.TXT" \
   "^Contraseña de Ana (Esc: no): \*\*\*\*\*\*\*\*$" "^permisos: modo administrador para ORDENES.BIN" "^u=2|N|0|0|BEA|Bea|argon2id"
-sal2=$(sed -n 's/^espia: azar //p' $X/t2.txt)
-if [ ${#sal1} = 64 ] && [ ${#sal2} = 64 ] && [ "$sal1" != "$sal2" ] && saca $X/s2.img HISPA/AZAR.SEM $X/azar2.sem && ! cmp -s $X/azar1.sem $X/azar2.sem; then
-  ok "el azar del núcleo (la llamada 210) no se repite de un arranque a otro (${sal1:0:16}... y ${sal2:0:16}...), y AZAR.SEM cambia en cada arranque"
-else ko "el azar se repite o no sale: «$sal1» y «$sal2»"; fi
+sal1=$(sed -n 's/^espia: azar //p' $X/t2.txt)
+if saca $X/s2.img HISPA/AZAR.SEM $X/azar2.sem && ! cmp -s $X/azar1.sem $X/azar2.sem; then ok "AZAR.SEM (la semilla del pozo del azar) cambia en cada arranque"
+else ko "AZAR.SEM no cambia de un arranque a otro"; fi
 if saca $X/s2.img USUARIOS/BIBLIOTE/DOCUMENT/MIO.TXT $X/m.txt && ! mdir -i $X/s2.img ::USUARIOS/ANA/DOCUMENT/MALO.TXT > /dev/null 2>&1 \
    && saca $X/s2.img USUARIOS/ANA/DOCUMENT/SECRETO.TXT $X/sec2.txt && ! mdir -i $X/s2.img ::USUARIOS/OTRO > /dev/null 2>&1 && sano $X/s2.img; then
   ok "y en el disco: lo de Biblioteca en su carpeta; el secreto de Ana, en su sitio; nada suyo en la de Ana; ni \\USUARIOS\\OTRO"
 else ko "el disco no queda como tiene que quedar tras el arranque de Biblioteca"; fi
+# otro arranque del mismo disco (con la misma semilla que tendrá el de SSH: el
+# azar no debe salir igual aunque AZAR.SEM sea la misma)
+cp $X/s2.img $X/s3.img
+ESCRIBE=1 SATA=$X/s3.img MEMORIA=128 MODULOS= ARRANQUE=ordenes $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 3" "espia" ":pausa 3" > $X/t3.sal 2>&1
+local sal3; sal3=$(tr -d '\r' < $X/t3.sal | sed -n 's/^espia: azar //p')
 # ---- 3. con el escritorio: la pantalla de entrada ----
 cp $X/s2.img $X/e.img
 saca $X/e.img HISPA/USUARIOS.TXT $X/U2.TXT && sed 's/|1|BIBLIOTE/|0|BIBLIOTE/' $X/U2.TXT > $X/U3.TXT && mcopy -o -i $X/e.img $X/U3.TXT ::HISPA/USUARIOS.TXT
 CAPTURAS=$X ESCRIBE=1 SATA=$X/e.img MEMORIA=128 MODULOS= ARRANQUE=escritorio \
   $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 6" ":tecla ctrl-alt-delete" ":tecla meta_l" ":pausa 1" ":captura ue1" ":escribe nopuede" ":tecla ret" ":pausa 5" ":captura ue2" \
-  ":escribe uno2tres" ":tecla ret" ":pausa 6" ":tecla meta_l-l" ":pausa 4" ":captura ue3" ":tecla right" ":escribe secreta" ":tecla ret" ":pausa 6" ":tecla meta_l" ":pausa 2" ":captura ue4" > $X/e.sal 2>&1
+  ":escribe uno2tres" ":tecla ret" ":pausa 6" ":doble 60 186" ":pausa 4" "admin" ":pausa 2" ":captura ue5" ":escribe uno2tres" ":tecla ret" ":pausa 5" \
+  ":tecla meta_l-l" ":pausa 6" ":captura ue3" ":tecla right" ":escribe secreta" ":tecla ret" ":pausa 6" ":tecla meta_l" ":pausa 2" ":captura ue4" > $X/e.sal 2>&1
 tr -d '\r' < $X/e.sal > $X/e.txt
 S=$X/e.txt
 miracap "con el escritorio, la pantalla de entrada: los tres usuarios, su tipo, la contraseña de la elegida, Entrar, Reiniciar y Apagar (Ctrl+Alt+Supr y el logo no la saltan)" ue1 \
@@ -210,6 +215,9 @@ miracap "con el escritorio, la pantalla de entrada: los tres usuarios, su tipo, 
 miracap "con la contraseña mala: «La contraseña no es esa», y no entra" ue2 negrita 150 350 650 400 "La contraseña no es esa"
 mira "con la buena entra Ana; cerrar la sesión (logo+L) vuelve a la pantalla; Bea, con la suya, entra" \
   "^entrada: la pantalla de entrada$" "^entrada: contraseña que no vale$" "^cuentas: entra Ana (el usuario 1)$" "^cuentas: sale el usuario 1" "^cuentas: entra Bea (el usuario 2)$"
+miracap "ADMIN en la Consola de Ana: la ventanita del núcleo pide SU contraseña (no un «Sí»)" ue5 \
+  negrita 190 230 420 260 "ORDENES.BIN pide el modo administrador" texto 190 280 420 300 "Contraseña de Ana:" negrita 380 360 470 400 "Aceptar"
+mira "con la contraseña de Ana, ORDENES (en su Consola) tiene el modo administrador" "^permisos: modo administrador para ORDENES.BIN"
 miracap "tras cerrar la sesión, otra vez la pantalla de entrada" ue3 negrita 300 70 500 110 "Elija su usuario"
 miracap "y el menú Inicio saluda a quien ha entrado: «Hola, Bea»" ue4 negrita 0 90 400 130 "Hola, Bea"
 if ! grep -q "Administrador de tareas\|excepción\|\*\*\*" $S; then ok "sin el Administrador de tareas detrás de la pantalla de entrada, y sin quejas del núcleo"
@@ -240,11 +248,15 @@ if command -v ssh > /dev/null && command -v ssh-keygen > /dev/null; then
   ) &
   FUERA=$!
   ESCRIBE=1 SATA=$X/h.img MEMORIA=128 MODULOS= ARRANQUE=ordenes QEMU_MAS="-netdev user,id=n0,hostfwd=tcp:127.0.0.1:$PS-:22 -device e1000,netdev=n0" \
-    $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 3" "salir" ":pausa 2" "Ana" ":pausa 1" "uno2tres" ":pausa 6" "ordenes" ":pausa 2" "sshd /encender" ":pausa 150" > $X/h.sal 2>&1
+    $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 3" "espia" ":pausa 3" "salir" ":pausa 2" "Ana" ":pausa 1" "uno2tres" ":pausa 6" "ordenes" ":pausa 2" "sshd /encender" ":pausa 150" > $X/h.sal 2>&1
   wait $FUERA
   tr -d '\r' < $X/h.sal > $X/h.txt
   S=$X/h.txt
   mira "SSHD encendido por una administradora (Ana), con los usuarios" "^Servidor SSH encendido (puerto 22)" "red: tcp: escuchando en el puerto 22$"
+  sal2=$(sed -n 's/^espia: azar //p' $X/h.txt)
+  if [ ${#sal1} = 64 ] && [ ${#sal2} = 64 ] && [ ${#sal3} = 64 ] && [ "$sal1" != "$sal2" ] && [ "$sal3" != "$sal2" ] && [ "$sal1" != "$sal3" ]; then
+    ok "el azar del núcleo (la llamada 210) no se repite: tres arranques, tres distintos (${sal1:0:12}..., ${sal3:0:12}..., ${sal2:0:12}...), también dos con la misma AZAR.SEM"
+  else ko "el azar se repite o no sale: «$sal1», «$sal3» y «$sal2»"; fi
   mira "SSHD: Bea entra con su contraseña (la comprueba el núcleo: Argon2id con UTF-8) y Ana con la llave de su carpeta; la contraseña mala y Biblioteca (sin contraseña), no" \
     "^cuentas: SSH: entra Bea (con su contraseña)$" "^sshd: entra Bea con la contraseña$" "^sshd: contraseña que no vale (Bea)$" "^sshd: contraseña que no vale (Biblioteca)$" \
     "^cuentas: SSH: entra Ana (con su llave)$" "^sshd: entra Ana con su llave$"

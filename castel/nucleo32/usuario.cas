@@ -152,7 +152,7 @@ módulo Usuario
     ; la versión de verdad, la del paquete «base» (tools/hpq.py, SISTEMA): la
     ; que dicen el menú Inicio, Configuración y «Acerca de» (la primera parte
     ; de las pruebas mira que sea la misma que la de hpq.py)
-    público constante VERSIÓN_TEXTO = "0.8.6"
+    público constante VERSIÓN_TEXTO = "0.8.7"
     público constante SIGUE = 0xFFFFFF00        ; (esperar sin quedarse) la tarea no ha acabado todavía
 
     ; ---- más errores (los de los archivos, en fat.cas) ----
@@ -1517,8 +1517,14 @@ módulo Usuario
                     Cuentas.quita(id)
                     devolver MAL
                 fin
+                ; (que entre solo uno)
+                si c.entra_solo entonces
+                    para r desde 0 hasta MAX_CUENTAS - 1 hacer
+                        si cuentas[r].usada y cuentas[r].id <> id entonces cuentas[r].entra_solo := falso fin
+                    fin
+                fin
                 si no guarda_cuentas() entonces
-                    Cuentas.quita(id)
+                    carga_cuentas()
                     devolver PROTEGIDO
                 fin
                 imprimir2("cuentas: %s da de alta a %s\n", nat32(actual.nombre), nat32(dirección(c.nombre[0])))
@@ -2406,6 +2412,7 @@ módulo Usuario
             ; delante (en la pantalla de entrada, nadie: el sistema)
             si actual <> nulo y actual.usuario entonces
                 t.uid := actual.uid
+                t.remota := actual.remota o actual.uid_hijo <> 0
                 si actual.uid_hijo <> 0 entonces
                     t.uid := actual.uid_hijo
                     actual.uid_hijo := 0

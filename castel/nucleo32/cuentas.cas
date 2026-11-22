@@ -592,7 +592,8 @@ módulo Cuentas
         n := 0
         para i desde 0 hasta MAX_TAREAS - 1 hacer
             t := dirección(tareas[i])
-            si t.estado <> LIBRE y t.estado <> ACABADA y t.usuario y t.uid = sesión y no t.servicio y t <> actual entonces
+            ; (lo de una sesión de SSH del mismo usuario, no: es otra sesión)
+            si t.estado <> LIBRE y t.estado <> ACABADA y t.usuario y t.uid = sesión y no t.servicio y no t.remota y t <> actual entonces
                 acabar_tarea(t)
                 n := n + 1
             fin

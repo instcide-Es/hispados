@@ -81,6 +81,7 @@ módulo Tareas
         ; puede instalar, poner la hora o pedir el modo administrador
         uid: nat32
         uid_hijo: nat32                         ; (SSHD) el que tendrá el próximo programa que lance (0: el suyo)
+        remota: bool                            ; (SSHD) de una sesión de SSH (y lo que lance): no la acaba cerrar la sesión de la pantalla
     fin
 
     público tipo Cola = estructura
@@ -417,6 +418,7 @@ módulo Tareas
         t.admin := falso
         t.uid := 0                              ; (USUARIOS) lo pone quien la carga (usuario.cas)
         t.uid_hijo := 0
+        t.remota := falso
         devolver t
     fin
 
