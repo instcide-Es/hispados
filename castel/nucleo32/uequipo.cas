@@ -114,6 +114,7 @@ módulo UEquipo
     variable ocultos: bool                      ; enseñar los ocultos y los de sistema
     variable aviso: arreglo [200] de byte
     variable abierto_m: ent32 = -1              ; el menú de la barra que está abierto
+    variable menú_con_editar: bool              ; (PINTURA32) el del botón secundario lleva «Editar con Pintura»
     variable ancla: ent32                       ; desde dónde se elige con Mayús
 
     ; la historia (Atrás, Adelante)
@@ -2995,6 +2996,7 @@ módulo UEquipo
         fin
         si en_algo entonces
             grises := 0
+            menú_con_editar := falso                ; (PINTURA32)
             si no puede entonces grises := grises ob 8 ob 64 ob 128 ob 256 fin
             si item(primero_marcado()).carpeta entonces grises := grises ob 2 fin
             si no item(primero_marcado()).carpeta y es_imagen_de_disco(dirección(item(primero_marcado()).ruta[0])) entonces
@@ -3003,6 +3005,10 @@ módulo UEquipo
             sino si no item(primero_marcado()).carpeta y acaba_en(dirección(item(primero_marcado()).ruta[0]), ".ZIP") entonces
                 ; (ZIP) un .ZIP: también «Extraer todo...» (Comprimidos)
                 menú(Controles.v, x, yy, "Abrir|Abrir con...|-|Cortar|Copiar|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades|-|Comprimir en ZIP|Extraer todo...", grises ob (grises yb 8) * 512 ob (grises yb 8) * 1024, M_CONTEXTO)
+            sino si no item(primero_marcado()).carpeta y se_edita_con_pintura(dirección(item(primero_marcado()).ruta[0])) entonces
+                ; (PINTURA32) una imagen, con Pintura 2 instalada: también «Editar con Pintura»
+                menú_con_editar := cierto
+                menú(Controles.v, x, yy, "Abrir|Abrir con...|-|Cortar|Copiar|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades|-|Comprimir en ZIP|Editar con Pintura", grises ob (grises yb 8) * 512, M_CONTEXTO)
             sino
                 menú(Controles.v, x, yy, "Abrir|Abrir con...|-|Cortar|Copiar|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades|-|Comprimir en ZIP", grises ob (grises yb 8) * 512, M_CONTEXTO)    ; (ZIP)
             fin
@@ -3111,7 +3117,7 @@ módulo UEquipo
                         caso 8: pide_borrar(cierto)
                         caso 10: pide_propiedades()
                         caso 12: comprime_elegidos()          ; (ZIP)
-                        caso 13: extrae_zip()                 ; (ZIP)
+                        caso 13: si menú_con_editar entonces edita_con_pintura() sino extrae_zip() fin     ; (ZIP) (PINTURA32)
                     fin
                 fin
             caso M_FONDO:
@@ -3635,6 +3641,24 @@ módulo UEquipo
             devolver
         fin
         d1(aviso, "Comprimiendo %u en un ZIP...", n)
+    fin
+
+    ; (PINTURA32) «Editar» de las imágenes que lee Pintura 2 (PNG, JPG, BMP,
+    ; GIF, PCX, ICO, TGA), si está (\HISPA\PINTURA.BIN, el paquete «pintura»);
+    ; «Abrir» sigue siendo el Mirador
+    función se_edita_con_pintura(r: puntero a byte): bool
+        si no (acaba_en(r, ".PNG") o acaba_en(r, ".JPG") o acaba_en(r, ".JPE") o acaba_en(r, ".BMP") o acaba_en(r, ".GIF") o acaba_en(r, ".PCX") o acaba_en(r, ".ICO") o acaba_en(r, ".TGA")) entonces devolver falso fin
+        devolver hay_programa("\\PINTURA.BIN")
+    fin
+
+    función edita_con_pintura()
+        variable k: ent32
+        variable t: nat32
+        menú_con_editar := falso
+        k := primero_marcado()
+        si k < 0 entonces devolver fin
+        t := lanzar("\\PINTURA.BIN", dirección(item(k).ruta[0]))
+        si es_error(t) entonces copiar(aviso, "No se ha podido abrir Pintura.") fin
     fin
 
     ; el .ZIP elegido, sacado entero a una carpeta de al lado (COMPRIM /EXTRAER)

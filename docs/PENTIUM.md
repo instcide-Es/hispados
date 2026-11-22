@@ -6535,14 +6535,14 @@ las pruebas y el modelo de Hispa-64):
 
 | Pieza | Qué da |
 |---|---|
-| `so.h`, `so_pentium.c`, `so_anfitrion.c` | lo único que cambia de un sistema a otro: memoria (la de Hispa-PDF), archivos y carpetas (rutas en UTF-8), la ventana (llamadas 32-36, 39, 40, 41, 80, 81, 181), los sucesos ya en Unicode (`so_suceso`), el portapapeles, la hora. En Linux, una **ventana de mentira** que se maneja con un guion (`OFI_GUION`: escribe, tecla, clic, doble, arrastra, rueda, elige, captura...) y deja capturas `.ppm` |
+| `so.h`, `so_pentium.c`, `so_anfitrion.c` | lo único que cambia de un sistema a otro: memoria (la de Hispa-PDF), archivos y carpetas (rutas en UTF-8), la ventana (llamadas 32-36, 39, 40, 41, 80, 81, 181), los sucesos ya en Unicode (`so_suceso`), el portapapeles, la hora. En Linux, una **ventana de mentira** que se maneja con un guion (`OFI_GUION`: escribe, tecla, clic, doble, arrastra, rueda, elige, captura...) y deja capturas `.ppm`. (PINTURA32) El fondo del escritorio (`so_fondo_escritorio`: la llamada 172; en Linux, `fondo.ppm`), la pantalla entera (`so_pantalla_entera`) y en el guion `arrastra ... der|ctrl|mayus|pasos N` y `traza X1 Y1 X2 Y2 ...` |
 | `entrada.asm`, `pentium.ld`, `inc/` | la cabecera HPU3 y la entrada (llama a `ofi_principal`), el enlace en 0x40000000, las cabeceras de C sin biblioteca |
 | `texto.h` | UTF-8, UTF-32, la 437 de Hispa (con Á, Í, Ó, Ú, €), mayúsculas, un `printf` pequeño (`fmt`, `dice`) y el búfer que crece (`bufer`, `buf_xml`...) |
 | `ttf.h` | las TrueType sin fiarse de ellas (comprobar, el glifo de una letra, la familia del `name`) y el **subconjunto** para un PDF |
 | `letras.h` | las letras: las DejaVu de dentro (`haz_letras.py`) y las del usuario, la familia más parecida, lo que mide cada letra (en milésimas de em) y su dibujo con grises guardado |
 | `lienzo.h` | dibujar en un lienzo 0x00RRGGBB: rectángulos, esquinas redondas, rayas y polígonos suavizados, imágenes a escala con alfa, la onda del corrector, texto |
 | `ui.h`, `iconos.c` | la cara: barra de menús, barras de herramientas (botones, conmutadores, listas, colores), **regla**, barras de desplazamiento, barra de estado y **cuadros de diálogo** (rótulos, campos, números con flechas, botones, casillas, opciones, listas, desplegables, muestras); 37 iconos |
-| `imagen.h` | PNG, JPG, BMP y GIF con stb_image (con topes) |
+| `imagen.h` | PNG, JPG, BMP y GIF con stb_image (con topes); (PINTURA32) con otro tope (`imagen_lee_max`) y los TGA, que no tienen firma (`imagen_lee_tga`) |
 | `zip.h`, `miniz_ofi.c` | leer y escribir ZIP con miniz (topes: 64 MB por archivo, 256 MB en total, 20.000 entradas) |
 | `xml.h` | un XML seguro (sin recursión, sin DTD) en árbol, con caminos (`xml_camino(n, "w:body/w:p")`) y lo de escribirlo: para ODT/DOCX y luego ODS/XLSX |
 | `pdfsal.h` | escribir PDF: páginas, texto con la x de cada letra, TrueType incrustadas, imágenes, rayas, rectángulos, marcadores y metadatos |
@@ -6615,6 +6615,208 @@ PDF), **Datos 2**, **Presentaciones 2** (ODP/PPTX y pase a pantalla
 completa), **Publicaciones 2** (marcos sobre la maqueta de Pluma) y
 **Facturas 2** (con el PDF de `pdfsal`). Los `.HVP` siguen para Hispa-386.
 Ver docs/pentium/METAS.md.
+
+## 14 quindecies. Pintura 2 (PINTURA.BIN, rama pintura32)
+
+*22/11/2026. Carlos: «¿Tienes en cuenta el Paint de 32 bits?». Pintura 2 es
+el programa de dibujo nativo, al estilo del Paint clásico de 32 bits pero
+con lo que hoy se espera (sin su marca ni su aspecto). Lo cambiado fuera de
+`castel/nucleo32/oficina/` lleva la marca «(PINTURA32)».*
+
+| | |
+|---|---|
+| ![Pintura 2 en QEMU, a 1024 x 600](pentium/pintura/pi1.png) | ![El pincel, una elipse y un texto TrueType](pentium/pintura/pi2.png) |
+| ![El menú Archivo: «Usar como fondo de escritorio»](pentium/pintura/pi3.png) | ![El dibujo, de fondo de escritorio](pentium/pintura/pi4.png) |
+| ![DIBUJO.PNG, vuelto a abrir](pentium/pintura/pi5.png) | ![El editor de colores (RGB, HSV, opacidad, código #)](pentium/pintura/pi6.png) |
+| ![En el anfitrión: el cuentagotas dice el nombre del color](pentium/pintura/hv1.png) | ![Un lienzo de 4096 x 4096](pentium/pintura/hv3.png) |
+| ![Mi equipo: «Editar con Pintura»](pentium/pintura/pi7.png) | ![Lo que se prueba en el anfitrión: cada herramienta](pentium/pintura/esperadas.png) |
+
+**Qué es.** Un programa del anillo 3 de 32 bits (`\HISPA\PINTURA.BIN`, unos
+510 KB con las DejaVu dentro), sin HVPRUN, en **C portable** sobre la
+biblioteca común de la oficina (`oficina/comun`): el mismo código se compila
+para Hispa-64 cambiando solo `comun/so_*.c`. La Pintura de Hispa-386
+(`PINTURA.HVP`, con HVPRUN) sigue para Hispa-386.
+
+**La cara**: la barra de menús (Archivo, Edición, Ver, Imagen, Colores,
+Herramientas y ?, con sus atajos); la **barra de opciones** (nuevo, abrir,
+guardar, cortar, copiar, pegar, deshacer y rehacer; y lo de la herramienta:
+forma y grosor del pincel, suavizado, contorno o relleno, tolerancia, lo que
+deja el borrador, densidad, selección opaca o transparente, letra, tamaño,
+negrita, cursiva y fondo del texto; y el zoom); a la izquierda, la **caja de
+herramientas** con iconos propios (dibujados con rayas suavizadas: se
+reconocen por la forma) y, debajo, el **nombre de la que está elegida** y su
+grosor; al pasar el ratón, un **globo** con el nombre y su letra; las
+**reglas** en puntos de la imagen (con la marca del ratón); abajo, la
+**paleta**: el color 1 y el 2 **con su nombre y su código** siempre a la
+vista («Rojo (#E02020)»), los 28 colores (en el que es el color 1 va un «1»
+y en el del 2, un «2»: no solo el color), el botón de intercambiarlos y
+«Editar colores...»; y la **barra de estado**: lo que hace lo que hay debajo
+del ratón, **la posición y el nombre del color que hay en ella** («120, 45
+px: Azul acero, casi (#4A80B0)»), el tamaño de lo elegido, el del lienzo y
+el zoom. Lo activo va hundido, con borde doble y una raya debajo.
+
+**El lienzo**: color verdadero de 32 bits con **transparencia** (0xAARRGGBB,
+sin premultiplicar), de 1 x 1 a **4096 x 4096** si hay memoria (si no, lo
+dice: «No hay memoria para una imagen de 4096 x 4096 (harían falta 65 MB)»);
+lo transparente se ve sobre cuadros grises; **zoom** de 12,5 % a 3200 %
+(Control y la rueda, donde está la flecha; + y -; la lupa; la lista;
+«Ajustar a la ventana»), **rejilla** a 400 % o más, barras de
+desplazamiento, la rueda (con Mayús, a los lados); y las **asas** del borde
+del lienzo, que se arrastran para cambiar su tamaño.
+
+**Las herramientas** (con el botón izquierdo, el color 1; con el derecho, el 2;
+cada una con su letra): selección rectangular (S) y **a mano alzada** (M),
+que se arrastran para moverlas (con Control, una copia), con las flechas
+(Mayús: de 10 en 10), **opacas o transparentes** (lo del color 2 no tapa);
+lápiz (L: un punto, el color exacto, también su alfa); **pincel** (P: redondo,
+cuadrado o de barra inclinada a los dos lados, de 1 a 48 puntos, suavizado o
+no); aerógrafo (A: rocía mientras se mantiene pulsado; radio y densidad);
+borrador (B: con el color 2, o **deja transparente**); relleno (R: con
+**tolerancia**; también lo transparente); **cuentagotas** (C: toma el color
+y **dice su nombre más parecido y su código**; luego vuelve a la herramienta
+de antes); **texto** (T: las TrueType de la biblioteca común —las DejaVu y
+las de `\DOCUMENT\LETRAS`—, tamaño, negrita, cursiva, fondo transparente o
+del color 2; varias líneas; la caja se arrastra; un clic fuera la deja en la
+imagen, Esc la anula; Ctrl+V pega el texto del portapapeles); lupa (Z);
+línea (I; con Mayús, a 0, 45 o 90 grados); curva (U: la raya y luego dos
+dobleces, Bézier); rectángulo (Q), redondeado (O), elipse (E; con Mayús,
+cuadrado y círculo) y polígono (G: un clic por vértice; dos clics, Intro o
+el primer vértice lo cierran), con **solo el contorno, solo el relleno o los
+dos** (el contorno con el color 1 y el relleno con el 2).
+
+**Los colores**: la paleta de 28 con nombre propio en español (Negro, Gris
+oscuro, Granate, Rojo, Naranja, Amarillo, Verde oliva, Verde, Verde azulado,
+Azul, Azul marino, Morado, Marrón, Blanco, Gris claro, Gris perla, Rosa,
+Salmón, Melocotón, Amarillo claro, Lima, Verde claro, Turquesa, Celeste, Azul
+claro, Lavanda, Beis) y otros cien para el «más parecido» (la distancia de la
+«media roja», que pesa cada canal como lo ve el ojo); dos clics en un color de
+la paleta lo cambian; el **editor de colores**: el cuadro de saturación y
+brillo, la barra de tonos, Rojo, Verde, Azul y Opacidad (0-255), Tono,
+Saturación y Brillo (HSV), el **código #RRGGBB** (o #RRGGBBAA) y la muestra
+con su nombre.
+
+**Imagen y Colores**: cambiar el tamaño (en % o en puntos, con la proporción;
+al reducir, la media del área de cada punto; al ampliar, el bilineal; con la
+transparencia bien llevada), estirar e inclinar, girar 90° a los dos lados,
+180° y **lo que se diga** (el lienzo crece; lo nuevo, del color 2), voltear,
+**recortar a la selección**, atributos del lienzo (ancho, alto y de qué color
+lo nuevo), borrar la imagen; invertir los colores, **escala de grises**,
+**brillo y contraste**. Con algo elegido, todo eso se hace solo con lo
+elegido. **Deshacer y rehacer sin límite práctico** (`historia.c`): la lámina
+va en **baldosas de 64 x 64**; cada paso guarda solo las baldosas que de
+verdad ha cambiado, como eran, todas juntas comprimidas con Flate (miniz); lo
+que cambia el tamaño guarda la imagen entera comprimida; si la historia pasa
+de 48 MB, se olvida lo más viejo. Una pincelada guarda también la
+**cobertura** de cada punto: lo translúcido no se oscurece donde pasa dos
+veces.
+
+**El dibujo** (`dibujo.c`): las figuras se rasterizan con su **cobertura
+exacta** (el área de cada punto que tapan, acumulada con signo, como font-rs
+o stb_truetype 2: bordes suavizados sin supermuestrear), a franjas de 32
+filas para no pedir memoria de más; los contornos, como anillos (el de fuera
+menos el de dentro); las rayas y curvas, con las puntas y las uniones
+redondas (la distancia de cada punto al trazo); el relleno, por tramos.
+
+**Formatos** (`formatos.c`): abre **PNG, JPG, BMP** (también RLE4 y RLE8),
+**GIF** (el primer cuadro), **TGA** y **ICO/CUR** (el lector del Mirador,
+pasado a C portable y sin fiarse de nada) con stb_image, y **PCX** con un
+lector propio en C (el de Pintura 1.0 de `pentium-oficina`, que era en asm:
+8 bits con paleta o grises, 24 y 32 bits, 1 bit, de 2 a 4 planos, 2 y 4 bits;
+RLE o no); guarda **PNG** sin pérdida (con miniz; con alfa solo si hace
+falta), **JPG** con su **calidad** (lo pregunta; lo transparente, sobre
+blanco), **BMP** (24 bits, o 32 con su alfa: BITMAPV5HEADER), **GIF**
+(con 256 colores o menos, exacto; con más, corte por la mediana a 255 y
+Floyd-Steinberg; el transparente; LZW propio) y **PCX** (8 bits con paleta
+o 24 bits, RLE); **exporta a PDF** (la imagen en PNG, una página de su
+tamaño a 96 puntos por pulgada, con `pdfsal`); y **«Usar como fondo de
+escritorio»**: la imagen llenando la pantalla entera (lo que sobra, cortado
+por igual), con la **llamada 172** del Mirador (el núcleo la guarda en
+`FONDO.HPM`). El nombre se adapta a 8+3 mientras el núcleo no cree nombres
+largos.
+
+**El portapapeles**: copiar, cortar y pegar imágenes **dentro de Pintura**
+(lo pegado, flotando, se arrastra; si no cabe, el lienzo crece), y
+«Copiar a un archivo» y «Pegar desde un archivo». **Entre programas, aún
+no**: el portapapeles del sistema (la llamada 40) es solo de texto (en
+docs/pentium/METAS.md, pendiente del portapapeles con imágenes).
+
+**La orden**: `PINTURA [imagen]`; `PINTURA --convierte ENTRADA SALIDA
+[CALIDAD]`, `--info`, `--compara A B` (punto a punto, con el PSNR) y
+`--mide [AN AL [PASOS]]`.
+
+### Cómo está hecha Pintura 2 (`castel/nucleo32/oficina/pintura`)
+
+```
+lamina.c            la imagen: 0xAARRGGBB y la mezcla «encima» (con alfa, sin premultiplicar)
+historia.c          deshacer y rehacer por baldosas comprimidas; la cobertura de la pincelada
+dibujo.c            el rasterizado con cobertura exacta, las figuras, las pinceladas, el relleno,
+                    el texto en la lámina
+operaciones.c       tamaño (área y bilineal), inclinar, girar, voltear, lienzo, colores
+formatos.c          leer y escribir PNG, JPG, BMP, GIF, PCX, ICO, TGA
+colores.c           la paleta y los nombres, HSV, el código #
+vista.c             el lienzo en la ventana (zoom, cuadros, rejilla, hormigas, asas), las reglas
+herramientas.c      cada herramienta con el ratón, lo elegido, la caja de texto, el polígono, la curva
+ventana.c           los menús, la barra de opciones, la caja, la paleta, la barra de estado, el bucle;
+                    se pinta solo lo que cambia, y al sistema va solo eso (so_mapa por trozos)
+dialogos.c          abrir y guardar, nueva, tamaño, inclinar, girar, atributos, brillo, colores...
+archivo.c           abrir, guardar, PDF y el fondo     iconos_p.c   los iconos de las herramientas
+principal.c         la orden    hacer.sh, anfitrion.sh, paquete.sh, fuentes.lst, LEEME.txt, pruebas/
+```
+
+**Medidas.** En QEMU con la CPU de un Atom (`-cpu n270 -icount shift=1`,
+menos de lo que da el N455 del HP Mini), con la pantalla de 1024 x 600 y un
+lienzo de **1600 x 1200** (`PINTURA --mide 1600 1200 200`): el **pincel**
+(5 puntos, suavizado), **4 ms por paso** del ratón (el peor, 10 ms):
+pintar el trozo en la lámina y llevar a la pantalla solo lo que cambia (y la
+barra de estado y las reglas); pintar la ventana entera, 130 ms; deshacer la
+pincelada, 60 ms; acercar o alejar, 100 ms; **rellenar el lienzo entero**,
+1,5 s (casi todo, guardar sus 470 baldosas comprimidas para poder
+deshacerlo); unos 10 MB de memoria. En el anfitrión, menos de 1 ms por paso.
+
+**El paquete** `pintura` 2.0 (OPCIONALES de `tools/hpq.py`, tipo
+multimedia, `base >= 0.8.6` por la llamada 172): `\HISPA\PINTURA.BIN`,
+`\HISPA\PINTURA\LEEME.TXT` y `\HISPA\MENU\PINTURA.MNU` (tipo=Multimedia) e
+`.ICP`; lo hace `castel/nucleo32/oficina/pintura/paquete.sh SALIDA`. Con él
+instalado, el menú Inicio lo pone en Multimedia; Mi equipo abre con él los
+`.PCX` (`exoper.cas`: `de_paquetes`, que el Mirador no lee) y en las
+imágenes (PNG, JPG, BMP, GIF, PCX, ICO, TGA) el botón secundario lleva
+**«Editar con Pintura»** (`uequipo.cas`; «Abrir» sigue siendo el Mirador).
+
+**Al juntar con la 0.8.7** (pentium-087, que ya lleva `pentium-oficina` con
+Pintura 1.0 por HVPRUN): (1) `tools/hpq.py`: la línea de `TIPO_POR_NOMBRE`
+es la misma que la de OFICINA2; en `SISTEMA` sobra la entrada `('pintura',
+'1.0', ...)` con `PINTURA.HVP`: el paquete `pintura` pasa a ser el 2.0 de
+`OPCIONALES` (quien tenga el 1.0, se actualiza al 2.0); (2) `inicio.cas`: en
+la tabla fija de la oficina (OFICINA2, `i = 8`), Pintura .HVP no sale si
+existe `\PINTURA.BIN` (como Pluma con PLUMA32: `si i <> 8 o no
+existe("\\PINTURA.BIN")`), porque Pintura 2 sale con su acceso; (3)
+`uequipo.cas`: OFICINA2 y PINTURA32 añaden lo mismo (`menú_con_editar`,
+`se_edita_con_pintura`, `edita_con_pintura`, el «caso 13»): se queda una
+sola, la de PINTURA32 primero (`\PINTURA.BIN`, todas las imágenes) y, si no
+está, la de OFICINA2 (BMP y PCX con `PINTURA.HVP`); (4) `exoper.cas`:
+`hay_programa` público es la misma línea en las dos.
+
+**Probarlo**: `castel/pruebas.sh`, parte 45 (`SOLO=pintura`,
+`castel/pruebas_pintura.sh`): en el anfitrión con ASan y UBSan,
+`pintura/pruebas/formatos.sh` (ida y vuelta de PNG, BMP, PCX y GIF
+idénticos punto a punto, JPG con su PSNR, lo que escribe ImageMagick leído
+igual y al revés, el **fuzz** de los siete lectores —también el PCX— y las
+medidas enormes) y `pintura/pruebas/ventana.sh` (cada herramienta con un
+guion, guardada en PNG y **comparada punto a punto con su imagen esperada**
+de `pruebas/esperadas/`; deshacer y rehacer, lo elegido, el texto, Imagen y
+Colores, el editor de colores y el cuentagotas por el nombre, guardar en
+cada formato desde el cuadro, el PDF, el fondo, 4096 x 4096 y sin memoria);
+en QEMU a 1024 x 600: pintar, una elipse, un texto, guardar `DIBUJO.PNG`,
+el fondo de escritorio (`FONDO.HPM`, mirado desde fuera), cerrar y volver a
+abrir, el editor de colores; y el pincel en el Atom; y, en QEMU, **«Editar con Pintura»** desde Mi equipo.
+Todo bien el 22/11 en el VPS: **74 bien, 0 mal** (los formatos, 217 bien;
+la ventana, 46 bien); la parte 41 (Pluma 2) sigue igual.
+
+**Lo que falta**: copiar y pegar imágenes entre programas (el portapapeles
+del sistema con imágenes); imprimir (cuando haya impresoras); capas; asas
+para estirar lo elegido con el ratón; el texto se escribe al final (sin
+mover el cursor por dentro); Pintura 1.0 (.HVP) y Pintura 2 juntas en el
+menú hasta juntar con la 0.8.7 (arriba).
 
 ## 15. Las pruebas
 

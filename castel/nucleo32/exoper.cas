@@ -841,10 +841,13 @@ módulo Exoper
     ; paquete «pdf»: \HISPA\HISPAPDF.BIN): si están instalados, sus clases se
     ; abren con ellos, también donde ASOCIA.TXT dice lo de fábrica de antes
     ; (el Mirador de la oficina); si no lo están, con lo de siempre
-    variable de_paquetes: arreglo [560] de byte = "PLU=\\PLUMA.BIN|%1\r\nODT=\\PLUMA.BIN|%1\r\nDOCX=\\PLUMA.BIN|%1\r\nDOC=\\PLUMA.BIN|%1\r\nRTF=\\PLUMA.BIN|%1\r\nPDF=\\HISPAPDF.BIN|%1\r\nZIP=\\COMPRIM.BIN|%1\r\nBMP=\\MIRADOR.BIN|%1\r\nPNG=\\MIRADOR.BIN|%1\r\nJPG=\\MIRADOR.BIN|%1\r\nJPE=\\MIRADOR.BIN|%1\r\nGIF=\\MIRADOR.BIN|%1\r\nICO=\\MIRADOR.BIN|%1\r\nTGA=\\MIRADOR.BIN|%1\r\nPSD=\\MIRADOR.BIN|%1\r\nPPM=\\MIRADOR.BIN|%1\r\nPGM=\\MIRADOR.BIN|%1\r\nPNM=\\MIRADOR.BIN|%1\r\n"
+    ; (PINTURA32) y los .PCX con Pintura 2 (el paquete «pintura»: \HISPA\PINTURA.BIN),
+    ; que el Mirador no lee; las demás imágenes se abren con el Mirador y se
+    ; editan con Pintura 2 («Editar con Pintura» de Mi equipo)
+    variable de_paquetes: arreglo [560] de byte = "PCX=\\PINTURA.BIN|%1\r\nPLU=\\PLUMA.BIN|%1\r\nODT=\\PLUMA.BIN|%1\r\nDOCX=\\PLUMA.BIN|%1\r\nDOC=\\PLUMA.BIN|%1\r\nRTF=\\PLUMA.BIN|%1\r\nPDF=\\HISPAPDF.BIN|%1\r\nZIP=\\COMPRIM.BIN|%1\r\nBMP=\\MIRADOR.BIN|%1\r\nPNG=\\MIRADOR.BIN|%1\r\nJPG=\\MIRADOR.BIN|%1\r\nJPE=\\MIRADOR.BIN|%1\r\nGIF=\\MIRADOR.BIN|%1\r\nICO=\\MIRADOR.BIN|%1\r\nTGA=\\MIRADOR.BIN|%1\r\nPSD=\\MIRADOR.BIN|%1\r\nPPM=\\MIRADOR.BIN|%1\r\nPGM=\\MIRADOR.BIN|%1\r\nPNM=\\MIRADOR.BIN|%1\r\n"
 
     ; ¿está ese programa (en la unidad del sistema o en su \HISPA)?
-    función hay_programa(prog: puntero a byte): bool
+    público función hay_programa(prog: puntero a byte): bool          ; ((OFICINA2) público: Mi equipo)
         variable r: arreglo [MAX_RUTA] de byte
         variable c: bool
         si ruta_asocia[0] = 0 entonces busca_asocia() fin
