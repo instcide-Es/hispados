@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -125,6 +125,15 @@ módulo Semilla
             mov {eip}, eax
             mov eax, [ebp+40]
             mov {cs_}, eax
+        fin
+        ; (TERMO) el rdmsr «seguro» de termo.cas: el registro no está; se sigue detrás
+        si cs_ yb 3 = 0 y recupera(eip) <> 0 entonces
+            eip := recupera(eip)
+            ensamblador
+                mov eax, {eip}
+                mov [ebp+36], eax
+            fin
+            devolver
         fin
         imprimir1("\n*** excepción 13: protección general (código %u)", código)
         no_sigue(cs_, eip, 13)

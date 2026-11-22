@@ -3453,6 +3453,8 @@ módulo Escritorio
             si t <> nulo entonces t.padre := 0 fin
         fin
         arranca_sonido()              ; (SONIDO) el servicio de sonido (y el sonido de inicio)
+        ; (TERMO) la memoria del Termómetro: con «termo» en la línea del cargador, se abre solo
+        si buscar(línea_del_cargador(), "termo") <> nulo entonces lanza("\\TERMO.BIN", "/ARRANQUE") fin
         devolver 1
     fin
 

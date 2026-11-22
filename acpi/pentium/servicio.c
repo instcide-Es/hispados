@@ -22,10 +22,16 @@
  *     reinicio lo hace el núcleo (el registro de la FADT, 8042, CF9h).
  *  4. El registro (lo que en Hispa-DOS es BATERIA.LOG) sale por el puerto
  *     serie y, con «registro», también a \ACPI.TXT de la unidad del sistema.
+ *  5. (TERMO) Solo si el Termómetro (TERMO.BIN) lo está pidiendo (la llamada
+ *     223 lo dice), cada 2 s y con la tarea quieta: _TMP de las zonas
+ *     térmicas (y una vez sus _CRT, _PSV, _HOT y _AC0), los ventiladores
+ *     (PNP0C0B: _FST, _STA, _PSC) y, una vez, lo que dice el SMBIOS (el
+ *     fabricante y el modelo del equipo, la placa, la BIOS). Solo se leen.
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include "acpi.h"
 #include "accommon.h"
 #include "pentium.h"
+#include "../../castel/nucleo32/termo/termo_acpi.h"	/* (TERMO) */
 
 int tarea_quieta(void);
 u32 mq_mide_tsc(void);
@@ -375,6 +381,243 @@ falla:
 	vacia_registro(0);
 }
 
+/* ---- (TERMO) las zonas térmicas, los ventiladores y el SMBIOS, para el
+ * Termómetro (TERMO.BIN, castel/nucleo32/termo/): la llamada 223 ---- */
+#define SC_TERMO 223
+/* (el núcleo copia TA_TAM octetos: los de detrás, a cero) */
+static union { struct termo_acpi t; char b[TA_TAM]; } ta_u;
+#define ta ta_u.t
+static ACPI_HANDLE ta_zh[TA_ZONAS], ta_fh[TA_VENT];
+static int ta_buscado;
+
+static int32_t ta_kelvin(ACPI_HANDLE h, const char *m)
+{
+	ACPI_BUFFER b;
+	ACPI_OBJECT o;
+	UINT64 v;
+
+	b.Length = sizeof o;
+	b.Pointer = &o;
+	if (ACPI_FAILURE(AcpiEvaluateObjectTyped(h, (char *)m, NULL, &b, ACPI_TYPE_INTEGER)))
+		return TA_NO;
+	v = o.Integer.Value;
+	/* en décimas de kelvin; lo que no puede ser (0, basura), fuera */
+	if (v < 2000 || v > 4732)
+		return TA_NO;
+	return (int32_t)v - 2732;
+}
+
+static ACPI_STATUS ta_una_zona(ACPI_HANDLE h, UINT32 nivel, void *ctx, void **ret)
+{
+	ACPI_BUFFER b;
+	struct ta_zona *z;
+
+	(void)nivel; (void)ctx; (void)ret;
+	if (ta.nzonas >= TA_ZONAS)
+		return AE_CTRL_TERMINATE;
+	z = &ta.zona[ta.nzonas];
+	ta_zh[ta.nzonas++] = h;
+	b.Length = sizeof z->nombre;
+	b.Pointer = z->nombre;
+	if (ACPI_FAILURE(AcpiGetName(h, ACPI_FULL_PATHNAME, &b)))
+		pon_texto(z->nombre, "?", sizeof z->nombre);
+	z->crt = ta_kelvin(h, "_CRT");
+	z->psv = ta_kelvin(h, "_PSV");
+	z->hot = ta_kelvin(h, "_HOT");
+	z->ac0 = ta_kelvin(h, "_AC0");
+	z->tmp = TA_NO;
+	reg("ACPI: (TERMO) zona térmica %s: _CRT %d, _PSV %d, _HOT %d, _AC0 %d (décimas de grado)\n",
+	    z->nombre, z->crt, z->psv, z->hot, z->ac0);
+	return AE_OK;
+}
+
+static ACPI_STATUS ta_un_ventilador(ACPI_HANDLE h, UINT32 nivel, void *ctx, void **ret)
+{
+	ACPI_PNP_DEVICE_ID *hid;
+	ACPI_BUFFER b;
+	int es_vent;
+
+	(void)nivel; (void)ctx; (void)ret;
+	if (ta.nvent >= TA_VENT)
+		return AE_CTRL_TERMINATE;
+	if (ACPI_FAILURE(AcpiUtExecute_HID((ACPI_NAMESPACE_NODE *)h, &hid)))
+		return AE_OK;
+	es_vent = !strcmp(hid->String, "PNP0C0B");
+	ACPI_FREE(hid);
+	if (!es_vent)
+		return AE_OK;
+	b.Length = sizeof ta.vent[0].nombre;
+	b.Pointer = ta.vent[ta.nvent].nombre;
+	if (ACPI_FAILURE(AcpiGetName(h, ACPI_FULL_PATHNAME, &b)))
+		pon_texto(ta.vent[ta.nvent].nombre, "?", sizeof ta.vent[0].nombre);
+	reg("ACPI: (TERMO) ventilador %s\n", ta.vent[ta.nvent].nombre);
+	ta_fh[ta.nvent++] = h;
+	return AE_OK;
+}
+
+static void ta_lee_vent(int i)
+{
+	ACPI_BUFFER b;
+	ACPI_OBJECT *o;
+	ACPI_BUFFER e;
+	ACPI_OBJECT x;
+	struct ta_vent *v = &ta.vent[i];
+
+	v->velocidad = v->control = TA_NO;
+	v->encendido = -1;
+	b.Length = ACPI_ALLOCATE_BUFFER;
+	b.Pointer = NULL;
+	if (ACPI_SUCCESS(AcpiEvaluateObjectTyped(ta_fh[i], "_FST", NULL, &b, ACPI_TYPE_PACKAGE))) {
+		o = b.Pointer;
+		if (o->Package.Count >= 3 && o->Package.Elements[1].Type == ACPI_TYPE_INTEGER &&
+		    o->Package.Elements[2].Type == ACPI_TYPE_INTEGER) {
+			UINT64 c = o->Package.Elements[1].Integer.Value, r = o->Package.Elements[2].Integer.Value;
+
+			if (c <= 100)
+				v->control = (int32_t)c;
+			if (r < 0xFFFFFFFFull && r < 100000)
+				v->velocidad = (int32_t)r;
+			if (v->velocidad != TA_NO)
+				v->encendido = v->velocidad > 0;
+		}
+		ACPI_FREE(b.Pointer);
+	}
+	if (v->encendido < 0) {
+		e.Length = sizeof x;
+		e.Pointer = &x;
+		if (ACPI_SUCCESS(AcpiEvaluateObjectTyped(ta_fh[i], "_PSC", NULL, &e, ACPI_TYPE_INTEGER)))
+			v->encendido = x.Integer.Value == 0;
+	}
+}
+
+/* lo de un texto del SMBIOS (el número k de los de detrás de la ficha) */
+static void ta_texto_smbios(char *d, u32 cabe, const u8 *f, u32 k)
+{
+	const char *t = (const char *)f + f[1];
+	u32 i;
+
+	d[0] = 0;
+	if (k == 0)
+		return;
+	while (--k && *t)
+		t += strlen(t) + 1;
+	if (!*t)
+		return;
+	for (i = 0; i + 1 < cabe && t[i]; i++)
+		d[i] = (t[i] >= 32 && t[i] < 127) ? t[i] : '?';
+	d[i] = 0;
+	/* (sin los blancos del final) */
+	while (i > 0 && d[i - 1] == ' ')
+		d[--i] = 0;
+}
+
+static void ta_smbios(void)
+{
+	const u8 *b = mq_mapa(0xF0000, 0x10000), *e = 0, *f, *fin;
+	u32 i, dir = 0, largo = 0;
+
+	ta.smbios = 2;		/* (mirado; 1 si se ha encontrado) */
+	if (!b)
+		return;
+	for (i = 0; i + 32 <= 0x10000; i += 16)
+		if (!memcmp((void *)(b + i), "_SM3_", 5)) {
+			e = b + i;
+			if (*(const u32 *)(e + 0x14) == 0) {
+				dir = *(const u32 *)(e + 0x10);
+				largo = *(const u32 *)(e + 0x0C);
+			}
+			break;
+		} else if (!memcmp((void *)(b + i), "_SM_", 4)) {
+			e = b + i;
+			largo = *(const u16 *)(e + 0x16);
+			dir = *(const u32 *)(e + 0x18);
+			break;
+		} else if (!memcmp((void *)(b + i), "_DMI_", 5)) {
+			e = b + i;
+			largo = *(const u16 *)(e + 6);
+			dir = *(const u32 *)(e + 8);
+			break;
+		}
+	if (!e || !dir || !largo || largo > 0x10000) {
+		reg("ACPI: (TERMO) no se encuentra el SMBIOS\n");
+		return;
+	}
+	f = mq_mapa(dir, largo);
+	if (!f)
+		return;
+	fin = f + largo;
+	while (f + 4 <= fin && f[0] != 127 && f[1] >= 4) {
+		const u8 *s = f + f[1];
+
+		if (f[0] == 0 && f[1] >= 9) {
+			ta_texto_smbios(ta.bios, sizeof ta.bios, f, f[5]);
+			{
+				char fe[16];
+				u32 n = strlen(ta.bios);
+
+				ta_texto_smbios(fe, sizeof fe, f, f[8]);
+				if (fe[0] && n + strlen(fe) + 4 < sizeof ta.bios)
+					snprintf(ta.bios + n, sizeof ta.bios - n, " (%s)", fe);
+			}
+		} else if (f[0] == 1 && f[1] >= 8) {
+			ta_texto_smbios(ta.fabricante, sizeof ta.fabricante, f, f[4]);
+			ta_texto_smbios(ta.producto, sizeof ta.producto, f, f[5]);
+			ta_texto_smbios(ta.version_eq, sizeof ta.version_eq, f, f[6]);
+		} else if (f[0] == 2 && f[1] >= 6) {
+			ta_texto_smbios(ta.placa_fab, sizeof ta.placa_fab, f, f[4]);
+			ta_texto_smbios(ta.placa, sizeof ta.placa, f, f[5]);
+		}
+		/* los textos de detrás acaban con dos ceros */
+		while (s + 1 < fin && (s[0] || s[1]))
+			s++;
+		f = s + 2;
+	}
+	ta.smbios = 1;
+	reg("ACPI: (TERMO) SMBIOS: «%s» «%s», placa «%s» «%s», BIOS «%s»\n", ta.fabricante, ta.producto,
+	    ta.placa_fab, ta.placa, ta.bios);
+}
+
+static void ta_lee(void)
+{
+	u32 i;
+
+	if (!ta_buscado) {
+		ta_buscado = 1;
+		ta.version = TA_VERSION;
+		ta_smbios();
+		if (apm.fase != FASE_ERROR || mq_rsdp()) {
+			AcpiWalkNamespace(ACPI_TYPE_THERMAL, ACPI_ROOT_OBJECT, ACPI_UINT32_MAX, ta_una_zona, NULL, NULL, NULL);
+			AcpiWalkNamespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT, ACPI_UINT32_MAX, ta_un_ventilador, NULL, NULL, NULL);
+		}
+		reg("ACPI: (TERMO) %u zonas térmicas y %u ventiladores\n", ta.nzonas, ta.nvent);
+	}
+	for (i = 0; i < ta.nzonas; i++)
+		ta.zona[i].tmp = ta_kelvin(ta_zh[i], "_TMP");
+	for (i = 0; i < ta.nvent; i++)
+		ta_lee_vent(i);
+	ta.lecturas++;
+}
+
+/* en cada vuelta del bucle: se da lo último (y el núcleo dice si alguien
+ * lo quiere); si lo quieren, cada 2 s, se lee otra vez */
+static void ta_vuelta(void)
+{
+	static u64 ultima;
+	u64 ahora;
+
+	ta.version = TA_VERSION;
+	if (sc(SC_TERMO, (u32)&ta, 0, 1) != 1)
+		return;
+	ahora = mq_ahora_us();
+	if (ultima && ahora - ultima < 1900000)
+		return;
+	if (!tarea_quieta())
+		return;
+	ultima = ahora;
+	ta_lee();
+	sc(SC_TERMO, (u32)&ta, 0, 1);
+}
+
 /* ¿está «p» en lo que le dice el núcleo (la línea del cargador)? Da lo que
  * va detrás, o 0 */
 static const char *tiene(const char *t, const char *p)
@@ -460,6 +703,7 @@ int servicio_principal(void)
 			fase = apm.fase;
 			cocina();
 		}
+		ta_vuelta();			/* (TERMO) */
 		vacia_registro(1);
 		/* un tic de HSPACPI son 54,9 ms; uno de Hispa-Pentium, 10 */
 		n = n < 0 ? 100 : n * 11 / 2;

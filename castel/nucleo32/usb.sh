@@ -65,6 +65,14 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -b ${L}p1 ] &&
 [ -b ${L}p1 ] || { partprobe $L 2> /dev/null; sleep 0.5; }
 mkfs.fat -F 16 -n HISPAPENT ${L}p1 > /dev/null
 mount ${L}p1 $W/m
+# (TERMO) con TERMO=1, la memoria del Termómetro: TERMO.BIN (termo/hacer.sh)
+# en la raíz y como módulo, y en el menú, primero (y solo, a los 5 s), el
+# escritorio con «termo», que lo abre al arrancar
+if [ -n "${TERMO:-}" ]; then
+  bash $AQUI/termo/hacer.sh $W/f/TERMO.BIN
+  MODULOS="$MODULOS  module /TERMO.BIN TERMO.BIN
+"
+fi
 cp $W/f/* $W/m/
 # lo que solo es para instalar (los textos del sistema instalado, lo que va a
 # otra carpeta y el arranque del disco), en \INSTALA
@@ -139,6 +147,13 @@ G
     printf '  boot\n}\n'
   }
   N="escritura=usb unidad=X registro"
+  if [ -n "${TERMO:-}" ]; then
+    echo "set timeout=5"
+    entrada "Termometro: medir la temperatura (la pantalla a su medida)" ESCRIT8.BIN "escritorio $N amedida termo" "auto"
+    entrada "Termometro (1024 x 600)" ESCRIT6.BIN "escritorio $N termo"
+    entrada "Termometro (800 x 600)" ESCRIT8.BIN "escritorio $N termo"
+    entrada "Termometro SIN ACPI (si se queda colgado al arrancar: sin zonas ni bateria)" ESCRIT8.BIN "escritorio $N sinacpi termo"
+  fi
   # [EDID] la primera, con la medida de PANTALLA.ENV si la hay (y lo dice
   # antes de arrancar); «a la medida», con «amedida» (el núcleo sabe así
   # que la que pone GRUB es la de la pantalla)

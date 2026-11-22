@@ -1,0 +1,128 @@
+TERMÓMETRO DE HISPA-PENTIUM - memoria USB para medir la temperatura de un portátil
+==================================================================================
+
+Qué es: una memoria USB que arranca sola en Hispa-Pentium y abre el Termómetro.
+Mide la temperatura del procesador y la de las zonas térmicas de la BIOS (ACPI),
+hace una prueba de esfuerzo («Calentar») que se para sola si se calienta de más,
+y lo apunta todo en la propia memoria. NO toca el disco duro del portátil: no
+escribe nada en él (Windows y los datos se quedan como están).
+
+Lo que hace falta: una memoria USB de 64 MB o más (se borra entera) y un PC con
+Windows o Linux para grabarla.
+
+
+1. GRABAR LA MEMORIA
+--------------------
+El archivo es termometro-usb.img (dentro del ZIP).
+
+Con Windows (Rufus, https://rufus.ie):
+  1. Enchufe la memoria y abra Rufus.
+  2. «Dispositivo»: la memoria (¡fíjese bien en que sea la memoria!).
+  3. «Elección de arranque»: SELECCIONAR -> termometro-usb.img.
+  4. Pulse EMPEZAR. Si pregunta el modo, elija «Escribir en modo Imagen DD».
+  5. Acepte el aviso de que se borra la memoria. Al acabar, CERRAR.
+
+Con Linux:
+  sudo dd if=termometro-usb.img of=/dev/sdX bs=4M conv=fsync status=progress
+  (sdX es la memoria: mírelo antes con «lsblk»; si se equivoca, borra otro disco.)
+
+
+2. ARRANCAR EL PORTÁTIL DESDE LA MEMORIA
+----------------------------------------
+  1. Con el portátil apagado y ENCHUFADO a la corriente, ponga la memoria.
+  2. Enciéndalo y pulse enseguida, varias veces, la tecla del menú de arranque.
+     Depende de la marca:
+       Acer, Asus (algunos), Dell, Lenovo, Toshiba, MSI (algunos) ...... F12
+       Asus .......................................................... Esc o F8
+       HP ............................................................ F9 (o Esc y luego F9)
+       Sony Vaio ..................................................... F11 (o el botón ASSIST)
+       Samsung, MSI .................................................. F10 o F11
+       Lenovo con botón «Novo» (el agujerito) ........................ ese botón con el equipo apagado
+     Si no sale, al encender suele poner abajo «Press F_ for Boot Menu».
+  3. En el menú, elija la memoria (USB, «USB HDD», o su marca: Kingston,
+     SanDisk...). Si hay dos con el mismo nombre, la que NO diga «UEFI».
+  4. Sale un menú negro (GRUB); a los 5 segundos arranca solo la primera
+     línea: «Termometro: medir la temperatura». A los pocos segundos se abre el
+     escritorio y, en él, el Termómetro, solo.
+  Un portátil de la época de Windows 7 arranca así sin tocar nada más (no hace
+  falta quitar el «Secure Boot»: esos equipos no lo tienen o lo traen apagado).
+  Si se queda colgado al arrancar, apáguelo (botón 5 s) y elija en el menú
+  «Termometro SIN ACPI» (mide el procesador, pero no las zonas ni la batería).
+  Si la pantalla sale rara, elija «Termometro (1024 x 600)» o «(800 x 600)».
+
+
+3. QUÉ SE VE
+------------
+  Arriba: el procesador, su frecuencia y el modelo del portátil.
+  La tabla: cada sensor con su temperatura ahora, la mínima, la máxima, el
+  límite (el del procesador o el de la BIOS) y una barra con el estado ESCRITO:
+  «bien», «templado», «caliente» o «peligro». Cada estado tiene además su
+  dibujo en la barra (liso, puntos, rayas, cuadros), no solo su color.
+  Debajo: la batería (carga, si está enchufado y su salud) y el ventilador si
+  la BIOS lo da. La gráfica: los últimos 10 minutos; cada sensor con su color,
+  su trazo (seguido, a rayas o de puntos) y su marca (círculo, cuadrado,
+  triángulo...), y el límite con una raya.
+  La tarjeta gráfica (NVIDIA o AMD/ATI) no se puede leer sin su controlador:
+  solo sale si la BIOS la da como zona térmica. Si el procesador no deja leer
+  su temperatura, lo dice en rojo.
+  Nota: Hispa-Pentium usa un solo núcleo del procesador. En los Intel, el
+  sensor «Procesador entero (paquete)» es el del núcleo más caliente de todos.
+
+
+4. LA PRUEBA DE ESFUERZO
+------------------------
+  1. Déjelo 2 o 3 minutos en reposo y mire las temperaturas.
+  2. Elija el tiempo: 5, 10 o 15 minutos (botones o teclas 1, 2, 3).
+  3. Pulse «Calentar» (o la tecla C). El procesador se pone a trabajar al
+     máximo (en pantalla: «solo 1 núcleo cargado»).
+  4. Se para sola al acabar el tiempo, si algún sensor llega a 10 °C de su
+     límite (PARADA DE SEGURIDAD) o si pulsa Esc.
+  5. Después mide cómo se enfría (hasta 3 minutos; Esc lo acaba antes) y
+     enseña el resultado: cuánto subió, cuánto bajó en el primer minuto y qué
+     le parece (por ejemplo, «el ventilador y el disipador sacan bien el
+     calor» o «baja muy despacio: polvo o pasta seca»).
+
+  QUÉ ES NORMAL
+    En reposo: entre 40 y 55 °C (hasta 60 °C en un portátil «gamer» es pasable).
+    En carga: un Intel de portátil puede llegar a 85-90 °C (su límite, la
+    «TjMax», suele ser 100 o 105 °C); un AMD de la época, hasta unos 80-90 °C.
+    Al parar debe bajar deprisa: 15 o 20 °C en el primer minuto.
+  MALA SEÑAL
+    - En reposo pasa de 65-70 °C.
+    - Se para por seguridad, o el portátil se apaga solo durante la prueba.
+    - Al parar casi no baja.
+    Entonces: limpiar el polvo del ventilador y de las rejillas (aire a presión,
+    con el ventilador sujeto para que no gire loco) y cambiar la pasta térmica
+    del procesador (y de la gráfica, si la tiene aparte).
+
+
+5. LO QUE SE GUARDA (para mandármelo)
+-------------------------------------
+  Todo va a la carpeta TERMO de la propia memoria. Los nombres son el mes, el
+  día, la hora y el minuto en que se abrió el Termómetro (MMDDHHMM), porque el
+  sistema de archivos solo deja 8 letras: 11221830 = 22 de noviembre, 18:30.
+    MMDDHHMM.CSV   una línea cada 2 s con todas las temperaturas (se abre con
+                   Excel o LibreOffice: separado por punto y coma, coma decimal)
+    MMDDHHMM.LOG   el registro de TODO lo que pasa: el arranque, cada suceso
+                   (empieza y acaba la prueba, cambios de «bien» a «caliente»,
+                   el ventilador, el enchufe) y cada 2 s la fase y las
+                   temperaturas. Cada línea se escribe en la memoria al
+                   momento: si el portátil se apaga de golpe, queda hasta el
+                   último par de segundos.
+    MMDDHHMM.TXT   el resumen de cada prueba de esfuerzo
+    DDHHMMSS.BMP   la pantalla, si se pulsa F12 o el botón «Captura»
+  Si el portátil se apaga solo: vuelva a arrancar desde la memoria. El
+  Termómetro avisa de que «la última vez no se cerró bien» y dice durante qué
+  fase se apagó, a qué hora y a qué temperatura estaba.
+
+  Cómo mandármelo:
+    1. Cierre el Termómetro (la X de la ventana: así apunta que acabó bien) y
+       apague desde Inicio > Apagar el equipo. Quite la memoria.
+    2. Póngala en su PC con Windows: sale como unidad «HISPAPENT».
+    3. Copie la carpeta TERMO entera (o comprímala: botón derecho > Enviar a >
+       Carpeta comprimida) y mándemela por el FTP (Pruebas/Completas/
+       Portatil-gamer/Termometro/) o por correo. Si puede, ponga en una nota la
+       marca y el modelo del portátil (lo pone debajo, en la pegatina).
+
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

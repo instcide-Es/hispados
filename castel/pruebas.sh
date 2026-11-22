@@ -256,6 +256,9 @@
 #      animado e ICO desde el explorador, las flechas, la rueda, girar,
 #      pantalla completa, diapositivas y «Usar como fondo de escritorio» (la
 #      llamada 172: FONDO.HPM), que sigue al arrancar otra vez.
+#  46. (TERMO, SOLO=termo) El Termómetro (TERMO.BIN, nucleo32/termo/; pruebas_termo.sh): la
+#      memoria USB que lo abre al arrancar, la zona térmica de mentira de ACPI, la parada de
+#      seguridad, el apagón a mitad de la carga (FAT sana, .LOG y .CSV al día) y el aviso al volver.
 #  39. (JUEGOS, SOLO=juegos) Los juegos (el paquete «juegos», nucleo32/juegos/;
 #      pruebas_juegos.sh): la física del pinball en el anfitrión (no atraviesa,
 #      conserva, el flipper golpea), los niveles de Almacén, el paquete, el
@@ -295,6 +298,7 @@
 #   SOLO=mirador ./pruebas.sh     la primera y la 32 (el Mirador y la imagen de tapiz; pruebas_zipvisor.sh)
 #   SOLO=juegos ./pruebas.sh      la primera y la 39 (JUEGOS: los juegos; pruebas_juegos.sh)
 #   SOLO=pluma ./pruebas.sh       la primera y la 41 (PLUMA32: Pluma 2; pruebas_pluma.sh)
+#   SOLO=termo ./pruebas.sh       la primera y la 46 (TERMO: el Termómetro y su memoria USB; pruebas_termo.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -347,6 +351,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_zipvisor.sh        # (ZIP) (MIRADOR) las partes 31 y 32, como parte_zip y parte_mirador
 . $AQUI/pruebas_juegos.sh          # (JUEGOS2) la parte 39, como parte_juegos
 . $AQUI/pruebas_pluma.sh           # (PLUMA32) la parte 41, como parte_pluma
+. $AQUI/pruebas_termo.sh           # (TERMO) la parte 46, como parte_termo
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -369,7 +374,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|juegos|pluma) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|juegos|pluma|termo) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -5566,6 +5571,7 @@ if parte08 zip; then parte_zip; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Comprim
 if parte08 mirador; then parte_mirador; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Mirador)"; fi
 if parte08 juegos; then parte_juegos; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los juegos)"; fi     # (JUEGOS2)
 if parte08 pluma; then parte_pluma; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Pluma 2)"; fi   # (PLUMA32) la 41
+if parte08 termo; then parte_termo; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Termómetro)"; fi   # (TERMO) la 46
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)

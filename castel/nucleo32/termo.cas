@@ -1,0 +1,199 @@
+; =============================================================================
+;  termo.cas - (TERMO) lo que el núcleo de Hispa-Pentium le da a TERMO.BIN, el
+;  Termómetro (nucleo32/termo/): leer las temperaturas del procesador y lo
+;  que el servicio de ACPI ha leído de las zonas térmicas. SOLO LEE: ni un
+;  registro del procesador, ni del controlador embebido, se escribe desde
+;  aquí (lo único que se escribe es el registro índice del SMN de AMD, que
+;  no cambia nada: dice qué se va a leer). Las llamadas (usuario.cas):
+;
+;   220  un registro del procesador (MSR) de la lista de abajo: EBX el
+;        registro, ECX dónde dejarlo (8 octetos: lo bajo y lo alto)
+;        -> 1; 0 si el procesador no lo tiene (la lectura da la excepción 13
+;        y se recoge: rdmsr «seguro»); NO_VALE si no está en la lista
+;          19Ch IA32_THERM_STATUS (Intel, el núcleo que corre)
+;          1B1h IA32_PACKAGE_THERM_STATUS (Intel, todo el procesador)
+;          1A2h MSR_TEMPERATURE_TARGET (Intel: la TjMax)
+;          E7h, E8h IA32_MPERF, IA32_APERF (la frecuencia de verdad)
+;          198h IA32_PERF_STATUS, CEh MSR_PLATFORM_INFO, 17h IA32_PLATFORM_ID
+;          y EEh (Core 2: el bit de la TjMax de los de portátil)
+;   221  la configuración PCI, para leer, de la lista: el bus 0, aparato
+;        18h, función 3 (el «control varios» de los AMD de K8 a la familia
+;        16h: sus registros 00h, 08h, A4h, E4h y FCh) y el 00h del 0:0.0
+;        (quién es el puente) -> lo leído (4 octetos); NO_VALE si no vale
+;   222  el SMN de AMD (familia 15h modelos 60h+, 16h modelos 30h+ y 17h en
+;        adelante): EBX la dirección, solo 00059800h (la temperatura,
+;        por 0:0.0 60h/64h) y D8200C64h (por 0:0.0 B8h/BCh); solo con un
+;        procesador AMD y su puente (1022h) en 0:0.0 -> lo leído
+;   223  las zonas térmicas: ECX = 0 (cualquiera), EBX dónde dejar lo último
+;        que dio el servicio (1024 octetos) -> 1, o 0 si aún no hay; ECX = 1
+;        (solo el servicio de ACPI) lo da él, desde EBX -> 1 si alguien lo ha
+;        pedido en los últimos 10 s (si no, no hace falta que lo lea)
+;   224  la prueba de esfuerzo: EBX = 1, ECX 1 o 0 (cargar o parar); EBX = 0
+;        -> 1 si hay que seguir cargando (y el Termómetro ha preguntado por
+;        las zonas hace menos de 6 s: si se cuelga o se cierra, la carga para)
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Termo
+
+    importar Cpu, Tareas, Paginas, Mem32, Energia
+
+    constante NO_VALE = 0xFFFFFFF9              ; (el de usuario.cas)
+    constante TAM_BLOQUE = 1024
+
+    variable bloque: arreglo [1024] de byte
+    variable hay_bloque: bool
+    variable visto: nat32                       ; los tics de la última vez que se pidió (223)
+    variable carga: nat32
+    variable r_cpu: arreglo [4] de nat32        ; lo que da cpuid
+    ; el rdmsr que puede fallar: dónde está y dónde se sigue (semilla.cas,
+    ; la excepción 13, mira «recupera»)
+    variable msr_ins, msr_sigue, msr_lo, msr_hi: nat32
+    variable en_msr, msr_falló: bool
+
+    función cpuid(hoja: nat32)
+        ensamblador
+            push ebx
+            mov eax, {hoja}
+            xor ecx, ecx
+            db 0x0F, 0xA2               ; cpuid
+            mov {r_cpu}, eax
+            mov {r_cpu+4}, ebx
+            mov {r_cpu+8}, ecx
+            mov {r_cpu+12}, edx
+            pop ebx
+        fin
+    fin
+
+    ; 1 Intel, 2 AMD, 0 otro
+    función fabricante(): nat32
+        cpuid(0)
+        si r_cpu[1] = 0x756E6547 y r_cpu[3] = 0x49656E69 y r_cpu[2] = 0x6C65746E entonces devolver 1 fin   ; GenuineIntel
+        si r_cpu[1] = 0x68747541 y r_cpu[3] = 0x69746E65 y r_cpu[2] = 0x444D4163 entonces devolver 2 fin   ; AuthenticAMD
+        devolver 0
+    fin
+
+    ; (semilla.cas, la excepción 13 en el núcleo) si ha sido el rdmsr de
+    ; aquí, se apunta que ha fallado y se da dónde seguir; si no, 0
+    público función recupera(eip: nat32): nat32
+        si en_msr y eip = msr_ins entonces
+            msr_falló := cierto
+            devolver msr_sigue
+        fin
+        devolver 0
+    fin
+
+    función rdmsr_seguro(m: nat32): bool
+        variable b: nat32
+        b := sin_interrupciones()
+        msr_falló := falso
+        msr_lo := 0
+        msr_hi := 0
+        en_msr := cierto
+        ensamblador
+            lea eax, [.ins]
+            mov {msr_ins}, eax
+            lea eax, [.sigue]
+            mov {msr_sigue}, eax
+            mov ecx, {m}
+        .ins:
+            db 0x0F, 0x32               ; rdmsr
+            mov {msr_lo}, eax
+            mov {msr_hi}, edx
+        .sigue:
+        fin
+        en_msr := falso
+        reponer(b)
+        devolver no msr_falló
+    fin
+
+    función msr_de_la_lista(m: nat32): bool
+        según m
+            caso 0x19C, 0x1B1, 0x1A2, 0xE7, 0xE8, 0x198, 0xCE, 0x17, 0xEE: devolver cierto
+        fin
+        devolver falso
+    fin
+
+    función lee_pci(d: nat32): nat32
+        variable b, r: nat32
+        b := sin_interrupciones()
+        escribe_puerto(0xCF8, 4, 0x80000000 ob (d yb 0x00FFFFFC))
+        r := lee_puerto(0xCFC, 4)
+        reponer(b)
+        devolver r
+    fin
+
+    función pci_de_la_lista(d: nat32): bool
+        si d yb 3 <> 0 entonces devolver falso fin
+        si d = 0 entonces devolver cierto fin                   ; 0:0.0, quién es
+        si d yb 0xFFFFFF00 <> (0x18 << 11) ob (3 << 8) entonces devolver falso fin
+        según d yb 0xFF
+            caso 0x00, 0x08, 0xA4, 0xE4, 0xFC: devolver cierto
+        fin
+        devolver falso
+    fin
+
+    ; el SMN, por el índice y el dato del 0:0.0, de una vez
+    función lee_smn(dir: nat32): nat32
+        variable b, r, ind: nat32
+        si dir = 0x00059800 entonces ind := 0x60 sino ind := 0xB8 fin
+        b := sin_interrupciones()
+        escribe_puerto(0xCF8, 4, 0x80000000 ob ind)
+        escribe_puerto(0xCFC, 4, dir)
+        escribe_puerto(0xCF8, 4, 0x80000000 ob (ind + 4))
+        r := lee_puerto(0xCFC, 4)
+        reponer(b)
+        devolver r
+    fin
+
+    ; las llamadas 220 a 224 (usuario.cas)
+    público función atender_termo(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        variable p: puntero a nat32
+        según n
+            caso 220:
+                si no msr_de_la_lista(a) entonces devolver NO_VALE fin
+                si no usuario_puede(actual.cr3, b, 8, cierto) entonces devolver NO_VALE fin
+                si fabricante() = 0 entonces devolver 0 fin
+                cpuid(1)
+                si r_cpu[3] yb 0x20 = 0 entonces devolver 0 fin    ; sin MSR
+                si no rdmsr_seguro(a) entonces devolver 0 fin
+                p := puntero(b)
+                p[0] := msr_lo
+                p[1] := msr_hi
+                devolver 1
+            caso 221:
+                si no pci_de_la_lista(a) entonces devolver NO_VALE fin
+                devolver lee_pci(a)
+            caso 222:
+                si a <> 0x00059800 y a <> 0xD8200C64 entonces devolver NO_VALE fin
+                si fabricante() <> 2 entonces devolver NO_VALE fin
+                si lee_pci(0) yb 0xFFFF <> 0x1022 entonces devolver NO_VALE fin
+                devolver lee_smn(a)
+            caso 223:
+                si c = 1 entonces
+                    si actual.id <> servicio_acpi() entonces devolver NO_VALE fin
+                    si no usuario_puede(actual.cr3, a, TAM_BLOQUE, falso) entonces devolver NO_VALE fin
+                    copiar_memoria(puntero(dirección(bloque)), puntero(a), TAM_BLOQUE)
+                    hay_bloque := cierto
+                    si visto <> 0 y tics - visto < 10 * HZ entonces devolver 1 fin
+                    devolver 0
+                fin
+                si no usuario_puede(actual.cr3, a, TAM_BLOQUE, cierto) entonces devolver NO_VALE fin
+                visto := tics
+                si visto = 0 entonces visto := 1 fin
+                si no hay_bloque entonces devolver 0 fin
+                copiar_memoria(puntero(a), puntero(dirección(bloque)), TAM_BLOQUE)
+                devolver 1
+            caso 224:
+                si a = 1 entonces
+                    carga := b yb 1
+                    si carga = 1 entonces visto := tics fin
+                    devolver carga
+                fin
+                si carga = 1 y tics - visto < 6 * HZ entonces devolver 1 fin
+                carga := 0
+                devolver 0
+        fin
+        devolver NO_VALE
+    fin
+
+fin Termo.

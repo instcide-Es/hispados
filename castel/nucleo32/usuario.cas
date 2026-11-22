@@ -103,6 +103,9 @@
 ;  Lo que se escribe, se borra o se cambia de nombre en la zona protegida
 ;  (\HISPA de la unidad del sistema y lo que dice la tabla), y lo que se lee
 ;  de un secreto, solo lo puede quien tiene permiso: si no, DENEGADO.
+;  (TERMO) 220 a 224: las temperaturas del procesador y de las zonas
+;       térmicas de ACPI, para el Termómetro (TERMO.BIN): solo leer, de una
+;       lista cerrada de registros (termo.cas)
 ;  (SONIDO) 190 a 199: el sonido, con el servicio de sonido (SONIDO.BIN):
 ;       los canales de los programas, el volumen, los sonidos del sistema y
 ;       tocar un .WAV (la 194); los cuenta sonido.cas
@@ -128,7 +131,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Termo
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -849,6 +852,8 @@ módulo Usuario
                 si t = nulo o no t.usuario entonces devolver NO_VALE fin
                 si t.servicio entonces devolver t.sello ob 0x80000000 fin
                 devolver t.sello
+            caso 220..224:
+                devolver atender_termo(n, a, b, c)     ; (TERMO) las temperaturas, solo leer (termo.cas)
             caso 180..189:
                 devolver atender_win32(n, a, b, c)     ; [WIN32] los programas de Windows (win32.cas)
             caso 190..199:
