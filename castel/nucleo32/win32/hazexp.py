@@ -36,7 +36,7 @@ SIN_CERROJO = {'ExitProcess', 'ExitThread', 'RaiseException', 'RtlUnwind', 'Ente
                'InitializeCriticalSectionAndSpinCount', 'InitializeCriticalSectionEx', 'DeleteCriticalSection',
                'SetCriticalSectionSpinCount', 'TlsGetValue', 'TlsSetValue', 'FlsGetValue', 'FlsSetValue',
                'GetCurrentThreadId', 'GetCurrentThread', 'GetCurrentProcess', 'GetCurrentProcessId',
-               'GetLastError', 'SetLastError', 'GetTickCount', 'QueryPerformanceCounter', 'RtlCaptureContext',
+               'GetLastError', 'SetLastError', 'GetTickCount', 'RtlCaptureContext',
                'HispaVuelveExcepcion'}
 def trampolin(s):
     return s if s in SIN_CERROJO or s.startswith('Interlocked') else 'gc_t_' + s

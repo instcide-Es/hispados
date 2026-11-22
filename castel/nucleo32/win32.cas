@@ -26,7 +26,11 @@
 ;          delante; 4 dónde está (seis números a EDX); 5 minimizar,
 ;          maximizar o restaurar (EDX: PIDE_...); 6 el ratón (x, y y los
 ;          botones, en la pantalla, a EDX); 7 de quién es la ventana activa
-;          (1 si es suya).
+;          (1 si es suya); (JUEGOS) 8 llevar la flecha a un punto de la
+;          pantalla (EDX: x e y; si la ventana activa es suya: SetCursorPos);
+;          9 lo que se ha movido el ratón de verdad, sin el borde (dos
+;          números a EDX); 10 esconder la flecha mientras su ventana sea la
+;          activa (EDX = 1) o enseñarla (0).
 ;   - 183  (JUEGOS) los hilos: EBX lo que se pide. 0 uno nuevo del proceso
 ;          (ECX: tres números del programa: dónde empieza, su pila y su TEB)
 ;          -> su número de hilo; 1 el número del hilo que corre; 2 adónde
@@ -199,6 +203,27 @@ módulo Win32
                 devolver 0
             caso 7:
                 si dueño_de_activa() = actual.id entonces devolver 1 fin
+                devolver 0
+            caso 8:
+                si no usuario_puede(actual.cr3, c, 8, falso) entonces devolver NO_VALE fin
+                si dueño_de_activa() <> actual.id entonces devolver NO_VALE fin
+                d := puntero(c)
+                pon_ratón(d[0], d[1])
+                devolver 0
+            caso 9:
+                si no usuario_puede(actual.cr3, c, 8, cierto) entonces devolver NO_VALE fin
+                d := puntero(c)
+                r := sin_interrupciones()
+                d[0] := movido_x
+                d[1] := movido_y
+                reponer(r)
+                devolver 0
+            caso 10:
+                si c = 1 entonces
+                    flecha_escondida := actual.id
+                sino si flecha_escondida = actual.id entonces
+                    flecha_escondida := 0
+                fin
                 devolver 0
         fin
         devolver NO_VALE

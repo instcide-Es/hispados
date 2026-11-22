@@ -151,6 +151,28 @@ API(i32) HispaDXPantalla(i32 op, u32 a, u32 b, u32 c)
 	return 0;
 }
 
+/* ---- (JUEGOS) la pantalla del juego: con una ventana a pantalla completa
+ * (DirectDraw u OpenGL con ChangeDisplaySettings), para el programa la
+ * pantalla es la de su modo (640 x 480...), aunque se vea agrandada y en
+ * el centro: el ratón, GetSystemMetrics y lo de su ventana, en ese modo ---- */
+int en_modo_juego(void) { return juego && wnd((HWND)juego) && geo[0] > 0 && geo[1] > 0 && geo[4] > 0 && geo[5] > 0; }
+int es_del_juego(Wnd *w) { return en_modo_juego() && w && raiz_de(w) == juego; }
+void modo_medida(i32 *an, i32 *al) { *an = geo[0]; *al = geo[1]; }
+void real_a_modo(i32 *x, i32 *y)
+{
+	*x = (*x - geo[2]) * geo[0] / geo[4];
+	*y = (*y - geo[3]) * geo[1] / geo[5];
+	if (*x < 0) *x = 0;
+	if (*y < 0) *y = 0;
+	if (*x >= geo[0]) *x = geo[0] - 1;
+	if (*y >= geo[1]) *y = geo[1] - 1;
+}
+void modo_a_real(i32 *x, i32 *y)
+{
+	*x = geo[2] + (*x * geo[4] + geo[4] / 2) / geo[0];
+	*y = geo[3] + (*y * geo[5] + geo[5] / 2) / geo[1];
+}
+
 /* ---- las teclas y el ratón ---- */
 static u8 mapa_bios[128];
 static u8 bios[0x500];
@@ -189,6 +211,11 @@ API(u32) HispaDXEntrada(i32 op, u32 a, u32 b)
 	case 2:                                   /* un mando: no hay */
 		(void)b;
 		return 0;
+	case 5: {                                 /* (JUEGOS) lo movido de verdad (dx, dy), sin el borde */
+		extern BOOL WINAPI HispaRatonMovido(i32 *dx, i32 *dy);
+		i32 *r = (i32 *)a;
+		return HispaRatonMovido(&r[0], &r[1]) ? 1 : 0;
+	}
 	case 3:                                   /* «la memoria de la BIOS» (la hora: 0x46C) */
 		*(u32 *)(bios + 0x46C) = sys_tics() * 182 / 1000;
 		return (u32)bios;

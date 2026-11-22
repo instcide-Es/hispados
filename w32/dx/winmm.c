@@ -69,6 +69,17 @@ static void reloj_ini(void) {
     tsc0 = b; ms0 = tics_ms();
   }
 }
+#ifdef HISPA_PENTIUM
+/* (JUEGOS) en Hispa-Pentium, el contador fino de KERNEL32 (los tics del
+ * núcleo y el TSC entre tic y tic, a 1 MHz): no se va aunque el TSC no
+ * corra como el reloj */
+int WINAPI QueryPerformanceCounter(u64 *c);
+static u32 reloj(void) {
+  u64 c = 0;
+  QueryPerformanceCounter(&c);
+  return (u32)hx_div64(c, 1000);
+}
+#else
 static u32 reloj(void) {
   u32 ms, t;
   reloj_ini();
@@ -82,6 +93,7 @@ static u32 reloj(void) {
   ms_ult = ms;
   return ms;
 }
+#endif
 
 /* ======================= la mezcla ======================= */
 static int snd_tarjeta = -2;        /* -2: sin mirar; -1: no hay HSPSND */

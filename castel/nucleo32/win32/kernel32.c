@@ -785,8 +785,41 @@ static void mide_tsc(void)
 	if (!tsc_hz)
 		tsc_hz = 1;
 }
-API(BOOL) QueryPerformanceFrequency(u64 *f) { mide_tsc(); *f = tsc_hz; return TRUE; }
-API(BOOL) QueryPerformanceCounter(u64 *c) { mide_tsc(); *c = rdtsc(); return TRUE; }
+/* (JUEGOS) el contador fino: en microsegundos (1 MHz), con los tics del
+ * núcleo (10 ms, que no se adelantan ni se atrasan) y, entre tic y tic, lo
+ * que ha corrido el TSC (con su ritmo medido en los tics de antes); nunca
+ * va hacia atrás. Así un juego que mide sus cuadros con él va bien aunque
+ * el TSC no corra igual que el reloj (QEMU, ahorro de energía). */
+static u32 qpc_tic, qpc_hz = 0;
+static u64 qpc_tsc, qpc_ult, qpc_ref_tsc;
+static u32 qpc_ref_tic;
+static u64 contador_us(void)
+{
+	u32 t = sys_tics();
+	u64 x = rdtsc(), us;
+	if (!qpc_ref_tic && !qpc_ref_tsc) {
+		qpc_ref_tic = t;
+		qpc_ref_tsc = x;
+	}
+	if (t != qpc_tic) {
+		/* un tic nuevo: el ritmo del TSC, desde el primero que se vio */
+		if (t - qpc_ref_tic >= 2)
+			qpc_hz = (u32)((x - qpc_ref_tsc) / (t - qpc_ref_tic));
+		qpc_tic = t;
+		qpc_tsc = x;
+	}
+	us = (u64)t * 10000u;
+	if (qpc_hz) {
+		u64 dentro = (x - qpc_tsc) * 10000u / qpc_hz;
+		us += dentro > 9999 ? 9999 : dentro;
+	}
+	if (us < qpc_ult)
+		us = qpc_ult;
+	qpc_ult = us;
+	return us;
+}
+API(BOOL) QueryPerformanceFrequency(u64 *f) { (void)mide_tsc; *f = 1000000; return TRUE; }
+API(BOOL) QueryPerformanceCounter(u64 *c) { *c = contador_us(); return TRUE; }
 API(void) GetSystemTime(SYSTEMTIME *s) { ahora(s); }
 API(void) GetLocalTime(SYSTEMTIME *s) { ahora(s); }
 API(BOOL) SetLocalTime(const SYSTEMTIME *s) { (void)s; return TRUE; }

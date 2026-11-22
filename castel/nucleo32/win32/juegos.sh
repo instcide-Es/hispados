@@ -13,7 +13,7 @@ SAL=$(readlink -m "${1:?uso: juegos.sh CARPETA}")
 cd "$RAIZ"
 O=build/juegos
 mkdir -p $O "$SAL"
-make -s build/MSVCRT.DLL build/crt0.o build/WINMM.DLL build/DSOUND.DLL build/DINPUT.DLL > /dev/null
+make -s build/MSVCRT.DLL build/crt0.o build/WINMM.DLL build/DSOUND.DLL build/DINPUT.DLL build/DDRAW.DLL > /dev/null
 CC="gcc -m32 -march=i586 -std=gnu11 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -fno-builtin
     -fno-tree-loop-distribute-patterns -fno-strict-aliasing -Wall -Wno-unused -Wno-unused-function -Werror=implicit-function-declaration -Itests/juegos"
 REG=ADVAPI32.dll:RegOpenKeyExA,RegOpenKeyA,RegCreateKeyExA,RegCreateKeyA,RegCloseKey,RegQueryValueExA,RegSetValueExA,RegQueryValueA,RegSetValueA,RegEnumKeyExA,RegEnumKeyA,RegEnumValueA,RegDeleteValueA,RegDeleteKeyA,RegQueryInfoKeyA,RegFlushKey
@@ -30,4 +30,10 @@ hacer sindll -i NOHAY.DLL:FuncionDeNoHay
 hacer hilos
 hacer seh
 hacer reg -i $REG
-echo "win32/juegos.sh: $(ls "$SAL" | wc -l) programas en $SAL"
+hacer crt
+hacer juegov -l build/DDRAW.DLL -l build/DINPUT.DLL
+# la DLL de JUEGOV, en su carpeta SUB
+$CC -c tests/juegos/jdll.c -o $O/jdll.o
+mkdir -p "$SAL/SUB"
+python3 tools/elf2pe.py --dll -o "$SAL/SUB/JDLL.DLL" $O/jdll.o
+echo "win32/juegos.sh: $(ls "$SAL"/*.EXE | wc -l) programas en $SAL"

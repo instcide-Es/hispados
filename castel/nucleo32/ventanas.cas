@@ -163,6 +163,7 @@ módulo Ventanas
     ; el ratón
     variable flecha_x, flecha_y: ent32          ; dónde está pintada la flecha
     variable flecha_pintada: bool
+    público variable flecha_escondida: nat32    ; (JUEGOS) la tarea que la esconde mientras su ventana es la activa (0: nadie)
     variable botones_antes: nat32
     variable arrastrada: ent32 = -1             ; la ventana que se está moviendo
     variable arr_dx, arr_dy: ent32
@@ -334,6 +335,11 @@ módulo Ventanas
         variable i, j, an, al: ent32
         variable c: byte
         variable p: puntero a byte
+        ; (JUEGOS) un juego que la ha escondido (ShowCursor), con su ventana delante
+        si flecha_escondida <> 0 y activa >= 0 y ventanas[activa].usada y ventanas[activa].dueño = flecha_escondida entonces
+            flecha_pintada := falso
+            devolver
+        fin
         según forma
             caso 1:
                 p := dirección(flecha_h[0])

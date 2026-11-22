@@ -222,8 +222,17 @@ u32 abrir_dll_desde(const char *carpeta, const char *nombre, char *ruta)
 	u32 m;
 	int k;
 	const char *sitios[4];
-	if (strchr(nombre, '\\') || strchr(nombre, ':')) {
-		copia_n(ruta, nombre, 128);
+	if (strchr(nombre, '\\') || strchr(nombre, '/') || strchr(nombre, ':')) {
+		/* con su carpeta: tal cual (desde la de trabajo); (JUEGOS) y, si es
+		 * relativa y no está ahí, desde la del programa («valve\dlls\hl.dll») */
+		char e[160];
+		ruta_entera(nombre, e, sizeof e);
+		copia_n(ruta, e, 128);
+		a437(c, ruta, sizeof c);
+		m = sys_abrir(c, 0);
+		if (!ES_ERROR(m) || strchr(nombre, ':') || nombre[0] == '\\' || nombre[0] == '/' || !carpeta[0])
+			return m;
+		fmt(ruta, 128, "%s%s", carpeta, nombre);
 		a437(c, ruta, sizeof c);
 		return sys_abrir(c, 0);
 	}
@@ -293,8 +302,8 @@ static Modulo *cargar_pe(const char *nombre, const char *base_nombre, int es_exe
 		copia_n(ruta, nombre, sizeof ruta);
 		a437(c, ruta, sizeof c);
 		f = sys_abrir(c, 0);
-	} else
-		f = abrir_dll(base_nombre, ruta);
+	} else    /* ((JUEGOS) con su carpeta si la lleva: «SUB\\JDLL.DLL») */
+		f = abrir_dll(strchr(nombre, '\\') || strchr(nombre, '/') || strchr(nombre, ':') ? nombre : base_nombre, ruta);
 	if (ES_ERROR(f)) {
 		*falta = 1;
 		return 0;
@@ -315,7 +324,9 @@ static Modulo *cargar_pe(const char *nombre, const char *base_nombre, int es_exe
 	if (!base) {
 		/* donde quepa, si se puede reubicar */
 		u32 rel = *(u32 *)(cab + pe + 24 + 96 + 5 * 8);
-		if (!rel || (*(u16 *)(cab + pe + 22) & 1)) {
+		/* ((JUEGOS) sin .reloc pero sin la marca de «quitados», como
+		 * Windows: se puede poner en otro sitio, no hay nada que cambiar) */
+		if ((!rel && es_exe) || (*(u16 *)(cab + pe + 22) & 1)) {
 			aviso_serie("%s no cabe en 0x%x y no se puede reubicar", ruta, ib);
 			*falta = 3;
 			sys_cerrar(f);

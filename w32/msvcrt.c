@@ -1706,6 +1706,418 @@ int _getch(void) {
 int _putch(int c) { char x = (char)c; u32 r; WriteFile(GetStdHandle(-11), &x, 1, &r, NULL); return c; }
 int _kbhit(void) { return 0; }
 
+/* =============================================================================
+ *  (JUEGOS) Lo que piden los programas de Visual C++ 6 enlazados con
+ *  MSVCRT.DLL (los juegos de 1998-2000): el arranque, las de coma flotante
+ *  del compilador (_ftol, _CI...), lo de C++ (new y delete, _purecall), las
+ *  rutas (_splitpath, _findfirst...), la hora, los hilos de la biblioteca
+ *  (_beginthreadex), los textos multiocteto (con la 1252, de un octeto), los
+ *  de Unicode y unas cuantas más. Con la documentación pública de la
+ *  biblioteca de Microsoft.
+ * ============================================================================= */
+int _adjust_fdiv = 0;                       /* (el fallo de FDIV del Pentium: no) */
+double _HUGE = 1e300 * 1e300;
+int _timezone = 0, _daylight = 0;
+char *_tzname[2] = { "UTC", "UTC" };
+u32 __lc_codepage = 0, __lc_collate_cp = 0;
+unsigned char _mbctype[257];
+unsigned char *__p__mbctype(void) { return _mbctype; }
+int *__p__winmajor(void) { static int v = 4; return &v; }
+int *__p__winminor(void) { static int v = 10; return &v; }
+char ***__p___initenv(void) { return &__initenv; }
+void _tzset(void) { }
+
+/* el valor de st(0) a entero (truncando), en EDX:EAX; lo saca de la pila */
+__asm__(".text\n.globl _ftol\n_ftol:\n"
+        "  subl $12, %esp\n  fnstcw (%esp)\n  movw (%esp), %ax\n  orw $0x0C00, %ax\n  movw %ax, 2(%esp)\n"
+        "  fldcw 2(%esp)\n  fistpll 4(%esp)\n  fldcw (%esp)\n  movl 4(%esp), %eax\n  movl 8(%esp), %edx\n"
+        "  addl $12, %esp\n  ret\n");
+/* las _CI...: el argumento (o los dos) en la pila del x87; el resultado, en st(0) */
+#define CI1(n, f) __asm__(".text\n.globl " #n "\n" #n ":\n  subl $8, %esp\n  fstpl (%esp)\n  call " #f "\n  addl $8, %esp\n  ret\n")
+#define CI2(n, f) __asm__(".text\n.globl " #n "\n" #n ":\n  subl $16, %esp\n  fstpl 8(%esp)\n  fstpl (%esp)\n  call " #f "\n  addl $16, %esp\n  ret\n")
+double asin(double x);
+double acos(double x);
+double sinh(double x);
+double cosh(double x);
+double tanh(double x);
+CI2(_CIpow, pow); CI2(_CIatan2, atan2); CI2(_CIfmod, fmod);
+CI1(_CIsqrt, sqrt); CI1(_CIsin, sin); CI1(_CIcos, cos); CI1(_CItan, tan); CI1(_CIexp, exp); CI1(_CIlog, log); CI1(_CIlog10, log10);
+CI1(_CIasin, asin); CI1(_CIacos, acos); CI1(_CIatan, atan); CI1(_CIsinh, sinh); CI1(_CIcosh, cosh); CI1(_CItanh, tanh);
+double asin(double x) { return atan2(x, sqrt(1 - x * x)); }
+double acos(double x) { return atan2(sqrt(1 - x * x), x); }
+double sinh(double x) { double e = exp(x); return (e - 1 / e) / 2; }
+double cosh(double x) { double e = exp(x); return (e + 1 / e) / 2; }
+double tanh(double x) { double e = exp(2 * x); return (e - 1) / (e + 1); }
+int _isnan(double x) { return x != x; }
+int _finite(double x) { u64 b; memcpy(&b, &x, 8); return ((b >> 52) & 0x7FF) != 0x7FF; }
+double _hypot(double x, double y) { return sqrt(x * x + y * y); }
+double _copysign(double x, double y) { u64 a, b; memcpy(&a, &x, 8); memcpy(&b, &y, 8); a = (a & ~(1ull << 63)) | (b & (1ull << 63)); memcpy(&x, &a, 8); return x; }
+double _chgsign(double x) { return -x; }
+double frexp(double x, int *e) {
+  u64 b;
+  int ex;
+  *e = 0;
+  if (x == 0 || !_finite(x)) return x;
+  memcpy(&b, &x, 8);
+  ex = (int)((b >> 52) & 0x7FF);
+  if (!ex) { x *= 18014398509481984.0; memcpy(&b, &x, 8); ex = (int)((b >> 52) & 0x7FF) - 54; *e = -54; }
+  *e += ex - 1022;
+  b = (b & ~(0x7FFull << 52)) | (1022ull << 52);
+  memcpy(&x, &b, 8);
+  return x;
+}
+double _logb(double x) { int e; frexp(x, &e); return e - 1; }
+double _scalb(double x, long e) { return ldexp(x, (int)e); }
+double _nextafter(double x, double y) {
+  u64 b;
+  if (x == y || x != x) return x;
+  if (x == 0) { b = 1; memcpy(&x, &b, 8); return y > 0 ? x : -x; }
+  memcpy(&b, &x, 8);
+  if ((x < y) == (x > 0)) b++; else b--;
+  memcpy(&x, &b, 8);
+  return x;
+}
+int _fpclass(double x) {
+  u64 b; memcpy(&b, &x, 8);
+  int neg = (int)(b >> 63), ex = (int)((b >> 52) & 0x7FF);
+  u64 m = b & ((1ull << 52) - 1);
+  if (ex == 0x7FF) return m ? 2 : neg ? 4 : 0x200;          /* _FPCLASS_QNAN, NINF, PINF */
+  if (!ex) return m ? (neg ? 0x10 : 0x80) : (neg ? 0x20 : 0x40);
+  return neg ? 8 : 0x100;
+}
+
+/* ---- C++: new, delete, _purecall, type_info, exception ---- */
+typedef int (*MANEJA_NEW)(size_t);
+static MANEJA_NEW maneja_new;
+void *op_new(size_t n) __asm__("\"??2@YAPAXI@Z\"");
+void *op_new(size_t n) {
+  for (;;) {
+    void *p = malloc(n ? n : 1);
+    if (p || !maneja_new || !maneja_new(n)) return p;
+  }
+}
+void op_delete(void *p) __asm__("\"??3@YAXPAX@Z\"");
+void op_delete(void *p) { free(p); }
+void *op_new_v(size_t n) __asm__("\"??_U@YAPAXI@Z\"");
+void *op_new_v(size_t n) { return op_new(n); }
+void op_delete_v(void *p) __asm__("\"??_V@YAXPAX@Z\"");
+void op_delete_v(void *p) { free(p); }
+MANEJA_NEW _set_new_handler(MANEJA_NEW f) { MANEJA_NEW a = maneja_new; maneja_new = f; return a; }
+MANEJA_NEW set_new_handler_c(MANEJA_NEW f) __asm__("\"?_set_new_handler@@YAP6AHI@ZP6AHI@Z@Z\"");
+MANEJA_NEW set_new_handler_c(MANEJA_NEW f) { return _set_new_handler(f); }
+typedef void (*MANEJA_NEW0)(void);
+MANEJA_NEW0 set_new_handler_std(MANEJA_NEW0 f) __asm__("\"?set_new_handler@@YAP6AXXZP6AXXZ@Z\"");
+MANEJA_NEW0 set_new_handler_std(MANEJA_NEW0 f) { (void)f; return 0; }
+int WINAPI MessageBoxA(HANDLE, const char *, const char *, u32);
+static void __attribute__((noreturn)) acaba_con(const char *t) {
+  u32 r;
+  WriteFile(GetStdHandle(-12), t, strlen(t), &r, NULL);
+  ExitProcess(3);
+  for (;;) ;
+}
+int _purecall(void) { acaba_con("Error de C++: se ha llamado a una función virtual pura.\r\n"); }
+void terminar_cpp(void) __asm__("\"?terminate@@YAXXZ\"");
+void terminar_cpp(void) { acaba_con("Error de C++: terminate().\r\n"); }
+/* (las de las clases van con «thiscall»: el objeto en ECX) */
+__asm__(".text\n.globl \"??1type_info@@UAE@XZ\"\n\"??1type_info@@UAE@XZ\":\n  ret\n"
+        ".globl \"??0exception@@QAE@ABQBD@Z\"\n\"??0exception@@QAE@ABQBD@Z\":\n"
+        "  movl 4(%esp), %eax\n  movl (%eax), %eax\n  movl %eax, 4(%ecx)\n  movl $0, 8(%ecx)\n  movl %ecx, %eax\n  ret $4\n"
+        ".globl \"?what@exception@@UBEPBDXZ\"\n\"?what@exception@@UBEPBDXZ\":\n"
+        "  movl 4(%ecx), %eax\n  testl %eax, %eax\n  jnz 1f\n  movl $texto_exc, %eax\n1:\n  ret\n"
+        ".section .rodata\ntexto_exc: .asciz \"excepción desconocida\"\n.text\n");
+void *__RTtypeid(void *o) { return 0; }
+void *__RTDynamicCast(void *o, int a, void *b, void *c, int d) { return 0; }
+
+/* ---- las rutas ---- */
+void _splitpath(const char *p, char *dr, char *dir, char *nom, char *ext) {
+  const char *f = p, *ub = NULL, *pu = NULL, *q;
+  if (dr) dr[0] = 0;
+  if (p[0] && p[1] == ':') { if (dr) { dr[0] = p[0]; dr[1] = ':'; dr[2] = 0; } f = p + 2; }
+  for (q = f; *q; q++) { if (*q == '\\' || *q == '/') ub = q; else if (*q == '.') pu = q; }
+  if (pu && ub && pu < ub) pu = NULL;
+  if (dir) { size_t n = ub ? (size_t)(ub - f + 1) : 0; memcpy(dir, f, n); dir[n] = 0; }
+  q = ub ? ub + 1 : f;
+  if (nom) { size_t n = pu ? (size_t)(pu - q) : strlen(q); memcpy(nom, q, n); nom[n] = 0; }
+  if (ext) strcpy(ext, pu ? pu : "");
+}
+void _makepath(char *d, const char *dr, const char *dir, const char *nom, const char *ext) {
+  d[0] = 0;
+  if (dr && *dr) { d[0] = dr[0]; d[1] = ':'; d[2] = 0; }
+  if (dir && *dir) { strcat(d, dir); char c = dir[strlen(dir) - 1]; if (c != '\\' && c != '/') strcat(d, "\\"); }
+  if (nom) strcat(d, nom);
+  if (ext && *ext) { if (*ext != '.') strcat(d, "."); strcat(d, ext); }
+}
+struct finddata_ms { u32 attrib; time_t c, a, e; u32 size; char name[260]; };
+int WINAPI FindNextFileA(HANDLE, FINDA *);
+static void pon_find(struct finddata_ms *d, const FINDA *f) {
+  d->attrib = f->atrib == 0x80 ? 0 : f->atrib;
+  d->c = t_de_ft(&f->c); d->a = t_de_ft(&f->a); d->e = t_de_ft(&f->e);
+  if (!d->c) d->c = d->e;
+  if (!d->a) d->a = d->e;
+  d->size = f->tam_lo;
+  strcpy(d->name, f->nombre);
+}
+long _findfirst(const char *p, struct finddata_ms *d) {
+  FINDA f;
+  HANDLE h = FindFirstFileA(p, &f);
+  if (h == INVALID) { error_win(); errno_v = ENOENT; return -1; }
+  pon_find(d, &f);
+  return (long)h;
+}
+int _findnext(long h, struct finddata_ms *d) {
+  FINDA f;
+  if (!FindNextFileA((HANDLE)h, &f)) { errno_v = ENOENT; return -1; }
+  pon_find(d, &f);
+  return 0;
+}
+int _findclose(long h) { return FindClose((HANDLE)h) ? 0 : -1; }
+int _getdrive(void) { char b[260]; GetCurrentDirectoryA(sizeof b, b); return b[0] >= 'a' ? b[0] - 'a' + 1 : b[0] - 'A' + 1; }
+int _chdrive(int u) { char b[4] = { (char)('A' + u - 1), ':', 0 }; return SetCurrentDirectoryA(b) ? 0 : -1; }
+char *_getdcwd(int u, char *b, int n) { (void)u; return _getcwd(b, n); }
+char *_tempnam(const char *dir, const char *pre) {
+  static int k;
+  char *r = malloc(300);
+  if (!r) return NULL;
+  for (;;) {
+    snprintf(r, 300, "%s\\%s%u.TMP", dir && *dir ? dir : ".", pre ? pre : "T", GetTickCount() % 100000 + k++);
+    if (GetFileAttributesA(r) == 0xFFFFFFFF) return r;
+  }
+}
+
+/* ---- la hora ---- */
+struct timeb_ms { time_t t; u16 ms; short zona, verano; };
+void _ftime(struct timeb_ms *b) {
+  FT f; ST s;
+  GetSystemTimeAsFileTime(&f);
+  FileTimeToSystemTime(&f, &s);
+  b->t = t_de_ft(&f);
+  b->ms = s.ms;
+  b->zona = 0;
+  b->verano = 0;
+}
+char *_strdate(char *d) { time_t t = time(NULL); struct tm *m = localtime(&t); snprintf(d, 9, "%02d/%02d/%02d", m->mon + 1, m->mday, m->year % 100); return d; }
+char *_strtime(char *d) { time_t t = time(NULL); struct tm *m = localtime(&t); snprintf(d, 9, "%02d:%02d:%02d", m->hour, m->min, m->sec); return d; }
+int _utime(const char *n, void *t) { (void)t; return GetFileAttributesA(n) == 0xFFFFFFFF ? -1 : 0; }
+int _futime(int fd, void *t) { (void)fd; (void)t; return 0; }
+
+/* ---- los hilos de la biblioteca ---- */
+typedef u32 (WINAPI *HILO_F)(void *);
+HANDLE WINAPI CreateThread(void *, u32, HILO_F, void *, u32, u32 *);
+void WINAPI ExitThread(u32);
+typedef struct { void (*f)(void *); void *arg; } HILO_C;
+static u32 WINAPI arranca_hilo_c(void *p) {
+  HILO_C h = *(HILO_C *)p;
+  free(p);
+  h.f(h.arg);
+  return 0;
+}
+u32 _beginthreadex(void *s, u32 pila, HILO_F f, void *arg, u32 fl, u32 *id) {
+  HANDLE h = CreateThread(s, pila, f, arg, fl, id);
+  if (!h) { error_win(); return 0; }
+  return (u32)h;
+}
+u32 _beginthread(void (*f)(void *), u32 pila, void *arg) {
+  HILO_C *h = malloc(sizeof *h);
+  if (!h) return (u32)-1;
+  h->f = f;
+  h->arg = arg;
+  HANDLE r = CreateThread(NULL, pila, arranca_hilo_c, h, 0, NULL);
+  if (!r) { free(h); error_win(); return (u32)-1; }
+  return (u32)r;
+}
+void _endthreadex(u32 c) { ExitThread(c); }
+void _endthread(void) { ExitThread(0); }
+
+/* ---- números a texto (_ecvt, _fcvt, _gcvt) ---- */
+static char *cifras(double x, int n, int fijo, int *pd, int *signo) {
+  static char b[352];
+  int e = 0, k, d;
+  *signo = x < 0;
+  if (x < 0) x = -x;
+  if (n < 0) n = 0;
+  if (n > 340) n = 340;
+  if (x != 0) {
+    while (x >= 10) { x /= 10; e++; }
+    while (x < 1) { x *= 10; e--; }
+  }
+  d = fijo ? n + e + 1 : n;           /* las cifras que hacen falta */
+  if (d < 0) d = 0;
+  if (d > 340) d = 340;
+  for (k = 0; k < d; k++) { int c = (int)x; b[k] = (char)('0' + c); x = (x - c) * 10; }
+  b[d] = 0;
+  if (x >= 5 && d > 0) {              /* redondear */
+    for (k = d - 1; k >= 0; k--) { if (b[k] < '9') { b[k]++; break; } b[k] = '0'; }
+    if (k < 0) { memmove(b + 1, b, d); b[0] = '1'; e++; if (!fijo) b[d] = 0; else b[d + 1] = 0; }
+  }
+  *pd = x == 0 && d == 0 ? 0 : e + 1;
+  return b;
+}
+char *_ecvt(double x, int n, int *pd, int *s) { return cifras(x, n, 0, pd, s); }
+char *_fcvt(double x, int n, int *pd, int *s) { return cifras(x, n, 1, pd, s); }
+char *_gcvt(double x, int n, char *d) { snprintf(d, 64, "%.*g", n, x); return d; }
+
+/* ---- los de un octeto y los «multiocteto» (la 1252: todos de uno) ---- */
+int _toupper(int c) { return c - 'a' + 'A'; }
+int _tolower(int c) { return c - 'A' + 'a'; }
+int _mbscmp(const unsigned char *a, const unsigned char *b) { return strcmp((const char *)a, (const char *)b); }
+int _mbsicmp(const unsigned char *a, const unsigned char *b) { return _stricmp((const char *)a, (const char *)b); }
+int _ismbblead(unsigned int c) { return 0; }
+unsigned char *_mbschr(const unsigned char *s, unsigned int c) { return (unsigned char *)strchr((const char *)s, c); }
+unsigned char *_mbsrchr(const unsigned char *s, unsigned int c) { return (unsigned char *)strrchr((const char *)s, c); }
+unsigned char *_mbsstr(const unsigned char *s, const unsigned char *t) { return (unsigned char *)strstr((const char *)s, (const char *)t); }
+size_t _mbslen(const unsigned char *s) { return strlen((const char *)s); }
+unsigned char *_mbsnbcpy(unsigned char *d, const unsigned char *s, size_t n) { return (unsigned char *)strncpy((char *)d, (const char *)s, n); }
+unsigned char *_mbsdec(const unsigned char *ini, const unsigned char *p) { return p > ini ? (unsigned char *)p - 1 : NULL; }
+unsigned char *_mbsinc(const unsigned char *p) { return (unsigned char *)p + 1; }
+int _getmbcp(void) { return 0; }
+int _setmbcp(int c) { return 0; }
+void *_memccpy(void *d, const void *s, int c, size_t n) {
+  u8 *a = d; const u8 *b = s;
+  while (n--) { *a = *b++; if (*a++ == (u8)c) return a; }
+  return NULL;
+}
+char *_strrev(char *s) { size_t n = strlen(s); for (size_t i = 0; i < n / 2; i++) { char t = s[i]; s[i] = s[n - 1 - i]; s[n - 1 - i] = t; } return s; }
+char *_strset(char *s, int c) { for (char *p = s; *p; p++) *p = (char)c; return s; }
+char *_strnset(char *s, int c, size_t n) { for (char *p = s; *p && n--; p++) *p = (char)c; return s; }
+int strcoll(const char *a, const char *b) { return strcmp(a, b); }
+int _strcoll(const char *a, const char *b) { return strcmp(a, b); }
+int _stricoll(const char *a, const char *b) { return _stricmp(a, b); }
+size_t strxfrm(char *d, const char *s, size_t n) { size_t l = strlen(s); if (n) { strncpy(d, s, n); if (l >= n) d[n - 1] = 0; } return l; }
+
+/* ---- Unicode (wchar_t de 16 bits) ---- */
+wchar_t *wcscpy(wchar_t *d, const wchar_t *s) { wchar_t *p = d; while ((*p++ = *s++)) ; return d; }
+wchar_t *wcscat(wchar_t *d, const wchar_t *s) { wcscpy(d + wcslen(d), s); return d; }
+int wcscmp(const wchar_t *a, const wchar_t *b) { while (*a && *a == *b) { a++; b++; } return (int)*a - (int)*b; }
+static wchar_t w_minus(wchar_t c) { return (c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7) ? c + 32 : c; }
+int _wcsicmp(const wchar_t *a, const wchar_t *b) { while (*a && w_minus(*a) == w_minus(*b)) { a++; b++; } return (int)w_minus(*a) - (int)w_minus(*b); }
+wchar_t *wcsncpy(wchar_t *d, const wchar_t *s, size_t n) { size_t i = 0; for (; i < n && s[i]; i++) d[i] = s[i]; for (; i < n; i++) d[i] = 0; return d; }
+wchar_t *wcschr(const wchar_t *s, wchar_t c) { for (;; s++) { if (*s == c) return (wchar_t *)s; if (!*s) return NULL; } }
+wchar_t *wcsrchr(const wchar_t *s, wchar_t c) { const wchar_t *r = NULL; for (;; s++) { if (*s == c) r = s; if (!*s) return (wchar_t *)r; } }
+wchar_t *wcsstr(const wchar_t *s, const wchar_t *t) {
+  size_t n = wcslen(t);
+  if (!n) return (wchar_t *)s;
+  for (; *s; s++) if (!memcmp(s, t, n * 2)) return (wchar_t *)s;
+  return NULL;
+}
+wchar_t *_wcslwr(wchar_t *s) { for (wchar_t *p = s; *p; p++) *p = w_minus(*p); return s; }
+wchar_t *_wcsupr(wchar_t *s) { for (wchar_t *p = s; *p; p++) if ((*p >= 'a' && *p <= 'z') || (*p >= 0xE0 && *p <= 0xFE && *p != 0xF7)) *p -= 32; return s; }
+long wcstol(const wchar_t *s, wchar_t **fin, int base) {
+  char b[64]; int k = 0; char *f;
+  while (s[k] && k < 63) { b[k] = s[k] < 128 ? (char)s[k] : '?'; k++; }
+  b[k] = 0;
+  long r = strtol(b, &f, base);
+  if (fin) *fin = (wchar_t *)s + (f - b);
+  return r;
+}
+int _wtoi(const wchar_t *s) { return (int)wcstol(s, NULL, 10); }
+/* printf de Unicode: el formato a la 1252, cada %s (de Unicode) también, y
+ * lo que sale, otra vez a Unicode */
+int _vsnwprintf(wchar_t *d, size_t n, const wchar_t *f, va_list ap) {
+  char sal[1024], trozo[256], fm[32];
+  size_t o = 0, k;
+  while (*f && o < sizeof sal - 1) {
+    if (*f != '%') { sal[o++] = *f < 256 ? (char)*f : '?'; f++; continue; }
+    k = 0;
+    fm[k++] = '%';
+    f++;
+    while (*f && k < 28 && !((*f >= 'a' && *f <= 'z' && *f != 'l' && *f != 'h') || (*f >= 'A' && *f <= 'Z' && *f != 'L') || *f == '%')) fm[k++] = (char)*f++;
+    char c = (char)*f++;
+    fm[k] = 0;
+    if (c == '%') { sal[o++] = '%'; continue; }
+    if (c == 's' || c == 'S') {
+      const wchar_t *w = c == 's' ? va_arg(ap, const wchar_t *) : NULL;
+      const char *a = c == 'S' ? va_arg(ap, const char *) : NULL;
+      char t2[256]; size_t j = 0;
+      if (w) { while (w[j] && j < 255) { t2[j] = w[j] < 256 ? (char)w[j] : '?'; j++; } t2[j] = 0; a = t2; }
+      if (!a) a = "(null)";
+      strcat(fm, "s");
+      snprintf(trozo, sizeof trozo, fm, a);
+    } else if (c == 'c' || c == 'C') {
+      int ch = va_arg(ap, int);
+      strcat(fm, "c");
+      snprintf(trozo, sizeof trozo, fm, ch < 256 ? ch : '?');
+    } else if (c == 'f' || c == 'e' || c == 'g' || c == 'E' || c == 'G') {
+      double v = va_arg(ap, double);
+      size_t l = strlen(fm); fm[l] = c; fm[l + 1] = 0;
+      snprintf(trozo, sizeof trozo, fm, v);
+    } else if (strstr(fm, "I64") || strstr(fm, "ll")) {
+      s64 v = va_arg(ap, s64);
+      size_t l = strlen(fm); fm[l] = c; fm[l + 1] = 0;
+      snprintf(trozo, sizeof trozo, fm, v);
+    } else {
+      u32 v = va_arg(ap, u32);
+      size_t l = strlen(fm); fm[l] = c; fm[l + 1] = 0;
+      snprintf(trozo, sizeof trozo, fm, v);
+    }
+    for (k = 0; trozo[k] && o < sizeof sal - 1; k++) sal[o++] = trozo[k];
+  }
+  sal[o] = 0;
+  if (!n) return (int)o;
+  for (k = 0; k < o && k < n - 1; k++) d[k] = (u8)sal[k];
+  d[k] = 0;
+  return o < n ? (int)o : -1;
+}
+int _snwprintf(wchar_t *d, size_t n, const wchar_t *f, ...) { va_list ap; va_start(ap, f); int r = _vsnwprintf(d, n, f, ap); va_end(ap); return r; }
+int vswprintf(wchar_t *d, const wchar_t *f, va_list ap) { return _vsnwprintf(d, 0x7FFFFFFF, f, ap); }
+int swprintf(wchar_t *d, const wchar_t *f, ...) { va_list ap; va_start(ap, f); int r = _vsnwprintf(d, 0x7FFFFFFF, f, ap); va_end(ap); return r; }
+/* el arranque de los de Unicode (wmain) */
+wchar_t *_wcmdln;
+static wchar_t *a_ancho(const char *s) {
+  size_t n = strlen(s);
+  wchar_t *w = malloc((n + 1) * 2);
+  if (w) { for (size_t k = 0; k <= n; k++) w[k] = (u8)s[k]; }
+  return w;
+}
+void __wgetmainargs(int *argc, wchar_t ***argv, wchar_t ***env, int comodines, void *si) {
+  static wchar_t **wa, **we;
+  if (!wa) {
+    wa = malloc((__argc + 1) * sizeof *wa);
+    for (int k = 0; k < __argc; k++) wa[k] = a_ancho(__argv[k]);
+    wa[__argc] = NULL;
+    int n = 0;
+    while (_environ && _environ[n]) n++;
+    we = malloc((n + 1) * sizeof *we);
+    for (int k = 0; k < n; k++) we[k] = a_ancho(_environ[k]);
+    we[n] = NULL;
+    _wcmdln = a_ancho(_acmdln);
+  }
+  *argc = __argc;
+  *argv = wa;
+  *env = we;
+}
+
+/* ---- el resto ---- */
+void _longjmpex(void *jb, int v) __attribute__((alias("longjmp")));
+int _heapchk(void) { return -2; }                 /* _HEAPOK */
+int _heapmin(void) { return 0; }
+int _heapwalk(void *e) { return -5; }             /* _HEAPEND */
+int _set_sbh_threshold(size_t n) { return 1; }
+static int devuelta = -1;
+int _getche(void) { int c = devuelta >= 0 ? devuelta : _getch(); devuelta = -1; if (c != EOF) _putch(c); return c; }
+int _ungetch(int c) { devuelta = c; return c; }
+int _cputs(const char *s) { u32 r; return WriteFile(GetStdHandle(-11), s, strlen(s), &r, NULL) ? 0 : -1; }
+int _cprintf(const char *f, ...) { char b[1024]; va_list ap; va_start(ap, f); int r = _vsnprintf(b, sizeof b, f, ap); va_end(ap); _cputs(b); return r; }
+int _cscanf(const char *f, ...) { return 0; }
+u32 WINAPI GetCurrentProcessId(void);
+void WINAPI Sleep(u32);
+int WINAPI Beep(u32, u32);
+int _getpid(void) { return (int)GetCurrentProcessId(); }
+void _sleep(u32 ms) { Sleep(ms); }
+void _beep(u32 f, u32 d) { Beep(f, d); }
+int _execv(const char *n, const char *const *argv) { exit(_spawnv(0, n, argv)); }
+int _execl(const char *n, const char *a0, ...) { exit(_spawnv(0, n, &a0)); }
+int _pipe(int *p, u32 n, int m) { errno_v = EMFILE; return -1; }
+int _dup2(int a, int b) { errno_v = EBADF; return -1; }
+int _locking(int fd, int m, long n) { return 0; }
+int _umask(int m) { static int v; int a = v; v = m; return a; }
+int WINAPI SetFileAttributesA(const char *, u32);
+int _chmod(const char *n, int m) {
+  u32 a = GetFileAttributesA(n);
+  if (a == 0xFFFFFFFF) { errno_v = ENOENT; return -1; }
+  a = (m & 0x80) ? (a & ~1u) : (a | 1);
+  return SetFileAttributesA(n, a) ? 0 : -1;
+}
+
 /* ---- el arranque de la DLL ---- */
 int WINAPI DllMain(HANDLE h, u32 razon, void *x) {
   if (razon != 1) return 1;
