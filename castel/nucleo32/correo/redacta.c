@@ -1025,7 +1025,7 @@ static int bucle(void)
 
 	for (;;) {
 		pinta();
-		if (!ui_suceso(&s, 200))
+		if (!ui_espera(&s, 0))
 			continue;
 		if (s.clase == UE_TAMANO) {
 			van = (int)s.a;

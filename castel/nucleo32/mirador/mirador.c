@@ -913,7 +913,7 @@ int principal(void)
 	static char args[400];
 	struct suceso s;
 	uint32_t n, alto = sc(SC_DATO, DATO_ALTO_LIBRE, 0, 0), ancho = sc(SC_DATO, DATO_ANCHO_PANTALLA, 0, 0);
-	int an = 740, al = 500, px = 0, py = 0, arrastra = 0, cx0 = 0, cy0 = 0;
+	int an = 740, al = 500, px = 0, py = 0, arrastra = 0, cx0 = 0, cy0 = 0, pintar = 1;	/* (PARPADEO) */
 	char *argv[4];
 
 	n = sc(SC_ARGUMENTOS, (uint32_t)args, sizeof(args) - 1, 0);
@@ -948,7 +948,9 @@ int principal(void)
 	for (;;) {
 		int hay, espera = diapos || n_cuadros > 1;
 
-		pinta();
+		if (pintar)
+			pinta();
+		pintar = 1;
 		for (;;) {
 			uint32_t t = ui_tics(), hz = ui_hz();
 
@@ -1013,8 +1015,10 @@ int principal(void)
 			continue;
 		}
 		case EV_RATON_MUEVE:
-			if (!arrastra || !(s.c & BOTON_IZQUIERDO) || ajustar)
+			if (!arrastra || !(s.c & BOTON_IZQUIERDO) || ajustar) {
+				pintar = 0;	/* (PARPADEO) el ratón que solo pasa no cambia nada: no se repinta */
 				continue;
+			}
 			centro_x = cx0 - (int)((int64_t)((int32_t)s.a - px) * 1000 / zoom);
 			centro_y = cy0 - (int)((int64_t)((int32_t)s.b - py) * 1000 / zoom);
 			break;
@@ -1026,6 +1030,7 @@ int principal(void)
 				elegido(s.a);
 			break;
 		default:
+			pintar = 0;	/* (PARPADEO) */
 			continue;
 		}
 	}

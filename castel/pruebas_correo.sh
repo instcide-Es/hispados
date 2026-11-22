@@ -204,6 +204,40 @@ S=$Y/sinred.txt
 mira "sin red: se ve lo guardado (la lista y lo bajado), en dos paneles (800 x 600)" "correo: ventana: [0-9]* x [0-9]* (dos paneles)" \
   "correo: buscar en lo bajado «Caso 02»: 1" "correo: leído: 2 «Caso 02"
 miracap "sin red: «Sin conexión: se ve lo guardado», y el mensaje con «< Volver a la lista»" co21 negrita 180 60 400 100 "< Volver a la lista"
+# (PARPADEO) el ratón que solo pasa por encima no repinta nada (Carlos, 0.8.7:
+# «los campos desaparecen unos milisegundos y vuelven a aparecer»): el
+# asistente y la ventana principal con el buzón cargado, con capturas entre
+# movimiento y movimiento; y lo que cuenta Correo al cerrar
+cp $Y/base.img $Y/p.img
+mmd -i $Y/p.img ::RAICES ::CORREO && mcopy -i $Y/p.img $Y/srv/RAIZ.CER ::RAICES/PRUEBA.CER && mcopy -i $Y/p.img $BIN :: && mcopy -i $Y/p.img $Y/CORREO.INI ::CORREO/
+SES=(":pausa 3" ":doble 60 186" ":pausa 4" ":escribe correo" ":tecla ret" ":pausa 8"
+  ":escribe ana@prueba.test" ":tecla tab" ":escribe Ana García" ":tecla tab" ":escribe secreta1")
+k=0
+for xy in "300 290" "420 200" "520 230" "640 290" "700 260" "460 300" "300 240" "620 200"; do
+  SES+=(":raton $xy" ":captura pa$k" ":raton $((${xy% *} + 7)) $((${xy#* } + 5))" ":raton $((${xy% *} + 15)) $((${xy#* } + 9))"); k=$((k + 1))
+done
+SES+=(":tecla ret" ":pausa 12" ":tecla ret" ":pausa 25")
+for xy in "300 150" "400 250" "500 330" "650 400" "800 200" "900 300" "250 450" "700 120"; do
+  SES+=(":raton $xy" ":captura pa$k" ":raton $((${xy% *} + 9)) $((${xy#* } + 4))" ":raton $((${xy% *} + 18)) $((${xy#* } + 8))"); k=$((k + 1))
+done
+SES+=(":clic 400 147" ":pausa 6")
+for xy in "650 250" "800 300" "900 200" "400 400"; do
+  SES+=(":raton $xy" ":captura pa$k" ":raton $((${xy% *} + 9)) $((${xy#* } + 4))"); k=$((k + 1))
+done
+SES+=(":tecla alt-f4" ":pausa 4")
+CAPTURAS=$G PANTALLA=1024x600 ESCRIBE=1 DISCO=$Y/p.img ARRANQUE="escritorio modo=1024x600" MODULOS= MEMORIA=128 QEMU_MAS="-nic user,model=e1000" \
+  $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN "${SES[@]}" > $Y/parpadeo.sal 2>&1
+tr -d '\r' < $Y/parpadeo.sal > $Y/parpadeo.txt
+S=$Y/parpadeo.txt
+mira "(PARPADEO) mover el ratón por el asistente y por la ventana (con el buzón cargado y un mensaje abierto) no repinta nada: «repintados por él: 0»" \
+  "correo: ventana: el ratón se ha movido [0-9][0-9]* veces; repintados por él: 0 (vuelcos: [0-9]*)$"
+m=$(grep -o 'se ha movido [0-9]* veces' $S | grep -o '[0-9]*'); [ "${m:-0}" -ge 40 ] && ok "(PARPADEO) el ratón se ha movido de verdad por la ventana ($m movimientos)" || ko "(PARPADEO) el ratón no se ha movido (${m:-0})"
+mal=0
+for i in 0 1 2 3 4 5 6 7; do cap $G/pa$i.ppm texto 200 120 820 300 "Dirección de correo:" texto 420 150 800 190 "ana@prueba.test" || mal="$mal pa$i"; done
+[ "$mal" = 0 ] && ok "(PARPADEO) el asistente, capturado mientras se mueve el ratón: los campos y lo escrito siempre están (8 capturas)" || ko "(PARPADEO) al asistente le faltan los campos en:$mal ($(head -2 $G/cap.txt | tr '\n' ' '))"
+mal=0
+for i in 8 9 10 11 12 13 14 15 16 17 18 19; do cap $G/pa$i.ppm negrita 0 70 190 90 "ana@prueba.test" negrita 186 95 600 118 "Asunto" || mal="$mal pa$i"; done
+[ "$mal" = 0 ] && ok "(PARPADEO) la ventana principal (la lista y el mensaje), capturada mientras se mueve el ratón: siempre entera (12 capturas)" || ko "(PARPADEO) a la ventana le falta algo en:$mal ($(head -2 $G/cap.txt | tr '\n' ' '))"
 if [ -z "${SIN_ATOM:-}" ]; then
 # --- 4. lo que tarda en un Atom N455 (-cpu n270 -icount shift=0: una instrucción, un nanosegundo) ---
 cp $Y/base.img $Y/r.img

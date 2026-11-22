@@ -1086,7 +1086,7 @@ static int ventana(const char *ruta)
 {
 	struct suceso s;
 	uint32_t alto = sc(SC_DATO, DATO_ALTO_LIBRE, 0, 0), ancho = sc(SC_DATO, DATO_ANCHO_PANTALLA, 0, 0);
-	int an = 720, al = 440;
+	int an = 720, al = 440, pintar = 1;	/* (PARPADEO) */
 
 	if (ancho && ancho < 760)
 		an = (int)ancho - 40;
@@ -1102,7 +1102,9 @@ static int ventana(const char *ruta)
 	if (ruta && ruta[0])
 		abre_zip(ruta);
 	for (;;) {
-		pinta();
+		if (pintar)
+			pinta();
+		pintar = 1;
 		if (!ui_suceso(&s, 1))
 			break;
 		switch (s.clase) {
@@ -1129,8 +1131,10 @@ static int ventana(const char *ruta)
 				arrastrando = 1;
 				snprintf(aviso, sizeof(aviso), "Su\x82ltelo en el escritorio para sacarlo al lado del ZIP.");
 			}
-			if (!arrastrando)
+			if (!arrastrando) {
+				pintar = 0;	/* (PARPADEO) el ratón que solo pasa no cambia nada: no se repinta */
 				continue;
+			}
 			break;
 		case EV_RATON_SUBE:
 			if (arrastrando) {
@@ -1157,6 +1161,7 @@ static int ventana(const char *ruta)
 			menu_elegido(s.b, s.a);
 			break;
 		default:
+			pintar = 0;	/* (PARPADEO) */
 			continue;
 		}
 	}

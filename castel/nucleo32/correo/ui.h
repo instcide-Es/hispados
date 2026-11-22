@@ -60,6 +60,21 @@ void ui_maximiza(void);
 /* el suceso siguiente, esperando como mucho espera_ms (0: sin esperar): 1
  * si hay */
 int ui_suceso(Suceso *s, u32 espera_ms);
+/* (PARPADEO) lo mismo, sin el ratón que solo se mueve (ni entrar ni salir
+ * de la ventana): lo que puede cambiar algo. 0 si no ha llegado nada en
+ * espera_ms (con 0, espera lo que haga falta) */
+int ui_espera(Suceso *s, u32 espera_ms);
+/* (PARPADEO) todo se pinta en un lienzo propio, fuera de la pantalla; ui_suceso
+ * lo vuelca a la ventana de una vez (las filas cambiadas) antes de esperar, o
+ * ui_vuelca ya. Con ui_callado(1), lo que se pinta no cuenta como cambiado (lo
+ * de debajo de un cuadro, que ya está así en la pantalla); ui_ensucia: esas
+ * filas, sí */
+void ui_vuelca(void);
+void ui_callado(int si);
+void ui_ensucia(int y, int al);
+/* (para las pruebas) cuántas veces se ha movido el ratón, cuántas se ha
+ * repintado solo por eso (debe ser 0) y cuántos vuelcos en total */
+void ui_cuenta_raton(u32 *movimientos, u32 *repintados, u32 *vuelcas);
 /* (0.8.7) tras UE_SOLTADO, la ruta de lo soltado (UTF-8; la llamada 173 de
  * Hispa-Pentium, la misma del Bloc de notas y del Reproductor): 1 si hay */
 int ui_soltado(char *ruta, int cabe);

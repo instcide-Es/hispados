@@ -1136,7 +1136,7 @@ static void nada(void) { repinta_todo(); }
 int correo_ventana(const char *args)
 {
 	Suceso s;
-	int pa, pal;
+	int pa, pal, sucio;
 	u32 ult_mira = 0;
 
 	ui_pantalla(&pa, &pal);
@@ -1177,9 +1177,15 @@ int correo_ventana(const char *args)
 		abre_cuenta(0);
 	if (args && !strncmp(args, "mailto:", 7))
 		redacta(RD_NUEVO, args + 7);
+	/* (PARPADEO) se repinta solo si algo ha cambiado (no con el ratón que
+	 * solo se mueve, ni cada vuelta), y en el lienzo propio: un vuelco */
+	sucio = 1;
 	for (;;) {
-		repinta_todo();
-		if (!ui_suceso(&s, 40)) {
+		if (sucio || (nuevos_aviso && (int)(aviso_hasta - so_tics()) <= 0)) {
+			repinta_todo();
+			sucio = 0;
+		}
+		if (!ui_espera(&s, 40)) {
 			/* nada que hacer: ¿algo nuevo en el servidor? */
 			if (ses && ses->conectada && (u32)(so_tics() - ult_mira) > so_hz() / 4) {
 				u32 antes = ses->car[ses->sel >= 0 ? ses->sel : 0].no_leidos;
@@ -1199,6 +1205,7 @@ int correo_ventana(const char *args)
 					}
 					rehaz_lista(buscando ? NULL : NULL, 0);
 					buscando = 0;
+					sucio = 1;
 				}
 				(void)antes;
 				red_espera = espera_red;
@@ -1206,6 +1213,7 @@ int correo_ventana(const char *args)
 			}
 			continue;
 		}
+		sucio = 1;
 		switch (s.clase) {
 		case UE_CERRAR:
 			goto fin;
@@ -1262,7 +1270,7 @@ static int aviso_bandeja(const char *t)
 {
 	Suceso s;
 	u32 hasta = so_tics() + 45 * so_hz();
-	int an = 380, al = 96, r = 0;
+	int an = 380, al = 96, r = 0, pintada = 0;
 
 	if (ui_abre_aviso(an, al))
 		return 0;
@@ -1271,6 +1279,7 @@ static int aviso_bandeja(const char *t)
 	so_apunta("bandeja: aviso: %s", t);
 	for (;;) {
 		zonas_olvida();
+		ui_callado(pintada);	/* (PARPADEO) la primera vez, entera; luego, ya está */
 		ui_rect(0, 0, an, al, 0xDCFCE7);
 		ui_rect(0, 0, an, 3, C_VERDE);
 		icono_correo(8, 10);
@@ -1278,9 +1287,11 @@ static int aviso_bandeja(const char *t)
 		texto(48, 32, t, (an - 56) / LA, C_TINTA);
 		boton(1, an - 200, al - ALTO_BOTON - 8, 90, "Leerlo", 1, 0, 0);
 		boton(2, an - 104, al - ALTO_BOTON - 8, 96, "Ahora no", 0, 0, 0);
+		ui_callado(0);
+		pintada = 1;
 		if ((int)(hasta - so_tics()) <= 0)
 			break;
-		if (!ui_suceso(&s, 200))
+		if (!ui_espera(&s, 1000))
 			continue;
 		if (s.clase == UE_CERRAR)
 			break;
