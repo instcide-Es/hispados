@@ -605,7 +605,7 @@ u32 WINAPI waveOutGetErrorTextA(u32 e, char *s, u32 n) {
 #define MMSYSERR_INVALPARAM 11
 static u32 texto_err(u32 e, char *s, u32 n) {
   const char *t = e == 0 ? "Correcto." : e == 2 ? "No hay ese dispositivo." : e == 5 ? "Ese manejador no vale." :
-                  e == 6 ? "No hay dispositivo (en Hispa a\xfan no hay micr\xf3fono ni MIDI)." : e == 8 ? "No se puede hacer." : "Error de sonido.";
+                  e == 6 ? "No hay dispositivo (en Hispa a\xfan no hay micr\xf3" "fono ni MIDI)." : e == 8 ? "No se puede hacer." : "Error de sonido.";
   u32 k = 0;
   if (!s || !n) return MMSYSERR_INVALPARAM;
   while (t[k] && k + 1 < n) { s[k] = t[k]; k++; }

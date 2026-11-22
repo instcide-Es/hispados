@@ -84,7 +84,7 @@ int main(int argc, char **argv)
 	}
 	{ int r = SetVolumeLabelA("C:\\", "HALFLIFE"); u32 e = GetLastError(); printf("setvolumelabel: %d %u\n", r, e); }
 	printf("getprocessversion: %08x %08x\n", GetProcessVersion(0), GetProcessVersion(GetCurrentProcessId()));
-	{ int r = EnumSystemLocalesA(un_locale, 2); printf("enumsystemlocales: %d %d %s\n", r, nlocales, hay_es ? "con el de Espa\xf1a" : "MAL"); }
+	{ int r = EnumSystemLocalesA(un_locale, 2); printf("enumsystemlocales: %d %d %s\n", r, nlocales, hay_es ? "con el de Espa\xf1" "a" : "MAL"); }
 	/* ---- USER32 ---- */
 	printf("waitforinputidle: %u\n", WaitForInputIdle(GetCurrentProcess(), 1000));
 	{ int r = ExitWindowsEx(1, 0); u32 e = GetLastError(); printf("exitwindowsex: %d %u\n", r, e); }

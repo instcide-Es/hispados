@@ -4359,7 +4359,7 @@ mira "(HL) WINMM, mmio: un WAV hecho con mmioCreateChunk y mmioAscend (el tamañ
   "^mmio_getinfo: RIFF 246$" "^mmio_setinfo: 8$" "^mmio_advance: 0$" "^mmio_nohay_archivo: nulo$" "^mmio_existe: 1 0$" "^mmio_memoria: si 0 0$" "^fourcc: 45564157$"
 mira "(HL) WINMM, el mezclador (los altavoces y la onda, sus controles, poner y leer el volumen) y lo que no hay (waveIn, midiOut y aux: limpio)" \
   "^mixer: 1 0 0 1 Mezclador de Hispa$" "^mixer_linea: 0 0 2 1 Altavoces$" "^mixer_onda: 0 10000 80000001$" "^mixer_micro: 1024$" "^mixer_control: 0 1 0 65535 Volumen general$" \
-  "^mixer_volumen: 0 0 la mitad$" "^mixer_control_nohay: 1025$" "^mixer_cierra: 0$" "^mcigetdeviceid: 0$" "^wavein: 0 6 nulo 6$" "^wavein_texto: No hay dispositivo (en Hispa a.*n no hay micr.*fono ni MIDI).$" \
+  "^mixer_volumen: 0 0 la mitad$" "^mixer_control_nohay: 1025$" "^mixer_cierra: 0$" "^mcigetdeviceid: 0$" "^wavein: 0 6 nulo 6$" "^wavein_texto: No hay dispositivo (en Hispa a.*n no hay micr.*fono ni MIDI)\.$" \
   "^midiout: 0 6 nulo 6$" "^aux: 0 2 2$" "^FIN HLMM$"
 mira "(HL) WININET sin red: InternetGetConnectedState dice que no (INTERNET_CONNECTION_OFFLINE), InternetCrackUrl, y bajar algo: ERROR_INTERNET_DISCONNECTED" \
   "^conectado: 0 20$" "^internetopen: si$" "^crackurl: 1 3 servidores.ejemplo.es 27950 /lista.txt$" "^sin_red: -12163$" "^FIN HLNET$"
