@@ -1,0 +1,34 @@
+# las líneas: duplicar, subir y bajar, mayúsculas, ordenar, tabuladores, en bloque, macros, ir a
+abre LINEAS.TXT
+teclas {ctrl-d}
+muestra
+teclas {alt-abajo}{alt-abajo}
+muestra
+teclas {alt-arriba}
+muestra
+teclas {ctrl-a}{ctrl-mayus-u}
+muestra
+teclas {ctrl-u}
+muestra
+menu 4 18
+muestra
+menu 4 19
+muestra
+teclas {ctrl-inicio}{alt-mayus-abajo}{alt-mayus-abajo}XY
+muestra
+estado
+teclas {retro}
+muestra
+teclas {esc}{ctrl-inicio}{ctrl-mayus-r}-> {abajo}{inicio}{ctrl-mayus-r}{ctrl-mayus-p}{ctrl-mayus-p}
+muestra
+teclas {ctrl-g}3{intro}
+estado
+abre TABS.TXT
+menu 4 12
+muestra
+menu 4 13
+muestra
+teclas {ctrl-a}{tab}
+muestra
+teclas {mayus-tab}{mayus-tab}
+muestra

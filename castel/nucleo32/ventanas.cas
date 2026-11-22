@@ -68,6 +68,7 @@ módulo Ventanas
     público constante EV_MENÚ = 10              ; se ha cerrado el menú que pidió: a, la opción elegida (desde 0; SIN_ELEGIR si ninguna); b, su etiqueta
     público constante EV_MENÚ_VENTANA = 11      ; (a la del fondo) el botón secundario en el título de la ventana a, en el punto (b, c) de la pantalla
     público constante EV_UNIDADES = 12          ; (a todas) ha aparecido o desaparecido una unidad (una memoria USB)
+    público constante EV_SOLTADO = 14           ; (BLOC) se ha soltado en ella algo arrastrado desde el explorador: a, b, dónde (la ruta, con la llamada 173)
     público constante EV_RUEDA = 13             ; (NAVEGADOR) la rueda del ratón: a, b, dónde; c, los pasos (con signo, en el octeto bajo: arriba, positivos) y las teclas de cambio
     público constante SIN_ELEGIR = 0xFFFFFFFF
     ; en «c» de los sucesos del ratón: abajo, los botones; luego las teclas de
@@ -1090,6 +1091,23 @@ módulo Ventanas
         devolver r
     fin
 
+    ; (BLOC) lo arrastrado desde el explorador se ha soltado en el punto (x,
+    ; yy) de la pantalla, encima de la ventana id: si es de un programa, le
+    ; llega EV_SOLTADO (con el punto, visto desde dentro). Da su dueño (0: no)
+    público función suelta_en(id: nat32, x: ent32, yy: ent32): nat32
+        variable i: ent32
+        variable r: nat32
+        tomar(cerrojo)
+        i := busca(id)
+        r := 0
+        si i >= 0 y ventanas[i].dueño <> 0 entonces
+            r := ventanas[i].dueño
+            pon_evento(i, EV_SOLTADO, nat32(dentro_x(i, x)), nat32(dentro_y(i, yy)), 0)
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
     ; ¿es de esa tarea la ventana? (0: del núcleo)
     público función es_de(id: nat32, dueño: nat32): bool
         variable i: ent32
@@ -1552,9 +1570,9 @@ módulo Ventanas
             sino si k = TECLA_F1_ y (activa < 0 o en_tapiz) y teclas_a = 0 entonces
                 pon_evento(busca(ventana_inicio), EV_TECLA, k, 0, 0)     ; (MENÚ) F1 en el tapiz: la Ayuda
             sino si teclas_a <> 0 entonces
-                pon_evento(busca(teclas_a), EV_TECLA, k, m, 0)
+                pon_evento(busca(teclas_a), EV_TECLA, k, m, modificadores())     ; (BLOC) en «c», las teclas de cambio
             sino
-                pon_evento(activa, EV_TECLA, k, m, 0)
+                pon_evento(activa, EV_TECLA, k, m, modificadores())
             fin
             k := saca_tecla()
         fin

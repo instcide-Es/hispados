@@ -1,0 +1,23 @@
+; =============================================================================
+;  BAT.LEN - los archivos de órdenes (.BAT) y CONFIG.SYS, para el Bloc de notas
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+;  El formato, en CASTEL.LEN.
+; =============================================================================
+nombre=Órdenes .BAT y CONFIG.SYS
+extensiones=BAT CMD SYS
+archivos=CONFIG.SYS AUTOEXEC.BAT
+distingue=no
+comentario=::
+comentario_palabra=rem
+al_principio=si
+etiquetas=delante
+variables=%
+operadores=@=<>|&()
+letras=.
+claves=echo set if goto call for in do not exist errorlevel else shift pause
+claves=exit choice cd chdir md mkdir rd rmdir del erase copy xcopy move ren
+claves=type cls path prompt ver vol dir date time loadhigh lh
+; CONFIG.SYS
+claves=device devicehigh dos files buffers lastdrive shell stacks fcbs country
+claves=install break numlock menuitem menudefault include submenu
+propias=on off nul con prn aux high umb

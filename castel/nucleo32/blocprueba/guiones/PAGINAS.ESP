@@ -1,0 +1,27 @@
+estado: UTF8BOM.TXT l°n 1 col 1 sel 0-0 l°neas 2 p†gina UTF-8 bom lf pesta§as 1 pliegues 0
+texto: caf√© ‚Ç¨ ‰∏≠\n
+bloc: guardado UTF8BOM.TXT, 20 octetos
+estado: UTF8BOM.TXT l°n 1 col 11 sel 16-16 l°neas 2 p†gina UTF-8 bom lf pesta§as 1 pliegues 0
+aviso: Guardado en UTF8BOM.TXT (20 octetos).
+estado: UTF8BOM.TXT l°n 1 col 11 sel 16-16 l°neas 2 p†gina 437 lf cambiado pesta§as 1 pliegues 0
+aviso: 1 letras no caben en la 437: Formato > UTF-8 las guarda; guardar otra vez las deja como Æ?Ø.
+bloc: guardado UTF8BOM.TXT, 11 octetos
+estado: UTF8BOM.TXT l°n 1 col 11 sel 16-16 l°neas 2 p†gina 437 lf pesta§as 1 pliegues 0
+aviso: Guardado en UTF8BOM.TXT (11 octetos).
+estado: WIN1252.TXT l°n 1 col 1 sel 0-0 l°neas 2 p†gina 1252 crlf pesta§as 2 pliegues 0
+aviso: Guardado en UTF8BOM.TXT (11 octetos).
+texto: se√±or caf√© ‚Ç¨\n
+bloc: guardado WIN1252.TXT, 18 octetos
+estado: WIN1252.TXT l°n 1 col 1 sel 0-0 l°neas 2 p†gina UTF-8 crlf pesta§as 2 pliegues 0
+aviso: Guardado en WIN1252.TXT (18 octetos).
+estado: MIXTO.TXT l°n 1 col 1 sel 0-0 l°neas 4 p†gina 437 crlf pesta§as 3 pliegues 0
+aviso: Tiene finales de l°nea de las dos clases: se guardar†n todos iguales (Formato).
+bloc: guardado MIXTO.TXT, 18 octetos
+estado: MIXTO.TXT l°n 1 col 1 sel 0-0 l°neas 4 p†gina 437 lf pesta§as 3 pliegues 0
+aviso: Guardado en MIXTO.TXT (18 octetos).
+estado: UTF8BOM.TXT l°n 1 col 1 sel 0-0 l°neas 2 p†gina 437 lf pesta§as 4 pliegues 0
+aviso: Guardado en MIXTO.TXT (18 octetos).
+texto: caf√© ‚Ç¨ ? √±\n
+archivo MIXTO.TXT:  m i x t o \n s o l o l f \n f i n \n
+archivo UTF8BOM.TXT:  c a f 202 364 ? 244 \n
+archivo WIN1252.TXT:  s e 303 261 o r c a f 303 251 342 202 254 \r \n

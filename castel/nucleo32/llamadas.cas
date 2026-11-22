@@ -140,6 +140,7 @@ módulo Llamadas
     público constante EV_SALE = 9               ; el ratón ya no está encima
     público constante EV_UNIDADES = 12          ; ha aparecido o desaparecido una unidad (una memoria USB): hay que mirarlas otra vez
     público constante EV_RUEDA = 13             ; (NAVEGADOR) la rueda del ratón: a, b, dónde; c, los pasos (con signo, en el octeto bajo: arriba, positivos), con CON_MAYÚS y CON_CONTROL
+    público constante EV_SOLTADO = 14           ; (BLOC) se ha soltado en la ventana algo arrastrado desde Mi equipo: a, b, dónde; la ruta, con lo_soltado()
     público constante EV_MENÚ = 10              ; se ha cerrado el menú que se pidió: a, la opción elegida (desde 0; SIN_ELEGIR si ninguna); b, su etiqueta
     público constante SIN_ELEGIR = 0xFFFFFFFF
     público constante BOTÓN_IZQUIERDO = 1       ; en «c» de los sucesos del ratón: los botones pulsados...
@@ -147,6 +148,11 @@ módulo Llamadas
     público constante CON_MAYÚS = 0x100         ; ...las teclas de cambio (también en «b» de EV_TECLA, como 1)...
     público constante CON_CONTROL = 0x200
     público constante TECLA_CON_MAYÚS = 1       ; en «b» de EV_TECLA: la tecla (una flecha, Inicio, Fin...) llegó con Mayús
+    ; (BLOC) en «c» de EV_TECLA, las teclas de cambio pulsadas al repartirla (de cualquier tecla)
+    público constante MOD_MAYÚS = 1
+    público constante MOD_CONTROL = 2
+    público constante MOD_ALT = 4
+    público constante CON_ALT = 0x400           ; (BLOC) en «c» de los sucesos del ratón: con el Alt de la izquierda
     público constante ANCHO_LETRA = 8           ; lo que mide cada letra del texto
     público constante ALTO_LETRA = 16
 
@@ -1060,6 +1066,12 @@ módulo Llamadas
         suelta.ye := yy
         suelta.ruta := ruta
         devolver llamada(171, v, nat32(dirección(suelta)), 0)
+    fin
+
+    ; (BLOC) la ruta de lo último que se ha soltado en una ventana de este
+    ; programa (EV_SOLTADO), a destino: da su largo, o un error
+    público función lo_soltado(destino: puntero a byte, cabe: nat32): nat32
+        devolver llamada(173, nat32(destino), cabe, 0)
     fin
 
     ; los menús con flechas (la barra de menús): con esta marca en la

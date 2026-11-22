@@ -1,0 +1,15 @@
+estado: PRUEBA.TXT l¡n 1 col 1 sel 0-0 l¡neas 3 p gina 437 crlf pesta¤as 1 pliegues 0
+texto: Hola mundo\nsegunda lÃ­nea\n
+texto: Hola mundo\nsegunda lÃ­nea\nAdiÃ³s amigo\ntercera
+texto: Hola mundo\nsegunda lÃ­nea\nAdiÃ³s amigo\n
+texto: Hola mundo\nsegunda lÃ­nea\nAdiÃ³s amigo
+texto: Hola mundo\nsegunda lÃ­nea\nAdiÃ³s 
+estado: PRUEBA.TXT l¡n 3 col 7 sel 33-33 l¡neas 3 p gina 437 crlf cambiado pesta¤as 1 pliegues 0
+texto: Hola mundo\nsegunda lÃ­nea\nAdiÃ³s amigo\ntercera
+estado: PRUEBA.TXT l¡n 3 col 7 sel 33-33 l¡neas 3 p gina 437 crlf cambiado pesta¤as 1 pliegues 0
+texto: Hola mundo\nHola mundo\nsegunda lÃ­nea\nAdiÃ³s 
+texto: Hola \nHola mundo\nsegunda lÃ­nea\nAdiÃ³s 
+estado: PRUEBA.TXT l¡n 1 col 6 sel 5-5 l¡neas 4 p gina 437 crlf cambiado pesta¤as 1 pliegues 0
+texto: 
+estado: PRUEBA.TXT l¡n 1 col 1 sel 0-0 l¡neas 1 p gina 437 crlf cambiado pesta¤as 1 pliegues 0
+texto: Hola \nHola mundo\nsegunda lÃ­nea\nAdiÃ³s 

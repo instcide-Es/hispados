@@ -1,0 +1,25 @@
+# las páginas: UTF-8 con BOM, la 1252, la 437; lo que no cabe; los finales de línea
+abre UTF8BOM.TXT
+estado
+muestra
+teclas {fin} ñ{f2}
+estado
+menu 4 2
+teclas {f2}
+estado
+teclas {f2}
+estado
+abre WIN1252.TXT
+estado
+muestra
+menu 4 0
+teclas {f2}
+estado
+abre MIXTO.TXT
+estado
+menu 4 10
+teclas {f2}
+estado
+abre_como 437 UTF8BOM.TXT
+estado
+muestra

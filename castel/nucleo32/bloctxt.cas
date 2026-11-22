@@ -1,0 +1,749 @@
+; =============================================================================
+;  bloctxt.cas - el texto de un documento del Bloc de notas (BLOC.BIN): un
+;  búfer con hueco (el texto, en UTF-8, con un hueco donde se escribe: meter
+;  o quitar en el mismo sitio no mueve nada), dónde empieza cada línea, lo
+;  de colorear y plegar de cada línea, los pliegues y la historia para
+;  deshacer y rehacer, sin límite (solo el de la memoria).
+;
+;  Todo va sobre el documento de ahora, «d» (uno por pestaña): el programa
+;  pone d := el de la pestaña y llama a meter(), quitar(), letra()...
+;
+;  La historia: cada cambio es un apunte (meter o quitar, dónde, cuántos
+;  octetos y cuáles); los apuntes van en grupos (lo que se deshace de una
+;  vez: una palabra tecleada, un pegar, un «Reemplazar todo»). corte() dice
+;  que el cambio siguiente empieza un grupo. Deshacer hasta lo guardado deja
+;  el documento «sin cambios» otra vez.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo BlocTxt
+
+    importar Llamadas, BlocMem
+
+    público constante MAX_RUTA = 160
+    público constante DOC_NORMAL = 0
+    público constante DOC_AYUDA = 1             ; la ayuda (F1): solo para leer
+    público constante DOC_RESULTADOS = 2        ; lo encontrado en una carpeta: solo para leer; dos clics van a cada sitio
+    constante HUECO_MÍNIMO = 4096
+
+    público tipo Doc = estructura
+        ; el texto
+        datos: puntero a byte
+        capacidad, hueco, fin_hueco, largo: nat32
+        ; las líneas: dónde empieza cada una; y, de cada una, cómo se empieza
+        ; a colorear (16 bits) y el nivel de los bloques (16 bits de arriba)
+        lín, estado: puntero a nat32
+        n_lín, cabe_lín, estado_bien: nat32
+        ; la historia
+        hist: puntero a byte
+        h_largo, h_cabe, h_pos, h_guardado: nat32
+        h_corte: bool
+        ; dónde se está
+        cursor, ancla: nat32
+        col_quiere: ent32                       ; la columna que se quiere al subir y bajar (-1: la del cursor)
+        primera, sub: nat32                     ; la primera línea que se ve (y su trozo, con el ajuste de línea)
+        izq: nat32                              ; las columnas que no se ven por la izquierda (sin ajuste)
+        ; el archivo
+        ruta: arreglo [MAX_RUTA] de byte        ; en la 437, como se abrió (vacío: sin nombre)
+        cp: nat32                               ; su página (BlocPag: CP_437, CP_UTF8, CP_1252)
+        bom, crlf, mezclados: bool
+        lenguaje: ent32                         ; BlocLen (-1: texto normal)
+        clase: nat32                            ; DOC_NORMAL, DOC_AYUDA, DOC_RESULTADOS
+        nuevo: nat32                            ; sin nombre: «Nuevo 1», «Nuevo 2»...
+        perder_vale: bool                       ; se ha avisado de lo que no cabe en su página: guardar otra vez lo pierde
+        sucio: bool                             ; cambiado sin tocar el texto (la página, los finales de línea)
+        ; los pliegues: pares (la línea de arriba, la última que se esconde), en orden
+        pl: puntero a nat32
+        n_pl, cabe_pl: nat32
+        ; la selección en bloque (en columna): de (línea, columna) a (línea, columna)
+        bloque: bool
+        b_l1, b_c1, b_l2, b_c2: nat32
+    fin
+
+    público variable d: puntero a Doc
+    público variable sin_memoria: bool          ; el último cambio no ha cabido
+
+    ; =========================================================================
+    ;  Hacer y deshacer documentos
+    ; =========================================================================
+    público función doc_nuevo(): puntero a Doc
+        variable x: puntero a Doc
+        x := puntero(pedir(tamaño(Doc)))
+        si x = nulo entonces devolver nulo fin
+        llenar_memoria(puntero(x), tamaño(Doc), 0)
+        x.capacidad := HUECO_MÍNIMO
+        x.datos := pedir(x.capacidad)
+        x.cabe_lín := 64
+        x.lín := puntero(pedir(x.cabe_lín * 4))
+        x.estado := puntero(pedir(x.cabe_lín * 4))
+        x.h_cabe := 4096
+        x.hist := pedir(x.h_cabe)
+        x.cabe_pl := 32
+        x.pl := puntero(pedir(x.cabe_pl * 8))
+        si x.datos = nulo o x.lín = nulo o x.estado = nulo o x.hist = nulo o x.pl = nulo entonces
+            doc_soltar(x)
+            devolver nulo
+        fin
+        x.hueco := 0
+        x.fin_hueco := x.capacidad
+        x.n_lín := 1
+        x.lín[0] := 0
+        x.estado[0] := 0
+        x.estado_bien := 1
+        x.lenguaje := -1
+        x.col_quiere := -1
+        x.crlf := cierto
+        devolver x
+    fin
+
+    público función doc_soltar(x: puntero a Doc)
+        si x = nulo entonces devolver fin
+        soltar(x.datos)
+        soltar(puntero(x.lín))
+        soltar(puntero(x.estado))
+        soltar(x.hist)
+        soltar(puntero(x.pl))
+        soltar(puntero(x))
+    fin
+
+    ; =========================================================================
+    ;  Leer el texto
+    ; =========================================================================
+    público función largo(): nat32
+        devolver d.largo
+    fin
+
+    ; el octeto de la posición pos (0 si pos está al final o más allá)
+    público función letra(pos: nat32): byte
+        si pos < d.hueco entonces devolver d.datos[pos] fin
+        si pos >= d.largo entonces devolver 0 fin
+        devolver d.datos[pos + d.fin_hueco - d.hueco]
+    fin
+
+    ; n octetos desde pos, a «destino» (los que haya)
+    público función copia(pos: nat32, n: nat32, destino: puntero a byte): nat32
+        variable a: nat32
+        si pos >= d.largo entonces devolver 0 fin
+        si pos + n > d.largo o pos + n < pos entonces n := d.largo - pos fin
+        si pos + n <= d.hueco entonces
+            mover_memoria(destino, d.datos + pos, n)
+        sino si pos >= d.hueco entonces
+            mover_memoria(destino, d.datos + (pos + d.fin_hueco - d.hueco), n)
+        sino
+            a := d.hueco - pos
+            mover_memoria(destino, d.datos + pos, a)
+            mover_memoria(destino + a, d.datos + d.fin_hueco, n - a)
+        fin
+        devolver n
+    fin
+
+    ; el hueco donde se dice (lo de detrás pasa delante, o al revés)
+    función mueve_hueco(pos: nat32)
+        variable n: nat32
+        si pos < d.hueco entonces
+            n := d.hueco - pos
+            mover_memoria(d.datos + (d.fin_hueco - n), d.datos + pos, n)
+            d.hueco := pos
+            d.fin_hueco := d.fin_hueco - n
+        sino si pos > d.hueco entonces
+            n := pos - d.hueco
+            mover_memoria(d.datos + d.hueco, d.datos + d.fin_hueco, n)
+            d.hueco := pos
+            d.fin_hueco := d.fin_hueco + n
+        fin
+    fin
+
+    ; todo el texto seguido (el hueco, al final): dónde empieza
+    público función contiguo(): puntero a byte
+        mueve_hueco(d.largo)
+        devolver d.datos
+    fin
+
+    ; que quepan n octetos más en el hueco
+    función agranda(n: nat32): bool
+        variable nueva, detrás: nat32
+        variable p: puntero a byte
+        si d.fin_hueco - d.hueco >= n entonces devolver cierto fin
+        nueva := d.largo + n + HUECO_MÍNIMO + d.largo div 2
+        si nueva < d.largo entonces devolver falso fin
+        p := pedir(nueva)
+        si p = nulo entonces
+            ; lo justo, por si no cabe con holgura
+            nueva := d.largo + n + 64
+            p := pedir(nueva)
+            si p = nulo entonces devolver falso fin
+        fin
+        detrás := d.capacidad - d.fin_hueco
+        mover_memoria(p, d.datos, d.hueco)
+        mover_memoria(p + (nueva - detrás), d.datos + d.fin_hueco, detrás)
+        soltar(d.datos)
+        d.datos := p
+        d.fin_hueco := nueva - detrás
+        d.capacidad := nueva
+        devolver cierto
+    fin
+
+    ; que quepan n líneas más
+    función más_líneas(n: nat32): bool
+        variable c: nat32
+        variable p, q: puntero a nat32
+        si d.n_lín + n <= d.cabe_lín entonces devolver cierto fin
+        c := d.cabe_lín + d.cabe_lín div 2 + n + 64
+        p := puntero(recrecer(puntero(d.lín), d.n_lín * 4, c * 4))
+        si p = nulo entonces devolver falso fin
+        d.lín := p
+        q := puntero(recrecer(puntero(d.estado), d.n_lín * 4, c * 4))
+        si q = nulo entonces devolver falso fin
+        d.estado := q
+        d.cabe_lín := c
+        devolver cierto
+    fin
+
+    ; =========================================================================
+    ;  Las líneas
+    ; =========================================================================
+    público función n_líneas(): nat32
+        devolver d.n_lín
+    fin
+
+    ; dónde empieza la línea l (la última, si se pasa)
+    público función inicio(l: nat32): nat32
+        si l >= d.n_lín entonces devolver d.lín[d.n_lín - 1] fin
+        devolver d.lín[l]
+    fin
+
+    ; dónde acaba (el \n, o el final del texto)
+    público función final(l: nat32): nat32
+        si l + 1 >= d.n_lín entonces devolver d.largo fin
+        devolver d.lín[l + 1] - 1
+    fin
+
+    ; la línea donde cae pos
+    público función línea_de(pos: nat32): nat32
+        variable a, b, m: nat32
+        a := 0
+        b := d.n_lín
+        mientras b - a > 1 hacer
+            m := (a + b) div 2
+            si d.lín[m] <= pos entonces a := m sino b := m fin
+        fin
+        devolver a
+    fin
+
+    ; cuántos \n hay en n octetos (deprisa)
+    público función cuenta_saltos(p: puntero a byte, n: nat32): nat32
+        ensamblador
+            mov edi, {p}
+            mov ecx, {n}
+            xor edx, edx
+            test ecx, ecx
+            jz .fin
+            mov al, 10
+        .otro:
+            repne scasb
+            jne .fin
+            inc edx
+            test ecx, ecx
+            jnz .otro
+        .fin:
+            mov eax, edx
+        fin
+    fin
+
+    ; apunta las líneas de todo el texto otra vez (al leer un archivo)
+    público función rehaz_líneas(): bool
+        variable p: puntero a byte
+        variable k: nat32
+        p := contiguo()
+        k := cuenta_saltos(p, d.largo)
+        d.n_lín := 1
+        si no más_líneas(k) entonces devolver falso fin
+        d.lín[0] := 0
+        apunta_comienzos(p, d.largo, d.lín + 1)
+        d.n_lín := k + 1
+        llenar_memoria(puntero(d.estado), d.n_lín * 4, 0)
+        d.estado_bien := 1
+        devolver cierto
+    fin
+
+    ; escribe en «lín» la posición de detrás de cada \n de p (n octetos)
+    función apunta_comienzos(p: puntero a byte, n: nat32, lín: puntero a nat32)
+        ensamblador
+            mov edi, {p}
+            mov ecx, {n}
+            mov ebx, {lín}
+            mov esi, edi
+            test ecx, ecx
+            jz .fin
+            mov al, 10
+        .otro:
+            repne scasb
+            jne .fin
+            mov edx, edi
+            sub edx, esi
+            mov [ebx], edx
+            add ebx, 4
+            test ecx, ecx
+            jnz .otro
+        .fin:
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Lo de colorear y plegar, de cada línea
+    ; =========================================================================
+    público función estado_de(l: nat32): nat32
+        si l >= d.n_lín entonces devolver 0 fin
+        devolver d.estado[l]
+    fin
+
+    público función pon_estado(l: nat32, e: nat32)
+        si l < d.n_lín entonces d.estado[l] := e fin
+    fin
+
+    público función estado_bien(): nat32
+        devolver d.estado_bien
+    fin
+
+    público función pon_estado_bien(l: nat32)
+        d.estado_bien := l
+    fin
+
+    función estropea_desde(l: nat32)
+        si l + 1 < d.estado_bien entonces d.estado_bien := l + 1 fin
+        si d.estado_bien < 1 entonces d.estado_bien := 1 fin
+    fin
+
+    ; =========================================================================
+    ;  Los pliegues
+    ; =========================================================================
+    público función pliegues(): nat32
+        devolver d.n_pl
+    fin
+
+    público función pliegue(i: nat32, ref arriba: nat32, ref última: nat32)
+        arriba := d.pl[i * 2]
+        última := d.pl[i * 2 + 1]
+    fin
+
+    ; el pliegue que empieza en la línea l (-1: ninguno)
+    público función plegado_en(l: nat32): ent32
+        variable i: nat32
+        i := 0
+        mientras i < d.n_pl hacer
+            si d.pl[i * 2] = l entonces devolver ent32(i) fin
+            si d.pl[i * 2] > l entonces devolver -1 fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    ; ¿se esconde la línea l (dentro de un pliegue)?
+    público función escondida(l: nat32): bool
+        variable i: nat32
+        i := 0
+        mientras i < d.n_pl y d.pl[i * 2] < l hacer
+            si d.pl[i * 2 + 1] >= l entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; la línea que se ve detrás de l (n_líneas si no hay más)
+    público función siguiente_visible(l: nat32): nat32
+        variable i: nat32
+        i := 0
+        mientras i < d.n_pl hacer
+            si d.pl[i * 2] = l entonces devolver d.pl[i * 2 + 1] + 1 fin
+            si d.pl[i * 2] > l entonces romper fin
+            i := i + 1
+        fin
+        devolver l + 1
+    fin
+
+    ; la que se ve delante de l (l si es la primera)
+    público función anterior_visible(l: nat32): nat32
+        variable k: nat32
+        si l = 0 entonces devolver 0 fin
+        k := l - 1
+        mientras k > 0 y escondida(k) hacer k := k - 1 fin
+        devolver k
+    fin
+
+    ; pliega de la línea a (que se ve) a la «última» (que se esconde)
+    público función plegar(a: nat32, última: nat32): bool
+        variable i, k: nat32
+        variable p: puntero a nat32
+        si última <= a entonces devolver falso fin
+        si plegado_en(a) >= 0 entonces devolver falso fin
+        si d.n_pl >= d.cabe_pl entonces
+            p := puntero(recrecer(puntero(d.pl), d.n_pl * 8, d.cabe_pl * 16))
+            si p = nulo entonces devolver falso fin
+            d.pl := p
+            d.cabe_pl := d.cabe_pl * 2
+        fin
+        ; los que quedan dentro se juntan en este
+        i := 0
+        mientras i < d.n_pl hacer
+            si d.pl[i * 2] > a y d.pl[i * 2] <= última entonces
+                quita_pliegue(i)
+            sino
+                i := i + 1
+            fin
+        fin
+        i := 0
+        mientras i < d.n_pl y d.pl[i * 2] < a hacer i := i + 1 fin
+        k := d.n_pl
+        mientras k > i hacer
+            d.pl[k * 2] := d.pl[k * 2 - 2]
+            d.pl[k * 2 + 1] := d.pl[k * 2 - 1]
+            k := k - 1
+        fin
+        d.pl[i * 2] := a
+        d.pl[i * 2 + 1] := última
+        d.n_pl := d.n_pl + 1
+        devolver cierto
+    fin
+
+    función quita_pliegue(i: nat32)
+        variable k: nat32
+        k := i
+        mientras k + 1 < d.n_pl hacer
+            d.pl[k * 2] := d.pl[k * 2 + 2]
+            d.pl[k * 2 + 1] := d.pl[k * 2 + 3]
+            k := k + 1
+        fin
+        d.n_pl := d.n_pl - 1
+    fin
+
+    ; despliega el que empieza en l (cierto si había)
+    público función desplegar(l: nat32): bool
+        variable i: ent32
+        i := plegado_en(l)
+        si i < 0 entonces devolver falso fin
+        quita_pliegue(nat32(i))
+        devolver cierto
+    fin
+
+    ; despliega lo que esconda la línea l (para que se vea: buscar, ir a)
+    público función destapa(l: nat32)
+        variable i: nat32
+        i := 0
+        mientras i < d.n_pl hacer
+            si d.pl[i * 2] < l y d.pl[i * 2 + 1] >= l entonces quita_pliegue(i) sino i := i + 1 fin
+        fin
+    fin
+
+    público función desplegar_todo()
+        d.n_pl := 0
+    fin
+
+    ; las líneas han cambiado: k más (o menos, con quitadas) desde la l
+    función mueve_pliegues(l: nat32, k: nat32, quitadas: bool)
+        variable i, a, b, l2: nat32
+        si k = 0 entonces devolver fin
+        i := 0
+        si no quitadas entonces
+            mientras i < d.n_pl hacer
+                a := d.pl[i * 2]
+                b := d.pl[i * 2 + 1]
+                si a > l entonces
+                    d.pl[i * 2] := a + k
+                    d.pl[i * 2 + 1] := b + k
+                    i := i + 1
+                sino si a = l entonces
+                    quita_pliegue(i)            ; se ha partido la línea de arriba: se despliega
+                sino si b >= l entonces
+                    d.pl[i * 2 + 1] := b + k
+                    i := i + 1
+                sino
+                    i := i + 1
+                fin
+            fin
+            devolver
+        fin
+        ; quitadas: de la l + 1 a la l + k (se juntan con la l)
+        l2 := l + k
+        mientras i < d.n_pl hacer
+            a := d.pl[i * 2]
+            b := d.pl[i * 2 + 1]
+            si a > l2 entonces
+                d.pl[i * 2] := a - k
+                d.pl[i * 2 + 1] := b - k
+                i := i + 1
+            sino si b < l entonces
+                i := i + 1
+            sino
+                quita_pliegue(i)                ; tocado: se despliega
+            fin
+        fin
+    fin
+
+    ; =========================================================================
+    ;  La historia
+    ; =========================================================================
+    ;  Cada apunte: [clase (1 meter, 2 quitar; +0x100 si empieza grupo)]
+    ;  [pos] [n] [cursor] [ancla] [los n octetos, hasta múltiplo de 4]
+    ;  [lo que mide el apunte entero]
+    constante H_METER = 1
+    constante H_QUITAR = 2
+    constante H_GRUPO = 0x100
+    constante H_CABEZA = 20
+
+    ; el cambio que venga empieza un grupo nuevo
+    público función corte()
+        d.h_corte := cierto
+    fin
+
+    público función puede_deshacer(): bool
+        devolver d.h_pos > 0
+    fin
+
+    público función puede_rehacer(): bool
+        devolver d.h_pos < d.h_largo
+    fin
+
+    ; ¿hay cambios sin guardar?
+    público función cambiado(): bool
+        devolver d.h_pos <> d.h_guardado o d.sucio
+    fin
+
+    público función marca_guardado()
+        d.h_guardado := d.h_pos
+        d.sucio := falso
+    fin
+
+    ; sin historia (al leer un archivo)
+    público función olvida_historia()
+        d.h_largo := 0
+        d.h_pos := 0
+        d.h_guardado := 0
+        d.h_corte := cierto
+        d.sucio := falso
+    fin
+
+    función palabra_en(p: puntero a byte, i: nat32): nat32
+        variable q: puntero a nat32
+        q := puntero(p + i)
+        devolver valor(q)
+    fin
+
+    función pon_palabra(p: puntero a byte, i: nat32, v: nat32)
+        variable q: puntero a nat32
+        q := puntero(p + i)
+        valor(q) := v
+    fin
+
+    función apunta(clase: nat32, pos: nat32, n: nat32, origen: puntero a byte): bool
+        variable mide, c: nat32
+        variable p: puntero a byte
+        mide := H_CABEZA + ((n + 3) yb 0xFFFFFFFC) + 4
+        ; lo que se había deshecho ya no se puede rehacer
+        si d.h_pos < d.h_largo entonces
+            d.h_largo := d.h_pos
+            si d.h_guardado > d.h_pos entonces d.h_guardado := 0xFFFFFFFF fin
+        fin
+        si d.h_largo + mide > d.h_cabe entonces
+            c := d.h_cabe * 2
+            si c < d.h_largo + mide + 4096 entonces c := d.h_largo + mide + 4096 fin
+            p := recrecer(d.hist, d.h_largo, c)
+            si p = nulo entonces devolver falso fin
+            d.hist := p
+            d.h_cabe := c
+        fin
+        p := d.hist + d.h_largo
+        si d.h_corte o d.h_largo = 0 entonces clase := clase ob H_GRUPO fin
+        d.h_corte := falso
+        pon_palabra(p, 0, clase)
+        pon_palabra(p, 4, pos)
+        pon_palabra(p, 8, n)
+        pon_palabra(p, 12, d.cursor)
+        pon_palabra(p, 16, d.ancla)
+        si n > 0 entonces mover_memoria(p + H_CABEZA, origen, n) fin
+        pon_palabra(p, mide - 4, mide)
+        d.h_largo := d.h_largo + mide
+        d.h_pos := d.h_largo
+        devolver cierto
+    fin
+
+    ; =========================================================================
+    ;  Cambiar el texto (sin apuntarlo en la historia)
+    ; =========================================================================
+    función mete_sin_historia(pos: nat32, p: puntero a byte, n: nat32): bool
+        variable l, k, i, j: nat32
+        si n = 0 entonces devolver cierto fin
+        si pos > d.largo entonces pos := d.largo fin
+        k := cuenta_saltos(p, n)
+        si no agranda(n) o no más_líneas(k) entonces
+            sin_memoria := cierto
+            devolver falso
+        fin
+        l := línea_de(pos)
+        mueve_hueco(pos)
+        mover_memoria(d.datos + d.hueco, p, n)
+        d.hueco := d.hueco + n
+        d.largo := d.largo + n
+        ; las líneas de detrás, n más allá; y las nuevas
+        sumar_a_todas(d.lín + (l + 1), d.n_lín - l - 1, n)
+        si k > 0 entonces
+            mover_memoria(puntero(d.lín + (l + 1 + k)), puntero(d.lín + (l + 1)), (d.n_lín - l - 1) * 4)
+            mover_memoria(puntero(d.estado + (l + 1 + k)), puntero(d.estado + (l + 1)), (d.n_lín - l - 1) * 4)
+            j := l + 1
+            i := 0
+            mientras i < n hacer
+                si p[i] = 10 entonces
+                    d.lín[j] := pos + i + 1
+                    d.estado[j] := 0
+                    j := j + 1
+                fin
+                i := i + 1
+            fin
+            d.n_lín := d.n_lín + k
+            mueve_pliegues(l, k, falso)
+        fin
+        estropea_desde(l)
+        devolver cierto
+    fin
+
+    función quita_sin_historia(pos: nat32, n: nat32)
+        variable l1, l2, k: nat32
+        si pos >= d.largo o n = 0 entonces devolver fin
+        si pos + n > d.largo entonces n := d.largo - pos fin
+        l1 := línea_de(pos)
+        l2 := línea_de(pos + n)
+        k := l2 - l1
+        mueve_hueco(pos)
+        d.fin_hueco := d.fin_hueco + n
+        d.largo := d.largo - n
+        si k > 0 entonces
+            mover_memoria(puntero(d.lín + (l1 + 1)), puntero(d.lín + (l2 + 1)), (d.n_lín - l2 - 1) * 4)
+            mover_memoria(puntero(d.estado + (l1 + 1)), puntero(d.estado + (l2 + 1)), (d.n_lín - l2 - 1) * 4)
+            d.n_lín := d.n_lín - k
+            mueve_pliegues(l1, k, cierto)
+        fin
+        sumar_a_todas(d.lín + (l1 + 1), d.n_lín - l1 - 1, 0 - n)
+        estropea_desde(l1)
+    fin
+
+    ; =========================================================================
+    ;  Cambiar el texto (apuntado en la historia)
+    ; =========================================================================
+    ; mete n octetos en pos (cierto si ha cabido)
+    público función meter(pos: nat32, p: puntero a byte, n: nat32): bool
+        sin_memoria := falso
+        si n = 0 entonces devolver cierto fin
+        si pos > d.largo entonces pos := d.largo fin
+        si no apunta(H_METER, pos, n, p) entonces
+            sin_memoria := cierto
+            devolver falso
+        fin
+        si no mete_sin_historia(pos, p, n) entonces
+            ; (no ha cabido: el apunte, fuera)
+            d.h_largo := d.h_largo - palabra_en(d.hist, d.h_largo - 4)
+            d.h_pos := d.h_largo
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+    ; quita n octetos desde pos
+    público función quitar(pos: nat32, n: nat32): bool
+        variable p: puntero a byte
+        sin_memoria := falso
+        si pos >= d.largo o n = 0 entonces devolver cierto fin
+        si pos + n > d.largo entonces n := d.largo - pos fin
+        ; lo que se quita, a la historia (copiado del texto)
+        mueve_hueco(pos + n)
+        p := d.datos + pos
+        si no apunta(H_QUITAR, pos, n, p) entonces
+            sin_memoria := cierto
+            devolver falso
+        fin
+        quita_sin_historia(pos, n)
+        devolver cierto
+    fin
+
+    ; cambia n octetos desde pos por los m de q (quitar y meter, en el mismo grupo)
+    público función cambiar(pos: nat32, n: nat32, q: puntero a byte, m: nat32): bool
+        si no quitar(pos, n) entonces devolver falso fin
+        devolver meter(pos, q, m)
+    fin
+
+    ; deshace un grupo: cierto si había algo; deja el cursor como estaba antes
+    público función deshacer(): bool
+        variable p: puntero a byte
+        variable mide, clase, pos, n: nat32
+        si d.h_pos = 0 entonces devolver falso fin
+        mientras d.h_pos > 0 hacer
+            mide := palabra_en(d.hist, d.h_pos - 4)
+            p := d.hist + (d.h_pos - mide)
+            clase := palabra_en(p, 0)
+            pos := palabra_en(p, 4)
+            n := palabra_en(p, 8)
+            si clase yb 0xFF = H_METER entonces
+                quita_sin_historia(pos, n)
+            sino
+                si no mete_sin_historia(pos, p + H_CABEZA, n) entonces devolver cierto fin
+            fin
+            d.h_pos := d.h_pos - mide
+            d.cursor := palabra_en(p, 12)
+            d.ancla := palabra_en(p, 16)
+            si clase yb H_GRUPO <> 0 entonces romper fin
+        fin
+        d.h_corte := cierto
+        si d.cursor > d.largo entonces d.cursor := d.largo fin
+        si d.ancla > d.largo entonces d.ancla := d.largo fin
+        devolver cierto
+    fin
+
+    ; rehace un grupo; el cursor, detrás de lo último
+    público función rehacer(): bool
+        variable p: puntero a byte
+        variable mide, clase, pos, n: nat32
+        variable primero: bool
+        si d.h_pos >= d.h_largo entonces devolver falso fin
+        primero := cierto
+        mientras d.h_pos < d.h_largo hacer
+            p := d.hist + d.h_pos
+            clase := palabra_en(p, 0)
+            si clase yb H_GRUPO <> 0 y no primero entonces romper fin
+            primero := falso
+            pos := palabra_en(p, 4)
+            n := palabra_en(p, 8)
+            mide := H_CABEZA + ((n + 3) yb 0xFFFFFFFC) + 4
+            si clase yb 0xFF = H_METER entonces
+                si no mete_sin_historia(pos, p + H_CABEZA, n) entonces devolver cierto fin
+                d.cursor := pos + n
+            sino
+                quita_sin_historia(pos, n)
+                d.cursor := pos
+            fin
+            d.h_pos := d.h_pos + mide
+        fin
+        d.ancla := d.cursor
+        d.h_corte := cierto
+        devolver cierto
+    fin
+
+    ; =========================================================================
+    ;  Poner un texto entero (al leer un archivo): «p» pasa a ser del
+    ;  documento (pedido con pedir(), de «cabe» octetos, con n de texto)
+    ; =========================================================================
+    público función adopta(p: puntero a byte, n: nat32, cabe: nat32): bool
+        soltar(d.datos)
+        d.datos := p
+        d.capacidad := cabe
+        d.largo := n
+        d.hueco := n
+        d.fin_hueco := cabe
+        d.cursor := 0
+        d.ancla := 0
+        d.primera := 0
+        d.sub := 0
+        d.izq := 0
+        d.n_pl := 0
+        d.bloque := falso
+        olvida_historia()
+        devolver rehaz_líneas()
+    fin
+
+fin BlocTxt.

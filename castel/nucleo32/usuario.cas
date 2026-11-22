@@ -189,6 +189,10 @@ módulo Usuario
     público variable suelta_pedida: bool
     público variable suelta_x, suelta_y: ent32
     público variable suelta_ruta: arreglo [128] de byte
+    ; (BLOC) lo soltado encima de la ventana de un programa (EV_SOLTADO): la
+    ; ruta y la ventana; el programa la pide con la llamada 173
+    público variable soltado_ruta: arreglo [128] de byte
+    público variable soltado_para: nat32
     tipo Suelta = estructura
         x, ye: ent32
         ruta: nat32
@@ -769,6 +773,8 @@ módulo Usuario
                 devolver atender_ajuste(a, b)           ; (PANEL) los ajustes del Panel de control (preferencias.cas)
             caso 175:
                 devolver atender_hora(a, b)             ; (PANEL, NTP) la hora exacta del reloj del PC
+            caso 173:
+                devolver lo_soltado(a, b)       ; (BLOC)
             caso 25:
                 si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
                 devolver cambiar_carpeta(u, ruta)
@@ -2078,6 +2084,18 @@ módulo Usuario
     ; (MIRADOR) dónde va el tapiz con imagen: «\HISPA\FONDO.HPM» o «\FONDO.HPM»
     público función ruta_del_tapiz(ruta: puntero a byte)
         si instalado() entonces copiar(ruta, "\\HISPA\\FONDO.HPM") sino copiar(ruta, "\\FONDO.HPM") fin
+    fin
+
+    ; (BLOC) 173: la ruta de lo último que se ha soltado en una ventana del
+    ; programa (EV_SOLTADO), a «a» (caben b octetos, con su 0): da su largo
+    función lo_soltado(a: nat32, b: nat32): nat32
+        variable n: nat32
+        si soltado_para = 0 o no es_de(soltado_para, actual.id) entonces devolver NO_HAY fin
+        n := longitud(soltado_ruta)
+        si b = 0 o no puede(a, b, cierto) entonces devolver NO_VALE fin
+        si n + 1 > b entonces devolver NO_VALE fin
+        copiar_memoria(puntero(a), dirección(soltado_ruta[0]), n + 1)
+        devolver n
     fin
 
     ; el portapapeles del sistema: un texto (en la página 437, con sus

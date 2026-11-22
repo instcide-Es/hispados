@@ -54,6 +54,7 @@ módulo Consola
     público constante TECLA_LOGO_LETRA = 0x1A0   ; el logo y una letra: TECLA_LOGO_LETRA + (la letra - 'a')
     público constante MOD_MAYÚS = 1              ; lo que da modificadores()
     público constante MOD_CONTROL = 2
+    público constante MOD_ALT = 4                ; (BLOC) el Alt de la izquierda
     público constante CTRL_C = 3
 
     ; las teclas muertas, en las tablas
@@ -411,12 +412,13 @@ módulo Consola
         reponer(b)
     fin
 
-    ; las teclas de cambio que están pulsadas ahora (MOD_MAYÚS, MOD_CONTROL)
+    ; las teclas de cambio que están pulsadas ahora (MOD_MAYÚS, MOD_CONTROL, MOD_ALT)
     público función modificadores(): nat32
         variable m: nat32
         m := 0
         si mayúsculas entonces m := m ob MOD_MAYÚS fin
         si control entonces m := m ob MOD_CONTROL fin
+        si alt entonces m := m ob MOD_ALT fin  ; (BLOC)
         devolver m
     fin
 

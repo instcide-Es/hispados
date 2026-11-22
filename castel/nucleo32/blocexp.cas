@@ -1,0 +1,1289 @@
+; =============================================================================
+;  blocexp.cas - las expresiones regulares del Bloc de notas (BLOC.BIN):
+;  buscar y reemplazar con un motor propio, sencillo y con tope de pasos.
+;
+;  El patrón y el texto van en UTF-8 (el texto, con sus líneas separadas por
+;  \n). Se entiende: «.» (un carácter entero, menos \n), * + ? {n} {n,}
+;  {,m} {n,m} y sus perezosos (*? +? ?? {n,m}?), [...] con intervalos, «^»
+;  de negar y escapes dentro, ^ y $ (principio y final de línea), ( ) con
+;  captura, (?: ), |, \b \B, \d \w \s \D \W \S, \n \t \r \f \v \a \xHH y los
+;  signos escapados (\. \( \\ ...). Sin referencias atrás en el patrón (\1
+;  vale en el reemplazo).
+;
+;  Por dentro: el patrón se trocea en un árbol y el árbol se hace un
+;  programa para una máquina de Pike: cada «hilo» es un sitio del programa
+;  con sus capturas, y todos avanzan a la vez letra a letra; como un mismo
+;  sitio no se pone dos veces en la misma letra, nunca hay vuelta atrás
+;  exponencial. La prioridad de los hilos es la de Perl (el de más a la
+;  izquierda; *, + y ? glotones). Cada paso de un hilo cuenta para el tope
+;  (exp_tope): si se pasa, la búsqueda acaba sin encontrar y exp_agotado lo
+;  dice. Un texto tal cual (EXP_LITERAL, con mayúsculas) va por un camino
+;  rápido: buscar su primer octeto con un bucle en ensamblador.
+;
+;  Diferencia con Perl o Python: si un grupo dentro de una repetición puede
+;  casar con nada (como «(a*)*»), su captura puede salir distinta (como en
+;  RE2); lo que se encuentra es lo mismo.
+;
+;      si exp_compilar(patrón, n, EXP_SIN_CAJA) entonces
+;          si exp_buscar(texto, largo, 0, ini, fin_) entonces ...
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo BlocExp
+
+    importar BlocMem
+
+    público constante EXP_SIN_CAJA = 1          ; sin mirar mayúsculas
+    público constante EXP_LITERAL = 2           ; el patrón es un texto tal cual
+    público constante EXP_PALABRA = 4           ; solo palabras enteras
+    público variable exp_tope: nat32 = 2000000  ; los pasos de una búsqueda, lo más
+    público variable exp_agotado: bool          ; la última búsqueda se cortó por el tope
+
+    constante NINGUNO = 0xFFFFFFFF
+    constante SIN_FIN = 0xFFFFFFFF              ; una repetición sin máximo
+    constante MAX_PROGRAMA = 8000               ; las instrucciones del programa, lo más
+    constante MAX_REPITE = 1000                 ; lo más en {n,m}
+    constante NCAP = 20                         ; las capturas: el principio y el final de los grupos 0 a 9
+
+    ; ---- los nudos del árbol ----
+    constante N_LETRA = 1                       ; a: el carácter
+    constante N_CUALQUIERA = 2
+    constante N_CLASE = 3                       ; a: la clase
+    constante N_PRINCIPIO = 4
+    constante N_FINAL = 5
+    constante N_LÍMITE = 6
+    constante N_NO_LÍMITE = 7
+    constante N_VACÍO = 8
+    constante N_SEGUIDOS = 9                    ; a, b
+    constante N_O = 10                          ; a, b
+    constante N_GRUPO = 11                      ; a: lo de dentro; b: el número
+    constante N_REPITE = 12                     ; a: lo de dentro; b, c: lo menos y lo más; d: perezoso
+
+    ; ---- las instrucciones de la máquina ----
+    constante I_LETRA = 1                       ; x: el carácter (en minúscula, sin caja)
+    constante I_CUALQUIERA = 2
+    constante I_CLASE = 3                       ; x: la clase
+    constante I_PRINCIPIO = 4
+    constante I_FINAL = 5
+    constante I_LÍMITE = 6
+    constante I_NO_LÍMITE = 7
+    constante I_NO_ANTES = 8                    ; (EXP_PALABRA) delante no hay letra de palabra
+    constante I_NO_DESPUÉS = 9                  ; ni detrás
+    constante I_SALTA = 10                      ; x
+    constante I_PARTE = 11                      ; x (primero), y
+    constante I_GUARDA = 12                     ; x: la captura
+    constante I_CASA = 13
+
+    ; las clases de siempre, dentro de una clase (el «desde» de un intervalo)
+    constante K_ESPECIAL = 0xFFFFFF00
+    constante K_D = 1
+    constante K_ND = 2
+    constante K_W = 3
+    constante K_NW = 4
+    constante K_S = 5
+    constante K_NS = 6
+
+    ; ---- lo compilado ----
+    variable opciones_: nat32
+    variable literal: bool                      ; el camino rápido (sin la máquina)
+    variable lit: puntero a byte                ; el texto tal cual
+    variable lit_n: nat32
+    variable compilado: bool
+    variable op, px, py: puntero a nat32        ; el programa
+    variable nprog: nat32
+    variable cl_ini, cl_n, cl_neg: puntero a nat32      ; las clases: dónde empiezan sus intervalos, cuántos y si se niegan
+    variable nclases: nat32
+    variable iv_a, iv_b: puntero a nat32        ; los intervalos de todas las clases
+    variable nivs: nat32
+    variable filtro: bool                       ; el primer octeto se sabe: b1 o b2
+    variable filtro1, filtro2: byte
+
+    ; ---- trocear el patrón ----
+    variable pat: puntero a byte
+    variable plargo, pi: nat32
+    variable fallo: bool
+    variable mal_texto: puntero a byte
+    variable mal_col: nat32
+    variable ngrupos: nat32
+    variable nk, na, nb, nc, nd: puntero a nat32        ; los nudos
+    variable nnudos, max_nudos: nat32
+
+    ; ---- la máquina ----
+    variable tx: puntero a byte                 ; el texto que se mira
+    variable tl: nat32
+    variable cuenta: arreglo [2] de nat32
+    variable hilos_pc: arreglo [2] de puntero a nat32
+    variable hilos_cap: arreglo [2] de puntero a nat32
+    variable gen_lista: arreglo [2] de nat32
+    variable marca: puntero a nat32
+    variable gen: nat32
+    variable pasos: nat32
+    variable cap: arreglo [NCAP] de nat32       ; las del último encontrado
+    variable hay_encontrado: bool
+
+    ; =========================================================================
+    ;  Los caracteres
+    ; =========================================================================
+    ; un carácter de UTF-8 en p (hay n octetos): cuántos ocupa; uno que no
+    ; vale es un octeto solo, U+DC00 + el octeto
+    función decodifica(p: puntero a byte, n: nat32, ref u: nat32): nat32
+        variable b0, b1, b2, b3: nat32
+        b0 := p[0]
+        si b0 < 0x80 entonces
+            u := b0
+            devolver 1
+        fin
+        u := 0xDC00 + b0
+        si b0 < 0xC2 o b0 > 0xF4 o n < 2 entonces devolver 1 fin
+        b1 := p[1]
+        si b1 yb 0xC0 <> 0x80 entonces devolver 1 fin
+        si b0 < 0xE0 entonces
+            u := ((b0 yb 0x1F) << 6) ob (b1 yb 0x3F)
+            devolver 2
+        fin
+        si n < 3 entonces devolver 1 fin
+        b2 := p[2]
+        si b2 yb 0xC0 <> 0x80 entonces devolver 1 fin
+        si b0 < 0xF0 entonces
+            si b0 = 0xE0 y b1 < 0xA0 entonces devolver 1 fin
+            u := ((b0 yb 0x0F) << 12) ob ((b1 yb 0x3F) << 6) ob (b2 yb 0x3F)
+            devolver 3
+        fin
+        si n < 4 entonces devolver 1 fin
+        b3 := p[3]
+        si b3 yb 0xC0 <> 0x80 entonces devolver 1 fin
+        si b0 = 0xF0 y b1 < 0x90 entonces devolver 1 fin
+        si b0 = 0xF4 y b1 >= 0x90 entonces devolver 1 fin
+        u := ((b0 yb 0x07) << 18) ob ((b1 yb 0x3F) << 12) ob ((b2 yb 0x3F) << 6) ob (b3 yb 0x3F)
+        devolver 4
+    fin
+
+    ; el primer octeto del carácter u en UTF-8
+    función primer_octeto(u: nat32): byte
+        si u < 0x80 entonces devolver byte(u) fin
+        si u >= 0xDC80 y u <= 0xDCFF entonces devolver byte(u - 0xDC00) fin
+        si u < 0x800 entonces devolver byte(0xC0 ob (u >> 6)) fin
+        si u < 0x10000 entonces devolver byte(0xE0 ob (u >> 12)) fin
+        devolver byte(0xF0 ob (u >> 18))
+    fin
+
+    función minúscula_u(u: nat32): nat32
+        si u >= 'A' y u <= 'Z' entonces devolver u + 32 fin
+        si u < 0xC0 entonces devolver u fin
+        si u <= 0xDE y u <> 0xD7 entonces devolver u + 32 fin
+        si u = 0x178 entonces devolver 0xFF fin
+        si u >= 0x100 y u <= 0x137 y u <> 0x130 y u <> 0x131 y u yb 1 = 0 entonces devolver u + 1 fin
+        si u >= 0x139 y u <= 0x148 y u yb 1 = 1 entonces devolver u + 1 fin
+        si u >= 0x14A y u <= 0x177 y u yb 1 = 0 entonces devolver u + 1 fin
+        si u >= 0x179 y u <= 0x17E y u yb 1 = 1 entonces devolver u + 1 fin
+        devolver u
+    fin
+
+    función mayúscula_u(u: nat32): nat32
+        si u >= 'a' y u <= 'z' entonces devolver u - 32 fin
+        si u < 0xE0 entonces devolver u fin
+        si u <= 0xFE y u <> 0xF7 entonces devolver u - 32 fin
+        si u = 0xFF entonces devolver 0x178 fin
+        si u >= 0x101 y u <= 0x137 y u <> 0x131 y u yb 1 = 1 entonces devolver u - 1 fin
+        si u >= 0x13A y u <= 0x148 y u yb 1 = 0 entonces devolver u - 1 fin
+        si u >= 0x14B y u <= 0x177 y u yb 1 = 1 entonces devolver u - 1 fin
+        si u >= 0x17A y u <= 0x17E y u yb 1 = 0 entonces devolver u - 1 fin
+        devolver u
+    fin
+
+    ; ¿es de palabra? (letras de ASCII, Latin-1 y Latin Extended-A, cifras y «_»)
+    función de_palabra(u: nat32): bool
+        si u < 0x80 entonces
+            devolver (u >= 'a' y u <= 'z') o (u >= 'A' y u <= 'Z') o (u >= '0' y u <= '9') o u = '_'
+        fin
+        si u = 0xAA o u = 0xB5 o u = 0xBA entonces devolver cierto fin
+        si u >= 0xC0 y u <= 0xFF entonces devolver u <> 0xD7 y u <> 0xF7 fin
+        devolver u >= 0x100 y u <= 0x17F
+    fin
+
+    función de_cifra(u: nat32): bool
+        devolver u >= '0' y u <= '9'
+    fin
+
+    función de_espacio(u: nat32): bool
+        devolver u = ' ' o (u >= 9 y u <= 13)
+    fin
+
+    ; el carácter que acaba justo antes de pos (en el texto que se mira)
+    función carácter_antes(pos: nat32, ref u: nat32): bool
+        variable k, l, inicio: nat32
+        si pos = 0 entonces devolver falso fin
+        k := 1
+        mientras k <= 4 y k <= pos hacer
+            si tx[pos - k] yb 0xC0 <> 0x80 entonces
+                inicio := pos - k
+                l := decodifica(dirección(tx[inicio]), tl - inicio, u)
+                si inicio + l = pos entonces devolver cierto fin
+                romper
+            fin
+            k := k + 1
+        fin
+        decodifica(dirección(tx[pos - 1]), tl - pos + 1, u)
+        devolver cierto
+    fin
+
+    función palabra_antes(pos: nat32): bool
+        variable u: nat32
+        si no carácter_antes(pos, u) entonces devolver falso fin
+        devolver de_palabra(u)
+    fin
+
+    función palabra_en(pos: nat32): bool
+        variable u: nat32
+        si pos >= tl entonces devolver falso fin
+        decodifica(dirección(tx[pos]), tl - pos, u)
+        devolver de_palabra(u)
+    fin
+
+    ; =========================================================================
+    ;  Trocear el patrón en un árbol
+    ; =========================================================================
+    función falla(t: puntero a byte, col: nat32)
+        si fallo entonces devolver fin
+        fallo := cierto
+        mal_texto := t
+        mal_col := col
+    fin
+
+    función nudo(k: nat32, a: nat32, b: nat32, c: nat32, d: nat32): nat32
+        si nnudos >= max_nudos entonces
+            falla("la expresi\xA2n es demasiado larga", pi)
+            devolver NINGUNO
+        fin
+        nk[nnudos] := k
+        na[nnudos] := a
+        nb[nnudos] := b
+        nc[nnudos] := c
+        nd[nnudos] := d
+        nnudos := nnudos + 1
+        devolver nnudos - 1
+    fin
+
+    función nueva_clase(neg: bool): nat32
+        cl_ini[nclases] := nivs
+        cl_n[nclases] := 0
+        cl_neg[nclases] := 0
+        si neg entonces cl_neg[nclases] := 1 fin
+        nclases := nclases + 1
+        devolver nclases - 1
+    fin
+
+    función intervalo(c: nat32, a: nat32, b: nat32)
+        iv_a[nivs] := a
+        iv_b[nivs] := b
+        nivs := nivs + 1
+        cl_n[c] := cl_n[c] + 1
+    fin
+
+    ; una cifra hexadecimal (o 16 si no lo es)
+    función hex(c: byte): nat32
+        si c >= '0' y c <= '9' entonces devolver c - '0' fin
+        si c >= 'a' y c <= 'f' entonces devolver c - 'a' + 10 fin
+        si c >= 'A' y c <= 'F' entonces devolver c - 'A' + 10 fin
+        devolver 16
+    fin
+
+    ; un escape (pi está detrás de «\»): el carácter, o K_ESPECIAL + la clase,
+    ; o 0x100000 + 'b'/'B' (fuera de las clases) ; NINGUNO si falla
+    función escape(en_clase: bool): nat32
+        variable c: byte
+        variable h1, h2, u, l: nat32
+        si pi >= plargo entonces
+            falla("\xAE\\\xAF al final", pi - 1)
+            devolver NINGUNO
+        fin
+        c := pat[pi]
+        según c
+            caso 'd':
+                pi := pi + 1
+                devolver K_ESPECIAL + K_D
+            caso 'D':
+                pi := pi + 1
+                devolver K_ESPECIAL + K_ND
+            caso 'w':
+                pi := pi + 1
+                devolver K_ESPECIAL + K_W
+            caso 'W':
+                pi := pi + 1
+                devolver K_ESPECIAL + K_NW
+            caso 's':
+                pi := pi + 1
+                devolver K_ESPECIAL + K_S
+            caso 'S':
+                pi := pi + 1
+                devolver K_ESPECIAL + K_NS
+            caso 'n':
+                pi := pi + 1
+                devolver 10
+            caso 't':
+                pi := pi + 1
+                devolver 9
+            caso 'r':
+                pi := pi + 1
+                devolver 13
+            caso 'f':
+                pi := pi + 1
+                devolver 12
+            caso 'v':
+                pi := pi + 1
+                devolver 11
+            caso 'a':
+                pi := pi + 1
+                devolver 7
+            caso '0':
+                pi := pi + 1
+                devolver 0
+            caso 'b', 'B':
+                pi := pi + 1
+                si en_clase y c = 'b' entonces devolver 8 fin
+                si en_clase entonces
+                    falla("escape que no se entiende dentro de [...]", pi - 2)
+                    devolver NINGUNO
+                fin
+                devolver 0x100000 + c
+            caso 'x':
+                si pi + 2 < plargo entonces
+                    h1 := hex(pat[pi + 1])
+                    h2 := hex(pat[pi + 2])
+                    si h1 < 16 y h2 < 16 entonces
+                        pi := pi + 3
+                        devolver h1 * 16 + h2
+                    fin
+                fin
+                falla("\\x tiene que llevar dos cifras hexadecimales", pi - 1)
+                devolver NINGUNO
+            caso '1'..'9':
+                falla("en la b\xA3squeda no se admiten referencias atr\xA0s (\\1...): solo en el reemplazo", pi - 1)
+                devolver NINGUNO
+            caso 'c', 'e', 'g'..'m', 'o'..'q', 'u', 'y', 'z', 'A', 'C', 'E'..'R', 'T'..'V', 'X'..'Z':
+                falla("escape que no se entiende", pi - 1)
+                devolver NINGUNO
+        fin
+        l := decodifica(dirección(pat[pi]), plargo - pi, u)
+        pi := pi + l
+        devolver u
+    fin
+
+    ; [...]: pi está en «[»
+    función trocea_clase(): nat32
+        variable inicio, c, a, b, l: nat32
+        variable neg, primero: bool
+        inicio := pi
+        pi := pi + 1
+        neg := falso
+        si pi < plargo y pat[pi] = '^' entonces
+            neg := cierto
+            pi := pi + 1
+        fin
+        c := nueva_clase(neg)
+        primero := cierto
+        mientras cierto hacer
+            si pi >= plargo entonces
+                falla("un \xAE[\xAF sin cerrar", inicio)
+                devolver NINGUNO
+            fin
+            si pat[pi] = ']' y no primero entonces
+                pi := pi + 1
+                romper
+            fin
+            primero := falso
+            si pat[pi] = '\\' entonces
+                pi := pi + 1
+                a := escape(cierto)
+                si fallo entonces devolver NINGUNO fin
+            sino
+                l := decodifica(dirección(pat[pi]), plargo - pi, a)
+                pi := pi + l
+            fin
+            b := a
+            si pi + 1 < plargo y pat[pi] = '-' y pat[pi + 1] <> ']' entonces
+                pi := pi + 1
+                si pat[pi] = '\\' entonces
+                    pi := pi + 1
+                    b := escape(cierto)
+                    si fallo entonces devolver NINGUNO fin
+                sino
+                    l := decodifica(dirección(pat[pi]), plargo - pi, b)
+                    pi := pi + l
+                fin
+                si a >= K_ESPECIAL o b >= K_ESPECIAL entonces
+                    falla("un intervalo de [...] con \\d, \\w o \\s", pi - 1)
+                    devolver NINGUNO
+                fin
+                si b < a entonces
+                    falla("un intervalo de [...] al rev\x82s", pi - 1)
+                    devolver NINGUNO
+                fin
+            fin
+            intervalo(c, a, b)
+        fin
+        devolver nudo(N_CLASE, c, 0, 0, 0)
+    fin
+
+    ; una clase de siempre (\d...) fuera de [...]
+    función clase_sola(k: nat32): nat32
+        variable c: nat32
+        c := nueva_clase(falso)
+        intervalo(c, k, k)
+        devolver nudo(N_CLASE, c, 0, 0, 0)
+    fin
+
+    ; lo de más abajo: un carácter, un grupo, una clase...
+    función trocea_átomo(): nat32
+        variable c: byte
+        variable inicio, a, u, l, k: nat32
+        variable captura: bool
+        inicio := pi
+        c := pat[pi]
+        según c
+            caso '(':
+                pi := pi + 1
+                captura := cierto
+                si pi + 1 < plargo y pat[pi] = '?' y pat[pi + 1] = ':' entonces
+                    pi := pi + 2
+                    captura := falso
+                sino si pi < plargo y pat[pi] = '?' entonces
+                    falla("un grupo \xAE(?\xAF que no se entiende (solo vale \xAE(?:\xAF)", inicio)
+                    devolver NINGUNO
+                fin
+                k := 0
+                si captura entonces
+                    ngrupos := ngrupos + 1
+                    k := ngrupos
+                fin
+                a := trocea_o()
+                si fallo entonces devolver NINGUNO fin
+                si pi >= plargo o pat[pi] <> ')' entonces
+                    falla("falta cerrar un par\x82ntesis", inicio)
+                    devolver NINGUNO
+                fin
+                pi := pi + 1
+                si captura entonces devolver nudo(N_GRUPO, a, k, 0, 0) fin
+                devolver a
+            caso '[':
+                devolver trocea_clase()
+            caso '.':
+                pi := pi + 1
+                devolver nudo(N_CUALQUIERA, 0, 0, 0, 0)
+            caso '^':
+                pi := pi + 1
+                devolver nudo(N_PRINCIPIO, 0, 0, 0, 0)
+            caso '$':
+                pi := pi + 1
+                devolver nudo(N_FINAL, 0, 0, 0, 0)
+            caso '*':
+                falla("\xAE*\xAF sin nada delante", inicio)
+                devolver NINGUNO
+            caso '+':
+                falla("\xAE+\xAF sin nada delante", inicio)
+                devolver NINGUNO
+            caso '?':
+                falla("\xAE?\xAF sin nada delante", inicio)
+                devolver NINGUNO
+            caso '\\':
+                pi := pi + 1
+                u := escape(falso)
+                si fallo entonces devolver NINGUNO fin
+                si u >= K_ESPECIAL entonces devolver clase_sola(u) fin
+                si u = 0x100000 + 'b' entonces devolver nudo(N_LÍMITE, 0, 0, 0, 0) fin
+                si u = 0x100000 + 'B' entonces devolver nudo(N_NO_LÍMITE, 0, 0, 0, 0) fin
+                devolver nudo(N_LETRA, u, 0, 0, 0)
+        fin
+        l := decodifica(dirección(pat[pi]), plargo - pi, u)
+        pi := pi + l
+        devolver nudo(N_LETRA, u, 0, 0, 0)
+    fin
+
+    ; un número de cifras (NINGUNO si no hay ninguna)
+    función lee_número(ref i: nat32): nat32
+        variable n: nat32
+        variable hay: bool
+        n := 0
+        hay := falso
+        mientras i < plargo y pat[i] >= '0' y pat[i] <= '9' hacer
+            si n < 100000 entonces n := n * 10 + (pat[i] - '0') fin
+            i := i + 1
+            hay := cierto
+        fin
+        si no hay entonces devolver NINGUNO fin
+        devolver n
+    fin
+
+    ; ¿hay en pi una repetición con llaves ({n}, {n,}, {,m}, {n,m})? Si no, la «{» es una letra
+    función llaves(ref mín: nat32, ref máx: nat32): bool
+        variable i, a, b: nat32
+        i := pi + 1
+        a := lee_número(i)
+        si i < plargo y pat[i] = '}' entonces
+            si a = NINGUNO entonces devolver falso fin
+            mín := a
+            máx := a
+            pi := i + 1
+            devolver cierto
+        fin
+        si i >= plargo o pat[i] <> ',' entonces devolver falso fin
+        i := i + 1
+        b := lee_número(i)
+        si i >= plargo o pat[i] <> '}' entonces devolver falso fin
+        si a = NINGUNO y b = NINGUNO entonces devolver falso fin
+        si a = NINGUNO entonces a := 0 fin
+        mín := a
+        máx := b
+        pi := i + 1
+        devolver cierto
+    fin
+
+    ; un átomo con sus repeticiones
+    función trocea_repite(): nat32
+        variable a, mín, máx, d, inicio: nat32
+        variable c: byte
+        variable ya: bool
+        a := trocea_átomo()
+        si fallo entonces devolver NINGUNO fin
+        ya := falso
+        mientras pi < plargo hacer
+            inicio := pi
+            c := pat[pi]
+            si c = '*' entonces
+                mín := 0
+                máx := SIN_FIN
+                pi := pi + 1
+            sino si c = '+' entonces
+                mín := 1
+                máx := SIN_FIN
+                pi := pi + 1
+            sino si c = '?' entonces
+                mín := 0
+                máx := 1
+                pi := pi + 1
+            sino si c = '{' entonces
+                si no llaves(mín, máx) entonces romper fin
+                si (mín <> SIN_FIN y mín > MAX_REPITE) o (máx <> SIN_FIN y máx > MAX_REPITE) entonces
+                    falla("una repetici\xA2n de m\xA0s de 1000", inicio)
+                    devolver NINGUNO
+                fin
+                si máx <> SIN_FIN y mín > máx entonces
+                    falla("en {n,m}, n no puede pasar de m", inicio)
+                    devolver NINGUNO
+                fin
+            sino
+                romper
+            fin
+            si ya entonces
+                falla("dos repeticiones seguidas", inicio)
+                devolver NINGUNO
+            fin
+            ya := cierto
+            d := 0
+            si pi < plargo y pat[pi] = '?' entonces
+                d := 1
+                pi := pi + 1
+            fin
+            a := nudo(N_REPITE, a, mín, máx, d)
+            si fallo entonces devolver NINGUNO fin
+        fin
+        devolver a
+    fin
+
+    ; unos detrás de otros (hasta «|», «)» o el final)
+    función trocea_seguidos(): nat32
+        variable r, a: nat32
+        r := NINGUNO
+        mientras no fallo y pi < plargo y pat[pi] <> '|' y pat[pi] <> ')' hacer
+            a := trocea_repite()
+            si fallo entonces devolver NINGUNO fin
+            si r = NINGUNO entonces
+                r := a
+            sino
+                r := nudo(N_SEGUIDOS, r, a, 0, 0)
+            fin
+        fin
+        si r = NINGUNO entonces r := nudo(N_VACÍO, 0, 0, 0, 0) fin
+        devolver r
+    fin
+
+    función trocea_o(): nat32
+        variable izq, der: nat32
+        izq := trocea_seguidos()
+        mientras no fallo y pi < plargo y pat[pi] = '|' hacer
+            pi := pi + 1
+            der := trocea_seguidos()
+            izq := nudo(N_O, izq, der, 0, 0)
+        fin
+        devolver izq
+    fin
+
+    ; =========================================================================
+    ;  Del árbol al programa
+    ; =========================================================================
+    función emite(o_: nat32, x: nat32, yy: nat32): nat32
+        si nprog >= MAX_PROGRAMA entonces
+            falla("la expresi\xA2n es demasiado larga", 0)
+            devolver 0
+        fin
+        op[nprog] := o_
+        px[nprog] := x
+        py[nprog] := yy
+        nprog := nprog + 1
+        devolver nprog - 1
+    fin
+
+    función genera(n: nat32)
+        variable s, j, e, k, cadena, sig: nat32
+        si fallo entonces devolver fin
+        según nk[n]
+            caso N_LETRA:
+                si opciones_ yb EXP_SIN_CAJA <> 0 entonces
+                    emite(I_LETRA, minúscula_u(na[n]), 0)
+                sino
+                    emite(I_LETRA, na[n], 0)
+                fin
+            caso N_CUALQUIERA: emite(I_CUALQUIERA, 0, 0)
+            caso N_CLASE: emite(I_CLASE, na[n], 0)
+            caso N_PRINCIPIO: emite(I_PRINCIPIO, 0, 0)
+            caso N_FINAL: emite(I_FINAL, 0, 0)
+            caso N_LÍMITE: emite(I_LÍMITE, 0, 0)
+            caso N_NO_LÍMITE: emite(I_NO_LÍMITE, 0, 0)
+            caso N_VACÍO:
+                devolver
+            caso N_SEGUIDOS:
+                genera(na[n])
+                genera(nb[n])
+            caso N_O:
+                s := emite(I_PARTE, nprog + 1, 0)
+                genera(na[n])
+                j := emite(I_SALTA, 0, 0)
+                si fallo entonces devolver fin
+                py[s] := nprog
+                genera(nb[n])
+                si fallo entonces devolver fin
+                px[j] := nprog
+            caso N_GRUPO:
+                si nb[n] <= 9 entonces emite(I_GUARDA, nb[n] * 2, 0) fin
+                genera(na[n])
+                si nb[n] <= 9 entonces emite(I_GUARDA, nb[n] * 2 + 1, 0) fin
+            caso N_REPITE:
+                k := 0
+                mientras k < nb[n] y no fallo hacer
+                    genera(na[n])
+                    k := k + 1
+                fin
+                si fallo entonces devolver fin
+                si nc[n] = SIN_FIN entonces
+                    s := emite(I_PARTE, 0, 0)
+                    genera(na[n])
+                    emite(I_SALTA, s, 0)
+                    si fallo entonces devolver fin
+                    si nd[n] = 0 entonces
+                        px[s] := s + 1
+                        py[s] := nprog
+                    sino
+                        px[s] := nprog
+                        py[s] := s + 1
+                    fin
+                sino
+                    ; las que pueden estar o no: cada una salta al final si no
+                    ; está (encadenadas por «y» hasta saber dónde acaba)
+                    cadena := NINGUNO
+                    k := nb[n]
+                    mientras k < nc[n] y no fallo hacer
+                        s := emite(I_PARTE, 0, cadena)
+                        cadena := s
+                        genera(na[n])
+                        k := k + 1
+                    fin
+                    si fallo entonces devolver fin
+                    e := nprog
+                    s := cadena
+                    mientras s <> NINGUNO hacer
+                        sig := py[s]
+                        si nd[n] = 0 entonces
+                            px[s] := s + 1
+                            py[s] := e
+                        sino
+                            px[s] := e
+                            py[s] := s + 1
+                        fin
+                        s := sig
+                    fin
+                fin
+        fin
+    fin
+
+    ; ¿se sabe con qué octeto tiene que empezar lo que se encuentre?
+    función mira_filtro()
+        variable pc, u, m: nat32
+        filtro := falso
+        pc := 0
+        mientras pc < nprog hacer
+            según op[pc]
+                caso I_GUARDA, I_PRINCIPIO, I_FINAL, I_LÍMITE, I_NO_LÍMITE, I_NO_ANTES, I_NO_DESPUÉS:
+                    pc := pc + 1
+                caso I_LETRA:
+                    u := px[pc]
+                    filtro := cierto
+                    filtro1 := primer_octeto(u)
+                    filtro2 := filtro1
+                    si opciones_ yb EXP_SIN_CAJA <> 0 entonces
+                        m := mayúscula_u(u)
+                        filtro2 := primer_octeto(m)
+                        si minúscula_u(m) <> u entonces filtro := falso fin
+                    fin
+                    devolver
+                si no:
+                    devolver
+            fin
+        fin
+    fin
+
+    función suelta_todo()
+        soltar(puntero(op))
+        soltar(puntero(px))
+        soltar(puntero(py))
+        soltar(puntero(marca))
+        soltar(puntero(hilos_pc[0]))
+        soltar(puntero(hilos_pc[1]))
+        soltar(puntero(hilos_cap[0]))
+        soltar(puntero(hilos_cap[1]))
+        soltar(puntero(cl_ini))
+        soltar(puntero(cl_n))
+        soltar(puntero(cl_neg))
+        soltar(puntero(iv_a))
+        soltar(puntero(iv_b))
+        soltar(lit)
+        op := nulo
+        px := nulo
+        py := nulo
+        marca := nulo
+        hilos_pc[0] := nulo
+        hilos_pc[1] := nulo
+        hilos_cap[0] := nulo
+        hilos_cap[1] := nulo
+        cl_ini := nulo
+        cl_n := nulo
+        cl_neg := nulo
+        iv_a := nulo
+        iv_b := nulo
+        lit := nulo
+    fin
+
+    función pide32(n: nat32): puntero a nat32
+        variable p: puntero a byte
+        p := pedir(n * 4 + 4)
+        si p = nulo entonces falla("no hay memoria para la expresi\xA2n", 0) fin
+        devolver puntero(p)
+    fin
+
+    ; compila el patrón (n octetos de UTF-8); falso si no vale (exp_error dice por qué)
+    público función exp_compilar(patrón: puntero a byte, n: nat32, opciones: nat32): bool
+        variable raíz, i, u, l: nat32
+        suelta_todo()
+        compilado := falso
+        fallo := falso
+        mal_texto := ""
+        mal_col := 0
+        opciones_ := opciones
+        si n > 20000 entonces
+            falla("la expresi\xA2n es demasiado larga", 0)
+            devolver falso
+        fin
+        literal := opciones yb EXP_LITERAL <> 0 y opciones yb EXP_SIN_CAJA = 0
+        si literal entonces
+            lit := pedir(n + 1)
+            si lit = nulo entonces
+                falla("no hay memoria para la expresi\xA2n", 0)
+                devolver falso
+            fin
+            mover_memoria(lit, patrón, n)
+            lit_n := n
+            compilado := cierto
+            devolver cierto
+        fin
+        pat := patrón
+        plargo := n
+        pi := 0
+        ngrupos := 0
+        nnudos := 0
+        max_nudos := 3 * n + 8
+        nclases := 0
+        nivs := 0
+        nk := pide32(max_nudos)
+        na := pide32(max_nudos)
+        nb := pide32(max_nudos)
+        nc := pide32(max_nudos)
+        nd := pide32(max_nudos)
+        cl_ini := pide32(n + 2)
+        cl_n := pide32(n + 2)
+        cl_neg := pide32(n + 2)
+        iv_a := pide32(n + 2)
+        iv_b := pide32(n + 2)
+        op := pide32(MAX_PROGRAMA)
+        px := pide32(MAX_PROGRAMA)
+        py := pide32(MAX_PROGRAMA)
+        si no fallo entonces
+            si opciones yb EXP_LITERAL <> 0 entonces
+                ; un texto tal cual, sin mayúsculas: una letra detrás de otra
+                raíz := nudo(N_VACÍO, 0, 0, 0, 0)
+                i := 0
+                mientras i < n y no fallo hacer
+                    l := decodifica(dirección(patrón[i]), n - i, u)
+                    raíz := nudo(N_SEGUIDOS, raíz, nudo(N_LETRA, u, 0, 0, 0), 0, 0)
+                    i := i + l
+                fin
+            sino
+                raíz := trocea_o()
+                si no fallo y pi < plargo entonces falla("un \xAE)\xAF que no se ha abierto", pi) fin
+            fin
+        fin
+        nprog := 0
+        si no fallo entonces
+            emite(I_GUARDA, 0, 0)
+            si opciones yb EXP_PALABRA <> 0 entonces emite(I_NO_ANTES, 0, 0) fin
+            genera(raíz)
+            si opciones yb EXP_PALABRA <> 0 entonces emite(I_NO_DESPUÉS, 0, 0) fin
+            emite(I_GUARDA, 1, 0)
+            emite(I_CASA, 0, 0)
+        fin
+        soltar(puntero(nk))
+        soltar(puntero(na))
+        soltar(puntero(nb))
+        soltar(puntero(nc))
+        soltar(puntero(nd))
+        si fallo entonces
+            suelta_todo()
+            devolver falso
+        fin
+        marca := pide32(nprog)
+        hilos_pc[0] := pide32(nprog)
+        hilos_pc[1] := pide32(nprog)
+        hilos_cap[0] := pide32(nprog * NCAP)
+        hilos_cap[1] := pide32(nprog * NCAP)
+        si fallo entonces
+            suelta_todo()
+            devolver falso
+        fin
+        llenar_memoria(puntero(marca), nprog * 4, 0)
+        gen := 0
+        mira_filtro()
+        compilado := cierto
+        devolver cierto
+    fin
+
+    público función exp_error(): puntero a byte
+        devolver mal_texto
+    fin
+
+    público función exp_columna_error(): nat32
+        devolver mal_col
+    fin
+
+    ; =========================================================================
+    ;  La máquina
+    ; =========================================================================
+    función de_especial(k: nat32, u: nat32): bool
+        según k
+            caso K_D: devolver de_cifra(u)
+            caso K_ND: devolver no de_cifra(u)
+            caso K_W: devolver de_palabra(u)
+            caso K_NW: devolver no de_palabra(u)
+            caso K_S: devolver de_espacio(u)
+            caso K_NS: devolver no de_espacio(u)
+        fin
+        devolver falso
+    fin
+
+    función en_intervalos(c: nat32, u: nat32): bool
+        variable i, f: nat32
+        i := cl_ini[c]
+        f := i + cl_n[c]
+        mientras i < f hacer
+            si iv_a[i] >= K_ESPECIAL entonces
+                si de_especial(iv_a[i] - K_ESPECIAL, u) entonces devolver cierto fin
+            sino si u >= iv_a[i] y u <= iv_b[i] entonces
+                devolver cierto
+            fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    función en_clase(c: nat32, u: nat32): bool
+        variable r: bool
+        r := en_intervalos(c, u)
+        si no r y opciones_ yb EXP_SIN_CAJA <> 0 entonces
+            r := en_intervalos(c, minúscula_u(u)) o en_intervalos(c, mayúscula_u(u))
+        fin
+        si cl_neg[c] <> 0 entonces devolver no r fin
+        devolver r
+    fin
+
+    función principio_de_línea(pos: nat32): bool
+        devolver pos = 0 o tx[pos - 1] = '\n'
+    fin
+
+    función final_de_línea(pos: nat32): bool
+        devolver pos >= tl o tx[pos] = '\n'
+    fin
+
+    ; pone el hilo (pc, con esas capturas) en la lista l, siguiendo los saltos
+    ; y lo que no gasta letras
+    función añade(l: nat32, pc: nat32, caps: puntero a nat32, pos: nat32)
+        variable mías: arreglo [NCAP] de nat32
+        variable k: nat32
+        variable sigue: bool
+        pasos := pasos + 1
+        si pasos > exp_tope entonces
+            exp_agotado := cierto
+            devolver
+        fin
+        si marca[pc] = gen_lista[l] entonces devolver fin
+        marca[pc] := gen_lista[l]
+        según op[pc]
+            caso I_SALTA:
+                añade(l, px[pc], caps, pos)
+                devolver
+            caso I_PARTE:
+                añade(l, px[pc], caps, pos)
+                añade(l, py[pc], caps, pos)
+                devolver
+            caso I_GUARDA:
+                mover_memoria(puntero(dirección(mías[0])), puntero(caps), NCAP * 4)
+                mías[px[pc]] := pos
+                añade(l, pc + 1, dirección(mías[0]), pos)
+                devolver
+            caso I_PRINCIPIO, I_FINAL, I_LÍMITE, I_NO_LÍMITE, I_NO_ANTES, I_NO_DESPUÉS:
+                según op[pc]
+                    caso I_PRINCIPIO: sigue := principio_de_línea(pos)
+                    caso I_FINAL: sigue := final_de_línea(pos)
+                    caso I_LÍMITE: sigue := palabra_antes(pos) <> palabra_en(pos)
+                    caso I_NO_LÍMITE: sigue := palabra_antes(pos) = palabra_en(pos)
+                    caso I_NO_ANTES: sigue := no palabra_antes(pos)
+                    caso I_NO_DESPUÉS: sigue := no palabra_en(pos)
+                fin
+                si sigue entonces añade(l, pc + 1, caps, pos) fin
+                devolver
+        fin
+        k := cuenta[l]
+        hilos_pc[l][k] := pc
+        mover_memoria(puntero(hilos_cap[l] + k * NCAP), puntero(caps), NCAP * 4)
+        cuenta[l] := k + 1
+    fin
+
+    ; el siguiente sitio desde pos con el primer octeto del filtro (tl + 1 si no hay)
+    función siguiente_candidato(pos: nat32): nat32
+        variable r: nat32
+        variable p: puntero a byte
+        variable b1, b2: byte
+        si pos >= tl entonces devolver tl + 1 fin
+        p := tx
+        b1 := filtro1
+        b2 := filtro2
+        ensamblador
+            mov esi, {p}
+            mov ecx, {pos}
+            mov edx, {tl}
+            mov al, {b1}
+            mov ah, {b2}
+        .otro:
+            cmp ecx, edx
+            jae .nada
+            mov bl, [esi+ecx]
+            cmp bl, al
+            je .hallado
+            cmp bl, ah
+            je .hallado
+            inc ecx
+            jmp .otro
+        .nada:
+            inc edx
+            mov ecx, edx
+        .hallado:
+            mov {r}, ecx
+        fin
+        devolver r
+    fin
+
+    ; la máquina, desde «inicio»; anclado: solo lo que empiece ahí
+    función ejecuta(inicio: nat32, anclado: bool): bool
+        variable pos, c, nl, t, u, lg, pc: nat32
+        variable vacías: arreglo [NCAP] de nat32
+        variable capt: puntero a nat32
+        variable encontrado: bool
+        para t desde 0 hasta NCAP - 1 hacer vacías[t] := NINGUNO fin
+        encontrado := falso
+        pos := inicio
+        c := 0
+        cuenta[0] := 0
+        cuenta[1] := 0
+        gen := gen + 1
+        gen_lista[c] := gen
+        mientras cierto hacer
+            si no encontrado y (no anclado o pos = inicio) entonces
+                si cuenta[c] = 0 y filtro y no anclado entonces
+                    pos := siguiente_candidato(pos)
+                    si pos > tl entonces romper fin
+                    gen := gen + 1
+                    gen_lista[c] := gen
+                fin
+                añade(c, 0, dirección(vacías[0]), pos)
+            fin
+            si exp_agotado entonces devolver falso fin
+            u := NINGUNO
+            lg := 0
+            si pos < tl entonces lg := decodifica(dirección(tx[pos]), tl - pos, u) fin
+            si cuenta[c] = 0 entonces
+                ; nadie sigue: a la letra siguiente, a probar desde ella
+                si encontrado o anclado o pos >= tl entonces romper fin
+                pos := pos + lg
+                gen := gen + 1
+                gen_lista[c] := gen
+                seguir
+            fin
+            nl := 1 - c
+            cuenta[nl] := 0
+            gen := gen + 1
+            gen_lista[nl] := gen
+            t := 0
+            mientras t < cuenta[c] hacer
+                pasos := pasos + 1
+                pc := hilos_pc[c][t]
+                capt := hilos_cap[c] + t * NCAP
+                según op[pc]
+                    caso I_LETRA:
+                        si lg > 0 entonces
+                            si u = px[pc] o (opciones_ yb EXP_SIN_CAJA <> 0 y minúscula_u(u) = px[pc]) entonces
+                                añade(nl, pc + 1, capt, pos + lg)
+                            fin
+                        fin
+                    caso I_CUALQUIERA:
+                        si lg > 0 y u <> 10 entonces añade(nl, pc + 1, capt, pos + lg) fin
+                    caso I_CLASE:
+                        si lg > 0 entonces
+                            si en_clase(px[pc], u) entonces añade(nl, pc + 1, capt, pos + lg) fin
+                        fin
+                    caso I_CASA:
+                        encontrado := cierto
+                        mover_memoria(puntero(dirección(cap[0])), puntero(capt), NCAP * 4)
+                        romper
+                fin
+                t := t + 1
+            fin
+            si exp_agotado o pasos > exp_tope entonces
+                exp_agotado := cierto
+                devolver falso
+            fin
+            c := nl
+            si pos >= tl entonces romper fin
+            pos := pos + lg
+        fin
+        devolver encontrado
+    fin
+
+    ; ---- el camino rápido: un texto tal cual, con mayúsculas ----
+    función busca_octeto(pos: nat32, b: byte): nat32
+        variable r: nat32
+        variable p: puntero a byte
+        si pos >= tl entonces devolver tl fin
+        p := tx
+        ensamblador
+            mov edi, {p}
+            add edi, {pos}
+            mov ecx, {tl}
+            sub ecx, {pos}
+            mov al, {b}
+            repne scasb
+            jne .nada
+            sub edi, {p}
+            dec edi
+            mov {r}, edi
+            jmp .fin
+        .nada:
+            mov eax, {tl}
+            mov {r}, eax
+        .fin:
+        fin
+        devolver r
+    fin
+
+    función casa_literal(pos: nat32): bool
+        variable k: nat32
+        si pos + lit_n > tl entonces devolver falso fin
+        k := 0
+        mientras k < lit_n hacer
+            si tx[pos + k] <> lit[k] entonces devolver falso fin
+            k := k + 1
+        fin
+        si opciones_ yb EXP_PALABRA <> 0 entonces
+            si palabra_antes(pos) o palabra_en(pos + lit_n) entonces devolver falso fin
+        fin
+        cap[0] := pos
+        cap[1] := pos + lit_n
+        devolver cierto
+    fin
+
+    función literal_adelante(inicio: nat32): bool
+        variable pos: nat32
+        si lit_n = 0 entonces
+            si inicio > tl entonces devolver falso fin
+            pos := inicio
+            mientras pos <= tl hacer
+                si casa_literal(pos) entonces devolver cierto fin
+                pos := pos + 1
+            fin
+            devolver falso
+        fin
+        pos := inicio
+        mientras pos < tl hacer
+            pos := busca_octeto(pos, lit[0])
+            si pos >= tl entonces devolver falso fin
+            si casa_literal(pos) entonces devolver cierto fin
+            pos := pos + 1
+        fin
+        devolver falso
+    fin
+
+    ; ¿empieza pos a mitad de un carácter (bien hecho)?
+    función a_mitad(pos: nat32): bool
+        variable k, l, u: nat32
+        si pos >= tl o tx[pos] yb 0xC0 <> 0x80 entonces devolver falso fin
+        k := 1
+        mientras k <= 3 y k <= pos hacer
+            si tx[pos - k] yb 0xC0 <> 0x80 entonces
+                l := decodifica(dirección(tx[pos - k]), tl - pos + k, u)
+                devolver l > k
+            fin
+            k := k + 1
+        fin
+        devolver falso
+    fin
+
+    función limpia_caps()
+        variable k: nat32
+        para k desde 0 hasta NCAP - 1 hacer cap[k] := NINGUNO fin
+    fin
+
+    ; =========================================================================
+    ;  Buscar
+    ; =========================================================================
+    ; el primero que empiece en «a_partir» o después
+    público función exp_buscar(texto: puntero a byte, largo: nat32, a_partir: nat32, ref ini: nat32, ref fin_: nat32): bool
+        variable r: bool
+        exp_agotado := falso
+        hay_encontrado := falso
+        si no compilado o a_partir > largo entonces devolver falso fin
+        tx := texto
+        tl := largo
+        pasos := 0
+        limpia_caps()
+        si literal entonces
+            r := literal_adelante(a_partir)
+        sino
+            r := ejecuta(a_partir, falso)
+        fin
+        si no r entonces devolver falso fin
+        hay_encontrado := cierto
+        ini := cap[0]
+        fin_ := cap[1]
+        devolver cierto
+    fin
+
+    ; el último que EMPIECE antes de «antes»
+    público función exp_buscar_antes(texto: puntero a byte, largo: nat32, antes: nat32, ref ini: nat32, ref fin_: nat32): bool
+        variable pos: nat32
+        variable r: bool
+        exp_agotado := falso
+        hay_encontrado := falso
+        si no compilado o antes = 0 entonces devolver falso fin
+        tx := texto
+        tl := largo
+        pasos := 0
+        si antes > largo + 1 entonces antes := largo + 1 fin
+        pos := antes
+        mientras pos > 0 hacer
+            pos := pos - 1
+            si no a_mitad(pos) entonces
+                r := falso
+                limpia_caps()
+                si literal entonces
+                    r := casa_literal(pos)
+                sino si filtro y (pos >= tl o (tx[pos] <> filtro1 y tx[pos] <> filtro2)) entonces
+                    r := falso
+                sino
+                    r := ejecuta(pos, cierto)
+                fin
+                si exp_agotado entonces devolver falso fin
+                si r entonces
+                    hay_encontrado := cierto
+                    ini := cap[0]
+                    fin_ := cap[1]
+                    devolver cierto
+                fin
+                pasos := pasos + 1
+                si pasos > exp_tope entonces
+                    exp_agotado := cierto
+                    devolver falso
+                fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; del último encontrado: 0, todo; 1 a 9, los grupos (falso si no ha casado)
+    público función exp_grupo(k: nat32, ref ini: nat32, ref fin_: nat32): bool
+        si no hay_encontrado o k > 9 entonces devolver falso fin
+        si cap[2 * k] = NINGUNO o cap[2 * k + 1] = NINGUNO entonces devolver falso fin
+        ini := cap[2 * k]
+        fin_ := cap[2 * k + 1]
+        devolver cierto
+    fin
+
+    ; =========================================================================
+    ;  Reemplazar
+    ; =========================================================================
+    ; lo que va en lugar del último encontrado; con «pon» falso solo se cuenta
+    función sustituye(plantilla: puntero a byte, n: nat32, texto: puntero a byte, destino: puntero a byte, cabe: nat32, pon: bool): nat32
+        variable i, k, a, b, total: nat32
+        variable c: byte
+        total := 0
+        i := 0
+        mientras i < n hacer
+            c := plantilla[i]
+            si c = '\\' y i + 1 < n entonces
+                i := i + 1
+                c := plantilla[i]
+                si c >= '0' y c <= '9' entonces
+                    si exp_grupo(c - '0', a, b) entonces
+                        k := a
+                        mientras k < b hacer
+                            si pon y total < cabe entonces destino[total] := texto[k] fin
+                            total := total + 1
+                            k := k + 1
+                        fin
+                    fin
+                    i := i + 1
+                    seguir
+                fin
+                si c = 'n' entonces c := 10 fin
+                si c = 't' entonces c := 9 fin
+            fin
+            si pon y total < cabe entonces destino[total] := c fin
+            total := total + 1
+            i := i + 1
+        fin
+        si pon y total > cabe entonces total := cabe fin
+        devolver total
+    fin
+
+    público función exp_sustituto(plantilla: puntero a byte, n: nat32, texto: puntero a byte, destino: puntero a byte, cabe: nat32): nat32
+        devolver sustituye(plantilla, n, texto, destino, cabe, cierto)
+    fin
+
+    público función exp_largo_sustituto(plantilla: puntero a byte, n: nat32, texto: puntero a byte): nat32
+        devolver sustituye(plantilla, n, texto, nulo, 0, falso)
+    fin
+
+fin BlocExp.

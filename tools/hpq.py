@@ -231,7 +231,7 @@ SISTEMA = [
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
-    ('bloc', VERSION_085, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
+    ('bloc', '1.0', 'El Bloc de notas: pestañas, buscar y reemplazar (con expresiones), colores según el lenguaje, UTF-8 y comparar', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),    # (BLOC) la 1.0: el Bloc al nivel de un editor serio
     ('consola', VERSION_085, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
     # (explorador, dispositivos) el explorador de archivos, sus miniaturas y el Administrador de dispositivos
     ('equipo', '0.9.2', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [

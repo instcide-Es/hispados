@@ -1,0 +1,265 @@
+; =============================================================================
+;  ppag.cas - prueba de BlocPag (blocpag.cas), con corre32 (lo manda
+;  prueba_pag.sh, que mira lo que sale con Python):
+;
+;    PPAG TABLAS                 las 256 de la 437 y de la 1252: código,
+;                                Unicode, la letra que lo pinta y la vuelta
+;    PPAG CASOS ENTRADA SALIDA   cada caso de ENTRADA (la clase en un octeto,
+;                                el largo en cuatro y los octetos) a SALIDA
+;    PPAG TIEMPO                 lo que tarda con 10 MB
+;
+;  Las clases de caso: 0..2, de fuera adentro en esa página (CP_437, CP_UTF8,
+;  CP_1252) y otra vez afuera; 0x80..0x82, de dentro (UTF-8) afuera en esa
+;  página; 0x40, recorrer con pag_decodifica y mirar pag_anterior; 0x41,
+;  adivinar la página; 0x42, pag_a_437; 0x43, pag_437_a_utf8.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo PPag
+    modelo usuario
+    importar Llamadas, BlocMem, BlocPag, Textos32
+
+    variable salida: nat32
+    variable malos: nat32
+
+    función pon32(v: nat32)
+        variable t: arreglo [4] de byte
+        t[0] := byte(v yb 255)
+        t[1] := byte((v >> 8) yb 255)
+        t[2] := byte((v >> 16) yb 255)
+        t[3] := byte(v >> 24)
+        escribir_archivo(salida, dirección(t[0]), 4)
+    fin
+
+    función pon(p: puntero a byte, n: nat32)
+        pon32(n)
+        si n > 0 entonces escribir_archivo(salida, p, n) fin
+    fin
+
+    función lee32(p: puntero a byte): nat32
+        devolver nat32(p[0]) ob (nat32(p[1]) << 8) ob (nat32(p[2]) << 16) ob (nat32(p[3]) << 24)
+    fin
+
+    función tablas()
+        variable c, u, l, k, perdidas: nat32
+        variable t: arreglo [8] de byte
+        variable v: arreglo [8] de byte
+        para c desde 0 hasta 255 hacer
+            u := pag_de_437(c)
+            l := pag_letra(u)
+            escribir("437 ", c, " ", u, " ", l)
+            u := pag_de_1252(c)
+            k := pag_codifica(u, dirección(t[0]))
+            perdidas := 0
+            l := pag_de_utf8(CP_1252, dirección(t[0]), k, dirección(v[0]), perdidas)
+            escribir(" 1252 ", u, " ", l, " ", nat32(v[0]), " ", perdidas, "\n")
+        fin
+    fin
+
+    ; de fuera adentro y otra vez afuera
+    función ida(cp: nat32, p: puntero a byte, n: nat32)
+        variable dentro, fuera: puntero a byte
+        variable l, k, l2, k2, perdidas: nat32
+        l := pag_largo_utf8(cp, p, n)
+        dentro := pedir(l + 4)
+        k := pag_a_utf8(cp, p, n, dentro)
+        si k <> l entonces malos := malos + 1 fin
+        l2 := pag_largo_de_utf8(cp, dentro, k)
+        fuera := pedir(l2 + 4)
+        perdidas := 0
+        k2 := pag_de_utf8(cp, dentro, k, fuera, perdidas)
+        si k2 <> l2 entonces malos := malos + 1 fin
+        pon(dentro, k)
+        pon(fuera, k2)
+        pon32(perdidas)
+        soltar(dentro)
+        soltar(fuera)
+    fin
+
+    ; de dentro afuera
+    función vuelta(cp: nat32, p: puntero a byte, n: nat32)
+        variable fuera: puntero a byte
+        variable l, k, perdidas: nat32
+        l := pag_largo_de_utf8(cp, p, n)
+        fuera := pedir(l + 4)
+        perdidas := 0
+        k := pag_de_utf8(cp, p, n, fuera, perdidas)
+        si k <> l entonces malos := malos + 1 fin
+        pon(fuera, k)
+        pon32(perdidas)
+        soltar(fuera)
+    fin
+
+    ; recorre con pag_decodifica (los octetos que gasta y el carácter de
+    ; cada uno) y mira que pag_anterior de cada sitio dé el de antes
+    función recorre(p: puntero a byte, n: nat32)
+        variable i, k, u, antes, cuantos, mal: nat32
+        variable lista: puntero a byte
+        lista := pedir(n * 5 + 4)
+        cuantos := 0
+        mal := 0
+        antes := 0
+        i := 0
+        mientras i < n hacer
+            k := pag_decodifica(dirección(p[i]), n - i, u)
+            si k = 0 o k > n - i entonces
+                mal := mal + 1
+                romper
+            fin
+            lista[cuantos * 5] := byte(k)
+            lista[cuantos * 5 + 1] := byte(u yb 255)
+            lista[cuantos * 5 + 2] := byte((u >> 8) yb 255)
+            lista[cuantos * 5 + 3] := byte((u >> 16) yb 255)
+            lista[cuantos * 5 + 4] := byte(u >> 24)
+            cuantos := cuantos + 1
+            si i > 0 y pag_anterior(p, i) <> antes entonces mal := mal + 1 fin
+            antes := i
+            i := i + k
+        fin
+        si n > 0 y pag_anterior(p, n) <> antes entonces mal := mal + 1 fin
+        pon(lista, cuantos * 5)
+        pon32(mal)
+        soltar(lista)
+    fin
+
+    ; de UTF-8 a la 437 para enseñar (con su 0 al final si cabe)
+    función a437(p: puntero a byte, n: nat32)
+        variable q: puntero a byte
+        variable k: nat32
+        q := pedir(n + 4)
+        k := pag_a_437(p, n, q, n + 1)
+        pon(q, k)
+        soltar(q)
+    fin
+
+    función de437(p: puntero a byte, n: nat32)
+        variable q: puntero a byte
+        variable k: nat32
+        q := pedir(n * 3 + 4)
+        k := pag_437_a_utf8(p, n, q, n * 3 + 1)
+        pon(q, k)
+        soltar(q)
+    fin
+
+    función casos(entrada: puntero a byte, nombre_salida: puntero a byte): byte
+        variable m, n, i, clase, largo, bom: nat32
+        variable datos: puntero a byte
+        variable b: bool
+        m := abrir(entrada)
+        si es_error(m) entonces
+            escribir("ppag: no puedo abrir ", entrada, "\n")
+            devolver 2
+        fin
+        n := largo_de(m)
+        datos := pedir(n + 4)
+        si leer(m, datos, n) <> n entonces
+            escribir("ppag: no puedo leer ", entrada, "\n")
+            devolver 2
+        fin
+        cerrar(m)
+        salida := crear(nombre_salida)
+        si es_error(salida) entonces
+            escribir("ppag: no puedo crear ", nombre_salida, "\n")
+            devolver 2
+        fin
+        i := 0
+        mientras i + 5 <= n hacer
+            clase := datos[i]
+            largo := lee32(dirección(datos[i + 1]))
+            i := i + 5
+            si clase <= 2 entonces
+                ida(clase, dirección(datos[i]), largo)
+            sino si clase >= 0x80 y clase <= 0x82 entonces
+                vuelta(clase - 0x80, dirección(datos[i]), largo)
+            sino si clase = 0x40 entonces
+                recorre(dirección(datos[i]), largo)
+            sino si clase = 0x41 entonces
+                pon32(pag_detectar(dirección(datos[i]), largo, b))
+                bom := 0
+                si b entonces bom := 1 fin
+                pon32(bom)
+            sino si clase = 0x42 entonces
+                a437(dirección(datos[i]), largo)
+            sino si clase = 0x43 entonces
+                de437(dirección(datos[i]), largo)
+            fin
+            i := i + largo
+        fin
+        cerrar(salida)
+        escribir("ppag: malos (largos que no cuadran): ", malos, "\n")
+        devolver 0
+    fin
+
+    ; 10 MB: ASCII, y con una letra de acento de cada 16
+    función tiempo()
+        variable n, i, t0, t1, k, l, perdidas: nat32
+        variable p, q, r: puntero a byte
+        variable b: bool
+        n := 10485760
+        p := pedir(n)
+        para i desde 0 hasta n - 1 hacer
+            p[i] := byte('a' + i mod 26)
+            si i mod 80 = 79 entonces p[i] := 10 fin
+        fin
+        t0 := tics()
+        k := pag_detectar(p, n, b)
+        t1 := tics()
+        escribir("tiempo: detectar 10 MB ASCII: ", (t1 - t0) * 10, " ms (", k, ")\n")
+        q := pedir(n * 3)
+        t0 := tics()
+        k := pag_a_utf8(CP_437, p, n, q)
+        t1 := tics()
+        escribir("tiempo: de la 437 a UTF-8, 10 MB ASCII: ", (t1 - t0) * 10, " ms\n")
+        r := pedir(n + 16)
+        t0 := tics()
+        perdidas := 0
+        l := pag_de_utf8(CP_437, q, k, r, perdidas)
+        t1 := tics()
+        escribir("tiempo: de UTF-8 a la 437, 10 MB ASCII: ", (t1 - t0) * 10, " ms\n")
+        para i desde 0 hasta n - 1 paso 16 hacer p[i] := 0xA4 fin          ; ñ en la 437
+        t0 := tics()
+        k := pag_detectar(p, n, b)
+        t1 := tics()
+        escribir("tiempo: detectar 10 MB con acentos (437): ", (t1 - t0) * 10, " ms (", k, ")\n")
+        t0 := tics()
+        k := pag_a_utf8(CP_437, p, n, q)
+        t1 := tics()
+        escribir("tiempo: de la 437 a UTF-8, 10 MB con acentos: ", (t1 - t0) * 10, " ms\n")
+        t0 := tics()
+        l := pag_detectar(q, k, b)
+        t1 := tics()
+        escribir("tiempo: detectar ", k, " octetos de UTF-8 con acentos: ", (t1 - t0) * 10, " ms (", l, ")\n")
+        t0 := tics()
+        perdidas := 0
+        l := pag_de_utf8(CP_437, q, k, r, perdidas)
+        t1 := tics()
+        escribir("tiempo: de UTF-8 a la 437, con acentos: ", (t1 - t0) * 10, " ms\n")
+        t0 := tics()
+        l := pag_a_utf8(CP_UTF8, q, k, p)
+        t1 := tics()
+        escribir("tiempo: de UTF-8 adentro (comprobar y copiar), con acentos: ", (t1 - t0) * 10, " ms\n")
+    fin
+
+    función principal(): byte
+        variable a: arreglo [256] de byte
+        variable orden: arreglo [32] de byte
+        variable e: arreglo [96] de byte
+        variable s: arreglo [96] de byte
+        argumentos(a, 256)
+        palabra(a, 0, orden, 32)
+        si iguales(orden, "TABLAS") entonces
+            tablas()
+            devolver 0
+        fin
+        si iguales(orden, "TIEMPO") entonces
+            tiempo()
+            devolver 0
+        fin
+        si iguales(orden, "CASOS") entonces
+            palabra(a, 1, e, 96)
+            palabra(a, 2, s, 96)
+            devolver casos(e, s)
+        fin
+        escribir("uso: PPAG TABLAS | CASOS ENTRADA SALIDA | TIEMPO\n")
+        devolver 1
+    fin
+fin PPag.

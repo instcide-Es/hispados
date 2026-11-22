@@ -1,0 +1,360 @@
+; =============================================================================
+;  blocdif.cas - comparar dos archivos por líneas, para el Bloc de notas
+;  (BLOC.BIN, «Comparar»): el algoritmo de Myers (1986), con el «trozo del
+;  medio» para no gastar más memoria que la de las dos líneas de búsqueda
+;  (O((N+M)·D) de tiempo, O(N+M) de memoria). Quien llama da un número (un
+;  «hash») por línea; aquí solo se mira si son iguales.
+;
+;      dif_comparar(a, na, b, nb, tope)     ; falso: más de «tope» cambios
+;      para i desde 0 hasta dif_cuántos() - 1: dif_trozo(i, clase, a0, an, b0, bn)
+;      dif_soltar()
+;
+;  Los trozos van en orden y cubren a y b enteros: D_IGUAL (an = bn líneas
+;  iguales), D_QUITADO (an líneas que solo están en a), D_AÑADIDO (bn que
+;  solo están en b) y D_CAMBIADO (an de a cambiadas por bn de b). Lo igual
+;  del principio y del final se quita antes de buscar. Si hay más de «tope»
+;  líneas quitadas y añadidas, lo de en medio sale como un CAMBIADO entero.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo BlocDif
+
+    importar BlocMem
+
+    público constante D_IGUAL = 0
+    público constante D_QUITADO = 1
+    público constante D_AÑADIDO = 2
+    público constante D_CAMBIADO = 3
+
+    ; las dos líneas de búsqueda (hacia delante y hacia atrás), por diagonal
+    variable vf, vb: puntero a ent32
+    variable centro: ent32                      ; el índice de la diagonal 0
+    variable la, lb: puntero a nat32            ; lo que se compara
+
+    ; los trozos: cinco palabras cada uno
+    variable trozos: puntero a nat32
+    variable n_trozos, cabe_trozos: nat32
+    ; lo que va saliendo: dónde se está, y lo quitado y añadido sin apuntar
+    variable cx, cy, pend_a, pend_b: nat32
+    variable sin_memoria: bool
+    variable ediciones: nat32                   ; las líneas quitadas y añadidas hasta ahora
+
+    ; lo que devuelve el trozo del medio: su comienzo y su final
+    variable mx0, my0, mx1, my1: ent32
+
+    ; -------------------------------------------------------------------------
+    ;  Los trozos que salen
+    ; -------------------------------------------------------------------------
+    función apunta(clase: nat32, a0: nat32, an: nat32, b0: nat32, bn: nat32)
+        variable p: puntero a nat32
+        variable q: puntero a byte
+        si an = 0 y bn = 0 entonces devolver fin
+        ; lo igual, con lo igual de antes
+        si clase = D_IGUAL y n_trozos > 0 entonces
+            p := trozos + (n_trozos - 1) * 5
+            si p[0] = D_IGUAL entonces
+                p[2] := p[2] + an
+                p[4] := p[4] + bn
+                devolver
+            fin
+        fin
+        si n_trozos = cabe_trozos entonces
+            q := recrecer(puntero(trozos), cabe_trozos * 20, (cabe_trozos * 2 + 16) * 20)
+            si q = nulo entonces
+                sin_memoria := cierto
+                devolver
+            fin
+            trozos := puntero(q)
+            cabe_trozos := cabe_trozos * 2 + 16
+        fin
+        p := trozos + n_trozos * 5
+        p[0] := clase
+        p[1] := a0
+        p[2] := an
+        p[3] := b0
+        p[4] := bn
+        n_trozos := n_trozos + 1
+    fin
+
+    ; lo quitado y añadido que esperaba, como un trozo
+    función vacía()
+        variable clase: nat32
+        si pend_a = 0 y pend_b = 0 entonces devolver fin
+        clase := D_CAMBIADO
+        si pend_b = 0 entonces clase := D_QUITADO fin
+        si pend_a = 0 entonces clase := D_AÑADIDO fin
+        apunta(clase, cx - pend_a, pend_a, cy - pend_b, pend_b)
+        pend_a := 0
+        pend_b := 0
+    fin
+
+    función iguales(n: nat32)
+        si n = 0 entonces devolver fin
+        vacía()
+        apunta(D_IGUAL, cx, n, cy, n)
+        cx := cx + n
+        cy := cy + n
+    fin
+
+    función quitadas(n: nat32)
+        pend_a := pend_a + n
+        ediciones := ediciones + n
+        cx := cx + n
+    fin
+
+    función añadidas(n: nat32)
+        pend_b := pend_b + n
+        ediciones := ediciones + n
+        cy := cy + n
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Myers
+    ; -------------------------------------------------------------------------
+    función eq(x: ent32, yy: ent32): bool
+        devolver la[nat32(x)] = lb[nat32(yy)]
+    fin
+
+    función f_de(k: ent32): ent32
+        devolver vf[nat32(k + centro)]
+    fin
+
+    función b_de(c: ent32): ent32
+        devolver vb[nat32(c + centro)]
+    fin
+
+    ; el trozo del medio de la caja (izq, arr)-(der, aba): un camino más corto
+    ; pasa por él. Deja su comienzo y su final en mx0..my1; con «tope» (0: sin
+    ; él), falso si el camino tiene más cambios que eso
+    función medio(izq: ent32, arr: ent32, der: ent32, aba: ent32, tope: nat32): bool
+        variable ancho, alto, delta, máx, d, k, c, x, yy, px, py: ent32
+        variable impar: bool
+        ancho := der - izq
+        alto := aba - arr
+        delta := ancho - alto
+        impar := delta yb 1 <> 0
+        máx := (ancho + alto + 1) div 2
+        vf[nat32(1 + centro)] := izq
+        vb[nat32(1 + centro)] := aba
+        para d desde 0 hasta máx hacer
+            si tope > 0 y d > 0 y nat32(2 * d - 1) > tope entonces devolver falso fin
+            ; hacia delante
+            k := d
+            mientras k >= -d hacer
+                c := k - delta
+                si k = -d o (k <> d y f_de(k - 1) < f_de(k + 1)) entonces
+                    x := f_de(k + 1)
+                    px := x
+                sino
+                    px := f_de(k - 1)
+                    x := px + 1
+                fin
+                yy := arr + (x - izq) - k
+                si d = 0 o x <> px entonces py := yy sino py := yy - 1 fin
+                mientras x < der y yy < aba y eq(x, yy) hacer
+                    x := x + 1
+                    yy := yy + 1
+                fin
+                vf[nat32(k + centro)] := x
+                si impar y c >= -(d - 1) y c <= d - 1 y yy >= b_de(c) entonces
+                    mx0 := px
+                    my0 := py
+                    mx1 := x
+                    my1 := yy
+                    devolver cierto
+                fin
+                k := k - 2
+            fin
+            ; hacia atrás
+            c := d
+            mientras c >= -d hacer
+                k := c + delta
+                si c = -d o (c <> d y b_de(c - 1) > b_de(c + 1)) entonces
+                    yy := b_de(c + 1)
+                    py := yy
+                sino
+                    py := b_de(c - 1)
+                    yy := py - 1
+                fin
+                x := izq + (yy - arr) + k
+                si d = 0 o yy <> py entonces px := x sino px := x + 1 fin
+                mientras x > izq y yy > arr y eq(x - 1, yy - 1) hacer
+                    x := x - 1
+                    yy := yy - 1
+                fin
+                vb[nat32(c + centro)] := yy
+                si no impar y k >= -d y k <= d y x <= f_de(k) entonces
+                    mx0 := x
+                    my0 := yy
+                    mx1 := px
+                    my1 := py
+                    devolver cierto
+                fin
+                c := c - 2
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; lo igual en diagonal desde (x, yy) hacia (x1, y1): cuántas
+    función diagonal(x: ent32, yy: ent32, x1: ent32, y1: ent32): ent32
+        variable n: ent32
+        n := 0
+        mientras x + n < x1 y yy + n < y1 y eq(x + n, yy + n) hacer n := n + 1 fin
+        devolver n
+    fin
+
+    ; el camino más corto por la caja, apuntado en orden
+    función camino(izq: ent32, arr: ent32, der: ent32, aba: ent32)
+        variable x0, y0, x1, y1, n: ent32
+        si der - izq = 0 entonces
+            añadidas(nat32(aba - arr))
+            devolver
+        fin
+        si aba - arr = 0 entonces
+            quitadas(nat32(der - izq))
+            devolver
+        fin
+        si no medio(izq, arr, der, aba, 0) entonces
+            ; (no pasa: siempre hay camino) por si acaso, todo cambiado
+            quitadas(nat32(der - izq))
+            añadidas(nat32(aba - arr))
+            devolver
+        fin
+        x0 := mx0
+        y0 := my0
+        x1 := mx1
+        y1 := my1
+        camino(izq, arr, x0, y0)
+        ; del comienzo al final del trozo del medio: lo igual, un paso y lo igual
+        n := diagonal(x0, y0, x1, y1)
+        iguales(nat32(n))
+        x0 := x0 + n
+        y0 := y0 + n
+        si x1 - x0 > y1 - y0 entonces
+            quitadas(1)
+            x0 := x0 + 1
+        sino si y1 - y0 > x1 - x0 entonces
+            añadidas(1)
+            y0 := y0 + 1
+        fin
+        n := diagonal(x0, y0, x1, y1)
+        iguales(nat32(n))
+        x0 := x0 + n
+        y0 := y0 + n
+        ; (si aún no ha llegado, que no se pierda nada)
+        si x1 > x0 entonces quitadas(nat32(x1 - x0)) fin
+        si y1 > y0 entonces añadidas(nat32(y1 - y0)) fin
+        camino(x1, y1, der, aba)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo de fuera
+    ; -------------------------------------------------------------------------
+    público función dif_soltar()
+        soltar(puntero(trozos))
+        trozos := nulo
+        n_trozos := 0
+        cabe_trozos := 0
+    fin
+
+    público función dif_comparar(a: puntero a nat32, na: nat32, b: puntero a nat32, nb: nat32, tope: nat32): bool
+        variable ini, fa, fb, máx: nat32
+        variable bien: bool
+        dif_soltar()
+        la := a
+        lb := b
+        cx := 0
+        cy := 0
+        pend_a := 0
+        pend_b := 0
+        sin_memoria := falso
+        bien := cierto
+        ; lo igual del principio y del final
+        ini := 0
+        mientras ini < na y ini < nb y a[ini] = b[ini] hacer ini := ini + 1 fin
+        fa := na
+        fb := nb
+        mientras fa > ini y fb > ini y a[fa - 1] = b[fb - 1] hacer
+            fa := fa - 1
+            fb := fb - 1
+        fin
+        iguales(ini)
+        si fa > ini y fb > ini entonces
+            máx := (fa - ini + fb - ini + 1) div 2 + 2
+            vf := puntero(pedir((2 * máx + 4) * 4))
+            vb := puntero(pedir((2 * máx + 4) * 4))
+            si vf = nulo o vb = nulo entonces
+                sin_memoria := cierto
+            sino
+                centro := ent32(máx + 1)
+                ; el primero, con el tope; luego, el camino entero
+                si tope > 0 y no medio(ent32(ini), ent32(ini), ent32(fa), ent32(fb), tope) entonces
+                    bien := falso
+                    quitadas(fa - ini)
+                    añadidas(fb - ini)
+                sino
+                    ediciones := 0
+                    camino(ent32(ini), ent32(ini), ent32(fa), ent32(fb))
+                    si tope > 0 y ediciones > tope entonces
+                        ; (por uno: el trozo del medio no lo dice justo) lo de en medio, cambiado entero
+                        vacía()
+                        dif_soltar()
+                        cx := 0
+                        cy := 0
+                        iguales(ini)
+                        bien := falso
+                        quitadas(fa - ini)
+                        añadidas(fb - ini)
+                    fin
+                fin
+            fin
+            soltar(puntero(vf))
+            soltar(puntero(vb))
+            vf := nulo
+            vb := nulo
+        sino
+            si tope > 0 y (fa - ini) + (fb - ini) > tope entonces bien := falso fin
+            quitadas(fa - ini)
+            añadidas(fb - ini)
+        fin
+        iguales(na - fa)
+        vacía()
+        si sin_memoria entonces
+            ; sin memoria: un trozo solo, todo cambiado
+            dif_soltar()
+            cx := 0
+            cy := 0
+            pend_a := 0
+            pend_b := 0
+            sin_memoria := falso
+            quitadas(na)
+            añadidas(nb)
+            vacía()
+            devolver falso
+        fin
+        devolver bien
+    fin
+
+    público función dif_cuántos(): nat32
+        devolver n_trozos
+    fin
+
+    público función dif_trozo(i: nat32, ref clase: nat32, ref a0: nat32, ref an: nat32, ref b0: nat32, ref bn: nat32)
+        variable p: puntero a nat32
+        si i >= n_trozos entonces
+            clase := D_IGUAL
+            a0 := 0
+            an := 0
+            b0 := 0
+            bn := 0
+            devolver
+        fin
+        p := trozos + i * 5
+        clase := p[0]
+        a0 := p[1]
+        an := p[2]
+        b0 := p[3]
+        bn := p[4]
+    fin
+
+fin BlocDif.

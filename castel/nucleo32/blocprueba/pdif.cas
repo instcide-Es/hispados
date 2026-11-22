@@ -1,0 +1,114 @@
+; =============================================================================
+;  pdif.cas - prueba de BlocDif (blocdif.cas), con corre32 (lo manda
+;  prueba_dif.sh, que mira lo que sale con Python):
+;
+;    PDIF CASOS ENTRADA SALIDA   cada caso (na, nb, las líneas de a y de b
+;                                como números, y el tope, en palabras de 32
+;                                bits) a SALIDA: si no se pasó del tope, y
+;                                los trozos (clase, a0, an, b0, bn)
+;    PDIF TIEMPO                 lo que tarda con 100.000 líneas
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo PDif
+    modelo usuario
+    importar Llamadas, BlocMem, BlocDif, Textos32
+
+    variable salida: nat32
+
+    función pon32(v: nat32)
+        variable t: arreglo [4] de nat32
+        t[0] := v
+        escribir_archivo(salida, puntero(dirección(t[0])), 4)
+    fin
+
+    función casos(entrada: puntero a byte, nombre_salida: puntero a byte): byte
+        variable m, n, i, na, nb, tope, k, clase, a0, an, b0, bn: nat32
+        variable datos: puntero a nat32
+        m := abrir(entrada)
+        si es_error(m) entonces devolver 2 fin
+        n := largo_de(m)
+        datos := puntero(pedir(n + 4))
+        si leer(m, puntero(datos), n) <> n entonces devolver 2 fin
+        cerrar(m)
+        salida := crear(nombre_salida)
+        si es_error(salida) entonces devolver 2 fin
+        n := n div 4
+        i := 0
+        mientras i + 3 <= n hacer
+            na := datos[i]
+            nb := datos[i + 1]
+            tope := datos[i + 2 + na + nb]
+            si dif_comparar(datos + (i + 2), na, datos + (i + 2 + na), nb, tope) entonces pon32(1) sino pon32(0) fin
+            pon32(dif_cuántos())
+            si dif_cuántos() > 0 entonces
+                para k desde 0 hasta dif_cuántos() - 1 hacer
+                    dif_trozo(k, clase, a0, an, b0, bn)
+                    pon32(clase)
+                    pon32(a0)
+                    pon32(an)
+                    pon32(b0)
+                    pon32(bn)
+                fin
+            fin
+            i := i + 3 + na + nb
+        fin
+        dif_soltar()
+        soltar(puntero(datos))
+        cerrar(salida)
+        escribir("pdif: en uso al final: ", en_uso, "\n")
+        devolver 0
+    fin
+
+    ; 100.000 líneas con unos cambios; y 20.000 contra 20.000 todas distintas, con tope
+    función tiempo()
+        variable a, b: puntero a nat32
+        variable i, n, t0, t1, clase, a0, an, b0, bn: nat32
+        variable r: bool
+        n := 100000
+        a := puntero(pedir(n * 4))
+        b := puntero(pedir((n + 100) * 4))
+        para i desde 0 hasta n - 1 hacer
+            a[i] := i * 2654435761
+            b[i] := a[i]
+        fin
+        para i desde 1 hasta 20 hacer b[i * 4999] := 7 + i fin             ; 20 cambiadas
+        para i desde 0 hasta n - 1 paso 25000 hacer b[i + 3] := 99 fin
+        t0 := tics()
+        r := dif_comparar(a, n, b, n, 0)
+        t1 := tics()
+        escribir("tiempo: 100.000 líneas con 24 cambiadas: ", (t1 - t0) * 10, " ms, ", dif_cuántos(), " trozos\n")
+        para i desde 0 hasta n - 1 hacer b[i] := i * 2654435761 + 1 fin
+        t0 := tics()
+        r := dif_comparar(a, 20000, b, 20000, 2000)
+        t1 := tics()
+        dif_trozo(0, clase, a0, an, b0, bn)
+        si r entonces escribir("mal: ") fin
+        escribir("tiempo: 20.000 contra 20.000 todas distintas, con tope 2000: ", (t1 - t0) * 10, " ms, ", dif_cuántos(), " trozo (clase ", clase, ", ", an, " y ", bn, ")\n")
+        t0 := tics()
+        r := dif_comparar(a, 3000, b, 3000, 0)
+        t1 := tics()
+        escribir("tiempo: 3.000 contra 3.000 todas distintas, sin tope: ", (t1 - t0) * 10, " ms\n")
+        soltar(puntero(a))
+        soltar(puntero(b))
+    fin
+
+    función principal(): byte
+        variable a: arreglo [256] de byte
+        variable orden: arreglo [32] de byte
+        variable e: arreglo [96] de byte
+        variable s: arreglo [96] de byte
+        argumentos(a, 256)
+        palabra(a, 0, orden, 32)
+        si iguales(orden, "TIEMPO") entonces
+            tiempo()
+            devolver 0
+        fin
+        si iguales(orden, "CASOS") entonces
+            palabra(a, 1, e, 96)
+            palabra(a, 2, s, 96)
+            devolver casos(e, s)
+        fin
+        escribir("uso: PDIF CASOS ENTRADA SALIDA | TIEMPO\n")
+        devolver 1
+    fin
+fin PDif.

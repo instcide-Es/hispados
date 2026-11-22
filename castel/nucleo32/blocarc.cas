@@ -1,0 +1,455 @@
+; =============================================================================
+;  blocarc.cas - los archivos del Bloc de notas (BLOC.BIN): leer un texto
+;  (de cualquier tamaño, de una vez) viendo en qué página está (UTF-8, con
+;  o sin BOM, la 437 de Hispa o la 1252 de Windows) y qué finales de línea
+;  lleva (CR LF o LF), y guardarlo igual (o como se haya elegido); lo que se
+;  recuerda entre una vez y otra (BLOC.INI, en la carpeta del usuario:
+;  \USUARIOS\<usuario>, fuera de la zona protegida); y la lista de una
+;  carpeta, para «Abrir» y «Guardar como».
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo BlocArc
+
+    importar Llamadas, BlocMem, BlocPag, BlocTxt, BlocLen, Textos32
+
+    público constante PERDIDAS = 0xFFFFFF00     ; lo que da guarda() si hay letras que no caben en la página (y no se ha dicho que valga)
+    constante TROZO = 32768
+    constante HOLGURA = 65536                   ; el hueco que se deja al leer
+
+    público variable perdidas: nat32            ; las letras que no caben (al guardar)
+    público variable guardados: nat32           ; los octetos escritos
+    público variable era_nuevo: bool            ; lee() no ha encontrado el archivo (se empieza en blanco)
+
+    ; =========================================================================
+    ;  Leer
+    ; =========================================================================
+    ; quita los \r de delante de los \n (CR LF -> LF): da lo que queda; cuenta los de cada clase
+    función quita_cr(p: puntero a byte, n: nat32, ref con_cr: nat32, ref sin_cr: nat32): nat32
+        variable i, k: nat32
+        variable c: byte
+        con_cr := 0
+        sin_cr := 0
+        k := 0
+        i := 0
+        mientras i < n hacer
+            c := p[i]
+            si c = 13 y i + 1 < n y p[i + 1] = 10 entonces
+                con_cr := con_cr + 1
+                p[k] := 10
+                k := k + 1
+                i := i + 2
+            sino
+                si c = 10 entonces sin_cr := sin_cr + 1 fin
+                p[k] := c
+                k := k + 1
+                i := i + 1
+            fin
+        fin
+        devolver k
+    fin
+
+    ; lee el archivo «ruta» en el documento d (vacío si no está: era_nuevo).
+    ; Da 0 o el error de abrirlo o leerlo (SIN_MEMORIA si no cabe).
+    ; cp_forzado: la página con que se lee (NADA_CP: la que se vea)
+    público constante NADA_CP = 0xFFFFFFFF
+    público función lee(ruta: puntero a byte, cp_forzado: nat32): nat32
+        variable m, n, got, r, cp, n2, con, sin, cabe: nat32
+        variable buf, q, q2: puntero a byte
+        variable bom: bool
+        era_nuevo := falso
+        copiar_hasta(dirección(d.ruta[0]), ruta, MAX_RUTA)
+        d.lenguaje := len_de_archivo(ruta)
+        m := abrir(ruta)
+        si es_error(m) entonces
+            si m = NO_HAY entonces
+                era_nuevo := cierto
+                d.cp := CP_437
+                d.bom := falso
+                d.crlf := cierto
+                d.mezclados := falso
+                adopta(pedir(HOLGURA), 0, HOLGURA)
+                devolver 0
+            fin
+            devolver m
+        fin
+        n := largo_de(m)
+        si es_error(n) entonces n := 0 fin
+        buf := pedir(n + 16)
+        si buf = nulo entonces
+            cerrar(m)
+            devolver SIN_MEMORIA
+        fin
+        got := 0
+        mientras got < n hacer
+            r := leer(m, buf + got, n - got)
+            si es_error(r) entonces
+                cerrar(m)
+                soltar(buf)
+                devolver r
+            fin
+            si r = 0 entonces romper fin
+            got := got + r
+        fin
+        cerrar(m)
+        n := got
+        ; la página
+        bom := falso
+        cp := pag_detectar(buf, n, bom)
+        si cp_forzado <> NADA_CP entonces
+            cp := cp_forzado
+            bom := cp = CP_UTF8 y n >= 3 y buf[0] = 0xEF y buf[1] = 0xBB y buf[2] = 0xBF
+        fin
+        q := buf
+        si bom entonces
+            q := buf + 3
+            n := n - 3
+        fin
+        ; el ^Z del final de los textos del DOS, fuera
+        si n > 0 y q[n - 1] = 26 entonces n := n - 1 fin
+        ; los finales de línea
+        n := quita_cr(q, n, con, sin)
+        d.crlf := con >= sin
+        d.mezclados := con > 0 y sin > 0
+        ; a UTF-8 (si ya lo es, sin copiar)
+        n2 := pag_largo_utf8(cp, q, n)
+        si n2 = n entonces
+            si q <> buf entonces mover_memoria(buf, q, n) fin
+            cabe := n + HOLGURA
+            buf := recrecer(buf, n, cabe)
+            si buf = nulo entonces devolver SIN_MEMORIA fin
+        sino
+            cabe := n2 + HOLGURA
+            q2 := pedir(cabe)
+            si q2 = nulo entonces
+                soltar(buf)
+                devolver SIN_MEMORIA
+            fin
+            pag_a_utf8(cp, q, n, q2)
+            soltar(buf)
+            buf := q2
+        fin
+        d.cp := cp
+        d.bom := bom
+        si no adopta(buf, n2, cabe) entonces devolver SIN_MEMORIA fin
+        devolver 0
+    fin
+
+    ; =========================================================================
+    ;  Guardar
+    ; =========================================================================
+    ; el principio del carácter en el que cae pos (para no partir uno al trocear)
+    función a_carácter(pos: nat32): nat32
+        variable k: nat32
+        k := 0
+        mientras pos > 0 y k < 3 y (BlocTxt.letra(pos) yb 0xC0) = 0x80 hacer
+            pos := pos - 1
+            k := k + 1
+        fin
+        devolver pos
+    fin
+
+    ; guarda el documento d en «ruta»: 0, un error o PERDIDAS (si hay letras
+    ; que no caben en su página y no vale perderlas: no se escribe nada)
+    público función guarda(ruta: puntero a byte, perder_vale: bool): nat32
+        variable m, pos, n, k, i, j, r, total, p: nat32
+        variable ent, sal, conv: puntero a byte
+        variable bom: arreglo [3] de byte
+        ent := pedir(TROZO + 8)
+        conv := pedir(TROZO * 2 + 16)
+        sal := pedir(TROZO * 4 + 16)
+        si ent = nulo o sal = nulo o conv = nulo entonces
+            soltar(ent)
+            soltar(sal)
+            soltar(conv)
+            devolver SIN_MEMORIA
+        fin
+        perdidas := 0
+        guardados := 0
+        ; primero, si se pierde algo
+        si d.cp <> CP_UTF8 y no perder_vale entonces
+            pos := 0
+            mientras pos < largo() hacer
+                n := TROZO
+                si pos + n < largo() entonces n := a_carácter(pos + n) - pos sino n := largo() - pos fin
+                si n = 0 entonces n := largo() - pos fin
+                copia(pos, n, ent)
+                p := 0
+                pag_de_utf8(d.cp, ent, n, sal, p)
+                perdidas := perdidas + p
+                pos := pos + n
+            fin
+            si perdidas > 0 entonces
+                soltar(ent)
+                soltar(sal)
+                soltar(conv)
+                devolver PERDIDAS
+            fin
+        fin
+        m := crear(ruta)
+        si es_error(m) entonces
+            soltar(ent)
+            soltar(sal)
+            soltar(conv)
+            devolver m
+        fin
+        total := 0
+        r := 0
+        si d.cp = CP_UTF8 y d.bom entonces
+            bom[0] := 0xEF
+            bom[1] := 0xBB
+            bom[2] := 0xBF
+            r := escribir_archivo(m, bom, 3)
+            si no es_error(r) entonces total := total + r fin
+        fin
+        pos := 0
+        mientras pos < largo() y no es_error(r) hacer
+            n := TROZO
+            si pos + n < largo() entonces n := a_carácter(pos + n) - pos sino n := largo() - pos fin
+            si n = 0 entonces n := largo() - pos fin
+            copia(pos, n, ent)
+            ; los finales de línea
+            j := 0
+            i := 0
+            mientras i < n hacer
+                si ent[i] = 10 y d.crlf entonces
+                    conv[j] := 13
+                    j := j + 1
+                fin
+                conv[j] := ent[i]
+                j := j + 1
+                i := i + 1
+            fin
+            ; la página
+            si d.cp = CP_UTF8 entonces
+                k := pag_de_utf8(CP_UTF8, conv, j, sal, p)
+            sino
+                p := 0
+                k := pag_de_utf8(d.cp, conv, j, sal, p)
+                perdidas := perdidas + p
+            fin
+            r := escribir_archivo(m, sal, k)
+            si no es_error(r) entonces
+                si r < k entonces r := DISCO_LLENO sino total := total + r fin
+            fin
+            pos := pos + n
+        fin
+        cerrar(m)
+        soltar(ent)
+        soltar(sal)
+        soltar(conv)
+        guardados := total
+        si es_error(r) entonces devolver r fin
+        devolver 0
+    fin
+
+    ; =========================================================================
+    ;  Lo que se recuerda: BLOC.INI, en \USUARIOS\<usuario> (de la unidad
+    ;  con que arrancó el programa)
+    ; =========================================================================
+    público variable ruta_ini: arreglo [96] de byte
+    variable carpeta_usr: arreglo [80] de byte
+    variable ini_m: nat32 = 0xFFFFFFFF
+    variable ini_buf: puntero a byte
+    variable ini_n, ini_i: nat32
+
+    ; la carpeta del usuario (con su «\» al final), en carpeta_usr; y ruta_ini
+    público función prepara_ini(letra_: nat32)
+        variable u: arreglo [64] de byte
+        variable nombre_: arreglo [12] de byte
+        variable i, j: nat32
+        variable c: byte
+        nombre_usuario(u, 64)
+        j := 0
+        i := 0
+        mientras u[i] <> 0 y j < 8 hacer
+            c := mayúscula(u[i])
+            si (c >= 'A' y c <= 'Z') o (c >= '0' y c <= '9') o c = '_' o c = '-' entonces
+                nombre_[j] := c
+                j := j + 1
+            fin
+            i := i + 1
+        fin
+        nombre_[j] := 0
+        si j = 0 entonces copiar(nombre_, "USUARIO") fin
+        carpeta_usr[0] := byte(letra_)
+        carpeta_usr[1] := 0
+        concatenar(carpeta_usr, ":\\USUARIOS\\")
+        concatenar(carpeta_usr, nombre_)
+        concatenar(carpeta_usr, "\\")
+        copiar(ruta_ini, carpeta_usr)
+        concatenar(ruta_ini, "BLOC.INI")
+    fin
+
+    ; ---- leer: una línea «clave=valor» cada vez ----
+    público función ini_abre(): bool
+        variable n, r: nat32
+        ini_m := abrir(ruta_ini)
+        si es_error(ini_m) entonces devolver falso fin
+        n := largo_de(ini_m)
+        si es_error(n) o n > 1048576 entonces n := 0 fin
+        ini_buf := pedir(n + 4)
+        si ini_buf = nulo entonces
+            cerrar(ini_m)
+            devolver falso
+        fin
+        r := leer(ini_m, ini_buf, n)
+        cerrar(ini_m)
+        ini_m := 0xFFFFFFFF
+        si es_error(r) entonces r := 0 fin
+        ini_n := r
+        ini_i := 0
+        devolver cierto
+    fin
+
+    ; la siguiente «clave=valor» (sin los comentarios): falso al acabar
+    público función ini_línea(clave: puntero a byte, cabe_c: nat32, val: puntero a byte, cabe_v: nat32): bool
+        variable k: nat32
+        variable c: byte
+        mientras ini_i < ini_n hacer
+            clave[0] := 0
+            val[0] := 0
+            ; la clave
+            k := 0
+            mientras ini_i < ini_n y ini_buf[ini_i] <> '=' y ini_buf[ini_i] <> 10 y ini_buf[ini_i] <> 13 hacer
+                si k + 1 < cabe_c entonces
+                    clave[k] := ini_buf[ini_i]
+                    k := k + 1
+                fin
+                ini_i := ini_i + 1
+            fin
+            clave[k] := 0
+            si ini_i < ini_n y ini_buf[ini_i] = '=' entonces
+                ini_i := ini_i + 1
+                k := 0
+                mientras ini_i < ini_n y ini_buf[ini_i] <> 10 y ini_buf[ini_i] <> 13 hacer
+                    si k + 1 < cabe_v entonces
+                        val[k] := ini_buf[ini_i]
+                        k := k + 1
+                    fin
+                    ini_i := ini_i + 1
+                fin
+                val[k] := 0
+                mientras ini_i < ini_n y (ini_buf[ini_i] = 10 o ini_buf[ini_i] = 13) hacer ini_i := ini_i + 1 fin
+                c := clave[0]
+                si c <> ';' y c <> 0 entonces devolver cierto fin
+            sino
+                mientras ini_i < ini_n y (ini_buf[ini_i] = 10 o ini_buf[ini_i] = 13) hacer ini_i := ini_i + 1 fin
+            fin
+        fin
+        soltar(ini_buf)
+        ini_buf := nulo
+        devolver falso
+    fin
+
+    ; ---- escribir ----
+    público función ini_crea(): bool
+        variable c: arreglo [80] de byte
+        variable n: nat32
+        ; la carpeta del usuario (y \USUARIOS), si no están
+        copiar(c, carpeta_usr)
+        n := longitud(c)
+        c[n - 1] := 0                          ; sin la última «\»
+        n := longitud(c)
+        mientras n > 3 y c[n - 1] <> '\\' hacer n := n - 1 fin
+        c[n - 1] := 0                          ; «X:\USUARIOS»
+        crear_carpeta(c)
+        copiar(c, carpeta_usr)
+        c[longitud(c) - 1] := 0
+        crear_carpeta(c)
+        ini_m := crear(ruta_ini)
+        devolver no es_error(ini_m)
+    fin
+
+    público función ini_pon(clave: puntero a byte, val: puntero a byte)
+        si es_error(ini_m) entonces devolver fin
+        escribir_archivo(ini_m, clave, longitud(clave))
+        escribir_archivo(ini_m, "=", 1)
+        escribir_archivo(ini_m, val, longitud(val))
+        escribir_archivo(ini_m, "\r\n", 2)
+    fin
+
+    público función ini_comentario(t: puntero a byte)
+        si es_error(ini_m) entonces devolver fin
+        escribir_archivo(ini_m, "; ", 2)
+        escribir_archivo(ini_m, t, longitud(t))
+        escribir_archivo(ini_m, "\r\n", 2)
+    fin
+
+    público función ini_cierra()
+        si no es_error(ini_m) entonces cerrar(ini_m) fin
+        ini_m := 0xFFFFFFFF
+    fin
+
+    ; =========================================================================
+    ;  La lista de una carpeta (para Abrir y Guardar como): las carpetas
+    ;  primero, y luego los archivos, cada grupo por orden
+    ; =========================================================================
+    público constante MAX_LISTA = 600
+    público tipo Cosa = estructura
+        nombre: arreglo [13] de byte
+        carpeta: bool
+        tamaño_: nat32
+    fin
+    público variable lista: puntero a Cosa
+    público variable n_lista: nat32
+
+    función va_antes(a: puntero a Cosa, b: puntero a Cosa): bool
+        si a.carpeta <> b.carpeta entonces devolver a.carpeta fin
+        devolver comparar(dirección(a.nombre[0]), dirección(b.nombre[0])) < 0
+    fin
+
+    ; ¿es una carpeta? (la ruta, con su «\» al final o sin ella)
+    público función es_carpeta(ruta: puntero a byte): bool
+        variable t: arreglo [164] de byte
+        variable n, a: nat32
+        copiar_hasta(t, ruta, 160)
+        n := longitud(t)
+        si n = 0 entonces devolver falso fin
+        ; la raíz («\», «C:\», «C:»)
+        si (n = 1 y t[0] = '\\') o (n = 2 y t[1] = ':') o (n = 3 y t[1] = ':' y t[2] = '\\') entonces devolver cierto fin
+        si t[n - 1] = '\\' entonces t[n - 1] := 0 fin
+        a := atributos_de(t)
+        si es_error(a) entonces devolver falso fin
+        devolver a yb CARPETA <> 0
+    fin
+
+    ; lee la carpeta (con su «\» al final): falso si no se puede
+    público función lee_lista(carpeta: puntero a byte): bool
+        variable m, i, j: nat32
+        variable e: Entrada
+        variable t: Cosa
+        variable a, b: puntero a Cosa
+        si lista = nulo entonces lista := puntero(pedir(MAX_LISTA * tamaño(Cosa))) fin
+        si lista = nulo entonces devolver falso fin
+        n_lista := 0
+        si no es_carpeta(carpeta) entonces devolver falso fin
+        m := abrir(carpeta)
+        si es_error(m) entonces devolver falso fin
+        mientras n_lista < MAX_LISTA y entrada(m, e) hacer
+            si e.nombre[0] <> '.' y e.atributos yb 0x08 = 0 entonces
+                a := dirección(lista[n_lista])
+                copiar_hasta(dirección(a.nombre[0]), dirección(e.nombre[0]), 13)
+                a.carpeta := e.atributos yb CARPETA <> 0
+                a.tamaño_ := e.tamaño
+                n_lista := n_lista + 1
+            fin
+        fin
+        cerrar(m)
+        ; por orden (por inserción: son pocos)
+        i := 1
+        mientras i < n_lista hacer
+            j := i
+            mientras j > 0 y va_antes(dirección(lista[j]), dirección(lista[j - 1])) hacer
+                a := dirección(lista[j])
+                b := dirección(lista[j - 1])
+                mover_memoria(puntero(dirección(t)), puntero(a), tamaño(Cosa))
+                mover_memoria(puntero(a), puntero(b), tamaño(Cosa))
+                mover_memoria(puntero(b), puntero(dirección(t)), tamaño(Cosa))
+                j := j - 1
+            fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+fin BlocArc.

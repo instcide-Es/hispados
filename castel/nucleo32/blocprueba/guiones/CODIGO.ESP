@@ -1,0 +1,15 @@
+estado: M.CAS l 1 col 1 sel 0-0 leas 11 p爂ina UTF-8 lf lenguaje Castel pestas 1 pliegues 0
+estado: M.CAS l 1 col 1 sel 0-0 leas 11 p爂ina UTF-8 lf lenguaje Castel pestas 1 pliegues 1
+texto: m贸dulo M\n    funci贸n f(a: nat32): nat32\n        si a > 0 entonces\n            ; devolver (a + 1) * 2\n        sino si a = 0 entonces\n            devolver 0\n        fin\n        devolver 1\n    fin\nfin M.\n
+estado: M.CAS l 2 col 24 sel 34-34 leas 11 p爂ina UTF-8 lf cambiado lenguaje Castel pestas 1 pliegues 0
+texto: m贸dulo M\n    funci贸n f(a: nat32): nat32\n        si a > 0 entonces\n        x\n            devolver (a + 1) * 2\n        sino si a = 0 entonces\n            devolver 0\n        fin\n        devolver 1\n    fin\nfin M.\n
+estado: P.C l 1 col 1 sel 0-0 leas 5 p爂ina 437 lf lenguaje C pestas 2 pliegues 0
+texto: // int main(void)\n// {\n//     return 0;\n// }\n
+estado: P.HTM l 1 col 1 sel 0-0 leas 3 p爂ina UTF-8 lf lenguaje HTML pestas 3 pliegues 0
+aviso: Comentado (Ctrl+Q otra vez lo quita).
+texto: <!-- <p>hola</p> -->\n<b>adi贸s</b>\n
+texto: <p>hola</p>\n<b>adi贸s</b>\n
+estado: P.BAS l 1 col 1 sel 0-0 leas 3 p爂ina 437 lf lenguaje Hispa-BASIC / QBasic pestas 4 pliegues 0
+aviso: Descomentado.
+texto: ' 10 PRINT "HOLA"\n20 GOTO 10\n
+estado: P.BAS l 1 col 18 sel 0-17 leas 3 p爂ina 437 lf cambiado pestas 4 pliegues 0
