@@ -26,7 +26,7 @@
 ; =============================================================================
 módulo Preferencias
 
-    importar Tareas, Fat, Unidades, Raton, Ventanas, Consola, Usbhid, Red, Permisos, Grafico, Textos32, Formato
+    importar Tareas, Fat, Unidades, Raton, Ventanas, Consola, Usbhid, Red, Permisos, Grafico, Textos32, Formato, Touchpad, Registro     ; (TOUCHPAD) los dos últimos
 
     ; ---- las claves de la llamada 174 (las mismas en llamadas.cas) ----
     público constante AJ_RATÓN_VELOCIDAD = 1    ; 1 (lenta) a 10 (rápida); 5, como llega
@@ -51,7 +51,17 @@ módulo Preferencias
     público constante AJ_HORA_ÚLTIMA = 20       ; (NTP) la última vez que se puso en hora por Internet (segundos desde el 1/1/2000; 0: nunca)
     público constante AJ_HORA_ESTADO = 21       ; (NTP) cómo fue la última vez (HORA_... de zonas.cas)
     público constante AJ_HORA_DESFASE = 22      ; (NTP) lo que iba mal el reloj, en segundos (con signo)
-    constante MAX_AJ = 23
+    ; (TOUCHPAD) el touchpad (Panel de control > Ratón, si lo hay)
+    público constante AJ_TP_TOQUE = 23          ; 1: tocar para hacer clic
+    público constante AJ_TP_BORDE_V = 24        ; 1: el borde derecho, para desplazar arriba y abajo
+    público constante AJ_TP_BORDE_H = 25        ; 1: el borde de abajo, a los lados
+    público constante AJ_TP_DOS_DEDOS = 26      ; 1: dos dedos, para desplazar
+    público constante AJ_TP_VELOCIDAD = 27      ; 1 a 10 (5)
+    público constante AJ_TP_ESCRIBIR = 28       ; no hacerle caso tras una tecla, en centésimas (0: siempre caso)
+    público constante AJ_TP_ZONA = 29           ; el ancho del borde, en % (4 a 20; 8)
+    público constante AJ_TP_HAY = 30            ; (solo leer) el touchpad: 0 ninguno, 1 Synaptics, 2 Synaptics como ratón, 3 ALPS, 4 Elantech
+    público constante AJ_TP_GRABA = 31          ; (cualquiera) grabar lo que llega N segundos (1 a 60); 0: guardarlo en TOUCHPAD.TXT; al leer, lo que queda (0: nada); 1000 + octeto: inyectarlo (tp_simulado)
+    constante MAX_AJ = 32
     público constante SOLO_LEER = 0xFFFFFFFF
     constante NO_VALE = 0xFFFFFFF9              ; (los de usuario.cas)
     constante DENEGADO = 0xFFFFFFF0
@@ -80,7 +90,7 @@ módulo Preferencias
     variable nombres: arreglo [MAX_AJ] de puntero a byte    ; en PANEL.INI (nulo: no se guarda ahí)
     público variable presentes: nat32           ; (bits) las claves que estaban en PANEL.INI
     variable ntp: arreglo [160] de byte         ; la línea «ntp=» de PANEL.INI, tal cual
-    variable texto_ini: arreglo [1024] de byte
+    variable texto_ini: arreglo [1536] de byte      ; (TOUCHPAD) antes 1024
     variable ruta: arreglo [24] de byte
 
     función clave(k: nat32, nombre: puntero a byte, mín: nat32, máx: nat32, por_omisión: nat32)
@@ -121,6 +131,15 @@ módulo Preferencias
         clave(AJ_HORA_ÚLTIMA, nulo, 0, 0xFFFFFFFE, 0)
         clave(AJ_HORA_ESTADO, nulo, 0, 0xFFFFFFFE, 0)
         clave(AJ_HORA_DESFASE, nulo, 0, 0xFFFFFFFE, 0)
+        clave(AJ_TP_TOQUE, "touchpad_toque", 0, 1, 1)         ; (TOUCHPAD)
+        clave(AJ_TP_BORDE_V, "touchpad_borde", 0, 1, 1)
+        clave(AJ_TP_BORDE_H, "touchpad_borde_abajo", 0, 1, 0)
+        clave(AJ_TP_DOS_DEDOS, "touchpad_dos_dedos", 0, 1, 1)
+        clave(AJ_TP_VELOCIDAD, "touchpad_velocidad", 1, 10, 5)
+        clave(AJ_TP_ESCRIBIR, "touchpad_escribir", 0, 200, 50)
+        clave(AJ_TP_ZONA, "touchpad_zona", 4, 20, 8)
+        clave(AJ_TP_HAY, nulo, 1, 0, 0)                       ; (no se puede poner)
+        clave(AJ_TP_GRABA, nulo, 0, 1255, 0)
         ntp[0] := 0
         pon_tema(0)
     fin
@@ -212,6 +231,13 @@ módulo Preferencias
                 dock_del_panel := v
                 cambios := cambios + 1
             caso AJ_RED: pedir_preferencia(v)
+            caso AJ_TP_TOQUE: tp_toque := v = 1        ; (TOUCHPAD)
+            caso AJ_TP_BORDE_V: tp_borde_v := v = 1
+            caso AJ_TP_BORDE_H: tp_borde_h := v = 1
+            caso AJ_TP_DOS_DEDOS: tp_dos_dedos := v = 1
+            caso AJ_TP_VELOCIDAD: tp_velocidad := v
+            caso AJ_TP_ESCRIBIR: tp_pausa := v
+            caso AJ_TP_ZONA: tp_zona := v
         fin
     fin
 
@@ -223,6 +249,8 @@ módulo Preferencias
             caso AJ_TAPIZ: devolver tapiz_de_ahora
             caso AJ_DOCK: devolver dock_de_ahora
             caso AJ_RED: devolver preferir_red
+            caso AJ_TP_HAY: devolver tp_tipo             ; (TOUCHPAD)
+            caso AJ_TP_GRABA: devolver quedan_grabando()
         fin
         devolver valores[k]
     fin
@@ -249,10 +277,62 @@ módulo Preferencias
         devolver actual.sello = SELLO_PANEL
     fin
 
+    ; (TOUCHPAD) lo grabado del touchpad, a TOUCHPAD.TXT (en la raíz de la
+    ; unidad del sistema, como ARRANQUE.TXT): los octetos escritos, o un error
+    función guarda_touchpad(): nat32
+        variable m, n, i, j: nat32
+        variable línea: arreglo [80] de byte
+        variable d: arreglo [2] de nat32
+        si del_sistema = NINGUNA o no escribible(del_sistema) entonces devolver NO_VALE fin
+        si quedan_grabando() <> 0 entonces devolver NO_VALE fin
+        m := abrir_archivo(del_sistema, "\\TOUCHPAD.TXT", PARA_CREAR)
+        si m >= PRIMER_ERROR entonces devolver m fin
+        cabecera_captura(texto_ini, 1536)
+        n := longitud(texto_ini)
+        escribir_archivo(m, texto_ini, n)
+        i := 0
+        texto_ini[0] := 0
+        j := 0
+        mientras línea_captura(i, línea, 80) > 0 hacer
+            concatenar(dirección(texto_ini[j]), línea)
+            j := j + longitud(línea)
+            si j > 1400 entonces
+                escribir_archivo(m, texto_ini, j)
+                n := n + j
+                j := 0
+                texto_ini[0] := 0
+            fin
+        fin
+        si j > 0 entonces
+            escribir_archivo(m, texto_ini, j)
+            n := n + j
+        fin
+        cerrar_archivo(m)
+        cap_hecha := falso
+        d[0] := cap_n
+        d[1] := nat32(unidades[del_sistema].letra)
+        Registro.apunta("ratón: grabados %u octetos del touchpad en %c:\\TOUCHPAD.TXT\n", d)
+        devolver n
+    fin
+
+    ; (TOUCHPAD) la clave AJ_TP_GRABA: grabar, guardar o inyectar
+    función graba(v: nat32): nat32
+        si v >= 1000 entonces
+            si tp_inyecta(v - 1000) entonces devolver 0 fin
+            devolver NO_VALE
+        fin
+        si v = 0 entonces devolver guarda_touchpad() fin
+        si v > 60 entonces devolver NO_VALE fin
+        graba_touchpad(v)
+        imprimir1("ratón: grabando lo que llega del touchpad, %u segundos (RATON /TOUCHPAD)\n", v)
+        devolver v
+    fin
+
     ; la llamada 174
     público función atender_ajuste(k: nat32, v: nat32): nat32
         si k = 0 o k >= MAX_AJ entonces devolver NO_VALE fin
         si v = SOLO_LEER entonces devolver ajuste(k) fin
+        si k = AJ_TP_GRABA entonces devolver graba(v) fin      ; (TOUCHPAD) cualquiera
         si no puede(k) entonces
             imprimir2("permisos: acceso denegado a cambiar el ajuste %u del Panel de control (%s)\n", k, nat32(actual.nombre))
             devolver DENEGADO
@@ -292,7 +372,7 @@ módulo Preferencias
         pon_ruta()
         m := abrir_archivo(del_sistema, ruta, PARA_LEER)
         si m >= PRIMER_ERROR entonces devolver 0 fin
-        n := leer_archivo(m, texto_ini, 1023)
+        n := leer_archivo(m, texto_ini, 1535)
         cerrar_archivo(m)
         si n >= PRIMER_ERROR entonces n := 0 fin
         texto_ini[n] := 0

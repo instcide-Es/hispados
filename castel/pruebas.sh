@@ -256,6 +256,11 @@
 #      a 800 x 600, ninguno en la barra ni en el dock (mira_iconos.py); organizar por
 #      nombre, tipo, tamaño y fecha; arrastrar; la cuadrícula, la automática, el teclado,
 #      ICONOS.INI; cambiar la medida en marcha; 47 a 640 x 480, en dos páginas; sin dock.
+#  50. (TOUCHPAD, SOLO=touchpad) El touchpad (pruebas_touchpad.sh): touchpad.cas con
+#      paquetes Synaptics hechos a mano (RATON /ANALIZA con corre32: mover, tocar, doble
+#      toque, arrastrar, el borde derecho, dos dedos, la palma, al escribir, descolocados);
+#      el ratón PS/2 de QEMU sigue igual (y RATON /TOUCHPAD lo graba); con «tp_simulado»,
+#      RATON /INYECTA baja y sube el Bloc y hace clic; Panel de control > Ratón > Touchpad.
 #  32. (MIRADOR, SOLO=mirador) El Mirador (MIRADOR.BIN): PNG, BMP, JPG, GIF
 #  41. (PLUMA32, SOLO=pluma) Pluma 2 (PLUMA.BIN, el procesador de textos de 32 bits en C
 #      portable: nucleo32/oficina; pruebas_pluma.sh): formatos, PDF, RTF, corrector, la
@@ -390,6 +395,7 @@
 #   SOLO=cuentas ./pruebas.sh     la primera y la 44 (CUENTAS32: Cuentas 2; pruebas_cuentas.sh)
 #   SOLO=pintura ./pruebas.sh     la primera y la 45 (PINTURA32: Pintura 2; pruebas_pintura.sh)
 #   SOLO=iconos ./pruebas.sh      la primera y la 47 (ICONOS: los iconos del tapiz; pruebas_iconos.sh)
+#   SOLO=touchpad ./pruebas.sh    la primera y la 50 (TOUCHPAD: el touchpad; pruebas_touchpad.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -452,6 +458,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_pintura.sh         # (PINTURA32) la parte 45, como parte_pintura
 . $AQUI/pruebas_cortes.sh          # (CORTES) la parte 37, como parte_cortes
 . $AQUI/pruebas_iconos.sh          # (ICONOS) la parte 47, como parte_iconos
+. $AQUI/pruebas_touchpad.sh        # (TOUCHPAD) la parte 50, como parte_touchpad
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -474,7 +481,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|touchpad) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -5840,6 +5847,8 @@ if parte08 pintura; then parte_pintura; else echo "  (SOLO=${SOLO08:-$SOLO}: sin
 if parte08 cortes; then parte_cortes; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los cortes de la red)"; fi   # (CORTES)
 # ------------------------- 47. (ICONOS) los iconos del tapiz (pruebas_iconos.sh)
 if parte08 iconos; then parte_iconos; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los iconos del tapiz)"; fi
+# ------------------------- 50. (TOUCHPAD) el touchpad (pruebas_touchpad.sh)
+if parte08 touchpad; then parte_touchpad; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el touchpad)"; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------- 35. (BLOC) el Bloc de notas 1.0
