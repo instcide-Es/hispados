@@ -706,6 +706,33 @@ int elige_archivo(const char *titulo, char *ruta, u32 cabe, int para_guardar, co
 					cur = -1;
 				} else if (foco == 1)
 					campo_tecla(&nom, s.a, s.b);
+				else if (foco == 0 && s.a > ' ' && s.a < 0x80) {
+					/* buscar tecleando: lo que empieza por lo escrito (en un segundo) */
+					static char bus[40];
+					static u32 cuando;
+					u32 bl;
+					int j;
+
+					if ((u32)(so_tics() - cuando) > so_hz())
+						bus[0] = 0;
+					cuando = so_tics();
+					bl = (u32)strlen(bus);
+					if (bl + 1 < sizeof bus) {
+						bus[bl] = (char)(s.a >= 'a' && s.a <= 'z' ? s.a - 32 : s.a);
+						bus[bl + 1] = 0;
+					}
+					for (j = 0; j < l.n; j++) {
+						u32 q;
+
+						for (q = 0; bus[q] && l.nombre[j][q] &&
+							    (l.nombre[j][q] >= 'a' && l.nombre[j][q] <= 'z' ? l.nombre[j][q] - 32 : l.nombre[j][q]) == bus[q]; q++)
+							;
+						if (!bus[q] && l.carpeta[j] < 2) {
+							cur = j;
+							break;
+						}
+					}
+				}
 			}
 			if (abre == 1 && cur < 0) {
 				/* subir */
@@ -897,18 +924,19 @@ int asistente_cuenta(int ic)
 			fy += 22;
 		}
 		for (i = primero; i <= ultimo; i++) {
-			int ancho = i == AC_PE || i == AC_PS ? 90 : an - 32 - 230;
-			int cx = i == AC_PE || i == AC_PS ? x + an - 16 - 90 : x + 230;
+			int ancho = an - 32 - 230, cx = x + 230;
 
-			if (i == AC_PE || i == AC_PS) {
-				texto(x + an - 16 - 90 - 64, fy - 30 + 4, rotulo[i], 8, C_TINTA);
-				campo_pinta(&f[i], cx, fy - 30, ancho, foco == i - primero);
-				zona(300 + i, cx, fy - 30, ancho, 24);
-				continue;
-			}
+			if (i == AC_PE || i == AC_PS)
+				continue;	/* (van en el renglón de su servidor) */
 			texto(x + 16, fy + 4, rotulo[i], 26, C_TINTA);
-			if (i == AC_ENTRADA || i == AC_SALIDA)
+			if (i == AC_ENTRADA || i == AC_SALIDA) {
+				int p = i + 1;
+
 				ancho -= 170;
+				texto(cx + ancho + 12, fy + 4, "Puerto:", 8, C_TINTA);
+				campo_pinta(&f[p], x + an - 16 - 90, fy, 90, foco == p - primero);
+				zona(300 + p, x + an - 16 - 90, fy, 90, 24);
+			}
 			campo_pinta(&f[i], cx, fy, ancho, foco == i - primero);
 			zona(300 + i, cx, fy, ancho, 24);
 			fy += 30;
@@ -1068,7 +1096,7 @@ int asistente_cuenta(int ic)
 				me = c.modo_entrada;
 				ms = c.modo_salida;
 				paso = 1;
-				foco = nf;
+				foco = AC_USUARIO - AC_ENTRADA + 1;	/* («Probar y guardar») */
 				so_apunta("asistente: %s: %s", co, ac.encontrada ? ac.de_donde : "no encontrado");
 				continue;
 			}

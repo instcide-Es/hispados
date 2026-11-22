@@ -1,0 +1,38 @@
+Correo 1.0 - el cliente de correo de Hispa-Pentium
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+Correo lee y envía el correo de una o varias cuentas:
+
+- IMAP (con IDLE: el correo nuevo llega solo), o POP3; y SMTP para enviar.
+- Siempre cifrado: TLS desde el principio (993, 995, 465) o STARTTLS (143,
+  110, 587), con el certificado y el nombre del servidor comprobados por el
+  servicio TLS del sistema. La contraseña nunca va sin cifrar; «Permitir sin
+  cifrar» solo vale para un servidor de la red de casa (192.168..., 10...,
+  .local), y avisa en rojo.
+- Los servidores se buscan solos (los proveedores conocidos, la
+  configuración del dominio, la base de datos de Mozilla, el DNS) y, si no,
+  se escriben a mano.
+- Gmail, Outlook, Yahoo e iCloud piden una «contraseña de aplicación» (se
+  hace en la web de la cuenta, en Seguridad). Entrar con OAuth2 llegará más
+  adelante.
+- Lo bajado se guarda en el equipo para leerlo sin red, en la carpeta del
+  correo (\HISPA\CORREO, que solo lee Correo; o la carpeta del usuario).
+- El HTML se enseña sin JavaScript y sin las imágenes de fuera (con «Mostrar
+  imágenes», si se quiere): así no se sabe que se ha leído.
+- Los adjuntos pasan por Escudo antes de abrirse; un programa se pregunta.
+- Avisa si el remitente que se ve no es el de verdad y si un enlace dice una
+  dirección y lleva a otra.
+- La libreta de direcciones (vCard: importar y exportar), los borradores en
+  el servidor, lo enviado en «Enviados», la firma de cada cuenta.
+
+Teclas: F5 recibir; Ctrl+N escribir; Ctrl+R responder; Ctrl+T responder a
+todos; Ctrl+L reenviar; Supr borrar (a la papelera); Ctrl+K mover; Ctrl+F
+buscar; S destacar; M leído o no; Tab, de un panel a otro. Al escribir:
+Ctrl+E (o Ctrl+Intro) enviar, Ctrl+S guardar el borrador, Esc cerrar.
+
+En la Consola: CORREO /ORDEN (cuentas, carpetas, al-dia, lista, lee, envia,
+busca, mueve, marca); CORREO /BANDEJA (lo lanza el escritorio: avisa del
+correo nuevo abajo a la derecha).
+
+Lleva stb_image (Sean Barrett, dominio público o MIT) para las imágenes de
+los mensajes.

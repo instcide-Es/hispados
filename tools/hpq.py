@@ -114,7 +114,7 @@ TIPOS = [
 TIPO_POR_NOMBRE = {
     'base': 'sistema', 'paquetes': 'sistema', 'equipo': 'sistema', 'hvprun': 'sistema',
     'red': 'internet', 'tls': 'internet', 'navega': 'internet', 'ssh': 'internet',
-    'tailscal': 'internet', 'wifi': 'internet',
+    'tailscal': 'internet', 'wifi': 'internet', 'correo': 'internet',  # (CORREO)
     'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina',
     'consola': 'herramientas', 'accesori': 'herramientas', 'comprim': 'herramientas',
     'ejemplos': 'desarrollo',
@@ -458,6 +458,12 @@ OPCIONALES = [
     ('mirador', '1.0', 'El Mirador: ver imágenes (BMP, PNG, JPG, GIF animados, ICO...), girar, diapositivas, pantalla completa y fondo de escritorio', 'base >= 0.8.6', [
         ('BIN/MIRADOR.BIN', r'\HISPA\MIRADOR.BIN'), ('MIRADOR.TXT', r'\HISPA\MIRADOR.TXT'),
         ('MIRADOR.MNU', r'\HISPA\MENU\MIRADOR.MNU'), ('MIRADOR.ICP', r'\HISPA\MENU\MIRADOR.ICP')]),
+    # (CORREO) Correo, el cliente de correo (castel/nucleo32/correo/paquete.sh; tipo «internet»). El
+    # secreto de \HISPA\CORREO y el STARTTLS llegan con el base y el tls de la rama correo
+    ('correo', '1.0', 'Correo: el cliente de correo (IMAP, POP3 y SMTP, siempre cifrado; HTML sin scripts, adjuntos por Escudo, sin conexión)',
+     'base >= 0.8.6, red >= 0.8.1, tls >= 0.8.5', [
+        ('CORREO.BIN', r'\HISPA\CORREO.BIN'), ('CORREO.TXT', r'\HISPA\CORREO.TXT'),
+        ('CORREO.MNU', r'\HISPA\MENU\CORREO.MNU'), ('CORREO.ICP', r'\HISPA\MENU\CORREO.ICP')]),
 ]
 
 # (0.8.6) los que el catálogo marca del sistema («sistema=nombre»): los que

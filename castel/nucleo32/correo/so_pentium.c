@@ -241,10 +241,15 @@ int so_carpeta_datos(char *d, int cabe)
 		}
 	}
 	snprintf(t, sizeof t, "%c:\\HISPA", unidad_sis());
-	if (so_existe(t, &c) && c)
+	if (so_existe(t, &c) && c) {
 		snprintf(d, (size_t)cabe, "%c:\\HISPA\\CORREO", unidad_sis());
-	else
-		snprintf(d, (size_t)cabe, "%c:\\CORREO", unidad_sis());
+		if (!so_haz_carpeta(d))
+			return 0;
+		/* (un núcleo de antes de la rama correo: sin el sello de CORREO.BIN no
+		 * se escribe en \HISPA; entonces, en la raíz, y sin el secreto) */
+		so_apunta("sin el sello de Correo (el paquete base es de antes): lo guardado va en %c:\\CORREO, y no es secreto", unidad_sis());
+	}
+	snprintf(d, (size_t)cabe, "%c:\\CORREO", unidad_sis());
 	return so_haz_carpeta(d);
 }
 
@@ -388,10 +393,10 @@ void so_apunta(const char *f, ...)
 	va_start(a, f);
 	vsnprintf(t, sizeof t, f, a);
 	va_end(a);
-	n = snprintf(u, sizeof u, "correo: %s\n", t);
-	if (n > (int)sizeof u - 1)
-		n = (int)sizeof u - 1;
-	sc(SC_SERIE, (u32)u, (u32)n, 0);
+	snprintf(u, sizeof u, "correo: %s\n", t);
+	/* (en la 437, como lo de los demás: las pruebas lo pasan a UTF-8) */
+	n = (int)utf8_a_437(u, (u32)strlen(u), t, sizeof t);
+	sc(SC_SERIE, (u32)t, (u32)n, 0);
 }
 
 void so_dice(const char *t)

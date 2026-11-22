@@ -4687,6 +4687,7 @@ primer renglón que casa. **PAQUETES e INSTALAR escriben en toda la zona**
 | `CLICGEST.SES` (la sesión guardada) | CLICGEST | sí |
 | `CLICGEST.ANC` | CLICGEST | |
 | `ASOCIA.TXT` | EQUIPO (Mi equipo) | |
+| `CORREO\` (las cuentas, sus contraseñas guardadas y los mensajes; rama `correo`, «(CORREO)») | CORREO | sí |
 | los programas del sistema (`ORDENES.BIN`, `RED.BIN`, `PAQUETES.BIN`... también en la raíz) y `HISPA\` en la raíz | nadie | |
 
 Los sellos (`Permisos.SELLO_...`) son los de `PAQUETES.BIN`, `ACTUALIZ.BIN`,
@@ -6010,6 +6011,210 @@ vueltas sin un fallo). En Hispa-Pentium: las órdenes en el intérprete (lo
 sacado, igual octeto a octeto que lo de Linux, y el ZIP hecho allí, bueno para
 el `unzip` de Linux) y la ventana desde el explorador, con capturas; y el
 Mirador con sus seis imágenes de prueba, el tapiz y otro arranque.
+
+## 14 quaterdecies. Correo (CORREO.BIN, rama correo)
+
+*22/11/2026. Lo pidió Carlos («ya que tenemos conexión segura, podemos empezar
+con el cliente de correo»). Todo lo nuevo, en `castel/nucleo32/correo/`; lo
+cambiado fuera lleva la marca «(CORREO)»: `tls/tls.c` (STARTTLS),
+`permisos.cas` (el sello y el secreto), `exoper.cas` (los .EML),
+`escritorio.cas` (el aviso al arrancar), `tools/hpq.py` (el paquete) y
+`pruebas.sh` (la parte 42).*
+
+| | |
+|---|---|
+| ![El asistente: los servidores, encontrados solos](pentium/correo/asistente.png) | ![Tres paneles a 1024 x 600 (el HP Mini)](pentium/correo/tres-paneles.png) |
+| ![La suplantación: «[!] Cuidado»](pentium/correo/suplantacion.png) | ![Un adjunto con EICAR: Escudo no lo deja abrir](pentium/correo/escudo.png) |
+| ![Escribir: la libreta completa «lu»](pentium/correo/escribir.png) | ![Sin red, a 800 x 600: dos paneles y lo guardado](pentium/correo/sin-red.png) |
+
+**Qué hace.** Varias cuentas **IMAP4rev1** (con IDLE —el correo nuevo llega
+solo—, UIDPLUS, MOVE, SPECIAL-USE y LITERAL+ si el servidor los tiene) o
+**POP3**, y **SMTP** para enviar (AUTH PLAIN o LOGIN). **Siempre cifrado**:
+TLS desde el principio (993, 995, 465) o **STARTTLS** (143, 110, 587), con el
+certificado y el nombre comprobados por `TLS.BIN` y su almacén de autoridades;
+si no vale, se dice por qué (el texto de TLS.BIN) y **la contraseña no sale**.
+«Permitir sin cifrar» solo para un servidor de la red de casa (10.x, 192.168.x,
+172.16-31.x, 127.x, .local, .lan), con su aviso rojo y con «[!]». Los
+servidores se **buscan solos**: los proveedores de siempre (Gmail, Outlook,
+Yahoo, iCloud, GMX, AOL, Zoho, Telefónica), el autoconfig del dominio
+(`autoconfig.dominio` y su `.well-known`), la **ISPDB de Mozilla** (la de
+Thunderbird; `ispdb=` en `CORREO.INI` la cambia), los **SRV** del DNS (RFC
+6186/8314: `_imaps._tcp`, `_submissions._tcp`, por UDP con el DNS del equipo) y,
+si no, probando `imap.`, `mail.` y el dominio (993/143) y `smtp.`, `mail.`
+(465/587). El asistente explica que **Gmail, Outlook, Yahoo e iCloud piden una
+«contraseña de aplicación»**; **OAuth2 queda para más adelante**.
+
+- **Los mensajes por dentro** (`mime.c`, `juegos.c`, `construye.c`; el agente
+  de esta rama): multipart mixed/alternative/related/digest, message/rfc822,
+  base64, quoted-printable y uuencode, cabeceras RFC 2047 (también partidas,
+  con lenguaje, mal hechas o con 8 bits crudos), parámetros RFC 2231 (con sus
+  trozos y su juego), direcciones con comillas, comentarios y grupos, fechas
+  raras; **30 juegos de caracteres** (UTF-8, ISO-8859-1 a 16, Windows-1250 a
+  1258, IBM437, CP850, KOI8-R/U, Mac; como los navegadores, el latin1 se lee
+  como 1252); y hacer los mensajes (RFC 5322, CRLF, el texto en QP, los
+  adjuntos en base64, los nombres en RFC 2231 y RFC 2047).
+- **El HTML, seguro** (`html.c`): **sin JavaScript** (los `<script>`, los
+  `on...=`, `javascript:`, `vbscript:`, `data:text/html` y los `<iframe>`
+  fuera), **sin las imágenes de fuera** hasta pulsar «Mostrar imágenes» (así el
+  píxel de rastreo no dice que se ha leído; los 1x1, los ocultos, ni así); las
+  de dentro (`cid:`) se pintan (stb_image). Es un conversor propio a «texto con
+  formato» (negrita, cursiva, títulos, listas, citas, tablas, enlaces,
+  imágenes), no el motor de NetSurf: NetSurf con su CSS es mucho para un
+  Atom con poca memoria, y así no hay ni una línea de JavaScript que
+  desactivar. El texto: las citas con «>», `format=flowed`, las direcciones
+  como enlaces.
+- **La seguridad**: el remitente que no cuadra («Banco Santander
+  <soporte@bancosantander.es>» <alerta@malo.ejemplo>, varios From, un
+  Reply-To de otro dominio) sale en un recuadro con **«[!] Cuidado:»** y su
+  porqué, y con un dibujo de aviso en la lista; **un enlace que dice una
+  dirección y lleva a otra** se avisa arriba y, al pulsarlo, se pregunta
+  enseñando adónde va de verdad (también `https://banco.es@malo.ejemplo/` y las
+  IP); un enlace se abre en el Navegador solo tras preguntar. **Los adjuntos
+  pasan por Escudo** antes de abrirse (`ESCUDO /DESCARGA`: si encuentra algo,
+  su cuadro —cuarentena, borrarlo o dejarlo— y no se abre); un programa
+  (.EXE, .COM, .BAT, .SCR, .JS, .VBS, .MSI, .LNK...) se pregunta además en
+  rojo; sin Escudo instalado, se avisa. Se sacan a `X:\CORREO.TMP` (o
+  `C:\CORREO.TMP`) con un nombre de 8+3 y se abren con lo suyo (`EQUIPO
+  /ABRIR`). Los nombres con carpetas (`../../etc/passwd`) se quedan sin ellas.
+- **La ventana** (`ventana.c`, `vista.c`, `redacta.c`, `dialogos.c`,
+  `iconos.c`; en C sobre las llamadas 32 a 40, con los colores y la forma de
+  `controles.cas`): **tres paneles** —las carpetas de cada cuenta (los sin leer
+  **en negrita y con su número**; la cuenta conectada, con su candado), la
+  lista y el mensaje— que se adaptan al ancho (a 1024 x 600, el HP Mini: 180 +
+  400 + lo demás) y, **por debajo de 900 puntos, dos**: la lista o el mensaje,
+  con «< Volver a la lista». La lista: columnas De, Asunto, Fecha y Tamaño
+  (por debajo de 560 puntos, sin el tamaño), **ordenar** pulsando la cabecera
+  (con su ▲/▼ dibujado), **hilos** opcionales (por In-Reply-To y References;
+  cada hilo por lo más nuevo), sin leer con un sobre y en negrita, **destacado
+  con una estrella** (que se pulsa), adjuntos con un clip, respondido con su
+  flecha; **nada solo con el color**. **Buscar** en el servidor (UID SEARCH
+  TEXT, con CHARSET UTF-8 y literal si lleva tildes) y, sin red, en lo bajado
+  (asunto, remitente y el texto, sin tildes ni mayúsculas). Marcar leído,
+  destacar, **mover** (UID MOVE, o COPY + \Deleted + UID EXPUNGE), **borrar a la
+  papelera** (y en la papelera, del todo, preguntando), varios a la vez
+  (Control y Mayús). **Escribir**: Para, CC y CCO con el **autocompletado de la
+  libreta** (por el nombre o la dirección, sin tildes, primero los más usados),
+  asunto, el texto (cursor, seleccionar, copiar y pegar con el portapapeles del
+  sistema), **adjuntar** (un cuadro con las unidades y las carpetas, que busca
+  al teclear), la **firma** de la cuenta, **responder** (con «Re:», la cita «> »
+  y el In-Reply-To/References), **a todos** (sin uno mismo), **reenviar** (con
+  sus adjuntos), y **HTML sencillo** si se quiere (*negrita*, _cursiva_,
+  listas con «- », [enlaces](https://...)); **borradores en el servidor**
+  (APPEND a Borradores con \Draft; «Seguir el borrador») y lo enviado en
+  **Enviados**. Arrastrar desde Mi equipo, aún no: la principal no tiene
+  `EV_SOLTADO` (está el botón «Adjuntar...»). La **libreta** (`libreta.c`,
+  `vcard.c`): nuevo, cambiar, quitar, **importar y exportar vCard** (2.1, 3.0
+  y 4.0; escribe 3.0). Los **avisos**: arriba, «Correo nuevo: N mensajes» (y en
+  el título), y con el escritorio, **`CORREO /BANDEJA`** (lo lanza el
+  escritorio al arrancar un sistema instalado; si `CORREO.INI` dice
+  `avisar=no` o no hay cuentas con la contraseña guardada, acaba): mira cada
+  tantos minutos (STATUS, sin tocar lo guardado) y saca una ventanita abajo a
+  la derecha con «Leerlo» y «Ahora no», como `ACTUALIZ /BANDEJA`.
+- **Sin conexión** (`almacen.c`): lo bajado se guarda en la carpeta del correo
+  —`\USUARIOS\<USUARIO>\CORREO` si hay usuarios (la llamada 200 de la rama
+  `usuarios`), y si no **`\HISPA\CORREO`** (o `\CORREO` en la memoria de
+  arranque), que es **un secreto de CORREO.BIN** (`permisos.cas`: el sello
+  `SELLO_CORREO` = 25 y la regla `CORREO\`): **ni ORDENES, ni Mi equipo, ni
+  otro programa lo leen** (las contraseñas guardadas tampoco). Con un `base`
+  de antes de esta rama no hay sello: entonces va en la raíz, sin secreto, y se
+  apunta. Por cuenta, `Cn`; por carpeta, `Fnnn` con **`INDICE.IDX`** (las fichas
+  de 192 octetos por orden de UID: remitente, asunto, fecha, tamaño,
+  banderas, dónde está el mensaje, los resúmenes del hilo; se escribe solo lo
+  cambiado) y **`CUERPOS.DAT`** (los mensajes bajados, uno detrás de otro; lo
+  borrado se quita al compactar): **50.000 mensajes son 9 MB de índice y no
+  50.000 archivos en una carpeta FAT**. Poner al día una carpeta: SELECT, UID
+  SEARCH ALL (lo que ya no está se quita), las banderas de lo que se tenía (de
+  20.000 para arriba, de los 2.000 últimos) y **las fichas que faltan de las más
+  nuevas a las más viejas, en tramos de 300**, guardando y repintando detrás de
+  cada tramo. Los cambios hechos sin red (leído, destacado) se suben al
+  conectar; lo que se envía sin red queda en la **bandeja de salida**
+  (`Cn\SALIDA`) y sale al conectar. Topes en `CORREO.INI`: lo más grande que
+  se baja (25 MB), lo más que se guarda por carpeta, cada cuántos minutos se
+  mira.
+
+**STARTTLS en TLS.BIN («(CORREO)» en `tls.c`).** La orden de conectar lleva en
+`cab[4]` el protocolo (1 IMAP, 2 SMTP, 3 POP3): el servicio conecta, espera el
+saludo, manda `STARTTLS` (en SMTP, tras su `EHLO`; en POP3, `STLS`) y, si el
+servidor dice que sí, sigue con el apretón de manos de siempre. Lo plano lo hace
+el servicio y no el programa: **el programa no ve nunca la conexión sin cifrar**
+y no puede mandar nada por ella. Si el servidor no ofrece STARTTLS, el error
+lleva la marca `0x5354` en `cab[1]` (Correo lo dice como tal: «la conexión
+iría sin cifrar»), y si manda algo de más detrás de su «sí» (la inyección de
+órdenes de antes del cifrado), no se sigue.
+
+**Cómo está hecho** (como Hispa-PDF: un núcleo en C99 portable que se compila
+tal cual en Linux —las pruebas con ASan— y en Hispa-64):
+
+```
+castel/nucleo32/correo/
+  so.h, ui.h        lo único que se pide al sistema (archivos, tiempo, red, programas) y a la ventana
+  so_pentium.c      Hispa-Pentium: la int 0x80, RED.BIN (90), TLS.BIN (99), las ventanas (32-40, 80)
+  libc_pentium.c    la memoria (la de Hispa-PDF) y lo poco de la biblioteca de C (snprintf con «%.*s»)
+  so_anfitrion.c    Linux: POSIX y OpenSSL, con el STARTTLS como el de TLS.BIN (el modelo para Hispa-64)
+  red.c             la conexión con su búfer (renglones con tope, literales), HTTP pequeño, SRV del DNS
+  imap.c            IMAP4rev1 (respuestas enteras con sus literales, un analizador sin recursión, UTF-7)
+  smtp.c, pop3.c    enviar (relleno de puntos) y POP3 (UIDL, RETR, DELE)
+  autocfg.c         los servidores de una dirección; cuentas.c: CUENTAS.INI, CORREO.INI
+  almacen.c         INDICE.IDX y CUERPOS.DAT; motor.c: poner al día, bajar, mover, enviar, borradores, IDLE, POP3
+  mime.c, juegos.c, construye.c, html.c, vcard.c, interno.h, juegos_tablas.h (haz_juegos.py)
+  libreta.c, imagenes.c (stb_image), orden.c (CORREO /ORDEN), principal.c
+  ventana.c, vista.c, redacta.c, dialogos.c, iconos.c, correo32.png
+  hacer.sh, anfitrion.sh, paquete.sh, FUENTES, LEEME.txt
+  pruebas/          servidor_correo.py, haz_buzones.py, prueba_servidor.py, pruebas_mime.sh,
+                    prueba_mime.c, so_minimo.c, fuzz.py, fuzz_imap.py, compara_email.py, casos/
+```
+
+**Lo que se aguanta** (lo que dice el servidor es hostil): un renglón de más de
+1 MB o un literal de más del tope (25 MB) cortan la conexión; las respuestas se
+miran con un analizador sin recursión (los paréntesis anidados, con su
+cuenta); MIME con sus topes (512 partes, 24 niveles, 256 cabeceras, 64 MB), sin
+recursión, en tiempo lineal (un mensaje de 2 MB o un HTML de 1 MB, en décimas de
+segundo con ASan); los registros del DNS, mirando cada octeto (y los punteros
+que se apuntan, con tope).
+
+**Las órdenes** (en la Consola; las usan las pruebas): `CORREO /ORDEN cuenta
+CORREO CLAVE [ENTRADA PUERTO MODO SALIDA PUERTO MODO] [/POP3] [/SINCIFRAR]`
+(sin los servidores, los busca), `autocfg`, `cuentas`, `carpetas [N]`, `al-dia
+[N] [CARPETA]`, `lista`, `lee UID`, `envia PARA ASUNTO TEXTO [ADJUNTO...]`,
+`busca TEXTO`, `mueve UID CARPETA`, `marca UID leido|noleido|destacado`.
+Teclas de la ventana: F5 recibir, Ctrl+N escribir, Ctrl+R responder, Ctrl+T a
+todos, Ctrl+L reenviar, Supr borrar, Ctrl+K mover, Ctrl+F buscar, S destacar, M
+leído; al escribir, Ctrl+E (o Ctrl+Intro) enviar, Ctrl+S guardar el borrador,
+Ctrl+B negrita (con HTML).
+
+**Medidas.** `CORREO.BIN` mide 333 KB. MEDIDAS_ATOM
+
+**El paquete** `correo` 1.0 (OPCIONALES de `tools/hpq.py`, tipo
+`internet`): `\HISPA\CORREO.BIN`, `\HISPA\CORREO.TXT` (el LEEME, con la
+licencia de stb_image) y `\HISPA\MENU\CORREO.MNU` y `.ICP` (con su icono, un
+sobre con un sello verde; también en el escritorio). Lo hace
+`castel/nucleo32/correo/paquete.sh SALIDA`. Necesita `base >= 0.8.6`, `red` y
+`tls`; **el secreto de `\HISPA\CORREO` y el STARTTLS llegan con el `base` y el
+`tls` de esta rama** (al publicarlos, subir sus versiones y que `correo` los
+pida): con los de antes, Correo va igual por TLS en 993/995/465, guarda en la
+raíz y STARTTLS no se puede.
+
+**Probarlo**: `SOLO=correo castel/pruebas.sh` (la parte 42,
+`castel/pruebas_correo.sh`, unos 15 minutos). **No usa ningún servidor ni
+cuenta de verdad**: el servidor es el de pruebas en Python
+(`pruebas/servidor_correo.py`: IMAP4rev1 con IDLE, UIDPLUS, MOVE,
+SPECIAL-USE; SMTP con STARTTLS y AUTH; POP3 con STLS; la autoconfiguración por
+HTTPS; su raíz de prueba en `\RAICES` del disco; puertos para lo que no se debe
+dejar: sin STARTTLS, de otro nombre, de una raíz que no conoce nadie), con
+los buzones de `haz_buzones.py` (49 casos en la entrada: juegos de caracteres,
+RFC 2047/2231, HTML con scripts, imágenes de fuera y píxel de rastreo, cid:,
+enlace engañoso, suplantación, adjuntos con EICAR, PDF, PNG, ZIP, reenviados,
+hilos, fechas raras, malformados, uno de 2 MB; y un buzón de 10.000 —o 50.000—
+hecho al vuelo). RESULTADO_PRUEBAS
+
+**Lo que falta**: OAuth2 (Gmail y Microsoft lo piden cada vez más); arrastrar
+adjuntos desde Mi equipo (cuando la principal tenga `EV_SOLTADO`); S/MIME y
+OpenPGP; los juegos de caracteres de varios octetos (gb2312, big5, shift_jis,
+iso-2022-jp, utf-16: se leen como UTF-8 o 1252); una imagen dentro de un
+enlace no lleva el enlace; carpetas nuevas, renombrar y borrar carpetas del
+servidor; las reglas (filtros); el HTML con su CSS de verdad (para eso, «Abrir
+en el Navegador» sin scripts); nombres largos al guardar adjuntos (el núcleo,
+8+3); las cuentas de Exchange (EWS) y JMAP.
 
 ## 15. Las pruebas
 

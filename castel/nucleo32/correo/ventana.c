@@ -576,7 +576,7 @@ static void medidas(void)
 		x_men = x_lis;
 		an_men = an_lis;
 	} else {
-		an_lis = (van - x_lis) * 45 / 100;
+		an_lis = (van - x_lis) * 48 / 100;
 		if (an_lis < 360)
 			an_lis = 360;
 		x_men = x_lis + an_lis + 2;
@@ -642,8 +642,13 @@ static void pinta_carpetas(void)
 			if (el)
 				negrita(x_car + 2, y + 2, ">", 1, C_PAPEL);
 			if (k->no_leidos) {
-				snprintf(t, sizeof t, "%s (%u)", n, (unsigned)k->no_leidos);
-				negrita(sx, y + 2, t, (x_car + an_car - sx - 4) / LA, tinta);
+				/* el nombre en negrita y, a la derecha, el número entre paréntesis */
+				int w;
+
+				snprintf(t, sizeof t, "(%u)", (unsigned)k->no_leidos);
+				w = ancho_texto(t);
+				negrita(x_car + an_car - w - 6, y + 2, t, 12, tinta);
+				negrita(sx, y + 2, n, (x_car + an_car - sx - w - 12) / LA, tinta);
 			} else
 				texto(sx, y + 2, n, (x_car + an_car - sx - 4) / LA, tinta);
 			zona(1100 + i, x_car, y, an_car, FILA);

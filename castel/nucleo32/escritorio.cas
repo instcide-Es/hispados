@@ -3443,6 +3443,9 @@ módulo Escritorio
                 si t <> nulo entonces t.padre := 0 fin
                 t := cargar_archivo("\\HISPA\\TAILSCAL.BIN", "/ARRANQUE", an)
                 si t <> nulo entonces t.padre := 0 fin
+                ; (CORREO) el aviso del correo nuevo, si el usuario lo quiere (CORREO.INI: si no, acaba enseguida)
+                t := cargar_archivo("\\HISPA\\CORREO.BIN", "/BANDEJA", an)
+                si t <> nulo entonces t.padre := 0 fin
             fin
         fin
         mira_pantalla_guardada()      ; (EDID) también desde la memoria USB

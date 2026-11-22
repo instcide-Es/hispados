@@ -839,7 +839,7 @@ módulo Exoper
     ; paquete «pdf»: \HISPA\HISPAPDF.BIN): si están instalados, sus clases se
     ; abren con ellos, también donde ASOCIA.TXT dice lo de fábrica de antes
     ; (el Mirador de la oficina); si no lo están, con lo de siempre
-    variable de_paquetes: arreglo [400] de byte = "PDF=\\HISPAPDF.BIN|%1\r\nZIP=\\COMPRIM.BIN|%1\r\nBMP=\\MIRADOR.BIN|%1\r\nPNG=\\MIRADOR.BIN|%1\r\nJPG=\\MIRADOR.BIN|%1\r\nJPE=\\MIRADOR.BIN|%1\r\nGIF=\\MIRADOR.BIN|%1\r\nICO=\\MIRADOR.BIN|%1\r\nTGA=\\MIRADOR.BIN|%1\r\nPSD=\\MIRADOR.BIN|%1\r\nPPM=\\MIRADOR.BIN|%1\r\nPGM=\\MIRADOR.BIN|%1\r\nPNM=\\MIRADOR.BIN|%1\r\n"
+    variable de_paquetes: arreglo [400] de byte = "PDF=\\HISPAPDF.BIN|%1\r\nZIP=\\COMPRIM.BIN|%1\r\nBMP=\\MIRADOR.BIN|%1\r\nPNG=\\MIRADOR.BIN|%1\r\nJPG=\\MIRADOR.BIN|%1\r\nJPE=\\MIRADOR.BIN|%1\r\nGIF=\\MIRADOR.BIN|%1\r\nICO=\\MIRADOR.BIN|%1\r\nTGA=\\MIRADOR.BIN|%1\r\nPSD=\\MIRADOR.BIN|%1\r\nPPM=\\MIRADOR.BIN|%1\r\nPGM=\\MIRADOR.BIN|%1\r\nPNM=\\MIRADOR.BIN|%1\r\nEML=\\CORREO.BIN|%1\r\n"  ; (CORREO) los .EML, con Correo
 
     ; ¿está ese programa (en la unidad del sistema o en su \HISPA)?
     función hay_programa(prog: puntero a byte): bool
