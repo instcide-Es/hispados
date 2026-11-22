@@ -273,14 +273,15 @@ MEMORIA=64 DISCO=$K/w.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh $K/
 tr -d '\r' < $K/w.sal > $K/w.txt
 S=$K/w.txt
 mira "el punto de acceso desaparece: WIFI.BIN lo nota (8 s sin oírlo) y RED.BIN se queda sin enlace (lo que hubiera, cortado)" \
-  "^wifi: .*SIM: el punto de acceso desaparece 12 s; DHCP da la 192\.168\.77\.11$" "^wifi: .*802\.11: se ha perdido la red (no se oye al punto de acceso)$" "^red: enlace: no (el Wi-Fi no está conectado)$"
+  "^wifi: .*SIM: el punto de acceso desaparece 12 s; DHCP da la 192\.168\.77\.11$" "wifi: .*802\.11: se ha perdido la red (no se oye al punto de acceso)$" "red: enlace: no (el Wi-Fi no está conectado)$"
 mira "al volver, WIFI.BIN se conecta solo y se lo dice a RED.BIN: DHCP otra vez, con la IP, la puerta y el DNS nuevos; y lo nuevo (PING) va" \
   "^red: DHCP: IP 192\.168\.77\.11, máscara 255\.255\.255\.0, puerta 192\.168\.77\.1, DNS 192\.168\.77\.1$" "^  Dirección IP  . . . . : 192\.168\.77\.11$" \
   "^    Paquetes: enviados = 2, recibidos = 2, perdidos = 0 (0% perdidos)$"
 mira "la IP cambia sin que se vaya el enlace (IPCONFIG /RENOVAR, y DHCP da otra): RED.BIN lo ve y corta lo de antes; lo nuevo va" \
   "^red: DHCP: la red ha cambiado (otra IP u otra puerta de enlace): las conexiones de antes se cortan$" "^red: DHCP: IP 192\.168\.77\.10," "^  Dirección IP  . . . . : 192\.168\.77\.10$"
-if ! grep -q "excepción\|\*\*\*" $K/d1.sal $K/d2.sal $K/s3.sal $K/s4.sal $K/s5.sal $K/s6.sal $K/s7.sal $K/w.sal; then ok "ni una excepción del núcleo en toda la parte"
-else ko "hay excepciones:"; grep -h "excepción\|\*\*\*" $K/*.sal | head -3 | sed 's/^/        /'; fi
+# (la contraseña del Wi-Fi sale con asteriscos: «\*\*\*» solo al principio de la línea)
+if ! grep -q "excepción\|^\*\*\*" $K/d1.sal $K/d2.sal $K/s3.sal $K/s4.sal $K/s5.sal $K/s6.sal $K/s7.sal $K/w.sal; then ok "ni una excepción del núcleo en toda la parte"
+else ko "hay excepciones:"; grep -h "excepción\|^\*\*\*" $K/*.sal | head -3 | sed 's/^/        /'; fi
 [ -n "${GUARDA_CAPTURAS:-}" ] && mkdir -p "$GUARDA_CAPTURAS" && cp $G/k[1-6].ppm "$GUARDA_CAPTURAS/"
 kill $SPID 2> /dev/null; wait $SPID 2> /dev/null
 SPID=

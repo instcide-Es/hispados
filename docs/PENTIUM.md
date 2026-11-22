@@ -8949,6 +8949,15 @@ eco y un cliente de aquí (REDUDP, `tests/juegos/eco_udp.py`), y el sonido
 grabado (SONJ: DirectSound sin cortes aunque el programa no haga nada, waveOut,
 el CD por MCI).
 
+**(CORTES) Los cortes de la red** (la parte 37, `SOLO=cortes`,
+`castel/pruebas_cortes.sh`, con `nucleo32/servidor_cortes.py`): DESCARGAR con
+el servidor que cierra, corta, calla o no deja seguir y con el enlace caído a
+mitad (sigue desde donde iba, con `Range`); TCP con el camino muerto
+(keepalive); PAQUETES con el enlace caído; «Cancelar» en menos de 2 s y
+«Reiniciar» en plena descarga en la ventana; «Forzar el cierre» de un programa
+colgado al apagar; y el Wi-Fi simulado que se va y vuelve con otra IP
+(sección 14 vicies).
+
 ## 16. Por dónde seguir
 
 Hecho el 21/11 (la 0.8.3, rama `pentium-navegador`): **el Navegador** (sección
