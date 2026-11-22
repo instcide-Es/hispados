@@ -110,8 +110,9 @@ cp $V/usb.img $V/u1.img
 local SIN64="-fw_cfg name=opt/ovmf/X-PciMmio64Mb,string=0"
 local Q64="-machine q35 -m 512 $SIN64 -drive if=pflash,format=raw,readonly=on,file=$F64 -drive if=pflash,format=raw,file=$V/vars64.fd $SSDT"
 # (con un teclado y un ratón USB de velocidad plena en el xHCI, como el teclado
-# de dentro y el ratón del ASUS GL553V: el ratón USB es el que mueve QEMU)
-local DISCOS="-device qemu-xhci,id=x -drive if=none,id=u,file=$V/u1.img,format=raw -device usb-storage,bus=x.0,drive=u -device usb-kbd,bus=x.0 -device usb-mouse,bus=x.0 -drive if=none,id=s,file=$V/sata.img,format=raw -device ide-hd,drive=s,bus=ide.0"
+# de dentro y el ratón del ASUS GL553V, el ratón detrás de un concentrador
+# (el de QEMU, de velocidad plena): el ratón USB es el que mueve QEMU)
+local DISCOS="-device qemu-xhci,id=x -drive if=none,id=u,file=$V/u1.img,format=raw -device usb-storage,bus=x.0,port=1,drive=u -device usb-kbd,bus=x.0,port=2 -device usb-hub,bus=x.0,port=3 -device usb-mouse,bus=x.0,port=3.1 -drive if=none,id=s,file=$V/sata.img,format=raw -device ide-hd,drive=s,bus=ide.0"
 maquina_uefi qemu-system-x86_64 e64 "$Q64 $DISCOS -S" "${PUESTA[@]}" ":monitor cont" ":espera 90 ^escritorio: en marcha" ":pausa 4" ":espera 30 ^Lectura 1:" ":captura uefi1"
 mira "por UEFI de 64 bits (OVMF, q35): GRUB EFI arranca la primera entrada por multiboot2 y el escritorio se pone a la medida del firmware (GOP)" \
   "^escritorio: en marcha, [0-9]* x [0-9]*"
@@ -132,7 +133,8 @@ mira "los discos: el SATA (AHCI) y la memoria USB (xHCI), que es X:, la del sist
 mira "la primera línea del registro dice por dónde ha arrancado (UEFI de 64 bits, la pantalla del GOP) y la línea del cargador" \
   "^arranque: por UEFI (64 bits, GOP 1280 x 800); la línea del cargador: .*escritorio escritura=usb unidad=X registro"
 mira "el 8042 y el ratón PS/2, en el registro (ps2: ...)" "^ps2: controlador 8042 sí; prueba de la boca 1 (teclado) 00, de la 2 (ratón) 00 (00: bien); el ratón contesta FA, id 0[03]"
-mira "el teclado y el ratón USB de velocidad plena (en el xHCI) se enumeran por UEFI" "^usb: 1 teclados, 1 ratones, 1 memorias"
+mira "el teclado y el ratón USB de velocidad plena (en el xHCI; el ratón, detrás de un concentrador) se enumeran por UEFI" "^usb: 1 teclados, 1 ratones, 1 memorias" \
+  "^usb: aparato [0-9], 0627:0001, velocidad plena, en el puerto 1 del concentrador [0-9]; ratón"
 if grep -q "no se deja enumerar" $S; then ko "algo USB no se deja enumerar: $(grep 'no se deja enumerar' $S | head -1)"; else ok "nada USB se queda sin enumerar"; fi
 mira "el SMBIOS, de la tabla del sistema de EFI (sin BIOS no está en F0000h), se lo da el núcleo a ACPI.BIN" "^uefi: el SMBIOS, en 0x" "^ACPI: SMBIOS en [0-9A-F]*h"
 grep -q "^ACPI: SMBIOS en 000F" $S && ko "el SMBIOS sale de F0000h, no de EFI"
@@ -180,9 +182,14 @@ else
 fi
 # 5. la misma memoria, por la BIOS (SeaBIOS), como disco: multiboot, como siempre
 cp $V/usb.img $V/u3.img
-maquina_uefi qemu-system-i386 bios "-machine pc -m 512 -drive file=$V/u3.img,format=raw,if=ide,index=0" ":espera 60 ^escritorio: en marcha" ":pausa 2" ":captura uefi4"
+# (con un teclado detrás de un concentrador en el EHCI, que lo cede a su UHCI
+# compañera, y un ratón detrás de otro en el xHCI: los de velocidad plena)
+local HUBS="-device ich9-usb-ehci1,id=e -device ich9-usb-uhci1,masterbus=e.0,firstport=0,multifunction=on -device ich9-usb-uhci2,masterbus=e.0,firstport=2 -device ich9-usb-uhci3,masterbus=e.0,firstport=4 -device usb-hub,bus=e.0,port=1 -device usb-kbd,bus=e.0,port=1.1 -device qemu-xhci,id=x -device usb-hub,bus=x.0,port=1 -device usb-mouse,bus=x.0,port=1.1"
+maquina_uefi qemu-system-i386 bios "-machine pc -m 512 -drive file=$V/u3.img,format=raw,if=ide,index=0 $HUBS" ":espera 60 ^escritorio: en marcha" ":pausa 2" ":captura uefi4"
 mira "y la misma memoria por la BIOS (SeaBIOS): el GRUB de siempre, el escritorio a 800 x 600" "^escritorio: en marcha, 800 x 600"
 mira "y su registro dice que ha arrancado por la BIOS/CSM, con la VBE de GRUB, y lo del 8042" "^arranque: por la BIOS/CSM (VBE 800 x 600); la línea del cargador: " "^ps2: controlador 8042 sí; .*el ratón contesta FA"
+mira "y por la BIOS, el teclado y el ratón de velocidad plena detrás de concentradores (EHCI/UHCI y xHCI)" "^usb: 1 teclados, 1 ratones, 0 memorias"
+grep -q "no se deja enumerar" $S && ko "por la BIOS, algo USB no se deja enumerar: $(grep 'no se deja enumerar' $S | head -1)"
 if ! grep -q "^uefi:" $S; then ok "por la BIOS, nada de UEFI (multiboot de siempre: la consola es la de texto)"; else ko "por la BIOS dice cosas de UEFI: $(grep '^uefi:' $S | head -1)"; fi
 # 6. el CD por UEFI
 if bash $AQUI/nucleo32/cd.sh $V/cd.iso > $V/cd.txt 2>&1 && xorriso -indev $V/cd.iso -report_el_torito plain > $V/torito.txt 2>&1 && grep -q "UEFI" $V/torito.txt && grep -q "BIOS" $V/torito.txt; then

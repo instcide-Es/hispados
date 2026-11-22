@@ -2844,6 +2844,38 @@ RSDP). GRUB sale de los servicios de arranque del firmware antes de entrar.
   portátiles; moverlas debajo (con la ventana del puente que dice ACPI) queda
   para más adelante.
 
+**Lo de los primeros equipos de verdad (22/11 por la noche).**
+
+- **ASUS ROG GL553V** (Kaby Lake, xHCI 8086:A12F): por UEFI al escritorio a
+  1920 x 1080, pero el teclado de dentro (USB, de velocidad plena) y un ratón USB
+  de velocidad plena no se dejaban enumerar (pasos 2 y 5). La causa encontrada
+  en `xhci.cas`: tras un error que no fuera STALL (error de la transacción,
+  «babble») el xHCI deja el extremo **parado** («Halted») y el núcleo mandaba
+  «Stop Endpoint», que en un extremo parado no vale: los tres reintentos fallaban
+  todos. Ahora se repone siempre (Reset Endpoint y el anillo, adelante). Y
+  además, como Linux y Windows: 10 ms tras la dirección (con el EHCI ya se
+  esperaban), los de velocidad plena empiezan con un paquete de 64 en el
+  extremo 0 (luego, Evaluate Context con el suyo), y si un aparato no se deja,
+  otro reinicio del puerto y otra vez. El registro dice ahora, en cada fallo,
+  el **código del xHCI** (4: error de la transacción, 6: STALL, 3: babble,
+  «se pasó el tiempo»...), lo que dio la petición y los 8 primeros octetos
+  leídos, y si al reintentarlo fue bien.
+- **El SMBIOS por UEFI** no está en F0000h: el núcleo lo busca en la tabla de
+  configuración de la tabla del sistema de EFI (etiquetas 11/12 de multiboot2;
+  los GUID de SMBIOS 3 y 2; GRUB 2.12 no da la etiqueta 13) y se lo pasa a
+  `ACPI.BIN` (`smbios=`); `mq_smbios()` da su punto de entrada (el dado, o el de
+  F0000h-FFFFFh con la BIOS). El registro de ACPI.BIN: «ACPI: SMBIOS en ...h».
+- **ThinkPad A275** (el touchpad/TrackPoint PS/2 dejó de ir): el arranque del
+  ratón PS/2 (`raton.cas`) tira antes lo que haya en el 8042 (un octeto que
+  quedara se tomaba por la respuesta), y si el ratón no contesta a F6 se
+  reinicia (FF, espera su AA) y se prueba otra vez. Y el registro lleva la línea
+  **«ps2: controlador 8042 sí/no; prueba de la boca 1 (teclado) .., de la 2
+  (ratón) ..; el ratón contesta .., id ..»**, por la BIOS y por UEFI.
+- **La primera línea del registro** (ARRANQUE.TXT): «arranque: por UEFI (64
+  bits, GOP 1366 x 768)» o «por la BIOS/CSM (VBE 800 x 600)» (o «modo texto»), y
+  la línea del cargador (que dice la entrada del menú elegida). También en
+  Acerca de («Arrancado por UEFI...»).
+
 **Lo que no se ha hecho:**
 
 - **El disco instalado arranca solo por la BIOS.** INSTALAR se puede lanzar

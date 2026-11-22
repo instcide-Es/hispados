@@ -59,6 +59,7 @@ módulo Usb
         leídos: nat32                           ; (UEFI) los octetos que han llegado (o el error)
         datos: arreglo [8] de byte              ; (UEFI) los 8 primeros de lo leído
         luego_bien: bool                        ; (UEFI) al reintentarlo (otro reinicio del puerto), sí
+        paquete0, tt: nat32                     ; (UEFI) el paquete del extremo 0 con que se iba; el traductor (dir. y puerto)
     fin
     variable fallos: arreglo [MAX_FALLOS] de Fallo
     público variable n_fallos: nat32
@@ -333,6 +334,9 @@ módulo Usb
             p := puntero(página + DATOS)
             para k desde 0 hasta 7 hacer fallos[n_fallos].datos[k] := p[k] fin
             fallos[n_fallos].luego_bien := falso
+            fallos[n_fallos].paquete0 := aparatos[i].paquete0
+            fallos[n_fallos].tt := (aparatos[i].tt_dir << 8) ob aparatos[i].tt_puerto
+            si aparatos[i].hc_clase = HC_XHCI entonces fallos[n_fallos].tt := (aparatos[i].tt_ranura << 8) ob aparatos[i].tt_puerto fin
             n_fallos := n_fallos + 1
         fin
         devolver NINGUNO
@@ -483,7 +487,22 @@ módulo Usb
 
     ; hay algo en ese puerto del concentrador i: reiniciar el puerto, esperar
     ; a que acabe y enumerarlo. Da su número, o NINGUNO.
+    ; (UEFI) como enumera_o_reintenta, para el puerto de un concentrador: si
+    ; lo que hay no se deja (los aparatos del Bluetooth de los Mac, detrás de
+    ; su concentrador, tardan en estar listos), otro reinicio del puerto y otra vez
     función puerto_de_concentrador(i: nat32, puerto: nat32): nat32
+        variable r, n0: nat32
+        n0 := n_fallos
+        r := puerto_de_concentrador_una(i, puerto)
+        si r <> NINGUNO o n_fallos = n0 entonces devolver r fin
+        espera_ms(100)
+        r := puerto_de_concentrador_una(i, puerto)
+        si r <> NINGUNO entonces fallos[n0].luego_bien := cierto fin
+        si r = NINGUNO y n_fallos > n0 + 1 entonces n_fallos := n0 + 1 fin
+        devolver r
+    fin
+
+    función puerto_de_concentrador_una(i: nat32, puerto: nat32): nat32
         variable p: puntero a byte
         variable r: ent32
         variable estado, v, vueltas: nat32
@@ -543,9 +562,13 @@ módulo Usb
         variable r, n0: nat32
         n0 := n_fallos
         r := enumera(hc_clase, hc, p, SIN_APARATO, 0, v)
-        si r <> NINGUNO o hc_clase <> HC_XHCI entonces devolver r fin
+        si r <> NINGUNO o n_fallos = n0 entonces devolver r fin
         espera_ms(100)
-        v := Xhci.puerto_reinicia(hc, p)
+        según hc_clase
+            caso HC_XHCI: v := Xhci.puerto_reinicia(hc, p)
+            caso HC_EHCI: v := Ehci.puerto_reinicia(hc, p)
+            si no: v := Uhci.puerto_reinicia(hc, p)
+        fin
         si v = 0 entonces devolver NINGUNO fin
         espera_ms(50)
         r := enumera(hc_clase, hc, p, SIN_APARATO, 0, v)
@@ -875,7 +898,10 @@ módulo Usb
                 apunta("; código xHCI %u (%s)", d)
             fin
             d[0] := fallos[i - 1].leídos
-            apunta("; dio %d", d)
+            d[1] := fallos[i - 1].paquete0
+            d[2] := fallos[i - 1].tt >> 8
+            d[3] := fallos[i - 1].tt yb 0xFF
+            apunta("; dio %d; extremo 0 de %u; traductor %u, puerto %u", d)
             para k desde 0 hasta 7 hacer
                 d[0] := fallos[i - 1].datos[k]
                 si k = 0 entonces apunta("; lo leído: %02X", d) sino apunta(" %02X", d) fin

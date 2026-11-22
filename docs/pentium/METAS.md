@@ -43,6 +43,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] Compartir carpetas en red (SMB) y FTP
 - [x] ~~**Tailscale** (WireGuard + su red privada: cada equipo localizado por su nombre) y **SSH** (entrar en la terminal de Hispa-Pentium desde otro equipo y desde él en los demás)~~ — rama pentium-tailscale (21/11; lo directo por UDP, más adelante: docs/PENTIUM.md §14 quinquies)
 - [ ] Más tarjetas de red y controladoras (las que vaya trayendo el taller)
+- [ ] **NVMe** (los discos M.2 de ahora: el del MacBook Air 2017, Samsung 144D:A808, clase 010802; sin él, el disco de dentro no se ve) — visto el 23/11 con la memoria del Termómetro por UEFI
 - [ ] Escudo: RAR y UPX por dentro, el interior de los PDF, revisar en segundo plano, reglas de UDP en el cortafuegos
 - [x] ~~NTP: la hora por Internet (y quitar el riesgo de la hora sin cifrar de TLS)~~ — rama panel-control (22/11: HORARED.BIN, SNTP con hora.roa.es y pool.ntp.org, varios servidores de acuerdo, ajuste suave, la zona y el horario de verano; nada de antes de TLS.HOR ni más de 15 minutos sin el modo administrador; el núcleo no deja atrasar más de 2 horas; TLS no se fía de un reloj de antes de TLS.HOR: docs/PENTIUM.md §14 sexdecies). Queda: NTS (NTP con TLS)
 - [ ] TLS 1.3 y descompresión gzip
