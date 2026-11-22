@@ -93,9 +93,9 @@ if [ -n "${PINTURA_CAPTURAS:-}" ]; then
   for c in pi1 pi2 pi3 pi4 pi5 pi6; do [ -f $G/$c.ppm ] && convert $G/$c.ppm "$PINTURA_CAPTURAS/$c.png" 2> /dev/null; done
   for c in v1 v2 v3; do [ -f $V/tv/cap/$c.ppm ] && convert $V/tv/cap/$c.ppm "$PINTURA_CAPTURAS/h$c.png" 2> /dev/null; done
 fi
-# «Editar con Pintura» en Mi equipo (el botón secundario en FIGURAS.PNG; la última opción)
+# «Editar con Pintura» en Mi equipo (el botón secundario en FIGURAS.PNG, la sexta de la segunda fila: desde la 0.8.7 está AZAR.SEM en C:\; la última opción)
 CAPTURAS=$G DISCO=$V/e.img ARRANQUE="escritorio modo=1024x600" PANTALLA=1024x600 MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 3" \
-  ":doble 64 30" ":pausa 5" ":doble 400 155" ":pausa 3" ":clicd 708 232" ":pausa 2" ":captura pi7" ":tecla up" ":tecla ret" \
+  ":doble 64 30" ":pausa 5" ":doble 400 155" ":pausa 3" ":clicd 805 232" ":pausa 2" ":captura pi7" ":tecla up" ":tecla ret" \
   ":hasta 120 1 pintura: abierto" ":pausa 2" > $V/editar.sal 2>&1
 grep -a -q "pintura: abierto FIGURAS.PNG (PNG, 320 x 200)" $V/editar.sal && ok "en QEMU: Mi equipo, «Editar con Pintura» en una imagen la abre en Pintura 2" \
   || ko "en QEMU: «Editar con Pintura»: $(grep -a pintura $V/editar.sal | tail -2)"
