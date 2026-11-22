@@ -77,7 +77,7 @@ import sys, zlib, re
 d = open(sys.argv[1], 'rb').read()
 sys.exit(0 if b'/Outlines' in d and b'/PageMode /UseOutlines' in d else 1)
 PY
-pdfinfo $T/variado.pdf 2>/dev/null | grep -q "^Title: *Informe de prueba de Pluma 2" && pdfinfo $T/variado.pdf | grep -q "^Producer: *Pluma 2.0 (Hispa-Pentium)" && ok "variado.pdf: /Title, /Author y /Producer" || ko "variado.pdf: pdfinfo: $(pdfinfo $T/variado.pdf 2>&1 | head -4 | tr '\n' ' ')"
+pdfinfo $T/variado.pdf 2>/dev/null | grep -q "^Title: *Informe de prueba de Pluma 2" && pdfinfo $T/variado.pdf | grep -q "^Producer: *Pluma 2.0.1 (Hispa-Pentium)" && ok "variado.pdf: /Title, /Author y /Producer" || ko "variado.pdf: pdfinfo: $(pdfinfo $T/variado.pdf 2>&1 | head -4 | tr '\n' ' ')"
 pdfimages -list $T/variado.pdf > $T/img.txt 2>&1
 grep -q "smask" $T/img.txt && grep -q "jpeg" $T/img.txt && ok "variado.pdf: el PNG con su transparencia (/SMask) y el JPG tal cual (DCTDecode)" || ko "variado.pdf: imágenes: $(cat $T/img.txt)"
 # lo que se ve: la página en imagen (pdftoppm), para mirarla

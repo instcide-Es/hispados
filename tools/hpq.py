@@ -225,8 +225,13 @@ VERSION_086 = '0.8.6'
 # PANEL.INI) y la hora por Internet (HORARED.BIN, NTP); ACPI.BIN con el botón
 # de encendido. Suben base y tls (TLS.BIN no se fía de un reloj de antes de TLS.HOR)
 VERSION_087 = '0.8.7'
+# (0.8.8, 22/11/2026, pentium-088: la Agenda —el vigilante de los avisos y
+# la próxima cita en el reloj de la bandeja, de cada usuario—, Cuentas 2 y
+# Pintura 2 —la 2.0 del sistema—: en el núcleo, el escritorio, Mi equipo
+# (exoper) y el menú Inicio). Sube la base
+VERSION_088 = '0.8.8'
 SISTEMA = [
-    ('base', VERSION_087, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
+    ('base', VERSION_088, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
         ('USUARIOS.BIN', r'\HISPA\USUARIOS.BIN'), ('ARGON2.BIN', r'\HISPA\ARGON2.BIN'),
         ('PANEL.BIN', r'\HISPA\PANEL.BIN'), ('HORARED.BIN', r'\HISPA\HORARED.BIN'),
@@ -504,7 +509,9 @@ OPCIONALES = [
         ('MENU/HISPAPDF.MNU', r'\HISPA\MENU\HISPAPDF.MNU'), ('MENU/HISPAPDF.ICP', r'\HISPA\MENU\HISPAPDF.ICP')]),
     # (PLUMA32) Pluma 2, el procesador de textos de 32 bits (castel/nucleo32/oficina/pluma/paquete.sh;
     # tipo «oficina»): con él instalado, el menú y Mi equipo lo usan en lugar del Pluma de Hispa-386
-    ('pluma', '2.0', 'Pluma 2: el procesador de textos de 32 bits (.PLU, .ODT, .DOCX, .RTF y .TXT; exporta a PDF; ortografía)',
+    # (0.8.8) la 2.0.1: la misma Pluma con la biblioteca común de la oficina de
+    # Cuentas 2 y Pintura 2 (memchr, strrchr, F11 y F12, las imágenes TGA)
+    ('pluma', '2.0.1', 'Pluma 2: el procesador de textos de 32 bits (.PLU, .ODT, .DOCX, .RTF y .TXT; exporta a PDF; ortografía)',
      'base >= 0.8.3', [
         ('PLUMA.BIN', r'\HISPA\PLUMA.BIN'), ('PLUMA/LEEME.TXT', r'\HISPA\PLUMA\LEEME.TXT'),
         ('PLUMA/DICCIO.DAT', r'\HISPA\PLUMA\DICCIO.DAT'),
@@ -521,8 +528,10 @@ OPCIONALES = [
         ('COMPRIM.TXT', r'\HISPA\COMPRIM.TXT'), ('COMPRIM.MNU', r'\HISPA\MENU\COMPRIM.MNU'), ('COMPRIM.ICP', r'\HISPA\MENU\COMPRIM.ICP')]),
     # (MIRADOR) el Mirador, el visor de imágenes (castel/nucleo32/mirador/paquete.sh; tipo «multimedia»)
     # (AGENDA) la Agenda (castel/nucleo32/agenda/paquete.sh; tipo «oficina»)
+    # (0.8.8) pide la base 0.8.8: el escritorio lanza su vigilante (AGENDA
+    # /VIGILAR) al entrar cada usuario y dice la próxima cita en el reloj
     ('agenda', '1.0', 'Agenda: citas, tareas y cumpleaños con avisos (aunque esté cerrada), festivos de España y de cada comunidad, repeticiones e importar y exportar .ICS',
-     'base >= 0.8.4', [
+     'base >= ' + VERSION_088, [
         ('AGENDA.BIN', r'\HISPA\AGENDA.BIN'), ('AGENDA/LEEME.TXT', r'\HISPA\AGENDA\LEEME.TXT'),
         ('MENU/AGENDA.MNU', r'\HISPA\MENU\AGENDA.MNU'), ('MENU/AGENDA.ICP', r'\HISPA\MENU\AGENDA.ICP')]),
     ('mirador', '1.0', 'El Mirador: ver imágenes (BMP, PNG, JPG, GIF animados, ICO...), girar, diapositivas, pantalla completa y fondo de escritorio', 'base >= 0.8.6', [

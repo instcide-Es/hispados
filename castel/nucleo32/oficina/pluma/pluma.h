@@ -4,7 +4,7 @@
 #define PLUMA_H
 #include "so.h"
 
-#define PLUMA_VERSION "2.0"
+#define PLUMA_VERSION "2.0.1"
 
 const char *pluma_arg(const char *s, char *d, u32 cabe);
 /* la ventana (ventana.c), con el documento que se abre (o NULL) */

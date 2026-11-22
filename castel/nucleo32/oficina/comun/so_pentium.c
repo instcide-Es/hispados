@@ -735,7 +735,7 @@ static u32 tecla_unicode(u32 k, int *mods)
 	case 0x152: return SO_T_INSERTAR;
 	case 0x10F: return SO_T_MAYUS_TAB;
 	case 0x110: return SO_T_CTRL_TAB;
-	case 0x157: return SO_T_F11;	/* (CUENTAS32) F11 y F12, si el núcleo los da */
+	case 0x157: return SO_T_F11;	/* (CUENTAS32) F11 y F12: TECLA_F11 y TECLA_F12 del núcleo (desde la 0.8.7) */
 	case 0x158: return SO_T_F12;
 	}
 	if (k >= 0x13B && k <= 0x144)
