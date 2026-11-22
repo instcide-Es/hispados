@@ -1809,7 +1809,7 @@ módulo Usuario
             caso 64, 65:
                 ; (PROTEGE) los sectores en crudo (se saltan la zona protegida y
                 ; los secretos): solo INSTALAR, o en modo administrador
-                si actual.sello <> SELLO_INSTALAR y no actual.admin entonces devolver DENEGADO fin
+                si (actual.sello <> SELLO_INSTALAR o no persona_admin(actual)) y no actual.admin entonces devolver DENEGADO fin     ; ((USUARIOS) INSTALAR, si lo lanza un administrador)
                 si no puede(b, tamaño(Pedido_disco), falso) entonces devolver NO_VALE fin
                 pd := puntero(b)
                 si pd.n = 0 o pd.n > 128 o no puede(pd.datos, pd.n * SECTOR, n = 64) entonces devolver NO_VALE fin
@@ -1834,7 +1834,7 @@ módulo Usuario
                 ; servicios, el asistente, INSTALAR y el modo administrador
                 ; (el Reloj lo pide con la 157); Configuración es del núcleo
                 ; ((USUARIOS) y el servicio, si no lo ha lanzado un usuario normal)
-                si (no actual.servicio o no persona_admin(actual)) y actual.sello <> SELLO_ASISTE y actual.sello <> SELLO_INSTALAR y no actual.admin entonces
+                si (no persona_admin(actual) o (no actual.servicio y actual.sello <> SELLO_ASISTE y actual.sello <> SELLO_INSTALAR)) y no actual.admin entonces
                     imprimir2("permisos: acceso denegado a poner el reloj del sistema (%s, la tarea %u)\n", nat32(actual.nombre), actual.id)
                     devolver DENEGADO
                 fin

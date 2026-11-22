@@ -110,6 +110,7 @@ módulo Permisos
         carpeta: bool
         escriben: nat32                         ; los sellos que escriben ahí (un bit cada uno), además de PAQUETES e INSTALAR
         secreto: bool                           ; solo lo leen los que lo escriben
+        admin: bool                             ; (USUARIOS) y solo si quien lanza al que escribe es administrador (o el sistema)
     fin
 
     tipo Programa = estructura
@@ -144,7 +145,15 @@ módulo Permisos
         r.carpeta := n > 0 y p[n - 1] = '\\'
         r.escriben := escriben
         r.secreto := secreto
+        r.admin := falso
         n_reglas := n_reglas + 1
+    fin
+
+    ; (USUARIOS) un renglón que solo vale si lo pide un administrador: el
+    ; arranque (GRUB.CFG, GRUBENV: qué núcleo) y HISPA.INI
+    función regla_admin(p: puntero a byte, escriben: nat32, secreto: bool)
+        regla(p, escriben, secreto)
+        si n_reglas > 0 entonces reglas[n_reglas - 1].admin := cierto fin
     fin
 
     función programa(ruta: puntero a byte, sello: nat32, servicio: bool)
@@ -189,10 +198,10 @@ módulo Permisos
         regla("USUARIOS.NUE", NADIE, cierto)
         regla("AZAR.SEM", NADIE, cierto)                   ; la semilla del pozo del azar (pozo.cas)
         ; ---- el arranque ----
-        regla("GRUB.CFG", B_ASISTE, falso)                 ; (y el escritorio, que es el núcleo: la medida de la pantalla)
-        regla("GRUBENV", B_ACTUALIZ, falso)                ; (lo pone PAQUETES; ACTUALIZ da el núcleo nuevo por bueno)
+        regla_admin("GRUB.CFG", B_ASISTE, falso)           ; (y el escritorio, que es el núcleo: la medida de la pantalla)
+        regla_admin("GRUBENV", B_ACTUALIZ, falso)          ; (lo pone PAQUETES; ACTUALIZ da el núcleo nuevo por bueno)
         regla("PANTALLA.ENV", NADIE, falso)                ; (la escribe el escritorio)
-        regla("HISPA.INI", B_ASISTE, falso)                ; (y Configuración, del núcleo)
+        regla_admin("HISPA.INI", B_ASISTE, falso)          ; (y Configuración, del núcleo)
         regla("INICIO.INI", NADIE, falso)                  ; (pentium-menu: lo fijado en el menú Inicio; lo escribe el núcleo)
         regla("DOCK.INI", NADIE, falso)                    ; (el dock, del núcleo)
         regla("ATAJOS.INI", NADIE, falso)
@@ -358,13 +367,14 @@ módulo Permisos
 
     ; lo que dice la tabla de la ruta entera «ruta» de la unidad u: LIBRE,
     ; PROTEGIDA (y, en «escriben» y «secreto», su renglón) o DUDOSA
-    función mira(u: nat32, ruta: puntero a byte, ref escriben: nat32, ref secreto: bool): nat32
+    función mira(u: nat32, ruta: puntero a byte, ref escriben: nat32, ref secreto: bool, ref solo_admin: bool): nat32
         variable forma: arreglo [MAX_FORMA] de byte
         variable rel: puntero a byte
         variable en_hispa: bool
         variable i: nat32
         escriben := NADIE
         secreto := falso
+        solo_admin := falso
         si u >= MAX_UNIDADES o u <> del_sistema entonces devolver LIBRE fin
         si no unidades[u].hay o unidades[u].clase <> U_FAT entonces devolver LIBRE fin
         ; (sin leer el disco si todos los trozos son de 8+3: casi siempre)
@@ -398,6 +408,7 @@ módulo Permisos
             si casa(dirección(reglas[i]), rel) entonces
                 escriben := reglas[i].escriben
                 secreto := reglas[i].secreto
+                solo_admin := reglas[i].admin
                 devolver PROTEGIDA
             fin
             i := i + 1
@@ -410,10 +421,10 @@ módulo Permisos
     ; en la ruta entera «ruta» de la unidad u?
     público función puede_escribir(u: nat32, ruta: puntero a byte): bool
         variable escriben, z: nat32
-        variable secreto: bool
+        variable secreto, solo: bool
         si actual = nulo entonces devolver cierto fin
         si no actual.usuario o actual.admin entonces devolver cierto fin
-        z := mira(u, ruta, escriben, secreto)
+        z := mira(u, ruta, escriben, secreto, solo)
         si z = LIBRE entonces devolver cierto fin
         ; (USUARIOS) en su carpeta, su dueño
         si z = DE_USUARIO y actual.uid <> 0 y actual.uid = escriben entonces devolver cierto fin
@@ -421,7 +432,7 @@ módulo Permisos
         ; administrador (o el sistema); los renglones de la configuración de
         ; SSH y de los túneles, igual; los demás, el programa del renglón
         si z = PROTEGIDA y bit(actual.sello) yb TODO_EL_SISTEMA <> 0 y persona_admin(actual) entonces devolver cierto fin
-        si z = PROTEGIDA y bit(actual.sello) yb escriben <> 0 y (bit(actual.sello) yb SOLO_ADMIN = 0 o persona_admin(actual)) entonces devolver cierto fin
+        si z = PROTEGIDA y bit(actual.sello) yb escriben <> 0 y ((bit(actual.sello) yb SOLO_ADMIN = 0 y no solo) o persona_admin(actual)) entonces devolver cierto fin
         denegados := denegados + 1
         imprimir2("permisos: acceso denegado a %s para escribir (%s)\n", nat32(ruta), nat32(actual.nombre))
         devolver falso
@@ -430,10 +441,10 @@ módulo Permisos
     ; ¿y leerla? (solo los secretos tienen dueño)
     público función puede_leer(u: nat32, ruta: puntero a byte): bool
         variable escriben, z: nat32
-        variable secreto: bool
+        variable secreto, solo: bool
         si actual = nulo entonces devolver cierto fin
         si no actual.usuario o actual.admin entonces devolver cierto fin
-        z := mira(u, ruta, escriben, secreto)
+        z := mira(u, ruta, escriben, secreto, solo)
         si z = LIBRE o z = USUARIOS_RAÍZ entonces devolver cierto fin
         si z = PROTEGIDA y (no secreto o bit(actual.sello) yb escriben <> 0) entonces devolver cierto fin
         ; (USUARIOS) lo de cada uno, su dueño; sus llaves de SSH, también SSHD
@@ -448,10 +459,10 @@ módulo Permisos
     ; de la carpeta de otro usuario, no (lo demás, como siempre)
     público función puede_lanzar(u: nat32, ruta: puntero a byte): bool
         variable escriben, z: nat32
-        variable secreto: bool
+        variable secreto, solo: bool
         si actual = nulo entonces devolver cierto fin
         si no actual.usuario o actual.admin o no Cuentas.hay_cuentas entonces devolver cierto fin
-        z := mira(u, ruta, escriben, secreto)
+        z := mira(u, ruta, escriben, secreto, solo)
         si z = DE_USUARIO y (actual.uid = 0 o actual.uid <> escriben) entonces
             denegados := denegados + 1
             imprimir2("permisos: acceso denegado a %s para lanzarlo (%s)\n", nat32(ruta), nat32(actual.nombre))
