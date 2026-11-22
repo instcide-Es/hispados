@@ -49,6 +49,7 @@ static int ant_x = -1, ant_y, ant_an, ant_al;
 static int CA = 72, CL = 100, sep, ox, oy, fila2, arriba, pie_al = 22, paso_tapada, paso_vista;
 static lienzo cara[MAX_CARTAS], dorso;
 static int hechas;		/* el tamaño de las cartas pintadas */
+static int esquina[16], esquina_r;	/* lo que se come cada fila de las esquinas redondas */
 
 static const struct efecto s_carta = { ON_RUIDO, 2500, 1200, 30, 16, 1, 25 };
 static const struct efecto s_sube = { ON_CAMPANA, 1320, 1320, 160, 20, 1, 150 };
@@ -398,7 +399,7 @@ static void pinta_cara(lienzo *l, int c)
 	char t[4];
 	int e = w >= 90 ? 2 : 1, k;
 
-	lz_rect(l, 0, 0, w, h, 0xFF00FF);	/* (lo de fuera de las esquinas: transparente) */
+	lz_rect(l, 0, 0, w, h, 0x1F4E5A);	/* (lo de fuera de las esquinas no se copia: carta()) */
 	lz_redondo(l, 0, 0, w, h, r, 0x8A8A8A);
 	lz_redondo(l, 1, 1, w - 2, h - 2, r - 1, 0xFFFFFF);
 	/* el índice: arriba a la izquierda, y girado abajo a la derecha */
@@ -451,7 +452,7 @@ static void pinta_dorso(lienzo *l)
 {
 	int w = l->an, h = l->al, r = MAX(3, w / 10), i;
 
-	lz_rect(l, 0, 0, w, h, 0xFF00FF);
+	lz_rect(l, 0, 0, w, h, 0x1F4E5A);
 	lz_redondo(l, 0, 0, w, h, r, 0x8A8A8A);
 	lz_redondo(l, 1, 1, w - 2, h - 2, r - 1, 0xFFFFFF);
 	lz_redondo(l, 4, 4, w - 8, h - 8, MAX(2, r - 3), 0x2F4B8F);
@@ -534,9 +535,34 @@ static void pinta_hueco(lienzo *l, int x, int y, const char *t)
 		lz_texto_centro(l, x + CA / 2, y + CL / 2 - 8, t, 0x7FC6BF, 1, 1);
 }
 
+/* una carta: sin lo de fuera de sus esquinas redondas */
 static void carta(lienzo *l, int x, int y, int c, int arriba_)
 {
-	lz_copia_clave(l, x, y, arriba_ ? &cara[c] : &dorso, 0, 0, CA, CL, 0xFF00FF);
+	const lienzo *o = arriba_ ? &cara[c] : &dorso;
+	int r = MIN(MAX(3, CA / 10), 16), f;
+
+	if (!o->p)
+		return;
+	if (esquina_r != r) {
+		esquina_r = r;
+		for (f = 0; f < 16; f++) {
+			float dy = (float)(r - f) - 0.5f;
+
+			esquina[f] = f < r ? r - (int)(m_raiz((float)(r * r) - dy * dy) + 0.5f) : 0;
+		}
+	}
+	for (f = 0; f < CL; f++) {
+		int e = f < r ? esquina[f] : f >= CL - r ? esquina[CL - 1 - f] : 0, yy = y + f, x0 = x + e, x1 = x + CA - e;
+
+		if (yy < 0 || yy >= l->al)
+			continue;
+		if (x0 < 0)
+			x0 = 0;
+		if (x1 > l->an)
+			x1 = l->an;
+		if (x1 > x0)
+			memcpy(l->p + (size_t)yy * l->paso + x0, o->p + (size_t)f * o->paso + (x0 - x), (size_t)(x1 - x0) * 4);
+	}
 }
 
 /* todo menos lo que se arrastra */

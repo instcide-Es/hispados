@@ -257,15 +257,19 @@ void lz_circulo_suave(lienzo *l, float cx, float cy, float r, u32 c)
 
 void lz_anillo(lienzo *l, int cx, int cy, int r, int grueso, u32 c)
 {
-	int x, y, ri = r - grueso;
+	int f, ri = r - grueso;
 
-	for (y = -r; y <= r; y++)
-		for (x = -r; x <= r; x++) {
-			int d = x * x + y * y;
+	/* por filas: lo de dentro del grande y fuera del pequeño (dos tramos) */
+	for (f = -r; f <= r; f++) {
+		int d = (int)m_raiz((float)(r * r - f * f)), di = f * f < ri * ri ? (int)m_raiz((float)(ri * ri - f * f)) : -1;
 
-			if (d <= r * r && d > ri * ri)
-				punto(l, cx + x, cy + y, c, 256);
+		if (di < 0)
+			lz_rect(l, cx - d, cy + f, 2 * d + 1, 1, c);
+		else {
+			lz_rect(l, cx - d, cy + f, d - di, 1, c);
+			lz_rect(l, cx + di + 1, cy + f, d - di, 1, c);
 		}
+	}
 }
 
 void lz_elipse(lienzo *l, int cx, int cy, int rx, int ry, u32 c)

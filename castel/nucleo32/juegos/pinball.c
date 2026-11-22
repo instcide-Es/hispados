@@ -380,22 +380,28 @@ static void pinta_marcador_fijo(lienzo *l)
 static void dmd(int y, const char *t, int desde, int centrado)
 {
 	char b[128];
-	int n = a437(t, b, sizeof b), i, f, k, total = n * 8, x0 = centrado ? (96 - total) / 2 : -desde;
+	int n = a437(t, b, sizeof b), f, k, total = n * 8, x0 = centrado ? (96 - total) / 2 : -desde, d = dmd_d;
 
-	lz_rect(&LZ, dmd_x - 2, y - 2, 96 * dmd_d + 4, 16 * dmd_d + 4, 0x120A04);
-	for (f = 0; f < 16; f++)
+	if (dmd_x < 0 || dmd_x + 96 * d > LZ.an || y < 0 || y + 16 * d > LZ.al)
+		return;
+	lz_rect(&LZ, dmd_x - 2, y - 2, 96 * d + 4, 16 * d + 4, 0x120A04);
+	for (f = 0; f < 16; f++) {
+		u32 *fila = LZ.p + (size_t)(y + f * d) * LZ.paso + dmd_x;
+
 		for (k = 0; k < 96; k++) {
-			int c = k - x0, on = 0;
+			int c = k - x0, on = 0, i, j;
+			u32 col;
 
-			if (c >= 0 && c < total) {
-				unsigned v = jg_letra((unsigned char)b[c / 8])[f];
-
-				on = (v >> (7 - c % 8)) & 1;
-			}
-			(void)i;
-			lz_rect(&LZ, dmd_x + k * dmd_d, y + f * dmd_d, dmd_d - 1, dmd_d - 1, on ? 0xFFB030 : 0x3A1E08);
+			if (c >= 0 && c < total)
+				on = (jg_letra((unsigned char)b[c / 8])[f] >> (7 - c % 8)) & 1;
+			col = on ? 0xFFB030 : 0x3A1E08;
+			/* (cada punto, d-1 x d-1: lo demás es la rejilla) */
+			for (j = 0; j < d - 1; j++)
+				for (i = 0; i < d - 1; i++)
+					fila[(size_t)j * LZ.paso + k * d + i] = col;
 		}
-	jg_sucio(dmd_x - 2, y - 2, 96 * dmd_d + 4, 16 * dmd_d + 4);
+	}
+	jg_sucio(dmd_x - 2, y - 2, 96 * d + 4, 16 * d + 4);
 }
 
 static void con_puntos(char *d, long n)
@@ -665,8 +671,13 @@ static void construye(void)
 
 /* ================================================================ lo que se mueve */
 #define MAX_SUC 24
-static struct { int x, y, an, al; } s_antes[MAX_SUC], s_ahora[MAX_SUC];
-static int n_s_antes, n_s_ahora;
+static struct { int x, y, an, al; } s_ahora[MAX_SUC];
+static int n_s_ahora;
+/* lo que se mueve: cada cosa, con lo que la define (si no cambia, no se repinta) */
+#define MAX_MOVILES (2 + 1 + F_MAX_BOLAS)
+struct movil { int x0, y0, x1, y1, firma, hay; };
+static struct movil mov_antes[MAX_MOVILES];
+
 
 static void apunta(float x0, float y0, float x1, float y1)
 {
@@ -837,9 +848,7 @@ static void pinta_marcador(int todo)
 			int total = ((int)strlen(b) + 4) * 8;
 
 			centrado = 0;
-			desde = (tic / 2) % total - 96 + 8;
-			desde = desde < -8 ? -8 : desde;
-			desde = ((tic / 2) % (total + 96)) - 96;
+			desde = ((tic / 2) % (total + 96)) - 96;	/* (de derecha a izquierda, 50 puntos por segundo) */
 		}
 	}
 	if (todo || strcmp(t1, dmd1_antes)) {
@@ -866,49 +875,134 @@ static void pinta_todo(void)
 	lz_copia(&LZ, 0, 0, &base, 0, 0, LZ.an, LZ.al);
 	if (!jg_completa)
 		jg_pinta_barra();
-	n_s_antes = 0;
+	memset(mov_antes, 0, sizeof mov_antes);
 	pinta_marcador(1);
 	if (cart_an)
 		pinta_noria(&LZ, 1);
 	jg_todo_sucio();
 }
 
+
+static int toca(const struct movil *a, int x0, int y0, int x1, int y1)
+{
+	return a->hay && a->x0 < x1 && x0 < a->x1 && a->y0 < y1 && y0 < a->y1;
+}
+
+static void pinta_movil(int k)
+{
+	if (k < 2)
+		pinta_flipper(k);
+	else if (k == 2)
+		pinta_embolo();
+	else
+		pinta_bola(k - 3);
+}
+
+/* el orden de atrás adelante: las bolas de lejos, los flippers, las de cerca, el émbolo y las de la rampa */
+static int orden_de(int k)
+{
+	struct f_bola *b;
+
+	if (k < 2)
+		return 10;
+	if (k == 2)
+		return 30;
+	b = &M.bolas[k - 3];
+	if (b->capa == CAPA_RAMPA)
+		return 40;
+	if (b->y >= 880)
+		return b->x >= 452 ? 35 : 20;
+	return 0;
+}
+
 static void pinta(void)
 {
-	int i, k;
 	static int noria_t;
+	struct movil ahora[MAX_MOVILES];
+	int cambia[MAX_MOVILES], i, k, o;
 
 	if (!listo)
 		return;
-	for (i = 0; i < n_s_antes; i++) {
-		lz_copia(&LZ, s_antes[i].x, s_antes[i].y, &base, s_antes[i].x, s_antes[i].y, s_antes[i].an, s_antes[i].al);
-		jg_sucio(s_antes[i].x, s_antes[i].y, s_antes[i].an, s_antes[i].al);
+	/* lo que es cada cosa ahora (lo que la define y lo que ocupa) */
+	for (k = 0; k < MAX_MOVILES; k++) {
+		memset(&ahora[k], 0, sizeof ahora[k]);
+		n_s_ahora = 0;
+		if (k < 2)
+			ahora[k].firma = (int)(M.flips[k].ang * 1000) * 2 + falta;
+		else if (k == 2)
+			ahora[k].firma = (int)(tiro * 1000);
+		else {
+			struct f_bola *b = &M.bolas[k - 3];
+
+			if (!b->viva && k - 3 != retenida)
+				continue;
+			ahora[k].firma = ((int)(b->x * 4) * 7919) ^ ((int)(b->y * 4) * 31) ^ (b->capa << 28) ^ (k - 3 == retenida);
+		}
+		ahora[k].hay = 1;
 	}
-	n_s_ahora = 0;
-	/* de atrás adelante: las bolas de lejos, los flippers, las de cerca, el émbolo y las de la rampa */
-	for (i = 0; i < F_MAX_BOLAS; i++)
-		if ((M.bolas[i].viva || i == retenida) && M.bolas[i].capa == CAPA_MESA && M.bolas[i].y < 880)
-			pinta_bola(i);
-	for (k = 0; k < 2; k++)
-		pinta_flipper(k);
-	for (i = 0; i < F_MAX_BOLAS; i++)
-		if (M.bolas[i].viva && M.bolas[i].capa == CAPA_MESA && M.bolas[i].y >= 880 && M.bolas[i].x < 452)
-			pinta_bola(i);
-	pinta_embolo();
-	for (i = 0; i < F_MAX_BOLAS; i++)
-		if (M.bolas[i].viva && ((M.bolas[i].capa == CAPA_MESA && M.bolas[i].y >= 880 && M.bolas[i].x >= 452) || M.bolas[i].capa == CAPA_RAMPA))
-			pinta_bola(i);
+	/* cambia: lo que ya no es como antes (o no estaba, o se ha ido) */
+	for (k = 0; k < MAX_MOVILES; k++)
+		cambia[k] = ahora[k].hay != mov_antes[k].hay || ahora[k].firma != mov_antes[k].firma || estado == E_PAUSA;
+	/* lo de antes de lo que cambia, se borra (de la base) */
+	for (k = 0; k < MAX_MOVILES; k++)
+		if (cambia[k] && mov_antes[k].hay) {
+			struct movil *a = &mov_antes[k];
+
+			lz_copia(&LZ, a->x0, a->y0, &base, a->x0, a->y0, a->x1 - a->x0, a->y1 - a->y0);
+			jg_sucio(a->x0, a->y0, a->x1 - a->x0, a->y1 - a->y0);
+		}
+	/* lo que no cambia pero toca lo borrado, también se repinta (hasta que no quede nada) */
+	for (o = 0; o < 3; o++)
+		for (k = 0; k < MAX_MOVILES; k++) {
+			if (cambia[k] || !mov_antes[k].hay)
+				continue;
+			for (i = 0; i < MAX_MOVILES; i++)
+				if (cambia[i] && mov_antes[i].hay && toca(&mov_antes[k], mov_antes[i].x0, mov_antes[i].y0, mov_antes[i].x1, mov_antes[i].y1)) {
+					struct movil *a = &mov_antes[k];
+
+					cambia[k] = 1;
+					lz_copia(&LZ, a->x0, a->y0, &base, a->x0, a->y0, a->x1 - a->x0, a->y1 - a->y0);
+					jg_sucio(a->x0, a->y0, a->x1 - a->x0, a->y1 - a->y0);
+					break;
+				}
+		}
+	/* y se pinta lo que cambia, de atrás adelante; lo que no, se queda como estaba */
+	for (o = 0; o <= 40; o += 5)
+		for (k = 0; k < MAX_MOVILES; k++) {
+			int j, x0 = 1 << 30, y0 = 1 << 30, x1 = -1, y1 = -1;
+
+			if (!ahora[k].hay || !cambia[k] || orden_de(k) != o)
+				continue;
+			n_s_ahora = 0;
+			pinta_movil(k);
+			for (j = 0; j < n_s_ahora; j++) {
+				x0 = MIN(x0, s_ahora[j].x);
+				y0 = MIN(y0, s_ahora[j].y);
+				x1 = MAX(x1, s_ahora[j].x + s_ahora[j].an);
+				y1 = MAX(y1, s_ahora[j].y + s_ahora[j].al);
+			}
+			ahora[k].x0 = MAX(0, x0);
+			ahora[k].y0 = MAX(0, y0);
+			ahora[k].x1 = MIN(LZ.an, x1);
+			ahora[k].y1 = MIN(LZ.al, y1);
+			jg_sucio(ahora[k].x0, ahora[k].y0, ahora[k].x1 - ahora[k].x0, ahora[k].y1 - ahora[k].y0);
+		}
+	for (k = 0; k < MAX_MOVILES; k++) {
+		if (ahora[k].hay && !cambia[k]) {
+			ahora[k].x0 = mov_antes[k].x0;
+			ahora[k].y0 = mov_antes[k].y0;
+			ahora[k].x1 = mov_antes[k].x1;
+			ahora[k].y1 = mov_antes[k].y1;
+		}
+		mov_antes[k] = ahora[k];
+	}
 	if (estado == E_PAUSA) {
 		int an = MIN(mesa_x1 - mesa_x0 - 20, 380);
 
 		jg_cartel(&LZ, (int)P_cx - an / 2, (LZ.al - 260) / 2, an, 260, "Pausa",
 			  "Intro o Esc: seguir.\nF2: partida nueva.\nM: música (sí o no).\nF11: ventana o pantalla completa.\nR: mejores puntuaciones.\nS: salir del juego.");
-		apunta(P_cx - an / 2.0f, (LZ.al - 260) / 2.0f, P_cx + an / 2.0f + 6, (LZ.al + 260) / 2.0f + 6);
+		jg_sucio((int)P_cx - an / 2, (LZ.al - 260) / 2, an + 6, 266);
 	}
-	for (i = 0; i < n_s_ahora; i++)
-		jg_sucio(s_ahora[i].x, s_ahora[i].y, s_ahora[i].an, s_ahora[i].al);
-	memcpy(s_antes, s_ahora, sizeof s_antes);
-	n_s_antes = n_s_ahora;
 	pinta_marcador(0);
 	if (cart_an && ++noria_t >= 5) {
 		noria_t = 0;

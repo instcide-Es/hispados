@@ -60,6 +60,9 @@ static void choca_seg(struct f_mesa *m, int ib, struct f_seg *s)
 	float dx = s->bx - s->ax, dy = s->by - s->ay, l2 = dx * dx + dy * dy, t, qx, qy, ex, ey, d2, d, nx, ny, f;
 	float R = m->radio + s->r;
 
+	/* (lo primero, lo que más descarta: ¿está la bola cerca de su caja?) */
+	if (b->x + m->radio < s->x0 || b->x - m->radio > s->x1 || b->y + m->radio < s->y0 || b->y - m->radio > s->y1)
+		return;
 	if (!s->activo || !(s->capas & b->capa))
 		return;
 	t = l2 > 0 ? ((b->x - s->ax) * dx + (b->y - s->ay) * dy) / l2 : 0;
@@ -240,6 +243,17 @@ void f_paso(struct f_mesa *m, float dt)
 	float vmax = 0, dts;
 	int n, k, i, j;
 
+	if (!m->preparada) {
+		for (i = 0; i < m->n_segs; i++) {
+			struct f_seg *s = &m->segs[i];
+
+			s->x0 = MIN(s->ax, s->bx) - s->r;
+			s->x1 = MAX(s->ax, s->bx) + s->r;
+			s->y0 = MIN(s->ay, s->by) - s->r;
+			s->y1 = MAX(s->ay, s->by) + s->r;
+		}
+		m->preparada = 1;
+	}
 	/* cuántos subpasos: lo más rápido que se mueve algo */
 	for (i = 0; i < F_MAX_BOLAS; i++)
 		if (m->bolas[i].viva) {

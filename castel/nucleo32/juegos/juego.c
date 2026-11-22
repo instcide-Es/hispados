@@ -830,6 +830,8 @@ int rec_meter(const char *clave, int n, int puntos, int menos)
 
 	if (n > REC_N)
 		n = REC_N;
+	if (puntos <= 0)
+		return -1;	/* (una partida sin puntos no es un récord) */
 	for (i = 0; i < k; i++)
 		if (menos ? puntos < t[i].puntos : puntos > t[i].puntos) {
 			sitio = i;
@@ -898,7 +900,7 @@ int jg_correr(const struct juego *j)
 	u32 t_ant, ult_cuadro = 0xFFFFFFFFu, cada = 0;
 	int cuadros = j->cuadros ? j->cuadros : 60;
 	/* lo que gasta (/MIDE) */
-	u64 trabajo = 0, desde = rdtsc(), t0;
+	u64 trabajo = 0, desde = rdtsc(), t0, en_pulso = 0, en_pinta = 0, en_subir = 0, q;
 	u32 tic_mide = 0, pintados = 0;
 
 	J = j;
@@ -966,16 +968,22 @@ int jg_correr(const struct juego *j)
 				e.b = e.c = 0;
 				j->suceso(&e);
 			}
+			q = rdtsc();
 			if (j->pulso)
 				j->pulso();
+			en_pulso += rdtsc() - q;
 		}
 		snd_alimentar();
 		cada = t * (u32)cuadros / jg_hz;
 		if (cada != ult_cuadro && jg_cambio && j->pinta) {
 			ult_cuadro = cada;
 			jg_cambio = 0;
+			q = rdtsc();
 			j->pinta();
+			en_pinta += rdtsc() - q;
+			q = rdtsc();
 			jg_subir();
+			en_subir += rdtsc() - q;
 			pintados++;
 		}
 		trabajo += rdtsc() - t0;
@@ -983,9 +991,11 @@ int jg_correr(const struct juego *j)
 			u64 todo = rdtsc() - desde;
 			u32 por_mil = todo ? (u32)(trabajo * 1000 / todo) : 0;
 
-			serie("juego: gasta el %u,%u %% del procesador (%u cuadros por segundo)\n", por_mil / 10, por_mil % 10,
-			      pintados * jg_hz / (t - tic_mide));
-			trabajo = 0;
+			serie("juego: gasta el %u,%u %% del procesador (%u cuadros por segundo; el juego %u,%u %%, pintar %u,%u %%, subirlo a la ventana %u,%u %%)\n",
+			      por_mil / 10, por_mil % 10, pintados * jg_hz / (t - tic_mide),
+			      (u32)(en_pulso * 1000 / todo) / 10, (u32)(en_pulso * 1000 / todo) % 10, (u32)(en_pinta * 1000 / todo) / 10, (u32)(en_pinta * 1000 / todo) % 10,
+			      (u32)(en_subir * 1000 / todo) / 10, (u32)(en_subir * 1000 / todo) % 10);
+			trabajo = en_pulso = en_pinta = en_subir = 0;
 			desde = rdtsc();
 			tic_mide = t;
 			pintados = 0;

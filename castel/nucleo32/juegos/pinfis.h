@@ -22,6 +22,7 @@ struct f_seg {
 	float rebote;
 	unsigned char capas, tipo, activo, relleno;
 	short id;
+	float x0, y0, x1, y1;	/* (lo que ocupa, con su grosor: lo calcula f_paso la primera vez) */
 };
 struct f_circ {
 	float x, y, r;
@@ -74,6 +75,7 @@ struct f_mesa {
 	void (*cruce)(int id, int bola, int sentido);
 	/* las cuentas (las pruebas) */
 	long subpasos, choques;
+	int preparada;		/* (las cajas de los segmentos ya están hechas) */
 };
 
 void f_paso(struct f_mesa *m, float dt);
