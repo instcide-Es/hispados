@@ -220,8 +220,8 @@ miracap "ADMIN en la Consola de Ana: la ventanita del núcleo pide SU contraseñ
 mira "con la contraseña de Ana, ORDENES (en su Consola) tiene el modo administrador" "^permisos: modo administrador para ORDENES.BIN"
 miracap "tras cerrar la sesión, otra vez la pantalla de entrada" ue3 negrita 300 70 500 110 "Elija su usuario"
 miracap "y el menú Inicio saluda a quien ha entrado: «Hola, Bea»" ue4 negrita 0 90 400 130 "Hola, Bea"
-if ! grep -q "Administrador de tareas\|excepción\|\*\*\*" $S; then ok "sin el Administrador de tareas detrás de la pantalla de entrada, y sin quejas del núcleo"
-else ko "el escritorio:"; grep "Administrador de tareas\|excepción\|\*\*\*" $S | head -3 | sed 's/^/        /'; fi
+if ! grep -q "Administrador de tareas\|excepción\|^\*\*\* " $S; then ok "sin el Administrador de tareas detrás de la pantalla de entrada, y sin quejas del núcleo"
+else ko "el escritorio:"; grep "Administrador de tareas\|excepción\|^\*\*\* " $S | head -3 | sed 's/^/        /'; fi
 # ---- 4. SSH con los usuarios ----
 if command -v ssh > /dev/null && command -v ssh-keygen > /dev/null; then
   ssh-keygen -q -t ed25519 -N '' -f $X/clave -C ana
@@ -270,6 +270,7 @@ if command -v ssh > /dev/null && command -v ssh-keygen > /dev/null; then
   mira "Ana, con la llave de su \\USUARIOS\\ANA\\AJUSTES\\AUTORIZA.TXT, entra y lee lo suyo" "^secreto de Ana$" "^código 0$"
 else echo "  (sin ssh de OpenSSH aquí: sin la prueba de SSH con los usuarios)"; fi
 kill $SPID 2> /dev/null
-if ! cat $X/t1.txt $X/t2.txt $X/e.txt | grep -q "excepción\|\*\*\*"; then ok "en esos arranques, ni una excepción ni una queja del núcleo"
-else ko "el núcleo se ha quejado:"; cat $X/t1.txt $X/t2.txt $X/e.txt | grep "excepción\|\*\*\*" | head -3 | sed 's/^/        /'; fi
+# (las quejas del núcleo empiezan por «*** »; los asteriscos de las contraseñas, no)
+if ! cat $X/t1.txt $X/t2.txt $X/t3.sal $X/e.txt | grep -q "excepción\|^\*\*\* "; then ok "en esos arranques, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; cat $X/t1.txt $X/t2.txt $X/t3.sal $X/e.txt | grep "excepción\|^\*\*\* " | head -3 | sed 's/^/        /'; fi
 }
