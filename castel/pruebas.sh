@@ -3568,7 +3568,7 @@ for vga in std vmware; do
   # (EDID) con -vga std, la lista llega hasta lo que dice su EDID (1280 x 800, la quinta); con vmware, sin EDID, la sexta
   if [ $vga = std ]; then x=403; else x=565; fi
   maquina cd$vga "$VBOX_PC -vga $vga -cdrom $CD -drive file=$V/ide.img,format=raw,if=ide,index=0 -boot d" ":espera 40 ^escritorio: en marcha" ":pausa 3" \
-    ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 572 236" ":pausa 1" ":captura cd$vga" ":clic $x 263" ":clic 229 441" ":pausa 2" ":captura cd${vga}2" ":clic 559 434" ":pausa 1"
+    ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 336 230" ":pausa 1" ":captura cd$vga" ":clic $x 263" ":clic 229 441" ":pausa 2" ":captura cd${vga}2" ":clic 559 434" ":pausa 1"
   mira "el CD en un «pc» como VirtualBox con -vga $vga: el modo de GRUB (800 x 600) se cambia en marcha (1280 x 800) y se mantiene" \
     "escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)" "^pantalla: 1280x800 con 32 bits por punto (cambiado en marcha" \
     "^escritorio: Se queda a 1280 x 800 (hasta que se apague)\."
@@ -3587,7 +3587,7 @@ cp $V/inst.img $V/inst0.img
 python3 -I -c "import sys; t='# GRUB Environment Block\npantalla=\nantes=\nprueba=0\nnativa=1024x768\n'; open(sys.argv[1],'w').write(t+'#'*(1024-len(t)))" $V/envn
 mcopy -o -i $V/inst.img@@1M $V/envn ::HISPA/PANTALLA.ENV
 CIRRUS="$VBOX_PC -vga cirrus -drive file=$V/inst.img,format=raw,if=ide,index=0"
-maquina pc1 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 572 236" ":pausa 1" ":captura pc1" \
+maquina pc1 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 336 230" ":pausa 1" ":captura pc1" \
   ":clic 565 229" ":clic 274 441" ":pausa 1" ":captura pc2" ":clic 314 336" ":pausa 6"
 mira "sin la VBE de Bochs (cirrus), instalado: la medida se guarda en \\HISPA\\PANTALLA.ENV (a prueba), GRUB.CFG la lee, y «Reiniciar ahora» reinicia" \
   "^escritorio: GRUB.CFG lee ahora PANTALLA.ENV" "^escritorio: .*PANTALLA.ENV: pantalla=1024x768 antes= prueba=1" "^escritorio: reiniciar"
@@ -3628,7 +3628,7 @@ else ko "tras reiniciar sin darla por buena, PANTALLA.ENV no queda bien:"; head 
 # para ella y va por la VBE de la BIOS, que no la da) la pone el núcleo al arrancar
 cp $V/inst0.img $V/inst.img
 STD="$VBOX_PC -vga std -drive file=$V/inst.img,format=raw,if=ide,index=0"
-maquina vb1 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 572 236" ":pausa 1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":clic 431 418" ":pausa 2"
+maquina vb1 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 336 230" ":pausa 1" ":clic 565 229" ":clic 229 441" ":pausa 2" ":clic 431 418" ":pausa 2"
 mira "instalado, con la VBE de Bochs: «Mantener» la guarda también para los próximos arranques" "^escritorio: .*PANTALLA.ENV: pantalla=1024x768 antes= prueba=0" \
   "^escritorio: Se queda a 1024 x 768, también al arrancar\."
 maquina vb2 "$STD" ":espera 40 ^escritorio: en marcha" ":pausa 3"
@@ -3648,7 +3648,7 @@ cp $P/d16.img $V/de.img; mcopy -o -i $V/de.img $V/DISPOSIT.BIN ::DISPOSIT.BIN
 for e in 1024:600 1366:768 no; do
   if [ $e = no ]; then o="edid=off"; else o="xres=${e%:*},yres=${e#*:}"; fi
   CAPTURAS=$G MEMORIA=128 DISCO=$V/de.img ARRANQUE=escritorio MODULOS= VGA=none QEMU_MAS="-device VGA,$o" $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" \
-    ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 576 236" ":pausa 1" ":captura ed${e%:*}" ":clic 594 441" ":clic 333 465" ":pausa 3" ":captura dv${e%:*}" > $V/edid$e.sal 2>&1
+    ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 336 230" ":pausa 1" ":captura ed${e%:*}" ":clic 594 441" ":clic 336 422" ":pausa 3" ":captura dv${e%:*}" > $V/edid$e.sal 2>&1
 done
 S=$V/edid1024:600.sal
 mira "con un EDID de 1024 x 600 (un netbook), el núcleo lo lee y lo apunta en el registro del arranque" "pantalla: EDID: «QEMU Monitor», hecha para 1024 x 600 (la tarjeta de QEMU)"
@@ -3668,7 +3668,7 @@ miracap "y en una máquina virtual (su pantalla es una ventana) la lista sigue s
 if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && command -v parted > /dev/null; then
   $AQUI/nucleo32/usb.sh $V/usb.img > $V/usb.txt 2>&1
   USBQ="-machine pc -m 256 -vga cirrus -nic none -device qemu-xhci,id=u -drive file=$V/usb.img,format=raw,if=none,id=m -device usb-storage,bus=u.0,drive=m,bootindex=1"
-  maquina us1 "$USBQ -no-reboot" ":espera 60 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 576 236" ":pausa 1" ":captura us1" \
+  maquina us1 "$USBQ -no-reboot" ":espera 60 ^escritorio: en marcha" ":pausa 3" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 336 230" ":pausa 1" ":captura us1" \
     ":clic 403 229" ":clic 274 441" ":pausa 1" ":clic 314 336" ":pausa 6"
   mira "desde la memoria USB (sin EDID): nada mayor que la de ahora, «A la medida», y se guarda en X:\\PANTALLA.ENV" \
     "la pantalla no dice su medida" "^escritorio: \\\\PANTALLA.ENV: pantalla=auto antes= prueba=1" "^escritorio: reiniciar"
