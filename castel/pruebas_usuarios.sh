@@ -251,6 +251,8 @@ if command -v ssh > /dev/null && command -v ssh-keygen > /dev/null; then
     $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 3" "espia" ":pausa 3" "salir" ":pausa 2" "Ana" ":pausa 1" "uno2tres" ":pausa 6" "ordenes" ":pausa 2" "sshd /encender" ":pausa 150" > $X/h.sal 2>&1
   wait $FUERA
   tr -d '\r' < $X/h.sal > $X/h.txt
+  # (TYPE da el archivo tal cual: con sus CR LF)
+  for f in $X/s_*.txt; do tr -d '\r' < $f > $f.l && mv $f.l $f; done
   S=$X/h.txt
   mira "SSHD encendido por una administradora (Ana), con los usuarios" "^Servidor SSH encendido (puerto 22)" "red: tcp: escuchando en el puerto 22$"
   sal2=$(sed -n 's/^espia: azar //p' $X/h.txt)
