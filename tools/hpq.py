@@ -589,6 +589,11 @@ def principal(a):
         print('hpq: %s (%s %s, %d archivos, %d octetos)' % (salida, op['--nombre'], op['--version'], len(archivos), os.path.getsize(salida)))
         return 0
     if orden == 'catalogo':
+        if len(a) > 4 and a[3] == '--clave':
+            # Antes de reescribir CATALOGO.TXT: que se pueda firmar (módulo y
+            # clave). Si no, un catálogo publicado se quedaba con la firma MALA
+            # (22/11/2026: el cron de Escudo con el Python de cvdupdate).
+            lee_privada(a[4])
         n = catalogo(a[2])
         print('hpq: %s con %d paquetes' % (os.path.join(a[2], 'CATALOGO.TXT'), n))
         if len(a) > 4 and a[3] == '--clave':
