@@ -246,8 +246,14 @@ módulo Preferencias
         si k = 0 o k >= MAX_AJ entonces devolver 0 fin
         según nat16(k)
             caso AJ_TECLADO: devolver distribución()
-            caso AJ_TAPIZ: devolver tapiz_de_ahora
-            caso AJ_DOCK: devolver dock_de_ahora
+            caso AJ_TAPIZ:
+                ; (TOUCHPAD) lo pedido, aunque el escritorio aún no lo haya puesto
+                ; (si no, el Panel, que se repinta enseguida, enseñaba el de antes)
+                si tapiz_del_panel <> 0xFFFFFFFF entonces devolver tapiz_del_panel fin
+                devolver tapiz_de_ahora
+            caso AJ_DOCK:
+                si dock_del_panel <> 0xFFFFFFFF entonces devolver dock_del_panel fin
+                devolver dock_de_ahora
             caso AJ_RED: devolver preferir_red
             caso AJ_TP_HAY: devolver tp_tipo             ; (TOUCHPAD)
             caso AJ_TP_GRABA: devolver quedan_grabando()
