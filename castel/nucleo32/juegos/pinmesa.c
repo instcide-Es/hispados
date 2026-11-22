@@ -205,7 +205,8 @@ void mesa_construye(struct f_mesa *m)
 	}
 	/* la montaña rusa: el canal (choca en las dos capas), su tapa de arriba (solo en la mesa) y sus sensores */
 	pared(88, 240, 88, RAMPA_Y0, 4, 30, C_METAL, C_METAL_ARRIBA, 0.4f, CAPA_TODAS, F_PARED, 0);
-	seg(12, 240, 88, 240, 4, 0.4f, CAPA_MESA, F_PARED, 0);
+	/* (inclinada, y pasando por encima de la punta de la pared del canal: una bola que caiga encima rueda a la mesa, sin quedarse en un rincón) */
+	seg(12, 222, 97, 236, 4, 0.4f, CAPA_MESA, F_PARED, 0);
 	sensor(12, RAMPA_Y0 - 4, 84, RAMPA_Y0 - 4, CAPA_TODAS, S_RAMPA_ENTRA);
 	sensor(12, RAMPA_Y1 + 12, 84, RAMPA_Y1 + 12, CAPA_RAMPA, S_RAMPA_SALE);
 	/* la rampa misma (la pintura: sube del suelo a RAMPA_ALTO, con sus barandillas) */
@@ -286,6 +287,7 @@ void mesa_construye(struct f_mesa *m)
 	}
 	/* los pasillos: las guías, sus postes y los sensores */
 	pared(46, 770, 46, 840, 4, 26, C_METAL, C_METAL_ARRIBA, 0.45f, CAPA_MESA, F_PARED, 0);
+	/* (las guías acaban por encima del eje del flipper —que está un poco más abajo—: la bola cae a él, sin quedarse en un rincón) */
 	pared(46, 840, 140, 897, 4, 26, C_METAL, C_METAL_ARRIBA, 0.45f, CAPA_MESA, F_PARED, 0);
 	pared(412, 770, 412, 840, 4, 26, C_METAL, C_METAL_ARRIBA, 0.45f, CAPA_MESA, F_PARED, 0);
 	pared(412, 840, 320, 897, 4, 26, C_METAL, C_METAL_ARRIBA, 0.45f, CAPA_MESA, F_PARED, 0);
@@ -299,8 +301,8 @@ void mesa_construye(struct f_mesa *m)
 	sensor(416, 860, 444, 860, CAPA_MESA, S_FUERA_D);
 	sensor(452, 420, 488, 420, CAPA_TODAS, S_LANZADOR);
 	/* los ejes de los flippers (metal, que no choca: lo hace el flipper) */
-	cilindro(150, 905, 6, 0, 16, 0x8A929C, 0xD8DDE4);
-	cilindro(310, 905, 6, 0, 16, 0x8A929C, 0xD8DDE4);
+	cilindro(150, FLIPPER_Y, 6, 0, 16, 0x8A929C, 0xD8DDE4);
+	cilindro(310, FLIPPER_Y, 6, 0, 16, 0x8A929C, 0xD8DDE4);
 
 	/* la física */
 	memset(m, 0, sizeof *m);
@@ -323,7 +325,7 @@ void mesa_construye(struct f_mesa *m)
 		struct f_flip *f = &m->flips[i];
 
 		f->px = i ? 310 : 150;
-		f->py = 905;
+		f->py = FLIPPER_Y;
 		f->largo = 66;
 		f->r0 = 11;
 		f->r1 = 5.5f;

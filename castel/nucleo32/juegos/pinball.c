@@ -83,6 +83,7 @@ static int letras_bola, rampas_bola, dianas_bola, tazas_bola;
 static int golpes_flipper_dichos, tic;
 static int pulsado_antes[2], solo_t[2];
 static int lanzar_auto;			/* (multibola, otra vez): lanzar sola la que está en el émbolo */
+static int quieta[F_MAX_BOLAS];		/* los pulsos que lleva cada bola sin moverse */
 
 static const char *const texto_mision[5] = {
 	"Enciende F-E-R-I-A", "Sube 3 veces a la montaña rusa", "Tumba las 3 dianas del tiro", "20 golpes en las tazas", "Mete la bola en la tómbola" };
@@ -1471,6 +1472,18 @@ static void pulso(void)
 			snd_efecto(&s_tombola);
 			premio_tombola();
 		}
+		/* la búsqueda de la bola: si se queda quieta 3 s en la mesa (fuera del lanzador), un empujoncito */
+		if (b->vx * b->vx + b->vy * b->vy < 25 * 25 && !(b->x > 452 && b->y > 900) && !(b->y > 840 && b->x > 110 && b->x < 350)) {
+			/* (no en el lanzador, ni parada en un flipper, que es cosa del jugador) */
+			if (++quieta[i] > 300) {
+				quieta[i] = 0;
+				b->vx = LIMITA((230.0f - b->x) * 1.5f, -300.0f, 300.0f) + (float)(azar_n(60) - 30);
+				b->vy = -320;
+				mensaje("Buscando la bola...", 120);
+				serie("pinball: la bola estaba quieta en (%d, %d): un empujoncito\n", (int)b->x, (int)b->y);
+			}
+		} else
+			quieta[i] = 0;
 		if (b->y > MESA_LARGO + 14) {
 			b->viva = 0;
 			if (salva_t > 0 && !ya_salvada && !falta) {
@@ -1687,7 +1700,12 @@ static void tamano(int an, int al)
 	lz_texto_centro(&LZ, LZ.an / 2, LZ.al / 2 - 8, "Preparando la mesa...", 0xFFD24A, 2, 1);
 	jg_todo_sucio();
 	jg_subir();
-	construye();
+	{
+		u64 t = rdtsc();
+
+		construye();
+		serie("pinball: la mesa, hecha en %u millones de ciclos\n", (u32)((rdtsc() - t) / 1000000));
+	}
 	pinta_todo();
 }
 

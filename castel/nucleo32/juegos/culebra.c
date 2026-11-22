@@ -359,9 +359,18 @@ static void suceso(const struct suceso *s)
 	switch (s->clase) {
 	case EV_TECLA:
 		switch (s->a) {
-		case 0x158:
-			serie("culebra: estado=%d puntos=%ld largo=%d frutas=%d nivel=%d cabeza=%d,%d sonido=%d\n", estado, puntos, largo, comidas, nivel, cx[cab], cy[cab], snd_hay);
+		case 0x158: {
+			int fx = -1, fy = -1, x, y;
+
+			for (y = 0; y < FILAS; y++)
+				for (x = 0; x < COLS; x++)
+					if (mapa[y][x] == M_FRUTA) {
+						fx = x;
+						fy = y;
+					}
+			serie("culebra: estado=%d puntos=%ld largo=%d frutas=%d nivel=%d cabeza=%d,%d fruta=%d,%d sonido=%d\n", estado, puntos, largo, comidas, nivel, cx[cab], cy[cab], fx, fy, snd_hay);
 			return;
+		}
 		case T_DERECHA: case 'd': case 'D': pide(0); return;
 		case T_IZQUIERDA: case 'a': case 'A': pide(1); return;
 		case T_ARRIBA: case 'w': case 'W': pide(2); return;

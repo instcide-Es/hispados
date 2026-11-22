@@ -6011,6 +6011,404 @@ sacado, igual octeto a octeto que lo de Linux, y el ZIP hecho allí, bueno para
 el `unzip` de Linux) y la ventana desde el explorador, con capturas; y el
 Mirador con sus seis imágenes de prueba, el tapiz y otro arranque.
 
+## 14 quaterdecies. Los juegos (el paquete «juegos», rama pentium-juegos)
+
+*22/11/2026, la rama `pentium-juegos` (sobre la 0.8.6 con navega 0.2.2).
+Carlos: «Los juegos tipo tetris, bloques... se quedaron atrás. También echo de
+menos el juego de pinball» (y, de pinball, el estilo del de Windows: «3D
+Pinball»; no esa mesa, sino el aspecto en perspectiva). Lo cambiado fuera de
+lo nuevo lleva la marca `(JUEGOS2)`.*
+
+| | |
+|---|---|
+| ![Hispa-Pinball: «La Feria», a 1024 x 600](pentium/juegos/pinball.png) | ![Inicio > Todos los programas > Juegos](pentium/juegos/menu.png) |
+| ![Bloques: cada pieza con su color y su dibujo](pentium/juegos/bloques.png) | ![Rompemuros](pentium/juegos/rompemuros.png) |
+| ![Solitario (las cartas de Hispa-386)](pentium/juegos/solitario.png) | ![Tragabolas](pentium/juegos/tragabolas.png) |
+| ![Campo de minas](pentium/juegos/minas.png) | ![Culebra](pentium/juegos/culebra.png) |
+
+Ocho juegos, en **Inicio › Todos los programas › Juegos**, cada uno con su
+icono (los de Hispa-386, los de su cabecera HVP; los nuevos, dibujados aquí):
+
+| Juego | Programa | Qué es |
+|---|---|---|
+| **Hispa-Pinball: «La Feria»** | `PINBALL.BIN` | Una mesa de pinball propia, vista en perspectiva, con física de verdad (más abajo) |
+| **Bloques** | `BLOQUES.BIN` | Las piezas que caen: el Bloques de Hispa-386 hecho otra vez, con lo que se espera hoy de un juego así |
+| **Rompemuros** | `ROMPEMUR.BIN` | La pala, la bola y el muro: 24 niveles propios, premios y un editor de niveles |
+| **Culebra** | `CULEBRA.BIN` | La de Hispa-386 |
+| **Campo de minas** | `MINAS.BIN` | El de Hispa-386 |
+| **Solitario** | `SOLITARI.BIN` | El de Hispa-386, con la baraja francesa o la española (sus dibujos) |
+| **Tragabolas** | `TRAGABOL.BIN` | El de Hispa-386 (sus tres jardines) |
+| **Almacén** | `ALMACEN.BIN` | El de Hispa-386 (sus 24 niveles) |
+
+Nada es de nadie: ni nombres de marcas, ni músicas, ni colores registrados,
+ni mesas de otros pinballs. Las melodías y los sonidos se sintetizan aquí;
+las cartas, los jardines y los niveles de Almacén son los de Hispa-386.
+
+### HVPRUN o programas de aquí: de aquí
+
+HVPRUN ya corre los módulos `.HVP` de Hispa Ventanas (la oficina, los
+emuladores), y los juegos de Hispa-386 correrían con él tal cual. Pero se han
+hecho otra vez, en C, como programas de Hispa-Pentium (el anillo 3, cabecera
+`HPU3`), porque así:
+
+- **Guardan los récords donde deben.** Un `.HVP` escribe los suyos al lado del
+  módulo (`CULEBRA.REC` junto a `CULEBRA.HVP`): en `\HISPA\JUEGOS`, la zona
+  protegida (§14 sexies), eso es «acceso denegado»; en una carpeta libre, los
+  de todos en el mismo archivo. Los de aquí los guardan en la carpeta de cada
+  usuario (abajo).
+- **Ganan la resolución y la ventana.** Los de Hispa Ventanas se pintan a 256
+  colores y casi todos a un tamaño fijo (el Solitario ya se estiraba, a tres
+  escalas); los de aquí, a 32 bits, en una ventana que se estira (lo de dentro
+  crece con ella: las casillas, las cartas, el campo, la mesa) y a pantalla
+  completa (F11).
+- **Suenan por SONIDO.BIN** con música y sonidos propios (los de Hispa
+  Ventanas no tenían sonido), y usan **la rueda del ratón** (Bloques gira con
+  ella; Rompemuros mueve la pala).
+- **Las teclas, de verdad.** Un juego de acción necesita saber qué teclas están
+  pulsadas (los dos flippers a la vez, mantener el lanzador, mover sin esperar
+  a la repetición del teclado): la llamada 181 da el mapa de las teclas
+  pulsadas y lo pulsado desde la última vez (la de WIN32.BIN).
+
+Lo que no cambia de los de Hispa-386: las reglas, los tableros, los niveles,
+los jardines, los dibujos de las cartas y los iconos (los saca de sus fuentes
+`castel/nucleo32/juegos/datos386.py` al compilar: no hay copias a mano).
+
+### Lo común: `juego.c`, `dibujo.c` y `sintes.c`
+
+- **La ventana y su lienzo** (`juego.c`). Cada juego pinta en un lienzo de 32
+  bits de su memoria y sube a la ventana **solo lo que ha cambiado** (una lista
+  corta de rectángulos sucios que se juntan si se tocan; si es casi todo, de una
+  vez), con la llamada 34 (`OP_MAPA`). La **pantalla completa** es la ventana
+  sin marco de la llamada 182 (`V_COMPLETA`), como la del Mirador.
+- **El pulso y los cuadros.** Cada programa lleva su bucle: los sucesos sin
+  esperar; el **pulso** del juego a 100 por segundo (el reloj del núcleo: el
+  pinball da ahí cuatro pasos de física); y un **cuadro** cuando toca (60 por
+  segundo) y algo ha cambiado. Luego duerme un tic (la llamada 3). Con
+  `/MIDE`, cada 5 s dice por el puerto serie lo que gasta (los ciclos del
+  procesador, `rdtsc`) y cuántos cuadros ha pintado, por partes: el juego,
+  pintar y subirlo a la ventana.
+- **Las teclas.** Las de jugar, por el mapa de la llamada 181 (`tecla(K_Z)`:
+  pulsada ahora; `tecla_vino(K_ESPACIO)`: se acaba de pulsar, aunque ya se haya
+  soltado, sin contar la repetición del teclado); las de los menús (F2, P,
+  Esc...), como sucesos. F11 y F12 no llegan como sucesos (el teclado da de la
+  F1 a la F10): se miran en el mapa. F12 dice el estado del juego por el
+  puerto serie (las pruebas).
+- **Dibujar** (`dibujo.c`): rectángulos, degradados, esquinas redondas,
+  líneas, círculos y **polígonos con el borde suavizado** (cuatro renglones por
+  fila y lo que tapa cada punto del borde), copiar, mezclar y la **letra de
+  8x16** de Hispa Ventanas a cualquier escala entera (de `letra.cas`). Los
+  textos van en UTF-8 en los fuentes y se pasan a la página 437 de Ventanas (con
+  la Á, la Í, la Ó, la Ú y el euro).
+- **Los menús** de la barra (Juego, Ayuda), con los menús emergentes del
+  escritorio (la llamada 39), y **los cuadros** (un aviso, sí o no, elegir de
+  una lista; la tabla de récords) pintados encima del juego, con su bucle.
+- **Los récords y los ajustes**, un archivo de texto por juego
+  (`BLOQUES.REC`: `clave=valor`, página 437, CR LF): en
+  **`\USUARIOS\<CARPETA>\AJUSTES\JUEGOS`** si hay cuentas (la llamada 200, la
+  de la rama `usuarios`: «su carpeta»), y si no (la principal de hoy, que no
+  tiene cuentas), en **`\AJUSTES\JUEGOS`** de la unidad del sistema (fuera de
+  `\HISPA`, que solo escriben PAQUETES e INSTALAR). Las tablas, los diez
+  mejores con el nombre del que juega (la llamada 68: el usuario de
+  `HISPA.INI`) y la fecha: `Puntos1=12345|Carlos|22/11/2026`. Una partida sin
+  puntos no es récord.
+- **El sonido** (`sintes.c`): un canal de 22.050 Hz, mono y 16 bits del
+  servicio de sonido (la llamada 190; se le dan unos 50 ms por delante en cada
+  pulso, sin esperar: la 191 con el bit 31). Si no hay servicio o tarjeta
+  (`NO_HAY`, o un núcleo sin la llamada), «sin sonido» y en silencio: el juego
+  no lo nota. Doce voces a la vez (cuadrada, triángulo, sierra, ruido, seno y
+  campana), cada una con su barrido de frecuencia, su ataque y su caída, y que
+  pueden esperar antes de sonar (los arpegios); y **la música**: dos voces
+  leídas de una partitura en texto, como las de los BASIC de siempre (`T132 O5
+  L8 V34 @1 e4 a b > c4 < b a | ...`). Cada juego, «Sonidos» y «Música» sí o
+  no en su menú (se recuerda).
+
+### Bloques
+
+Por un pozo de **10 x 20** caen las siete piezas de cuatro casillas, con los
+nombres que ya tenían en el Bloques de Hispa-386: **Viga, Losa, Pico,
+Peldaño, Escalón, Gancho y Garfio**; con «Piezas variadas», las **once** de
+Hispa-386 (también Barrita, Codo, Cruz y Cazo), en su pozo de 11 y con sus
+filas de piedra (desde el nivel 5, cada 10 piezas sube del fondo una fila con
+un hueco).
+
+- **Cada pieza, su color y su dibujo** (para Carlos, que es daltónico: se
+  distinguen sin mirar el color, y en «Ayuda › Las piezas» se dice cuál es cuál):
+
+  | Pieza | Dibujo | Color |
+  |---|---|---|
+  | Viga | rayas tumbadas | terracota |
+  | Losa | cuatro puntos | añil |
+  | Pico | un rombo | mostaza |
+  | Peldaño | rayas que suben | ciruela |
+  | Escalón | rayas que bajan | oliva |
+  | Gancho | rayas de pie | pizarra |
+  | Garfio | cuadros | verde azulado |
+  | Barrita, Codo, Cruz, Cazo | una cruz, un aro, un aspa, un marco | (las de Hispa-386) |
+  | La piedra | motas | gris |
+
+  Los colores son propios (ninguno es el de la misma pieza en otro juego) y las
+  piezas son azulejos con su bisel. Los nombres de las siguientes y de la
+  reserva se escriben debajo de cada una.
+- **Girar con apoyos**: a la derecha (↑, X, la rueda, un clic) y a la
+  izquierda (Z, Control). Si girada no cabe, se prueba una casilla a cada lado,
+  una más arriba, en diagonal hacia arriba, dos a los lados (solo la Viga) y
+  una más abajo; la Losa no gira.
+- **Las tres siguientes**, la **reserva** (C o Mayús: guardar la pieza y sacar
+  la guardada; una vez por pieza), **la sombra** (dónde caería; se puede
+  quitar), **bajar deprisa** (↓: una casilla cada 30 ms, un punto cada una) y
+  **de golpe** (Espacio o el botón derecho: dos puntos por casilla).
+- **Mover sin esperar al teclado**: al pulsar, una casilla; si se deja
+  pulsado, tras 160 ms, una cada 45.
+- **Al tocar fondo**, medio segundo para moverla aún (15 movimientos como
+  mucho).
+- **Las piezas salen de una bolsa**: las siete (o las once) en un orden al
+  azar, y otra bolsa.
+- **Niveles**: cada 10 filas, uno más (hasta el 15; se puede empezar en el 1,
+  3, 5, 7 o 10): 800 ms por casilla en el 1 y 50 en el 15.
+- **Puntos**: 100, 300, 500 u 800 por una, dos, tres o cuatro filas a la vez
+  («¡Doble!», «¡Triple!», «¡Cuádruple!»), por el nivel; 50 más por el nivel
+  por cada vez seguida que se quitan filas; y 1.000 por el nivel si el pozo
+  queda vacío («¡Limpio!»). Las filas hechas se ven en blanco un momento.
+- **La música**: una melodía propia en la menor, en dos voces (la melodía en
+  triángulo y el bajo), de 32 compases; M la quita y la pone. Los sonidos:
+  mover, girar, encajar, soltar de golpe, las filas (un arpegio de campanas,
+  más largo cuantas más filas), el nivel nuevo y el final.
+- **Récords**: los diez mejores de cada forma de jugar (`Puntos1=` y
+  `Variadas1=`), con el nivel inicial, las piezas, la música, los sonidos y la
+  sombra, en `BLOQUES.REC`. P o Esc pausa (y sola, si la ventana deja de ser
+  la activa).
+
+### Rompemuros
+
+Una pala, una bola y un muro de **13 columnas** de ladrillos. La pala sigue a
+la flecha del ratón (o ← → con A D, más deprisa con Mayús, o la rueda); un
+clic o Espacio suelta la bola (o dispara).
+
+- **La bola sale de la pala** con un ángulo según dónde la toca (hasta 60
+  grados), va algo más deprisa con cada golpe (hasta un tope) y cada nivel
+  empieza un poco más rápido; nunca va casi de lado. La física: cuatro pasos
+  por pulso (400 por segundo), primero en x y luego en y (así se sabe en qué
+  cara ha dado).
+- **Los ladrillos**, cada uno con su dibujo además de su color: los normales
+  (rayas, puntos, un rombo, diagonales, cuadros, rayas de pie, aspas, liso:
+  un golpe), los **duros** (remaches; dos golpes: con el primero se rajan),
+  los **muy duros** (doble marco; tres), los de **metal** (tornillos y brillo:
+  no se rompen, ni hacen falta), los **explosivos** (un aspa: se llevan los de
+  alrededor, y los de alrededor de esos si también lo son) y los de **premio**
+  (una estrella: siempre sueltan una cápsula). Al romperse, saltan trozos.
+- **Los premios**: cápsulas que caen (uno de cada seis ladrillos), cada una con
+  su **letra**, su dibujo y su color: **L** pala larga, **C** pala corta, **M**
+  tres bolas, **P** pala pegajosa (la bola se queda en la pala hasta soltarla),
+  **R** bola lenta, **D** disparos (dos cañones en la pala) y **V** una vida
+  más. Duran un rato.
+- **24 niveles propios**: Primeros ladrillos, Pirámide, Ajedrez, Corazón,
+  Franjas duras, El disquete (el de Hispa-DOS), Almenas, Rombos, Barriles,
+  Escalera, La flor, Pasillos de metal, La ola, El barco, Muro doble, El sol,
+  La llave, Explosiones en cadena, El cactus, Laberinto, Arcoíris, La casa,
+  Fortaleza y Gran final; cada uno con su fondo.
+- **El editor** (Juego › Editor de niveles...): uno nuevo, vacío o desde el
+  nivel en que se está, o uno de los guardados; un clic pone el ladrillo
+  elegido (en la paleta de abajo, o con las teclas 1 a 9), el botón derecho lo
+  quita; G guarda (hasta diez, en `ROMPEMUR.NIV`, al lado de los récords: un
+  nivel por renglón), J lo juega y Esc sale. «Jugar mis niveles» juega los
+  guardados uno tras otro.
+
+### Hispa-Pinball: «La Feria»
+
+Una mesa propia, de una **feria de pueblo de noche**: el suelo, un cielo
+violeta con estrellas y la carpa de rayas rojas y blancas con su orla de
+banderines; arriba, las tres **calles F, E y R** y las tres **tazas** (los
+bumpers, como las de la atracción); a la izquierda, la **montaña rusa** (una
+rampa que sube y suelta la bola arriba, junto a las calles); a la derecha, el
+**tiro al blanco** (tres dianas que se tumban); en medio, la **tómbola** (un
+agujero con su rueda de colores que se traga la bola, da un premio y la
+devuelve) y la **noria**, pintada en el suelo, con las cinco misiones en sus
+barquillas y la estrella de la Gran Feria en el eje; abajo, las dos hondas,
+los pasillos **I** y **A**, los multiplicadores x2 a x5 y los dos flippers.
+Nada es de otra mesa: ni la forma, ni el tema, ni los dibujos, ni los textos.
+
+**Cómo se ve: en perspectiva, desde el jugador.** La mesa se proyecta como una
+de verdad vista desde delante y desde arriba: cada fila de la pantalla es una
+distancia de la mesa (lo de lejos, más estrecho y más oscuro), las piezas
+tienen volumen (paredes de madera con el canto dorado, guías de metal,
+postes, las tazas con su aro, su cuerpo y su tapa, las hondas de plástico
+blanco con su goma, las dianas, la rampa de plástico azul con sus barandillas,
+los flippers de goma roja con lo de arriba crema), con sus caras iluminadas
+según hacia dónde miran, y un brillo de cristal en diagonal. La bola es de
+acero (la luz de arriba a la izquierda, el reflejo de la mesa abajo y su
+brillo) y lleva su sombra; en la rampa sube y se hace más grande. Las luces se
+encienden de verdad (con su resplandor). Se adapta a la pantalla: a 1024 x 600
+(el HP Mini) la mesa ocupa el alto, con **el cartel de la feria a la
+izquierda** (con la **noria que gira**) y **el marcador a la derecha**: los
+puntos y los mensajes en una matriz de puntos ámbar (los largos pasan de
+derecha a izquierda), la bola, el multiplicador, el récord, las misiones (la
+que toca, marcada; las hechas, con su señal) y las teclas. A 1280 x 720 o más,
+todo más grande; en una ventana pequeña, sin el cartel.
+
+**Cómo está hecho** (`pinball.c`, `pinmesa.c`, `pinfis.c`):
+
+- **La física**, en el plano de la mesa (2D, en unidades de la mesa: 500 de
+  ancho por 1000 de largo, unos milímetros; la bola, de 12,5 de radio):
+  gravedad hacia el jugador (la de la mesa inclinada; más en la rampa, que
+  sube), un poco de roce al rodar, y choques con **segmentos** (con su grosor:
+  las paredes, las guías, las gomas, las dianas, la puerta de un solo sentido
+  del lanzador), **círculos** (los postes y las tazas, que patean) y
+  **flippers** (un palo que gira, más grueso en el eje que en la punta). Cada
+  paso (400 por segundo) se parte en los **subpasos** que hagan falta para que
+  ni la bola ni la punta de un flipper que se mueve avancen más de un cuarto del
+  radio de la bola en uno (hasta 64): así su centro no puede cruzar una pared
+  sin haber chocado antes, y **no atraviesa nada a ninguna velocidad** (las
+  pruebas lo miran con miles de bolas de hasta 15.000 unidades por segundo).
+  En cada choque, lo que va hacia la cosa se da la vuelta por su rebote, y en
+  los flippers con lo que se mueve la goma en ese punto (así golpean: una bola
+  parada en el flipper sale a unas 1.400 unidades por segundo); las hondas y
+  las tazas dan además su patada. Dos bolas chocan entre sí. La rampa es otra
+  «capa»: unas rayas (sensores) cambian la bola de capa al entrar y al salir.
+  Una caja alrededor de cada segmento descarta casi todos sin hacer cuentas.
+- **El fondo, una vez**: el dibujo del suelo se hace en la mesa (`mesa_suelo`:
+  apagado, encendido y el mapa de qué punto es de qué luz) y se proyecta fila
+  a fila con su textura (con las dos mezclas de los cuatro puntos de al lado);
+  luego las piezas, de atrás adelante, en las dos versiones; y, de cada punto,
+  **su profundidad** (para que la bola se esconda detrás de lo que tiene
+  delante) y de qué luz es: cada luz son unos tramos de filas, que se copian de
+  la versión encendida o de la apagada cuando cambia. Se rehace al cambiar el
+  tamaño («Preparando la mesa...»).
+- **En cada cuadro**, solo lo que se mueve (la bola con su sombra, los
+  flippers, el émbolo) y solo si ha cambiado o le toca algo que ha cambiado:
+  se borra de la base lo de antes y se pinta lo de ahora, de atrás adelante.
+- **Las reglas**: tres bolas. Las calles F, E y R (al pasar por ellas) y los
+  pasillos I y A encienden **FERIA**: con la palabra entera, el multiplicador
+  del bonus sube (hasta x5). Los flippers corren las letras de arriba (el
+  «cambio de calle»). **Cinco misiones**, una tras otra, con su texto en el
+  marcador: encender F-E-R-I-A; subir 3 veces a la montaña rusa; tumbar las 3
+  dianas del tiro; 20 golpes en las tazas; meter la bola en la tómbola. Cada
+  una, 100.000 puntos por su número (y por la vuelta); con las cinco, **¡la
+  Gran Feria!**: otra bola a la vez y los puntos al doble mientras haya dos.
+  La tómbola da un premio (puntos, el multiplicador, una letra, más «otra
+  vez»); tras el tiro al blanco, **la bola extra**. Al lanzar, la calle que
+  parpadea vale el **tiro de habilidad**. Los primeros 10 s de cada bola, si
+  se cuela, vuelve: **«¡Otra vez!»**. Al perder la bola, **el bonus**: las
+  letras, las rampas, las dianas y las tazas de esa bola, por el
+  multiplicador. Si una bola se queda quieta 3 s fuera de los flippers y del
+  lanzador, un empujoncito («Buscando la bola...»).
+- **Empujar la mesa** (X, el punto, la flecha arriba) da a la bola un poco de
+  velocidad hacia un lado o hacia arriba; cada empujón suma «temblor», que se
+  va pasando: con mucho, **«¡Cuidado!»** y luego **FALTA**: los flippers se
+  apagan (grises) hasta que se pierde la bola, y no hay bonus.
+- **Las teclas**: flipper izquierdo, **Z**, Mayús izquierda, Control izquierdo,
+  ← o el botón izquierdo del ratón; derecho, **«-»** (donde otros teclados
+  tienen la «/»), Mayús derecha, Control derecho, → o el botón derecho.
+  **Lanzar**: mantener Espacio (o ↓, o Intro) y soltar: cuanta más fuerza, más
+  rápido sale. P pausa; **Esc, el menú** (seguir, partida nueva, música,
+  ventana o pantalla completa, récords, salir); F2 otra partida; F11 ventana o
+  pantalla completa. Empieza a pantalla completa (`/VENTANA`: en una ventana).
+- **Los sonidos** (sintetizados): los flippers, las tazas, las hondas, las
+  dianas, la rampa, el muelle, la tómbola, la falta, la bola perdida, las
+  campanillas de las letras y el organillo de las misiones; y **un vals de
+  feria** propio, de fondo (M lo quita).
+- `/SOLO` juega solo (los flippers saltan cuando la bola llega, y lanza solo):
+  para las pruebas y para ver la mesa en marcha.
+
+### Los de Hispa-386
+
+Las mismas reglas y los mismos tableros, ahora con la ventana que se estira,
+sonido y los récords en la carpeta del usuario (cada uno, su `.REC`):
+
+- **Culebra** (28 x 18): las mismas velocidades (275, 220 y 165 ms por paso, y
+  55 menos por nivel, cada cinco frutas), los mismos muros, los mismos puntos
+  (5 por la suma de la velocidad, el nivel y los muros) y el mismo dibujo; los
+  diez mejores sin muros y con muros. `/P`, paso a paso.
+- **Campo de minas**: Pequeño, Mediano, Grande y Personalizado (el ancho, el
+  alto y las minas, de unas listas); la primera losa nunca tiene mina; clic,
+  botón derecho o Mayús+clic, dos clics en un número; teclado; el rombo (con
+  su forma, además del color, al ganar y al perder: una marca o un aspa); los
+  mejores tiempos de cada tablero. `/P`, el tablero de prueba de Hispa-386.
+- **Solitario**: la baraja francesa o la española, con las cartas dibujadas
+  en Hispa-386 (las pintas, los índices y las figuras), a la escala que pida
+  la ventana; arrastrar (la carta o la escalera vuelve si no vale), dos clics
+  o el botón derecho, Espacio, S, deshacer (512 pasos); las mismas claves de
+  `SOLITARI.REC` (`Jugadas=`, `Ganadas=`, `Tiempo=`, `Movimientos=`, y los de
+  la francesa con `Francesa ...`). `/CASI`, todo subido menos los reyes.
+- **Tragabolas**: los tres jardines, los tres erizos con sus maneras (el
+  granate va a por el Tragón, el añil al azar, el marrón le sale al paso), las
+  campanas, las vueltas más rápidas; ahora el Tragón y los erizos van suaves de
+  casilla a casilla.
+- **Almacén**: los 24 niveles (tools/almacen_niveles.py los resuelve todos),
+  deshacer, empezar otra vez, cambiar de nivel (al primero, a los resueltos y
+  al siguiente), un clic en la fila o la columna del mozo; las cajas en su
+  sitio, verdes **y con una marca blanca**; las marcas del suelo, un aro con
+  un aspa. `ALMACEN.REC`: `Nivel=`, `Mejor1=` ... y `Empujones1=` ...
+
+### Lo que gasta (el HP Mini 5103, Atom N455)
+
+Medido como el Reproductor, en QEMU con **`-cpu n270 -icount shift=0`** (un
+Atom N270, el mismo núcleo que el N455, haciendo mil millones de
+instrucciones por segundo; los juegos son `-march=i586` y `hacer.sh` comprueba
+con `objdump` que no llevan CMOV ni FCOMI): lo que dice `/MIDE` (los ciclos
+del juego, de sus llamadas al sistema y de subir lo pintado; sin lo que el
+escritorio tarda en componer la pantalla). El N455 va a 1,66 GHz; con lo que
+tarda su x87, cuente hasta el doble.
+
+| Qué | Lo que gasta | Cuadros por segundo |
+|---|---|---|
+| **Hispa-Pinball** a pantalla completa a 1024 x 600, jugando (`/SOLO`) | **4 %** (la física, 0,2 %; pintar, 2,6 %; subirlo, 0,5 %) | **60** |
+| Rompemuros jugando (`/SOLA`) | MEDIDA_ROMPE | 60 |
+| Hacer la mesa del pinball (una vez, al abrirlo o cambiar el tamaño) | MEDIDA_MESA | |
+
+Al principio el pinball gastaba el 11 %: repintaba en cada cuadro los
+flippers y el émbolo aunque no se movieran. Ahora cada cosa que se mueve se
+repinta solo si ha cambiado (o si toca algo que ha cambiado).
+
+### Dónde está
+
+- `castel/nucleo32/juegos/`: `juego.h`, `juego.c`, `dibujo.c`, `sintes.c` (lo
+  común); `bloques.c`, `rompemur.c`, `pinball.c` + `pinmesa.c` + `pinfis.c`,
+  `culebra.c`, `minas.c`, `solitar.c`, `tragabol.c`, `almacen.c`;
+  `datos386.py` (lo de Hispa-386 y la letra, a un `.h` al compilar),
+  `hazicono.py` (los iconos `.ICP`), `hacer.sh CARPETA` (los ocho programas, y
+  al lado sus `.MNU` con `tipo=Juegos` y sus `.ICP`; con la biblioteca de C y
+  la entrada de Comprimidos: `../comprim/base.c`, `entrada.asm`,
+  `pentium.ld`), `paquete.sh SALIDA`, `LEEME.txt` y `prueba/` (las pruebas en
+  el anfitrión: `anfitrion.sh`, `prueba_pinball.c`, `prueba_sonido.c`, y un
+  `pentium.h` de mentira).
+- **El paquete «juegos» 1.0** (tipo juegos; `OPCIONALES` de `tools/hpq.py`,
+  marcado `(JUEGOS2)`): los ocho en `\HISPA\JUEGOS`, sus accesos y sus iconos
+  en `\HISPA\MENU` y `\HISPA\JUEGOS\LEEME.TXT`. Necesita base >= 0.8.4 (las
+  llamadas 181 y 182); el sonido, si está.
+
+### Probarlo
+
+`SOLO=juegos castel/pruebas.sh` (la parte 39, en `castel/pruebas_juegos.sh`;
+DURACION): en el anfitrión, con ASan y UBSan, **la física del pinball** —4.000
+bolas por la mesa de verdad, desde sitios y en direcciones al azar, de 100 a
+15.000 unidades por segundo (sin el tope del juego), y ninguna sale por las
+paredes de fuera, cruza la del lanzador ni se mete en un poste o una pared;
+en una caja sin roce y con rebote 1, la rapidez sigue igual tras 30 s y más
+de 120 choques; con la gravedad, la energía no se va más de un 3 %; con rebote
+0,5, de frente sale a la mitad; una bola quieta en cada flipper sale
+disparada al pulsarlo; y 300 bolas de 1.500 a 4.200 por segundo contra el
+flipper que sube, sin atravesarlo—, la música de `sintes.c` y los 24 niveles
+de Almacén con solución. Luego los programas (sin CMOV ni FCOMI) y el
+paquete; y en QEMU, en un disco con `\JUEGOS` y los accesos en `\MENU`: el
+menú Inicio con la carpeta Juegos y sus ocho, uno abierto desde ahí; y cada
+juego desde la Consola con teclas grabadas (Bloques: una Viga en el pozo de
+prueba que quita cuatro filas a la vez —824 puntos y 1.000 del «¡Limpio!»—,
+la reserva, la música por la tarjeta y la partida hasta el final; Culebra: a
+la fruta y contra el borde; Campo de minas y Solitario, ganados; Tragabolas;
+Almacén, el primer nivel; Rompemuros y el pinball, solos; el pinball también
+a mano, con el lanzador mantenido, a 1024 x 600 y a pantalla completa), los
+**récords** en `\AJUSTES\JUEGOS` del disco, **sin el servicio de sonido**
+(en silencio, sin fallar) y **lo que gastan en el Atom N270** de QEMU.
+
+### Lo que falta
+
+- Probarlos en el HP Mini, el Toshiba y los Mac (el sonido y los 60 cuadros de
+  verdad; con QEMU, el escritorio compone a 100 por segundo).
+- Los mandos (joysticks) cuando el núcleo los tenga; el pinball con más mesas.
+- Pintura (en Hispa-386 es un `.HVP`): con HVPRUN ya se puede abrir; hacerla
+  de aquí, como los juegos.
+- Las vibraciones de la pantalla al empujar la mesa del pinball.
+
 ## 15. Las pruebas
 
 `castel/pruebas.sh` (las partes 8 a 14; `SOLO=32 ./pruebas.sh` hace solo esas y la

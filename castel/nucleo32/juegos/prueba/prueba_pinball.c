@@ -10,7 +10,11 @@
  *     rapidez sigue igual (±2 %) tras 30 s y más de 120 choques; con la gravedad,
  *     la energía (la del movimiento más la de la altura) no se va más de un
  *     3 %; con rebote 0,5, cada choque pierde lo que tiene que perder.
- *  3. El flipper golpea: una bola quieta en el flipper sale disparada hacia
+ *  3. Ninguna se queda atascada: 2.000 bolas soltadas por la mesa (también
+ *     encima del canal de la rampa), con los flippers abajo, acaban todas
+ *     cayendo por abajo (o en el lanzador) antes de 15 s: no hay rincones ni
+ *     repisas donde se queden quietas.
+ *  4. El flipper golpea: una bola quieta en el flipper sale disparada hacia
  *     arriba al pulsarlo (a más de 1.000 por segundo); y una bola que llega
  *     rapidísima mientras el flipper sube no lo atraviesa.
  * Sale con 1 si algo falla. Lo que dice, una línea por prueba («OK» o «MAL»).
@@ -329,9 +333,42 @@ static void flipper(void)
 	dice(malas == 0, t);
 }
 
+static void atascadas(void)
+{
+	struct f_mesa m;
+	int intento, malas = 0, k;
+	char t[200];
+
+	mesa_construye(&m);
+	for (intento = 0; intento < 2000; intento++) {
+		float x, y;
+
+		do {
+			x = al_azar(20, 440);
+			y = intento % 10 == 0 ? al_azar(150, 236) : al_azar(60, 880);
+		} while (!libre(&m, x, y) && !(intento % 10 == 0 && x < 100 && x > 25));
+		memset(m.bolas, 0, sizeof m.bolas);
+		m.bolas[0].viva = 1;
+		m.bolas[0].capa = CAPA_MESA;
+		m.bolas[0].x = x;
+		m.bolas[0].y = y;
+		m.bolas[0].vx = al_azar(-60, 60);
+		for (k = 0; k < 6000 && m.bolas[0].y < 1005; k++)
+			f_paso(&m, 1.0f / 400);
+		if (m.bolas[0].y < 1005 && !(m.bolas[0].x > 452 && m.bolas[0].y > 930)) {
+			if (malas < 5)
+				printf("    se queda en (%.1f, %.1f), soltada en (%.1f, %.1f)\n", (double)m.bolas[0].x, (double)m.bolas[0].y, (double)x, (double)y);
+			malas++;
+		}
+	}
+	snprintf(t, sizeof t, "atascadas: 2000 bolas soltadas por la mesa (una de cada diez, encima del canal de la rampa): %d se quedan quietas", malas);
+	dice(malas == 0, t);
+}
+
 int main(void)
 {
 	no_atraviesa();
+	atascadas();
 	conserva();
 	flipper();
 	printf("%s\n", fallos ? "== hay fallos ==" : "== todo bien ==");

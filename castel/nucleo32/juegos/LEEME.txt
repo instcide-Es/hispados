@@ -1,0 +1,31 @@
+Los juegos de Hispa-Pentium (el paquete «juegos»)
+=================================================
+
+Ocho juegos propios, en el menú Inicio > Todos los programas > Juegos. Todos
+se abren en una ventana que se puede estirar (lo de dentro crece con ella),
+F11 los pasa a pantalla completa y vuelve, suenan (si hay tarjeta de sonido y
+el servicio SONIDO.BIN; si no, en silencio) y guardan sus récords y sus
+ajustes en la carpeta del usuario (\USUARIOS\<USUARIO>\AJUSTES\JUEGOS; sin
+cuentas, \AJUSTES\JUEGOS de la unidad del sistema), un archivo de texto por
+juego (BLOQUES.REC, PINBALL.REC...).
+
+  - Hispa-Pinball, «La Feria»: una mesa de pinball propia en perspectiva, con
+    física de verdad. Flippers: Z y «-» (o Mayús, Control, las flechas o los
+    botones del ratón); lanzar: mantener Espacio y soltar; empujar: X, punto y
+    flecha arriba (¡sin pasarse, o FALTA!); Esc: el menú. Cinco misiones y la
+    Gran Feria (dos bolas).
+  - Bloques: las piezas que caen; cada pieza con su color y su dibujo (para
+    distinguirlas sin mirar el color). Flechas, arriba o X gira, Z gira al
+    otro lado, Espacio suelta, C guarda en la reserva, P pausa, M música.
+  - Rompemuros: la pala y la bola contra el muro; 24 niveles y el editor de
+    niveles propios. La pala, con el ratón o las flechas; un clic o Espacio
+    suelta la bola o dispara.
+  - Y los de Hispa-386: Culebra, Campo de minas, Solitario (baraja francesa o
+    española), Tragabolas y Almacén (24 niveles).
+
+F1, en cada uno, cómo se juega.
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+Todo es de aquí: los juegos, la mesa, los niveles, los dibujos, la música y
+los sonidos (sintetizados). Las cartas, los jardines de Tragabolas y los
+niveles de Almacén son los de Hispa-386.

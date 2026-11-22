@@ -12,6 +12,8 @@
 #define MESA_AN 500.0f
 #define MESA_LARGO 1000.0f
 #define RADIO_BOLA 12.5f
+/* los ejes de los flippers (x 150 y 310) */
+#define FLIPPER_Y 913.0f
 /* dónde descansa la bola en el lanzador, y la goma del émbolo */
 #define LANZA_X 468.0f
 #define LANZA_Y 958.0f
