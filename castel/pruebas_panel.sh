@@ -38,7 +38,7 @@ pu() { grep "^$1=" $K/srv/puertos | cut -d= -f2; }
 B=https://10.0.2.2:$(pu bueno)
 mmd -i $K/d.img ::RAICES && mcopy -i $K/d.img $K/srv/RAIZ.CER ::RAICES/PRUEBA.CER
 # el reloj del PC: la hora de Madrid más cinco minutos
-relojes() { TZ=Europe/Madrid date -d "$1" +%Y-%m-%dT%H:%M:%S; }
+relojes() { TZ=Europe/Madrid date -d "$1" +%Y-%m-%dT%H:%M:%S; }   # (con el PC cargado, QEMU puede tardar en arrancar: de 3 a 5 min por delante)
 
 # 1. HORARED en la Consola (ORDENES, con la red): una copia fuera de \HISPA
 # no tiene el sello; dos servidores de acuerdo la ponen; el del 2001, no; el
@@ -63,7 +63,7 @@ mira "HORARED sin nada: la zona (Europa/Madrid), el horario de verano (en noviem
   "^La hora por Internet: encendida$" "^La última vez: aún no se ha preguntado la hora a Internet$"
 mira "HORARED /AHORA con dos servidores que dicen lo mismo: el reloj iba cinco minutos adelantado y se pone en hora (de una vez, al empezar el segundo)" \
   "^hora: 10.0.2.2 (10.0.2.2:$NP) da [0-9/]* [0-9:,]* UTC (ida y vuelta: [0-9]* ms)$" \
-  "^hora: la hora de aquí: .* (el reloj del PC va adelantado 4 min [0-9]* s; contestan 2, de acuerdo 2)$\|^hora: la hora de aquí: .* (el reloj del PC va adelantado 5 min [0-9]* s; contestan 2, de acuerdo 2)$" \
+  "^hora: la hora de aquí: .* (el reloj del PC va adelantado [345] min [0-9]* s; contestan 2, de acuerdo 2)$" \
   "^hora: puesta en hora: -[23][0-9][0-9] s$" "^hora: puesto en hora por Internet$" "(HORARED.BIN ha acabado con el código 2)"
 mira "y otra vez: ya está en hora (un segundo arriba o abajo); el estado lo dice" "^hora: el reloj del PC está en hora$" "^hora: el reloj estaba en hora$" \
   "^La última vez: el reloj estaba en hora (el [0-9/]* [0-9:]*; el reloj iba "
