@@ -113,11 +113,11 @@ TIPO_POR_NOMBRE = {
     'red': 'internet', 'tls': 'internet', 'navega': 'internet', 'ssh': 'internet',
     'tailscal': 'internet', 'wifi': 'internet',
     'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina',
-    'consola': 'herramientas', 'accesori': 'herramientas',
+    'consola': 'herramientas', 'accesori': 'herramientas', 'comprim': 'herramientas',
     'ejemplos': 'desarrollo',
     'win32': 'windows',
     'escudo': 'seguridad', 'escbase': 'seguridad', 'escmes': 'seguridad', 'escdia': 'seguridad',
-    'sonido': 'multimedia',
+    'sonido': 'multimedia', 'mirador': 'multimedia',
     'clicgest': 'terceros',
 }
 
@@ -208,7 +208,7 @@ SISTEMA = [
     ('bloc', VERSION_085, 'El Bloc de notas', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),
     ('consola', VERSION_085, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
     # (explorador, dispositivos) el explorador de archivos, sus miniaturas y el Administrador de dispositivos
-    ('equipo', '0.9.1', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
+    ('equipo', '0.9.2', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
         ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('MINIAT.BIN', r'\HISPA\MINIAT.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
     ('ejemplos', VERSION_085, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.4', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
@@ -440,6 +440,14 @@ OPCIONALES = [
      'base >= 0.8.3', [
         ('PDF.BIN', r'\HISPA\PDF.BIN'), ('HISPAPDF.BIN', r'\HISPA\HISPAPDF.BIN'), ('PDF/LEEME.TXT', r'\HISPA\PDF\LEEME.TXT'),
         ('MENU/HISPAPDF.MNU', r'\HISPA\MENU\HISPAPDF.MNU'), ('MENU/HISPAPDF.ICP', r'\HISPA\MENU\HISPAPDF.ICP')]),
+    # (ZIP) Comprimidos y las órdenes ZIP y UNZIP (castel/nucleo32/comprim/paquete.sh; tipo «herramientas»)
+    ('comprim', '1.0', 'Comprimidos: los .ZIP como una carpeta (sacar, añadir y quitar, con contraseña) y las órdenes ZIP y UNZIP', 'base >= 0.8.4', [
+        ('BIN/COMPRIM.BIN', r'\HISPA\COMPRIM.BIN'), ('BIN/ZIP.BIN', r'\HISPA\ZIP.BIN'), ('BIN/UNZIP.BIN', r'\HISPA\UNZIP.BIN'),
+        ('COMPRIM.TXT', r'\HISPA\COMPRIM.TXT'), ('COMPRIM.MNU', r'\HISPA\MENU\COMPRIM.MNU'), ('COMPRIM.ICP', r'\HISPA\MENU\COMPRIM.ICP')]),
+    # (MIRADOR) el Mirador, el visor de imágenes (castel/nucleo32/mirador/paquete.sh; tipo «multimedia»)
+    ('mirador', '1.0', 'El Mirador: ver imágenes (BMP, PNG, JPG, GIF animados, ICO...), girar, diapositivas, pantalla completa y fondo de escritorio', 'base >= 0.8.6', [
+        ('BIN/MIRADOR.BIN', r'\HISPA\MIRADOR.BIN'), ('MIRADOR.TXT', r'\HISPA\MIRADOR.TXT'),
+        ('MIRADOR.MNU', r'\HISPA\MENU\MIRADOR.MNU'), ('MIRADOR.ICP', r'\HISPA\MENU\MIRADOR.ICP')]),
 ]
 
 

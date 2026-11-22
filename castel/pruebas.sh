@@ -242,6 +242,17 @@
 #      altavoz de la bandeja con la rueda, Configuración > Sonido, los
 #      sonidos de inicio y de apagar; DirectSound (WINDX.EXE) y Hispa-Snes en
 #      HVPRUN.
+#  31. (ZIP, SOLO=zip) Comprimidos (COMPRIM.BIN, ZIP y UNZIP; pruebas_zipvisor.sh):
+#      el motor en el anfitrión (comprim/prueba/prueba.sh: con el zip y el
+#      unzip de Linux octeto a octeto, ZipCrypto, AES, ZIP64, los ZIP malos y
+#      el fuzz con ASan; FUZZ_ZIP=vueltas, SIN_GRANDE=1 sin el de 4 GB); las
+#      órdenes en el intérprete; y la ventana desde el explorador (abrir,
+#      entrar, Extraer todo, Quitar, Añadir, Propiedades, arrastrar al tapiz,
+#      contraseña, «Comprimir en ZIP»), mirando el disco con mtools y unzip.
+#  32. (MIRADOR, SOLO=mirador) El Mirador (MIRADOR.BIN): PNG, BMP, JPG, GIF
+#      animado e ICO desde el explorador, las flechas, la rueda, girar,
+#      pantalla completa, diapositivas y «Usar como fondo de escritorio» (la
+#      llamada 172: FONDO.HPM), que sigue al arrancar otra vez.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -271,7 +282,9 @@
 #   SOLO=wifi ./pruebas.sh        la primera y la 27 (el Wi-Fi: WIFI.BIN)
 #   SOLO=accesorios ./pruebas.sh  la primera y la 28 (ACCESORIOS: la Calculadora, el Reloj y el Mapa de caracteres)
 #   SOLO=sonido ./pruebas.sh      la primera y la 29 (el sonido: SONIDO.BIN, la bandeja, DirectSound, HVPRUN)
-#   SOLO=pdf ./pruebas.sh         la primera y la 23 (Hispa-PDF: PDF.BIN y su ventana)
+#   SOLO=pdf ./pruebas.sh         la primera y la 30 (Hispa-PDF: PDF.BIN y su ventana)
+#   SOLO=zip ./pruebas.sh         la primera y la 31 (Comprimidos: ZIP y UNZIP; pruebas_zipvisor.sh)
+#   SOLO=mirador ./pruebas.sh     la primera y la 32 (el Mirador y la imagen de tapiz; pruebas_zipvisor.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -321,6 +334,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 }
 
 . $AQUI/pruebas32.sh               # la parte 15 (CASTEL32), como la función parte15
+. $AQUI/pruebas_zipvisor.sh        # (ZIP) (MIRADOR) las partes 31 y 32, como parte_zip y parte_mirador
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -337,7 +351,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas $AQUI/ejemp
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -5309,7 +5323,7 @@ else ko "no se pueden hacer el disco o WIFISIM.BIN: $(tail -2 $Wf/disco.txt) $(t
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Wi-Fi)"
 fi   # el Wi-Fi
-# ---------------------------------------- 23. (PDF) Hispa-PDF: PDF.BIN y su ventana
+# ---------------------------------------- 30. (PDF) Hispa-PDF: PDF.BIN y su ventana
 # El núcleo en C de castel/nucleo32/pdf, en el anfitrión (con ASan y UBSan:
 # unir, separar, girar, quitar, comprimir con flujos de objetos, cifrar y
 # descifrar con RC4, AES-128 y AES-256, texto, imágenes, crear con fotos; y,
@@ -5434,6 +5448,9 @@ fi
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin Hispa-PDF)"
 fi   # (PDF) Hispa-PDF
+# ------------------------- 31 y 32. (ZIP) Comprimidos y (MIRADOR) el Mirador
+if parte08 zip; then parte_zip; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Comprimidos)"; fi
+if parte08 mirador; then parte_mirador; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Mirador)"; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)

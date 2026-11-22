@@ -87,7 +87,7 @@ módulo UPaquetes
     constante NOMBRES_TIPO = "Sistema|Oficina|Internet y red|Juegos y emuladores|Multimedia|Seguridad|Programas de Windows|Herramientas|Desarrollo|Programas de terceros|Otros"
     constante TIPO_OTROS = 10
     ; el de los paquetes que no lo dicen (los de antes de la 0.8.4): como TIPO_POR_NOMBRE de hpq.py
-    constante TIPO_POR_NOMBRE = "\nbase sistema\npaquetes sistema\nequipo sistema\nhvprun sistema\nred internet\ntls internet\nnavega internet\nssh internet\ntailscal internet\nwifi internet\nbloc oficina\noficina oficina\npdf oficina\nconsola herramientas\naccesori herramientas\nejemplos desarrollo\nwin32 windows\nescudo seguridad\nescbase seguridad\nescmes seguridad\nescdia seguridad\nsonido multimedia\nclicgest terceros\n"
+    constante TIPO_POR_NOMBRE = "\nbase sistema\npaquetes sistema\nequipo sistema\nhvprun sistema\nred internet\ntls internet\nnavega internet\nssh internet\ntailscal internet\nwifi internet\nbloc oficina\noficina oficina\npdf oficina\nconsola herramientas\naccesori herramientas\ncomprim herramientas\nejemplos desarrollo\nwin32 windows\nescudo seguridad\nescbase seguridad\nescmes seguridad\nescdia seguridad\nsonido multimedia\nmirador multimedia\nclicgest terceros\n"
     ; los que no se quitan nunca, y por qué
     constante IMPRESCINDIBLES = "\nbase es el sistema mismo; sin él, el equipo no arranca\nred sin ella no llegan las actualizaciones ni se pueden traer programas\npaquetes es el que instala, repara y quita los programas\n"
     ; dónde se buscan los programas sueltos (sin paquete); con «*», también sus subcarpetas

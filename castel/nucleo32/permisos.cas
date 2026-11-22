@@ -172,6 +172,7 @@ módulo Permisos
         regla("INICIO.INI", NADIE, falso)                  ; (pentium-menu: lo fijado en el menú Inicio; lo escribe el núcleo)
         regla("DOCK.INI", NADIE, falso)                    ; (el dock, del núcleo)
         regla("ATAJOS.INI", NADIE, falso)
+        regla("FONDO.HPM", NADIE, falso)                   ; (MIRADOR) el tapiz con imagen: solo el núcleo (la llamada 172)
         regla("NUCLEO.BIN", NADIE, falso)
         regla("NUCLEO.ANT", NADIE, falso)
         regla("MBR.ANT", NADIE, falso)

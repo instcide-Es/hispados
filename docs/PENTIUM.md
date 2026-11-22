@@ -460,6 +460,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 131 | las veces que han **aparecido o desaparecido unidades** (además, a las ventanas de los programas les llega `EV_UNIDADES`) | `cambios_unidades` | ese número |
 | 170 | (explorador, 21/11) **los atributos** del archivo o la carpeta de nombre EBX: con ECX = 0xFFFFFFFF, solo leerlos; si no, poner los de solo lectura, oculto, de sistema y archivo (`0x27`: los de carpeta y volumen no se tocan) | `atributos_de`, `poner_atributos` | los que quedan, o un error |
 | 171 | (explorador) **lo soltado fuera de la ventana**: EBX, la ventana (suya); ECX, una `Suelta` (el punto, dentro de la ventana, y una ruta entera con su letra). Lo recoge el escritorio: en el dock, se fija (o va a la Papelera); en el tapiz, un acceso nuevo | `soltar_fuera` | 0 (`EN_USO` si aún no ha recogido el de antes) |
+| 172 | (MIRADOR) **una imagen como tapiz**: EBX = 1, la de ECX (una `Imagen_tapiz`: el ancho, el alto y sus puntos 0x00RRGGBB, ya a la medida de la pantalla), que el núcleo guarda en `FONDO.HPM` (al lado de `DOCK.INI`: `\HISPA` instalado, la raíz si no) y pinta el escritorio; EBX = 0, quitarla (vuelve el de siempre) | — | 0, o el error |
 | 80 | **colocar la ventana** EBX (suya) con su esquina en (ECX, EDX) de la pantalla; con ECX = 0xFFFFFFFF, en el centro (encima de la barra de tareas). La usa HVPRUN (sección 10, «La oficina de Hispa-386») | — | 0 |
 | 90-98 | **la red**: pedir al servicio de red (90) y lo del propio servicio (91 a 96, 98); cómo está (97). Las cuenta la sección 14 | `redes.cas` | |
 
@@ -5708,6 +5709,170 @@ texto, leer las páginas por columnas, el orden de los marcadores al unir
 varios (solo van los del primero), nombres largos al escribir (el núcleo,
 8+3), y que el Lector de la oficina de Hispa-386 vaya en el paquete `oficina`
 de Pentium (hoy no va: los .PDF se abren con Hispa-PDF).
+## 14 duodecies. Comprimidos y el Mirador (rama pentium-zipvisor)
+
+*21/11/2026, la rama `pentium-zipvisor`: dos programas de la lista de metas
+([pentium/METAS.md](pentium/METAS.md)), el **compresor ZIP** y el **visor de
+imágenes**, con su sitio en el explorador. Lo cambiado fuera de sus carpetas
+lleva la marca «(ZIP)» o «(MIRADOR)».*
+
+| | | |
+|---|---|---|
+| ![Comprimidos: un ZIP como una carpeta](pentium/zipvisor/comprimidos.png) | ![«Comprimir en ZIP» en el explorador](pentium/zipvisor/comprimir-en-zip.png) | ![Con contraseña](pentium/zipvisor/contrasena.png) |
+| ![El Mirador](pentium/zipvisor/mirador.png) | ![Una grande, ajustada](pentium/zipvisor/mirador-grande.png) | ![Una imagen de tapiz](pentium/zipvisor/tapiz.png) |
+
+**Por qué en C, y no en Castel con `controles.cas`.** Lo pesado de los dos es
+de formatos y de puntos: deflate, CRC-32, AES y SHA-1, ZIP64, decodificar
+PNG/JPEG/GIF, escalar y girar. Para eso ya hay C probado (miniz, stb_image, y
+el camino de `MINIAT.BIN` y `NAVEGA.BIN`: un programa del anillo 3 enlazado
+para `0x40000000`), y el motor ZIP en C se compila **tal cual en Linux** para
+probarlo contra el `zip` y el `unzip` de verdad y hacerle fuzz con ASan, cosa
+que en Castel no se puede. La ventana que necesitan es poca (una lista con
+columnas, una barra de botones, un lienzo, unos cuadros): `comprim/ui.c` la
+pinta con las llamadas 32 a 39 y los colores y la forma de los botones de
+`controles.cas`, para que se vean como los demás. Hacerlo en Castel habría
+obligado a partirlo en dos programas (la ventana en Castel y un ayudante en C,
+como Mi equipo y MINIAT) hablándose por archivos.
+
+### Comprimidos (`COMPRIM.BIN`, el paquete «comprim»)
+
+`castel/nucleo32/comprim/`: `zip.c` (el motor), `cifra.c` (ZipCrypto, AES,
+SHA-1, HMAC y PBKDF2, escritos aquí), `ordenes.c` (ZIP y UNZIP), `comprim.c`
+(la ventana y los modos), `plat.c` (los archivos, con las llamadas al núcleo),
+`ui.c` y `base.c` (la poca biblioteca de C: `malloc` con `free` de verdad,
+`vsnprintf`, las cuentas de 64 bits que gcc le pide a libgcc), `lanza.c`
+(`ZIP.BIN` y `UNZIP.BIN`: lanzan `COMPRIM.BIN /ZIP ...`, así el motor está una
+sola vez en el disco) y `anfitrion.c` (lo mismo en Linux). Deflate e inflate,
+de **miniz 3.0.2** (`terceros/miniz`, MIT: solo `tdefl` y `tinfl`); lo demás,
+nuestro. (El `inflar.c` de Escudo, de la rama `pentium-escudo`, no está en esta
+base.)
+
+- **La ventana**: dos clics en un `.ZIP` en Mi equipo lo abren como una
+  carpeta (las carpetas delante, con lo que llevan; el nombre, el tamaño, lo
+  comprimido y la fecha; candado en los que van con contraseña y en rojo los
+  peligrosos). Dos clics en una carpeta entran; Retroceso o «Subir» salen.
+  **Extraer todo** (pregunta la carpeta: al lado del ZIP, con su nombre; si ya
+  está, si se reemplaza lo que haya) y **Extraer lo elegido** (Control y
+  Mayús con el ratón, Espacio, Ctrl+A); **Añadir...** (un archivo o una
+  carpeta entera, dentro de la carpeta del ZIP en la que se está) y **Quitar**
+  (Supr), que rehacen el ZIP aparte (`COMPRIM.$$$`) copiando lo de antes tal
+  cual, sin descomprimirlo (también lo cifrado, sin la contraseña), y lo
+  cambian por el de antes; dos clics en un archivo lo sacan a
+  `\COMPRIM.TMP` y lo abren con lo suyo (`EQUIPO /ABRIR`); **arrastrarlo
+  fuera** de la ventana lo saca al lado del ZIP y, si se suelta en el tapiz, el
+  escritorio le pone su acceso (la llamada 171); Propiedades; Nuevo y Abrir
+  (el menú del botón secundario en lo vacío); la rueda; la barra de progreso
+  con «Cancelar» (y Esc).
+- **El explorador** (`uequipo.cas`, marcado «(ZIP)»): en el menú del botón
+  secundario de cualquier archivo o carpeta, **«Comprimir en ZIP»** (lo
+  elegido, a una lista `X:\ZIPLISTA.TMP`, y `COMPRIM /COMPRIMIR` la convierte
+  en `NOMBRE.ZIP` al lado, sin pisar ninguno: `NOMBRE2.ZIP`...); y en un `.ZIP`,
+  **«Extraer todo...»** (`COMPRIM /EXTRAER`: a la carpeta de al lado, y la
+  abre). Mientras Comprimidos trabaja, el explorador no se queda parado y, al
+  acabar, vuelve a mirar la carpeta. (Con ellas, el menú lleva 13 opciones: el
+  tope de `emergente.cas` pasa de 12 a 16, «(ZIP)»; la 0.8.5 ya lo sube a 32.)
+- **Las clases** (`exoper.cas`, «(ZIP) (MIRADOR)»): `de_paquetes` dice
+  `ZIP=\COMPRIM.BIN` y las imágenes con el Mirador; vale **si el programa
+  está** (en `\HISPA` o en la raíz de la unidad del sistema), donde
+  `ASOCIA.TXT` no dice nada o dice lo de fábrica de antes (el Mirador de la
+  oficina); lo que el usuario haya elegido con «Abrir con...» manda.
+- **ZIP y UNZIP** (en la Consola y en el intérprete), al estilo de Info-ZIP:
+  `ZIP [-0..-9] [-q] A.ZIP RUTA...` (las carpetas, con todo lo de dentro; lo
+  que ya esté, se pone al día), `ZIP -d A.ZIP NOMBRE...` (con `*` y `?`),
+  `UNZIP [-o] [-q] [-P CLAVE] [-d CARPETA] A.ZIP [NOMBRE...]`, `UNZIP -l` y
+  `UNZIP -t`. Sin `-P`, la contraseña se pregunta (con asteriscos); Ctrl+C
+  para.
+- **Lo que lee**: deflate y guardado; **ZIP64** (el directorio y cada
+  miembro); los nombres en **UTF-8** (con su marca o el extra 0x7075 de
+  Info-ZIP) y en la **página 437** (lo de MS-DOS; los de Unix sin marca, si son
+  UTF-8 válido, como UTF-8); **ZipCrypto** y el **AES de WinZip** (AE-1 y
+  AE-2, de 128, 192 y 256 bits, con su verificador y su firma HMAC-SHA1);
+  los autoextraíbles (lo de delante se corre). **Lo que hace**: deflate (nivel
+  6; 0 a 9 en ZIP), guardado si no se gana, ZIP64 cuando hace falta, nombres
+  en UTF-8 con su marca y «hecho en Unix» (así el `unzip` de Linux no los pasa
+  de la página 437), carpetas con su fecha. Sin cifrar al escribir (no se pidió).
+- **Los nombres de lo que se saca**, de **8+3** (el núcleo aún no escribe
+  nombres largos): «Informe largo ñandú.txt» queda `INFORM~1.TXT` (como
+  Windows, sin pisar ninguno que ya esté); los que ya son de 8+3 (`LEEME.TXT`,
+  `NIÑO.TXT`) se quedan, y una carpeta que ya está se aprovecha. Las letras con
+  tilde que la página 437 no tiene en mayúscula pierden la tilde; las fechas,
+  las de ahora (no hay llamada para ponerlas).
+- **La seguridad** (los ZIP vienen de Internet): los nombres con `..`, que
+  empiezan por `/` o `\`, con letra de unidad o `:`, con letras de control,
+  vacíos a medias o de más de 32 carpetas **se ven en rojo y no se sacan nunca**
+  (lo bueno del mismo ZIP sí); los enlaces simbólicos, tampoco; los ZIP cuyos
+  datos se pisan (la **bomba solapada** de Fifield: dos entradas sobre los mismos
+  datos) no se abren; topes de **65000 miembros**, **2 GB** descomprimidos en
+  una tanda y una proporción de 1100 a 1 en los de más de 16 MB; al
+  descomprimir **nunca se escribe más de lo que dice el directorio** (un
+  miembro que «miente» se para ahí y no se queda), y lo que sale mal se borra;
+  al juntar carpetas se baja como mucho 32 niveles (y el ZIP que se está
+  haciendo no se mete en sí mismo).
+
+### El Mirador (`MIRADOR.BIN`, el paquete «mirador»)
+
+`castel/nucleo32/mirador/mirador.c`, con **stb_image** (`terceros/stb`) y
+la ventana y la biblioteca de C de Comprimidos. Lee BMP, PNG, JPG, **GIF
+(animados: cada cuadro con su tiempo)**, TGA, PSD y PNM, y los **ICO y CUR**
+con un lector propio (el más grande y de más colores de los que lleva: un PNG
+dentro, o el BMP de doble alto con su máscara).
+
+- **Ajustar** (a la ventana, sin agrandar las pequeñas) y **1:1**; la **rueda**
+  acerca y aleja **donde está la flecha**; `+` y `-`; arrastrar la mueve. Al
+  alejar se lee de la imagen a la mitad, a la cuarta parte... (cada punto, la
+  media de cuatro) con el bilineal; al acercar, los puntos tal cual. Lo
+  transparente, sobre cuadros grises.
+- **Girar** (R, y Mayús+R al otro lado; todos los cuadros de un GIF); las
+  **flechas**, las demás imágenes de la carpeta (Inicio y Fin: la primera y la
+  última); **diapositivas** (F5: cada 4 segundos); **pantalla completa**
+  (Intro, F, dos clics o «Completa»; Esc vuelve): una ventana sin marco que
+  tapa la barra de tareas (la llamada 182, la de Win32). (F11 no llega: el
+  núcleo da de F1 a F10.)
+- **«Usar como fondo de escritorio»** (Más... o el botón secundario): la
+  imagen, llenando la pantalla (lo que sobra, cortado por igual), va al
+  núcleo con la **llamada 172** (nueva, `usuario.cas`), que la guarda en
+  `FONDO.HPM` (con la cabecera de las miniaturas, «HPMI»; `\HISPA\FONDO.HPM`
+  instalado, al lado de `DOCK.INI`: lo escribe el núcleo, así que en la 0.8.5 no
+  choca con la zona protegida) y el escritorio la pinta (`escritorio.cas`,
+  «(MIRADOR)»: centrada si la pantalla cambia de medida) y la vuelve a poner
+  al arrancar. «Quitar el fondo de escritorio», o elegir Olas, Azul o Verde en
+  Configuración, la quita (y borra `FONDO.HPM`).
+
+### Los paquetes
+
+| Paquete | Versión | Tipo | Lleva | Necesita |
+|---|---|---|---|---|
+| `comprim` | 1.0 | herramientas | `\HISPA\COMPRIM.BIN`, `ZIP.BIN`, `UNZIP.BIN`, `COMPRIM.TXT` (con la licencia de miniz), y su acceso `\HISPA\MENU\COMPRIM.MNU` y `.ICP` (en Herramientas) | base >= 0.8.4 |
+| `mirador` | 1.0 | multimedia | `\HISPA\MIRADOR.BIN`, `MIRADOR.TXT` (con la de stb_image), y `\HISPA\MENU\MIRADOR.MNU` y `.ICP` (en Multimedia) | base >= 0.8.4 |
+
+Los hacen `castel/nucleo32/comprim/paquete.sh` y `mirador/paquete.sh` (con
+`HPQ=` el `hpq.py` de la 0.8.5, que pone el tipo con `--tipo`), y están en
+`OPCIONALES` de `tools/hpq.py` (con lo de la 0.8.5 que salta los que no tienen
+sus archivos, para que cada `paquete.sh` haga solo lo suyo; al juntar con la
+0.8.5, `comprim` y `mirador` van a `TIPO_POR_NOMBRE`). El explorador nuevo
+(«Comprimir en ZIP», las clases) va en `equipo`, y la llamada 172, en el núcleo
+(`base`): con lo de antes, Comprimidos y el Mirador van igual (se abren desde
+el menú Inicio) y «Usar como fondo» dice que no se ha podido.
+
+### Probarlo
+
+`SOLO=zip castel/pruebas.sh` (la parte 27, unos 6 minutos: el motor en Linux
+con el fuzz, y dos arranques de QEMU) y `SOLO=mirador castel/pruebas.sh` (la
+28, unos 2 minutos); el motor solo, `castel/nucleo32/comprim/prueba/prueba.sh
+[VUELTAS]`. Lo que miran: un ZIP del `zip` de Linux sacado con el nuestro y
+al revés, **igual octeto a octeto** (`diff -r`, con la carpeta vacía, el
+archivo vacío y los nombres con eñe); `-0` y `-9`; ZipCrypto de `zip -P`; el AES
+de WinZip (hecho en Python con `cryptography`: AE-1 y AE-2, 128, 192 y 256, y
+uno con un octeto tocado, que descubre la firma); ZIP64 (el de `zipfile` y uno
+nuestro de 4,2 GB disperso, que comprueba `unzip -t`); la página 437 y UTF-8;
+añadir y quitar (también en uno con AES); los malos (`../`, `/etc/`, `C:/`,
+`a\..\..\`, 40 carpetas, la bomba solapada, el tope de lo descomprimido, el que
+miente y el CRC cambiado); y **el fuzz** (`prueba/fuzz.py`: ZIP cambiados al
+azar que se abren, se prueban, se sacan y se rehacen con ASan y UBSan; 3000
+vueltas sin un fallo). En Hispa-Pentium: las órdenes en el intérprete (lo
+sacado, igual octeto a octeto que lo de Linux, y el ZIP hecho allí, bueno para
+el `unzip` de Linux) y la ventana desde el explorador, con capturas; y el
+Mirador con sus seis imágenes de prueba, el tapiz y otro arranque.
 
 ## 15. Las pruebas
 
