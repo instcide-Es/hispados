@@ -28,6 +28,7 @@ static int buscando;		/* la lista es lo encontrado */
 static char buscado[200];
 static int panel = 1;		/* el que tiene el teclado: 0 carpetas, 1 lista, 2 mensaje, 3 buscar */
 static int solo_mensaje;	/* (estrecha) se ve el mensaje en vez de la lista */
+static int completo;		/* (1.0.2) el mensaje, a toda la ventana (dos clics o Intro en la lista) */
 static Campo busca;
 static char estado[400];
 static int nuevos_aviso;	/* lo nuevo que se avisa arriba */
@@ -535,6 +536,41 @@ static void abre_mensaje(void)
 	}
 }
 
+/* (1.0.2) dos clics o Intro en la lista: el mensaje a toda la ventana, con
+ * sus botones; Esc (o «< Volver a la lista») vuelve, con el mismo elegido */
+static int panel_antes = 1;
+
+static void abre_completo(void)
+{
+	if (!completo)
+		panel_antes = panel == 2 ? 2 : 1;
+	abre_mensaje();
+	if (!vista_hay())
+		return;
+	completo = 1;
+	solo_mensaje = 0;
+	panel = 2;
+	so_apunta("mensaje a toda la ventana: %u (fila %u de %u)", (unsigned)uid_abierto(), (unsigned)cursor + 1, (unsigned)nlista);
+}
+
+static void vuelve_lista(void)
+{
+	completo = 0;
+	panel = panel_antes;	/* (el que tenía el teclado antes: así queda todo como estaba) */
+	so_apunta("vuelta a la lista: el elegido, %u (fila %u; la primera que se ve, %u)", (unsigned)uid_cursor(), (unsigned)cursor + 1,
+		  (unsigned)primera + 1);
+}
+
+/* el anterior o el siguiente de la lista, a toda la ventana */
+static void otro_completo(int paso)
+{
+	if ((paso < 0 && cursor == 0) || (paso > 0 && cursor + 1 >= nlista))
+		return;
+	cursor = (u32)((int)cursor + paso);
+	memset(elegidos, 0, nlista);
+	abre_completo();
+}
+
 static void haz_busca(void)
 {
 	char t[200];
@@ -803,10 +839,35 @@ static void pinta_aviso(void)
 	negrita(van - w + 14, ALTO_BARRA + 11, t, 40, C_VERDE);
 }
 
+static void pinta_completo(void)
+{
+	static const char *const b[] = { "< Volver a la lista", "Responder", "A todos", "Reenviar", "Borrar", "< Anterior", "Siguiente >" };
+	int x = 8, i;
+
+	ui_degradado(0, 0, van, ALTO_BARRA, 0xF9FAFB, 0xE5E7EB);
+	ui_rect(0, ALTO_BARRA - 1, van, 1, C_GRIS);
+	for (i = 0; i < 7; i++) {
+		int w = ancho_texto(b[i]) + 16, apagado = (i == 5 && cursor == 0) || (i == 6 && cursor + 1 >= nlista);
+
+		if (x + w > van - 4)
+			break;
+		boton(660 + i, x, 6, w, b[i], i == 0, apagado, 0);
+		x += w + (i == 0 || i == 4 ? 14 : 4);
+	}
+	vista_pinta(0, ALTO_BARRA, van, val - ALTO_BARRA - ALTO_ABAJO);
+	pinta_abajo();
+	pinta_aviso();
+}
+
 void repinta_todo(void)
 {
 	medidas();
 	zonas_olvida();
+	if (completo && vista_hay()) {
+		pinta_completo();
+		return;
+	}
+	completo = 0;
 	pinta_barra();
 	pinta_carpetas();
 	if (!dos_paneles || !solo_mensaje)
@@ -943,6 +1004,20 @@ static void raton(int x, int y, u32 c)
 {
 	int z = zona_en(x, y), veces = (int)(c >> 16);
 
+	if (completo) {
+		switch (z) {
+		case 660: vuelve_lista(); return;
+		case 661: redacta(RD_RESPONDER, NULL); return;
+		case 662: redacta(RD_TODOS, NULL); return;
+		case 663: redacta(RD_REENVIAR, NULL); return;
+		case 664: borrar(); if (cursor < nlista && completo) abre_completo(); else vuelve_lista(); return;
+		case 665: otro_completo(-1); return;
+		case 666: otro_completo(1); return;
+		}
+		vista_raton(x, y, c);
+		return;
+	}
+
 	if (z >= 500 && z < 511) {
 		boton_barra(z - 500);
 		return;
@@ -1025,8 +1100,12 @@ static void raton(int x, int y, u32 c)
 			ui_menu(x, y, "Abrir|Responder|Reenviar|Le\xc3\xad" "do / sin leer|Destacar|Mover a...|Borrar", 0, M_FILA);
 			return;
 		}
-		if (!(c & (UC_CONTROL | UC_MAYUS)) && (veces >= 2 || !dos_paneles))
+		if (!(c & (UC_CONTROL | UC_MAYUS)) && veces >= 2)
+			abre_completo();		/* (1.0.2) dos clics: a toda la ventana */
+		else if (!(c & (UC_CONTROL | UC_MAYUS)) && !dos_paneles) {
 			abre_mensaje();
+			panel = 1;	/* (1.0.2) el teclado sigue en la lista (las flechas, Intro), como en Thunderbird */
+		}
 		return;
 	}
 	if (x >= x_men && (!dos_paneles || solo_mensaje)) {
@@ -1037,6 +1116,34 @@ static void raton(int x, int y, u32 c)
 
 static void tecla(u32 k, u32 mod)
 {
+	if (completo) {
+		if (k == UT_ESC || k == UT_BORRAR) {
+			vuelve_lista();
+			return;
+		}
+		if (k == 0x141) {	/* F7: el anterior */
+			otro_completo(-1);
+			return;
+		}
+		if (k == 0x142) {	/* F8: el siguiente */
+			otro_completo(1);
+			return;
+		}
+		if (k == UT_SUPR) {
+			borrar();
+			if (cursor < nlista && completo)
+				abre_completo();
+			else
+				vuelve_lista();
+			return;
+		}
+		if (vista_tecla(k, mod))
+			return;
+		if (k == 18 || k == 20 || k == 12 || k == UT_F5 || k == 14 || k == 11) {
+			/* (Ctrl+R, Ctrl+T, Ctrl+L, F5, Ctrl+N, Ctrl+K: como siempre) */
+		} else
+			return;
+	}
 	if (panel == 3) {
 		if (k == UT_INTRO) {
 			haz_busca();
@@ -1116,7 +1223,9 @@ static void tecla(u32 k, u32 mod)
 			cursor = 0;
 		else if (k == UT_FIN)
 			cursor = nlista ? nlista - 1 : 0;
-		else if (k == UT_INTRO || k == ' ')
+		else if (k == UT_INTRO)
+			abre_completo();	/* (1.0.2) Intro: a toda la ventana */
+		else if (k == ' ')
 			abre_mensaje();
 		else if (k == 1)
 			memset(elegidos, 1, nlista);
@@ -1231,7 +1340,7 @@ int correo_ventana(const char *args)
 		case UE_RUEDA: {
 			int pasos = (int)(signed char)(s.c & 0xFF);
 
-			if ((int)s.a >= x_men && (!dos_paneles || solo_mensaje))
+			if (completo || ((int)s.a >= x_men && (!dos_paneles || solo_mensaje)))
 				vista_rueda(pasos);
 			else if ((int)s.a >= x_lis) {
 				int p = (int)primera - pasos * 3;

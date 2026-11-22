@@ -8400,6 +8400,22 @@ si no, probando `imap.`, `mail.` y el dominio (993/143) y `smtp.`, `mail.`
   se baja (25 MB), lo más que se guarda por carpeta, cada cuántos minutos se
   mira.
 
+**La 1.0.2: el mensaje a toda la ventana (22/11/2026).** Lo pidió Carlos (con
+la 1.0.1 ya en su cuenta de verdad: «en segundos sin fallos»): **dos clics en
+un mensaje de la lista (o Intro)** lo abren **a toda la ventana de Correo**, como
+Outlook o Thunderbird: arriba, «< Volver a la lista», Responder, A todos,
+Reenviar, Borrar, «< Anterior» y «Siguiente >»; el mensaje, de lado a lado (la
+rueda, Av Pág, Re Pág, las flechas, Espacio, para leer). **Esc** (o Retroceso,
+o el botón) vuelve a la lista **con el mismo mensaje elegido y la lista igual**;
+F8 y F7, el siguiente y el anterior; Supr lo borra y pasa al siguiente; Ctrl+R,
+Ctrl+T y Ctrl+L, como siempre. La ventana de Correo ya se puede maximizar (y
+lo está de entrada en las pantallas de hasta 1100 puntos). Un clic sigue
+abriéndolo en su panel (con tres paneles; el teclado sigue en la lista); con
+dos paneles, dos clics, a toda la ventana. Lo prueba la parte 42 (dos clics, F8,
+F7, Av Pág y Esc: el mismo elegido y la lista igual punto a punto).
+
+![El mensaje a toda la ventana](pentium/correo/completo.png)
+
 **La 1.0.1: sin parpadeo («(PARPADEO)», 22/11/2026).** Carlos, con la 0.8.7:
 «cuando paso el ratón por encima, sin pulsar, los campos para poner los datos
 de la cuenta desaparecen unos milisegundos y vuelven a aparecer» (y lo mismo la
