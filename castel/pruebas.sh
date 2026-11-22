@@ -2382,7 +2382,7 @@ for hc in xhci ehci; do
       && cap $G/c2$hc.ppm negrita 72 22 84 30 Facturas texto 62 126 74 138 "No hay facturas emitidas."; then
       ok "la oficina en el disco instalado: el menú Inicio (con su saludo) tiene el grupo «Oficina», y Facturas se abre con C:\\HISPA\\HVPRUN.BIN (FACTURAS.HVP, de C:\\OFICINA)"
     else ko "la oficina no se abre desde el menú Inicio del disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; grep "lanzo" $S | sed 's/^/        /' | head -4; fi
-    if cap $G/c3$hc.ppm negrita 29 9 39 19 "C:\\OFICINA" texto 213 166 223 176 "CUENTAS.HV" texto 311 166 321 176 "DICCIO.DAT" \
+    if cap $G/c3$hc.ppm negrita 29 9 39 19 "C:\\OFICINA" texto 213 166 223 176 "CUENTAS.HV" texto 311 166 321 176 "DATOS.HVP" \
       && cap $G/c4$hc.ppm negrita 80 16 110 36 "Cuentas - (sin nombre)" && [ $sano = 0 ]; then
       ok "y Mi equipo entra en C:\\OFICINA y abre CUENTAS.HVP (Cuentas, con HVPRUN); el disco queda sano"
     else ko "Mi equipo no abre la oficina de C:\\OFICINA en el disco instalado:"; sed 's/^/        /' $G/cap.txt | head -4; sed 's/^/        /' $Z/fsck.txt | head -3; fi
@@ -4741,7 +4741,7 @@ if $AQUI/nucleo32/disco.sh $W/d.img 32 oficina > $W/disco.txt 2>&1; then
   # 1. el menú: su forma, Todos los programas, una carpeta larga (con la
   # flecha en diagonal: no se cierra), la rueda, el teclado y Mis documentos
   CAPTURAS=$G DISCO=$W/d.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh $W/SEMILLA.BIN \
-    ":pausa 3" ":clic 40 585" ":pausa 1" ":captura mn1" ":raton 100 502" ":pausa 1" ":captura mn2" ":raton 300 454" ":pausa 1" ":captura mn3" \
+    ":pausa 3" ":clic 40 585" ":pausa 1" ":captura mn1" ":raton 100 502" ":pausa 1" ":captura mn2" ":raton 300 428" ":pausa 1" ":captura mn3" \
     ":raton 560 300" ":monitor mouse_move 0 0 -4" ":pausa 0.5" ":monitor mouse_move 0 0 -4" ":pausa 1" ":captura mn4" ":tecla esc" ":tecla esc" ":tecla esc" ":pausa 1" ":captura mn5" \
     ":tecla meta_l" ":pausa 1" ":tecla t" ":tecla right" ":tecla a" ":tecla right" ":pausa 1" ":captura mn6" ":tecla s" ":tecla ret" ":pausa 2" \
     ":clic 40 585" ":clic 300 171" ":pausa 1" ":captura mn7" ":clic 500 171" ":pausa 2" ":captura mn8" > $W/m.sal 2>&1
@@ -4752,14 +4752,15 @@ if $AQUI/nucleo32/disco.sh $W/d.img 32 oficina > $W/disco.txt 2>&1; then
     negrita 256 159 264 167 "Mis documentos" negrita 256 192 264 200 "Mi equipo" negrita 256 226 264 234 "Configuración" negrita 256 256 264 264 "Administrador de" \
     negrita 256 296 264 304 "Programas instalados" negrita 256 330 264 338 "Actualizar" negrita 256 363 264 371 "Ayuda" negrita 256 393 264 401 "Ejecutar..." \
     negrita 68 533 76 541 "Cerrar sesión" negrita 210 533 222 541 Reiniciar negrita 320 533 328 541 "Apagar equipo"
-  miracap "«Todos los programas» (con la flecha encima) abre sus carpetas: Accesorios, Internet (el Navegador, por su programa), Juegos (por su «tipo»), Oficina y Sistema" mn2 \
-    texto 250 390 258 398 Accesorios texto 250 416 258 424 Internet texto 250 442 258 450 Juegos texto 250 468 258 476 Oficina texto 250 494 258 502 Sistema
+  # ((OFICINA2) con Pintura, también Multimedia: las demás, una más arriba)
+  miracap "«Todos los programas» (con la flecha encima) abre sus carpetas: Accesorios, Internet (el Navegador, por su programa), Juegos (por su «tipo»), Multimedia (Pintura), Oficina y Sistema" mn2 \
+    texto 250 364 258 372 Accesorios texto 250 390 258 398 Internet texto 250 416 258 424 Juegos texto 250 442 258 450 Multimedia texto 250 468 258 476 Oficina texto 250 494 258 502 Sistema
   miracap "una carpeta con más de los que caben a lo alto: el submenú no crece más que la pantalla y lleva sus flechas (el 01 arriba, el 24 no se ve)" mn3 \
     texto 486 30 494 40 "Juego 01" notexto 460 0 700 570 "Juego 24" negrita 320 533 328 541 "Apagar equipo"
   miracap "la flecha, en diagonal hasta él, no lo cierra; y la rueda lo baja: el 24, a la vista" mn4 texto 460 0 700 570 "Juego 24" notexto 460 0 700 570 "Juego 01"
   miracap "Esc cierra un submenú cada vez, y luego el menú" mn5 notexto 0 90 440 570 "Todos los programas"
   miracap "con el teclado: el logo, la «t» (Todos los programas), la flecha a la derecha, la «a» (Accesorios) y otra vez a la derecha: su submenú, la primera elegida" mn6 \
-    texto 486 390 494 398 "Bloc de notas" texto 486 468 494 476 "Saludo"
+    texto 486 364 494 372 "Bloc de notas" texto 486 442 494 450 "Saludo"
   mira "y la «s» e Intro lanzan «Saludo» (un acceso de un paquete)" "escritorio: lanzo .HOLA.BIN"
   miracap "«Mis documentos» abre su submenú con los .TXT de la raíz" mn7 texto 460 160 480 182 "LEEME.TXT" texto 460 0 700 570 "DOC8.TXT"
   mira "y uno de ellos se abre con el Bloc de notas" "escritorio: lanzo .BLOC.BIN"
