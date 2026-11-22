@@ -2633,6 +2633,7 @@ módulo Escritorio
             nuevo_icono("Mi equipo", AM_EQUIPO)
             nuevo_icono("Bloc de notas", AM_BLOC)
             nuevo_icono("Consola", AM_CONSOLA)
+            lee_accesos()                       ; (0.8.7) los de los paquetes de ahora (lo instalado en la sesión de antes, también)
             i := 0
             mientras i < n_accesos hacer
                 si en_escritorio(i) entonces nuevo_icono_de(nombre_de(i), AM_ACCESO, i) fin
