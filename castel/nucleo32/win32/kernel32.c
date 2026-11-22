@@ -728,23 +728,10 @@ API(u32) ExpandEnvironmentStringsA(const char *s, char *d, u32 cabe)
 API(u32) GetLastError(void) { return da_error(); }
 API(void) SetLastError(u32 e) { pon_error(e); }
 API(u32) SetErrorMode(u32 m) { static u32 v; u32 a = v; v = m; return a; }
-API(void *) SetUnhandledExceptionFilter(void *f) { static void *v; void *a = v; v = f; return a; }
-API(i32) UnhandledExceptionFilter(void *p) { (void)p; return 0; }
 API(BOOL) IsDebuggerPresent(void) { return FALSE; }
 API(void) OutputDebugStringA(const char *s) { traza("depuración: %s", s); }
-API(void) DebugBreak(void) { }
-API(void) RaiseException(u32 c, u32 f, u32 n, const u32 *a)
-{
-	(void)f; (void)n; (void)a;
-	aviso_serie("RaiseException(%x): se acaba el programa", c);
-	w32_salir(255);
-}
-API(void) RtlUnwind(void *a, void *b, void *c, void *d) { (void)a; (void)b; (void)c; (void)d; }
+/* (JUEGOS) SetUnhandledExceptionFilter, RaiseException, RtlUnwind, IsBad*Ptr...: seh.c */
 API(BOOL) IsProcessorFeaturePresent(u32 f) { return f == 0 || f == 2 || f == 3; }  /* FPU, RDTSC... */
-API(BOOL) IsBadReadPtr(const void *p, u32 n) { return p == 0 && n; }
-API(BOOL) IsBadWritePtr(void *p, u32 n) { return p == 0 && n; }
-API(BOOL) IsBadCodePtr(void *p) { return p == 0; }
-API(BOOL) IsBadStringPtrA(const char *p, u32 n) { return p == 0 && n; }
 API(void) SetHandleCount(u32 n) { (void)n; }
 /* (SONIDO) Beep: un tono de verdad (cuadrado, suave), por un canal propio; sin
  * tarjeta, solo el tiempo */

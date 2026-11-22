@@ -28,4 +28,5 @@ hacer() {
 hacer falta -i WINMM.DLL:mixerNoHay
 hacer sindll -i NOHAY.DLL:FuncionDeNoHay
 hacer hilos
+hacer seh
 echo "win32/juegos.sh: $(ls "$SAL" | wc -l) programas en $SAL"

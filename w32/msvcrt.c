@@ -1484,6 +1484,7 @@ __attribute__((naked)) void longjmp(void *jb, int v) {
   __asm__("movl 4(%esp), %edx\n movl 8(%esp), %eax\n"
           "testl %eax, %eax\n jnz 1f\n incl %eax\n1:\n"
           "movl 0(%edx), %ebp\n movl 4(%edx), %ebx\n movl 8(%edx), %edi\n movl 12(%edx), %esi\n"
+          "movl 24(%edx), %ecx\n movl %ecx, %fs:0\n"   /* (JUEGOS) la cadena de SEH, como estaba */
           "movl 16(%edx), %esp\n jmp *20(%edx)\n");
 }
 
@@ -1525,8 +1526,105 @@ unsigned _clearfp(void) { u16 sw; __asm__ volatile("fnstsw %0; fnclex" : "=m"(sw
 unsigned _statusfp(void) { u16 sw; __asm__ volatile("fnstsw %0" : "=m"(sw)); return sw & 0x3F; }
 void _fpreset(void) { __asm__ volatile("fninit"); }
 /* el manejador de excepciones de Visual C++ (sin SEH: no se llega a usar) */
-int _except_handler3(void *a, void *b, void *c, void *d) { return 1; }
+/* ---- (JUEGOS) SEH de Visual C++ 6: __try/__except y __try/__finally.
+ * El marco que hace el compilador (documentado por Microsoft y descrito en
+ * los artículos públicos sobre SEH): el registro de FS:[0] con, detrás, la
+ * tabla de ámbitos, el nivel de __try en que se está y el EBP de la función;
+ * en [EBP-14h], los punteros de la excepción (GetExceptionInformation) y en
+ * [EBP-18h], la pila que repone el bloque __except. Cada ámbito: el de
+ * fuera, el filtro (0: es un __finally) y el bloque. Los filtros y los
+ * __finally son trozos de la función: se llaman con su EBP. En Hispa-486
+ * (HW32, sin despachador de excepciones) no se llega a llamar. ---- */
+typedef struct { int fuera; void *filtro, *bloque; } AMBITO;
+typedef struct MARCO_VC { struct MARCO_VC *sig; void *manejador; AMBITO *tabla; int nivel; } MARCO_VC;
+#define EBP_DE(m) ((u32)(m) + 16)              /* el EBP de la función: justo detrás del registro */
+typedef struct { u32 codigo, banderas; void *otra; u32 dir, n, info[15]; } REC_X;
+#define DESHACIENDO 6
+static u32 llama_con_ebp(void *f, u32 ebp);
+__asm__(".text\n"
+        "llama_con_ebp:\n"
+        "  pushl %ebp\n  pushl %ebx\n  pushl %esi\n  pushl %edi\n"
+        "  movl 20(%esp), %eax\n  movl 24(%esp), %ebp\n"
+        "  call *%eax\n"
+        "  popl %edi\n  popl %esi\n  popl %ebx\n  popl %ebp\n"
+        "  ret\n");
+static void __attribute__((noreturn)) salta_con_ebp(void *f, u32 ebp) {
+  __asm__ volatile("movl %1, %%ebp\n jmp *%0" : : "r"(f), "r"(ebp));
+  __builtin_unreachable();
+}
+/* los __finally de este marco, de dentro afuera, hasta el nivel «hasta» */
+void _local_unwind2(MARCO_VC *m, int hasta) {
+  while (m->nivel != -1 && m->nivel != hasta) {
+    AMBITO *a = &m->tabla[m->nivel];
+    m->nivel = a->fuera;
+    if (!a->filtro && a->bloque) llama_con_ebp(a->bloque, EBP_DE(m));
+  }
+}
+/* los marcos de la cadena, de arriba abajo hasta «m» (sin él): cada uno,
+ * avisado de que se deshace, y quitado (lo de RtlUnwind, sin importarla) */
+typedef int (*MANEJADOR_X)(REC_X *, void *, void *, void *);
+static u32 llama_manejador_x(void *f, REC_X *r, void *m);
+__asm__(".text\n"
+        "llama_manejador_x:\n"
+        "  pushl %ebp\n  pushl %ebx\n  pushl %esi\n  pushl %edi\n"
+        "  movl %esp, %ebp\n"
+        "  pushl $0\n  pushl $0\n  pushl 28(%ebp)\n  pushl 24(%ebp)\n"
+        "  call *20(%ebp)\n"
+        "  movl %ebp, %esp\n"
+        "  popl %edi\n  popl %esi\n  popl %ebx\n  popl %ebp\n"
+        "  ret\n");
+void _global_unwind2(void *hasta) {
+  REC_X r;
+  memset(&r, 0, sizeof r);
+  r.codigo = 0xC0000027;                    /* STATUS_UNWIND */
+  r.banderas = 2;
+  for (;;) {
+    MARCO_VC *m;
+    __asm__ volatile("movl %%fs:0, %0" : "=r"(m));
+    if (!m || (u32)m == 0xFFFFFFFF || (void *)m == hasta) break;
+    llama_manejador_x(m->manejador, &r, m);
+    __asm__ volatile("movl %0, %%fs:0" : : "r"(m->sig) : "memory");
+  }
+}
+int _except_handler3(REC_X *r, MARCO_VC *m, void *ctx, void *dc) {
+  void *punteros[2];
+  int nivel;
+  (void)dc;
+  if (r->banderas & DESHACIENDO) {          /* se está deshaciendo: los __finally */
+    _local_unwind2(m, -1);
+    return 1;
+  }
+  punteros[0] = r;
+  punteros[1] = ctx;
+  ((void **)m)[-1] = punteros;              /* [EBP-14h]: GetExceptionInformation */
+  for (nivel = m->nivel; nivel != -1; nivel = m->tabla[nivel].fuera) {
+    AMBITO *a = &m->tabla[nivel];
+    if (a->filtro) {
+      int x = (int)llama_con_ebp(a->filtro, EBP_DE(m));
+      if (x < 0) return 0;                  /* EXCEPTION_CONTINUE_EXECUTION */
+      if (x > 0) {                          /* EXCEPTION_EXECUTE_HANDLER: a su bloque */
+        _global_unwind2(m);
+        _local_unwind2(m, nivel);
+        m->nivel = a->fuera;
+        salta_con_ebp(a->bloque, EBP_DE(m));
+      }
+    }
+  }
+  return 1;                                 /* ExceptionContinueSearch */
+}
+int _except_handler2(REC_X *r, MARCO_VC *m, void *ctx, void *dc) { return _except_handler3(r, m, ctx, dc); }
 int _except_handler4_common(void *a, void *b, void *c, void *d, void *e, void *f) { return 1; }
+int _abnormal_termination(void) { return 0; }
+/* EH de C++ (__CxxFrameHandler, _CxxThrowException): los objetos no se
+ * destruyen al deshacer y un «throw» acaba en «excepción de C++ que nadie
+ * recoge» (lo dice WIN32.BIN) */
+int __CxxFrameHandler(void *r, void *m, void *ctx, void *dc) { return 1; }
+int __CxxFrameHandler3(void *r, void *m, void *ctx, void *dc) { return 1; }
+void WINAPI RaiseException(u32, u32, u32, const u32 *);
+void WINAPI _CxxThrowException(void *obj, void *tipo) {
+  u32 a[3] = { 0x19930520, (u32)obj, (u32)tipo };
+  RaiseException(0xE06D7363, 1, 3, a);
+}
 
 /* ---- otros programas, por CreateProcessA de HW32 (síncrono: al volver ya
  * ha terminado; P_NOWAIT devuelve su handle y _cwait da el código) ---- */

@@ -158,6 +158,7 @@ int w32_principal(void)
 	u32 n, pila, tam_pila, pe;
 	int falta = 0;
 	__asm__ volatile("fninit");
+	sc(183, 9, 0, 0);                   /* (JUEGOS) sin las primeras 64 K: el puntero nulo falla */
 	/* la TEB y la PEB, ya: FS apunta ahí */
 	if (!v_reservar(TEB_DIR, 0x2000, 1)) {
 		sys_serie("[w32] no hay memoria para la TEB\n");
@@ -165,6 +166,10 @@ int w32_principal(void)
 	}
 	prepara_teb(0, 0);
 	hilos_prepara(TEB_DIR, 0);          /* (JUEGOS) la TEB al núcleo (FS de cada hilo) y los hilos */
+	{
+		void seh_prepara(void);
+		seh_prepara();              /* (JUEGOS) las excepciones del procesador, a seh.c */
+	}
 	prepara_objs();
 	n = sys_argumentos(args, sizeof args);
 	if (ES_ERROR(n) || !n || !args[0]) {

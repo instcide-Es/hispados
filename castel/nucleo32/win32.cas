@@ -43,8 +43,16 @@
 ;          si alguien la despierta (185) -> 0; si se acaba el tiempo -> 1.
 ;   - 185  (JUEGOS) despertar a las que esperan en la dirección EBX (de
 ;          verdad), ECX como mucho -> cuántas.
-;   - 186  (JUEGOS, SEH) volver de una excepción: EBX el contexto (los
-;          registros, en el programa) que puso el núcleo, quizá cambiado.
+;   - (JUEGOS, SEH) las excepciones del procesador en un programa de
+;     Windows (dividir por cero, una instrucción que no existe, protección
+;     general, fallo de página): si el proceso ha dado su despachador (la
+;     183, 2), no se le acaba: se le deja en su pila lo que ha pasado (15
+;     números: el vector, el código de error, la dirección del fallo, EIP,
+;     EFLAGS, ESP, EAX, ECX, EDX, EBX, EBP, ESI, EDI, CS y SS) y se le manda
+;     al despachador, que hace lo de Windows (la cadena de FS:[0]) y, si se
+;     sigue, vuelve él solo a donde diga el contexto. La 183, 9 quita las
+;     primeras 64 K del programa (las de WIN32.BIN, sin nada: así un
+;     puntero nulo falla, como en Windows).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Win32
@@ -235,12 +243,73 @@ módulo Win32
             caso 8:
                 acaba_hermanos()
                 devolver 0
+            caso 9:
+                si actual.teb = 0 entonces devolver NO_VALE fin
+                quita_principio()
+                devolver 0
             caso 7:
                 si b yb (PÁGINA - 1) <> 0 o b >= 0x7FFFF000 entonces devolver NO_VALE fin
                 pon_mi_teb(b + BASE_WIN32)
                 devolver 0
         fin
         devolver NO_VALE
+    fin
+
+    ; las primeras 64 K del espacio (la cabecera de WIN32.BIN y su relleno)
+    función quita_principio()
+        variable v, f: nat32
+        v := USUARIO_INICIO
+        mientras v < USUARIO_INICIO + 0x10000 hacer
+            si banderas_de(actual.cr3, v) <> 0 y banderas_de(actual.cr3, v) yb AJENO = 0 entonces
+                f := desmapear(actual.cr3, v)
+                si f <> 0 entonces soltar_marco(f) fin
+            fin
+            v := v + PÁGINA
+        fin
+    fin
+
+    ; (SEH) una excepción del procesador en un programa de Windows: si su
+    ; proceso tiene despachador, se cambia el marco («marco»: lo de pushad;
+    ; detrás, el código de error si «con_código», y lo que apiló el
+    ; procesador) para que vuelva a él con lo que ha pasado en su pila. Da
+    ; falso si no (y se le acaba, como siempre).
+    público función a_su_despachador(marco: nat32, vector: nat32, código: nat32, dir_fallo: nat32, con_código: bool): bool
+        variable f, c: puntero a nat32
+        variable k, esp_u, nueva: nat32
+        variable l: puntero a Tarea
+        si actual = nulo entonces devolver falso fin
+        l := actual
+        si l.líder <> nulo entonces l := l.líder fin
+        si l.despachador = 0 entonces devolver falso fin
+        f := puntero(marco)
+        k := 8
+        si con_código entonces k := 9 fin
+        si f[k + 1] yb 0xFFFF <> CÓDIGO_WIN32 entonces devolver falso fin
+        esp_u := f[k + 3]
+        nueva := (esp_u - 128 - 4 * 17) yb 0xFFFFFFF0
+        si esp_u < 0x10000 o esp_u >= 0x80000000 o no usuario_puede(actual.cr3, nueva + BASE_WIN32, 4 * 17, cierto) entonces devolver falso fin
+        c := puntero(nueva + BASE_WIN32)
+        c[0] := 0                               ; (la vuelta: no vuelve)
+        c[1] := nueva + 8                       ; su argumento: lo de debajo
+        c[2] := vector
+        c[3] := código
+        c[4] := dir_fallo
+        c[5] := f[k]                            ; EIP
+        c[6] := f[k + 2]                        ; EFLAGS
+        c[7] := esp_u
+        c[8] := f[7]                            ; EAX (pushad: EDI, ESI, EBP, ESP, EBX, EDX, ECX, EAX)
+        c[9] := f[6]
+        c[10] := f[5]
+        c[11] := f[4]
+        c[12] := f[2]
+        c[13] := f[1]
+        c[14] := f[0]
+        c[15] := f[k + 1]
+        c[16] := f[k + 4]
+        f[k] := l.despachador
+        f[k + 2] := f[k + 2] yb nob 0x500       ; sin TF ni DF
+        f[k + 3] := nueva
+        devolver cierto
     fin
 
     ; espera mientras en la dirección «a» (de verdad, del programa) esté «v»
