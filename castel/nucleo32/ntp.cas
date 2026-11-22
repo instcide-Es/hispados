@@ -1,0 +1,418 @@
+; =============================================================================
+;  ntp.cas - (NTP) la hora por Internet: un cliente SNTP (RFC 4330: NTP en
+;  UDP, el puerto 123) para HORARED.BIN y el Panel de control («modelo
+;  usuario»), sobre los puertos UDP de RED.BIN (Redes: udp_abrir,
+;  udp_enviar, udp_recibir, cerrar_conexión).
+;
+;  pregunta() pregunta a los servidores (los de la línea «ntp=» de
+;  PANEL.INI: «nombre[:puerto],...»; si no, hora.roa.es y minuto.roa.es —la
+;  hora oficial de España, del Real Instituto y Observatorio de la Armada—,
+;  es.pool.ntp.org y pool.ntp.org), junta lo que dicen y lo compara con el
+;  reloj del PC; pone(forzar) lo pone en el reloj (la llamada 175).
+;
+;  NTP va sin cifrar y sin firmar: quien esté en medio (o un servidor malo)
+;  puede decir la hora que quiera. Y la hora la usa TLS.BIN para mirar las
+;  fechas de los certificados: llevar el reloj atrás haría pasar uno
+;  caducado (o revocado y caducado). Por eso (docs/PENTIUM.md, «La hora por
+;  Internet»):
+;    - se pregunta a varios y, si contestan dos o más, al menos dos tienen
+;      que decir lo mismo (dos segundos arriba o abajo); si no, no se toca
+;      nada (HORA_DESACUERDO);
+;    - nada de antes del día en que se hizo esta versión (Zonas.DÍA_HECHO)
+;      ni del último día en que TLS comprobó una cadena buena (TLS.HOR), ni
+;      de 30 años después (HORA_INCREÍBLE);
+;    - con el reloj del PC creíble, solo se corrige solo hasta 15 minutos
+;      (arriba o abajo); más, lo hace quien esté delante con el modo
+;      administrador (Panel de control > Fecha y hora > Sincronizar ahora:
+;      HORA_SALTO); y el núcleo no deja a HORARED.BIN atrasarlo más de 2 horas
+;      sin él (usuario.cas, la llamada 175);
+;    - y TLS.BIN no se fía de un reloj del PC de antes de TLS.HOR (tls.c).
+;  Hasta 2 minutos, el ajuste es suave: un segundo cada diez (ajusta_un_poco).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ntp
+
+    importar Llamadas, Redes, Textos32, Formato, Zonas, Panelaj
+
+    constante MAX_SERV = 4
+    constante DE_1900_A_2000 = 3155673600       ; los segundos de NTP (desde 1900) del 1/1/2000
+    constante TLS_DÍA_2000 = 730485             ; el 1/1/2000 en los días de TLS.HOR (desde el año 0, tls.c)
+    público constante SUAVE_HASTA = 120         ; hasta aquí (en segundos), poco a poco
+    público constante SOLO_HASTA = 900          ; y hasta aquí, solo (sin el modo administrador)
+
+    ; lo que ha dicho cada uno
+    variable nombres: arreglo [160] de byte      ; MAX_SERV de 40
+    variable puertos: arreglo [MAX_SERV] de nat32
+    variable n_serv: nat32
+    variable r_s, r_ms, r_tic, r_vuelta: arreglo [MAX_SERV] de nat32
+    variable r_bien: arreglo [MAX_SERV] de bool
+    variable paquete: arreglo [48] de byte
+    variable llega: arreglo [64] de byte
+    variable galleta: nat32
+
+    ; ---- lo último que se ha sabido ----
+    público variable propuesta_s: nat32         ; la hora de aquí que debería ser, en propuesta_tic (segundos desde el 1/1/2000)
+    público variable propuesta_ms: nat32        ; y sus milésimas
+    público variable propuesta_tic: nat32
+    público variable diferencia: ent32             ; lo que va mal el reloj del PC (propuesta - reloj), en segundos
+    público variable contestan: nat32           ; los servidores que han contestado
+    público variable de_acuerdo: nat32          ; los que dicen lo mismo
+    público variable reloj_creíble: bool        ; el reloj del PC no es de antes de lo que se sabe
+    público variable pendiente: ent32           ; (ajuste suave) los segundos que quedan por corregir
+    público variable servidor: arreglo [40] de byte     ; el que se ha tomado
+    variable texto: arreglo [220] de byte
+    público variable servidores_pedidos: puntero a byte     ; si no es nulo, estos (HORARED /AHORA servidor,...)
+    público variable despertar: bool            ; si la red no está en marcha, ponerla (y esperarla hasta 10 s)
+
+    ; -------------------------------------------------------------------------
+    ;  Los servidores
+    ; -------------------------------------------------------------------------
+    función pon_servidor(t: puntero a byte, n: nat32)
+        variable i, p: nat32
+        si n_serv >= MAX_SERV o n = 0 entonces devolver fin
+        i := 0
+        p := 123
+        mientras i < n y i < 39 y t[i] <> ':' hacer
+            nombres[n_serv * 40 + i] := t[i]
+            i := i + 1
+        fin
+        nombres[n_serv * 40 + i] := 0
+        si i < n y t[i] = ':' entonces
+            p := 0
+            i := i + 1
+            mientras i < n y t[i] >= '0' y t[i] <= '9' hacer
+                p := p * 10 + (t[i] - '0')
+                i := i + 1
+            fin
+        fin
+        si nombres[n_serv * 40] = 0 o p = 0 o p > 65535 entonces devolver fin
+        puertos[n_serv] := p
+        n_serv := n_serv + 1
+    fin
+
+    ; lee un archivo pequeño de la carpeta del sistema (o de la raíz) a «llega_ini»
+    variable llega_ini: arreglo [1100] de byte
+    función lee_del_sistema(nombre: puntero a byte, cabe: nat32): nat32
+        variable m, n: nat32
+        variable ruta: arreglo [32] de byte
+        copiar(ruta, "\\HISPA\\")
+        concatenar(ruta, nombre)
+        m := abrir(ruta)
+        si es_error(m) entonces
+            copiar(ruta, "\\")
+            concatenar(ruta, nombre)
+            m := abrir(ruta)
+            si es_error(m) entonces devolver 0 fin
+        fin
+        si cabe > 1099 entonces cabe := 1099 fin
+        n := leer(m, llega_ini, cabe)
+        cerrar(m)
+        si es_error(n) entonces n := 0 fin
+        llega_ini[n] := 0
+        devolver n
+    fin
+
+    ; los servidores: los de «ntp=» en PANEL.INI, o los de siempre
+    público función lee_servidores()
+        variable n, i, j: nat32
+        variable p: puntero a byte
+        n_serv := 0
+        n := 0
+        p := servidores_pedidos
+        si p = nulo entonces n := lee_del_sistema("PANEL.INI", 1099) fin
+        si n > 0 entonces
+            si empieza_por(llega_ini, "ntp=") entonces p := dirección(llega_ini[4]) sino p := buscar(llega_ini, "\nntp=") fin
+            si p <> nulo y p[0] = '\n' entonces p := p + 5 fin
+        fin
+        si p <> nulo entonces
+            i := 0
+            mientras p[i] <> 0 y p[i] <> '\r' y p[i] <> '\n' hacer
+                j := i
+                mientras p[j] <> 0 y p[j] <> ',' y p[j] <> '\r' y p[j] <> '\n' y p[j] <> ' ' hacer j := j + 1 fin
+                pon_servidor(dirección(p[i]), j - i)
+                i := j
+                mientras p[i] = ',' o p[i] = ' ' hacer i := i + 1 fin
+            fin
+        fin
+        si n_serv = 0 entonces
+            pon_servidor("hora.roa.es", 11)
+            pon_servidor("minuto.roa.es", 13)
+            pon_servidor("es.pool.ntp.org", 15)
+            pon_servidor("pool.ntp.org", 12)
+        fin
+    fin
+
+    ; el último día con una cadena de certificados buena (TLS.HOR, de TLS.BIN),
+    ; en días desde el 1/1/2000 (0 si no está)
+    público función día_tls(): nat32
+        variable d: nat32
+        si lee_del_sistema("TLS.HOR", 4) <> 4 entonces devolver 0 fin
+        d := nat32(llega_ini[0]) ob (nat32(llega_ini[1]) << 8) ob (nat32(llega_ini[2]) << 16) ob (nat32(llega_ini[3]) << 24)
+        si d < TLS_DÍA_2000 + DÍA_HECHO o d >= TLS_DÍA_2000 + DÍA_HECHO + DÍAS_TOPE entonces devolver 0 fin
+        devolver d - TLS_DÍA_2000
+    fin
+
+    ; el primer día que puede ser (el de esta versión, o el de TLS.HOR)
+    público función día_mínimo(): nat32
+        variable d: nat32
+        d := día_tls()
+        si d < DÍA_HECHO entonces d := DÍA_HECHO fin
+        devolver d
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Preguntar a uno
+    ; -------------------------------------------------------------------------
+    función n32(p: puntero a byte): nat32
+        devolver (nat32(p[0]) << 24) ob (nat32(p[1]) << 16) ob (nat32(p[2]) << 8) ob nat32(p[3])
+    fin
+
+    función milésimas(fracción: nat32): nat32
+        devolver ((fracción >> 16) * 1000) >> 16
+    fin
+
+    función apunta(t: puntero a byte)
+        escribir("hora: ")
+        escribir(t)
+        escribir("\n")
+    fin
+
+    ; pregunta al servidor i por el puerto UDP s: cierto si contesta bien
+    función pregunta_a(i: nat32, s: nat32): bool
+        variable ip, ip2, p2, r, t1, t4, k, vuelta, proceso, ms: nat32
+        variable d: arreglo [6] de nat32
+        variable tip: arreglo [20] de byte
+        r_bien[i] := falso
+        r := resolver(dirección(nombres[i * 40]), ip)
+        si es_error_red(r) entonces
+            d[0] := nat32(dirección(nombres[i * 40]))
+            d[1] := nat32(texto_error_red(r))
+            formatear(texto, 220, "%s: no se encuentra (%s)", d)
+            apunta(texto)
+            devolver falso
+        fin
+        para k desde 0 hasta 47 hacer paquete[k] := 0 fin
+        paquete[0] := 0x23                      ; LI 0, versión 4, modo 3 (cliente)
+        galleta := galleta * 1103515245 + 12345 + tics()
+        ; lo que va en «transmit»: una galleta que la respuesta trae en «originate»
+        paquete[40] := byte(galleta >> 24)
+        paquete[41] := byte(galleta >> 16)
+        paquete[42] := byte(galleta >> 8)
+        paquete[43] := byte(galleta)
+        paquete[44] := byte(i)
+        paquete[45] := 0x48                     ; «H»
+        paquete[46] := 0x50                     ; «P»
+        paquete[47] := byte(tics())
+        t1 := tics()
+        r := udp_enviar(s, ip, puertos[i], paquete, 48)
+        si es_error_red(r) entonces
+            d[0] := nat32(dirección(nombres[i * 40]))
+            d[1] := nat32(texto_error_red(r))
+            formatear(texto, 220, "%s: no se puede preguntar (%s)", d)
+            apunta(texto)
+            devolver falso
+        fin
+        ; lo que llegue de él (otra cosa, se tira), dos segundos como mucho
+        mientras cierto hacer
+            k := tics() - t1
+            si k >= 200 entonces romper fin
+            r := udp_recibir(s, llega, 64, 200 - k, ip2, p2)
+            t4 := tics()
+            si es_error_red(r) entonces romper fin
+            si ip2 = ip y p2 = puertos[i] y r >= 48 y llega[0] yb 7 = 4 y llega[0] >> 6 <> 3 y llega[1] >= 1 y llega[1] <= 15 entonces
+                si llega[24] = paquete[40] y llega[25] = paquete[41] y llega[26] = paquete[42] y llega[27] = paquete[43] y llega[28] = paquete[44] y llega[29] = paquete[45] y llega[30] = paquete[46] y llega[31] = paquete[47] y n32(dirección(llega[40])) <> 0 entonces
+                    ; T2 (cuando le llegó) y T3 (cuando contestó): lo que tardó él
+                    proceso := (n32(dirección(llega[40])) - n32(dirección(llega[32]))) * 1000 + milésimas(n32(dirección(llega[44]))) - milésimas(n32(dirección(llega[36])))
+                    vuelta := (t4 - t1) * 10
+                    si proceso > vuelta entonces proceso := vuelta fin
+                    ms := milésimas(n32(dirección(llega[44]))) + (vuelta - proceso) div 2
+                    r_s[i] := n32(dirección(llega[40])) - DE_1900_A_2000 + ms div 1000
+                    r_ms[i] := ms mod 1000
+                    r_tic[i] := t4
+                    r_vuelta[i] := vuelta
+                    r_bien[i] := cierto
+                    ip_a_texto(ip, tip)
+                    texto_fecha(r_s[i], dirección(texto[100]))
+                    d[0] := nat32(dirección(nombres[i * 40]))
+                    d[1] := nat32(dirección(tip[0]))
+                    d[2] := puertos[i]
+                    d[3] := nat32(dirección(texto[100]))
+                    d[4] := r_ms[i]
+                    d[5] := vuelta
+                    formatear(texto, 100, "%s (%s:%u) da %s,%03u UTC (ida y vuelta: %u ms)", d)
+                    apunta(texto)
+                    devolver cierto
+                fin
+            fin
+        fin
+        d[0] := nat32(dirección(nombres[i * 40]))
+        formatear(texto, 220, "%s no contesta", d)
+        apunta(texto)
+        devolver falso
+    fin
+
+    ; la diferencia (en milésimas, con signo) entre lo que dijeron i y j, a la vez
+    función entre(i: nat32, j: nat32): ent32
+        variable a, b: ent32
+        a := ent32(r_s[i] - r_s[j]) * 1000 + ent32(r_ms[i]) - ent32(r_ms[j])
+        b := ent32(r_tic[j] - r_tic[i]) * 10       ; lo que se dijo antes, llevado a después
+        devolver a + b
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Preguntar a todos
+    ; -------------------------------------------------------------------------
+    ; da HORA_BIEN si hay una hora que se puede creer (en propuesta_s,
+    ; propuesta_ms y propuesta_tic, la de aquí; en «diferencia», lo que va mal el
+    ; reloj del PC); si no, por qué no
+    público función pregunta(): nat32
+        variable s, i, j, k, mejor, cuántos, ip, ms, días_ahora, reloj, mín: nat32
+        variable utc_s: nat32
+        variable dz: ent32
+        variable d: arreglo [6] de nat32
+        variable f: arreglo [24] de byte
+        variable info: Info_red
+        contestan := 0
+        de_acuerdo := 0
+        si estado_rápido(ip) <> RED_CONECTADA y despertar entonces
+            ; la red, en marcha (la llamada 90 la pone), y su IP, hasta 10 s
+            estado_red(info)
+            k := 0
+            mientras estado_rápido(ip) <> RED_CONECTADA y k < 100 hacer
+                dormir(10)
+                k := k + 1
+            fin
+        fin
+        si estado_rápido(ip) <> RED_CONECTADA entonces devolver HORA_SIN_RED fin
+        lee_servidores()
+        s := udp_abrir(0)
+        si es_error_red(s) entonces devolver HORA_SIN_RED fin
+        para i desde 0 hasta n_serv - 1 hacer
+            si pregunta_a(i, s) entonces contestan := contestan + 1 fin
+        fin
+        cerrar_conexión(s)
+        si contestan = 0 entonces devolver HORA_SIN_RESPUESTA fin
+        ; el que más acompañados está (dos segundos arriba o abajo) y, de
+        ; ellos, el de la ida y vuelta más corta
+        mejor := MAX_SERV
+        cuántos := 0
+        para i desde 0 hasta n_serv - 1 hacer
+            si r_bien[i] entonces
+                k := 0
+                para j desde 0 hasta n_serv - 1 hacer
+                    si r_bien[j] y entre(i, j) <= 2000 y entre(i, j) >= -2000 entonces k := k + 1 fin
+                fin
+                si k > cuántos entonces
+                    mejor := i
+                    cuántos := k
+                sino si k = cuántos entonces
+                    si r_vuelta[i] < r_vuelta[mejor] entonces mejor := i fin
+                fin
+            fin
+        fin
+        de_acuerdo := cuántos
+        si contestan >= 2 y cuántos < 2 entonces
+            apunta("los servidores no dicen lo mismo: no se cambia nada")
+            devolver HORA_DESACUERDO
+        fin
+        ; lo que hay que creer: nada de antes de lo que se sabe
+        utc_s := r_s[mejor]
+        mín := día_mínimo()
+        si utc_s div 86400 < mín o utc_s div 86400 >= DÍA_HECHO + DÍAS_TOPE entonces
+            texto_fecha(utc_s, f)
+            d[0] := nat32(dirección(nombres[mejor * 40]))
+            d[1] := nat32(dirección(f[0]))
+            formatear(texto, 220, "%s dice %s: no puede ser (de antes de lo que se sabe, o de dentro de 30 a\xA4os): no se cree", d)
+            apunta(texto)
+            devolver HORA_INCREÍBLE
+        fin
+        copiar(servidor, dirección(nombres[mejor * 40]))
+        ; a la hora de aquí, y a ahora
+        dz := desfase(ajuste(AJ_HORA_ZONA), utc_s, ajuste(AJ_HORA_VERANO) = 1)
+        propuesta_tic := tics()
+        ms := r_ms[mejor] + (propuesta_tic - r_tic[mejor]) * 10
+        propuesta_s := nat32(ent32(utc_s) + dz) + ms div 1000
+        propuesta_ms := ms mod 1000
+        reloj := hora_exacta()
+        días_ahora := reloj div 86400
+        reloj_creíble := días_ahora + 1 >= mín y días_ahora < DÍA_HECHO + DÍAS_TOPE
+        diferencia := ent32(propuesta_s - reloj)
+        si propuesta_ms >= 500 entonces diferencia := diferencia + 1 fin
+        texto_fecha(propuesta_s, f)
+        texto_diferencia(diferencia, dirección(texto[180]))
+        d[0] := nat32(dirección(f[0]))
+        d[1] := nat32(dirección(texto[180]))
+        d[2] := contestan
+        d[3] := cuántos
+        formatear(texto, 180, "la hora de aqu\xA1: %s (el reloj del PC va %s; contestan %u, de acuerdo %u)", d)
+        apunta(texto)
+        devolver HORA_BIEN
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Ponerla
+    ; -------------------------------------------------------------------------
+    ; pone en el reloj del PC lo que dijo pregunta() (que ha dado HORA_BIEN).
+    ; Sin «forzar», solo lo que se puede solo (hasta 15 minutos con el reloj
+    ; creíble; hasta 2 minutos, poco a poco si «suave»); con él (quien llama
+    ; tiene el modo administrador), lo que sea
+    público función pone(forzar: bool, suave: bool): nat32
+        variable ms, r, k: nat32
+        variable d: arreglo [2] de nat32
+        pendiente := 0
+        si diferencia >= -1 y diferencia <= 1 entonces
+            apunta("el reloj del PC est\xA0 en hora")
+            devolver HORA_BIEN
+        fin
+        si no forzar y reloj_creíble y (diferencia > ent32(SOLO_HASTA) o diferencia < 0 - ent32(SOLO_HASTA)) entonces
+            texto_diferencia(diferencia, dirección(texto[180]))
+            d[0] := nat32(dirección(texto[180]))
+            formatear(texto, 180, "el reloj del PC va %s: no se cambia solo (Panel de control > Fecha y hora, con el modo administrador)", d)
+            apunta(texto)
+            devolver HORA_SALTO
+        fin
+        si suave y no forzar y diferencia >= 0 - ent32(SUAVE_HASTA) y diferencia <= ent32(SUAVE_HASTA) entonces
+            pendiente := diferencia
+            d[0] := nat32(diferencia)
+            formatear(texto, 220, "ajuste suave: %d s, un segundo cada diez", d)
+            apunta(texto)
+            devolver HORA_AJUSTANDO
+        fin
+        ; de una vez, justo al empezar el segundo
+        ms := propuesta_ms + (tics() - propuesta_tic) * 10
+        k := (1000 - ms mod 1000) div 10
+        si k > 0 y k <= 100 entonces dormir(k) fin
+        ms := propuesta_ms + (tics() - propuesta_tic) * 10
+        r := poner_hora_exacta(propuesta_s + (ms + 500) div 1000)
+        si r <> 0 entonces
+            apunta("el n\xA3cleo no deja poner la hora")
+            devolver HORA_DENEGADO
+        fin
+        d[0] := nat32(diferencia)
+        formatear(texto, 220, "puesta en hora: %d s", d)
+        apunta(texto)
+        devolver HORA_PUESTA
+    fin
+
+    ; (ajuste suave) un segundo arriba o abajo, justo al cambiar el segundo
+    ; del reloj del PC: falso si ya no queda nada
+    público función ajusta_un_poco(): bool
+        variable a, b, k: nat32
+        si pendiente = 0 entonces devolver falso fin
+        a := hora_exacta()
+        k := 0
+        b := a
+        mientras b = a y k < 120 hacer
+            dormir(1)
+            b := hora_exacta()
+            k := k + 1
+        fin
+        si pendiente > 0 entonces
+            si poner_hora_exacta(b + 1) <> 0 entonces pendiente := 0 sino pendiente := pendiente - 1 fin
+        sino
+            si poner_hora_exacta(b - 1) <> 0 entonces pendiente := 0 sino pendiente := pendiente + 1 fin
+        fin
+        devolver pendiente <> 0
+    fin
+
+fin Ntp.

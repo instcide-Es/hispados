@@ -60,11 +60,20 @@ módulo Energia
         salud_pct, salud_n, unidad, diseño, llena, ciclos1, ciclos2: nat32
         s5, pm1a_cnt, pm1b_cnt, slp_typa, slp_typb, smi_cmd, acpi_enable: nat32
         reset_esp, reset_dir, reset_valor, respuesta, sin_archivos: nat32
+        botón: nat32                            ; (PANEL) las veces que se ha pulsado el botón de encendido (con la versión 2 del servicio)
     fin
+    constante TAMAÑO_154 = 120                  ; (PANEL) lo que da la 154: la Energía sin «botón» (la de llamadas.cas)
 
     público variable energía: Energía           ; lo último que ha dado el servicio
     público variable hay_energía: bool
     público variable cambios_energía: nat32     ; sube cuando cambia lo que se ve de la batería
+
+    ; (PANEL) las veces que se ha pulsado el botón de encendido (lo mira el
+    ; servicio de ACPI desde su versión 2: con una de antes, siempre 0)
+    público función pulsaciones_botón(): nat32
+        si no hay_energía o energía.versión < 2 entonces devolver 0 fin
+        devolver energía.botón
+    fin
     variable servicio: nat32                    ; la tarea de ACPI.BIN (0: no hay)
     variable orden: nat32
     variable sin_archivos: bool                 ; se le ha pedido que no escriba más en el disco
@@ -168,8 +177,8 @@ módulo Energia
     ; las llamadas 150 a 154 (usuario.cas)
     público función atender_energía(n: nat32, a: nat32, b: nat32, c: nat32): nat32
         si n = 154 entonces
-            si no hay_energía o no usuario_puede(actual.cr3, a, tamaño(Energía), cierto) entonces devolver 0 fin
-            copiar_memoria(puntero(a), puntero(dirección(energía)), tamaño(Energía))
+            si no hay_energía o no usuario_puede(actual.cr3, a, TAMAÑO_154, cierto) entonces devolver 0 fin
+            copiar_memoria(puntero(a), puntero(dirección(energía)), TAMAÑO_154)
             devolver 1
         fin
         si servicio = 0 o actual.id <> servicio entonces devolver NO_VALE fin

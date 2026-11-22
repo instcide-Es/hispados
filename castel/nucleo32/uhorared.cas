@@ -1,0 +1,237 @@
+; =============================================================================
+;  uhorared.cas - (PANEL, NTP) HORARED.BIN: la hora por Internet y el horario de
+;  verano de Hispa-Pentium.
+;
+;    HORARED /VIGILAR     (lo lanza el escritorio al arrancar, de la carpeta
+;                      del sistema: con su sello) se queda en marcha: en
+;                      cuanto hay red, pregunta la hora (ntp.cas) y la pone;
+;                      luego, cada cuatro horas (si falla, a los quince
+;                      minutos); y cada minuto mira si toca cambiar al
+;                      horario de verano o al de invierno (zonas.cas)
+;    HORARED /AHORA       pregunta la hora ya y la pone (con /FORZAR y el modo
+;                      administrador, aunque vaya muy distinta); el código
+;                      de salida es el HORA_... de zonas.cas. Detrás, se
+;                      pueden dar los servidores (nombre[:puerto],...) en
+;                      vez de los de PANEL.INI; si la red no está en
+;                      marcha, la pone
+;    HORARED           cómo está: la zona, el horario de verano, la última vez
+;    HORARED /ATRASA h    (para las pruebas) intenta atrasar el reloj h horas:
+;                      sin el modo administrador, el núcleo no deja más de 2
+;  Lo que hace lo dice por la salida («hora: ...»: en el escritorio, el
+;  puerto serie) y lo apunta en el núcleo (la llamada 174: AJ_HORA_...),
+;  que es lo que enseña el Panel de control (Fecha y hora).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UHorared
+
+    modelo usuario
+
+    importar Llamadas, Redes, Textos32, Formato, Zonas, Panelaj, Ntp
+
+    variable texto: arreglo [200] de byte
+    variable servidores: arreglo [120] de byte
+
+    función di(t: puntero a byte)
+        escribir("hora: ")
+        escribir(t)
+        escribir("\n")
+    fin
+
+    ; apunta en el núcleo cómo ha ido (lo que enseña el Panel de control)
+    función anota(r: nat32)
+        variable zona, local, utc: nat32
+        variable v: bool
+        poner_ajuste(AJ_HORA_ESTADO, r)
+        si r = HORA_PUESTA o r = HORA_BIEN o r = HORA_AJUSTANDO entonces
+            poner_ajuste(AJ_HORA_ÚLTIMA, hora_exacta())
+            poner_ajuste(AJ_HORA_DESFASE, nat32(diferencia))
+        fin
+        si r = HORA_PUESTA entonces
+            ; el reloj lleva ahora la hora de aquí con el verano de ahora
+            zona := ajuste(AJ_HORA_ZONA)
+            local := hora_exacta()
+            utc := nat32(ent32(local) - base_zona(zona) * 60)
+            v := ajuste(AJ_HORA_VERANO) = 1 y en_verano(zona, utc - 3600)
+            si v entonces poner_ajuste(AJ_HORA_VERANO_PUESTO, 1) sino poner_ajuste(AJ_HORA_VERANO_PUESTO, 0) fin
+        fin
+    fin
+
+    ; espera a que cambie el segundo del reloj del PC y da el de ahora
+    función al_segundo(): nat32
+        variable a, b, k: nat32
+        a := hora_exacta()
+        b := a
+        k := 0
+        mientras b = a y k < 120 hacer
+            dormir(1)
+            b := hora_exacta()
+            k := k + 1
+        fin
+        devolver b
+    fin
+
+    ; el horario de verano: si toca, una hora más o una menos
+    función mira_verano()
+        variable zona, puesto, local, utc, nuevo: nat32
+        variable quiere: bool
+        variable d: arreglo [2] de nat32
+        variable f: arreglo [24] de byte
+        zona := ajuste(AJ_HORA_ZONA)
+        si no tiene_verano(zona) o ajuste(AJ_HORA_VERANO) <> 1 entonces devolver fin
+        puesto := ajuste(AJ_HORA_VERANO_PUESTO)
+        local := hora_exacta()
+        si puesto = 2 entonces
+            ; la primera vez: el reloj lleva la hora de aquí, con lo de hoy
+            utc := nat32(ent32(local) - base_zona(zona) * 60)
+            si en_verano(zona, utc - 3600) entonces puesto := 1 sino puesto := 0 fin
+            poner_ajuste(AJ_HORA_VERANO_PUESTO, puesto)
+            si puesto = 1 entonces di("el reloj del PC lleva el horario de verano") sino di("el reloj del PC lleva el horario de invierno") fin
+            devolver
+        fin
+        utc := nat32(ent32(local) - base_zona(zona) * 60 - ent32(puesto) * 3600)
+        quiere := en_verano(zona, utc)
+        si quiere = (puesto = 1) entonces devolver fin
+        local := al_segundo()
+        si quiere entonces nuevo := local + 3600 sino nuevo := local - 3600 fin
+        si poner_hora_exacta(nuevo) <> 0 entonces
+            di("el n\xA3cleo no deja cambiar al horario de verano o de invierno")
+            devolver
+        fin
+        si quiere entonces poner_ajuste(AJ_HORA_VERANO_PUESTO, 1) sino poner_ajuste(AJ_HORA_VERANO_PUESTO, 0) fin
+        texto_fecha(local, f)
+        d[0] := nat32(dirección(f[0]))
+        texto_fecha(nuevo, dirección(texto[150]))
+        d[1] := nat32(dirección(texto[150]))
+        si quiere entonces
+            formatear(texto, 150, "al horario de verano: de %s a %s", d)
+        sino
+            formatear(texto, 150, "al horario de invierno: de %s a %s", d)
+        fin
+        di(texto)
+    fin
+
+    ; la hora por Internet, una vez: pregunta y pone
+    función una_vez(forzar: bool, suave: bool): nat32
+        variable r: nat32
+        r := pregunta()
+        si r = HORA_BIEN entonces r := pone(forzar, suave) fin
+        anota(r)
+        devolver r
+    fin
+
+    función vigila(): byte
+        variable próxima, siguiente_paso, r: nat32
+        di("HORARED.BIN en marcha: la hora por Internet y el horario de verano")
+        próxima := tics() + 200
+        siguiente_paso := 0
+        mientras cierto hacer
+            mira_verano()
+            si ajuste(AJ_HORA_INTERNET) <> 1 entonces
+                pendiente := 0
+                si ajuste(AJ_HORA_ESTADO) <> HORA_APAGADA entonces poner_ajuste(AJ_HORA_ESTADO, HORA_APAGADA) fin
+            sino si pendiente <> 0 entonces
+                si ent32(tics() - siguiente_paso) >= 0 entonces
+                    si no ajusta_un_poco() entonces
+                        di("ajuste suave: acabado")
+                        poner_ajuste(AJ_HORA_ESTADO, HORA_PUESTA)
+                        poner_ajuste(AJ_HORA_ÚLTIMA, hora_exacta())
+                    fin
+                    siguiente_paso := tics() + 1000
+                fin
+            sino si ent32(tics() - próxima) >= 0 entonces
+                r := una_vez(falso, cierto)
+                según nat16(r)
+                    caso HORA_PUESTA, HORA_BIEN: próxima := tics() + 4 * 3600 * 100
+                    caso HORA_AJUSTANDO:
+                        siguiente_paso := tics() + 1000
+                        próxima := tics() + 4 * 3600 * 100
+                    caso HORA_SIN_RED: próxima := tics() + 1000
+                    si no: próxima := tics() + 15 * 60 * 100
+                fin
+            fin
+            dormir(100)
+        fin
+        devolver 0
+    fin
+
+    función estado()
+        variable zona, e, u: nat32
+        variable d: arreglo [3] de nat32
+        variable f: arreglo [24] de byte
+        zona := ajuste(AJ_HORA_ZONA)
+        texto_fecha(hora_exacta(), f)
+        d[0] := nat32(dirección(f[0]))
+        d[1] := nat32(nombre_zona(zona))
+        imprimir("Ahora: %s (%s)\n", d)
+        si no tiene_verano(zona) entonces
+            escribir("Horario de verano: no hay en esta zona\n")
+        sino si ajuste(AJ_HORA_VERANO) <> 1 entonces
+            escribir("Horario de verano: no se cambia solo\n")
+        sino si ajuste(AJ_HORA_VERANO_PUESTO) = 1 entonces
+            escribir("Horario de verano: solo (ahora, el de verano)\n")
+        sino
+            escribir("Horario de verano: solo (ahora, el de invierno)\n")
+        fin
+        si ajuste(AJ_HORA_INTERNET) = 1 entonces escribir("La hora por Internet: encendida\n") sino escribir("La hora por Internet: apagada\n") fin
+        e := ajuste(AJ_HORA_ESTADO)
+        u := ajuste(AJ_HORA_ÚLTIMA)
+        d[0] := nat32(texto_estado(e))
+        imprimir("La \xA3ltima vez: %s", d)
+        si u <> 0 entonces
+            texto_fecha(u, f)
+            d[0] := nat32(dirección(f[0]))
+            texto_diferencia(ent32(ajuste(AJ_HORA_DESFASE)), dirección(texto[150]))
+            d[1] := nat32(dirección(texto[150]))
+            imprimir(" (el %s; el reloj iba %s)", d)
+        fin
+        escribir("\n")
+    fin
+
+    función principal(): byte
+        variable args: arreglo [120] de byte
+        variable p: arreglo [24] de byte
+        variable r, h, k: nat32
+        variable forzar: bool
+        variable q: arreglo [120] de byte
+        argumentos(args, 120)
+        si no palabra(args, 0, p, 24) entonces
+            estado()
+            devolver 0
+        fin
+        si iguales_sin_caja(p, "/VIGILAR") entonces devolver vigila() fin
+        si iguales_sin_caja(p, "/AHORA") entonces
+            despertar := cierto
+            forzar := falso
+            k := 1
+            mientras palabra(args, k, q, 120) hacer
+                si iguales_sin_caja(q, "/FORZAR") entonces
+                    forzar := cierto
+                sino
+                    ; los servidores, en vez de los de PANEL.INI: «nombre[:puerto],...»
+                    copiar(servidores, q)
+                    servidores_pedidos := dirección(servidores[0])
+                fin
+                k := k + 1
+            fin
+            si forzar y no es_admin() entonces
+                escribir("hora: /FORZAR pide el modo administrador (ADMIN)\n")
+                forzar := falso
+            fin
+            r := una_vez(forzar, falso)
+            di(texto_estado(r))
+            devolver byte(r)
+        fin
+        si iguales_sin_caja(p, "/ATRASA") y palabra(args, 1, p, 24) y texto_a_natural(p, h) entonces
+            r := poner_hora_exacta(hora_exacta() - h * 3600)
+            si r = 0 entonces
+                di("atrasado")
+                devolver 0
+            fin
+            di("el n\xA3cleo no deja atrasar el reloj tanto")
+            devolver 1
+        fin
+        escribir("HORARED [/AHORA [/FORZAR] [servidor[:puerto],...]] [/VIGILAR]: la hora por Internet (Panel de control > Fecha y hora)\n")
+        devolver 1
+    fin
+
+fin UHorared.

@@ -1,0 +1,371 @@
+; =============================================================================
+;  preferencias.cas - (PANEL) los ajustes del Panel de control de
+;  Hispa-Pentium: lo que se elige en Configuración (el Panel de control,
+;  PANEL.BIN) y que el núcleo aplica al momento y al arrancar.
+;
+;  La llamada 174 (EBX: la clave AJ_...; ECX: el valor nuevo, o 0xFFFFFFFF
+;  para solo leerlo) da el valor que queda. Leer, cualquiera; cambiar, el
+;  Panel de control (su sello, SELLO_PANEL) o el modo administrador; la zona
+;  horaria y el cambio solo al horario de verano, solo con el modo
+;  administrador (lo pide el Panel con la 157: mueven el reloj); lo de la
+;  hora por Internet que se ve en el Panel (la última vez, el desfase, si va
+;  el horario de verano puesto), también HORARED.BIN (su sello, SELLO_HORA).
+;
+;  Se guardan en PANEL.INI (en \HISPA en un sistema instalado; en la raíz
+;  de la memoria USB si no), que escribe solo el núcleo (la zona protegida:
+;  «PANEL.INI», nadie más), con una línea «clave=valor» por ajuste; y la
+;  línea «ntp=» (los servidores de la hora: la lee HORARED.BIN) se guarda tal
+;  cual. El escritorio los lee al arrancar (lee_preferencias) y los pone.
+;  Lo que ya se guardaba en otro sitio sigue allí: el dock (DOCK.INI), por
+;  dónde va la red (RED.INI, de RED.BIN).
+;
+;  Los temas (Personalización): el de siempre y cinco más con el contraste
+;  medido (la letra blanca sobre el color más claro de cada degradado, como
+;  WCAG: 4,5 a 1 o más; castel/pruebas.sh lo comprueba con esta tabla).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Preferencias
+
+    importar Tareas, Fat, Unidades, Raton, Ventanas, Consola, Usbhid, Red, Permisos, Grafico, Textos32, Formato
+
+    ; ---- las claves de la llamada 174 (las mismas en llamadas.cas) ----
+    público constante AJ_RATÓN_VELOCIDAD = 1    ; 1 (lenta) a 10 (rápida); 5, como llega
+    público constante AJ_RATÓN_DOBLE = 2        ; lo que puede tardar el doble clic, en centésimas (20 a 90; 45)
+    público constante AJ_RATÓN_ZURDO = 3        ; 1: los botones, cambiados
+    público constante AJ_RATÓN_RUEDA = 4        ; los renglones por paso de la rueda (3, 6, 9, 12 o 15: los programas desplazan 3 por paso)
+    público constante AJ_TECLADO = 5            ; 0 EE. UU., 1 español, 2 latinoamericano
+    público constante AJ_TECLADO_RETARDO = 6    ; 0 a 3: 250, 500, 750 o 1.000 ms
+    público constante AJ_TECLADO_RITMO = 7      ; las letras por segundo al repetir (2 a 30)
+    público constante AJ_BLOQ_NUM = 8           ; Bloq Num al arrancar (1, encendido)
+    público constante AJ_PANTALLA_APAGAR = 9    ; los minutos sin tocar nada para apagar la pantalla (0: nunca)
+    público constante AJ_BATERÍA_APAGAR = 10    ; con la batería a este % (o menos) y sin cable, se apaga el equipo (0: nunca)
+    público constante AJ_BOTÓN = 11             ; el botón de encendido: 0 apagar, 1 preguntar, 2 nada
+    público constante AJ_TEMA = 12              ; el tema de los colores (0 a MAX_TEMAS - 1)
+    público constante AJ_TAPIZ = 13             ; el tapiz: 0 olas, 1 azul, 2 verde (3, al leer: una imagen)
+    público constante AJ_DOCK = 14              ; el dock: 1 visible, 0 oculto (se guarda en DOCK.INI)
+    público constante AJ_RED = 15               ; por dónde va la red: 0 automático, 1 cable, 2 Wi-Fi (RED.INI)
+    público constante AJ_HORA_ZONA = 16         ; (NTP) la zona horaria (la tabla de zonas.cas); solo con el modo administrador
+    público constante AJ_HORA_INTERNET = 17     ; (NTP) 1: la hora por Internet (HORARED.BIN)
+    público constante AJ_HORA_VERANO = 18       ; (NTP) 1: el horario de verano, solo; solo con el modo administrador
+    público constante AJ_HORA_VERANO_PUESTO = 19    ; (NTP) 1: el reloj del PC lleva ahora el horario de verano (2: no se sabe aún)
+    público constante AJ_HORA_ÚLTIMA = 20       ; (NTP) la última vez que se puso en hora por Internet (segundos desde el 1/1/2000; 0: nunca)
+    público constante AJ_HORA_ESTADO = 21       ; (NTP) cómo fue la última vez (HORA_... de zonas.cas)
+    público constante AJ_HORA_DESFASE = 22      ; (NTP) lo que iba mal el reloj, en segundos (con signo)
+    constante MAX_AJ = 23
+    público constante SOLO_LEER = 0xFFFFFFFF
+    constante NO_VALE = 0xFFFFFFF9              ; (los de usuario.cas)
+    constante DENEGADO = 0xFFFFFFF0
+
+    ; ---- los temas ----
+    público constante MAX_TEMAS = 6
+    público tipo Tema = estructura
+        t_arriba, t_abajo: nat32                ; el título de la ventana activa
+        b_arriba, b_abajo, raya1, raya2: nat32  ; la barra de tareas (y sus dos rayas de arriba)
+        j_arriba, j_abajo, j_borde1, j_borde2, sombra: nat32    ; la bandeja (y la sombra del reloj)
+        k_arriba, k_abajo, k_borde: nat32       ; los botones de la barra
+        a_arriba, a_abajo, a_borde: nat32       ; el de la ventana activa
+        tinta: nat32                            ; la letra (del título y de la barra)
+    fin
+    público variable tema: Tema                 ; el de ahora (lo pinta el escritorio)
+    público variable cambios: nat32             ; sube cuando hay que repintar el escritorio (el tema, el tapiz, el dock)
+    público variable tapiz_del_panel: nat32 = 0xFFFFFFFF   ; el tapiz que ha pedido el Panel (lo pone el escritorio)
+    público variable dock_del_panel: nat32 = 0xFFFFFFFF    ; lo mismo, el dock
+    público variable tapiz_de_ahora: nat32      ; lo pone el escritorio (3: una imagen)
+    público variable dock_de_ahora: nat32 = 1   ; lo pone el escritorio (el dock no se puede importar aquí: va en círculo)
+    público variable leídas: bool               ; ya se ha leído PANEL.INI
+
+    variable valores: arreglo [MAX_AJ] de nat32
+    variable mínimos: arreglo [MAX_AJ] de nat32
+    variable máximos: arreglo [MAX_AJ] de nat32
+    variable nombres: arreglo [MAX_AJ] de puntero a byte    ; en PANEL.INI (nulo: no se guarda ahí)
+    público variable presentes: nat32           ; (bits) las claves que estaban en PANEL.INI
+    variable ntp: arreglo [160] de byte         ; la línea «ntp=» de PANEL.INI, tal cual
+    variable texto_ini: arreglo [1024] de byte
+    variable ruta: arreglo [24] de byte
+
+    función clave(k: nat32, nombre: puntero a byte, mín: nat32, máx: nat32, por_omisión: nat32)
+        nombres[k] := nombre
+        mínimos[k] := mín
+        máximos[k] := máx
+        valores[k] := por_omisión
+    fin
+
+    ; los valores de siempre (los de antes del Panel)
+    público función prepara_preferencias()
+        variable k: nat32
+        para k desde 0 hasta MAX_AJ - 1 hacer
+            nombres[k] := nulo
+            mínimos[k] := 0
+            máximos[k] := 0xFFFFFFFE
+            valores[k] := 0
+        fin
+        clave(AJ_RATÓN_VELOCIDAD, "raton_velocidad", 1, 10, 5)
+        clave(AJ_RATÓN_DOBLE, "raton_doble", 20, 90, 45)
+        clave(AJ_RATÓN_ZURDO, "raton_zurdo", 0, 1, 0)
+        clave(AJ_RATÓN_RUEDA, "raton_rueda", 3, 15, 3)
+        clave(AJ_TECLADO, "teclado", 0, 2, 1)
+        clave(AJ_TECLADO_RETARDO, "teclado_retardo", 0, 3, 1)
+        clave(AJ_TECLADO_RITMO, "teclado_ritmo", 2, 30, 25)
+        clave(AJ_BLOQ_NUM, "bloq_num", 0, 1, 1)
+        clave(AJ_PANTALLA_APAGAR, "pantalla_apagar", 0, 240, 0)
+        clave(AJ_BATERÍA_APAGAR, "bateria_apagar", 0, 30, 5)
+        clave(AJ_BOTÓN, "boton_encendido", 0, 2, 0)
+        clave(AJ_TEMA, "tema", 0, MAX_TEMAS - 1, 0)
+        clave(AJ_TAPIZ, "tapiz", 0, 2, 0)
+        clave(AJ_DOCK, nulo, 0, 1, 1)
+        clave(AJ_RED, nulo, 0, 2, 0)
+        clave(AJ_HORA_ZONA, "zona", 0, 31, 0)
+        clave(AJ_HORA_INTERNET, "hora_internet", 0, 1, 1)
+        clave(AJ_HORA_VERANO, "verano_automatico", 0, 1, 1)
+        clave(AJ_HORA_VERANO_PUESTO, "verano_puesto", 0, 2, 2)
+        clave(AJ_HORA_ÚLTIMA, nulo, 0, 0xFFFFFFFE, 0)
+        clave(AJ_HORA_ESTADO, nulo, 0, 0xFFFFFFFE, 0)
+        clave(AJ_HORA_DESFASE, nulo, 0, 0xFFFFFFFE, 0)
+        ntp[0] := 0
+        pon_tema(0)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los temas
+    ; -------------------------------------------------------------------------
+    función colores(t_a: nat32, t_b: nat32, b_a: nat32, b_b: nat32, j_a: nat32, j_b: nat32, k_a: nat32, k_b: nat32, a_a: nat32, a_b: nat32)
+        tema.t_arriba := t_a
+        tema.t_abajo := t_b
+        tema.b_arriba := b_a
+        tema.b_abajo := b_b
+        tema.raya1 := mezcla(b_a, 0xFFFFFF, 110)
+        tema.raya2 := mezcla(b_a, 0xFFFFFF, 50)
+        tema.j_arriba := j_a
+        tema.j_abajo := j_b
+        tema.j_borde1 := mezcla(j_b, 0, 90)
+        tema.j_borde2 := mezcla(j_a, 0xFFFFFF, 110)
+        tema.sombra := mezcla(j_b, 0, 120)
+        tema.k_arriba := k_a
+        tema.k_abajo := k_b
+        tema.k_borde := mezcla(k_b, 0, 70)
+        tema.a_arriba := a_a
+        tema.a_abajo := a_b
+        tema.a_borde := mezcla(a_a, 0, 70)
+        tema.tinta := 0xFFFFFF
+    fin
+
+    ; pone el tema n (0: el de siempre, con sus colores de antes, tal cual)
+    público función pon_tema(n: nat32)
+        según nat16(n)
+            caso 1: colores(0x2463C4, 0x164A96, 0x2A66BE, 0x143F86, 0x2D6CC4, 0x174A92, 0x3570C8, 0x1F55A8, 0x0F3570, 0x1A4A94)   ; Azul intenso
+            caso 2: colores(0x287A4D, 0x145C36, 0x2A7A4C, 0x134B2C, 0x2F8552, 0x175C37, 0x2F7A51, 0x1F5F39, 0x0F3D22, 0x1A5A35)   ; Verde bosque
+            caso 3: colores(0x58626F, 0x2C3239, 0x4A525D, 0x252A30, 0x545D69, 0x30363E, 0x5E6773, 0x3E454F, 0x1C2025, 0x2E343B)   ; Grafito
+            caso 4: colores(0x9E3446, 0x641A27, 0x8A2C3C, 0x531520, 0x963244, 0x5F1925, 0x9A3A4A, 0x74222F, 0x3F0E17, 0x5A1823)   ; Granate
+            caso 5:
+                ; Alto contraste: negro y letra blanca; la ventana activa, con
+                ; el botón de la barra en azul marino (y el foco, como siempre:
+                ; un borde, no solo un color)
+                colores(0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x1A1A1A, 0x1A1A1A, 0x00005E, 0x00005E)
+                tema.raya1 := 0xFFFFFF
+                tema.raya2 := 0x000000
+                tema.j_borde1 := 0xFFFFFF
+                tema.j_borde2 := 0x000000
+                tema.sombra := 0x000000
+                tema.k_borde := 0xFFFFFF
+                tema.a_borde := 0xFFFF00
+            si no:
+                ; el de siempre (los colores de antes del Panel)
+                colores(0x3F8DEA, 0x1A5AB6, 0x4C97EC, 0x1D5DBA, 0x6FBDF7, 0x3393E0, 0x6DB4F8, 0x3E86E2, 0x1A52A6, 0x2B6FCC)
+                tema.raya1 := 0x8FC4FA
+                tema.raya2 := 0x62A8F2
+                tema.j_borde1 := 0x1A56AC
+                tema.j_borde2 := 0x9AD4FF
+                tema.sombra := 0x1E5CA8
+                tema.k_borde := 0x2A6BC8
+                tema.a_borde := 0x0F3F8A
+        fin
+        título_arriba := tema.t_arriba
+        título_abajo := tema.t_abajo
+        título_tinta := tema.tinta
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Aplicar un ajuste
+    ; -------------------------------------------------------------------------
+    función aplica(k: nat32)
+        variable v: nat32
+        v := valores[k]
+        según nat16(k)
+            caso AJ_RATÓN_VELOCIDAD: velocidad := v
+            caso AJ_RATÓN_DOBLE: tics_doble := v
+            caso AJ_RATÓN_ZURDO: zurdo := v = 1
+            caso AJ_RATÓN_RUEDA: pasos_por_paso := ent32(v div 3)
+            caso AJ_TECLADO: pon_distribución(v)
+            caso AJ_TECLADO_RETARDO, AJ_TECLADO_RITMO:
+                pon_repetición(valores[AJ_TECLADO_RETARDO], valores[AJ_TECLADO_RITMO])
+                repite_tras := (valores[AJ_TECLADO_RETARDO] + 1) * 25
+                repite_cada := 100 div valores[AJ_TECLADO_RITMO]
+                si repite_cada < 1 entonces repite_cada := 1 fin
+            caso AJ_BLOQ_NUM: pon_bloq_num(v = 1)
+            caso AJ_TEMA:
+                pon_tema(v)
+                cambios := cambios + 1
+            caso AJ_TAPIZ:
+                tapiz_del_panel := v
+                cambios := cambios + 1
+            caso AJ_DOCK:
+                dock_del_panel := v
+                cambios := cambios + 1
+            caso AJ_RED: pedir_preferencia(v)
+        fin
+    fin
+
+    ; lo que vale ahora (lo que no lleva el núcleo aquí, de donde está)
+    público función ajuste(k: nat32): nat32
+        si k = 0 o k >= MAX_AJ entonces devolver 0 fin
+        según nat16(k)
+            caso AJ_TECLADO: devolver distribución()
+            caso AJ_TAPIZ: devolver tapiz_de_ahora
+            caso AJ_DOCK: devolver dock_de_ahora
+            caso AJ_RED: devolver preferir_red
+        fin
+        devolver valores[k]
+    fin
+
+    ; lo guardado (aunque el núcleo lo lleve en otro sitio: el tapiz)
+    público función ajuste_leído(k: nat32): nat32
+        si k = 0 o k >= MAX_AJ entonces devolver 0 fin
+        devolver valores[k]
+    fin
+
+    ; el escritorio apunta lo que ha cambiado él (el tapiz desde su menú)
+    público función anota(k: nat32, v: nat32, guardar: bool)
+        si k = 0 o k >= MAX_AJ entonces devolver fin
+        si v < mínimos[k] o v > máximos[k] entonces devolver fin
+        valores[k] := v
+        si guardar y nombres[k] <> nulo entonces guarda_preferencias() fin
+    fin
+
+    ; ¿puede la tarea de ahora cambiar ese ajuste?
+    función puede(k: nat32): bool
+        si actual.admin entonces devolver cierto fin
+        si k = AJ_HORA_ZONA o k = AJ_HORA_VERANO entonces devolver falso fin    ; (mueven el reloj)
+        si k >= AJ_HORA_VERANO_PUESTO y actual.sello = SELLO_HORA entonces devolver cierto fin
+        devolver actual.sello = SELLO_PANEL
+    fin
+
+    ; la llamada 174
+    público función atender_ajuste(k: nat32, v: nat32): nat32
+        si k = 0 o k >= MAX_AJ entonces devolver NO_VALE fin
+        si v = SOLO_LEER entonces devolver ajuste(k) fin
+        si no puede(k) entonces
+            imprimir2("permisos: acceso denegado a cambiar el ajuste %u del Panel de control (%s)\n", k, nat32(actual.nombre))
+            devolver DENEGADO
+        fin
+        si v < mínimos[k] o v > máximos[k] entonces devolver NO_VALE fin
+        valores[k] := v
+        aplica(k)
+        si nombres[k] <> nulo entonces guarda_preferencias() fin
+        devolver ajuste(k)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  PANEL.INI
+    ; -------------------------------------------------------------------------
+    función pon_ruta()
+        si instalado() entonces copiar(ruta, "\\HISPA\\PANEL.INI") sino copiar(ruta, "\\PANEL.INI") fin
+    fin
+
+    función número_de(t: puntero a byte): nat32
+        variable n, i: nat32
+        n := 0
+        i := 0
+        mientras t[i] >= '0' y t[i] <= '9' y i < 10 hacer
+            n := n * 10 + (t[i] - '0')
+            i := i + 1
+        fin
+        devolver n
+    fin
+
+    ; lee PANEL.INI (si está) y pone lo que dice; da los bits de las claves leídas
+    público función lee_preferencias(): nat32
+        variable m, n, i, j, k, v: nat32
+        variable línea: arreglo [180] de byte
+        leídas := cierto
+        presentes := 0
+        si del_sistema = NINGUNA entonces devolver 0 fin
+        pon_ruta()
+        m := abrir_archivo(del_sistema, ruta, PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver 0 fin
+        n := leer_archivo(m, texto_ini, 1023)
+        cerrar_archivo(m)
+        si n >= PRIMER_ERROR entonces n := 0 fin
+        texto_ini[n] := 0
+        i := 0
+        mientras texto_ini[i] <> 0 hacer
+            j := 0
+            mientras texto_ini[i] <> 0 y texto_ini[i] <> '\n' hacer
+                si texto_ini[i] <> '\r' y j < 179 entonces
+                    línea[j] := texto_ini[i]
+                    j := j + 1
+                fin
+                i := i + 1
+            fin
+            si texto_ini[i] = '\n' entonces i := i + 1 fin
+            línea[j] := 0
+            si empieza_por(línea, "ntp=") entonces
+                copiar_hasta(ntp, dirección(línea[4]), 160)
+            sino
+                para k desde 1 hasta MAX_AJ - 1 hacer
+                    si nombres[k] <> nulo entonces
+                        si empieza_por(línea, nombres[k]) y línea[longitud(nombres[k])] = '=' entonces
+                            v := número_de(dirección(línea[longitud(nombres[k]) + 1]))
+                            si v >= mínimos[k] y v <= máximos[k] entonces
+                                valores[k] := v
+                                presentes := presentes ob (nat32(1) << k)
+                            fin
+                        fin
+                    fin
+                fin
+            fin
+        fin
+        ; y se pone (el tapiz lo mira el escritorio: la línea del cargador va antes)
+        para k desde 1 hasta MAX_AJ - 1 hacer
+            si presentes yb (nat32(1) << k) <> 0 y k <> AJ_TAPIZ entonces aplica(k) fin
+        fin
+        ; la repetición del teclado y Bloq Num, siempre (como dice el Panel)
+        aplica(AJ_TECLADO_RITMO)
+        aplica(AJ_BLOQ_NUM)
+        tomar_consola()
+        imprimir1("panel: los ajustes del Panel de control (%s)\n", nat32(dirección(ruta[0])))
+        soltar_consola()
+        devolver presentes
+    fin
+
+    ; los guarda todos en PANEL.INI (falso si no se puede: sin disco, o de
+    ; solo lectura)
+    público función guarda_preferencias(): bool
+        variable k, m, n: nat32
+        variable línea: arreglo [200] de byte
+        variable d: arreglo [2] de nat32
+        si del_sistema = NINGUNA o no escribible(del_sistema) entonces devolver falso fin
+        copiar(texto_ini, "; los ajustes del Panel de control de Hispa-Pentium (los escribe el n\xA3cleo)\r\n")
+        para k desde 1 hasta MAX_AJ - 1 hacer
+            si nombres[k] <> nulo entonces
+                d[0] := nat32(nombres[k])
+                d[1] := valores[k]
+                si k = AJ_TECLADO entonces d[1] := distribución() fin
+                si k = AJ_TAPIZ y tapiz_de_ahora < 3 entonces d[1] := tapiz_de_ahora fin
+                formatear(línea, 200, "%s=%u\r\n", d)
+                concatenar(texto_ini, línea)
+            fin
+        fin
+        si ntp[0] <> 0 entonces
+            concatenar(texto_ini, "ntp=")
+            concatenar(texto_ini, ntp)
+            concatenar(texto_ini, "\r\n")
+        fin
+        pon_ruta()
+        m := abrir_archivo(del_sistema, ruta, PARA_CREAR)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        n := escribir_archivo(m, texto_ini, longitud(texto_ini))
+        cerrar_archivo(m)
+        devolver n = longitud(texto_ini)
+    fin
+
+fin Preferencias.

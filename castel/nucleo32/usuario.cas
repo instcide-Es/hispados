@@ -128,7 +128,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Preferencias
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -136,7 +136,8 @@ módulo Usuario
     ; la versión de verdad, la del paquete «base» (tools/hpq.py, SISTEMA): la
     ; que dicen el menú Inicio, Configuración y «Acerca de» (la primera parte
     ; de las pruebas mira que sea la misma que la de hpq.py)
-    público constante VERSIÓN_TEXTO = "0.8.6"
+    ; (PANEL) la 0.8.7: el Panel de control y la hora por Internet
+    público constante VERSIÓN_TEXTO = "0.8.7"
     público constante SIGUE = 0xFFFFFF00        ; (esperar sin quedarse) la tarea no ha acabado todavía
 
     ; ---- más errores (los de los archivos, en fat.cas) ----
@@ -747,6 +748,10 @@ módulo Usuario
                 devolver atender_explorador(n, a, b)
             caso 172:
                 devolver atender_tapiz(a, b)             ; (MIRADOR) una imagen como tapiz
+            caso 174:
+                devolver atender_ajuste(a, b)           ; (PANEL) los ajustes del Panel de control (preferencias.cas)
+            caso 175:
+                devolver atender_hora(a, b)             ; (PANEL, NTP) la hora exacta del reloj del PC
             caso 25:
                 si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
                 devolver cambiar_carpeta(u, ruta)
@@ -1359,6 +1364,32 @@ módulo Usuario
     ; (\HISPA\FONDO.HPM instalado; si no, en la raíz: como DOCK.INI), con la
     ; cabecera de las miniaturas («HPMI», ancho y alto), y se pone; a = 0: se
     ; quita y vuelve el de siempre. Da 0 o el error
+    ; (PANEL, NTP) la llamada 175: la hora del reloj del PC en segundos desde
+    ; el 1/1/2000 a las 0:00 (a = 0), o ponerla (a = 1, b los segundos). Poner
+    ; la hora es lo de la 67 (los servicios, el asistente, INSTALAR y el modo
+    ; administrador) y, además, HORARED.BIN (la hora por Internet: su sello),
+    ; que no la puede atrasar más de dos horas sin el modo administrador
+    ; (una hora, el cambio del horario de verano al de invierno): quien
+    ; engañe a NTP no lleva el reloj días atrás para colar un certificado
+    ; caducado (docs/PENTIUM.md, «La hora por Internet»)
+    función atender_hora(a: nat32, b: nat32): nat32
+        variable ya: nat32
+        si a = 0 entonces devolver segundos_ahora() fin
+        si a <> 1 entonces devolver NO_VALE fin
+        si b < 86400 * 365 o b >= 86400 * 36524 entonces devolver NO_VALE fin       ; del 2001 al 2099
+        si no actual.servicio y actual.sello <> SELLO_ASISTE y actual.sello <> SELLO_INSTALAR y actual.sello <> SELLO_HORA y no actual.admin entonces
+            imprimir2("permisos: acceso denegado a poner el reloj del sistema (%s, la tarea %u)\n", nat32(actual.nombre), actual.id)
+            devolver DENEGADO
+        fin
+        ya := segundos_ahora()
+        si actual.sello = SELLO_HORA y no actual.admin y b + 7200 < ya entonces
+            imprimir2("permisos: HORARED.BIN no puede atrasar el reloj %u segundos sin el modo administrador (la tarea %u)\n", ya - b, actual.id)
+            devolver DENEGADO
+        fin
+        pon_segundos(b)
+        devolver 0
+    fin
+
     función atender_tapiz(a: nat32, b: nat32): nat32
         variable s: puntero a Imagen_tapiz
         variable ruta: arreglo [24] de byte
@@ -1646,6 +1677,7 @@ módulo Usuario
 
     público función prepara_usuario()
         prepara_permisos()                      ; (PROTEGE) la tabla de quién escribe qué
+        prepara_preferencias()                  ; (PANEL) los ajustes del Panel de control, los de siempre
         pon_puerta(0x80, nat32(dirección(llamada_al_sistema)), PUERTA_USUARIO)
         al_cortar := nat32(dirección(cortar_actual))
     fin

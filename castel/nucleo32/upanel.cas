@@ -1,0 +1,967 @@
+; =============================================================================
+;  upanel.cas - (PANEL) PANEL.BIN, el Panel de control de Hispa-Pentium: las
+;  secciones de Configuración que no son del núcleo (la pantalla y «Acerca
+;  de» sí lo son; el sonido, los programas y los dispositivos, sus
+;  programas). Se abre desde Configuración, con la sección por argumento:
+;
+;    PANEL /FECHA        la fecha y la hora: la zona horaria, el horario de
+;                        verano, la hora por Internet («Sincronizar ahora»)
+;                        y ponerla a mano
+;    PANEL /RATON        la velocidad, el doble clic (con su prueba), para
+;                        zurdos y los renglones de la rueda
+;    PANEL /TECLADO      la distribución, la repetición y Bloq Num
+;    PANEL /RED          cómo está la red y por dónde va; el Wi-Fi y Tailscale
+;    PANEL /ENERGIA      apagar la pantalla, la batería baja, el botón de encendido
+;    PANEL /PERSONALIZA  el tema de los colores, el tapiz (o una imagen, con
+;                        el Mirador) y el dock
+;
+;  Cada cosa se cambia al momento: el núcleo la pone y la guarda en
+;  PANEL.INI (la llamada 174, panelaj.cas), y la vuelve a poner al arrancar.
+;  Lo que mueve el reloj (la hora, la zona, el horario de verano y una hora
+;  de Internet muy distinta) pide el modo administrador (la 157, que
+;  pregunta el núcleo). Nada va solo por el color: lo elegido lleva un borde
+;  grueso o «(elegido)», y el foco, su borde azul.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UPanel
+
+    modelo usuario
+
+    importar Llamadas, Controles, Textos32, Formato, Panelaj, Zonas, Ntp, Redes, Iconpanel
+
+    ; ---- las secciones ----
+    constante S_FECHA = 0
+    constante S_RATÓN = 1
+    constante S_TECLADO = 2
+    constante S_RED = 3
+    constante S_ENERGÍA = 4
+    constante S_PERSONALIZA = 5
+    constante N_SECCIONES = 6
+
+    ; ---- los controles ----
+    constante ID_SECCIÓN = 1                    ; 1 a 6: las de la izquierda
+    constante ID_CERRAR = 10
+    constante ID_ZONA = 11
+    constante ID_VERANO = 12
+    constante ID_INTERNET = 13
+    constante ID_SINCRONIZAR = 14
+    constante ID_FECHA = 15
+    constante ID_HORA = 16
+    constante ID_PONER = 17
+    constante ID_AHORA = 18
+    constante ID_SÍ = 19                        ; (la pregunta: «Ponerla»)
+    constante ID_NO = 20
+    constante ID_VEL_MENOS = 21
+    constante ID_VEL_MÁS = 22
+    constante ID_DOBLE = 23
+    constante ID_PRUEBA = 24
+    constante ID_ZURDO = 25
+    constante ID_RUEDA = 26
+    constante ID_DISTRIBUCIÓN = 31
+    constante ID_RETARDO = 32
+    constante ID_RITMO = 33
+    constante ID_BLOQ_NUM = 34
+    constante ID_ESCRIBE = 35
+    constante ID_RED_AUTO = 41                  ; 41, 42 y 43
+    constante ID_WIFI = 44
+    constante ID_TAILSCALE = 45
+    constante ID_PANTALLA = 51
+    constante ID_BATERÍA = 52
+    constante ID_BOTÓN = 53
+    constante ID_TEMA = 61
+    constante ID_TAPIZ = 62                     ; 62, 63 y 64
+    constante ID_IMAGEN = 65
+    constante ID_DOCK = 66
+
+    constante DOBLES = "Muy r\xA0pido (0,2 s)|R\xA0pido (0,3 s)|Normal (0,45 s)|Lento (0,6 s)|Muy lento (0,9 s)"
+    constante RUEDAS = "3 renglones (como siempre)|6 renglones|9 renglones|12 renglones|15 renglones"
+    constante DISTRIBUCIONES = "Espa\xA4ol (Espa\xA4a)|Latinoamericano|Ingl\x82s (EE. UU.)"
+    constante RETARDOS = "Corto (0,25 s)|Normal (0,5 s)|Largo (0,75 s)|Muy largo (1 s)"
+    constante RITMOS = "Lenta (5 por segundo)|Media (10 por segundo)|R\xA0pida (15 por segundo)|Normal (25 por segundo)|La m\xA0s r\xA0pida (30 por segundo)"
+    constante PANTALLAS = "Nunca|Al minuto|A los 5 minutos|A los 10 minutos|A los 15 minutos|A la media hora|A la hora"
+    constante BATERÍAS = "No apagarlo|Al 3 %|Al 5 % (lo de siempre)|Al 10 %|Al 15 %"
+    constante BOTONES = "Apagar el equipo|Preguntar qu\x82 hacer|No hacer nada"
+    constante TEMAS = "Azul (el de siempre)|Azul intenso|Verde bosque|Grafito|Granate|Alto contraste"
+
+    variable sección: nat32
+    variable tamaño_: nat32 = T_GRANDE
+    variable hz: nat32 = 100
+    variable aviso: arreglo [200] de byte
+    variable zonas_texto: arreglo [800] de byte ; las zonas, con «|»
+    variable sx: ent32                          ; donde empieza lo de la sección
+
+    ; ---- la fecha y la hora ----
+    variable campo_fecha: arreglo [12] de byte
+    variable campo_hora: arreglo [12] de byte
+    variable pregunta_salto: bool               ; se pregunta si poner una hora de Internet muy distinta
+    variable texto_salto: arreglo [200] de byte
+    variable pintado: nat32 = 0xFFFFFFFF        ; el segundo pintado
+
+    ; ---- el ratón y el teclado ----
+    variable prueba_bien: bool                  ; el doble clic de prueba ha salido
+    variable prueba_x, prueba_y, prueba_lado: ent32
+    variable escrito: arreglo [80] de byte
+
+    ; =========================================================================
+    ;  Lo que vale cada lista
+    ; =========================================================================
+    función de_lista(id: nat32, k: nat32): nat32
+        según nat16(id)
+            caso ID_DOBLE:
+                según nat16(k)
+                    caso 0: devolver 20
+                    caso 1: devolver 30
+                    caso 3: devolver 60
+                    caso 4: devolver 90
+                fin
+                devolver 45
+            caso ID_RUEDA: devolver (k + 1) * 3
+            caso ID_DISTRIBUCIÓN:
+                si k = 0 entonces devolver 1 fin
+                si k = 1 entonces devolver 2 fin
+                devolver 0
+            caso ID_RETARDO: devolver k
+            caso ID_RITMO:
+                según nat16(k)
+                    caso 0: devolver 5
+                    caso 1: devolver 10
+                    caso 2: devolver 15
+                    caso 4: devolver 30
+                fin
+                devolver 25
+            caso ID_PANTALLA:
+                según nat16(k)
+                    caso 1: devolver 1
+                    caso 2: devolver 5
+                    caso 3: devolver 10
+                    caso 4: devolver 15
+                    caso 5: devolver 30
+                    caso 6: devolver 60
+                fin
+                devolver 0
+            caso ID_BATERÍA:
+                según nat16(k)
+                    caso 0: devolver 0
+                    caso 1: devolver 3
+                    caso 3: devolver 10
+                    caso 4: devolver 15
+                fin
+                devolver 5
+        fin
+        devolver k
+    fin
+
+    ; y al revés: qué renglón de la lista es lo que vale ahora
+    función en_lista(id: nat32, v: nat32): nat32
+        variable k: nat32
+        para k desde 0 hasta 6 hacer
+            si de_lista(id, k) = v entonces devolver k fin
+        fin
+        devolver 0
+    fin
+
+    función clave_de(id: nat32): nat32
+        según nat16(id)
+            caso ID_DOBLE: devolver AJ_RATÓN_DOBLE
+            caso ID_RUEDA: devolver AJ_RATÓN_RUEDA
+            caso ID_DISTRIBUCIÓN: devolver AJ_TECLADO
+            caso ID_RETARDO: devolver AJ_TECLADO_RETARDO
+            caso ID_RITMO: devolver AJ_TECLADO_RITMO
+            caso ID_PANTALLA: devolver AJ_PANTALLA_APAGAR
+            caso ID_BATERÍA: devolver AJ_BATERÍA_APAGAR
+            caso ID_BOTÓN: devolver AJ_BOTÓN
+            caso ID_TEMA: devolver AJ_TEMA
+        fin
+        devolver 0
+    fin
+
+    función opciones_de(id: nat32): puntero a byte
+        según nat16(id)
+            caso ID_DOBLE: devolver DOBLES
+            caso ID_RUEDA: devolver RUEDAS
+            caso ID_DISTRIBUCIÓN: devolver DISTRIBUCIONES
+            caso ID_RETARDO: devolver RETARDOS
+            caso ID_RITMO: devolver RITMOS
+            caso ID_PANTALLA: devolver PANTALLAS
+            caso ID_BATERÍA: devolver BATERÍAS
+            caso ID_BOTÓN: devolver BOTONES
+            caso ID_TEMA: devolver TEMAS
+            caso ID_ZONA: devolver zonas_texto
+        fin
+        devolver ""
+    fin
+
+    función elegida(id: nat32): nat32
+        si id = ID_ZONA entonces devolver ajuste(AJ_HORA_ZONA) fin
+        devolver en_lista(id, ajuste(clave_de(id)))
+    fin
+
+    ; un ajuste del Panel: al núcleo (que lo pone y lo guarda)
+    función pon(k: nat32, v: nat32)
+        variable r: nat32
+        variable d: arreglo [2] de nat32
+        r := poner_ajuste(k, v)
+        d[0] := k
+        d[1] := v
+        si es_error(r) entonces
+            copiar(aviso, "No se ha podido cambiar (acceso denegado)")
+            imprimir("panel: el ajuste %u no se ha podido poner a %u\n", d)
+        sino
+            copiar(aviso, "Hecho: ya est\xA0 puesto (y se guarda para el arranque)")
+            imprimir("panel: el ajuste %u, a %u\n", d)
+        fin
+    fin
+
+    ; =========================================================================
+    ;  La fecha y la hora
+    ; =========================================================================
+    ; la hora universal de ahora, por lo que lleva el reloj del PC
+    función utc_de_ahora(): nat32
+        variable zona, puesto, local: nat32
+        zona := ajuste(AJ_HORA_ZONA)
+        local := hora_exacta()
+        puesto := ajuste(AJ_HORA_VERANO_PUESTO)
+        si puesto = 2 entonces
+            si ajuste(AJ_HORA_VERANO) = 1 y en_verano(zona, nat32(ent32(local) - base_zona(zona) * 60 - 3600)) entonces puesto := 1 sino puesto := 0 fin
+        fin
+        devolver nat32(ent32(local) - base_zona(zona) * 60 - ent32(puesto) * 3600)
+    fin
+
+    ; pone el reloj a la hora universal «utc» en la zona y con el verano de
+    ; ahora (el modo administrador ya lo tiene quien llama)
+    función pon_reloj_de(utc: nat32): bool
+        variable zona: nat32
+        variable v: bool
+        zona := ajuste(AJ_HORA_ZONA)
+        v := ajuste(AJ_HORA_VERANO) = 1 y en_verano(zona, utc)
+        si poner_hora_exacta(nat32(ent32(utc) + desfase(zona, utc, v))) <> 0 entonces devolver falso fin
+        si v entonces poner_ajuste(AJ_HORA_VERANO_PUESTO, 1) sino poner_ajuste(AJ_HORA_VERANO_PUESTO, 0) fin
+        devolver cierto
+    fin
+
+    función cambia_zona(nueva: nat32)
+        variable utc: nat32
+        si nueva = ajuste(AJ_HORA_ZONA) o nueva >= N_ZONAS entonces devolver fin
+        si no pedir_admin() entonces
+            copiar(aviso, "Sin el modo administrador no se cambia la zona horaria")
+            devolver
+        fin
+        utc := utc_de_ahora()
+        si es_error(poner_ajuste(AJ_HORA_ZONA, nueva)) o no pon_reloj_de(utc) entonces
+            copiar(aviso, "No se ha podido cambiar la zona horaria")
+        sino
+            copiar(aviso, "Zona horaria cambiada (y el reloj, con ella)")
+            imprimir1("panel: la zona horaria, ahora %s\n", nat32(nombre_zona(nueva)))
+        fin
+        dejar_admin()
+    fin
+
+    función cambia_verano()
+        variable utc, nuevo: nat32
+        si no pedir_admin() entonces
+            copiar(aviso, "Sin el modo administrador no se cambia el horario de verano")
+            devolver
+        fin
+        utc := utc_de_ahora()
+        si ajuste(AJ_HORA_VERANO) = 1 entonces nuevo := 0 sino nuevo := 1 fin
+        si es_error(poner_ajuste(AJ_HORA_VERANO, nuevo)) o no pon_reloj_de(utc) entonces
+            copiar(aviso, "No se ha podido cambiar el horario de verano")
+        sino si nuevo = 1 entonces
+            copiar(aviso, "El reloj cambia solo al horario de verano y al de invierno")
+        sino
+            copiar(aviso, "El reloj ya no cambia solo al horario de verano")
+        fin
+        imprimir1("panel: el horario de verano, solo: %u\n", nuevo)
+        dejar_admin()
+    fin
+
+    función rellena_ahora()
+        variable a, me, d, h, mi, se: nat32
+        variable x: arreglo [3] de nat32
+        fecha_de(hora_exacta(), a, me, d, h, mi, se)
+        x[0] := d
+        x[1] := me
+        x[2] := a
+        formatear(campo_fecha, 12, "%02u/%02u/%04u", x)
+        x[0] := h
+        x[1] := mi
+        x[2] := se
+        formatear(campo_hora, 12, "%02u:%02u:%02u", x)
+    fin
+
+    ; «hh:mm[:ss]» a segundos del día
+    función lee_hora(t: puntero a byte, ref s: nat32): bool
+        variable h, m, se, i: nat32
+        h := 0
+        m := 0
+        se := 0
+        i := 0
+        si t[0] < '0' o t[0] > '9' entonces devolver falso fin
+        mientras t[i] >= '0' y t[i] <= '9' hacer
+            h := h * 10 + t[i] - '0'
+            i := i + 1
+        fin
+        si t[i] <> ':' entonces devolver falso fin
+        i := i + 1
+        mientras t[i] >= '0' y t[i] <= '9' hacer
+            m := m * 10 + t[i] - '0'
+            i := i + 1
+        fin
+        si t[i] = ':' entonces
+            i := i + 1
+            mientras t[i] >= '0' y t[i] <= '9' hacer
+                se := se * 10 + t[i] - '0'
+                i := i + 1
+            fin
+        fin
+        si t[i] <> 0 o h > 23 o m > 59 o se > 59 entonces devolver falso fin
+        s := h * 3600 + m * 60 + se
+        devolver cierto
+    fin
+
+    función pon_a_mano()
+        variable d, m, a, s: nat32
+        si campo_fecha[0] = 0 o no fecha_vale(campo_fecha) entonces
+            copiar(aviso, "La fecha no vale (dd/mm/aaaa)")
+            devolver
+        fin
+        si no lee_hora(campo_hora, s) entonces
+            copiar(aviso, "La hora no vale (hh:mm:ss)")
+            devolver
+        fin
+        d := (campo_fecha[0] - '0') * 10 + campo_fecha[1] - '0'
+        m := (campo_fecha[3] - '0') * 10 + campo_fecha[4] - '0'
+        a := (campo_fecha[6] - '0') * 1000 + (campo_fecha[7] - '0') * 100 + (campo_fecha[8] - '0') * 10 + campo_fecha[9] - '0'
+        si a < 2001 o a > 2099 entonces
+            copiar(aviso, "El a\xA4o tiene que ir de 2001 a 2099")
+            devolver
+        fin
+        si no pedir_admin() entonces
+            copiar(aviso, "Sin el modo administrador no se cambia la hora")
+            devolver
+        fin
+        si poner_hora_exacta(segundos_de(a, m, d, s div 3600, (s div 60) mod 60, s mod 60)) <> 0 entonces
+            copiar(aviso, "No se ha podido poner en hora (acceso denegado)")
+        sino
+            copiar(aviso, "Puesto en hora a mano")
+            imprimir2("panel: puesto en hora a mano: %s %s\n", nat32(dirección(campo_fecha[0])), nat32(dirección(campo_hora[0])))
+        fin
+        dejar_admin()
+    fin
+
+    ; apunta en el núcleo lo que ha pasado (como HORARED.BIN)
+    función anota(r: nat32)
+        variable zona: nat32
+        poner_ajuste(AJ_HORA_ESTADO, r)
+        si r = HORA_PUESTA o r = HORA_BIEN entonces
+            poner_ajuste(AJ_HORA_ÚLTIMA, hora_exacta())
+            poner_ajuste(AJ_HORA_DESFASE, nat32(diferencia))
+        fin
+        si r = HORA_PUESTA entonces
+            zona := ajuste(AJ_HORA_ZONA)
+            si ajuste(AJ_HORA_VERANO) = 1 y en_verano(zona, nat32(ent32(hora_exacta()) - base_zona(zona) * 60 - 3600)) entonces
+                poner_ajuste(AJ_HORA_VERANO_PUESTO, 1)
+            sino
+                poner_ajuste(AJ_HORA_VERANO_PUESTO, 0)
+            fin
+        fin
+    fin
+
+    función sincroniza()
+        variable r: nat32
+        variable d: arreglo [2] de nat32
+        variable f: arreglo [24] de byte
+        copiar(aviso, "Preguntando la hora a Internet...")
+        pinta()
+        despertar := cierto
+        r := pregunta()
+        si r = HORA_BIEN entonces r := pone(falso, falso) fin
+        si r = HORA_SALTO entonces
+            ; muy distinta: lo decide quien está delante, con el modo administrador
+            texto_fecha(propuesta_s + (propuesta_ms + (tics() - propuesta_tic) * 10) div 1000, f)
+            texto_diferencia(diferencia, dirección(aviso[0]))
+            d[0] := nat32(dirección(f[0]))
+            d[1] := nat32(dirección(aviso[0]))
+            formatear(texto_salto, 200, "Internet dice %s: el reloj del equipo va %s. \xA8Ponerla? (Si no la espera, puede ser un enga\xA4o: d\xA1gale que no.)", d)
+            pregunta_salto := cierto
+            foco := ID_NO
+        fin
+        anota(r)
+        copiar(aviso, texto_estado(r))
+        imprimir1("panel: sincronizar ahora: %s\n", nat32(texto_estado(r)))
+    fin
+
+    función pon_salto()
+        variable r: nat32
+        pregunta_salto := falso
+        si no pedir_admin() entonces
+            copiar(aviso, "Sin el modo administrador no se pone esa hora")
+            devolver
+        fin
+        r := pone(cierto, falso)
+        dejar_admin()
+        anota(r)
+        copiar(aviso, texto_estado(r))
+        imprimir1("panel: la hora de Internet, con el modo administrador: %s\n", nat32(texto_estado(r)))
+    fin
+
+    ; =========================================================================
+    ;  Pintar
+    ; =========================================================================
+    función nombre_sección(k: nat32): puntero a byte
+        según nat16(k)
+            caso S_FECHA: devolver "Fecha y hora"
+            caso S_RATÓN: devolver "Rat\xA2n"
+            caso S_TECLADO: devolver "Teclado"
+            caso S_RED: devolver "Red y Wi-Fi"
+            caso S_ENERGÍA: devolver "Energ\xA1a"
+        fin
+        devolver "Personalizaci\xA2n"
+    fin
+
+    función icono_sección(k: nat32): nat32
+        según nat16(k)
+            caso S_FECHA: devolver IP_FECHA
+            caso S_RATÓN: devolver IP_RATÓN
+            caso S_TECLADO: devolver IP_TECLADO
+            caso S_RED: devolver IP_RED
+            caso S_ENERGÍA: devolver IP_ENERGÍA
+        fin
+        devolver IP_PERSONALIZA
+    fin
+
+    ; la columna de la izquierda: las secciones (la de ahora, con su borde grueso)
+    función pinta_secciones(abajo: ent32)
+        variable k: nat32
+        variable yy, al, an: ent32
+        an := sx - 3 * LA div 2
+        al := LT * 2 + 8 * E
+        caja(0, 0, sx - LA div 2, abajo, 0xDCE6F2)
+        yy := 2 * LA div 2
+        para k desde 0 hasta N_SECCIONES - 1 hacer
+            si k = sección entonces
+                caja(LA div 2, yy, an, al, C_AZUL)
+                caja(LA div 2 + 3 * E + 1, yy + 3 * E + 1, an - 6 * E - 2, al - 6 * E - 2, C_AZUL_CLARO)
+            fin
+            icono_panel(lz, LA, yy + (al - 2 * LT) div 2, 2 * LT, icono_sección(k))
+            si k = sección entonces
+                negrita(LA + 2 * LT + LA div 2, yy + (al - LT) div 2, nombre_sección(k), C_TINTA)
+            sino
+                Controles.texto(LA + 2 * LT + LA div 2, yy + (al - LT) div 2, nombre_sección(k), C_TINTA)
+            fin
+            si foco = ID_SECCIÓN + k entonces marca_foco(LA div 2, yy, an, al) fin
+            apuntar(ID_SECCIÓN + k, K_BOTÓN, LA div 2, yy, an, al)
+            yy := yy + al + LA div 2
+        fin
+    fin
+
+    función título_de(t: puntero a byte, yy: ent32): ent32
+        negrita(sx, yy, t, C_TINTA)
+        caja(sx, yy + LT + E, ancho - sx - LA, 1, C_BORDE)
+        devolver yy + LT + 4 * E
+    fin
+
+    función pinta_fecha(yy: ent32, abajo: ent32)
+        variable a, me, d, h, mi, se, zona, u, e: nat32
+        variable x: arreglo [4] de nat32
+        variable t: arreglo [120] de byte
+        variable f: arreglo [24] de byte
+        variable an, x2, y2: ent32
+        an := ancho - sx - LA
+        zona := ajuste(AJ_HORA_ZONA)
+        fecha_de(hora_exacta(), a, me, d, h, mi, se)
+        x[0] := d
+        x[1] := me
+        x[2] := a
+        formatear(t, 120, "%02u/%02u/%04u  ", x)
+        x[0] := h
+        x[1] := mi
+        x[2] := se
+        formatear(dirección(t[12]), 100, "%02u:%02u:%02u", x)
+        negrita(sx, yy, t, C_TINTA)
+        Controles.texto(sx + ancho_negrita(t) + LA, yy, "(la del reloj del equipo)", C_SUAVE)
+        yy := yy + LT + 4 * E
+        yy := yy + desplegable(ID_ZONA, sx, yy, an, "Zona horaria (pide el modo administrador)", zonas_texto, zona, falso) + 3 * E
+        si tiene_verano(zona) entonces
+            casilla(ID_VERANO, sx, yy, "Cambiar solo al horario de verano y al de invierno", ajuste(AJ_HORA_VERANO) = 1)
+        sino
+            Controles.texto(sx, yy, "En esta zona no hay horario de verano", C_SUAVE)
+        fin
+        yy := yy + LT + 3 * E
+        casilla(ID_INTERNET, sx, yy, "Poner en hora por Internet (al arrancar y cada 4 horas)", ajuste(AJ_HORA_INTERNET) = 1)
+        yy := yy + LT + 3 * E
+        x2 := sx + botón(ID_SINCRONIZAR, sx, yy, "Sincronizar ahora", cierto, falso) + LA
+        texto_corto(x2, yy + 5 * E, "con hora.roa.es y pool.ntp.org", ancho - x2 - LA, C_SUAVE, falso)
+        yy := yy + alto_botón() + 2 * E
+        ; cómo fue la última vez
+        e := ajuste(AJ_HORA_ESTADO)
+        u := ajuste(AJ_HORA_ÚLTIMA)
+        copiar(t, "La \xA3ltima vez: ")
+        concatenar(t, texto_estado(e))
+        si u <> 0 entonces
+            texto_fecha(u, f)
+            concatenar(t, " (el ")
+            concatenar(t, f)
+            concatenar(t, ")")
+        fin
+        yy := yy + párrafo(sx, yy, an, t, C_TINTA, falso, cierto) + 2 * E
+        ; ponerla a mano
+        y2 := recuadro(sx, yy, an, abajo - yy, "Poner en hora a mano (pide el modo administrador)")
+        x2 := sx + LA
+        campo(ID_FECHA, x2, y2, 10 * LA, "Fecha", campo_fecha, falso)
+        campo(ID_HORA, x2 + 11 * LA, y2, 8 * LA, "Hora", campo_hora, falso)
+        y2 := y2 + LT + 2 * E
+        x2 := x2 + 20 * LA
+        x2 := x2 + botón(ID_PONER, x2, y2, "Poner en hora", falso, falso) + LA div 2
+        botón(ID_AHORA, x2, y2, "Ahora", falso, falso)
+    fin
+
+    ; la pregunta de «Sincronizar ahora» cuando Internet dice algo muy distinto
+    función pinta_pregunta()
+        variable x, yy, an, al, y2: ent32
+        an := ancho - sx - 2 * LA
+        al := 5 * LT + alto_botón() + 16 * E
+        x := sx + LA div 2
+        yy := (alto - al) div 2
+        caja(x, yy, an, al, C_NARANJA)
+        caja(x + 3 * E + 1, yy + 3 * E + 1, an - 6 * E - 2, al - 6 * E - 2, C_NARANJA_CLARO)
+        negrita(x + LA, yy + 4 * E, "\xADOjo! La hora de Internet es muy distinta", C_TINTA)
+        y2 := yy + LT + 6 * E
+        y2 := y2 + párrafo(x + LA, y2, an - 2 * LA, texto_salto, C_TINTA, falso, cierto) + 2 * E
+        x := x + LA
+        x := x + botón(ID_NO, x, y2, "No, dejarla", falso, falso) + LA
+        botón(ID_SÍ, x, y2, "Ponerla (modo administrador)", falso, falso)
+    fin
+
+    función pinta_ratón(yy: ent32, abajo: ent32)
+        variable v, k: nat32
+        variable x, an, w: ent32
+        variable t: arreglo [40] de byte
+        variable d: arreglo [1] de nat32
+        an := ancho - sx - LA
+        v := ajuste(AJ_RATÓN_VELOCIDAD)
+        d[0] := v
+        formatear(t, 40, "Velocidad de la flecha: %u de 10", d)
+        negrita(sx, yy, t, C_TINTA)
+        yy := yy + LT + 2 * E
+        x := sx + botón(ID_VEL_MENOS, sx, yy, "- M\xA0s lenta", falso, v <= 1) + LA
+        ; diez casillas, llenas hasta la velocidad (y el número arriba: no solo el color)
+        w := LA
+        para k desde 1 hasta 10 hacer
+            caja(x, yy + 4 * E, w, alto_botón() - 8 * E, C_TINTA)
+            si k <= v entonces caja(x + 2, yy + 4 * E + 2, w - 4, alto_botón() - 8 * E - 4, C_AZUL) sino caja(x + 2, yy + 4 * E + 2, w - 4, alto_botón() - 8 * E - 4, C_PAPEL) fin
+            x := x + w + 2
+        fin
+        x := x + LA div 2
+        botón(ID_VEL_MÁS, x, yy, "+ M\xA0s r\xA0pida", falso, v >= 10)
+        yy := yy + alto_botón() + 5 * E
+        ; la prueba: una carpeta que se abre con dos clics (al lado de la lista)
+        prueba_lado := 2 * LT + 8 * E
+        prueba_x := sx + an div 2 + 2 * LA
+        prueba_y := yy
+        yy := yy + desplegable(ID_DOBLE, sx, yy, an div 2, "Velocidad del doble clic", DOBLES, elegida(ID_DOBLE), falso) + 3 * E
+        caja(prueba_x, prueba_y, prueba_lado, prueba_lado, C_BORDE)
+        si prueba_bien entonces
+            caja(prueba_x + 2, prueba_y + 2, prueba_lado - 4, prueba_lado - 4, C_VERDE_CLARO)
+            caja(prueba_x + 8 * E, prueba_y + prueba_lado div 3, prueba_lado - 16 * E, prueba_lado div 2, 0xF0A92E)
+            caja(prueba_x + 12 * E, prueba_y + prueba_lado div 4, prueba_lado - 20 * E, prueba_lado div 3, C_PAPEL)
+            Controles.texto(prueba_x + prueba_lado + LA div 2, prueba_y + LT div 2, "\xAD Bien ! Abierta", C_VERDE)
+        sino
+            caja(prueba_x + 2, prueba_y + 2, prueba_lado - 4, prueba_lado - 4, C_PAPEL)
+            caja(prueba_x + 8 * E, prueba_y + prueba_lado div 3, prueba_lado - 16 * E, prueba_lado div 2, 0xF0A92E)
+            Controles.texto(prueba_x + prueba_lado + LA div 2, prueba_y + LT div 2, "Pruebe: dos clics", C_SUAVE)
+        fin
+        apuntar(ID_PRUEBA, K_LISTA, prueba_x, prueba_y, prueba_lado, prueba_lado)
+        casilla(ID_ZURDO, sx, yy, "Para zurdos: el bot\xA2n principal, el de la derecha", ajuste(AJ_RATÓN_ZURDO) = 1)
+        yy := yy + LT + 4 * E
+        desplegable(ID_RUEDA, sx, yy, an div 2, "La rueda: renglones por paso", RUEDAS, elegida(ID_RUEDA), falso)
+    fin
+
+    función pinta_teclado(yy: ent32, abajo: ent32)
+        variable an: ent32
+        an := ancho - sx - LA
+        yy := yy + desplegable(ID_DISTRIBUCIÓN, sx, yy, an * 2 div 3, "Distribuci\xA2n del teclado", DISTRIBUCIONES, elegida(ID_DISTRIBUCIÓN), falso) + 3 * E
+        yy := yy + desplegable(ID_RETARDO, sx, yy, an * 2 div 3, "Al dejar una tecla pulsada, empieza a repetirse", RETARDOS, elegida(ID_RETARDO), falso) + 3 * E
+        yy := yy + desplegable(ID_RITMO, sx, yy, an * 2 div 3, "Y se repite", RITMOS, elegida(ID_RITMO), falso) + 3 * E
+        casilla(ID_BLOQ_NUM, sx, yy, "Bloq Num encendido al arrancar", ajuste(AJ_BLOQ_NUM) = 1)
+        yy := yy + LT + 4 * E
+        campo(ID_ESCRIBE, sx, yy, an, "Pruebe aqu\xA1 el teclado", escrito, falso)
+    fin
+
+    función pinta_red(yy: ent32, abajo: ent32)
+        variable ip, e, p, k: nat32
+        variable t: arreglo [80] de byte
+        variable tip: arreglo [20] de byte
+        variable x: ent32
+        e := estado_rápido(ip)
+        según nat16(e)
+            caso RED_CONECTADA:
+                ip_a_texto(ip, tip)
+                copiar(t, "Conectada, con la IP ")
+                concatenar(t, tip)
+            caso RED_BUSCANDO: copiar(t, "Buscando la IP (DHCP)...")
+            caso RED_SIN_CABLE: copiar(t, "Sin cable (o sin Wi-Fi): no hay red")
+            caso RED_SIN_TARJETA: copiar(t, "Este equipo no tiene una tarjeta de red que se sepa llevar")
+            si no: copiar(t, "La red no est\xA0 en marcha")
+        fin
+        negrita(sx, yy, "Estado:", C_TINTA)
+        Controles.texto(sx + ancho_negrita("Estado:") + LA, yy, t, C_TINTA)
+        yy := yy + LT + 5 * E
+        negrita(sx, yy, "Por d\xA2nde va la red", C_TINTA)
+        yy := yy + LT + 2 * E
+        p := ajuste(AJ_RED)
+        x := sx
+        para k desde 0 hasta 2 hacer
+            si k = 0 entonces copiar(t, "Autom\xA0tico") fin
+            si k = 1 entonces copiar(t, "Cable") fin
+            si k = 2 entonces copiar(t, "Wi-Fi") fin
+            si k = p entonces concatenar(t, " (elegido)") fin
+            x := x + botón(ID_RED_AUTO + k, x, yy, t, k = p, falso) + LA div 2
+        fin
+        yy := yy + alto_botón() + 2 * E
+        Controles.texto(sx, yy, "Autom\xA0tico: el cable si est\xA0 enchufado; si no, el Wi-Fi", C_SUAVE)
+        yy := yy + LT + 6 * E
+        x := sx + botón(ID_WIFI, sx, yy, "Redes Wi-Fi...", falso, falso) + LA
+        botón(ID_TAILSCALE, x, yy, "Tailscale...", falso, falso)
+        yy := yy + alto_botón() + 4 * E
+        Controles.texto(sx, yy, "Los detalles, en la Consola: IPCONFIG /TODO", C_SUAVE)
+    fin
+
+    función pinta_energía(yy: ent32, abajo: ent32)
+        variable e: Energía
+        variable an: ent32
+        variable t: arreglo [100] de byte
+        variable d: arreglo [1] de nat32
+        an := ancho - sx - LA
+        yy := yy + desplegable(ID_PANTALLA, sx, yy, an div 2 + 2 * LA, "Apagar la pantalla sin tocar nada", PANTALLAS, elegida(ID_PANTALLA), falso) + 4 * E
+        si batería(e) y e.nbat > 0 y e.pct <= 100 entonces
+            d[0] := e.pct
+            si e.ca = 1 entonces formatear(t, 100, "Bater\xA1a: %u %%, enchufado", d) sino formatear(t, 100, "Bater\xA1a: %u %%, sin cable", d) fin
+        sino
+            copiar(t, "Este equipo no dice tener bater\xA1a")
+        fin
+        negrita(sx, yy, t, C_TINTA)
+        yy := yy + LT + 2 * E
+        yy := yy + desplegable(ID_BATERÍA, sx, yy, an div 2 + 2 * LA, "Con la bater\xA1a baja, sin cable, apagar el equipo", BATERÍAS, elegida(ID_BATERÍA), falso) + 4 * E
+        yy := yy + desplegable(ID_BOTÓN, sx, yy, an div 2 + 2 * LA, "Al pulsar el bot\xA2n de encendido", BOTONES, elegida(ID_BOTÓN), falso) + 2 * E
+        párrafo(sx, yy, an, "(En algunos equipos el bot\xA2n lo atiende la BIOS y no llega aqu\xA1. La pantalla se pone en negro: se enciende otra vez con el rat\xA2n o una tecla.)", C_SUAVE, falso, cierto)
+    fin
+
+    ; los colores del título de cada tema (los de preferencias.cas) y su contraste medido
+    función tema_arriba(k: nat32): nat32
+        según nat16(k)
+            caso 1: devolver 0x2463C4
+            caso 2: devolver 0x287A4D
+            caso 3: devolver 0x58626F
+            caso 4: devolver 0x9E3446
+            caso 5: devolver 0x000000
+        fin
+        devolver 0x3F8DEA
+    fin
+
+    función tema_abajo(k: nat32): nat32
+        según nat16(k)
+            caso 1: devolver 0x164A96
+            caso 2: devolver 0x145C36
+            caso 3: devolver 0x2C3239
+            caso 4: devolver 0x641A27
+            caso 5: devolver 0x000000
+        fin
+        devolver 0x1A5AB6
+    fin
+
+    función tema_contraste(k: nat32): puntero a byte
+        según nat16(k)
+            caso 1: devolver "5,7 a 1 (pide 4,5)"
+            caso 2: devolver "5,3 a 1 (pide 4,5)"
+            caso 3: devolver "6,2 a 1 (pide 4,5)"
+            caso 4: devolver "6,9 a 1 (pide 4,5)"
+            caso 5: devolver "21 a 1, el m\xA0ximo"
+        fin
+        devolver "4,7 a 1 en medio, 3,4 arriba"
+    fin
+
+    función mezcla_(a: nat32, b: nat32, k: nat32, n: nat32): nat32
+        variable r, g, z: nat32
+        r := (((a >> 16) yb 255) * (n - k) + ((b >> 16) yb 255) * k) div n
+        g := (((a >> 8) yb 255) * (n - k) + ((b >> 8) yb 255) * k) div n
+        z := ((a yb 255) * (n - k) + (b yb 255) * k) div n
+        devolver (r << 16) ob (g << 8) ob z
+    fin
+
+    función pinta_personaliza(yy: ent32, abajo: ent32)
+        variable k, tz: nat32
+        variable an, x, i, al: ent32
+        variable t: arreglo [40] de byte
+        an := ancho - sx - LA
+        k := ajuste(AJ_TEMA)
+        yy := yy + desplegable(ID_TEMA, sx, yy, an div 2, "El tema de los colores", TEMAS, k, falso) + 3 * E
+        ; cómo se ve: un título de ventana con su letra blanca
+        al := LT + 8 * E
+        i := 0
+        mientras i < al hacer
+            caja(sx, yy + i, an, 1, mezcla_(tema_arriba(k), tema_abajo(k), nat32(i), nat32(al)))
+            i := i + 1
+        fin
+        negrita(sx + LA, yy + 4 * E, "As\xA1 se ven los t\xA1tulos de las ventanas", 0xFFFFFF)
+        yy := yy + al + 2 * E
+        copiar(t, "Contraste de la letra: ")
+        Controles.texto(sx, yy, t, C_SUAVE)
+        Controles.texto(sx + ancho_texto(t), yy, tema_contraste(k), C_SUAVE)
+        yy := yy + LT + 5 * E
+        negrita(sx, yy, "Tapiz", C_TINTA)
+        yy := yy + LT + 2 * E
+        tz := ajuste(AJ_TAPIZ)
+        x := sx
+        para k desde 0 hasta 2 hacer
+            si k = 0 entonces copiar(t, "Olas") fin
+            si k = 1 entonces copiar(t, "Azul") fin
+            si k = 2 entonces copiar(t, "Verde") fin
+            si k = tz entonces concatenar(t, " (elegido)") fin
+            x := x + botón(ID_TAPIZ + k, x, yy, t, k = tz, falso) + LA div 2
+        fin
+        yy := yy + alto_botón() + 2 * E
+        copiar(t, "Una imagen... (con el Mirador)")
+        si tz = 3 entonces copiar(t, "Una imagen (elegida)...") fin
+        botón(ID_IMAGEN, sx, yy, t, tz = 3, falso)
+        yy := yy + alto_botón() + 5 * E
+        casilla(ID_DOCK, sx, yy, "Ver el dock (encima de la barra de tareas)", ajuste(AJ_DOCK) = 1)
+    fin
+
+    función pinta()
+        variable yy, abajo: ent32
+        variable vueltas: nat32
+        vueltas := 0
+        mientras vueltas < 2 hacer
+            empezar_controles()
+            caja(0, 0, ancho, alto, C_FONDO)
+            abajo := alto - alto_estado()
+            sx := 2 * LT + 15 * LA
+            pinta_secciones(abajo)
+            si pregunta_salto entonces
+                empezar_controles()
+            fin
+            yy := título_de(nombre_sección(sección), 2 * E + LA div 2) + 2 * E
+            según nat16(sección)
+                caso S_FECHA: pinta_fecha(yy, abajo - alto_botón() - 6 * E)
+                caso S_RATÓN: pinta_ratón(yy, abajo)
+                caso S_TECLADO: pinta_teclado(yy, abajo)
+                caso S_RED: pinta_red(yy, abajo)
+                caso S_ENERGÍA: pinta_energía(yy, abajo)
+                si no: pinta_personaliza(yy, abajo)
+            fin
+            si pregunta_salto entonces
+                empezar_controles()
+                pinta_pregunta()
+            sino
+                botón(ID_CERRAR, ancho - ancho_botón("Cerrar") - LA, abajo - alto_botón() - 2 * E, "Cerrar", falso, falso)
+            fin
+            si aviso[0] <> 0 entonces
+                barra_estado(abajo, aviso)
+            sino
+                barra_estado(abajo, "Panel de control: lo que se cambia, se pone al momento y se guarda")
+            fin
+            si no asegurar_foco() entonces romper fin
+            vueltas := vueltas + 1
+        fin
+        volcar()
+        pintado := hora_exacta()
+    fin
+
+    ; =========================================================================
+    ;  Lo que se hace
+    ; =========================================================================
+    función a_sección(k: nat32)
+        variable t: arreglo [60] de byte
+        sección := k
+        foco := ID_SECCIÓN + k
+        aviso[0] := 0
+        pregunta_salto := falso
+        copiar(t, "Panel de control - ")
+        concatenar(t, nombre_sección(k))
+        título(v, t)
+        imprimir1("panel: %s\n", nat32(nombre_sección(k)))
+    fin
+
+    función elige(id: nat32, k: nat32)
+        si k >= cuántas_opciones(opciones_de(id)) entonces devolver fin
+        si id = ID_ZONA entonces
+            cambia_zona(k)
+            devolver
+        fin
+        pon(clave_de(id), de_lista(id, k))
+    fin
+
+    función hace(id: nat32)
+        variable v: nat32
+        variable r: nat32
+        si id >= ID_SECCIÓN y id < ID_SECCIÓN + N_SECCIONES entonces
+            a_sección(id - ID_SECCIÓN)
+            devolver
+        fin
+        según nat16(id)
+            caso ID_CERRAR: salir(0)
+            caso ID_VERANO: cambia_verano()
+            caso ID_INTERNET:
+                si ajuste(AJ_HORA_INTERNET) = 1 entonces pon(AJ_HORA_INTERNET, 0) sino pon(AJ_HORA_INTERNET, 1) fin
+            caso ID_SINCRONIZAR: sincroniza()
+            caso ID_PONER: pon_a_mano()
+            caso ID_AHORA: rellena_ahora()
+            caso ID_SÍ: pon_salto()
+            caso ID_NO:
+                pregunta_salto := falso
+                copiar(aviso, "No se ha cambiado la hora")
+                imprimir1("panel: la hora de Internet, no (%s)\n", nat32(dirección(texto_salto[0])))
+            caso ID_VEL_MENOS:
+                v := ajuste(AJ_RATÓN_VELOCIDAD)
+                si v > 1 entonces pon(AJ_RATÓN_VELOCIDAD, v - 1) fin
+            caso ID_VEL_MÁS:
+                v := ajuste(AJ_RATÓN_VELOCIDAD)
+                si v < 10 entonces pon(AJ_RATÓN_VELOCIDAD, v + 1) fin
+            caso ID_ZURDO: pon(AJ_RATÓN_ZURDO, 1 - ajuste(AJ_RATÓN_ZURDO))
+            caso ID_BLOQ_NUM: pon(AJ_BLOQ_NUM, 1 - ajuste(AJ_BLOQ_NUM))
+            caso ID_RED_AUTO, ID_RED_AUTO + 1, ID_RED_AUTO + 2: pon(AJ_RED, id - ID_RED_AUTO)
+            caso ID_WIFI:
+                r := lanzar_suelto("\\REDWIFI.BIN", "")
+                si es_error(r) entonces copiar(aviso, "No est\xA0 el Wi-Fi (el paquete \xAEwifi\xAF)") fin
+            caso ID_TAILSCALE:
+                r := lanzar_suelto("\\TAILSCAL.BIN", "/VENTANA")
+                si es_error(r) entonces copiar(aviso, "No est\xA0 Tailscale (el paquete \xAEtailscal\xAF)") fin
+            caso ID_TAPIZ, ID_TAPIZ + 1, ID_TAPIZ + 2: pon(AJ_TAPIZ, id - ID_TAPIZ)
+            caso ID_IMAGEN:
+                r := lanzar_suelto("\\MIRADOR.BIN", "")
+                si es_error(r) entonces
+                    copiar(aviso, "No est\xA0 el Mirador (el paquete \xAEmirador\xAF, en Programas y actualizaciones)")
+                sino
+                    copiar(aviso, "En el Mirador: abra la imagen y elija \xAEUsar como fondo de escritorio\xAF")
+                fin
+            caso ID_DOCK: pon(AJ_DOCK, 1 - ajuste(AJ_DOCK))
+        fin
+    fin
+
+    función tecla_pulsada(c: nat32)
+        variable k, e: nat32
+        si c = 27 entonces
+            si pregunta_salto entonces
+                hace(ID_NO)
+                devolver
+            fin
+            salir(0)
+        fin
+        si c = '\t' o c = TECLA_MAYÚS_TAB entonces
+            pasar_foco(c = '\t')
+            devolver
+        fin
+        si c = TECLA_CTRL_TAB o c = TECLA_CTRL_MAYÚS_TAB entonces
+            si no pregunta_salto entonces a_sección(otra_pestaña(sección, N_SECCIONES, 0, c = TECLA_CTRL_TAB)) fin
+            devolver
+        fin
+        k := clase_de(foco)
+        si k = K_DESPLEGABLE entonces
+            e := elegida(foco)
+            si c = '\n' o c = ' ' entonces
+                abrir_desplegable(foco, opciones_de(foco))
+            sino si desplegable_tecla(opciones_de(foco), e, c) entonces
+                elige(foco, e)
+            fin
+            devolver
+        fin
+        si k = K_CAMPO entonces
+            si c = '\n' y (foco = ID_FECHA o foco = ID_HORA) entonces
+                hace(ID_PONER)
+                devolver
+            fin
+            según nat16(foco)
+                caso ID_FECHA: fecha_tecla(campo_fecha, c)
+                caso ID_HORA: campo_tecla(campo_hora, 9, c)
+                caso ID_ESCRIBE: campo_tecla(escrito, 80, c)
+            fin
+            devolver
+        fin
+        ; en la columna de la izquierda, arriba y abajo: la sección
+        si foco >= ID_SECCIÓN y foco < ID_SECCIÓN + N_SECCIONES y (c = TECLA_ARRIBA o c = TECLA_ABAJO) entonces
+            si c = TECLA_ARRIBA y foco > ID_SECCIÓN entonces foco := foco - 1 fin
+            si c = TECLA_ABAJO y foco + 1 < ID_SECCIÓN + N_SECCIONES entonces foco := foco + 1 fin
+            a_sección(foco - ID_SECCIÓN)
+            devolver
+        fin
+        si c = '\n' o c = ' ' entonces hace(foco) fin
+    fin
+
+    función clic(x: ent32, yy: ent32, n: nat32)
+        variable id: nat32
+        id := control_en(x, yy)
+        si id = 0 entonces devolver fin
+        foco := id
+        según nat16(clase_de(id))
+            caso K_DESPLEGABLE:
+                pinta()
+                abrir_desplegable(id, opciones_de(id))
+            caso K_CAMPO:
+            caso K_LISTA:
+                ; la prueba del doble clic
+                si id = ID_PRUEBA y n >= 2 entonces
+                    prueba_bien := no prueba_bien
+                    si prueba_bien entonces escribir("panel: el doble clic de prueba, bien\n") fin
+                fin
+            si no: hace(id)
+        fin
+    fin
+
+    función principal(): byte
+        variable s: Suceso
+        variable args: arreglo [80] de byte
+        variable p: arreglo [24] de byte
+        variable k: nat32
+        hz := dato(DATO_HZ)
+        si hz = 0 o hz > 10000 entonces hz := 100 fin
+        argumentos(args, 80)
+        sección := S_FECHA
+        si palabra(args, 0, p, 24) entonces
+            si iguales_sin_caja(p, "/RATON") entonces sección := S_RATÓN fin
+            si iguales_sin_caja(p, "/TECLADO") entonces sección := S_TECLADO fin
+            si iguales_sin_caja(p, "/RED") entonces sección := S_RED fin
+            si iguales_sin_caja(p, "/ENERGIA") entonces sección := S_ENERGÍA fin
+            si iguales_sin_caja(p, "/PERSONALIZA") entonces sección := S_PERSONALIZA fin
+        fin
+        zonas_texto[0] := 0
+        para k desde 0 hasta N_ZONAS - 1 hacer
+            si k > 0 entonces concatenar(zonas_texto, "|") fin
+            concatenar(zonas_texto, nombre_zona(k))
+        fin
+        rellena_ahora()
+        si no preparar_medida("Panel de control", 784, 560, tamaño_) entonces
+            escribir("panel: el Panel de control necesita el escritorio (Configuraci\xA2n)\n")
+            devolver 1
+        fin
+        a_sección(sección)
+        escribir("panel: Panel de control 1.0\n")
+        foco := ID_SECCIÓN + sección
+        pinta()
+        mientras cierto hacer
+            si suceso(v, s, falso) entonces
+                si s.clase = EV_TECLA entonces
+                    tecla_pulsada(s.a)
+                    pinta()
+                sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                    clic(ent32(s.a), ent32(s.b), veces(s.c))
+                    pinta()
+                sino si s.clase = EV_MENÚ entonces
+                    si s.a <> SIN_ELEGIR entonces elige(s.b, s.a) fin
+                    pinta()
+                sino si s.clase = EV_TAMAÑO entonces
+                    nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
+                    pinta()
+                sino si s.clase = EV_CERRAR entonces
+                    devolver 0
+                fin
+            sino
+                ; cada segundo: el reloj (y la red y la batería, por si cambian)
+                si hora_exacta() <> pintado entonces pinta() fin
+                dormir(10)
+            fin
+        fin
+        devolver 0
+    fin
+
+fin UPanel.

@@ -1,0 +1,267 @@
+; =============================================================================
+;  zonas.cas - (PANEL, NTP) las zonas horarias y el horario de verano, para
+;  HORARED.BIN (la hora por Internet) y el Panel de control («modelo usuario»).
+;
+;  El reloj del PC (la CMOS) lleva la hora de aquí, como en el DOS y en
+;  Windows (la FAT guarda la hora de aquí; la barra de tareas la enseña tal
+;  cual): la hora universal (UTC, la de NTP) más lo de la zona y, en
+;  verano, una hora más. Las fechas van en segundos desde el 1/1/2000 a las
+;  0:00 (los de la llamada 175), de 2000 a 2099.
+;
+;  El horario de verano: el de la Unión Europea (del último domingo de marzo
+;  a la 1:00 UTC al último de octubre a la 1:00 UTC: en la península, de las
+;  2:00 a las 3:00 y de las 3:00 a las 2:00) y el de EE. UU. (del segundo
+;  domingo de marzo a las 2:00 al primero de noviembre a las 2:00, de allí).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Zonas
+
+    importar Textos32, Formato
+
+    público constante N_ZONAS = 13
+    constante SIN_VERANO = 0
+    constante VERANO_UE = 1
+    constante VERANO_EEUU = 2
+
+    ; ---- cómo ha ido la hora por Internet (AJ_HORA_ESTADO) ----
+    público constante HORA_NUNCA = 0            ; aún no se ha preguntado
+    público constante HORA_BIEN = 1             ; ya estaba en hora (menos de un segundo)
+    público constante HORA_PUESTA = 2           ; puesta en hora
+    público constante HORA_AJUSTANDO = 3        ; se está ajustando poco a poco (un segundo cada diez)
+    público constante HORA_SIN_RED = 4
+    público constante HORA_SIN_RESPUESTA = 5    ; ningún servidor ha contestado
+    público constante HORA_DESACUERDO = 6       ; los servidores no se ponen de acuerdo
+    público constante HORA_INCREÍBLE = 7        ; dan una fecha de antes de lo que se sabe (o de dentro de 30 años)
+    público constante HORA_SALTO = 8            ; el reloj va muy mal: ponerlo pide el modo administrador
+    público constante HORA_DENEGADO = 9         ; el núcleo no ha dejado poner la hora
+    público constante HORA_APAGADA = 10         ; la hora por Internet, apagada (Panel de control)
+
+    ; ---- la fecha de esta versión: nada puede ser de antes ----
+    ; (el día en que se hizo: el 22/11/2026, en días desde el 1/1/2000; se
+    ; pone al día con cada versión de HORARED.BIN, como la de TLS.BIN)
+    público constante DÍA_HECHO = 9822
+    público constante DÍAS_TOPE = 10958         ; y nada de más de 30 años después
+
+    público función nombre_zona(i: nat32): puntero a byte
+        según nat16(i)
+            caso 0: devolver "Europa/Madrid (pen\xA1nsula, Baleares, Ceuta y Melilla)"
+            caso 1: devolver "Atl\xA0ntico/Canarias"
+            caso 2: devolver "Europa/Lisboa"
+            caso 3: devolver "Europa/Londres"
+            caso 4: devolver "Europa/Par\xA1s, Roma, Berl\xA1n"
+            caso 5: devolver "Europa/Atenas"
+            caso 6: devolver "UTC (la hora universal, sin verano)"
+            caso 7: devolver "Am\x82rica/Ciudad de M\x82xico"
+            caso 8: devolver "Am\x82rica/Bogot\xA0, Lima, Quito"
+            caso 9: devolver "Am\x82rica/Caracas"
+            caso 10: devolver "Am\x82rica/Buenos Aires, Montevideo"
+            caso 11: devolver "Am\x82rica/Nueva York"
+            caso 12: devolver "Am\x82rica/Los \xB6ngeles"
+        fin
+        devolver "?"
+    fin
+
+    ; los minutos de la zona respecto de UTC, sin el verano
+    público función base_zona(i: nat32): ent32
+        según nat16(i)
+            caso 0, 4: devolver 60
+            caso 5: devolver 120
+            caso 7: devolver -360
+            caso 8, 11: devolver -300
+            caso 9: devolver -240
+            caso 10: devolver -180
+            caso 12: devolver -480
+        fin
+        devolver 0
+    fin
+
+    función regla(i: nat32): nat32
+        si i <= 5 entonces devolver VERANO_UE fin
+        si i = 11 o i = 12 entonces devolver VERANO_EEUU fin
+        devolver SIN_VERANO
+    fin
+
+    público función tiene_verano(i: nat32): bool
+        devolver regla(i) <> SIN_VERANO
+    fin
+
+    ; ---- las fechas ----
+    función bisiesto(a: nat32): bool
+        devolver (a mod 4 = 0 y a mod 100 <> 0) o a mod 400 = 0
+    fin
+
+    público función días_del_mes(me: nat32, a: nat32): nat32
+        si me = 2 entonces
+            si bisiesto(a) entonces devolver 29 fin
+            devolver 28
+        fin
+        si me = 4 o me = 6 o me = 9 o me = 11 entonces devolver 30 fin
+        devolver 31
+    fin
+
+    ; los días del 1/1/2000 al d/me/a
+    público función días_de(a: nat32, me: nat32, d: nat32): nat32
+        variable n, k, i: nat32
+        si a < 2000 entonces a := 2000 fin
+        k := a - 2000
+        n := k * 365 + (k + 3) div 4 - (k + 99) div 100 + (k + 399) div 400
+        i := 1
+        mientras i < me hacer
+            n := n + días_del_mes(i, a)
+            i := i + 1
+        fin
+        devolver n + d - 1
+    fin
+
+    ; al revés
+    público función fecha_de_días(días: nat32, ref a: nat32, ref me: nat32, ref d: nat32)
+        a := 2000
+        mientras a < 2135 y días >= días_de(a + 1, 1, 1) hacer a := a + 1 fin
+        días := días - días_de(a, 1, 1)
+        me := 1
+        mientras me < 12 y días >= días_del_mes(me, a) hacer
+            días := días - días_del_mes(me, a)
+            me := me + 1
+        fin
+        d := días + 1
+    fin
+
+    ; de los segundos desde el 1/1/2000, la fecha y la hora
+    público función fecha_de(s: nat32, ref a: nat32, ref me: nat32, ref d: nat32, ref h: nat32, ref mi: nat32, ref se: nat32)
+        fecha_de_días(s div 86400, a, me, d)
+        s := s mod 86400
+        h := s div 3600
+        mi := (s div 60) mod 60
+        se := s mod 60
+    fin
+
+    público función segundos_de(a: nat32, me: nat32, d: nat32, h: nat32, mi: nat32, se: nat32): nat32
+        devolver días_de(a, me, d) * 86400 + h * 3600 + mi * 60 + se
+    fin
+
+    ; el día de la semana (0 lunes ... 6 domingo): el 1/1/2000 fue sábado
+    público función día_semana(días: nat32): nat32
+        devolver (días + 5) mod 7
+    fin
+
+    ; el último domingo del mes (en días desde el 1/1/2000)
+    función último_domingo(a: nat32, me: nat32): nat32
+        variable n: nat32
+        n := días_de(a, me, días_del_mes(me, a))
+        mientras día_semana(n) <> 6 hacer n := n - 1 fin
+        devolver n
+    fin
+
+    ; el domingo número k (1, 2...) del mes
+    función domingo(a: nat32, me: nat32, k: nat32): nat32
+        variable n: nat32
+        n := días_de(a, me, 1)
+        mientras día_semana(n) <> 6 hacer n := n + 1 fin
+        devolver n + (k - 1) * 7
+    fin
+
+    ; ¿es verano en la zona i en ese momento (en UTC)?
+    público función en_verano(i: nat32, utc: nat32): bool
+        variable a, me, d, h, mi, se, empieza, acaba: nat32
+        variable b: ent32
+        fecha_de(utc, a, me, d, h, mi, se)
+        según nat16(regla(i))
+            caso VERANO_UE:
+                empieza := último_domingo(a, 3) * 86400 + 3600
+                acaba := último_domingo(a, 10) * 86400 + 3600
+                devolver utc >= empieza y utc < acaba
+            caso VERANO_EEUU:
+                ; a las 2:00 de allí: en UTC, 2:00 menos la zona (en invierno al
+                ; empezar; en verano, una hora menos, al acabar)
+                b := base_zona(i) * 60
+                empieza := nat32(ent32(domingo(a, 3, 2) * 86400 + 7200) - b)
+                acaba := nat32(ent32(domingo(a, 11, 1) * 86400 + 7200) - b - 3600)
+                devolver utc >= empieza y utc < acaba
+        fin
+        devolver falso
+    fin
+
+    ; lo que hay que sumar a UTC para tener la hora de la zona (en segundos);
+    ; con «verano» falso, sin el horario de verano
+    público función desfase(i: nat32, utc: nat32, verano: bool): ent32
+        variable s: ent32
+        s := base_zona(i) * 60
+        si verano y en_verano(i, utc) entonces s := s + 3600 fin
+        devolver s
+    fin
+
+    ; «22/11/2026 10:05:00», a destino (caben 20)
+    público función texto_fecha(s: nat32, destino: puntero a byte)
+        variable a, me, d, h, mi, se: nat32
+        fecha_de(s, a, me, d, h, mi, se)
+        destino[0] := byte('0' + d div 10)
+        destino[1] := byte('0' + d mod 10)
+        destino[2] := '/'
+        destino[3] := byte('0' + me div 10)
+        destino[4] := byte('0' + me mod 10)
+        destino[5] := '/'
+        destino[6] := byte('0' + a div 1000)
+        destino[7] := byte('0' + (a div 100) mod 10)
+        destino[8] := byte('0' + (a div 10) mod 10)
+        destino[9] := byte('0' + a mod 10)
+        destino[10] := ' '
+        destino[11] := byte('0' + h div 10)
+        destino[12] := byte('0' + h mod 10)
+        destino[13] := ':'
+        destino[14] := byte('0' + mi div 10)
+        destino[15] := byte('0' + mi mod 10)
+        destino[16] := ':'
+        destino[17] := byte('0' + se div 10)
+        destino[18] := byte('0' + se mod 10)
+        destino[19] := 0
+    fin
+
+    ; «adelantado 4 min 13 s» o «atrasado 2 d 0 h» (s: lo que hay que sumar
+    ; al reloj), a destino (caben 40)
+    público función texto_diferencia(s: ent32, destino: puntero a byte)
+        variable n: nat32
+        variable d: arreglo [2] de nat32
+        si s < 0 entonces
+            copiar(destino, "adelantado ")
+            n := nat32(0 - s)
+        sino
+            copiar(destino, "atrasado ")
+            n := nat32(s)
+        fin
+        si n >= 86400 entonces
+            d[0] := n div 86400
+            d[1] := (n mod 86400) div 3600
+            formatear(dirección(destino[longitud(destino)]), 28, "%u d %u h", d)
+        sino si n >= 3600 entonces
+            d[0] := n div 3600
+            d[1] := (n mod 3600) div 60
+            formatear(dirección(destino[longitud(destino)]), 28, "%u h %u min", d)
+        sino si n >= 60 entonces
+            d[0] := n div 60
+            d[1] := n mod 60
+            formatear(dirección(destino[longitud(destino)]), 28, "%u min %u s", d)
+        sino
+            d[0] := n
+            formatear(dirección(destino[longitud(destino)]), 28, "%u s", d)
+        fin
+    fin
+
+    ; lo que quiere decir cada HORA_...
+    público función texto_estado(e: nat32): puntero a byte
+        según nat16(e)
+            caso HORA_NUNCA: devolver "a\xA3n no se ha preguntado la hora a Internet"
+            caso HORA_BIEN: devolver "el reloj estaba en hora"
+            caso HORA_PUESTA: devolver "puesto en hora por Internet"
+            caso HORA_AJUSTANDO: devolver "ajust\xA0ndose poco a poco (un segundo cada diez)"
+            caso HORA_SIN_RED: devolver "sin red: no se puede preguntar la hora"
+            caso HORA_SIN_RESPUESTA: devolver "ning\xA3n servidor de la hora ha contestado"
+            caso HORA_DESACUERDO: devolver "los servidores no se ponen de acuerdo: no se cambia nada"
+            caso HORA_INCREÍBLE: devolver "la hora de Internet no puede ser (es de antes de lo que se sabe): no se cree"
+            caso HORA_SALTO: devolver "el reloj va muy distinto de Internet: ponerlo pide el modo administrador"
+            caso HORA_DENEGADO: devolver "el n\xA3cleo no ha dejado poner la hora"
+            caso HORA_APAGADA: devolver "la hora por Internet est\xA0 apagada"
+        fin
+        devolver "?"
+    fin
+
+fin Zonas.

@@ -202,9 +202,16 @@ VERSION_SONIDO = VERSION_085
 # de un paquete grande, «Cancelar», mira si cabe antes de bajar y borra lo
 # bajado) y DESCARGAR /CANCELA=. Suben base, red y paquetes
 VERSION_086 = '0.8.6'
+# (PANEL, 22/11/2026, rama panel-control) la 0.8.7: el Panel de control
+# (Configuración con sus iconos; PANEL.BIN: la fecha y la hora, el ratón, el
+# teclado, la red, la energía y la personalización; las llamadas 174 y 175,
+# PANEL.INI) y la hora por Internet (HORARED.BIN, NTP); ACPI.BIN con el botón
+# de encendido. Suben base y tls (TLS.BIN no se fía de un reloj de antes de TLS.HOR)
+VERSION_087 = '0.8.7'
 SISTEMA = [
-    ('base', VERSION_086, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
+    ('base', VERSION_087, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
+        ('PANEL.BIN', r'\HISPA\PANEL.BIN'), ('HORARED.BIN', r'\HISPA\HORARED.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
@@ -232,7 +239,7 @@ SISTEMA = [
     ('red', VERSION_086, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
-    ('tls', VERSION_085, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
+    ('tls', VERSION_087, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
         ('TLS.BIN', r'\HISPA\TLS.BIN'), ('HTTPS.BIN', r'\HISPA\HTTPS.BIN')]),
     ('ssh', VERSION_084, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, apagado hasta que se encienda)', 'base >= 0.8.4, red >= 0.8.4', [
         ('SSH.BIN', r'\HISPA\SSH.BIN'), ('SSHD.BIN', r'\HISPA\SSHD.BIN')]),

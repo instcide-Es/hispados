@@ -47,7 +47,7 @@ static inline u32 sc(u32 n, u32 a, u32 b, u32 c)
 }
 
 /* la batería y lo que hace falta para apagar y reiniciar, para el núcleo */
-#define PE_VERSION 1
+#define PE_VERSION 2		/* (PANEL) la 2 lleva «boton» */
 struct pe_energia {
 	u32 version;		/* PE_VERSION */
 	u32 fase;		/* FASE_... de llamadas.h */
@@ -72,6 +72,7 @@ struct pe_energia {
 	u32 reset_valor;
 	u32 respuesta;		/* RESP_... */
 	u32 sin_archivos;	/* 1: ya no se escribe en el disco (ORDEN_SIN_ARCHIVOS) */
+	u32 boton;		/* (PANEL) las veces que se ha pulsado el botón de encendido (PWRBTN_STS de PM1) */
 };
 
 /* (dispositivos) lo que el servicio ha hallado en el espacio de nombres de

@@ -57,6 +57,9 @@ módulo Permisos
     público constante SELLO_ESCUDO = 17         ; (pentium-escudo) el antivirus y el cortafuegos
     público constante SELLO_PROGRAMA = 18       ; (pentium-programas) «Programas instalados»
     público constante SELLO_SONIDO = 19         ; (pentium-sonido) el servicio de sonido
+    ; (el 20 es el del Reproductor, rama reproductor)
+    público constante SELLO_PANEL = 21          ; (PANEL) el Panel de control: los ajustes del sistema (la llamada 174)
+    público constante SELLO_HORA = 22           ; (PANEL, NTP) la hora por Internet: poner el reloj (la 175), sin atrasarlo más de 2 h
     ; (hasta 31)
 
     ; un bit por sello, para las listas de quién escribe
@@ -164,6 +167,8 @@ módulo Permisos
         programa("ESCUDO.BIN", SELLO_ESCUDO, cierto)
         programa("PROGRAMA.BIN", SELLO_PROGRAMA, falso)
         programa("SONIDO.BIN", SELLO_SONIDO, cierto)
+        programa("PANEL.BIN", SELLO_PANEL, falso)          ; (PANEL)
+        programa("HORARED.BIN", SELLO_HORA, falso)            ; (PANEL, NTP) no es servicio: solo pone la hora
         ; ---- el arranque ----
         regla("GRUB.CFG", B_ASISTE, falso)                 ; (y el escritorio, que es el núcleo: la medida de la pantalla)
         regla("GRUBENV", B_ACTUALIZ, falso)                ; (lo pone PAQUETES; ACTUALIZ da el núcleo nuevo por bueno)
@@ -172,6 +177,7 @@ módulo Permisos
         regla("INICIO.INI", NADIE, falso)                  ; (pentium-menu: lo fijado en el menú Inicio; lo escribe el núcleo)
         regla("DOCK.INI", NADIE, falso)                    ; (el dock, del núcleo)
         regla("ATAJOS.INI", NADIE, falso)
+        regla("PANEL.INI", NADIE, falso)                   ; (PANEL) los ajustes del Panel de control: los escribe el núcleo (la llamada 174)
         regla("FONDO.HPM", NADIE, falso)                   ; (MIRADOR) el tapiz con imagen: solo el núcleo (la llamada 172)
         regla("NUCLEO.BIN", NADIE, falso)
         regla("NUCLEO.ANT", NADIE, falso)

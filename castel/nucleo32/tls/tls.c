@@ -526,7 +526,10 @@ static int hora(u32 *dias, u32 *seg)
 	f >>= 16;
 	a = 1980 + (f >> 9), m = (f >> 5) & 15, d = f & 31;
 	reloj_fecha = f;
-	if (fuente_hora != 2 && a * 10000 + m * 100 + d >= COMPILADO && a <= COMPILADO / 10000 + 30) {
+	/* (NTP) ni de antes del último día con una cadena buena (TLS.HOR): la
+	 * hora por Internet (HORA.BIN) va sin cifrar, y si alguien la llevara
+	 * atrás, no colaría un certificado caducado */
+	if (fuente_hora != 2 && a * 10000 + m * 100 + d >= COMPILADO && a <= COMPILADO / 10000 + 30 && dias_de(a, m, d) >= dia_sabido()) {
 		if (fuente_hora != 1)
 			apunta("la hora, del reloj del PC: %02u/%02u/%u", d, m, a);
 		fuente_hora = 1;
@@ -535,6 +538,8 @@ static int hora(u32 *dias, u32 *seg)
 		return 1;
 	}
 	if (fuente_hora != 2) {
+		if (dia_sabido() && a * 10000 + m * 100 + d >= COMPILADO && dias_de(a, m, d) < dia_sabido())
+			apunta("el reloj del PC dice %02u/%02u/%u: es de antes del último día con una cadena buena (TLS.HOR): no se cree", d, m, a);	/* (NTP) */
 		apunta("el reloj del PC dice %02u/%02u/%u: no puede ser (este TLS.BIN es del %02u/%02u/%u); se pregunta la hora a %s (sin cifrar: RIESGO, quien cambie esa respuesta puede hacer pasar por bueno un certificado caducado)",
 		       d, m, a, COMPILADO % 100, COMPILADO / 100 % 100, COMPILADO / 10000, servidor_hora);
 		if (!hora_http())

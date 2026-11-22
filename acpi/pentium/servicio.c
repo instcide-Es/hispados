@@ -63,6 +63,38 @@ static u32 gas_es(const ACPI_GENERIC_ADDRESS *g)
 	return g->SpaceId == ACPI_ADR_SPACE_SYSTEM_IO && g->Address < 0x10000 ? (u32)g->Address : 0;
 }
 
+/* (PANEL) el botón de encendido: PWRBTN_STS (el bit 8 de PM1a_STS) se mira
+ * en cada vuelta del servicio (como mucho, cada segundo) y se borra
+ * escribiendo un 1; para que el equipo lo apunte hace falta PWRBTN_EN (el
+ * bit 8 de PM1a_EN, la segunda mitad del bloque). Sin el modo ACPI, en
+ * muchos equipos el botón lo atiende la BIOS (SMI) y aquí no llega; en
+ * QEMU (system_powerdown) y en los que ya arrancan en modo ACPI, sí. El
+ * núcleo decide qué hacer (Panel de control > Energía) */
+static u32 pm1a_evt, pm1_largo;
+
+static void prepara_boton(void)
+{
+	u32 en;
+
+	if (!pm1a_evt || pm1_largo < 4)
+		return;
+	en = mq_es_lee(pm1a_evt + pm1_largo / 2, 2);
+	mq_es_escribe(pm1a_evt + pm1_largo / 2, 2, en | 0x100);
+	mq_es_escribe(pm1a_evt, 2, 0x100);	/* lo que hubiera de antes, fuera */
+	reg("ACPI: el botón de encendido, en PM1a_EVT %xh (PWRBTN_EN puesto)\n", pm1a_evt);
+}
+
+static void mira_boton(void)
+{
+	if (!pm1a_evt || pm1_largo < 4)
+		return;
+	if (mq_es_lee(pm1a_evt, 2) & 0x100) {
+		mq_es_escribe(pm1a_evt, 2, 0x100);
+		pe.boton++;
+		reg("ACPI: se ha pulsado el botón de encendido (%u)\n", pe.boton);
+	}
+}
+
 /* si ACPICA no ha podido con \_S5 (o con la DSDT), se busca a mano, como
  * APAGAR de Hispa-DOS: Name (_S5_, Package () {a, b, ...}) en la DSDT */
 static int s5_a_mano(u32 *a, u32 *b)
@@ -116,6 +148,9 @@ static void prepara_energia(void)
 		return;
 	}
 	pe.pm1a_cnt = gas_es(&AcpiGbl_FADT.XPm1aControlBlock);
+	pm1a_evt = gas_es(&AcpiGbl_FADT.XPm1aEventBlock);	/* (PANEL) el botón de encendido */
+	pm1_largo = AcpiGbl_FADT.Pm1EventLength;
+	prepara_boton();
 	pe.pm1b_cnt = gas_es(&AcpiGbl_FADT.XPm1bControlBlock);
 	pe.smi_cmd = AcpiGbl_FADT.SmiCommand < 0x10000 ? AcpiGbl_FADT.SmiCommand : 0;
 	pe.acpi_enable = AcpiGbl_FADT.AcpiEnable;
@@ -460,6 +495,8 @@ int servicio_principal(void)
 			fase = apm.fase;
 			cocina();
 		}
+		if (preparado)
+			mira_boton();	/* (PANEL) */
 		vacia_registro(1);
 		/* un tic de HSPACPI son 54,9 ms; uno de Hispa-Pentium, 10 */
 		n = n < 0 ? 100 : n * 11 / 2;
