@@ -2603,6 +2603,15 @@ módulo Escritorio
         lee_ajustes_dock()
         lee_atajos()
         quita_iconos()
+        ; (0.8.7) y fuera de la lista: si no, los del arranque se quedaban y
+        ; los del usuario salían otra vez detrás (Mi equipo, el Bloc... dos veces)
+        i := 0
+        mientras i < n_iconos hacer
+            liberar(puntero(iconos[i].debajo))
+            i := i + 1
+        fin
+        n_iconos := 0
+        icono_elegido := -1
         si n_atajos > 0 entonces
             i := 0
             mientras i < n_atajos hacer
