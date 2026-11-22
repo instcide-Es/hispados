@@ -14,6 +14,8 @@
 ;  Con /AVANCE=ARCHIVO, cada 16 K reescribe en ARCHIVO una línea «llevados
 ;  total Bajando nombre» (total: 0 si el servidor no lo dice): así enseña la
 ;  barra la ventana de «Programas y actualizaciones» (PAQUETES se lo pide).
+;  (RÁPIDO) Si aparece CANCELA.TXT en la carpeta de ARCHIVO (o el de
+;  /CANCELA=ARCHIVO; lo deja la ventana al pulsar «Cancelar»), se para.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Udescarg
@@ -41,6 +43,7 @@ módulo Udescarg
     variable salida: nat32
     variable escritos, próximo_punto: nat32
     variable avance: arreglo [128] de byte      ; /AVANCE=archivo (o nada)
+    variable cancela: arreglo [128] de byte     ; (RÁPIDO) /CANCELA=archivo: si aparece, se para
     variable total_, próximo_avance: nat32
 
     ; ---- la URL ----
@@ -207,11 +210,25 @@ módulo Udescarg
         si avance[0] <> 0 y escritos >= próximo_avance entonces
             di_avance()
             próximo_avance := próximo_avance + 16384
+            si cancela[0] <> 0 y hay_archivo(cancela) entonces
+                escribir("\nDESCARGAR: cancelado.\n")
+                cancelado := cierto
+                devolver falso
+            fin
         fin
         si no a_pantalla y escritos >= próximo_punto entonces
             escribir(".")
             próximo_punto := próximo_punto + 32768
         fin
+        devolver cierto
+    fin
+
+    variable cancelado: bool
+    función hay_archivo(r: puntero a byte): bool
+        variable m: nat32
+        m := abrir(r)
+        si es_error(m) entonces devolver falso fin
+        cerrar(m)
         devolver cierto
     fin
 
@@ -510,8 +527,23 @@ módulo Udescarg
             si empieza_por_sin_caja(pal, "/AVANCE=") entonces
                 copiar_hasta(avance, dirección(pal[8]), 128)
                 Textos32.copiar(args, tras_palabra(args, s))
+            sino si empieza_por_sin_caja(pal, "/CANCELA=") entonces
+                copiar_hasta(cancela, dirección(pal[9]), 128)
+                Textos32.copiar(args, tras_palabra(args, s))
             sino
                 s := s + 1
+            fin
+        fin
+        ; (RÁPIDO) sin /CANCELA=: CANCELA.TXT junto al archivo del avance
+        si cancela[0] = 0 y avance[0] <> 0 entonces
+            copiar_hasta(cancela, avance, 128)
+            s := longitud(cancela)
+            mientras s > 0 y cancela[s - 1] <> '\\' hacer s := s - 1 fin
+            si s > 0 y s + 12 < 128 entonces
+                cancela[s] := 0
+                concatenar(cancela, "CANCELA.TXT")
+            sino
+                cancela[0] := 0
             fin
         fin
         si no palabra(args, 0, url, 512) o iguales(url, "/?") entonces

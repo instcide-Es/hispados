@@ -193,8 +193,14 @@ VERSION_WIFI = VERSION_085
 # los programas de Hispa Ventanas). Pide la base con las llamadas del sonido
 # (la que salga con esta rama; ver docs/PENTIUM.md, «El sonido»)
 VERSION_SONIDO = VERSION_085
+# (RÁPIDO, 22/11/2026, escudo-rapido) la 0.8.6: fat.cas lee y escribe los
+# sectores seguidos de una vez (antes, una orden al disco por sector), la
+# memoria USB va de 16 K en 16 K (antes 4 K), PAQUETES 1.3 (el avance dentro
+# de un paquete grande, «Cancelar», mira si cabe antes de bajar y borra lo
+# bajado) y DESCARGAR /CANCELA=. Suben base, red y paquetes
+VERSION_086 = '0.8.6'
 SISTEMA = [
-    ('base', VERSION_085, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
+    ('base', VERSION_086, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
@@ -217,10 +223,10 @@ SISTEMA = [
     # (PROGRAMAS) la 1.2 (sobre la 1.1, la de la revisión de seguridad): los tipos,
     # REPARA, ARCHIVOS, SUELTOS, QUITA /DEPENDIENTES y la ventana unificada
     # «Programas y actualizaciones» (PROGRAMA.BIN, con los controles: base 0.8.2)
-    ('paquetes', '1.2', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
+    ('paquetes', '1.3', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
         ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN')]),
-    ('red', VERSION_085, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
+    ('red', VERSION_086, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
     ('tls', VERSION_085, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
@@ -424,7 +430,7 @@ OPCIONALES = [
      + [('NAVEGA.MNU', r'\HISPA\MENU\NAVEGA.MNU'), ('NAVEGA.ICP', r'\HISPA\MENU\NAVEGA.ICP')]),
     # (ESCUDO) el antivirus (castel/nucleo32/escudo/paquete.sh). Sus firmas, aparte
     # (los paquetes «escbase», «escmes» y «escdia», que hace tools/escudo_firmas.py)
-    ('escudo', '0.2', 'Escudo: el antivirus (con las firmas de ClamAV), para el equipo y para revisar memorias USB',
+    ('escudo', '0.2.1', 'Escudo: el antivirus (con las firmas de ClamAV), para el equipo y para revisar memorias USB',
      'base >= 0.8.3, red >= 0.8.1, tls >= 0.8.1', [
         ('ESCUDO.BIN', r'\HISPA\ESCUDO.BIN'), ('ESCUDO/LEEME.TXT', r'\HISPA\ESCUDO\LEEME.TXT'),
         ('MENU/ESCUDO.MNU', r'\HISPA\MENU\ESCUDO.MNU'), ('MENU/ESCUDO.ICP', r'\HISPA\MENU\ESCUDO.ICP')]),

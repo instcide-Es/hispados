@@ -31,6 +31,7 @@ static inline u32 sc(u32 n, u32 a, u32 b, u32 c)
 #define SC_BORRAR 21
 #define SC_RENOMBRAR 22
 #define SC_HACER_CARPETA 23
+#define SC_REDIRIGIR 27
 #define SC_ENTRADA_LARGA 28
 #define SC_ATENDER_CORTE 29
 #define SC_HUBO_CORTE 30

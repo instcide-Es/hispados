@@ -25,6 +25,8 @@
 # desenchufar en marcha); «:captura NOMBRE»
 # deja la pantalla en $CAPTURAS/NOMBRE.ppm (CAPTURAS: una carpeta; /tmp si no
 # se dice). La flecha empieza en el centro (PANTALLA=800x600 si no se dice).
+# «:hasta S N texto» espera a que el puerto serie diga N veces «texto» (con
+# RELOJ_A=archivo, apunta la hora: para medir); «:reloj NOMBRE», la hora ya.
 # «:monitor ORDEN» le da esa orden al monitor de QEMU (como «o /b 0x70 0x60»:
 # escribir en un puerto; con QEMU_MAS="-S", antes de arrancar, y «cont»).
 # «:texto NOMBRE» deja la pantalla de texto (sus 25 líneas) en
@@ -144,6 +146,14 @@ for orden in "${ORDENES[@]}"; do
   fi
   case "$orden" in
     ":pausa "*) sleep ${orden:7}; continue ;;
+    # (RÁPIDO) «:hasta S N texto»: espera (hasta S segundos) a que el puerto serie
+    # haya dicho N veces «texto»; y con RELOJ_A=archivo, apunta allí la hora
+    # (en segundos, con decimales) al acabar de esperar: lo que tarda algo
+    ":hasta "*) set -- ${orden:7}; s=$1; c=$2; shift 2
+      for ((i = 0; i < s * 4; i++)); do [ "$(tr -d '\r' < $T/sal | grep -a -c -- "$*")" -ge $c ] && break; sleep 0.25; done
+      [ -n "${RELOJ_A:-}" ] && echo "$* $c $(date +%s.%N)" >> "$RELOJ_A"
+      continue ;;
+    ":reloj "*) [ -n "${RELOJ_A:-}" ] && echo "${orden:7} $(date +%s.%N)" >> "$RELOJ_A"; continue ;;
     ":monitor "*) mon "${orden:9}" 0.3; continue ;;
     ":raton "*) set -- ${orden:7}; ir $1 $2; continue ;;
     ":clic "*) set -- ${orden:6}; ir $1 $2; mon "mouse_button 1" 0.2; mon "mouse_button 0" 0.4; continue ;;

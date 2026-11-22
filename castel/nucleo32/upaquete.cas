@@ -78,7 +78,7 @@ módulo UPaquetes
     constante RUTA = 160
     constante NINGUNO = 0xFFFFFFFF
     constante URL_POR_DEFECTO = "http://actualiza.hispados.es/pentium/"
-    constante VERSIÓN_PAQUETES = "1.2"
+    constante VERSIÓN_PAQUETES = "1.3"
 
     ; (PROGRAMAS) los tipos: el código y su nombre, en el orden en que salen
     ; (los mismos que TIPOS en tools/hpq.py; docs/PENTIUM.md, sección 13)
@@ -180,6 +180,16 @@ módulo UPaquetes
     variable firmado: bool                      ; el catálogo lleva firma, y es buena
     variable núcleo_nuevo: bool                 ; se ha cambiado \HISPA\NUCLEO.BIN
     variable con_avance: bool                   ; /AVANCE: lo pide la ventana
+    ; (RÁPIDO) el avance dentro de un paquete grande (octetos) y «Cancelar»:
+    ; si la ventana deja C:\HISPA\PAQUETES\CANCELA.TXT, se para en cuanto se
+    ; puede (lo cambiado se deshace con el diario, como si se fuera la luz)
+    variable cancela: arreglo [48] de byte
+    variable cancelado: bool
+    variable av_hecho, av_total, av_próximo: nat32
+    variable av_qué, av_de: puntero a byte
+    variable plan_bajado: nat32                 ; lo que se va a traer de Internet (para ver si cabe)
+    variable cancela_en: nat32                  ; (las pruebas) /CANCELA_EN=K: «Cancelar» a esos K instalando
+    variable av_instalando: bool
     ; (PROGRAMAS)
     variable por_tipo: bool                     ; /TIPO
     variable con_dependientes: bool             ; /DEPENDIENTES
@@ -844,6 +854,8 @@ módulo UPaquetes
             concatenar(a, " /AVANCE=")
             concatenar(a, avance)
         fin
+        ; (RÁPIDO) DESCARGA para si aparece CANCELA.TXT junto a AVANCE.TXT (sin
+        ; más argumentos: no pasan de 128 letras)
         t := lanzar("DESCARGA.BIN", a)
         si es_error(t) entonces
             imprimir1("paquetes: para traer %s de Internet hace falta la red (el programa DESCARGA),\n", pt(url))
@@ -914,6 +926,89 @@ módulo UPaquetes
         si es_error(m) entonces devolver fin
         escribir_archivo(m, x, longitud(x))
         cerrar(m)
+    fin
+
+    ; (RÁPIDO) empieza a contar octetos de algo largo: «qué» (Comprobando,
+    ; Instalando) y «de» (el paquete); el avance va cada 512 K
+    función av_empieza(total: nat32, qué: puntero a byte, de: puntero a byte)
+        av_hecho := 0
+        av_total := total
+        av_próximo := 0
+        av_qué := qué
+        av_de := de
+    fin
+
+    ; k octetos más: falso si se ha pedido cancelar
+    función av_lleva(k: nat32): bool
+        av_hecho := av_hecho + k
+        si cancela_en <> 0 y av_instalando y av_hecho div 1024 >= cancela_en y no cancelado entonces
+            escribir("paquetes: cancelado (prueba: /CANCELA_EN; lo que se haya cambiado se deshace).\n")
+            cancelado := cierto
+        fin
+        si av_hecho >= av_próximo entonces
+            av_próximo := av_hecho + 524288
+            si av_total > 0 entonces di_avance(av_hecho div 1024, av_total div 1024, av_qué, av_de) fin
+            si cancela[0] <> 0 y existe(cancela) entonces
+                si no cancelado entonces escribir("paquetes: cancelado (lo que se haya cambiado se deshace).\n") fin
+                cancelado := cierto
+            fin
+        fin
+        devolver no cancelado
+    fin
+
+    ; ¿se ha pedido cancelar? (entre paso y paso)
+    función se_cancela(): bool
+        si cancela[0] <> 0 y no cancelado y existe(cancela) entonces
+            escribir("paquetes: cancelado.\n")
+            cancelado := cierto
+        fin
+        devolver cancelado
+    fin
+
+    ; (RÁPIDO) ¿cabe lo que se va a traer del paquete c del catálogo (y,
+    ; luego, instalado: otro tanto)? Antes de bajar 20 MB a una memoria de 256
+    función cabe_bajada(c: nat32): bool
+        variable i, k: nat32
+        variable u: Info_unidad
+        busca_origen()
+        si no es_red entonces devolver cierto fin
+        plan_bajado := plan_bajado + cat_tamaño[c] div 1024 + 4
+        k := plan_bajado * 2 + 1024
+        i := 0
+        mientras info_unidad(i, u) hacer
+            si u.letra = sis entonces
+                si u.libre_k <> 0xFFFFFFFF y u.libre_k < k entonces
+                    imprimir3("paquetes: no cabe: para traer e instalar %s hacen falta %u MB y en el disco del sistema quedan %u MB.\n", pt(cat_nombre[c]), (k + 1023) div 1024, u.libre_k div 1024)
+                    escribir("  Haga sitio (borre lo que no necesite) y vuelva a probar.\n")
+                    devolver falso
+                fin
+                devolver cierto
+            fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; ¿empieza t por p? (sin mirar mayúsculas)
+    función empieza_con(t: puntero a byte, p: puntero a byte): bool
+        mientras valor(p) <> 0 hacer
+            si minúscula(valor(t)) <> minúscula(valor(p)) entonces devolver falso fin
+            t := t + 1
+            p := p + 1
+        fin
+        devolver cierto
+    fin
+
+    ; lo traído de Internet a BAJADAS ya no hace falta (instalado o no):
+    ; fuera, que en una memoria pequeña son megas
+    función suelta_bajadas()
+        variable i: nat32
+        variable b: arreglo [RUTA] de byte
+        si base[0] = 0 entonces devolver fin
+        en_base("BAJADAS\\", b)
+        para i desde 1 hasta plan_n hacer
+            si empieza_con(plan_ruta[i - 1], b) entonces borrar(plan_ruta[i - 1]) fin
+        fin
     fin
 
     función cifra_hex(c: byte): nat32
@@ -1087,7 +1182,8 @@ módulo UPaquetes
             imprimir("paquetes: hace falta %s%s%s y no está en el catálogo\n", dirección(d[0]))
             devolver falso
         fin
-        si no trae(cat_archivo[c], r) entonces devolver falso fin
+        si no cabe_bajada(c) entonces devolver falso fin       ; (RÁPIDO)
+        si se_cancela() o no trae(cat_archivo[c], r) entonces devolver falso fin
         cab := lee_cabecera(r, largo)
         si cab = nulo entonces
             imprimir1("paquetes: %s no es un paquete\n", pt(r))
@@ -1220,6 +1316,7 @@ módulo UPaquetes
             si no lee_todo(m, buf, k) entonces devolver falso fin
             Sha256.añadir(buf, k)
             n := n - k
+            si no av_lleva(k) entonces devolver falso fin
         fin
         Sha256.acabar(salida)
         devolver cierto
@@ -1239,9 +1336,11 @@ módulo UPaquetes
         total := largo_de(m)
         c := plan_cat[i]
         bien := cierto
+        av_empieza(total, "Comprobando", plan_nombre[i])
+        av_instalando := falso
         si c <> NINGUNO entonces
             bien := total = cat_tamaño[c] y resume(m, total, s) y iguales(s, cat_sha[c])
-            si no bien entonces
+            si no bien y no cancelado entonces
                 imprimir1("paquetes: %s no es el del catálogo (no mide lo mismo o su suma no es la suya)\n", pt(plan_ruta[i]))
             fin
             mover(m, 0, DESDE_INICIO)
@@ -1254,9 +1353,14 @@ módulo UPaquetes
             bien := falso
         fin
         si bien entonces mover(m, plan_largo[i], DESDE_INICIO) fin
+        ; (RÁPIDO) con la suma del catálogo buena, el paquete entero es el
+        ; firmado: la de cada archivo se mira al copiarlo (escribe_temporal);
+        ; aquí sería leerlo otra vez entero (21 MB la base de Escudo)
+        si plan_cat[i] <> NINGUNO entonces n := 0 fin
         para c desde 1 hasta n hacer
             si bien entonces
                 si no resume(m, nuevos[c - 1].tamaño, s) o no iguales(s, nuevos[c - 1].sha) entonces
+                    si cancelado entonces romper fin
                     imprimir2("paquetes: %s: la suma de %s no es la suya: el paquete está estropeado\n", pt(plan_ruta[i]), pt(dirección(nuevos[c - 1].destino[2])))
                     bien := falso
                 fin
@@ -1555,7 +1659,7 @@ módulo UPaquetes
                 bien := lee_todo(mp, buf, k)
                 si bien entonces
                     Sha256.añadir(buf, k)
-                    bien := escribe_todo(s, buf, k)
+                    bien := escribe_todo(s, buf, k) y av_lleva(k)
                 fin
                 queda := queda - k
             fin
@@ -1585,6 +1689,13 @@ módulo UPaquetes
                 fin
             fin
         fin
+        ; (RÁPIDO) el avance: lo que se va a escribir
+        r := 0
+        para i desde 1 hasta n_pasos hacer
+            si pasos[i - 1].clase = P_NUEVO entonces r := r + pasos[i - 1].tamaño fin
+        fin
+        av_empieza(r, "Instalando", txn_nombre)
+        av_instalando := cierto
         mp := NINGUNO
         si txn_paquete[0] <> 0 entonces
             mp := abrir(txn_paquete)
@@ -1597,7 +1708,7 @@ módulo UPaquetes
         para i desde 1 hasta n_pasos hacer
             si bien y pasos[i - 1].clase = P_NUEVO entonces
                 si no escribe_temporal(i - 1, mp) entonces
-                    imprimir1("paquetes: no se puede escribir %s (¿está lleno el disco?)\n", pt(pasos[i - 1].destino))
+                    si no cancelado entonces imprimir1("paquetes: no se puede escribir %s (¿está lleno el disco?)\n", pt(pasos[i - 1].destino)) fin
                     bien := falso
                 fin
             fin
@@ -2220,6 +2331,10 @@ módulo UPaquetes
         para i desde 1 hasta orden_n hacer
             k := orden[i - 1]
             di_avance(i - 1, orden_n, "Instalando", plan_nombre[k])
+            si se_cancela() entonces
+                si i > 1 entonces escribir("(lo de antes en la lista sí ha quedado instalado)\n") fin
+                devolver falso
+            fin
             si no pasos_de_instalar(k) entonces devolver falso fin
             si reparando entonces quita_los_sanos() fin
             si no ejecuta() entonces
@@ -2598,6 +2713,7 @@ módulo UPaquetes
             si iguales_sin_caja(palabra_, "/TIPO") o iguales_sin_caja(palabra_, "/TIPOS") entonces por_tipo := cierto fin
             si iguales_sin_caja(palabra_, "/DEPENDIENTES") entonces con_dependientes := cierto fin
             si iguales_sin_caja(palabra_, "/LENTO") entonces lento := cierto fin
+            si empieza_por(palabra_, "/CANCELA_EN=") entonces texto_a_natural(dirección(palabra_[12]), cancela_en) fin
             si iguales_sin_caja(palabra_, "/CATALOGO") entonces con_catálogo := cierto fin
             si empieza_por(palabra_, "/CORTE=") o empieza_por(palabra_, "/corte=") entonces
                 texto_a_natural(dirección(palabra_[7]), corte)
@@ -2663,7 +2779,11 @@ módulo UPaquetes
         concatenar(base, "\\PAQUETES")
         en_base("DIARIO.TXT", diario)
         en_base("HECHO.TXT", hecho)
-        si con_avance entonces en_base("AVANCE.TXT", avance) fin
+        si con_avance entonces
+            en_base("AVANCE.TXT", avance)
+            en_base("CANCELA.TXT", cancela)             ; (RÁPIDO)
+            borrar(cancela)
+        fin
         si no existe(base) entonces crear_carpeta(base) fin
         recupera()
         carga_instalados()
@@ -2694,6 +2814,10 @@ módulo UPaquetes
             imprimir1("paquetes: no sé qué es «%s» (PAQUETES AYUDA)\n", pt(orden_))
             bien := falso
         fin
+        suelta_bajadas()                                ; (RÁPIDO)
+        si no bien entonces se_cancela() fin
+        si cancela[0] <> 0 entonces borrar(cancela) fin
+        si cancelado entonces devolver 3 fin
         si bien entonces devolver 0 fin
         devolver 1
     fin

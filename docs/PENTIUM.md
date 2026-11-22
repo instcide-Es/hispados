@@ -4817,6 +4817,52 @@ La parte 26 de las pruebas pasa los casos de la revisión
 (`escudo/prueba/fuzz.py`) con el motor compilado con ASan y UBSan
 (`hacer.sh --asan`).
 
+### La 0.8.6: lo que iba lento (22/11, rama escudo-rapido)
+
+En la 0.8.5, en VirtualBox, «Revisar todo el equipo» tardó 504 s en 145
+archivos (unos 4 KB/s), «Actualizar las firmas» dejaba la ventana parada, y en
+el HP Mini (el sistema en una memoria USB) instalar la base de firmas parecía
+colgado. La causa, en el núcleo y no en Escudo: **`fat.cas` leía y escribía
+de sector en sector** (una orden al disco por cada 512 octetos: en QEMU es
+barato, pero en VirtualBox y en una memoria USB de verdad cada orden cuesta
+milisegundos) y **la memoria USB iba de 4 K en 4 K**. Arreglado (marcado
+«(RÁPIDO)»):
+- `fat.cas`: los sectores enteros y seguidos en el disco van de una vez, hasta
+  64 K por orden, derechos al sitio de quien lee o escribe (sin pasar por el
+  sector de trabajo); al escribir, el cluster de al lado se añade a la cadena
+  si está libre, para que lo escrito quede seguido.
+- `usbalm.cas`: 16 K por orden (4 páginas seguidas y alineadas a 16 K: un solo
+  qTD en la EHCI, sin cruzar 64 K en la xHCI).
+- `uordenes.cas`: COPY, de 32 K en 32 K.
+- PAQUETES 1.3: con la suma del catálogo buena no se vuelve a leer el paquete
+  entero para las sumas de cada archivo (se miran al copiarlo); el avance va
+  también dentro de un paquete grande (cada 512 K); «Cancelar» (la ventana deja
+  `C:\HISPA\PAQUETES\CANCELA.TXT`: PAQUETES para y lo cambiado se deshace con
+  el diario; DESCARGAR, con `/CANCELA=`, también para); mira si cabe antes de
+  traer nada de Internet (lo traído y lo instalado: en una memoria de 256 MB,
+  la base y el mes son unos 95 MB) y lo dice claro; y lo traído a `BAJADAS`
+  se borra al acabar (antes se quedaba: 47 MB).
+- «Programas y actualizaciones»: el tanto por ciento dentro de un paquete y
+  el botón «Cancelar (Esc)».
+- Escudo 0.2.1: «Actualizar las firmas» ya no deja la ventana parada (la
+  barra, lo que hace y «Cancelar»; si no se puede, dice lo último de
+  PAQUETES, p. ej. que no cabe); carga primero lo del día y del mes y luego la
+  base, y un `.ESC` que no deje 8 MB de memoria libres no se carga (queda lo
+  más nuevo); el archivo que más ha tardado de una revisión va al registro
+  (si pasa de 2 s); el aviso de un `AUTORUN.INF` en un CD (o lo que no se
+  puede mover) tiene «Dejarlo» por omisión, con «A cuarentena» y «Borrarlo»
+  apagados; y su explicación va en dos líneas.
+
+En QEMU (la parte 26 de las pruebas lo mide):
+
+| | 0.8.5 | 0.8.6 |
+|---|---|---|
+| Revisar 21 MB en la memoria USB (EHCI) | 105 s | 5 s |
+| Copiar 21 MB dentro de la memoria USB | 343 s | 110 s (COPY de 4 K); 16 MB con COPY de 32 K, 24 s |
+| Instalar escudo + escbase (21 MB) desde la memoria USB al disco IDE | 295 s | 41 s |
+| Revisar 16 MB del disco IDE | 1,7-2,8 MB/s | 4,2 MB/s |
+| «Revisar todo el equipo» en la ventana (disco y un CD de 301 archivos) | | 4,5 s |
+
 ### Lo que tarda
 
 | | |

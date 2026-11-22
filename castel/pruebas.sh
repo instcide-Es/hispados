@@ -2659,8 +2659,8 @@ paq $Q/s7.img red "paquetes instala letras /desde=http://prueba/" ":pausa 2" "ad
 mira "el gancho de la red: con /DESDE=http://..., el catálogo y los paquetes los trae DESCARGA (DESCARGA.BIN, la orden de la red) a C:\\HISPA\\PAQUETES\\BAJADAS, y se instalan igual" \
   "^Trayendo http://prueba/CATALOGO\.TXT\.\.\.$" "^descarga (de prueba): http://prueba/LETRAS11\.HPQ -> C:.HISPA.PAQUETES.BAJADAS.LETRAS11\.HPQ$" "^  instalado letras 1\.1$" \
   "^paquetes: para traer http://actualiza\.hispados\.es/pentium/CATALOGO\.TXT de Internet hace falta la red (el programa DESCARGA),$"
-if sano $Q/s7.img && sin_restos $Q/s7.img && igual_en $Q/s7.img DOCS/LETRAS/B.TXT $F/B11.TXT && igual_en $Q/s7.img HISPA/PAQUETES/BAJADAS/LETRAS11.HPQ $F/paq/LETRAS11.HPQ; then
-  ok "y en el disco: sano, con lo instalado y lo traído (en BAJADAS) igual que lo de la memoria octeto a octeto"
+if sano $Q/s7.img && sin_restos $Q/s7.img && igual_en $Q/s7.img DOCS/LETRAS/B.TXT $F/B11.TXT && ! lista_de $Q/s7.img | grep -q "BAJADAS/LETRAS11\.HPQ"; then
+  ok "y en el disco: sano, con lo instalado igual que lo de la memoria octeto a octeto; lo traído a BAJADAS, ya borrado (RÁPIDO: en una memoria pequeña son megas)"
 else ko "lo traído por el gancho de la red no queda bien en el disco:"; lista_de $Q/s7.img | sed 's/^/        /' | head -14; fi
 
 # 8. la ventana «Programas y actualizaciones» (ACTUALIZ.BIN), desde el menú
@@ -3418,8 +3418,8 @@ mira "al arrancar, con red, ACTUALIZ /BANDEJA mira solo si hay actualizaciones (
   "^actualiz: aviso en la bandeja: Hay una actualización\.$" "^reiniciar$" "^actualiz: aviso en la bandeja: El núcleo de Hispa-Pentium El núcleo nuevo ha arrancado bien\.$"
 miracap "el aviso de la bandeja: una ventanita abajo a la derecha, «Hay una actualización», con «Verlas» y «Ahora no»" u1 negrita 400 460 480 480 "Hay una actualización." negrita 420 510 520 530 Verlas
 [ -n "${GUARDA_CAPTURAS:-}" ] && mkdir -p "$GUARDA_CAPTURAS" && cp $G/u[23].ppm "$GUARDA_CAPTURAS/"
-miracap "«Verlas» abre «Programas y actualizaciones» en «Pendientes (1)»: base, de la 0.8.5 a la 0.9, y el catálogo de Internet con su firma buena" u2 \
-  negrita 10 120 150 140 "Pendientes (1)" negrita 40 190 120 230 base texto 110 190 200 230 "0.8.5" texto 195 190 245 230 "0.9" texto 300 88 790 110 "Paquetes de http://10.0.2.2:" \
+miracap "«Verlas» abre «Programas y actualizaciones» en «Pendientes (1)»: base, de la 0.8.6 a la 0.9, y el catálogo de Internet con su firma buena" u2 \
+  negrita 10 120 150 140 "Pendientes (1)" negrita 40 190 120 230 base texto 110 190 200 230 "0.8.6" texto 195 190 245 230 "0.9" texto 300 88 790 110 "Paquetes de http://10.0.2.2:" \
   texto 300 88 790 110 "(firma buena)"
 miracap "«Actualizar todo»: con el núcleo nuevo, ofrece «Reiniciar ahora» o «Más tarde»" u3 negrita 150 200 660 400 "Reiniciar ahora" negrita 150 200 660 400 "Más tarde" \
   texto 140 200 660 320 "Se ha puesto un núcleo nuevo: se usa al reiniciar"
@@ -5001,6 +5001,48 @@ if $AQUI/nucleo32/disco.sh $E/d.img 32 escudo > $E/disco.txt 2>&1 && mmd -i $E/d
     MS=$(tr -d '\r' < $E/r.sal | sed -n 's/^escudo: 16777216 octetos en \([0-9]*\) ms$/\1/p')
     if [ -n "$MS" ]; then ok "lo que tarda, 16 MB al azar con 20.000 patrones, 5.000 lógicas y 100.000 sumas: en Linux, $LIN; en QEMU (sin KVM), $(python3 -c "print('%.1f MB/s' % (16000/$MS))") (leyendo del disco IDE)"
     else ko "no se ha podido medir en QEMU"; fi
+    # (RÁPIDO) lo que pasó en la 0.8.5 (VirtualBox: «145 archivos en 504 s»;
+    # el HP Mini, congelado instalando la base de firmas): fat.cas leía y
+    # escribía de sector en sector (una orden al disco por cada 512 octetos)
+    # y la memoria USB de 4 K en 4 K. Se mide en un «pc» con el disco IDE, una
+    # memoria USB (EHCI, como el HP Mini) y un CD con 300 archivos (ide-cd,
+    # como VirtualBox): copiar 16 MB en la memoria, revisarlos, y «Revisar
+    # todo el equipo» desde la ventana
+    rm -rf $E/cdr; mkdir -p $E/cdr/UNO $E/cdr/DOS
+    for k in $(seq 150); do printf 'archivo %d del CD de prueba\r\n' $k > $E/cdr/UNO/A$k.TXT; head -c $((k * 97)) $E/c/GRANDE.BIN > $E/cdr/DOS/B$k.BIN; done
+    printf '[autorun]\r\nopen=NADA.EXE\r\n' > $E/cdr/AUTORUN.INF
+    rm -f $E/u.img; truncate -s 64M $E/u.img; mkfs.fat -F 32 -n MEMORIA $E/u.img > /dev/null && mcopy -i $E/u.img $E/c/GRANDE.BIN ::
+    if xorriso -as mkisofs -quiet -J -V PRUEBA_CD -o $E/cd.iso $E/cdr > $E/iso.txt 2>&1; then
+      rm -f $E/rel.txt
+      RELOJ_A=$E/rel.txt CAPTURAS=$G DISCO=$E/r.img MAQUINA=pc ARRANQUE=ordenes MODULOS= MEMORIA=160 \
+        QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$E/u.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu -drive id=cd,file=$E/cd.iso,media=cdrom,if=none,readonly=on -device ide-cd,drive=cd,bus=ide.1,unit=0" \
+        $AQUI/nucleo32/probar.sh "" ":pausa 3" ":reloj copia" "copy X:\\GRANDE.BIN X:\\COPIA.BIN" ":hasta 400 2 C:.>" "escudo X:\\COPIA.BIN" ":hasta 200 3 C:.>" \
+        "escudo D:" ":hasta 200 4 C:.>" > $E/rap.sal 2>&1
+      tr -d '\r' < $E/rap.sal > $E/rap.txt
+      T1=$(sed -n 's/^copia \([0-9.]*\)$/\1/p' $E/rel.txt); T2=$(sed -n 's/^C:\.> 2 \([0-9.]*\)$/\1/p' $E/rel.txt)
+      MSU=$(sed -n 's/^escudo: 16777216 octetos en \([0-9]*\) ms$/\1/p' $E/rap.txt | head -n 1)
+      MSD=$(sed -n 's/^escudo: \([0-9]*\) octetos en \([0-9]*\) ms$/\2/p' $E/rap.txt | tail -n 1)
+      NCD=$(sed -n 's/^escudo: revisado D: \([0-9]*\) archivos.*/\1/p' $E/rap.txt)
+      if [ -n "$T1" ] && [ -n "$T2" ] && [ -n "$MSU" ] && python3 -c "import sys; sys.exit(not (16 / ($T2 - $T1) >= 0.4 and 16000 / $MSU >= 1.5))"; then
+        ok "(RÁPIDO) la memoria USB (EHCI): copiar 16 MB, $(python3 -c "print('%.1f s' % ($T2 - $T1))") (antes, unos 260); revisarlos, $(python3 -c "print('%.1f MB/s' % (16000 / $MSU))") (antes, 0,2)"
+      else ko "(RÁPIDO) la memoria USB va lenta: copiar 16 MB ${T1:+$(python3 -c "print('%.1f s' % (${T2:-0} - $T1))")}, revisar ${MSU:-?} ms"; fi
+      if [ "$NCD" = 301 ] && [ -n "$MSD" ] && [ "$MSD" -lt 15000 ]; then ok "(RÁPIDO) el CD (ide-cd, como VirtualBox): sus 301 archivos, en $(python3 -c "print('%.1f s' % ($MSD / 1000))")"
+      else ko "(RÁPIDO) el CD: ${NCD:-?} archivos en ${MSD:-?} ms"; fi
+      # y en el escritorio, la ventana: «Revisar todo el equipo» (Intro, el botón de fábrica)
+      CAPTURAS=$G DISCO=$E/r.img MAQUINA=pc ARRANQUE=escritorio MODULOS= MEMORIA=160 \
+        QEMU_MAS="-drive id=cd,file=$E/cd.iso,media=cdrom,if=none,readonly=on -device ide-cd,drive=cd,bus=ide.1,unit=0" \
+        $AQUI/nucleo32/probar.sh "" ":pausa 6" ":doble 62 185" ":pausa 3" "escudo /ventana" ":pausa 4" ":tecla ret" \
+        ":hasta 120 1 revisión de \* acabada" ":pausa 2" ":captura rp1" ":clic 400 300" ":pausa 1" > $E/rv.sal 2>&1
+      tr -d '\r' < $E/rv.sal > $E/rv.txt
+      MST=$(sed -n 's/^escudo: \([0-9]*\) octetos en \([0-9]*\) ms$/\2/p' $E/rv.txt | tail -n 1)
+      NT=$(sed -n 's/^escudo: ventana: revisión de \* acabada: \([0-9]*\) archivos.*/\1/p' $E/rv.txt)
+      if [ -n "$MST" ] && [ -n "$NT" ] && [ "$NT" -gt 300 ] && [ "$MST" -lt 30000 ]; then
+        ok "(RÁPIDO) «Revisar todo el equipo» en la ventana (el disco y el CD): $NT archivos en $(python3 -c "print('%.1f s' % ($MST / 1000))")"
+      else ko "(RÁPIDO) «Revisar todo el equipo»: ${NT:-?} archivos en ${MST:-?} ms"; fi
+      # el AUTORUN.INF del CD: un aviso que no se puede mover: «Dejarlo» por omisión; y el texto, en dos líneas
+      miracap "(RÁPIDO) el AUTORUN.INF de un CD: «A cuarentena» y «Borrarlo» apagados, «Dejarlo» por omisión; la explicación, entera" rp1 \
+        negrita 80 450 720 510 "Dejarlo" texto 80 360 720 480 "al meter el disco o la memoria."
+    else ko "(RÁPIDO) no se ha podido hacer el CD de prueba: $(tail -n 1 $E/iso.txt)"; fi
   fi
   # 5. (CORTAFUEGOS) el cortafuegos de RED.BIN (rcorta.cas), con el servidor
   # SSH de verdad (SSHD.BIN) y una conexión desde aquí por QEMU (hostfwd: la

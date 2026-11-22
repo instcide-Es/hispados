@@ -535,6 +535,35 @@ módulo Fat
         devolver sector_de_cluster(a.cluster) + (a.posición mod oc) div SECTOR
     fin
 
+    ; (RÁPIDO) cuántos sectores seguidos en el disco hay desde la posición de
+    ; a (que ya tiene su cluster en a.cluster), hasta «quiero» (y 128, 64 K
+    ; por orden). Con «crece», los clusters que faltan al final de la cadena
+    ; se le añaden si el de al lado está libre (para escribir de una vez).
+    constante POR_ORDEN = 128
+    función seguidos(ref a: Abierto, quiero: nat32, crece: bool): nat32
+        variable k, c, s: nat32
+        si quiero > POR_ORDEN entonces quiero := POR_ORDEN fin
+        k := sectores_cluster - (a.posición mod (sectores_cluster * SECTOR)) div SECTOR
+        c := a.cluster
+        mientras k < quiero hacer
+            s := siguiente(c)
+            si fallo entonces romper fin
+            si s = 0 y crece y c + 1 < clusters + 2 y fat_de(c + 1) = 0 y no fallo entonces
+                pon_fat(c, c + 1)
+                pon_fat(c + 1, FIN_CADENA)
+                si libres <> NINGUNO entonces libres := libres - 1 fin
+                pista := c + 2
+                info_sucio := cierto
+                s := c + 1
+            fin
+            si s <> c + 1 entonces romper fin
+            c := s
+            k := k + sectores_cluster
+        fin
+        si k > quiero entonces k := quiero fin
+        devolver k
+    fin
+
     ; hasta n octetos desde la posición de a (que avanza). Da los leídos.
     función lee(ref a: Abierto, destino: puntero a byte, n: nat32): nat32
         variable hechos, s, d, k: nat32
@@ -543,12 +572,25 @@ módulo Fat
             si no a.carpeta y a.posición >= a.tamaño entonces romper fin
             s := sector_de(a)
             si s = 0 entonces romper fin
-            si no trae(s) entonces romper fin
             d := a.posición mod SECTOR
-            k := SECTOR - d
-            si k > n - hechos entonces k := n - hechos fin
-            si no a.carpeta y k > a.tamaño - a.posición entonces k := a.tamaño - a.posición fin
-            copiar_memoria(destino + hechos, dirección(buf[d]), k)
+            si d = 0 y no a.fija y no a.carpeta y n - hechos >= SECTOR y a.tamaño - a.posición >= SECTOR entonces
+                ; (RÁPIDO) sectores enteros y seguidos: de una vez, derechos a su
+                ; sitio (antes, una orden al disco por cada 512 octetos)
+                k := (n - hechos) div SECTOR
+                si k > (a.tamaño - a.posición) div SECTOR entonces k := (a.tamaño - a.posición) div SECTOR fin
+                k := seguidos(a, k, falso)
+                si k = 0 o no leer_sectores(disco, base + s, k, destino + hechos) entonces
+                    fallo := cierto
+                    romper
+                fin
+                k := k * SECTOR
+            sino
+                si no trae(s) entonces romper fin
+                k := SECTOR - d
+                si k > n - hechos entonces k := n - hechos fin
+                si no a.carpeta y k > a.tamaño - a.posición entonces k := a.tamaño - a.posición fin
+                copiar_memoria(destino + hechos, dirección(buf[d]), k)
+            fin
             hechos := hechos + k
             a.posición := a.posición + k
         fin
@@ -568,19 +610,32 @@ módulo Fat
             d := a.posición mod SECTOR
             k := SECTOR - d
             si k > n - hechos entonces k := n - hechos fin
-            si k < SECTOR y (a.carpeta o a.posición - d < a.tamaño) entonces
-                ; un trozo de un sector que ya tiene algo: se trae antes
-                si no trae(s) entonces romper fin
+            si d = 0 y origen <> nulo y no a.fija y no a.carpeta y n - hechos >= 2 * SECTOR entonces
+                ; (RÁPIDO) sectores enteros: de una vez (y los clusters de al
+                ; lado, si están libres, a la cadena), sin pasar por buf
+                k := seguidos(a, (n - hechos) div SECTOR, cierto)
+                si fallo o k = 0 entonces romper fin
+                si buf_sector >= s y buf_sector < s + k entonces buf_sector := NINGUNO fin
+                si no escribir_sectores(disco, base + s, k, origen + hechos) entonces
+                    fallo := cierto
+                    romper
+                fin
+                k := k * SECTOR
             sino
-                si k < SECTOR entonces llenar(buf, SECTOR, 0) fin
-                buf_sector := s
+                si k < SECTOR y (a.carpeta o a.posición - d < a.tamaño) entonces
+                    ; un trozo de un sector que ya tiene algo: se trae antes
+                    si no trae(s) entonces romper fin
+                sino
+                    si k < SECTOR entonces llenar(buf, SECTOR, 0) fin
+                    buf_sector := s
+                fin
+                si origen = nulo entonces
+                    llenar(dirección(buf[d]), k, 0)
+                sino
+                    copiar_memoria(dirección(buf[d]), origen + hechos, k)
+                fin
+                si no guarda() entonces romper fin
             fin
-            si origen = nulo entonces
-                llenar(dirección(buf[d]), k, 0)
-            sino
-                copiar_memoria(dirección(buf[d]), origen + hechos, k)
-            fin
-            si no guarda() entonces romper fin
             hechos := hechos + k
             a.posición := a.posición + k
             si no a.carpeta y a.posición > a.tamaño entonces a.tamaño := a.posición fin
