@@ -1,0 +1,31 @@
+# buscar (adelante, atrás, vuelta), mayúsculas, palabra entera, expresiones con grupos, reemplazar uno y todas
+abre LINEAS.TXT
+teclas {ctrl-fin}una docena de unos y UNO{intro}
+teclas {ctrl-inicio}{ctrl-f}uno{intro}
+estado
+teclas {intro}
+estado
+teclas {intro}{intro}
+estado
+teclas {mayus-f3}
+estado
+casilla 0
+teclas {f3}{f3}
+estado
+casilla 0
+casilla 1
+teclas {ctrl-inicio}{f3}{f3}{f3}
+estado
+casilla 1
+casilla 2
+teclas {esc}{ctrl-h}([a-z]+)s\b{tab}{tab}{tab}{tab}{tab}<\1>{tab}{tab}{intro}
+muestra
+estado
+teclas {ctrl-z}
+muestra
+teclas {esc}{ctrl-inicio}{ctrl-h}t(r)es{tab}{tab}{tab}{tab}{tab}[\1]{tab}{intro}{intro}
+muestra
+teclas {esc}{ctrl-f}xyz{intro}
+estado
+teclas {esc}{ctrl-f}([{intro}
+estado

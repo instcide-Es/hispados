@@ -398,6 +398,21 @@ módulo BlocArc
         devolver comparar(dirección(a.nombre[0]), dirección(b.nombre[0])) < 0
     fin
 
+    ; ¿es una carpeta? (la ruta, con su «\» al final o sin ella)
+    público función es_carpeta(ruta: puntero a byte): bool
+        variable t: arreglo [164] de byte
+        variable n, a: nat32
+        copiar_hasta(t, ruta, 160)
+        n := longitud(t)
+        si n = 0 entonces devolver falso fin
+        ; la raíz («\», «C:\», «C:»)
+        si (n = 1 y t[0] = '\\') o (n = 2 y t[1] = ':') o (n = 3 y t[1] = ':' y t[2] = '\\') entonces devolver cierto fin
+        si t[n - 1] = '\\' entonces t[n - 1] := 0 fin
+        a := atributos_de(t)
+        si es_error(a) entonces devolver falso fin
+        devolver a yb CARPETA <> 0
+    fin
+
     ; lee la carpeta (con su «\» al final): falso si no se puede
     público función lee_lista(carpeta: puntero a byte): bool
         variable m, i, j: nat32
@@ -407,6 +422,7 @@ módulo BlocArc
         si lista = nulo entonces lista := puntero(pedir(MAX_LISTA * tamaño(Cosa))) fin
         si lista = nulo entonces devolver falso fin
         n_lista := 0
+        si no es_carpeta(carpeta) entonces devolver falso fin
         m := abrir(carpeta)
         si es_error(m) entonces devolver falso fin
         mientras n_lista < MAX_LISTA y entrada(m, e) hacer

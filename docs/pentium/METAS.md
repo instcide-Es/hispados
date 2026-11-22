@@ -49,6 +49,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 ## Programas
 - [x] ~~Programas de Windows de 32 bits (cargador PE) y **DirectX** (DirectDraw, DirectSound, DirectInput), como en Hispa-486~~ (WIN32.BIN: NASM, TCC, FASMW, Naves; [WIN32.md](WIN32.md)). Queda: hilos de verdad, SEH, Direct3D, el sonido de DirectSound
 - [x] ~~**OpenGL 1.1** por programa (OPENGL32.DLL y GLU32.DLL, las mismas que en Hispa-486; GLPRUEBA y ENGRANA)~~ — rama opengl (21/11: [../486/OPENGL.md](../486/OPENGL.md)). Para Half-Life 1 (meta de Carlos) falta lo de HW32: hilos, registro, mutex y eventos, SEH, MSVCRT de VC6 más completa, el CD
+- [x] ~~**Bloc de notas al nivel de Notepad++** (pedido de Carlos 22/11): archivos grandes (búfer con hueco), deshacer sin límite, números de línea, pestañas con « *», sesión, arrastrar desde Mi equipo, buscar y reemplazar con expresiones regulares (en los abiertos y en una carpeta), colores según el lenguaje (Castel, BASIC, NASM, C, HTML/CSS/JS, .BAT, INI, Python; en .LEN) con negrita, plegar, la pareja, UTF-8/437/1252 y CR LF/LF, en columna, macros, comparar, duplicar y mover líneas, comentar, mayúsculas, ordenar~~ — rama bloc-avanzado (22/11: BLOC.BIN 1.0, docs/PENTIUM.md §14 undecies). Queda: imprimir (cuando haya impresoras) y guardar con nombre largo
 - [ ] Reproductor de música y vídeo (MP3, OGG, WAV; vídeo sencillo)
 - [ ] Visor de imágenes y Pintura
 - [ ] Compresor ZIP

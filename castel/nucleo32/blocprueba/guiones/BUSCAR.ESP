@@ -1,0 +1,17 @@
+estado: LINEAS.TXT l¡n 1 col 4 sel 0-3 l¡neas 6 p gina 437 lf cambiado pesta¤as 1 pliegues 0
+estado: LINEAS.TXT l¡n 5 col 18 sel 34-37 l¡neas 6 p gina 437 lf cambiado pesta¤as 1 pliegues 0
+estado: LINEAS.TXT l¡n 1 col 4 sel 0-3 l¡neas 6 p gina 437 lf cambiado pesta¤as 1 pliegues 0
+aviso: Llegado al final: se ha vuelto a buscar desde el principio.
+estado: LINEAS.TXT l¡n 5 col 25 sel 41-44 l¡neas 6 p gina 437 lf cambiado pesta¤as 1 pliegues 0
+aviso: Llegado al principio: se ha vuelto a buscar desde el final.
+estado: LINEAS.TXT l¡n 5 col 18 sel 34-37 l¡neas 6 p gina 437 lf cambiado pesta¤as 1 pliegues 0
+estado: LINEAS.TXT l¡n 5 col 25 sel 41-44 l¡neas 6 p gina 437 lf cambiado pesta¤as 1 pliegues 0
+texto: uno\n<do>\n<tre>\ncuatro\nuna docena de <uno> y UNO\n
+estado: LINEAS.TXT l¡n 5 col 23 sel 44-44 l¡neas 6 p gina 437 lf cambiado pesta¤as 1 pliegues 0
+aviso: Reemplazadas: 3 (Ctrl+Z lo deshace de una vez).
+texto: uno\ndos\ntres\ncuatro\nuna docena de unos y UNO\n
+texto: uno\ndos\n[r]\ncuatro\nuna docena de unos y UNO\n
+estado: LINEAS.TXT l¡n 3 col 4 sel 11-11 l¡neas 6 p gina 437 lf cambiado pesta¤as 1 pliegues 0
+aviso: No se encuentra ®xyz¯.
+estado: LINEAS.TXT l¡n 3 col 4 sel 11-11 l¡neas 6 p gina 437 lf cambiado pesta¤as 1 pliegues 0
+aviso: La expresi¢n no vale: un ®[¯ sin cerrar

@@ -1067,7 +1067,7 @@ módulo BlocVis
                 Grafico.marco(lz, x + 1, yy + 1, cw - 2, ch - 2, C_PAREJA)
             fin
             si u = 9 entonces
-                si ver_espacios entonces pon_letra(x + (ent32(w) * cw - cw) div 2, yy, 0x1A, C_ESPACIO, falso) fin
+                si ver_espacios entonces pon_letra(x + (ent32(w) * cw - cw) div 2, yy, 0xAF, C_ESPACIO, falso) fin    ; «»» (la letra no tiene →)
             sino si u = ' ' entonces
                 si ver_espacios entonces pon_letra(x, yy, 0xFA, C_ESPACIO, falso) fin
             sino
@@ -1097,7 +1097,7 @@ módulo BlocVis
                 Grafico.rectángulo(lz, xs, yy, 4, ch, RESALTE)
             fin
             si ver_finales y l + 1 < n_líneas() entonces
-                pon_letra(xs + 1, yy, 0x14, C_ESPACIO, falso)
+                pon_letra(xs + 1, yy, 0xAA, C_ESPACIO, falso)      ; «¬» (la letra no tiene ¶)
             fin
             ; plegado: «...» en un recuadro, detrás de lo de arriba
             si plegado_en(l) >= 0 entonces
@@ -1174,7 +1174,8 @@ módulo BlocVis
         ; el cursor: una raya entre dos letras (si se ve)
         si enfocada y no d.bloque entonces
             si punto_de(d.cursor, cx, cy) y cx >= tx - 1 y cx < ax + aw entonces
-                Grafico.rectángulo(lz, cx - 1, cy, 2, ch, C_CURSOR)
+                ; (con la letra del sistema, de un punto, entre las dos letras: como siempre)
+                si tam = 0 entonces Grafico.rectángulo(lz, cx - 1, cy, 1, ch, C_CURSOR) sino Grafico.rectángulo(lz, cx - 2, cy, 2, ch, C_CURSOR) fin
             fin
         fin
         si d.bloque entonces pinta_cursor_bloque() fin
@@ -1192,7 +1193,9 @@ módulo BlocVis
         mientras ent32(k) < filas y l < n_líneas() hacer
             si r = 0 y l >= l1 y l <= l2 entonces
                 x := tx + (ent32(d.b_c2) - ent32(d.izq)) * cw
-                si x >= tx - 1 entonces Grafico.rectángulo(lz, x - 1, yy, 2, ch, C_CURSOR) fin
+                si x >= tx - 1 entonces
+                    si tam = 0 entonces Grafico.rectángulo(lz, x - 1, yy, 1, ch, C_CURSOR) sino Grafico.rectángulo(lz, x - 2, yy, 2, ch, C_CURSOR) fin
+                fin
             fin
             si no avanza(l, r) entonces romper fin
             yy := yy + ch

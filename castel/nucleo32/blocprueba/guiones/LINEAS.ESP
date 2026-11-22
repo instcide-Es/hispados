@@ -1,0 +1,16 @@
+texto: uno\nuno\ndos\ntres\ncuatro\n
+texto: uno\ndos\ntres\nuno\ncuatro\n
+texto: uno\ndos\nuno\ntres\ncuatro\n
+texto: UNO\nDOS\nUNO\nTRES\nCUATRO\n
+texto: uno\ndos\nuno\ntres\ncuatro\n
+texto: cuatro\ndos\ntres\nuno\nuno\n
+texto: uno\nuno\ntres\ndos\ncuatro\n
+texto: XYuno\nXYuno\nXYtres\ndos\ncuatro\n
+estado: LINEAS.TXT l¡n 3 col 3 sel 14-14 l¡neas 6 p gina 437 lf cambiado pesta¤as 1 pliegues 0
+texto: Xuno\nXuno\nXtres\ndos\ncuatro\n
+texto: -> Xuno\n-> Xuno\n-> Xtres\ndos\ncuatro\n
+estado: LINEAS.TXT l¡n 3 col 1 sel 16-16 l¡neas 6 p gina 437 lf cambiado pesta¤as 1 pliegues 0
+texto:     uno\n        dos\n    tres\n
+texto: 	uno\n		dos\n	tres\n
+texto:     	uno\n    		dos\n    	tres\n
+texto: uno\n	dos\ntres\n

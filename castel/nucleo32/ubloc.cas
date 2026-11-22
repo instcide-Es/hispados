@@ -17,7 +17,7 @@
 ;  del usuario); abre lo que se arrastra desde Mi equipo. Buscar y reemplazar
 ;  (Ctrl+F, Ctrl+H) con mayúsculas, palabra entera y expresiones regulares
 ;  (blocexp.cas), en todos los abiertos y en una carpeta (blocbus.cas). Los
-;  colores según el lenguaje (bloclen.cas y los .LEN de \HISPA\BLOC\LENGUAJES),
+;  colores según el lenguaje (bloclen.cas, los .LEN de serie y los de \HISPA\BLOC\LENGUAJE),
 ;  plegar y la pareja de los paréntesis. UTF-8 (con y sin BOM), la 437 de
 ;  Hispa y la 1252, CR LF y LF (blocarc.cas, blocpag.cas). Y la edición en
 ;  columna (Alt y arrastrar), las macros (Ctrl+Mayús+R y P), comparar dos
@@ -295,10 +295,10 @@ módulo UBloc
 
     ; abre «ruta» (en la 437): si ya está abierta, va a su pestaña. Cierto si se ha abierto
     función abre_documento(ruta: puntero a byte, cp: nat32): bool
-        variable i, r: nat32
+        variable i, r, t0: nat32
         variable x, viejo: puntero a Doc
         variable t: arreglo [MAX_RUTA] de byte
-        variable dd: arreglo [2] de nat32
+        variable dd: arreglo [5] de nat32
         copiar_hasta(t, ruta, MAX_RUTA)
         a_mayúsculas(t)
         si n_docs > 0 entonces
@@ -316,6 +316,7 @@ módulo UBloc
         fin
         viejo := d
         d := x
+        t0 := tics()
         r := BlocArc.lee(t, cp)
         si r <> 0 entonces
             d := viejo
@@ -326,6 +327,16 @@ módulo UBloc
             aviso_malo := cierto
             escribir("bloc: no puedo abrir ", t, ": ", texto_mal(r), "\n")
             devolver falso
+        fin
+        dd[0] := largo()
+        dd[1] := (tics() - t0) * 10
+        si no era_nuevo y largo() >= 1000000 entonces
+            ; (por el puerto serie: lanzado desde la Consola, escribir() va a ella)
+            dd[2] := nat32(dirección(t[0]))
+            dd[3] := dd[0]
+            dd[4] := dd[1]
+            formatear(rótulo, 256, "bloc: abierto %s, %u octetos, en %u ms\n", dirección(dd[2]))
+            al_serie(rótulo)
         fin
         d := viejo
         si n_docs > 0 y activa_vacía() entonces
@@ -556,8 +567,33 @@ módulo UBloc
         devolver falso
     fin
 
+    ; la ruta entera (con la unidad y la carpeta de trabajo) de una que no la lleva
+    función ruta_entera(ruta: puntero a byte, destino: puntero a byte)
+        variable t: arreglo [MAX_RUTA] de byte
+        si ruta[0] <> 0 y ruta[1] = ':' entonces
+            copiar_hasta(destino, ruta, MAX_RUTA)
+            devolver
+        fin
+        destino[0] := byte(unidad(0))
+        destino[1] := ':'
+        destino[2] := 0
+        si ruta[0] = '\\' entonces
+            concatenar(destino, ruta)
+            devolver
+        fin
+        carpeta_actual(t, MAX_RUTA - 20)
+        si longitud(t) + longitud(ruta) + 4 >= MAX_RUTA entonces
+            copiar_hasta(destino, ruta, MAX_RUTA)
+            devolver
+        fin
+        concatenar(destino, t)
+        si t[longitud(t) - 1] <> '\\' entonces concatenar(destino, "\\") fin
+        concatenar(destino, ruta)
+    fin
+
     función guarda_ajustes()
         variable t: arreglo [MAX_RUTA + 16] de byte
+        variable r: arreglo [MAX_RUTA] de byte
         variable i, k: nat32
         variable dd: arreglo [2] de nat32
         si sin_ventana o no algo_que_recordar() entonces devolver fin
@@ -574,7 +610,8 @@ módulo UBloc
         si n_docs > 0 entonces
         para i desde 0 hasta n_docs - 1 hacer
             si docs[i].clase = DOC_NORMAL y docs[i].ruta[0] <> 0 entonces
-                dd[0] := nat32(dirección(docs[i].ruta[0]))
+                ruta_entera(dirección(docs[i].ruta[0]), r)
+                dd[0] := nat32(dirección(r[0]))
                 dd[1] := docs[i].cursor
                 formatear(t, MAX_RUTA + 16, "%s|%u", dd)
                 ini_pon("abierto", t)
@@ -2043,6 +2080,7 @@ módulo UBloc
             relee_lista()
         fin
         si p = P_BUSCAR o p = P_REEMPLAZAR o p = P_CARPETA entonces campos[CA_BUSCAR].entero := campos[CA_BUSCAR].n > 0 fin
+        si p = P_REEMPLAZAR entonces campos[CA_POR].entero := campos[CA_POR].n > 0 fin
         si p = P_IR entonces campos[CA_IR].entero := cierto fin
         si p = P_CARPETA entonces
             si campos[CA_CARPETA].n = 0 entonces
@@ -2744,7 +2782,7 @@ módulo UBloc
         nombre_corto(docs[i], t)
         n := ent32(longitud(t))
         si n > 20 entonces n := 20 fin
-        devolver (n + 2) * 8 + 26
+        devolver (n + 2) * 8 + 34
     fin
 
     función pinta_pestañas()
@@ -2799,7 +2837,7 @@ módulo UBloc
                 Grafico.texto(lz, x + 8, yy + 5, t, 0x34465E)
             fin
             ; la «x» de cerrarla
-            Grafico.texto(lz, x + an - 16, yy + 5, "x", SUAVE)
+            Grafico.texto(lz, x + an - 15, yy + 5, "x", SUAVE)
             x := x + an + 2
             i := i + 1
         fin
@@ -2917,7 +2955,7 @@ módulo UBloc
     ; con su marca (√) si está puesta
     función op_marca(t: puntero a byte, puesta: bool)
         si opciones[0] <> 0 entonces concatenar(opciones, "|") fin
-        si puesta entonces concatenar(opciones, "\xFB ") sino concatenar(opciones, "  ") fin
+        si puesta entonces concatenar(opciones, "[x] ") sino concatenar(opciones, "[ ] ") fin
         concatenar(opciones, t)
     fin
 
@@ -2993,17 +3031,17 @@ módulo UBloc
         op_marca("Espacios y tabuladores", ver_espacios)
         op_marca("Finales de línea", ver_finales)
         raya()
-        op("  Letra más grande", "Ctrl+rueda", 28)
-        op("  Letra más pequeña", "Ctrl+rueda", 28)
-        op("  Letra normal", "", 28)
+        op("    Letra más grande", "Ctrl+rueda", 28)
+        op("    Letra más pequeña", "Ctrl+rueda", 28)
+        op("    Letra normal", "", 28)
         raya()
-        op("  Plegar todo", "", 28)
-        op("  Desplegar todo", "", 28)
+        op("    Plegar todo", "", 28)
+        op("    Desplegar todo", "", 28)
         raya()
-        op("  Comparar con la de al lado", "", 28)
-        op("  Dejar de comparar", "Esc", 28)
-        op("  Diferencia siguiente", "F8", 28)
-        op("  Diferencia anterior", "Mayús+F8", 28)
+        op("    Comparar con la de al lado", "", 28)
+        op("    Dejar de comparar", "Esc", 28)
+        op("    Diferencia siguiente", "F8", 28)
+        op("    Diferencia anterior", "Mayús+F8", 28)
         g := 0
         si d.lenguaje < 0 o len_plegado(d.lenguaje) = P_NADA entonces g := g ob (3 << 9) fin
         si n_docs < 2 entonces g := g ob (1 << 12) fin
@@ -3029,10 +3067,10 @@ módulo UBloc
         op_marca("Espacios de delante a tabuladores", falso)
         op_marca("El tabulador pone espacios", tab_espacios)
         raya()
-        op("  MAY\xD7SCULAS", "Ctrl+Mayús+U", 26)
-        op("  minúsculas", "Ctrl+U", 26)
-        op("  Ordenar las líneas", "", 26)
-        op("  Ordenar al revés", "", 26)
+        op("    MAY\xD7SCULAS", "Ctrl+Mayús+U", 26)
+        op("    minúsculas", "Ctrl+U", 26)
+        op("    Ordenar las líneas", "", 26)
+        op("    Ordenar al revés", "", 26)
         devolver 0
     fin
 
@@ -3279,7 +3317,7 @@ módulo UBloc
     ; =========================================================================
     ;  La ayuda (F1): una pestaña para leer
     ; =========================================================================
-    constante TEXTO_AYUDA = "Bloc de notas de Hispa-Pentium: la ayuda\n========================================\n\nArchivos y pestañas\n  Ctrl+N            documento nuevo (otra pestaña)\n  Ctrl+O            abrir (abajo: la ruta y, encima, la carpeta; las flechas eligen)\n  Ctrl+S o F2       guardar (sin nombre: Guardar como)\n  Ctrl+W            cerrar la pestaña (si tiene cambios, pregunta)\n  Ctrl+Tab          la pestaña siguiente (con Mayús, la de antes)\n  Las pestañas con cambios sin guardar llevan « *» detrás del nombre.\n  Un archivo arrastrado desde Mi equipo y soltado aquí, se abre.\n  Al salir se recuerda lo abierto, y la vez siguiente se vuelve a abrir.\n\nEscribir y moverse\n  Ctrl+Z / Ctrl+Y   deshacer y rehacer (sin límite)\n  Ctrl+A, C, X, V   todo, copiar, cortar y pegar (con los demás programas)\n  Mayús+flechas     seleccionar; también arrastrando el ratón, dos clics (la\n                    palabra) o tres (la línea)\n  Ctrl+flechas      de palabra en palabra; Ctrl+Inicio y Ctrl+Fin, al principio y al final\n  Alt+arrastrar     seleccionar en columna (en bloque); lo que se teclea va en todas\n                    las líneas. También Alt+Mayús+flechas.\n  Ctrl+D            duplicar la línea (o lo seleccionado)\n  Alt+Arriba/Abajo  subir o bajar las líneas\n  Ctrl+Q            comentar o descomentar las líneas, según el lenguaje\n  Ctrl+U            minúsculas; Ctrl+Mayús+U, MAY\xD7SCULAS\n  Tab, Mayús+Tab    con varias líneas elegidas, las mete o las saca\n  Ctrl+Mayús+R      grabar una macro (otra vez: parar); Ctrl+Mayús+P, repetirla\n\nBuscar\n  Ctrl+F            buscar (abajo); Intro o F3, lo siguiente; Mayús+F3, lo de antes\n  Ctrl+H            reemplazar (uno, o todas de una vez)\n  Ctrl+Mayús+F      buscar en los archivos de una carpeta: la lista de lo\n                    encontrado; dos clics o Intro en una línea, a su sitio\n  Las casillas: Mayúsculas (que cuenten), Palabra entera, Expresión (regular)\n  y Todos los abiertos. En las expresiones: . * + ? {n,m} [a-z] [^0-9] ^ $\n  ( ) | \\b \\d \\w \\s; en el reemplazo, \\1 a \\9 lo de cada paréntesis.\n  Ctrl+G            ir a la línea\n  Ctrl+B            ir al paréntesis pareja ( ) [ ] { } (se ven con un recuadro)\n\nVer\n  Ctrl+rueda        la letra más grande o más pequeña\n  El menú Ver: los números de línea, el ajuste de línea, los espacios y los\n  finales de línea; plegar y desplegar (o un clic en el [-] del margen);\n  comparar con la pestaña de al lado: lo quitado lleva «-», lo añadido «+»\n  y lo cambiado «*»; F8 va a lo siguiente distinto; Esc deja de comparar.\n\nLenguajes y páginas\n  Los colores van según el lenguaje (por la extensión, o el menú Lenguaje);\n  las palabras clave, además, en negrita. Los lenguajes son archivos de\n  texto en \\HISPA\\BLOC\\LENGUAJES: se pueden añadir más.\n  El menú Formato: UTF-8 (con o sin BOM), la 437 de Hispa o la 1252 de\n  Windows; CR LF o LF; tabuladores y espacios; mayúsculas; ordenar.\n  Abajo a la derecha se ve el lenguaje, la página y los finales de línea.\n\nEsc cierra lo de abajo (buscar, ir a...). F1, esta ayuda.\n"
+    constante TEXTO_AYUDA = "Bloc de notas de Hispa-Pentium: la ayuda\n========================================\n\nArchivos y pestañas\n  Ctrl+N            documento nuevo (otra pestaña)\n  Ctrl+O            abrir (abajo: la ruta y, encima, la carpeta; las flechas eligen)\n  Ctrl+S o F2       guardar (sin nombre: Guardar como)\n  Ctrl+W            cerrar la pestaña (si tiene cambios, pregunta)\n  Ctrl+Tab          la pestaña siguiente (con Mayús, la de antes)\n  Las pestañas con cambios sin guardar llevan « *» detrás del nombre.\n  Un archivo arrastrado desde Mi equipo y soltado aquí, se abre.\n  Al salir se recuerda lo abierto, y la vez siguiente se vuelve a abrir.\n\nEscribir y moverse\n  Ctrl+Z / Ctrl+Y   deshacer y rehacer (sin límite)\n  Ctrl+A, C, X, V   todo, copiar, cortar y pegar (con los demás programas)\n  Mayús+flechas     seleccionar; también arrastrando el ratón, dos clics (la\n                    palabra) o tres (la línea)\n  Ctrl+flechas      de palabra en palabra; Ctrl+Inicio y Ctrl+Fin, al principio y al final\n  Alt+arrastrar     seleccionar en columna (en bloque); lo que se teclea va en todas\n                    las líneas. También Alt+Mayús+flechas.\n  Ctrl+D            duplicar la línea (o lo seleccionado)\n  Alt+Arriba/Abajo  subir o bajar las líneas\n  Ctrl+Q            comentar o descomentar las líneas, según el lenguaje\n  Ctrl+U            minúsculas; Ctrl+Mayús+U, MAY\xD7SCULAS\n  Tab, Mayús+Tab    con varias líneas elegidas, las mete o las saca\n  Ctrl+Mayús+R      grabar una macro (otra vez: parar); Ctrl+Mayús+P, repetirla\n\nBuscar\n  Ctrl+F            buscar (abajo); Intro o F3, lo siguiente; Mayús+F3, lo de antes\n  Ctrl+H            reemplazar (uno, o todas de una vez)\n  Ctrl+Mayús+F      buscar en los archivos de una carpeta: la lista de lo\n                    encontrado; dos clics o Intro en una línea, a su sitio\n  Las casillas: Mayúsculas (que cuenten), Palabra entera, Expresión (regular)\n  y Todos los abiertos. En las expresiones: . * + ? {n,m} [a-z] [^0-9] ^ $\n  ( ) | \\b \\d \\w \\s; en el reemplazo, \\1 a \\9 lo de cada paréntesis.\n  Ctrl+G            ir a la línea\n  Ctrl+B            ir al paréntesis pareja ( ) [ ] { } (se ven con un recuadro)\n\nVer\n  Ctrl+rueda        la letra más grande o más pequeña\n  El menú Ver: los números de línea, el ajuste de línea, los espacios y los\n  finales de línea; plegar y desplegar (o un clic en el [-] del margen);\n  comparar con la pestaña de al lado: lo quitado lleva «-», lo añadido «+»\n  y lo cambiado «*»; F8 va a lo siguiente distinto; Esc deja de comparar.\n\nLenguajes y páginas\n  Los colores van según el lenguaje (por la extensión, o el menú Lenguaje);\n  las palabras clave, además, en negrita. Los lenguajes son archivos de\n  texto (.LEN): se añaden más en \\BLOC\\LENGUAJE (o en \\HISPA\\BLOC\\LENGUAJE).\n  El menú Formato: UTF-8 (con o sin BOM), la 437 de Hispa o la 1252 de\n  Windows; CR LF o LF; tabuladores y espacios; mayúsculas; ordenar.\n  Abajo a la derecha se ve el lenguaje, la página y los finales de línea.\n\nEsc cierra lo de abajo (buscar, ir a...). F1, esta ayuda.\n"
 
     función ayuda()
         variable i: nat32
@@ -3341,6 +3379,9 @@ módulo UBloc
         con_mayús := b yb TECLA_CON_MAYÚS <> 0 o mods yb MOD_MAYÚS <> 0
         con_ctrl := mods yb MOD_CONTROL <> 0
         con_alt := mods yb MOD_ALT <> 0
+        ; (un núcleo de antes de la 1.0 del Bloc no dice las teclas de cambio:
+        ; lo de debajo del espacio, menos Retroceso, Tab, Intro y Esc, es Ctrl y una letra)
+        si mods = 0 y k < 32 y k <> 8 y k <> 9 y k <> 10 y k <> 13 y k <> 27 entonces con_ctrl := cierto fin
         aviso[0] := 0
         si panel <> P_SALIR entonces cerrando := falso fin
         ; las macros: grabar (sin las teclas de grabar y repetir)
@@ -3926,13 +3967,15 @@ módulo UBloc
     ; =========================================================================
     ;  Empezar
     ; =========================================================================
-    ; los lenguajes: los de \HISPA\BLOC\LENGUAJES (los del paquete), los de
-    ; \BLOC\LENGUAJES (los que añada cada uno) y, si no están, los de serie
+    ; los lenguajes: los de \HISPA\BLOC\LENGUAJE (los del sistema), los de
+    ; \BLOC\LENGUAJE (los que añada cada uno) y, si no están, los de serie
     función carga_lenguajes()
         variable i, n: nat32
         variable p: puntero a byte
+        ; (LENGUAJES no cabe en 8+3: el FAT de aquí hace LENGUAJE; el largo, por si lo ha hecho otro sistema)
+        len_cargar("\\HISPA\\BLOC\\LENGUAJE\\")
         len_cargar("\\HISPA\\BLOC\\LENGUAJES\\")
-        len_cargar("\\BLOC\\LENGUAJES\\")
+        len_cargar("\\BLOC\\LENGUAJE\\")
         para i desde 0 hasta DE_SERIE - 1 hacer
             p := de_serie(i, n)
             si p <> nulo entonces len_cargar_texto(p, n) fin

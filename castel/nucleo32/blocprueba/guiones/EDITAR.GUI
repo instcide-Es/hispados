@@ -1,0 +1,27 @@
+# escribir, deshacer (por palabras) y rehacer; copiar y pegar; Ctrl+flechas
+abre PRUEBA.TXT
+estado
+muestra
+teclas {ctrl-fin}Adiós amigo{intro}tercera
+muestra
+teclas {ctrl-z}
+muestra
+teclas {ctrl-z}
+muestra
+teclas {ctrl-z}
+muestra
+estado
+teclas {ctrl-y}{ctrl-y}{ctrl-y}
+muestra
+teclas {ctrl-z}{ctrl-z}{ctrl-z}
+estado
+teclas {ctrl-inicio}{mayus-fin}{ctrl-c}{fin}{intro}{ctrl-v}
+muestra
+teclas {ctrl-inicio}{ctrl-der}{ctrl-der}{mayus-ctrl-izq}{supr}
+muestra
+estado
+teclas {ctrl-a}{retro}
+muestra
+estado
+teclas {ctrl-z}
+muestra

@@ -254,7 +254,7 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `upaquete.cas` | `PAQUETES.BIN` | **PAQUETES**: instala, actualiza y quita paquetes `.HPQ`, con sus dependencias, sus sumas y deshaciendo lo que quede a medias (sección 13). |
 | `uactual.cas` | `ACTUALIZ.BIN` | La ventana **«Programas y actualizaciones»** del escritorio: la de PAQUETES (sección 13). |
 | `uasiste.cas` | `ASISTE.BIN` | El **asistente del primer arranque** de un sistema instalado (sección 12). |
-| `ubloc.cas` | `BLOC.BIN` | El **Bloc de notas** del escritorio (sección 10). |
+| `ubloc.cas` | `BLOC.BIN` | El **Bloc de notas** 1.0 del escritorio (sección 14 undecies), con sus módulos: `bloctxt.cas` (el texto: búfer con hueco y la historia), `blocvis.cas` (lo que se ve), `blocarc.cas` (leer y guardar), `blocbus.cas` (buscar), `blocexp.cas` (expresiones regulares), `blocpag.cas` (las páginas), `blocdif.cas` (comparar), `bloclen.cas` con `bloc/lenguajes/*.LEN` y `blocdef.cas` (los lenguajes), `letramono.cas` (la letra de ancho fijo) y `blocmem.cas` (la memoria). |
 | `uequipo.cas` | `EQUIPO.BIN` | **Mi equipo**: las unidades (con su letra, de qué son y lo que cabe en ellas) y lo que hay dentro (sección 10). |
 | `udisposi.cas` | `DISPOSIT.BIN` | El **Administrador de dispositivos**: el PCI, el USB, ACPI, los discos, lo de siempre y el procesador, con el controlador de cada cosa, sus recursos y un informe (sección 10). |
 | `uconsola.cas` | `CONSOLA.BIN` | La **Consola** del escritorio: el intérprete de órdenes dentro de una ventana (sección 10). |
@@ -1086,7 +1086,9 @@ propio, con sus tildes y su eñe).
   medida de la pantalla, en el momento donde la tarjeta lo deja y, si no, al
   arrancar (más abajo, «La medida de la pantalla»). **Acerca de Hispa-Pentium**: la versión y la
   licencia.
-- **El Bloc de notas** (`BLOC.BIN`, `ubloc.cas`): escribir un texto con el teclado
+- **El Bloc de notas** (`BLOC.BIN`, `ubloc.cas`; desde el 22/11/2026, la **1.0**:
+  pestañas, buscar y reemplazar con expresiones, colores según el lenguaje,
+  UTF-8, comparar... en la sección 14 undecies): escribir un texto con el teclado
   español y **guardarlo en el disco** («Guardar», F2 o Ctrl+S; en la página 437 y
   con los finales de línea del DOS). Las flechas, Inicio, Fin, Re Pág, Av Pág,
   Supr, Retroceso; un clic pone el cursor; las líneas largas siguen debajo.
@@ -3132,7 +3134,7 @@ python3 tools/hpq.py sistema SALIDA CARPETA...   # los paquetes del sistema (lo 
 | Paquete | Versión | Lleva | Necesita |
 |---|---|---|---|
 | `base` | 0.8.3 | `NUCLEO.BIN`, `ORDENES.BIN`, `ASISTE.BIN`, `INSTALAR.BIN`, `LEEME.TXT` (en `\HISPA` y en la raíz), `MANUAL.TXT`, `BOOT.IMG`, `CORE.IMG` | — |
-| `bloc` | 0.7 | `BLOC.BIN` | base >= 0.7 |
+| `bloc` | 1.0 (BLOC: el Bloc de notas 1.0, sección 14 undecies) | `BLOC.BIN` | base >= 0.7 |
 | `consola` | 0.7 | `CONSOLA.BIN` | base >= 0.7 |
 | `equipo` | 0.8.3 | `EQUIPO.BIN` (Mi equipo) y `DISPOSIT.BIN` (el Administrador de dispositivos) | base >= 0.8.3 |
 | `ejemplos` | 0.8.2 | `HOLA.BIN`, `ECO.BIN`, `PRUEBA.BIN`, `BUCLE.BIN`, `MUESTRA.BIN` (los controles de las ventanas) | base >= 0.8.2 |
@@ -4344,7 +4346,7 @@ se ve vuelve a seguir a lo elegido.
 | Dónde | La rueda | Ctrl+rueda |
 |---|---|---|
 | Las **rejillas y listas** de `controles.cas` (MUESTRA, el Administrador de dispositivos, ClicGest...) | la rejilla que hay debajo de la flecha, tres renglones por paso | la letra: hacia arriba, más grande (normal, vez y media, doble); hacia abajo, más pequeña |
-| El **Bloc de notas** | el texto, tres líneas por paso (el cursor se queda donde estaba; «Lín» no cambia) | — (el Bloc tiene una sola letra) |
+| El **Bloc de notas** | el texto, tres líneas por paso (el cursor se queda donde estaba; «Lín» no cambia) | (desde la 1.0) la letra: la del sistema y la de ancho fijo de 20, 24 y 32 |
 | La **Consola** | el **historial**: lo que ha subido por arriba de la pantalla (las últimas 500 líneas), en un azul algo más claro, y el título dice cuántas líneas se ha subido («Consola - historial: 6 líneas más arriba»); al escribir algo el programa, al teclear o con un clic, otra vez abajo. También con **Mayús+Re Pág** y **Mayús+Av Pág** | — |
 | **Mi equipo** (el explorador) | en el árbol, tres renglones; en los iconos y las miniaturas, una fila; en la lista, una columna; en los detalles, tres renglones de la rejilla | la vista, como en Windows: hacia arriba, más grande (detalles, lista, iconos, miniaturas); hacia abajo, más pequeña |
 | **Programas y actualizaciones** | la lista de los paquetes | — |
@@ -5478,6 +5480,302 @@ QEMU_MAS="-audiodev wav,id=s,path=/tmp/sale.wav -device intel-hda -device hda-du
 - Los mandos (HSPJOY) en HVPRUN; un reproductor de música (MP3, OGG) y el
   CD de música.
 
+## 14 undecies. El Bloc de notas 1.0 (BLOC.BIN, rama bloc-avanzado)
+
+*22/11/2026, pedido de Carlos: «actualizar nuestro Bloc de notas al nivel de
+Notepad++».* Sin una línea ni un dibujo de Notepad++ (ni de Scintilla): todo
+escrito aquí, en Castel, y en español. Sigue llamándose **Bloc de notas**, se
+abre igual (`BLOC [ARCHIVO]`, dos clics en un .TXT, el menú Inicio) y un .TXT
+de siempre se abre, se ve y se guarda **como antes** (en la 437, con CR LF, sin
+números de línea y con las líneas largas partidas): las pruebas de antes que
+lo usan siguen pasando sin tocarlas.
+
+| | |
+|---|---|
+| ![Castel con sus colores, la negrita de las palabras clave, los números y los pliegues](pentium/bloc/bloc-colores.png) | ![Buscar (Ctrl+F) con sus casillas](pentium/bloc/bloc-buscar.png) |
+| ![Pestañas: « *» en la que tiene cambios](pentium/bloc/bloc-pestanas.png) | ![Comparar: «-», «+» y «*» en el margen, el hueco rayado](pentium/bloc/bloc-comparar.png) |
+| ![Buscar en una carpeta: la pestaña de lo encontrado](pentium/bloc/bloc-carpeta.png) | ![En columna: lo tecleado, en las tres líneas](pentium/bloc/bloc-columna.png) |
+| ![Ctrl+rueda: la letra de ancho fijo, más grande](pentium/bloc/bloc-letra-grande.png) | ![Abrir (Ctrl+O): la carpeta y la ruta](pentium/bloc/bloc-abrir.png) |
+| ![Plegado: el módulo entero, con «...»](pentium/bloc/bloc-plegado.png) | ![Al salir con cambios, la pregunta](pentium/bloc/bloc-salir.png) |
+
+### Cómo se maneja
+
+**La ventana**: la barra de menús (Archivo, Edición, Buscar, Ver, Formato,
+Lenguaje, Ayuda; también con **Alt** y su inicial: Alt+A, Alt+E, Alt+B, Alt+V,
+Alt+F, Alt+L, Alt+Y), los botones (Nuevo y Guardar, en su sitio de siempre, y
+Abrir, Deshacer, Rehacer y Buscar si caben; Deshacer y Rehacer, en gris cuando
+no hay nada), las **pestañas** (solo con dos o más documentos: con uno, el Bloc
+se ve como siempre), el texto, el **panel de abajo** (buscar, reemplazar, ir a,
+abrir...) y la barra de estado: el nombre, **«Lín L, Col C»** (de la línea del
+archivo, no de la pantalla), «(sin guardar)», y a la derecha el lenguaje, la
+página y los finales de línea («Castel | UTF-8 | LF»). Los menús llevan sus
+atajos escritos al lado; **F1** abre la ayuda en una pestaña para leer.
+
+| Tecla | Lo que hace |
+|---|---|
+| Ctrl+N, Ctrl+O, Ctrl+S (o F2), Ctrl+W | nuevo (otra pestaña), abrir, guardar (sin nombre: Guardar como), cerrar la pestaña (si tiene cambios: «¿Guardar los cambios de X?» con Guardar, No guardar y Cancelar) |
+| Ctrl+Tab, Ctrl+Mayús+Tab | la pestaña siguiente y la de antes |
+| Ctrl+Z, Ctrl+Y (o Ctrl+Mayús+Z) | deshacer y rehacer, **sin límite** (lo tecleado, palabra a palabra; un pegar, un «Reemplazar todas», de una vez); deshecho todo hasta lo guardado, el documento vuelve a estar «sin cambios» |
+| Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V | con el **portapapeles del sistema** (en la 437, hasta 64 K); dentro del Bloc se guarda además entero y en UTF-8: lo que no cabe en la 437, o lo de más de 64 K, se pega sin perder nada |
+| Mayús+flechas, arrastrar, dos clics, tres clics, Mayús+clic | seleccionar (letra, palabra, línea); un clic en los números, la línea entera |
+| Ctrl+flechas, Ctrl+Inicio, Ctrl+Fin | de palabra en palabra; al principio y al final (con Mayús, seleccionando) |
+| Inicio | en los programas, a la primera letra de la línea (otra vez: al principio) |
+| Intro | en los programas, con la sangría de la línea de arriba |
+| Tab, Mayús+Tab | espacios hasta la columna siguiente (o un tabulador: Formato); con varias líneas elegidas, las mete o las saca |
+| Alt+arrastrar, Alt+Mayús+flechas | seleccionar **en columna** (en bloque): lo que se teclea va en todas las líneas (las cortas se rellenan con espacios); Retroceso y Supr, en todas; copiar un bloque y pegarlo, una línea en cada línea |
+| Ctrl+D | duplicar la línea (o lo seleccionado) |
+| Alt+Arriba, Alt+Abajo | subir o bajar las líneas elegidas |
+| Ctrl+Q | comentar o descomentar las líneas, con el comentario del lenguaje (`;`, `//`, `#`, `'`, `REM`, `::`; en HTML y CSS, `<!-- -->` y `/* */` alrededor) |
+| Ctrl+U, Ctrl+Mayús+U | minúsculas y MAYÚSCULAS (con tildes, ñ, ç...) |
+| Ctrl+Mayús+R, Ctrl+Mayús+P | grabar una macro (otra vez: parar; arriba sale «GRABANDO» con letras) y repetirla |
+| Ctrl+F, F3, Mayús+F3, Ctrl+H | buscar, lo siguiente, lo de antes, reemplazar |
+| Ctrl+Mayús+F | buscar en los archivos de una carpeta |
+| Ctrl+G, Ctrl+B | ir a la línea; ir al paréntesis pareja |
+| Ctrl+rueda | la letra más grande o más pequeña (cuatro tamaños) |
+| F8, Mayús+F8, Esc | comparando: lo distinto siguiente y el de antes; dejar de comparar |
+| Esc | cierra el panel de abajo; deja la selección en bloque |
+
+**Archivo**: Nuevo, Abrir..., Guardar, Guardar como..., Guardar todo, Cerrar,
+Cerrar todo, Leer otra vez, **Vista de impresión** (en gris: «aún no hay
+impresoras»; el sitio está hecho para cuando las haya) y Salir. **Abrir** y
+**Guardar como** usan el panel de abajo: la ruta, y encima, en el sitio del
+texto, la carpeta (las carpetas primero, con «[carpeta]» delante); las flechas
+eligen, Intro abre (o entra en la carpeta), dos clics también. Guardar encima
+de un archivo que ya está pide Guardar otra vez. **Edición**: Cortar, Copiar,
+Pegar, Seleccionar todo, Deshacer, Rehacer, Duplicar línea, Subir y Bajar
+líneas, (Des)comentar, Grabar y Repetir macro (el botón secundario saca casi lo
+mismo). **Ver**: los números de línea, el ajuste de línea, los espacios y
+tabuladores (· y ») y los finales de línea (¬), con «[x]» delante de lo que
+está puesto; la letra; plegar y desplegar todo; comparar. **Formato**: las
+páginas, los finales de línea, tabuladores y espacios, mayúsculas y ordenar.
+**Lenguaje**: «Texto normal» y los que haya.
+
+**Lo que se recuerda** (Carlos: «lo que el usuario confirma, el sistema lo
+guarda y lo aplica solo»): las opciones de Ver y Formato y **los archivos
+abiertos** (con su cursor y cuál estaba delante) van a `BLOC.INI`, en
+`\USUARIOS\<usuario>\` de la unidad de trabajo (como el registro de WIN32:
+fuera de la zona protegida). `BLOC` sin nada los vuelve a abrir. Lo de
+siempre (NOTAS.TXT sola y las opciones de fábrica) no se escribe: así no
+aparece `\USUARIOS` en un disco sin haber hecho nada.
+
+**Arrastrar desde Mi equipo**: un archivo arrastrado y soltado encima del Bloc
+se abre en otra pestaña (EV_SOLTADO, más abajo).
+
+### Lo que se ve
+
+- **Los números de línea**, en un margen gris a la izquierda (el de la línea
+  del cursor, en negrita); por omisión, en los programas (en un .TXT, como
+  antes, no salen: Ver > Números de línea los pone en todos, y se recuerda).
+- **Los colores según el lenguaje**, y **nada solo por el color**: las palabras
+  clave, los tipos, las directivas y las etiquetas van además **en negrita**;
+  los comentarios, las cadenas, los números y las funciones de la biblioteca,
+  cada uno de su color (con buen contraste sobre blanco).
+- **Plegar**: un [-] en el margen donde empieza un bloque; un clic lo pliega
+  (sale [+] y, detrás de la línea, «...» en un recuadro) y otro lo despliega.
+  Buscar, ir a una línea o moverse dentro despliega lo que esconda el cursor.
+- **El paréntesis pareja** del que está junto al cursor ( ) [ ] { }: los dos,
+  dentro de un recuadro azul (no solo de color); solo cuentan los de fuera de
+  cadenas y comentarios.
+- **Las pestañas**: la de delante, blanca, con el nombre en negrita y una raya
+  azul arriba; las que tienen cambios, con **« *»** detrás del nombre; cada una
+  con su «x» para cerrarla; si no caben, ◄ y ► en los lados.
+- **Lo que no se puede pintar** (un carácter que no está en la letra de Hispa,
+  un octeto que no es UTF-8) sale como «?» dentro de un recuadro; los de
+  control (^A...), con su dibujo en un recuadro gris.
+- **La letra**: la del sistema (8x16, la de siempre) y, con Ctrl+rueda, la de
+  **ancho fijo suavizada** (DejaVu Sans Mono, en renglones de 20, 24 y 32
+  puntos, con su negrita: `letramono.cas`, hecho por `hazletramono.py` con
+  FreeType en tiempo de compilación, como `letrasuave.cas`).
+
+### Los archivos y las páginas
+
+Al abrir se mira la página: **BOM de UTF-8**; todo ASCII (la 437: da igual);
+**UTF-8** válido; y si no, por puntos entre **la 437 de Hispa** y **la 1252**
+de Windows pensando en textos en español (`blocpag.cas`, `pag_detectar`). Y los
+finales de línea: **CR LF** o **LF** (los que más haya; si hay de las dos
+clases, se dice abajo y se guardarán todos iguales). Dentro, el texto va en
+UTF-8; lo que no es UTF-8 válido se guarda «escapado» (U+DC00 + el octeto, como
+el *surrogateescape* de Python) y al guardar vuelve a ser ese octeto: **no se
+pierde nada**. Un ^Z al final (de los textos del DOS) se quita. Un documento
+nuevo es de la 437 con CR LF (como los de siempre).
+
+**Formato > Convertir a** UTF-8, UTF-8 con BOM, la 437 o la 1252: el texto no
+cambia y se guardará en esa página; si hay letras que no caben, al guardar se
+dice cuántas y **no se guarda**: Guardar otra vez las deja como «?» (o se elige
+UTF-8). **Leer otra vez como**: lee el archivo con otra página (si no la ha
+acertado). **Finales de línea** CR LF o LF; **tabuladores a espacios** (a sus
+columnas) y **espacios de delante a tabuladores**; «El tabulador pone
+espacios».
+
+**Archivos grandes**: el texto está en un **búfer con hueco** (meter o quitar
+en el mismo sitio no mueve nada), con un arreglo de dónde empieza cada línea
+(cientos de miles), que se pone al día solo con lo que cambia (y se rehace de
+una vez, en ensamblador, al leer). Un archivo de 11 MB (250.000 líneas) se lee
+de una vez, sin copiarlo si ya está en UTF-8 o es ASCII. Las líneas de más de
+1 MB se enseñan cortadas (el resto sigue ahí); las de más de 64 K, sin colores.
+
+| Con 11 MB (250.000 líneas) | corre32 (el servidor) | QEMU sin aceleración |
+|---|---|---|
+| abrir, ir al final, buscar, reemplazar 250.000 de una vez y deshacerlo | menos de 1 s todo (873 ms) | abrir: 3,4 s (lo dice por el puerto serie: «bloc: abierto GRANDE.TXT, 10750000 octetos, en 3440 ms»); en un PC de verdad, mucho menos |
+
+### Buscar y reemplazar
+
+**Ctrl+F** abre abajo el panel: «Buscar:», Siguiente, Anterior, **Todos** (la
+lista de lo encontrado) y las casillas **Mayúsculas** (que cuenten),
+**Palabra entera**, **Expresión** (regular) y **Todos los abiertos**. Lo
+seleccionado (si es corto) pasa al campo; lo que hay en el campo sale elegido,
+y lo que se teclea lo sustituye. Intro (o F3) busca lo siguiente, Mayús+Intro (o
+Mayús+F3) lo de antes; al llegar al final **vuelve a empezar por arriba** (y lo
+dice). **Ctrl+H** añade «Por:», Reemplazar (si lo seleccionado es lo que se
+busca, se cambia; y se busca lo siguiente) y **Todas** (en todo el documento;
+con varias líneas elegidas, solo en ellas; con «Todos los abiertos», en todos):
+un solo cambio en la historia, así que **un Ctrl+Z lo deshace entero**.
+**Ctrl+Mayús+F**: buscar en los archivos de una carpeta («En:» y «Archivos:»,
+con `*` y `?`, varios separados por espacios; «Con sus carpetas»). Lo
+encontrado (en los abiertos o en la carpeta) va a una pestaña **«Encontrado»**,
+para leer: la búsqueda, y de cada archivo su ruta y sus líneas («  12: lo que
+pone»); **dos clics o Intro** en una de ellas abre el archivo, va a esa línea y
+elige lo buscado. Los archivos con ceros al principio no se miran (no son
+textos); hasta 20.000 líneas encontradas.
+
+**Las expresiones regulares** (`blocexp.cas`, un motor propio: una máquina de
+Pike, sin vuelta atrás exponencial, con un tope de pasos): `.` (un carácter
+entero, no el salto de línea), `*`, `+`, `?`, `{n}`, `{n,}`, `{n,m}` y sus
+perezosos (`*?`...), `[a-zá-ú]`, `[^0-9]`, `^` y `$` (principio y final de
+línea), `( )`, `(?: )`, `|`, `\b`, `\d \w \s \D \W \S`, `\n \t \\ \. \(`... En
+el reemplazo, `\0` a `\9` (lo de cada paréntesis), `\n` y `\t`. Sin
+mayúsculas, valen la ñ, las tildes y lo de Latin-1 y Latin Extended-A. Una
+expresión mal escrita lo dice («La expresión no vale: un «[» sin cerrar»). No
+hay referencias atrás en el patrón (`\1` solo en el reemplazo) ni miradas
+adelante.
+
+### Los lenguajes
+
+Diez, con sus colores y su manera de plegar: **Castel**; **Hispa-BASIC /
+GW-BASIC / QBasic** (los números de línea, `REM` y `'`, `IF ... THEN` de una
+línea y de bloque, `END SUB`); **ensamblador NASM**; **C**; **HTML**, **CSS** y
+**JavaScript**; **.BAT y CONFIG.SYS** (`REM`, `::`, las etiquetas, `%VARIABLES%`);
+**INI** (las secciones); y **Python** (la sangría, las cadenas triples). Se
+eligen por la **extensión** (o el nombre entero: CONFIG.SYS, AUTOEXEC.BAT) y
+desde el menú **Lenguaje**. Cada uno es un **archivo de texto** `.LEN` (en
+UTF-8), en `castel/nucleo32/bloc/lenguajes/`; los diez van además **dentro de
+BLOC.BIN** (`blocdef.cas`, hecho por `hazblocdef.py`: así colorea aunque no
+estén los archivos), y se leen antes los de **`\HISPA\BLOC\LENGUAJE\`** (los
+del sistema) y **`\BLOC\LENGUAJE\`** (los que añada cada uno, fuera de la zona
+protegida): si uno se llama igual que otro, vale el primero. (`LENGUAJES` no
+cabe en un nombre 8+3, que es lo único que sabe hacer el FAT de Hispa-Pentium:
+de ahí `LENGUAJE`; un `\HISPA\BLOC\LENGUAJES` hecho desde otro sistema, con su
+nombre largo, también se lee.) **Para añadir uno**: copiar un `.LEN` y
+cambiarlo. El formato (`bloclen.cas`; viene explicado entero en la cabecera de
+CASTEL.LEN):
+
+- UTF-8, una `clave=valor` por línea; las que empiezan por `;`, comentarios;
+  las listas, separadas por espacios y repartidas en varias líneas con la
+  misma clave.
+- **Qué es**: `nombre`, `extensiones`, `archivos` (nombres enteros),
+  `distingue=si|no` (las mayúsculas).
+- **Comentarios**: `comentario` (de línea, hasta 4), `comentario_palabra` (REM),
+  `al_principio=si`, `bloque=ABRE CIERRA`, `anida=si`.
+- **Cadenas**: `comillas`, `largas` (las de varias líneas: `"""`, `'''`, la
+  `` ` `` de JS), `escape`.
+- **Palabras**: `claves` y `tipos` (en negrita), `propias` (la biblioteca),
+  `letras` (las que van dentro de una palabra, como los `$%!#&` de BASIC),
+  `inicio`; `operadores`, `numeros=si`, `prefijos` (&H, &O, &B).
+- **Lo especial**: `directiva` (la línea entera: `#` de C, `%` de NASM),
+  `directiva_palabra` (`@`), `etiquetas` (`dospuntos`, «x:»; `delante`, «:x»;
+  `numeros`, los números de línea; `secciones`, «[x]»), `variables=%`,
+  `modo=html|css|ini`.
+- **Plegar**: `plegado=bloques|sangria|secciones`; `abre` y `cierra` (palabras),
+  `signos_abre` y `signos_cierra` ({ }); `cierra_doble` (END SUB, END IF: el
+  END y la palabra de detrás no abren otra vez), `abre_al_final` (el THEN de un
+  IF de bloque), `no_abre_tras` (el «si» de «sino si»), `no_abre_ante`,
+  `sueltas` (las etiquetas de HTML que no se cierran).
+- El estado entre líneas (comentario de bloque con su anidamiento, cadena
+  larga, dentro de una etiqueta o de unas llaves) cabe en 16 bits y se guarda
+  de cada línea: colorear la que se ve no obliga a leer desde el principio
+  más que una vez.
+
+### Comparar, en columna y las macros
+
+**Ver > Comparar con la de al lado**: la pestaña de ahora con la siguiente (o
+la de antes), **lado a lado**, por líneas (`blocdif.cas`: Myers, el mínimo de
+líneas tocadas, con un tope para no tardar; se compara el resumen de cada
+línea). Lo quitado, con **«-»** y fondo rosa; lo añadido, con **«+»** y fondo
+verde; lo cambiado, con **«*»** y fondo amarillo; donde a una le faltan líneas,
+un hueco gris **rayado**. F8 y Mayús+F8 van de una diferencia a otra; la rueda
+y las flechas mueven las dos a la vez; abajo, cuántos trozos distintos hay;
+Esc lo deja (comparando no se escribe).
+
+**En columna**: Alt y arrastrar (o Alt+Mayús y las flechas) elige un
+rectángulo; abajo pone «(en bloque)». Lo que se teclea va en cada línea en esa
+columna; Retroceso y Supr, en todas; Ctrl+C copia sus líneas; un Intro o una
+flecha sin Alt lo deja.
+
+**Las macros**: Ctrl+Mayús+R empieza a grabar las teclas (arriba,
+«GRABANDO»), otra vez para; Ctrl+Mayús+P las repite (hasta 4.096 teclas).
+
+### Lo que cambia en el núcleo (BLOC)
+
+- **Las teclas de cambio, con cada tecla**: en `c` de `EV_TECLA` llegan ahora
+  las que estaban pulsadas al repartirla (`MOD_MAYÚS` 1, `MOD_CONTROL` 2,
+  `MOD_ALT` 4: el Alt de la izquierda; `modificadores()` de consola.cas lo
+  dice ya). Así se distingue **Ctrl+H de Retroceso** (los dos daban 8),
+  Ctrl+Mayús+R de Ctrl+R, Mayús+F3 de F3, Alt+flechas y Ctrl+flechas. Los
+  programas de antes no miraban `c`: les da igual. En los sucesos del ratón,
+  `CON_ALT` (0x400), para Alt+arrastrar.
+- **Soltar en una ventana lo arrastrado desde Mi equipo**: el escritorio
+  (`atiende_suelta`) ya no lo tira si cae encima de la ventana de un programa:
+  le manda **`EV_SOLTADO`** (14, con el punto) y guarda la ruta, que el
+  programa pide con **`lo_soltado(destino, cabe)`** (la llamada **173**; solo
+  el dueño de esa ventana). (La 172 es la del fondo del escritorio, de la 0.8.6.)
+
+### Cómo está hecho
+
+| Módulo | Qué |
+|---|---|
+| `ubloc.cas` (BLOC.BIN) | el programa: las pestañas, los paneles, los menús, las teclas y el ratón, guardar, la sesión, las líneas (duplicar, mover, comentar, ordenar...), en columna, las macros, la ayuda; y el modo sin ventana para las pruebas (`BLOC /PRUEBA GUION`) |
+| `bloctxt.cas` | el texto de un documento: el búfer con hueco, las líneas, el estado de cada línea (para colorear y plegar), los pliegues y la historia sin límite |
+| `blocvis.cas` | lo que se ve: el lienzo, la letra, dónde cae cada letra (las filas, con el ajuste), el margen, los colores, la selección (también en bloque), la pareja y las dos columnas de comparar |
+| `blocarc.cas` | leer y guardar (páginas y finales de línea), `BLOC.INI` y la lista de una carpeta |
+| `blocbus.cas` | buscar, contar, reemplazar uno y todas; la lista de lo encontrado en los abiertos y en una carpeta |
+| `blocexp.cas` | las expresiones regulares |
+| `blocpag.cas` (+ `hazblocpag.py`) | las páginas: detectar, de y a UTF-8, la letra de cada carácter, mayúsculas y minúsculas |
+| `blocdif.cas` | comparar por líneas (Myers) |
+| `bloclen.cas`, `bloc/lenguajes/*.LEN`, `blocdef.cas` (+ `hazblocdef.py`) | los lenguajes: leer los .LEN, colorear una línea, lo que abre y cierra cada una |
+| `letramono.cas` (+ `hazletramono.py`) | la letra de ancho fijo suavizada |
+| `blocmem.cas` | la memoria: pedir y soltar trozos (con su lista de libres) sobre `más_memoria`, que solo crece |
+
+BLOC.BIN mide unos 250 K (la letra grande y los lenguajes de serie, dentro);
+arranca enseguida: lee el archivo de una vez y pinta solo lo que se ve. El
+paquete **bloc** pasa a la **1.0** (solo BLOC.BIN: los lenguajes van dentro;
+INSTALAR no hace carpetas dentro de las de `\HISPA`).
+
+### Las pruebas (la parte 34, `SOLO=bloc`)
+
+En Linux, con corre32: `blocprueba/prueba_bloc.sh` (BlocMem y BlocTxt al azar
+—miles de cambios comparados con una copia, deshacer y rehacer todo—; el Bloc
+sin ventana con seis guiones, cada uno con su `.ESP`: escribir y deshacer,
+buscar y reemplazar, las páginas, las líneas, el código, las pestañas; y 11
+MB), `prueba_exp.sh` (73 casos a mano, el tope con los patrones patológicos y
+un **fuzz contra el `re` de Python**: miles de patrones al azar), `prueba_pag.sh`
+(las 256 de cada página de ida y vuelta y un **fuzz** de octetos al azar,
+también UTF-8 roto: vuelve idéntico), `prueba_dif.sh` (al azar contra Python:
+el mínimo) y `prueba_len.sh` (las muestras de los diez lenguajes con lo que
+tiene que salir, un .LEN roto y uno enorme); y CASTEL32 saca lo mismo que
+ccastel.py. En el escritorio, con capturas (en `docs/pentium/bloc/`): lo de
+arriba, la sesión otra vez, soltar desde Mi equipo y abrir 11 MB.
+
+### Lo que falta
+
+- Imprimir (cuando haya impresoras: el menú ya tiene su sitio).
+- Los nombres largos al guardar (el FAT de Hispa-Pentium solo hace 8+3).
+- Una sola ventana para todo (abrir un archivo desde Mi equipo con el Bloc ya
+  abierto abre otro Bloc; arrastrarlo encima, una pestaña).
+- Colorear JS y CSS dentro de un HTML; las expresiones regulares literales de
+  JS; plegar por la sangría las líneas en blanco del medio, como Notepad++.
+- La edición en columna con la letra proporcional (con la de ancho fijo va).
+- Las líneas de más de 1 MB se enseñan cortadas.
+
 ## 15. Las pruebas
 
 `castel/pruebas.sh` (las partes 8 a 14; `SOLO=32 ./pruebas.sh` hace solo esas y la
@@ -5964,6 +6262,15 @@ capturas; Naves desde Mi equipo, jugando (DirectDraw a pantalla completa,
 DirectInput); el ejemplo DDRAW y FASMW abriendo y ensamblando HELLO.ASM; y
 WSOCK32 (REDPRUE) contra el servidor HTTP de aquí. Ver
 [pentium/WIN32.md](pentium/WIN32.md).
+
+**(BLOC) El Bloc de notas 1.0** (la parte 34, `SOLO=bloc`; también con `SOLO=08`):
+en Linux con corre32, los módulos (la memoria y el texto al azar, el fuzz de
+las expresiones regulares contra Python y el de las páginas, comparar, los
+diez lenguajes) y el Bloc sin ventana con sus guiones y 11 MB; en el
+escritorio, lo de cada fase con sus capturas, la sesión, soltar desde Mi
+equipo y abrir 11 MB (sección 14 undecies). Las partes que ya abrían el Bloc
+(el escritorio, la memoria USB, apagar, la pantalla, los accesorios, la
+rueda, el menú) pasan sin tocarlas.
 
 ## 16. Por dónde seguir
 

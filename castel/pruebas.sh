@@ -242,6 +242,20 @@
 #      altavoz de la bandeja con la rueda, Configuración > Sonido, los
 #      sonidos de inicio y de apagar; DirectSound (WINDX.EXE) y Hispa-Snes en
 #      HVPRUN.
+#  34. (BLOC, SOLO=bloc) El Bloc de notas 1.0 (BLOC.BIN, ubloc.cas y sus
+#      módulos bloc*.cas): en Linux, con corre32, la memoria y el texto
+#      (búfer con hueco, deshacer sin límite) al azar, las expresiones
+#      regulares contra el «re» de Python (fuzz), las páginas (UTF-8, la 437,
+#      la 1252; fuzz de ida y vuelta), comparar (Myers, el mínimo), los
+#      colores de los diez lenguajes, el Bloc sin ventana con sus guiones
+#      (escribir, buscar, reemplazar, páginas, líneas, código, pestañas) y
+#      un archivo de 11 MB; y en el escritorio, con capturas en
+#      docs/pentium/bloc/: los colores y la negrita, los números y plegar,
+#      buscar y reemplazar (Ctrl+H, con las teclas de cambio del núcleo), la
+#      letra grande con Ctrl+rueda, Abrir, las pestañas con « *», comparar,
+#      buscar en una carpeta y saltar, la ayuda, en columna (Alt+Mayús+flechas),
+#      la pregunta al salir, la sesión otra vez, soltar un archivo arrastrado
+#      desde Mi equipo y abrir 11 MB.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -271,6 +285,7 @@
 #   SOLO=wifi ./pruebas.sh        la primera y la 27 (el Wi-Fi: WIFI.BIN)
 #   SOLO=accesorios ./pruebas.sh  la primera y la 28 (ACCESORIOS: la Calculadora, el Reloj y el Mapa de caracteres)
 #   SOLO=sonido ./pruebas.sh      la primera y la 29 (el sonido: SONIDO.BIN, la bandeja, DirectSound, HVPRUN)
+#   SOLO=bloc ./pruebas.sh        la primera y la 34 (BLOC: el Bloc de notas 1.0)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -336,7 +351,7 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas $AQUI/ejemp
 done
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|bloc) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -5266,6 +5281,117 @@ else ko "no se pueden hacer el disco o WIFISIM.BIN: $(tail -2 $Wf/disco.txt) $(t
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Wi-Fi)"
 fi   # el Wi-Fi
+
+# ------------------------------------- 34. (BLOC) el Bloc de notas 1.0
+if parte08 bloc; then
+echo "== Hispa-Pentium: el Bloc de notas 1.0 (BLOC) =="
+W=$P/bloc
+rm -rf $W; mkdir -p $W $G
+export MTOOLS_SKIP_CHECK=1
+B=$AQUI/nucleo32/blocprueba
+# 1. en Linux, con corre32: cada guion dice «bien: ...» o «mal: ...»
+for s in prueba_bloc prueba_exp prueba_pag prueba_dif prueba_len; do
+  BLOC_TMP=$W/t $B/$s.sh > $W/$s.txt 2>&1; rc=$?
+  hubo=0
+  while IFS= read -r l; do
+    case "$l" in bien:*) ok "BLOC, $s: ${l#bien: }"; hubo=1 ;; mal:*) ko "BLOC, $s: ${l#mal: }"; hubo=1 ;; esac
+  done < <(iconv -f UTF-8 -t UTF-8 -c $W/$s.txt)
+  [ $rc != 0 ] && [ $hubo = 0 ] && ko "BLOC, $s acaba mal: $(tail -3 $W/$s.txt)"
+done
+# 2. en el escritorio
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $W/semilla.asm > /dev/null && nasm -f bin $W/semilla.asm -o $W/SEMILLA.BIN || ko "semilla.cas no compila"
+if $AQUI/nucleo32/disco.sh $W/d.img 32 > $W/disco.txt 2>&1; then
+  cp $B/muestras/MUESTRA.CAS $B/guiones/datos/A1.TXT $B/guiones/datos/A2.TXT $B/guiones/datos/P.C $W/
+  mkdir -p $W/docs
+  printf 'una carta para Juan\r\nsaludos\r\n' > $W/docs/CARTA.TXT
+  printf 'la lista de la compra\r\npan, leche y una carta\r\n' > $W/docs/LISTA.TXT
+  printf 'nada que ver\r\n' > $W/docs/OTRO.TXT
+  python3 -I -c "
+import sys
+sys.stdout.buffer.write(''.join('linea %06d con algo de texto para llenar\r\n' % i for i in range(250000)).encode())" > $W/GRANDE.TXT
+  mmd -i $W/d.img ::DOCS
+  mcopy -i $W/d.img $W/docs/*.TXT ::DOCS/
+  mcopy -i $W/d.img $W/MUESTRA.CAS $W/A1.TXT $W/A2.TXT $W/P.C $W/GRANDE.TXT ::/
+  cp $W/d.img $W/s.img
+  # 2a. MUESTRA.CAS (con su lenguaje: Castel), buscar, reemplazar, la letra
+  # grande, Abrir, las pestañas, comparar, buscar en una carpeta, la ayuda,
+  # en columna y la pregunta al salir (sin guardar: la sesión, sí)
+  CAPTURAS=$G ESCRIBE=1 DISCO=$W/s.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $W/SEMILLA.BIN \
+    ":pausa 3" ":doble 62 185" ":pausa 3" "bloc muestra.cas" ":pausa 4" ":captura bl1" \
+    ":tecla ctrl-f" ":escribe fin" ":tecla ret" ":pausa 1" ":captura bl2" ":tecla esc" ":tecla ctrl-h" ":pausa 1" ":captura bl3" ":tecla esc" \
+    ":raton 400 300" ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 1" ":pausa 2" ":captura bl4" ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 -1" ":pausa 2" \
+    ":clic 157 199" ":pausa 1" ":captura bl5" ":clic 157 199" ":pausa 1" \
+    ":tecla ctrl-o" ":pausa 2" ":captura bl6" ":escribe A1.TXT" ":tecla ret" ":pausa 2" ":escribe zz" ":pausa 1" ":captura bl7" \
+    ":tecla ctrl-o" ":pausa 1" ":escribe A2.TXT" ":tecla ret" ":pausa 2" ":clic 340 126" ":pausa 1" ":clic 400 395" ":pausa 2" ":captura bl8" ":tecla esc" ":pausa 1" \
+    ":tecla ctrl-shift-f" ":pausa 1" ":escribe carta" ":tecla tab" ":tecla tab" ":tecla tab" ":tecla end" ":escribe DOCS" ":tecla ret" ":pausa 3" ":captura bl9" \
+    ":doble 200 254" ":pausa 2" ":captura bl10" ":tecla f1" ":pausa 2" ":captura bl11" \
+    ":tecla ctrl-tab" ":pausa 1" ":tecla ctrl-home" ":tecla alt-shift-down" ":tecla alt-shift-down" ":escribe #" ":pausa 1" ":captura bl12" \
+    ":clic 604 101" ":pausa 1" ":captura bl13" ":clic 380 440" ":pausa 3" ":captura bl14" > $W/a.sal 2>&1
+  S=$W/a.sal
+  mira "el Bloc de notas se lanza desde la Consola con MUESTRA.CAS" "escritorio: lanzo .CONSOLA.BIN"
+  miracap "MUESTRA.CAS en Castel (por la extensión): las palabras clave en negrita y de color, los números de línea, el lenguaje y la página abajo" bl1 \
+    negrita 140 88 152 100 "MUESTRA.CAS - Bloc de notas" negrita 166 186 178 198 "módulo" texto 222 186 234 198 "Muestra" negrita 318 250 330 262 "entonces" \
+    texto 166 170 178 182 "; un comentario: si mientras fin" negrita 120 170 150 190 "1" texto 120 454 132 466 "MUESTRA.CAS   Lín 1, Col 1" texto 440 454 480 466 "Castel | UTF-8 | LF" \
+    rgb 160 199 FFFFFF rgb 158 205 5A7396 8
+  miracap "Ctrl+F: el panel de buscar (con sus casillas), y lo encontrado elegido (en blanco sobre azul)" bl2 texto 122 398 134 410 "Buscar:" texto 354 400 366 412 "Siguiente" \
+    texto 142 426 154 438 "Mayúsculas" rgb 410 183 2F74D0
+  miracap "Ctrl+H (Control y la H: el núcleo dice ya las teclas de cambio, y no es Retroceso): reemplazar, con «Por:»" bl3 texto 122 398 134 410 "Por:" texto 454 400 466 412 "Reemplazar"
+  miracap "Ctrl+rueda: la letra de ancho fijo suavizada, más grande (el renglón de 20)" bl4 distinto 170 176 300 60 $G/bl1.ppm texto 120 454 132 466 "MUESTRA.CAS   Lín 1, Col 33"
+  miracap "un clic en el [-] del margen pliega el módulo entero: se ve «...» y el número de la línea de después es el 20" bl5 negrita 166 186 178 198 "módulo" \
+    texto 124 202 136 214 "20" notexto 160 200 400 300 "función"
+  miracap "Ctrl+O: Abrir, con la carpeta (las carpetas primero) y la ruta abajo" bl6 negrita 122 170 134 182 'C:\' negrita 200 186 400 200 "DOCS" texto 122 426 134 438 "Abrir:"
+  miracap "las pestañas: MUESTRA.CAS y A1.TXT (con cambios: « *», no solo un color)" bl7 texto 126 171 138 183 "MUESTRA.CAS" negrita 266 171 278 183 "A1.TXT *"
+  miracap "Ver > Comparar con la de al lado: A1 y A2 lado a lado, con «*» (cambiado), «-» (quitado) y «+» (añadido) en el margen, el hueco rayado y el resumen" bl8 \
+    negrita 128 194 140 206 "*" negrita 128 242 140 254 "-" negrita 380 274 392 286 "+" texto 120 454 132 466 "3 trozos distintos" rgb 200 248 FDE2E2 rgb 450 280 DCFCE7
+  miracap "Ctrl+Mayús+F: buscar «carta» en C:\\DOCS\\: la pestaña de lo encontrado, con cada archivo y su línea" bl9 texto 120 194 132 206 'Buscar «carta» en C:\DOCS\' \
+    texto 120 226 132 238 'C:\DOCS\CARTA.TXT' texto 120 242 132 254 "  1: una carta para Juan" texto 120 454 132 466 "Encontradas 2 líneas en 2 archivos"
+  miracap "dos clics en una línea de lo encontrado: el archivo abierto, en esa línea y con lo buscado elegido" bl10 negrita 140 88 152 100 'C:\DOCS\CARTA.TXT - Bloc de notas' rgb 168 207 2F74D0
+  miracap "F1: la ayuda, en una pestaña para leer" bl11 texto 120 194 132 206 "Bloc de notas de Hispa-Pentium: la ayuda" negrita 140 88 152 100 "Ayuda - Bloc de notas"
+  miracap "en columna (Alt+Mayús+flechas abajo, con las teclas de cambio del núcleo): «#» en las tres primeras líneas de MUESTRA.CAS a la vez" bl12 \
+    texto 166 194 178 206 "#" texto 174 194 186 206 "; un comentario: si mientras fin" texto 166 210 178 222 "#" texto 166 226 178 238 "#" texto 340 454 380 466 "(en bloque)"
+  miracap "cerrar con cambios: la pregunta, con Guardar todo y salir, Salir sin guardar y Cancelar" bl13 texto 122 398 134 410 "Hay 2 documentos con cambios sin guardar." texto 312 427 324 439 "Salir sin guardar"
+  miracap "«Salir sin guardar»: se cierra (ni ventana ni botón en la barra)" bl14 notexto 100 80 700 120 "Bloc de notas" notexto 260 570 500 590 "MUESTRA"
+  if saca $W/s.img USUARIOS/USUARIO/BLOC.INI $W/bloc.ini && grep -q '^abierto=C:\\MUESTRA.CAS|[0-9]*.$' $W/bloc.ini && grep -q '^abierto=C:\\A1.TXT|' $W/bloc.ini && grep -q '^abierto=C:\\A2.TXT|' $W/bloc.ini \
+    && grep -q '^abierto=C:\\DOCS\\CARTA.TXT|' $W/bloc.ini && grep -q '^activo=0.$' $W/bloc.ini && ! grep -qi 'Ayuda\|Encontrado' $W/bloc.ini && saca $W/s.img A1.TXT $W/a1 && cmp -s $W/a1 $W/A1.TXT; then
+    ok "la sesión, en \\USUARIOS\\USUARIO\\BLOC.INI (fuera de la zona protegida): los cuatro archivos con su ruta entera y su cursor, y cuál estaba delante (no la ayuda ni lo encontrado); A1.TXT, sin guardar"
+  else ko "BLOC.INI no recuerda lo abierto:"; sed 's/^/        /' $W/bloc.ini 2> /dev/null | head -12; fi
+  if ! grep -q "excepción\|\*\*\*" $S; then ok "BLOC: en toda la sesión, ni una excepción ni una queja del núcleo"; else ko "BLOC: el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -3 | sed 's/^/        /'; fi
+  # 2b. otra vez, sin decirle nada: lo de la última vez; y 11 MB
+  CAPTURAS=$G ESCRIBE=1 DISCO=$W/s.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $W/SEMILLA.BIN \
+    ":pausa 3" ":doble 62 185" ":pausa 3" "bloc" ":pausa 4" ":captura bl15" ":clic 604 101" ":pausa 2" \
+    "bloc grande.txt" ":pausa 8" ":tecla ctrl-end" ":pausa 2" ":captura bl16" > $W/b.sal 2>&1
+  S=$W/b.sal
+  miracap "BLOC sin nada: abre lo de la última vez (MUESTRA.CAS, A1.TXT, A2.TXT y CARTA.TXT) y deja MUESTRA.CAS delante, con el cursor donde estaba" bl15 \
+    negrita 126 171 138 183 "MUESTRA.CAS" texto 200 171 460 183 "A2.TXT" texto 120 454 132 466 'C:\MUESTRA.CAS   Lín 3, Col'
+  t=$(sed -n 's/^.*bloc: abierto GRANDE.TXT, 10750000 octetos, en \([0-9]*\) ms.*/\1/p' $S | head -1)
+  if [ -n "$t" ] && [ "$t" -lt 30000 ]; then ok "11 MB (250.000 líneas) abiertos en $t ms (QEMU sin aceleración)"; else ko "GRANDE.TXT no se abre (o tarda: ${t:-?} ms)"; fi
+  miracap "y Ctrl+Fin va a la última línea (la 250.001)" bl16 texto 100 100 700 500 "linea 249999 con algo de texto para llenar" texto 100 100 700 500 "GRANDE.TXT   Lín 250001, Col 1"
+  # 2c. soltar en el Bloc un archivo arrastrado desde Mi equipo (EV_SOLTADO: la llamada 173)
+  cp $W/d.img $W/m.img
+  CAPTURAS=$G DISCO=$W/m.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $W/SEMILLA.BIN \
+    ":pausa 3" ":doble 62 185" ":pausa 3" "bloc muestra.cas" ":pausa 4" ":doble 60 40" ":pausa 4" ":arrastra 795 497 470 430" ":pausa 2" ":doble 300 160" ":pausa 3" \
+    ":arrastra 356 310 550 300" ":pausa 3" ":captura bl17" > $W/c.sal 2>&1
+  miracap "un archivo (A2.TXT) arrastrado desde Mi equipo y soltado en el Bloc se abre en otra pestaña" bl17 texto 120 454 132 466 'C:\A2.TXT   Lín 1, Col 1'
+  # 2d. Ver: las líneas largas partidas (como siempre) y sin partir; los
+  # espacios, los tabuladores y los finales de línea, con su dibujo
+  printf '\tuno dos\r\nuna l\xa1nea muy larga que no cabe en lo ancho de la ventana del Bloc de notas y que sigue y sigue hasta el final\r\n' > $W/VER.TXT
+  cp $W/d.img $W/v.img
+  mcopy -i $W/v.img $W/VER.TXT ::/
+  CAPTURAS=$G DISCO=$W/v.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $W/SEMILLA.BIN \
+    ":pausa 3" ":doble 62 185" ":pausa 3" "bloc ver.txt" ":pausa 4" ":captura bl18" ":tecla alt-v" ":pausa 1" ":clic 420 200" ":pausa 1" \
+    ":tecla alt-v" ":pausa 1" ":clic 420 224" ":pausa 1" ":tecla alt-v" ":pausa 1" ":clic 420 176" ":pausa 1" ":captura bl19" > $W/v.sal 2>&1
+  miracap "un .TXT se ve como siempre: sin números de línea y con las líneas largas partidas al ancho de la ventana" bl18 \
+    texto 120 186 132 198 "una línea muy larga que no cabe en lo ancho de la ventana del" texto 120 202 132 214 " Bloc de notas y que sigue y sigue hasta el final" \
+    texto 120 454 132 466 "VER.TXT   Lín 1, Col 1" texto 380 454 620 466 "Texto | 437 | CR LF"
+  miracap "Ver > Espacios y tabuladores (· y »), Finales de línea (¬) y sin Ajuste de línea: la larga, en una fila (lo demás, a la derecha)" bl19 \
+    texto 132 170 144 182 "»" texto 152 170 164 182 "uno" texto 176 170 188 182 "·" texto 184 170 196 182 "dos" texto 209 170 221 182 "¬" \
+    texto 120 186 132 198 "una" texto 144 186 156 198 "·" notexto 100 200 640 260 "sigue"
+  # las capturas, para la documentación (docs/pentium/bloc/)
+  if [ -n "${CAPTURAS_A:-}" ]; then mkdir -p "$CAPTURAS_A"; cp $G/bl*.ppm "$CAPTURAS_A"/ 2> /dev/null; fi
+else ko "no se puede hacer el disco: $(tail -2 $W/disco.txt)"; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin el Bloc de notas)"
+fi   # el Bloc de notas
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
 [ -z "${SOLO:-}" ] && parte15
