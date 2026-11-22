@@ -4213,12 +4213,18 @@ módulo Escritorio
 
     ; (PUNTEROS) por el puerto serie: la forma del puntero cuando cambia, y
     ; cuando se localiza con Control (lo miran las pruebas)
-    variable formas_dichas, localizados_dichos: nat32
+    variable formas_dichas, localizados_dichos, rastros_dichos: nat32
     función mira_puntero()
         si formas_vistas <> formas_dichas entonces
             formas_dichas := formas_vistas
             tomar_consola()
             imprimir2("puntero: forma %u (%s)\n", forma_vista, nat32(nombre_forma(forma_vista)))
+            soltar_consola()
+        fin
+        si rastros_vistos <> rastros_dichos entonces
+            rastros_dichos := rastros_vistos
+            tomar_consola()
+            imprimir1("puntero: rastro, con %u copias\n", copias_rastro)
             soltar_consola()
         fin
         si localizados <> localizados_dichos entonces

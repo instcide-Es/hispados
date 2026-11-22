@@ -133,6 +133,14 @@ int so_argumentos(char *d, int cabe);
 int so_al_portapapeles(const char *t, u32 n);
 char *so_del_portapapeles(u32 *n);	/* de so_pide; NULL si no hay */
 
+/* ---- (PUNTEROS) el puntero del ratón: la forma de una zona de la ventana
+ * (la llamada 177: 7, la «I» de escribir; con an = 0, se quitan todas). El
+ * núcleo la pone sin esperar al programa (Correo no recibe el ratón que
+ * solo se mueve). En Linux, nada. ---- */
+#define SO_P_FLECHA 0
+#define SO_P_TEXTO 7
+void so_puntero_zona(int x, int y, int an, int al, int forma);
+
 /* ---- el salto de los errores sin vuelta ---- */
 #if defined(CORREO_PENTIUM)
 typedef u32 so_salto[8];

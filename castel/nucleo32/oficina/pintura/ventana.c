@@ -1375,6 +1375,20 @@ static void sale_de_la_vista(void)
 	}
 }
 
+/* (PUNTEROS) la forma del puntero (la pone el núcleo, la llamada 177): en
+ * un asa, la de cambiar el tamaño; en el lienzo, la cruz para dibujar (la
+ * «I» con el texto); en lo demás, la flecha */
+static void puntero_de_pintura(const so_suceso *s)
+{
+	int f = SO_P_FLECHA;
+
+	if (asa_encima)
+		f = asa_encima == 1 ? SO_P_TAMANO_H : asa_encima == 2 ? SO_P_TAMANO_V : SO_P_TAMANO_D1;
+	else if (!P.cuadro && s->x >= VI.x && s->y >= VI.y && s->x < VI.x + VI.an && s->y < VI.y + VI.al)
+		f = P.herr == H_TEXTO ? SO_P_TEXTO : P.herr == H_LUPA ? SO_P_FLECHA : SO_P_CRUZ;
+	so_puntero(P.v, f);
+}
+
 static void raton(const so_suceso *s)
 {
 	int flecha;
@@ -1788,7 +1802,7 @@ static void bucle(void)
 		case SO_TECLA: tecla(&s); break;
 		case SO_BAJA:
 		case SO_SUBE:
-		case SO_MUEVE: raton(&s); break;
+		case SO_MUEVE: raton(&s); puntero_de_pintura(&s); break;	/* (PUNTEROS) */
 		case SO_RUEDA: rueda(&s); break;
 		case SO_MENU: menu_elegido(&s); break;
 		case SO_TAMANO: cambia_tamano(s.x, s.y); break;

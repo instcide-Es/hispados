@@ -236,6 +236,14 @@ VERSION_088 = '0.8.8'
 # apagar. Suben base (el núcleo: el cuadro de apagar y la llamada 11 con ECX =
 # 2), red, tls (HTTPS reintenta), wifi (REDWIFI /SIMCORTE) y paquetes (1.5)
 VERSION_CORTES = '0.8.8'
+# (PUNTEROS, 22/11/2026, rama punteros) los punteros del ratón: en el núcleo
+# las 13 formas (cursores.cas), la llamada 177 y PUNTERO.INI; en el Panel de
+# control, Ratón > Puntero (PANEL.BIN). La base sube al juntarla (0.8.9: la
+# pone quien coordina); con ella, los programas que piden su puntero: bloc
+# 1.0.1, pintura 2.0.1 (sin la flecha doble dibujada: pide esta base),
+# pluma 2.0.2, correo 1.0.2 y navega 0.2.3 (con una base de antes, la
+# llamada 177 no hace nada y siguen yendo)
+VERSION_PUNTEROS = '0.8.9'
 SISTEMA = [
     ('base', VERSION_088, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
@@ -244,7 +252,7 @@ SISTEMA = [
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
-    ('bloc', '1.0', 'El Bloc de notas: pestañas, buscar y reemplazar (con expresiones), colores según el lenguaje, UTF-8 y comparar', 'base >= ' + VERSION_087, [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),    # (BLOC) la 1.0: el Bloc al nivel de un editor serio
+    ('bloc', '1.0.1', 'El Bloc de notas: pestañas, buscar y reemplazar (con expresiones), colores según el lenguaje, UTF-8 y comparar', 'base >= ' + VERSION_087, [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),    # (BLOC) la 1.0: el Bloc al nivel de un editor serio
     ('consola', VERSION_085, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
     # (explorador, dispositivos) el explorador de archivos, sus miniaturas y el Administrador de dispositivos
     # (REPRODUCTOR) la 0.9.3: la música (.MP3, .OGG, .FLAC, .WAV, .CUE...) se abre con el Reproductor si está
@@ -309,7 +317,7 @@ SISTEMA = [
     # Hispa-386, en HVPRUN) y sigue siendo del sistema. Pide base 0.8.6 (la
     # llamada 172, el fondo de escritorio). Con ella, el menú (PINTURA.MNU,
     # tipo=Multimedia) y Mi equipo («Editar con Pintura», los .PCX) la usan
-    ('pintura', '2.0', 'Pintura 2: dibujar y retocar imágenes en color verdadero (PNG, JPG, BMP, GIF, PCX, ICO, TGA; a PDF; fondo de escritorio)', 'base >= 0.8.6', [
+    ('pintura', '2.0.1', 'Pintura 2: dibujar y retocar imágenes en color verdadero (PNG, JPG, BMP, GIF, PCX, ICO, TGA; a PDF; fondo de escritorio)', 'base >= ' + VERSION_PUNTEROS, [
         ('PINTURA.BIN', r'\HISPA\PINTURA.BIN'), ('PINTURA.TXT', r'\HISPA\PINTURA.TXT'),
         ('PINTURA.MNU', r'\HISPA\MENU\PINTURA.MNU'), ('PINTURA.ICP', r'\HISPA\MENU\PINTURA.ICP')]),
     # [WIN32] los programas de Windows de 32 bits y DirectX (docs/pentium/WIN32.md)
@@ -495,7 +503,7 @@ def busca(nombre, carpetas):
 NAVEGA_RECURSOS = ['DEFAULT.CSS', 'QUIRKS.CSS', 'ADBLOCK.CSS', 'INTERNAL.CSS', 'MESSAGES', 'BROTLI.DIC', 'INICIO.HTM']
 NAVEGA_FUENTES = ['SANS.TTF', 'SANSN.TTF', 'SERIF.TTF', 'SERIFN.TTF', 'MONO.TTF', 'MONON.TTF']
 OPCIONALES = [
-    ('navega', '0.2.2', 'El Navegador: la web de hoy (NetSurf con JavaScript), con pestañas y descargas',
+    ('navega', '0.2.3', 'El Navegador: la web de hoy (NetSurf con JavaScript), con pestañas y descargas',
      'base >= 0.8.3, red >= 0.8.1, tls >= 0.8.1', [
         ('NAVEGA/NAVEGA.BIN', r'\HISPA\NAVEGA\NAVEGA.BIN'), ('NAVEGA/NAVEGA.INI', r'\HISPA\NAVEGA\NAVEGA.INI'),
         ('NAVEGA/LEEME.TXT', r'\HISPA\NAVEGA\LEEME.TXT')]
@@ -518,7 +526,7 @@ OPCIONALES = [
     # tipo «oficina»): con él instalado, el menú y Mi equipo lo usan en lugar del Pluma de Hispa-386
     # (0.8.8) la 2.0.1: la misma Pluma con la biblioteca común de la oficina de
     # Cuentas 2 y Pintura 2 (memchr, strrchr, F11 y F12, las imágenes TGA)
-    ('pluma', '2.0.1', 'Pluma 2: el procesador de textos de 32 bits (.PLU, .ODT, .DOCX, .RTF y .TXT; exporta a PDF; ortografía)',
+    ('pluma', '2.0.2', 'Pluma 2: el procesador de textos de 32 bits (.PLU, .ODT, .DOCX, .RTF y .TXT; exporta a PDF; ortografía)',
      'base >= 0.8.3', [
         ('PLUMA.BIN', r'\HISPA\PLUMA.BIN'), ('PLUMA/LEEME.TXT', r'\HISPA\PLUMA\LEEME.TXT'),
         ('PLUMA/DICCIO.DAT', r'\HISPA\PLUMA\DICCIO.DAT'),
@@ -558,7 +566,7 @@ OPCIONALES = [
     # (CORREO) Correo, el cliente de correo (castel/nucleo32/correo/paquete.sh; tipo «internet»). El
     # secreto de \HISPA\CORREO y el STARTTLS llegan con el base y el tls de la 0.8.7
     # (PARPADEO) 1.0.1: sin parpadeo (el lienzo propio, un vuelco; nada por el ratón que solo pasa); comprim y mirador 1.0.1, tampoco repintan por él
-    ('correo', '1.0.1', 'Correo: el cliente de correo (IMAP, POP3 y SMTP, siempre cifrado; HTML sin scripts, adjuntos por Escudo, sin conexión)',
+    ('correo', '1.0.2', 'Correo: el cliente de correo (IMAP, POP3 y SMTP, siempre cifrado; HTML sin scripts, adjuntos por Escudo, sin conexión)',
      'base >= ' + VERSION_087 + ', red >= 0.8.1, tls >= ' + VERSION_087, [
         ('CORREO.BIN', r'\HISPA\CORREO.BIN'), ('CORREO.TXT', r'\HISPA\CORREO.TXT'),
         ('CORREO.MNU', r'\HISPA\MENU\CORREO.MNU'), ('CORREO.ICP', r'\HISPA\MENU\CORREO.ICP')]),

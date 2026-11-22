@@ -950,7 +950,31 @@ static void v_estado(struct gui_window *g, const char *t)
   }
   if (g == actual) surf_estado(t);
 }
-static void v_puntero(struct gui_window *g, enum gui_pointer_shape s) { (void)g; (void)s; }   /* (el núcleo no deja cambiar la flecha) */
+/* (PUNTEROS) la forma del puntero que pide la página (la mano en un enlace,
+ * la «I» en un campo...), al núcleo: la llamada 177 (docs/PENTIUM.md, «Los
+ * punteros»); fuera de la página, la flecha (mueve) */
+static int forma_puesta = -1;
+static void pon_forma(int f) { if (f != forma_puesta) { forma_puesta = f; sc(177, 0, vent, (u32)f); } }
+static void v_puntero(struct gui_window *g, enum gui_pointer_shape s)
+{
+  int f = 0;                   /* la flecha */
+  switch (s) {
+  case GUI_POINTER_POINT: f = 8; break;             /* la mano: un enlace */
+  case GUI_POINTER_CARET: f = 7; break;             /* el texto */
+  case GUI_POINTER_CROSS: f = 10; break;
+  case GUI_POINTER_MOVE: f = 9; break;
+  case GUI_POINTER_WAIT: f = 5; break;
+  case GUI_POINTER_PROGRESS: f = 6; break;
+  case GUI_POINTER_HELP: f = 12; break;
+  case GUI_POINTER_NO_DROP: case GUI_POINTER_NOT_ALLOWED: f = 11; break;
+  case GUI_POINTER_UP: case GUI_POINTER_DOWN: f = 2; break;
+  case GUI_POINTER_LEFT: case GUI_POINTER_RIGHT: f = 1; break;
+  case GUI_POINTER_LU: case GUI_POINTER_RD: f = 3; break;
+  case GUI_POINTER_RU: case GUI_POINTER_LD: f = 4; break;
+  default: break;
+  }
+  if (g == actual) pon_forma(f);
+}
 static void v_cursor(struct gui_window *g, int x, int y, int h, const struct rect *clip)
 {
   (void)clip;
@@ -1502,7 +1526,7 @@ static void mueve(int x, int y, u32 botones)
   if ((y >= ARRIBA_H && y < ARRIBA_H + ph && x < pw) || boton_dentro)
     browser_window_mouse_track(actual->bw, ((botones & BOTON_IZQUIERDO) ? BROWSER_MOUSE_HOLDING_1 | BROWSER_MOUSE_DRAG_ON : 0) | mods(),
                                x + actual->sx, y - ARRIBA_H + actual->sy);
-  else surf_estado("");
+  else { surf_estado(""); pon_forma(0); }     /* (PUNTEROS) fuera de la página, la flecha */
 }
 static void rueda(int pasos, int x, int y, u32 m)
 {

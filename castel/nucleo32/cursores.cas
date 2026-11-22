@@ -964,7 +964,7 @@ módulo Cursores
     fin
 
     ; (localizar el puntero) dos anillos, blanco con borde oscuro, de radio r
-    ; alrededor de (cx, cy)
+    ; (y 0,6 r, si es grande) alrededor de (cx, cy)
     público función pinta_anillos(ref l: Lienzo, cx: ent32, cy: ent32, r: ent32, grueso: ent32)
         variable i, j, d, e, x0, y0, x1, y1, k: ent32
         variable p: puntero a nat32
@@ -980,6 +980,7 @@ módulo Cursores
                 ; en 16 avos de punto
                 d := ent32(raíz_c(nat32((i - cx) * (i - cx) * 256 + (j - cy) * (j - cy) * 256)))
                 e := absoluto(d - r * 16)
+                si r > 30 entonces e := menor_c(e, absoluto(d - r * 16 * 6 div 10)) fin     ; y otro dentro
                 k := -1
                 si e <= grueso * 16 + 24 entonces
                     q := 0x10233F

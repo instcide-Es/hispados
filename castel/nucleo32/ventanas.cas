@@ -124,7 +124,7 @@ módulo Ventanas
 
     constante COLA_EV = 32
     ; (PUNTEROS) una zona de lo de dentro de una ventana con su forma del puntero
-    público constante MAX_ZONAS = 8
+    público constante MAX_ZONAS = 16
     público tipo Zona = estructura
         x, ye, ancho, alto: ent32
         forma: nat32
@@ -227,6 +227,9 @@ módulo Ventanas
     público variable forma_vista: nat32         ; la forma que se ve ahora (la dice el escritorio por el puerto serie)
     público variable formas_vistas: nat32       ; sube cada vez que cambia
     público variable localizados: nat32         ; las veces que se ha localizado con Control (también lo dice el escritorio)
+    público variable rastros_vistos: nat32      ; las veces que ha salido el rastro (al empezar a moverlo; lo dice el escritorio)
+    público variable copias_rastro: nat32       ; y con cuántas copias
+    variable copias_antes: nat32
     constante MAX_PIEZAS_V = 12
     constante BALDOSA = 128
     constante PZ_IMAGEN = 1
@@ -251,7 +254,7 @@ módulo Ventanas
     variable ras_t: arreglo [MAX_RASTRO] de nat32
     variable ras_i: nat32
     ; localizar el puntero: Control pulsado y suelto, solo
-    constante VIDA_ANILLOS = 60
+    constante VIDA_ANILLOS = 100                ; un segundo
     variable loc_desde: nat32
     variable loc_activo, ctrl_antes, ctrl_solo: bool
 
@@ -479,7 +482,7 @@ módulo Ventanas
             si edad >= VIDA_ANILLOS entonces
                 loc_activo := falso
             sino
-                r := 6 * m + ent32(VIDA_ANILLOS - edad) * (m + 1)
+                r := 4 * m + ent32(VIDA_ANILLOS - edad) * (m + 4) div 6
                 g := 1 + m div 2
                 k := n_nuevas
                 nuevas[k].clase := PZ_ANILLOS
@@ -499,6 +502,7 @@ módulo Ventanas
             fin
         fin
         ; el rastro: donde estuvo hace poco (lo más viejo, más transparente)
+        r := ent32(n_nuevas)
         si p_rastro entonces
             para i desde 1 hasta MAX_RASTRO - 1 hacer
                 k := (ras_i + nat32(i)) mod MAX_RASTRO
@@ -509,6 +513,13 @@ módulo Ventanas
                 fin
             fin
         fin
+        ; (cuántas copias: si sale ahora, se apunta)
+        k := n_nuevas - nat32(r)
+        si k > 0 y copias_antes = 0 entonces
+            rastros_vistos := rastros_vistos + 1
+            copias_rastro := k
+        fin
+        copias_antes := k
         pieza_imagen(im, flecha_x, flecha_y, 256)
         ; lo que tapan todas juntas
         bx0 := 1000000

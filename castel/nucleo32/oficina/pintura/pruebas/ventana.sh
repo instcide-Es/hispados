@@ -157,9 +157,13 @@ else ko "el fondo de escritorio: $(grep -i fondo $S | head -2)"; fi
 # (PINTURA32) el asa de la esquina del lienzo
 grep -q "pintura: aviso: Arrastre para cambiar el tamaño del lienzo (ahora, 320 x 200 píxeles)" $S && ok "el ratón sobre el asa de la esquina: la barra de estado dice «Arrastre para cambiar el tamaño del lienzo»" || ko "el aviso del asa: $(grep -a 'aviso: Arrastre' $S | head -1)"
 if command -v convert > /dev/null && [ -f $D/cap/v4.ppm ]; then
-	a=$(convert $D/cap/v4.ppm -format '%[hex:p{711,397}]' info: 2> /dev/null); f=$(convert $D/cap/v4.ppm -format '%[hex:p{725,411}]' info: 2> /dev/null)
-	case "$a/$f" in 2F6FD0*/000000*) ok "con el ratón encima, el asa se resalta (azul) y sale la flecha de cambiar el tamaño junto a la del ratón" ;; *) ko "el asa resaltada y la flecha: $a $f" ;; esac
+	a=$(convert $D/cap/v4.ppm -format '%[hex:p{711,397}]' info: 2> /dev/null)
+	case "$a" in 2F6FD0*) ok "con el ratón encima, el asa se resalta (azul)" ;; *) ko "el asa resaltada: $a" ;; esac
 fi
+# (PUNTEROS) la flecha de cambiar el tamaño ya es el puntero del sistema (la
+# llamada 177: en Linux, so_anfitrion.c lo dice); en el lienzo, la cruz
+grep -q "^puntero: forma 3$" $S && ok "(PUNTEROS) sobre el asa de la esquina, el puntero del sistema pasa a la flecha doble en diagonal" || ko "el puntero sobre el asa: $(grep -a '^puntero:' $S | head -3 | tr '\n' ' ')"
+grep -q "^puntero: forma 10$" $S && ok "(PUNTEROS) sobre el lienzo, con el lápiz o el pincel, la cruz de precisión" || ko "la cruz en el lienzo: $(grep -a '^puntero:' $S | head -3 | tr '\n' ' ')"
 n=$(grep -c "pintura: aviso: Tamaño del lienzo: [0-9]* x [0-9]* píxeles (suelte para aplicarlo)" $S)
 [ "$n" -ge 10 ] && ok "mientras se arrastra, la barra de estado dice la medida ($n veces; la última, $(grep -o 'Tamaño del lienzo: [0-9]* x [0-9]*' $S | sed -n 11p))" || ko "la medida al arrastrar: $n"
 i=$("$PIN" --info $D/t_lienzo.png 2>&1); case "$i" in *"424 x 254"*) ok "al soltar el asa se aplica: el lienzo, de 320 x 200 a 424 x 254" ;; *) ko "el lienzo arrastrado: $i" ;; esac

@@ -849,6 +849,11 @@ static void pinta(void)
 	R.ey = fy;
 	R.ean = van - 16;
 	R.eal = val - fy - 8;
+	/* (PUNTEROS) la «I» sobre lo que se escribe: los cuatro campos y el texto */
+	so_puntero_zona(0, 0, 0, 0, SO_P_FLECHA);
+	for (i = 0; i < 4; i++)
+		so_puntero_zona(90, ey_campos[i], van - 100, 24, SO_P_TEXTO);
+	so_puntero_zona(R.ex, R.ey, R.ean, R.eal, SO_P_TEXTO);
 	marco_hundido(R.ex, R.ey, R.ean, R.eal, C_PAPEL);
 	if (R.foco == F_TEXTO)
 		ui_marco(R.ex + 1, R.ey + 1, R.ean - 2, R.eal - 2, C_AZUL);

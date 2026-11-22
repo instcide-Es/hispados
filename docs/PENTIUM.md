@@ -242,6 +242,8 @@ cuarta parte, los discos y el USB).
 | `dispositivos.cas` (Dispositivos) | **Lo que hay en el equipo y qué lo lleva** (desde la 0.8.3): las llamadas 155 (la lista, de solo lectura) y 156 (lo que apuntan los servicios del anillo 3), para el Administrador de dispositivos (sección 10). |
 | `sonido.cas` (Sonido) | (SONIDO) **El sonido**, lo que pone el núcleo (sección 14 decies): los canales de los programas (sus colas), el volumen general, el silencio, los sonidos del sistema y las órdenes para el servicio de sonido (`SONIDO.BIN`); las llamadas 190 a 199. |
 | `preferencias.cas` (Preferencias) | (PANEL) **Los ajustes del Panel de control** (sección 14 quattuordecies): la llamada 174, aplicarlos (el ratón, el teclado, el tema, el tapiz...) y `PANEL.INI`, que escribe solo el núcleo. |
+| `cursores.cas` (Cursores) | (PUNTEROS) **Las formas del puntero** (sección 14 quatervicies): 13 formas vectoriales en seis juegos, cuatro tamaños, once colores y en espejo; la caché de lo medido. |
+| `apuntero.cas` (Apuntero) | (PUNTEROS) La llamada 177 y `PUNTERO.INI` (por usuario). |
 | `iconpanel.cas` (Iconpanel) | (PANEL) **Los iconos del Panel de control** (Configuración y PANEL.BIN), dibujados, cada uno con su forma. |
 | `win32.cas` (Win32) | [WIN32] **Lo de los programas de Windows** (sección 14 quater): las llamadas 180 a 182 (páginas en cualquier sitio de la zona del programa, el mapa de las teclas, las ventanas sin marco o a pantalla completa). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
@@ -274,6 +276,8 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `uhttps.cas` (con `biblioteca32/https.cas`) | `HTTPS.BIN` | La orden **HTTPS**: pedir direcciones con la biblioteca `Https` (sección 14). |
 | `uipconf.cas`, `uping.cas`, `udescarg.cas` | `IPCONFIG.BIN`, `PING.BIN`, `DESCARGA.BIN` | **IPCONFIG**, **PING** y **DESCARGAR** (sección 14). |
 | `upanel.cas` | `PANEL.BIN` | (PANEL) **El Panel de control**: Fecha y hora, Ratón, Teclado, Red y Wi-Fi, Energía y Personalización (sección 14 quattuordecies). |
+| `panelpun.cas` | (en `PANEL.BIN`) | (PUNTEROS) **Panel de control › Ratón › Puntero**: la forma, el tamaño, el color, el rastro, localizar y para zurdos, con la vista previa. |
+| `upuntest.cas` | `PUNTEST.BIN` | (PUNTEROS) La prueba de los punteros (la parte 51; no va en el sistema). |
 | `uhorared.cas` con `ntp.cas` y `zonas.cas` | `HORARED.BIN` | (NTP) **La hora por Internet** (SNTP) y el horario de verano; la orden HORARED (sección 14 quattuordecies). |
 | `panelaj.cas` (Panelaj) | — | (PANEL) Las llamadas 174 (los ajustes) y 175 (la hora exacta) para los programas. |
 | `ubucle.cas` | `BUCLE.BIN` | El que no acaba nunca (da vueltas, duerme, espera teclas o escribe sin parar): para probar **Ctrl+C**. |
@@ -484,6 +488,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 173 | (BLOC, REPRODUCTOR; la 0.8.7) **lo soltado desde Mi equipo** en una ventana suya (tras `EV_SOLTADO` = 14, que lleva el punto, visto desde dentro): la ruta, a EBX (caben ECX, con su 0). Una sola para todos: el Bloc de notas la abre en una pestaña, el Reproductor la pone en la lista. Se da una vez | `lo_soltado` | su largo; `NO_HAY` (nada para ella) o `NO_VALE` |
 | 174 | (PANEL) **un ajuste del Panel de control**: EBX la clave, ECX el valor nuevo (0xFFFFFFFF: leerlo). Cambiarlo, el Panel de control o el modo administrador (sección 14 quattuordecies) | `ajuste`, `poner_ajuste` (`panelaj.cas`) | el que queda, o `DENEGADO` |
 | 175 | (PANEL, NTP) **la hora exacta**: EBX = 0, el reloj del PC en segundos desde el 1/1/2000; EBX = 1, ponerlo a ECX (como la 67, y HORARED.BIN sin atrasarlo más de 2 horas) | `hora_exacta`, `poner_hora_exacta` | el reloj, o 0 / `DENEGADO` |
+| 177 | (PUNTEROS) **el puntero del ratón**: EBX = 0, la forma sobre la ventana ECX (EDX); 1, la de una zona (EDX, una `Zona`); 2, leer los ajustes (a ECX); 3, cambiarlos (el Panel o el modo administrador); 4, pintar uno en un mapa del programa; 5, la forma de ahora (sección 14 quatervicies) | `puntero_de_ventana`, `zona_de_puntero`... (`ppuntero.cas`) | 0, `NO_VALE` o `DENEGADO` |
 | 158 | (PROTEGE; **solo los servicios**) el sello de la tarea EBX (los de `permisos.cas`; con el bit 31, es un servicio) | `sello_de_tarea` | el sello, o `NO_VALE` |
 | 100 | (WIFI) **pedir al servicio Wi-Fi** (`WIFI.BIN`), como la 90 (sección 14 octies) | — | la primera palabra de la respuesta (`SIN_WIFI` si no hay servicio) |
 
@@ -9201,7 +9206,7 @@ necesite»): las tres asas del marco (derecha, abajo y la esquina) miden 7 x 7
 puntos de la pantalla con cualquier zoom y se cogen en 10 x 10. Con el ratón
 encima, el asa se pone azul con doble borde, junto a la flecha del ratón sale
 la de cambiar el tamaño (doble: en diagonal, en horizontal o en vertical;
-negra con borde blanco: el sistema no tiene punteros con otra forma) y la
+desde la rama punteros, el puntero del sistema: la llamada 177) y la
 barra de estado dice «Arrastre para cambiar el tamaño del lienzo (ahora, 320
 x 200 píxeles)». Mientras se arrastra, el contorno nuevo con hormigas y en la
 barra «Tamaño del lienzo: 424 x 254 píxeles (suelte para aplicarlo)»; al
@@ -9391,6 +9396,202 @@ cerrar, `/lento/` va a unos 150 K/s):
    reiniciado): `IPCONFIG` dice la nueva y el Navegador y `PING` van.
 5. Si algo falla: `IPCONFIG /TODO > RED.TXT` y `X:\WIFI.LOG` (lo apuntan RED.BIN
    y WIFI.BIN: el enlace, DHCP, «tcp: ... cortada»).
+
+## 14 quatervicies. Los punteros del ratón (rama punteros, «(PUNTEROS)»)
+
+*22/11/2026. Lo pidió Carlos («es más estética»): Configuración › Ratón,
+cambiar el color, la forma y el tamaño del puntero; y luego, una mano con el
+dedo índice como puntero normal (hacia arriba y en diagonal) y los punteros
+en espejo para los zurdos. Todo lo cambiado lleva la marca «(PUNTEROS)».*
+
+| | |
+|---|---|
+| ![Las 13 formas de la «Clásica» a 1x y a 3x, sobre claro y sobre oscuro](pentium/punteros/clasica.png) | ![Los seis juegos: Clásica, Moderna, Gruesa, Retro, Mano y Mano en diagonal](pentium/punteros/juegos.png) |
+| ![Los once colores, con su nombre](pentium/punteros/colores.png) | ![Para zurdos: la flecha y la mano en espejo; la «I» y la cruz, iguales](pentium/punteros/zurdos.png) |
+| ![Panel de control › Ratón › Puntero, con la vista previa](pentium/punteros/panel.png) | ![Localizar el puntero al pulsar Control: los anillos que se cierran](pentium/punteros/localizar.png) |
+
+### Las formas
+
+Hasta la 0.8.8 había una flecha (y las cuatro de cambiar el tamaño en los
+bordes, de 1x): Pintura 2 dibujaba una flecha doble junto a la del ratón
+porque el sistema no tenía otra. Ahora el núcleo tiene **13 formas**
+(`cursores.cas`):
+
+| | forma | quién la pone |
+|---|---|---|
+| 0 | la flecha | lo de siempre |
+| 1-4 | cambiar el tamaño: de lado a lado, de arriba abajo y las dos diagonales | el núcleo, solo, en los bordes y las esquinas de una ventana que se puede estirar |
+| 5 | la espera (el reloj de arena, o un círculo que da vueltas en «Moderna» y en las manos), **animada** | un programa que trabaja sin atender |
+| 6 | la flecha con la espera | el núcleo, al abrir un programa, hasta que hace su ventana (o 3 s) |
+| 7 | el texto (la «I») | el Bloc de notas sobre el texto; Pluma sobre la página; Correo sobre los campos y el texto; Pintura con la herramienta Texto; el Navegador en un campo |
+| 8 | la mano (un enlace) | el Navegador sobre un enlace |
+| 9 | mover (las cuatro flechas) | el núcleo, al mover una ventana desde su menú (Alt+Espacio › Mover) |
+| 10 | la cruz de precisión | Pintura sobre el lienzo |
+| 11 | prohibido | el Navegador (lo que no se puede soltar) |
+| 12 | la ayuda (la flecha con «?») | el Navegador (`cursor: help`) |
+
+Cada forma es un **dibujo vectorial propio** (polígonos, discos, anillos y
+trazos redondos, en décimas de punto, con el punto activo en (0, 0)): no se
+copia de Windows ni de macOS. Para pintarla se mide, en cada punto de la
+pantalla, la distancia con signo a la silueta (en 64 avos de punto): lo que
+queda a menos de medio punto de la orilla se suaviza, lo que está a más de
+un borde de ella es relleno, y la «tinta» de dentro (las rayas entre los
+dedos, la arena del reloj, los puntos que corren) va del color del borde.
+Así cada tamaño sale **nítido** (no es la de 1x ampliada a bloques), y las
+de siempre (la flecha y las cuatro dobles de la «Clásica» a 1x) siguen
+siendo **las de antes, punto a punto**. Lo medido se guarda en una caché de
+24 imágenes (forma, juego, tamaño, espejo y cuadro de la animación).
+
+**Los juegos** (Panel › Ratón › Puntero › Forma), todos propios:
+
+- **Clásica**: la flecha de siempre, con su cola.
+- **Moderna**: una punta sin cola, con la base hacia dentro; la espera, un
+  círculo.
+- **Gruesa**: la clásica un 25 % más grande y con el borde doble (2 puntos a
+  1x): para ver mal.
+- **Retro (1990)**: lados rectos y **sin suavizar** (los puntos enteros).
+- **Mano (el dedo hacia arriba)** y **Mano (el dedo en diagonal)**: el
+  puntero normal es una mano con el índice apuntando, **con el punto activo
+  en la punta del dedo**; en diagonal, arriba a la izquierda, como una
+  flecha. En estos dos juegos la mano del **enlace no es la misma**: es la
+  mano hacia arriba con un **destello** (tres rayitas junto a la punta), para
+  que se note al pasar por un enlace.
+
+**Los tamaños**: normal (1x), grande (1,5x), muy grande (2x) y enorme (3x).
+El borde crece con el tamaño (es la misma silueta).
+
+**Los colores**, cada uno con su nombre escrito en el Panel (no solo el
+color: el daltonismo): blanco con borde negro (el de siempre), negro con
+borde blanco, **invertido** (el contrario de lo de debajo; en un gris
+medio, donde el contrario se parecería mucho, blanco o negro; y el borde, el
+contrario del relleno), amarillo, verde lima, rojo, azul, naranja, rosa,
+morado y cian, cada uno con el borde (negro o blanco) que más se distingue
+de él: se ve sobre claro y sobre oscuro.
+
+**Para zurdos** (Panel › Ratón › Puntero, «Para zurdos: en espejo»; y al
+marcar «Para zurdos» de los botones en Ratón se marca también, y se puede
+quitar): la flecha, la mano, la ayuda y la flecha con la espera, **en
+espejo** (apuntan arriba a la derecha y el punto activo sigue en la punta;
+el «?» y la espera van al otro lado, sin espejo: se leen igual); la «I», la
+cruz, mover, las dobles y prohibido no cambian.
+
+**El rastro** (opcional): por donde ha pasado en la última décima de
+segundo, el mismo puntero cada vez más transparente. **Localizar al pulsar
+Control** (opcional): Control pulsado y suelto, solo (sin otra tecla, ni un
+clic, ni la rueda), dos anillos (blanco con borde oscuro) que se cierran
+sobre el puntero en 0,6 s.
+
+### Sin parpadeo y sin restos
+
+Antes, `ventanas.cas` borraba la flecha (copiaba lo de debajo desde el
+doble búfer) y la pintaba otra vez en la pantalla: entre una cosa y otra, un
+instante sin flecha. Ahora lo que va encima de la pantalla (el puntero, el
+rastro y los anillos) son **piezas**: cuando cambian (se mueve, cambia de
+forma, de tamaño o de color, un cuadro de la animación) o se recompone algo
+debajo, se pinta en una **baldosa** de 128 x 128 lo del doble búfer con las
+piezas encima, y de ahí a la pantalla: cada punto se escribe **una sola vez
+y ya con lo que tiene que tener**. Donde estaban y donde están, juntos si se
+tocan; lo recompuesto que no toca las piezas, tal cual. Así no parpadea al
+moverse ni al cambiar de forma, y un puntero grande que tapa más no deja
+restos (lo comprueba la parte 51: después de moverlo deprisa por encima de
+las zonas y los bordes, la pantalla, igual punto a punto). Vale para todas
+las medidas de la pantalla y para las de 24 y 16 bits (la baldosa va al
+lienzo de la pantalla y `volcar()` la pasa).
+
+**Los juegos y lo que va a pantalla completa** (OpenGL, DirectX): manda el
+juego. `ShowCursor` (WIN32, `flecha_escondida`) esconde todas las piezas
+(también el rastro y los anillos) mientras su ventana es la activa. **La
+consola de texto** (también la pintada en la pantalla del firmware por
+UEFI) no tiene puntero: no aplica.
+
+### Para los programas: la llamada 177
+
+| EBX | lo que hace |
+|---|---|
+| 0 | la forma sobre lo de dentro de la ventana ECX (suya): EDX, la forma. Vale hasta que se pida otra |
+| 1 | una **zona** de la ventana ECX con su forma: EDX apunta a una `Zona` (x, y, ancho, alto y forma; 20 octetos). La última que se pide es la que vale; la misma zona otra vez, cambia su forma; con ancho 0 se quitan todas. Hasta 16 por ventana. El núcleo la pone sin esperar al programa |
+| 2 | los ajustes, a la `Ajustes_puntero` de ECX (24 octetos: juego, tamaño, color, rastro, localizar, espejo) |
+| 3 | cambiarlos: solo el Panel de control (su sello) o el modo administrador; se ponen al momento y se guardan |
+| 4 | pintar un puntero en un mapa de puntos del programa (la vista previa del Panel): EDX, un `Pinta_puntero` |
+| 5 | la forma que se ve ahora |
+
+En Castel, `ppuntero.cas` («modelo usuario»: `puntero_de_ventana`,
+`zona_de_puntero`, `ajustes_puntero`, `poner_ajustes_puntero`,
+`pinta_puntero`); en C, la oficina (`so_puntero` y `so_puntero_zona` en
+`oficina/comun/so.h`: Pluma, Cuentas, Pintura...), Correo
+(`so_puntero_zona`) y el Navegador (`v_puntero`, la `set_pointer` de
+NetSurf). **Cómo usarla** en un programa nuevo:
+
+- Sobre lo que se escribe, `P_TEXTO` con una **zona** (el núcleo la pone
+  enseguida, aunque el programa esté ocupado): el Bloc la rehace cada vez
+  que mide la ventana (`medidas()`), Correo cada vez que pinta.
+- Lo que depende de dónde está el ratón dentro de algo dibujado por el
+  programa (un enlace, un asa), con la forma de la ventana al recibir
+  `EV_RATÓN_MUEVE` (y la flecha al salir): Pintura y Pluma, después de cada
+  suceso del ratón; el Navegador, cuando NetSurf la pide.
+- Mientras trabaja sin atender, `P_ESPERA` (y luego la de antes).
+- Los bordes que cambian el tamaño de la ventana ya los pone el núcleo; un
+  programa no los pide.
+
+**Lo que se dice por el puerto serie** (las pruebas): `puntero: forma 7 (el
+texto)` cada vez que cambia; `puntero: localizado (Control)`; `puntero:
+juego 0, tamaño 0, color 0, rastro 0, localizar 0, zurdo 0` al arrancar o al
+entrar un usuario, y con «(del Panel)» al cambiarlo.
+
+### Dónde se guarda
+
+En `PUNTERO.INI`, **por usuario**: en sus ajustes
+(`\USUARIOS\CARLOS\AJUSTES\PUNTERO.INI`) o, sin usuarios, en `\HISPA`
+(sin instalar, en la raíz de la memoria). Solo lo escribe el núcleo (la zona
+protegida). Se lee al arrancar y al entrar cada usuario:
+
+```
+juego=4
+tamano=1
+color=3
+rastro=0
+localizar=1
+zurdo=0
+```
+
+### El Panel de control › Ratón › Puntero
+
+En Ratón, abajo, «Puntero: forma, color y tamaño...» (o `PANEL /PUNTERO`)
+abre la página (`panelpun.cas`, aparte de `upanel.cas` para no cruzarse con
+la sección «Touchpad» de la otra rama): Forma, Tamaño y Color (listas con su
+nombre), las casillas del rastro, localizar con Control y para zurdos, y la
+**vista previa** en el propio cuadro: la flecha, la «I», la mano, la
+espera, la doble en diagonal y la ayuda, sobre claro y sobre oscuro (las
+pinta el núcleo, la llamada 177, con lo elegido). Todo se pone al momento.
+
+### Probarlo
+
+`SOLO=punteros castel/pruebas.sh` (la parte 51, `castel/pruebas_punteros.sh`
+y `nucleo32/mira_punteros.py`): el puntero de verdad, en QEMU, es lo que
+cambia entre dos capturas (con él y con él lejos). A 800 x 600, la flecha
+de siempre punto a punto, la «I» sobre el texto del Bloc, las cuatro dobles
+en los bordes de su ventana y la flecha con la espera al abrirlo. A 1280 x
+720, `PUNTEST.BIN` (`upuntest.cas`: 13 columnas, cada una con su forma, en
+claro y en oscuro) con nueve `PUNTERO.INI`: las 13, distintas, a 1x y a 3x
+(tres veces más altas, nítidas y no ampliadas a bloques); Moderna, Gruesa,
+Retro (sin medios tonos), invertido (el contrario del fondo), Mano (la del
+enlace, distinta), Mano en diagonal; los colores con su borde; para zurdos,
+en espejo (y la «I» y la cruz, iguales); los anillos de Control, el rastro;
+y **sin restos** tras moverlo deprisa, con el puntero normal y el enorme. Y
+el Panel con el teclado: los once colores uno a uno (el puntero de verdad,
+de ese color, en claro y en oscuro), el tamaño enorme, para zurdos;
+`PUNTERO.INI` y al arrancar otra vez. Pintura (`pintura/pruebas/ventana.sh`)
+comprueba que sobre el asa sale la doble en diagonal y sobre el lienzo la
+cruz (en Linux, `so_anfitrion.c` dice la forma).
+
+### Lo que falta
+
+- La forma que pide un programa de Windows (`SetCursor`, `LoadCursor` con
+  los IDC_ de siempre) y uno de Ventanas en HVPRUN: hoy, la flecha.
+- Que Cuentas pida la cruz gruesa sobre las celdas y la Agenda la mano en
+  sus enlaces (con la llamada 177 es una línea).
+- Punteros de colores hechos por el usuario (un .CUR o un .ANI): por ahora,
+  los seis juegos propios.
 
 ## 15. Las pruebas
 
