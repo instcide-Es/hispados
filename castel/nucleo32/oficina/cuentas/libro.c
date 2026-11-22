@@ -941,8 +941,11 @@ static celda *para_poner(libro *l, hoja *h, u32 f, u32 c)
 	}
 	if (!x)
 		return NULL;
-	if (x->f)
+	if (x->f) {
 		calc_quita_formula(l, h, x);
+		fm_suelta(x->f);
+		x->f = NULL;
+	}
 	val_suelta(&x->v);
 	return x;
 }

@@ -822,6 +822,13 @@ static void factor(lector *L)
 		return;
 	}
 	primario(L);
+	/* (A1:INDICE(B1:B9; 3): el rango de lo que va a cada lado) */
+	while (!L->mal && mira(L) == ':') {
+		L->i++;
+		primario(L);
+		pieza(L, T_DOSP);
+		L->volatil = 1;	/* (lo que abarca puede salirse de lo apuntado) */
+	}
 	while (!L->mal && mira(L) == '%') {
 		L->i++;
 		pieza(L, T_PORC);
@@ -1225,6 +1232,15 @@ void fm_escribe(const libro *l, const formula *fm, const hoja *h, const cu_local
 				buf_pon(&w, w.d + pila[np].o, pila[np].n);
 			buf_c(&w, '%');
 			pila[np].prio = 7;
+			break;
+		case T_DOSP:
+			if (np < 2)
+				break;
+			np -= 2;
+			buf_pon(&w, w.d + pila[np].o, pila[np].n);
+			buf_c(&w, ':');
+			buf_pon(&w, w.d + pila[np + 1].o, pila[np + 1].n);
+			pila[np].prio = 9;
 			break;
 		case T_PAREN:
 			if (np < 1)

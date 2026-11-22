@@ -1032,7 +1032,7 @@ void fmt_cambia_decimales(const char *c, int mas, char *d, u32 cabe)
 void fmt_a_local(const char *c, const cu_local *loc, char *d, u32 cabe)
 {
 	u32 n = 0;
-	int com = 0, cor = 0;
+	int com = 0, cor = 0, fecha = fmt_es_fecha(c);
 
 	if (!cabe)
 		return;
@@ -1055,9 +1055,9 @@ void fmt_a_local(const char *c, const cu_local *loc, char *d, u32 cabe)
 			continue;
 		}
 		if (!com && !cor) {
-			if (k == '.')
+			if (k == '.' && !fecha)
 				k = loc->dec;
-			else if (k == ',')
+			else if (k == ',' && !fecha)
 				k = loc->mil;
 			else if ((k == 'y' || k == 'Y') && loc->dec == ',')
 				k = 'a';
@@ -1070,7 +1070,26 @@ void fmt_a_local(const char *c, const cu_local *loc, char *d, u32 cabe)
 void fmt_de_local(const char *t, const cu_local *loc, char *d, u32 cabe)
 {
 	u32 n = 0;
-	int com = 0, cor = 0;
+	int com = 0, cor = 0, fecha;
+	char prov[200];
+
+	/* (en las de fecha, la coma y el punto son tal cual) */
+	{
+		u32 i;
+		int q = 0;
+
+		for (i = 0; t[i] && i + 1 < sizeof prov; i++) {
+			char k = t[i];
+
+			if (k == '"')
+				q = !q;
+			if (!q && (k == 'a' || k == 'A') && !(t[i + 1] == 'm' || t[i + 1] == 'M' || t[i + 1] == '/'))
+				k = 'y';
+			prov[i] = k;
+		}
+		prov[i] = 0;
+		fecha = fmt_es_fecha(prov);
+	}
 
 	if (!cabe)
 		return;
@@ -1093,9 +1112,9 @@ void fmt_de_local(const char *t, const cu_local *loc, char *d, u32 cabe)
 			continue;
 		}
 		if (!com && !cor) {
-			if (k == loc->dec)
+			if (k == loc->dec && !fecha)
 				k = '.';
-			else if (k == loc->mil)
+			else if (k == loc->mil && !fecha)
 				k = ',';
 			else if (k == 'a' || k == 'A') {
 				/* aaaa es el año (salvo AM/PM) */

@@ -23,6 +23,8 @@
  *   nombre NOMBRE =Hoja1!$A$1:$A$5
  *   guarda RUTA | abre RUTA
  *   celdas N                 la hoja tiene N celdas
+ *   ida A1                   lo que sale al corregir A1, escrito otra vez, sale igual
+ *   prueba A1 TEXTO          como «pon», pero sin quejarse si está mal escrito (para el fuzz)
  *   estilo A1:B2 COSAS       negrita cursiva subrayado tachado tam=14 letra=DejaVu_Serif
  *                            color=FF0000 fondo=FFFF00 trama=6 ctrama=000000 alin=izq|centro|der
  *                            valin=arriba|centro|abajo ajustar borde=1 (todos) bizq= barr= bder= bab=
@@ -528,8 +530,27 @@ int cuentas_guion(const char *ruta)
 		}
 		if (*q == ' ')
 			q++;
+		if (iguales(o, "ida")) {
+			char t1[4096], t2[4096], err[300];
+
+			lib_texto_edicion(l, h, f, c, t1, sizeof t1);
+			lib_pon_entrada(l, h, f, c, t1, err, sizeof err);
+			calc_recalcula(l);
+			lib_texto_edicion(l, h, f, c, t2, sizeof t2);
+			if (iguales(t1, t2))
+				bien++;
+			else
+				falla("ida", t2, t1);
+			continue;
+		}
 		if (iguales(o, "comenta")) {
 			op_comentario(l, h, f, c, q);
+			continue;
+		}
+		if (iguales(o, "prueba")) {
+			char err[300];
+
+			op_entrada(l, h, f, c, q, err, sizeof err);
 			continue;
 		}
 		if (iguales(o, "pon")) {

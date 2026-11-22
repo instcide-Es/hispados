@@ -41,6 +41,14 @@ void pdf_texto(pdfsal *s, int cara, int falsas, double tam, u32 color, const u32
 void pdf_rect(pdfsal *s, double x, double y, double an, double al, u32 color);
 /* una raya de x0,y0 a x1,y1, de grosor g */
 void pdf_raya(pdfsal *s, double x0, double y0, double x1, double y1, double g, u32 color);
+/* (CUENTAS32) un polígono relleno (n puntos x, y); y los recortes: guardar el
+ * estado (q), recortar a un rectángulo o a un polígono (lo de después solo se
+ * pinta dentro) y volver al estado guardado (Q) */
+void pdf_poligono(pdfsal *s, const double *xy, int n, u32 color);
+void pdf_guarda(pdfsal *s);
+void pdf_recorta_rect(pdfsal *s, double x, double y, double an, double al);
+void pdf_recorta_poligono(pdfsal *s, const double *xy, int n);
+void pdf_restaura(pdfsal *s);
 /* una imagen (el archivo entero: PNG, JPG, BMP, GIF). La misma «datos» dos
  * veces es la misma imagen (va una vez). Da su número, o -1 si no se lee */
 int pdf_imagen(pdfsal *s, const u8 *datos, u32 n);

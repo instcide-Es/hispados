@@ -21,6 +21,16 @@ cuentas/funciones
 cuentas/deshacer
 cuentas/operar
 cuentas/archivo
+cuentas/f_hoj
+cuentas/f_csv
+cuentas/f_xlsx
+cuentas/f_ods
+cuentas/pintor
+cuentas/celdas
+cuentas/grafico
+cuentas/f_pdf
+cuentas/vista
+cuentas/dialogos
+cuentas/ventana
 cuentas/prueba
 cuentas/principal
-cuentas/apanos_tmp

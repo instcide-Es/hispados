@@ -1258,6 +1258,32 @@ static void evalua_en(ctx *x, const formula *fm, ev *res, int hondo)
 			break;
 		case T_PAREN:
 			break;
+		case T_DOSP:
+			if (np >= 2) {
+				ev *a = &pila[np - 2], *b = &pila[np - 1];
+
+				if (a->t == V_ERR)
+					;
+				else if (b->t == V_ERR)
+					*a = *b;
+				else if (a->t != V_REF || b->t != V_REF || a->h != b->h)
+					ev_err(a, ER_VALOR);
+				else {
+					rango r = a->r;
+
+					if (b->r.f0 < r.f0)
+						r.f0 = b->r.f0;
+					if (b->r.f1 > r.f1)
+						r.f1 = b->r.f1;
+					if (b->r.c0 < r.c0)
+						r.c0 = b->r.c0;
+					if (b->r.c1 > r.c1)
+						r.c1 = b->r.c1;
+					a->r = r;
+				}
+				np--;
+			}
+			break;
 		case T_NEG:
 		case T_POS:
 		case T_PORC:

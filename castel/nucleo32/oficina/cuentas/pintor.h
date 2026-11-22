@@ -18,6 +18,8 @@ struct pintor {
 	double rx0, ry0, rx1, ry1;	/* el recorte de ahora */
 	double pila_r[16][4];	/* (los recortes guardados) */
 	int n_pila;
+	int abierto;		/* (PDF) hay un recorte puesto (un «q» sin su «Q») */
+	double an_pag, al_pag;
 	/* lo de cada uno */
 	void (*rect)(pintor *p, double x, double y, double an, double al, u32 c);
 	void (*raya)(pintor *p, double x0, double y0, double x1, double y1, double g, u32 c);
@@ -30,6 +32,8 @@ struct pintor {
 /* el pintor de un lienzo y el de un PDF (con su página ya empezada) */
 void pt_de_lienzo(pintor *p, lienzo *l);
 void pt_de_pdf(pintor *p, pdfsal *s, double an_pag, double al_pag);
+/* (PDF) acabar lo pintado en la página: cierra el recorte (antes de pdf_pagina o pdf_acaba) */
+void pt_acaba(pintor *p);
 /* el recorte: guardar el de ahora y cortar más (la intersección), y volver al de antes */
 void pt_recorte(pintor *p, double x, double y, double an, double al);
 void pt_vuelve(pintor *p);

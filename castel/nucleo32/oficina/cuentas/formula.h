@@ -19,7 +19,8 @@
 enum {
 	T_NUM, T_TXT, T_LOG, T_ERR, T_REF, T_RANGO, T_NOMBRE, T_FUNC, T_FALTA,
 	T_SUMA, T_RESTA, T_POR, T_ENTRE, T_POT, T_UNE, T_IGUAL, T_DISTINTO, T_MENOR, T_MAYOR, T_MENOR_IG, T_MAYOR_IG,
-	T_NEG, T_POS, T_PORC, T_PAREN, T_NOMBRE_MAL
+	T_NEG, T_POS, T_PORC, T_PAREN, T_NOMBRE_MAL,
+	T_DOSP			/* «:» entre dos referencias (A1:INDICE(...)): el rango que las abarca */
 };
 /* (T_REF, T_RANGO) a: los «$» y lo demás */
 #define RA_C0 1			/* columna (de la primera) fija */
