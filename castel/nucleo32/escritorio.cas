@@ -2191,8 +2191,8 @@ módulo Escritorio
         devolver ventanas[i].ent <> ventanas[i].sal
     fin
 
-    constante AC_FORZAR = 78                    ; (CORTES) «Forzar el cierre»
-    constante AC_NO_FORZAR = 79                 ; (CORTES) «Cancelar»
+    constante AC_FORZAR = 240                   ; (CORTES) «Forzar el cierre» (lejos de los demás AC_: se miran aquí, no en haz)
+    constante AC_NO_FORZAR = 241                ; (CORTES) «Cancelar»
     constante FORZAR_AN = 500
     constante FORZAR_AL = 236
 
