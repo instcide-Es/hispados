@@ -36,21 +36,26 @@ static const struct { const char *nombre; const Exp *t; const u32 *n; } propias[
 static struct { char dll[32]; char f[40]; } faltan[MAX_FALTAN];
 static int nfaltan;
 static u8 *trampolines;
-void falta_funcion(const char *dll, const char *f) __attribute__((noreturn));
+void falta_funcion(const char *dll, const char *f, u32 desde) __attribute__((noreturn));
+void diag_falta_importada(const char *quien, const char *dll, const char *f);   /* (JUEGOS) diagnostico.c */
+void diag_falta_dll(const char *quien, const char *dll);
 
-static void __attribute__((used, regparm(1))) falta_n(u32 i)
+/* (JUEGOS) el trampolín de la que falta: con la dirección desde la que se ha llamado */
+static void __attribute__((used, regparm(2))) falta_n(u32 i, u32 desde)
 {
-	falta_funcion(faltan[i].dll, faltan[i].f);
+	falta_funcion(faltan[i].dll, faltan[i].f, desde);
 }
-__asm__(".text\n falta_comun:\n push %eax\n call falta_n\n");
+__asm__(".text\n falta_comun:\n movl (%esp), %edx\n push %eax\n call falta_n\n");
 
-static void *trampolin(const char *dll, const char *f)
+static void *trampolin(const char *quien, const char *dll, const char *f)
 {
 	u8 *p;
 	u32 i;
 	extern u8 falta_comun[];
-	if (nfaltan >= MAX_FALTAN)
+	if (nfaltan >= MAX_FALTAN) {
+		diag_falta_importada(quien, dll, f);
 		return (void *)falta_comun;
+	}
 	if (!trampolines)
 		trampolines = m_pedir(MAX_FALTAN * 12);
 	i = nfaltan++;
@@ -62,6 +67,7 @@ static void *trampolin(const char *dll, const char *f)
 	p[5] = 0xE9;                     /* jmp falta_comun */
 	*(u32 *)(p + 6) = (u32)falta_comun - (u32)(p + 10);
 	traza("falta %s!%s (trampolín)", dll, f);
+	diag_falta_importada(quien, dll, f);       /* (JUEGOS) al registro */
 	return p;
 }
 
@@ -111,6 +117,12 @@ static void alias(char *n)
 		strcpy(n, "MSVCRT.DLL");
 	else if (!strcmp(n, "COMCTL32.DLL") || !strcmp(n, "MSVCRT.DLL"))
 		;
+}
+
+void nombre_dll(const char *r, char *d, u32 cabe)
+{
+	nombre_base(r, d, cabe);
+	alias(d);
 }
 
 Modulo *mod_por_nombre(const char *nombre)
@@ -202,7 +214,9 @@ static int leer_en(u32 m, u32 pos, void *d, u32 n)
 	return sys_leer(m, d, n) == n;
 }
 
-static u32 abrir_dll(const char *nombre, char *ruta)
+/* (JUEGOS) la DLL «nombre» buscada como al cargar, pero desde la carpeta
+ * «carpeta» (la del programa; «» si no): para WIN32 COMPRUEBA */
+u32 abrir_dll_desde(const char *carpeta, const char *nombre, char *ruta)
 {
 	char t[160], c[160];
 	u32 m;
@@ -214,14 +228,7 @@ static u32 abrir_dll(const char *nombre, char *ruta)
 		return sys_abrir(c, 0);
 	}
 	/* la carpeta del programa, la de Win32 y la de trabajo */
-	copia_n(t, ruta_exe, sizeof t);
-	{
-		char *p = strrchr(t, '\\');
-		if (p)
-			p[1] = 0;
-		else
-			t[0] = 0;
-	}
+	copia_n(t, carpeta, sizeof t);
 	sitios[0] = t;
 	sitios[1] = carpeta_w32;
 	sitios[2] = "";
@@ -235,6 +242,41 @@ static u32 abrir_dll(const char *nombre, char *ruta)
 	}
 	return E_NO_HAY;
 }
+static u32 abrir_dll(const char *nombre, char *ruta)
+{
+	char t[160];
+	copia_n(t, ruta_exe, sizeof t);
+	{
+		char *p = strrchr(t, '\\');
+		if (p)
+			p[1] = 0;
+		else
+			t[0] = 0;
+	}
+	return abrir_dll_desde(t, nombre, ruta);
+}
+
+/* (JUEGOS) ¿tiene la DLL de dentro «dll» la función «fn»? 1 sí, -1 no; 0 si
+ * «dll» no es de las de dentro. Con fn = 0, solo si es de dentro (1); con
+ * dll = 0, si la tiene alguna (como al importar) */
+int propia_tiene(const char *dll, const char *fn)
+{
+	u32 k, q;
+	for (k = 0; k < sizeof propias / sizeof propias[0]; k++)
+		if (!dll || !strcmp(propias[k].nombre, dll)) {
+			if (!fn)
+				return 1;
+			for (q = 0; q < *propias[k].n; q++)
+				if (!strcmp(propias[k].t[q].nombre, fn))
+					return 1;
+			if (dll)
+				return -1;
+		}
+	return dll ? 0 : -1;
+}
+/* (JUEGOS) el nombre de una DLL como la busca el cargador (con sus alias) */
+static void alias(char *n);
+void nombre_dll(const char *r, char *d, u32 cabe);
 
 static int importar(Modulo *m, u32 *falta);
 
@@ -370,7 +412,7 @@ static int importar(Modulo *m, u32 *fl)
 		if (!o) {
 			char t[200];
 			fmt(t, sizeof t, "No se encuentra %s, que necesita %s.", dll, m->nombre);
-			aviso_serie("%s", t);
+			diag_falta_dll(m->nombre, dll);     /* (JUEGOS) */
 			extern void error_carga(const char *);
 			error_carga(t);
 			return 0;
@@ -399,7 +441,7 @@ static int importar(Modulo *m, u32 *fl)
 						}
 			}
 			if (!p)
-				p = trampolin(o->nombre, fn);
+				p = trampolin(m->nombre, o->nombre, fn);
 			else if (traza_si >= 2 && (o->propias || traza_si >= 3))
 				p = espia(fn, p);
 			*iat = (u32)p;

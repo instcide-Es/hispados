@@ -472,6 +472,8 @@ API(HMODULE) LoadLibraryA(const char *n)
 	m = mod_cargar(n, &f);
 	traza("LoadLibraryA(%s) = %x", n, m ? m->base : 0);
 	if (!m) {
+		void diag_apunta(const char *f, ...);   /* (JUEGOS) */
+		diag_apunta("LoadLibrary(%s): %s", n, f == 1 ? "no se encuentra" : f == 4 ? "le falta una DLL" : f == 3 ? "no hay memoria" : "no es una DLL de 32 bits");
 		pon_error(f == 1 ? 126 : 193);
 		return 0;
 	}
@@ -500,8 +502,14 @@ API(void *) GetProcAddress(HMODULE h, const char *n)
 		traza("GetProcAddress(%s, #%u) = %x", m ? m->nombre : "?", (u32)n, (u32)p);
 	else
 		traza("GetProcAddress(%s, %s) = %x", m ? m->nombre : "?", n, (u32)p);
-	if (!p)
+	if (!p) {
+		void diag_getprocaddress(const char *dll, const char *f);   /* (JUEGOS) */
+		char num[12];
+		if ((u32)n < 0x10000)
+			fmt(num, sizeof num, "#%u", (u32)n);
+		diag_getprocaddress(m ? m->nombre : "?", (u32)n < 0x10000 ? num : n);
 		pon_error(127);
+	}
 	return p;
 }
 API(char *) GetCommandLineA(void) { return linea_ordenes; }

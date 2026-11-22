@@ -22,6 +22,13 @@ void mensaje_fatal(const char *t);   /* user32.c: un cuadro (o la consola) */
 
 typedef struct { u8 letra, clase, medio, sl; u32 total, libre, sist; char n[41], et[12]; u8 q, rel[2]; } INFO_UNIDAD;
 
+char letra_sistema;               /* (JUEGOS) la de la unidad del sistema */
+void prepara_carpeta_usuario(void);   /* (JUEGOS) diagnostico.c */
+void diag_apunta(const char *f, ...);
+void diag_donde(u32 dir, char *d, u32 cabe);
+const char *diag_ruta_log(void);
+int comprueba(const char *args);
+
 /* la carpeta de las DLL: \WIN32 de la unidad del sistema, o su \HISPA\WIN32 */
 static void busca_carpeta(void)
 {
@@ -36,6 +43,7 @@ static void busca_carpeta(void)
 		}
 	if (!l)
 		l = 'C';
+	letra_sistema = l;
 	fmt(c, sizeof c, "%c:\\WIN32", l);
 	if (entrada_de(c, &e, 0) && (e.atributos & 0x10)) {
 		fmt(carpeta_w32, sizeof carpeta_w32, "%c:\\WIN32\\", l);
@@ -69,11 +77,15 @@ void error_carga(const char *t)
 	mensaje_fatal(t);
 }
 
-void falta_funcion(const char *dll, const char *f)
+/* (JUEGOS) el programa llama a una función que aún no hay: se dice cuál
+ * (DLL!función, y desde dónde), se apunta y se acaba */
+void falta_funcion(const char *dll, const char *f, u32 desde)
 {
-	char t[200];
-	fmt(t, sizeof t, "Hispa-Pentium: falta la función %s (%s).", f, dll);
-	aviso_serie("%s", t);
+	char t[400], d[48];
+	diag_donde(desde, d, sizeof d);
+	diag_apunta("LLAMA A UNA QUE FALTA: %s!%s (desde %s); se acaba", dll, f, d);
+	fmt(t, sizeof t, "Falta la función %s!%s\n\n%s la ha llamado (desde %s) y Hispa-Pentium aún no la tiene: el programa tiene que acabar.\n\n"
+	    "Queda apuntado en %s. Mándenos una foto de este aviso.", dll, f, mod_exe ? mod_exe->nombre : "El programa", d, diag_ruta_log());
 	mensaje_fatal(t);
 	w32_salir(255);
 }
@@ -147,6 +159,15 @@ int w32_principal(void)
 		sys_escribir(t, sizeof t - 1);
 		sys_salir(1);
 	}
+	/* (JUEGOS) «WIN32 COMPRUEBA programa.exe...»: mirar sin ejecutar */
+	if (!strnicmp_(args, "COMPRUEBA", 9) && (args[9] == ' ' || !args[9])) {
+		char resto[400];
+		busca_carpeta();
+		prepara_entorno();
+		prepara_carpeta_usuario();
+		a1252(resto, args + 9, sizeof resto);
+		sys_salir(comprueba(resto));
+	}
 	/* «U:\RUTA\PROG.EXE resto»: la ruta, en la 1252 */
 	p = args;
 	{
@@ -170,6 +191,7 @@ int w32_principal(void)
 	}
 	busca_carpeta();
 	prepara_entorno();
+	prepara_carpeta_usuario();          /* (JUEGOS) \USUARIOS\<usuario>: el registro de WIN32 */
 	{
 		char t[16];
 		if (GetEnvironmentVariableA("HISPA32", t, sizeof t) && (t[0] == 'T' || t[0] == 't'))
