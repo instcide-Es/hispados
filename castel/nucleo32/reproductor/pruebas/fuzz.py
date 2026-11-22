@@ -61,7 +61,7 @@ def cambia(d):
 malos = ub = 0
 tmp = tempfile.mkdtemp()
 exts = ['.mp3', '.ogg', '.flac', '.wav', '.mod', '.xm', '.s3m', '.it', '.m3u', '.pls', '.cue']
-env = dict(os.environ, ASAN_OPTIONS='detect_leaks=0:abort_on_error=0', UBSAN_OPTIONS='print_stacktrace=0:halt_on_error=0')
+env = dict(os.environ, ASAN_OPTIONS='detect_leaks=0:abort_on_error=0:allocator_may_return_null=1', UBSAN_OPTIONS='print_stacktrace=0:halt_on_error=0')
 for k in range(veces):
     s = random.choice(semillas)
     ruta = os.path.join(tmp, 'f%d%s' % (k % 4, random.choice(exts)))

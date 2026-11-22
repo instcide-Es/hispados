@@ -39,7 +39,7 @@ typedef struct {
 } marca;
 #define MAX_MARCAS 64
 
-#define VIS_N 16384			/* lo último que ha salido, para la visualización (en mono) */
+#define VIS_N 65536			/* lo último que ha salido, para la visualización (en mono): más que lo que va por delante (hasta 1,2 s) */
 
 typedef struct {
 	lista *l;

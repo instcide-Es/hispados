@@ -18,7 +18,7 @@
 #include <sys/stat.h>
 #include "so.h"
 
-void *so_pide(size_t n) { return malloc(n ? n : 1); }
+void *so_pide(size_t n) { return n > 0x30000000u ? NULL : malloc(n ? n : 1); }	/* (como en Pentium: lo enorme, que no) */
 void *so_repide(void *p, size_t n) { return realloc(p, n ? n : 1); }
 void so_suelta(void *p) { free(p); }
 u32 so_memoria_usada(void) { return 0; }

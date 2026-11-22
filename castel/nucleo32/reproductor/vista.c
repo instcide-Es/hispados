@@ -2356,6 +2356,9 @@ static void pon_bandeja(void)
 
 static void opcion_bandeja(u32 a)
 {
+	static const char *nom[] = { "tocar o pausa", "siguiente", "anterior", "parar", "", "mostrar la ventana", "salir" };
+
+	reg("la bandeja: %s", a < 7 ? nom[a] : "un clic");
 	switch (a) {
 	case 0: accion(Z_TOCAR, 0, 0, 0, 1, 0); break;
 	case 1: motor_siguiente(&M); break;
@@ -2537,6 +2540,22 @@ int vista_principal(const char *args)
 	if (motor_prepara(&M, &L))
 		return 1;
 	lee_ajustes();
+	/* las opciones de la línea (antes de hacer la ventana) */
+	for (p = args;;) {
+		p = siguiente_ruta(p, a, sizeof a);
+		if (!a[0])
+			break;
+		if (igual_sin_caja(a, "/PEQUENO") || igual_sin_caja(a, "/MINI"))
+			mini = 1;
+		else if (igual_sin_caja(a, "/GRANDE"))
+			mini = 0;
+		else if (igual_sin_caja(a, "/SINVIS"))
+			vis_modo = 0;
+		else if (igual_sin_caja(a, "/ONDA"))
+			vis_modo = 2;
+		else if (igual_sin_caja(a, "/ESPECTRO"))
+			vis_modo = 1;
+	}
 	{
 		int ca, cl;
 
@@ -2574,14 +2593,6 @@ int vista_principal(const char *args)
 		p = siguiente_ruta(p, a, sizeof a);
 		if (!a[0])
 			break;
-		if (igual_sin_caja(a, "/PEQUENO") || igual_sin_caja(a, "/MINI"))
-			mini = 1;
-		else if (igual_sin_caja(a, "/SINVIS"))
-			vis_modo = 0;
-		else if (igual_sin_caja(a, "/ONDA"))
-			vis_modo = 2;
-		else if (igual_sin_caja(a, "/ESPECTRO"))
-			vis_modo = 1;
 		if (es_opcion(a))
 			continue;
 		anade_argumento(&L, a);

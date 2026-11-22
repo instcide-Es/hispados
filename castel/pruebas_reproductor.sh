@@ -78,7 +78,7 @@ case "$l" in *"desfase=0 snr="[7-9][0-9]*|*"desfase=0 snr=999"*) ok "anfitrión:
 ffmpeg -hide_banner -loglevel error -y -i $F/seno.wav -af aresample=48000:resampler=soxr:precision=28 $Y/seno48.wav
 for x in wav flac mp3 ogg; do
   $R motor $Y/m.wav $F/seno_a.$x $F/seno_b.$x > $Y/motor.txt 2>&1
-  l=$($C $Y/m.wav $Y/seno48.wav --desfase 50)
+  l=$($C $Y/m.wav $Y/seno48.wav --sin-alinear)
   s=60; [ $x = ogg ] && s=38
   if echo "$l" | awk -v s=$s '{ for (i = 1; i <= NF; i++) { split($i, x, "="); v[x[1]] = x[2] } } END { split(v["tramas"], t, "/"); exit !(t[1] >= t[2] - 2 && v["desfase"] == 0 && v["snr"] + 0 >= s) }'; then
     ok "anfitrión: sin huecos ($x): las dos mitades de un seno, seguidas como si fueran una ($l)"
@@ -138,13 +138,14 @@ for x in escala.ogg:"los comentarios de un OGG Vorbis y su METADATA_BLOCK_PICTUR
   else ko "anfitrión: ${x#*:}: $(tr '\n' ' ' < $Y/et.txt)"; fi
 done
 $R lista $F/lista.m3u > $Y/l.txt 2>&1
-if [ "$(wc -l < $Y/l.txt)" = 3 ] && grep -q "^0|escala.mp3|Hispa-DOS|Escala MP3|10|" $Y/l.txt; then ok "anfitrión: una .M3U con #EXTINF (artista, título y duración; la radio de Internet, saltada)"
+if [ "$(wc -l < $Y/l.txt)" = 3 ] && grep -q "^0|.*/escala.mp3|Hispa-DOS|Escala MP3|10|" $Y/l.txt; then ok "anfitrión: una .M3U con #EXTINF (artista, título y duración; la radio de Internet, saltada)"
 else ko "anfitrión: .M3U: $(tr '\n' ' ' < $Y/l.txt)"; fi
 $R lista $F/lista.pls > $Y/l.txt 2>&1
-if [ "$(wc -l < $Y/l.txt)" = 2 ] && grep -q "^0|escala.wav||La escala en WAV|10|" $Y/l.txt; then ok "anfitrión: una .PLS"; else ko "anfitrión: .PLS: $(tr '\n' ' ' < $Y/l.txt)"; fi
+if [ "$(wc -l < $Y/l.txt)" = 2 ] && grep -q "^0|.*/escala.wav||La escala en WAV|10|" $Y/l.txt; then ok "anfitrión: una .PLS"; else ko "anfitrión: .PLS: $(tr '\n' ' ' < $Y/l.txt)"; fi
 # el fuzz (los decodificadores, las etiquetas, las listas y las hojas .CUE)
-l=$(python3 -I $RD/pruebas/fuzz.py $R $F ${FUZZ_REPRO:-400} 2>&1 | tail -n 1)
-case "$l" in "fuzz: "*" 0 malos"*) ok "anfitrión: $l (con ASan y UBSan)" ;; *) ko "anfitrión: $l" ;; esac
+python3 -I $RD/pruebas/fuzz.py $R $F ${FUZZ_REPRO:-400} > $Y/fuzz.txt 2>&1
+l=$(tail -n 1 $Y/fuzz.txt)
+case "$l" in "fuzz: "*" 0 malos"*) ok "anfitrión: $l (con ASan y UBSan)" ;; *) ko "anfitrión: $l"; head -14 $Y/fuzz.txt | sed 's/^/        /' ;; esac
 unset ASAN_OPTIONS
 # ---- 2. REPRODUC.BIN y el paquete ----
 if bash $RD/hacer.sh $Y/REPRODUC.BIN > $Y/hacer.txt 2>&1; then ok "hacer.sh: REPRODUC.BIN ($(stat -c %s $Y/REPRODUC.BIN) octetos), para el Pentium (-march=i586: sin CMOV ni FCOMI)"
@@ -235,4 +236,18 @@ miracap "la ventana: la «pantalla» con la carátula, los botones grandes (Paus
 sigue_bien "en el escritorio${KVM:+, con otro programa gastando el procesador,} con la ventana arrastrándose y el modo pequeño" $Y/esc.wav $Y/ref_esc.wav
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en el escritorio, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+# ---- 7. Mi equipo y la bandeja: dos clics en un .OGG lo abren con el
+# Reproductor (exoper.cas); se arrastra la ventana abajo y, desde Mi equipo,
+# se suelta en ella una hoja .CUE (EV_SOLTADO y la llamada 136); y el menú de
+# la nota de la bandeja (la 135): la primera opción, pausa
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/uequipo.cas -o $Y/uequipo.asm > /dev/null && nasm -f bin $Y/uequipo.asm -o $Y/EQUIPO.BIN
+CAPTURAS=$G MEMORIA=256 MODULOS=$Y/ORDENES.BIN,$Y/CONSOLA.BIN,$Y/SONIDO.BIN,$Y/INICIO.WAV,$Y/REPRODUC.BIN,$Y/ESCALA.OGG,$Y/TONOS.CUE,$Y/TONOS.BIN,$Y/EQUIPO.BIN \
+  ARRANQUE=escritorio QEMU_MAS="$KVM -audiodev wav,id=snd0,path=$Y/eq.wav,out.frequency=48000 -device intel-hda -device hda-duplex,audiodev=snd0" \
+  $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 6" ":doble 60 40" ":pausa 3" ":doble 580 160" ":pausa 3" ":doble 452 160" ":pausa 5" ":captura re4" \
+  ":arrastra 300 42 300 330" ":pausa 2" ":arrastra 545 235 300 540" ":pausa 3" ":clicd 726 585" ":pausa 1" ":captura re5" ":tecla ret" ":pausa 2" > $Y/eq.sal 2>&1
+tr -d '\r' < $Y/eq.sal > $Y/eq.txt
+S=$Y/eq.txt
+mira "Mi equipo: dos clics en ESCALA.OGG la abren con el Reproductor (y suena)" "^reproductor: ventana 760x[0-9]*; 1 canciones; la tarjeta a 48000 Hz$"
+mira "una hoja .CUE arrastrada desde Mi equipo y soltada en la ventana del Reproductor: a la lista (EV_SOLTADO y la llamada 136)" "^reproductor: Soltado en la lista: M:.TONOS.CUE$"
+mira "el menú de la nota de la bandeja (la llamada 135, EV_BANDEJA): la primera opción, «Pausa»" "^reproductor: la bandeja: tocar o pausa$"
 }

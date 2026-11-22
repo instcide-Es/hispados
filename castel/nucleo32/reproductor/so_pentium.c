@@ -268,6 +268,7 @@ size_t fwrite(const void *p, size_t a, size_t b, FILE *f) { (void)p; (void)a; (v
 int fseek(FILE *f, long o, int w) { (void)f; (void)o; (void)w; return -1; }
 long ftell(FILE *f) { (void)f; return -1; }
 int fgetc(FILE *f) { (void)f; return -1; }
+int fputc(int c, FILE *f) { (void)c; (void)f; return -1; }
 int ferror(FILE *f) { (void)f; return 1; }
 int feof(FILE *f) { (void)f; return 1; }
 int fflush(FILE *f) { (void)f; return 0; }

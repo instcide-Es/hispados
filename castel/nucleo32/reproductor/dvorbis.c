@@ -12,12 +12,79 @@
 #include "stb_vorbis.c"
 
 #define MAX_OGG (160u * 1024 * 1024)
+#define ARENA_OGG (3u * 1024 * 1024)	/* la memoria de stb_vorbis, toda de aquí (sin malloc ni free) */
 
 typedef struct {
 	stb_vorbis *v;
 	float *t;
 	int cabe_t;
+	char *arena;
 } vorbis;
+
+/* ¿está bien hecha la cabecera de los comentarios (el segundo paquete)?
+ * stb_vorbis se fía de sus largos (un largo enorme le hace pedir memoria
+ * «negativa» y escribir fuera: lo encontró el fuzz), así que se miran antes */
+static int comentarios_bien(const u8 *d, u32 n)
+{
+	u32 p = 0, paquete = 0, serie = 0, en = 0, cuantos, i, l, q;
+	int primera = 1;
+	static u8 b[65536];
+	int cabe_entero = 1;
+
+	while (p + 27 <= n && paquete < 2) {
+		u32 segs, k, datos;
+
+		if (memcmp(d + p, "OggS", 4))
+			return 0;
+		if (primera)
+			serie = le32(d + p + 14), primera = 0;
+		segs = d[p + 26];
+		if (p + 27 + segs > n)
+			return 0;
+		datos = p + 27 + segs;
+		for (k = 0; k < segs; k++) {
+			u32 s = d[p + 27 + k];
+
+			if (datos + s > n)
+				return 0;
+			if (le32(d + p + 14) == serie && paquete == 1) {
+				if (en + s <= sizeof b)
+					memcpy(b + en, d + datos, s);
+				else
+					cabe_entero = 0;
+				en += s;
+			}
+			datos += s;
+			if (s < 255 && le32(d + p + 14) == serie)
+				paquete++;
+		}
+		p = datos;
+	}
+	if (paquete < 2 || en < 7 + 8 || memcmp(b, "\x03vorbis", 7))
+		return 0;
+	if (!cabe_entero)
+		return 1;	/* (uno enorme, de imágenes: se deja a stb_vorbis) */
+	q = 7;
+	l = le32(b + q);
+	if (l > en - q - 4)
+		return 0;
+	q += 4 + l;
+	if (q + 4 > en)
+		return 0;
+	cuantos = le32(b + q);
+	q += 4;
+	if (cuantos > (en - q) / 4)
+		return 0;
+	for (i = 0; i < cuantos; i++) {
+		if (q + 4 > en)
+			return 0;
+		l = le32(b + q);
+		if (l > en - q - 4)
+			return 0;
+		q += 4 + l;
+	}
+	return 1;
+}
 
 static int vorbis_paso(dec *d)
 {
@@ -27,7 +94,25 @@ static int vorbis_paso(dec *d)
 
 	if (r <= 0)
 		return r;
-	o->v = stb_vorbis_open_memory(d->mem, (int)d->mem_largo, &e, NULL);
+	if (!comentarios_bien(d->mem, d->mem_largo)) {
+		copia(d->error, sizeof d->error, "OGG Vorbis mal hecho (sus comentarios)");
+		return -1;
+	}
+	/* (con su propia memoria: así un archivo malo no le hace soltar lo que no
+	 * pidió —el fuzz encontró uno así—, y lo que pide se ve de una vez) */
+	{
+		stb_vorbis_alloc a;
+
+		if (!o->arena)
+			o->arena = so_pide(ARENA_OGG);
+		if (!o->arena) {
+			copia(d->error, sizeof d->error, "no hay memoria para el OGG");
+			return -1;
+		}
+		a.alloc_buffer = o->arena;
+		a.alloc_buffer_length_in_bytes = (int)ARENA_OGG;
+		o->v = stb_vorbis_open_memory(d->mem, (int)d->mem_largo, &e, &a);
+	}
 	if (!o->v) {
 		fmt(d->error, sizeof d->error, "OGG Vorbis que no se puede leer (%d)", e);
 		return -1;
@@ -84,6 +169,7 @@ static void vorbis_cierra(dec *d)
 		if (o->v)
 			stb_vorbis_close(o->v);
 		so_suelta(o->t);
+		so_suelta(o->arena);
 		so_suelta(o);
 	}
 	d->priv = NULL;

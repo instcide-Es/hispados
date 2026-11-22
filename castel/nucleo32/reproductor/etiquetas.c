@@ -303,8 +303,10 @@ void etiquetas_ogg(const u8 *d, u32 n, etiquetas *e, int caratula)
 						goto fin;
 					b = nb;
 				}
-				memcpy(b + en, d + datos, s);
-				en += s;
+				if (s) {
+					memcpy(b + en, d + datos, s);
+					en += s;
+				}
 			}
 			datos += s;
 			if (s < 255 && le32(d + p + 14) == serie)

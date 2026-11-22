@@ -17,6 +17,7 @@ size_t fwrite(const void *, size_t, size_t, FILE *);
 int fseek(FILE *, long, int);
 long ftell(FILE *);
 int fgetc(FILE *);
+int fputc(int, FILE *);
 int ferror(FILE *);
 int feof(FILE *);
 int fflush(FILE *);

@@ -18,7 +18,7 @@ O=build/reproductor-pentium
 mkdir -p $O
 T=terceros
 BF="-m32 -std=gnu11 -march=i586 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables
-    -fno-builtin -fno-tree-loop-distribute-patterns -ffunction-sections -fdata-sections -fno-strict-aliasing
+    -fno-builtin -fno-tree-loop-distribute-patterns -ffunction-sections -fdata-sections -fno-strict-aliasing -Werror=implicit-function-declaration -Werror=int-conversion -Werror=incompatible-pointer-types
     -nostdinc -isystem $(gcc -m32 -print-file-name=include) -I$AQUI/inc -I$AQUI -I$T/minimp3 -I$T/stb_vorbis -I$T/dr_flac -I$T/stb
     -I$T/libxmp-lite/include/libxmp-lite -DREPRO_PENTIUM"
 CABECERAS="$AQUI/so.h $AQUI/decod.h $AQUI/util.h $AQUI/lista.h $AQUI/motor.h $AQUI/dsp.h $AQUI/etiquetas.h $AQUI/vista.h"
@@ -63,5 +63,6 @@ nasm -f elf32 $AQUI/entrada.asm -o $O/entrada.o
 ld -m elf_i386 --no-warn-rwx-segments -z noexecstack --gc-sections -T $AQUI/pentium.ld -o $O/reproduc.elf $O/entrada.o $OBJ
 objcopy -O binary $O/reproduc.elf "$SAL"
 # nada de después del Pentium (el Atom N455 lo tiene, pero el Pentium de verdad no)
-if objdump -d $O/reproduc.elf | grep -qE '\scmov|\sfcomi|\sfucomi'; then echo "hacer.sh: ¡REPRODUC.BIN lleva CMOV o FCOMI!" >&2; exit 1; fi
+# (sin la cabecera HPU3 de delante, que son datos: objdump los lee como instrucciones)
+if objdump -d --start-address=0x40000018 $O/reproduc.elf | grep -qE '\scmov|\sfcomi|\sfucomi'; then echo "hacer.sh: ¡REPRODUC.BIN lleva CMOV o FCOMI!" >&2; exit 1; fi
 echo "hacer.sh: $SAL ($(stat -c %s "$SAL") octetos)"
