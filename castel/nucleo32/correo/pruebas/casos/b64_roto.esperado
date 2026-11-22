@@ -1,0 +1,10 @@
+partes: 1 cortado=0 malformado=0
+[0] application/octet-stream juego="" cod=1 nombre="roto.bin" id="" disp="" tam=30 adjunto=1
+From: a@b.es
+To: (no está)
+Subject: roto
+Date: (no está)
+principal: html=-1 texto=-1
+adjuntos: 1
+adjunto 0: parte=0 nombre="roto.bin" tipo=application/octet-stream largo=20 sha256=d41282ce4bc6ac89
+suplantacion: 0 

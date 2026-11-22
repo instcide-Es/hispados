@@ -844,7 +844,7 @@ módulo Exoper
     ; paquete «pdf»: \HISPA\HISPAPDF.BIN): si están instalados, sus clases se
     ; abren con ellos, también donde ASOCIA.TXT dice lo de fábrica de antes
     ; (el Mirador de la oficina); si no lo están, con lo de siempre
-    variable de_paquetes: arreglo [560] de byte = "PLU=\\PLUMA.BIN|%1\r\nODT=\\PLUMA.BIN|%1\r\nDOCX=\\PLUMA.BIN|%1\r\nDOC=\\PLUMA.BIN|%1\r\nRTF=\\PLUMA.BIN|%1\r\nPDF=\\HISPAPDF.BIN|%1\r\nZIP=\\COMPRIM.BIN|%1\r\nBMP=\\MIRADOR.BIN|%1\r\nPNG=\\MIRADOR.BIN|%1\r\nJPG=\\MIRADOR.BIN|%1\r\nJPE=\\MIRADOR.BIN|%1\r\nGIF=\\MIRADOR.BIN|%1\r\nICO=\\MIRADOR.BIN|%1\r\nTGA=\\MIRADOR.BIN|%1\r\nPSD=\\MIRADOR.BIN|%1\r\nPPM=\\MIRADOR.BIN|%1\r\nPGM=\\MIRADOR.BIN|%1\r\nPNM=\\MIRADOR.BIN|%1\r\n"
+    variable de_paquetes: arreglo [600] de byte = "PLU=\\PLUMA.BIN|%1\r\nODT=\\PLUMA.BIN|%1\r\nDOCX=\\PLUMA.BIN|%1\r\nDOC=\\PLUMA.BIN|%1\r\nRTF=\\PLUMA.BIN|%1\r\nPDF=\\HISPAPDF.BIN|%1\r\nZIP=\\COMPRIM.BIN|%1\r\nBMP=\\MIRADOR.BIN|%1\r\nPNG=\\MIRADOR.BIN|%1\r\nJPG=\\MIRADOR.BIN|%1\r\nJPE=\\MIRADOR.BIN|%1\r\nGIF=\\MIRADOR.BIN|%1\r\nICO=\\MIRADOR.BIN|%1\r\nTGA=\\MIRADOR.BIN|%1\r\nPSD=\\MIRADOR.BIN|%1\r\nPPM=\\MIRADOR.BIN|%1\r\nPGM=\\MIRADOR.BIN|%1\r\nPNM=\\MIRADOR.BIN|%1\r\nEML=\\CORREO.BIN|%1\r\n"  ; (CORREO) los .EML, con Correo
 
     ; (REPRODUCTOR) la música, con el Reproductor (el paquete «reproduc»:
     ; \HISPA\REPRODUC.BIN), si está instalado (y donde ASOCIA.TXT no dice otra cosa)

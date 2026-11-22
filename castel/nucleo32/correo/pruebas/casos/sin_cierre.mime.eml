@@ -1,0 +1,20 @@
+From: a@b.es
+Subject: sin cerrar
+Content-Type: multipart/mixed; boundary="ext"
+
+--ext
+Content-Type: multipart/alternative; boundary="int"
+
+--int
+Content-Type: text/plain
+
+texto de dentro
+--int
+Content-Type: text/html
+
+<b>html</b>
+--ext
+Content-Type: text/plain; name="nota.txt"
+Content-Disposition: attachment
+
+una nota sin cierre final

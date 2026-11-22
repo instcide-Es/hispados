@@ -1,0 +1,38 @@
+From: Banco <soporte@banco.es>
+To: x@y.es
+Subject: =?ISO-8859-1?Q?Factura_de_noviembre?=
+Date: 22 Nov 2026 10:05 +0100
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="AAA"
+
+preambulo
+--AAA
+Content-Type: multipart/alternative; boundary=BBB
+
+--BBB
+Content-Type: text/plain; charset=iso-8859-15
+Content-Transfer-Encoding: quoted-printable
+
+Importe: 12 =A4=20
+L=EDnea partida=
+ aqu=ed.
+--BBB
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PHA+SW1wb3J0ZTogMTIgJmV1cm87PC9wPg==
+--BBB--
+--AAA
+Content-Type: application/pdf; name="factura.pdf"
+Content-Disposition: attachment; filename*=utf-8''factura%20noviembre.pdf
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQK
+JSVFT0YK
+--AAA
+Content-Type: image/png
+Content-Disposition: inline
+
+iVBORw0KGgo=
+--AAA--
+epilogo

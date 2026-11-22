@@ -1,0 +1,68 @@
+parrafos: 25 tramos: 24 enlaces: 0 imagenes: 0 scripts=0 remotas=0 enganosos=0 cortado=0
+P1 n0 h0 a0: [21]Título grande
+P0 n0 h1 a0: [1]pequeño
+P0 n0 h1 a0: [0]Párrafo uno con salto.
+P0 n0 h1 a1: [0]centrado
+P2 n1 h1 a0: [0]• uno
+P2 n1 h0 a0: [0]• dos
+P2 n2 h0 a0: [0]• dos.a
+P2 n1 h0 a0: [0]• tres
+P2 n1 h1 a0: [0]3. tres
+P2 n1 h0 a0: [0]4. cuatro
+P3 n1 h1 a0: [0]cita
+P3 n2 h1 a0: [0]cita doble
+P3 n1 h1 a0: [0]vuelve
+P5 n0 h1 a0: [8]  a  b
+P5 n0 h0 a0: [8]        tab
+P4 n0 h1 a0:
+P6 n0 h0 a0: [1]Nombre	Edad
+P6 n0 h0 a0: [0]Ana	30
+P0 n0 h1 a0: [0]bloque
+P0 n0 h1 a0: [0]uno
+P0 n0 h0 a0: [0]dos
+P0 n0 h1 a0: [0]tres
+P0 n0 h2 a0: [0]cuatro
+P0 n0 h0 a0: [0]término
+P2 n1 h0 a0: [0]definición
+--- texto ---
+Título grande
+
+pequeño
+
+Párrafo uno con salto.
+
+centrado
+
+• uno
+• dos
+  • dos.a
+• tres
+
+3. tres
+4. cuatro
+
+> cita
+>>
+>> cita doble
+>
+> vuelve
+
+  a  b
+        tab
+
+----------------------------------------
+Nombre	Edad
+Ana	30
+
+bloque
+
+uno
+dos
+
+tres
+
+
+cuatro
+término
+definición
+--- fin ---

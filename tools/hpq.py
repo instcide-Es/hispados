@@ -123,7 +123,7 @@ TIPOS = [
 TIPO_POR_NOMBRE = {
     'base': 'sistema', 'paquetes': 'sistema', 'equipo': 'sistema', 'hvprun': 'sistema',
     'red': 'internet', 'tls': 'internet', 'navega': 'internet', 'ssh': 'internet',
-    'tailscal': 'internet', 'wifi': 'internet',
+    'tailscal': 'internet', 'wifi': 'internet', 'correo': 'internet',  # (CORREO)
     'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina', 'pluma': 'oficina',   # (PLUMA32: pluma)
     'consola': 'herramientas', 'accesori': 'herramientas', 'comprim': 'herramientas',
     'ejemplos': 'desarrollo',
@@ -520,6 +520,12 @@ OPCIONALES = [
       for j in ('BLOQUES', 'ROMPEMUR', 'PINBALL', 'CULEBRA', 'MINAS', 'SOLITARI', 'TRAGABOL', 'ALMACEN')
       for o, d, e in (('BIN', 'JUEGOS', 'BIN'), ('', 'MENU', 'MNU'), ('', 'MENU', 'ICP'))]
      + [('JUEGOS.TXT', r'\HISPA\JUEGOS\LEEME.TXT')]),
+    # (CORREO) Correo, el cliente de correo (castel/nucleo32/correo/paquete.sh; tipo «internet»). El
+    # secreto de \HISPA\CORREO y el STARTTLS llegan con el base y el tls de la 0.8.7
+    ('correo', '1.0', 'Correo: el cliente de correo (IMAP, POP3 y SMTP, siempre cifrado; HTML sin scripts, adjuntos por Escudo, sin conexión)',
+     'base >= ' + VERSION_087 + ', red >= 0.8.1, tls >= ' + VERSION_087, [
+        ('CORREO.BIN', r'\HISPA\CORREO.BIN'), ('CORREO.TXT', r'\HISPA\CORREO.TXT'),
+        ('CORREO.MNU', r'\HISPA\MENU\CORREO.MNU'), ('CORREO.ICP', r'\HISPA\MENU\CORREO.ICP')]),
 ]
 
 # (0.8.6) los que el catálogo marca del sistema («sistema=nombre»): los que

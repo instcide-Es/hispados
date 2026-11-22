@@ -1,0 +1,4 @@
+direcciones: 3
+nombre=<> dir=<real@c.es> valida=1 cabecera=<real@c.es>
+nombre=<"mal cerrada> dir=<x@y.es> valida=1 cabecera=<"\"mal cerrada" <x@y.es>>
+nombre=<> dir=<otra@z.es> valida=1 cabecera=<otra@z.es>

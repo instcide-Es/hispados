@@ -963,6 +963,148 @@ static void mira(struct conex *c)
 	}
 }
 
+
+/* ---- (CORREO) STARTTLS: lo plano de antes del apretón de manos, para el
+ * correo (IMAP en el 143, SMTP en el 587, POP3 en el 110). Lo hace el
+ * servicio, no el programa: así el programa no ve nunca la conexión sin
+ * cifrar y no puede mandar nada por ella (la contraseña, tampoco). Se espera
+ * el saludo, se pide STARTTLS (con EHLO antes en SMTP) y, si el servidor dice
+ * que sí, sigue el apretón de manos como siempre. Lo que llegue de más
+ * detrás del «sí» (la inyección de órdenes de antes del cifrado, el fallo de
+ * tantos clientes) hace que no se siga. Da 0 o el error, con su texto. */
+#define ST_IMAP 1
+#define ST_SMTP 2
+#define ST_POP3 3
+static int st_renglon(u32 tcp, char *b, u32 *n, u32 cabe, u32 limite, int *de_mas)
+{
+	/* lee hasta tener un renglón entero (acabado en \n) al principio de b */
+	u32 k, r;
+
+	for (;;) {
+		for (k = 0; k < *n; k++)
+			if (b[k] == '\n') {
+				*de_mas = *n > k + 1;
+				return (int)(k + 1);
+			}
+		if (*n + 1 >= cabe || (int)(limite - tics()) <= 0)
+			return -1;
+		r = red_pide(O_RECIBIR, tcp, hz / 2, 0, 0, 0, b + *n, cabe - 1 - *n, 0);
+		if (r == TIEMPO)
+			continue;
+		if (ES_ERROR(r) || r == 0)
+			return -1;
+		*n += r;
+	}
+}
+
+static void st_quita(char *b, u32 *n, int k)
+{
+	memmove(b, b + k, *n - (u32)k);
+	*n -= (u32)k;
+}
+
+static int st_empieza(const char *b, const char *p)
+{
+	while (*p) {
+		char x = *b >= 'a' && *b <= 'z' ? *b - 32 : *b;
+		if (x != *p)
+			return 0;
+		b++, p++;
+	}
+	return 1;
+}
+
+static u32 starttls(u32 tcp, u32 modo, u32 espera, char *t, int cabe, u32 *sin)
+{
+	static char b[2048];
+	u32 n = 0, limite = tics() + (espera > 30 * hz ? 30 * hz : espera < 5 * hz ? 5 * hz : espera);
+	int k, de_mas = 0, hay = 0;
+	const char *orden;
+
+	*sin = 0;
+	/* el saludo (en SMTP, de varios renglones: «220-...») */
+	for (;;) {
+		k = st_renglon(tcp, b, &n, sizeof b, limite, &de_mas);
+		if (k < 0)
+			goto mudo;
+		if (modo == ST_IMAP) {
+			if (!st_empieza(b, "* OK")) {
+				formatear(t, cabe, "STARTTLS: el servidor de correo no saluda como IMAP (o no deja entrar)");
+				return TLS_FALLO;
+			}
+		} else if (modo == ST_POP3) {
+			if (!st_empieza(b, "+OK")) {
+				formatear(t, cabe, "STARTTLS: el servidor de correo no saluda como POP3");
+				return TLS_FALLO;
+			}
+		} else if (!st_empieza(b, "220")) {
+			formatear(t, cabe, "STARTTLS: el servidor de correo no saluda como SMTP");
+			return TLS_FALLO;
+		}
+		hay = modo == ST_SMTP && k > 3 && b[3] == '-';
+		st_quita(b, &n, k);
+		if (!hay)
+			break;
+	}
+	if (modo == ST_SMTP) {
+		static const char ehlo[] = "EHLO hispa-pentium\r\n";
+		red_pide(O_ENVIAR, tcp, 0, 0, ehlo, sizeof ehlo - 1, 0, 0, 0);
+		hay = 0;
+		for (;;) {
+			k = st_renglon(tcp, b, &n, sizeof b, limite, &de_mas);
+			if (k < 0)
+				goto mudo;
+			if (!st_empieza(b, "250")) {
+				formatear(t, cabe, "STARTTLS: el servidor de correo no acepta EHLO");
+				return TLS_FALLO;
+			}
+			if (k >= 12 && st_empieza(b + 4, "STARTTLS"))
+				hay = 1;
+			if (k > 3 && b[3] == '-') {
+				st_quita(b, &n, k);
+				continue;
+			}
+			st_quita(b, &n, k);
+			break;
+		}
+		if (!hay) {
+			*sin = 0x5354;
+			formatear(t, cabe, "el servidor de correo no ofrece STARTTLS: la conexión iría sin cifrar");
+			return TLS_FALLO;
+		}
+	}
+	orden = modo == ST_IMAP ? "h1 STARTTLS\r\n" : modo == ST_POP3 ? "STLS\r\n" : "STARTTLS\r\n";
+	if (n) {
+		formatear(t, cabe, "STARTTLS: el servidor manda de más antes de tiempo");
+		return TLS_FALLO;
+	}
+	red_pide(O_ENVIAR, tcp, 0, 0, orden, strlen(orden), 0, 0, 0);
+	for (;;) {
+		k = st_renglon(tcp, b, &n, sizeof b, limite, &de_mas);
+		if (k < 0)
+			goto mudo;
+		if (modo == ST_IMAP && b[0] == '*') {
+			st_quita(b, &n, k);	/* (lo que diga antes: CAPABILITY...) */
+			continue;
+		}
+		break;
+	}
+	if ((modo == ST_IMAP && !st_empieza(b, "H1 OK")) || (modo == ST_POP3 && !st_empieza(b, "+OK")) ||
+	    (modo == ST_SMTP && !st_empieza(b, "220"))) {
+		*sin = 0x5354;
+		formatear(t, cabe, "el servidor de correo no ofrece STARTTLS: la conexión iría sin cifrar");
+		return TLS_FALLO;
+	}
+	if (de_mas) {
+		formatear(t, cabe, "STARTTLS: el servidor manda de más detrás del sí (¿alguien en medio?): no se sigue");
+		return TLS_FALLO;
+	}
+	return 0;
+mudo:
+	formatear(t, cabe, "STARTTLS: el servidor de correo no contesta");
+	return TIEMPO;
+}
+
 static void conectar(struct pedido *p, const u8 *datos)
 {
 	static const uint16_t suites[] = {
@@ -1020,6 +1162,16 @@ static void conectar(struct pedido *p, const u8 *datos)
 	if (ES_ERROR(r)) {
 		contesta(p->hueco, p->serie, r, 0, 0, 0, 0, 0);
 		return;
+	}
+	if (p->cab[4] >= ST_IMAP && p->cab[4] <= ST_POP3) {	/* (CORREO) STARTTLS */
+		u32 sin, e = starttls(r, p->cab[4], espera, t, sizeof t, &sin);
+		if (e) {
+			red_pide(O_CERRAR, r, 0, 0, 0, 0, 0, 0, 0);
+			apunta("%s: %s", nombre, t);
+			contesta(p->hueco, p->serie, e, sin, 0, 0, t, strlen(t) + 1 < p->cabe ? strlen(t) + 1 : p->cabe);
+			return;
+		}
+		apunta("%s: STARTTLS (%s): sí", nombre, p->cab[4] == ST_IMAP ? "IMAP" : p->cab[4] == ST_SMTP ? "SMTP" : "POP3");
 	}
 	memset(c, 0, offsetof(struct conex, cadena));
 	c->usada = 1;

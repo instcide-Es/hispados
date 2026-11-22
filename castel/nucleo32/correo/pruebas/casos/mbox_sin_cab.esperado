@@ -1,0 +1,15 @@
+partes: 1 cortado=0 malformado=1
+[0] text/plain juego="" cod=0 nombre="" id="" disp="" tam=28 adjunto=0
+From: a@b.es
+To: (no está)
+Subject: mbox
+Date: (no está)
+principal: html=0 texto=0
+--- texto (28) ---
+esto no es cabecera
+
+cuerpo
+
+--- fin ---
+adjuntos: 0
+suplantacion: 0 

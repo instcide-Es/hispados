@@ -1,0 +1,27 @@
+contactos: 3
+nombre=<Luis Sanz> correos=<luis@x.es||> tel=<+34-600-222-333> org=<> nota=<> usado=7
+nombre=<solo@correo.es> correos=<solo@correo.es||> tel=<> org=<> nota=<> usado=0
+nombre=<sin end> correos=<||> tel=<> org=<> nota=<> usado=0
+--- escrito ---
+BEGIN:VCARD
+VERSION:3.0
+FN:Luis Sanz
+N:Sanz;Luis;;;
+EMAIL;TYPE=INTERNET,PREF:luis@x.es
+TEL:+34-600-222-333
+X-HISPA-USADO:7
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+FN:solo@correo.es
+N:;solo@correo.es;;;
+EMAIL;TYPE=INTERNET,PREF:solo@correo.es
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+FN:sin end
+N:end;sin;;;
+END:VCARD
+--- fin ---
+bien: renglones de 75 como mucho
+bien: los mismos contactos al volverlos a leer

@@ -1,0 +1,17 @@
+From: lista@x.es
+Subject: digest
+Content-Type: multipart/digest; boundary=d
+
+--d
+
+From: uno@x.es
+Subject: Uno
+
+cuerpo uno
+--d
+
+From: dos@x.es
+Subject: Dos
+
+cuerpo dos
+--d--

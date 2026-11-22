@@ -73,6 +73,7 @@ módulo Permisos
     público constante SELLO_HORA = 22           ; (PANEL, NTP) la hora por Internet: poner el reloj (la 175), sin atrasarlo más de 2 h
     público constante SELLO_ARGON2 = 23         ; (USUARIOS) el que resume las contraseñas (ARGON2.BIN)
     público constante SELLO_USUARIOS = 24       ; (USUARIOS) Configuración › Usuarios (USUARIOS.BIN)
+    público constante SELLO_CORREO = 25         ; (CORREO) Correo: sus cuentas y sus mensajes (\HISPA\CORREO, secreto)
     ; (hasta 31)
 
     ; un bit por sello, para las listas de quién escribe
@@ -99,6 +100,7 @@ módulo Permisos
     ; (0x200000 y 0x400000: PANEL.BIN y HORARED.BIN, que no escriben en la zona)
     constante B_ARGON2 = 0x800000               ; (USUARIOS)
     constante B_USUARIOS = 0x1000000
+    constante B_CORREO = 0x2000000              ; (CORREO)
     ; (USUARIOS) los renglones que solo valen si quien lanza el programa es
     ; administrador (o el sistema): la configuración de SSH y de los túneles
     constante SOLO_ADMIN = 0xD00                ; B_SSHD, B_WG y B_TAILSCAL
@@ -205,6 +207,7 @@ módulo Permisos
         regla("USUARIOS.TXT", NADIE, cierto)               ; los usuarios y sus contraseñas, resumidas
         regla("USUARIOS.NUE", NADIE, cierto)
         regla("AZAR.SEM", NADIE, cierto)                   ; la semilla del pozo del azar (pozo.cas)
+        programa("CORREO.BIN", SELLO_CORREO, falso)        ; (CORREO)
         ; ---- el arranque ----
         regla_admin("GRUB.CFG", B_ASISTE, falso)           ; (y el escritorio, que es el núcleo: la medida de la pantalla)
         regla_admin("GRUBENV", B_ACTUALIZ, falso)          ; (lo pone PAQUETES; ACTUALIZ da el núcleo nuevo por bueno)
@@ -280,6 +283,7 @@ módulo Permisos
         regla("NAVEGA\\", NADIE, falso)
         regla("CLICGEST.SES", B_CLICGEST, cierto)          ; la sesión guardada («recordarme»)
         regla("CLICGEST.ANC", B_CLICGEST, falso)
+        regla("CORREO\\", B_CORREO, cierto)              ; (CORREO) las cuentas, las contraseñas guardadas y los mensajes: solo los lee Correo
         regla("ASOCIA.TXT", B_EQUIPO, falso)               ; con qué se abre cada clase de archivo (Mi equipo)
         regla("REPRODUC\\", B_REPRODUC, falso)             ; (REPRODUCTOR) sus ajustes, su lista, el ecualizador y el buzón
         ; ---- los programas del sistema (en la raíz de la memoria de arranque;
@@ -316,6 +320,7 @@ módulo Permisos
         regla("SONIDO.BIN", NADIE, falso)
         regla("ARGON2.BIN", NADIE, falso)                  ; (USUARIOS)
         regla("USUARIOS.BIN", NADIE, falso)
+        regla("CORREO.BIN", NADIE, falso)                  ; (CORREO)
         regla("HISPA\\", NADIE, falso)                     ; (en la raíz: que no se haga una \HISPA donde no la hay)
     fin
 
