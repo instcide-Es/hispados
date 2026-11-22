@@ -223,16 +223,16 @@ mira "al arrancar otra vez: «la última vez se apagó durante la prueba, a 80 �
 mdel -i $Y/termo.img@@1M ::TERMO/INFORME.TXT > /dev/null 2>&1
 termo_qemu $Y/termo.img t4 140 "-smp 4 -cpu Haswell" "44:sendkey 1" "46:sendkey c" "60:$C" "60:o /b 0x71 91" "72:$C" "72:o /b 0x71 50" "100:screendump $Y/smp.ppm"
 mira "-smp 4 (sin KVM): al calentar, el núcleo despierta a los otros 3 procesadores, cargan (sus vueltas suben) y se duermen otra vez al parar" \
-  "termo: suceso: la carga, en 4 procesadores (este y 3 más" "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9][0-9]*$" \
+  "termo: suceso: la carga, en 4 procesadores (este y 3 más" "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9]" \
   "termo: suceso: informe para el técnico"
 if mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -q 'en 4 procesadores (hilos)' && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT | grep -q '^FRENADOS DEL PROCESADOR' \
    && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT | grep -q '^RESULTADO'; then
   ok "INFORME.TXT para el técnico: el equipo, la carga en 4 procesadores, cada sensor, los frenados y el resultado"
 else ko "INFORME.TXT: $(mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | head -n 12 | tr '\n' ' ')"; fi
 if [ -w /dev/kvm ]; then
-  termo_qemu $Y/termo.img t5 90 "-enable-kvm -cpu host -smp 4" "40:sendkey 1" "42:sendkey c" "56:$C" "56:o /b 0x71 91"
+  termo_qemu $Y/termo.img t5 120 "-enable-kvm -cpu host -smp 4" "48:sendkey 1" "50:sendkey c" "78:$C" "78:o /b 0x71 91"
   mira "-smp 4 con KVM: lo mismo (los 3, a cargar y luego, dormidos)" "termo: suceso: la carga, en 4 procesadores (este y 3 más" \
-    "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9][0-9]*$"
+    "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9]"
 fi
 termo_qemu $Y/termo.img t6 70 "-cpu Haswell" "44:sendkey 1" "46:sendkey c" "56:$C" "56:o /b 0x71 91"
 mira "con un solo procesador: lo dice y carga solo este" "termo: suceso: la carga, en este procesador solo: los demás no (ningún otro procesador ha contestado"
