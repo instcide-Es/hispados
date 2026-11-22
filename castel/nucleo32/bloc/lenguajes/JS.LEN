@@ -1,0 +1,27 @@
+; =============================================================================
+;  JS.LEN - JavaScript, para el Bloc de notas
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+;  El formato, en CASTEL.LEN.
+; =============================================================================
+nombre=JavaScript
+extensiones=JS MJS JSON
+distingue=si
+comentario=//
+bloque=/* */
+comillas=" '
+largas=`
+escape=\
+inicio=$
+letras=$
+numeros=si
+operadores=+-*/%=<>!&|^~?:;,.
+claves=var let const function return if else for while do switch case default
+claves=break continue new delete typeof instanceof in of this class extends
+claves=super try catch finally throw async await yield import export from
+claves=true false null undefined void with static get set
+propias=console document window Math JSON Object Array String Number Boolean
+propias=Promise Date RegExp Error parseInt parseFloat isNaN setTimeout
+propias=setInterval clearTimeout fetch alert
+plegado=bloques
+signos_abre={
+signos_cierra=}

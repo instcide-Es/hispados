@@ -3143,7 +3143,13 @@ módulo Escritorio
             fin
             devolver
         fin
-        si id <> 0 entonces devolver fin
+        si id <> 0 entonces
+            ; (BLOC) encima de la ventana de un programa: se lo dice a él (el Bloc de notas lo abre)
+            copiar(soltado_ruta, suelta_ruta)
+            soltado_para := id
+            si suelta_en(id, suelta_x, suelta_y) = 0 entonces soltado_para := 0 fin
+            devolver
+        fin
         x := suelta_x - CELDA_AN div 2
         yy := suelta_y - 20
         si x < 0 entonces x := 0 fin

@@ -1,0 +1,30 @@
+; =============================================================================
+;  C.LEN - el lenguaje C, para el Bloc de notas
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+;  El formato, en CASTEL.LEN.
+; =============================================================================
+nombre=C
+extensiones=C H CPP HPP CC
+distingue=si
+comentario=//
+bloque=/* */
+comillas=" '
+escape=\
+numeros=si
+directiva=#
+operadores=+-*/%=<>!&|^~?:;,.
+claves=if else for while do switch case default break continue return goto
+claves=sizeof typedef struct union enum static extern const volatile register
+claves=auto inline restrict
+tipos=void char short int long float double signed unsigned _Bool bool
+tipos=size_t ssize_t int8_t int16_t int32_t int64_t uint8_t uint16_t uint32_t uint64_t
+tipos=uintptr_t intptr_t FILE
+propias=NULL printf fprintf sprintf snprintf scanf puts putchar getchar fopen
+propias=fclose fread fwrite fgets fputs malloc calloc realloc free memcpy memmove
+propias=memset memcmp strlen strcpy strncpy strcmp strncmp strcat strchr strstr
+propias=exit abort atoi strtol main true false
+plegado=bloques
+signos_abre={
+signos_cierra=}
+abre=#if #ifdef #ifndef
+cierra=#endif

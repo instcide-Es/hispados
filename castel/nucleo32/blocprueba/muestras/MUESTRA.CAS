@@ -1,0 +1,19 @@
+; un comentario: si mientras fin
+módulo Muestra
+    (* un comentario (* anidado *) y
+       de dos líneas *) variable x: nat32 = 0x1F
+    función f(ref a: ent32): bool
+        si a = 'b' entonces devolver cierto fin
+        si a > 2 entonces
+            escribir("hola \"tú\"\n")
+        sino si a < 0 entonces
+            a := -a
+        sino
+            según a
+                caso 1: a := 2
+                si no: a := 3
+            fin
+        fin
+        devolver falso
+    fin
+fin Muestra.

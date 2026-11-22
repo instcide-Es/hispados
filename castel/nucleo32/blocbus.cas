@@ -1,0 +1,459 @@
+; =============================================================================
+;  blocbus.cas - buscar y reemplazar en el Bloc de notas (BLOC.BIN): en el
+;  documento de ahora (hacia delante o hacia atrás, volviendo a empezar al
+;  llegar al final), contar, reemplazar uno o todos (de una vez: un solo
+;  «deshacer»), y la lista de lo encontrado en todos los documentos abiertos
+;  o en los archivos de una carpeta (con sus subcarpetas, si se quiere),
+;  para saltar a cada sitio. Con BlocExp: mayúsculas sí o no, palabra
+;  entera y expresiones regulares.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo BlocBus
+
+    importar Llamadas, BlocMem, BlocPag, BlocTxt, BlocExp, Textos32, Formato
+
+    público variable bus_error: arreglo [128] de byte   ; por qué no se ha podido (en la 437)
+    público variable bus_vuelta: bool           ; la última búsqueda ha vuelto a empezar por el otro lado
+    público variable bus_cortada: bool          ; la última se ha parado por el tope de pasos
+    variable pat: arreglo [512] de byte         ; lo que se busca, en UTF-8
+    variable n_pat: nat32
+    variable por: arreglo [512] de byte         ; por lo que se cambia, en UTF-8
+    variable n_por: nat32
+    variable es_exp: bool
+    público variable listo: bool                ; hay algo compilado
+
+    ; lo que se busca (en la 437, como se escribe en el campo) y cómo
+    público función bus_prepara(patrón: puntero a byte, opciones: nat32): bool
+        listo := falso
+        bus_error[0] := 0
+        n_pat := pag_437_a_utf8(patrón, longitud(patrón), pat, 510)
+        pat[n_pat] := 0
+        si n_pat = 0 entonces
+            copiar(bus_error, "Escribe lo que quieres buscar.")
+            devolver falso
+        fin
+        es_exp := opciones yb EXP_LITERAL = 0
+        si no exp_compilar(pat, n_pat, opciones) entonces
+            copiar(bus_error, "La expresi\xA2n no vale: ")
+            concatenar(bus_error, exp_error())
+            devolver falso
+        fin
+        listo := cierto
+        devolver cierto
+    fin
+
+    público función bus_pon_por(t: puntero a byte)
+        n_por := pag_437_a_utf8(t, longitud(t), por, 510)
+        por[n_por] := 0
+    fin
+
+    función pon_tope(n: nat32)
+        exp_tope := 40000000
+        si n < 100000000 entonces exp_tope := exp_tope + n * 16 fin
+    fin
+
+    ; busca en el documento d desde «a_partir» (hacia delante) o antes de
+    ; ahí (hacia atrás): lo encontrado de a a b. Vuelve a empezar por el
+    ; otro lado si no hay más (bus_vuelta)
+    público función bus_en_doc(adelante: bool, a_partir: nat32, ref a: nat32, ref b: nat32): bool
+        variable p: puntero a byte
+        bus_vuelta := falso
+        bus_cortada := falso
+        si no listo entonces devolver falso fin
+        p := contiguo()
+        pon_tope(largo())
+        si adelante entonces
+            si exp_buscar(p, largo(), a_partir, a, b) entonces devolver cierto fin
+            bus_cortada := exp_agotado
+            si a_partir > 0 y exp_buscar(p, largo(), 0, a, b) entonces
+                bus_vuelta := cierto
+                devolver cierto
+            fin
+        sino
+            si a_partir > 0 y exp_buscar_antes(p, largo(), a_partir, a, b) entonces devolver cierto fin
+            bus_cortada := exp_agotado
+            si exp_buscar_antes(p, largo(), largo() + 1, a, b) entonces
+                bus_vuelta := cierto
+                devolver cierto
+            fin
+        fin
+        bus_cortada := bus_cortada o exp_agotado
+        devolver falso
+    fin
+
+    ; ¿lo de a a b es justo lo que se busca? (para «Reemplazar»: lo seleccionado)
+    público función bus_es_esto(a: nat32, b: nat32): bool
+        variable p: puntero a byte
+        variable x, y_: nat32
+        si no listo entonces devolver falso fin
+        p := contiguo()
+        pon_tope(largo())
+        si no exp_buscar(p, largo(), a, x, y_) entonces devolver falso fin
+        devolver x = a y y_ = b
+    fin
+
+    ; cuántas veces está en el documento d
+    público función bus_contar(): nat32
+        variable p: puntero a byte
+        variable a, b, pos, n: nat32
+        si no listo entonces devolver 0 fin
+        p := contiguo()
+        pon_tope(largo())
+        n := 0
+        pos := 0
+        mientras pos <= largo() y exp_buscar(p, largo(), pos, a, b) hacer
+            n := n + 1
+            si b > a entonces pos := b sino pos := a + 1 fin
+        fin
+        devolver n
+    fin
+
+    ; lo que va en lugar de lo último encontrado (en UTF-8, en destino; da cuánto)
+    función sustituto(p: puntero a byte, destino: puntero a byte, cabe: nat32): nat32
+        si es_exp entonces devolver exp_sustituto(por, n_por, p, destino, cabe) fin
+        si n_por > cabe entonces devolver 0 fin
+        mover_memoria(destino, por, n_por)
+        devolver n_por
+    fin
+
+    función largo_sustituto(p: puntero a byte): nat32
+        si es_exp entonces devolver exp_largo_sustituto(por, n_por, p) fin
+        devolver n_por
+    fin
+
+    ; cambia lo de a a b (que es lo encontrado) por lo que toca; da lo que mide lo puesto
+    público función bus_reemplaza(a: nat32, b: nat32): nat32
+        variable p, q: puntero a byte
+        variable x, y_, n: nat32
+        p := contiguo()
+        pon_tope(largo())
+        si no exp_buscar(p, largo(), a, x, y_) o x <> a o y_ <> b entonces devolver 0 fin
+        n := largo_sustituto(p)
+        q := pedir(n + 4)
+        si q = nulo entonces devolver 0 fin
+        n := sustituto(p, q, n + 4)
+        cambiar(a, b - a, q, n)
+        soltar(q)
+        devolver n
+    fin
+
+    ; reemplaza todas (en lo que va de «de» a «a»; todo el texto: 0 y
+    ; 0xFFFFFFFF): da cuántas. Se hace de una vez: un solo cambio en la
+    ; historia (lo de la primera a la última), así «deshacer» lo quita entero
+    público función bus_reemplaza_todo(de_: nat32, a_: nat32): nat32
+        variable p, nuevo: puntero a byte
+        variable a, b, pos, n, k, cabe, primera, última, s: nat32
+        si no listo entonces devolver 0 fin
+        p := contiguo()
+        si a_ > largo() entonces a_ := largo() fin
+        pon_tope(largo())
+        ; primero, lo que medirá
+        n := 0
+        k := 0
+        pos := de_
+        primera := 0xFFFFFFFF
+        última := 0
+        mientras pos <= a_ y exp_buscar(p, largo(), pos, a, b) y b <= a_ hacer
+            si primera = 0xFFFFFFFF entonces primera := a fin
+            k := k + (a - pos) + largo_sustituto(p)
+            n := n + 1
+            última := b
+            si b > a entonces
+                pos := b
+            sino
+                ; (uno vacío: se copia una letra y se sigue detrás)
+                si a < largo() entonces k := k + 1 fin
+                pos := a + 1
+                última := a + 1
+                si última > largo() entonces última := largo() fin
+            fin
+        fin
+        si n = 0 entonces devolver 0 fin
+        ; lo de la primera a la última, ya cambiado
+        k := k - (primera - de_)
+        cabe := k + 16
+        nuevo := pedir(cabe)
+        si nuevo = nulo entonces
+            copiar(bus_error, "No hay memoria para reemplazar todo.")
+            devolver 0
+        fin
+        k := 0
+        pos := primera
+        mientras pos <= a_ y exp_buscar(p, largo(), pos, a, b) y b <= a_ hacer
+            si a > pos entonces
+                mover_memoria(nuevo + k, p + pos, a - pos)
+                k := k + (a - pos)
+            fin
+            s := sustituto(p, nuevo + k, cabe - k)
+            k := k + s
+            si b > a entonces
+                pos := b
+            sino
+                si a < largo() y a < última entonces
+                    nuevo[k] := p[a]
+                    k := k + 1
+                fin
+                pos := a + 1
+            fin
+            si pos >= última entonces romper fin
+        fin
+        corte()
+        cambiar(primera, última - primera, nuevo, k)
+        soltar(nuevo)
+        devolver n
+    fin
+
+    ; =========================================================================
+    ;  La lista de lo encontrado (en UTF-8): una cabecera, y de cada archivo,
+    ;  su ruta y sus líneas («  12: lo que pone»)
+    ; =========================================================================
+    público constante MAX_RESULTADOS = 20000
+    público variable res: puntero a byte
+    público variable n_res, cabe_res: nat32
+    público variable res_líneas, res_archivos: nat32
+    variable cortada_lista: bool
+
+    función añade(p: puntero a byte, n: nat32)
+        variable q: puntero a byte
+        si n_res + n + 4 > cabe_res entonces
+            q := recrecer(res, n_res, (n_res + n) * 2 + 65536)
+            si q = nulo entonces devolver fin
+            res := q
+            cabe_res := (n_res + n) * 2 + 65536
+        fin
+        mover_memoria(res + n_res, p, n)
+        n_res := n_res + n
+    fin
+
+    ; un texto en la 437 (los nombres), pasado a UTF-8
+    función añade_437(t: puntero a byte)
+        variable b: arreglo [600] de byte
+        variable n: nat32
+        n := pag_437_a_utf8(t, longitud(t), b, 600)
+        añade(b, n)
+    fin
+
+    público función lista_empieza()
+        n_res := 0
+        res_líneas := 0
+        res_archivos := 0
+        cortada_lista := falso
+        si res = nulo entonces
+            cabe_res := 65536
+            res := pedir(cabe_res)
+        fin
+    fin
+
+    público función lista_línea_437(t: puntero a byte)
+        añade_437(t)
+        añade("\n", 1)
+    fin
+
+    ; las líneas de un texto (UTF-8, seguido) donde está lo que se busca
+    función lista_texto(p: puntero a byte, n: nat32, nombre: puntero a byte)
+        variable a, b, pos, lín, visto, ini, fin_, i, k: nat32
+        variable puesto: bool
+        variable t: arreglo [16] de byte
+        si no listo entonces devolver fin
+        pon_tope(n)
+        pos := 0
+        lín := 0
+        visto := 0                              ; hasta dónde se han contado las líneas
+        puesto := falso
+        ini := 0xFFFFFFFF
+        mientras pos <= n y exp_buscar(p, n, pos, a, b) hacer
+            si res_líneas >= MAX_RESULTADOS entonces
+                cortada_lista := cierto
+                devolver
+            fin
+            si a > visto entonces lín := lín + cuenta_saltos(p + visto, a - visto) fin
+            visto := a
+            si no puesto entonces
+                añade_437(nombre)
+                añade("\n", 1)
+                puesto := cierto
+                res_archivos := res_archivos + 1
+            fin
+            ; la línea entera (lo más, 200 octetos), una vez aunque esté dos veces
+            i := a
+            mientras i > 0 y p[i - 1] <> 10 hacer i := i - 1 fin
+            si i <> ini entonces
+                ini := i
+                fin_ := a
+                mientras fin_ < n y p[fin_] <> 10 hacer fin_ := fin_ + 1 fin
+                si fin_ - ini > 200 entonces fin_ := ini + 200 fin
+                mientras fin_ > ini y fin_ < n y (p[fin_] yb 0xC0) = 0x80 hacer fin_ := fin_ - 1 fin
+                añade("  ", 2)
+                natural_a_texto(lín + 1, t)
+                añade(t, longitud(t))
+                añade(": ", 2)
+                k := ini
+                mientras k < fin_ hacer
+                    si p[k] = 9 o p[k] = 13 entonces añade(" ", 1) sino añade(p + k, 1) fin
+                    k := k + 1
+                fin
+                añade("\n", 1)
+                res_líneas := res_líneas + 1
+            fin
+            ; se sigue detrás de esta línea (ya está puesta)
+            k := a
+            mientras k < n y p[k] <> 10 hacer k := k + 1 fin
+            si b > k entonces pos := b sino pos := k + 1 fin
+        fin
+    fin
+
+    ; lo encontrado en el documento x (con ese nombre en la lista)
+    público función lista_doc(x: puntero a Doc, nombre: puntero a byte)
+        variable viejo: puntero a Doc
+        viejo := d
+        d := x
+        lista_texto(contiguo(), largo(), nombre)
+        d := viejo
+    fin
+
+    ; ---- en una carpeta ----
+    variable filtros: arreglo [8] de arreglo [16] de byte
+    variable n_filtros: nat32
+    variable archivos_vistos: nat32
+
+    ; los filtros («*.TXT *.CAS», separados por espacios o «;»)
+    función pon_filtros(t: puntero a byte)
+        variable i, k: nat32
+        n_filtros := 0
+        i := 0
+        mientras t[i] <> 0 y n_filtros < 8 hacer
+            mientras t[i] = ' ' o t[i] = ';' o t[i] = ',' hacer i := i + 1 fin
+            si t[i] = 0 entonces romper fin
+            k := 0
+            mientras t[i] <> 0 y t[i] <> ' ' y t[i] <> ';' y t[i] <> ',' hacer
+                si k < 15 entonces
+                    filtros[n_filtros][k] := mayúscula(t[i])
+                    k := k + 1
+                fin
+                i := i + 1
+            fin
+            filtros[n_filtros][k] := 0
+            n_filtros := n_filtros + 1
+        fin
+        si n_filtros = 0 entonces
+            copiar(dirección(filtros[0][0]), "*.*")
+            n_filtros := 1
+        fin
+    fin
+
+    ; ¿casa el nombre con el patrón (con * y ?)?
+    función casa(p: puntero a byte, t: puntero a byte): bool
+        si p[0] = 0 entonces devolver t[0] = 0 fin
+        si p[0] = '*' entonces
+            ; «*.*» vale también para los que no tienen punto
+            si p[1] = '.' y p[2] = '*' y p[3] = 0 entonces devolver cierto fin
+            si casa(p + 1, t) entonces devolver cierto fin
+            si t[0] <> 0 y casa(p, t + 1) entonces devolver cierto fin
+            devolver falso
+        fin
+        si t[0] = 0 entonces devolver falso fin
+        si p[0] = '?' o mayúscula(p[0]) = mayúscula(t[0]) entonces devolver casa(p + 1, t + 1) fin
+        devolver falso
+    fin
+
+    función vale_nombre(t: puntero a byte): bool
+        variable i: nat32
+        para i desde 0 hasta n_filtros - 1 hacer
+            si casa(dirección(filtros[i][0]), t) entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; un archivo: se lee entero, se pasa a UTF-8 y se busca
+    función lista_archivo(ruta: puntero a byte)
+        variable m, n, r, got, cp, n2: nat32
+        variable buf, u: puntero a byte
+        variable bom: bool
+        m := abrir(ruta)
+        si es_error(m) entonces devolver fin
+        n := largo_de(m)
+        si es_error(n) o n > 33554432 entonces
+            cerrar(m)
+            devolver
+        fin
+        buf := pedir(n + 4)
+        si buf = nulo entonces
+            cerrar(m)
+            devolver
+        fin
+        got := 0
+        mientras got < n hacer
+            r := leer(m, buf + got, n - got)
+            si es_error(r) o r = 0 entonces romper fin
+            got := got + r
+        fin
+        cerrar(m)
+        archivos_vistos := archivos_vistos + 1
+        ; los que tienen ceros al principio no son textos
+        r := 0
+        mientras r < got y r < 8192 hacer
+            si buf[r] = 0 entonces
+                soltar(buf)
+                devolver
+            fin
+            r := r + 1
+        fin
+        bom := falso
+        cp := pag_detectar(buf, got, bom)
+        si bom entonces r := 3 sino r := 0 fin
+        n2 := pag_largo_utf8(cp, buf + r, got - r)
+        si n2 = got - r entonces
+            lista_texto(buf + r, got - r, ruta)
+        sino
+            u := pedir(n2 + 4)
+            si u <> nulo entonces
+                pag_a_utf8(cp, buf + r, got - r, u)
+                lista_texto(u, n2, ruta)
+                soltar(u)
+            fin
+        fin
+        soltar(buf)
+    fin
+
+    función lista_carpeta_r(carpeta: puntero a byte, sub: bool, hondo: nat32)
+        variable m: nat32
+        variable e: Entrada
+        variable ruta: arreglo [160] de byte
+        si hondo > 10 o res_líneas >= MAX_RESULTADOS o archivos_vistos > 20000 entonces devolver fin
+        m := abrir(carpeta)
+        si es_error(m) entonces devolver fin
+        mientras entrada(m, e) hacer
+            si e.nombre[0] <> '.' y e.atributos yb 0x08 = 0 entonces
+                si longitud(carpeta) + longitud(dirección(e.nombre[0])) + 2 < 160 entonces
+                    copiar(ruta, carpeta)
+                    concatenar(ruta, dirección(e.nombre[0]))
+                    si e.atributos yb CARPETA <> 0 entonces
+                        si sub entonces
+                            concatenar(ruta, "\\")
+                            lista_carpeta_r(ruta, sub, hondo + 1)
+                        fin
+                    sino si vale_nombre(dirección(e.nombre[0])) entonces
+                        lista_archivo(ruta)
+                    fin
+                fin
+            fin
+        fin
+        cerrar(m)
+    fin
+
+    ; lo encontrado en los archivos de una carpeta (en la 437, con su «\»)
+    público función lista_carpeta(carpeta: puntero a byte, filtro: puntero a byte, sub: bool)
+        pon_filtros(filtro)
+        archivos_vistos := 0
+        lista_carpeta_r(carpeta, sub, 0)
+    fin
+
+    público función lista_cortada(): bool
+        devolver cortada_lista
+    fin
+
+    público función lista_archivos_vistos(): nat32
+        devolver archivos_vistos
+    fin
+
+fin BlocBus.

@@ -1,0 +1,1435 @@
+; =============================================================================
+;  blocvis.cas - lo que se ve del Bloc de notas (BLOC.BIN): el lienzo de la
+;  ventana, la letra (la del sistema, 8x16, o la de ancho fijo suavizada de
+;  letramono.cas para los tamaños grandes), dónde cae cada letra (las líneas
+;  largas se parten al ancho, si se quiere), el margen con los números de
+;  línea y los pliegues, los colores según el lenguaje (las palabras clave,
+;  además, en negrita), lo seleccionado (también en bloque), los espacios y
+;  los finales de línea, el paréntesis que hace pareja (con un recuadro, no
+;  solo de color) y las dos columnas de «Comparar» (con su signo en el
+;  margen: «-» quitado, «+» añadido, «*» cambiado).
+;
+;  Todo se pinta en un lienzo propio (Grafico) que luego va entero a la
+;  ventana con mapa(): la barra de menús no (la pinta Barramenu directamente).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo BlocVis
+
+    importar Llamadas, Grafico, Letra, LetraMono, BlocMem, BlocPag, BlocTxt, BlocLen, BlocDif, Textos32
+
+    público constante NADA = 0xFFFFFFFF
+    público constante NUM_NO = 0
+    público constante NUM_SÍ = 1
+    público constante NUM_CÓDIGO = 2            ; solo en los archivos de un lenguaje (en los .TXT, como antes)
+    público constante MARGEN = 6
+    público constante TAMAÑOS = 4               ; 0: la del sistema (8x16); 1, 2, 3: la de ancho fijo de 20, 24 y 32
+    ; los colores
+    público constante PAPEL = 0xFFFFFF
+    público constante TINTA = 0x14294A
+    público constante SUAVE = 0x5A7396
+    público constante RESALTE = 0x2F74D0        ; el fondo de lo seleccionado
+    constante C_MARGEN = 0xEEF3FA
+    constante C_NÚMERO = 0x6B7C93
+    constante C_CURSOR = 0x2468C8
+    constante C_ESPACIO = 0x9AA9BF               ; los puntos de los espacios y los finales de línea
+    constante C_PAREJA = 0x2F74D0
+    constante C_QUITADO = 0xFDE2E2
+    constante C_AÑADIDO = 0xDCFCE7
+    constante C_CAMBIADO = 0xFEF3C7
+    constante C_HUECO = 0xE5E7EB
+    constante LARGA = 1048576                   ; lo más que se enseña de una línea (1 M)
+    constante MAX_COLOREA = 65536               ; las de más, sin colores
+
+    público variable v: nat32                   ; la ventana (0: sin ventana, en las pruebas)
+    público variable lz: Lienzo
+    variable memoria: puntero a nat32
+    variable máx_an, máx_al: ent32
+    público variable ancho, alto: ent32
+    ; lo que se puede elegir
+    público variable tam: nat32
+    público variable números: nat32 = 2
+    público variable ajuste: bool = cierto
+    público variable ver_espacios, ver_finales: bool
+    público variable tab_ancho: nat32 = 4
+    ; las medidas de ahora
+    público variable cw: ent32 = 8              ; lo que mide una letra
+    público variable ch: ent32 = 16
+    público variable ax, ay, aw, ah: ent32      ; el sitio del texto
+    público variable gw, tx: ent32              ; lo que mide el margen; dónde empieza el texto
+    público variable cols, filas: ent32         ; las letras que caben a lo ancho y las filas a lo alto
+    público variable con_pliegues: bool         ; el margen lleva la columna de los pliegues
+    público variable enfocada: bool = cierto
+    público variable suelto: bool               ; (RUEDA) se ha movido con la rueda: lo que se ve no sigue al cursor
+    variable cara_n, cara_b: puntero a nat32    ; las caras de la de ancho fijo (normal y negrita)
+    variable base_letra: ent32                  ; lo que se baja la letra en su fila
+
+    ; la línea preparada: su texto, sus colores y dónde empieza cada fila
+    variable lbuf, sbuf: puntero a byte
+    variable lcabe: nat32
+    público variable ln: nat32
+    variable cortes: puntero a nat32
+    variable ccabe: nat32
+    público variable nf: nat32
+    ; lo de calcular los colores de las líneas de arriba (aparte, para no pisar la preparada)
+    variable tbuf, tsty: puntero a byte
+    variable tcabe: nat32
+
+    ; el paréntesis que hace pareja con el del cursor (NADA: ninguno)
+    público variable par_a, par_b: nat32 = NADA
+
+    ; =========================================================================
+    ;  El lienzo
+    ; =========================================================================
+    público función prepara(ventana_: nat32, an: ent32, al: ent32): bool
+        variable sw, sh: nat32
+        sw := dato(DATO_ANCHO_PANTALLA)
+        sh := dato(DATO_ALTO_PANTALLA)
+        si sw < nat32(an) entonces sw := nat32(an) fin
+        si sh < nat32(al) entonces sh := nat32(al) fin
+        memoria := puntero(pedir(sw * sh * 4))
+        si memoria = nulo entonces devolver falso fin
+        máx_an := ent32(sw)
+        máx_al := ent32(sh)
+        v := ventana_
+        nuevo_tamaño(an, al)
+        lcabe := 4096
+        lbuf := pedir(lcabe)
+        sbuf := pedir(lcabe)
+        ccabe := 256
+        cortes := puntero(pedir(ccabe * 4))
+        tcabe := 4096
+        tbuf := pedir(tcabe)
+        tsty := pedir(tcabe)
+        devolver lbuf <> nulo y sbuf <> nulo y cortes <> nulo y tbuf <> nulo y tsty <> nulo
+    fin
+
+    ; sin ventana (las pruebas con corre32): solo las medidas
+    público función prepara_sin_ventana(an: ent32, al: ent32): bool
+        v := 0
+        ancho := an
+        alto := al
+        lcabe := 4096
+        lbuf := pedir(lcabe)
+        sbuf := pedir(lcabe)
+        ccabe := 256
+        cortes := puntero(pedir(ccabe * 4))
+        tcabe := 4096
+        tbuf := pedir(tcabe)
+        tsty := pedir(tcabe)
+        devolver lbuf <> nulo y cortes <> nulo y tbuf <> nulo
+    fin
+
+    público función nuevo_tamaño(an: ent32, al: ent32)
+        si an > máx_an entonces an := máx_an fin
+        si al > máx_al entonces al := máx_al fin
+        si an < 1 entonces an := 1 fin
+        si al < 1 entonces al := 1 fin
+        ancho := an
+        alto := al
+        si memoria <> nulo entonces pon_lienzo(lz, memoria, nat32(an), an, al) fin
+    fin
+
+    ; manda a la ventana lo pintado de la fila «desde» para abajo
+    público función volcar(arriba_: ent32)
+        si v = 0 o memoria = nulo entonces devolver fin
+        mapa(v, 0, arriba_, ancho, alto - arriba_, memoria + nat32(arriba_ * ancho))
+    fin
+
+    ; =========================================================================
+    ;  La letra
+    ; =========================================================================
+    público función pon_tamaño(t: nat32)
+        si t >= TAMAÑOS entonces t := TAMAÑOS - 1 fin
+        tam := t
+        si t = 0 entonces
+            cw := 8
+            ch := 16
+            cara_n := nulo
+            cara_b := nulo
+            base_letra := 0
+            devolver
+        fin
+        cara_n := cara_mono((t - 1) * 2)
+        cara_b := cara_mono((t - 1) * 2 + 1)
+        ch := ent32(cara_n[2])
+        cw := ent32(cara_n[3])
+        base_letra := 0
+    fin
+
+    función con_signo(b: byte): ent32
+        si b >= 128 entonces devolver ent32(b) - 256 fin
+        devolver ent32(b)
+    fin
+
+    ; mezcla n puntos de una fila de la letra suavizada (q, desde su punto
+    ; i0) con lo que hay en p: 0, nada; 15, la tinta entera
+    función fila_suave(p: puntero a nat32, q: puntero a byte, i0: nat32, n: nat32, tinta: nat32)
+        ensamblador
+            mov edi, {p}
+            mov esi, {q}
+            mov ecx, {i0}
+            mov ebx, {n}
+        .otro:
+            test ebx, ebx
+            jz .fin
+            mov eax, ecx
+            shr eax, 1
+            movzx eax, byte [esi+eax]
+            test ecx, 1
+            jnz .derecha
+            shr eax, 4
+            jmp .tono
+        .derecha:
+            and eax, 15
+        .tono:
+            test eax, eax
+            jz .siguiente
+            cmp eax, 15
+            jne .mezcla
+            mov edx, {tinta}
+            mov [edi], edx
+            jmp .siguiente
+        .mezcla:
+            cmp eax, 8
+            cmc
+            adc eax, 0
+            push ecx
+            push ebx
+            mov ebx, 16
+            sub ebx, eax
+            mov edx, [edi]
+            mov ecx, edx
+            and edx, 0xFF00FF
+            and ecx, 0x00FF00
+            imul edx, ebx
+            imul ecx, ebx
+            mov ebx, {tinta}
+            and ebx, 0xFF00FF
+            imul ebx, eax
+            add edx, ebx
+            mov ebx, {tinta}
+            and ebx, 0x00FF00
+            imul ebx, eax
+            add ecx, ebx
+            shr edx, 4
+            shr ecx, 4
+            and edx, 0xFF00FF
+            and ecx, 0x00FF00
+            or edx, ecx
+            mov [edi], edx
+            pop ebx
+            pop ecx
+        .siguiente:
+            add edi, 4
+            inc ecx
+            dec ebx
+            jmp .otro
+        .fin:
+        fin
+    fin
+
+    ; una letra de la de ancho fijo (c: el código de la 437 de casa), con lo alto de su fila en yy
+    función letra_mono(x: ent32, yy: ent32, c: nat32, tinta: nat32, cara: puntero a nat32)
+        variable f, puntos: puntero a byte
+        variable gx, gy, an, al, fila_, i0, i1, j: ent32
+        si c < 32 o c > 255 entonces devolver fin
+        f := puntero(cara[0])
+        f := f + (c - 32) * 8
+        an := ent32(f[3])
+        al := ent32(f[4])
+        si an = 0 entonces devolver fin
+        gx := x + con_signo(f[1])
+        gy := yy + con_signo(f[2])
+        fila_ := (an + 1) div 2
+        puntos := puntero(cara[1])
+        puntos := puntos + (nat32(f[6]) ob (nat32(f[7]) << 8))
+        i0 := 0
+        si gx < 0 entonces i0 := -gx fin
+        i1 := an
+        si gx + i1 > lz.ancho entonces i1 := lz.ancho - gx fin
+        si i1 <= i0 entonces devolver fin
+        para j desde 0 hasta al - 1 hacer
+            si gy + j >= 0 y gy + j < lz.alto entonces
+                fila_suave(dirección(lz.puntos[nat32(gy + j) * lz.salto + nat32(gx + i0)]), puntos + nat32(j * fila_), nat32(i0), nat32(i1 - i0), tinta)
+            fin
+        fin
+    fin
+
+    ; una letra del texto (el código de la 437), de la letra de ahora; negrita: las palabras clave
+    público función pon_letra(x: ent32, yy: ent32, c: nat32, tinta: nat32, negrita: bool)
+        si tam = 0 entonces
+            Grafico.letra(lz, x, yy, c, tinta)
+            si negrita entonces Grafico.letra(lz, x + 1, yy, c, tinta) fin
+            devolver
+        fin
+        si negrita entonces letra_mono(x, yy, c, tinta, cara_b) sino letra_mono(x, yy, c, tinta, cara_n) fin
+    fin
+
+    ; =========================================================================
+    ;  Dónde va cada cosa
+    ; =========================================================================
+    función cifras(n: nat32): ent32
+        variable k: ent32
+        k := 1
+        mientras n >= 10 hacer
+            n := n div 10
+            k := k + 1
+        fin
+        devolver k
+    fin
+
+    ; ¿lleva números de línea el documento de ahora?
+    público función con_números(): bool
+        si números = NUM_SÍ entonces devolver cierto fin
+        si números = NUM_NO entonces devolver falso fin
+        devolver d.lenguaje >= 0
+    fin
+
+    ; el sitio del texto: de «arriba» a «abajo» (las filas de la ventana), todo lo ancho
+    público función colócate(arriba: ent32, abajo: ent32)
+        variable k: ent32
+        ax := 0
+        ay := arriba
+        aw := ancho
+        ah := abajo - arriba
+        si ah < 0 entonces ah := 0 fin
+        gw := 0
+        con_pliegues := d.lenguaje >= 0 y len_plegado(d.lenguaje) <> P_NADA y d.clase = DOC_NORMAL
+        si con_números() entonces
+            k := cifras(n_líneas())
+            si k < 3 entonces k := 3 fin
+            gw := k * cw + 8
+        fin
+        si con_pliegues entonces gw := gw + 14 fin
+        tx := ax + gw + MARGEN
+        cols := (aw - gw - 2 * MARGEN) div cw
+        si cols < 8 entonces cols := 8 fin
+        filas := (ah - 8) div ch
+        si filas < 1 entonces filas := 1 fin
+    fin
+
+    ; =========================================================================
+    ;  Una línea, preparada: su texto (hasta 1 M), sus colores y sus filas
+    ; =========================================================================
+    función que_quepa(n: nat32): bool
+        variable p, q: puntero a byte
+        si n + 8 <= lcabe entonces devolver cierto fin
+        p := recrecer(lbuf, 0, n + 4096)
+        q := recrecer(sbuf, 0, n + 4096)
+        si p = nulo o q = nulo entonces devolver falso fin
+        lbuf := p
+        sbuf := q
+        lcabe := n + 4096
+        devolver cierto
+    fin
+
+    ; lo que ocupa (en columnas) el carácter u en la columna col
+    función ancho_de(u: nat32, col: nat32): nat32
+        si u = 9 entonces devolver tab_ancho - (col mod tab_ancho) fin
+        devolver 1
+    fin
+
+    público función prepara_línea(l: nat32)
+        variable a, n, oc, k, u, col, w: nat32
+        variable p: puntero a nat32
+        a := inicio(l)
+        n := final(l) - a
+        si n > LARGA entonces n := LARGA fin
+        si no que_quepa(n) entonces n := lcabe - 8 fin
+        copia(a, n, lbuf)
+        lbuf[n] := 0
+        ln := n
+        si d.lenguaje >= 0 y n <= MAX_COLOREA entonces
+            asegura_estado(l)
+            len_colorea(d.lenguaje, lbuf, n, estado_de(l) yb 0xFFFF, sbuf)
+        sino
+            llenar_memoria(sbuf, n + 1, 0)
+        fin
+        cortes[0] := 0
+        nf := 1
+        si ajuste entonces
+            col := 0
+            oc := 0
+            mientras oc < n hacer
+                k := pag_decodifica(lbuf + oc, n - oc, u)
+                w := ancho_de(u, col)
+                si col + w > nat32(cols) y col > 0 entonces
+                    si nf + 2 >= ccabe entonces
+                        p := puntero(recrecer(puntero(cortes), ccabe * 4, ccabe * 8))
+                        si p = nulo entonces romper fin
+                        cortes := p
+                        ccabe := ccabe * 2
+                    fin
+                    cortes[nf] := oc
+                    nf := nf + 1
+                    col := 0
+                    w := ancho_de(u, 0)
+                fin
+                col := col + w
+                oc := oc + k
+            fin
+        fin
+        cortes[nf] := n
+    fin
+
+    ; las filas de la línea l
+    público función filas_de(l: nat32): nat32
+        si no ajuste entonces devolver 1 fin
+        prepara_línea(l)
+        devolver nf
+    fin
+
+    ; la fila (de la línea preparada) donde cae el octeto o
+    público función fila_de(oc: nat32): nat32
+        variable r: nat32
+        r := 0
+        mientras r + 1 < nf y cortes[r + 1] <= oc hacer r := r + 1 fin
+        devolver r
+    fin
+
+    público función corte_fila(r: nat32): nat32
+        si r > nf entonces devolver ln fin
+        devolver cortes[r]
+    fin
+
+    ; la columna (en la fila r, o en la línea sin ajuste) del octeto o
+    público función col_en_fila(r: nat32, oc: nat32): nat32
+        variable i, k, u, col: nat32
+        i := cortes[r]
+        col := 0
+        mientras i < oc y i < ln hacer
+            k := pag_decodifica(lbuf + i, ln - i, u)
+            col := col + ancho_de(u, col)
+            i := i + k
+        fin
+        devolver col
+    fin
+
+    ; el octeto de la fila r que está en la columna col (redondeando: «cerca»,
+    ; el más cercano; si no, el que empieza antes o en col)
+    público función octeto_de_col(r: nat32, col: nat32, cerca: bool): nat32
+        variable i, k, u, c, w, fin_: nat32
+        i := cortes[r]
+        fin_ := cortes[r + 1]
+        c := 0
+        mientras i < fin_ hacer
+            k := pag_decodifica(lbuf + i, ln - i, u)
+            w := ancho_de(u, c)
+            si cerca entonces
+                si c + w div 2 + w mod 2 > col entonces devolver i fin
+            sino
+                si c + w > col entonces devolver i fin
+            fin
+            c := c + w
+            i := i + k
+        fin
+        ; detrás de lo último de la fila: en una fila partida, su última letra
+        si r + 1 < nf y fin_ > cortes[r] entonces devolver pag_anterior(lbuf, fin_) fin
+        devolver fin_
+    fin
+
+    ; la columna de pos en su línea (con los tabuladores; para «Col» y el bloque)
+    público función col_lógica(pos: nat32): nat32
+        variable i, k, u, col, a, n: nat32
+        variable b: arreglo [8] de byte
+        a := inicio(línea_de(pos))
+        i := a
+        col := 0
+        mientras i < pos hacer
+            n := copia(i, 4, b)
+            si n = 0 entonces romper fin
+            k := pag_decodifica(b, n, u)
+            col := col + ancho_de(u, col)
+            i := i + k
+        fin
+        devolver col
+    fin
+
+    ; la posición de la línea l en la columna col (o su final): para el bloque
+    público función pos_de_col(l: nat32, col: nat32, ref falta: nat32): nat32
+        variable i, k, u, c, w, fin_, n: nat32
+        variable b: arreglo [8] de byte
+        i := inicio(l)
+        fin_ := final(l)
+        c := 0
+        falta := 0
+        mientras i < fin_ hacer
+            n := copia(i, 4, b)
+            k := pag_decodifica(b, n, u)
+            w := ancho_de(u, c)
+            si c + w > col entonces devolver i fin
+            c := c + w
+            i := i + k
+        fin
+        si col > c entonces falta := col - c fin
+        devolver fin_
+    fin
+
+    ; =========================================================================
+    ;  Los colores de las líneas de arriba (de cada línea, cómo se empieza)
+    ; =========================================================================
+    público función asegura_estado(l: nat32)
+        variable i, a, n, sale, nivel, e: nat32
+        variable p, q: puntero a byte
+        si d.lenguaje < 0 entonces devolver fin
+        mientras estado_bien() <= l y estado_bien() < n_líneas() hacer
+            i := estado_bien() - 1
+            a := inicio(i)
+            n := final(i) - a
+            si n > MAX_COLOREA entonces n := MAX_COLOREA fin
+            si n + 8 > tcabe entonces
+                p := recrecer(tbuf, 0, n + 4096)
+                q := recrecer(tsty, 0, n + 4096)
+                si p = nulo o q = nulo entonces devolver fin
+                tbuf := p
+                tsty := q
+                tcabe := n + 4096
+            fin
+            copia(a, n, tbuf)
+            e := estado_de(i)
+            sale := len_colorea(d.lenguaje, tbuf, n, e yb 0xFFFF, tsty)
+            nivel := e >> 16
+            nivel := nivel + len_abre
+            si len_cierra > nivel entonces nivel := 0 sino nivel := nivel - len_cierra fin
+            si nivel > 0xFFFF entonces nivel := 0xFFFF fin
+            pon_estado(i + 1, (sale yb 0xFFFF) ob (nivel << 16))
+            pon_estado_bien(i + 2)
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Plegar
+    ; =========================================================================
+    función sangría(l: nat32, ref vacía: bool): nat32
+        variable i, f, col: nat32
+        variable c: byte
+        i := inicio(l)
+        f := final(l)
+        col := 0
+        mientras i < f hacer
+            c := BlocTxt.letra(i)
+            si c = ' ' entonces
+                col := col + 1
+            sino si c = 9 entonces
+                col := col + tab_ancho - col mod tab_ancho
+            sino si c <> 13 entonces
+                vacía := falso
+                devolver col
+            fin
+            i := i + 1
+        fin
+        vacía := cierto
+        devolver col
+    fin
+
+    función es_sección(l: nat32): bool
+        variable i, f: nat32
+        i := inicio(l)
+        f := final(l)
+        mientras i < f y (BlocTxt.letra(i) = ' ' o BlocTxt.letra(i) = 9) hacer i := i + 1 fin
+        devolver i < f y BlocTxt.letra(i) = '['
+    fin
+
+    función nivel(l: nat32): nat32
+        asegura_estado(l)
+        devolver estado_de(l) >> 16
+    fin
+
+    ; ¿empieza un bloque en la línea l? (lo que se pliega)
+    público función cabeza(l: nat32): bool
+        variable s, k, n: nat32
+        variable vacía: bool
+        si d.lenguaje < 0 o l + 1 >= n_líneas() entonces devolver falso fin
+        según nat16(len_plegado(d.lenguaje))
+            caso P_BLOQUES:
+                devolver nivel(l + 1) > nivel(l)
+            caso P_SANGRÍA:
+                s := sangría(l, vacía)
+                si vacía entonces devolver falso fin
+                k := l + 1
+                n := 0
+                mientras k < n_líneas() y n < 2000 hacer
+                    s := s + 0
+                    si sangría(k, vacía) > s y no vacía entonces devolver cierto fin
+                    si no vacía entonces devolver falso fin
+                    k := k + 1
+                    n := n + 1
+                fin
+                devolver falso
+            caso P_SECCIONES:
+                devolver es_sección(l)
+        fin
+        devolver falso
+    fin
+
+    ; la última línea del bloque que empieza en l
+    público función fin_de_bloque(l: nat32): nat32
+        variable k, s, n, últ, nv: nat32
+        variable vacía: bool
+        según nat16(len_plegado(d.lenguaje))
+            caso P_BLOQUES:
+                nv := nivel(l)
+                k := l + 1
+                mientras k + 1 < n_líneas() hacer
+                    si nivel(k + 1) <= nv entonces devolver k fin
+                    k := k + 1
+                fin
+                devolver n_líneas() - 1
+            caso P_SANGRÍA:
+                s := sangría(l, vacía)
+                k := l + 1
+                últ := l
+                mientras k < n_líneas() hacer
+                    n := sangría(k, vacía)
+                    si no vacía entonces
+                        si n <= s entonces romper fin
+                        últ := k
+                    fin
+                    k := k + 1
+                fin
+                devolver últ
+            caso P_SECCIONES:
+                k := l + 1
+                últ := l
+                mientras k < n_líneas() y no es_sección(k) hacer
+                    sangría(k, vacía)
+                    si no vacía entonces últ := k fin
+                    k := k + 1
+                fin
+                devolver últ
+        fin
+        devolver l
+    fin
+
+    ; pliega o despliega el bloque de la línea l (cierto si ha hecho algo)
+    público función pliega_o_despliega(l: nat32): bool
+        si desplegar(l) entonces devolver cierto fin
+        si no cabeza(l) entonces devolver falso fin
+        devolver plegar(l, fin_de_bloque(l))
+    fin
+
+    ; pliega todos los bloques de fuera
+    público función plegar_todo()
+        variable l, f: nat32
+        si d.lenguaje < 0 entonces devolver fin
+        l := 0
+        mientras l < n_líneas() hacer
+            si cabeza(l) entonces
+                f := fin_de_bloque(l)
+                plegar(l, f)
+                l := f + 1
+            sino
+                l := l + 1
+            fin
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Las filas: andar por ellas, de dónde a dónde
+    ; =========================================================================
+    ; a la fila de después (falso si no hay)
+    público función avanza(ref l: nat32, ref r: nat32): bool
+        variable k: nat32
+        si r + 1 < filas_de(l) entonces
+            r := r + 1
+            devolver cierto
+        fin
+        k := siguiente_visible(l)
+        si k >= n_líneas() entonces devolver falso fin
+        l := k
+        r := 0
+        devolver cierto
+    fin
+
+    público función retrocede(ref l: nat32, ref r: nat32): bool
+        si r > 0 entonces
+            r := r - 1
+            devolver cierto
+        fin
+        si l = 0 entonces devolver falso fin
+        l := anterior_visible(l)
+        r := filas_de(l) - 1
+        devolver cierto
+    fin
+
+    ; la línea y la fila de pos
+    público función sitio_de(pos: nat32, ref l: nat32, ref r: nat32)
+        l := línea_de(pos)
+        si no ajuste entonces
+            r := 0
+            devolver
+        fin
+        prepara_línea(l)
+        r := fila_de(pos - inicio(l))
+    fin
+
+    ; que se vea el cursor
+    público función a_la_vista()
+        variable cl, cr, l, r, n, col: nat32
+        variable i: ent32
+        sitio_de(d.cursor, cl, cr)
+        destapa(cl)
+        si cl < d.primera o (cl = d.primera y cr < d.sub) entonces
+            d.primera := cl
+            d.sub := cr
+        sino
+            ; si está muy abajo, se empieza a contar cerca
+            si cl > d.primera + nat32(filas) entonces
+                l := cl
+                n := 0
+                mientras l > 0 y n < nat32(filas) hacer
+                    l := anterior_visible(l)
+                    n := n + 1
+                fin
+                si l > d.primera entonces
+                    d.primera := l
+                    d.sub := 0
+                fin
+            fin
+            ; cuántas filas hay de la primera a la del cursor
+            l := d.primera
+            r := d.sub
+            n := 1
+            mientras (l < cl o (l = cl y r < cr)) y n < 100000 hacer
+                si no avanza(l, r) entonces romper fin
+                n := n + 1
+            fin
+            mientras n > nat32(filas) hacer
+                avanza(d.primera, d.sub)
+                n := n - 1
+            fin
+        fin
+        si escondida(d.primera) entonces
+            d.primera := anterior_visible(d.primera)
+            d.sub := 0
+        fin
+        ; a lo ancho (sin ajuste)
+        si no ajuste entonces
+            prepara_línea(cl)
+            col := col_en_fila(0, d.cursor - inicio(cl))
+            si col < d.izq entonces
+                i := ent32(col) - cols div 4
+                si i < 0 entonces i := 0 fin
+                d.izq := nat32(i)
+            sino si col >= d.izq + nat32(cols) entonces
+                d.izq := col - nat32(cols) + nat32(cols div 4) + 1
+            fin
+        sino
+            d.izq := 0
+        fin
+    fin
+
+    ; sube (n < 0) o baja n filas el cursor, en la columna que se quiere
+    público función mueve_filas(n: ent32)
+        variable l, r, oc: nat32
+        variable fuera: bool
+        sitio_de(d.cursor, l, r)
+        prepara_línea(l)
+        si d.col_quiere < 0 entonces d.col_quiere := ent32(col_en_fila(r, d.cursor - inicio(l))) fin
+        fuera := falso
+        mientras n <> 0 hacer
+            si n > 0 entonces
+                si no avanza(l, r) entonces
+                    fuera := cierto
+                    romper
+                fin
+                n := n - 1
+            sino
+                si no retrocede(l, r) entonces romper fin
+                n := n + 1
+            fin
+        fin
+        si fuera entonces
+            d.cursor := largo()
+            devolver
+        fin
+        prepara_línea(l)
+        oc := octeto_de_col(r, nat32(d.col_quiere), falso)
+        d.cursor := inicio(l) + oc
+    fin
+
+    ; el principio y el final de la fila del cursor (Inicio, Fin)
+    público función inicio_de_fila(): nat32
+        variable l, r: nat32
+        sitio_de(d.cursor, l, r)
+        prepara_línea(l)
+        devolver inicio(l) + cortes[r]
+    fin
+
+    público función fin_de_fila(): nat32
+        variable l, r: nat32
+        sitio_de(d.cursor, l, r)
+        prepara_línea(l)
+        si r + 1 < nf entonces devolver inicio(l) + pag_anterior(lbuf, cortes[r + 1]) fin
+        devolver inicio(l) + ln
+    fin
+
+    ; (RUEDA) la rueda: n filas (arriba, negativas), sin mover el cursor
+    público función rueda_filas(n: ent32): bool
+        variable l, r, k, pl, pr: nat32
+        pl := d.primera
+        pr := d.sub
+        mientras n > 0 hacer
+            si no avanza(d.primera, d.sub) entonces romper fin
+            n := n - 1
+        fin
+        mientras n < 0 hacer
+            si no retrocede(d.primera, d.sub) entonces romper fin
+            n := n + 1
+        fin
+        ; que no se quede en blanco por abajo: lo más, con la última fila abajo
+        l := n_líneas() - 1
+        mientras l > 0 y escondida(l) hacer l := l - 1 fin
+        r := filas_de(l) - 1
+        k := 1
+        mientras k < nat32(filas) y retrocede(l, r) hacer k := k + 1 fin
+        si d.primera > l o (d.primera = l y d.sub > r) entonces
+            d.primera := l
+            d.sub := r
+        fin
+        devolver d.primera <> pl o d.sub <> pr
+    fin
+
+    ; la posición que cae en el punto (x, yy) de la ventana (por encima y por
+    ; debajo del texto, la fila de antes y la de después: así, arrastrando, pasa)
+    público función pos_del_punto(x: ent32, yy: ent32): nat32
+        variable l, r, k, oc: nat32
+        variable col: ent32
+        l := d.primera
+        r := d.sub
+        si yy < ay + 4 entonces
+            si yy < ay entonces retrocede(l, r) fin
+        sino
+            k := nat32((yy - ay - 4) div ch)
+            si yy >= ay + ah entonces k := nat32(filas) fin
+            mientras k > 0 hacer
+                si no avanza(l, r) entonces
+                    devolver largo()
+                fin
+                k := k - 1
+            fin
+        fin
+        prepara_línea(l)
+        col := (x - tx + cw div 2) div cw
+        si x < tx entonces col := 0 fin
+        si no ajuste entonces col := col + ent32(d.izq) fin
+        oc := octeto_de_col(r, nat32(col), cierto)
+        devolver inicio(l) + oc
+    fin
+
+    ; la línea (y si es la primera fila de ella) que está en la fila yy de la ventana
+    público función línea_del_punto(yy: ent32, ref primera_fila: bool): nat32
+        variable l, r, k: nat32
+        l := d.primera
+        r := d.sub
+        primera_fila := falso
+        si yy < ay + 4 entonces devolver NADA fin
+        k := nat32((yy - ay - 4) div ch)
+        si ent32(k) >= filas entonces devolver NADA fin
+        mientras k > 0 hacer
+            si no avanza(l, r) entonces devolver NADA fin
+            k := k - 1
+        fin
+        primera_fila := r = 0
+        devolver l
+    fin
+
+    ; el punto donde se pinta pos (falso si no se ve)
+    público función punto_de(pos: nat32, ref x: ent32, ref yy: ent32): bool
+        variable cl, cr, l, r, k: nat32
+        sitio_de(pos, cl, cr)
+        l := d.primera
+        r := d.sub
+        k := 0
+        mientras l <> cl o r <> cr hacer
+            si ent32(k) >= filas entonces devolver falso fin
+            si no avanza(l, r) entonces devolver falso fin
+            k := k + 1
+        fin
+        si ent32(k) >= filas entonces devolver falso fin
+        prepara_línea(cl)
+        x := tx + (ent32(col_en_fila(cr, pos - inicio(cl))) - ent32(d.izq)) * cw
+        si ajuste entonces x := tx + ent32(col_en_fila(cr, pos - inicio(cl))) * cw fin
+        yy := ay + 4 + ent32(k) * ch
+        devolver cierto
+    fin
+
+    ; =========================================================================
+    ;  El paréntesis que hace pareja
+    ; =========================================================================
+    función es_paréntesis(c: byte): bool
+        devolver c = '(' o c = ')' o c = '[' o c = ']' o c = '{' o c = '}'
+    fin
+
+    función pareja_de(c: byte): byte
+        según c
+            caso '(': devolver ')'
+            caso ')': devolver '('
+            caso '[': devolver ']'
+            caso ']': devolver '['
+            caso '{': devolver '}'
+            caso '}': devolver '{'
+        fin
+        devolver 0
+    fin
+
+    ; ¿cuenta el octeto o de la línea preparada? (si hay lenguaje, solo los de fuera de cadenas y comentarios)
+    función cuenta_aquí(oc: nat32): bool
+        si d.lenguaje < 0 o ln > MAX_COLOREA entonces devolver cierto fin
+        devolver sbuf[oc] = E_OPERADOR
+    fin
+
+    ; busca la pareja del paréntesis de pos (NADA si no la hay, en 4000 líneas)
+    público función pareja(pos: nat32): nat32
+        variable c, q: byte
+        variable l, a, oc, nivel_, vueltas: nat32
+        variable atrás: bool
+        c := BlocTxt.letra(pos)
+        si pos >= largo() o no es_paréntesis(c) entonces devolver NADA fin
+        q := pareja_de(c)
+        atrás := c = ')' o c = ']' o c = '}'
+        l := línea_de(pos)
+        prepara_línea(l)
+        a := inicio(l)
+        si pos - a >= ln entonces devolver NADA fin
+        si no cuenta_aquí(pos - a) entonces devolver NADA fin
+        nivel_ := 0
+        oc := pos - a
+        vueltas := 0
+        mientras vueltas < 4000 hacer
+            si atrás entonces
+                mientras oc > 0 hacer
+                    oc := oc - 1
+                    si lbuf[oc] = q y cuenta_aquí(oc) entonces
+                        si nivel_ = 0 entonces devolver a + oc fin
+                        nivel_ := nivel_ - 1
+                    sino si lbuf[oc] = c y cuenta_aquí(oc) entonces
+                        nivel_ := nivel_ + 1
+                    fin
+                fin
+                si l = 0 entonces devolver NADA fin
+                l := l - 1
+                prepara_línea(l)
+                a := inicio(l)
+                oc := ln
+            sino
+                oc := oc + 1
+                mientras oc < ln hacer
+                    si lbuf[oc] = q y cuenta_aquí(oc) entonces
+                        si nivel_ = 0 entonces devolver a + oc fin
+                        nivel_ := nivel_ - 1
+                    sino si lbuf[oc] = c y cuenta_aquí(oc) entonces
+                        nivel_ := nivel_ + 1
+                    fin
+                    oc := oc + 1
+                fin
+                l := l + 1
+                si l >= n_líneas() entonces devolver NADA fin
+                prepara_línea(l)
+                a := inicio(l)
+                si ln = 0 entonces oc := 0 fin
+                oc := 0
+                ; (el primero de la línea también cuenta)
+                si ln > 0 entonces
+                    si lbuf[0] = q y cuenta_aquí(0) entonces
+                        si nivel_ = 0 entonces devolver a fin
+                        nivel_ := nivel_ - 1
+                    sino si lbuf[0] = c y cuenta_aquí(0) entonces
+                        nivel_ := nivel_ + 1
+                    fin
+                fin
+            fin
+            vueltas := vueltas + 1
+        fin
+        devolver NADA
+    fin
+
+    ; mira si junto al cursor hay un paréntesis y busca su pareja
+    público función mira_pareja()
+        variable p: nat32
+        par_a := NADA
+        par_b := NADA
+        si d.clase <> DOC_NORMAL entonces devolver fin
+        p := NADA
+        si d.cursor < largo() y es_paréntesis(BlocTxt.letra(d.cursor)) entonces
+            p := pareja(d.cursor)
+            si p <> NADA entonces par_a := d.cursor fin
+        fin
+        si par_a = NADA y d.cursor > 0 y es_paréntesis(BlocTxt.letra(d.cursor - 1)) entonces
+            p := pareja(d.cursor - 1)
+            si p <> NADA entonces par_a := d.cursor - 1 fin
+        fin
+        si par_a <> NADA entonces par_b := p fin
+    fin
+
+    ; =========================================================================
+    ;  Pintar el texto
+    ; =========================================================================
+    función color_de(e: byte): nat32
+        según nat16(e)
+            caso E_CLAVE: devolver 0x1D4ED8
+            caso E_TIPO: devolver 0x7C3AED
+            caso E_PROPIA: devolver 0x0E7490
+            caso E_COMENTARIO: devolver 0x15803D
+            caso E_CADENA: devolver 0xA34A0B
+            caso E_NÚMERO: devolver 0xC2410C
+            caso E_OPERADOR: devolver 0x374151
+            caso E_DIRECTIVA: devolver 0x9D174D
+            caso E_ETIQUETA: devolver 0x1E40AF
+            caso E_ATRIBUTO: devolver 0x0369A1
+            caso E_ESPECIAL: devolver 0xBE185D
+        fin
+        devolver TINTA
+    fin
+
+    función en_negrita(e: byte): bool
+        devolver e = E_CLAVE o e = E_TIPO o e = E_DIRECTIVA o e = E_ETIQUETA
+    fin
+
+    ; lo seleccionado: de s0 a s1 (sin contar s1)
+    público función sel_inicio(): nat32
+        si d.ancla < d.cursor entonces devolver d.ancla fin
+        devolver d.cursor
+    fin
+
+    público función sel_fin(): nat32
+        si d.ancla > d.cursor entonces devolver d.ancla fin
+        devolver d.cursor
+    fin
+
+    ; las líneas y las columnas del bloque, en orden
+    público función bloque_orden(ref l1: nat32, ref l2: nat32, ref c1: nat32, ref c2: nat32)
+        l1 := d.b_l1
+        l2 := d.b_l2
+        si l1 > l2 entonces
+            l1 := d.b_l2
+            l2 := d.b_l1
+        fin
+        c1 := d.b_c1
+        c2 := d.b_c2
+        si c1 > c2 entonces
+            c1 := d.b_c2
+            c2 := d.b_c1
+        fin
+    fin
+
+    ; un recuadro alrededor de una celda (lo que no se puede pintar, los de control)
+    función recuadro(x: ent32, yy: ent32, an: ent32, c: nat32)
+        Grafico.marco(lz, x, yy + 1, an, ch - 2, c)
+    fin
+
+    ; la fila r de la línea preparada l, en yy
+    función pinta_fila(l: nat32, r: nat32, yy: ent32, s0: nat32, s1: nat32)
+        variable oc, fin_, k, u, col, w, a, g, pos, bl1, bl2, bc1, bc2, cabs: nat32
+        variable x, xs: ent32
+        variable e: byte
+        variable sel, en_bloque: bool
+        variable tinta: nat32
+        a := inicio(l)
+        oc := cortes[r]
+        fin_ := cortes[r + 1]
+        col := 0
+        x := tx
+        en_bloque := d.bloque
+        si en_bloque entonces
+            bloque_orden(bl1, bl2, bc1, bc2)
+            en_bloque := l >= bl1 y l <= bl2
+        fin
+        ; la columna en la línea entera (para el bloque): la de la fila de arriba sigue
+        cabs := 0
+        si en_bloque y r > 0 entonces cabs := col_lógica(a + oc) fin
+        mientras oc < fin_ hacer
+            k := pag_decodifica(lbuf + oc, ln - oc, u)
+            w := ancho_de(u, col)
+            ; sin ajuste: lo que queda a la izquierda no se ve
+            si no ajuste y col + w <= d.izq entonces
+                col := col + w
+                cabs := cabs + w
+                oc := oc + k
+                seguir
+            fin
+            si no ajuste entonces x := tx + (ent32(col) - ent32(d.izq)) * cw fin
+            si x >= ax + aw entonces romper fin
+            pos := a + oc
+            si en_bloque entonces
+                sel := cabs >= bc1 y cabs < bc2
+            sino
+                sel := pos >= s0 y pos < s1
+            fin
+            e := sbuf[oc]
+            tinta := color_de(e)
+            si sel entonces
+                Grafico.rectángulo(lz, x, yy, ent32(w) * cw, ch, RESALTE)
+                tinta := PAPEL
+            fin
+            si pos = par_a o pos = par_b entonces
+                Grafico.marco(lz, x, yy, cw, ch, C_PAREJA)
+                Grafico.marco(lz, x + 1, yy + 1, cw - 2, ch - 2, C_PAREJA)
+            fin
+            si u = 9 entonces
+                si ver_espacios entonces pon_letra(x + (ent32(w) * cw - cw) div 2, yy, 0x1A, C_ESPACIO, falso) fin
+            sino si u = ' ' entonces
+                si ver_espacios entonces pon_letra(x, yy, 0xFA, C_ESPACIO, falso) fin
+            sino
+                g := pag_letra(u)
+                si u >= 0xDC80 y u <= 0xDCFF entonces g := SIN_LETRA fin
+                si g = SIN_LETRA entonces
+                    pon_letra(x, yy, '?', tinta, falso)
+                    recuadro(x, yy, cw, tinta)
+                sino si u < 32 o u = 127 entonces
+                    pon_letra(x, yy, g, tinta, falso)
+                    recuadro(x, yy, cw, C_ESPACIO)
+                sino
+                    pon_letra(x, yy, g, tinta, en_negrita(e))
+                fin
+            fin
+            x := x + ent32(w) * cw
+            col := col + w
+            cabs := cabs + w
+            oc := oc + k
+        fin
+        ; el final de la línea (en su última fila)
+        si r + 1 = nf entonces
+            xs := x
+            si no ajuste entonces xs := tx + (ent32(col) - ent32(d.izq)) * cw fin
+            pos := a + ln
+            si pos >= s0 y pos < s1 y pos < largo() y no d.bloque entonces
+                Grafico.rectángulo(lz, xs, yy, 4, ch, RESALTE)
+            fin
+            si ver_finales y l + 1 < n_líneas() entonces
+                pon_letra(xs + 1, yy, 0x14, C_ESPACIO, falso)
+            fin
+            ; plegado: «...» en un recuadro, detrás de lo de arriba
+            si plegado_en(l) >= 0 entonces
+                Grafico.marco(lz, xs + 4, yy + 2, 3 * cw + 4, ch - 4, SUAVE)
+                pon_letra(xs + 6, yy, '.', SUAVE, falso)
+                pon_letra(xs + 6 + cw, yy, '.', SUAVE, falso)
+                pon_letra(xs + 6 + 2 * cw, yy, '.', SUAVE, falso)
+            fin
+        fin
+    fin
+
+    ; el número (a la derecha del margen) y el pliegue de la línea l, en yy
+    función pinta_margen(l: nat32, yy: ent32, del_cursor: bool)
+        variable t: arreglo [12] de byte
+        variable n, i: nat32
+        variable x, mx: ent32
+        si con_números() entonces
+            natural_a_texto(l + 1, t)
+            n := longitud(t)
+            x := ax + gw - 6 - ent32(n) * cw
+            si con_pliegues entonces x := x - 14 fin
+            i := 0
+            mientras i < n hacer
+                si del_cursor entonces pon_letra(x, yy, t[i], TINTA, cierto) sino pon_letra(x, yy, t[i], C_NÚMERO, falso) fin
+                x := x + cw
+                i := i + 1
+            fin
+        fin
+        si con_pliegues entonces
+            mx := ax + gw - 13
+            si plegado_en(l) >= 0 entonces
+                Grafico.rectángulo(lz, mx, yy + ch div 2 - 5, 11, 11, PAPEL)
+                Grafico.marco(lz, mx, yy + ch div 2 - 5, 11, 11, SUAVE)
+                Grafico.rectángulo(lz, mx + 2, yy + ch div 2, 7, 1, TINTA)
+                Grafico.rectángulo(lz, mx + 5, yy + ch div 2 - 3, 1, 7, TINTA)
+            sino si cabeza(l) entonces
+                Grafico.rectángulo(lz, mx, yy + ch div 2 - 5, 11, 11, PAPEL)
+                Grafico.marco(lz, mx, yy + ch div 2 - 5, 11, 11, SUAVE)
+                Grafico.rectángulo(lz, mx + 2, yy + ch div 2, 7, 1, TINTA)
+            fin
+        fin
+    fin
+
+    público función pinta_texto()
+        variable l, r, k, cl, s0, s1: nat32
+        variable yy, cx, cy: ent32
+        si v = 0 entonces devolver fin
+        Grafico.rectángulo(lz, ax, ay, aw, ah, PAPEL)
+        si gw > 0 entonces
+            Grafico.rectángulo(lz, ax, ay, gw, ah, C_MARGEN)
+            Grafico.rectángulo(lz, ax + gw - 1, ay, 1, ah, 0xD5DFEC)
+        fin
+        s0 := sel_inicio()
+        s1 := sel_fin()
+        cl := línea_de(d.cursor)
+        l := d.primera
+        r := d.sub
+        yy := ay + 4
+        k := 0
+        mientras ent32(k) < filas y l < n_líneas() hacer
+            prepara_línea(l)
+            si r = 0 y gw > 0 entonces pinta_margen(l, yy, l = cl) fin
+            ; (pinta_margen prepara otras líneas si mira los pliegues)
+            prepara_línea(l)
+            mientras r < nf y ent32(k) < filas hacer
+                pinta_fila(l, r, yy, s0, s1)
+                yy := yy + ch
+                k := k + 1
+                r := r + 1
+            fin
+            l := siguiente_visible(l)
+            r := 0
+        fin
+        ; el cursor: una raya entre dos letras (si se ve)
+        si enfocada y no d.bloque entonces
+            si punto_de(d.cursor, cx, cy) y cx >= tx - 1 y cx < ax + aw entonces
+                Grafico.rectángulo(lz, cx - 1, cy, 2, ch, C_CURSOR)
+            fin
+        fin
+        si d.bloque entonces pinta_cursor_bloque() fin
+    fin
+
+    ; en bloque: una raya en la columna del cursor de cada línea del bloque
+    función pinta_cursor_bloque()
+        variable l1, l2, c1, c2, l, r, k: nat32
+        variable yy, x: ent32
+        bloque_orden(l1, l2, c1, c2)
+        l := d.primera
+        r := d.sub
+        yy := ay + 4
+        k := 0
+        mientras ent32(k) < filas y l < n_líneas() hacer
+            si r = 0 y l >= l1 y l <= l2 entonces
+                x := tx + (ent32(d.b_c2) - ent32(d.izq)) * cw
+                si x >= tx - 1 entonces Grafico.rectángulo(lz, x - 1, yy, 2, ch, C_CURSOR) fin
+            fin
+            si no avanza(l, r) entonces romper fin
+            yy := yy + ch
+            k := k + 1
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Comparar dos documentos, lado a lado
+    ; =========================================================================
+    público variable comparando: bool
+    público variable da, db: puntero a Doc
+    variable filas_c: puntero a nat32          ; de cada fila: la línea de a, la de b y la clase (3 palabras)
+    público variable n_filas_c: nat32
+    público variable c_primera: nat32
+    público variable c_izq: nat32
+    público variable diferencias: nat32         ; cuántos trozos distintos
+
+    ; el resumen de una línea (FNV-1a)
+    función resumen_línea(l: nat32): nat32
+        variable i, f, h: nat32
+        h := 2166136261
+        i := inicio(l)
+        f := final(l)
+        mientras i < f hacer
+            h := (h xob nat32(BlocTxt.letra(i))) * 16777619
+            i := i + 1
+        fin
+        devolver h
+    fin
+
+    función pon_fila_c(i: nat32, la: nat32, lb: nat32, clase: nat32)
+        filas_c[i * 3] := la
+        filas_c[i * 3 + 1] := lb
+        filas_c[i * 3 + 2] := clase
+    fin
+
+    ; compara a con b: cierto si se ha podido (falso: sin memoria)
+    público función compara(a: puntero a Doc, b: puntero a Doc): bool
+        variable ha, hb: puntero a nat32
+        variable na, nb, i, k, n, clase, a0, an, b0, bn, j, guardado: nat32
+        variable viejo: puntero a Doc
+        viejo := d
+        d := a
+        na := n_líneas()
+        ha := puntero(pedir(na * 4 + 4))
+        si ha = nulo entonces
+            d := viejo
+            devolver falso
+        fin
+        para i desde 0 hasta na - 1 hacer ha[i] := resumen_línea(i) fin
+        d := b
+        nb := n_líneas()
+        hb := puntero(pedir(nb * 4 + 4))
+        si hb = nulo entonces
+            soltar(puntero(ha))
+            d := viejo
+            devolver falso
+        fin
+        para i desde 0 hasta nb - 1 hacer hb[i] := resumen_línea(i) fin
+        d := viejo
+        dif_comparar(ha, na, hb, nb, 20000)
+        soltar(puntero(ha))
+        soltar(puntero(hb))
+        ; las filas: lo igual, una con las dos; lo quitado, solo la de a; lo
+        ; cambiado, las dos y, si una tiene más, huecos en la otra
+        n := 0
+        si dif_cuántos() > 0 entonces
+        para i desde 0 hasta dif_cuántos() - 1 hacer
+            dif_trozo(i, clase, a0, an, b0, bn)
+            si an > bn entonces n := n + an sino n := n + bn fin
+        fin
+        fin
+        si filas_c <> nulo entonces soltar(puntero(filas_c)) fin
+        filas_c := puntero(pedir(n * 12 + 12))
+        si filas_c = nulo entonces
+            dif_soltar()
+            devolver falso
+        fin
+        k := 0
+        diferencias := 0
+        si dif_cuántos() > 0 entonces
+        para i desde 0 hasta dif_cuántos() - 1 hacer
+            dif_trozo(i, clase, a0, an, b0, bn)
+            si clase <> D_IGUAL entonces diferencias := diferencias + 1 fin
+            j := 0
+            guardado := an
+            si bn > guardado entonces guardado := bn fin
+            mientras j < guardado hacer
+                si j < an y j < bn entonces
+                    pon_fila_c(k, a0 + j, b0 + j, clase)
+                sino si j < an entonces
+                    si clase = D_IGUAL entonces pon_fila_c(k, a0 + j, NADA, D_IGUAL) sino pon_fila_c(k, a0 + j, NADA, D_QUITADO) fin
+                sino
+                    si clase = D_IGUAL entonces pon_fila_c(k, NADA, b0 + j, D_IGUAL) sino pon_fila_c(k, NADA, b0 + j, D_AÑADIDO) fin
+                fin
+                k := k + 1
+                j := j + 1
+            fin
+        fin
+        fin
+        dif_soltar()
+        n_filas_c := k
+        da := a
+        db := b
+        c_primera := 0
+        c_izq := 0
+        comparando := cierto
+        devolver cierto
+    fin
+
+    público función deja_de_comparar()
+        comparando := falso
+        si filas_c <> nulo entonces soltar(puntero(filas_c)) fin
+        filas_c := nulo
+        n_filas_c := 0
+    fin
+
+    ; la fila (de las de comparar) de la diferencia siguiente (o la de antes)
+    público función otra_diferencia(adelante: bool): bool
+        variable i: nat32
+        si n_filas_c = 0 entonces devolver falso fin
+        i := c_primera
+        si adelante entonces
+            ; lo de la fila de ahora no cuenta: la primera distinta después de una igual
+            mientras i < n_filas_c y filas_c[i * 3 + 2] <> D_IGUAL hacer i := i + 1 fin
+            mientras i < n_filas_c y filas_c[i * 3 + 2] = D_IGUAL hacer i := i + 1 fin
+            si i >= n_filas_c entonces devolver falso fin
+        sino
+            si i = 0 entonces devolver falso fin
+            i := i - 1
+            mientras i > 0 y filas_c[i * 3 + 2] = D_IGUAL hacer i := i - 1 fin
+            si filas_c[i * 3 + 2] = D_IGUAL entonces devolver falso fin
+            mientras i > 0 y filas_c[(i - 1) * 3 + 2] <> D_IGUAL hacer i := i - 1 fin
+        fin
+        c_primera := i
+        devolver cierto
+    fin
+
+    público función rueda_comparar(n: ent32)
+        variable p: ent32
+        p := ent32(c_primera) + n
+        si p > ent32(n_filas_c) - filas entonces p := ent32(n_filas_c) - filas fin
+        si p < 0 entonces p := 0 fin
+        c_primera := nat32(p)
+    fin
+
+    ; una mitad: las líneas del documento x (la columna «lado»: 0 a, 1 b) desde x0, de an de ancho
+    función pinta_mitad(x0: ent32, an: ent32, lado: nat32)
+        variable i, k, l, clase, n: nat32
+        variable yy, gx, txx: ent32
+        variable fondo, tinta: nat32
+        variable señal: byte
+        variable t: arreglo [12] de byte
+        variable viejo: puntero a Doc
+        variable oc, w, col, kk, u, g: nat32
+        variable x: ent32
+        viejo := d
+        si lado = 0 entonces d := da sino d := db fin
+        gx := (cifras(n_líneas()) + 1) * cw + 10
+        txx := x0 + gx + 4
+        Grafico.rectángulo(lz, x0, ay, an, ah, PAPEL)
+        Grafico.rectángulo(lz, x0, ay, gx, ah, C_MARGEN)
+        i := c_primera
+        yy := ay + 4
+        k := 0
+        mientras ent32(k) < filas y i < n_filas_c hacer
+            l := filas_c[i * 3 + lado]
+            clase := filas_c[i * 3 + 2]
+            fondo := PAPEL
+            señal := ' '
+            si clase = D_QUITADO entonces
+                fondo := C_QUITADO
+                señal := '-'
+            sino si clase = D_AÑADIDO entonces
+                fondo := C_AÑADIDO
+                señal := '+'
+            sino si clase = D_CAMBIADO entonces
+                fondo := C_CAMBIADO
+                señal := '*'
+            fin
+            si l = NADA entonces
+                ; un hueco: rayado (no solo de color)
+                Grafico.rectángulo(lz, x0 + gx, yy, an - gx, ch, C_HUECO)
+                x := x0 + gx
+                mientras x < x0 + an hacer
+                    Grafico.rectángulo(lz, x, yy + ch div 2, cw div 2, 1, 0xB8C0CC)
+                    x := x + cw
+                fin
+            sino
+                si fondo <> PAPEL entonces Grafico.rectángulo(lz, x0 + gx, yy, an - gx, ch, fondo) fin
+                natural_a_texto(l + 1, t)
+                n := longitud(t)
+                x := x0 + gx - 6 - cw - ent32(n) * cw
+                kk := 0
+                mientras kk < n hacer
+                    pon_letra(x, yy, t[kk], C_NÚMERO, falso)
+                    x := x + cw
+                    kk := kk + 1
+                fin
+                si señal <> ' ' entonces pon_letra(x0 + gx - 4 - cw, yy, señal, TINTA, cierto) fin
+                ; el texto de la línea (sin ajuste, desde c_izq)
+                prepara_línea(l)
+                oc := 0
+                col := 0
+                x := txx
+                mientras oc < ln hacer
+                    kk := pag_decodifica(lbuf + oc, ln - oc, u)
+                    w := ancho_de(u, col)
+                    si col + w > c_izq entonces
+                        x := txx + (ent32(col) - ent32(c_izq)) * cw
+                        si x + cw > x0 + an entonces romper fin
+                        si u <> 9 y u <> ' ' entonces
+                            g := pag_letra(u)
+                            si g = SIN_LETRA entonces g := '?' fin
+                            tinta := color_de(sbuf[oc])
+                            pon_letra(x, yy, g, tinta, en_negrita(sbuf[oc]))
+                        fin
+                    fin
+                    col := col + w
+                    oc := oc + kk
+                fin
+            fin
+            yy := yy + ch
+            k := k + 1
+            i := i + 1
+        fin
+        d := viejo
+    fin
+
+    público función pinta_comparación()
+        variable m: ent32
+        si v = 0 entonces devolver fin
+        m := aw div 2
+        pinta_mitad(ax, m - 2, 0)
+        Grafico.rectángulo(lz, ax + m - 2, ay, 4, ah, 0x9DBBE4)
+        pinta_mitad(ax + m + 2, aw - m - 2, 1)
+    fin
+
+fin BlocVis.

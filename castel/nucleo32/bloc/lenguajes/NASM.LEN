@@ -1,0 +1,43 @@
+; =============================================================================
+;  NASM.LEN - el ensamblador del 8086 al Pentium (NASM y el ENSAMBLA de casa),
+;  para el Bloc de notas
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+;  El formato, en CASTEL.LEN.
+; =============================================================================
+nombre=Ensamblador NASM
+extensiones=ASM NAS INC S
+distingue=no
+comentario=;
+comillas=" ' `
+escape=\
+inicio=._?
+letras=.$#@~?
+numeros=si
+etiquetas=dospuntos
+directiva=%
+operadores=+-*/%<>=&|^~!:,
+; las instrucciones de siempre
+claves=mov movzx movsx lea push pop pusha popa pushad popad pushf popf xchg
+claves=add adc sub sbb inc dec neg cmp mul imul div idiv and or xor not test
+claves=shl shr sal sar rol ror rcl rcr shld shrd bt bts btr btc bsf bsr
+claves=jmp call ret retf iret iretd int into loop loope loopne jcxz jecxz
+claves=je jne jz jnz ja jae jb jbe jg jge jl jle jc jnc jo jno js jns jp jnp jpe jpo jna jnae jnb jnbe jng jnge jnl jnle
+claves=sete setne setz setnz seta setae setb setbe setg setge setl setle setc setnc
+claves=cmove cmovne cmovz cmovnz cmova cmovae cmovb cmovbe cmovg cmovge cmovl cmovle
+claves=movsb movsw movsd stosb stosw stosd lodsb lodsw lodsd scasb scasw scasd cmpsb cmpsw cmpsd
+claves=rep repe repz repne repnz lock cld std cli sti clc stc cmc nop hlt
+claves=in out insb insw insd outsb outsw outsd cbw cwd cwde cdq lahf sahf
+claves=lgdt lidt sgdt sidt lldt ltr cpuid rdtsc rdmsr wrmsr invlpg wbinvd
+claves=enter leave bound arpl lar lsl verr verw clts
+claves=fld fst fstp fild fist fistp fadd fsub fmul fdiv fsqrt fabs fchs fcom fcomp fxch finit fwait
+; los registros
+tipos=al ah ax eax bl bh bx ebx cl ch cx ecx dl dh dx edx si esi di edi bp ebp sp esp
+tipos=cs ds es fs gs ss cr0 cr2 cr3 cr4 dr0 dr1 dr2 dr3 dr6 dr7
+tipos=rax rbx rcx rdx rsi rdi rbp rsp r8 r9 r10 r11 r12 r13 r14 r15
+tipos=byte word dword qword tword near far short
+; lo que no es una instrucción
+propias=db dw dd dq dt resb resw resd resq times equ org bits section segment
+propias=global extern align cpu use16 use32 use64 incbin struc endstruc
+plegado=bloques
+abre=%macro %if %ifdef %ifndef %rep struc
+cierra=%endmacro %endif %endrep endstruc

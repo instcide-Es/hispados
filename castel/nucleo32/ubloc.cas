@@ -1,159 +1,652 @@
 ; =============================================================================
-;  ubloc.cas - el «Bloc de notas» del escritorio de Hispa-Pentium (BLOC.BIN en
-;  el disco): un programa del anillo 3 con su ventana, para escribir un texto
-;  con el teclado español y guardarlo en el disco.
+;  ubloc.cas - el «Bloc de notas» del escritorio de Hispa-Pentium (BLOC.BIN):
+;  un editor de textos y de programas para el anillo 3.
 ;
-;    BLOC [ARCHIVO]      abre ese archivo de texto (NOTAS.TXT si no se dice)
+;    BLOC [ARCHIVO]      abre ese archivo (sin nada: los que estaban abiertos
+;                        la última vez, o NOTAS.TXT)
+;    BLOC /PRUEBA GUION  sin ventana (para las pruebas, con corre32): hace lo
+;                        que dice el guion (teclas, abrir, guardar, enseñar)
 ;
-;  Se escribe como en cualquier editor: las letras entran donde está el
-;  cursor; Intro, Retroceso y Supr; las flechas, Inicio, Fin, Re Pág y Av Pág;
-;  un clic pone el cursor. Las líneas largas siguen en la de debajo.
-;  Se selecciona arrastrando el ratón, con dos clics (la palabra), con tres
-;  (la línea), con Mayús y un clic (hasta ahí) o con Mayús y las flechas; lo
-;  seleccionado se ve resaltado, y lo que se teclea lo sustituye. Cortar,
-;  Copiar y Pegar (Ctrl+X, Ctrl+C, Ctrl+V; todo, Ctrl+A) van con el
-;  portapapeles del sistema: lo copiado aquí se pega en otro programa.
-;  Arriba, la barra de menús (Archivo, Edición, Ayuda) y los botones «Nuevo»
-;  y «Guardar» (también F2 y Ctrl+S); el botón secundario del ratón saca el
-;  menú de Cortar, Copiar, Pegar y Seleccionar todo. El archivo se guarda con
-;  los finales de línea del DOS, en la página 437. Si se cierra con cambios
-;  sin guardar, avisa (cerrar otra vez sale sin guardar).
+;  Lo de un editor serio: archivos de cualquier tamaño (un búfer con hueco:
+;  bloctxt.cas), deshacer y rehacer sin límite, los números de línea, la
+;  línea y la columna abajo, ir a la línea (Ctrl+G), seleccionar con Mayús y
+;  las flechas o con el ratón, el portapapeles del sistema (Ctrl+A/C/X/V),
+;  la rueda, el ajuste de línea y la letra más grande con Ctrl+rueda.
+;  Pestañas (Ctrl+N, Ctrl+O, Ctrl+W, Ctrl+Tab), con « *» en las que tienen
+;  cambios; pregunta al cerrar; recuerda lo abierto (BLOC.INI, en la carpeta
+;  del usuario); abre lo que se arrastra desde Mi equipo. Buscar y reemplazar
+;  (Ctrl+F, Ctrl+H) con mayúsculas, palabra entera y expresiones regulares
+;  (blocexp.cas), en todos los abiertos y en una carpeta (blocbus.cas). Los
+;  colores según el lenguaje (bloclen.cas y los .LEN de \HISPA\BLOC\LENGUAJES),
+;  plegar y la pareja de los paréntesis. UTF-8 (con y sin BOM), la 437 de
+;  Hispa y la 1252, CR LF y LF (blocarc.cas, blocpag.cas). Y la edición en
+;  columna (Alt y arrastrar), las macros (Ctrl+Mayús+R y P), comparar dos
+;  archivos (blocdif.cas), duplicar y mover líneas (Ctrl+D, Alt+flechas),
+;  comentar (Ctrl+Q), mayúsculas y minúsculas, ordenar las líneas. F1, la
+;  ayuda. Nada depende solo del color: lo cambiado lleva « *», las palabras
+;  clave van en negrita, lo distinto de comparar lleva su signo.
+;
+;  Un .TXT se abre y se guarda como siempre (en la 437, con CR LF), y con lo
+;  de siempre se ve igual que antes: sin números de línea (en los programas,
+;  sí) y con las líneas largas partidas.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo UBloc
 
     modelo usuario
 
-    importar Llamadas, Barramenu, Textos32, Formato
+    importar Llamadas, Barramenu, Textos32, Formato, Grafico, BlocMem, BlocPag, BlocTxt, BlocVis, BlocArc, BlocLen, BlocExp, BlocBus, BlocDef
 
-    constante MÁXIMO = 30000                    ; las letras que caben
     constante BARRA = 34                        ; lo que mide la franja de los botones
-    constante ARRIBA = ALTO_MENÚS + BARRA       ; donde empieza el texto: debajo de los menús y los botones
-    constante PIE = 22                          ; y la de abajo
-    constante MARGEN = 6
-    constante TECLA_F2 = 0x13C
-    constante PAPEL = 0xFFFFFF
-    constante TINTA = 0x14294A
-    constante SUAVE = 0x5A7396
-    constante RESALTE = 0x2F74D0                ; el fondo de lo seleccionado
+    constante ALTO_PESTAÑAS = 24
+    constante PIE = 22
+    constante FILA_PANEL = 28
+    constante MAX_DOCS = 32
+    constante TECLA_F7 = 0x141
+    constante TECLA_INSERTAR = 0x152
     ; las teclas con Ctrl
     constante CTRL_A = 1
+    constante CTRL_B = 2
+    constante CTRL_D = 4
+    constante CTRL_F = 6
+    constante CTRL_G = 7
+    constante CTRL_H = 8
+    constante CTRL_N = 14
+    constante CTRL_O = 15
+    constante CTRL_P = 16
+    constante CTRL_Q = 17
+    constante CTRL_R = 18
     constante CTRL_S = 19
+    constante CTRL_U = 21
     constante CTRL_V = 22
+    constante CTRL_W = 23
     constante CTRL_X = 24
+    constante CTRL_Y = 25
+    constante CTRL_Z = 26
     ; los menús: los de la barra (su número) y el del botón secundario
     constante M_ARCHIVO = 0
     constante M_EDICIÓN = 1
-    constante M_AYUDA = 2
+    constante M_BUSCAR = 2
+    constante M_VER = 3
+    constante M_FORMATO = 4
+    constante M_LENGUAJE = 5
+    constante M_AYUDA = 6
     constante M_CONTEXTO = 100
+    ; los colores de la barra
+    constante C_BARRA_ARRIBA = 0xF4F8FE
+    constante C_BARRA_ABAJO = 0xD3E3F8
+    constante C_RAYA = 0x9DBBE4
+    constante C_FOCO = 0x1D4ED8
 
-    variable v: nat32
-    variable ancho, alto: ent32                 ; lo de dentro de la ventana
-    variable columnas, filas: ent32             ; las letras que caben a lo ancho y a lo alto
-    variable letras: arreglo [MÁXIMO + 4] de byte
-    variable largo, cursor: nat32
-    variable ancla: nat32                       ; el otro extremo de lo seleccionado (igual que el cursor: nada)
-    variable arrastrando: bool                  ; se está seleccionando con el ratón
-    variable primera: ent32                     ; la primera línea que se ve
-    variable suelto: bool                       ; (RUEDA) desplazado con la rueda: lo que se ve no sigue al cursor
-    variable nombre: arreglo [64] de byte
-    variable rótulo: arreglo [96] de byte
-    variable aviso: arreglo [96] de byte
-    variable cambiado, cerrando: bool
-    variable aviso_malo: bool                   ; el aviso es de algo que ha ido mal
-    variable trozo: arreglo [512] de byte
-    variable pegado: arreglo [MÁXIMO] de byte   ; lo que viene del portapapeles
-    variable menús: arreglo [24] de byte = "Archivo|Edición|Ayuda"
-    variable menú_abierto: ent32 = -1           ; el de la barra que está abierto
+    variable menús: arreglo [64] de byte = "Archivo|Edición|Buscar|Ver|Formato|Lenguaje|Ayuda"
+    variable menú_abierto: ent32 = -1
+    variable opciones: arreglo [2048] de byte   ; lo de un menú, hecho al abrirlo
 
-    ; -------------------------------------------------------------------------
-    ;  Dónde cae cada letra (las líneas largas se parten al ancho de la ventana)
-    ; -------------------------------------------------------------------------
-    ; la línea y la columna (de la pantalla) de la letra número «pos»
-    función sitio(pos: nat32, ref lin: ent32, ref col: ent32)
-        variable i: nat32
-        lin := 0
-        col := 0
-        i := 0
-        mientras i < pos hacer
-            si letras[i] = '\n' entonces
-                lin := lin + 1
-                col := 0
-            sino
-                col := col + 1
-                si col = columnas entonces
-                    lin := lin + 1
-                    col := 0
-                fin
-            fin
-            i := i + 1
-        fin
+    ; ---- los documentos (las pestañas) ----
+    variable docs: arreglo [MAX_DOCS] de puntero a Doc
+    variable n_docs: nat32
+    variable activo: nat32
+    variable nuevos: nat32                      ; para «Nuevo 1», «Nuevo 2»...
+    variable rótulo: arreglo [256] de byte
+    variable aviso: arreglo [160] de byte
+    variable aviso_malo: bool
+    variable cerrando: bool                     ; ya se ha avisado al cerrar: otra vez, se sale
+    variable letra_sistema: nat32
+    variable sin_ventana: bool
+    variable arriba_texto, abajo_texto: ent32   ; dónde va el texto (lo calcula medidas())
+    variable tab_espacios: bool = cierto        ; el tabulador pone espacios
+    variable ver_cambiado: bool                 ; hay que repintar
+    variable saliendo: bool                     ; se ha dicho que sí a salir
+
+    ; ---- la historia: qué se hizo lo último (para juntar lo tecleado en un grupo) ----
+    constante A_OTRA = 0
+    constante A_ESCRIBIR = 1
+    constante A_BORRAR = 2
+    variable última_acción: nat32
+    variable donde_acabó: nat32
+    variable último_tecleado: byte
+
+    ; ---- el ratón ----
+    variable arrastrando: bool
+    variable arrastrando_bloque: bool
+
+    ; ---- el portapapeles: lo de dentro, entero y en UTF-8, y lo que se puso fuera ----
+    variable interno: puntero a byte
+    variable n_interno: nat32
+    variable puesto: puntero a byte
+    variable n_puesto: nat32
+    variable interno_bloque: bool               ; lo copiado era un bloque (en columna)
+
+    ; ---- las macros ----
+    constante MAX_MACRO = 4096
+    variable macro: arreglo [MAX_MACRO * 3] de nat32
+    variable n_macro: nat32
+    variable grabando, repitiendo: bool
+
+    ; =========================================================================
+    ;  Los paneles de abajo (buscar, reemplazar, ir a la línea, abrir, guardar
+    ;  como, buscar en una carpeta, la pregunta de cerrar): campos, casillas y
+    ;  botones; el que tiene el teclado, con un borde azul grueso
+    ; =========================================================================
+    constante P_NINGUNO = 0
+    constante P_BUSCAR = 1
+    constante P_REEMPLAZAR = 2
+    constante P_IR = 3
+    constante P_ABRIR = 4
+    constante P_GUARDAR = 5
+    constante P_CARPETA = 6
+    constante P_CERRAR = 7                      ; ¿guardar los cambios de esta pestaña?
+    constante P_SALIR = 8                       ; ¿guardar los de todas antes de salir?
+    variable panel: nat32
+    variable foco_panel: bool                   ; el teclado va al panel (si no, al texto)
+
+    constante K_CAMPO = 1
+    constante K_CASILLA = 2
+    constante K_BOTÓN = 3
+    constante K_RÓTULO = 4
+    ; los campos
+    constante CA_BUSCAR = 0
+    constante CA_POR = 1
+    constante CA_IR = 2
+    constante CA_RUTA = 3
+    constante CA_CARPETA = 4
+    constante CA_FILTRO = 5
+    constante N_CAMPOS = 6
+    constante LARGO_CAMPO = 160
+    tipo Campo = estructura
+        t: arreglo [LARGO_CAMPO] de byte
+        n, cur, izq: nat32
+        entero: bool                            ; todo elegido: lo que se teclee lo sustituye
+    fin
+    variable campos: arreglo [N_CAMPOS] de Campo
+    ; las casillas
+    constante CS_CAJA = 0
+    constante CS_PALABRA = 1
+    constante CS_EXP = 2
+    constante CS_TODOS = 3
+    constante CS_SUB = 4
+    variable casillas: arreglo [5] de bool
+    ; los botones
+    constante B_SIGUIENTE = 1
+    constante B_ANTERIOR = 2
+    constante B_TODOS = 3
+    constante B_REEMPLAZAR = 4
+    constante B_TODO = 5
+    constante B_IR = 6
+    constante B_ABRIR = 7
+    constante B_GUARDAR = 8
+    constante B_BUSCAR_AQUÍ = 9
+    constante B_CERRAR_PANEL = 10
+    constante B_SÍ = 11
+    constante B_NO = 12
+    constante B_CANCELAR = 13
+    constante B_CONTAR = 14
+
+    tipo Ctl = estructura
+        clase, id: nat32
+        x, ye, an, al: ent32
+        t: puntero a byte
+    fin
+    constante MAX_CTL = 24
+    variable ctls: arreglo [MAX_CTL] de Ctl
+    variable n_ctls: nat32
+    variable foco: nat32                        ; el número (en ctls) del que tiene el teclado
+    variable panel_y: ent32
+    variable pregunta: arreglo [160] de byte
+    variable pide_otra_vez: bool                ; (Guardar como) ya se ha dicho que el archivo existe
+
+    ; la lista de la carpeta (Abrir, Guardar como)
+    variable carpeta_lista: arreglo [160] de byte
+    variable lista_elegido: ent32
+    variable lista_primera: nat32
+
+    ; =========================================================================
+    ;  Los documentos y las pestañas
+    ; =========================================================================
+    función doc_activo(): puntero a Doc
+        devolver docs[activo]
     fin
 
-    ; la letra que está en esa línea y esa columna (o la última de la línea)
-    función letra_en(lin: ent32, col: ent32): nat32
-        variable i: nat32
-        variable l, c: ent32
-        si lin < 0 entonces devolver 0 fin
-        l := 0
-        c := 0
+    ; el nombre corto (sin la carpeta) de un documento, en la 437
+    función nombre_corto(x: puntero a Doc, destino: puntero a byte)
+        variable i, k: nat32
+        variable datos_: arreglo [1] de nat32
+        si x.clase = DOC_AYUDA entonces
+            copiar(destino, "Ayuda")
+            devolver
+        fin
+        si x.clase = DOC_RESULTADOS entonces
+            copiar(destino, "Encontrado")
+            devolver
+        fin
+        si x.ruta[0] = 0 entonces
+            datos_[0] := x.nuevo
+            formatear(destino, 24, "Nuevo %u", datos_)
+            devolver
+        fin
+        k := 0
         i := 0
-        mientras i < largo hacer
-            si l = lin y c >= col entonces devolver i fin
-            si letras[i] = '\n' entonces
-                si l = lin entonces devolver i fin
-                l := l + 1
-                c := 0
-            sino
-                c := c + 1
-                si c = columnas entonces
-                    si l = lin entonces devolver i fin
-                    l := l + 1
-                    c := 0
-                fin
-            fin
+        mientras x.ruta[i] <> 0 hacer
+            si x.ruta[i] = '\\' o x.ruta[i] = ':' entonces k := i + 1 fin
             i := i + 1
         fin
-        devolver largo
+        copiar_hasta(destino, dirección(x.ruta[k]), 64)
     fin
 
-    ; la letra que cae en ese punto de la ventana (por arriba y por abajo
-    ; del texto, la línea de antes y la de después: así, arrastrando, pasa)
-    función letra_del_punto(x: ent32, yy: ent32): nat32
-        variable lin, col: ent32
-        si yy < ARRIBA entonces
-            lin := primera - 1
-        sino si yy >= alto - PIE entonces
-            lin := primera + filas
+    ; el nombre del documento, como se enseña (la ruta tal cual se abrió)
+    función nombre_largo(x: puntero a Doc, destino: puntero a byte)
+        si x.ruta[0] = 0 o x.clase <> DOC_NORMAL entonces
+            nombre_corto(x, destino)
+            devolver
+        fin
+        copiar_hasta(destino, dirección(x.ruta[0]), MAX_RUTA)
+    fin
+
+    función pon_título()
+        variable t: arreglo [200] de byte
+        si sin_ventana entonces devolver fin
+        nombre_largo(d, t)
+        concatenar(t, " - Bloc de notas")
+        título(BlocVis.v, t)
+    fin
+
+    ; un documento nuevo en una pestaña (al final): cierto si cabe
+    función pestaña_nueva(x: puntero a Doc): bool
+        si n_docs >= MAX_DOCS entonces
+            doc_soltar(x)
+            avisa_mal("Ya hay demasiadas pestañas abiertas: cierra alguna (Ctrl+W).")
+            devolver falso
+        fin
+        docs[n_docs] := x
+        n_docs := n_docs + 1
+        activa(n_docs - 1)
+        devolver cierto
+    fin
+
+    función activa(i: nat32)
+        si i >= n_docs entonces devolver fin
+        activo := i
+        d := docs[i]
+        si comparando y d <> da y d <> db entonces deja_de_comparar() fin
+        BlocVis.suelto := falso
+        pon_título()
+        ver_cambiado := cierto
+    fin
+
+    ; ¿es la de ahora una pestaña sin nombre, vacía y sin tocar? (se cambia por lo que se abra)
+    función activa_vacía(): bool
+        devolver n_docs = 1 y d.ruta[0] = 0 y d.clase = DOC_NORMAL y largo() = 0 y no cambiado()
+    fin
+
+    ; un documento en blanco, sin nombre
+    función documento_nuevo()
+        variable x: puntero a Doc
+        x := doc_nuevo()
+        si x = nulo entonces
+            avisa_mal("No hay memoria para otro documento.")
+            devolver
+        fin
+        nuevos := nuevos + 1
+        x.nuevo := nuevos
+        x.cp := CP_437
+        x.crlf := cierto
+        pestaña_nueva(x)
+    fin
+
+    ; abre «ruta» (en la 437): si ya está abierta, va a su pestaña. Cierto si se ha abierto
+    función abre_documento(ruta: puntero a byte, cp: nat32): bool
+        variable i, r: nat32
+        variable x, viejo: puntero a Doc
+        variable t: arreglo [MAX_RUTA] de byte
+        variable dd: arreglo [2] de nat32
+        copiar_hasta(t, ruta, MAX_RUTA)
+        a_mayúsculas(t)
+        si n_docs > 0 entonces
+        para i desde 0 hasta n_docs - 1 hacer
+            si docs[i].clase = DOC_NORMAL y iguales(dirección(docs[i].ruta[0]), t) y cp = NADA_CP entonces
+                activa(i)
+                devolver cierto
+            fin
+        fin
+        fin
+        x := doc_nuevo()
+        si x = nulo entonces
+            avisa_mal("No hay memoria para abrir otro documento.")
+            devolver falso
+        fin
+        viejo := d
+        d := x
+        r := BlocArc.lee(t, cp)
+        si r <> 0 entonces
+            d := viejo
+            doc_soltar(x)
+            dd[0] := nat32(dirección(t[0]))
+            dd[1] := nat32(texto_mal(r))
+            formatear(aviso, 160, "No se puede abrir %s: %s.", dd)
+            aviso_malo := cierto
+            escribir("bloc: no puedo abrir ", t, ": ", texto_mal(r), "\n")
+            devolver falso
+        fin
+        d := viejo
+        si n_docs > 0 y activa_vacía() entonces
+            doc_soltar(docs[activo])
+            docs[activo] := x
+            activa(activo)
         sino
-            lin := primera + (yy - ARRIBA - 4) div ALTO_LETRA
-            si yy < ARRIBA + 4 entonces lin := primera fin
+            si no pestaña_nueva(x) entonces devolver falso fin
         fin
-        col := (x - MARGEN + 3) div ANCHO_LETRA
-        si x < MARGEN entonces col := 0 fin
-        devolver letra_en(lin, col)
+        si d.mezclados entonces
+            avisa_bien("Tiene finales de línea de las dos clases: se guardarán todos iguales (Formato).")
+        fin
+        devolver cierto
     fin
 
-    ; -------------------------------------------------------------------------
-    ;  Lo seleccionado: de «desde» a «hasta» (sin contar esta)
-    ; -------------------------------------------------------------------------
-    función sel_inicio(): nat32
-        si ancla < cursor entonces devolver ancla fin
-        devolver cursor
+    función texto_mal(r: nat32): puntero a byte
+        si r = SIN_MEMORIA entonces devolver "no hay memoria para tanto" fin
+        devolver texto_error(r)
     fin
 
-    función sel_fin(): nat32
-        si ancla > cursor entonces devolver ancla fin
-        devolver cursor
+    ; quita la pestaña i (sin preguntar)
+    función quita_pestaña(i: nat32)
+        variable k: nat32
+        si comparando y (docs[i] = da o docs[i] = db) entonces deja_de_comparar() fin
+        doc_soltar(docs[i])
+        k := i
+        mientras k + 1 < n_docs hacer
+            docs[k] := docs[k + 1]
+            k := k + 1
+        fin
+        n_docs := n_docs - 1
+        si n_docs = 0 entonces
+            documento_nuevo()
+            devolver
+        fin
+        si activo >= n_docs entonces activo := n_docs - 1 fin
+        si activo > i entonces activo := activo - 1 fin
+        activa(activo)
     fin
 
+    ; cerrar la pestaña de ahora (Ctrl+W): si tiene cambios, se pregunta
+    función cierra_pestaña()
+        variable t: arreglo [80] de byte
+        variable dd: arreglo [1] de nat32
+        si cambiado() y d.clase = DOC_NORMAL entonces
+            nombre_corto(d, t)
+            dd[0] := nat32(dirección(t[0]))
+            formatear(pregunta, 160, "\xA8Guardar los cambios de %s?", dd)
+            abre_panel(P_CERRAR)
+            devolver
+        fin
+        quita_pestaña(activo)
+    fin
+
+    ; cuántos documentos tienen cambios
+    función con_cambios(): nat32
+        variable i, n: nat32
+        variable viejo: puntero a Doc
+        viejo := d
+        n := 0
+        si n_docs > 0 entonces
+        para i desde 0 hasta n_docs - 1 hacer
+            d := docs[i]
+            si cambiado() y d.clase = DOC_NORMAL entonces n := n + 1 fin
+        fin
+        fin
+        d := viejo
+        devolver n
+    fin
+
+    ; =========================================================================
+    ;  Los avisos de abajo
+    ; =========================================================================
+    función avisa_bien(t: puntero a byte)
+        copiar_hasta(aviso, t, 160)
+        aviso_malo := falso
+    fin
+
+    función avisa_mal(t: puntero a byte)
+        copiar_hasta(aviso, t, 160)
+        aviso_malo := cierto
+    fin
+
+    ; =========================================================================
+    ;  Guardar
+    ; =========================================================================
+    ; guarda el documento de ahora en «ruta» (cierto si ha ido bien)
+    función guarda_en(ruta: puntero a byte): bool
+        variable r: nat32
+        variable dd: arreglo [3] de nat32
+        r := BlocArc.guarda(ruta, d.perder_vale)
+        si r = PERDIDAS entonces
+            d.perder_vale := cierto
+            dd[0] := perdidas
+            dd[1] := nat32(nombre_página(d.cp))
+            formatear(aviso, 160, "%u letras no caben en la %s: Formato > UTF-8 las guarda; guardar otra vez las deja como \xAE?\xAF.", dd)
+            aviso_malo := cierto
+            devolver falso
+        fin
+        si r <> 0 entonces
+            dd[0] := nat32(texto_mal(r))
+            formatear(aviso, 160, "No se puede guardar: %s.", dd)
+            aviso_malo := cierto
+            escribir("bloc: no puedo guardar ", ruta, ": ", texto_mal(r), "\n")
+            devolver falso
+        fin
+        d.perder_vale := falso
+        copiar_hasta(dirección(d.ruta[0]), ruta, MAX_RUTA)
+        a_mayúsculas(dirección(d.ruta[0]))
+        marca_guardado()
+        cerrando := falso
+        dd[0] := nat32(dirección(d.ruta[0]))
+        dd[1] := guardados
+        formatear(aviso, 160, "Guardado en %s (%u octetos).", dd)
+        aviso_malo := falso
+        escribir("bloc: guardado ", dirección(d.ruta[0]), ", ", guardados, " octetos\n")
+        si d.lenguaje < 0 entonces d.lenguaje := len_de_archivo(dirección(d.ruta[0])) fin
+        pon_título()
+        devolver cierto
+    fin
+
+    ; «Guardar» (F2, Ctrl+S): sin nombre, «Guardar como»
+    función guardar_doc()
+        si d.clase <> DOC_NORMAL entonces
+            avisa_mal("Esto no se guarda (es solo para leer).")
+            devolver
+        fin
+        si d.ruta[0] = 0 entonces
+            abre_panel(P_GUARDAR)
+            devolver
+        fin
+        guarda_en(dirección(d.ruta[0]))
+    fin
+
+    función guarda_todo(): bool
+        variable i, viejo: nat32
+        variable bien: bool
+        bien := cierto
+        viejo := activo
+        si n_docs > 0 entonces
+        para i desde 0 hasta n_docs - 1 hacer
+            d := docs[i]
+            si d.clase = DOC_NORMAL y cambiado() entonces
+                si d.ruta[0] = 0 entonces
+                    bien := falso
+                sino si no guarda_en(dirección(d.ruta[0])) entonces
+                    bien := falso
+                fin
+            fin
+        fin
+        fin
+        activa(viejo)
+        devolver bien
+    fin
+
+    función nombre_página(cp: nat32): puntero a byte
+        si cp = CP_UTF8 entonces devolver "UTF-8" fin
+        si cp = CP_1252 entonces devolver "1252" fin
+        devolver "437"
+    fin
+
+    ; =========================================================================
+    ;  Lo que se recuerda (BLOC.INI): las opciones y lo que había abierto
+    ; =========================================================================
+    variable sesión: arreglo [MAX_DOCS] de arreglo [MAX_RUTA] de byte
+    variable sesión_cursor: arreglo [MAX_DOCS] de nat32
+    variable n_sesión: nat32
+    variable sesión_activa: nat32
+    variable hay_ini: bool
+
+    función sí_no(t: puntero a byte): bool
+        devolver t[0] = 's' o t[0] = 'S' o t[0] = '1'
+    fin
+
+    función lee_ajustes()
+        variable clave: arreglo [24] de byte
+        variable val: arreglo [MAX_RUTA + 16] de byte
+        variable n, i: nat32
+        variable p: puntero a byte
+        n_sesión := 0
+        hay_ini := ini_abre()
+        si no hay_ini entonces devolver fin
+        mientras ini_línea(clave, 24, val, MAX_RUTA + 16) hacer
+            si iguales(clave, "numeros") entonces
+                si iguales(val, "si") entonces números := NUM_SÍ sino si iguales(val, "no") entonces números := NUM_NO sino números := NUM_CÓDIGO fin
+            sino si iguales(clave, "ajuste") entonces
+                ajuste := sí_no(val)
+            sino si iguales(clave, "espacios") entonces
+                ver_espacios := sí_no(val)
+            sino si iguales(clave, "finales") entonces
+                ver_finales := sí_no(val)
+            sino si iguales(clave, "tabulador") entonces
+                tab_espacios := sí_no(val)
+            sino si iguales(clave, "letra") entonces
+                si texto_a_natural(val, n) entonces pon_tamaño(n) fin
+            sino si iguales(clave, "abierto") y n_sesión < MAX_DOCS entonces
+                ; «ruta|cursor»
+                p := buscar_car(val, '|')
+                sesión_cursor[n_sesión] := 0
+                si p <> nulo entonces
+                    valor(p) := 0
+                    texto_a_natural(p + 1, sesión_cursor[n_sesión])
+                fin
+                copiar_hasta(dirección(sesión[n_sesión][0]), val, MAX_RUTA)
+                n_sesión := n_sesión + 1
+            sino si iguales(clave, "activo") entonces
+                texto_a_natural(val, sesión_activa)
+            fin
+            i := 0
+        fin
+    fin
+
+    ; ¿hay algo que recordar? (lo de siempre —NOTAS.TXT sola y las opciones de
+    ; fábrica— no se escribe: así no aparece \USUARIOS en un disco sin hacer nada)
+    función algo_que_recordar(): bool
+        variable n, i: nat32
+        si hay_ini entonces devolver cierto fin
+        si números <> NUM_CÓDIGO o no ajuste o ver_espacios o ver_finales o no tab_espacios o tam <> 0 entonces devolver cierto fin
+        n := 0
+        si n_docs > 0 entonces
+        para i desde 0 hasta n_docs - 1 hacer
+            si docs[i].clase = DOC_NORMAL y docs[i].ruta[0] <> 0 entonces
+                n := n + 1
+                si no iguales(dirección(docs[i].ruta[0]), "NOTAS.TXT") entonces devolver cierto fin
+            fin
+        fin
+        fin
+        devolver falso
+    fin
+
+    función guarda_ajustes()
+        variable t: arreglo [MAX_RUTA + 16] de byte
+        variable i, k: nat32
+        variable dd: arreglo [2] de nat32
+        si sin_ventana o no algo_que_recordar() entonces devolver fin
+        si no ini_crea() entonces devolver fin
+        ini_comentario("el Bloc de notas: lo que se recuerda (lo escribe el propio Bloc al salir)")
+        si números = NUM_SÍ entonces ini_pon("numeros", "si") sino si números = NUM_NO entonces ini_pon("numeros", "no") sino ini_pon("numeros", "codigo") fin
+        si ajuste entonces ini_pon("ajuste", "si") sino ini_pon("ajuste", "no") fin
+        si ver_espacios entonces ini_pon("espacios", "si") sino ini_pon("espacios", "no") fin
+        si ver_finales entonces ini_pon("finales", "si") sino ini_pon("finales", "no") fin
+        si tab_espacios entonces ini_pon("tabulador", "si") sino ini_pon("tabulador", "no") fin
+        natural_a_texto(tam, t)
+        ini_pon("letra", t)
+        k := 0
+        si n_docs > 0 entonces
+        para i desde 0 hasta n_docs - 1 hacer
+            si docs[i].clase = DOC_NORMAL y docs[i].ruta[0] <> 0 entonces
+                dd[0] := nat32(dirección(docs[i].ruta[0]))
+                dd[1] := docs[i].cursor
+                formatear(t, MAX_RUTA + 16, "%s|%u", dd)
+                ini_pon("abierto", t)
+                si i = activo entonces
+                    natural_a_texto(k, t)
+                    ini_pon("activo", t)
+                fin
+                k := k + 1
+            fin
+        fin
+        fin
+        ini_cierra()
+    fin
+
+    ; =========================================================================
+    ;  Seleccionar
+    ; =========================================================================
     función hay_selección(): bool
-        devolver ancla <> cursor
+        devolver d.ancla <> d.cursor o d.bloque
     fin
 
-    ; ¿es de palabra esa letra? (las letras, también las de la eñe y los acentos, las cifras y «_»)
-    función de_palabra(c: byte): bool
-        devolver es_letra(c) o es_cifra(c) o c = '_' o c >= 128
+    función sin_bloque()
+        d.bloque := falso
+    fin
+
+    ; quita lo seleccionado (cierto si había algo): el cursor queda en su sitio
+    función quita_selección(): bool
+        variable a: nat32
+        si d.bloque entonces
+            bloque_borra()
+            devolver cierto
+        fin
+        si d.ancla = d.cursor entonces devolver falso fin
+        a := sel_inicio()
+        quitar(a, sel_fin() - a)
+        d.cursor := a
+        d.ancla := a
+        devolver cierto
+    fin
+
+    función elige_todo()
+        sin_bloque()
+        d.ancla := 0
+        d.cursor := largo()
+    fin
+
+    ; ¿es de palabra lo que hay en pos?
+    función palabra_en(pos: nat32): bool
+        variable b: arreglo [8] de byte
+        variable n, u: nat32
+        n := copia(pos, 4, b)
+        si n = 0 entonces devolver falso fin
+        pag_decodifica(b, n, u)
+        devolver pag_es_palabra(u)
+    fin
+
+    función siguiente_pos(pos: nat32): nat32
+        variable b: arreglo [8] de byte
+        variable n, u: nat32
+        n := copia(pos, 4, b)
+        si n = 0 entonces devolver pos fin
+        devolver pos + pag_decodifica(b, n, u)
+    fin
+
+    función anterior_pos(pos: nat32): nat32
+        variable b: arreglo [8] de byte
+        variable a: nat32
+        si pos = 0 entonces devolver 0 fin
+        a := 4
+        si pos < 4 entonces a := pos fin
+        copia(pos - a, a, b)
+        devolver pos - a + pag_anterior(b, a)
     fin
 
     ; selecciona la palabra que está en «pos» (o, si no es de palabra, esa letra sola)
@@ -161,603 +654,3407 @@ módulo UBloc
         variable a, b: nat32
         a := pos
         b := pos
-        si pos < largo y de_palabra(letras[pos]) entonces
-            mientras a > 0 y de_palabra(letras[a - 1]) hacer a := a - 1 fin
-            mientras b < largo y de_palabra(letras[b]) hacer b := b + 1 fin
-        sino si pos < largo y letras[pos] <> '\n' entonces
-            b := pos + 1
+        si pos < largo() y palabra_en(pos) entonces
+            mientras a > 0 y palabra_en(anterior_pos(a)) hacer a := anterior_pos(a) fin
+            mientras b < largo() y palabra_en(b) hacer b := siguiente_pos(b) fin
+        sino si pos < largo() y BlocTxt.letra(pos) <> 10 entonces
+            b := siguiente_pos(pos)
         sino
-            ; al final de la línea: la palabra de antes
-            mientras a > 0 y de_palabra(letras[a - 1]) hacer a := a - 1 fin
+            mientras a > 0 y palabra_en(anterior_pos(a)) hacer a := anterior_pos(a) fin
         fin
-        ancla := a
-        cursor := b
+        d.ancla := a
+        d.cursor := b
     fin
 
     ; selecciona la línea entera (con su final) donde está «pos»
     función elige_línea(pos: nat32)
-        variable a, b: nat32
-        a := pos
-        b := pos
-        mientras a > 0 y letras[a - 1] <> '\n' hacer a := a - 1 fin
-        mientras b < largo y letras[b] <> '\n' hacer b := b + 1 fin
-        si b < largo entonces b := b + 1 fin
-        ancla := a
-        cursor := b
+        variable l: nat32
+        l := línea_de(pos)
+        d.ancla := inicio(l)
+        d.cursor := final(l)
+        si d.cursor < largo() entonces d.cursor := d.cursor + 1 fin
     fin
 
-    ; -------------------------------------------------------------------------
-    ;  Pintar
-    ; -------------------------------------------------------------------------
-    función botón(x: ent32, t: puntero a byte, arriba: nat32, abajo: nat32)
-        redondeado(v, x, ALTO_MENÚS + 5, 84, 24, 5, arriba, abajo)
-        texto_negrita(v, x + (84 - ent32(longitud(t)) * ANCHO_LETRA) div 2, ALTO_MENÚS + 9, t, PAPEL)
+    ; la palabra de antes o de después (Ctrl+flechas)
+    función palabra_atrás(pos: nat32): nat32
+        mientras pos > 0 y no palabra_en(anterior_pos(pos)) hacer pos := anterior_pos(pos) fin
+        mientras pos > 0 y palabra_en(anterior_pos(pos)) hacer pos := anterior_pos(pos) fin
+        devolver pos
     fin
 
-    función pinta_barra()
-        pinta_menús(v, ancho, menús, menú_abierto)
-        degradado(v, 0, ALTO_MENÚS, ancho, BARRA, 0xF4F8FE, 0xD3E3F8)
-        rectángulo(v, 0, ARRIBA - 1, ancho, 1, 0x9DBBE4)
-        botón(8, "Nuevo", 0x5AA6F4, 0x2468C8)
-        botón(98, "Guardar", 0x5CC45E, 0x2A8A3C)
-        texto(v, 196, ALTO_MENÚS + 9, "F2 guarda", SUAVE)
+    función palabra_delante(pos: nat32): nat32
+        mientras pos < largo() y palabra_en(pos) hacer pos := siguiente_pos(pos) fin
+        mientras pos < largo() y no palabra_en(pos) y BlocTxt.letra(pos) <> 10 hacer pos := siguiente_pos(pos) fin
+        si pos < largo() y BlocTxt.letra(pos) = 10 y pos = siguiente_pos(pos) entonces pos := pos + 1 fin
+        devolver pos
     fin
 
-    función pinta_pie()
-        variable lin, col: ent32
-        variable d: arreglo [3] de nat32
-        degradado(v, 0, alto - PIE, ancho, PIE, 0xE6EFFB, 0xCADDF6)
-        rectángulo(v, 0, alto - PIE, ancho, 1, 0x9DBBE4)
-        si aviso[0] <> 0 entonces
-            si aviso_malo entonces texto(v, MARGEN, alto - PIE + 4, aviso, 0xB8441A) sino texto(v, MARGEN, alto - PIE + 4, aviso, 0x1F7532) fin
+    ; =========================================================================
+    ;  Escribir
+    ; =========================================================================
+    ; que lo que viene empiece otro grupo de la historia, si no sigue a lo de antes
+    función acción(a: nat32)
+        si a <> última_acción o d.cursor <> donde_acabó o a = A_OTRA entonces corte() fin
+        última_acción := a
+    fin
+
+    función acabó()
+        donde_acabó := d.cursor
+    fin
+
+    función solo_leer(): bool
+        si d.clase <> DOC_NORMAL entonces
+            avisa_mal("Esto es solo para leer.")
+            devolver cierto
+        fin
+        si comparando entonces
+            avisa_mal("Comparando: Esc deja de comparar (y se puede escribir otra vez).")
+            devolver cierto
+        fin
+        devolver falso
+    fin
+
+    ; mete n octetos (UTF-8) donde está el cursor, en lugar de lo seleccionado
+    función mete_texto(p: puntero a byte, n: nat32)
+        si d.bloque entonces
+            bloque_escribe(p, n)
             devolver
         fin
-        sitio(cursor, lin, col)
-        d[0] := nat32(dirección(nombre[0]))
-        d[1] := nat32(lin) + 1
-        d[2] := nat32(col) + 1
-        si cambiado entonces
-            formatear(rótulo, 96, "%s   Lín %u, Col %u   (sin guardar)", d)
-        sino
-            formatear(rótulo, 96, "%s   Lín %u, Col %u", d)
-        fin
-        texto(v, MARGEN, alto - PIE + 4, rótulo, TINTA)
-    fin
-
-    ; una línea de la pantalla: las letras de «a» a «b» (sin contar esta), en
-    ; la fila «f» de las que se ven; lo seleccionado, en blanco sobre azul
-    función pinta_línea(a: nat32, b: nat32, f: ent32)
-        variable s0, s1: nat32
-        variable yy: ent32
-        yy := ARRIBA + 4 + f * ALTO_LETRA
-        s0 := sel_inicio()
-        s1 := sel_fin()
-        si s0 < a entonces s0 := a fin
-        si s1 > b entonces s1 := b fin
-        si no hay_selección() o s1 <= s0 entonces
-            si b > a entonces texto_n(v, MARGEN, yy, dirección(letras[a]), b - a, TINTA) fin
-        sino
-            si s0 > a entonces texto_n(v, MARGEN, yy, dirección(letras[a]), s0 - a, TINTA) fin
-            texto_fondo(v, MARGEN + ent32(s0 - a) * ANCHO_LETRA, yy, dirección(letras[s0]), s1 - s0, PAPEL, RESALTE)
-            si b > s1 entonces texto_n(v, MARGEN + ent32(s1 - a) * ANCHO_LETRA, yy, dirección(letras[s1]), b - s1, TINTA) fin
-        fin
-        ; el final de línea seleccionado: un poco de azul detrás de la última letra
-        si hay_selección() y b < largo y letras[b] = '\n' y b >= sel_inicio() y b < sel_fin() entonces
-            rectángulo(v, MARGEN + ent32(b - a) * ANCHO_LETRA, yy, 4, ALTO_LETRA, RESALTE)
-        fin
-    fin
-
-    ; el texto: las líneas que se ven, y el cursor
-    función pinta_texto()
-        variable i, inicio: nat32
-        variable lin, col, clin, ccol: ent32
-        ; que el cursor se vea
-        sitio(cursor, clin, ccol)
-        si no suelto entonces                   ; (RUEDA) tras la rueda, no
-            si clin < primera entonces primera := clin fin
-            si clin >= primera + filas entonces primera := clin - filas + 1 fin
-        fin
-        rectángulo(v, 0, ARRIBA, ancho, alto - ARRIBA - PIE, PAPEL)
-        lin := 0
-        col := 0
-        inicio := 0
-        i := 0
-        mientras i <= largo y lin < primera + filas hacer
-            si i = largo o letras[i] = '\n' o col = columnas entonces
-                ; se acaba una línea de la pantalla: de «inicio» a «i»
-                si lin >= primera entonces pinta_línea(inicio, i, lin - primera) fin
-                si i = largo entonces romper fin
-                lin := lin + 1
-                col := 0
-                si letras[i] = '\n' entonces
-                    inicio := i + 1
-                    i := i + 1
-                    seguir
-                fin
-                inicio := i
-            fin
-            col := col + 1
-            i := i + 1
-        fin
-        ; el cursor: una raya entre dos letras (si se ve: con la rueda, puede que no)
-        si clin < primera o clin >= primera + filas entonces devolver fin
-        rectángulo(v, MARGEN + ccol * ANCHO_LETRA - 1, ARRIBA + 4 + (clin - primera) * ALTO_LETRA, 1, ALTO_LETRA, 0x2468C8)
-    fin
-
-    ; (RUEDA) las líneas que tiene el texto en la pantalla (con las que se parten)
-    función líneas_del_texto(): ent32
-        variable i: nat32
-        variable lin, col: ent32
-        lin := 0
-        col := 0
-        i := 0
-        mientras i < largo hacer
-            si letras[i] = '\n' entonces
-                lin := lin + 1
-                col := 0
-            sino
-                si col = columnas entonces
-                    lin := lin + 1
-                    col := 0
-                fin
-                col := col + 1
-            fin
-            i := i + 1
-        fin
-        devolver lin + 1
-    fin
-
-    ; (RUEDA) la rueda: tres líneas por paso, sin mover el cursor
-    función rueda(c: nat32)
-        variable p, máx, antes: ent32
-        p := ent32(c yb 0xFF)
-        si p > 127 entonces p := p - 256 fin
-        antes := primera
-        máx := líneas_del_texto() - filas
-        si máx < 0 entonces máx := 0 fin
-        primera := primera - p * 3
-        si primera > máx entonces primera := máx fin
-        si primera < 0 entonces primera := 0 fin
-        si primera = antes entonces devolver fin
-        suelto := cierto
-        pinta_texto()
-    fin
-
-    función pinta_todo()
-        columnas := (ancho - 2 * MARGEN) div ANCHO_LETRA
-        filas := (alto - ARRIBA - PIE - 8) div ALTO_LETRA
-        si columnas < 8 entonces columnas := 8 fin
-        si filas < 1 entonces filas := 1 fin
-        pinta_barra()
-        pinta_texto()
-        pinta_pie()
-    fin
-
-    función pon_título()
-        variable d: arreglo [1] de nat32
-        d[0] := nat32(dirección(nombre[0]))
-        formatear(rótulo, 96, "%s - Bloc de notas", d)
-        título(v, rótulo)
-    fin
-
-    ; -------------------------------------------------------------------------
-    ;  El archivo
-    ; -------------------------------------------------------------------------
-    función lee()
-        variable m, n, i: nat32
-        largo := 0
-        cursor := 0
-        ancla := 0
-        primera := 0
-        cambiado := falso
-        m := abrir(nombre)
-        si es_error(m) entonces devolver fin        ; no está: se empieza en blanco
-        n := leer(m, trozo, 512)
-        mientras n > 0 y no es_error(n) hacer
-            para i desde 0 hasta n - 1 hacer
-                si trozo[i] <> '\r' y trozo[i] <> 26 y largo < MÁXIMO entonces
-                    letras[largo] := trozo[i]
-                    largo := largo + 1
-                fin
-            fin
-            n := leer(m, trozo, 512)
-        fin
-        cerrar(m)
-    fin
-
-    función guarda()
-        variable m, i, k, r, total: nat32
-        variable d: arreglo [2] de nat32
-        aviso_malo := cierto
-        m := crear(nombre)
-        si es_error(m) entonces
-            d[0] := nat32(texto_error(m))
-            formatear(aviso, 96, "No se puede guardar: %s.", d)
-            escribir("bloc: no puedo guardar ", nombre, ": ", texto_error(m), "\n")
+        quita_selección()
+        si no meter(d.cursor, p, n) entonces
+            avisa_mal("No hay memoria para tanto texto.")
             devolver
         fin
-        k := 0
-        total := 0
-        r := 0
-        i := 0
-        mientras i <= largo y no es_error(r) hacer
-            si i < largo entonces
-                si letras[i] = '\n' entonces
-                    trozo[k] := '\r'
+        d.cursor := d.cursor + n
+        d.ancla := d.cursor
+    fin
+
+    ; una tecla de letra (en la 437, como la da el teclado)
+    función teclea(c: nat32)
+        variable b: arreglo [8] de byte
+        variable n: nat32
+        si solo_leer() entonces devolver fin
+        acción(A_ESCRIBIR)
+        ; una palabra cada vez en la historia
+        si (último_tecleado = ' ' o último_tecleado = 10) y c <> ' ' entonces corte() fin
+        último_tecleado := byte(c)
+        n := pag_codifica(pag_de_437(c), b)
+        mete_texto(b, n)
+        acabó()
+    fin
+
+    ; Intro: una línea nueva (en los programas, con la sangría de la de arriba)
+    función intro()
+        variable b: arreglo [128] de byte
+        variable n, i, f: nat32
+        si solo_leer() entonces devolver fin
+        acción(A_ESCRIBIR)
+        corte()
+        último_tecleado := 10
+        b[0] := 10
+        n := 1
+        si d.lenguaje >= 0 y no d.bloque entonces
+            i := inicio(línea_de(d.cursor))
+            f := sel_inicio()
+            mientras i < f y n < 120 y (BlocTxt.letra(i) = ' ' o BlocTxt.letra(i) = 9) hacer
+                b[n] := BlocTxt.letra(i)
+                n := n + 1
+                i := i + 1
+            fin
+        fin
+        mete_texto(b, n)
+        acabó()
+    fin
+
+    ; las líneas de lo seleccionado (de l1 a l2)
+    función líneas_elegidas(ref l1: nat32, ref l2: nat32)
+        l1 := línea_de(sel_inicio())
+        l2 := línea_de(sel_fin())
+        si l2 > l1 y sel_fin() = inicio(l2) entonces l2 := l2 - 1 fin
+    fin
+
+    ; Tab: espacios hasta la columna siguiente (o un tabulador); con varias
+    ; líneas elegidas, las mete hacia dentro (con Mayús, hacia fuera)
+    función tabulador(atrás: bool)
+        variable l1, l2, l, col, n, i, a: nat32
+        variable b: arreglo [16] de byte
+        si solo_leer() entonces devolver fin
+        acción(A_OTRA)
+        líneas_elegidas(l1, l2)
+        si (l2 > l1 o atrás) y no d.bloque entonces
+            corte()
+            l := l1
+            mientras l <= l2 hacer
+                a := inicio(l)
+                si atrás entonces
+                    n := 0
+                    mientras n < tab_ancho y BlocTxt.letra(a + n) = ' ' y a + n < final(l) hacer n := n + 1 fin
+                    si n = 0 y BlocTxt.letra(a) = 9 y a < final(l) entonces n := 1 fin
+                    si n > 0 entonces quitar(a, n) fin
+                sino si final(l) > a entonces
+                    si tab_espacios entonces
+                        para i desde 0 hasta tab_ancho - 1 hacer b[i] := ' ' fin
+                        meter(a, b, tab_ancho)
+                    sino
+                        meter(a, "\t", 1)
+                    fin
+                fin
+                l := l + 1
+            fin
+            d.ancla := inicio(l1)
+            d.cursor := final(l2)
+            devolver
+        fin
+        si tab_espacios entonces
+            col := col_lógica(sel_inicio())
+            n := tab_ancho - col mod tab_ancho
+            para i desde 0 hasta n - 1 hacer b[i] := ' ' fin
+            mete_texto(b, n)
+        sino
+            mete_texto("\t", 1)
+        fin
+        acabó()
+    fin
+
+    ; Retroceso y Supr
+    función borra(atrás: bool)
+        variable p: nat32
+        si solo_leer() entonces devolver fin
+        si d.bloque entonces
+            acción(A_OTRA)
+            bloque_borra_letra(atrás)
+            devolver
+        fin
+        acción(A_BORRAR)
+        si no quita_selección() entonces
+            si atrás y d.cursor > 0 entonces
+                p := anterior_pos(d.cursor)
+                quitar(p, d.cursor - p)
+                d.cursor := p
+            sino si no atrás y d.cursor < largo() entonces
+                quitar(d.cursor, siguiente_pos(d.cursor) - d.cursor)
+            fin
+        fin
+        d.ancla := d.cursor
+        acabó()
+    fin
+
+    función deshaz()
+        si comparando entonces devolver fin
+        sin_bloque()
+        si deshacer() entonces
+            última_acción := A_OTRA
+        sino
+            avisa_bien("No hay nada que deshacer.")
+        fin
+    fin
+
+    función rehaz()
+        si comparando entonces devolver fin
+        sin_bloque()
+        si rehacer() entonces
+            última_acción := A_OTRA
+        sino
+            avisa_bien("No hay nada que rehacer.")
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Cortar, copiar y pegar (el portapapeles del sistema va en la 437; aquí
+    ;  dentro se guarda también entero y en UTF-8)
+    ; =========================================================================
+    ; el texto (UTF-8) de lo seleccionado, a «interno» (un bloque: sus líneas)
+    función toma_selección(): bool
+        variable a, n, l1, l2, c1, c2, l, p1, p2, falta, k: nat32
+        variable q: puntero a byte
+        si d.bloque entonces
+            bloque_orden(l1, l2, c1, c2)
+            n := 0
+            l := l1
+            mientras l <= l2 hacer
+                p1 := pos_de_col(l, c1, falta)
+                p2 := pos_de_col(l, c2, falta)
+                n := n + (p2 - p1) + 1
+                l := l + 1
+            fin
+            q := recrecer(interno, 0, n + 4)
+            si q = nulo entonces devolver falso fin
+            interno := q
+            k := 0
+            l := l1
+            mientras l <= l2 hacer
+                p1 := pos_de_col(l, c1, falta)
+                p2 := pos_de_col(l, c2, falta)
+                k := k + copia(p1, p2 - p1, interno + k)
+                si l < l2 entonces
+                    interno[k] := 10
                     k := k + 1
                 fin
-                trozo[k] := letras[i]
-                k := k + 1
+                l := l + 1
             fin
-            si k >= 500 o (i = largo y k > 0) entonces
-                r := escribir_archivo(m, trozo, k)
-                si no es_error(r) entonces
-                    si r < k entonces r := DISCO_LLENO sino total := total + r fin
-                fin
-                k := 0
-            fin
-            i := i + 1
+            n_interno := k
+            interno_bloque := cierto
+            devolver cierto
         fin
-        cerrar(m)
-        si es_error(r) entonces
-            d[0] := nat32(texto_error(r))
-            formatear(aviso, 96, "No se ha guardado entero: %s.", d)
-            devolver
-        fin
-        cambiado := falso
-        cerrando := falso
-        aviso_malo := falso
-        d[0] := nat32(dirección(nombre[0]))
-        d[1] := total
-        formatear(aviso, 96, "Guardado en %s (%u octetos).", d)
-        escribir("bloc: guardado ", nombre, ", ", total, " octetos\n")
-    fin
-
-    ; -------------------------------------------------------------------------
-    ;  Escribir, cortar, copiar y pegar
-    ; -------------------------------------------------------------------------
-    ; mete n letras donde está el cursor (las que quepan), que queda detrás
-    función mete_trozo(p: puntero a byte, n: nat32)
-        variable i: nat32
-        si largo + n > MÁXIMO entonces n := MÁXIMO - largo fin
-        si n = 0 entonces devolver fin
-        i := largo
-        mientras i > cursor hacer
-            i := i - 1
-            letras[i + n] := letras[i]
-        fin
-        para i desde 0 hasta n - 1 hacer letras[cursor + i] := p[i] fin
-        largo := largo + n
-        cursor := cursor + n
-        ancla := cursor
-        cambiado := cierto
-    fin
-
-    ; quita n letras desde «pos»
-    función quita_trozo(pos: nat32, n: nat32)
-        variable i: nat32
-        si pos >= largo o n = 0 entonces devolver fin
-        si pos + n > largo entonces n := largo - pos fin
-        i := pos + n
-        mientras i < largo hacer
-            letras[i - n] := letras[i]
-            i := i + 1
-        fin
-        largo := largo - n
-        cambiado := cierto
-    fin
-
-    ; quita lo seleccionado (cierto si había algo): el cursor queda en su sitio
-    función quita_selección(): bool
-        variable a: nat32
-        si no hay_selección() entonces devolver falso fin
         a := sel_inicio()
-        quita_trozo(a, sel_fin() - a)
-        cursor := a
-        ancla := a
+        n := sel_fin() - a
+        q := recrecer(interno, 0, n + 4)
+        si q = nulo entonces devolver falso fin
+        interno := q
+        n_interno := copia(a, n, interno)
+        interno_bloque := falso
         devolver cierto
     fin
 
-    función mete(c: byte)
-        variable uno: arreglo [1] de byte
-        uno[0] := c
-        mete_trozo(uno, 1)
+    función cuenta_letras(p: puntero a byte, n: nat32): nat32
+        variable i, k: nat32
+        k := 0
+        i := 0
+        mientras i < n hacer
+            si (p[i] yb 0xC0) <> 0x80 entonces k := k + 1 fin
+            i := i + 1
+        fin
+        devolver k
     fin
 
-    función copia()
-        variable d: arreglo [1] de nat32
+    función copia_sel()
+        variable dd: arreglo [1] de nat32
+        variable q: puntero a byte
+        variable m: nat32
         si no hay_selección() entonces devolver fin
-        aviso_malo := no al_portapapeles(dirección(letras[sel_inicio()]), sel_fin() - sel_inicio())
-        d[0] := sel_fin() - sel_inicio()
-        si aviso_malo entonces
-            Textos32.copiar(aviso, "No se ha podido copiar.")
-        sino
-            formatear(aviso, 96, "Copiado (%u letras).", d)
+        si no toma_selección() entonces
+            avisa_mal("No hay memoria para copiar tanto.")
+            devolver
         fin
+        ; fuera, en la 437 (lo que quepa en el portapapeles: 64 K)
+        m := n_interno
+        q := recrecer(puesto, 0, m + 4)
+        si q = nulo entonces devolver fin
+        puesto := q
+        n_puesto := pag_a_437(interno, n_interno, puesto, m + 4)
+        si n_puesto > 65536 entonces n_puesto := 65536 fin
+        si no al_portapapeles(puesto, n_puesto) y not_vacío() y no es_error(en_portapapeles()) entonces
+            avisa_mal("No se ha podido copiar.")
+            devolver
+        fin
+        dd[0] := cuenta_letras(interno, n_interno)
+        formatear(aviso, 160, "Copiado (%u letras).", dd)
+        aviso_malo := falso
+    fin
+
+    función not_vacío(): bool
+        devolver n_puesto > 0
     fin
 
     función corta()
         si no hay_selección() entonces devolver fin
-        copia()
-        si no aviso_malo entonces quita_selección() fin
+        si solo_leer() entonces devolver fin
+        copia_sel()
+        si no aviso_malo entonces
+            acción(A_OTRA)
+            quita_selección()
+        fin
         aviso[0] := 0
     fin
 
     ; lo del portapapeles, donde está el cursor (en lugar de lo seleccionado)
     función pega()
-        variable n, i, k: nat32
-        n := del_portapapeles(pegado, MÁXIMO)
-        ; solo el texto: sin los «\r», y los tabuladores, un espacio
+        variable buf, u: puntero a byte
+        variable n, i, k, nu: nat32
+        si solo_leer() entonces devolver fin
+        n := en_portapapeles()
+        acción(A_OTRA)
+        si es_error(n) entonces
+            ; (sin portapapeles del sistema, como en las pruebas: el de dentro)
+            si interno <> nulo y n_interno > 0 entonces
+                si interno_bloque y no d.bloque entonces pega_bloque(interno, n_interno) sino mete_texto(interno, n_interno) fin
+                acabó()
+            fin
+            devolver
+        fin
+        buf := pedir(n + 4)
+        si buf = nulo entonces devolver fin
+        n := del_portapapeles(buf, n)
+        ; si es lo que se copió aquí, entero (y en UTF-8)
+        si n > 0 y n = n_puesto y puesto <> nulo y interno <> nulo y comparar_memoria_(buf, puesto, n) entonces
+            soltar(buf)
+            si interno_bloque y no d.bloque entonces
+                pega_bloque(interno, n_interno)
+            sino
+                mete_texto(interno, n_interno)
+            fin
+            acabó()
+            devolver
+        fin
+        ; solo el texto: sin los «\r» ni los de control (menos el tabulador)
         k := 0
         i := 0
         mientras i < n hacer
-            si pegado[i] = '\t' entonces pegado[i] := ' ' fin
-            si pegado[i] = '\n' o pegado[i] >= ' ' entonces
-                pegado[k] := pegado[i]
+            si buf[i] = 10 o buf[i] = 9 o buf[i] >= ' ' entonces
+                buf[k] := buf[i]
                 k := k + 1
             fin
             i := i + 1
         fin
-        si k = 0 entonces devolver fin
-        quita_selección()
-        mete_trozo(pegado, k)
-    fin
-
-    función elige_todo()
-        ancla := 0
-        cursor := largo
-    fin
-
-    función tecla_pulsada(c: nat32, con_mayús: bool)
-        variable lin, col: ent32
-        variable mueve: bool
-        aviso[0] := 0
-        cerrando := falso
-        mueve := falso
-        si c = TECLA_F2 o c = CTRL_S entonces
-            guarda()
-        sino si c = CTRL_A entonces
-            elige_todo()
-        sino si c = CTRL_C entonces
-            copia()
-        sino si c = CTRL_X entonces
-            corta()
-        sino si c = CTRL_V entonces
-            pega()
-        sino si c = '\n' o (c >= ' ' y c < TECLA_ESPECIAL) entonces
-            quita_selección()
-            mete(c)
-        sino si c = '\t' entonces
-            quita_selección()
-            mete_trozo("    ", 4)
-        sino si c = 8 entonces
-            si no quita_selección() y cursor > 0 entonces
-                cursor := cursor - 1
-                ancla := cursor
-                quita_trozo(cursor, 1)
-            fin
-        sino si c = TECLA_SUPR entonces
-            si no quita_selección() entonces quita_trozo(cursor, 1) fin
-        sino si c = TECLA_IZQUIERDA entonces
-            mueve := cierto
-            si hay_selección() y no con_mayús entonces
-                cursor := sel_inicio()
-            sino si cursor > 0 entonces
-                cursor := cursor - 1
-            fin
-        sino si c = TECLA_DERECHA entonces
-            mueve := cierto
-            si hay_selección() y no con_mayús entonces
-                cursor := sel_fin()
-            sino si cursor < largo entonces
-                cursor := cursor + 1
-            fin
-        sino si c = TECLA_ARRIBA entonces
-            mueve := cierto
-            sitio(cursor, lin, col)
-            si lin > 0 entonces cursor := letra_en(lin - 1, col) fin
-        sino si c = TECLA_ABAJO entonces
-            mueve := cierto
-            sitio(cursor, lin, col)
-            cursor := letra_en(lin + 1, col)
-        sino si c = TECLA_RE_PÁG entonces
-            mueve := cierto
-            sitio(cursor, lin, col)
-            si lin > filas entonces cursor := letra_en(lin - filas, col) sino cursor := letra_en(0, col) fin
-        sino si c = TECLA_AV_PÁG entonces
-            mueve := cierto
-            sitio(cursor, lin, col)
-            cursor := letra_en(lin + filas, col)
-        sino si c = TECLA_INICIO entonces
-            mueve := cierto
-            sitio(cursor, lin, col)
-            cursor := letra_en(lin, 0)
-        sino si c = TECLA_FIN entonces
-            mueve := cierto
-            sitio(cursor, lin, col)
-            cursor := letra_en(lin, columnas)
+        si k = 0 entonces
+            soltar(buf)
+            devolver
         fin
-        ; una tecla de moverse, sin Mayús, deja de seleccionar
-        si mueve y no con_mayús entonces ancla := cursor fin
-        pinta_texto()
-        pinta_pie()
+        u := pedir(k * 3 + 4)
+        si u = nulo entonces
+            soltar(buf)
+            devolver
+        fin
+        nu := pag_437_a_utf8(buf, k, u, k * 3 + 4)
+        mete_texto(u, nu)
+        soltar(u)
+        soltar(buf)
+        acabó()
     fin
 
-    ; «Nuevo»: en blanco (el archivo no se toca hasta guardar)
-    función nuevo()
-        largo := 0
-        cursor := 0
-        ancla := 0
-        primera := 0
-        cambiado := cierto
+    función comparar_memoria_(a: puntero a byte, b: puntero a byte, n: nat32): bool
+        variable i: nat32
+        i := 0
+        mientras i < n hacer
+            si a[i] <> b[i] entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
     fin
 
-    ; el botón principal del ratón en (x, yy); «c», lo que dice su suceso
-    función clic(x: ent32, yy: ent32, c: nat32)
-        variable pos: nat32
-        aviso[0] := 0
-        si yy < ARRIBA entonces
-            si yy >= ALTO_MENÚS entonces
-                si x >= 8 y x < 92 entonces
-                    nuevo()
-                sino si x >= 98 y x < 182 entonces
-                    guarda()
+    ; =========================================================================
+    ;  En columna (en bloque): Alt y arrastrar, o Alt+Mayús y las flechas
+    ; =========================================================================
+    función bloque_empieza(pos: nat32)
+        d.bloque := cierto
+        d.b_l1 := línea_de(pos)
+        d.b_c1 := col_lógica(pos)
+        d.b_l2 := d.b_l1
+        d.b_c2 := d.b_c1
+    fin
+
+    ; el cursor del bloque (el otro extremo) va a pos
+    función bloque_hasta(pos: nat32)
+        d.b_l2 := línea_de(pos)
+        d.b_c2 := col_lógica(pos)
+        d.cursor := pos
+        d.ancla := pos
+    fin
+
+    ; un espacio de relleno hasta la columna, si la línea es más corta
+    función rellena(l: nat32, col: nat32): nat32
+        variable falta, p, i: nat32
+        variable b: arreglo [64] de byte
+        p := pos_de_col(l, col, falta)
+        si falta > 0 entonces
+            si falta > 64 entonces falta := 64 fin
+            para i desde 0 hasta falta - 1 hacer b[i] := ' ' fin
+            meter(p, b, falta)
+            p := p + falta
+        fin
+        devolver p
+    fin
+
+    ; borra lo del bloque en cada línea (queda un bloque sin ancho en la columna de la izquierda)
+    función bloque_borra()
+        variable l1, l2, c1, c2, l, p1, p2, falta: nat32
+        bloque_orden(l1, l2, c1, c2)
+        corte()
+        l := l2 + 1
+        mientras l > l1 hacer
+            l := l - 1
+            p1 := pos_de_col(l, c1, falta)
+            p2 := pos_de_col(l, c2, falta)
+            si p2 > p1 entonces quitar(p1, p2 - p1) fin
+        fin
+        d.b_c1 := c1
+        d.b_c2 := c1
+        d.cursor := pos_de_col(l2, c1, falta)
+        d.ancla := d.cursor
+    fin
+
+    ; lo tecleado va en todas las líneas del bloque
+    función bloque_escribe(p: puntero a byte, n: nat32)
+        variable l1, l2, c1, c2, l, q, falta, k, i: nat32
+        variable u: nat32
+        si cuenta_saltos(p, n) > 0 entonces
+            ; un salto de línea deja el bloque
+            sin_bloque()
+            mete_texto(p, n)
+            devolver
+        fin
+        bloque_orden(l1, l2, c1, c2)
+        si c2 > c1 entonces bloque_borra() fin
+        ; las columnas que ocupa lo tecleado
+        k := 0
+        i := 0
+        mientras i < n hacer
+            i := i + pag_decodifica(p + i, n - i, u)
+            k := k + 1
+        fin
+        l := l1
+        mientras l <= l2 hacer
+            q := rellena(l, c1)
+            meter(q, p, n)
+            l := l + 1
+        fin
+        d.b_l1 := l1
+        d.b_l2 := l2
+        d.b_c1 := c1 + k
+        d.b_c2 := c1 + k
+        d.cursor := pos_de_col(l2, c1 + k, falta)
+        d.ancla := d.cursor
+    fin
+
+    función bloque_borra_letra(atrás: bool)
+        variable l1, l2, c1, c2, l, p, falta, q: nat32
+        bloque_orden(l1, l2, c1, c2)
+        si c2 > c1 entonces
+            bloque_borra()
+            devolver
+        fin
+        si atrás y c1 = 0 entonces devolver fin
+        corte()
+        l := l2 + 1
+        mientras l > l1 hacer
+            l := l - 1
+            si atrás entonces
+                p := pos_de_col(l, c1 - 1, falta)
+                q := pos_de_col(l, c1, falta)
+                si falta = 0 y q > p entonces quitar(p, q - p) fin
+            sino
+                p := pos_de_col(l, c1, falta)
+                si falta = 0 y p < final(l) entonces quitar(p, siguiente_pos(p) - p) fin
+            fin
+        fin
+        si atrás entonces c1 := c1 - 1 fin
+        d.b_c1 := c1
+        d.b_c2 := c1
+        d.cursor := pos_de_col(l2, c1, falta)
+        d.ancla := d.cursor
+    fin
+
+    ; pega las líneas de un bloque copiado, una en cada línea desde el cursor
+    función pega_bloque(p: puntero a byte, n: nat32)
+        variable l, col, i, a, q: nat32
+        corte()
+        quita_selección()
+        l := línea_de(d.cursor)
+        col := col_lógica(d.cursor)
+        i := 0
+        mientras i <= n hacer
+            a := i
+            mientras i < n y p[i] <> 10 hacer i := i + 1 fin
+            si l >= n_líneas() entonces
+                meter(largo(), "\n", 1)
+            fin
+            q := rellena(l, col)
+            meter(q, p + a, i - a)
+            l := l + 1
+            i := i + 1
+        fin
+        d.ancla := d.cursor
+    fin
+
+    ; =========================================================================
+    ;  Las líneas: duplicar, subir y bajar, comentar, mayúsculas, ordenar
+    ; =========================================================================
+    función duplica()
+        variable l1, l2, a, b, n: nat32
+        variable q: puntero a byte
+        si solo_leer() entonces devolver fin
+        acción(A_OTRA)
+        sin_bloque()
+        si d.ancla <> d.cursor entonces
+            ; lo seleccionado, otra vez detrás
+            a := sel_inicio()
+            b := sel_fin()
+            q := pedir(b - a + 4)
+            si q = nulo entonces devolver fin
+            n := copia(a, b - a, q)
+            meter(b, q, n)
+            soltar(q)
+            d.ancla := b
+            d.cursor := b + n
+            devolver
+        fin
+        l1 := línea_de(d.cursor)
+        l2 := l1
+        a := inicio(l1)
+        b := final(l2)
+        q := pedir(b - a + 4)
+        si q = nulo entonces devolver fin
+        q[0] := 10
+        n := copia(a, b - a, q + 1)
+        meter(b, q, n + 1)
+        soltar(q)
+        d.cursor := d.cursor + n + 1
+        d.ancla := d.cursor
+    fin
+
+    ; sube (o baja) las líneas elegidas una línea
+    función mueve_líneas(arriba_: bool)
+        variable l1, l2, a, b, a2, b2, n, n2, ca, cc: nat32
+        variable q: puntero a byte
+        si solo_leer() entonces devolver fin
+        acción(A_OTRA)
+        sin_bloque()
+        líneas_elegidas(l1, l2)
+        si arriba_ y l1 = 0 entonces devolver fin
+        si no arriba_ y l2 + 1 >= n_líneas() entonces devolver fin
+        corte()
+        a := inicio(l1)
+        b := final(l2)
+        ca := d.ancla - a
+        cc := d.cursor - a
+        si d.ancla < a entonces ca := 0 fin
+        si arriba_ entonces
+            ; la de encima pasa debajo
+            a2 := inicio(l1 - 1)
+            n := b - a
+            n2 := a - a2                        ; con su \n
+            q := pedir(n + n2 + 4)
+            si q = nulo entonces devolver fin
+            copia(a, n, q)
+            q[n] := 10
+            copia(a2, n2 - 1, q + n + 1)
+            cambiar(a2, b - a2, q, n + n2)
+            soltar(q)
+            d.ancla := a2 + ca
+            d.cursor := a2 + cc
+        sino
+            b2 := final(l2 + 1)
+            n := b - a
+            n2 := b2 - b                        ; con el \n de delante
+            q := pedir(n + n2 + 4)
+            si q = nulo entonces devolver fin
+            copia(b + 1, n2 - 1, q)
+            q[n2 - 1] := 10
+            copia(a, n, q + n2)
+            cambiar(a, b2 - a, q, n + n2)
+            soltar(q)
+            d.ancla := a + n2 + ca
+            d.cursor := a + n2 + cc
+        fin
+    fin
+
+    ; Ctrl+Q: comenta o descomenta las líneas elegidas, según el lenguaje
+    función comenta()
+        variable l1, l2, l, a, f, n, mínima, col: nat32
+        variable com, abre, cierra: puntero a byte
+        variable todas, vacía: bool
+        si solo_leer() entonces devolver fin
+        acción(A_OTRA)
+        sin_bloque()
+        com := len_comentario(d.lenguaje)
+        líneas_elegidas(l1, l2)
+        si com = nulo entonces
+            si len_bloque(d.lenguaje, abre, cierra) entonces
+                comenta_bloque(l1, l2, abre, cierra)
+                devolver
+            fin
+            si d.lenguaje < 0 entonces avisa_mal("Elige antes el lenguaje (el menú Lenguaje): en un texto normal no hay comentarios.") sino avisa_mal("Este lenguaje no tiene comentarios de línea.") fin
+            devolver
+        fin
+        n := longitud(com)
+        ; ¿están todas comentadas? (las que no están en blanco)
+        todas := cierto
+        mínima := 0xFFFFFFFF
+        l := l1
+        mientras l <= l2 hacer
+            a := primera_letra(l, vacía)
+            si no vacía entonces
+                si no empieza_con(a, com, n) entonces todas := falso fin
+                col := a - inicio(l)
+                si col < mínima entonces mínima := col fin
+            fin
+            l := l + 1
+        fin
+        si mínima = 0xFFFFFFFF entonces devolver fin
+        corte()
+        l := l1
+        mientras l <= l2 hacer
+            a := primera_letra(l, vacía)
+            si no vacía entonces
+                si todas entonces
+                    f := n
+                    ; y el espacio de detrás, si lo hay y el comentario no lo lleva
+                    si BlocTxt.letra(a + n) = ' ' y com[n - 1] <> ' ' entonces f := n + 1 fin
+                    quitar(a, f)
+                sino
+                    meter(inicio(l) + mínima, com, n)
+                    si com[n - 1] <> ' ' entonces meter(inicio(l) + mínima + n, " ", 1) fin
                 fin
             fin
-        sino si yy < alto - PIE entonces
-            pos := letra_del_punto(x, yy)
-            si veces(c) = 2 entonces
-                elige_palabra(pos)
-            sino si veces(c) = 3 entonces
-                elige_línea(pos)
-            sino
-                ; un clic: el cursor ahí (con Mayús, selecciona hasta ahí), y
-                ; arrastrando se sigue seleccionando
-                cursor := pos
-                si c yb CON_MAYÚS = 0 entonces ancla := cursor fin
-                arrastrando := cierto
-            fin
+            l := l + 1
         fin
-        pinta_texto()
-        pinta_pie()
+        d.ancla := inicio(l1)
+        d.cursor := final(l2)
+        si todas entonces avisa_bien("Descomentado.") sino avisa_bien("Comentado (Ctrl+Q otra vez lo quita).") fin
     fin
 
-    ; lo que no se puede hacer ahora en el menú de Edición (un bit por opción)
-    función grises_de_edición(): nat32
+    ; la primera letra que no es un espacio de la línea l
+    función primera_letra(l: nat32, ref vacía: bool): nat32
+        variable i, f: nat32
+        i := inicio(l)
+        f := final(l)
+        mientras i < f y (BlocTxt.letra(i) = ' ' o BlocTxt.letra(i) = 9) hacer i := i + 1 fin
+        vacía := i >= f
+        devolver i
+    fin
+
+    ; ¿empieza en pos el texto t (n octetos, sin mirar mayúsculas)?
+    función empieza_con(pos: nat32, t: puntero a byte, n: nat32): bool
+        variable i: nat32
+        i := 0
+        mientras i < n hacer
+            si mayúscula(BlocTxt.letra(pos + i)) <> mayúscula(t[i]) entonces
+                ; (el espacio del final del comentario, si no lo lleva la línea)
+                si i = n - 1 y t[i] = ' ' entonces devolver cierto fin
+                devolver falso
+            fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; los de bloque (HTML, CSS): <!-- ... --> alrededor, o se quitan
+    función comenta_bloque(l1: nat32, l2: nat32, abre: puntero a byte, cierra: puntero a byte)
+        variable a, b, na, nc: nat32
+        variable vacía: bool
+        na := longitud(abre)
+        nc := longitud(cierra)
+        a := primera_letra(l1, vacía)
+        b := final(l2)
+        mientras b > a y (BlocTxt.letra(b - 1) = ' ' o BlocTxt.letra(b - 1) = 9) hacer b := b - 1 fin
+        corte()
+        si b - a >= na + nc y empieza_con(a, abre, na) y empieza_con(b - nc, cierra, nc) entonces
+            quitar(b - nc, nc)
+            si BlocTxt.letra(b - nc - 1) = ' ' entonces quitar(b - nc - 1, 1) fin
+            quitar(a, na)
+            si BlocTxt.letra(a) = ' ' entonces quitar(a, 1) fin
+            avisa_bien("Descomentado.")
+        sino
+            meter(b, " ", 1)
+            meter(b + 1, cierra, nc)
+            meter(a, abre, na)
+            meter(a + na, " ", 1)
+            avisa_bien("Comentado (Ctrl+Q otra vez lo quita).")
+        fin
+        d.ancla := inicio(l1)
+        d.cursor := final(l2)
+    fin
+
+    ; MAY\xD7SCULAS o minúsculas en lo seleccionado
+    función caja(mayús: bool)
+        variable a, b, n, i, k, u, m: nat32
+        variable p, q: puntero a byte
+        si solo_leer() entonces devolver fin
+        si d.ancla = d.cursor entonces
+            avisa_mal("Selecciona antes lo que quieras cambiar.")
+            devolver
+        fin
+        acción(A_OTRA)
+        sin_bloque()
+        a := sel_inicio()
+        b := sel_fin()
+        p := pedir(b - a + 4)
+        q := pedir((b - a) * 2 + 8)
+        si p = nulo o q = nulo entonces
+            soltar(p)
+            soltar(q)
+            devolver
+        fin
+        n := copia(a, b - a, p)
+        i := 0
+        k := 0
+        mientras i < n hacer
+            m := pag_decodifica(p + i, n - i, u)
+            si u >= 0xDC80 y u <= 0xDCFF entonces
+                ; (un octeto que no es UTF-8: tal cual)
+                mover_memoria(q + k, p + i, m)
+                k := k + m
+            sino
+                si mayús entonces u := pag_mayúscula(u) sino u := pag_minúscula(u) fin
+                k := k + pag_codifica(u, q + k)
+            fin
+            i := i + m
+        fin
+        corte()
+        cambiar(a, n, q, k)
+        d.ancla := a
+        d.cursor := a + k
+        soltar(p)
+        soltar(q)
+    fin
+
+    ; ---- ordenar las líneas ----
+    variable orden_ini, orden_fin: puntero a nat32
+    variable orden_texto: puntero a byte
+
+    ; la clave de un carácter para ordenar: sin mayúsculas ni tildes (la ñ, detrás de la n)
+    función clave_de(u: nat32): nat32
+        u := pag_minúscula(u)
+        según nat16(u)
+            caso 0xE0..0xE5: devolver nat32('a') * 4
+            caso 0xE8..0xEB: devolver nat32('e') * 4
+            caso 0xEC..0xEF: devolver nat32('i') * 4
+            caso 0xF2..0xF6: devolver nat32('o') * 4
+            caso 0xF9..0xFC: devolver nat32('u') * 4
+            caso 0xE7: devolver nat32('c') * 4 + 1
+            caso 0xF1: devolver nat32('n') * 4 + 2
+        fin
+        si u < 0x10000 entonces devolver u * 4 fin
+        devolver u
+    fin
+
+    ; compara las líneas i y j (de orden_ini/orden_fin): < 0, 0, > 0
+    función compara_líneas(i: nat32, j: nat32): ent32
+        variable a, b, fa, fb, ua, ub, ka, kb: nat32
+        a := orden_ini[i]
+        fa := orden_fin[i]
+        b := orden_ini[j]
+        fb := orden_fin[j]
+        mientras a < fa y b < fb hacer
+            a := a + pag_decodifica(orden_texto + a, fa - a, ua)
+            b := b + pag_decodifica(orden_texto + b, fb - b, ub)
+            ka := clave_de(ua)
+            kb := clave_de(ub)
+            si ka < kb entonces devolver -1 fin
+            si ka > kb entonces devolver 1 fin
+        fin
+        si a < fa entonces devolver 1 fin
+        si b < fb entonces devolver -1 fin
+        devolver 0
+    fin
+
+    ; ordena (por mezcla, estable) los n números de idx (las líneas) con tmp de ayuda
+    función ordena(idx: puntero a nat32, tmp: puntero a nat32, n: nat32, revés: bool)
+        variable ancho_, i, a, m, b, x, y_, k: nat32
+        variable c: ent32
+        variable p, q, t: puntero a nat32
+        p := idx
+        q := tmp
+        ancho_ := 1
+        mientras ancho_ < n hacer
+            i := 0
+            mientras i < n hacer
+                a := i
+                m := i + ancho_
+                si m > n entonces m := n fin
+                b := i + 2 * ancho_
+                si b > n entonces b := n fin
+                x := a
+                y_ := m
+                k := a
+                mientras x < m o y_ < b hacer
+                    si x < m y y_ < b entonces
+                        c := compara_líneas(p[x], p[y_])
+                        si revés entonces c := -c fin
+                        si c <= 0 entonces
+                            q[k] := p[x]
+                            x := x + 1
+                        sino
+                            q[k] := p[y_]
+                            y_ := y_ + 1
+                        fin
+                    sino si x < m entonces
+                        q[k] := p[x]
+                        x := x + 1
+                    sino
+                        q[k] := p[y_]
+                        y_ := y_ + 1
+                    fin
+                    k := k + 1
+                fin
+                i := i + 2 * ancho_
+            fin
+            t := p
+            p := q
+            q := t
+            ancho_ := ancho_ * 2
+        fin
+        si p <> idx entonces mover_memoria(puntero(idx), puntero(p), n * 4) fin
+    fin
+
+    ; ordena las líneas elegidas (o todas, si no hay varias elegidas)
+    función ordena_líneas(revés: bool)
+        variable l1, l2, n, i, a, b, k: nat32
+        variable idx, tmp: puntero a nat32
+        variable nuevo: puntero a byte
+        si solo_leer() entonces devolver fin
+        acción(A_OTRA)
+        sin_bloque()
+        líneas_elegidas(l1, l2)
+        si l1 = l2 entonces
+            l1 := 0
+            l2 := n_líneas() - 1
+            ; (la última vacía, detrás del último salto, se queda donde está)
+            si l2 > 0 y final(l2) = inicio(l2) entonces l2 := l2 - 1 fin
+        fin
+        n := l2 - l1 + 1
+        si n < 2 entonces devolver fin
+        a := inicio(l1)
+        b := final(l2)
+        orden_texto := pedir(b - a + 4)
+        orden_ini := puntero(pedir(n * 4))
+        orden_fin := puntero(pedir(n * 4))
+        idx := puntero(pedir(n * 4))
+        tmp := puntero(pedir(n * 4))
+        nuevo := pedir(b - a + 4)
+        si orden_texto = nulo o orden_ini = nulo o orden_fin = nulo o idx = nulo o tmp = nulo o nuevo = nulo entonces
+            avisa_mal("No hay memoria para ordenar tantas líneas.")
+        sino
+            copia(a, b - a, orden_texto)
+            para i desde 0 hasta n - 1 hacer
+                orden_ini[i] := inicio(l1 + i) - a
+                orden_fin[i] := final(l1 + i) - a
+                idx[i] := i
+            fin
+            ordena(idx, tmp, n, revés)
+            k := 0
+            para i desde 0 hasta n - 1 hacer
+                mover_memoria(nuevo + k, orden_texto + orden_ini[idx[i]], orden_fin[idx[i]] - orden_ini[idx[i]])
+                k := k + orden_fin[idx[i]] - orden_ini[idx[i]]
+                si i + 1 < n entonces
+                    nuevo[k] := 10
+                    k := k + 1
+                fin
+            fin
+            corte()
+            cambiar(a, b - a, nuevo, k)
+            d.ancla := a
+            d.cursor := a + k
+            avisa_bien("Líneas ordenadas (Ctrl+Z las deja como estaban).")
+        fin
+        soltar(orden_texto)
+        soltar(puntero(orden_ini))
+        soltar(puntero(orden_fin))
+        soltar(puntero(idx))
+        soltar(puntero(tmp))
+        soltar(nuevo)
+    fin
+
+    ; los tabuladores a espacios (o los espacios de delante a tabuladores), en lo elegido o en todo
+    función tabuladores(a_espacios: bool)
+        variable l1, l2, l, i, f, col, n, k, cuenta: nat32
+        variable c: byte
+        variable b: arreglo [16] de byte
+        si solo_leer() entonces devolver fin
+        acción(A_OTRA)
+        sin_bloque()
+        líneas_elegidas(l1, l2)
+        si l1 = l2 entonces
+            l1 := 0
+            l2 := n_líneas() - 1
+        fin
+        corte()
+        cuenta := 0
+        l := l1
+        mientras l <= l2 hacer
+            si a_espacios entonces
+                i := inicio(l)
+                col := 0
+                mientras i < final(l) hacer
+                    c := BlocTxt.letra(i)
+                    si c = 9 entonces
+                        n := tab_ancho - col mod tab_ancho
+                        para k desde 0 hasta n - 1 hacer b[k] := ' ' fin
+                        cambiar(i, 1, b, n)
+                        i := i + n
+                        col := col + n
+                        cuenta := cuenta + 1
+                    sino
+                        si (c yb 0xC0) <> 0x80 entonces col := col + 1 fin
+                        i := i + 1
+                    fin
+                fin
+            sino
+                ; los espacios de delante, de tab_ancho en tab_ancho
+                i := inicio(l)
+                f := final(l)
+                n := 0
+                mientras i + n < f y BlocTxt.letra(i + n) = ' ' hacer n := n + 1 fin
+                k := n div tab_ancho
+                si k > 0 entonces
+                    para col desde 0 hasta k - 1 hacer b[col] := 9 fin
+                    cambiar(i, k * tab_ancho, b, k)
+                    cuenta := cuenta + k
+                fin
+            fin
+            l := l + 1
+        fin
+        d.ancla := d.cursor
+        si d.cursor > largo() entonces d.cursor := largo() fin
+        d.ancla := d.cursor
+        b[0] := 0
+        si cuenta = 0 entonces avisa_bien("No había nada que cambiar.") sino avisa_bien("Hecho (Ctrl+Z lo deshace).") fin
+    fin
+
+    ; =========================================================================
+    ;  Ir a una línea, a la pareja, y los pliegues
+    ; =========================================================================
+    función ve_a_línea(l: nat32)
+        si l >= n_líneas() entonces l := n_líneas() - 1 fin
+        destapa(l)
+        sin_bloque()
+        d.cursor := inicio(l)
+        d.ancla := d.cursor
+        BlocVis.suelto := falso
+    fin
+
+    función ve_a_pareja()
+        mira_pareja()
+        si par_b = NADA entonces
+            avisa_mal("Junto al cursor no hay un paréntesis con pareja: ( ) [ ] { }.")
+            devolver
+        fin
+        d.cursor := par_b
+        si par_b < par_a entonces d.cursor := par_b sino d.cursor := par_b + 1 fin
+        d.ancla := d.cursor
+    fin
+
+    ; =========================================================================
+    ;  Buscar
+    ; =========================================================================
+    función opciones_búsqueda(): nat32
+        variable o_: nat32
+        o_ := 0
+        si no casillas[CS_CAJA] entonces o_ := o_ ob EXP_SIN_CAJA fin
+        si casillas[CS_PALABRA] entonces o_ := o_ ob EXP_PALABRA fin
+        si no casillas[CS_EXP] entonces o_ := o_ ob EXP_LITERAL fin
+        devolver o_
+    fin
+
+    función prepara_búsqueda(): bool
+        campos[CA_BUSCAR].t[campos[CA_BUSCAR].n] := 0
+        si no bus_prepara(dirección(campos[CA_BUSCAR].t[0]), opciones_búsqueda()) entonces
+            avisa_mal(bus_error)
+            devolver falso
+        fin
+        campos[CA_POR].t[campos[CA_POR].n] := 0
+        bus_pon_por(dirección(campos[CA_POR].t[0]))
+        devolver cierto
+    fin
+
+    ; F3 (o Mayús+F3): lo siguiente (o lo de antes)
+    función busca_otra(adelante: bool)
+        variable a, b, p: nat32
+        variable t: arreglo [200] de byte
+        variable dd: arreglo [1] de nat32
+        si campos[CA_BUSCAR].n = 0 entonces
+            abre_panel(P_BUSCAR)
+            devolver
+        fin
+        si no prepara_búsqueda() entonces devolver fin
+        sin_bloque()
+        si adelante entonces
+            p := sel_fin()
+            si d.ancla = d.cursor entonces p := d.cursor fin
+            ; un encuentro vacío en el mismo sitio: un poco más allá
+        sino
+            p := sel_inicio()
+        fin
+        si bus_en_doc(adelante, p, a, b) entonces
+            si adelante y a = b y a = p y d.ancla = d.cursor y not_fin(p) entonces
+                bus_en_doc(cierto, siguiente_pos(p), a, b)
+            fin
+            destapa(línea_de(a))
+            d.ancla := a
+            d.cursor := b
+            BlocVis.suelto := falso
+            si bus_vuelta entonces
+                si adelante entonces avisa_bien("Llegado al final: se ha vuelto a buscar desde el principio.") sino avisa_bien("Llegado al principio: se ha vuelto a buscar desde el final.") fin
+            sino
+                aviso[0] := 0
+            fin
+        sino
+            campos[CA_BUSCAR].t[campos[CA_BUSCAR].n] := 0
+            copiar_hasta(t, dirección(campos[CA_BUSCAR].t[0]), 60)
+            dd[0] := nat32(dirección(t[0]))
+            si bus_cortada entonces
+                avisa_mal("La búsqueda se ha cortado: la expresión es demasiado costosa para un texto tan grande.")
+            sino
+                formatear(aviso, 160, "No se encuentra \xAE%s\xAF.", dd)
+                aviso_malo := cierto
+            fin
+        fin
+    fin
+
+    función not_fin(p: nat32): bool
+        devolver p < largo()
+    fin
+
+    ; «Reemplazar»: si lo seleccionado es lo que se busca, se cambia; y se busca lo siguiente
+    función reemplaza_uno()
+        variable n, a: nat32
+        si solo_leer() entonces devolver fin
+        si no prepara_búsqueda() entonces devolver fin
+        sin_bloque()
+        si d.ancla <> d.cursor y bus_es_esto(sel_inicio(), sel_fin()) entonces
+            acción(A_OTRA)
+            corte()
+            a := sel_inicio()
+            n := bus_reemplaza(a, sel_fin())
+            d.ancla := a + n
+            d.cursor := a + n
+        fin
+        busca_otra(cierto)
+    fin
+
+    función reemplaza_todo()
+        variable n, i, total, viejo: nat32
+        variable dd: arreglo [2] de nat32
+        si solo_leer() entonces devolver fin
+        si no prepara_búsqueda() entonces devolver fin
+        sin_bloque()
+        acción(A_OTRA)
+        total := 0
+        si casillas[CS_TODOS] entonces
+            viejo := activo
+            n := 0
+            si n_docs > 0 entonces
+            para i desde 0 hasta n_docs - 1 hacer
+                d := docs[i]
+                si d.clase = DOC_NORMAL entonces
+                    total := total + bus_reemplaza_todo(0, 0xFFFFFFFF)
+                    d.cursor := 0
+                    d.ancla := 0
+                    n := n + 1
+                fin
+            fin
+            fin
+            activa(viejo)
+            dd[0] := total
+            dd[1] := n
+            formatear(aviso, 160, "Reemplazadas %u en %u documentos (Ctrl+Z en cada uno lo deshace).", dd)
+        sino
+            si d.ancla <> d.cursor y cuenta_saltos_sel() > 0 entonces
+                ; con varias líneas elegidas, solo en ellas
+                total := bus_reemplaza_todo(sel_inicio(), sel_fin())
+            sino
+                total := bus_reemplaza_todo(0, 0xFFFFFFFF)
+            fin
+            d.ancla := d.cursor
+            si d.cursor > largo() entonces d.cursor := largo() fin
+            d.ancla := d.cursor
+            dd[0] := total
+            formatear(aviso, 160, "Reemplazadas: %u (Ctrl+Z lo deshace de una vez).", dd)
+        fin
+        aviso_malo := total = 0
+        si total = 0 y bus_error[0] <> 0 entonces avisa_mal(bus_error) fin
+    fin
+
+    función cuenta_saltos_sel(): nat32
+        devolver línea_de(sel_fin()) - línea_de(sel_inicio())
+    fin
+
+    función cuenta()
+        variable dd: arreglo [1] de nat32
+        si no prepara_búsqueda() entonces devolver fin
+        dd[0] := bus_contar()
+        formatear(aviso, 160, "Está %u veces.", dd)
+        aviso_malo := falso
+    fin
+
+    ; la pestaña de lo encontrado: se hace (o se rehace) con lo de BlocBus
+    función enseña_resultados(cabecera: puntero a byte)
+        variable i: nat32
+        variable x: puntero a Doc
+        variable p: puntero a byte
+        variable dd: arreglo [3] de nat32
+        x := nulo
+        si n_docs > 0 entonces
+        para i desde 0 hasta n_docs - 1 hacer
+            si docs[i].clase = DOC_RESULTADOS entonces
+                x := docs[i]
+                activa(i)
+            fin
+        fin
+        fin
+        si x = nulo entonces
+            x := doc_nuevo()
+            si x = nulo entonces devolver fin
+            x.clase := DOC_RESULTADOS
+            x.cp := CP_UTF8
+            si no pestaña_nueva(x) entonces devolver fin
+        fin
+        d := x
+        p := pedir(n_res + 65536)
+        si p = nulo entonces devolver fin
+        mover_memoria(p, res, n_res)
+        adopta(p, n_res, n_res + 65536)
+        dd[0] := res_líneas
+        dd[1] := res_archivos
+        si lista_cortada() entonces
+            formatear(aviso, 160, "Encontradas %u líneas en %u archivos (y hay más: solo se enseñan las primeras). Dos clics o Intro, a cada sitio.", dd)
+        sino
+            formatear(aviso, 160, "Encontradas %u líneas en %u archivos. Dos clics o Intro en una, a ese sitio.", dd)
+        fin
+        aviso_malo := res_líneas = 0
+        ver_cambiado := cierto
+    fin
+
+    ; «Todos» (buscar todo, aquí o en todos los abiertos): la lista
+    función busca_todos()
+        variable i: nat32
+        variable t: arreglo [200] de byte
+        variable nombre_: arreglo [MAX_RUTA] de byte
+        variable dd: arreglo [1] de nat32
+        si no prepara_búsqueda() entonces devolver fin
+        lista_empieza()
+        campos[CA_BUSCAR].t[campos[CA_BUSCAR].n] := 0
+        dd[0] := nat32(dirección(campos[CA_BUSCAR].t[0]))
+        si casillas[CS_TODOS] entonces
+            formatear(t, 200, "Buscar \xAE%s\xAF en todos los documentos abiertos", dd)
+        sino
+            formatear(t, 200, "Buscar \xAE%s\xAF en este documento", dd)
+        fin
+        lista_línea_437(t)
+        si n_docs > 0 entonces
+        para i desde 0 hasta n_docs - 1 hacer
+            si docs[i].clase = DOC_NORMAL y (casillas[CS_TODOS] o i = activo) entonces
+                nombre_largo(docs[i], nombre_)
+                lista_doc(docs[i], nombre_)
+            fin
+        fin
+        fin
+        enseña_resultados(t)
+    fin
+
+    ; buscar en los archivos de una carpeta
+    función busca_en_carpeta()
+        variable t: arreglo [240] de byte
+        variable c: arreglo [MAX_RUTA] de byte
+        variable dd: arreglo [3] de nat32
+        variable n: nat32
+        si no prepara_búsqueda() entonces devolver fin
+        campos[CA_CARPETA].t[campos[CA_CARPETA].n] := 0
+        campos[CA_FILTRO].t[campos[CA_FILTRO].n] := 0
+        copiar_hasta(c, dirección(campos[CA_CARPETA].t[0]), MAX_RUTA - 2)
+        n := longitud(c)
+        si n = 0 entonces
+            avisa_mal("Escribe en qué carpeta buscar.")
+            devolver
+        fin
+        si c[n - 1] <> '\\' entonces concatenar(c, "\\") fin
+        avisa_bien("Buscando...")
+        pinta_todo()
+        lista_empieza()
+        dd[0] := nat32(dirección(campos[CA_BUSCAR].t[0]))
+        dd[1] := nat32(dirección(c[0]))
+        dd[2] := nat32(dirección(campos[CA_FILTRO].t[0]))
+        formatear(t, 240, "Buscar \xAE%s\xAF en %s (%s)", dd)
+        si casillas[CS_SUB] entonces concatenar(t, ", con sus carpetas") fin
+        lista_línea_437(t)
+        lista_carpeta(c, dirección(campos[CA_FILTRO].t[0]), casillas[CS_SUB])
+        enseña_resultados(t)
+    fin
+
+    ; en la lista de lo encontrado: Intro o dos clics en una línea van a su sitio
+    función salta_al_resultado()
+        variable l, k, a, i, n: nat32
+        variable t: arreglo [MAX_RUTA * 3] de byte
+        variable ruta: arreglo [MAX_RUTA] de byte
+        variable num: arreglo [16] de byte
+        variable p: puntero a byte
+        l := línea_de(d.cursor)
+        a := inicio(l)
+        si BlocTxt.letra(a) <> ' ' o l = 0 entonces devolver fin
+        ; el número de la línea: «  12: ...»
+        i := a
+        mientras BlocTxt.letra(i) = ' ' hacer i := i + 1 fin
+        k := 0
+        mientras BlocTxt.letra(i) >= '0' y BlocTxt.letra(i) <= '9' y k < 12 hacer
+            num[k] := BlocTxt.letra(i)
+            k := k + 1
+            i := i + 1
+        fin
+        num[k] := 0
+        si k = 0 o no texto_a_natural(num, n) entonces devolver fin
+        ; la ruta: la línea de arriba que no empieza por espacio
+        k := l
+        mientras k > 1 y BlocTxt.letra(inicio(k)) = ' ' hacer k := k - 1 fin
+        si k = 0 entonces devolver fin
+        i := final(k) - inicio(k)
+        si i > MAX_RUTA * 3 - 4 entonces i := MAX_RUTA * 3 - 4 fin
+        i := copia(inicio(k), i, t)
+        t[i] := 0
+        pag_a_437(t, i, ruta, MAX_RUTA)
+        p := dirección(ruta[0])
+        si abre_documento(p, NADA_CP) entonces
+            ve_a_línea(n - 1)
+            ; y lo buscado, elegido
+            si prepara_búsqueda() entonces
+                si bus_en_doc(cierto, inicio(n - 1), a, k) y línea_de(a) = n - 1 entonces
+                    d.ancla := a
+                    d.cursor := k
+                fin
+            fin
+            aviso[0] := 0
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Comparar
+    ; =========================================================================
+    función empieza_a_comparar()
+        variable otro: nat32
+        variable dd: arreglo [1] de nat32
+        si n_docs < 2 entonces
+            avisa_mal("Para comparar hacen falta dos pestañas: abre el otro archivo (Ctrl+O).")
+            devolver
+        fin
+        otro := activo + 1
+        si otro >= n_docs entonces otro := activo - 1 fin
+        si activo + 1 >= n_docs entonces
+            si no compara(docs[otro], docs[activo]) entonces
+                avisa_mal("No hay memoria para comparar.")
+                devolver
+            fin
+        sino
+            si no compara(docs[activo], docs[otro]) entonces
+                avisa_mal("No hay memoria para comparar.")
+                devolver
+            fin
+        fin
+        dd[0] := diferencias
+        si diferencias = 0 entonces
+            avisa_bien("Son iguales. (Esc deja de comparar.)")
+        sino
+            formatear(aviso, 160, "%u trozos distintos: - quitado, + añadido, * cambiado. F8 el siguiente, Mayús+F8 el de antes; Esc lo deja.", dd)
+            aviso_malo := falso
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Las macros
+    ; =========================================================================
+    función graba_o_para()
+        si grabando entonces
+            grabando := falso
+            avisa_bien("Macro grabada: Ctrl+Mayús+P la repite.")
+            devolver
+        fin
+        n_macro := 0
+        grabando := cierto
+        avisa_bien("GRABANDO la macro: lo que se teclee. Ctrl+Mayús+R otra vez la para.")
+    fin
+
+    función repite_macro()
+        variable i: nat32
+        si grabando entonces graba_o_para() fin
+        si n_macro = 0 entonces
+            avisa_mal("No hay macro grabada: Ctrl+Mayús+R empieza a grabar.")
+            devolver
+        fin
+        repitiendo := cierto
+        corte()
+        i := 0
+        mientras i < n_macro hacer
+            tecla_ev(macro[i * 3], macro[i * 3 + 1], macro[i * 3 + 2])
+            i := i + 1
+        fin
+        repitiendo := falso
+    fin
+
+    ; =========================================================================
+    ;  Los paneles
+    ; =========================================================================
+    función alto_panel(): ent32
+        según nat16(panel)
+            caso P_BUSCAR: devolver 2 * FILA_PANEL + 4
+            caso P_REEMPLAZAR: devolver 3 * FILA_PANEL + 4
+            caso P_IR: devolver FILA_PANEL + 4
+            caso P_ABRIR, P_GUARDAR: devolver FILA_PANEL + 4
+            caso P_CARPETA: devolver 3 * FILA_PANEL + 4
+            caso P_CERRAR, P_SALIR: devolver 2 * FILA_PANEL + 4
+        fin
+        devolver 0
+    fin
+
+    función campo_pon(c: nat32, t: puntero a byte)
+        campos[c].entero := falso
+        copiar_hasta(dirección(campos[c].t[0]), t, LARGO_CAMPO - 1)
+        campos[c].n := longitud(dirección(campos[c].t[0]))
+        campos[c].cur := campos[c].n
+        campos[c].izq := 0
+    fin
+
+    ; la carpeta del documento de ahora (con su «\»), o la raíz de la unidad
+    función carpeta_del_doc(destino: puntero a byte)
+        variable i, k: nat32
+        k := 0
+        i := 0
+        mientras d.ruta[i] <> 0 hacer
+            si d.ruta[i] = '\\' entonces k := i + 1 fin
+            i := i + 1
+        fin
+        si d.ruta[0] <> 0 y d.ruta[1] = ':' y k > 0 entonces
+            copiar_hasta(destino, dirección(d.ruta[0]), k + 1)
+            destino[k] := 0
+            devolver
+        fin
+        destino[0] := byte(letra_sistema)
+        destino[1] := ':'
+        destino[2] := 0
+        si d.ruta[0] = '\\' y k > 0 entonces
+            copiar_hasta(destino + 2, dirección(d.ruta[0]), k + 1)
+            destino[k + 2] := 0
+            devolver
+        fin
+        carpeta_actual(destino + 2, MAX_RUTA - 4)
+        si destino[longitud(destino) - 1] <> '\\' entonces concatenar(destino, "\\") fin
+    fin
+
+    función abre_panel(p: nat32)
+        variable t: arreglo [MAX_RUTA] de byte
+        variable dd: arreglo [1] de nat32
+        panel := p
+        foco_panel := cierto
+        foco := 0
+        pide_otra_vez := falso
+        si (p = P_BUSCAR o p = P_REEMPLAZAR) y d.ancla <> d.cursor y cuenta_saltos_sel() = 0 y sel_fin() - sel_inicio() < 100 entonces
+            ; lo seleccionado, a «Buscar»
+            copia(sel_inicio(), sel_fin() - sel_inicio(), t)
+            t[sel_fin() - sel_inicio()] := 0
+            pag_a_437(t, sel_fin() - sel_inicio(), dirección(campos[CA_BUSCAR].t[0]), LARGO_CAMPO)
+            campos[CA_BUSCAR].n := longitud(dirección(campos[CA_BUSCAR].t[0]))
+            campos[CA_BUSCAR].cur := campos[CA_BUSCAR].n
+        fin
+        si p = P_IR entonces
+            dd[0] := línea_de(d.cursor) + 1
+            formatear(t, 20, "%u", dd)
+            campo_pon(CA_IR, t)
+        fin
+        si p = P_ABRIR o p = P_GUARDAR entonces
+            carpeta_del_doc(carpeta_lista)
+            si p = P_GUARDAR y d.ruta[0] <> 0 entonces
+                copiar(t, carpeta_lista)
+                nombre_corto(d, dirección(t[longitud(t)]))
+                campo_pon(CA_RUTA, t)
+            sino si p = P_GUARDAR entonces
+                copiar(t, carpeta_lista)
+                concatenar(t, "NUEVO.TXT")
+                campo_pon(CA_RUTA, t)
+            sino
+                campo_pon(CA_RUTA, carpeta_lista)
+            fin
+            relee_lista()
+        fin
+        si p = P_BUSCAR o p = P_REEMPLAZAR o p = P_CARPETA entonces campos[CA_BUSCAR].entero := campos[CA_BUSCAR].n > 0 fin
+        si p = P_IR entonces campos[CA_IR].entero := cierto fin
+        si p = P_CARPETA entonces
+            si campos[CA_CARPETA].n = 0 entonces
+                carpeta_del_doc(t)
+                campo_pon(CA_CARPETA, t)
+            fin
+            si campos[CA_FILTRO].n = 0 entonces campo_pon(CA_FILTRO, "*.TXT *.CAS *.BAS *.ASM *.C *.H *.HTM *.CSS *.JS *.BAT *.INI *.PY") fin
+        fin
+        ver_cambiado := cierto
+    fin
+
+    función cierra_panel()
+        panel := P_NINGUNO
+        foco_panel := falso
+        ver_cambiado := cierto
+    fin
+
+    función relee_lista()
+        lista_elegido := -1
+        lista_primera := 0
+        si no lee_lista(carpeta_lista) entonces n_lista := 0 fin
+    fin
+
+    ; ---- poner los controles del panel ----
+    función ctl(clase: nat32, id: nat32, x: ent32, yy: ent32, an: ent32, al: ent32, t: puntero a byte)
+        si n_ctls >= MAX_CTL entonces devolver fin
+        ctls[n_ctls].clase := clase
+        ctls[n_ctls].id := id
+        ctls[n_ctls].x := x
+        ctls[n_ctls].ye := yy
+        ctls[n_ctls].an := an
+        ctls[n_ctls].al := al
+        ctls[n_ctls].t := t
+        n_ctls := n_ctls + 1
+    fin
+
+    función botón_p(id: nat32, ref x: ent32, yy: ent32, t: puntero a byte)
+        variable an: ent32
+        an := ent32(longitud(t)) * 8 + 16
+        ctl(K_BOTÓN, id, x, yy, an, 22, t)
+        x := x + an + 6
+    fin
+
+    función casilla_p(id: nat32, ref x: ent32, yy: ent32, t: puntero a byte)
+        variable an: ent32
+        an := ent32(longitud(t)) * 8 + 22
+        si x + an > ancho - 4 entonces devolver fin
+        ctl(K_CASILLA, id, x, yy, an, 20, t)
+        x := x + an + 10
+    fin
+
+    función rótulo_p(ref x: ent32, yy: ent32, t: puntero a byte)
+        ctl(K_RÓTULO, 0, x, yy, ent32(longitud(t)) * 8, 20, t)
+        x := x + ent32(longitud(t)) * 8 + 6
+    fin
+
+    ; un campo que llega hasta «hasta_x» (le deja sitio a lo que va detrás)
+    función campo_p(id: nat32, ref x: ent32, yy: ent32, hasta_x: ent32)
+        variable an: ent32
+        an := hasta_x - x
+        si an < 60 entonces an := 60 fin
+        ctl(K_CAMPO, id, x, yy - 1, an, 22, nulo)
+        x := x + an + 6
+    fin
+
+    función coloca_panel()
+        variable x, yy, sitio: ent32
+        n_ctls := 0
+        panel_y := alto - PIE - alto_panel()
+        yy := panel_y + 6
+        x := 8
+        según nat16(panel)
+            caso P_BUSCAR, P_REEMPLAZAR:
+                rótulo_p(x, yy, "Buscar:")
+                sitio := ancho - 8 - 266
+                campo_p(CA_BUSCAR, x, yy, sitio)
+                botón_p(B_SIGUIENTE, x, yy, "Siguiente")
+                botón_p(B_ANTERIOR, x, yy, "Anterior")
+                botón_p(B_TODOS, x, yy, "Todos")
+                botón_p(B_CERRAR_PANEL, x, yy, "x")
+                yy := yy + FILA_PANEL
+                si panel = P_REEMPLAZAR entonces
+                    x := 8
+                    rótulo_p(x, yy, "Por:   ")
+                    campo_p(CA_POR, x, yy, ancho - 8 - 166)
+                    botón_p(B_REEMPLAZAR, x, yy, "Reemplazar")
+                    botón_p(B_TODO, x, yy, "Todas")
+                    yy := yy + FILA_PANEL
+                fin
+                x := 8
+                casilla_p(CS_CAJA, x, yy, "Mayúsculas")
+                casilla_p(CS_PALABRA, x, yy, "Palabra entera")
+                casilla_p(CS_EXP, x, yy, "Expresión")
+                casilla_p(CS_TODOS, x, yy, "Todos los abiertos")
+            caso P_IR:
+                rótulo_p(x, yy, "Ir a la línea:")
+                campo_p(CA_IR, x, yy, x + 100)
+                botón_p(B_IR, x, yy, "Ir")
+                botón_p(B_CERRAR_PANEL, x, yy, "x")
+            caso P_ABRIR, P_GUARDAR:
+                si panel = P_ABRIR entonces rótulo_p(x, yy, "Abrir:") sino rótulo_p(x, yy, "Guardar como:") fin
+                campo_p(CA_RUTA, x, yy, ancho - 8 - 110)
+                si panel = P_ABRIR entonces botón_p(B_ABRIR, x, yy, "Abrir") sino botón_p(B_GUARDAR, x, yy, "Guardar") fin
+                botón_p(B_CERRAR_PANEL, x, yy, "x")
+            caso P_CARPETA:
+                rótulo_p(x, yy, "Buscar:")
+                campo_p(CA_BUSCAR, x, yy, ancho - 8 - 100)
+                botón_p(B_BUSCAR_AQUÍ, x, yy, "Buscar")
+                botón_p(B_CERRAR_PANEL, x, yy, "x")
+                yy := yy + FILA_PANEL
+                x := 8
+                rótulo_p(x, yy, "En:    ")
+                campo_p(CA_CARPETA, x, yy, (ancho * 5) div 9)
+                rótulo_p(x, yy, "Archivos:")
+                campo_p(CA_FILTRO, x, yy, ancho - 8)
+                yy := yy + FILA_PANEL
+                x := 8
+                casilla_p(CS_CAJA, x, yy, "Mayúsculas")
+                casilla_p(CS_PALABRA, x, yy, "Palabra entera")
+                casilla_p(CS_EXP, x, yy, "Expresión")
+                casilla_p(CS_SUB, x, yy, "Con sus carpetas")
+            caso P_CERRAR, P_SALIR:
+                rótulo_p(x, yy, pregunta)
+                yy := yy + FILA_PANEL
+                x := 8
+                si panel = P_CERRAR entonces
+                    botón_p(B_SÍ, x, yy, "Guardar")
+                    botón_p(B_NO, x, yy, "No guardar")
+                sino
+                    botón_p(B_SÍ, x, yy, "Guardar todo y salir")
+                    botón_p(B_NO, x, yy, "Salir sin guardar")
+                fin
+                botón_p(B_CANCELAR, x, yy, "Cancelar")
+        fin
+        si foco >= n_ctls o ctls[foco].clase = K_RÓTULO entonces siguiente_foco(1) fin
+    fin
+
+    función siguiente_foco(paso_: ent32)
+        variable i, k: ent32
+        si n_ctls = 0 entonces devolver fin
+        i := ent32(foco)
+        k := 0
+        mientras k < ent32(n_ctls) hacer
+            i := i + paso_
+            si i < 0 entonces i := ent32(n_ctls) - 1 fin
+            si i >= ent32(n_ctls) entonces i := 0 fin
+            si ctls[i].clase <> K_RÓTULO entonces
+                foco := nat32(i)
+                devolver
+            fin
+            k := k + 1
+        fin
+    fin
+
+    ; ---- pintar el panel ----
+    función pinta_campo(k: nat32, enfocado: bool)
+        variable c: nat32
+        variable x, yy, an, cabe, n: ent32
+        c := ctls[k].id
+        x := ctls[k].x
+        yy := ctls[k].ye
+        an := ctls[k].an
+        Grafico.rectángulo(lz, x, yy, an, 22, PAPEL)
+        si enfocado entonces
+            Grafico.marco(lz, x, yy, an, 22, C_FOCO)
+            Grafico.marco(lz, x + 1, yy + 1, an - 2, 20, C_FOCO)
+        sino
+            Grafico.marco(lz, x, yy, an, 22, 0x8FA3BF)
+        fin
+        cabe := (an - 8) div 8
+        si cabe < 1 entonces cabe := 1 fin
+        si campos[c].cur < campos[c].izq entonces campos[c].izq := campos[c].cur fin
+        si ent32(campos[c].cur - campos[c].izq) > cabe entonces campos[c].izq := campos[c].cur - nat32(cabe) fin
+        n := ent32(campos[c].n - campos[c].izq)
+        si n > cabe entonces n := cabe fin
+        si n > 0 y campos[c].entero y enfocado entonces
+            Grafico.rectángulo(lz, x + 4, yy + 3, n * 8, 16, RESALTE)
+            Grafico.texto_n(lz, x + 4, yy + 3, dirección(campos[c].t[campos[c].izq]), nat32(n), PAPEL)
+        sino si n > 0 entonces
+            Grafico.texto_n(lz, x + 4, yy + 3, dirección(campos[c].t[campos[c].izq]), nat32(n), TINTA)
+        fin
+        si enfocado y foco_panel entonces
+            Grafico.rectángulo(lz, x + 4 + ent32(campos[c].cur - campos[c].izq) * 8 - 1, yy + 3, 2, 16, 0x2468C8)
+        fin
+    fin
+
+    función pinta_panel()
+        variable k: nat32
+        variable x, yy: ent32
+        variable enfocado, puesta: bool
+        si panel = P_NINGUNO entonces devolver fin
+        coloca_panel()
+        Grafico.rectángulo(lz, 0, panel_y, ancho, alto_panel(), 0xEEF3FA)
+        Grafico.rectángulo(lz, 0, panel_y, ancho, 1, C_RAYA)
+        si n_ctls > 0 entonces
+        para k desde 0 hasta n_ctls - 1 hacer
+            enfocado := foco_panel y k = foco
+            x := ctls[k].x
+            yy := ctls[k].ye
+            según nat16(ctls[k].clase)
+                caso K_RÓTULO:
+                    Grafico.texto(lz, x, yy + 2, ctls[k].t, TINTA)
+                caso K_CAMPO:
+                    pinta_campo(k, enfocado)
+                caso K_CASILLA:
+                    puesta := casillas[ctls[k].id]
+                    Grafico.rectángulo(lz, x, yy + 3, 14, 14, PAPEL)
+                    Grafico.marco(lz, x, yy + 3, 14, 14, TINTA)
+                    si puesta entonces
+                        Grafico.línea(lz, x + 3, yy + 6, x + 10, yy + 13, TINTA)
+                        Grafico.línea(lz, x + 10, yy + 6, x + 3, yy + 13, TINTA)
+                        Grafico.línea(lz, x + 4, yy + 6, x + 11, yy + 13, TINTA)
+                        Grafico.línea(lz, x + 11, yy + 6, x + 4, yy + 13, TINTA)
+                    fin
+                    Grafico.texto(lz, x + 20, yy + 2, ctls[k].t, TINTA)
+                    si enfocado entonces
+                        Grafico.marco(lz, x - 3, yy, ctls[k].an + 2, 20, C_FOCO)
+                        Grafico.marco(lz, x - 2, yy + 1, ctls[k].an, 18, C_FOCO)
+                    fin
+                caso K_BOTÓN:
+                    Grafico.redondeado(lz, x, yy, ctls[k].an, 22, 4, 0xF8FBFF, 0xD9E6F7, TODAS)
+                    Grafico.marco(lz, x + 2, yy, ctls[k].an - 4, 1, 0x8FA3BF)
+                    si enfocado entonces
+                        Grafico.marco(lz, x, yy, ctls[k].an, 22, C_FOCO)
+                        Grafico.marco(lz, x + 1, yy + 1, ctls[k].an - 2, 20, C_FOCO)
+                        Grafico.texto_negrita(lz, x + 8, yy + 3, ctls[k].t, TINTA)
+                    sino
+                        Grafico.marco(lz, x, yy, ctls[k].an, 22, 0x8FA3BF)
+                        Grafico.texto(lz, x + 8, yy + 3, ctls[k].t, TINTA)
+                    fin
+            fin
+        fin
+        fin
+    fin
+
+    ; ---- lo que hace cada botón del panel ----
+    función pulsa(id: nat32)
+        según nat16(id)
+            caso B_SIGUIENTE: busca_otra(cierto)
+            caso B_ANTERIOR: busca_otra(falso)
+            caso B_TODOS: busca_todos()
+            caso B_REEMPLAZAR: reemplaza_uno()
+            caso B_TODO: reemplaza_todo()
+            caso B_CONTAR: cuenta()
+            caso B_IR: ir_del_panel()
+            caso B_ABRIR: abrir_del_panel()
+            caso B_GUARDAR: guardar_del_panel()
+            caso B_BUSCAR_AQUÍ: busca_en_carpeta()
+            caso B_CERRAR_PANEL: cierra_panel()
+            caso B_SÍ: responde(1)
+            caso B_NO: responde(2)
+            caso B_CANCELAR: responde(0)
+        fin
+    fin
+
+    ; P_CERRAR y P_SALIR: 1 guardar, 2 no guardar, 0 cancelar
+    función responde(r: nat32)
+        si r = 0 entonces
+            cerrando := falso
+            cierra_panel()
+            devolver
+        fin
+        si panel = P_CERRAR entonces
+            cierra_panel()
+            si r = 1 entonces
+                guardar_doc()
+                si cambiado() entonces devolver fin        ; (no se ha podido, o pide un nombre)
+            fin
+            quita_pestaña(activo)
+            devolver
+        fin
+        ; P_SALIR
+        si r = 1 y no guarda_todo() entonces
+            cierra_panel()
+            avisa_mal("No se ha podido guardar todo (los que no tienen nombre: Guardar como).")
+            devolver
+        fin
+        saliendo := cierto
+    fin
+
+    función ir_del_panel()
+        variable n: nat32
+        campos[CA_IR].t[campos[CA_IR].n] := 0
+        si no texto_a_natural(dirección(campos[CA_IR].t[0]), n) o n = 0 entonces
+            avisa_mal("Escribe el número de la línea (de 1 en adelante).")
+            devolver
+        fin
+        ve_a_línea(n - 1)
+        cierra_panel()
+        aviso[0] := 0
+    fin
+
+    ; la ruta del campo, entera (si no lleva carpeta, la de la lista)
+    función ruta_del_campo(destino: puntero a byte)
+        variable t: puntero a byte
+        campos[CA_RUTA].t[campos[CA_RUTA].n] := 0
+        t := dirección(campos[CA_RUTA].t[0])
+        si t[0] <> 0 y t[1] <> ':' y t[0] <> '\\' entonces
+            copiar(destino, carpeta_lista)
+            concatenar(destino, t)
+        sino
+            copiar_hasta(destino, t, MAX_RUTA)
+        fin
+        a_mayúsculas(destino)
+    fin
+
+    ; ¿es una carpeta? (entonces se entra en ella)
+    función entra_si_carpeta(ruta: puntero a byte): bool
+        variable t: arreglo [MAX_RUTA + 2] de byte
+        variable n: nat32
+        copiar_hasta(t, ruta, MAX_RUTA)
+        n := longitud(t)
+        si n = 0 entonces devolver falso fin
+        si t[n - 1] <> '\\' entonces concatenar(t, "\\") fin
+        ; «..»: la de arriba
+        n := longitud(t)
+        si n >= 4 y t[n - 2] = '.' y t[n - 3] = '.' y t[n - 4] = '\\' entonces
+            t[n - 4] := 0
+            n := longitud(t)
+            mientras n > 0 y t[n - 1] <> '\\' hacer n := n - 1 fin
+            t[n] := 0
+            si n = 0 entonces devolver falso fin
+        fin
+        si no lee_lista(t) entonces
+            lee_lista(carpeta_lista)
+            devolver falso
+        fin
+        copiar(carpeta_lista, t)
+        lista_elegido := -1
+        lista_primera := 0
+        si panel = P_GUARDAR entonces
+            copiar(t, carpeta_lista)
+            nombre_corto(d, dirección(t[longitud(t)]))
+            si d.ruta[0] = 0 entonces concatenar(t, "NUEVO.TXT") fin
+            campo_pon(CA_RUTA, t)
+        sino
+            campo_pon(CA_RUTA, carpeta_lista)
+        fin
+        devolver cierto
+    fin
+
+    función abrir_del_panel()
+        variable t: arreglo [MAX_RUTA + 2] de byte
+        ruta_del_campo(t)
+        si entra_si_carpeta(t) entonces devolver fin
+        si abre_documento(t, NADA_CP) entonces cierra_panel() fin
+    fin
+
+    función guardar_del_panel()
+        variable t: arreglo [MAX_RUTA + 2] de byte
+        variable m: nat32
+        ruta_del_campo(t)
+        si entra_si_carpeta(t) entonces devolver fin
+        ; si ya existe (y no es él mismo), Intro otra vez para sustituirlo
+        si no iguales(t, dirección(d.ruta[0])) y no pide_otra_vez entonces
+            m := abrir(t)
+            si no es_error(m) entonces
+                cerrar(m)
+                pide_otra_vez := cierto
+                avisa_mal("Ya hay un archivo con ese nombre: Guardar otra vez lo sustituye.")
+                devolver
+            fin
+        fin
+        pide_otra_vez := falso
+        si guarda_en(t) entonces
+            d.lenguaje := len_de_archivo(t)
+            pon_estado_bien(1)
+            cierra_panel()
+        fin
+    fin
+
+    ; una tecla en el panel: cierto si la ha atendido
+    función tecla_panel(k: nat32, con_mayús: bool, con_ctrl: bool): bool
+        variable c: nat32
+        variable f: puntero a Campo
+        variable i: nat32
+        variable buf: arreglo [LARGO_CAMPO] de byte
+        coloca_panel()
+        si k = 27 entonces
+            si panel = P_CERRAR o panel = P_SALIR entonces responde(0) sino cierra_panel() fin
+            devolver cierto
+        fin
+        si k = 9 o k = TECLA_MAYÚS_TAB entonces
+            si k = 9 y no con_mayús entonces siguiente_foco(1) sino siguiente_foco(-1) fin
+            devolver cierto
+        fin
+        si n_ctls = 0 entonces devolver falso fin
+        ; las flechas de arriba y abajo, en Abrir y Guardar como: la lista
+        si (panel = P_ABRIR o panel = P_GUARDAR) y (k = TECLA_ARRIBA o k = TECLA_ABAJO o k = TECLA_RE_PÁG o k = TECLA_AV_PÁG) entonces
+            mueve_lista(k)
+            devolver cierto
+        fin
+        si k = '\n' entonces
+            según nat16(panel)
+                caso P_BUSCAR:
+                    si ctls[foco].clase = K_BOTÓN entonces pulsa(ctls[foco].id) sino busca_otra(no con_mayús) fin
+                caso P_REEMPLAZAR:
+                    si ctls[foco].clase = K_BOTÓN entonces pulsa(ctls[foco].id) sino si ctls[foco].clase = K_CAMPO y ctls[foco].id = CA_POR entonces reemplaza_uno() sino busca_otra(no con_mayús) fin
+                caso P_IR: ir_del_panel()
+                caso P_ABRIR:
+                    si ctls[foco].clase = K_BOTÓN y ctls[foco].id = B_CERRAR_PANEL entonces cierra_panel() sino abrir_del_panel() fin
+                caso P_GUARDAR:
+                    si ctls[foco].clase = K_BOTÓN y ctls[foco].id = B_CERRAR_PANEL entonces cierra_panel() sino guardar_del_panel() fin
+                caso P_CARPETA:
+                    si ctls[foco].clase = K_BOTÓN entonces pulsa(ctls[foco].id) sino busca_en_carpeta() fin
+                caso P_CERRAR, P_SALIR:
+                    si ctls[foco].clase = K_BOTÓN entonces pulsa(ctls[foco].id) fin
+            fin
+            devolver cierto
+        fin
+        si ctls[foco].clase = K_CASILLA entonces
+            si k = ' ' entonces
+                casillas[ctls[foco].id] := no casillas[ctls[foco].id]
+                devolver cierto
+            fin
+            devolver falso
+        fin
+        si ctls[foco].clase = K_BOTÓN entonces
+            si k = ' ' entonces
+                pulsa(ctls[foco].id)
+                devolver cierto
+            fin
+            devolver falso
+        fin
+        si ctls[foco].clase <> K_CAMPO entonces devolver falso fin
+        c := ctls[foco].id
+        f := dirección(campos[c])
+        pide_otra_vez := falso
+        si f.entero entonces
+            f.entero := falso
+            si (k >= ' ' y k < TECLA_ESPECIAL y no con_ctrl) o k = 8 o k = TECLA_SUPR o (k = CTRL_V y con_ctrl) entonces
+                f.n := 0
+                f.cur := 0
+                f.izq := 0
+                f.t[0] := 0
+                si k = 8 o k = TECLA_SUPR entonces devolver cierto fin
+            fin
+        fin
+        si k = 8 y no con_ctrl entonces
+            si f.cur > 0 entonces
+                mover_memoria(dirección(f.t[f.cur - 1]), dirección(f.t[f.cur]), f.n - f.cur)
+                f.cur := f.cur - 1
+                f.n := f.n - 1
+            fin
+        sino si k = TECLA_SUPR entonces
+            si f.cur < f.n entonces
+                mover_memoria(dirección(f.t[f.cur]), dirección(f.t[f.cur + 1]), f.n - f.cur - 1)
+                f.n := f.n - 1
+            fin
+        sino si k = TECLA_IZQUIERDA entonces
+            si f.cur > 0 entonces f.cur := f.cur - 1 fin
+        sino si k = TECLA_DERECHA entonces
+            si f.cur < f.n entonces f.cur := f.cur + 1 fin
+        sino si k = TECLA_INICIO entonces
+            f.cur := 0
+        sino si k = TECLA_FIN entonces
+            f.cur := f.n
+        sino si k = CTRL_V y con_ctrl entonces
+            i := del_portapapeles(buf, LARGO_CAMPO - 1)
+            buf[i] := 0
+            i := 0
+            mientras buf[i] <> 0 y buf[i] <> 10 y buf[i] <> 13 y f.n + 1 < LARGO_CAMPO hacer
+                mover_memoria(dirección(f.t[f.cur + 1]), dirección(f.t[f.cur]), f.n - f.cur)
+                f.t[f.cur] := buf[i]
+                f.cur := f.cur + 1
+                f.n := f.n + 1
+                i := i + 1
+            fin
+        sino si k = CTRL_A y con_ctrl entonces
+            f.cur := f.n
+        sino si k >= ' ' y k < TECLA_ESPECIAL y no con_ctrl entonces
+            si f.n + 1 < LARGO_CAMPO entonces
+                mover_memoria(dirección(f.t[f.cur + 1]), dirección(f.t[f.cur]), f.n - f.cur)
+                f.t[f.cur] := byte(k)
+                f.cur := f.cur + 1
+                f.n := f.n + 1
+            fin
+        sino
+            devolver falso
+        fin
+        f.t[f.n] := 0
+        devolver cierto
+    fin
+
+    ; un clic en el panel
+    función clic_panel(x: ent32, yy: ent32)
+        variable k: nat32
+        coloca_panel()
+        foco_panel := cierto
+        si n_ctls > 0 entonces
+        para k desde 0 hasta n_ctls - 1 hacer
+            si x >= ctls[k].x y x < ctls[k].x + ctls[k].an y yy >= ctls[k].ye y yy < ctls[k].ye + ctls[k].al entonces
+                si ctls[k].clase <> K_RÓTULO entonces foco := k fin
+                según nat16(ctls[k].clase)
+                    caso K_CASILLA: casillas[ctls[k].id] := no casillas[ctls[k].id]
+                    caso K_BOTÓN: pulsa(ctls[k].id)
+                    caso K_CAMPO:
+                        campos[ctls[k].id].cur := campos[ctls[k].id].izq + nat32((x - ctls[k].x - 4 + 4) div 8)
+                        si campos[ctls[k].id].cur > campos[ctls[k].id].n entonces campos[ctls[k].id].cur := campos[ctls[k].id].n fin
+                fin
+                devolver
+            fin
+        fin
+        fin
+    fin
+
+    ; ---- la lista de la carpeta (en el sitio del texto) ----
+    función filas_lista(): nat32
+        variable n: ent32
+        n := (abajo_texto - arriba_texto - 24) div 18
+        si n < 1 entonces n := 1 fin
+        devolver nat32(n)
+    fin
+
+    función elige_de_lista(i: ent32)
+        variable t: arreglo [MAX_RUTA + 16] de byte
+        si i < 0 o nat32(i) >= n_lista entonces devolver fin
+        lista_elegido := i
+        si nat32(i) < lista_primera entonces lista_primera := nat32(i) fin
+        si nat32(i) >= lista_primera + filas_lista() entonces lista_primera := nat32(i) - filas_lista() + 1 fin
+        copiar(t, carpeta_lista)
+        concatenar(t, dirección(lista[i].nombre[0]))
+        si lista[i].carpeta entonces concatenar(t, "\\") fin
+        campo_pon(CA_RUTA, t)
+    fin
+
+    función mueve_lista(k: nat32)
+        variable i: ent32
+        i := lista_elegido
+        si k = TECLA_ARRIBA entonces i := i - 1 fin
+        si k = TECLA_ABAJO entonces i := i + 1 fin
+        si k = TECLA_RE_PÁG entonces i := i - ent32(filas_lista()) fin
+        si k = TECLA_AV_PÁG entonces i := i + ent32(filas_lista()) fin
+        si i < 0 entonces i := 0 fin
+        si i >= ent32(n_lista) entonces i := ent32(n_lista) - 1 fin
+        elige_de_lista(i)
+    fin
+
+    función pinta_lista()
+        variable i, k: nat32
+        variable yy: ent32
+        variable t: arreglo [40] de byte
+        variable dd: arreglo [1] de nat32
+        Grafico.rectángulo(lz, 0, arriba_texto, ancho, abajo_texto - arriba_texto, PAPEL)
+        Grafico.texto_negrita(lz, 8, arriba_texto + 4, carpeta_lista, TINTA)
+        yy := arriba_texto + 24
+        si n_lista = 0 entonces
+            Grafico.texto(lz, 16, yy, "(vacía, o no se puede leer)", SUAVE)
+            devolver
+        fin
+        i := lista_primera
+        k := 0
+        mientras i < n_lista y k < filas_lista() hacer
+            si ent32(i) = lista_elegido entonces
+                Grafico.rectángulo(lz, 4, yy - 1, ancho - 8, 18, RESALTE)
+                Grafico.texto(lz, 8, yy, "\x10", PAPEL)
+            fin
+            si lista[i].carpeta entonces
+                Grafico.texto(lz, 20, yy, "[carpeta]", si_elegido(i))
+                Grafico.texto_negrita(lz, 100, yy, dirección(lista[i].nombre[0]), si_elegido(i))
+            sino
+                dd[0] := lista[i].tamaño_
+                formatear(t, 40, "%u", dd)
+                Grafico.texto(lz, 100, yy, dirección(lista[i].nombre[0]), si_elegido(i))
+                Grafico.texto(lz, 220, yy, t, si_elegido(i))
+            fin
+            yy := yy + 18
+            i := i + 1
+            k := k + 1
+        fin
+    fin
+
+    función si_elegido(i: nat32): nat32
+        si ent32(i) = lista_elegido entonces devolver PAPEL fin
+        devolver TINTA
+    fin
+
+    ; un clic en la lista: elige; con dos, abre (o entra)
+    función clic_lista(yy: ent32, veces_: nat32)
+        variable i: ent32
+        i := (yy - arriba_texto - 24) div 18
+        si yy < arriba_texto + 24 entonces devolver fin
+        i := i + ent32(lista_primera)
+        si i >= ent32(n_lista) entonces devolver fin
+        elige_de_lista(i)
+        si veces_ >= 2 entonces
+            si panel = P_ABRIR entonces abrir_del_panel() sino si lista[i].carpeta entonces guardar_del_panel() fin
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Pintar la ventana
+    ; =========================================================================
+    función con_pestañas(): bool
+        devolver n_docs > 1
+    fin
+
+    ; dónde va cada cosa (y las medidas del texto)
+    función medidas()
+        arriba_texto := ALTO_MENÚS + BARRA
+        si con_pestañas() entonces arriba_texto := arriba_texto + ALTO_PESTAÑAS fin
+        abajo_texto := alto - PIE - alto_panel()
+        si abajo_texto < arriba_texto + 20 entonces abajo_texto := arriba_texto + 20 fin
+        colócate(arriba_texto, abajo_texto)
+    fin
+
+    ; los botones de arriba: «Nuevo» y «Guardar» (como siempre) y los de más, si caben
+    constante N_BOTONES = 6
+    función botón_x(i: nat32): ent32
+        según nat16(i)
+            caso 0: devolver 8
+            caso 1: devolver 98
+            caso 2: devolver 188
+            caso 3: devolver 248
+            caso 4: devolver 332
+            caso 5: devolver 408
+        fin
+        devolver 0
+    fin
+
+    función botón_an(i: nat32): ent32
+        según nat16(i)
+            caso 0, 1: devolver 84
+            caso 2: devolver 56
+            caso 3: devolver 80
+            caso 4: devolver 72
+            caso 5: devolver 64
+        fin
+        devolver 0
+    fin
+
+    función botón_nombre(i: nat32): puntero a byte
+        según nat16(i)
+            caso 0: devolver "Nuevo"
+            caso 1: devolver "Guardar"
+            caso 2: devolver "Abrir"
+            caso 3: devolver "Deshacer"
+            caso 4: devolver "Rehacer"
+            caso 5: devolver "Buscar"
+        fin
+        devolver ""
+    fin
+
+    función botón_apagado(i: nat32): bool
+        si i = 3 entonces devolver no puede_deshacer() o d.clase <> DOC_NORMAL fin
+        si i = 4 entonces devolver no puede_rehacer() o d.clase <> DOC_NORMAL fin
+        devolver falso
+    fin
+
+    función pinta_barra()
+        variable i: nat32
+        variable x, an: ent32
+        variable t: puntero a byte
+        Grafico.degradado(lz, 0, ALTO_MENÚS, ancho, BARRA, C_BARRA_ARRIBA, C_BARRA_ABAJO)
+        Grafico.rectángulo(lz, 0, ALTO_MENÚS + BARRA - 1, ancho, 1, C_RAYA)
+        para i desde 0 hasta N_BOTONES - 1 hacer
+            x := botón_x(i)
+            an := botón_an(i)
+            t := botón_nombre(i)
+            si x + an <= ancho - 4 entonces
+                si i = 0 entonces
+                    Grafico.redondeado(lz, x, ALTO_MENÚS + 5, an, 24, 5, 0x5AA6F4, 0x2468C8, TODAS)
+                    Grafico.texto_negrita(lz, x + (an - ent32(longitud(t)) * 8) div 2, ALTO_MENÚS + 9, t, PAPEL)
+                sino si i = 1 entonces
+                    Grafico.redondeado(lz, x, ALTO_MENÚS + 5, an, 24, 5, 0x5CC45E, 0x2A8A3C, TODAS)
+                    Grafico.texto_negrita(lz, x + (an - ent32(longitud(t)) * 8) div 2, ALTO_MENÚS + 9, t, PAPEL)
+                sino si botón_apagado(i) entonces
+                    Grafico.redondeado(lz, x, ALTO_MENÚS + 5, an, 24, 5, 0xEEF2F7, 0xDDE3EB, TODAS)
+                    Grafico.texto(lz, x + (an - ent32(longitud(t)) * 8) div 2, ALTO_MENÚS + 9, t, 0x8A97A8)
+                sino
+                    Grafico.redondeado(lz, x, ALTO_MENÚS + 5, an, 24, 5, 0xFFFFFF, 0xD6E4F7, TODAS)
+                    Grafico.marco(lz, x + 4, ALTO_MENÚS + 5, an - 8, 1, 0xB4CBEA)
+                    Grafico.texto(lz, x + (an - ent32(longitud(t)) * 8) div 2, ALTO_MENÚS + 9, t, TINTA)
+                fin
+            fin
+        fin
+        ; grabando una macro: se dice con letras (no solo con un color)
+        si grabando y ancho > 560 entonces
+            Grafico.texto_negrita(lz, 480, ALTO_MENÚS + 9, "GRABANDO", 0xB8441A)
+        fin
+    fin
+
+    función botón_en(x: ent32, yy: ent32): ent32
+        variable i: nat32
+        si yy < ALTO_MENÚS + 5 o yy >= ALTO_MENÚS + 29 entonces devolver -1 fin
+        para i desde 0 hasta N_BOTONES - 1 hacer
+            si x >= botón_x(i) y x < botón_x(i) + botón_an(i) y botón_x(i) + botón_an(i) <= ancho - 4 entonces devolver ent32(i) fin
+        fin
+        devolver -1
+    fin
+
+    ; ---- las pestañas ----
+    variable pestaña_x: arreglo [MAX_DOCS + 1] de ent32    ; dónde empieza cada una (las que se ven)
+    variable primera_pestaña: nat32
+
+    función ancho_pestaña(i: nat32): ent32
+        variable t: arreglo [80] de byte
+        variable n: ent32
+        nombre_corto(docs[i], t)
+        n := ent32(longitud(t))
+        si n > 20 entonces n := 20 fin
+        devolver (n + 2) * 8 + 26
+    fin
+
+    función pinta_pestañas()
+        variable i: nat32
+        variable x, an, yy, total: ent32
+        variable t: arreglo [80] de byte
+        variable viejo: puntero a Doc
+        si no con_pestañas() entonces devolver fin
+        yy := ALTO_MENÚS + BARRA
+        Grafico.rectángulo(lz, 0, yy, ancho, ALTO_PESTAÑAS, 0xDCE7F5)
+        Grafico.rectángulo(lz, 0, yy + ALTO_PESTAÑAS - 1, ancho, 1, C_RAYA)
+        ; que se vea la activa
+        si primera_pestaña > activo entonces primera_pestaña := activo fin
+        mientras cierto hacer
+            total := 4
+            i := primera_pestaña
+            mientras i <= activo hacer
+                total := total + ancho_pestaña(i) + 2
+                i := i + 1
+            fin
+            si total <= ancho - 20 o primera_pestaña >= activo entonces romper fin
+            primera_pestaña := primera_pestaña + 1
+        fin
+        para i desde 0 hasta MAX_DOCS hacer pestaña_x[i] := -10000 fin
+        x := 4
+        si primera_pestaña > 0 entonces
+            Grafico.texto(lz, x, yy + 4, "\x11", TINTA)
+            x := x + 12
+        fin
+        viejo := d
+        i := primera_pestaña
+        mientras i < n_docs hacer
+            an := ancho_pestaña(i)
+            si x + an > ancho - 14 entonces
+                Grafico.texto(lz, ancho - 12, yy + 4, "\x10", TINTA)
+                romper
+            fin
+            pestaña_x[i] := x
+            d := docs[i]
+            nombre_corto(d, t)
+            si longitud(t) > 20 entonces
+                t[19] := 0xF5                  ; «…»
+                t[20] := 0
+            fin
+            si cambiado() y d.clase = DOC_NORMAL entonces concatenar(t, " *") fin
+            si i = activo entonces
+                Grafico.redondeado(lz, x, yy + 2, an, ALTO_PESTAÑAS - 2, 4, PAPEL, PAPEL, ARRIBA)
+                Grafico.rectángulo(lz, x + 3, yy + 2, an - 6, 2, C_FOCO)
+                Grafico.texto_negrita(lz, x + 8, yy + 5, t, TINTA)
+            sino
+                Grafico.redondeado(lz, x, yy + 3, an, ALTO_PESTAÑAS - 4, 4, 0xF1F5FB, 0xE4ECF7, ARRIBA)
+                Grafico.texto(lz, x + 8, yy + 5, t, 0x34465E)
+            fin
+            ; la «x» de cerrarla
+            Grafico.texto(lz, x + an - 16, yy + 5, "x", SUAVE)
+            x := x + an + 2
+            i := i + 1
+        fin
+        d := viejo
+    fin
+
+    ; la pestaña en ese punto (y si es en su «x»): -1 si ninguna
+    función pestaña_en(x: ent32, ref en_x: bool): ent32
+        variable i: nat32
+        en_x := falso
+        si n_docs > 0 entonces
+        para i desde 0 hasta n_docs - 1 hacer
+            si pestaña_x[i] > -10000 y x >= pestaña_x[i] y x < pestaña_x[i] + ancho_pestaña(i) entonces
+                en_x := x >= pestaña_x[i] + ancho_pestaña(i) - 20
+                devolver ent32(i)
+            fin
+        fin
+        fin
+        devolver -1
+    fin
+
+    ; ---- la barra de abajo ----
+    función pinta_pie()
+        variable l, col, n, k: nat32
+        variable dd: arreglo [4] de nat32
+        variable t: arreglo [80] de byte
+        variable der: arreglo [96] de byte
+        variable x: ent32
+        Grafico.degradado(lz, 0, alto - PIE, ancho, PIE, 0xE6EFFB, 0xCADDF6)
+        Grafico.rectángulo(lz, 0, alto - PIE, ancho, 1, C_RAYA)
+        si aviso[0] <> 0 entonces
+            si aviso_malo entonces Grafico.texto(lz, MARGEN, alto - PIE + 4, aviso, 0xB8441A) sino Grafico.texto(lz, MARGEN, alto - PIE + 4, aviso, 0x1F7532) fin
+            devolver
+        fin
+        si comparando entonces
+            dd[0] := diferencias
+            formatear(rótulo, 256, "Comparando: %u trozos distintos (- quitado, + añadido, * cambiado). F8: el siguiente.", dd)
+            Grafico.texto(lz, MARGEN, alto - PIE + 4, rótulo, TINTA)
+            devolver
+        fin
+        nombre_largo(d, t)
+        l := línea_de(d.cursor)
+        col := col_lógica(d.cursor)
+        dd[0] := nat32(dirección(t[0]))
+        dd[1] := l + 1
+        dd[2] := col + 1
+        si d.bloque entonces
+            formatear(rótulo, 256, "%s   Lín %u, Col %u   (en bloque)", dd)
+        sino si cambiado() entonces
+            formatear(rótulo, 256, "%s   Lín %u, Col %u   (sin guardar)", dd)
+        sino
+            formatear(rótulo, 256, "%s   Lín %u, Col %u", dd)
+        fin
+        Grafico.texto(lz, MARGEN, alto - PIE + 4, rótulo, TINTA)
+        ; a la derecha: el lenguaje, la página y los finales de línea (si caben)
+        der[0] := 0
+        si d.lenguaje >= 0 entonces
+            copiar_hasta(der, len_nombre(nat32(d.lenguaje)), 40)
+        sino
+            copiar(der, "Texto")
+        fin
+        concatenar(der, " | ")
+        concatenar(der, nombre_página(d.cp))
+        si d.cp = CP_UTF8 y d.bom entonces concatenar(der, " BOM") fin
+        si d.crlf entonces concatenar(der, " | CR LF") sino concatenar(der, " | LF") fin
+        n := longitud(rótulo)
+        k := longitud(der)
+        x := ancho - 8 - ent32(k) * 8
+        si x > MARGEN + ent32(n) * 8 + 16 entonces Grafico.texto(lz, x, alto - PIE + 4, der, SUAVE) fin
+    fin
+
+    función pinta_todo()
+        si sin_ventana entonces
+            medidas()
+            si no BlocVis.suelto entonces a_la_vista() fin
+            devolver
+        fin
+        medidas()
+        si no BlocVis.suelto y no comparando entonces a_la_vista() fin
+        mira_pareja()
+        pinta_barra()
+        pinta_pestañas()
+        si panel = P_ABRIR o panel = P_GUARDAR entonces
+            pinta_lista()
+        sino si comparando entonces
+            pinta_comparación()
+        sino
+            pinta_texto()
+        fin
+        pinta_panel()
+        pinta_pie()
+        volcar(ALTO_MENÚS)
+        pinta_menús(BlocVis.v, ancho, menús, menú_abierto)
+        ver_cambiado := falso
+    fin
+
+    ; =========================================================================
+    ;  Los menús
+    ; =========================================================================
+    ; una opción con su atajo, en la columna col
+    función op(t: puntero a byte, atajo: puntero a byte, col: nat32)
+        variable n: nat32
+        si opciones[0] <> 0 entonces concatenar(opciones, "|") fin
+        concatenar(opciones, t)
+        si atajo[0] <> 0 entonces
+            n := longitud(t)
+            mientras n < col hacer
+                concatenar(opciones, " ")
+                n := n + 1
+            fin
+            concatenar(opciones, atajo)
+        fin
+    fin
+
+    ; con su marca (√) si está puesta
+    función op_marca(t: puntero a byte, puesta: bool)
+        si opciones[0] <> 0 entonces concatenar(opciones, "|") fin
+        si puesta entonces concatenar(opciones, "\xFB ") sino concatenar(opciones, "  ") fin
+        concatenar(opciones, t)
+    fin
+
+    función raya()
+        concatenar(opciones, "|-")
+    fin
+
+    función menú_archivo(): nat32
+        opciones[0] := 0
+        op("Nuevo", "Ctrl+N", 18)
+        op("Abrir...", "Ctrl+O", 18)
+        op("Guardar", "Ctrl+S, F2", 18)
+        op("Guardar como...", "", 18)
+        op("Guardar todo", "", 18)
+        raya()
+        op("Cerrar", "Ctrl+W", 18)
+        op("Cerrar todo", "", 18)
+        raya()
+        op("Leer otra vez", "", 18)
+        op("Vista de impresión (aún no hay impresoras)", "", 18)
+        raya()
+        op("Salir", "", 18)
+        devolver (1 << 10)
+    fin
+
+    función menú_edición(): nat32
         variable g: nat32
+        opciones[0] := 0
+        op("Cortar", "Ctrl+X", 18)
+        op("Copiar", "Ctrl+C", 18)
+        op("Pegar", "Ctrl+V", 18)
+        raya()
+        op("Seleccionar todo", "Ctrl+A", 18)
+        raya()
+        op("Deshacer", "Ctrl+Z", 18)
+        op("Rehacer", "Ctrl+Y", 18)
+        raya()
+        op("Duplicar línea", "Ctrl+D", 18)
+        op("Subir líneas", "Alt+Arriba", 18)
+        op("Bajar líneas", "Alt+Abajo", 18)
+        op("(Des)comentar", "Ctrl+Q", 18)
+        raya()
+        si grabando entonces op("Parar la macro", "Ctrl+Mayús+R", 18) sino op("Grabar macro", "Ctrl+Mayús+R", 18) fin
+        op("Repetir macro", "Ctrl+Mayús+P", 18)
         g := 0
         si no hay_selección() entonces g := g ob 3 fin
         si en_portapapeles() = 0 entonces g := g ob 4 fin
-        si largo = 0 entonces g := g ob 16 fin
+        si largo() = 0 entonces g := g ob 16 fin
+        si no puede_deshacer() entonces g := g ob 64 fin
+        si no puede_rehacer() entonces g := g ob 128 fin
+        si n_macro = 0 entonces g := g ob (1 << 15) fin
         devolver g
+    fin
+
+    función menú_buscar(): nat32
+        opciones[0] := 0
+        op("Buscar...", "Ctrl+F", 26)
+        op("Buscar siguiente", "F3", 26)
+        op("Buscar anterior", "Mayús+F3", 26)
+        op("Reemplazar...", "Ctrl+H", 26)
+        op("Buscar en una carpeta...", "Ctrl+Mayús+F", 26)
+        raya()
+        op("Ir a la línea...", "Ctrl+G", 26)
+        op("Ir a la pareja ( [ {", "Ctrl+B", 26)
+        devolver 0
+    fin
+
+    función menú_ver(): nat32
+        variable g: nat32
+        opciones[0] := 0
+        op_marca("Números de línea", con_números())
+        op_marca("Ajuste de línea", ajuste)
+        op_marca("Espacios y tabuladores", ver_espacios)
+        op_marca("Finales de línea", ver_finales)
+        raya()
+        op("  Letra más grande", "Ctrl+rueda", 28)
+        op("  Letra más pequeña", "Ctrl+rueda", 28)
+        op("  Letra normal", "", 28)
+        raya()
+        op("  Plegar todo", "", 28)
+        op("  Desplegar todo", "", 28)
+        raya()
+        op("  Comparar con la de al lado", "", 28)
+        op("  Dejar de comparar", "Esc", 28)
+        op("  Diferencia siguiente", "F8", 28)
+        op("  Diferencia anterior", "Mayús+F8", 28)
+        g := 0
+        si d.lenguaje < 0 o len_plegado(d.lenguaje) = P_NADA entonces g := g ob (3 << 9) fin
+        si n_docs < 2 entonces g := g ob (1 << 12) fin
+        si no comparando entonces g := g ob (7 << 13) fin
+        devolver g
+    fin
+
+    función menú_formato(): nat32
+        opciones[0] := 0
+        op_marca("Convertir a UTF-8", d.cp = CP_UTF8 y no d.bom)
+        op_marca("Convertir a UTF-8 con BOM", d.cp = CP_UTF8 y d.bom)
+        op_marca("Convertir a la 437 (la de Hispa)", d.cp = CP_437)
+        op_marca("Convertir a la 1252 (la de Windows)", d.cp = CP_1252)
+        raya()
+        op_marca("Leer otra vez como UTF-8", falso)
+        op_marca("Leer otra vez como la 437", falso)
+        op_marca("Leer otra vez como la 1252", falso)
+        raya()
+        op_marca("Finales de línea CR LF (DOS)", d.crlf)
+        op_marca("Finales de línea LF (Unix)", no d.crlf)
+        raya()
+        op_marca("Tabuladores a espacios", falso)
+        op_marca("Espacios de delante a tabuladores", falso)
+        op_marca("El tabulador pone espacios", tab_espacios)
+        raya()
+        op("  MAY\xD7SCULAS", "Ctrl+Mayús+U", 26)
+        op("  minúsculas", "Ctrl+U", 26)
+        op("  Ordenar las líneas", "", 26)
+        op("  Ordenar al revés", "", 26)
+        devolver 0
+    fin
+
+    función menú_lenguaje(): nat32
+        variable i: nat32
+        opciones[0] := 0
+        op_marca("Texto normal", d.lenguaje < 0)
+        raya()
+        si len_cuántos() > 0 entonces
+            si len_cuántos() > 0 entonces
+            para i desde 0 hasta len_cuántos() - 1 hacer
+                si longitud(opciones) + 60 < 2000 entonces op_marca(len_nombre(i), d.lenguaje = ent32(i)) fin
+            fin
+            fin
+        fin
+        devolver 0
+    fin
+
+    función menú_ayuda(): nat32
+        opciones[0] := 0
+        op("Ayuda", "F1", 26)
+        op("Acerca del Bloc de notas", "", 26)
+        devolver 0
+    fin
+
+    ; se ha pulsado un rótulo de la barra de menús (o Alt y su letra)
+    función abre_el_menú(cuál: ent32)
+        variable g: nat32
+        menú_abierto := cuál
+        pinta_menús(BlocVis.v, ancho, menús, menú_abierto)
+        g := 0
+        según nat16(cuál)
+            caso M_ARCHIVO: g := menú_archivo()
+            caso M_EDICIÓN: g := menú_edición()
+            caso M_BUSCAR: g := menú_buscar()
+            caso M_VER: g := menú_ver()
+            caso M_FORMATO: g := menú_formato()
+            caso M_LENGUAJE: g := menú_lenguaje()
+            caso M_AYUDA: g := menú_ayuda()
+        fin
+        abre_menú(BlocVis.v, menús, nat32(cuál), opciones, g)
     fin
 
     ; el botón secundario: el cursor va ahí (si no es sobre lo seleccionado) y sale el menú
     función clic_secundario(x: ent32, yy: ent32)
-        variable pos: nat32
-        si yy < ARRIBA o yy >= alto - PIE entonces devolver fin
-        pos := letra_del_punto(x, yy)
-        si no hay_selección() o pos < sel_inicio() o pos >= sel_fin() entonces
-            cursor := pos
-            ancla := pos
-            pinta_texto()
-            pinta_pie()
+        variable pos, g: nat32
+        si yy < arriba_texto o yy >= abajo_texto o comparando entonces devolver fin
+        pos := pos_del_punto(x, yy)
+        si d.bloque o d.ancla = d.cursor o pos < sel_inicio() o pos >= sel_fin() entonces
+            sin_bloque()
+            d.cursor := pos
+            d.ancla := pos
+            pinta_todo()
         fin
-        menú(v, x, yy, "Cortar|Copiar|Pegar|-|Seleccionar todo", grises_de_edición(), M_CONTEXTO)
-    fin
-
-    ; se ha pulsado un rótulo de la barra de menús
-    función abre_el_menú(cuál: ent32)
-        menú_abierto := cuál
-        pinta_menús(v, ancho, menús, menú_abierto)
-        según cuál
-            caso M_ARCHIVO: abre_menú(v, menús, M_ARCHIVO, "Nuevo|Guardar         F2|-|Salir", 0)
-            caso M_EDICIÓN: abre_menú(v, menús, M_EDICIÓN, "Cortar            Ctrl+X|Copiar            Ctrl+C|Pegar             Ctrl+V|-|Seleccionar todo  Ctrl+A", grises_de_edición())
-            caso M_AYUDA: abre_menú(v, menús, M_AYUDA, "Acerca del Bloc de notas", 0)
-        fin
+        g := 0
+        si no hay_selección() entonces g := g ob 3 fin
+        si en_portapapeles() = 0 entonces g := g ob 4 fin
+        si largo() = 0 entonces g := g ob 16 fin
+        si no puede_deshacer() entonces g := g ob 64 fin
+        si no puede_rehacer() entonces g := g ob 128 fin
+        si no hay_selección() entonces g := g ob (3 << 12) fin
+        menú(BlocVis.v, x, yy, "Cortar|Copiar|Pegar|-|Seleccionar todo|-|Deshacer|Rehacer|-|Duplicar línea|(Des)comentar|-|MAY\xD7SCULAS|minúsculas", g, M_CONTEXTO)
     fin
 
     ; lo elegido en un menú: cierto si hay que salir
     función elegido(cuál: nat32, opción: nat32): bool
         si ent32(cuál) = menú_abierto entonces
             menú_abierto := -1
-            pinta_menús(v, ancho, menús, menú_abierto)
+            si no sin_ventana entonces pinta_menús(BlocVis.v, ancho, menús, menú_abierto) fin
         fin
-        si opción = SIN_ELEGIR entonces devolver falso fin
+        si opción = SIN_ELEGIR o opción >= 0xFFFFFFF0 entonces devolver falso fin
         aviso[0] := 0
-        si cuál = M_ARCHIVO entonces
-            según opción
-                caso 0: nuevo()
-                caso 1: guarda()
-                caso 3: devolver cierto
-            fin
-        sino si cuál = M_EDICIÓN o cuál = M_CONTEXTO entonces
-            según opción
-                caso 0: corta()
-                caso 1: copia()
-                caso 2: pega()
-                caso 4: elige_todo()
-            fin
-        sino si cuál = M_AYUDA entonces
-            aviso_malo := falso
-            Textos32.copiar(aviso, "Bloc de notas de Hispa-Pentium 0.8: un programa escrito en Castel.")
+        según nat16(cuál)
+            caso M_ARCHIVO:
+                según nat16(opción)
+                    caso 0: documento_nuevo()
+                    caso 1: abre_panel(P_ABRIR)
+                    caso 2: guardar_doc()
+                    caso 3:
+                        si d.clase = DOC_NORMAL entonces abre_panel(P_GUARDAR) sino avisa_mal("Esto no se guarda (es solo para leer).") fin
+                    caso 4: guarda_todo()
+                    caso 6: cierra_pestaña()
+                    caso 7: cierra_todo()
+                    caso 9: vuelve_a_leer(NADA_CP)
+                    caso 10: vista_de_impresión()
+                    caso 12: devolver cierto
+                fin
+            caso M_EDICIÓN, M_CONTEXTO:
+                si cuál = M_CONTEXTO entonces
+                    según nat16(opción)
+                        caso 0: corta()
+                        caso 1: copia_sel()
+                        caso 2: pega()
+                        caso 4: elige_todo()
+                        caso 6: deshaz()
+                        caso 7: rehaz()
+                        caso 9: duplica()
+                        caso 10: comenta()
+                        caso 12: caja(cierto)
+                        caso 13: caja(falso)
+                    fin
+                sino
+                    según nat16(opción)
+                        caso 0: corta()
+                        caso 1: copia_sel()
+                        caso 2: pega()
+                        caso 4: elige_todo()
+                        caso 6: deshaz()
+                        caso 7: rehaz()
+                        caso 9: duplica()
+                        caso 10: mueve_líneas(cierto)
+                        caso 11: mueve_líneas(falso)
+                        caso 12: comenta()
+                        caso 14: graba_o_para()
+                        caso 15: repite_macro()
+                    fin
+                fin
+            caso M_BUSCAR:
+                según nat16(opción)
+                    caso 0: abre_panel(P_BUSCAR)
+                    caso 1: busca_otra(cierto)
+                    caso 2: busca_otra(falso)
+                    caso 3: abre_panel(P_REEMPLAZAR)
+                    caso 4: abre_panel(P_CARPETA)
+                    caso 6: abre_panel(P_IR)
+                    caso 7: ve_a_pareja()
+                fin
+            caso M_VER:
+                según nat16(opción)
+                    caso 0:
+                        si con_números() entonces números := NUM_NO sino números := NUM_SÍ fin
+                    caso 1:
+                        ajuste := no ajuste
+                        d.sub := 0
+                    caso 2: ver_espacios := no ver_espacios
+                    caso 3: ver_finales := no ver_finales
+                    caso 5: letra_más(1)
+                    caso 6: letra_más(-1)
+                    caso 7: letra_más(-9)
+                    caso 9: plegar_todo()
+                    caso 10: desplegar_todo()
+                    caso 12: empieza_a_comparar()
+                    caso 13: deja_de_comparar()
+                    caso 14: otra_diferencia(cierto)
+                    caso 15: otra_diferencia(falso)
+                fin
+            caso M_FORMATO:
+                formato(opción)
+            caso M_LENGUAJE:
+                si opción = 0 entonces
+                    d.lenguaje := -1
+                sino si opción >= 2 entonces
+                    d.lenguaje := ent32(opción - 2)
+                fin
+                pon_estado_bien(1)
+                desplegar_todo()
+            caso M_AYUDA:
+                si opción = 0 entonces ayuda() sino acerca() fin
         fin
-        pinta_texto()
-        pinta_pie()
         devolver falso
     fin
 
-    ; quieren cerrar: cierto si se puede salir ya (sin cambios, o avisado antes)
+    función formato(opción: nat32)
+        si opción <= 3 y d.clase <> DOC_NORMAL entonces devolver fin
+        según nat16(opción)
+            caso 0, 1, 2, 3:
+                si opción <= 1 entonces d.cp := CP_UTF8 fin
+                si opción = 2 entonces d.cp := CP_437 fin
+                si opción = 3 entonces d.cp := CP_1252 fin
+                d.bom := opción = 1
+                d.sucio := cierto
+                d.perder_vale := falso
+                avisa_bien("Se guardará en esa página (el texto no cambia).")
+            caso 5: vuelve_a_leer(CP_UTF8)
+            caso 6: vuelve_a_leer(CP_437)
+            caso 7: vuelve_a_leer(CP_1252)
+            caso 9, 10:
+                si d.crlf <> (opción = 9) entonces
+                    d.crlf := opción = 9
+                    d.sucio := cierto
+                fin
+                d.mezclados := falso
+            caso 12: tabuladores(cierto)
+            caso 13: tabuladores(falso)
+            caso 14: tab_espacios := no tab_espacios
+            caso 16: caja(cierto)
+            caso 17: caja(falso)
+            caso 18: ordena_líneas(falso)
+            caso 19: ordena_líneas(cierto)
+        fin
+    fin
+
+    ; lee otra vez el archivo (con esa página, o la que se vea)
+    función vuelve_a_leer(cp: nat32)
+        variable r: nat32
+        variable t: arreglo [MAX_RUTA] de byte
+        si d.clase <> DOC_NORMAL o d.ruta[0] = 0 entonces
+            avisa_mal("No hay archivo que leer otra vez (aún no se ha guardado).")
+            devolver
+        fin
+        si cambiado() y no cerrando entonces
+            cerrando := cierto
+            avisa_mal("Leer otra vez pierde los cambios sin guardar: elígelo otra vez para seguir.")
+            devolver
+        fin
+        cerrando := falso
+        copiar(t, dirección(d.ruta[0]))
+        r := BlocArc.lee(t, cp)
+        si r <> 0 entonces
+            avisa_mal("No se ha podido leer otra vez.")
+            devolver
+        fin
+        BlocVis.suelto := falso
+        avisa_bien("Leído otra vez.")
+    fin
+
+    función cierra_todo()
+        si con_cambios() > 0 entonces
+            avisa_mal("Hay pestañas con cambios: ciérralas de una en una (Ctrl+W pregunta).")
+            devolver
+        fin
+        mientras n_docs > 1 hacer quita_pestaña(n_docs - 1) fin
+        quita_pestaña(0)
+    fin
+
+    función vista_de_impresión()
+        avisa_mal("Aún no hay impresoras en Hispa-Pentium: la vista de impresión llegará con ellas.")
+    fin
+
+    función acerca()
+        avisa_bien("Bloc de notas 1.0 de Hispa-Pentium, escrito en Castel. GPL-2.0 o posterior.")
+    fin
+
+    función letra_más(paso_: ent32)
+        variable t: ent32
+        t := ent32(tam) + paso_
+        si paso_ = -9 entonces t := 0 fin
+        si t < 0 entonces t := 0 fin
+        si t >= ent32(TAMAÑOS) entonces t := ent32(TAMAÑOS) - 1 fin
+        pon_tamaño(nat32(t))
+        d.sub := 0
+    fin
+
+    ; =========================================================================
+    ;  La ayuda (F1): una pestaña para leer
+    ; =========================================================================
+    constante TEXTO_AYUDA = "Bloc de notas de Hispa-Pentium: la ayuda\n========================================\n\nArchivos y pestañas\n  Ctrl+N            documento nuevo (otra pestaña)\n  Ctrl+O            abrir (abajo: la ruta y, encima, la carpeta; las flechas eligen)\n  Ctrl+S o F2       guardar (sin nombre: Guardar como)\n  Ctrl+W            cerrar la pestaña (si tiene cambios, pregunta)\n  Ctrl+Tab          la pestaña siguiente (con Mayús, la de antes)\n  Las pestañas con cambios sin guardar llevan « *» detrás del nombre.\n  Un archivo arrastrado desde Mi equipo y soltado aquí, se abre.\n  Al salir se recuerda lo abierto, y la vez siguiente se vuelve a abrir.\n\nEscribir y moverse\n  Ctrl+Z / Ctrl+Y   deshacer y rehacer (sin límite)\n  Ctrl+A, C, X, V   todo, copiar, cortar y pegar (con los demás programas)\n  Mayús+flechas     seleccionar; también arrastrando el ratón, dos clics (la\n                    palabra) o tres (la línea)\n  Ctrl+flechas      de palabra en palabra; Ctrl+Inicio y Ctrl+Fin, al principio y al final\n  Alt+arrastrar     seleccionar en columna (en bloque); lo que se teclea va en todas\n                    las líneas. También Alt+Mayús+flechas.\n  Ctrl+D            duplicar la línea (o lo seleccionado)\n  Alt+Arriba/Abajo  subir o bajar las líneas\n  Ctrl+Q            comentar o descomentar las líneas, según el lenguaje\n  Ctrl+U            minúsculas; Ctrl+Mayús+U, MAY\xD7SCULAS\n  Tab, Mayús+Tab    con varias líneas elegidas, las mete o las saca\n  Ctrl+Mayús+R      grabar una macro (otra vez: parar); Ctrl+Mayús+P, repetirla\n\nBuscar\n  Ctrl+F            buscar (abajo); Intro o F3, lo siguiente; Mayús+F3, lo de antes\n  Ctrl+H            reemplazar (uno, o todas de una vez)\n  Ctrl+Mayús+F      buscar en los archivos de una carpeta: la lista de lo\n                    encontrado; dos clics o Intro en una línea, a su sitio\n  Las casillas: Mayúsculas (que cuenten), Palabra entera, Expresión (regular)\n  y Todos los abiertos. En las expresiones: . * + ? {n,m} [a-z] [^0-9] ^ $\n  ( ) | \\b \\d \\w \\s; en el reemplazo, \\1 a \\9 lo de cada paréntesis.\n  Ctrl+G            ir a la línea\n  Ctrl+B            ir al paréntesis pareja ( ) [ ] { } (se ven con un recuadro)\n\nVer\n  Ctrl+rueda        la letra más grande o más pequeña\n  El menú Ver: los números de línea, el ajuste de línea, los espacios y los\n  finales de línea; plegar y desplegar (o un clic en el [-] del margen);\n  comparar con la pestaña de al lado: lo quitado lleva «-», lo añadido «+»\n  y lo cambiado «*»; F8 va a lo siguiente distinto; Esc deja de comparar.\n\nLenguajes y páginas\n  Los colores van según el lenguaje (por la extensión, o el menú Lenguaje);\n  las palabras clave, además, en negrita. Los lenguajes son archivos de\n  texto en \\HISPA\\BLOC\\LENGUAJES: se pueden añadir más.\n  El menú Formato: UTF-8 (con o sin BOM), la 437 de Hispa o la 1252 de\n  Windows; CR LF o LF; tabuladores y espacios; mayúsculas; ordenar.\n  Abajo a la derecha se ve el lenguaje, la página y los finales de línea.\n\nEsc cierra lo de abajo (buscar, ir a...). F1, esta ayuda.\n"
+
+    función ayuda()
+        variable i: nat32
+        variable x: puntero a Doc
+        variable p: puntero a byte
+        variable n: nat32
+        si n_docs > 0 entonces
+        para i desde 0 hasta n_docs - 1 hacer
+            si docs[i].clase = DOC_AYUDA entonces
+                activa(i)
+                devolver
+            fin
+        fin
+        fin
+        x := doc_nuevo()
+        si x = nulo entonces devolver fin
+        x.clase := DOC_AYUDA
+        x.cp := CP_UTF8
+        n := longitud(TEXTO_AYUDA)
+        p := pedir(n * 3 + 4096)
+        si p = nulo entonces
+            doc_soltar(x)
+            devolver
+        fin
+        n := pag_437_a_utf8(TEXTO_AYUDA, n, p, n * 3 + 4096)
+        si no pestaña_nueva(x) entonces devolver fin
+        adopta(p, n, n * 3 + 4096)
+    fin
+
+    ; =========================================================================
+    ;  El teclado
+    ; =========================================================================
+    función mueve(nuevo: nat32, con_mayús: bool)
+        d.cursor := nuevo
+        si no con_mayús entonces d.ancla := d.cursor fin
+    fin
+
+    ; Alt+Mayús y las flechas: el bloque
+    función tecla_bloque(k: nat32)
+        variable l, col: nat32
+        variable falta: nat32
+        si no d.bloque entonces bloque_empieza(d.cursor) fin
+        l := d.b_l2
+        col := d.b_c2
+        si k = TECLA_ARRIBA y l > 0 entonces l := l - 1 fin
+        si k = TECLA_ABAJO y l + 1 < n_líneas() entonces l := l + 1 fin
+        si k = TECLA_IZQUIERDA y col > 0 entonces col := col - 1 fin
+        si k = TECLA_DERECHA entonces col := col + 1 fin
+        d.b_l2 := l
+        d.b_c2 := col
+        d.cursor := pos_de_col(l, col, falta)
+        d.ancla := d.cursor
+    fin
+
+    función tecla_ev(k: nat32, b: nat32, mods: nat32)
+        variable con_mayús, con_ctrl, con_alt: bool
+        variable mover_: bool
+        variable i: nat32
+        con_mayús := b yb TECLA_CON_MAYÚS <> 0 o mods yb MOD_MAYÚS <> 0
+        con_ctrl := mods yb MOD_CONTROL <> 0
+        con_alt := mods yb MOD_ALT <> 0
+        aviso[0] := 0
+        si panel <> P_SALIR entonces cerrando := falso fin
+        ; las macros: grabar (sin las teclas de grabar y repetir)
+        si grabando y no repitiendo y no (con_ctrl y con_mayús y (k = CTRL_R o k = CTRL_P)) y n_macro < MAX_MACRO entonces
+            macro[n_macro * 3] := k
+            macro[n_macro * 3 + 1] := b
+            macro[n_macro * 3 + 2] := mods
+            n_macro := n_macro + 1
+        fin
+        ; Alt y una letra: los menús
+        si k >= TECLA_ALT y k < TECLA_ALT + 26 entonces
+            según nat16(k - TECLA_ALT)
+                caso 0: abre_el_menú(M_ARCHIVO)
+                caso 4: abre_el_menú(M_EDICIÓN)
+                caso 1: abre_el_menú(M_BUSCAR)
+                caso 21: abre_el_menú(M_VER)
+                caso 5: abre_el_menú(M_FORMATO)
+                caso 11: abre_el_menú(M_LENGUAJE)
+                caso 24: abre_el_menú(M_AYUDA)
+            fin
+            devolver
+        fin
+        ; lo de todo el programa
+        si k = TECLA_F1 entonces
+            ayuda()
+            devolver
+        fin
+        si (k = CTRL_R o k = CTRL_P) y con_ctrl y con_mayús entonces
+            si k = CTRL_R entonces graba_o_para() sino repite_macro() fin
+            devolver
+        fin
+        si k = TECLA_F2 o (k = CTRL_S y con_ctrl) o (k = CTRL_S y mods = 0) entonces
+            guardar_doc()
+            devolver
+        fin
+        si k = TECLA_F3 entonces
+            busca_otra(no con_mayús)
+            devolver
+        fin
+        si k = TECLA_F8 entonces
+            si comparando entonces
+                si no otra_diferencia(no con_mayús) entonces avisa_bien("No hay más diferencias por ese lado.") fin
+            fin
+            devolver
+        fin
+        si k = TECLA_CTRL_TAB o k = TECLA_CTRL_MAYÚS_TAB entonces
+            si n_docs > 1 entonces
+                si k = TECLA_CTRL_TAB entonces i := (activo + 1) mod n_docs sino i := (activo + n_docs - 1) mod n_docs fin
+                activa(i)
+            fin
+            devolver
+        fin
+        si con_ctrl y k < 32 y k <> 9 y k <> 10 y k <> 13 entonces
+            según nat16(k)
+                caso CTRL_Z:
+                    si con_mayús entonces rehaz() sino deshaz() fin
+                    devolver
+                caso CTRL_Y:
+                    rehaz()
+                    devolver
+                caso CTRL_N:
+                    documento_nuevo()
+                    devolver
+                caso CTRL_O:
+                    abre_panel(P_ABRIR)
+                    devolver
+                caso CTRL_W:
+                    cierra_pestaña()
+                    devolver
+                caso CTRL_F:
+                    si con_mayús entonces abre_panel(P_CARPETA) sino abre_panel(P_BUSCAR) fin
+                    devolver
+                caso CTRL_H:
+                    abre_panel(P_REEMPLAZAR)
+                    devolver
+                caso CTRL_G:
+                    abre_panel(P_IR)
+                    devolver
+            fin
+        fin
+        ; el panel de abajo, si tiene el teclado
+        si panel <> P_NINGUNO y foco_panel entonces
+            tecla_panel(k, con_mayús, con_ctrl)
+            devolver
+        fin
+        si k = 27 entonces
+            si panel <> P_NINGUNO entonces
+                cierra_panel()
+            sino si comparando entonces
+                deja_de_comparar()
+            sino si d.bloque entonces
+                sin_bloque()
+            fin
+            devolver
+        fin
+        ; comparando: solo moverse
+        si comparando entonces
+            según nat16(k)
+                caso TECLA_ARRIBA: rueda_comparar(-1)
+                caso TECLA_ABAJO: rueda_comparar(1)
+                caso TECLA_RE_PÁG: rueda_comparar(-filas)
+                caso TECLA_AV_PÁG: rueda_comparar(filas)
+                caso TECLA_INICIO: c_primera := 0
+                caso TECLA_FIN: rueda_comparar(ent32(n_filas_c))
+                caso TECLA_DERECHA: c_izq := c_izq + 8
+                caso TECLA_IZQUIERDA:
+                    si c_izq >= 8 entonces c_izq := c_izq - 8 sino c_izq := 0 fin
+            fin
+            devolver
+        fin
+        ; en la lista de lo encontrado: Intro va al sitio
+        si d.clase = DOC_RESULTADOS y k = '\n' entonces
+            salta_al_resultado()
+            devolver
+        fin
+        ; Alt y las flechas: subir y bajar líneas; con Mayús, el bloque
+        si con_alt y (k = TECLA_ARRIBA o k = TECLA_ABAJO o k = TECLA_IZQUIERDA o k = TECLA_DERECHA) entonces
+            si con_mayús entonces
+                tecla_bloque(k)
+            sino si k = TECLA_ARRIBA entonces
+                mueve_líneas(cierto)
+            sino si k = TECLA_ABAJO entonces
+                mueve_líneas(falso)
+            fin
+            devolver
+        fin
+        ; las de Ctrl
+        si con_ctrl y k < 32 y k <> 9 y k <> 10 y k <> 13 entonces
+            según nat16(k)
+                caso CTRL_A: elige_todo()
+                caso CTRL_C: copia_sel()
+                caso CTRL_X: corta()
+                caso CTRL_V: pega()
+                caso CTRL_Z:
+                    si con_mayús entonces rehaz() sino deshaz() fin
+                caso CTRL_Y: rehaz()
+                caso CTRL_D: duplica()
+                caso CTRL_Q: comenta()
+                caso CTRL_B: ve_a_pareja()
+                caso CTRL_U: caja(con_mayús)
+            fin
+            devolver
+        fin
+        ; sin Ctrl (o con un teclado que no lo dice): las de siempre
+        mover_ := falso
+        si k = CTRL_A entonces
+            elige_todo()
+        sino si k = CTRL_C entonces
+            copia_sel()
+        sino si k = CTRL_X entonces
+            corta()
+        sino si k = CTRL_V entonces
+            pega()
+        sino si k = CTRL_Z entonces
+            deshaz()
+        sino si k = CTRL_Y entonces
+            rehaz()
+        sino si k = '\n' entonces
+            intro()
+        sino si k = 9 o k = TECLA_MAYÚS_TAB entonces
+            tabulador(k = TECLA_MAYÚS_TAB o con_mayús)
+        sino si k >= ' ' y k < TECLA_ESPECIAL y k <> 127 entonces
+            teclea(k)
+        sino si k = 8 entonces
+            borra(cierto)
+        sino si k = TECLA_SUPR entonces
+            borra(falso)
+        sino
+            ; moverse
+            mover_ := cierto
+            si d.bloque y no con_alt entonces sin_bloque() fin
+            según nat16(k)
+                caso TECLA_IZQUIERDA:
+                    si con_ctrl entonces
+                        mueve(palabra_atrás(d.cursor), con_mayús)
+                    sino si d.ancla <> d.cursor y no con_mayús entonces
+                        mueve(sel_inicio(), falso)
+                    sino
+                        mueve(anterior_pos(d.cursor), con_mayús)
+                    fin
+                    d.col_quiere := -1
+                caso TECLA_DERECHA:
+                    si con_ctrl entonces
+                        mueve(palabra_delante(d.cursor), con_mayús)
+                    sino si d.ancla <> d.cursor y no con_mayús entonces
+                        mueve(sel_fin(), falso)
+                    sino
+                        mueve(siguiente_pos(d.cursor), con_mayús)
+                    fin
+                    d.col_quiere := -1
+                caso TECLA_ARRIBA:
+                    mueve_filas(-1)
+                    si no con_mayús entonces d.ancla := d.cursor fin
+                caso TECLA_ABAJO:
+                    mueve_filas(1)
+                    si no con_mayús entonces d.ancla := d.cursor fin
+                caso TECLA_RE_PÁG:
+                    mueve_filas(-filas)
+                    si no con_mayús entonces d.ancla := d.cursor fin
+                caso TECLA_AV_PÁG:
+                    mueve_filas(filas)
+                    si no con_mayús entonces d.ancla := d.cursor fin
+                caso TECLA_INICIO:
+                    si con_ctrl entonces mueve(0, con_mayús) sino mueve(inicio_fila_lista(), con_mayús) fin
+                    d.col_quiere := -1
+                caso TECLA_FIN:
+                    si con_ctrl entonces mueve(largo(), con_mayús) sino mueve(fin_de_fila(), con_mayús) fin
+                    d.col_quiere := -1
+            fin
+            última_acción := A_OTRA
+        fin
+        si no mover_ entonces d.col_quiere := -1 fin
+        BlocVis.suelto := falso
+    fin
+
+    ; Inicio: a la primera letra de la línea (otra vez: al principio del todo)
+    función inicio_fila_lista(): nat32
+        variable a, p: nat32
+        variable vacía: bool
+        a := inicio_de_fila()
+        si a = inicio(línea_de(d.cursor)) entonces
+            p := primera_letra(línea_de(d.cursor), vacía)
+            si p <> d.cursor y no vacía y d.lenguaje >= 0 entonces devolver p fin
+        fin
+        devolver a
+    fin
+
+    ; =========================================================================
+    ;  El ratón
+    ; =========================================================================
+    función clic(x: ent32, yy: ent32, c: nat32)
+        variable pos, l: nat32
+        variable i: ent32
+        variable en_x, primera_fila: bool
+        aviso[0] := 0
+        si yy < ALTO_MENÚS + BARRA entonces
+            i := botón_en(x, yy)
+            según nat16(i + 1)
+                caso 1: documento_nuevo()
+                caso 2: guardar_doc()
+                caso 3: abre_panel(P_ABRIR)
+                caso 4: deshaz()
+                caso 5: rehaz()
+                caso 6: abre_panel(P_BUSCAR)
+            fin
+            devolver
+        fin
+        si con_pestañas() y yy < ALTO_MENÚS + BARRA + ALTO_PESTAÑAS entonces
+            i := pestaña_en(x, en_x)
+            si i >= 0 entonces
+                activa(nat32(i))
+                si en_x entonces cierra_pestaña() fin
+            fin
+            devolver
+        fin
+        si panel <> P_NINGUNO y yy >= alto - PIE - alto_panel() y yy < alto - PIE entonces
+            clic_panel(x, yy)
+            devolver
+        fin
+        si yy >= abajo_texto entonces devolver fin
+        si panel = P_ABRIR o panel = P_GUARDAR entonces
+            clic_lista(yy, veces(c))
+            devolver
+        fin
+        foco_panel := falso
+        si comparando entonces devolver fin
+        ; en el margen: los pliegues
+        si x < gw y con_pliegues y x >= gw - 16 entonces
+            l := línea_del_punto(yy, primera_fila)
+            si l <> NADA y primera_fila entonces
+                si no pliega_o_despliega(l) entonces avisa_bien("Aquí no empieza ningún bloque que plegar.") fin
+                d.cursor := inicio(l)
+                d.ancla := d.cursor
+            fin
+            devolver
+        fin
+        pos := pos_del_punto(x, yy)
+        si x < gw entonces
+            ; en los números: la línea entera
+            sin_bloque()
+            elige_línea(pos)
+            arrastrando := falso
+            devolver
+        fin
+        si c yb CON_ALT <> 0 entonces
+            bloque_empieza(pos)
+            d.cursor := pos
+            d.ancla := pos
+            arrastrando_bloque := cierto
+            devolver
+        fin
+        sin_bloque()
+        si d.clase = DOC_RESULTADOS y veces(c) = 2 entonces
+            d.cursor := pos
+            d.ancla := pos
+            salta_al_resultado()
+            devolver
+        fin
+        si veces(c) = 2 entonces
+            elige_palabra(pos)
+        sino si veces(c) = 3 entonces
+            elige_línea(pos)
+        sino
+            ; un clic: el cursor ahí (con Mayús, selecciona hasta ahí), y
+            ; arrastrando se sigue seleccionando
+            d.cursor := pos
+            si c yb CON_MAYÚS = 0 entonces d.ancla := d.cursor fin
+            arrastrando := cierto
+        fin
+        d.col_quiere := -1
+        última_acción := A_OTRA
+    fin
+
+    función ratón_mueve(x: ent32, yy: ent32, c: nat32)
+        variable pos: nat32
+        si c yb BOTÓN_IZQUIERDO = 0 entonces
+            arrastrando := falso
+            arrastrando_bloque := falso
+            devolver
+        fin
+        si arrastrando_bloque entonces
+            pos := pos_del_punto(x, yy)
+            d.b_l2 := línea_de(pos)
+            si x < tx entonces d.b_c2 := 0 sino d.b_c2 := nat32((x - tx + cw div 2) div cw) + d.izq fin
+            d.cursor := pos
+            d.ancla := pos
+            ver_cambiado := cierto
+            devolver
+        fin
+        si arrastrando entonces
+            pos := pos_del_punto(x, yy)
+            si pos <> d.cursor entonces
+                d.cursor := pos
+                ver_cambiado := cierto
+            fin
+        fin
+    fin
+
+    ; (RUEDA) la rueda: tres filas por paso; con Ctrl, la letra
+    función rueda(c: nat32)
+        variable p: ent32
+        p := ent32(c yb 0xFF)
+        si p > 127 entonces p := p - 256 fin
+        si c yb CON_CONTROL <> 0 entonces
+            si p > 0 entonces letra_más(1) sino letra_más(-1) fin
+            devolver
+        fin
+        si panel = P_ABRIR o panel = P_GUARDAR entonces
+            si p > 0 entonces
+                si lista_primera > nat32(p) * 3 entonces lista_primera := lista_primera - nat32(p) * 3 sino lista_primera := 0 fin
+            sino
+                lista_primera := lista_primera + nat32(-p) * 3
+                si lista_primera + filas_lista() > n_lista entonces
+                    si n_lista > filas_lista() entonces lista_primera := n_lista - filas_lista() sino lista_primera := 0 fin
+                fin
+            fin
+            devolver
+        fin
+        si comparando entonces
+            rueda_comparar(-p * 3)
+            devolver
+        fin
+        si rueda_filas(-p * 3) entonces BlocVis.suelto := cierto fin
+    fin
+
+    ; quieren cerrar la ventana: cierto si se puede salir ya (sin cambios, o
+    ; avisado antes: el escritorio, al apagar, lo pide otra vez y se sale)
     función sale(): bool
-        si no cambiado o cerrando entonces devolver cierto fin
+        variable dd: arreglo [1] de nat32
+        variable n: nat32
+        n := con_cambios()
+        si n = 0 o cerrando entonces devolver cierto fin
         cerrando := cierto
-        aviso_malo := cierto
-        Textos32.copiar(aviso, "Hay cambios sin guardar: F2 guarda; cerrar otra vez, sale.")
-        pinta_pie()
+        dd[0] := n
+        si n = 1 entonces
+            copiar(pregunta, "Hay cambios sin guardar. \xA8Guardarlos antes de salir?")
+        sino
+            formatear(pregunta, 160, "Hay %u documentos con cambios sin guardar. \xA8Guardarlos?", dd)
+        fin
+        abre_panel(P_SALIR)
+        avisa_mal("Hay cambios sin guardar: F2 guarda; cerrar otra vez, sale.")
         devolver falso
+    fin
+
+    ; =========================================================================
+    ;  Sin ventana: las pruebas (BLOC /PRUEBA GUION, con corre32)
+    ; =========================================================================
+    ; enseña el texto del documento de ahora (con \n, y lo de fuera de ASCII tal cual)
+    función enseña_texto()
+        variable i, n: nat32
+        variable b: arreglo [4] de byte
+        escribir("texto: ")
+        i := 0
+        mientras i < largo() hacer
+            b[0] := BlocTxt.letra(i)
+            si b[0] = 10 entonces
+                escribir("\\n")
+            sino si b[0] = '\\' entonces
+                escribir("\\\\")
+            sino
+                escribir_trozo(b, 1)
+            fin
+            i := i + 1
+        fin
+        escribir("\n")
+        n := 0
+    fin
+
+    función enseña_estado()
+        variable t: arreglo [80] de byte
+        nombre_largo(d, t)
+        escribir("estado: ", t, " lín ", línea_de(d.cursor) + 1, " col ", col_lógica(d.cursor) + 1)
+        escribir(" sel ", sel_inicio(), "-", sel_fin(), " líneas ", n_líneas(), " página ", nombre_página(d.cp))
+        si d.bom entonces escribir(" bom") fin
+        si d.crlf entonces escribir(" crlf") sino escribir(" lf") fin
+        si cambiado() entonces escribir(" cambiado") fin
+        si d.lenguaje >= 0 entonces escribir(" lenguaje ", len_nombre(nat32(d.lenguaje))) fin
+        escribir(" pestañas ", n_docs, " pliegues ", pliegues(), "\n")
+        si aviso[0] <> 0 entonces escribir("aviso: ", aviso, "\n") fin
+    fin
+
+    ; las teclas de una línea del guion: lo normal, tal cual (de UTF-8 a la
+    ; 437, como las da el teclado); entre llaves, las especiales:
+    ; {intro} {tab} {esc} {retro} {supr} {izq} {der} {arriba} {abajo}
+    ; {inicio} {fin} {repág} {avpág} {f1}..{f8}, con «ctrl-», «mayús-» y
+    ; «alt-» delante ({ctrl-z}, {mayús-izq}, {ctrl-mayús-r}, {alt-arriba})
+    función teclas_del_guion(t: puntero a byte, n: nat32)
+        variable i, k, j, mods, u, código: nat32
+        variable nombre_: arreglo [32] de byte
+        variable p: puntero a byte
+        i := 0
+        mientras i < n hacer
+            si t[i] = '{' entonces
+                k := i + 1
+                j := 0
+                mientras k < n y t[k] <> '}' y j < 30 hacer
+                    nombre_[j] := t[k]
+                    j := j + 1
+                    k := k + 1
+                fin
+                nombre_[j] := 0
+                i := k + 1
+                mods := 0
+                p := dirección(nombre_[0])
+                mientras cierto hacer
+                    si empieza_por(p, "ctrl-") entonces
+                        mods := mods ob MOD_CONTROL
+                        p := p + 5
+                    sino si empieza_por(p, "mayus-") entonces
+                        mods := mods ob MOD_MAYÚS
+                        p := p + 6
+                    sino si empieza_por(p, "may\xC3\xBAs-") entonces
+                        mods := mods ob MOD_MAYÚS
+                        p := p + 7
+                    sino si empieza_por(p, "alt-") entonces
+                        mods := mods ob MOD_ALT
+                        p := p + 4
+                    sino
+                        romper
+                    fin
+                fin
+                código := código_de_tecla(p, mods)
+                si código = 9 y mods yb MOD_CONTROL <> 0 entonces
+                    si mods yb MOD_MAYÚS <> 0 entonces código := TECLA_CTRL_MAYÚS_TAB sino código := TECLA_CTRL_TAB fin
+                fin
+                si código <> 0 entonces
+                    tecla_ev(código, 0, mods)
+                    pinta_todo()
+                sino
+                    escribir("guion: no conozco la tecla {", nombre_, "}\n")
+                fin
+            sino
+                k := pag_decodifica(t + i, n - i, u)
+                i := i + k
+                código := pag_letra(u)
+                si código <> SIN_LETRA entonces
+                    tecla_ev(código, 0, 0)
+                    pinta_todo()
+                fin
+            fin
+        fin
+    fin
+
+    función código_de_tecla(p: puntero a byte, mods: nat32): nat32
+        si iguales(p, "intro") entonces devolver '\n' fin
+        si iguales(p, "tab") entonces devolver 9 fin
+        si iguales(p, "esc") entonces devolver 27 fin
+        si iguales(p, "retro") entonces devolver 8 fin
+        si iguales(p, "supr") entonces devolver TECLA_SUPR fin
+        si iguales(p, "izq") entonces devolver TECLA_IZQUIERDA fin
+        si iguales(p, "der") entonces devolver TECLA_DERECHA fin
+        si iguales(p, "arriba") entonces devolver TECLA_ARRIBA fin
+        si iguales(p, "abajo") entonces devolver TECLA_ABAJO fin
+        si iguales(p, "inicio") entonces devolver TECLA_INICIO fin
+        si iguales(p, "fin") entonces devolver TECLA_FIN fin
+        si iguales(p, "repag") entonces devolver TECLA_RE_PÁG fin
+        si iguales(p, "avpag") entonces devolver TECLA_AV_PÁG fin
+        si iguales(p, "f1") entonces devolver TECLA_F1 fin
+        si iguales(p, "f2") entonces devolver TECLA_F2 fin
+        si iguales(p, "f3") entonces devolver TECLA_F3 fin
+        si iguales(p, "f8") entonces devolver TECLA_F8 fin
+        si iguales(p, "llave") entonces devolver '{' fin
+        si p[0] >= 'a' y p[0] <= 'z' y p[1] = 0 entonces
+            si mods = MOD_ALT entonces devolver TECLA_ALT + nat32(p[0]) - 'a' fin
+            si mods yb MOD_CONTROL <> 0 entonces devolver nat32(p[0]) - 0x60 fin
+            devolver nat32(p[0])
+        fin
+        devolver 0
+    fin
+
+    función prueba(guion: puntero a byte): byte
+        variable m, n, i, a, k: nat32
+        variable buf: puntero a byte
+        variable línea: arreglo [1024] de byte
+        variable ruta: arreglo [MAX_RUTA] de byte
+        m := abrir(guion)
+        si es_error(m) entonces
+            escribir("guion: no puedo abrir ", guion, "\n")
+            devolver 1
+        fin
+        n := largo_de(m)
+        buf := pedir(n + 4)
+        n := leer(m, buf, n)
+        cerrar(m)
+        i := 0
+        mientras i < n hacer
+            a := i
+            mientras i < n y buf[i] <> 10 hacer i := i + 1 fin
+            k := i - a
+            si k > 0 y buf[i - 1] = 13 entonces k := k - 1 fin
+            si k > 1000 entonces k := 1000 fin
+            mover_memoria(línea, buf + a, k)
+            línea[k] := 0
+            i := i + 1
+            si empieza_por(línea, "teclas ") entonces
+                teclas_del_guion(dirección(línea[7]), k - 7)
+            sino si empieza_por(línea, "abre ") entonces
+                pag_a_437(dirección(línea[5]), k - 5, ruta, MAX_RUTA)
+                si no abre_documento(ruta, NADA_CP) entonces escribir("aviso: ", aviso, "\n") fin
+                pinta_todo()
+            sino si empieza_por(línea, "abre_como ") entonces
+                ; «abre_como 437 RUTA»
+                pag_a_437(dirección(línea[14]), k - 14, ruta, MAX_RUTA)
+                si línea[10] = 'u' entonces abre_documento(ruta, CP_UTF8) sino si línea[10] = '1' entonces abre_documento(ruta, CP_1252) sino abre_documento(ruta, CP_437) fin
+                pinta_todo()
+            sino si iguales(línea, "nuevo") entonces
+                documento_nuevo()
+            sino si iguales(línea, "muestra") entonces
+                enseña_texto()
+            sino si iguales(línea, "estado") entonces
+                enseña_estado()
+            sino si empieza_por(línea, "ancho ") entonces
+                ; el ancho de la ventana de mentira (para el ajuste de línea)
+                si texto_a_natural(dirección(línea[6]), a) entonces BlocVis.nuevo_tamaño(ent32(a), alto) fin
+                i := i + 0
+            sino si empieza_por(línea, "menu ") entonces
+                ; «menú M O»: la opción O del menú M (sus números, con las rayas)
+                escribe_menú(dirección(línea[5]))
+            sino si empieza_por(línea, "casilla ") entonces
+                si texto_a_natural(dirección(línea[8]), a) y a < 5 entonces casillas[a] := no casillas[a] fin
+            sino si empieza_por(línea, "pestana ") entonces
+                si texto_a_natural(dirección(línea[8]), a) entonces activa(a) fin
+            sino si iguales(línea, "salir") entonces
+                romper
+            sino si línea[0] = '#' o línea[0] = 0 entonces
+                ; (un comentario)
+            sino
+                escribir("guion: no entiendo «", línea, "»\n")
+            fin
+            pinta_todo()
+        fin
+        devolver 0
+    fin
+
+    función escribe_menú(t: puntero a byte)
+        variable m, o_: nat32
+        variable q: arreglo [16] de byte
+        si no palabra(t, 0, q, 16) o no texto_a_natural(q, m) entonces devolver fin
+        si no palabra(t, 1, q, 16) o no texto_a_natural(q, o_) entonces devolver fin
+        elegido(m, o_)
+    fin
+
+    ; =========================================================================
+    ;  Empezar
+    ; =========================================================================
+    ; los lenguajes: los de \HISPA\BLOC\LENGUAJES (los del paquete), los de
+    ; \BLOC\LENGUAJES (los que añada cada uno) y, si no están, los de serie
+    función carga_lenguajes()
+        variable i, n: nat32
+        variable p: puntero a byte
+        len_cargar("\\HISPA\\BLOC\\LENGUAJES\\")
+        len_cargar("\\BLOC\\LENGUAJES\\")
+        para i desde 0 hasta DE_SERIE - 1 hacer
+            p := de_serie(i, n)
+            si p <> nulo entonces len_cargar_texto(p, n) fin
+        fin
+    fin
+
+    ; abre lo de la última vez (o NOTAS.TXT)
+    función abre_sesión()
+        variable i, vistos: nat32
+        vistos := 0
+        si n_sesión > 0 entonces
+        para i desde 0 hasta n_sesión - 1 hacer
+            si abre_documento(dirección(sesión[i][0]), NADA_CP) entonces
+                si sesión_cursor[i] <= largo() entonces
+                    d.cursor := sesión_cursor[i]
+                    d.ancla := d.cursor
+                fin
+                vistos := vistos + 1
+            fin
+        fin
+        fin
+        aviso[0] := 0
+        si vistos = 0 entonces
+            abre_documento("NOTAS.TXT", NADA_CP)
+            devolver
+        fin
+        si sesión_activa < n_docs entonces activa(sesión_activa) fin
     fin
 
     función principal(): byte
         variable s: Suceso
-        variable n: nat32
-        variable pos: nat32
-        argumentos(nombre, 64)
-        n := longitud(nombre)
-        mientras n > 0 y es_espacio(nombre[n - 1]) hacer
+        variable n, i: nat32
+        variable args: arreglo [MAX_RUTA + 16] de byte
+        variable nombre_: arreglo [MAX_RUTA] de byte
+        variable p: puntero a byte
+        argumentos(args, MAX_RUTA + 16)
+        n := longitud(args)
+        mientras n > 0 y es_espacio(args[n - 1]) hacer
             n := n - 1
-            nombre[n] := 0
+            args[n] := 0
         fin
-        si n = 0 entonces Textos32.copiar(nombre, "NOTAS.TXT") fin
-        a_mayúsculas(nombre)
-        ancho := 500
-        alto := 340 + ALTO_MENÚS
-        v := ventana("Bloc de notas", nat32(ancho), nat32(alto))
-        si es_error(v) entonces
+        p := saltar_espacios(args)
+        letra_sistema := unidad(0)
+        si es_error(letra_sistema) entonces letra_sistema := 'C' fin
+        prepara_ini(letra_sistema)
+        carga_lenguajes()
+        ; sin ventana: las pruebas
+        si empieza_por(p, "/PRUEBA ") o empieza_por(p, "/prueba ") entonces
+            sin_ventana := cierto
+            prepara_sin_ventana(500, 340 + ALTO_MENÚS)
+            nombre_[0] := 0
+            copiar_hasta(nombre_, saltar_espacios(p + 8), MAX_RUTA)
+            documento_nuevo()
+            devolver prueba(nombre_)
+        fin
+        lee_ajustes()
+        i := 0
+        BlocVis.v := ventana("Bloc de notas", 500, nat32(340 + ALTO_MENÚS))
+        si es_error(BlocVis.v) entonces
             escribir("bloc: no hay escritorio (o no hay memoria para la ventana)\n")
             devolver 1
         fin
+        si no prepara(BlocVis.v, 500, 340 + ALTO_MENÚS) entonces
+            escribir("bloc: no hay memoria\n")
+            devolver 1
+        fin
+        ; lo que se abre
+        si p[0] <> 0 entonces
+            copiar_hasta(nombre_, p, MAX_RUTA)
+            a_mayúsculas(nombre_)
+            si no abre_documento(nombre_, NADA_CP) entonces documento_nuevo() fin
+        sino si n_sesión > 0 entonces
+            abre_sesión()
+        sino
+            abre_documento("NOTAS.TXT", NADA_CP)
+        fin
+        si n_docs = 0 entonces documento_nuevo() fin
         pon_título()
-        columnas := (ancho - 2 * MARGEN) div ANCHO_LETRA
-        lee()
         pinta_todo()
-        mientras suceso(v, s, cierto) hacer
+        mientras suceso(BlocVis.v, s, cierto) hacer
+            ver_cambiado := cierto
             si s.clase = EV_TECLA entonces
-                suelto := falso                 ; (RUEDA) al teclear, al cursor otra vez
-                tecla_pulsada(s.a, s.b yb TECLA_CON_MAYÚS <> 0)
+                tecla_ev(s.a, s.b, s.c)
             sino si s.clase = EV_RUEDA entonces
                 rueda(s.c)                      ; (RUEDA)
             sino si s.clase = EV_RATÓN_BAJA entonces
-                suelto := falso                 ; (RUEDA)
                 n := nat32(menú_en(menús, ent32(s.a), ent32(s.b)))
                 si ent32(n) >= 0 entonces
                     abre_el_menú(ent32(n))
+                    ver_cambiado := falso
                 sino si s.c yb BOTÓN_DERECHO <> 0 entonces
                     clic_secundario(ent32(s.a), ent32(s.b))
+                    ver_cambiado := falso
                 sino si s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                    BlocVis.suelto := falso
                     clic(ent32(s.a), ent32(s.b), s.c)
                 fin
             sino si s.clase = EV_RATÓN_MUEVE entonces
-                ; arrastrando con el botón pulsado: se selecciona hasta donde va el ratón
-                si arrastrando y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
-                    pos := letra_del_punto(ent32(s.a), ent32(s.b))
-                    si pos <> cursor entonces
-                        cursor := pos
-                        pinta_texto()
-                        pinta_pie()
-                    fin
-                fin
+                ver_cambiado := falso
+                ratón_mueve(ent32(s.a), ent32(s.b), s.c)
             sino si s.clase = EV_RATÓN_SUBE entonces
                 arrastrando := falso
+                arrastrando_bloque := falso
+                ver_cambiado := falso
             sino si s.clase = EV_MENÚ entonces
-                si elegido(s.b, s.a) y sale() entonces devolver 0 fin
+                si elegido(s.b, s.a) y sale() entonces romper fin
             sino si s.clase = EV_TAMAÑO entonces
-                ancho := ent32(s.a)
-                alto := ent32(s.b)
-                pinta_todo()
+                nuevo_tamaño(ent32(s.a), ent32(s.b))
+            sino si s.clase = EV_FOCO entonces
+                enfocada := s.a = 1
+            sino si s.clase = EV_SOLTADO entonces
+                ; (BLOC) lo arrastrado desde Mi equipo: se abre
+                si no es_error(lo_soltado(nombre_, MAX_RUTA)) entonces abre_documento(nombre_, NADA_CP) fin
             sino si s.clase = EV_CERRAR entonces
-                si sale() entonces devolver 0 fin
+                si sale() entonces romper fin
+            sino
+                ver_cambiado := falso
             fin
+            si saliendo entonces romper fin
+            si ver_cambiado entonces pinta_todo() fin
         fin
+        guarda_ajustes()
         devolver 0
     fin
 

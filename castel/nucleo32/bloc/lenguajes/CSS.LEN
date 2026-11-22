@@ -1,0 +1,25 @@
+; =============================================================================
+;  CSS.LEN - las hojas de estilo (CSS), para el Bloc de notas: el selector,
+;  las propiedades y sus valores
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+;  El formato, en CASTEL.LEN.
+; =============================================================================
+nombre=CSS
+extensiones=CSS
+distingue=no
+modo=css
+bloque=/* */
+comillas=" '
+escape=\
+letras=-
+inicio=-.#
+numeros=si
+directiva_palabra=@
+operadores=:;,>+~*=()
+claves=important inherit initial unset auto none block inline flex grid
+claves=absolute relative fixed sticky static hidden visible bold normal
+claves=left right center top bottom solid dashed dotted transparent
+propias=rgb rgba hsl hsla url calc var
+plegado=bloques
+signos_abre={
+signos_cierra=}
