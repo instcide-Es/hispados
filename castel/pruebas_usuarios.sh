@@ -206,7 +206,8 @@ saca $X/e.img HISPA/USUARIOS.TXT $X/U2.TXT && sed 's/|1|BIBLIOTE/|0|BIBLIOTE/' $
 CAPTURAS=$X ESCRIBE=1 SATA=$X/e.img MEMORIA=128 MODULOS= ARRANQUE=escritorio \
   $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 6" ":tecla ctrl-alt-delete" ":tecla meta_l" ":pausa 1" ":captura ue1" ":escribe nopuede" ":tecla ret" ":pausa 5" ":captura ue2" \
   ":escribe uno2tres" ":tecla ret" ":pausa 6" ":doble 60 186" ":pausa 4" "admin" ":pausa 2" ":captura ue5" ":escribe uno2tres" ":tecla ret" ":pausa 5" \
-  ":tecla meta_l-l" ":pausa 6" ":captura ue3" ":tecla right" ":escribe secreta" ":tecla ret" ":pausa 6" ":tecla meta_l" ":pausa 2" ":captura ue4" > $X/e.sal 2>&1
+  ":tecla meta_l-l" ":pausa 6" ":captura ue3" ":tecla right" ":escribe secreta" ":tecla ret" ":pausa 6" ":tecla meta_l" ":pausa 2" ":captura ue4" \
+  ":tecla esc" ":tecla meta_l-r" ":pausa 1" ":escribe usuarios" ":tecla ret" ":pausa 6" ":captura ue6" > $X/e.sal 2>&1
 tr -d '\r' < $X/e.sal > $X/e.txt
 S=$X/e.txt
 miracap "con el escritorio, la pantalla de entrada: los tres usuarios, su tipo, la contraseña de la elegida, Entrar, Reiniciar y Apagar (Ctrl+Alt+Supr y el logo no la saltan)" ue1 \
@@ -220,6 +221,8 @@ miracap "ADMIN en la Consola de Ana: la ventanita del núcleo pide SU contraseñ
 mira "con la contraseña de Ana, ORDENES (en su Consola) tiene el modo administrador" "^permisos: modo administrador para ORDENES.BIN"
 miracap "tras cerrar la sesión, otra vez la pantalla de entrada" ue3 negrita 300 70 500 110 "Elija su usuario"
 miracap "y el menú Inicio saluda a quien ha entrado: «Hola, Bea»" ue4 negrita 0 90 400 130 "Hola, Bea"
+miracap "Configuración › Usuarios (USUARIOS.BIN), abierto por Bea (normal): la lista, ella «(usted)», y lo que puede cambiar" ue6 \
+  negrita 0 20 80 50 "Usuarios de este equipo (usted puede cambiar su contraseña y su imagen)" texto 0 100 120 130 "Bea (usted)" texto 0 120 120 150 "Biblioteca"
 if ! grep -q "Administrador de tareas\|excepción\|^\*\*\* " $S; then ok "sin el Administrador de tareas detrás de la pantalla de entrada, y sin quejas del núcleo"
 else ko "el escritorio:"; grep "Administrador de tareas\|excepción\|^\*\*\* " $S | head -3 | sed 's/^/        /'; fi
 # ---- 4. SSH con los usuarios ----
