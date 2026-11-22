@@ -110,11 +110,36 @@ módulo Sha256
         fin
     fin
 
+    ; (USUARIOS) acaba el resumen: sus 32 octetos, a «salida» (para el pozo del azar del núcleo, pozo.cas)
+    público función acabar_octetos(salida: puntero a byte)
+        variable i: nat32
+        rellena()
+        para i desde 0 hasta 7 hacer
+            salida[i * 4] := byte(h[i] >> 24)
+            salida[i * 4 + 1] := byte(h[i] >> 16)
+            salida[i * 4 + 2] := byte(h[i] >> 8)
+            salida[i * 4 + 3] := byte(h[i])
+        fin
+    fin
+
     ; acaba el resumen: sus 64 cifras hexadecimales y un 0, a «salida» (65 octetos)
     público función acabar(salida: puntero a byte)
-        variable i, j, v, bits_alto, bits_bajo: nat32
+        variable i, j, v: nat32
         variable cifras: puntero a byte
         cifras := "0123456789abcdef"
+        rellena()
+        para i desde 0 hasta 7 hacer
+            v := h[i]
+            para j desde 0 hasta 7 hacer
+                salida[i * 8 + j] := cifras[(v >> (28 - j * 4)) yb 0xF]
+            fin
+        fin
+        salida[64] := 0
+    fin
+
+    ; el relleno del final y la longitud en bits (lo último de un resumen)
+    función rellena()
+        variable bits_alto, bits_bajo: nat32
         bits_alto := total >> 29
         bits_bajo := total << 3
         bloque[en_bloque] := 0x80
@@ -141,13 +166,6 @@ módulo Sha256
         bloque[63] := bits_bajo
         comprime(bloque)
         en_bloque := 0
-        para i desde 0 hasta 7 hacer
-            v := h[i]
-            para j desde 0 hasta 7 hacer
-                salida[i * 8 + j] := cifras[(v >> (28 - j * 4)) yb 0xF]
-            fin
-        fin
-        salida[64] := 0
     fin
 
 fin Sha256.

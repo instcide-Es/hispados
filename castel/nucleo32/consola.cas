@@ -23,7 +23,7 @@
 ; =============================================================================
 módulo Consola
 
-    importar Cpu, Tareas
+    importar Cpu, Tareas, Pozo
 
     constante TECLADO = 0x60
 
@@ -383,7 +383,10 @@ módulo Consola
     fin
 
     interrupción función teclado()
-        llega_código(meter_puerto(TECLADO))
+        variable c: nat32
+        c := meter_puerto(TECLADO)
+        ruido(R_TECLADO, c)                     ; (USUARIOS) el pozo del azar
+        llega_código(c)
         sacar_puerto(PIC1, FIN_INT)
     fin
 

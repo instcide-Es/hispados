@@ -19,6 +19,16 @@
  * 37): lo que escribe llega aquí, se pasa a UTF-8 y sale por el canal; lo
  * que se teclea al otro lado (UTF-8 y las secuencias de un xterm) se pasa a
  * las teclas de Hispa-Pentium. Una sesión a la vez.
+ *
+ * (USUARIOS) Con usuarios (un sistema instalado desde la 0.9: cuentas.cas),
+ * se entra con el nombre de uno de ellos y SU contraseña (la comprueba el
+ * núcleo, la llamada 202: Argon2id; los que no tienen contraseña no entran
+ * con contraseña) o con una llave de SU \USUARIOS\<carpeta>\AJUSTES\
+ * AUTORIZA.TXT (y, los administradores, las de \HISPA\SSH\AUTORIZA.TXT de
+ * antes). El intérprete que se lanza es de ese usuario (lee su carpeta y no
+ * las de los demás). La contraseña de SSHD /CLAVE de antes vale solo para un
+ * administrador que aún no tiene la suya (la migración). Encender, apagar,
+ * el puerto y /CLAVE, solo un administrador.
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include "ssh.h"
 #include "cripto.h"
@@ -34,6 +44,8 @@ static char carpeta[48];
 static u32 puerto = 22;
 static u8 m[SSH_CABE];
 static u32 term_hecho;		/* el terminal del núcleo (uno por programa: el de este) */
+
+static int con_usuarios(void);		/* (USUARIOS) */
 
 static void ruta_de(char *d, const char *nombre)
 {
@@ -226,20 +238,26 @@ static int pon_clave(void)
 }
 
 /* ---- las llaves autorizadas ---- */
+static int autorizada_en(const char *ruta, const u8 *blob, u32 nb);
 static int autorizada(const u8 *blob, u32 nb)
+{
+	char r[80];
+
+	ruta_de(r, "AUTORIZA.TXT");
+	if (h_existe(r))
+		return autorizada_en(r, blob, nb);
+	ruta_de(r, "authorized_keys");
+	return autorizada_en(r, blob, nb);
+}
+
+/* ¿está la llave «blob» en el archivo «ruta» (como el authorized_keys de OpenSSH)? */
+static int autorizada_en(const char *ruta, const u8 *blob, u32 nb)
 {
 	static char t[16384];
 	static u8 b[600];
-	char r[80];
 	int n, i = 0, k;
-	const char *nombres[2] = { "AUTORIZA.TXT", "authorized_keys" };
 
-	for (k = 0; k < 2; k++) {
-		ruta_de(r, nombres[k]);
-		n = h_lee_archivo(r, t, sizeof t - 1);
-		if (n > 0)
-			break;
-	}
+	n = h_lee_archivo(ruta, t, sizeof t - 1);
 	if (n <= 0)
 		return 0;
 	t[n] = 0;
@@ -285,9 +303,11 @@ static int envia_fallo(void)
 	char metodos[40];
 
 	metodos[0] = 0;
-	if (hay_autorizadas())
+	if (con_usuarios())
+		formatear(metodos, sizeof metodos, "publickey,password");	/* (USUARIOS) */
+	else if (hay_autorizadas())
 		formatear(metodos, sizeof metodos, "publickey");
-	if (hay_clave())
+	if (!con_usuarios() && hay_clave())
 		formatear(metodos + strlen(metodos), 20, "%spassword", metodos[0] ? "," : "");
 	sb_inicia(&b, m, sizeof m);
 	sb_u8(&b, SSH_USERAUTH_FAILURE);
@@ -296,9 +316,115 @@ static int envia_fallo(void)
 	return ssh_envia(&S, m, b.n);
 }
 
+/* ---- (USUARIOS) los usuarios del sistema (cuentas.cas; Ficha_usuario y
+ * Pedido_usuario de usuario.cas: la misma forma) ---- */
+struct ficha_u {
+	u32 id;
+	u8 admin, entra_solo, con_clave, es_yo;
+	u32 imagen;
+	char nombre[24];
+	char carpeta[12];
+	u8 en_sesion, resto[15];
+};
+struct pedido_u {
+	u32 orden, id, admin, entra_solo, imagen, n_clave, n_vieja;
+	char nombre[24];
+	u8 clave[128];
+	u8 vieja[128];
+};
+
+static int con_usuarios(void)
+{
+	u32 n = sc(SC_USUARIOS, 0, 0, 0);
+
+	return !ES_ERROR(n) && n > 0;
+}
+
+static int soy_administrador(void)
+{
+	return !con_usuarios() || sc(SC_USUARIOS, 3, 0, 0) == 1;
+}
+
+/* el nombre que llega por SSH (UTF-8), a la página 437 (la de los nombres) */
+static void a_437(const char *u, char *d, int cabe)
+{
+	const u8 *p = (const u8 *)u;
+	int k = 0;
+
+	while (*p && k < cabe - 1) {
+		u32 c = *p++;
+		if (c >= 0xC0 && c < 0xE0 && (*p & 0xC0) == 0x80)
+			c = (c & 31) << 6 | (*p++ & 63);
+		else if (c >= 0xE0 && c < 0xF0 && (p[0] & 0xC0) == 0x80 && (p[1] & 0xC0) == 0x80) {
+			c = (c & 15) << 12 | (p[0] & 63) << 6 | (p[1] & 63);
+			p += 2;
+		} else if (c >= 0x80)
+			c = '?';
+		d[k++] = h_437_de_unicode(c);
+	}
+	d[k] = 0;
+}
+
+/* la ficha del usuario «u» (en UTF-8): 1 si lo hay */
+static int busca_usuario(const char *u, struct ficha_u *f)
+{
+	char n[24];
+	u32 i;
+
+	a_437(u, n, sizeof n);
+	for (i = 0; i < 16 && sc(SC_USUARIOS, 1, i, (u32)f) == 1; i++)
+		if (h_es_ascii_igual(f->nombre, n))
+			return 1;
+	return 0;
+}
+
+/* el núcleo: ¿es esa su contraseña? (a = 0), o el de una llave ya
+ * comprobada (a = 1). Si vale, el intérprete que se lance será suyo */
+static int entra_usuario(const struct ficha_u *f, u32 a, const u8 *c, u32 nc)
+{
+	static struct pedido_u p;
+	u32 r;
+
+	memset(&p, 0, sizeof p);
+	h_copia(p.nombre, f->nombre, sizeof p.nombre);
+	if (nc > 127)
+		nc = 127;
+	if (c)
+		memcpy(p.clave, c, nc);
+	p.n_clave = nc;
+	r = sc(SC_ENTRAR_SSH, a, (u32)&p, 0);
+	crypto_wipe(&p, sizeof p);
+	return !ES_ERROR(r);
+}
+
+/* ¿es la llave «blob» de las que deja entrar al usuario f? (su AUTORIZA.TXT;
+ * un administrador, también las de \HISPA\SSH de antes) */
+static int autorizada_en(const char *ruta, const u8 *blob, u32 nb);
+static int autorizada_de(const struct ficha_u *f, const u8 *blob, u32 nb)
+{
+	char r[80];
+
+	if (f->carpeta[0]) {
+		formatear(r, sizeof r, "%c:\\USUARIOS\\%s\\AJUSTES\\AUTORIZA.TXT", h_sistema, f->carpeta);
+		if (autorizada_en(r, blob, nb))
+			return 1;
+	}
+	if (!f->admin)
+		return 0;
+	ruta_de(r, "AUTORIZA.TXT");
+	if (autorizada_en(r, blob, nb))
+		return 1;
+	ruta_de(r, "authorized_keys");
+	return autorizada_en(r, blob, nb);
+}
+
 static int usuario_vale(const char *u)
 {
 	char mio[64];
+	struct ficha_u f;
+
+	if (con_usuarios())
+		return busca_usuario(u, &f);		/* (USUARIOS) */
 
 	memset(mio, 0, sizeof mio);
 	sc(SC_AJUSTES, 1, (u32)mio, 0);
@@ -348,6 +474,7 @@ static int autentica(void)
 		const u8 *srv, *met, *alg, *blob, *firma;
 		u32 ns, nm, na, nb, nf;
 		char usuario[64];
+		struct ficha_u fu;
 		r = ssh_lee(&S, &pl, &n, 50);
 		if (r < 0)
 			return -1;
@@ -381,7 +508,8 @@ static int autentica(void)
 			int con_firma = sl_u8(&l);
 			alg = sl_cad(&l, &na);
 			blob = sl_cad(&l, &nb);
-			if (l.mal || !sl_cad_es(alg, na, "ssh-ed25519") || nb != 51 || !autorizada(blob, nb)) {
+			if (l.mal || !sl_cad_es(alg, na, "ssh-ed25519") || nb != 51 ||
+			    (con_usuarios() ? !busca_usuario(usuario, &fu) || !autorizada_de(&fu, blob, nb) : !autorizada(blob, nb))) {
 				envia_fallo();
 				continue;
 			}
@@ -406,7 +534,8 @@ static int autentica(void)
 				fa = sl_cad(&fl, &nfa);
 				fs = sl_cad(&fl, &nfs);
 				memcpy(pub, blob + 19, 32);
-				if (!l.mal && !fl.mal && nlf && sl_cad_es(fa, nfa, "ssh-ed25519") && nfs == 64 && !crypto_ed25519_check(fs, pub, f, nlf)) {
+				if (!l.mal && !fl.mal && nlf && sl_cad_es(fa, nfa, "ssh-ed25519") && nfs == 64 && !crypto_ed25519_check(fs, pub, f, nlf) &&
+				    (!con_usuarios() || entra_usuario(&fu, 1, 0, 0))) {
 					h_apunta("entra %s con su llave", usuario);
 					goto dentro;
 				}
@@ -422,7 +551,15 @@ static int autentica(void)
 			u32 nc;
 			sl_u8(&l);
 			c = sl_cad(&l, &nc);
-			if (!l.mal && hay_clave() && comprueba_clave(c, nc)) {
+			if (!l.mal && con_usuarios()) {
+				/* (USUARIOS) la suya, la comprueba el núcleo; la de SSHD /CLAVE
+				 * de antes, solo un administrador que aún no tiene la suya */
+				if (busca_usuario(usuario, &fu) &&
+				    (fu.con_clave ? entra_usuario(&fu, 0, c, nc) : fu.admin && hay_clave() && comprueba_clave(c, nc) && entra_usuario(&fu, 1, 0, 0))) {
+					h_apunta("entra %s con la contraseña", usuario);
+					goto dentro;
+				}
+			} else if (!l.mal && hay_clave() && comprueba_clave(c, nc)) {
 				h_apunta("entra %s con la contraseña", usuario);
 				goto dentro;
 			}
@@ -833,7 +970,7 @@ static int servicio(void)
 		h_apunta("no se puede hacer la llave del equipo en %s", carpeta);
 		return 1;
 	}
-	if (!hay_clave() && !hay_autorizadas())
+	if (!con_usuarios() && !hay_clave() && !hay_autorizadas())
 		h_apunta("ojo: no hay contraseña (SSHD /CLAVE) ni llaves autorizadas: nadie podrá entrar");
 	l = h_escuchar(puerto);
 	if (ES_ERROR(l)) {
@@ -881,8 +1018,12 @@ static void estado(void)
 		h_escribef("La llave de este equipo: ssh-ed25519 %s\n", hu);
 	} else
 		h_escribe("Aún no tiene llave (se hace al encenderlo).\n");
-	h_escribef("Contraseña: %s. Llaves autorizadas (%s\\AUTORIZA.TXT): %s.\n", hay_clave() ? "puesta" : "sin poner (SSHD /CLAVE)",
-		   carpeta, hay_autorizadas() ? "sí" : "ninguna");
+	if (con_usuarios())
+		h_escribe("Se entra con el nombre y la contraseña de un usuario de este equipo (sin contraseña,\n"
+			  "solo con su llave: \\USUARIOS\\<su carpeta>\\AJUSTES\\AUTORIZA.TXT).\n");
+	else
+		h_escribef("Contraseña: %s. Llaves autorizadas (%s\\AUTORIZA.TXT): %s.\n", hay_clave() ? "puesta" : "sin poner (SSHD /CLAVE)",
+			   carpeta, hay_autorizadas() ? "sí" : "ninguna");
 	h_escribe("Para entrar desde otro equipo: ssh usuario@");
 	{
 		u32 ip = h_mi_ip();
@@ -922,6 +1063,16 @@ int principal(void)
 	/* (al arrancar el escritorio: solo si se dejó encendido) */
 	if (h_empieza(a, "/ARRANQUE"))
 		return encendido() ? servicio() : 0;
+	/* (USUARIOS) cambiarlo, solo un administrador */
+	if ((h_empieza(a, "/PUERTO=") || h_empieza(a, "/ENCENDER") || h_empieza(a, "/APAGAR") || h_empieza(a, "/CLAVE")) && !soy_administrador()) {
+		h_escribe("Eso solo lo puede hacer un administrador.\n");
+		return 1;
+	}
+	if (h_empieza(a, "/CLAVE") && con_usuarios()) {
+		h_escribe("Con usuarios, por SSH se entra con el nombre y la contraseña de cada uno\n"
+			  "(Configuración > Usuarios, o USUARIOS /CLAVE nombre en la Consola).\n");
+		return 1;
+	}
 	if (h_empieza(a, "/PUERTO=")) {
 		u32 p = 0;
 		int i;
@@ -940,7 +1091,7 @@ int principal(void)
 		u32 t;
 		lee_puerto();
 		pon_ini(1);
-		if (!hay_clave() && !hay_autorizadas())
+		if (!con_usuarios() && !hay_clave() && !hay_autorizadas())
 			h_escribe("Ojo: no hay contraseña ni llaves autorizadas; póngala con SSHD /CLAVE.\n");
 		{
 			char r[40];

@@ -24,6 +24,17 @@
 ;  EL MODO ADMINISTRADOR (Tarea.admin: la orden ADMIN de ORDENES, el menú de
 ;  Mi equipo): el usuario lo confirma en la pantalla (el núcleo pregunta, no
 ;  el programa) y deja tocarlo todo; lo heredan los programas que lance.
+;  (USUARIOS) Solo lo pide un administrador, con SU contraseña si la tiene.
+;
+;  (USUARIOS) LAS CARPETAS DE LOS USUARIOS. Con usuarios (cuentas.cas),
+;  \USUARIOS\<CARPETA>\ y lo de dentro solo lo leen y lo escriben su dueño
+;  (Tarea.uid) y el modo administrador; \USUARIOS mismo se mira, pero solo
+;  el núcleo hace carpetas en él. SSHD lee AJUSTES\AUTORIZA.TXT de cada uno
+;  (sus llaves de SSH). Y lo que solo hace un administrador: PAQUETES e
+;  INSTALAR escriben en toda la zona solo si quien los lanza lo es (o es el
+;  sistema); los renglones de SSHD, WG y TAILSCAL (su configuración),
+;  igual. PAQUETES de un usuario normal mira el catálogo (y apunta su serie)
+;  pero no instala.
 ;
 ;  Las comprobaciones las hace la llamada al sistema (usuario.cas), con la
 ;  ruta como la entiende el disco (Fat.forma_de_ruta: nada de «hispa.» ni
@@ -33,7 +44,7 @@
 ; =============================================================================
 módulo Permisos
 
-    importar Tareas, Fat, Unidades, Textos32, Formato
+    importar Tareas, Fat, Unidades, Textos32, Formato, Cuentas
 
     ; ---- los sellos: los programas del sistema (Tarea.sello) ----
     público constante SELLO_NINGUNO = 0         ; un programa normal
@@ -57,6 +68,8 @@ módulo Permisos
     público constante SELLO_ESCUDO = 17         ; (pentium-escudo) el antivirus y el cortafuegos
     público constante SELLO_PROGRAMA = 18       ; (pentium-programas) «Programas instalados»
     público constante SELLO_SONIDO = 19         ; (pentium-sonido) el servicio de sonido
+    público constante SELLO_ARGON2 = 20         ; (USUARIOS) el que resume las contraseñas (ARGON2.BIN)
+    público constante SELLO_USUARIOS = 21       ; (USUARIOS) Configuración › Usuarios (USUARIOS.BIN)
     ; (hasta 31)
 
     ; un bit por sello, para las listas de quién escribe
@@ -79,6 +92,11 @@ módulo Permisos
     constante B_ESCUDO = 0x20000
     constante B_PROGRAMA = 0x40000
     constante B_SONIDO = 0x80000
+    constante B_ARGON2 = 0x100000               ; (USUARIOS)
+    constante B_USUARIOS = 0x200000
+    ; (USUARIOS) los renglones que solo valen si quien lanza el programa es
+    ; administrador (o el sistema): la configuración de SSH y de los túneles
+    constante SOLO_ADMIN = 0xD00                ; B_SSHD, B_WG y B_TAILSCAL
     constante NADIE = 0                         ; (solo PAQUETES, INSTALAR y el administrador)
     constante TODO_EL_SISTEMA = 0xA             ; PAQUETES e INSTALAR: escriben en toda la zona (no leen secretos)
 
@@ -92,6 +110,7 @@ módulo Permisos
         carpeta: bool
         escriben: nat32                         ; los sellos que escriben ahí (un bit cada uno), además de PAQUETES e INSTALAR
         secreto: bool                           ; solo lo leen los que lo escriben
+        admin: bool                             ; (USUARIOS) y solo si quien lanza al que escribe es administrador (o el sistema)
     fin
 
     tipo Programa = estructura
@@ -126,7 +145,15 @@ módulo Permisos
         r.carpeta := n > 0 y p[n - 1] = '\\'
         r.escriben := escriben
         r.secreto := secreto
+        r.admin := falso
         n_reglas := n_reglas + 1
+    fin
+
+    ; (USUARIOS) un renglón que solo vale si lo pide un administrador: el
+    ; arranque (GRUB.CFG, GRUBENV: qué núcleo) y HISPA.INI
+    función regla_admin(p: puntero a byte, escriben: nat32, secreto: bool)
+        regla(p, escriben, secreto)
+        si n_reglas > 0 entonces reglas[n_reglas - 1].admin := cierto fin
     fin
 
     función programa(ruta: puntero a byte, sello: nat32, servicio: bool)
@@ -164,11 +191,17 @@ módulo Permisos
         programa("ESCUDO.BIN", SELLO_ESCUDO, cierto)
         programa("PROGRAMA.BIN", SELLO_PROGRAMA, falso)
         programa("SONIDO.BIN", SELLO_SONIDO, cierto)
+        programa("ARGON2.BIN", SELLO_ARGON2, falso)        ; (USUARIOS)
+        programa("USUARIOS.BIN", SELLO_USUARIOS, falso)
+        ; ---- (USUARIOS) los usuarios y el azar: solo el núcleo ----
+        regla("USUARIOS.TXT", NADIE, cierto)               ; los usuarios y sus contraseñas, resumidas
+        regla("USUARIOS.NUE", NADIE, cierto)
+        regla("AZAR.SEM", NADIE, cierto)                   ; la semilla del pozo del azar (pozo.cas)
         ; ---- el arranque ----
-        regla("GRUB.CFG", B_ASISTE, falso)                 ; (y el escritorio, que es el núcleo: la medida de la pantalla)
-        regla("GRUBENV", B_ACTUALIZ, falso)                ; (lo pone PAQUETES; ACTUALIZ da el núcleo nuevo por bueno)
+        regla_admin("GRUB.CFG", B_ASISTE, falso)           ; (y el escritorio, que es el núcleo: la medida de la pantalla)
+        regla_admin("GRUBENV", B_ACTUALIZ, falso)          ; (lo pone PAQUETES; ACTUALIZ da el núcleo nuevo por bueno)
         regla("PANTALLA.ENV", NADIE, falso)                ; (la escribe el escritorio)
-        regla("HISPA.INI", B_ASISTE, falso)                ; (y Configuración, del núcleo)
+        regla_admin("HISPA.INI", B_ASISTE, falso)          ; (y Configuración, del núcleo)
         regla("INICIO.INI", NADIE, falso)                  ; (pentium-menu: lo fijado en el menú Inicio; lo escribe el núcleo)
         regla("DOCK.INI", NADIE, falso)                    ; (el dock, del núcleo)
         regla("ATAJOS.INI", NADIE, falso)
@@ -213,10 +246,13 @@ módulo Permisos
         regla("TS\\CLAVES.TS", B_TAILSCAL, cierto)
         regla("TS\\", B_TAILSCAL, falso)
         ; ---- los paquetes ----
-        regla("PAQUETES\\BAJADAS\\", B_DESCARGA, falso)
-        regla("PAQUETES\\AVANCE.TXT", B_ACTUALIZ ob B_DESCARGA ob B_PROGRAMA, falso)
+        ; ((USUARIOS) con B_PAQUETES: lo que escribe PAQUETES aunque lo lance un
+        ; usuario normal, que mira el catálogo pero no instala)
+        regla("PAQUETES\\BAJADAS\\", B_DESCARGA ob B_PAQUETES, falso)
+        regla("PAQUETES\\AVANCE.TXT", B_ACTUALIZ ob B_DESCARGA ob B_PROGRAMA ob B_PAQUETES, falso)
         regla("PAQUETES\\PROGRAMA.TXT", B_PROGRAMA, falso)
-        regla("PAQUETES\\CANCELA.TXT", B_ACTUALIZ ob B_PROGRAMA ob B_ESCUDO, falso)     ; (RÁPIDO) «Cancelar» de las ventanas
+        regla("PAQUETES\\CANCELA.TXT", B_ACTUALIZ ob B_PROGRAMA ob B_ESCUDO ob B_PAQUETES, falso)     ; (RÁPIDO) «Cancelar» de las ventanas
+        regla("PAQUETES\\SERIE.TXT", B_PAQUETES, falso)   ; (USUARIOS) la serie del último catálogo firmado
         regla("PAQUETES\\VENTANA.TXT", B_ACTUALIZ, falso)
         regla("PAQUETES\\BANDEJA.TXT", B_ACTUALIZ, falso)  ; (lo de PAQUETES ESTADO, para el aviso de la bandeja)
         regla("PAQUETES\\", NADIE, falso)
@@ -268,6 +304,8 @@ módulo Permisos
         regla("ESCUDO.BIN", NADIE, falso)
         regla("PROGRAMA.BIN", NADIE, falso)
         regla("SONIDO.BIN", NADIE, falso)
+        regla("ARGON2.BIN", NADIE, falso)                  ; (USUARIOS)
+        regla("USUARIOS.BIN", NADIE, falso)
         regla("HISPA\\", NADIE, falso)                     ; (en la raíz: que no se haga una \HISPA donde no la hay)
     fin
 
@@ -320,16 +358,23 @@ módulo Permisos
     constante LIBRE = 0
     constante PROTEGIDA = 1
     constante DUDOSA = 2                        ; no se sabe qué archivo es (el disco falla): se dice que no
+    constante USUARIOS_RAÍZ = 3                 ; (USUARIOS) la carpeta \USUARIOS misma
+    ; (USUARIOS) dentro de la carpeta de un usuario: su dueño, en «escriben»
+    ; (0xFFFFFFFF: de nadie), y «secreto», si es su AJUSTES\AUTORIZA.TXT (las
+    ; llaves de SSH: las lee SSHD). (En variables de la llamada, no del módulo:
+    ; dos tareas pueden estar mirando a la vez)
+    constante DE_USUARIO = 4
 
     ; lo que dice la tabla de la ruta entera «ruta» de la unidad u: LIBRE,
     ; PROTEGIDA (y, en «escriben» y «secreto», su renglón) o DUDOSA
-    función mira(u: nat32, ruta: puntero a byte, ref escriben: nat32, ref secreto: bool): nat32
+    función mira(u: nat32, ruta: puntero a byte, ref escriben: nat32, ref secreto: bool, ref solo_admin: bool): nat32
         variable forma: arreglo [MAX_FORMA] de byte
         variable rel: puntero a byte
         variable en_hispa: bool
         variable i: nat32
         escriben := NADIE
         secreto := falso
+        solo_admin := falso
         si u >= MAX_UNIDADES o u <> del_sistema entonces devolver LIBRE fin
         si no unidades[u].hay o unidades[u].clase <> U_FAT entonces devolver LIBRE fin
         ; (sin leer el disco si todos los trozos son de 8+3: casi siempre)
@@ -337,6 +382,16 @@ módulo Permisos
             si no forma_de_ruta(u, ruta, forma, MAX_FORMA) entonces devolver DUDOSA fin
         fin
         mira_sistema()
+        ; (USUARIOS) \USUARIOS y las carpetas de cada uno
+        si Cuentas.hay_cuentas y empieza_por(forma, "\\USUARIOS") y (forma[9] = 0 o forma[9] = '\\') entonces
+            si forma[9] = 0 o forma[10] = 0 entonces devolver USUARIOS_RAÍZ fin
+            i := 10
+            mientras forma[i] <> 0 y forma[i] <> '\\' hacer i := i + 1 fin
+            secreto := iguales(dirección(forma[i]), "\\AJUSTES\\AUTORIZA.TXT")
+            forma[i] := 0
+            escriben := dueño_de_carpeta(dirección(forma[10]))
+            devolver DE_USUARIO
+        fin
         en_hispa := falso
         rel := dirección(forma[1])
         si empieza_por(forma, "\\HISPA") y (forma[6] = 0 o forma[6] = '\\') entonces
@@ -353,6 +408,7 @@ módulo Permisos
             si casa(dirección(reglas[i]), rel) entonces
                 escriben := reglas[i].escriben
                 secreto := reglas[i].secreto
+                solo_admin := reglas[i].admin
                 devolver PROTEGIDA
             fin
             i := i + 1
@@ -365,12 +421,18 @@ módulo Permisos
     ; en la ruta entera «ruta» de la unidad u?
     público función puede_escribir(u: nat32, ruta: puntero a byte): bool
         variable escriben, z: nat32
-        variable secreto: bool
+        variable secreto, solo: bool
         si actual = nulo entonces devolver cierto fin
         si no actual.usuario o actual.admin entonces devolver cierto fin
-        z := mira(u, ruta, escriben, secreto)
+        z := mira(u, ruta, escriben, secreto, solo)
         si z = LIBRE entonces devolver cierto fin
-        si z = PROTEGIDA y bit(actual.sello) yb (escriben ob TODO_EL_SISTEMA) <> 0 entonces devolver cierto fin
+        ; (USUARIOS) en su carpeta, su dueño
+        si z = DE_USUARIO y actual.uid <> 0 y actual.uid = escriben entonces devolver cierto fin
+        ; (USUARIOS) PAQUETES e INSTALAR, en toda la zona, si los lanza un
+        ; administrador (o el sistema); los renglones de la configuración de
+        ; SSH y de los túneles, igual; los demás, el programa del renglón
+        si z = PROTEGIDA y bit(actual.sello) yb TODO_EL_SISTEMA <> 0 y persona_admin(actual) entonces devolver cierto fin
+        si z = PROTEGIDA y bit(actual.sello) yb escriben <> 0 y ((bit(actual.sello) yb SOLO_ADMIN = 0 y no solo) o persona_admin(actual)) entonces devolver cierto fin
         denegados := denegados + 1
         imprimir2("permisos: acceso denegado a %s para escribir (%s)\n", nat32(ruta), nat32(actual.nombre))
         devolver falso
@@ -379,15 +441,34 @@ módulo Permisos
     ; ¿y leerla? (solo los secretos tienen dueño)
     público función puede_leer(u: nat32, ruta: puntero a byte): bool
         variable escriben, z: nat32
-        variable secreto: bool
+        variable secreto, solo: bool
         si actual = nulo entonces devolver cierto fin
         si no actual.usuario o actual.admin entonces devolver cierto fin
-        z := mira(u, ruta, escriben, secreto)
-        si z = LIBRE entonces devolver cierto fin
+        z := mira(u, ruta, escriben, secreto, solo)
+        si z = LIBRE o z = USUARIOS_RAÍZ entonces devolver cierto fin
         si z = PROTEGIDA y (no secreto o bit(actual.sello) yb escriben <> 0) entonces devolver cierto fin
+        ; (USUARIOS) lo de cada uno, su dueño; sus llaves de SSH, también SSHD
+        si z = DE_USUARIO y actual.uid <> 0 y actual.uid = escriben entonces devolver cierto fin
+        si z = DE_USUARIO y secreto y actual.sello = SELLO_SSHD entonces devolver cierto fin
         denegados := denegados + 1
         imprimir2("permisos: acceso denegado a %s para leer (%s)\n", nat32(ruta), nat32(actual.nombre))
         devolver falso
+    fin
+
+    ; (USUARIOS) ¿puede la tarea que corre lanzar el programa de esa ruta? El
+    ; de la carpeta de otro usuario, no (lo demás, como siempre)
+    público función puede_lanzar(u: nat32, ruta: puntero a byte): bool
+        variable escriben, z: nat32
+        variable secreto, solo: bool
+        si actual = nulo entonces devolver cierto fin
+        si no actual.usuario o actual.admin o no Cuentas.hay_cuentas entonces devolver cierto fin
+        z := mira(u, ruta, escriben, secreto, solo)
+        si z = DE_USUARIO y (actual.uid = 0 o actual.uid <> escriben) entonces
+            denegados := denegados + 1
+            imprimir2("permisos: acceso denegado a %s para lanzarlo (%s)\n", nat32(ruta), nat32(actual.nombre))
+            devolver falso
+        fin
+        devolver cierto
     fin
 
     ; -------------------------------------------------------------------------

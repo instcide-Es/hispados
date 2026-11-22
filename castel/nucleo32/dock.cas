@@ -38,7 +38,7 @@
 ; =============================================================================
 módulo Dock
 
-    importar Tareas, Grafico, Letra, Video, Raton, Ventanas, Emergente, Fat, Unidades, Monton, Textos32, Formato, Mem32, Accesos, Iconos
+    importar Tareas, Grafico, Letra, Video, Raton, Ventanas, Emergente, Fat, Unidades, Monton, Textos32, Formato, Mem32, Accesos, Iconos, Cuentas
 
     ; ---- las medidas ----
     constante LADO = 40                         ; el de cada icono
@@ -134,8 +134,10 @@ módulo Dock
         n_el := 6
     fin
 
-    ; dónde van DOCK.INI y ATAJOS.INI (en «renglón»)
+    ; dónde van DOCK.INI y ATAJOS.INI (en «renglón»): (USUARIOS) en los
+    ; ajustes del que ha entrado (\USUARIOS\CARLOS\AJUSTES), si tiene carpeta
     función ruta_ini(nombre: puntero a byte)
+        si ajuste_de_sesión(nombre, renglón, 260) entonces devolver fin
         si instalado() entonces copiar(renglón, "\\HISPA\\") sino copiar(renglón, "\\") fin
         concatenar(renglón, nombre)
     fin

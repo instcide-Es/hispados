@@ -103,6 +103,22 @@
 ;  Lo que se escribe, se borra o se cambia de nombre en la zona protegida
 ;  (\HISPA de la unidad del sistema y lo que dice la tabla), y lo que se lee
 ;  de un secreto, solo lo puede quien tiene permiso: si no, DENEGADO.
+;   (USUARIOS) Los usuarios (cuentas.cas) y el azar (pozo.cas):
+;  200  lo de los usuarios: EBX = 0, cuántos hay (0: sin usuarios, el sistema
+;       sin instalar); 1, la ficha número ECX (Ficha_usuario, 64 octetos) a
+;       EDX -> 1, o 0 si no hay tantos; 2, el número del usuario de la tarea
+;       (0: el sistema); 3, ¿es administrador? -> 1 o 0; 4, su carpeta
+;       («\USUARIOS\CARLOS») a ECX (caben EDX) -> su largo (0: no tiene);
+;       5, el que ha entrado en la pantalla (0: nadie)
+;  201  (solo USUARIOS.BIN, Configuración › Usuarios) crear, quitar y
+;       cambiar usuarios y contraseñas: EBX, un Pedido_usuario. Los demás,
+;       solo un administrador; la contraseña propia, cada uno (con la de antes)
+;  202  (solo SSHD.BIN) EBX = 0: ¿es esa la contraseña (UTF-8) de ese
+;       usuario? (ECX, un Pedido_usuario) -> su número, y el programa que
+;       lance luego será suyo; o DENEGADO; 1, lo mismo con una llave ya comprobada
+;  209  (solo ARGON2.BIN, el que pone el núcleo) EBX = 0: el pedido, a ECX
+;       (caben EDX); 1: el resumen (32 octetos de ECX)
+;  210  ECX octetos de azar (hasta 256) del pozo del núcleo, a EBX -> ECX
 ;  (SONIDO) 190 a 199: el sonido, con el servicio de sonido (SONIDO.BIN):
 ;       los canales de los programas, el volumen, los sonidos del sistema y
 ;       tocar un .WAV (la 194); los cuenta sonido.cas
@@ -128,7 +144,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Cuentas, Pozo
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -136,7 +152,7 @@ módulo Usuario
     ; la versión de verdad, la del paquete «base» (tools/hpq.py, SISTEMA): la
     ; que dicen el menú Inicio, Configuración y «Acerca de» (la primera parte
     ; de las pruebas mira que sea la misma que la de hpq.py)
-    público constante VERSIÓN_TEXTO = "0.8.6"
+    público constante VERSIÓN_TEXTO = "0.8.7"
     público constante SIGUE = 0xFFFFFF00        ; (esperar sin quedarse) la tarea no ha acabado todavía
 
     ; ---- más errores (los de los archivos, en fat.cas) ----
@@ -692,6 +708,7 @@ módulo Usuario
                 si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
                 args[0] := 0
                 si b <> 0 y no texto_de_usuario(b, args, MAX_ARGS) entonces devolver NO_VALE fin
+                si no puede_lanzar(u, ruta) entonces devolver DENEGADO fin     ; (USUARIOS) de la carpeta de otro, no
                 t := carga_de(u, ruta, args, r)
                 si t = nulo entonces devolver r fin
                 devolver t.id
@@ -841,6 +858,8 @@ módulo Usuario
                 devolver atender_dispositivos(n, a, b, c)
             caso 157:
                 devolver pide_admin(a)                  ; (PROTEGE) el modo administrador
+            caso 200..202, 209, 210:
+                devolver atender_usuarios(n, a, b, c)   ; (USUARIOS) los usuarios y el azar
             caso 158:
                 ; (PROTEGE) el sello de una tarea, para los servicios (RED.BIN
                 ; mira así quién le pide la interfaz del túnel)
@@ -913,6 +932,7 @@ módulo Usuario
             Sonido.sin_tarjeta_sonido := cierto
             devolver falso
         fin
+        t.uid := 0                              ; (USUARIOS) un servicio que pone el núcleo
         t.padre := 0
         t.terminal := 0
         t.salida := SIN_SALIDA
@@ -982,6 +1002,7 @@ módulo Usuario
     ; RED.BIN puesto en la raíz de un sistema instalado no es el servicio.
     público función cargar_servicio(nombre: puntero a byte, args: puntero a byte, ref error: nat32): puntero a Tarea
         variable r: arreglo [40] de byte
+        variable t: puntero a Tarea
         si del_sistema >= MAX_UNIDADES entonces
             error := SIN_DISCO
             devolver nulo
@@ -992,7 +1013,9 @@ módulo Usuario
         sino
             ruta_del_sistema(nombre, r, 40)
         fin
-        devolver carga_de(del_sistema, r, args, error)
+        t := carga_de(del_sistema, r, args, error)
+        si t <> nulo entonces t.uid := 0 fin           ; (USUARIOS) los pone el núcleo: del sistema
+        devolver t
     fin
 
     ; (PROTEGE) el modo administrador (la llamada 157): a = 0, pedirlo; 1,
@@ -1038,7 +1061,8 @@ módulo Usuario
     fin
 
     función pide_admin(a: nat32): nat32
-        variable sí: bool
+        variable sí, con_clave: bool
+        variable c: puntero a Cuenta
         según a
             caso 1:
                 actual.admin := falso
@@ -1048,14 +1072,26 @@ módulo Usuario
                 devolver 0
             caso 0:
                 si actual.admin entonces devolver 1 fin
+                ; (USUARIOS) solo un administrador, y con SU contraseña si la tiene
+                si hay_cuentas y no es_admin_uid(actual.uid) entonces
+                    imprimir2("permisos: el modo administrador es solo para un administrador (%s, la tarea %u)\n", nat32(actual.nombre), actual.id)
+                    devolver DENEGADO
+                fin
+                c := de_id(actual.uid)
+                con_clave := hay_cuentas y c <> nulo y c.clave[0] <> 0
                 tomar(cerrojo_admin)
-                si escritorio_en_marcha y hay_pantalla entonces
-                    sí := pregunta_en_pantalla()
+                si escritorio_en_marcha y hay_pantalla y (no hay_cuentas o actual.uid = sesión o actual.uid = 0) entonces
+                    ; (el que está delante de la pantalla es el que lo pide)
+                    si con_clave entonces sí := pide_clave_en_pantalla(c) sino sí := pregunta_en_pantalla() fin
                 sino si actual.terminal = 0 entonces
-                    sí := pregunta_en_consola()
+                    si con_clave entonces sí := pide_clave_en_texto(c, 0) sino sí := pregunta_en_consola() fin
+                sino si con_clave entonces
+                    ; (USUARIOS) un terminal sin nadie delante (una sesión de SSH):
+                    ; la contraseña del administrador, por el terminal
+                    sí := pide_clave_en_texto(c, actual.terminal)
                 sino
-                    ; (un terminal sin escritorio: una sesión de SSH; no hay
-                    ; nadie delante a quien preguntar)
+                    ; (un terminal sin escritorio y sin contraseña: no hay nadie
+                    ; delante a quien preguntar)
                     soltar(cerrojo_admin)
                     devolver DENEGADO
                 fin
@@ -1068,6 +1104,609 @@ módulo Usuario
                 devolver 0
         fin
         devolver NO_VALE
+    fin
+
+    ; =========================================================================
+    ;  (USUARIOS) Las contraseñas, las llamadas de los usuarios (200 a 202),
+    ;  la de ARGON2.BIN (209) y la del azar (210)
+    ; =========================================================================
+    ; lo que el núcleo le pasa a ARGON2.BIN (hispac/argon2.c: la misma forma)
+    tipo Pedido_argon = estructura
+        magia, kib, pasadas, utf8, n: nat32
+        sal: arreglo [16] de byte
+        clave: arreglo [256] de byte
+    fin
+    constante MAGIA_ARGON = 0x4E4F4741          ; «AGON»
+
+    ; lo que se sabe de un usuario (la llamada 200, 1): 64 octetos
+    tipo Ficha_usuario = estructura
+        id: nat32
+        admin, entra_solo, con_clave, es_yo: byte
+        imagen: nat32
+        nombre: arreglo [24] de byte
+        carpeta: arreglo [12] de byte
+        en_sesión: byte
+        reservado: arreglo [15] de byte
+    fin
+
+    ; lo que se pide (las llamadas 201 y 202)
+    tipo Pedido_usuario = estructura
+        orden, id, admin, entra_solo, imagen, n_clave, n_vieja: nat32
+        nombre: arreglo [24] de byte
+        clave: arreglo [128] de byte
+        vieja: arreglo [128] de byte
+    fin
+    constante PU_CREA = 1
+    constante PU_QUITA = 2
+    constante PU_CAMBIA = 3
+    constante PU_CLAVE = 4
+
+    variable cerrojo_argon: Cerrojo
+    variable cerrojo_cuentas: Cerrojo
+    variable pedido_argon: Pedido_argon
+    variable respuesta_argon: arreglo [32] de byte
+    variable hay_respuesta_argon: bool
+    variable tarea_argon: nat32
+    público variable falta_argon: bool          ; no está ARGON2.BIN (sin él, las contraseñas no se comprueban)
+    variable pu: Pedido_usuario                 ; (el de la 201 o la 202, copiado aquí: con cerrojo_cuentas)
+
+    ; n octetos de azar del pozo del núcleo (pozo.cas)
+    público función azar(destino: puntero a byte, n: nat32)
+        variable f, h: nat32
+        ahora(f, h)
+        sacar(destino, n, tics, (f << 16) xob h)
+    fin
+
+    ; el resumen Argon2id (32 octetos, a «salida») de los n octetos de la
+    ; clave (en UTF-8, o en la página 437: ARGON2.BIN la pasa a UTF-8) con la
+    ; sal de 16 octetos. Lo hace ARGON2.BIN (C con Monocypher), puesto en
+    ; marcha de \HISPA para eso: solo él recoge el pedido (por su número de
+    ; tarea y su sello) y nadie más ve la clave. Falso si no se ha podido
+    público función argon2(clave: puntero a byte, n: nat32, utf8: bool, sal: puntero a byte, kib: nat32, pasadas: nat32, salida: puntero a byte): bool
+        variable t: puntero a Tarea
+        variable e, t0: nat32
+        variable bien: bool
+        si n > 255 o kib < 8 o kib > 65536 o pasadas < 1 o pasadas > 10 entonces devolver falso fin
+        tomar(cerrojo_argon)
+        llenar(puntero(nat32(dirección(pedido_argon))), tamaño(Pedido_argon), 0)
+        pedido_argon.magia := MAGIA_ARGON
+        pedido_argon.kib := kib
+        pedido_argon.pasadas := pasadas
+        si utf8 entonces pedido_argon.utf8 := 1 fin
+        pedido_argon.n := n
+        copiar_memoria(dirección(pedido_argon.sal[0]), sal, 16)
+        si n > 0 entonces copiar_memoria(dirección(pedido_argon.clave[0]), clave, n) fin
+        hay_respuesta_argon := falso
+        bien := falso
+        t0 := tics
+        t := cargar_servicio("ARGON2.BIN", nulo, e)
+        si t = nulo entonces
+            falta_argon := cierto
+            imprimir1("cuentas: no se puede poner en marcha ARGON2.BIN (%s): sin él no se comprueban las contraseñas\n", nat32(texto_error(e)))
+        sino si t.sello <> SELLO_ARGON2 entonces
+            t.padre := 0
+            acabar_tarea(t)
+        sino
+            t.padre := actual.id
+            t.terminal := 0
+            t.salida := SIN_SALIDA
+            t.uid := 0
+            tarea_argon := t.id
+            esperar(t)
+            tarea_argon := 0
+            bien := hay_respuesta_argon
+            si bien entonces copiar_memoria(salida, dirección(respuesta_argon[0]), 32) fin
+            imprimir2("cuentas: Argon2id (%u KB, %u pasadas)", kib, pasadas)
+            imprimir1(" en %u tics\n", tics - t0)
+        fin
+        llenar(puntero(nat32(dirección(pedido_argon))), tamaño(Pedido_argon), 0)
+        llenar(dirección(respuesta_argon[0]), 32, 0)
+        hay_respuesta_argon := falso
+        soltar(cerrojo_argon)
+        devolver bien
+    fin
+
+    ; ¿es «clave» (n octetos) la contraseña del usuario c? (falso si no tiene)
+    público función comprueba_clave(c: puntero a Cuenta, clave: puntero a byte, n: nat32, utf8: bool): bool
+        variable kib, pas, i, d: nat32
+        variable sal: arreglo [16] de byte
+        variable bueno: arreglo [32] de byte
+        variable h: arreglo [32] de byte
+        si c = nulo o c.clave[0] = 0 entonces devolver falso fin
+        si no lee_resumen(dirección(c.clave[0]), kib, pas, sal, bueno) entonces devolver falso fin
+        si no argon2(clave, n, utf8, sal, kib, pas, h) entonces devolver falso fin
+        d := 0
+        para i desde 0 hasta 31 hacer d := d ob (nat32(h[i]) xob nat32(bueno[i])) fin
+        llenar(h, 32, 0)
+        devolver d = 0
+    fin
+
+    ; pone la contraseña del usuario c (n = 0: se la quita): sal nueva del
+    ; pozo y Argon2id. Falso si no se ha podido (no está ARGON2.BIN)
+    público función pon_clave(c: puntero a Cuenta, clave: puntero a byte, n: nat32, utf8: bool): bool
+        variable sal: arreglo [16] de byte
+        variable h: arreglo [32] de byte
+        variable w: arreglo [16] de byte
+        variable hx: arreglo [72] de byte
+        si c = nulo entonces devolver falso fin
+        si n = 0 entonces
+            llenar(dirección(c.clave[0]), MAX_CLAVE_C, 0)
+            devolver cierto
+        fin
+        azar(sal, 16)
+        si no argon2(clave, n, utf8, sal, ARGON_KIB, ARGON_PASADAS, h) entonces devolver falso fin
+        copiar_hasta(dirección(c.clave[0]), "argon2id$", MAX_CLAVE_C)
+        natural_a_texto(ARGON_KIB, w)
+        concatenar(dirección(c.clave[0]), w)
+        concatenar(dirección(c.clave[0]), "$")
+        natural_a_texto(ARGON_PASADAS, w)
+        concatenar(dirección(c.clave[0]), w)
+        concatenar(dirección(c.clave[0]), "$")
+        a_hex(sal, 16, hx)
+        concatenar(dirección(c.clave[0]), hx)
+        concatenar(dirección(c.clave[0]), "$")
+        a_hex(h, 32, hx)
+        concatenar(dirección(c.clave[0]), hx)
+        llenar(h, 32, 0)
+        c.entra_solo := falso                   ; (con contraseña no se entra solo)
+        devolver cierto
+    fin
+
+    ; la contraseña, tecleada en la consola de texto (con asteriscos) o en
+    ; un terminal (term <> 0: el de SSH). Da cuántas letras (falso si Esc o Ctrl+C)
+    público función lee_clave_texto(term: nat32, destino: puntero a byte, cabe: nat32, ref n: nat32): bool
+        variable c: nat32
+        n := 0
+        mientras cierto hacer
+            si term <> 0 entonces c := tecla_terminal(term) sino c := leer_tecla() fin
+            si c = '\n' o c = '\r' entonces
+                si term <> 0 entonces escribir_terminal(term, "\r\n", 2) sino escribir("\n") fin
+                devolver cierto
+            fin
+            si c = 27 o c = 3 o (term = 0 y actual.matar) entonces
+                llenar(destino, cabe, 0)
+                n := 0
+                si term <> 0 entonces escribir_terminal(term, "\r\n", 2) sino escribir("\n") fin
+                devolver falso
+            fin
+            si c = 8 entonces
+                si n > 0 entonces
+                    n := n - 1
+                    destino[n] := 0
+                    si term <> 0 entonces escribir_terminal(term, "\x08 \x08", 3) sino escribir("\x08 \x08") fin
+                fin
+            sino si c >= ' ' y c < 0x100 y n + 1 < cabe entonces
+                destino[n] := byte(c)
+                n := n + 1
+                si term <> 0 entonces escribir_terminal(term, "*", 1) sino escribir("*") fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; ---- la contraseña del modo administrador, en una ventanita del núcleo ----
+    constante CL_AN = 440
+    constante CL_AL = 200
+    variable cl_clave: arreglo [128] de byte
+    variable cl_n: nat32
+    variable cl_v: nat32
+
+    función pinta_cl(c: puntero a Cuenta, quién: puntero a byte, aviso: puntero a byte)
+        variable l: puntero a Lienzo
+        variable i: nat32
+        variable r: arreglo [96] de byte
+        l := lienzo_de(cl_v)
+        si l = nulo entonces devolver fin
+        degradado(valor(l), 0, 0, CL_AN, CL_AL, 0xF4F8FE, 0xD6E6FA)
+        disquete(valor(l), 16, 14, 40)
+        copiar_hasta(r, quién, 60)
+        concatenar(r, " pide el modo administrador")
+        texto_negrita(valor(l), 70, 14, r, 0x14294A)
+        texto(valor(l), 70, 34, "(cambiar y borrar los archivos del sistema)", 0x5A7396)
+        copiar_hasta(r, "Contraseña de ", 96)
+        concatenar(r, dirección(c.nombre[0]))
+        concatenar(r, ":")
+        texto(valor(l), 70, 62, r, 0x14294A)
+        rectángulo(valor(l), 70, 82, 350, 28, 0x1D4ED8)
+        rectángulo(valor(l), 72, 84, 346, 24, 0xFFFFFF)
+        para i desde 1 hasta cl_n hacer
+            si i <= 40 entonces círculo(valor(l), 80 + ent32(i - 1) * 8, 96, 3, 0x14294A) fin
+        fin
+        rectángulo(valor(l), 78 + ent32(cl_n) * 8, 88, 2, 16, 0x14294A)
+        si aviso <> nulo entonces texto_negrita(valor(l), 70, 116, aviso, 0x991B1B) fin
+        ; los botones, con su borde y su nombre (no solo el color)
+        rectángulo(valor(l), 200, 146, 104, 36, 0x14294A)
+        redondeado(valor(l), 202, 148, 100, 32, 5, 0x5CC45E, 0x2A8A3C, TODAS)
+        texto_negrita(valor(l), 252 - ancho_texto("Aceptar") div 2, 156, "Aceptar", 0xFFFFFF)
+        rectángulo(valor(l), 316, 146, 104, 36, 0x14294A)
+        redondeado(valor(l), 318, 148, 100, 32, 5, 0x8FA6C4, 0x5F7699, TODAS)
+        texto_negrita(valor(l), 368 - ancho_texto("Cancelar") div 2, 156, "Cancelar", 0xFFFFFF)
+        repintada(cl_v, 0, 0, CL_AN, CL_AL)
+    fin
+
+    ; pide en la pantalla la contraseña del usuario c para dárselo a la
+    ; tarea que corre: cierto si la ha escrito bien (tres intentos, dos
+    ; minutos). Solo responden el teclado y el ratón de verdad
+    función pide_clave_en_pantalla(c: puntero a Cuenta): bool
+        variable e: Evento
+        variable k, intentos, antes_teclas: nat32
+        variable x, yy: ent32
+        variable aviso: puntero a byte
+        variable sí, fuera: bool
+        x := ent32(pantalla.ancho div 2) - CL_AN div 2
+        yy := ent32(pantalla.alto div 2) - CL_AL div 2
+        cl_v := crear_ventana("Modo administrador", x, yy, CL_AN, CL_AL, FIJA ob ENCIMA, 0)
+        si cl_v = 0 entonces devolver falso fin
+        antes_teclas := teclas_a
+        teclas_a := cl_v
+        cl_n := 0
+        aviso := nulo
+        pinta_cl(c, actual.nombre, aviso)
+        k := 0
+        intentos := 0
+        sí := falso
+        fuera := falso
+        mientras no fuera y k < 120 * HZ y no actual.matar hacer
+            mientras saca_evento(cl_v, 0, e) hacer
+                si e.clase = EV_CERRAR o (e.clase = EV_TECLA y e.a = 27) entonces
+                    fuera := cierto
+                sino si (e.clase = EV_TECLA y e.a = '\n') o (e.clase = EV_RATÓN_BAJA y ent32(e.a) >= 200 y ent32(e.a) < 304 y ent32(e.b) >= 146 y ent32(e.b) < 182) entonces
+                    si espera_por_fallos() > 0 entonces
+                        aviso := "Demasiados intentos: espere un poco."
+                    sino
+                        texto_negrita(valor(lienzo_de(cl_v)), 70, 116, "Comprobando la contraseña...", 0x14294A)
+                        repintada(cl_v, 0, 0, CL_AN, CL_AL)
+                        si comprueba_clave(c, cl_clave, cl_n, falso) entonces
+                            apunta_acierto()
+                            sí := cierto
+                            fuera := cierto
+                        sino
+                            apunta_fallo()
+                            intentos := intentos + 1
+                            aviso := "La contraseña no es esa."
+                            si intentos >= 3 entonces fuera := cierto fin
+                        fin
+                    fin
+                    llenar(cl_clave, 128, 0)
+                    cl_n := 0
+                sino si e.clase = EV_RATÓN_BAJA y ent32(e.a) >= 316 y ent32(e.a) < 420 y ent32(e.b) >= 146 y ent32(e.b) < 182 entonces
+                    fuera := cierto
+                sino si e.clase = EV_TECLA y e.a = 8 entonces
+                    si cl_n > 0 entonces
+                        cl_n := cl_n - 1
+                        cl_clave[cl_n] := 0
+                    fin
+                sino si e.clase = EV_TECLA y e.a >= ' ' y e.a < 0x100 y cl_n < 127 entonces
+                    cl_clave[cl_n] := byte(e.a)
+                    cl_n := cl_n + 1
+                fin
+                si no fuera entonces pinta_cl(c, actual.nombre, aviso) fin
+            fin
+            dormir(2)
+            k := k + 2
+        fin
+        llenar(cl_clave, 128, 0)
+        cl_n := 0
+        si teclas_a = cl_v entonces teclas_a := antes_teclas fin
+        cerrar_ventana(cl_v, 0)
+        cl_v := 0
+        devolver sí
+    fin
+
+    ; en la consola de texto o en un terminal (el de SSH): la contraseña del usuario c
+    función pide_clave_en_texto(c: puntero a Cuenta, term: nat32): bool
+        variable n, intentos: nat32
+        variable sí: bool
+        variable r: arreglo [160] de byte
+        intentos := 0
+        sí := falso
+        mientras no sí y intentos < 3 hacer
+            copiar_hasta(r, "\r\nEl núcleo pregunta: ", 160)
+            concatenar(r, actual.nombre)
+            concatenar(r, " pide el MODO ADMINISTRADOR.\r\nContraseña de ")
+            concatenar(r, dirección(c.nombre[0]))
+            concatenar(r, " (Esc: no): ")
+            si term <> 0 entonces
+                escribir_terminal(term, r, longitud(r))
+            sino
+                tomar_consola()
+                escribir(r)
+                soltar_consola()
+            fin
+            si espera_por_fallos() > 0 entonces dormir(espera_por_fallos()) fin
+            si no lee_clave_texto(term, cl_clave, 128, n) entonces
+                llenar(cl_clave, 128, 0)
+                devolver falso
+            fin
+            si comprueba_clave(c, cl_clave, n, falso) entonces
+                apunta_acierto()
+                sí := cierto
+            sino
+                apunta_fallo()
+                intentos := intentos + 1
+                si term <> 0 entonces escribir_terminal(term, "No es esa.\r\n", 12) sino escribir("No es esa.\n") fin
+            fin
+            llenar(cl_clave, 128, 0)
+        fin
+        devolver sí
+    fin
+
+    ; ---- las llamadas ----
+    función ficha_de(i: nat32, f: puntero a Ficha_usuario): nat32
+        variable k, j: nat32
+        llenar(puntero(nat32(f)), tamaño(Ficha_usuario), 0)
+        k := 0
+        para j desde 0 hasta MAX_CUENTAS - 1 hacer
+            si cuentas[j].usada entonces
+                si k = i entonces
+                    f.id := cuentas[j].id
+                    si cuentas[j].admin entonces f.admin := 1 fin
+                    si cuentas[j].entra_solo entonces f.entra_solo := 1 fin
+                    si cuentas[j].clave[0] <> 0 entonces f.con_clave := 1 fin
+                    si cuentas[j].id = actual.uid entonces f.es_yo := 1 fin
+                    si cuentas[j].id = sesión entonces f.en_sesión := 1 fin
+                    f.imagen := cuentas[j].imagen
+                    copiar_hasta(dirección(f.nombre[0]), dirección(cuentas[j].nombre[0]), 24)
+                    copiar_hasta(dirección(f.carpeta[0]), dirección(cuentas[j].carpeta[0]), 12)
+                    devolver 1
+                fin
+                k := k + 1
+            fin
+        fin
+        devolver 0
+    fin
+
+    función atender_usuarios_200(a: nat32, b: nat32, c: nat32): nat32
+        variable p: puntero a byte
+        según nat16(a)
+            caso 0:
+                si hay_cuentas entonces devolver n_cuentas() fin
+                devolver 0
+            caso 1:
+                si no puede(c, tamaño(Ficha_usuario), cierto) entonces devolver NO_VALE fin
+                devolver ficha_de(b, puntero(c))
+            caso 2:
+                devolver actual.uid
+            caso 3:
+                si es_admin_uid(actual.uid) entonces devolver 1 fin
+                devolver 0
+            caso 4:
+                ; su carpeta («\USUARIOS\CARLOS»), a b (caben c)
+                si c < 2 o no puede(b, c, cierto) entonces devolver NO_VALE fin
+                p := puntero(b)
+                p[0] := 0
+                si carpeta_de(actual.uid)[0] = 0 entonces devolver 0 fin
+                copiar_hasta(p, "\\USUARIOS\\", c)
+                si longitud(p) + longitud(carpeta_de(actual.uid)) < c entonces concatenar(p, carpeta_de(actual.uid)) fin
+                devolver longitud(p)
+            caso 5:
+                devolver sesión
+        fin
+        devolver NO_VALE
+    fin
+
+    ; ¿queda algún administrador si el usuario id deja de serlo (o se quita)?
+    función queda_admin_sin(id: nat32): bool
+        variable i: nat32
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            si cuentas[i].usada y cuentas[i].admin y cuentas[i].id <> id entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; la 201: Configuración › Usuarios (USUARIOS.BIN). Crear, quitar y cambiar
+    ; los demás, solo un administrador; la contraseña propia, cada uno (con la
+    ; de antes, si la tenía)
+    función atender_usuarios_201(): nat32
+        variable c: puntero a Cuenta
+        variable id, r: nat32
+        variable soy_admin: bool
+        si actual.sello <> SELLO_USUARIOS entonces devolver NO_VALE fin
+        si no hay_cuentas entonces devolver NO_VALE fin        ; (sin sistema instalado no hay usuarios)
+        pu.nombre[23] := 0
+        si pu.n_clave > 127 o pu.n_vieja > 127 entonces devolver NO_VALE fin
+        soy_admin := es_admin_uid(actual.uid)
+        según nat16(pu.orden)
+            caso PU_CREA:
+                si no soy_admin entonces devolver DENEGADO fin
+                si no nombre_vale(dirección(pu.nombre[0]), 0) entonces devolver YA_EXISTE fin
+                id := Cuentas.nueva(dirección(pu.nombre[0]), pu.admin <> 0, pu.imagen, pu.entra_solo <> 0)
+                si id = 0 entonces devolver LLENO fin
+                c := de_id(id)
+                si pu.n_clave > 0 y no pon_clave(c, dirección(pu.clave[0]), pu.n_clave, falso) entonces
+                    Cuentas.quita(id)
+                    devolver MAL
+                fin
+                ; (que entre solo uno)
+                si c.entra_solo entonces
+                    para r desde 0 hasta MAX_CUENTAS - 1 hacer
+                        si cuentas[r].usada y cuentas[r].id <> id entonces cuentas[r].entra_solo := falso fin
+                    fin
+                fin
+                si no guarda_cuentas() entonces
+                    carga_cuentas()
+                    devolver PROTEGIDO
+                fin
+                imprimir2("cuentas: %s da de alta a %s\n", nat32(actual.nombre), nat32(dirección(c.nombre[0])))
+                devolver id
+            caso PU_QUITA:
+                si no soy_admin entonces devolver DENEGADO fin
+                c := de_id(pu.id)
+                si c = nulo entonces devolver NO_HAY fin
+                si pu.id = actual.uid o pu.id = sesión entonces devolver EN_USO fin
+                si c.admin y no queda_admin_sin(pu.id) entonces devolver EN_USO fin
+                Cuentas.quita(pu.id)
+                si no guarda_cuentas() entonces
+                    carga_cuentas()
+                    devolver PROTEGIDO
+                fin
+                devolver 0
+            caso PU_CAMBIA:
+                c := de_id(pu.id)
+                si c = nulo entonces devolver NO_HAY fin
+                si no soy_admin entonces
+                    ; (uno normal, solo su imagen)
+                    si pu.id <> actual.uid entonces devolver DENEGADO fin
+                    si pu.imagen > MAX_IMAGEN entonces devolver NO_VALE fin
+                    c.imagen := pu.imagen
+                sino
+                    si pu.nombre[0] <> 0 y no nombre_vale(dirección(pu.nombre[0]), pu.id) entonces devolver YA_EXISTE fin
+                    si pu.admin = 0 y c.admin y no queda_admin_sin(pu.id) entonces devolver EN_USO fin
+                    si pu.nombre[0] <> 0 entonces copiar_hasta(dirección(c.nombre[0]), dirección(pu.nombre[0]), MAX_NOMBRE_C) fin
+                    c.admin := pu.admin <> 0
+                    si pu.imagen <= MAX_IMAGEN entonces c.imagen := pu.imagen fin
+                    c.entra_solo := pu.entra_solo <> 0 y c.clave[0] = 0
+                    ; (que entre solo uno)
+                    si c.entra_solo entonces
+                        para r desde 0 hasta MAX_CUENTAS - 1 hacer
+                            si cuentas[r].usada y cuentas[r].id <> c.id entonces cuentas[r].entra_solo := falso fin
+                        fin
+                    fin
+                fin
+                si no guarda_cuentas() entonces
+                    carga_cuentas()
+                    devolver PROTEGIDO
+                fin
+                devolver 0
+            caso PU_CLAVE:
+                c := de_id(pu.id)
+                si c = nulo entonces devolver NO_HAY fin
+                si pu.id = actual.uid entonces
+                    ; la suya: con la de antes, si la tenía
+                    si c.clave[0] <> 0 entonces
+                        si espera_por_fallos() > 0 entonces devolver EN_USO fin
+                        si no comprueba_clave(c, dirección(pu.vieja[0]), pu.n_vieja, falso) entonces
+                            apunta_fallo()
+                            devolver MAL
+                        fin
+                        apunta_acierto()
+                    fin
+                sino si no soy_admin entonces
+                    devolver DENEGADO
+                fin
+                si pu.n_clave > 0 y pu.n_clave < 4 entonces devolver NOMBRE_MALO fin     ; (demasiado corta)
+                si no pon_clave(c, dirección(pu.clave[0]), pu.n_clave, falso) entonces devolver MAL fin
+                si no guarda_cuentas() entonces
+                    carga_cuentas()
+                    devolver PROTEGIDO
+                fin
+                imprimir2("cuentas: contraseña de %s cambiada (por %s)\n", nat32(dirección(c.nombre[0])), nat32(actual.nombre))
+                devolver 0
+        fin
+        devolver NO_VALE
+    fin
+
+    ; la 202: el servidor SSH (SSHD.BIN, su sello) pregunta. 0: ¿es esa la
+    ; contraseña (UTF-8) de ese usuario? -> su número, y el programa que lance
+    ; después (el intérprete de órdenes) será suyo; o DENEGADO (sin
+    ; contraseña no se entra por SSH). 1: el usuario de una llave que SSHD ya
+    ; ha comprobado (la de su AJUSTES\AUTORIZA.TXT): lo mismo, sin contraseña
+    función atender_usuarios_202(a: nat32): nat32
+        variable c: puntero a Cuenta
+        si actual.sello <> SELLO_SSHD entonces devolver NO_VALE fin
+        si no hay_cuentas entonces devolver NO_VALE fin
+        pu.nombre[23] := 0
+        si pu.n_clave > 127 entonces devolver NO_VALE fin
+        c := por_nombre(dirección(pu.nombre[0]))
+        si a = 1 entonces
+            si c = nulo entonces devolver DENEGADO fin
+            actual.uid_hijo := c.id
+            imprimir1("cuentas: SSH: entra %s (con su llave)\n", nat32(dirección(c.nombre[0])))
+            devolver c.id
+        fin
+        si a <> 0 entonces devolver NO_VALE fin
+        si espera_por_fallos() > 0 entonces dormir(espera_por_fallos()) fin
+        si c = nulo o c.clave[0] = 0 o no comprueba_clave(c, dirección(pu.clave[0]), pu.n_clave, cierto) entonces
+            apunta_fallo()
+            actual.uid_hijo := 0
+            devolver DENEGADO
+        fin
+        apunta_acierto()
+        actual.uid_hijo := c.id
+        imprimir1("cuentas: SSH: entra %s (con su contraseña)\n", nat32(dirección(c.nombre[0])))
+        devolver c.id
+    fin
+
+    función atender_usuarios(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        variable r: nat32
+        variable p: puntero a Pedido_argon
+        según nat16(n)
+            caso 200:
+                devolver atender_usuarios_200(a, b, c)
+            caso 201, 202:
+                si no puede(b, tamaño(Pedido_usuario), falso) entonces devolver NO_VALE fin
+                tomar(cerrojo_cuentas)
+                copiar_memoria(puntero(nat32(dirección(pu))), puntero(b), tamaño(Pedido_usuario))
+                si n = 201 entonces r := atender_usuarios_201() sino r := atender_usuarios_202(a) fin
+                llenar(puntero(nat32(dirección(pu))), tamaño(Pedido_usuario), 0)
+                soltar(cerrojo_cuentas)
+                devolver r
+            caso 209:
+                ; ARGON2.BIN: el pedido (a = 0) y la respuesta (a = 1); solo el
+                ; que ha puesto en marcha el núcleo para eso
+                si tarea_argon = 0 o actual.id <> tarea_argon o actual.sello <> SELLO_ARGON2 entonces devolver NO_VALE fin
+                si a = 0 entonces
+                    si c < tamaño(Pedido_argon) o no puede(b, tamaño(Pedido_argon), cierto) entonces devolver NO_VALE fin
+                    copiar_memoria(puntero(b), puntero(nat32(dirección(pedido_argon))), tamaño(Pedido_argon))
+                    devolver tamaño(Pedido_argon)
+                fin
+                si a = 1 entonces
+                    si no puede(b, 32, falso) entonces devolver NO_VALE fin
+                    copiar_memoria(dirección(respuesta_argon[0]), puntero(b), 32)
+                    hay_respuesta_argon := cierto
+                    devolver 0
+                fin
+            caso 210:
+                ; el azar del pozo del núcleo: b octetos (hasta 256) a a
+                si b = 0 o b > 256 o no puede(a, b, cierto) entonces devolver NO_VALE fin
+                azar(puntero(a), b)
+                devolver b
+        fin
+        devolver NO_VALE
+    fin
+
+    ; (USUARIOS) al arrancar, con los discos ya vistos (semilla.cas): los
+    ; usuarios del sistema instalado y la semilla del azar de la vez de antes
+    ; (AZAR.SEM; si no la hay, se hace. Se cambia al apagar: el disco no se
+    ; toca en cada arranque. Dos arranques con la misma semilla no dan el
+    ; mismo azar: lleva también el momento de cada interrupción y RDRAND)
+    público función arranca_cuentas()
+        carga_cuentas()
+        guarda_semilla(cierto)
+    fin
+
+    ; (USUARIOS) la semilla del pozo: con «leer» (al arrancar), se echa al
+    ; pozo la que hay y, si no la hay, se hace; sin «leer» (al apagar), se
+    ; escribe otra (si se puede escribir en el disco)
+    público función guarda_semilla(leer: bool)
+        variable r: arreglo [40] de byte
+        variable sem: arreglo [32] de byte
+        variable m, n, f, h: nat32
+        si del_sistema >= MAX_UNIDADES o en_memoria(del_sistema) entonces devolver fin
+        si unidades[del_sistema].clase <> U_FAT entonces devolver fin
+        ruta_del_sistema("AZAR.SEM", r, 40)
+        ahora(f, h)
+        si leer entonces
+            m := abrir_archivo(del_sistema, r, PARA_LEER)
+            si m < PRIMER_ERROR entonces
+                n := leer_archivo(m, sem, 32)
+                cerrar_archivo(m)
+                si n > 0 y n <= 32 entonces
+                    echar(sem, n, tics, (f << 16) xob h)
+                    con_semilla := cierto
+                    llenar(sem, 32, 0)
+                    devolver
+                fin
+            fin
+        fin
+        si no escribible(del_sistema) entonces devolver fin
+        azar(sem, 32)
+        m := abrir_archivo(del_sistema, r, PARA_CREAR)
+        si m < PRIMER_ERROR entonces
+            escribir_archivo(m, sem, 32)
+            cerrar_archivo(m)
+        fin
+        llenar(sem, 32, 0)
     fin
 
     ; ¿puede el programa INSTALAR escribir sector a sector en el disco d?
@@ -1175,7 +1814,7 @@ módulo Usuario
             caso 64, 65:
                 ; (PROTEGE) los sectores en crudo (se saltan la zona protegida y
                 ; los secretos): solo INSTALAR, o en modo administrador
-                si actual.sello <> SELLO_INSTALAR y no actual.admin entonces devolver DENEGADO fin
+                si (actual.sello <> SELLO_INSTALAR o no persona_admin(actual)) y no actual.admin entonces devolver DENEGADO fin     ; ((USUARIOS) INSTALAR, si lo lanza un administrador)
                 si no puede(b, tamaño(Pedido_disco), falso) entonces devolver NO_VALE fin
                 pd := puntero(b)
                 si pd.n = 0 o pd.n > 128 o no puede(pd.datos, pd.n * SECTOR, n = 64) entonces devolver NO_VALE fin
@@ -1199,7 +1838,8 @@ módulo Usuario
                 ; pasar por buenos los certificados caducados (TLS). Solo los
                 ; servicios, el asistente, INSTALAR y el modo administrador
                 ; (el Reloj lo pide con la 157); Configuración es del núcleo
-                si no actual.servicio y actual.sello <> SELLO_ASISTE y actual.sello <> SELLO_INSTALAR y no actual.admin entonces
+                ; ((USUARIOS) y el servicio, si no lo ha lanzado un usuario normal)
+                si (no persona_admin(actual) o (no actual.servicio y actual.sello <> SELLO_ASISTE y actual.sello <> SELLO_INSTALAR)) y no actual.admin entonces
                     imprimir2("permisos: acceso denegado a poner el reloj del sistema (%s, la tarea %u)\n", nat32(actual.nombre), actual.id)
                     devolver DENEGADO
                 fin
@@ -1207,14 +1847,24 @@ módulo Usuario
                 devolver 0
             caso 68:
                 si a = 0 entonces
-                    si lee_ajustes() entonces devolver 1 fin
+                    si lee_ajustes() entonces
+                        si no hay_cuentas entonces carga_cuentas() fin      ; (USUARIOS) el del asistente
+                        devolver 1
+                    fin
                     devolver 0
                 sino si a = 2 entonces
                     si instalado() entonces devolver 1 fin
                     devolver 0
                 fin
                 si c = 0 o no puede(b, c, cierto) entonces devolver NO_VALE fin
-                si a = 1 entonces copiar_hasta(puntero(b), Ajustes.usuario, c) sino copiar_hasta(puntero(b), Ajustes.equipo, c) fin
+                ; (USUARIOS) el usuario: el de la tarea (si no, el que ha entrado; si no, el de HISPA.INI)
+                si a = 1 y de_id(actual.uid) <> nulo entonces
+                    copiar_hasta(puntero(b), dirección(de_id(actual.uid).nombre[0]), c)
+                sino si a = 1 entonces
+                    copiar_hasta(puntero(b), nombre_de_sesión(), c)
+                sino
+                    copiar_hasta(puntero(b), Ajustes.equipo, c)
+                fin
                 devolver 0
         fin
         devolver NO_VALE
@@ -1645,6 +2295,9 @@ módulo Usuario
     fin
 
     público función prepara_usuario()
+        variable f, h: nat32
+        ahora(f, h)
+        prepara_pozo((f << 16) xob h)           ; (USUARIOS) el pozo del azar: el procesador (TSC, RDRAND) y la fecha
         prepara_permisos()                      ; (PROTEGE) la tabla de quién escribe qué
         pon_puerta(0x80, nat32(dirección(llamada_al_sistema)), PUERTA_USUARIO)
         al_cortar := nat32(dirección(cortar_actual))
@@ -1759,6 +2412,19 @@ módulo Usuario
             t.sello := sello
             t.servicio := servicio
             t.admin := actual <> nulo y actual.usuario y actual.admin
+            ; (USUARIOS) de quién es: de quien lo lanza (SSHD da el del que ha
+            ; entrado por SSH: uid_hijo); lo que lanza el núcleo, del que está
+            ; delante (en la pantalla de entrada, nadie: el sistema)
+            si actual <> nulo y actual.usuario entonces
+                t.uid := actual.uid
+                t.remota := actual.remota o actual.uid_hijo <> 0
+                si actual.uid_hijo <> 0 entonces
+                    t.uid := actual.uid_hijo
+                    actual.uid_hijo := 0
+                fin
+            sino
+                t.uid := sesión
+            fin
         fin
         reponer(b)
         si t = nulo entonces

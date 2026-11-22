@@ -1,0 +1,233 @@
+; =============================================================================
+;  pozo.cas - (USUARIOS) el pozo del azar del núcleo de Hispa-Pentium (desde
+;  la 0.9, por la revisión de seguridad del 21/11/2026: «el azar sale solo
+;  del contador de ciclos en el primer arranque»).
+;
+;  DE DÓNDE SALE. Cada interrupción (el reloj, el teclado, el ratón, la
+;  tarjeta de red) y cada lectura del disco echan al pozo el momento exacto
+;  en que han llegado (los 32 bits bajos del contador de ciclos, el TSC: lo
+;  que varía de una vez a otra son los de abajo); el teclado y el ratón,
+;  además, lo que se ha pulsado. Eso se va juntando, sin cuentas, en un
+;  anillo de 32 palabras (barato: se hace dentro de las interrupciones).
+;  Cuando alguien pide azar, el anillo, el estado de antes, el contador de
+;  ciclos, los tics, la fecha y, si el procesador lo tiene, RDRAND (Ivy
+;  Bridge y siguientes; los Pentium y los Atom de antes no) se mezclan con
+;  SHA-256 en el ESTADO (32 octetos); de él sale lo que se pide (SHA-256 del
+;  estado con un contador) y el estado se cambia otra vez detrás (lo que ya
+;  se ha dado no se puede volver a sacar del estado de después).
+;
+;  DE UN ARRANQUE A OTRO. En \HISPA\AZAR.SEM (un secreto: solo lo lee el
+;  núcleo, permisos.cas) se guardan 32 octetos sacados del pozo: al arrancar
+;  se echan al pozo (si no la hay, se hace) y al apagar se escribe otra (el
+;  disco no se toca en cada arranque). Dos arranques con la misma semilla no
+;  empiezan igual: llevan también el momento de cada interrupción y RDRAND.
+;
+;  QUIÉN LO USA. El núcleo (las sales de las contraseñas: cuentas.cas) y los
+;  programas por la llamada 210 (hasta 256 octetos cada vez): TLS.BIN,
+;  SSH.BIN, SSHD.BIN, WG.BIN, TAILSCAL.BIN (hispac/hispa.c, h_azar) y
+;  WIFI.BIN (wifi/compat/base.c, hl_azar: las claves de WPA2).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Pozo
+
+    importar Cpu, Sha256
+
+    ; ---- de dónde viene cada ruido (para que dos iguales no se anulen) ----
+    público constante R_RELOJ = 1
+    público constante R_TECLADO = 2
+    público constante R_RATÓN = 3
+    público constante R_RED = 4
+    público constante R_DISCO = 5
+    público constante R_LLAMADA = 6
+
+    constante ANILLO = 32
+    variable anillo: arreglo [ANILLO] de nat32
+    variable pos: nat32
+    variable estado: arreglo [32] de byte
+    variable contador: nat32
+    variable mirado: bool                       ; se ha mirado si hay TSC y RDRAND
+    público variable hay_tsc: bool
+    público variable hay_rdrand: bool
+    público variable ruidos: nat32              ; los que han llegado (para ver lo que pasa)
+    público variable sacados: nat32             ; los octetos que se han dado
+    público variable con_semilla: bool          ; se ha echado la semilla de antes (AZAR.SEM)
+    variable bloque: arreglo [96] de byte       ; lo que se resume cada vez
+
+    ; ---- el procesador: ¿TSC? ¿RDRAND? (sin CPUID, ninguno) ----
+    función mira_cpu()
+        variable a, c, d: nat32
+        mirado := cierto
+        ensamblador
+            pushfd
+            pop eax
+            mov ecx, eax
+            xor eax, 0x200000
+            push eax
+            popfd
+            pushfd
+            pop eax
+            push ecx
+            popfd
+            xor eax, ecx
+            mov {a}, eax
+        fin
+        si a yb 0x200000 = 0 entonces devolver fin
+        ensamblador
+            push ebx
+            xor eax, eax
+            db 0x0F, 0xA2                       ; cpuid (NASM va con «cpu 386»)
+            mov {a}, eax
+            pop ebx
+        fin
+        si a < 1 entonces devolver fin
+        ensamblador
+            push ebx
+            mov eax, 1
+            db 0x0F, 0xA2                       ; cpuid (NASM va con «cpu 386»)
+            mov {c}, ecx
+            mov {d}, edx
+            pop ebx
+        fin
+        hay_tsc := d yb 0x10 <> 0
+        hay_rdrand := c yb 0x40000000 <> 0
+    fin
+
+    ; los 32 bits bajos del contador de ciclos (0 si no lo hay)
+    función tsc(): nat32
+        variable a: nat32
+        a := 0
+        si hay_tsc entonces
+            ensamblador
+                db 0x0F, 0x31                   ; rdtsc
+                mov {a}, eax
+            fin
+        fin
+        devolver a
+    fin
+
+    ; una palabra de RDRAND (con sus diez intentos, como dice Intel); 0 si no sale
+    función rdrand(): nat32
+        variable a, bien: nat32
+        a := 0
+        bien := 0
+        si no hay_rdrand entonces devolver 0 fin
+        ensamblador
+            mov ecx, 10
+        .otra:
+            db 0x0F, 0xC7, 0xF0                 ; rdrand eax
+            jc .bien
+            dec ecx
+            jnz .otra
+            xor eax, eax
+            jmp .fuera
+        .bien:
+            mov dword {bien}, 1
+        .fuera:
+            mov {a}, eax
+        fin
+        devolver a
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El ruido: desde las interrupciones (sin cerrojos ni cuentas largas)
+    ; -------------------------------------------------------------------------
+    ; «fuente» (R_...) y un dato suyo (la tecla, el movimiento del ratón)
+    público función ruido(fuente: nat32, dato: nat32)
+        variable i, t: nat32
+        si no mirado entonces devolver fin       ; (aún no se ha mirado el procesador: prepara_pozo)
+        t := tsc()
+        i := pos yb (ANILLO - 1)
+        anillo[i] := ((anillo[i] << 7) ob (anillo[i] >> 25)) xob t xob (fuente << 28) xob (dato * 0x9E3779B1)
+        pos := pos + 1
+        ruidos := ruidos + 1
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Mezclar y sacar (con las interrupciones tapadas mientras: el resumen
+    ;  es uno solo, el de Sha256, y lo usan todos)
+    ; -------------------------------------------------------------------------
+    función pon32(p: puntero a byte, v: nat32)
+        p[0] := byte(v)
+        p[1] := byte(v >> 8)
+        p[2] := byte(v >> 16)
+        p[3] := byte(v >> 24)
+    fin
+
+    ; el estado nuevo: SHA-256 del de antes, el anillo, el contador de
+    ; ciclos, RDRAND y lo que se dé (n octetos de p; puede ser nada)
+    función mezcla(p: puntero a byte, n: nat32, tics_: nat32, fecha_: nat32)
+        variable i: nat32
+        empezar()
+        añadir(estado, 32)
+        añadir(puntero(nat32(dirección(anillo[0]))), ANILLO * 4)
+        pon32(bloque, tsc())
+        pon32(dirección(bloque[4]), rdrand())
+        pon32(dirección(bloque[8]), rdrand())
+        pon32(dirección(bloque[12]), tics_)
+        pon32(dirección(bloque[16]), fecha_)
+        pon32(dirección(bloque[20]), contador)
+        pon32(dirección(bloque[24]), ruidos)
+        añadir(bloque, 28)
+        si n > 0 entonces añadir(p, n) fin
+        acabar_octetos(estado)
+        ; (lo del anillo ya está dentro: se revuelve para que no cuente dos veces igual)
+        para i desde 0 hasta ANILLO - 1 hacer anillo[i] := anillo[i] xob (nat32(estado[i]) * 0x01000193) fin
+    fin
+
+    ; echa al pozo n octetos de p (la semilla de antes, algo que dé un servicio)
+    público función echar(p: puntero a byte, n: nat32, tics_: nat32, fecha_: nat32)
+        variable b: nat32
+        si no mirado entonces mira_cpu() fin
+        b := sin_interrupciones()
+        mezcla(p, n, tics_, fecha_)
+        reponer(b)
+    fin
+
+    ; n octetos de azar (los que sean) a «destino»
+    público función sacar(destino: puntero a byte, n: nat32, tics_: nat32, fecha_: nat32)
+        variable b, k, i: nat32
+        variable sale: arreglo [32] de byte
+        si no mirado entonces mira_cpu() fin
+        mientras n > 0 hacer
+            b := sin_interrupciones()
+            mezcla(nulo, 0, tics_, fecha_)
+            contador := contador + 1
+            empezar()
+            añadir(estado, 32)
+            pon32(bloque, contador)
+            bloque[4] := 's'
+            bloque[5] := 'a'
+            bloque[6] := 'l'
+            bloque[7] := 'e'
+            añadir(bloque, 8)
+            acabar_octetos(sale)
+            ; y el estado, otra vez: lo dado no se saca del de después
+            contador := contador + 1
+            empezar()
+            añadir(estado, 32)
+            pon32(bloque, contador)
+            bloque[4] := 'o'
+            bloque[5] := 't'
+            bloque[6] := 'r'
+            bloque[7] := 'a'
+            añadir(bloque, 8)
+            acabar_octetos(estado)
+            reponer(b)
+            k := n
+            si k > 32 entonces k := 32 fin
+            para i desde 0 hasta k - 1 hacer destino[i] := sale[i] fin
+            para i desde 0 hasta 31 hacer sale[i] := 0 fin
+            destino := destino + k
+            n := n - k
+            sacados := sacados + k
+        fin
+    fin
+
+    ; al arrancar (prepara_usuario): se mira el procesador y se echa lo que
+    ; haya (el contador de ciclos, RDRAND, la fecha)
+    público función prepara_pozo(fecha_: nat32)
+        mira_cpu()
+        echar(nulo, 0, 0, fecha_)
+    fin
+
+fin Pozo.

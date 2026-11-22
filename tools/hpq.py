@@ -35,6 +35,11 @@
 #        sistema=<nombre>               (0.8.6: es del sistema; PAQUETES ACTUALIZA
 #                                        lo instala si no está, salvo si se ha
 #                                        quitado a propósito: QUITADOS.TXT)
+#        serie=<N>                      (USUARIOS, 22/11/2026: la pone «firma», detrás
+#                                        de la primera línea, y la sube cada vez:
+#                                        PAQUETES no usa un catálogo de Internet con
+#                                        la serie más baja que la última que vio,
+#                                        contra la vuelta atrás a versiones viejas)
 #
 #  (PROGRAMAS) El tipo: uno de los códigos de TIPOS (sistema, oficina,
 #  internet...: docs/PENTIUM.md, sección 13, «El tipo de cada paquete»). Si
@@ -71,7 +76,10 @@
 #               archivo PRIVADA, con permisos 600; dice la pública)
 #    hpq.py publica PRIVADA [clave.cas]  (la pública; con clave.cas, el
 #               módulo de Castel que la lleva)
-#    hpq.py firma CARPETA PRIVADA     (CATALOGO.FIR del CATALOGO.TXT de ahí)
+#    hpq.py firma CARPETA PRIVADA [--serie N]   (CATALOGO.FIR del CATALOGO.TXT de
+#               ahí; antes le pone «serie=N»: la de ahora más uno, y como poco
+#               los segundos desde 1970, así sube aunque el catálogo se rehaga;
+#               --serie, para las pruebas)
 #    hpq.py catalogo CARPETA [--clave PRIVADA]   (y, con la clave, firmado)
 #    hpq.py comprueba CARPETA PUBLICA (si CATALOGO.FIR es buena; PUBLICA: las
 #               64 cifras, o un clave.cas)
@@ -83,6 +91,7 @@ import hashlib
 import os
 import re
 import sys
+import time
 
 MAGIA = 'HPQ 1'
 MAGIA_CATALOGO = 'HPQ-CATALOGO 1'
@@ -202,9 +211,17 @@ VERSION_SONIDO = VERSION_085
 # de un paquete grande, «Cancelar», mira si cabe antes de bajar y borra lo
 # bajado) y DESCARGAR /CANCELA=. Suben base, red y paquetes
 VERSION_086 = '0.8.6'
+# (USUARIOS, 22/11/2026, rama usuarios) la 0.8.7: los usuarios con contraseña
+# (la pantalla de entrada, \USUARIOS, Configuración > Usuarios: USUARIOS.BIN;
+# las contraseñas, con Argon2id: ARGON2.BIN) y el pozo del azar del núcleo
+# (las llamadas 200 a 210) en la base; SSHD con los usuarios (ssh); el azar del
+# núcleo en TLS.BIN (tls), WIFI.BIN (wifi), SSH, WG y TAILSCAL (hispac/hispa.c:
+# ssh y tailscal); PAQUETES 1.4 (la serie del catálogo, solo el administrador instala)
+VERSION_USUARIOS = '0.8.7'
 SISTEMA = [
-    ('base', VERSION_086, 'El sistema base: el núcleo, el intérprete de órdenes, el asistente, INSTALAR y el arranque', '', [
+    ('base', VERSION_USUARIOS, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR y el arranque', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
+        ('USUARIOS.BIN', r'\HISPA\USUARIOS.BIN'), ('ARGON2.BIN', r'\HISPA\ARGON2.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
@@ -226,20 +243,20 @@ SISTEMA = [
     # (PROGRAMAS) la 1.2 (sobre la 1.1, la de la revisión de seguridad): los tipos,
     # REPARA, ARCHIVOS, SUELTOS, QUITA /DEPENDIENTES y la ventana unificada
     # «Programas y actualizaciones» (PROGRAMA.BIN, con los controles: base 0.8.2)
-    ('paquetes', '1.3', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
+    ('paquetes', '1.4', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
         ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN')]),
     ('red', VERSION_086, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
-    ('tls', VERSION_085, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
+    ('tls', VERSION_USUARIOS, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
         ('TLS.BIN', r'\HISPA\TLS.BIN'), ('HTTPS.BIN', r'\HISPA\HTTPS.BIN')]),
-    ('ssh', VERSION_084, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, apagado hasta que se encienda)', 'base >= 0.8.4, red >= 0.8.4', [
+    ('ssh', VERSION_USUARIOS, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, con los usuarios del equipo; apagado hasta que se encienda)', 'base >= ' + VERSION_USUARIOS + ', red >= 0.8.4', [
         ('SSH.BIN', r'\HISPA\SSH.BIN'), ('SSHD.BIN', r'\HISPA\SSHD.BIN')]),
-    ('tailscal', VERSION_084, 'Tailscale y WireGuard: la red privada de sus equipos, cada uno con su nombre y su IP 100.x', 'base >= 0.8.4, red >= 0.8.4, tls >= 0.8.1', [
+    ('tailscal', VERSION_USUARIOS, 'Tailscale y WireGuard: la red privada de sus equipos, cada uno con su nombre y su IP 100.x', 'base >= 0.8.4, red >= 0.8.4, tls >= 0.8.1', [
         ('TAILSCAL.BIN', r'\HISPA\TAILSCAL.BIN'), ('WG.BIN', r'\HISPA\WG.BIN')]),
     # (WIFI) el Wi-Fi (castel/nucleo32/wifi/, docs/PENTIUM.md «El Wi-Fi»); el microcódigo, con su licencia
-    ('wifi', VERSION_WIFI, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
+    ('wifi', VERSION_USUARIOS, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
      'base >= ' + VERSION_WIFI + ', red >= ' + VERSION_WIFI, [
         ('WIFI.BIN', r'\HISPA\WIFI.BIN'), ('REDWIFI.BIN', r'\HISPA\REDWIFI.BIN'), ('WIFI.TXT', r'\HISPA\WIFI.TXT'),
         ('BCM43XX.FW', r'\HISPA\BCM43XX.FW'), ('BCM43XXH.FW', r'\HISPA\BCM43XXH.FW'), ('BCM43XX.TXT', r'\HISPA\BCM43XX.TXT')]),
@@ -572,8 +589,33 @@ def modulo_clave(pub):
             'fin Clave.\n') % (pub.hex()[:16], filas)
 
 
-def firma(carpeta, privada):
+def pon_serie(carpeta, serie=None):
+    """(USUARIOS) «serie=N» en CATALOGO.TXT, detrás de la primera línea: N, la
+    que se diga o la de antes más uno (y, como poco, los segundos desde 1970:
+    sube aunque «catalogo» haya rehecho el archivo sin ella). Da N."""
+    ruta = os.path.join(carpeta, 'CATALOGO.TXT')
+    filas = open(ruta, 'rb').read().split(b'\r\n')
+    vieja = 0
+    for x in filas:
+        if x.startswith(b'serie='):
+            try:
+                vieja = int(x[6:].decode())
+            except ValueError:
+                pass
+    filas = [x for x in filas if not x.startswith(b'serie=')]
+    if serie is None:
+        serie = max(vieja + 1, int(time.time()))
+    if serie < 1 or serie > 0xFFFFFFFF:
+        falla('la serie %d no vale (de 1 a 4294967295)' % serie)
+    filas.insert(1, b'serie=%d' % serie)
+    with open(ruta, 'wb') as f:
+        f.write(b'\r\n'.join(filas))
+    return serie
+
+
+def firma(carpeta, privada, serie=None):
     k = lee_privada(privada)
+    pon_serie(carpeta, serie)
     datos = open(os.path.join(carpeta, 'CATALOGO.TXT'), 'rb').read()
     f = k.sign(datos)
     with open(os.path.join(carpeta, 'CATALOGO.FIR'), 'wb') as s:
@@ -633,7 +675,7 @@ def principal(a):
         n = catalogo(a[2])
         print('hpq: %s con %d paquetes' % (os.path.join(a[2], 'CATALOGO.TXT'), n))
         if len(a) > 4 and a[3] == '--clave':
-            firma(a[2], a[4])
+            firma(a[2], a[4], int(a[6]) if len(a) > 6 and a[5] == '--serie' else None)
             print('hpq: %s, firmado' % os.path.join(a[2], 'CATALOGO.FIR'))
         return 0
     if orden == 'clave':
@@ -648,7 +690,7 @@ def principal(a):
         print(pub.hex())
         return 0
     if orden == 'firma':
-        firma(a[2], a[3])
+        firma(a[2], a[3], int(a[5]) if len(a) > 5 and a[4] == '--serie' else None)
         print('hpq: %s, firmado' % os.path.join(a[2], 'CATALOGO.FIR'))
         return 0
     if orden == 'comprueba':

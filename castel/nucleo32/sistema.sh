@@ -26,7 +26,7 @@ python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT10.BIN 1024 768 32 
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT6.BIN 1024 600 32 > /dev/null
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT13.BIN 1366 768 32 > /dev/null
 MODULOS=
-for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO udisposi:DISPOSIT upaquete:PAQUETES uactual:ACTUALIZ uprogram:PROGRAMA uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE umuestra:MUESTRA ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uhttps:HTTPS uredwifi:REDWIFI uinstala:INSTALAR uasiste:ASISTE ucalc:CALC ureloj:RELOJ ucaract:CARACTER; do
+for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO udisposi:DISPOSIT upaquete:PAQUETES uactual:ACTUALIZ uprogram:PROGRAMA uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE umuestra:MUESTRA ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uhttps:HTTPS uredwifi:REDWIFI uinstala:INSTALAR uasiste:ASISTE ucalc:CALC ureloj:RELOJ ucaract:CARACTER ucuentas:USUARIOS; do
   f=${p%%:*}; N=${p##*:}
   python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $W/$f.asm > /dev/null
   nasm -f bin $W/$f.asm -o $W/f/$N.BIN
@@ -56,7 +56,8 @@ MODULOS="$MODULOS  module /TLS.BIN TLS.BIN
 # (SSH) el cliente y el servidor SSH, WireGuard y Tailscale (nucleo32/hispac/:
 # C con Monocypher), igual: en la raíz, como módulos y, al instalar, a \HISPA
 bash $AQUI/hispac/hacer.sh $W/f
-for N in SSH SSHD WG TAILSCAL; do
+# ((USUARIOS) y ARGON2.BIN, el que resume las contraseñas de los usuarios)
+for N in SSH SSHD WG TAILSCAL ARGON2; do
   MODULOS="$MODULOS  module /$N.BIN $N.BIN
 "
 done

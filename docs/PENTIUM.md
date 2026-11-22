@@ -2860,6 +2860,19 @@ instalado. Un PAQUETES de antes no mira esas líneas: un equipo con la 1.2 se
 pone al día en dos veces (la primera trae PAQUETES 1.3; tras reiniciar, la
 bandeja avisa de los nuevos del sistema y «Actualizar todo» los pone).
 
+**La serie** (22/11/2026, rama `usuarios`, por la revisión de seguridad: M3).
+La segunda línea del catálogo firmado es `serie=N`: la pone `hpq.py firma` (y
+`catalogo --clave`), dentro de lo firmado, y la sube cada vez (la de antes más
+uno y, como poco, los segundos desde 1970: sube aunque `catalogo` haya rehecho
+el archivo; `--serie N` para las pruebas). PAQUETES 1.4 apunta la más alta que
+ha visto en `C:\HISPA\PAQUETES\SERIE.TXT` y **no usa un catálogo de Internet
+con la serie más baja** (o sin serie, si ya ha visto una): «el catálogo de
+Internet es más viejo (serie 50) que el último que se ha usado (serie 100): no
+se usa». Así nadie le puede servir otra vez un catálogo viejo, firmado de
+verdad, con versiones que tenían fallos ya arreglados. Uno de una carpeta del
+equipo (el CD, una memoria USB) más viejo se usa, con un aviso (lo ha puesto ahí
+quien está delante). Un PAQUETES de antes no mira esa línea.
+
 ### Lo instalado: C:\HISPA\PAQUETES
 
 Un **registro por paquete**, `NOMBRE.PQI`: **la cabecera de su paquete, tal
@@ -3219,8 +3232,9 @@ sus archivos, así que con firmar el catálogo queda atado todo.
   es su firma buena, con la clave del sistema.
 - **`tools/hpq.py`**: `clave PRIVADA` (una nueva: la privada al archivo, 600, y
   dice la pública), `publica PRIVADA [clave.cas]` (y el módulo de Castel),
-  `firma CARPETA PRIVADA`, `catalogo CARPETA --clave PRIVADA` (hace el catálogo y
-  lo firma) y `comprueba CARPETA PUBLICA`. Usa el módulo `cryptography` de Python.
+  `firma CARPETA PRIVADA [--serie N]` (antes pone la serie: arriba),
+  `catalogo CARPETA --clave PRIVADA` (hace el catálogo y lo firma) y
+  `comprueba CARPETA PUBLICA`. Usa el módulo `cryptography` de Python.
 - **Cambiar de clave** (si la privada se perdiera o se supiera): una nueva con
   `hpq.py clave`, `hpq.py publica ... clave.cas`, y sacar un `paquetes` nuevo
   firmado aún con la vieja (que lleva ya la clave nueva); luego, todo con la
@@ -4713,10 +4727,13 @@ tabla: si su programa no está, no casan). ClicGest no cambia: sigue guardando `
   quien sea quien lo lance; así, un programa malo puede lanzar
   `\HISPA\SSHD.BIN /CLAVE` y teclearle una contraseña por un terminal suyo
   (llamada 37). PAQUETES está a salvo (solo instala lo firmado); SSHD,
-  TAILSCAL y WG, no del todo: cuando haya usuarios, sus órdenes de
-  configuración pedirán el modo administrador.
-- **No hay usuarios ni contraseña** para el modo administrador: lo da quien
-  esté delante del equipo.
+  TAILSCAL y WG, no del todo. (USUARIOS) Con usuarios: lo que escriben
+  PAQUETES e INSTALAR en toda la zona y la configuración de SSHD, WG y
+  TAILSCAL valen solo si quien los lanza es administrador (o el sistema);
+  SSHD dice que no a /ENCENDER, /APAGAR, /PUERTO y /CLAVE de un usuario normal.
+- ~~**No hay usuarios ni contraseña** para el modo administrador: lo da quien
+  esté delante del equipo.~~ Desde la rama `usuarios` (22/11), con usuarios,
+  solo lo pide un administrador y con **su** contraseña (sección 14 tredecies).
 - **La memoria USB de arranque** (con «escritura=usb»): su raíz no es toda
   zona protegida (sus documentos, sí se escriben), solo lo de la tabla.
 - **Otras unidades** con un `\HISPA` (otro disco, una memoria USB) no están
@@ -6010,6 +6027,182 @@ vueltas sin un fallo). En Hispa-Pentium: las órdenes en el intérprete (lo
 sacado, igual octeto a octeto que lo de Linux, y el ZIP hecho allí, bueno para
 el `unzip` de Linux) y la ventana desde el explorador, con capturas; y el
 Mirador con sus seis imágenes de prueba, el tapiz y otro arranque.
+
+## 14 tredecies. Los usuarios, sus contraseñas y sus carpetas (USUARIOS)
+
+*22/11/2026, rama `usuarios` («usuarios con contraseña y carpetas propias»,
+METAS; y lo que quedaba de la revisión de seguridad del 21/11: la serie del
+catálogo, el pozo del azar y SSHD con los usuarios). Lo cambiado en archivos
+de todos lleva la marca «(USUARIOS)»; lo nuevo, en `cuentas.cas` (los
+usuarios y la sesión), `entrada.cas` (la pantalla de entrada), `pozo.cas` (el
+azar), `ucuentas.cas` (`USUARIOS.BIN`) y `hispac/argon2.c` (`ARGON2.BIN`).*
+
+### Cómo se usa
+
+- **La pantalla de entrada.** Con el escritorio: los usuarios, cada uno con su
+  cara (un color y una señal de 1 a 10 puntos), su nombre y su tipo; el elegido,
+  con un borde grueso, una flecha y su nombre en negrita (nada depende solo
+  del color). Las flechas cambian de usuario; con contraseña se escribe (salen
+  puntos) e Intro o «Entrar»; sin ella, Intro. Abajo, «Reiniciar» y «Apagar».
+  Va por delante de todas las ventanas (también de las que salgan luego) y se
+  lleva todas las teclas: ni el logo, ni Alt+Tab, ni Ctrl+Alt+Supr la saltan
+  (`Ventanas.cortina`).
+- **Entra solo** el usuario que lo tiene marcado y no tiene contraseña (la
+  biblioteca del HP Mini: un usuario «Biblioteca», normal, sin contraseña y
+  «Entra solo al encender»). Si no hay ninguno así, la pantalla.
+- **Cerrar sesión** (menú Inicio, «Apagar el equipo» › Cerrar sesión, o
+  logo+L): se cierran sus programas (los que queden se acaban: los suyos, no
+  los del sistema) y sale la pantalla de entrada, para él o para otro (aunque
+  haya uno que entra solo). Al entrar, lo suyo: el dock, lo fijado en el menú
+  Inicio, los accesos del tapiz (de su carpeta de ajustes) y «Hola, Bea».
+- **Configuración › «Usuarios...»** (`USUARIOS.BIN`; una sección aparte: el
+  Panel de control la abre con `\USUARIOS.BIN`): la lista (nombre, tipo, si
+  tiene contraseña, si entra solo; «(usted)» detrás del suyo), y del elegido: el nombre, el
+  tipo, la imagen, entrar solo, guardar y quitar; la contraseña (la de ahora,
+  si es la suya; la nueva dos veces), «Quitarla»; y «Usuario nuevo». Un
+  administrador lo hace todo; uno normal, su contraseña y su imagen.
+- **En la Consola** (y por SSH), las mismas cosas: `USUARIOS` (la lista; con el
+  escritorio, la ventana), `USUARIOS /LISTA`, `USUARIOS /NUEVO nombre [/ADMIN]
+  [/SOLO]` (pregunta la contraseña con asteriscos; Intro, sin ella), `USUARIOS
+  /CLAVE nombre`, `/QUITA nombre`, `/TIPO nombre ADMIN|NORMAL`, `/IMAGEN nombre
+  N`, `/SOLO nombre SI|NO`.
+- **Sin escritorio** (`ordenes` en la línea del cargador): «Usuario:» y
+  «Contraseña:» (con asteriscos) en la consola de texto (si entra uno solo, sin
+  preguntar). Al acabar el intérprete (SALIR) se sale, y otra vez la entrada.
+  **La consola del núcleo** (la de `lanzar`, `dir`... sección 9) es para un
+  administrador: uno normal entra derecho al intérprete y, al salir, sale.
+- **La migración**: un sistema de antes (sin `USUARIOS.TXT`) tiene el usuario de
+  `HISPA.INI` como administrador, sin contraseña y entrando solo: todo sigue
+  como estaba. `USUARIOS.TXT` no se escribe hasta que se cambia algo; entonces
+  cada uno recibe su carpeta. Sin sistema instalado (la memoria USB de
+  arranque, el CD) no hay usuarios.
+
+### Lo de cada uno
+
+- **Su carpeta**: `\USUARIOS\<CARPETA>\` (las letras y cifras del nombre, en
+  mayúsculas, hasta 8: `ANA`, `BIBLIOTE`), con `DOCUMENT` (Mis documentos: el
+  menú Inicio los busca ahí y, si no hay ninguno, abre esa carpeta en Mi
+  equipo), `ESCRITOR` y `AJUSTES` (`DOCK.INI`, `INICIO.INI`,
+  `ATAJOS.INI`, y `AUTORIZA.TXT`: sus llaves de SSH). **Solo la leen y la
+  escriben su dueño y el modo administrador** (permisos.cas: «acceso
+  denegado» al abrirla, verla, escribir, borrar, llevarse algo, lanzar un
+  programa de ella); `\USUARIOS` se mira, pero solo el núcleo hace carpetas en
+  él. Quitar un usuario no borra su carpeta.
+- **Tipos**: el **administrador** instala y quita programas (PAQUETES:
+  «solo un administrador puede instalar, actualizar o quitar programas»; y el
+  núcleo, además, no deja a un PAQUETES lanzado por uno normal escribir en
+  `\HISPA`, salvo su serie y lo bajado), cambia la hora (la 67), pide el modo
+  administrador (la 157, **con su contraseña**: en la ventanita del núcleo,
+  en la consola o en el terminal de SSH; sin contraseña, el «Sí, dárselo» de
+  antes), da de alta a los demás y enciende SSHD. El **normal**, lo suyo. Siempre
+  queda al menos un administrador. Lo que escribe un programa del sistema
+  lanzado por un usuario normal tampoco vale en lo delicado: `GRUB.CFG`,
+  `GRUBENV` (qué núcleo arranca) y `HISPA.INI` (ASISTE, ACTUALIZ:
+  `regla_admin`), la configuración de SSHD, WG y TAILSCAL, toda la zona de
+  PAQUETES e INSTALAR; ni la hora (la 67) ni el disco en crudo (la 64) de
+  ASISTE e INSTALAR.
+- **Quién es cada programa**: `Tarea.uid` (tareas.cas): el de quien lo lanza;
+  lo que lanza el escritorio, del que ha entrado; lo que pone en marcha el
+  núcleo (los servicios, lo del arranque), 0, el sistema (que no entra en
+  ninguna carpeta de usuario).
+
+### Las contraseñas
+
+- **Nunca se guardan**: en `\HISPA\USUARIOS.TXT` (un secreto: solo lo lee el
+  núcleo; con el modo administrador se ve) va su resumen **Argon2id** (RFC
+  9106; 12 MB de memoria, 3 pasadas, un hilo: lo que pide la OWASP), con una
+  sal de 16 octetos del pozo del azar: `u=1|A|0|0|ANA|Ana|argon2id$12288$3$<sal>$<resumen>`.
+  Cada resumen lleva su memoria y sus pasadas (se pueden subir sin perder las
+  de antes). Se escribe por `USUARIOS.NUE` (si se va la luz, queda uno entero).
+- **Las resume `ARGON2.BIN`** (C, Monocypher 4: el núcleo es de Castel, sin
+  números de 64 bits): el núcleo lo pone en marcha de `\HISPA` cada vez,
+  le da el pedido por la llamada 209 (solo a esa tarea, con su sello: un
+  ARGON2.BIN lanzado a mano no recibe nada) y recoge los 32 octetos; no toca
+  el disco, y borra la memoria al acabar. La contraseña se resume en UTF-8
+  (desde la pantalla, en la página 437, la pasa él): la misma por SSH. En QEMU
+  tarda unos 0,7 s; en un Pentium M, algo menos.
+- **Los intentos malos** (la pantalla, el modo administrador, SSH, todos
+  juntos): desde el tercero seguido, una espera que dobla cada vez (hasta un
+  minuto).
+- **Sin `ARGON2.BIN`** no se puede entrar con contraseña («falta ARGON2.BIN»);
+  sin contraseña, sí.
+
+### Lo que no cubre (y por qué)
+
+- **El disco leído desde otro sistema.** Las carpetas y `USUARIOS.TXT` los
+  guarda el núcleo de Hispa-Pentium: quien saque el disco y lo lea en otro
+  equipo (o arranque otro sistema desde una memoria USB, o cambie la línea de
+  GRUB) lo lee todo, porque **no hay cifrado**. Las contraseñas no se pueden
+  sacar del resumen (Argon2id, con su sal), pero los documentos están en
+  claro. Para eso haría falta cifrar el disco o las carpetas (queda por hacer).
+- **ClicGest**: su sesión guardada (`\HISPA\CLICGEST.SES`) es una para todo
+  el equipo: quien abra ClicGest con otro usuario entra con la sesión de quien
+  marcó «recordarme» (habría que llevarla a la carpeta de cada uno: en
+  ClicGest, que tiene su repositorio). Y «Salir» no corta la sesión en el
+  servidor: la API de ClicGest no tiene `/api/v1/admin/logout` (se corta desde la
+  web, en las sesiones por equipo).
+- Un servicio que lanza a mano un usuario (TAILSCALE /VENTANA desde la bandeja)
+  es de ese usuario: si es normal, no cambia la configuración del túnel.
+
+### El azar del núcleo (pozo.cas)
+
+Cada interrupción (el reloj, el teclado, el ratón, la red) y cada lectura del
+disco echan el momento exacto (el contador de ciclos) a un anillo; al pedir
+azar se mezcla con SHA-256 con el estado de antes, el contador de ciclos,
+RDRAND (si el procesador lo tiene), los tics y la fecha; lo que sale es el
+SHA-256 del estado con un contador, y el estado cambia detrás. La semilla de
+una vez a otra va en `\HISPA\AZAR.SEM` (secreto: solo el núcleo): se hace en
+el primer arranque y se cambia al apagar (en los demás arranques el disco no se
+toca: las pruebas que comparan el disco octeto a octeto siguen valiendo); dos
+arranques con la misma semilla no dan el mismo azar, por el momento de cada
+interrupción y RDRAND. Los programas lo piden con la **llamada 210**
+(hasta 256 octetos); lo usan TLS.BIN (con lo suyo), SSH, SSHD, WG y TAILSCAL
+(`h_azar`, en hispac/hispa.c), WIFI.BIN (las claves de WPA2: la SNonce;
+`hl_azar`) y las sales de las contraseñas. Con un núcleo de antes, cada uno
+sigue con su azar de siempre.
+
+### SSH con los usuarios
+
+`SSHD` (sección 14 quinquies), con usuarios: se entra con el nombre de un
+usuario y **su** contraseña (la comprueba el núcleo, la llamada 202), o con
+una llave de su `\USUARIOS\<CARPETA>\AJUSTES\AUTORIZA.TXT` (un administrador,
+también con las de `\HISPA\SSH\AUTORIZA.TXT` de antes); los que no tienen
+contraseña, solo con llave. El intérprete que se lanza es de ese usuario. La
+contraseña de `SSHD /CLAVE` de antes vale solo para un administrador que aún no
+tiene la suya (la migración); con usuarios, `SSHD /CLAVE` dice que se use la de
+cada uno. Encender, apagar y el puerto, solo un administrador.
+
+### Las llamadas (usuario.cas)
+
+| | |
+|---|---|
+| 200 | lo de los usuarios: 0, cuántos (0: sin usuarios); 1, la ficha número ECX (64 octetos: `Ficha_usuario`) a EDX; 2, el número del de la tarea; 3, ¿administrador?; 4, su carpeta; 5, el que ha entrado |
+| 201 | (solo `USUARIOS.BIN`) crear, quitar, cambiar, la contraseña: un `Pedido_usuario` |
+| 202 | (solo `SSHD.BIN`) ¿es esa su contraseña? / el de una llave ya comprobada: el siguiente programa que lance será suyo |
+| 209 | (solo el `ARGON2.BIN` que pone el núcleo) el pedido y el resumen |
+| 210 | azar del pozo del núcleo (hasta 256 octetos) |
+
+Los envoltorios, en `llamadas.cas` (`hay_usuarios`, `ficha_usuario`,
+`mi_usuario`, `soy_administrador`, `mi_carpeta`, `pedir_usuarios`,
+`azar_del_sistema`) y en `hispac/hispa.h` (`SC_USUARIOS`, `SC_ENTRAR_SSH`,
+`SC_AZAR`).
+
+### Las pruebas
+
+`SOLO=usuarios castel/pruebas.sh` (la parte 38, `pruebas_usuarios.sh`):
+ARGON2 en Linux con ASan y UBSan (el vector de la RFC 9106, la página 437 y
+UTF-8, 2.000 pedidos al azar) y la serie de `hpq.py`; un sistema de antes que
+da de alta usuarios (y el resumen de Ana hecho en QEMU es el mismo que el de
+Linux; ni rastro de las contraseñas en el disco); el usuario normal que no lee
+ni escribe la carpeta de otro, ni lanza sus programas, ni lee `USUARIOS.TXT`
+ni `AZAR.SEM` ni el disco en crudo, ni pone la hora, ni pide el modo
+administrador, ni instala, ni enciende SSHD; la entrada en texto (mala y
+buena) y el modo administrador con su contraseña; el catálogo con la serie 50
+rechazado tras el de la 100; el azar distinto en cada arranque; la pantalla de
+entrada con el escritorio (capturas: Ctrl+Alt+Supr y el logo no la saltan; la
+contraseña mala; cerrar la sesión y entrar como Bea, «Hola, Bea»); y SSH con
+OpenSSH (Bea con su contraseña entra y es Bea, y no lee lo de Ana; con otra,
+no; Biblioteca sin contraseña, no; Ana con la llave de su carpeta).
 
 ## 15. Las pruebas
 

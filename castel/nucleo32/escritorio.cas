@@ -47,7 +47,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro, Inicio, Sonido
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro, Inicio, Sonido, Cuentas, Entrada
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -107,6 +107,7 @@ módulo Escritorio
     constante AC_RED_TS = 70                    ; (TAILSCALE) Configuración > «Red y Tailscale...»
     constante AC_PROGRAMAS_INST = 95            ; (PROGRAMAS) Configuración > «Programas...» (PROGRAMA.BIN)
     constante AC_SONIDO = 97                    ; (SONIDO) Configuración > «Sonido...»
+    constante AC_USUARIOS = 99                  ; (USUARIOS) Configuración > «Usuarios...» (USUARIOS.BIN: una sección aparte)
     constante ME_SONIDO = 47                    ; (SONIDO) el menú del icono del altavoz de la bandeja
     constante ICONO_SONIDO = 24                 ; (SONIDO) lo que se ensancha la bandeja con el altavoz
     constante AC_CERRAR_PANTALLA = 31
@@ -1212,6 +1213,8 @@ módulo Escritorio
         ; (SONIDO) el volumen y los sonidos del sistema (SONIDO.BIN /VENTANA)
         texto(valor(l), 20, 282, "Sonido:", TINTA)
         pulsador(v_config, 110, 276, 208, 26, "Volumen y sonidos...", 0x5AA6F4, 0x2468C8, AC_SONIDO)
+        ; (USUARIOS) los usuarios, sus contraseñas y sus imágenes (USUARIOS.BIN)
+        pulsador(v_config, 326, 276, 120, 26, "Usuarios...", 0x5AA6F4, 0x2468C8, AC_USUARIOS)
         ; (dispositivos) lo que hay en el equipo y qué lo lleva; (TAILSCALE) la red
         pulsador(v_config, 14, 312, 150, 28, "Dispositivos...", 0x5AA6F4, 0x2468C8, AM_DISPOSITIVOS)
         pulsador(v_config, 172, 312, 166, 28, "Red y Tailscale...", 0x5AA6F4, 0x2468C8, AC_RED_TS)
@@ -2071,6 +2074,7 @@ módulo Escritorio
         texto(pantalla, (pantalla.ancho - 13 * 8) div 2, pantalla.alto div 2 + 28, "Hispa-Pentium", 0xBFDCFA)
         volcar(0, 0, pantalla.ancho, pantalla.alto)
         apaga_sonido()                          ; (SONIDO)
+        guarda_semilla(falso)                   ; (USUARIOS) la semilla del azar, nueva, para el arranque siguiente
         acabar_programas(200)
         recoger_huérfanas()
         vaciar_discos()
@@ -2275,6 +2279,7 @@ módulo Escritorio
             caso AC_RED_TS: lanza("\\TAILSCAL.BIN", "/VENTANA")     ; (TAILSCALE) Configuración > Red y Tailscale
             caso AC_PROGRAMAS_INST: lanza("\\PROGRAMA.BIN", "/INSTALADAS")    ; (PROGRAMAS) Configuración > Programas
             caso AC_SONIDO: lanza("\\SONIDO.BIN", "/VENTANA")       ; (SONIDO) Configuración > Sonido
+            caso AC_USUARIOS: lanza("\\USUARIOS.BIN", nulo)        ; (USUARIOS) Configuración > Usuarios
             caso AC_PANTALLA:
                 texto_pantalla[0] := 0
                 abre_pantalla()
@@ -2386,6 +2391,14 @@ módulo Escritorio
         cierra_cuadro(v_apagar)
         si no cierra_programas() entonces devolver fin
         apagar_otra_vez := falso
+        ; (USUARIOS) con usuarios: se acaba lo que quede suyo y sale la
+        ; pantalla de entrada (para él o para otro)
+        si hay_cuentas entonces
+            cierra_sesión_de_cuentas()
+            tras_salir := cierto
+            escribir("escritorio: sesión cerrada\n")
+            devolver
+        fin
         cierra_cuadro(v_sesión)
         v_sesión := cuadro("Sesión cerrada", 400, 150)
         l := lienzo_de(v_sesión)
@@ -2397,7 +2410,7 @@ módulo Escritorio
         disquete(valor(l), 14, 12, 44)
         si Ajustes.usuario[0] <> 0 entonces
             copiar(renglón, "Hasta pronto, ")
-            concatenar(renglón, Ajustes.usuario)
+            concatenar(renglón, nombre_de_sesión())      ; (USUARIOS)
             concatenar(renglón, ".")
             texto_negrita(valor(l), 70, 18, renglón, TINTA)
         sino
@@ -2416,6 +2429,79 @@ módulo Escritorio
             si e.clase = EV_CERRAR o (e.clase = EV_TECLA y (e.a = '\n' o e.a = 27)) o (e.clase = EV_RATÓN_BAJA y pulsador_en(v_sesión, ent32(e.a), ent32(e.b)) = AC_ENTRAR) entonces
                 cierra_cuadro(v_sesión)
                 escribir("escritorio: sesión abierta\n")
+            fin
+        fin
+    fin
+
+    ; ---- (USUARIOS) entrar y cambiar de usuario (entrada.cas, cuentas.cas) ----
+    variable arranque_hecho: bool               ; arranca() ha acabado (lo que lanza es del sistema)
+    variable tras_salir: bool                   ; se ha cerrado la sesión: la pantalla, aunque alguien entre solo
+    variable cuentas_vistas: nat32
+
+    ; ha entrado alguien: lo suyo (el dock, los accesos del tapiz, lo fijado
+    ; en el menú Inicio, de sus ajustes), y su saludo
+    función lo_del_usuario()
+        variable i: nat32
+        olvida_inicio()
+        cierra_menú()
+        lee_ajustes_dock()
+        lee_atajos()
+        quita_iconos()
+        si n_atajos > 0 entonces
+            i := 0
+            mientras i < n_atajos hacer
+                nuevo_icono_de(dirección(atajos[i].nombre[0]), AM_ATAJO, i)
+                i := i + 1
+            fin
+            organiza_iconos()
+            pon_atajos()
+        sino
+            nuevo_icono("Mi equipo", AM_EQUIPO)
+            nuevo_icono("Bloc de notas", AM_BLOC)
+            nuevo_icono("Consola", AM_CONSOLA)
+            i := 0
+            mientras i < n_accesos hacer
+                si en_escritorio(i) entonces nuevo_icono_de(nombre_de(i), AM_ACCESO, i) fin
+                i := i + 1
+            fin
+            organiza_iconos()
+        fin
+        pon_iconos()
+        pinta_barra()
+        repintar_todo()
+        escribir("escritorio: sesión abierta\n")
+    fin
+
+    función atiende_usuarios()
+        variable k: nat32
+        si no arranque_hecho entonces devolver fin
+        si v_entrada <> 0 entonces
+            k := atiende_entrada()
+            si k = E_DENTRO entonces
+                tras_salir := falso
+                lo_del_usuario()
+            sino si k = E_APAGAR entonces
+                apaga(falso)
+            sino si k = E_REINICIAR entonces
+                apaga(cierto)
+            fin
+            devolver
+        fin
+        ; nadie dentro, con usuarios: el que entra solo (si no se acaba de
+        ; salir) o la pantalla de entrada
+        si hay_cuentas y sesión = 0 entonces
+            k := 0
+            si no tras_salir entonces k := el_que_entra_solo() fin
+            si k <> 0 entonces
+                abre_sesión(k)
+                lo_del_usuario()
+            sino
+                cierra_menú()
+                cerrar_emergente()
+                si no abre_entrada() entonces
+                    ; (sin memoria para la pantalla: el primero que entre solo, o nadie)
+                    tras_salir := falso
+                fin
             fin
         fin
     fin
@@ -2927,7 +3013,7 @@ módulo Escritorio
                 caso 'e': lanza("\\EQUIPO.BIN", nulo)
                 caso 'd': enseña_escritorio()
                 caso 'r': abre_ejecutar()
-                caso 'l': si Ajustes.usuario[0] <> 0 entonces cierra_sesión() fin
+                caso 'l': si Ajustes.usuario[0] <> 0 o hay_cuentas entonces cierra_sesión() fin     ; (USUARIOS)
             fin
         sino
             devolver falso
@@ -3268,6 +3354,7 @@ módulo Escritorio
             atiende_fondo()
             atiende_apagar()                    ; (MENÚ) y los cuadros nuevos
             atiende_sesión()
+            atiende_usuarios()                  ; (USUARIOS) la pantalla de entrada
             atiende_ejecutar()
             atiende_tareas()
             atiende_cuadro(v_config)
@@ -3453,6 +3540,7 @@ módulo Escritorio
             si t <> nulo entonces t.padre := 0 fin
         fin
         arranca_sonido()              ; (SONIDO) el servicio de sonido (y el sonido de inicio)
+        arranque_hecho := cierto      ; (USUARIOS) ya se puede entrar (atiende_usuarios): lo de arriba es del sistema
         devolver 1
     fin
 

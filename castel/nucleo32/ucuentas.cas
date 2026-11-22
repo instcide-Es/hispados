@@ -1,0 +1,592 @@
+; =============================================================================
+;  ucuentas.cas - (USUARIOS) USUARIOS.BIN: Configuración › Usuarios (desde la
+;  0.9, 22/11/2026). Una ventana con los usuarios (su nombre, su tipo, si
+;  tienen contraseña, si entran solos) y, del elegido, lo que se puede
+;  cambiar: el nombre, el tipo, la imagen, entrar solo, la contraseña; y
+;  «Usuario nuevo» y «Quitar». Es una sección aparte: el Panel de control
+;  la abre con «USUARIOS.BIN» (y también Configuración).
+;
+;  Lo hace el núcleo (la llamada 201, cuentas.cas y usuario.cas), que mira
+;  quién lo pide: crear, quitar y cambiar a los demás, solo un
+;  administrador; la contraseña propia, cada uno (con la de antes); uno
+;  normal, además, su imagen. La contraseña no se guarda: la resume el
+;  núcleo (Argon2id).
+;
+;  Sin escritorio (en la Consola, por SSH), las mismas cosas por órdenes:
+;      USUARIOS                       la lista (con el escritorio, la ventana)
+;      USUARIOS /LISTA                la lista, siempre (por SSH)
+;      USUARIOS /NUEVO nombre [/ADMIN] [/SOLO]   (pregunta la contraseña: Intro, sin ella)
+;      USUARIOS /CLAVE nombre         la contraseña (la de antes, si es la suya)
+;      USUARIOS /QUITA nombre
+;      USUARIOS /TIPO nombre ADMIN|NORMAL
+;      USUARIOS /IMAGEN nombre N      (de 0 a 9)
+;      USUARIOS /SOLO nombre SI|NO    (entra solo al encender: sin contraseña)
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UCuentas
+
+    modelo usuario
+
+    importar Llamadas, Controles, Textos32, Formato, Mem32
+
+    constante ID_LISTA = 1
+    constante ID_NOMBRE = 2
+    constante ID_TIPO = 3
+    constante ID_IMAGEN = 4
+    constante ID_SOLO = 5
+    constante ID_GUARDAR = 6
+    constante ID_QUITAR = 7
+    constante ID_NUEVO = 8
+    constante ID_CLAVE1 = 9
+    constante ID_CLAVE2 = 10
+    constante ID_VIEJA = 11
+    constante ID_PONER_CLAVE = 12
+    constante ID_QUITAR_CLAVE = 13
+    constante ID_CREAR = 14
+    constante ID_CERRAR = 15
+    constante TIPOS = "Administrador|Normal"
+    constante IMÁGENES = "1 (azul)|2 (verde)|3 (naranja)|4 (morado)|5 (rosa)|6 (turquesa)|7 (oliva)|8 (teja)|9 (pizarra)|10 (ocre)"
+    constante MAX_U = 16
+
+    variable fichas: arreglo [MAX_U] de Ficha_usuario
+    variable n_fichas: nat32
+    variable g: Rejilla
+    variable elegida: nat32                     ; la ficha elegida
+    variable nuevo: bool                        ; se está dando de alta uno
+    variable nombre: arreglo [24] de byte
+    variable tipo_: nat32                       ; 0: administrador; 1: normal
+    variable imagen: nat32
+    variable solo: bool
+    variable clave1: arreglo [64] de byte
+    variable clave2: arreglo [64] de byte
+    variable vieja: arreglo [64] de byte
+    variable aviso: arreglo [160] de byte
+    variable aviso_malo: bool
+    variable soy_admin: bool
+    variable p: Pedido_usuario
+    variable tamaño_v: nat32 = T_NORMAL
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que hay
+    ; -------------------------------------------------------------------------
+    función lee_fichas()
+        variable i: nat32
+        n_fichas := 0
+        i := 0
+        mientras i < MAX_U y ficha_usuario(i, fichas[n_fichas]) hacer
+            n_fichas := n_fichas + 1
+            i := i + 1
+        fin
+        soy_admin := soy_administrador()
+    fin
+
+    función por_nombre(n: puntero a byte): ent32
+        variable i: nat32
+        para i desde 1 hasta n_fichas hacer
+            si iguales_sin_caja(dirección(fichas[i - 1].nombre[0]), n) entonces devolver ent32(i - 1) fin
+        fin
+        devolver -1
+    fin
+
+    ; lo que dice el núcleo, en palabras
+    función qué_ha_pasado(r: nat32): puntero a byte
+        si no es_error(r) entonces devolver "Hecho." fin
+        según r
+            caso DENEGADO: devolver "Eso solo lo puede hacer un administrador."
+            caso YA_EXISTE: devolver "Ese nombre no vale o ya lo tiene otro (de 1 a 20 letras, sin «|»)."
+            caso EN_USO: devolver "No se puede: es usted, el que está dentro o el último administrador (o espere un poco)."
+            caso MAL: devolver "La contraseña de antes no es esa (o no se ha podido resumir)."
+            caso NOMBRE_MALO: devolver "La contraseña es demasiado corta (al menos 4 letras)."
+            caso PROTEGIDO: devolver "No se puede guardar en el disco (¿arrancado sin escritura?)."
+            caso LLENO: devolver "No caben más usuarios (16)."
+            caso NO_VALE: devolver "No hay usuarios: el sistema no está instalado en el disco."
+            caso NO_HAY: devolver "Ese usuario ya no está."
+        fin
+        devolver texto_error(r)
+    fin
+
+    función pide(orden: nat32, id: nat32): nat32
+        variable r: nat32
+        p.orden := orden
+        p.id := id
+        r := pedir_usuarios(p)
+        llenar(puntero(nat32(dirección(p))), tamaño(Pedido_usuario), 0)
+        devolver r
+    fin
+
+    función pon_clave_en(destino: puntero a byte, t: puntero a byte): nat32
+        variable n: nat32
+        n := longitud(t)
+        si n > 127 entonces n := 127 fin
+        copiar_memoria(destino, t, n)
+        devolver n
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La ventana
+    ; -------------------------------------------------------------------------
+    función llena_lista()
+        variable i: nat32
+        variable r: ent32
+        variable t: arreglo [40] de byte
+        rejilla_nueva(g, MAX_U)
+        rejilla_columna(g, "Nombre", 0, falso)
+        rejilla_columna(g, "Tipo", 7, falso)
+        rejilla_columna(g, "Clave", 5, falso)
+        rejilla_columna(g, "Solo", 4, falso)
+        para i desde 1 hasta n_fichas hacer
+            r := renglón_nuevo(g, R_NORMAL, i - 1)
+            copiar_hasta(t, dirección(fichas[i - 1].nombre[0]), 40)
+            si fichas[i - 1].es_yo <> 0 entonces concatenar(t, " (usted)") fin
+            celda(g, r, 0, t)
+            si fichas[i - 1].admin <> 0 entonces celda(g, r, 1, "Admin.") sino celda(g, r, 1, "Normal") fin
+            si fichas[i - 1].con_clave <> 0 entonces celda(g, r, 2, "Sí") sino celda(g, r, 2, "No") fin
+            si fichas[i - 1].entra_solo <> 0 entonces celda(g, r, 3, "Sí") sino celda(g, r, 3, "No") fin
+        fin
+        rejilla_lista(g)
+    fin
+
+    función elige(i: nat32)
+        llenar(clave1, 64, 0)
+        llenar(clave2, 64, 0)
+        llenar(vieja, 64, 0)
+        nuevo := falso
+        si i >= n_fichas entonces devolver fin
+        elegida := i
+        copiar_hasta(nombre, dirección(fichas[i].nombre[0]), 24)
+        si fichas[i].admin <> 0 entonces tipo_ := 0 sino tipo_ := 1 fin
+        imagen := fichas[i].imagen
+        solo := fichas[i].entra_solo <> 0
+    fin
+
+    función relee()
+        variable i: nat32
+        i := elegida
+        lee_fichas()
+        llena_lista()
+        si i >= n_fichas entonces i := 0 fin
+        elige(i)
+    fin
+
+    función dice(t: puntero a byte, malo: bool)
+        copiar_hasta(aviso, t, 160)
+        aviso_malo := malo
+    fin
+
+    función pinta()
+        variable yy, y2, an, x2, w: ent32
+        variable vueltas: nat32
+        variable es_mía: bool
+        variable t: arreglo [96] de byte
+        vueltas := 0
+        es_mía := no nuevo y elegida < n_fichas y fichas[elegida].es_yo <> 0
+        mientras vueltas < 2 hacer
+            empezar_controles()
+            caja(0, 0, ancho, alto, C_FONDO)
+            yy := 2 * E
+            si soy_admin entonces
+                negrita(LA, yy, "Usuarios de este equipo (usted es administrador)", C_TINTA)
+            sino
+                negrita(LA, yy, "Usuarios de este equipo (usted puede cambiar su contraseña y su imagen)", C_TINTA)
+            fin
+            yy := yy + LT + 4 * E
+            an := ancho - 2 * LA
+            w := an * 5 div 12
+            rejilla(g, ID_LISTA, LA, yy, w, alto - yy - alto_botón() - 10 * E, "No hay usuarios.")
+            si soy_admin entonces botón(ID_NUEVO, LA, alto - alto_botón() - 4 * E, "Usuario nuevo", falso, falso) fin
+            ; a la derecha: el elegido (o el nuevo)
+            x2 := LA + w + 2 * LA
+            w := ancho - x2 - LA
+            si nuevo entonces copiar(t, "Usuario nuevo") sino copiar(t, "El usuario elegido") fin
+            ; (casilla devuelve lo ancho; campo y desplegable, lo alto; recuadro, dónde se empieza dentro)
+            y2 := recuadro(x2, yy, w, 2 * (alto_caja() + LT + 6 * E) + 2 * LT + 12 * E, t)
+            y2 := y2 + campo_de(ID_NOMBRE, x2 + LA, y2, w - 2 * LA, "Nombre", nombre, falso, no soy_admin) + 4 * E
+            desplegable(ID_TIPO, x2 + LA, y2, (w - 3 * LA) div 2, "Tipo", TIPOS, tipo_, no soy_admin)
+            y2 := y2 + desplegable(ID_IMAGEN, x2 + 2 * LA + (w - 3 * LA) div 2, y2, (w - 3 * LA) div 2, "Imagen", IMÁGENES, imagen, falso) + 4 * E
+            casilla(ID_SOLO, x2 + LA, y2, "Entra solo al encender (sin contraseña)", solo)
+            y2 := yy + 2 * (alto_caja() + LT + 6 * E) + 2 * LT + 12 * E + 6 * E
+            si nuevo entonces
+                y2 := y2 + campo(ID_CLAVE1, x2 + LA, y2, (w - 3 * LA) div 2, "Contraseña (o nada)", clave1, cierto)
+                campo(ID_CLAVE2, x2 + 2 * LA + (w - 3 * LA) div 2, y2 - alto_caja() - LT - 2 * E, (w - 3 * LA) div 2, "Otra vez", clave2, cierto)
+                y2 := y2 + 4 * E
+                botón(ID_CREAR, x2 + LA, y2, "Crear", cierto, falso)
+            sino si elegida < n_fichas entonces
+                botón(ID_GUARDAR, x2 + LA, y2, "Guardar cambios", cierto, falso)
+                si soy_admin y no es_mía entonces botón(ID_QUITAR, x2 + LA + ancho_botón("Guardar cambios") + 2 * LA, y2, "Quitar usuario", falso, falso) fin
+                y2 := y2 + alto_botón() + 6 * E
+                ; la contraseña
+                si es_mía y fichas[elegida].con_clave <> 0 entonces
+                    y2 := recuadro(x2, y2, w, 2 * (alto_caja() + LT + 6 * E) + alto_botón() + LT + 12 * E, "La contraseña")
+                sino
+                    y2 := recuadro(x2, y2, w, (alto_caja() + LT + 6 * E) + alto_botón() + LT + 12 * E, "La contraseña")
+                fin
+                si es_mía y fichas[elegida].con_clave <> 0 entonces
+                    y2 := y2 + campo(ID_VIEJA, x2 + LA, y2, w - 2 * LA, "La de ahora", vieja, cierto) + 4 * E
+                fin
+                y2 := y2 + campo(ID_CLAVE1, x2 + LA, y2, (w - 3 * LA) div 2, "La nueva", clave1, cierto)
+                campo(ID_CLAVE2, x2 + 2 * LA + (w - 3 * LA) div 2, y2 - alto_caja() - LT - 2 * E, (w - 3 * LA) div 2, "Otra vez", clave2, cierto)
+                y2 := y2 + 4 * E
+                botón(ID_PONER_CLAVE, x2 + LA, y2, "Poner la contraseña", falso, no es_mía y no soy_admin)
+                si fichas[elegida].con_clave <> 0 entonces botón(ID_QUITAR_CLAVE, x2 + LA + ancho_botón("Poner la contraseña") + 2 * LA, y2, "Quitarla", falso, no es_mía y no soy_admin) fin
+            fin
+            botón(ID_CERRAR, ancho - ancho_botón("Cerrar") - LA, alto - alto_botón() - 4 * E, "Cerrar", falso, falso)
+            si aviso[0] <> 0 entonces
+                si aviso_malo entonces
+                    caja(x2, alto - alto_botón() - LT - 14 * E, w, LT + 4 * E, C_ROJO_CLARO)
+                    negrita(x2 + LA div 2, alto - alto_botón() - LT - 12 * E, aviso, C_ROJO)
+                sino
+                    caja(x2, alto - alto_botón() - LT - 14 * E, w, LT + 4 * E, C_VERDE_CLARO)
+                    negrita(x2 + LA div 2, alto - alto_botón() - LT - 12 * E, aviso, C_VERDE)
+                fin
+            fin
+            si no asegurar_foco() entonces romper fin
+            vueltas := vueltas + 1
+        fin
+        volcar()
+    fin
+
+    ; las dos contraseñas iguales (y no vacías): en p.clave
+    función claves_iguales(): bool
+        si clave1[0] = 0 entonces
+            dice("Escriba la contraseña nueva (dos veces).", cierto)
+            devolver falso
+        fin
+        si no iguales(clave1, clave2) entonces
+            dice("Las dos contraseñas no son iguales.", cierto)
+            devolver falso
+        fin
+        p.n_clave := pon_clave_en(dirección(p.clave[0]), clave1)
+        devolver cierto
+    fin
+
+    función hace(id: nat32)
+        variable r: nat32
+        variable k: ent32
+        aviso[0] := 0
+        según id
+            caso ID_LISTA:
+                k := rejilla_elegido(g)
+                si k >= 0 entonces elige(renglón(g, k).id) fin
+            caso ID_TIPO:
+                si soy_admin entonces abrir_desplegable(ID_TIPO, TIPOS) fin
+            caso ID_IMAGEN:
+                abrir_desplegable(ID_IMAGEN, IMÁGENES)
+            caso ID_SOLO:
+                si soy_admin entonces solo := no solo fin
+            caso ID_NUEVO:
+                nuevo := cierto
+                nombre[0] := 0
+                tipo_ := 1
+                imagen := 1
+                solo := falso
+                llenar(clave1, 64, 0)
+                llenar(clave2, 64, 0)
+                foco := ID_NOMBRE
+            caso ID_CREAR:
+                si clave1[0] <> 0 y no claves_iguales() entonces devolver fin
+                si clave1[0] <> 0 entonces solo := falso fin
+                copiar_hasta(dirección(p.nombre[0]), nombre, 24)
+                si tipo_ = 0 entonces p.admin := 1 fin
+                p.imagen := imagen
+                si solo entonces p.entra_solo := 1 fin
+                si clave1[0] <> 0 entonces p.n_clave := pon_clave_en(dirección(p.clave[0]), clave1) fin
+                dice("Un momento...", falso)
+                pinta()
+                r := pide(PU_CREA, 0)
+                dice(qué_ha_pasado(r), es_error(r))
+                si no es_error(r) entonces
+                    relee()
+                    dice("Usuario dado de alta (con su carpeta en \\USUARIOS).", falso)
+                fin
+            caso ID_GUARDAR:
+                si elegida >= n_fichas entonces devolver fin
+                copiar_hasta(dirección(p.nombre[0]), nombre, 24)
+                si tipo_ = 0 entonces p.admin := 1 fin
+                p.imagen := imagen
+                si solo entonces p.entra_solo := 1 fin
+                r := pide(PU_CAMBIA, fichas[elegida].id)
+                dice(qué_ha_pasado(r), es_error(r))
+                si no es_error(r) entonces relee() fin
+            caso ID_QUITAR:
+                si elegida >= n_fichas entonces devolver fin
+                r := pide(PU_QUITA, fichas[elegida].id)
+                dice(qué_ha_pasado(r), es_error(r))
+                si no es_error(r) entonces
+                    elegida := 0
+                    relee()
+                    dice("Usuario quitado (su carpeta se queda, con lo suyo).", falso)
+                fin
+            caso ID_PONER_CLAVE:
+                si elegida >= n_fichas o no claves_iguales() entonces devolver fin
+                p.n_vieja := pon_clave_en(dirección(p.vieja[0]), vieja)
+                dice("Un momento...", falso)
+                pinta()
+                r := pide(PU_CLAVE, fichas[elegida].id)
+                dice(qué_ha_pasado(r), es_error(r))
+                si no es_error(r) entonces relee() fin
+            caso ID_QUITAR_CLAVE:
+                si elegida >= n_fichas entonces devolver fin
+                p.n_vieja := pon_clave_en(dirección(p.vieja[0]), vieja)
+                p.n_clave := 0
+                r := pide(PU_CLAVE, fichas[elegida].id)
+                dice(qué_ha_pasado(r), es_error(r))
+                si no es_error(r) entonces relee() fin
+        fin
+        llenar(clave1, 64, 0)
+        llenar(clave2, 64, 0)
+        llenar(vieja, 64, 0)
+    fin
+
+    función tecla_pulsada(c: nat32)
+        variable k: nat32
+        si c = '\t' o c = TECLA_MAYÚS_TAB entonces
+            pasar_foco(c = '\t')
+            devolver
+        fin
+        k := clase_de(foco)
+        si k = K_CAMPO entonces
+            si foco = ID_NOMBRE y soy_admin entonces campo_tecla(nombre, 21, c) fin
+            si foco = ID_CLAVE1 entonces campo_tecla(clave1, 64, c) fin
+            si foco = ID_CLAVE2 entonces campo_tecla(clave2, 64, c) fin
+            si foco = ID_VIEJA entonces campo_tecla(vieja, 64, c) fin
+            si c = '\n' entonces
+                si nuevo entonces hace(ID_CREAR) sino si foco = ID_NOMBRE entonces hace(ID_GUARDAR) sino hace(ID_PONER_CLAVE) fin
+            fin
+        sino si k = K_LISTA entonces
+            rejilla_tecla(g, c)
+            hace(ID_LISTA)
+        sino si k = K_DESPLEGABLE entonces
+            si c = '\n' o c = ' ' entonces
+                hace(foco)
+            sino si foco = ID_TIPO y soy_admin entonces
+                desplegable_tecla(TIPOS, tipo_, c)
+            sino si foco = ID_IMAGEN entonces
+                desplegable_tecla(IMÁGENES, imagen, c)
+            fin
+        sino si c = '\n' o c = ' ' entonces
+            hace(foco)
+        fin
+    fin
+
+    función clic(x: ent32, yy: ent32, veces_: nat32)
+        variable id: nat32
+        id := control_en(x, yy)
+        si id = 0 entonces devolver fin
+        según clase_de(id)
+            caso K_LISTA:
+                foco := id
+                si rejilla_clic_veces(g, x, yy, veces_) >= 0 entonces hace(id) fin
+            caso K_CAMPO:
+                foco := id
+            si no:
+                foco := id
+                hace(id)
+        fin
+    fin
+
+    función ventana_de_usuarios(): byte
+        variable s: Suceso
+        ; (la letra grande si cabe: con 768 de alto o más; si no, la normal)
+        si dato(DATO_ALTO_PANTALLA) >= 760 entonces tamaño_v := T_GRANDE sino tamaño_v := T_NORMAL fin
+        si no preparar_medida("Usuarios", 980, 640, tamaño_v) entonces devolver 1 fin
+        lee_fichas()
+        llena_lista()
+        elige(0)
+        foco := ID_LISTA
+        pinta()
+        mientras suceso(v, s, cierto) hacer
+            si s.clase = EV_TECLA entonces
+                si s.a = 27 entonces devolver 0 fin
+                tecla_pulsada(s.a)
+                pinta()
+            sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                si control_en(ent32(s.a), ent32(s.b)) = ID_CERRAR entonces devolver 0 fin
+                clic(ent32(s.a), ent32(s.b), veces(s.c))
+                pinta()
+            sino si s.clase = EV_MENÚ entonces
+                si s.b = ID_TIPO y s.a <> SIN_ELEGIR entonces tipo_ := s.a fin
+                si s.b = ID_IMAGEN y s.a <> SIN_ELEGIR entonces imagen := s.a fin
+                pinta()
+            sino si s.clase = EV_TAMAÑO entonces
+                nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_v)
+                pinta()
+            sino si s.clase = EV_RUEDA entonces
+                si rueda(s) entonces pinta() fin
+            sino si s.clase = EV_CERRAR entonces
+                devolver 0
+            fin
+        fin
+        devolver 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Sin escritorio: las órdenes
+    ; -------------------------------------------------------------------------
+    ; una contraseña, sin que se vea (asteriscos); vacía con Intro
+    función lee_secreto(destino: puntero a byte, cabe: nat32): bool
+        variable n, c: nat32
+        n := 0
+        mientras cierto hacer
+            c := tecla()
+            si c = '\n' o c = '\r' entonces
+                destino[n] := 0
+                escribir("\n")
+                devolver cierto
+            fin
+            si c = 27 o c = 3 entonces
+                llenar(destino, cabe, 0)
+                escribir("\n")
+                devolver falso
+            fin
+            si c = 8 entonces
+                si n > 0 entonces
+                    n := n - 1
+                    escribir("\x08 \x08")
+                fin
+            sino si c >= ' ' y c < 0x100 y n + 1 < cabe entonces
+                destino[n] := byte(c)
+                n := n + 1
+                escribir("*")
+            fin
+        fin
+        devolver falso
+    fin
+
+    función lista()
+        variable i: nat32
+        variable f: puntero a Ficha_usuario
+        si n_fichas = 0 entonces
+            escribir("No hay usuarios (el sistema no está instalado en el disco): todo es como antes.\n")
+            devolver
+        fin
+        escribir("Usuarios de este equipo:\n")
+        para i desde 1 hasta n_fichas hacer
+            f := dirección(fichas[i - 1])
+            escribir("  ", dirección(f.nombre[0]))
+            si f.admin <> 0 entonces escribir("  administrador") sino escribir("  normal") fin
+            si f.con_clave <> 0 entonces escribir(", con contraseña") sino escribir(", sin contraseña") fin
+            si f.entra_solo <> 0 entonces escribir(", entra solo") fin
+            si f.carpeta[0] <> 0 entonces escribir(", carpeta \\USUARIOS\\", dirección(f.carpeta[0])) fin
+            si f.es_yo <> 0 entonces escribir("  (usted)") fin
+            escribir("\n")
+        fin
+    fin
+
+    función orden(args: puntero a byte): byte
+        variable qué: arreglo [16] de byte
+        variable n: arreglo [40] de byte
+        variable v: arreglo [16] de byte
+        variable k: ent32
+        variable r, i: nat32
+        palabra(args, 0, qué, 16)
+        palabra(args, 1, n, 24)
+        palabra(args, 2, v, 16)
+        a_mayúsculas(qué)
+        a_mayúsculas(v)
+        si iguales(qué, "/NUEVO") entonces
+            copiar_hasta(dirección(p.nombre[0]), n, 24)
+            ; (/ADMIN y /SOLO, en cualquier sitio detrás)
+            i := 2
+            mientras palabra(args, i, v, 16) hacer
+                a_mayúsculas(v)
+                si iguales(v, "/ADMIN") entonces p.admin := 1 fin
+                si iguales(v, "/SOLO") entonces p.entra_solo := 1 fin
+                i := i + 1
+            fin
+            escribir("La contraseña de ", n, " (Intro: sin contraseña): ")
+            si no lee_secreto(clave1, 64) entonces devolver 1 fin
+            si clave1[0] <> 0 entonces
+                escribir("Otra vez: ")
+                si no lee_secreto(clave2, 64) o no iguales(clave1, clave2) entonces
+                    escribir("No son iguales: no se hace nada.\n")
+                    llenar(clave1, 64, 0)
+                    llenar(clave2, 64, 0)
+                    devolver 1
+                fin
+                p.n_clave := pon_clave_en(dirección(p.clave[0]), clave1)
+                p.entra_solo := 0
+            fin
+            escribir("Un momento...\n")
+            r := pide(PU_CREA, 0)
+        sino
+            k := por_nombre(n)
+            si k < 0 entonces
+                escribir("usuarios: no hay ningún usuario «", n, "»\n")
+                devolver 1
+            fin
+            si iguales(qué, "/QUITA") entonces
+                r := pide(PU_QUITA, fichas[k].id)
+            sino si iguales(qué, "/CLAVE") entonces
+                si fichas[k].es_yo <> 0 y fichas[k].con_clave <> 0 entonces
+                    escribir("La contraseña de ahora: ")
+                    si no lee_secreto(vieja, 64) entonces devolver 1 fin
+                fin
+                escribir("La nueva (Intro: quitarla): ")
+                si no lee_secreto(clave1, 64) entonces devolver 1 fin
+                si clave1[0] <> 0 entonces
+                    escribir("Otra vez: ")
+                    si no lee_secreto(clave2, 64) o no iguales(clave1, clave2) entonces
+                        escribir("No son iguales: no se cambia.\n")
+                        llenar(clave1, 64, 0)
+                        llenar(clave2, 64, 0)
+                        llenar(vieja, 64, 0)
+                        devolver 1
+                    fin
+                fin
+                p.n_clave := pon_clave_en(dirección(p.clave[0]), clave1)
+                p.n_vieja := pon_clave_en(dirección(p.vieja[0]), vieja)
+                escribir("Un momento...\n")
+                r := pide(PU_CLAVE, fichas[k].id)
+            sino
+                ; /TIPO, /IMAGEN, /SOLO: lo de ahora, con eso cambiado
+                p.admin := fichas[k].admin
+                p.entra_solo := fichas[k].entra_solo
+                p.imagen := fichas[k].imagen
+                si iguales(qué, "/TIPO") entonces
+                    si iguales(v, "ADMIN") entonces p.admin := 1 sino p.admin := 0 fin
+                sino si iguales(qué, "/IMAGEN") entonces
+                    si no texto_a_natural(v, r) entonces r := 0 fin
+                    p.imagen := r
+                sino si iguales(qué, "/SOLO") entonces
+                    si iguales(v, "SI") o iguales(v, "S\xD6") entonces p.entra_solo := 1 sino p.entra_solo := 0 fin
+                sino
+                    escribir("usuarios: no sé qué es «", qué, "» (USUARIOS /? para las órdenes)\n")
+                    devolver 1
+                fin
+                r := pide(PU_CAMBIA, fichas[k].id)
+            fin
+        fin
+        llenar(clave1, 64, 0)
+        llenar(clave2, 64, 0)
+        llenar(vieja, 64, 0)
+        escribir("usuarios: ", qué_ha_pasado(r), "\n")
+        si es_error(r) entonces devolver 1 fin
+        lee_fichas()
+        lista()
+        devolver 0
+    fin
+
+    función principal(): byte
+        variable args: arreglo [120] de byte
+        argumentos(args, 120)
+        lee_fichas()
+        si args[0] = '/' y args[1] = '?' entonces
+            escribir("USUARIOS: los usuarios de este equipo. Sin nada, la lista (con el escritorio, la ventana).\n")
+            escribir("  USUARIOS /NUEVO nombre [/ADMIN] [/SOLO]   da de alta (pregunta la contraseña)\n")
+            escribir("  USUARIOS /CLAVE nombre    la contraseña     USUARIOS /QUITA nombre\n")
+            escribir("  USUARIOS /TIPO nombre ADMIN|NORMAL   /IMAGEN nombre N   /SOLO nombre SI|NO\n")
+            devolver 0
+        fin
+        si iguales_sin_caja(args, "/LISTA") entonces
+            lista()
+            devolver 0
+        fin
+        si args[0] = '/' entonces devolver orden(args) fin
+        si n_fichas = 0 o dato(DATO_ESCRITORIO) <> 1 entonces
+            lista()
+            devolver 0
+        fin
+        devolver ventana_de_usuarios()
+    fin
+
+fin UCuentas.

@@ -1,0 +1,634 @@
+; =============================================================================
+;  cuentas.cas - (USUARIOS) los usuarios de un Hispa-Pentium instalado (desde
+;  la 0.9, 22/11/2026): quiénes son, de qué tipo, su carpeta, su contraseña
+;  (resumida) y quién ha entrado (la sesión).
+;
+;  LO GUARDADO. En \HISPA\USUARIOS.TXT de la unidad del sistema (un secreto:
+;  solo lo lee y lo escribe el núcleo; permisos.cas), una línea por usuario:
+;
+;      HISPA-USUARIOS 1
+;      u=1|A|3|0|CARLOS|Carlos|argon2id$12288$3$<sal: 32 cifras>$<resumen: 64 cifras>
+;      u=2|N|5|1|BIBLIOTE|Biblioteca|
+;
+;  (su número, que no cambia; A, administrador, o N, normal; su imagen, de
+;  0 a 9; 1 si entra solo al arrancar; su carpeta en \USUARIOS; su nombre, y
+;  su contraseña resumida con Argon2id —la sal, al azar del pozo del núcleo:
+;  pozo.cas— o nada, sin contraseña). La contraseña no se guarda nunca: el
+;  resumen lo hace ARGON2.BIN (hispac/argon2.c, con Monocypher), que el
+;  núcleo pone en marcha para eso (usuario.cas, «argon2»).
+;
+;  LA MIGRACIÓN. Un sistema de antes (sin USUARIOS.TXT) tiene el usuario de
+;  HISPA.INI («usuario=Carlos»): es el administrador, sin contraseña y entra
+;  solo, como siempre. El archivo no se escribe hasta que se cambia algo
+;  (Configuración › Usuarios); entonces cada usuario recibe su carpeta.
+;
+;  LA CARPETA DE CADA UNO. \USUARIOS\<CARPETA>\ con DOCUMENT (Mis
+;  documentos), ESCRITOR (el escritorio) y AJUSTES (lo suyo: el dock, lo
+;  fijado en el menú Inicio, los accesos del tapiz, sus llaves de SSH). Solo
+;  la lee y la escribe su dueño (y el modo administrador): permisos.cas.
+;
+;  QUIÉN ES CADA PROGRAMA. Tarea.uid (tareas.cas): el número del usuario, o
+;  0, el sistema (lo que pone en marcha el núcleo al arrancar y sus
+;  servicios). Solo el administrador instala programas, cambia la hora o
+;  pide el modo administrador (con su contraseña).
+;
+;  Sin sistema instalado (la memoria USB de arranque, el CD) no hay
+;  usuarios: todo es como antes.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Cuentas
+
+    importar Cpu, Tareas, Fat, Unidades, Ajustes, Textos32, Formato, Mem32
+
+    público constante MAX_CUENTAS = 16
+    público constante MAX_NOMBRE_C = 21         ; un nombre: hasta 20 letras
+    público constante MAX_CLAVE_C = 128         ; lo que se guarda de la contraseña (resumida)
+    público constante MAX_IMAGEN = 9            ; las imágenes, de 0 a 9 (entrada.cas: las caras)
+    ; Argon2id: lo de cada contraseña nueva (en cada resumen va lo suyo: se puede subir)
+    público constante ARGON_KIB = 12288         ; 12 MB de memoria (como pide la OWASP con 3 pasadas)
+    público constante ARGON_PASADAS = 3
+
+    público tipo Cuenta = estructura
+        usada: bool
+        admin: bool                             ; administrador (si no, normal)
+        entra_solo: bool                        ; entra solo al arrancar (sin contraseña: la biblioteca)
+        imagen: nat32
+        id: nat32
+        nombre: arreglo [24] de byte
+        carpeta: arreglo [12] de byte           ; en \USUARIOS («CARLOS»); vacía: aún sin carpeta (la migración)
+        clave: arreglo [MAX_CLAVE_C] de byte    ; «argon2id$...»; vacía: sin contraseña
+    fin
+
+    público variable cuentas: arreglo [MAX_CUENTAS] de Cuenta
+    público variable hay_cuentas: bool          ; un sistema instalado con usuarios
+    público variable implícitas: bool           ; aún sin USUARIOS.TXT (el usuario de HISPA.INI)
+    público variable sesión: nat32              ; el número del que ha entrado (0: nadie)
+    público variable cambios_cuentas: nat32     ; sube cada vez que cambia algo (para el escritorio)
+    variable sig_id: nat32
+    variable texto: arreglo [4097] de byte
+    variable cerrojo_texto: Cerrojo             ; (el texto de USUARIOS.TXT: leerlo y escribirlo, de una en una)
+    ; los intentos que no valen (en la pantalla de entrada, en el modo
+    ; administrador y por SSH, todos juntos): desde el tercero, una espera
+    ; que dobla cada vez (hasta un minuto)
+    variable fallos: nat32
+    variable libre_en: nat32                    ; el tic desde el que se puede probar otra vez
+
+    ; -------------------------------------------------------------------------
+    ;  Buscar
+    ; -------------------------------------------------------------------------
+    público función de_id(id: nat32): puntero a Cuenta
+        variable i: nat32
+        si id = 0 entonces devolver nulo fin
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            si cuentas[i].usada y cuentas[i].id = id entonces devolver dirección(cuentas[i]) fin
+        fin
+        devolver nulo
+    fin
+
+    público función por_nombre(n: puntero a byte): puntero a Cuenta
+        variable i: nat32
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            si cuentas[i].usada y iguales_sin_caja(dirección(cuentas[i].nombre[0]), n) entonces devolver dirección(cuentas[i]) fin
+        fin
+        devolver nulo
+    fin
+
+    público función n_cuentas(): nat32
+        variable i, n: nat32
+        n := 0
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            si cuentas[i].usada entonces n := n + 1 fin
+        fin
+        devolver n
+    fin
+
+    público función administradores(): nat32
+        variable i, n: nat32
+        n := 0
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            si cuentas[i].usada y cuentas[i].admin entonces n := n + 1 fin
+        fin
+        devolver n
+    fin
+
+    ; ¿es administrador el usuario uid? (0, el sistema, sí; sin usuarios, todos)
+    público función es_admin_uid(uid: nat32): bool
+        variable c: puntero a Cuenta
+        si no hay_cuentas o uid = 0 entonces devolver cierto fin
+        c := de_id(uid)
+        devolver c <> nulo y c.admin
+    fin
+
+    ; ¿puede la tarea t hacer lo del administrador (instalar, la hora)?
+    público función persona_admin(t: puntero a Tarea): bool
+        si t = nulo o no t.usuario entonces devolver cierto fin
+        devolver es_admin_uid(t.uid)
+    fin
+
+    público función de_sesión(): puntero a Cuenta
+        devolver de_id(sesión)
+    fin
+
+    ; el nombre del que ha entrado (para el saludo); si no hay usuarios, el de HISPA.INI
+    público función nombre_de_sesión(): puntero a byte
+        variable c: puntero a Cuenta
+        c := de_id(sesión)
+        si c <> nulo entonces devolver dirección(c.nombre[0]) fin
+        devolver dirección(Ajustes.usuario[0])
+    fin
+
+    ; la carpeta del usuario uid en \USUARIOS («CARLOS»), o «» si no tiene
+    público función carpeta_de(uid: nat32): puntero a byte
+        variable c: puntero a Cuenta
+        c := de_id(uid)
+        si c = nulo entonces devolver "" fin
+        devolver dirección(c.carpeta[0])
+    fin
+
+    ; el dueño de la carpeta «c» de \USUARIOS (como la entiende el disco: en
+    ; mayúsculas, 8+3); 0xFFFFFFFF si no es de nadie
+    público función dueño_de_carpeta(c: puntero a byte): nat32
+        variable i: nat32
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            si cuentas[i].usada y cuentas[i].carpeta[0] <> 0 y iguales_sin_caja(dirección(cuentas[i].carpeta[0]), c) entonces devolver cuentas[i].id fin
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    ; la ruta de un ajuste del que ha entrado («DOCK.INI»): en su carpeta
+    ; (\USUARIOS\CARLOS\AJUSTES\DOCK.INI) si la tiene; si no, «» (el de siempre)
+    público función ajuste_de_sesión(nombre: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+        variable c: puntero a Cuenta
+        destino[0] := 0
+        c := de_id(sesión)
+        si c = nulo o c.carpeta[0] = 0 entonces devolver falso fin
+        copiar_hasta(destino, "\\USUARIOS\\", cabe)
+        si longitud(destino) + longitud(dirección(c.carpeta[0])) + longitud(nombre) + 10 >= cabe entonces devolver falso fin
+        concatenar(destino, dirección(c.carpeta[0]))
+        concatenar(destino, "\\AJUSTES\\")
+        concatenar(destino, nombre)
+        devolver cierto
+    fin
+
+    ; sus documentos (\USUARIOS\CARLOS\DOCUMENT), o falso si no tiene carpeta
+    público función documentos_de_sesión(destino: puntero a byte, cabe: nat32): bool
+        variable c: puntero a Cuenta
+        destino[0] := 0
+        c := de_id(sesión)
+        si c = nulo o c.carpeta[0] = 0 o cabe < 32 entonces devolver falso fin
+        copiar_hasta(destino, "\\USUARIOS\\", cabe)
+        concatenar(destino, dirección(c.carpeta[0]))
+        concatenar(destino, "\\DOCUMENT")
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los intentos que no valen
+    ; -------------------------------------------------------------------------
+    ; los tics que faltan para poder probar otra vez (0: ya)
+    público función espera_por_fallos(): nat32
+        si fallos < 3 o ent32(libre_en - tics) <= 0 entonces devolver 0 fin
+        devolver libre_en - tics
+    fin
+
+    público función apunta_fallo()
+        variable s: nat32
+        fallos := fallos + 1
+        si fallos >= 3 entonces
+            s := 1 << (fallos - 3)
+            si fallos - 3 > 6 o s > 60 entonces s := 60 fin
+            libre_en := tics + s * HZ
+            imprimir2("cuentas: %u intentos seguidos que no valen: el siguiente, dentro de %u s\n", fallos, s)
+        fin
+    fin
+
+    público función apunta_acierto()
+        fallos := 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Leer USUARIOS.TXT (o hacer la cuenta de HISPA.INI)
+    ; -------------------------------------------------------------------------
+    ; el trozo k (desde 0) de la línea l, separada con «|», a destino
+    función trozo(l: puntero a byte, k: nat32, destino: puntero a byte, cabe: nat32): bool
+        variable i, n: nat32
+        i := 0
+        mientras k > 0 hacer
+            mientras l[i] <> 0 y l[i] <> '|' hacer i := i + 1 fin
+            si l[i] = 0 entonces
+                destino[0] := 0
+                devolver falso
+            fin
+            i := i + 1
+            k := k - 1
+        fin
+        n := 0
+        mientras l[i] <> 0 y l[i] <> '|' hacer
+            si n + 1 < cabe entonces
+                destino[n] := l[i]
+                n := n + 1
+            fin
+            i := i + 1
+        fin
+        destino[n] := 0
+        devolver cierto
+    fin
+
+    función lee_línea(l: puntero a byte)
+        variable c: puntero a Cuenta
+        variable w: arreglo [16] de byte
+        variable i, n: nat32
+        c := nulo
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            si c = nulo y no cuentas[i].usada entonces c := dirección(cuentas[i]) fin
+        fin
+        si c = nulo entonces devolver fin
+        llenar(puntero(nat32(c)), tamaño(Cuenta), 0)
+        si no trozo(l, 0, w, 16) o no texto_a_natural(w, n) o n = 0 o de_id(n) <> nulo entonces devolver fin
+        c.id := n
+        trozo(l, 1, w, 16)
+        c.admin := w[0] = 'A'
+        trozo(l, 2, w, 16)
+        si no texto_a_natural(w, n) o n > MAX_IMAGEN entonces n := 0 fin
+        c.imagen := n
+        trozo(l, 3, w, 16)
+        c.entra_solo := w[0] = '1'
+        trozo(l, 4, dirección(c.carpeta[0]), 12)
+        a_mayúsculas(dirección(c.carpeta[0]))
+        si no trozo(l, 5, dirección(c.nombre[0]), MAX_NOMBRE_C) o c.nombre[0] = 0 entonces devolver fin
+        trozo(l, 6, dirección(c.clave[0]), MAX_CLAVE_C)
+        si c.clave[0] <> 0 y no empieza_por(dirección(c.clave[0]), "argon2id$") entonces
+            ; (una que no se entiende: mejor sin entrar que sin contraseña)
+            copiar(dirección(c.clave[0]), "mala")
+        fin
+        ; (con contraseña no se entra solo)
+        si c.clave[0] <> 0 entonces c.entra_solo := falso fin
+        c.usada := cierto
+        si c.id >= sig_id entonces sig_id := c.id + 1 fin
+    fin
+
+    función lee_archivo(ruta: puntero a byte): bool
+        variable bien: bool
+        tomar(cerrojo_texto)
+        bien := lee_archivo_ya(ruta)
+        llenar(texto, 4097, 0)
+        soltar(cerrojo_texto)
+        devolver bien
+    fin
+
+    función lee_archivo_ya(ruta: puntero a byte): bool
+        variable m, n, i: nat32
+        variable p, l: puntero a byte
+        m := abrir_archivo(del_sistema, ruta, PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        n := leer_archivo(m, texto, 4096)
+        cerrar_archivo(m)
+        si n > 4096 entonces devolver falso fin
+        texto[n] := 0
+        si no empieza_por(texto, "HISPA-USUARIOS 1") entonces devolver falso fin
+        para i desde 0 hasta n hacer
+            si texto[i] = '\r' o texto[i] = '\n' entonces texto[i] := 0 fin
+        fin
+        p := texto
+        mientras p < dirección(texto[n]) hacer
+            l := p
+            mientras valor(p) <> 0 hacer p := p + 1 fin
+            p := p + 1
+            si empieza_por(l, "u=") entonces lee_línea(l + 2) fin
+        fin
+        llenar(texto, 4097, 0)
+        devolver cierto
+    fin
+
+    ; los usuarios del sistema instalado (al arrancar, y si el asistente pone
+    ; los ajustes): de USUARIOS.TXT; si no lo hay, el de HISPA.INI
+    público función carga_cuentas()
+        variable i: nat32
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer llenar(puntero(nat32(dirección(cuentas[i]))), tamaño(Cuenta), 0) fin
+        hay_cuentas := falso
+        implícitas := falso
+        sig_id := 1
+        cambios_cuentas := cambios_cuentas + 1
+        si no instalado() entonces devolver fin
+        si lee_archivo("\\HISPA\\USUARIOS.TXT") o lee_archivo("\\HISPA\\USUARIOS.NUE") entonces
+            si n_cuentas() > 0 entonces
+                hay_cuentas := cierto
+                ; (que haya siempre un administrador: si no, el primero)
+                si administradores() = 0 entonces
+                    para i desde 0 hasta MAX_CUENTAS - 1 hacer
+                        si cuentas[i].usada y administradores() = 0 entonces cuentas[i].admin := cierto fin
+                    fin
+                fin
+                imprimir1("cuentas: %u usuarios (USUARIOS.TXT)\n", n_cuentas())
+                devolver
+            fin
+        fin
+        ; un sistema de antes: el usuario de HISPA.INI, administrador, sin
+        ; contraseña y entrando solo (como hasta ahora)
+        si Ajustes.usuario[0] = 0 entonces devolver fin
+        cuentas[0].usada := cierto
+        cuentas[0].id := 1
+        cuentas[0].admin := cierto
+        cuentas[0].entra_solo := cierto
+        cuentas[0].imagen := 0
+        copiar_hasta(dirección(cuentas[0].nombre[0]), dirección(Ajustes.usuario[0]), MAX_NOMBRE_C)
+        sig_id := 2
+        hay_cuentas := cierto
+        implícitas := cierto
+        imprimir1("cuentas: el usuario de HISPA.INI (%s), administrador, sin contraseña\n", nat32(dirección(cuentas[0].nombre[0])))
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Guardar
+    ; -------------------------------------------------------------------------
+    ; una carpeta para el nombre n: sus letras y cifras, en mayúsculas, hasta
+    ; 8; sin repetir (con una cifra al final)
+    función carpeta_para(c: puntero a Cuenta)
+        variable f: arreglo [12] de byte
+        variable i, k: nat32
+        variable x: byte
+        k := 0
+        i := 0
+        mientras c.nombre[i] <> 0 y k < 8 hacer
+            x := c.nombre[i]
+            ; (las letras con acento, a la de sin: á à â ä a la A...)
+            según x
+                caso 0xA0, 0x85, 0x83, 0x84, 0x86, 0x8E, 0x8F: x := 'A'
+                caso 0x82, 0x8A, 0x88, 0x89, 0x90: x := 'E'
+                caso 0xA1, 0x8D, 0x8C, 0x8B: x := 'I'
+                caso 0xA2, 0x95, 0x93, 0x94, 0x99: x := 'O'
+                caso 0xA3, 0x97, 0x96, 0x81, 0x9A: x := 'U'
+                caso 0xA4, 0xA5: x := 'N'
+                caso 0x87, 0x80: x := 'C'
+            fin
+            x := mayúscula(x)
+            si (x >= 'A' y x <= 'Z') o (x >= '0' y x <= '9') entonces
+                f[k] := x
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        f[k] := 0
+        si k = 0 entonces copiar(f, "USUARIO") fin
+        ; (NUL, CON, PRN, AUX... no valen en la FAT)
+        si iguales(f, "CON") o iguales(f, "NUL") o iguales(f, "PRN") o iguales(f, "AUX") entonces concatenar(f, "1") fin
+        k := longitud(f)
+        x := '2'
+        mientras dueño_de_carpeta(f) <> 0xFFFFFFFF y dueño_de_carpeta(f) <> c.id y x <= '9' hacer
+            si k >= 8 entonces
+                f[7] := x
+            sino
+                f[k] := x
+                f[k + 1] := 0
+            fin
+            x := x + 1
+        fin
+        copiar_hasta(dirección(c.carpeta[0]), f, 12)
+    fin
+
+    ; hace \USUARIOS\<su carpeta>\ con DOCUMENT, ESCRITOR y AJUSTES (lo que no esté)
+    público función haz_carpetas(c: puntero a Cuenta)
+        variable r: arreglo [48] de byte
+        si c = nulo o c.carpeta[0] = 0 entonces devolver fin
+        crear_carpeta(del_sistema, "\\USUARIOS")
+        copiar(r, "\\USUARIOS\\")
+        concatenar(r, dirección(c.carpeta[0]))
+        crear_carpeta(del_sistema, r)
+        concatenar(r, "\\DOCUMENT")
+        crear_carpeta(del_sistema, r)
+        copiar(r, "\\USUARIOS\\")
+        concatenar(r, dirección(c.carpeta[0]))
+        concatenar(r, "\\ESCRITOR")
+        crear_carpeta(del_sistema, r)
+        copiar(r, "\\USUARIOS\\")
+        concatenar(r, dirección(c.carpeta[0]))
+        concatenar(r, "\\AJUSTES")
+        crear_carpeta(del_sistema, r)
+    fin
+
+    función añade(t: puntero a byte, ref n: nat32, s: puntero a byte)
+        variable i: nat32
+        i := 0
+        mientras s[i] <> 0 y n < 4090 hacer
+            t[n] := s[i]
+            n := n + 1
+            i := i + 1
+        fin
+    fin
+
+    ; escribe USUARIOS.TXT (por USUARIOS.NUE: si se corta la luz a medias,
+    ; queda uno de los dos entero). Cada usuario, con su carpeta. Falso si
+    ; no se puede (el disco sin «escritura», lleno...)
+    público función guarda_cuentas(): bool
+        variable bien: bool
+        tomar(cerrojo_texto)
+        bien := guarda_cuentas_ya()
+        soltar(cerrojo_texto)
+        devolver bien
+    fin
+
+    función guarda_cuentas_ya(): bool
+        variable n, i, m, k: nat32
+        variable w: arreglo [16] de byte
+        variable c: puntero a Cuenta
+        si no instalado() entonces devolver falso fin
+        n := 0
+        añade(texto, n, "HISPA-USUARIOS 1\r\n")
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            c := dirección(cuentas[i])
+            si c.usada entonces
+                si c.carpeta[0] = 0 entonces carpeta_para(c) fin
+                añade(texto, n, "u=")
+                natural_a_texto(c.id, w)
+                añade(texto, n, w)
+                si c.admin entonces añade(texto, n, "|A|") sino añade(texto, n, "|N|") fin
+                natural_a_texto(c.imagen, w)
+                añade(texto, n, w)
+                si c.entra_solo y c.clave[0] = 0 entonces añade(texto, n, "|1|") sino añade(texto, n, "|0|") fin
+                añade(texto, n, dirección(c.carpeta[0]))
+                añade(texto, n, "|")
+                añade(texto, n, dirección(c.nombre[0]))
+                añade(texto, n, "|")
+                añade(texto, n, dirección(c.clave[0]))
+                añade(texto, n, "\r\n")
+            fin
+        fin
+        m := abrir_archivo(del_sistema, "\\HISPA\\USUARIOS.NUE", PARA_CREAR)
+        si m >= PRIMER_ERROR entonces
+            llenar(texto, 4097, 0)
+            imprimir1("cuentas: no se puede escribir USUARIOS.TXT (error 0x%08X)\n", m)
+            devolver falso
+        fin
+        k := escribir_archivo(m, texto, n)
+        cerrar_archivo(m)
+        llenar(texto, 4097, 0)
+        si k <> n entonces
+            borrar_archivo(del_sistema, "\\HISPA\\USUARIOS.NUE")
+            devolver falso
+        fin
+        borrar_archivo(del_sistema, "\\HISPA\\USUARIOS.TXT")
+        k := renombrar(del_sistema, "\\HISPA\\USUARIOS.NUE", "\\HISPA\\USUARIOS.TXT")
+        si k >= PRIMER_ERROR entonces devolver falso fin
+        implícitas := falso
+        hay_cuentas := cierto
+        cambios_cuentas := cambios_cuentas + 1
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            si cuentas[i].usada entonces haz_carpetas(dirección(cuentas[i])) fin
+        fin
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Dar de alta, quitar, cambiar (lo pide Configuración › Usuarios,
+    ;  USUARIOS.BIN, por la llamada 201: usuario.cas comprueba quién lo pide)
+    ; -------------------------------------------------------------------------
+    ; ¿vale ese nombre? (de 1 a 20 letras; sin «|» ni letras de control; sin repetir)
+    público función nombre_vale(n: puntero a byte, salvo: nat32): bool
+        variable i: nat32
+        variable c: puntero a Cuenta
+        si n[0] = 0 o n[0] = ' ' o longitud(n) >= MAX_NOMBRE_C entonces devolver falso fin
+        i := 0
+        mientras n[i] <> 0 hacer
+            si n[i] < ' ' o n[i] = '|' o n[i] = '\\' o n[i] = '/' entonces devolver falso fin
+            i := i + 1
+        fin
+        si n[i - 1] = ' ' entonces devolver falso fin
+        c := por_nombre(n)
+        devolver c = nulo o c.id = salvo
+    fin
+
+    ; uno nuevo (sin contraseña aún: usuario.cas la pone luego). Su número,
+    ; o 0 si no cabe
+    público función nueva(nombre: puntero a byte, admin: bool, imagen: nat32, entra_solo: bool): nat32
+        variable i: nat32
+        variable c: puntero a Cuenta
+        c := nulo
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            si c = nulo y no cuentas[i].usada entonces c := dirección(cuentas[i]) fin
+        fin
+        si c = nulo entonces devolver 0 fin
+        llenar(puntero(nat32(c)), tamaño(Cuenta), 0)
+        c.id := sig_id
+        sig_id := sig_id + 1
+        copiar_hasta(dirección(c.nombre[0]), nombre, MAX_NOMBRE_C)
+        c.admin := admin
+        si imagen > MAX_IMAGEN entonces imagen := 0 fin
+        c.imagen := imagen
+        c.entra_solo := entra_solo
+        c.usada := cierto
+        carpeta_para(c)
+        devolver c.id
+    fin
+
+    ; quitar (su carpeta se queda: lo suyo no se borra)
+    público función quita(id: nat32)
+        variable c: puntero a Cuenta
+        c := de_id(id)
+        si c <> nulo entonces
+            llenar(puntero(nat32(c)), tamaño(Cuenta), 0)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las cifras hexadecimales (lo resumido de las contraseñas)
+    ; -------------------------------------------------------------------------
+    público función a_hex(p: puntero a byte, n: nat32, destino: puntero a byte)
+        variable i: nat32
+        variable cifras: puntero a byte
+        cifras := "0123456789abcdef"
+        para i desde 1 hasta n hacer
+            destino[(i - 1) * 2] := cifras[p[i - 1] >> 4]
+            destino[(i - 1) * 2 + 1] := cifras[p[i - 1] yb 15]
+        fin
+        destino[n * 2] := 0
+    fin
+
+    función cifra(c: byte): nat32
+        si c >= '0' y c <= '9' entonces devolver nat32(c - '0') fin
+        si c >= 'a' y c <= 'f' entonces devolver nat32(c - 'a') + 10 fin
+        si c >= 'A' y c <= 'F' entonces devolver nat32(c - 'A') + 10 fin
+        devolver 16
+    fin
+
+    ; n octetos de las 2n cifras de t, a p (falso si alguna no es una cifra)
+    público función de_hex(t: puntero a byte, p: puntero a byte, n: nat32): bool
+        variable i, a, b: nat32
+        para i desde 1 hasta n hacer
+            a := cifra(t[(i - 1) * 2])
+            si a > 15 entonces devolver falso fin
+            b := cifra(t[(i - 1) * 2 + 1])
+            si b > 15 entonces devolver falso fin
+            p[i - 1] := byte(a * 16 + b)
+        fin
+        devolver cierto
+    fin
+
+    ; lo de un resumen guardado («argon2id$12288$3$<sal>$<resumen>»): falso si no se entiende
+    público función lee_resumen(t: puntero a byte, ref kib: nat32, ref pasadas: nat32, sal: puntero a byte, resumen: puntero a byte): bool
+        variable i: nat32
+        si no empieza_por(t, "argon2id$") entonces devolver falso fin
+        i := 9
+        kib := 0
+        mientras t[i] >= '0' y t[i] <= '9' y kib < 1000000 hacer
+            kib := kib * 10 + nat32(t[i] - '0')
+            i := i + 1
+        fin
+        si t[i] <> '$' entonces devolver falso fin
+        i := i + 1
+        pasadas := 0
+        mientras t[i] >= '0' y t[i] <= '9' y pasadas < 1000 hacer
+            pasadas := pasadas * 10 + nat32(t[i] - '0')
+            i := i + 1
+        fin
+        si t[i] <> '$' entonces devolver falso fin
+        i := i + 1
+        si no de_hex(t + i, sal, 16) o t[i + 32] <> '$' entonces devolver falso fin
+        si no de_hex(t + i + 33, resumen, 32) o t[i + 97] <> 0 entonces devolver falso fin
+        devolver kib >= 8 y kib <= 65536 y pasadas >= 1 y pasadas <= 10
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La sesión
+    ; -------------------------------------------------------------------------
+    ; entra el usuario id: su carpeta (si le toca) y la semilla del azar nueva
+    público función abre_sesión(id: nat32)
+        variable c: puntero a Cuenta
+        c := de_id(id)
+        si c = nulo entonces devolver fin
+        sesión := id
+        si no implícitas entonces haz_carpetas(c) fin
+        cambios_cuentas := cambios_cuentas + 1
+        imprimir2("cuentas: entra %s (el usuario %u)\n", nat32(dirección(c.nombre[0])), id)
+    fin
+
+    ; sale el que había entrado: se acaban sus programas (los que queden: el
+    ; escritorio ya les ha pedido que se cierren)
+    público función cierra_sesión_de_cuentas()
+        variable i, n: nat32
+        variable t: puntero a Tarea
+        si sesión = 0 entonces devolver fin
+        n := 0
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            t := dirección(tareas[i])
+            ; (lo de una sesión de SSH del mismo usuario, no: es otra sesión)
+            si t.estado <> LIBRE y t.estado <> ACABADA y t.usuario y t.uid = sesión y no t.servicio y no t.remota y t <> actual entonces
+                acabar_tarea(t)
+                n := n + 1
+            fin
+        fin
+        imprimir2("cuentas: sale el usuario %u (%u programas acabados)\n", sesión, n)
+        sesión := 0
+        cambios_cuentas := cambios_cuentas + 1
+    fin
+
+    ; el que entra solo al arrancar (sin contraseña), o 0: el de la biblioteca
+    público función el_que_entra_solo(): nat32
+        variable i: nat32
+        si no hay_cuentas entonces devolver 0 fin
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            si cuentas[i].usada y cuentas[i].entra_solo y cuentas[i].clave[0] = 0 entonces devolver cuentas[i].id fin
+        fin
+        devolver 0
+    fin
+
+fin Cuentas.

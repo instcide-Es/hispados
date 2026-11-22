@@ -254,6 +254,14 @@
 #      pantalla completa, diapositivas y «Usar como fondo de escritorio» (la
 #      llamada 172: FONDO.HPM), que sigue al arrancar otra vez.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
+#  38. (USUARIOS, SOLO=usuarios) Los usuarios (pruebas_usuarios.sh): ARGON2
+#      con ASan en Linux, la serie de tools/hpq.py; un sistema de antes que
+#      da de alta usuarios con contraseña (Argon2id) y sus carpetas; el usuario
+#      normal que no lee la carpeta de otro, ni instala, ni pide el modo
+#      administrador; la entrada en texto y con el escritorio; el catálogo con
+#      la serie vieja rechazado; el azar del núcleo, distinto en cada
+#      arranque; SSH con los usuarios (OpenSSH de aquí: contraseña buena y
+#      mala, sin contraseña, la llave de su carpeta)
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
@@ -285,6 +293,7 @@
 #   SOLO=pdf ./pruebas.sh         la primera y la 30 (Hispa-PDF: PDF.BIN y su ventana)
 #   SOLO=zip ./pruebas.sh         la primera y la 31 (Comprimidos: ZIP y UNZIP; pruebas_zipvisor.sh)
 #   SOLO=mirador ./pruebas.sh     la primera y la 32 (el Mirador y la imagen de tapiz; pruebas_zipvisor.sh)
+#   SOLO=usuarios ./pruebas.sh    la primera y la 38 (USUARIOS: los usuarios, la serie del catálogo, el azar; pruebas_usuarios.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -299,7 +308,7 @@ set -u
 AQUI=$(dirname "$(readlink -f "$0")")
 H=$AQUI/../h8086
 # los programas de usuario de Hispa-Pentium (usuario.cas y llamadas.cas son módulos)
-USU="$AQUI/nucleo32/uinstala.cas $AQUI/nucleo32/uasiste.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas $AQUI/nucleo32/uequipo.cas $AQUI/nucleo32/udisposi.cas $AQUI/nucleo32/upaquete.cas $AQUI/nucleo32/uactual.cas"
+USU="$AQUI/nucleo32/uinstala.cas $AQUI/nucleo32/uasiste.cas $AQUI/nucleo32/uhola.cas $AQUI/nucleo32/umalo.cas $AQUI/nucleo32/ucli.cas $AQUI/nucleo32/ueco.cas $AQUI/nucleo32/uordenes.cas $AQUI/nucleo32/uprueba.cas $AQUI/nucleo32/uescribe.cas $AQUI/nucleo32/ubucle.cas $AQUI/nucleo32/ubloc.cas $AQUI/nucleo32/uconsola.cas $AQUI/nucleo32/uequipo.cas $AQUI/nucleo32/udisposi.cas $AQUI/nucleo32/upaquete.cas $AQUI/nucleo32/uactual.cas $AQUI/nucleo32/ucuentas.cas"
 # y los de la red (la 0.8): el servicio, RED.BIN, y sus programas (con sus
 # módulos: rbase, rtarjeta, ryukon, rpila, rtcp y redes); van en su tanda
 RED_USU="$AQUI/nucleo32/ured.cas $AQUI/nucleo32/uipconf.cas $AQUI/nucleo32/uping.cas $AQUI/nucleo32/udescarg.cas $AQUI/nucleo32/uredwifi.cas"
@@ -335,6 +344,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 
 . $AQUI/pruebas32.sh               # la parte 15 (CASTEL32), como la función parte15
 . $AQUI/pruebas_zipvisor.sh        # (ZIP) (MIRADOR) las partes 31 y 32, como parte_zip y parte_mirador
+. $AQUI/pruebas_usuarios.sh        # (USUARIOS) la parte 38, como parte_usuarios
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -357,7 +367,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -2343,7 +2353,7 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -n 8; fi
-    if grep -q "^|  win32     1.1     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0.8.4   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|16 paquetes\.$" $Z/b2$hc.txt \
+    if grep -q "^|  win32     1.1     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0\.8\.[0-9]   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|16 paquetes\.$" $Z/b2$hc.txt \
       && grep -q "^|Los archivos de los 16 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
       ok "PAQUETES en el sistema recién instalado: LISTA dice los 16 paquetes del sistema (..., ssh, tailscal, sonido, tls, wifi y win32: con 16, base ya no cabe en la pantalla) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -n 12; fi
@@ -2687,6 +2697,9 @@ if saca $Q/s3.img HISPA/PAQUETES/QUITADOS.TXT $Q/quitados.txt && [ "$(tr -d '\r'
   ok "lo quitado a propósito queda en C:\\HISPA\\PAQUETES\\QUITADOS.TXT (saludo y letras: ACTUALIZA no los pondrá si fueran del sistema)"
 else ko "QUITADOS.TXT no dice lo quitado: $(cat $Q/quitados.txt 2> /dev/null)"; fi
 mdel -i $Q/s3.img ::HISPA/PAQUETES/QUITADOS.TXT 2> /dev/null
+# ((USUARIOS) menos la semilla del azar, AZAR.SEM, que se hace en el primer
+# arranque, y la serie del último catálogo firmado, SERIE.TXT)
+mdel -i $Q/s3.img ::HISPA/AZAR.SEM ::HISPA/PAQUETES/SERIE.TXT 2> /dev/null
 if sano $Q/s3.img && [ "$(grep -o '[0-9]*/[0-9]* clusters' $P/fsck.txt)" = "$antes" ] && [ "$(lista_de $Q/s3.img)" = "$(lista_de $Q/sis.img)" ]; then
   ok "lo quitado, desde fuera: el disco sano, con los mismos archivos y carpetas que antes de instalar nada y los mismos clusters ocupados ($antes)"
 else ko "después de quitarlo todo el disco no queda como al principio:"; diff <(lista_de $Q/s3.img) <(lista_de $Q/sis.img) | sed 's/^/        /' | head -8; fi
@@ -2742,7 +2755,7 @@ miracap "«Buscar novedades» trae el catálogo otra vez (y su firma, buena)" pq
   texto 112 415 116 419 "La firma del catálogo es buena" negrita 112 203 116 207 choque
 miracap "maximizada, la ventana se pone a su medida: la lista, los mensajes y los botones, al ancho y al alto de la pantalla, y lo que no cabe, cortado" pq5 \
   negrita 52 32 60 38 "Programas y actualizaciones" negrita 660 50 700 58 "(firma buena)" negrita 182 512 190 522 Quitarlo
-if sano $Q/s8.img && sin_restos $Q/s8.img && [ "$(mdir -/ -b -i $Q/s8.img ::HISPA/PAQUETES 2> /dev/null | sort | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI ::/HISPA/PAQUETES/LETRAS.PQI ::/HISPA/PAQUETES/QUITADOS.TXT " ]; then
+if sano $Q/s8.img && sin_restos $Q/s8.img && [ "$(mdir -/ -b -i $Q/s8.img ::HISPA/PAQUETES 2> /dev/null | grep -v '/SERIE.TXT$' | sort | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI ::/HISPA/PAQUETES/LETRAS.PQI ::/HISPA/PAQUETES/QUITADOS.TXT " ]; then    # ((USUARIOS) y SERIE.TXT)
   ok "lo hecho desde la ventana, desde fuera: el disco sano, letras instalado, saludo quitado y sin restos (tampoco VENTANA.TXT)"
 else ko "lo hecho desde la ventana no queda bien en el disco:"; lista_de $Q/s8.img | sed 's/^/        /' | head -12; fi
 
@@ -2829,7 +2842,7 @@ mira "la firma (Ed25519, en Castel): PAQUETES FIRMA dice si es buena; el catálo
   "^La firma de X:.paquetes.catalogo\.txt NO es buena\.$" "^paquetes: la firma del catálogo NO es buena: no se usa nada de él$" \
   "^paquetes: el catálogo de Internet no trae su firma (CATALOGO.FIR): no se usa$" "^  letras    1\.1  *Unas letras, mejores$" \
   "^Todavía no hay actualizaciones publicadas en el servidor\.$"
-if [ "$(grep -c '^paquetes: la firma del catálogo NO es buena' $S)" = 2 ] && ! grep -q '^  instalado' $S && sano $Q/s9.img && [ "$(mdir -/ -b -i $Q/s9.img ::HISPA/PAQUETES 2> /dev/null | grep -v BAJADAS | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI " ]; then
+if [ "$(grep -c '^paquetes: la firma del catálogo NO es buena' $S)" = 2 ] && ! grep -q '^  instalado' $S && sano $Q/s9.img && [ "$(mdir -/ -b -i $Q/s9.img ::HISPA/PAQUETES 2> /dev/null | grep -v 'BAJADAS\|/SERIE.TXT$' | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI " ]; then    # ((USUARIOS) SERIE.TXT: la del catálogo bueno)
   ok "y con la firma mala, nada: ni de Internet ni de la carpeta (que trae CATALOGO.FIR); el disco sano, con lo de antes"
 else ko "con la firma mala se ha usado algo:"; lista_de $Q/s9.img | sed 's/^/        /' | head -10; fi
 
@@ -3475,8 +3488,8 @@ mira "al arrancar, con red, ACTUALIZ /BANDEJA mira solo si hay actualizaciones (
   "^actualiz: aviso en la bandeja: Hay una actualización\.$" "^reiniciar$" "^actualiz: aviso en la bandeja: El núcleo de Hispa-Pentium El núcleo nuevo ha arrancado bien\.$"
 miracap "el aviso de la bandeja: una ventanita abajo a la derecha, «Hay una actualización», con «Verlas» y «Ahora no»" u1 negrita 400 460 480 480 "Hay una actualización." negrita 420 510 520 530 Verlas
 [ -n "${GUARDA_CAPTURAS:-}" ] && mkdir -p "$GUARDA_CAPTURAS" && cp $G/u[23].ppm "$GUARDA_CAPTURAS/"
-miracap "«Verlas» abre «Programas y actualizaciones» en «Pendientes (1)»: base, de la 0.8.6 a la 0.9, y el catálogo de Internet con su firma buena" u2 \
-  negrita 10 120 150 140 "Pendientes (1)" negrita 40 190 120 230 base texto 110 190 200 230 "0.8.6" texto 195 190 245 230 "0.9" texto 300 88 790 110 "Paquetes de http://10.0.2.2:" \
+miracap "«Verlas» abre «Programas y actualizaciones» en «Pendientes (1)»: base, de la $VERSION_BASE a la 0.9, y el catálogo de Internet con su firma buena" u2 \
+  negrita 10 120 150 140 "Pendientes (1)" negrita 40 190 120 230 base texto 110 190 200 230 "$VERSION_BASE" texto 195 190 245 230 "0.9" texto 300 88 790 110 "Paquetes de http://10.0.2.2:" \
   texto 300 88 790 110 "(firma buena)"
 miracap "«Actualizar todo»: con el núcleo nuevo, ofrece «Reiniciar ahora» o «Más tarde»" u3 negrita 150 200 660 400 "Reiniciar ahora" negrita 150 200 660 400 "Más tarde" \
   texto 140 200 660 320 "Se ha puesto un núcleo nuevo: se usa al reiniciar"
@@ -5552,6 +5565,8 @@ fi   # (PDF) Hispa-PDF
 # ------------------------- 31 y 32. (ZIP) Comprimidos y (MIRADOR) el Mirador
 if parte08 zip; then parte_zip; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Comprimidos)"; fi
 if parte08 mirador; then parte_mirador; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Mirador)"; fi
+# ------------------------- 38. (USUARIOS) los usuarios, la serie del catálogo y el azar
+if parte08 usuarios; then parte_usuarios; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los usuarios)"; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)

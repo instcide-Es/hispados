@@ -20,7 +20,7 @@
 ; =============================================================================
 módulo Tareas
 
-    importar Cpu, Monton, Paginas, Formato
+    importar Cpu, Monton, Paginas, Formato, Pozo
 
     público constante MAX_TAREAS = 16
     público constante PILA = 8192               ; la pila del núcleo de cada tarea
@@ -74,6 +74,14 @@ módulo Tareas
         sello: nat32                            ; el programa del sistema que es (Permisos.SELLO_...; 0: uno normal)
         servicio: bool                          ; es uno de los servicios (RED.BIN, TLS.BIN, ACPI.BIN...)
         admin: bool                             ; el modo administrador (la orden ADMIN, confirmado en la pantalla)
+        ; (USUARIOS) de quién es (cuentas.cas): el número del usuario (0: del
+        ; sistema, lo que pone en marcha el núcleo al arrancar y sus
+        ; servicios); la hereda de quien la lanza, y el escritorio da la del
+        ; que ha entrado. Lo dice qué carpeta de \USUARIOS puede tocar y si
+        ; puede instalar, poner la hora o pedir el modo administrador
+        uid: nat32
+        uid_hijo: nat32                         ; (SSHD) el que tendrá el próximo programa que lance (0: el suyo)
+        remota: bool                            ; (SSHD) de una sesión de SSH (y lo que lance): no la acaba cerrar la sesión de la pantalla
     fin
 
     público tipo Cola = estructura
@@ -272,6 +280,7 @@ módulo Tareas
         variable marco, s, i: nat32
         variable t, sig: puntero a Tarea
         tics := tics + 1
+        ruido(R_RELOJ, tics)                    ; (USUARIOS) el pozo del azar: el momento exacto
         si tics mod HZ = 0 y no sin_segundos entonces
             s := tics div HZ
             para i desde 0 hasta 5 hacer
@@ -407,6 +416,9 @@ módulo Tareas
         t.sello := 0                            ; (PROTEGE) lo pone quien la carga (usuario.cas)
         t.servicio := falso
         t.admin := falso
+        t.uid := 0                              ; (USUARIOS) lo pone quien la carga (usuario.cas)
+        t.uid_hijo := 0
+        t.remota := falso
         devolver t
     fin
 
