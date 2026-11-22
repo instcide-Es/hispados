@@ -1,0 +1,1053 @@
+; =============================================================================
+;  agics.cas - (AGENDA) leer y escribir iCalendar (.ICS, RFC 5545) y sacar
+;  los cumpleaños de una libreta de direcciones (vCard, .VCF, RFC 6350).
+;
+;  Lee: VEVENT y VTODO (SUMMARY, LOCATION, DESCRIPTION, CATEGORIES, UID,
+;  DTSTART, DTEND, DURATION, DUE, STATUS, RRULE, EXDATE, RECURRENCE-ID: la
+;  vez cambiada de una cita que se repite queda como cita suelta y su día,
+;  como excepción de la otra), VALARM (TRIGGER antes del principio, del
+;  final o a una hora) y VTIMEZONE (las zonas que trae el archivo, con sus
+;  reglas del cambio de hora; y, si no las trae, las de siempre por su
+;  nombre: Europe/Madrid, las de Europa, los nombres de Windows de
+;  Outlook, UTC). Las horas acaban en la de Madrid. Las líneas dobladas, los
+;  «\,» «\;» «\n», y el UTF-8 (a la página 437 de la casa: lo que no está,
+;  «?»). Lo que no sabe, lo salta. Todo con sus topes: un renglón de 8 K,
+;  un archivo con lo que quepa (AgNucleo.MAX_CITAS).
+;  Escribe: VCALENDAR 2.0 con la VTIMEZONE de Europe/Madrid, las citas con
+;  DTSTART;TZID=Europe/Madrid (las de todo el día, VALUE=DATE), su RRULE,
+;  sus EXDATE y su VALARM; las tareas, VTODO; renglones de 75 octetos
+;  como mucho, en UTF-8 y con CR LF. La Agenda guarda así lo suyo
+;  (AGENDA.ICS): lo que guarda es lo que exporta.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo AgIcs
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Formato, Mem32, Json, Festivos, AgNucleo
+
+    ; ---- lo que se ha leído (para decirlo) ----
+    público variable leídas, cambiadas, saltadas, raras: nat32
+
+    ; =========================================================================
+    ;  Leer de un archivo, de octeto en octeto (con un trozo en la memoria)
+    ; =========================================================================
+    constante TROZO = 16384
+    variable trozo: arreglo [TROZO] de byte
+    variable t_n, t_i: nat32
+    variable t_m: nat32
+    variable t_fin: bool
+
+    función abre_lectura(ruta: puntero a byte): bool
+        t_m := abrir(ruta)
+        t_n := 0
+        t_i := 0
+        t_fin := falso
+        devolver t_m < PRIMER_ERROR
+    fin
+
+    función mira_octeto(): ent32
+        si t_i >= t_n entonces
+            si t_fin entonces devolver -1 fin
+            t_n := leer(t_m, trozo, TROZO)
+            t_i := 0
+            si t_n = 0 o t_n > TROZO entonces
+                t_n := 0
+                t_fin := cierto
+                devolver -1
+            fin
+        fin
+        devolver ent32(trozo[t_i])
+    fin
+
+    función saca_octeto(): ent32
+        variable c: ent32
+        c := mira_octeto()
+        si c >= 0 entonces t_i := t_i + 1 fin
+        devolver c
+    fin
+
+    ; ---- el renglón (ya desdoblado) ----
+    constante MAX_LÍNEA = 8192
+    variable lín: arreglo [MAX_LÍNEA] de byte
+    variable n_lín: nat32
+
+    ; el renglón siguiente, con sus continuaciones (los que empiezan por un
+    ; espacio o un tabulador): falso al acabar el archivo
+    función renglón(): bool
+        variable c: ent32
+        n_lín := 0
+        c := mira_octeto()
+        si c < 0 entonces devolver falso fin
+        mientras cierto hacer
+            c := saca_octeto()
+            si c < 0 entonces romper fin
+            si c = 13 entonces seguir fin
+            si c = 10 entonces
+                c := mira_octeto()
+                si c = ' ' o c = 9 entonces
+                    saca_octeto()
+                    seguir
+                fin
+                romper
+            fin
+            si c = 0 entonces c := ' ' fin
+            si n_lín + 1 < MAX_LÍNEA entonces
+                lín[n_lín] := byte(c)
+                n_lín := n_lín + 1
+            fin
+        fin
+        lín[n_lín] := 0
+        devolver cierto
+    fin
+
+    ; ---- el renglón, en sus partes: NOMBRE;PARÁMETROS:VALOR ----
+    variable nombre: arreglo [40] de byte
+    variable p_tzid: arreglo [64] de byte
+    variable p_valor: arreglo [16] de byte
+    variable p_related: arreglo [8] de byte
+    variable val: puntero a byte
+
+    ; parte el renglón: cierto si tiene «:»
+    función parte(): bool
+        variable i, k: nat32
+        variable pn: arreglo [24] de byte
+        variable pv: arreglo [64] de byte
+        variable comillas: bool
+        i := 0
+        k := 0
+        nombre[0] := 0
+        p_tzid[0] := 0
+        p_valor[0] := 0
+        p_related[0] := 0
+        mientras lín[i] <> 0 y lín[i] <> ';' y lín[i] <> ':' hacer
+            si k < 39 entonces
+                nombre[k] := mayúscula(lín[i])
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        nombre[k] := 0
+        ; los parámetros
+        mientras lín[i] = ';' hacer
+            i := i + 1
+            k := 0
+            mientras lín[i] <> 0 y lín[i] <> '=' y lín[i] <> ':' y lín[i] <> ';' hacer
+                si k < 23 entonces
+                    pn[k] := mayúscula(lín[i])
+                    k := k + 1
+                fin
+                i := i + 1
+            fin
+            pn[k] := 0
+            k := 0
+            si lín[i] = '=' entonces
+                i := i + 1
+                comillas := falso
+                mientras lín[i] <> 0 y (comillas o (lín[i] <> ':' y lín[i] <> ';')) hacer
+                    si lín[i] = '"' entonces
+                        comillas := no comillas
+                    sino si k < 63 entonces
+                        pv[k] := lín[i]
+                        k := k + 1
+                    fin
+                    i := i + 1
+                fin
+            fin
+            pv[k] := 0
+            si iguales(pn, "TZID") entonces copiar(p_tzid, pv) fin
+            si iguales(pn, "VALUE") entonces
+                copiar_hasta(p_valor, pv, 16)
+                a_mayúsculas(p_valor)
+            fin
+            si iguales(pn, "RELATED") entonces
+                copiar_hasta(p_related, pv, 8)
+                a_mayúsculas(p_related)
+            fin
+        fin
+        si lín[i] <> ':' entonces
+            val := dirección(lín[n_lín])
+            devolver falso
+        fin
+        val := dirección(lín[i + 1])
+        devolver cierto
+    fin
+
+    ; un texto de iCalendar (en UTF-8, con «\n», «\,»...) a destino, en la
+    ; página 437 de la casa; «coma»: se para en la primera coma sin «\»
+    función texto_de(p: puntero a byte, destino: puntero a byte, cabe: nat32, coma: bool)
+        variable k, c, u, n: nat32
+        k := 0
+        mientras valor(p) <> 0 y k + 1 < cabe hacer
+            c := valor(p)
+            si coma y c = ',' entonces romper fin
+            si c = '\\' y p[1] <> 0 entonces
+                p := p + 1
+                c := valor(p)
+                si c = 'n' o c = 'N' entonces c := 10 fin
+                p := p + 1
+            sino si c < 0x80 entonces
+                p := p + 1
+            sino
+                ; UTF-8 -> Unicode -> la 437 de la casa
+                n := 0
+                si c yb 0xE0 = 0xC0 entonces
+                    u := c yb 0x1F
+                    n := 1
+                sino si c yb 0xF0 = 0xE0 entonces
+                    u := c yb 0x0F
+                    n := 2
+                sino si c yb 0xF8 = 0xF0 entonces
+                    u := c yb 0x07
+                    n := 3
+                sino
+                    u := '?'
+                fin
+                p := p + 1
+                mientras n > 0 y valor(p) yb 0xC0 = 0x80 hacer
+                    u := (u << 6) ob (valor(p) yb 0x3F)
+                    p := p + 1
+                    n := n - 1
+                fin
+                si n > 0 entonces u := '?' fin
+                c := de_unicode(u)
+                si c = 0 entonces c := '?' fin
+            fin
+            si c = 13 entonces seguir fin
+            destino[k] := byte(c)
+            k := k + 1
+        fin
+        destino[k] := 0
+    fin
+
+    ; =========================================================================
+    ;  Las zonas del archivo
+    ; =========================================================================
+    constante MAX_ZONAS = 8
+    variable zonas: arreglo [MAX_ZONAS] de Zona
+    variable n_zonas: nat32
+    variable z_cet, z_wet, z_eet, z_utc: Zona
+    variable zonas_hechas: bool
+
+    función haz_zonas()
+        variable z: puntero a Zona
+        z := zona_madrid()
+        copiar_memoria(puntero(dirección(z_cet)), puntero(z), tamaño(Zona))
+        copiar_memoria(puntero(dirección(z_wet)), puntero(z), tamaño(Zona))
+        copiar_memoria(puntero(dirección(z_eet)), puntero(z), tamaño(Zona))
+        ; (el cambio es a la misma hora UTC en toda la UE: la 1:00)
+        z_wet.normal := 0
+        z_wet.verano := 60
+        z_wet.v_min := 60
+        z_wet.n_min := 120
+        z_eet.normal := 120
+        z_eet.verano := 180
+        z_eet.v_min := 180
+        z_eet.n_min := 240
+        llenar(puntero(dirección(z_utc)), tamaño(Zona), 0)
+        zonas_hechas := cierto
+    fin
+
+    ; la zona de un TZID (nulo: la hora «flotante», la de aquí)
+    función zona_de(tz: puntero a byte): puntero a Zona
+        variable i: nat32
+        si no zonas_hechas entonces haz_zonas() fin
+        si tz[0] = 0 entonces devolver nulo fin
+        para i desde 1 hasta n_zonas hacer
+            si iguales_sin_caja(zonas[i - 1].nombre, tz) entonces devolver dirección(zonas[i - 1]) fin
+        fin
+        si iguales_sin_caja(tz, "Europe/Madrid") entonces devolver zona_madrid() fin
+        si iguales_sin_caja(tz, "UTC") o iguales_sin_caja(tz, "GMT") o iguales_sin_caja(tz, "Etc/UTC") o iguales_sin_caja(tz, "Etc/GMT") o iguales_sin_caja(tz, "Greenwich Standard Time") o iguales_sin_caja(tz, "UTC+00:00") entonces devolver dirección(z_utc) fin
+        si iguales_sin_caja(tz, "Europe/London") o iguales_sin_caja(tz, "Europe/Lisbon") o iguales_sin_caja(tz, "Europe/Dublin") o iguales_sin_caja(tz, "Atlantic/Canary") o iguales_sin_caja(tz, "Atlantic/Madeira") o iguales_sin_caja(tz, "GMT Standard Time") entonces devolver dirección(z_wet) fin
+        si iguales_sin_caja(tz, "Europe/Athens") o iguales_sin_caja(tz, "Europe/Helsinki") o iguales_sin_caja(tz, "Europe/Bucharest") o iguales_sin_caja(tz, "Europe/Sofia") o iguales_sin_caja(tz, "Europe/Kiev") o iguales_sin_caja(tz, "Europe/Kyiv") o iguales_sin_caja(tz, "Europe/Riga") o iguales_sin_caja(tz, "Europe/Tallinn") o iguales_sin_caja(tz, "Europe/Vilnius") o iguales_sin_caja(tz, "GTB Standard Time") o iguales_sin_caja(tz, "FLE Standard Time") entonces devolver dirección(z_eet) fin
+        si empieza_por(tz, "Europe/") o iguales_sin_caja(tz, "Africa/Ceuta") o iguales_sin_caja(tz, "Romance Standard Time") o iguales_sin_caja(tz, "W. Europe Standard Time") o iguales_sin_caja(tz, "Central Europe Standard Time") o iguales_sin_caja(tz, "Central European Standard Time") o iguales_sin_caja(tz, "CET") entonces devolver dirección(z_cet) fin
+        devolver zona_madrid()
+    fin
+
+    ; «+0100» o «-0500» -> minutos
+    función lee_desfase(p: puntero a byte): ent32
+        variable s: ent32
+        variable h, m: nat32
+        s := 1
+        si valor(p) = '-' entonces s := -1 fin
+        si valor(p) = '+' o valor(p) = '-' entonces p := p + 1 fin
+        si p[0] < '0' o p[0] > '9' entonces devolver 0 fin
+        h := (p[0] - '0') * 10 + p[1] - '0'
+        m := 0
+        si p[2] >= '0' y p[2] <= '9' entonces m := (p[2] - '0') * 10 + p[3] - '0' fin
+        devolver s * ent32(h * 60 + m)
+    fin
+
+    ; una fecha y hora del renglón (con su TZID, o «Z», o VALUE=DATE) a la
+    ; hora de Madrid: cierto si vale; «todo»: era solo la fecha; «antiguo»:
+    ; el año, si era de antes de 1970 (entonces el día es el de 1970 o 1972)
+    variable antiguo: nat32
+    función hora_de(p: puntero a byte, ref día: nat32, ref minuto: nat32, ref todo: bool): bool
+        variable ch, u: bool
+        variable z: puntero a Zona
+        variable a: nat32
+        variable t: arreglo [20] de byte
+        antiguo := 0
+        si p[0] >= '0' y p[0] <= '1' entonces
+            ; (de antes de 1970: los cumpleaños; se lleva a 1970, o a 1972 si es un 29 de febrero)
+            a := (p[0] - '0') * 1000 + (p[1] - '0') * 100 + (p[2] - '0') * 10 + p[3] - '0'
+            si a < 1970 y a >= 1000 entonces
+                copiar_hasta(t, p, 20)
+                antiguo := a
+                t[0] := '1'
+                t[1] := '9'
+                t[2] := '7'
+                t[3] := '0'
+                si t[4] = '0' y t[5] = '2' y t[6] = '2' y t[7] = '9' entonces t[3] := '2' fin
+                p := dirección(t[0])
+            fin
+        fin
+        si no lee_fecha_ics(p, día, minuto, ch, u) entonces devolver falso fin
+        todo := no ch
+        si no ch entonces devolver cierto fin
+        si u entonces
+            madrid_de_utc(día * 1440 + minuto, día, minuto)
+            devolver cierto
+        fin
+        ; (la de Madrid, o la flotante, también: así una hora que no existe,
+        ; las 2:30 del día del cambio de marzo, queda en la que es, las 3:30)
+        z := zona_de(p_tzid)
+        si z = nulo entonces z := zona_madrid() fin
+        madrid_de_utc(utc_de(valor(z), día, minuto), día, minuto)
+        devolver cierto
+    fin
+
+    ; «P1DT2H30M», «-PT15M», «P1W» -> minutos (con su signo)
+    función lee_duración(p: puntero a byte): ent32
+        variable s, n, total: ent32
+        variable en_t: bool
+        s := 1
+        total := 0
+        si valor(p) = '-' entonces s := -1 fin
+        si valor(p) = '+' o valor(p) = '-' entonces p := p + 1 fin
+        si valor(p) <> 'P' y valor(p) <> 'p' entonces devolver 0 fin
+        p := p + 1
+        en_t := falso
+        mientras valor(p) <> 0 hacer
+            si valor(p) = 'T' o valor(p) = 't' entonces
+                en_t := cierto
+                p := p + 1
+                seguir
+            fin
+            n := 0
+            mientras valor(p) >= '0' y valor(p) <= '9' hacer
+                n := n * 10 + ent32(valor(p) - '0')
+                p := p + 1
+            fin
+            según nat32(mayúscula(valor(p)))
+                caso 'W': total := total + n * 10080
+                caso 'D': total := total + n * 1440
+                caso 'H': total := total + n * 60
+                caso 'M': si en_t entonces total := total + n fin
+                caso 'S': total := total + n div 60
+                si no: romper
+            fin
+            p := p + 1
+        fin
+        devolver s * total
+    fin
+
+    ; =========================================================================
+    ;  Leer un .ICS
+    ; =========================================================================
+    ; lo que se va juntando de un VEVENT o un VTODO
+    variable c: Cita
+    variable en_cita: bool
+    variable es_tarea: bool
+    variable c_ini_ok, c_fin_ok, c_todo: bool
+    variable c_fin_día, c_fin_min: nat32
+    variable c_dura: ent32
+    variable c_rid: bool
+    variable c_rid_día: nat32
+    variable c_regla: arreglo [400] de byte
+    variable c_aviso_rel: ent32
+    variable c_aviso_abs: nat32
+    variable c_aviso_fin: bool
+    variable c_hay_aviso: bool
+    variable c_clase_x: nat32
+    variable c_nac: nat32
+    ; las zonas: en la VTIMEZONE
+    variable en_zona: bool
+    variable en_sub: nat32                      ; 1 STANDARD, 2 DAYLIGHT
+    variable z_nueva: Zona
+    variable z_desfase: ent32
+    variable z_min: nat32
+    variable z_regla: arreglo [120] de byte
+    ; las vueltas cambiadas cuya cita aún no ha salido
+    constante MAX_PENDIENTES = 64
+    variable pend_uid: arreglo [MAX_PENDIENTES] de arreglo [80] de byte
+    variable pend_día: arreglo [MAX_PENDIENTES] de nat32
+    variable n_pend: nat32
+
+    función busca_uid(uid: puntero a byte): puntero a Cita
+        variable i: nat32
+        para i desde 1 hasta n_citas hacer
+            si citas[i - 1].usada y iguales(citas[i - 1].uid, uid) entonces devolver dirección(citas[i - 1]) fin
+        fin
+        devolver nulo
+    fin
+
+    público función busca_cita(uid: puntero a byte): puntero a Cita
+        devolver busca_uid(uid)
+    fin
+
+    función pon_excepción(x: puntero a Cita, día: nat32)
+        si x.n_excep < MAX_EXCEP entonces
+            x.excep[x.n_excep] := día
+            x.n_excep := x.n_excep + 1
+        fin
+    fin
+
+    ; acaba la cita que se estaba leyendo: a la tabla (o en lugar de la del mismo UID)
+    función acaba_cita()
+        variable x: puntero a Cita
+        variable t: arreglo [24] de byte
+        variable i: nat32
+        en_cita := falso
+        si no c_ini_ok y no es_tarea entonces
+            saltadas := saltadas + 1
+            devolver
+        fin
+        c.usada := cierto
+        si es_tarea entonces
+            c.clase := CLASE_TAREA
+            c.con_fecha := c_ini_ok
+            c.todo_día := c_todo
+            c.dura := 0
+        sino
+            c.todo_día := c_todo
+            si c_fin_ok y c_todo y c_fin_día > c.día entonces
+                c.dura := (c_fin_día - c.día) * 1440
+            sino si c_fin_ok y no c_todo y utc_de_madrid(c_fin_día, c_fin_min) >= utc_de_madrid(c.día, c.minuto) entonces
+                ; (lo que dura de verdad: el día del cambio de hora, una hora más o menos)
+                c.dura := utc_de_madrid(c_fin_día, c_fin_min) - utc_de_madrid(c.día, c.minuto)
+            sino si c_dura > 0 entonces
+                c.dura := nat32(c_dura)
+            sino si c_todo entonces
+                c.dura := 1440
+            sino
+                c.dura := 0
+            fin
+            si c_todo y c.dura < 1440 entonces c.dura := 1440 fin
+        fin
+        si c_clase_x = CLASE_CUMPLE o (antiguo_ini > 0 y c.regla.frec = F_ANUAL) entonces
+            c.clase := CLASE_CUMPLE
+            si c_nac > 0 entonces c.año_nac := c_nac sino c.año_nac := antiguo_ini fin
+        fin
+        si antiguo_ini > 0 y c.regla.frec <> F_ANUAL entonces
+            saltadas := saltadas + 1
+            devolver
+        fin
+        ; el aviso
+        c.aviso := SIN_AVISO
+        si c_hay_aviso entonces
+            si c_aviso_abs <> 0 entonces
+                i := utc_de_madrid(c.día, c.minuto)
+                si c_aviso_abs <= i entonces c.aviso := ent32(i - c_aviso_abs) sino c.aviso := 0 fin
+            sino
+                si c_aviso_fin entonces c_aviso_rel := c_aviso_rel + ent32(c.dura) fin
+                si c_aviso_rel <= 0 entonces c.aviso := -c_aviso_rel sino c.aviso := 0 fin
+            fin
+        fin
+        ; la categoría, por su nombre (la primera que case)
+        c.categoría := 0
+        si c.cats[0] <> 0 entonces
+            texto_de(dirección(c.cats[0]), dirección(c.cats[0]), 60, falso)
+            para i desde 1 hasta N_CATEGORÍAS hacer
+                si empieza_por_sin_caja(c.cats, nombres_cat[i]) entonces
+                    c.categoría := byte(i)
+                    romper
+                fin
+            fin
+        fin
+        si c.clase = CLASE_CUMPLE y c.categoría = 0 entonces c.categoría := 6 fin
+        si c.regla.rara entonces raras := raras + 1 fin
+        si c.uid[0] = 0 entonces pon_uid(c) fin
+        ; una vez cambiada de otra: la otra no la da (excepción) y esta va suelta
+        si c_rid entonces
+            x := busca_uid(c.uid)
+            si x <> nulo entonces
+                pon_excepción(x, c_rid_día)
+            sino si n_pend < MAX_PENDIENTES entonces
+                copiar(pend_uid[n_pend], c.uid)
+                pend_día[n_pend] := c_rid_día
+                n_pend := n_pend + 1
+            fin
+            concatenar(c.uid, "-")
+            texto_fecha_ics(c_rid_día, 0, falso, falso, t)
+            concatenar(c.uid, t)
+            c.regla.frec := F_NO
+        fin
+        x := busca_uid(c.uid)
+        si x <> nulo entonces
+            cambiadas := cambiadas + 1
+        sino
+            x := nueva(c.clase)
+            si x = nulo entonces
+                saltadas := saltadas + 1
+                devolver
+            fin
+            leídas := leídas + 1
+        fin
+        copiar_memoria(puntero(x), puntero(dirección(c)), tamaño(Cita))
+        ; las pendientes de esta
+        para i desde 1 hasta n_pend hacer
+            si iguales(pend_uid[i - 1], x.uid) entonces
+                pon_excepción(x, pend_día[i - 1])
+                pend_uid[i - 1][0] := 0
+            fin
+        fin
+    fin
+    variable antiguo_ini: nat32
+
+    función empieza_por_sin_caja(t: puntero a byte, q: puntero a byte): bool
+        si valor(q) = 0 entonces devolver falso fin
+        mientras valor(q) <> 0 hacer
+            si mayúscula(valor(t)) <> mayúscula(valor(q)) entonces devolver falso fin
+            t := t + 1
+            q := q + 1
+        fin
+        devolver valor(t) = 0 o valor(t) = ','
+    fin
+
+    ; las EXDATE de un renglón (con comas)
+    función pon_exdates()
+        variable p: puntero a byte
+        variable d, m: nat32
+        variable todo: bool
+        p := val
+        mientras valor(p) <> 0 hacer
+            si hora_de(p, d, m, todo) entonces pon_excepción(dirección(c), d) fin
+            mientras valor(p) <> 0 y valor(p) <> ',' hacer p := p + 1 fin
+            si valor(p) = ',' entonces p := p + 1 fin
+        fin
+    fin
+
+    ; lo de la VTIMEZONE: una STANDARD o una DAYLIGHT acabada
+    función acaba_sub()
+        variable r: Regla
+        variable d, m, a: nat32
+        variable ord: ent32
+        variable ds: nat32
+        ord := -1
+        ds := 6
+        m := 0
+        si z_regla[0] <> 0 y lee_regla(z_regla, r) entonces
+            m := 0
+            para a desde 1 hasta 12 hacer
+                si r.meses yb (1 << a) <> 0 entonces m := a fin
+            fin
+            si r.n_dsem > 0 entonces
+                ds := r.dsem[0]
+                ord := r.dord[0]
+                si ord = 0 entonces ord := 1 fin
+            fin
+        fin
+        si en_sub = 1 entonces
+            z_nueva.normal := z_desfase
+            si m > 0 entonces
+                z_nueva.n_mes := m
+                z_nueva.n_dsem := ds
+                z_nueva.n_ord := ord
+                z_nueva.n_min := z_min
+            fin
+        sino
+            z_nueva.verano := z_desfase
+            si m > 0 entonces
+                z_nueva.con_verano := cierto
+                z_nueva.v_mes := m
+                z_nueva.v_dsem := ds
+                z_nueva.v_ord := ord
+                z_nueva.v_min := z_min
+            fin
+        fin
+        en_sub := 0
+        d := 0
+    fin
+
+    función acaba_zona()
+        en_zona := falso
+        si z_nueva.nombre[0] = 0 entonces devolver fin
+        ; sin las dos reglas, solo el desfase de siempre
+        si z_nueva.con_verano y z_nueva.n_mes = 0 entonces z_nueva.con_verano := falso fin
+        si n_zonas < MAX_ZONAS entonces
+            copiar_memoria(puntero(dirección(zonas[n_zonas])), puntero(dirección(z_nueva)), tamaño(Zona))
+            n_zonas := n_zonas + 1
+        fin
+    fin
+
+    ; lee un .ICS (o un .VCF: los cumpleaños) y lo pone con lo que hay; da
+    ; cierto si se ha podido abrir. Lo que lleva el mismo UID que una que ya
+    ; está, la cambia (volver a importar no duplica).
+    público función lee_ics(ruta: puntero a byte): bool
+        variable hondo, saltando: nat32
+        variable d, m: nat32
+        variable todo: bool
+        variable tv: arreglo [24] de byte
+        variable en_vcard: bool
+        variable vc_nombre: arreglo [100] de byte
+        variable vc_bday: arreglo [24] de byte
+        si no abre_lectura(ruta) entonces devolver falso fin
+        leídas := 0
+        cambiadas := 0
+        saltadas := 0
+        raras := 0
+        n_zonas := 0
+        n_pend := 0
+        en_cita := falso
+        en_zona := falso
+        en_vcard := falso
+        en_sub := 0
+        saltando := 0
+        hondo := 0
+        mientras renglón() hacer
+            parte()
+            si iguales(nombre, "BEGIN") entonces
+                copiar_hasta(tv, val, 24)
+                a_mayúsculas(tv)
+                si saltando > 0 entonces
+                    saltando := saltando + 1
+                sino si iguales(tv, "VEVENT") o iguales(tv, "VTODO") entonces
+                    si en_cita o en_zona entonces
+                        saltando := 1
+                    sino
+                        en_cita := cierto
+                        es_tarea := iguales(tv, "VTODO")
+                        llenar(puntero(dirección(c)), tamaño(Cita), 0)
+                        c.regla.cada := 1
+                        c.regla.hasta_día := SIN_FIN
+                        c_ini_ok := falso
+                        c_fin_ok := falso
+                        c_todo := falso
+                        c_dura := -1
+                        c_rid := falso
+                        c_regla[0] := 0
+                        c_hay_aviso := falso
+                        c_aviso_abs := 0
+                        c_aviso_rel := 0
+                        c_aviso_fin := falso
+                        c_clase_x := CLASE_CITA
+                        c_nac := 0
+                        antiguo_ini := 0
+                    fin
+                sino si iguales(tv, "VALARM") y en_cita entonces
+                    hondo := hondo + 1
+                    si c_hay_aviso entonces saltando := 1 fin     ; (solo el primer aviso)
+                sino si iguales(tv, "VTIMEZONE") y no en_cita entonces
+                    en_zona := cierto
+                    llenar(puntero(dirección(z_nueva)), tamaño(Zona), 0)
+                sino si en_zona y (iguales(tv, "STANDARD") o iguales(tv, "DAYLIGHT")) entonces
+                    si iguales(tv, "STANDARD") entonces en_sub := 1 sino en_sub := 2 fin
+                    z_desfase := 0
+                    z_min := 0
+                    z_regla[0] := 0
+                sino si iguales(tv, "VCARD") entonces
+                    en_vcard := cierto
+                    vc_nombre[0] := 0
+                    vc_bday[0] := 0
+                sino si iguales(tv, "VCALENDAR") entonces
+                    ; (lo de dentro)
+                sino
+                    saltando := 1
+                fin
+                seguir
+            fin
+            si iguales(nombre, "END") entonces
+                copiar_hasta(tv, val, 24)
+                a_mayúsculas(tv)
+                si saltando > 0 entonces
+                    saltando := saltando - 1
+                sino si (iguales(tv, "VEVENT") o iguales(tv, "VTODO")) y en_cita entonces
+                    acaba_cita()
+                sino si iguales(tv, "VALARM") y hondo > 0 entonces
+                    hondo := hondo - 1
+                sino si (iguales(tv, "STANDARD") o iguales(tv, "DAYLIGHT")) y en_sub > 0 entonces
+                    acaba_sub()
+                sino si iguales(tv, "VTIMEZONE") y en_zona entonces
+                    acaba_zona()
+                sino si iguales(tv, "VCARD") y en_vcard entonces
+                    en_vcard := falso
+                    cumple_de_vcard(vc_nombre, vc_bday)
+                fin
+                seguir
+            fin
+            si saltando > 0 entonces seguir fin
+            si en_vcard entonces
+                si iguales(nombre, "FN") entonces texto_de(val, vc_nombre, 100, falso) fin
+                si iguales(nombre, "BDAY") entonces copiar_hasta(vc_bday, val, 24) fin
+                seguir
+            fin
+            si en_sub > 0 entonces
+                si iguales(nombre, "TZOFFSETTO") entonces z_desfase := lee_desfase(val) fin
+                si iguales(nombre, "DTSTART") y lee_fecha_ics(val, d, m, todo, todo) entonces z_min := m fin
+                si iguales(nombre, "RRULE") entonces copiar_hasta(z_regla, val, 120) fin
+                seguir
+            fin
+            si en_zona entonces
+                si iguales(nombre, "TZID") entonces copiar_hasta(z_nueva.nombre, val, 48) fin
+                seguir
+            fin
+            si no en_cita entonces seguir fin
+            si hondo > 0 entonces
+                ; dentro del VALARM
+                si iguales(nombre, "TRIGGER") entonces
+                    c_hay_aviso := cierto
+                    si iguales(p_valor, "DATE-TIME") entonces
+                        si hora_de(val, d, m, todo) entonces c_aviso_abs := utc_de_madrid(d, m) fin
+                        si c_aviso_abs = 0 entonces c_aviso_abs := 1 fin
+                    sino
+                        c_aviso_rel := lee_duración(val)
+                        c_aviso_fin := iguales(p_related, "END")
+                    fin
+                fin
+                seguir
+            fin
+            si iguales(nombre, "SUMMARY") entonces texto_de(val, c.título, 100, falso)
+            sino si iguales(nombre, "LOCATION") entonces texto_de(val, c.lugar, 80, falso)
+            sino si iguales(nombre, "DESCRIPTION") entonces texto_de(val, c.notas, 480, falso)
+            sino si iguales(nombre, "CATEGORIES") entonces copiar_hasta(c.cats, val, 60)
+            sino si iguales(nombre, "UID") entonces copiar_hasta(c.uid, val, 72)
+            sino si iguales(nombre, "DTSTART") entonces
+                si hora_de(val, c.día, c.minuto, c_todo) entonces
+                    c_ini_ok := cierto
+                    antiguo_ini := antiguo
+                fin
+            sino si iguales(nombre, "DTEND") entonces
+                si hora_de(val, c_fin_día, c_fin_min, todo) entonces c_fin_ok := cierto fin
+            sino si iguales(nombre, "DUE") entonces
+                si hora_de(val, c.día, c.minuto, c_todo) entonces c_ini_ok := cierto fin
+            sino si iguales(nombre, "DURATION") entonces
+                c_dura := lee_duración(val)
+            sino si iguales(nombre, "RRULE") entonces
+                copiar_hasta(c_regla, val, 400)
+                lee_regla(c_regla, c.regla)
+            sino si iguales(nombre, "EXDATE") entonces
+                pon_exdates()
+            sino si iguales(nombre, "RECURRENCE-ID") entonces
+                si hora_de(val, c_rid_día, m, todo) entonces c_rid := cierto fin
+            sino si iguales(nombre, "STATUS") entonces
+                si empieza_por(val, "COMPLETED") entonces c.hecha := cierto fin
+            sino si iguales(nombre, "COMPLETED") entonces
+                c.hecha := cierto
+            sino si iguales(nombre, "X-HISPA-CLASE") entonces
+                si empieza_por(val, "CUMPLE") entonces c_clase_x := CLASE_CUMPLE fin
+            sino si iguales(nombre, "X-HISPA-NACIMIENTO") entonces
+                texto_a_natural(val, c_nac)
+            fin
+        fin
+        cerrar(t_m)
+        devolver cierto
+    fin
+
+    ; un cumpleaños de una vCard: BDAY 19500315, 1950-03-15, --0315 o --03-15
+    función cumple_de_vcard(nombre_: puntero a byte, bday: puntero a byte)
+        variable t: arreglo [12] de byte
+        variable k, i, a, m, d, n: nat32
+        variable x: puntero a Cita
+        variable u: arreglo [80] de byte
+        si nombre_[0] = 0 o bday[0] = 0 entonces
+            saltadas := saltadas + 1
+            devolver
+        fin
+        k := 0
+        i := 0
+        mientras bday[i] <> 0 y bday[i] <> 'T' y k < 8 hacer
+            si bday[i] >= '0' y bday[i] <= '9' entonces
+                t[k] := bday[i]
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        t[k] := 0
+        a := 0
+        si k = 8 entonces
+            a := (t[0] - '0') * 1000 + (t[1] - '0') * 100 + (t[2] - '0') * 10 + t[3] - '0'
+            m := (t[4] - '0') * 10 + t[5] - '0'
+            d := (t[6] - '0') * 10 + t[7] - '0'
+        sino si k = 4 entonces
+            m := (t[0] - '0') * 10 + t[1] - '0'
+            d := (t[2] - '0') * 10 + t[3] - '0'
+        sino
+            saltadas := saltadas + 1
+            devolver
+        fin
+        si m < 1 o m > 12 o d < 1 o d > días_del_mes(m, 2000) entonces
+            saltadas := saltadas + 1
+            devolver
+        fin
+        ; el día: el de 1970 (o 1972, el 29 de febrero), o el de su año si es de después
+        si a >= 1970 y d <= días_del_mes(m, a) entonces n := número_de_día(d, m, a)
+        sino si m = 2 y d = 29 entonces n := número_de_día(29, 2, 1972)
+        sino n := número_de_día(d, m, 1970) fin
+        ; el UID: el nombre y el día (volver a importar no duplica)
+        copiar(u, "cumple-")
+        i := longitud(u)
+        k := 0
+        mientras nombre_[k] <> 0 y i < 60 hacer
+            si es_letra(nombre_[k]) o es_cifra(nombre_[k]) entonces
+                u[i] := minúscula(nombre_[k])
+                i := i + 1
+            fin
+            k := k + 1
+        fin
+        u[i] := 0
+        concatenar(u, "@hispa-pentium")
+        x := busca_uid(u)
+        si x = nulo entonces
+            x := nueva(CLASE_CUMPLE)
+            si x = nulo entonces
+                saltadas := saltadas + 1
+                devolver
+            fin
+            leídas := leídas + 1
+        sino
+            cambiadas := cambiadas + 1
+        fin
+        copiar(x.uid, u)
+        x.clase := CLASE_CUMPLE
+        x.todo_día := cierto
+        x.dura := 1440
+        x.día := n
+        x.minuto := 0
+        x.categoría := 6
+        x.año_nac := a
+        x.regla.frec := F_ANUAL
+        x.regla.cada := 1
+        x.regla.hasta_día := SIN_FIN
+        x.aviso := 900                   ; el día antes, a las 9:00
+        copiar(x.título, "Cumplea\xA4os de ")
+        concatenar(x.título, nombre_)
+    fin
+
+    ; =========================================================================
+    ;  Escribir un .ICS
+    ; =========================================================================
+    constante SALIDA = 8192
+    variable sal: arreglo [SALIDA] de byte
+    variable n_sal: nat32
+    variable s_m: nat32
+    variable s_mal: bool
+
+    función vuelca()
+        si n_sal > 0 y no s_mal entonces
+            si escribir_archivo(s_m, sal, n_sal) <> n_sal entonces s_mal := cierto fin
+        fin
+        n_sal := 0
+    fin
+
+    función pon(c_: nat32)
+        si n_sal >= SALIDA entonces vuelca() fin
+        sal[n_sal] := byte(c_)
+        n_sal := n_sal + 1
+    fin
+
+    ; un renglón (en UTF-8 ya), doblado a 75 octetos sin partir una letra
+    variable col: nat32
+    función pon_renglón(t: puntero a byte)
+        col := 0
+        mientras valor(t) <> 0 hacer
+            si col >= 74 y valor(t) yb 0xC0 <> 0x80 entonces
+                pon(13)
+                pon(10)
+                pon(' ')
+                col := 1
+            fin
+            pon(valor(t))
+            col := col + 1
+            t := t + 1
+        fin
+        pon(13)
+        pon(10)
+    fin
+
+    ; un texto de la 437 de la casa a iCalendar (UTF-8 y sus «\»)
+    variable r: arreglo [2400] de byte
+    función a_ics(t: puntero a byte, destino: puntero a byte, cabe: nat32)
+        variable k, n, i: nat32
+        variable u: arreglo [4] de byte
+        k := 0
+        mientras valor(t) <> 0 y k + 6 < cabe hacer
+            si valor(t) = 10 entonces
+                destino[k] := '\\'
+                destino[k + 1] := 'n'
+                k := k + 2
+            sino si valor(t) = '\\' o valor(t) = ';' o valor(t) = ',' entonces
+                destino[k] := '\\'
+                destino[k + 1] := valor(t)
+                k := k + 2
+            sino si valor(t) = 13 entonces
+                ; (fuera)
+            sino
+                n := a_utf8(valor(t), u)
+                para i desde 1 hasta n hacer
+                    destino[k] := u[i - 1]
+                    k := k + 1
+                fin
+            fin
+            t := t + 1
+        fin
+        destino[k] := 0
+    fin
+
+    ; «NOMBRE:texto» con el texto pasado a iCalendar
+    función propiedad(nombre_: puntero a byte, t: puntero a byte)
+        si t[0] = 0 entonces devolver fin
+        copiar(r, nombre_)
+        concatenar(r, ":")
+        a_ics(t, dirección(r[longitud(r)]), 2400 - longitud(r))
+        pon_renglón(r)
+    fin
+
+    función fecha_prop(nombre_: puntero a byte, día: nat32, minuto: nat32, todo: bool, año_viejo: nat32)
+        variable t: arreglo [24] de byte
+        texto_fecha_ics(día, minuto, no todo, falso, t)
+        si año_viejo > 0 entonces
+            ; (un cumpleaños de antes de 1970: con su año)
+            t[0] := byte('0' + año_viejo div 1000)
+            t[1] := byte('0' + año_viejo div 100 mod 10)
+            t[2] := byte('0' + año_viejo div 10 mod 10)
+            t[3] := byte('0' + año_viejo mod 10)
+        fin
+        copiar(r, nombre_)
+        si todo entonces concatenar(r, ";VALUE=DATE:") sino concatenar(r, ";TZID=Europe/Madrid:") fin
+        concatenar(r, t)
+        pon_renglón(r)
+    fin
+
+    función escribe_zona()
+        pon_renglón("BEGIN:VTIMEZONE")
+        pon_renglón("TZID:Europe/Madrid")
+        pon_renglón("X-LIC-LOCATION:Europe/Madrid")
+        pon_renglón("BEGIN:DAYLIGHT")
+        pon_renglón("TZOFFSETFROM:+0100")
+        pon_renglón("TZOFFSETTO:+0200")
+        pon_renglón("TZNAME:CEST")
+        pon_renglón("DTSTART:19700329T020000")
+        pon_renglón("RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU")
+        pon_renglón("END:DAYLIGHT")
+        pon_renglón("BEGIN:STANDARD")
+        pon_renglón("TZOFFSETFROM:+0200")
+        pon_renglón("TZOFFSETTO:+0100")
+        pon_renglón("TZNAME:CET")
+        pon_renglón("DTSTART:19701025T030000")
+        pon_renglón("RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU")
+        pon_renglón("END:STANDARD")
+        pon_renglón("END:VTIMEZONE")
+    fin
+
+    función escribe_cita(ref x: Cita, sello: puntero a byte)
+        variable t: arreglo [24] de byte
+        variable fd, fm, i, viejo: nat32
+        variable cats: arreglo [64] de byte
+        si x.clase = CLASE_TAREA entonces pon_renglón("BEGIN:VTODO") sino pon_renglón("BEGIN:VEVENT") fin
+        copiar(r, "UID:")
+        concatenar(r, x.uid)
+        pon_renglón(r)
+        copiar(r, "DTSTAMP:")
+        concatenar(r, sello)
+        pon_renglón(r)
+        propiedad("SUMMARY", x.título)
+        propiedad("LOCATION", x.lugar)
+        propiedad("DESCRIPTION", x.notas)
+        ; las categorías: las suyas (si se leyeron) o el nombre de la elegida
+        cats[0] := 0
+        si x.categoría > 0 y x.categoría <= N_CATEGORÍAS entonces
+            copiar(cats, nombres_cat[x.categoría])
+            si x.cats[0] <> 0 y no empieza_por_sin_caja(x.cats, cats) entonces
+                concatenar(cats, ",")
+                copiar_hasta(dirección(cats[longitud(cats)]), x.cats, 60 - longitud(cats))
+            fin
+        sino si x.cats[0] <> 0 entonces
+            copiar(cats, x.cats)
+        fin
+        si cats[0] <> 0 entonces
+            ; (las comas, sin «\»: separan)
+            copiar(r, "CATEGORIES:")
+            a_ics(cats, dirección(r[11]), 300)
+            i := 11
+            mientras r[i] <> 0 hacer
+                si r[i] = '\\' y r[i + 1] = ',' entonces copiar(dirección(r[i]), dirección(r[i + 1])) fin
+                i := i + 1
+            fin
+            pon_renglón(r)
+        fin
+        viejo := 0
+        si x.clase = CLASE_CUMPLE y x.año_nac > 0 y x.año_nac < 1970 entonces viejo := x.año_nac fin
+        si x.clase = CLASE_TAREA entonces
+            si x.con_fecha entonces fecha_prop("DUE", x.día, x.minuto, x.todo_día, 0) fin
+            si x.hecha entonces pon_renglón("STATUS:COMPLETED") sino pon_renglón("STATUS:NEEDS-ACTION") fin
+        sino
+            fecha_prop("DTSTART", x.día, x.minuto, x.todo_día, viejo)
+            fd := x.día + (x.minuto + x.dura) div 1440
+            fm := (x.minuto + x.dura) mod 1440
+            si x.todo_día entonces
+                si x.dura < 1440 entonces fd := x.día + 1 sino fd := x.día + (x.dura + 1439) div 1440 fin
+                si viejo = 0 entonces fecha_prop("DTEND", fd, 0, cierto, 0) fin
+            sino
+                madrid_de_utc(utc_de_madrid(x.día, x.minuto) + x.dura, fd, fm)
+                fecha_prop("DTEND", fd, fm, falso, 0)
+            fin
+        fin
+        si x.regla.frec <> F_NO entonces
+            copiar(r, "RRULE:")
+            escribe_regla(x.regla, x.todo_día, dirección(r[6]))
+            pon_renglón(r)
+        fin
+        para i desde 1 hasta x.n_excep hacer
+            fecha_prop("EXDATE", x.excep[i - 1], x.minuto, x.todo_día, 0)
+        fin
+        si x.clase = CLASE_CUMPLE entonces
+            pon_renglón("X-HISPA-CLASE:CUMPLE")
+            si x.año_nac > 0 entonces
+                copiar(r, "X-HISPA-NACIMIENTO:")
+                natural_a_texto(x.año_nac, t)
+                concatenar(r, t)
+                pon_renglón(r)
+            fin
+        fin
+        si x.aviso >= 0 entonces
+            pon_renglón("BEGIN:VALARM")
+            pon_renglón("ACTION:DISPLAY")
+            propiedad("DESCRIPTION", x.título)
+            copiar(r, "TRIGGER:-PT")
+            natural_a_texto(nat32(x.aviso), t)
+            concatenar(r, t)
+            concatenar(r, "M")
+            pon_renglón(r)
+            pon_renglón("END:VALARM")
+        fin
+        si x.clase = CLASE_TAREA entonces pon_renglón("END:VTODO") sino pon_renglón("END:VEVENT") fin
+    fin
+
+    ; escribe todo (o lo de una categoría, si «solo_cat» > 0) en un .ICS:
+    ; cierto si ha ido bien
+    público función escribe_ics(ruta: puntero a byte, solo_cat: nat32): bool
+        variable i: nat32
+        variable sello: arreglo [24] de byte
+        s_m := crear(ruta)
+        si s_m >= PRIMER_ERROR entonces devolver falso fin
+        n_sal := 0
+        s_mal := falso
+        texto_fecha_ics(instante_ahora() div 1440, instante_ahora() mod 1440, cierto, falso, sello)
+        concatenar(sello, "Z")
+        pon_renglón("BEGIN:VCALENDAR")
+        pon_renglón("VERSION:2.0")
+        pon_renglón("PRODID:-//Hispa-Pentium//Agenda 1.0//ES")
+        pon_renglón("CALSCALE:GREGORIAN")
+        pon_renglón("X-WR-TIMEZONE:Europe/Madrid")
+        escribe_zona()
+        para i desde 1 hasta n_citas hacer
+            si citas[i - 1].usada y (solo_cat = 0 o citas[i - 1].categoría = solo_cat) entonces escribe_cita(citas[i - 1], sello) fin
+        fin
+        pon_renglón("END:VCALENDAR")
+        vuelca()
+        cerrar(s_m)
+        devolver no s_mal
+    fin
+
+fin AgIcs.

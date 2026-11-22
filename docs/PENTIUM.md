@@ -235,6 +235,7 @@ cuarta parte, los discos y el USB).
 | `emergente.cas` (Emergente) | Los **menús emergentes**: el del botón secundario y el que cuelga de una barra de menús. |
 | `terminal.cas` (Terminal) | Los **terminales**: dos tubos para que una ventana tenga dentro al intérprete de órdenes y a sus programas. |
 | `escritorio.cas` (Escritorio) | El **escritorio**: el tapiz y sus **iconos**, la barra de tareas, el menú Inicio, el reloj, los cuadros (apagar, configuración, «Acerca de»), los menús del botón secundario, y la tarea que lo mueve todo. |
+| `organiza.cas` (Organiza) | (ICONOS) **Dónde van los iconos del tapiz**: la zona de trabajo (sin la barra ni el dock), la rejilla, organizarlos (por nombre, tipo, tamaño o fecha), la organización automática, la cuadrícula, las páginas si no caben, `ICONOS.INI` y los archivos de la carpeta ESCRITOR (sección 10, «Los iconos del tapiz»). |
 | `red.cas` (Red) | **La red**, lo que pone el núcleo (sección 14): el cartero entre los programas y el servicio de red (`RED.BIN`) —y el servicio TLS (`TLS.BIN`), con la llamada 99—, y lo que solo el servicio de red puede pedir: los puertos, memoria física seguida para el DMA, los registros de la tarjeta y su interrupción. |
 
 | `energia.cas` (Energia) | **Apagar de verdad, reiniciar y la batería**: las llamadas del servicio de ACPI (`ACPI.BIN`, un programa del anillo 3 con ACPICA) y la 154; apagar por ACPI (S5) y reiniciar (FADT, 8042, CF9h); la pila de la bandeja y su recuadro de ayuda (sección 11). |
@@ -419,7 +420,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 8 | **leer** del archivo EBX, a ECX, hasta EDX octetos | `leer` | los leídos (0: el final) |
 | 9 | **cerrar** el archivo EBX | `cerrar` | |
 | 10 | **lanzar** el programa de nombre EBX con los argumentos ECX | `lanzar` | el número de su tarea |
-| 11 | **esperar** a que acabe la tarea EBX (una lanzada por uno mismo) | `esperar` | su código de salida |
+| 11 | **esperar** a que acabe la tarea EBX (una lanzada por uno mismo); con ECX = 1, sin esperar (`acabada`: `SIGUE` si no ha acabado); (CORTES) con ECX = 2, **acabarla** a ella y a las que haya lanzado, esté esperando a lo que esté (la red, el disco): «Cancelar» y lo que no responde | `esperar`, `acabada`, `acabar_hija` | su código de salida |
 | 12 | la entrada siguiente de la carpeta EBX, a ECX (32 octetos) | `entrada` | 1, o 0 si no hay más |
 | 13 | lo que mide el archivo EBX | `largo_de` | |
 | 14 | los argumentos del programa, a EBX (caben ECX) | `argumentos` | su largo |
@@ -1050,8 +1051,11 @@ propio, con sus tildes y su eñe).
 - **El tapiz**: tres a elegir («Olas», «Azul» y «Verde»), con el disquete y el
   nombre abajo a la derecha.
 - **Los iconos del tapiz**: «Mi equipo», «Bloc de notas» y «Consola», con su
-  rótulo en letra normal. Un clic lo elige (el rótulo queda sobre azul); **dos
-  clics lo abren**; se llevan a otro sitio **arrastrándolos**.
+  rótulo en letra normal (y los de los paquetes, los accesos soltados y los
+  archivos del escritorio). Un clic lo elige (un recuadro alrededor del
+  dibujo y el rótulo sobre azul con su borde blanco); **dos clics lo abren**;
+  se llevan a otro sitio **arrastrándolos**, siempre dentro de la zona de
+  los iconos (más abajo, «Los iconos del tapiz»).
 - **La barra de tareas**, abajo: el botón **«Inicio»** (verde, redondeado), un
   **botón por cada ventana abierta** (pulsarlo la trae delante; si ya lo estaba, la
   minimiza; si estaba minimizada, la recupera) y, a la derecha, la **bandeja con el
@@ -1073,7 +1077,9 @@ propio, con sus tildes y su eñe).
   gris.
 - **El botón secundario del ratón** saca un menú, según dónde:
   - en el **tapiz**: Configuración, Cambiar el tapiz (pasa al siguiente),
-    Organizar iconos (cada uno a su sitio) y Acerca de Hispa-Pentium;
+    Organizar iconos... (su submenú: por nombre, por tipo, por tamaño, por
+    fecha, como al principio y sus casillas; más abajo, «Los iconos del
+    tapiz») y Acerca de Hispa-Pentium;
   - en el **título de una ventana**, o en **su botón de la barra de tareas**:
     Restaurar, Mover, Minimizar, Maximizar y Cerrar (en gris, lo que en ese
     momento no toca). «Mover» lleva la flecha al título y la ventana la sigue
@@ -1677,6 +1683,102 @@ del dock lo sabe con `DATO_ALTO_LIBRE` (`Ventanas.alto_dock`): así se
 pone el explorador. Sabe qué está abierto mirando las
 ventanas y el nombre (y los argumentos) de la tarea de cada una; lo que se
 pulsa se lo pide al escritorio (`Dock.pide`: lanzar o Configuración).
+
+### Los iconos del tapiz: la zona, la rejilla y «Organizar iconos» (22/11; marcado «(ICONOS)»)
+
+| | |
+|---|---|
+| ![30 iconos a 1024 x 600: ninguno debajo del dock ni de la barra](pentium/escritorio/iconos-1024x600.png) | ![El submenú «Organizar iconos»](pentium/escritorio/organizar-menu.png) |
+| ![Organizados por tipo: programas, carpetas y documentos por su extensión](pentium/escritorio/por-tipo.png) | ![El elegido con el teclado: el recuadro y el rótulo con su borde](pentium/escritorio/teclado.png) |
+| ![A 800 x 600, por nombre](pentium/escritorio/iconos-800x600.png) | ![A 640 x 480 con 47: dos páginas y «Más (1/2)»](pentium/escritorio/paginas-640x480.png) |
+| ![De 1280 x 720 a 800 x 600 y a 1024 x 600 en marcha: la Consola, llevada a la derecha, sigue dentro](pentium/escritorio/cambio-a-1024x600.png) | |
+
+Lo pidió Carlos el 22/11: «Organizar iconos tiene que tener un mínimo en
+pantalla destinado para la organización de los iconos, imposibilitando que se
+escondan debajo del menú de Inicio. Igualmente también estaría genial que se
+pudieran organizar por nombre, tipo, etc.» Antes, «Organizar iconos» los ponía
+en una sola columna sin mirar la pantalla: con muchos, los de abajo se
+quedaban debajo de la barra de tareas (con «Inicio») o del dock.
+
+**La zona de trabajo** (`organiza.cas`): la pantalla menos la barra de
+tareas (34 puntos), menos el dock si se ve (62), menos un margen (8 a los
+lados y abajo, 12 arriba). **Ningún icono sale de ella**: ni al arrancar, ni
+al organizarlos, ni al arrastrar uno (mientras se lleva, no baja de la zona;
+soltado encima de la barra, vuelve a ella), ni al llegar iconos nuevos (un
+paquete instalado, un acceso soltado desde el explorador, un archivo nuevo en
+ESCRITOR), ni al cambiar la medida de la pantalla (de 1280 x 720 a 1024 x 600 o
+a 800 x 600, en marcha), ni al ver u ocultar el dock, ni al entrar otro
+usuario. (El menú Inicio, cuando se abre, tapa lo que tenga debajo como
+cualquier ventana; lo que no puede pasar es que un icono se quede **siempre**
+escondido debajo de la barra, del botón «Inicio» o del dock.)
+
+**La rejilla**: celdas de 112 x 76 puntos, de arriba abajo y, cuando no caben
+en una columna, en la siguiente. Si no caben en la pantalla, las celdas se
+estrechan (hasta 80 x 64; los rótulos largos, con «..»); y si aun así no
+caben, **páginas**: la última celda de cada una es «Más (1/2)», con una
+flecha, que pasa a la siguiente (un clic, o Av Pág y Re Pág con el teclado).
+Nunca se esconde ninguno. Dos iconos no quedan **nunca** uno encima de otro:
+el que se suelta encima de otro va a la celda libre más cercana.
+
+**«Organizar iconos...»** (el menú del botón secundario en el tapiz) es un
+submenú:
+
+| Opción | Lo que hace |
+|---|---|
+| Por nombre | En orden alfabético (sin mirar mayúsculas ni tildes; la eñe, detrás de la ene) |
+| Por tipo | Los programas, las carpetas, los documentos (por su extensión: BMP, CSV, DOC...) y los accesos; dentro de cada uno, por nombre |
+| Por tamaño | De menos a más (el del archivo; de un programa, su `.BIN`; las carpetas, 0) |
+| Por fecha de modificación | Lo más nuevo, primero |
+| Como al principio | Como salen: los de siempre, los de los paquetes, los accesos y los archivos (como antes de esto) |
+| [x] Organización automática | Con ella, se ordenan solos (en el orden elegido) cada vez que se añade o se quita alguno, y lo que se arrastra vuelve a su sitio en el orden |
+| [x] Alinear a la cuadrícula | Con ella (lo normal), lo que se suelta va a la celda más cercana; sin ella, se queda donde se suelta, dentro de la zona y sin tapar a otro |
+| [x] Mi equipo, siempre el primero | Mi equipo, arriba a la izquierda, sea cual sea el orden |
+
+El orden elegido lleva delante «»», y las casillas, «[x]» o «[ ]»: la forma,
+no solo el color.
+
+**Con el teclado** (con el tapiz pulsado, o sin ventanas): las flechas van al
+icono de al lado (la primera, al primero), una letra al siguiente que empieza
+por ella, Intro lo abre, Esc no deja ninguno elegido, Av Pág y Re Pág cambian
+de página. Para eso el gestor de ventanas (`ventanas.cas`) le da las teclas a
+la ventana del fondo cuando lo último que se ha pulsado es el tapiz.
+
+**Lo que se guarda**, por usuario: `ICONOS.INI`, en sus ajustes
+(`\USUARIOS\CARLOS\AJUSTES\ICONOS.INI`); sin usuarios, `\HISPA\ICONOS.INI`
+(o `\ICONOS.INI` sin instalar). Solo lo escribe el núcleo (`permisos.cas`).
+Se lee al arrancar y al entrar cada usuario:
+
+```
+orden=tipo
+automatica=no
+cuadricula=si
+primero=si
+sitio=s:Mi equipo|8|12
+sitio=f:CARTA.TXT|456|88
+```
+
+(«sitio»: dónde dejó cada uno, por su clase —«s» los de siempre, «p» los de
+los paquetes, «a» los accesos, «f» los archivos— y su nombre.)
+
+**Los archivos del escritorio**: los de la carpeta ESCRITOR del que ha
+entrado (`\USUARIOS\CARLOS\ESCRITOR`, la que hace `cuentas.cas`); sin
+usuarios, los de `\ESCRITOR` en la unidad del sistema, si está. Hasta 24
+(los ocultos y los del sistema, no). Cada uno, con el icono de su clase
+(como en el explorador); dos clics lo abren con lo suyo (`EQUIPO /ABRIR`). El
+escritorio mira la carpeta cada dos segundos: lo que se copia o se borra
+ahí sale o se va solo.
+
+**Por el puerto serie**, cada vez que los coloca: `escritorio: iconos
+(motivo): N en la zona X0,Y0-X1,Y1, celdas de A x B, C x F, P página(s),
+orden O: Mi equipo@8,12/1; ...`; con eso comprueba
+`castel/nucleo32/mira_iconos.py` que ninguno se sale ni se tapa.
+
+**Probarlo**: `SOLO=iconos castel/pruebas.sh` (la parte 47,
+`pruebas_iconos.sh`): 30 iconos (12 accesos de paquetes y 15 archivos y
+carpetas en `\ESCRITOR`) a 1024 x 600 y a 800 x 600, cada orden, arrastrar uno
+a la barra, la cuadrícula, la automática, el teclado, `ICONOS.INI` y el
+arranque siguiente; cambiar la medida en marcha (de 1280 x 720 a 800 x 600 y
+a 1024 x 600); 47 a 640 x 480 (dos páginas); y sin el dock.
 
 ### El menú Inicio y los atajos de teclado (21/11, la 0.8.4; marcado «(MENÚ)»)
 
@@ -2566,11 +2668,14 @@ del sistema (con la memoria USB, `X:\ACPI.TXT`).
 **Apagar, en orden** (`escritorio.cas`, `apaga`; `energia.cas`):
 
 1. **Avisar a los programas**: a cada ventana de un programa, «cerrar» (como el
-   botón de la ventana), y hasta 2 s para que se cierren, sin dejar de mover
-   el escritorio. Si alguno no se cierra (el Bloc de notas con cambios sin
-   guardar avisa y se queda), **no se apaga**: un aviso lo dice («Hay un
-   programa sin cerrar: ¿algo sin guardar?»); al pedirlo **otra vez**, se le
-   cierra (como el Bloc al cerrar otra vez).
+   botón de la ventana), y hasta 3 s para que se cierren, sin dejar de mover
+   el escritorio. (CORTES) Si alguno no se cierra (el Bloc de notas con
+   cambios sin guardar pregunta; uno colgado ni lo lee), el cuadro **«Estos
+   programas no se han cerrado»**, con cada uno («no responde» o «espera una
+   respuesta»), **«Forzar el cierre»** y **«Cancelar»**; sin elegir nada, a
+   los 15 s se fuerza (a los 60 si alguno pregunta algo): sección 14 tervicies.
+   (Antes: «Hay un programa sin cerrar: ¿algo sin guardar?» y no se apagaba
+   hasta pedirlo otra vez.)
 2. La pantalla del final («Apagando el equipo...»), y los programas que
    queden (sin ventana) se acaban: sus archivos se cierran y lo escrito queda.
 3. **Vaciar los discos** (`asentar` de cada uno).
@@ -3537,7 +3642,8 @@ CNAME de la respuesta; 8 nombres sabidos durante 5 minutos); y **TCP**
 que llega; el MSS (1.460) en el SYN; la ventana que se anuncia es lo libre de
 lo recibido y se avisa cuando se abre; lo enviado se guarda hasta que llega su
 ACK y, si no llega a tiempo, se manda otra vez desde ahí, cada vez esperando el
-doble (de 1 a 32 s; a los 8 intentos, cortada); con la ventana de la otra punta
+doble (de 1 a 16 s; al séptimo sin respuesta, unos 63 s, cortada: sección 14
+vicies); con la ventana de la otra punta
 cerrada, un octeto de vez en cuando para preguntar; lo desordenado se tira (se
 repite el ACK); FIN en los dos sentidos, RST a lo que no es de ninguna
 conexión. Sin escuchar en un puerto (de momento solo se conecta), sin
@@ -4237,6 +4343,109 @@ de otros no los lee), el Navegador con Google, ClicGest, Naves (suena),
 alarma del Reloj (suena), «Poner en hora» (pregunta el modo
 administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
+
+**La 0.8.8** (22/11, rama `pentium-088`, corta: las ramas `agenda`, `cuentas32`,
+`pintura32` y, al final, `red-cortes` e `iconos-escritorio`; `termometro` va
+aparte). Lo que se tocó al juntar:
+
+- **Una sola versión**: `VERSION_088` en `hpq.py` (la base) y
+  `Usuario.VERSIÓN_TEXTO` («0.8.8»: el menú, «Acerca de» y VER).
+- **La Agenda con usuarios** (sección 14 vicies): el vigilante (`AGENDA
+  /VIGILAR`) lo lanza el escritorio al entrar cada usuario
+  (`lanza_vigilante_agenda` en `lo_del_usuario`, como `CORREO /BANDEJA`): es
+  suyo, usa su `\USUARIOS\<u>\AGENDA` (`Festivos.carpeta_agenda`, la llamada
+  200, 4) y se acaba al cerrar su sesión; sin usuarios, al arrancar. El
+  recuadro del reloj (`ayuda_agenda`) lee el `PROXIMA.TXT` de quien ha
+  entrado (`Cuentas.carpeta_de(sesión)`); con usuarios, `busca_agenda` mira si
+  está para que el reloj la abra. El paquete `agenda` pide la base 0.8.8.
+- **Mi equipo** (`exoper.cas`, `de_paquetes`): .ICS y .VCF con la Agenda;
+  .HOJ, .XLSX, .XLS, .ODS y .CSV con Cuentas 2 (también donde ASOCIA.TXT dice
+  el `CUENTAS.HVP` de antes); .PCX con Pintura 2. El menú Inicio: con
+  `\CUENTAS.BIN`, el Cuentas de Hispa-386 no sale en Oficina (como Pluma).
+- **Pintura 2 sustituye a la 1.0 del sistema**: el paquete del sistema
+  `pintura` 2.0 (`PINTURA.BIN` y `PINTURA.TXT` en `\HISPA`, `PINTURA.MNU`
+  —tipo Multimedia, sin icono en el tapiz— y su icono en `\HISPA\MENU`); lo
+  instala `sistema.sh` (solo en el sistema instalado, como la oficina) y ya no
+  instala `PINTURA.HVP`; al actualizar desde la 0.8.7, PAQUETES quita el .HVP
+  (no está en la 2.0). En el menú Inicio, la tabla fija de la oficina no
+  enseña el .HVP de Pintura si existe `\PINTURA.BIN`, y Pintura 2 no entra de
+  salida entre los más usados (desplazaba a Facturas: la parte 07). En Mi
+  equipo, **una sola** «Editar con Pintura» (`uequipo.cas`): Pintura 2 si
+  está (PNG, JPG, BMP, GIF, PCX, ICO, TGA) y, si no, la de la oficina (BMP y
+  PCX); en «Abrir con...», el .HVP solo sin Pintura 2. equipo 0.9.4.
+- **La biblioteca común** (`oficina/comun`): Cuentas añade sus iconos al enum
+  de `ui.h` detrás de los de Pluma; Pintura dibuja los suyos aparte
+  (`iconos_p.c`), así que no se pisan. Lo demás de las dos (memchr y
+  strrchr; las TGA y `imagen_lee_max`; el fondo con la llamada 172) entra
+  junto. **/Producer** de los PDF: era siempre «Pluma 2.0» (también los de
+  Cuentas y Pintura); ahora `pdf_productor` (Pluma 2.0.1, Cuentas 2.0, Pintura
+  2.0). Los tres se compilan con la biblioteca final: Pluma cambia de binario
+  y sube a **2.0.1** (el ODT dice `PLUMA_VERSION`).
+- **F11 y F12**: `so_pentium.c` da `SO_T_F11`/`SO_T_F12` con las teclas 0x157
+  y 0x158 del núcleo (la 0.8.7); no había apaños que quitar.
+- **Pintura: el asa de la esquina** (petición de Carlos): sección 14
+  duovicies, «El asa de la esquina».
+- **Los cortes de la red** (`red-cortes`, el HP Mini por Wi-Fi: la descarga
+  colgada tras un corte, «Cancelar» que no cortaba, reiniciar que esperaba
+  para siempre): su sección pasa a la **14 tervicies** (en su rama era la 14
+  vicies, la de la Agenda); `VERSION_CORTES` y `VERSION_088` son la misma
+  0.8.8; parte 37 (`cortes`). Se juntó sin más choques que `pruebas.sh` y
+  `hpq.py` (escritorio.cas, usuario.cas y llamadas.cas, solos).
+- **Los iconos del tapiz** (`iconos-escritorio`, sección «Los iconos del
+  tapiz»): se juntó solo (escritorio.cas sin choques: `lo_del_usuario`
+  queda con sus iconos, `CORREO /BANDEJA` y el vigilante de la Agenda); parte
+  47 (`iconos`). Y lo que pidió Carlos: no hay Papelera en el tapiz porque
+  **la Papelera está siempre en el dock, la última** (`dock.cas`,
+  «(ICONOS)»: `papelera_al_final`; «Quitar del dock» sale apagado en ella y
+  `quita` no la quita; arrastrarla no la mueve ni nadie pasa a su sitio; lo
+  que se fija va delante; un DOCK.INI sin ella, o con ella en otro sitio, la
+  recupera). Con el dock oculto, Mi equipo › Papelera y Ejecutar
+  `\EQUIPO.BIN /PAPELERA`; la parte 47 lo comprueba.
+- **Las secciones**: la Agenda es la 14 vicies, Cuentas 2 la 14 unvicies y
+  Pintura 2 la 14 duovicies (en sus ramas, 14 terdecies y 14 quindecies, ya
+  ocupadas). Las partes de las pruebas: 43 `agenda`, 44 `cuentas`, 45
+  `pintura`. La de Pintura, «Editar con Pintura» en FIGURAS.PNG un sitio más
+  allá (con `AZAR.SEM` en `C:\`).
+
+Los paquetes: base, red, tls y wifi **0.8.8**, paquetes 1.5, equipo 0.9.4,
+accesori 1.1 (el Reloj con los festivos de `festivos.cas`), pintura 2.0 (del
+sistema), pluma 2.0.1; nuevos agenda 1.0 y cuentas 2.0; lo demás, tal cual
+lo publicado (también correo 1.0.1, que se publicó aparte, y las firmas de
+Escudo del día).
+
+**Las pruebas de la 0.8.8** (22/11; en el PC de Albinyana con
+`tools/pruebas_castel_pc.sh -j 4`, y en el VPS lo que necesita qpdf,
+pdftotext, zlib o `convert`). Con todo junto (agenda, cuentas32, pintura32,
+red-cortes, iconos-escritorio y la Papelera fija): `iconos` 95/0, `06`
+168/0, `07` 102/0, `16` 139/0, `cd` 77/0, `paquetes` 108/0, `menu` 95/0,
+`programas` 92/0, `pantalla` 98/0, `rueda` 71/0, `usuarios` 94/0, `agenda`
+91/0, `cortes` 86/0, `acpi` 78/0 (una vez, en la batería cargada, «Reiniciar» no llegó a tiempo; sola, bien); tras red-cortes, `red` 72/0, `tls` 72/0,
+`wifi` 96/0; de antes de juntar red-cortes (no los toca), `protege` 76/0,
+`caliente` 79/0, `win32` 90/0, `win32juegos` 100/0, `sonido` 109/0,
+`accesorios` 81/0, `mirador` 75/0, `zip` 118/0, `castel64` 72/0,
+`castel32` 67/0, `oficina` 101/0, `bloc` 119/0, `correo` 185/0,
+`dispositivos` 85/0, `ssh` 70/0, `lectores` 79/0, `juegos` 98/0,
+`reproductor` 111/0; en el VPS, `pintura` 74/0, `cuentas` 85/0, `pluma`
+79/0, `pdf` 80/0, `escudo` 103/0 y `navegador` 98/0; `panel` 107/1 (en el PC y en el VPS: el tema Grafito, «Verde (elegido)» que no sale en pn6 tras el clic; **falla igual con el código de la 0.8.7** —8afbfc2, pasado hoy en el VPS—: no es de esta versión; queda mirarlo aparte). Fallos que
+se vieron y se arreglaron: las partes 06 y 07 (Pintura 2 entre los más
+usados del menú Inicio desplazaba a Facturas), la 41 (/Producer «Pluma
+2.0») y la 45 («Editar con Pintura» un sitio más allá por `AZAR.SEM`).
+
+**La 0.8.8, por Internet** (22/11, en QEMU `pc` con el disco en IDE, como el
+VirtualBox de Carlos): un disco instalado con el CD publicado de la 0.8.7, el
+usuario Carlos **con contraseña**, y Correo, Pluma 2 y los juegos de lo
+publicado; el catálogo de la 0.8.8 (firmado, `serie=` mayor que la publicada:
+la 1.4 lo acepta) por HTTP: la pantalla de entrada, «Hay 11
+actualizaciones» > Verlas > «Actualizar todo» (base, red, tls, wifi,
+paquetes, equipo, accesori, pintura, pluma, correo 1.0.1 y escudo) >
+«Reiniciar ahora» > la contraseña > «El núcleo nuevo ha arrancado bien»; VER,
+«Hispa-Pentium 0.8.8»; `PAQUETES INSTALA agenda cuentas` (la 1.5) y
+`PAQUETES COMPRUEBA`, «los 23 paquetes... como se instalaron»; el
+`PINTURA.HVP` de la 1.0, quitado. Logo+L y otra vez dentro: el vigilante de
+la Agenda, suyo, avisa de una cita de su `\USUARIOS\CARLOS\AGENDA` («AVISO
+Reunion de la junta», 15 minutos antes) y el reloj de la bandeja dice
+«Próxima cita: hoy...»; en Mi equipo, dos clics en un .HOJ abren Cuentas 2
+(con su gráfico) y «Editar con Pintura» en un .PNG abre Pintura 2.
 
 **La 0.8.7** (22/11, rama `pentium-087`: las ramas `usuarios`, `panel-control`,
 `bloc-avanzado`, `reproductor`, `win32-juegos`, `pentium-oficina` y `correo`,
@@ -5675,7 +5884,9 @@ con su icono). Sin tocar el núcleo.*
   («Sábado, 21 de noviembre de 2026»); el **calendario del mes**, de lunes a
   domingo, con **hoy** en negro con «HOY» debajo y **los festivos nacionales**
   con «*» y su nombre debajo (también el Viernes Santo, que se calcula con la
-  Pascua); se pasa de mes con < y > (o Re Pág y Av Pág) y de día con las
+  Pascua; (AGENDA, 22/11) desde la Agenda, también los de la comunidad y los
+  locales elegidos en ella: la misma tabla, `festivos.cas`; y **dos clics en
+  un día abren la Agenda en ese día**); se pasa de mes con < y > (o Re Pág y Av Pág) y de día con las
   flechas; Inicio o «Hoy» vuelven a hoy. Y **poner en hora el equipo** (fecha
   y hora; «Ahora» las rellena): la llamada 67, que en la 0.8.5 no pide el modo
   administrador (si lo pidiera, está apuntado dónde: `pon_en_hora`).
@@ -5724,7 +5935,8 @@ con su icono). Sin tocar el núcleo.*
   `tipo=Accesorios`) y sus iconos (`.ICP`, dibujados en el propio script), de
   `nucleo32/accesorios.py`. `sistema.sh` los compila con los demás y los pone
   en `\HISPA` y `\HISPA\MENU` del sistema instalado (como NAVES.MNU).
-- **El paquete** `accesori` 1.0 (`tools/hpq.py`, en SISTEMA), que pide `base`
+- **El paquete** `accesori` 1.0 (`tools/hpq.py`, en SISTEMA; (AGENDA) la 1.1,
+  con el Reloj de los festivos de `festivos.cas` y los dos clics), que pide `base`
   0.8.4: `CALC.BIN`, `RELOJ.BIN` y `CARACTER.BIN` en `\HISPA`, y sus `.MNU` y
   `.ICP` en `\HISPA\MENU`. Tipo **herramientas** (con el hpq.py de la 0.8.5,
   `--tipo herramientas`; el menú de la 0.8.5 los pone en Accesorios por el
@@ -7985,14 +8197,14 @@ las pruebas y el modelo de Hispa-64):
 
 | Pieza | Qué da |
 |---|---|
-| `so.h`, `so_pentium.c`, `so_anfitrion.c` | lo único que cambia de un sistema a otro: memoria (la de Hispa-PDF), archivos y carpetas (rutas en UTF-8), la ventana (llamadas 32-36, 39, 40, 41, 80, 81, 181), los sucesos ya en Unicode (`so_suceso`), el portapapeles, la hora. En Linux, una **ventana de mentira** que se maneja con un guion (`OFI_GUION`: escribe, tecla, clic, doble, arrastra, rueda, elige, captura...) y deja capturas `.ppm` |
+| `so.h`, `so_pentium.c`, `so_anfitrion.c` | lo único que cambia de un sistema a otro: memoria (la de Hispa-PDF), archivos y carpetas (rutas en UTF-8), la ventana (llamadas 32-36, 39, 40, 41, 80, 81, 181), los sucesos ya en Unicode (`so_suceso`), el portapapeles, la hora. En Linux, una **ventana de mentira** que se maneja con un guion (`OFI_GUION`: escribe, tecla, clic, doble, arrastra, rueda, elige, captura...) y deja capturas `.ppm`. (PINTURA32) El fondo del escritorio (`so_fondo_escritorio`: la llamada 172; en Linux, `fondo.ppm`), la pantalla entera (`so_pantalla_entera`) y en el guion `arrastra ... der|ctrl|mayus|pasos N` y `traza X1 Y1 X2 Y2 ...` |
 | `entrada.asm`, `pentium.ld`, `inc/` | la cabecera HPU3 y la entrada (llama a `ofi_principal`), el enlace en 0x40000000, las cabeceras de C sin biblioteca |
 | `texto.h` | UTF-8, UTF-32, la 437 de Hispa (con Á, Í, Ó, Ú, €), mayúsculas, un `printf` pequeño (`fmt`, `dice`) y el búfer que crece (`bufer`, `buf_xml`...) |
 | `ttf.h` | las TrueType sin fiarse de ellas (comprobar, el glifo de una letra, la familia del `name`) y el **subconjunto** para un PDF |
 | `letras.h` | las letras: las DejaVu de dentro (`haz_letras.py`) y las del usuario, la familia más parecida, lo que mide cada letra (en milésimas de em) y su dibujo con grises guardado |
 | `lienzo.h` | dibujar en un lienzo 0x00RRGGBB: rectángulos, esquinas redondas, rayas y polígonos suavizados, imágenes a escala con alfa, la onda del corrector, texto |
 | `ui.h`, `iconos.c` | la cara: barra de menús, barras de herramientas (botones, conmutadores, listas, colores), **regla**, barras de desplazamiento, barra de estado y **cuadros de diálogo** (rótulos, campos, números con flechas, botones, casillas, opciones, listas, desplegables, muestras); 37 iconos |
-| `imagen.h` | PNG, JPG, BMP y GIF con stb_image (con topes) |
+| `imagen.h` | PNG, JPG, BMP y GIF con stb_image (con topes); (PINTURA32) con otro tope (`imagen_lee_max`) y los TGA, que no tienen firma (`imagen_lee_tga`) |
 | `zip.h`, `miniz_ofi.c` | leer y escribir ZIP con miniz (topes: 64 MB por archivo, 256 MB en total, 20.000 entradas) |
 | `xml.h` | un XML seguro (sin recursión, sin DTD) en árbol, con caminos (`xml_camino(n, "w:body/w:p")`) y lo de escribirlo: para ODT/DOCX y luego ODS/XLSX |
 | `pdfsal.h` | escribir PDF: páginas, texto con la x de cada letra, TrueType incrustadas, imágenes, rayas, rectángulos, marcadores y metadatos |
@@ -8060,11 +8272,11 @@ la cursiva de verdad de las DejaVu (hoy, inclinada).
 
 Con el mismo patrón (núcleo en C portable sobre `oficina/comun`, la misma
 cara, sus pruebas en el anfitrión y en QEMU, su paquete): **Cuentas 2**
-(hoja de cálculo, ODS/XLSX con `zip`/`xml`/`f_xmlcomun`, gráficos, exportar a
-PDF), **Datos 2**, **Presentaciones 2** (ODP/PPTX y pase a pantalla
-completa), **Publicaciones 2** (marcos sobre la maqueta de Pluma) y
-**Facturas 2** (con el PDF de `pdfsal`). Los `.HVP` siguen para Hispa-386.
-Ver docs/pentium/METAS.md.
+(hecha: la sección siguiente), **Datos 2**, **Presentaciones 2** (ODP/PPTX y
+pase a pantalla completa), **Publicaciones 2** (marcos sobre la maqueta de
+Pluma) y **Facturas 2** (con el PDF de `pdfsal`; y las tablas y los formatos
+de número de Cuentas 2). Los `.HVP` siguen para Hispa-386. Ver
+docs/pentium/METAS.md.
 
 ## 14 undevicies. Correo (CORREO.BIN, rama correo)
 
@@ -8308,6 +8520,877 @@ enlace no lleva el enlace; carpetas nuevas, renombrar y borrar carpetas del
 servidor; las reglas (filtros); el HTML con su CSS de verdad (para eso, «Abrir
 en el Navegador» sin scripts); nombres largos al guardar adjuntos (el núcleo,
 8+3); las cuentas de Exchange (EWS) y JMAP.
+## 14 vicies. La Agenda (AGENDA.BIN, rama agenda)
+
+*22/11/2026. Carlos: «Mirando el reloj he visto que no tenemos calendario
+para apuntar cosas». Paquete **`agenda`** 1.0 (tipo Oficina). Lo cambiado
+fuera de sus archivos lleva la marca «(AGENDA)».*
+
+| | |
+|---|---|
+| ![El mes, con la cita semanal importada y la leyenda de las categorías](pentium/agenda/ag3.png) | ![La ficha de una cita: aviso y «Cada semana» con sus días](pentium/agenda/ag4.png) |
+| ![El aviso, con la Agenda cerrada o abierta: Posponer y Hecho](pentium/agenda/ag6.png) | ![La semana](pentium/agenda/ag7.png) |
+| ![Los próximos 60 días, con los festivos](pentium/agenda/ag8.png) | ![Las tareas](pentium/agenda/ag9.png) |
+| ![El día, abierto desde el Reloj con dos clics](pentium/agenda/ag12.png) | ![El reloj de la bandeja: la próxima cita](pentium/agenda/ag13.png) |
+| ![Al arrancar: lo que se pasó con el equipo apagado](pentium/agenda/ag14.png) | ![La Agenda, recién abierta: el mes, hoy y la leyenda](pentium/agenda/ag1.png) |
+
+### Cómo se maneja
+
+- **Dónde**: Inicio › Oficina › Agenda; **un clic en el reloj de la
+  bandeja** (y, con el ratón quieto encima, la próxima cita); **dos clics en
+  un día del calendario del Reloj** (la abre en ese día); dos clics en un
+  `.ICS` o un `.VCF` en Mi equipo (pregunta si se importa).
+- **Las vistas** (pestañas, o las teclas 1 a 5): **Día** (lo del día en una
+  rejilla: la hora, el título, el lugar, la categoría y el aviso), **Semana**
+  (siete columnas, de lunes a domingo), **Mes**, **Próximos** (60 días, con
+  los festivos en su sitio) y **Tareas** (por hacer y, si se quiere, las
+  hechas). A la izquierda, el **mini calendario** (un clic salta a ese día;
+  dos, a su vista del día; un puntito: hay algo apuntado) y la **leyenda de
+  las categorías**. «<», «Hoy», «>» e «Ir a...» (Ctrl+G, «dd/mm/aaaa»).
+- **Nada solo por el color** (Carlos es daltónico): hoy, con un **recuadro
+  negro grueso, en negrita y la palabra HOY**; el día elegido, con un borde
+  azul; los festivos, con **«*» y su nombre**; cada categoría, con su
+  **símbolo** (Personal ●, Trabajo ■, Asociación ▲, Médico ✚, Familia ◆,
+  Cumpleaños ✱, Viaje ➜, Otros ○) además del color, y su nombre en la
+  leyenda; las tareas, con «[x]» o «[ ]». Los nombres de las categorías se
+  cambian en Opciones.
+- **Una cita** (Ctrl+N, «Nueva», dos clics en un día; dos clics en una cita
+  la cambian): título, lugar, el día, **todo el día o la hora y lo que
+  dura**, el **aviso** (a la hora, 5, 10, 15 o 30 minutos, 1 o 2 horas, 1 o 2
+  días o 1 semana antes), la categoría, **la repetición** (cada día, cada N
+  semanas con sus días, cada mes el mismo día o «el segundo martes» —el
+  último, si cae en la última semana—, cada año; **hasta un día o N
+  veces**) y las notas. De una que se repite: «Quitar solo este día» (una
+  excepción, EXDATE) o borrar todas. Lo que viene de un `.ICS` con una regla
+  que la ficha no sabe hacer (BYSETPOS, varios meses...) se ve «Como viene
+  del .ICS» y se guarda tal cual.
+- **Las tareas**: con fecha límite (o sin ella), «hecha» con la casilla (o
+  Espacio en la vista de Tareas) y su aviso. **Los cumpleaños**: cada año,
+  con los años que cumple («Cumpleaños de Pepa (75)») si se sabe el año (de
+  antes de 1970 también); se importan de una libreta de direcciones en
+  vCard (`BDAY`: 19500315, 1950-03-15, --0315), la del Correo cuando lo haya.
+- **Importar y exportar** (Archivo): `.ICS` de Google Calendar, Outlook o el
+  móvil, y `.VCF`. Lo que lleva el mismo UID que una que ya está, la cambia:
+  importar dos veces no duplica. Exportar, todo o una categoría.
+- **En la Consola**: `AGENDA /PROXIMOS`, `/LISTA dd/mm/aaaa [dd/mm/aaaa]`,
+  `/TAREAS`, `/NUEVA`, `/TAREA`, `/HECHA`, `/BORRA`, `/IMPORTA`, `/EXPORTA`,
+  `/FESTIVOS aaaa [comunidad]`, `/AVISOS`, `/UTC`, `/CASOS` (la cabecera de
+  `uagenda.cas`); con `/CARPETA=` y `/AHORA=` delante, para las pruebas.
+
+### Los avisos, aunque la Agenda esté cerrada
+
+`AGENDA /VIGILAR`, **el vigilante** (`agvigia.cas`), lo lanza el escritorio
+al arrancar (`escritorio.cas`, «(AGENDA)»: tres líneas, como `ESCUDO
+/VIGILAR`; si no está `AGENDA.BIN`, nada). **Casi sin procesador**: calcula
+cuándo salta el aviso siguiente y duerme hasta entonces (la llamada de
+dormir: el procesador, para los demás), como mucho 30 segundos de cada vez;
+al despertar mira el reloj y `AGENDA.GEN` (un número que la Agenda sube cada
+vez que guarda: si ha cambiado, vuelve a leer). En el HP Mini, una vuelta
+cada 30 s que lee 8 octetos.
+
+Cuando salta: **el sonido de aviso del sistema** (`sonar(SISTEMA_AVISO)`,
+SONIDO.BIN; cada 10 s durante el primer minuto; sin tarjeta, nada) y una
+ventanita **«AVISO - Agenda»** con la franja amarilla y la palabra AVISO, la
+cita (con su símbolo), el día y las horas, el lugar y cuánto falta; y
+**Posponer 5 min, 10 min, 1 hora, Hecho y Abrir la Agenda** (Intro, Esc y
+Tab también). Si saltan varios, uno detrás de otro («y 2 más»). Lo pospuesto
+se guarda (`VISTO.TXT`): no se pierde al apagar.
+
+**Al arrancar**: lo que tenía que avisar **mientras el equipo estaba
+apagado** (desde lo último que vio, `VISTO.TXT`; hasta 31 días), en una
+lista («AVISOS: mientras el equipo estaba apagado»). Si el reloj se
+adelanta, salta lo de en medio; si se atrasa, sigue desde la hora nueva.
+
+Y deja en **`PROXIMA.TXT`** la cita siguiente: el escritorio la enseña en el
+recuadro de ayuda del reloj de la bandeja («Próxima cita: hoy Mar 24/11
+09:40 Reunión de la junta (Casal d'Avis)» y «Un clic en el reloj: la
+Agenda»), y un clic en el reloj abre la Agenda (`escritorio.cas`,
+`ayuda_agenda` y el clic, «(AGENDA)»).
+
+### Las horas y el cambio de hora
+
+Las horas de las citas son **las de aquí, las de la pared (Europe/Madrid)**:
+una cita de los lunes a las 10:00 sigue a las 10:00 después del cambio de
+hora, como en Google. Para los avisos y para escribir en UTC se pasa al
+instante de verdad (minutos desde 1970, en UTC) con las reglas de la UE (el
+último domingo de marzo y el de octubre, a la 1:00 UTC). Las horas raras,
+como dice RFC 5545: **las 2:30 del día del cambio de marzo no existen** (se
+toman con la hora de antes: son las 3:30 de verano; un aviso de una hora
+antes de las 3:00 de ese día salta a la 1:00); **las 2:30 del de octubre
+pasan dos veces** (se toma la primera, la de verano). Lo que dura una cita
+es lo que dura de verdad (la de las 2:00 a las 3:00 del día de octubre dura
+dos horas en el reloj... y una de verdad: se guarda la de verdad).
+
+Al importar, cada hora se pasa a la de Madrid: con su `TZID` (las
+`VTIMEZONE` que trae el archivo, con sus reglas: también Nueva York o
+Sídney; y, si no la trae, las de siempre por su nombre: las de Europa
+—Madrid, Londres y Lisboa, Atenas...—, los nombres de Windows de Outlook
+—«Romance Standard Time»—, UTC), en UTC («Z») o flotante (la de aquí).
+
+### Los festivos: una sola tabla para el Reloj y la Agenda
+
+`festivos.cas` (marcado «(AGENDA)»): el calendario (las fechas, la Pascua,
+la fecha larga; antes dentro del Reloj) y **la tabla de los festivos**, que
+usan los dos (el Reloj ya no lleva la suya: la de los nacionales se ha
+movido aquí). En Opciones › Festivos se elige **la comunidad autónoma** (de
+serie, **Cataluña**) y **el municipio** de las fiestas locales (de serie,
+**Albinyana**); se guarda en `AGENDA.INI` y el Reloj lo lee igual.
+
+- **Nacionales**: los diez de todos los años (con el Viernes Santo, contado
+  desde la Pascua).
+- **De cada comunidad**: para **2026 y 2027, las listas oficiales** (la
+  Resolución de la Dirección General de Trabajo, BOE-A-2025-21667 y
+  BOE-A-2026-21254; y, para Cataluña, las Ordres EMT/66/2025 y EMT/52/2026
+  del DOGC), con los traslados de cada año (el 2/11 y el 7/12 de 2026 en
+  muchas; Cataluña sin el 26/12 de 2027, que es domingo); para los demás
+  años, **las reglas de siempre** (el Jueves Santo en todas menos Cataluña y
+  la Comunitat Valenciana, el Lunes de Pascua donde toca, el día de cada
+  una). Las fiestas insulares de Canarias no van (una por isla).
+- **Locales de Albinyana**: el **16 de julio** (Mare de Déu del Carme) y el
+  **24 de agosto** (Sant Bartomeu), que el Ajuntament mueve al viernes de
+  antes o al lunes siguiente si caen en fin de semana: los de 2023 a 2026
+  van tal cual salieron (Ordre EMT/208/2025 del DOGC para 2026; los datos
+  abiertos de la Generalitat, «Calendari de festes locals a Catalunya», para
+  los de antes); **los de 2027 aún no están publicados** (salen en el DOGC
+  en diciembre de 2026): hasta entonces, el 16/7 y el 24/8.
+- **Los suyos**: `FESTIVOS.TXT` en la carpeta de la Agenda, un renglón por
+  festivo: `16/07|Mare de Déu del Carme` (cada año), `25/08/2025|Sant
+  Bartomeu` (un año), `P+50|Lunes de Pentecostés` (desde la Pascua) o
+  `-24/08/2025|` (quitar uno). Así se añaden los de otro pueblo; para que
+  salga en la lista de Opciones, una línea `L:MUNICIPIO|...` en `festivos.cas`
+  y su nombre en `MUNICIPIOS`.
+
+### El .ICS (RFC 5545)
+
+`agics.cas`. **Lee**: VEVENT y VTODO (SUMMARY, LOCATION, DESCRIPTION,
+CATEGORIES, UID, DTSTART, DTEND, DURATION, DUE, STATUS), **RRULE** (FREQ
+diaria, semanal, mensual y anual; INTERVAL, COUNT, UNTIL, BYDAY con sus
+ordinales, BYMONTHDAY, BYMONTH, BYYEARDAY, BYSETPOS, WKST), **EXDATE**,
+**RECURRENCE-ID** (la vez cambiada queda como cita suelta y su día, como
+excepción de la otra, aunque venga antes), **VALARM** (TRIGGER antes del
+principio, del final o a una hora) y **VTIMEZONE**; los renglones doblados,
+los `\,` `\;` `\n` y el UTF-8 (a la página 437 de la casa; lo que no está,
+«?»). Lo que no sabe (BYHOUR, HOURLY...), lo dice («repeticiones raras») y
+la cita se queda con lo demás. **Escribe**: VCALENDAR 2.0 con la VTIMEZONE de
+Europe/Madrid, DTSTART;TZID=Europe/Madrid (las de todo el día, VALUE=DATE),
+su RRULE, sus EXDATE, su VALARM y las categorías; las tareas, VTODO; los
+cumpleaños de antes de 1970, con su año; renglones de 75 octetos como mucho,
+sin partir una letra, en UTF-8 y con CR LF. **La Agenda guarda así lo suyo**
+(`AGENDA.ICS`): lo que guarda es lo que exporta, y se prueba cada vez.
+
+**La carpeta** (una sola función, `Festivos.carpeta_agenda`): con usuarios
+(la rama `usuarios`, la 0.8.7), `\USUARIOS\<CARPETA>\AGENDA` (la llamada 200,
+4); si no (un núcleo sin usuarios, o un sistema sin instalar),
+`\DOCUMENT\AGENDA` de la unidad del sistema. Dentro: `AGENDA.ICS`,
+`AGENDA.GEN`, `AGENDA.INI`, `FESTIVOS.TXT`, `VISTO.TXT` y `PROXIMA.TXT`. Se
+guarda por `AGENDA.NUE` (si se va la luz a medias, queda una entera). El
+escritorio lee `PROXIMA.TXT` con la misma regla (`ayuda_agenda`): desde la
+0.8.8, con usuarios, la de quien ha entrado (`Cuentas.carpeta_de(sesión)`); y
+el vigilante (`AGENDA /VIGILAR`) lo lanza al entrar cada uno
+(`lanza_vigilante_agenda` en `lo_del_usuario`, como `CORREO /BANDEJA`): es
+suyo y se acaba al cerrar su sesión. Sin usuarios, al arrancar.
+
+### Cómo está hecho
+
+```
+castel/nucleo32/
+  festivos.cas   (AGENDA) el calendario y la tabla de los festivos: Reloj y Agenda
+  agnucleo.cas   las citas, las reglas RRULE (leer, escribir, dar las veces), las zonas, los avisos
+  agics.cas      leer y escribir .ICS; los cumpleaños de las vCard
+  agcomun.cas    leer y guardar la agenda, AGENDA.GEN y AGENDA.INI; los símbolos; los textos
+  agventa.cas    la ventana (las cinco vistas, la ficha y los cuadros)
+  agvigia.cas    el vigilante de los avisos
+  uagenda.cas    AGENDA.BIN: la línea de órdenes y a cuál de las tres
+  agenda/        paquete.sh, icono.py (el icono, dibujado), LEEME.txt y pruebas/
+                 (repite.py, casos.txt, fuzz.py, google.ics, libreta.vcf, exportado.ics)
+```
+
+**En Castel** (como el Reloj): lo de la Agenda es sobre todo ventana, que
+son los controles de `controles.cas`, y las reglas y el .ICS son cuentas de
+números y textos, que en Castel se escriben igual y van tal cual a Hispa-64
+con Castel de 64 bits. Las veces de una regla se dan **de una en una** (una
+`Vuelta`: el período —el día, la semana desde WKST, el mes o el año—, sus
+días candidatos ordenados, BYSETPOS, y luego UNTIL y COUNT), como hace
+python-dateutil; la de DTSTART va siempre (RFC 5545). Sin COUNT, salta
+derecho al período de lo que se mira (el mes de 2040 no cuenta desde 2026);
+todo con tope (el año 2200, 3000 períodos seguidos sin ninguna). Del
+«Tareas» de la oficina de Hispa-386 (`programas/tareas.asm`) no se ha tomado
+nada: es el Administrador de tareas (los programas en marcha), no una lista
+de pendientes.
+
+**El núcleo y los demás** (lo mínimo, marcado «(AGENDA)»): `escritorio.cas`
+(lanzar el vigilante, el recuadro del reloj y su clic), `ureloj.cas` (los
+festivos de `festivos.cas` —sus funciones de fechas se han ido allí— y los
+dos clics), `exoper.cas` (los .ICS y .VCF, con la Agenda si está
+instalada), `tools/hpq.py` (el paquete `agenda` y `accesori` 1.1) y
+`pruebas.sh` (la parte 43).
+
+### Los paquetes
+
+- **`agenda` 1.0** (OPCIONALES de `tools/hpq.py`, tipo oficina, `base >=
+  0.8.4`): `\HISPA\AGENDA.BIN`, `\HISPA\AGENDA\LEEME.TXT` y
+  `\HISPA\MENU\AGENDA.MNU` y `.ICP` (con `tipo=Oficina`). Lo hace
+  `castel/nucleo32/agenda/paquete.sh SALIDA` (AGENDA.HPQ y CATALOGO.LIN).
+  **Los avisos con la Agenda cerrada piden el núcleo con «(AGENDA)»** (el que
+  lanza el vigilante: la 0.8.7); con uno de antes, la Agenda va, pero el
+  vigilante no arranca solo.
+- **`accesori` 1.1**: el Reloj con `festivos.cas` y los dos clics.
+
+### Probarlo
+
+`SOLO=agenda ./pruebas.sh`, la parte 43 (`pruebas_agenda.sh`): con corre32,
+**las repeticiones frente a python-dateutil** (`agenda/pruebas/repite.py`:
+1.500 reglas al azar y las de siempre, cada una desde su principio y, sin
+COUNT, también desde años más adelante: más de 2.000 casos; sin dateutil,
+`casos.txt`), **el cambio de hora** (las dos noches de 2026 y sus avisos),
+**un .ICS de Google** (`google.ics`: la cita semanal con COUNT, EXDATE y una
+vez cambiada; UTC; Nueva York; tres días; la hora que no existe; un
+cumpleaños de 1952; una tarea; VALARM; UTF-8) importado, exportado e
+importado y exportado otra vez, **igual** (y lo exportado, mirado como dice
+RFC 5545), **los cumpleaños de una vCard**, **los festivos** (Cataluña 2026 y
+2027 como el DOGC, Albinyana, Madrid) y **el fuzz del lector .ICS**
+(`fuzz.py`: 3.000 vueltas, 15.000 ejecuciones, sin un fallo, el 22/11; en
+la parte, 400). En QEMU: el vigilante arranca con el escritorio, el icono
+abre la Agenda, Archivo › Importar, **una cita nueva con su aviso y «Cada
+semana»**, **el aviso a su hora con el reloj del PC puesto justo antes**
+(RELOJ=), Posponer 5 min, la semana, los próximos, las tareas, el Reloj con
+dos clics en un día, **el reloj de la bandeja con la próxima cita** y lo que
+queda en el disco (fsck.fat). Las capturas, con `CAPTURAS_DOCS=1`, a
+`docs/pentium/agenda/`.
+
+### Lo que falta
+
+**Sincronizar con CalDAV** (Google Calendar, Nextcloud, el móvil: leer y
+escribir el calendario de un servidor, con HTTPS; apuntado en METAS),
+varios calendarios a la vez (de colores, que se encienden y se apagan), las
+horas dentro de las reglas (BYHOUR, BYMINUTE, HOURLY: hoy, una vez al día
+como mucho), arrastrar una cita a otro día, imprimir el mes, la semana con
+las horas en filas (hoy, una lista por día), y la libreta de direcciones del
+Correo (hoy, los cumpleaños se importan de un .VCF).
+
+## 14 unvicies. Cuentas 2, la hoja de cálculo de 32 bits (CUENTAS.BIN, rama cuentas32)
+
+*22/11/2026. Carlos (16/11): Cuentas, «acercarlo lo más posible a Excel
+5.0»; y (22/11) la oficina de 32 bits con cara nueva. Lo cambiado fuera de
+`castel/nucleo32/oficina/cuentas/` lleva la marca «(CUENTAS32)».*
+
+| | |
+|---|---|
+| ![Cuentas 2 en QEMU: números, fórmulas, € y un gráfico](pentium/cuentas/cu1.png) | ![Exportado a PDF](pentium/cuentas/cu2.png) |
+| ![El cuadro Formato de celdas (Alt+F)](pentium/cuentas/cu3.png) | ![Vuelto a abrir: PRUEBA.HOJ](pentium/cuentas/cu4.png) |
+| ![Y el .XLSX (PRUEBA.XLS por el 8+3)](pentium/cuentas/cu5.png) | ![En el anfitrión: combinar y centrar, €, gráfico con tramas, formato condicional](pentium/cuentas/h1.png) |
+| ![Formato de celdas, pestaña Número](pentium/cuentas/h2.png) | ![La vista preliminar](pentium/cuentas/h3.png) |
+| ![El autofiltro: solo «Peras» (el botón lleva un embudo)](pentium/cuentas/h4.png) | ![Ordenado por Datos > Ordenar: la fila de títulos queda arriba](pentium/cuentas/h5.png) |
+| ![Ordenado, con la primera fila inmovilizada y a 120%](pentium/cuentas/h6.png) | |
+
+**Qué es.** Cuentas 2 es la hoja de cálculo nativa de Hispa-Pentium: un
+programa del anillo 3 de 32 bits (`\HISPA\CUENTAS.BIN`, unos 820 KB con las
+seis DejaVu dentro), sin HVPRUN, en **C portable** sobre la biblioteca común
+de la oficina (`oficina/comun`): el mismo código se compila para Hispa-64
+cambiando solo `comun/so_*.c`. El Cuentas de Hispa-386 (`CUENTAS.HVP`)
+sigue para Hispa-386 y para quien no tenga el paquete; con el paquete
+`cuentas` instalado, el menú Inicio (Oficina) y Mi equipo (los `.HOJ`,
+`.XLSX`, `.XLS`, `.ODS` y `.CSV`) usan Cuentas 2.
+
+**La cara, la de Excel 5 en español**: la barra de menús (Archivo, Edición,
+Ver, Insertar, Formato, Herramientas, Datos, Ventana, ?; lo que aún no hay,
+en gris; Deshacer y Rehacer dicen qué deshacen), la barra **Estándar**
+(nuevo, abrir, guardar, imprimir, vista preliminar, cortar, copiar, pegar,
+copiar formato, deshacer, rehacer, **Σ autosuma**, **fx** asistente para
+funciones, ordenar A→Z y Z→A, **asistente para gráficos**, autofiltro, PDF,
+zoom, ayuda) y la de **Formato** (fuente, tamaño, N K S, alineación,
+combinar y centrar, **moneda €**, **porcentaje**, millares, más y menos
+decimales, bordes, relleno, color de la letra, comentario, inmovilizar), con
+**iconos propios** nuevos en `comun/iconos.c` (Σ, fx, ordenar, gráfico, €,
+%, 000, decimales, combinar, relleno, filtro, comentario, inmovilizar); la
+**barra de fórmulas** con el **cuadro de nombres** (la celda, «3F x 2C»
+mientras se elige, los nombres definidos con su flecha; escribir una
+referencia o un nombre lleva a ella) y ✗ ✓ fx; los rótulos de columnas
+(A... IV) y de filas (1... 65536); las **pestañas** de las hojas con sus
+flechas y la de «+»; la barra de estado (Listo, Introducir, Modificar,
+Señalar, Copiar formato; **Suma, Promedio y Recuento** de lo elegido; la
+referencia circular, si la hay; el zoom). Nada depende solo del color: lo
+elegido lleva un marco grueso y sus rótulos van hundidos y en negrita; la
+pestaña activa, blanca, sin raya y en negrita; lo cortado, un marco de
+trazos; lo señalado al escribir una fórmula, trazos y un borde doble; el
+autofiltro activo, un embudo en su botón; el comentario, un triángulo; el
+formato condicional, un **símbolo** (▲ ▼ ✓ ✗ ! ★ ● =) delante del número;
+las series de los gráficos, **tramas y marcadores** distintos; los rellenos,
+**tramas** además del color.
+
+**Las teclas**: las de Excel en español: flechas, Tab y Mayús+Tab, Intro y
+Mayús+Intro (tras escribir con Tab, Intro vuelve a la columna del primer
+Tab), Inicio, Ctrl+Inicio, Ctrl+Fin, **Ctrl+flechas** (al borde de los
+datos), Re Pág y Av Pág, Ctrl+Re Pág y Ctrl+Av Pág (las hojas), Mayús para
+elegir, Ctrl+E todo, F2 corregir, **F4** ($A$1 → A$1 → $A1 → A1), F5 ir a,
+F9 calcular, F11 gráfico, Mayús+F11 hoja nueva, F12 guardar como, Supr,
+Ctrl+Intro (lo escrito, en todo lo elegido), Ctrl+1 formato de celdas,
+Ctrl+; la fecha de hoy, Ctrl+U/A/G/P/B/L, Ctrl+N/K/S, Ctrl+Q/T/D
+(alineación), Ctrl+X/C/V, Ctrl+Z/Y, Alt+letra los menús. **El ratón**:
+elegir arrastrando (y con Mayús), los rótulos eligen filas y columnas
+enteras, su borde se arrastra (ancho y alto; doble clic: autoajustar), el
+**cuadradito de rellenar** se arrastra (series: números con la recta que
+mejor pasa, fechas, meses y días en español o en inglés, «Producto 7»...;
+y las fórmulas, corridas), el borde de lo elegido se arrastra para
+**moverlo** (las fórmulas que lo piden se van con él), los gráficos se
+eligen, se arrastran y se agrandan por su esquina (doble clic: el
+asistente), el botón derecho da el menú de las celdas, de las columnas, de
+las filas, de las pestañas o del gráfico, la rueda baja y sube (con Mayús,
+a los lados; **con Ctrl, el zoom**). Escribiendo una fórmula, las flechas y
+el ratón **señalan** las celdas (con Mayús, el rango; también de otra hoja).
+
+**La hoja** (`cuentas/libro.h`): **65.536 filas por 256 columnas**, como
+Excel 5, guardadas **dispersas**: solo las celdas que tienen algo, en un
+montón con una tabla de dispersión por la clave fila·256+columna y un
+**índice por columnas** (las celdas de cada columna, por filas: un rango se
+recorre seguido, sin buscar), que se rehace solo cuando cambia qué celdas
+hay. Varias hojas por libro (meter, quitar, cambiar el nombre, mover y
+copiar; las fórmulas llevan el id de la hoja, no su posición); ancho de
+columnas y alto de filas, ocultar; estilos de columnas y filas enteras (dar
+formato a la columna A no crea 65.536 celdas); inmovilizar paneles;
+combinar celdas; **formatos de número** con los códigos de siempre (General,
+número, moneda €, porcentaje, fechas y horas en español —«d "de" mmmm "de"
+aaaa», «dddd», «[h]:mm»—, científica, texto, personalizados con secciones,
+colores y condiciones), guardados en inglés como en los .XLSX y enseñados con
+la coma y el punto de quien usa Cuentas (`cuentas/numeros.c`); la letra (las
+TrueType de `comun/letras`), alineación horizontal y vertical, ajustar el
+texto, sangría, bordes (fino, medio, grueso, doble, puntos, guiones),
+**relleno con trama** (11 tramas) y color; **formato condicional sencillo**
+(mayor, menor, entre, igual, distinto, contiene) con negrita, color, relleno
+y su símbolo; **comentarios** (con autor; se ven al pasar el ratón).
+Lo tecleado se lee en español: 1.234,5; 12%; 3,50 €; (100); 22/11/2026;
+22-nov-26; 14:30; 1,5E3; VERDADERO; 'texto; y si trae formato (%, €, fecha,
+hora, millares) y la celda no tiene ninguno, se le pone.
+
+**Las fórmulas** (`cuentas/formula.c`, `calculo.c`, `funciones.c`): se leen a
+piezas en notación polaca inversa y se escriben de vuelta en español
+(=SUMA(A1:A3;2,5)) o en inglés (=SUM(A1:A3,2.5)): Herramientas > Opciones;
+**las dos se entienden siempre al escribir** (también `_xlfn.`). Prioridades
+de siempre (-2^2 es 4), %, &, comparaciones; referencias relativas,
+absolutas y mixtas (y F4), rangos, columnas y filas enteras, **de otras
+hojas** ('Mi hoja'!A1:B5), el operador «:» entre referencias
+(=SUMA(A1:INDICE(A:A;5))), **nombres definidos** (Insertar > Nombre; en el
+cuadro de nombres). Al copiar se corren las referencias sin «$»; al meter o
+quitar filas y columnas, o mover con el ratón o cortar y pegar, se arreglan
+en todo el libro (las que desaparecen, #¡REF!). **Unas 160 funciones** con su
+nombre en español y en inglés: SUMA, PROMEDIO, CONTAR, CONTARA,
+CONTAR.BLANCO, MAX, MIN, PRODUCTO, MEDIANA, MODA, VAR, VARP, DESVEST,
+DESVESTP, K.ESIMO.MAYOR, K.ESIMO.MENOR, JERARQUIA, SUMA.CUADRADOS,
+SUMAPRODUCTO, SUMAR.SI, CONTAR.SI, PROMEDIO.SI, SUMAR.SI.CONJUNTO,
+CONTAR.SI.CONJUNTO, SUBTOTALES; REDONDEAR, REDONDEAR.MAS, REDONDEAR.MENOS,
+TRUNCAR, ENTERO, ABS, RAIZ, POTENCIA, RESIDUO, COCIENTE, SIGNO, PI,
+ALEATORIO, ALEATORIO.ENTRE, EXP, LN, LOG, LOG10, las trigonométricas, FACT,
+COMBINAT, MULTIPLO.SUPERIOR/INFERIOR, REDOND.MULT, M.C.D, M.C.M,
+NUMERO.ROMANO; SI, Y, O, NO, VERDADERO, FALSO, SI.ERROR y las ES...;
+BUSCARV, BUSCARH, BUSCAR, COINCIDIR, INDICE, ELEGIR, FILA, COLUMNA, FILAS,
+COLUMNAS, INDIRECTO, DESREF, DIRECCION; CONCATENAR, IZQUIERDA, DERECHA,
+EXTRAE, LARGO, MAYUSC, MINUSC, NOMPROPIO, ESPACIOS, ENCONTRAR, HALLAR (con
+comodines), SUSTITUIR, REEMPLAZAR, REPETIR, TEXTO (con el código en
+español: «#.##0,00», «dd/mm/aaaa»), VALOR, CARACTER, CODIGO, IGUAL, DECIMAL,
+MONEDA, T, LIMPIAR; HOY, AHORA, FECHA, NSHORA, AÑO, MES, DIA, HORA,
+MINUTO, SEGUNDO, DIASEM, DIAS360, FECHANUMERO, HORANUMERO, FIN.MES,
+FECHA.MES, DIAS.LAB, DIA.LAB, NUM.DE.SEMANA, SIFECHA, DIAS; PAGO, VA, VF,
+TASA, NPER, VNA, TIR, PAGOINT, PAGOPRIN, SLN, SYD, DDB (todas las del Cuentas
+de Hispa-386 están). Errores #¡DIV/0!, #¡REF!, #¿NOMBRE?, #N/A, #¡VALOR!,
+#¡NUM!, #¡NULO! y **#¡CIRC!** para las referencias circulares (y la barra de
+estado dice cuál). Las fechas, los días desde el 30/12/1899 (como Excel y
+LibreOffice: el 1/3/1900 es el 61).
+
+**El recálculo por dependencias** (`calculo.c`): cada fórmula apunta de qué
+depende (las celdas sueltas en una tabla de dispersión; los rangos, en una
+lista por columna de la hoja, o en la de los anchos); al cambiar una celda
+se marca lo que depende de ella (y lo que depende de eso), se cuenta cuántas
+pendientes pide cada una y se calculan **solo esas, en el orden de sus
+dependencias** (de Kahn); lo que queda está en un círculo y se calcula a
+demanda, viendo el círculo (#¡CIRC!). Las volátiles (HOY, AHORA,
+ALEATORIO, INDIRECTO, DESREF) se calculan cada vez. Al meter o quitar filas,
+ordenar o abrir, se rehace todo. Coma flotante de 64 bits (como Excel; 0,1
++ 0,2 = 0,3 al compararlo y al verlo: 15 cifras).
+
+**Gráficos** (`cuentas/grafico.c`): columnas (y apiladas), barras (y
+apiladas), líneas, sectores y dispersión (X Y), **dentro de la hoja**
+(anclados a una celda; se mueven y se agrandan con el ratón), con título,
+rótulos de los ejes, escala «bonita» con números en español, rayas guía y
+leyenda (a la derecha o abajo) con la muestra de cada serie: **su trama, su
+marcador y su raya**, distintos en cada una. El asistente (F11) enseña el
+gráfico mientras se cambia.
+
+**Datos**: **ordenar** por hasta tres columnas (con la fila de títulos; las
+fórmulas se corren con su fila; lo vacío, al final), **autofiltro** (el
+botón de cada título: todas, las 10 más altas o más bajas, vacías, no
+vacías o un valor; las filas que no casan se ocultan y SUBTOTALES no las
+cuenta), **rellenar series** (el cuadradito, y Edición > Rellenar series:
+lineal, geométrica, días, laborables, meses, años, con límite), **buscar y
+reemplazar** (mayúsculas, celda entera, en fórmulas o en valores, por
+filas o columnas), **pegado especial** (todo, fórmulas, valores, formatos,
+comentarios; transponer) y el portapapeles del sistema (lo copiado va como
+texto con tabuladores; lo de otros programas se pega por celdas), y
+**deshacer y rehacer sin límite** (`cuentas/deshacer.c`: cada paso guarda
+regiones de celdas y lo de la hoja; deshacer lo cambia por lo guardado y lo
+guarda, y rehacer es lo mismo al revés; también las hojas y los nombres).
+
+**Formatos** (`cuentas/archivo.c` y `f_*.c`; se conocen por lo de dentro):
+
+| | Leer | Escribir |
+|---|---|---|
+| `.HOJ` | los de Cuentas de Hispa-386 (texto 437: celdas como se teclearon, formatos, anchos, altos, paneles, el gráfico, varias hojas, también las «plegadas») y los de Cuentas 2 | delante, lo que entiende Cuentas de 386 (que salta lo que no conoce: sus 64 columnas y 1000 filas, los bits de formato que tiene); detrás, en líneas «2x» en UTF-8, **todo** lo de Cuentas 2: no se pierde nada, y guardar dos veces da el mismo archivo |
+| `.XLSX` | hojas, valores, textos compartidos, fórmulas (también las compartidas), estilos (letras, rellenos con sus tramas, bordes, alineación, formatos de número), anchos, altos, ocultas, combinadas, paneles, nombres, área de impresión, autofiltro, comentarios, condicionales, página, fechas de 1904 | lo mismo (con los comentarios en VML para Excel); los gráficos aún no |
+| `.ODS` | hojas, valores (número, porcentaje, moneda, fecha, hora, lógico, texto en varias líneas), fórmulas `of:=`, estilos de celda y de número, anchos, altos, ocultas, unidas, anotaciones, nombres, área, autofiltro, paneles (las repeticiones enormes de filas vacías no se recorren) | lo mismo; las tramas quedan en su color, sin condicionales ni gráficos |
+| `.CSV` | separador `;`, `,` o tabulador (el que más salga), UTF-8 (con o sin marca), Windows-1252 o 437 (la de Hispa), comillas y saltos de línea dentro | lo que se ve o las fórmulas, con el separador y la codificación que se elijan (cuadro al guardar) |
+| `.PDF` | (no: Hispa-PDF) | **exportar**: papel (A4, carta, A3, A5, legal), apaisado, márgenes, escala o en N páginas, centrar, cuadrícula, encabezado y pie (&P, &N, &A, &F, &D), el **área de impresión** y los **saltos de página** puestos a mano, primero hacia abajo y luego a la derecha; las celdas y los gráficos pintados con lo mismo que la pantalla (`cuentas/pintor.c`, `celdas.c`), las TrueType incrustadas |
+
+La **vista preliminar** (Archivo) enseña las páginas del PDF en la ventana.
+Los `.XLS` binarios de Excel 97-2003 no se abren (se dice por qué). El núcleo
+aún crea solo nombres 8+3: «Guardar como ventas.xlsx» queda `VENTAS.XLS`
+(se vuelve a abrir como XLSX, por lo de dentro). **Imprimir**: aún no hay
+impresoras; Archivo > Imprimir lo explica y lleva al PDF.
+
+**Lo añadido a la biblioteca común** (marcado «(CUENTAS32)»): 15 iconos en
+`iconos.c` (y su `enum` en `ui.h`, detrás de los de Pluma); en `pdfsal`,
+polígonos y recortes (`pdf_poligono`, `pdf_guarda`, `pdf_recorta_rect`,
+`pdf_recorta_poligono`, `pdf_restaura`); `memchr` y `strrchr` en
+`so_pentium.c` e `inc/string.h`. Pluma 2 sigue igual (su `pdf.sh`, bien).
+
+### Cómo está hecho Cuentas 2 (`castel/nucleo32/oficina/cuentas`)
+
+```
+libro.h, libro.c     el libro, las hojas dispersas (tabla de dispersión e índice por
+                     columnas), los estilos sin repetir, los nombres, combinadas, comentarios...
+numeros.c            leer lo tecleado, los códigos de formato, las fechas, los números de C exactos
+formula.c            leer y escribir las fórmulas (español, inglés, .XLSX, .ODS), copiarlas, ajustarlas
+calculo.c            las dependencias, el recálculo de lo que cambia y el evaluador
+funciones.c          las ~160 funciones (con sus dos nombres: una lista X)
+deshacer.c, operar.c deshacer sin límite y todo lo que se hace (filas, pegar, rellenar, ordenar...)
+archivo.c, f_hoj.c, f_csv.c, f_xlsx.c, f_ods.c, f_pdf.c   los formatos
+pintor.c, celdas.c, grafico.c   pintar en la pantalla y en el PDF lo mismo
+vista.c, ventana.c, dialogos.c  la hoja en la ventana, la ventana y los cuadros
+prueba.c             los guiones de prueba (CUENTAS --guion)      principal.c   las órdenes
+hacer.sh, anfitrion.sh, paquete.sh, fuentes.lst, LEEME.txt, cuentas32.png, pruebas/
+```
+
+**Medidas.** En QEMU con la CPU de un Atom (`-cpu n270 -icount shift=1`) y
+una hoja de **10.000 fórmulas** que dependen unas de otras (`CUENTAS --mide
+10000`: B = A·2 + la B de antes, C = SUMA($A$1:A) acumulada, D = un SI):
+la hoja se hace en 380 ms; **recalcularla entera, 960 ms**; cambiar A1, de la que
+dependen todas, 930 ms (y escribir en A1, recalcular y pintar, un segundo);
+cambiar la última fila, 3 fórmulas en menos de 1 ms (solo lo que depende);
+**desplazarse con Av Pág, 64 ms** (pintar la ventana, 60 ms) y con las
+flechas, lo mismo; unos 5 MB de memoria. En el anfitrión: recalcular las 10.000, 33 ms (eran 131 antes
+del índice por columnas). La suma acumulada es cuadrática (como en Excel): la
+mayor parte del tiempo es suya.
+
+**El paquete** `cuentas` 2.0 (OPCIONALES de `tools/hpq.py`, tipo oficina,
+`base >= 0.8.3`): `\HISPA\CUENTAS.BIN`, `\HISPA\CUENTAS\LEEME.TXT` y
+`\HISPA\MENU\CUENTAS.MNU` y `.ICP`; `castel/nucleo32/oficina/cuentas/paquete.sh
+SALIDA`. Para que el menú y Mi equipo lo usen en vez del de 386 hace falta
+el núcleo (`inicio.cas`) y el `equipo` (`exoper.cas`) de esta rama.
+
+**Probarlo**: `castel/pruebas.sh`, parte 44 (`SOLO=cuentas`,
+`castel/pruebas_cuentas.sh`): en el anfitrión con ASan y UBSan, la batería
+de fórmulas a mano (`cuentas/pruebas/formulas.txt`: 295 casos de
+prioridades, errores, circulares, referencias, nombres, funciones, filas y
+columnas, deshacer, series, ordenar y pegado especial) y la calculada con
+Python (`pruebas/haz_formulas.py`: unos 2.300 casos de dinero, estadística,
+redondeos con `decimal`, fechas con `datetime` y textos), el **fuzz** del
+analizador de fórmulas (`pruebas/fuzz_formulas.py`: miles de fórmulas al
+azar; lo que se lee bien tiene que escribirse y leerse igual: encontró dos
+fallos de verdad, ya arreglados), los formatos (`pruebas/formatos.sh`: .HOJ
+de 386 hechos a mano, .XLSX y .ODS de referencia hechos con Python como los
+de Excel y LibreOffice —en el VPS no está LibreOffice Calc ni openpyxl—, ida
+y vuelta por los cuatro, la validez de los ZIP y XML, y su fuzz), el PDF
+(`pruebas/pdf.sh` y `prueba_dibujo.c`: qpdf, pdftotext, pdffonts, páginas,
+área y saltos; las celdas y los gráficos pintados), la ventana con un guion
+(escribir, formatos con la barra, combinar, gráfico, formato condicional,
+comentario, autoajustar, guardar en los cuatro formatos, PDF, deshacer,
+vista preliminar) y lo guardado mirado desde fuera; en QEMU, escribir
+números y fórmulas, negrita, €, un gráfico, guardar .HOJ y .XLSX, exportar a
+PDF, el cuadro Formato de celdas, cerrar y volver a abrir los dos, y lo del
+disco mirado desde fuera; y la medida en el Atom. Las capturas, en
+`docs/pentium/cuentas/`.
+
+**Lo que falta**: imprimir (cuando haya impresoras); los gráficos en .XLSX y
+.ODS; validación de datos, tablas dinámicas, subtotales automáticos,
+autoformatos, proteger hojas, dividir la ventana y las matrices ({1;2;3} y
+las fórmulas matriciales); el formulario de datos; las macros; los nombres
+largos al guardar (el núcleo); los `.XLS` binarios; el corrector de
+ortografía en las celdas (está en `comun/orto`).
+
+## 14 duovicies. Pintura 2 (PINTURA.BIN, rama pintura32)
+
+*22/11/2026. Carlos: «¿Tienes en cuenta el Paint de 32 bits?». Pintura 2 es
+el programa de dibujo nativo, al estilo del Paint clásico de 32 bits pero
+con lo que hoy se espera (sin su marca ni su aspecto). Lo cambiado fuera de
+`castel/nucleo32/oficina/` lleva la marca «(PINTURA32)».*
+
+| | |
+|---|---|
+| ![Pintura 2 en QEMU, a 1024 x 600](pentium/pintura/pi1.png) | ![El pincel, una elipse y un texto TrueType](pentium/pintura/pi2.png) |
+| ![El menú Archivo: «Usar como fondo de escritorio»](pentium/pintura/pi3.png) | ![El dibujo, de fondo de escritorio](pentium/pintura/pi4.png) |
+| ![DIBUJO.PNG, vuelto a abrir](pentium/pintura/pi5.png) | ![El editor de colores (RGB, HSV, opacidad, código #)](pentium/pintura/pi6.png) |
+| ![En el anfitrión: el cuentagotas dice el nombre del color](pentium/pintura/hv1.png) | ![Un lienzo de 4096 x 4096](pentium/pintura/hv3.png) |
+| ![Mi equipo: «Editar con Pintura»](pentium/pintura/pi7.png) | ![Lo que se prueba en el anfitrión: cada herramienta](pentium/pintura/esperadas.png) |
+
+**Qué es.** Un programa del anillo 3 de 32 bits (`\HISPA\PINTURA.BIN`, unos
+510 KB con las DejaVu dentro), sin HVPRUN, en **C portable** sobre la
+biblioteca común de la oficina (`oficina/comun`): el mismo código se compila
+para Hispa-64 cambiando solo `comun/so_*.c`. La Pintura de Hispa-386
+(`PINTURA.HVP`, con HVPRUN) sigue para Hispa-386.
+
+**La cara**: la barra de menús (Archivo, Edición, Ver, Imagen, Colores,
+Herramientas y ?, con sus atajos); la **barra de opciones** (nuevo, abrir,
+guardar, cortar, copiar, pegar, deshacer y rehacer; y lo de la herramienta:
+forma y grosor del pincel, suavizado, contorno o relleno, tolerancia, lo que
+deja el borrador, densidad, selección opaca o transparente, letra, tamaño,
+negrita, cursiva y fondo del texto; y el zoom); a la izquierda, la **caja de
+herramientas** con iconos propios (dibujados con rayas suavizadas: se
+reconocen por la forma) y, debajo, el **nombre de la que está elegida** y su
+grosor; al pasar el ratón, un **globo** con el nombre y su letra; las
+**reglas** en puntos de la imagen (con la marca del ratón); abajo, la
+**paleta**: el color 1 y el 2 **con su nombre y su código** siempre a la
+vista («Rojo (#E02020)»), los 28 colores (en el que es el color 1 va un «1»
+y en el del 2, un «2»: no solo el color), el botón de intercambiarlos y
+«Editar colores...»; y la **barra de estado**: lo que hace lo que hay debajo
+del ratón, **la posición y el nombre del color que hay en ella** («120, 45
+px: Azul acero, casi (#4A80B0)»), el tamaño de lo elegido, el del lienzo y
+el zoom. Lo activo va hundido, con borde doble y una raya debajo.
+
+**El lienzo**: color verdadero de 32 bits con **transparencia** (0xAARRGGBB,
+sin premultiplicar), de 1 x 1 a **4096 x 4096** si hay memoria (si no, lo
+dice: «No hay memoria para una imagen de 4096 x 4096 (harían falta 65 MB)»);
+lo transparente se ve sobre cuadros grises; **zoom** de 12,5 % a 3200 %
+(Control y la rueda, donde está la flecha; + y -; la lupa; la lista;
+«Ajustar a la ventana»), **rejilla** a 400 % o más, barras de
+desplazamiento, la rueda (con Mayús, a los lados); y las **asas** del borde
+del lienzo, que se arrastran para cambiar su tamaño.
+
+**Las herramientas** (con el botón izquierdo, el color 1; con el derecho, el 2;
+cada una con su letra): selección rectangular (S) y **a mano alzada** (M),
+que se arrastran para moverlas (con Control, una copia), con las flechas
+(Mayús: de 10 en 10), **opacas o transparentes** (lo del color 2 no tapa);
+lápiz (L: un punto, el color exacto, también su alfa); **pincel** (P: redondo,
+cuadrado o de barra inclinada a los dos lados, de 1 a 48 puntos, suavizado o
+no); aerógrafo (A: rocía mientras se mantiene pulsado; radio y densidad);
+borrador (B: con el color 2, o **deja transparente**); relleno (R: con
+**tolerancia**; también lo transparente); **cuentagotas** (C: toma el color
+y **dice su nombre más parecido y su código**; luego vuelve a la herramienta
+de antes); **texto** (T: las TrueType de la biblioteca común —las DejaVu y
+las de `\DOCUMENT\LETRAS`—, tamaño, negrita, cursiva, fondo transparente o
+del color 2; varias líneas; la caja se arrastra; un clic fuera la deja en la
+imagen, Esc la anula; Ctrl+V pega el texto del portapapeles); lupa (Z);
+línea (I; con Mayús, a 0, 45 o 90 grados); curva (U: la raya y luego dos
+dobleces, Bézier); rectángulo (Q), redondeado (O), elipse (E; con Mayús,
+cuadrado y círculo) y polígono (G: un clic por vértice; dos clics, Intro o
+el primer vértice lo cierran), con **solo el contorno, solo el relleno o los
+dos** (el contorno con el color 1 y el relleno con el 2).
+
+**Los colores**: la paleta de 28 con nombre propio en español (Negro, Gris
+oscuro, Granate, Rojo, Naranja, Amarillo, Verde oliva, Verde, Verde azulado,
+Azul, Azul marino, Morado, Marrón, Blanco, Gris claro, Gris perla, Rosa,
+Salmón, Melocotón, Amarillo claro, Lima, Verde claro, Turquesa, Celeste, Azul
+claro, Lavanda, Beis) y otros cien para el «más parecido» (la distancia de la
+«media roja», que pesa cada canal como lo ve el ojo); dos clics en un color de
+la paleta lo cambian; el **editor de colores**: el cuadro de saturación y
+brillo, la barra de tonos, Rojo, Verde, Azul y Opacidad (0-255), Tono,
+Saturación y Brillo (HSV), el **código #RRGGBB** (o #RRGGBBAA) y la muestra
+con su nombre.
+
+**Imagen y Colores**: cambiar el tamaño (en % o en puntos, con la proporción;
+al reducir, la media del área de cada punto; al ampliar, el bilineal; con la
+transparencia bien llevada), estirar e inclinar, girar 90° a los dos lados,
+180° y **lo que se diga** (el lienzo crece; lo nuevo, del color 2), voltear,
+**recortar a la selección**, atributos del lienzo (ancho, alto y de qué color
+lo nuevo), borrar la imagen; invertir los colores, **escala de grises**,
+**brillo y contraste**. Con algo elegido, todo eso se hace solo con lo
+elegido. **Deshacer y rehacer sin límite práctico** (`historia.c`): la lámina
+va en **baldosas de 64 x 64**; cada paso guarda solo las baldosas que de
+verdad ha cambiado, como eran, todas juntas comprimidas con Flate (miniz); lo
+que cambia el tamaño guarda la imagen entera comprimida; si la historia pasa
+de 48 MB, se olvida lo más viejo. Una pincelada guarda también la
+**cobertura** de cada punto: lo translúcido no se oscurece donde pasa dos
+veces.
+
+**El dibujo** (`dibujo.c`): las figuras se rasterizan con su **cobertura
+exacta** (el área de cada punto que tapan, acumulada con signo, como font-rs
+o stb_truetype 2: bordes suavizados sin supermuestrear), a franjas de 32
+filas para no pedir memoria de más; los contornos, como anillos (el de fuera
+menos el de dentro); las rayas y curvas, con las puntas y las uniones
+redondas (la distancia de cada punto al trazo); el relleno, por tramos.
+
+**Formatos** (`formatos.c`): abre **PNG, JPG, BMP** (también RLE4 y RLE8),
+**GIF** (el primer cuadro), **TGA** y **ICO/CUR** (el lector del Mirador,
+pasado a C portable y sin fiarse de nada) con stb_image, y **PCX** con un
+lector propio en C (el de Pintura 1.0 de `pentium-oficina`, que era en asm:
+8 bits con paleta o grises, 24 y 32 bits, 1 bit, de 2 a 4 planos, 2 y 4 bits;
+RLE o no); guarda **PNG** sin pérdida (con miniz; con alfa solo si hace
+falta), **JPG** con su **calidad** (lo pregunta; lo transparente, sobre
+blanco), **BMP** (24 bits, o 32 con su alfa: BITMAPV5HEADER), **GIF**
+(con 256 colores o menos, exacto; con más, corte por la mediana a 255 y
+Floyd-Steinberg; el transparente; LZW propio) y **PCX** (8 bits con paleta
+o 24 bits, RLE); **exporta a PDF** (la imagen en PNG, una página de su
+tamaño a 96 puntos por pulgada, con `pdfsal`); y **«Usar como fondo de
+escritorio»**: la imagen llenando la pantalla entera (lo que sobra, cortado
+por igual), con la **llamada 172** del Mirador (el núcleo la guarda en
+`FONDO.HPM`). El nombre se adapta a 8+3 mientras el núcleo no cree nombres
+largos.
+
+**El portapapeles**: copiar, cortar y pegar imágenes **dentro de Pintura**
+(lo pegado, flotando, se arrastra; si no cabe, el lienzo crece), y
+«Copiar a un archivo» y «Pegar desde un archivo». **Entre programas, aún
+no**: el portapapeles del sistema (la llamada 40) es solo de texto (en
+docs/pentium/METAS.md, pendiente del portapapeles con imágenes).
+
+**La orden**: `PINTURA [imagen]`; `PINTURA --convierte ENTRADA SALIDA
+[CALIDAD]`, `--info`, `--compara A B` (punto a punto, con el PSNR) y
+`--mide [AN AL [PASOS]]`.
+
+### Cómo está hecha Pintura 2 (`castel/nucleo32/oficina/pintura`)
+
+```
+lamina.c            la imagen: 0xAARRGGBB y la mezcla «encima» (con alfa, sin premultiplicar)
+historia.c          deshacer y rehacer por baldosas comprimidas; la cobertura de la pincelada
+dibujo.c            el rasterizado con cobertura exacta, las figuras, las pinceladas, el relleno,
+                    el texto en la lámina
+operaciones.c       tamaño (área y bilineal), inclinar, girar, voltear, lienzo, colores
+formatos.c          leer y escribir PNG, JPG, BMP, GIF, PCX, ICO, TGA
+colores.c           la paleta y los nombres, HSV, el código #
+vista.c             el lienzo en la ventana (zoom, cuadros, rejilla, hormigas, asas), las reglas
+herramientas.c      cada herramienta con el ratón, lo elegido, la caja de texto, el polígono, la curva
+ventana.c           los menús, la barra de opciones, la caja, la paleta, la barra de estado, el bucle;
+                    se pinta solo lo que cambia, y al sistema va solo eso (so_mapa por trozos)
+dialogos.c          abrir y guardar, nueva, tamaño, inclinar, girar, atributos, brillo, colores...
+archivo.c           abrir, guardar, PDF y el fondo     iconos_p.c   los iconos de las herramientas
+principal.c         la orden    hacer.sh, anfitrion.sh, paquete.sh, fuentes.lst, LEEME.txt, pruebas/
+```
+
+**Medidas.** En QEMU con la CPU de un Atom (`-cpu n270 -icount shift=1`,
+menos de lo que da el N455 del HP Mini), con la pantalla de 1024 x 600 y un
+lienzo de **1600 x 1200** (`PINTURA --mide 1600 1200 200`): el **pincel**
+(5 puntos, suavizado), **4 ms por paso** del ratón (el peor, 10 ms):
+pintar el trozo en la lámina y llevar a la pantalla solo lo que cambia (y la
+barra de estado y las reglas); pintar la ventana entera, 130 ms; deshacer la
+pincelada, 60 ms; acercar o alejar, 100 ms; **rellenar el lienzo entero**,
+1,5 s (casi todo, guardar sus 470 baldosas comprimidas para poder
+deshacerlo); unos 10 MB de memoria. En el anfitrión, menos de 1 ms por paso.
+
+**El paquete** `pintura` 2.0 (OPCIONALES de `tools/hpq.py`, tipo
+multimedia, `base >= 0.8.6` por la llamada 172): `\HISPA\PINTURA.BIN`,
+`\HISPA\PINTURA\LEEME.TXT` y `\HISPA\MENU\PINTURA.MNU` (tipo=Multimedia) e
+`.ICP`; lo hace `castel/nucleo32/oficina/pintura/paquete.sh SALIDA`. Con él
+instalado, el menú Inicio lo pone en Multimedia; Mi equipo abre con él los
+`.PCX` (`exoper.cas`: `de_paquetes`, que el Mirador no lee) y en las
+imágenes (PNG, JPG, BMP, GIF, PCX, ICO, TGA) el botón secundario lleva
+**«Editar con Pintura»** (`uequipo.cas`; «Abrir» sigue siendo el Mirador).
+
+**Al juntar con la 0.8.7** (pentium-087, que ya lleva `pentium-oficina` con
+Pintura 1.0 por HVPRUN): (1) `tools/hpq.py`: la línea de `TIPO_POR_NOMBRE`
+es la misma que la de OFICINA2; en `SISTEMA` sobra la entrada `('pintura',
+'1.0', ...)` con `PINTURA.HVP`: el paquete `pintura` pasa a ser el 2.0 de
+`OPCIONALES` (quien tenga el 1.0, se actualiza al 2.0); (2) `inicio.cas`: en
+la tabla fija de la oficina (OFICINA2, `i = 8`), Pintura .HVP no sale si
+existe `\PINTURA.BIN` (como Pluma con PLUMA32: `si i <> 8 o no
+existe("\\PINTURA.BIN")`), porque Pintura 2 sale con su acceso; (3)
+`uequipo.cas`: OFICINA2 y PINTURA32 añaden lo mismo (`menú_con_editar`,
+`se_edita_con_pintura`, `edita_con_pintura`, el «caso 13»): se queda una
+sola, la de PINTURA32 primero (`\PINTURA.BIN`, todas las imágenes) y, si no
+está, la de OFICINA2 (BMP y PCX con `PINTURA.HVP`); (4) `exoper.cas`:
+`hay_programa` público es la misma línea en las dos.
+
+**El asa de la esquina** (petición de Carlos, 0.8.8: «una vez apuntas en la
+esquina inferior derecha del lienzo, poder arrastrarlo a la medida que se
+necesite»): las tres asas del marco (derecha, abajo y la esquina) miden 7 x 7
+puntos de la pantalla con cualquier zoom y se cogen en 10 x 10. Con el ratón
+encima, el asa se pone azul con doble borde, junto a la flecha del ratón sale
+la de cambiar el tamaño (doble: en diagonal, en horizontal o en vertical;
+negra con borde blanco: el sistema no tiene punteros con otra forma) y la
+barra de estado dice «Arrastre para cambiar el tamaño del lienzo (ahora, 320
+x 200 píxeles)». Mientras se arrastra, el contorno nuevo con hormigas y en la
+barra «Tamaño del lienzo: 424 x 254 píxeles (suelte para aplicarlo)»; al
+soltar se aplica (se deshace con Ctrl+Z) y lo añadido es del color 2, o
+transparente si el borrador está en «Deja transparente» (`ventana.c`,
+`mira_asa`; `vista.c`, `flecha_tamano`; «(PINTURA32)»). Lo prueba
+`pruebas/ventana.sh` (15 bis).
+
+**Probarlo**: `castel/pruebas.sh`, parte 45 (`SOLO=pintura`,
+`castel/pruebas_pintura.sh`): en el anfitrión con ASan y UBSan,
+`pintura/pruebas/formatos.sh` (ida y vuelta de PNG, BMP, PCX y GIF
+idénticos punto a punto, JPG con su PSNR, lo que escribe ImageMagick leído
+igual y al revés, el **fuzz** de los siete lectores —también el PCX— y las
+medidas enormes) y `pintura/pruebas/ventana.sh` (cada herramienta con un
+guion, guardada en PNG y **comparada punto a punto con su imagen esperada**
+de `pruebas/esperadas/`; deshacer y rehacer, lo elegido, el texto, Imagen y
+Colores, el editor de colores y el cuentagotas por el nombre, guardar en
+cada formato desde el cuadro, el PDF, el fondo, 4096 x 4096 y sin memoria);
+en QEMU a 1024 x 600: pintar, una elipse, un texto, guardar `DIBUJO.PNG`,
+el fondo de escritorio (`FONDO.HPM`, mirado desde fuera), cerrar y volver a
+abrir, el editor de colores; y el pincel en el Atom; y, en QEMU, **«Editar con Pintura»** desde Mi equipo.
+Todo bien el 22/11 en el VPS: **74 bien, 0 mal** (los formatos, 217 bien;
+la ventana, 46 bien); la parte 41 (Pluma 2) sigue igual.
+
+**Lo que falta**: copiar y pegar imágenes entre programas (el portapapeles
+del sistema con imágenes); imprimir (cuando haya impresoras); capas; asas
+para estirar lo elegido con el ratón; el texto se escribe al final (sin
+mover el cursor por dentro); Pintura 1.0 (.HVP) y Pintura 2 juntas en el
+menú hasta juntar con la 0.8.7 (arriba).
+
+## 14 tervicies. Los cortes de la red (rama red-cortes, «(CORTES)»)
+
+*22/11/2026.* Lo que vio Carlos en el **HP Mini 5103 con el Wi-Fi** (la 0.8.6
+y la 0.8.7): si el Wi-Fi se corta a mitad de bajar una actualización, la
+descarga se queda esperando para siempre aunque el Wi-Fi vuelva; «Cancelar»
+no la para; y al reiniciar desde el menú Inicio el equipo espera a que se
+cierre «Programas y actualizaciones», que no se cierra. (En el registro del
+servidor se ve: `BASE.HPQ` cortado a los 455.655 octetos de 1.080.349, a las
+18:24 del 22/11, y nada más hasta que se reinició el equipo, dos minutos
+después.)
+
+### Las causas
+
+1. **Cancelar no llegaba a la espera.** DESCARGA solo miraba `CANCELA.TXT`
+   cada 16 K que **llegaban**: parada la descarga, no lo veía nunca. PAQUETES
+   esperaba a DESCARGA con `esperar` (parado) y la ventana solo dejaba el
+   archivo: nadie podía acabar con una DESCARGA esperando a la red.
+2. **La ventana no se cerraba mientras trabajaba.** «Programas y
+   actualizaciones», con PAQUETES en marcha, no hacía caso del «cerrar»; y
+   al apagar, el escritorio esperaba 2 s, decía «Hay un programa sin cerrar:
+   ¿algo sin guardar?» y **no apagaba** (había que volver a pedirlo, sin
+   saberlo): sin salida a la vista.
+3. **TCP, con el camino muerto, tardaba o no acababa.** Lo enviado se
+   repetía hasta 8 veces, de 1 a 32 s (más de dos minutos); y una conexión
+   **que solo recibe** (una descarga: lo único que se manda son los ACK) no
+   tenía nada que repetir, así que, si el Wi-Fi se iba sin que el enlace
+   cayera del todo (o la IP cambiaba por DHCP), quedaba abierta para
+   siempre: solo la espera de 30 s de DESCARGA la cortaba, y entonces la
+   actualización fallaba entera (no se volvía a probar).
+4. **Ni reintento ni seguir.** Cortada, DESCARGA acababa con un error y lo
+   bajado no valía: con un Wi-Fi que va y viene, una actualización de 20 MB
+   no llegaba nunca.
+
+### Lo que se ha hecho
+
+**TCP en `RED.BIN`** (`rtcp.cas`, `rpila.cas`, `ured.cas`):
+- Lo que se manda y no confirma la otra punta, con **tope**: 1, 2, 4, 8, 16, 16
+  y 16 s, y al séptimo sin respuesta (unos 63 s) cortada, y lo apunta
+  («tcp: lo mandado al puerto N no llega (7 intentos): cortada»).
+- **Keepalive**: una conexión que no oye nada de la otra punta en 15 s (sin
+  nada por confirmar) le pregunta (un ACK con el número de antes, que obliga a
+  contestar), cada 5 s; a la cuarta sin respuesta (35 s) está muerta:
+  cortada con `CORTADA_RED` («tcp: la conexión con el puerto N no contesta
+  desde hace 35 s: cortada»). Una viva sin datos sigue (contesta).
+- **La red que cambia**: si DHCP da **otra IP u otra puerta de enlace** que
+  las de antes (al renovar, o tras perderla), las conexiones que iban por la
+  tarjeta se cortan con el error nuevo **`RED_CAMBIADA`** (`0xFFFFFFE0`: «la
+  red ha cambiado (otra IP u otra puerta de enlace): la conexión se ha
+  cortado»); las del túnel (WireGuard, Tailscale), no. Los vecinos (ARP),
+  olvidados. Al caer el enlace (cable o Wi-Fi) ya se cortaban todas con
+  `SIN_CABLE`, que ahora dice «la red no tiene enlace (¿está enchufado el
+  cable? ¿se ha desconectado el Wi-Fi?)».
+
+**DESCARGA** (`udescarg.cas`):
+- Lo que llega se espera **de medio segundo en medio segundo**: entre uno y
+  otro mira `CANCELA.TXT` (para **al momento**, llegue algo o no) y, a los
+  **30 s sin un octeto**, la conexión se da por cortada («se ha cortado la
+  conexión (30 s sin que llegue nada)»).
+- **Reintento**: cortada (sin enlace, la red cambiada, el servidor que
+  cierra, corta o calla, no contesta...), espera a que vuelva la red (hasta
+  **2 minutos** cada vez: «sin red: se espera a que vuelva para seguir»; en la
+  barra, «Sin red: esperando para seguir con BASE.HPQ») y un poco más cada
+  vez (1, 2, 4, 8 y 15 s), y vuelve a probar: hasta **8 intentos**.
+- **Sigue desde donde iba**: pide el resto con `Range: bytes=N-` e
+  `If-Range` (el `ETag` o el `Last-Modified` de la primera respuesta: que sea
+  el mismo archivo). Con `206` y su `Content-Range` desde N, sigue
+  escribiendo detrás; si el servidor contesta `200` (no deja, o el archivo ha
+  cambiado), **empieza de nuevo** (el archivo, a cero). El nginx de
+  actualiza.hispados.es lo admite (`curl -r 100-199` da `206 Partial
+  Content` con `Content-Range: bytes 100-199/7166`). Lo traído lo comprueba
+  PAQUETES como siempre: el tamaño y el SHA-256 del catálogo firmado, y los
+  de cada archivo.
+- **Cancelado**: borra lo bajado a medias y acaba con el código **3**.
+
+**PAQUETES** (`upaquete.cas`) espera a DESCARGA sin quedarse parado
+(`acabada` cada décima): si se pide cancelar y DESCARGA no ha parado sola en
+1,5 s, **la acaba** (la llamada 11 con ECX = 2, `acabar_hija`: nueva, solo
+para las tareas que uno ha lanzado, y con ellas las suyas; despierta a la que
+espera a la red o al disco). Lo traído a medias se borra y dice «cancelado:
+lo traído a medias se ha borrado y todo queda como estaba».
+
+**«Programas y actualizaciones»** (`uprogram.cas`): cerrarla (o apagar el
+equipo) mientras trabaja **cancela** lo que hace y luego se cierra; y si
+PAQUETES no para en 10 s tras «Cancelar» (5 si se ha cerrado la ventana), lo
+acaba (y a DESCARGA): lo que hubiera cambiado lo deshace su diario la próxima
+vez (sección 13).
+
+**Apagar y reiniciar** (`escritorio.cas`): se avisa a los programas y se
+espera 3 s; si alguno no se cierra, el cuadro **«Estos programas no se han
+cerrado:»** (como el de Windows), con cada uno y si **no responde** (no ha
+leído lo que se le ha mandado: su cola de sucesos tiene el «cerrar» sin leer)
+o **espera una respuesta** (lo ha leído y pregunta algo, como el Bloc con
+cambios sin guardar); «Si tienen algo sin guardar y se fuerza el cierre, se
+pierde»; y **«Forzar el cierre»** (Intro) o **«Cancelar»** (Esc: no se
+apaga). Si no se elige nada, **a los 15 s se fuerza** (a los 60 si alguno
+está preguntando algo): nunca se queda esperando sin salida. Forzar es acabar
+sus programas (sus archivos se cierran: lo escrito queda) y seguir como
+siempre: el sonido, acabar lo que quede, **vaciar los discos** (`asentar`) y
+apagar o reiniciar. Lo mismo al cerrar la sesión.
+
+**Https** (`biblioteca32/https.cas`): con `https_reintentar := cierto` (lo
+pone `HTTPS.BIN`; el Navegador no, que no puede quedarse esperando), un GET
+(o HEAD) que se corta porque la red se va se vuelve a pedir cuando vuelve
+(se espera `https_espera_red` tics, 30 s si no se dice; hasta 3 veces) y, con
+`https_pedir`, sigue desde donde iba con `Range` (si no, desde el principio).
+
+**WIFI.BIN**: al reconectar ya se lo decía a `RED.BIN` (el enlace, en cada
+vuelta: `O_WIFI_CAMBIO`), que pide la IP por DHCP con la puerta y el DNS
+nuevos; ahora, además, si la IP o la puerta son otras, corta lo de antes. Para
+probarlo sin la tarjeta, **`REDWIFI /SIMCORTE segundos [IP11|IP10]`** (solo con
+la radio simulada, `WifiSimulada=SI`): el punto de acceso de mentira
+desaparece esos segundos (ni balizas) y DHCP da la 192.168.77.11 (o, otra vez,
+la .10); `wifi/nucleo/sim.c` lleva `sim_ausente` y `sim_ip_otra`.
+
+### Las pruebas: la parte 37 (`SOLO=cortes`, `castel/pruebas_cortes.sh`)
+
+Con `nucleo32/servidor_cortes.py` (un servidor HTTP que, como nginx, admite
+`Range` e `If-Range`, y que corta la primera vez que se pide cada archivo
+grande: `/cierra/` manda la mitad y cierra, `/rst/` corta con un RST,
+`/norango/` cierra y no deja seguir, `/calla/` manda la mitad y se calla sin
+cerrar, `/lento/` va a unos 150 K/s):
+1. DESCARGAR con cada clase de corte y con el enlace caído 15 s en plena
+   descarga (`set_link nic0 off` en el monitor de QEMU): los cinco archivos,
+   de 3 MB, iguales octeto a octeto a los del servidor; al servidor, el resto
+   se le pide con `Range` una vez por corte.
+2. TCP: una conexión viva sin datos sigue 60 s (los keepalive tienen
+   respuesta); con el camino muerto y el enlace en pie (un `filter-buffer`
+   de QEMU que se queda las tramas), cortada a los 35 s, y el programa lo sabe.
+3. `PAQUETES INSTALA` de Internet un paquete de 3 MB con el enlace caído a
+   mitad: sigue, comprueba las sumas e instala (lo instalado, igual al del
+   paquete; BAJADAS, sin restos).
+4. En el escritorio, «Programas y actualizaciones» con el servidor callado a
+   mitad del .HPQ: **«Cancelar» corta la conexión en menos de 2 s** (lo mide
+   el servidor: el cliente cierra), la ventana responde y nada queda a medias;
+   y **«Reiniciar» del menú Inicio** en plena descarga parada: la ventana
+   cancela, se cierra sola y el equipo reinicia.
+5. Un programa colgado (no lee sus sucesos) al reiniciar: el cuadro con
+   «(no responde)», «Forzar el cierre» y «Cancelar»; Cancelar no reinicia; sin
+   elegir nada, a los 15 s se fuerza y reinicia; y el botón lo hace al momento.
+6. El Wi-Fi simulado: el punto de acceso desaparece 12 s (WIFI.BIN lo nota,
+   RED.BIN se queda sin enlace) y vuelve con otra IP (DHCP otra vez, IPCONFIG
+   la dice, PING va); y la IP que cambia sin caer el enlace (`IPCONFIG
+   /RENOVAR`): «la red ha cambiado».
+
+### Lo que probará Carlos en el HP Mini (el Wi-Fi de verdad no se emula)
+
+1. Con el Wi-Fi conectado, «Programas y actualizaciones» > Actualizar algo
+   grande (o `DESCARGAR http://actualiza.hispados.es/pentium/ESCBASE.HPQ` en
+   la Consola) y, a mitad, **apagar el router** (o alejarse): en unos 8-10 s,
+   «Sin red: esperando para seguir con ...»; al volver el Wi-Fi (el icono con
+   sus rayitas), «Se sigue desde el octeto N» y acaba bien (las sumas, buenas).
+2. Lo mismo y, mientras espera, **«Cancelar» (Esc)**: para en menos de 2 s,
+   la ventana responde y `C:\HISPA\PAQUETES\BAJADAS` queda vacía.
+3. Lo mismo y, mientras espera, **Inicio > Reiniciar**: reinicia solo (como
+   mucho, el cuadro «Estos programas no se han cerrado» unos segundos).
+4. Con el Wi-Fi que vuelve con otra IP (otro punto de acceso, o el router
+   reiniciado): `IPCONFIG` dice la nueva y el Navegador y `PING` van.
+5. Si algo falla: `IPCONFIG /TODO > RED.TXT` y `X:\WIFI.LOG` (lo apuntan RED.BIN
+   y WIFI.BIN: el enlace, DHCP, «tcp: ... cortada»).
 
 ## 15. Las pruebas
 
@@ -8814,6 +9897,15 @@ ventana del juego a pantalla completa con el ratón de QEMU (JUEGOV); UDP con un
 eco y un cliente de aquí (REDUDP, `tests/juegos/eco_udp.py`), y el sonido
 grabado (SONJ: DirectSound sin cortes aunque el programa no haga nada, waveOut,
 el CD por MCI).
+
+**(CORTES) Los cortes de la red** (la parte 37, `SOLO=cortes`,
+`castel/pruebas_cortes.sh`, con `nucleo32/servidor_cortes.py`): DESCARGAR con
+el servidor que cierra, corta, calla o no deja seguir y con el enlace caído a
+mitad (sigue desde donde iba, con `Range`); TCP con el camino muerto
+(keepalive); PAQUETES con el enlace caído; «Cancelar» en menos de 2 s y
+«Reiniciar» en plena descarga en la ventana; «Forzar el cierre» de un programa
+colgado al apagar; y el Wi-Fi simulado que se va y vuelve con otra IP
+(sección 14 tervicies).
 
 ## 16. Por dónde seguir
 

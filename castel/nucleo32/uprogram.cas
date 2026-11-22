@@ -152,6 +152,8 @@ módulo UProgram
     variable fich_cancela: arreglo [64] de byte ; (RÁPIDO) C:\HISPA\PAQUETES\CANCELA.TXT: «Cancelar»
     variable cx_, cy_, cw_, ch_: ent32          ; (RÁPIDO) dónde está el botón «Cancelar» del avance
     variable cancelando: bool
+    variable pide_salir: bool                   ; (CORTES) se ha cerrado la ventana mientras trabajaba PAQUETES
+    variable tras_cancelar: nat32               ; (CORTES) lo que lleva PAQUETES sin parar desde «Cancelar» (décimas)
     variable sis: byte
     variable ocupado, lento: bool
     variable av_hecho, av_total: nat32
@@ -306,6 +308,7 @@ módulo UProgram
         borrar(fich_avance)
         borrar(fich_cancela)
         cancelando := falso
+        tras_cancelar := 0
         av_hecho := 0
         av_total := 0
         Textos32.copiar(av_texto, "Un momento...")
@@ -323,9 +326,25 @@ módulo UProgram
                     ; (RÁPIDO) «Cancelar» (o Esc): PAQUETES para en cuanto puede y lo deshace
                     si s.clase = EV_TECLA y s.a = 27 entonces pide_cancelar() fin
                     si s.clase = EV_RATÓN_BAJA y ent32(s.a) >= cx_ y ent32(s.a) < cx_ + cw_ y ent32(s.b) >= cy_ y ent32(s.b) < cy_ + ch_ entonces pide_cancelar() fin
+                    ; (CORTES) cerrar la ventana (o apagar el equipo) mientras
+                    ; tanto: se cancela lo que hace y luego se cierra
+                    si s.clase = EV_CERRAR entonces
+                        pide_salir := cierto
+                        pide_cancelar()
+                    fin
                 fin
                 dormir(10)
                 c := acabada(tarea)
+                ; (CORTES) cancelado, y PAQUETES sin parar en 10 s (5 si se ha
+                ; cerrado la ventana): se le acaba (y a DESCARGA). Lo que
+                ; hubiera cambiado lo deshace su diario la próxima vez
+                si c = SIGUE y cancelando entonces
+                    tras_cancelar := tras_cancelar + 1
+                    si tras_cancelar = 100 o (pide_salir y tras_cancelar = 50) entonces
+                        escribir("programa: PAQUETES no para: se le acaba\n")
+                        acabar_hija(tarea)
+                    fin
+                fin
             fin
             ocupado := falso
         fin
@@ -812,7 +831,7 @@ módulo UProgram
             caja(x + 2 * LA + 2 + ((bw - 4 - 12 * LA) * q) div 100, yy + LT + 14 * E + 2, 12 * LA, LT - 4, C_AZUL)
         fin
         ; (RÁPIDO) «Cancelar», abajo a la derecha
-        cw_ := 16 * LA
+        cw_ := 18 * LA                          ; (CORTES) que quepa «Cancelar (Esc)» (con 16 salía «Cancelar (...»)
         ch_ := LT + 6 * E
         cx_ := x + an - 2 * LA - cw_
         cy_ := yy + 2 * LT + 22 * E
@@ -1585,6 +1604,8 @@ módulo UProgram
             si s.clase = EV_TECLA entonces
                 si tecla_pulsada(s.a) entonces devolver 0 fin
                 pinta()
+            sino si s.clase = EV_CERRAR entonces
+                devolver 0
             sino si s.clase = EV_RATÓN_BAJA entonces
                 clic(ent32(s.a), ent32(s.b), veces(s.c), s.c yb BOTÓN_DERECHO <> 0)
                 pinta()
@@ -1594,9 +1615,8 @@ módulo UProgram
             sino si s.clase = EV_TAMAÑO entonces
                 nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
                 pinta()
-            sino si s.clase = EV_CERRAR entonces
-                devolver 0
             fin
+            si pide_salir entonces devolver 0 fin     ; (CORTES) se cerró mientras trabajaba
         fin
         devolver 0
     fin

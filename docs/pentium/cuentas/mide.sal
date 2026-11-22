@@ -1,0 +1,22 @@
+Hispa-Pentium (semilla), un núcleo de 32 bits escrito en Castel
+memoria: 256 MB, 65026 marcos libres; paginación activa; 0 programas de usuario.
+disco 0: QEMU HARDDISK, 40 MB, FAT32.
+disco 1: QEMU DVD-ROM, lector de CD o DVD (IDE).
+cd: D: el lector QEMU DVD-ROM (IDE)
+escritorio: el ratón PS/2 tiene rueda
+escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha puesto el núcleo, por la VBE de Bochs/QEMU), tapiz 0
+pantalla: arrancada a 800 x 600, 32 bits (la ha puesto el núcleo)
+edid: QEMU Monitor, hecha para 1280x800; lo más: 1280x800 (la tarjeta de QEMU)
+pantalla: EDID: «QEMU Monitor», hecha para 1280 x 800 (la tarjeta de QEMU)
+pantalla: no se guarda la medida aquí (Sin instalar no se guarda (no arranca de aquí): instálelo.)
+Escriba «ayuda».
+> escritorio: lanzo \CONSOLA.BIN (la tarea 5)
+cuentas: mide: hoja de 10002 fórmulas hecha en 380 ms
+cuentas: mide: recalcular todo: 10002 fórmulas en 960 ms
+cuentas: mide: cambiar A1 (de la que dependen todas): 10002 fórmulas en 930 ms
+cuentas: mide: cambiar la última fila: 3 fórmulas en 0 ms
+cuentas: mide: 20 Av Pág en 1280 ms: 64 ms cada una (pintar la ventana: 60 ms)
+cuentas: mide: 20 flechas abajo en 1280 ms: 64 ms cada una
+cuentas: mide: escribir en A1 y recalcular y pintar: 1002 ms cada vez
+cuentas: mide: memoria 4975 KB
+[sigue encendido]

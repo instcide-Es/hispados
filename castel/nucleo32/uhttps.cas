@@ -32,6 +32,7 @@ módulo Uhttps
         variable ver_cab, hay_datos: bool
         variable d: arreglo [4] de nat32
         argumentos(args, 1024)
+        https_reintentar := cierto              ; (CORTES) si la red se va a mitad, se espera y se sigue
         si no palabra(args, 0, pal, 512) o iguales(pal, "/?") entonces
             escribir("Uso: HTTPS [-X MÉTODO] [-d DATOS] [-H Cabecera:valor] [-i] [-o ARCHIVO] dirección...\n")
             escribir("     HTTPS /ESTADO   cómo está el servicio TLS;   HTTPS /TODO   lo que ha apuntado\n")

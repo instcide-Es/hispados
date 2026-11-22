@@ -126,6 +126,29 @@ char *strcpy(char *d, const char *o)
 	return r;
 }
 
+/* (CUENTAS32) las dos que pide Cuentas 2 */
+void *memchr(const void *s, int c, size_t n)
+{
+	const u8 *p = s;
+
+	for (; n; n--, p++)
+		if (*p == (u8)c)
+			return (void *)p;
+	return NULL;
+}
+
+char *strrchr(const char *s, int c)
+{
+	const char *u = NULL;
+
+	for (;; s++) {
+		if (*s == (char)c)
+			u = s;
+		if (!*s)
+			return (char *)u;
+	}
+}
+
 int abs(int x)
 {
 	return x < 0 ? -x : x;
@@ -712,6 +735,8 @@ static u32 tecla_unicode(u32 k, int *mods)
 	case 0x152: return SO_T_INSERTAR;
 	case 0x10F: return SO_T_MAYUS_TAB;
 	case 0x110: return SO_T_CTRL_TAB;
+	case 0x157: return SO_T_F11;	/* (CUENTAS32) F11 y F12: TECLA_F11 y TECLA_F12 del núcleo (desde la 0.8.7) */
+	case 0x158: return SO_T_F12;
 	}
 	if (k >= 0x13B && k <= 0x144)
 		return SO_T_F1 + (k - 0x13B);
@@ -958,6 +983,26 @@ double fmod(double x, double y) { return so_resto(x, y); }
 double cos(double x) { return so_cos(x); }
 double acos(double x) { return so_acos(x); }
 
+
+void so_pantalla_entera(int *an, int *al)
+{
+	u32 a = llamada(15, 11, 0, 0), b = llamada(15, 12, 0, 0);
+
+	*an = ES_ERROR(a) || !a ? 800 : (int)a;
+	*al = ES_ERROR(b) || !b ? 600 : (int)b;
+}
+
+int so_fondo_escritorio(const u32 *px, int an, int al)
+{
+	struct { u32 ancho, alto, puntos; } it;	/* (una Imagen_tapiz de usuario.cas) */
+
+	if (an < 1 || al < 1 || an > 4096 || al > 4096)
+		return -1;
+	it.ancho = (u32)an;
+	it.alto = (u32)al;
+	it.puntos = (u32)px;
+	return ES_ERROR(llamada(172, 1, (u32)&it, 0)) ? -1 : 0;
+}
 
 int so_lanza(const char *programa, const char *args)
 {

@@ -86,6 +86,8 @@ static void sondear_sim(void) { ap_sim->canal(tsim_canal); ap_sim->sondear(); so
 
 static struct radio *la_radio;
 static int listo, simulada;
+extern int sim_ausente, sim_ip_otra;	/* (CORTES) (wifi/nucleo/sim.c) */
+static u32 sim_vuelve;			/* (CORTES) el tic en que vuelve el punto de acceso simulado */
 static u32 aparato = 0xFFFFFFFF;	/* la tarjeta en el PCI (bus << 16 | aparato << 11 | función << 8) */
 static char nombre_tarjeta[48] = "Wi-Fi";
 static u32 hz = 100;
@@ -1074,6 +1076,23 @@ static void atiende(struct pedido *p, u8 *d)
 		contesta(p, r ? 0 : 1, 0, NULL, 0);
 		return;
 	}
+	case WO_SIMCORTE:
+		/* (CORTES) las pruebas: el punto de acceso de mentira desaparece unos segundos */
+		/* (cab[2]: 1, DHCP da desde ya 192.168.77.11; 2, otra vez la .10;
+		 * con 0 s, no desaparece: solo eso) */
+		if (!simulada || p->cab[1] > 600 || p->cab[2] > 2 || (p->cab[1] == 0 && p->cab[2] == 0)) {
+			contesta(p, 0xFFFFFFF9u, 0, NULL, 0);
+			return;
+		}
+		if (p->cab[2])
+			sim_ip_otra = p->cab[2] == 1;
+		if (p->cab[1]) {
+			sim_ausente = 1;
+			sim_vuelve = hl_pentium_tics() + p->cab[1] * hz;
+		}
+		hl_log(2, "SIM: el punto de acceso desaparece %u s; DHCP da la 192.168.77.%u\n", p->cab[1], sim_ip_otra ? 11 : 10);
+		contesta(p, 0, 0, NULL, 0);
+		return;
 	case WO_REGISTRO: {
 		/* lo que queda por volcar va antes a WIFI.LOG; aquí, el resumen */
 		struct w_estado_ui s;
@@ -1339,6 +1358,10 @@ int servicio_wifi(void)
 		struct pedido *p = (struct pedido *)pedido;
 		int hubo = 0, k;
 
+		if (sim_ausente && (int)(hl_pentium_tics() - sim_vuelve) >= 0) {
+			sim_ausente = 0;	/* (CORTES) */
+			hl_log(2, "SIM: el punto de acceso vuelve\n");
+		}
 		if (listo) {
 			la_radio->sondear();
 			w80211_tic();

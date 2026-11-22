@@ -32,6 +32,8 @@ typedef struct pdfsal pdfsal;
 pdfsal *pdf_nuevo(void);
 /* el título, el autor y el asunto (UTF-8; NULL o "" si no hay) */
 void pdf_datos(pdfsal *s, const char *titulo, const char *autor, const char *asunto);
+/* (0.8.8) el programa que lo hace, para /Producer (si no, «Hispa-Pentium») */
+void pdf_productor(pdfsal *s, const char *p);
 /* una página nueva (la de antes queda acabada); da su número (desde 0) */
 int pdf_pagina(pdfsal *s, double ancho, double alto);
 /* n letras (Unicode) de la cara de letras.h (con su respaldo, letra_glifo),
@@ -41,6 +43,14 @@ void pdf_texto(pdfsal *s, int cara, int falsas, double tam, u32 color, const u32
 void pdf_rect(pdfsal *s, double x, double y, double an, double al, u32 color);
 /* una raya de x0,y0 a x1,y1, de grosor g */
 void pdf_raya(pdfsal *s, double x0, double y0, double x1, double y1, double g, u32 color);
+/* (CUENTAS32) un polígono relleno (n puntos x, y); y los recortes: guardar el
+ * estado (q), recortar a un rectángulo o a un polígono (lo de después solo se
+ * pinta dentro) y volver al estado guardado (Q) */
+void pdf_poligono(pdfsal *s, const double *xy, int n, u32 color);
+void pdf_guarda(pdfsal *s);
+void pdf_recorta_rect(pdfsal *s, double x, double y, double an, double al);
+void pdf_recorta_poligono(pdfsal *s, const double *xy, int n);
+void pdf_restaura(pdfsal *s);
 /* una imagen (el archivo entero: PNG, JPG, BMP, GIF). La misma «datos» dos
  * veces es la misma imagen (va una vez). Da su número, o -1 si no se lee */
 int pdf_imagen(pdfsal *s, const u8 *datos, u32 n);
