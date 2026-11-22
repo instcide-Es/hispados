@@ -6026,6 +6026,8 @@ cambiado fuera lleva la marca «(CORREO)»: `tls/tls.c` (STARTTLS),
 | ![El asistente: los servidores, encontrados solos](pentium/correo/asistente.png) | ![Tres paneles a 1024 x 600 (el HP Mini)](pentium/correo/tres-paneles.png) |
 | ![La suplantación: «[!] Cuidado»](pentium/correo/suplantacion.png) | ![Un adjunto con EICAR: Escudo no lo deja abrir](pentium/correo/escudo.png) |
 | ![Escribir: la libreta completa «lu»](pentium/correo/escribir.png) | ![Sin red, a 800 x 600: dos paneles y lo guardado](pentium/correo/sin-red.png) |
+| ![El enlace engañoso, avisado arriba](pentium/correo/enlace.png) | ![Un adjunto, con su clip (se quita con la X)](pentium/correo/adjuntar.png) |
+| ![El asistente (1 de 2): la contraseña de aplicación](pentium/correo/asistente-1.png) | |
 
 **Qué hace.** Varias cuentas **IMAP4rev1** (con IDLE —el correo nuevo llega
 solo—, UIDPLUS, MOVE, SPECIAL-USE y LITERAL+ si el servidor los tiene) o
@@ -6182,7 +6184,17 @@ todos, Ctrl+L reenviar, Supr borrar, Ctrl+K mover, Ctrl+F buscar, S destacar, M
 leído; al escribir, Ctrl+E (o Ctrl+Intro) enviar, Ctrl+S guardar el borrador,
 Ctrl+B negrita (con HTML).
 
-**Medidas.** `CORREO.BIN` mide 333 KB. MEDIDAS_ATOM
+**Medidas.** `CORREO.BIN` mide 333 KB. **Un buzón de 10.000 mensajes en un
+Atom N455** (QEMU `-cpu n270 -icount shift=0`: una instrucción, un
+nanosegundo; el servidor de pruebas, en Python, en la misma máquina): la
+primera vez, traer las 10.000 fichas lleva **42 s** —en tramos de 300: los
+300 más nuevos se ven en algo más de un segundo, y se puede leer mientras
+llegan; en Linux, el programa gasta 0,34 s de procesador para lo mismo, así
+que casi todo es esperar al servidor y descifrar (AES-GCM: unos 5 MB)—, y
+**abrirlo otra vez, con lo guardado, 0,26 s** (UID SEARCH ALL, las banderas y
+el índice de 1,9 MB). El índice de 50.000 mensajes mide 9,6 MB en memoria.
+Conectar con la cadena ya comprobada, 0,2 M ciclos de BearSSL (sesión
+reanudada).
 
 **El paquete** `correo` 1.0 (OPCIONALES de `tools/hpq.py`, tipo
 `internet`): `\HISPA\CORREO.BIN`, `\HISPA\CORREO.TXT` (el LEEME, con la
@@ -6205,7 +6217,7 @@ los buzones de `haz_buzones.py` (49 casos en la entrada: juegos de caracteres,
 RFC 2047/2231, HTML con scripts, imágenes de fuera y píxel de rastreo, cid:,
 enlace engañoso, suplantación, adjuntos con EICAR, PDF, PNG, ZIP, reenviados,
 hilos, fechas raras, malformados, uno de 2 MB; y un buzón de 10.000 —o 50.000—
-hecho al vuelo). RESULTADO_PRUEBAS
+hecho al vuelo). **184 bien, 0 mal** (22/11; con el Atom, que se pasa sin `SIN_ATOM=1`, uno más), con 1.500 vueltas del fuzz de MIME/HTML/vCard y 1.000 del de IMAP (el agente dio además 5.200 de MIME sin un fallo).
 
 **Lo que falta**: OAuth2 (Gmail y Microsoft lo piden cada vez más); arrastrar
 adjuntos desde Mi equipo (cuando la principal tenga `EV_SOLTADO`); S/MIME y

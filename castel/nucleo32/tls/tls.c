@@ -1059,13 +1059,13 @@ static u32 starttls(u32 tcp, u32 modo, u32 espera, char *t, int cabe, u32 *sin)
 		}
 		if (!hay) {
 			*sin = 0x5354;
-			formatear(t, cabe, "el servidor de correo no ofrece STARTTLS: la conexi\xc3\xb3n ir\xc3\xad" "a sin cifrar");
+			formatear(t, cabe, "el servidor de correo no ofrece STARTTLS: la conexión iría sin cifrar");
 			return TLS_FALLO;
 		}
 	}
 	orden = modo == ST_IMAP ? "h1 STARTTLS\r\n" : modo == ST_POP3 ? "STLS\r\n" : "STARTTLS\r\n";
 	if (n) {
-		formatear(t, cabe, "STARTTLS: el servidor manda de m\xc3\xa1s antes de tiempo");
+		formatear(t, cabe, "STARTTLS: el servidor manda de más antes de tiempo");
 		return TLS_FALLO;
 	}
 	red_pide(O_ENVIAR, tcp, 0, 0, orden, strlen(orden), 0, 0, 0);
@@ -1082,11 +1082,11 @@ static u32 starttls(u32 tcp, u32 modo, u32 espera, char *t, int cabe, u32 *sin)
 	if ((modo == ST_IMAP && !st_empieza(b, "H1 OK")) || (modo == ST_POP3 && !st_empieza(b, "+OK")) ||
 	    (modo == ST_SMTP && !st_empieza(b, "220"))) {
 		*sin = 0x5354;
-		formatear(t, cabe, "el servidor de correo no ofrece STARTTLS: la conexi\xc3\xb3n ir\xc3\xad" "a sin cifrar");
+		formatear(t, cabe, "el servidor de correo no ofrece STARTTLS: la conexión iría sin cifrar");
 		return TLS_FALLO;
 	}
 	if (de_mas) {
-		formatear(t, cabe, "STARTTLS: el servidor manda de m\xc3\xa1s detr\xc3\xa1s del s\xc3\xad (\xc2\xbf" "alguien en medio?): no se sigue");
+		formatear(t, cabe, "STARTTLS: el servidor manda de más detrás del sí (¿alguien en medio?): no se sigue");
 		return TLS_FALLO;
 	}
 	return 0;
@@ -1161,7 +1161,7 @@ static void conectar(struct pedido *p, const u8 *datos)
 			contesta(p->hueco, p->serie, e, sin, 0, 0, t, strlen(t) + 1 < p->cabe ? strlen(t) + 1 : p->cabe);
 			return;
 		}
-		apunta("%s: STARTTLS (%s): s\xc3\xad", nombre, p->cab[4] == ST_IMAP ? "IMAP" : p->cab[4] == ST_SMTP ? "SMTP" : "POP3");
+		apunta("%s: STARTTLS (%s): sí", nombre, p->cab[4] == ST_IMAP ? "IMAP" : p->cab[4] == ST_SMTP ? "SMTP" : "POP3");
 	}
 	memset(c, 0, offsetof(struct conex, cadena));
 	c->usada = 1;

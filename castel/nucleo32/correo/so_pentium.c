@@ -548,8 +548,13 @@ int so_conecta(const char *servidor, u32 puerto, int modo, u32 espera_ms, char *
 			t[cab[7]] = 0;
 			if (r == TLS_FALLO && cab[1] == 0x5354)
 				e = SO_E_STARTTLS;
-			if (error)
-				snprintf(error, (size_t)cabe, "%s", t);
+			/* (los textos de TLS.BIN van en la 437) */
+			if (error) {
+				if (utf8_valido((const u8 *)t, (u32)strlen(t)))
+					snprintf(error, (size_t)cabe, "%s", t);
+				else
+					de437(t, error, (u32)cabe);
+			}
 		} else if (error)
 			snprintf(error, (size_t)cabe, "%s", texto_red(r));
 		return e;

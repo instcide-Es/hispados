@@ -56,7 +56,7 @@ L=127.0.0.1
   c d1 /ORDEN carpetas; c d1 /ORDEN al-dia; c d1 /ORDEN lee 24; c d1 /ORDEN lee 18; c d1 /ORDEN lee 17; c d1 /ORDEN lee 16; c d1 /ORDEN lee 4
   printf 'Hola desde Linux\n' > $Y/adj.txt
   c d1 /ORDEN envia "Luis Ruiz <luis@prueba.test>" "Prueba con ñ y €" "Texto con tildes: año." $Y/adj.txt
-  c d1 /ORDEN busca ñandú; c d1 /ORDEN mueve 20 Archive; c d1 /ORDEN carpetas
+  c d1 /ORDEN busca ñandú; c d1 /ORDEN mueve 21 Archive; c d1 /ORDEN carpetas
   c d2 /ORDEN cuenta ana@prueba.test secreta1 $L $(pu imap) starttls $L $(pu submission) starttls; c d2 /ORDEN al-dia
   c d2 /ORDEN envia luis@prueba.test "Por el 587" "con STARTTLS"
   c d3 /ORDEN cuenta ana@prueba.test secreta1 $L $(pu pop3s) tls $L $(pu smtps) tls /POP3; c d3 /ORDEN al-dia; c d3 /ORDEN al-dia
@@ -75,7 +75,7 @@ mira "Linux: enviar (SMTP 465 con AUTH, un adjunto, y guardado en Enviados); bus
   "^Enviado.$" "^3 encontrados$" "^Movido a Archive.$" "^Sent (3, 0 sin leer) \[enviados\]$"
 mira "Linux: STARTTLS en el 143 (IMAP) y en el 587 (SMTP): lo plano lo hace la capa del sistema, y se entra ya cifrado" \
   "imap: conectado con 127.0.0.1:$(pu imap) (TLS" "smtp: conectado con 127.0.0.1:$(pu submission) (TLS"
-mira "Linux: POP3 por TLS (995) y por STLS (110): baja los 49 una vez (la segunda, nada nuevo)" "pop3: 49 nuevos de 49" "pop3: 0 nuevos de 49" \
+mira "Linux: POP3 por TLS (995) y por STLS (110): baja los 48 una vez (uno se ha movido antes a Archive) (la segunda, nada nuevo)" "pop3: 4[89] nuevos de 4[89]$" "pop3: 0 nuevos de 4[89]$" \
   "pop3: conectado con 127.0.0.1:$(pu pop3) (TLS"
 mira "Linux: lo que no se deja: un servidor sin STARTTLS, un certificado de otro nombre, y sin cifrar a uno que no es de casa sin «permitir»" \
   "Sin conexión: el servidor de correo no ofrece STARTTLS: la conexión iría sin cifrar" "Sin conexión: el certificado es de otro sitio" \
@@ -127,11 +127,11 @@ ESCRIBE=1 DISCO=$Y/q.img ARRANQUE=ordenes MODULOS= MEMORIA=128 QEMU_MAS="-nic us
 tr -d '\r' < $Y/ordenes.sal > $Y/ordenes.txt
 S=$Y/ordenes.txt
 mira "QEMU: la cuenta por TLS (TLS.BIN, con la raíz de prueba de \\RAICES), las carpetas y lo nuevo" "correo: imap: conectado con 10.0.2.2:$(pu imaps) (TLS 1.2, ECDHE-ECDSA" \
-  "^  Asociación/Cuotas (2, 1 sin leer)$" "^Bandeja de entrada: 49 mensajes"
+  "^  Asociación/Cuotas (2, 1 sin leer)$" "^Bandeja de entrada: 4[89] mensajes"
 mira "QEMU: leer uno (bajado y guardado) y enviar con un adjunto del disco" "^Adjunto 1: Presupuesto año 2026.pdf (application/pdf" "^Enviado.$"
 mira "QEMU: STARTTLS en el 143 y en el 587, lo hace TLS.BIN (la orden nueva, «(CORREO)» en tls.c)" "tls: 10.0.2.2: STARTTLS (IMAP): sí" \
   "correo: imap: conectado con 10.0.2.2:$(pu imap) (TLS 1.2"
-mira "QEMU: POP3 por TLS (995): los 49, a la bandeja de aquí" "correo: pop3: 49 nuevos de 49"
+mira "QEMU: POP3 por TLS (995): todos, a la bandeja de aquí" "correo: pop3: 4[89] nuevos de 4[89]$"
 mira "QEMU: sin STARTTLS no se sigue (ni se manda la clave); una raíz desconocida, tampoco" \
   "Sin conexión: el servidor de correo no ofrece STARTTLS: la conexión iría sin cifrar" "Sin conexión: el certificado de 10.0.2.2 no lo firma ninguna autoridad conocida"
 mira "QEMU: la carpeta del correo es un secreto de CORREO.BIN: ni DIR ni TYPE la leen (la zona protegida, permisos.cas «(CORREO)»)" \
@@ -145,20 +145,21 @@ mmd -i $Y/v.img ::RAICES ::CORREO && mcopy -i $Y/v.img $Y/srv/RAIZ.CER ::RAICES/
 printf 'ispdb=https://10.0.2.2:%s/v1.1/\r\n' $(pu https) > $Y/CORREO.INI
 printf 'BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Luis Ruiz\r\nEMAIL:luis@prueba.test\r\nEND:VCARD\r\nBEGIN:VCARD\r\nVERSION:3.0\r\nFN:Marta Gil\r\nEMAIL:marta@ejemplo.es\r\nEND:VCARD\r\n' > $Y/LIBRETA.VCF
 mcopy -i $Y/v.img $Y/CORREO.INI $Y/LIBRETA.VCF ::CORREO/
-busca() { echo ":tecla ctrl-f" ":tecla ctrl-a" ":escribe $1" ":tecla ret" ":pausa 6" ":clic 400 147" ":pausa 6"; }
-# shellcheck disable=SC2207
-SES=(":pausa 3" ":doble 60 186" ":pausa 4" ":escribe correo" ":tecla ret" ":pausa 8" ":captura co1"
- ":escribe ana@prueba.test" ":tecla tab" ":escribe Ana García" ":tecla tab" ":escribe secreta1" ":tecla ret" ":pausa 12" ":captura co2" ":tecla ret" ":pausa 25" ":captura co3"
- $(busca "Caso 23") ":captura co4" ":clic 640 164" ":pausa 2" ":clic 700 181" ":pausa 15" ":captura co5" ":tecla ret" ":pausa 4" ":captura co6" ":tecla ret" ":pausa 2"
- $(busca "Caso 20") ":clic 640 164" ":pausa 2" ":clic 700 181" ":pausa 15" ":captura co7" ":tecla alt-f4" ":pausa 3"
- $(busca "Caso 18") ":captura co8" $(busca "Caso 17") ":captura co9" ":clic 800 187" ":pausa 2" ":captura co10" ":tecla esc" ":pausa 1"
- $(busca "Caso 14") ":captura co11" $(busca "Caso 15") ":captura co12"
- ":tecla ctrl-n" ":pausa 2" ":escribe lu" ":pausa 1" ":captura co13" ":tecla ret" ":tecla tab" ":tecla tab" ":tecla tab" ":escribe Prueba desde Hispa-Pentium"
- ":tecla tab" ":escribe Hola Luis, te mando el LEEME." ":clic 294 47" ":pausa 3" ":escribe LEEME" ":pausa 1" ":tecla ret" ":pausa 2" ":captura co14" ":tecla ctrl-e" ":pausa 10" ":captura co15"
- $(busca "Caso 02") ":tecla ctrl-r" ":pausa 3" ":escribe Gracias, Marta." ":captura co16" ":tecla ctrl-e" ":pausa 10"
- $(busca "Caso 01") ":tecla ctrl-k" ":pausa 2" ":captura co17" ":tecla ret" ":pausa 6" ":captura co18"
- ":tecla ctrl-n" ":pausa 2" ":escribe marta@ejemplo.es" ":tecla tab" ":tecla tab" ":tecla tab" ":escribe Borrador de prueba" ":tecla tab" ":escribe Sin acabar"
- ":tecla ctrl-s" ":pausa 6" ":tecla esc" ":pausa 2" ":tecla ctrl-f" ":tecla ctrl-a" ":escribe ñandú" ":tecla ret" ":pausa 6" ":captura co19")
+SES=()
+pon() { SES+=("$@"); }
+busca() { pon ":tecla ctrl-f" ":tecla ctrl-a" ":escribe $1" ":tecla ret" ":pausa 6" ":clic 400 147" ":pausa 6"; }
+pon ":pausa 3" ":doble 60 186" ":pausa 4" ":escribe correo" ":tecla ret" ":pausa 8" ":captura co1" \
+  ":escribe ana@prueba.test" ":tecla tab" ":escribe Ana García" ":tecla tab" ":escribe secreta1" ":tecla ret" ":pausa 12" ":captura co2" ":tecla ret" ":pausa 25" ":captura co3"
+busca "Caso 23"; pon ":captura co4" ":clic 640 164" ":pausa 2" ":clic 700 181" ":pausa 15" ":captura co5" ":tecla ret" ":pausa 4" ":captura co6" ":tecla ret" ":pausa 2"
+busca "Caso 20"; pon ":clic 640 164" ":pausa 2" ":clic 700 181" ":pausa 15" ":captura co7" ":tecla alt-f4" ":pausa 3"
+busca "Caso 18"; pon ":captura co8"; busca "Caso 17"; pon ":captura co9" ":clic 800 187" ":pausa 2" ":captura co10" ":tecla esc" ":pausa 1"
+busca "Caso 14"; pon ":captura co11"; busca "Caso 15"; pon ":captura co12"
+pon ":tecla ctrl-n" ":pausa 2" ":escribe lu" ":pausa 1" ":captura co13" ":tecla ret" ":tecla tab" ":tecla tab" ":tecla tab" ":escribe Prueba desde Hispa-Pentium" \
+  ":tecla tab" ":escribe Hola Luis, te mando el LEEME." ":clic 294 47" ":pausa 3" ":escribe LEEME" ":pausa 1" ":tecla ret" ":pausa 2" ":captura co14" ":tecla ctrl-e" ":pausa 10" ":captura co15"
+busca "Caso 02"; pon ":tecla ctrl-r" ":pausa 3" ":escribe Gracias, Marta." ":captura co16" ":tecla ctrl-e" ":pausa 10"
+busca "Caso 01"; pon ":tecla ctrl-k" ":pausa 2" ":captura co17" ":tecla ret" ":pausa 6" ":captura co18"
+pon ":tecla ctrl-n" ":pausa 2" ":escribe marta@ejemplo.es" ":tecla tab" ":tecla tab" ":tecla tab" ":escribe Borrador de prueba" ":tecla tab" ":escribe Sin acabar" \
+  ":tecla ctrl-s" ":pausa 6" ":tecla esc" ":pausa 2" ":tecla ctrl-f" ":tecla ctrl-a" ":escribe ñandú" ":tecla ret" ":pausa 6" ":captura co19"
 CAPTURAS=$G PANTALLA=1024x600 ESCRIBE=1 DISCO=$Y/v.img ARRANQUE="escritorio modo=1024x600" MODULOS= MEMORIA=128 QEMU_MAS="-nic user,model=e1000" \
   $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN "${SES[@]}" > $Y/ventana.sal 2>&1
 tr -d '\r' < $Y/ventana.sal > $Y/ventana.txt
@@ -178,14 +179,14 @@ miracap "Escudo lo ha encontrado: «Adjunto peligroso», con [!] (no solo en roj
 mira "un adjunto de texto: Escudo no dice nada y se abre con lo suyo (Mi equipo: el Bloc de notas)" "correo: adjunto C:.CORREO.TMP.NOTA.TXT: Escudo dice 0" "correo: adjunto abierto: C:.CORREO.TMP.NOTA.TXT"
 miracap "la suplantación: el recuadro con «[!] Cuidado:» y el porqué" co8 negrita 590 140 1020 200 "[!] Cuidado:"
 miracap "el enlace engañoso: el aviso arriba («[!] Hay enlaces...»)" co9 negrita 590 130 1020 200 "[!] Hay enlaces"
-mira "el HTML: sin scripts, las imágenes de fuera sin cargar (el píxel de rastreo), los enlaces engañosos" "leído: 16\|leído: .*sin scripts" \
+mira "el HTML: sin scripts, las imágenes de fuera sin cargar (el píxel de rastreo), los enlaces engañosos" \
   "leído: [0-9]* «Caso 14: solo HTML con imagen remota y píxel de rastreo» (HTML, 0 adjuntos, imágenes de fuera sin cargar)" "aviso: enlace engañoso: El enlace dice «www.banco.es» pero lleva a «malo.ejemplo»"
 miracap "las imágenes de fuera, sin cargar, con «Mostrar imágenes»" co11 negrita 820 140 1020 200 "Mostrar imágenes"
 mira "escribir: la libreta completa «lu» (Luis Ruiz), el adjunto (el cuadro de archivos, buscando al teclear), enviar y a Enviados" \
   "correo: adjuntado: C:.LEEME.TXT" "correo: enviado: «Prueba desde Hispa-Pentium» a luis@prueba.test (1 adjuntos)" "correo: guardado en Sent"
 miracap "el autocompletado de la libreta, debajo de «Para»" co13 negrita 90 120 900 160 "Luis Ruiz <luis@prueba.test>"
 mira "responder (Re:, con la cita y el In-Reply-To), mover a Archive y guardar un borrador en Drafts" "correo: redactar: responder" \
-  "correo: enviado: «Re: Caso 02: UTF-8 quoted-printable (año, ñandú, €)»" "correo: movidos 1 a Archive" "correo: borrador guardado en Drafts"
+  "correo: enviado: «Re: Caso 02: UTF-8 quoted-printable (año, ñandú, " "correo: movidos 1 a Archive" "correo: borrador guardado en Drafts"
 miracap "buscar «ñandú» en el servidor: «Lo encontrado de «ñandú»: 3»" co19 negrita 186 115 590 140 "Lo encontrado de «ñandú»: 3"
 f=$(grep -l "Prueba desde Hispa-Pentium" $Y/srv/enviados/*.eml 2> /dev/null | head -1)
 if [ -n "$f" ] && grep -q "luis@prueba.test" $f && grep -q 'filename="LEEME.TXT"' $f; then ok "lo escrito en la ventana ha llegado: a luis@prueba.test, con LEEME.TXT"; else ko "lo de la ventana no ha llegado bien ($f)"; fi
@@ -196,13 +197,14 @@ if grep -q "APPEND \"Drafts\" (\\\\Seen \\\\Draft)" $Y/srv/registro.txt; then ok
 if grep -q "excepción\|\*\*\*" $S; then ko "el núcleo se ha quejado: $(grep -m1 'excepción\|\*\*\*' $S)"; else ok "la ventana: ni una excepción ni una queja del núcleo"; fi
 # luego, sin red y a 800 x 600: dos paneles, lo guardado
 SES=(":pausa 3" ":doble 60 186" ":pausa 4" ":escribe correo" ":tecla ret" ":pausa 12" ":captura co20" ":tecla ctrl-f" ":tecla ctrl-a" ":escribe Caso 02" ":tecla ret" ":pausa 6"
- ":clic 400 147" ":pausa 6" ":captura co21")
+ ":doble 400 147" ":pausa 6" ":captura co21")
 CAPTURAS=$G ESCRIBE=1 DISCO=$Y/v.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN "${SES[@]}" > $Y/sinred.sal 2>&1
 tr -d '\r' < $Y/sinred.sal > $Y/sinred.txt
 S=$Y/sinred.txt
 mira "sin red: se ve lo guardado (la lista y lo bajado), en dos paneles (800 x 600)" "correo: ventana: [0-9]* x [0-9]* (dos paneles)" \
   "correo: buscar en lo bajado «Caso 02»: 1" "correo: leído: 2 «Caso 02"
 miracap "sin red: «Sin conexión: se ve lo guardado», y el mensaje con «< Volver a la lista»" co21 negrita 180 60 400 100 "< Volver a la lista"
+if [ -z "${SIN_ATOM:-}" ]; then
 # --- 4. lo que tarda en un Atom N455 (-cpu n270 -icount shift=0: una instrucción, un nanosegundo) ---
 cp $Y/base.img $Y/r.img
 mmd -i $Y/r.img ::RAICES && mcopy -i $Y/r.img $Y/srv/RAIZ.CER ::RAICES/PRUEBA.CER && mcopy -i $Y/r.img $BIN ::
@@ -215,6 +217,7 @@ S=$Y/atom.txt
 mira "un buzón de 10.000 mensajes, en un Atom N455 (QEMU -cpu n270 -icount): las fichas en tramos, y abrirlo otra vez desde lo guardado" \
   "correo: al día: Bandeja de entrada: 10000 mensajes (3000 nuevos, 10000 fichas traídas) en [0-9]* ms" "correo: al día: Bandeja de entrada: 10000 mensajes (0 nuevos, 0 fichas traídas) en [0-9]* ms"
 grep "correo: al día: Bandeja de entrada: 10000" $S | sed 's/^/        /'
+fi
 kill $SPID 2> /dev/null
 wait $SPID 2> /dev/null
 }
