@@ -549,6 +549,11 @@ void ui_pantalla(int *an, int *al) { *an = 1024; *al = 570; }
 void ui_maximiza(void) {}
 int ui_soltado(char *ruta, int cabe) { (void)cabe; ruta[0] = 0; return 0; }
 int ui_suceso(Suceso *s, u32 espera_ms) { (void)s; if (espera_ms) usleep(espera_ms * 1000); return 0; }
+int ui_espera(Suceso *s, u32 espera_ms) { return ui_suceso(s, espera_ms ? espera_ms : 1000); }
+void ui_vuelca(void) {}
+void ui_callado(int si) { (void)si; }
+void ui_ensucia(int y, int al) { (void)y, (void)al; }
+void ui_cuenta_raton(u32 *m, u32 *r, u32 *v) { *m = *r = *v = 0; }
 void ui_rect(int x, int y, int an, int al, u32 c) { (void)x, (void)y, (void)an, (void)al, (void)c; }
 void ui_degradado(int x, int y, int an, int al, u32 a, u32 b) { (void)x, (void)y, (void)an, (void)al, (void)a, (void)b; }
 void ui_redondo(int x, int y, int an, int al, int r, u32 a, u32 b) { (void)x, (void)y, (void)an, (void)al, (void)r, (void)a, (void)b; }

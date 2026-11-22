@@ -10,6 +10,7 @@
 #include "ui.h"
 #include "mime.h"
 #include "pentium.h"
+#include "lienzo.h"
 
 #define RUTA 260
 
@@ -750,6 +751,10 @@ char *so_del_portapapeles(u32 *n)
  * ============================================================================= */
 static u32 vent;
 static struct orden ord;
+/* (PARPADEO) el lienzo propio: todo se pinta aquí y se vuelca de una vez */
+static Lienzo lz;
+static int solo_raton;			/* desde el último suceso de verdad, solo ha llegado el ratón */
+static u32 n_mueve, n_rep_raton, n_vuelcas;
 
 static void dibuja(u32 op, int x, int y, int an, int al, u32 t1, u32 t2, const void *d, int n)
 {
@@ -774,7 +779,7 @@ int ui_abre(const char *titulo, int an, int al)
 	if (ES_ERROR(vent) || !vent)
 		return -1;
 	sc(SC_COLOCAR, vent, 0xFFFFFFFFu, 0);
-	return 0;
+	return lz_crea(&lz, an, al);
 }
 
 int ui_abre_aviso(int an, int al)
@@ -787,14 +792,18 @@ int ui_abre_aviso(int an, int al)
 	ui_pantalla(&pa, &pal);
 	if (pa > an + 30 && pal > al + 60)
 		sc(SC_COLOCAR, vent, (u32)(pa - an - 20), (u32)(pal - al - 34));
-	return 0;
+	return lz_crea(&lz, an, al);
 }
 
 void ui_cierra(void)
 {
-	if (vent)
+	if (vent) {
+		so_apunta("ventana: el rat\xc3\xb3n se ha movido %u veces; repintados por \xc3\xa9l: %u (vuelcos: %u)", (unsigned)n_mueve,
+			  (unsigned)n_rep_raton, (unsigned)n_vuelcas);
 		sc(SC_CERRAR_VENTANA, vent, 0, 0);
+	}
 	vent = 0;
+	lz_suelta(&lz);
 }
 
 void ui_titulo(const char *t)
@@ -829,11 +838,33 @@ int ui_soltado(char *ruta, int cabe)
 	return ruta[0] != 0;
 }
 
+
+void ui_vuelca(void)
+{
+	if (!vent || !lz.p || !lz.sucio)
+		return;
+	dibuja(OP_MAPA, 0, lz.sy0, lz.an, lz.sy1 - lz.sy0, 0, 0, lz.p + (size_t)lz.sy0 * (size_t)lz.an, 0);
+	lz.sucio = 0;
+	n_vuelcas++;
+	if (solo_raton)
+		n_rep_raton++;
+}
+
+void ui_callado(int si) { lz.callado = si; }
+void ui_ensucia(int y, int al) { lz_ensucia(&lz, y, al); }
+void ui_cuenta_raton(u32 *movimientos, u32 *repintados, u32 *vuelcas)
+{
+	*movimientos = n_mueve;
+	*repintados = n_rep_raton;
+	*vuelcas = n_vuelcas;
+}
+
 int ui_suceso(Suceso *s, u32 espera_ms)
 {
 	struct suceso x;
 	u32 hasta = so_tics() + a_tics(espera_ms);
 
+	ui_vuelca();		/* (lo pintado, a la ventana, de una vez, antes de esperar) */
 	for (;;) {
 		if (sc(SC_SUCESO, vent, (u32)&x, 0) == 1) {
 			s->clase = x.clase;
@@ -847,6 +878,13 @@ int ui_suceso(Suceso *s, u32 espera_ms)
 				else if (x.a == 10)
 					s->a = UT_INTRO;
 			}
+			if (x.clase == EV_RATON_MUEVE) {
+				n_mueve++;
+				solo_raton = 1;
+			} else if (x.clase != EV_SALE && x.clase != EV_FOCO)
+				solo_raton = 0;
+			if (x.clase == EV_TAMANO)
+				lz_crea(&lz, (int)x.a, (int)x.b);
 			return 1;
 		}
 		if (!espera_ms || (int)(hasta - so_tics()) <= 0)
@@ -855,12 +893,31 @@ int ui_suceso(Suceso *s, u32 espera_ms)
 	}
 }
 
-void ui_rect(int x, int y, int an, int al, u32 c) { if (an > 0 && al > 0) dibuja(OP_RECTANGULO, x, y, an, al, c, 0, 0, 0); }
-void ui_degradado(int x, int y, int an, int al, u32 a, u32 b) { if (an > 0 && al > 0) dibuja(OP_DEGRADADO, x, y, an, al, a, b, 0, 0); }
-void ui_redondo(int x, int y, int an, int al, int r, u32 a, u32 b) { if (an > 0 && al > 0) dibuja(OP_REDONDEADO, x, y, an, al, a, b, 0, r); }
-void ui_marco(int x, int y, int an, int al, u32 c) { if (an > 0 && al > 0) dibuja(OP_MARCO, x, y, an, al, c, 0, 0, 0); }
-void ui_linea(int x1, int y1, int x2, int y2, u32 c) { dibuja(OP_LINEA, x1, y1, x2, y2, c, 0, 0, 0); }
-void ui_mapa(int x, int y, int an, int al, const u32 *p) { if (an > 0 && al > 0) dibuja(OP_MAPA, x, y, an, al, 0, 0, p, 0); }
+/* lo que cambia algo: el ratón que solo pasa por encima (y entrar y salir
+ * de la ventana) no se devuelve: no hay nada que repintar por él */
+int ui_espera(Suceso *s, u32 espera_ms)
+{
+	u32 hasta = so_tics() + a_tics(espera_ms);
+
+	for (;;) {
+		u32 queda = espera_ms ? (int)(hasta - so_tics()) > 0 ? (hasta - so_tics()) * 1000 / so_hz() + 1 : 0 : 1000;
+
+		if (espera_ms && !queda)
+			return 0;
+		if (!ui_suceso(s, queda))
+			continue;
+		if (s->clase == UE_MUEVE || s->clase == UE_SALE || s->clase == UE_FOCO)
+			continue;
+		return 1;
+	}
+}
+
+void ui_rect(int x, int y, int an, int al, u32 c) { lz_rect(&lz, x, y, an, al, c); }
+void ui_degradado(int x, int y, int an, int al, u32 a, u32 b) { lz_degradado(&lz, x, y, an, al, a, b); }
+void ui_redondo(int x, int y, int an, int al, int r, u32 a, u32 b) { lz_redondo(&lz, x, y, an, al, r, a, b); }
+void ui_marco(int x, int y, int an, int al, u32 c) { lz_marco(&lz, x, y, an, al, c); }
+void ui_linea(int x1, int y1, int x2, int y2, u32 c) { lz_linea(&lz, x1, y1, x2, y2, c); }
+void ui_mapa(int x, int y, int an, int al, const u32 *p) { lz_mapa(&lz, x, y, an, al, p); }
 
 void ui_texto(int x, int y, const char *t, u32 n, int max, u32 c, int negrita)
 {
@@ -878,7 +935,7 @@ void ui_texto(int x, int y, const char *t, u32 n, int max, u32 c, int negrita)
 			memcpy(d + max - 3, "...", 3);
 	}
 	if (k)
-		dibuja(negrita ? OP_NEGRITA : OP_TEXTO, x, y, 0, 0, c, 0, d, (int)k);
+		lz_texto(&lz, x, y, (const u8 *)d, (int)k, c, negrita);
 }
 
 void ui_menu(int x, int y, const char *opciones, u32 grises, u32 etiqueta)
@@ -886,6 +943,7 @@ void ui_menu(int x, int y, const char *opciones, u32 grises, u32 etiqueta)
 	static struct pide_menu p;
 	static char t[1200];
 
+	ui_vuelca();
 	a437(opciones, t, sizeof t);
 	p.x = x;
 	p.y = y;

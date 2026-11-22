@@ -8188,6 +8188,33 @@ si no, probando `imap.`, `mail.` y el dominio (993/143) y `smtp.`, `mail.`
   se baja (25 MB), lo más que se guarda por carpeta, cada cuántos minutos se
   mira.
 
+**La 1.0.1: sin parpadeo («(PARPADEO)», 22/11/2026).** Carlos, con la 0.8.7:
+«cuando paso el ratón por encima, sin pulsar, los campos para poner los datos
+de la cuenta desaparecen unos milisegundos y vuelven a aparecer» (y lo mismo la
+ventana principal). **La causa**, en Correo (no en el núcleo: al mover el
+puntero, `ventanas.cas` solo repone los puntos de debajo de la flecha desde su
+doble búfer): el bucle de la ventana lo repintaba todo **cada 40 ms y con cada
+suceso, también el ratón que solo se mueve**, y los cuadros (el asistente, las
+preguntas, elegir...) repintaban el fondo entero y luego el cuadro con cada
+suceso y cada 100 ms; y cada cosa iba a la ventana por separado (la llamada 34,
+orden a orden), así que el escritorio, al componer lo «ensuciado» cuando le
+tocaba, podía enseñar el fondo ya pintado y el cuadro todavía no. **El
+arreglo**: (1) **un lienzo propio** (`lienzo.c`, con las mismas cuentas que
+`grafico.cas` y la letra de 8x16 de `letra.cas`, sacada a `letra8x16.h` por
+`haz_letra.py`): todo se pinta ahí, fuera de la pantalla, y `ui_suceso` lo
+**vuelca de una vez** (un solo OP_MAPA con las filas que han cambiado) antes de
+esperar; (2) **se repinta solo si algo cambia**: `ui_espera` no devuelve el
+ratón que solo se mueve (ni entrar ni salir de la ventana), el bucle principal
+lleva su «sucio», y los cuadros pintan lo de debajo sin contarlo como cambiado
+(ya está así en la pantalla) salvo donde estaba el cuadro antes. Correo cuenta
+los movimientos del ratón y los repintados por ellos (`ventana: el ratón se ha
+movido N veces; repintados por él: 0`). **Otros programas**: los de
+`controles.cas` (Pluma, Bloc, Panel, ClicGest, Hispa-PDF...) ya pintan en un
+lienzo y lo vuelcan; **Comprimidos y el Mirador** (C, `comprim/ui.c`) también
+repintaban entero con cada movimiento del ratón: ya no (1.0.1, el mínimo:
+`pintar = 0` para el ratón que solo pasa; un repintado de verdad suyo aún va
+orden a orden).
+
 **STARTTLS en TLS.BIN («(CORREO)» en `tls.c`).** La orden de conectar lleva en
 `cab[4]` el protocolo (1 IMAP, 2 SMTP, 3 POP3): el servicio conecta, espera el
 saludo, manda `STARTTLS` (en SMTP, tras su `EHLO`; en POP3, `STLS`) y, si el
