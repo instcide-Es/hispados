@@ -4345,8 +4345,8 @@ administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
 
 **La 0.8.8** (22/11, rama `pentium-088`, corta: las ramas `agenda`, `cuentas32`,
-`pintura32` y, al final, `red-cortes`; `termometro` va aparte). Lo que se
-tocó al juntar:
+`pintura32` y, al final, `red-cortes` e `iconos-escritorio`; `termometro` va
+aparte). Lo que se tocó al juntar:
 
 - **Una sola versión**: `VERSION_088` en `hpq.py` (la base) y
   `Usuario.VERSIÓN_TEXTO` («0.8.8»: el menú, «Acerca de» y VER).
@@ -4391,6 +4391,16 @@ tocó al juntar:
   vicies, la de la Agenda); `VERSION_CORTES` y `VERSION_088` son la misma
   0.8.8; parte 37 (`cortes`). Se juntó sin más choques que `pruebas.sh` y
   `hpq.py` (escritorio.cas, usuario.cas y llamadas.cas, solos).
+- **Los iconos del tapiz** (`iconos-escritorio`, sección «Los iconos del
+  tapiz»): se juntó solo (escritorio.cas sin choques: `lo_del_usuario`
+  queda con sus iconos, `CORREO /BANDEJA` y el vigilante de la Agenda); parte
+  47 (`iconos`). Y lo que pidió Carlos: no hay Papelera en el tapiz porque
+  **la Papelera está siempre en el dock, la última** (`dock.cas`,
+  «(ICONOS)»: `papelera_al_final`; «Quitar del dock» sale apagado en ella y
+  `quita` no la quita; arrastrarla no la mueve ni nadie pasa a su sitio; lo
+  que se fija va delante; un DOCK.INI sin ella, o con ella en otro sitio, la
+  recupera). Con el dock oculto, Mi equipo › Papelera y Ejecutar
+  `\EQUIPO.BIN /PAPELERA`; la parte 47 lo comprueba.
 - **Las secciones**: la Agenda es la 14 vicies, Cuentas 2 la 14 unvicies y
   Pintura 2 la 14 duovicies (en sus ramas, 14 terdecies y 14 quindecies, ya
   ocupadas). Las partes de las pruebas: 43 `agenda`, 44 `cuentas`, 45
@@ -4403,7 +4413,39 @@ sistema), pluma 2.0.1; nuevos agenda 1.0 y cuentas 2.0; lo demás, tal cual
 lo publicado (también correo 1.0.1, que se publicó aparte, y las firmas de
 Escudo del día).
 
-@@PRUEBAS088@@
+**Las pruebas de la 0.8.8** (22/11; en el PC de Albinyana con
+`tools/pruebas_castel_pc.sh -j 4`, y en el VPS lo que necesita qpdf,
+pdftotext, zlib o `convert`). Con todo junto (agenda, cuentas32, pintura32,
+red-cortes, iconos-escritorio y la Papelera fija): `iconos` 95/0, `06`
+168/0, `07` 102/0, `16` 139/0, `cd` 77/0, `paquetes` 108/0, `menu` 95/0,
+`programas` 92/0, `pantalla` 98/0, `rueda` 71/0, `usuarios` 94/0, `agenda`
+91/0, `cortes` 86/0, `acpi` 78/0 (una vez, en la batería cargada, «Reiniciar» no llegó a tiempo; sola, bien); tras red-cortes, `red` 72/0, `tls` 72/0,
+`wifi` 96/0; de antes de juntar red-cortes (no los toca), `protege` 76/0,
+`caliente` 79/0, `win32` 90/0, `win32juegos` 100/0, `sonido` 109/0,
+`accesorios` 81/0, `mirador` 75/0, `zip` 118/0, `castel64` 72/0,
+`castel32` 67/0, `oficina` 101/0, `bloc` 119/0, `correo` 185/0,
+`dispositivos` 85/0, `ssh` 70/0, `lectores` 79/0, `juegos` 98/0,
+`reproductor` 111/0; en el VPS, `pintura` 74/0, `cuentas` 85/0, `pluma`
+79/0, `pdf` 80/0, `escudo` 103/0 y `navegador` 98/0; `panel` 107/1 (en el PC y en el VPS: el tema Grafito, «Verde (elegido)» que no sale en pn6 tras el clic; **falla igual con el código de la 0.8.7** —8afbfc2, pasado hoy en el VPS—: no es de esta versión; queda mirarlo aparte). Fallos que
+se vieron y se arreglaron: las partes 06 y 07 (Pintura 2 entre los más
+usados del menú Inicio desplazaba a Facturas), la 41 (/Producer «Pluma
+2.0») y la 45 («Editar con Pintura» un sitio más allá por `AZAR.SEM`).
+
+**La 0.8.8, por Internet** (22/11, en QEMU `pc` con el disco en IDE, como el
+VirtualBox de Carlos): un disco instalado con el CD publicado de la 0.8.7, el
+usuario Carlos **con contraseña**, y Correo, Pluma 2 y los juegos de lo
+publicado; el catálogo de la 0.8.8 (firmado, `serie=` mayor que la publicada:
+la 1.4 lo acepta) por HTTP: la pantalla de entrada, «Hay 11
+actualizaciones» > Verlas > «Actualizar todo» (base, red, tls, wifi,
+paquetes, equipo, accesori, pintura, pluma, correo 1.0.1 y escudo) >
+«Reiniciar ahora» > la contraseña > «El núcleo nuevo ha arrancado bien»; VER,
+«Hispa-Pentium 0.8.8»; `PAQUETES INSTALA agenda cuentas` (la 1.5) y
+`PAQUETES COMPRUEBA`, «los 23 paquetes... como se instalaron»; el
+`PINTURA.HVP` de la 1.0, quitado. Logo+L y otra vez dentro: el vigilante de
+la Agenda, suyo, avisa de una cita de su `\USUARIOS\CARLOS\AGENDA` («AVISO
+Reunion de la junta», 15 minutos antes) y el reloj de la bandeja dice
+«Próxima cita: hoy...»; en Mi equipo, dos clics en un .HOJ abren Cuentas 2
+(con su gráfico) y «Editar con Pintura» en un .PNG abre Pintura 2.
 
 **La 0.8.7** (22/11, rama `pentium-087`: las ramas `usuarios`, `panel-control`,
 `bloc-avanzado`, `reproductor`, `win32-juegos`, `pentium-oficina` y `correo`,
