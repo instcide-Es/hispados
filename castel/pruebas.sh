@@ -349,6 +349,12 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas $AQUI/ejemp
   dicho=$(head -1 $T/err.txt | sed 's/^.*\.cas://')
   if [ "$dicho" = "$esperado" ]; then ok "$n: $dicho"; else ko "$n: dice «$dicho» y se esperaba «$esperado»"; fi
 done
+# la versión que dicen el menú Inicio, Configuración y «Acerca de»
+# (usuario.cas, VERSIÓN_TEXTO) es la del paquete «base» de tools/hpq.py
+VERSION_BASE=$(python3 -I -c "import sys; sys.path.insert(0, '$AQUI/../tools'); import hpq; print([v for n, v, *_ in hpq.SISTEMA if n == 'base'][0])")
+if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/nucleo32/usuario.cas; then
+  ok "la versión del escritorio (VERSIÓN_TEXTO) es la de la base de hpq.py: $VERSION_BASE"
+else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
 case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
@@ -1396,7 +1402,7 @@ miracap "la Consola: el intérprete de órdenes dentro de una ventana (un termin
 miracap "SALIR acaba el intérprete y la Consola se cierra (su ventana y su botón)" e10 notexto 130 80 160 100 Consola notexto 280 570 310 582 Consola \
   negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas"
 miracap "Configuración: lo que hay (pantalla, memoria), el teclado y el tapiz" e11 negrita 196 126 206 136 "Configuración" \
-  negrita 240 160 256 170 "Hispa-Pentium 0.8" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
+  negrita 240 160 256 170 "Hispa-Pentium $VERSION_BASE" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
 miracap "el tapiz se cambia desde Configuración (a «Verde»), y se repinta todo el escritorio" e12 rgb 10 10 1F6B52 negrita 30 570 46 580 Inicio \
   negrita 196 126 206 136 "Configuración"
 miracap "el botón de cerrar acaba el Bloc de notas (sin cambios pendientes): ni ventana ni botón en la barra" e13 \
@@ -1473,7 +1479,7 @@ miracap "dos clics en «Mi equipo»: el explorador, con la unidad C: (el disco F
 miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 30 10 40 20 "C:\\" texto 316 322 326 332 LEEME.TXT texto 428 166 438 176 VACIA
 miracap "y dos clics en un texto lo abren con el Bloc de notas" b11 negrita 198 142 206 150 "\\LEEME.TXT - Bloc de notas" \
   texto 178 224 186 232 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
-miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.8" \
+miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium $VERSION_BASE" \
   texto 196 294 204 302 "Copyright (C) 2026 Carlos Sanz y contribuidores."
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
@@ -2302,7 +2308,7 @@ for hc in xhci ehci; do
     miracap "al aceptar: «Todo listo», con el saludo; y el reloj de la barra ya marca la hora puesta (el reloj del PC)" a3$hc \
       negrita 154 98 162 106 "Todo listo" negrita 112 176 120 184 "¡Hola, Carlos!" negrita 454 427 462 435 "Empezar" negrita 740 570 760 584 "07:45"
     miracap "el menú Inicio saluda con el nombre («Hola, Carlos») y dice la versión; LEEME.TXT, en los documentos" a4$hc \
-      negrita 54 104 62 112 "Hola, Carlos" texto 54 122 62 130 "Hispa-Pentium, versión 0.8" negrita 256 159 264 167 "Mis documentos" texto 38 246 46 254 Naves
+      negrita 54 104 62 112 "Hola, Carlos" texto 54 122 62 130 "Hispa-Pentium, versión $VERSION_BASE" negrita 256 159 264 167 "Mis documentos" texto 38 246 46 254 Naves
     if grep -q "asistente: guardado HISPA.INI (Carlos, Toshiba)$" $S && [ "$(tr -d '\r' < $Z/ini.txt | tr '\n' '|')" = "[hispa]|usuario=Carlos|equipo=Toshiba|teclado=es|modo=1024x600|" ] \
       && grep -q "^set modo=1024x600x32,1024x600,auto$" $Z/cfg.txt && [ "$(grep -c '^set modo=' $Z/cfg.txt)" = 1 ] && [ $sano = 0 ]; then
       ok "lo guardado: C:\\HISPA\\HISPA.INI (usuario, equipo, teclado y modo) y la medida de la pantalla en el menú de arranque (GRUB.CFG); el disco, sano"
@@ -2622,6 +2628,35 @@ if sano $Q/s2.img && sin_restos $Q/s2.img && igual_en $Q/s2.img HISPA/SALUDO.TXT
   && igual_en $Q/s2.img HISPA/PAQUETES/SALUDO.PQI $F/SALUDO2.PQI && igual_en $Q/s2.img HISPA/SALUDO.BIN $F/HOLA.BIN; then
   ok "lo actualizado, desde fuera: el disco sano, lo de la 2.0 en su sitio, el archivo que la 2.0 ya no trae (SALUDO.DAT) quitado y el registro, el de la 2.0"
 else ko "lo actualizado no queda bien en el disco:"; lista_de $Q/s2.img | sed 's/^/        /' | head -14; tail -n 3 $P/fsck.txt | sed 's/^/        /'; fi
+
+# 3 bis. (SISTEMA, 0.8.6) los paquetes nuevos del sistema: el catálogo marca
+# «sistema=nuevo» (y «sistema=letras», que ya está); ACTUALIZA pone «nuevo»
+# aunque no estuviera (como accesori, sonido, wifi o escudo en un sistema que
+# viene de una versión de antes), pero no «extra», que no es del sistema; lo
+# quitado a propósito no lo vuelve a poner (QUITADOS.TXT) e INSTALA lo olvida
+mkdir -p $F/paq2
+cp $F/paq/LETRAS1.HPQ $F/paq/LETRAS11.HPQ $F/paq/SALUDO1.HPQ $F/paq/SALUDO2.HPQ $F/paq2/
+( cd $F
+  $HPQ crea paq2/NUEVO.HPQ --nombre nuevo --version 1.0 --descripcion 'Nuevo del sistema (de prueba)' A.TXT='\HISPA\NUEVO.TXT'
+  $HPQ crea paq2/EXTRA.HPQ --nombre extra --version 1.0 --descripcion 'Opcional (de prueba)' A.TXT='\HISPA\EXTRA.TXT'
+  $HPQ catalogo paq2 && printf 'sistema=letras\r\nsistema=nuevo\r\n' >> paq2/CATALOGO.TXT && $HPQ firma paq2 $Q/prueba.key ) > $Q/hpq2.txt 2>&1
+mkfs.fat -F 16 -n MEMORIA -C $Q/usb2.img 16384 > /dev/null && mmd -i $Q/usb2.img ::PAQUETES && mcopy -i $Q/usb2.img $F/paq2/* ::PAQUETES/
+cp $Q/s1.img $Q/s3.img
+USB_IMG=$Q/usb2.img paq $Q/s3.img sistema "paquetes estado" "paquetes actualiza" ":pausa 2" "paquetes lista" "paquetes quita nuevo" "paquetes estado" "paquetes actualiza" ":pausa 1"
+mira "PAQUETES ESTADO dice cuál es nuevo del sistema («|nuevo»: la bandeja lo cuenta); ACTUALIZA pone también el paquete nuevo del sistema (no estaba), no el opcional; y quitado a propósito, ACTUALIZA ya no lo pone" \
+  "^p|nuevo||1\.0|Nuevo del sistema (de prueba)|otros|nuevo$" "^p|extra||1\.0|Opcional (de prueba)|otros$" "^Nuevo del sistema: nuevo$" \
+  "^Se va a instalar: saludo 2\.0 (en lugar de la 1\.0), nuevo 1\.0$" "^  instalado nuevo 1\.0$" "^  nuevo     1\.0     Nuevo del sistema (de prueba)$" \
+  "^  quitado nuevo 1\.0$" "^p|nuevo||1\.0|Nuevo del sistema (de prueba)|otros$" "^Todo está al día\.$"
+if grep -q "instalado extra\|^p|letras||" $S; then ko "ACTUALIZA ha puesto el opcional (extra) o da letras por no instalado"; else ok "el opcional (extra) se queda sin instalar"; fi
+if sano $Q/s3.img && sin_restos $Q/s3.img && saca $Q/s3.img HISPA/PAQUETES/QUITADOS.TXT $Q/quitados.txt && [ "$(cat $Q/quitados.txt)" = "$(printf 'nuevo\r')" ] \
+  && ! igual_en $Q/s3.img HISPA/NUEVO.TXT $F/A.TXT && ! igual_en $Q/s3.img HISPA/EXTRA.TXT $F/A.TXT; then
+  ok "en el disco: sano, sin «nuevo» (quitado) ni «extra», y QUITADOS.TXT dice «nuevo»"
+else ko "lo de los nuevos del sistema no queda bien en el disco:"; lista_de $Q/s3.img | sed 's/^/        /' | head -14; fi
+USB_IMG=$Q/usb2.img paq $Q/s3.img sistema2 "paquetes instala nuevo" ":pausa 1" "paquetes actualiza" ":pausa 1"
+mira "y PAQUETES INSTALA nuevo lo pone otra vez (y lo olvida de QUITADOS.TXT)" "^  instalado nuevo 1\.0$" "^Todo está al día\.$"
+if sano $Q/s3.img && igual_en $Q/s3.img HISPA/NUEVO.TXT $F/A.TXT && ! saca $Q/s3.img HISPA/PAQUETES/QUITADOS.TXT $Q/quitados.txt; then
+  ok "en el disco: «nuevo» puesto y QUITADOS.TXT, borrado (ya no queda nada quitado)"
+else ko "INSTALA no olvida lo quitado:"; cat $Q/quitados.txt 2> /dev/null | sed 's/^/        /'; fi
 
 # 4. lo que no vale no toca nada: una suma mala, un conflicto, quitar lo que
 # otro necesita; y COMPRUEBA ve un archivo cambiado (la imagen, idéntica)
@@ -4330,7 +4365,7 @@ cumple() {
 campo() { grep "^ráfaga $2 " $1 | awk -v c=$3 '{ print $c }'; }
 for tarjeta in "hda:-device intel-hda -device hda-duplex,audiodev=snd0" "ac97:-device AC97,audiodev=snd0" "sb16:-device sb16,audiodev=snd0"; do
   n=${tarjeta%%:*}; dev=${tarjeta#*:}
-  O=("sonido" ":pausa 2" "sonido /tono 440 1200 I" ":pausa 1" "sonido /tono 660 1200 D" ":pausa 1" "sonido /tono 523 9000 /suelto" ":pausa 1" "sonido /tono 1000 1500" ":pausa 4"
+  O=("sonido" ":pausa 2" "sonido /tono 440 1200 I" ":pausa 1" "sonido /tono 660 1200 D" ":pausa 1" "sonido /tono 523 6000 /suelto" ":pausa 1" "sonido /tono 1000 1500" ":pausa 6"
      "sonido M:\\P8.WAV" ":pausa 2" "sonido /volumen 40" "sonido /tono 440 800" ":pausa 1" "sonido /silencio si" "sonido /tono 440 800" ":pausa 1" "sonido /silencio no"
      "sonido /volumen 80" "sonido /fondo M:\\AVISO.WAV" ":pausa 2")
   [ $n = hda ] && O+=("disposit /informe" ":pausa 6")
@@ -4351,7 +4386,11 @@ for tarjeta in "hda:-device intel-hda -device hda-duplex,audiodev=snd0" "ac97:-d
   r0=$(campo $Y/$n.oye 0 7); r0=${r0:-1}
   cumple $Y/$n.oye 0 'hz >= 420 && hz <= 460 && dura >= 1100 && dura <= 1400 && izq > 3000 && der < 200 && cortes == 0' "$n: «SONIDO /TONO 440 1200 I»: 440 Hz, 1,2 s, solo por la izquierda y sin cortes"
   cumple $Y/$n.oye 1 'hz >= 630 && hz <= 690 && dura >= 1100 && dura <= 1400 && der > 3000 && izq < 200 && cortes == 0' "$n: «/TONO 660 1200 D»: 660 Hz, solo por la derecha"
-  cumple $Y/$n.oye 2 'dura >= 8500 && f[1] > 0.6 * r0 && f[2] > 0.6 * r0 && izq > 1.6 * r0 && cortes == 0' "$n: dos programas a la vez (523 Hz 9 s, suelto, y 1.000 Hz encima): los dos se oyen y se suman, sin cortes" -v r0=$r0
+  # (el de 523 Hz dura 6 s y P8.WAV va 6 s después del de 1.000 Hz: con 9 s y
+  # 4 s, según lo que se tardara en teclear, P8.WAV empezaba justo al acabar
+  # el de 523 Hz y oye.py los juntaba en una ráfaga, con «un corte» entre los
+  # dos; y faltaba una ráfaga: así salían los 5 fallos de cada tarjeta)
+  cumple $Y/$n.oye 2 'dura >= 5500 && dura <= 6800 && f[1] > 0.6 * r0 && f[2] > 0.6 * r0 && izq > 1.6 * r0 && cortes == 0' "$n: dos programas a la vez (523 Hz 6 s, suelto, y 1.000 Hz encima): los dos se oyen y se suman, sin cortes" -v r0=$r0
   cumple $Y/$n.oye 3 'hz >= 700 && hz <= 800 && dura >= 900 && dura <= 1200 && izq > 1000 && der > 1000' "$n: un WAV de 8 bits, mono, a 11.025 Hz (SONIDO M:\\P8.WAV), a su frecuencia y lo que dura"
   cumple $Y/$n.oye 4 'hz >= 420 && hz <= 460 && izq < 0.2 * r0 && izq > 0.05 * r0' "$n: con el volumen al 40 %, unos 19 dB más bajo (la curva de HSPSND: 0,47 dB por punto)" -v r0=$r0
   cumple $Y/$n.oye 5 'hz >= 780 && hz <= 980 && dura >= 400 && dura <= 800' "$n: en silencio no suena nada; y AVISO.WAV, que toca el servicio solo (la llamada 194, «SONIDO /FONDO»)"

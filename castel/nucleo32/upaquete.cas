@@ -202,6 +202,15 @@ módulo UPaquetes
     variable cat_tipos_n: nat32
     variable cat_tipo_nombre: arreglo [MAX_PAQ] de arreglo [12] de byte
     variable cat_tipo: arreglo [MAX_PAQ] de arreglo [16] de byte
+    ; (SISTEMA, 0.8.6) los que el catálogo marca del sistema («sistema=nombre»)
+    ; y los que se han quitado a propósito (QUITADOS.TXT, uno por línea: ACTUALIZA
+    ; no los vuelve a poner; INSTALA los quita de ahí)
+    constante MAX_QUITADOS = 1024
+    variable cat_sis_n: nat32
+    variable cat_sis: arreglo [MAX_PAQ] de arreglo [12] de byte
+    variable quitados: arreglo [MAX_QUITADOS] de byte
+    variable quitados2: arreglo [MAX_QUITADOS] de byte
+    variable quitados_leídos: bool
     variable sueltos_n: nat32
     variable suelto_ruta: arreglo [MAX_SUELTOS] de arreglo [RUTA] de byte
     variable suelto_tamaño: arreglo [MAX_SUELTOS] de nat32
@@ -1094,6 +1103,7 @@ módulo UPaquetes
         fin
         cat_n := 0
         cat_tipos_n := 0
+        cat_sis_n := 0
         p := cat
         mientras p < cat + n y cat_n < MAX_PAQ hacer
             l := p
@@ -1104,6 +1114,11 @@ módulo UPaquetes
                 palabra(l + 5, 0, cat_tipo_nombre[cat_tipos_n], 12)
                 palabra(l + 5, 1, cat_tipo[cat_tipos_n], 16)
                 si cat_tipo[cat_tipos_n][0] <> 0 entonces cat_tipos_n := cat_tipos_n + 1 fin
+            fin
+            ; (SISTEMA) «sistema=nombre»
+            si empieza_por(l, "sistema=") y cat_sis_n < MAX_PAQ entonces
+                palabra(l + 8, 0, cat_sis[cat_sis_n], 12)
+                si cat_sis[cat_sis_n][0] <> 0 entonces cat_sis_n := cat_sis_n + 1 fin
             fin
             si empieza_por(l, "paquete=") entonces
                 l := l + 8
@@ -1120,6 +1135,93 @@ módulo UPaquetes
         fin
         hay_catálogo := cierto
         devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  (SISTEMA) Los paquetes nuevos del sistema y los quitados a propósito
+    ; -------------------------------------------------------------------------
+    función lee_quitados()
+        variable r: arreglo [RUTA] de byte
+        variable m, n, k: nat32
+        si quitados_leídos entonces devolver fin
+        quitados_leídos := cierto
+        quitados[0] := 0
+        en_base("QUITADOS.TXT", r)
+        m := abrir(r)
+        si es_error(m) entonces devolver fin
+        n := 0
+        mientras n < MAX_QUITADOS - 1 hacer
+            k := leer(m, dirección(quitados[n]), MAX_QUITADOS - 1 - n)
+            si es_error(k) o k = 0 entonces romper fin
+            n := n + k
+        fin
+        cerrar(m)
+        quitados[n] := 0
+    fin
+
+    ; ¿se ha quitado a propósito (PAQUETES QUITA)?
+    función quitado(nombre: puntero a byte): bool
+        variable p: puntero a byte
+        variable x: arreglo [16] de byte
+        lee_quitados()
+        p := dirección(quitados[0])
+        mientras valor(p) <> 0 hacer
+            p := línea(p, x, 16)
+            si iguales(x, nombre) entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    función escribe_quitados()
+        variable r: arreglo [RUTA] de byte
+        variable m: nat32
+        en_base("QUITADOS.TXT", r)
+        si quitados[0] = 0 entonces
+            si existe(r) entonces borrar(r) fin
+            devolver
+        fin
+        m := crear(r)
+        si es_error(m) entonces devolver fin
+        escribe_todo(m, dirección(quitados[0]), longitud(quitados))
+        cerrar(m)
+    fin
+
+    ; lo apunta en QUITADOS.TXT (al quitarlo)
+    función apunta_quitado(nombre: puntero a byte)
+        si quitado(nombre) entonces devolver fin
+        si longitud(quitados) + longitud(nombre) + 3 >= MAX_QUITADOS entonces devolver fin
+        concatenar(quitados, nombre)
+        concatenar(quitados, "\r\n")
+        escribe_quitados()
+    fin
+
+    ; lo borra de QUITADOS.TXT (al instalarlo otra vez)
+    función olvida_quitado(nombre: puntero a byte)
+        variable p: puntero a byte
+        variable x: arreglo [16] de byte
+        si no quitado(nombre) entonces devolver fin
+        quitados2[0] := 0
+        p := dirección(quitados[0])
+        mientras valor(p) <> 0 hacer
+            p := línea(p, x, 16)
+            si x[0] <> 0 y no iguales(x, nombre) entonces
+                concatenar(quitados2, x)
+                concatenar(quitados2, "\r\n")
+            fin
+        fin
+        Textos32.copiar(quitados, quitados2)
+        escribe_quitados()
+    fin
+
+    ; ¿es del sistema (el catálogo lo dice), está en el catálogo, aquí no está
+    ; instalado y no se ha quitado a propósito? Lo pone ACTUALIZA
+    función sistema_nuevo(nombre: puntero a byte): bool
+        variable i: nat32
+        si instalado(nombre) <> NINGUNO o mejor_del_catálogo(nombre, 0, "") = NINGUNO o quitado(nombre) entonces devolver falso fin
+        para i desde 1 hasta cat_sis_n hacer
+            si iguales(cat_sis[i - 1], nombre) entonces devolver cierto fin
+        fin
+        devolver falso
     fin
 
     ; la versión más nueva de ese paquete en el catálogo que cumpla (op, versión)
@@ -2132,7 +2234,9 @@ módulo UPaquetes
             para i desde 1 hasta cat_n hacer
                 si mejor_del_catálogo(cat_nombre[i - 1], 0, "") = i - 1 entonces
                     código_tipo(tipo_de(nulo, cat_nombre[i - 1]), x)
-                    escribir("c|", cat_nombre[i - 1], "|", cat_versión[i - 1], "|", x, "|", cat_tamaño[i - 1], "|", cat_desc[i - 1], "\n")
+                    escribir("c|", cat_nombre[i - 1], "|", cat_versión[i - 1], "|", x, "|", cat_tamaño[i - 1], "|", cat_desc[i - 1])
+                    si sistema_nuevo(cat_nombre[i - 1]) entonces escribir("|nuevo") fin     ; (SISTEMA)
+                    escribir("\n")
                 fin
             fin
         fin
@@ -2293,7 +2397,10 @@ módulo UPaquetes
         para i desde 1 hasta cat_n hacer
             si instalado(cat_nombre[i - 1]) = NINGUNO y mejor_del_catálogo(cat_nombre[i - 1], 0, "") = i - 1 entonces
                 código_tipo(tipo_de(nulo, cat_nombre[i - 1]), x)
-                escribir("p|", cat_nombre[i - 1], "||", cat_versión[i - 1], "|", cat_desc[i - 1], "|", x, "\n")
+                escribir("p|", cat_nombre[i - 1], "||", cat_versión[i - 1], "|", cat_desc[i - 1], "|", x)
+                ; (SISTEMA) y si es nuevo del sistema (ACTUALIZA lo pondrá)
+                si sistema_nuevo(cat_nombre[i - 1]) entonces escribir("|nuevo") fin
+                escribir("\n")
             fin
         fin
     fin
@@ -2342,6 +2449,7 @@ módulo UPaquetes
                 devolver falso
             fin
             apunta_instalado(plan_nombre[k], plan_versión[k], plan_cab[k])
+            si no reparando entonces olvida_quitado(plan_nombre[k]) fin     ; (SISTEMA)
             si reparando entonces
                 imprimir2("  reparado %s %s\n", pt(plan_nombre[k]), pt(plan_versión[k]))
             sino
@@ -2430,6 +2538,11 @@ módulo UPaquetes
             alguno := cierto
             a_minúsculas(palabra_)
             i := instalado(palabra_)
+            si i = NINGUNO y sistema_nuevo(palabra_) entonces
+                ; (SISTEMA) uno nuevo del sistema: se instala
+                si no planea(palabra_, 0, "", 0) entonces devolver falso fin
+                seguir
+            fin
             si i = NINGUNO entonces
                 imprimir1("paquetes: %s no está instalado\n", pt(palabra_))
                 devolver falso
@@ -2444,6 +2557,15 @@ módulo UPaquetes
                 c := mejor_del_catálogo(ins_nombre[i - 1], 0, "")
                 si c <> NINGUNO y compara(cat_versión[c], ins_versión[i - 1]) > 0 entonces
                     si no planea(ins_nombre[i - 1], 1, cat_versión[c], 0) entonces devolver falso fin
+                fin
+            fin
+            ; (SISTEMA) y los del sistema que trae el catálogo y aquí no están
+            ; (los de una versión nueva: un sistema que viene de una de antes
+            ; no los tiene), salvo los quitados a propósito
+            para i desde 1 hasta cat_n hacer
+                si mejor_del_catálogo(cat_nombre[i - 1], 0, "") = i - 1 y sistema_nuevo(cat_nombre[i - 1]) entonces
+                    imprimir1("Nuevo del sistema: %s\n", pt(cat_nombre[i - 1]))
+                    si no planea(cat_nombre[i - 1], 0, "", 0) entonces devolver falso fin
                 fin
             fin
         fin
@@ -2573,6 +2695,7 @@ módulo UPaquetes
                 devolver falso
             fin
             imprimir1("  quitado %s\n", pt(txn_nombre))
+            apunta_quitado(nombre)              ; (SISTEMA) ACTUALIZA no lo vuelve a poner
             a := a + 1
         fin
         ; (la lista de lo instalado, al final: los números de arriba son de antes)

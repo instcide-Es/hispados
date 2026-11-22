@@ -868,11 +868,15 @@ módulo Inicio
             concatenar(saludo, Ajustes.usuario)
             texto_negrita(valor(l), 59, 13, saludo, 0x123F85)
             texto_negrita(valor(l), 58, 12, saludo, BLANCO)
-            texto(valor(l), 58, 30, "Hispa-Pentium, versión 0.8", 0xD3E7FD)
+            copiar_hasta(saludo, "Hispa-Pentium, versión ", 40)
+            concatenar(saludo, Usuario.VERSIÓN_TEXTO)
+            texto(valor(l), 58, 30, saludo, 0xD3E7FD)
         sino
             texto_negrita(valor(l), 59, 13, "Hispa-Pentium", 0x123F85)
             texto_negrita(valor(l), 58, 12, "Hispa-Pentium", BLANCO)
-            texto(valor(l), 58, 30, "el escritorio, versión 0.8", 0xD3E7FD)
+            copiar_hasta(saludo, "el escritorio, versión ", 40)
+            concatenar(saludo, Usuario.VERSIÓN_TEXTO)
+            texto(valor(l), 58, 30, saludo, 0xD3E7FD)
         fin
         rectángulo(valor(l), 1, CABEZA, ancho - 2, 2, NARANJA)
         ; las dos columnas

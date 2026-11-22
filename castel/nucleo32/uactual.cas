@@ -661,6 +661,9 @@ módulo UActual
                     trozo(p, 2, instalada[0], 16)
                     trozo(p, 3, disponible[0], 16)
                     si instalada[0][0] <> 0 y disponible[0][0] <> 0 y más_nueva(disponible[0], instalada[0]) entonces nuevas := nuevas + 1 fin
+                    ; (SISTEMA) y los nuevos del sistema, que no están («p|nombre||versión|...|tipo|nuevo»)
+                    trozo(p, 6, t, 8)
+                    si instalada[0][0] = 0 y iguales(t, "nuevo") entonces nuevas := nuevas + 1 fin
                 fin
                 p := siguiente_línea(p)
             fin

@@ -32,6 +32,9 @@
 #        tipo=<nombre> <tipo>           (PROGRAMAS: una por paquete; un PAQUETES
 #                                        de antes no la mira, y la línea de cada
 #                                        paquete sigue como era)
+#        sistema=<nombre>               (0.8.6: es del sistema; PAQUETES ACTUALIZA
+#                                        lo instala si no está, salvo si se ha
+#                                        quitado a propósito: QUITADOS.TXT)
 #
 #  (PROGRAMAS) El tipo: uno de los códigos de TIPOS (sistema, oficina,
 #  internet...: docs/PENTIUM.md, sección 13, «El tipo de cada paquete»). Si
@@ -398,11 +401,18 @@ def catalogo(carpeta):
     # (PROGRAMAS) y el tipo de cada uno, aparte (un PAQUETES de antes no lo mira;
     # «otros», el de no saberlo, no se escribe)
     filas += ['tipo=%s %s' % (k, tipos[k]) for k in sorted(tipos)]
+    # (0.8.6) los que son del sistema: un sistema que se pone al día
+    # (PAQUETES ACTUALIZA) los instala también si no los tiene (los que salen
+    # en una versión nueva: accesori, sonido, wifi, escudo...), salvo los que
+    # se han quitado a propósito (QUITADOS.TXT); un PAQUETES de antes no mira
+    # estas líneas
+    hay = {x.split()[0][len('paquete='):] for x in filas if x.startswith('paquete=')}
+    filas += ['sistema=%s' % n for n in sorted(DEL_SISTEMA) if n in hay]
     with open(os.path.join(carpeta, 'CATALOGO.TXT'), 'wb') as f:
         f.write(a437(MAGIA_CATALOGO) + b'\r\n')
         for x in filas:
             f.write(a437(x) + b'\r\n')
-    return len(filas) - len(tipos)
+    return len([x for x in filas if x.startswith('paquete=')])
 
 
 def busca(nombre, carpetas):
@@ -449,6 +459,12 @@ OPCIONALES = [
         ('BIN/MIRADOR.BIN', r'\HISPA\MIRADOR.BIN'), ('MIRADOR.TXT', r'\HISPA\MIRADOR.TXT'),
         ('MIRADOR.MNU', r'\HISPA\MENU\MIRADOR.MNU'), ('MIRADOR.ICP', r'\HISPA\MENU\MIRADOR.ICP')]),
 ]
+
+# (0.8.6) los que el catálogo marca del sistema («sistema=nombre»): los que
+# van con él (SISTEMA) y Escudo, el antivirus (no sus firmas: las trae
+# Escudo con «Actualizar las firmas»). No: los opcionales (navega, pdf,
+# comprim, mirador, clicgest...)
+DEL_SISTEMA = [n for n, *_ in SISTEMA] + ['escudo']
 
 
 def opcionales(salida, carpetas, nombres=None):

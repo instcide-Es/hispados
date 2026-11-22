@@ -1107,6 +1107,12 @@ módulo Escritorio
         pinta_apagar()
     fin
 
+    ; «t» y la versión de verdad («Hispa-Pentium 0.8.6»), a d
+    función une_versión(d: puntero a byte, t: puntero a byte)
+        copiar_hasta(d, t, 80)
+        concatenar(d, Usuario.VERSIÓN_TEXTO)
+    fin
+
     ; «Acerca de Hispa-Pentium»
     función abre_acerca()
         variable l: puntero a Lienzo
@@ -1119,7 +1125,8 @@ módulo Escritorio
         fin
         degradado(valor(l), 0, 0, 440, 214, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 16, 14, 64)
-        texto_negrita(valor(l), 96, 16, "Hispa-Pentium 0.8", TINTA)
+        une_versión(renglón, "Hispa-Pentium ")
+        texto_negrita(valor(l), 96, 16, renglón, TINTA)
         texto(valor(l), 96, 38, "Un núcleo de 32 bits, sin DOS debajo,", TINTA)
         texto(valor(l), 96, 56, "escrito en Castel, con su escritorio.", TINTA)
         texto(valor(l), 96, 74, "De la familia de Hispa-DOS.", TINTA_SUAVE)
@@ -1147,7 +1154,8 @@ módulo Escritorio
         quita_pulsadores(v_config)
         degradado(valor(l), 0, 0, 460, CONFIG_AL, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 14, 10, 48)
-        texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.8", TINTA)
+        une_versión(renglón, "Hispa-Pentium ")
+        texto_negrita(valor(l), 74, 14, renglón, TINTA)
         texto(valor(l), 74, 34, "un núcleo de 32 bits escrito en Castel", TINTA_SUAVE)
         rectángulo(valor(l), 14, 66, 432, 1, 0xA9C6EC)
         d[0] := nat32(pantalla.ancho)

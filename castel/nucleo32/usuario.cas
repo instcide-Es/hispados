@@ -133,6 +133,10 @@ módulo Usuario
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
     público constante VERSIÓN = 0x0008          ; la 0.8
+    ; la versión de verdad, la del paquete «base» (tools/hpq.py, SISTEMA): la
+    ; que dicen el menú Inicio, Configuración y «Acerca de» (la primera parte
+    ; de las pruebas mira que sea la misma que la de hpq.py)
+    público constante VERSIÓN_TEXTO = "0.8.6"
     público constante SIGUE = 0xFFFFFF00        ; (esperar sin quedarse) la tarea no ha acabado todavía
 
     ; ---- más errores (los de los archivos, en fat.cas) ----
