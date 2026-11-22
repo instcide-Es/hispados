@@ -8959,6 +8959,21 @@ sola, la de PINTURA32 primero (`\PINTURA.BIN`, todas las imágenes) y, si no
 está, la de OFICINA2 (BMP y PCX con `PINTURA.HVP`); (4) `exoper.cas`:
 `hay_programa` público es la misma línea en las dos.
 
+**El asa de la esquina** (petición de Carlos, 0.8.8: «una vez apuntas en la
+esquina inferior derecha del lienzo, poder arrastrarlo a la medida que se
+necesite»): las tres asas del marco (derecha, abajo y la esquina) miden 7 x 7
+puntos de la pantalla con cualquier zoom y se cogen en 10 x 10. Con el ratón
+encima, el asa se pone azul con doble borde, junto a la flecha del ratón sale
+la de cambiar el tamaño (doble: en diagonal, en horizontal o en vertical;
+negra con borde blanco: el sistema no tiene punteros con otra forma) y la
+barra de estado dice «Arrastre para cambiar el tamaño del lienzo (ahora, 320
+x 200 píxeles)». Mientras se arrastra, el contorno nuevo con hormigas y en la
+barra «Tamaño del lienzo: 424 x 254 píxeles (suelte para aplicarlo)»; al
+soltar se aplica (se deshace con Ctrl+Z) y lo añadido es del color 2, o
+transparente si el borrador está en «Deja transparente» (`ventana.c`,
+`mira_asa`; `vista.c`, `flecha_tamano`; «(PINTURA32)»). Lo prueba
+`pruebas/ventana.sh` (15 bis).
+
 **Probarlo**: `castel/pruebas.sh`, parte 45 (`SOLO=pintura`,
 `castel/pruebas_pintura.sh`): en el anfitrión con ASan y UBSan,
 `pintura/pruebas/formatos.sh` (ida y vuelta de PNG, BMP, PCX y GIF

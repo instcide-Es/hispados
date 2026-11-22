@@ -96,6 +96,14 @@ p "tecla f12"; p "escribe $D/f.jpg"; p "tecla ret"; p "tecla ret"
 p "tecla alt-a"; p "elige 5"; p "escribe $D/f.pdf"; p "tecla ret"
 p "tecla alt-a"; p "elige 8"
 p "tecla alt-a"; p "elige 9"; p "captura v2"; p "tecla ret"
+# 15 bis. (PINTURA32) el asa de la esquina de abajo a la derecha del lienzo
+# (en (708, 394), de 7 x 7): el ratón encima (se resalta, la flecha de
+# cambiar el tamaño y el aviso), arrastrarla (la medida en la barra de
+# estado), lo añadido con el color 2; deshacer; y con el borrador en «Deja
+# transparente», lo añadido transparente
+nueva; color2 $AMARILLO; p "mueve 711 397"; p "captura v4"; p "arrastra 711 397 811 447 pasos 10"; guarda t_lienzo.png
+p "tecla ctrl-z"; guarda t_lienzo2.png
+p "tecla b"; lista 505 1; p "arrastra 711 397 761 397 pasos 5"; guarda t_lienzo3.png
 # 16. abrir lo guardado (el GIF) y un lienzo de 4096 x 4096
 p "tecla ctrl-a"; p "tecla tab"; p "escribe $D/f.gif"; p "tecla ret"
 nueva 4096 4096; p "tecla p"; p "traza 450 250 650 350"; p "captura v3"
@@ -146,6 +154,21 @@ if [ -f $D/f.pdf ]; then
 else ko "no está el PDF exportado"; fi
 if grep -q "fondo: 1024x700" $S && [ -f $D/cap/fondo.ppm ] && grep -q "de fondo de escritorio, 1024 x 700: bien" $S; then ok "usar como fondo de escritorio: la imagen a la medida de la pantalla (1024 x 700)"
 else ko "el fondo de escritorio: $(grep -i fondo $S | head -2)"; fi
+# (PINTURA32) el asa de la esquina del lienzo
+grep -q "pintura: aviso: Arrastre para cambiar el tamaño del lienzo (ahora, 320 x 200 píxeles)" $S && ok "el ratón sobre el asa de la esquina: la barra de estado dice «Arrastre para cambiar el tamaño del lienzo»" || ko "el aviso del asa: $(grep -a 'aviso: Arrastre' $S | head -1)"
+if command -v convert > /dev/null && [ -f $D/cap/v4.ppm ]; then
+	a=$(convert $D/cap/v4.ppm -format '%[hex:p{711,397}]' info: 2> /dev/null); f=$(convert $D/cap/v4.ppm -format '%[hex:p{725,411}]' info: 2> /dev/null)
+	case "$a/$f" in 2F6FD0*/000000*) ok "con el ratón encima, el asa se resalta (azul) y sale la flecha de cambiar el tamaño junto a la del ratón" ;; *) ko "el asa resaltada y la flecha: $a $f" ;; esac
+fi
+n=$(grep -c "pintura: aviso: Tamaño del lienzo: [0-9]* x [0-9]* píxeles (suelte para aplicarlo)" $S)
+[ "$n" -ge 10 ] && ok "mientras se arrastra, la barra de estado dice la medida ($n veces; la última, $(grep -o 'Tamaño del lienzo: [0-9]* x [0-9]*' $S | sed -n 11p))" || ko "la medida al arrastrar: $n"
+i=$("$PIN" --info $D/t_lienzo.png 2>&1); case "$i" in *"424 x 254"*) ok "al soltar el asa se aplica: el lienzo, de 320 x 200 a 424 x 254" ;; *) ko "el lienzo arrastrado: $i" ;; esac
+if command -v convert > /dev/null; then
+	a=$(convert $D/t_lienzo.png -format '%[hex:p{400,240}]' info: 2> /dev/null)
+	case "$a" in FFD800*) ok "lo añadido, con el color 2 (el amarillo de la paleta: $a)" ;; *) ko "lo añadido no es el color 2: $a" ;; esac
+fi
+i=$("$PIN" --info $D/t_lienzo2.png 2>&1); case "$i" in *"320 x 200"*) ok "y se deshace (otra vez 320 x 200)" ;; *) ko "deshacer el lienzo: $i" ;; esac
+i=$("$PIN" --info $D/t_lienzo3.png 2>&1); case "$i" in *"374 x 204"*"con transparencia"*) ok "con el borrador en «Deja transparente», lo añadido es transparente ($i)" ;; *) ko "el lienzo transparente: $i" ;; esac
 grep -q "cuadro «Propiedades de la imagen»" $S && ok "Propiedades de la imagen" || ko "Propiedades"
 grep -q "pintura: abierto f.gif (GIF, 320 x 200)" $S && ok "abrir lo guardado (f.gif)" || ko "abrir f.gif"
 grep -q "pintura: imagen nueva de 4096 x 4096" $S && ok "un lienzo de 4096 x 4096 (64 MB) y pintar en él" || ko "4096 x 4096: $(grep 'nueva\|memoria' $S | tail -2)"

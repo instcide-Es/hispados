@@ -695,7 +695,10 @@ void herr_baja(const so_suceso *s)
 	if (!P.sel.flota && !pol_activo && !fase_curva && !P.tx.activa && (asa_modo = vista_asa_en(s->x, s->y)) != 0) {
 		asa_an = P.img.an;
 		asa_al = P.img.al;
-		pin_aviso("Tamaño del lienzo: %d x %d", asa_an, asa_al);
+		asa_encima = asa_modo;		/* (PINTURA32) la flecha sigue mientras se arrastra */
+		asa_mx = s->x;
+		asa_my = s->y;
+		pin_aviso("Tamaño del lienzo: %d x %d píxeles (suelte para aplicarlo)", asa_an, asa_al);
 		return;
 	}
 	ax = lx = ix;
@@ -866,7 +869,9 @@ void herr_mueve(const so_suceso *s)
 		zona_suma(z, 0, 0, (an > asa_an ? an : asa_an) + 2, (al > asa_al ? al : asa_al) + 2);
 		asa_an = an;
 		asa_al = al;
-		pin_aviso("Tamaño del lienzo: %d x %d", an, al);
+		asa_mx = s->x;			/* (PINTURA32) */
+		asa_my = s->y;
+		pin_aviso("Tamaño del lienzo: %d x %d píxeles (suelte para aplicarlo)", an, al);
 		pin_repinta_todo();
 		return;
 	}
@@ -962,8 +967,11 @@ void herr_sube(const so_suceso *s)
 
 		asa_modo = 0;
 		asa_an = asa_al = 0;
+		asa_encima = 0;
 		if (an != P.img.an || al != P.img.al) {
-			if (!op_lienzo(&P.img, &n, an, al, P.c2)) {
+			/* (PINTURA32) lo añadido, con el color 2; o transparente, si el
+			 * borrador está en «Deja transparente» */
+			if (!op_lienzo(&P.img, &n, an, al, P.borra_transparente ? 0x00000000u : P.c2)) {
 				dlg_aviso("Pintura", "No hay memoria para un lienzo tan grande.");
 				return;
 			}

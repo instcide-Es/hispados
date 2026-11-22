@@ -1346,8 +1346,27 @@ static void elige_contexto(int op)
 		pin_orden(o[op]);
 }
 
+/* (PINTURA32) el ratón sobre un asa del lienzo (o fuera): se resalta, sale
+ * la flecha de cambiar el tamaño y la barra de estado dice qué hacer */
+static void mira_asa(int x, int y)
+{
+	int h = x < 0 || P.sel.flota || P.tx.activa ? 0 : vista_asa_en(x, y);
+
+	if (h == asa_encima && (!h || (x == asa_mx && y == asa_my)))
+		return;
+	if (h && !asa_encima)
+		pin_aviso("Arrastre para cambiar el tamaño del lienzo (ahora, %d x %d píxeles)", P.img.an, P.img.al);
+	else if (!h && asa_encima)
+		pin_aviso("%s", "");
+	asa_encima = h;
+	asa_mx = x;
+	asa_my = y;
+	pin_repinta_todo();
+}
+
 static void sale_de_la_vista(void)
 {
+	mira_asa(-1, -1);			/* (PINTURA32) */
 	if (raton_x >= 0) {
 		raton_x = raton_y = -1;
 		pon_cursor();
@@ -1572,6 +1591,8 @@ static void raton(const so_suceso *s)
 		pon_cursor();
 		s_reglas = s_estado = 1;
 		P.sucio = 1;
+		if (s->clase == SO_MUEVE)
+			mira_asa(s->x, s->y);	/* (PINTURA32) */
 		if (s->clase == SO_BAJA) {
 			int ix, iy;
 

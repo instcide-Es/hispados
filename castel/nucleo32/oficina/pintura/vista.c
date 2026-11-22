@@ -14,6 +14,7 @@
 vista_t VI;
 int cursor_x, cursor_y, cursor_r = -1;
 int asa_an, asa_al;
+int asa_encima, asa_mx, asa_my;		/* (PINTURA32) */
 
 #define MARGEN 14
 #define FONDO_VISTA 0xB9C3CF
@@ -204,10 +205,51 @@ static void caja_hormigas(lienzo *L, int x0, int y0, int x1, int y1)
 	hormigas(L, x0, y1, x0, y0);
 }
 
-static void asa(lienzo *L, int x, int y)
+static void asa(lienzo *L, int x, int y, int encima)
 {
-	lz_rect(L, x, y, 7, 7, 0xFFFFFF);
+	/* (PINTURA32) con el ratón encima, rellena de azul y con doble borde */
+	lz_rect(L, x, y, 7, 7, encima ? 0x2F6FD0 : 0xFFFFFF);
 	lz_marco(L, x, y, 7, 7, 0x1B2633);
+	if (encima)
+		lz_marco(L, x - 1, y - 1, 9, 9, 0xFFFFFF);
+}
+
+/* (PINTURA32) la flecha de cambiar el tamaño, junto a la del ratón (abajo a
+ * la derecha de la punta): doble, en diagonal para la esquina, en
+ * horizontal para el asa de la derecha y en vertical para la de abajo; negra
+ * con borde blanco (se ve sobre cualquier color) */
+static void flecha_tamano(lienzo *L, int modo, int x, int y)
+{
+	int i, k, dx = modo == 2 ? 0 : 1, dy = modo == 1 ? 0 : 1;
+
+	x += 14;
+	y += 14;
+	for (k = 0; k < 2; k++) {
+		u32 c = k ? 0x000000 : 0xFFFFFF;
+		int g = k ? 1 : 3, o = k ? 0 : -1;
+
+		for (i = -6; i <= 6; i++)
+			lz_rect(L, x + i * dx + o, y + i * dy + o, g, g, c);
+		/* las dos puntas */
+		for (i = 0; i <= 4; i++) {
+			int s;
+
+			for (s = -1; s <= 1; s += 2) {
+				int px = x + s * 6 * dx, py = y + s * 6 * dy;
+
+				if (modo == 3) {
+					lz_rect(L, px - s * i + o, py + o, g, g, c);
+					lz_rect(L, px + o, py - s * i + o, g, g, c);
+				} else if (modo == 1) {
+					lz_rect(L, px - s * i + o, py - i + o, g, g, c);
+					lz_rect(L, px - s * i + o, py + i + o, g, g, c);
+				} else {
+					lz_rect(L, px - i + o, py - s * i + o, g, g, c);
+					lz_rect(L, px + i + o, py - s * i + o, g, g, c);
+				}
+			}
+		}
+	}
 }
 
 int vista_asa_en(int sx, int sy)
@@ -319,15 +361,17 @@ void vista_pinta(lienzo *L, int x0, int y0, int x1, int y1)
 	/* el marco de la imagen y sus asas */
 	lz_marco(L, VI.ox - 1, VI.oy - 1, VI.san + 2, VI.sal + 2, 0x6E7A8A);
 	if (!s->flota) {
-		asa(L, VI.ox + VI.san + 1, VI.oy + VI.sal / 2 - 3);
-		asa(L, VI.ox + VI.san / 2 - 3, VI.oy + VI.sal + 1);
-		asa(L, VI.ox + VI.san + 1, VI.oy + VI.sal + 1);
+		asa(L, VI.ox + VI.san + 1, VI.oy + VI.sal / 2 - 3, asa_encima == 1);
+		asa(L, VI.ox + VI.san / 2 - 3, VI.oy + VI.sal + 1, asa_encima == 2);
+		asa(L, VI.ox + VI.san + 1, VI.oy + VI.sal + 1, asa_encima == 3);
 	}
 	if (asa_an > 0 && asa_al > 0) {
 		int ex = vista_de_lamina_x(asa_an), ey = vista_de_lamina_y(asa_al);
 
 		caja_hormigas(L, VI.ox - 1, VI.oy - 1, ex, ey);
 	}
+	if (asa_encima)
+		flecha_tamano(L, asa_encima, asa_mx, asa_my);	/* (PINTURA32) */
 	/* lo elegido */
 	if (s->activa) {
 		if (s->libre && !s->flota && s->n_libre > 1) {

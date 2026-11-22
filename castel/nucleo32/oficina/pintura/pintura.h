@@ -143,6 +143,10 @@ void vista_cursor_zona(int *x0, int *y0, int *x1, int *y1);
 /* el asa de abajo a la derecha (cambiar el tamaño del lienzo): 0 ninguna, 1 derecha, 2 abajo, 3 la esquina */
 int vista_asa_en(int sx, int sy);
 extern int asa_an, asa_al;		/* (mientras se arrastra: el tamaño nuevo; 0 si no) */
+/* (PINTURA32) el asa que tiene el ratón encima (0 ninguna; como vista_asa_en)
+ * y dónde está el ratón: el asa se resalta y junto a la flecha sale la de
+ * cambiar el tamaño (el sistema no tiene punteros con otra forma) */
+extern int asa_encima, asa_mx, asa_my;
 
 /* ---- las herramientas (herramientas.c) ---- */
 void herr_baja(const so_suceso *s);
