@@ -25,8 +25,6 @@
 #include "util.h"
 
 #define VERSION_REPRO "1.0"
-#include <stdlib.h>
-static int getenv_depura(void) { return getenv("REPRO_DEPURA") != NULL; }
 
 /* ---- los colores (los de la casa: azules y verdes) ---- */
 #define C_FONDO 0xF1F5FB
@@ -2143,7 +2141,7 @@ static void tecla(u32 k, u32 mods)
 		if (k == 27) {
 			campo_activo = 0;
 			modo_guardar = 0;
-		} else if (k == '\r' || k == '\n') {
+		} else if (k == '\n') {
 			if (campo_activo == 1 && campo_texto[0] && n_propios < MAX_PROPIOS) {
 				int b;
 
@@ -2173,27 +2171,27 @@ static void tecla(u32 k, u32 mods)
 		}
 		return;
 	}
-	if (ctrl && (k == 'o' || k == 'O' || k == 15)) {
+	if (k == 15 || (ctrl && (k == 'o' || k == 'O'))) {
 		accion(Z_L_ANADIR, 0, 0, 0, 1, 0);
 		return;
 	}
-	if (ctrl && (k == 's' || k == 'S' || k == 19)) {
+	if (k == 19 || (ctrl && (k == 's' || k == 'S'))) {
 		accion(Z_L_GUARDAR, 0, 0, 0, 1, 0);
 		return;
 	}
-	if (ctrl && (k == 'm' || k == 'M' || k == 13)) {
+	if (k == 13 || (ctrl && (k == 'm' || k == 'M'))) {
 		cambia_modo(!mini);
 		return;
 	}
-	if (ctrl && (k == 'l' || k == 'L' || k == 12)) {
+	if (k == 12 || (ctrl && (k == 'l' || k == 'L'))) {
 		pestana = P_LISTA;
 		return;
 	}
-	if (ctrl && (k == 'e' || k == 'E' || k == 5)) {
+	if (k == 5 || (ctrl && (k == 'e' || k == 'E'))) {
 		pestana = P_EQ;
 		return;
 	}
-	if (ctrl && (k == 'a' || k == 'A' || k == 1) && pestana == P_LISTA) {
+	if ((k == 1 || (ctrl && (k == 'a' || k == 'A'))) && pestana == P_LISTA) {
 		int i;
 
 		for (i = 0; i < L.n; i++)
@@ -2257,7 +2255,6 @@ static void tecla(u32 k, u32 mods)
 				exp_arriba = c - n + 1;
 		}
 		break;
-	case '\r':
 	case '\n':
 		if (pestana == P_LISTA)
 			tocar_cancion(lista_cursor);
@@ -2523,6 +2520,8 @@ static void sucesos(void)
 	}
 }
 
+static u64 ciclos_ocupado, ciclos_total;
+
 int vista_principal(const char *args)
 {
 	const char *p;
@@ -2538,9 +2537,21 @@ int vista_principal(const char *args)
 	if (motor_prepara(&M, &L))
 		return 1;
 	lee_ajustes();
-	if (AN < 480 || AN > 1600 || AL < 200 || AL > 1200) {
-		AN = 760;
-		AL = 560;
+	{
+		int ca, cl;
+
+		so_cabe_ventana(&ca, &cl);
+		if (AN < 480 || AN > 1600 || AL < 300 || AL > 1200) {
+			AN = 760;
+			AL = 560;
+		}
+		/* (en la pantalla de un netbook, lo que quepa) */
+		if (AN > ca)
+			AN = ca;
+		if (AL > cl)
+			AL = cl;
+		if (AL < 300)
+			AL = 300;
 	}
 	if (mini) {
 		AN = MINI_AN;
@@ -2560,20 +2571,7 @@ int vista_principal(const char *args)
 	haz_icono_bandeja();
 	/* lo que se ha pedido (archivos, carpetas, listas, un CD); si no, la de la última vez */
 	for (p = args;;) {
-		int k = 0;
-
-		while (*p == ' ')
-			p++;
-		if (*p == '"') {
-			p++;
-			while (*p && *p != '"' && k < MAX_RUTA - 1)
-				a[k++] = *p++;
-			if (*p)
-				p++;
-		} else
-			while (*p && *p != ' ' && k < MAX_RUTA - 1)
-				a[k++] = *p++;
-		a[k] = 0;
+		p = siguiente_ruta(p, a, sizeof a);
 		if (!a[0])
 			break;
 		if (es_opcion(a))
@@ -2603,7 +2601,7 @@ int vista_principal(const char *args)
 	pon_bandeja();
 	reg("ventana %ux%u; %d canciones; la tarjeta a %u Hz%s", AN, AL, L.n, M.hz, M.sin_tarjeta ? " (no hay)" : "");
 	while (!salir) {
-		u32 ahora = so_ms();
+		u32 ahora = so_ms(), c_vuelta = so_ciclos();
 
 		sucesos();
 		/* el motor: lo primero (que no se corte) */
@@ -2639,8 +2637,10 @@ int vista_principal(const char *args)
 		}
 		/* lo que se oye ha cambiado: sus etiquetas y su carátula */
 		if (M.cambio != cambio_antes || M.estado != estado_antes) {
-			if (M.oida != et_de && motor_cola_ms(&M) > 120)
+			if (M.oida != et_de && motor_cola_ms(&M) > 120) {
 				mira_oida();
+				motor_ciclo(&M, 20);
+			}
 			if (M.oida == et_de) {
 				cambio_antes = M.cambio;
 				estado_antes = M.estado;
@@ -2656,8 +2656,6 @@ int vista_principal(const char *args)
 		/* el tiempo y la barra, cuatro veces por segundo */
 		if (ahora - t_pos >= 250) {
 			t_pos = ahora;
-			if (getenv_depura())
-				reg("pos=%u oida=%d et_de=%d estado=%d cola=%d salida=%u marcas=%d", motor_pos_ms(&M), M.oida, et_de, M.estado, motor_cola_ms(&M), (u32)M.salida, M.n_marcas);
 			if (mini)
 				pinta_mini_titulo();
 			else {
@@ -2670,8 +2668,9 @@ int vista_principal(const char *args)
 			desplaza_titulo += 3;
 			pinta_mini_titulo();
 		}
-		/* la visualización, a 20 cuadros por segundo (si suena y se ve) */
-		if (!mini && vis_modo && M.estado == M_SONANDO && ahora - t_vis >= 50) {
+		/* la visualización, a 20 cuadros por segundo (si suena y se ve; no
+		 * si la cola va justa: primero el sonido) */
+		if (!mini && vis_modo && M.estado == M_SONANDO && ahora - t_vis >= 50 && motor_cola_ms(&M) > 200) {
 			t_vis = ahora;
 			pinta_vis();
 		}
@@ -2685,20 +2684,7 @@ int vista_principal(const char *args)
 				const char *q = pedido;
 
 				for (;;) {
-					int k = 0;
-
-					while (*q == ' ')
-						q++;
-					if (*q == '"') {
-						q++;
-						while (*q && *q != '"' && k < MAX_RUTA - 1)
-							a[k++] = *q++;
-						if (*q)
-							q++;
-					} else
-						while (*q && *q != ' ' && k < MAX_RUTA - 1)
-							a[k++] = *q++;
-					a[k] = 0;
+					q = siguiente_ruta(q, a, sizeof a);
 					if (!a[0])
 						break;
 					if (!es_opcion(a))
@@ -2721,10 +2707,20 @@ int vista_principal(const char *args)
 		if (ahora - t_bandeja >= 5000) {
 			t_bandeja = ahora;
 			pon_bandeja();
+			/* lo que gasta (al registro: para medirlo en un equipo lento) */
+			if (ciclos_total)
+				reg("gasta el %u,%u %% del procesador (%s, visualización %s%s)", (u32)(ciclos_ocupado * 100 / ciclos_total),
+				    (u32)(ciclos_ocupado * 1000 / ciclos_total % 10), M.estado == M_SONANDO ? "sonando" : "parado",
+				    vis_modo == 1 ? "espectro" : vis_modo == 2 ? "onda" : "apagada", mini ? ", pequeño" : "");
+			ciclos_ocupado = ciclos_total = 0;
 		}
+		motor_ciclo(&M, 20);
 		vuelca();
+		/* lo que gasta: los ciclos trabajando frente a los de la vuelta entera (con el dormir) */
+		ciclos_ocupado += (u64)(u32)(so_ciclos() - c_vuelta);
 		/* a dormir lo que se pueda (la cola aguanta) */
 		so_duerme(M.estado == M_SONANDO && motor_cola_ms(&M) < 150 ? 1 : 10);
+		ciclos_total += (u64)(u32)(so_ciclos() - c_vuelta);
 	}
 	guarda_ajustes();
 	so_bandeja(V, NULL, NULL, NULL);

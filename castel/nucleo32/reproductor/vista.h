@@ -8,4 +8,5 @@ int vista_principal(const char *args);
 int anade_argumento(lista *l, const char *a);
 /* ¿es una opción (/ALEATORIO)? (en Linux, una ruta entera también empieza por «/») */
 int es_opcion(const char *a);
+const char *siguiente_ruta(const char *p, char *a, int cabe);
 #endif

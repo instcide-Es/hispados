@@ -74,6 +74,8 @@ void so_de_utf8(const char *utf, char *d, int cabe);
 u32 so_ms(void);			/* milésimas desde que arrancó (da la vuelta) */
 void so_duerme(u32 ms);
 u32 so_ciclos(void);			/* para medir lo que cuesta algo (rdtsc o así) */
+/* lo que ha gastado el programa (en milésimas de procesador) desde que empezó; 0 si no se sabe */
+u32 so_ms_propios(void);
 
 /* ---- lo que dice el programa ---- */
 void so_dice(const char *t);		/* a la consola o al terminal (UTF-8) */
@@ -154,6 +156,8 @@ typedef struct { u32 clase, a, b, c; } so_suceso;
 typedef struct { int an, al; u32 *p; } lienzo;
 
 int so_hay_escritorio(void);
+/* lo que cabe de una ventana (la pantalla sin la barra de tareas ni el dock, ni el marco) */
+void so_cabe_ventana(int *an, int *al);
 u32 so_ventana(const char *titulo, int an, int al);	/* 0 si no se puede */
 void so_titulo(u32 v, const char *t);
 void so_vuelca(u32 v, const lienzo *l, int x, int y, int an, int al);	/* ese trozo, a la ventana */

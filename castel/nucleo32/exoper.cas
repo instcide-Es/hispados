@@ -841,6 +841,10 @@ módulo Exoper
     ; (el Mirador de la oficina); si no lo están, con lo de siempre
     variable de_paquetes: arreglo [400] de byte = "PDF=\\HISPAPDF.BIN|%1\r\nZIP=\\COMPRIM.BIN|%1\r\nBMP=\\MIRADOR.BIN|%1\r\nPNG=\\MIRADOR.BIN|%1\r\nJPG=\\MIRADOR.BIN|%1\r\nJPE=\\MIRADOR.BIN|%1\r\nGIF=\\MIRADOR.BIN|%1\r\nICO=\\MIRADOR.BIN|%1\r\nTGA=\\MIRADOR.BIN|%1\r\nPSD=\\MIRADOR.BIN|%1\r\nPPM=\\MIRADOR.BIN|%1\r\nPGM=\\MIRADOR.BIN|%1\r\nPNM=\\MIRADOR.BIN|%1\r\n"
 
+    ; (REPRODUCTOR) la música, con el Reproductor (el paquete «reproduc»:
+    ; \HISPA\REPRODUC.BIN), si está instalado (y donde ASOCIA.TXT no dice otra cosa)
+    variable de_reproductor: arreglo [400] de byte = "MP3=\\REPRODUC.BIN|%1\r\nMP2=\\REPRODUC.BIN|%1\r\nOGG=\\REPRODUC.BIN|%1\r\nOGA=\\REPRODUC.BIN|%1\r\nFLA=\\REPRODUC.BIN|%1\r\nFLAC=\\REPRODUC.BIN|%1\r\nWAV=\\REPRODUC.BIN|%1\r\nM3U=\\REPRODUC.BIN|%1\r\nM3U8=\\REPRODUC.BIN|%1\r\nPLS=\\REPRODUC.BIN|%1\r\nCUE=\\REPRODUC.BIN|%1\r\nMOD=\\REPRODUC.BIN|%1\r\nXM=\\REPRODUC.BIN|%1\r\nS3M=\\REPRODUC.BIN|%1\r\nIT=\\REPRODUC.BIN|%1\r\n"
+
     ; ¿está ese programa (en la unidad del sistema o en su \HISPA)?
     función hay_programa(prog: puntero a byte): bool
         variable r: arreglo [MAX_RUTA] de byte
@@ -924,6 +928,12 @@ módulo Exoper
         hay := asociado_en(dirección(asocia[0]), ext, programa, plantilla)
         ; (ZIP) (MIRADOR) lo de los paquetes, si están: donde no hay nada o
         ; donde está lo de fábrica de antes (el Mirador de la oficina)
+        ; (REPRODUCTOR) la música
+        si no hay y asociado_en(dirección(de_reproductor[0]), ext, p2, t2) y hay_programa(p2) entonces
+            copiar(programa, p2)
+            copiar(plantilla, t2)
+            devolver cierto
+        fin
         si (no hay o (iguales(programa, "\\HVPRUN.BIN") y empieza_por(plantilla, "\\OFICINA\\MIRADOR.HVP"))) y asociado_en(dirección(de_paquetes[0]), ext, p2, t2) y hay_programa(p2) entonces
             copiar(programa, p2)
             copiar(plantilla, t2)

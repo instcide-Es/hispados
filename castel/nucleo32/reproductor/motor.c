@@ -12,7 +12,8 @@
 #include "util.h"
 
 #define TROZO 1024			/* tramas de salida por vuelta (21 ms a 48 kHz) */
-#define OBJETIVO_MS 250			/* lo que se deja en la cola por delante */
+#define OBJETIVO_MS 400			/* lo que se deja en la cola por delante (al empezar) */
+#define OBJETIVO_MAX 1200		/* (si se queda corta, crece hasta aquí: otro programa gasta el procesador) */
 #define ABRIR_ANTES_S 12		/* la siguiente se empieza a abrir a falta de tanto */
 
 /* ---------------------------------------------------------------- la voz */
@@ -431,6 +432,12 @@ void motor_ciclo(motor *m, u32 presupuesto)
 		m->ms_sin_tarjeta += ahora - antes;
 	antes = ahora;
 	mira_oida(m);
+	/* si la cola se ha quedado casi vacía sonando (otro programa gasta el
+	 * procesador), que vaya más por delante */
+	if (m->estado == M_SONANDO && !m->cebando && m->objetivo_ms < OBJETIVO_MAX && motor_cola_ms(m) < 120 && m->v[m->va].lista && !m->v[m->va].acabada) {
+		m->objetivo_ms += 200;
+		reg("la cola se ha quedado en %d ms: ahora, %d ms por delante", motor_cola_ms(m), m->objetivo_ms);
+	}
 	if (m->estado != M_SONANDO) {
 		/* aún así: abrir de a poco la que toca */
 		return;

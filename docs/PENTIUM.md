@@ -458,6 +458,9 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 68 | **los ajustes** (`HISPA.INI`): EBX = 0, leerlos otra vez; 1, el nombre del usuario, a ECX; 2, ¿está el sistema instalado en el disco?; 3, el nombre del equipo | `releer_ajustes`, `nombre_usuario`, `sistema_instalado`, `nombre_equipo` | |
 | 130 | **quitar con seguridad** la memoria USB de la unidad de letra EBX (desde la 0.8): lo pendiente se escribe, la memoria se para y sus unidades dejan de estar | `quitar_memoria` | 0 (`QUITADA`), ya se puede quitar; 1, no hay tal unidad; 2, no es una memoria USB; 3 (`ES_DEL_SISTEMA`), el sistema corre desde ella |
 | 131 | las veces que han **aparecido o desaparecido unidades** (además, a las ventanas de los programas les llega `EV_UNIDADES`) | `cambios_unidades` | ese número |
+| 134 | (REPRODUCTOR) **el CD de música** del lector de la letra EBX: ECX = 0, la tabla de las pistas (una `Toc_cd`) a EDX; 1, leer sectores de sonido (una `Pide_sonido` en EDX: el lba, cuántos —hasta 64—, adónde; 2.352 octetos cada uno); 2, en crudo (sección 14 terdecies) | `cd_pistas`, `cd_sonido` | 0, `NO_HAY` o `MAL` |
+| 135 | (REPRODUCTOR) **el icono de la ventana** EBX (suya) **en la bandeja**: ECX, 16 x 16 puntos, la ayuda y las opciones de su menú; 0, quitarlo. Los clics le llegan como `EV_BANDEJA` | — | 0 |
+| 136 | (REPRODUCTOR) **lo soltado desde Mi equipo** en una ventana suya (tras `EV_SOLTADO`): la ruta, a EBX (caben ECX) | `lo_soltado` | su largo, o 0 |
 | 170 | (explorador, 21/11) **los atributos** del archivo o la carpeta de nombre EBX: con ECX = 0xFFFFFFFF, solo leerlos; si no, poner los de solo lectura, oculto, de sistema y archivo (`0x27`: los de carpeta y volumen no se tocan) | `atributos_de`, `poner_atributos` | los que quedan, o un error |
 | 171 | (explorador) **lo soltado fuera de la ventana**: EBX, la ventana (suya); ECX, una `Suelta` (el punto, dentro de la ventana, y una ruta entera con su letra). Lo recoge el escritorio: en el dock, se fija (o va a la Papelera); en el tapiz, un acceso nuevo | `soltar_fuera` | 0 (`EN_USO` si aún no ha recogido el de antes) |
 | 172 | (MIRADOR) **una imagen como tapiz**: EBX = 1, la de ECX (una `Imagen_tapiz`: el ancho, el alto y sus puntos 0x00RRGGBB, ya a la medida de la pantalla), que el núcleo guarda en `FONDO.HPM` (al lado de `DOCK.INI`: `\HISPA` instalado, la raíz si no) y pinta el escritorio; EBX = 0, quitarla (vuelve el de siempre) | — | 0, o el error |
@@ -483,7 +486,9 @@ sectores en crudo) son solo de INSTALAR o del modo administrador; la 150 a la
 152 y la 156, solo de las tareas que el núcleo ha marcado como servicio
 (sección 14 sexies).
 
-(La 15 con `DATO_ALTO_LIBRE`, el 14, da lo alto de la pantalla sin la barra
+(La 15 con `DATO_TERMINAL`, el 15, (REPRODUCTOR) dice si el programa va en un
+terminal (la Consola, SSH); con `DATO_MIS_TICS`, el 16, los tics en que el
+reloj lo ha pillado corriendo. Con `DATO_ALTO_LIBRE`, el 14, da lo alto de la pantalla sin la barra
 de tareas ni el dock: así una ventana grande puede quedar encima del dock. La
 12 y la 28 dan además, en lo que antes iba a cero, la fecha del último
 acceso (`reservado`) y la fecha y la hora en que se hizo el archivo (`libre`:
@@ -888,7 +893,8 @@ lector de CD (MEDIO_CD) y 5 una imagen (MEDIO_IMAGEN); `clase` 9 es ISO 9660;
 `quitable` 2, que se puede expulsar; y `relleno[0]`, lo que tiene el lector (0
 nada, 1 datos, 2 música, 3 no se lee).
 
-**Lo que falta**: escuchar los CD de música (READ CD y el sonido); UDF (los
+**Lo que falta**: (escuchar los CD de música: hecho, READ CD y la llamada 134,
+§14 terdecies) UDF (los
 DVD que solo lo llevan; los de vídeo y casi todos los de datos llevan también
 ISO 9660); los archivos de varios trozos (de más de 4 GB) de ISO 9660 y las
 entradas CE de Rock Ridge; GET EVENT STATUS NOTIFICATION (hoy, TEST UNIT READY
@@ -5614,8 +5620,8 @@ QEMU_MAS="-audiodev wav,id=s,path=/tmp/sale.wav -device intel-hda -device hda-du
   STAC9221 y AC'97 con el AD1980); y la VIA, que no tiene emulador.
 - Grabar (el micrófono y la línea); el mezclador por fuentes de HSPSND
   (`snd_mezcla`); el HDMI; más de un códec a la vez; cambiar de salida a mano.
-- Los mandos (HSPJOY) en HVPRUN; un reproductor de música (MP3, OGG) y el
-  CD de música.
+- Los mandos (HSPJOY) en HVPRUN. (El reproductor de música y el CD de música:
+  el Reproductor, §14 terdecies.)
 
 ## 14 undecies. Hispa-PDF (PDF.BIN y su ventana, rama pentium-pdf)
 
@@ -5965,6 +5971,336 @@ vueltas sin un fallo). En Hispa-Pentium: las órdenes en el intérprete (lo
 sacado, igual octeto a octeto que lo de Linux, y el ZIP hecho allí, bueno para
 el `unzip` de Linux) y la ventana desde el explorador, con capturas; y el
 Mirador con sus seis imágenes de prueba, el tapiz y otro arranque.
+
+## 14 terdecies. El Reproductor (REPRODUC.BIN, rama reproductor)
+
+*22/11/2026, la rama `reproductor` (sobre `worktree-v0.1-nucleo` con la
+0.8.6). Carlos: «un Reproductor al estilo VLC para Hispa-Pentium, empezando
+por la música» y, para el ecualizador, «Winamp tenía ecualizador». Nombre y
+diseño propios (ni la marca ni el cono de VLC, ni el aspecto ni las pieles de
+Winamp): **Reproductor**, con su icono (una corchea blanca sobre azul y el
+triángulo verde de reproducir). Esta entrega es **la fase de la música**; el
+vídeo, la siguiente (más abajo, «La fase del vídeo»). Lo cambiado fuera de su
+carpeta lleva la marca «(REPRODUCTOR)».*
+
+| | | |
+|---|---|---|
+| ![La lista sonando, con la carátula y el espectro](pentium/reproductor/lista.png) | ![El ecualizador: 10 bandas, el preamplificador y los preajustes](pentium/reproductor/ecualizador.png) | ![Añadir: las unidades y las carpetas](pentium/reproductor/anadir.png) |
+| ![Opciones: sin huecos, el fundido, ReplayGain, la visualización, la velocidad](pentium/reproductor/opciones.png) | ![El modo pequeño](pentium/reproductor/pequeno.png) | ![En el escritorio de Hispa-Pentium (QEMU), con la nota en la bandeja](pentium/reproductor/escritorio.png) |
+
+### Qué suena
+
+- **MP3** (y MP2 y MP1) con **minimp3** (`terceros/minimp3`, CC0): trama a
+  trama, leyendo el archivo a trozos de 32 K (un MP3 de una hora no va entero
+  a la memoria). Lo de alrededor es nuestro (`dmp3.c`): el ID3v2 de delante y
+  el ID3v1 de detrás, la cabecera **Xing/Info** (o VBRI) para la duración de los
+  de tasa variable y su tabla para buscar, y la **etiqueta LAME** (el retraso y
+  el relleno del codificador) para que no haya hueco entre canciones. Buscar
+  en uno de tasa fija cae **en la muestra justa** (se mira dónde ha caído de
+  verdad y se tiran dos tramas: la reserva de bits y el solape del IMDCT); en
+  uno de tasa variable, por la tabla de Xing (una trama arriba o abajo).
+- **OGG Vorbis** con **stb_vorbis** (`terceros/stb_vorbis`, dominio público o
+  MIT): el archivo va entero a la memoria, de 64 K en 64 K mientras suena lo
+  de antes.
+- **FLAC** (y OGG FLAC) con **dr_flac** (`terceros/dr_flac`, dominio público o
+  MIT-0), a trozos; de 8 a 24 bits, de 1 a 8 canales.
+- **WAV**: PCM de 8, 16, 24 y 32 bits, coma flotante (32 y 64), **IMA-ADPCM**
+  y **MS-ADPCM** (`decod.c`, nuestro).
+- **Los módulos de los «trackers»**: **MOD, XM, S3M e IT** con **libxmp-lite**
+  4.6.0 (`terceros/libxmp-lite`, MIT), a la frecuencia de la tarjeta (sin
+  remuestrear), una vez (sin dar vueltas para siempre).
+- **Los CD de música** (más abajo) y sus **imágenes**: una hoja **.CUE** con su
+  **.BIN** en crudo (las pistas de sonido; MOTOROLA, al revés), o con un
+  **FLAC o un WAV enteros** (el disco en un archivo: cada pista, su trozo).
+- Más de dos canales, mezclados a estéreo; mono, a los dos lados.
+- **Opus**, no en esta fase (libopus es grande: con el vídeo); los `.OPUS`
+  no se añaden a la lista.
+
+Las **etiquetas** (`etiquetas.c`): ID3v1, **ID3v2.2, 2.3 y 2.4** (con la
+desincronización, los marcos comprimidos o cifrados saltados, Latin-1, UTF-16 y
+UTF-8; `TXXX` del ReplayGain; `APIC`/`PIC`), los **comentarios de Vorbis** (de
+los OGG Vorbis, los Opus y los FLAC; `METADATA_BLOCK_PICTURE` en base64), el
+bloque **PICTURE** de FLAC y el **INFO** de los WAV (y su `id3 `). La
+**carátula** (JPEG, PNG, GIF o BMP, con stb_image), la de dentro o, si no
+lleva, `FOLDER.JPG`, `COVER.JPG`, `CARATULA.JPG` o `FRONT.JPG` de su carpeta,
+a 128 x 128 con la media de los puntos. Todo se mira antes de tocarlo (los
+largos, los finales, las codificaciones): el fuzz con ASan, abajo.
+
+### Cómo está hecho: un programa en C portable (como Hispa-PDF)
+
+`castel/nucleo32/reproductor/`, en C99: lo único del sistema va en **`so.h`**
+(la memoria, los archivos a trozos, las carpetas, el tiempo, el sonido, el CD,
+las ventanas, la bandeja y lo soltado), con **`so_pentium.c`** (la int 0x80, la
+poca biblioteca de C y la coma flotante del x87) y **`so_anfitrion.c`** (Linux:
+el sonido a un .WAV y la ventana a un lienzo con capturas; lo mismo valdrá
+para empezar en **Hispa-64**). Lo demás no sabe dónde corre:
+
+```
+  decod.c (el origen, el formato, WAV, CD) · dmp3.c · dvorbis.c · dflac.c · dmod.c
+        │  tramas de coma flotante, en estéreo, a su frecuencia
+        ▼
+  motor.c   ReplayGain -> velocidad (WSOLA) -> remuestrear a la de la tarjeta
+            (seno cardinal con ventana de Kaiser, 16 coeficientes, 256 fases)
+            => dos voces: la que suena y la siguiente (sin huecos y el fundido)
+            -> ecualizador -> lo oído (para la visualización) -> 16 bits
+        │  la cola del canal: SONIDO.BIN (las llamadas 190 a 193)
+        ▼
+  la tarjeta (HD Audio, AC'97, Sound Blaster 16)
+
+  vista.c (la ventana) · dibujo.c (el lienzo y las letras) · imagen.c (la carátula)
+  lista.c (la lista, M3U/PLS/CUE) · etiquetas.c · dsp.c · principal.c (REPRODUCE)
+```
+
+- **Un solo hilo, de a poco.** `motor_ciclo()` se llama en cada vuelta del
+  bucle y llena la cola del sonido por delante (400 ms al empezar; si se queda
+  casi vacía —otro programa gasta el procesador—, crece de 200 en 200 ms hasta
+  1,2 s) a trozos de 1.024 tramas, sin pasar de lo que le dejan (30 ms); abrir
+  la canción siguiente es también de a poco (`dec_paso`: leer 64 K de un OGG,
+  buscar la primera trama de un MP3...), y lo que tarda (las etiquetas, la
+  carátula, las duraciones de la lista, mirar las carpetas que se añaden) se
+  hace solo con la cola llena. Al empezar y tras buscar, la tarjeta espera en
+  pausa a que haya cola (sin ese silencio entre el primer trozo y el segundo).
+- **Lo que se oye, de verdad**: cada trozo que se da lleva su marca (de qué
+  canción, por dónde, a qué velocidad); lo que ha salido por la tarjeta (la
+  llamada 192, «los octetos sacados») dice qué marca suena: el título, la
+  barra, la carátula y la visualización cambian cuando se oye, no cuando se
+  decodifica.
+- **Sin huecos** (gapless): la siguiente se abre a falta de 12 s; al acabarse
+  la de antes, si va a la misma frecuencia, el remuestreador y el estirador
+  pasan a la siguiente con lo que tenían dentro (sigue como si fuera una sola);
+  si no, se saca lo de dentro con ceros detrás, hasta lo que tocaba. Las dos
+  mitades de un seno en WAV o FLAC salen como el seno entero (67 dB, lo del
+  remuestreador).
+- **El fundido** entre canciones (de 2 a 10 s, en Opciones): las dos voces a
+  la vez, con ganancias de potencia constante (seno y coseno).
+- **ReplayGain** (por canción o por disco, de la etiqueta), sin pasar del pico.
+- **La velocidad** de 0,5× a 2× **sin cambiar el tono**: WSOLA (trozos de
+  40 ms con la ventana de Hann, solapados por la mitad; cada uno, donde mejor
+  casa con lo que seguía al de antes, con la correlación normalizada, de ocho
+  en ocho y luego fina).
+- **El ecualizador**: diez filtros de pico (biquad, los de Robert
+  Bristow-Johnson, Q de 1,4) en **60, 170, 310, 600 Hz, 1, 3, 6, 12, 14 y
+  16 kHz**, de -12 a +12 dB, y el **preamplificador**; las bandas a 0 dB no se
+  calculan; los números desnormalizados, a cero (en el x87 son lentísimos).
+  **18 preajustes** con nombre (Plano, Rock, Pop, Clásica, Jazz, Voz, Graves,
+  Agudos, Graves y agudos, Baile, Directo, Fiesta, Suave, Reggae, Ska, Techno,
+  Auriculares, Altavoz pequeño: valores nuestros), los **propios** («Guardar...»
+  con un nombre, «Borrar») y el **automático por el género** de la canción
+  (Rock, Pop, Classical, Jazz, Dance, Techno, Reggae...).
+- **La visualización** (`espectro()`: FFT de 512 con la ventana de Hann):
+  **24 barras** de 50 Hz a 16 kHz en escala logarítmica, de -60 a 0 dB, hechas
+  de trocitos de 3 puntos (la altura se ve por la forma, no solo por el color:
+  verde, amarillo, naranja) con su pico blanco que cae despacio; o la **onda**
+  (el osciloscopio); un clic cambia, y **apagada** no gasta nada. A 20 cuadros
+  por segundo, solo si suena, se ve y la cola va holgada.
+- **Las letras**: DejaVu Sans y DejaVu Sans Bold (`terceros/dejavu`) a cinco
+  tamaños, hechas puntos **al compilar** (`haz_letras.c` con stb_truetype, en el
+  anfitrión): en marcha no se rasteriza nada.
+
+### La ventana
+
+- **La «pantalla»**, arriba (azul oscuro): la carátula (o un disco con su
+  nota), el título, «artista — disco (año)», el formato («MP3 · 44,1 kHz ·
+  estéreo · 192 kbit/s · ReplayGain -6,5 dB»), el estado con su símbolo
+  («Sonando · canción 2 de 12») y la visualización.
+- **La posición**: el tiempo, la barra (se arrastra; la rueda, 5 s) y el total
+  (un clic: lo que falta).
+- **Los botones grandes** (redondeados, con su **símbolo y su texto**: el
+  daltonismo): Anterior, **Reproducir o Pausa** (verde, el principal), Parar
+  (gris si no hay nada) y Siguiente; el **volumen** (un deslizador en cuña, con
+  las ondas del altavoz y el número): es el de este programa en el mezclador
+  de SONIDO.BIN (la llamada 192, el volumen del canal; sale en Configuración >
+  Sonido). Debajo, **Aleatorio** («sí»/«no») y **Repetir** («no», «todo»,
+  «una», con un 1 en el símbolo), encendidos con un borde claro además del
+  color; **la velocidad** (1×, 1,25×... un clic, la siguiente) y **Pequeño**.
+- **Las pestañas** (la elegida, en negrita y con una raya encima):
+  - **Lista**: Añadir..., CD (las pistas del CD de música que haya), Abrir
+    lista, Guardar lista (.M3U con `#EXTINF`, en UTF-8, con las rutas relativas
+    a su carpeta; o .PLS), Quitar (Supr), Vaciar y Ordenar (por título, por
+    artista, por carpeta). Las columnas: el número, el título, el artista y la
+    duración; **lo que suena, en negrita con su triángulo**; lo elegido, con
+    **una franja** a la izquierda; las que no se pueden tocar, «(no se puede
+    tocar)» detrás. Dos clics, tocar; **arrastrar una fila, cambiarla de sitio**
+    (una raya con su flecha dice dónde irá); Mayús y Control con el ratón;
+    el botón secundario: Tocar, Quitar de la lista, Subir, Bajar. Las
+    duraciones y las etiquetas se van rellenando solas.
+  - **Ecualizador**: «Ecualizador activado», «Automático (por el género)»,
+    «Todo a 0 dB»; la lista de los preajustes (el puesto, con su franja y su
+    triángulo); y los once **deslizadores verticales** (el preamplificador en
+    verde), con su valor encima, sus rayas de ±12 y 0 dB y lo subido en azul
+    (lo bajado en naranja: además, se ve hacia dónde va). Arrastrar, la rueda
+    (1 dB), dos clics (0 dB).
+  - **Añadir**: las unidades (botones con su letra; los CD con su disco),
+    «Subir», la carpeta, las carpetas (amarillas, con su pestaña y
+    «(carpeta)») y las canciones y listas (con su nota y su tamaño): «Añadir
+    lo elegido», «Añadir la carpeta» (con lo de dentro: de a poco, la barra de
+    estado lo dice; con una hoja .CUE en la carpeta, sus pistas y no el .BIN o
+    el FLAC entero) y «Tocar ahora». Para guardar la lista, aquí: el nombre y
+    «Guardar aquí».
+  - **Opciones**: sin huecos, el fundido (No, 2, 4, 6, 8, 10 s), el volumen
+    igualado (No, Por canción, Por disco), la visualización (Espectro, Onda,
+    Apagada), la velocidad (de 0,5× a 2×) y las teclas.
+- **La barra de estado**: cuántas canciones y lo que duran, «mirando las
+  carpetas...»; el ecualizador puesto; y los avisos (en naranja claro **con su
+  franja**): lo que no se puede tocar, lo añadido, lo soltado, la lista
+  guardada.
+- **El modo pequeño** (Ctrl+M o «Pequeño»): una tira de 520 x 76 con el título
+  que se desplaza, el tiempo, una raya con la posición (se pulsa), los cuatro
+  botones con su símbolo, el volumen y «Grande».
+- **Las teclas**: Espacio (tocar o pausa), N y P (siguiente, anterior), S
+  (parar), las flechas izquierda y derecha (5 s; con Mayús, 30 s), arriba y
+  abajo (la lista), Intro (tocar), + y - o Ctrl+flechas (el volumen), Ctrl+O
+  (Añadir), Ctrl+S (guardar la lista), Ctrl+M (pequeño), Ctrl+L y Ctrl+E (la
+  lista, el ecualizador), Ctrl+A (todas), Supr (quitar), Tab (otra pestaña),
+  F1 (las teclas, en Opciones). **La rueda en todo**: la lista, las carpetas,
+  los preajustes, cada banda, la posición y, en lo demás, el volumen.
+- **Una sola copia**: dos clics en otra canción en Mi equipo con el
+  Reproductor abierto la añaden y la tocan en el que hay (el que llega deja lo
+  pedido en `REPRODUC.BUZ` y se va; el que está tiene `REPRODUC.LCK` abierto
+  para escribir —nadie más puede abrirlo: «está en uso»— y mira el buzón cada
+  medio segundo).
+- **Minimizada sigue sonando**, con **la nota en la bandeja** (la llamada 135):
+  un clic, la ventana; el botón secundario, «Reproducir» o «Pausa»,
+  «Siguiente», «Anterior», «Parar», «Mostrar la ventana» y «Salir».
+- **Lo guardado** (`\HISPA\REPRODUC\`, o `\REPRODUC\` sin instalar; el sello de
+  REPRODUC.BIN en `permisos.cas`): `REPRODUC.INI` (el volumen, aleatorio,
+  repetir, el ecualizador y sus bandas, la velocidad, el fundido, sin huecos,
+  ReplayGain, la visualización, el modo, la pestaña, lo que mide la ventana y
+  la canción y el punto en que se quedó), `ECUALIZA.TXT` (los preajustes
+  propios) y `LISTA.M3U` (la lista de la última vez), a los dos segundos de un
+  cambio y al cerrar.
+
+### El CD de música (la llamada 134, para el Reproductor y para WIN32)
+
+`cdrom.cas` (marcado «(REPRODUCTOR)») sabe ya **READ TOC entera** (formato 0,
+en LBA, desde la pista 1: todas y el final del disco) y **READ CD** (BEh: la
+clase esperada, CD-DA; lo de dentro de cada sector, que en uno de sonido son
+los 2.352 octetos), por las tres vías (IDE: 13 sectores por orden, 32 K; SATA:
+también; USB: uno). La llamada:
+
+| EAX | EBX | ECX | EDX | Devuelve |
+|---|---|---|---|---|
+| 134 | la letra del lector | 0: la tabla de las pistas | una `Toc_cd` (808 octetos: `pistas`, `primera` y 100 `Pista_cd` de 8: el LBA, el control —bit 2: de datos— y el número; la de después de la última, 0xAA, es el final) | 0; `NO_HAY` (no es un lector); `MAL` (no contesta o no hay disco) |
+| | | 1: leer sonido | una `Pide_sonido` (`lba`, `n` —de 1 a 64—, `destino`): `n` x 2.352 octetos, PCM de 16 bits estéreo a 44.100 Hz | 0; `NO_VALE`; `MAL` (un rayón: dos intentos) |
+| | | 2: leer en crudo | lo mismo, sin mirar la clase del sector (los de datos salen enteros, con su sincronía y su cabecera: para las pruebas en QEMU, que no tiene CD de música) | |
+
+En Castel, `cd_pistas(letra, destino)` y `cd_sonido(letra, lba, n, destino)`
+(`llamadas.cas`). **Para WIN32.BIN** (la rama `win32-juegos`, el CD de música de
+los juegos por MCI: `mciSendString("play cdaudio from 3")`): con la 134, ECX =
+0, se sabe dónde empieza cada pista y, con ECX = 1, se leen sus sectores y se
+dan a un canal de sonido (190 y 191), como hace `decod.c` (`dcdda_abre`). El
+cerrojo de `cdrom.cas` deja que la tarea `cd-cambios` siga mirando el lector a
+la vez. En el Reproductor, la pestaña Lista > «CD» (o `REPRODUCE D:`) añade
+las pistas de sonido («Pista 1»...); al tocarlas se leen de 13 en 13 sectores
+(75 ms) y un sector que no se lee suena a silencio y se sigue.
+
+### Mi equipo, la bandeja y la Consola
+
+- **Dos clics** en un `.MP3`, `.MP2`, `.OGG`, `.OGA`, `.FLA`, `.FLAC`, `.WAV`,
+  `.M3U`, `.M3U8`, `.PLS`, `.CUE`, `.MOD`, `.XM`, `.S3M` o `.IT` en Mi equipo lo
+  abren con el Reproductor si está instalado (`exoper.cas`, `de_reproductor`,
+  como las de los paquetes de la 0.8.6: donde `ASOCIA.TXT` no dice otra cosa).
+  Los nombres largos con espacios llegan sin comillas: se juntan los trozos
+  hasta que existe.
+- **Soltar en su ventana** lo que se arrastra desde Mi equipo (una canción, una
+  carpeta, una lista): el escritorio (`escritorio.cas`, `atiende_suelta`), que
+  antes solo lo ponía en el tapiz o en el dock, ahora se lo dice a la ventana
+  que hay debajo (`EV_SOLTADO` = 14, con el punto dentro de ella) y el programa
+  recoge la ruta con la **llamada 136** (EBX adónde, ECX cuánto cabe: da su
+  largo, o 0). Sirve para cualquier programa.
+- **La bandeja**: la **llamada 135** pone el icono de una ventana (suya) en la
+  bandeja, a la izquierda del reloj (16 x 16 puntos `0xAARRGGBB`, una ayuda de
+  48 y las opciones de su menú, hasta 160 con «|»; EBX la ventana, ECX el icono
+  o 0 para quitarlo; dos como mucho); un clic le llega como `EV_BANDEJA` = 15
+  con `a` = `SIN_ELEGIR`, y lo elegido en el menú del botón secundario, con su
+  número. Al acabar el programa, su icono se va (`recoge_lo_suyo`).
+- **La orden `REPRODUCE`** (la Consola: el nombre largo se queda en
+  `REPRODUC.BIN`, como hace el intérprete con los de más de ocho letras):
+  `REPRODUCE archivo|carpeta|lista|D: ... [/ALEATORIO] [/REPITE] [/VOLUMEN n]
+  [/EQ Rock] [/VELOCIDAD 1,5] [/FUNDIDO s] [/VENTANA] [/MIDE]`: en una línea,
+  «03:12 / 04:56  Artista - Título  80 %»; Espacio, N, P, las flechas, + y -, Q.
+  En un terminal (la Consola, SSH: el **dato 15**, `DATO_TERMINAL`, nuevo) va
+  así; desde el escritorio, la ventana (o con `/VENTANA`). `/MIDE` decodifica
+  sin sonar y dice lo que cuesta cada segundo de sonido.
+
+### Que no se corte
+
+La cola de cada canal de `sonido.cas` es ahora de **256 K** (eran 64 K: 1,4 s
+a 48 kHz en vez de 0,34 s; marcado «(REPRODUCTOR)»; los demás programas no lo
+notan: DirectSound y HVPRUN ya miden lo que dejan ir por delante). Con eso y
+el objetivo que crece, el Reproductor no se corta **con otro programa
+gastando todo el procesador** (en la prueba, `REPRODUCE /MIDE` decodificando
+MP3 sin parar en otra Consola) **y la ventana arrastrándose por la pantalla**:
+lo que graba QEMU de la tarjeta es lo del anfitrión, trozo a trozo, sin un
+salto (`pruebas/sigue.py`).
+
+### Lo que cuesta (el HP Mini 5103, Atom N455)
+
+RESUMEN_CPU
+
+### Probarlo
+
+`SOLO=reproductor castel/pruebas.sh` (la parte 33, en `castel/pruebas_reproductor.sh`).
+En el anfitrión, a mano:
+
+```
+castel/nucleo32/reproductor/anfitrion.sh /tmp/repro asan
+python3 -I castel/nucleo32/reproductor/pruebas/haz_pruebas.py /tmp/p
+/tmp/repro decodifica /tmp/p/escala.mp3 /tmp/o.wav       # a su frecuencia, para compararlo
+REPRO_RG=1 /tmp/repro motor /tmp/m.wav /tmp/p/seno_a.flac /tmp/p/seno_b.mp3   # como suena (48 kHz)
+/tmp/repro etiquetas /tmp/p/esc_vbr.mp3 ; /tmp/repro lista /tmp/p/TONOS.CUE ; /tmp/repro dsp
+python3 -I castel/nucleo32/reproductor/pruebas/fuzz.py /tmp/repro /tmp/p 1000
+REPRO_VENTANA=1 REPRO_SUCESOS=sucesos.txt REPRO_CAPTURA=v.ppm /tmp/repro ventana /tmp/p/esc_vbr.mp3
+```
+
+y en QEMU:
+
+```
+QEMU_MAS="-audiodev wav,id=s,path=/tmp/sale.wav,out.frequency=48000 -device intel-hda -device hda-duplex,audiodev=s" \
+  MODULOS=ORDENES.BIN,SONIDO.BIN,REPRODUC.BIN,ESCALA.OGG ARRANQUE=ordenes castel/nucleo32/probar.sh SEMILLA.BIN "reproduce M:\ESCALA.OGG"
+```
+
+### Lo que falta (de la música)
+
+- **Las radios de Internet** (Icecast y SHOUTcast en MP3 y OGG, por HTTP y
+  HTTPS con RED.BIN y TLS.BIN, con los metadatos «StreamTitle»): no han dado
+  tiempo en esta fase; van en la siguiente (las listas las saltan ya).
+- **Opus** (libopus) y extraer un CD a WAV o FLAC.
+- Probarlo en el HP Mini 5103 de verdad (el IDT y el Atom) y con un CD de
+  música en un lector de verdad (IDE y SATA): en QEMU solo se ha podido
+  probar READ CD en crudo sobre un CD de datos.
+- La búsqueda exacta en los MP3 de tasa variable (hoy, por la tabla de Xing:
+  una trama arriba o abajo).
+
+### La fase del vídeo (el plan)
+
+1. **Los decodificadores**: o **FFmpeg recortado** (libavcodec y libavformat
+   con `--disable-everything` y solo MPEG-1/2 de vídeo, MPEG-4 parte 2 (DivX,
+   Xvid), H.264 en Baseline/Main, VP8, MJPEG, AAC, AC-3 y Opus; los
+   contenedores AVI, MP4/MOV, MKV/WebM, MPEG-PS/TS y OGG; LGPL 2.1, enlazado
+   en un programa aparte), o **decodificadores sueltos** (pl_mpeg para
+   MPEG-1 y MP2, de dominio público; libvpx o un VP8 propio; libmpeg2; un
+   H.264 Baseline pequeño). Lo primero da casi todo de una vez y pesa (unos
+   2-3 MB para el Pentium); lo segundo es más ligero y nuestro, pero no
+   llega a lo de hoy (H.264 High). La propuesta: **pl_mpeg primero** (un .MPG
+   y los VCD el primer día, en el Atom sin sudar) y luego **FFmpeg recortado**
+   como paquete «multimedia» aparte, con `-march=i586` y sin ensamblador
+   (en el Atom N455, H.264 a 480p va justo: medirlo con `/MIDE`).
+2. **Dibujar el vídeo**: el YUV a RGB (por tablas) y escalado en el anillo 3,
+   y a la ventana con `mapa` (la llamada 34) a trozos; luego, una llamada
+   para dibujar directamente en el lienzo de la ventana (sin copiar dos
+   veces); la pantalla completa (la 182 de WIN32, `COMPLETA`).
+3. **La sincronía**: el reloj es el del sonido (las marcas y «los octetos
+   sacados», como ahora); el vídeo, cuadro a cuadro detrás, tirando cuadros si
+   no llega.
+4. **DVD**: el lector ya lee los DVD de datos (UDF falta: `iso.cas` lee ISO
+   9660, que casi todos los de vídeo llevan también); los `VIDEO_TS` (IFO y
+   VOB: MPEG-2 y AC-3 o MP2), los menús sencillos y los capítulos; sin CSS
+   (los discos protegidos no: no se puede ni se debe).
+5. **Los subtítulos**: SRT y SSA/ASS (el texto) y los de DVD (VobSub), con las
+   letras DejaVu y su borde; elegir la pista de sonido y la de subtítulos.
+6. Las mismas piezas de esta fase: la lista, las teclas, la bandeja, el modo
+   pequeño, la ventana en Hispa-64.
 
 ## 15. Las pruebas
 

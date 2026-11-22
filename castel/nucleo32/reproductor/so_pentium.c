@@ -1077,6 +1077,17 @@ void so_duerme(u32 ms)
 	llamada(3, t ? t : 1, 0, 0);
 }
 
+u32 so_ms_propios(void)
+{
+	u32 t = llamada(15, 16, 0, 0);
+
+	if (ES_ERROR(t))
+		return 0;
+	if (!hz_reloj)
+		so_ms();
+	return (u32)((u64)t * 1000 / hz_reloj);
+}
+
 u32 so_ciclos(void)
 {
 	u32 a, d;
@@ -1120,6 +1131,14 @@ int so_hay_escritorio(void)
 	u32 r = llamada(15, 13, 0, 0);
 
 	return !ES_ERROR(r) && r == 1;
+}
+
+void so_cabe_ventana(int *an, int *al)
+{
+	u32 a = llamada(15, 11, 0, 0), b = llamada(15, 14, 0, 0);
+
+	*an = ES_ERROR(a) || !a ? 800 : (int)a - 8;
+	*al = ES_ERROR(b) || !b ? 560 : (int)b - 28;
 }
 
 /* (REPRODUCTOR) el dato 15: ¿va en un terminal? (la Consola, SSH) */
@@ -1282,6 +1301,16 @@ int so_cd_lee(char letra, u32 lba, u32 n, void *d)
 	return llamada(134, (u8)letra, 1, (u32)&p) == 0 ? 0 : -1;
 }
 
+int so_cd_lee_crudo(char letra, u32 lba, u32 n, void *d)
+{
+	pide_cdda p;
+
+	p.lba = lba;
+	p.n = n;
+	p.destino = d;
+	return llamada(134, (u8)letra, 2, (u32)&p) == 0 ? 0 : -1;
+}
+
 int so_cd_expulsa(char letra) { return llamada(132, (u8)letra, 0, 0) == 0 ? 0 : -1; }
 
 /* =================================================================== las ventanas */
@@ -1294,7 +1323,10 @@ u32 so_ventana(const char *titulo, int an, int al)
 
 	so_de_utf8(titulo, t, sizeof t);
 	v = llamada(32, (u32)t, (u32)an, (u32)al);
-	return ES_ERROR(v) ? 0 : v;
+	if (ES_ERROR(v))
+		return 0;
+	llamada(80, v, 0xFFFFFFFFu, 0);	/* (en el centro, encima de la barra de tareas) */
+	return v;
 }
 
 void so_titulo(u32 v, const char *t)
@@ -1443,17 +1475,28 @@ int so_otro_en_marcha(const char *pedido)
 {
 	char c[MAX_RUTA], r[MAX_RUTA];
 	so_archivo *a;
+	u32 m;
 
 	so_carpeta_propia(c, sizeof c);
 	if (!so_existe(c, NULL))
 		so_haz_carpeta(c);
 	copia(r, sizeof r, c);
 	anade(r, sizeof r, "REPRODUC.LCK");
-	cerrojo = so_crea(r);
-	if (cerrojo)
-		return 0;	/* (no hay otro: este es el que se queda) */
+	m = llamada(7, (u32)r, 2, 0);
+	if (!ES_ERROR(m)) {
+		/* no hay otro: este es el que se queda (con el cerrojo abierto) */
+		cerrojo = so_pide(sizeof *cerrojo);
+		if (cerrojo) {
+			cerrojo->m = m;
+			cerrojo->pos = cerrojo->largo = 0;
+			cerrojo->escribe = 1;
+		}
+		return 0;
+	}
+	if (m != 0xFFFFFFF6u)
+		return 0;	/* (no se puede escribir ahí: sin una sola copia) */
 	if (!pedido || !pedido[0])
-		return 1;	/* (hay otro y no se pide nada: que se vea el que hay) */
+		pedido = "/MOSTRAR";	/* (hay otro y no se pide nada: que se vea el que hay) */
 	copia(r, sizeof r, c);
 	anade(r, sizeof r, "REPRODUC.BUZ");
 	a = so_crea(r);

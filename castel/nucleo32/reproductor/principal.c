@@ -40,6 +40,32 @@ static const char *trozo(const char *p, char *d, int cabe)
 	return p;
 }
 
+/* la ruta siguiente de los argumentos: entre comillas; o, sin ellas, los
+ * trozos que hagan falta para que exista (los nombres largos con espacios:
+ * «\MUSICA\Mi canción.mp3» llega sin comillas desde Mi equipo) */
+const char *siguiente_ruta(const char *p, char *a, int cabe)
+{
+	const char *q;
+	char t[MAX_RUTA], j[MAX_RUTA];
+
+	p = trozo(p, a, cabe);
+	if (!a[0] || es_opcion(a) || so_existe(a, NULL))
+		return p;
+	copia(j, sizeof j, a);
+	for (q = p; *q;) {
+		q = trozo(q, t, sizeof t);
+		if (!t[0] || es_opcion(t) || (int)(strlen(j) + strlen(t) + 2) > (int)sizeof j)
+			break;
+		anade(j, sizeof j, " ");
+		anade(j, sizeof j, t);
+		if (so_existe(j, NULL)) {
+			copia(a, cabe, j);
+			return q;
+		}
+	}
+	return p;	/* (no existe ni juntando: el primer trozo, tal cual) */
+}
+
 int es_opcion(const char *a)
 {
 	return a[0] == '/' && (so_separador() != '/' || !strchr(a + 1, '/'));
@@ -107,6 +133,54 @@ static int mide(lista *l)
 	return 0;
 }
 
+/* (para las pruebas) la tabla de las pistas del lector y la suma (CRC-32) de
+ * lo que trae cada sector en crudo (READ CD, la llamada 134 con ECX = 2): en
+ * un CD de datos, los 2048 octetos de dentro (desde el 16) tienen que ser
+ * los de la imagen */
+static u32 crc32(const u8 *d, u32 n)
+{
+	u32 c = 0xFFFFFFFFu, i;
+	int k;
+
+	for (i = 0; i < n; i++) {
+		c ^= d[i];
+		for (k = 0; k < 8; k++)
+			c = c & 1 ? (c >> 1) ^ 0xEDB88320u : c >> 1;
+	}
+	return ~c;
+}
+
+int so_cd_lee_crudo(char letra, u32 lba, u32 n, void *d);
+
+static int prueba_cd(char letra, u32 lba, u32 n)
+{
+	so_toc t;
+	char s[200];
+	static u8 b[2352 * 32];
+	u32 i;
+
+	if (so_cd_toc(letra, &t)) {
+		so_dice("PRUEBACD: no se puede leer la tabla de las pistas.\n");
+		return 1;
+	}
+	for (i = 0; i <= (u32)t.pistas; i++) {
+		fmt(s, sizeof s, "PRUEBACD: pista %u: lba %u, control %u\n", t.pista[i].numero, t.pista[i].lba, t.pista[i].control);
+		so_dice(s);
+	}
+	if (n > 32)
+		n = 32;
+	if (so_cd_lee_crudo(letra, lba, n, b)) {
+		so_dice("PRUEBACD: READ CD falla.\n");
+		return 1;
+	}
+	for (i = 0; i < n; i++) {
+		fmt(s, sizeof s, "PRUEBACD: sector %u: crc %08x (de dentro) sincronía %02x%02x%02x\n", lba + i, crc32(b + i * 2352 + 16, 2048),
+		    b[i * 2352], b[i * 2352 + 1], b[i * 2352 + 11]);
+		so_dice(s);
+	}
+	return 0;
+}
+
 static void linea_estado(motor *m, char *t, int cabe)
 {
 	char a[16], b[16], nom[200];
@@ -130,6 +204,8 @@ static int consola(lista *l, int volumen, const char *eq, float velocidad, int f
 	motor m;
 	char t[300], antes[300] = "";
 	int oida = -2, i;
+	u32 t0, p0;
+	u64 ocupado = 0, total = 0;
 
 	if (motor_prepara(&m, l)) {
 		so_dice("REPRODUCE: no hay memoria.\n");
@@ -156,8 +232,11 @@ static int consola(lista *l, int volumen, const char *eq, float velocidad, int f
 			so_dice("REPRODUCE: no hay tal ecualización (Rock, Pop, Clásica, Jazz, Voz, Graves...).\n");
 	}
 	motor_toca(&m, l->aleatorio ? (int)(azar() % (u32)l->n) : 0);
+	t0 = so_ms();
+	p0 = so_ms_propios();
 	while (m.estado != M_PARADO) {
 		int k = so_tecla();
+		u32 c_vuelta = so_ciclos();
 
 		if (k == ' ')
 			motor_pausa(&m);
@@ -193,9 +272,14 @@ static int consola(lista *l, int volumen, const char *eq, float velocidad, int f
 			reg("%s", m.error);
 			m.error[0] = 0;
 		}
+		ocupado += (u64)(u32)(so_ciclos() - c_vuelta);
 		so_duerme(motor_cola_ms(&m) > 150 ? 30 : 10);
+		total += (u64)(u32)(so_ciclos() - c_vuelta);
 	}
 	so_dice("\n");
+	if (total)
+		reg("ha gastado el %u,%u %% del procesador sonando (%u ms)", (u32)(ocupado * 100 / total), (u32)(ocupado * 1000 / total % 10), so_ms() - t0);
+	(void)p0;
 	/* lo que quede en la cola, que suene (como mucho dos segundos; no si se
 	 * ha pedido salir) */
 	for (i = 0; i < 200 && motor_cola_ms(&m) > 0 && m.estado == M_PARADO; i++)
@@ -219,9 +303,13 @@ int principal(void)
 	if (!so_en_consola())
 		ventana = 1;
 	for (p = args;;) {
+		const char *antes = p;
+
 		p = trozo(p, a, sizeof a);
 		if (!a[0])
 			break;
+		if (!es_opcion(a))
+			p = siguiente_ruta(antes, a, sizeof a);
 		if (es_opcion(a)) {
 			if (igual_sin_caja(a, "/ALEATORIO"))
 				l.aleatorio = 1;
@@ -242,6 +330,13 @@ int principal(void)
 			} else if (igual_sin_caja(a, "/VELOCIDAD")) {
 				p = trozo(p, a, sizeof a);
 				velocidad = (float)decimas_de(a) / 10.0f;
+			} else if (igual_sin_caja(a, "/PRUEBACD")) {
+				char l[8], b2[16], c2[16];
+
+				p = trozo(p, l, sizeof l);
+				p = trozo(p, b2, sizeof b2);
+				p = trozo(p, c2, sizeof c2);
+				return prueba_cd((char)mayus(l[0]), (u32)a_entero(b2), (u32)a_entero(c2));
 			} else if (igual_sin_caja(a, "/FUNDIDO")) {
 				p = trozo(p, a, sizeof a);
 				fundido = a_entero(a);

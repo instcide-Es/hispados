@@ -174,6 +174,14 @@ void so_duerme(u32 ms)
 		usleep(ms * 1000);
 }
 
+u32 so_ms_propios(void)
+{
+	struct timespec t;
+
+	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t);
+	return (u32)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
+}
+
 u32 so_ciclos(void)
 {
 	struct timespec t;
@@ -349,6 +357,7 @@ int so_cd_lee(char letra, u32 lba, u32 n, void *d)
 }
 
 int so_cd_expulsa(char letra) { (void)letra; return 0; }
+int so_cd_lee_crudo(char letra, u32 lba, u32 n, void *d) { return so_cd_lee(letra, lba, n, d); }
 
 /* ---- la ventana: un lienzo ---- */
 static lienzo pantalla;
@@ -357,6 +366,7 @@ static FILE *sucesos;
 static u32 espera_hasta;
 
 int so_hay_escritorio(void) { return getenv("REPRO_VENTANA") != NULL; }
+void so_cabe_ventana(int *an, int *al) { *an = 1024; *al = 740; }
 
 u32 so_ventana(const char *t, int an, int al)
 {
