@@ -64,6 +64,7 @@ módulo UCuentas
     variable aviso_malo: bool
     variable soy_admin: bool
     variable p: Pedido_usuario
+    variable tamaño_v: nat32 = T_NORMAL
 
     ; -------------------------------------------------------------------------
     ;  Lo que hay
@@ -127,19 +128,20 @@ módulo UCuentas
     función llena_lista()
         variable i: nat32
         variable r: ent32
+        variable t: arreglo [40] de byte
         rejilla_nueva(g, MAX_U)
         rejilla_columna(g, "Nombre", 0, falso)
-        rejilla_columna(g, "Tipo", 13, falso)
-        rejilla_columna(g, "Contraseña", 10, falso)
-        rejilla_columna(g, "Entra solo", 10, falso)
-        rejilla_columna(g, "", 9, falso)
+        rejilla_columna(g, "Tipo", 7, falso)
+        rejilla_columna(g, "Clave", 5, falso)
+        rejilla_columna(g, "Solo", 4, falso)
         para i desde 1 hasta n_fichas hacer
             r := renglón_nuevo(g, R_NORMAL, i - 1)
-            celda(g, r, 0, dirección(fichas[i - 1].nombre[0]))
-            si fichas[i - 1].admin <> 0 entonces celda(g, r, 1, "Administrador") sino celda(g, r, 1, "Normal") fin
+            copiar_hasta(t, dirección(fichas[i - 1].nombre[0]), 40)
+            si fichas[i - 1].es_yo <> 0 entonces concatenar(t, " (usted)") fin
+            celda(g, r, 0, t)
+            si fichas[i - 1].admin <> 0 entonces celda(g, r, 1, "Admin.") sino celda(g, r, 1, "Normal") fin
             si fichas[i - 1].con_clave <> 0 entonces celda(g, r, 2, "Sí") sino celda(g, r, 2, "No") fin
             si fichas[i - 1].entra_solo <> 0 entonces celda(g, r, 3, "Sí") sino celda(g, r, 3, "No") fin
-            si fichas[i - 1].es_yo <> 0 entonces celda(g, r, 4, "(usted)") sino celda(g, r, 4, "") fin
         fin
         rejilla_lista(g)
     fin
@@ -196,11 +198,13 @@ módulo UCuentas
             x2 := LA + w + 2 * LA
             w := ancho - x2 - LA
             si nuevo entonces copiar(t, "Usuario nuevo") sino copiar(t, "El usuario elegido") fin
-            y2 := recuadro(x2, yy, w, 4 * (alto_caja() + LT + 6 * E) + LT, t)
+            ; (casilla devuelve lo ancho; campo y desplegable, lo alto; recuadro, dónde se empieza dentro)
+            y2 := recuadro(x2, yy, w, 2 * (alto_caja() + LT + 6 * E) + 2 * LT + 12 * E, t)
             y2 := y2 + campo_de(ID_NOMBRE, x2 + LA, y2, w - 2 * LA, "Nombre", nombre, falso, no soy_admin) + 4 * E
             desplegable(ID_TIPO, x2 + LA, y2, (w - 3 * LA) div 2, "Tipo", TIPOS, tipo_, no soy_admin)
             y2 := y2 + desplegable(ID_IMAGEN, x2 + 2 * LA + (w - 3 * LA) div 2, y2, (w - 3 * LA) div 2, "Imagen", IMÁGENES, imagen, falso) + 4 * E
-            y2 := y2 + casilla(ID_SOLO, x2 + LA, y2, "Entra solo al encender (sin contraseña)", solo) + 4 * E
+            casilla(ID_SOLO, x2 + LA, y2, "Entra solo al encender (sin contraseña)", solo)
+            y2 := yy + 2 * (alto_caja() + LT + 6 * E) + 2 * LT + 12 * E + 6 * E
             si nuevo entonces
                 y2 := y2 + campo(ID_CLAVE1, x2 + LA, y2, (w - 3 * LA) div 2, "Contraseña (o nada)", clave1, cierto)
                 campo(ID_CLAVE2, x2 + 2 * LA + (w - 3 * LA) div 2, y2 - alto_caja() - LT - 2 * E, (w - 3 * LA) div 2, "Otra vez", clave2, cierto)
@@ -211,7 +215,11 @@ módulo UCuentas
                 si soy_admin y no es_mía entonces botón(ID_QUITAR, x2 + LA + ancho_botón("Guardar cambios") + 2 * LA, y2, "Quitar usuario", falso, falso) fin
                 y2 := y2 + alto_botón() + 6 * E
                 ; la contraseña
-                y2 := recuadro(x2, y2, w, 3 * (alto_caja() + LT + 6 * E), "La contraseña")
+                si es_mía y fichas[elegida].con_clave <> 0 entonces
+                    y2 := recuadro(x2, y2, w, 2 * (alto_caja() + LT + 6 * E) + alto_botón() + LT + 12 * E, "La contraseña")
+                sino
+                    y2 := recuadro(x2, y2, w, (alto_caja() + LT + 6 * E) + alto_botón() + LT + 12 * E, "La contraseña")
+                fin
                 si es_mía y fichas[elegida].con_clave <> 0 entonces
                     y2 := y2 + campo(ID_VIEJA, x2 + LA, y2, w - 2 * LA, "La de ahora", vieja, cierto) + 4 * E
                 fin
@@ -378,7 +386,9 @@ módulo UCuentas
 
     función ventana_de_usuarios(): byte
         variable s: Suceso
-        si no preparar_medida("Usuarios", 980, 600, T_GRANDE) entonces devolver 1 fin
+        ; (la letra grande si cabe: con 768 de alto o más; si no, la normal)
+        si dato(DATO_ALTO_PANTALLA) >= 760 entonces tamaño_v := T_GRANDE sino tamaño_v := T_NORMAL fin
+        si no preparar_medida("Usuarios", 980, 640, tamaño_v) entonces devolver 1 fin
         lee_fichas()
         llena_lista()
         elige(0)
@@ -398,7 +408,7 @@ módulo UCuentas
                 si s.b = ID_IMAGEN y s.a <> SIN_ELEGIR entonces imagen := s.a fin
                 pinta()
             sino si s.clase = EV_TAMAÑO entonces
-                nuevo_tamaño(ent32(s.a), ent32(s.b), T_GRANDE)
+                nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_v)
                 pinta()
             sino si s.clase = EV_RUEDA entonces
                 si rueda(s) entonces pinta() fin
