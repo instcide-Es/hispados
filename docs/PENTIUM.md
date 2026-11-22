@@ -4238,6 +4238,76 @@ alarma del Reloj (suena), «Poner en hora» (pregunta el modo
 administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
 
+**La 0.8.7** (22/11, rama `pentium-087`: las ramas `usuarios`, `panel-control`,
+`bloc-avanzado`, `reproductor`, `win32-juegos` y `pentium-oficina`, y la
+principal con `pentium-juegos` y `pluma32`). Lo que se tocó al juntar:
+
+- **Una sola versión**: `VERSION_087` en `hpq.py` (base, red, tls, ssh,
+  tailscal y wifi 0.8.7); `Usuario.VERSIÓN_TEXTO` («0.8.7») la dicen el menú
+  Inicio, Configuración, «Acerca de» y ahora también **la orden VER**
+  («Hispa-Pentium 0.8.7: ...»): el dato `DATO_ARREGLO` (17) da el tercer
+  número, sacado de `VERSIÓN_TEXTO` (un núcleo de antes da un error y VER
+  dice «0.8» como siempre).
+- **Soltar desde Mi equipo**: el Bloc (llamada 173) y el Reproductor (136)
+  traían cada uno su llamada para el mismo `EV_SOLTADO` = 14. Se queda **una**:
+  la **173** (`lo_soltado`, en `usuario.cas`; la ruta se da una vez y luego se
+  olvida), con `suelta_en` de `ventanas.cas` (el punto, visto desde dentro).
+  `so_pentium.c` del Reproductor pide la 173; **la 136 queda libre**.
+- **El CD de música**: el Reproductor (llamada 134: `leer_toc` y `leer_sonido`
+  de `cdrom.cas`, con la `Toc_cd`) y WIN32 (la 186, con su `toc()` y otro
+  `leer_sonido` en `cdrom.cas`, que chocaban de nombre). Se queda **la 134**,
+  que ahora acepta la letra 0 («el primer lector que haya»); `HispaCDAudio`
+  (`win32/dx.c`) la pide y le pasa a WINMM.DLL la tabla como la da READ TOC
+  (no cambia `winmm.c`). **La 186 queda libre.**
+- **Los hilos (JUEGOS) y los usuarios**: un hilo de un programa de Windows
+  hereda del proceso `uid`, `uid_hijo` y `remota` (si no, un hilo era «del
+  sistema» y cerrar la sesión no lo acababa).
+- **Los sellos** (`permisos.cas`): 20 REPRODUC, 21 PANEL, 22 HORA, 23 ARGON2,
+  24 USUARIOS (en la rama `usuarios` eran 20 y 21; sus bits `B_ARGON2` y
+  `B_USUARIOS`, 0x800000 y 0x1000000).
+- **El Panel de control** gana el icono **Usuarios** (dos personas; abre
+  USUARIOS.BIN), antes de «Acerca de»: 12 iconos; el botón «Usuarios...» de la
+  Configuración de antes ya no está. El texto de abajo, sin taparse con «Cerrar».
+- **Los iconos del tapiz al entrar un usuario**: `lo_del_usuario` los quitaba
+  de la pantalla pero no de la lista, y salían dos veces (visto al actualizar
+  desde la 0.8.6). Arreglado.
+- **La llamada 181** (las teclas): escribía siempre 64 octetos (un búfer de 32
+  en la pila se pisaba; lo encontró Pluma). Ahora ECX dice lo que cabe: 32, un
+  mapa; 64 o más, los dos; 0, los 64 de antes (WIN32 1.1, juegos 1.0 y Pluma
+  2.0 dan 0 con un búfer de 64: siguen valiendo). WIN32 1.2 da 64.
+- **F11 y F12** llegan como teclas propias (`TECLA_F11` = 0x157, `TECLA_F12` =
+  0x158; antes, nada). Ctrl+I, Ctrl+J y Ctrl+H siguen llegando como 9, 10 y 8,
+  pero con `CON_CONTROL` en «c» de `EV_TECLA` (lo del Bloc), y Pluma lo mira
+  en el mapa de la 181: se distinguen de Tab, Intro y Retroceso.
+- **Pluma 2 y la oficina 1.1** (`exoper.cas`, `inicio.cas`): con el paquete
+  `pluma` instalado, el Pluma del menú Oficina y los .PLU/.ODT/.DOCX/.RTF de
+  Mi equipo abren Pluma 2, no el .HVP; con la oficina 1.1, Datos, Lector,
+  Publicaciones, Presentaciones y Pintura (paquete del sistema).
+- **El Navegador**: la MSVCRT de WIN32 1.2 trae `asin`, `acos`, `frexp` y
+  `strcoll`, que `w32/surf/apoyo.c` también definía: en Pentium, solo las de
+  la MSVCRT (`#ifndef HISPA_PENTIUM`). Se publica el navega 0.2.2 de siempre.
+- **Las partes de las pruebas**: 33 `win32juegos` (era `juegos` en su rama),
+  34 `panel`, 35 `bloc`, 36 `reproductor`, 38 `usuarios`, 39 `juegos` (el
+  paquete), 40 `oficina`, 41 `pluma`; libre la 37 y, para `correo`, la 42. La
+  prueba del Panel acepta el reloj de 3 a 5 minutos adelantado (con el PC
+  cargado QEMU tarda en arrancar).
+- **La serie del catálogo**: desde esta versión todo catálogo firmado lleva
+  `serie=` (los segundos desde 1970, o la de antes más uno). PAQUETES 1.3 (la
+  0.8.6) no conoce la línea y la salta; la 1.4 apunta la más alta vista y no
+  usa un catálogo de Internet con una menor (ni sin serie). El cron de Escudo
+  (`escudo_firmas.py --publica`, que llama a `hpq.py catalogo --clave`) la pone
+  sola **si usa el `hpq.py` de esta versión**: hay que fusionar en la
+  principal antes de publicar.
+
+Los paquetes: base, red, tls, ssh, tailscal y wifi **0.8.7**; paquetes 1.4;
+bloc 1.0 (pide base 0.8.7); equipo 0.9.3; win32 1.2; hvprun 0.10; oficina
+1.1; nuevos reproduc 1.0 (pide base 0.8.7) y pintura 1.0 (del sistema); de lo
+publicado, tal cual: accesori, consola, ejemplos, escudo, sonido, comprim,
+mirador, pdf, navega 0.2.2, clicgest, juegos 1.0, pluma 2.0 y las firmas de
+Escudo.
+
+@@PRUEBAS087@@
+
 **La 0.8.6** (22/11, rama `pentium-086`: las ramas `escudo-rapido`,
 `pentium-pdf` y `pentium-zipvisor` juntas). Lo que se tocó al juntar y lo nuevo:
 
