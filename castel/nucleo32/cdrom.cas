@@ -12,6 +12,9 @@
 ;    READ TOC (43)             las pistas: si la primera es de sonido, es un
 ;                              CD de música
 ;    READ(10) (28)             leer sectores
+;    READ CD (BE)              (JUEGOS) las pistas de sonido, en crudo (2352
+;                              octetos por sector: CD-DA), para el CD-audio
+;                              de los juegos (WINMM, MCI «cdaudio»)
 ;    PREVENT ALLOW MEDIUM REMOVAL (1E) y START STOP UNIT (1B): expulsar
 ;
 ;  mira_disco() dice qué hay en el lector (CD_VACÍO, CD_DATOS, CD_MÚSICA)
@@ -267,6 +270,65 @@ módulo Cdrom
             fin
         fin
         si no bien entonces fallos_cd := fallos_cd + 1 fin
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+    ; (JUEGOS) las pistas del disco del lector l (READ TOC, formato 0, todas):
+    ; a destino, como las da el lector (4 octetos y 8 por pista, con la del
+    ; final, la AA). Da los octetos, o 0.
+    público función toc(l: nat32, destino: puntero a byte, cabe: nat32): nat32
+        variable n: nat32
+        si l >= MAX_LECTORES o cabe < 12 entonces devolver 0 fin
+        si no lectores[l].hay entonces devolver 0 fin
+        si cabe > 804 entonces cabe := 804 fin
+        tomar(cerrojo)
+        prepara(0x43)
+        cdb[6] := 1
+        cdb[7] := cabe >> 8
+        cdb[8] := cabe
+        llenar(destino, cabe, 0)
+        si no orden(l, cabe, destino) entonces
+            soltar(cerrojo)
+            devolver 0
+        fin
+        soltar(cerrojo)
+        n := (nat32(destino[0]) << 8 ob destino[1]) + 2
+        si n > cabe entonces n := cabe fin
+        devolver n
+    fin
+
+    ; (JUEGOS) n sectores de sonido (CD-DA, 2352 octetos cada uno) desde el
+    ; lba, a destino (READ CD). Falso si el lector no puede (o no son de sonido).
+    público función leer_sonido(l: nat32, lba: nat32, n: nat32, destino: puntero a byte): bool
+        variable k, por_vez: nat32
+        variable bien: bool
+        si l >= MAX_LECTORES entonces devolver falso fin
+        si no lectores[l].hay entonces devolver falso fin
+        tomar(cerrojo)
+        por_vez := lo_más(l) div 2352
+        si por_vez = 0 entonces por_vez := 1 fin
+        bien := cierto
+        mientras bien y n > 0 hacer
+            k := n
+            si k > por_vez entonces k := por_vez fin
+            prepara(0xBE)
+            cdb[1] := 0x04                      ; (los sectores que se esperan: CD-DA)
+            cdb[2] := lba >> 24
+            cdb[3] := lba >> 16
+            cdb[4] := lba >> 8
+            cdb[5] := lba
+            cdb[6] := k >> 16
+            cdb[7] := k >> 8
+            cdb[8] := k
+            cdb[9] := 0x10                      ; (solo los datos del usuario: las muestras)
+            bien := orden(l, k * 2352, destino)
+            si bien entonces
+                destino := destino + k * 2352
+                lba := lba + k
+                n := n - k
+            fin
+        fin
         soltar(cerrojo)
         devolver bien
     fin

@@ -173,6 +173,25 @@ void modo_a_real(i32 *x, i32 *y)
 	*y = geo[3] + (*y * geo[5] + geo[5] / 2) / geo[1];
 }
 
+/* ---- (JUEGOS) el CD de sonido (la llamada 186) y si hay hilos de verdad:
+ * para WINMM.DLL de Pentium (MCI «cdaudio», la mezcla en otro hilo) ---- */
+API(u32) HispaCDAudio(u32 op, u32 letra, void *destino, u32 lba, u32 n)
+{
+	u32 r, k = gc_suelta_todo();       /* (leer el CD tarda: los demás hilos, que sigan) */
+	if (op == 0)
+		r = sc(186, 0, letra, LIN(destino));
+	else {
+		static u32 d[4];
+		u32 dd[4];
+		(void)d;
+		dd[0] = letra; dd[1] = lba; dd[2] = n; dd[3] = LIN(destino);
+		r = sc(186, 1, 0, LIN(dd));
+	}
+	gc_retoma(k);
+	return r;
+}
+API(BOOL) HispaHilosDeVerdad(void) { return k_hilos; }
+
 /* ---- las teclas y el ratón ---- */
 static u8 mapa_bios[128];
 static u8 bios[0x500];

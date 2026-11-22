@@ -33,6 +33,7 @@ hacer reg -i $REG
 hacer crt
 hacer juegov -l build/DDRAW.DLL -l build/DINPUT.DLL
 hacer redudp -i $RED
+hacer sonj -l build/DSOUND.DLL
 # la DLL de JUEGOV, en su carpeta SUB
 $CC -c tests/juegos/jdll.c -o $O/jdll.o
 mkdir -p "$SAL/SUB"

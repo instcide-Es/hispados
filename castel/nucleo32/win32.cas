@@ -57,11 +57,16 @@
 ;     sigue, vuelve él solo a donde diga el contexto. La 183, 9 quita las
 ;     primeras 64 K del programa (las de WIN32.BIN, sin nada: así un
 ;     puntero nulo falla, como en Windows).
+;   - 186  (JUEGOS) el CD de sonido de los juegos (WINMM, «cdaudio»): EBX 0
+;          las pistas (READ TOC: ECX la letra del lector, 0 el primero; EDX
+;          adónde, 804 octetos) -> los octetos; 1 leer sectores de sonido
+;          (EDX: cuatro números: la letra, el lba, cuántos y adónde; de 2352
+;          octetos) -> los octetos.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Win32
 
-    importar Cpu, Tareas, Paginas, Marcos, Consola, Ventanas, Raton, Mem32
+    importar Cpu, Tareas, Paginas, Marcos, Consola, Ventanas, Raton, Mem32, Cdrom, Discos, Unidades, Monton
 
     constante NO_VALE = 0xFFFFFFF9              ; (los de usuario.cas)
     constante SIN_MEMORIA = 0xFFFFFFFA
@@ -386,6 +391,63 @@ módulo Win32
         devolver k
     fin
 
+    ; (JUEGOS) el lector de cdrom.cas de esa letra (0: el primero que haya)
+    función lector_de(letra: nat32): nat32
+        variable d, i: nat32
+        si letra = 0 entonces
+            para i desde 0 hasta MAX_LECTORES - 1 hacer
+                si lectores[i].hay entonces devolver i fin
+            fin
+            devolver NINGUNO_CD
+        fin
+        d := lector_de_letra(letra)
+        si d = 0xFFFFFFFF entonces devolver NINGUNO_CD fin
+        devolver discos[d].cuál
+    fin
+
+    función w_cd(op: nat32, b: nat32, c: nat32): nat32
+        variable l, n, k, hecho: nat32
+        variable d: puntero a nat32
+        variable buf: puntero a byte
+        según op
+            caso 0:
+                l := lector_de(b)
+                si l = NINGUNO_CD entonces devolver NO_VALE fin
+                si no usuario_puede(actual.cr3, c, 804, cierto) entonces devolver NO_VALE fin
+                buf := reservar(804)
+                si buf = nulo entonces devolver SIN_MEMORIA fin
+                n := toc(l, buf, 804)
+                si n > 0 entonces copiar_memoria(puntero(c), buf, n) fin
+                liberar(buf)
+                si n = 0 entonces devolver NO_VALE fin
+                devolver n
+            caso 1:
+                si no usuario_puede(actual.cr3, c, 16, falso) entonces devolver NO_VALE fin
+                d := puntero(c)
+                l := lector_de(d[0])
+                n := d[2]
+                si l = NINGUNO_CD o n = 0 o n > 75 entonces devolver NO_VALE fin
+                si no usuario_puede(actual.cr3, d[3], n * 2352, cierto) entonces devolver NO_VALE fin
+                buf := reservar(13 * 2352)
+                si buf = nulo entonces devolver SIN_MEMORIA fin
+                hecho := 0
+                mientras hecho < n hacer
+                    k := n - hecho
+                    si k > 13 entonces k := 13 fin
+                    si no leer_sonido(l, d[1] + hecho, k, buf) entonces
+                        liberar(buf)
+                        si hecho = 0 entonces devolver NO_VALE fin
+                        devolver hecho * 2352
+                    fin
+                    copiar_memoria(puntero(d[3] + hecho * 2352), buf, k * 2352)
+                    hecho := hecho + k
+                fin
+                liberar(buf)
+                devolver n * 2352
+        fin
+        devolver NO_VALE
+    fin
+
     ; la llamada al sistema (180 a 189), desde usuario.cas
     público función atender_win32(n: nat32, a: nat32, b: nat32, c: nat32): nat32
         según n
@@ -395,6 +457,7 @@ módulo Win32
             caso 183: devolver w_hilos(a, b)     ; (JUEGOS)
             caso 184: devolver w_espera(a, b, c)
             caso 185: devolver w_despierta(a, b)
+            caso 186: devolver w_cd(a, b, c)
         fin
         devolver NO_VALE
     fin
