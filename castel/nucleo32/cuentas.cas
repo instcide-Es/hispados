@@ -66,6 +66,7 @@ módulo Cuentas
     público variable cambios_cuentas: nat32     ; sube cada vez que cambia algo (para el escritorio)
     variable sig_id: nat32
     variable texto: arreglo [4097] de byte
+    variable cerrojo_texto: Cerrojo             ; (el texto de USUARIOS.TXT: leerlo y escribirlo, de una en una)
     ; los intentos que no valen (en la pantalla de entrada, en el modo
     ; administrador y por SSH, todos juntos): desde el tercero, una espera
     ; que dobla cada vez (hasta un minuto)
@@ -267,6 +268,15 @@ módulo Cuentas
     fin
 
     función lee_archivo(ruta: puntero a byte): bool
+        variable bien: bool
+        tomar(cerrojo_texto)
+        bien := lee_archivo_ya(ruta)
+        llenar(texto, 4097, 0)
+        soltar(cerrojo_texto)
+        devolver bien
+    fin
+
+    función lee_archivo_ya(ruta: puntero a byte): bool
         variable m, n, i: nat32
         variable p, l: puntero a byte
         m := abrir_archivo(del_sistema, ruta, PARA_LEER)
@@ -410,6 +420,14 @@ módulo Cuentas
     ; queda uno de los dos entero). Cada usuario, con su carpeta. Falso si
     ; no se puede (el disco sin «escritura», lleno...)
     público función guarda_cuentas(): bool
+        variable bien: bool
+        tomar(cerrojo_texto)
+        bien := guarda_cuentas_ya()
+        soltar(cerrojo_texto)
+        devolver bien
+    fin
+
+    función guarda_cuentas_ya(): bool
         variable n, i, m, k: nat32
         variable w: arreglo [16] de byte
         variable c: puntero a Cuenta

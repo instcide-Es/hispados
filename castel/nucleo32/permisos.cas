@@ -350,9 +350,11 @@ módulo Permisos
     constante PROTEGIDA = 1
     constante DUDOSA = 2                        ; no se sabe qué archivo es (el disco falla): se dice que no
     constante USUARIOS_RAÍZ = 3                 ; (USUARIOS) la carpeta \USUARIOS misma
-    constante DE_USUARIO = 4                    ; (USUARIOS) dentro de la carpeta de un usuario (su dueño, en «mirado_dueño»)
-    variable mirado_dueño: nat32
-    variable mirado_autoriza: bool              ; es su AJUSTES\AUTORIZA.TXT (las llaves de SSH: las lee SSHD)
+    ; (USUARIOS) dentro de la carpeta de un usuario: su dueño, en «escriben»
+    ; (0xFFFFFFFF: de nadie), y «secreto», si es su AJUSTES\AUTORIZA.TXT (las
+    ; llaves de SSH: las lee SSHD). (En variables de la llamada, no del módulo:
+    ; dos tareas pueden estar mirando a la vez)
+    constante DE_USUARIO = 4
 
     ; lo que dice la tabla de la ruta entera «ruta» de la unidad u: LIBRE,
     ; PROTEGIDA (y, en «escriben» y «secreto», su renglón) o DUDOSA
@@ -375,9 +377,9 @@ módulo Permisos
             si forma[9] = 0 o forma[10] = 0 entonces devolver USUARIOS_RAÍZ fin
             i := 10
             mientras forma[i] <> 0 y forma[i] <> '\\' hacer i := i + 1 fin
-            mirado_autoriza := iguales(dirección(forma[i]), "\\AJUSTES\\AUTORIZA.TXT")
+            secreto := iguales(dirección(forma[i]), "\\AJUSTES\\AUTORIZA.TXT")
             forma[i] := 0
-            mirado_dueño := dueño_de_carpeta(dirección(forma[10]))
+            escriben := dueño_de_carpeta(dirección(forma[10]))
             devolver DE_USUARIO
         fin
         en_hispa := falso
@@ -414,7 +416,7 @@ módulo Permisos
         z := mira(u, ruta, escriben, secreto)
         si z = LIBRE entonces devolver cierto fin
         ; (USUARIOS) en su carpeta, su dueño
-        si z = DE_USUARIO y actual.uid <> 0 y actual.uid = mirado_dueño entonces devolver cierto fin
+        si z = DE_USUARIO y actual.uid <> 0 y actual.uid = escriben entonces devolver cierto fin
         ; (USUARIOS) PAQUETES e INSTALAR, en toda la zona, si los lanza un
         ; administrador (o el sistema); los renglones de la configuración de
         ; SSH y de los túneles, igual; los demás, el programa del renglón
@@ -435,8 +437,8 @@ módulo Permisos
         si z = LIBRE o z = USUARIOS_RAÍZ entonces devolver cierto fin
         si z = PROTEGIDA y (no secreto o bit(actual.sello) yb escriben <> 0) entonces devolver cierto fin
         ; (USUARIOS) lo de cada uno, su dueño; sus llaves de SSH, también SSHD
-        si z = DE_USUARIO y actual.uid <> 0 y actual.uid = mirado_dueño entonces devolver cierto fin
-        si z = DE_USUARIO y mirado_autoriza y actual.sello = SELLO_SSHD entonces devolver cierto fin
+        si z = DE_USUARIO y actual.uid <> 0 y actual.uid = escriben entonces devolver cierto fin
+        si z = DE_USUARIO y secreto y actual.sello = SELLO_SSHD entonces devolver cierto fin
         denegados := denegados + 1
         imprimir2("permisos: acceso denegado a %s para leer (%s)\n", nat32(ruta), nat32(actual.nombre))
         devolver falso
@@ -450,7 +452,7 @@ módulo Permisos
         si actual = nulo entonces devolver cierto fin
         si no actual.usuario o actual.admin o no Cuentas.hay_cuentas entonces devolver cierto fin
         z := mira(u, ruta, escriben, secreto)
-        si z = DE_USUARIO y (actual.uid = 0 o actual.uid <> mirado_dueño) entonces
+        si z = DE_USUARIO y (actual.uid = 0 o actual.uid <> escriben) entonces
             denegados := denegados + 1
             imprimir2("permisos: acceso denegado a %s para lanzarlo (%s)\n", nat32(ruta), nat32(actual.nombre))
             devolver falso
