@@ -1,0 +1,6 @@
+libxmp-lite 4.6.0 de Claudio Matsuoka, Hipolito Carraro Jr y colaboradores
+(https://github.com/libxmp/libxmp/releases/download/libxmp-4.6.0/libxmp-lite-4.6.0.tar.gz,
+SHA-256 del tar.gz: 71a93eb0119824bcc56eca95db154d1cdf30304b33d89a4732de6fef8a2c6f38),
+licencia MIT: ver LICENSE. Solo src/ e include/ del tar.gz (sin sus Makefile);
+SHA256SUMS, la suma de cada archivo. Sin cambios. Lo usa el Reproductor de
+Hispa-Pentium (castel/nucleo32/reproductor): los módulos MOD, XM, S3M e IT.
