@@ -854,10 +854,8 @@ módulo UPaquetes
             concatenar(a, " /AVANCE=")
             concatenar(a, avance)
         fin
-        si cancela[0] <> 0 entonces
-            concatenar(a, " /CANCELA=")                 ; (RÁPIDO) que la descarga también se pueda parar
-            concatenar(a, cancela)
-        fin
+        ; (RÁPIDO) DESCARGA para si aparece CANCELA.TXT junto a AVANCE.TXT (sin
+        ; más argumentos: no pasan de 128 letras)
         t := lanzar("DESCARGA.BIN", a)
         si es_error(t) entonces
             imprimir1("paquetes: para traer %s de Internet hace falta la red (el programa DESCARGA),\n", pt(url))

@@ -770,9 +770,10 @@ módulo UProgram
         variable an, al, x, yy, bw, w, q: ent32
         an := 56 * LA
         si an > ancho - 2 * LA entonces an := ancho - 2 * LA fin
-        al := 3 * LT + 40 * E                   ; (RÁPIDO) con el botón «Cancelar»
+        al := 2 * LT + 30 * E
         x := (ancho - an) div 2
         yy := (alto - al) div 2
+        al := al + LT + 10 * E                  ; (RÁPIDO) y debajo, el botón «Cancelar» (la barra, donde estaba)
         caja(x + 4 * E, yy + 4 * E, an, al, 0x9CA3AF)
         caja(x, yy, an, al, C_BORDE)
         caja(x + 2 * E, yy + 2 * E, an - 4 * E, al - 4 * E, C_PAPEL)

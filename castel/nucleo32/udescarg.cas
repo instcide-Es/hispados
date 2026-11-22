@@ -14,8 +14,8 @@
 ;  Con /AVANCE=ARCHIVO, cada 16 K reescribe en ARCHIVO una línea «llevados
 ;  total Bajando nombre» (total: 0 si el servidor no lo dice): así enseña la
 ;  barra la ventana de «Programas y actualizaciones» (PAQUETES se lo pide).
-;  (RÁPIDO) Con /CANCELA=ARCHIVO, si ese archivo aparece (lo deja la ventana
-;  al pulsar «Cancelar»), se para y acaba con 3.
+;  (RÁPIDO) Si aparece CANCELA.TXT en la carpeta de ARCHIVO (o el de
+;  /CANCELA=ARCHIVO; lo deja la ventana al pulsar «Cancelar»), se para.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Udescarg
@@ -532,6 +532,18 @@ módulo Udescarg
                 Textos32.copiar(args, tras_palabra(args, s))
             sino
                 s := s + 1
+            fin
+        fin
+        ; (RÁPIDO) sin /CANCELA=: CANCELA.TXT junto al archivo del avance
+        si cancela[0] = 0 y avance[0] <> 0 entonces
+            copiar_hasta(cancela, avance, 128)
+            s := longitud(cancela)
+            mientras s > 0 y cancela[s - 1] <> '\\' hacer s := s - 1 fin
+            si s > 0 y s + 12 < 128 entonces
+                cancela[s] := 0
+                concatenar(cancela, "CANCELA.TXT")
+            sino
+                cancela[0] := 0
             fin
         fin
         si no palabra(args, 0, url, 512) o iguales(url, "/?") entonces
