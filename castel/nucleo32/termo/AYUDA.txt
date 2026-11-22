@@ -1,0 +1,28 @@
+Termómetro de Hispa-Pentium 1.0
+===============================
+
+Mide la temperatura del procesador (Intel y AMD) y la de las zonas térmicas
+de la BIOS (ACPI), hace una prueba de esfuerzo («Calentar», 5, 10 o 15
+minutos) que se para sola si se calienta de más, y dice qué le parece: si el
+ventilador y el disipador sacan bien el calor o si toca limpiar el polvo y
+cambiar la pasta térmica.
+
+Se abre en Inicio > Herramientas > Termómetro (o con TERMO en la Consola).
+
+Lo que apunta va a la carpeta TERMO del usuario (\USUARIOS\<usuario>\TERMO;
+sin usuarios, \TERMO): MMDDHHMM.CSV (una línea cada 2 s, para Excel o
+LibreOffice), MMDDHHMM.LOG (todo lo que pasa, a prueba de apagones),
+MMDDHHMM.TXT (el resumen de cada prueba) y, con F12, la pantalla en .BMP. Si
+el equipo se apagó solo la vez anterior, lo dice al abrirlo.
+
+Teclas: C calentar; 1, 2 y 3 los minutos; Esc parar; F12 guardar la pantalla.
+
+Lo que no se puede leer, se dice: la gráfica dedicada (sin su controlador),
+un sensor que no se mueve («sin lectura fiable») o uno que da algo imposible
+(no cuenta para la parada ni para el veredicto). En los Atom N2xx/N4xx el
+sensor es aproximado. Hispa-Pentium usa un solo núcleo del procesador.
+
+Necesita Hispa-Pentium 0.8.9 o posterior (las lecturas de temperatura del
+núcleo, llamadas 220 a 224); con uno de antes, lo dice y no hace nada más.
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

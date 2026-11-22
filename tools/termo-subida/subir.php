@@ -43,7 +43,7 @@ function apunta(string $equipo, string $nombre, string $que): void
 {
     $ip = $_SERVER['REMOTE_ADDR'] ?? '?';
     $l = sprintf("%s %s %s %s %s\n", gmdate('Y-m-d\TH:i:s\Z'), $ip,
-        $equipo !== '' ? $equipo : '-', $nombre !== '' ? $nombre : '-', preg_replace('/[^\x20-\x7E]/', '?', $que));
+        $equipo !== '' ? $equipo : '-', $nombre !== '' ? $nombre : '-', preg_replace('/[\x00-\x1F\x7F]/', '?', $que));
     @file_put_contents(REGISTRO, $l, FILE_APPEND | LOCK_EX);
 }
 

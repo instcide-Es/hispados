@@ -125,7 +125,7 @@ TIPO_POR_NOMBRE = {
     'red': 'internet', 'tls': 'internet', 'navega': 'internet', 'ssh': 'internet',
     'tailscal': 'internet', 'wifi': 'internet', 'correo': 'internet',  # (CORREO)
     'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina', 'pluma': 'oficina',   # (PLUMA32: pluma)
-    'consola': 'herramientas', 'accesori': 'herramientas', 'comprim': 'herramientas',
+    'consola': 'herramientas', 'accesori': 'herramientas', 'comprim': 'herramientas', 'termo': 'herramientas',   # (TERMO) termo
     'ejemplos': 'desarrollo',
     'win32': 'windows',
     'escudo': 'seguridad', 'escbase': 'seguridad', 'escmes': 'seguridad', 'escdia': 'seguridad',

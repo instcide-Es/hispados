@@ -72,8 +72,12 @@ if [ -n "${TERMO:-}" ]; then
   bash $AQUI/termo/hacer.sh $W/f/TERMO.BIN
   MODULOS="$MODULOS  module /TERMO.BIN TERMO.BIN
 "
+  # (TERMO) X:\TERMO: «Enviar a Carlos» (el testigo), «Terminal» (la llave de
+  # la memoria) (termo/prepara_memoria.sh: lo de cada memoria es distinto)
+  bash $AQUI/termo/prepara_memoria.sh $W/termo
 fi
 cp $W/f/* $W/m/
+[ -n "${TERMO:-}" ] && cp -r $W/termo $W/m/TERMO
 # lo que solo es para instalar (los textos del sistema instalado, lo que va a
 # otra carpeta y el arranque del disco), en \INSTALA
 mkdir $W/m/INSTALA

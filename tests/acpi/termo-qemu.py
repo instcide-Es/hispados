@@ -29,8 +29,22 @@ zona = b'\x5b\x85' + pkglen(b'TZ01' + tmp + b'\x08_CRT' + word(3732) + b'\x08_PS
 tz = b'\x10' + pkglen(b'\\_TZ_' + campos + zona)                             # Scope (\_TZ)
 fan = b'\x5b\x82' + pkglen(b'FAN0' + b'\x08_HID\x0c' + bytes([0x41, 0xD0, 0x0C, 0x0B]) +
                           b'\x08_FST\x12' + pkglen(b'\x03\x00' + byte(45) + word(2400)))
-sb = b'\x10' + pkglen(b'\\_SB_' + fan)
-cuerpo = tz + sb
+# (TERMO) un controlador embebido (PNP0C09, puertos 62h/66h: en QEMU no hay
+# nada detrás) con su región EmbeddedControl, y una zona, \_TZ.TZ02, cuyo
+# _TMP escribe en el EC (Store (One, CTL0): ACPI.BIN no lo hace, lo apunta)
+# y lee de él (TMP0: no contesta; el Termómetro dice por qué no hay dato)
+ec_crs = b'\x47\x01\x62\x00\x62\x00\x00\x01' + b'\x47\x01\x66\x00\x66\x00\x00\x01' + b'\x79\x00'
+ec = b'\x5b\x82' + pkglen(b'EC0_' + b'\x08_HID\x0c' + bytes([0x41, 0xD0, 0x0C, 0x09]) +
+                         b'\x08_CRS\x11' + pkglen(byte(len(ec_crs)) + ec_crs) +
+                         b'\x5b\x80ERAM\x03\x00' + byte(0xFF) +                       # OperationRegion (ERAM, EmbeddedControl, 0, 0xFF)
+                         b'\x5b\x81' + pkglen(b'ERAM\x01' + b'\x00\x40\x08' + b'TMP0\x08' + b'CTL0\x08'))   # Field: Offset (0x10), TMP0, 8, CTL0, 8
+sb = b'\x10' + pkglen(b'\\_SB_' + fan + ec)
+ruta = lambda n: b'\\\x2f\x03_SB_EC0_' + n
+tmp2 = b'\x14' + pkglen(b'_TMP\x08' + b'\x70\x01' + ruta(b'CTL0') +                     # Store (One, \_SB.EC0.CTL0)
+                        b'\xa4\x72\x77' + ruta(b'TMP0') + byte(10) + b'\x00' + word(2732) + b'\x00')
+zona2 = b'\x5b\x85' + pkglen(b'TZ02' + tmp2 + b'\x08_CRT' + word(3732))
+tz = b'\x10' + pkglen(b'\\_TZ_' + campos + zona + zona2)
+cuerpo = sb + tz
 cab = bytearray(b'SSDT' + struct.pack('<I', 36 + len(cuerpo)) + b'\x02\x00' + b'HISPA ' + b'TERMPRUE' +
                 struct.pack('<I', 1) + b'INTL' + struct.pack('<I', 0x20200925))
 t = cab + cuerpo

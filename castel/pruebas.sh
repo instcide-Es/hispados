@@ -300,9 +300,14 @@
 #      ventana a pantalla completa con el ratón de los juegos y DirectInput,
 #      UDP de cliente y de servidor, y el sonido (la mezcla en su hilo,
 #      waveOut, el CD de sonido por MCI).
-#  46. (TERMO, SOLO=termo) El Termómetro (TERMO.BIN, nucleo32/termo/; pruebas_termo.sh): la
-#      memoria USB que lo abre al arrancar, la zona térmica de mentira de ACPI, la parada de
-#      seguridad, el apagón a mitad de la carga (FAT sana, .LOG y .CSV al día) y el aviso al volver.
+#  46. (TERMO, SOLO=termo) El Termómetro (TERMO.BIN, nucleo32/termo/; pruebas_termo.sh): en el
+#      anfitrión, el veredicto con los registros de equipos de verdad (HP Mini, Toshiba, ThinkPad),
+#      la TjMax, el terminal de SSH.BIN (vt.c, con htop, vim y less de verdad) y el receptor de
+#      «Enviar a Carlos» (subir.php); en QEMU, la memoria USB que lo abre al arrancar, la zona
+#      térmica de mentira de ACPI, la parada de seguridad, el registro cada 2 s, lo ocupado, sin
+#      repintar por el ratón, el apagón a mitad de la carga (FAT sana, .LOG y .CSV al día), el aviso
+#      al volver, «Enviar a Carlos» por HTTPS y «Terminal» (SSH con la llave de la memoria contra un
+#      sshd propio: xterm-256color, htop, vim, less, las teclas y window-change).
 #  39. (JUEGOS, SOLO=juegos) Los juegos (el paquete «juegos», nucleo32/juegos/;
 #      pruebas_juegos.sh): la física del pinball en el anfitrión (no atraviesa,
 #      conserva, el flipper golpea), los niveles de Almacén, el paquete, el

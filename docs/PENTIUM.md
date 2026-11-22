@@ -8282,6 +8282,41 @@ servidor; las reglas (filtros); el HTML con su CSS de verdad (para eso, «Abrir
 en el Navegador» sin scripts); nombres largos al guardar adjuntos (el núcleo,
 8+3); las cuentas de Exchange (EWS) y JMAP.
 
+## 14 vicies. El Termómetro (TERMO.BIN, rama termometro)
+
+*22/11/2026. Una memoria USB que arranca sola y mide si un portátil ajeno se
+calienta (y, desde la 1.0, también un programa normal: el paquete «termo»,
+Inicio › Herramientas). Lo cambiado fuera de `castel/nucleo32/termo/` lleva
+la marca «(TERMO)». Las llamadas 220 a 224 del núcleo (termo.cas: solo leer,
+de una lista cerrada) van en la base 0.8.9; con una base de antes, TERMO.BIN
+lo dice y no hace nada más. Las pruebas: la parte 46 (`SOLO=termo`).*
+
+**Lo que mide.** El procesador (Intel: 19Ch/1B1h con la TjMax del 1A2h o de
+la tabla de coretemp; AMD: como k10temp, con el registro de cada familia), las
+zonas de ACPI (ACPI.BIN; el controlador embebido, de solo lectura mientras
+tanto, y el porqué de cada zona sin dato en el .LOG), lo ocupado que está el
+procesador (la tarea ociosa del núcleo; MPERF/TSC y C6 si los hay). El
+veredicto (`veredicto.c`, el mismo en el anfitrión) se mide con el sensor del
+procesador que más sube; una zona que no se mueve sale «fija» y no cuenta; un
+sensor clavado o imposible es «sin lectura fiable» y no para la prueba ni
+juzga nada; si el procesador no queda en reposo, no se juzga el enfriamiento.
+
+**«Enviar a Carlos» y «Terminal».** La memoria lleva un testigo (32 octetos
+al azar; el servidor solo guarda su SHA-256, `tools/termo-subida/`) para
+subir por HTTPS la carpeta TERMO, y una llave Ed25519 propia para el botón
+«Terminal»: SSH.BIN con el terminal nuevo de la ventana (`ssh/vt.c`:
+xterm-256color, 24 bits, cajas, Braille, símbolos, 2026, 2004, el tamaño de
+la ventana con window-change), lo bastante para Claude Code, htop, vim y less.
+
+**Equipos probados (de verdad).**
+
+| Equipo | Procesador | Lo que salió | Lo arreglado |
+|---|---|---|---|
+| HP Mini 5103 | Atom N455 (06_1C, paso A) | lee; zona FDTZ clavada en 50 °C; 6 zonas «--» y 4 ventiladores sin datos | TjMax 100 (no 90); veredicto con el procesador; zona fija; el porqué de cada zona (EC); cada 2 s por el reloj |
+| Toshiba NB250 | Atom N455 | el sensor clavado en 6 °C, también en carga; reloj en 2010 | «sin lectura fiable»; «no da la temperatura del procesador»; aviso de la fecha y hora por Internet |
+| MacBook Air 2012 («Mac Nº3») | i5-3427U (Ivy Bridge, TjMax 105 del MSR) | lee bien; no bajaba al parar; el puntero parpadeaba | lo ocupado en cada línea; no se juzga el enfriamiento sin reposo; volcar solo lo que cambia (pendiente: EDID por GMBUS, SMC de Apple) |
+| ThinkPad A275 | AMD PRO A12-8830B (15h, 60h+) | 114,3 °C fijos y PARADA DE SEGURIDAD falsa | el registro bueno (SMN D8200CA4h por B8h/BCh); nada de PELIGRO con lecturas no creíbles |
+
 ## 15. Las pruebas
 
 `castel/pruebas.sh` (las partes 8 a 14; `SOLO=32 ./pruebas.sh` hace solo esas y la
