@@ -6012,7 +6012,7 @@ azar), `ucuentas.cas` (`USUARIOS.BIN`) y `hispac/argon2.c` (`ARGON2.BIN`).*
   Inicio, los accesos del tapiz (de su carpeta de ajustes) y «Hola, Bea».
 - **Configuración › «Usuarios...»** (`USUARIOS.BIN`; una sección aparte: el
   Panel de control la abre con `\USUARIOS.BIN`): la lista (nombre, tipo, si
-  tiene contraseña, si entra solo, «(usted)»), y del elegido: el nombre, el
+  tiene contraseña, si entra solo; «(usted)» detrás del suyo), y del elegido: el nombre, el
   tipo, la imagen, entrar solo, guardar y quitar; la contraseña (la de ahora,
   si es la suya; la nueva dos veces), «Quitarla»; y «Usuario nuevo». Un
   administrador lo hace todo; uno normal, su contraseña y su imagen.
@@ -6036,7 +6036,8 @@ azar), `ucuentas.cas` (`USUARIOS.BIN`) y `hispac/argon2.c` (`ARGON2.BIN`).*
 
 - **Su carpeta**: `\USUARIOS\<CARPETA>\` (las letras y cifras del nombre, en
   mayúsculas, hasta 8: `ANA`, `BIBLIOTE`), con `DOCUMENT` (Mis documentos: el
-  menú Inicio los busca ahí), `ESCRITOR` y `AJUSTES` (`DOCK.INI`, `INICIO.INI`,
+  menú Inicio los busca ahí y, si no hay ninguno, abre esa carpeta en Mi
+  equipo), `ESCRITOR` y `AJUSTES` (`DOCK.INI`, `INICIO.INI`,
   `ATAJOS.INI`, y `AUTORIZA.TXT`: sus llaves de SSH). **Solo la leen y la
   escriben su dueño y el modo administrador** (permisos.cas: «acceso
   denegado» al abrirla, verla, escribir, borrar, llevarse algo, lanzar un
