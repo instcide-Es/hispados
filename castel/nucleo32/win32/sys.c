@@ -11,9 +11,19 @@ void sys_salir(u32 c)
 }
 u32 sys_escribir(const void *p, u32 n) { return sc(1, LIN(p), n, 0); }
 u32 sys_tics(void) { return sc(4, 0, 0, 0); }
-void sys_dormir(u32 t) { sc(3, t, 0, 0); }
+/* (JUEGOS) las que esperan sueltan el cerrojo grande mientras tanto (hilos.c) */
+void sys_dormir(u32 t) { u32 n = gc_suelta_todo(); sc(3, t, 0, 0); gc_retoma(n); }
 u32 sys_tarea(void) { return sc(5, 0, 0, 0); }
-u32 sys_tecla(int espera) { return sc(6, espera ? 0 : 1, 0, 0); }
+u32 sys_tecla(int espera)
+{
+	u32 n, r;
+	if (!espera)
+		return sc(6, 1, 0, 0);
+	n = gc_suelta_todo();
+	r = sc(6, 0, 0, 0);
+	gc_retoma(n);
+	return r;
+}
 u32 sys_abrir(const char *nombre, u32 modo) { return sc(7, LIN(nombre), modo, 0); }
 u32 sys_leer(u32 m, void *d, u32 n) { return sc(8, m, LIN(d), n); }
 u32 sys_escribir_archivo(u32 m, const void *p, u32 n) { return sc(18, m, LIN(p), n); }
@@ -31,8 +41,20 @@ u32 sys_borrar_carpeta(const char *n) { return sc(24, LIN(n), 0, 0); }
 u32 sys_cambiar_carpeta(const char *n) { return sc(25, LIN(n), 0, 0); }
 u32 sys_carpeta_actual(char *d, u32 cabe) { return sc(26, LIN(d), cabe, 0); }
 u32 sys_unidad(u32 letra) { return sc(42, letra, 0, 0); }
-u32 sys_lanzar(const char *n, const char *args, int suelto) { return sc(suelto ? 41 : 10, LIN(n), args ? LIN(args) : 0, 0); }
-u32 sys_esperar(u32 t, int sin_quedarse) { return sc(11, t, sin_quedarse ? 1 : 0, 0); }
+u32 sys_lanzar(const char *n, const char *args, int suelto)
+{
+	u32 k = suelto ? 0 : gc_suelta_todo(), r;
+	r = sc(suelto ? 41 : 10, LIN(n), args ? LIN(args) : 0, 0);
+	gc_retoma(k);
+	return r;
+}
+u32 sys_esperar(u32 t, int sin_quedarse)
+{
+	u32 k = sin_quedarse ? 0 : gc_suelta_todo(), r;
+	r = sc(11, t, sin_quedarse ? 1 : 0, 0);
+	gc_retoma(k);
+	return r;
+}
 u32 sys_memoria(u32 dir, u32 n, int quitar) { return sc(180, LIN(dir), n, quitar ? 1 : 0); }
 u32 sys_teclas(u32 *mapa) { return sc(181, LIN(mapa), 0, 0); }
 u32 sys_ventana_op(u32 op, u32 id, u32 dato) { return sc(182, op, id, dato); }
@@ -62,8 +84,12 @@ u32 sys_mapa(u32 v, i32 x, i32 y, i32 an, i32 al, const u32 *puntos)
 static struct { i32 x, y; u32 opciones, inactivas, etiqueta; } pm;
 u32 sys_menu(u32 v, i32 x, i32 y, const char *opciones, u32 inactivas, u32 etiqueta)
 {
+	u32 n, r;
 	pm.x = x; pm.y = y; pm.opciones = LIN(opciones); pm.inactivas = inactivas; pm.etiqueta = etiqueta;
-	return sc(39, v, LIN(&pm), 0);
+	n = gc_suelta_todo();           /* (JUEGOS) el menú espera a que se elija */
+	r = sc(39, v, LIN(&pm), 0);
+	gc_retoma(n);
+	return r;
 }
 u32 sys_portapapeles(u32 que, void *p, u32 n) { return sc(40, que, p ? LIN(p) : 0, n); }
 void sys_serie(const char *t) { sc(61, LIN(t), strlen(t), 0); }

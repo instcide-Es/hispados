@@ -18,6 +18,8 @@ extern Obj objs[MAX_OBJ];
 HANDLE nuevo_obj(int tipo);
 Obj *obj(HANDLE h);
 void cerrar_todo(void);
+void hilo_cierra(Obj *o);      /* (JUEGOS) hilos.c */
+int sinc_cierra(Obj *o);
 extern int hilo_n;
 extern u32 tls_usados[2];
 int entrada_de(const char *ruta, Entrada *en, char *largo);

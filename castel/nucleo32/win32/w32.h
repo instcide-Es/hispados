@@ -158,6 +158,7 @@ typedef struct Modulo {
 	u32 nprop;
 	u32 entrada;
 	int es_exe, refs, iniciada;
+	int sin_hilos;          /* (JUEGOS) DisableThreadLibraryCalls: sin DllMain de los hilos */
 	u32 rsrc, rsrc_tam;
 	struct Modulo *sig;
 } Modulo;
@@ -181,6 +182,17 @@ void w32_salir(u32 c) __attribute__((noreturn));
 void carpeta_de_trabajo(char *d, u32 cabe);
 void ruta_entera(const char *r, char *d, u32 cabe);
 u32 tics_ms(void);
+
+/* (JUEGOS) hilos.c: el cerrojo grande y las esperas */
+extern int k_hilos;
+u32 gc_suelta_todo(void);
+void gc_retoma(u32 n);
+void gc_toma(void);
+void gc_suelta(void);
+u32 fx_espera(volatile void *a, u32 v, u32 ms);
+void fx_despierta(volatile void *a, u32 n);
+void hilos_prepara(u32 teb, u32 tam_pila);
+static inline u32 GetLastError_(void) { u32 v; __asm__ volatile("movl %%fs:0x34, %0" : "=r"(v)); return v; }
 
 /* user32 */
 void bomba(int esperar);        /* mira los sucesos del núcleo y los hace mensajes */

@@ -642,6 +642,16 @@ módulo Usuario
                 escribir_trozo(puntero(a), b)
                 devolver b
             caso 2:
+                ; (JUEGOS) un hilo de un programa de Windows acaba el proceso:
+                ; se le dice al proceso (con el código) y el hilo acaba; el
+                ; proceso, antes de soltar lo suyo, acaba sus hilos
+                si actual.líder <> nulo entonces
+                    actual.líder.salir_con := a
+                    actual.líder.salir_pedido := cierto
+                    acabar_tarea(actual.líder)
+                    terminar(a)
+                fin
+                acaba_hilos()
                 recoge_lo_suyo()
                 terminar(a)
             caso 3:
@@ -1578,6 +1588,15 @@ módulo Usuario
     ; código CORTADA. No vuelve. (La llaman la llamada al sistema y, por su
     ; dirección, el reloj: tareas.cas.)
     función cortar_actual()
+        ; (JUEGOS) un hilo de un programa de Windows: solo él (lo del proceso
+        ; lo suelta el proceso); y un proceso que acaba porque uno de sus
+        ; hilos lo ha pedido (ExitProcess), con su código y sin «^C»
+        si actual.líder <> nulo entonces terminar(CORTADA) fin
+        acaba_hilos()
+        si actual.salir_pedido entonces
+            recoge_lo_suyo()
+            terminar(actual.salir_con)
+        fin
         si actual.terminal <> 0 entonces escribir_terminal(actual.terminal, "^C\n", 3) sino escribir_trozo("^C\n", 3) fin
         recoge_lo_suyo()
         terminar(CORTADA)
@@ -1857,6 +1876,7 @@ módulo Usuario
             fin
             copiar_hasta(dirección(t.nombre_propio[0]), nombre, 16)
             t.nombre := dirección(t.nombre_propio[0])
+            t.teb := TEB_PRINCIPAL               ; (JUEGOS) la TEB de su hilo principal (FS, tareas.cas)
         fin
         devolver t
     fin
@@ -1865,6 +1885,14 @@ módulo Usuario
     ; quien llama): se acaba con el código MATADA. No vuelve.
     público función matar_actual()
         imprimir2("*** se acaba la tarea %u (%s)\n", actual.id, nat32(actual.nombre))
+        ; (JUEGOS) si es un hilo de un programa de Windows, se acaba el proceso entero
+        si actual.líder <> nulo entonces
+            actual.líder.salir_con := MATADA
+            actual.líder.salir_pedido := cierto
+            acabar_tarea(actual.líder)
+            terminar(MATADA)
+        fin
+        acaba_hilos()
         recoge_lo_suyo()
         terminar(MATADA)
     fin

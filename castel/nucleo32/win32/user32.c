@@ -1836,6 +1836,12 @@ API(BOOL) WaitMessage(void)
 		sys_dormir(1);
 	return TRUE;
 }
+int hay_mensajes(void)             /* (JUEGOS) MsgWaitForMultipleObjects */
+{
+	MSG m;
+	bomba(0);
+	return algo(&m, 0, 0, 0, 0);
+}
 API(u32) GetQueueStatus(u32 f)
 {
 	MSG m;

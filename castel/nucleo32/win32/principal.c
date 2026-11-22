@@ -110,27 +110,39 @@ static void prepara_teb(u32 pila_tope, u32 pila_fondo)
 	peb[0xB0 / 4] = 1;               /* (Windows 9x) */
 }
 
-/* lo de TLS de la imagen (.tls): sus datos y sus funciones */
-static void prepara_tls(Modulo *m)
+/* lo de TLS de la imagen (.tls, __declspec(thread)): sus datos, para el
+ * hilo de la TEB «teb» (cada hilo, los suyos: (JUEGOS) hilos.c) y, con
+ * «llama» (1 al empezar el proceso, 2 un hilo), sus funciones */
+void tls_de_imagen(u32 teb, int llama)
 {
-	u32 pe = m->base + *(u32 *)(m->base + 0x3C), t = *(u32 *)(pe + 24 + 96 + 9 * 8), *d, n;
+	Modulo *m = mod_exe;
+	u32 pe, t, *d, n;
 	u8 *bloque;
+	if (!m)
+		return;
+	pe = m->base + *(u32 *)(m->base + 0x3C);
+	t = *(u32 *)(pe + 24 + 96 + 9 * 8);
 	if (!t)
 		return;
 	d = (u32 *)(m->base + t);
-	n = d[1] - d[0];
-	bloque = m_cero(n + d[4] + 16);
-	memcpy(bloque, (void *)d[0], n);
-	((u32 *)(TEB_DIR + 0xF80))[0] = (u32)bloque;
-	if (d[2])
-		*(u32 *)d[2] = 0;
-	if (d[3]) {
+	if (!llama || llama == 1) {
+		n = d[1] - d[0];
+		bloque = m_cero(n + d[4] + 16);
+		if (!bloque)
+			return;
+		memcpy(bloque, (void *)d[0], n);
+		((u32 *)(teb + 0xF80))[0] = (u32)bloque;
+		if (d[2])
+			*(u32 *)d[2] = 0;
+	}
+	if (llama && d[3]) {
 		typedef void (WINAPI *TLSF)(void *, u32, void *);
 		TLSF *f;
 		for (f = (TLSF *)d[3]; *f; f++)
-			(*f)((void *)m->base, 1, 0);
+			(*f)((void *)m->base, (u32)llama, 0);
 	}
 }
+static void prepara_tls(Modulo *m) { (void)m; tls_de_imagen(TEB_DIR, 1); }
 
 static u32 entrada_exe;
 static u32 __attribute__((used)) llama_entrada(void)
@@ -152,6 +164,7 @@ int w32_principal(void)
 		sys_salir(255);
 	}
 	prepara_teb(0, 0);
+	hilos_prepara(TEB_DIR, 0);          /* (JUEGOS) la TEB al núcleo (FS de cada hilo) y los hilos */
 	prepara_objs();
 	n = sys_argumentos(args, sizeof args);
 	if (ES_ERROR(n) || !n || !args[0]) {
@@ -230,6 +243,7 @@ int w32_principal(void)
 		teb[2] = pila;
 		((u32 *)PEB_DIR)[2] = mod_exe->base;
 	}
+	hilos_prepara(TEB_DIR, *(u32 *)(pe + 24 + 72) ? *(u32 *)(pe + 24 + 72) : 0x100000);   /* (la pila de los hilos: la que pide el .EXE) */
 	prepara_tls(mod_exe);
 	entrada_exe = mod_exe->entrada;
 	traza("a la entrada: %x (pila %x, %s)", entrada_exe, pila + tam_pila, es_ventanas ? "ventanas" : "consola");

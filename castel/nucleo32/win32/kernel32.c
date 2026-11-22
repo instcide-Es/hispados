@@ -14,7 +14,9 @@
 u32 ultimo_error;
 
 /* ---- la TEB ---- */
-#define TEB ((u32 *)TEB_DIR)
+/* (JUEGOS) la del hilo que corre (cada hilo tiene la suya: FS) */
+static inline u32 *teb_de_fs(void) { u32 *t; __asm__ volatile("movl %%fs:0x18, %0" : "=r"(t)); return t; }
+#define TEB teb_de_fs()
 void pon_error(u32 e) { TEB[0x34 / 4] = e; }
 static u32 da_error(void) { return TEB[0x34 / 4]; }
 
@@ -397,6 +399,12 @@ extern void (*al_salir_user)(void);
 void w32_salir(u32 c)
 {
 	static int saliendo;
+	if (k_hilos) {
+		/* (JUEGOS) como Windows: los otros hilos acaban antes que las DLL */
+		u32 n = gc_suelta_todo();
+		sc(183, 8, 0, 0);
+		gc_retoma(n ? n : 1);
+	}
 	if (!saliendo) {
 		saliendo = 1;
 		mods_acabar();
@@ -415,9 +423,7 @@ API(BOOL) TerminateProcess(HANDLE h, u32 c)
 	return FALSE;
 }
 API(HANDLE) GetCurrentProcess(void) { return (HANDLE)-1; }
-API(HANDLE) GetCurrentThread(void) { return (HANDLE)-2; }
 API(u32) GetCurrentProcessId(void) { return sys_tarea(); }
-API(u32) GetCurrentThreadId(void) { return sys_tarea() + hilo_n * 0x10000; }
 API(HMODULE) GetModuleHandleA(const char *n)
 {
 	Modulo *m;
@@ -792,21 +798,6 @@ static void mide_tsc(void)
 }
 API(BOOL) QueryPerformanceFrequency(u64 *f) { mide_tsc(); *f = tsc_hz; return TRUE; }
 API(BOOL) QueryPerformanceCounter(u64 *c) { mide_tsc(); *c = rdtsc(); return TRUE; }
-API(void) Sleep(u32 ms)
-{
-	u32 fin = tics_ms() + ms;
-	dx_tic();
-	if (!ms) {
-		sys_dormir(0);
-		return;
-	}
-	while ((i32)(fin - tics_ms()) > 0) {
-		u32 q = (fin - tics_ms() + 9) / 10;
-		sys_dormir(q > 2 ? 2 : (q ? q : 1));
-		dx_tic();
-	}
-}
-API(u32) SleepEx(u32 ms, BOOL a) { (void)a; Sleep(ms); return 0; }
 API(void) GetSystemTime(SYSTEMTIME *s) { ahora(s); }
 API(void) GetLocalTime(SYSTEMTIME *s) { ahora(s); }
 API(BOOL) SetLocalTime(const SYSTEMTIME *s) { (void)s; return TRUE; }
@@ -1108,161 +1099,7 @@ API(i32) GetLocaleInfoW(u32 lc, u32 t, WCHAR *d, i32 cabe)
 	return r;
 }
 
-/* ---- los cerrojos, los eventos y los hilos (uno solo) ---- */
-API(void) InitializeCriticalSection(void *c) { memset(c, 0, 24); }
-API(BOOL) InitializeCriticalSectionAndSpinCount(void *c, u32 n) { (void)n; memset(c, 0, 24); return TRUE; }
-API(BOOL) InitializeCriticalSectionEx(void *c, u32 n, u32 f) { (void)n; (void)f; memset(c, 0, 24); return TRUE; }
-API(void) EnterCriticalSection(void *c) { (void)c; }
-API(void) LeaveCriticalSection(void *c) { (void)c; }
-API(BOOL) TryEnterCriticalSection(void *c) { (void)c; return TRUE; }
-API(void) DeleteCriticalSection(void *c) { (void)c; }
-API(i32) InterlockedIncrement(volatile i32 *p) { return ++*p; }
-API(i32) InterlockedDecrement(volatile i32 *p) { return --*p; }
-API(i32) InterlockedExchange(volatile i32 *p, i32 v) { i32 a = *p; *p = v; return a; }
-API(i32) InterlockedExchangeAdd(volatile i32 *p, i32 v) { i32 a = *p; *p += v; return a; }
-API(i32) InterlockedCompareExchange(volatile i32 *p, i32 v, i32 c) { i32 a = *p; if (a == c) *p = v; return a; }
-API(HANDLE) CreateEventA(void *s, BOOL manual, BOOL ini, const char *n)
-{
-	HANDLE h = nuevo_obj(O_EVENTO);
-	(void)s; (void)n;
-	if (h) { obj(h)->a = ini; obj(h)->b = manual; }
-	return h;
-}
-API(HANDLE) CreateEventW(void *s, BOOL manual, BOOL ini, const WCHAR *n) { (void)n; return CreateEventA(s, manual, ini, 0); }
-API(BOOL) SetEvent(HANDLE h) { Obj *o = obj(h); if (o) o->a = 1; return o != 0; }
-API(BOOL) ResetEvent(HANDLE h) { Obj *o = obj(h); if (o) o->a = 0; return o != 0; }
-API(BOOL) PulseEvent(HANDLE h) { (void)h; return TRUE; }
-API(HANDLE) CreateMutexA(void *s, BOOL d, const char *n) { (void)s; (void)d; (void)n; return nuevo_obj(O_MUTEX); }
-API(HANDLE) CreateMutexW(void *s, BOOL d, const WCHAR *n) { (void)s; (void)d; (void)n; return nuevo_obj(O_MUTEX); }
-API(HANDLE) OpenMutexA(u32 a, BOOL h, const char *n) { (void)a; (void)h; (void)n; pon_error(2); return 0; }
-API(BOOL) ReleaseMutex(HANDLE h) { (void)h; return TRUE; }
-API(HANDLE) CreateSemaphoreA(void *s, i32 ini, i32 max, const char *n) { HANDLE h = nuevo_obj(O_SEMAFORO); (void)s; (void)max; (void)n; if (h) obj(h)->a = ini; return h; }
-API(BOOL) ReleaseSemaphore(HANDLE h, i32 n, i32 *antes) { Obj *o = obj(h); if (antes) *antes = o ? (i32)o->a : 0; if (o) o->a += n; return TRUE; }
-
-int hilo_n;
-static void *hilo_vuelta[5];
-static u32 hilo_codigo;
-typedef u32 (WINAPI *HILO)(void *);
-static int corre_hilo(HANDLE h);
-API(HANDLE) CreateThread(void *s, u32 pila, HILO f, void *arg, u32 fl, u32 *id)
-{
-	HANDLE h = nuevo_obj(O_HILO);
-	Obj *o = obj(h);
-	(void)s; (void)pila;
-	if (!o)
-		return 0;
-	o->f = (void *)f;
-	o->arg = arg;
-	o->codigo = 259;              /* STILL_ACTIVE */
-	if (id)
-		*id = sys_tarea() + (hilo_n + 1) * 0x10000;
-	traza("CreateThread(%x, %x)%s", (u32)f, (u32)arg, fl & 4 ? " (dormido)" : "");
-	if (!(fl & 4))
-		corre_hilo(h);
-	return h;
-}
-/* corre el hilo entero (ExitThread vuelve aquí) */
-static int corre_hilo(HANDLE h)
-{
-	Obj *o = obj(h);
-	u32 c;
-	if (!o || o->hecho || hilo_n >= 8)
-		return 0;
-	o->hecho = 1;
-	{
-		void *guarda[5];
-		memcpy(guarda, hilo_vuelta, sizeof guarda);
-		hilo_n++;
-		if (__builtin_setjmp(hilo_vuelta) == 0)
-			c = ((HILO)o->f)(o->arg);
-		else
-			c = hilo_codigo;
-		hilo_n--;
-		memcpy(hilo_vuelta, guarda, sizeof guarda);
-	}
-	o = obj(h);
-	if (o)
-		o->codigo = c;
-	return 1;
-}
-API(void) ExitThread(u32 c)
-{
-	if (!hilo_n)
-		w32_salir(c);
-	hilo_codigo = c;
-	__builtin_longjmp(hilo_vuelta, 1);
-}
-API(u32) ResumeThread(HANDLE h) { corre_hilo(h); return 1; }
-API(u32) SuspendThread(HANDLE h) { (void)h; return 0; }
-API(BOOL) TerminateThread(HANDLE h, u32 c) { Obj *o = obj(h); if (o) { o->hecho = 1; o->codigo = c; } return TRUE; }
-API(BOOL) GetExitCodeThread(HANDLE h, u32 *c) { Obj *o = obj(h); *c = o ? o->codigo : 0; return o != 0; }
-API(BOOL) SetThreadPriority(HANDLE h, i32 p) { (void)h; (void)p; return TRUE; }
-API(i32) GetThreadPriority(HANDLE h) { (void)h; return 0; }
-API(BOOL) SetPriorityClass(HANDLE h, u32 p) { (void)h; (void)p; return TRUE; }
-API(u32) GetPriorityClass(HANDLE h) { (void)h; return 0x20; }
-API(BOOL) SwitchToThread(void) { sys_dormir(0); return TRUE; }
-API(u32) WaitForSingleObject(HANDLE h, u32 ms)
-{
-	Obj *o = obj(h);
-	(void)ms;
-	if (o && o->tipo == O_PROCESO) {
-		if (!o->hecho) {
-			if (ms == 0) {
-				u32 r = sys_esperar(o->a, 1);
-				if (r == 0xFFFFFF00u)
-					return 258;          /* WAIT_TIMEOUT */
-				o->codigo = r;
-			} else
-				o->codigo = sys_esperar(o->a, 0);
-			o->hecho = 1;
-		}
-		return 0;
-	}
-	if (o && o->tipo == O_HILO && !o->hecho)
-		corre_hilo(h);
-	if (o && o->tipo == O_EVENTO && !o->a && ms == 0)
-		return 258;
-	if (o && o->tipo == O_EVENTO && !o->b)
-		o->a = 0;
-	return 0;                        /* WAIT_OBJECT_0 */
-}
-API(u32) WaitForSingleObjectEx(HANDLE h, u32 ms, BOOL a) { (void)a; return WaitForSingleObject(h, ms); }
-API(u32) WaitForMultipleObjects(u32 n, const HANDLE *h, BOOL todos, u32 ms)
-{
-	u32 k;
-	for (k = 0; k < n; k++)
-		if (WaitForSingleObject(h[k], todos ? ms : 0) == 0 && !todos)
-			return k;
-	return todos ? 0 : 258;
-}
-API(u32) MsgWaitForMultipleObjects(u32 n, const HANDLE *h, BOOL todos, u32 ms, u32 m)
-{
-	(void)m;
-	if (n)
-		return WaitForMultipleObjects(n, h, todos, 0) == 258 ? n : 0;
-	if (ms)
-		Sleep(ms > 10 ? 10 : ms);
-	return n;
-}
-u32 tls_usados[2];
-API(u32) TlsAlloc(void)
-{
-	u32 k;
-	for (k = 0; k < 64; k++)
-		if (!(tls_usados[k / 32] & (1u << (k % 32)))) {
-			tls_usados[k / 32] |= 1u << (k % 32);
-			TEB[0xE10 / 4 + k] = 0;
-			return k;
-		}
-	return 0xFFFFFFFF;
-}
-API(BOOL) TlsFree(u32 k) { if (k < 64) tls_usados[k / 32] &= ~(1u << (k % 32)); return k < 64; }
-API(void *) TlsGetValue(u32 k) { pon_error(0); return k < 64 ? (void *)TEB[0xE10 / 4 + k] : 0; }
-API(BOOL) TlsSetValue(u32 k, void *v) { if (k >= 64) return FALSE; TEB[0xE10 / 4 + k] = (u32)v; return TRUE; }
-API(u32) FlsAlloc(void *f) { (void)f; return TlsAlloc(); }
-API(BOOL) FlsFree(u32 k) { return TlsFree(k); }
-API(void *) FlsGetValue(u32 k) { return TlsGetValue(k); }
-API(BOOL) FlsSetValue(u32 k, void *v) { return TlsSetValue(k, v); }
+/* ---- (JUEGOS) los cerrojos, los eventos, los hilos y TLS: hilos.c ---- */
 
 /* ---- los procesos ---- */
 typedef struct { HANDLE proc, hilo; u32 pid, tid; } PROCESS_INFORMATION;

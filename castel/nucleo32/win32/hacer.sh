@@ -29,7 +29,7 @@ mkdir -p $O
 BF="-m32 -std=gnu11 -march=i586 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables
     -fno-builtin -fno-tree-loop-distribute-patterns -ffunction-sections -fdata-sections -fno-strict-aliasing
     -fexec-charset=CP1252 -Wall -Wno-unused -Wno-unused-function -Werror=implicit-function-declaration -Werror=int-conversion -I$O -I$AQUI"
-FUENTES="sys libc monton cargador principal diagnostico kernel32 archivos user32 controles menus dialogos recursos gdi32 dx comdlg32 otros red"
+FUENTES="sys libc monton cargador principal diagnostico hilos kernel32 archivos user32 controles menus dialogos recursos gdi32 dx comdlg32 otros red"
 python3 -I $AQUI/hazdatos.py $O/datos.h
 LISTA=
 for f in $FUENTES; do [ -f $AQUI/$f.c ] && LISTA="$LISTA $AQUI/$f.c"; done
