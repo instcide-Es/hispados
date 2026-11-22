@@ -129,7 +129,7 @@ TIPO_POR_NOMBRE = {
     'ejemplos': 'desarrollo',
     'win32': 'windows',
     'escudo': 'seguridad', 'escbase': 'seguridad', 'escmes': 'seguridad', 'escdia': 'seguridad',
-    'sonido': 'multimedia', 'mirador': 'multimedia',
+    'sonido': 'multimedia', 'mirador': 'multimedia', 'reproduc': 'multimedia',     # (REPRODUCTOR)
     'clicgest': 'terceros',
 }
 
@@ -481,6 +481,11 @@ OPCIONALES = [
     ('mirador', '1.0', 'El Mirador: ver imágenes (BMP, PNG, JPG, GIF animados, ICO...), girar, diapositivas, pantalla completa y fondo de escritorio', 'base >= 0.8.6', [
         ('BIN/MIRADOR.BIN', r'\HISPA\MIRADOR.BIN'), ('MIRADOR.TXT', r'\HISPA\MIRADOR.TXT'),
         ('MIRADOR.MNU', r'\HISPA\MENU\MIRADOR.MNU'), ('MIRADOR.ICP', r'\HISPA\MENU\MIRADOR.ICP')]),
+    # (REPRODUCTOR) el Reproductor de música (castel/nucleo32/reproductor/paquete.sh; tipo «multimedia»)
+    ('reproduc', '1.0', 'El Reproductor: música (MP3, OGG, FLAC, WAV, MOD, XM, S3M, IT) y CD de música, con lista, ecualizador de 10 bandas y visualización',
+     'base >= 0.8.6, sonido >= 1.0', [
+        ('BIN/REPRODUC.BIN', r'\HISPA\REPRODUC.BIN'), ('REPRODUC.TXT', r'\HISPA\REPRODUC.TXT'),
+        ('REPRODUC.MNU', r'\HISPA\MENU\REPRODUC.MNU'), ('REPRODUC.ICP', r'\HISPA\MENU\REPRODUC.ICP')]),
 ]
 
 # (0.8.6) los que el catálogo marca del sistema («sistema=nombre»): los que

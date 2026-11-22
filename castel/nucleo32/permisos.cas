@@ -68,7 +68,7 @@ módulo Permisos
     público constante SELLO_ESCUDO = 17         ; (pentium-escudo) el antivirus y el cortafuegos
     público constante SELLO_PROGRAMA = 18       ; (pentium-programas) «Programas instalados»
     público constante SELLO_SONIDO = 19         ; (pentium-sonido) el servicio de sonido
-    ; (el 20 es el del Reproductor)
+    público constante SELLO_REPRODUC = 20       ; (REPRODUCTOR) el Reproductor: su carpeta (\HISPA\REPRODUC)
     público constante SELLO_PANEL = 21          ; (PANEL) el Panel de control: los ajustes del sistema (la llamada 174)
     público constante SELLO_HORA = 22           ; (PANEL, NTP) la hora por Internet: poner el reloj (la 175), sin atrasarlo más de 2 h
     público constante SELLO_ARGON2 = 23         ; (USUARIOS) el que resume las contraseñas (ARGON2.BIN)
@@ -95,8 +95,10 @@ módulo Permisos
     constante B_ESCUDO = 0x20000
     constante B_PROGRAMA = 0x40000
     constante B_SONIDO = 0x80000
-    constante B_ARGON2 = 0x100000               ; (USUARIOS)
-    constante B_USUARIOS = 0x200000
+    constante B_REPRODUC = 0x100000              ; (REPRODUCTOR)
+    ; (0x200000 y 0x400000: PANEL.BIN y HORARED.BIN, que no escriben en la zona)
+    constante B_ARGON2 = 0x800000               ; (USUARIOS)
+    constante B_USUARIOS = 0x1000000
     ; (USUARIOS) los renglones que solo valen si quien lanza el programa es
     ; administrador (o el sistema): la configuración de SSH y de los túneles
     constante SOLO_ADMIN = 0xD00                ; B_SSHD, B_WG y B_TAILSCAL
@@ -194,6 +196,7 @@ módulo Permisos
         programa("ESCUDO.BIN", SELLO_ESCUDO, cierto)
         programa("PROGRAMA.BIN", SELLO_PROGRAMA, falso)
         programa("SONIDO.BIN", SELLO_SONIDO, cierto)
+        programa("REPRODUC.BIN", SELLO_REPRODUC, falso)    ; (REPRODUCTOR)
         programa("PANEL.BIN", SELLO_PANEL, falso)          ; (PANEL)
         programa("HORARED.BIN", SELLO_HORA, falso)            ; (PANEL, NTP) no es servicio: solo pone la hora
         programa("ARGON2.BIN", SELLO_ARGON2, falso)        ; (USUARIOS)
@@ -278,6 +281,7 @@ módulo Permisos
         regla("CLICGEST.SES", B_CLICGEST, cierto)          ; la sesión guardada («recordarme»)
         regla("CLICGEST.ANC", B_CLICGEST, falso)
         regla("ASOCIA.TXT", B_EQUIPO, falso)               ; con qué se abre cada clase de archivo (Mi equipo)
+        regla("REPRODUC\\", B_REPRODUC, falso)             ; (REPRODUCTOR) sus ajustes, su lista, el ecualizador y el buzón
         ; ---- los programas del sistema (en la raíz de la memoria de arranque;
         ; en un sistema instalado, que nadie ponga en la raíz uno que se llame
         ; igual: ORDENES.BIN en la raíz haría pasar el disco por una memoria de arranque) ----

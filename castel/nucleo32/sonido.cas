@@ -113,7 +113,7 @@ módulo Sonido
     constante O_CALLAR = 6                      ; se va a apagar: la tarjeta, parada y sin ruido
 
     público constante MAX_CANALES = 8
-    constante COLA = 65536                      ; lo que cabe en la cola de un canal (potencia de 2)
+    constante COLA = 262144                     ; lo que cabe en la cola de un canal (potencia de 2; (REPRODUCTOR) eran 64 K: 1,4 s a 48 kHz, para que no se corte con otro programa gastando el procesador)
     constante MAX_ÓRDENES = 16
     constante PRIMERA_VOZ = 0x100
     constante ZONA_INICIO = 0xA0000000          ; donde ve el servicio_sonido la memoria de DMA y los registros

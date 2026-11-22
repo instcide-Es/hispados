@@ -1,0 +1,55 @@
+Reproductor 1.0 de Hispa-Pentium
+================================
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+Suena: MP3 (y MP2), OGG Vorbis, FLAC (también en OGG), WAV (PCM de 8, 16,
+24 y 32 bits, coma flotante, IMA-ADPCM y MS-ADPCM), los módulos de los
+«trackers» (MOD, XM, S3M e IT), los CD de música y sus imágenes (.CUE con su
+.BIN, o con un FLAC o un WAV entero). Listas .M3U, .M3U8 y .PLS.
+
+La ventana
+----------
+- Arriba, la carátula (la que lleva la canción dentro, o FOLDER.JPG o
+  COVER.JPG en su carpeta), el título, el artista, el disco y el formato, y
+  la visualización: el espectro (barras) o la onda; un clic la cambia o la
+  apaga (apagada gasta menos).
+- La barra de la posición se arrastra; un clic en el tiempo enseña lo que
+  falta. La rueda encima: 5 segundos adelante o atrás.
+- Los botones grandes: Anterior, Reproducir o Pausa, Parar y Siguiente; el
+  volumen (el de este programa en el mezclador: Configuración > Sonido);
+  Aleatorio, Repetir (no, todo, una), la velocidad (de 0,5 a 2, sin cambiar
+  el tono) y «Pequeño» (una tira con el título, el tiempo y los botones).
+- Las pestañas: la Lista (dos clics: tocar; arrastrar: cambiar de sitio;
+  el botón secundario: tocar, quitar, subir, bajar), el Ecualizador (10
+  bandas, de 60 Hz a 16 kHz, y el preamplificador; los preajustes y los
+  propios; «Automático», por el género de la canción), Añadir (las
+  unidades y las carpetas: añadir lo elegido o la carpeta entera, guardar
+  la lista) y Opciones (sin huecos, el fundido entre canciones, el volumen
+  igualado con ReplayGain, la visualización, la velocidad y las teclas).
+- Se pueden soltar canciones, carpetas y listas desde Mi equipo en la
+  ventana. Dos clics en una canción en Mi equipo la tocan (en el
+  Reproductor que ya esté abierto).
+- Minimizada sigue sonando; en la bandeja, la nota: un clic, la ventana;
+  el botón secundario, Reproducir o Pausa, Siguiente, Anterior, Parar.
+
+Las teclas: Espacio (tocar o pausa), N y P (siguiente y anterior), S
+(parar), las flechas (5 s; con Mayús, 30 s), + y - (el volumen), Ctrl+O
+(añadir), Ctrl+S (guardar la lista), Ctrl+M (pequeño o grande), Supr
+(quitar), Tab (otra pestaña).
+
+En la Consola
+-------------
+  REPRODUCE archivo|carpeta|lista|D: ... [/ALEATORIO] [/REPITE]
+            [/VOLUMEN n] [/EQ Rock] [/VELOCIDAD 1,5] [/FUNDIDO 4]
+            [/VENTANA] [/MIDE]
+
+Lo guardado (el volumen, el ecualizador, la lista de la última vez), en
+\HISPA\REPRODUC (o \REPRODUC sin instalar).
+
+Las bibliotecas de otros (libres; sus licencias, en terceros/ del código):
+- minimp3 (lieff): dominio público (CC0).
+- stb_vorbis y stb_image (Sean Barrett): dominio público o MIT.
+- dr_flac (David Reid): dominio público o MIT-0.
+- libxmp-lite 4.6.0 (Claudio Matsuoka, Hipolito Carraro Jr): MIT.
+- Las letras DejaVu Sans: licencia de Bitstream Vera y DejaVu (libre).

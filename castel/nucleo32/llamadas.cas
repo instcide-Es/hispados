@@ -126,6 +126,8 @@ módulo Llamadas
     público constante DATO_ALTO_PANTALLA = 12
     público constante DATO_ESCRITORIO = 13      ; 1 si el escritorio está en marcha
     público constante DATO_ALTO_LIBRE = 14      ; (explorador) lo alto de la pantalla sin la barra de tareas ni el dock
+    público constante DATO_TERMINAL = 15        ; (REPRODUCTOR) 1 si el programa escribe en un terminal (la Consola, SSH)
+    público constante DATO_MIS_TICS = 16        ; (REPRODUCTOR) los tics en que el reloj lo ha pillado corriendo (lo que gasta)
 
     público constante SIGUE = 0xFFFFFF00        ; lo que da acabada() si la tarea no ha acabado
 
@@ -140,7 +142,8 @@ módulo Llamadas
     público constante EV_SALE = 9               ; el ratón ya no está encima
     público constante EV_UNIDADES = 12          ; ha aparecido o desaparecido una unidad (una memoria USB): hay que mirarlas otra vez
     público constante EV_RUEDA = 13             ; (NAVEGADOR) la rueda del ratón: a, b, dónde; c, los pasos (con signo, en el octeto bajo: arriba, positivos), con CON_MAYÚS y CON_CONTROL
-    público constante EV_SOLTADO = 14           ; (BLOC) se ha soltado en la ventana algo arrastrado desde Mi equipo: a, b, dónde; la ruta, con lo_soltado()
+    público constante EV_SOLTADO = 14           ; (BLOC, REPRODUCTOR) se ha soltado en la ventana algo arrastrado desde Mi equipo: a, b, dónde (visto desde dentro); la ruta, con lo_soltado() (la llamada 173)
+    público constante EV_BANDEJA = 15           ; (REPRODUCTOR) su icono de la bandeja: a, lo elegido de su menú (SIN_ELEGIR: un clic)
     público constante EV_MENÚ = 10              ; se ha cerrado el menú que se pidió: a, la opción elegida (desde 0; SIN_ELEGIR si ninguna); b, su etiqueta
     público constante SIN_ELEGIR = 0xFFFFFFFF
     público constante BOTÓN_IZQUIERDO = 1       ; en «c» de los sucesos del ratón: los botones pulsados...
@@ -1058,6 +1061,27 @@ módulo Llamadas
     fin
     variable suelta: Suelta
 
+    ; (REPRODUCTOR) el CD de música de la unidad de esa letra: la tabla de las
+    ; pistas (808 octetos: una Toc_cd de cdrom.cas) a destino. Da 0 o el error
+    público función cd_pistas(letra: nat32, destino: puntero a byte): nat32
+        devolver llamada(134, letra, 0, nat32(destino))
+    fin
+
+    tipo Pide_sonido = estructura
+        lba, n: nat32
+        destino: puntero a byte
+    fin
+    variable pide_sonido: Pide_sonido
+
+    ; (REPRODUCTOR) n sectores de sonido (2352 octetos cada uno, hasta 64)
+    ; del CD de música de esa letra, desde el lba, a destino. Da 0 o el error
+    público función cd_sonido(letra: nat32, lba: nat32, n: nat32, destino: puntero a byte): nat32
+        pide_sonido.lba := lba
+        pide_sonido.n := n
+        pide_sonido.destino := destino
+        devolver llamada(134, letra, 1, nat32(dirección(pide_sonido)))
+    fin
+
     ; lo que se arrastra desde la ventana v (una ruta entera, con su letra)
     ; se ha soltado en el punto (x, yy) de ella, que cae fuera: el escritorio
     ; lo pone en el tapiz (un acceso) o, en el dock, lo fija
@@ -1068,8 +1092,9 @@ módulo Llamadas
         devolver llamada(171, v, nat32(dirección(suelta)), 0)
     fin
 
-    ; (BLOC) la ruta de lo último que se ha soltado en una ventana de este
-    ; programa (EV_SOLTADO), a destino: da su largo, o un error
+    ; (BLOC, REPRODUCTOR) la ruta de lo último que se ha soltado en una
+    ; ventana de este programa (EV_SOLTADO), a destino: da su largo, o un
+    ; error (NO_HAY: nada para él). La llamada 173, una sola para todos
     público función lo_soltado(destino: puntero a byte, cabe: nat32): nat32
         devolver llamada(173, nat32(destino), cabe, 0)
     fin
