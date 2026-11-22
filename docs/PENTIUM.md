@@ -6413,6 +6413,208 @@ a mano, con el lanzador mantenido, a 1024 x 600 y a pantalla completa), los
 - Pintura (en Hispa-386 es un `.HVP`): con HVPRUN ya se puede abrir; hacerla
   de aquí, como los juegos.
 - Las vibraciones de la pantalla al empujar la mesa del pinball.
+## 14 terdecies. Pluma 2 y la oficina de 32 bits (PLUMA.BIN, rama pluma32)
+
+*22/11/2026. Carlos: «Ya que funcionarán los programas de oficina en 32
+bits, podríamos darles una cara nueva y actualizarlos con funciones propias
+de 32 bits». Se empieza por Pluma. Lo cambiado fuera de
+`castel/nucleo32/oficina/` lleva la marca «(PLUMA32)».*
+
+| | |
+|---|---|
+| ![Pluma 2 en QEMU: formato, una tabla y una imagen](pentium/pluma/pl1.png) | ![Exportado a PDF (la barra de estado lo dice)](pentium/pluma/pl2.png) |
+| ![Ortografía (F7)](pentium/pluma/pl3.png) | ![Vuelto a abrir: PRUEBA.PLU](pentium/pluma/pl4.png) |
+| ![El menú Formato (Alt+F): lo que aún no hay, en gris](pentium/pluma/pl5.png) | ![El cuadro Fuentes](pentium/pluma/pl6.png) |
+| ![En el anfitrión (1024 x 700): estilos, tabla, imagen](pentium/pluma/h1.png) | ![El cuadro Fuentes, con su muestra](pentium/pluma/h3.png) |
+
+**Qué es.** Pluma 2 es el procesador de textos nativo de Hispa-Pentium: un
+programa del anillo 3 de 32 bits (`\HISPA\PLUMA.BIN`, unos 680 KB con las
+seis DejaVu dentro), sin HVPRUN, en **C portable**: el mismo código se
+compila para Hispa-64 cambiando solo `comun/so_*.c` (como Hispa-PDF). El
+Pluma de Hispa-386 (`PLUMA.HVP`) sigue para Hispa-386 y para quien no tenga
+el paquete; con el paquete `pluma` instalado, el menú Inicio (Oficina) y Mi
+equipo (los `.PLU`, `.ODT`, `.DOCX`, `.DOC` y `.RTF`) usan Pluma 2.
+
+**La cara nueva** (el croquis de Carlos, al estilo de Word 6): la barra de
+menús con los menús que pidió el 16/11 (Archivo, Edición, Ver, Insertar,
+Formato, Herramientas, Tabla, Ventana, ?: lo que aún no hay sale en gris),
+la barra de herramientas (nuevo, abrir, guardar, imprimir, presentación
+preliminar, ortografía, cortar, copiar, pegar, copiar formato, deshacer,
+rehacer, tabla, imagen, salto de página, PDF, ¶, buscar, zoom) y la de
+formato (Estilo, Fuente, Tamaño, N K S, color de la letra y resaltado,
+alineación, numeración, viñetas, sangrías, bordes), con **iconos propios**
+dibujados con rayas suavizadas a cualquier tamaño; la **regla** con las
+sangrías (primera línea, izquierda, derecha) y las tabulaciones que se
+arrastran (un clic pone una del tipo del botón de la izquierda; arrastrada
+fuera, se quita); la **vista de página** (las hojas una debajo de otra, con
+las esquinas de los márgenes) con **zoom** (Ctrl+rueda, la lista, Ver > Zoom,
+ancho de página); la **presentación preliminar**; la barra de estado (página
+X de Y, la línea en la página, las palabras, el idioma, lo que hace el
+botón que hay debajo del ratón). Nada depende solo del color: lo activo va
+hundido y con una raya debajo, el foco con un borde grueso, lo elegido de
+una lista con una flecha, las faltas con un **trazo ondulado** (no una raya
+roja). Los menús son los del sistema (la llamada 39; Alt+letra los abre y
+las flechas pasan al de al lado).
+
+**Lo que hace** (el documento, `pluma/doc.h`): párrafos con tramos de
+formato (letra, tamaño, negrita, cursiva, subrayado, tachado, color,
+resaltado, super y subíndice, versalitas); estilos con nombre (Normal,
+Título, Título 1-3, Subtítulo, Cita, Párrafo de lista, Encabezado, Pie, Nota
+al pie, Sin espaciado y los que se creen: Formato > Estilo, «Definir con lo
+elegido»); alineación y justificado; sangrías (también francesa);
+interlineado sencillo, 1,15, 1,5, doble, exacto o mínimo; espacio antes y
+después; salto de página antes y «con el siguiente»; tabulaciones a la
+izquierda, centradas, a la derecha y decimales, con relleno de puntos;
+listas con viñetas, números, letras y romanos, con niveles (Tab y Mayús+Tab)
+y número de inicio; **tablas** (insertar filas y columnas, quitarlas, unir y
+dividir celdas a lo ancho y a lo alto, bordes, fondo de celda, ancho de
+columna, fila de títulos; Tab pasa de celda y en la última hace otra fila);
+**imágenes** PNG, JPG, BMP y GIF (stb_image), en la línea o con el texto
+alrededor a un lado, que se agrandan arrastrando su esquina; saltos de
+página; **encabezado y pie** con el número de página y de páginas (y sin
+ellos en la portada); notas al pie (solo su número, de momento); deshacer y
+rehacer **sin límite** (cada cambio guarda los párrafos que toca; las
+palabras que se escriben seguidas van en un paso); buscar y reemplazar (sin
+mirar mayúsculas ni tildes, o exacto); ir a una página; contar palabras;
+cambiar mayúsculas; fecha, campos y símbolos; copiar formato con la brocha;
+y el portapapeles del sistema (lo copiado dentro de Pluma se pega con su
+formato).
+
+**Letras de verdad**: TrueType con `stb_truetype` y grises (16 bits de
+precisión, un poco de gamma), con un tercio de punto de precisión a lo
+ancho: las seis DejaVu de dentro (Sans, Serif y Sans Mono, normal y
+negrita; la cursiva se hace inclinando 12°, igual en la pantalla que en el
+PDF) y las `.TTF` que el usuario ponga en `\DOCUMENT\LETRAS` (o `\LETRAS`),
+comprobadas antes de usarlas (`comun/ttf.c`: la comprobación de Hispa-PDF;
+stb_truetype no mira los límites). Una familia que no está («Times New
+Roman», «Calibri», «Roble» de Hispa-386) se ve con la DejaVu más parecida y
+se guarda con su nombre. **WYSIWYG**: todo se mide en twips con lo que
+avanza cada letra en su TrueType, y `pluma/pinta_pag.c` recorre la página
+igual para la pantalla que para el PDF.
+
+**Formatos** (se conocen por lo de dentro, no por la extensión):
+
+| | Leer | Escribir |
+|---|---|---|
+| `.PLU` | los de Hispa-386 (texto 437, formato, tipo y tamaño, tablas de 386) y los de Pluma 2 | delante, lo que entiende Pluma de 386 (que no mira lo de detrás); detrás («PLU2»), todo lo de Pluma 2: no se pierde nada |
+| `.ODT` | texto, estilos, formato, listas, tablas con celdas unidas, imágenes, página, encabezado y pie con campos, notas, título y autor | lo mismo |
+| `.DOCX` | lo mismo (numbering.xml, gridSpan/vMerge, la letra del tema) | lo mismo |
+| `.RTF` | 1252/437 y \u, letras y colores, estilos, listas, tablas (\clmgf, \clvmgf), imágenes PNG/JPG, página, encabezado y pie | lo mismo (solo ASCII) |
+| `.TXT` | 437 o UTF-8 | 437 con CR LF |
+| `.PDF` | (no: Hispa-PDF) | **exportar**, con las TrueType incrustadas (subconjunto, CIDFontType2 con ToUnicode: se busca y se copia), marcadores con los títulos, imágenes JPEG tal cual |
+
+El núcleo aún crea solo nombres 8+3: «Guardar como carta.docx» queda
+`CARTA.DOC` (Pluma lo vuelve a abrir como DOCX, por lo de dentro) y lo dice
+en la barra de estado. Los `.DOC` binarios de Word 97-2003 no se abren (se
+dice por qué). **Imprimir**: aún no hay impresoras; Archivo > Imprimir lo
+explica y lleva a Exportar a PDF.
+
+**El corrector** (`comun/orto.c`): el de la oficina de Hispa-386
+(`ortografia.inc`) pasado a C, con el mismo `DICCIO.DAT` (docs/ORTOGRAFIA.md)
+y sus mismas respuestas (258.088 consultas comparadas, 0 distintas); subraya
+mientras se escribe (no la palabra que se está escribiendo), propone con el
+botón derecho (y «Añadir al diccionario», «Omitir todas») y F7 recorre el
+documento (Cambiar, Cambiar todas, Omitir, Omitir todas, Añadir). Las
+palabras del usuario, en `\DOCUMENT\PROPIAS.TXT`.
+
+**Las teclas**: las de Word en español que pidió Carlos (Ctrl+U nuevo,
+Ctrl+A abrir, Ctrl+G guardar, Ctrl+P imprimir, Ctrl+E todo, Ctrl+B buscar,
+Ctrl+L reemplazar, Ctrl+N/K/S negrita, cursiva, subrayado, Ctrl+Q/T/D
+izquierda, centro, derecha), Ctrl+Z/Y, Ctrl+X/C/V, Ctrl+R salto de página
+(como en Pluma de 386), Ctrl+O/W letra más grande/más pequeña, F5 ir a, F7
+ortografía, Mayús+Intro salto de línea; Ctrl+flechas y
+Ctrl+Inicio/Fin (Control, del mapa de teclas de la llamada 181). Ctrl+I,
+Ctrl+J y Ctrl+H no se pueden: el teclado las da como Tab, Intro y Retroceso.
+
+### La oficina de 32 bits: la biblioteca común (`castel/nucleo32/oficina/comun`)
+
+Lo que comparten Pluma 2 y los que vengan (Cuentas 2 la primera), en C
+portable. Cada programa lista sus fuentes (`pluma/fuentes.lst`) y se compila
+con `comun/so_pentium.c` (Hispa-Pentium) o `comun/so_anfitrion.c` (Linux:
+las pruebas y el modelo de Hispa-64):
+
+| Pieza | Qué da |
+|---|---|
+| `so.h`, `so_pentium.c`, `so_anfitrion.c` | lo único que cambia de un sistema a otro: memoria (la de Hispa-PDF), archivos y carpetas (rutas en UTF-8), la ventana (llamadas 32-36, 39, 40, 41, 80, 81, 181), los sucesos ya en Unicode (`so_suceso`), el portapapeles, la hora. En Linux, una **ventana de mentira** que se maneja con un guion (`OFI_GUION`: escribe, tecla, clic, doble, arrastra, rueda, elige, captura...) y deja capturas `.ppm` |
+| `entrada.asm`, `pentium.ld`, `inc/` | la cabecera HPU3 y la entrada (llama a `ofi_principal`), el enlace en 0x40000000, las cabeceras de C sin biblioteca |
+| `texto.h` | UTF-8, UTF-32, la 437 de Hispa (con Á, Í, Ó, Ú, €), mayúsculas, un `printf` pequeño (`fmt`, `dice`) y el búfer que crece (`bufer`, `buf_xml`...) |
+| `ttf.h` | las TrueType sin fiarse de ellas (comprobar, el glifo de una letra, la familia del `name`) y el **subconjunto** para un PDF |
+| `letras.h` | las letras: las DejaVu de dentro (`haz_letras.py`) y las del usuario, la familia más parecida, lo que mide cada letra (en milésimas de em) y su dibujo con grises guardado |
+| `lienzo.h` | dibujar en un lienzo 0x00RRGGBB: rectángulos, esquinas redondas, rayas y polígonos suavizados, imágenes a escala con alfa, la onda del corrector, texto |
+| `ui.h`, `iconos.c` | la cara: barra de menús, barras de herramientas (botones, conmutadores, listas, colores), **regla**, barras de desplazamiento, barra de estado y **cuadros de diálogo** (rótulos, campos, números con flechas, botones, casillas, opciones, listas, desplegables, muestras); 37 iconos |
+| `imagen.h` | PNG, JPG, BMP y GIF con stb_image (con topes) |
+| `zip.h`, `miniz_ofi.c` | leer y escribir ZIP con miniz (topes: 64 MB por archivo, 256 MB en total, 20.000 entradas) |
+| `xml.h` | un XML seguro (sin recursión, sin DTD) en árbol, con caminos (`xml_camino(n, "w:body/w:p")`) y lo de escribirlo: para ODT/DOCX y luego ODS/XLSX |
+| `pdfsal.h` | escribir PDF: páginas, texto con la x de cada letra, TrueType incrustadas, imágenes, rayas, rectángulos, marcadores y metadatos |
+| `orto.h` | el corrector de español (`DICCIO.DAT`) |
+
+Lo de los documentos de texto de ODF y OOXML que no es de Pluma (los
+estilos, las medidas, los colores) va en `pluma/f_xmlcomun.c`, que valdrá
+para ODS y XLSX.
+
+### Cómo está hecho Pluma 2 (`castel/nucleo32/oficina/pluma`)
+
+```
+doc.h, doc.c        el documento: párrafos en UTF-32 con su formato por letra (los
+                    formatos, sin repetir), estilos, tablas (cada celda un párrafo),
+                    imágenes (el archivo tal cual), notas, la página
+maqueta.c           partir en líneas (con lo que mide cada letra en twips) y repartir en
+                    páginas: incremental (solo se rehace el párrafo que cambia; repartir
+                    es sumar), así cientos de páginas van igual de ligeras
+editar.c            los cambios y deshacer/rehacer sin límite
+pinta_pag.c         el recorrido de una página: el mismo para la pantalla y el PDF
+vista.c             la vista de página, el cursor, lo elegido, las faltas, el zoom
+ventana.c           la ventana, los menús, las barras, el teclado y el ratón
+dialogos.c          los cuadros (abrir y guardar, fuente, párrafo, tabulaciones, página,
+                    tabla, imagen, buscar, encabezado y pie, estilos, ortografía...)
+f_plu.c f_odt.c f_docx.c f_rtf.c f_pdf.c archivo.c   los formatos
+orto_pluma.c        el corrector en Pluma         principal.c   la orden y --convierte
+hacer.sh, anfitrion.sh, paquete.sh, fuentes.lst, LEEME.txt, pluma32.png, pruebas/
+```
+
+**Medidas.** En QEMU con la CPU de un Atom (`-cpu n270 -icount shift=1`:
+unos 500 millones de instrucciones por segundo, menos de lo que da un N455
+de verdad) y un documento de 101 páginas (`PLUMA --mide 100 40`): **24 ms
+por letra** escrita en medio (maquetar y pintar la ventana; la peor, 30 ms)
+y 36 ms cada Av Pág; unos 5,7 MB de memoria. Al principio eran 96 ms:
+pintar las barras con sus iconos cada vez; ahora cada barra se repinta solo
+si cambia (su «firma») y al sistema va solo la franja que cambia. En el
+anfitrión, un PDF de 101 páginas, 152 KB en 57 ms.
+
+**El paquete** `pluma` 2.0 (OPCIONALES de `tools/hpq.py`, tipo oficina,
+`base >= 0.8.3`): `\HISPA\PLUMA.BIN`, `\HISPA\PLUMA\DICCIO.DAT`,
+`\HISPA\PLUMA\LEEME.TXT` y `\HISPA\MENU\PLUMA.MNU` y `.ICP`;
+`castel/nucleo32/oficina/pluma/paquete.sh SALIDA`. Para que el menú y Mi
+equipo lo usen en vez del de 386 hace falta el núcleo (`inicio.cas`) y el
+`equipo` (`exoper.cas`) de esta rama.
+
+**Probarlo**: `castel/pruebas.sh`, parte 41 (`SOLO=pluma`,
+`castel/pruebas_pluma.sh`): las pruebas de cada parte en el anfitrión con
+ASan y UBSan (`pluma/pruebas/formatos.sh`, `pdf.sh`, `rtf.sh`, `orto.sh`,
+con sus fuzz de ODT, DOCX, RTF y DICCIO.DAT), la ventana con un guion, la
+ida y vuelta de lo guardado por ODT, DOCX y RTF, la ventana en QEMU (escribir
+con formato, tabla, imagen, guardar, exportar, cerrar y abrir otra vez, el
+corrector (F7), el menú Formato y el cuadro Fuentes; y lo guardado, mirado
+desde fuera) y la medida en el Atom; todo bien el 22/11. En el VPS no está LibreOffice Writer (solo core, draw e
+impress): las comparaciones con él se saltan, y los ODT y DOCX de prueba los
+hace `pruebas/haz_docs.py` con la forma de los de LibreOffice y Word.
+
+**Lo que falta**: imprimir (cuando haya impresoras); escribir el texto de
+las notas al pie (se leen y se guardan, pero aún no se editan ni se pintan
+abajo); columnas, secciones, sinónimos, autocorrección, combinar
+correspondencia, control de cambios y comentarios; nombres largos al
+guardar (el núcleo); imágenes en el encabezado; tablas dentro de tablas;
+la cursiva de verdad de las DejaVu (hoy, inclinada).
+
+### El plan para el resto de la oficina
+
+Con el mismo patrón (núcleo en C portable sobre `oficina/comun`, la misma
+cara, sus pruebas en el anfitrión y en QEMU, su paquete): **Cuentas 2**
+(hoja de cálculo, ODS/XLSX con `zip`/`xml`/`f_xmlcomun`, gráficos, exportar a
+PDF), **Datos 2**, **Presentaciones 2** (ODP/PPTX y pase a pantalla
+completa), **Publicaciones 2** (marcos sobre la maqueta de Pluma) y
+**Facturas 2** (con el PDF de `pdfsal`). Los `.HVP` siguen para Hispa-386.
+Ver docs/pentium/METAS.md.
 
 ## 15. Las pruebas
 

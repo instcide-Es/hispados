@@ -1,0 +1,32 @@
+# Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+# Los fuentes de Pluma 2 (los leen hacer.sh y anfitrion.sh): «comun/x» es
+# de la biblioteca común de la oficina (oficina/comun); «pluma/x», de Pluma.
+# Detrás, «-w» si es de los que llevan código de otros dentro (sin avisos).
+comun/texto
+comun/ttf
+comun/letras -w
+comun/lienzo
+comun/imagen -w
+comun/ui
+comun/iconos
+comun/zip
+comun/xml
+comun/pdfsal
+comun/orto
+comun/miniz_ofi -w
+pluma/doc
+pluma/maqueta
+pluma/editar
+pluma/pinta_pag
+pluma/archivo
+pluma/f_plu
+pluma/f_xmlcomun
+pluma/f_odt
+pluma/f_docx
+pluma/f_rtf
+pluma/f_pdf
+pluma/vista
+pluma/orto_pluma
+pluma/dialogos
+pluma/ventana
+pluma/principal
