@@ -2753,14 +2753,17 @@ RSDP). GRUB sale de los servicios de arranque del firmware antes de entrar.
   paquete puesto sale solo.
 - No firmado (sin shim): hay que apagar el Secure Boot.
 
-**Probado** (parte 48, `SOLO=uefi`, `pruebas_uefi.sh`): con OVMF de 64 bits
+**Probado** (parte 48, `SOLO=uefi`, `pruebas_uefi.sh`, 77 bien): con OVMF de 64 bits
 (q35): la memoria con `BOOTX64.EFI` y su menú, el escritorio a la medida del GOP
 (1280 x 800, la del EDID de QEMU), ACPI.BIN con la RSDP de GRUB y la batería de
 la SSDT de prueba, el disco SATA (AHCI) y la memoria por el xHCI como X:, la
 consola del núcleo pintada en la pantalla del firmware (con las letras al
-doble) y su texto en el marco que dice; la misma memoria por SeaBIOS (multiboot
+doble) y su texto en el marco que dice; `PANTALLA.ENV` a 800 x 600 pedida al GOP
+y Configuración › Pantalla diciendo que no se cambia en marcha; la misma memoria por SeaBIOS (multiboot
 de siempre, 800 x 600, nada de UEFI); y el CD por UEFI al escritorio. El de 32
-bits, si están OVMF32 y GRUB ia32.
+bits, si están OVMF32 y GRUB ia32. Y siguen pasando, con las imágenes híbridas
+(VPS), las partes cd, pantalla, 06 y 07; y en el PC de Albinyana (sin GRUB EFI:
+imágenes solo BIOS) castel32, 06, 07, cd, caliente, paquetes, acpi y pantalla.
 
 ## 12. Instalarlo en el disco duro
 

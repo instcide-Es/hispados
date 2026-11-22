@@ -24,7 +24,7 @@
 # para el OVMF de 64), «:tecla» y «:texto_uefi» (el texto de 80 x 25 de la
 # consola pintada, del marco que dice el núcleo, a NOMBRE.txt)
 maquina_uefi() {
-  local q=$1 n=$2 o=$3 p i s x m
+  local q=$1 n=$2 o=$3 p i s x m rx=400 ry=300 sx sy dx dy
   shift 3
   rm -f $V/mon
   # shellcheck disable=SC2086
@@ -45,6 +45,18 @@ import sys
 d = open(sys.argv[1], 'rb').read()
 for f in range(25): print('|' + bytes(d[f * 160:(f + 1) * 160:2]).decode('cp437').rstrip())" $V/p.bin > $V/${p:12}.txt
         else : > $V/${p:12}.txt; fi ;;
+      ":raton "*|":clic "*) set -- ${p#:* }; dx=$(($1 - rx)); dy=$(($2 - ry))
+        while [ $dx -ne 0 ] || [ $dy -ne 0 ]; do
+          sx=$dx; [ $sx -gt 50 ] && sx=50; [ $sx -lt -50 ] && sx=-50
+          sy=$dy; [ $sy -gt 50 ] && sy=50; [ $sy -lt -50 ] && sy=-50
+          printf 'mouse_move %s %s\n' $sx $sy | socat - UNIX-CONNECT:$V/mon > /dev/null 2>&1; sleep 0.05
+          dx=$((dx - sx)); dy=$((dy - sy))
+        done
+        rx=$1; ry=$2; sleep 0.25
+        if [ "${p:0:5}" = ":clic" ]; then
+          printf 'mouse_button 1\n' | socat - UNIX-CONNECT:$V/mon > /dev/null 2>&1; sleep 0.2
+          printf 'mouse_button 0\n' | socat - UNIX-CONNECT:$V/mon > /dev/null 2>&1; sleep 0.4
+        fi ;;
       ":espera "*) s=${p:8}; s=${s%% *}; x=${p#:espera $s }
         for ((i = 0; i < s * 2; i++)); do tr -d '\r' < $V/$n.sal | iconv -f CP437 -t UTF-8 2> /dev/null | grep -q -- "$x" && break; sleep 0.5; done ;;
     esac
@@ -116,6 +128,15 @@ else ok "(la RSDP no es la de la zona de la BIOS)"; fi
 mira "los discos: el SATA (AHCI) y la memoria USB (xHCI), que es X:, la del sistema" "^usb: controladora xHCI" "QEMU HARDDISK, 64 MB, FAT16 (SATA)" \
   "QEMU HARDDISK, 64 MB, FAT16 (USB)" "^unidades: .*C: (disco [0-9], SATA, FAT16).*X: (disco [0-9], USB, FAT16); la del sistema, X:"
 if ! grep -q "excepción\|\*\*\*" $S; then ok "por UEFI, ni una excepción ni una queja del núcleo"; else ko "por UEFI, el núcleo se queja:"; grep "excepción\|\*\*\*" $S | head -3 | sed 's/^/        /'; fi
+# 2b. la medida guardada (PANTALLA.ENV: 800 x 600) se la pide GRUB al
+# firmware; y Configuración > Pantalla: no se cambia en marcha, y lo dice
+cp $OV/OVMF_VARS_4M.fd $V/vars64.fd
+cp $V/usb.img $V/u1.img
+grub-editenv $V/PANTALLA.ENV create && grub-editenv $V/PANTALLA.ENV set pantalla=800x600 antes= prueba=0 && mcopy -o -i $V/u1.img@@1M $V/PANTALLA.ENV ::/
+maquina_uefi qemu-system-x86_64 conf "$Q64 $DISCOS" ":espera 90 ^escritorio: en marcha" ":pausa 4" ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 336 230" ":pausa 2" ":captura uefi6"
+mira "la medida guardada en PANTALLA.ENV (800 x 600) se la pide GRUB al firmware (GOP) al arrancar" "^escritorio: en marcha, 800 x 600 con 32 bits"
+miracap "Configuración > Pantalla, por UEFI: no se cambia en marcha (aunque QEMU tenga la VBE de Bochs), lo dice, y se guarda para el próximo arranque" uefi6 \
+  texto 150 160 175 180 "Arrancado por UEFI: no se cambia en marcha, la pone el" texto 150 178 175 198 "firmware al arrancar. Se guarda para el próximo arranque."
 # 3. la consola del núcleo, en modo texto, por UEFI: la entrada 9 del menú
 cp $OV/OVMF_VARS_4M.fd $V/vars64.fd
 cp $V/usb.img $V/u1.img
