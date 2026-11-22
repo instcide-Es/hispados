@@ -7741,7 +7741,7 @@ a mano, con el lanzador mantenido, a 1024 x 600 y a pantalla completa), los
 - Pintura (en Hispa-386 es un `.HVP`): con HVPRUN ya se puede abrir; hacerla
   de aquí, como los juegos.
 - Las vibraciones de la pantalla al empujar la mesa del pinball.
-## 14 terdecies. Pluma 2 y la oficina de 32 bits (PLUMA.BIN, rama pluma32)
+## 14 duodevicies. Pluma 2 y la oficina de 32 bits (PLUMA.BIN, rama pluma32)
 
 *22/11/2026. Carlos: «Ya que funcionarán los programas de oficina en 32
 bits, podríamos darles una cara nueva y actualizarlos con funciones propias
