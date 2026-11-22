@@ -240,6 +240,8 @@ cuarta parte, los discos y el USB).
 | `energia.cas` (Energia) | **Apagar de verdad, reiniciar y la batería**: las llamadas del servicio de ACPI (`ACPI.BIN`, un programa del anillo 3 con ACPICA) y la 154; apagar por ACPI (S5) y reiniciar (FADT, 8042, CF9h); la pila de la bandeja y su recuadro de ayuda (sección 11). |
 | `dispositivos.cas` (Dispositivos) | **Lo que hay en el equipo y qué lo lleva** (desde la 0.8.3): las llamadas 155 (la lista, de solo lectura) y 156 (lo que apuntan los servicios del anillo 3), para el Administrador de dispositivos (sección 10). |
 | `sonido.cas` (Sonido) | (SONIDO) **El sonido**, lo que pone el núcleo (sección 14 decies): los canales de los programas (sus colas), el volumen general, el silencio, los sonidos del sistema y las órdenes para el servicio de sonido (`SONIDO.BIN`); las llamadas 190 a 199. |
+| `preferencias.cas` (Preferencias) | (PANEL) **Los ajustes del Panel de control** (sección 14 terdecies): la llamada 174, aplicarlos (el ratón, el teclado, el tema, el tapiz...) y `PANEL.INI`, que escribe solo el núcleo. |
+| `iconpanel.cas` (Iconpanel) | (PANEL) **Los iconos del Panel de control** (Configuración y PANEL.BIN), dibujados, cada uno con su forma. |
 | `win32.cas` (Win32) | [WIN32] **Lo de los programas de Windows** (sección 14 quater): las llamadas 180 a 182 (páginas en cualquier sitio de la zona del programa, el mapa de las teclas, las ventanas sin marco o a pantalla completa). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
 
@@ -270,6 +272,9 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `sonido/*.c` (en C: `sonido/hacer.sh`) | `SONIDO.BIN` | (SONIDO) El **servicio de sonido** (HD Audio, AC'97 y Sound Blaster 16; la mezcla; los sonidos del sistema) y la orden **SONIDO** (sección 14 decies). |
 | `uhttps.cas` (con `biblioteca32/https.cas`) | `HTTPS.BIN` | La orden **HTTPS**: pedir direcciones con la biblioteca `Https` (sección 14). |
 | `uipconf.cas`, `uping.cas`, `udescarg.cas` | `IPCONFIG.BIN`, `PING.BIN`, `DESCARGA.BIN` | **IPCONFIG**, **PING** y **DESCARGAR** (sección 14). |
+| `upanel.cas` | `PANEL.BIN` | (PANEL) **El Panel de control**: Fecha y hora, Ratón, Teclado, Red y Wi-Fi, Energía y Personalización (sección 14 terdecies). |
+| `uhorared.cas` con `ntp.cas` y `zonas.cas` | `HORARED.BIN` | (NTP) **La hora por Internet** (SNTP) y el horario de verano; la orden HORARED (sección 14 terdecies). |
+| `panelaj.cas` (Panelaj) | — | (PANEL) Las llamadas 174 (los ajustes) y 175 (la hora exacta) para los programas. |
 | `ubucle.cas` | `BUCLE.BIN` | El que no acaba nunca (da vueltas, duerme, espera teclas o escribe sin parar): para probar **Ctrl+C**. |
 
 ---
@@ -472,6 +477,8 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 155 | (dispositivos) **la lista de los dispositivos** y qué los lleva: hasta ECX fichas `Dispositivo` (320 octetos, `dispositivos.cas`) a EBX. Solo lee | `lista_dispositivos` | cuántos hay (aunque no quepan) |
 | 156 | (dispositivos; **solo los servicios**: `ACPI.BIN`, `RED.BIN`) apuntar la ficha de EBX (ECX = 0) u olvidar las suyas (ECX = 1) | — | 0 |
 | 157 | (PROTEGE) **el modo administrador**: EBX = 0, pedirlo (lo pregunta el núcleo en la pantalla: sección 14 sexies); 1, dejarlo; 2, ¿se tiene? | `pedir_admin`, `dejar_admin`, `es_admin` | 1 o 0 (`DENEGADO` si no hay a quién preguntar) |
+| 174 | (PANEL) **un ajuste del Panel de control**: EBX la clave, ECX el valor nuevo (0xFFFFFFFF: leerlo). Cambiarlo, el Panel de control o el modo administrador (sección 14 terdecies) | `ajuste`, `poner_ajuste` (`panelaj.cas`) | el que queda, o `DENEGADO` |
+| 175 | (PANEL, NTP) **la hora exacta**: EBX = 0, el reloj del PC en segundos desde el 1/1/2000; EBX = 1, ponerlo a ECX (como la 67, y HORARED.BIN sin atrasarlo más de 2 horas) | `hora_exacta`, `poner_hora_exacta` | el reloj, o 0 / `DENEGADO` |
 | 158 | (PROTEGE; **solo los servicios**) el sello de la tarea EBX (los de `permisos.cas`; con el bit 31, es un servicio) | `sello_de_tarea` | el sello, o `NO_VALE` |
 | 100 | (WIFI) **pedir al servicio Wi-Fi** (`WIFI.BIN`), como la 90 (sección 14 octies) | — | la primera palabra de la respuesta (`SIN_WIFI` si no hay servicio) |
 
@@ -1082,10 +1089,12 @@ propio, con sus tildes y su eñe).
   pega en cualquier otro (del Bloc a la Consola, y al revés). Es un texto.
 - **«Apagar el equipo»**: Apagar, Reiniciar o Cancelar. Apagar deja la pantalla de
   «Ya puede apagar el equipo» (en QEMU, además, lo apaga).
-- **Configuración**: lo que hay (la pantalla, la memoria, las tareas), el teclado
-  (español o de EE. UU.), el tapiz y el dock (visible u oculto); y, junto a la pantalla, **«Cambiar...»**: la
-  medida de la pantalla, en el momento donde la tarjeta lo deja y, si no, al
-  arrancar (más abajo, «La medida de la pantalla»). **Acerca de Hispa-Pentium**: la versión y la
+- **Configuración**: (PANEL, la 0.8.7) **el Panel de control**: lo que hay
+  (la pantalla, la memoria, las tareas) y un icono por sección (Fecha y hora,
+  Pantalla, Sonido, Ratón, Teclado, Red y Wi-Fi, Energía, Programas,
+  Personalización, Dispositivos y Acerca de: sección 14 terdecies). El de
+  **Pantalla** es la medida de la pantalla, en el momento donde la tarjeta lo
+  deja y, si no, al arrancar (más abajo, «La medida de la pantalla»). **Acerca de Hispa-Pentium**: la versión y la
   licencia.
 - **El Bloc de notas** (`BLOC.BIN`, `ubloc.cas`): escribir un texto con el teclado
   español y **guardarlo en el disco** («Guardar», F2 o Ctrl+S; en la página 437 y
@@ -3605,8 +3614,11 @@ una línea `hora=servidor[:puerto]` de `TLS.INI`) y toma la de su cabecera
 `Date`. **Es un riesgo, y se apunta**: quien pueda cambiar esa respuesta (en la
 red de en medio) puede hacer pasar por bueno un certificado caducado o aún no
 válido —no uno falso: la firma y el nombre se siguen comprobando—. Lo mejor es
-poner el reloj en hora (el asistente del primer arranque, llamada 67). Si
-tampoco hay respuesta, no hay conexión: `TLS_SIN_HORA`.
+poner el reloj en hora (el asistente del primer arranque, llamada 67) y,
+desde la 0.8.7, **la hora por Internet** (HORARED.BIN, NTP: sección 14
+terdecies). (NTP) **Tampoco se fía de un reloj del PC de antes de TLS.HOR**:
+si NTP mintiera y se le hiciera caso, no colaría un certificado caducado
+antes de ese día. Si tampoco hay respuesta, no hay conexión: `TLS_SIN_HORA`.
 
 **Lo que cuesta.** Medido en QEMU con `-icount shift=0` (el contador de ciclos
 cuenta entonces instrucciones: es lo que `TLS.BIN` apunta como «M ciclos» de
@@ -3661,7 +3673,7 @@ demás del sistema en el catálogo firmado de `actualiza.sh`.
 Reensamblar lo que llega desordenado y la retransmisión rápida (escuchar en un
 puerto ya va: sección 14 ter); IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
 la vez (con el Wi-Fi, una u otra: sección 14 octies); TLS 1.3 (BearSSL no lo tiene), gzip en `Https` y la
-hora por NTP; más tarjetas (la RTL8168 del Toshiba NB250,
+hora por NTP (hecho: la 0.8.7, sección 14 terdecies); más tarjetas (la RTL8168 del Toshiba NB250,
 la PCnet, NE2000: Hispa-DOS ya las lleva). (El navegador, encima de esto, ya
 está: sección 14 ter.)
 (Las **actualizaciones** por la red ya van: sección 13.)
@@ -4669,6 +4681,7 @@ primer renglón que casa. **PAQUETES e INSTALAR escriben en toda la zona**
 | `GRUB.CFG` | ASISTE (y el escritorio, que es el núcleo) | |
 | `GRUBENV` | ACTUALIZ | |
 | `HISPA.INI` | ASISTE (y Configuración, del núcleo) | |
+| `PANEL.INI` | nadie (lo escribe el núcleo: los ajustes del Panel de control, la llamada 174; rama `panel-control`) | |
 | `INICIO.INI` (rama `pentium-menu`), `DOCK.INI`, `ATAJOS.INI` | nadie (los escribe el núcleo: el menú Inicio y el dock) | |
 | `PANTALLA.ENV`, `NUCLEO.BIN`, `NUCLEO.ANT`, `MBR.ANT`, `SEMILLA.BIN`, `ESCRIT*.BIN`, `BOOT\` | nadie (el escritorio, del núcleo, escribe `PANTALLA.ENV`) | |
 | `TLS.SEM` | TLS | sí |
@@ -4707,7 +4720,8 @@ Los sellos (`Permisos.SELLO_...`) son los de `PAQUETES.BIN`, `ACTUALIZ.BIN`,
 `INSTALAR.BIN`, `ASISTE.BIN`, `DESCARGA.BIN`, `SSH.BIN`, `NAVEGA\NAVEGA.BIN`,
 `CLICGEST.BIN`, `EQUIPO.BIN` y `PROGRAMA.BIN`; y, **servicios**, `RED.BIN`,
 `TLS.BIN`, `ACPI.BIN`, `SSHD.BIN`, `WG.BIN`, `TAILSCAL.BIN`, `WIFI.BIN`,
-`ESCUDO.BIN` y `SONIDO.BIN` (los de las ramas que vienen ya están en la
+`ESCUDO.BIN` y `SONIDO.BIN` (y, de la rama `panel-control`, sin ser servicios,
+`PANEL.BIN` —la 174— y `HORARED.BIN` —la 174 y la 175—; los de las ramas que vienen ya están en la
 tabla: si su programa no está, no casan). ClicGest no cambia: sigue guardando `CLICGEST.SES` y
 `CLICGEST.ANC` en `\HISPA` (o en la raíz sin instalar), que son suyos.
 
@@ -5100,7 +5114,8 @@ programa del anillo 3 con `-DHL_PENTIUM`, como `TLS.BIN` con BearSSL.
   red no se guarda: la contraseña se escribe cada vez), **Buscar**, **Conectar** (o dos clics,
   o Intro), **Desconectar** y **Olvidar**; y **«Usar: Automático / Cable /
   Wi-Fi»** (el elegido, verde y subrayado).
-- **Configuración** tiene la misma fila, **«Red: Automático, Cable, Wi-Fi»**.
+- **Configuración** tiene la misma fila, **«Red: Automático, Cable, Wi-Fi»**
+  (desde la 0.8.7, en el Panel de control > Red y Wi-Fi: «Por dónde va la red»).
 - Las redes conectadas se **recuerdan** y el equipo **se conecta solo** a la
   mejor que se vea (si se pierde, vuelve a buscarla cada 5 segundos). Tras
   conectar, la IP la pide `RED.BIN` por DHCP, como con el cable: `IPCONFIG`,
@@ -5594,7 +5609,7 @@ En Castel (`llamadas.cas`): `abrir_canal(hz, canales, bits)`,
   arrastrar, la rueda, las flechas, «Silencio» y «Ajustes...»; se va al
   pinchar fuera); **el botón secundario**, «Silenciar» (o «Quitar el
   silencio») y «Configuración de sonido...».
-- **Configuración > «Sonido...»** (`SONIDO /VENTANA`): la tarjeta, el códec y
+- **Configuración > «Sonido...»** (`SONIDO /VENTANA`; desde la 0.8.7, el icono Sonido del Panel de control): la tarjeta, el códec y
   la salida (con los auriculares: «enchufados» o no), el volumen general
   (arrastrando, con la rueda o con las flechas), el silencio, «Probar:
   Izquierdo / Derecho» (un do por la izquierda; un mi por la derecha), los
@@ -6203,6 +6218,284 @@ entrada con el escritorio (capturas: Ctrl+Alt+Supr y el logo no la saltan; la
 contraseña mala; cerrar la sesión y entrar como Bea, «Hola, Bea»); y SSH con
 OpenSSH (Bea con su contraseña entra y es Bea, y no lee lo de Ana; con otra,
 no; Biblioteca sin contraseña, no; Ana con la llave de su carpeta).
+
+## 14 quattuordecies. El Panel de control y la hora por Internet (PANEL)
+
+*22/11/2026. Todo lo cambiado lleva la marca «(PANEL)»; lo de la hora,
+también «(NTP)». Lo pidió Carlos con la hoja de ruta (docs/pentium/METAS.md:
+«Panel de control completo» y «NTP: la hora por Internet»).*
+
+| | |
+|---|---|
+| ![Configuración: el Panel de control, con un icono por sección](pentium/panel/configuracion.png) | ![Fecha y hora: la zona, el horario de verano y la hora por Internet](pentium/panel/fecha.png) |
+| ![Ratón: la velocidad, el doble clic con su prueba, zurdos y la rueda](pentium/panel/raton.png) | ![Personalización: el tema Grafito, con su contraste, y el tapiz verde](pentium/panel/personaliza.png) |
+| ![«¡Ojo!»: Internet dice una hora muy distinta (aquí, un servidor que miente)](pentium/panel/salto.png) | ![Energía: apagar la pantalla, la batería baja y el botón de encendido](pentium/panel/energia.png) |
+| ![Teclado: el latinoamericano, con «{ñ¡» en el campo de prueba](pentium/panel/teclado.png) | ![El botón de encendido (en QEMU, system_powerdown): «Apagar el equipo»](pentium/panel/boton.png) |
+
+### Configuración es el Panel de control
+
+**Configuración** (el menú Inicio, el del tapiz, el dock) ya no es un cuadro
+de botones: es el **Panel de control**, un icono grande con su nombre por
+sección (cada icono con su forma, `iconpanel.cas`: el calendario, la
+pantalla, el altavoz, el ratón, el teclado, las rayitas de la señal, la
+pila, la caja, la paleta, el chip y la «i»), con lo que hay arriba (la
+versión, la pantalla y la memoria, como antes). Se abre con un clic, o con
+las **flechas** (el borde azul grueso va de icono en icono) e **Intro**; Esc
+lo cierra.
+
+| Icono | Lo que abre |
+|---|---|
+| Fecha y hora | el Panel de control (`PANEL /FECHA`) |
+| Pantalla | la medida de la pantalla, del núcleo (sección 10, como «Cambiar...» antes) |
+| Sonido | `SONIDO /VENTANA` (sección 14 decies) |
+| Ratón, Teclado, Red y Wi-Fi, Energía, Personalización | el Panel de control en esa sección (`/RATON`, `/TECLADO`, `/RED`, `/ENERGIA`, `/PERSONALIZA`) |
+| Programas | «Programas y actualizaciones», en Instaladas (`PROGRAMA /INSTALADAS`, sección 13) |
+| Dispositivos | el Administrador de dispositivos (`DISPOSIT.BIN`) |
+| Acerca de | «Acerca de Hispa-Pentium», del núcleo |
+
+El **Panel de control** (`PANEL.BIN`, `upanel.cas`, con `controles.cas` y la
+letra grande) tiene las secciones a la izquierda (también con Ctrl+Tab, o
+arriba y abajo) y lo de cada una a la derecha. **Todo se pone al momento y
+se guarda**: el núcleo lo aplica y lo escribe en `PANEL.INI`, y lo vuelve a
+poner al arrancar (`preferencias.cas`). Nada va solo por el color: lo
+elegido lleva «(elegido)» o un borde grueso; las casillas, su X; la
+velocidad, sus casillas y «5 de 10».
+
+- **Fecha y hora**: la hora de ahora; la **zona horaria** (13: Europa/Madrid
+  —la de siempre—, Canarias, Lisboa, Londres, París/Roma/Berlín, Atenas, UTC,
+  Ciudad de México, Bogotá/Lima/Quito, Caracas, Buenos Aires/Montevideo,
+  Nueva York y Los Ángeles: `zonas.cas`), **cambiar solo al horario de
+  verano** (el de la UE o el de EE. UU.), **poner en hora por Internet**
+  (al arrancar y cada 4 horas), **«Sincronizar ahora»**, cómo fue la última
+  vez y **ponerla a mano** (dd/mm/aaaa y hh:mm:ss, con «Ahora»). Lo que mueve
+  el reloj (la zona, el horario de verano, ponerla a mano y una hora de
+  Internet muy distinta) **pide el modo administrador** (la 157: lo pregunta
+  el núcleo). Al cambiar de zona, el reloj se mueve con ella (sigue siendo la
+  misma hora universal).
+- **Ratón**: la **velocidad de la flecha** (de 1 a 10: cada punto, de 2 a 22
+  octavos, con lo que sobra guardado para el siguiente; `raton.cas`), el
+  **doble clic** (de 0,2 a 0,9 s: `Ventanas.tics_doble`) con **una carpeta
+  de prueba** que se abre con dos clics, **para zurdos** (los botones
+  cambiados en el núcleo: para todos los programas) y **la rueda**: 3, 6, 9,
+  12 o 15 renglones por paso (los programas desplazan tres por paso; el
+  núcleo les da dos, tres... pasos por cada uno del ratón: vale para todos
+  sin tocarlos, también el Navegador y los de Windows).
+- **Teclado**: la **distribución** (española, **latinoamericana** —nueva en
+  `consola.cas`: la ñ en su sitio, el acento a la derecha de la P, ¿ junto
+  al 0, @ con Alt Gr y la Q— o de EE. UU.), el **retardo** y la **velocidad
+  de repetición** (en el teclado PS/2, la orden F3h; en los USB,
+  `usbhid.cas`), **Bloq Num al arrancar** (con su luz) y un campo para
+  probarlo.
+- **Red y Wi-Fi**: cómo está la red (con su IP), **por dónde va**
+  (Automático, Cable o Wi-Fi: lo de la fila «Red» de antes, que guarda
+  RED.BIN en RED.INI) y los botones «Redes Wi-Fi...» (REDWIFI.BIN) y
+  «Tailscale...».
+- **Energía**: **apagar la pantalla** tras 1, 5, 10, 15, 30 o 60 minutos sin
+  tocar nada (o nunca, lo de siempre: se pone negra con una ventana encima
+  de todo —sin DPMS aún: la luz de la pantalla sigue encendida— y vuelve con
+  el ratón o una tecla); **con la batería baja, sin cable, apagar el
+  equipo** (al 3, 5 —lo de siempre—, 10 o 15 %; avisa 5 puntos antes; dos
+  lecturas seguidas, para que una mala no lo apague; el apagado de siempre,
+  que espera a los programas sin guardar) y **el botón de encendido**:
+  apagar (lo de siempre), preguntar («Apagar el equipo») o nada. El botón lo
+  mira **ACPI.BIN** (la versión 2 de su `pe_energia`, con `boton`): PWRBTN_EN
+  puesto y PWRBTN_STS mirado y borrado en cada vuelta. En QEMU va
+  (`system_powerdown`); en los equipos que no pasan al modo ACPI hasta
+  apagar, el botón lo atiende la BIOS (SMI) y no llega.
+- **Personalización**: el **tema** de los colores —el título de la ventana
+  activa, la barra de tareas, la bandeja y sus botones—: **Azul** (el de
+  siempre, tal cual), **Azul intenso**, **Verde bosque**, **Grafito**,
+  **Granate** y **Alto contraste** (negro, letra blanca, la ventana activa
+  con su borde amarillo en la barra), con una muestra y **el contraste de la
+  letra medido** (WCAG: la blanca sobre el color más claro de cada
+  degradado, la barra, la bandeja y sus botones: 4,6 a 1 el que menos de los nuevos, 17,4 el alto contraste; el de
+  siempre, 4,7 en medio del título y 3,4 arriba, se deja como estaba); el
+  **tapiz** (Olas, Azul, Verde, o **«Una imagen...»**: abre el Mirador, que
+  la pone con «Usar como fondo de escritorio») y **ver el dock**.
+
+### Lo que pone el núcleo: `preferencias.cas` y la llamada 174
+
+| EAX | Qué | Devuelve |
+|---|---|---|
+| 174 | (PANEL) **un ajuste del Panel de control**: EBX la clave (`AJ_...`), ECX el valor nuevo (0xFFFFFFFF: solo leerlo). Leer, cualquiera; cambiar, el Panel de control (su sello, `SELLO_PANEL`) o el modo administrador; la zona horaria y el horario de verano, solo el modo administrador; lo de la hora por Internet que enseña el Panel, también HORARED.BIN (`SELLO_HORA`) | el valor que queda, `DENEGADO` o `NO_VALE` |
+| 175 | (PANEL, NTP) **la hora exacta**: EBX = 0, el reloj del PC en segundos desde el 1/1/2000 a las 0:00 (la FAT va de dos en dos); EBX = 1, ponerlo a ECX: lo de la 67 (los servicios, el asistente, INSTALAR y el modo administrador) y HORARED.BIN, que **no lo puede atrasar más de 2 horas** sin el modo administrador (una, el cambio al horario de invierno) | el reloj, o 0 / `DENEGADO` |
+
+Las claves (`preferencias.cas` y, para los programas, `panelaj.cas`, aparte
+de `llamadas.cas` para que los que no lo usan no cambien):
+
+| Clave | | Valores (lo de siempre) | En PANEL.INI |
+|---|---|---|---|
+| 1 | velocidad del ratón | 1 a 10 (5) | `raton_velocidad` |
+| 2 | doble clic | 20 a 90 centésimas (45) | `raton_doble` |
+| 3 | zurdos | 0 o 1 (0) | `raton_zurdo` |
+| 4 | renglones de la rueda | 3, 6, 9, 12, 15 (3) | `raton_rueda` |
+| 5 | distribución del teclado | 0 EE. UU., 1 española, 2 latinoamericana (la de HISPA.INI) | `teclado` |
+| 6, 7 | retardo y velocidad de repetición | 0 a 3 (1: 500 ms); 2 a 30 por segundo (25) | `teclado_retardo`, `teclado_ritmo` |
+| 8 | Bloq Num al arrancar | 0 o 1 (1) | `bloq_num` |
+| 9 | apagar la pantalla | minutos (0: nunca) | `pantalla_apagar` |
+| 10 | apagar con la batería baja | % (5; 0: nunca) | `bateria_apagar` |
+| 11 | el botón de encendido | 0 apagar, 1 preguntar, 2 nada (0) | `boton_encendido` |
+| 12 | el tema | 0 a 5 (0) | `tema` |
+| 13 | el tapiz | 0 olas, 1 azul, 2 verde (al leer, 3: una imagen) | `tapiz` (la línea del cargador, `tapiz=`, va antes) |
+| 14, 15 | el dock; por dónde va la red | (en DOCK.INI y en RED.INI, como antes) | — |
+| 16, 17, 18 | la zona; la hora por Internet; el horario de verano solo | 0 a 12 (0); 0 o 1 (1); 0 o 1 (1) | `zona`, `hora_internet`, `verano_automatico` |
+| 19 | el reloj lleva el horario de verano | 0, 1 (2: no se sabe aún) | `verano_puesto` |
+| 20, 21, 22 | la última puesta en hora, cómo fue, lo que iba mal | (solo en memoria) | — |
+
+`PANEL.INI` va en `\HISPA` (sin instalar, en la raíz de la memoria) y **lo
+escribe solo el núcleo** (en la zona protegida, `PANEL.INI`: nadie); guarda
+también tal cual la línea **`ntp=`** (los servidores de la hora,
+`nombre[:puerto],...`), que lee HORARED.BIN. El escritorio lo lee al
+arrancar (`lee_preferencias`), después de `HISPA.INI` (su teclado va antes
+que el del asistente). Los colores del tema van a `Ventanas` (el título) y a
+`Preferencias.tema` (la barra, que pinta el escritorio); el ratón, a
+`Raton.velocidad` y `Raton.zurdo`; el doble clic, a `Ventanas.tics_doble`;
+la rueda, a `Ventanas.pasos_por_paso`; el teclado, a
+`Consola.pon_distribución`, `pon_repetición` y `pon_bloq_num` y a
+`Usbhid.repite_tras` y `repite_cada`.
+
+### La hora por Internet: HORARED.BIN
+
+`HORARED.BIN` (`uhorared.cas`, con `ntp.cas` y `zonas.cas`; el nombre, para
+no chocar con la orden HORA del intérprete) es un cliente **SNTP** (RFC 4330:
+NTP por UDP, el puerto 123) sobre los puertos UDP que RED.BIN ya daba a los
+programas (`Redes.udp_abrir`, `udp_enviar`, `udp_recibir` y
+`cerrar_conexión`: no ha hecho falta tocar RED.BIN; quien haga winsock UDP
+—la rama win32-juegos— usa lo mismo). **No es un servicio**: tiene su sello
+(`SELLO_HORA`, por la ruta, como los demás programas del sistema), que solo
+le deja poner la hora (la 175) y apuntar lo suyo en el Panel (la 174).
+
+- **El escritorio lo pone en marcha al arrancar** (`HORARED /VIGILAR`, de
+  la carpeta del sistema; si no está, nada). En cuanto hay red (lo mira con
+  la 97, sin despertar a RED.BIN), pregunta la hora y la pone; luego, **cada
+  4 horas** (si falla, a los 15 minutos; sin red, mira cada 10 s); y **cada
+  minuto mira el horario de verano** (en la UE, el último domingo de marzo a
+  la 1:00 UTC y el de octubre: una hora más o una menos, justo al cambiar el
+  segundo), aunque no haya red. Si el equipo estaba apagado al cambiar, lo
+  pone al arrancar (lo que lleva el reloj se guarda: `verano_puesto`).
+- **Los servidores**: `hora.roa.es` y `minuto.roa.es` (la hora oficial de
+  España, del Real Instituto y Observatorio de la Armada), `es.pool.ntp.org`
+  y `pool.ntp.org`; o los de la línea `ntp=` de PANEL.INI. Se pregunta a
+  todos (2 s cada uno como mucho), con una galleta en el «transmit» que la
+  respuesta tiene que traer en el «originate» (modo 4, estrato de 1 a 15,
+  sin «no sincronizado»); la hora es la de su «transmit» más la mitad de la
+  ida y vuelta (sin lo que tardó él).
+- **El reloj del PC lleva la hora de aquí** (como el DOS y Windows: la FAT y
+  la barra de tareas la usan tal cual): la universal más la zona y, en
+  verano, una hora. **Se guarda en la CMOS** (la llamada 175, con los
+  segundos de uno en uno, justo al empezar el segundo: un segundo arriba o
+  abajo, lo que da la CMOS).
+- **Ajuste suave**: hasta 2 minutos, un segundo cada diez (al cambiar el
+  segundo del reloj, uno más o uno menos); más, de una vez.
+- **En la Consola**: `HORARED` (cómo está: la zona, el verano, la última
+  vez), `HORARED /AHORA [servidor[:puerto],...]` (ya; si la red no está en
+  marcha, la pone), `HORARED /AHORA /FORZAR` (con ADMIN: aunque vaya muy
+  distinta) y, para las pruebas, `HORARED /ATRASA h`. Lo que hace lo dice por
+  la salida (`hora: ...`; en el escritorio, el puerto serie).
+
+### NTP puede mentir: lo que se hace (la seguridad)
+
+NTP va **sin cifrar ni firmar** (NTS, con TLS, sería lo siguiente): quien
+esté en medio, o un servidor malo, puede decir la hora que quiera. Y la hora
+la usa TLS.BIN para mirar las fechas de los certificados: **llevar el
+reloj atrás haría pasar uno caducado** (o revocado y caducado); llevarlo
+adelante, que ninguno valga. Lo que se hace, por capas:
+
+1. **Varios servidores, y de acuerdo.** Si contestan dos o más, al menos dos
+   tienen que decir lo mismo (2 s arriba o abajo); si no, **no se toca nada**
+   («los servidores no dicen lo mismo»). Con uno solo (los demás callados), se
+   le cree solo dentro de lo de abajo.
+2. **Un suelo y un techo.** Nada de antes del día en que se hizo esta versión
+   (`Zonas.DÍA_HECHO`, el 22/11/2026: como la fecha de compilación de
+   TLS.BIN) **ni del último día en que TLS comprobó una cadena buena**
+   (`TLS.HOR`), ni de 30 años después: «no puede ser: no se cree».
+3. **Solo, poco.** Con el reloj del PC creíble (de después de ese suelo), la
+   hora de Internet **solo se pone sola si va 15 minutos o menos** (arriba o
+   abajo: un reloj de verdad no se va más, y el cambio de verano es aparte).
+   Más, la decide quien está delante: **Panel de control > Fecha y hora >
+   «Sincronizar ahora»** dice «Internet dice ...: el reloj del equipo va
+   atrasado 2 d 0 h. ¿Ponerla? (Si no la espera, puede ser un engaño)», y
+   «Ponerla» **pide el modo administrador**. Con el reloj del PC no creíble
+   (la pila gastada: arranca en el 2000), se le cree a Internet (con el suelo
+   de arriba): es el mismo riesgo que ya tenía TLS con la cabecera `Date`, y
+   menor (varios servidores, el suelo de TLS.HOR).
+4. **El núcleo, por si acaso.** La 175 no deja a HORARED.BIN atrasar el reloj
+   **más de 2 horas** sin el modo administrador, aunque HORARED tuviera un
+   fallo; y un HORARED.BIN que no sea el de la carpeta del sistema no tiene
+   sello: ni pone la hora ni apunta nada.
+5. **TLS no se fía de un reloj de antes de TLS.HOR** (nuevo en `tls.c`,
+   marcado «(NTP)»): si el reloj del PC dice un día de antes del último con
+   una cadena buena, no lo cree (lo apunta) y pide la hora por la cabecera
+   `Date`, que tampoco puede ser de antes. Así, **aunque NTP mintiera y se
+   le hiciera caso, no colaría un certificado caducado antes de ese día**.
+
+Lo que queda: entre el último día bueno de TLS.HOR y hoy, un NTP que mienta
+podría atrasar el reloj hasta 15 minutos (o lo que diga quien tenga el modo
+administrador); y lo que se adelanta no tiene suelo (como mucho, que no
+valga ningún certificado hasta que se arregle a mano). NTS (NTP con TLS) o
+pedir la hora por HTTPS a actualiza.hispados.es (con la cadena ya
+comprobada) lo cerrarían.
+
+### Las pruebas
+
+`SOLO=panel castel/pruebas.sh`, la **parte 34** (`castel/pruebas_panel.sh`;
+la 33 es la de win32-juegos): con servidores NTP de mentira
+(`nucleo32/ntp_prueba.py`: dos que dicen la hora de verdad, uno el
+1/1/2001, uno dos días por delante y uno que no contesta) y los HTTPS de
+`tls/servidor_https.py`, y el reloj de QEMU cinco minutos adelantado:
+
+- **En la Consola**: una copia de HORARED.BIN fuera de la carpeta del
+  sistema no pone la hora ni apunta (sin sello); dos de acuerdo la ponen
+  (`-253 s`) y otra vez ya está en hora; el del 2001, no se cree; el de dos
+  días, no se pone solo; uno bueno y uno malo, no se ponen de acuerdo; el
+  callado; atrasar 3 horas, el núcleo no deja (1, sí; y para volver hace
+  falta ADMIN y /FORZAR); y **HTTPS sigue yendo**. Con un TLS.HOR de dentro
+  de diez días y el reloj dentro de cinco, **TLS no se fía del reloj** y
+  HORARED no cree a quien diga hoy.
+- **En el escritorio**: HORARED la pone sola al arrancar; Configuración con
+  sus iconos (y las flechas); Fecha y hora; Ratón (más rápida y otra vez
+  normal, el doble clic «Lento» de la lista, la prueba con dos clics, para
+  zurdos —el izquierdo deja de pulsar y el derecho pulsa— y la rueda a 9);
+  Teclado (el latinoamericano: «{ñ¡» con las teclas de «´ ñ ¡¿», y otra vez
+  el español); Energía (la pantalla, negra al minuto y encendida con el
+  ratón; el botón de encendido de QEMU, que pregunta); Personalización (el
+  tema Grafito y el tapiz verde, con capturas); `PANEL.INI` con todo y la
+  línea `ntp=`; el **horario de verano** sin red (el 25/10/2026 a las 3:00,
+  las 2:00; el 28/03/2027 a las 2:00, las 3:00; y `verano_puesto` en
+  PANEL.INI); y **al arrancar otra vez**, el tema y el tapiz. Con la
+  batería de mentira al 4 % y sin cable, el equipo se apaga solo (S5). Y el
+  contraste de los cinco temas nuevos, medido con la tabla de
+  `preferencias.cas`.
+- Las partes que usaban la Configuración de antes (el escritorio y la 0.5,
+  la pantalla, los programas, los dispositivos, el sonido y el Wi-Fi) van
+  ahora por sus iconos; la memoria USB y la unidad M: llevan 41 programas.
+- **Lo que dieron** (22/11): la 34, 108 bien y 0 mal; en el PC de Albinyana,
+  06 (168), 07 (102), caliente (79), paquetes (108), red (72), tls (72),
+  acpi (78), cd (77), menu (95), protege (76) y castel32 (67: el núcleo se
+  sigue compilando a sí mismo, con las tablas lejos del tope), todas sin un
+  fallo; aquí, pantalla (98), dispositivos (85), sonido (109), programas
+  (92), wifi, rueda (71) y accesorios (81), también.
+
+### Los paquetes
+
+`base` **0.8.7** (el núcleo con las llamadas 174 y 175, `PANEL.BIN` y
+`HORARED.BIN` en `\HISPA`, ACPI.BIN con el botón de encendido) y `tls`
+**0.8.7** (TLS.HOR también para el reloj del PC). `sistema.sh` los pone en
+la memoria USB y en el CD; `disco.sh ... panel`, en los discos de prueba.
+
+### Lo que falta
+
+- **Usuarios** (otra sesión): cuando los haya, los ajustes podrán ser de
+  cada uno (el ratón, el teclado, el tema) y los del equipo (la hora, la
+  energía), del administrador.
+- Apagar la pantalla de verdad (DPMS: en las Intel, por sus registros); la
+  hibernación y suspender (ACPI S3/S4) en Energía; el botón de encendido en
+  los equipos que no pasan solos al modo ACPI.
+- NTS (NTP con TLS), o la hora por HTTPS de actualiza.hispados.es.
+- Más zonas horarias (una tabla de la base tz), y más distribuciones del
+  teclado (portugués, francés, catalán con su ŀl).
+- Que el Bloc de notas, la Consola y los demás lean los renglones de la
+  rueda (ahora, de tres en tres para todos).
 
 ## 15. Las pruebas
 

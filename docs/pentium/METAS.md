@@ -27,7 +27,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [x] ~~La rueda del ratón en todo el entorno: menús y submenús largos, rejillas de controles.cas, Bloc, Consola (historial), Explorador, Administrador de dispositivos, Actualizaciones; Ctrl+rueda, la letra o la vista~~ — ramas pentium-menu y pentium-rueda (21/11; ClicGest, en su versión siguiente)
 - [x] ~~Atajos de teclado de todo el sistema: Alt+F4, Alt+Tab, Logo (E, D, R, L), Ctrl+Esc, Alt+Espacio, Ctrl+Alt+Supr (Administrador de tareas), Impr Pant, F1~~ — rama pentium-menu (21/11)
 - [ ] Barra de tareas: agrupar ventanas, vista previa (la bandeja ya lleva el Wi-Fi, el sonido —volumen con la rueda, silencio— y Escudo)
-- [ ] Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido (hecho el 21/11: Configuración > Sonido), ratón, teclado, red y Wi-Fi, energía, usuarios, programas (hecho: actualizaciones y «Programas instalados»)
+- [x] ~~Panel de control completo: fecha y hora (y por Internet), pantalla (hecho), sonido (hecho el 21/11: Configuración > Sonido), ratón, teclado, red y Wi-Fi, energía, programas (hecho: actualizaciones y «Programas instalados»)~~ — rama panel-control (22/11, la 0.8.7: Configuración con un icono por sección y PANEL.BIN; el ratón —velocidad, doble clic, zurdos, rueda—, el teclado —el latinoamericano, la repetición, Bloq Num—, la energía —apagar la pantalla, la batería baja, el botón de encendido—, la personalización —temas con el contraste medido, el tapiz con el Mirador—; todo se guarda en PANEL.INI y vale al arrancar: docs/PENTIUM.md §14 terdecies). Queda: los usuarios (otra sesión), apagar la pantalla de verdad (DPMS)
 - [x] ~~**Gestor de programas instalados** por tipos para desinstalarlos (como «Agregar o quitar programas»): árbol por tipos, tamaño, fecha, dependencias, desinstalar (con lo que lo necesita), reparar, ver archivos, los programas sueltos con «Borrar»; y en la misma ventana, «Programas y actualizaciones» con pestañas Pendientes, Al día, Instaladas y Sin instalar, con búsqueda~~ — rama pentium-programas (21/11: PROGRAMA.BIN, el campo `tipo=` de los paquetes; docs/PENTIUM.md §13)
 - [ ] Temas y fondo de escritorio (una imagen de fondo, ya: el Mirador, la llamada 172); letras TrueType del sistema; protector de pantalla
 - [ ] Portapapeles con imágenes y archivos; arrastrar y soltar entre programas
@@ -43,7 +43,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [x] ~~**Tailscale** (WireGuard + su red privada: cada equipo localizado por su nombre) y **SSH** (entrar en la terminal de Hispa-Pentium desde otro equipo y desde él en los demás)~~ — rama pentium-tailscale (21/11; lo directo por UDP, más adelante: docs/PENTIUM.md §14 quinquies)
 - [ ] Más tarjetas de red y controladoras (las que vaya trayendo el taller)
 - [ ] Escudo: RAR y UPX por dentro, el interior de los PDF, revisar en segundo plano, reglas de UDP en el cortafuegos
-- [ ] NTP: la hora por Internet (y quitar el riesgo de la hora sin cifrar de TLS)
+- [x] ~~NTP: la hora por Internet (y quitar el riesgo de la hora sin cifrar de TLS)~~ — rama panel-control (22/11: HORARED.BIN, SNTP con hora.roa.es y pool.ntp.org, varios servidores de acuerdo, ajuste suave, la zona y el horario de verano; nada de antes de TLS.HOR ni más de 15 minutos sin el modo administrador; el núcleo no deja atrasar más de 2 horas; TLS no se fía de un reloj de antes de TLS.HOR: docs/PENTIUM.md §14 terdecies). Queda: NTS (NTP con TLS)
 - [ ] TLS 1.3 y descompresión gzip
 
 ## Programas

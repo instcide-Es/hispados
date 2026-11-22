@@ -39,6 +39,11 @@ módulo Raton
     variable cuántos: nat32
     variable largo_paquete: nat32 = 3           ; (NAVEGADOR) 4 con la rueda (IntelliMouse)
     público variable hay_rueda: bool            ; (NAVEGADOR) el ratón PS/2 tiene rueda
+    ; (PANEL) lo que dice el Panel de control (Ratón)
+    público variable velocidad: nat32 = 5       ; de 1 (lenta) a 10 (rápida); 5, como llega
+    público variable zurdo: bool                ; los botones, cambiados (el principal, el de la derecha)
+    variable resto_x, resto_y: ent32            ; (PANEL) lo que queda de los octavos de punto
+    variable por_octavos: arreglo [11] de ent32 ; (PANEL) lo que vale cada punto, en octavos, por la velocidad
     variable rueda: ent32                       ; (NAVEGADOR) lo que ha girado y aún no se ha repartido (arriba, positivo)
     constante COLA = 32
     variable cola: arreglo [COLA] de Clic
@@ -75,6 +80,23 @@ módulo Raton
     función frecuencia(n: byte): bool
         si al_ratón(0xF3) <> 0xFA entonces devolver falso fin
         devolver al_ratón(n) = 0xFA
+    fin
+
+    ; (PANEL) lo movido, por la velocidad del Panel (en octavos de punto: lo
+    ; que no llega a un punto se guarda para la vez siguiente)
+    función escala(d: ent32, ref resto: ent32): ent32
+        variable t, q: ent32
+        si velocidad = 5 o velocidad < 1 o velocidad > 10 entonces devolver d fin
+        t := d * por_octavos[velocidad] + resto
+        q := t div 8
+        resto := t - q * 8
+        devolver q
+    fin
+
+    ; (PANEL) los botones: con el ratón de zurdo, el izquierdo y el derecho, cambiados
+    función botones_de(b: nat32): nat32
+        si no zurdo entonces devolver b fin
+        devolver (b yb nob 3) ob ((b yb 1) << 1) ob ((b >> 1) yb 1)
     fin
 
     ; el ratón se ha movido (dx a la derecha, dy hacia abajo) y sus botones
@@ -124,7 +146,7 @@ módulo Raton
         variable b: nat32
         si ancho = 0 entonces devolver fin      ; (aún no hay escritorio)
         b := sin_interrupciones()
-        movido(dx, dy, botones)
+        movido(escala(dx, resto_x), escala(dy, resto_y), botones_de(botones))     ; (PANEL)
         reponer(b)
     fin
 
@@ -148,7 +170,7 @@ módulo Raton
                     si b yb 0x10 <> 0 entonces dx := dx - 256 fin
                     dy := ent32(trozo[2])
                     si b yb 0x20 <> 0 entonces dy := dy - 256 fin
-                    movido(dx, 0 - dy, b yb 7)
+                    movido(escala(dx, resto_x), escala(0 - dy, resto_y), botones_de(b yb 7))     ; (PANEL)
                     ; (NAVEGADOR) el cuarto: la rueda (hacia el que la usa, positivo)
                     si largo_paquete = 4 y trozo[3] <> 0 entonces
                         dx := ent32(trozo[3] yb 0x0F)
@@ -212,6 +234,17 @@ módulo Raton
         variable b, c, r: nat32
         ancho := an
         alto := al
+        ; (PANEL) cada punto, en octavos, por la velocidad (de 1 a 10; el 5, uno a uno)
+        por_octavos[1] := 2
+        por_octavos[2] := 3
+        por_octavos[3] := 4
+        por_octavos[4] := 6
+        por_octavos[5] := 8
+        por_octavos[6] := 10
+        por_octavos[7] := 12
+        por_octavos[8] := 15
+        por_octavos[9] := 18
+        por_octavos[10] := 22
         ratón_x := an div 2
         ratón_y := al div 2
         ; sin controlador de teclado y ratón PS/2 (un Mac, un PC «sin

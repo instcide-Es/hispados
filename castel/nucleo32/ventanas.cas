@@ -184,6 +184,12 @@ módulo Ventanas
     variable est_lados: nat32
     variable est_x, est_y, est_px, est_py, est_an, est_al: ent32
     ; los clics seguidos (el doble y el triple)
+    público variable tics_doble: nat32 = 45     ; (PANEL) lo que puede tardar el segundo clic (Panel de control > Ratón)
+    público variable pasos_por_paso: ent32 = 1  ; (PANEL) los pasos de la rueda por cada uno del ratón (los renglones del Panel, de tres en tres)
+    ; (PANEL) el color del título de la ventana activa (Panel de control > Personalización: el tema)
+    público variable título_arriba: nat32 = AZUL_ARRIBA
+    público variable título_abajo: nat32 = AZUL_ABAJO
+    público variable título_tinta: nat32 = BLANCO
     variable clic_ventana, clic_botones, clic_tic, clic_veces: nat32
     variable clic_x, clic_y: ent32
     variable capturada: ent32 = -1              ; la que recibió el clic (hasta que se suelte)
@@ -472,8 +478,8 @@ módulo Ventanas
         variable caben, n: ent32
         si no con_marco(v) entonces devolver fin
         si es_activa entonces
-            arriba := AZUL_ARRIBA
-            abajo := AZUL_ABAJO
+            arriba := título_arriba             ; (PANEL) el tema
+            abajo := título_abajo
         sino
             arriba := GRIS_ARRIBA
             abajo := GRIS_ABAJO
@@ -504,8 +510,8 @@ módulo Ventanas
             texto_n(v.todo, 31, 7, v.título, n, oscuro)
             texto_n(v.todo, 32, 7, v.título, n, oscuro)
             si es_activa entonces
-                texto_n(v.todo, 30, 6, v.título, n, BLANCO)
-                texto_n(v.todo, 31, 6, v.título, n, BLANCO)
+                texto_n(v.todo, 30, 6, v.título, n, título_tinta)      ; (PANEL) el tema
+                texto_n(v.todo, 31, 6, v.título, n, título_tinta)
             sino
                 texto_n(v.todo, 30, 6, v.título, n, 0xE6EEF8)
                 texto_n(v.todo, 31, 6, v.título, n, 0xE6EEF8)
@@ -1040,6 +1046,16 @@ módulo Ventanas
         soltar(cerrojo)
     fin
 
+    ; (PANEL) el marco de la ventana activa, otra vez (ha cambiado el tema)
+    público función repinta_activa()
+        tomar(cerrojo)
+        si activa >= 0 y ventanas[activa].usada entonces
+            pinta_marco(ventanas[activa], cierto)
+            ensuciar_ventana(ventanas[activa])
+        fin
+        soltar(cerrojo)
+    fin
+
     ; todo el escritorio, a recomponer (ha cambiado el tapiz)
     público función repintar_todo()
         tomar(cerrojo)
@@ -1263,7 +1279,7 @@ módulo Ventanas
     ; las veces seguidas que se ha pulsado ahí (1, 2 o 3): mismo sitio, mismos
     ; botones y menos de medio segundo
     función cuenta_clic(id: nat32, x: ent32, yy: ent32, nuevos: nat32): nat32
-        si id = clic_ventana y nuevos = clic_botones y tics - clic_tic < 45 y x - clic_x < 5 y clic_x - x < 5 y yy - clic_y < 5 y clic_y - yy < 5 y clic_veces < 3 entonces
+        si id = clic_ventana y nuevos = clic_botones y tics - clic_tic < tics_doble y x - clic_x < 5 y clic_x - x < 5 y yy - clic_y < 5 y clic_y - yy < 5 y clic_veces < 3 entonces
             clic_veces := clic_veces + 1
         sino
             clic_veces := 1
@@ -1486,6 +1502,13 @@ módulo Ventanas
         fin
         ; (NAVEGADOR) la rueda: a la ventana de debajo de la flecha
         nr := saca_rueda()
+        ; (PANEL) los renglones por paso (Panel de control > Ratón): los
+        ; programas desplazan tres por paso; con 6, 9, 12 o 15, más pasos
+        si pasos_por_paso > 1 y nr <> 0 entonces
+            nr := nr * pasos_por_paso
+            si nr > 120 entonces nr := 120 fin
+            si nr < -120 entonces nr := -120 fin
+        fin
         si nr <> 0 entonces
             si nr > 127 entonces nr := 127 fin
             si nr < -127 entonces nr := -127 fin

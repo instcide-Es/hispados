@@ -4,6 +4,10 @@
 ;  FAT en las entradas de sus carpetas:
 ;    fecha: (año - 1980) << 9 | mes << 5 | día
 ;    hora:  horas << 11 | minutos << 5 | segundos div 2
+;  (NTP) Y la hora exacta, en segundos desde el 1/1/2000 a las 0:00 (la hora
+;  que tenga la CMOS, la de aquí: Europa/Madrid si no se ha dicho otra), para
+;  la llamada 175: la usa HORARED.BIN (la hora por Internet), que necesita los
+;  segundos de uno en uno (la FAT los guarda de dos en dos).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Fecha
@@ -19,9 +23,10 @@ módulo Fecha
         devolver (v >> 4) * 10 + (v yb 15)
     fin
 
-    ; la fecha y la hora de ahora, como las quiere la FAT
-    público función ahora(ref fecha: nat32, ref hora: nat32)
-        variable s, mi, h, d, me, a, b, s2, i, j, t, tarde: nat32
+    ; (NTP) lo que dice la CMOS ahora: el año (entero), el mes, el día, la
+    ; hora, los minutos y los segundos
+    función lee_cmos(ref a: nat32, ref me: nat32, ref d: nat32, ref h: nat32, ref mi: nat32, ref s: nat32)
+        variable b, s2, i, j, t, tarde: nat32
         t := sin_interrupciones()
         i := 0
         s := 0
@@ -59,8 +64,17 @@ módulo Fecha
         si a >= 80 entonces a := a + 1900 sino a := a + 2000 fin
         si me < 1 o me > 12 entonces me := 1 fin
         si d < 1 o d > 31 entonces d := 1 fin
+        h := h mod 24
+        mi := mi mod 60
+        s := s mod 60
+    fin
+
+    ; la fecha y la hora de ahora, como las quiere la FAT
+    público función ahora(ref fecha: nat32, ref hora: nat32)
+        variable s, mi, h, d, me, a: nat32
+        lee_cmos(a, me, d, h, mi, s)
         fecha := ((a - 1980) << 9) ob (me << 5) ob d
-        hora := ((h mod 24) << 11) ob ((mi mod 60) << 5) ob ((s mod 60) div 2)
+        hora := (h << 11) ob (mi << 5) ob (s div 2)
     fin
 
     función a_bcd(v: nat32): nat32
@@ -76,13 +90,13 @@ módulo Fecha
     ; guarda la FAT. Se escribe como lo tenga puesto la CMOS (en BCD o en
     ; binario, de 24 horas o de 12), con el reloj parado mientras tanto.
     público función pon_reloj(fecha: nat32, hora: nat32)
-        variable s, mi, h, d, me, a, b, t: nat32
-        s := (hora yb 31) * 2
-        mi := (hora >> 5) yb 63
-        h := (hora >> 11) yb 31
-        d := fecha yb 31
-        me := (fecha >> 5) yb 15
-        a := ((fecha >> 9) + 80) mod 100
+        pon_campos((hora yb 31) * 2, (hora >> 5) yb 63, (hora >> 11) yb 31, fecha yb 31, (fecha >> 5) yb 15, (fecha >> 9) + 1980)
+    fin
+
+    ; (NTP) lo mismo, campo a campo (el año entero)
+    función pon_campos(s: nat32, mi: nat32, h: nat32, d: nat32, me: nat32, año: nat32)
+        variable a, b, t: nat32
+        a := año mod 100
         t := sin_interrupciones()
         b := cmos(0x0B)
         pon_cmos(0x0B, b ob 0x80)               ; el reloj, parado
@@ -114,6 +128,55 @@ módulo Fecha
         pon_cmos(9, a)
         pon_cmos(0x0B, b yb 0x7F)               ; y otra vez en marcha
         reponer(t)
+    fin
+
+    ; ---- (NTP) la hora exacta: segundos desde el 1/1/2000 a las 0:00 ----
+    función bisiesto(a: nat32): bool
+        devolver (a mod 4 = 0 y a mod 100 <> 0) o a mod 400 = 0
+    fin
+
+    ; los días que van del 1/1/2000 al día d del mes me del año a (de 2000 a 2099)
+    público función días_de(a: nat32, me: nat32, d: nat32): nat32
+        variable n, k: nat32
+        variable antes: arreglo [12] de nat32
+        antes[0] := 0
+        antes[1] := 31
+        antes[2] := 59
+        antes[3] := 90
+        antes[4] := 120
+        antes[5] := 151
+        antes[6] := 181
+        antes[7] := 212
+        antes[8] := 243
+        antes[9] := 273
+        antes[10] := 304
+        antes[11] := 334
+        si a < 2000 entonces a := 2000 fin
+        k := a - 2000
+        n := k * 365 + (k + 3) div 4 - (k + 99) div 100 + (k + 399) div 400
+        n := n + antes[(me - 1) mod 12] + d - 1
+        si me > 2 y bisiesto(a) entonces n := n + 1 fin
+        devolver n
+    fin
+
+    ; los segundos de ahora (la hora de la CMOS) desde el 1/1/2000 a las 0:00
+    público función segundos_ahora(): nat32
+        variable s, mi, h, d, me, a: nat32
+        lee_cmos(a, me, d, h, mi, s)
+        devolver días_de(a, me, d) * 86400 + h * 3600 + mi * 60 + s
+    fin
+
+    ; pone el reloj del PC en esos segundos desde el 1/1/2000 (hasta el 2099)
+    público función pon_segundos(seg: nat32)
+        variable días, a, me, n, s: nat32
+        días := seg div 86400
+        s := seg mod 86400
+        a := 2000
+        mientras a < 2099 y días >= días_de(a + 1, 1, 1) hacer a := a + 1 fin
+        me := 1
+        mientras me < 12 y días >= días_de(a, me + 1, 1) hacer me := me + 1 fin
+        n := días - días_de(a, me, 1) + 1
+        pon_campos(s mod 60, (s div 60) mod 60, s div 3600, n, me, a)
     fin
 
 fin Fecha.

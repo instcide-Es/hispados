@@ -89,6 +89,11 @@ módulo Consola
     variable es_normal: arreglo [59] de byte = "\0\e1234567890'\xAD\x08\tqwertyuiop\x02+\n\0asdfghjkl\xA4\x01\xA7\0\x87zxcvbnm,.-\0*\0 "
     variable es_mayús: arreglo [59] de byte = "\0\e!\"\xFA$%&/()=?\xA8\x08\tQWERTYUIOP\x03*\n\0ASDFGHJKL\xA5\x04\xA6\0\x80ZXCVBNM;:_\0*\0 "
     variable es_altgr: arreglo [59] de byte = "\0\0|@#~\0\xAA\0\0\0\0\0\0\0\0\0\0\xF4\0\0\0\0\0\0\0[]\0\0\0\0\0\0\0\0\0\0\0\0{\\\0}"   ; (0.8.5) Alt Gr+E: el euro (F4h, la 437 de Hispa: tools/hispa437.py)
+    ; (PANEL) el latinoamericano (Panel de control > Teclado): la ñ en su sitio, el acento a la derecha de la P, ¿ junto al 0
+    variable la_normal: arreglo [59] de byte = "\0\e1234567890'\xA8\x08\tqwertyuiop\x01+\n\0asdfghjkl\xA4{|\0}zxcvbnm,.-\0*\0 "
+    variable la_mayús: arreglo [59] de byte = "\0\e!\"#$%&/()=?\xAD\x08\tQWERTYUIOP\x04*\n\0ASDFGHJKL\xA5[\xF8\0]ZXCVBNM;:_\0*\0 "
+    variable la_altgr: arreglo [59] de byte = "\0\0\0\0\0\0\0\0\0\0\0\0\\\0\0\0@\0\xF4\0\0\0\0\0\0\0\0~\0\0\0\0\0\0\0\0\0\0\0\0\x03\xAA\0\x02"
+    variable latino: bool                       ; (PANEL) con «español», el latinoamericano
     ; y el de EE. UU.
     variable us_normal: arreglo [59] de byte = "\0\e1234567890-=\x08\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 "
     variable us_mayús: arreglo [59] de byte = "\0\e!@#$%^&*()_+\x08\tQWERTYUIOP{}\n\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 "
@@ -157,6 +162,14 @@ módulo Consola
             si mayúsculas entonces c := '>' sino c := '<' fin
         sino si código > 0x39 entonces
             devolver 0
+        sino si latino entonces                 ; (PANEL)
+            si alt_gr entonces
+                c := la_altgr[código]
+            sino si mayúsculas entonces
+                c := la_mayús[código]
+            sino
+                c := la_normal[código]
+            fin
         sino si alt_gr entonces
             c := es_altgr[código]
         sino si mayúsculas entonces
@@ -414,7 +427,93 @@ módulo Consola
     ; qué teclado es: el español (cierto) o el de EE. UU. (falso)
     público función pon_teclado(el_español: bool)
         español := el_español
+        latino := falso                         ; (PANEL)
         muerta := 0
+    fin
+
+    ; (PANEL) la distribución del teclado: 0, la de EE. UU.; 1, la española;
+    ; 2, la latinoamericana (Panel de control > Teclado)
+    público función pon_distribución(n: nat32)
+        pon_teclado(n <> 0)
+        latino := n = 2
+    fin
+
+    público función distribución(): nat32
+        si no español entonces devolver 0 fin
+        si latino entonces devolver 2 fin
+        devolver 1
+    fin
+
+    ; (PANEL) espera a que el 8042 admita un octeto (falso si no: no hay 8042)
+    función espera_8042(): bool
+        variable i: nat32
+        si meter_puerto(0x64) = 0xFF entonces devolver falso fin
+        para i desde 1 hasta 100000 hacer
+            si meter_puerto(0x64) yb 2 = 0 entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; (PANEL) una orden al teclado PS/2 con su dato (la respuesta, 0xFAh,
+    ; llega por la IRQ 1 como un código más, que no es de ninguna tecla)
+    función al_teclado(orden: nat32, dato: nat32)
+        si no espera_8042() entonces devolver fin
+        sacar_puerto(TECLADO, orden)
+        si no espera_8042() entonces devolver fin
+        sacar_puerto(TECLADO, dato)
+    fin
+
+    ; (PANEL) Bloq Num, encendido o apagado (y su luz, en el teclado PS/2)
+    público función pon_bloq_num(encendido: bool)
+        variable l: nat32
+        bloq_num := encendido
+        l := 0
+        si bloq_num entonces l := l ob 2 fin
+        si bloqueo entonces l := l ob 4 fin
+        al_teclado(0xED, l)
+    fin
+
+    ; (PANEL) la repetición del teclado PS/2: el retardo (0 a 3: 250, 500,
+    ; 750 o 1.000 ms) y las letras por segundo (de 2 a 30), con la orden F3h
+    público función pon_repetición(retardo: nat32, por_segundo: nat32)
+        variable k: nat32
+        variable ritmos: arreglo [32] de nat32
+        ; las letras por segundo (por diez) de cada código de la orden, del 0 al 31
+        ritmos[0] := 300
+        ritmos[1] := 267
+        ritmos[2] := 240
+        ritmos[3] := 218
+        ritmos[4] := 207
+        ritmos[5] := 185
+        ritmos[6] := 171
+        ritmos[7] := 160
+        ritmos[8] := 150
+        ritmos[9] := 133
+        ritmos[10] := 120
+        ritmos[11] := 109
+        ritmos[12] := 100
+        ritmos[13] := 92
+        ritmos[14] := 86
+        ritmos[15] := 80
+        ritmos[16] := 75
+        ritmos[17] := 67
+        ritmos[18] := 60
+        ritmos[19] := 55
+        ritmos[20] := 50
+        ritmos[21] := 46
+        ritmos[22] := 43
+        ritmos[23] := 40
+        ritmos[24] := 37
+        ritmos[25] := 33
+        ritmos[26] := 30
+        ritmos[27] := 27
+        ritmos[28] := 25
+        ritmos[29] := 23
+        ritmos[30] := 21
+        ritmos[31] := 20
+        k := 0
+        mientras k < 31 y ritmos[k] > por_segundo * 10 hacer k := k + 1 fin
+        al_teclado(0xF3, ((retardo yb 3) << 5) ob k)
     fin
 
     público función teclado_español(): bool

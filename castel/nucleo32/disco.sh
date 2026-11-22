@@ -27,6 +27,8 @@
 # microcódigo de las Broadcom (BCM43XX.FW, BCM43XXH.FW y su licencia,
 # BCM43XX.TXT); con «wifisim», además un RED.INI con «WifiSimulada=SI» (la
 # radio de mentira: las pruebas).
+# (PANEL) Con «panel», también el Panel de control (PANEL.BIN) y la hora por
+# Internet (HORARED.BIN), que el escritorio pone en marcha al arrancar.
 # La imagen se le da a QEMU como disco IDE: DISCO=IMAGEN nucleo32/probar.sh ...
 # Necesita python3, nasm, mkfs.fat (dosfstools) y mtools.
 set -e
@@ -41,8 +43,9 @@ NAVEGADOR=
 ESCUDO=
 SSH=
 WIFI=
+PANEL=
 for o in "${@:3}"; do
-  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; navegador) NAVEGADOR=navegador ;; ssh) SSH=ssh ;; escudo) ESCUDO=escudo ;; wifi) WIFI=wifi ;; wifisim) WIFI=wifisim ;; esac
+  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; navegador) NAVEGADOR=navegador ;; ssh) SSH=ssh ;; escudo) ESCUDO=escudo ;; wifi) WIFI=wifi ;; wifisim) WIFI=wifisim ;; panel) PANEL=panel ;; esac
 done
 T=$(mktemp -d)
 trap 'rm -rf $T' EXIT
@@ -115,6 +118,15 @@ if [ "$RED" = red ]; then
       mcopy -i $V $T/RED.INI ::
     fi
   fi
+fi
+# (PANEL) el Panel de control y la hora por Internet
+if [ "$PANEL" = panel ]; then
+  for p in upanel:PANEL uhorared:HORARED; do
+    f=${p%%:*}; N=${p##*:}
+    python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $T/$f.asm > /dev/null
+    nasm -f bin $T/$f.asm -o $T/$N.BIN
+  done
+  mcopy -i $V $T/PANEL.BIN $T/HORARED.BIN ::
 fi
 if [ "$OFICINA" = oficina ]; then
   bash $AQUI/hvprun/hacer.sh $T/of > /dev/null

@@ -5,7 +5,8 @@
 # (la carpeta nucleo32), $W (una carpeta de trabajo con f/ e i/ ya hechas)
 # y $MEDIO («usb» o «cd»). Deja:
 #   $W/f     el núcleo (SEMILLA.BIN y sus copias ESCRIT*.BIN que piden el modo
-#            gráfico), los programas, ACPI.BIN, TLS.BIN, SSH.BIN, SSHD.BIN,
+#            gráfico), los programas (con (PANEL) PANEL.BIN, el Panel de
+#            control, y HORARED.BIN, la hora por Internet), ACPI.BIN, TLS.BIN, SSH.BIN, SSHD.BIN,
 #            WG.BIN, TAILSCAL.BIN, (WIFI) WIFI.BIN con el microcódigo de las
 #            Broadcom, SONIDO.BIN (y los sonidos del sistema: INICIO.WAV,
 #            APAGAR.WAV, AVISO.WAV y ERROR.WAV) y LEEME.TXT
@@ -26,7 +27,7 @@ python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT10.BIN 1024 768 32 
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT6.BIN 1024 600 32 > /dev/null
 python3 -I $AQUI/modo_grafico.py $W/f/SEMILLA.BIN $W/f/ESCRIT13.BIN 1366 768 32 > /dev/null
 MODULOS=
-for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO udisposi:DISPOSIT upaquete:PAQUETES uactual:ACTUALIZ uprogram:PROGRAMA uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE umuestra:MUESTRA ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uhttps:HTTPS uredwifi:REDWIFI uinstala:INSTALAR uasiste:ASISTE ucalc:CALC ureloj:RELOJ ucaract:CARACTER ucuentas:USUARIOS; do
+for p in uordenes:ORDENES ubloc:BLOC uconsola:CONSOLA uequipo:EQUIPO udisposi:DISPOSIT upaquete:PAQUETES uactual:ACTUALIZ uprogram:PROGRAMA uhola:HOLA ueco:ECO uprueba:PRUEBA ubucle:BUCLE umuestra:MUESTRA ured:RED uipconf:IPCONFIG uping:PING udescarg:DESCARGA uhttps:HTTPS uredwifi:REDWIFI uinstala:INSTALAR uasiste:ASISTE ucalc:CALC ureloj:RELOJ ucaract:CARACTER ucuentas:USUARIOS upanel:PANEL uhorared:HORARED; do
   f=${p%%:*}; N=${p##*:}
   python3 -I $AQUI/../ccastel.py $AQUI/$f.cas -o $W/$f.asm > /dev/null
   nasm -f bin $W/$f.asm -o $W/f/$N.BIN
