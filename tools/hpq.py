@@ -130,6 +130,7 @@ TIPO_POR_NOMBRE = {
     'win32': 'windows',
     'escudo': 'seguridad', 'escbase': 'seguridad', 'escmes': 'seguridad', 'escdia': 'seguridad',
     'sonido': 'multimedia', 'mirador': 'multimedia', 'reproduc': 'multimedia',     # (REPRODUCTOR)
+    'juegos': 'juegos',     # (JUEGOS2)
     'clicgest': 'terceros',
 }
 
@@ -493,6 +494,12 @@ OPCIONALES = [
      'base >= ' + VERSION_087 + ', sonido >= 1.0', [
         ('BIN/REPRODUC.BIN', r'\HISPA\REPRODUC.BIN'), ('REPRODUC.TXT', r'\HISPA\REPRODUC.TXT'),
         ('REPRODUC.MNU', r'\HISPA\MENU\REPRODUC.MNU'), ('REPRODUC.ICP', r'\HISPA\MENU\REPRODUC.ICP')]),
+    # (JUEGOS2) los juegos (castel/nucleo32/juegos/paquete.sh; tipo «juegos»)
+    ('juegos', '1.0', 'Los juegos: Hispa-Pinball (La Feria), Bloques, Rompemuros, Culebra, Campo de minas, Solitario, Tragabolas y Almacén', 'base >= 0.8.4',
+     [(o + '/' + j + '.' + e if o else j + '.' + e, '\\HISPA\\' + d + '\\' + j + '.' + e)
+      for j in ('BLOQUES', 'ROMPEMUR', 'PINBALL', 'CULEBRA', 'MINAS', 'SOLITARI', 'TRAGABOL', 'ALMACEN')
+      for o, d, e in (('BIN', 'JUEGOS', 'BIN'), ('', 'MENU', 'MNU'), ('', 'MENU', 'ICP'))]
+     + [('JUEGOS.TXT', r'\HISPA\JUEGOS\LEEME.TXT')]),
 ]
 
 # (0.8.6) los que el catálogo marca del sistema («sistema=nombre»): los que

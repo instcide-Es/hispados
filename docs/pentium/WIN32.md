@@ -352,7 +352,7 @@ escritorio, mirando las capturas; Naves desde Mi equipo, jugando; el ejemplo
 DDRAW y FASMW si están los de otros (`tests/thirdparty/fetch_win32.sh`); y
 REDPRUE contra el servidor HTTP de aquí.
 
-(JUEGOS) La parte 33 (`SOLO=juegos`): los programas de `tests/juegos/`
+(JUEGOS) La parte 33 (`SOLO=win32juegos`): los programas de `tests/juegos/`
 (`nucleo32/win32/juegos.sh`: gcc -m32 -march=i586 y `tools/elf2pe.py`, con
 MSVCRT.DLL; los PE son como los de MinGW): FALTA, SINDLL y `WIN32 COMPRUEBA`
 (con `WIN32.LOG`), HILOS, SEH, REG (dos veces, y los `.REG` del disco con
