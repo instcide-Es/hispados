@@ -1016,7 +1016,19 @@ static void medidas(int *w, int *h) {
 FN(f_ancho) { int w, h; USA; (void)a; medidas(&w, &h); return JS_NewInt32(c, w); }
 FN(f_alto) { int w, h; USA; (void)a; medidas(&w, &h); return JS_NewInt32(c, h); }
 FN(f_ahora) { USA; (void)a; return JS_NewFloat64(c, (double)(GetTickCount() - H->t_pagina)); }
-FN(f_agente) { USA; (void)a; return JS_NewString(c, AGENTE); }
+/* navigator.userAgent: el mismo que va en las peticiones a este sitio (la
+ * versión para móvil o la de escritorio: http_agente, de frontal.c) */
+extern const char *(*http_agente)(const char *servidor);
+FN(f_agente) {
+  const char *u = url_pagina(), *d;
+  char host[150];
+  size_t n = 0;
+  USA; (void)a;
+  if (!http_agente || !u || !(d = strstr(u, "://"))) return JS_NewString(c, AGENTE);
+  for (d += 3; d[n] && d[n] != '/' && d[n] != ':' && d[n] != '?' && d[n] != '#' && n < sizeof host - 1; n++) host[n] = d[n];
+  host[n] = 0;
+  return JS_NewString(c, http_agente(host));
+}
 FN(f_idioma) { USA; (void)a; return JS_NewString(c, "es-ES"); }
 FN(f_registro) {
   int niv = 0;

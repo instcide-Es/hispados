@@ -12,6 +12,9 @@ Lo que hay en \HISPA\NAVEGA (el paquete «navegador»):
   FUENTES\      las letras DejaVu (recortadas a las de Europa occidental)
   SURFGAL.TXT   las galletas que dicen hasta cuándo valen (lo escribe él)
   NAVEGA2.ALM   lo que guardan las páginas (localStorage; lo escribe él)
+  NAVEGA2.INI   los sitios en los que se ha pedido la versión para móvil
+                («Movil=servidor»: menú ≡ o botón derecho, «Ver la versión
+                para móvil» / «Ver la versión de escritorio»; lo escribe él)
 Con un archivo SURF.LOG (aunque esté vacío) en esta carpeta, apunta ahí lo que
 hace (y NetSurf en NS.LOG). Las descargas van a C:\DESCARGA.
 
@@ -38,6 +41,8 @@ Lleva dentro, de terceros (cada uno con su licencia, en terceros/):
   - El descompresor de Brotli, de Google, licencia MIT (terceros/brotli).
   - stb_truetype y stb_image, de Sean Barrett, dominio público o MIT
     (terceros/stb).
+  - NanoSVG, de Mikko Mononen, licencia zlib (terceros/nanosvg): las
+    imágenes SVG (los iconos de las webs).
   - Las letras DejaVu (Bitstream Vera y sus cambios, de dominio público), con
     su licencia (terceros/dejavu/LICENSE).
   - Las conexiones cifradas las hace TLS.BIN (el paquete «tls»), con BearSSL,

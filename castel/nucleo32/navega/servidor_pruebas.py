@@ -27,6 +27,27 @@ Lo que sirve:
                  abajo) y sticky, en una página larga
   /descarga      un archivo de 50.000 octetos «Informe anual 2026.zip»
                  (Content-Disposition: attachment)
+  /panel         (navega 0.2.2) como el modo teléfono de ClicGest: con la
+                 galleta vista=movil (o, sin galleta, un User-Agent con
+                 «Mobile»), un guion pone la clase «cg-movil» en <html> y la
+                 hoja manda: la barra de abajo fija (bottom: 0) con «Más», que
+                 abre con showModal() un <dialog> pegado abajo (inset: auto 0
+                 0 0; max-height: 86dvh; overflow-y: auto) con un <details>
+                 cerrado y, al final, «Ver versión de ordenador»; si no, la de
+                 ordenador, con «Ver versión móvil»
+  /vista?modo=movil|pc&volver=/panel   pone la galleta vista (un año,
+                 HttpOnly) y vuelve con un 302, como /vista de ClicGest
+  /portada       como la cabecera de clicgest.es con menos de 1200 puntos de
+                 ancho (navbar-expand-xl de Bootstrap): el menú plegado
+                 (.collapse sin .show: display: none), el botón de las tres
+                 rayas, que es un SVG en un data: (navbar-toggler-icon: sin
+                 SVG no se veía), y dentro «Acceder» (a /login)
+  /login         una página de un color
+  /svg.html      imágenes SVG: un <img> de /icono.svg (un cuadrado relleno
+                 de rgb(200, 30, 120) en un viewBox) y otro en un data: (tres
+                 rayas con stroke en rgba(), como el de Bootstrap), a 90 x 90
+  /ua            una página que dice (con el color) si el User-Agent de la
+                 petición y el de navigator.userAgent llevan «Mobile»
 Lo pone en marcha pruebas.sh y lo para por su PID.
 """
 import http.server
@@ -129,6 +150,110 @@ main { margin-left: 120px; padding-top: 40px; }
 </main></body></html>
 """
 
+# (navega 0.2.2) el modo teléfono de ClicGest, con lo que lo hace difícil:
+# la barra de abajo y la hoja «Más» son position: fixed con bottom: 0 (NetSurf
+# las ponía al final de la página: no se veían), la hoja con inset (que libcss
+# no conocía), max-height en dvh y overflow-y: auto, un <details> cerrado con
+# display: grid dentro (salía desplegado) y la salida al final de la hoja
+PANEL_MOVIL = """<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Panel (movil)</title>
+<script>document.documentElement.className += ' cg-movil cg-vista-fijada';</script><style>
+body { margin: 0; font-family: sans-serif; background: #f4f6f8; }
+.cabecera { background: #0f172a; color: #fff; height: 50px; font-size: 22px; }
+.relleno { height: 220px; margin: 10px; background: #dfe6ee; }
+html.cg-movil body { padding-bottom: 60px; }
+html.cg-movil .pestanas { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1030; display: flex; background: #0b6e4f; height: 50px; }
+html.cg-movil .pestana { flex: 1 1 0; color: #fff; text-align: center; padding-top: 14px; border: 0; background: none; font-size: 16px; }
+html.cg-movil #mas { background: #f59e0b; color: #000; }
+html.cg-movil dialog.hoja { position: fixed; inset: auto 0 0 0; margin: 0; width: 100%; max-width: 100%; max-height: 86dvh;
+  padding: 0; border: 0; background: #fff3c4; overflow-y: auto; z-index: 1045; }
+html.cg-movil dialog.hoja:not([open]) { display: none; }
+html.cg-movil .lista { display: grid; grid-template-columns: 1fr 1fr; }
+html.cg-movil .item { display: flex; min-height: 52px; align-items: center; padding: 0 12px; color: #14294a; }
+html.cg-movil .plegado .item { background: #ffd0d0; }
+html.cg-movil #ordenador { background: #c0306a; color: #fff; min-height: 60px; }
+</style></head><body>
+<div class="cabecera">Panel (version movil)</div>
+""" + ''.join('<div class="relleno">bloque %d</div>' % k for k in range(8)) + """
+<nav class="pestanas"><a class="pestana" href="/panel">Inicio</a><a class="pestana" href="/panel">Socios</a>
+<button type="button" class="pestana" id="mas">Mas</button></nav>
+<dialog class="hoja" id="hoja">
+<div class="lista">""" + ''.join('<a class="item" href="/panel">Seccion %d</a>' % k for k in range(12)) + """</div>
+<details class="plegado"><summary class="item">Papeles, banco y mas</summary>
+<div class="lista">""" + ''.join('<a class="item" href="/panel">Escondida %d</a>' % k for k in range(10)) + """</div></details>
+<div class="lista"><a class="item" href="/panel">Ajustes</a><a class="item" href="/panel">Seguridad</a></div>
+<a class="item" id="ordenador" href="/vista?modo=pc&amp;volver=/panel">Ver version de ordenador</a>
+</dialog>
+<script>
+var hoja = document.getElementById('hoja');
+document.getElementById('mas').addEventListener('click', function (e) {
+  e.preventDefault();
+  if (typeof hoja.showModal === 'function') hoja.showModal(); else hoja.setAttribute('open', '');
+});
+</script>
+</body></html>
+"""
+
+PANEL_PC = """<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Panel (ordenador)</title><style>
+body { margin: 0; font-family: sans-serif; }
+.cabecera { background: #1f4e79; color: #fff; height: 60px; font-size: 24px; }
+#movil { display: block; background: #2e8b57; color: #fff; height: 50px; width: 300px; font-size: 18px; }
+</style></head><body>
+<div class="cabecera">Panel (version de ordenador)</div>
+<a id="movil" href="/vista?modo=movil&amp;volver=/panel">Ver version movil</a>
+</body></html>
+"""
+
+PORTADA = """<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Portada</title><style>
+body { margin: 0; font-family: sans-serif; }
+.nav { position: fixed; top: 0; left: 0; right: 0; background: #fff; z-index: 1030; border-bottom: 1px solid #ccc; }
+.barra { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 8px 16px; }
+.marca { font-size: 22px; color: #166534; }
+.toggler { padding: 4px 12px; background: transparent; border: 0; }
+.toggler-icon { display: inline-block; width: 1.5em; height: 1.5em; vertical-align: middle; background-repeat: no-repeat;
+  background-position: center; background-size: 100%;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%2833, 37, 41, 0.75%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e"); }
+.collapse:not(.show) { display: none; }
+.menu { flex-basis: 100%; }
+.menu a { display: block; padding: 8px 0; color: #14294a; }
+#acceder { display: inline-block; background: #1f6feb; color: #fff; padding: 10px 20px; }
+.heroe { margin-top: 60px; height: 900px; background: #0b1020; color: #fff; font-size: 30px; }
+</style></head><body>
+<nav class="nav"><div class="barra"><a class="marca" href="/portada">ClicGest</a>
+<button class="toggler" type="button" id="toggler" aria-label="Abrir el menu"><span class="toggler-icon"></span></button>
+<div class="collapse menu" id="navmenu"><a href="#funciones">Funciones</a><a href="#precios">Precios</a>
+<a id="acceder" href="/login">Acceder</a></div></div></nav>
+<section class="heroe">El software todo en uno para tu asociacion</section>
+<script>
+document.getElementById('toggler').addEventListener('click', function () {
+  document.getElementById('navmenu').classList.toggle('show');
+});
+</script>
+</body></html>
+"""
+
+LOGIN = """<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Entrar</title></head>
+<body style="margin:0"><div style="background:#6a5acd;height:200px;color:#fff;font-size:30px">Entrar</div></body></html>
+"""
+
+ICONO_SVG = (b"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'>"
+             b"<rect x='3' y='3' width='24' height='24' fill='rgb(200, 30, 120)'/></svg>")
+
+SVG_PAGINA = """<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>SVG</title></head>
+<body style="margin:0;background:#fff"><img src="/icono.svg" width="90" height="90" alt="cuadrado">
+<img width="90" height="90" alt="rayas" src="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%2820, 40, 200, 0.9%29' stroke-linecap='round' stroke-width='4' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e">
+</body></html>
+"""
+
+UA_PAGINA = """<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>User-Agent</title></head>
+<body style="margin:0"><div style="background:%s;height:120px;color:#fff;font-size:24px">%s</div>
+<div id="js" style="background:#808080;height:80px"></div>
+<script>document.getElementById('js').style.backgroundColor = /Mobile/.test(navigator.userAgent) ? '#c71585' : '#1e90ff';</script>
+</body></html>
+"""
+
 PAGINA2 = """<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>La segunda</title></head>
 <body style="margin:0"><div style="background:#008b8b;height:200px;color:#fff;font-size:30px">La segunda página</div></body></html>
 """.encode()
@@ -179,6 +304,41 @@ class Pedidos(http.server.BaseHTTPRequestHandler):
             self.da(200, 'text/html; charset=utf-8', pag.encode())
         elif camino == '/pagina2.html':
             self.da(200, 'text/html; charset=utf-8', PAGINA2)
+        elif camino == '/panel':
+            galleta = self.headers.get('Cookie', '')
+            vista = ''
+            for trozo in galleta.split(';'):
+                k, _, v = trozo.strip().partition('=')
+                if k == 'vista':
+                    vista = v
+            if vista not in ('movil', 'pc'):
+                vista = 'movil' if 'Mobile' in self.headers.get('User-Agent', '') else 'pc'
+            self.da(200, 'text/html; charset=utf-8', (PANEL_MOVIL if vista == 'movil' else PANEL_PC).encode(),
+                    [('Cache-Control', 'no-store')])
+        elif camino == '/vista':
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            modo = q.get('modo', [''])[0]
+            volver = q.get('volver', ['/panel'])[0]
+            if not volver.startswith('/') or volver.startswith('//'):
+                volver = '/panel'
+            if modo in ('movil', 'pc'):
+                g = 'vista=%s; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax' % modo
+            else:
+                g = 'vista=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax'
+            self.da(302, 'text/plain', b'', [('Set-Cookie', g), ('Location', volver)])
+        elif camino == '/portada':
+            self.da(200, 'text/html; charset=utf-8', PORTADA.encode())
+        elif camino == '/login':
+            self.da(200, 'text/html; charset=utf-8', LOGIN.encode())
+        elif camino == '/svg.html':
+            self.da(200, 'text/html; charset=utf-8', SVG_PAGINA.encode())
+        elif camino == '/icono.svg':
+            self.da(200, 'image/svg+xml', ICONO_SVG)
+        elif camino == '/ua':
+            movil = 'Mobile' in self.headers.get('User-Agent', '')
+            self.da(200, 'text/html; charset=utf-8',
+                    (UA_PAGINA % (('#daa520', 'movil') if movil else ('#008b8b', 'escritorio'))).encode(),
+                    [('Cache-Control', 'no-store')])
         elif camino == '/descarga':
             self.da(200, 'application/zip', DESCARGA, [('Content-Disposition', 'attachment; filename="Informe anual 2026.zip"')])
         else:

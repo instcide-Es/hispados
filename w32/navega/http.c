@@ -37,6 +37,9 @@ typedef struct { u16 anio, mes, sem, dia, hora, min, seg, ms; } ST;
 void WINAPI GetLocalTime(ST *);
 
 char http_idioma[32] = "es";
+/* el User-Agent para un servidor (el Navegador de Hispa-Pentium: la versión
+ * para móvil o la de escritorio de cada sitio); sin él, HTTP_AGENTE */
+const char *(*http_agente)(const char *servidor);
 #define CUERPO_MAX (4u << 20)
 
 /* =============================================================================
@@ -502,9 +505,10 @@ static int pet_arma(Pet *p) {
   /* [JS] fetch puede traer su Accept y su Content-Type: entonces mandan los suyos */
   acc = cab_de(p->js_cab, "Accept") ? NULL : p->js_cab ? "*/*"
       : p->sub ? "image/png,image/gif,image/jpeg,image/bmp,image/x-icon;q=0.9,*/*;q=0.1" : "text/html,text/plain;q=0.9,*/*;q=0.5";
-  n = sprintf(p->pet, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: " HTTP_AGENTE "\r\n"
+  n = sprintf(p->pet, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\n"
               "%s%s%sAccept-Language: %s\r\nConnection: keep-alive\r\n%s",
               p->js_metodo ? p->js_metodo : p->post ? "POST" : "GET", p->u.ruta, host,
+              http_agente ? http_agente(p->u.servidor) : HTTP_AGENTE,
               acc ? "Accept: " : "", acc ? acc : "", acc ? "\r\n" : "", http_idioma, g ? g : "");
   free(g);
   if (p->js_cab) n += sprintf(p->pet + n, "%.2000s", p->js_cab);     /* [JS] las de fetch */

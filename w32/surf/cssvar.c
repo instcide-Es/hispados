@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <strings.h>
 
 #include "cssvar.h"
 
@@ -435,6 +436,46 @@ static void pon_valor(Txt *x, const char *v, size_t l) {
   tx_pon(x, v + desde, l - desde);
 }
 
+/* inset (top, right, bottom y left de una vez, como margin), que libcss no
+ * conoce: «inset: auto 0 0 0» (la hoja «Más» del modo teléfono de ClicGest,
+ * pegada abajo) o «inset: 0» (los fondos oscuros de detrás de una ventana) */
+static int pon_inset(Txt *x, const char *v, size_t l) {
+  static const char *const lado[4] = { "top", "right", "bottom", "left" };
+  const char *pa[4];
+  size_t pl[4], k = 0;
+  int n = 0, i, prof;
+  char imp[16] = "";
+  /* (con !important, a los cuatro) */
+  {
+    const char *e = v + l;
+    while (e > v && isspace((unsigned char)e[-1])) e--;
+    if (e - v > 10 && !strncasecmp(e - 10, "!important", 10)) {
+      strcpy(imp, " !important");
+      l = (e - 10) - v;
+      while (l && isspace((unsigned char)v[l - 1])) l--;
+    }
+  }
+  while (k < l) {
+    while (k < l && isspace((unsigned char)v[k])) k++;
+    if (k >= l) break;
+    if (n == 4) return 0;                      /* (más de cuatro: no es inset) */
+    pa[n] = v + k;
+    for (prof = 0; k < l && (prof || !isspace((unsigned char)v[k])); k++) {
+      if (v[k] == '(') prof++;
+      else if (v[k] == ')' && prof) prof--;
+    }
+    pl[n] = v + k - pa[n];
+    n++;
+  }
+  if (!n) return 0;
+  for (i = 0; i < 4; i++) {
+    /* 1: los cuatro; 2: arriba y abajo, los lados; 3: arriba, lados, abajo */
+    int j = n == 1 ? 0 : n == 2 ? i % 2 : n == 3 ? (i == 3 ? 1 : i) : i;
+    tx_cad(x, lado[i]); tx_cad(x, ":"); pon_valor(x, pa[j], pl[j]); tx_cad(x, imp); tx_cad(x, ";");
+  }
+  return 1;
+}
+
 /* una declaración ya sin var(): a la salida (quitando los degradados) */
 static void pon_decl(Txt *x, const char *n, size_t ln, const char *v, size_t lv) {
   v = recorta(v, &lv);
@@ -443,6 +484,7 @@ static void pon_decl(Txt *x, const char *n, size_t ln, const char *v, size_t lv)
   if (fondo_texto && ((ln == 5 && !memcmp(n, "color", 5)) || (ln == 23 && !memcmp(n, "-webkit-text-fill-color", 23))) &&
       lv >= 11 && !memcmp(v, "transparent", 11)) return;
   if (es_fondo(n, ln) && busca_grad(v, lv)) { sin_degradado(x, n, ln, v, lv); return; }
+  if (ln == 5 && !memcmp(n, "inset", 5) && pon_inset(x, v, lv)) return;
   tx_pon(x, n, ln); tx_cad(x, ":"); pon_valor(x, v, lv); tx_cad(x, ";");
   /* lo que se esconde fuera de la pantalla moviéndolo (el menú lateral
    * «off-canvas»: transform: translateX(-100%)): NetSurf no mueve, así que
@@ -586,7 +628,7 @@ char *cssvar_expande(const char *css, size_t n, size_t *sale) {
     for (k = 0; k + 9 <= n && !hay; k++)
       if ((css[k] == 'v' && !memcmp(css + k, "var(", 4)) || (css[k] == '-' && css[k + 1] == '-') || (css[k] == 'g' && !memcmp(css + k, "gradient(", 9)) ||
           (css[k] == 't' && !memcmp(css + k, "translate", 9)) || (css[k] == 'c' && !memcmp(css + k, "clamp(", 6)) ||
-          (css[k] == 'e' && !memcmp(css + k, "env(", 4)) ||
+          (css[k] == 'e' && !memcmp(css + k, "env(", 4)) || (css[k] == 'i' && !memcmp(css + k, "inset", 5)) ||
           ((css[k] == 'm') && es_mates(css, n, k))) hay = 1;
     if (!hay) return NULL;
   }

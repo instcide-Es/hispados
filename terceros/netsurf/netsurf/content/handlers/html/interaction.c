@@ -692,18 +692,17 @@ get_mouse_action_node(html_content *html,
 	box_x = box->margin[LEFT];
 	box_y = box->margin[TOP];
 
+	/* [HISPA] lo que va por encima (un menú desplegable, la hoja «Más»
+	 * de ClicGest, con z-index): si se ha dado en él, solo cuenta lo suyo
+	 * (lo de debajo, antes o después en el árbol, no) */
+	hispa_encima = box_hispa_arriba(&html->unit_len_ctx, box, x, y,
+			&box_x, &box_y);
+	if (hispa_encima != NULL)
+		box = hispa_encima;
+
 	do {
-		/* [HISPA] lo que va por encima (un menú desplegable, con
-		 * z-index): si se ha dado en él, lo de después no cuenta */
-		if (hispa_encima != NULL) {
-			struct box *b;
-			for (b = box; b != NULL && b != hispa_encima; b = b->parent)
-				;
-			if (b == NULL)
-				goto next_box;
-		} else if (box_hispa_encima(box)) {
-			hispa_encima = box;
-		}
+		if (hispa_encima != NULL && !box_hispa_dentro(box, hispa_encima))
+			break;
 
 		/* skip hidden boxes */
 		if ((box->style != NULL) &&

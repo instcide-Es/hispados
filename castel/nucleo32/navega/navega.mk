@@ -42,6 +42,7 @@ $(O)/surf/surf_js.h: w32/navega/dom.js w32/surf/surf.js
 	python3 -c "import sys; f = lambda n, a: 'static const char %s[] = {' % n + ','.join(str(b) for b in open(a, 'rb').read()) + ',0};'; print(f('dom_js', sys.argv[1])); print(f('surf_js', sys.argv[2]))" $^ > $@
 $(O)/surf/w32/surf/guion.o: $(O)/surf/surf_js.h w32/surf/guion.h terceros/quickjs/quickjs.h
 $(O)/surf/w32/surf/selector.o $(O)/surf/w32/surf/rehaz.o: w32/surf/guion.h
+$(O)/surf/w32/surf/svgimagen.o: terceros/nanosvg/nanosvg.h terceros/nanosvg/nanosvgrast.h
 $(O)/surf/$(AQUI)/frontal.o $(O)/surf/$(AQUI)/descarga.o: $(AQUI)/frontal.h
 $(O)/surf/$(AQUI)/sistema.o: $(AQUI)/pentium.h
 $(O)/surf/$(AQUI)/frontal.o: $(AQUI)/pentium.h

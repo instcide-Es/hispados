@@ -99,5 +99,50 @@ chk('position: sticky: pegado bajo la cabecera', cerca(p(400, 55), (0, 170, 0)) 
 sys.exit(fallo)
 EOP
 else echo "  FAIL surfppm no pinta tests/surf/fijo.html"; r=1; fi
+# (navega 0.2.2) el modo teléfono de ClicGest (tests/surf/movil.html): la
+# barra de abajo, fija con bottom: 0, abajo de la ventana; la hoja «Más» (un
+# <dialog open> fijo con inset: auto 0 0 0 y max-height: 80dvh) pegada abajo,
+# con su <details> cerrado; los clics, para la hoja de encima (también con la
+# página desplazada) y no para los enlaces de debajo; el icono SVG en un data:
+if build/anf/surfppm -w 600 -h 400 -o $T/m.ppm -enlace 100 380 -enlace 100 300 -enlace 100 50 tests/surf/movil.html > $T/m.txt 2>&1 \
+   && build/anf/surfppm -w 600 -h 400 -y 300 -o $T/m2.ppm -enlace 100 380 -enlace 100 250 tests/surf/movil.html > $T/m2.txt 2>&1 \
+   && build/anf/surfppm -w 600 -h 230 -o $T/m3.ppm tests/surf/movil.html > /dev/null 2>&1; then
+  python3 -I - $T/m.ppm $T/m.txt $T/m2.txt $T/m3.ppm <<'EOP' || r=1
+import sys
+d = open(sys.argv[1], 'rb').read()
+t = d.split(b'\n', 3)
+w, h = map(int, t[1].split())
+px = t[3]
+def p(x, y):
+    o = (y * w + x) * 3
+    return tuple(px[o:o + 3])
+def cerca(c, r, tol=12):
+    return all(abs(a - b) <= tol for a, b in zip(c, r))
+enl = {}
+for f in sys.argv[2:4]:
+    for l in open(f):
+        if l.startswith('enlace '):
+            _, x, y, u = l.split()
+            enl[(f == sys.argv[3], int(x), int(y))] = u.split('/')[-1]
+fallo = 0
+def chk(nombre, ok):
+    global fallo
+    print('  %s %s' % ('OK  ' if ok else 'FAIL', nombre))
+    if not ok: fallo = 1
+chk('inset: auto 0 0 0: la hoja, pegada abajo (200 de alto: de 200 a 400)', cerca(p(500, 197), (221, 221, 221)) and cerca(p(500, 203), (255, 243, 196)) and cerca(p(500, 399), (192, 48, 106)))
+d3 = open(sys.argv[4], 'rb').read().split(b'\n', 3)[3]
+def p3(x, y):
+    o = (y * w + x) * 3
+    return tuple(d3[o:o + 3])
+chk('max-height: 80dvh: con 230 de alto, la hoja mide 184 (de 46 abajo)', cerca(p3(500, 43), (221, 221, 221)) and cerca(p3(500, 49), (255, 243, 196)))
+chk('<details> cerrado: se ve su <summary>, no lo de dentro (aunque sea display: grid)', cerca(p(300, 340), (255, 208, 208)) and not cerca(p(300, 300), (255, 208, 208)))
+chk('el icono SVG (data:, trazos con rgba()), pintado', cerca(p(580, 16), (33, 37, 41), 30) and cerca(p(580, 24), (33, 37, 41), 30) and cerca(p(580, 20), (221, 221, 221)))
+chk('el clic en la hoja de encima: «Ver versión de ordenador», no el enlace de debajo', enl.get((False, 100, 380)) == 'vista?modo=pc')
+chk('el clic en la rejilla de la hoja: su enlace', enl.get((False, 100, 300)) == 'seccion4')
+chk('el clic fuera de la hoja: el enlace de la página', enl.get((False, 100, 50)) == 'fondo0')
+chk('con la página desplazada (300), lo fijo sigue llevándose el clic donde se ve', enl.get((True, 100, 380)) == 'vista?modo=pc' and enl.get((True, 100, 250)) == 'seccion2')
+sys.exit(fallo)
+EOP
+else echo "  FAIL surfppm no pinta tests/surf/movil.html"; r=1; fi
 [ -n "${GUARDAR:-}" ] && { mkdir -p "$GUARDAR"; python3 -I tests/tools/ppm2png.py $T/p.ppm "$GUARDAR"/pintado.png; }
 exit $r

@@ -26,6 +26,7 @@
  */
 
 #include <string.h>
+#include <strings.h>
 #include <dom/dom.h>
 
 #include "utils/errors.h"
@@ -318,6 +319,45 @@ static bool hispa_hay_texto(const css_computed_style *style)
 				lwc_string_length(c_item->data.string) > 0)
 			return true;
 	return false;
+}
+
+/* [HISPA] ¿un hijo de un <details> cerrado que no es su <summary>? No se
+ * ve (como en los navegadores de hoy, aunque su hoja le dé display: grid:
+ * la hoja «Más» del modo teléfono de ClicGest). Al abrirlo (dom.js pone
+ * «open»), las cajas se rehacen */
+static bool hispa_nombre_es(dom_node *n, const char *nombre)
+{
+	dom_string *nom = NULL;
+	bool si = false;
+	if (dom_node_get_node_name(n, &nom) == DOM_NO_ERR && nom != NULL) {
+		si = strcasecmp(dom_string_data(nom), nombre) == 0;
+		dom_string_unref(nom);
+	}
+	return si;
+}
+static bool hispa_en_details_cerrado(dom_node *n)
+{
+	dom_node *padre = NULL;
+	dom_node_type tipo;
+	bool cerrado = false;
+	if (dom_node_get_node_type(n, &tipo) != DOM_NO_ERR ||
+			tipo != DOM_ELEMENT_NODE || hispa_nombre_es(n, "summary"))
+		return false;
+	if (dom_node_get_parent_node(n, &padre) != DOM_NO_ERR || padre == NULL)
+		return false;
+	if (dom_node_get_node_type(padre, &tipo) == DOM_NO_ERR &&
+			tipo == DOM_ELEMENT_NODE && hispa_nombre_es(padre, "details")) {
+		dom_string *o = NULL;
+		bool tiene = false;
+		if (dom_string_create((const uint8_t *)"open", 4, &o) ==
+				DOM_NO_ERR) {
+			dom_element_has_attribute(padre, o, &tiene);
+			dom_string_unref(o);
+		}
+		cerrado = !tiene;
+	}
+	dom_node_unref(padre);
+	return cerrado;
 }
 #endif
 
@@ -786,7 +826,11 @@ box_construct_element(struct box_construct_ctx *ctx, bool *convert_children)
 
 	if (box->type == BOX_NONE || (ns_computed_display(box->style,
 			props.node_is_root) == CSS_DISPLAY_NONE &&
-			props.node_is_root == false)) {
+			props.node_is_root == false)
+#ifdef nshispa
+			|| hispa_en_details_cerrado(ctx->n)	/* [HISPA] */
+#endif
+			) {
 		css_select_results_destroy(styles);
 		box->styles = NULL;
 		box->style = NULL;

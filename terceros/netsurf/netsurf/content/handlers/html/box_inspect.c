@@ -615,6 +615,40 @@ box_at_point(const css_unit_ctx *unit_len_ctx,
 }
 
 
+/* [HISPA] Exported function documented in html/box_inspect.h */
+struct box *
+box_hispa_arriba(const css_unit_ctx *unit_len_ctx, struct box *raiz,
+		int x, int y, int *box_x, int *box_y)
+{
+	struct box *b = raiz, *mejor = NULL;
+	int bx = *box_x, by = *box_y, mx = 0, my = 0, mz = 0;
+
+	while ((b = box_at_point(unit_len_ctx, b, x, y, &bx, &by)) != NULL) {
+		if (box_hispa_encima(b) && (mejor == NULL ||
+				box_hispa_z(b) >= mz)) {
+			mejor = b;
+			mx = bx;
+			my = by;
+			mz = box_hispa_z(b);
+		}
+	}
+	if (mejor != NULL) {
+		*box_x = mx;
+		*box_y = my;
+	}
+	return mejor;
+}
+
+/* [HISPA] Exported function documented in html/box_inspect.h */
+bool box_hispa_dentro(const struct box *b, const struct box *a)
+{
+	for (; b != NULL; b = b->parent)
+		if (b == a)
+			return true;
+	return false;
+}
+
+
 /* Exported function documented in html/box.h */
 struct box *box_find_by_id(struct box *box, lwc_string *id)
 {

@@ -1,0 +1,12 @@
+NanoSVG (Mikko Mononen, https://github.com/memononen/nanosvg), licencia zlib
+(LICENSE.txt: compatible con la GPL-2.0), de la versión
+93ce879dc4c04a3ef1758428ec80083c38610b1f del repositorio, tal cual:
+  nanosvg.h      lee un SVG (trazos, figuras, rellenos, degradados)
+                 SHA-256 b0057538cd65b6d8a37a2ef7f5aa3905a14f82964b741534ca61bf20054dcc31
+  nanosvgrast.h  lo pinta en un mapa de puntos RGBA
+                 SHA-256 86e2bf20bd8e75083c1ffab89018cbea73946945b04e30d1b010ef046c538e15
+
+Lo usa el Navegador completo (NAVEGA2.EXE de Hispa-486 y NAVEGA.BIN de
+Hispa-Pentium) para las imágenes SVG: w32/surf/svgimagen.c (los iconos que
+las webs de hoy ponen en SVG, como el botón del menú plegable de Bootstrap,
+«navbar-toggler-icon», sin el que no se veía «Acceder» en clicgest.es).

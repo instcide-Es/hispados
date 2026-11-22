@@ -70,6 +70,7 @@
 #include "html/box_textarea.h"
 #include "html/layout_internal.h"
 #include "html/table.h"
+#include "guion.h"		/* [HISPA] box_hispa_fijo() */
 
 /** Array of per-side access functions for computed style margins. */
 const css_len_func margin_funcs[4] = {
@@ -5247,6 +5248,45 @@ layout_absolute(struct box *box,
  * \param  content           memory pool for any new boxes
  * \return  true on success, false on memory exhaustion
  */
+/* [HISPA] el alto de la ventana en la que se maqueta (layout_document): lo
+ * de position: fixed va respecto a ella, no a la página */
+static int hispa_alto_ventana;
+
+/* [HISPA] position: fixed (la de fuera: lo de dentro va con ella): su caja de
+ * referencia es la ventana, no la caja colocada de encima ni la página
+ * entera. Con la de la página, lo pegado abajo (bottom: 0: el menú de abajo
+ * del modo teléfono de ClicGest, su hoja «Más») caía al final de la página y,
+ * como redraw.c lo pinta respecto a la ventana, no se veía nunca. Se hace con
+ * la caja de <html>, con el alto de la ventana mientras dura, y desde donde
+ * está la caja de encima en la página (redraw.c y box_inspect.c le suman lo
+ * desplazado) */
+static bool
+layout_hispa_fijo(struct box *c, struct box *box, html_content *content)
+{
+	struct box *raiz = box;
+	int ax, ay, ancho, alto;
+	bool ok;
+
+	while (raiz->parent != NULL)
+		raiz = raiz->parent;
+	box_coords(box, &ax, &ay);
+	ax -= raiz->x;
+	ay -= raiz->y;
+	ancho = raiz->width;
+	alto = raiz->height;
+	if (hispa_alto_ventana > 0) {
+		raiz->height = hispa_alto_ventana - (raiz->y +
+				raiz->padding[TOP] + raiz->padding[BOTTOM] +
+				raiz->border[BOTTOM].width + raiz->margin[BOTTOM]);
+		if (raiz->height < 0)
+			raiz->height = 0;
+	}
+	ok = layout_absolute(c, raiz, ax, ay, content);
+	raiz->width = ancho;
+	raiz->height = alto;
+	return ok;
+}
+
 static bool
 layout_position_absolute(struct box *box,
 			 struct box *containing_block,
@@ -5257,6 +5297,17 @@ layout_position_absolute(struct box *box,
 
 	for (c = box->children; c; c = c->next) {
 		if ((c->type == BOX_BLOCK || c->type == BOX_TABLE ||
+				c->type == BOX_INLINE_BLOCK ||
+				c->type == BOX_FLEX ||
+				c->type == BOX_INLINE_FLEX) &&
+				css_computed_position(c->style) ==
+						CSS_POSITION_FIXED &&
+				box_hispa_fijo(c)) {
+			if (!layout_hispa_fijo(c, box, content))
+				return false;
+			if (!layout_position_absolute(c, c, 0, 0, content))
+				return false;
+		} else if ((c->type == BOX_BLOCK || c->type == BOX_TABLE ||
 				c->type == BOX_INLINE_BLOCK ||
 				c->type == BOX_FLEX ||
 				c->type == BOX_INLINE_FLEX) &&
@@ -5745,6 +5796,7 @@ bool layout_document(html_content *content, int width, int height)
 	}
 
 	layout_lists(content, doc);
+	hispa_alto_ventana = height;	/* [HISPA] */
 	layout_position_absolute(doc, doc, 0, 0, content);
 	layout_position_relative(&content->unit_len_ctx, doc, doc, 0, 0);
 

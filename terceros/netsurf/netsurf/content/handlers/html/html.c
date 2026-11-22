@@ -74,6 +74,7 @@
 #include "html/imagemap.h"
 #include "html/layout.h"
 #include "html/textselection.h"
+#include "guion.h"		/* [HISPA] */
 
 #define CHUNK 4096
 
@@ -1479,10 +1480,17 @@ html_get_contextual_content(struct content *c, int x, int y,
 	struct box *box = html->layout;
 	struct box *next;
 	int box_x = 0, box_y = 0;
+	/* [HISPA] lo de encima (box_hispa_arriba): solo lo suyo */
+	struct box *arriba = box_hispa_arriba(&html->unit_len_ctx, box, x, y,
+			&box_x, &box_y);
 
-	while ((next = box_at_point(&html->unit_len_ctx, box, x, y,
-			&box_x, &box_y)) != NULL) {
+	for (next = arriba != NULL ? arriba : box_at_point(&html->unit_len_ctx,
+			box, x, y, &box_x, &box_y); next != NULL;
+			next = box_at_point(&html->unit_len_ctx, box, x, y,
+			&box_x, &box_y)) {
 		box = next;
+		if (arriba != NULL && !box_hispa_dentro(box, arriba))
+			break;
 
 		/* hidden boxes are ignored */
 		if ((box->style != NULL) &&
@@ -1558,12 +1566,21 @@ html_scroll_at_point(struct content *c, int x, int y, int scrx, int scry)
 	struct box *next;
 	int box_x = 0, box_y = 0;
 	bool handled_scroll = false;
+	/* [HISPA] lo de encima (box_hispa_arriba): solo lo suyo; y si es
+	 * fijo (la hoja «Más» de ClicGest, una ventana), la rueda no pasa a
+	 * la página de debajo (como overscroll-behavior: contain) */
+	struct box *arriba = box_hispa_arriba(&html->unit_len_ctx, box, x, y,
+			&box_x, &box_y);
 
 	/* TODO: invert order; visit deepest box first */
 
-	while ((next = box_at_point(&html->unit_len_ctx, box, x, y,
-			&box_x, &box_y)) != NULL) {
+	for (next = arriba != NULL ? arriba : box_at_point(&html->unit_len_ctx,
+			box, x, y, &box_x, &box_y); next != NULL;
+			next = box_at_point(&html->unit_len_ctx, box, x, y,
+			&box_x, &box_y)) {
 		box = next;
+		if (arriba != NULL && !box_hispa_dentro(box, arriba))
+			break;
 
 		if (box->style && css_computed_visibility(box->style) ==
 				CSS_VISIBILITY_HIDDEN)
@@ -1605,6 +1622,9 @@ html_scroll_at_point(struct content *c, int x, int y, int scrx, int scry)
 			return true;
 	}
 
+	if (arriba != NULL && arriba->style != NULL &&
+			css_computed_position(arriba->style) == CSS_POSITION_FIXED)
+		return true;	/* [HISPA] */
 	return false;
 }
 

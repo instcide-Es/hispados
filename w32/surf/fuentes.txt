@@ -596,6 +596,7 @@ terceros/netsurf/netsurf/utils/utils.c
 w32/surf/apoyo.c
 w32/surf/archivo.c
 w32/surf/imagen.c
+w32/surf/svgimagen.c
 w32/surf/letra.c
 w32/surf/ns/bitmap.c
 w32/surf/ns/plot.c

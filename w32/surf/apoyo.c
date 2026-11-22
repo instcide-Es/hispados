@@ -279,9 +279,13 @@ float atan2f(float y, float x) { return (float)m_atan2(y, x); }
 float powf(float x, float y) { return (float)m_pow(x, y); }
 float fmodf(float x, float y) { return (float)m_fmod(x, y); }
 double trunc(double x) { return x < 0 ? m_ceil(x) : m_floor(x); }
-float truncf(float x) { return (float)trunc(x); }
+/* (truncf y roundf, sin pasar por trunc ni round: gcc cambiaba «(float)trunc(x)»
+ * por truncf y «(float)round(x)» por roundf, y las dos se llamaban a sí mismas
+ * para siempre: el Navegador se quedaba colgado al pintar un SVG con trazos,
+ * que redondea con floorf(x + 0.5), que gcc hace truncf) */
+float truncf(float x) { return (float)(x < 0 ? m_ceil(x) : m_floor(x)); }
 double round(double x) { return x < 0 ? -m_floor(-x + 0.5) : m_floor(x + 0.5); }
-float roundf(float x) { return (float)round(x); }
+float roundf(float x) { return (float)(x < 0 ? -m_floor(-(double)x + 0.5) : m_floor((double)x + 0.5)); }
 long lround(double x) { return (long)round(x); }
 long lroundf(float x) { return (long)round(x); }
 double rint(double x) { return round(x); }

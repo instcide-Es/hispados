@@ -71,7 +71,7 @@ struct box *html_get_box_tree(struct hlcache_handle *h);   /* (html/html_save.h)
 typedef uint32_t u32;
 typedef uint8_t u8;
 
-#define VERSION_NAVEGADOR "0.2"
+#define VERSION_NAVEGADOR "0.2.2"
 
 /* ---- medidas (puntos) ---- */
 #define PEST_H 30              /* las pestañas */
@@ -1203,6 +1203,115 @@ static void foco_a_dir(int todo)
   foco_dir = 1; dir_sel = todo; dir_cur = n_dir;
   pinta_barra();
 }
+/* ---- la versión para móvil o la de escritorio, por sitio (navega 0.2.2) ----
+ * Como «Ver versión de escritorio» de los navegadores de los teléfonos, al
+ * revés: el Navegador es de escritorio y, para un sitio, se puede pedir la
+ * versión para móvil (el User-Agent con «Mobile», lo que miran las webs que
+ * deciden por él) y volver a la de escritorio. Se recuerda por servidor en
+ * NAVEGA2.INI («Movil=servidor», una línea cada uno: es el archivo de lo que
+ * guarda el Navegador por su cuenta; NAVEGA.INI es el de las opciones). Las
+ * webs que recuerdan lo elegido en su propia galleta (ClicGest: cg_vista)
+ * mandan con ella: allí se vuelve con su enlace «Ver versión de ordenador». */
+#define AGENTE_ESCRITORIO "HispaSurf/0.2 (NetSurf 3.11; Hispa-Pentium)"   /* (el de siempre: SURF_UA en navega.mk) */
+extern const char *(*http_agente)(const char *servidor);          /* (w32/navega/http.c) */
+#define AGENTE_MOVIL "HispaSurf/0.2 (NetSurf 3.11; Hispa-Pentium; Mobile)"
+#define N_MOVIL 32
+static char movil[N_MOVIL][128];
+static int n_movil;
+static int es_movil(const char *servidor)
+{
+  int k;
+  if (!servidor || !*servidor) return 0;
+  for (k = 0; k < n_movil; k++) if (!strcasecmp(movil[k], servidor)) return 1;
+  return 0;
+}
+static const char *agente_de(const char *servidor)
+{
+  return es_movil(servidor) ? AGENTE_MOVIL : AGENTE_ESCRITORIO;
+}
+static void movil_ruta(char *n, size_t cabe) { snprintf(n, cabe, "%s\\NAVEGA2.INI", surf_carpeta); }
+static void movil_lee(void)
+{
+  char n[300], l[300];
+  FILE *f;
+  movil_ruta(n, sizeof n);
+  n_movil = 0;
+  if (!(f = fopen(n, "r"))) return;
+  while (fgets(l, sizeof l, f)) {
+    char *e = l + strlen(l);
+    while (e > l && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ' || e[-1] == '\t')) e--;
+    *e = 0;
+    if (!strncasecmp(l, "Movil=", 6) && l[6] && strlen(l + 6) < sizeof movil[0] && n_movil < N_MOVIL && !es_movil(l + 6))
+      snprintf(movil[n_movil++], sizeof movil[0], "%s", l + 6);
+  }
+  fclose(f);
+}
+/* (guarda la lista; las otras líneas de NAVEGA2.INI, como estaban) */
+static void movil_guarda(void)
+{
+  char n[300], l[300], *otras = NULL;
+  size_t lo = 0;
+  int k;
+  FILE *f;
+  movil_ruta(n, sizeof n);
+  if ((f = fopen(n, "r"))) {
+    while (fgets(l, sizeof l, f)) {
+      size_t m = strlen(l);
+      char *q;
+      if (!strncasecmp(l, "Movil=", 6)) continue;
+      if (!(q = realloc(otras, lo + m + 1))) break;
+      otras = q; memcpy(otras + lo, l, m); lo += m; otras[lo] = 0;
+    }
+    fclose(f);
+  }
+  if ((f = fopen(n, "w"))) {
+    if (otras) fwrite(otras, 1, lo, f);
+    for (k = 0; k < n_movil; k++) fprintf(f, "Movil=%s\n", movil[k]);   /* (en modo texto: \r\n) */
+    fclose(f);
+  } else pent_serie("navega: no se puede guardar %s", n);
+  free(otras);
+}
+/* el servidor de la página de ahora (en s, vacío si no es http ni https) */
+static void servidor_actual(char *s, size_t cabe)
+{
+  nsurl *u = actual ? browser_window_access_url(actual->bw) : NULL;
+  lwc_string *esq, *h;
+  s[0] = 0;
+  if (!u) return;
+  esq = nsurl_get_component(u, NSURL_SCHEME);
+  h = nsurl_get_component(u, NSURL_HOST);
+  if (esq && h && (!strcasecmp(lwc_string_data(esq), "http") || !strcasecmp(lwc_string_data(esq), "https")))
+    snprintf(s, cabe, "%.*s", (int)lwc_string_length(h), lwc_string_data(h));
+  if (esq) lwc_string_unref(esq);
+  if (h) lwc_string_unref(h);
+}
+/* el texto de la opción del menú (página 437) para el sitio de ahora */
+static const char *texto_version(void)
+{
+  char s[128];
+  servidor_actual(s, sizeof s);
+  return es_movil(s) ? "Ver la versi\xa2n de escritorio" : "Ver la versi\xa2n para m\xa2vil";
+}
+static void cambia_version(void)
+{
+  char s[128];
+  int k;
+  servidor_actual(s, sizeof s);
+  if (!s[0]) return;
+  if (es_movil(s)) {
+    for (k = 0; k < n_movil; k++)
+      if (!strcasecmp(movil[k], s)) { memmove(movil[k], movil[k + 1], (size_t)(n_movil - k - 1) * sizeof movil[0]); n_movil--; break; }
+    pent_serie("navega: %s, la versi\xa2n de escritorio", s);
+  } else {
+    if (n_movil == N_MOVIL) { memmove(movil[0], movil[1], (size_t)(N_MOVIL - 1) * sizeof movil[0]); n_movil--; }
+    snprintf(movil[n_movil++], sizeof movil[0], "%s", s);
+    pent_serie("navega: %s, la versi\xa2n para m\xa2vil", s);
+  }
+  movil_guarda();
+  /* otra vez, sin lo guardado (la página de la otra versión) */
+  browser_window_reload(actual->bw, true);
+}
+
 /* ---- los menús (llamada 39; los textos en la página 437: «á» es \xa0...) ---- */
 enum { MENU_PRINCIPAL = 1, MENU_PAGINA = 2 };
 static char menu_enlace[2048];  /* el enlace de debajo del ratón, para el menú de la página */
@@ -1214,9 +1323,11 @@ static void menu(int x, int y, const char *opciones, u32 grises, u32 etiqueta)
 }
 static void menu_principal(void)
 {
-  menu(b_r[B_MENU].x + b_r[B_MENU].w - 230, b_r[B_MENU].y + b_r[B_MENU].h,
-       "Nueva pesta\xa4" "a (Ctrl+T)|Cerrar la pesta\xa4" "a (Ctrl+W)|-|Copiar la direcci\xa2n|Ver las descargas|"
-       "-|P\xa0gina de inicio|Acerca del Navegador|-|Salir", 0, MENU_PRINCIPAL);
+  char op[400], s[128];
+  servidor_actual(s, sizeof s);
+  snprintf(op, sizeof op, "Nueva pesta\xa4" "a (Ctrl+T)|Cerrar la pesta\xa4" "a (Ctrl+W)|-|Copiar la direcci\xa2n|Ver las descargas|"
+           "%s|-|P\xa0gina de inicio|Acerca del Navegador|-|Salir", texto_version());
+  menu(b_r[B_MENU].x + b_r[B_MENU].w - 230, b_r[B_MENU].y + b_r[B_MENU].h, op, s[0] ? 0 : 1u << 5, MENU_PRINCIPAL);
 }
 static void copia_texto(const char *u8)
 {
@@ -1249,9 +1360,10 @@ static void elegido(u32 etiqueta, u32 op)
       if (netsurf_path_to_nsurl(b, &u) == NSERROR_OK) { browser_window_navigate(actual->bw, u, NULL, BW_NAVIGATE_HISTORY, NULL, NULL, NULL); nsurl_unref(u); }
       break;
     }
-    case 6: ir(inicio); break;
-    case 7: acerca(); break;
-    case 9: salir = 1; break;
+    case 5: cambia_version(); break;
+    case 7: ir(inicio); break;
+    case 8: acerca(); break;
+    case 10: salir = 1; break;
     }
   } else if (etiqueta == MENU_PAGINA) {
     int hay = menu_enlace[0] != 0;
@@ -1276,6 +1388,7 @@ static void elegido(u32 etiqueta, u32 op)
     case 4: browser_window_key_press(actual->bw, NS_KEY_COPY_SELECTION); break;
     case 5: browser_window_key_press(actual->bw, NS_KEY_PASTE); break;
     case 6: browser_window_key_press(actual->bw, NS_KEY_SELECT_ALL); break;
+    case 8: cambia_version(); break;
     }
   }
 }
@@ -1294,7 +1407,13 @@ static void menu_pagina(int x, int y)
     strcat(op, "Abrir el enlace en otra pesta\xa4" "a|Copiar la direcci\xa2n del enlace|Descargar el enlace|-|");
     base = 4;
   }
-  strcat(op, "Atr\xa0s|Adelante|Recargar|-|Copiar|Pegar|Seleccionar todo");
+  strcat(op, "Atr\xa0s|Adelante|Recargar|-|Copiar|Pegar|Seleccionar todo|-|");
+  strcat(op, texto_version());
+  {
+    char s[128];
+    servidor_actual(s, sizeof s);
+    if (!s[0]) grises |= 1u << (base + 8);
+  }
   if (!browser_window_back_available(actual->bw)) grises |= 1u << base;
   if (!browser_window_forward_available(actual->bw)) grises |= 1u << (base + 1);
   menu(x, y, op, grises, MENU_PAGINA);
@@ -1658,6 +1777,8 @@ int navega_principal(void)
   if (p) *p = 0; else strcpy(surf_carpeta, ".");
   snprintf(frontal_descargas, sizeof frontal_descargas, "%c:\\DESCARGA", surf_carpeta[0]);
   lee_ini();
+  movil_lee();
+  http_agente = agente_de;
   pent_serie("navega: Navegador %s, en %s", VERSION_NAVEGADOR, surf_carpeta);
   if (netsurf_register(&tabla) != NSERROR_OK) muere("No se ha podido preparar NetSurf.");
   /* el registro (para ver qué pasa): con SURF.LOG junto al programa */

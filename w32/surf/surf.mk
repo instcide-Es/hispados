@@ -36,6 +36,7 @@ $(B)/surf/surf_js.h: w32/navega/dom.js w32/surf/surf.js
 	python3 -c "import sys; f = lambda n, a: 'static const char %s[] = {' % n + ','.join(str(b) for b in open(a, 'rb').read()) + ',0};'; print(f('dom_js', sys.argv[1])); print(f('surf_js', sys.argv[2]))" $^ > $@
 $(B)/surf/w32/surf/guion.o: $(B)/surf/surf_js.h w32/surf/guion.h terceros/quickjs/quickjs.h
 $(B)/surf/w32/surf/selector.o $(B)/surf/w32/surf/rehaz.o: w32/surf/guion.h
+$(B)/surf/w32/surf/svgimagen.o $(B)/anf/w32/surf/svgimagen.o: terceros/nanosvg/nanosvg.h terceros/nanosvg/nanosvgrast.h
 $(B)/surf/http.o: w32/navega/http.c w32/navega/nav.h w32/surf/surf.mk | $(B)
 	@mkdir -p $(B)/surf
 	$(CC32) -march=i486 $(SURF_UA) -c $< -o $@
