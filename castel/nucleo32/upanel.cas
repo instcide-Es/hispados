@@ -670,13 +670,15 @@ módulo UPanel
         devolver 0x1A5AB6
     fin
 
+    ; (el peor de la letra blanca sobre lo más claro del título, la barra,
+    ; la bandeja y los botones: lo que mide castel/pruebas.sh)
     función tema_contraste(k: nat32): puntero a byte
         según nat16(k)
-            caso 1: devolver "5,7 a 1 (pide 4,5)"
-            caso 2: devolver "5,3 a 1 (pide 4,5)"
-            caso 3: devolver "6,2 a 1 (pide 4,5)"
-            caso 4: devolver "6,9 a 1 (pide 4,5)"
-            caso 5: devolver "21 a 1, el m\xA0ximo"
+            caso 1: devolver "4,9 a 1 (pide 4,5)"
+            caso 2: devolver "4,6 a 1 (pide 4,5)"
+            caso 3: devolver "5,7 a 1 (pide 4,5)"
+            caso 4: devolver "6,8 a 1 (pide 4,5)"
+            caso 5: devolver "17,4 a 1 (pide 4,5)"
         fin
         devolver "4,7 a 1 en medio, 3,4 arriba"
     fin

@@ -350,7 +350,6 @@ módulo Preferencias
                 d[0] := nat32(nombres[k])
                 d[1] := valores[k]
                 si k = AJ_TECLADO entonces d[1] := distribución() fin
-                si k = AJ_TAPIZ y tapiz_de_ahora < 3 entonces d[1] := tapiz_de_ahora fin
                 formatear(línea, 200, "%s=%u\r\n", d)
                 concatenar(texto_ini, línea)
             fin

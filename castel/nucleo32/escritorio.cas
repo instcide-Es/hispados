@@ -3410,7 +3410,7 @@ módulo Escritorio
         repintada(v_negra, 0, 0, pantalla.ancho, pantalla.alto)
         d[0] := min
         tomar_consola()
-        imprimir("escritorio: la pantalla, apagada (%u minutos sin tocar nada)\n", d)
+        imprimir("escritorio: la pantalla, apagada (tras %u min sin tocar nada)\n", d)
         soltar_consola()
     fin
 
