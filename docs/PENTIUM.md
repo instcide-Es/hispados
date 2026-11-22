@@ -4271,7 +4271,8 @@ y la principal con `pentium-juegos` y `pluma32`; la `agenda` queda para la
   Configuración de antes ya no está. El texto de abajo, sin taparse con «Cerrar».
 - **Los iconos del tapiz al entrar un usuario**: `lo_del_usuario` los quitaba
   de la pantalla pero no de la lista, y salían dos veces (visto al actualizar
-  desde la 0.8.6). Arreglado.
+  desde la 0.8.6). Arreglado; y lee otra vez los accesos de los paquetes
+  (lo instalado en la sesión de antes sale ya en el tapiz).
 - **La llamada 181** (las teclas): escribía siempre 64 octetos (un búfer de 32
   en la pila se pisaba; lo encontró Pluma). Ahora ECX dice lo que cabe: 32, un
   mapa; 64 o más, los dos; 0, los 64 de antes (WIN32 1.1, juegos 1.0 y Pluma
@@ -4292,6 +4293,14 @@ y la principal con `pentium-juegos` y `pluma32`; la `agenda` queda para la
   en `lo_del_usuario`: es suyo, guarda en `\USUARIOS\<u>\CORREO` y se acaba
   al cerrar su sesión); sin usuarios, al arrancar, como en su rama. El
   paquete pide base y tls 0.8.7 (STARTTLS va en TLS.BIN).
+- **La tabla de los programas con sello** (`permisos.cas`): eran 24 como
+  mucho; con CORREO.BIN son 25 y el último se quedaba sin el suyo (Correo no
+  podía usar `\CORREO`). Ahora 32 (hay hasta 31 sellos).
+- **Las pruebas que cambian por lo que hay ahora en la raíz**: con USUARIOS,
+  ARGON2, PANEL y HORARED la entrada «como la 0.5» trae 43 archivos y en la
+  lista de X: los archivos cambian de sitio (parte 06); en `C:\` sale también
+  `AZAR.SEM` (la semilla del azar) y LINUX.ZIP baja una fila (parte 31). La
+  del Panel espera 5 s tras cambiar el tema antes del clic en «Verde».
 - **El Navegador**: la MSVCRT de WIN32 1.2 trae `asin`, `acos`, `frexp` y
   `strcoll`, que `w32/surf/apoyo.c` también definía: en Pentium, solo las de
   la MSVCRT (`#ifndef HISPA_PENTIUM`). Se publica el navega 0.2.2 de siempre.
@@ -4317,7 +4326,38 @@ publicado, tal cual: accesori, consola, ejemplos, escudo, sonido, comprim,
 mirador, pdf, navega 0.2.2, clicgest, juegos 1.0, pluma 2.0 y las firmas de
 Escudo.
 
-@@PRUEBAS087@@
+**Las pruebas de la 0.8.7** (22/11; el PC de Albinyana se apagó a media
+batería, y lo que faltaba se pasó en el VPS, sin `make -j`, y luego otra vez
+en el PC): en el VPS, `06` 168/0, `16` 139/0, `07` 102/0, `cd` 77/0,
+`paquetes` 108/0, `menu` 95/0, `protege` 76/0, `programas` 92/0, `pantalla`
+98/0, `correo` 185/0, `tls` 72/0, `red` 72/0, `caliente` 79/0, `acpi` 78/0,
+`win32` 90/0, `win32juegos` 100/0, `sonido` 109/0, `accesorios` 81/0, `wifi`
+96/0, `mirador` 75/0, `zip` 118/0, `pdf` 80/0, `castel64` 72/0, `castel32`
+67/0, `oficina` 101/0, `bloc` 119/0, `panel` 108/0, `escudo` 103/0,
+`navegador` 98/0 y `pluma` 79/0 (el PC no tiene qpdf ni pdftotext); en el PC,
+`dispositivos` 85/0, `ssh` 70/0, `lectores` 79/0, `rueda` 71/0, `juegos`
+98/0, `reproductor` 111/0, `usuarios` 93/0 y `panel` 108/0.
+
+**La 0.8.7, por Internet** (22/11, en QEMU `pc` con el disco en IDE, como el
+VirtualBox de Carlos): un disco instalado con el CD publicado de la 0.8.6 y,
+con PAQUETES (1.3), navega, clicgest, escudo, escbase, escmes y escdia de lo
+publicado; el catálogo de la 0.8.7 (firmado, con `serie=`: la 1.3 salta la
+línea) por HTTP: «Hay 13 actualizaciones» > «Actualizar todo» (base, bloc,
+equipo, hvprun, oficina, paquetes, red, ssh, tailscal, tls, wifi, win32 y la
+nueva del sistema, pintura) > «Reiniciar ahora» > «El núcleo nuevo ha
+arrancado bien»; entra solo el usuario de antes («el usuario de HISPA.INI
+(Carlos), administrador, sin contraseña»), con los iconos una vez; la hora,
+de un NTP de mentira (el reloj iba 5 minutos adelantado: «puesta en hora: -298
+s»); VER, «Hispa-Pentium 0.8.7»; `PAQUETES INSTALA reproduc juegos pluma
+correo`; el Panel con el icono Usuarios; el Bloc 1.0; el Reproductor con un
+MP3 (en su ventana y en la Consola); `WIN32 COMPRUEBA C:\HISPA32`: los 8,
+«no falta nada»; Naves suena (grabado con `-audiodev wav`); `USUARIOS /CLAVE
+Carlos`, Logo+L, la pantalla de entrada y otra vez dentro con la contraseña:
+los récords de Campo de minas en `C:\USUARIOS\CARLOS\AJUSTES\JUEGOS` y Correo
+(su bandeja, lanzada al entrar) en `\USUARIOS\CARLOS\CORREO`. Y la serie: con
+la 1.4 ya puesta, el catálogo firmado otra vez como lo hace el cron de Escudo
+(`hpq.py catalogo --clave`: la serie, los segundos de ahora) se usa, y uno
+firmado con la serie 100 no («más viejo... no se usa»).
 
 **La 0.8.6** (22/11, rama `pentium-086`: las ramas `escudo-rapido`,
 `pentium-pdf` y `pentium-zipvisor` juntas). Lo que se tocó al juntar y lo nuevo:
