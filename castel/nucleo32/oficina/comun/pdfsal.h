@@ -32,6 +32,8 @@ typedef struct pdfsal pdfsal;
 pdfsal *pdf_nuevo(void);
 /* el título, el autor y el asunto (UTF-8; NULL o "" si no hay) */
 void pdf_datos(pdfsal *s, const char *titulo, const char *autor, const char *asunto);
+/* (0.8.8) el programa que lo hace, para /Producer (si no, «Hispa-Pentium») */
+void pdf_productor(pdfsal *s, const char *p);
 /* una página nueva (la de antes queda acabada); da su número (desde 0) */
 int pdf_pagina(pdfsal *s, double ancho, double alto);
 /* n letras (Unicode) de la cara de letras.h (con su respaldo, letra_glifo),

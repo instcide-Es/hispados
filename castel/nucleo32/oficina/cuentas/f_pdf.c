@@ -8,6 +8,7 @@
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include <string.h>
 #include "archivo.h"
+#include "cuentas.h"		/* (0.8.8) CUENTAS_VERSION */
 #include "f_pdf.h"
 #include "celdas.h"
 #include "grafico.h"
@@ -346,6 +347,7 @@ int pdf_exporta(libro *l, int hoja_i, const char *titulo, bufer *b, char *err, u
 		return 1;
 	}
 	pdf_datos(s, titulo, l->autor, NULL);
+	pdf_productor(s, "Cuentas " CUENTAS_VERSION " (Hispa-Pentium)");
 	/* cuántas páginas (para &N) */
 	for (i = 0; i < l->n_h; i++) {
 		if ((hoja_i >= 0 && (u32)hoja_i != i) || (hoja_i < 0 && l->h[i]->oculta))

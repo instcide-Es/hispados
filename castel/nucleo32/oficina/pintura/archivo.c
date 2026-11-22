@@ -209,6 +209,7 @@ int pin_pdf(const char *ruta)
 		return -1;
 	}
 	pdf_datos(s, P.ruta[0] ? sin_carpeta(P.ruta) : "Imagen de Pintura", NULL, "Hecho con Pintura 2 de Hispa-Pentium");
+	pdf_productor(s, "Pintura " PINTURA_VERSION " (Hispa-Pentium)");
 	/* (las de más de 200 pulgadas, que no caben en un PDF: más pequeñas) */
 	while (an > 14400 || al > 14400) {
 		an /= 2;

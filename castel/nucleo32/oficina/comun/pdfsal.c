@@ -65,6 +65,7 @@ struct pdfsal {
 	pmarca *mar;
 	u32 n_mar, cabe_mar;
 	char titulo[200], autor[200], asunto[200];
+	char productor[80];		/* (0.8.8) el programa que lo hace: pdf_productor */
 	int mal;
 };
 
@@ -204,6 +205,16 @@ pdfsal *pdf_nuevo(void)
 		obj_nuevo(s);
 	buf_txt(&s->o, "%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
 	return s;
+}
+
+/* (0.8.8) el programa que hace el PDF (/Producer: «Cuentas 2.0 (Hispa-Pentium)») */
+void pdf_productor(pdfsal *s, const char *p)
+{
+	u32 i;
+
+	for (i = 0; p && p[i] && i + 1 < sizeof s->productor; i++)
+		s->productor[i] = p[i];
+	s->productor[i] = 0;
 }
 
 void pdf_datos(pdfsal *s, const char *titulo, const char *autor, const char *asunto)
@@ -785,7 +796,7 @@ int pdf_acaba(pdfsal *s, bufer *b)
 		so_ahora(&a, &me, &d, &h, &mi, &se);
 		obj_empieza(s, OBJ_INFO);
 		buf_txt(&s->o, "<< /Producer ");
-		cadena(&s->o, "Pluma 2.0 (Hispa-Pentium)");
+		cadena(&s->o, s->productor[0] ? s->productor : "Hispa-Pentium");	/* (0.8.8: antes, siempre «Pluma 2.0») */
 		if (s->titulo[0]) {
 			buf_txt(&s->o, " /Title ");
 			cadena(&s->o, s->titulo);
