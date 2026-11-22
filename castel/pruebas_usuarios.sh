@@ -222,7 +222,7 @@ mira "con la contraseña de Ana, ORDENES (en su Consola) tiene el modo administr
 miracap "tras cerrar la sesión, otra vez la pantalla de entrada" ue3 negrita 300 70 500 110 "Elija su usuario"
 miracap "y el menú Inicio saluda a quien ha entrado: «Hola, Bea»" ue4 negrita 0 90 400 130 "Hola, Bea"
 miracap "Configuración › Usuarios (USUARIOS.BIN), abierto por Bea (normal): la lista, ella «(usted)», y lo que puede cambiar" ue6 \
-  negrita 0 20 80 50 "Usuarios de este equipo (usted puede cambiar su contraseña y su imagen)" texto 0 100 120 130 "Bea (usted)" texto 0 120 120 150 "Biblioteca"
+  negrita 0 20 80 50 "Usuarios de este equipo (usted puede cambiar su contraseña y su imagen)" negrita 0 100 120 130 "Bea (usted)" negrita 0 120 120 150 "Biblioteca" texto 150 100 220 130 "Normal"
 if ! grep -q "Administrador de tareas\|excepción\|^\*\*\* " $S; then ok "sin el Administrador de tareas detrás de la pantalla de entrada, y sin quejas del núcleo"
 else ko "el escritorio:"; grep "Administrador de tareas\|excepción\|^\*\*\* " $S | head -3 | sed 's/^/        /'; fi
 # ---- 4. SSH con los usuarios ----
