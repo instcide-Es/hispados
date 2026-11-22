@@ -120,6 +120,18 @@ módulo BlocVis
     fin
 
     público función nuevo_tamaño(an: ent32, al: ent32)
+        variable p: puntero a nat32
+        ; más grande que la pantalla de cuando se empezó (se ha cambiado la
+        ; medida de la pantalla): otro lienzo, a la medida nueva
+        si memoria <> nulo y (an > máx_an o al > máx_al) y an > 0 y al > 0 y an <= 8192 y al <= 8192 entonces
+            p := puntero(pedir(nat32(an) * nat32(al) * 4))
+            si p <> nulo entonces
+                soltar(puntero(memoria))
+                memoria := p
+                máx_an := an
+                máx_al := al
+            fin
+        fin
         si an > máx_an entonces an := máx_an fin
         si al > máx_al entonces al := máx_al fin
         si an < 1 entonces an := 1 fin
