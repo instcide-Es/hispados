@@ -151,9 +151,9 @@ int main(void)
 		{
 			struct { u32 cb, id; const char *tipo, *elem, *alias; } op = { 0, 0, "cdaudio", 0, 0 };
 			struct { u32 cb, ret, item, pista; } st = { 0, 0, 5, 0 };
-			e = mciSendCommandA(0, 0x803, 0x2000, (u32)&op);    /* MCI_OPEN, MCI_OPEN_TYPE */
+			e = mciSendCommandA(0, 0x803, 0x2000, &op);    /* MCI_OPEN, MCI_OPEN_TYPE */
 			DI("cd_mci_open: %u %s\n", e, op.id ? "con numero" : "sin numero");
-			e = mciSendCommandA(op.id, 0x814, 0x100, (u32)&st);  /* MCI_STATUS, MEDIA_PRESENT */
+			e = mciSendCommandA(op.id, 0x814, 0x100, &st);  /* MCI_STATUS, MEDIA_PRESENT */
 			DI("cd_mci_status: %u %u\n", e, st.ret);
 			DI("cd_mci_close: %u\n", mciSendCommandA(op.id, 0x804, 0, 0));
 		}

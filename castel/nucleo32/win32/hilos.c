@@ -136,6 +136,11 @@ u32 __attribute__((used)) gc_entra(u32 esp_vuelta)
 __asm__(".text\n"
 	".globl gc_puente\n"
 	"gc_puente:\n"                 /* [esp] = la función, [esp+4] = la vuelta del que llama */
+	/* (una llamada «de cola» desde una de las nuestras: un procedimiento de
+	 * ventana que salta a DefWindowProc con la vuelta que le puso gc_puente;
+	 * ya está apuntada y con el cerrojo: tal cual) */
+	"  cmpl $gc_vuelta, 4(%esp)\n"
+	"  je 2f\n"
 	"  pushl %eax\n  pushl %ecx\n  pushl %edx\n"
 	"  leal 16(%esp), %eax\n"
 	"  pushl %eax\n"
@@ -153,7 +158,7 @@ __asm__(".text\n"
 	"  movl %edx, %fs:0xFC4\n"
 	"  movl $gc_vuelta, 16(%esp)\n"
 	"1:\n  popl %edx\n  popl %ecx\n  popl %eax\n"
-	"  ret\n"
+	"2:\n  ret\n"
 	"gc_vuelta:\n"
 	"  pushl %eax\n  pushl %eax\n  pushl %ecx\n  pushl %edx\n"
 	"  movl %fs:0xFC4, %edx\n"
