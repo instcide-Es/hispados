@@ -11,8 +11,8 @@ import re, sys, os
 POR_ARCHIVO = {'kernel32': 'KERNEL32', 'archivos': 'KERNEL32', 'user32': 'USER32',
                'controles': 'USER32', 'menus': 'USER32', 'dialogos': 'USER32',
                'dx': 'USER32', 'recursos': 'USER32', 'gdi32': 'GDI32', 'comdlg32': 'COMDLG32', 'otros': 'ADVAPI32',
-               'red': 'WSOCK32', 'registro': 'ADVAPI32'}
-TODAS = ['KERNEL32', 'USER32', 'GDI32', 'COMDLG32', 'ADVAPI32', 'SHELL32', 'WSOCK32', 'VERSION', 'WINSPOOL']
+               'red': 'WSOCK32', 'registro': 'ADVAPI32', 'wininet': 'WININET'}
+TODAS = ['KERNEL32', 'USER32', 'GDI32', 'COMDLG32', 'ADVAPI32', 'SHELL32', 'WSOCK32', 'VERSION', 'WINSPOOL', 'WININET']
 tablas = {d: [] for d in TODAS}
 for f in sys.argv[2:]:
     dll = POR_ARCHIVO.get(os.path.splitext(os.path.basename(f))[0], 'KERNEL32')

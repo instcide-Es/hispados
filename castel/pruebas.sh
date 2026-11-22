@@ -4301,7 +4301,11 @@ fi   # [WIN32] los programas de Windows
 # ventana a pantalla completa con el ratón de los juegos y DirectInput
 # (JUEGOV, moviendo el ratón de QEMU), UDP en red local como cliente y como
 # servidor (REDUDP, con tests/juegos/eco_udp.py) y el sonido (SONJ: la
-# mezcla en su hilo, waveOut con su evento y el CD de sonido por MCI).
+# mezcla en su hilo, waveOut con su evento y el CD de sonido por MCI). (HL)
+# Lo que pedía Half-Life 1: HLK32, HLORD (Winsock por número), HLMM (mmio y
+# el mezclador), HLNET (WININET, sin red y contra el servidor HTTP de aquí),
+# HLVEN (en el escritorio) y el juego de mentira JUEGO99 (WIN32 COMPRUEBA de
+# su carpeta, /CON y /MAQUINA: «está todo»).
 if parte08 win32juegos; then
 echo "== (JUEGOS) Hispa-Pentium: lo que pide un juego de Windows (diagnóstico, hilos, SEH, registro, MSVCRT de VC6, ventanas y ratón, UDP, sonido y CD) =="
 J=$P/jue
@@ -4316,7 +4320,11 @@ ok "nucleo32/win32/juegos.sh: $(ls $J/jp/*.EXE | wc -l) programas de prueba (gcc
 cp $J/d.img $J/c.img
 O=("cd \\JUEGOS" "FALTA" ":pausa 3" "SINDLL" ":pausa 3" "WIN32 COMPRUEBA FALTA.EXE SINDLL.EXE" ":pausa 4" "WIN32 COMPRUEBA C:\\JUEGOS" ":pausa 6"
    "HILOS" ":pausa 15" "HILOS /SALIR" ":pausa 4" "HILOS /DEJA" ":pausa 4" "SEH" ":pausa 6" "SEH /SOLO" ":pausa 3" "SEH /FILTRO" ":pausa 3"
-   "REG" ":pausa 4" "REG /LEE" ":pausa 3" "CRT uno \"dos tres\" cuatro" ":pausa 6" "cd \\PRUEBAS" "K32PRUE" ":pausa 5" "HOLAC" ":pausa 2")
+   "REG" ":pausa 4" "REG /LEE" ":pausa 3" "CRT uno \"dos tres\" cuatro" ":pausa 6"
+   "WIN32 COMPRUEBA FALTA.EXE SINDLL.EXE /MAQUINA" ":pausa 4" "HLK32" ":pausa 6" "HLK32 /FATAL" ":pausa 3" "HLORD" ":pausa 4" "HLMM" ":pausa 5"
+   "HLNET /SINRED" ":pausa 5" "cd \\JUEGOS\\JUEGO99" "WIN32 COMPRUEBA C:\\JUEGOS\\JUEGO99" ":pausa 5" "WIN32 COMPRUEBA JUEGO.EXE /CON C:\\JUEGOS\\JUEGO99" ":pausa 5"
+   "WIN32 COMPRUEBA JUEGO.EXE /MAQUINA" ":pausa 4" "JUEGO" ":pausa 5"
+   "cd \\PRUEBAS" "K32PRUE" ":pausa 5" "HOLAC" ":pausa 2")
 ESCRIBE=1 DISCO=$J/c.img ARRANQUE=ordenes MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $J/SEMILLA.BIN "${O[@]}" > $J/consola.sal 2>&1
 tr -d '\r' < $J/consola.sal | grep -v '^\[w32\]' > $J/consola.txt
 S=$J/consola.txt
@@ -4363,6 +4371,50 @@ mira "stdio en texto (\\n como \\r\\n en el disco) y en binario, sprintf con com
 mira "qsort, bsearch, setjmp y longjmp, _beginthreadex y _beginthread, _ftol y _CIpow/_CIsqrt del compilador, new de C++, _splitpath, _ecvt, Unicode; atexit al revés" \
   "^qsort: 12345789 kiwi uva 5$" "^longjmp: 5$" "^beginthreadex: 40 9 con id$" "^beginthread: 42$" "^ftol: -3 00000002540be400$" "^cipow: 1024 141421$" "^new: si 3$" \
   "^splitpath: C:|.JUEGOS.VALVE.|hl|.exe D:.OTRA.hl.dll$" "^ecvt: 12346 3 1$" "^unicode: 8 vida=100$" "^FIN CRT$" "^atexit: segundo puesto, el primero$" "^atexit: primero puesto, el ultimo$"
+# (HL) lo que pedía Half-Life 1
+TB=$'\t'
+mira "(HL) WIN32 COMPRUEBA /MAQUINA: una línea por hecho, con tabuladores (FALTA, FALTADLL, RESUMEN, TOTAL)" \
+  "^ARCHIVO${TB}C:.JUEGOS.FALTA.EXE${TB}consola${TB}[0-9]*${TB}[0-9a-f]\{64\}$" "^FALTA${TB}C:.JUEGOS.FALTA.EXE${TB}WINMM.DLL${TB}mixerNoHay$" \
+  "^FALTADLL${TB}C:.JUEGOS.SINDLL.EXE${TB}NOHAY.DLL${TB}1$" "^RESUMEN${TB}C:.JUEGOS.FALTA.EXE${TB}[0-9]*${TB}[0-9]*${TB}2$" "^TOTAL${TB}2${TB}3${TB}1$"
+mira "(HL) KERNEL32: _lcreat, _lwrite, _llseek, _lopen y _lread (solo para leer: no escribe), OpenFile (OF_EXIST con la ruta entera, el error, leer, OF_DELETE)" \
+  "^lcreat: si 14$" "^llseek: 5 14$" "^lopen: 4 \[Life\] 1$" "^lopen_nohay: -1$" "^openfile_existe: 1 ruta entera$" "^openfile_nohay: -1 2$" "^openfile_lee: 4 \[Half\]$" "^openfile_borra: 1 -1$"
+mira "(HL) KERNEL32: OpenFileMapping por su nombre (el mismo trozo; sigue al cerrar el primero; ERROR_ALREADY_EXISTS), SetEnvironmentVariableW, SetVolumeLabel, GetProcessVersion, EnumSystemLocales" \
+  "^openfilemapping: si \[visto por los dos\]$" "^mapa_sigue: \[visto por los dos\]$" "^mapa_ya_existe: 183$" "^openfilemapping_nohay: nulo 2$" "^setenvw: 1 \[valve\]$" \
+  "^setvolumelabel: 0 50$" "^getprocessversion: 00040000 00040000$" "^enumsystemlocales: 1 4 con el de Espa"
+mira "(HL) USER32: WaitForInputIdle, ExitWindowsEx (no: ERROR_PRIVILEGE_NOT_HELD), DDE que falla limpio (DMLERR_NO_CONV_ESTABLISHED) con sus cadenas y datos, los lParam de DDE" \
+  "^waitforinputidle: 0$" "^exitwindowsex: 0 1314$" "^ddeinitialize: 0 con id$" "^ddestring: 8 \[Servidor\] distintas$" "^ddeconnect: nulo 400a$" "^ddetransaction: nulo$" \
+  "^ddedata: 13 \[datos de dde\]$" "^ddeuninitialize: 1$" "^unpackddelparam: 1 1234 56789abc$" "^reuseddelparam: 7 11223344 1$" "^getlastactivepopup_nohay: nulo$"
+mira "(HL) GDI32 (ScaleWindowExtEx y ScaleViewportExtEx en MM_TEXT, Escape: no, GetBoundsRect) y WINSPOOL.DRV (DocumentProperties: no hay impresoras)" \
+  "^scalewindowextex: 1 1 1$" "^scaleviewportextex: 1 1 1$" "^escape: 0 0$" "^getboundsrect: 9 0 0$" "^documentproperties: -1 1801$"
+mira "(HL) ADVAPI32, la seguridad: descriptores sin dueño ni DACL (todo permitido), SID y ACL de verdad, la de los objetos y archivos, sin testigos, los privilegios" \
+  "^initializesd: 1 20 1$" "^sd_owner: 1 nulo 0$" "^sd_group: 1 nulo$" "^sd_dacl: 1 0 nulo$" "^sd_sacl: 1 0$" "^sd_control: 1 0 1$" "^sd_pon_dacl: 1$" "^sid: 1 1 16$" \
+  "^equalsid: 1$" "^acl: 1 1 1 1$" "^acl_mala: 0$" "^kernelobjectsecurity: 0 122 20 1 1$" "^filesecurity: 1 1$" "^openprocesstoken: 0 120$" "^privilegios: 1 19 1 0$" "^privilegio_nohay: 0 1313$" "^FIN HLK32$"
+mira "(HL) FatalAppExit: su aviso y acaba (255)" "^HLK32.EXE ha tenido que acabar:$" "(HLK32.EXE ha acabado con el código 255)"
+mira "(HL) Winsock por número (WSOCK32 y WS2_32, que tienen otros del 10 al 12) y GetProcAddress con un número" \
+  "^wsastartup: 0 101$" "^htons: 3412 1234$" "^htonl: 04030201$" "^inet_addr: 0f02000a 192.168.1.20$" "^wsalasterror: 10035$" "^gethostname: 0 con nombre$" \
+  "^getprotobynumber: nulo$" "^socket_udp: si$" "^ioctlsocket: 0$" "^wsafdisset: 1 0$" "^ws2_32: 0202000a 10.0.2.15 01020304$" \
+  "^getprocaddress_numero: inet_addr gethostbyname nulo$" "^getprocaddress_ws2: otra inet_addr$" "^wsacleanup: 0$" "^FIN HLORD$"
+mira "(HL) WINMM, mmio: un WAV hecho con mmioCreateChunk y mmioAscend (el tamaño y el relleno) y leído con mmioDescend (FINDRIFF, FINDCHUNK), mmioRead, mmioSeek, el acceso directo y en memoria" \
+  "^mmio_escribe: si 0 0 0 0 201$" "^mmio_cierra: 0$" "^mmio_riff: 0 238 8$" "^mmio_fmt: 0 16 11025 16 1$" "^mmio_data: 0 201 8 100 300$" "^mmio_seek: 8 246$" "^mmio_nohay: 265$" \
+  "^mmio_getinfo: RIFF 246$" "^mmio_setinfo: 8$" "^mmio_advance: 0$" "^mmio_nohay_archivo: nulo$" "^mmio_existe: 1 0$" "^mmio_memoria: si 0 0$" "^fourcc: 45564157$"
+mira "(HL) WINMM, el mezclador (los altavoces y la onda, sus controles, poner y leer el volumen) y lo que no hay (waveIn, midiOut y aux: limpio)" \
+  "^mixer: 1 0 0 1 Mezclador de Hispa$" "^mixer_linea: 0 0 2 1 Altavoces$" "^mixer_onda: 0 10000 80000001$" "^mixer_micro: 1024$" "^mixer_control: 0 1 0 65535 Volumen general$" \
+  "^mixer_volumen: 0 0 la mitad$" "^mixer_control_nohay: 1025$" "^mixer_cierra: 0$" "^mcigetdeviceid: 0$" "^wavein: 0 6 nulo 6$" "^wavein_texto: No hay dispositivo (en Hispa a.*n no hay micr.*fono ni MIDI)\.$" \
+  "^midiout: 0 6 nulo 6$" "^aux: 0 2 2$" "^FIN HLMM$"
+mira "(HL) WININET sin red: InternetGetConnectedState dice que no (INTERNET_CONNECTION_OFFLINE), InternetCrackUrl, y bajar algo: ERROR_INTERNET_DISCONNECTED" \
+  "^conectado: 0 20$" "^internetopen: si$" "^crackurl: 1 3 servidores.ejemplo.es 27950 /lista.txt$" "^sin_red: -12163$" "^FIN HLNET$"
+mira "(HL) el juego de mentira de 1999 (el .EXE y su VGUI.DLL en la raíz, las del mod en MOD\\CL_DLLS y MOD\\DLLS, Winsock por número): WIN32 COMPRUEBA de su carpeta, está todo" \
+  "^(las DLL, desde la carpeta del programa: C:.JUEGOS.JUEGO99.)$" "^CLIENTE.DLL: DLL$" "^SERVIDOR.DLL: DLL$" "^VGUI.DLL: DLL$" "^JUEGO.EXE: programa de consola$" "^En total: 4 archivos; está todo (no falta nada).$"
+if [ "$(grep -c '^En total: 4 archivos; está todo (no falta nada).$' $S)" = 2 ] && ! sed -n '/COMPRUEBA C:.JUEGOS.JUEGO99/,/^FIN JUEGO/p' $S | grep -q '^  falta\|FALTA'; then
+  ok "(HL) y con «JUEGO.EXE /CON C:\\JUEGOS\\JUEGO99» (la carpeta del .EXE para las de las subcarpetas): está todo; VGUI.DLL ya no sale como falta"
+else ko "(HL) WIN32 COMPRUEBA del juego de mentira: $(sed -n '/COMPRUEBA C:.JUEGOS.JUEGO99/,/^FIN JUEGO/p' $S | grep '^  falta\|FALTA\|En total' | head -5 | tr '\n' ' ')"; fi
+SH=$(sha256sum $J/jp/JUEGO99/JUEGO.EXE | cut -d' ' -f1)
+mira "(HL) /MAQUINA del juego de mentira: su SHA-256 (el de aquí: ${SH:0:16}...), de dónde sale cada DLL (VGUI.DLL de la carpeta del .EXE) y nada que falte" \
+  "^PROGRAMA${TB}C:.JUEGOS.JUEGO99.$" "^ARCHIVO${TB}C:.JUEGOS.JUEGO99.JUEGO.EXE${TB}consola${TB}$(stat -c %s $J/jp/JUEGO99/JUEGO.EXE)${TB}$SH$" \
+  "^USA${TB}C:.JUEGOS.JUEGO99.JUEGO.EXE${TB}VGUI.DLL${TB}C:.JUEGOS.JUEGO99.VGUI.DLL$" "^USA${TB}C:.JUEGOS.JUEGO99.JUEGO.EXE${TB}WSOCK32.DLL${TB}WIN32.BIN$" \
+  "^RESUMEN${TB}C:.JUEGOS.JUEGO99.JUEGO.EXE${TB}9${TB}[0-9]*${TB}0$" "^TOTAL${TB}2${TB}0${TB}0$"
+mira "(HL) y al correr: carga las del mod por su ruta (desde otra carpeta de trabajo); la del cliente encuentra VGUI.DLL junto al .EXE, la del servidor usa Winsock por número" \
+  "^juego_wsastartup: 0 6c1b 0202000a$" "^juego_vgui: 41$" "^juego_openfile: -1$" "^juego_mixer: 0$" "^juego_cliente: cargada 1011$" "^juego_servidor: cargada 1111$" "^FIN JUEGO$"
 mira "y lo de antes sigue igual (K32PRUE y HOLAC, con los hilos y el cerrojo grande)" "^tls: si 1234$" "^interlocked: 6 6 10 20$" "^FIN K32PRUE$" "^Primo 100: 541$"
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo (las de SEH las recoge el programa)"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
@@ -4370,7 +4422,8 @@ else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | se
 cp $J/d.img $J/v.img
 M=(); for _ in 1 2 3 4 5 6 7 8 9; do M+=(":monitor mouse_move 100 0"); done
 CAPTURAS=$G ESCRIBE=1 DISCO=$J/v.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $J/SEMILLA.BIN ":pausa 2" ":doble 60 186" ":pausa 4" \
-  ":escribe \\JUEGOS\\JUEGOV" ":tecla ret" ":pausa 5" "${M[@]}" ":pausa 3" "${M[@]}" ":pausa 6" > $J/juegov.sal 2>&1
+  ":escribe \\JUEGOS\\JUEGOV" ":tecla ret" ":pausa 5" "${M[@]}" ":pausa 3" "${M[@]}" ":pausa 6" \
+  ":escribe \\JUEGOS\\HLVEN" ":tecla ret" ":pausa 8" > $J/juegov.sal 2>&1
 mtype -i $J/v.img ::JUEGOS/JUEGOV.TXT 2>/dev/null | tr -d '\r' > $J/juegov.txt
 S=$J/juegov.txt
 mira "GetVersionEx (4.10), QueryPerformanceCounter y timeGetTime a su paso (Sleep(100): 100 ms), timeBeginPeriod" "^version: 4.10 1$" "^timebeginperiod: 0$" "^qpc: mhz sube$" "^sleep100: bien bien$"
@@ -4379,6 +4432,11 @@ mira "una ventana WS_POPUP a pantalla completa (DirectDraw a 640 x 480): GetSyst
 mira "SetCursorPos y GetCursorPos (en el modo del juego), ShowCursor, ClipCursor" "^cursor_centro: 320 240$" "^showcursor: -1 -2$" "^clipcursor: 100 100$"
 mira "mirar con el ratón como un motor de juegos (volviendo al centro en cada vuelta): más de lo que mide la pantalla" "^raton_al_centro: mas que la pantalla"
 mira "y DirectInput (el ratón relativo, lo movido de verdad, sin topar con el borde)" "^dinput_raton: 0 0 0$" "^dinput_relativo: mas que la pantalla" "^FIN JUEGOV$"
+mtype -i $J/v.img ::JUEGOS/HLVEN.TXT 2>/dev/null | tr -d '\r' > $J/hlven.txt
+S=$J/hlven.txt
+mira "(HL) GetLastActivePopup (la ventanita de encima del juego), ExcludeUpdateRgn (sin lo que está por repintar) y WSAAsyncGetHostByName (el aviso a la ventana, con su hostent)" \
+  "^ventana: si$" "^lastactivepopup_sola: ella$" "^lastactivepopup: la de encima$" "^excludeupdatergn: [23] sin lo de repintar$" "^excludeupdatergn_nada: [123]$" \
+  "^asyncgethostbyname: 0 [0-9]* 10.0.2.15 10.0.2.15$" "^FIN HLVEN$"
 S=$J/juegov.sal
 if ! grep -q "excepción\|\*\*\*" $S; then ok "JUEGOV: ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
@@ -4389,15 +4447,26 @@ python3 -I $AQUI/../tests/juegos/eco_udp.py $J/eco $FU > $J/eco.txt 2>&1 &
 EPID=$!
 for _ in $(seq 50); do [ -s $J/eco/puerto ] && break; sleep 0.1; done
 PE=$(cat $J/eco/puerto 2> /dev/null)
+mkdir -p $J/srv                     # (HL) y el servidor HTTP de aquí, para WININET
+python3 -I $AQUI/nucleo32/servidor_prueba.py $J/srv > $J/srv.txt 2>&1 &
+SPID=$!
+for _ in $(seq 50); do [ -s $J/srv/puerto ] && break; sleep 0.1; done
+PU=$(cat $J/srv/puerto 2> /dev/null)
 DISCO=$J/d.img ARRANQUE=ordenes MODULOS= MEMORIA=64 QEMU_MAS="-nic user,model=e1000,hostfwd=udp::$FU-:27015" $AQUI/nucleo32/probar.sh $J/SEMILLA.BIN \
-  "cd \\JUEGOS" ":pausa 3" "REDUDP $PE" ":pausa 15" > $J/red.sal 2>&1
-kill $EPID 2> /dev/null
+  "cd \\JUEGOS" ":pausa 3" "REDUDP $PE" ":pausa 15" "HLNET 10.0.2.2 $PU" ":pausa 25" > $J/red.sal 2>&1
+kill $EPID $SPID 2> /dev/null
 tr -d '\r' < $J/red.sal | grep -v '^\[w32\]' > $J/red.txt
 S=$J/red.txt
 mira "UDP de cliente: sendto y recvfrom con el eco, gethostbyname del propio equipo, getsockname" "^eco: 13 \[eco: hola eco\] de 10.0.2.2:$PE$" "^mi_ip: 10.0.2.15$" "^getsockname: puerto propio$"
 mira "sin bloqueo (FIONBIO): WSAEWOULDBLOCK al momento (100 veces, deprisa); select y FIONREAD con UDP; la difusión" "^sin_bloqueo: -1 10035 deprisa$" "^select: 1 13$" "^tras_select: 13 \[eco: otra vez\]$" "^difusion: 9$"
 mira "de servidor: bind al 27015 (y otro al mismo, WSAEADDRINUSE), y contesta al que llega sin haberlo pedido" "^bind: 0$" "^bind_ocupado: -1 10048$" "^servidor_recibe: 13 \[hola servidor\]$" "^servidor_contesta: 22$" "^FIN REDUDP$"
 if [ "$(cat $J/eco/respuesta 2> /dev/null)" = "respuesta del servidor" ]; then ok "y la respuesta llega al otro equipo (aquí, por el puerto de QEMU)"; else ko "la respuesta del servidor no llega: $(cat $J/eco.txt)"; fi
+SG=$(python3 -c "import sys; d=open(sys.argv[1],'rb').read(); print(len(d), sum(d))" $J/srv/grande.bin 2> /dev/null)
+ST=$(python3 -c "import sys; d=open(sys.argv[1],'rb').read(); print(len(d), sum(d))" $J/srv/trozos.bin 2> /dev/null)
+mira "(HL) WININET con red: InternetOpenUrl de 400 KB con Content-Length ($SG), en trozos ($ST), la redirección (302) y un 404" \
+  "^conectado: 1 2$" "^grande: $SG 200$" "^trozos: $ST 200$" "^redirige: 41 200$" "^no_esta: 404$"
+mira "(HL) InternetConnect, HttpOpenRequest, HttpSendRequest, HttpQueryInfo (el texto, una cabecera por su nombre); HTTPS y FTP, aún no (ERROR_INTERNET_CANNOT_CONNECT)" \
+  "^httpsendrequest: 1 \[OK\] 41 con su texto$" "^httpqueryinfo_custom: 1 41$" "^https: -12029$" "^ftp: -12029$" "^FIN HLNET$"
 # 4. el sonido: DirectSound en bucle sin que el programa haga nada, waveOut, el CD
 if bash $AQUI/nucleo32/sonido/hacer.sh $J/son > $J/son.txt 2>&1; then
   cp $J/d.img $J/s.img

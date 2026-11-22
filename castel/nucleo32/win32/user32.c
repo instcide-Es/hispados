@@ -3577,3 +3577,228 @@ void mensaje_fatal(const char *t)
 	sys_escribir(b, strlen(b));
 	sys_escribir("\n", 1);
 }
+
+/* ---- (HL) lo que pide un juego de 1998-2000 ---- */
+/* la última ventana emergente activa de las de «h» (o ella misma) */
+API(HWND) GetLastActivePopup(HWND h)
+{
+	Wnd *w = wnd(h), *p;
+	if (!w)
+		return 0;
+	if (activa && activa != w && raiz_de(activa)->dueno == raiz_de(w) && ventana_visible(activa))
+		return (HWND)activa;
+	for (p = escritorio ? escritorio->hijas : 0; p; p = p->sig)
+		if (p->dueno == w && !p->destruida && ventana_visible(p) && !(p->estilo & WS_DISABLED))
+			return (HWND)p;
+	return h;
+}
+/* quita de lo que pinta «d» lo que «h» tiene por repintar */
+API(i32) ExcludeUpdateRgn(HDC d, HWND h)
+{
+	extern i32 WINAPI ExcludeClipRect(HDC, i32, i32, i32, i32);
+	extern i32 WINAPI GetClipBox(HDC, RECT *);
+	RECT r;
+	if (!wnd(h))
+		return 0;                       /* ERROR */
+	if (GetUpdateRect(h, &r, FALSE))
+		return ExcludeClipRect(d, r.left, r.top, r.right, r.bottom);
+	return GetClipBox(d, &r);
+}
+/* los programas que lanza ya están listos (CreateProcess espera, o corren a la vez) */
+API(u32) WaitForInputIdle(HANDLE p, u32 ms) { (void)p; (void)ms; return 0; }
+/* apagar el equipo desde un programa de Windows: no (el que apaga es el
+ * usuario, desde Inicio); se dice y se apunta */
+API(BOOL) ExitWindowsEx(u32 fl, u32 r)
+{
+	void diag_apunta(const char *f, ...);
+	(void)r;
+	diag_apunta("ExitWindowsEx(%x): Hispa-Pentium no deja que un programa apague el equipo (se apaga desde Inicio)", fl);
+	pon_error(1314);                    /* ERROR_PRIVILEGE_NOT_HELD */
+	return FALSE;
+}
+
+/* ---- (HL) DDE: no hay con quién hablar. Se puede empezar (DdeInitialize)
+ * y hacer cadenas y datos, pero conectar falla siempre, limpio
+ * (DMLERR_NO_CONV_ESTABLISHED), como un Windows sin ese servidor ---- */
+#define DDE_CAD 32
+static char *dde_cad[DDE_CAD];
+static u32 dde_error;
+typedef u32 (WINAPI *DDECB)(u32, u32, HANDLE, HANDLE, HANDLE, HANDLE, u32, u32);
+API(u32) DdeInitializeA(u32 *id, DDECB f, u32 cmd, u32 r) { (void)f; (void)cmd; (void)r; if (id) *id = 1; dde_error = 0; return 0; }
+API(u32) DdeInitializeW(u32 *id, DDECB f, u32 cmd, u32 r) { return DdeInitializeA(id, f, cmd, r); }
+API(BOOL) DdeUninitialize(u32 id) { (void)id; return TRUE; }
+API(u32) DdeGetLastError(u32 id) { u32 e = dde_error; (void)id; dde_error = 0; return e; }
+API(HANDLE) DdeCreateStringHandleA(u32 id, const char *s, i32 cp)
+{
+	u32 k;
+	(void)id; (void)cp;
+	for (k = 0; k < DDE_CAD; k++)
+		if (dde_cad[k] && !stricmp_(dde_cad[k], s ? s : ""))
+			return (HANDLE)(k + 1);
+	for (k = 0; k < DDE_CAD; k++)
+		if (!dde_cad[k]) {
+			dde_cad[k] = m_pedir(strlen(s ? s : "") + 1);
+			if (!dde_cad[k])
+				break;
+			strcpy(dde_cad[k], s ? s : "");
+			return (HANDLE)(k + 1);
+		}
+	dde_error = 0x4008;                 /* DMLERR_MEMORY_ERROR */
+	return 0;
+}
+API(HANDLE) DdeCreateStringHandleW(u32 id, const WCHAR *s, i32 cp)
+{
+	char b[256];
+	if (s)
+		de_w(b, s, sizeof b);
+	return DdeCreateStringHandleA(id, s ? b : 0, cp);
+}
+API(BOOL) DdeFreeStringHandle(u32 id, HANDLE h) { (void)id; (void)h; return TRUE; }
+API(BOOL) DdeKeepStringHandle(u32 id, HANDLE h) { (void)id; (void)h; return TRUE; }
+API(u32) DdeQueryStringA(u32 id, HANDLE h, char *d, u32 n, i32 cp)
+{
+	u32 k = (u32)h - 1, l;
+	(void)id; (void)cp;
+	if (k >= DDE_CAD || !dde_cad[k])
+		return 0;
+	l = strlen(dde_cad[k]);
+	if (d && n)
+		copia_n(d, dde_cad[k], n);
+	return l;
+}
+API(i32) DdeCmpStringHandles(HANDLE a, HANDLE b) { return a == b ? 0 : (u32)a < (u32)b ? -1 : 1; }
+API(HANDLE) DdeConnect(u32 id, HANDLE serv, HANDLE tema, void *cc) { (void)id; (void)serv; (void)tema; (void)cc; dde_error = 0x400A; return 0; }
+API(HANDLE) DdeConnectList(u32 id, HANDLE serv, HANDLE tema, HANDLE l, void *cc) { (void)id; (void)serv; (void)tema; (void)l; (void)cc; dde_error = 0x400A; return 0; }
+API(HANDLE) DdeQueryNextServer(HANDLE l, HANDLE c) { (void)l; (void)c; return 0; }
+API(HANDLE) DdeReconnect(HANDLE c) { (void)c; dde_error = 0x400A; return 0; }
+API(BOOL) DdeDisconnect(HANDLE c) { (void)c; dde_error = 0x400B; return FALSE; }        /* DMLERR_NO_CONV_ESTABLISHED / INVALIDPARAMETER */
+API(BOOL) DdeDisconnectList(HANDLE l) { (void)l; return FALSE; }
+API(HANDLE) DdeClientTransaction(void *d, u32 n, HANDLE c, HANDLE it, u32 fmt_, u32 tipo, u32 t, u32 *r)
+{
+	(void)d; (void)n; (void)c; (void)it; (void)fmt_; (void)tipo; (void)t;
+	if (r)
+		*r = 0;
+	dde_error = 0x400A;
+	return 0;
+}
+API(BOOL) DdeAbandonTransaction(u32 id, HANDLE c, u32 t) { (void)id; (void)c; (void)t; return TRUE; }
+API(u32) DdeQueryConvInfo(HANDLE c, u32 t, void *i) { (void)c; (void)t; (void)i; dde_error = 0x400B; return 0; }
+API(BOOL) DdeSetUserHandle(HANDLE c, u32 i, u32 u) { (void)c; (void)i; (void)u; return FALSE; }
+API(BOOL) DdeEnableCallback(u32 id, HANDLE c, u32 cmd) { (void)id; (void)c; (void)cmd; return TRUE; }
+API(HANDLE) DdeNameService(u32 id, HANDLE a, HANDLE b, u32 f) { (void)id; (void)a; (void)b; (void)f; return (HANDLE)1; }
+API(BOOL) DdePostAdvise(u32 id, HANDLE t, HANDLE i) { (void)id; (void)t; (void)i; return TRUE; }
+API(BOOL) DdeImpersonateClient(HANDLE c) { (void)c; return FALSE; }
+/* los datos: un bloque con su largo delante */
+API(HANDLE) DdeCreateDataHandle(u32 id, const void *s, u32 n, u32 off, HANDLE it, u32 f, u32 cmd)
+{
+	u32 *b = m_cero(n + 8);
+	(void)id; (void)it; (void)f; (void)cmd;
+	if (!b) {
+		dde_error = 0x4008;
+		return 0;
+	}
+	b[0] = n;
+	if (s)
+		memcpy(b + 2, (const u8 *)s + off, n);
+	return (HANDLE)b;
+}
+API(HANDLE) DdeAddData(HANDLE h, const void *s, u32 n, u32 off)
+{
+	u32 *b = h;
+	if (!b)
+		return 0;
+	if (off + n > b[0]) {
+		b = m_cambiar(b, off + n + 8);
+		if (!b)
+			return 0;
+		memset((u8 *)(b + 2) + b[0], 0, off + n - b[0]);
+		b[0] = off + n;
+	}
+	memcpy((u8 *)(b + 2) + off, s, n);
+	return (HANDLE)b;
+}
+API(u32) DdeGetData(HANDLE h, void *d, u32 n, u32 off)
+{
+	u32 *b = h, t;
+	if (!b || off > b[0])
+		return 0;
+	t = b[0] - off;
+	if (!d)
+		return t;
+	if (t > n)
+		t = n;
+	memcpy(d, (u8 *)(b + 2) + off, t);
+	return t;
+}
+API(void *) DdeAccessData(HANDLE h, u32 *n) { u32 *b = h; if (!b) return 0; if (n) *n = b[0]; return b + 2; }
+API(BOOL) DdeUnaccessData(HANDLE h) { (void)h; return TRUE; }
+API(BOOL) DdeFreeDataHandle(HANDLE h) { if (h) m_soltar(h); return TRUE; }
+/* los lParam de los mensajes WM_DDE_*: los que llevan dos valores (ACK,
+ * ADVISE, DATA, POKE) van en una pareja guardada aquí */
+#define DDE_PAR 32
+static struct { u32 uso, lo, hi; } dde_par[DDE_PAR];
+static int dde_lleva_dos(u32 m) { return m == 0x3E4 || m == 0x3E2 || m == 0x3E5 || m == 0x3E7; }
+static u32 *dde_de(LPARAM lp)
+{
+	u32 k = (u32)lp - 0xDDE00001u;
+	return k < DDE_PAR && dde_par[k].uso ? &dde_par[k].uso : 0;
+}
+API(LPARAM) PackDDElParam(u32 m, u32 lo, u32 hi)
+{
+	u32 k;
+	if (m == 0x3E8)                    /* WM_DDE_EXECUTE: el bloque de la orden, tal cual */
+		return (LPARAM)hi;
+	if (!dde_lleva_dos(m))
+		return (LPARAM)((lo & 0xFFFF) | (hi << 16));
+	for (k = 0; k < DDE_PAR; k++)
+		if (!dde_par[k].uso) {
+			dde_par[k].uso = 1;
+			dde_par[k].lo = lo;
+			dde_par[k].hi = hi;
+			return (LPARAM)(0xDDE00001u + k);
+		}
+	return 0;
+}
+API(BOOL) UnpackDDElParam(u32 m, LPARAM lp, u32 *lo, u32 *hi)
+{
+	u32 *p;
+	if (m == 0x3E8) {
+		if (lo)
+			*lo = 0;
+		if (hi)
+			*hi = (u32)lp;
+		return TRUE;
+	}
+	if (!dde_lleva_dos(m)) {
+		if (lo)
+			*lo = (u32)lp & 0xFFFF;
+		if (hi)
+			*hi = (u32)lp >> 16;
+		return TRUE;
+	}
+	p = dde_de(lp);
+	if (!p) {
+		if (lo)
+			*lo = 0;
+		if (hi)
+			*hi = 0;
+		return FALSE;
+	}
+	if (lo)
+		*lo = p[1];
+	if (hi)
+		*hi = p[2];
+	return TRUE;
+}
+API(BOOL) FreeDDElParam(u32 m, LPARAM lp)
+{
+	u32 *p = dde_lleva_dos(m) ? dde_de(lp) : 0;
+	if (p)
+		p[0] = 0;
+	return TRUE;
+}
+API(LPARAM) ReuseDDElParam(LPARAM lp, u32 de, u32 a, u32 lo, u32 hi)
+{
+	FreeDDElParam(de, lp);
+	return PackDDElParam(a, lo, hi);
+}

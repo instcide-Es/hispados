@@ -318,7 +318,10 @@ SISTEMA = [
     # hilo, el CD de sonido; WIN32 COMPRUEBA y WIN32.LOG). Vale con la base de
     # antes (sin las llamadas 183 a 186 hace lo de siempre); con todo, la base
     # que las lleve (la rama win32-juegos)
-    ('win32', '1.2', 'Programas de Windows de 32 bits y juegos: hilos, SEH, registro, DirectX (con sonido y CD), OpenGL; WIN32.BIN, sus DLL y los ejemplos', 'base >= ' + VERSION_084, [
+    # (HL, 22/11/2026) win32 1.3: lo que pedía Half-Life 1 (las DLL donde las
+    # busca Windows, WSOCK32 por número, mmio, el mezclador, WININET, la
+    # seguridad de ADVAPI32...; WIN32 COMPRUEBA /CON y /MAQUINA). Los mismos archivos
+    ('win32', '1.3', 'Programas de Windows de 32 bits y juegos: hilos, SEH, registro, DirectX (con sonido y CD), OpenGL, WININET; WIN32.BIN, sus DLL y los ejemplos', 'base >= ' + VERSION_084, [
         ('WIN32.BIN', r'\HISPA\WIN32.BIN'),
         ('MSVCRT.DLL', r'\WIN32\MSVCRT.DLL'), ('UCRT.DLL', r'\WIN32\UCRT.DLL'), ('COMCTL32.DLL', r'\WIN32\COMCTL32.DLL'),
         ('WINMM.DLL', r'\WIN32\WINMM.DLL'), ('DDRAW.DLL', r'\WIN32\DDRAW.DLL'), ('DSOUND.DLL', r'\WIN32\DSOUND.DLL'),

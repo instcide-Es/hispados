@@ -5105,6 +5105,31 @@ C++ 6, OpenGL o DirectDraw), hecho y probado con programas propios
   lector de verdad (QEMU no tiene CD de música), las prioridades de los hilos
   (se guardan, no cambian el reparto), Direct3D.
 
+### 14 quater quater. Lo que pedía Half-Life 1 (HL, la rama `win32-hl`)
+
+*22/11/2026. Carlos pasó `WIN32 COMPRUEBA` sobre su Half-Life 1: «faltan
+2642 funciones», casi 1.700 de mentira. Todo, en
+[pentium/WIN32.md](pentium/WIN32.md), «Lo que pedía Half-Life 1».*
+
+- **Las DLL, donde las busca Windows**: la carpeta del `.EXE` que arranca, la
+  de trabajo, `\WIN32` y el `PATH` (no la de la DLL que importa: VGUI.DLL ya
+  no sale como falta). `WIN32 COMPRUEBA carpeta` mira cada DLL desde las
+  carpetas de arriba con un `.EXE`; `WIN32 COMPRUEBA HL.EXE /CON carpeta`,
+  desde la del `.EXE`; `/MAQUINA`, una línea por hecho con tabuladores (con el
+  SHA-256 de cada archivo) para el Asistente de compatibilidad. El aviso de lo
+  que falta lleva «Comprobar compatibilidad» si está `\COMPAT.BIN`.
+- **WSOCK32 y WS2_32 por número** (los de Windows; `GetProcAddress` con
+  número también); `WSAAsyncGetHostByName`.
+- **Nuevas**: KERNEL32 (`OpenFile`, `_lopen` y las de 16 bits,
+  `OpenFileMapping` con nombre, `FatalAppExit`...), USER32
+  (`GetLastActivePopup`, `ExcludeUpdateRgn`, DDE que falla limpio...), GDI32,
+  WINSPOOL.DRV (sin impresoras), la seguridad de ADVAPI32 (todo permitido),
+  WINMM (mmio de verdad, el mezclador con el volumen de SONIDO.BIN —
+  `HispaDXSonido` 4—, waveIn/midiOut/aux sin dispositivo) y **WININET.DLL**
+  (HTTP de verdad; HTTPS y FTP, aún no).
+- **Paquete**: `win32` 1.3. **Pruebas**: la parte 33 (`SOLO=win32juegos`),
+  con HLK32, HLORD, HLMM, HLNET, HLVEN y el juego de mentira `JUEGO99`.
+
 ## 14 sexies. La seguridad: la zona protegida, los secretos y los servicios (PROTEGE)
 
 *21/11/2026, rama `pentium-protege`, por la revisión de seguridad de ese día

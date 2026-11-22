@@ -14,6 +14,12 @@ BOOL WINAPI DosDateTimeToFileTime(u16 fe, u16 ho, FILETIME *f);
 BOOL WINAPI FileTimeToDosDateTime(const FILETIME *f, u16 *fe, u16 *ho);
 void w32_salir(u32 c);
 void dx_tic(void);
+BOOL WINAPI ReadFile(HANDLE h, void *d, u32 n, u32 *leidos, void *sol);     /* (HL) para las de 16 bits */
+BOOL WINAPI WriteFile(HANDLE h, const void *p, u32 n, u32 *esc, void *sol);
+u32 WINAPI SetFilePointer(HANDLE h, i32 d, i32 *alto, u32 desde);
+BOOL WINAPI SetEndOfFile(HANDLE h);
+BOOL WINAPI DeleteFileA(const char *n);
+int mapa_otro_usa(Obj *o);
 
 void prepara_objs(void)
 {
@@ -122,7 +128,7 @@ API(BOOL) CloseHandle(HANDLE h)
 		return TRUE;          /* (la consola) */
 	if ((o->tipo == O_ARCHIVO || o->tipo == O_BUSQUEDA) && o->fd != 0xFFFFFFFF)
 		sys_cerrar(o->fd);
-	if (o->tipo == O_MAPA)
+	if (o->tipo == O_MAPA && !mapa_otro_usa(o))     /* (HL) con nombre, el último */
 		m_soltar(o->f);
 	if (o->tipo == O_HILO)          /* (JUEGOS) */
 		hilo_cierra(o);
@@ -132,6 +138,79 @@ API(BOOL) CloseHandle(HANDLE h)
 	return TRUE;
 }
 API(u32) _lclose(HANDLE h) { return CloseHandle(h) ? 0 : (u32)-1; }
+/* (HL) las de 16 bits que aún usan los instaladores (y OpenFile) */
+API(HANDLE) _lopen(const char *n, i32 modo)
+{
+	u32 a = (modo & 3) == 1 ? 0x40000000 : (modo & 3) == 2 ? 0xC0000000 : 0x80000000;
+	return CreateFileA(n, a, 3, 0, 3, 0x80, 0);
+}
+API(HANDLE) _lcreat(const char *n, i32 atr)
+{
+	return CreateFileA(n, 0xC0000000, 3, 0, 2, atr ? (u32)atr : 0x80, 0);
+}
+API(u32) _lread(HANDLE h, void *d, u32 n)
+{
+	u32 l = 0;
+	return ReadFile(h, d, n, &l, 0) ? l : 0xFFFFFFFF;
+}
+API(u32) _hread(HANDLE h, void *d, u32 n) { return _lread(h, d, n); }
+API(u32) _lwrite(HANDLE h, const char *d, u32 n)
+{
+	u32 l = 0;
+	if (!n)                   /* (como en Windows: escribir 0 corta el archivo ahí) */
+		return SetEndOfFile(h) ? 0 : 0xFFFFFFFF;
+	return WriteFile(h, d, n, &l, 0) ? l : 0xFFFFFFFF;
+}
+API(u32) _hwrite(HANDLE h, const char *d, u32 n) { return _lwrite(h, d, n); }
+API(i32) _llseek(HANDLE h, i32 d, i32 desde) { return (i32)SetFilePointer(h, d, 0, (u32)desde); }
+/* OFSTRUCT: cBytes, fFixedDisk, nErrCode, dos reservados y la ruta (128) */
+typedef struct { u8 n, fijo; u16 error, r1, r2; char ruta[128]; } OFS;
+API(HANDLE) OpenFile(const char *n, OFS *of, u32 estilo)
+{
+	HANDLE h;
+	u32 a, como;
+	char e[300];
+	if (of) {
+		memset(of, 0, sizeof *of);
+		of->n = sizeof *of;
+		of->fijo = 1;
+	}
+	if (estilo & 0x8000)         /* OF_REOPEN: la ruta que ya lleva */
+		n = of ? of->ruta : n;
+	if (!n) {
+		pon_error(87);
+		return (HANDLE)-1;
+	}
+	ruta_entera(n, e, sizeof e);
+	if (of)
+		copia_n(of->ruta, e, sizeof of->ruta);
+	if (estilo & 0x100)          /* OF_PARSE: solo la ruta */
+		return 0;
+	if (estilo & 0x200) {        /* OF_DELETE */
+		if (DeleteFileA(e))
+			return (HANDLE)1;
+		if (of)
+			of->error = (u16)GetLastError_();
+		return (HANDLE)-1;
+	}
+	a = (estilo & 3) == 1 ? 0x40000000 : (estilo & 3) == 2 ? 0xC0000000 : 0x80000000;
+	como = (estilo & 0x1000) ? 2 : 3;     /* OF_CREATE: de nuevo */
+	if (estilo & 0x1000)
+		a |= 0x40000000;
+	h = CreateFileA(e, a, 3, 0, como, 0x80, 0);
+	if (h == INVALID_HANDLE_VALUE) {
+		if (of)
+			of->error = (u16)GetLastError_();
+		return (HANDLE)-1;
+	}
+	if (estilo & 0x4000) {       /* OF_EXIST: abrir y cerrar */
+		CloseHandle(h);
+		return (HANDLE)1;
+	}
+	return h;
+}
+API(BOOL) SetVolumeLabelA(const char *r, const char *n) { (void)r; (void)n; pon_error(50); return FALSE; }   /* ERROR_NOT_SUPPORTED */
+API(BOOL) SetVolumeLabelW(const WCHAR *r, const WCHAR *n) { (void)r; (void)n; pon_error(50); return FALSE; }
 
 /* ---- la consola ---- */
 static char ent_linea[256];
@@ -1046,12 +1125,72 @@ API(u32) GetTempFileNameA(const char *ruta, const char *pre, u32 u, char *d)
 }
 
 /* ---- archivos en memoria (CreateFileMapping: se lee entero) ---- */
+/* (HL) los que tienen nombre: el mismo trozo de memoria para todos los que
+ * lo abren (CreateFileMapping otra vez, ERROR_ALREADY_EXISTS; o
+ * OpenFileMapping); se suelta al cerrar el último */
+static Obj *mapa_por_nombre(const char *n)
+{
+	int i;
+	if (!n || !n[0])
+		return 0;
+	for (i = 3; i < MAX_OBJ; i++)
+		if (objs[i].tipo == O_MAPA && objs[i].patron[0] && !stricmp_(objs[i].patron, n))
+			return &objs[i];
+	return 0;
+}
+int mapa_otro_usa(Obj *o)
+{
+	int i;
+	for (i = 3; i < MAX_OBJ; i++)
+		if (&objs[i] != o && objs[i].tipo == O_MAPA && objs[i].f == o->f)
+			return 1;
+	return 0;
+}
+static HANDLE mapa_otra_vez(Obj *m)
+{
+	HANDLE h = nuevo_obj(O_MAPA);
+	if (!h)
+		return 0;
+	obj(h)->f = m->f;
+	obj(h)->a = m->a;
+	copia_n(obj(h)->patron, m->patron, sizeof obj(h)->patron);
+	return h;
+}
+API(HANDLE) OpenFileMappingA(u32 acceso, BOOL her, const char *n)
+{
+	Obj *m = mapa_por_nombre(n);
+	(void)acceso; (void)her;
+	if (!m) {
+		pon_error(2);
+		return 0;
+	}
+	return mapa_otra_vez(m);
+}
+API(HANDLE) OpenFileMappingW(u32 acceso, BOOL her, const WCHAR *n)
+{
+	char b[64];
+	if (!n) {
+		pon_error(87);
+		return 0;
+	}
+	de_w(b, n, sizeof b);
+	return OpenFileMappingA(acceso, her, b);
+}
 API(HANDLE) CreateFileMappingA(HANDLE f, void *s, u32 prot, u32 alto, u32 bajo, const char *n)
 {
 	Obj *o = obj(f);
 	HANDLE h;
 	u32 t;
-	(void)s; (void)prot; (void)alto; (void)n;
+	(void)s; (void)prot; (void)alto;
+	{
+		Obj *m = mapa_por_nombre(n);       /* (HL) ya lo hay con ese nombre */
+		if (m) {
+			h = mapa_otra_vez(m);
+			if (h)
+				pon_error(183);
+			return h;
+		}
+	}
 	t = bajo;
 	if (o && o->tipo == O_ARCHIVO && !t)
 		t = sys_largo(o->fd);
@@ -1066,6 +1205,9 @@ API(HANDLE) CreateFileMappingA(HANDLE f, void *s, u32 prot, u32 alto, u32 bajo, 
 		sys_leer(o->fd, obj(h)->f, t);
 		sys_mover(o->fd, (i32)pos, 0);
 	}
+	if (n)
+		copia_n(obj(h)->patron, n, sizeof obj(h)->patron);
+	pon_error(0);
 	return h;
 }
 API(void *) MapViewOfFile(HANDLE h, u32 a, u32 alto, u32 bajo, u32 n)
