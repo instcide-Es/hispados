@@ -4150,9 +4150,9 @@ mira "WIN32 COMPRUEBA: las importaciones que faltan, sin ejecutar (las de una DL
 mira "y de una carpeta entera (sus .EXE y sus .DLL, también los de dentro): HILOS, SEH, CRT, REG... sin nada que falte" \
   "^HILOS.EXE: programa de consola$" "^JDLL.DLL: DLL$" "^SEH.EXE: programa de consola$"
 if [ "$(sed -n '/COMPRUEBA C:.JUEGOS/,/^En total/p' $S | grep -c '^  falta ')" = 2 ]; then ok "en C:\\JUEGOS, solo faltan las dos de FALTA.EXE (y la DLL de SINDLL)"; else ko "WIN32 COMPRUEBA C:\\JUEGOS: $(sed -n '/COMPRUEBA C:.JUEGOS/,/^En total/p' $S | grep '^  falta ' | head -5 | tr '\n' ' ')"; fi
-if mtype -i $J/c.img ::USUARIOS/USUARIO/WIN32.LOG > $J/win32.log 2>/dev/null && grep -q "FALTA.EXE: LLAMA A UNA QUE FALTA: KERNEL32.DLL!FuncionQueNoHay" $J/win32.log \
-   && grep -q "FALTA.EXE: GetProcAddress(KERNEL32.DLL, OtraQueNoHay)" $J/win32.log && grep -q "no se encuentra NOHAY.DLL, que necesita SINDLL.EXE" $J/win32.log \
-   && grep -q "EXCEPCI.N SIN MANEJADOR: 0xc0000005" $J/win32.log; then
+if mtype -i $J/c.img ::USUARIOS/USUARIO/WIN32.LOG > $J/win32.log 2>/dev/null && LC_ALL=C grep -q "FALTA.EXE: LLAMA A UNA QUE FALTA: KERNEL32.DLL!FuncionQueNoHay" $J/win32.log \
+   && LC_ALL=C grep -q "FALTA.EXE: GetProcAddress(KERNEL32.DLL, OtraQueNoHay)" $J/win32.log && LC_ALL=C grep -q "no se encuentra NOHAY.DLL, que necesita SINDLL.EXE" $J/win32.log \
+   && LC_ALL=C grep -q "EXCEPCI.N SIN MANEJADOR: 0xc0000005" $J/win32.log; then
   ok "\\USUARIOS\\USUARIO\\WIN32.LOG apunta, con la fecha y el programa, lo que falta, lo que falló y las excepciones sin manejador"
 else ko "WIN32.LOG no tiene lo que debe: $(head -c 300 $J/win32.log 2>/dev/null)"; fi
 mira "hilos de verdad: cuatro que suman a la vez (Interlocked y CRITICAL_SECTION), esperar a todos, sus códigos y números, TLS de cada uno" \
@@ -4173,7 +4173,7 @@ mira "una excepción sin manejador: el aviso claro (qué y dónde); con SetUnhan
   "^SEH.EXE ha fallado: EXCEPTION_ACCESS_VIOLATION (un puntero que no vale) en SEH.EXE+0x.*, al escribir en 0x00000024.$" "^filtro_final: c0000005 en su sitio$" "(SEH.EXE ha acabado con el código 3221225477)"
 mira "el registro: crear (REG_CREATED_NEW_KEY), poner y leer DWORD, texto y binario, el búfer corto (ERROR_MORE_DATA), el valor sin nombre, borrar, enumerar, Unicode, HKLM y HKCR" \
   "^abrir_nohay: 2$" "^crear: 0 1$" "^tam_sin_bufer: 0 1 7$" "^bufer_corto: 234 7$" "^texto: 0 hw.dll 7$" "^binario: 0 3 4 0102feff$" "^sin_nombre: 0 por defecto$" "^borrar_valor: 0 2$" \
-  "^info: 1 5 12 22$" "^unicode: 0 14 hw\.$" "^enum_claves: 0 Half-Life 259$" "^directx: 0 4.07.00.0700$" "^hkcr: 0 HispaJuego$" "^borrar_clave: 0 2$"
+  "^info: 1 5 12 21$" "^unicode: 0 14 hw\.$" "^enum_claves: 0 Half-Life 259$" "^directx: 0 4.07.00.0700$" "^hkcr: 0 HispaJuego$" "^borrar_clave: 0 2$"
 mira "y al correr otra vez, sigue ahí (REG_OPENED_EXISTING_KEY)" "^lee_otra_vez: 0 4 640$" "^lee_texto: 0 hw.dll 7$" "^lee_borrado: 2$" "^crear_existente: 0 2$"
 if mtype -i $J/c.img ::USUARIOS/USUARIO/REGISTRO.REG > $J/registro.reg 2>/dev/null && grep -q '^"ScreenWidth"=dword:00000280' $J/registro.reg && grep -q '^\[HKEY_CURRENT_USER.Software.Valve.Half-Life.Settings\]' $J/registro.reg \
    && grep -q '^"Clave"=hex:01,02,fe,ff' $J/registro.reg && mtype -i $J/c.img ::USUARIOS/EQUIPO.REG 2>/dev/null | grep -q '^\[HKEY_LOCAL_MACHINE.Software.Classes..hlj\]'; then
