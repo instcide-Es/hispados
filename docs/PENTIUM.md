@@ -6230,7 +6230,13 @@ la 33 es la de win32-juegos): con servidores NTP de mentira
   `preferencias.cas`.
 - Las partes que usaban la Configuración de antes (el escritorio y la 0.5,
   la pantalla, los programas, los dispositivos, el sonido y el Wi-Fi) van
-  ahora por sus iconos.
+  ahora por sus iconos; la memoria USB y la unidad M: llevan 41 programas.
+- **Lo que dieron** (22/11): la 34, 108 bien y 0 mal; en el PC de Albinyana,
+  06 (168), 07 (102), caliente (79), paquetes (108), red (72), tls (72),
+  acpi (78), cd (77), menu (95), protege (76) y castel32 (67: el núcleo se
+  sigue compilando a sí mismo, con las tablas lejos del tope), todas sin un
+  fallo; aquí, pantalla (98), dispositivos (85), sonido (109), programas
+  (92), wifi, rueda (71) y accesorios (81), también.
 
 ### Los paquetes
 
