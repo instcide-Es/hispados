@@ -126,6 +126,29 @@ char *strcpy(char *d, const char *o)
 	return r;
 }
 
+/* (CUENTAS32) las dos que pide Cuentas 2 */
+void *memchr(const void *s, int c, size_t n)
+{
+	const u8 *p = s;
+
+	for (; n; n--, p++)
+		if (*p == (u8)c)
+			return (void *)p;
+	return NULL;
+}
+
+char *strrchr(const char *s, int c)
+{
+	const char *u = NULL;
+
+	for (;; s++) {
+		if (*s == (char)c)
+			u = s;
+		if (!*s)
+			return (char *)u;
+	}
+}
+
 int abs(int x)
 {
 	return x < 0 ? -x : x;

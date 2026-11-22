@@ -1,0 +1,26 @@
+# Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+# Los fuentes de Cuentas 2 (los leen hacer.sh y anfitrion.sh): «comun/x» es
+# de la biblioteca común de la oficina (oficina/comun); «cuentas/x», de Cuentas.
+# Detrás, «-w» si es de los que llevan código de otros dentro (sin avisos).
+comun/texto
+comun/ttf
+comun/letras -w
+comun/lienzo
+comun/imagen -w
+comun/ui
+comun/iconos
+comun/zip
+comun/xml
+comun/pdfsal
+comun/miniz_ofi -w
+cuentas/libro
+cuentas/numeros
+cuentas/formula
+cuentas/calculo
+cuentas/funciones
+cuentas/deshacer
+cuentas/operar
+cuentas/archivo
+cuentas/prueba
+cuentas/principal
+cuentas/apanos_tmp
