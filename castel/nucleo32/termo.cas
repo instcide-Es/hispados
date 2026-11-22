@@ -20,10 +20,12 @@
 ;        18h, función 3 (el «control varios» de los AMD de K8 a la familia
 ;        16h: sus registros 00h, 08h, A4h, E4h y FCh) y el 00h del 0:0.0
 ;        (quién es el puente) -> lo leído (4 octetos); NO_VALE si no vale
-;   222  el SMN de AMD (familia 15h modelos 60h+, 16h modelos 30h+ y 17h en
-;        adelante): EBX la dirección, solo 00059800h (la temperatura,
-;        por 0:0.0 60h/64h) y D8200C64h (por 0:0.0 B8h/BCh); solo con un
-;        procesador AMD y su puente (1022h) en 0:0.0 -> lo leído
+;   222  el SMN de AMD: EBX la dirección, solo 00059800h (familia 17h en
+;        adelante: la temperatura, por 0:0.0 60h/64h, como amd_smn_read de
+;        Linux) y D8200CA4h (familia 15h modelos 60h-7Fh, Carrizo y
+;        Bristol Ridge: por 0:0.0 B8h/BCh, como amd_nb_index_read; antes,
+;        por error, D8200C64h, que en el ThinkPad A275 daba 114,3 °C fijos);
+;        solo con un procesador AMD y su puente (1022h) en 0:0.0 -> lo leído
 ;   223  las zonas térmicas: ECX = 0 (cualquiera), EBX dónde dejar lo último
 ;        que dio el servicio (1024 octetos) -> 1, o 0 si aún no hay; ECX = 1
 ;        (solo el servicio de ACPI) lo da él, desde EBX -> 1 si alguien lo ha
@@ -171,7 +173,7 @@ módulo Termo
                 si no pci_de_la_lista(a) entonces devolver NO_VALE fin
                 devolver lee_pci(a)
             caso 222:
-                si a <> 0x00059800 y a <> 0xD8200C64 entonces devolver NO_VALE fin
+                si a <> 0x00059800 y a <> 0xD8200CA4 entonces devolver NO_VALE fin
                 si fabricante() <> 2 entonces devolver NO_VALE fin
                 si lee_pci(0) yb 0xFFFF <> 0x1022 entonces devolver NO_VALE fin
                 devolver lee_smn(a)

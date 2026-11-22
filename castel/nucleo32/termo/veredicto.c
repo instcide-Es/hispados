@@ -89,6 +89,15 @@ static int ocupado(const struct ve_prueba *p)
 	return p->ocup_n ? p->ocup_suma / p->ocup_n : -1;
 }
 
+int ve_creible(int t, int limite)
+{
+	if (t == VE_NO)
+		return 1;
+	if (t < 0 || t > 1250)
+		return 0;
+	return limite == VE_NO || t < limite;
+}
+
 int ve_fija(const struct ve_prueba *p, int k)
 {
 	return p->n[k] >= 2 && p->lo[k] != VE_NO && p->lo[k] == p->hi[k];
@@ -104,7 +113,7 @@ static int elige(const struct ve_prueba *p)
 		for (k = 0; k < p->ns; k++) {
 			int sube;
 
-			if (p->ini[k] == VE_NO || p->pico[k] == VE_NO)
+			if (p->ini[k] == VE_NO || p->pico[k] == VE_NO || p->s[k].no_fiable)
 				continue;
 			if (pasada == 0 && !p->s[k].cpu)
 				continue;
@@ -179,7 +188,21 @@ void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int
 	else
 		PON("Prueba de %s%s. ", tiempo(a, seg_carga), esc ? " (parada con Esc)" : "");
 	if (r < 0) {
-		PON("Ningún sensor ha dado temperaturas durante la prueba: no se puede decir nada.");
+		int nf = 0;
+
+		d[0] = 0, m = 0;
+		for (k = 0; k < p->ns; k++)
+			nf += p->s[k].no_fiable;
+		if (nf)
+			PON("No se puede juzgar: ningún sensor da una temperatura creíble (%s marca %s, fuera de lo posible o por encima de su límite estando en reposo, y no se mueve). No es que se caliente: es que este equipo no deja leer bien su temperatura así.",
+			    p->s[0].nombre, ve_grados(a, p->ini[0] != VE_NO ? p->ini[0] : p->lo[0]));
+		else
+			PON("Ningún sensor ha dado temperaturas durante la prueba: no se puede decir nada.");
+		return;
+	}
+	if (ve_fija(p, r) && p->s[r].cpu) {
+		PON("El sensor del procesador («%s») no ha cambiado en toda la prueba (siempre %s): este equipo no da la temperatura del procesador, y no se puede juzgar cómo se calienta.",
+		    p->s[r].nombre, ve_grados(a, p->lo[r]));
 		return;
 	}
 	sube = p->pico_ref - p->t_ini;

@@ -5,9 +5,10 @@
  *  - El procesador: Intel (CPUID 6: el sensor digital, DTS; IA32_THERM_STATUS
  *    19Ch del núcleo que corre y IA32_PACKAGE_THERM_STATUS 1B1h de todo el
  *    procesador; la TjMax de MSR_TEMPERATURE_TARGET 1A2h o, si no lo tiene,
- *    de una tabla) y AMD (K8: PCI 0:18.3 E4h; familias 10h a 16h: 0:18.3 A4h;
- *    15h modelos 60h+ y 16h 30h+: SMN D8200C64h; 17h en adelante: SMN
- *    59800h). Lo lee el núcleo (las llamadas 220 a 222, termo.cas): solo
+ *    de una tabla) y AMD (como k10temp de Linux: K8, PCI 0:18.3 E4h;
+ *    familias 10h, 11h, 12h, 14h, 15h modelos 00h-5Fh y 16h: 0:18.3 A4h;
+ *    15h modelos 60h-7Fh: SMN D8200CA4h por 0:0.0 B8h/BCh; 17h en adelante:
+ *    SMN 59800h por 0:0.0 60h/64h, con -49 °C si el bit 19 lo dice). Lo lee el núcleo (las llamadas 220 a 222, termo.cas): solo
  *    lectura y solo esos registros.
  *  - ACPI: las zonas térmicas (_TMP, _CRT, _PSV, _HOT) y los ventiladores
  *    (_FST), que lee el servicio de ACPI (ACPI.BIN) y da el núcleo (la 223);
@@ -36,12 +37,14 @@
 
 static int mas_caliente(void);
 static void mira_envio(void);
+static int en_reposo(void);
 static void mira_anterior(void);
 static void log_arranque(void);
 static void log_escribe(const char *clase, const char *texto);
 static char ruta_log[64], anterior[700];
 static int log_malo;
 static u32 cuenta_s;
+static int fecha_mala, pidio_hora;	/* (TERMO) el año del reloj, si parece mal */
 /* (TERMO) lo ocupado (mide_ocupacion) */
 static int ocup_pct = -1, c0_pct = -1, c6_pct = -1;
 static u32 oc_ociosa, oc_tics, oc_mperf, oc_mperfh, oc_c6, oc_c6h;
@@ -95,6 +98,7 @@ struct sensor {
 	int t, min, max;	/* décimas de grado; NO, no se sabe */
 	int limite, supuesto;	/* el límite (TjMax, _CRT), y si es de tabla */
 	int fija;		/* (TERMO) no ha cambiado en toda la última prueba */
+	int no_fiable;		/* (TERMO) del procesador, clavada 30 s en carga (el Toshiba NB250: 6 °C siempre) */
 	u32 estado_dicho;	/* (ACPI) el porqué de «--» ya apuntado */
 	int hist[HIST];
 };
@@ -107,7 +111,7 @@ static struct {
 	char marca[52], fab[16];
 	int dts, ptm, aperf, msr_ok;
 	int tjmax, tj_de_msr;
-	int amd_metodo;		/* 1 K8, 2 0:18.3 A4h, 3 SMN D8200C64h, 4 SMN 59800h */
+	int amd_metodo;		/* 1 K8, 2 0:18.3 A4h, 3 SMN D8200CA4h, 4 SMN 59800h */
 	char no_hay[160];	/* por qué no hay temperatura del procesador */
 	int aproximada;		/* (TERMO) un Atom: su sensor es poco de fiar */
 	char msr_texto[120];	/* lo que da el 19Ch la primera vez (para el registro) */
@@ -252,7 +256,7 @@ static void mira_procesador(void)
 		v = lee_pci(0x18, 3, 0);
 		if (cpu.fam == 0x0F && (v & 0xFFFF) == 0x1022)
 			cpu.amd_metodo = 1, cl = 950;
-		else if (((cpu.fam == 0x15 && cpu.modelo >= 0x60) || (cpu.fam == 0x16 && cpu.modelo >= 0x30)) && !ES_ERROR(sc(SC_SMN, 0xD8200C64u, 0, 0)))
+		else if (cpu.fam == 0x15 && (cpu.modelo & 0xF0) >= 0x60 && (cpu.modelo & 0xF0) <= 0x70 && !ES_ERROR(sc(SC_SMN, 0xD8200CA4u, 0, 0)))
 			cpu.amd_metodo = 3;
 		else if (cpu.fam >= 0x10 && cpu.fam <= 0x16 && (v & 0xFFFF) == 0x1022)
 			cpu.amd_metodo = 2;
@@ -289,7 +293,7 @@ static int lee_cpu(u32 msr)
 		v = lee_pci(0x18, 3, 0xA4);
 		return ES_ERROR(v) ? NO : (int)(v >> 21) * 5 / 4;
 	case 3:
-		v = sc(SC_SMN, 0xD8200C64u, 0, 0);
+		v = sc(SC_SMN, 0xD8200CA4u, 0, 0);
 		return ES_ERROR(v) ? NO : (int)(v >> 21) * 5 / 4;
 	case 4:
 		v = sc(SC_SMN, 0x59800u, 0, 0);
@@ -720,6 +724,17 @@ static void mira_cambios(void)
 	int k;
 	u32 i;
 
+	if (fecha_mala && cuenta_s == 2)
+		suceso_log("AVISO: la fecha del equipo parece mal (año %d: ¿la pila del reloj?); %s", fecha_mala, pidio_hora ? "se pide la hora por Internet (HORARED /AHORA)" : "sin red no se puede poner en hora");
+	if (fecha_mala && cuenta_s % 10 == 0) {
+		u32 a, me, d, h, mi, se;
+
+		fecha_hora(&a, &me, &d, &h, &mi, &se);
+		if (a >= 2025) {
+			suceso_log("la hora ya está bien (por Internet): %02u/%02u/%04u %02u:%02u", d, me, a, h, mi);
+			fecha_mala = 0;
+		}
+	}
 	if (!zonas_dichas && cpu.msr_texto[0] && cuenta_s >= 2) {
 		suceso_log("procesador: %s%s", cpu.msr_texto, cpu.aproximada ? ". La medida del sensor de este Atom es aproximada (sobre todo en frío): si sale por debajo de 25-30 °C con el equipo encendido, no es de fiar" : "");
 		cpu.msr_texto[0] = 0;
@@ -757,8 +772,14 @@ static void mira_cambios(void)
 
 		if (S[k].t == NO && vistos_antes[k])
 			suceso_log("AVISO: el sensor «%s» ha dejado de responder", S[k].nombre);
-		if (S[k].t != NO && !vistos_antes[k])
+		if (S[k].t != NO && !vistos_antes[k]) {
 			suceso_log("sensor «%s»: %s (límite %s)", S[k].nombre, grados(g, S[k].t), S[k].limite == NO ? "no dice" : grados(g2, S[k].limite));
+			if (en_reposo() && !ve_creible(S[k].t, S[k].limite) && !S[k].no_fiable) {
+				S[k].no_fiable = 1;
+				suceso_log("AVISO: «%s» da %s estando en reposo (fuera de lo posible o por encima de su límite): lectura no fiable; no cuenta para la parada ni para el veredicto",
+					   S[k].nombre, grados(g, S[k].t));
+			}
+		}
 		vistos_antes[k] = S[k].t != NO;
 		if (e != E_NADA && est_antes[k] != E_NADA && e != est_antes[k])
 			suceso_log("%s: de «%s» a «%s» (%s)", S[k].nombre, nombre_estado[est_antes[k]], nombre_estado[e], grados(g, S[k].t));
@@ -1038,6 +1059,11 @@ static int puede_enviar, puede_terminal, enviando;	/* (TERMO) */
 static u32 t_envio;
 static char aviso_envio[420];
 
+static int en_reposo(void)
+{
+	return fase == F_REPOSO || fase == F_RESULTADO;
+}
+
 static const char *fase_texto(void)
 {
 	return fase == F_CARGA ? "carga" : fase == F_ENFRIA ? "enfriando" : "reposo";
@@ -1052,7 +1078,7 @@ static int mas_caliente(void)
 
 	for (pasada = 0; pasada < 2 && m == NO; pasada++)
 		for (k = 0; k < ns; k++)
-			if ((pasada || S[k].clase != CL_ACPI) && S[k].t != NO && (m == NO || S[k].t > m))
+			if ((pasada || S[k].clase != CL_ACPI) && !S[k].no_fiable && S[k].t != NO && (m == NO || S[k].t > m))
 				m = S[k].t;
 	return m;
 }
@@ -1085,6 +1111,7 @@ static void empieza(void)
 			snprintf(vs[k].nombre, sizeof vs[k].nombre, "%s", S[k].nombre);
 			vs[k].cpu = S[k].clase != CL_ACPI;
 			vs[k].limite = S[k].limite;
+			vs[k].no_fiable = S[k].no_fiable;
 			S[k].fija = 0;
 		}
 		temperaturas(t);
@@ -1188,7 +1215,9 @@ static void prueba_segundo(void)
 		for (k = 0; k < ns; k++) {
 			int lim = S[k].limite != NO ? S[k].limite : 1050;
 
-			if (S[k].t != NO && S[k].t >= lim - 100) {
+			/* (solo con lecturas creíbles: el ThinkPad A275 se paraba al segundo
+			 * con 114,3 °C de un registro equivocado) */
+			if (S[k].t != NO && !S[k].no_fiable && S[k].t >= lim - 100) {
 				char a[24], b[24];
 
 				snprintf(motivo, sizeof motivo, "%s llegó a %s (su límite: %s)", S[k].nombre, grados(a, S[k].t), grados(b, lim));
@@ -1196,6 +1225,15 @@ static void prueba_segundo(void)
 				return;
 			}
 		}
+		/* (TERMO) un sensor del procesador que en 30 s de carga no se mueve
+		 * ni un grado no está midiendo: «sin lectura fiable» */
+		if (seg == 30)
+			for (k = 0; k < ns && k < VE_MAXS; k++)
+				if (S[k].clase == CL_CPU && VP.n[k] >= 10 && VP.hi[k] - VP.lo[k] < 10 && !S[k].no_fiable) {
+					S[k].no_fiable = 1;
+					VP.s[k].no_fiable = 1;
+					suceso_log("AVISO: «%s» no se ha movido en 30 s de carga (%d,%d °C): no da una lectura fiable de la temperatura", S[k].nombre, VP.lo[k] / 10, VP.lo[k] % 10);
+				}
 		if (seg >= dura_s)
 			para_carga(0, 0);
 	} else if (fase == F_ENFRIA) {
@@ -1698,7 +1736,7 @@ static void pinta(void)
 		lz_texto(&LZ, cn, y + 7, s->nombre, C_TINTA, 1);
 		if (s->fija)
 			lz_texto(&LZ, cn + ancho_texto(s->nombre, 1) + 6, y + 7, "(fija, no cambia)", C_GRIS, 1);
-		lz_negrita(&LZ, ca, y + 7, grados(g, s->t), C_TINTA, 1);
+		lz_negrita(&LZ, ca, y + 7, s->no_fiable ? "sin lectura fiable" : grados(g, s->t), s->no_fiable ? C_PELIGRO : C_TINTA, 1);
 		lz_texto(&LZ, cmi, y + 7, grados(g, s->min), C_TINTA, 1);
 		lz_texto(&LZ, cma, y + 7, grados(g, s->max), C_TINTA, 1);
 		if (s->limite != NO)
@@ -1726,6 +1764,13 @@ static void pinta(void)
 	a[0] = 0;
 	if (cpu.no_hay[0])
 		lineas += nota(y + 4 + 16 * lineas, cpu.no_hay, C_PELIGRO);
+	if (fecha_mala) {
+		char f[200];
+
+		snprintf(f, sizeof f, "La fecha del equipo parece mal (%d): seguramente la pila del reloj está gastada. %s", fecha_mala,
+			 pidio_hora ? "Se ha pedido la hora por Internet." : "Con red (cable o Wi-Fi) se pone en hora sola; las horas del registro pueden no valer.");
+		lineas += nota(y + 4 + 16 * lineas, f, C_CALIENTE);
+	}
 	if (cpu.aproximada)
 		lineas += nota(y + 4 + 16 * lineas, "La medida del sensor de este Atom es aproximada (sobre todo en frío): menos de 25-30 °C con el equipo encendido no es de fiar; mire cuánto sube, más que la cifra.", C_CALIENTE);
 	if (cpu.intel && cpu.dts)
@@ -2155,6 +2200,19 @@ int principal(void)
 		else if (jg_abrir("Termómetro", 620, 140, 0) >= 0)
 			jg_correr(&J_viejo);
 		return 1;
+	}
+	/* (TERMO) la fecha: con la pila de la CMOS gastada (el Toshiba NB250
+	 * decía 19/03/2010), los nombres de los registros y las horas no valen.
+	 * Con red, se pide la hora por Internet (HORARED /AHORA) */
+	{
+		u32 a, me, d, h, mi, se;
+
+		fecha_hora(&a, &me, &d, &h, &mi, &se);
+		if (a < 2025) {
+			fecha_mala = (int)a;
+			if (hay_red_ya() && !ES_ERROR(sc(SC_LANZAR_SUELTO, (u32)"\\HORARED.BIN", (u32)"/AHORA /FORZAR", 0)))
+				pidio_hora = 1;
+		}
 	}
 	puede_enviar = carpeta[0] && envio_hay(carpeta);
 	{

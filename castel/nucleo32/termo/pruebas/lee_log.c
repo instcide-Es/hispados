@@ -14,7 +14,7 @@
 
 static struct ve_sensor sen[VE_MAXS];
 static char csv[VE_MAXS][48];
-static int ns, lim_de[VE_MAXS];
+static int ns, lim_de[VE_MAXS], visto[VE_MAXS];
 
 static int segundos(const char *l)
 {
@@ -127,6 +127,12 @@ int main(int argc, char **argv)
 					sen[k].limite = lim_de[i];
 			}
 		}
+		/* lo que no es creíble desde la primera lectura (como TERMO.BIN) */
+		for (k = 0; k < ns; k++)
+			if (!sen[k].no_fiable && !visto[k] && t[k] != VE_NO) {
+				visto[k] = 1;
+				sen[k].no_fiable = !ve_creible(t[k], sen[k].limite);
+			}
 		ult = segundos(l);
 		if (strstr(l, "fase=carga")) {
 			if (fase != 1) {

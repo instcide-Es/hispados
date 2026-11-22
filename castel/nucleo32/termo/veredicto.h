@@ -15,6 +15,7 @@ struct ve_sensor {
 	char nombre[48];	/* (UTF-8) */
 	int cpu;		/* 1: del procesador (o simulado) */
 	int limite;		/* el suyo, o VE_NO */
+	int no_fiable;		/* lo que da no es creíble: ni para la parada ni para el veredicto */
 };
 
 /* la prueba entera: lo que se sabe de cada sensor */
@@ -37,6 +38,9 @@ int ve_enfria(struct ve_prueba *p, int seg, const int *t);
 /* lo ocupado que está el procesador (0-100) en una medida enfriando: si no
  * baja, el enfriamiento no se puede juzgar */
 void ve_ocupacion(struct ve_prueba *p, int pct);
+/* ¿es creíble la primera lectura de un sensor en reposo? (0-125 °C y por
+ * debajo de su límite: el ThinkPad A275 daba 114,3 °C de 90, fijos) */
+int ve_creible(int t, int limite);
 int ve_fija(const struct ve_prueba *p, int k);		/* ¿no ha cambiado en toda la prueba? */
 /* el resumen y el veredicto, en UTF-8 */
 void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int seguridad, const char *motivo, int esc, int simula);
