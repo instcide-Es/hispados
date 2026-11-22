@@ -27,6 +27,14 @@
 ;  La memoria de la pantalla está muy por encima de la RAM: se pone en la
 ;  zona de los gráficos del núcleo (paginas.cas, GRÁFICOS_INICIO), cuyas
 ;  tablas ven todos los espacios de direcciones.
+;
+;  (UEFI) Arrancado por UEFI (GRUB EFI, multiboot2), el modo es el que deja
+;  el firmware (su GOP), o el que GRUB le pide antes de arrancar (gfxpayload).
+;  Sin BIOS no se puede cambiar en marcha (ni aunque esté la VBE de Bochs de
+;  QEMU: en un PC de verdad no la hay, y así QEMU se porta como uno de
+;  verdad): Configuración lo guarda para el próximo arranque. Si el GOP es de
+;  colores «al revés» (RGB), se dibuja en un lienzo aparte y volcar() lo pasa
+;  dándole la vuelta a cada punto.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Video
@@ -56,6 +64,7 @@ módulo Video
     variable real: nat32                        ; la pantalla de verdad (si no es de 32 bits)
     variable octetos_fila: nat32                ; de una fila a la siguiente, en ella
     variable lienzo_aparte: puntero a byte      ; el lienzo de 32 bits (si el modo no lo es), para soltarlo al cambiar
+    variable al_revés: bool                     ; (UEFI) la pantalla es RGB (el rojo abajo): volcar() da la vuelta a los puntos
 
     función vbe_pon(índice: nat32, dato: nat32)
         ensamblador
@@ -129,8 +138,9 @@ módulo Video
     fin
 
     ; ¿se puede cambiar el modo en marcha? (hay escritorio y la VBE de Bochs)
+    ; (UEFI: nunca; el modo lo pone el firmware al arrancar)
     público función se_cambia_en_marcha(): bool
-        devolver hay_pantalla y hay_bochs()
+        devolver hay_pantalla y hay_bochs() y no arrancado_por_uefi()
     fin
 
     ; lo más que da la tarjeta (su ancho y su alto), preguntado a la VBE de
@@ -203,7 +213,7 @@ módulo Video
     fin
 
     ; pone la memoria física de la pantalla en la zona de los gráficos
-    función a_la_vista(física: nat32, octetos: nat32): bool
+    público función a_la_vista(física: nat32, octetos: nat32): bool     ; (UEFI) público: también textouefi.cas
         variable v: nat32
         si octetos > GRÁFICOS_TABLAS * 0x400000 entonces devolver falso fin
         v := 0
@@ -228,6 +238,31 @@ módulo Video
             mov [edi+2], al
             add esi, 4
             add edi, 3
+            dec ecx
+            jnz .otro
+        fin
+    fin
+
+    ; (UEFI) n puntos de 32 bits, con el rojo y el azul cambiados (RGB)
+    función fila_al_revés(destino: nat32, origen: puntero a nat32, n: nat32)
+        ensamblador
+            mov edi, {destino}
+            mov esi, {origen}
+            mov ecx, {n}
+        .otro:
+            mov eax, [esi]
+            mov edx, eax
+            and edx, 0x0000FF00
+            mov ebx, eax
+            shr ebx, 16
+            and ebx, 0xFF
+            shl eax, 16
+            and eax, 0x00FF0000
+            or eax, edx
+            or eax, ebx
+            mov [edi], eax
+            add esi, 4
+            add edi, 4
             dec ecx
             jnz .otro
         fin
@@ -263,7 +298,7 @@ módulo Video
     ; verdad (con 32 bits por punto ya está en ella: nada)
     público función volcar(x: ent32, yy: ent32, an: ent32, al: ent32)
         variable j: ent32
-        si bits_pantalla = 32 o no hay_pantalla entonces devolver fin
+        si (bits_pantalla = 32 y no al_revés) o no hay_pantalla entonces devolver fin
         si x < 0 entonces
             an := an + x
             x := 0
@@ -276,7 +311,9 @@ módulo Video
         si yy + al > pantalla.alto entonces al := pantalla.alto - yy fin
         si an <= 0 o al <= 0 entonces devolver fin
         para j desde yy hasta yy + al - 1 hacer
-            si bits_pantalla = 24 entonces
+            si al_revés entonces                ; (UEFI)
+                fila_al_revés(real + nat32(j) * octetos_fila + nat32(x) * 4, pantalla.puntos + (j * pantalla.ancho + x), nat32(an))
+            sino si bits_pantalla = 24 entonces
                 fila_a_24(real + nat32(j) * octetos_fila + nat32(x) * 3, pantalla.puntos + (j * pantalla.ancho + x), nat32(an))
             sino
                 fila_a_16(real + nat32(j) * octetos_fila + nat32(x) * 2, pantalla.puntos + (j * pantalla.ancho + x), nat32(an))
@@ -319,11 +356,12 @@ módulo Video
         fin
         pantalla_física := base
         bits_pantalla := bits
-        si bits = 32 y fila yb 3 = 0 entonces
+        al_revés := bits = 32 y pantalla_al_revés()          ; (UEFI)
+        si bits = 32 y fila yb 3 = 0 y no al_revés entonces
             pon_lienzo(pantalla, puntero(GRÁFICOS_INICIO + (base yb 0xFFF)), fila div 4, an, al)
         sino
             ; no es de 32 bits: se dibuja en un lienzo aparte, y volcar() lo pasa
-            si bits = 32 entonces bits_pantalla := 24 fin     ; (no pasa: una fila de 32 bits siempre es múltiplo de 4)
+            si bits = 32 y no al_revés entonces bits_pantalla := 24 fin     ; (no pasa: una fila de 32 bits siempre es múltiplo de 4)
             m := reservar(an * al * 4)
             si m = nulo entonces
                 escribir("pantalla: no hay memoria para el lienzo de la pantalla\n")
@@ -346,7 +384,7 @@ módulo Video
     ; modo de antes, tal cual.
     público función cambia_modo(ancho: nat32, alto: nat32): bool
         variable fila, an0, al0, bits0: nat32
-        si no hay_pantalla o no hay_bochs() entonces devolver falso fin
+        si no hay_pantalla o no hay_bochs() o arrancado_por_uefi() entonces devolver falso fin     ; (UEFI)
         si ancho < 640 o alto < 480 o ancho * alto * 4 > VENTANA_PANTALLA entonces devolver falso fin
         an0 := nat32(pantalla.ancho)
         al0 := nat32(pantalla.alto)

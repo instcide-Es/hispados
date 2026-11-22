@@ -470,6 +470,14 @@ int servicio_principal(void)
 			cada = cada * 10 + *p - '0';
 	if (cada < 1 || cada > 600)
 		cada = 10;
+	/* (UEFI) la RSDP, si la dice el núcleo (en hexadecimal) */
+	if ((p = tiene(args, "rsdp=")) != 0) {
+		u32 d = 0;
+
+		for (; (*p >= '0' && *p <= '9') || (*p >= 'A' && *p <= 'F'); p++)
+			d = d * 16 + (u32)(*p <= '9' ? *p - '0' : *p - 'A' + 10);
+		mq_pon_rsdp(d);
+	}
 	fin = sc(SC_MAS_MEMORIA, MONTON, 0, 0);
 	if (ES_ERROR(fin)) {
 		static const char m[] = "ACPI: no hay memoria para el servicio\n";

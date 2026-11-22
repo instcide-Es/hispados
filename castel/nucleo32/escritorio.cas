@@ -1631,6 +1631,14 @@ módulo Escritorio
         si en_marcha entonces
             texto(valor(l), 20, 60, "Elija una y pruébela: se pone en el momento, y si no", TINTA)
             texto(valor(l), 20, 78, "se ve bien, vuelve sola a la de antes en 15 segundos.", TINTA)
+        sino si arrancado_por_uefi() entonces
+            ; (UEFI) sin BIOS, la medida la pone el firmware (GOP) al arrancar
+            texto(valor(l), 20, 60, "Arrancado por UEFI: no se cambia en marcha, la pone el", TINTA)
+            si guarda entonces
+                texto(valor(l), 20, 78, "firmware al arrancar. Se guarda para el próximo arranque.", TINTA)
+            sino
+                texto(valor(l), 20, 78, "firmware al arrancar; sin instalar, «a la medida», en GRUB.", TINTA)
+            fin
         sino si guarda entonces
             texto(valor(l), 20, 60, "Esta tarjeta no deja cambiarla en marcha: se guarda y", TINTA)
             texto(valor(l), 20, 78, "se pone al arrancar otra vez (con 15 s para probarla).", TINTA)
