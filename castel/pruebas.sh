@@ -253,6 +253,11 @@
 #      animado e ICO desde el explorador, las flechas, la rueda, girar,
 #      pantalla completa, diapositivas y «Usar como fondo de escritorio» (la
 #      llamada 172: FONDO.HPM), que sigue al arrancar otra vez.
+#  39. (JUEGOS, SOLO=juegos) Los juegos (el paquete «juegos», nucleo32/juegos/;
+#      pruebas_juegos.sh): la física del pinball en el anfitrión (no atraviesa,
+#      conserva, el flipper golpea), los niveles de Almacén, el paquete, el
+#      menú Inicio > Juegos y cada juego en QEMU con teclas grabadas, sus
+#      récords, el sonido, y lo que gastan en un Atom N270 de QEMU.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -285,6 +290,7 @@
 #   SOLO=pdf ./pruebas.sh         la primera y la 30 (Hispa-PDF: PDF.BIN y su ventana)
 #   SOLO=zip ./pruebas.sh         la primera y la 31 (Comprimidos: ZIP y UNZIP; pruebas_zipvisor.sh)
 #   SOLO=mirador ./pruebas.sh     la primera y la 32 (el Mirador y la imagen de tapiz; pruebas_zipvisor.sh)
+#   SOLO=juegos ./pruebas.sh      la primera y la 39 (JUEGOS: los juegos; pruebas_juegos.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -335,6 +341,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 
 . $AQUI/pruebas32.sh               # la parte 15 (CASTEL32), como la función parte15
 . $AQUI/pruebas_zipvisor.sh        # (ZIP) (MIRADOR) las partes 31 y 32, como parte_zip y parte_mirador
+. $AQUI/pruebas_juegos.sh          # (JUEGOS2) la parte 39, como parte_juegos
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -357,7 +364,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|juegos) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -5552,6 +5559,7 @@ fi   # (PDF) Hispa-PDF
 # ------------------------- 31 y 32. (ZIP) Comprimidos y (MIRADOR) el Mirador
 if parte08 zip; then parte_zip; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Comprimidos)"; fi
 if parte08 mirador; then parte_mirador; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Mirador)"; fi
+if parte08 juegos; then parte_juegos; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los juegos)"; fi     # (JUEGOS2)
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
