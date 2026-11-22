@@ -48,8 +48,10 @@ static int palabra(const char *a, int k, char *d, u32 cabe)
 
 		while (*a == ' ')
 			a++;
-		if (!*a)
+		if (!*a) {
+			d[0] = 0;	/* (no hay tantas: nada, no la última que se leyó) */
 			return 0;
+		}
 		if (*a == '"') {
 			a++;
 			while (*a && *a != '"') {

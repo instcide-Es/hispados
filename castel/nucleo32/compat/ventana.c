@@ -1310,6 +1310,7 @@ static void suceso(const so_suceso *s)
 static int lo_que_fallo(const char *exe, char *d, u32 cabe)
 {
 	char r[RUTA_MAX], m[64], *t, *p;
+	char ant_falta[48], ant_quien[48];	/* la línea de antes: «no se encuentra A, que necesita B» */
 	int hay = 0;
 
 	if (plat_ruta_log(r, sizeof r))
@@ -1319,10 +1320,11 @@ static int lo_que_fallo(const char *exe, char *d, u32 cabe)
 		return 0;
 	copia(m, exe, sizeof m);
 	a_mayusculas(m);
+	ant_falta[0] = ant_quien[0] = 0;
 	for (p = t; *p;) {
-		char l[400], x[400];
-		u32 j = 0;
-		const char *q;
+		char l[400], x[400], a[48], b[48];
+		u32 j = 0, k;
+		const char *q, *n;
 
 		while (*p && *p != '\n' && j + 1 < sizeof l)
 			l[j++] = *p++;
@@ -1331,29 +1333,35 @@ static int lo_que_fallo(const char *exe, char *d, u32 cabe)
 			p++;
 		copia(x, l, sizeof x);
 		a_mayusculas(x);
-		if (!busca(x, m))
-			continue;
-		if ((q = busca(l, "LLAMA A UNA QUE FALTA: ")) != NULL) {
-			u32 k = 0;
-
-			q += 23;
-			while (q[k] && q[k] != ' ' && k + 1 < cabe) {
-				d[k] = q[k];
-				k++;
-			}
-			d[k] = 0;
-			hay = k > 0;
-		} else if ((q = busca(l, "no se encuentra ")) != NULL && busca(l, ", que necesita")) {
-			u32 k = 0;
-
+		a[0] = b[0] = 0;
+		if ((q = busca(l, "no se encuentra ")) != NULL && (n = busca(q, ", que necesita ")) != NULL) {
 			q += 16;
-			while (q[k] && q[k] != ',' && k + 1 < cabe) {
-				d[k] = q[k];
-				k++;
-			}
-			d[k] = 0;
-			hay = k > 0;
+			for (k = 0; q + k < n && k + 1 < sizeof a; k++)
+				a[k] = q[k];
+			a[k] = 0;
+			copia(b, n + 15, sizeof b);
+			for (k = 0; b[k] && b[k] != ' ' && b[k] != '\r'; k++)
+				;
+			b[k] = 0;
 		}
+		if (busca(x, m)) {
+			if ((q = busca(l, "LLAMA A UNA QUE FALTA: ")) != NULL) {
+				q += 23;
+				for (k = 0; q[k] && q[k] != ' ' && k + 1 < cabe; k++)
+					d[k] = q[k];
+				d[k] = 0;
+				hay = k > 0;
+			} else if (a[0] && iguales_sin_caja(b, m)) {
+				/* (si a la que no se carga le falta otra, se dice: «MOTOR.DLL, que necesita GLIDE2X.DLL») */
+				if (ant_falta[0] && iguales_sin_caja(ant_quien, a))
+					fmt(d, cabe, "%s, que necesita %s", a, ant_falta);
+				else
+					copia(d, a, cabe);
+				hay = 1;
+			}
+		}
+		copia(ant_falta, a, sizeof ant_falta);
+		copia(ant_quien, b, sizeof ant_quien);
 	}
 	so_suelta(t);
 	return hay;

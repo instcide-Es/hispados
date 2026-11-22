@@ -239,7 +239,7 @@ if grep -q "excepción\|\*\*\*" $S; then ko "el núcleo se ha quejado: $(grep -m
 local SES=(":pausa 3" ":doble 60 186" ":pausa 4" ":escribe compat C:\\JUEGOMEN" ":tecla ret" ":hasta 120 1 compat: comprobado" ":pausa 3" ":captura cp1"
   ":tecla alt-v" ":hasta 90 1 cuadro «Enviar el informe" ":pausa 2" ":captura cp2" ":tecla spc" ":pausa 1" ":tecla ret" ":hasta 120 1 compat: informe" ":pausa 2" ":captura cp3" ":tecla ret" ":pausa 1"
   ":tecla alt-p" ":hasta 30 1 cuadro «Componentes" ":pausa 2" ":captura cp4" ":tecla ret" ":hasta 120 1 cuadro «La licencia" ":pausa 2" ":captura cp5" ":tecla esc" ":pausa 2"
-  ":tecla esc" ":pausa 3" ":escribe C:\\JUEGOMEN\\JUEGO.EXE" ":tecla ret" ":hasta 60 1 PRUEBAC.DLL" ":pausa 3" ":captura cp8" ":tecla ret" ":pausa 3"
+  ":tecla esc" ":pausa 3" ":escribe C:\\JUEGOMEN\\JUEGO.EXE" ":tecla ret" ":hasta 60 1 que necesita JUEGO.EXE" ":pausa 3" ":captura cp8" ":tecla ret" ":pausa 3"
   ":escribe compat /fallo C:\\JUEGOMEN\\JUEGO.EXE" ":tecla ret" ":hasta 120 2 compat: comprobado C:" ":pausa 3" ":captura cp7" ":tecla esc" ":pausa 3"
   ":escribe paquetes actualiza" ":tecla ret" ":hasta 240 1 compat: aviso en la bandeja" ":pausa 3" ":captura cp6")
 CAPTURAS=$G PANTALLA=1024x600 ESCRIBE=1 DISCO=$Q/v.img ARRANQUE="escritorio modo=1024x600" MODULOS= MEMORIA=128 \
@@ -251,8 +251,8 @@ mira "la ventana (1024 x 600): comprobar el juego de mentira, el consentimiento 
   "compat: comprobado C:.JUEGOMEN: faltan 10 (5 importantes), 4 archivos, win32 1\.2" "compat: cuadro «Enviar el informe a Hispa-DOS»" "compat: informe mandado: OK " \
   "compat: cuadro «Componentes de Microsoft»" "compat: componente prueba: bajado y comprobado (SHA-256)" "compat: cuadro «La licencia de Microsoft»"
 mira "el aviso de la bandeja tras PAQUETES ACTUALIZA (el gancho, con escritorio: la ventanita abajo a la derecha)" "compat: aviso en la bandeja: JUEGOMEN: ahora faltan 7 (antes 10)"
-mira "un programa al que le falta una DLL: WIN32 1.3 lo dice con su botón «Comprobar compatibilidad»; COMPAT /FALLO (lo que lanza ese botón, sin decir qué) lo saca de WIN32.LOG y comprueba la carpeta" \
-  "compat: fallo: JUEGO.EXE: PRUEBAC.DLL" "compat: comprobado C:.JUEGOMEN: faltan 10 (5 importantes)"
+mira "un programa que no carga (a su MOTOR.DLL le falta GLIDE2X.DLL): COMPAT /FALLO (lo que lanza el botón de WIN32, sin decir qué) lo saca de WIN32.LOG y comprueba la carpeta" \
+  "compat: fallo: JUEGO.EXE: MOTOR.DLL, que necesita GLIDE2X.DLL" "compat: comprobado C:.JUEGOMEN: faltan 10 (5 importantes)"
 if grep -q "excepción\|\*\*\*" $S; then ko "el núcleo se ha quejado: $(grep -m1 'excepción\|\*\*\*' $S)"; else ok "QEMU (el escritorio): ni una excepción ni una queja del núcleo"; fi
 mal=0; for c in cp1 cp2 cp3 cp4 cp5 cp6 cp7 cp8; do [ -s $G/$c.ppm ] || mal="$mal $c"; done
 [ "$mal" = 0 ] && ok "las capturas de la ventana (cp1 a cp8)" || ko "faltan capturas:$mal"

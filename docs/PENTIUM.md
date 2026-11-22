@@ -9568,9 +9568,9 @@ sumas, medidas: Microsoft no publica el SHA-256 y su ETag no lo es):
 
 | Componente | Lo que se pone | Con WIN32 |
 |---|---|---|
-| **Visual C++ 2010 SP1** (8.993.744 octetos) | MSVCR100, MSVCP100, MFC100, MFC100U, ATL100, VCOMP100 | no tira de nada de dentro de NT; a MSVCR100 le faltan hoy 22 funciones de KERNEL32 (`EncodePointer` y `DecodePointer`, que llama al arrancar; las listas S de Interlocked; las colas de temporizadores...): se piden a win32-hl |
-| **Visual C++ 2008 SP1** (4.483.040) | MSVCR90, MSVCP90, MFC90, MFC90U, ATL90, VCOMP90 | a MSVCR90 le faltan 9, ninguna de las que llama al arrancar; MSVCP90, nada. Comprueba si la cargan con un manifiesto (`FindActCtxSectionStringW`, por GetProcAddress: el R6034), pero solo si esa función existe: como en Windows 2000, sin ella no mira |
-| **Visual C++ 2005 SP1** (2.710.520) | MSVCR80, MSVCP80, MFC80, MFC80U, ATL80, VCOMP | igual que la 2008 (le faltan 8) |
+| **Visual C++ 2010 SP1** (8.993.744 octetos) | MSVCR100, MSVCP100, MFC100, MFC100U, ATL100, VCOMP100 | no tira de nada de dentro de NT; a MSVCR100 le faltan con win32 1.3 20 funciones de KERNEL32 (`EncodePointer` y `DecodePointer`, que llama al arrancar; las listas S de Interlocked; las colas de temporizadores...): se piden a win32-hl |
+| **Visual C++ 2008 SP1** (4.483.040) | MSVCR90, MSVCP90, MFC90, MFC90U, ATL90, VCOMP90 | a MSVCR90 le faltan 7, ninguna de las que llama al arrancar; MSVCP90, nada. Comprueba si la cargan con un manifiesto (`FindActCtxSectionStringW`, por GetProcAddress: el R6034), pero solo si esa función existe: como en Windows 2000, sin ella no mira |
+| **Visual C++ 2005 SP1** (2.710.520) | MSVCR80, MSVCP80, MFC80, MFC80U, ATL80, VCOMP | igual que la 2008 (le faltan 6) |
 
 Y por qué los demás no: **MSVCM80/90 y MFCM80/90/100** piden .NET
 (MSCOREE.DLL); **Visual C++ 6** (MFC42, MSVCP60) ya no está en
@@ -9605,17 +9605,16 @@ Para la próxima versión de win32 (apuntado):
    GetProcAddress y, si está y dice que no, acaban con el R6034.
 2. Lo que les falta a las bibliotecas de Visual C++ (por si se quieren
    poner): a **MSVCR100**, `EncodePointer`, `DecodePointer` (las dos al
-   arrancar), `FindFirstFileExW`, `SetEnvironmentVariableW`, `CreateProcessW`,
+   arrancar), `FindFirstFileExW`, `CreateProcessW`,
    `InterlockedPushEntrySList`, `InterlockedPopEntrySList`,
    `InterlockedFlushSList`, `QueryDepthSList`, `CreateTimerQueue`,
    `CreateTimerQueueTimer`, `DeleteTimerQueueTimer`, `OutputDebugStringW`,
    `FreeLibraryAndExitThread`, `GetThreadTimes`, `GetTimeFormatW`,
    `GetDateFormatW`, `HeapQueryInformation`, `HeapWalk`, `PeekNamedPipe`,
-   `CreatePipe`, `EnumSystemLocalesA`; a **MSVCP100**, `EncodePointer` y
+   `CreatePipe`; a **MSVCP100**, `EncodePointer` y
    `DecodePointer`; a **MSVCR90**, `GetSystemWindowsDirectoryW`,
-   `GetSystemDirectoryW`, `GetLongPathNameW`, `SetEnvironmentVariableW`,
-   `CreateProcessW`, `HeapWalk`, `PeekNamedPipe`, `CreatePipe`,
-   `EnumSystemLocalesA` (a MSVCR80, las mismas menos la primera).
+   `GetSystemDirectoryW`, `GetLongPathNameW`, `CreateProcessW`, `HeapWalk`,
+   `PeekNamedPipe`, `CreatePipe` (a MSVCR80, las mismas menos la primera).
 
 ### Las pruebas (la parte 49, `SOLO=compat`, `castel/pruebas_compat.sh`)
 
