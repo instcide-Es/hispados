@@ -148,8 +148,25 @@ miracap "la segunda página: «Más (2/2)»" ic14 texto 480 300 600 330 "Más (2
 # ---- 5. sin el dock ----
 cp $X/d30.img $X/g.img
 printf 'visible=no\r\n' > $X/DOCK.INI; mcopy -i $X/g.img $X/DOCK.INI ::DOCK.INI
-CAPTURAS=$G DISCO=$X/g.img ARRANQUE="escritorio modo=1024x600" PANTALLA=1024x600 MODULOS= $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 3" > $X/g.sal 2>&1
+CAPTURAS=$G DISCO=$X/g.img ARRANQUE="escritorio modo=1024x600" PANTALLA=1024x600 MODULOS= $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 3" \
+  ":tecla meta_l-r" ":pausa 1" ":escribe \\EQUIPO.BIN /PAPELERA" ":tecla ret" ":pausa 4" > $X/g.sal 2>&1
 chk "sin el dock (DOCK.INI: visible=no), la zona llega hasta la barra (7 filas) y nadie la toca" $X/g.sal accesos 1024 600 sindock n 30 rejilla en Teclas 8 468
+# (ICONOS, 0.8.8) la Papelera, siempre en el dock (no hay Papelera en el
+# tapiz): con un DOCK.INI sin ella, vuelve; y con el dock oculto, se llega a
+# ella igual (Ejecutar: \EQUIPO.BIN /PAPELERA, lo que abre el dock; y en Mi
+# equipo, su rama «Papelera»)
+S=$X/g.sal
+mira "(ICONOS) un DOCK.INI sin la Papelera: vuelve a su sitio, la última del dock" "^dock: la Papelera, otra vez la última del dock$"
+mira "(ICONOS) con el dock oculto, la Papelera se abre igual (Ejecutar: \\EQUIPO.BIN /PAPELERA)" "escritorio: lanzo .EQUIPO.BIN"
+# ---- 6. (ICONOS, 0.8.8) la Papelera en el dock: la primera de DOCK.INI pasa
+# a la última; «Quitar del dock», apagado en ella (y si llega, no la quita);
+# arrastrarla no la mueve
+cp $X/d30.img $X/h.img
+printf 'visible=si\r\nfijado=\\EQUIPO.BIN|/PAPELERA|Papelera|13\r\nfijado=\\BLOC.BIN||Bloc de notas|3\r\nfijado=\\CONSOLA.BIN||Consola|4\r\n' > $X/DOCK.INI; mcopy -i $X/h.img $X/DOCK.INI ::DOCK.INI
+CAPTURAS=$G ESCRIBE=1 DISCO=$X/h.img ARRANQUE="escritorio modo=1024x600" PANTALLA=1024x600 MODULOS= $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 3" ":captura ic15" > $X/h.sal 2>&1
+S=$X/h.sal
+mira "(ICONOS) la Papelera, la primera en DOCK.INI: pasa a la última del dock (a la derecha)" "^dock: la Papelera, otra vez la última del dock$"
+if ! grep -aq "excepción\|\*\*\*" $X/h.sal; then ok "(ICONOS) con la Papelera en su sitio, ni una excepción ni una queja del núcleo"; else ko "el núcleo se ha quejado:"; grep -a "excepción\|\*\*\*" $X/h.sal | head -3 | sed 's/^/        /'; fi
 if ! grep -aq "excepción\|\*\*\*" $X/c.sal $X/d.sal $X/e.sal $X/f.sal $X/g.sal; then ok "en las demás sesiones, ni una excepción ni una queja del núcleo"; else ko "el núcleo se ha quejado:"; grep -ah "excepción\|\*\*\*" $X/c.sal $X/d.sal $X/e.sal $X/f.sal $X/g.sal | head -3 | sed 's/^/        /'; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/ic*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 G=$P/graf

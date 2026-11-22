@@ -134,6 +134,46 @@ módulo Dock
         n_el := 6
     fin
 
+    ; (ICONOS, 0.8.8) la Papelera está siempre en el dock, la última de los
+    ; fijados (a la derecha): no se quita (ni con «Quitar del dock» ni
+    ; arrastrándola), lo que se fija va delante de ella y, si un DOCK.INI no
+    ; la tiene (o la tiene en otro sitio), vuelve a su sitio. (Carlos: sin
+    ; Papelera en el tapiz «mientras la Papelera esté fija en el dock»)
+    función es_papelera(i: nat32): bool
+        devolver i < n_el y el[i].clase = IC_PAPELERA y el[i].fijado
+    fin
+
+    función papelera_al_final()
+        variable i: nat32
+        variable e: Elemento
+        i := 0
+        mientras i < n_fijados y no es_papelera(i) hacer i := i + 1 fin
+        si i < n_fijados entonces
+            si i + 1 = n_fijados entonces devolver fin
+            ; donde esté, a la última de los fijados
+            copiar_memoria(puntero(dirección(e)), puntero(dirección(el[i])), tamaño(Elemento))
+            mientras i + 1 < n_fijados hacer
+                copiar_memoria(puntero(dirección(el[i])), puntero(dirección(el[i + 1])), tamaño(Elemento))
+                i := i + 1
+            fin
+            copiar_memoria(puntero(dirección(el[n_fijados - 1])), puntero(dirección(e)), tamaño(Elemento))
+        sino
+            ; no está: se pone (si no cabe, ocupa el sitio del último fijado)
+            si n_fijados >= MAX_ELEMENTOS entonces n_fijados := MAX_ELEMENTOS - 1 fin
+            i := n_el
+            si i >= MAX_ELEMENTOS entonces i := MAX_ELEMENTOS - 1 fin
+            mientras i > n_fijados hacer
+                copiar_memoria(puntero(dirección(el[i])), puntero(dirección(el[i - 1])), tamaño(Elemento))
+                i := i - 1
+            fin
+            pon(n_fijados, "Papelera", "\\EQUIPO.BIN", "/PAPELERA", IC_PAPELERA)
+            n_fijados := n_fijados + 1
+            si n_el < MAX_ELEMENTOS entonces n_el := n_el + 1 fin
+            si n_el < n_fijados entonces n_el := n_fijados fin
+        fin
+        escribir("dock: la Papelera, otra vez la última del dock\n")
+    fin
+
     ; dónde van DOCK.INI y ATAJOS.INI (en «renglón»): (USUARIOS) en los
     ; ajustes del que ha entrado (\USUARIOS\CARLOS\AJUSTES), si tiene carpeta
     función ruta_ini(nombre: puntero a byte)
@@ -233,6 +273,7 @@ módulo Dock
             fin
         fin
         n_fijados := n_el
+        papelera_al_final()             ; (ICONOS, 0.8.8)
     fin
 
     ; escribe «tini» en el archivo de ajustes (falso si no se puede)
@@ -718,11 +759,16 @@ módulo Dock
         copiar_memoria(puntero(dirección(el[n_fijados])), puntero(dirección(e)), tamaño(Elemento))
         el[n_fijados].fijado := cierto
         n_fijados := n_fijados + 1
+        papelera_al_final()             ; (ICONOS, 0.8.8) lo nuevo, delante de la Papelera
         guarda_dock()
     fin
 
     función quita(i: nat32)
         si i >= n_fijados entonces devolver fin
+        si es_papelera(i) entonces      ; (ICONOS, 0.8.8) la Papelera no se quita
+            escribir("dock: la Papelera no se quita del dock\n")
+            devolver
+        fin
         mientras i + 1 < n_el hacer
             copiar_memoria(puntero(dirección(el[i])), puntero(dirección(el[i + 1])), tamaño(Elemento))
             i := i + 1
@@ -816,10 +862,12 @@ módulo Dock
                         si movido entonces
                             cog_x := ent32(e.a) - base_x
                             ; el sitio de los fijados que toca
-                            si nat32(cogido) < n_fijados entonces
+                            ; ((ICONOS, 0.8.8) la Papelera no se mueve, y nadie pasa a su sitio)
+                            si nat32(cogido) < n_fijados y no es_papelera(nat32(cogido)) entonces
                                 d := (cog_x - 8) div CELDA
                                 si d < 0 entonces d := 0 fin
-                                si d >= ent32(n_fijados) entonces d := ent32(n_fijados) - 1 fin
+                                si d >= ent32(n_fijados) - 1 entonces d := ent32(n_fijados) - 2 fin
+                                si d < 0 entonces d := 0 fin
                                 si d <> cogido entonces
                                     lleva(nat32(cogido), nat32(d))
                                     cogido := d
@@ -922,6 +970,7 @@ módulo Dock
         si el[k].ventana = 0 entonces grises := grises ob (1 << 6) fin
         si el[k].programa[0] = '*' entonces grises := grises ob 2 fin
         si el[k].fijado entonces grises := grises ob (1 << 3) sino grises := grises ob (1 << 4) fin
+        si es_papelera(nat32(k)) entonces grises := grises ob (1 << 4) fin     ; (ICONOS, 0.8.8) «Quitar del dock», apagado
         px := x
         py := yy
         a_pantalla(v_dock, px, py)
