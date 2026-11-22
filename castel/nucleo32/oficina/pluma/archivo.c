@@ -52,6 +52,8 @@ int arch_formato_datos(const u8 *d, u32 n)
 	}
 	if (n >= 4 && !memcmp(d, "%PDF", 4))
 		return FMT_PDF;
+	if (n >= 8 && !memcmp(d, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", 8))
+		return FMT_NADA;	/* (un .DOC de Word 97-2003: OLE) */
 	return FMT_TXT;
 }
 
@@ -102,6 +104,9 @@ documento *arch_abre(const char *ruta, int *formato, char *error, u32 cabe)
 	case FMT_RTF: doc = rtf_lee(d, n, error, cabe); break;
 	case FMT_PDF:
 		copia(error, "Pluma no abre los PDF (para eso está Hispa-PDF): sí los hace, con Archivo > Exportar a PDF.", cabe);
+		break;
+	case FMT_NADA:
+		copia(error, "Es un .DOC de Word 97-2003 (el de antes, binario): Pluma lee los .DOCX, .ODT y .RTF; guárdelo así en el otro programa.", cabe);
 		break;
 	default: doc = txt_lee(d, n, error, cabe); break;
 	}

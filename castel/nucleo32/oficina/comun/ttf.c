@@ -415,7 +415,7 @@ static void marca_compuestos(const ttf *t, u8 *usa, u32 g, int hondo)
 	u32 n = t->n, a, b, q, fl;
 	int k = 0;
 
-	if (g >= t->n_glifos || hondo > 4 || t->ok[g] != 1)
+	if (g >= t->n_glifos || hondo > 4 || t->ok[g] == 2)
 		return;
 	usa[g >> 3] |= (u8)(1 << (g & 7));
 	a = t->loca_larga ? rd32(d, n, t->loca + 4 * g) : 2 * rd16(d, n, t->loca + 2 * g);

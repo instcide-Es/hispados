@@ -108,12 +108,43 @@ static void pinta_linea(documento *d, const parrafo *p, u32 par, u32 nl, i32 x0,
 	}
 	if (!n)
 		return;
-	/* la x de cada letra */
+	/* la x de cada letra (los campos, con lo que miden de verdad en esta
+	 * página: la línea se corre lo que cambian, según su alineación) */
+	{
+		i32 dif = 0;
+
+		for (k = 0; k < n && k < MAX_TROZO; k++) {
+			u32 c = p->t[l->ini + k];
+
+			if (c == CAMPO_PAGINA || c == CAMPO_PAGINAS) {
+				u32 v[12], j;
+				i32 w = 0;
+				const info_fmt *in = maq_info(d, p->f[l->ini + k]);
+
+				pinta_campo(d, c, pag, v, 12);
+				for (j = 0; v[j]; j++)
+					w += avance_letra(in, v[j]);
+				dif += w - maq_avance(d, p, l->ini + k, 0);
+			}
+		}
+		if (dif && p->p.alin == AL_CENTRO)
+			x0 -= dif / 2;
+		else if (dif && p->p.alin == AL_DER)
+			x0 -= dif;
+	}
 	for (k = 0; k < n && k < MAX_TROZO; k++) {
 		u32 c = p->t[l->ini + k];
 
 		xs[k] = x0 + l->x0 + acum + extra / 1000;
-		acum += maq_avance(d, p, l->ini + k, l->izq + acum);
+		if (c == CAMPO_PAGINA || c == CAMPO_PAGINAS) {
+			u32 v[12], j;
+			const info_fmt *in = maq_info(d, p->f[l->ini + k]);
+
+			pinta_campo(d, c, pag, v, 12);
+			for (j = 0; v[j]; j++)
+				acum += avance_letra(in, v[j]);
+		} else
+			acum += maq_avance(d, p, l->ini + k, l->izq + acum);
 		if (l->extra && es_esp(c))
 			extra += l->extra;
 	}

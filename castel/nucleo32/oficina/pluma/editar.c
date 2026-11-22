@@ -179,7 +179,8 @@ void ed_empieza(editor *e, u32 p0, u32 p1, int clase)
 	if (clase & PASO_TABLAS) {
 		s->tabs = so_pide((d->n_tab + 1) * sizeof(tabla));
 		if (s->tabs) {
-			memcpy(s->tabs, d->tab, d->n_tab * sizeof(tabla));
+			if (d->n_tab)
+				memcpy(s->tabs, d->tab, d->n_tab * sizeof(tabla));
 			s->n_tabs = d->n_tab;
 		}
 	}
@@ -263,7 +264,8 @@ static void cambia_paso(editor *e, paso *s)
 		if (t) {
 			u32 k = d->n_tab;
 
-			memcpy(t, d->tab, d->n_tab * sizeof(tabla));
+			if (d->n_tab)
+				memcpy(t, d->tab, d->n_tab * sizeof(tabla));
 			if (s->n_tabs > d->cabe_tab) {
 				tabla *nt = so_repide(d->tab, s->n_tabs * sizeof(tabla));
 
@@ -1177,8 +1179,9 @@ void ed_tabla(editor *e, int filas, int cols)
 		ed_acaba(e, 1);
 		return;
 	}
-	/* el párrafo se parte donde está el cursor (si no está al principio) */
-	if (e->cur.o > 0 || d->par[i].n == 0) {
+	/* el párrafo se parte donde está el cursor (si no está al principio:
+	 * entonces la tabla va delante, y él se queda detrás para seguir) */
+	if (e->cur.o > 0) {
 		parrafo *p;
 
 		if (!doc_inserta_parrafos(d, i + 1, 1)) {

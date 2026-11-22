@@ -361,7 +361,19 @@ void so_titulo(int v, const char *t)
 	fprintf(stderr, "título: %s\n", t);
 }
 
-void so_maximiza(int v) { (void)v; }
+static void mete(so_suceso s);
+
+void so_maximiza(int v)
+{
+	so_suceso s;
+
+	(void)v;
+	memset(&s, 0, sizeof s);
+	s.clase = SO_TAMANO;
+	s.x = lan;
+	s.y = lal;
+	mete(s);
+}
 void so_centra(int v) { (void)v; }
 void so_cierra_ventana(int v) { (void)v; }
 
@@ -614,6 +626,10 @@ int so_lee_suceso(int v, so_suceso *s, int espera)
 {
 	(void)v;
 	memset(s, 0, sizeof *s);
+	/* sin esperar y sin nada en la cola: nada (así el programa pinta antes
+	 * de la orden siguiente del guion, que puede ser una captura) */
+	if (c_ini == c_fin && !espera)
+		return 0;
 	if (c_ini == c_fin && !lee_guion()) {
 		if (!espera)
 			return 0;
@@ -638,7 +654,7 @@ void so_menu(int v, int x, int y, const char *opciones, u32 grises, u32 etiqueta
 	(void)v;
 	(void)grises;
 	fprintf(stderr, "menú (%d, %d): %s\n", x, y, opciones);
-	etiqueta_menu = etiqueta;
+	etiqueta_menu = etiqueta & ~0x40000000u;	/* (como el núcleo: sin la marca de las flechas) */
 	hay_menu = 1;
 }
 
@@ -671,6 +687,19 @@ char *so_del_portapapeles(u32 *n)
 	return d;
 }
 
+int so_lanza(const char *programa, const char *args)
+{
+	fprintf(stderr, "lanza: %s %s\n", programa, args ? args : "");
+	return 0;
+}
+
+static char nombre_programa[1024];
+
+void so_programa(char *d, u32 cabe)
+{
+	copia(d, nombre_programa, cabe);
+}
+
 int main(int argc, char **argv)
 {
 	int i, r;
@@ -678,6 +707,7 @@ int main(int argc, char **argv)
 
 	if (m)
 		tope = (size_t)atoi(m) << 20;
+	copia(nombre_programa, argv[0], sizeof nombre_programa);
 	args_linea[0] = 0;
 	for (i = 1; i < argc; i++) {
 		/* (con comillas si llevan espacios) */

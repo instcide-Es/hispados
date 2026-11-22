@@ -1,0 +1,47 @@
+Pluma 2.0 - el procesador de textos de Hispa-Pentium, de 32 bits y en C
+portable (docs/PENTIUM.md, «Pluma 2»): se compila tal cual para Hispa-64.
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+Lo que pone el paquete «pluma»:
+  \HISPA\PLUMA.BIN         el programa (menú Inicio > Oficina > Pluma; y Mi
+                           equipo abre con él los .PLU, .ODT, .DOCX, .DOC y .RTF)
+  \HISPA\PLUMA\DICCIO.DAT  el diccionario de español (el de la oficina de
+                           Hispa-386; su licencia, abajo)
+  \HISPA\MENU\PLUMA.MNU, PLUMA.ICP   el acceso del menú y su icono
+  \HISPA\PLUMA\LEEME.TXT   esto
+
+Qué hace: letras TrueType de verdad (las DejaVu de dentro y las .TTF que
+se pongan en \DOCUMENT\LETRAS), con lo que se ve igual a lo que sale en el
+PDF; estilos (Normal, Título 1-3, Cita...), negrita, cursiva, subrayado,
+tachado, colores, resaltado, super y subíndices, versalitas; párrafos con
+alineación y justificado, sangrías (también arrastrándolas en la regla),
+interlineado, espacio antes y después, tabulaciones (izquierda, centro,
+derecha, decimal, con relleno); listas con viñetas, números, letras y
+romanos; tablas (unir y dividir celdas, filas y columnas, bordes, fondo);
+imágenes PNG, JPG, BMP y GIF (en la línea, o con el texto alrededor);
+saltos de página; encabezado y pie con el número de página; deshacer y
+rehacer sin límite; buscar y reemplazar; contar palabras; el corrector de
+español mientras se escribe (un trazo ondulado) con propuestas en el botón
+derecho y F7; zoom (Ctrl+rueda) y presentación preliminar.
+
+Formatos: .PLU (el de Pluma de Hispa-386: delante va lo que entiende aquel,
+y detrás todo lo de Pluma 2; un .PLU de Hispa-386 se abre como era), .ODT
+(LibreOffice), .DOCX (Word), .RTF y .TXT; y exportar a PDF con las letras
+dentro. Imprimir: aún no hay impresoras; Pluma ofrece el PDF.
+
+La orden, para la Consola:
+  PLUMA [documento]
+  PLUMA --convierte ENTRADA SALIDA     (el formato de SALIDA, por su extensión)
+  PLUMA --info ENTRADA | --texto ENTRADA | --mide PAGINAS LETRAS
+
+Lo de otros que lleva dentro (todo libre):
+  miniz 3.0.2 (Rich Geldreich y otros; licencia MIT): ZIP y Flate.
+  stb_image 2.30, stb_image_write 1.19 y stb_truetype 1.26 (Sean Barrett y
+    otros; de dominio público o MIT, a elegir).
+  Las letras DejaVu (recortadas a Europa occidental; la licencia de
+    Bitstream Vera, con las de DejaVu).
+  DICCIO.DAT: el diccionario de español de LibreOffice (RLA-ES, Santiago
+    Bosio y colaboradores), transformado con tools/hazdiccio.py; con su
+    licencia: GPL-3.0 o posterior, o LGPL-3.0 o posterior, o MPL-1.1 o
+    posterior, a elegir (docs/ORTOGRAFIA.md). Va aparte: el programa lo lee.
+Sus licencias, enteras, en terceros/ del código fuente.

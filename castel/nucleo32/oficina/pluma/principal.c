@@ -14,6 +14,8 @@
 #include "letras.h"
 #include "pluma.h"
 
+const char ofi_programa[] = "PLUMA.BIN";
+
 /* el argumento siguiente (con comillas, si las lleva); da dónde sigue */
 const char *pluma_arg(const char *s, char *d, u32 cabe)
 {

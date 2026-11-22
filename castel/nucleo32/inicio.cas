@@ -599,8 +599,12 @@ módulo Inicio
         ; la oficina de Hispa-386 (HVPRUN.BIN)
         i := 0
         mientras i < 4 hacer
-            k := nuevo(de_oficina(i), nulo, P_OFICINA, i, C_OFICINA, IC_DOCUMENTO, rango)
-            si k >= 0 entonces progs[k].letra := nat32(de_oficina(i)[0]) fin
+            ; (PLUMA32) con Pluma 2 (el paquete «pluma»: \HISPA\PLUMA.BIN, con su
+            ; acceso en Oficina), el Pluma de Hispa-386 no sale aquí
+            si i <> 1 o no existe("\\PLUMA.BIN") entonces
+                k := nuevo(de_oficina(i), nulo, P_OFICINA, i, C_OFICINA, IC_DOCUMENTO, rango)
+                si k >= 0 entonces progs[k].letra := nat32(de_oficina(i)[0]) fin
+            fin
             rango := rango + 1
             i := i + 1
         fin

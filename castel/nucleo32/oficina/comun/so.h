@@ -142,6 +142,13 @@ int so_control(void);
 void so_al_portapapeles(const char *t, u32 n);
 char *so_del_portapapeles(u32 *n);
 
+/* lanzar otro programa sin esperarlo (una ventana nueva de Pluma, Hispa-PDF...) */
+int so_lanza(const char *programa, const char *args);
+/* la ruta del programa que corre (para lanzarse otra vez): en Hispa-Pentium,
+ * \\HISPA\\ y el nombre que da el programa en ofi_programa («PLUMA.BIN») */
+extern const char ofi_programa[];
+void so_programa(char *d, u32 cabe);
+
 /* el principio del programa (lo llama so_pentium.c o so_anfitrion.c) */
 int ofi_principal(const char *args);
 

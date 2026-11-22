@@ -288,12 +288,14 @@ int empieza(const char *s, const char *p)
 
 const char *busca(const char *s, const char *p)
 {
-	u32 n = largo(p);
+	u32 n = largo(p), m = largo(s), i;
 
-	for (; *s; s++)
-		if (!memcmp(s, p, n))
-			return s;
-	return n ? NULL : s;
+	if (!n)
+		return s;
+	for (i = 0; i + n <= m; i++)
+		if (!memcmp(s + i, p, n))
+			return s + i;
+	return NULL;
 }
 
 char *duplica_n(const char *s, u32 n)

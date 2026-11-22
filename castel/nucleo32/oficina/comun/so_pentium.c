@@ -963,6 +963,22 @@ double cos(double x) { return so_cos(x); }
 double acos(double x) { return so_acos(x); }
 
 
+int so_lanza(const char *programa, const char *args)
+{
+	char p[300], a[400];
+
+	utf8_a_437(programa, p, sizeof p);
+	utf8_a_437(args ? args : "", a, sizeof a);
+	return ES_ERROR(llamada(41, (u32)p, (u32)a, 0)) ? -1 : 0;
+}
+
+void so_programa(char *d, u32 cabe)
+{
+	char u = so_unidad_sistema();
+
+	fmt(d, cabe, "%c:\\HISPA\\%s", u, ofi_programa);
+}
+
 /* ---- la entrada (la llama entrada.asm) ---- */
 int ofi_pentium(void)
 {
