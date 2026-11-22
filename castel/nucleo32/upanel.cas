@@ -959,8 +959,9 @@ módulo UPanel
                     devolver 0
                 fin
             sino
-                ; cada segundo: el reloj (y la red y la batería, por si cambian)
-                si hora_exacta() <> pintado entonces pinta() fin
+                ; cada segundo, lo que cambia solo: el reloj, la red, la batería
+                ; (en las demás secciones no se repinta: en un Pentium cuesta)
+                si (sección = S_FECHA o sección = S_RED o sección = S_ENERGÍA) y hora_exacta() <> pintado entonces pinta() fin
                 dormir(10)
             fin
         fin
