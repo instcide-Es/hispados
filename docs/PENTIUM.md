@@ -4097,6 +4097,36 @@ nuevos pdf 1.0, comprim 1.0 y mirador 1.0; los demás, iguales octeto a octeto
 a lo publicado (accesori, bloc, consola, ejemplos, hvprun, oficina, sonido,
 ssh, tailscal, tls, wifi, win32, navega, clicgest y las firmas de Escudo).
 
+**Las pruebas de la 0.8.6** (22/11; en el PC de Albinyana con
+`tools/pruebas_castel_pc.sh -j 5`, y en el VPS `cd`, `escudo` y `navegador`):
+`paquetes` 108/0, `programas` 92/0, `sonido` 109/0 (antes 15 mal), `menu`
+95/0, `pantalla` 98/0, `07` 102/0, `16` 139/0, `06` 168/0, `castel32` 67/0,
+`castel64` 72/0, `caliente` 79/0, `red` 72/0, `acpi` 78/0, `tls` 72/0,
+`dispositivos` 85/0, `ssh` 70/0, `lectores` 79/0, `win32` 90/0, `rueda`
+71/0, `protege` 76/0, `wifi` 96/0, `accesorios` 81/0, `pdf` 77/0 (con el gcc del PC hizo falta declarar `frexp`), `zip`
+118/0, `mirador` 75/0; en el VPS, `cd` 77/0, `escudo` 103/0 y `navegador`
+83/0.
+
+**La 0.8.6, por Internet** (22/11, en QEMU `pc` con el disco en IDE, como el
+VirtualBox de Carlos): un disco instalado con el CD de la 0.8.5 y, con
+PAQUETES, navega, clicgest, escudo y las firmas (escbase, escmes, escdia)
+de lo publicado; el catálogo de la 0.8.6 por HTTP: «Hay 5 actualizaciones»
+> «Actualizar todo» (26 s: base, equipo, escudo, paquetes, red) >
+«Reiniciar ahora» > «El núcleo nuevo ha arrancado bien»; el menú Inicio dice
+«versión 0.8.6»; Escudo carga las firmas del día (sin «no hay memoria») y
+«Revisar todo el equipo», **139 archivos (7 MB) en 6 s** (con la 1.2 de
+antes y lo que quedaba en BAJADAS, 150 archivos y 56 MB en 40 s);
+`PAQUETES INSTALA pdf comprim mirador` (20 s); en Mi equipo, una foto se abre
+con el Mirador («Usar como fondo de escritorio», con la zona protegida), un
+.PDF con Hispa-PDF y un .ZIP con Comprimidos; el Navegador con Google,
+ClicGest; `PAQUETES COMPRUEBA`: los 25 paquetes, bien. Lo que tarda instalar
+escbase (21 MB, por HTTP; el VPS con otras dos pruebas a la vez):
+
+| | 0.8.5 | 0.8.6 |
+|---|---|---|
+| sistema en el disco IDE | 60 s | 56 s |
+| sistema en una memoria USB (EHCI) | 755 s (la bajada sola, 167 s a 126 K/s) | 97 s |
+
 **Las pruebas de la 0.8.5** (21/11, en el PC de Albinyana con
 `tools/pruebas_castel_pc.sh -j 5`, y en el VPS lo que el PC no tiene —zlib,
 `convert`, el `xorriso` de `cd.sh`—): `sonido` 104/0, `accesorios` 76/0,
