@@ -4239,8 +4239,9 @@ administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
 
 **La 0.8.7** (22/11, rama `pentium-087`: las ramas `usuarios`, `panel-control`,
-`bloc-avanzado`, `reproductor`, `win32-juegos` y `pentium-oficina`, y la
-principal con `pentium-juegos` y `pluma32`). Lo que se tocó al juntar:
+`bloc-avanzado`, `reproductor`, `win32-juegos`, `pentium-oficina` y `correo`,
+y la principal con `pentium-juegos` y `pluma32`; la `agenda` queda para la
+0.8.8). Lo que se tocó al juntar:
 
 - **Una sola versión**: `VERSION_087` en `hpq.py` (base, red, tls, ssh,
   tailscal y wifi 0.8.7); `Usuario.VERSIÓN_TEXTO` («0.8.7») la dicen el menú
@@ -4283,12 +4284,21 @@ principal con `pentium-juegos` y `pluma32`). Lo que se tocó al juntar:
   `pluma` instalado, el Pluma del menú Oficina y los .PLU/.ODT/.DOCX/.RTF de
   Mi equipo abren Pluma 2, no el .HVP; con la oficina 1.1, Datos, Lector,
   Publicaciones, Presentaciones y Pintura (paquete del sistema).
+- **Correo** (sección 14 undevicies): su sello es el 25 (`B_CORREO` 0x2000000;
+  `CORREO\` secreto); los .EML se abren con él; adjunta también lo que se
+  suelta desde Mi equipo en la ventana de redactar (`UE_SOLTADO` y
+  `ui_soltado()`, la llamada 173: la misma de todos); y `CORREO /BANDEJA`, con
+  usuarios, lo lanza el escritorio al entrar cada uno (`lanza_bandeja_correo`
+  en `lo_del_usuario`: es suyo, guarda en `\USUARIOS\<u>\CORREO` y se acaba
+  al cerrar su sesión); sin usuarios, al arrancar, como en su rama. El
+  paquete pide base y tls 0.8.7 (STARTTLS va en TLS.BIN).
 - **El Navegador**: la MSVCRT de WIN32 1.2 trae `asin`, `acos`, `frexp` y
   `strcoll`, que `w32/surf/apoyo.c` también definía: en Pentium, solo las de
   la MSVCRT (`#ifndef HISPA_PENTIUM`). Se publica el navega 0.2.2 de siempre.
 - **Las partes de las pruebas**: 33 `win32juegos` (era `juegos` en su rama),
   34 `panel`, 35 `bloc`, 36 `reproductor`, 38 `usuarios`, 39 `juegos` (el
-  paquete), 40 `oficina`, 41 `pluma`; libre la 37 y, para `correo`, la 42. La
+  paquete), 40 `oficina`, 41 `pluma`, 42 `correo`; libre la 37 (y la 43, para
+  la `agenda`). La
   prueba del Panel acepta el reloj de 3 a 5 minutos adelantado (con el PC
   cargado QEMU tarda en arrancar).
 - **La serie del catálogo**: desde esta versión todo catálogo firmado lleva
@@ -4301,7 +4311,8 @@ principal con `pentium-juegos` y `pluma32`). Lo que se tocó al juntar:
 
 Los paquetes: base, red, tls, ssh, tailscal y wifi **0.8.7**; paquetes 1.4;
 bloc 1.0 (pide base 0.8.7); equipo 0.9.3; win32 1.2; hvprun 0.10; oficina
-1.1; nuevos reproduc 1.0 (pide base 0.8.7) y pintura 1.0 (del sistema); de lo
+1.1; nuevos reproduc 1.0 (pide base 0.8.7), correo 1.0 (pide base y tls
+0.8.7) y pintura 1.0 (del sistema); de lo
 publicado, tal cual: accesori, consola, ejemplos, escudo, sonido, comprim,
 mirador, pdf, navega 0.2.2, clicgest, juegos 1.0, pluma 2.0 y las firmas de
 Escudo.
