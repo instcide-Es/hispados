@@ -106,6 +106,18 @@ módulo Cpu
         fin
     fin
 
+    ; (JUEGOS) la TEB del hilo de Windows que va a correr: la base del
+    ; descriptor 0x43 (4 K, del anillo 3) y FS otra vez (para que el
+    ; procesador tome la base nueva). La llama el cambio de tarea (tareas.cas).
+    público función pon_teb(base: nat32)
+        gdt[16] := (base << 16) ob 0x0FFF
+        gdt[17] := (base yb 0xFF000000) ob 0x0040F200 ob ((base >> 16) yb 0xFF)
+        ensamblador
+            mov ax, {TEB_WIN32}
+            mov fs, ax
+        fin
+    fin
+
     ; la pila del anillo 0 de la tarea que va a correr (su tope)
     público función pon_pila_núcleo(tope: nat32)
         tss[1] := tope

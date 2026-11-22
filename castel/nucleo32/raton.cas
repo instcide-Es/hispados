@@ -33,6 +33,7 @@ módulo Raton
     público variable ratón_ps2: bool            ; (dispositivos) hay un ratón PS/2 (ha contestado)
     público variable ratón_x, ratón_y: ent32    ; dónde está la flecha
     público variable ratón_botones: nat32       ; los que están pulsados
+    público variable movido_x, movido_y: ent32  ; (JUEGOS) lo que se ha movido de verdad (sin topar con el borde), desde siempre
     público variable paquetes: nat32            ; los movimientos que han llegado
     variable ancho, alto: ent32                 ; hasta dónde llega
     variable trozo: arreglo [4] de byte
@@ -104,6 +105,8 @@ módulo Raton
     ; tapadas.
     función movido(dx: ent32, dy: ent32, botones: nat32)
         paquetes := paquetes + 1
+        movido_x := movido_x + dx               ; (JUEGOS) para los juegos: el ratón relativo
+        movido_y := movido_y + dy
         ratón_x := ratón_x + dx
         ratón_y := ratón_y + dy
         si ratón_x < 0 entonces ratón_x := 0 fin

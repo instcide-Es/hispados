@@ -26,15 +26,53 @@
 ;          delante; 4 dónde está (seis números a EDX); 5 minimizar,
 ;          maximizar o restaurar (EDX: PIDE_...); 6 el ratón (x, y y los
 ;          botones, en la pantalla, a EDX); 7 de quién es la ventana activa
-;          (1 si es suya).
+;          (1 si es suya); (JUEGOS) 8 llevar la flecha a un punto de la
+;          pantalla (EDX: x e y; si la ventana activa es suya: SetCursorPos);
+;          9 lo que se ha movido el ratón de verdad, sin el borde (dos
+;          números a EDX); 10 esconder la flecha mientras su ventana sea la
+;          activa (EDX = 1) o enseñarla (0).
+;   - 183  (JUEGOS) los hilos: EBX lo que se pide. 0 uno nuevo del proceso
+;          (ECX: tres números del programa: dónde empieza, su pila y su TEB)
+;          -> su número de hilo; 1 el número del hilo que corre; 2 adónde
+;          se mandan las excepciones del proceso (SEH: ECX, la dirección del
+;          despachador de WIN32.BIN; 0, ninguno); 3 ceder el procesador
+;          (Sleep(0)); 4 acabar el hilo que corre (ECX el código; si es el
+;          del proceso, como la 2); 5 acabar otro hilo del proceso (ECX su
+;          número); 6 ¿sigue vivo el hilo ECX? (1 o 0); 7 la TEB del que corre
+;          (ECX: su dirección en el programa); 8 acabar los otros hilos del
+;          proceso (no el que corre ni el principal) y esperar a que acaben.
+;   - 184  (JUEGOS) esperar en una dirección (como un «futex»): EBX la
+;          dirección (de verdad), ECX lo que tiene que haber, EDX los
+;          milisegundos (0xFFFFFFFF: sin fin). Si ya no está ese valor -> 2;
+;          si alguien la despierta (185) -> 0; si se acaba el tiempo -> 1.
+;   - 185  (JUEGOS) despertar a las que esperan en la dirección EBX (de
+;          verdad), ECX como mucho -> cuántas.
+;   - (JUEGOS, SEH) las excepciones del procesador en un programa de
+;     Windows (dividir por cero, una instrucción que no existe, protección
+;     general, fallo de página): si el proceso ha dado su despachador (la
+;     183, 2), no se le acaba: se le deja en su pila lo que ha pasado (15
+;     números: el vector, el código de error, la dirección del fallo, EIP,
+;     EFLAGS, ESP, EAX, ECX, EDX, EBX, EBP, ESI, EDI, CS y SS) y se le manda
+;     al despachador, que hace lo de Windows (la cadena de FS:[0]) y, si se
+;     sigue, vuelve él solo a donde diga el contexto. La 183, 9 quita las
+;     primeras 64 K del programa (las de WIN32.BIN, sin nada: así un
+;     puntero nulo falla, como en Windows).
+;   - 186  (JUEGOS) el CD de sonido de los juegos (WINMM, «cdaudio»): EBX 0
+;          las pistas (READ TOC: ECX la letra del lector, 0 el primero; EDX
+;          adónde, 804 octetos) -> los octetos; 1 leer sectores de sonido
+;          (EDX: cuatro números: la letra, el lba, cuántos y adónde; de 2352
+;          octetos) -> los octetos.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Win32
 
-    importar Cpu, Tareas, Paginas, Marcos, Consola, Ventanas, Raton, Mem32
+    importar Cpu, Tareas, Paginas, Marcos, Consola, Ventanas, Raton, Mem32, Cdrom, Discos, Unidades, Monton
 
     constante NO_VALE = 0xFFFFFFF9              ; (los de usuario.cas)
     constante SIN_MEMORIA = 0xFFFFFFFA
+
+    público constante TEB_PRINCIPAL = 0xBFBF0000  ; (JUEGOS) la TEB del hilo principal (0x7FBF0000 del programa)
+    constante SIN_FIN = 0xFFFFFFFF
 
     tipo Pide_ventana = estructura
         nombre: puntero a byte
@@ -171,9 +209,192 @@ módulo Win32
             caso 7:
                 si dueño_de_activa() = actual.id entonces devolver 1 fin
                 devolver 0
+            caso 8:
+                si no usuario_puede(actual.cr3, c, 8, falso) entonces devolver NO_VALE fin
+                si dueño_de_activa() <> actual.id entonces devolver NO_VALE fin
+                d := puntero(c)
+                pon_ratón(d[0], d[1])
+                devolver 0
+            caso 9:
+                si no usuario_puede(actual.cr3, c, 8, cierto) entonces devolver NO_VALE fin
+                d := puntero(c)
+                r := sin_interrupciones()
+                d[0] := movido_x
+                d[1] := movido_y
+                reponer(r)
+                devolver 0
+            caso 10:
+                si c = 1 entonces
+                    flecha_escondida := actual.id
+                sino si flecha_escondida = actual.id entonces
+                    flecha_escondida := 0
+                fin
+                devolver 0
         fin
         devolver NO_VALE
     fin
+
+    ; -------------------------------------------------------------------------
+    ;  (JUEGOS) Los hilos de los programas de Windows (tareas.cas, crear_hilo)
+    ; -------------------------------------------------------------------------
+    función w_hilos(op: nat32, b: nat32): nat32
+        variable d: puntero a nat32
+        variable t, l: puntero a Tarea
+        l := actual
+        si l.líder <> nulo entonces l := l.líder fin
+        según op
+            caso 0:
+                si no usuario_puede(actual.cr3, b, 12, falso) entonces devolver NO_VALE fin
+                d := puntero(b)
+                si d[2] yb (PÁGINA - 1) <> 0 o d[2] >= 0x7FFFF000 o d[1] >= 0x80000000 entonces devolver NO_VALE fin
+                t := crear_hilo(d[0], d[1], CÓDIGO_WIN32, DATOS_WIN32, d[2] + BASE_WIN32)
+                si t = nulo entonces devolver SIN_MEMORIA fin
+                devolver t.hilo_id
+            caso 1:
+                devolver actual.hilo_id
+            caso 2:
+                l.despachador := b
+                devolver 0
+            caso 3:
+                ceder()
+                devolver 0
+            caso 4:
+                si actual.líder = nulo entonces devolver NO_VALE fin
+                terminar(b)
+            caso 5:
+                t := hilo_de(b)
+                si t = nulo o t = l o t = actual entonces devolver NO_VALE fin
+                acabar_tarea(t)
+                devolver 0
+            caso 6:
+                t := hilo_de(b)
+                si t = nulo o t.estado = ACABADA entonces devolver 0 fin
+                devolver 1
+            caso 8:
+                acaba_hermanos()
+                devolver 0
+            caso 9:
+                si actual.teb = 0 entonces devolver NO_VALE fin
+                quita_principio()
+                devolver 0
+            caso 7:
+                si b yb (PÁGINA - 1) <> 0 o b >= 0x7FFFF000 entonces devolver NO_VALE fin
+                pon_mi_teb(b + BASE_WIN32)
+                devolver 0
+        fin
+        devolver NO_VALE
+    fin
+
+    ; las primeras 64 K del espacio (la cabecera de WIN32.BIN y su relleno)
+    función quita_principio()
+        variable v, f: nat32
+        v := USUARIO_INICIO
+        mientras v < USUARIO_INICIO + 0x10000 hacer
+            si banderas_de(actual.cr3, v) <> 0 y banderas_de(actual.cr3, v) yb AJENO = 0 entonces
+                f := desmapear(actual.cr3, v)
+                si f <> 0 entonces soltar_marco(f) fin
+            fin
+            v := v + PÁGINA
+        fin
+    fin
+
+    ; (SEH) una excepción del procesador en un programa de Windows: si su
+    ; proceso tiene despachador, se cambia el marco («marco»: lo de pushad;
+    ; detrás, el código de error si «con_código», y lo que apiló el
+    ; procesador) para que vuelva a él con lo que ha pasado en su pila. Da
+    ; falso si no (y se le acaba, como siempre).
+    público función a_su_despachador(marco: nat32, vector: nat32, código: nat32, dir_fallo: nat32, con_código: bool): bool
+        variable f, c: puntero a nat32
+        variable k, esp_u, nueva: nat32
+        variable l: puntero a Tarea
+        si actual = nulo entonces devolver falso fin
+        l := actual
+        si l.líder <> nulo entonces l := l.líder fin
+        si l.despachador = 0 entonces devolver falso fin
+        f := puntero(marco)
+        k := 8
+        si con_código entonces k := 9 fin
+        si f[k + 1] yb 0xFFFF <> CÓDIGO_WIN32 entonces devolver falso fin
+        esp_u := f[k + 3]
+        nueva := (esp_u - 128 - 4 * 17) yb 0xFFFFFFF0
+        si esp_u < 0x10000 o esp_u >= 0x80000000 o no usuario_puede(actual.cr3, nueva + BASE_WIN32, 4 * 17, cierto) entonces devolver falso fin
+        c := puntero(nueva + BASE_WIN32)
+        c[0] := 0                               ; (la vuelta: no vuelve)
+        c[1] := nueva + 8                       ; su argumento: lo de debajo
+        c[2] := vector
+        c[3] := código
+        c[4] := dir_fallo
+        c[5] := f[k]                            ; EIP
+        c[6] := f[k + 2]                        ; EFLAGS
+        c[7] := esp_u
+        c[8] := f[7]                            ; EAX (pushad: EDI, ESI, EBP, ESP, EBX, EDX, ECX, EAX)
+        c[9] := f[6]
+        c[10] := f[5]
+        c[11] := f[4]
+        c[12] := f[2]
+        c[13] := f[1]
+        c[14] := f[0]
+        c[15] := f[k + 1]
+        c[16] := f[k + 4]
+        f[k] := l.despachador
+        f[k + 2] := f[k + 2] yb nob 0x500       ; sin TF ni DF
+        f[k + 3] := nueva
+        devolver cierto
+    fin
+
+    ; espera mientras en la dirección «a» (de verdad, del programa) esté «v»
+    función w_espera(a: nat32, v: nat32, ms: nat32): nat32
+        variable p: puntero a nat32
+        variable b, r, n: nat32
+        si a yb 3 <> 0 o no usuario_puede(actual.cr3, a, 4, falso) entonces devolver NO_VALE fin
+        p := puntero(a)
+        b := sin_interrupciones()
+        si valor(p) <> v entonces
+            reponer(b)
+            devolver 2
+        fin
+        si ms = 0 o actual.matar entonces
+            reponer(b)
+            devolver 1
+        fin
+        actual.espera_dir := a
+        si ms = SIN_FIN entonces
+            bloquear()
+        sino
+            n := (ms + 9) div 10
+            si n = 0 entonces n := 1 fin
+            dormir(n)
+        fin
+        r := 0
+        si actual.espera_dir <> 0 entonces r := 1 fin
+        actual.espera_dir := 0
+        reponer(b)
+        devolver r
+    fin
+
+    ; despierta a las (como mucho n) que esperan en «a» en este espacio
+    función w_despierta(a: nat32, n: nat32): nat32
+        variable i, b, k: nat32
+        variable t: puntero a Tarea
+        si a = 0 entonces devolver 0 fin
+        k := 0
+        b := sin_interrupciones()
+        para i desde 0 hasta MAX_TAREAS - 1 hacer
+            t := dirección(tareas[i])
+            si k < n y t.espera_dir = a y t.cr3 = actual.cr3 y (t.estado = ESPERANDO o t.estado = DORMIDA) entonces
+                t.espera_dir := 0
+                si t.estado = DORMIDA entonces despertar_dormida(t) sino despertar_tarea(t) fin
+                k := k + 1
+            fin
+        fin
+        reponer(b)
+        devolver k
+    fin
+
+    ; (JUEGOS) el CD de sonido de los juegos (MCI «cdaudio» de WINMM.DLL) ya
+    ; no es una llamada del WIN32: es la 134, la del CD de música del
+    ; Reproductor (usuario.cas), una sola en el núcleo para los dos. La 186
+    ; queda libre.
 
     ; la llamada al sistema (180 a 189), desde usuario.cas
     público función atender_win32(n: nat32, a: nat32, b: nat32, c: nat32): nat32
@@ -181,6 +402,9 @@ módulo Win32
             caso 180: devolver w_memoria(a, b, c = 1)
             caso 181: devolver w_teclas(a)
             caso 182: devolver w_ventana(a, b, c)
+            caso 183: devolver w_hilos(a, b)     ; (JUEGOS)
+            caso 184: devolver w_espera(a, b, c)
+            caso 185: devolver w_despierta(a, b)
         fin
         devolver NO_VALE
     fin

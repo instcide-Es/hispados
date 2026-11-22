@@ -395,6 +395,12 @@ def main():
         dirs[0] = (rva_e, len(edata))
     if rsrc:
         dirs[2] = (rva_rs, len(rsrc))
+    # (JUEGOS) TLS de la imagen (__declspec(thread)): si el programa define
+    # «_tls_used» (un IMAGE_TLS_DIRECTORY, como el que pone el enlazador de
+    # Microsoft), el directorio 9 apunta a él
+    if '_tls_used' in glob:
+        g = glob['_tls_used']
+        dirs[9] = (dir_sec(g[0], g[1]) + g[2] - base, 24)
     for k, (r, n) in enumerate(dirs):
         struct.pack_into('<II', sal, o + 96 + 8 * k, r, n)
     st = o + 224

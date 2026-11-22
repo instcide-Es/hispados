@@ -174,6 +174,11 @@ void prepara_user(void);
 /* user32.c */
 Wnd *wnd(HWND h);
 Wnd *raiz_de(Wnd *w);
+int en_modo_juego(void);       /* (JUEGOS) dx.c: la pantalla del juego */
+int es_del_juego(Wnd *w);
+void modo_medida(i32 *an, i32 *al);
+void real_a_modo(i32 *x, i32 *y);
+void modo_a_real(i32 *x, i32 *y);
 extern Wnd *escritorio;
 void lo_de_dentro(Wnd *w, RECT *r);           /* GetClientRect */
 void dentro_en_lienzo(Wnd *w, POINT *p);      /* dónde cae el (0,0) de dentro de w en el lienzo de su raíz */

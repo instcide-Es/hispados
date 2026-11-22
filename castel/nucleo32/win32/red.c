@@ -25,8 +25,11 @@ static u32 pide(u32 orden, u32 a, u32 b, u32 c, u32 d, void *datos, u32 largo, u
 {
 	u32 r, k;
 	for (k = 0; k < 3; k++) {
+		u32 n;
 		cab[0] = orden; cab[1] = a; cab[2] = b; cab[3] = c; cab[4] = d; cab[5] = cab[6] = 0; cab[7] = largo;
+		n = gc_suelta_todo();               /* (JUEGOS) el servicio tarda: los otros hilos, que sigan */
 		r = sc(90, LIN(cab), datos ? LIN(datos) : 0, cabe);
+		gc_retoma(n);
 		/* (la red se está poniendo en marcha: se espera un poco) */
 		if ((r != SIN_IP && r != SIN_CABLE) || orden == O_ESTADO)
 			return r;
@@ -61,8 +64,11 @@ typedef struct {
 	u16 puerto_local;
 	u8 *pre;                 /* lo recibido de antemano (por select) */
 	u32 npre, ipre;
+	int dgrama;              /* (JUEGOS, UDP) hay un datagrama en «pre» (de pre_ip:pre_puerto) */
+	u32 pre_ip, pre_puerto;
 } Sock;
 static Sock socks[MAX_SOCK];
+static i32 trae_udp(Sock *x, u32 espera);     /* (JUEGOS) */
 static Sock *sock(u32 s)
 {
 	if (s < 1 || s > MAX_SOCK || !socks[s - 1].usado) {
@@ -232,6 +238,10 @@ API(i32) ioctlsocket(u32 s, u32 orden, u32 *v)
 		return 0;
 	}
 	if (orden == 0x4004667Fu) {                  /* FIONREAD */
+		if (x->tipo == 2) {                      /* (JUEGOS) UDP: lo que mide el siguiente datagrama */
+			*v = trae_udp(x, 0) > 0 ? x->npre : 0;
+			return 0;
+		}
 		if (x->tipo == 1 && x->conectado)
 			traer(x, 0);
 		*v = x->npre > x->ipre ? x->npre - x->ipre : 0;
@@ -256,6 +266,8 @@ API(i32) select(i32 nfds, FD_SET *l, FD_SET *e, FD_SET *x, const TIMEVAL *t)
 			for (k = 0; k < l->n; k++) {
 				Sock *s = sock(l->s[k]);
 				if (s && s->tipo == 1 && s->conectado && traer(s, 0) != 0)
+					rl.s[rl.n++] = l->s[k];
+				else if (s && s->tipo == 2 && trae_udp(s, 0) > 0)   /* (JUEGOS) UDP: un datagrama esperando */
 					rl.s[rl.n++] = l->s[k];
 			}
 		if (e)
@@ -282,6 +294,62 @@ API(i32) __WSAFDIsSet(u32 s, FD_SET *f)
 			return 1;
 	return 0;
 }
+/* (JUEGOS) el puerto UDP del socket, abierto en el servicio (uno cualquiera
+ * si no se ha dicho: aquí, para saber cuál es) */
+static i32 abre_udp(Sock *x)
+{
+	u32 r, k;
+	if (x->con != 0xFFFFFFFF)
+		return 0;
+	for (k = 0; k < 20; k++) {
+		u16 p = x->puerto_local;
+		if (!p)
+			p = (u16)(49152 + (sys_tics() * 7919u + k * 104729u + (u32)(x - socks) * 31u) % 16000u);
+		r = pide(O_UDP, p, 0, 0, 0, 0, 0, 0);
+		if (!ES_ERROR_RED(r)) {
+			x->con = r;
+			x->puerto_local = p;
+			traza("UDP: el puerto %u (%x)", p, r);
+			return 0;
+		}
+		if (x->puerto_local) {
+			ultimo = r == 0xFFFFFFE1u || r == 0xFFFFFFE2u || r == 0xFFFFFFE3u ? 10048 : 10048;   /* WSAEADDRINUSE */
+			if (r == SIN_RED || r == SIN_TARJETA || r == SIN_CABLE || r == SIN_IP)
+				return falla(r);
+			return -1;
+		}
+	}
+	return falla(r);
+}
+/* (JUEGOS) un datagrama al búfer, si llega en «espera» ms: 1 sí, 0 no, -1 error */
+static i32 trae_udp(Sock *x, u32 espera)
+{
+	u32 r;
+	if (x->dgrama)
+		return 1;
+	if (abre_udp(x) < 0)
+		return -1;
+	if (!x->pre) {
+		x->pre = m_pedir(MAX_DATOS);
+		if (!x->pre) {
+			ultimo = 10055;                  /* WSAENOBUFS */
+			return -1;
+		}
+	}
+	r = pide(O_RECIBIR, x->con, espera, 0, 0, x->pre, 0, MAX_DATOS);
+	if (r == TIEMPO)
+		return 0;
+	if (ES_ERROR_RED(r)) {
+		falla(r);
+		return -1;
+	}
+	x->dgrama = 1;
+	x->npre = r;
+	x->pre_ip = cab[1];
+	x->pre_puerto = cab[2];
+	return 1;
+}
+
 API(i32) bind(u32 s, const SOCKADDR_IN *a, i32 n)
 {
 	Sock *x = sock(s);
@@ -289,6 +357,8 @@ API(i32) bind(u32 s, const SOCKADDR_IN *a, i32 n)
 	if (!x)
 		return -1;
 	x->puerto_local = vuelta16(a->puerto);
+	if (x->tipo == 2)                            /* (JUEGOS) UDP: ya recibe (un servidor) */
+		return abre_udp(x);
 	return 0;
 }
 API(i32) listen(u32 s, i32 n) { (void)s; (void)n; ultimo = 10045; return -1; }   /* WSAEOPNOTSUPP */
@@ -302,13 +372,13 @@ API(i32) sendto(u32 s, const char *p, i32 n, i32 fl, const SOCKADDR_IN *a, i32 a
 		return -1;
 	if (x->tipo == 1)
 		return send(s, p, n, fl);
-	if (x->con == 0xFFFFFFFF) {
-		r = pide(O_UDP, x->puerto_local, 0, 0, 0, 0, 0, 0);
-		if (ES_ERROR_RED(r))
-			return falla(r);
-		x->con = r;
+	if (abre_udp(x) < 0)
+		return -1;
+	if (n > 1472) {
+		ultimo = 10040;                          /* WSAEMSGSIZE */
+		return -1;
 	}
-	r = pide(O_UDP_ENVIAR, x->con, a->ip, vuelta16(a->puerto), 0, (void *)p, n > MAX_DATOS ? MAX_DATOS : n, 0);
+	r = pide(O_UDP_ENVIAR, x->con, a ? a->ip : x->ip, a ? vuelta16(a->puerto) : x->puerto, 0, (void *)p, n, 0);
 	if (ES_ERROR_RED(r))
 		return falla(r);
 	return n;
@@ -322,27 +392,39 @@ API(i32) recvfrom(u32 s, char *p, i32 n, i32 fl, SOCKADDR_IN *a, i32 *al)
 		return -1;
 	if (x->tipo == 1)
 		return recv(s, p, n, fl);
-	if (x->con == 0xFFFFFFFF) {
-		r = pide(O_UDP, x->puerto_local, 0, 0, 0, 0, 0, 0);
-		if (ES_ERROR_RED(r))
-			return falla(r);
-		x->con = r;
+	/* (JUEGOS) un datagrama entero (del búfer, si ya lo trajo select); sin
+	 * bloqueo, WSAEWOULDBLOCK si no hay; con bloqueo, se espera lo que haga falta */
+	for (;;) {
+		i32 k = trae_udp(x, x->sin_bloqueo ? 0 : 1000);
+		if (k < 0)
+			return -1;
+		if (k)
+			break;
+		if (x->sin_bloqueo) {
+			ultimo = 10035;                  /* WSAEWOULDBLOCK */
+			return -1;
+		}
 	}
-	r = pide(O_RECIBIR, x->con, x->sin_bloqueo ? 0 : 1000, 0, 0, p, 0, n > MAX_DATOS ? MAX_DATOS : n);
-	if (r == TIEMPO && x->sin_bloqueo) {
-		ultimo = 10035;
-		return -1;
-	}
-	if (ES_ERROR_RED(r))
-		return falla(r);
+	r = x->npre;
+	if (r > (u32)n)
+		r = (u32)n;
+	memcpy(p, x->pre, r);
 	if (a) {
 		a->fam = 2;
-		a->ip = cab[1];
-		a->puerto = vuelta16(cab[2]);
+		a->ip = x->pre_ip;
+		a->puerto = vuelta16(x->pre_puerto);
+		memset(a->cero, 0, 8);
 		if (al)
 			*al = 16;
 	}
-	return r;
+	if (!(fl & 2))                               /* MSG_PEEK: se queda */
+		x->dgrama = 0;
+	if (x->npre > (u32)n) {
+		x->dgrama = 0;
+		ultimo = 10040;                          /* WSAEMSGSIZE: no cabía (lo que cabe, dado) */
+		return -1;
+	}
+	return (i32)r;
 }
 API(i32) setsockopt(u32 s, i32 n, i32 o, const char *v, i32 l) { (void)s; (void)n; (void)o; (void)v; (void)l; return 0; }
 API(i32) getsockopt(u32 s, i32 n, i32 o, char *v, i32 *l)
@@ -381,12 +463,25 @@ static char he_nombre[128];
 static u32 he_ip;
 static char *he_ips[2], *he_alias[1];
 static i32 texto_ip(const char *t, u32 *ip);
+i32 WINAPI gethostname(char *d, i32 n);
 API(void *) gethostbyname(const char *n)
 {
 	u32 ip, r;
 	if (!n) {
 		ultimo = 10014;
 		return 0;
+	}
+	{
+		/* (JUEGOS) el nombre del propio equipo (y «localhost»): su IP, sin el DNS */
+		char yo[64];
+		gethostname(yo, sizeof yo);
+		if (!stricmp_(n, yo) || !stricmp_(n, "localhost")) {
+			ip = 0;
+			sc(97, LIN(&ip), 0, 0);
+			if (!stricmp_(n, "localhost") || !ip)
+				ip = 0x0100007F;
+			goto tiene;
+		}
 	}
 	if (!texto_ip(n, &ip)) {
 		r = pide(O_RESOLVER, 0, 0, 0, 0, (void *)n, strlen(n), 0);
@@ -396,6 +491,7 @@ API(void *) gethostbyname(const char *n)
 		}
 		ip = cab[1];
 	}
+tiene:
 	copia_n(he_nombre, n, sizeof he_nombre);
 	he_ip = ip;
 	he_ips[0] = (char *)&he_ip;

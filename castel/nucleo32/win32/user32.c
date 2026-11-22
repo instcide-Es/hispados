@@ -1529,6 +1529,11 @@ static void suceso_raton(Wnd *raiz, Suceso *s)
 	}
 	{
 		LPARAM lp = MAKELONG(x - o.x, y - o.y);
+		if (es_del_juego(w) && es_raiz(w)) {
+			i32 mx = x, my = y;             /* (JUEGOS) en el modo del juego */
+			real_a_modo(&mx, &my);
+			lp = MAKELONG(mx, my);
+		}
 		if (s->clase == EV_MUEVE) {
 			poner_mensaje(w, WM_MOUSEMOVE, mk_de(b), lp);
 			ultima_bajo = w;
@@ -1835,6 +1840,12 @@ API(BOOL) WaitMessage(void)
 	while (!PeekMessageA(&m, 0, 0, 0, 0))
 		sys_dormir(1);
 	return TRUE;
+}
+int hay_mensajes(void)             /* (JUEGOS) MsgWaitForMultipleObjects */
+{
+	MSG m;
+	bomba(0);
+	return algo(&m, 0, 0, 0, 0);
 }
 API(u32) GetQueueStatus(u32 f)
 {
@@ -2181,6 +2192,11 @@ API(BOOL) GetWindowRect(HWND h, RECT *r)
 		r->bottom = pantalla_al;
 		return TRUE;
 	}
+	if (es_raiz(w) && es_del_juego(w)) {
+		r->left = r->top = 0;                  /* (JUEGOS) toda la pantalla del modo */
+		modo_medida(&r->right, &r->bottom);
+		return TRUE;
+	}
 	if (es_raiz(w)) {
 		donde_nucleo(w);
 		*r = w->r;
@@ -2206,6 +2222,11 @@ API(BOOL) GetClientRect(HWND h, RECT *r)
 		r->bottom = pantalla_al;
 		return TRUE;
 	}
+	if (es_raiz(w) && es_del_juego(w)) {
+		r->left = r->top = 0;                  /* (JUEGOS) */
+		modo_medida(&r->right, &r->bottom);
+		return TRUE;
+	}
 	lo_de_dentro(w, r);
 	return TRUE;
 }
@@ -2228,6 +2249,8 @@ API(BOOL) ClientToScreen(HWND h, POINT *p)
 	POINT o;
 	if (!w || w == escritorio)
 		return w != 0;
+	if (es_raiz(w) && es_del_juego(w))
+		return TRUE;                            /* (JUEGOS) empieza en 0, 0 del modo */
 	dentro_en_pantalla(w, &o);
 	p->x += o.x;
 	p->y += o.y;
@@ -2239,6 +2262,8 @@ API(BOOL) ScreenToClient(HWND h, POINT *p)
 	POINT o;
 	if (!w || w == escritorio)
 		return w != 0;
+	if (es_raiz(w) && es_del_juego(w))
+		return TRUE;                            /* (JUEGOS) */
 	dentro_en_pantalla(w, &o);
 	p->x -= o.x;
 	p->y -= o.y;
@@ -2945,6 +2970,11 @@ API(i32) GetPriorityClipboardFormat(u32 *l, i32 n) { i32 k; for (k = 0; k < n; k
  * ------------------------------------------------------------------------- */
 API(i32) GetSystemMetrics(i32 i)
 {
+	if ((i == 0 || i == 1 || i == 16 || i == 78 || i == 79) && en_modo_juego()) {
+		i32 an, al;                               /* (JUEGOS) en el modo del juego */
+		modo_medida(&an, &al);
+		return i == 1 || i == 79 ? al : an;
+	}
 	switch (i) {
 	case 0: case 16: case 78: return pantalla_an;    /* SM_CXSCREEN, CXFULLSCREEN, CXVIRTUALSCREEN */
 	case 1: case 79: return pantalla_al;
@@ -3032,13 +3062,99 @@ API(BOOL) SystemParametersInfoA(u32 a, u32 b, void *c, u32 f)
 	return TRUE;
 }
 API(BOOL) SystemParametersInfoW(u32 a, u32 b, void *c, u32 f) { return SystemParametersInfoA(a, b, c, f); }
-API(BOOL) GetCursorPos(POINT *p) { raton_pantalla(); p->x = raton_px; p->y = raton_py; return TRUE; }
-API(BOOL) SetCursorPos(i32 x, i32 y) { (void)x; (void)y; return TRUE; }
+/* (JUEGOS) el cursor de los juegos: SetCursorPos lleva la flecha de verdad
+ * (los que miran con el ratón la vuelven al centro en cada vuelta), con
+ * ClipCursor no sale del recuadro, y con una ventana a pantalla completa va
+ * en las medidas del modo del juego */
+static RECT recorte;
+static int hay_recorte;
+API(BOOL) GetCursorPos(POINT *p)
+{
+	i32 x, y;
+	raton_pantalla();
+	x = raton_px;
+	y = raton_py;
+	if (en_modo_juego())
+		real_a_modo(&x, &y);
+	if (hay_recorte) {
+		i32 cx = x < recorte.left ? recorte.left : x >= recorte.right ? recorte.right - 1 : x;
+		i32 cy = y < recorte.top ? recorte.top : y >= recorte.bottom ? recorte.bottom - 1 : y;
+		x = cx;
+		y = cy;
+	}
+	p->x = x;
+	p->y = y;
+	return TRUE;
+}
+API(BOOL) SetCursorPos(i32 x, i32 y)
+{
+	i32 d[2];
+	if (hay_recorte) {
+		if (x < recorte.left) x = recorte.left;
+		if (x >= recorte.right) x = recorte.right - 1;
+		if (y < recorte.top) y = recorte.top;
+		if (y >= recorte.bottom) y = recorte.bottom - 1;
+	}
+	if (en_modo_juego())
+		modo_a_real(&x, &y);
+	d[0] = x;
+	d[1] = y;
+	if (!ES_ERROR(sys_ventana_op(8, 0, LIN(d)))) {
+		raton_px = x;
+		raton_py = y;
+	}
+	return TRUE;
+}
+/* lo que se ha movido el ratón de verdad, sin topar con el borde (para DirectInput) */
+API(BOOL) HispaRatonMovido(i32 *dx, i32 *dy)
+{
+	static i32 antes[2];
+	static int visto;
+	i32 d[2];
+	if (ES_ERROR(sys_ventana_op(9, 0, LIN(d))))
+		return FALSE;
+	if (!visto) {
+		antes[0] = d[0];
+		antes[1] = d[1];
+		visto = 1;
+	}
+	*dx = d[0] - antes[0];
+	*dy = d[1] - antes[1];
+	antes[0] = d[0];
+	antes[1] = d[1];
+	return TRUE;
+}
 API(HCURSOR) SetCursor(HCURSOR c) { static HCURSOR v; HCURSOR a = v; v = c; return a; }
 API(HCURSOR) GetCursor(void) { return (HCURSOR)0x7F00; }
-API(i32) ShowCursor(BOOL s) { static i32 n; n += s ? 1 : -1; return n; }
-API(BOOL) ClipCursor(const RECT *r) { (void)r; return TRUE; }
-API(BOOL) GetClipCursor(RECT *r) { r->left = r->top = 0; r->right = pantalla_an; r->bottom = pantalla_al; return TRUE; }
+API(i32) ShowCursor(BOOL s)
+{
+	static i32 n;
+	i32 antes = n;
+	n += s ? 1 : -1;
+	if ((antes < 0) != (n < 0))
+		sys_ventana_op(10, 0, n < 0 ? 1 : 0);   /* (JUEGOS) la flecha, escondida o a la vista */
+	return n;
+}
+API(BOOL) ClipCursor(const RECT *r)
+{
+	hay_recorte = r != 0 && r->right > r->left && r->bottom > r->top;
+	if (hay_recorte)
+		recorte = *r;
+	return TRUE;
+}
+API(BOOL) GetClipCursor(RECT *r)
+{
+	if (hay_recorte) {
+		*r = recorte;
+		return TRUE;
+	}
+	r->left = r->top = 0;
+	r->right = pantalla_an;
+	r->bottom = pantalla_al;
+	if (en_modo_juego())
+		modo_medida(&r->right, &r->bottom);
+	return TRUE;
+}
 API(u32) GetDoubleClickTime(void) { return 450; }
 API(BOOL) SetDoubleClickTime(u32 t) { (void)t; return TRUE; }
 /* (SONIDO) el sonido del sistema: el de error con MB_ICONHAND; si no, el de aviso */

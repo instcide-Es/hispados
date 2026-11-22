@@ -109,11 +109,15 @@ static void leer(DEV *d) {
       if ((o = ofs_de(d, O_TECLA, k)) != 0xFFFFFFFF) evento(d, o, t[k]);
     }
   } else if (d->clase == RATON) {
-    int r[3], dx, dy;
+    int r[3], dx, dy, m[2];
     HispaDXEntrada(1, (u32)r, 0);
     dx = r[0] - d->rx; dy = r[1] - d->ry;
     d->rx = r[0]; d->ry = r[1];
-    if (d->exclusivo && d->adquirido) {   /* que no tope con el borde */
+    if (d->relativo && HispaDXEntrada(5, (u32)m, 0)) {
+      /* (JUEGOS) Hispa-Pentium da lo que se ha movido de verdad: sin topar
+       * con el borde ni perder los puntos al pasar al modo del juego */
+      dx = m[0]; dy = m[1];
+    } else if (d->exclusivo && d->adquirido) {   /* que no tope con el borde */
       static HXPANT p;
       int cx, cy;
       if (!p.ancho) { HispaDXPantalla(7, (u32)&p, 0, 0); if (!p.ancho) { p.ancho = 640; p.alto = 480; } }

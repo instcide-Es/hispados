@@ -286,6 +286,14 @@
 #      del anfitrión sin un corte, lo que cuesta en un Atom N270, el CD (la
 #      llamada 134) por IDE y por SATA, y en el escritorio la ventana, la
 #      bandeja (la 135) y que no se corte con el procesador ocupado.
+#  33. (JUEGOS, SOLO=juegos) Lo que pide un juego de Windows de 1998-2000
+#      (Half-Life: Win32, VC6, OpenGL o DirectDraw), con los programas de
+#      tests/juegos/: el diagnóstico de lo que falta (el aviso, WIN32.LOG y
+#      WIN32 COMPRUEBA), los hilos de verdad y lo que los sincroniza, SEH (el
+#      __try/__except de VC6), el registro (en \USUARIOS), MSVCRT de VC6, la
+#      ventana a pantalla completa con el ratón de los juegos y DirectInput,
+#      UDP de cliente y de servidor, y el sonido (la mezcla en su hilo,
+#      waveOut, el CD de sonido por MCI).
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 #  38. (USUARIOS, SOLO=usuarios) Los usuarios (pruebas_usuarios.sh): ARGON2
 #      con ASan en Linux, la serie de tools/hpq.py; un sistema de antes que
@@ -330,6 +338,7 @@
 #   SOLO=panel ./pruebas.sh       la primera y la 34 ((PANEL) el Panel de control y la hora por Internet; pruebas_panel.sh)
 #   SOLO=bloc ./pruebas.sh        la primera y la 35 (BLOC: el Bloc de notas 1.0)
 #   SOLO=reproductor ./pruebas.sh la primera y la 36 (el Reproductor; pruebas_reproductor.sh; FUZZ_REPRO=n casos de fuzz)
+#   SOLO=juegos ./pruebas.sh      la primera y la 33 ((JUEGOS) lo que pide un juego de Windows: hilos, SEH, registro, VC6, ratón, UDP, sonido y CD)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -405,7 +414,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|juegos) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -2393,7 +2402,7 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -n 8; fi
-    if grep -q "^|  win32     1.1     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0\.8\.[0-9]   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|16 paquetes\.$" $Z/b2$hc.txt \
+    if grep -q "^|  win32     1.2     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0\.8\.[0-9]   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|16 paquetes\.$" $Z/b2$hc.txt \
       && grep -q "^|Los archivos de los 16 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
       ok "PAQUETES en el sistema recién instalado: LISTA dice los 16 paquetes del sistema (..., ssh, tailscal, sonido, tls, wifi y win32: con 16, base ya no cabe en la pantalla) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -n 12; fi
@@ -4214,6 +4223,142 @@ fi
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin los programas de Windows)"
 fi   # [WIN32] los programas de Windows
+# ------------------------------------------------- 33. (JUEGOS) lo que pide un juego de Windows
+# (JUEGOS, SOLO=juegos) Lo que necesita un juego de Windows de 1998-2000
+# (Half-Life y los de su tiempo: Win32, Visual C++ 6, OpenGL o DirectDraw),
+# con los programas de prueba de tests/juegos/ (gcc y tools/elf2pe.py:
+# castel/nucleo32/win32/juegos.sh): el diagnóstico (FALTA, SINDLL y WIN32
+# COMPRUEBA, con el registro WIN32.LOG), los hilos de verdad (HILOS), SEH
+# (SEH), el registro (REG, y que siga al volver), MSVCRT de VC6 (CRT), la
+# ventana a pantalla completa con el ratón de los juegos y DirectInput
+# (JUEGOV, moviendo el ratón de QEMU), UDP en red local como cliente y como
+# servidor (REDUDP, con tests/juegos/eco_udp.py) y el sonido (SONJ: la
+# mezcla en su hilo, waveOut con su evento y el CD de sonido por MCI).
+if parte08 juegos; then
+echo "== (JUEGOS) Hispa-Pentium: lo que pide un juego de Windows (diagnóstico, hilos, SEH, registro, MSVCRT de VC6, ventanas y ratón, UDP, sonido y CD) =="
+J=$P/jue
+mkdir -p $J $G
+export MTOOLS_SKIP_CHECK=1
+if bash $AQUI/nucleo32/win32/disco.sh $J/d.img > $J/disco.txt 2>&1 && bash $AQUI/nucleo32/win32/juegos.sh $J/jp > $J/jp.txt 2>&1; then
+python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $J/semilla.asm > /dev/null 2>&1 && nasm -f bin $J/semilla.asm -o $J/SEMILLA.BIN
+mmd -i $J/d.img ::JUEGOS
+mcopy -s -i $J/d.img $J/jp/* ::JUEGOS/
+ok "nucleo32/win32/juegos.sh: $(ls $J/jp/*.EXE | wc -l) programas de prueba (gcc -m32 -march=i586 y elf2pe.py, con MSVCRT.DLL)"
+# 1. en el intérprete de órdenes: el diagnóstico, los hilos, SEH, el registro y la biblioteca de C
+cp $J/d.img $J/c.img
+O=("cd \\JUEGOS" "FALTA" ":pausa 3" "SINDLL" ":pausa 3" "WIN32 COMPRUEBA FALTA.EXE SINDLL.EXE" ":pausa 4" "WIN32 COMPRUEBA C:\\JUEGOS" ":pausa 6"
+   "HILOS" ":pausa 15" "HILOS /SALIR" ":pausa 4" "HILOS /DEJA" ":pausa 4" "SEH" ":pausa 6" "SEH /SOLO" ":pausa 3" "SEH /FILTRO" ":pausa 3"
+   "REG" ":pausa 4" "REG /LEE" ":pausa 3" "CRT uno \"dos tres\" cuatro" ":pausa 6" "cd \\PRUEBAS" "K32PRUE" ":pausa 5" "HOLAC" ":pausa 2")
+ESCRIBE=1 DISCO=$J/c.img ARRANQUE=ordenes MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $J/SEMILLA.BIN "${O[@]}" > $J/consola.sal 2>&1
+tr -d '\r' < $J/consola.sal | grep -v '^\[w32\]' > $J/consola.txt
+S=$J/consola.txt
+mira "una función que falta, llamada: el aviso dice cuál (DLL!función) y desde dónde, y dónde queda apuntado; lo que no está por GetProcAddress, nulo" \
+  "^getprocaddress_nohay: nulo$" "^Falta la función KERNEL32.DLL!FuncionQueNoHay$" "FALTA.EXE la ha llamado (desde FALTA.EXE+0x" "Queda apuntado en C:.USUARIOS.USUARIO.WIN32.LOG" "(FALTA.EXE ha acabado con el código 255)"
+mira "una DLL que no está: lo dice («No se encuentra NOHAY.DLL, que necesita SINDLL.EXE»)" "^No se encuentra NOHAY.DLL, que necesita SINDLL.EXE.$" "(SINDLL.EXE ha acabado con el código 255)"
+mira "WIN32 COMPRUEBA: las importaciones que faltan, sin ejecutar (las de una DLL de dentro, las de una de fuera y la DLL que no hay)" \
+  "^FALTA.EXE: programa de consola$" "^  falta WINMM.DLL!mixerNoHay$" "^  falta KERNEL32.DLL!FuncionQueNoHay$" "^  FALTA LA DLL NOHAY.DLL (1 función)$" "^En total: 2 archivos; faltan 3 funciones"
+mira "y de una carpeta entera (sus .EXE y sus .DLL, también los de dentro): HILOS, SEH, CRT, REG... sin nada que falte" \
+  "^HILOS.EXE: programa de consola$" "^JDLL.DLL: DLL$" "^SEH.EXE: programa de consola$"
+if [ "$(sed -n '/COMPRUEBA C:.JUEGOS/,/^En total/p' $S | grep -c '^  falta ')" = 2 ]; then ok "en C:\\JUEGOS, solo faltan las dos de FALTA.EXE (y la DLL de SINDLL)"; else ko "WIN32 COMPRUEBA C:\\JUEGOS: $(sed -n '/COMPRUEBA C:.JUEGOS/,/^En total/p' $S | grep '^  falta ' | head -5 | tr '\n' ' ')"; fi
+if mtype -i $J/c.img ::USUARIOS/USUARIO/WIN32.LOG > $J/win32.log 2>/dev/null && LC_ALL=C grep -q "FALTA.EXE: LLAMA A UNA QUE FALTA: KERNEL32.DLL!FuncionQueNoHay" $J/win32.log \
+   && LC_ALL=C grep -q "FALTA.EXE: GetProcAddress(KERNEL32.DLL, OtraQueNoHay)" $J/win32.log && LC_ALL=C grep -q "no se encuentra NOHAY.DLL, que necesita SINDLL.EXE" $J/win32.log \
+   && LC_ALL=C grep -q "EXCEPCI.N SIN MANEJADOR: 0xc0000005" $J/win32.log; then
+  ok "\\USUARIOS\\USUARIO\\WIN32.LOG apunta, con la fecha y el programa, lo que falta, lo que falló y las excepciones sin manejador"
+else ko "WIN32.LOG no tiene lo que debe: $(head -c 300 $J/win32.log 2>/dev/null)"; fi
+mira "hilos de verdad: cuatro que suman a la vez (Interlocked y CRITICAL_SECTION), esperar a todos, sus códigos y números, TLS de cada uno" \
+  "^esperar_a_todos: 0$" "^interlocked: 80000$" "^critical_section: 80000$" "^codigos: 46$" "^ids_distintos: si$" "^tls_principal: 7$"
+mira "un hilo que no llama a nada corre a la vez que el principal (con el de HW32, que corre los hilos enteros, se quedaría colgado)" "^sin_fin_sigue: si$" "^sin_fin_acaba: 0 5$"
+mira "semáforos, eventos automáticos y manuales, esperar con tiempo" "^semaforo: 0 10$" "^evento_auto_se_apaga: 258$" "^semaforo_demasiado: 0 298$" "^manual_antes: 0$" "^manual_despues: 0 3$" "^manual_sigue_puesto: 0$" "^espera_60ms: 258 bien$"
+mira "mutex: con dueño, recursivo, ERROR_NOT_OWNER, por su nombre (ERROR_ALREADY_EXISTS) y abandonado (WAIT_ABANDONED)" \
+  "^mutex_nuevo: 0$" "^mutex_recursivo: 0$" "^mutex_suelta: 1 1 0 288$" "^mutex_mismo_nombre: 183 el mismo$" "^mutex_abre: si$" "^mutex_abandonado: 80$"
+mira "Sleep(0) cede, las prioridades se guardan, CREATE_SUSPENDED y ResumeThread, ExitThread con su código" "^sleep0: 0 200 200$" "^prioridad: 1 15$" "^dormido: 258$" "^exitthread: 0 77$"
+mira "__declspec(thread) (TLS de la imagen): cada hilo, su copia; y sus funciones (DLL_THREAD_ATTACH y DETACH)" "^tls_imagen: 0 100 plantilla$" "^tls_imagen_hilo: 100 200 5$" "^tls_funciones: 1 1 1$" "^FIN HILOS$"
+mira "un hilo acaba el proceso (ExitProcess(33)) con el principal esperando; y el principal acaba con un hilo que no acaba nunca" \
+  "^hilo: ExitProcess(33)$" "(HILOS.EXE ha acabado con el código 33)" "^deja: el principal acaba con un hilo que no acaba$" "(HILOS.EXE ha acabado con el código 4)"
+mira "SEH: el puntero nulo (escribir y leer), la memoria que no hay, dividir por cero (seguir con otro divisor), ud2, int 3, cli, RaiseException con sus datos" \
+  "^nulo_escritura: c0000005 1 00000000 55$" "^nulo_lectura: c0000005 0 00000400$" "^sin_memoria: c0000005 6fff0000$" "^division: c0000094 25$" "^ud2: c000001d$" "^int3: 80000003$" "^cli: c0000096$" "^raise: e0001234 2 11 22$" "^cadena_vacia: si$"
+mira "SEH: dos marcos con RtlUnwind; el __try/__except y el __try/__finally de VC6 (_except_handler3 de MSVCRT); en otro hilo; longjmp repone la cadena; IsBadReadPtr" \
+  "^dos_marcos: c0000005 1 bien$" "^vc6_except: 1 42$" "^vc6_finally: 43 1$" "^en_otro_hilo: 42$" "^longjmp_cadena: bien$" "^isbad: 1 0 1 1$" "^FIN SEH$"
+mira "una excepción sin manejador: el aviso claro (qué y dónde); con SetUnhandledExceptionFilter, su filtro" \
+  "^SEH.EXE ha fallado: EXCEPTION_ACCESS_VIOLATION (un puntero que no vale) en SEH.EXE+0x.*, al escribir en 0x00000024.$" "^filtro_final: c0000005 en su sitio$" "(SEH.EXE ha acabado con el código 3221225477)"
+mira "el registro: crear (REG_CREATED_NEW_KEY), poner y leer DWORD, texto y binario, el búfer corto (ERROR_MORE_DATA), el valor sin nombre, borrar, enumerar, Unicode, HKLM y HKCR" \
+  "^abrir_nohay: 2$" "^crear: 0 1$" "^tam_sin_bufer: 0 1 7$" "^bufer_corto: 234 7$" "^texto: 0 hw.dll 7$" "^binario: 0 3 4 0102feff$" "^sin_nombre: 0 por defecto$" "^borrar_valor: 0 2$" \
+  "^info: 1 5 12 21$" "^unicode: 0 14 hw\.$" "^enum_claves: 0 Half-Life 259$" "^directx: 0 4.07.00.0700$" "^hkcr: 0 HispaJuego$" "^borrar_clave: 0 2$"
+mira "y al correr otra vez, sigue ahí (REG_OPENED_EXISTING_KEY)" "^lee_otra_vez: 0 4 640$" "^lee_texto: 0 hw.dll 7$" "^lee_borrado: 2$" "^crear_existente: 0 2$"
+if mtype -i $J/c.img ::USUARIOS/USUARIO/REGISTRO.REG > $J/registro.reg 2>/dev/null && grep -q '^"ScreenWidth"=dword:00000280' $J/registro.reg && grep -q '^\[HKEY_CURRENT_USER.Software.Valve.Half-Life.Settings\]' $J/registro.reg \
+   && grep -q '^"Clave"=hex:01,02,fe,ff' $J/registro.reg && mtype -i $J/c.img ::USUARIOS/EQUIPO.REG 2>/dev/null | grep -q '^\[HKEY_LOCAL_MACHINE.Software.Classes..hlj\]'; then
+  ok "en el disco: \\USUARIOS\\USUARIO\\REGISTRO.REG (HKCU) y \\USUARIOS\\EQUIPO.REG (HKLM), de texto como los de REGEDIT4"
+else ko "REGISTRO.REG o EQUIPO.REG no están como deben: $(head -c 300 $J/registro.reg 2>/dev/null)"; fi
+mira "MSVCRT de VC6: __getmainargs con comillas, _initterm, WinMain con su lpCmdLine (como lo saca el arranque de VC6)" "^argc: 4$" "^argv2: \[dos tres\]$" "^initterm: 11$" "^winmain: \[uno \"dos tres\" cuatro\] hinstance 10$"
+mira "stdio en texto (\\n como \\r\\n en el disco) y en binario, sprintf con coma flotante, sscanf, _findfirst, la hora" \
+  "^texto_en_disco: 10 0d0a$" "^texto_leido: 8 0a$" "^binario: 5 b$" "^sprintf: 3.141593|-2.500|  7.3|1.234568e+04|0.0001|1e+20|3|1.00    |+3.00$" "^sscanf: 2 12 3.5$" "^findfirst: varios CRT.EXE$" "^findfirst_nada: -1$" "^time: 2026 o despues fecha$" "^strdate: 8$"
+mira "qsort, bsearch, setjmp y longjmp, _beginthreadex y _beginthread, _ftol y _CIpow/_CIsqrt del compilador, new de C++, _splitpath, _ecvt, Unicode; atexit al revés" \
+  "^qsort: 12345789 kiwi uva 5$" "^longjmp: 5$" "^beginthreadex: 40 9 con id$" "^beginthread: 42$" "^ftol: -3 00000002540be400$" "^cipow: 1024 141421$" "^new: si 3$" \
+  "^splitpath: C:|.JUEGOS.VALVE.|hl|.exe D:.OTRA.hl.dll$" "^ecvt: 12346 3 1$" "^unicode: 8 vida=100$" "^FIN CRT$" "^atexit: segundo puesto, el primero$" "^atexit: primero puesto, el ultimo$"
+mira "y lo de antes sigue igual (K32PRUE y HOLAC, con los hilos y el cerrojo grande)" "^tls: si 1234$" "^interlocked: 6 6 10 20$" "^FIN K32PRUE$" "^Primo 100: 541$"
+if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo (las de SEH las recoge el programa)"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+# 2. en el escritorio: la ventana del juego a pantalla completa y el ratón
+cp $J/d.img $J/v.img
+M=(); for _ in 1 2 3 4 5 6 7 8 9; do M+=(":monitor mouse_move 100 0"); done
+CAPTURAS=$G ESCRIBE=1 DISCO=$J/v.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $J/SEMILLA.BIN ":pausa 2" ":doble 60 186" ":pausa 4" \
+  ":escribe \\JUEGOS\\JUEGOV" ":tecla ret" ":pausa 5" "${M[@]}" ":pausa 3" "${M[@]}" ":pausa 6" > $J/juegov.sal 2>&1
+mtype -i $J/v.img ::JUEGOS/JUEGOV.TXT 2>/dev/null | tr -d '\r' > $J/juegov.txt
+S=$J/juegov.txt
+mira "GetVersionEx (4.10), QueryPerformanceCounter y timeGetTime a su paso (Sleep(100): 100 ms), timeBeginPeriod" "^version: 4.10 1$" "^timebeginperiod: 0$" "^qpc: mhz sube$" "^sleep100: bien bien$"
+mira "la DLL del juego por su ruta relativa a la carpeta del .EXE (con otra carpeta de trabajo), GetProcAddress y GetModuleFileName" "^loadlibrary_relativa: si 5 su ruta$" "^getprocaddress_nohay: nulo$"
+mira "una ventana WS_POPUP a pantalla completa (DirectDraw a 640 x 480): GetSystemMetrics y GetClientRect, en el modo del juego" "^ddraw: si 0 0$" "^pantalla: 640 480$" "^cliente: 0 0 640 480$"
+mira "SetCursorPos y GetCursorPos (en el modo del juego), ShowCursor, ClipCursor" "^cursor_centro: 320 240$" "^showcursor: -1 -2$" "^clipcursor: 100 100$"
+mira "mirar con el ratón como un motor de juegos (volviendo al centro en cada vuelta): más de lo que mide la pantalla" "^raton_al_centro: mas que la pantalla"
+mira "y DirectInput (el ratón relativo, lo movido de verdad, sin topar con el borde)" "^dinput_raton: 0 0 0$" "^dinput_relativo: mas que la pantalla" "^FIN JUEGOV$"
+S=$J/juegov.sal
+if ! grep -q "excepción\|\*\*\*" $S; then ok "JUEGOV: ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+# 3. UDP: cliente (contra el eco de aquí) y servidor (en el 27015, llevado desde fuera)
+mkdir -p $J/eco
+FU=$((20000 + RANDOM % 20000))
+python3 -I $AQUI/../tests/juegos/eco_udp.py $J/eco $FU > $J/eco.txt 2>&1 &
+EPID=$!
+for _ in $(seq 50); do [ -s $J/eco/puerto ] && break; sleep 0.1; done
+PE=$(cat $J/eco/puerto 2> /dev/null)
+DISCO=$J/d.img ARRANQUE=ordenes MODULOS= MEMORIA=64 QEMU_MAS="-nic user,model=e1000,hostfwd=udp::$FU-:27015" $AQUI/nucleo32/probar.sh $J/SEMILLA.BIN \
+  "cd \\JUEGOS" ":pausa 3" "REDUDP $PE" ":pausa 15" > $J/red.sal 2>&1
+kill $EPID 2> /dev/null
+tr -d '\r' < $J/red.sal | grep -v '^\[w32\]' > $J/red.txt
+S=$J/red.txt
+mira "UDP de cliente: sendto y recvfrom con el eco, gethostbyname del propio equipo, getsockname" "^eco: 13 \[eco: hola eco\] de 10.0.2.2:$PE$" "^mi_ip: 10.0.2.15$" "^getsockname: puerto propio$"
+mira "sin bloqueo (FIONBIO): WSAEWOULDBLOCK al momento (100 veces, deprisa); select y FIONREAD con UDP; la difusión" "^sin_bloqueo: -1 10035 deprisa$" "^select: 1 13$" "^tras_select: 13 \[eco: otra vez\]$" "^difusion: 9$"
+mira "de servidor: bind al 27015 (y otro al mismo, WSAEADDRINUSE), y contesta al que llega sin haberlo pedido" "^bind: 0$" "^bind_ocupado: -1 10048$" "^servidor_recibe: 13 \[hola servidor\]$" "^servidor_contesta: 22$" "^FIN REDUDP$"
+if [ "$(cat $J/eco/respuesta 2> /dev/null)" = "respuesta del servidor" ]; then ok "y la respuesta llega al otro equipo (aquí, por el puerto de QEMU)"; else ko "la respuesta del servidor no llega: $(cat $J/eco.txt)"; fi
+# 4. el sonido: DirectSound en bucle sin que el programa haga nada, waveOut, el CD
+if bash $AQUI/nucleo32/sonido/hacer.sh $J/son > $J/son.txt 2>&1; then
+  cp $J/d.img $J/s.img
+  mcopy -o -i $J/s.img $J/son/SONIDO.BIN $J/son/INICIO.WAV $J/son/APAGAR.WAV $J/son/AVISO.WAV $J/son/ERROR.WAV ::
+  rm -f "${J:?}/son.wav"
+  CAPTURAS=$G ESCRIBE=1 DISCO=$J/s.img ARRANQUE=escritorio MODULOS= MEMORIA=128 QEMU_MAS="-audiodev wav,id=snd0,path=$J/son.wav -device intel-hda -device hda-duplex,audiodev=snd0" \
+    $AQUI/nucleo32/probar.sh $J/SEMILLA.BIN ":pausa 6" ":doble 60 186" ":pausa 4" ":escribe \\JUEGOS\\SONJ" ":tecla ret" ":pausa 14" > $J/sonj.sal 2>&1
+  mtype -i $J/s.img ::JUEGOS/SONJ.TXT 2>/dev/null | tr -d '\r' > $J/sonj.txt
+  python3 -I $AQUI/nucleo32/sonido/oye.py $J/son.wav 440,660 > $J/son.oye 2>&1
+  S=$J/sonj.txt
+  mira "DirectSound: un búfer de 1 s en bucle, GetCurrentPosition (da la vuelta, el de escribir va delante), GetStatus (sonando, en bucle)" "^crear_bufer: 0$" "^play: 0$" "^vueltas_en_1500ms: bien" "^escribir_delante: si$" "^estado: 5$"
+  mira "waveOut con CALLBACK_EVENT: los cuatro trozos vuelven hechos, a su tiempo" "^waveout: 1 0$" "^waveout_hechos: 4 a su tiempo$"
+  mira "el CD de sonido por MCI (sin disco en QEMU): open, «media present», el error de «number of tracks» con su texto, play y mode; y por mciSendCommand" \
+    "^cd_open: 0$" "^cd_disco: 0 false$" "^cd_pistas: 276 \[\] No hay disco en el lector" "^cd_play: 276$" "^cd_modo: 0 not ready$" "^cd_mci_open: 0 con numero$" "^cd_mci_status: 0 0$" "^cd_mci_close: 0$" "^FIN SONJ$"
+  r=$(awk '$6 >= 400 && $6 <= 480 && $5 >= 3300 && $9 == 0' $J/son.oye | head -1)
+  if [ -n "$r" ]; then ok "suena el la de DirectSound 3,5 s seguidos, sin un corte, aunque el programa pase 2 s sin llamar a nada (la mezcla, en su hilo): $r"
+  else ko "el la de DirectSound no suena seguido: $(cat $J/son.oye | head -5 | tr '\n' ' ')"; fi
+  r=$(awk '$6 >= 600 && $6 <= 700 && $5 >= 850 && $5 <= 1300 && $9 == 0' $J/son.oye | head -1)
+  if [ -n "$r" ]; then ok "y el mi de waveOut, 1 s: $r"; else ko "el mi de waveOut no suena: $(cat $J/son.oye | head -5 | tr '\n' ' ')"; fi
+  S=$J/sonj.sal
+  if ! grep -q "excepción\|\*\*\*" $S; then ok "SONJ: ni una excepción ni una queja del núcleo"
+  else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+else ko "nucleo32/sonido/hacer.sh no hace SONIDO.BIN: $(tail -n 2 $J/son.txt)"; fi
+else
+  ko "no se pueden hacer el disco de los programas de Windows o los de JUEGOS: $(tail -n 2 $J/disco.txt) $(tail -n 2 $J/jp.txt)"
+fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin lo que pide un juego de Windows)"
+fi   # (JUEGOS)
 # ------------------------------------------------- 28. (ACCESORIOS) los accesorios
 # (ACCESORIOS, SOLO=accesorios) La Calculadora (CALC.BIN, ucalc.cas, con
 # las cuentas decimales de decimal.cas), el Reloj (RELOJ.BIN, ureloj.cas) y

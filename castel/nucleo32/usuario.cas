@@ -695,6 +695,16 @@ módulo Usuario
                 escribir_trozo(puntero(a), b)
                 devolver b
             caso 2:
+                ; (JUEGOS) un hilo de un programa de Windows acaba el proceso:
+                ; se le dice al proceso (con el código) y el hilo acaba; el
+                ; proceso, antes de soltar lo suyo, acaba sus hilos
+                si actual.líder <> nulo entonces
+                    actual.líder.salir_con := a
+                    actual.líder.salir_pedido := cierto
+                    acabar_tarea(actual.líder)
+                    terminar(a)
+                fin
+                acaba_hilos()
                 recoge_lo_suyo()
                 terminar(a)
             caso 3:
@@ -2336,10 +2346,21 @@ módulo Usuario
                 ; el CD de música del lector de la letra a: b = 0, la tabla de
                 ; las pistas (una Toc_cd) a c; b = 1, leer sectores de sonido
                 ; (una Pide_sonido en c: 2352 octetos cada uno); b = 2, igual
-                ; pero sin mirar la clase del sector (en crudo)
-                d := lector_de_letra(a)
-                si d = 0xFFFFFFFF entonces devolver NO_HAY fin
-                l := discos[d].cuál
+                ; pero sin mirar la clase del sector (en crudo). Con a = 0,
+                ; el primer lector que haya (el CD de sonido de los juegos:
+                ; WINMM.DLL, por HispaCDAudio de WIN32.BIN; una sola llamada
+                ; del CD de música para el Reproductor y para WIN32)
+                si a = 0 entonces
+                    l := MAX_LECTORES
+                    para i desde 0 hasta MAX_LECTORES - 1 hacer
+                        si l = MAX_LECTORES y lectores[i].hay entonces l := i fin
+                    fin
+                    si l = MAX_LECTORES entonces devolver NO_HAY fin
+                sino
+                    d := lector_de_letra(a)
+                    si d = 0xFFFFFFFF entonces devolver NO_HAY fin
+                    l := discos[d].cuál
+                fin
                 si b = 0 entonces
                     si no puede(c, tamaño(Toc_cd), cierto) entonces devolver NO_VALE fin
                     si no leer_toc(l, dirección(toc)) entonces devolver MAL fin
@@ -2456,6 +2477,15 @@ módulo Usuario
     ; código CORTADA. No vuelve. (La llaman la llamada al sistema y, por su
     ; dirección, el reloj: tareas.cas.)
     función cortar_actual()
+        ; (JUEGOS) un hilo de un programa de Windows: solo él (lo del proceso
+        ; lo suelta el proceso); y un proceso que acaba porque uno de sus
+        ; hilos lo ha pedido (ExitProcess), con su código y sin «^C»
+        si actual.líder <> nulo entonces terminar(CORTADA) fin
+        acaba_hilos()
+        si actual.salir_pedido entonces
+            recoge_lo_suyo()
+            terminar(actual.salir_con)
+        fin
         si actual.terminal <> 0 entonces escribir_terminal(actual.terminal, "^C\n", 3) sino escribir_trozo("^C\n", 3) fin
         recoge_lo_suyo()
         terminar(CORTADA)
@@ -2752,6 +2782,7 @@ módulo Usuario
             fin
             copiar_hasta(dirección(t.nombre_propio[0]), nombre, 16)
             t.nombre := dirección(t.nombre_propio[0])
+            t.teb := TEB_PRINCIPAL               ; (JUEGOS) la TEB de su hilo principal (FS, tareas.cas)
         fin
         devolver t
     fin
@@ -2760,6 +2791,14 @@ módulo Usuario
     ; quien llama): se acaba con el código MATADA. No vuelve.
     público función matar_actual()
         imprimir2("*** se acaba la tarea %u (%s)\n", actual.id, nat32(actual.nombre))
+        ; (JUEGOS) si es un hilo de un programa de Windows, se acaba el proceso entero
+        si actual.líder <> nulo entonces
+            actual.líder.salir_con := MATADA
+            actual.líder.salir_pedido := cierto
+            acabar_tarea(actual.líder)
+            terminar(MATADA)
+        fin
+        acaba_hilos()
         recoge_lo_suyo()
         terminar(MATADA)
     fin

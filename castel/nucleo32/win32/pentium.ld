@@ -7,7 +7,10 @@ ENTRY(_inicio)
 SECTIONS
 {
 	. = 0;
-	.text : { *(.entrada) *(.text .text.*) }
+	/* (JUEGOS) la cabecera en la primera página y lo demás desde 64 K: al
+	 * empezar, WIN32.BIN quita esas 64 K (la 183, 9) y un puntero nulo del
+	 * programa falla, como en Windows (SEH) */
+	.text : { *(.entrada) . = 0x10000; *(.text .text.*) }
 	.rodata : { *(.rodata .rodata.*) }
 	.data : { *(.data .data.*) }
 	_fin_imagen = .;

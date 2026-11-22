@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -71,61 +71,71 @@ módulo Semilla
     fin
 
     interrupción función división_por_cero()
-        variable cs_, eip: nat32
+        variable cs_, eip, m: nat32
         ensamblador
             mov eax, [ebp+32]
             mov {eip}, eax
             mov eax, [ebp+36]
             mov {cs_}, eax
+            mov {m}, ebp
         fin
+        si a_su_despachador(m, 0, 0, 0, falso) entonces devolver fin   ; (JUEGOS, SEH) al programa de Windows
         escribir("\n*** excepción 0: división por cero")
         no_sigue(cs_, eip, 9)
     fin
 
     interrupción función instrucción_mala()
-        variable cs_, eip: nat32
+        variable cs_, eip, m: nat32
         ensamblador
             mov eax, [ebp+32]
             mov {eip}, eax
             mov eax, [ebp+36]
             mov {cs_}, eax
+            mov {m}, ebp
         fin
+        si a_su_despachador(m, 6, 0, 0, falso) entonces devolver fin   ; (JUEGOS, SEH)
         escribir("\n*** excepción 6: instrucción que no existe")
         no_sigue(cs_, eip, 10)
     fin
 
     interrupción función excepción()
-        variable cs_, eip: nat32
+        variable cs_, eip, m: nat32
         ensamblador
             mov eax, [ebp+32]
             mov {eip}, eax
             mov eax, [ebp+36]
             mov {cs_}, eax
+            mov {m}, ebp
         fin
+        si a_su_despachador(m, 255, 0, 0, falso) entonces devolver fin   ; (JUEGOS, SEH)
         escribir("\n*** excepción del procesador")
         no_sigue(cs_, eip, 10)
     fin
 
     interrupción función excepción_con_código(código: nat32)
-        variable cs_, eip: nat32
+        variable cs_, eip, m: nat32
         ensamblador
             mov eax, [ebp+36]
             mov {eip}, eax
             mov eax, [ebp+40]
             mov {cs_}, eax
+            mov {m}, ebp
         fin
+        si a_su_despachador(m, 254, código, 0, cierto) entonces devolver fin   ; (JUEGOS, SEH)
         imprimir1("\n*** excepción del procesador (código %u)", código)
         no_sigue(cs_, eip, 11)
     fin
 
     interrupción función protección_general(código: nat32)
-        variable cs_, eip: nat32
+        variable cs_, eip, m: nat32
         ensamblador
             mov eax, [ebp+36]
             mov {eip}, eax
             mov eax, [ebp+40]
             mov {cs_}, eax
+            mov {m}, ebp
         fin
+        si a_su_despachador(m, 13, código, 0, cierto) entonces devolver fin   ; (JUEGOS, SEH)
         imprimir1("\n*** excepción 13: protección general (código %u)", código)
         no_sigue(cs_, eip, 13)
     fin
@@ -151,6 +161,11 @@ módulo Semilla
         si código yb 4 = 0 y atender_demanda(dir) entonces devolver fin
         ; un programa cuya pila baja a una página que aún no tiene: se le pone
         si código yb 5 = 4 y atender_pila(actual.cr3, dir, esp_u) entonces devolver fin
+        ; (JUEGOS, SEH) un programa de Windows: a su despachador
+        ensamblador
+            mov {esp_u}, ebp
+        fin
+        si código yb 4 <> 0 y a_su_despachador(esp_u, 14, código, dir, cierto) entonces devolver fin
         d[0] := dir
         si código yb 2 <> 0 entonces d[1] := nat32("escritura") sino d[1] := nat32("lectura") fin
         si código yb 4 <> 0 entonces d[2] := nat32("anillo 3") sino d[2] := nat32("núcleo") fin

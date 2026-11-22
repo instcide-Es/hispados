@@ -234,8 +234,7 @@ static HRESULT WINAPI S_CreateSoundBuffer(DS *s, const DSBUFFERDESC *d, DSB **pb
     if (!dat || !(dat->d = hx_pedir(44100))) { hx_soltar(dat); return E_OUTOFMEMORY; }
     dat->n = 44100;                 /* medio segundo */
     b = dsb_nuevo(s, dat, &f, d->dwFlags | DSBCAPS_CTRLVOLUME | DSBCAPS_CTRLPAN);
-    if (!b) return E_OUTOFMEMORY;
-    dat->refs--;
+    if (!b) return E_OUTOFMEMORY;   /* ((JUEGOS) dsb_nuevo ya cuenta la suya: 1) */
     b->primario = 1;
     s->primario = b;
     *pb = b;
@@ -250,8 +249,8 @@ static HRESULT WINAPI S_CreateSoundBuffer(DS *s, const DSBUFFERDESC *d, DSB **pb
   dat->n = d->dwBufferBytes;
   if (f.bits == 8) { u32 k; for (k = 0; k < dat->n; k++) dat->d[k] = 0x80; }
   b = dsb_nuevo(s, dat, &f, d->dwFlags);
-  if (!b) return E_OUTOFMEMORY;
-  dat->refs--;
+  if (!b) return E_OUTOFMEMORY;     /* ((JUEGOS) dsb_nuevo ya cuenta la suya: con «refs--» se quedaba a 0 y,
+                                     con un duplicado, se soltaban los datos que aún usaba el otro) */
   *pb = b;
   return S_OK;
 }
