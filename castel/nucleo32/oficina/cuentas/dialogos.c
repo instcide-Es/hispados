@@ -1479,7 +1479,25 @@ void dlg_ordenar(void)
 	if (s.c1 - s.c0 > 200)
 		s.c1 = (u16)(s.c0 + 200);
 	zona_orden = s;
-	tit = s.f1 > s.f0 && lib_valor(h, s.f0, h->cur_c)->t == V_TXT && lib_valor(h, s.f0 + 1, h->cur_c)->t != V_TXT;
+	/* ¿la primera fila son títulos? (texto encima de números, o con otro formato: la negrita) */
+	tit = 0;
+	if (s.f1 > s.f0) {
+		u32 c;
+		int todos_txt = 1;
+
+		for (c = s.c0; c <= s.c1; c++) {
+			const valor *a = lib_valor(h, s.f0, c), *b = lib_valor(h, s.f0 + 1, c);
+
+			if (a->t != V_TXT && a->t != V_VACIO)
+				todos_txt = 0;
+			if (a->t == V_TXT && b->t != V_TXT && b->t != V_VACIO)
+				tit = 1;
+			if (a->t == V_TXT && lib_estilo(C.lib, hj_estilo(h, s.f0, c))->negrita != lib_estilo(C.lib, hj_estilo(h, s.f0 + 1, c))->negrita)
+				tit = 1;
+		}
+		if (!todos_txt)
+			tit = 0;
+	}
 	opciones_columnas(1);
 	nuevo_cuadro("Ordenar", 480, 0);
 	for (k = 0; k < 3; k++) {

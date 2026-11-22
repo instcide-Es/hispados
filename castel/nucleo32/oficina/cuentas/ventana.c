@@ -915,9 +915,13 @@ static void ed_empieza(const char *t, int nuevo, int donde)
 
 static void ed_cancela(void)
 {
+	int i = lib_hoja_indice(C.lib, C.ed_hoja);
+
 	C.editando = 0;
 	C.senala = 0;
-	C.sucio = 1;
+	if (i >= 0)
+		C.lib->activa = (u32)i;
+	C.sucio = C.todo = 1;
 }
 
 /* acaba de corregir y lo pone; 0 si va bien (si no, se sigue corrigiendo) */
@@ -974,6 +978,15 @@ static int ed_acepta(int en_todo)
 	}
 	C.editando = 0;
 	C.senala = 0;
+	/* (si se señaló en otra hoja, a la de la celda) */
+	{
+		int i = lib_hoja_indice(C.lib, C.ed_hoja);
+
+		if (i >= 0 && (u32)i != C.lib->activa) {
+			C.lib->activa = (u32)i;
+			C.todo = 1;
+		}
+	}
 	cu_cambio();
 	return 0;
 }
@@ -1507,13 +1520,21 @@ static int tiene_titulos(rango r)
 {
 	hoja *h = cu_hoja();
 	u32 c;
+	int tit = 0;
 
 	if (r.f0 == r.f1)
 		return 0;
-	for (c = r.c0; c <= r.c1; c++)
-		if (lib_valor(h, r.f0, c)->t == V_TXT && lib_valor(h, r.f0 + 1, c)->t != V_TXT)
-			return 1;
-	return 0;
+	for (c = r.c0; c <= r.c1; c++) {
+		const valor *a = lib_valor(h, r.f0, c), *b = lib_valor(h, r.f0 + 1, c);
+
+		if (a->t != V_TXT && a->t != V_VACIO)
+			return 0;	/* (un número arriba: no son títulos) */
+		if (a->t == V_TXT && b->t != V_TXT && b->t != V_VACIO)
+			tit = 1;
+		if (a->t == V_TXT && lib_estilo(C.lib, hj_estilo(h, r.f0, c))->negrita != lib_estilo(C.lib, hj_estilo(h, r.f0 + 1, c))->negrita)
+			tit = 1;
+	}
+	return tit;
 }
 
 static void ordena_rapido(int desc)
@@ -2256,8 +2277,8 @@ static void tecla(const so_suceso *s)
 	int mayus = (s->mods & SO_CON_MAYUS) != 0, ctrl = (s->mods & SO_CON_CONTROL) != 0;
 	hoja *h = cu_hoja();
 
-	if (!C.cuadro && t != SO_TAB && t != SO_INTRO && !(C.editando && t >= 32 && t < SO_T_BASE) &&
-	    !(C.editando && (t == SO_RETROCESO || t == SO_T_SUPR)) && !(!C.editando && t >= 32 && t < SO_T_BASE))
+	/* (moverse sin escribir olvida la columna del primer Tab; escribiendo, no) */
+	if (!C.cuadro && !C.editando && t != SO_TAB && t != SO_INTRO && !(t >= 32 && t < SO_T_BASE) && t != SO_RETROCESO && t != SO_T_F2)
 		C.tab_col = -1;
 
 	if (C.cuadro) {
@@ -2386,6 +2407,9 @@ static void tecla(const so_suceso *s)
 			cu_orden(o[t]);
 		return;
 	}
+	/* (en Hispa-Pentium, Ctrl+1 y Ctrl+; llegan sin la marca de Control: se mira) */
+	if ((t == '1' || t == ';' || t == ',') && !ctrl && so_control())
+		ctrl = 1;
 	if (ctrl && t == '1') {
 		cu_orden(O_FMT_CELDAS);
 		return;

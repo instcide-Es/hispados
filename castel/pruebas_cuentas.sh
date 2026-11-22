@@ -201,6 +201,90 @@ for f in hoj xlsx ods; do
 done
 case "$($HCU --info $V/q/prueba.hoj 2>&1)" in *"1 gráficos"*"1 condicionales"*) ok "el .HOJ lleva también el gráfico y el formato condicional" ;; *) ko "el .HOJ sin gráfico o sin condicional" ;; esac
 grep -q "^Total;3.660,75 €;2.850,00 €;6.510,75 €" $V/q/prueba.csv && ok "el .CSV: lo que se ve, con «;»" || ko "el .CSV: $(head -c 200 $V/q/prueba.csv)"
+# el segundo guion: señalar con las flechas y F4, autofiltro, ordenar, buscar, meter filas, inmovilizar, zoom
+sed "s#CARPETA#$V/q#" > $V/q/guion2.txt <<'EOF'
+escribe Producto
+tecla tab
+escribe Unidades
+tecla tab
+escribe Precio
+tecla tab
+escribe Importe
+tecla ret
+escribe Peras
+tecla tab
+escribe 12
+tecla tab
+escribe 1,5
+tecla tab
+escribe =
+tecla izq
+tecla izq
+escribe *
+tecla izq
+tecla f4
+tecla ret
+escribe Manzanas
+tecla tab
+escribe 30
+tecla tab
+escribe 0,9
+tecla tab
+escribe =B3*$C3
+tecla ret
+escribe Uvas
+tecla tab
+escribe 7
+tecla tab
+escribe 2,25
+tecla tab
+escribe =B4*$C4
+tecla ret
+tecla ctrl-inicio
+clic 443 13
+elige 1
+marca autofiltro
+clic 132 168
+elige 7
+captura h4
+clic 132 168
+elige 0
+clic 443 13
+elige 0
+tecla tab
+tecla tab
+tecla tab
+tecla ret
+captura h5
+clic 104 13
+elige 21
+escribe uvas
+tecla ret
+tecla esc
+tecla abajo
+clic 205 13
+elige 1
+tecla ctrl-inicio
+tecla abajo
+clic 505 13
+elige 1
+rueda 2 400 300 ctrl
+mueve 100 210
+captura h6
+tecla f12
+escribe CARPETA/prueba2.hoj
+tecla ret
+cerrar
+tecla tab ret
+EOF
+OFI_GUION=$V/q/guion2.txt OFI_CAPTURAS=$V/cap OFI_VENTANA=1024x700 OFI_83=0 timeout 300 $HCU > $V/ventana2.txt 2>&1
+S=$V/ventana2.txt
+x=$($HCU --valores $V/q/prueba2.hoj 2>&1 | tr '\n' ' ')
+if ! grep -q "runtime error\|Sanitizer" $S && grep -q "aviso: Filtrado" $S && grep -q "cuadro «Ordenar»" $S && grep -q "Encontrado en A4" $S && grep -q "Zoom: 120%" $S; then
+  case "$x" in *"A1=Producto"*"A2=Manzanas"*"D2=27"*"A3=Peras"*"D3=10,8"*"A4=Uvas"*"D4=15,75"*)
+    ok "anfitrión: el segundo guion: señalar con las flechas y F4 (\$C\$2), autofiltro (un valor y todas), ordenar con títulos, buscar, meter filas, inmovilizar y Ctrl+rueda" ;;
+    *) ko "el segundo guion: lo guardado da «$x»" ;; esac
+else ko "anfitrión: el segundo guion:"; grep -a "runtime error\|Sanitizer\|aviso" $S | head -6 | sed 's/^/        /'; fi
 if command -v pdftotext > /dev/null && [ -f $V/q/prueba.pdf ]; then
   t=$(pdftotext $V/q/prueba.pdf - 2> /dev/null | tr '\n' ' ')
   q=$(qpdf --check $V/q/prueba.pdf 2>&1 | grep -c "No syntax or stream encoding errors")
@@ -212,16 +296,16 @@ fi
 python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $V/semilla.asm > /dev/null && nasm -f bin $V/semilla.asm -o $V/SEMILLA.BIN || { ko "semilla.cas no compila"; return; }
 bash $AQUI/nucleo32/disco.sh $V/v.img 32 > $V/disco.txt 2>&1 || { ko "disco.sh: $(tail -n 2 $V/disco.txt)"; return; }
 mcopy -i $V/v.img $V/CUENTAS.BIN ::
+# (las celdas, con el ratón: A1 en (100, 195), una fila cada 20 puntos; B, en x = 190)
 CAPTURAS=$G ESCRIBE=1 DISCO=$V/v.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 3" ":doble 60 186" ":pausa 4" \
   ":escribe CUENTAS" ":tecla ret" ":hasta 180 1 cuentas: lista" ":pausa 2" \
-  ":escribe Gastos de QEMU" ":tecla ret" ":escribe Luz" ":tecla tab" ":escribe 45,5" ":tecla ret" \
-  ":escribe Agua" ":tecla tab" ":escribe 23,75" ":tecla ret" ":escribe Gas" ":tecla tab" ":escribe 61" ":tecla ret" \
-  ":escribe Total" ":tecla tab" ":escribe =SUMA(B2:B4)" ":tecla ret" ":escribe IVA" ":tecla tab" ":escribe =REDONDEAR(B5*21%;2)" ":tecla ret" \
-  ":tecla ctrl-home" ":tecla ctrl-n" ":tecla down" ":tecla right" ":tecla shift-down" ":tecla shift-down" ":tecla shift-down" ":tecla shift-down" \
-  ":clic 449 107" ":pausa 1" ":tecla ctrl-home" ":tecla down" ":tecla shift-down" ":tecla shift-down" ":tecla shift-right" \
-  ":tecla f11" ":pausa 3" ":tecla ret" ":pausa 3" ":captura cu1" \
-  ":tecla ctrl-g" ":pausa 3" ":escribe PRUEBA.HOJ" ":tecla ret" ":hasta 60 1 cuentas: guardado" \
-  ":tecla f12" ":pausa 3" ":escribe PRUEBA.XLSX" ":tecla ret" ":hasta 60 2 cuentas: guardado" \
+  ":escribe Gastos de QEMU" ":tecla ret" ":escribe Luz" ":tecla tab" ":escribe 45,5" ":tecla ret" ":pausa 1" \
+  ":escribe Agua" ":tecla tab" ":escribe 23,75" ":tecla ret" ":escribe Gas" ":tecla tab" ":escribe 61" ":tecla ret" ":pausa 1" \
+  ":escribe Total" ":tecla tab" ":escribe =SUMA(B2:B4)" ":tecla ret" ":escribe IVA" ":tecla tab" ":escribe =REDONDEAR(B5*21%;2)" ":tecla ret" ":pausa 2" \
+  ":clic 100 195" ":pausa 1" ":clic 208 107" ":pausa 2" ":arrastra 190 215 190 295" ":pausa 1" ":clic 449 107" ":pausa 2" \
+  ":arrastra 100 215 190 255" ":pausa 1" ":clic 541 72" ":pausa 3" ":tecla ret" ":pausa 3" ":captura cu1" \
+  ":clic 300 400" ":pausa 1" ":tecla ctrl-g" ":pausa 3" ":escribe PRUEBA.HOJ" ":tecla ret" ":hasta 60 1 cuentas: guardado" ":pausa 1" \
+  ":clic 41 41" ":pausa 2" ":clic 100 176" ":pausa 3" ":escribe PRUEBA.XLSX" ":tecla ret" ":hasta 60 2 cuentas: guardado" ":pausa 1" \
   ":clic 604 72" ":pausa 3" ":tecla ret" ":hasta 180 1 cuentas: pdf" ":pausa 2" ":captura cu2" \
   ":tecla alt-f" ":pausa 2" ":tecla down" ":tecla ret" ":pausa 3" ":captura cu3" ":tecla esc" ":pausa 1" \
   ":clic 787 13" ":hasta 30 1 cuentas: adiós" ":pausa 2" ":escribe CUENTAS PRUEBA.HOJ" ":tecla ret" ":hasta 180 1 cuentas: abierto PRUEBA.HOJ" ":pausa 3" ":captura cu4" \
@@ -257,7 +341,7 @@ fi
 if [ -n "${CUENTAS_CAPTURAS:-}" ]; then
   mkdir -p "$CUENTAS_CAPTURAS"
   for c in cu1 cu2 cu3 cu4 cu5; do [ -f $G/$c.ppm ] && convert $G/$c.ppm "$CUENTAS_CAPTURAS/$c.png" 2> /dev/null; done
-  for c in h1 h2 h3; do [ -f $V/cap/$c.ppm ] && convert $V/cap/$c.ppm "$CUENTAS_CAPTURAS/$c.png" 2> /dev/null; done
+  for c in h1 h2 h3 h4 h5 h6; do [ -f $V/cap/$c.ppm ] && convert $V/cap/$c.ppm "$CUENTAS_CAPTURAS/$c.png" 2> /dev/null; done
 fi
 # ---- 3. lo que tarda en un Atom ----
 [ -n "${CUENTAS_SOLO_QEMU:-}" ] && return
