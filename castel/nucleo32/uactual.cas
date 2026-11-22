@@ -641,6 +641,9 @@ módulo UActual
         variable d: arreglo [1] de nat32
         variable p: puntero a byte
         cuento := mira_arranque()
+        ; (COMPAT) el Asistente de compatibilidad: si win32 ha cambiado desde que
+        ; se comprobaron los programas de este usuario, avisa (si no está, nada)
+        lanzar_suelto("\\COMPAT.BIN", "/REVISA")
         ; la red: hasta 90 s (el servicio se pone en marcha con el escritorio)
         nuevas := 0
         i := 0

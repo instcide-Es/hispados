@@ -1,0 +1,44 @@
+# Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+# (COMPAT) Los componentes redistribuibles de Microsoft que el Asistente de
+# compatibilidad sabe bajar (de download.microsoft.com, por quien los usa) y
+# de los que pone solo las DLL en \WIN32. Solo los que valen con WIN32.BIN
+# (que no dependen de lo de dentro de Windows NT): docs/PENTIUM.md, «Los
+# componentes de Microsoft», con por qué los demás no. No van en el
+# paquete: aquí solo está dónde están, lo que miden y su SHA-256 (medido el
+# 22/11/2026: Microsoft no lo publica; su ETag no es el SHA-256 del archivo).
+# Las URL siguen vivas (curl -I, 22/11/2026: 200).
+#
+# Cada bloque: nombre, url, tam, sha256, interior (el CAB o el MSI de dentro
+# donde van las DLL; vacío si van en el primero), dlls (las que se sacan,
+# por el nombre de su directorio de exportaciones), licencia (el archivo de
+# dentro con la licencia; «recurso:LICENSE», un recurso del ejecutable) y para.
+
+[vc2010]
+nombre=Microsoft Visual C++ 2010 SP1 (x86)
+url=https://download.microsoft.com/download/1/6/5/165255E7-1014-4D0A-B094-B6A430A6BFFC/vcredist_x86.exe
+tam=8993744
+sha256=99dce3c841cc6028560830f7866c9ce2928c98cf3256892ef8e6cf755147b0d8
+interior=vc_red.cab
+dlls=MSVCR100.DLL,MSVCP100.DLL,MFC100.DLL,MFC100U.DLL,ATL100.DLL,VCOMP100.DLL
+licencia=3082\eula.rtf
+para=La biblioteca de C y C++ de Visual C++ 2010 (10.0.40219.1) y sus ventanas (MFC): la piden programas y juegos de 2010 a 2015.
+
+[vc2008]
+nombre=Microsoft Visual C++ 2008 SP1 (x86)
+url=https://download.microsoft.com/download/5/D/8/5D8C65CB-C849-4025-8E95-C3966CAFD8AE/vcredist_x86.exe
+tam=4483040
+sha256=8742bcbf24ef328a72d2a27b693cc7071e38d3bb4b9b44dec42aa3d2c8d61d92
+interior=vc_red.cab
+dlls=MSVCR90.DLL,MSVCP90.DLL,MFC90.DLL,MFC90U.DLL,ATL90.DLL,VCOMP90.DLL
+licencia=eula.3082.txt
+para=La biblioteca de C y C++ de Visual C++ 2008 (9.0.30729.6161) y sus ventanas (MFC): la piden programas y juegos de 2008 a 2012.
+
+[vc2005]
+nombre=Microsoft Visual C++ 2005 SP1 (x86)
+url=https://download.microsoft.com/download/8/B/4/8B42259F-5D70-43F4-AC2E-4B208FD8D66A/vcredist_x86.EXE
+tam=2710520
+sha256=8648c5fc29c44b9112fe52f9a33f80e7fc42d10f3b5b42b2121542a13e44adfd
+interior=vcredist.msi
+dlls=MSVCR80.DLL,MSVCP80.DLL,MFC80.DLL,MFC80U.DLL,ATL80.DLL,VCOMP.DLL
+licencia=recurso:LICENSE
+para=La biblioteca de C y C++ de Visual C++ 2005 (8.0.50727.6195) y sus ventanas (MFC): la piden programas y juegos de 2005 a 2009. La licencia, en inglés (es la que trae).

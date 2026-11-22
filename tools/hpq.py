@@ -125,7 +125,7 @@ TIPO_POR_NOMBRE = {
     'red': 'internet', 'tls': 'internet', 'navega': 'internet', 'ssh': 'internet',
     'tailscal': 'internet', 'wifi': 'internet', 'correo': 'internet',  # (CORREO)
     'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina', 'pluma': 'oficina',   # (PLUMA32: pluma)
-    'consola': 'herramientas', 'accesori': 'herramientas', 'comprim': 'herramientas',
+    'consola': 'herramientas', 'accesori': 'herramientas', 'comprim': 'herramientas', 'compat': 'herramientas',  # (COMPAT)
     'ejemplos': 'desarrollo',
     'win32': 'windows',
     'escudo': 'seguridad', 'escbase': 'seguridad', 'escmes': 'seguridad', 'escdia': 'seguridad',
@@ -527,6 +527,14 @@ OPCIONALES = [
      'base >= ' + VERSION_087 + ', red >= 0.8.1, tls >= ' + VERSION_087, [
         ('CORREO.BIN', r'\HISPA\CORREO.BIN'), ('CORREO.TXT', r'\HISPA\CORREO.TXT'),
         ('CORREO.MNU', r'\HISPA\MENU\CORREO.MNU'), ('CORREO.ICP', r'\HISPA\MENU\CORREO.ICP')]),
+    # (COMPAT) el Asistente de compatibilidad (castel/nucleo32/compat/paquete.sh; tipo «herramientas»): qué le
+    # falta a un programa de Windows, el informe (con permiso), el aviso al cambiar win32 y los componentes
+    # de Microsoft (la lista REDIST.LST: se bajan de Microsoft, no van aquí)
+    ('compat', '1.0', 'Asistente de compatibilidad: qué le falta a un programa de Windows, explicado; avisa cuando ya está y pone los componentes de Microsoft',
+     'base >= 0.8.4, win32 >= 1.0', [
+        ('BIN/COMPAT.BIN', r'\HISPA\COMPAT.BIN'), ('COMPAT/REDIST.LST', r'\HISPA\COMPAT\REDIST.LST'),
+        ('COMPAT/COMPAT.INI', r'\HISPA\COMPAT\COMPAT.INI'), ('COMPAT/LEEME.TXT', r'\HISPA\COMPAT\LEEME.TXT'),
+        ('COMPAT.MNU', r'\HISPA\MENU\COMPAT.MNU'), ('COMPAT.ICP', r'\HISPA\MENU\COMPAT.ICP')]),
 ]
 
 # (0.8.6) los que el catálogo marca del sistema («sistema=nombre»): los que
