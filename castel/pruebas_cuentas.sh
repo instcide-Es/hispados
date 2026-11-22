@@ -19,7 +19,8 @@
 #   3. lo que tarda en un Atom (QEMU -cpu n270 -icount shift=1): CUENTAS --mide
 #      10000 (recalcular una hoja de 10.000 fórmulas y desplazarse).
 # Con CUENTAS_CAPTURAS=carpeta, las capturas (en .png) van también allí (las de
-# docs/pentium/cuentas/). FUZZ_CUENTAS=vueltas (300 de ordinario).
+# docs/pentium/cuentas/). FUZZ_CUENTAS=vueltas (300 de ordinario). CUENTAS_SOLO_QEMU=1: solo
+# la 2; CUENTAS_SIN_QEMU=1: solo la 1.
 
 parte_cuentas() {
 echo "== Cuentas 2 (CUENTAS.BIN: la hoja de cálculo de 32 bits, en C portable) =="
@@ -292,7 +293,8 @@ if command -v pdftotext > /dev/null && [ -f $V/q/prueba.pdf ]; then
     *) ko "el PDF exportado da «$t»" ;; esac
 else ko "no está prueba.pdf (o falta pdftotext)"; fi
 fi
-# ---- 2. en QEMU ---- (con la ventana maximizada: lo de dentro empieza en (4, 28))
+# ---- 2. en QEMU ---- (con la ventana maximizada: lo de dentro empieza en (4, 28)); CUENTAS_SIN_QEMU=1: sin esta ni la 3
+[ -n "${CUENTAS_SIN_QEMU:-}" ] && return
 python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $V/semilla.asm > /dev/null && nasm -f bin $V/semilla.asm -o $V/SEMILLA.BIN || { ko "semilla.cas no compila"; return; }
 bash $AQUI/nucleo32/disco.sh $V/v.img 32 > $V/disco.txt 2>&1 || { ko "disco.sh: $(tail -n 2 $V/disco.txt)"; return; }
 mcopy -i $V/v.img $V/CUENTAS.BIN ::
@@ -315,7 +317,7 @@ S=$V/qemu.sal
 [ -n "${CUENTAS_CAPTURAS:-}" ] && mkdir -p "$CUENTAS_CAPTURAS" && cp $S "$CUENTAS_CAPTURAS/qemu.sal"
 mira_cu() { if grep -a -q -- "$2" $S; then ok "$1"; else ko "$1: falta «$2»"; grep -a "cuentas" $S | tail -6 | sed 's/^/        /'; fi; }
 mira_cu "en QEMU: Cuentas 2 abre su ventana en el escritorio" "cuentas: lista"
-mira_cu "en QEMU: el asistente para gráficos (F11)" "cuadro «Asistente para gráficos»"
+mira_cu "en QEMU: el asistente para gráficos (su botón de la barra)" "cuadro «Asistente para gráficos»"
 mira_cu "en QEMU: guardado como PRUEBA.HOJ" "cuentas: guardado .*PRUEBA.HOJ"
 mira_cu "en QEMU: guardado como .XLSX (el núcleo aún da 8+3: PRUEBA.XLS)" "cuentas: guardado .*PRUEBA.XLS"
 mira_cu "en QEMU: exportado a PDF" "cuentas: pdf .*PRUEBA.PDF"

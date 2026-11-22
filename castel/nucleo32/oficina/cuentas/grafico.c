@@ -113,16 +113,22 @@ static void saca(libro *l, const grafico *g)
 	ns = g->en_filas ? alto : ancho;
 	nc = g->en_filas ? ancho : alto;
 	if (g->rotulos) {
-		/* ¿la primera «fila» de cada serie es su nombre? (si tiene algún texto) */
-		for (i = 0; i < ns && !cab_series; i++)
-			if (val(h, g, i, 0)->t == V_TXT)
-				cab_series = 1;
-		/* ¿la primera serie son los rótulos de las categorías? */
-		for (j = cab_series; j < nc && !cab_cat; j++)
+		/* como Excel: la primera serie son los rótulos de las categorías si
+		 * tiene textos (debajo de su primera celda, que puede ser un título);
+		 * y la primera «fila» son los nombres de las series si en las demás
+		 * series es texto, o si la esquina está vacía */
+		for (j = 1; j < nc && !cab_cat; j++)
 			if (val(h, g, 0, j)->t == V_TXT)
 				cab_cat = 1;
+		if (nc == 1 && val(h, g, 0, 0)->t == V_TXT && ns > 1)
+			cab_cat = 1;
 		if (g->tipo == GR_DISPERSION)
 			cab_cat = 0;
+		if (val(h, g, 0, 0)->t == V_VACIO && ns > 1 && nc > 1)
+			cab_series = 1;
+		for (i = cab_cat ? 1 : 0; i < ns && !cab_series; i++)
+			if (val(h, g, i, 0)->t == V_TXT)
+				cab_series = 1;
 	}
 	s0 = cab_cat ? 1 : 0;
 	k0 = cab_series ? 1 : 0;

@@ -6628,6 +6628,8 @@ docs/pentium/METAS.md.
 | ![El cuadro Formato de celdas (Alt+F)](pentium/cuentas/cu3.png) | ![Vuelto a abrir: PRUEBA.HOJ](pentium/cuentas/cu4.png) |
 | ![Y el .XLSX (PRUEBA.XLS por el 8+3)](pentium/cuentas/cu5.png) | ![En el anfitrión: combinar y centrar, €, gráfico con tramas, formato condicional](pentium/cuentas/h1.png) |
 | ![Formato de celdas, pestaña Número](pentium/cuentas/h2.png) | ![La vista preliminar](pentium/cuentas/h3.png) |
+| ![El autofiltro: solo «Peras» (el botón lleva un embudo)](pentium/cuentas/h4.png) | ![Ordenado por Datos > Ordenar: la fila de títulos queda arriba](pentium/cuentas/h5.png) |
+| ![Ordenado, con la primera fila inmovilizada y a 120%](pentium/cuentas/h6.png) | |
 
 **Qué es.** Cuentas 2 es la hoja de cálculo nativa de Hispa-Pentium: un
 programa del anillo 3 de 32 bits (`\HISPA\CUENTAS.BIN`, unos 820 KB con las
