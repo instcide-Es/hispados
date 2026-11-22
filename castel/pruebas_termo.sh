@@ -35,16 +35,19 @@
 #     htop, vim y less a pantalla completa (capturas), las teclas en crudo y
 #     el tamaño nuevo al cambiar la ventana (window-change: la ventana
 #     empieza de 640 x 380 y se agranda con Alt+Espacio, «Tamaño» y las flechas).
+#  6. -smp 4 (con y sin KVM): la carga en los demás procesadores; y sin
+#     ninguna NVIDIA, que lo dice sin colgarse.
+#  7. Por UEFI (OVMF, q35, -smp 2): el Termómetro, las zonas y la carga.
 # Necesita ser root (usb.sh), qemu-system-x86_64, socat, mtools y fsck.fat;
 # para la 0, gcc; para la 4, php y openssl; para la 5, sshd (OpenSSH).
 
 # termo_qemu IMAGEN NOMBRE SEGUNDOS "CPU" "t:orden del monitor"...
-# (TQ_RED: la red de QEMU; sin red si no se dice)
+# (TQ_RED: la red de QEMU; sin red si no se dice. TQ_FIRM: el firmware, OVMF para UEFI)
 termo_qemu() {
   local img=$1 n=$2 seg=$3 cpu=$4 t=0 o w q; shift 4
   rm -f $Y/$n.mon
   # shellcheck disable=SC2086
-  qemu-system-x86_64 $cpu ${TQ_RED:--nic none} -m 512 -display none -monitor unix:$Y/$n.mon,server,nowait -serial file:$Y/$n.sal -no-reboot \
+  qemu-system-x86_64 $cpu ${TQ_FIRM:-} ${TQ_RED:--nic none} -m 512 -display none -monitor unix:$Y/$n.mon,server,nowait -serial file:$Y/$n.sal -no-reboot \
     -acpitable file=$Y/termo.aml -device qemu-xhci -drive file=$img,format=raw,if=none,id=u -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
   q=$!
   QPID=$q
@@ -234,6 +237,9 @@ fi
 termo_qemu $Y/termo.img t6 70 "-cpu Haswell" "44:sendkey 1" "46:sendkey c" "56:$C" "56:o /b 0x71 91"
 mira "con un solo procesador: lo dice y carga solo este" "termo: suceso: la carga, en este procesador solo: los demás no (ningún otro procesador ha contestado"
 mira "(NVIDIA) sin gráficas NVIDIA (QEMU): lo dice, sin colgarse" "termo: suceso: gráficas NVIDIA Maxwell: ninguna en el PCI"
+# 7. (UEFI) la misma memoria por UEFI (OVMF, q35): el Termómetro, las zonas de
+# la SSDT de prueba (ACPI.BIN con la RSDP que le pasa el núcleo) y la carga
+termo_uefi
 # 4. «Enviar a Carlos»
 termo_enviar
 # 5. «Terminal»
@@ -385,4 +391,20 @@ PY
   for c in vt2 vt3 vt4; do [ -s $H/$c.ppm ] || ko "falta la captura $c (htop, vim o less)"; done
   [ -s $H/vt2.ppm ] && [ -s $H/vt3.ppm ] && [ -s $H/vt4.ppm ] && ok "htop, vim y less a pantalla completa por SSH, en la ventana (capturas vt2, vt3 y vt4)"
   if ! grep -q "excepción\|\*\*\*" $S; then ok "en la sesión, ni una excepción ni una queja del núcleo"; else ko "el núcleo se ha quejado: $(grep "excepción\|\*\*\*" $S | head -n 2)"; fi
+}
+
+# (TERMO) 7. por UEFI (OVMF), si lo hay
+termo_uefi() {
+  local OV=/usr/share/OVMF C="o /b 0x70 0x63"
+  if [ ! -f $OV/OVMF_CODE_4M.fd ] || ! mdir -i $Y/termo.img@@1M ::EFI/BOOT/BOOTX64.EFI > /dev/null 2>&1; then
+    echo "  (sin OVMF o sin GRUB EFI en la memoria: sin el Termómetro por UEFI)"; return
+  fi
+  cp $OV/OVMF_VARS_4M.fd $Y/vars64.fd
+  TQ_FIRM="-machine q35 -fw_cfg name=opt/ovmf/X-PciMmio64Mb,string=0 -drive if=pflash,format=raw,readonly=on,file=$OV/OVMF_CODE_4M.fd -drive if=pflash,format=raw,file=$Y/vars64.fd" \
+    termo_qemu $Y/termo.img t8 110 "-smp 2 -cpu Haswell" "60:sendkey 1" "62:sendkey c" "76:$C" "76:o /b 0x71 91"
+  mira "por UEFI (OVMF): GRUB EFI arranca la primera entrada, la del Termómetro, que se abre solo; ACPI.BIN, con la RSDP que le pasa el núcleo, ve la zona de la SSDT de prueba" \
+    "escritorio: lanzo .TERMO.BIN" "termo: suceso: sensor «Zona ACPI ._TZ_.TZ01»: 45,0 °C (límite 100,0 °C)" "termo: suceso: ACPI (ACPI.BIN): 2 zonas térmicas"
+  mira "por UEFI, la carga en los 2 procesadores (el trampolín en la memoria baja libre del mapa de UEFI) y la parada de seguridad" \
+    "termo: suceso: la carga, en 2 procesadores (este y 1 más" "termo: fin de la carga a los [0-9]* s (PARADA DE SEGURIDAD)"
+  if ! grep -q "excepción\|\*\*\*" $S; then ok "por UEFI, ni una excepción ni una queja del núcleo"; else ko "por UEFI, el núcleo se queja: $(grep "excepción\|\*\*\*" $S | head -n 2)"; fi
 }

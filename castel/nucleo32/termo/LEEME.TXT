@@ -69,6 +69,39 @@ Con Linux:
   Si la pantalla sale rara, elija «Termometro (1024 x 600)» o «(800 x 600)».
 
 
+  La memoria arranca también por UEFI (los equipos de 2012 en adelante): en
+  el menú de arranque sale como «UEFI: <su nombre>»; su primera línea es
+  «Termometro (UEFI)». Por UEFI hay que apagar antes el «Secure Boot»:
+
+
+2 BIS. POR UEFI: APAGAR EL «SECURE BOOT» (ARRANQUE SEGURO)
+-----------------------------------------------------------
+
+Hispa-Pentium no está firmado por Microsoft, así que con el «Secure Boot»
+encendido el equipo no lo arranca (dice «Secure Boot Violation», «Invalid
+signature» o se salta la memoria sin decir nada). Hay que apagarlo en la
+configuración del firmware (lo que se suele llamar «la BIOS» del equipo):
+
+  1. Encienda el equipo y pulse enseguida, varias veces, la tecla de la
+     configuración. Suele ser F2 (Acer, Asus, Dell, Toshiba, Medion), Supr
+     (los de sobremesa), F10 (HP), F1 (Lenovo ThinkPad) o Esc.
+  2. Busque la pestaña «Security» (Seguridad) o «Boot» (Arranque).
+  3. Ponga «Secure Boot» en «Disabled» (Desactivado).
+     - En los Acer (y otros con Insyde), «Secure Boot» sale en gris hasta
+       que se pone una contraseña de supervisor: «Set Supervisor Password»,
+       en «Security». Póngala, apague el Secure Boot y, si quiere, quite
+       luego la contraseña dejándola en blanco.
+     - Si pregunta por «OS Type», elija «Other OS» (no «Windows UEFI»).
+  4. Guarde y salga: F10, o «Exit Saving Changes».
+  5. Arranque de la memoria con el menú de arranque: F12 (Acer, Dell,
+     Lenovo, Toshiba), F9 (HP), F8 o F11 (Asus, Medion, MSI), Esc...
+     La memoria sale como «UEFI: <su nombre>» (y, si el equipo tiene
+     también BIOS de siempre, otra vez sin «UEFI»: cualquiera de las dos vale).
+
+Se puede volver a encender el Secure Boot cuando se quiera (para arrancar
+Windows, por ejemplo): a Windows no le pasa nada por apagarlo un rato, y
+con él encendido simplemente no arranca esta memoria.
+
 3. QUÉ SE VE
 ------------
   Arriba: el procesador, su frecuencia y el modelo del portátil.

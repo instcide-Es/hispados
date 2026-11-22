@@ -1392,12 +1392,7 @@ static int sesion(void)
 				if (e.clase != EV_TECLA)
 					continue;
 				k = tecla_vt(&e, o);
-				{
-					static int dichas;
 
-					if (dichas++ < 40)	/* (TERMO) las primeras teclas, al puerto serie (las pruebas) */
-						h_apunta("(TERMO) tecla %x (%x, %x): %d octetos", e.a, e.b, e.c, k);
-				}
 				if (k == -2) {
 					if (pega_v() < 0)
 						goto fin;
