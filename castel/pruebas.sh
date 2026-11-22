@@ -1638,9 +1638,10 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
-    # (SSH, TAILSCALE: SSH, SSHD, WG y TAILSCAL también van como módulos; (SONIDO) y SONIDO.BIN con sus cuatro .WAV: 31)
+    # (SSH, TAILSCALE: SSH, SSHD, WG y TAILSCAL también van como módulos; (SONIDO) y SONIDO.BIN con sus cuatro .WAV: 31;
+    # (PANEL) y PANEL.BIN y HORARED.BIN: 41)
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 39 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 41 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 46 155 54 163 "Bloc de notas" negrita 256 159 264 167 "Mis documentos"
@@ -3488,8 +3489,8 @@ mira "al arrancar, con red, ACTUALIZ /BANDEJA mira solo si hay actualizaciones (
   "^actualiz: aviso en la bandeja: Hay una actualización\.$" "^reiniciar$" "^actualiz: aviso en la bandeja: El núcleo de Hispa-Pentium El núcleo nuevo ha arrancado bien\.$"
 miracap "el aviso de la bandeja: una ventanita abajo a la derecha, «Hay una actualización», con «Verlas» y «Ahora no»" u1 negrita 400 460 480 480 "Hay una actualización." negrita 420 510 520 530 Verlas
 [ -n "${GUARDA_CAPTURAS:-}" ] && mkdir -p "$GUARDA_CAPTURAS" && cp $G/u[23].ppm "$GUARDA_CAPTURAS/"
-miracap "«Verlas» abre «Programas y actualizaciones» en «Pendientes (1)»: base, de la 0.8.6 a la 0.9, y el catálogo de Internet con su firma buena" u2 \
-  negrita 10 120 150 140 "Pendientes (1)" negrita 40 190 120 230 base texto 110 190 200 230 "0.8.6" texto 195 190 245 230 "0.9" texto 300 88 790 110 "Paquetes de http://10.0.2.2:" \
+miracap "«Verlas» abre «Programas y actualizaciones» en «Pendientes (1)»: base, de la $VERSION_BASE a la 0.9, y el catálogo de Internet con su firma buena" u2 \
+  negrita 10 120 150 140 "Pendientes (1)" negrita 40 190 120 230 base texto 110 190 200 230 "$VERSION_BASE" texto 195 190 245 230 "0.9" texto 300 88 790 110 "Paquetes de http://10.0.2.2:" \
   texto 300 88 790 110 "(firma buena)"
 miracap "«Actualizar todo»: con el núcleo nuevo, ofrece «Reiniciar ahora» o «Más tarde»" u3 negrita 150 200 660 400 "Reiniciar ahora" negrita 150 200 660 400 "Más tarde" \
   texto 140 200 660 320 "Se ha puesto un núcleo nuevo: se usa al reiniciar"
@@ -5377,14 +5378,14 @@ miracap "conectada: arriba «Conectado a», la señal, el canal y la IP; en la l
 cp $Wf/d.img $Wf/v2.img
 python3 -I $AQUI/ccastel.py $AQUI/nucleo32/upanel.cas -o $Wf/upanel.asm > /dev/null && nasm -f bin $Wf/upanel.asm -o $Wf/PANEL.BIN && mcopy -i $Wf/v2.img $Wf/PANEL.BIN ::
 CAPTURAS=$G MEMORIA=64 ESCRIBE=1 DISCO=$Wf/v2.img ARRANQUE="escritorio conred" MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 8" ":clicd 400 300" ":pausa 1" ":clic 420 310" ":pausa 2" \
-  ":clic 336 326" ":pausa 4" ":captura wf5" ":clic 632 139" ":pausa 2" ":captura wf6" ":clic 419 139" ":pausa 3" ":captura wf7" > $Wf/conf.sal 2>&1
+  ":clic 336 326" ":pausa 4" ":raton 400 450" ":captura wf5" ":clic 632 139" ":raton 400 450" ":pausa 2" ":captura wf6" ":clic 440 139" ":pausa 3" ":captura wf7" > $Wf/conf.sal 2>&1
 S=$Wf/conf.sal
 mira "Configuración, «Red»: Wi-Fi y luego Cable llegan a RED.BIN (un aviso del núcleo), que lo guarda; con Cable, WIFI.BIN se para" \
   "^red: Wi-Fi: se usa el Wi-Fi (Preferir=WIFI)$" "^red: Wi-Fi: se usa solo el cable (Preferir=CABLE)$" "^wifi: RED.BIN usa el cable: el Wi-Fi se para$"
 miracap "el Panel de control > Red y Wi-Fi: «Por dónde va la red» con Automático (elegido), Cable y Wi-Fi" wf5 negrita15 230 90 300 120 "Por dónde va la red" \
   negrita15 240 120 300 150 "Automático (elegido)" negrita15 480 120 520 150 "Cable"
 miracap "y elegido Wi-Fi, los botones cambian («Wi-Fi (elegido)»), lo de al lado no" wf6 distinto 236 123 440 32 $G/wf5.ppm igual 10 300 200 60 $G/wf5.ppm \
-  negrita15 460 120 520 150 "Wi-Fi (elegido)"
+  negrita15 500 120 520 135 "Wi-Fi (elegido)"
 miracap "y con Cable, el icono de la bandeja deja de ser el del Wi-Fi" wf7 distinto 700 570 40 25 $G/wf6.ppm
 if saca $Wf/v2.img RED.INI $Wf/red2.ini && grep -q "^Preferir=CABLE.$" $Wf/red2.ini; then ok "y RED.INI queda con Preferir=CABLE"; else ko "RED.INI no guarda lo de Configuración"; fi
 else ko "no se pueden hacer el disco o WIFISIM.BIN: $(tail -2 $Wf/disco.txt) $(tail -2 $Wf/chip_hacer.txt)"; fi
