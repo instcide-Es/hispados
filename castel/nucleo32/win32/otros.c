@@ -1,5 +1,5 @@
 /* otros.c - WIN32.BIN: lo poco que piden los programas de ADVAPI32 (el
- * registro: no hay, todo «no está»), SHELL32, VERSION y WINSPOOL.
+ * registro, desde JUEGOS, en registro.c), SHELL32, VERSION y WINSPOOL.
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include "w32.h"
 #include "k32.h"
@@ -7,22 +7,7 @@
 u32 WINAPI GetModuleFileNameA(HMODULE h, char *d, u32 n);
 BOOL WINAPI CreateProcessA(const char *, char *, void *, void *, BOOL, u32, void *, const char *, void *, void *);
 
-/* el registro: no hay */
-API(i32) RegOpenKeyExA(HKEY k, const char *s, u32 o, u32 a, HKEY *r) { (void)k; (void)s; (void)o; (void)a; *r = 0; return 2; }
-API(i32) RegOpenKeyExW(HKEY k, const WCHAR *s, u32 o, u32 a, HKEY *r) { (void)k; (void)s; (void)o; (void)a; *r = 0; return 2; }
-API(i32) RegOpenKeyA(HKEY k, const char *s, HKEY *r) { (void)k; (void)s; *r = 0; return 2; }
-API(i32) RegCreateKeyExA(HKEY k, const char *s, u32 r, char *c, u32 o, u32 a, void *sg, HKEY *res, u32 *d) { (void)k; (void)s; (void)r; (void)c; (void)o; (void)a; (void)sg; *res = (HKEY)0x80001234; if (d) *d = 1; return 0; }
-API(i32) RegCreateKeyA(HKEY k, const char *s, HKEY *r) { (void)k; (void)s; *r = (HKEY)0x80001234; return 0; }
-API(i32) RegCloseKey(HKEY k) { (void)k; return 0; }
-API(i32) RegQueryValueExA(HKEY k, const char *n, u32 *r, u32 *t, u8 *d, u32 *l) { (void)k; (void)n; (void)r; (void)t; (void)d; (void)l; return 2; }
-API(i32) RegQueryValueExW(HKEY k, const WCHAR *n, u32 *r, u32 *t, u8 *d, u32 *l) { (void)k; (void)n; (void)r; (void)t; (void)d; (void)l; return 2; }
-API(i32) RegQueryValueA(HKEY k, const char *s, char *d, i32 *l) { (void)k; (void)s; (void)d; (void)l; return 2; }
-API(i32) RegSetValueExA(HKEY k, const char *n, u32 r, u32 t, const u8 *d, u32 l) { (void)k; (void)n; (void)r; (void)t; (void)d; (void)l; return 0; }
-API(i32) RegDeleteKeyA(HKEY k, const char *s) { (void)k; (void)s; return 0; }
-API(i32) RegDeleteValueA(HKEY k, const char *s) { (void)k; (void)s; return 0; }
-API(i32) RegEnumKeyExA(HKEY k, u32 i, char *n, u32 *l, u32 *r, char *c, u32 *cl, void *t) { (void)k; (void)i; (void)n; (void)l; (void)r; (void)c; (void)cl; (void)t; return 259; }
-API(i32) RegEnumValueA(HKEY k, u32 i, char *n, u32 *l, u32 *r, u32 *t, u8 *d, u32 *dl) { (void)k; (void)i; (void)n; (void)l; (void)r; (void)t; (void)d; (void)dl; return 259; }
-API(i32) RegFlushKey(HKEY k) { (void)k; return 0; }
+/* (JUEGOS) el registro: registro.c */
 API(BOOL) GetUserNameA(char *d, u32 *n)
 {
 	char b[64];

@@ -406,8 +406,10 @@ void w32_salir(u32 c)
 		gc_retoma(n ? n : 1);
 	}
 	if (!saliendo) {
+		void registro_guarda(void);
 		saliendo = 1;
 		mods_acabar();
+		registro_guarda();          /* (JUEGOS) lo que haya cambiado del registro */
 		cerrar_todo();
 		if (al_salir_user)
 			al_salir_user();
