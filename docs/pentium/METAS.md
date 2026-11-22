@@ -56,6 +56,7 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [x] ~~Calculadora, Reloj, Mapa de caracteres~~ (21/11, rama pentium-accesorios: la Calculadora estándar, científica y de oficina —IVA, cinta, euros— con cuentas decimales; el Reloj con calendario, festivos, alarma, cronómetro, cuenta atrás y poner en hora; el Mapa de caracteres con copiar y la tecla de cada letra; paquete «accesori»: docs/PENTIUM.md §14 sexies)
 - [ ] Juegos: los emuladores (Hispa-Nes, Hispa-System, Hispa-Snes, Hispa-Drive) con sonido en Pentium (21/11: HVPRUN pasa el sonido; Hispa-Snes, Hispa-Nes e Hispa-System corren en HVPRUN y suenan; falta Hispa-Drive y los mandos)
 - [ ] Correo
+- [ ] **Hispa-BASIC visual** (pedido de Carlos 22/11, «para los amantes de BASIC»): el sucesor de Hispa-BASIC (compatible GW-BASIC) al estilo de QuickBASIC y Visual Basic: editor a pantalla completa sin números de línea (SUB, FUNCTION, TYPE, SELECT CASE, DO…LOOP), diseñador de ventanas de arrastrar y soltar con los controles de `controles.cas` (botón, casilla, lista, cuadro de texto, pestañas, menús) y sus propiedades, código por evento (`Boton1_Click`), ejecutar al momento y compilar a un .BIN de Hispa-Pentium (pasando por Castel); que abra los .BAS de GW-BASIC y QBasic; en español y en inglés; y luego en Hispa-64
 - [ ] ClicGest (programa de ClicGest, licencia propia): 0.1 publicado; 0.2 con pestañas en marcha
 
 ## Hecho
