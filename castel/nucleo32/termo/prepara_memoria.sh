@@ -18,6 +18,7 @@
 #   TERMO_SSH_EQUIPO, TERMO_SSH_PUERTO, TERMO_SSH_USUARIO (hispados.es, 22, termo)
 #   TERMO_SSH_CONOCIDO  un archivo con la llave pública del equipo (ssh-ed25519 ...)
 #   TERMO_PARA        dónde dejar el testigo y la llave pública
+#   TERMO_TESTIGO, TERMO_LLAVE  los de una memoria anterior (el testigo y la semilla de 32 octetos)
 set -eu
 D=${1:?uso: prepara_memoria.sh CARPETA}
 mkdir -p "$D/SSH"
@@ -26,7 +27,9 @@ EQ=${TERMO_EQUIPO:-Portatil-gamer}
 SE=${TERMO_SSH_EQUIPO:-hispados.es}
 SP=${TERMO_SSH_PUERTO:-22}
 SU=${TERMO_SSH_USUARIO:-termo}
-TESTIGO=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+# (con TERMO_TESTIGO y TERMO_LLAVE, los de una memoria anterior: así lo ya
+# registrado en el servidor sigue valiendo al rehacerla)
+if [ -n "${TERMO_TESTIGO:-}" ]; then TESTIGO=$TERMO_TESTIGO; else TESTIGO=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'); fi
 RES=$(printf '%s' "$TESTIGO" | sha256sum | cut -d' ' -f1)
 {
   printf '; (TERMO) «Enviar a Carlos»: adónde se mandan los registros y con qué testigo.\r\n'
@@ -43,7 +46,7 @@ RES=$(printf '%s' "$TESTIGO" | sha256sum | cut -d' ' -f1)
   if [ "${TERMO_SSH_GRABAR:-}" = si ]; then printf 'grabar=si\r\n'; fi
   if [ -n "${TERMO_SSH_VENTANA:-}" ]; then printf 'ventana=%s\r\n' "$TERMO_SSH_VENTANA"; fi
 } > "$D/SSH.INI"
-head -c 32 /dev/urandom > "$D/SSH/ID_ED.SSH"
+if [ -n "${TERMO_LLAVE:-}" ] && [ "$(stat -c %s "$TERMO_LLAVE")" = 32 ]; then cp "$TERMO_LLAVE" "$D/SSH/ID_ED.SSH"; else head -c 32 /dev/urandom > "$D/SSH/ID_ED.SSH"; fi
 PUB=$(python3 -I - "$D/SSH/ID_ED.SSH" <<'PY'
 import sys, struct, base64
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
