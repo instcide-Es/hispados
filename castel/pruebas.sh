@@ -3612,7 +3612,7 @@ if head -c 100 $V/env2 | grep -q '^prueba=0$' && head -c 100 $V/env2 | grep -q '
 else ko "PANTALLA.ENV no queda bien tras «Mantener»:"; head -c 70 $V/env2 | sed 's/^/        /'; fi
 # otra, 1024 x 600: se reinicia y, en la prueba, se reinicia otra vez a lo
 # bruto (como con la pantalla a oscuras): GRUB vuelve sola a 1024 x 768
-maquina pc3 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":centro 512 384" ":clic 40 753" ":clic 300 406" ":clic 688 320" ":pausa 1" \
+maquina pc3 "$CIRRUS -no-reboot" ":espera 40 ^escritorio: en marcha" ":pausa 3" ":centro 512 384" ":clic 40 753" ":clic 300 406" ":clic 448 314" ":pausa 1" \
   ":clic 515 313" ":clic 386 525" ":pausa 1" ":clic 426 420" ":pausa 6"
 mira "desde 1024 x 768, 1024 x 600 guardada a prueba (la de antes, apuntada)" "^escritorio: .*PANTALLA.ENV: pantalla=1024x600 antes=1024x768 prueba=1" "^escritorio: reiniciar"
 maquina pc4 "$CIRRUS" ":espera 40 está a prueba" ":pausa 2" ":monitor system_reset" ":pausa 3" ":espera 40 en marcha, 1024 x 768" ":pausa 4"
