@@ -6049,7 +6049,12 @@ azar), `ucuentas.cas` (`USUARIOS.BIN`) y `hispac/argon2.c` (`ARGON2.BIN`).*
   administrador (la 157, **con su contraseña**: en la ventanita del núcleo,
   en la consola o en el terminal de SSH; sin contraseña, el «Sí, dárselo» de
   antes), da de alta a los demás y enciende SSHD. El **normal**, lo suyo. Siempre
-  queda al menos un administrador.
+  queda al menos un administrador. Lo que escribe un programa del sistema
+  lanzado por un usuario normal tampoco vale en lo delicado: `GRUB.CFG`,
+  `GRUBENV` (qué núcleo arranca) y `HISPA.INI` (ASISTE, ACTUALIZ:
+  `regla_admin`), la configuración de SSHD, WG y TAILSCAL, toda la zona de
+  PAQUETES e INSTALAR; ni la hora (la 67) ni el disco en crudo (la 64) de
+  ASISTE e INSTALAR.
 - **Quién es cada programa**: `Tarea.uid` (tareas.cas): el de quien lo lanza;
   lo que lanza el escritorio, del que ha entrado; lo que pone en marcha el
   núcleo (los servicios, lo del arranque), 0, el sistema (que no entra en
