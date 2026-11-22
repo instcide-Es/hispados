@@ -1507,8 +1507,8 @@ miracap "a 1024 x 600 (la pantalla de un netbook): la barra de tareas abajo, de 
 miracap "un icono del tapiz se lleva a otro sitio arrastrándolo" c2 texto 472 312 480 320 Consola notexto 20 196 60 214 Consola texto 24 50 32 58 "Mi equipo"
 miracap "«Organizar iconos» los devuelve a su sitio" c3 texto 32 202 40 210 Consola notexto 460 300 500 330 Consola
 miracap "Configuración dice la medida de la pantalla" c4 texto 300 135 320 145 "Pantalla:  1024 x 600, 32 bits por punto"
-miracap "«Mover», en el menú de una ventana: la flecha va a su título y la ventana la sigue hasta el clic siguiente" c5 negrita 348 185 356 193 "Configuración" \
-  notexto 300 120 330 140 "Configuración"
+miracap "«Mover», en el menú de una ventana: la flecha va a su título y la ventana la sigue hasta el clic siguiente" c5 negrita 298 185 306 193 "Configuración" \
+  notexto 255 80 270 95 "Configuración"
 # (explorador, 21/11) el explorador de archivos (EQUIPO.BIN: el árbol, las
 # vistas, las miniaturas con MINIAT.BIN, copiar y pegar, cambiar el nombre,
 # carpeta nueva, la Papelera, el menú del botón secundario, elegir varios,

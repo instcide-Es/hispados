@@ -396,6 +396,7 @@ módulo UPanel
         pregunta_salto := falso
         si no pedir_admin() entonces
             copiar(aviso, "Sin el modo administrador no se pone esa hora")
+            escribir("panel: la hora de Internet, sin el modo administrador: no se pone\n")
             devolver
         fin
         r := pone(cierto, falso)

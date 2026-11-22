@@ -5992,6 +5992,7 @@ también «(NTP)». Lo pidió Carlos con la hoja de ruta (docs/pentium/METAS.md:
 | ![Configuración: el Panel de control, con un icono por sección](pentium/panel/configuracion.png) | ![Fecha y hora: la zona, el horario de verano y la hora por Internet](pentium/panel/fecha.png) |
 | ![Ratón: la velocidad, el doble clic con su prueba, zurdos y la rueda](pentium/panel/raton.png) | ![Personalización: el tema Grafito, con su contraste, y el tapiz verde](pentium/panel/personaliza.png) |
 | ![«¡Ojo!»: Internet dice una hora muy distinta (aquí, un servidor que miente)](pentium/panel/salto.png) | ![Energía: apagar la pantalla, la batería baja y el botón de encendido](pentium/panel/energia.png) |
+| ![Teclado: el latinoamericano, con «{ñ¡» en el campo de prueba](pentium/panel/teclado.png) | ![El botón de encendido (en QEMU, system_powerdown): «Apagar el equipo»](pentium/panel/boton.png) |
 
 ### Configuración es el Panel de control
 

@@ -168,6 +168,27 @@ else ko "PANEL.INI no guarda lo que toca:"; sed 's/^/        /' $K/panel.txt 2>&
 sano $K/e.img
 if grep -q "^$K/e.img: [0-9]* files" $P/fsck.txt; then ok "y el disco queda sano"; else ko "el disco no queda sano:"; head -4 $P/fsck.txt | sed 's/^/        /'; fi
 
+# 3 bis. un servidor que miente (dos días por delante): HORARED no la pone
+# sola; «Sincronizar ahora» pregunta («¡Ojo!»), «No» la deja; «Ponerla» pide
+# el modo administrador (lo pregunta el núcleo) y, sin él, tampoco
+cp $K/d.img $K/m.img
+printf 'ntp=%s\r\n' $S3 > $K/PANEL.INI
+mcopy -i $K/m.img $K/PANEL.INI ::
+RELOJ=$(relojes "+0 min") CAPTURAS=$G DISCO=$K/m.img ARRANQUE=escritorio MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ":pausa 8" \
+  ":clicd 400 300" ":pausa 1" ":clic 410 309" ":pausa 1" ":clic 208 230" ":pausa 3" ":clic 340 242" ":pausa 4" ":raton 400 450" ":captura pn12" ":clic 327 336" ":pausa 1" \
+  ":clic 340 242" ":pausa 4" ":clic 580 336" ":pausa 2" ":captura pn13" ":clic 300 327" ":pausa 2" ":captura pn14" > $K/m.sal 2>&1
+S=$K/m.sal
+mira "con un servidor que va dos días por delante, HORARED no pone la hora sola (más de 15 minutos con el reloj creíble)" \
+  "^hora: el reloj del PC va atrasado 2 d 0 h: no se cambia solo"
+miracap "«Sincronizar ahora»: «¡Ojo! La hora de Internet es muy distinta», lo que dice y cuánto va, «No, dejarla» (con el foco) y «Ponerla (modo administrador)»" pn12 \
+  negrita15 240 210 300 235 "¡Ojo! La hora de Internet es muy distinta" texto15 240 235 300 260 "Internet dice" negrita15 250 320 300 345 "No, dejarla" \
+  negrita15 420 320 480 345 "Ponerla (modo administrador)"
+mira "«No» la deja; «Ponerla» pide el modo administrador, y sin él (el núcleo pregunta: «No») tampoco" \
+  "^panel: sincronizar ahora: el reloj va muy distinto de Internet: ponerlo pide el modo administrador$" "^panel: la hora de Internet, no (" \
+  "^panel: la hora de Internet, sin el modo administrador: no se pone$"
+miracap "el núcleo pregunta el modo administrador para PANEL.BIN" pn13 texto 200 220 600 260 "PANEL.BIN pide el modo administrador"
+miracap "y sin él, el reloj sigue como estaba (lo dice abajo)" pn14 texto15 130 530 800 560 "Sin el modo administrador no se pone esa hora"
+
 # 4. al arrancar otra vez: el tema, el tapiz y lo demás, como se dejó
 RELOJ=$(relojes "+0 min") CAPTURAS=$G DISCO=$K/e.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 4" ":captura pn11" > $K/r.sal 2>&1
 S=$K/r.sal
