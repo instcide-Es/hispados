@@ -223,6 +223,7 @@ void hoja_suelta(hoja *h)
 		celda_vacia(&h->cel[i]);
 	so_suelta(h->cel);
 	so_suelta(h->tabla);
+	so_suelta(h->ix);
 	so_suelta(h->alto);
 	so_suelta(h->oculta_f);
 	so_suelta(h->estilo_fila);
@@ -495,6 +496,7 @@ celda *hj_celda_crea(hoja *h, u32 f, u32 c)
 	x = &h->cel[h->n_cel];
 	memset(x, 0, sizeof *x);
 	x->clave = clave;
+	h->ix_bien = 0;
 	if (f + 1 > h->lim_f)
 		h->lim_f = f + 1;
 	if (c + 1 > h->lim_c)
@@ -530,6 +532,7 @@ static int saca(hoja *h, u32 f, u32 c, celda *d)
 	if (!e)
 		return 0;
 	*d = h->cel[e - 1];
+	h->ix_bien = 0;
 	/* el hueco de la tabla se cierra (corriendo los de detrás) */
 	m = h->cabe_tabla - 1;
 	h->tabla[i] = 0;
@@ -620,6 +623,84 @@ static void ordena_u32(u32 *a, u32 n)
 			k = h;
 		}
 	}
+}
+
+const u32 *hj_columna(hoja *h, u32 c, u32 *n)
+{
+	*n = 0;
+	if (c >= CU_COLS)
+		return NULL;
+	if (!h->ix_bien) {
+		u32 i, k, cuenta[CU_COLS];
+		u32 *ix = so_repide(h->ix, (h->n_cel ? h->n_cel : 1) * sizeof(u32));
+
+		if (!ix)
+			return NULL;
+		h->ix = ix;
+		memset(cuenta, 0, sizeof cuenta);
+		for (i = 0; i < h->n_cel; i++)
+			cuenta[CU_COL(h->cel[i].clave)]++;
+		h->ix_ini[0] = 0;
+		for (k = 0; k < CU_COLS; k++)
+			h->ix_ini[k + 1] = h->ix_ini[k] + cuenta[k];
+		memset(cuenta, 0, sizeof cuenta);
+		for (i = 0; i < h->n_cel; i++) {
+			u32 col = CU_COL(h->cel[i].clave);
+
+			ix[h->ix_ini[col] + cuenta[col]++] = i;
+		}
+		/* cada columna, por filas (por montículo: sin recursión) */
+		for (k = 0; k < CU_COLS; k++) {
+			u32 *a = ix + h->ix_ini[k], m = h->ix_ini[k + 1] - h->ix_ini[k], j, ordenada = 1;
+
+			for (j = 1; j < m && ordenada; j++)
+				if (h->cel[a[j - 1]].clave > h->cel[a[j]].clave)
+					ordenada = 0;
+			if (ordenada)
+				continue;
+			for (j = m / 2; j-- > 0;) {
+				u32 q = j;
+
+				for (;;) {
+					u32 hh = 2 * q + 1, t;
+
+					if (hh >= m)
+						break;
+					if (hh + 1 < m && h->cel[a[hh + 1]].clave > h->cel[a[hh]].clave)
+						hh++;
+					if (h->cel[a[q]].clave >= h->cel[a[hh]].clave)
+						break;
+					t = a[q];
+					a[q] = a[hh];
+					a[hh] = t;
+					q = hh;
+				}
+			}
+			for (j = m; j-- > 1;) {
+				u32 t = a[0], q = 0;
+
+				a[0] = a[j];
+				a[j] = t;
+				for (;;) {
+					u32 hh = 2 * q + 1;
+
+					if (hh >= j)
+						break;
+					if (hh + 1 < j && h->cel[a[hh + 1]].clave > h->cel[a[hh]].clave)
+						hh++;
+					if (h->cel[a[q]].clave >= h->cel[a[hh]].clave)
+						break;
+					t = a[q];
+					a[q] = a[hh];
+					a[hh] = t;
+					q = hh;
+				}
+			}
+		}
+		h->ix_bien = 1;
+	}
+	*n = h->ix_ini[c + 1] - h->ix_ini[c];
+	return h->ix + h->ix_ini[c];
 }
 
 u32 *hj_claves_ordenadas(const hoja *h, u32 *n)

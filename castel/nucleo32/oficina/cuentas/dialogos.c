@@ -460,6 +460,9 @@ static void al_abrir(int id)
 		int f = modo_abrir == 2 ? FMT_PDF : fmt_tipo[tipo_elegido];
 		char e[8];
 
+		/* (la extensión que se escribe manda: «libro.xlsx» es un .XLSX) */
+		if (modo_abrir == 1 && arch_formato_ext(ruta) && arch_formato_ext(ruta) != FMT_PDF)
+			f = arch_formato_ext(ruta);
 		extension(ruta, e);
 		if (!e[0] || (arch_formato_ext(ruta) != f && !(f == FMT_XLSX && iguales(e, "XLS")))) {
 			anade(ruta, ".", sizeof ruta);
@@ -1810,7 +1813,7 @@ static void muestra_condicional(void *u, lienzo *l, const ui_control *c, int x, 
 	pt_de_lienzo(&p, l);
 	if (f > 0)
 		pt_trama(&p, x + 4, y + 4, c->an - 8, c->al - 8, TR_SOLIDO, FONDOS_V[f < 12 ? f : 0], 0);
-	fmt(t, sizeof t, "%s%s1.234,50", s > 0 && s < SIM_N ? SIMBOLO_LETRA[s] : "", s > 0 ? " " : "");
+	fmt(t, sizeof t, "%s%s1.234,50", s == SIM_ESTRELLA ? "*" : s > 0 && s < SIM_N ? SIMBOLO_LETRA[s] : "", s > 0 ? " " : "");
 	if (marcado(ID_FC_NEG))
 		lz_ui_negrita(l, x + 10, y + (c->al - lz_ui_alto()) / 2 + lz_ui_base(), t, col == CU_AUTO ? 0 : col);
 	else

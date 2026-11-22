@@ -387,9 +387,21 @@ double fecha_serie(int a, int m, int d)
 	return (double)(k + 25569);
 }
 
+/* (las fechas que se pueden contar: del año -9999 al 99999; lo demás se acota) */
+static double acota_serie(double s)
+{
+	if (!(s == s))
+		return 0;
+	if (s < -4380000)
+		return -4380000;
+	if (s > 36500000)
+		return 36500000;
+	return s;
+}
+
 void serie_fecha(double s, int *ano, int *mes, int *dia)
 {
-	i64 z = (i64)so_suelo(s) - 25569 + 719468, era;
+	i64 z = (i64)so_suelo(acota_serie(s)) - 25569 + 719468, era;
 	u32 doe, yoe, doy, mp;
 	i64 y;
 
@@ -406,7 +418,10 @@ void serie_fecha(double s, int *ano, int *mes, int *dia)
 
 void serie_hora(double s, int *h, int *mi, int *se)
 {
-	double f = s - so_suelo(s);
+	double f;
+
+	s = acota_serie(s);
+	f = s - so_suelo(s);
 	i64 t = (i64)(f * 86400 + 0.5);
 
 	if (t >= 86400)
@@ -418,7 +433,7 @@ void serie_hora(double s, int *h, int *mi, int *se)
 
 int dia_semana(double s)
 {
-	i64 k = (i64)so_suelo(s);
+	i64 k = (i64)so_suelo(acota_serie(s));
 
 	/* (el 30/12/1899 fue sábado) */
 	return (int)(((k + 6) % 7 + 7) % 7);

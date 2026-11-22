@@ -116,6 +116,7 @@ TIPO_POR_NOMBRE = {
     'red': 'internet', 'tls': 'internet', 'navega': 'internet', 'ssh': 'internet',
     'tailscal': 'internet', 'wifi': 'internet',
     'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina', 'pluma': 'oficina',   # (PLUMA32: pluma)
+    'cuentas': 'oficina',   # (CUENTAS32)
     'consola': 'herramientas', 'accesori': 'herramientas', 'comprim': 'herramientas',
     'ejemplos': 'desarrollo',
     'win32': 'windows',
@@ -458,6 +459,12 @@ OPCIONALES = [
         ('PLUMA.BIN', r'\HISPA\PLUMA.BIN'), ('PLUMA/LEEME.TXT', r'\HISPA\PLUMA\LEEME.TXT'),
         ('PLUMA/DICCIO.DAT', r'\HISPA\PLUMA\DICCIO.DAT'),
         ('MENU/PLUMA.MNU', r'\HISPA\MENU\PLUMA.MNU'), ('MENU/PLUMA.ICP', r'\HISPA\MENU\PLUMA.ICP')]),
+    # (CUENTAS32) Cuentas 2, la hoja de cálculo de 32 bits (castel/nucleo32/oficina/cuentas/paquete.sh;
+    # tipo «oficina»): con ella instalada, el menú y Mi equipo la usan en lugar del Cuentas de Hispa-386
+    ('cuentas', '2.0', 'Cuentas 2: la hoja de cálculo de 32 bits (.HOJ, .XLSX, .ODS y .CSV; gráficos; exporta a PDF)',
+     'base >= 0.8.3', [
+        ('CUENTAS.BIN', r'\HISPA\CUENTAS.BIN'), ('CUENTAS/LEEME.TXT', r'\HISPA\CUENTAS\LEEME.TXT'),
+        ('MENU/CUENTAS.MNU', r'\HISPA\MENU\CUENTAS.MNU'), ('MENU/CUENTAS.ICP', r'\HISPA\MENU\CUENTAS.ICP')]),
     # (ZIP) Comprimidos y las órdenes ZIP y UNZIP (castel/nucleo32/comprim/paquete.sh; tipo «herramientas»)
     ('comprim', '1.0', 'Comprimidos: los .ZIP como una carpeta (sacar, añadir y quitar, con contraseña) y las órdenes ZIP y UNZIP', 'base >= 0.8.4', [
         ('BIN/COMPRIM.BIN', r'\HISPA\COMPRIM.BIN'), ('BIN/ZIP.BIN', r'\HISPA\ZIP.BIN'), ('BIN/UNZIP.BIN', r'\HISPA\UNZIP.BIN'),

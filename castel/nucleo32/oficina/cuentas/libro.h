@@ -142,6 +142,9 @@ typedef struct hoja {
 	u32 *tabla;		/* la dispersión: índice + 1 en cel (0: libre) */
 	u32 cabe_tabla;
 	u32 lim_f, lim_c;	/* hasta dónde ha habido celdas (la fila y la columna de después): no se mira más allá */
+	u32 *ix;		/* el índice por columnas: las celdas de cada columna, por filas (hj_columna) */
+	u32 ix_ini[CU_COLS + 1];
+	int ix_bien;
 	/* anchos y altos */
 	u16 ancho[CU_COLS];	/* en puntos a 100% */
 	u16 *alto;		/* [CU_FILAS]: 0 el de siempre (o NULL: todas) */
@@ -264,6 +267,9 @@ void celda_vacia(celda *x);			/* suelta lo que lleva (y queda vacía) */
 void hj_usado(const hoja *h, u32 *f, u32 *c);
 /* las claves de las celdas, por orden (de so_pide; *n cuántas) */
 u32 *hj_claves_ordenadas(const hoja *h, u32 *n);
+/* las celdas de la columna c, por filas (índices en h->cel; *n cuántas); NULL si no hay memoria.
+ * Vale hasta que se crea o se quita una celda */
+const u32 *hj_columna(hoja *h, u32 c, u32 *n);
 /* el estilo de (f, c): el de la celda o, si no la hay, el de su fila o su columna */
 u16 hj_estilo(const hoja *h, u32 f, u32 c);
 u16 hj_estilo_def(const hoja *h, u32 f, u32 c);	/* (el de su fila o su columna) */

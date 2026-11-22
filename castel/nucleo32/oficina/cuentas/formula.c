@@ -1127,6 +1127,23 @@ static void pon_ref(bufer *b, const libro *l, const hoja *h, const cu_tok *t, co
 		buf_c(b, ']');
 }
 
+/* añade a w un trozo de lo que ya tiene (sin leer de lo que se suelta al crecer) */
+static void autocopia(bufer *w, u32 o, u32 n)
+{
+	u8 *t;
+
+	if (!n || w->mal)
+		return;
+	t = so_pide(n);
+	if (!t) {
+		w->mal = 1;
+		return;
+	}
+	memcpy(t, w->d + o, n);
+	buf_pon(w, t, n);
+	so_suelta(t);
+}
+
 void fm_escribe(const libro *l, const formula *fm, const hoja *h, const cu_local *loc, bufer *b)
 {
 	trozo *pila;
@@ -1204,7 +1221,7 @@ void fm_escribe(const libro *l, const formula *fm, const hoja *h, const cu_local
 			for (k = np - na; k < np; k++) {
 				if (k > np - na)
 					buf_c(&w, (u8)loc->sep);
-				buf_pon(&w, w.d + pila[k].o, pila[k].n);
+				autocopia(&w, pila[k].o, pila[k].n);
 			}
 			buf_c(&w, ')');
 			np -= na;
@@ -1217,7 +1234,7 @@ void fm_escribe(const libro *l, const formula *fm, const hoja *h, const cu_local
 				break;
 			np--;
 			buf_c(&w, t->t == T_NEG ? '-' : '+');
-			buf_pon(&w, w.d + pila[np].o, pila[np].n);
+			autocopia(&w, pila[np].o, pila[np].n);
 			pila[np].prio = 6;
 			break;
 		case T_PORC:
@@ -1226,10 +1243,10 @@ void fm_escribe(const libro *l, const formula *fm, const hoja *h, const cu_local
 			np--;
 			if (pila[np].prio < 7) {
 				buf_c(&w, '(');
-				buf_pon(&w, w.d + pila[np].o, pila[np].n);
+				autocopia(&w, pila[np].o, pila[np].n);
 				buf_c(&w, ')');
 			} else
-				buf_pon(&w, w.d + pila[np].o, pila[np].n);
+				autocopia(&w, pila[np].o, pila[np].n);
 			buf_c(&w, '%');
 			pila[np].prio = 7;
 			break;
@@ -1237,9 +1254,9 @@ void fm_escribe(const libro *l, const formula *fm, const hoja *h, const cu_local
 			if (np < 2)
 				break;
 			np -= 2;
-			buf_pon(&w, w.d + pila[np].o, pila[np].n);
+			autocopia(&w, pila[np].o, pila[np].n);
 			buf_c(&w, ':');
-			buf_pon(&w, w.d + pila[np + 1].o, pila[np + 1].n);
+			autocopia(&w, pila[np + 1].o, pila[np + 1].n);
 			pila[np].prio = 9;
 			break;
 		case T_PAREN:
@@ -1247,7 +1264,7 @@ void fm_escribe(const libro *l, const formula *fm, const hoja *h, const cu_local
 				break;
 			np--;
 			buf_c(&w, '(');
-			buf_pon(&w, w.d + pila[np].o, pila[np].n);
+			autocopia(&w, pila[np].o, pila[np].n);
 			buf_c(&w, ')');
 			pila[np].prio = 9;
 			break;
@@ -1260,17 +1277,17 @@ void fm_escribe(const libro *l, const formula *fm, const hoja *h, const cu_local
 				/* (lo de la izquierda puede tener la misma prioridad; lo de la derecha, no) */
 				if (a.prio < p) {
 					buf_c(&w, '(');
-					buf_pon(&w, w.d + a.o, a.n);
+					autocopia(&w, a.o, a.n);
 					buf_c(&w, ')');
 				} else
-					buf_pon(&w, w.d + a.o, a.n);
+					autocopia(&w, a.o, a.n);
 				buf_txt(&w, OPS[t->t]);
 				if (z.prio <= p && z.prio != 9) {
 					buf_c(&w, '(');
-					buf_pon(&w, w.d + z.o, z.n);
+					autocopia(&w, z.o, z.n);
 					buf_c(&w, ')');
 				} else
-					buf_pon(&w, w.d + z.o, z.n);
+					autocopia(&w, z.o, z.n);
 				pila[np].prio = p;
 			} else
 				continue;

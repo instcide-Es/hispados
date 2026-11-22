@@ -836,12 +836,14 @@ módulo Exoper
 
     ; (PLUMA32) y los documentos (.PLU, .ODT, .DOCX, .DOC, .RTF) con Pluma 2
     ; (el paquete «pluma»: \HISPA\PLUMA.BIN) en lugar del Pluma de Hispa-386.
+    ; (CUENTAS32) y las hojas de cálculo (.HOJ, .XLSX, .XLS, .ODS, .CSV) con
+    ; Cuentas 2 (el paquete «cuentas»: \HISPA\CUENTAS.BIN).
     ; (ZIP) (MIRADOR) los programas de los paquetes «comprim» (Comprimidos) y
     ; «mirador» (el Mirador de Pentium), y (PDF) los .PDF con Hispa-PDF (el
     ; paquete «pdf»: \HISPA\HISPAPDF.BIN): si están instalados, sus clases se
     ; abren con ellos, también donde ASOCIA.TXT dice lo de fábrica de antes
     ; (el Mirador de la oficina); si no lo están, con lo de siempre
-    variable de_paquetes: arreglo [560] de byte = "PLU=\\PLUMA.BIN|%1\r\nODT=\\PLUMA.BIN|%1\r\nDOCX=\\PLUMA.BIN|%1\r\nDOC=\\PLUMA.BIN|%1\r\nRTF=\\PLUMA.BIN|%1\r\nPDF=\\HISPAPDF.BIN|%1\r\nZIP=\\COMPRIM.BIN|%1\r\nBMP=\\MIRADOR.BIN|%1\r\nPNG=\\MIRADOR.BIN|%1\r\nJPG=\\MIRADOR.BIN|%1\r\nJPE=\\MIRADOR.BIN|%1\r\nGIF=\\MIRADOR.BIN|%1\r\nICO=\\MIRADOR.BIN|%1\r\nTGA=\\MIRADOR.BIN|%1\r\nPSD=\\MIRADOR.BIN|%1\r\nPPM=\\MIRADOR.BIN|%1\r\nPGM=\\MIRADOR.BIN|%1\r\nPNM=\\MIRADOR.BIN|%1\r\n"
+    variable de_paquetes: arreglo [700] de byte = "PLU=\\PLUMA.BIN|%1\r\nODT=\\PLUMA.BIN|%1\r\nDOCX=\\PLUMA.BIN|%1\r\nDOC=\\PLUMA.BIN|%1\r\nRTF=\\PLUMA.BIN|%1\r\nHOJ=\\CUENTAS.BIN|%1\r\nXLSX=\\CUENTAS.BIN|%1\r\nXLS=\\CUENTAS.BIN|%1\r\nODS=\\CUENTAS.BIN|%1\r\nCSV=\\CUENTAS.BIN|%1\r\nPDF=\\HISPAPDF.BIN|%1\r\nZIP=\\COMPRIM.BIN|%1\r\nBMP=\\MIRADOR.BIN|%1\r\nPNG=\\MIRADOR.BIN|%1\r\nJPG=\\MIRADOR.BIN|%1\r\nJPE=\\MIRADOR.BIN|%1\r\nGIF=\\MIRADOR.BIN|%1\r\nICO=\\MIRADOR.BIN|%1\r\nTGA=\\MIRADOR.BIN|%1\r\nPSD=\\MIRADOR.BIN|%1\r\nPPM=\\MIRADOR.BIN|%1\r\nPGM=\\MIRADOR.BIN|%1\r\nPNM=\\MIRADOR.BIN|%1\r\n"
 
     ; ¿está ese programa (en la unidad del sistema o en su \HISPA)?
     función hay_programa(prog: puntero a byte): bool
@@ -927,7 +929,8 @@ módulo Exoper
         ; (ZIP) (MIRADOR) lo de los paquetes, si están: donde no hay nada o
         ; donde está lo de fábrica de antes (el Mirador de la oficina; y,
         ; (PLUMA32), el Pluma de la oficina)
-        si (no hay o (iguales(programa, "\\HVPRUN.BIN") y (empieza_por(plantilla, "\\OFICINA\\MIRADOR.HVP") o empieza_por(plantilla, "\\OFICINA\\PLUMA.HVP")))) y asociado_en(dirección(de_paquetes[0]), ext, p2, t2) y hay_programa(p2) entonces
+        ; ((CUENTAS32) y el Cuentas de la oficina)
+        si (no hay o (iguales(programa, "\\HVPRUN.BIN") y (empieza_por(plantilla, "\\OFICINA\\MIRADOR.HVP") o empieza_por(plantilla, "\\OFICINA\\PLUMA.HVP") o empieza_por(plantilla, "\\OFICINA\\CUENTAS.HVP")))) y asociado_en(dirección(de_paquetes[0]), ext, p2, t2) y hay_programa(p2) entonces
             copiar(programa, p2)
             copiar(plantilla, t2)
             devolver cierto

@@ -25,6 +25,7 @@
  *   celdas N                 la hoja tiene N celdas
  *   ida A1                   lo que sale al corregir A1, escrito otra vez, sale igual
  *   prueba A1 TEXTO          como «pon», pero sin quejarse si está mal escrito (para el fuzz)
+ *   quitahoja NOMBRE | copiahoja NOMBRE | muevehoja NOMBRE POS
  *   estilo A1:B2 COSAS       negrita cursiva subrayado tachado tam=14 letra=DejaVu_Serif
  *                            color=FF0000 fondo=FFFF00 trama=6 ctrama=000000 alin=izq|centro|der
  *                            valin=arriba|centro|abajo ajustar borde=1 (todos) bizq= barr= bder= bab=
@@ -120,6 +121,31 @@ int cuentas_guion(const char *ruta)
 				h = x;
 				l->activa = (u32)lib_hoja_indice(l, x->id);
 			}
+			continue;
+		}
+		if (iguales(o, "quitahoja") || iguales(o, "copiahoja")) {
+			hoja *x = lib_hoja_nombre(l, p, largo(p));
+
+			if (!x) {
+				falla(o, p, "una hoja");
+				continue;
+			}
+			if (o[0] == 'q')
+				op_hoja_quita(l, (u32)lib_hoja_indice(l, x->id));
+			else
+				op_hoja_copia(l, (u32)lib_hoja_indice(l, x->id), -1);
+			h = lib_hoja(l, l->activa);
+			continue;
+		}
+		if (iguales(o, "muevehoja")) {
+			const char *sp = strchr(p, ' ');
+			hoja *x = sp ? lib_hoja_nombre(l, p, (u32)(sp - p)) : NULL;
+
+			if (!x) {
+				falla(o, p, "una hoja y su sitio");
+				continue;
+			}
+			op_hoja_mueve(l, (u32)lib_hoja_indice(l, x->id), (u32)numero(sp + 1, NULL));
 			continue;
 		}
 		if (iguales(o, "loc")) {

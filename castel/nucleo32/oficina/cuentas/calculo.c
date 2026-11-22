@@ -905,6 +905,43 @@ void ev_recorre(ctx *x, const ev *ref, int todas, ev_cada cb, void *u)
 			g.c1 = (u16)(h->lim_c - 1);
 	}
 	area = (u64)(g.f1 - g.f0 + 1) * (g.c1 - g.c0 + 1);
+	if (!todas && area > 8) {
+		/* por el índice de columnas: solo las que hay, seguidas */
+		u32 c, n, i;
+		int bien = 1;
+
+		for (c = g.c0; c <= g.c1 && bien; c++)
+			if (!hj_columna(h, c, &n) && h->n_cel)
+				bien = 0;
+		if (bien) {
+			for (c = g.c0; c <= g.c1; c++) {
+				const u32 *ix = hj_columna(h, c, &n);
+				u32 a = 0, b = n;
+
+				if (!n)
+					continue;
+				/* la primera con fila >= f0 */
+				while (a < b) {
+					u32 m = (a + b) / 2;
+
+					if (CU_FILA(h->cel[ix[m]].clave) < g.f0)
+						a = m + 1;
+					else
+						b = m;
+				}
+				for (i = a; i < n; i++) {
+					celda *k = &h->cel[ix[i]];
+					u32 f = CU_FILA(k->clave);
+
+					if (f > g.f1)
+						break;
+					if (cb(u, (k->f && (k->marca & CM_SUCIA)) ? ev_celda(x, h->id, f, c) : &k->v, f, c))
+						return;
+				}
+			}
+			return;
+		}
+	}
 	if (todas || area <= 4096 || area <= h->n_cel) {
 		u32 f, c;
 
@@ -916,7 +953,7 @@ void ev_recorre(ctx *x, const ev *ref, int todas, ev_cada cb, void *u)
 				const valor *v = &vacio;
 
 				if (k)
-					v = ev_celda(x, h->id, f, c);
+					v = (k->f && (k->marca & CM_SUCIA)) ? ev_celda(x, h->id, f, c) : &k->v;
 				else if (!todas)
 					continue;
 				if (cb(u, v, f, c))
@@ -930,7 +967,7 @@ void ev_recorre(ctx *x, const ev *ref, int todas, ev_cada cb, void *u)
 
 			if (f < g.f0 || f > g.f1 || c < g.c0 || c > g.c1)
 				continue;
-			if (cb(u, ev_celda(x, h->id, f, c), f, c))
+			if (cb(u, (h->cel[i].f && (h->cel[i].marca & CM_SUCIA)) ? ev_celda(x, h->id, f, c) : &h->cel[i].v, f, c))
 				return;
 		}
 	}

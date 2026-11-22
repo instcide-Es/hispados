@@ -676,3 +676,36 @@ form C2 20
 pega D5 transp
 num D5 2
 form E5 =E4*10
+
+# ---- las hojas: quitar, deshacer, copiar, mover ----
+hoja Temporal
+pon A1 42
+pon A2 =A1*2
+hoja Resumen
+pon A1 =Temporal!A1+1
+pon A2 =SUMA(Temporal!A1:A2)
+num A1 43
+num A2 126
+quitahoja Temporal
+err A1 #¡REF!
+form A1 =#¡REF!+1
+deshaz
+num A1 43
+rehaz
+err A1 #¡REF!
+deshaz
+form A1 =Temporal!A1+1
+hoja Temporal
+pon A1 10
+hoja Resumen
+num A1 11
+num A2 30
+copiahoja Temporal
+hoja Temporal (2)
+num A2 20
+pon A1 1
+num A2 2
+hoja Resumen
+num A1 11
+muevehoja Resumen 0
+num A2 30

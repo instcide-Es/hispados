@@ -601,7 +601,8 @@ módulo Inicio
         mientras i < 4 hacer
             ; (PLUMA32) con Pluma 2 (el paquete «pluma»: \HISPA\PLUMA.BIN, con su
             ; acceso en Oficina), el Pluma de Hispa-386 no sale aquí
-            si i <> 1 o no existe("\\PLUMA.BIN") entonces
+            ; (CUENTAS32) y con Cuentas 2 (el paquete «cuentas»), el Cuentas de 386
+            si (i <> 1 o no existe("\\PLUMA.BIN")) y (i <> 2 o no existe("\\CUENTAS.BIN")) entonces
                 k := nuevo(de_oficina(i), nulo, P_OFICINA, i, C_OFICINA, IC_DOCUMENTO, rango)
                 si k >= 0 entonces progs[k].letra := nat32(de_oficina(i)[0]) fin
             fin
