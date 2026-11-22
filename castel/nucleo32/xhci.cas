@@ -94,9 +94,15 @@ módulo Xhci
         orden_código, orden_ranura: nat32
         tr_hecha: bool
         tr_código, tr_resto, tr_trb, tr_ranura, tr_extremo: nat32
+        tr_corto_trb, tr_corto_resto: nat32     ; (UEFI) el último «corto» (los datos que no han llegado enteros)
     fin
 
     público variable xhcis: arreglo [MAX_XHCI] de Controladora
+    ; (UEFI) cómo ha acabado la última transferencia de control o a granel: el
+    ; código del xHCI (1 bien, 3 «babble», 4 error de la transacción, 6
+    ; STALL, 13 corto...) o SIN_CÓDIGO si se pasó el tiempo. Para el registro.
+    público constante SIN_CÓDIGO = 0xFF
+    público variable último_código: nat32
     público variable cuántas: nat32
 
     función lee(c: nat32, d: nat32): nat32
@@ -199,6 +205,12 @@ módulo Xhci
                     i := i + 1
                 fin
                 si no de_tubo entonces
+                    ; (UEFI) el corto de los datos y el final del estado pueden
+                    ; llegar juntos: el resto de los datos no se pisa
+                    si t[2] >> 24 = CORTO entonces
+                        xhcis[c].tr_corto_trb := t[0]
+                        xhcis[c].tr_corto_resto := t[2] yb 0xFFFFFF
+                    fin
                     xhcis[c].tr_hecha := cierto
                     xhcis[c].tr_código := t[2] >> 24
                     xhcis[c].tr_resto := t[2] yb 0xFFFFFF
@@ -610,6 +622,7 @@ módulo Xhci
         vueltas := 0
         resto := 0
         ranura := ap.ranura
+        xhcis[c].tr_corto_trb := 0              ; (UEFI)
         mientras cierto hacer
             ; (desenchufado: no va a acabar; la ranura se deshabilita luego)
             si ap.ido entonces devolver T_FALLO fin
@@ -618,17 +631,26 @@ módulo Xhci
                 xhcis[c].tr_hecha := falso
                 si xhcis[c].tr_ranura = ranura y xhcis[c].tr_extremo = extremo entonces
                     código := xhcis[c].tr_código
+                    último_código := código
                     si código <> BIEN y código <> CORTO entonces
-                        repone(c, ranura, extremo, a, código = PARADA)
+                        ; (UEFI) con cualquier error (STALL, «babble», error de
+                        ; la transacción...) el xHCI deja el extremo PARADO
+                        ; («Halted»): hay que reponerlo (Reset Endpoint); antes
+                        ; solo se hacía con el STALL, y con los otros se
+                        ; mandaba «Stop Endpoint», que en un extremo parado no
+                        ; vale, y los reintentos fallaban todos
+                        repone(c, ranura, extremo, a, cierto)
                         si código = PARADA entonces devolver T_PARADA fin
                         devolver T_FALLO
                     fin
                     si xhcis[c].tr_trb = de_datos entonces resto := xhcis[c].tr_resto fin
+                    si xhcis[c].tr_corto_trb = de_datos y de_datos <> 0 entonces resto := xhcis[c].tr_corto_resto fin     ; (UEFI)
                     si xhcis[c].tr_trb = último entonces devolver 0 fin
                 fin
             fin
             vueltas := vueltas + 1
             si tics > tope o vueltas > 100000000 entonces
+                último_código := SIN_CÓDIGO     ; (UEFI)
                 repone(c, ranura, extremo, a, falso)
                 devolver T_FALLO
             fin

@@ -1601,6 +1601,9 @@ módulo Escritorio
         rectángulo(valor(l), 16, 104, 408, 1, 0xA9C6EC)
         texto(valor(l), 16, 114, "Copyright (C) 2026 Carlos Sanz y contribuidores.", TINTA)
         texto(valor(l), 16, 134, "Software libre: GPL-2.0 o posterior.", TINTA_SUAVE)
+        Textos32.copiar(renglón, "Arrancado ")                  ; (UEFI) por dónde
+        concatenar(renglón, modo_arranque)
+        texto(valor(l), 16, 152, renglón, TINTA_SUAVE)
         pulsador(v_acerca, 324, 168, 100, 32, "Aceptar", 0x5AA6F4, 0x2468C8, AC_CERRAR_ACERCA)
         repintada(v_acerca, 0, 0, 440, 214)
     fin

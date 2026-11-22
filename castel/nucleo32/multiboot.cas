@@ -103,6 +103,23 @@ módulo Multiboot
         devolver etiqueta(E_EFI32) <> 0 o etiqueta(E_EFI64) <> 0
     fin
 
+    ; (UEFI) la tabla del sistema de EFI (su dirección física; 0 si no la hay o
+    ; está por encima de los 4 GB) y si es la de 64 bits (etiqueta 12) o la de
+    ; 32 (11). De ella sale el SMBIOS (semilla.cas, smbios_uefi)
+    público función tabla_efi(ref de64: bool): nat32
+        variable e: puntero a nat32
+        e := puntero(etiqueta(E_EFI64))
+        si e <> nulo entonces
+            de64 := cierto
+            si e[3] <> 0 entonces devolver 0 fin
+            devolver e[2]
+        fin
+        e := puntero(etiqueta(E_EFI32))
+        de64 := falso
+        si e = nulo entonces devolver 0 fin
+        devolver e[2]
+    fin
+
     ; (UEFI) la RSDP de ACPI que ha copiado GRUB (la de ACPI 2 si la hay; si
     ; no, la de la 1): su dirección física, dentro de la información (que no
     ; se pisa), o 0. Con la BIOS, 0: ACPI.BIN la busca él donde siempre.
