@@ -200,6 +200,7 @@ módulo Escritorio
     variable minuto_visto: nat32 = 0xFFFFFFFF
     variable segundo_visto: nat32
     variable fondo: nat32                       ; el tapiz: 0, 1 o 2
+    variable con_imagen: bool                   ; (MIRADOR) el tapiz es una imagen (FONDO.HPM: la llamada 172)
     variable texto_aviso: arreglo [128] de byte
     variable renglón: arreglo [96] de byte
     público variable lanzados: nat32            ; los programas que ha lanzado el escritorio
@@ -248,10 +249,86 @@ módulo Escritorio
         fin
     fin
 
+    ; (MIRADOR) la imagen de FONDO.HPM (la del Mirador: «HPMI», ancho, alto y
+    ; sus puntos), en el centro (lo que sobre, cortado; lo que falte, del
+    ; azul de siempre): falso si no está o no vale
+    función pinta_imagen_tapiz(): bool
+        variable ruta: arreglo [24] de byte
+        variable cab: arreglo [3] de nat32
+        variable m, w, h: nat32
+        variable x0, y0, dx, dy, n, yy: ent32
+        variable p: puntero a nat32
+        si del_sistema = NINGUNA entonces devolver falso fin
+        ruta_del_tapiz(ruta)
+        m := abrir_archivo(del_sistema, ruta, PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        si leer_archivo(m, puntero(nat32(dirección(cab[0]))), 12) <> 12 o cab[0] <> 0x494D5048 o cab[1] < 1 o cab[2] < 1 o cab[1] > 4096 o cab[2] > 4096 entonces
+            cerrar_archivo(m)
+            devolver falso
+        fin
+        si tamaño_archivo(m) <> 12 + cab[1] * cab[2] * 4 entonces
+            cerrar_archivo(m)
+            devolver falso
+        fin
+        w := cab[1]
+        h := cab[2]
+        degradado(tapiz, 0, 0, tapiz.ancho, tapiz.alto, 0x16468E, 0x4E9FE6)
+        ; x0, y0: desde dónde de la imagen; dx, dy: a dónde del tapiz
+        x0 := 0
+        dx := 0
+        si ent32(w) > tapiz.ancho entonces x0 := (ent32(w) - tapiz.ancho) div 2 sino dx := (tapiz.ancho - ent32(w)) div 2 fin
+        y0 := 0
+        dy := 0
+        si ent32(h) > tapiz.alto entonces y0 := (ent32(h) - tapiz.alto) div 2 sino dy := (tapiz.alto - ent32(h)) div 2 fin
+        n := ent32(w) - x0
+        si n > tapiz.ancho - dx entonces n := tapiz.ancho - dx fin
+        yy := 0
+        mientras yy < ent32(h) - y0 y yy + dy < tapiz.alto hacer
+            p := tapiz.puntos + ((yy + dy) * ent32(tapiz.salto) + dx)
+            mover_archivo(m, 12 + (nat32(yy + y0) * w + nat32(x0)) * 4, DESDE_INICIO)
+            si leer_archivo(m, puntero(nat32(p)), nat32(n) * 4) <> nat32(n) * 4 entonces romper fin
+            yy := yy + 1
+        fin
+        cerrar_archivo(m)
+        devolver cierto
+    fin
+
+    ; (MIRADOR) lo que ha pedido un programa con la llamada 172
+    función atiende_tapiz()
+        variable d: arreglo [1] de nat32
+        con_imagen := tapiz_pedido = 2
+        tapiz_pedido := 0
+        pinta_tapiz()
+        repintar_todo()
+        si v_config <> 0 entonces pinta_config() fin
+        si con_imagen entonces d[0] := nat32("una imagen (FONDO.HPM)") sino d[0] := nat32("el de siempre") fin
+        tomar_consola()
+        imprimir("escritorio: el tapiz, ahora %s\n", d)
+        soltar_consola()
+    fin
+
+    ; (MIRADOR) se elige un tapiz de los de siempre: fuera la imagen
+    función sin_imagen()
+        variable ruta: arreglo [24] de byte
+        si con_imagen y del_sistema <> NINGUNA entonces
+            ruta_del_tapiz(ruta)
+            borrar_archivo(del_sistema, ruta)
+        fin
+        con_imagen := falso
+    fin
+
     función pinta_tapiz()
         variable an, al: ent32
         an := tapiz.ancho
         al := tapiz.alto
+        ; (MIRADOR) una imagen, si se ha puesto (sin la firma: es la del usuario)
+        si con_imagen entonces
+            si pinta_imagen_tapiz() entonces
+                pon_iconos()
+                devolver
+            fin
+            con_imagen := falso
+        fin
         según fondo
             caso 1: degradado(tapiz, 0, 0, an, al, 0x16468E, 0x4E9FE6)
             caso 2: degradado(tapiz, 0, 0, an, al, 0x1E6A52, 0x7CC878)
@@ -1085,6 +1162,12 @@ módulo Escritorio
         pinta_apagar()
     fin
 
+    ; «t» y la versión de verdad («Hispa-Pentium 0.8.6»), a d
+    función une_versión(d: puntero a byte, t: puntero a byte)
+        copiar_hasta(d, t, 80)
+        concatenar(d, Usuario.VERSIÓN_TEXTO)
+    fin
+
     ; «Acerca de Hispa-Pentium»
     función abre_acerca()
         variable l: puntero a Lienzo
@@ -1097,7 +1180,8 @@ módulo Escritorio
         fin
         degradado(valor(l), 0, 0, 440, 214, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 16, 14, 64)
-        texto_negrita(valor(l), 96, 16, "Hispa-Pentium 0.8", TINTA)
+        une_versión(renglón, "Hispa-Pentium ")
+        texto_negrita(valor(l), 96, 16, renglón, TINTA)
         texto(valor(l), 96, 38, "Un núcleo de 32 bits, sin DOS debajo,", TINTA)
         texto(valor(l), 96, 56, "escrito en Castel, con su escritorio.", TINTA)
         texto(valor(l), 96, 74, "De la familia de Hispa-DOS.", TINTA_SUAVE)
@@ -1125,7 +1209,8 @@ módulo Escritorio
         quita_pulsadores(v_config)
         degradado(valor(l), 0, 0, 460, CONFIG_AL, 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 14, 10, 48)
-        texto_negrita(valor(l), 74, 14, "Hispa-Pentium 0.8", TINTA)
+        une_versión(renglón, "Hispa-Pentium ")
+        texto_negrita(valor(l), 74, 14, renglón, TINTA)
         texto(valor(l), 74, 34, "un núcleo de 32 bits escrito en Castel", TINTA_SUAVE)
         rectángulo(valor(l), 14, 66, 432, 1, 0xA9C6EC)
         d[0] := nat32(pantalla.ancho)
@@ -1148,17 +1233,17 @@ módulo Escritorio
             pulsador(v_config, 228, 128, 110, 30, "EE. UU.", VERDE_ARRIBA, VERDE_ABAJO, AC_TECLADO_US)
         fin
         texto(valor(l), 20, 182, "Tapiz:", TINTA)
-        si fondo = 0 entonces
+        si fondo = 0 y no con_imagen entonces          ; (MIRADOR: con una imagen, ninguno)
             pulsador(v_config, 110, 174, 100, 30, "Olas", VERDE_ARRIBA, VERDE_ABAJO, AC_FONDO)
         sino
             pulsador(v_config, 110, 174, 100, 30, "Olas", 0xA9BDD8, 0x7C95B8, AC_FONDO)
         fin
-        si fondo = 1 entonces
+        si fondo = 1 y no con_imagen entonces
             pulsador(v_config, 218, 174, 100, 30, "Azul", VERDE_ARRIBA, VERDE_ABAJO, AC_FONDO + 1)
         sino
             pulsador(v_config, 218, 174, 100, 30, "Azul", 0xA9BDD8, 0x7C95B8, AC_FONDO + 1)
         fin
-        si fondo = 2 entonces
+        si fondo = 2 y no con_imagen entonces
             pulsador(v_config, 326, 174, 100, 30, "Verde", VERDE_ARRIBA, VERDE_ABAJO, AC_FONDO + 2)
         sino
             pulsador(v_config, 326, 174, 100, 30, "Verde", 0xA9BDD8, 0x7C95B8, AC_FONDO + 2)
@@ -2216,6 +2301,7 @@ módulo Escritorio
                 organiza_iconos()
                 pon_iconos()
             caso AC_TAPIZ_SIGUIENTE:
+                sin_imagen()                    ; (MIRADOR)
                 fondo := (fondo + 1) mod 3
                 pinta_tapiz()
                 repintar_todo()
@@ -2235,6 +2321,7 @@ módulo Escritorio
                 pedir_preferencia(acción - AC_PREFIERE)
                 pinta_config()
             caso AC_FONDO..AC_FONDO + 2:
+                sin_imagen()                    ; (MIRADOR)
                 fondo := acción - AC_FONDO
                 pinta_tapiz()
                 repintar_todo()
@@ -3277,6 +3364,7 @@ módulo Escritorio
                 pide := PIDE_NADA
             fin
             si suelta_pedida entonces atiende_suelta() fin
+            si tapiz_pedido <> 0 entonces atiende_tapiz() fin     ; (MIRADOR)
             si Ventanas.cambios <> cambios_vistos o cambios_red <> red_vista o cambios_energía <> energía_vista o cambios_sonido <> sonido_visto o cambios_iconos <> iconos_vistos entonces pinta_barra() fin     ; (REPRODUCTOR) y los iconos de los programas
             ; cada segundo: el reloj (si ha cambiado el minuto) y las tareas acabadas
             si tics div HZ <> segundo_visto entonces
@@ -3341,6 +3429,8 @@ módulo Escritorio
         fin
         p := buscar(línea_del_cargador(), "tapiz=")
         si p <> nulo entonces fondo := número_tras(p + 6, q) mod 3 fin
+        con_imagen := p = nulo                  ; (MIRADOR) la imagen de FONDO.HPM, si la hay (y no se dice otro)
+        tapiz_pedido := 0
         si no pon_modo(an, al, bits) entonces devolver 0 fin
         si no prepara_ventanas() entonces
             escribir("escritorio: no hay memoria para la pantalla\n")

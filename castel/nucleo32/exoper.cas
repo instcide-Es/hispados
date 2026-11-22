@@ -834,6 +834,29 @@ módulo Exoper
     público variable ruta_asocia: arreglo [40] de byte
     variable de_siempre: arreglo [700] de byte = "; con qu\x82 se abre cada clase de archivo: EXT=programa|argumentos (%1 es el archivo)\r\nTXT=\\BLOC.BIN|%1\r\nBAT=\\BLOC.BIN|%1\r\nINI=\\BLOC.BIN|%1\r\nMNU=\\BLOC.BIN|%1\r\nBIN=%1|\r\nEXE=%1|\r\nHVP=\\HVPRUN.BIN|%1\r\nPLU=\\HVPRUN.BIN|\\OFICINA\\PLUMA.HVP %1\r\nHOJ=\\HVPRUN.BIN|\\OFICINA\\CUENTAS.HVP %1\r\nFAC=\\HVPRUN.BIN|\\OFICINA\\FACTURAS.HVP %1\r\nBMP=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nPCX=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nGIF=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nPNG=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nJPG=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nTGA=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nICO=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\nPPM=\\HVPRUN.BIN|\\OFICINA\\MIRADOR.HVP %1\r\n"
 
+    ; (ZIP) (MIRADOR) los programas de los paquetes «comprim» (Comprimidos) y
+    ; «mirador» (el Mirador de Pentium), y (PDF) los .PDF con Hispa-PDF (el
+    ; paquete «pdf»: \HISPA\HISPAPDF.BIN): si están instalados, sus clases se
+    ; abren con ellos, también donde ASOCIA.TXT dice lo de fábrica de antes
+    ; (el Mirador de la oficina); si no lo están, con lo de siempre
+    variable de_paquetes: arreglo [400] de byte = "PDF=\\HISPAPDF.BIN|%1\r\nZIP=\\COMPRIM.BIN|%1\r\nBMP=\\MIRADOR.BIN|%1\r\nPNG=\\MIRADOR.BIN|%1\r\nJPG=\\MIRADOR.BIN|%1\r\nJPE=\\MIRADOR.BIN|%1\r\nGIF=\\MIRADOR.BIN|%1\r\nICO=\\MIRADOR.BIN|%1\r\nTGA=\\MIRADOR.BIN|%1\r\nPSD=\\MIRADOR.BIN|%1\r\nPPM=\\MIRADOR.BIN|%1\r\nPGM=\\MIRADOR.BIN|%1\r\nPNM=\\MIRADOR.BIN|%1\r\n"
+
+    ; ¿está ese programa (en la unidad del sistema o en su \HISPA)?
+    función hay_programa(prog: puntero a byte): bool
+        variable r: arreglo [MAX_RUTA] de byte
+        variable c: bool
+        si ruta_asocia[0] = 0 entonces busca_asocia() fin
+        r[0] := ruta_asocia[0]
+        r[1] := 0
+        concatenar(r, ":\\HISPA")
+        si longitud(r) + longitud(prog) + 1 >= MAX_RUTA entonces devolver falso fin
+        concatenar(r, prog)
+        si existe(r, c) y no c entonces devolver cierto fin
+        r[2] := 0
+        concatenar(r, prog)
+        devolver existe(r, c) y no c
+    fin
+
     ; dónde está ASOCIA.TXT: \HISPA\ASOCIA.TXT en un sistema instalado
     ; (si está la carpeta \HISPA); si no, \ASOCIA.TXT, en la unidad del sistema
     función busca_asocia()
@@ -868,13 +891,17 @@ módulo Exoper
 
     ; dónde empieza la línea de la extensión (o MAX_ASOCIA si no está)
     función línea_de(ext: puntero a byte): nat32
+        devolver línea_en(dirección(asocia[0]), ext)
+    fin
+
+    función línea_en(t: puntero a byte, ext: puntero a byte): nat32
         variable i, n: nat32
         n := longitud(ext)
         si n = 0 entonces devolver MAX_ASOCIA fin
         i := 0
-        mientras asocia[i] <> 0 hacer
-            si (i = 0 o asocia[i - 1] = '\n') y asocia[i + n] = '=' entonces
-                si comparar_sin_caja(dirección(asocia[i]), ext, n) entonces devolver i fin
+        mientras t[i] <> 0 hacer
+            si (i = 0 o t[i - 1] = '\n') y t[i + n] = '=' entonces
+                si comparar_sin_caja(dirección(t[i]), ext, n) entonces devolver i fin
             fin
             i := i + 1
         fin
@@ -891,25 +918,39 @@ módulo Exoper
 
     ; con qué se abre la extensión: el programa y la plantilla de argumentos
     público función asociado(ext: puntero a byte, programa: puntero a byte, plantilla: puntero a byte): bool
-        variable i, j: nat32
+        variable p2, t2: arreglo [80] de byte
+        variable hay: bool
         si no asocia_leída entonces lee_asociaciones() fin
+        hay := asociado_en(dirección(asocia[0]), ext, programa, plantilla)
+        ; (ZIP) (MIRADOR) lo de los paquetes, si están: donde no hay nada o
+        ; donde está lo de fábrica de antes (el Mirador de la oficina)
+        si (no hay o (iguales(programa, "\\HVPRUN.BIN") y empieza_por(plantilla, "\\OFICINA\\MIRADOR.HVP"))) y asociado_en(dirección(de_paquetes[0]), ext, p2, t2) y hay_programa(p2) entonces
+            copiar(programa, p2)
+            copiar(plantilla, t2)
+            devolver cierto
+        fin
+        devolver hay
+    fin
+
+    función asociado_en(t: puntero a byte, ext: puntero a byte, programa: puntero a byte, plantilla: puntero a byte): bool
+        variable i, j: nat32
         programa[0] := 0
         plantilla[0] := 0
-        i := línea_de(ext)
+        i := línea_en(t, ext)
         si i = MAX_ASOCIA entonces devolver falso fin
         i := i + longitud(ext) + 1
         j := 0
-        mientras asocia[i] <> 0 y asocia[i] <> '|' y asocia[i] <> '\r' y asocia[i] <> '\n' y j < 79 hacer
-            programa[j] := asocia[i]
+        mientras t[i] <> 0 y t[i] <> '|' y t[i] <> '\r' y t[i] <> '\n' y j < 79 hacer
+            programa[j] := t[i]
             i := i + 1
             j := j + 1
         fin
         programa[j] := 0
         j := 0
-        si asocia[i] = '|' entonces
+        si t[i] = '|' entonces
             i := i + 1
-            mientras asocia[i] <> 0 y asocia[i] <> '\r' y asocia[i] <> '\n' y j < 79 hacer
-                plantilla[j] := asocia[i]
+            mientras t[i] <> 0 y t[i] <> '\r' y t[i] <> '\n' y j < 79 hacer
+                plantilla[j] := t[i]
                 i := i + 1
                 j := j + 1
             fin

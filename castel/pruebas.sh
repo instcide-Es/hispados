@@ -242,6 +242,17 @@
 #      altavoz de la bandeja con la rueda, Configuración > Sonido, los
 #      sonidos de inicio y de apagar; DirectSound (WINDX.EXE) y Hispa-Snes en
 #      HVPRUN.
+#  31. (ZIP, SOLO=zip) Comprimidos (COMPRIM.BIN, ZIP y UNZIP; pruebas_zipvisor.sh):
+#      el motor en el anfitrión (comprim/prueba/prueba.sh: con el zip y el
+#      unzip de Linux octeto a octeto, ZipCrypto, AES, ZIP64, los ZIP malos y
+#      el fuzz con ASan; FUZZ_ZIP=vueltas, SIN_GRANDE=1 sin el de 4 GB); las
+#      órdenes en el intérprete; y la ventana desde el explorador (abrir,
+#      entrar, Extraer todo, Quitar, Añadir, Propiedades, arrastrar al tapiz,
+#      contraseña, «Comprimir en ZIP»), mirando el disco con mtools y unzip.
+#  32. (MIRADOR, SOLO=mirador) El Mirador (MIRADOR.BIN): PNG, BMP, JPG, GIF
+#      animado e ICO desde el explorador, las flechas, la rueda, girar,
+#      pantalla completa, diapositivas y «Usar como fondo de escritorio» (la
+#      llamada 172: FONDO.HPM), que sigue al arrancar otra vez.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
@@ -271,6 +282,9 @@
 #   SOLO=wifi ./pruebas.sh        la primera y la 27 (el Wi-Fi: WIFI.BIN)
 #   SOLO=accesorios ./pruebas.sh  la primera y la 28 (ACCESORIOS: la Calculadora, el Reloj y el Mapa de caracteres)
 #   SOLO=sonido ./pruebas.sh      la primera y la 29 (el sonido: SONIDO.BIN, la bandeja, DirectSound, HVPRUN)
+#   SOLO=pdf ./pruebas.sh         la primera y la 30 (Hispa-PDF: PDF.BIN y su ventana)
+#   SOLO=zip ./pruebas.sh         la primera y la 31 (Comprimidos: ZIP y UNZIP; pruebas_zipvisor.sh)
+#   SOLO=mirador ./pruebas.sh     la primera y la 32 (el Mirador y la imagen de tapiz; pruebas_zipvisor.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -320,6 +334,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 }
 
 . $AQUI/pruebas32.sh               # la parte 15 (CASTEL32), como la función parte15
+. $AQUI/pruebas_zipvisor.sh        # (ZIP) (MIRADOR) las partes 31 y 32, como parte_zip y parte_mirador
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -334,9 +349,15 @@ for f in $AQUI/ejemplos/errores/*.cas $AQUI/ejemplos32/errores/*.cas $AQUI/ejemp
   dicho=$(head -1 $T/err.txt | sed 's/^.*\.cas://')
   if [ "$dicho" = "$esperado" ]; then ok "$n: $dicho"; else ko "$n: dice «$dicho» y se esperaba «$esperado»"; fi
 done
+# la versión que dicen el menú Inicio, Configuración y «Acerca de»
+# (usuario.cas, VERSIÓN_TEXTO) es la del paquete «base» de tools/hpq.py
+VERSION_BASE=$(python3 -I -c "import sys; sys.path.insert(0, '$AQUI/../tools'); import hpq; print([v for n, v, *_ in hpq.SISTEMA if n == 'base'][0])")
+if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/nucleo32/usuario.cas; then
+  ok "la versión del escritorio (VERSIÓN_TEXTO) es la de la base de hpq.py: $VERSION_BASE"
+else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -1381,7 +1402,7 @@ miracap "la Consola: el intérprete de órdenes dentro de una ventana (un termin
 miracap "SALIR acaba el intérprete y la Consola se cierra (su ventana y su botón)" e10 notexto 130 80 160 100 Consola notexto 280 570 310 582 Consola \
   negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas"
 miracap "Configuración: lo que hay (pantalla, memoria), el teclado y el tapiz" e11 negrita 196 126 206 136 "Configuración" \
-  negrita 240 160 256 170 "Hispa-Pentium 0.8" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
+  negrita 240 160 256 170 "Hispa-Pentium $VERSION_BASE" texto 190 224 200 234 "Pantalla:  800 x 600, 32 bits por punto" negrita 290 280 330 300 "Español" rgb 10 10 154C9C
 miracap "el tapiz se cambia desde Configuración (a «Verde»), y se repinta todo el escritorio" e12 rgb 10 10 1F6B52 negrita 30 570 46 580 Inicio \
   negrita 196 126 206 136 "Configuración"
 miracap "el botón de cerrar acaba el Bloc de notas (sin cambios pendientes): ni ventana ni botón en la barra" e13 \
@@ -1458,7 +1479,7 @@ miracap "dos clics en «Mi equipo»: el explorador, con la unidad C: (el disco F
 miracap "dos clics en la unidad: sus archivos y sus carpetas" b10 negrita 30 10 40 20 "C:\\" texto 316 322 326 332 LEEME.TXT texto 428 166 438 176 VACIA
 miracap "y dos clics en un texto lo abren con el Bloc de notas" b11 negrita 198 142 206 150 "\\LEEME.TXT - Bloc de notas" \
   texto 178 224 186 232 "Hispa-Pentium: un núcleo de 32 bits escrito en Castel."
-miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium 0.8" \
+miracap "«Acerca de Hispa-Pentium», desde el menú del tapiz: la versión y la licencia" b12 negrita 206 158 214 166 "Acerca de Hispa-Pentium" negrita 276 196 284 204 "Hispa-Pentium $VERSION_BASE" \
   texto 196 294 204 302 "Copyright (C) 2026 Carlos Sanz y contribuidores."
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
@@ -2287,7 +2308,7 @@ for hc in xhci ehci; do
     miracap "al aceptar: «Todo listo», con el saludo; y el reloj de la barra ya marca la hora puesta (el reloj del PC)" a3$hc \
       negrita 154 98 162 106 "Todo listo" negrita 112 176 120 184 "¡Hola, Carlos!" negrita 454 427 462 435 "Empezar" negrita 740 570 760 584 "07:45"
     miracap "el menú Inicio saluda con el nombre («Hola, Carlos») y dice la versión; LEEME.TXT, en los documentos" a4$hc \
-      negrita 54 104 62 112 "Hola, Carlos" texto 54 122 62 130 "Hispa-Pentium, versión 0.8" negrita 256 159 264 167 "Mis documentos" texto 38 246 46 254 Naves
+      negrita 54 104 62 112 "Hola, Carlos" texto 54 122 62 130 "Hispa-Pentium, versión $VERSION_BASE" negrita 256 159 264 167 "Mis documentos" texto 38 246 46 254 Naves
     if grep -q "asistente: guardado HISPA.INI (Carlos, Toshiba)$" $S && [ "$(tr -d '\r' < $Z/ini.txt | tr '\n' '|')" = "[hispa]|usuario=Carlos|equipo=Toshiba|teclado=es|modo=1024x600|" ] \
       && grep -q "^set modo=1024x600x32,1024x600,auto$" $Z/cfg.txt && [ "$(grep -c '^set modo=' $Z/cfg.txt)" = 1 ] && [ $sano = 0 ]; then
       ok "lo guardado: C:\\HISPA\\HISPA.INI (usuario, equipo, teclado y modo) y la medida de la pantalla en el menú de arranque (GRUB.CFG); el disco, sano"
@@ -2608,6 +2629,37 @@ if sano $Q/s2.img && sin_restos $Q/s2.img && igual_en $Q/s2.img HISPA/SALUDO.TXT
   ok "lo actualizado, desde fuera: el disco sano, lo de la 2.0 en su sitio, el archivo que la 2.0 ya no trae (SALUDO.DAT) quitado y el registro, el de la 2.0"
 else ko "lo actualizado no queda bien en el disco:"; lista_de $Q/s2.img | sed 's/^/        /' | head -14; tail -n 3 $P/fsck.txt | sed 's/^/        /'; fi
 
+# 3 bis. (SISTEMA, 0.8.6) los paquetes nuevos del sistema: el catálogo marca
+# «sistema=nuevo» (y «sistema=letras», que ya está); ACTUALIZA pone «nuevo»
+# aunque no estuviera (como accesori, sonido, wifi o escudo en un sistema que
+# viene de una versión de antes), pero no «extra», que no es del sistema; lo
+# quitado a propósito no lo vuelve a poner (QUITADOS.TXT) e INSTALA lo olvida
+mkdir -p $F/paqsis
+cp $F/paq/LETRAS1.HPQ $F/paq/LETRAS11.HPQ $F/paq/SALUDO1.HPQ $F/paq/SALUDO2.HPQ $F/paqsis/
+( cd $F
+  $HPQ crea paqsis/NUEVO.HPQ --nombre nuevo --version 1.0 --descripcion 'Nuevo del sistema (de prueba)' A.TXT='\HISPA\NUEVO.TXT'
+  $HPQ crea paqsis/EXTRA.HPQ --nombre extra --version 1.0 --descripcion 'Opcional (de prueba)' A.TXT='\HISPA\EXTRA.TXT'
+  $HPQ catalogo paqsis && printf 'sistema=letras\r\nsistema=nuevo\r\n' >> paqsis/CATALOGO.TXT && $HPQ firma paqsis $Q/prueba.key ) > $Q/hpqsis.txt 2>&1
+mkfs.fat -F 16 -n MEMORIA -C $Q/usbsis.img 16384 > /dev/null && mmd -i $Q/usbsis.img ::PAQUETES && mcopy -i $Q/usbsis.img $F/paqsis/* ::PAQUETES/
+cp $Q/s1.img $Q/ssis.img
+# (y lo que dejaba en BAJADAS un PAQUETES de antes de la 0.8.6: se borra)
+mmd -i $Q/ssis.img ::HISPA/PAQUETES/BAJADAS 2> /dev/null; mcopy -i $Q/ssis.img $F/paq/LETRAS1.HPQ ::HISPA/PAQUETES/BAJADAS/VIEJO.HPQ
+USB_IMG=$Q/usbsis.img paq $Q/ssis.img sistema "paquetes estado" "paquetes actualiza" ":pausa 2" "paquetes lista" "paquetes quita nuevo" "paquetes estado" "paquetes actualiza" ":pausa 1"
+mira "PAQUETES ESTADO dice cuál es nuevo del sistema («|nuevo»: la bandeja lo cuenta); ACTUALIZA pone también el paquete nuevo del sistema (no estaba), no el opcional; y quitado a propósito, ACTUALIZA ya no lo pone" \
+  "^p|nuevo||1\.0|Nuevo del sistema (de prueba)|otros|nuevo$" "^p|extra||1\.0|Opcional (de prueba)|otros$" "^Nuevo del sistema: nuevo$" \
+  "^Se va a instalar: saludo 2\.0 (en lugar de la 1\.0), nuevo 1\.0$" "^  instalado nuevo 1\.0$" "^  nuevo     1\.0     Nuevo del sistema (de prueba)$" \
+  "^  quitado nuevo 1\.0$" "^p|nuevo||1\.0|Nuevo del sistema (de prueba)|otros$" "^Todo está al día\.$"
+if grep -q "instalado extra\|^p|letras||" $S; then ko "ACTUALIZA ha puesto el opcional (extra) o da letras por no instalado"; else ok "el opcional (extra) se queda sin instalar"; fi
+if sano $Q/ssis.img && sin_restos $Q/ssis.img && saca $Q/ssis.img HISPA/PAQUETES/QUITADOS.TXT $Q/quitados.txt && [ "$(cat $Q/quitados.txt)" = "$(printf 'nuevo\r')" ] \
+  && ! igual_en $Q/ssis.img HISPA/NUEVO.TXT $F/A.TXT && ! igual_en $Q/ssis.img HISPA/EXTRA.TXT $F/A.TXT && ! saca $Q/ssis.img HISPA/PAQUETES/BAJADAS/VIEJO.HPQ $Q/viejo.hpq; then
+  ok "en el disco: sano, sin «nuevo» (quitado) ni «extra», QUITADOS.TXT dice «nuevo» y lo viejo de BAJADAS (de un PAQUETES de antes), borrado"
+else ko "lo de los nuevos del sistema no queda bien en el disco:"; lista_de $Q/ssis.img | sed 's/^/        /' | head -14; fi
+USB_IMG=$Q/usbsis.img paq $Q/ssis.img sistema2 "paquetes instala nuevo" ":pausa 1" "paquetes actualiza" ":pausa 1"
+mira "y PAQUETES INSTALA nuevo lo pone otra vez (y lo olvida de QUITADOS.TXT)" "^  instalado nuevo 1\.0$" "^Todo está al día\.$"
+if sano $Q/ssis.img && igual_en $Q/ssis.img HISPA/NUEVO.TXT $F/A.TXT && ! saca $Q/ssis.img HISPA/PAQUETES/QUITADOS.TXT $Q/quitados.txt; then
+  ok "en el disco: «nuevo» puesto y QUITADOS.TXT, borrado (ya no queda nada quitado)"
+else ko "INSTALA no olvida lo quitado:"; cat $Q/quitados.txt 2> /dev/null | sed 's/^/        /'; fi
+
 # 4. lo que no vale no toca nada: una suma mala, un conflicto, quitar lo que
 # otro necesita; y COMPRUEBA ve un archivo cambiado (la imagen, idéntica)
 cp $Q/s1.img $Q/s4.img
@@ -2630,6 +2682,11 @@ paq $Q/s3.img quita "paquetes quita saludo letras" "paquetes lista" "dir \\docs"
 mira "PAQUETES QUITA saludo letras: quita sus archivos, sus registros y las carpetas que se quedan vacías (C:\\DOCS\\LETRAS y C:\\DOCS)" \
   "^  quitado saludo 2\.0$" "^  quitado letras 1\.1$" "^Hecho\.$" "^1 paquetes\.$" "^No puedo abrir .docs: no existe\.$"
 sano $Q/sis.img; antes=$(grep -o '[0-9]*/[0-9]* clusters' $P/fsck.txt)
+# ((SISTEMA, 0.8.6) lo quitado a propósito queda apuntado: QUITADOS.TXT; fuera, para comparar)
+if saca $Q/s3.img HISPA/PAQUETES/QUITADOS.TXT $Q/quitados.txt && [ "$(tr -d '\r' < $Q/quitados.txt | tr '\n' ' ')" = "saludo letras " ]; then
+  ok "lo quitado a propósito queda en C:\\HISPA\\PAQUETES\\QUITADOS.TXT (saludo y letras: ACTUALIZA no los pondrá si fueran del sistema)"
+else ko "QUITADOS.TXT no dice lo quitado: $(cat $Q/quitados.txt 2> /dev/null)"; fi
+mdel -i $Q/s3.img ::HISPA/PAQUETES/QUITADOS.TXT 2> /dev/null
 if sano $Q/s3.img && [ "$(grep -o '[0-9]*/[0-9]* clusters' $P/fsck.txt)" = "$antes" ] && [ "$(lista_de $Q/s3.img)" = "$(lista_de $Q/sis.img)" ]; then
   ok "lo quitado, desde fuera: el disco sano, con los mismos archivos y carpetas que antes de instalar nada y los mismos clusters ocupados ($antes)"
 else ko "después de quitarlo todo el disco no queda como al principio:"; diff <(lista_de $Q/s3.img) <(lista_de $Q/sis.img) | sed 's/^/        /' | head -8; fi
@@ -2659,8 +2716,8 @@ paq $Q/s7.img red "paquetes instala letras /desde=http://prueba/" ":pausa 2" "ad
 mira "el gancho de la red: con /DESDE=http://..., el catálogo y los paquetes los trae DESCARGA (DESCARGA.BIN, la orden de la red) a C:\\HISPA\\PAQUETES\\BAJADAS, y se instalan igual" \
   "^Trayendo http://prueba/CATALOGO\.TXT\.\.\.$" "^descarga (de prueba): http://prueba/LETRAS11\.HPQ -> C:.HISPA.PAQUETES.BAJADAS.LETRAS11\.HPQ$" "^  instalado letras 1\.1$" \
   "^paquetes: para traer http://actualiza\.hispados\.es/pentium/CATALOGO\.TXT de Internet hace falta la red (el programa DESCARGA),$"
-if sano $Q/s7.img && sin_restos $Q/s7.img && igual_en $Q/s7.img DOCS/LETRAS/B.TXT $F/B11.TXT && igual_en $Q/s7.img HISPA/PAQUETES/BAJADAS/LETRAS11.HPQ $F/paq/LETRAS11.HPQ; then
-  ok "y en el disco: sano, con lo instalado y lo traído (en BAJADAS) igual que lo de la memoria octeto a octeto"
+if sano $Q/s7.img && sin_restos $Q/s7.img && igual_en $Q/s7.img DOCS/LETRAS/B.TXT $F/B11.TXT && ! lista_de $Q/s7.img | grep -q "BAJADAS/LETRAS11\.HPQ"; then
+  ok "y en el disco: sano, con lo instalado igual que lo de la memoria octeto a octeto; lo traído a BAJADAS, ya borrado (RÁPIDO: en una memoria pequeña son megas)"
 else ko "lo traído por el gancho de la red no queda bien en el disco:"; lista_de $Q/s7.img | sed 's/^/        /' | head -14; fi
 
 # 8. la ventana «Programas y actualizaciones» (ACTUALIZ.BIN), desde el menú
@@ -2685,7 +2742,7 @@ miracap "«Buscar novedades» trae el catálogo otra vez (y su firma, buena)" pq
   texto 112 415 116 419 "La firma del catálogo es buena" negrita 112 203 116 207 choque
 miracap "maximizada, la ventana se pone a su medida: la lista, los mensajes y los botones, al ancho y al alto de la pantalla, y lo que no cabe, cortado" pq5 \
   negrita 52 32 60 38 "Programas y actualizaciones" negrita 660 50 700 58 "(firma buena)" negrita 182 512 190 522 Quitarlo
-if sano $Q/s8.img && sin_restos $Q/s8.img && [ "$(mdir -/ -b -i $Q/s8.img ::HISPA/PAQUETES 2> /dev/null | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI ::/HISPA/PAQUETES/LETRAS.PQI " ]; then
+if sano $Q/s8.img && sin_restos $Q/s8.img && [ "$(mdir -/ -b -i $Q/s8.img ::HISPA/PAQUETES 2> /dev/null | sort | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI ::/HISPA/PAQUETES/LETRAS.PQI ::/HISPA/PAQUETES/QUITADOS.TXT " ]; then
   ok "lo hecho desde la ventana, desde fuera: el disco sano, letras instalado, saludo quitado y sin restos (tampoco VENTANA.TXT)"
 else ko "lo hecho desde la ventana no queda bien en el disco:"; lista_de $Q/s8.img | sed 's/^/        /' | head -12; fi
 
@@ -3418,8 +3475,8 @@ mira "al arrancar, con red, ACTUALIZ /BANDEJA mira solo si hay actualizaciones (
   "^actualiz: aviso en la bandeja: Hay una actualización\.$" "^reiniciar$" "^actualiz: aviso en la bandeja: El núcleo de Hispa-Pentium El núcleo nuevo ha arrancado bien\.$"
 miracap "el aviso de la bandeja: una ventanita abajo a la derecha, «Hay una actualización», con «Verlas» y «Ahora no»" u1 negrita 400 460 480 480 "Hay una actualización." negrita 420 510 520 530 Verlas
 [ -n "${GUARDA_CAPTURAS:-}" ] && mkdir -p "$GUARDA_CAPTURAS" && cp $G/u[23].ppm "$GUARDA_CAPTURAS/"
-miracap "«Verlas» abre «Programas y actualizaciones» en «Pendientes (1)»: base, de la 0.8.5 a la 0.9, y el catálogo de Internet con su firma buena" u2 \
-  negrita 10 120 150 140 "Pendientes (1)" negrita 40 190 120 230 base texto 110 190 200 230 "0.8.5" texto 195 190 245 230 "0.9" texto 300 88 790 110 "Paquetes de http://10.0.2.2:" \
+miracap "«Verlas» abre «Programas y actualizaciones» en «Pendientes (1)»: base, de la 0.8.6 a la 0.9, y el catálogo de Internet con su firma buena" u2 \
+  negrita 10 120 150 140 "Pendientes (1)" negrita 40 190 120 230 base texto 110 190 200 230 "0.8.6" texto 195 190 245 230 "0.9" texto 300 88 790 110 "Paquetes de http://10.0.2.2:" \
   texto 300 88 790 110 "(firma buena)"
 miracap "«Actualizar todo»: con el núcleo nuevo, ofrece «Reiniciar ahora» o «Más tarde»" u3 negrita 150 200 660 400 "Reiniciar ahora" negrita 150 200 660 400 "Más tarde" \
   texto 140 200 660 320 "Se ha puesto un núcleo nuevo: se usa al reiniciar"
@@ -4315,7 +4372,7 @@ cumple() {
 campo() { grep "^ráfaga $2 " $1 | awk -v c=$3 '{ print $c }'; }
 for tarjeta in "hda:-device intel-hda -device hda-duplex,audiodev=snd0" "ac97:-device AC97,audiodev=snd0" "sb16:-device sb16,audiodev=snd0"; do
   n=${tarjeta%%:*}; dev=${tarjeta#*:}
-  O=("sonido" ":pausa 2" "sonido /tono 440 1200 I" ":pausa 1" "sonido /tono 660 1200 D" ":pausa 1" "sonido /tono 523 9000 /suelto" ":pausa 1" "sonido /tono 1000 1500" ":pausa 4"
+  O=("sonido" ":pausa 2" "sonido /tono 440 1200 I" ":pausa 1" "sonido /tono 660 1200 D" ":pausa 1" "sonido /tono 523 6000 /suelto" ":pausa 1" "sonido /tono 1000 1500" ":pausa 6"
      "sonido M:\\P8.WAV" ":pausa 2" "sonido /volumen 40" "sonido /tono 440 800" ":pausa 1" "sonido /silencio si" "sonido /tono 440 800" ":pausa 1" "sonido /silencio no"
      "sonido /volumen 80" "sonido /fondo M:\\AVISO.WAV" ":pausa 2")
   [ $n = hda ] && O+=("disposit /informe" ":pausa 6")
@@ -4336,7 +4393,11 @@ for tarjeta in "hda:-device intel-hda -device hda-duplex,audiodev=snd0" "ac97:-d
   r0=$(campo $Y/$n.oye 0 7); r0=${r0:-1}
   cumple $Y/$n.oye 0 'hz >= 420 && hz <= 460 && dura >= 1100 && dura <= 1400 && izq > 3000 && der < 200 && cortes == 0' "$n: «SONIDO /TONO 440 1200 I»: 440 Hz, 1,2 s, solo por la izquierda y sin cortes"
   cumple $Y/$n.oye 1 'hz >= 630 && hz <= 690 && dura >= 1100 && dura <= 1400 && der > 3000 && izq < 200 && cortes == 0' "$n: «/TONO 660 1200 D»: 660 Hz, solo por la derecha"
-  cumple $Y/$n.oye 2 'dura >= 8500 && f[1] > 0.6 * r0 && f[2] > 0.6 * r0 && izq > 1.6 * r0 && cortes == 0' "$n: dos programas a la vez (523 Hz 9 s, suelto, y 1.000 Hz encima): los dos se oyen y se suman, sin cortes" -v r0=$r0
+  # (el de 523 Hz dura 6 s y P8.WAV va 6 s después del de 1.000 Hz: con 9 s y
+  # 4 s, según lo que se tardara en teclear, P8.WAV empezaba justo al acabar
+  # el de 523 Hz y oye.py los juntaba en una ráfaga, con «un corte» entre los
+  # dos; y faltaba una ráfaga: así salían los 5 fallos de cada tarjeta)
+  cumple $Y/$n.oye 2 'dura >= 5500 && dura <= 6800 && f[1] > 0.6 * r0 && f[2] > 0.6 * r0 && izq > 1.6 * r0 && cortes == 0' "$n: dos programas a la vez (523 Hz 6 s, suelto, y 1.000 Hz encima): los dos se oyen y se suman, sin cortes" -v r0=$r0
   cumple $Y/$n.oye 3 'hz >= 700 && hz <= 800 && dura >= 900 && dura <= 1200 && izq > 1000 && der > 1000' "$n: un WAV de 8 bits, mono, a 11.025 Hz (SONIDO M:\\P8.WAV), a su frecuencia y lo que dura"
   cumple $Y/$n.oye 4 'hz >= 420 && hz <= 460 && izq < 0.2 * r0 && izq > 0.05 * r0' "$n: con el volumen al 40 %, unos 19 dB más bajo (la curva de HSPSND: 0,47 dB por punto)" -v r0=$r0
   cumple $Y/$n.oye 5 'hz >= 780 && hz <= 980 && dura >= 400 && dura <= 800' "$n: en silencio no suena nada; y AVISO.WAV, que toca el servicio solo (la llamada 194, «SONIDO /FONDO»)"
@@ -4891,6 +4952,11 @@ if bash $AQUI/nucleo32/escudo/hacer.sh --anfitrion $E/anf > $E/hacer.txt 2>&1; t
   $E/anf -q $FIRMAS -o $E/PRUEBA.ESC && $E/anf -q -f $E/PRUEBA.ESC $E/p/ARCHIVOS > $E/l2.txt 2>&1
   if $CMP $E/l2.txt > $E/c2.txt; then ok "y lo mismo desde FIRMAS.ESC (el índice propio: las sumas en el disco por tramos; el cuerpo en bloques comprimidos y, en memoria, sus disparadores)"
   else ko "desde FIRMAS.ESC no dice lo mismo:"; sed 's/^/        /' $E/c2.txt | head -6; fi
+  # (0.8.6) un .ESC sin nada (el DIA.ESC de un día sin firmas nuevas), cargado el
+  # primero (Escudo carga primero DIA.ESC): antes salía «no hay memoria» y no se usaba
+  $E/anf -q -o $E/VACIO.ESC > /dev/null 2>&1 && $E/anf -f $E/VACIO.ESC -f $E/PRUEBA.ESC $E/p/ARCHIVOS > $E/l3.txt 2> $E/l3.err
+  if ! grep -q "no hay memoria" $E/l3.err && $CMP $E/l3.txt > $E/c3.txt; then ok "un .ESC vacío (un DIA.ESC sin firmas) cargado el primero: se usa, sin «no hay memoria», y lo demás dice lo mismo"
+  else ko "un .ESC vacío cargado el primero no va:"; cat $E/l3.err $E/c3.txt 2> /dev/null | sed 's/^/        /' | head -6; fi
   # lo de la revisión de seguridad (21/11): los casos que encontró (FIRMAS.ESC
   # con la cabecera mentirosa, una tabla de bloques al revés, paréntesis sin
   # fin, variantes que piden 1 GB, una bomba ZIP de miembros solapados, un PE
@@ -5001,6 +5067,48 @@ if $AQUI/nucleo32/disco.sh $E/d.img 32 escudo > $E/disco.txt 2>&1 && mmd -i $E/d
     MS=$(tr -d '\r' < $E/r.sal | sed -n 's/^escudo: 16777216 octetos en \([0-9]*\) ms$/\1/p')
     if [ -n "$MS" ]; then ok "lo que tarda, 16 MB al azar con 20.000 patrones, 5.000 lógicas y 100.000 sumas: en Linux, $LIN; en QEMU (sin KVM), $(python3 -c "print('%.1f MB/s' % (16000/$MS))") (leyendo del disco IDE)"
     else ko "no se ha podido medir en QEMU"; fi
+    # (RÁPIDO) lo que pasó en la 0.8.5 (VirtualBox: «145 archivos en 504 s»;
+    # el HP Mini, congelado instalando la base de firmas): fat.cas leía y
+    # escribía de sector en sector (una orden al disco por cada 512 octetos)
+    # y la memoria USB de 4 K en 4 K. Se mide en un «pc» con el disco IDE, una
+    # memoria USB (EHCI, como el HP Mini) y un CD con 300 archivos (ide-cd,
+    # como VirtualBox): copiar 16 MB en la memoria, revisarlos, y «Revisar
+    # todo el equipo» desde la ventana
+    rm -rf $E/cdr; mkdir -p $E/cdr/UNO $E/cdr/DOS
+    for k in $(seq 150); do printf 'archivo %d del CD de prueba\r\n' $k > $E/cdr/UNO/A$k.TXT; head -c $((k * 97)) $E/c/GRANDE.BIN > $E/cdr/DOS/B$k.BIN; done
+    printf '[autorun]\r\nopen=NADA.EXE\r\n' > $E/cdr/AUTORUN.INF
+    rm -f $E/u.img; truncate -s 64M $E/u.img; mkfs.fat -F 32 -n MEMORIA $E/u.img > /dev/null && mcopy -i $E/u.img $E/c/GRANDE.BIN ::
+    if xorriso -as mkisofs -quiet -J -V PRUEBA_CD -o $E/cd.iso $E/cdr > $E/iso.txt 2>&1; then
+      rm -f $E/rel.txt
+      RELOJ_A=$E/rel.txt CAPTURAS=$G DISCO=$E/r.img MAQUINA=pc ARRANQUE=ordenes MODULOS= MEMORIA=160 \
+        QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$E/u.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu -drive id=cd,file=$E/cd.iso,media=cdrom,if=none,readonly=on -device ide-cd,drive=cd,bus=ide.1,unit=0" \
+        $AQUI/nucleo32/probar.sh "" ":pausa 3" ":reloj copia" "copy X:\\GRANDE.BIN X:\\COPIA.BIN" ":hasta 400 2 C:.>" "escudo X:\\COPIA.BIN" ":hasta 200 3 C:.>" \
+        "escudo D:" ":hasta 200 4 C:.>" > $E/rap.sal 2>&1
+      tr -d '\r' < $E/rap.sal > $E/rap.txt
+      T1=$(sed -n 's/^copia \([0-9.]*\)$/\1/p' $E/rel.txt); T2=$(sed -n 's/^C:\.> 2 \([0-9.]*\)$/\1/p' $E/rel.txt)
+      MSU=$(sed -n 's/^escudo: 16777216 octetos en \([0-9]*\) ms$/\1/p' $E/rap.txt | head -n 1)
+      MSD=$(sed -n 's/^escudo: \([0-9]*\) octetos en \([0-9]*\) ms$/\2/p' $E/rap.txt | tail -n 1)
+      NCD=$(sed -n 's/^escudo: revisado D: \([0-9]*\) archivos.*/\1/p' $E/rap.txt)
+      if [ -n "$T1" ] && [ -n "$T2" ] && [ -n "$MSU" ] && python3 -c "import sys; sys.exit(not (16 / ($T2 - $T1) >= 0.4 and 16000 / $MSU >= 1.5))"; then
+        ok "(RÁPIDO) la memoria USB (EHCI): copiar 16 MB, $(python3 -c "print('%.1f s' % ($T2 - $T1))") (antes, unos 260); revisarlos, $(python3 -c "print('%.1f MB/s' % (16000 / $MSU))") (antes, 0,2)"
+      else ko "(RÁPIDO) la memoria USB va lenta: copiar 16 MB ${T1:+$(python3 -c "print('%.1f s' % (${T2:-0} - $T1))")}, revisar ${MSU:-?} ms"; fi
+      if [ "$NCD" = 301 ] && [ -n "$MSD" ] && [ "$MSD" -lt 15000 ]; then ok "(RÁPIDO) el CD (ide-cd, como VirtualBox): sus 301 archivos, en $(python3 -c "print('%.1f s' % ($MSD / 1000))")"
+      else ko "(RÁPIDO) el CD: ${NCD:-?} archivos en ${MSD:-?} ms"; fi
+      # y en el escritorio, la ventana: «Revisar todo el equipo» (Intro, el botón de fábrica)
+      CAPTURAS=$G DISCO=$E/r.img MAQUINA=pc ARRANQUE=escritorio MODULOS= MEMORIA=160 \
+        QEMU_MAS="-drive id=cd,file=$E/cd.iso,media=cdrom,if=none,readonly=on -device ide-cd,drive=cd,bus=ide.1,unit=0" \
+        $AQUI/nucleo32/probar.sh "" ":pausa 6" ":doble 62 185" ":pausa 3" "escudo /ventana" ":pausa 4" ":tecla ret" \
+        ":hasta 120 1 revisión de \* acabada" ":pausa 2" ":captura rp1" ":clic 400 300" ":pausa 1" > $E/rv.sal 2>&1
+      tr -d '\r' < $E/rv.sal > $E/rv.txt
+      MST=$(sed -n 's/^escudo: \([0-9]*\) octetos en \([0-9]*\) ms$/\2/p' $E/rv.txt | tail -n 1)
+      NT=$(sed -n 's/^escudo: ventana: revisión de \* acabada: \([0-9]*\) archivos.*/\1/p' $E/rv.txt)
+      if [ -n "$MST" ] && [ -n "$NT" ] && [ "$NT" -gt 300 ] && [ "$MST" -lt 30000 ]; then
+        ok "(RÁPIDO) «Revisar todo el equipo» en la ventana (el disco y el CD): $NT archivos en $(python3 -c "print('%.1f s' % ($MST / 1000))")"
+      else ko "(RÁPIDO) «Revisar todo el equipo»: ${NT:-?} archivos en ${MST:-?} ms"; fi
+      # el AUTORUN.INF del CD: un aviso que no se puede mover: «Dejarlo» por omisión; y el texto, en dos líneas
+      miracap "(RÁPIDO) el AUTORUN.INF de un CD: «A cuarentena» y «Borrarlo» apagados, «Dejarlo» por omisión; la explicación, entera" rp1 \
+        negrita 80 450 720 510 "Dejarlo" texto 80 360 720 480 "al meter el disco o la memoria."
+    else ko "(RÁPIDO) no se ha podido hacer el CD de prueba: $(tail -n 1 $E/iso.txt)"; fi
   fi
   # 5. (CORTAFUEGOS) el cortafuegos de RED.BIN (rcorta.cas), con el servidor
   # SSH de verdad (SSHD.BIN) y una conexión desde aquí por QEMU (hostfwd: la
@@ -5266,6 +5374,135 @@ else ko "no se pueden hacer el disco o WIFISIM.BIN: $(tail -2 $Wf/disco.txt) $(t
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Wi-Fi)"
 fi   # el Wi-Fi
+# ---------------------------------------- 30. (PDF) Hispa-PDF: PDF.BIN y su ventana
+# El núcleo en C de castel/nucleo32/pdf, en el anfitrión (con ASan y UBSan:
+# unir, separar, girar, quitar, comprimir con flujos de objetos, cifrar y
+# descifrar con RC4, AES-128 y AES-256, texto, imágenes, crear con fotos; y,
+# si están qpdf y pdftotext, lo que escribe, mirado por ellos), y PDF.BIN en
+# QEMU: la orden PDF en el intérprete de órdenes (lo que deja, mirado luego
+# desde fuera) y la ventana, HISPAPDF.BIN, en el escritorio: las miniaturas,
+# girar con R, arrastrar una página, añadir otro PDF por su ruta, uno con
+# contraseña (la pide), guardar todo junto y verlo en grande. Los PDF de la
+# prueba los hace pdf/pruebas/haz_pdf.py (cada página dice cuál es).
+if parte08 pdf; then
+echo "== Hispa-PDF (PDF.BIN, en C, y su ventana HISPAPDF.BIN) =="
+V=$P/pdf
+mkdir -p $V/a $V/q $G
+export MTOOLS_SKIP_CHECK=1
+HP=$V/pdf-anfitrion
+if bash $AQUI/nucleo32/pdf/anfitrion.sh $HP asan > $V/anf.txt 2>&1 && bash $AQUI/nucleo32/pdf/hacer.sh $V/PDF.BIN > $V/hacer.txt 2>&1; then
+  ok "PDF.BIN se compila (-march=i586, sin CMOV: $(stat -c %s $V/PDF.BIN) octetos) y Hispa-PDF en el anfitrión, con ASan y UBSan"
+  python3 -I $AQUI/nucleo32/pdf/pruebas/haz_pdf.py $V/q/A.PDF A 10
+  python3 -I $AQUI/nucleo32/pdf/pruebas/haz_pdf.py $V/q/B.PDF B 6 objstm
+  python3 -I $AQUI/nucleo32/pdf/pruebas/haz_pdf.py $V/a/c0.pdf C 4
+  python3 -I - $V/q/FOTO.PPM <<'PY'
+import sys
+w, h = 160, 120
+d = bytearray()
+for y in range(h):
+    for x in range(w):
+        d += bytes([x * 255 // w, y * 255 // h, 128])
+open(sys.argv[1], 'wb').write(b'P6 %d %d 255\n' % (w, h) + d)
+PY
+  # 1. en el anfitrión
+  ASAN_OPTIONS=detect_leaks=1 $HP CIFRA $V/a/c0.pdf /CLAVE=hola /SALIDA=$V/q/C.PDF > $V/a/o.txt 2>&1
+  bien=1; por=
+  ord_() { if ! ASAN_OPTIONS=detect_leaks=1 $HP "$@" > $V/a/o.txt 2>&1 || grep -q "Sanitizer\|runtime error" $V/a/o.txt; then bien=0; por="$por | $* -> $(tail -n 2 $V/a/o.txt | tr '\n' ' ')"; fi; }
+  ord_ UNE $V/q/A.PDF $V/q/B.PDF /SALIDA=$V/a/u.pdf
+  ord_ SEPARA $V/q/B.PDF /SALIDA=$V/a/s.pdf
+  ord_ EXTRAE $V/q/A.PDF 3,1,8-10 /SALIDA=$V/a/e.pdf
+  ord_ QUITA $V/q/A.PDF 2-9 /SALIDA=$V/a/qu.pdf
+  ord_ GIRA $V/q/A.PDF 90 2 /SALIDA=$V/a/g.pdf
+  ord_ COMPRIME $V/a/u.pdf /SALIDA=$V/a/co.pdf
+  for m in RC4 AES128 AES256; do ord_ CIFRA $V/q/B.PDF /CLAVE=uno /DUENO=dos /CIFRADO=$m /SALIDA=$V/a/c$m.pdf; ord_ DESCIFRA $V/a/c$m.pdf /CLAVE=dos /SALIDA=$V/a/d$m.pdf; done
+  ord_ CREA $V/q/FOTO.PPM /SALIDA=$V/a/cr.pdf
+  ord_ IMAGENES $V/a/e.pdf /PAGINAS=1 /PUNTOS=50 /SALIDA=$V/a/p.png
+  ord_ TEXTO $V/a/e.pdf /SALIDA=$V/a/e.txt
+  [ $bien = 1 ] && ok "en el anfitrión: unir, separar, sacar, quitar, girar, comprimir, cifrar y descifrar (RC4, AES-128, AES-256), crear, imágenes y texto, sin quejas de ASan" || ko "en el anfitrión:$por"
+  t=$(grep -o "Documento [AB], p.gina [0-9]*" $V/a/e.txt | tr '\n' ';')
+  [ "$t" = "Documento A, página 3;Documento A, página 1;Documento A, página 8;Documento A, página 9;Documento A, página 10;" ] && ok "EXTRAE 3,1,8-10 deja esas páginas en ese orden (su texto)" || ko "EXTRAE: el texto da «$t»"
+  if [ "$(head -c 8 $V/a/p.png | od -An -tx1 | tr -d ' \n')" = 89504e470d0a1a0a ]; then ok "IMAGENES escribe un PNG"; else ko "IMAGENES: no es un PNG"; fi
+  for f in u co cRC4 cAES128 cAES256 dAES256 cr g; do
+    case $f in u) n=16 ;; co) n=16 ;; cr) n=1 ;; g) n=10 ;; *) n=6 ;; esac
+    r=$($HP INFO $V/a/$f.pdf /CLAVE=uno 2> /dev/null | head -1)
+    case "$r" in *", $n páginas"*) ;; *) ko "$f.pdf: «$r» (tenían que ser $n páginas)"; bien=0 ;; esac
+  done
+  if command -v qpdf > /dev/null; then
+    m=0
+    for f in $V/a/*.pdf; do qpdf --check --password=uno $f > /dev/null 2>&1 || { m=1; ko "qpdf no da por bueno $(basename $f)"; }; done
+    [ $m = 0 ] && ok "qpdf --check da por buenos los $(ls $V/a/*.pdf | wc -l) PDF que ha hecho (también los cifrados, con su contraseña)"
+    r=$(qpdf --show-npages $V/a/s16.pdf 2> /dev/null; qpdf --show-npages $V/a/s1.pdf 2> /dev/null)
+    [ -f $V/a/s6.pdf ] && ok "SEPARA: un archivo por página (S1.PDF ... S6.PDF)" || ko "SEPARA: no están sus archivos"
+  fi
+  if command -v pdftotext > /dev/null; then
+    t=$(pdftotext -upw uno -f 1 -l 1 $V/a/cAES256.pdf - 2> /dev/null | head -1)
+    [ "$t" = "Documento B, página 1" ] && ok "pdftotext lee el cifrado con AES-256 (con su contraseña)" || ko "pdftotext con AES-256: «$t»"
+  fi
+  # 2. la orden, en QEMU
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $V/semilla.asm > /dev/null 2>&1 && nasm -f bin $V/semilla.asm -o $V/SEMILLA.BIN
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo32/uhpdf.cas -o $V/uhpdf.asm > /dev/null && nasm -f bin $V/uhpdf.asm -o $V/HISPAPDF.BIN
+  bash $AQUI/nucleo32/disco.sh $V/d.img 32 > /dev/null
+  mcopy -i $V/d.img $V/PDF.BIN $V/HISPAPDF.BIN $V/q/A.PDF $V/q/B.PDF $V/q/C.PDF $V/q/FOTO.PPM ::
+  ESCRIBE=1 DISCO=$V/d.img ARRANQUE=ordenes MODULOS= MEMORIA=64 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN "PDF INFO B.PDF" ":pausa 3" \
+    "PDF UNE A.PDF B.PDF /SALIDA=U.PDF" ":pausa 12" "PDF GIRA B.PDF 90 1-2 /SALIDA=G.PDF" ":pausa 6" "PDF INFO C.PDF" ":pausa 3" \
+    "PDF TEXTO C.PDF /CLAVE=hola /PAGINAS=2" ":pausa 4" "PDF COMPRIME U.PDF /SALIDA=CO.PDF" ":pausa 15" \
+    "PDF CIFRA B.PDF /CLAVE=uno /CIFRADO=AES256 /SALIDA=CI.PDF" ":pausa 8" "PDF CREA FOTO.PPM /SALIDA=CR.PDF" ":pausa 4" \
+    "PDF IMAGENES A.PDF /PAGINAS=1-2 /PUNTOS=40 /SALIDA=P.PNG" ":pausa 15" > $V/orden.sal 2>&1
+  tr -d '\r' < $V/orden.sal > $V/orden.txt
+  S=$V/orden.txt
+  mira "PDF INFO (un PDF 1.5 con flujos de objetos y la tabla en un flujo)" "^B.PDF: PDF 1.5, 6 p.ginas$" "^  p.gina 1: 216 x 279 mm$"
+  mira "PDF UNE, GIRA, COMPRIME, CIFRA (AES-256), CREA e IMAGENES en Hispa-Pentium" "^Hecho: U.PDF, con 16 p.ginas de 2 archivos\.$" \
+    "^Hecho: G.PDF (2 p.ginas giradas 90 grados)\.$" "^Hecho: CO.PDF: de " "^Hecho: CI.PDF, con contrase.a (AES de 256 bits)\.$" \
+    "^Hecho: CR.PDF, con 1 p.gina\.$" "^  P01.PNG: 340 x 440 puntos$" "^  P02.PNG: 340 x 440 puntos$"
+  mira "un PDF con contraseña: sin ella lo dice; con /CLAVE= se lee (AES-128, el texto de su página 2, con su tilde)" \
+    "^C.PDF: lleva contrase.a: p.ngala con /CLAVE=\.\.\.$" "^Documento C, p.gina 2"
+  m=0
+  for f in U G CO CI CR; do saca $V/d.img $f.PDF $V/a/qemu_$f.pdf || m=1; done
+  for f in U CO; do r=$($HP INFO $V/a/qemu_$f.pdf 2> /dev/null | head -1); case "$r" in *", 16 páginas"*) ;; *) m=1 ;; esac; done
+  r=$($HP INFO $V/a/qemu_CI.pdf /CLAVE=uno 2> /dev/null | sed -n 2p); case "$r" in *AES*256*) ;; *) m=1 ;; esac
+  [ $m = 0 ] && ok "lo que ha escrito en el disco de QEMU se lee bien desde fuera (16 páginas; el cifrado, con AES-256)" || ko "lo escrito en QEMU no está bien"
+  if ! grep -q "excepción\|\*\*\*" $S; then ok "la orden PDF: ni una excepción ni una queja del núcleo"
+  else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+  # 3. la ventana (800 x 600, maximizada: las miniaturas, de 4 en 4 desde (250, 89), cada 112 x 128)
+  bash $AQUI/nucleo32/disco.sh $V/v.img 32 > /dev/null
+  mcopy -i $V/v.img $V/PDF.BIN $V/HISPAPDF.BIN $V/q/A.PDF $V/q/B.PDF $V/q/C.PDF ::
+  CAPTURAS=$G ESCRIBE=1 DISCO=$V/v.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 3" ":doble 60 186" ":pausa 4" \
+    ":escribe HISPAPDF A.PDF" ":tecla ret" ":pausa 30" ":captura hp1" ":clic 418 139" ":tecla r" ":pausa 1" ":captura hp2" \
+    ":arrastra 530 139 262 139" ":pausa 1" ":captura hp3" ":clic 62 64" ":pausa 2" ":escribe B.PDF" ":tecla ret" ":pausa 2" \
+    ":escribe C.PDF" ":tecla ret" ":pausa 25" ":captura hp4" ":escribe hola" ":tecla ret" ":pausa 30" \
+    ":captura hp6" ":clic 165 64" ":pausa 2" ":captura hp7" ":tecla ret" ":pausa 40" ":captura hp8" ":clic 306 139" ":tecla ret" ":pausa 20" ":captura hp9" \
+    ":tecla esc" ":pausa 2" > $V/ventana.sal 2>&1
+  S=$V/ventana.sal
+  miracap "la ventana: A.PDF con sus 10 páginas en miniatura (las pinta PDF.BIN, de seis en seis)" hp1 \
+    negrita 0 0 160 30 "Hispa-PDF" texto 0 100 120 140 "A A.PDF" texto 20 120 120 150 "10 páginas" texto 250 170 380 200 "1 (A1)" texto 250 420 400 460 "9 (A9)"
+  miracap "R gira la página elegida (su miniatura, apaisada; y la marca *)" hp2 texto 360 170 500 200 "2 (A2)*" distinto 362 89 112 100 $G/hp1.ppm
+  miracap "arrastrar la tercera al principio: ahora va la primera" hp3 texto 250 170 380 200 "1 (A3)" texto 360 170 500 200 "2 (A1)" texto 470 170 620 200 "3 (A2)*"
+  miracap "en el cuadro de añadir se escribe la ruta (B.PDF, C.PDF) y se añaden; C.PDF lleva contraseña: la pide" hp4 \
+    texto 0 520 800 600 "Añadido" negrita 0 90 600 130 "C.PDF lleva contraseña" negrita 20 100 400 200 "La contraseña"
+  miracap "con la contraseña, las páginas de los tres (10 + 6 + 4)" hp6 texto 0 520 400 600 "20 páginas" texto 0 100 240 300 "C C.PDF" texto 0 100 240 300 "4 páginas"
+  miracap "Guardar: dónde (al lado del primero: NUEVO.PDF), comprimir, contraseña, uno por página" hp7 \
+    negrita 0 80 300 130 "Guardar como" texto 20 100 600 200 "NUEVO.PDF" negrita 20 150 700 300 "Comprimir" negrita 20 200 700 500 "Cancelar"
+  miracap "guardado" hp8 texto 0 530 800 600 "Guardado: NUEVO.PDF"
+  miracap "Intro: la página, en grande" hp9 texto 0 80 300 110 "Esc o un clic: volver" distinto 300 200 200 200 $G/hp8.ppm
+  if saca $V/v.img NUEVO.PDF $V/a/nuevo.pdf; then
+    t=$($HP TEXTO $V/a/nuevo.pdf /PAGINAS=1-3,11,17,20 2> /dev/null | grep -o "Documento [ABC], p.gina [0-9]*" | tr '\n' ';')
+    g=$($HP INFO $V/a/nuevo.pdf 2> /dev/null | grep -c "girada 90")
+    if [ "$t" = "Documento A, página 3;Documento A, página 1;Documento A, página 2;Documento B, página 1;Documento C, página 1;Documento C, página 4;" ] && [ "$g" = 1 ]; then
+      ok "NUEVO.PDF (hecho en QEMU): 20 páginas en el orden de la ventana (A3, A1, A2 girada, ..., B, C sin contraseña)"
+    else ko "NUEVO.PDF: «$t», giradas $g"; fi
+  else ko "no está NUEVO.PDF"; fi
+  if ! grep -q "excepción\|\*\*\*" $S; then ok "la ventana: ni una excepción ni una queja del núcleo"
+  else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
+else
+  ko "no se puede compilar Hispa-PDF: $(tail -n 3 $V/anf.txt $V/hacer.txt)"
+fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin Hispa-PDF)"
+fi   # (PDF) Hispa-PDF
+# ------------------------- 31 y 32. (ZIP) Comprimidos y (MIRADOR) el Mirador
+if parte08 zip; then parte_zip; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Comprimidos)"; fi
+if parte08 mirador; then parte_mirador; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Mirador)"; fi
+[ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)
 [ -z "${SOLO:-}" ] && parte15

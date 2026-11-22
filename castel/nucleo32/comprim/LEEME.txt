@@ -1,0 +1,54 @@
+Comprimidos de Hispa-Pentium (el paquete «comprim»)
+====================================================
+
+Los archivos .ZIP como una carpeta: dos clics en un .ZIP en Mi equipo lo
+abren; se entra en sus carpetas, se saca todo («Extraer todo») o lo elegido,
+se añaden archivos y carpetas, se quitan, se abre uno con dos clics (se saca
+a C:\COMPRIM.TMP y se abre con lo suyo) y se saca arrastrándolo al
+escritorio. En Mi equipo, el botón secundario da «Comprimir en ZIP» (lo
+elegido, en un .ZIP al lado) y, en un .ZIP, «Extraer todo...».
+
+Lee ZIP con deflate o sin comprimir, ZIP64, nombres en UTF-8 y en la página
+437, y con contraseña (ZipCrypto y el AES de WinZip de 128, 192 y 256 bits).
+Lo que saca lleva nombres de 8+3 (el núcleo aún no escribe nombres largos):
+«Informe de enero.txt» queda INFORM~1.TXT.
+
+Por seguridad (los ZIP vienen de Internet) no saca nunca los nombres con «..»
+ni las rutas enteras, ni los enlaces; rechaza los ZIP cuyos datos se pisan
+(las bombas «solapadas»), los de más de 65000 archivos y lo que descomprimido
+pasaría de 2 GB, y nunca escribe más de lo que dice el ZIP.
+
+En la Consola o el intérprete de órdenes:
+
+  ZIP [-0..-9] [-q] ARCHIVO.ZIP RUTA...      mete archivos y carpetas
+  ZIP -d ARCHIVO.ZIP NOMBRE...               los quita (vale * y ?)
+  UNZIP [-o] [-q] [-P CLAVE] [-d CARPETA] ARCHIVO.ZIP [NOMBRE...]
+  UNZIP -l ARCHIVO.ZIP                       lo que lleva
+  UNZIP -t ARCHIVO.ZIP                       lo prueba sin sacar nada
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+Lleva miniz 3.0.2 (deflate e inflate), de Rich Geldreich y colaboradores
+(https://github.com/richgel999/miniz), con esta licencia (MIT):
+
+  Copyright 2013-2014 RAD Game Tools and Valve Software
+  Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
+  All Rights Reserved.
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  THE SOFTWARE.

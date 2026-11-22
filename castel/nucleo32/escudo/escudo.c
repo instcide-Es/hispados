@@ -187,6 +187,9 @@ int lee_registro(char *d, u32 cabe)
 }
 
 /* ------------------------------------------------------------ las firmas */
+/* (RÁPIDO) lo libre de la memoria del equipo, en K (para motor.c) */
+static u32 libre_kb(void) { return sc(SC_DATO, 0, 0, 0) * 4; }
+
 int carga_firmas(void)
 {
 	char c[RUTA], r[RUTA], largo[256];
@@ -197,8 +200,23 @@ int carga_firmas(void)
 		return 0;
 	memset(&inf, 0, sizeof inf);
 	motor_inicia();
+	motor_memoria_libre = libre_kb;
 	ruta_en(c, dir_escudo, "FIRMAS");
-	/* primero los FIRMAS.ESC (los grandes, del paquete), luego lo demás */
+	/* (RÁPIDO) primero lo más nuevo (lo del día y del mes), luego la base:
+	 * si la memoria no da para todo, lo que no cabe se deja (motor.c lo
+	 * mira antes de cargar) y queda lo más reciente */
+	{
+		static const char *const orden[3] = { "DIA.ESC", "MES.ESC", "BASE.ESC" };
+		int k;
+		for (k = 0; k < 3; k++) {
+			ruta_en(r, c, orden[k]);
+			if (existe(r) && motor_carga_como(r, orden[k], &inf) < 0) {
+				serie("escudo: %s", inf.error);
+				apunta("%s", inf.error);
+			}
+		}
+	}
+	/* luego los otros FIRMAS.ESC, y lo demás (firmas en texto) */
 	for (pasada = 0; pasada < 2; pasada++) {
 		h = abre_carpeta(c);
 		if (h < 0)
@@ -208,6 +226,9 @@ int carga_firmas(void)
 			int es_esc = x && !strncasecmp_es(x, ".ESC", 4);
 			if (e.atributos & (AT_CARPETA | AT_VOLUMEN) || es_esc != (pasada == 0))
 				continue;
+			if (es_esc && (!strncasecmp_es(e.nombre, "DIA.ESC", 8) || !strncasecmp_es(e.nombre, "MES.ESC", 8) ||
+				       !strncasecmp_es(e.nombre, "BASE.ESC", 9)))
+				continue;	/* (ya cargados) */
 			ruta_en(r, c, e.nombre);
 			if (motor_carga_como(r, largo, &inf) < 0)
 				serie("escudo: %s", inf.error);
@@ -294,14 +315,25 @@ static int se_salta(const char *ruta)
 	       !strncasecmp_es(ruta, f, (u32)strlen(f) + 1);
 }
 
+/* (RÁPIDO) el archivo que más ha tardado (va al registro: si una revisión es
+ * lenta en un equipo, se ve dónde) */
+static char lento_ruta[RUTA];
+static u32 lento_ms;
+
 static void revisa_uno(const char *ruta, const char *largo, u32 tam)
 {
 	resultado r;
 	const char *nombre = largo && largo[0] ? largo : ruta;
 	int x;
+	u32 t0;
 	formatear(rev.actual, RUTA, "%s", ruta);
 	avanza();
+	t0 = pl_ms();
 	x = motor_revisa_archivo(ruta, nombre, &r);
+	if (pl_ms() - t0 > lento_ms) {
+		lento_ms = pl_ms() - t0;
+		formatear(lento_ruta, RUTA, "%s (%u K)", ruta, tam / 1024);
+	}
 	if (x < 0) {
 		rev.errores++;
 		if (lista_todo)
@@ -399,6 +431,7 @@ void revisa(const char *ruta, int lista)
 	memset(&rev, 0, sizeof rev);
 	formatear(rev.raiz, RUTA, "%s", ruta);
 	rev.empezo_ms = pl_ms();
+	lento_ms = 0, lento_ruta[0] = 0;
 	lista_todo = lista;
 	carga_firmas();
 	if (!strcmp(ruta, "*")) {	/* todas las unidades */
@@ -419,6 +452,8 @@ void revisa(const char *ruta, int lista)
 	       rev.revisados, rev.octetos / 1024,
 	       rev.ms / 1000, rev.n_hallados, rev.cortada ? " (cancelado)" : "");
 	serie("escudo: %u octetos en %u ms", rev.octetos, rev.ms);
+	if (lento_ms >= 2000)
+		apunta("lo que más ha tardado: %s, %u ms", lento_ruta, lento_ms);
 	{
 		extern u32 motor_disparos, motor_leidas, motor_ms_sumas, motor_ms_disparos, motor_ms_candidatas, motor_bloques;
 		serie("escudo: tiempos: sumas %u ms, disparadores %u ms (%u saltan), firmas del disco %u ms (%u leídas, %u bloques)",
@@ -858,11 +893,40 @@ int apaga_ssh(void)
  * tools/escudo_firmas.py en el VPS con las bases de ClamAV; el catálogo va
  * firmado. La primera vez, PAQUETES INSTALA escdia (trae los otros dos, que
  * necesita); luego, PAQUETES ACTUALIZA de los tres */
-int actualiza_firmas(void)
+u32 act_hecho, act_total;
+char act_texto[100], act_dice[200];
+int act_cancelando;
+
+/* «hecho total texto» de C:\HISPA\PAQUETES\AVANCE.TXT */
+static void lee_avance_paquetes(const char *ruta)
 {
-	char r[RUTA], q[RUTA];
+	char t[160], *p;
+	int n = lee_todo(ruta, t, sizeof t - 1);
+	u32 h = 0, tot = 0;
+	if (n < 5)
+		return;
+	t[n] = 0;
+	for (p = t; *p >= '0' && *p <= '9'; p++)
+		h = h * 10 + (u32)(*p - '0');
+	while (*p == ' ')
+		p++;
+	for (; *p >= '0' && *p <= '9'; p++)
+		tot = tot * 10 + (u32)(*p - '0');
+	while (*p == ' ')
+		p++;
+	act_hecho = h, act_total = tot;
+	formatear(act_texto, sizeof act_texto, "%s", p);
+	for (p = act_texto; *p; p++)
+		if (*p == '\r' || *p == '\n')
+			*p = 0;
+}
+
+int actualiza_firmas_con(int (*cada)(void))
+{
+	char r[RUTA], q[RUTA], a[RUTA], av[RUTA], ca[RUTA], sal[RUTA];
 	const char *orden;
 	u32 t, c;
+	int m = -1;
 	formatear(r, RUTA, "%c:\\HISPA\\PAQUETES.BIN", unidad_sistema());
 	if (!existe(r))
 		return -2;
@@ -870,16 +934,79 @@ int actualiza_firmas(void)
 	orden = existe(q) ? "ACTUALIZA escbase escmes escdia" : "INSTALA escdia";
 	op.ultima_act = fecha_hoy();
 	guarda_opciones();
-	t = sc(SC_LANZAR, (u32)r, (u32)orden, 0);
-	if (ES_ERROR(t))
-		return -1;
-	c = sc(SC_ESPERAR, t, 0, 0);
-	apunta("actualizar las firmas (PAQUETES %s): %s", orden, c == 0 ? "hecho" : "no ha podido");
+	act_hecho = act_total = 0, act_cancelando = 0;
+	act_texto[0] = act_dice[0] = 0;
+	if (!cada) {
+		t = sc(SC_LANZAR, (u32)r, (u32)orden, 0);
+		if (ES_ERROR(t))
+			return -1;
+		c = sc(SC_ESPERAR, t, 0, 0);
+	} else {
+		/* (RÁPIDO) con /AVANCE: la barra y «Cancelar» (CANCELA.TXT: PAQUETES
+		 * para en cuanto puede y deja todo como estaba); lo que dice, a
+		 * \ESCUDO\PAQUETES.TXT, para enseñar lo último (p. ej. que no cabe) */
+		formatear(a, RUTA, "%s /AVANCE", orden);
+		formatear(av, RUTA, "%c:\\HISPA\\PAQUETES\\AVANCE.TXT", unidad_sistema());
+		formatear(ca, RUTA, "%c:\\HISPA\\PAQUETES\\CANCELA.TXT", unidad_sistema());
+		ruta_en(sal, dir_escudo, "PAQUETES.TXT");
+		borrar(ca);
+		m = pl_crear(sal);
+		if (m >= 0)
+			sc(SC_REDIRIGIR, (u32)m, 0, 0);
+		t = sc(SC_LANZAR, (u32)r, (u32)a, 0);
+		if (m >= 0)
+			sc(SC_REDIRIGIR, 0xFFFFFFFFu, 0, 0);
+		if (ES_ERROR(t)) {
+			if (m >= 0)
+				pl_cerrar(m);
+			return -1;
+		}
+		while ((c = sc(SC_ESPERAR, t, 1, 0)) == SIGUE) {
+			lee_avance_paquetes(av);
+			if (cada() && !act_cancelando) {
+				int h = pl_crear(ca);
+				if (h >= 0)
+					pl_cerrar(h);
+				act_cancelando = 1;
+			}
+			dormir(hz() / 10 ? hz() / 10 : 1);
+		}
+		if (m >= 0) {
+			static char tx[4096];
+			int n;
+			char *p, *ult = 0;
+			pl_cerrar(m);
+			n = lee_todo(sal, tx, sizeof tx - 1);
+			if (n > 0) {
+				tx[n] = 0;
+				for (p = tx; *p; p++)
+					if (*p == '\r')
+						*p = ' ';
+				/* la última línea con algo de «paquetes: » */
+				for (p = tx; (p = strstr(p, "paquetes: ")); p++)
+					ult = p + 10;
+				if (ult) {
+					char *e = strchr(ult, '\n');
+					if (e)
+						*e = 0;
+					formatear(act_dice, sizeof act_dice, "%s", ult);
+				}
+			}
+		}
+		borrar(ca);
+	}
+	apunta("actualizar las firmas (PAQUETES %s): %s%s%s", orden, c == 0 ? "hecho" : act_cancelando ? "cancelado" : "no ha podido",
+	       act_dice[0] ? ": " : "", act_dice);
 	if (c == 0) {
 		motor_suelta();
 		firmas_cargadas = 0;
 	}
-	return c == 0 ? 0 : -1;
+	return c == 0 ? 0 : act_cancelando ? -3 : -1;
+}
+
+int actualiza_firmas(void)
+{
+	return actualiza_firmas_con(0);
 }
 
 /* ------------------------------------------------------------ vigilar

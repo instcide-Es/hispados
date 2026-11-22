@@ -460,6 +460,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 131 | las veces que han **aparecido o desaparecido unidades** (además, a las ventanas de los programas les llega `EV_UNIDADES`) | `cambios_unidades` | ese número |
 | 170 | (explorador, 21/11) **los atributos** del archivo o la carpeta de nombre EBX: con ECX = 0xFFFFFFFF, solo leerlos; si no, poner los de solo lectura, oculto, de sistema y archivo (`0x27`: los de carpeta y volumen no se tocan) | `atributos_de`, `poner_atributos` | los que quedan, o un error |
 | 171 | (explorador) **lo soltado fuera de la ventana**: EBX, la ventana (suya); ECX, una `Suelta` (el punto, dentro de la ventana, y una ruta entera con su letra). Lo recoge el escritorio: en el dock, se fija (o va a la Papelera); en el tapiz, un acceso nuevo | `soltar_fuera` | 0 (`EN_USO` si aún no ha recogido el de antes) |
+| 172 | (MIRADOR) **una imagen como tapiz**: EBX = 1, la de ECX (una `Imagen_tapiz`: el ancho, el alto y sus puntos 0x00RRGGBB, ya a la medida de la pantalla), que el núcleo guarda en `FONDO.HPM` (al lado de `DOCK.INI`: `\HISPA` instalado, la raíz si no) y pinta el escritorio; EBX = 0, quitarla (vuelve el de siempre) | — | 0, o el error |
 | 80 | **colocar la ventana** EBX (suya) con su esquina en (ECX, EDX) de la pantalla; con ECX = 0xFFFFFFFF, en el centro (encima de la barra de tareas). La usa HVPRUN (sección 10, «La oficina de Hispa-386») | — | 0 |
 | 90-98 | **la red**: pedir al servicio de red (90) y lo del propio servicio (91 a 96, 98); cómo está (97). Las cuenta la sección 14 | `redes.cas` | |
 
@@ -2843,6 +2844,22 @@ El nombre, la versión, el archivo, **lo que mide y el SHA-256 del paquete
 entero** (cabecera incluida) y la descripción. Un paquete que se trae por el
 catálogo tiene que medir eso y dar esa suma, además de las de sus archivos.
 
+**Los paquetes del sistema** (0.8.6): detrás, una línea `sistema=nombre` por
+cada paquete que va con el sistema (los de `SISTEMA` de `tools/hpq.py` y
+`escudo`: `DEL_SISTEMA`; no los opcionales, como navega, pdf, comprim,
+mirador o clicgest, ni las firmas de Escudo, que trae Escudo). `PAQUETES
+ACTUALIZA` (sin nombres: «Actualizar todo») **instala también los del sistema
+que no estén** («Nuevo del sistema: accesori»): así un equipo que viene de una
+versión de antes recibe los que salieron después (accesori, sonido y wifi en
+la 0.8.5; escudo). Lo que se quita a propósito (`PAQUETES QUITA`) queda en
+`C:\HISPA\PAQUETES\QUITADOS.TXT` y ACTUALIZA no lo vuelve a poner; `PAQUETES
+INSTALA` lo borra de ahí. `PAQUETES ESTADO` los marca (`p|nombre||versión|...|tipo|nuevo`)
+y la bandeja los cuenta entre las actualizaciones; en «Programas y
+actualizaciones» salen en **Pendientes** con «(nuevo)» en la columna de lo
+instalado. Un PAQUETES de antes no mira esas líneas: un equipo con la 1.2 se
+pone al día en dos veces (la primera trae PAQUETES 1.3; tras reiniciar, la
+bandeja avisa de los nuevos del sistema y «Actualizar todo» los pone).
+
 ### Lo instalado: C:\HISPA\PAQUETES
 
 Un **registro por paquete**, `NOMBRE.PQI`: **la cabecera de su paquete, tal
@@ -2962,13 +2979,13 @@ tipo=navega internet
 | Código (`tipo=`) | Nombre (carpeta del menú, apartado de la ventana) | Paquetes |
 |---|---|---|
 | `sistema` | Sistema | base, paquetes, equipo, hvprun |
-| `oficina` | Oficina | bloc, oficina |
+| `oficina` | Oficina | bloc, oficina, pdf |
 | `internet` | Internet y red | red, tls, navega, ssh, tailscal, wifi |
 | `juegos` | Juegos y emuladores | (los emuladores, cuando lleguen) |
-| `multimedia` | Multimedia | |
+| `multimedia` | Multimedia | sonido, mirador |
 | `seguridad` | Seguridad | escudo |
 | `windows` | Programas de Windows | win32 |
-| `herramientas` | Herramientas | consola |
+| `herramientas` | Herramientas | consola, accesori, comprim |
 | `desarrollo` | Desarrollo | ejemplos |
 | `terceros` | Programas de terceros | clicgest |
 | `otros` | Otros | (el que no dice nada ni se sabe) |
@@ -4034,6 +4051,82 @@ alarma del Reloj (suena), «Poner en hora» (pregunta el modo
 administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
 
+**La 0.8.6** (22/11, rama `pentium-086`: las ramas `escudo-rapido`,
+`pentium-pdf` y `pentium-zipvisor` juntas). Lo que se tocó al juntar y lo nuevo:
+
+- **La lentitud de la 0.8.5** (`escudo-rapido`, sección 14 septies, «La
+  0.8.6: lo que iba lento»): `fat.cas` de una vez por tramos seguidos, la
+  memoria USB de 16 K en 16 K, PAQUETES 1.3 con avance, «Cancelar» y sin leer
+  dos veces, Escudo 0.2.1 que no deja la ventana parada.
+- **Hispa-PDF** (sección 14 undecies) y **Comprimidos y el Mirador** (sección
+  14 duodecies), paquetes opcionales `pdf` (oficina), `comprim`
+  (herramientas) y `mirador` (multimedia; pide base 0.8.6 por la llamada 172):
+  sus tipos, en `TIPO_POR_NOMBRE` de `hpq.py` y de `upaquete.cas`. Mi equipo
+  (`exoper.cas`, `de_paquetes`) abre los `.PDF` con Hispa-PDF, los `.ZIP` con
+  Comprimidos y las imágenes (`.JPG`, `.PNG`, `.BMP`, `.GIF`, `.ICO`...) con el
+  Mirador **si están instalados** (si no, lo de siempre: el Mirador de la
+  oficina); el `.PDF` ya no va en lo de fábrica (sin Hispa-PDF abría un
+  programa que no está). `FONDO.HPM` (el tapiz con imagen) en la zona
+  protegida: solo lo escribe el núcleo, con la llamada 172 (que no choca: la
+  170 y la 171 son del explorador, de la 180 a la 189 del WIN32 y de la 190 a
+  la 199 del sonido). Las partes de pruebas
+  del PDF, el ZIP y el Mirador son la 30, la 31 y la 32.
+- **La versión de verdad**: el menú Inicio, Configuración y «Acerca de» dicen
+  `Usuario.VERSIÓN_TEXTO` («0.8.6»), que la primera parte de las pruebas
+  compara con la del paquete `base` de `hpq.py` (y las capturas la buscan así).
+- **Los paquetes nuevos del sistema** (arriba, «El catálogo»): `sistema=` en
+  el catálogo, `QUITADOS.TXT` y la ventana y la bandeja que los cuentan.
+- **BAJADAS**: los PAQUETES de antes dejaban ahí todo lo traído (con las
+  firmas de Escudo, unos 50 MB, que «Revisar todo el equipo» revisaba: 40 s).
+  La 1.3 borra los `.HPQ` que quedan al instalar, actualizar o reparar, y la
+  bandeja, al arrancar, con `PAQUETES ESTADO /LIMPIA`.
+- **Escudo con un DIA.ESC vacío** (un día sin firmas nuevas; el de hoy):
+  la 0.2.1 lo carga el primero y `crece()` daba el puntero nulo para cero
+  disparadores: «no hay memoria para DIA.ESC: no se usa». Arreglado en el
+  `CRECE` de `motor.c` (la parte 26 lo prueba).
+- **WIFI.BIN igual octeto a octeto** cada vez: `__DATE__` con
+  `SOURCE_DATE_EPOCH` en `wifi/hacer.sh` (cada día salía un octeto distinto).
+- **Los 15 fallos del sonido** (5 por tarjeta, con `SOLO=sonido` y `SOLO=32`):
+  eran de la prueba: el tono de 523 Hz de 9 s y la pausa de 4 s hacían que
+  `P8.WAV` empezara justo al acabar aquel, según lo que se tardara en
+  teclear; `oye.py` juntaba los dos en una ráfaga (con «un corte») y faltaba
+  una, y todo lo de detrás salía corrido. Ahora 6 s y 6 s.
+
+Los paquetes: base y red **0.8.6**, paquetes 1.3, equipo 0.9.2, escudo 0.2.1;
+nuevos pdf 1.0, comprim 1.0 y mirador 1.0; los demás, iguales octeto a octeto
+a lo publicado (accesori, bloc, consola, ejemplos, hvprun, oficina, sonido,
+ssh, tailscal, tls, wifi, win32, navega, clicgest y las firmas de Escudo).
+
+**Las pruebas de la 0.8.6** (22/11; en el PC de Albinyana con
+`tools/pruebas_castel_pc.sh -j 5`, y en el VPS `cd`, `escudo` y `navegador`):
+`paquetes` 108/0, `programas` 92/0, `sonido` 109/0 (antes 15 mal), `menu`
+95/0, `pantalla` 98/0, `07` 102/0, `16` 139/0, `06` 168/0, `castel32` 67/0,
+`castel64` 72/0, `caliente` 79/0, `red` 72/0, `acpi` 78/0, `tls` 72/0,
+`dispositivos` 85/0, `ssh` 70/0, `lectores` 79/0, `win32` 90/0, `rueda`
+71/0, `protege` 76/0, `wifi` 96/0, `accesorios` 81/0, `pdf` 77/0 (con el gcc del PC hizo falta declarar `frexp`), `zip`
+118/0, `mirador` 75/0; en el VPS, `cd` 77/0, `escudo` 103/0 y `navegador`
+83/0.
+
+**La 0.8.6, por Internet** (22/11, en QEMU `pc` con el disco en IDE, como el
+VirtualBox de Carlos): un disco instalado con el CD de la 0.8.5 y, con
+PAQUETES, navega, clicgest, escudo y las firmas (escbase, escmes, escdia)
+de lo publicado; el catálogo de la 0.8.6 por HTTP: «Hay 5 actualizaciones»
+> «Actualizar todo» (26 s: base, equipo, escudo, paquetes, red) >
+«Reiniciar ahora» > «El núcleo nuevo ha arrancado bien»; el menú Inicio dice
+«versión 0.8.6»; Escudo carga las firmas del día (sin «no hay memoria») y
+«Revisar todo el equipo», **139 archivos (7 MB) en 6 s** (con la 1.2 de
+antes y lo que quedaba en BAJADAS, 150 archivos y 56 MB en 40 s);
+`PAQUETES INSTALA pdf comprim mirador` (20 s); en Mi equipo, una foto se abre
+con el Mirador («Usar como fondo de escritorio», con la zona protegida), un
+.PDF con Hispa-PDF y un .ZIP con Comprimidos; el Navegador con Google,
+ClicGest; `PAQUETES COMPRUEBA`: los 25 paquetes, bien. Lo que tarda instalar
+escbase (21 MB, por HTTP; el VPS con otras dos pruebas a la vez):
+
+| | 0.8.5 | 0.8.6 |
+|---|---|---|
+| sistema en el disco IDE | 60 s | 56 s |
+| sistema en una memoria USB (EHCI) | 755 s (la bajada sola, 167 s a 126 K/s) | 97 s |
+
 **Las pruebas de la 0.8.5** (21/11, en el PC de Albinyana con
 `tools/pruebas_castel_pc.sh -j 5`, y en el VPS lo que el PC no tiene —zlib,
 `convert`, el `xorriso` de `cd.sh`—): `sonido` 104/0, `accesorios` 76/0,
@@ -4817,6 +4910,52 @@ La parte 26 de las pruebas pasa los casos de la revisión
 (`escudo/prueba/fuzz.py`) con el motor compilado con ASan y UBSan
 (`hacer.sh --asan`).
 
+### La 0.8.6: lo que iba lento (22/11, rama escudo-rapido)
+
+En la 0.8.5, en VirtualBox, «Revisar todo el equipo» tardó 504 s en 145
+archivos (unos 4 KB/s), «Actualizar las firmas» dejaba la ventana parada, y en
+el HP Mini (el sistema en una memoria USB) instalar la base de firmas parecía
+colgado. La causa, en el núcleo y no en Escudo: **`fat.cas` leía y escribía
+de sector en sector** (una orden al disco por cada 512 octetos: en QEMU es
+barato, pero en VirtualBox y en una memoria USB de verdad cada orden cuesta
+milisegundos) y **la memoria USB iba de 4 K en 4 K**. Arreglado (marcado
+«(RÁPIDO)»):
+- `fat.cas`: los sectores enteros y seguidos en el disco van de una vez, hasta
+  64 K por orden, derechos al sitio de quien lee o escribe (sin pasar por el
+  sector de trabajo); al escribir, el cluster de al lado se añade a la cadena
+  si está libre, para que lo escrito quede seguido.
+- `usbalm.cas`: 16 K por orden (4 páginas seguidas y alineadas a 16 K: un solo
+  qTD en la EHCI, sin cruzar 64 K en la xHCI).
+- `uordenes.cas`: COPY, de 32 K en 32 K.
+- PAQUETES 1.3: con la suma del catálogo buena no se vuelve a leer el paquete
+  entero para las sumas de cada archivo (se miran al copiarlo); el avance va
+  también dentro de un paquete grande (cada 512 K); «Cancelar» (la ventana deja
+  `C:\HISPA\PAQUETES\CANCELA.TXT`: PAQUETES para y lo cambiado se deshace con
+  el diario; DESCARGAR, con `/CANCELA=`, también para); mira si cabe antes de
+  traer nada de Internet (lo traído y lo instalado: en una memoria de 256 MB,
+  la base y el mes son unos 95 MB) y lo dice claro; y lo traído a `BAJADAS`
+  se borra al acabar (antes se quedaba: 47 MB).
+- «Programas y actualizaciones»: el tanto por ciento dentro de un paquete y
+  el botón «Cancelar (Esc)».
+- Escudo 0.2.1: «Actualizar las firmas» ya no deja la ventana parada (la
+  barra, lo que hace y «Cancelar»; si no se puede, dice lo último de
+  PAQUETES, p. ej. que no cabe); carga primero lo del día y del mes y luego la
+  base, y un `.ESC` que no deje 8 MB de memoria libres no se carga (queda lo
+  más nuevo); el archivo que más ha tardado de una revisión va al registro
+  (si pasa de 2 s); el aviso de un `AUTORUN.INF` en un CD (o lo que no se
+  puede mover) tiene «Dejarlo» por omisión, con «A cuarentena» y «Borrarlo»
+  apagados; y su explicación va en dos líneas.
+
+En QEMU (la parte 26 de las pruebas lo mide):
+
+| | 0.8.5 | 0.8.6 |
+|---|---|---|
+| Revisar 21 MB en la memoria USB (EHCI) | 105 s | 5 s |
+| Copiar 21 MB dentro de la memoria USB | 343 s | 110 s (COPY de 4 K); 16 MB con COPY de 32 K, 24 s |
+| Instalar escudo + escbase (21 MB) desde la memoria USB al disco IDE | 295 s | 41 s |
+| Revisar 16 MB del disco IDE | 1,7-2,8 MB/s | 4,2 MB/s |
+| «Revisar todo el equipo» en la ventana (disco y un CD de 301 archivos) | | 4,5 s |
+
 ### Lo que tarda
 
 | | |
@@ -5477,6 +5616,355 @@ QEMU_MAS="-audiodev wav,id=s,path=/tmp/sale.wav -device intel-hda -device hda-du
   (`snd_mezcla`); el HDMI; más de un códec a la vez; cambiar de salida a mano.
 - Los mandos (HSPJOY) en HVPRUN; un reproductor de música (MP3, OGG) y el
   CD de música.
+
+## 14 undecies. Hispa-PDF (PDF.BIN y su ventana, rama pentium-pdf)
+
+*21/11/2026. Pedido de Carlos («herramienta de PDF propia», en lugar de
+PDF24, que es de 64 bits y no es libre). Todo lo cambiado o nuevo fuera de
+`castel/nucleo32/pdf/` y `uhpdf.cas` lleva la marca «(PDF)».*
+
+| | |
+|---|---|
+| ![La ventana: A.PDF en miniatura](pentium/pdf/hp1.png) | ![La segunda, girada con R; la tercera, arrastrada al principio](pentium/pdf/hp3.png) |
+| ![Tres PDF (uno con contraseña): 20 páginas](pentium/pdf/hp6.png) | ![Guardar: dónde, comprimir, contraseña, uno por página](pentium/pdf/hp7.png) |
+| ![Una página, en grande](pentium/pdf/hp9.png) | |
+
+**Qué hace.** Unir varios PDF; separar (una página por archivo, o por
+trozos); sacar, quitar, ordenar y girar páginas; comprimir (los flujos otra
+vez con Flate, los objetos sueltos en flujos de objetos con su tabla en un
+flujo, y las fotos JPEG más pequeñas y con menos calidad); pasar las páginas
+a imágenes (PNG o JPG) y a texto; hacer un PDF con fotos (JPG, PNG, BMP,
+GIF, TGA, PNM); y poner y quitar contraseñas: lee RC4 de 40 a 128 bits, AES
+de 128 (R4) y de 256 (R5 y R6), con la contraseña del usuario o la del
+dueño; y cifra con AES-128 (de serie), AES-256 o RC4-128.
+
+**La orden PDF** (la Consola; `PDF AYUDA`):
+
+```
+PDF INFO a.pdf                               PDF UNE a.pdf b.pdf ... /SALIDA=c.pdf
+PDF SEPARA a.pdf [1-3,4-9] /SALIDA=p.pdf     (uno por página, o por trozo; /CADA=n) -> P1.PDF...
+PDF EXTRAE a.pdf 3,1,5-7 /SALIDA=b.pdf       (ORDENA es lo mismo; /INVIERTE, al revés)
+PDF QUITA a.pdf 2,4-5 /SALIDA=b.pdf          PDF GIRA a.pdf 90 [páginas] /SALIDA=b.pdf
+PDF COMPRIME a.pdf /SALIDA=b.pdf [/CALIDAD=ALTA|MEDIA|BAJA]
+PDF TEXTO a.pdf [/SALIDA=a.txt] [/PAGINAS=1-3] [/UTF8]
+PDF IMAGENES a.pdf /SALIDA=pag.png [/PUNTOS=150] [/PAGINAS=..]       (o .jpg)
+PDF CREA a.jpg b.png ... /SALIDA=c.pdf [/PAPEL=A4|A3|A5|CARTA|IMAGEN] [/MARGEN=10]
+PDF CIFRA a.pdf /CLAVE=x [/DUENO=y] [/CIFRADO=AES128|AES256|RC4] /SALIDA=b.pdf
+PDF DESCIFRA a.pdf /CLAVE=x /SALIDA=b.pdf
+```
+
+Las páginas: `1-3,5,8-` (`z` o `fin`, la última; `5-1`, al revés). `/CLAVE=`
+abre los que llevan contraseña (con el código 2, si falta). Los nombres que
+hace (P1.PDF, PAG01.PNG...) se cortan para caber en 8+3. El texto sale en la
+página 437 con CR LF (para el Bloc de notas), o en UTF-8 con `/UTF8`.
+
+**La ventana: `HISPAPDF.BIN`** (`uhpdf.cas`, en Castel, con los controles de
+`controles.cas`; en el menú Inicio, «Hispa-PDF», del tipo Oficina; y Mi
+equipo abre con ella los .PDF: la línea `PDF=` nueva de las asociaciones de
+siempre, `exoper.cas`). A la izquierda, los archivos (cada uno con su color);
+a la derecha, sus páginas en miniatura, en el orden en que irán: un clic
+elige (con Control, varias; Espacio también), se arrastran para ordenarlas,
+R y L giran, Supr quita, Intro (o dos clics) la ve en grande. «Añadir PDF»
+abre un cuadro con las carpetas y los PDF (o se escribe la ruta entera);
+«Añadir imágenes» hace de cada foto una página. Si un PDF lleva contraseña,
+la pide. «Guardar» (o Herramientas > Unir y comprimir, Poner contraseña,
+Separar) pregunta dónde (al lado del primero, NUEVO.PDF), si se comprime
+(sin perder calidad, media o baja), una contraseña y si va cada página
+aparte. Herramientas > Sacar el texto o Pasar a imágenes, del PDF de la
+página elegida. El trabajo lo hace PDF.BIN: la ventana le escribe la orden en
+un archivo (`PDF @X:\HPDF.ARG`: así no hay tope de 128 octetos) en la
+primera unidad en la que se puede escribir (X: si la hay) y lo espera sin
+pararse; las miniaturas llegan de seis en seis (`PDF MINIATURAS`, «HPMP»),
+la página grande con `PDF PAGINA` («HPMI», como MINIAT.BIN) y lo de guardar
+con `PDF HAZ lista` (una lista: SALIDA=, ARCHIVO=, CLAVE=, PAGINA=archivo
+página giro, COMPRIME=, CIFRA=, SEPARA=).
+
+### Cómo está hecho
+
+```
+castel/nucleo32/pdf/
+  hpdf.h, so.h     el núcleo (C99 portable) y lo único que se pide al sistema
+  objetos.c        la memoria de cada documento y el analizador (sin recursión: pila propia)
+  documento.c      la tabla de objetos (la de siempre, en flujo, híbrida, /Prev), los
+                   flujos de objetos, rehacer la tabla si miente, el árbol de páginas
+  filtros.c        Flate (miniz), LZW, ASCIIHex, ASCII85, RunLength y los predictores
+  cifra.c          MD5, RC4, AES, SHA-256/384/512 (propios) y el manejador estándar (R2-R6)
+  escribe.c        copiar objetos de otros con su número nuevo, y escribir (tabla de
+                   siempre, o flujos de objetos con la tabla en un flujo; cifrado)
+  paginas.c        componer un documento con unas páginas (unir, separar, girar...)
+  fuente.c         las letras: ToUnicode, codificaciones, anchos; su dibujo (stb_truetype,
+                   con las TrueType comprobadas antes) o la DejaVu que se le parezca
+  pinta.c          el pintor y el recorrido del contenido (también para el texto)
+  texto.c          el texto de una página        imagen.c   fotos a PDF, JPEG más pequeños
+  orden.c          la orden PDF                   util.c     formatear, la página 437
+  so_pentium.c     Hispa-Pentium: la int 0x80, su memoria, el x87, lo de la biblioteca de C
+  so_anfitrion.c   Linux (las pruebas, con ASan; y el modelo para Hispa-64)
+  entrada.asm, pentium.ld, hacer.sh, anfitrion.sh, paquete.sh, haz_fuentes.py
+  pruebas/fuzz.py, pruebas/haz_pdf.py
+castel/nucleo32/uhpdf.cas   la ventana (HISPAPDF.BIN)
+terceros/miniz (nuevo, MIT), terceros/stb/stb_image_write.h (nuevo), terceros/dejavu
+```
+
+**Por qué un núcleo propio en C y no qpdf.** qpdf es C++ con excepciones,
+`std::shared_ptr`, `std::map` y la biblioteca de C++ entera (más zlib, libjpeg
+y gnutls u OpenSSL): llevarlo al anillo 3 sería portar libstdc++ y montar las
+excepciones sin sistema, para algo que en C son unas 11.000 líneas que se
+entienden de cabo a rabo y que van igual en Hispa-64. Se ha usado como
+referencia (y para comprobar lo que hace Hispa-PDF). Del «Lector» de la
+oficina de Hispa-386 (ensamblador, `programas/lector`) se ha tomado la idea
+(un PDF entero en memoria, la tabla rehecha buscando «obj» si miente); el
+código es nuevo, en C.
+
+**Leer un PDF.** El archivo, entero en memoria (hasta 96 MB). Desde
+`startxref`: cada tabla (de siempre, en flujo, o las dos en un híbrido) y las
+de antes por `/Prev` (las más nuevas mandan; un bucle se corta). Los objetos
+se leen cuando hacen falta (y una vez): de su sitio o de su flujo de objetos.
+Si la tabla miente (el objeto no está donde dice, o no hay tabla, o falta
+`/Root`), se rehace buscando cada «N G obj» por todo el archivo, los flujos de
+objetos que haya y el último trailer (o el catálogo). Un flujo cuyo `/Length`
+no acaba en `endstream` se mide buscándolo. El cifrado se prepara antes de
+leer nada más, y lo leído antes se vuelve a leer descifrado.
+
+**La seguridad** (los PDF llegan de Internet): todo tiene su tope —el archivo
+(96 MB), los objetos (4 M), lo anidado (64 niveles: lo más hondo no se lee),
+los elementos de un arreglo, lo que crece un flujo al descomprimirlo (128
+MB: las «bombas» se cortan), las tablas encadenadas (256), las páginas
+(50.000), las órdenes de una página (4 M), los formularios y Type3 uno dentro
+de otro (10), q dentro de q (64), los puntos de una imagen (8 M en Pentium)—
+y nada se recorre con una recursión sin tope (el árbol de páginas y lo
+anidado, con pila propia; las referencias, con su marca de «leyéndose»).
+stb_truetype se fía de lo que lee: antes de usar la TrueType de un PDF se
+comprueban sus tablas, `loca` y cada glifo (con sus compuestos, sin ciclos),
+y el `cmap` se busca con una función propia que mira los límites; las CFF
+van con la DejaVu. Lo que no se puede seguir (sin memoria, un límite) acaba
+la orden con su mensaje (`so_marca`/`so_salta`, el setjmp de entrada.asm).
+`pruebas/fuzz.py` estropea PDF a propósito (octetos, cortes, trozos
+repetidos, números, nombres, «bombas» de Flate, árboles que se apuntan a sí
+mismos, `/Length` que se apunta, q sin fin, formularios que se llaman,
+imágenes de 60.000 x 60.000) y los pasa por INFO, TEXTO, IMAGENES, COMPRIME y
+UNE con ASan y UBSan: 1.900 vueltas (9.500 ejecuciones); las 1.100 últimas,
+sin un fallo, tras arreglar los dos que salieron (la TrueType sin comprobar;
+lo muy anidado, que paraba la orden).
+
+**Escribir.** Se copia lo que hace falta de cada documento con su número
+nuevo; las páginas que no van y los nodos del árbol de páginas no se traen
+(lo que apunte a ellos, a `null`; los enlaces a páginas que no van se
+quitan). Cada página lleva lo que heredaba; el árbol nuevo, en grupos de 32.
+Un documento entero en su orden (comprimir, cifrar, girar) conserva todo su
+catálogo (marcadores, etiquetas, formularios); si no, los marcadores y el
+formulario del primero (y los campos de los demás). `/Producer`: «Hispa-PDF
+1.0 (Hispa-Pentium)».
+
+**El pintor** (miniaturas, verlas en grande, `PDF IMAGENES`): caminos
+rellenos y trazados con suavizado (4 subfilas por fila y lo que cubre cada
+punto a lo ancho; las rayas, rectángulos con sus esquinas y tapas, guiones),
+recortes (un rectángulo, o una máscara), imágenes (JPEG con stb_image; de
+1 a 16 bits, gris, RGB, CMYK, indexadas, ICC, Separation y DeviceN con su
+función —también la calculadora de PostScript—, máscaras, `/SMask` y color
+clave), degradados axiales y radiales, transparencia (`ca`, `CA`), las
+letras (las TrueType que trae el PDF; las demás, la DejaVu más parecida —sans,
+serif o mono, normal o negrita— con el ancho de la suya), las Type3 y el
+aspecto de las anotaciones (los campos rellenos). Lo que no sabe (JPX,
+JBIG2, CCITT, mosaicos) sale en gris claro.
+
+**El texto**: con ToUnicode, con la codificación (WinAnsi, MacRoman, la
+estándar y las `/Differences`, con los nombres de las letras de Europa), en
+el orden del contenido: un renglón nuevo cuando cambia de línea, un espacio
+cuando hay hueco.
+
+**Medidas.** PDF.BIN mide 484 KB (210 KB son las seis DejaVu). En el
+anfitrión: un PDF de 45 páginas de Word, 3 páginas a 80 ppp en 0,6 s; el
+corpus de 64 PDF (23,4 MB) comprimido con la calidad media, 18,8 MB (el 80%).
+En QEMU sin KVM, UNE de 10 + 16 páginas, unos 10 s.
+
+**El paquete** `pdf` 1.0 (OPCIONALES de `tools/hpq.py`, que necesita
+`base >= 0.8.3`): `\HISPA\PDF.BIN`, `\HISPA\HISPAPDF.BIN`,
+`\HISPA\PDF\LEEME.TXT` (con las licencias) y `\HISPA\MENU\HISPAPDF.MNU` y
+`.ICP` (con `tipo=Oficina`); lo hace `castel/nucleo32/pdf/paquete.sh SALIDA`
+(PDF.HPQ y CATALOGO.LIN). `hpq.py opcionales SALIDA CARPETA nombre...` hace
+solo esos; sin nombres, se salta los que no tienen nada en esas carpetas
+(como en la 0.8.5). Para que Mi equipo abra los .PDF con la ventana hace
+falta el `equipo` con el `exoper.cas` de esta rama.
+
+**Probarlo**: `castel/pruebas.sh`, parte 23 (`SOLO=pdf`): en el anfitrión con
+ASan (todas las órdenes, lo escrito mirado por qpdf y pdftotext), la orden
+en QEMU (y lo que deja, mirado desde fuera) y la ventana (miniaturas, girar,
+arrastrar, añadir por la ruta, la contraseña, guardar —NUEVO.PDF, con sus 20
+páginas en el orden de la ventana— y verla en grande): 75 bien, 0 mal (21/11). En el anfitrión, a
+mano: `castel/nucleo32/pdf/anfitrion.sh` (deja `build/pdf-anfitrion/pdf`) y
+`pruebas/fuzz.py PROGRAMA CORPUS VUELTAS`.
+
+**Lo que falta**: las CFF y Type1 que trae el PDF (hoy, la DejaVu: se lee,
+pero no es su letra), JPX/JBIG2/CCITT al pintar, los mosaicos y los
+sombreados de malla, la escritura de derecha a izquierda y vertical en el
+texto, leer las páginas por columnas, el orden de los marcadores al unir
+varios (solo van los del primero), nombres largos al escribir (el núcleo,
+8+3), y que el Lector de la oficina de Hispa-386 vaya en el paquete `oficina`
+de Pentium (hoy no va: los .PDF se abren con Hispa-PDF).
+## 14 duodecies. Comprimidos y el Mirador (rama pentium-zipvisor)
+
+*21/11/2026, la rama `pentium-zipvisor`: dos programas de la lista de metas
+([pentium/METAS.md](pentium/METAS.md)), el **compresor ZIP** y el **visor de
+imágenes**, con su sitio en el explorador. Lo cambiado fuera de sus carpetas
+lleva la marca «(ZIP)» o «(MIRADOR)».*
+
+| | | |
+|---|---|---|
+| ![Comprimidos: un ZIP como una carpeta](pentium/zipvisor/comprimidos.png) | ![«Comprimir en ZIP» en el explorador](pentium/zipvisor/comprimir-en-zip.png) | ![Con contraseña](pentium/zipvisor/contrasena.png) |
+| ![El Mirador](pentium/zipvisor/mirador.png) | ![Una grande, ajustada](pentium/zipvisor/mirador-grande.png) | ![Una imagen de tapiz](pentium/zipvisor/tapiz.png) |
+
+**Por qué en C, y no en Castel con `controles.cas`.** Lo pesado de los dos es
+de formatos y de puntos: deflate, CRC-32, AES y SHA-1, ZIP64, decodificar
+PNG/JPEG/GIF, escalar y girar. Para eso ya hay C probado (miniz, stb_image, y
+el camino de `MINIAT.BIN` y `NAVEGA.BIN`: un programa del anillo 3 enlazado
+para `0x40000000`), y el motor ZIP en C se compila **tal cual en Linux** para
+probarlo contra el `zip` y el `unzip` de verdad y hacerle fuzz con ASan, cosa
+que en Castel no se puede. La ventana que necesitan es poca (una lista con
+columnas, una barra de botones, un lienzo, unos cuadros): `comprim/ui.c` la
+pinta con las llamadas 32 a 39 y los colores y la forma de los botones de
+`controles.cas`, para que se vean como los demás. Hacerlo en Castel habría
+obligado a partirlo en dos programas (la ventana en Castel y un ayudante en C,
+como Mi equipo y MINIAT) hablándose por archivos.
+
+### Comprimidos (`COMPRIM.BIN`, el paquete «comprim»)
+
+`castel/nucleo32/comprim/`: `zip.c` (el motor), `cifra.c` (ZipCrypto, AES,
+SHA-1, HMAC y PBKDF2, escritos aquí), `ordenes.c` (ZIP y UNZIP), `comprim.c`
+(la ventana y los modos), `plat.c` (los archivos, con las llamadas al núcleo),
+`ui.c` y `base.c` (la poca biblioteca de C: `malloc` con `free` de verdad,
+`vsnprintf`, las cuentas de 64 bits que gcc le pide a libgcc), `lanza.c`
+(`ZIP.BIN` y `UNZIP.BIN`: lanzan `COMPRIM.BIN /ZIP ...`, así el motor está una
+sola vez en el disco) y `anfitrion.c` (lo mismo en Linux). Deflate e inflate,
+de **miniz 3.0.2** (`terceros/miniz`, MIT: solo `tdefl` y `tinfl`); lo demás,
+nuestro. (El `inflar.c` de Escudo, de la rama `pentium-escudo`, no está en esta
+base.)
+
+- **La ventana**: dos clics en un `.ZIP` en Mi equipo lo abren como una
+  carpeta (las carpetas delante, con lo que llevan; el nombre, el tamaño, lo
+  comprimido y la fecha; candado en los que van con contraseña y en rojo los
+  peligrosos). Dos clics en una carpeta entran; Retroceso o «Subir» salen.
+  **Extraer todo** (pregunta la carpeta: al lado del ZIP, con su nombre; si ya
+  está, si se reemplaza lo que haya) y **Extraer lo elegido** (Control y
+  Mayús con el ratón, Espacio, Ctrl+A); **Añadir...** (un archivo o una
+  carpeta entera, dentro de la carpeta del ZIP en la que se está) y **Quitar**
+  (Supr), que rehacen el ZIP aparte (`COMPRIM.$$$`) copiando lo de antes tal
+  cual, sin descomprimirlo (también lo cifrado, sin la contraseña), y lo
+  cambian por el de antes; dos clics en un archivo lo sacan a
+  `\COMPRIM.TMP` y lo abren con lo suyo (`EQUIPO /ABRIR`); **arrastrarlo
+  fuera** de la ventana lo saca al lado del ZIP y, si se suelta en el tapiz, el
+  escritorio le pone su acceso (la llamada 171); Propiedades; Nuevo y Abrir
+  (el menú del botón secundario en lo vacío); la rueda; la barra de progreso
+  con «Cancelar» (y Esc).
+- **El explorador** (`uequipo.cas`, marcado «(ZIP)»): en el menú del botón
+  secundario de cualquier archivo o carpeta, **«Comprimir en ZIP»** (lo
+  elegido, a una lista `X:\ZIPLISTA.TMP`, y `COMPRIM /COMPRIMIR` la convierte
+  en `NOMBRE.ZIP` al lado, sin pisar ninguno: `NOMBRE2.ZIP`...); y en un `.ZIP`,
+  **«Extraer todo...»** (`COMPRIM /EXTRAER`: a la carpeta de al lado, y la
+  abre). Mientras Comprimidos trabaja, el explorador no se queda parado y, al
+  acabar, vuelve a mirar la carpeta. (Con ellas, el menú lleva 13 opciones: el
+  tope de `emergente.cas` pasa de 12 a 16, «(ZIP)»; la 0.8.5 ya lo sube a 32.)
+- **Las clases** (`exoper.cas`, «(ZIP) (MIRADOR)»): `de_paquetes` dice
+  `ZIP=\COMPRIM.BIN` y las imágenes con el Mirador; vale **si el programa
+  está** (en `\HISPA` o en la raíz de la unidad del sistema), donde
+  `ASOCIA.TXT` no dice nada o dice lo de fábrica de antes (el Mirador de la
+  oficina); lo que el usuario haya elegido con «Abrir con...» manda.
+- **ZIP y UNZIP** (en la Consola y en el intérprete), al estilo de Info-ZIP:
+  `ZIP [-0..-9] [-q] A.ZIP RUTA...` (las carpetas, con todo lo de dentro; lo
+  que ya esté, se pone al día), `ZIP -d A.ZIP NOMBRE...` (con `*` y `?`),
+  `UNZIP [-o] [-q] [-P CLAVE] [-d CARPETA] A.ZIP [NOMBRE...]`, `UNZIP -l` y
+  `UNZIP -t`. Sin `-P`, la contraseña se pregunta (con asteriscos); Ctrl+C
+  para.
+- **Lo que lee**: deflate y guardado; **ZIP64** (el directorio y cada
+  miembro); los nombres en **UTF-8** (con su marca o el extra 0x7075 de
+  Info-ZIP) y en la **página 437** (lo de MS-DOS; los de Unix sin marca, si son
+  UTF-8 válido, como UTF-8); **ZipCrypto** y el **AES de WinZip** (AE-1 y
+  AE-2, de 128, 192 y 256 bits, con su verificador y su firma HMAC-SHA1);
+  los autoextraíbles (lo de delante se corre). **Lo que hace**: deflate (nivel
+  6; 0 a 9 en ZIP), guardado si no se gana, ZIP64 cuando hace falta, nombres
+  en UTF-8 con su marca y «hecho en Unix» (así el `unzip` de Linux no los pasa
+  de la página 437), carpetas con su fecha. Sin cifrar al escribir (no se pidió).
+- **Los nombres de lo que se saca**, de **8+3** (el núcleo aún no escribe
+  nombres largos): «Informe largo ñandú.txt» queda `INFORM~1.TXT` (como
+  Windows, sin pisar ninguno que ya esté); los que ya son de 8+3 (`LEEME.TXT`,
+  `NIÑO.TXT`) se quedan, y una carpeta que ya está se aprovecha. Las letras con
+  tilde que la página 437 no tiene en mayúscula pierden la tilde; las fechas,
+  las de ahora (no hay llamada para ponerlas).
+- **La seguridad** (los ZIP vienen de Internet): los nombres con `..`, que
+  empiezan por `/` o `\`, con letra de unidad o `:`, con letras de control,
+  vacíos a medias o de más de 32 carpetas **se ven en rojo y no se sacan nunca**
+  (lo bueno del mismo ZIP sí); los enlaces simbólicos, tampoco; los ZIP cuyos
+  datos se pisan (la **bomba solapada** de Fifield: dos entradas sobre los mismos
+  datos) no se abren; topes de **65000 miembros**, **2 GB** descomprimidos en
+  una tanda y una proporción de 1100 a 1 en los de más de 16 MB; al
+  descomprimir **nunca se escribe más de lo que dice el directorio** (un
+  miembro que «miente» se para ahí y no se queda), y lo que sale mal se borra;
+  al juntar carpetas se baja como mucho 32 niveles (y el ZIP que se está
+  haciendo no se mete en sí mismo).
+
+### El Mirador (`MIRADOR.BIN`, el paquete «mirador»)
+
+`castel/nucleo32/mirador/mirador.c`, con **stb_image** (`terceros/stb`) y
+la ventana y la biblioteca de C de Comprimidos. Lee BMP, PNG, JPG, **GIF
+(animados: cada cuadro con su tiempo)**, TGA, PSD y PNM, y los **ICO y CUR**
+con un lector propio (el más grande y de más colores de los que lleva: un PNG
+dentro, o el BMP de doble alto con su máscara).
+
+- **Ajustar** (a la ventana, sin agrandar las pequeñas) y **1:1**; la **rueda**
+  acerca y aleja **donde está la flecha**; `+` y `-`; arrastrar la mueve. Al
+  alejar se lee de la imagen a la mitad, a la cuarta parte... (cada punto, la
+  media de cuatro) con el bilineal; al acercar, los puntos tal cual. Lo
+  transparente, sobre cuadros grises.
+- **Girar** (R, y Mayús+R al otro lado; todos los cuadros de un GIF); las
+  **flechas**, las demás imágenes de la carpeta (Inicio y Fin: la primera y la
+  última); **diapositivas** (F5: cada 4 segundos); **pantalla completa**
+  (Intro, F, dos clics o «Completa»; Esc vuelve): una ventana sin marco que
+  tapa la barra de tareas (la llamada 182, la de Win32). (F11 no llega: el
+  núcleo da de F1 a F10.)
+- **«Usar como fondo de escritorio»** (Más... o el botón secundario): la
+  imagen, llenando la pantalla (lo que sobra, cortado por igual), va al
+  núcleo con la **llamada 172** (nueva, `usuario.cas`), que la guarda en
+  `FONDO.HPM` (con la cabecera de las miniaturas, «HPMI»; `\HISPA\FONDO.HPM`
+  instalado, al lado de `DOCK.INI`: lo escribe el núcleo, así que en la 0.8.5 no
+  choca con la zona protegida) y el escritorio la pinta (`escritorio.cas`,
+  «(MIRADOR)»: centrada si la pantalla cambia de medida) y la vuelve a poner
+  al arrancar. «Quitar el fondo de escritorio», o elegir Olas, Azul o Verde en
+  Configuración, la quita (y borra `FONDO.HPM`).
+
+### Los paquetes
+
+| Paquete | Versión | Tipo | Lleva | Necesita |
+|---|---|---|---|---|
+| `comprim` | 1.0 | herramientas | `\HISPA\COMPRIM.BIN`, `ZIP.BIN`, `UNZIP.BIN`, `COMPRIM.TXT` (con la licencia de miniz), y su acceso `\HISPA\MENU\COMPRIM.MNU` y `.ICP` (en Herramientas) | base >= 0.8.4 |
+| `mirador` | 1.0 | multimedia | `\HISPA\MIRADOR.BIN`, `MIRADOR.TXT` (con la de stb_image), y `\HISPA\MENU\MIRADOR.MNU` y `.ICP` (en Multimedia) | base >= 0.8.4 |
+
+Los hacen `castel/nucleo32/comprim/paquete.sh` y `mirador/paquete.sh` (con
+`HPQ=` el `hpq.py` de la 0.8.5, que pone el tipo con `--tipo`), y están en
+`OPCIONALES` de `tools/hpq.py` (con lo de la 0.8.5 que salta los que no tienen
+sus archivos, para que cada `paquete.sh` haga solo lo suyo; al juntar con la
+0.8.5, `comprim` y `mirador` van a `TIPO_POR_NOMBRE`). El explorador nuevo
+(«Comprimir en ZIP», las clases) va en `equipo`, y la llamada 172, en el núcleo
+(`base`): con lo de antes, Comprimidos y el Mirador van igual (se abren desde
+el menú Inicio) y «Usar como fondo» dice que no se ha podido.
+
+### Probarlo
+
+`SOLO=zip castel/pruebas.sh` (la parte 27, unos 6 minutos: el motor en Linux
+con el fuzz, y dos arranques de QEMU) y `SOLO=mirador castel/pruebas.sh` (la
+28, unos 2 minutos); el motor solo, `castel/nucleo32/comprim/prueba/prueba.sh
+[VUELTAS]`. Lo que miran: un ZIP del `zip` de Linux sacado con el nuestro y
+al revés, **igual octeto a octeto** (`diff -r`, con la carpeta vacía, el
+archivo vacío y los nombres con eñe); `-0` y `-9`; ZipCrypto de `zip -P`; el AES
+de WinZip (hecho en Python con `cryptography`: AE-1 y AE-2, 128, 192 y 256, y
+uno con un octeto tocado, que descubre la firma); ZIP64 (el de `zipfile` y uno
+nuestro de 4,2 GB disperso, que comprueba `unzip -t`); la página 437 y UTF-8;
+añadir y quitar (también en uno con AES); los malos (`../`, `/etc/`, `C:/`,
+`a\..\..\`, 40 carpetas, la bomba solapada, el tope de lo descomprimido, el que
+miente y el CRC cambiado); y **el fuzz** (`prueba/fuzz.py`: ZIP cambiados al
+azar que se abren, se prueban, se sacan y se rehacen con ASan y UBSan; 3000
+vueltas sin un fallo). En Hispa-Pentium: las órdenes en el intérprete (lo
+sacado, igual octeto a octeto que lo de Linux, y el ZIP hecho allí, bueno para
+el `unzip` de Linux) y la ventana desde el explorador, con capturas; y el
+Mirador con sus seis imágenes de prueba, el tapiz y otro arranque.
 
 ## 15. Las pruebas
 

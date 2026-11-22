@@ -203,6 +203,7 @@ módulo UEquipo
 
     variable texto_: arreglo [300] de byte
     variable sale: bool
+    variable zip_tarea: nat32                   ; (ZIP) Comprimidos haciendo un ZIP: al acabar, se vuelve a mirar la carpeta
 
     ; =========================================================================
     ;  Las piezas
@@ -2998,9 +2999,12 @@ módulo UEquipo
             si item(primero_marcado()).carpeta entonces grises := grises ob 2 fin
             si no item(primero_marcado()).carpeta y es_imagen_de_disco(dirección(item(primero_marcado()).ruta[0])) entonces
                 ; (CD) una imagen de disco: «Montar» (lo mismo que abrirla)
-                menú(Controles.v, x, yy, "Montar|Abrir con...|-|Cortar|Copiar|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades", grises, M_CONTEXTO)
+                menú(Controles.v, x, yy, "Montar|Abrir con...|-|Cortar|Copiar|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades|-|Comprimir en ZIP", grises ob (grises yb 8) * 512, M_CONTEXTO)
+            sino si no item(primero_marcado()).carpeta y acaba_en(dirección(item(primero_marcado()).ruta[0]), ".ZIP") entonces
+                ; (ZIP) un .ZIP: también «Extraer todo...» (Comprimidos)
+                menú(Controles.v, x, yy, "Abrir|Abrir con...|-|Cortar|Copiar|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades|-|Comprimir en ZIP|Extraer todo...", grises ob (grises yb 8) * 512 ob (grises yb 8) * 1024, M_CONTEXTO)
             sino
-                menú(Controles.v, x, yy, "Abrir|Abrir con...|-|Cortar|Copiar|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades", grises, M_CONTEXTO)
+                menú(Controles.v, x, yy, "Abrir|Abrir con...|-|Cortar|Copiar|-|Cambiar el nombre|Mandar a la Papelera|Borrar del todo|-|Propiedades|-|Comprimir en ZIP", grises ob (grises yb 8) * 512, M_CONTEXTO)    ; (ZIP)
             fin
         sino
             grises := 0
@@ -3106,6 +3110,8 @@ módulo UEquipo
                         caso 7: pide_borrar(falso)
                         caso 8: pide_borrar(cierto)
                         caso 10: pide_propiedades()
+                        caso 12: comprime_elegidos()          ; (ZIP)
+                        caso 13: extrae_zip()                 ; (ZIP)
                     fin
                 fin
             caso M_FONDO:
@@ -3585,6 +3591,68 @@ módulo UEquipo
     fin
 
     ; =========================================================================
+    ;  (ZIP) Comprimir en ZIP y Extraer todo: los hace Comprimidos (COMPRIM.BIN,
+    ;  del paquete «comprim»; el núcleo lo busca también en \HISPA)
+    ; =========================================================================
+    ; lo elegido, a una lista (X:\ZIPLISTA.TMP, en la unidad de la carpeta: la
+    ; borra Comprimidos), y COMPRIM /COMPRIMIR con ella
+    función comprime_elegidos()
+        variable lista: arreglo [24] de byte
+        variable args: arreglo [40] de byte
+        variable i: ent32
+        variable m, n: nat32
+        si lugar <> L_CARPETA o no escribible(ruta) entonces devolver fin
+        lista[0] := ruta[0]
+        lista[1] := 0
+        concatenar(lista, ":\\ZIPLISTA.TMP")
+        m := crear(lista)
+        si es_error(m) entonces
+            copiar(aviso, "No se puede escribir la lista para Comprimidos.")
+            devolver
+        fin
+        n := 0
+        i := 0
+        mientras i < vistos() hacer
+            si marcado(de_vista(i)) entonces
+                escribir_archivo(m, dirección(item(de_vista(i)).ruta[0]), longitud(dirección(item(de_vista(i)).ruta[0])))
+                escribir_archivo(m, "\r\n", 2)
+                n := n + 1
+            fin
+            i := i + 1
+        fin
+        si n = 0 y primero_marcado() >= 0 entonces
+            escribir_archivo(m, dirección(item(primero_marcado()).ruta[0]), longitud(dirección(item(primero_marcado()).ruta[0])))
+            n := 1
+        fin
+        cerrar(m)
+        copiar(args, "/COMPRIMIR ")
+        concatenar(args, lista)
+        zip_tarea := lanzar("\\COMPRIM.BIN", args)
+        si es_error(zip_tarea) entonces
+            zip_tarea := 0
+            borrar(lista)
+            copiar(aviso, "Falta Comprimidos (el paquete \xABcomprim\xBB: Programas y actualizaciones).")
+            devolver
+        fin
+        d1(aviso, "Comprimiendo %u en un ZIP...", n)
+    fin
+
+    ; el .ZIP elegido, sacado entero a una carpeta de al lado (COMPRIM /EXTRAER)
+    función extrae_zip()
+        variable args: arreglo [MAX_RUTA + 16] de byte
+        variable k: ent32
+        k := primero_marcado()
+        si k < 0 entonces devolver fin
+        copiar(args, "/EXTRAER ")
+        concatenar(args, dirección(item(k).ruta[0]))
+        zip_tarea := lanzar("\\COMPRIM.BIN", args)
+        si es_error(zip_tarea) entonces
+            zip_tarea := 0
+            copiar(aviso, "Falta Comprimidos (el paquete \xABcomprim\xBB: Programas y actualizaciones).")
+        fin
+    fin
+
+    ; =========================================================================
     ;  Lo que se hace sin ventana (el tapiz y el dock)
     ; =========================================================================
     ; pone la ventana v con su esquina en (x, yy) de la pantalla (la llamada 80)
@@ -3673,6 +3741,17 @@ módulo UEquipo
         mientras no sale hacer
             si trabaja_miniaturas() entonces
                 si no suceso(Controles.v, s, falso) entonces seguir fin
+            sino si zip_tarea <> 0 entonces
+                ; (ZIP) Comprimidos está haciendo un ZIP aquí: al acabar, se mira otra vez
+                si no suceso(Controles.v, s, falso) entonces
+                    si acabada(zip_tarea) <> Llamadas.SIGUE entonces
+                        zip_tarea := 0
+                        relee()
+                        pinta()
+                    fin
+                    dormir(5)
+                    seguir
+                fin
             sino
                 si no suceso(Controles.v, s, cierto) entonces romper fin
             fin
