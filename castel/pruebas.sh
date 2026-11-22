@@ -2634,29 +2634,29 @@ else ko "lo actualizado no queda bien en el disco:"; lista_de $Q/s2.img | sed 's
 # aunque no estuviera (como accesori, sonido, wifi o escudo en un sistema que
 # viene de una versión de antes), pero no «extra», que no es del sistema; lo
 # quitado a propósito no lo vuelve a poner (QUITADOS.TXT) e INSTALA lo olvida
-mkdir -p $F/paq2
-cp $F/paq/LETRAS1.HPQ $F/paq/LETRAS11.HPQ $F/paq/SALUDO1.HPQ $F/paq/SALUDO2.HPQ $F/paq2/
+mkdir -p $F/paqsis
+cp $F/paq/LETRAS1.HPQ $F/paq/LETRAS11.HPQ $F/paq/SALUDO1.HPQ $F/paq/SALUDO2.HPQ $F/paqsis/
 ( cd $F
-  $HPQ crea paq2/NUEVO.HPQ --nombre nuevo --version 1.0 --descripcion 'Nuevo del sistema (de prueba)' A.TXT='\HISPA\NUEVO.TXT'
-  $HPQ crea paq2/EXTRA.HPQ --nombre extra --version 1.0 --descripcion 'Opcional (de prueba)' A.TXT='\HISPA\EXTRA.TXT'
-  $HPQ catalogo paq2 && printf 'sistema=letras\r\nsistema=nuevo\r\n' >> paq2/CATALOGO.TXT && $HPQ firma paq2 $Q/prueba.key ) > $Q/hpq2.txt 2>&1
-mkfs.fat -F 16 -n MEMORIA -C $Q/usb2.img 16384 > /dev/null && mmd -i $Q/usb2.img ::PAQUETES && mcopy -i $Q/usb2.img $F/paq2/* ::PAQUETES/
-cp $Q/s1.img $Q/s3.img
+  $HPQ crea paqsis/NUEVO.HPQ --nombre nuevo --version 1.0 --descripcion 'Nuevo del sistema (de prueba)' A.TXT='\HISPA\NUEVO.TXT'
+  $HPQ crea paqsis/EXTRA.HPQ --nombre extra --version 1.0 --descripcion 'Opcional (de prueba)' A.TXT='\HISPA\EXTRA.TXT'
+  $HPQ catalogo paqsis && printf 'sistema=letras\r\nsistema=nuevo\r\n' >> paqsis/CATALOGO.TXT && $HPQ firma paqsis $Q/prueba.key ) > $Q/hpqsis.txt 2>&1
+mkfs.fat -F 16 -n MEMORIA -C $Q/usbsis.img 16384 > /dev/null && mmd -i $Q/usbsis.img ::PAQUETES && mcopy -i $Q/usbsis.img $F/paqsis/* ::PAQUETES/
+cp $Q/s1.img $Q/ssis.img
 # (y lo que dejaba en BAJADAS un PAQUETES de antes de la 0.8.6: se borra)
-mmd -i $Q/s3.img ::HISPA/PAQUETES/BAJADAS 2> /dev/null; mcopy -i $Q/s3.img $F/paq/LETRAS1.HPQ ::HISPA/PAQUETES/BAJADAS/VIEJO.HPQ
-USB_IMG=$Q/usb2.img paq $Q/s3.img sistema "paquetes estado" "paquetes actualiza" ":pausa 2" "paquetes lista" "paquetes quita nuevo" "paquetes estado" "paquetes actualiza" ":pausa 1"
+mmd -i $Q/ssis.img ::HISPA/PAQUETES/BAJADAS 2> /dev/null; mcopy -i $Q/ssis.img $F/paq/LETRAS1.HPQ ::HISPA/PAQUETES/BAJADAS/VIEJO.HPQ
+USB_IMG=$Q/usbsis.img paq $Q/ssis.img sistema "paquetes estado" "paquetes actualiza" ":pausa 2" "paquetes lista" "paquetes quita nuevo" "paquetes estado" "paquetes actualiza" ":pausa 1"
 mira "PAQUETES ESTADO dice cuál es nuevo del sistema («|nuevo»: la bandeja lo cuenta); ACTUALIZA pone también el paquete nuevo del sistema (no estaba), no el opcional; y quitado a propósito, ACTUALIZA ya no lo pone" \
   "^p|nuevo||1\.0|Nuevo del sistema (de prueba)|otros|nuevo$" "^p|extra||1\.0|Opcional (de prueba)|otros$" "^Nuevo del sistema: nuevo$" \
   "^Se va a instalar: saludo 2\.0 (en lugar de la 1\.0), nuevo 1\.0$" "^  instalado nuevo 1\.0$" "^  nuevo     1\.0     Nuevo del sistema (de prueba)$" \
   "^  quitado nuevo 1\.0$" "^p|nuevo||1\.0|Nuevo del sistema (de prueba)|otros$" "^Todo está al día\.$"
 if grep -q "instalado extra\|^p|letras||" $S; then ko "ACTUALIZA ha puesto el opcional (extra) o da letras por no instalado"; else ok "el opcional (extra) se queda sin instalar"; fi
-if sano $Q/s3.img && sin_restos $Q/s3.img && saca $Q/s3.img HISPA/PAQUETES/QUITADOS.TXT $Q/quitados.txt && [ "$(cat $Q/quitados.txt)" = "$(printf 'nuevo\r')" ] \
-  && ! igual_en $Q/s3.img HISPA/NUEVO.TXT $F/A.TXT && ! igual_en $Q/s3.img HISPA/EXTRA.TXT $F/A.TXT && ! saca $Q/s3.img HISPA/PAQUETES/BAJADAS/VIEJO.HPQ $Q/viejo.hpq; then
+if sano $Q/ssis.img && sin_restos $Q/ssis.img && saca $Q/ssis.img HISPA/PAQUETES/QUITADOS.TXT $Q/quitados.txt && [ "$(cat $Q/quitados.txt)" = "$(printf 'nuevo\r')" ] \
+  && ! igual_en $Q/ssis.img HISPA/NUEVO.TXT $F/A.TXT && ! igual_en $Q/ssis.img HISPA/EXTRA.TXT $F/A.TXT && ! saca $Q/ssis.img HISPA/PAQUETES/BAJADAS/VIEJO.HPQ $Q/viejo.hpq; then
   ok "en el disco: sano, sin «nuevo» (quitado) ni «extra», QUITADOS.TXT dice «nuevo» y lo viejo de BAJADAS (de un PAQUETES de antes), borrado"
-else ko "lo de los nuevos del sistema no queda bien en el disco:"; lista_de $Q/s3.img | sed 's/^/        /' | head -14; fi
-USB_IMG=$Q/usb2.img paq $Q/s3.img sistema2 "paquetes instala nuevo" ":pausa 1" "paquetes actualiza" ":pausa 1"
+else ko "lo de los nuevos del sistema no queda bien en el disco:"; lista_de $Q/ssis.img | sed 's/^/        /' | head -14; fi
+USB_IMG=$Q/usbsis.img paq $Q/ssis.img sistema2 "paquetes instala nuevo" ":pausa 1" "paquetes actualiza" ":pausa 1"
 mira "y PAQUETES INSTALA nuevo lo pone otra vez (y lo olvida de QUITADOS.TXT)" "^  instalado nuevo 1\.0$" "^Todo está al día\.$"
-if sano $Q/s3.img && igual_en $Q/s3.img HISPA/NUEVO.TXT $F/A.TXT && ! saca $Q/s3.img HISPA/PAQUETES/QUITADOS.TXT $Q/quitados.txt; then
+if sano $Q/ssis.img && igual_en $Q/ssis.img HISPA/NUEVO.TXT $F/A.TXT && ! saca $Q/ssis.img HISPA/PAQUETES/QUITADOS.TXT $Q/quitados.txt; then
   ok "en el disco: «nuevo» puesto y QUITADOS.TXT, borrado (ya no queda nada quitado)"
 else ko "INSTALA no olvida lo quitado:"; cat $Q/quitados.txt 2> /dev/null | sed 's/^/        /'; fi
 
@@ -2682,6 +2682,11 @@ paq $Q/s3.img quita "paquetes quita saludo letras" "paquetes lista" "dir \\docs"
 mira "PAQUETES QUITA saludo letras: quita sus archivos, sus registros y las carpetas que se quedan vacías (C:\\DOCS\\LETRAS y C:\\DOCS)" \
   "^  quitado saludo 2\.0$" "^  quitado letras 1\.1$" "^Hecho\.$" "^1 paquetes\.$" "^No puedo abrir .docs: no existe\.$"
 sano $Q/sis.img; antes=$(grep -o '[0-9]*/[0-9]* clusters' $P/fsck.txt)
+# ((SISTEMA, 0.8.6) lo quitado a propósito queda apuntado: QUITADOS.TXT; fuera, para comparar)
+if saca $Q/s3.img HISPA/PAQUETES/QUITADOS.TXT $Q/quitados.txt && [ "$(tr -d '\r' < $Q/quitados.txt | tr '\n' ' ')" = "saludo letras " ]; then
+  ok "lo quitado a propósito queda en C:\\HISPA\\PAQUETES\\QUITADOS.TXT (saludo y letras: ACTUALIZA no los pondrá si fueran del sistema)"
+else ko "QUITADOS.TXT no dice lo quitado: $(cat $Q/quitados.txt 2> /dev/null)"; fi
+mdel -i $Q/s3.img ::HISPA/PAQUETES/QUITADOS.TXT 2> /dev/null
 if sano $Q/s3.img && [ "$(grep -o '[0-9]*/[0-9]* clusters' $P/fsck.txt)" = "$antes" ] && [ "$(lista_de $Q/s3.img)" = "$(lista_de $Q/sis.img)" ]; then
   ok "lo quitado, desde fuera: el disco sano, con los mismos archivos y carpetas que antes de instalar nada y los mismos clusters ocupados ($antes)"
 else ko "después de quitarlo todo el disco no queda como al principio:"; diff <(lista_de $Q/s3.img) <(lista_de $Q/sis.img) | sed 's/^/        /' | head -8; fi
@@ -2737,7 +2742,7 @@ miracap "«Buscar novedades» trae el catálogo otra vez (y su firma, buena)" pq
   texto 112 415 116 419 "La firma del catálogo es buena" negrita 112 203 116 207 choque
 miracap "maximizada, la ventana se pone a su medida: la lista, los mensajes y los botones, al ancho y al alto de la pantalla, y lo que no cabe, cortado" pq5 \
   negrita 52 32 60 38 "Programas y actualizaciones" negrita 660 50 700 58 "(firma buena)" negrita 182 512 190 522 Quitarlo
-if sano $Q/s8.img && sin_restos $Q/s8.img && [ "$(mdir -/ -b -i $Q/s8.img ::HISPA/PAQUETES 2> /dev/null | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI ::/HISPA/PAQUETES/LETRAS.PQI " ]; then
+if sano $Q/s8.img && sin_restos $Q/s8.img && [ "$(mdir -/ -b -i $Q/s8.img ::HISPA/PAQUETES 2> /dev/null | sort | tr '\n' ' ')" = "::/HISPA/PAQUETES/BASE.PQI ::/HISPA/PAQUETES/LETRAS.PQI ::/HISPA/PAQUETES/QUITADOS.TXT " ]; then
   ok "lo hecho desde la ventana, desde fuera: el disco sano, letras instalado, saludo quitado y sin restos (tampoco VENTANA.TXT)"
 else ko "lo hecho desde la ventana no queda bien en el disco:"; lista_de $Q/s8.img | sed 's/^/        /' | head -12; fi
 

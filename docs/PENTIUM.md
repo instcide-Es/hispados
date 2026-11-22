@@ -2844,6 +2844,22 @@ El nombre, la versión, el archivo, **lo que mide y el SHA-256 del paquete
 entero** (cabecera incluida) y la descripción. Un paquete que se trae por el
 catálogo tiene que medir eso y dar esa suma, además de las de sus archivos.
 
+**Los paquetes del sistema** (0.8.6): detrás, una línea `sistema=nombre` por
+cada paquete que va con el sistema (los de `SISTEMA` de `tools/hpq.py` y
+`escudo`: `DEL_SISTEMA`; no los opcionales, como navega, pdf, comprim,
+mirador o clicgest, ni las firmas de Escudo, que trae Escudo). `PAQUETES
+ACTUALIZA` (sin nombres: «Actualizar todo») **instala también los del sistema
+que no estén** («Nuevo del sistema: accesori»): así un equipo que viene de una
+versión de antes recibe los que salieron después (accesori, sonido y wifi en
+la 0.8.5; escudo). Lo que se quita a propósito (`PAQUETES QUITA`) queda en
+`C:\HISPA\PAQUETES\QUITADOS.TXT` y ACTUALIZA no lo vuelve a poner; `PAQUETES
+INSTALA` lo borra de ahí. `PAQUETES ESTADO` los marca (`p|nombre||versión|...|tipo|nuevo`)
+y la bandeja los cuenta entre las actualizaciones; en «Programas y
+actualizaciones» salen en **Pendientes** con «(nuevo)» en la columna de lo
+instalado. Un PAQUETES de antes no mira esas líneas: un equipo con la 1.2 se
+pone al día en dos veces (la primera trae PAQUETES 1.3; tras reiniciar, la
+bandeja avisa de los nuevos del sistema y «Actualizar todo» los pone).
+
 ### Lo instalado: C:\HISPA\PAQUETES
 
 Un **registro por paquete**, `NOMBRE.PQI`: **la cabecera de su paquete, tal
@@ -2963,13 +2979,13 @@ tipo=navega internet
 | Código (`tipo=`) | Nombre (carpeta del menú, apartado de la ventana) | Paquetes |
 |---|---|---|
 | `sistema` | Sistema | base, paquetes, equipo, hvprun |
-| `oficina` | Oficina | bloc, oficina |
+| `oficina` | Oficina | bloc, oficina, pdf |
 | `internet` | Internet y red | red, tls, navega, ssh, tailscal, wifi |
 | `juegos` | Juegos y emuladores | (los emuladores, cuando lleguen) |
-| `multimedia` | Multimedia | |
+| `multimedia` | Multimedia | sonido, mirador |
 | `seguridad` | Seguridad | escudo |
 | `windows` | Programas de Windows | win32 |
-| `herramientas` | Herramientas | consola |
+| `herramientas` | Herramientas | consola, accesori, comprim |
 | `desarrollo` | Desarrollo | ejemplos |
 | `terceros` | Programas de terceros | clicgest |
 | `otros` | Otros | (el que no dice nada ni se sabe) |
@@ -4034,6 +4050,52 @@ de otros no los lee), el Navegador con Google, ClicGest, Naves (suena),
 alarma del Reloj (suena), «Poner en hora» (pregunta el modo
 administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
+
+**La 0.8.6** (22/11, rama `pentium-086`: las ramas `escudo-rapido`,
+`pentium-pdf` y `pentium-zipvisor` juntas). Lo que se tocó al juntar y lo nuevo:
+
+- **La lentitud de la 0.8.5** (`escudo-rapido`, sección 14 septies, «La
+  0.8.6: lo que iba lento»): `fat.cas` de una vez por tramos seguidos, la
+  memoria USB de 16 K en 16 K, PAQUETES 1.3 con avance, «Cancelar» y sin leer
+  dos veces, Escudo 0.2.1 que no deja la ventana parada.
+- **Hispa-PDF** (sección 14 undecies) y **Comprimidos y el Mirador** (sección
+  14 duodecies), paquetes opcionales `pdf` (oficina), `comprim`
+  (herramientas) y `mirador` (multimedia; pide base 0.8.6 por la llamada 172):
+  sus tipos, en `TIPO_POR_NOMBRE` de `hpq.py` y de `upaquete.cas`. Mi equipo
+  (`exoper.cas`, `de_paquetes`) abre los `.PDF` con Hispa-PDF, los `.ZIP` con
+  Comprimidos y las imágenes (`.JPG`, `.PNG`, `.BMP`, `.GIF`, `.ICO`...) con el
+  Mirador **si están instalados** (si no, lo de siempre: el Mirador de la
+  oficina); el `.PDF` ya no va en lo de fábrica (sin Hispa-PDF abría un
+  programa que no está). `FONDO.HPM` (el tapiz con imagen) en la zona
+  protegida: solo lo escribe el núcleo, con la llamada 172 (que no choca: la
+  170 y la 171 son del explorador, de la 180 a la 189 del WIN32 y de la 190 a
+  la 199 del sonido). Las partes de pruebas
+  del PDF, el ZIP y el Mirador son la 30, la 31 y la 32.
+- **La versión de verdad**: el menú Inicio, Configuración y «Acerca de» dicen
+  `Usuario.VERSIÓN_TEXTO` («0.8.6»), que la primera parte de las pruebas
+  compara con la del paquete `base` de `hpq.py` (y las capturas la buscan así).
+- **Los paquetes nuevos del sistema** (arriba, «El catálogo»): `sistema=` en
+  el catálogo, `QUITADOS.TXT` y la ventana y la bandeja que los cuentan.
+- **BAJADAS**: los PAQUETES de antes dejaban ahí todo lo traído (con las
+  firmas de Escudo, unos 50 MB, que «Revisar todo el equipo» revisaba: 40 s).
+  La 1.3 borra los `.HPQ` que quedan al instalar, actualizar o reparar, y la
+  bandeja, al arrancar, con `PAQUETES ESTADO /LIMPIA`.
+- **Escudo con un DIA.ESC vacío** (un día sin firmas nuevas; el de hoy):
+  la 0.2.1 lo carga el primero y `crece()` daba el puntero nulo para cero
+  disparadores: «no hay memoria para DIA.ESC: no se usa». Arreglado en el
+  `CRECE` de `motor.c` (la parte 26 lo prueba).
+- **WIFI.BIN igual octeto a octeto** cada vez: `__DATE__` con
+  `SOURCE_DATE_EPOCH` en `wifi/hacer.sh` (cada día salía un octeto distinto).
+- **Los 15 fallos del sonido** (5 por tarjeta, con `SOLO=sonido` y `SOLO=32`):
+  eran de la prueba: el tono de 523 Hz de 9 s y la pausa de 4 s hacían que
+  `P8.WAV` empezara justo al acabar aquel, según lo que se tardara en
+  teclear; `oye.py` juntaba los dos en una ráfaga (con «un corte») y faltaba
+  una, y todo lo de detrás salía corrido. Ahora 6 s y 6 s.
+
+Los paquetes: base y red **0.8.6**, paquetes 1.3, equipo 0.9.2, escudo 0.2.1;
+nuevos pdf 1.0, comprim 1.0 y mirador 1.0; los demás, iguales octeto a octeto
+a lo publicado (accesori, bloc, consola, ejemplos, hvprun, oficina, sonido,
+ssh, tailscal, tls, wifi, win32, navega, clicgest y las firmas de Escudo).
 
 **Las pruebas de la 0.8.5** (21/11, en el PC de Albinyana con
 `tools/pruebas_castel_pc.sh -j 5`, y en el VPS lo que el PC no tiene —zlib,
