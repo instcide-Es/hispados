@@ -16,6 +16,16 @@
 ;  barra la ventana de «Programas y actualizaciones» (PAQUETES se lo pide).
 ;  (RÁPIDO) Si aparece CANCELA.TXT en la carpeta de ARCHIVO (o el de
 ;  /CANCELA=ARCHIVO; lo deja la ventana al pulsar «Cancelar»), se para.
+;  (CORTES) Lo que llega se espera a trozos de medio segundo: entre uno y
+;  otro se mira si hay que cancelar (se para al momento, aunque no llegue
+;  nada, y lo bajado a medias se borra) y, si en 30 s no llega ni un
+;  octeto, la conexión se da por cortada. Si se corta a mitad (el Wi-Fi se
+;  va, la red cambia, el servidor cierra o calla), se espera a que vuelva la
+;  red (hasta 2 minutos cada vez) y se sigue desde donde iba, pidiendo el
+;  resto («Range: bytes=N-», con «If-Range» para que sea el mismo archivo);
+;  si el servidor no lo deja (contesta 200 con todo), se empieza de nuevo.
+;  Hasta 8 intentos (3, y 20 s de espera a la red, si aún no se ha bajado
+;  nada). Acaba con 3 si se ha cancelado.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Udescarg
@@ -26,6 +36,13 @@ módulo Udescarg
 
     constante CABE = 8192
     constante ESPERA = 3000                     ; tics (30 s) sin que llegue nada: se deja
+    ; (CORTES)
+    constante TROZO_ESPERA = 50                 ; se espera lo que llega de medio segundo en medio segundo
+    constante ESPERA_RED = 12000                ; tics (2 min): lo que se espera a que vuelva la red
+    constante ESPERA_RED_ANTES = 2000           ; (20 s, si aún no se ha bajado nada: sin red desde el principio, no se espera tanto)
+    constante MAX_INTENTOS = 8
+    constante CORTADO = 0xFFFFFFFE              ; lo que da una(): se ha cortado, y se puede volver a probar
+    constante SIN_OCTETOS = 0xFFFFFFFD          ; (el error de llena: 30 s sin que llegue nada)
 
     variable args: arreglo [600] de byte
     variable url: arreglo [512] de byte
@@ -45,6 +62,12 @@ módulo Udescarg
     variable avance: arreglo [128] de byte      ; /AVANCE=archivo (o nada)
     variable cancela: arreglo [128] de byte     ; (RÁPIDO) /CANCELA=archivo: si aparece, se para
     variable total_, próximo_avance: nat32
+    ; (CORTES) para seguir desde donde iba
+    variable etiqueta: arreglo [100] de byte    ; su «ETag» (o nada)
+    variable modificado: arreglo [64] de byte   ; su «Last-Modified» (o nada)
+    variable creado, en_cuerpo: bool             ; ya se ha creado el archivo; se está copiando el cuerpo
+    variable intentos: nat32
+    variable falló_disco: bool
 
     ; ---- la URL ----
     ; http[s]://nombre[:puerto][/camino]. Falso si no vale
@@ -149,9 +172,26 @@ módulo Udescarg
 
     ; ---- leer de la conexión ----
     función llena(): bool
-        variable r: nat32
+        variable r, quieto: nat32
         si cerrada entonces devolver falso fin
-        r := recibir(sock, buf, CABE, ESPERA)
+        ; (CORTES) a trozos de medio segundo: entre uno y otro, ¿cancelar?;
+        ; y 30 s sin un octeto, cortada
+        quieto := 0
+        mientras cierto hacer
+            r := recibir(sock, buf, CABE, TROZO_ESPERA)
+            si r <> TIEMPO entonces romper fin
+            si se_cancela() entonces
+                error_red := TIEMPO
+                cerrada := cierto
+                devolver falso
+            fin
+            quieto := quieto + TROZO_ESPERA
+            si quieto >= ESPERA entonces
+                error_red := SIN_OCTETOS
+                cerrada := cierto
+                devolver falso
+            fin
+        fin
         si es_error_red(r) entonces
             error_red := r
             cerrada := cierto
@@ -203,6 +243,7 @@ módulo Udescarg
             r := escribir_archivo(salida, p, n)
             si r <> n entonces
                 si es_error(r) entonces imprimir1("\nDESCARGAR: no se puede escribir: %s.\n", nat32(texto_error(r))) sino escribir("\nDESCARGAR: no queda sitio en el disco.\n") fin
+                falló_disco := cierto                   ; (CORTES) (esto no se arregla volviendo a probar)
                 devolver falso
             fin
         fin
@@ -210,11 +251,7 @@ módulo Udescarg
         si avance[0] <> 0 y escritos >= próximo_avance entonces
             di_avance()
             próximo_avance := próximo_avance + 16384
-            si cancela[0] <> 0 y hay_archivo(cancela) entonces
-                escribir("\nDESCARGAR: cancelado.\n")
-                cancelado := cierto
-                devolver falso
-            fin
+            si se_cancela() entonces devolver falso fin
         fin
         si no a_pantalla y escritos >= próximo_punto entonces
             escribir(".")
@@ -224,6 +261,17 @@ módulo Udescarg
     fin
 
     variable cancelado: bool
+
+    ; (CORTES) ¿se ha pedido cancelar (CANCELA.TXT)? Lo dice una vez
+    función se_cancela(): bool
+        si cancelado entonces devolver cierto fin
+        si cancela[0] <> 0 y hay_archivo(cancela) entonces
+            escribir("\nDESCARGAR: cancelado.\n")
+            cancelado := cierto
+        fin
+        devolver cancelado
+    fin
+
     función hay_archivo(r: puntero a byte): bool
         variable m: nat32
         m := abrir(r)
@@ -233,13 +281,20 @@ módulo Udescarg
     fin
 
     función di_avance()
+        di_avance_texto("Bajando")
+    fin
+
+    ; (CORTES) con otro texto: «Sin red: esperando para seguir con»...
+    función di_avance_texto(qué: puntero a byte)
         variable m: nat32
-        variable d: arreglo [3] de nat32
+        variable d: arreglo [4] de nat32
         variable x: arreglo [200] de byte
+        si avance[0] = 0 entonces devolver fin
         d[0] := escritos
         d[1] := total_
-        d[2] := nat32(dirección(archivo[0]))
-        formatear(x, 200, "%u %u Bajando %s\r\n", d)
+        d[2] := nat32(qué)
+        d[3] := nat32(dirección(archivo[0]))
+        formatear(x, 200, "%u %u %s %s\r\n", d)
         m := crear(avance)
         si es_error(m) entonces devolver fin
         escribir_archivo(m, x, longitud(x))
@@ -309,16 +364,45 @@ módulo Udescarg
         devolver p
     fin
 
-    ; ---- una descarga: da el código del servidor (0 si no ha podido ser) ----
+    ; (CORTES) ¿es de los fallos que pasan (la red se ha ido o ha cambiado, el
+    ; servidor no contesta o ha cortado)? Entonces se espera y se vuelve a probar
+    función pasajero(e: nat32): bool
+        devolver e = SIN_CABLE o e = SIN_IP o e = TIEMPO o e = CORTADA_RED o e = RED_CAMBIADA o e = INALCANZABLE o e = SIN_RED o e = SIN_OCTETOS
+    fin
+
+    función texto_corte(e: nat32): puntero a byte
+        si e = SIN_OCTETOS entonces devolver "se ha cortado la conexión (30 s sin que llegue nada)" fin
+        devolver texto_error_red(e)
+    fin
+
+    ; (CORTES) lo de la cabecera «Content-Range: bytes A-B/T»: falso si no vale
+    función rango_de(p: puntero a byte, ref ini_r: nat32, ref tot_r: nat32): bool
+        variable h: nat32
+        si no empieza_por_sin_caja(p, "bytes ") entonces devolver falso fin
+        p := p + 6
+        si no texto_a_natural_hasta(p, ini_r) entonces devolver falso fin
+        p := buscar_car(p, '/')
+        tot_r := 0
+        si p = nulo entonces devolver cierto fin
+        si valor(p + 1) = '*' entonces devolver cierto fin
+        si no texto_a_natural_hasta(p + 1, h) entonces devolver cierto fin
+        tot_r := h
+        devolver cierto
+    fin
+
+    ; ---- una descarga: da el código del servidor (0 si no ha podido ser;
+    ; (CORTES) CORTADO si se ha cortado y se puede volver a probar) ----
     función una(): nat32
-        variable ip, r, código, largo: nat32
+        variable ip, r, código, largo, ini_r, tot_r: nat32
         variable p: puntero a byte
-        variable trozos, con_largo: bool
+        variable trozos, con_largo, a_rango: bool
         variable d: arreglo [4] de nat32
         variable t: arreglo [20] de byte
+        variable rango: arreglo [140] de byte
         r := resolver(nombre, ip)
         si es_error_red(r) entonces
             imprimir2("DESCARGAR: no se encuentra %s: %s.\n", nat32(dirección(nombre[0])), nat32(texto_error_red(r)))
+            si pasajero(r) entonces devolver CORTADO fin        ; (CORTES)
             devolver 0
         fin
         ip_a_texto(ip, t)
@@ -328,6 +412,7 @@ módulo Udescarg
             sock := conectar_seguro(nombre, puerto, ESPERA_NORMAL)
             si es_error_red(sock) entonces
                 imprimir2("\nDESCARGAR: no hay conexión segura con %s: %s.\n", nat32(dirección(nombre[0])), nat32(texto_error_red(sock)))
+                si pasajero(sock) entonces devolver CORTADO fin  ; (CORTES)
                 devolver 0
             fin
             info_segura(sock, línea, 100, r, largo)
@@ -336,6 +421,7 @@ módulo Udescarg
             sock := conectar(ip, puerto, ESPERA_NORMAL)
             si es_error_red(sock) entonces
                 imprimir1("\nDESCARGAR: %s.\n", nat32(texto_error_red(sock)))
+                si pasajero(sock) entonces devolver CORTADO fin  ; (CORTES)
                 devolver 0
             fin
             escribir("conectado.\n")
@@ -347,11 +433,25 @@ módulo Udescarg
             formatear(línea, 16, ":%u", puntero(dirección(puerto)))
             concatenar(petición, línea)
         fin
-        concatenar(petición, "\r\nUser-Agent: Hispa-Pentium/0.8 DESCARGAR\r\nAccept: */*\r\nConnection: close\r\n\r\n")
+        concatenar(petición, "\r\nUser-Agent: Hispa-Pentium/0.8 DESCARGAR\r\nAccept: */*\r\nConnection: close\r\n")
+        ; (CORTES) seguir desde donde iba: el resto, si es el mismo archivo
+        a_rango := creado y escritos > 0 y no a_pantalla
+        si a_rango entonces
+            d[0] := escritos
+            formatear(rango, 140, "Range: bytes=%u-\r\n", d)
+            concatenar(petición, rango)
+            si etiqueta[0] <> 0 o modificado[0] <> 0 entonces
+                concatenar(petición, "If-Range: ")
+                si etiqueta[0] <> 0 entonces concatenar(petición, etiqueta) sino concatenar(petición, modificado) fin
+                concatenar(petición, "\r\n")
+            fin
+        fin
+        concatenar(petición, "\r\n")
         r := enviar_texto(sock, petición)
         si es_error_red(r) entonces
             imprimir1("DESCARGAR: %s.\n", nat32(texto_error_red(r)))
             cerrar_conexión(sock)
+            si pasajero(r) entonces devolver CORTADO fin        ; (CORTES)
             devolver 0
         fin
         bn := 0
@@ -362,8 +462,14 @@ módulo Udescarg
         código := 100
         mientras código >= 100 y código < 200 hacer
             si no lee_línea() entonces
-                escribir("DESCARGAR: el servidor no ha contestado.\n")
                 cerrar_conexión(sock)
+                si cancelado entonces devolver 0 fin
+                si error_red <> 0 entonces
+                    imprimir1("DESCARGAR: el servidor no ha contestado: %s.\n", nat32(texto_corte(error_red)))
+                    si pasajero(error_red) entonces devolver CORTADO fin     ; (CORTES)
+                sino
+                    escribir("DESCARGAR: el servidor no ha contestado.\n")
+                fin
                 devolver 0
             fin
             p := buscar_car(línea, ' ')
@@ -384,6 +490,7 @@ módulo Udescarg
         con_largo := falso
         largo := 0
         ubicación[0] := 0
+        rango[0] := 0
         mientras lee_línea() hacer
             si línea[0] = 0 entonces romper fin
             p := cabecera("content-length:")
@@ -392,37 +499,75 @@ módulo Udescarg
             si p <> nulo y buscar_sin_caja(p, "chunked") entonces trozos := cierto fin
             p := cabecera("location:")
             si p <> nulo entonces copiar_hasta(ubicación, p, 512) fin
+            ; (CORTES) lo que dice qué archivo es (para pedir luego el resto) y el trozo que manda
+            si código = 200 entonces
+                p := cabecera("etag:")
+                si p <> nulo entonces copiar_hasta(etiqueta, p, 100) fin
+                p := cabecera("last-modified:")
+                si p <> nulo entonces copiar_hasta(modificado, p, 64) fin
+            fin
+            p := cabecera("content-range:")
+            si p <> nulo entonces copiar_hasta(rango, p, 140) fin
         fin
         si código >= 300 y código < 400 y ubicación[0] <> 0 entonces
             cerrar_conexión(sock)
             devolver código
         fin
-        si código <> 200 entonces
+        ; (CORTES) lo que contesta a «el resto»
+        si a_rango entonces
+            si código = 416 y total_ > 0 y escritos = total_ entonces
+                ; (ya estaba todo)
+                cerrar_conexión(sock)
+                devolver 200
+            fin
+            si código = 206 entonces
+                si no rango_de(rango, ini_r, tot_r) o ini_r <> escritos o (tot_r <> 0 y total_ <> 0 y tot_r <> total_) entonces
+                    ; (no es el trozo que se ha pedido: desde el principio)
+                    escribir("DESCARGAR: el servidor no manda el trozo que se le pide: se empieza de nuevo.\n")
+                    cerrar_conexión(sock)
+                    empieza_de_nuevo()
+                    devolver CORTADO
+                fin
+                imprimir2("Se sigue desde el octeto %u (de %u)", escritos, total_)
+            sino si código = 200 entonces
+                escribir("DESCARGAR: el servidor no deja seguir desde donde iba (o el archivo ha cambiado): se empieza de nuevo.\n")
+                empieza_de_nuevo()
+            fin
+        fin
+        si código <> 200 y (código <> 206 o no a_rango) entonces
             cerrar_conexión(sock)
             devolver código
         fin
         ; el archivo
-        si no a_pantalla y con_largo y no cabe(largo) entonces
-            ; (seguridad, 21/11) lo que dice el servidor que mide no cabe: ni se empieza
-            imprimir2("DESCARGAR: %s no cabe: son %u octetos y no queda tanto sitio en esa unidad.\n", nat32(dirección(archivo[0])), largo)
-            cerrar_conexión(sock)
-            devolver 0
-        fin
-        si no a_pantalla entonces
-            salida := crear(archivo)
-            si es_error(salida) entonces
-                imprimir2("DESCARGAR: no se puede crear %s: %s.\n", nat32(dirección(archivo[0])), nat32(texto_error(salida)))
+        si no creado entonces
+            si no a_pantalla y con_largo y no cabe(largo) entonces
+                ; (seguridad, 21/11) lo que dice el servidor que mide no cabe: ni se empieza
+                imprimir2("DESCARGAR: %s no cabe: son %u octetos y no queda tanto sitio en esa unidad.\n", nat32(dirección(archivo[0])), largo)
                 cerrar_conexión(sock)
                 devolver 0
             fin
-            si con_largo entonces imprimir2("Guardando %s (%u octetos)", nat32(dirección(archivo[0])), largo) sino imprimir1("Guardando %s", nat32(dirección(archivo[0]))) fin
+            si no a_pantalla entonces
+                salida := crear(archivo)
+                si es_error(salida) entonces
+                    imprimir2("DESCARGAR: no se puede crear %s: %s.\n", nat32(dirección(archivo[0])), nat32(texto_error(salida)))
+                    cerrar_conexión(sock)
+                    devolver 0
+                fin
+                si con_largo entonces imprimir2("Guardando %s (%u octetos)", nat32(dirección(archivo[0])), largo) sino imprimir1("Guardando %s", nat32(dirección(archivo[0]))) fin
+            fin
+            creado := cierto
+            escritos := 0
+            próximo_punto := 32768
+            total_ := 0
+            si con_largo entonces total_ := largo fin
+            próximo_avance := 16384
+        sino si código = 200 entonces
+            ; (CORTES) otra vez desde el principio
+            total_ := 0
+            si con_largo entonces total_ := largo fin
         fin
-        escritos := 0
-        próximo_punto := 32768
-        total_ := 0
-        si con_largo entonces total_ := largo fin
-        próximo_avance := 16384
         si avance[0] <> 0 entonces di_avance() fin
+        en_cuerpo := cierto
         si trozos entonces
             mientras cierto hacer
                 si no lee_línea() o no hex(línea, largo) entonces
@@ -447,20 +592,73 @@ módulo Udescarg
             r := 0
             si copia(0xFFFFFFFF) entonces r := 1 fin
         fin
-        si no a_pantalla entonces
-            cerrar(salida)
-            escribir("\n")
-        fin
+        en_cuerpo := falso
         cerrar_conexión(sock)
         si r = 0 entonces
+            si cancelado o falló_disco entonces devolver 0 fin
+            ; (CORTES) cortada a mitad: si se puede, se seguirá
             si error_red <> 0 entonces
-                imprimir1("DESCARGAR: %s (a medias).\n", nat32(texto_error_red(error_red)))
+                imprimir2("\nDESCARGAR: %s (a medias: %u octetos).\n", nat32(texto_corte(error_red)), escritos)
             sino
-                escribir("DESCARGAR: la conexión se ha cerrado antes de acabar.\n")
+                imprimir1("\nDESCARGAR: la conexión se ha cerrado antes de acabar (a medias: %u octetos).\n", escritos)
             fin
+            si a_pantalla entonces devolver 0 fin
+            si error_red = 0 o pasajero(error_red) entonces devolver CORTADO fin
             devolver 0
         fin
+        si código = 206 entonces código := 200 fin
         devolver código
+    fin
+
+    ; (CORTES) lo bajado, fuera: se empieza otra vez desde el principio
+    función empieza_de_nuevo()
+        si creado y no a_pantalla entonces
+            mover(salida, 0, DESDE_INICIO)
+            cortar(salida)
+        fin
+        escritos := 0
+        próximo_punto := 32768
+        próximo_avance := 16384
+    fin
+
+    ; (CORTES) espera, tras un corte, a que haya red (hasta 2 minutos; 20 s
+    ; si aún no se ha bajado nada) y un poco más cada vez (1, 2, 4, 8 y 15 s:
+    ; si el servidor ha cerrado, que no se le pida sin parar). Falso si se
+    ; cancela o la red no vuelve
+    función espera_red(intento: nat32): bool
+        variable ip, e, quieto, pausa, tope: nat32
+        variable avisado: bool
+        tope := ESPERA_RED
+        si no creado entonces tope := ESPERA_RED_ANTES fin
+        pausa := 100
+        mientras intento > 1 y pausa < 1500 hacer
+            pausa := pausa * 2
+            intento := intento - 1
+        fin
+        si pausa > 1500 entonces pausa := 1500 fin
+        quieto := 0
+        avisado := falso
+        mientras cierto hacer
+            si se_cancela() entonces devolver falso fin
+            e := estado_rápido(ip)
+            si e = RED_CONECTADA entonces
+                si quieto >= pausa entonces romper fin
+            sino
+                si no avisado entonces
+                    si creado entonces escribir("DESCARGAR: sin red: se espera a que vuelva para seguir (hasta 2 minutos)...\n") sino escribir("DESCARGAR: sin red: se espera a que vuelva (hasta 20 s)...\n") fin
+                    di_avance_texto("Sin red: esperando para seguir con")
+                    avisado := cierto
+                fin
+                si quieto >= tope entonces
+                    si creado entonces escribir("DESCARGAR: la red no ha vuelto en 2 minutos.\n") sino escribir("DESCARGAR: no hay red.\n") fin
+                    devolver falso
+                fin
+            fin
+            dormir(TROZO_ESPERA)
+            quieto := quieto + TROZO_ESPERA
+        fin
+        si avisado entonces escribir("DESCARGAR: la red ha vuelto: se sigue.\n") fin
+        devolver cierto
     fin
 
     ; como texto_a_natural, pero se para en lo que no sea una cifra
@@ -555,14 +753,34 @@ módulo Udescarg
         a_pantalla := dado y iguales(pal, "-")
         empezó := tics()
         vueltas := 0
+        intentos := 0
         mientras cierto hacer
             si no parte_url(url) entonces
                 imprimir1("DESCARGAR: la dirección no vale: %s\n", nat32(dirección(url[0])))
-                devolver 1
+                devolver acaba(1)
             fin
-            si dado entonces copiar_hasta(archivo, pal, 128) sino nombre_de_archivo() fin
+            ; (CORTES) el archivo, el mismo aunque se vuelva a probar
+            si no creado entonces
+                si dado entonces copiar_hasta(archivo, pal, 128) sino nombre_de_archivo() fin
+            fin
             código := una()
-            si código = 0 entonces devolver 1 fin
+            si cancelado entonces devolver acaba(3) fin
+            ; (CORTES) cortada: cuando vuelva la red, otra vez (desde donde iba)
+            si código = CORTADO entonces
+                intentos := intentos + 1
+                ; (sin haber bajado nada aún, tres veces: el servidor que no está no se espera tanto)
+                si intentos >= MAX_INTENTOS o (no creado y intentos >= 3) entonces
+                    imprimir1("DESCARGAR: no se ha podido acabar (%u intentos).\n", intentos)
+                    devolver acaba(1)
+                fin
+                si no espera_red(intentos) entonces
+                    si cancelado entonces devolver acaba(3) fin
+                    devolver acaba(1)
+                fin
+                imprimir1("Otra vez (el intento %u)...\n", intentos + 1)
+                seguir
+            fin
+            si código = 0 entonces devolver acaba(1) fin
             si código >= 300 y código < 400 y ubicación[0] <> 0 y vueltas < 5 entonces
                 vueltas := vueltas + 1
                 imprimir1("Redirigido a %s\n", nat32(dirección(ubicación[0])))
@@ -582,9 +800,10 @@ módulo Udescarg
         si código <> 200 entonces
             imprimir1("DESCARGAR: no se ha bajado nada (el servidor ha dicho %u).\n", código)
             ; (404: no está en el servidor; PAQUETES lo dice en llano)
-            si código = 404 entonces devolver 4 fin
-            devolver 1
+            si código = 404 entonces devolver acaba(4) fin
+            devolver acaba(1)
         fin
+        acaba(0)
         s := tics() - empezó
         si s = 0 entonces s := 1 fin
         si no a_pantalla entonces
@@ -596,6 +815,18 @@ módulo Udescarg
             imprimir1(" (%u K/s).\n", ((escritos div 1024) * 100) div s)
         fin
         devolver 0
+    fin
+
+    ; (CORTES) al acabar: el archivo, cerrado; si se ha cancelado, lo bajado a
+    ; medias, borrado (que todo quede como estaba). Da el código
+    función acaba(c: nat32): byte
+        si creado y no a_pantalla entonces
+            cerrar(salida)
+            escribir("\n")
+            si c = 3 entonces borrar(archivo) fin
+        fin
+        creado := falso
+        devolver byte(c)
     fin
 
 fin Udescarg.

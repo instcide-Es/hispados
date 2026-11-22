@@ -1,0 +1,280 @@
+; =============================================================================
+;  agcomun.cas - (AGENDA) lo que comparten la ventana de la Agenda y su
+;  vigilante: leer y guardar la agenda (AGENDA.ICS, en la carpeta de la
+;  Agenda), AGENDA.GEN (el número de veces que se ha guardado: el vigilante
+;  lo mira para saber si tiene que volver a leer) y los ajustes (AGENDA.INI:
+;  la comunidad y el municipio de los festivos, los nombres de las
+;  categorías).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo AgComun
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Formato, Mem32, Controles, Festivos, AgNucleo, AgIcs
+
+    público variable generación: nat32         ; la de AGENDA.GEN cuando se leyó
+    público variable error_guardar: arreglo [100] de byte
+
+    ; el número de AGENDA.GEN (0 si no está)
+    público función lee_generación(): nat32
+        variable r: arreglo [120] de byte
+        variable t: arreglo [16] de byte
+        variable m, n, g: nat32
+        ruta_agenda("AGENDA.GEN", r)
+        m := abrir(r)
+        si m >= PRIMER_ERROR entonces devolver 0 fin
+        n := leer(m, t, 15)
+        cerrar(m)
+        si n > 15 entonces devolver 0 fin
+        t[n] := 0
+        g := 0
+        texto_a_natural(t, g)
+        devolver g
+    fin
+
+    función escribe_generación(g: nat32)
+        variable r: arreglo [120] de byte
+        variable t: arreglo [16] de byte
+        variable m: nat32
+        ruta_agenda("AGENDA.GEN", r)
+        m := crear(r)
+        si m >= PRIMER_ERROR entonces devolver fin
+        natural_a_texto(g, t)
+        escribir_archivo(m, t, longitud(t))
+        cerrar(m)
+    fin
+
+    ; los nombres de las categorías (cat1= ... cat8=) de AGENDA.INI
+    público función lee_ajustes_agenda()
+        variable r: arreglo [120] de byte
+        variable t: arreglo [1024] de byte
+        variable c: arreglo [8] de byte
+        variable v: arreglo [24] de byte
+        variable m, n, i: nat32
+        lee_ajustes()                           ; (los de los festivos)
+        ruta_agenda("AGENDA.INI", r)
+        m := abrir(r)
+        si m >= PRIMER_ERROR entonces devolver fin
+        n := leer(m, t, 1023)
+        cerrar(m)
+        si n > 1023 entonces devolver fin
+        t[n] := 0
+        para i desde 1 hasta N_CATEGORÍAS hacer
+            copiar(c, "cat")
+            natural_a_texto(i, dirección(c[3]))
+            si valor_ini(t, c, v, 24) y v[0] <> 0 entonces copiar(nombres_cat[i], v) fin
+        fin
+    fin
+
+    público función guarda_ajustes_agenda(): bool
+        variable r: arreglo [120] de byte
+        variable t: arreglo [1024] de byte
+        variable c: arreglo [24] de byte
+        variable m, i: nat32
+        si no asegura_carpeta() entonces devolver falso fin
+        copiar(t, "; los ajustes de la Agenda de Hispa-Pentium\r\ncomunidad=")
+        código_comunidad(c)
+        concatenar(t, c)
+        concatenar(t, "\r\nmunicipio=")
+        código_municipio(c)
+        concatenar(t, c)
+        concatenar(t, "\r\n")
+        para i desde 1 hasta N_CATEGORÍAS hacer
+            concatenar(t, "cat")
+            natural_a_texto(i, c)
+            concatenar(t, c)
+            concatenar(t, "=")
+            concatenar(t, nombres_cat[i])
+            concatenar(t, "\r\n")
+        fin
+        ruta_agenda("AGENDA.INI", r)
+        m := crear(r)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        escribir_archivo(m, t, longitud(t))
+        cerrar(m)
+        devolver cierto
+    fin
+
+    ; lee la agenda entera (lo de antes se olvida)
+    público función carga_agenda()
+        variable r: arreglo [120] de byte
+        n_citas := 0
+        lee_ajustes_agenda()
+        generación := lee_generación()
+        ruta_agenda("AGENDA.ICS", r)
+        lee_ics(r)
+    fin
+
+    ; guarda la agenda: en AGENDA.NUE y luego en lugar de AGENDA.ICS (si se
+    ; va la luz a medias, queda una de las dos entera). Cierto si ha ido bien.
+    público función guarda_agenda(): bool
+        variable r: arreglo [120] de byte
+        variable n: arreglo [120] de byte
+        error_guardar[0] := 0
+        si no asegura_carpeta() entonces
+            copiar(error_guardar, "No se puede hacer la carpeta de la Agenda")
+            escribir("agenda: no se puede hacer la carpeta de la Agenda\n")
+            devolver falso
+        fin
+        ruta_agenda("AGENDA.NUE", n)
+        ruta_agenda("AGENDA.ICS", r)
+        si no escribe_ics(n, 0) entonces
+            copiar(error_guardar, "No se puede guardar (¿el disco está lleno o es de solo lectura?)")
+            escribir("agenda: no se puede guardar\n")
+            devolver falso
+        fin
+        borrar(r)
+        si es_error(renombrar(n, r)) entonces
+            copiar(error_guardar, "No se puede cambiar AGENDA.NUE por AGENDA.ICS")
+            devolver falso
+        fin
+        generación := lee_generación() + 1
+        escribe_generación(generación)
+        devolver cierto
+    fin
+
+    ; =========================================================================
+    ;  Las categorías: su color y su símbolo (Carlos es daltónico: el
+    ;  símbolo dice la categoría sin el color; y su nombre, en la leyenda)
+    ; =========================================================================
+    público función color_cat(k: nat32): nat32
+        según nat32(k)
+            caso 1: devolver 0x1D4ED8           ; Personal: un círculo
+            caso 2: devolver 0x166534           ; Trabajo: un cuadrado
+            caso 3: devolver 0xB45309           ; Asociación: un triángulo
+            caso 4: devolver 0x991B1B           ; Médico: una cruz
+            caso 5: devolver 0x6D28D9           ; Familia: un rombo
+            caso 6: devolver 0xBE185D           ; Cumpleaños: una estrella (un asterisco)
+            caso 7: devolver 0x0E7490           ; Viaje: una flecha
+            caso 8: devolver 0x374151           ; Otros: un anillo
+        fin
+        devolver 0x6B7280
+    fin
+
+    público constante FORMAS = "-|c\xA1rculo|cuadrado|tri\xA0ngulo|cruz|rombo|estrella|flecha|anillo"
+
+    ; el símbolo de la categoría k en un cuadro de «l» puntos
+    público función símbolo(k: nat32, x: ent32, yy: ent32, l: ent32)
+        variable c: nat32
+        variable i, w, m: ent32
+        c := color_cat(k)
+        m := l div 2
+        según nat32(k)
+            caso 1:
+                caja_redonda(x, yy, l, l, m, c)
+            caso 2:
+                caja(x + 1, yy + 1, l - 2, l - 2, c)
+            caso 3:
+                para i desde 0 hasta l - 1 hacer
+                    w := (i + 1) * l div l
+                    w := i + 1
+                    caja(x + m - w div 2, yy + i, w, 1, c)
+                fin
+            caso 4:
+                caja(x + l * 3 div 8, yy, l - 2 * (l * 3 div 8), l, c)
+                caja(x, yy + l * 3 div 8, l, l - 2 * (l * 3 div 8), c)
+            caso 5:
+                para i desde 0 hasta l - 1 hacer
+                    si i < m entonces w := 2 * i + 1 sino w := 2 * (l - 1 - i) + 1 fin
+                    caja(x + m - w div 2, yy + i, w, 1, c)
+                fin
+            caso 6:
+                raya(x, yy + m, x + l - 1, yy + m, c)
+                raya(x + m, yy, x + m, yy + l - 1, c)
+                raya(x, yy, x + l - 1, yy + l - 1, c)
+                raya(x + l - 1, yy, x, yy + l - 1, c)
+                raya(x + 1, yy + m, x + l - 1, yy + m + 1, c)
+                raya(x + m + 1, yy, x + m + 1, yy + l - 1, c)
+            caso 7:
+                caja(x, yy + l * 3 div 8, m, l - 2 * (l * 3 div 8), c)
+                para i desde 0 hasta m hacer
+                    caja(x + m + i, yy + i, 1, l - 2 * i, c)
+                fin
+            caso 8:
+                caja_redonda(x, yy, l, l, m, c)
+                caja_redonda(x + l div 4, yy + l div 4, l - 2 * (l div 4), l - 2 * (l div 4), m div 2, C_PAPEL)
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Los textos de las citas
+    ; =========================================================================
+    público constante AVISOS = "Sin aviso|A la hora|5 minutos antes|10 minutos antes|15 minutos antes|30 minutos antes|1 hora antes|2 horas antes|1 d\xA1a antes|2 d\xA1as antes|1 semana antes"
+    público constante MIN_AVISOS = 11
+    variable min_aviso: arreglo [11] de ent32 = (-1, 0, 5, 10, 15, 30, 60, 120, 1440, 2880, 10080)
+
+    público función aviso_de_opción(k: nat32): ent32
+        si k >= MIN_AVISOS entonces devolver -1 fin
+        devolver min_aviso[k]
+    fin
+
+    público función opción_de_aviso(a: ent32): nat32
+        variable i: nat32
+        para i desde 0 hasta MIN_AVISOS - 1 hacer
+            si min_aviso[i] = a entonces devolver i fin
+        fin
+        si a < 0 entonces devolver 0 fin
+        devolver 4
+    fin
+
+    ; «15 min», «1 h», «2 días»... (vacío sin aviso)
+    público función texto_aviso(a: ent32, destino: puntero a byte)
+        variable x: arreglo [1] de nat32
+        destino[0] := 0
+        si a < 0 entonces devolver fin
+        si a = 0 entonces
+            copiar(destino, "a la hora")
+            devolver
+        fin
+        si a mod 1440 = 0 entonces
+            x[0] := nat32(a div 1440)
+            si x[0] = 1 entonces copiar(destino, "1 d\xA1a antes") sino formatear(destino, 24, "%u d\xA1as antes", x) fin
+        sino si a mod 60 = 0 entonces
+            x[0] := nat32(a div 60)
+            formatear(destino, 24, "%u h antes", x)
+        sino
+            x[0] := nat32(a)
+            formatear(destino, 24, "%u min antes", x)
+        fin
+    fin
+
+    ; el título que se ve de una vez (los cumpleaños, con los años que cumple)
+    público función título_de(ref c: Cita, vez: nat32, destino: puntero a byte, cabe: nat32)
+        variable d, m, a: nat32
+        variable t: arreglo [16] de byte
+        copiar_hasta(destino, c.título, cabe)
+        si c.clase = CLASE_CUMPLE y c.año_nac > 0 entonces
+            de_número(vez, d, m, a)
+            si a > c.año_nac y longitud(destino) + 8 < cabe entonces
+                concatenar(destino, " (")
+                natural_a_texto(a - c.año_nac, t)
+                concatenar(destino, t)
+                concatenar(destino, ")")
+            fin
+        fin
+        si c.clase = CLASE_TAREA y c.hecha y longitud(destino) + 10 < cabe entonces concatenar(destino, " (hecha)") fin
+    fin
+
+    ; «10:00-11:30», «todo el día», «tarea»
+    público función texto_horas(ref c: Cita, destino: puntero a byte)
+        variable h: arreglo [8] de byte
+        variable fd, fm: nat32
+        si c.clase = CLASE_TAREA entonces
+            copiar(destino, "tarea")
+            devolver
+        fin
+        si c.todo_día entonces
+            copiar(destino, "todo el d\xA1a")
+            devolver
+        fin
+        texto_hora(c.minuto, destino)
+        si c.dura > 0 entonces
+            madrid_de_utc(utc_de_madrid(c.día, c.minuto) + c.dura, fd, fm)
+            concatenar(destino, "-")
+            texto_hora(fm, h)
+            concatenar(destino, h)
+        fin
+    fin
+
+fin AgComun.

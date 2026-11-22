@@ -53,6 +53,8 @@
 #define WO_DESCONECTAR 5
 #define WO_OLVIDAR 6		/* los octetos: el nombre */
 #define WO_REGISTRO 7		/* -> lo último que ha apuntado */
+#define WO_SIMCORTE 9		/* (CORTES) solo con la radio simulada: el punto de acceso desaparece cab[1]
+				 * segundos; con cab[2] = 1, DHCP da otra IP (192.168.77.11); con 2, la .10 */
 #define WO_AUTO 8		/* los octetos: el nombre; cab[1] = 1/0: conectar automáticamente */
 
 /* lo que contesta WO_CONECTAR (cab[0]) */

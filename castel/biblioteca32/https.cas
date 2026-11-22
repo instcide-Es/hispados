@@ -60,6 +60,14 @@ módulo Https
 
     público variable sin_redirecciones: bool    ; cierto: un 3xx se devuelve, sin seguirlo
     público variable sin_galletas: bool         ; cierto: ni se guardan ni se mandan
+    ; (CORTES) cierto: un GET (o HEAD) que se corta porque la red se va (el
+    ; Wi-Fi, un cambio de IP, el servidor que calla) se vuelve a pedir cuando
+    ; vuelve (se espera https_espera_red tics, 30 s si no se dice; hasta 3
+    ; veces) y, con https_pedir, se sigue desde donde iba («Range», con
+    ; «If-Range»); si el servidor no lo deja, desde el principio. Sin ponerlo,
+    ; como antes (lo que no puede esperar, como el Navegador, no lo pone)
+    público variable https_reintentar: bool
+    público variable https_espera_red: nat32
 
     constante CABE_BUF = 8192
     constante ESPERA = 3000                     ; tics (30 s) sin que llegue nada: se deja
@@ -743,12 +751,61 @@ módulo Https
         devolver 0
     fin
 
+    ; (CORTES) ¿un fallo de los que pasan (la red se ha ido o ha cambiado, el
+    ; servidor no contesta o ha cortado)?
+    función pasajero(e: nat32): bool
+        devolver e = SIN_CABLE o e = SIN_IP o e = TIEMPO o e = CORTADA_RED o e = RED_CAMBIADA o e = INALCANZABLE o e = SIN_RED
+    fin
+
+    función duerme(n: nat32)
+        ensamblador
+            mov eax, 3
+            mov ebx, {n}
+            int 0x80
+        fin
+    fin
+
+    ; (CORTES) espera a que haya red (hasta https_espera_red tics) y un poco
+    ; más (un segundo por cada vez que ya se ha probado): falso si no vuelve
+    función espera_red(vez: nat32): bool
+        variable ip, k, tope: nat32
+        tope := https_espera_red
+        si tope = 0 entonces tope := 3000 fin
+        k := 0
+        mientras k < tope hacer
+            si estado_rápido(ip) = RED_CONECTADA entonces
+                duerme(100 * vez)
+                devolver cierto
+            fin
+            duerme(50)
+            k := k + 50
+        fin
+        devolver falso
+    fin
+
     ; el pedido entero: el cuerpo de la respuesta, a «destino» (hasta «cabe»
     ; octetos; detrás, un 0 si cabe). El código del servidor, o un error
     público función https_pedir(método: puntero a byte, url: puntero a byte, cabeceras: puntero a byte, cuerpo: puntero a byte, n: nat32, destino: puntero a byte, cabe: nat32, ref r: Respuesta_https): nat32
-        variable c, k: nat32
-        c := https_abrir(método, url, cabeceras, cuerpo, n, r)
-        si r.error <> 0 entonces devolver c fin
+        variable c, k, vez, ini_r: nat32
+        variable volver, con_rango: bool
+        variable más: arreglo [700] de byte
+        variable val: arreglo [100] de byte
+        variable cr: arreglo [100] de byte
+        variable d: arreglo [1] de nat32
+        vez := 0
+        con_rango := falso
+        mientras cierto hacer
+            c := https_abrir(método, url, cabeceras, cuerpo, n, r)
+            ; (CORTES) sin red, o cortada antes de contestar: otra vez, cuando vuelva
+            si r.error <> 0 entonces
+                si https_reintentar y (iguales(método, "GET") o iguales(método, "HEAD")) y pasajero(r.error) y vez < 3 entonces
+                    vez := vez + 1
+                    si espera_red(vez) entonces seguir fin
+                fin
+                devolver c
+            fin
+            romper
+        fin
         mientras cierto hacer
             si r.largo < cabe entonces
                 k := https_leer(destino + r.largo, cabe - r.largo)
@@ -758,7 +815,40 @@ módulo Https
             si k = 0 entonces romper fin
             si es_error_red(k) entonces
                 r.error := k
-                romper
+                ; (CORTES) cortada a mitad: se pide el resto, si es un GET y el
+                ; servidor dice qué archivo es (ETag o Last-Modified)
+                volver := falso
+                si https_reintentar y iguales(método, "GET") y pasajero(k) y vez < 3 y r.total > 0 y (https_cabecera("etag", val, 100) o https_cabecera("last-modified", val, 100)) entonces
+                    vez := vez + 1
+                    si espera_red(vez) entonces
+                        d[0] := r.total
+                        más[0] := 0
+                        si cabeceras <> nulo entonces concatenar_hasta(más, cabeceras, 500) fin
+                        k := longitud(más)
+                        si k > 0 y más[k - 1] <> '\n' entonces concatenar(más, "\r\n") fin
+                        formatear(cr, 100, "Range: bytes=%u-\r\nIf-Range: ", d)
+                        concatenar(más, cr)
+                        concatenar_hasta(más, val, 690)
+                        ini_r := r.total
+                        k := r.largo
+                        c := https_abrir(método, dirección(r.url[0]), más, nulo, 0, r)
+                        r.largo := k
+                        r.total := ini_r
+                        si r.error = 0 y c = 206 y https_cabecera("content-range", cr, 100) y rango_empieza(cr) = ini_r entonces
+                            c := 200
+                            volver := cierto
+                        sino si r.error = 0 y c = 200 entonces
+                            ; (no deja seguir, o ha cambiado: desde el principio)
+                            r.largo := 0
+                            r.total := 0
+                            volver := cierto
+                        sino si r.error = 0 entonces
+                            https_cerrar()
+                        fin
+                    fin
+                fin
+                si no volver entonces romper fin
+                seguir
             fin
             si r.largo < cabe entonces r.largo := r.largo + k fin
             r.total := r.total + k
@@ -766,6 +856,14 @@ módulo Https
         si r.largo < cabe entonces destino[r.largo] := 0 fin
         si r.error <> 0 entonces devolver r.error fin
         devolver c
+    fin
+
+    ; (CORTES) de «bytes A-B/T», A (0xFFFFFFFF si no se entiende)
+    función rango_empieza(t: puntero a byte): nat32
+        variable a: nat32
+        si no empieza_sin_caja(t, "bytes ") entonces devolver 0xFFFFFFFF fin
+        si no natural_hasta(t + 6, a) entonces devolver 0xFFFFFFFF fin
+        devolver a
     fin
 
     público función https_get(url: puntero a byte, destino: puntero a byte, cabe: nat32, ref r: Respuesta_https): nat32

@@ -1,0 +1,1821 @@
+; =============================================================================
+;  agventa.cas - (AGENDA) la ventana de la Agenda (AGENDA.BIN sin órdenes),
+;  con los controles de controles.cas:
+;
+;    arriba, los menús (Archivo, Ver, Opciones, Ayuda) y las vistas en
+;    pestañas: Día, Semana, Mes, Próximos y Tareas, con «<», «Hoy», «>» e
+;    «Ir a...»; a la izquierda, el mini calendario (un clic salta a ese día)
+;    y la leyenda de las categorías (su símbolo y su nombre); y en medio, la
+;    vista. Hoy va con un recuadro grueso, en negrita y con «HOY» (no solo
+;    el color); los festivos, con «*» y su nombre; la semana, de lunes a
+;    domingo. Dos clics en un día (o Intro) apuntan una cita; en una cita,
+;    la cambian. La ficha de la cita: título, lugar, el día, todo el día o
+;    la hora y lo que dura, el aviso, la categoría, la repetición (cada
+;    día, cada N semanas con sus días, cada mes por el día o por «el segundo
+;    martes», cada año; hasta un día o N veces) y las notas; de una cita
+;    que se repite se puede quitar solo un día (una excepción).
+;
+;  Las teclas: las flechas (de día en día, de semana en semana), Re Pág y Av
+;  Pág (el mes o la semana), Inicio (hoy), 1 a 5 (las vistas), Ctrl+N (cita
+;  nueva), Ctrl+G (ir a un día), Intro (abrir), Supr (borrar), Espacio (en
+;  Tareas, hecha o no), Tab y Mayús+Tab, Alt+letra (los menús), F1.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo AgVenta
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Formato, Mem32, Controles, Festivos, AgNucleo, AgIcs, AgComun
+
+    ; ---- los controles ----
+    constante ID_VISTAS = 1
+    constante ID_ANT = 2
+    constante ID_HOY = 3
+    constante ID_SIG = 4
+    constante ID_IR = 5
+    constante ID_NUEVA = 6
+    constante ID_MINI = 7
+    constante ID_REJ = 8
+    constante ID_VISTA = 9                       ; la rejilla del mes o de la semana
+    constante ID_CAMBIAR = 10
+    constante ID_BORRAR = 11
+    constante ID_HECHA = 12
+    constante ID_VER_HECHAS = 13
+    constante ID_MINI_ANT = 14
+    constante ID_MINI_SIG = 15
+    ; la ficha
+    constante ID_E_TÍTULO = 30
+    constante ID_E_LUGAR = 31
+    constante ID_E_FECHA = 32
+    constante ID_E_TODO = 33
+    constante ID_E_HORA = 34
+    constante ID_E_DURA = 35
+    constante ID_E_AVISO = 36
+    constante ID_E_CAT = 37
+    constante ID_E_REP = 38
+    constante ID_E_CADA = 39
+    constante ID_E_FIN = 40
+    constante ID_E_FIN_DATO = 41
+    constante ID_E_NOTAS = 42
+    constante ID_E_HECHA = 43
+    constante ID_E_NAC = 44
+    constante ID_E_GUARDAR = 45
+    constante ID_E_CANCELAR = 46
+    constante ID_E_BORRAR = 47
+    constante ID_E_SOLO_HOY = 48
+    constante ID_E_DÍA0 = 50                     ; los siete días de la semana: 50 a 56
+    ; los otros cuadros
+    constante ID_C_CAMPO = 60
+    constante ID_C_SÍ = 61
+    constante ID_C_NO = 62
+    constante ID_C_OTRO = 63
+    constante ID_C_COM = 64
+    constante ID_C_MUNI = 65
+    constante ID_C_CAT = 66
+    constante ID_C_N0 = 70                       ; los nombres de las categorías: 71 a 78
+
+    constante VISTAS = "D\xA1a|Semana|Mes|Pr\xA2ximos|Tareas"
+    constante V_DÍA = 0
+    constante V_SEMANA = 1
+    constante V_MES = 2
+    constante V_PRÓXIMOS = 3
+    constante V_TAREAS = 4
+    constante MENÚS = "&Archivo|&Ver|&Opciones|A&yuda"
+    constante DURAS = "15 minutos|30 minutos|45 minutos|1 hora|1 hora y media|2 horas|3 horas|4 horas|Medio d\xA1a (5 horas)|Sin duraci\xA2n"
+    constante REPS = "No se repite|Cada d\xA1a|Cada semana|Cada mes (el mismo d\xA1a)|Cada mes (el mismo d\xA1a de la semana)|Cada a\xA4o|Como viene del .ICS"
+    constante FINES = "Nunca|Hasta el d\xA1a|Un n\xA3mero de veces"
+    constante LETRAS_DSEM = "L|M|X|J|V|S|D"
+    variable min_dura: arreglo [10] de nat32 = (15, 30, 45, 60, 90, 120, 180, 240, 300, 0)
+
+    ; ---- los modos (los cuadros, encima de la vista) ----
+    constante M_NADA = 0
+    constante M_FICHA = 1
+    constante M_IR = 2
+    constante M_FESTIVOS = 3
+    constante M_CATEGORÍAS = 4
+    constante M_IMPORTA = 5
+    constante M_EXPORTA = 6
+    constante M_BORRAR = 7
+    constante M_AYUDA = 8
+    variable modo: nat32
+
+    variable tamaño_: nat32 = T_GRANDE
+    variable vista: nat32 = V_MES
+    variable abierto: ent32 = -1
+    variable sel: nat32                          ; el día elegido
+    variable mini_mes, mini_año: nat32           ; el mes del mini calendario
+    variable hoy_: nat32
+    variable aviso: arreglo [160] de byte
+    variable ver_hechas: bool
+
+    ; ---- las veces que se ven (del mes o la semana): el día, la cita y su inicio ----
+    constante MAX_VECES = 700
+    tipo Vez = estructura
+        día: nat32                               ; el día en que se ve
+        vez: nat32                               ; el día en que empieza esa vez
+        k: nat32                                 ; la cita (su sitio en citas)
+        orden: nat32                             ; para ordenar (todo el día, antes)
+    fin
+    variable veces: arreglo [MAX_VECES] de Vez
+    variable n_veces: nat32
+    variable veces_d1, veces_d2: nat32
+    variable sucio: bool = cierto
+
+    ; ---- dónde se han pintado (para los clics) ----
+    constante MAX_SITIOS = 300
+    variable st_x, st_y, st_an, st_al: arreglo [MAX_SITIOS] de ent32
+    variable st_día, st_k, st_vez: arreglo [MAX_SITIOS] de nat32
+    variable n_st: nat32
+    ; el mini calendario y la vista
+    variable mc_x, mc_y, mc_cw, mc_ch: ent32
+    variable mc_hueco: nat32
+    variable vc_x, vc_y, vc_cw, vc_ch: ent32     ; la cuadrícula del mes (o las columnas de la semana)
+    variable vc_ini: nat32                       ; el día de su primera celda
+
+    ; ---- las rejillas ----
+    variable g: Rejilla
+
+    ; ---- la ficha ----
+    variable e_cita: puntero a Cita              ; la que se cambia (nulo: nueva)
+    variable e_clase: nat32
+    variable e_vez: nat32                        ; el día de la vez que se ha abierto
+    variable e_título: arreglo [100] de byte
+    variable e_lugar: arreglo [80] de byte
+    variable e_fecha: arreglo [12] de byte
+    variable e_hora: arreglo [8] de byte
+    variable e_cada: arreglo [6] de byte
+    variable e_fin_dato: arreglo [12] de byte
+    variable e_notas: arreglo [200] de byte
+    variable e_nac: arreglo [8] de byte
+    variable e_todo, e_hecha: bool
+    variable e_dura, e_aviso, e_cat, e_rep, e_fin: nat32
+    variable e_días: nat32                       ; los bits de los días de la semana
+    variable e_regla: Regla                      ; la que traía (para «Como viene del .ICS»)
+    ; los otros cuadros
+    variable c_campo: arreglo [100] de byte
+    variable c_com, c_muni, c_cat: nat32
+    variable c_nombres: arreglo [9] de arreglo [24] de byte
+    variable b_k: nat32                          ; (borrar) la cita
+    variable b_vez: nat32
+
+    ; =========================================================================
+    ;  Las veces que se ven
+    ; =========================================================================
+    función pon_vez(d: nat32, vz: nat32, k: nat32)
+        variable c: puntero a Cita
+        si n_veces >= MAX_VECES entonces devolver fin
+        c := dirección(citas[k])
+        veces[n_veces].día := d
+        veces[n_veces].vez := vz
+        veces[n_veces].k := k
+        si c.todo_día o c.clase <> CLASE_CITA entonces veces[n_veces].orden := 0 sino veces[n_veces].orden := c.minuto + 1 fin
+        n_veces := n_veces + 1
+    fin
+
+    ; junta las veces de todas las citas entre d1 y d2 (también las que vienen
+    ; de antes y duran varios días), ordenadas por el día y la hora
+    función junta(d1: nat32, d2: nat32)
+        variable i, x, largo, d, df: nat32
+        variable vu: Vuelta
+        variable c: puntero a Cita
+        variable t: Vez
+        variable j: ent32
+        si no sucio y d1 = veces_d1 y d2 = veces_d2 entonces devolver fin
+        n_veces := 0
+        i := 0
+        mientras i < n_citas hacer
+            c := dirección(citas[i])
+            si c.usada y no (c.clase = CLASE_TAREA y (no c.con_fecha o (c.hecha y no ver_hechas))) entonces
+                largo := 0
+                si c.dura > 1440 entonces largo := (c.dura - 1) div 1440 fin
+                si d1 >= largo entonces x := d1 - largo sino x := 0 fin
+                empieza(vu, c, x)
+                mientras siguiente(vu, x) y x <= d2 hacer
+                    df := x + largo
+                    para d desde x hasta df hacer
+                        si d >= d1 y d <= d2 entonces pon_vez(d, x, i) fin
+                    fin
+                fin
+            fin
+            i := i + 1
+        fin
+        ; por orden (inserción: son pocas)
+        i := 1
+        mientras i < n_veces hacer
+            t.día := veces[i].día
+            t.vez := veces[i].vez
+            t.k := veces[i].k
+            t.orden := veces[i].orden
+            j := ent32(i) - 1
+            mientras j >= 0 y (veces[j].día > t.día o (veces[j].día = t.día y veces[j].orden > t.orden)) hacer
+                veces[j + 1].día := veces[j].día
+                veces[j + 1].vez := veces[j].vez
+                veces[j + 1].k := veces[j].k
+                veces[j + 1].orden := veces[j].orden
+                j := j - 1
+            fin
+            veces[j + 1].día := t.día
+            veces[j + 1].vez := t.vez
+            veces[j + 1].k := t.k
+            veces[j + 1].orden := t.orden
+            i := i + 1
+        fin
+        veces_d1 := d1
+        veces_d2 := d2
+        sucio := falso
+    fin
+
+    ; ¿hay alguna vez ese día? (para el punto del mini calendario)
+    función hay_en(d: nat32): bool
+        variable i: nat32
+        para i desde 1 hasta n_veces hacer
+            si veces[i - 1].día = d entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    función apunta_sitio(x: ent32, yy: ent32, an: ent32, al: ent32, d: nat32, k: nat32, vz: nat32)
+        si n_st >= MAX_SITIOS entonces devolver fin
+        st_x[n_st] := x
+        st_y[n_st] := yy
+        st_an[n_st] := an
+        st_al[n_st] := al
+        st_día[n_st] := d
+        st_k[n_st] := k
+        st_vez[n_st] := vz
+        n_st := n_st + 1
+    fin
+
+    ; =========================================================================
+    ;  Pintar
+    ; =========================================================================
+    constante MP = 2                             ; la letra pequeña (la del sistema, 8x16), la de dentro de las celdas
+
+    función pequeño(x: ent32, yy: ent32, t: puntero a byte, an: ent32, tinta: nat32, negrita_: bool)
+        texto_ne(x, yy, t, caben_ne(t, longitud(t), an, MP, negrita_), tinta, MP, negrita_)
+    fin
+
+    ; una vez en una línea: el símbolo, la hora y el título
+    función pinta_vez(x: ent32, yy: ent32, an: ent32, ref vz: Vez)
+        variable c: puntero a Cita
+        variable t: arreglo [140] de byte
+        variable h: arreglo [8] de byte
+        variable tinta: nat32
+        c := dirección(citas[vz.k])
+        t[0] := 0
+        si c.clase = CLASE_CITA y no c.todo_día y vz.vez = vz.día y an >= 15 * 8 entonces
+            texto_hora(c.minuto, h)
+            copiar(t, h)
+            concatenar(t, " ")
+        fin
+        si c.clase = CLASE_TAREA entonces
+            si c.hecha entonces copiar(t, "[x] ") sino copiar(t, "[ ] ") fin
+        fin
+        título_de(valor(c), vz.vez, dirección(t[longitud(t)]), 140 - longitud(t))
+        tinta := C_TINTA
+        si c.clase = CLASE_TAREA y c.hecha entonces tinta := C_SUAVE fin
+        si c.categoría > 0 entonces
+            símbolo(c.categoría, x, yy + 3, 10)
+            pequeño(x + 13, yy, t, an - 13, tinta, falso)
+        sino
+            pequeño(x, yy, t, an, tinta, falso)
+        fin
+        apunta_sitio(x, yy, an, 16, vz.día, vz.k, vz.vez)
+    fin
+
+    función pinta_mini(x: ent32, yy: ent32, an: ent32): ent32
+        variable t: arreglo [40] de byte
+        variable nm: arreglo [16] de byte
+        variable dc: arreglo [4] de byte
+        variable xd: arreglo [2] de nat32
+        variable i, primero, n, col, fila, cx, cy: ent32
+        variable dd: nat32
+        variable tinta: nat32
+        variable f: puntero a byte
+        variable fc: nat32
+        botón(ID_MINI_ANT, x, yy, "<", falso, falso)
+        botón(ID_MINI_SIG, x + an - ancho_botón(">"), yy, ">", falso, falso)
+        opción_de(MESES, mini_mes - 1, nm, 16)
+        xd[0] := nat32(dirección(nm[0]))
+        xd[1] := mini_año
+        formatear(t, 40, "%s %u", xd)
+        t[0] := mayúscula(t[0])
+        si ent32(longitud(t)) * 8 > an - 2 * ancho_botón("<") - 4 entonces
+            nm[3] := 0
+            formatear(t, 40, "%s %u", xd)
+            t[0] := mayúscula(t[0])
+        fin
+        pequeño(x + (an - ent32(longitud(t)) * 8) div 2, yy + (alto_botón() - 16) div 2, t, an, C_TINTA, cierto)
+        yy := yy + alto_botón() + 2 * E
+        mc_cw := an div 7
+        mc_ch := 20
+        para i desde 0 hasta 6 hacer
+            opción_de(DÍAS_CORTOS, nat32(i), dc, 4)
+            pequeño(x + i * mc_cw + (mc_cw - 16) div 2, yy, dc, mc_cw, C_SUAVE, cierto)
+        fin
+        yy := yy + 18
+        mc_x := x
+        mc_y := yy
+        primero := ent32(día_semana(1, mini_mes, mini_año))
+        mc_hueco := nat32(primero)
+        n := ent32(días_del_mes(mini_mes, mini_año))
+        junta(número_de_día(1, mini_mes, mini_año), número_de_día(nat32(n), mini_mes, mini_año))
+        para i desde 1 hasta n hacer
+            col := (primero + i - 1) mod 7
+            fila := (primero + i - 1) div 7
+            cx := x + col * mc_cw
+            cy := yy + fila * mc_ch
+            dd := número_de_día(nat32(i), mini_mes, mini_año)
+            tinta := C_TINTA
+            f := festivo_de(nat32(i), mini_mes, mini_año, fc)
+            si dd = sel entonces
+                caja(cx + 1, cy, mc_cw - 2, mc_ch - 1, C_AZUL)
+                tinta := C_PAPEL
+            sino si f <> nulo entonces
+                caja(cx + 1, cy, mc_cw - 2, mc_ch - 1, C_NARANJA_CLARO)
+            fin
+            natural_a_texto(nat32(i), t)
+            si f <> nulo entonces concatenar(t, "*") fin
+            pequeño(cx + (mc_cw - ent32(longitud(t)) * 8) div 2, cy + 2, t, mc_cw, tinta, dd = hoy_ o dd = sel)
+            si dd = hoy_ entonces borde(cx, cy - 1, mc_cw, mc_ch + 1, 2, C_TINTA) fin
+            si hay_en(dd) entonces caja(cx + mc_cw div 2 - 1, cy + mc_ch - 3, 3, 2, tinta) fin
+        fin
+        apuntar(ID_MINI, K_LISTA, x, yy, an, 6 * mc_ch)
+        si foco = ID_MINI entonces marca_foco(x, yy, an, 6 * mc_ch) fin
+        devolver alto_botón() + 2 * E + 18 + 6 * mc_ch
+    fin
+
+    función pinta_leyenda(x: ent32, yy: ent32, an: ent32): ent32
+        variable i: nat32
+        variable w: ent32
+        w := an div 2
+        para i desde 1 hasta N_CATEGORÍAS hacer
+            símbolo(i, x + ent32((i - 1) mod 2) * w, yy + ent32((i - 1) div 2) * 20 + 3, 10)
+            pequeño(x + ent32((i - 1) mod 2) * w + 14, yy + ent32((i - 1) div 2) * 20, nombres_cat[i], w - 16, C_TINTA, falso)
+        fin
+        devolver 4 * 20
+    fin
+
+    ; el festivo (y su clase) en una celda: «* Navidad»
+    función pinta_festivo(x: ent32, yy: ent32, an: ent32, d: nat32): bool
+        variable dd, mm, aa, fc: nat32
+        variable f: puntero a byte
+        variable t: arreglo [64] de byte
+        de_número(d, dd, mm, aa)
+        f := festivo_de(dd, mm, aa, fc)
+        si f = nulo entonces devolver falso fin
+        t[0] := '*'
+        t[1] := ' '
+        nombre_festivo(f, dirección(t[2]), 60)
+        pequeño(x, yy, t, an, C_NARANJA, falso)
+        devolver cierto
+    fin
+
+    función pinta_mes(x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable dc: arreglo [16] de byte
+        variable t: arreglo [16] de byte
+        variable i, col, fila, cx, cy, ly, filas, n, w_núm: ent32
+        variable d1, d, dd, mm, aa, k, quedan, fc: nat32
+        variable fondo_, tinta: nat32
+        variable sd, sm, sa: nat32
+        de_número(sel, sd, sm, sa)
+        ; desde el lunes de la semana del día 1
+        d1 := número_de_día(1, sm, sa)
+        d1 := d1 - día_semana(1, sm, sa)
+        filas := ent32((día_semana(1, sm, sa) + días_del_mes(sm, sa) + 6) div 7)
+        vc_cw := an div 7
+        para i desde 0 hasta 6 hacer
+            opción_de(DÍAS, nat32(i), dc, 16)
+            si vc_cw < 80 entonces dc[2] := 0 fin
+            pequeño(x + i * vc_cw + 4, yy, dc, vc_cw - 4, C_SUAVE, cierto)
+        fin
+        yy := yy + 18
+        vc_x := x
+        vc_y := yy
+        vc_ch := (al - 18) div filas
+        vc_ini := d1
+        junta(d1, d1 + nat32(filas) * 7 - 1)
+        k := 0
+        para i desde 0 hasta filas * 7 - 1 hacer
+            d := d1 + nat32(i)
+            col := i mod 7
+            fila := i div 7
+            cx := x + col * vc_cw
+            cy := yy + fila * vc_ch
+            de_número(d, dd, mm, aa)
+            fondo_ := C_PAPEL
+            tinta := C_TINTA
+            si mm <> sm entonces
+                fondo_ := 0xF3F4F6
+                tinta := 0x6B7280
+            fin
+            si festivo_de(dd, mm, aa, fc) <> nulo entonces fondo_ := C_NARANJA_CLARO fin
+            si d = sel entonces fondo_ := C_AZUL_CLARO fin
+            caja(cx, cy, vc_cw, vc_ch, C_GRIS)
+            caja(cx + 1, cy + 1, vc_cw - 2, vc_ch - 2, fondo_)
+            natural_a_texto(dd, t)
+            si dd = 1 entonces
+                opción_de("ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic", mm - 1, dirección(t[longitud(t) + 1]), 4)
+                t[longitud(t)] := ' '
+            fin
+            w_núm := ancho_negrita(t)
+            negrita(cx + 7 * E + 1, cy + 6 * E, t, tinta)
+            si d = sel entonces
+                si foco = ID_VISTA entonces borde(cx, cy, vc_cw, vc_ch, 3 * E, C_AZUL) sino borde(cx, cy, vc_cw, vc_ch, E + 1, C_AZUL) fin
+            fin
+            si d = hoy_ entonces
+                ; hoy: un recuadro negro grueso por dentro (también si es el elegido), «HOY» y en negrita
+                borde(cx + 3 * E + 1, cy + 3 * E + 1, vc_cw - 6 * E - 2, vc_ch - 6 * E - 2, 2 * E, C_TINTA)
+                pequeño(cx + vc_cw - 7 * E - 30, cy + 7 * E + 2, "HOY", 28, C_TINTA, cierto)
+            fin
+            ly := cy + LT + 7 * E
+            si pinta_festivo(cx + 7 * E + 1, ly, vc_cw - 14 * E - 2, d) entonces ly := ly + 16 fin
+            ; las veces de ese día
+            mientras k < n_veces y veces[k].día < d hacer k := k + 1 fin
+            quedan := 0
+            n := 0
+            mientras k < n_veces y veces[k].día = d hacer
+                si ly + 16 <= cy + vc_ch - 3 entonces
+                    pinta_vez(cx + 7 * E + 1, ly, vc_cw - 14 * E - 2, veces[k])
+                    ly := ly + 16
+                sino
+                    quedan := quedan + 1
+                fin
+                k := k + 1
+            fin
+            si quedan > 0 entonces
+                ; las que no caben: «+2», al lado del número del día
+                t[0] := '+'
+                natural_a_texto(quedan, dirección(t[1]))
+                pequeño(cx + 7 * E + 1 + w_núm + LA div 2, cy + 7 * E + 2, t, vc_cw div 2, C_AZUL, cierto)
+            fin
+        fin
+        apuntar(ID_VISTA, K_LISTA, x, yy, an, filas * vc_ch)
+    fin
+
+    función pinta_semana(x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable t: arreglo [40] de byte
+        variable dc: arreglo [16] de byte
+        variable xd: arreglo [2] de nat32
+        variable i, cx, ly, cab: ent32
+        variable d1, d, dd, mm, aa, k: nat32
+        variable fondo_: nat32
+        d1 := sel - dsem_de(sel)
+        vc_cw := an div 7
+        vc_x := x
+        vc_y := yy
+        vc_ini := d1
+        cab := LT + 22
+        junta(d1, d1 + 6)
+        k := 0
+        para i desde 0 hasta 6 hacer
+            d := d1 + nat32(i)
+            cx := x + i * vc_cw
+            de_número(d, dd, mm, aa)
+            fondo_ := C_PAPEL
+            si festivo_de(dd, mm, aa, aa) <> nulo entonces fondo_ := C_NARANJA_CLARO fin
+            de_número(d, dd, mm, aa)
+            si d = sel entonces fondo_ := C_AZUL_CLARO fin
+            caja(cx, yy, vc_cw, al, C_GRIS)
+            caja(cx + 1, yy + 1, vc_cw - 2, al - 2, fondo_)
+            opción_de(DÍAS, nat32(i), dc, 16)
+            xd[0] := nat32(dirección(dc[0]))
+            xd[1] := dd
+            formatear(t, 40, "%s %u", xd)
+            si vc_cw < 110 entonces
+                dc[2] := 0
+                formatear(t, 40, "%s %u", xd)
+            fin
+            negrita(cx + 3 * E, yy + 2 * E, t, C_TINTA)
+            si d = hoy_ entonces
+                borde(cx + 1, yy + 1, vc_cw - 2, cab, 3 * E, C_TINTA)
+                pequeño(cx + 6 * E + 2, yy + LT + 2 * E, "HOY", 28, C_TINTA, cierto)
+            fin
+            si d = sel entonces
+                si foco = ID_VISTA entonces borde(cx, yy, vc_cw, al, 3 * E, C_AZUL) sino borde(cx, yy, vc_cw, al, E + 1, C_AZUL) fin
+            fin
+            ly := yy + cab + 2
+            si pinta_festivo(cx + 3 * E, ly, vc_cw - 6 * E, d) entonces ly := ly + 18 fin
+            mientras k < n_veces y veces[k].día < d hacer k := k + 1 fin
+            mientras k < n_veces y veces[k].día = d hacer
+                si ly + 16 <= yy + al - 2 entonces
+                    pinta_vez(cx + 3 * E, ly, vc_cw - 6 * E, veces[k])
+                    ly := ly + 18
+                fin
+                k := k + 1
+            fin
+        fin
+        vc_ch := al
+        apuntar(ID_VISTA, K_LISTA, x, yy, an, al)
+    fin
+
+    ; las vistas con rejilla: el día, los próximos y las tareas
+    función renglón_de(c: puntero a Cita, k: nat32, vz: nat32, con_fecha: bool)
+        variable r: ent32
+        variable t: arreglo [140] de byte
+        variable dd, mm, aa: nat32
+        variable clase: nat32
+        clase := R_NORMAL
+        si c.clase = CLASE_TAREA y c.hecha entonces clase := R_GRIS fin
+        r := renglón_nuevo(g, clase, k + 1)
+        si r < 0 entonces devolver fin
+        g.r[r].id2 := vz
+        si con_fecha entonces
+            si vista = V_TAREAS y no c.con_fecha entonces
+                copiar(t, "sin fecha")
+            sino
+                opción_de(DÍAS_CORTOS, dsem_de(vz), t, 4)
+                concatenar(t, " ")
+                texto_fecha(vz, dirección(t[3]))
+                si vista = V_PRÓXIMOS entonces t[8] := 0 fin       ; (sin el año: son 60 días)
+            fin
+            celda(g, r, 0, t)
+        fin
+        si vista = V_TAREAS entonces
+            si c.hecha entonces celda(g, r, 1, "[x]") sino celda(g, r, 1, "[ ]") fin
+        sino
+            texto_horas(valor(c), t)
+            si vz <> c.día y c.dura > 1440 entonces copiar(t, "(sigue)") fin
+            celda(g, r, nat32(con_fecha), t)
+        fin
+        título_de(valor(c), vz, t, 64)
+        si c.regla.frec <> F_NO entonces
+            t[56] := 0
+            concatenar(t, " (se repite)")
+        fin
+        celda(g, r, nat32(con_fecha) + 1, t)
+        si vista <> V_TAREAS entonces celda(g, r, nat32(con_fecha) + 2, c.lugar) fin
+        si c.categoría > 0 entonces celda(g, r, nat32(con_fecha) + 3 - nat32(vista = V_TAREAS), nombres_cat[c.categoría]) fin
+        texto_aviso(c.aviso, t)
+        si vista = V_DÍA y ancho >= 1000 entonces celda(g, r, 4, t) fin
+        de_número(vz, dd, mm, aa)
+    fin
+
+    función llena_rejilla()
+        variable i, d, idsel, fc, dd, mm, aa: nat32
+        variable c: puntero a Cita
+        variable r: ent32
+        variable t: arreglo [80] de byte
+        idsel := rejilla_id(g)
+        rejilla_vaciar(g)
+        g.n_cols := 0
+        si vista = V_DÍA entonces
+            rejilla_columna(g, "Hora", 11, falso)
+            rejilla_columna(g, "T\xA1tulo", 16, falso)
+            rejilla_columna(g, "Lugar", 10, falso)
+            rejilla_columna(g, "Categor\xA1a", 8, falso)
+            si ancho >= 1000 entonces rejilla_columna(g, "Aviso", 12, falso) fin
+            junta(sel, sel)
+            para i desde 1 hasta n_veces hacer
+                renglón_de(dirección(citas[veces[i - 1].k]), veces[i - 1].k, veces[i - 1].vez, falso)
+            fin
+        sino si vista = V_PRÓXIMOS entonces
+            rejilla_columna(g, "Fecha", 8, falso)
+            rejilla_columna(g, "Hora", 11, falso)
+            rejilla_columna(g, "T\xA1tulo", 20, falso)
+            rejilla_columna(g, "Lugar", 12, falso)
+            rejilla_columna(g, "Categor\xA1a", 10, falso)
+            junta(hoy_, hoy_ + 59)
+            d := hoy_
+            para i desde 1 hasta n_veces hacer
+                ; los festivos, en su día (antes de lo de ese día)
+                mientras d <= veces[i - 1].día hacer
+                    renglón_festivo(d)
+                    d := d + 1
+                fin
+                si veces[i - 1].vez = veces[i - 1].día o veces[i - 1].día = hoy_ entonces
+                    renglón_de(dirección(citas[veces[i - 1].k]), veces[i - 1].k, veces[i - 1].día, cierto)
+                fin
+            fin
+            mientras d <= hoy_ + 59 hacer
+                renglón_festivo(d)
+                d := d + 1
+            fin
+        sino
+            rejilla_columna(g, "Fecha l\xA1mite", 13, falso)
+            rejilla_columna(g, "Hecha", 5, falso)
+            rejilla_columna(g, "Tarea", 30, falso)
+            rejilla_columna(g, "Categor\xA1a", 10, falso)
+            ; primero las que faltan (por la fecha), luego las hechas
+            para d desde 0 hasta 1 hacer
+                para i desde 1 hasta n_citas hacer
+                    c := dirección(citas[i - 1])
+                    si c.usada y c.clase = CLASE_TAREA y nat32(c.hecha) = d y (d = 0 o ver_hechas) entonces renglón_de(c, i - 1, c.día, cierto) fin
+                fin
+            fin
+            g.col_clave := -1
+        fin
+        rejilla_lista(g)
+        si idsel <> 0 entonces rejilla_elegir_id(g, idsel) fin
+        si rejilla_elegido(g) < 0 entonces rejilla_ir(g, I_PRIMERO) fin
+        r := 0
+        fc := 0
+        t[0] := 0
+        dd := 0
+        mm := 0
+        aa := 0
+    fin
+
+    función renglón_festivo(d: nat32)
+        variable dd, mm, aa, fc: nat32
+        variable f: puntero a byte
+        variable t: arreglo [80] de byte
+        variable r: ent32
+        de_número(d, dd, mm, aa)
+        f := festivo_de(dd, mm, aa, fc)
+        si f = nulo entonces devolver fin
+        r := renglón_nuevo(g, R_AVISO, 0)
+        si r < 0 entonces devolver fin
+        g.r[r].id2 := d
+        opción_de(DÍAS_CORTOS, dsem_de(d), t, 4)
+        concatenar(t, " ")
+        texto_fecha(d, dirección(t[3]))
+        t[8] := 0
+        celda(g, r, 0, t)
+        celda(g, r, 1, "todo el d\xA1a")
+        copiar(t, "* Festivo: ")
+        nombre_festivo(f, dirección(t[11]), 60)
+        celda(g, r, 2, t)
+        si fc = F_NACIONAL entonces celda(g, r, 3, "nacional") sino si fc = F_COMUNIDAD entonces celda(g, r, 3, "de la comunidad") sino celda(g, r, 3, "local") fin
+    fin
+
+    función pinta_día(x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable t: arreglo [120] de byte
+        variable dd, mm, aa, fc: nat32
+        variable f: puntero a byte
+        variable x2, y2: ent32
+        de_número(sel, dd, mm, aa)
+        fecha_larga(dd, mm, aa, t)
+        si sel = hoy_ entonces concatenar(t, " (HOY)") fin
+        negrita(x, yy, t, C_TINTA)
+        y2 := yy + LT + 2 * E
+        f := festivo_de(dd, mm, aa, fc)
+        si f <> nulo entonces
+            copiar(t, "* Festivo: ")
+            nombre_festivo(f, dirección(t[11]), 100)
+            texto_corto(x, y2, t, an, C_NARANJA, cierto)
+            y2 := y2 + LT + 2 * E
+        fin
+        llena_rejilla()
+        rejilla(g, ID_REJ, x, y2, an, al - (y2 - yy) - alto_botón() - 6 * E, "Nada apuntado este d\xA1a. Dos clics aqu\xA1 o Ctrl+N: una cita nueva.")
+        y2 := yy + al - alto_botón()
+        x2 := x + botón(ID_NUEVA, x, y2, "Nueva cita", cierto, falso) + LA
+        x2 := x2 + botón(ID_CAMBIAR, x2, y2, "Cambiar", falso, rejilla_id(g) = 0) + LA
+        botón(ID_BORRAR, x2, y2, "Borrar", falso, rejilla_id(g) = 0)
+    fin
+
+    función pinta_lista(x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable x2, y2: ent32
+        llena_rejilla()
+        si vista = V_PRÓXIMOS entonces
+            negrita(x, yy, "Lo de los pr\xA2ximos 60 d\xA1as (con los festivos)", C_TINTA)
+            rejilla(g, ID_REJ, x, yy + LT + 2 * E, an, al - LT - 2 * E - alto_botón() - 6 * E, "Nada apuntado en los pr\xA2ximos 60 d\xA1as.")
+        sino
+            negrita(x, yy, "Las tareas (Espacio: hecha o no)", C_TINTA)
+            rejilla(g, ID_REJ, x, yy + LT + 2 * E, an, al - LT - 2 * E - alto_botón() - 6 * E, "Sin tareas. Pulse \xABNueva tarea\xBB.")
+        fin
+        y2 := yy + al - alto_botón()
+        si vista = V_TAREAS entonces
+            x2 := x + botón(ID_NUEVA, x, y2, "Nueva tarea", cierto, falso) + LA
+            x2 := x2 + botón(ID_HECHA, x2, y2, "Hecha / por hacer", falso, rejilla_id(g) = 0) + LA
+        sino
+            x2 := x + botón(ID_NUEVA, x, y2, "Nueva cita", cierto, falso) + LA
+        fin
+        x2 := x2 + botón(ID_CAMBIAR, x2, y2, "Cambiar", falso, rejilla_id(g) = 0) + LA
+        x2 := x2 + botón(ID_BORRAR, x2, y2, "Borrar", falso, rejilla_id(g) = 0) + LA
+        si vista = V_TAREAS entonces casilla(ID_VER_HECHAS, x2, y2 + 5 * E, "Ver las hechas", ver_hechas) fin
+    fin
+
+    ; la cabecera de la vista: el mes, la semana o el día que se ve
+    función texto_período(t: puntero a byte)
+        variable nm: arreglo [16] de byte
+        variable x: arreglo [6] de nat32
+        variable dd, mm, aa, d1, d2, m2, a2: nat32
+        de_número(sel, dd, mm, aa)
+        opción_de(MESES, mm - 1, nm, 16)
+        x[0] := nat32(dirección(nm[0]))
+        x[1] := aa
+        si vista = V_SEMANA entonces
+            de_número(sel - dsem_de(sel), d1, mm, aa)
+            de_número(sel - dsem_de(sel) + 6, d2, m2, a2)
+            x[0] := d1
+            x[1] := d2
+            opción_de(MESES, m2 - 1, nm, 16)
+            x[2] := nat32(dirección(nm[0]))
+            x[3] := a2
+            formatear(t, 60, "Semana del %u al %u de %s de %u", x)
+            devolver
+        fin
+        formatear(t, 60, "%s de %u", x)
+        t[0] := mayúscula(t[0])
+    fin
+
+    ; ---- los cuadros ----
+    función caja_cuadro(an: ent32, al: ent32, título_: puntero a byte, ref x: ent32, ref yy: ent32)
+        x := (ancho - an) div 2
+        yy := (alto - al) div 2
+        si x < 0 entonces x := 0 fin
+        si yy < 0 entonces yy := 0 fin
+        caja(x, yy, an, al, C_TINTA)
+        caja(x + 2 * E, yy + 2 * E, an - 4 * E, al - 4 * E, C_FONDO)
+        caja(x + 2 * E, yy + 2 * E, an - 4 * E, LT + 6 * E, C_AZUL)
+        negrita(x + LA, yy + 5 * E, título_, C_PAPEL)
+        yy := yy + LT + 12 * E
+        x := x + LA
+    fin
+
+    función pinta_ficha()
+        variable x, yy, an, al, c1, c2, y2, y1, w, i: ent32
+        variable t: arreglo [80] de byte
+        variable dl: arreglo [4] de byte
+        variable tit: arreglo [40] de byte
+        an := ancho - 2 * LA
+        al := alto - alto_estado() - 2 * E
+        si an > 1000 entonces an := 1000 fin
+        si e_cita = nulo entonces copiar(tit, "Nueva ") sino copiar(tit, "Cambiar ") fin
+        si e_clase = CLASE_TAREA entonces concatenar(tit, "tarea") sino si e_clase = CLASE_CUMPLE entonces concatenar(tit, "cumplea\xA4os") sino concatenar(tit, "cita") fin
+        caja_cuadro(an, al, tit, x, yy)
+        w := (an - 3 * LA) div 2
+        c1 := x
+        c2 := x + w + LA
+        y1 := yy
+        si e_clase = CLASE_CUMPLE entonces
+            y1 := y1 + campo(ID_E_TÍTULO, c1, y1, w, "Nombre", e_título, falso) + 4 * E
+            y1 := y1 + campo(ID_E_FECHA, c1, y1, w div 2, "D\xA1a (dd/mm)", e_fecha, falso) + 4 * E
+            y1 := y1 + campo(ID_E_NAC, c1, y1, w div 2, "A\xA4o en que naci\xA2 (si se sabe)", e_nac, falso) + 4 * E
+            y2 := yy
+            y2 := y2 + desplegable(ID_E_AVISO, c2, y2, w, "Aviso", AVISOS, e_aviso, falso) + 4 * E
+            y2 := y2 + campo(ID_E_NOTAS, c2, y2, w, "Notas", e_notas, falso) + 4 * E
+        sino
+            y1 := y1 + campo(ID_E_TÍTULO, c1, y1, w, "T\xA1tulo", e_título, falso) + 4 * E
+            si e_clase = CLASE_CITA entonces y1 := y1 + campo(ID_E_LUGAR, c1, y1, w, "Lugar", e_lugar, falso) + 4 * E fin
+            si e_clase = CLASE_TAREA entonces
+                y1 := y1 + campo(ID_E_FECHA, c1, y1, w div 2, "Fecha l\xA1mite (o nada)", e_fecha, falso) + 4 * E
+                casilla(ID_E_HECHA, c1, y1, "Hecha", e_hecha)
+                y1 := y1 + LT + 6 * E
+                y1 := y1 + campo(ID_E_HORA, c1, y1, w div 2, "Hora del aviso", e_hora, falso) + 4 * E
+            sino
+                campo(ID_E_FECHA, c1, y1, w div 2 - LA div 2, "D\xA1a", e_fecha, falso)
+                si no e_todo entonces campo(ID_E_HORA, c1 + w div 2 + LA div 2, y1, w div 2 - LA div 2, "Hora", e_hora, falso) fin
+                y1 := y1 + LT + 2 * E + alto_caja() + 4 * E
+                casilla(ID_E_TODO, c1, y1, "Todo el d\xA1a", e_todo)
+                y1 := y1 + LT + 6 * E
+                si no e_todo entonces y1 := y1 + desplegable(ID_E_DURA, c1, y1, w, "Dura", DURAS, e_dura, falso) + 4 * E fin
+            fin
+            y2 := yy
+            y2 := y2 + desplegable(ID_E_AVISO, c2, y2, w, "Aviso", AVISOS, e_aviso, falso) + 4 * E
+            y2 := y2 + desplegable(ID_E_CAT, c2, y2, w, "Categor\xA1a", texto_cats, e_cat, falso) + 4 * E
+            si e_cat > 0 entonces símbolo(e_cat, c2 + w - 3 * LA - LT, y2 - alto_caja() - 4 * E + (alto_caja() - 12) div 2, 12) fin
+            si e_clase = CLASE_CITA entonces
+                y2 := y2 + desplegable(ID_E_REP, c2, y2, w, "Se repite", REPS, e_rep, falso) + 4 * E
+                si e_rep > 0 y e_rep < 6 entonces
+                    campo(ID_E_CADA, c2, y2, 6 * LA, "Cada", e_cada, falso)
+                    Controles.texto(c2 + 6 * LA + LA div 2, y2 + LT + 8 * E, unidad_rep(), C_SUAVE)
+                    y2 := y2 + LT + 2 * E + alto_caja() + 4 * E
+                    si e_rep = 2 entonces
+                        para i desde 0 hasta 6 hacer
+                            opción_de(LETRAS_DSEM, nat32(i), dl, 4)
+                            casilla(ID_E_DÍA0 + nat32(i), c2 + i * (w div 7), y2, dl, (e_días >> nat32(i)) yb 1 <> 0)
+                        fin
+                        y2 := y2 + LT + 6 * E
+                    fin
+                    desplegable(ID_E_FIN, c2, y2, w div 2, "Termina", FINES, e_fin, falso)
+                    si e_fin = 1 entonces campo(ID_E_FIN_DATO, c2 + w div 2 + LA div 2, y2, w div 2 - LA div 2, "El d\xA1a", e_fin_dato, falso) fin
+                    si e_fin = 2 entonces campo(ID_E_FIN_DATO, c2 + w div 2 + LA div 2, y2, w div 2 - LA div 2, "Veces", e_fin_dato, falso) fin
+                    y2 := y2 + LT + 2 * E + alto_caja() + 4 * E
+                fin
+                si e_cita <> nulo y e_cita.n_excep > 0 entonces
+                    formatear(t, 80, "(con %u d\xA1as quitados)", dirección(e_cita.n_excep))
+                    Controles.texto(c2, y2, t, C_SUAVE)
+                    y2 := y2 + LT
+                fin
+            fin
+            si y2 < y1 entonces y2 := y1 fin
+            y2 := y2 + campo(ID_E_NOTAS, c1, y2, an - 2 * LA, "Notas", e_notas, falso) + 6 * E
+            y1 := y2
+        fin
+        si y2 > y1 entonces y1 := y2 fin
+        y1 := yy + al - LT - 12 * E - alto_botón() - 6 * E
+        x := x + botón(ID_E_GUARDAR, c1, y1, "Guardar", cierto, falso) + LA
+        x := x + botón(ID_E_CANCELAR, x, y1, "Cancelar", falso, falso) + LA
+        si e_cita <> nulo entonces x := x + botón(ID_E_BORRAR, x, y1, "Borrar", falso, falso) + LA fin
+        si e_cita <> nulo y e_cita.regla.frec <> F_NO entonces botón(ID_E_SOLO_HOY, x, y1, "Quitar solo este d\xA1a", falso, falso) fin
+    fin
+
+
+    función unidad_rep(): puntero a byte
+        según nat32(e_rep)
+            caso 1: devolver "d\xA1as"
+            caso 2: devolver "semanas, estos d\xA1as:"
+            caso 3, 4: devolver "meses"
+        fin
+        devolver "a\xA4os"
+    fin
+
+    función pinta_cuadro()
+        variable x, yy, an, al, x2, i: ent32
+        variable t: arreglo [80] de byte
+        según nat32(modo)
+            caso M_IR:
+                caja_cuadro(28 * LA, 3 * LT + alto_caja() + alto_botón() + 30 * E, "Ir a un d\xA1a", x, yy)
+                yy := yy + campo(ID_C_CAMPO, x, yy, 14 * LA, "El d\xA1a (dd/mm/aaaa)", c_campo, falso) + 6 * E
+                x2 := x + botón(ID_C_SÍ, x, yy, "Ir", cierto, falso) + LA
+                botón(ID_C_NO, x2, yy, "Cancelar", falso, falso)
+            caso M_IMPORTA, M_EXPORTA:
+                an := ancho - 4 * LA
+                si an > 50 * LA entonces an := 50 * LA fin
+                si modo = M_IMPORTA entonces copiar(t, "Importar citas (.ICS) o cumplea\xA4os (.VCF)") sino copiar(t, "Exportar a un .ICS") fin
+                caja_cuadro(an, 5 * LT + 2 * alto_caja() + alto_botón() + 40 * E, t, x, yy)
+                yy := yy + campo(ID_C_CAMPO, x, yy, an - 2 * LA, "El archivo (con su ruta: C:\\DOCUMENT\\CITAS.ICS)", c_campo, falso) + 6 * E
+                si modo = M_EXPORTA entonces
+                    yy := yy + desplegable(ID_C_CAT, x, yy, an div 2, "Qu\x82 citas", texto_cats_todas, c_cat, falso) + 6 * E
+                sino
+                    párrafo(x, yy, an - 2 * LA, "Las que ya est\xA0n (el mismo UID) se cambian: importar dos veces no las duplica.", C_SUAVE, falso, cierto)
+                    yy := yy + 2 * LT + 4 * E
+                fin
+                si modo = M_IMPORTA entonces x2 := x + botón(ID_C_SÍ, x, yy, "Importar", cierto, falso) + LA sino x2 := x + botón(ID_C_SÍ, x, yy, "Exportar", cierto, falso) + LA fin
+                botón(ID_C_NO, x2, yy, "Cancelar", falso, falso)
+            caso M_FESTIVOS:
+                caja_cuadro(40 * LA, 3 * LT + 2 * alto_caja() + alto_botón() + 60 * E, "Los festivos", x, yy)
+                yy := yy + desplegable(ID_C_COM, x, yy, 36 * LA, "Comunidad aut\xA2noma", COMUNIDADES, c_com, falso) + 6 * E
+                yy := yy + desplegable(ID_C_MUNI, x, yy, 36 * LA, "Fiestas locales de", MUNICIPIOS, c_muni, falso) + 6 * E
+                texto_corto(x, yy, "Otros: FESTIVOS.TXT en la carpeta de la Agenda", 36 * LA, C_SUAVE, falso)
+                yy := yy + LT + 4 * E
+                x2 := x + botón(ID_C_SÍ, x, yy, "Guardar", cierto, falso) + LA
+                botón(ID_C_NO, x2, yy, "Cancelar", falso, falso)
+            caso M_CATEGORÍAS:
+                caja_cuadro(44 * LA, 4 * (alto_caja() + 4 * E) + alto_botón() + LT + 30 * E, "Los nombres de las categor\xA1as", x, yy)
+                para i desde 1 hasta ent32(N_CATEGORÍAS) hacer
+                    símbolo(nat32(i), x + ((i - 1) mod 2) * 21 * LA, yy + ((i - 1) div 2) * (alto_caja() + 4 * E) + (alto_caja() - 12) div 2, 12)
+                    campo(ID_C_N0 + nat32(i), x + ((i - 1) mod 2) * 21 * LA + LA + 4, yy + ((i - 1) div 2) * (alto_caja() + 4 * E), 18 * LA, "", c_nombres[i], falso)
+                fin
+                yy := yy + 4 * (alto_caja() + 4 * E) + 2 * E
+                x2 := x + botón(ID_C_SÍ, x, yy, "Guardar", cierto, falso) + LA
+                botón(ID_C_NO, x2, yy, "Cancelar", falso, falso)
+            caso M_BORRAR:
+                caja_cuadro(44 * LA, 3 * LT + alto_botón() + 34 * E, "Borrar", x, yy)
+                copiar(t, "\xA8Borrar \xAB")
+                copiar_hasta(dirección(t[9]), citas[b_k].título, 50)
+                concatenar(t, "\xBB?")
+                texto_corto(x, yy, t, 42 * LA, C_TINTA, cierto)
+                yy := yy + LT + 8 * E
+                si citas[b_k].regla.frec <> F_NO entonces
+                    x2 := x + botón(ID_C_OTRO, x, yy, "Solo este d\xA1a", cierto, falso) + LA
+                    x2 := x2 + botón(ID_C_SÍ, x2, yy, "Todas las veces", falso, falso) + LA
+                sino
+                    x2 := x + botón(ID_C_SÍ, x, yy, "Borrar", cierto, falso) + LA
+                fin
+                botón(ID_C_NO, x2, yy, "Cancelar", falso, falso)
+            caso M_AYUDA:
+                an := ancho - 4 * LA
+                al := alto - 4 * E
+                caja_cuadro(an, al, "La Agenda: las teclas", x, yy)
+                yy := yy + párrafo(x, yy, an - 2 * LA, "Flechas: de d\xA1a en d\xA1a (arriba y abajo, de semana en semana). Re P\xA0g y Av P\xA0g: el mes (o la semana, o el d\xA1a) de antes o el siguiente. Inicio: hoy. 1 a 5: D\xA1a, Semana, Mes, Pr\xA2ximos y Tareas. Ctrl+N: una cita nueva. Ctrl+G: ir a un d\xA1a. Intro o dos clics: abrir. Supr: borrar. Espacio (en Tareas): hecha o no. Tab y May\xA3s+Tab: de un control a otro. Alt y la letra subrayada: los men\xA3s. Esc: cerrar un cuadro.", C_TINTA, falso, cierto) + 4 * E
+                yy := yy + párrafo(x, yy, an - 2 * LA, "Hoy va con un recuadro grueso y la palabra HOY; los festivos, con * y su nombre; cada categor\xA1a, con su s\xA1mbolo (la leyenda, a la izquierda). Los avisos saltan aunque la Agenda est\x82 cerrada: los da el vigilante que arranca con el escritorio, con su sonido y Posponer.", C_TINTA, falso, cierto) + 4 * E
+                botón(ID_C_NO, x, yy, "Cerrar", cierto, falso)
+        fin
+    fin
+
+
+    variable texto_cats: arreglo [260] de byte
+    variable texto_cats_todas: arreglo [270] de byte
+
+    ; «Sin categoría|Personal|...» para la desplegable
+    función haz_texto_cats()
+        variable i: nat32
+        copiar(texto_cats, nombres_cat[0])
+        copiar(texto_cats_todas, "Todas")
+        para i desde 1 hasta N_CATEGORÍAS hacer
+            concatenar(texto_cats, "|")
+            concatenar(texto_cats, nombres_cat[i])
+            concatenar(texto_cats_todas, "|")
+            concatenar(texto_cats_todas, nombres_cat[i])
+        fin
+    fin
+
+    ; lo que miden las pestañas (como las pinta controles.cas)
+    función ancho_pestañas_(nombres: puntero a byte): ent32
+        variable k, n: nat32
+        variable w: ent32
+        variable t: arreglo [40] de byte
+        n := cuántas_opciones(nombres)
+        w := LA div 2
+        para k desde 0 hasta n - 1 hacer
+            opción_de(nombres, k, t, 40)
+            w := w + ancho_negrita(t) + 2 * LA + 2 * E
+        fin
+        devolver w
+    fin
+
+    función pinta()
+        variable yy, abajo, x, xi, an_iz, x2, vueltas: ent32
+        variable t: arreglo [120] de byte
+        variable est: arreglo [240] de byte
+        variable dd, mm, aa: nat32
+        vueltas := 0
+        mientras vueltas < 2 hacer
+            empezar_controles()
+            n_st := 0
+            caja(0, 0, ancho, alto, C_FONDO)
+            yy := barra_menús(0, 0, ancho, MENÚS, abierto)
+            yy := yy + 2 * E
+            ; las vistas y, a su derecha, los botones de moverse (sin «Ir a...»
+            ; si no caben: está en Ver y en Ctrl+G)
+            x2 := ancho_pestañas_(VISTAS) + LA
+            botón(ID_ANT, x2, yy + E, "<", falso, vista >= V_PRÓXIMOS)
+            x2 := x2 + ancho_botón("<") + LA div 4
+            botón(ID_HOY, x2, yy + E, "Hoy", falso, falso)
+            x2 := x2 + ancho_botón("Hoy") + LA div 4
+            botón(ID_SIG, x2, yy + E, ">", falso, vista >= V_PRÓXIMOS)
+            x2 := x2 + ancho_botón(">") + LA div 2
+            si x2 + ancho_botón("Ir a...") + ancho_botón("Nueva") + LA <= ancho entonces
+                botón(ID_IR, x2, yy + E, "Ir a...", falso, falso)
+            fin
+            si x2 + ancho_botón("Nueva") + LA div 2 <= ancho entonces botón(ID_NUEVA + 100, ancho - ancho_botón("Nueva") - LA div 2, yy + E, "Nueva", cierto, falso) fin
+            yy := yy + pestañas(ID_VISTAS, 0, yy, ancho_pestañas_(VISTAS), VISTAS, vista, 0) + 4 * E
+            abajo := alto - alto_estado() - 2 * E
+            ; a la izquierda: el mini calendario y la leyenda
+            an_iz := 7 * 30
+            si ancho < 640 entonces an_iz := 7 * 24 fin
+            xi := LA div 2
+            x := xi + an_iz + LA
+            ; (en Próximos y Tareas, con la ventana estrecha, sin el panel: las columnas caben)
+            si vista <= V_MES o ancho >= 1000 entonces
+                x2 := yy + pinta_mini(xi, yy, an_iz) + 4 * E
+                si abajo - x2 > 90 entonces
+                    pequeño(xi, x2, "Las categor\xA1as", an_iz, C_SUAVE, cierto)
+                    pinta_leyenda(xi, x2 + 18, an_iz)
+                fin
+            sino
+                x := LA div 2
+            fin
+            ; la vista
+            si vista = V_SEMANA o vista = V_MES entonces
+                texto_período(t)
+                negrita(x, yy, t, C_TINTA)
+                yy := yy + LT + 2 * E
+            fin
+            según nat32(vista)
+                caso V_MES: pinta_mes(x, yy, ancho - x - LA div 2, abajo - yy)
+                caso V_SEMANA: pinta_semana(x, yy, ancho - x - LA div 2, abajo - yy)
+                caso V_DÍA: pinta_día(x, yy, ancho - x - LA div 2, abajo - yy)
+                si no: pinta_lista(x, yy, ancho - x - LA div 2, abajo - yy)
+            fin
+            si modo = M_FICHA entonces
+                empezar_controles()
+                pinta_ficha()
+            sino si modo <> M_NADA entonces
+                empezar_controles()
+                pinta_cuadro()
+            fin
+            ; la barra de estado: lo elegido y lo que se ha hecho
+            de_número(sel, dd, mm, aa)
+            fecha_larga(dd, mm, aa, est)
+            concatenar(est, "|")
+            si aviso[0] <> 0 entonces concatenar(est, aviso) sino concatenar(est, "F1: las teclas") fin
+            barra_estado(alto - alto_estado(), est)
+            si modo = M_NADA y (no hay_control(foco) o clase_de(foco) = K_BOTÓN y foco <> ID_NUEVA y foco <> ID_CAMBIAR y foco <> ID_BORRAR y foco <> ID_HECHA y foco <> ID_ANT y foco <> ID_SIG y foco <> ID_HOY y foco <> ID_IR y foco <> ID_NUEVA + 100 y foco <> ID_MINI_ANT y foco <> ID_MINI_SIG) entonces
+                si vista >= V_PRÓXIMOS o vista = V_DÍA entonces foco := ID_REJ sino foco := ID_VISTA fin
+                seguir
+            fin
+            si no asegurar_foco() entonces romper fin
+            vueltas := vueltas + 1
+        fin
+        volcar()
+    fin
+
+    ; =========================================================================
+    ;  La ficha: abrirla y guardarla
+    ; =========================================================================
+    función abre_ficha(c: puntero a Cita, clase: nat32, día: nat32)
+        variable x: arreglo [2] de nat32
+        variable i: nat32
+        variable d, m, a: nat32
+        modo := M_FICHA
+        e_cita := c
+        e_vez := día
+        haz_texto_cats()
+        si c = nulo entonces
+            e_clase := clase
+            e_título[0] := 0
+            e_lugar[0] := 0
+            e_notas[0] := 0
+            e_nac[0] := 0
+            texto_fecha(día, e_fecha)
+            si clase = CLASE_CUMPLE entonces e_fecha[5] := 0 fin
+            copiar(e_hora, "10:00")
+            e_todo := clase <> CLASE_CITA
+            e_hecha := falso
+            e_dura := 3
+            e_aviso := 0
+            si clase = CLASE_CITA entonces e_aviso := 4 fin
+            si clase = CLASE_CUMPLE entonces e_aviso := 8 fin
+            e_cat := 0
+            si clase = CLASE_CUMPLE entonces e_cat := 6 fin
+            e_rep := 0
+            copiar(e_cada, "1")
+            e_fin := 0
+            e_fin_dato[0] := 0
+            e_días := 1 << dsem_de(día)
+            llenar(puntero(dirección(e_regla)), tamaño(Regla), 0)
+        sino
+            e_clase := c.clase
+            copiar(e_título, c.título)
+            copiar(e_lugar, c.lugar)
+            copiar_hasta(e_notas, c.notas, 200)
+            para i desde 1 hasta longitud(e_notas) hacer
+                si e_notas[i - 1] = 10 entonces e_notas[i - 1] := ' ' fin
+            fin
+            si c.clase = CLASE_TAREA y no c.con_fecha entonces e_fecha[0] := 0 sino texto_fecha(c.día, e_fecha) fin
+            texto_hora(c.minuto, e_hora)
+            si c.clase = CLASE_TAREA y c.minuto = 0 entonces copiar(e_hora, "09:00") fin
+            e_todo := c.todo_día
+            e_hecha := c.hecha
+            e_dura := 9
+            para i desde 0 hasta 8 hacer
+                si min_dura[i] = c.dura entonces e_dura := i fin
+            fin
+            si c.dura > 0 y e_dura = 9 entonces e_dura := 3 fin
+            e_aviso := opción_de_aviso(c.aviso)
+            e_cat := c.categoría
+            copiar_memoria(puntero(dirección(e_regla)), puntero(dirección(c.regla)), tamaño(Regla))
+            e_rep := rep_de_regla(c.regla, c.día)
+            natural_a_texto(c.regla.cada, e_cada)
+            e_días := 0
+            para i desde 1 hasta c.regla.n_dsem hacer e_días := e_días ob (1 << nat32(c.regla.dsem[i - 1])) fin
+            si e_días = 0 entonces e_días := 1 << dsem_de(c.día) fin
+            e_fin := 0
+            e_fin_dato[0] := 0
+            si c.regla.veces > 0 entonces
+                e_fin := 2
+                natural_a_texto(c.regla.veces, e_fin_dato)
+            sino si c.regla.hasta_día <> SIN_FIN entonces
+                e_fin := 1
+                texto_fecha(c.regla.hasta_día, e_fin_dato)
+            fin
+            si c.clase = CLASE_CUMPLE entonces
+                e_fecha[5] := 0
+                si c.año_nac > 0 entonces natural_a_texto(c.año_nac, e_nac) sino e_nac[0] := 0 fin
+            fin
+        fin
+        foco := ID_E_TÍTULO
+        cursor := longitud(e_título)
+        x[0] := 0
+        d := 0
+        m := 0
+        a := 0
+    fin
+
+    ; qué opción de «Se repite» es esa regla
+    función rep_de_regla(ref r: Regla, día: nat32): nat32
+        si r.frec = F_NO entonces devolver 0 fin
+        si r.rara o r.meses <> 0 o r.n_pos > 0 o r.n_adía > 0 o r.n_mdía > 0 entonces devolver 6 fin
+        si r.frec = F_DIARIA y r.n_dsem = 0 entonces devolver 1 fin
+        si r.frec = F_SEMANAL entonces
+            si tiene_ordinal(r) entonces devolver 6 fin
+            devolver 2
+        fin
+        si r.frec = F_MENSUAL y r.n_dsem = 0 entonces devolver 3 fin
+        si r.frec = F_MENSUAL y r.n_dsem = 1 y r.dord[0] <> 0 entonces devolver 4 fin
+        si r.frec = F_ANUAL y r.n_dsem = 0 entonces devolver 5 fin
+        devolver 6
+    fin
+
+    función tiene_ordinal(ref r: Regla): bool
+        variable i: nat32
+        para i desde 1 hasta r.n_dsem hacer
+            si r.dord[i - 1] <> 0 entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    función guarda_ficha()
+        variable c: puntero a Cita
+        variable día, mi, n, i, a: nat32
+        variable ord: ent32
+        variable t: arreglo [16] de byte
+        variable nueva_: bool
+        si e_título[0] = 0 entonces
+            si e_clase = CLASE_CUMPLE entonces copiar(aviso, "Falta el nombre") sino copiar(aviso, "Falta el t\xA1tulo") fin
+            foco := ID_E_TÍTULO
+            devolver
+        fin
+        día := 0
+        si e_clase = CLASE_CUMPLE entonces
+            a := 0
+            si e_nac[0] <> 0 entonces texto_a_natural(e_nac, a) fin
+            copiar(t, e_fecha)
+            t[5] := 0
+            si a >= 1970 entonces
+                concatenar(t, "/")
+                natural_a_texto(a, dirección(t[6]))
+            sino si t[0] = '2' y t[1] = '9' y t[3] = '0' y t[4] = '2' entonces
+                concatenar(t, "/1972")
+            sino
+                concatenar(t, "/1970")
+            fin
+            si no lee_fecha(t, día) entonces
+                copiar(aviso, "El d\xA1a no vale (dd/mm)")
+                foco := ID_E_FECHA
+                devolver
+            fin
+        sino si e_fecha[0] <> 0 o e_clase = CLASE_CITA entonces
+            si no lee_fecha(e_fecha, día) entonces
+                copiar(aviso, "El d\xA1a no vale (dd/mm/aaaa)")
+                foco := ID_E_FECHA
+                devolver
+            fin
+        fin
+        mi := 0
+        si (e_clase = CLASE_CITA y no e_todo) o e_clase = CLASE_TAREA entonces
+            si no lee_hora(e_hora, mi) entonces
+                copiar(aviso, "La hora no vale (hh:mm)")
+                foco := ID_E_HORA
+                devolver
+            fin
+        fin
+        nueva_ := e_cita = nulo
+        si nueva_ entonces c := nueva(e_clase) sino c := e_cita fin
+        si c = nulo entonces
+            copiar(aviso, "No caben m\xA0s citas")
+            devolver
+        fin
+        copiar(c.título, e_título)
+        si e_clase = CLASE_CUMPLE y no empieza_por(c.título, "Cumplea") entonces
+            copiar(c.título, "Cumplea\xA4os de ")
+            copiar_hasta(dirección(c.título[15]), e_título, 85)
+        fin
+        copiar(c.lugar, e_lugar)
+        si no iguales_corto(c.notas, e_notas) entonces copiar(c.notas, e_notas) fin
+        c.clase := byte(e_clase)
+        c.categoría := byte(e_cat)
+        c.aviso := aviso_de_opción(e_aviso)
+        c.día := día
+        c.minuto := mi
+        si e_clase = CLASE_CITA entonces
+            c.todo_día := e_todo
+            si e_todo entonces
+                si c.dura < 1440 entonces c.dura := 1440 fin
+            sino
+                c.dura := min_dura[e_dura]
+            fin
+            ; la repetición
+            si e_rep = 6 entonces
+                copiar_memoria(puntero(dirección(c.regla)), puntero(dirección(e_regla)), tamaño(Regla))
+            sino
+                llenar(puntero(dirección(c.regla)), tamaño(Regla), 0)
+                c.regla.hasta_día := SIN_FIN
+                n := 1
+                texto_a_natural(e_cada, n)
+                si n < 1 entonces n := 1 fin
+                c.regla.cada := n
+                según nat32(e_rep)
+                    caso 1: c.regla.frec := F_DIARIA
+                    caso 2:
+                        c.regla.frec := F_SEMANAL
+                        si e_días = 0 entonces e_días := 1 << dsem_de(día) fin
+                        para i desde 0 hasta 6 hacer
+                            si (e_días >> i) yb 1 <> 0 entonces
+                                c.regla.dsem[c.regla.n_dsem] := byte(i)
+                                c.regla.dord[c.regla.n_dsem] := 0
+                                c.regla.n_dsem := c.regla.n_dsem + 1
+                            fin
+                        fin
+                    caso 3: c.regla.frec := F_MENSUAL
+                    caso 4:
+                        c.regla.frec := F_MENSUAL
+                        ordinal_del_día(día, ord)
+                        c.regla.n_dsem := 1
+                        c.regla.dsem[0] := byte(dsem_de(día))
+                        c.regla.dord[0] := ent16(ord)
+                    caso 5: c.regla.frec := F_ANUAL
+                fin
+                si e_rep > 0 entonces
+                    si e_fin = 1 y lee_fecha(e_fin_dato, n) entonces
+                        c.regla.hasta_día := n
+                        c.regla.hasta_min := 1439
+                    sino si e_fin = 2 entonces
+                        n := 0
+                        texto_a_natural(e_fin_dato, n)
+                        c.regla.veces := n
+                    fin
+                fin
+            fin
+            si c.regla.frec = F_NO entonces c.n_excep := 0 fin
+        sino si e_clase = CLASE_TAREA entonces
+            c.con_fecha := e_fecha[0] <> 0
+            c.hecha := e_hecha
+            c.todo_día := cierto
+            c.dura := 0
+        sino
+            c.todo_día := cierto
+            c.dura := 1440
+            c.año_nac := a
+            c.regla.frec := F_ANUAL
+            c.regla.cada := 1
+            c.regla.hasta_día := SIN_FIN
+        fin
+        modo := M_NADA
+        sucio := cierto
+        si e_clase <> CLASE_TAREA o c.con_fecha entonces
+            sel := día
+            mini_de_sel()
+        fin
+        si guarda_agenda() entonces
+            si nueva_ entonces copiar(aviso, "Apuntada") sino copiar(aviso, "Guardada") fin
+            imprimir2("agenda: guardada %s (%u)\n", nat32(dirección(c.título[0])), día)
+        sino
+            copiar(aviso, error_guardar)
+        fin
+        foco := ID_VISTA
+        si vista >= V_PRÓXIMOS o vista = V_DÍA entonces foco := ID_REJ fin
+    fin
+
+    función iguales_corto(a: puntero a byte, b: puntero a byte): bool
+        ; (las notas de más de 200 letras se quedan como estaban si no se cambian)
+        devolver longitud(a) > 199 y comparar_memoria(a, b, 199) = 0
+    fin
+
+    ; =========================================================================
+    ;  Lo que se hace
+    ; =========================================================================
+    función mini_de_sel()
+        variable d: nat32
+        de_número(sel, d, mini_mes, mini_año)
+    fin
+
+    función mueve(n: ent32)
+        si n < 0 y ent32(sel) + n < 3653 entonces devolver fin
+        sel := nat32(ent32(sel) + n)
+        si sel > 84000 entonces sel := 84000 fin
+        mini_de_sel()
+    fin
+
+    función mes_más(k: ent32)
+        variable d, m, a: nat32
+        variable mm: ent32
+        de_número(sel, d, m, a)
+        mm := ent32(a) * 12 + ent32(m) - 1 + k
+        si mm < 1970 * 12 entonces mm := 1970 * 12 fin
+        a := nat32(mm div 12)
+        m := nat32(mm mod 12) + 1
+        si d > días_del_mes(m, a) entonces d := días_del_mes(m, a) fin
+        sel := número_de_día(d, m, a)
+        mini_de_sel()
+    fin
+
+    función período_más(k: ent32)
+        según nat32(vista)
+            caso V_DÍA: mueve(k)
+            caso V_SEMANA: mueve(7 * k)
+            caso V_MES: mes_más(k)
+        fin
+    fin
+
+    función a_hoy()
+        variable mi: nat32
+        ahora(hoy_, mi)
+        sel := hoy_
+        mini_de_sel()
+    fin
+
+    ; la cita de la rejilla elegida (o nulo) y su vez
+    función elegida(ref vz: nat32): puntero a Cita
+        variable k: ent32
+        variable id: nat32
+        k := rejilla_elegido(g)
+        si k < 0 entonces devolver nulo fin
+        id := g.r[k].id
+        si id = 0 o id > n_citas entonces devolver nulo fin
+        vz := g.r[k].id2
+        devolver dirección(citas[id - 1])
+    fin
+
+    función pide_borrar(c: puntero a Cita, vz: nat32)
+        b_k := (nat32(c) - nat32(citas)) div tamaño(Cita)
+        b_vez := vz
+        modo := M_BORRAR
+        foco := ID_C_NO
+    fin
+
+    función borra(solo_ese: bool)
+        variable c: puntero a Cita
+        c := dirección(citas[b_k])
+        si solo_ese entonces
+            si c.n_excep < MAX_EXCEP entonces
+                c.excep[c.n_excep] := b_vez
+                c.n_excep := c.n_excep + 1
+            fin
+            copiar(aviso, "Quitado ese d\xA1a")
+        sino
+            quita(c)
+            copiar(aviso, "Borrada")
+        fin
+        modo := M_NADA
+        sucio := cierto
+        si no guarda_agenda() entonces copiar(aviso, error_guardar) fin
+        imprimir1("agenda: borrada (solo ese d\xA1a: %u)\n", nat32(solo_ese))
+    fin
+
+    función cambia_hecha()
+        variable c: puntero a Cita
+        variable vz: nat32
+        c := elegida(vz)
+        si c = nulo o c.clase <> CLASE_TAREA entonces devolver fin
+        c.hecha := no c.hecha
+        sucio := cierto
+        si no guarda_agenda() entonces copiar(aviso, error_guardar) fin
+        si c.hecha entonces copiar(aviso, "Tarea hecha") sino copiar(aviso, "Tarea por hacer") fin
+    fin
+
+    función importa(ruta: puntero a byte)
+        variable x: arreglo [4] de nat32
+        si no lee_ics(ruta) entonces
+            copiar(aviso, "No se puede abrir el archivo")
+            devolver
+        fin
+        sucio := cierto
+        x[0] := leídas
+        x[1] := cambiadas
+        x[2] := saltadas
+        formatear(aviso, 160, "Importadas %u (y %u cambiadas; %u sin poderse leer)", x)
+        imprimir("agenda: importadas %u, cambiadas %u, saltadas %u\n", x)
+        si raras > 0 entonces concatenar(aviso, "; algunas repeticiones no se entienden del todo") fin
+        si no guarda_agenda() entonces copiar(aviso, error_guardar) fin
+        modo := M_NADA
+    fin
+
+    función nueva_según_vista()
+        si vista = V_TAREAS entonces abre_ficha(nulo, CLASE_TAREA, hoy_) sino abre_ficha(nulo, CLASE_CITA, sel) fin
+    fin
+
+    función abre_elegida()
+        variable c: puntero a Cita
+        variable vz: nat32
+        c := elegida(vz)
+        si c <> nulo entonces abre_ficha(c, c.clase, vz) fin
+    fin
+
+    función hace(id: nat32)
+        variable c: puntero a Cita
+        variable vz, n, i: nat32
+        según nat32(id)
+            caso ID_ANT: período_más(-1)
+            caso ID_SIG: período_más(1)
+            caso ID_HOY: a_hoy()
+            caso ID_IR:
+                modo := M_IR
+                texto_fecha(sel, c_campo)
+                foco := ID_C_CAMPO
+                cursor := longitud(c_campo)
+            caso ID_NUEVA, ID_NUEVA + 100: nueva_según_vista()
+            caso ID_MINI_ANT:
+                si mini_mes = 1 entonces
+                    mini_mes := 12
+                    mini_año := mini_año - 1
+                sino mini_mes := mini_mes - 1 fin
+            caso ID_MINI_SIG:
+                si mini_mes = 12 entonces
+                    mini_mes := 1
+                    mini_año := mini_año + 1
+                sino mini_mes := mini_mes + 1 fin
+            caso ID_CAMBIAR: abre_elegida()
+            caso ID_BORRAR:
+                c := elegida(vz)
+                si c <> nulo entonces pide_borrar(c, vz) fin
+            caso ID_HECHA: cambia_hecha()
+            caso ID_VER_HECHAS:
+                ver_hechas := no ver_hechas
+                sucio := cierto
+            caso ID_E_TODO: e_todo := no e_todo
+            caso ID_E_HECHA: e_hecha := no e_hecha
+            caso ID_E_GUARDAR: guarda_ficha()
+            caso ID_E_CANCELAR: modo := M_NADA
+            caso ID_E_BORRAR:
+                si e_cita <> nulo entonces pide_borrar(e_cita, e_vez) fin
+            caso ID_E_SOLO_HOY:
+                si e_cita <> nulo entonces
+                    pide_borrar(e_cita, e_vez)
+                    borra(cierto)
+                fin
+            caso ID_E_DURA: abrir_desplegable(id, DURAS)
+            caso ID_E_AVISO: abrir_desplegable(id, AVISOS)
+            caso ID_E_CAT: abrir_desplegable(id, texto_cats)
+            caso ID_E_REP: abrir_desplegable(id, REPS)
+            caso ID_E_FIN: abrir_desplegable(id, FINES)
+            caso ID_C_COM: abrir_desplegable(id, COMUNIDADES)
+            caso ID_C_MUNI: abrir_desplegable(id, MUNICIPIOS)
+            caso ID_C_CAT: abrir_desplegable(id, texto_cats_todas)
+            caso ID_E_DÍA0..ID_E_DÍA0 + 6: e_días := e_días xob (1 << (id - ID_E_DÍA0))
+            caso ID_C_NO: modo := M_NADA
+            caso ID_C_OTRO: borra(cierto)
+            caso ID_C_SÍ:
+                según nat32(modo)
+                    caso M_IR:
+                        si lee_fecha(c_campo, n) entonces
+                            sel := n
+                            mini_de_sel()
+                            modo := M_NADA
+                        sino
+                            copiar(aviso, "Ese d\xA1a no vale (dd/mm/aaaa)")
+                        fin
+                    caso M_IMPORTA: importa(c_campo)
+                    caso M_EXPORTA:
+                        si escribe_ics(c_campo, c_cat) entonces
+                            copiar(aviso, "Exportado a ")
+                            concatenar(aviso, c_campo)
+                            imprimir1("agenda: exportado a %s\n", nat32(dirección(c_campo[0])))
+                            modo := M_NADA
+                        sino
+                            copiar(aviso, "No se puede escribir ese archivo")
+                        fin
+                    caso M_FESTIVOS:
+                        Festivos.elige(c_com, c_muni)
+                        si guarda_ajustes_agenda() entonces copiar(aviso, "Festivos guardados") sino copiar(aviso, "No se pueden guardar los ajustes") fin
+                        modo := M_NADA
+                    caso M_CATEGORÍAS:
+                        para i desde 1 hasta N_CATEGORÍAS hacer
+                            si c_nombres[i][0] <> 0 entonces copiar(nombres_cat[i], c_nombres[i]) fin
+                        fin
+                        guarda_ajustes_agenda()
+                        guarda_agenda()
+                        haz_texto_cats()
+                        modo := M_NADA
+                    caso M_BORRAR: borra(falso)
+                fin
+        fin
+    fin
+
+    ; lo elegido en un menú (de la barra: 0 a 3; de una desplegable: su id)
+    función menú_elegido(et: nat32, k: nat32)
+        variable i: nat32
+        si k = SIN_ELEGIR entonces devolver fin
+        según nat32(et)
+            caso 0:
+                según nat32(k)
+                    caso 0: abre_ficha(nulo, CLASE_CITA, sel)
+                    caso 1: abre_ficha(nulo, CLASE_TAREA, hoy_)
+                    caso 2: abre_ficha(nulo, CLASE_CUMPLE, sel)
+                    caso 4:
+                        modo := M_IMPORTA
+                        copiar(c_campo, "C:\\DOCUMENT\\CITAS.ICS")
+                        foco := ID_C_CAMPO
+                        cursor := longitud(c_campo)
+                    caso 5:
+                        modo := M_EXPORTA
+                        copiar(c_campo, "C:\\DOCUMENT\\AGENDA.ICS")
+                        c_cat := 0
+                        haz_texto_cats()
+                        foco := ID_C_CAMPO
+                        cursor := longitud(c_campo)
+                    caso 7: salir(0)
+                fin
+            caso 1:
+                si k <= 4 entonces vista := k fin
+                si k = 6 entonces a_hoy() fin
+                si k = 7 entonces hace(ID_IR) fin
+                si k >= 9 y k <= 11 entonces
+                    tamaño_ := k - 8
+                    nuevo_tamaño(ancho, alto, tamaño_)
+                fin
+                sucio := cierto
+            caso 2:
+                si k = 0 entonces
+                    modo := M_FESTIVOS
+                    c_com := Festivos.comunidad
+                    c_muni := Festivos.municipio
+                    foco := ID_C_COM
+                sino
+                    modo := M_CATEGORÍAS
+                    para i desde 1 hasta N_CATEGORÍAS hacer copiar(c_nombres[i], nombres_cat[i]) fin
+                    foco := ID_C_N0 + 1
+                fin
+            caso 3:
+                si k = 0 entonces
+                    modo := M_AYUDA
+                    foco := ID_C_NO
+                sino
+                    copiar(aviso, "Agenda 1.0 de Hispa-Pentium: citas, tareas, cumplea\xA4os, festivos y avisos; .ICS")
+                fin
+            caso ID_E_DURA: e_dura := k
+            caso ID_E_AVISO: e_aviso := k
+            caso ID_E_CAT: e_cat := k
+            caso ID_E_REP:
+                e_rep := k
+                si e_rep = 6 y e_regla.frec = F_NO entonces e_rep := 0 fin
+            caso ID_E_FIN: e_fin := k
+            caso ID_C_COM: c_com := k
+            caso ID_C_MUNI: c_muni := k
+            caso ID_C_CAT: c_cat := k
+        fin
+    fin
+
+    función abre(k: nat32)
+        abierto := ent32(k)
+        según nat32(k)
+            caso 0: abrir_menú_barra(0, "Nueva cita (Ctrl+N)|Nueva tarea|Nuevo cumplea\xA4os|-|Importar .ICS o .VCF...|Exportar a .ICS...|-|Salir", 0)
+            caso 1: abrir_menú_barra(1, "D\xA1a (1)|Semana (2)|Mes (3)|Pr\xA2ximos (4)|Tareas (5)|-|Hoy (Inicio)|Ir a un d\xA1a... (Ctrl+G)|-|Letra normal|Letra grande|Letra muy grande", 0)
+            caso 2: abrir_menú_barra(2, "Festivos (comunidad y municipio)...|Nombres de las categor\xA1as...", 0)
+            si no: abrir_menú_barra(3, "Las teclas (F1)|Acerca de la Agenda", 0)
+        fin
+    fin
+
+    ; la vez que hay en un punto de la vista (el mes, la semana): falso si ninguna
+    función vez_en(x: ent32, yy: ent32, ref k: nat32, ref vz: nat32): bool
+        variable i: nat32
+        para i desde 1 hasta n_st hacer
+            si x >= st_x[i - 1] y x < st_x[i - 1] + st_an[i - 1] y yy >= st_y[i - 1] y yy < st_y[i - 1] + st_al[i - 1] entonces
+                k := st_k[i - 1]
+                vz := st_vez[i - 1]
+                devolver cierto
+            fin
+        fin
+        devolver falso
+    fin
+
+    función clic(x: ent32, yy: ent32, n_veces_: nat32)
+        variable id, k, vz: nat32
+        variable m, p, col, fila, d: ent32
+        si modo = M_NADA entonces
+            m := menú_en_barra(x, yy)
+            si m >= 0 entonces
+                abre(nat32(m))
+                devolver
+            fin
+        fin
+        id := control_en(x, yy)
+        si id = 0 entonces devolver fin
+        según nat16(clase_de(id))
+            caso K_PESTAÑAS:
+                p := pestaña_en(x, yy)
+                si p >= 0 entonces
+                    vista := nat32(p)
+                    sucio := cierto
+                fin
+                foco := id
+            caso K_LISTA:
+                foco := id
+                si id = ID_MINI entonces
+                    col := (x - mc_x) div mc_cw
+                    fila := (yy - mc_y) div mc_ch
+                    d := fila * 7 + col - ent32(mc_hueco) + 1
+                    si col >= 0 y col < 7 y d >= 1 y d <= ent32(días_del_mes(mini_mes, mini_año)) entonces
+                        sel := número_de_día(nat32(d), mini_mes, mini_año)
+                        si n_veces_ >= 2 entonces vista := V_DÍA fin
+                    fin
+                sino si id = ID_VISTA entonces
+                    col := (x - vc_x) div vc_cw
+                    si col < 0 entonces col := 0 fin
+                    si col > 6 entonces col := 6 fin
+                    fila := 0
+                    si vista = V_MES entonces fila := (yy - vc_y) div vc_ch fin
+                    sel := vc_ini + nat32(fila * 7 + col)
+                    mini_de_sel()
+                    si n_veces_ >= 2 entonces
+                        si vez_en(x, yy, k, vz) entonces abre_ficha(dirección(citas[k]), citas[k].clase, vz) sino abre_ficha(nulo, CLASE_CITA, sel) fin
+                    fin
+                sino si id = ID_REJ entonces
+                    si rejilla_clic_veces(g, x, yy, n_veces_) >= 0 y n_veces_ >= 2 entonces abre_elegida() fin
+                fin
+            caso K_CAMPO:
+                foco := id
+                cursor := 0xFFFF
+            caso K_DESPLEGABLE:
+                foco := id
+                pinta()
+                hace(id)
+            si no:
+                foco := id
+                hace(id)
+        fin
+    fin
+
+    función tecla_campo(c: nat32): bool
+        según nat32(foco)
+            caso ID_E_TÍTULO: devolver campo_tecla(e_título, 100, c)
+            caso ID_E_LUGAR: devolver campo_tecla(e_lugar, 80, c)
+            caso ID_E_FECHA:
+                si e_clase = CLASE_CUMPLE entonces devolver campo_tecla(e_fecha, 6, c) fin
+                devolver fecha_tecla(e_fecha, c)
+            caso ID_E_HORA: devolver campo_tecla(e_hora, 6, c)
+            caso ID_E_CADA: devolver número_tecla(e_cada, 5, c, falso)
+            caso ID_E_FIN_DATO:
+                si e_fin = 1 entonces devolver fecha_tecla(e_fin_dato, c) fin
+                devolver número_tecla(e_fin_dato, 6, c, falso)
+            caso ID_E_NOTAS: devolver campo_tecla(e_notas, 200, c)
+            caso ID_E_NAC: devolver número_tecla(e_nac, 5, c, falso)
+            caso ID_C_CAMPO:
+                si modo = M_IR entonces devolver fecha_tecla(c_campo, c) fin
+                devolver campo_tecla(c_campo, 100, c)
+        fin
+        si foco > ID_C_N0 y foco <= ID_C_N0 + N_CATEGORÍAS entonces devolver campo_tecla(c_nombres[foco - ID_C_N0], 24, c) fin
+        devolver falso
+    fin
+
+    función tecla_pulsada(c: nat32, b: nat32)
+        variable k: nat32
+        variable m: ent32
+        variable cc: puntero a Cita
+        variable vz: nat32
+        aviso[0] := 0
+        si c = '\t' o c = TECLA_MAYÚS_TAB entonces
+            pasar_foco(c = '\t')
+            devolver
+        fin
+        m := menú_de_alt(MENÚS, c)
+        si m >= 0 y modo = M_NADA entonces
+            abre(nat32(m))
+            devolver
+        fin
+        k := clase_de(foco)
+        si modo <> M_NADA entonces
+            si c = 27 entonces
+                modo := M_NADA
+                devolver
+            fin
+            si k = K_CAMPO entonces
+                si c = '\n' entonces
+                    si modo = M_FICHA entonces guarda_ficha() sino hace(ID_C_SÍ) fin
+                    devolver
+                fin
+                tecla_campo(c)
+                devolver
+            fin
+            si k = K_DESPLEGABLE entonces
+                si c = '\n' o c = ' ' entonces
+                    hace(foco)
+                    devolver
+                fin
+                según nat32(foco)
+                    caso ID_E_DURA: desplegable_tecla(DURAS, e_dura, c)
+                    caso ID_E_AVISO: desplegable_tecla(AVISOS, e_aviso, c)
+                    caso ID_E_CAT: desplegable_tecla(texto_cats, e_cat, c)
+                    caso ID_E_REP:
+                        desplegable_tecla(REPS, e_rep, c)
+                        si e_rep = 6 y e_regla.frec = F_NO entonces e_rep := 5 fin
+                    caso ID_E_FIN: desplegable_tecla(FINES, e_fin, c)
+                    caso ID_C_COM: desplegable_tecla(COMUNIDADES, c_com, c)
+                    caso ID_C_MUNI: desplegable_tecla(MUNICIPIOS, c_muni, c)
+                    caso ID_C_CAT: desplegable_tecla(texto_cats_todas, c_cat, c)
+                fin
+                devolver
+            fin
+            si c = '\n' o c = ' ' entonces hace(foco) fin
+            devolver
+        fin
+        ; sin cuadros
+        si c = TECLA_CTRL_TAB o c = TECLA_CTRL_MAYÚS_TAB entonces
+            vista := otra_pestaña(vista, 5, 0, c = TECLA_CTRL_TAB)
+            sucio := cierto
+            devolver
+        fin
+        si c = 14 entonces
+            nueva_según_vista()
+            devolver
+        fin
+        si c = 7 entonces
+            hace(ID_IR)
+            devolver
+        fin
+        si c = TECLA_F1 entonces
+            modo := M_AYUDA
+            foco := ID_C_NO
+            devolver
+        fin
+        si c >= '1' y c <= '5' y k <> K_CAMPO entonces
+            vista := c - '1'
+            sucio := cierto
+            devolver
+        fin
+        si c = TECLA_INICIO y foco <> ID_REJ entonces
+            a_hoy()
+            devolver
+        fin
+        si foco = ID_REJ entonces
+            si c = '\n' entonces
+                abre_elegida()
+                devolver
+            fin
+            si c = TECLA_SUPR entonces
+                cc := elegida(vz)
+                si cc <> nulo entonces pide_borrar(cc, vz) fin
+                devolver
+            fin
+            si c = ' ' y vista = V_TAREAS entonces
+                cambia_hecha()
+                devolver
+            fin
+            si rejilla_tecla(g, c) entonces devolver fin
+        fin
+        si foco = ID_VISTA o foco = ID_MINI o foco = ID_VISTAS o vista <= V_MES entonces
+            según nat32(c)
+                caso TECLA_IZQUIERDA:
+                    si foco = ID_VISTAS entonces vista := otra_pestaña(vista, 5, 0, falso) sino mueve(-1) fin
+                    devolver
+                caso TECLA_DERECHA:
+                    si foco = ID_VISTAS entonces vista := otra_pestaña(vista, 5, 0, cierto) sino mueve(1) fin
+                    devolver
+                caso TECLA_ARRIBA: si vista = V_DÍA entonces mueve(-1) sino mueve(-7) fin
+                caso TECLA_ABAJO: si vista = V_DÍA entonces mueve(1) sino mueve(7) fin
+                caso TECLA_RE_PÁG: período_más(-1)
+                caso TECLA_AV_PÁG: período_más(1)
+                caso '\n':
+                    si foco = ID_VISTA o foco = ID_MINI entonces
+                        vista := V_DÍA
+                        foco := ID_REJ
+                        devolver
+                    fin
+                    hace(foco)
+                caso ' ': hace(foco)
+            fin
+            devolver
+        fin
+        si c = '\n' o c = ' ' entonces hace(foco) fin
+        b := 0
+    fin
+
+    ; =========================================================================
+    ;  La ventana
+    ; =========================================================================
+    público función ventana_agenda(args: puntero a byte): byte
+        variable s: Suceso
+        variable p: arreglo [100] de byte
+        variable ext: arreglo [8] de byte
+        variable n, k: nat32
+        palabra(args, 0, p, 100)
+        si iguales_sin_caja(p, "/NORMAL") entonces tamaño_ := T_NORMAL fin
+        si iguales_sin_caja(p, "/DOBLE") entonces tamaño_ := T_MUY_GRANDE fin
+        carga_agenda()
+        haz_texto_cats()
+        a_hoy()
+        si iguales_sin_caja(p, "/DIA") y palabra(args, 1, p, 100) y lee_fecha(p, n) entonces
+            sel := n
+            vista := V_DÍA
+            mini_de_sel()
+        sino si p[0] <> 0 y p[0] <> '/' entonces
+            ; un archivo (dos clics en Mi equipo): ¿importarlo?
+            copiar_hasta(c_campo, saltar_espacios(args), 100)
+            k := longitud(c_campo)
+            mientras k > 0 y es_espacio(c_campo[k - 1]) hacer
+                k := k - 1
+                c_campo[k] := 0
+            fin
+            si c_campo[0] = '"' entonces
+                copiar(c_campo, dirección(c_campo[1]))
+                k := longitud(c_campo)
+                si k > 0 y c_campo[k - 1] = '"' entonces c_campo[k - 1] := 0 fin
+            fin
+            modo := M_IMPORTA
+            foco := ID_C_SÍ
+        fin
+        si no preparar("Agenda", tamaño_, falso) entonces
+            escribir("agenda: hace falta el escritorio (sin \x82l: AGENDA /LISTA, AGENDA /PROXIMOS...)\n")
+            devolver 1
+        fin
+        rejilla_nueva(g, 600)
+        escribir("agenda: Agenda 1.0\n")
+        si modo = M_NADA entonces foco := ID_VISTA fin
+        pinta()
+        mientras cierto hacer
+            si suceso(v, s, cierto) entonces
+                si s.clase = EV_TECLA entonces
+                    tecla_pulsada(s.a, s.b)
+                    pinta()
+                sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                    aviso[0] := 0
+                    clic(ent32(s.a), ent32(s.b), Llamadas.veces(s.c))
+                    pinta()
+                sino si s.clase = EV_RUEDA entonces
+                    si rueda(s) entonces pinta() sino
+                        si pasos_rueda(s.c) > 0 entonces período_más(-1) sino período_más(1) fin
+                        pinta()
+                    fin
+                sino si s.clase = EV_MENÚ entonces
+                    abierto := -1
+                    menú_elegido(s.b, s.a)
+                    pinta()
+                sino si s.clase = EV_TAMAÑO entonces
+                    nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
+                    pinta()
+                sino si s.clase = EV_FOCO y s.a = 1 entonces
+                    ; (al volver: puede haber cambiado el día)
+                    a_hoy_si_cambia()
+                    pinta()
+                sino si s.clase = EV_CERRAR entonces
+                    devolver 0
+                fin
+            fin
+        fin
+        devolver 0
+    fin
+
+    función a_hoy_si_cambia()
+        variable h, mi: nat32
+        ahora(h, mi)
+        si h <> hoy_ entonces
+            hoy_ := h
+            sucio := cierto
+        fin
+    fin
+
+fin AgVenta.

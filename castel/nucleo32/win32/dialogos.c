@@ -619,7 +619,7 @@ typedef struct { Wnd *w; i32 res; } CajaMsg;
 static LRESULT WINAPI proc_msg(HWND h, u32 m, WPARAM wp, LPARAM lp)
 {
 	Wnd *w = wnd(h);
-	if (m == WM_COMMAND && w && LOWORD(wp) >= 1 && LOWORD(wp) <= 7) {
+	if (m == WM_COMMAND && w && LOWORD(wp) >= 1 && LOWORD(wp) <= 8) {
 		w->dlg_res = LOWORD(wp);
 		w->dlg_fin = 1;
 		return 0;
@@ -639,6 +639,9 @@ static LRESULT WINAPI proc_msg(HWND h, u32 m, WPARAM wp, LPARAM lp)
 	return DefWindowProcA(h, m, wp, lp);
 }
 BOOL WINAPI MessageBeep(u32 t);           /* (SONIDO) user32.c */
+/* (HL) un botón más (el 8) en el siguiente MessageBox de WIN32.BIN: el de
+ * «Comprobar compatibilidad» de los avisos de lo que falta (principal.c) */
+const char *msg_boton_extra;
 API(i32) MessageBoxA(HWND padre, const char *texto, const char *titulo, u32 tipo)
 {
 	static const char *nombres[8] = { "", "Aceptar", "Cancelar", "Anular", "Reintentar", "Omitir", "Sí", "No" };
@@ -649,6 +652,9 @@ API(i32) MessageBoxA(HWND padre, const char *texto, const char *titulo, u32 tipo
 	HWND h, hs;
 	Wnd *w, *dueno = padre ? raiz_de(wnd(padre)) : activa;
 	HDC d;
+	const char *extra = msg_boton_extra;       /* (HL) */
+	i32 anx = extra ? 220 : 0;
+	msg_boton_extra = 0;
 	prepara_user();
 	traza("MessageBoxA(%s, %s)", titulo ? titulo : "", texto ? texto : "");
 	if (hay_icono)
@@ -668,6 +674,7 @@ API(i32) MessageBoxA(HWND padre, const char *texto, const char *titulo, u32 tipo
 		cual = 0;
 	for (nb = 0; nb < 3 && botones[cual][nb]; nb++)
 		;
+
 	/* lo que mide el texto */
 	d = GetDC(0);
 	r.left = r.top = 0;
@@ -676,7 +683,7 @@ API(i32) MessageBoxA(HWND padre, const char *texto, const char *titulo, u32 tipo
 	DrawTextA(d, texto ? texto : "", -1, &r, 0x400 | 0x10 | 0x800);     /* DT_CALCRECT | WORDBREAK | NOPREFIX */
 	ReleaseDC(0, d);
 	tx = hay_icono ? 64 : 20;
-	an = MAX(tx + r.right + 24, (i32)nb * (anb + 10) + 30);
+	an = MAX(tx + r.right + 24, (i32)nb * (anb + 10) + 30 + (anx ? anx + 10 : 0));
 	if (an < 240)
 		an = 240;
 	al = MAX(r.bottom, hay_icono ? 36 : 0) + 24 + 52;
@@ -698,10 +705,17 @@ API(i32) MessageBoxA(HWND padre, const char *texto, const char *titulo, u32 tipo
 	}
 	hs = CreateWindowExA(0, "STATIC", texto ? texto : "", WS_CHILD | WS_VISIBLE | 0x80, tx, 20, r.right + 4, MAX(r.bottom, 16), h, (HMENU)0xFFFF, 0, 0);
 	(void)hs;
-	for (k = 0; k < nb; k++) {
-		u32 id = botones[cual][k];
-		i32 x = (an - (i32)nb * (anb + 10) + 10) / 2 + k * (anb + 10);
-		CreateWindowExA(0, "BUTTON", nombres[id], WS_CHILD | WS_VISIBLE | WS_TABSTOP | (k == defecto ? 1 : 0), x, al - 40, anb, 28, h, (HMENU)id, 0, 0);
+	{
+		i32 x0 = (an - (i32)nb * (anb + 10) + 10 - (anx ? anx + 10 : 0)) / 2;
+		if (extra) {                /* (HL) el botón de más, el primero */
+			CreateWindowExA(0, "BUTTON", extra, WS_CHILD | WS_VISIBLE | WS_TABSTOP, x0, al - 40, anx, 28, h, (HMENU)8, 0, 0);
+			x0 += anx + 10;
+		}
+		for (k = 0; k < nb; k++) {
+			u32 id = botones[cual][k];
+			i32 x = x0 + k * (anb + 10);
+			CreateWindowExA(0, "BUTTON", nombres[id], WS_CHILD | WS_VISIBLE | WS_TABSTOP | (k == defecto ? 1 : 0), x, al - 40, anb, 28, h, (HMENU)id, 0, 0);
+		}
 	}
 	{
 		HWND b = GetDlgItem(h, botones[cual][defecto < nb ? defecto : 0]);

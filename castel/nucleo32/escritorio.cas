@@ -47,7 +47,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro, Inicio, Sonido, Cuentas, Entrada, Preferencias, Iconpanel
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro, Inicio, Sonido, Cuentas, Entrada, Preferencias, Iconpanel, Organiza
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -142,19 +142,16 @@ módulo Escritorio
     constante MAX_BOTONES = 12
 
     ; ---- los iconos del tapiz ----
-    constante MAX_ICONOS = 4 + MAX_ACCESOS + MAX_ATAJOS   ; (dock) con los accesos soltados en el tapiz
-    constante CELDA_AN = 112                    ; lo que ocupa uno, con su rótulo
-    constante CELDA_AL = 62
-    tipo Icono = estructura
-        x, ye: ent32
-        acción: nat32
-        dato: nat32                             ; (de un acceso: cuál)
-        nombre: puntero a byte
-        debajo: puntero a nat32                 ; lo que tapa del tapiz (para quitarlo de ahí)
-    fin
-    variable iconos: arreglo [MAX_ICONOS] de Icono
-    variable n_iconos: nat32
+    ; (ICONOS) el arreglo, la zona de trabajo, la rejilla y cómo se organizan, en organiza.cas
+    constante AM_ARCHIVO = 140                  ; (ICONOS) un archivo del escritorio (ESCRITOR; dato: cuál)
+    constante ME_ORGANIZAR = 49                 ; (ICONOS) el submenú «Organizar iconos»
     variable icono_elegido: ent32 = -1
+    variable debajo_más: puntero a nat32        ; (ICONOS) lo que tapa el botón «Más iconos»
+    variable más_puesto: bool
+    variable rótulo_corto: arreglo [48] de byte
+    variable menú_x, menú_y: ent32              ; (ICONOS) dónde se abrió el menú del tapiz
+    variable dock_visto: ent32 = -1             ; (ICONOS) el alto del dock con el que se colocaron
+    variable mirado_escritor: nat32             ; (ICONOS) el tic en que se miró ESCRITOR
     variable icono_cogido: ent32 = -1           ; el que se está arrastrando
     variable cog_dx, cog_dy, cog_x, cog_y: ent32
     variable cog_movido: bool
@@ -199,6 +196,8 @@ módulo Escritorio
     constante ICONO_RED = 24                    ; lo que se ensancha la bandeja con el icono de la red
     constante ICONO_ESCUDO = 22                 ; (ESCUDO) y con el del antivirus, si está ESCUDO.BIN
     variable hay_escudo: bool                   ; (ESCUDO)
+    variable hay_agenda: bool                   ; (AGENDA) está AGENDA.BIN: el reloj de la bandeja la abre y dice la próxima cita
+    variable ayuda_reloj: bool                  ; (AGENDA) el recuadro de ayuda es el del reloj (no el de la pila)
     variable ruta_escudo: arreglo [24] de byte  ; (ESCUDO) \HISPA\ESCUDO.BIN o \ESCUDO.BIN
     variable minuto_visto: nat32 = 0xFFFFFFFF
     variable segundo_visto: nat32
@@ -232,6 +231,7 @@ módulo Escritorio
     variable ayuda_tapada: bool                 ; se ha pulsado un botón: no vuelve hasta salir y entrar
     variable ayuda_vista, energía_vista: nat32  ; (cambios_energía de lo que se ve)
     variable apagar_otra_vez: bool              ; la última vez no se cerró un programa: ahora se le cierra
+    variable v_forzar: nat32                    ; (CORTES) «Estos programas no se han cerrado»
 
     ; -------------------------------------------------------------------------
     ;  El tapiz
@@ -489,63 +489,184 @@ módulo Escritorio
     ;  Los iconos del tapiz. Se pintan en el propio tapiz: de cada uno se
     ;  guarda lo que tapa, para quitarlo de ahí al moverlo o al elegirlo.
     ; -------------------------------------------------------------------------
+    constante TECLA_RE_PÁG_I = 0x149            ; (ICONOS) (las de consola.cas)
+    constante TECLA_AV_PÁG_I = 0x151
+    variable texto_más: arreglo [32] de byte
+    variable texto_organizar: arreglo [400] de byte
+
+    función uno_si(b: bool): nat32
+        si b entonces devolver 1 fin
+        devolver 0
+    fin
+
+    ; (ICONOS) el rótulo que cabe en su celda (con «..» si no cabe entero)
+    función rótulo_de(t: puntero a byte): puntero a byte
+        variable cabe, n, i: nat32
+        variable lim: ent32
+        lim := paso_an
+        si lim > CELDA_AN entonces lim := CELDA_AN fin
+        cabe := nat32(lim - 6) div 8
+        n := longitud(t)
+        si n <= cabe o cabe < 3 o cabe >= 46 entonces devolver t fin
+        i := 0
+        mientras i < cabe - 2 hacer
+            rótulo_corto[i] := t[i]
+            i := i + 1
+        fin
+        rótulo_corto[i] := '.'
+        rótulo_corto[i + 1] := '.'
+        rótulo_corto[i + 2] := 0
+        devolver dirección(rótulo_corto[0])
+    fin
+
     ; quita todos del tapiz (del último al primero: pueden estar unos sobre otros)
     función quita_iconos()
         variable i: ent32
         variable l: Lienzo
+        ; (ICONOS) el botón «Más iconos», que va encima
+        si más_puesto y debajo_más <> nulo entonces
+            pon_lienzo(l, debajo_más, CELDA_AN, CELDA_AN, CELDA_AL)
+            copiar_lienzo(tapiz, más_x, más_y, l, 0, 0, CELDA_AN, CELDA_AL)
+            repintar_trozo(más_x, más_y, CELDA_AN, CELDA_AL)
+        fin
+        más_puesto := falso
         i := ent32(n_iconos) - 1
         mientras i >= 0 hacer
-            pon_lienzo(l, iconos[i].debajo, CELDA_AN, CELDA_AN, CELDA_AL)
-            copiar_lienzo(tapiz, iconos[i].x, iconos[i].ye, l, 0, 0, CELDA_AN, CELDA_AL)
-            repintar_trozo(iconos[i].x, iconos[i].ye, CELDA_AN, CELDA_AL)
+            si en_página(nat32(i)) entonces
+                pon_lienzo(l, iconos[i].debajo, CELDA_AN, CELDA_AN, CELDA_AL)
+                copiar_lienzo(tapiz, iconos[i].x, iconos[i].ye, l, 0, 0, CELDA_AN, CELDA_AL)
+                repintar_trozo(iconos[i].x, iconos[i].ye, CELDA_AN, CELDA_AL)
+            fin
             i := i - 1
         fin
+    fin
+
+    ; el rótulo de un icono: blanco con su sombra; el del elegido, sobre azul con
+    ; su borde blanco (y un recuadro alrededor del dibujo: no solo el color)
+    función pinta_rótulo(x: ent32, yy: ent32, nombre: puntero a byte, elegido: bool)
+        variable tx, n, bx, bn: ent32
+        variable r: puntero a byte
+        r := rótulo_de(nombre)
+        n := ancho_texto(r)
+        tx := x + (CELDA_AN - n) div 2
+        si elegido entonces
+            marco(tapiz, x + CELDA_AN div 2 - 23, yy, 46, 39, BLANCO)
+            marco(tapiz, x + CELDA_AN div 2 - 22, yy + 1, 44, 37, 0x0B2A52)
+            ; (el recuadro del rótulo, sin salirse de la celda: lo de fuera no se quitaría)
+            bx := tx - 5
+            si bx < x entonces bx := x fin
+            bn := n + 10
+            si bx + bn > x + CELDA_AN entonces bn := x + CELDA_AN - bx fin
+            redondeado(tapiz, bx, yy + 39, bn, ALTO_LETRA + 6, 4, BLANCO, BLANCO, TODAS)
+            redondeado(tapiz, bx + 1, yy + 40, bn - 2, ALTO_LETRA + 4, 4, 0x3F86E0, AZUL_ELEGIDO, TODAS)
+        sino
+            texto(tapiz, tx + 1, yy + 43, r, 0x0B2A52)
+        fin
+        texto(tapiz, tx, yy + 42, r, BLANCO)
     fin
 
     ; y los pinta todos, cada uno donde está, guardando antes lo que tapa
     función pon_iconos()
         variable i: nat32
-        variable x, yy, tx, n: ent32
+        variable x, yy: ent32
         variable l: Lienzo
+        variable d: arreglo [2] de nat32
         i := 0
         mientras i < n_iconos hacer
-            x := iconos[i].x
-            yy := iconos[i].ye
-            pon_lienzo(l, iconos[i].debajo, CELDA_AN, CELDA_AN, CELDA_AL)
-            copiar_lienzo(l, 0, 0, tapiz, x, yy, CELDA_AN, CELDA_AL)
-            según iconos[i].acción
-                caso AM_EQUIPO: icono_equipo(tapiz, x + (CELDA_AN - 32) div 2, yy + 3)
-                caso AM_BLOC: icono_hoja_grande(tapiz, x + (CELDA_AN - 26) div 2, yy + 3)
-                caso AM_ACCESO: icono_acceso(tapiz, x + (CELDA_AN - LADO_ICONO) div 2, yy + 3, iconos[i].dato, 1)
-                caso AM_ATAJO:
-                    ; (dock) el icono de su clase, con la flechita de los accesos
-                    icono(tapiz, x + (CELDA_AN - 32) div 2, yy + 3, 32, atajos[iconos[i].dato].clase, 0, 0)
-                    marca_acceso(tapiz, x + (CELDA_AN - 32) div 2, yy + 3, 32)
-                si no: icono_consola_grande(tapiz, x + (CELDA_AN - 32) div 2, yy + 5)
+            si en_página(i) entonces
+                x := iconos[i].x
+                yy := iconos[i].ye
+                pon_lienzo(l, iconos[i].debajo, CELDA_AN, CELDA_AN, CELDA_AL)
+                copiar_lienzo(l, 0, 0, tapiz, x, yy, CELDA_AN, CELDA_AL)
+                según iconos[i].acción
+                    caso AM_EQUIPO: icono_equipo(tapiz, x + (CELDA_AN - 32) div 2, yy + 3)
+                    caso AM_BLOC: icono_hoja_grande(tapiz, x + (CELDA_AN - 26) div 2, yy + 3)
+                    caso AM_ACCESO: icono_acceso(tapiz, x + (CELDA_AN - LADO_ICONO) div 2, yy + 3, iconos[i].dato, 1)
+                    caso AM_ATAJO:
+                        ; (dock) el icono de su clase, con la flechita de los accesos
+                        icono(tapiz, x + (CELDA_AN - 32) div 2, yy + 3, 32, atajos[iconos[i].dato].clase, 0, 0)
+                        marca_acceso(tapiz, x + (CELDA_AN - 32) div 2, yy + 3, 32)
+                    caso AM_ARCHIVO: icono(tapiz, x + (CELDA_AN - 32) div 2, yy + 3, 32, clase_de_archivo(iconos[i].dato), 0, 0)    ; (ICONOS)
+                    si no: icono_consola_grande(tapiz, x + (CELDA_AN - 32) div 2, yy + 5)
+                fin
+                pinta_rótulo(x, yy, iconos[i].nombre, ent32(i) = icono_elegido)
+                repintar_trozo(x, yy, CELDA_AN, CELDA_AL)
             fin
-            ; el rótulo, con letra normal: blanco con su sombra; el del elegido, sobre azul
-            n := ancho_texto(iconos[i].nombre)
-            tx := x + (CELDA_AN - n) div 2
-            si ent32(i) = icono_elegido entonces
-                redondeado(tapiz, tx - 4, yy + 40, n + 8, ALTO_LETRA + 4, 4, 0x3F86E0, AZUL_ELEGIDO, TODAS)
-            sino
-                texto(tapiz, tx + 1, yy + 43, iconos[i].nombre, 0x0B2A52)
-            fin
-            texto(tapiz, tx, yy + 42, iconos[i].nombre, BLANCO)
-            repintar_trozo(x, yy, CELDA_AN, CELDA_AL)
             i := i + 1
+        fin
+        ; (ICONOS) con más de una página: «Más iconos» en la última celda
+        si páginas > 1 entonces
+            si debajo_más = nulo entonces debajo_más := puntero(reservar(CELDA_AN * CELDA_AL * 4)) fin
+            si debajo_más <> nulo entonces
+                pon_lienzo(l, debajo_más, CELDA_AN, CELDA_AN, CELDA_AL)
+                copiar_lienzo(l, 0, 0, tapiz, más_x, más_y, CELDA_AN, CELDA_AL)
+                icono(tapiz, más_x + (CELDA_AN - 32) div 2, más_y + 3, 32, IC_CARPETA, 0, 0)
+                ; la flecha («»»: a la página siguiente; la forma, no solo el color)
+                texto_negrita(tapiz, más_x + CELDA_AN div 2 - 4, más_y + 14, "\xAF", BLANCO)
+                d[0] := página + 1
+                d[1] := páginas
+                formatear(texto_más, 32, "M\xA0s (%u/%u)", d)
+                pinta_rótulo(más_x, más_y, texto_más, falso)
+                repintar_trozo(más_x, más_y, CELDA_AN, CELDA_AL)
+                más_puesto := cierto
+            fin
         fin
     fin
 
-    ; cada uno a su sitio de siempre: en columna, arriba a la izquierda
-    función organiza_iconos()
+    ; (ICONOS) dónde está cada uno, por el puerto serie (para comprobarlo)
+    función apunta_iconos(motivo: puntero a byte)
         variable i: nat32
+        variable d: arreglo [10] de nat32
+        tomar_consola()
+        d[0] := nat32(motivo)
+        d[1] := n_iconos
+        d[2] := nat32(zona_x0)
+        d[3] := nat32(zona_y0)
+        d[4] := nat32(zona_x1)
+        d[5] := nat32(zona_y1)
+        d[6] := nat32(paso_an)
+        d[7] := nat32(paso_al)
+        d[8] := nat32(columnas)
+        d[9] := nat32(filas)
+        imprimir("escritorio: iconos (%s): %u en la zona %d,%d-%d,%d, celdas de %d x %d, %d x %d", d)
+        d[0] := páginas
+        d[1] := orden_iconos
+        imprimir(", %u página(s), orden %u:", d)
         i := 0
         mientras i < n_iconos hacer
-            iconos[i].x := 8
-            iconos[i].ye := 12 + ent32(i) * 76
+            d[0] := nat32(iconos[i].nombre)
+            d[1] := nat32(iconos[i].x)
+            d[2] := nat32(iconos[i].ye)
+            d[3] := iconos[i].página + 1
+            imprimir(" %s@%d,%d/%u;", d)
             i := i + 1
         fin
+        escribir("\n")
+        soltar_consola()
+    fin
+
+    ; (ICONOS) la zona de ahora (la pantalla, menos la barra y el dock)
+    función pon_zona_de_ahora()
+        pon_zona(tapiz.ancho, tapiz.alto, ALTO_BARRA + alto_dock)
+        dock_visto := alto_dock
+    fin
+
+    ; (ICONOS) cada uno donde estaba (o donde se dejó), dentro de la zona y sin
+    ; taparse; con la organización automática, en orden
+    función coloca_iconos(motivo: puntero a byte)
+        pon_zona_de_ahora()
+        encaja()
+        si icono_elegido >= 0 y no en_página(nat32(icono_elegido)) entonces icono_elegido := -1 fin
+        apunta_iconos(motivo)
+    fin
+
+    ; (ICONOS) «Organizar iconos»: todos en orden (el elegido), y se guarda
+    función organiza_iconos()
+        pon_zona_de_ahora()
+        organiza()
+        si icono_elegido >= 0 y no en_página(nat32(icono_elegido)) entonces icono_elegido := -1 fin
+        apunta_iconos("organizados")
+        guarda_iconos()
     fin
 
     función nuevo_icono(nombre: puntero a byte, acción: nat32)
@@ -554,25 +675,126 @@ módulo Escritorio
 
     función nuevo_icono_de(nombre: puntero a byte, acción: nat32, dato: nat32)
         variable m: puntero a byte
+        variable k, tam, fecha: nat32
         si n_iconos >= MAX_ICONOS entonces devolver fin
         m := reservar(CELDA_AN * CELDA_AL * 4)
         si m = nulo entonces devolver fin
-        iconos[n_iconos].debajo := puntero(m)
-        iconos[n_iconos].nombre := nombre
-        iconos[n_iconos].acción := acción
-        iconos[n_iconos].dato := dato
+        k := n_iconos
+        iconos[k].debajo := puntero(m)
+        iconos[k].nombre := nombre
+        iconos[k].acción := acción
+        iconos[k].dato := dato
+        ; (ICONOS) lo que hace falta para ordenarlos: la familia, la extensión, lo que mide y su fecha
+        iconos[k].familia := F_PROGRAMA
+        iconos[k].ext[0] := 0
+        iconos[k].fijo := acción = AM_EQUIPO
+        iconos[k].clave := 's'
+        iconos[k].página := 0
+        tam := 0
+        fecha := 0
+        según acción
+            caso AM_BLOC: datos_de_ruta("\\BLOC.BIN", tam, fecha)
+            caso AM_CONSOLA: datos_de_ruta("\\CONSOLA.BIN", tam, fecha)
+            caso AM_ACCESO:
+                iconos[k].clave := 'p'
+                datos_de_ruta(programa_de(dato), tam, fecha)
+            caso AM_ATAJO:
+                iconos[k].clave := 'a'
+                iconos[k].familia := F_ACCESO
+                pon_extensión(dirección(atajos[dato].ruta[0]), dirección(iconos[k].ext[0]))
+                datos_de_ruta(dirección(atajos[dato].ruta[0]), tam, fecha)
+            caso AM_ARCHIVO:
+                iconos[k].clave := 'f'
+                si archivos[dato].carpeta entonces iconos[k].familia := F_CARPETA sino iconos[k].familia := F_DOCUMENTO fin
+                pon_extensión(dirección(archivos[dato].nombre[0]), dirección(iconos[k].ext[0]))
+                tam := archivos[dato].tamaño
+                fecha := archivos[dato].fecha
+        fin
+        iconos[k].tamaño := tam
+        iconos[k].fecha := fecha
         n_iconos := n_iconos + 1
+        sitio_de_antes(k)                       ; (ICONOS) donde se dejó (o SIN_SITIO)
+    fin
+
+    ; (ICONOS) los quita todos (sin apuntar dónde estaban)
+    función olvida_iconos()
+        variable i: nat32
+        quita_iconos()
+        i := 0
+        mientras i < n_iconos hacer
+            liberar(puntero(iconos[i].debajo))
+            i := i + 1
+        fin
+        n_iconos := 0
+        icono_elegido := -1
+    fin
+
+    ; (ICONOS) los rehace todos: los de siempre, los de los paquetes, los
+    ; accesos soltados y los archivos del escritorio; cada uno, donde estaba
+    función rehace_iconos(motivo: puntero a byte)
+        variable i: nat32
+        quita_iconos()
+        apunta_sitios()
+        i := 0
+        mientras i < n_iconos hacer
+            liberar(puntero(iconos[i].debajo))
+            i := i + 1
+        fin
+        n_iconos := 0
+        icono_elegido := -1
+        icono_cogido := -1
+        nuevo_icono("Mi equipo", AM_EQUIPO)
+        nuevo_icono("Bloc de notas", AM_BLOC)
+        nuevo_icono("Consola", AM_CONSOLA)
+        i := 0
+        mientras i < n_accesos hacer
+            si en_escritorio(i) entonces nuevo_icono_de(nombre_de(i), AM_ACCESO, i) fin
+            i := i + 1
+        fin
+        i := 0
+        mientras i < n_atajos hacer
+            nuevo_icono_de(dirección(atajos[i].nombre[0]), AM_ATAJO, i)
+            ; (dock) donde se soltó, si no se sabe otro sitio
+            si n_iconos > 0 y iconos[n_iconos - 1].acción = AM_ATAJO y iconos[n_iconos - 1].x = SIN_SITIO y atajos[i].x >= 0 y atajos[i].ye >= 0 entonces
+                iconos[n_iconos - 1].x := atajos[i].x
+                iconos[n_iconos - 1].ye := atajos[i].ye
+            fin
+            i := i + 1
+        fin
+        i := 0
+        mientras i < n_archivos hacer
+            nuevo_icono_de(dirección(archivos[i].nombre[0]), AM_ARCHIVO, i)
+            i := i + 1
+        fin
+        coloca_iconos(motivo)
+        pon_iconos()
     fin
 
     ; el icono que está en ese punto de la pantalla (el de más arriba); -1 si no hay
     función icono_en(x: ent32, yy: ent32): ent32
-        variable i: ent32
+        variable i, m: ent32
+        m := (CELDA_AN - paso_an) div 2 + 8     ; (ICONOS) con las celdas estrechas, solo lo suyo
         i := ent32(n_iconos) - 1
         mientras i >= 0 hacer
-            si x >= iconos[i].x + 8 y x < iconos[i].x + CELDA_AN - 8 y yy >= iconos[i].ye y yy < iconos[i].ye + CELDA_AL entonces devolver i fin
+            si en_página(nat32(i)) y x >= iconos[i].x + m y x < iconos[i].x + CELDA_AN - m y yy >= iconos[i].ye y yy < iconos[i].ye + CELDA_AL entonces devolver i fin
             i := i - 1
         fin
         devolver -1
+    fin
+
+    ; (ICONOS) ¿cae en el botón «Más iconos»?
+    función en_más(x: ent32, yy: ent32): bool
+        devolver páginas > 1 y x >= más_x + 8 y x < más_x + CELDA_AN - 8 y yy >= más_y y yy < más_y + CELDA_AL
+    fin
+
+    ; (ICONOS) a otra página (con más de una)
+    función pasa_página(adelante: bool)
+        si páginas < 2 entonces devolver fin
+        quita_iconos()
+        si adelante entonces página := (página + 1) mod páginas sino página := (página + páginas - 1) mod páginas fin
+        icono_elegido := -1
+        pon_iconos()
+        imprimir2("escritorio: iconos, la página %u de %u\n", página + 1, páginas)
     fin
 
     función elige_icono(k: ent32)
@@ -582,17 +804,197 @@ módulo Escritorio
         pon_iconos()
     fin
 
-    ; lleva un icono a otro sitio (sin salirse de la pantalla ni meterse bajo la barra)
+    ; lleva un icono a otro sitio mientras se arrastra (ICONOS: sin salirse de
+    ; la zona: ni bajo la barra, ni bajo el dock)
     función mueve_icono(k: ent32, x: ent32, yy: ent32)
-        si x > tapiz.ancho - CELDA_AN entonces x := tapiz.ancho - CELDA_AN fin
-        si yy > tapiz.alto - ALTO_BARRA - CELDA_AL entonces yy := tapiz.alto - ALTO_BARRA - CELDA_AL fin
-        si x < 0 entonces x := 0 fin
-        si yy < 0 entonces yy := 0 fin
+        a_la_zona(x, yy)
         si x = iconos[k].x y yy = iconos[k].ye entonces devolver fin
         quita_iconos()
         iconos[k].x := x
         iconos[k].ye := yy
         pon_iconos()
+    fin
+
+    ; (ICONOS) se ha soltado el que se arrastraba: a su celda (o a la libre más
+    ; cercana), y se guarda dónde
+    función suelta_icono(k: ent32, x: ent32, yy: ent32)
+        quita_iconos()
+        suelta(nat32(k), x, yy)
+        pon_iconos()
+        si iconos[k].acción = AM_ATAJO entonces mueve_atajo(iconos[k].dato, iconos[k].x, iconos[k].ye) fin
+        apunta_iconos("soltado")
+        guarda_iconos()
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  (ICONOS) Los iconos con el teclado: las flechas, Intro, Av Pág, Re Pág,
+    ;  Esc y la letra (el siguiente que empieza por ella)
+    ; -------------------------------------------------------------------------
+    función clave_de_sitio(i: nat32): ent32
+        devolver iconos[i].x * 4096 + iconos[i].ye
+    fin
+
+    ; el primero (arriba a la izquierda) de la página
+    función primer_icono(): ent32
+        variable i: nat32
+        variable k: ent32
+        k := -1
+        i := 0
+        mientras i < n_iconos hacer
+            si en_página(i) entonces
+                si k < 0 entonces k := ent32(i) sino si clave_de_sitio(i) < clave_de_sitio(nat32(k)) entonces k := ent32(i) fin
+            fin
+            i := i + 1
+        fin
+        devolver k
+    fin
+
+    ; el más cercano hacia ese lado (dx, dy: -1, 0 o 1)
+    función vecino(origen: nat32, dx: ent32, dy: ent32): ent32
+        variable i: nat32
+        variable k, a, b, p, mejor: ent32
+        k := -1
+        mejor := 0
+        i := 0
+        mientras i < n_iconos hacer
+            si i <> origen y en_página(i) entonces
+                a := iconos[i].x - iconos[origen].x
+                b := iconos[i].ye - iconos[origen].ye
+                si dx <> 0 entonces
+                    a := a * dx
+                    si b < 0 entonces b := -b fin
+                sino
+                    p := b * dy
+                    b := a
+                    si b < 0 entonces b := -b fin
+                    a := p
+                fin
+                ; «a»: lo que avanza hacia ese lado; «b»: lo que se aparta
+                si a > 0 entonces
+                    si k < 0 o a + b * 4 < mejor entonces
+                        k := ent32(i)
+                        mejor := a + b * 4
+                    fin
+                fin
+            fin
+            i := i + 1
+        fin
+        devolver k
+    fin
+
+    ; el siguiente (en el orden de la pantalla) que empieza por esa letra
+    función por_letra_icono(c: nat32): ent32
+        variable i: nat32
+        variable k, primero, ahora: ent32
+        k := -1
+        primero := -1
+        ahora := -1
+        si icono_elegido >= 0 entonces ahora := clave_de_sitio(nat32(icono_elegido)) fin
+        i := 0
+        mientras i < n_iconos hacer
+            si en_página(i) y letra_de_orden(iconos[i].nombre[0]) = letra_de_orden(byte(c)) entonces
+                si primero < 0 entonces primero := ent32(i) sino si clave_de_sitio(i) < clave_de_sitio(nat32(primero)) entonces primero := ent32(i) fin
+                si clave_de_sitio(i) > ahora entonces
+                    si k < 0 entonces k := ent32(i) sino si clave_de_sitio(i) < clave_de_sitio(nat32(k)) entonces k := ent32(i) fin
+                fin
+            fin
+            i := i + 1
+        fin
+        si k < 0 entonces k := primero fin
+        devolver k
+    fin
+
+    función icono_tecla(k: nat32)
+        variable n: ent32
+        n := -2
+        si k = TECLA_RE_PÁG_I entonces
+            pasa_página(falso)
+        sino si k = TECLA_AV_PÁG_I entonces
+            pasa_página(cierto)
+        sino si k = 27 entonces
+            n := -1
+        sino si k = '\n' entonces
+            si icono_elegido >= 0 entonces
+                si en_página(nat32(icono_elegido)) entonces haz(iconos[icono_elegido].acción, iconos[icono_elegido].dato) fin
+            fin
+        sino si k = TECLA_DERECHA o k = TECLA_IZQUIERDA o k = TECLA_ARRIBA o k = TECLA_ABAJO entonces
+            si icono_elegido < 0 entonces
+                n := primer_icono()
+            sino si no en_página(nat32(icono_elegido)) entonces
+                n := primer_icono()
+            sino
+                según k
+                    caso TECLA_DERECHA: n := vecino(nat32(icono_elegido), 1, 0)
+                    caso TECLA_IZQUIERDA: n := vecino(nat32(icono_elegido), -1, 0)
+                    caso TECLA_ARRIBA: n := vecino(nat32(icono_elegido), 0, -1)
+                    caso TECLA_ABAJO: n := vecino(nat32(icono_elegido), 0, 1)
+                fin
+                si n < 0 entonces n := icono_elegido fin
+            fin
+        sino si k > ' ' y k < 0x100 entonces
+            n := por_letra_icono(k)
+            si n < 0 entonces n := icono_elegido fin
+        fin
+        si n >= -1 entonces
+            elige_icono(n)
+            si n >= 0 entonces imprimir1("escritorio: icono elegido con el teclado: %s\n", nat32(iconos[n].nombre)) fin
+        fin
+    fin
+
+    ; (ICONOS) el submenú «Organizar iconos», en (x, y): lo elegido, con «»»
+    ; y las casillas con [x] (no solo el color)
+    función abre_organizar(x: ent32, yy: ent32)
+        variable mk: arreglo [5] de puntero a byte
+        variable i: nat32
+        para i desde 0 hasta 4 hacer mk[i] := "   " fin
+        según orden_iconos
+            caso O_NOMBRE: mk[0] := "\xAF  "
+            caso O_TIPO: mk[1] := "\xAF  "
+            caso O_TAMAÑO: mk[2] := "\xAF  "
+            caso O_FECHA: mk[3] := "\xAF  "
+            si no: mk[4] := "\xAF  "
+        fin
+        copiar(texto_organizar, mk[0])
+        concatenar(texto_organizar, "Por nombre|")
+        concatenar(texto_organizar, mk[1])
+        concatenar(texto_organizar, "Por tipo|")
+        concatenar(texto_organizar, mk[2])
+        concatenar(texto_organizar, "Por tamaño|")
+        concatenar(texto_organizar, mk[3])
+        concatenar(texto_organizar, "Por fecha de modificación|")
+        concatenar(texto_organizar, mk[4])
+        concatenar(texto_organizar, "Como al principio|-|")
+        si automática entonces concatenar(texto_organizar, "[x] ") sino concatenar(texto_organizar, "[ ] ") fin
+        concatenar(texto_organizar, "Organización automática|")
+        si cuadrícula entonces concatenar(texto_organizar, "[x] ") sino concatenar(texto_organizar, "[ ] ") fin
+        concatenar(texto_organizar, "Alinear a la cuadrícula|")
+        si primero_equipo entonces concatenar(texto_organizar, "[x] ") sino concatenar(texto_organizar, "[ ] ") fin
+        concatenar(texto_organizar, "Mi equipo, siempre el primero")
+        abrir_emergente(x, yy, texto_organizar, 0, 0, ME_ORGANIZAR)
+    fin
+
+    ; (ICONOS) lo elegido en «Organizar iconos»
+    función elegido_organizar(opción: nat32)
+        si opción > 9 entonces devolver fin
+        quita_iconos()
+        según opción
+            caso 0: orden_iconos := O_NOMBRE
+            caso 1: orden_iconos := O_TIPO
+            caso 2: orden_iconos := O_TAMAÑO
+            caso 3: orden_iconos := O_FECHA
+            caso 4: orden_iconos := O_COMO_SALEN
+            caso 6: automática := no automática
+            caso 7: cuadrícula := no cuadrícula
+            caso 8: primero_equipo := no primero_equipo
+        fin
+        si opción <= 4 o (opción = 6 y automática) o opción = 8 entonces
+            organiza_iconos()
+        sino
+            coloca_iconos("ajustes")
+            guarda_iconos()
+        fin
+        pon_iconos()
+        imprimir4("escritorio: organizar iconos: orden %u, automática %u, cuadrícula %u, primero %u\n", orden_iconos, uno_si(automática), uno_si(cuadrícula), uno_si(primero_equipo))
     fin
 
     ; -------------------------------------------------------------------------
@@ -1011,6 +1413,7 @@ módulo Escritorio
     función pon_accesos()
         variable i, k: nat32
         variable firma: arreglo [600] de byte
+        si v_fondo <> 0 entonces apunta_sitios() fin      ; (ICONOS) antes de leer: los nombres de ahora son los de los iconos
         lee_accesos()
         firma[0] := 0
         i := 0
@@ -1023,33 +1426,9 @@ módulo Escritorio
         si iguales(firma, firma_accesos) entonces devolver fin
         copiar(firma_accesos, firma)
         si v_fondo = 0 entonces devolver fin
-        ; los iconos del tapiz: los de siempre y los de los accesos que lo piden
-        quita_iconos()
-        k := 0
-        i := 0
-        mientras i < n_iconos hacer
-            si iconos[i].acción <> AM_ACCESO entonces
-                iconos[k].x := iconos[i].x
-                iconos[k].ye := iconos[i].ye
-                iconos[k].acción := iconos[i].acción
-                iconos[k].dato := iconos[i].dato
-                iconos[k].nombre := iconos[i].nombre
-                iconos[k].debajo := iconos[i].debajo
-                k := k + 1
-            sino
-                liberar(puntero(iconos[i].debajo))
-            fin
-            i := i + 1
-        fin
-        n_iconos := k
-        i := 0
-        mientras i < n_accesos hacer
-            si en_escritorio(i) entonces nuevo_icono_de(nombre_de(i), AM_ACCESO, i) fin
-            i := i + 1
-        fin
-        icono_elegido := -1
-        organiza_iconos()
-        pon_iconos()
+        ; (ICONOS) los iconos del tapiz, otra vez: los que ya estaban, donde
+        ; estaban; los nuevos, en la primera celda libre (o todos en orden)
+        rehace_iconos("paquetes")
     fin
 
     ; (MENÚ) el menú Inicio es de inicio.cas
@@ -1845,13 +2224,12 @@ módulo Escritorio
         si no cambia_pantalla(ent32(an), ent32(al)) entonces devolver falso fin
         recolocar_ventana(v_barra, 0, ent32(al) - ALTO_BARRA, ent32(an), ALTO_BARRA)
         recoloca_dock()                         ; (dock)
-        ; los iconos, dentro (sin quitarlos del tapiz: es nuevo)
-        para i desde 0 hasta MAX_ICONOS - 1 hacer
-            si i < n_iconos entonces
-                si iconos[i].x > ent32(an) - CELDA_AN entonces iconos[i].x := ent32(an) - CELDA_AN fin
-                si iconos[i].ye > ent32(al) - ALTO_BARRA - CELDA_AL entonces iconos[i].ye := ent32(al) - ALTO_BARRA - CELDA_AL fin
-            fin
-        fin
+        ; (ICONOS) los iconos, dentro de la zona nueva (sin quitarlos del tapiz:
+        ; es nuevo): los que caben, donde estaban (en la medida de antes); los
+        ; demás, a la celda libre más cercana
+        más_puesto := falso
+        página := 0
+        coloca_iconos("pantalla")
         pinta_tapiz()
         si v_config <> 0 entonces centrar_ventana(v_config) fin
         si v_aviso <> 0 entonces centrar_ventana(v_aviso) fin
@@ -2170,25 +2548,143 @@ módulo Escritorio
     fin
 
     ; avisa a los programas (a sus ventanas: «cerrar») y espera, como mucho
-    ; dos segundos, a que se cierren, sin dejar de mover el escritorio (por
-    ; si alguno dice algo). Falso si alguno no se ha cerrado (el Bloc de
-    ; notas con cambios sin guardar avisa y se queda): entonces no se apaga,
-    ; y si se vuelve a pedir, se le cierra (como el Bloc al cerrar otra vez).
+    ; tres segundos, a que se cierren, sin dejar de mover el escritorio (por
+    ; si alguno dice algo). (CORTES) Si alguno no se cierra (el Bloc de notas
+    ; con cambios sin guardar pregunta; uno colgado ni lo lee), el cuadro
+    ; «Estos programas no se han cerrado», como el de Windows: «Forzar el
+    ; cierre» (se acaban y se sigue) o «Cancelar» (no se apaga). Si no se
+    ; elige nada, a los 15 s se fuerza (a los 60, si alguno está preguntando
+    ; algo). Falso si se cancela: entonces no se apaga
     función cierra_programas(): bool
         variable i, k: nat32
         para i desde 0 hasta MAX_VENTANAS - 1 hacer
             si ventanas[i].usada y ventanas[i].dueño <> 0 entonces pedir_cierre(ventanas[i].id) fin
         fin
         k := 0
-        mientras k < 200 y programas_con_ventana() hacer
+        mientras k < 300 y programas_con_ventana() hacer
             pulso()
             dormir(1)
             k := k + 1
         fin
-        si programas_con_ventana() y no apagar_otra_vez entonces
-            apagar_otra_vez := cierto
-            aviso("Hay un programa sin cerrar: ¿algo sin guardar?")
+        si programas_con_ventana() entonces devolver forzar_cierre() fin
+        devolver cierto
+    fin
+
+    ; (CORTES) ¿lee lo que le llega? (si tiene en su cola, sin leer, lo que se
+    ; le ha mandado, como el «cerrar», no responde)
+    función no_responde(i: nat32): bool
+        devolver ventanas[i].ent <> ventanas[i].sal
+    fin
+
+    constante AC_FORZAR = 240                   ; (CORTES) «Forzar el cierre» (lejos de los demás AC_: se miran aquí, no en haz)
+    constante AC_NO_FORZAR = 241                ; (CORTES) «Cancelar»
+    constante FORZAR_AN = 500
+    constante FORZAR_AL = 236
+
+    ; (CORTES) el cuadro de los programas que no se cierran, con lo que queda
+    ; para forzarlos («s»: segundos)
+    función pinta_forzar(s: nat32)
+        variable l: puntero a Lienzo
+        variable i, n, yy: nat32
+        variable d: arreglo [2] de nat32
+        l := lienzo_de(v_forzar)
+        si l = nulo entonces devolver fin
+        quita_pulsadores(v_forzar)
+        rectángulo(valor(l), 0, 0, FORZAR_AN, FORZAR_AL, 0xF4F8FE)
+        círculo(valor(l), 34, 34, 16, NARANJA)
+        rectángulo(valor(l), 32, 24, 4, 13, BLANCO)
+        rectángulo(valor(l), 32, 40, 4, 4, BLANCO)
+        texto_negrita(valor(l), 64, 16, "Estos programas no se han cerrado:", TINTA)
+        n := 0
+        yy := 40
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].dueño <> 0 y n < 4 entonces
+                copiar_hasta(renglón, dirección(ventanas[i].título[0]), 60)
+                si no_responde(i) entonces concatenar(renglón, " (no responde)") sino concatenar(renglón, " (espera una respuesta)") fin
+                texto(valor(l), 76, ent32(yy), renglón, TINTA)
+                yy := yy + 20
+                n := n + 1
+            fin
+        fin
+        texto(valor(l), 64, 128, "Si tienen algo sin guardar y se fuerza el cierre, se pierde.", TINTA_SUAVE)
+        d[0] := s
+        formatear(renglón, 96, "Si no se elige nada, se forzará dentro de %u s.", d)
+        texto(valor(l), 64, 148, renglón, TINTA_SUAVE)
+        pulsador(v_forzar, 64, 180, 190, 36, "Forzar el cierre", 0xFF9A5A, 0xD9601E, AC_FORZAR)
+        pulsador(v_forzar, 280, 180, 130, 36, "Cancelar", 0x5AA6F4, 0x2468C8, AC_NO_FORZAR)
+        repintada(v_forzar, 0, 0, FORZAR_AN, FORZAR_AL)
+    fin
+
+    función forzar_cierre(): bool
+        variable i, k, tope, decisión, seg_visto: nat32
+        variable e: Evento
+        variable t: puntero a Tarea
+        variable alguno_pregunta: bool
+        ; (lo que se espera: 15 s si ninguno responde; 60 si alguno pregunta algo)
+        alguno_pregunta := falso
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].dueño <> 0 y no no_responde(i) entonces alguno_pregunta := cierto fin
+        fin
+        tope := 15 * HZ
+        si alguno_pregunta entonces tope := 60 * HZ fin
+        cierra_cuadro(v_forzar)
+        v_forzar := cuadro("Apagar el equipo", FORZAR_AN, FORZAR_AL)
+        decisión := 0
+        si v_forzar <> 0 entonces pinta_forzar(tope div HZ) fin
+        sonar(SS_AVISO)                         ; (SONIDO)
+        escribir("escritorio: hay programas que no se cierran: «Forzar el cierre»\n")
+        k := 0
+        seg_visto := 0
+        mientras decisión = 0 hacer
+            pulso()
+            mientras v_forzar <> 0 y saca_evento(v_forzar, 0, e) hacer
+                si e.clase = EV_CERRAR o (e.clase = EV_TECLA y e.a = 27) entonces
+                    decisión := AC_NO_FORZAR
+                sino si e.clase = EV_TECLA y e.a = '\n' entonces
+                    decisión := AC_FORZAR
+                sino si e.clase = EV_RATÓN_BAJA entonces
+                    i := pulsador_en(v_forzar, ent32(e.a), ent32(e.b))
+                    si i = AC_FORZAR o i = AC_NO_FORZAR entonces decisión := i fin
+                fin
+            fin
+            ; (los que se cierran mientras tanto: si ya no queda ninguno, se sigue)
+            si no programas_con_ventana() entonces
+                cierra_cuadro(v_forzar)
+                devolver cierto
+            fin
+            si k >= tope entonces
+                escribir("escritorio: nadie ha elegido: se fuerza el cierre\n")
+                decisión := AC_FORZAR
+            fin
+            si k div HZ <> seg_visto y v_forzar <> 0 entonces
+                seg_visto := k div HZ
+                pinta_forzar((tope - k) div HZ)
+            fin
+            dormir(1)
+            k := k + 1
+        fin
+        cierra_cuadro(v_forzar)
+        si decisión = AC_NO_FORZAR entonces
+            escribir("escritorio: no se apaga (Cancelar)\n")
             devolver falso
+        fin
+        ; forzar: se acaban sus programas y se espera (2 s) a que se vayan
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].dueño <> 0 entonces
+                t := tarea_de(ventanas[i].dueño)
+                si t <> nulo entonces
+                    tomar_consola()
+                    imprimir2("escritorio: se fuerza el cierre de la tarea %u (%s)\n", t.id, nat32(dirección(ventanas[i].título[0])))
+                    soltar_consola()
+                    acabar_tarea(t)
+                fin
+            fin
+        fin
+        k := 0
+        mientras k < 200 y programas_con_ventana() hacer
+            pulso()
+            dormir(1)
+            k := k + 1
         fin
         devolver cierto
     fin
@@ -2290,7 +2786,7 @@ módulo Escritorio
         variable n, i, j, k: nat32
         variable an, al, x, yy, w: ent32
         variable l: puntero a Lienzo
-        n := ayuda_pila(texto_a, colores)
+        si ayuda_reloj entonces n := ayuda_agenda(texto_a, colores) sino n := ayuda_pila(texto_a, colores) fin   ; (AGENDA)
         si n = 0 entonces devolver fin
         ; lo ancho de la línea más larga
         an := 0
@@ -2346,12 +2842,21 @@ módulo Escritorio
     ; hasta salir y entrar otra vez); mientras se ve, se pone al día
     función vigila_ayuda()
         variable x0: ent32
-        si no hay_pila() o v_barra = 0 o menú_abierto entonces
+        variable en_reloj: bool
+        ; (AGENDA) también sobre el reloj, si está la Agenda: la próxima cita
+        en_reloj := hay_agenda y v_barra <> 0 y ratón_x >= pantalla.ancho - BANDEJA_ANCHO y ratón_y >= pantalla.alto - ALTO_BARRA
+        si en_reloj <> ayuda_reloj entonces
+            quita_ayuda()
+            ayuda_reloj := en_reloj
+            ayuda_quieto := 0
+        fin
+        si (no hay_pila() y no en_reloj) o v_barra = 0 o menú_abierto entonces
             quita_ayuda()
             devolver
         fin
         x0 := pantalla.ancho - ancho_bandeja() + hueco_usb() + hueco_red() + hueco_sonido() + 4
-        si ratón_x < x0 o ratón_x >= x0 + ANCHO_PILA o ratón_y < pantalla.alto - ALTO_BARRA entonces
+        si en_reloj entonces x0 := pantalla.ancho - BANDEJA_ANCHO fin
+        si ratón_x < x0 o (ratón_x >= x0 + ANCHO_PILA y no en_reloj) o ratón_y < pantalla.alto - ALTO_BARRA entonces
             quita_ayuda()
             ayuda_tapada := falso
             ayuda_quieto := 0
@@ -2371,10 +2876,52 @@ módulo Escritorio
             fin
             ayuda_quieto := ayuda_quieto + 1
             si ayuda_quieto >= 50 entonces pon_ayuda() fin
-        sino si ayuda_vista <> cambios_energía entonces
+        sino si ayuda_vista <> cambios_energía y no ayuda_reloj entonces
             quita_ayuda()
             pon_ayuda()
         fin
+    fin
+
+    ; (AGENDA) lo del recuadro del reloj: lo que deja el vigilante de la
+    ; Agenda en PROXIMA.TXT (AGENDA /VIGILAR, uagenda.cas) y cómo abrirla.
+    ; Su carpeta, con la regla de Festivos.carpeta_agenda (festivos.cas):
+    ; \DOCUMENT\AGENDA; (USUARIOS) con usuarios, la de quien ha entrado
+    ; (\USUARIOS\<CARPETA>\AGENDA, 0.8.8: la de Cuentas.carpeta_de(sesión)).
+    función ayuda_agenda(destino: puntero a byte, colores: puntero a nat32): nat32
+        variable m, n, i, k: nat32
+        variable r: arreglo [64] de byte
+        Textos32.copiar(r, "\\DOCUMENT\\AGENDA\\PROXIMA.TXT")
+        si hay_cuentas y sesión <> 0 y carpeta_de(sesión)[0] <> 0 entonces
+            Textos32.copiar(r, "\\USUARIOS\\")
+            Textos32.concatenar(r, carpeta_de(sesión))
+            Textos32.concatenar(r, "\\AGENDA\\PROXIMA.TXT")
+        fin
+        m := abrir_archivo(del_sistema, r, PARA_LEER)
+        n := 0
+        si m < PRIMER_ERROR entonces
+            n := leer_archivo(m, destino, 200)
+            cerrar_archivo(m)
+            si n > 200 entonces n := 0 fin
+        fin
+        destino[n] := 0
+        ; sin CR; cada renglón, una línea
+        k := 0
+        i := 0
+        mientras destino[i] <> 0 hacer
+            si destino[i] <> 13 entonces
+                destino[k] := destino[i]
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        destino[k] := 0
+        si k = 0 o destino[k - 1] <> '\n' entonces Textos32.concatenar(destino, "\n") fin
+        si k = 0 entonces Textos32.copiar(destino, "Agenda\n") fin
+        Textos32.concatenar(destino, "Un clic en el reloj: la Agenda")
+        colores[0] := 0x111827
+        colores[1] := 0x404B5A
+        colores[2] := 0x404B5A
+        devolver 2
     fin
 
     función haz(acción: nat32, dato: nat32)
@@ -2402,9 +2949,11 @@ módulo Escritorio
             caso AC_DOCK_SÍ:
                 pon_visible(cierto)
                 pinta_config()
+                mira_dock_iconos()              ; (ICONOS) la zona cambia
             caso AC_DOCK_NO:
                 pon_visible(falso)
                 pinta_config()
+                mira_dock_iconos()
             caso AM_OFICINA: lanza("\\HVPRUN.BIN", de_oficina(dato, cierto))
             caso AC_ACERCA: abre_acerca()
             caso AC_CERRAR_ACERCA: cierra_cuadro(v_acerca)
@@ -2412,6 +2961,13 @@ módulo Escritorio
                 quita_iconos()
                 organiza_iconos()
                 pon_iconos()
+            caso AM_ARCHIVO:
+                ; (ICONOS) un archivo del escritorio: lo abre el explorador, con lo suyo
+                si dato < n_archivos entonces
+                    copiar(renglón, "/ABRIR ")
+                    concatenar(renglón, dirección(archivos[dato].ruta[0]))
+                    lanza("\\EQUIPO.BIN", renglón)
+                fin
             caso AC_TAPIZ_SIGUIENTE:
                 sin_imagen()                    ; (MIRADOR)
                 fondo := (fondo + 1) mod 3
@@ -2613,46 +3169,46 @@ módulo Escritorio
         si t <> nulo entonces t.padre := 0 fin
     fin
 
+    ; (AGENDA, 0.8.8) AGENDA /VIGILAR: los avisos de las citas (lo lanza el
+    ; núcleo: sin usuarios, al arrancar; con usuarios, al entrar cada uno, y
+    ; así es suyo: su carpeta de la Agenda y se acaba al cerrar su sesión)
+    función lanza_vigilante_agenda()
+        variable t: puntero a Tarea
+        variable an: nat32
+        t := cargar_archivo("\\AGENDA.BIN", "/VIGILAR", an)
+        si t <> nulo entonces
+            t.padre := 0
+            hay_agenda := cierto
+        fin
+    fin
+
+    ; (AGENDA, 0.8.8) ¿está la Agenda? (instalada, en \HISPA; o en la raíz)
+    función busca_agenda()
+        variable m: nat32
+        m := abrir_archivo(del_sistema, "\\HISPA\\AGENDA.BIN", PARA_LEER)
+        si m >= PRIMER_ERROR entonces m := abrir_archivo(del_sistema, "\\AGENDA.BIN", PARA_LEER) fin
+        hay_agenda := m < PRIMER_ERROR
+        si hay_agenda entonces cerrar_archivo(m) fin
+    fin
+
     función lo_del_usuario()
         variable i: nat32
         olvida_inicio()
         cierra_menú()
         lee_ajustes_dock()
         lee_atajos()
-        quita_iconos()
-        ; (0.8.7) y fuera de la lista: si no, los del arranque se quedaban y
-        ; los del usuario salían otra vez detrás (Mi equipo, el Bloc... dos veces)
-        i := 0
-        mientras i < n_iconos hacer
-            liberar(puntero(iconos[i].debajo))
-            i := i + 1
-        fin
-        n_iconos := 0
-        icono_elegido := -1
-        si n_atajos > 0 entonces
-            i := 0
-            mientras i < n_atajos hacer
-                nuevo_icono_de(dirección(atajos[i].nombre[0]), AM_ATAJO, i)
-                i := i + 1
-            fin
-            organiza_iconos()
-            pon_atajos()
-        sino
-            nuevo_icono("Mi equipo", AM_EQUIPO)
-            nuevo_icono("Bloc de notas", AM_BLOC)
-            nuevo_icono("Consola", AM_CONSOLA)
-            lee_accesos()                       ; (0.8.7) los de los paquetes de ahora (lo instalado en la sesión de antes, también)
-            i := 0
-            mientras i < n_accesos hacer
-                si en_escritorio(i) entonces nuevo_icono_de(nombre_de(i), AM_ACCESO, i) fin
-                i := i + 1
-            fin
-            organiza_iconos()
-        fin
-        pon_iconos()
+        ; (ICONOS) los suyos: cómo los organiza y dónde los dejó (ICONOS.INI),
+        ; los de siempre, los de los paquetes de ahora (lo instalado en la
+        ; sesión de antes, también), sus accesos y los archivos de su ESCRITOR
+        olvida_iconos()
+        lee_iconos()
+        lee_accesos()
+        lee_archivos()
+        rehace_iconos("usuario")
         pinta_barra()
         repintar_todo()
         si instalado() y hay_ajustes entonces lanza_bandeja_correo() fin     ; (CORREO, 0.8.7) el suyo
+        lanza_vigilante_agenda()                                            ; (AGENDA, 0.8.8) el suyo
         escribir("escritorio: sesión abierta\n")
     fin
 
@@ -3260,6 +3816,10 @@ módulo Escritorio
                     si túnel_red <> 0 entonces lanza("\\TAILSCAL.BIN", "/VENTANA") sino si estado_wifi <> WIFI_NADA entonces lanza("\\REDWIFI.BIN", nulo) sino dice_red() fin
                 sino si hueco_programas() > 0 y ent32(e.a) >= pantalla.ancho - BANDEJA_ANCHO - hueco_programas() y ent32(e.a) < pantalla.ancho - BANDEJA_ANCHO entonces
                     clic_programa(ent32(e.a), e.c)      ; (REPRODUCTOR) el icono de un programa
+                sino si hay_agenda y ent32(e.a) >= pantalla.ancho - BANDEJA_ANCHO entonces
+                    ; (AGENDA) el reloj: la Agenda, en hoy
+                    quita_ayuda()
+                    lanza("\\AGENDA.BIN", nulo)
                 sino si hay_escudo y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() + hueco_red() + hueco_sonido() + hueco_pila() y ent32(e.a) < pantalla.ancho - BANDEJA_ANCHO entonces
                     ; (ESCUDO) el del antivirus: su ventana
                     lanza(ruta_escudo, "/VENTANA")
@@ -3300,7 +3860,14 @@ módulo Escritorio
             según e.clase
                 caso EV_MENÚ_VENTANA:
                     menú_de_ventana(e.a, ent32(e.b), ent32(e.c))
+                caso EV_TECLA:
+                    icono_tecla(e.a)            ; (ICONOS) las flechas, Intro, la letra...
                 caso EV_RATÓN_BAJA:
+                    ; (ICONOS) «Más iconos»: a la página siguiente
+                    si en_más(x, yy) y e.c yb BOTÓN_DERECHO = 0 entonces
+                        pasa_página(cierto)
+                        devolver
+                    fin
                     k := icono_en(x, yy)
                     elige_icono(k)
                     si e.c yb BOTÓN_DERECHO <> 0 entonces
@@ -3317,7 +3884,9 @@ módulo Escritorio
                                 abrir_emergente(x, yy, "Abrir", 0, 0, ME_ICONO)
                             fin
                         sino
-                            abrir_emergente(x, yy, "Configuración|Cambiar el tapiz|Organizar iconos|-|Acerca de Hispa-Pentium", 0, 0, ME_FONDO)
+                            menú_x := x                 ; (ICONOS) el submenú «Organizar iconos» sale ahí
+                            menú_y := yy
+                            abrir_emergente(x, yy, "Configuración|Cambiar el tapiz|Organizar iconos...|-|Acerca de Hispa-Pentium", 0, 0, ME_FONDO)
                         fin
                     sino si k >= 0 entonces
                         si (e.c >> DESPLAZA_VECES) = 2 entonces
@@ -3337,8 +3906,9 @@ módulo Escritorio
                         si cog_movido entonces mueve_icono(icono_cogido, x - cog_dx, yy - cog_dy) fin
                     fin
                 caso EV_RATÓN_SUBE:
-                    ; (dock) un acceso soltado que se ha llevado a otro sitio: se guarda dónde
-                    si icono_cogido >= 0 y cog_movido y iconos[icono_cogido].acción = AM_ATAJO entonces mueve_atajo(iconos[icono_cogido].dato, iconos[icono_cogido].x, iconos[icono_cogido].ye) fin
+                    ; (ICONOS) el que se ha llevado a otro sitio: a la zona, a su
+                    ; celda y sin tapar a otro; y se guarda dónde (dock: el de un acceso, también en ATAJOS.INI)
+                    si icono_cogido >= 0 y cog_movido entonces suelta_icono(icono_cogido, x - cog_dx, yy - cog_dy) fin
                     icono_cogido := -1
             fin
         fin
@@ -3351,9 +3921,10 @@ módulo Escritorio
                 según opción
                     caso 0: abre_config()
                     caso 1: haz(AC_TAPIZ_SIGUIENTE, 0)
-                    caso 2: haz(AC_ORGANIZAR, 0)
+                    caso 2: abre_organizar(menú_x, menú_y)     ; (ICONOS) el submenú
                     caso 4: abre_acerca()
                 fin
+            caso ME_ORGANIZAR: elegido_organizar(opción)      ; (ICONOS)
             caso ME_VENTANA:
                 según opción
                     caso 0: orden_ventana(menú_dato, PIDE_RESTAURAR)
@@ -3421,21 +3992,6 @@ módulo Escritorio
     ; -------------------------------------------------------------------------
     ;  (dock) Los accesos que se sueltan en el tapiz desde el explorador
     ; -------------------------------------------------------------------------
-    ; cada acceso soltado, donde se dejó (si cabe en la pantalla)
-    función pon_atajos()
-        variable i: nat32
-        i := 0
-        mientras i < n_iconos hacer
-            si iconos[i].acción = AM_ATAJO y iconos[i].dato < n_atajos entonces
-                si atajos[iconos[i].dato].x >= 0 y atajos[iconos[i].dato].ye >= 0 y atajos[iconos[i].dato].x <= tapiz.ancho - CELDA_AN y atajos[iconos[i].dato].ye <= tapiz.alto - ALTO_BARRA - CELDA_AL entonces
-                    iconos[i].x := atajos[iconos[i].dato].x
-                    iconos[i].ye := atajos[iconos[i].dato].ye
-                fin
-            fin
-            i := i + 1
-        fin
-    fin
-
     ; quita el icono k (un acceso soltado) del tapiz y de ATAJOS.INI
     función quita_atajo_del_tapiz(k: nat32)
         variable i, a: nat32
@@ -3465,6 +4021,7 @@ módulo Escritorio
             i := i + 1
         fin
         icono_elegido := -1
+        coloca_iconos("quitado")                ; (ICONOS) con la automática, en orden otra vez
         pon_iconos()
     fin
 
@@ -3517,10 +4074,7 @@ módulo Escritorio
         fin
         x := suelta_x - CELDA_AN div 2
         yy := suelta_y - 20
-        si x < 0 entonces x := 0 fin
-        si yy < 0 entonces yy := 0 fin
-        si x > tapiz.ancho - CELDA_AN entonces x := tapiz.ancho - CELDA_AN fin
-        si yy > tapiz.alto - ALTO_BARRA - CELDA_AL entonces yy := tapiz.alto - ALTO_BARRA - CELDA_AL fin
+        a_la_zona(x, yy)                        ; (ICONOS) dentro de la zona de los iconos
         k := nuevo_atajo(suelta_ruta, es_carpeta_ruta(suelta_ruta), x, yy)
         si k < 0 o n_iconos >= MAX_ICONOS entonces
             globo_título := "Escritorio"
@@ -3529,9 +4083,13 @@ módulo Escritorio
         fin
         quita_iconos()
         nuevo_icono_de(dirección(atajos[k].nombre[0]), AM_ATAJO, nat32(k))
-        iconos[n_iconos - 1].x := x
-        iconos[n_iconos - 1].ye := yy
+        iconos[n_iconos - 1].x := SIN_SITIO
+        coloca_iconos("acceso")                 ; (ICONOS) los que estaban, quietos
+        suelta(n_iconos - 1, x, yy)             ; y el nuevo, a la celda libre más cercana
+        mueve_atajo(iconos[n_iconos - 1].dato, iconos[n_iconos - 1].x, iconos[n_iconos - 1].ye)
         pon_iconos()
+        apunta_iconos("acceso nuevo")
+        guarda_iconos()
         tomar_consola()
         imprimir1("escritorio: un acceso nuevo en el tapiz: %s\n", nat32(dirección(suelta_ruta[0])))
         soltar_consola()
@@ -3642,6 +4200,23 @@ módulo Escritorio
         fin
     fin
 
+    ; (ICONOS) el dock se ve o se oculta: la zona de los iconos cambia
+    función mira_dock_iconos()
+        si alto_dock = dock_visto entonces devolver fin
+        quita_iconos()
+        coloca_iconos("dock")
+        pon_iconos()
+    fin
+
+    ; (ICONOS) cada dos segundos: si ha cambiado lo de la carpeta ESCRITOR (un
+    ; archivo nuevo, uno borrado), los iconos otra vez
+    función mira_escritor()
+        mirado_escritor := tics
+        si v_fondo = 0 o icono_cogido >= 0 entonces devolver fin
+        apunta_sitios()                         ; (antes de leer: los nombres de los archivos de ahora son los de los iconos)
+        si lee_archivos() entonces rehace_iconos("escritor") fin
+    fin
+
     ; la tarea del escritorio: el pulso del gestor y lo suyo, cien veces por segundo
     función tarea_escritorio(n: nat32)
         variable f, h: nat32
@@ -3679,6 +4254,8 @@ módulo Escritorio
                 pide := PIDE_NADA
             fin
             si suelta_pedida entonces atiende_suelta() fin
+            si alto_dock <> dock_visto y v_fondo <> 0 y arranque_hecho entonces mira_dock_iconos() fin     ; (ICONOS) el dock se ve o se oculta
+            si tics - mirado_escritor >= 2 * HZ y arranque_hecho entonces mira_escritor() fin              ; (ICONOS) lo nuevo en ESCRITOR
             si tapiz_pedido <> 0 entonces atiende_tapiz() fin     ; (MIRADOR)
             si Preferencias.cambios <> prefs_vistas entonces atiende_preferencias() fin    ; (PANEL)
             vigila_pantalla()                   ; (PANEL) apagar la pantalla
@@ -3775,17 +4352,11 @@ módulo Escritorio
         v_fondo := crear_ventana("fondo", 0, 0, 1, 1, SIN_MARCO ob OCULTA, 0)
         ventana_fondo := v_fondo
         busca_escudo()                          ; (ESCUDO)
-        ; los iconos del tapiz
-        nuevo_icono("Mi equipo", AM_EQUIPO)
-        nuevo_icono("Bloc de notas", AM_BLOC)
-        nuevo_icono("Consola", AM_CONSOLA)
-        i := 0
-        mientras i < n_accesos hacer
-            si en_escritorio(i) entonces nuevo_icono_de(nombre_de(i), AM_ACCESO, i) fin
-            i := i + 1
-        fin
-        organiza_iconos()
-        pon_iconos()
+        ; los iconos del tapiz (ICONOS: cómo se organizan, lo guardado y los
+        ; archivos de \ESCRITOR; los accesos soltados, luego)
+        lee_iconos()
+        lee_archivos()
+        rehace_iconos("arranque")
         pinta_barra()
         repintar_todo()
         t := crear_tarea("escritorio", nat32(dirección(tarea_escritorio)), 0)
@@ -3810,16 +4381,10 @@ módulo Escritorio
         ; leen del disco ya con el escritorio en marcha)
         lee_ajustes_dock()
         lee_atajos()
-        si n_atajos > 0 entonces
-            quita_iconos()
-            i := 0
-            mientras i < n_atajos hacer
-                nuevo_icono_de(dirección(atajos[i].nombre[0]), AM_ATAJO, i)
-                i := i + 1
-            fin
-            organiza_iconos()
-            pon_atajos()
-            pon_iconos()
+        si n_atajos > 0 o alto_dock <> dock_visto entonces
+            olvida_iconos()                     ; (ICONOS) los sitios, solo los guardados (no los de recién arrancado)
+            lee_iconos()
+            rehace_iconos("accesos")            ; (ICONOS) con los accesos soltados (y la zona, si el dock se ve distinto)
             repintar_todo()
         fin
         ; un sistema instalado en el disco: sus ajustes (HISPA.INI); si aún
@@ -3867,6 +4432,15 @@ módulo Escritorio
             si t <> nulo entonces t.padre := 0 fin
         fin
         arranca_sonido()              ; (SONIDO) el servicio de sonido (y el sonido de inicio)
+        ; (AGENDA) el vigilante de los avisos de la Agenda (si está: de la raíz
+        ; o de \HISPA). (USUARIOS, 0.8.8) con usuarios, al entrar cada uno
+        ; (lanza_vigilante_agenda en lo_del_usuario: es suyo, lee su
+        ; \USUARIOS\<u>\AGENDA y se acaba al cerrar su sesión)
+        si hay_cuentas entonces
+            busca_agenda()
+        sino
+            lanza_vigilante_agenda()
+        fin
         arranque_hecho := cierto      ; (USUARIOS) ya se puede entrar (atiende_usuarios): lo de arriba es del sistema
         devolver 1
     fin

@@ -46,6 +46,8 @@ int sim_renovar_grupo;		/* las pruebas lo ponen a 1 */
 int sim_echar;			/* las pruebas: mandar una desautenticación */
 int sim_silencio;		/* las pruebas: el punto de acceso desaparece */
 int sim_gemela;			/* las pruebas: otra red, ABIERTA, con el mismo nombre (una falsa), en el canal 1 */
+int sim_ausente;		/* (CORTES) las pruebas: el punto de acceso desaparece del todo (ni balizas) */
+int sim_ip_otra;		/* (CORTES) las pruebas: DHCP da otra IP (192.168.77.11) */
 static const o8 ap_mac[6] = { 0x02, 0x48, 0x53, 0xaa, 0x00, 0x01 };
 static const o8 otra_mac[6] = { 0x02, 0x48, 0x53, 0xaa, 0x00, 0x02 };
 static const o8 tkip_mac[6] = { 0x02, 0x48, 0x53, 0xaa, 0x00, 0x03 };
@@ -313,7 +315,7 @@ static void dhcp(const o8 *origen, const o8 *b, int n)
 	r[0] = 2; r[1] = 1; r[2] = 6;
 	memcpy(r + 4, b + 4, 4);		/* xid */
 	memcpy(r + 10, b + 10, 2);		/* indicadores */
-	s.ip_dada[0] = 192; s.ip_dada[1] = 168; s.ip_dada[2] = 77; s.ip_dada[3] = 10;
+	s.ip_dada[0] = 192; s.ip_dada[1] = 168; s.ip_dada[2] = 77; s.ip_dada[3] = sim_ip_otra ? 11 : 10;	/* (CORTES) */
 	memcpy(r + 16, s.ip_dada, 4);
 	memcpy(r + 20, ip_ap, 4);
 	memcpy(r + 28, b + 28, 16);
@@ -378,6 +380,8 @@ static int sim_enviar(const o8 *t, int n, int vel)
 		w80211_tx_hecho(0);
 		return 0;
 	}
+	if (sim_ausente)
+		return 0;		/* (CORTES) no hay nadie */
 	if (sub == 0x40) {
 		/* sondeo: contestan las redes de ese canal (la oculta, solo por su nombre) */
 		balizas(0x50, t + 10);
@@ -445,9 +449,15 @@ static void sim_sondear(void)
 {
 	d32 ya = hl_jiffies();
 
-	if ((int)(ya - s.t_baliza) >= 100) {
+	if ((int)(ya - s.t_baliza) >= 100 && !sim_ausente) {
 		s.t_baliza = ya;
 		balizas(0x80, todos);
+	}
+	if (sim_ausente) {
+		s.cab = s.fin;	/* (CORTES) lo que iba a mandar, perdido */
+		s.autenticada = s.asociada = 0;
+		s.paso = 0;
+		return;
 	}
 	if (sim_renovar_grupo && s.paso == 4) {
 		o8 k[80], r[200];

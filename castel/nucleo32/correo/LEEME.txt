@@ -27,7 +27,9 @@ Correo lee y envía el correo de una o varias cuentas:
 
 Teclas: F5 recibir; Ctrl+N escribir; Ctrl+R responder; Ctrl+T responder a
 todos; Ctrl+L reenviar; Supr borrar (a la papelera); Ctrl+K mover; Ctrl+F
-buscar; S destacar; M leído o no; Tab, de un panel a otro. Al escribir:
+buscar; S destacar; M leído o no; Tab, de un panel a otro. Dos clics (o Intro)
+en un mensaje: a toda la ventana (Esc vuelve a la lista; F7 y F8, el anterior
+y el siguiente). Al escribir:
 Ctrl+E (o Ctrl+Intro) enviar, Ctrl+S guardar el borrador, Esc cerrar.
 
 En la Consola: CORREO /ORDEN (cuentas, carpetas, al-dia, lista, lee, envia,
