@@ -1,0 +1,12 @@
+La biblioteca común de la oficina de 32 bits de Hispa-Pentium (Pluma 2,
+y luego Cuentas 2, Datos 2, Presentaciones 2...), en C portable: el mismo
+código vale para Hispa-64 cambiando solo so_pentium.c por otro so_*.c.
+Lo que hay y cómo se usa: docs/PENTIUM.md, «La oficina de 32 bits: la
+biblioteca común»; cada cabecera (.h) explica su API.
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+Para un programa nuevo: un ofi_principal(args) y ofi_programa[]
+(«CUENTAS.BIN»), su lista de fuentes (como oficina/pluma/fuentes.lst) y
+sus hacer.sh y anfitrion.sh (como los de Pluma). Lo de otros: miniz (MIT),
+stb_image, stb_image_write y stb_truetype (dominio público o MIT), las
+DejaVu (licencia de Bitstream Vera); DICCIO.DAT, con la suya (ORTOGRAFIA.md).
