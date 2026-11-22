@@ -1351,7 +1351,7 @@ static void pinta_opciones(void)
 	if (y + 36 < r.y + r.al) {
 		dib_texto_corto(&f_normal12, 12, y, AN - 20, "Teclas: Espacio, tocar o pausa · N y P, siguiente y anterior · S, parar · flechas, 5 s (con Mayús, 30 s)", C_TINTA);
 		y += 16;
-		dib_texto_corto(&f_normal12, 12, y, AN - 20, "+ y - (o Ctrl+flechas), volumen · Ctrl+O, añadir · Ctrl+S, guardar la lista · Ctrl+M, pequeño · Supr, quitar · Tab, otra pestaña", C_TINTA);
+		dib_texto_corto(&f_normal12, 12, y, AN - 20, "+ y -, volumen · Ctrl+O, añadir · Ctrl+S, guardar la lista · Ctrl+M, pequeño · Supr, quitar · Tab, otra pestaña", C_TINTA);
 		y += 20;
 	}
 	fmt(t, sizeof t, "Reproductor %s de Hispa-Pentium · GPL-2.0 o posterior · con minimp3, stb_vorbis, dr_flac, libxmp-lite y stb_image (libres)", VERSION_REPRO);
@@ -1721,17 +1721,14 @@ static void quitar_elegidas(void)
 		hay |= L.c[i].marcada;
 	if (!hay && lista_cursor >= 0 && lista_cursor < L.n)
 		L.c[lista_cursor].marcada = 1;
-	/* (la que suena no se para: sigue hasta acabar) */
+	/* (la que suena no se para: sigue hasta acabar; sus números, otra vez) */
+	for (i = 0; i < 2; i++)
+		if (M.v[i].cancion >= 0 && M.v[i].cancion < L.n && L.c[M.v[i].cancion].marcada)
+			M.v[i].cancion = -3;
 	for (i = L.n - 1; i >= 0; i--)
-		if (L.c[i].marcada) {
-			if (i == M.oida) {
-				M.oida = -1;
-			} else if (M.oida > i)
-				M.oida--;
-			if (M.v[0].cancion == i) M.v[0].cancion = -3; else if (M.v[0].cancion > i) M.v[0].cancion--;
-			if (M.v[1].cancion == i) M.v[1].cancion = -3; else if (M.v[1].cancion > i) M.v[1].cancion--;
+		if (L.c[i].marcada)
 			lista_quita(&L, i);
-		}
+	motor_reordena(&M);
 	if (lista_cursor >= L.n)
 		lista_cursor = L.n - 1;
 }
@@ -2452,12 +2449,7 @@ static void sucesos(void)
 				int a = fila_destino > fila_arrastrada ? fila_destino - 1 : fila_destino;
 
 				lista_mueve(&L, fila_arrastrada, a);
-				if (M.oida == fila_arrastrada)
-					M.oida = a;
-				else if (fila_arrastrada < a && M.oida > fila_arrastrada && M.oida <= a)
-					M.oida--;
-				else if (fila_arrastrada > a && M.oida >= a && M.oida < fila_arrastrada)
-					M.oida++;
+				motor_reordena(&M);
 				lista_cursor = a;
 			}
 			fila_arrastrada = fila_destino = -1;
@@ -2473,8 +2465,10 @@ static void sucesos(void)
 			break;
 		}
 		case EV_MENU:
-			if (s.b == 1 && s.a != SIN_ELEGIR)
+			if (s.b == 1 && s.a != SIN_ELEGIR) {
 				lista_ordena(&L, (int)s.a);
+				motor_reordena(&M);
+			}
 			else if (s.b == 2 && s.a != SIN_ELEGIR) {
 				if (s.a == 0)
 					tocar_cancion(lista_cursor);
@@ -2483,9 +2477,11 @@ static void sucesos(void)
 				else if (s.a == 2 && lista_cursor > 0) {
 					lista_mueve(&L, lista_cursor, lista_cursor - 1);
 					lista_cursor--;
+					motor_reordena(&M);
 				} else if (s.a == 3 && lista_cursor + 1 < L.n) {
 					lista_mueve(&L, lista_cursor, lista_cursor + 1);
 					lista_cursor++;
+					motor_reordena(&M);
 				}
 			}
 			pinta_todo();

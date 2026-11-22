@@ -748,6 +748,47 @@ void motor_lo_oido(motor *m, float *d, int n)
 	}
 }
 
+/* (la lista ha cambiado de orden) los números de lo que suena, otra vez:
+ * por su origen (el archivo, el trozo, la pista) */
+void motor_reordena(motor *m)
+{
+	int i, k, j, antes[2], nuevo[2], oida = m->oida, hecha = 0;
+
+	for (i = 0; i < 2; i++) {
+		voz *v = &m->v[i];
+
+		antes[i] = nuevo[i] = v->cancion;
+		if (v->cancion < 0 || !v->abierta)
+			continue;
+		for (k = 0; k < m->l->n; k++)
+			if (!memcmp(&m->l->c[k].o, &v->d.o, sizeof(origen)))
+				break;
+		if (k < m->l->n)
+			nuevo[i] = k;
+	}
+	/* (de una vez: los números viejos a los nuevos) */
+	for (j = 0; j < m->n_marcas; j++) {
+		marca *mk = &m->marcas[(m->primera_marca + j) % MAX_MARCAS];
+
+		for (i = 0; i < 2; i++)
+			if (antes[i] >= 0 && mk->cancion == antes[i]) {
+				mk->cancion = nuevo[i];
+				break;
+			}
+		if (i == 2)
+			mk->cancion = -1;	/* (una que ya no está en la lista) */
+	}
+	for (i = 0; i < 2 && !hecha; i++)
+		if (antes[i] >= 0 && oida == antes[i]) {
+			m->oida = nuevo[i];
+			hecha = 1;
+		}
+	if (!hecha)
+		m->oida = -1;
+	for (i = 0; i < 2; i++)
+		m->v[i].cancion = nuevo[i];
+}
+
 void motor_cierra(motor *m)
 {
 	voz_cierra(&m->v[0]);

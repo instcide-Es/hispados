@@ -89,6 +89,7 @@ voz *motor_voz_oida(motor *m);
 void motor_lo_oido(motor *m, float *d, int n);
 int motor_cola_ms(motor *m);			/* lo que hay en la cola de la tarjeta */
 void motor_cierra(motor *m);
+void motor_reordena(motor *m);		/* tras mover o ordenar la lista */
 extern u32 dmod_hz;
 /* la duración (segundos) sin decodificarla entera; 0 si no se sabe */
 u32 duracion_rapida(const origen *o);

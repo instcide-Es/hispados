@@ -6149,7 +6149,7 @@ para empezar en **Hispa-64**). Lo demás no sabe dónde corre:
   botones con su símbolo, el volumen y «Grande».
 - **Las teclas**: Espacio (tocar o pausa), N y P (siguiente, anterior), S
   (parar), las flechas izquierda y derecha (5 s; con Mayús, 30 s), arriba y
-  abajo (la lista), Intro (tocar), + y - o Ctrl+flechas (el volumen), Ctrl+O
+  abajo (la lista), Intro (tocar), + y - (el volumen), Ctrl+O
   (Añadir), Ctrl+S (guardar la lista), Ctrl+M (pequeño), Ctrl+L y Ctrl+E (la
   lista, el ecualizador), Ctrl+A (todas), Supr (quitar), Tab (otra pestaña),
   F1 (las teclas, en Opciones). **La rueda en todo**: la lista, las carpetas,
@@ -6229,10 +6229,15 @@ La cola de cada canal de `sonido.cas` es ahora de **256 K** (eran 64 K: 1,4 s
 a 48 kHz en vez de 0,34 s; marcado «(REPRODUCTOR)»; los demás programas no lo
 notan: DirectSound y HVPRUN ya miden lo que dejan ir por delante). Con eso y
 el objetivo que crece, el Reproductor no se corta **con otro programa
-gastando todo el procesador** (en la prueba, `REPRODUCE /MIDE` decodificando
-MP3 sin parar en otra Consola) **y la ventana arrastrándose por la pantalla**:
-lo que graba QEMU de la tarjeta es lo del anfitrión, trozo a trozo, sin un
-salto (`pruebas/sigue.py`).
+gastando todo el procesador** (en la prueba, otra Consola con `REPRODUCE
+/OCUPA 70`, que da vueltas sin parar 70 s) **y la ventana arrastrándose
+por la pantalla**: lo que graba QEMU de la tarjeta es lo del anfitrión, trozo a
+trozo, sin un salto (`pruebas/sigue.py`: 50 s, 500 trozos de 100 ms, la peor
+correlación 0,99998). Se prueba con KVM (un procesador de verdad) o, donde no
+lo hay (el WSL del PC de Albinyana), con el Atom N270 de QEMU y `-icount`: el
+sonido de QEMU va entonces con el reloj de las instrucciones y lo que se mira
+es si un Atom llega (el QEMU normal emula el x87 tan despacio que ahí sí se
+corta: no es lo que pasará en el HP Mini).
 
 ### Lo que cuesta (el HP Mini 5103, Atom N455)
 
@@ -6290,6 +6295,13 @@ QEMU_MAS="-audiodev wav,id=s,path=/tmp/sale.wav,out.frequency=48000 -device inte
   probar READ CD en crudo sobre un CD de datos.
 - La búsqueda exacta en los MP3 de tasa variable (hoy, por la tabla de Xing:
   una trama arriba o abajo).
+- **La Sound Blaster 16 de QEMU**: con lo que da el Reproductor, el servicio
+  repite de vez en cuando un trozo de 602 tramas (13,7 ms; siempre en los
+  mismos sitios, también con KVM y con `-icount`: no es que no llegue el
+  procesador); con `SONIDO archivo.wav` (el mismo canal, la misma frecuencia)
+  no pasa. Con HD Audio y AC'97, nada. Queda mirarlo en `SONIDO.BIN`
+  (`sb16.c`, la posición del 8237, y `rellena()`); la prueba lo dice y mira que
+  suene todo.
 
 ### La fase del vídeo (el plan)
 

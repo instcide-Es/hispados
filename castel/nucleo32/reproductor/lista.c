@@ -797,6 +797,8 @@ int lista_siguiente(lista *l, int a_mano)
 
 	if (!l->n)
 		return -1;
+	if (l->actual < -1 || l->actual >= l->n)
+		l->actual = -1;	/* (una que ya no está: desde el principio) */
 	if (l->repetir == REPITE_UNA && !a_mano && l->actual >= 0)
 		return l->actual;
 	for (vueltas = 0; vueltas < l->n; vueltas++) {
@@ -833,6 +835,8 @@ int lista_anterior(lista *l)
 {
 	if (!l->n)
 		return -1;
+	if (l->actual < -1 || l->actual >= l->n)
+		l->actual = -1;
 	if (l->aleatorio) {
 		int p = pos_en_orden(l);
 
