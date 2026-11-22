@@ -104,6 +104,7 @@ módulo Cursores
     variable t_espejo: bool
     variable t_tinta: bool                      ; lo que sigue es tinta (dentro), no silueta
     variable medios: ent32 = 2                  ; el tamaño, en medios
+    variable t_borde: ent32 = 10                ; el borde del juego, en décimas del dibujo (los trazos finos lo llevan de más: así les queda relleno)
     variable rx, ry: ent32                      ; lo que da transforma()
 
     ; ---- las formas de siempre (la «Clásica» a 1x): X, el borde; o, el relleno ----
@@ -485,7 +486,7 @@ módulo Cursores
 
     ; una flecha de dos puntas de lado a lado (la de cambiar el tamaño)
     función doble_h()
-        trazo(-75, 0, 75, 0, 15)
+        trazo(-75, 0, 75, 0, 6 + t_borde)
         polígono()
         v(112, 0)
         v(60, -46)
@@ -499,7 +500,7 @@ módulo Cursores
     fin
 
     función doble_v()
-        trazo(0, -75, 0, 75, 15)
+        trazo(0, -75, 0, 75, 6 + t_borde)
         polígono()
         v(0, 112)
         v(46, 60)
@@ -513,8 +514,8 @@ módulo Cursores
     fin
 
     función mover()
-        trazo(-80, 0, 80, 0, 15)
-        trazo(0, -80, 0, 80, 15)
+        trazo(-80, 0, 80, 0, 6 + t_borde)
+        trazo(0, -80, 0, 80, 6 + t_borde)
         polígono()
         v(122, 0)
         v(72, -42)
@@ -538,29 +539,33 @@ módulo Cursores
     fin
 
     función texto_i(j: nat32)
-        trazo(0, -82, 0, 82, 10)
+        variable r: ent32
+        r := 6 + t_borde
+        trazo(0, -82, 0, 82, r)
         si j = J_MODERNA entonces
-            trazo(-32, -98, 0, -84, 10)
-            trazo(32, -98, 0, -84, 10)
-            trazo(-32, 98, 0, 84, 10)
-            trazo(32, 98, 0, 84, 10)
+            trazo(-32, -98, 0, -84, r)
+            trazo(32, -98, 0, -84, r)
+            trazo(-32, 98, 0, 84, r)
+            trazo(32, 98, 0, 84, r)
         sino
-            trazo(-30, -90, 30, -90, 10)
-            trazo(-30, 90, 30, 90, 10)
+            trazo(-30, -90, 30, -90, r)
+            trazo(-30, 90, 30, 90, r)
         fin
     fin
 
     función cruz()
-        trazo(-96, 0, -30, 0, 9)
-        trazo(30, 0, 96, 0, 9)
-        trazo(0, -96, 0, -30, 9)
-        trazo(0, 30, 0, 96, 9)
-        disco(0, 0, 10)
+        variable r: ent32
+        r := 6 + t_borde
+        trazo(-96, 0, -30, 0, r)
+        trazo(30, 0, 96, 0, r)
+        trazo(0, -96, 0, -30, r)
+        trazo(0, 30, 0, 96, r)
+        disco(0, 0, r)
     fin
 
     función prohibido()
-        anillo(0, 0, 74, 18)
-        trazo(-52, -52, 52, 52, 15)
+        anillo(0, 0, 74, 9 + t_borde)
+        trazo(-52, -52, 52, 52, 7 + t_borde)
     fin
 
     ; un añadido (la espera, el «?») al lado de la flecha, sin espejo y del
@@ -743,6 +748,8 @@ módulo Cursores
         t_dy := 0
         t_espejo := esp
         t_tinta := falso
+        t_borde := borde_de(j) * 1000 div t_esc
+        si j = J_RETRO entonces t_borde := 10 fin
         dibuja(f, j, k)
         t_espejo := falso
         si n_piezas = 0 entonces devolver falso fin

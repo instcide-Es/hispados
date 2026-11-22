@@ -9,7 +9,7 @@
 ;       10 la cruz...). Vale hasta que se pida otra.
 ;    1  una zona de la ventana ECX con su forma: EDX apunta a una Zona (x, y,
 ;       ancho, alto y forma; 20 octetos). La última que se pide es la que
-;       vale; con ancho 0 se quitan todas. Hasta 8 por ventana.
+;       vale; con ancho 0 se quitan todas. Hasta 16 por ventana.
 ;    2  los ajustes del puntero, a la Ajustes_puntero de ECX (24 octetos):
 ;       el juego de formas, el tamaño, el color, el rastro, localizar con
 ;       Control y el espejo para zurdos.
@@ -172,8 +172,8 @@ módulo Apuntero
         variable z: puntero a Zona
         variable aj: puntero a Ajustes_puntero
         variable pp: puntero a Pinta_puntero
-        variable im: puntero a Imagen
         variable l: Lienzo
+        variable r: nat32
         según nat16(qué)
             caso 0:
                 si pon_forma(a, actual.id, b) entonces devolver 0 fin
@@ -200,11 +200,10 @@ módulo Apuntero
             caso 4:
                 pp := puntero(b)
                 si pp.forma >= N_FORMAS o pp.juego >= N_JUEGOS o pp.tamaño >= N_TAMAÑOS o pp.color >= N_COLORES entonces devolver NO_VALE fin
-                im := imagen_de(pp.forma, pp.juego, pp.tamaño, pp.espejo = 1, pp.cuadro yb 7)
-                si im = nulo entonces devolver NO_VALE fin
                 pon_lienzo(l, pp.puntos, pp.salto, pp.ancho, pp.alto)
-                pinta_imagen(l, pp.x, pp.ye, im, pp.color, 256)
-                devolver nat32(im.an) ob (nat32(im.al) << 16)
+                r := pinta_puntero_en(l, pp.x, pp.ye, pp.forma, pp.juego, pp.tamaño, pp.espejo = 1, pp.cuadro yb 7, pp.color)
+                si r = 0 entonces devolver NO_VALE fin
+                devolver r
             caso 5:
                 devolver forma_vista
         fin

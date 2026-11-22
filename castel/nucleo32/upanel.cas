@@ -888,6 +888,7 @@ módulo UPanel
             devolver
         fin
         si c = TECLA_CTRL_TAB o c = TECLA_CTRL_MAYÚS_TAB entonces
+            si sección = S_PUNTERO entonces sección := S_RATÓN fin      ; (PUNTEROS) Puntero va con Ratón
             si no pregunta_salto entonces a_sección(otra_pestaña(sección, N_SECCIONES, 0, c = TECLA_CTRL_TAB)) fin
             devolver
         fin

@@ -2165,6 +2165,24 @@ módulo Ventanas
         devolver cierto
     fin
 
+    ; (PUNTEROS) pinta un puntero en un lienzo (la vista previa del Panel: la
+    ; llamada 177), con el cerrojo (la caché de las formas es una para todos).
+    ; Da el ancho y el alto de lo pintado (el alto, arriba), o 0 si no hay
+    ; memoria
+    público función pinta_puntero_en(ref l: Lienzo, x: ent32, yy: ent32, f: nat32, j: nat32, t: nat32, esp: bool, k: nat32, color: nat32): nat32
+        variable im: puntero a Imagen
+        variable r: nat32
+        r := 0
+        tomar(cerrojo)
+        im := imagen_de(f, j, t, esp, k)
+        si im <> nulo entonces
+            pinta_imagen(l, x, yy, im, color, 256)
+            r := nat32(im.an) ob (nat32(im.al) << 16)
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
     ; (PUNTEROS) se está abriendo un programa: la flecha con la espera, hasta
     ; que haga su ventana (o unos segundos)
     público función pon_ocupado(centésimas: nat32)

@@ -5,7 +5,7 @@
 ;
 ;    puntero_de_ventana(v, P_TEXTO)          la forma sobre lo de dentro de v
 ;    zona_de_puntero(v, x, y, an, al, P_...)  la de una zona (la última manda;
-;                                            hasta 8; con an = 0, se quitan)
+;                                            hasta 16; con an = 0, se quitan)
 ;    ajustes_puntero(a) / poner_ajustes_puntero(a)
 ;                                            los del Panel (cambiarlos, solo
 ;                                            el Panel o el modo administrador)
