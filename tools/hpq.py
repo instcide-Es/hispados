@@ -245,7 +245,12 @@ SISTEMA = [
         ('CUENTAS.HVP', r'\OFICINA\CUENTAS.HVP'), ('MIRADOR.HVP', r'\OFICINA\MIRADOR.HVP'),
         ('TIPOS.DAT', r'\OFICINA\TIPOS.DAT'), ('DICCIO.DAT', r'\OFICINA\DICCIO.DAT')]),
     # [WIN32] los programas de Windows de 32 bits y DirectX (docs/pentium/WIN32.md)
-    ('win32', '1.1', 'Programas de Windows de 32 bits, DirectX (con sonido) y OpenGL: WIN32.BIN, sus DLL y los ejemplos (Naves, GLPRUEBA)', 'base >= ' + VERSION_084, [
+    # (JUEGOS, 22/11/2026) win32 1.2: lo que pide un juego (hilos de verdad, SEH,
+    # el registro, MSVCRT de VC6, el ratón de los juegos, UDP, la mezcla en su
+    # hilo, el CD de sonido; WIN32 COMPRUEBA y WIN32.LOG). Vale con la base de
+    # antes (sin las llamadas 183 a 186 hace lo de siempre); con todo, la base
+    # que las lleve (la rama win32-juegos)
+    ('win32', '1.2', 'Programas de Windows de 32 bits y juegos: hilos, SEH, registro, DirectX (con sonido y CD), OpenGL; WIN32.BIN, sus DLL y los ejemplos', 'base >= ' + VERSION_084, [
         ('WIN32.BIN', r'\HISPA\WIN32.BIN'),
         ('MSVCRT.DLL', r'\WIN32\MSVCRT.DLL'), ('UCRT.DLL', r'\WIN32\UCRT.DLL'), ('COMCTL32.DLL', r'\WIN32\COMCTL32.DLL'),
         ('WINMM.DLL', r'\WIN32\WINMM.DLL'), ('DDRAW.DLL', r'\WIN32\DDRAW.DLL'), ('DSOUND.DLL', r'\WIN32\DSOUND.DLL'),

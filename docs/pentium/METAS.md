@@ -47,8 +47,9 @@ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.*
 - [ ] TLS 1.3 y descompresión gzip
 
 ## Programas
-- [x] ~~Programas de Windows de 32 bits (cargador PE) y **DirectX** (DirectDraw, DirectSound, DirectInput), como en Hispa-486~~ (WIN32.BIN: NASM, TCC, FASMW, Naves; [WIN32.md](WIN32.md)). Queda: hilos de verdad, SEH, Direct3D, el sonido de DirectSound
-- [x] ~~**OpenGL 1.1** por programa (OPENGL32.DLL y GLU32.DLL, las mismas que en Hispa-486; GLPRUEBA y ENGRANA)~~ — rama opengl (21/11: [../486/OPENGL.md](../486/OPENGL.md)). Para Half-Life 1 (meta de Carlos) falta lo de HW32: hilos, registro, mutex y eventos, SEH, MSVCRT de VC6 más completa, el CD
+- [x] ~~Programas de Windows de 32 bits (cargador PE) y **DirectX** (DirectDraw, DirectSound, DirectInput), como en Hispa-486~~ (WIN32.BIN: NASM, TCC, FASMW, Naves; [WIN32.md](WIN32.md)). ~~Hilos de verdad, SEH, el sonido de DirectSound~~ (22/11, rama win32-juegos); queda Direct3D
+- [x] ~~**OpenGL 1.1** por programa (OPENGL32.DLL y GLU32.DLL, las mismas que en Hispa-486; GLPRUEBA y ENGRANA)~~ — rama opengl (21/11: [../486/OPENGL.md](../486/OPENGL.md))
+- [x] ~~**Half-Life 1** (meta de Carlos; 22/11: en la 0.8.5 no arrancaba): lo que pide un juego de Windows de 1998-2000~~ — rama win32-juegos (22/11: [WIN32.md](WIN32.md), «Lo que pide un juego»): ~~el diagnóstico de lo que falta (el aviso con DLL!función, `\USUARIOS\<usuario>\WIN32.LOG`, `WIN32 COMPRUEBA`), hilos de verdad, CRITICAL_SECTION, mutex, eventos, semáforos, TLS y `__declspec(thread)`, SEH (el `__try/__except` de VC6), el registro, MSVCRT de VC6, la ventana a pantalla completa con el ratón de los juegos y DirectInput, el contador fino, UDP en red local, la mezcla en su hilo, waveOut y el CD de sonido por MCI~~. Queda: probarlo con el juego (que Carlos mande la foto del aviso o el WIN32.LOG, y `WIN32 COMPRUEBA` de su carpeta), el CD de sonido en un lector de verdad, las excepciones de C++, MIDI
 - [ ] Reproductor de música y vídeo (MP3, OGG, WAV; vídeo sencillo)
 - [ ] Visor de imágenes y Pintura
 - [ ] Compresor ZIP

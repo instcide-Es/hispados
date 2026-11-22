@@ -464,7 +464,8 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 90-98 | **la red**: pedir al servicio de red (90) y lo del propio servicio (91 a 96, 98); cómo está (97). Las cuenta la sección 14 | `redes.cas` | |
 
 | 190-199 | (SONIDO) **el sonido**: abrir un canal (190), darle muestras (191), el canal (192), el volumen y lo de todos (193), tocar un .WAV (194); y lo del servicio de sonido (195 a 199). Las cuenta la sección 14 decies | `abrir_canal`, `dar_muestras`, `orden_canal`, `tocar_wav`, `volumen_general`, `sonar` | |
-| 180-182 | [WIN32] **los programas de Windows** (`WIN32.BIN`, sección 14 ter): poner y quitar páginas en cualquier sitio de la zona del programa (180), las teclas pulsadas ahora y desde la última vez (181), y las ventanas: hacerlas sin marco o a pantalla completa, colocarlas, traerlas delante, dónde están, el ratón (182) | — | |
+| 180-182 | [WIN32] **los programas de Windows** (`WIN32.BIN`, sección 14 ter): poner y quitar páginas en cualquier sitio de la zona del programa (180), las teclas pulsadas ahora y desde la última vez (181), y las ventanas: hacerlas sin marco o a pantalla completa, colocarlas, traerlas delante, dónde están, el ratón; (JUEGOS) llevar la flecha, lo movido de verdad y esconderla (182) | — | |
+| 183-186 | (JUEGOS) **lo que pide un juego** (sección 14 quater ter): los hilos de un proceso de Windows, su TEB, el despachador de SEH, ceder y quitar las primeras 64 K (183); esperar mientras en una dirección haya un valor (184) y despertar a los que esperan (185); el CD de sonido: las pistas y leer sectores de sonido (186) | `crear_hilo`, `acaba_hilos`, `a_su_despachador`, `toc`, `leer_sonido` | |
 
 | 150-153 | **solo el servicio de ACPI** (`ACPI.BIN`): puertos, memoria física, configuración PCI, y dar la batería y esperar órdenes (sección 11, «Apagar de verdad y la batería») | — | |
 | 154 | **la batería**: lo último que ha leído el servicio de ACPI (una `Energía`, `energia.cas`) a EBX | — | 1, o 0 si no hay servicio |
@@ -4411,9 +4412,9 @@ desde el 21/11: sección 14 decies); y Winsock sobre el servicio de red.
   lienzo de 32 bits donde WIN32.BIN pinta ella y sus controles. Los menús son el
   emergente del núcleo.
 - **Los paquetes**: `win32` 1.0 (nuevo), que pide `base` 0.8.4 (en la 0.8.4, con el CD, SSH y el explorador: `base` 0.8.4 y `equipo` 0.9); Naves, en el menú Inicio del sistema instalado.
-- **Falta**: hilos de verdad (como en HW32, un hilo corre entero al crearlo),
-  SEH, escuchar en la red, HTTPS para ellos (por eso NAVEGA2.EXE aún no),
-  Direct3D. Ver [pentium/WIN32.md](pentium/WIN32.md).
+- **Falta**: escuchar en la red por TCP, HTTPS para ellos (por eso NAVEGA2.EXE
+  aún no), Direct3D. (Los hilos de verdad, SEH, el registro y lo demás que
+  pide un juego: sección 14 quater ter.) Ver [pentium/WIN32.md](pentium/WIN32.md).
 
 ### 14 quater bis. OpenGL (HispaGL, la rama `opengl`)
 
@@ -4439,6 +4440,60 @@ Pruebas: `castel/pruebas.sh`, parte 22 (`SOLO=win32`), el punto 5: GLPRUEBA en
 su ventana y a pantalla completa, ENGRANA y la sala, desde la Consola, con sus
 cuadros por segundo en QEMU (por la traza de HispaGL). Las del PC (contra Mesa)
 y las de Hispa-486, en [486/OPENGL.md](486/OPENGL.md).
+
+### 14 quater ter. Lo que pide un juego de Windows (JUEGOS, la rama `win32-juegos`)
+
+*22/11/2026. Carlos probó su Half-Life 1 (de su CD) en la 0.8.5 y no
+arrancaba: faltaban piezas. Lo que pide un juego de 1998-2000 (Win32, Visual
+C++ 6, OpenGL o DirectDraw), hecho y probado con programas propios
+(`tests/juegos/`), sin el juego. Todo, con el porqué, en
+[pentium/WIN32.md](pentium/WIN32.md), «Lo que pide un juego».*
+
+- **Qué falta, dicho claro**: si un programa llama a una función que aún no
+  hay, un cuadro dice cuál (`WINMM.DLL!mixerOpen`) y desde dónde
+  (`HW.DLL+0x1234`), y lo apunta en **`\USUARIOS\<usuario>\WIN32.LOG`** (también
+  lo que importa y no hay, las DLL que no están, lo que se pide por
+  `GetProcAddress` y no está, y las excepciones que nadie recoge). Y la orden
+  **`WIN32 COMPRUEBA programa.exe`** (o una carpeta entera: todos sus `.EXE` y
+  `.DLL`, también los de dentro) dice lo que falta sin ejecutarlo.
+- **Hilos de verdad**: cada hilo es una tarea del núcleo en el mismo espacio
+  (llamada 183), con el número de su proceso (sus archivos, ventanas, sonido y
+  red son del proceso) y su propia TEB (el núcleo pone la base del descriptor
+  0x43 de FS en cada cambio de tarea); `MAX_TAREAS` pasa a 32. Esperar en una
+  dirección y despertar (184 y 185, como un «futex»). En WIN32.BIN, un cerrojo
+  grande (cada función exportada entra por un trampolín que lo toma; las que
+  esperan lo sueltan); CRITICAL_SECTION, mutex (con nombre, abandonados),
+  eventos (también `PulseEvent`), semáforos, `WaitForMultipleObjects`, TLS
+  por hilo y `__declspec(thread)`, `Interlocked*` atómicas.
+- **SEH**: las excepciones del procesador de un programa de Windows van a su
+  despachador (`seh.c`): la cadena de FS:[0], `RtlUnwind`, `RaiseException`,
+  `SetUnhandledExceptionFilter`; `_except_handler3`, `_local_unwind2` y
+  `_global_unwind2` de VC6 en MSVCRT. WIN32.BIN va desde 64 K y quita la
+  primera página: un puntero nulo falla, como en Windows.
+- **El registro** (ADVAPI32): HKCU en `\USUARIOS\<usuario>\REGISTRO.REG`, HKLM en
+  `\USUARIOS\EQUIPO.REG` (fuera de la zona protegida; de texto, como REGEDIT4).
+- **MSVCRT de VC6**: `_ftol`, las `_CI...`, new y delete de C++, `_findfirst`,
+  `_beginthreadex`, `_splitpath`, lo de Unicode y unas 140 funciones más.
+- **El juego**: `SetCursorPos` lleva la flecha (mirar con el ratón volviendo
+  al centro), `ClipCursor`, `ShowCursor` la esconde, el ratón y
+  `GetSystemMetrics` en el modo del juego a pantalla completa, DirectInput con
+  lo movido de verdad, `QueryPerformanceCounter` y `timeGetTime` a 1 MHz que no
+  se van, `LoadLibrary` con carpeta relativa a la del `.EXE`.
+- **UDP** de cliente y de servidor (`bind`, sin bloqueo, `select`, la
+  difusión); **el sonido**: la mezcla en su hilo (DirectSound en bucle no se
+  corta), waveOut con sus avisos, y **el CD de sonido** por MCI («cdaudio»:
+  READ TOC y READ CD del lector, la llamada 186).
+- **Las llamadas nuevas** (win32.cas): 182, 8 a 10 (la flecha, lo movido de
+  verdad, esconderla); 183 (los hilos, el despachador de SEH, ceder, quitar las
+  primeras 64 K); 184 y 185 (esperar y despertar); 186 (el CD de sonido).
+  Todo lo cambiado lleva la marca **(JUEGOS)**; con un núcleo de antes,
+  WIN32.BIN hace lo de siempre (un hilo corre entero, una excepción acaba el
+  programa).
+- **Pruebas**: la parte 33 de `castel/pruebas.sh` (`SOLO=juegos`).
+- **Falta**: lo de C++ (`__CxxFrameHandler` no destruye los objetos al
+  deshacer; un `throw` acaba el programa), MIDI, el CD de sonido probado en un
+  lector de verdad (QEMU no tiene CD de música), las prioridades de los hilos
+  (se guardan, no cambian el reparto), Direct3D.
 
 ## 14 sexies. La seguridad: la zona protegida, los secretos y los servicios (PROTEGE)
 
@@ -5964,6 +6019,16 @@ capturas; Naves desde Mi equipo, jugando (DirectDraw a pantalla completa,
 DirectInput); el ejemplo DDRAW y FASMW abriendo y ensamblando HELLO.ASM; y
 WSOCK32 (REDPRUE) contra el servidor HTTP de aquí. Ver
 [pentium/WIN32.md](pentium/WIN32.md).
+
+**(JUEGOS) Lo que pide un juego de Windows** (la parte 33, `SOLO=juegos`): los
+programas de `tests/juegos/` (hechos por `nucleo32/win32/juegos.sh`): el
+diagnóstico (FALTA, SINDLL, `WIN32 COMPRUEBA` y `WIN32.LOG`), los hilos y lo que
+los sincroniza (HILOS), SEH (SEH, con el marco de VC6 a mano), el registro (REG,
+dos veces, y los `.REG` del disco), MSVCRT de VC6 (CRT); en el escritorio, la
+ventana del juego a pantalla completa con el ratón de QEMU (JUEGOV); UDP con un
+eco y un cliente de aquí (REDUDP, `tests/juegos/eco_udp.py`), y el sonido
+grabado (SONJ: DirectSound sin cortes aunque el programa no haga nada, waveOut,
+el CD por MCI).
 
 ## 16. Por dónde seguir
 
