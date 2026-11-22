@@ -38,6 +38,7 @@
 #  6. -smp 4 (con y sin KVM): la carga en los demás procesadores; y sin
 #     ninguna NVIDIA, que lo dice sin colgarse.
 #  7. Por UEFI (OVMF, q35, -smp 2): el Termómetro, las zonas y la carga.
+#  8. «Rendimiento» (R): las medidas en RENDIMIE.TXT, y que Esc la para.
 # Necesita ser root (usb.sh), qemu-system-x86_64, socat, mtools y fsck.fat;
 # para la 0, gcc; para la 4, php y openssl; para la 5, sshd (OpenSSH).
 
@@ -242,6 +243,18 @@ fi
 termo_qemu $Y/termo.img t6 70 "-cpu Haswell" "44:sendkey 1" "46:sendkey c" "56:$C" "56:o /b 0x71 91"
 mira "con un solo procesador: lo dice y carga solo este" "termo: suceso: la carga, en este procesador solo: los demás no (ningún otro procesador ha contestado"
 mira "(NVIDIA) sin gráficas NVIDIA (QEMU): lo dice, sin colgarse" "termo: suceso: gráficas NVIDIA Maxwell: ninguna en el PCI"
+# 8. (TERMO) «Rendimiento» (la tecla R): las medidas, en RENDIMIE.TXT; y Esc la para
+local cpum="-smp 2 -cpu Haswell"
+[ -w /dev/kvm ] && cpum="-enable-kvm -cpu host -smp 2"
+termo_qemu $Y/termo.img t9 170 "$cpum" "46:sendkey ret" "48:sendkey r"
+mira "«Rendimiento»: un núcleo (SHA-256, criba, matrices), todos los procesadores, la memoria, la memoria USB y pintar; en RENDIMIE.TXT" \
+  "termo: suceso: EMPIEZA la medida del rendimiento" "termo: rendimiento: 3/7 Todos los procesadores" "termo: rendimiento: 5/7 El disco" "termo: rendimiento: Hecho: SHA-256 [0-9]*,[0-9] MB/s"
+if mtype -i $Y/termo.img@@1M ::TERMO/RENDIMIE.TXT 2> /dev/null | grep -q '^MEDIDA;' && mtype -i $Y/termo.img@@1M ::TERMO/RENDIMIE.TXT | grep -q 'Todos los procesadores (2): [0-9]*,[0-9] vueltas/s, [0-9]*,[0-9] veces' \
+   && mtype -i $Y/termo.img@@1M ::TERMO/RENDIMIE.TXT | grep -q 'sin aceleración: mide la CPU pintando' && ! mdir -i $Y/termo.img@@1M ::TERMO/RENDIM.DAT > /dev/null 2>&1; then
+  ok "RENDIMIE.TXT: la línea para la tabla, los dos procesadores, «sin aceleración» y el archivo de prueba de la memoria USB, borrado"
+else ko "RENDIMIE.TXT: $(mtype -i $Y/termo.img@@1M ::TERMO/RENDIMIE.TXT 2> /dev/null | head -n 6 | tr '\n' ' ')"; fi
+termo_qemu $Y/termo.img t10 75 "$cpum" "46:sendkey ret" "48:sendkey r" "56:sendkey esc"
+mira "«Rendimiento» se para con Esc" "termo: rendimiento: Medida cancelada (Esc)"
 # 7. (UEFI) la misma memoria por UEFI (OVMF, q35): el Termómetro, las zonas de
 # la SSDT de prueba (ACPI.BIN con la RSDP que le pasa el núcleo) y la carga
 termo_uefi

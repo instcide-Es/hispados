@@ -233,6 +233,13 @@ void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int
 			PON(". ");
 		else if (p->vuelve_s >= 0)
 			PON(", y a los %s ya estaba a 5 °C o menos de la de antes de la prueba (%s). ", tiempo(a, p->vuelve_s), ve_grados(b, p->t_ini));
+		else if (b60 != VE_NO && b60 >= 50)
+			/* (bajó bien, pero no hasta la de antes: en Hispa-Pentium el
+			 * procesador solo descansa con «hlt», sin los estados de ahorro
+			 * profundos de un sistema operativo completo: el MacBook Air 2012
+			 * se quedaba en 44 °C de 33) */
+			PON("; a los %s estaba en %s (antes de la prueba, %s): es normal, sin el ahorro de energía profundo de un sistema operativo completo el procesador queda en reposo unos grados por encima. ",
+			    tiempo(a, p->ult_seg), ve_grados(c, p->ultimo), ve_grados(b, p->t_ini));
 		else
 			PON("; en %s no volvió a la de antes de la prueba (%s): se quedó en %s. ", tiempo(a, p->ult_seg), ve_grados(b, p->t_ini), ve_grados(c, p->ultimo));
 	}
@@ -291,6 +298,12 @@ void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int
 			PON("Al parar se enfría deprisa: el ventilador y el disipador sacan bien el calor.");
 		else if (lejos && sube < 200)
 			PON("Al parar baja despacio, pero como no ha pasado de %s (lejos del límite) no es mala señal: muchos portátiles apenas mueven el ventilador con tan poco calor.", ve_grados(a, p->pico_ref));
+		else if (lejos)
+			/* (el MacBook Air 2017: 62 °C de 105 y luego en 55-57 °C con C6 = 0 %:
+			 * en Hispa-Pentium el procesador solo descansa con «hlt», sin los
+			 * estados de ahorro profundos; no es el polvo) */
+			PON("Al parar baja despacio, pero sin el ahorro de energía profundo de un sistema operativo completo no se puede juzgar el enfriamiento fino: en carga va bien (%s, lejos de su límite%s%s).",
+			    ve_grados(a, p->pico_ref), lim != VE_NO ? " de " : "", lim != VE_NO ? ve_grados(b, lim) : "");
 		else if (b60 == VE_NO || b60 < 50)
 			PON("Al parar baja muy despacio: los datos indican que el calor no sale bien; conviene revisar el ventilador (que gire), el polvo y la pasta térmica.");
 		else

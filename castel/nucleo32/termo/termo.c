@@ -34,11 +34,16 @@
 #include "termo_acpi.h"
 #include "veredicto.h"
 #include "envio.h"
+#include "rendimiento.h"
 
 static int mas_caliente(void);
 static void mira_envio(void);
 static int en_reposo(void);
 static int informe_frenos(char *d, int cabe);
+static void mira_mide(void);
+static int midiendo;
+static u32 t_mide;
+static char aviso_mide[320];
 static void mira_anterior(void);
 static void log_arranque(void);
 static void log_escribe(const char *clase, const char *texto);
@@ -863,7 +868,8 @@ static void mira_cambios(void)
 	for (k = 0; k < ns; k++) {
 		int e = estado_de(S[k].t, S[k].limite);
 
-		if (S[k].t == NO && vistos_antes[k])
+		/* (los núcleos de los demás procesadores solo se leen en la carga: no es un fallo) */
+		if (S[k].t == NO && vistos_antes[k] && !(S[k].clase == CL_CPU && (S[k].zona & 0x10000)))
 			suceso_log("AVISO: el sensor «%s» ha dejado de responder", S[k].nombre);
 		if (S[k].t != NO && !vistos_antes[k]) {
 			suceso_log("sensor «%s»: %s (límite %s)", S[k].nombre, grados(g, S[k].t), S[k].limite == NO ? "no dice" : grados(g2, S[k].limite));
@@ -1502,6 +1508,13 @@ static void escribe_informe(void)
 	}
 	if (anterior[0])
 		IN("\r\nLA VEZ ANTERIOR\r\n  %s\r\n", anterior);
+	{
+		char r2[120];
+
+		snprintf(r2, sizeof r2, "%s\\RENDIMIE.TXT", carpeta);
+		if (existe(r2))
+			IN("\r\nRENDIMIENTO: lo medido con «Rendimiento» está en RENDIMIE.TXT (con la tabla de los equipos medidos).\r\n");
+	}
 	if (cpu.aproximada)
 		IN("Nota: el sensor de este procesador (Atom) es aproximado.\r\n");
 	IN("No se puede leer sin su controlador la temperatura de las tarjetas gráficas (NVIDIA/AMD), salvo que la BIOS la dé como zona ACPI.\r\n");
@@ -1901,6 +1914,7 @@ static void pulso(void)
 		mide_ocupacion();
 		mira_frenos();
 		mira_envio();
+		mira_mide();
 		if (!csv_listo && !csv_malo && cuenta_s >= 6)
 			csv_cabecera();
 		apunta_historia();
@@ -1932,8 +1946,8 @@ static const char *nucleos_texto(void)
 
 /* ---------------------------------------------------------------- pintar */
 struct boton { int x, y, an, al; const char *t; int id; };
-enum { B_CALENTAR = 1, B_5, B_10, B_15, B_PARAR, B_CAPTURA, B_ENVIAR, B_TERMINAL };
-static struct boton bot[8];
+enum { B_CALENTAR = 1, B_5, B_10, B_15, B_PARAR, B_CAPTURA, B_ENVIAR, B_TERMINAL, B_MIDE };
+static struct boton bot[12];
 static int nbot;
 
 static void pixel_mezcla(int x, int y, u32 c)
@@ -1991,7 +2005,7 @@ static void boton(int x, int y, int an, int al, const char *t, int id, int activ
 	if (marcado)
 		lz_marco(&LZ, x + 3, y + 3, an - 6, al - 6, C_TINTA);
 	lz_texto_centro(&LZ, x + an / 2, y + (al - 16) / 2, t, activo ? C_TINTA : 0x9A948A, 1, marcado);
-	if (nbot < 8) {
+	if (nbot < 12) {
 		bot[nbot].x = x, bot[nbot].y = y, bot[nbot].an = an, bot[nbot].al = al, bot[nbot].t = t, bot[nbot].id = id;
 		nbot++;
 	}
@@ -2207,7 +2221,9 @@ static void pinta(void)
 		lz_texto(&LZ, cn, y + 7, s->nombre, C_TINTA, 1);
 		if (s->fija)
 			lz_texto(&LZ, cn + ancho_texto(s->nombre, 1) + 6, y + 7, "(fija, no cambia)", C_GRIS, 1);
-		if (s->clase == CL_GPU && s->t == NO && gpu_estado[k] > 0 && gpu_estado[k] < 10)
+		if (s->clase == CL_CPU && (s->zona & 0x10000) && s->t == NO)
+			lz_texto(&LZ, ca, y + 7, "solo en la carga", C_GRIS, 1);
+		else if (s->clase == CL_GPU && s->t == NO && gpu_estado[k] > 0 && gpu_estado[k] < 10)
 			lz_texto(&LZ, ca, y + 7, estado_gpu[gpu_estado[k]], C_GRIS, 1);
 		else
 			lz_negrita(&LZ, ca, y + 7, s->no_fiable ? "sin lectura fiable" : grados(g, s->t), s->no_fiable ? C_PELIGRO : C_TINTA, 1);
@@ -2333,8 +2349,12 @@ static void pinta(void)
 		xb += 102;
 		boton(xb, yb, 96, 32, "15 min (3)", B_15, fase != F_CARGA, minutos == 15);
 		xb += 112;
-		boton(xb, yb, 120, 32, "Parar (Esc)", B_PARAR, fase == F_CARGA || fase == F_ENFRIA, 0);
+		boton(xb, yb, 120, 32, "Parar (Esc)", B_PARAR, fase == F_CARGA || fase == F_ENFRIA || midiendo, 0);
 		xb += 130;
+		if (W >= 1000) {
+			boton(xb, yb, 150, 32, "Rendimiento (R)", B_MIDE, !midiendo && fase != F_CARGA && fase != F_ENFRIA, midiendo);
+			xb += 160;
+		}
 		{
 			/* (TERMO) «Enviar a Carlos» y «Terminal», si la memoria está preparada */
 			int estrecho = W < 1000, an_env = estrecho ? 80 : 150, an_ter = estrecho ? 90 : 100,
@@ -2351,7 +2371,8 @@ static void pinta(void)
 			if (puede_terminal && xb + an_ter <= W)
 				boton(xb, yb, an_ter, 32, "Terminal", B_TERMINAL, 1, 0);
 		}
-		lz_texto(&LZ, 12, H - 20, aviso_envio[0] ? aviso_envio : aviso_archivo, aviso_envio[0] ? C_TINTA : C_GRIS, 1);
+		lz_texto(&LZ, 12, H - 20, midiendo || aviso_mide[0] ? aviso_mide : aviso_envio[0] ? aviso_envio : aviso_archivo,
+			 midiendo || aviso_mide[0] || aviso_envio[0] ? C_TINTA : C_GRIS, 1);
 		/* la vez anterior no acabó bien: se dice, encima de todo */
 		if (ver_anterior) {
 			int an = W - 120, rx = 60, ry = 100, al = 90 + 18 * lz_parrafo(0, 0, 0, an - 28, anterior, 0, 1, 18);
@@ -2448,6 +2469,66 @@ static void mira_envio(void)
 	}
 	if ((int)(jg_tics() - t_envio) > 900 * (int)jg_hz)
 		enviando = 0;
+}
+
+/* (TERMO) «Medir rendimiento»: TERMO.BIN /MIDE, una tarea hija; lo que va
+ * diciendo, en MIDE.EST; Esc deja MIDE.PAR y se para */
+
+static void lanza_mide(void)
+{
+	char r[120];
+	u32 x;
+
+	if (midiendo || fase == F_CARGA || fase == F_ENFRIA)
+		return;
+	snprintf(r, sizeof r, "%s\\MIDE.EST", carpeta);
+	escribe(r, "Empezando...", 12, 1);
+	x = sc(SC_LANZAR_SUELTO, (u32)"\\TERMO.BIN", (u32)"/MIDE", 0);
+	if (ES_ERROR(x))
+		x = sc(SC_LANZAR_SUELTO, (u32)"\\HISPA\\TERMO.BIN", (u32)"/MIDE", 0);
+	if (ES_ERROR(x)) {
+		snprintf(aviso_mide, sizeof aviso_mide, "Rendimiento: no se puede poner en marcha TERMO.BIN /MIDE.");
+		return;
+	}
+	midiendo = 1;
+	t_mide = jg_tics();
+	snprintf(aviso_mide, sizeof aviso_mide, "Rendimiento: empezando...");
+	suceso_log("EMPIEZA la medida del rendimiento (TERMO.BIN /MIDE; menos de 2 min; Esc la para)");
+}
+
+static void para_mide(void)
+{
+	char r[120];
+
+	snprintf(r, sizeof r, "%s\\MIDE.PAR", carpeta);
+	escribe(r, "parar", 5, 1);
+}
+
+static void mira_mide(void)
+{
+	char r[120], t[320];
+	u32 m, n;
+
+	if (!midiendo)
+		return;
+	snprintf(r, sizeof r, "%s\\MIDE.EST", carpeta);
+	m = sc(SC_ABRIR, (u32)r, PARA_LEER, 0);
+	if (ES_ERROR(m))
+		return;
+	n = sc(SC_LEER, m, (u32)t, sizeof t - 1);
+	sc(SC_CERRAR, m, 0, 0);
+	if (ES_ERROR(n))
+		return;
+	t[n] = 0;
+	if (strcmp(t, aviso_mide + 13)) {
+		snprintf(aviso_mide, sizeof aviso_mide, "Rendimiento: %s", t);
+		if (busca(t, "Hecho") || busca(t, "cancelada") || busca(t, "No hay memoria")) {
+			midiendo = 0;
+			suceso_log("medida del rendimiento: %s", t);
+		}
+	}
+	if ((int)(jg_tics() - t_mide) > 300 * (int)jg_hz)
+		midiendo = 0;
 }
 
 /* SSH.INI: equipo=, puerto=, usuario= */
@@ -2563,7 +2644,9 @@ static void haz(int id)
 	case B_10: pide_minutos(10); break;
 	case B_15: pide_minutos(15); break;
 	case B_PARAR:
-		if (fase == F_CARGA)
+		if (midiendo)
+			para_mide();
+		else if (fase == F_CARGA)
 			para_carga(0, 1);
 		else if (fase == F_ENFRIA) {
 			fase = F_RESULTADO;
@@ -2578,6 +2661,9 @@ static void haz(int id)
 		break;
 	case B_TERMINAL:
 		lanza_terminal();
+		break;
+	case B_MIDE:
+		lanza_mide();
 		break;
 	}
 	jg_cambio = 1;
@@ -2605,6 +2691,7 @@ static void suceso(const struct suceso *s)
 		case 0x158: captura(); estado_serie(); break;	/* F12 */
 		case 'e': case 'E': if (puede_enviar) lanza_envio(); break;
 		case 't': case 'T': if (puede_terminal) lanza_terminal(); break;
+		case 'r': case 'R': lanza_mide(); break;
 		default:
 			if (ES_INTRO(s->a) && fase == F_RESULTADO) {
 				fase = F_REPOSO;
@@ -2689,6 +2776,21 @@ int principal(void)
 	 * Consola lo dice en la pantalla; con /VENTANA, en ENVIO.EST) */
 	arranque_auto = arg_aqui("/ARRANQUE");
 	elige_carpeta();
+	if (arg_aqui("/MIDE")) {
+		char eq[120];
+		u32 r[4];
+		int i;
+
+		/* (el procesador y el equipo, para el archivo: la marca de CPUID y el SMBIOS que ya tenga el servicio) */
+		memset(cpu.marca, 0, sizeof cpu.marca);
+		for (i = 0; i < 3; i++) {
+			cpuid(0x80000002u + (u32)i, r);
+			memcpy(cpu.marca + i * 16, r, 16);
+		}
+		lee_zonas();
+		snprintf(eq, sizeof eq, "%s %s", hay_zonas ? za.t.fabricante : "", hay_zonas ? za.t.producto : "equipo");
+		return carpeta[0] ? rendimiento_principal(carpeta, eq, cpu.marca) : 1;
+	}
 	if (arg_aqui("/ENVIAR")) {
 		if (!carpeta[0]) {
 			sc(SC_ESCRIBIR, (u32)"TERMO: no hay carpeta TERMO.\n", 29, 0);

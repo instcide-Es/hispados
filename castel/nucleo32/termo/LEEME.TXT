@@ -239,4 +239,18 @@ con él encendido simplemente no arranca esta memoria.
   entera. La primera vez con un equipo nuevo enseña su huella y pregunta.
 
 
+
+9. «RENDIMIENTO» (CUÁNTO CORRE)
+-------------------------------
+  El botón «Rendimiento» (o la tecla R) mide en menos de 2 minutos: el
+  procesador (un núcleo, con enteros y con coma flotante, y todos a la vez),
+  la memoria (leer, escribir, copiar y la latencia), la memoria USB (con un
+  archivo de prueba propio que se borra; el disco del portátil NO se toca) y
+  lo rápido que pinta la CPU (sin la tarjeta gráfica: sin su controlador no
+  hay aceleración). Mientras, vigila la temperatura: si al final corre menos
+  que al principio, dice «puntuación bajada por calor». Esc lo para.
+  Todo queda en TERMO\RENDIMIE.TXT, con la fecha, el equipo y una tabla con
+  los equipos ya medidos con esta memoria (la referencia, 100, es el HP Mini
+  5103, cuando se haya medido).
+
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
