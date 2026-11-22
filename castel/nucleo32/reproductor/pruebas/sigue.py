@@ -65,16 +65,20 @@ def main():
             if callado >= 2400:
                 candidatos.append(i)
             callado = 0
+    # (con un trozo largo —segundo y medio—: con uno corto, una nota de una
+    # escala casa con otra parecida)
+    largo = min(72000, len(r) - j0 - 1)
     for c0 in candidatos[:40]:
-        base = c0 - (j0 - (j0 - 0))
-        for i in range(max(0, c0 - 400), min(len(g) - n0, c0 + 400), 2):
-            c = corr(g, i, r, j0, n0, 8)
+        for i in range(max(0, c0 - 400), min(len(g) - largo, c0 + 400), 8):
+            c = corr(g, i, r, j0, largo, 24)
             if c > cm:
                 cm, mejor = c, i
-    for i in range(max(0, mejor - 4), min(len(g) - n0, mejor + 4)):
-        c = corr(g, i, r, j0, n0, 1)
-        if c > cm:
-            cm, mejor = c, i
+    m0 = mejor
+    for i in range(max(0, m0 - 10), min(len(g) - largo, m0 + 10)):
+        c = corr(g, i, r, j0, largo, 6)
+        if c > cm or i == max(0, m0 - 10):
+            if c > cm:
+                cm, mejor = c, i
     desfase = mejor - j0
     if '--depura' in sys.argv:
         print('inicio: j0=%d mejor=%d corr=%.6f candidatos=%d' % (j0, mejor, cm, len(candidatos)), file=sys.stderr)

@@ -153,7 +153,7 @@ static int pasa_el_filtro(motor *m, voz *v)
 	estira e;
 	u64 hay;
 
-	if (v != &m->v[m->va] || !m->sin_huecos || m->fundido || !b->lista || b->fallo || b->d.hz != v->d.hz ||
+	if (v != &m->v[m->va] || !m->sin_huecos || (m->fundido && strcmp(v->d.o.ruta, b->d.o.ruta)) || !b->lista || b->fallo || b->d.hz != v->d.hz ||
 	    b->entrada || b->sacadas)
 		return 0;
 	hay = esperadas(m, v);
@@ -497,7 +497,8 @@ void motor_ciclo(motor *m, u32 presupuesto)
 		n = TROZO;
 		hechas = voz_saca(m, a, s, n);
 		/* el fundido: lo de la siguiente, sumado */
-		if (m->fundido > 0 && b->lista && !b->fallo) {
+		/* (entre las pistas de un mismo disco —una hoja .CUE—, sin fundido: van seguidas) */
+		if (m->fundido > 0 && b->lista && !b->fallo && strcmp(a->d.o.ruta, b->d.o.ruta)) {
 			u64 falta = voz_falta(m, a), F = (u64)m->fundido * m->hz;
 
 			if ((falta && falta <= F) || a->acabada) {

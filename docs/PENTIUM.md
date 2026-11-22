@@ -6236,7 +6236,26 @@ salto (`pruebas/sigue.py`).
 
 ### Lo que cuesta (el HP Mini 5103, Atom N455)
 
-RESUMEN_CPU
+Medido en QEMU con **`-cpu n270 -icount shift=0`**: un Atom N270 (el mismo
+núcleo Bonnell que el N455 del HP Mini 5103, sin CMOV de más: REPRODUC.BIN es
+`-march=i586` y `hacer.sh` comprueba con `objdump` que no lleva CMOV ni FCOMI)
+que hace **mil millones de instrucciones por segundo**: lo que dice es lo que
+cuesta en instrucciones. El N455 va a 1,66 GHz; con lo que tarda su x87
+(sin reordenar), cuente entre una y dos veces estos números.
+
+| Qué | Lo que gasta |
+|---|---|
+| Decodificar MP3 de 192 kbit/s (`REPRODUCE /MIDE`) | 1,5-1,7 % |
+| OGG Vorbis | 1,5 % |
+| FLAC | 1,0 % |
+| Un módulo MOD (a 48 kHz) | 0,5 % |
+| **La ventana sonando, con el espectro** (decodificar, remuestrear a 48 kHz, pintar 20 cuadros por segundo, la barra y la lista) | **3,4-4,5 %** |
+| El modo pequeño (el título que se desplaza y el tiempo) | 1,1-1,2 % |
+| La Consola (`REPRODUCE`), sonando | menos del 1 % |
+
+(Sin `-icount`, el QEMU normal emula el x87 con coma flotante «de programa»,
+decenas de veces más despacio que un Atom: allí un MP3 cuesta el 30 %; por eso
+la prueba de «con el procesador ocupado» se hace con KVM, abajo.)
 
 ### Probarlo
 

@@ -2574,6 +2574,14 @@ int vista_principal(const char *args)
 		p = siguiente_ruta(p, a, sizeof a);
 		if (!a[0])
 			break;
+		if (igual_sin_caja(a, "/PEQUENO") || igual_sin_caja(a, "/MINI"))
+			mini = 1;
+		else if (igual_sin_caja(a, "/SINVIS"))
+			vis_modo = 0;
+		else if (igual_sin_caja(a, "/ONDA"))
+			vis_modo = 2;
+		else if (igual_sin_caja(a, "/ESPECTRO"))
+			vis_modo = 1;
 		if (es_opcion(a))
 			continue;
 		anade_argumento(&L, a);

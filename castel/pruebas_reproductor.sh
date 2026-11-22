@@ -92,6 +92,12 @@ for x in TONOS.CUE:"la imagen .BIN de un CD de música con su hoja .CUE" ALBUM.C
   if grep -q "^cancion 2: Tono 3" $Y/motor.txt && echo "$l" | grep -q "desfase=0 snr=[6-9][0-9]"; then ok "anfitrión: ${x#*:}: sus tres pistas, sin huecos ($l)"
   else ko "anfitrión: ${x#*:}: $l"; head -4 $Y/motor.txt | sed 's/^/        /'; fi
 done
+# el fundido (4 s) entre canciones (no entre las pistas de un mismo disco):
+# 10 + 10 + 12 s, menos dos fundidos de 4 s, son 24 s
+REPRO_FUNDIDO=4 $R motor $Y/m.wav $F/escala.ogg $F/escala.flac $F/TONOS.CUE > $Y/motor.txt 2>&1
+l=$(sed -n 's/^salida=\([0-9]*\) .*/\1/p' $Y/motor.txt)
+if [ -n "$l" ] && [ "$l" -ge 1150000 ] && [ "$l" -le 1154000 ]; then ok "anfitrión: el fundido de 4 s entre canciones (y no entre las pistas de un disco): $l tramas (24 s)"
+else ko "anfitrión: el fundido: «$l» tramas (se esperaban unas 1.152.000)"; fi
 # el módulo: suena (30 s) y dice lo que es
 $R motor $Y/m.wav $F/PRUEBA.MOD > $Y/motor.txt 2>&1
 if grep -q "^salida=14[0-9][0-9][0-9][0-9][0-9] " $Y/motor.txt && grep -q "duracion=30 fallo=0" $Y/motor.txt; then ok "anfitrión: un módulo MOD propio (cuatro canales), con libxmp-lite: 30 s"
@@ -169,9 +175,20 @@ done
 MEMORIA=128 MODULOS=$Y/ORDENES.BIN,$Y/REPRODUC.BIN,$Y/ESCVBR.MP3,$Y/ESCALA.FLA,$Y/ESCALA.OGG,$Y/PRUEBA.MOD ARRANQUE=ordenes QEMU_MAS="-cpu n270 -icount shift=0,sleep=off" \
   $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN "reproduce /mide M:\\ESCVBR.MP3 M:\\ESCALA.FLA M:\\ESCALA.OGG M:\\PRUEBA.MOD" ":pausa 40" > $Y/mide.sal 2>&1
 tr -d '\r' < $Y/mide.sal | grep "^MIDE:" > $Y/mide.txt
-if [ "$(wc -l < $Y/mide.txt)" = 4 ] && awk -F'[(%]' '{ split($2, x, " "); gsub(",", ".", x[1]); if (x[1] + 0 > 40) m++ } END { exit m }' $Y/mide.txt; then
+if [ "$(wc -l < $Y/mide.txt)" = 4 ] && awk -F'[(%]' '{ split($2, x, " "); gsub(",", ".", x[1]); if (x[1] + 0 > 10) m++ } END { exit m }' $Y/mide.txt; then
   ok "lo que cuesta decodificar en un Atom N270 de QEMU (mil millones de instrucciones por segundo): $(sed 's/^MIDE: //; s/ de sonido en [0-9]* ms//; s/; [0-9]* M ciclos//' $Y/mide.txt | tr '\n' ' ')"
 else ko "REPRODUCE /MIDE en el Atom: $(tr '\n' ' ' < $Y/mide.txt)"; fi
+# y la ventana entera sonando (con el espectro) y en pequeño, en el mismo Atom
+CAPTURAS=$G MEMORIA=256 MODULOS=$Y/ORDENES.BIN,$Y/CONSOLA.BIN,$Y/SONIDO.BIN,$Y/INICIO.WAV,$Y/REPRODUC.BIN,$Y/ESCVBR.MP3,$Y/ESCALA.OGG,$Y/PRUEBA.MOD \
+  ARRANQUE=escritorio QEMU_MAS="-cpu n270 -icount shift=0 -audiodev wav,id=snd0,path=$Y/ic.wav,out.frequency=48000 -device intel-hda -device hda-duplex,audiodev=snd0" \
+  $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 8" ":doble 60 186" ":pausa 6" ":escribe reproduce /ventana M:\\ESCVBR.MP3 M:\\ESCALA.OGG M:\\PRUEBA.MOD" ":tecla ret" \
+  ":pausa 30" ":tecla ctrl-m" ":pausa 15" > $Y/ic.sal 2>&1
+tr -d '\r' < $Y/ic.sal | grep "^reproductor: gasta el" > $Y/gasta.txt
+l=$(grep "visualización espectro)" $Y/gasta.txt | tail -n 1 | sed 's/.*gasta el \([0-9,]*\) %.*/\1/')
+k=$(grep "pequeño)" $Y/gasta.txt | tail -n 1 | sed 's/.*gasta el \([0-9,]*\) %.*/\1/')
+if [ -n "$l" ] && [ -n "$k" ] && echo "$l $k" | awk '{ gsub(",", ".", $1); gsub(",", ".", $2); exit !($1 + 0 < 15 && $2 + 0 < 8) }'; then
+  ok "la ventana entera sonando en el Atom N270 de QEMU: el $l % con el espectro; en pequeño, el $k %"
+else ko "lo que gasta la ventana en el Atom: «$l» y «$k»: $(tr '\n' ' ' < $Y/gasta.txt)"; fi
 # ---- 5. el CD: READ TOC y READ CD por IDE y por SATA ----
 mkdir -p $Y/iso/d
 head -c 300000 $F/escala.wav > $Y/iso/d/DATOS.BIN
@@ -197,7 +214,7 @@ done
 local KVM= OTRO=()
 if [ -w /dev/kvm ] && qemu-system-i386 -accel help 2>/dev/null | grep -q kvm; then
   KVM="-enable-kvm"
-  OTRO=(":doble 60 186" ":pausa 4" ":escribe reproduce /mide M:\\ESCVBR.MP3 M:\\ESCVBR.MP3 M:\\ESCVBR.MP3 M:\\ESCVBR.MP3 M:\\ESCVBR.MP3 M:\\ESCVBR.MP3 M:\\ESCVBR.MP3 M:\\ESCVBR.MP3 M:\\ESCVBR.MP3 M:\\ESCVBR.MP3 M:\\ESCVBR.MP3 M:\\ESCVBR.MP3" ":tecla ret" ":pausa 1" ":clic 185 583" ":pausa 1")
+  OTRO=(":doble 60 186" ":pausa 4" ":escribe reproduce /ocupa 70" ":tecla ret" ":pausa 1" ":clic 185 583" ":pausa 1")
 fi
 cp $F/escala.ogg $Y/ESCALA.OGG
 (cd $F && REPRO_RG=1 $R motor $Y/ref_esc.wav escala.ogg TONOS.CUE PRUEBA.MOD > /dev/null 2>&1)
@@ -211,7 +228,7 @@ CAPTURAS=$G MEMORIA=256 MODULOS=$Y/ORDENES.BIN,$Y/CONSOLA.BIN,$Y/SONIDO.BIN,$Y/I
 tr -d '\r' < $Y/esc.sal > $Y/esc.txt
 S=$Y/esc.txt
 mira "en el escritorio: REPRODUCE /VENTANA abre la ventana" "^reproductor: ventana 760x[0-9]*; 5 canciones; la tarjeta a 48000 Hz$"
-[ -n "$KVM" ] && mira "y, a la vez, otro programa gasta todo el procesador (REPRODUCE /MIDE, con KVM)" "^MIDE: ESCVBR: MP3"
+[ -n "$KVM" ] && mira "y, a la vez, otro programa gasta todo el procesador (REPRODUCE /OCUPA 70, con KVM)" "^reproductor: OCUPA: gasto el procesador 70 s$"
 # la pantalla (azul oscuro), Reproducir/Pausa (verde) y el icono de la nota en la bandeja
 miracap "la ventana: la «pantalla» con la carátula, los botones grandes (Pausa, en verde) y la nota del Reproductor en la bandeja" re1 \
   rgb 40 80 15304F rgb 250 270 2E9E40 rgb 726 585 2468C8

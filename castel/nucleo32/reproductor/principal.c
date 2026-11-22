@@ -330,6 +330,25 @@ int principal(void)
 			} else if (igual_sin_caja(a, "/VELOCIDAD")) {
 				p = trozo(p, a, sizeof a);
 				velocidad = (float)decimas_de(a) / 10.0f;
+			} else if (igual_sin_caja(a, "/OCUPA")) {
+				/* (para las pruebas) gastar todo el procesador tantos segundos */
+				char b2[16];
+				u32 hasta, vueltas = 0;
+				volatile u32 x = 1;
+
+				p = trozo(p, b2, sizeof b2);
+				reg("OCUPA: gasto el procesador %d s", a_entero(b2));
+				hasta = so_ms() + (u32)a_entero(b2) * 1000;
+				while ((int)(hasta - so_ms()) > 0) {
+					u32 k;
+
+					for (k = 0; k < 100000; k++)
+						x = x * 1103515245u + 12345u;
+					vueltas++;
+				}
+				fmt(a, sizeof a, "OCUPA: %u vueltas\n", vueltas);
+				so_dice(a);
+				return 0;
 			} else if (igual_sin_caja(a, "/PRUEBACD")) {
 				char l[8], b2[16], c2[16];
 
