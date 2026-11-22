@@ -44,6 +44,8 @@ int ec_prepara(void);			/* lo busca y pone su manejador (antes de los _INI) */
 void ec_reg(int conecta);		/* _REG (3, conecta) */
 void ec_eventos(void);			/* atiende los avisos pendientes (_Qxx) */
 void *ec_disp(void);
+extern int ec_solo_lectura;		/* (TERMO) 1: lo que se escriba en la región EC, no se escribe */
+extern unsigned int ec_ignoradas;
 
 /* ---- bateria.c ---- */
 void bateria_tarea(void);		/* lo que hace la tarea: no vuelve */

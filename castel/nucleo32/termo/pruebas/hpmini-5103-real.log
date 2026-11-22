@@ -1,0 +1,47 @@
+Registro del Termometro de Hispa-Pentium, 22/11/2026
+(EXTRACTO del registro real del HP Mini 5103 que pegó Carlos: arranque, sucesos, una muestra de DATOS de cada fase y el resultado; las líneas DATOS omitidas son iguales salvo Nucleo 0, que sube de 25 a 38 C en la carga y se queda en 37-38 C al enfriar)
+19:12:48 ARRANQUE ahci: no hay controladora AHCI (clase 01 06 01)
+19:12:48 ARRANQUE ahci: en el PCI, 00:1F.2: 27C08086, clase 01018A
+19:12:48 ARRANQUE usb: controladora EHCI 8086:27CC, 8 puertos
+19:12:48 ARRANQUE usb: controladora UHCI 8086:27C8, 2 puertos
+19:12:48 ARRANQUE usb: controladora UHCI 8086:27C9, 2 puertos
+19:12:48 ARRANQUE usb: controladora UHCI 8086:27CA, 2 puertos
+19:12:48 ARRANQUE usb: controladora UHCI 8086:27CB, 2 puertos
+19:12:48 ARRANQUE usb: aparato 0, 05C8:0403, velocidad alta, en el puerto 4 (EHCI), interfaz 0E/01/00, interfaz 0E/02/00
+19:12:48 ARRANQUE usb: aparato 1, 346D:5678, velocidad alta, en el puerto 8 (EHCI), almacenamiento
+19:12:48 ARRANQUE usb: aparato 2, 367B:1919, velocidad plena, en el puerto 2 (UHCI), ratn
+19:12:48 ARRANQUE usb: 0 teclados, 1 ratones, 1 memorias.
+19:12:48 ARRANQUE disco 0: Patriot P210 128GB, 122104 MB, FAT32.
+19:12:48 ARRANQUE disco 1: VendorCoProductCode, 15000 MB, FAT16 (USB).
+19:12:48 ARRANQUE unidades: C: (disco 0, IDE, FAT32) M: (en memoria) X: (disco 1, USB, FAT16), la del sistema, X:
+19:12:48 ARRANQUE pantalla: arrancada a 1024 x 600, 32 bits (la ha puesto el cargador)
+19:12:48 ARRANQUE pantalla: EDID: , hecha para 1024 x 600 (el panel, por el GMBUS de Intel)
+19:12:48 ARRANQUE pantalla: \PANTALLA.ENV pide  (prueba=0)
+19:12:48 ARRANQUE escritorio: \PANTALLA.ENV: pantalla= antes= prueba=0
+19:12:48 SUCESO Termometro abierto (solo, al arrancar desde la memoria): procesador Intel(R) Atom(TM) CPU N455   @ 1.66GHz, 1 sensores del procesador, registro X:\TERMO\11221912.CSV
+19:12:50 SUCESO ACPI (ACPI.BIN): 6 zonas termicas, 4 ventiladores, equipo Hewlett-Packard HP Mini 5103, placa Hewlett-Packard 1608, BIOS 68PGP Ver. F.61 (04/25/2016)
+19:12:50 SUCESO sensor Nucleo 0 del procesador: 22,0 C (limite 90,0 C)
+19:12:50 SUCESO sensor Zona ACPI \_TZ_.FDTZ: 50,0 C (limite 110,0 C)
+19:12:50 SUCESO ventilador 1: sin datos
+19:12:50 SUCESO ventilador 2: sin datos
+19:12:50 SUCESO ventilador 3: sin datos
+19:12:50 SUCESO ventilador 4: sin datos
+19:12:50 SUCESO bateria: enchufado a la corriente
+19:12:50 SUCESO bateria al 87 %
+19:12:50 DATOS fase=reposo max=50,0 C | Nucleo 0=22,0 C | ACPI \_TZ_.CU2Z=-- | ACPI \_TZ_.DTSZ=-- | ACPI \_TZ_.CPUZ=-- | ACPI \_TZ_.SKNZ=-- | ACPI \_TZ_.BATZ=-- | ACPI \_TZ_.FDTZ=50,0 C | MHz=1640 | bateria=87% enchufado
+19:13:12 DATOS fase=reposo max=50,0 C | Nucleo 0=24,0 C | ACPI \_TZ_.CU2Z=-- | ACPI \_TZ_.DTSZ=-- | ACPI \_TZ_.CPUZ=-- | ACPI \_TZ_.SKNZ=-- | ACPI \_TZ_.BATZ=-- | ACPI \_TZ_.FDTZ=50,0 C | MHz=1640 | bateria=87% enchufado
+19:13:14 SUCESO EMPIEZA la prueba de esfuerzo: 300 s, carga de coma flotante (x87) en 1 nucleo (tarea hija TERMO.BIN /CARGA, al 100 %), el mas caliente, a 50,0 C
+19:13:14 DATOS fase=carga max=50,0 C | Nucleo 0=25,0 C | ACPI \_TZ_.CU2Z=-- | ACPI \_TZ_.DTSZ=-- | ACPI \_TZ_.CPUZ=-- | ACPI \_TZ_.SKNZ=-- | ACPI \_TZ_.BATZ=-- | ACPI \_TZ_.FDTZ=50,0 C | MHz=1640 | bateria=87% enchufado
+19:13:16 DATOS fase=carga max=50,0 C | Nucleo 0=26,0 C | ACPI \_TZ_.CU2Z=-- | ACPI \_TZ_.DTSZ=-- | ACPI \_TZ_.CPUZ=-- | ACPI \_TZ_.SKNZ=-- | ACPI \_TZ_.BATZ=-- | ACPI \_TZ_.FDTZ=50,0 C | MHz=1640 | bateria=87% enchufado
+19:13:20 DATOS fase=carga max=50,0 C | Nucleo 0=26,0 C | ACPI \_TZ_.CU2Z=-- | ACPI \_TZ_.DTSZ=-- | ACPI \_TZ_.CPUZ=-- | ACPI \_TZ_.SKNZ=-- | ACPI \_TZ_.BATZ=-- | ACPI \_TZ_.FDTZ=50,0 C | MHz=1639 | bateria=87% enchufado
+19:14:12 DATOS fase=carga max=50,0 C | Nucleo 0=31,0 C | ACPI \_TZ_.CU2Z=-- | ACPI \_TZ_.DTSZ=-- | ACPI \_TZ_.CPUZ=-- | ACPI \_TZ_.SKNZ=-- | ACPI \_TZ_.BATZ=-- | ACPI \_TZ_.FDTZ=50,0 C | MHz=1639 | bateria=87% enchufado
+19:15:42 DATOS fase=carga max=50,0 C | Nucleo 0=35,0 C | ACPI \_TZ_.CU2Z=-- | ACPI \_TZ_.DTSZ=-- | ACPI \_TZ_.CPUZ=-- | ACPI \_TZ_.SKNZ=-- | ACPI \_TZ_.BATZ=-- | ACPI \_TZ_.FDTZ=50,0 C | MHz=1640 | bateria=88% enchufado
+19:17:42 DATOS fase=carga max=50,0 C | Nucleo 0=38,0 C | ACPI \_TZ_.CU2Z=-- | ACPI \_TZ_.DTSZ=-- | ACPI \_TZ_.CPUZ=-- | ACPI \_TZ_.SKNZ=-- | ACPI \_TZ_.BATZ=-- | ACPI \_TZ_.FDTZ=50,0 C | MHz=1640 | bateria=89% enchufado
+19:18:12 DATOS fase=carga max=50,0 C | Nucleo 0=37,0 C | ACPI \_TZ_.CU2Z=-- | ACPI \_TZ_.DTSZ=-- | ACPI \_TZ_.CPUZ=-- | ACPI \_TZ_.SKNZ=-- | ACPI \_TZ_.BATZ=-- | ACPI \_TZ_.FDTZ=50,0 C | MHz=1640 | bateria=90% enchufado
+19:18:14 SUCESO ACABA la carga a los 301 s: se acabo el tiempo, llego a 50,0 C, al empezar 50,0 C. Empieza el enfriamiento
+19:18:16 DATOS fase=enfriando max=50,0 C | Nucleo 0=38,0 C | ACPI \_TZ_.CU2Z=-- | ACPI \_TZ_.DTSZ=-- | ACPI \_TZ_.CPUZ=-- | ACPI \_TZ_.SKNZ=-- | ACPI \_TZ_.BATZ=-- | ACPI \_TZ_.FDTZ=50,0 C | MHz=1640 | bateria=90% enchufado
+19:19:14 DATOS fase=enfriando max=50,0 C | Nucleo 0=38,0 C | ACPI \_TZ_.CU2Z=-- | ACPI \_TZ_.DTSZ=-- | ACPI \_TZ_.CPUZ=-- | ACPI \_TZ_.SKNZ=-- | ACPI \_TZ_.BATZ=-- | ACPI \_TZ_.FDTZ=50,0 C | MHz=1640 | bateria=90% enchufado
+19:19:14 SUCESO RESULTADO: Prueba de 5 min 1 s. Subio de 50,0 C a 50,0 C (+0 C). Al parar, bajo 0 C en el primer minuto y volvio a 55,0 C en 1 s.
+Casi no ha subido: o se enfria muy bien, o la carga de un solo nucleo no basta para calentarlo.
+19:20:02 DATOS fase=reposo max=50,0 C | Nucleo 0=37,0 C | ACPI \_TZ_.CU2Z=-- | ACPI \_TZ_.DTSZ=-- | ACPI \_TZ_.CPUZ=-- | ACPI \_TZ_.SKNZ=-- | ACPI \_TZ_.BATZ=-- | ACPI \_TZ_.FDTZ=50,0 C | MHz=1640 | bateria=90% enchufado
+19:20:02 CIERRE el Termometro se ha cerrado bien

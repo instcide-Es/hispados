@@ -445,21 +445,36 @@ static union { struct termo_acpi t; char b[TA_TAM]; } ta_u;
 static ACPI_HANDLE ta_zh[TA_ZONAS], ta_fh[TA_VENT];
 static int ta_buscado;
 
-static int32_t ta_kelvin(ACPI_HANDLE h, const char *m)
+/* (si «estado» no es 0: lo que dijo ACPICA y lo que devolvió, para saber
+ * por qué no hay dato) */
+static int32_t ta_kelvin_de(ACPI_HANDLE h, const char *m, uint32_t *estado, int32_t *crudo)
 {
 	ACPI_BUFFER b;
 	ACPI_OBJECT o;
+	ACPI_STATUS s;
 	UINT64 v;
 
 	b.Length = sizeof o;
 	b.Pointer = &o;
-	if (ACPI_FAILURE(AcpiEvaluateObjectTyped(h, (char *)m, NULL, &b, ACPI_TYPE_INTEGER)))
+	s = AcpiEvaluateObjectTyped(h, (char *)m, NULL, &b, ACPI_TYPE_INTEGER);
+	if (estado)
+		*estado = s;
+	if (crudo)
+		*crudo = -1;
+	if (ACPI_FAILURE(s))
 		return TA_NO;
 	v = o.Integer.Value;
+	if (crudo)
+		*crudo = v > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)v;
 	/* en décimas de kelvin; lo que no puede ser (0, basura), fuera */
 	if (v < 2000 || v > 4732)
 		return TA_NO;
 	return (int32_t)v - 2732;
+}
+
+static int32_t ta_kelvin(ACPI_HANDLE h, const char *m)
+{
+	return ta_kelvin_de(h, m, 0, 0);
 }
 
 static ACPI_STATUS ta_una_zona(ACPI_HANDLE h, UINT32 nivel, void *ctx, void **ret)
@@ -522,7 +537,9 @@ static void ta_lee_vent(int i)
 	v->encendido = -1;
 	b.Length = ACPI_ALLOCATE_BUFFER;
 	b.Pointer = NULL;
-	if (ACPI_SUCCESS(AcpiEvaluateObjectTyped(ta_fh[i], "_FST", NULL, &b, ACPI_TYPE_PACKAGE))) {
+	v->estado_fst = (uint16_t)AcpiEvaluateObjectTyped(ta_fh[i], "_FST", NULL, &b, ACPI_TYPE_PACKAGE);
+	v->estado_psc = 0;
+	if (ACPI_SUCCESS(v->estado_fst)) {
 		o = b.Pointer;
 		if (o->Package.Count >= 3 && o->Package.Elements[1].Type == ACPI_TYPE_INTEGER &&
 		    o->Package.Elements[2].Type == ACPI_TYPE_INTEGER) {
@@ -540,7 +557,8 @@ static void ta_lee_vent(int i)
 	if (v->encendido < 0) {
 		e.Length = sizeof x;
 		e.Pointer = &x;
-		if (ACPI_SUCCESS(AcpiEvaluateObjectTyped(ta_fh[i], "_PSC", NULL, &e, ACPI_TYPE_INTEGER)))
+		v->estado_psc = (uint16_t)AcpiEvaluateObjectTyped(ta_fh[i], "_PSC", NULL, &e, ACPI_TYPE_INTEGER);
+		if (ACPI_SUCCESS(v->estado_psc))
 			v->encendido = x.Integer.Value == 0;
 	}
 }
@@ -646,10 +664,31 @@ static void ta_lee(void)
 		}
 		reg("ACPI: (TERMO) %u zonas térmicas y %u ventiladores\n", ta.nzonas, ta.nvent);
 	}
-	for (i = 0; i < ta.nzonas; i++)
-		ta.zona[i].tmp = ta_kelvin(ta_zh[i], "_TMP");
-	for (i = 0; i < ta.nvent; i++)
-		ta_lee_vent(i);
+	/* (TERMO) el EC, de solo lectura mientras tanto; y cuánto se tarda y por
+	 * qué falla cada zona, apuntado (la primera vez y cuando cambia) */
+	{
+		u64 t0 = mq_ahora_us();
+		u32 l0 = estado.ec_lecturas, f0 = estado.ec_fallos;
+		static uint32_t antes[TA_ZONAS];
+
+		ec_solo_lectura = 1;
+		for (i = 0; i < ta.nzonas; i++) {
+			struct ta_zona *z = &ta.zona[i];
+
+			z->tmp = ta_kelvin_de(ta_zh[i], "_TMP", &z->estado, &z->crudo);
+			if (z->tmp == TA_NO && (z->estado != antes[i] || ta.lecturas == 0))
+				reg("ACPI: (TERMO) %s._TMP sin dato: %s, devuelve %d\n", z->nombre, AcpiFormatException(z->estado), z->crudo);
+			antes[i] = z->tmp == TA_NO ? z->estado : 0xFFFFFFFFu;
+		}
+		for (i = 0; i < ta.nvent; i++)
+			ta_lee_vent(i);
+		ec_solo_lectura = 0;
+		ta.ec_hay = estado.ec_hay;
+		ta.ec_lecturas += estado.ec_lecturas - l0;
+		ta.ec_fallos += estado.ec_fallos - f0;
+		ta.ec_ignoradas = ec_ignoradas;
+		ta.ms_lectura = (uint32_t)((mq_ahora_us() - t0) / 1000);
+	}
 	ta.lecturas++;
 }
 

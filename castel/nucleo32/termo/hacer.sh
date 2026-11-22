@@ -20,7 +20,7 @@ python3 -I $J/datos386.py $O/datos386.h $O/letra.h
 # (como mucho -march=i586: nada de CMOV ni de FCOMI, que el Pentium no tiene)
 BF="-m32 -std=gnu11 -march=i586 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables
     -fno-builtin -fno-tree-loop-distribute-patterns -ffunction-sections -fdata-sections -I$C/inc -I$C -I$J -I$M -I$O"
-for f in $J/juego $J/dibujo $J/sintes $M/termo; do
+for f in $J/juego $J/dibujo $J/sintes $M/termo $M/veredicto $M/envio; do
   # shellcheck disable=SC2086
   gcc $BF -Wall -Wextra -Wno-unused-parameter -c $f.c -o $O/$(basename $f).o
 done
@@ -28,6 +28,6 @@ done
 gcc $BF -Wall -c $C/base.c -o $O/base.o
 nasm -f elf32 -DPRINCIPAL=principal $C/entrada.asm -o $O/entrada.o
 ld -m elf_i386 --no-warn-rwx-segments -z noexecstack --gc-sections -T $C/pentium.ld -o $O/TERMO.elf \
-  $O/entrada.o $O/juego.o $O/dibujo.o $O/sintes.o $O/base.o $O/termo.o
+  $O/entrada.o $O/juego.o $O/dibujo.o $O/sintes.o $O/base.o $O/termo.o $O/veredicto.o $O/envio.o
 objcopy -O binary $O/TERMO.elf "$SAL"
 if objdump -d $O/TERMO.elf | grep -qE '\scmov|\sfcomi|\sfucomi'; then echo "hacer.sh: TERMO.BIN lleva instrucciones de después del Pentium"; exit 1; fi

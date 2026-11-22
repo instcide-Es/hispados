@@ -30,7 +30,11 @@
 ;        pedido en los últimos 10 s (si no, no hace falta que lo lea)
 ;   224  la prueba de esfuerzo: EBX = 1, ECX 1 o 0 (cargar o parar); EBX = 0
 ;        -> 1 si hay que seguir cargando (y el Termómetro ha preguntado por
-;        las zonas hace menos de 6 s: si se cuelga o se cierra, la carga para)
+;        las zonas hace menos de 6 s: si se cuelga o se cierra, la carga para);
+;        EBX = 2: los tics que ha corrido la tarea ociosa (el «hlt»); 3: los
+;        del reloj (con los dos, lo ocupado que está el procesador)
+;        En la 220, también (Intel de Nehalem en adelante) 3F8h, 3F9h, 3FAh,
+;        3FCh, 3FDh y 3FEh: lo que lleva el paquete y el núcleo en C3, C6 y C7
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Termo
@@ -109,6 +113,9 @@ módulo Termo
     función msr_de_la_lista(m: nat32): bool
         según m
             caso 0x19C, 0x1B1, 0x1A2, 0xE7, 0xE8, 0x198, 0xCE, 0x17, 0xEE: devolver cierto
+            ; (TERMO) la residencia en los estados de reposo (Intel de Nehalem en
+            ; adelante): el paquete en C3, C6 y C7, el núcleo en C3, C6 y C7
+            caso 0x3F8, 0x3F9, 0x3FA, 0x3FC, 0x3FD, 0x3FE: devolver cierto
         fin
         devolver falso
     fin
@@ -184,6 +191,10 @@ módulo Termo
                 copiar_memoria(puntero(a), puntero(dirección(bloque)), TAM_BLOQUE)
                 devolver 1
             caso 224:
+                ; (TERMO) 2: los tics de la tarea ociosa; 3: los del reloj (la
+                ; ocupación del procesador: lo que no ha corrido la ociosa)
+                si a = 2 entonces devolver tics_de_la_ociosa() fin
+                si a = 3 entonces devolver tics fin
                 si a = 1 entonces
                     carga := b yb 1
                     si carga = 1 entonces visto := tics fin

@@ -31,14 +31,27 @@
 #include "juego.h"
 #include <stdarg.h>
 #include "termo_acpi.h"
+#include "veredicto.h"
+#include "envio.h"
 
 static int mas_caliente(void);
+static void mira_envio(void);
 static void mira_anterior(void);
 static void log_arranque(void);
 static void log_escribe(const char *clase, const char *texto);
 static char ruta_log[64], anterior[700];
 static int log_malo;
 static u32 cuenta_s;
+/* (TERMO) lo ocupado (mide_ocupacion) */
+static int ocup_pct = -1, c0_pct = -1, c6_pct = -1;
+static u32 oc_ociosa, oc_tics, oc_mperf, oc_mperfh, oc_c6, oc_c6h;
+static u64 oc_tsc;
+static int hay_cestados;
+/* (PARPADEO) lo pintado la vez anterior y lo que se cuenta (vuelca_cambios) */
+static u32 *antes_p;
+static int antes_an, antes_al;
+static u32 cuadros_pintados, puntos_subidos, pinta_sin_motivo;
+static int motivo_pinta = 1;
 static const char *busca(const char *t, const char *o)
 {
 	size_t n = strlen(o);
@@ -81,6 +94,8 @@ struct sensor {
 	int clase, zona;	/* (CL_ACPI: el número de su zona) */
 	int t, min, max;	/* décimas de grado; NO, no se sabe */
 	int limite, supuesto;	/* el límite (TjMax, _CRT), y si es de tabla */
+	int fija;		/* (TERMO) no ha cambiado en toda la última prueba */
+	u32 estado_dicho;	/* (ACPI) el porqué de «--» ya apuntado */
 	int hist[HIST];
 };
 static struct sensor S[MAXS];
@@ -94,6 +109,8 @@ static struct {
 	int tjmax, tj_de_msr;
 	int amd_metodo;		/* 1 K8, 2 0:18.3 A4h, 3 SMN D8200C64h, 4 SMN 59800h */
 	char no_hay[160];	/* por qué no hay temperatura del procesador */
+	int aproximada;		/* (TERMO) un Atom: su sensor es poco de fiar */
+	char msr_texto[120];	/* lo que da el 19Ch la primera vez (para el registro) */
 } cpu;
 static u64 tsc_hz;
 static u32 mhz_ahora, mhz_tsc;
@@ -140,6 +157,14 @@ static int nuevo_sensor(const char *nombre, const char *csv, int clase, int limi
 	for (i = 0; i < HIST; i++)
 		s->hist[i] = NO;
 	return ns++;
+}
+
+static int tjmax_tabla(void)
+{
+	u32 lo = 0, hi;
+	int ee = (cpu.modelo == 0x0F || cpu.modelo == 0x16 || cpu.modelo == 0x17) && lee_msr(0xEE, &lo, &hi) && (lo & (1u << 30));
+
+	return ve_tjmax_intel(cpu.fam, cpu.modelo, cpu.pasos, cpu.marca, ee);
 }
 
 static void mira_procesador(void)
@@ -192,23 +217,33 @@ static void mira_procesador(void)
 			snprintf(cpu.no_hay, sizeof cpu.no_hay, "Este procesador Intel no dice tener sensor de temperatura (CPUID 6). En una máquina virtual es lo normal.");
 			return;
 		}
-		/* la TjMax: del MSR 1A2h, o de la tabla */
-		if (lee_msr(0x1A2, &lo, &hi) && ((lo >> 16) & 0xFF) >= 70 && ((lo >> 16) & 0xFF) <= 130) {
+		/* la TjMax: del MSR 1A2h (solo de Nehalem en adelante: en los de
+		 * antes y en los Atom de la 1Ch no existe o dice otra cosa), o de
+		 * la tabla (la de coretemp de Linux, con los datos de Intel) */
+		cpu.tjmax = tjmax_tabla();
+		if (cpu.fam == 6 && cpu.modelo > 0x0E && cpu.modelo != 0x1C && lee_msr(0x1A2, &lo, &hi) &&
+		    ((lo >> 16) & 0xFF) >= 70 && ((lo >> 16) & 0xFF) <= 130) {
 			cpu.tjmax = (int)((lo >> 16) & 0xFF);
 			cpu.tj_de_msr = 1;
-		} else {
-			cpu.tjmax = 100;
-			if (cpu.fam == 6 && (cpu.modelo == 0x1C || cpu.modelo == 0x26))
-				cpu.tjmax = 90;	/* los Atom N270/N280/Z5xx */
-			else if (cpu.fam == 6 && (cpu.modelo == 0x0F || cpu.modelo == 0x16 || cpu.modelo == 0x17) &&
-				 lee_msr(0xEE, &lo, &hi) && (lo & (1u << 30)))
-				cpu.tjmax = 85;	/* los Core 2 de sobremesa */
 		}
 		serie("termo: TjMax %u °C (%s)\n", cpu.tjmax, cpu.tj_de_msr ? "del MSR 1A2h" : "de la tabla: el procesador no la dice");
-		if (lee_msr(0x19C, &lo, &hi) && (k = nuevo_sensor("Núcleo 0 del procesador", "Nucleo 0", CL_CPU, cpu.tjmax * 10, !cpu.tj_de_msr)) >= 0)
+		/* (TERMO) los Atom de la 06_1Ch (N2xx, N4xx, D4xx, D5xx): su sensor es
+		 * poco fiable (Intel y coretemp de Linux lo dicen: sobre todo frío), y
+		 * en el Toshiba NB250 llegó a dar 6 °C */
+		cpu.aproximada = cpu.fam == 6 && (cpu.modelo == 0x1C || cpu.modelo == 0x26);
+		if (lee_msr(0x19C, &lo, &hi)) {
+			serie("termo: MSR 19Ch = %08Xh: %s, %u °C por debajo de la TjMax, resolución %u °C\n", lo, (lo >> 31) ? "lectura válida" : "SIN lectura válida",
+			      (lo >> 16) & 0x7F, (lo >> 27) & 15);
+			snprintf(cpu.msr_texto, sizeof cpu.msr_texto, "MSR 19Ch = %08Xh (%s; %u bajo la TjMax de %u; resolución %u °C)", lo,
+				 (lo >> 31) ? "válida" : "sin lectura válida", (lo >> 16) & 0x7F, cpu.tjmax, (lo >> 27) & 15);
+		}
+		if (lee_msr(0x19C, &lo, &hi) && (k = nuevo_sensor(cpu.aproximada ? "Núcleo 0 (aproximada)" : "Núcleo 0 del procesador", "Nucleo 0", CL_CPU, cpu.tjmax * 10, !cpu.tj_de_msr)) >= 0)
 			S[k].zona = 0x19C;
 		else
 			snprintf(cpu.no_hay, sizeof cpu.no_hay, "El procesador dice tener sensor, pero no deja leerlo (MSR 19Ch).");
+		/* (los estados de reposo: de Nehalem en adelante, sin los Atom de antes) */
+		hay_cestados = cpu.fam == 6 && cpu.modelo >= 0x1A && cpu.modelo != 0x1C && cpu.modelo != 0x26 && cpu.modelo != 0x27 &&
+			       cpu.modelo != 0x35 && cpu.modelo != 0x36 && lee_msr(0x3FD, &lo, &hi);
 		if (cpu.ptm && lee_msr(0x1B1, &lo, &hi) && (k = nuevo_sensor("Procesador entero (paquete)", "Paquete", CL_CPU, cpu.tjmax * 10, !cpu.tj_de_msr)) >= 0)
 			S[k].zona = 0x1B1;
 	} else if (cpu.amd) {
@@ -398,6 +433,13 @@ static void llano(char *d, const char *o, int cabe)
 
 /* ---------------------------------------------------------------- los archivos */
 static char unidad = 0;
+/* (TERMO) dónde va todo: X:\TERMO en la memoria del Termómetro (la unidad del
+ * sistema es una memoria USB con \TERMO.BIN en la raíz); instalado (el
+ * paquete «termo»), la carpeta del usuario, \USUARIOS\<u>\TERMO (la llamada
+ * 200), o \TERMO de la unidad del sistema si no hay usuarios */
+static char carpeta[96];
+static int en_memoria, arranque_auto;
+static int sin_llamadas;	/* el núcleo no tiene las llamadas 220-224 (antes de la 0.8.9) */
 static char ruta_csv[64], ruta_txt[64], aviso_archivo[160];
 static int csv_listo, csv_malo;
 static u32 t_inicio;
@@ -434,14 +476,23 @@ typedef struct {
 	u8 quitable, relleno[2];
 } info_unidad;
 
-/* la unidad donde se guarda: la del sistema (la memoria USB). Nunca C: ni
- * la M: (la de los módulos, de solo lectura) */
-static void prepara_archivos(void)
+static int existe(const char *r)
+{
+	u32 m = sc(SC_ABRIR, (u32)r, PARA_LEER, 0);
+
+	if (ES_ERROR(m))
+		return 0;
+	sc(SC_CERRAR, m, 0, 0);
+	return 1;
+}
+
+/* la unidad del sistema y la carpeta (arriba). En la memoria, nunca C: (el
+ * disco del portátil ajeno) ni la M: (la de los módulos, de solo lectura) */
+static void elige_carpeta(void)
 {
 	info_unidad u;
 	int i;
-	char c[24];
-	u32 a, me, d, h, mi, s;
+	char r[24];
 
 	for (i = 0; i < 40; i++) {
 		memset(&u, 0, sizeof u);
@@ -450,18 +501,45 @@ static void prepara_archivos(void)
 		if (u.del_sistema && u.letra)
 			unidad = (char)u.letra;
 	}
-	if (!unidad || unidad == 'M' || unidad == 'C') {
-		snprintf(aviso_archivo, sizeof aviso_archivo, "No se guarda el registro: el sistema no ha arrancado desde una memoria USB en la que se pueda escribir.");
+	if (!unidad || unidad == 'M')
+		return;
+	snprintf(r, sizeof r, "%c:\\TERMO.BIN", unidad);
+	en_memoria = arranque_auto || (unidad != 'C' && existe(r));
+	if (en_memoria) {
+		snprintf(carpeta, sizeof carpeta, "%c:\\TERMO", unidad);
+		return;
+	}
+	{
+		char c[128];
+		u32 n = sc(200, 0, 0, 0), k = 0;
+
+		if (!ES_ERROR(n) && n > 0 && n < 1000)
+			k = sc(200, 4, (u32)c, sizeof c);
+		if (!ES_ERROR(k) && k > 1 && k < sizeof c - 8) {
+			c[k] = 0;
+			while (k > 1 && c[k - 1] == '\\')
+				c[--k] = 0;
+			snprintf(carpeta, sizeof carpeta, "%c:%s\\TERMO", unidad, c[0] == '\\' ? c : "\\USUARIOS");
+		} else
+			snprintf(carpeta, sizeof carpeta, "%c:\\TERMO", unidad);
+	}
+}
+
+static void prepara_archivos(void)
+{
+	u32 a, me, d, h, mi, s;
+
+	if (!carpeta[0] || (en_memoria && unidad == 'C')) {
+		snprintf(aviso_archivo, sizeof aviso_archivo, "No se guarda el registro: no hay dónde (el sistema no ha arrancado desde una memoria USB en la que se pueda escribir).");
 		csv_malo = 1;
 		return;
 	}
-	snprintf(c, sizeof c, "%c:\\TERMO", unidad);
-	sc(SC_HACER_CARPETA, (u32)c, 0, 0);
+	sc(SC_HACER_CARPETA, (u32)carpeta, 0, 0);
 	fecha_hora(&a, &me, &d, &h, &mi, &s);
-	snprintf(ruta_csv, sizeof ruta_csv, "%c:\\TERMO\\%02u%02u%02u%02u.CSV", unidad, me, d, h, mi);
-	snprintf(ruta_txt, sizeof ruta_txt, "%c:\\TERMO\\%02u%02u%02u%02u.TXT", unidad, me, d, h, mi);
+	snprintf(ruta_csv, sizeof ruta_csv, "%s\\%02u%02u%02u%02u.CSV", carpeta, me, d, h, mi);
+	snprintf(ruta_txt, sizeof ruta_txt, "%s\\%02u%02u%02u%02u.TXT", carpeta, me, d, h, mi);
 	mira_anterior();
-	snprintf(ruta_log, sizeof ruta_log, "%c:\\TERMO\\%02u%02u%02u%02u.LOG", unidad, me, d, h, mi);
+	snprintf(ruta_log, sizeof ruta_log, "%s\\%02u%02u%02u%02u.LOG", carpeta, me, d, h, mi);
 	{
 		char t[120];
 		int n = snprintf(t, sizeof t, "Registro del Termometro de Hispa-Pentium, %02u/%02u/%04u\r\n", d, me, a);
@@ -578,9 +656,58 @@ static void log_datos(void)
 	for (k = 0; k < ns; k++)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | %s=%s", S[k].csv, grados(g, S[k].t));
 	m += snprintf(b + m, sizeof b - (size_t)m, " | MHz=%u", mhz_ahora);
+	if (ocup_pct >= 0)
+		m += snprintf(b + m, sizeof b - (size_t)m, " | ocupado=%d%%", ocup_pct);
+	if (c0_pct >= 0)
+		m += snprintf(b + m, sizeof b - (size_t)m, " | C0=%d%%", c0_pct);
+	if (c6_pct >= 0)
+		m += snprintf(b + m, sizeof b - (size_t)m, " | C6=%d%%", c6_pct);
 	if (hay_bateria && en.pct <= 100)
 		snprintf(b + m, sizeof b - (size_t)m, " | bateria=%u%% %s", en.pct, en.ca == 1 ? "enchufado" : en.ca == 0 ? "sin enchufar" : "");
 	log_escribe("DATOS", b);
+}
+
+/* (TERMO) por qué una zona o un ventilador no da nada: lo que dijo ACPICA
+ * (ACPI_STATUS, acpica/include/acexcep.h) */
+static const char *texto_acpi(u32 e, char *d)
+{
+	static const struct { u32 c; const char *t; } tabla[] = {
+		{ 0x0005, "AE_NOT_FOUND: la BIOS no tiene ese método" },
+		{ 0x0006, "AE_NOT_EXIST" },
+		{ 0x0011, "AE_TIME: tiempo agotado (¿el controlador embebido no contesta?)" },
+		{ 0x001A, "AE_NO_HANDLER: una región que no se sabe leer" },
+		{ 0x0016, "AE_AML_MUTEX_NOT_ACQUIRED" },
+		{ 0x0010, "AE_NOT_ACQUIRED: un Mutex que no se suelta" },
+		{ 0x0001, "AE_ERROR" },
+		{ 0x000E, "AE_TYPE: no devuelve un número" },
+		{ 0x3001, "AE_AML_BAD_OPCODE" },
+		{ 0x3003, "AE_AML_OPERAND_TYPE" },
+		{ 0x3005, "AE_AML_UNINITIALIZED_LOCAL" },
+		{ 0x3009, "AE_AML_REGION_LIMIT" },
+		{ 0x300E, "AE_AML_NAME_NOT_FOUND: llama a algo que no está" },
+		{ 0x3010, "AE_AML_INVALID_SPACE_ID: una región de un tipo que no se sabe leer" },
+		{ 0x3012, "AE_AML_NO_RETURN_VALUE: no devuelve nada" },
+		{ 0x3021, "AE_AML_LOOP_TIMEOUT: un bucle que no acaba (esperando al EC)" },
+	};
+	u32 i;
+
+	for (i = 0; i < sizeof tabla / sizeof tabla[0]; i++)
+		if (tabla[i].c == e)
+			return tabla[i].t;
+	snprintf(d, 40, "ACPICA %04Xh", e);
+	return d;
+}
+
+static void motivo_zona(char *d, int cabe, const struct ta_zona *z)
+{
+	char x[40];
+
+	if (z->estado)
+		snprintf(d, (size_t)cabe, "_TMP falla: %s", texto_acpi(z->estado, x));
+	else if (z->crudo >= 0)
+		snprintf(d, (size_t)cabe, "_TMP devuelve %d (décimas de kelvin: %d,%d °C), que no puede ser", z->crudo, (z->crudo - 2732) / 10, abs(z->crudo - 2732) % 10);
+	else
+		snprintf(d, (size_t)cabe, "_TMP no devuelve un número");
 }
 
 /* los cambios: de estado de cada sensor, del ventilador, de la batería */
@@ -593,10 +720,35 @@ static void mira_cambios(void)
 	int k;
 	u32 i;
 
+	if (!zonas_dichas && cpu.msr_texto[0] && cuenta_s >= 2) {
+		suceso_log("procesador: %s%s", cpu.msr_texto, cpu.aproximada ? ". La medida del sensor de este Atom es aproximada (sobre todo en frío): si sale por debajo de 25-30 °C con el equipo encendido, no es de fiar" : "");
+		cpu.msr_texto[0] = 0;
+	}
 	if (hay_zonas && !zonas_dichas) {
 		zonas_dichas = 1;
 		suceso_log("ACPI (ACPI.BIN): %u zonas térmicas, %u ventiladores; equipo «%s %s», placa «%s %s», BIOS «%s»", za.t.nzonas, za.t.nvent,
 			   za.t.fabricante, za.t.producto, za.t.placa_fab, za.t.placa, za.t.bios);
+	}
+	if (hay_zonas && (cuenta_s == 10 || cuenta_s == 120) && za.t.ec_hay)
+		suceso_log("ACPI: el controlador embebido (EC), al leer las zonas: %u lecturas, %u sin respuesta a tiempo, %u escrituras del AML no hechas (solo lectura); una lectura entera tarda %u ms",
+			   za.t.ec_lecturas, za.t.ec_fallos, za.t.ec_ignoradas, za.t.ms_lectura);
+	else if (hay_zonas && cuenta_s == 10)
+		suceso_log("ACPI: el equipo no declara controlador embebido (EC); una lectura de las zonas tarda %u ms", za.t.ms_lectura);
+	for (k = 0; hay_zonas && k < ns; k++) {
+		const struct ta_zona *z;
+
+		if (S[k].clase != CL_ACPI || S[k].zona >= TA_ZONAS)
+			continue;
+		z = &za.t.zona[S[k].zona];
+		if (z->tmp == NO && (S[k].estado_dicho != z->estado + 1 || cuenta_s == 4)) {
+			char m[160];
+
+			if (S[k].estado_dicho != z->estado + 1) {
+				motivo_zona(m, sizeof m, z);
+				suceso_log("sensor «%s»: sin dato (--): %s", S[k].nombre, m);
+			}
+			S[k].estado_dicho = z->estado + 1;
+		}
 	}
 	if (!hay_zonas && cuenta_s == 20)
 		suceso_log("AVISO: el servicio de ACPI no da las zonas térmicas (¿arrancado con «sinacpi», o ACPI.BIN no va?)");
@@ -617,9 +769,18 @@ static void mira_cambios(void)
 		struct ta_vent *v = &za.t.vent[i];
 		int x = v->velocidad != NO ? v->velocidad / 500 + 10 : v->encendido;
 
-		if (x != vent_antes[i])
-			suceso_log("ventilador %u: %s", i + 1, v->velocidad != NO ? (snprintf(g, sizeof g, "%d r.p.m.", v->velocidad), g) :
-				   v->encendido == 1 ? "en marcha" : v->encendido == 0 ? "parado" : "sin datos");
+		if (x != vent_antes[i]) {
+			char m[200], e1[40], e2[40];
+
+			if (v->velocidad == NO && v->encendido < 0)
+				snprintf(m, sizeof m, "sin datos (%s: _FST %s; _PSC %s)", v->nombre, v->estado_fst ? texto_acpi(v->estado_fst, e1) : "sin r.p.m.",
+					 v->estado_psc ? texto_acpi(v->estado_psc, e2) : "no dice");
+			else if (v->velocidad != NO)
+				snprintf(m, sizeof m, "%d r.p.m.", v->velocidad);
+			else
+				snprintf(m, sizeof m, "%s", v->encendido == 1 ? "en marcha" : "parado");
+			suceso_log("ventilador %u: %s", i + 1, m);
+		}
 		vent_antes[i] = x;
 	}
 	if (hay_bateria) {
@@ -715,15 +876,14 @@ static int decimas(const char *t)
 
 static void mira_anterior(void)
 {
-	char c[24], mejor[16] = "", r[64], *b, *p, *ult = 0;
+	char mejor[16] = "", r[64], *b, *p, *ult = 0;
 	struct entrada e;
 	u32 m, n, largo, desde;
 	char hora[12] = "", fase_a[16] = "", maxi[16] = "", h60[12] = "";
 	int lmin = NO, lmax = NO, cerrado = 0, k, nlin = 0;
 	const char *lineas[40];
 
-	snprintf(c, sizeof c, "%c:\\TERMO", unidad);
-	m = sc(SC_ABRIR, (u32)c, PARA_LEER, 0);
+	m = sc(SC_ABRIR, (u32)carpeta, PARA_LEER, 0);
 	if (ES_ERROR(m))
 		return;
 	while (sc(SC_ENTRADA, m, (u32)&e, 0) == 1) {
@@ -737,7 +897,7 @@ static void mira_anterior(void)
 	sc(SC_CERRAR, m, 0, 0);
 	if (!mejor[0])
 		return;
-	snprintf(r, sizeof r, "%c:\\TERMO\\%s", unidad, mejor);
+	snprintf(r, sizeof r, "%s\\%s", carpeta, mejor);
 	m = sc(SC_ABRIR, (u32)r, PARA_LEER, 0);
 	if (ES_ERROR(m))
 		return;
@@ -825,10 +985,10 @@ static void captura(void)
 	u32 a, me, d, h, mi, s, m, tf, total;
 	int y, x;
 
-	if (!unidad || csv_malo)
+	if (!carpeta[0] || csv_malo)
 		return;
 	fecha_hora(&a, &me, &d, &h, &mi, &s);
-	snprintf(ruta, sizeof ruta, "%c:\\TERMO\\%02u%02u%02u%02u.BMP", unidad, d, h, mi, s);
+	snprintf(ruta, sizeof ruta, "%s\\%02u%02u%02u%02u.BMP", carpeta, d, h, mi, s);
 	tf = ((u32)LZ.an * 3 + 3) & ~3u;
 	total = 54 + tf * (u32)LZ.al;
 	memset(cab, 0, sizeof cab);
@@ -869,25 +1029,40 @@ static void captura(void)
 enum { F_REPOSO, F_CARGA, F_ENFRIA, F_RESULTADO };
 static int fase = F_REPOSO, minutos = 10, dura_s, enfria_max = 180;
 static u32 t_fase;
-static int t_ini, pico, t_parada, por_seguridad, por_esc, seg_carga;
-static int baja30 = NO, baja60 = NO, vuelve_s = -1;
+static int t_ini, pico, por_seguridad, por_esc, seg_carga;
+static struct ve_prueba VP;	/* (veredicto.c) con qué sensor se mide y qué ha pasado */
+static int hubo_prueba;
 static char resumen[1200], motivo[160];
 static int hija = -1, solo_aqui;
+static int puede_enviar, puede_terminal, enviando;	/* (TERMO) */
+static u32 t_envio;
+static char aviso_envio[420];
 
 static const char *fase_texto(void)
 {
 	return fase == F_CARGA ? "carga" : fase == F_ENFRIA ? "enfriando" : "reposo";
 }
 
-/* la más caliente de las que se leen (para la prueba) */
+/* la más caliente de las del procesador (si hay alguna que lea) o, si no,
+ * de todas: es la «max=» del registro. (Una zona de ACPI clavada en 50 °C
+ * no debe tapar al procesador: el HP Mini 5103.) */
 static int mas_caliente(void)
 {
-	int k, m = NO;
+	int k, m = NO, pasada;
 
-	for (k = 0; k < ns; k++)
-		if (S[k].t != NO && (m == NO || S[k].t > m))
-			m = S[k].t;
+	for (pasada = 0; pasada < 2 && m == NO; pasada++)
+		for (k = 0; k < ns; k++)
+			if ((pasada || S[k].clase != CL_ACPI) && S[k].t != NO && (m == NO || S[k].t > m))
+				m = S[k].t;
 	return m;
+}
+
+static void temperaturas(int *t)
+{
+	int k;
+
+	for (k = 0; k < VE_MAXS; k++)
+		t[k] = k < ns ? S[k].t : VE_NO;
 }
 
 static void empieza(void)
@@ -901,9 +1076,21 @@ static void empieza(void)
 	t_ini = mas_caliente();
 	pico = t_ini;
 	por_seguridad = por_esc = 0;
-	baja30 = baja60 = NO;
-	vuelve_s = -1;
 	motivo[0] = 0;
+	{
+		struct ve_sensor vs[VE_MAXS];
+		int t[VE_MAXS], k;
+
+		for (k = 0; k < ns && k < VE_MAXS; k++) {
+			snprintf(vs[k].nombre, sizeof vs[k].nombre, "%s", S[k].nombre);
+			vs[k].cpu = S[k].clase != CL_ACPI;
+			vs[k].limite = S[k].limite;
+			S[k].fija = 0;
+		}
+		temperaturas(t);
+		ve_empieza(&VP, ns, vs, t);
+		hubo_prueba = 1;
+	}
 	carga_on = 1;
 	sc(SC_CARGA, 1, 1, 0);
 	/* la carga: un programa hijo (este mismo, con /CARGA) que no suelta el
@@ -944,58 +1131,34 @@ static void para_carga(int seguridad, int esc)
 	seg_carga = (int)((jg_tics() - t_fase) / jg_hz);
 	por_seguridad = seguridad;
 	por_esc = esc;
-	t_parada = mas_caliente();
+	{
+		int t[VE_MAXS];
+
+		temperaturas(t);
+		if (ve_para(&VP, t) >= 0) {
+			t_ini = VP.t_ini;
+			pico = VP.pico_ref;
+			serie("termo: se mide con «%s»\n", VP.s[VP.ref].nombre);
+		}
+	}
 	fase = F_ENFRIA;
 	t_fase = jg_tics();
 	serie("termo: fin de la carga a los %d s (%s); pico %s, ahora %s, al empezar %s\n", seg_carga,
-	      seguridad ? "PARADA DE SEGURIDAD" : esc ? "Esc" : "se acabó el tiempo", grados(a, pico), grados(b, t_parada), grados(c, t_ini));
+	      seguridad ? "PARADA DE SEGURIDAD" : esc ? "Esc" : "se acabó el tiempo", grados(a, pico), grados(b, VP.t_parada), grados(c, t_ini));
 	suceso_log("ACABA la carga a los %d s: %s%s; llegó a %s, al empezar %s. Empieza el enfriamiento", seg_carga,
 		   seguridad ? "PARADA DE SEGURIDAD: " : esc ? "parada con Esc" : "se acabó el tiempo", seguridad ? motivo : "", grados(a, pico), grados(c, t_ini));
 }
 
 static void escribe_resumen(void)
 {
-	char a[24], b[24], c[24], d[24], e[24];
-	int sube = (pico != NO && t_ini != NO) ? pico - t_ini : 0, m = 0, lim = NO, k;
+	int k;
 
-	for (k = 0; k < ns; k++)
-		if (S[k].limite != NO && (lim == NO || S[k].limite < lim))
-			lim = S[k].limite;
-	if (por_seguridad)
-		m += snprintf(resumen + m, sizeof resumen - (size_t)m, "PARADA DE SEGURIDAD a los %s: %s. ", tiempo(a, seg_carga), motivo);
-	else
-		m += snprintf(resumen + m, sizeof resumen - (size_t)m, "Prueba de %s%s. ", tiempo(a, seg_carga), por_esc ? " (parada con Esc)" : "");
-	m += snprintf(resumen + m, sizeof resumen - (size_t)m, "Subió de %s a %s (%s%d °C). ", grados(b, t_ini), grados(c, pico), sube >= 0 ? "+" : "", sube / 10);
-	if (baja60 != NO)
-		m += snprintf(resumen + m, sizeof resumen - (size_t)m, "Al parar, bajó %d °C en el primer minuto", baja60 / 10);
-	else if (baja30 != NO)
-		m += snprintf(resumen + m, sizeof resumen - (size_t)m, "Al parar, bajó %d °C en 30 s", baja30 / 10);
-	if (vuelve_s >= 0)
-		m += snprintf(resumen + m, sizeof resumen - (size_t)m, " y volvió a %s en %s. ", grados(d, t_ini + 50), tiempo(e, vuelve_s));
-	else
-		m += snprintf(resumen + m, sizeof resumen - (size_t)m, ". ");
-	m += snprintf(resumen + m, sizeof resumen - (size_t)m, "\n\n");
-	if (por_seguridad)
-		m += snprintf(resumen + m, sizeof resumen - (size_t)m, "PELIGRO: se calienta demasiado. Limpie el polvo del ventilador y de las rejillas y cambie la pasta térmica del procesador. ");
-	else if (lim != NO && pico != NO && pico >= lim - 200)
-		m += snprintf(resumen + m, sizeof resumen - (size_t)m, "Se calienta bastante: en carga es normal en un portátil, pero queda cerca del límite; una limpieza le vendría bien. ");
-	else if (sube < 50 && !simula)
-		m += snprintf(resumen + m, sizeof resumen - (size_t)m, "Casi no ha subido: o se enfría muy bien, o la carga de un solo núcleo no basta para calentarlo. ");
-	else
-		m += snprintf(resumen + m, sizeof resumen - (size_t)m, "La temperatura en carga es buena. ");
-	if (sube >= 100) {
-		int b60 = baja60 != NO ? baja60 : baja30 != NO ? baja30 : 0;
-
-		if (b60 >= 150 || b60 * 10 >= sube * 4)
-			m += snprintf(resumen + m, sizeof resumen - (size_t)m, "Al parar se enfría deprisa: el ventilador y el disipador sacan bien el calor.");
-		else if (b60 < 50)
-			m += snprintf(resumen + m, sizeof resumen - (size_t)m, "Al parar baja muy despacio: el ventilador o el disipador no hacen bien su trabajo (polvo, ventilador que no gira o pasta seca).");
-		else
-			m += snprintf(resumen + m, sizeof resumen - (size_t)m, "Al parar baja algo despacio: puede tener polvo.");
-	}
+	ve_resumen(&VP, resumen, (int)sizeof resumen, seg_carga, por_seguridad, motivo, por_esc, simula);
+	for (k = 0; k < ns && k < VE_MAXS; k++)
+		S[k].fija = ve_fija(&VP, k) && k != VP.ref;
 	serie("termo: resumen: %s\n", resumen);
 	suceso_log("RESULTADO: %s", resumen);
-	if (unidad && !csv_malo && ruta_txt[0]) {
+	if (carpeta[0] && !csv_malo && ruta_txt[0]) {
 		char t[1400];
 		int n = 0;
 		u32 aa, me, dd, h, mi, s;
@@ -1014,9 +1177,11 @@ static void escribe_resumen(void)
 /* lo de la prueba, cada segundo */
 static void prueba_segundo(void)
 {
-	int k, p = mas_caliente(), seg = (int)((jg_tics() - t_fase) / jg_hz);
+	int k, p = mas_caliente(), seg = (int)((jg_tics() - t_fase) / jg_hz), t[VE_MAXS];
 
+	temperaturas(t);
 	if (fase == F_CARGA) {
+		ve_carga(&VP, t);
 		if (p != NO && (pico == NO || p > pico))
 			pico = p;
 		/* la parada de seguridad: el límite menos 10 °C (o 95 °C sin límite) */
@@ -1034,13 +1199,7 @@ static void prueba_segundo(void)
 		if (seg >= dura_s)
 			para_carga(0, 0);
 	} else if (fase == F_ENFRIA) {
-		if (seg == 30 && p != NO)
-			baja30 = t_parada - p;
-		if (seg == 60 && p != NO)
-			baja60 = t_parada - p;
-		if (vuelve_s < 0 && p != NO && t_ini != NO && p <= t_ini + 50)
-			vuelve_s = seg;
-		if (seg >= enfria_max || (vuelve_s >= 0 && seg >= 60)) {
+		if (ve_enfria(&VP, seg, t) || seg >= enfria_max) {
 			fase = F_RESULTADO;
 			escribe_resumen();
 		}
@@ -1130,6 +1289,51 @@ static void mide_frecuencia(void)
 		mhz_ahora = (u32)((u64)mhz_tsc * da / dm);
 }
 
+/* ---------------------------------------------------------------- lo ocupado
+ * (TERMO) Cada 2 s: lo ocupado que está el procesador, con lo que el núcleo
+ * no ha corrido la tarea ociosa (el «hlt»; la 224 con 2 y 3: cualquier
+ * procesador, también QEMU) y, si los hay, con MPERF/TSC (lo que ha estado
+ * despierto, en C0) y lo que el núcleo ha dormido en C6 (Intel de Nehalem en
+ * adelante, MSR 3FDh). Sin esto, en el MacBook Air 2012 parecía que el
+ * ventilador no enfriaba, y lo que pasaba es que algo no lo dejaba en reposo. */
+
+static void mide_ocupacion(void)
+{
+	u32 o = sc(SC_CARGA, 2, 0, 0), t = sc(SC_CARGA, 3, 0, 0), lo, hi;
+	u64 tsc = rdtsc();
+
+	if (!ES_ERROR(o) && !ES_ERROR(t) && oc_tics && t - oc_tics >= 50) {
+		u32 dt = t - oc_tics, dociosa = o - oc_ociosa;
+
+		ocup_pct = dociosa >= dt ? 0 : (int)((dt - dociosa) * 100 / dt);
+	}
+	if (!ES_ERROR(o) && !ES_ERROR(t))
+		oc_ociosa = o, oc_tics = t;
+	if (cpu.aperf && lee_msr(0xE7, &lo, &hi)) {
+		if (oc_tsc && tsc > oc_tsc) {
+			u64 dm = (((u64)hi << 32) | lo) - (((u64)oc_mperfh << 32) | oc_mperf);
+
+			c0_pct = (int)(dm * 100 / (tsc - oc_tsc));
+			if (c0_pct > 100)
+				c0_pct = 100;
+		}
+		oc_mperf = lo, oc_mperfh = hi;
+	}
+	if (hay_cestados && lee_msr(0x3FD, &lo, &hi)) {
+		if (oc_tsc && tsc > oc_tsc) {
+			u64 d6 = (((u64)hi << 32) | lo) - (((u64)oc_c6h << 32) | oc_c6);
+
+			c6_pct = (int)(d6 * 100 / (tsc - oc_tsc));
+			if (c6_pct > 100)
+				c6_pct = 100;
+		}
+		oc_c6 = lo, oc_c6h = hi;
+	}
+	oc_tsc = tsc;
+	if (fase == F_ENFRIA && ocup_pct >= 0)
+		ve_ocupacion(&VP, c0_pct >= 0 && c0_pct > ocup_pct ? c0_pct : ocup_pct);
+}
+
 /* ---------------------------------------------------------------- leer todo */
 
 static void lee_todo(void)
@@ -1171,22 +1375,36 @@ static void estado_serie(void)
 	m = snprintf(b, sizeof b, "termo: estado fase=%s", fase_texto());
 	for (k = 0; k < ns; k++)
 		m += snprintf(b + m, sizeof b - (size_t)m, " [%s=%s %s]", S[k].csv, grados(g, S[k].t), nombre_estado[estado_de(S[k].t, S[k].limite)]);
-	snprintf(b + m, sizeof b - (size_t)m, " mhz=%u\n", mhz_ahora);
+	snprintf(b + m, sizeof b - (size_t)m, " mhz=%u pintados=%u subidos=%u sin_motivo=%u\n", mhz_ahora, cuadros_pintados, puntos_subidos, pinta_sin_motivo);
 	serie("%s", b);
 }
 
+/* (TERMO) cada segundo por el reloj, no contando pulsos: el marco de los
+ * juegos no recupera más de 10 pulsos seguidos, y escribir en la memoria USB
+ * puede tardar más de 0,1 s; contando pulsos, el registro salía en el HP
+ * Mini cada 4 s en vez de cada 2. Si se pierde un segundo entero, se sigue
+ * desde ahora (sin correr para recuperarlo) */
 static void pulso(void)
 {
-	static u32 tic;
+	static u32 proximo, lento_dicho;
+	u32 ahora = jg_tics(), t0;
 
 	if (solo_aqui && carga_on)
 		carga_aqui();
-	if (++tic % 100)
+	if (!proximo)
+		proximo = ahora + jg_hz;
+	if ((int)(ahora - proximo) < 0)
 		return;
+	proximo += jg_hz;
+	if ((int)(ahora - proximo) >= 0)
+		proximo = ahora + jg_hz;
+	t0 = ahora;
 	cuenta_s++;
 	lee_todo();
 	if (cuenta_s % 2 == 0) {
 		lee_zonas();
+		mide_ocupacion();
+		mira_envio();
 		if (!csv_listo && !csv_malo && cuenta_s >= 6)
 			csv_cabecera();
 		apunta_historia();
@@ -1198,11 +1416,17 @@ static void pulso(void)
 	}
 	prueba_segundo();
 	jg_cambio = 1;
+	motivo_pinta = 1;
+	ahora = jg_tics() - t0;
+	if (ahora * 1000 / jg_hz >= 900 && lento_dicho < 5) {
+		lento_dicho++;
+		suceso_log("AVISO: leer y apuntar ha tardado %u ms (la lectura de ACPI, la última: %u ms)", ahora * 1000 / jg_hz, hay_zonas ? za.t.ms_lectura : 0);
+	}
 }
 
 /* ---------------------------------------------------------------- pintar */
 struct boton { int x, y, an, al; const char *t; int id; };
-enum { B_CALENTAR = 1, B_5, B_10, B_15, B_PARAR, B_CAPTURA };
+enum { B_CALENTAR = 1, B_5, B_10, B_15, B_PARAR, B_CAPTURA, B_ENVIAR, B_TERMINAL };
 static struct boton bot[8];
 static int nbot;
 
@@ -1340,6 +1564,59 @@ static void pinta_grafica(int x0, int y0, int an, int al)
 }
 
 /* una nota bajo la tabla, partida en renglones si no cabe: da cuántos */
+/* (PARPADEO) lo pintado se compara con lo de la vez anterior y solo se suben
+ * a la ventana las franjas de filas que han cambiado (y, de cada una, de la
+ * primera a la última columna distinta): antes se subía la ventana entera
+ * cada segundo y, en el MacBook Air 2012, el puntero del ratón parpadeaba
+ * encima. El ratón que solo pasa no hace pintar nada (pinta_sin_motivo
+ * lo cuenta: tiene que ser 0; lo dice estado_serie) */
+
+static void vuelca_cambios(void)
+{
+	int y, y0 = -1, x0 = 0, x1 = 0, an = LZ.an, al = LZ.al;
+
+	if (!antes_p || antes_an != an || antes_al != al) {
+		free(antes_p);
+		antes_p = (u32 *)malloc((size_t)an * (size_t)al * 4);
+		antes_an = an;
+		antes_al = al;
+		if (antes_p)
+			for (y = 0; y < al; y++)
+				memcpy(antes_p + (size_t)y * an, LZ.p + (size_t)y * LZ.paso, (size_t)an * 4);
+		jg_todo_sucio();
+		puntos_subidos += (u32)(an * al);
+		return;
+	}
+	for (y = 0; y <= al; y++) {
+		int a = -1, b = -1;
+
+		if (y < al) {
+			const u32 *n = LZ.p + (size_t)y * LZ.paso;
+			u32 *v = antes_p + (size_t)y * an;
+
+			if (memcmp(n, v, (size_t)an * 4)) {
+				for (a = 0; n[a] == v[a]; a++)
+					;
+				for (b = an - 1; n[b] == v[b]; b--)
+					;
+				memcpy(v + a, n + a, (size_t)(b - a + 1) * 4);
+			}
+		}
+		if (a >= 0) {
+			if (y0 < 0)
+				y0 = y, x0 = a, x1 = b;
+			else {
+				x0 = MIN(x0, a);
+				x1 = MAX(x1, b);
+			}
+		} else if (y0 >= 0) {
+			jg_sucio(x0, y0, x1 - x0 + 1, y - y0);
+			puntos_subidos += (u32)((x1 - x0 + 1) * (y - y0));
+			y0 = -1;
+		}
+	}
+}
+
 static int nota(int y, const char *t, u32 c)
 {
 	return lz_parrafo(&LZ, 14, y, LZ.an - 28, t, c, 1, 16);
@@ -1351,6 +1628,10 @@ static void pinta(void)
 	char a[200], g[24], h[24], g2[24], g3[24];
 
 	nbot = 0;
+	cuadros_pintados++;
+	if (!motivo_pinta)
+		pinta_sin_motivo++;
+	motivo_pinta = 0;
 	lz_rect(&LZ, 0, 0, W, H, C_FONDO);
 	/* arriba: el procesador, el equipo, la frecuencia, la batería */
 	lz_rect(&LZ, 0, 0, W, 78, C_CABECERA);
@@ -1362,6 +1643,11 @@ static void pinta(void)
 		snprintf(a, sizeof a, "Frecuencia: %u MHz (la de serie: %u MHz)", mhz_ahora, mhz_tsc);
 	else
 		snprintf(a, sizeof a, "Frecuencia de serie: %u MHz", mhz_tsc);
+	if (ocup_pct >= 0) {
+		size_t n = strlen(a);
+
+		snprintf(a + n, sizeof a - n, "  ·  ocupado: %d %%", ocup_pct);
+	}
 	lz_texto(&LZ, W - ancho_texto(a, 1) - 10, 40, a, 0xFFFFFF, 1);
 	if (hay_zonas && za.t.smbios == 1)
 	{
@@ -1410,6 +1696,8 @@ static void pinta(void)
 		lz_rect(&LZ, 10, y, ance, fila, k % 2 ? 0xFAF8F3 : C_PANEL);
 		marca(k, 20, y + fila / 2, trazo_color[k % 8]);
 		lz_texto(&LZ, cn, y + 7, s->nombre, C_TINTA, 1);
+		if (s->fija)
+			lz_texto(&LZ, cn + ancho_texto(s->nombre, 1) + 6, y + 7, "(fija, no cambia)", C_GRIS, 1);
 		lz_negrita(&LZ, ca, y + 7, grados(g, s->t), C_TINTA, 1);
 		lz_texto(&LZ, cmi, y + 7, grados(g, s->min), C_TINTA, 1);
 		lz_texto(&LZ, cma, y + 7, grados(g, s->max), C_TINTA, 1);
@@ -1438,6 +1726,8 @@ static void pinta(void)
 	a[0] = 0;
 	if (cpu.no_hay[0])
 		lineas += nota(y + 4 + 16 * lineas, cpu.no_hay, C_PELIGRO);
+	if (cpu.aproximada)
+		lineas += nota(y + 4 + 16 * lineas, "La medida del sensor de este Atom es aproximada (sobre todo en frío): menos de 25-30 °C con el equipo encendido no es de fiar; mire cuánto sube, más que la cifra.", C_CALIENTE);
 	if (cpu.intel && cpu.dts)
 		lineas += nota(y + 4 + 16 * lineas, "Hispa-Pentium usa un solo núcleo: se lee el núcleo 0; el «paquete» es el más caliente de todos.", C_GRIS);
 	if (!hay_zonas)
@@ -1494,8 +1784,8 @@ static void pinta(void)
 		} else if (fase == F_ENFRIA) {
 			int seg = (int)((jg_tics() - t_fase) / jg_hz);
 
-			snprintf(a, sizeof a, "ENFRIANDO: %s  ·  ahora %s (empezó en %s, llegó a %s)  ·  Esc: acabar ya", tiempo(g, seg), grados(h, mas_caliente()),
-				 grados(g2, t_ini), grados(g3, pico));
+			snprintf(a, sizeof a, "ENFRIANDO: %s  ·  %s: ahora %s (empezó en %s, llegó a %s)  ·  Esc: acabar ya", tiempo(g, seg),
+				 VP.ref >= 0 ? S[VP.ref].nombre : "el más caliente", grados(h, VP.ref >= 0 ? S[VP.ref].t : mas_caliente()), grados(g2, t_ini), grados(g3, pico));
 			lz_rect(&LZ, 10, ym, W - 20, 26, C_BIEN);
 			lz_rect(&LZ, 14, ym + 4, ancho_texto(a, 1) + 8, 18, 0xFFFFFF);
 			lz_negrita(&LZ, 18, ym + 5, a, C_TINTA, 1);
@@ -1512,9 +1802,23 @@ static void pinta(void)
 		xb += 112;
 		boton(xb, yb, 120, 32, "Parar (Esc)", B_PARAR, fase == F_CARGA || fase == F_ENFRIA, 0);
 		xb += 130;
-		if (xb + 140 <= W)
-			boton(xb, yb, 140, 32, "Captura (F12)", B_CAPTURA, 1, 0);
-		lz_texto(&LZ, 12, H - 20, aviso_archivo, C_GRIS, 1);
+		{
+			/* (TERMO) «Enviar a Carlos» y «Terminal», si la memoria está preparada */
+			int estrecho = W < 1000, an_env = estrecho ? 80 : 150, an_ter = estrecho ? 90 : 100,
+			    an_cap = estrecho ? 50 : 140, pide = (puede_enviar ? an_env + 6 : 0) + (puede_terminal ? an_ter + 6 : 0);
+
+			if (xb + an_cap + pide <= W) {
+				boton(xb, yb, an_cap, 32, estrecho ? "F12" : "Captura (F12)", B_CAPTURA, 1, 0);
+				xb += an_cap + 6;
+			}
+			if (puede_enviar && xb + an_env <= W) {
+				boton(xb, yb, an_env, 32, estrecho ? "Enviar" : "Enviar a Carlos", B_ENVIAR, 1, enviando);
+				xb += an_env + 6;
+			}
+			if (puede_terminal && xb + an_ter <= W)
+				boton(xb, yb, an_ter, 32, "Terminal", B_TERMINAL, 1, 0);
+		}
+		lz_texto(&LZ, 12, H - 20, aviso_envio[0] ? aviso_envio : aviso_archivo, aviso_envio[0] ? C_TINTA : C_GRIS, 1);
 		/* la vez anterior no acabó bien: se dice, encima de todo */
 		if (ver_anterior) {
 			int an = W - 120, rx = 60, ry = 100, al = 90 + 18 * lz_parrafo(0, 0, 0, an - 28, anterior, 0, 1, 18);
@@ -1542,7 +1846,145 @@ static void pinta(void)
 			lz_texto(&LZ, rx + 14, ry + al - 22, "Intro o un clic: cerrar este cuadro. (El resumen también queda en el .TXT de \\TERMO.)", C_GRIS, 1);
 		}
 	}
-	jg_todo_sucio();
+	vuelca_cambios();
+}
+
+/* ---------------------------------------------------------------- (TERMO) enviar y la terminal */
+static int hay_red_ya(void)
+{
+	u32 ip;
+
+	return sc(97, (u32)&ip, 0, 0) == 4;	/* (SC_ESTADO_RED: RED_CONECTADA) */
+}
+
+static const char *sin_red_texto = "No hay red: enchufe el cable o conecte el Wi-Fi (Inicio > Configuración > Red; o en la Consola: REDWIFI /CONECTAR nombre). Luego, otra vez.";
+
+static void lanza_envio(void)
+{
+	char r[120];
+	u32 x;
+
+	if (enviando && (int)(jg_tics() - t_envio) < 600 * (int)jg_hz) {
+		snprintf(aviso_envio, sizeof aviso_envio, "Envío: ya se está enviando; espere a que acabe.");
+		return;
+	}
+	if (!hay_red_ya()) {
+		snprintf(aviso_envio, sizeof aviso_envio, "%s", sin_red_texto);
+		suceso_log("Enviar a Carlos: %s", sin_red_texto);
+		return;
+	}
+	snprintf(r, sizeof r, "%s\\ENVIO.EST", carpeta);
+	escribe(r, "Empezando a enviar...", 21, 1);
+	suceso_log("Enviar a Carlos: se manda %s", carpeta);
+	x = sc(SC_LANZAR_SUELTO, (u32)"\\TERMO.BIN", (u32)"/ENVIAR /VENTANA", 0);
+	if (ES_ERROR(x))
+		x = sc(SC_LANZAR_SUELTO, (u32)"\\HISPA\\TERMO.BIN", (u32)"/ENVIAR /VENTANA", 0);
+	if (ES_ERROR(x)) {
+		snprintf(aviso_envio, sizeof aviso_envio, "Envío: no se puede poner en marcha TERMO.BIN /ENVIAR.");
+		return;
+	}
+	enviando = 1;
+	t_envio = jg_tics();
+	snprintf(aviso_envio, sizeof aviso_envio, "Envío: empezando...");
+}
+
+/* cada 2 s, mientras se envía: lo que dice ENVIO.EST */
+static void mira_envio(void)
+{
+	char r[120], t[400];
+	u32 m, n;
+
+	if (!enviando)
+		return;
+	snprintf(r, sizeof r, "%s\\ENVIO.EST", carpeta);
+	m = sc(SC_ABRIR, (u32)r, PARA_LEER, 0);
+	if (ES_ERROR(m))
+		return;
+	n = sc(SC_LEER, m, (u32)t, sizeof t - 1);
+	sc(SC_CERRAR, m, 0, 0);
+	if (ES_ERROR(n))
+		return;
+	t[n] = 0;
+	if (strcmp(t, aviso_envio + 7)) {
+		snprintf(aviso_envio, sizeof aviso_envio, "Envío: %s", t);
+		serie("termo: envío dice: %s\n", t);
+		if (busca(t, "Hecho") || busca(t, "Enviados ") || busca(t, "No hay ") || busca(t, "no está preparada") || busca(t, "no vale")) {
+			enviando = 0;
+			suceso_log("Enviar a Carlos: %s", t);
+		}
+	}
+	if ((int)(jg_tics() - t_envio) > 900 * (int)jg_hz)
+		enviando = 0;
+}
+
+/* SSH.INI: equipo=, puerto=, usuario= */
+static int lee_ssh_ini(char *eq, int ceq, char *us, int cus, u32 *pu)
+{
+	char r[120], t[600], *p;
+	u32 m, n;
+
+	snprintf(r, sizeof r, "%s\\SSH.INI", carpeta);
+	m = sc(SC_ABRIR, (u32)r, PARA_LEER, 0);
+	if (ES_ERROR(m))
+		return 0;
+	n = sc(SC_LEER, m, (u32)t, sizeof t - 1);
+	sc(SC_CERRAR, m, 0, 0);
+	if (ES_ERROR(n))
+		return 0;
+	t[n] = 0;
+	eq[0] = us[0] = 0;
+	*pu = 22;
+	for (p = t; *p;) {
+		char *f = p;
+
+		while (*f && *f != '\r' && *f != '\n')
+			f++;
+		if (*f)
+			*f++ = 0;
+		if (!strncmp(p, "equipo=", 7))
+			snprintf(eq, (size_t)ceq, "%s", p + 7);
+		else if (!strncmp(p, "usuario=", 8))
+			snprintf(us, (size_t)cus, "%s", p + 8);
+		else if (!strncmp(p, "puerto=", 7))
+			for (*pu = 0, p += 7; *p >= '0' && *p <= '9'; p++)
+				*pu = *pu * 10 + (u32)(*p - '0');
+		while (*f == '\r' || *f == '\n')
+			f++;
+		p = f;
+	}
+	/* (solo letras, cifras, «.», «-» y «_»: nada que se cuele en la orden) */
+	for (p = eq; *p; p++)
+		if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '.' || *p == '-' || *p == '_'))
+			return 0;
+	for (p = us; *p; p++)
+		if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '.' || *p == '-' || *p == '_'))
+			return 0;
+	return eq[0] && us[0] && *pu > 0 && *pu < 65536;
+}
+
+static void lanza_terminal(void)
+{
+	char eq[80], us[40], a[300];
+	u32 pu, x;
+
+	if (!lee_ssh_ini(eq, sizeof eq, us, sizeof us, &pu)) {
+		snprintf(aviso_envio, sizeof aviso_envio, "Terminal: %s\\SSH.INI no dice bien el equipo, el puerto y el usuario.", carpeta);
+		return;
+	}
+	if (!hay_red_ya()) {
+		snprintf(aviso_envio, sizeof aviso_envio, "%s", sin_red_texto);
+		return;
+	}
+	snprintf(a, sizeof a, "-k %s\\SSH -p %u %s@%s", carpeta, pu, us, eq);
+	x = sc(SC_LANZAR_SUELTO, (u32)"\\SSH.BIN", (u32)a, 0);
+	if (ES_ERROR(x))
+		x = sc(SC_LANZAR_SUELTO, (u32)"\\HISPA\\SSH.BIN", (u32)a, 0);
+	if (ES_ERROR(x))
+		snprintf(aviso_envio, sizeof aviso_envio, "Terminal: no se encuentra SSH.BIN (el paquete «ssh»).");
+	else {
+		snprintf(aviso_envio, sizeof aviso_envio, "Terminal: conectando con %s@%s (puerto %u)...", us, eq, pu);
+		suceso_log("Terminal: SSH a %s@%s, puerto %u", us, eq, pu);
+	}
 }
 
 /* ---------------------------------------------------------------- las teclas y el ratón */
@@ -1578,6 +2020,12 @@ static void haz(int id)
 	case B_CAPTURA:
 		captura();
 		break;
+	case B_ENVIAR:
+		lanza_envio();
+		break;
+	case B_TERMINAL:
+		lanza_terminal();
+		break;
 	}
 	jg_cambio = 1;
 }
@@ -1585,6 +2033,9 @@ static void haz(int id)
 static void suceso(const struct suceso *s)
 {
 	int i;
+
+	if (s->clase != EV_RATON_MUEVE && s->clase != EV_RATON_SUBE)
+		motivo_pinta = 1;	/* (PARPADEO) lo que pinta: teclas, clics, la rueda */
 
 	if (ver_anterior && (s->clase == EV_RATON_BAJA || (s->clase == EV_TECLA && (ES_INTRO(s->a) || s->a == T_ESC)))) {
 		ver_anterior = 0;
@@ -1599,6 +2050,8 @@ static void suceso(const struct suceso *s)
 		case '3': haz(B_15); break;
 		case T_ESC: haz(B_PARAR); break;
 		case 0x158: captura(); estado_serie(); break;	/* F12 */
+		case 'e': case 'E': if (puede_enviar) lanza_envio(); break;
+		case 't': case 'T': if (puede_terminal) lanza_terminal(); break;
 		default:
 			if (ES_INTRO(s->a) && fase == F_RESULTADO) {
 				fase = F_REPOSO;
@@ -1634,9 +2087,21 @@ static void tamano(int an, int al)
 	(void)an;
 	(void)al;
 	jg_cambio = 1;
+	motivo_pinta = 1;
 }
 
 static const struct juego J = { pulso, pinta, suceso, tamano, al_cerrar, 10 };
+
+/* (TERMO) con un núcleo de antes de la 0.8.9: solo el aviso */
+static void pinta_viejo(void)
+{
+	lz_rect(&LZ, 0, 0, LZ.an, LZ.al, C_FONDO);
+	lz_negrita(&LZ, 16, 16, "El Termómetro necesita Hispa-Pentium 0.8.9 o posterior", C_TINTA, 1);
+	lz_parrafo(&LZ, 16, 44, LZ.an - 32, "Lee las temperaturas con unas llamadas del núcleo que llegan en la 0.8.9. Actualice el sistema en Programas y actualizaciones (Inicio) y ábralo otra vez.", C_TINTA, 1, 18);
+	vuelca_cambios();
+}
+
+static const struct juego J_viejo = { 0, pinta_viejo, 0, 0, 0, 10 };
 
 /* ---------------------------------------------------------------- principal */
 static char args[256];
@@ -1666,6 +2131,37 @@ int principal(void)
 			s = s * 10 + *p - '0';
 
 		return carga_hija(s > 0 ? s : 1000);
+	}
+	/* (TERMO) dónde va todo, y «Enviar a Carlos» (TERMO /ENVIAR: desde la
+	 * Consola lo dice en la pantalla; con /VENTANA, en ENVIO.EST) */
+	arranque_auto = arg_aqui("/ARRANQUE");
+	elige_carpeta();
+	if (arg_aqui("/ENVIAR")) {
+		if (!carpeta[0]) {
+			sc(SC_ESCRIBIR, (u32)"TERMO: no hay carpeta TERMO.\n", 29, 0);
+			return 1;
+		}
+		return envio_principal(carpeta, en_memoria ? unidad : 0, !arg_aqui("/VENTANA"));
+	}
+	/* (TERMO) las llamadas 220-224 son de la base 0.8.9: con una de antes,
+	 * se dice en vez de fallar */
+	sin_llamadas = ES_ERROR(sc(SC_CARGA, 3, 0, 0));
+	if (sin_llamadas) {
+		static const char t[] = "El Termometro necesita Hispa-Pentium 0.8.9 o posterior (las lecturas de temperatura del nucleo). "
+					"Actualicelo en Programas y actualizaciones.\n";
+
+		if (sc(SC_DATO, DATO_ESCRITORIO, 0, 0) != 1)
+			sc(SC_ESCRIBIR, (u32)t, sizeof t - 1, 0);
+		else if (jg_abrir("Termómetro", 620, 140, 0) >= 0)
+			jg_correr(&J_viejo);
+		return 1;
+	}
+	puede_enviar = carpeta[0] && envio_hay(carpeta);
+	{
+		char eq[80], us[40];
+		u32 pu;
+
+		puede_terminal = carpeta[0] && lee_ssh_ini(eq, sizeof eq, us, sizeof us, &pu);
 	}
 	/* (los argumentos, para arg_entero: jg_correr los vuelve a leer) */
 	memcpy(jg_args, args, sizeof args);

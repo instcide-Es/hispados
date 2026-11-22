@@ -874,6 +874,13 @@ módulo Tareas
         devolver "libre"
     fin
 
+    ; (TERMO) los tics que ha corrido la ociosa (el Termómetro: lo ocupado
+    ; que está el procesador)
+    público función tics_de_la_ociosa(): nat32
+        si ociosa = nulo entonces devolver 0 fin
+        devolver ociosa.tics_usados
+    fin
+
     público función enseña_tareas()
         variable i: nat32
         variable t: puntero a Tarea

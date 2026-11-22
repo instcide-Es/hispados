@@ -1,0 +1,305 @@
+/* veredicto.c - (TERMO) el resumen de la prueba de esfuerzo (veredicto.h).
+ *
+ * Lo que enseñó el HP Mini 5103 de verdad (pruebas/hpmini-5103-real.log):
+ * una zona de ACPI clavada en 50 °C toda la prueba y el procesador de 25 a
+ * 38 °C. Medir con «el más caliente» daba «subió de 50 a 50 (+0)» y «volvió
+ * a 55 °C en 1 s». Ahora:
+ *  - se mide con el sensor del procesador que más sube; si no hay ninguno
+ *    del procesador, con el que más sube de los demás;
+ *  - un sensor que no cambia en toda la prueba (con medidas) es «fijo»: se
+ *    dice, y no cuenta para el veredicto;
+ *  - «volver a la de reposo» es quedar a 5 °C o menos de lo que tenía el de
+ *    referencia al empezar, y se dice así.
+ * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "veredicto.h"
+
+#define CERCA_REPOSO 50		/* 5 °C */
+
+char *ve_grados(char *d, int t)
+{
+	if (t == VE_NO)
+		strcpy(d, "--");
+	else if (t < 0)
+		snprintf(d, 24, "-%d,%d °C", -t / 10, -t % 10);
+	else
+		snprintf(d, 24, "%d,%d °C", t / 10, t % 10);
+	return d;
+}
+
+static void apunta(struct ve_prueba *p, int k, int v)
+{
+	if (v == VE_NO)
+		return;
+	if (p->lo[k] == VE_NO || v < p->lo[k])
+		p->lo[k] = v;
+	if (p->hi[k] == VE_NO || v > p->hi[k])
+		p->hi[k] = v;
+	p->n[k]++;
+}
+
+void ve_empieza(struct ve_prueba *p, int ns, const struct ve_sensor *s, const int *t)
+{
+	int k;
+
+	memset(p, 0, sizeof *p);	/* (también lo ocupado) */
+	p->ns = ns > VE_MAXS ? VE_MAXS : ns;
+	p->ref = -1;
+	p->t_ini = p->pico_ref = p->t_parada = p->ultimo = VE_NO;
+	p->baja30 = p->baja60 = VE_NO;
+	p->vuelve_s = -1;
+	for (k = 0; k < p->ns; k++) {
+		p->s[k] = s[k];
+		p->ini[k] = p->pico[k] = t[k];
+		p->lo[k] = p->hi[k] = p->parada[k] = VE_NO;
+		apunta(p, k, t[k]);
+	}
+}
+
+void ve_carga(struct ve_prueba *p, const int *t)
+{
+	int k;
+
+	for (k = 0; k < p->ns; k++) {
+		if (t[k] == VE_NO)
+			continue;
+		if (p->ini[k] == VE_NO)
+			p->ini[k] = t[k];	/* (el que aún no daba nada al empezar) */
+		if (p->pico[k] == VE_NO || t[k] > p->pico[k])
+			p->pico[k] = t[k];
+		apunta(p, k, t[k]);
+	}
+}
+
+void ve_ocupacion(struct ve_prueba *p, int pct)
+{
+	if (pct < 0 || pct > 100)
+		return;
+	p->ocup_suma += pct;
+	p->ocup_n++;
+	if (pct > p->ocup_max)
+		p->ocup_max = pct;
+}
+
+/* (lo ocupado de media enfriando, o -1 si no se sabe) */
+static int ocupado(const struct ve_prueba *p)
+{
+	return p->ocup_n ? p->ocup_suma / p->ocup_n : -1;
+}
+
+int ve_fija(const struct ve_prueba *p, int k)
+{
+	return p->n[k] >= 2 && p->lo[k] != VE_NO && p->lo[k] == p->hi[k];
+}
+
+/* el de referencia: el del procesador que más sube; si no, el que más sube
+ * de los que cambian; si ninguno cambia, el más caliente */
+static int elige(const struct ve_prueba *p)
+{
+	int k, mejor = -1, msube = 0, pasada;
+
+	for (pasada = 0; pasada < 3 && mejor < 0; pasada++)
+		for (k = 0; k < p->ns; k++) {
+			int sube;
+
+			if (p->ini[k] == VE_NO || p->pico[k] == VE_NO)
+				continue;
+			if (pasada == 0 && !p->s[k].cpu)
+				continue;
+			if (pasada < 2 && ve_fija(p, k))
+				continue;
+			sube = pasada == 2 ? p->pico[k] : p->pico[k] - p->ini[k];
+			if (mejor < 0 || sube > msube)
+				mejor = k, msube = sube;
+		}
+	return mejor;
+}
+
+int ve_para(struct ve_prueba *p, const int *t)
+{
+	int k;
+
+	ve_carga(p, t);
+	for (k = 0; k < p->ns; k++)
+		p->parada[k] = t[k];
+	p->ref = elige(p);
+	if (p->ref >= 0) {
+		p->t_ini = p->ini[p->ref];
+		p->pico_ref = p->pico[p->ref];
+		p->t_parada = t[p->ref] != VE_NO ? t[p->ref] : p->pico_ref;
+	}
+	return p->ref;
+}
+
+int ve_enfria(struct ve_prueba *p, int seg, const int *t)
+{
+	int k, v;
+
+	for (k = 0; k < p->ns; k++)
+		apunta(p, k, t[k]);
+	if (p->ref < 0)
+		return seg >= 60;
+	v = t[p->ref];
+	if (v == VE_NO)
+		return 0;
+	p->ultimo = v;
+	p->ult_seg = seg;
+	if (seg >= 30 && p->baja30 == VE_NO)
+		p->baja30 = p->t_parada - v;
+	if (seg >= 60 && p->baja60 == VE_NO)
+		p->baja60 = p->t_parada - v;
+	if (p->vuelve_s < 0 && p->t_ini != VE_NO && v <= p->t_ini + CERCA_REPOSO && p->pico_ref - p->t_ini > CERCA_REPOSO)
+		p->vuelve_s = seg;
+	return (p->vuelve_s >= 0 || p->pico_ref - p->t_ini <= CERCA_REPOSO) && seg >= 60;
+}
+
+#define PON(...) (m += snprintf(d + m, (size_t)(cabe > m ? cabe - m : 0), __VA_ARGS__), m = m < cabe ? m : cabe - 1)
+
+static char *tiempo(char *d, int seg)
+{
+	if (seg >= 60 && seg % 60)
+		snprintf(d, 24, "%d min %d s", seg / 60, seg % 60);
+	else if (seg >= 60)
+		snprintf(d, 24, "%d min", seg / 60);
+	else
+		snprintf(d, 24, "%d s", seg);
+	return d;
+}
+
+void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int seguridad, const char *motivo, int esc, int simula)
+{
+	char a[24], b[24], c[24];
+	int m = 0, k, r = p->ref, sube = 0, lim = VE_NO, nfijas = 0, nsin = 0, b60;
+
+	d[0] = 0;
+	if (seguridad)
+		PON("PARADA DE SEGURIDAD a los %s: %s. ", tiempo(a, seg_carga), motivo);
+	else
+		PON("Prueba de %s%s. ", tiempo(a, seg_carga), esc ? " (parada con Esc)" : "");
+	if (r < 0) {
+		PON("Ningún sensor ha dado temperaturas durante la prueba: no se puede decir nada.");
+		return;
+	}
+	sube = p->pico_ref - p->t_ini;
+	lim = p->s[r].limite;
+	PON("Medido con «%s»: subió de %s a %s (%s%d °C). ", p->s[r].nombre, ve_grados(a, p->t_ini), ve_grados(b, p->pico_ref), sube >= 0 ? "+" : "", sube / 10);
+	/* el enfriamiento */
+	b60 = p->baja60 != VE_NO ? p->baja60 : p->baja30;
+	if (p->ultimo == VE_NO)
+		PON("No se ha medido el enfriamiento. ");
+	else {
+		if (p->baja60 != VE_NO || p->baja30 != VE_NO) {
+			const char *cuando = p->baja60 != VE_NO ? "en el primer minuto" : "en los primeros 30 s";
+
+			if (b60 > 0)
+				PON("Al parar, bajó %d,%d °C %s", b60 / 10, b60 % 10, cuando);
+			else
+				PON("Al parar, %s no bajó (de %s a %s)", cuando, ve_grados(a, p->t_parada), ve_grados(b, p->t_parada - b60));
+		} else
+			PON("Al parar, en %s pasó de %s a %s", tiempo(a, p->ult_seg), ve_grados(b, p->t_parada), ve_grados(c, p->ultimo));
+		if (sube <= CERCA_REPOSO)
+			PON(". ");
+		else if (p->vuelve_s >= 0)
+			PON(", y a los %s ya estaba a 5 °C o menos de la de antes de la prueba (%s). ", tiempo(a, p->vuelve_s), ve_grados(b, p->t_ini));
+		else
+			PON("; en %s no volvió a la de antes de la prueba (%s): se quedó en %s. ", tiempo(a, p->ult_seg), ve_grados(b, p->t_ini), ve_grados(c, p->ultimo));
+	}
+	/* los fijos y los que no dan nada */
+	for (k = 0; k < p->ns; k++)
+		if (k != r && ve_fija(p, k))
+			nfijas++;
+		else if (p->n[k] == 0)
+			nsin++;
+	if (nfijas) {
+		int i = 0;
+
+		PON(nfijas == 1 ? "No cambia en toda la prueba (fija, no cuenta): " : "No cambian en toda la prueba (fijas, no cuentan): ");
+		for (k = 0; k < p->ns; k++)
+			if (k != r && ve_fija(p, k))
+				PON("%s%s (%s)", i++ ? ", " : "", p->s[k].nombre, ve_grados(a, p->lo[k]));
+		PON(". ");
+	}
+	if (nsin) {
+		int i = 0;
+
+		PON("Sin dato: ");
+		for (k = 0; k < p->ns; k++)
+			if (k != r && !ve_fija(p, k) && p->n[k] == 0)
+				PON("%s%s", i++ ? ", " : "", p->s[k].nombre);
+		PON(". ");
+	}
+	PON("\n\n");
+	/* el veredicto */
+	if (seguridad)
+		PON("PELIGRO: se calienta demasiado. Limpie el polvo del ventilador y de las rejillas y cambie la pasta térmica del procesador. ");
+	else if (lim != VE_NO && p->pico_ref >= lim - 200)
+		PON("Se calienta bastante: en carga es normal en un portátil, pero queda cerca del límite (%s); una limpieza le vendría bien. ", ve_grados(a, lim));
+	else if (sube < 50 && !simula)
+		PON("Casi no ha subido: o se enfría muy bien, o la carga de un solo núcleo no basta para calentarlo. ");
+	else if (lim != VE_NO)
+		PON("La temperatura en carga es buena: %s, lejos de su límite (%s). ", ve_grados(a, p->pico_ref), ve_grados(b, lim));
+	else
+		PON("La temperatura en carga es buena (%s). ", ve_grados(a, p->pico_ref));
+	/* (el MacBook Air 2012: si algo no deja al procesador en reposo, no baja
+	 * aunque el ventilador vaya bien: no se juzga) */
+	if (sube >= 100 && !seguridad && p->ultimo != VE_NO && ocupado(p) >= 30)
+		PON("No se puede juzgar el enfriamiento: el procesador no ha quedado en reposo después de la prueba (ocupado al %d %% de media, como mucho al %d %%), y así no baja aunque el ventilador vaya bien.",
+		    ocupado(p), p->ocup_max);
+	else if (sube >= 100 && !seguridad && p->ultimo != VE_NO) {
+		int lejos = lim != VE_NO ? p->pico_ref < lim - 300 : p->pico_ref < 700;
+
+		if (b60 != VE_NO && (b60 >= 150 || b60 * 10 >= sube * 4))
+			PON("Al parar se enfría deprisa: el ventilador y el disipador sacan bien el calor.");
+		else if (lejos && sube < 200)
+			PON("Al parar baja despacio, pero como no ha pasado de %s (lejos del límite) no es mala señal: muchos portátiles apenas mueven el ventilador con tan poco calor.", ve_grados(a, p->pico_ref));
+		else if (b60 == VE_NO || b60 < 50)
+			PON("Al parar baja muy despacio: el ventilador o el disipador no hacen bien su trabajo (polvo, ventilador que no gira o pasta seca).");
+		else
+			PON("Al parar baja algo despacio: puede tener polvo.");
+	}
+}
+
+/* (TERMO) la TjMax de los Intel que no la dicen (MSR 1A2h): por el modelo,
+ * el paso y la marca. El HP Mini 5103 (Atom N455, 06_1C paso Ah) salía con
+ * 90 °C, los de los N270: los Pineview (N4xx, N5xx, D4xx, D5xx) son de 100 */
+static int contiene(const char *t, const char *o)
+{
+	size_t n = strlen(o);
+
+	for (; *t; t++)
+		if (!strncmp(t, o, n))
+			return 1;
+	return 0;
+}
+
+int ve_tjmax_intel(int fam, int modelo, int pasos, const char *marca, int movil_ee)
+{
+	if (fam != 6)
+		return 100;
+	switch (modelo) {
+	case 0x1C:		/* Diamondville, Silverthorne y Pineview */
+		if (pasos == 10)
+			return 100;	/* D4xx, K4xx, N4xx, D5xx, K5xx, N5xx */
+		if (contiene(marca, "CPU  230") || contiene(marca, "CPU 230"))
+			return 100;
+		if (contiene(marca, "CPU  330") || contiene(marca, "CPU 330"))
+			return 125;
+		if (contiene(marca, " N4") || contiene(marca, " N5") || contiene(marca, " D4") || contiene(marca, " D5"))
+			return 100;	/* (por si el paso no es el Ah) */
+		return 90;	/* N270, N280, Z5xx */
+	case 0x26:		/* Tunnel Creek (Exx), Lincroft (Z6xx) */
+	case 0x27:		/* Medfield */
+	case 0x35:		/* Cloverview */
+		return 90;
+	case 0x36:		/* Cedarview: N2xxx, D2xxx */
+		return 100;
+	case 0x0F: case 0x16: case 0x17:	/* Core 2 */
+		return movil_ee ? 85 : 100;	/* (el bit 30 del MSR EEh: los de sobremesa, 85) */
+	case 0x0E:		/* Core Duo/Solo (Yonah) */
+		return 100;
+	}
+	return 100;
+}
+

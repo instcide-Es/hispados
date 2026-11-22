@@ -8,7 +8,7 @@
 #define TERMO_ACPI_H
 #include <stdint.h>
 
-#define TA_VERSION 1
+#define TA_VERSION 2
 #define TA_NO ((int32_t)0x80000000)
 #define TA_ZONAS 10
 #define TA_VENT 4
@@ -17,6 +17,10 @@
 struct ta_zona {
 	char nombre[24];	/* la ruta: \_TZ_.THRM */
 	int32_t tmp, crt, psv, hot, ac0;
+	/* (TERMO) por qué no hay _TMP: lo que dijo ACPICA (ACPI_STATUS: 0, AE_OK)
+	 * y lo que devolvió (décimas de kelvin; -1, nada) */
+	uint32_t estado;
+	int32_t crudo;
 };
 
 struct ta_vent {
@@ -24,6 +28,7 @@ struct ta_vent {
 	int32_t velocidad;	/* r.p.m. (de _FST), o TA_NO */
 	int32_t control;	/* % (de _FST), o TA_NO */
 	int32_t encendido;	/* 1 sí, 0 no, -1 no se sabe (de _STA/_PSC) */
+	uint16_t estado_fst, estado_psc;	/* (TERMO) lo que dijo ACPICA de _FST y _PSC */
 };
 
 struct termo_acpi {
@@ -35,6 +40,12 @@ struct termo_acpi {
 	struct ta_vent vent[TA_VENT];
 	char fabricante[40], producto[40], version_eq[24];
 	char placa_fab[40], placa[40], bios[40];
+	/* (TERMO) el controlador embebido (EC) mientras se leen las zonas: 1 si
+	 * el equipo lo tiene; lecturas, fallos (sin respuesta a tiempo) y
+	 * escrituras que el AML ha querido hacer y no se han hecho (al leer las
+	 * zonas, el EC es de solo lectura); lo que tarda una lectura (ms) */
+	uint32_t ec_hay, ec_lecturas, ec_fallos, ec_ignoradas, ms_lectura;
 };
 
+_Static_assert(sizeof(struct termo_acpi) <= TA_TAM, "termo_acpi: no cabe en lo que copia el núcleo");
 #endif
