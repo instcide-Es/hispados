@@ -235,6 +235,7 @@ cuarta parte, los discos y el USB).
 | `emergente.cas` (Emergente) | Los **menús emergentes**: el del botón secundario y el que cuelga de una barra de menús. |
 | `terminal.cas` (Terminal) | Los **terminales**: dos tubos para que una ventana tenga dentro al intérprete de órdenes y a sus programas. |
 | `escritorio.cas` (Escritorio) | El **escritorio**: el tapiz y sus **iconos**, la barra de tareas, el menú Inicio, el reloj, los cuadros (apagar, configuración, «Acerca de»), los menús del botón secundario, y la tarea que lo mueve todo. |
+| `organiza.cas` (Organiza) | (ICONOS) **Dónde van los iconos del tapiz**: la zona de trabajo (sin la barra ni el dock), la rejilla, organizarlos (por nombre, tipo, tamaño o fecha), la organización automática, la cuadrícula, las páginas si no caben, `ICONOS.INI` y los archivos de la carpeta ESCRITOR (sección 10, «Los iconos del tapiz»). |
 | `red.cas` (Red) | **La red**, lo que pone el núcleo (sección 14): el cartero entre los programas y el servicio de red (`RED.BIN`) —y el servicio TLS (`TLS.BIN`), con la llamada 99—, y lo que solo el servicio de red puede pedir: los puertos, memoria física seguida para el DMA, los registros de la tarjeta y su interrupción. |
 
 | `energia.cas` (Energia) | **Apagar de verdad, reiniciar y la batería**: las llamadas del servicio de ACPI (`ACPI.BIN`, un programa del anillo 3 con ACPICA) y la 154; apagar por ACPI (S5) y reiniciar (FADT, 8042, CF9h); la pila de la bandeja y su recuadro de ayuda (sección 11). |
@@ -1050,8 +1051,11 @@ propio, con sus tildes y su eñe).
 - **El tapiz**: tres a elegir («Olas», «Azul» y «Verde»), con el disquete y el
   nombre abajo a la derecha.
 - **Los iconos del tapiz**: «Mi equipo», «Bloc de notas» y «Consola», con su
-  rótulo en letra normal. Un clic lo elige (el rótulo queda sobre azul); **dos
-  clics lo abren**; se llevan a otro sitio **arrastrándolos**.
+  rótulo en letra normal (y los de los paquetes, los accesos soltados y los
+  archivos del escritorio). Un clic lo elige (un recuadro alrededor del
+  dibujo y el rótulo sobre azul con su borde blanco); **dos clics lo abren**;
+  se llevan a otro sitio **arrastrándolos**, siempre dentro de la zona de
+  los iconos (más abajo, «Los iconos del tapiz»).
 - **La barra de tareas**, abajo: el botón **«Inicio»** (verde, redondeado), un
   **botón por cada ventana abierta** (pulsarlo la trae delante; si ya lo estaba, la
   minimiza; si estaba minimizada, la recupera) y, a la derecha, la **bandeja con el
@@ -1073,7 +1077,9 @@ propio, con sus tildes y su eñe).
   gris.
 - **El botón secundario del ratón** saca un menú, según dónde:
   - en el **tapiz**: Configuración, Cambiar el tapiz (pasa al siguiente),
-    Organizar iconos (cada uno a su sitio) y Acerca de Hispa-Pentium;
+    Organizar iconos... (su submenú: por nombre, por tipo, por tamaño, por
+    fecha, como al principio y sus casillas; más abajo, «Los iconos del
+    tapiz») y Acerca de Hispa-Pentium;
   - en el **título de una ventana**, o en **su botón de la barra de tareas**:
     Restaurar, Mover, Minimizar, Maximizar y Cerrar (en gris, lo que en ese
     momento no toca). «Mover» lleva la flecha al título y la ventana la sigue
@@ -1677,6 +1683,102 @@ del dock lo sabe con `DATO_ALTO_LIBRE` (`Ventanas.alto_dock`): así se
 pone el explorador. Sabe qué está abierto mirando las
 ventanas y el nombre (y los argumentos) de la tarea de cada una; lo que se
 pulsa se lo pide al escritorio (`Dock.pide`: lanzar o Configuración).
+
+### Los iconos del tapiz: la zona, la rejilla y «Organizar iconos» (22/11; marcado «(ICONOS)»)
+
+| | |
+|---|---|
+| ![30 iconos a 1024 x 600: ninguno debajo del dock ni de la barra](pentium/escritorio/iconos-1024x600.png) | ![El submenú «Organizar iconos»](pentium/escritorio/organizar-menu.png) |
+| ![Organizados por tipo: programas, carpetas y documentos por su extensión](pentium/escritorio/por-tipo.png) | ![El elegido con el teclado: el recuadro y el rótulo con su borde](pentium/escritorio/teclado.png) |
+| ![A 800 x 600, por nombre](pentium/escritorio/iconos-800x600.png) | ![A 640 x 480 con 47: dos páginas y «Más (1/2)»](pentium/escritorio/paginas-640x480.png) |
+| ![De 1280 x 720 a 800 x 600 y a 1024 x 600 en marcha: la Consola, llevada a la derecha, sigue dentro](pentium/escritorio/cambio-a-1024x600.png) | |
+
+Lo pidió Carlos el 22/11: «Organizar iconos tiene que tener un mínimo en
+pantalla destinado para la organización de los iconos, imposibilitando que se
+escondan debajo del menú de Inicio. Igualmente también estaría genial que se
+pudieran organizar por nombre, tipo, etc.» Antes, «Organizar iconos» los ponía
+en una sola columna sin mirar la pantalla: con muchos, los de abajo se
+quedaban debajo de la barra de tareas (con «Inicio») o del dock.
+
+**La zona de trabajo** (`organiza.cas`): la pantalla menos la barra de
+tareas (34 puntos), menos el dock si se ve (62), menos un margen (8 a los
+lados y abajo, 12 arriba). **Ningún icono sale de ella**: ni al arrancar, ni
+al organizarlos, ni al arrastrar uno (mientras se lleva, no baja de la zona;
+soltado encima de la barra, vuelve a ella), ni al llegar iconos nuevos (un
+paquete instalado, un acceso soltado desde el explorador, un archivo nuevo en
+ESCRITOR), ni al cambiar la medida de la pantalla (de 1280 x 720 a 1024 x 600 o
+a 800 x 600, en marcha), ni al ver u ocultar el dock, ni al entrar otro
+usuario. (El menú Inicio, cuando se abre, tapa lo que tenga debajo como
+cualquier ventana; lo que no puede pasar es que un icono se quede **siempre**
+escondido debajo de la barra, del botón «Inicio» o del dock.)
+
+**La rejilla**: celdas de 112 x 76 puntos, de arriba abajo y, cuando no caben
+en una columna, en la siguiente. Si no caben en la pantalla, las celdas se
+estrechan (hasta 80 x 64; los rótulos largos, con «..»); y si aun así no
+caben, **páginas**: la última celda de cada una es «Más (1/2)», con una
+flecha, que pasa a la siguiente (un clic, o Av Pág y Re Pág con el teclado).
+Nunca se esconde ninguno. Dos iconos no quedan **nunca** uno encima de otro:
+el que se suelta encima de otro va a la celda libre más cercana.
+
+**«Organizar iconos...»** (el menú del botón secundario en el tapiz) es un
+submenú:
+
+| Opción | Lo que hace |
+|---|---|
+| Por nombre | En orden alfabético (sin mirar mayúsculas ni tildes; la eñe, detrás de la ene) |
+| Por tipo | Los programas, las carpetas, los documentos (por su extensión: BMP, CSV, DOC...) y los accesos; dentro de cada uno, por nombre |
+| Por tamaño | De menos a más (el del archivo; de un programa, su `.BIN`; las carpetas, 0) |
+| Por fecha de modificación | Lo más nuevo, primero |
+| Como al principio | Como salen: los de siempre, los de los paquetes, los accesos y los archivos (como antes de esto) |
+| [x] Organización automática | Con ella, se ordenan solos (en el orden elegido) cada vez que se añade o se quita alguno, y lo que se arrastra vuelve a su sitio en el orden |
+| [x] Alinear a la cuadrícula | Con ella (lo normal), lo que se suelta va a la celda más cercana; sin ella, se queda donde se suelta, dentro de la zona y sin tapar a otro |
+| [x] Mi equipo, siempre el primero | Mi equipo, arriba a la izquierda, sea cual sea el orden |
+
+El orden elegido lleva delante «»», y las casillas, «[x]» o «[ ]»: la forma,
+no solo el color.
+
+**Con el teclado** (con el tapiz pulsado, o sin ventanas): las flechas van al
+icono de al lado (la primera, al primero), una letra al siguiente que empieza
+por ella, Intro lo abre, Esc no deja ninguno elegido, Av Pág y Re Pág cambian
+de página. Para eso el gestor de ventanas (`ventanas.cas`) le da las teclas a
+la ventana del fondo cuando lo último que se ha pulsado es el tapiz.
+
+**Lo que se guarda**, por usuario: `ICONOS.INI`, en sus ajustes
+(`\USUARIOS\CARLOS\AJUSTES\ICONOS.INI`); sin usuarios, `\HISPA\ICONOS.INI`
+(o `\ICONOS.INI` sin instalar). Solo lo escribe el núcleo (`permisos.cas`).
+Se lee al arrancar y al entrar cada usuario:
+
+```
+orden=tipo
+automatica=no
+cuadricula=si
+primero=si
+sitio=s:Mi equipo|8|12
+sitio=f:CARTA.TXT|456|88
+```
+
+(«sitio»: dónde dejó cada uno, por su clase —«s» los de siempre, «p» los de
+los paquetes, «a» los accesos, «f» los archivos— y su nombre.)
+
+**Los archivos del escritorio**: los de la carpeta ESCRITOR del que ha
+entrado (`\USUARIOS\CARLOS\ESCRITOR`, la que hace `cuentas.cas`); sin
+usuarios, los de `\ESCRITOR` en la unidad del sistema, si está. Hasta 24
+(los ocultos y los del sistema, no). Cada uno, con el icono de su clase
+(como en el explorador); dos clics lo abren con lo suyo (`EQUIPO /ABRIR`). El
+escritorio mira la carpeta cada dos segundos: lo que se copia o se borra
+ahí sale o se va solo.
+
+**Por el puerto serie**, cada vez que los coloca: `escritorio: iconos
+(motivo): N en la zona X0,Y0-X1,Y1, celdas de A x B, C x F, P página(s),
+orden O: Mi equipo@8,12/1; ...`; con eso comprueba
+`castel/nucleo32/mira_iconos.py` que ninguno se sale ni se tapa.
+
+**Probarlo**: `SOLO=iconos castel/pruebas.sh` (la parte 47,
+`pruebas_iconos.sh`): 30 iconos (12 accesos de paquetes y 15 archivos y
+carpetas en `\ESCRITOR`) a 1024 x 600 y a 800 x 600, cada orden, arrastrar uno
+a la barra, la cuadrícula, la automática, el teclado, `ICONOS.INI` y el
+arranque siguiente; cambiar la medida en marcha (de 1280 x 720 a 800 x 600 y
+a 1024 x 600); 47 a 640 x 480 (dos páginas); y sin el dock.
 
 ### El menú Inicio y los atajos de teclado (21/11, la 0.8.4; marcado «(MENÚ)»)
 
