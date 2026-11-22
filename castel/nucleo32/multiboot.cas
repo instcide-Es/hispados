@@ -5,11 +5,34 @@
 ;  programas de usuario: en QEMU, -initrd "uno.bin,otro.bin").
 ;  El arranque que pone Castel (modelo núcleo) guarda la magia (EAX) y la
 ;  dirección de la información (EBX) en C_mb_magia y C_mb_info.
+;  (UEFI) Con GRUB EFI el núcleo se arranca por multiboot2 (la otra cabecera
+;  que pone Castel, C_multiboot2): la magia es otra (0x36D76289) y la
+;  información va en etiquetas (la línea, los módulos, el mapa de memoria,
+;  la pantalla del firmware, GOP, y la RSDP de ACPI). Lo de abajo da lo mismo
+;  con una que con otra: el resto del núcleo no sabe por cuál ha arrancado,
+;  salvo por arrancado_por_uefi() (no hay modo de texto ni BIOS) y rsdp().
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Multiboot
 
     constante MAGIA = 0x2BADB002
+    constante MAGIA2 = 0x36D76289               ; (UEFI) multiboot2
+    constante MAX_MÓDULOS2 = 2048               ; (UEFI) los módulos que se apuntan (las etiquetas)
+
+    ; (UEFI) las etiquetas de multiboot2 que se usan
+    constante E_LÍNEA = 1
+    constante E_MÓDULO = 3
+    constante E_MEMORIA = 4
+    constante E_MAPA = 6
+    constante E_PANTALLA = 8
+    constante E_EFI32 = 11
+    constante E_EFI64 = 12
+    constante E_ACPI1 = 14
+    constante E_ACPI2 = 15
+
+    variable mods2: arreglo [MAX_MÓDULOS2] de nat32  ; (UEFI) dónde está la etiqueta de cada módulo
+    variable n_mods2: nat32
+    variable mods2_mirados: bool
 
     tipo Info = estructura                      ; la información de multiboot (lo que se usa)
         banderas: nat32                         ; qué campos valen
@@ -46,8 +69,49 @@ módulo Multiboot
     fin
 
     ; ¿ha arrancado con un cargador multiboot (que ha dejado su información)?
+    ; (solo la de multiboot de siempre, la primera: con la 2, mb2())
     público función hay_multiboot(): bool
         devolver magia() = MAGIA
+    fin
+
+    ; (UEFI) ¿ha arrancado por multiboot2 (GRUB EFI)?
+    público función mb2(): bool
+        devolver magia() = MAGIA2
+    fin
+
+    ; (UEFI) la primera etiqueta de multiboot2 de esa clase (su dirección), o 0
+    función etiqueta(clase: nat32): nat32
+        variable p, fin_: nat32
+        variable e: puntero a nat32
+        si no mb2() entonces devolver 0 fin
+        p := nat32(info())
+        e := puntero(p)
+        fin_ := p + e[0]
+        p := p + 8
+        mientras p + 8 <= fin_ hacer
+            e := puntero(p)
+            si e[0] = 0 entonces devolver 0 fin
+            si e[0] = clase entonces devolver p fin
+            p := (p + e[1] + 7) yb 0xFFFFFFF8
+        fin
+        devolver 0
+    fin
+
+    ; (UEFI) ¿ha arrancado el firmware UEFI? (GRUB EFI deja la tabla del
+    ; sistema de EFI: entonces no hay BIOS, ni modo de texto, ni VBE)
+    público función arrancado_por_uefi(): bool
+        devolver etiqueta(E_EFI32) <> 0 o etiqueta(E_EFI64) <> 0
+    fin
+
+    ; (UEFI) la RSDP de ACPI que ha copiado GRUB (la de ACPI 2 si la hay; si
+    ; no, la de la 1): su dirección física, dentro de la información (que no
+    ; se pisa), o 0. Con la BIOS, 0: ACPI.BIN la busca él donde siempre.
+    público función rsdp(): nat32
+        variable p: nat32
+        p := etiqueta(E_ACPI2)
+        si p = 0 entonces p := etiqueta(E_ACPI1) fin
+        si p = 0 entonces devolver 0 fin
+        devolver p + 8
     fin
 
     ; dónde está la información (para no pisarla)
@@ -55,8 +119,25 @@ módulo Multiboot
         devolver nat32(info())
     fin
 
+    ; (UEFI) lo que ocupa (con multiboot2, todas las etiquetas: los nombres
+    ; de los módulos, la línea y la copia de la RSDP van dentro)
+    público función largo_info(): nat32
+        variable e: puntero a nat32
+        si mb2() entonces
+            e := puntero(nat32(info()))
+            devolver e[0]
+        fin
+        devolver 88
+    fin
+
     ; la memoria de encima del primer mega, en K (0 si no se sabe)
     público función memoria_alta(): nat32
+        variable e: puntero a nat32
+        si mb2() entonces
+            e := puntero(etiqueta(E_MEMORIA))
+            si e = nulo entonces devolver 0 fin
+            devolver e[3]
+        fin
         si no hay_multiboot() o info().banderas yb 1 = 0 entonces devolver 0 fin
         devolver info().mem_alta
     fin
@@ -66,6 +147,15 @@ módulo Multiboot
     público función regiones(): nat32
         variable p, fin_, n: nat32
         variable r: puntero a Región
+        variable e: puntero a nat32
+        si mb2() entonces
+            ; (UEFI) entradas de e[2] octetos detrás de 16: base, largo
+            ; (de 64 bits) y clase, que son los mismos campos que los de una
+            ; Región contada desde 4 octetos antes (región() lo hace así)
+            e := puntero(etiqueta(E_MAPA))
+            si e = nulo o e[2] < 24 entonces devolver 0 fin
+            devolver (e[1] - 16) div e[2]
+        fin
         si no hay_multiboot() o info().banderas yb 0x40 = 0 entonces devolver 0 fin
         p := info().mapa_dir
         fin_ := p + info().mapa_largo
@@ -82,6 +172,13 @@ módulo Multiboot
     público función región(i: nat32): puntero a Región
         variable p: nat32
         variable r: puntero a Región
+        variable e: puntero a nat32
+        si mb2() entonces
+            ; (UEFI) de esa Región solo valen base, largo y clase (su «tam»
+            ; son los 4 octetos de antes de la entrada)
+            e := puntero(etiqueta(E_MAPA))
+            devolver puntero(nat32(e) + 16 + i * e[2] - 4)
+        fin
         p := info().mapa_dir
         r := puntero(p)
         mientras i > 0 hacer
@@ -94,11 +191,18 @@ módulo Multiboot
 
     ; dónde está el mapa y cuánto ocupa (para no pisarlo)
     público función dirección_mapa(): nat32
+        si mb2() entonces devolver etiqueta(E_MAPA) fin           ; (UEFI) dentro de la información
         si no hay_multiboot() o info().banderas yb 0x40 = 0 entonces devolver 0 fin
         devolver info().mapa_dir
     fin
 
     público función largo_mapa(): nat32
+        variable e: puntero a nat32
+        si mb2() entonces
+            e := puntero(etiqueta(E_MAPA))
+            si e = nulo entonces devolver 0 fin
+            devolver e[1]
+        fin
         si no hay_multiboot() o info().banderas yb 0x40 = 0 entonces devolver 0 fin
         devolver info().mapa_largo
     fin
@@ -106,6 +210,12 @@ módulo Multiboot
     ; lo que se le ha dicho al núcleo al arrancarlo (en QEMU, -append "..."):
     ; un texto, vacío si no se ha dicho nada
     público función línea_del_cargador(): puntero a byte
+        variable p: nat32
+        si mb2() entonces
+            p := etiqueta(E_LÍNEA)
+            si p = 0 entonces devolver "" fin
+            devolver puntero(p + 8)
+        fin
         si no hay_multiboot() o info().banderas yb 4 = 0 entonces devolver "" fin
         devolver puntero(info().línea)
     fin
@@ -118,9 +228,17 @@ módulo Multiboot
     público función pantalla_del_cargador(ref base: nat32, ref octetos_fila: nat32, ref ancho: nat32, ref alto: nat32, ref bits: nat32): bool
         variable p: puntero a nat32
         variable q: puntero a byte
-        si no hay_multiboot() o info().banderas yb 0x1000 = 0 entonces devolver falso fin
-        p := puntero(nat32(info()) + 88)
-        q := puntero(nat32(info()) + 108)
+        si mb2() entonces
+            ; (UEFI) la etiqueta 8: los mismos campos, 8 octetos detrás
+            p := puntero(etiqueta(E_PANTALLA))
+            si p = nulo entonces devolver falso fin
+            q := puntero(nat32(p) + 28)
+            p := p + 2
+        sino
+            si no hay_multiboot() o info().banderas yb 0x1000 = 0 entonces devolver falso fin
+            p := puntero(nat32(info()) + 88)
+            q := puntero(nat32(info()) + 108)
+        fin
         si p[1] <> 0 o q[1] <> 1 entonces devolver falso fin      ; por encima de 4 GB, o no es de color directo
         base := p[0]
         octetos_fila := p[2]
@@ -130,14 +248,60 @@ módulo Multiboot
         devolver cierto
     fin
 
+    ; (UEFI) ¿es de colores al revés? (rojo en el octeto bajo y azul en el
+    ; alto: «RGB»; lo de siempre, y lo que dibuja el núcleo, es «BGR»: el azul
+    ; abajo). Solo con 32 bits por punto y multiboot2 (con la VBE de la BIOS
+    ; no se mira: siempre ha sido BGR).
+    público función pantalla_al_revés(): bool
+        variable q: puntero a byte
+        si no mb2() entonces devolver falso fin
+        q := puntero(etiqueta(E_PANTALLA))
+        si q = nulo entonces devolver falso fin
+        devolver q[28] = 32 y q[29] = 1 y q[32] = 0 y q[36] = 16
+    fin
+
     ; ---- los módulos ----
+    ; (UEFI) con multiboot2, cada módulo es una etiqueta: se apuntan la
+    ; primera vez
+    función mira_mods2()
+        variable p, fin_: nat32
+        variable e: puntero a nat32
+        si mods2_mirados entonces devolver fin
+        mods2_mirados := cierto
+        n_mods2 := 0
+        p := nat32(info())
+        e := puntero(p)
+        fin_ := p + e[0]
+        p := p + 8
+        mientras p + 8 <= fin_ y n_mods2 < MAX_MÓDULOS2 hacer
+            e := puntero(p)
+            si e[0] = 0 entonces romper fin
+            si e[0] = E_MÓDULO entonces
+                mods2[n_mods2] := p
+                n_mods2 := n_mods2 + 1
+            fin
+            p := (p + e[1] + 7) yb 0xFFFFFFF8
+        fin
+    fin
+
     público función módulos(): nat32
+        si mb2() entonces
+            mira_mods2()
+            devolver n_mods2
+        fin
         si no hay_multiboot() o info().banderas yb 8 = 0 entonces devolver 0 fin
         devolver info().mods_cuántos
     fin
 
+    ; (UEFI) con multiboot2, la etiqueta del módulo vista como su ficha: el
+    ; inicio y el final están 8 octetos detrás, y el nombre (el texto mismo,
+    ; no un puntero) 16: módulo_texto() lo da aparte
     función ficha_módulo(i: nat32): puntero a Módulo
         variable m: puntero a Módulo
+        si mb2() entonces
+            mira_mods2()
+            devolver puntero(mods2[i] + 8)
+        fin
         m := puntero(info().mods_dir)
         devolver m + i
     fin
@@ -152,6 +316,7 @@ módulo Multiboot
 
     ; su nombre entero, como lo dejó el cargador (para no pisarlo); nulo si no tiene
     público función módulo_texto(i: nat32): puntero a byte
+        si mb2() entonces devolver puntero(nat32(ficha_módulo(i)) + 8) fin    ; (UEFI)
         devolver ficha_módulo(i).nombre
     fin
 
@@ -159,7 +324,7 @@ módulo Multiboot
     ; él, lo que va detrás de la última «/»
     público función módulo_nombre(i: nat32): puntero a byte
         variable t, último: puntero a byte
-        t := ficha_módulo(i).nombre
+        t := módulo_texto(i)                    ; (UEFI)
         si t = nulo entonces devolver "(sin nombre)" fin
         último := t
         mientras valor(t) <> 0 hacer
@@ -172,6 +337,7 @@ módulo Multiboot
     ; dónde está la lista de módulos (para no pisarla)
     público función dirección_módulos(): nat32
         si módulos() = 0 entonces devolver 0 fin
+        si mb2() entonces devolver 0 fin         ; (UEFI) van dentro de la información (largo_info)
         devolver info().mods_dir
     fin
 

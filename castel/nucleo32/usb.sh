@@ -44,8 +44,17 @@
 #     CARPETAS.TXT, que le dice a INSTALAR lo que va a C:\OFICINA.
 #   - y el servicio de ACPI, ACPI.BIN (acpi/pentium/hacer.sh): apagar de
 #     verdad y la batería; con «registro», lo suyo queda en X:\ACPI.TXT.
+# (UEFI) Desde la 0.8.8 arranca también por UEFI (x64 y, si está su GRUB,
+# ia32: los Bay Trail como el Acer One 10): en la misma partición FAT (la
+# tabla sigue siendo la del MBR, como la de Rufus «MBR para BIOS o UEFI»)
+# van \EFI\BOOT\BOOTX64.EFI y BOOTIA32.EFI, el GRUB EFI (nucleo32/uefi.sh),
+# que lee el mismo /boot/grub/grub.cfg: con «$grub_platform» = efi, sus
+# entradas son las de multiboot2 y la pantalla es la del firmware (GOP). Y
+# LEEME-UEFI.TXT (Secure Boot apagado). Sin grub-efi-amd64-bin ni
+# grub-efi-ia32-bin, solo BIOS, como antes; SIN_UEFI=1, también.
 # Necesita ser root (losetup, mount), python3, nasm, parted, dosfstools y
-# grub-pc-bin (grub-install --target=i386-pc).
+# grub-pc-bin (grub-install --target=i386-pc); (UEFI) y grub-efi-amd64-bin
+# y grub-efi-ia32-bin (grub-mkimage).
 set -eu
 export LC_ALL=C.UTF-8
 AQUI=$(dirname "$(readlink -f "$0")")
@@ -56,6 +65,7 @@ trap '[ -n "$L" ] && { umount $W/m 2>/dev/null || true; losetup -d $L 2>/dev/nul
 mkdir $W/f $W/m $W/i
 MEDIO=usb
 . $AQUI/sistema.sh
+. $AQUI/uefi.sh                 # (UEFI)
 IMG=$W/usb.img
 truncate -s ${USB_MB:-64}M $IMG   # (USB_MB=256: con sitio para las firmas de Escudo)
 parted -s $IMG mklabel msdos mkpart primary fat16 1MiB 100% set 1 boot on
@@ -119,7 +129,14 @@ mkdir -p $W/m/boot/grub
 { cat <<'G'
 set timeout=8
 set default=0
-insmod all_video
+# (UEFI) por UEFI, solo la pantalla del firmware (GOP, o UGA en los Mac
+# viejos): con all_video, en QEMU, GRUB usaría la VBE de Bochs por su cuenta
+if [ "$grub_platform" = efi ]; then
+  insmod efi_gop
+  insmod efi_uga
+else
+  insmod all_video
+fi
 # [EDID] la medida elegida en Configuración (\PANTALLA.ENV, la escribe el
 # escritorio): la usa la primera entrada. prueba=1, se va a probar; 2, se esta
 # probando (si se vuelve a arrancar sin darla por buena, vuelve la de antes)
@@ -151,8 +168,64 @@ G
     printf '  boot\n}\n'
   }
   N="escritura=usb unidad=X registro"
+  # (TERMO) la memoria del Termómetro arranca sola a los 5 s
+  if [ -n "${TERMO:-}" ]; then echo "set timeout=5"; fi
+  # (UEFI) por UEFI: multiboot2 y module2, y la pantalla del firmware (GOP:
+  # «auto», la que dice la pantalla (su EDID) o, si no lo dice, la que ha
+  # dejado el firmware; o la elegida en Configuración, o la que se pide; con
+  # «keep» no: GRUB, con la consola de texto de EFI, no tiene modo que
+  # guardar y el núcleo se quedaría sin pantalla). El cambio de medida en marcha no va (no hay BIOS): Configuración
+  # la guarda para el próximo arranque, como en un PC sin la VBE de Bochs
+  if [ -n "$EFI_PLAT" ]; then
+    M2=$(a_module2 "$MODULOS")
+    M2="$M2
+"
+    I2=$(a_module2 "$INSTALA")
+    I2="$I2
+"
+    echo 'if [ "$grub_platform" = efi ]; then'
+    # (TERMO) y por UEFI, también primero
+    if [ -n "${TERMO:-}" ]; then
+      menu_efi "Termometro (UEFI): medir la temperatura (la pantalla a su medida)" ESCRIT8.BIN "escritorio $N amedida termo" "$M2" auto
+      menu_efi "Termometro (UEFI, 1024 x 600)" ESCRIT6.BIN "escritorio $N termo" "$M2" "1024x600x32,1024x600,auto"
+      menu_efi "Termometro (UEFI, 800 x 600)" ESCRIT8.BIN "escritorio $N termo" "$M2" "800x600x32,800x600,auto"
+      menu_efi "Termometro SIN ACPI (UEFI)" ESCRIT8.BIN "escritorio $N sinacpi termo" "$M2" auto
+    fi
+    menu_efi "Hispa-Pentium 0.8 (UEFI): el escritorio (la medida de la pantalla, o la elegida en Configuracion)" ESCRIT8.BIN "escritorio $N" "$M2" auto '  if [ "$modo" = auto ]; then
+    set gfxpayload=auto
+  elif [ -n "$modo" ]; then
+    echo "Hispa-Pentium: la pantalla, a $pantalla (si el firmware no la da, la que hay)"
+    set gfxpayload="${pantalla}x32,${pantalla},auto"
+  fi'
+    menu_efi "Hispa-Pentium 0.8 (UEFI): el escritorio a la medida de la pantalla" ESCRIT8.BIN "escritorio $N amedida" "$M2" auto
+    menu_efi "Hispa-Pentium 0.8 (UEFI): el escritorio (1024 x 600)" ESCRIT6.BIN "escritorio $N" "$M2" "1024x600x32,1024x600,auto"
+    menu_efi "Hispa-Pentium 0.8 (UEFI): el escritorio (1366 x 768)" ESCRIT13.BIN "escritorio $N" "$M2" "1366x768x32,1366x768,auto"
+    menu_efi "Hispa-Pentium 0.8 (UEFI): el escritorio (1024 x 768)" ESCRIT10.BIN "escritorio $N" "$M2" "1024x768x32,1024x768,auto"
+    menu_efi "Hispa-Pentium 0.8 (UEFI): el escritorio SIN tocar el USB, los discos, la red ni ACPI" ESCRIT8.BIN "escritorio sindisco sinusb sinred sinacpi" "$M2" auto
+    cat <<'G'
+menuentry "Ver los modos de video que da el firmware (GOP) de este equipo" {
+  insmod videoinfo
+  set pager=1
+  videoinfo
+  echo
+  echo "Los modos de 32 bits valen. Pulse Intro para volver."
+  read nada
+}
+G
+    menu_efi "Hispa-Pentium 0.8 (UEFI): el interprete de ordenes (texto, en la pantalla del firmware)" SEMILLA.BIN "ordenes $N" "$M2" auto
+    menu_efi "Hispa-Pentium 0.8 (UEFI): la consola del nucleo: dice los discos y el USB que encuentra" SEMILLA.BIN "$N" "$M2" auto
+    menu_efi "Instalar Hispa-Pentium 0.8 en el disco duro (arrancara por la BIOS: Legacy/CSM)" SEMILLA.BIN "instalar unidad=M" "$I2" auto '  echo "Ojo: el disco instalado arranca por la BIOS de siempre (Legacy/CSM);"
+  echo "por UEFI, todavia no. Sin Legacy/CSM, siga usando la memoria USB."
+  sleep 5'
+    cat <<'G'
+menuentry "Volver a la configuracion del firmware (UEFI)" {
+  fwsetup
+}
+else
+G
+  fi
+  # (TERMO) la memoria del Termómetro, por la BIOS: primero (y sola, a los 5 s)
   if [ -n "${TERMO:-}" ]; then
-    echo "set timeout=5"
     entrada "Termometro: medir la temperatura (la pantalla a su medida)" ESCRIT8.BIN "escritorio $N amedida termo" "auto"
     entrada "Termometro (1024 x 600)" ESCRIT6.BIN "escritorio $N termo"
     entrada "Termometro (800 x 600)" ESCRIT8.BIN "escritorio $N termo"
@@ -183,8 +256,15 @@ G
   entrada "Hispa-Pentium 0.8: el interprete de ordenes (modo texto)" SEMILLA.BIN "ordenes $N"
   entrada "Hispa-Pentium 0.8: la consola del nucleo (modo texto): dice los discos y el USB que encuentra" SEMILLA.BIN "$N"
   printf 'menuentry "Instalar Hispa-Pentium 0.8 en el disco duro" {\n  multiboot /SEMILLA.BIN instalar unidad=M\n%s  boot\n}\n' "$INSTALA"
+  [ -n "$EFI_PLAT" ] && echo fi         # (UEFI)
 } > $W/m/boot/grub/grub.cfg
 grub-install --target=i386-pc --boot-directory=$W/m/boot --modules="part_msdos fat multiboot all_video videoinfo read echo" $L > $W/grub.txt 2>&1 || { cat $W/grub.txt; exit 1; }
+# (UEFI) el GRUB EFI, en \EFI\BOOT, y lo que hay que saber
+if [ -n "$EFI_PLAT" ]; then
+  haz_efi $W/m || { echo "usb.sh: no se puede hacer el GRUB EFI"; exit 1; }
+  leeme_uefi $W/m
+  echo "usb.sh: (UEFI) arranca también por UEFI: $EFI_PLAT"
+fi
 sync
 umount $W/m
 losetup -d $L

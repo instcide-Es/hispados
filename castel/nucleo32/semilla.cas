@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32, Textouefi     ; (UEFI) Textouefi
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -743,7 +743,18 @@ módulo Semilla
     función arranca_acpi()
         variable t: puntero a Tarea
         variable e: nat32
-        t := cargar_servicio("ACPI.BIN", línea_del_cargador(), e)      ; (PROTEGE) de la carpeta del sistema
+        variable línea: arreglo [600] de byte
+        variable d: arreglo [2] de nat32
+        ; (UEFI) sin BIOS, la RSDP no está en su zona: la que ha copiado GRUB
+        ; (su dirección física), detrás de lo que dice el cargador
+        si rsdp() <> 0 entonces
+            d[0] := nat32(línea_del_cargador())
+            d[1] := rsdp()
+            formatear(línea, 600, "%s rsdp=%08X", d)
+            t := cargar_servicio("ACPI.BIN", línea, e)
+        sino
+            t := cargar_servicio("ACPI.BIN", línea_del_cargador(), e)      ; (PROTEGE) de la carpeta del sistema
+        fin
         si t = nulo entonces devolver fin
         pon_servicio_acpi(t)
         imprimir1("acpi: el servicio de ACPI (ACPI.BIN) en marcha, la tarea %u\n", t.id)
@@ -767,6 +778,7 @@ módulo Semilla
             devolver 12
         fin
         prepara_tareas()
+        prepara_texto_uefi()                    ; (UEFI) sin modo de texto: la consola, en la pantalla del firmware
         prepara_consola()
         prepara_usuario()
         prepara_escritorio()

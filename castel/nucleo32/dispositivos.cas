@@ -820,6 +820,25 @@ módulo Dispositivos
         añade()
     fin
 
+    ; (UEFI) sin BIOS no hay su zona de datos (400h es memoria cualquiera): el
+    ; puerto serie k (COM1 a COM4, en sus puertos de siempre) se mira por su
+    ; registro de prueba (el 7: lo que se escribe, se lee). 0 si no está
+    función com_por_puertos(k: nat32): nat32
+        variable base, v: nat32
+        si k = 0 entonces base := 0x3F8 sino si k = 1 entonces base := 0x2F8 sino si k = 2 entonces base := 0x3E8 sino base := 0x2E8 fin
+        ensamblador
+            mov edx, {base}
+            add edx, 7
+            mov al, 0x5A
+            out dx, al
+            in al, dx
+            movzx eax, al
+            mov {v}, eax
+        fin
+        si v = 0x5A entonces devolver base fin
+        devolver 0
+    fin
+
     función mira_placa()
         variable k, base: nat32
         variable bda: puntero a nat16
@@ -860,7 +879,7 @@ módulo Dispositivos
         ; los puertos serie, como los dejó la BIOS (su zona de datos, en 400h)
         bda := puntero(0x400)
         para k desde 0 hasta 3 hacer
-            base := bda[k]
+            si arrancado_por_uefi() entonces base := com_por_puertos(k) sino base := bda[k] fin     ; (UEFI)
             si base <> 0 y base < 0x1000 entonces
                 dd[0] := k + 1
                 formatear(buf, 48, "Puerto serie COM%u", dd)

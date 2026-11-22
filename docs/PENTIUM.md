@@ -2628,6 +2628,143 @@ de sus métodos y que la BIOS de cada uno apague con `SLP_EN`. Las pruebas
 con PIIX4 (`pc`) y con ICH9 (`q35`). Para el equipo: la imagen
 `hispa-pentium-usb-0.8-hp-mini.zip` (o `-toshiba`, la misma), con todo lo de la 0.8 y su LEEME.
 
+### Arrancar por UEFI (22/11, rama pentium-uefi; marcado «(UEFI)»)
+
+Hasta aquí la memoria USB, el CD e INSTALAR arrancaban **solo por la BIOS**
+(o el «Legacy»/«CSM» de un equipo UEFI), con GRUB y multiboot. Ahora la
+memoria USB y el CD arrancan **también por UEFI**: de 64 bits (`BOOTX64.EFI`) y,
+si en el equipo que hace la imagen está su GRUB, de 32 bits (`BOOTIA32.EFI`: los
+Atom Bay Trail como el **Acer One 10** o el Medion, que tienen UEFI de 32 bits
+con un procesador de 64). Lo elige el equipo; la memoria es la misma.
+
+**La imagen** (`nucleo32/usb.sh`, `nucleo32/cd.sh` y lo común en
+`nucleo32/uefi.sh`):
+
+- **La memoria USB**: la tabla sigue siendo la del **MBR**, con una sola
+  partición FAT16 (la de siempre, con el GRUB de la BIOS en el MBR y su hueco).
+  En ella van **`\EFI\BOOT\BOOTX64.EFI`** (y `BOOTIA32.EFI`): un GRUB EFI hecho
+  con `grub-mkimage`, con todo lo que usa el menú dentro (no hace falta la
+  carpeta de módulos de EFI) y `-p /boot/grub` sin disco: busca su `grub.cfg` en
+  la misma partición de la que lo cargó el firmware. Es lo de Rufus «MBR para
+  BIOS o UEFI»: los firmwares buscan `\EFI\BOOT\` en cualquier partición FAT de
+  una memoria USB (no hace falta que sea de clase `EFh`), y así el núcleo sigue
+  viendo una sola unidad X: y la BIOS de los equipos viejos no ve nada nuevo.
+  No hay ESP aparte ni GPT.
+- **El CD**: `grub-mkrescue` sin `-d` hace las dos: el El Torito de la BIOS y
+  otro de **UEFI** (`/efi.img`, una FAT con el GRUB EFI), y la tabla para
+  grabarlo en una memoria con `dd`. La parte 16 sigue viendo su El Torito 1 de
+  la BIOS igual.
+- **El menú** es el mismo `grub.cfg` para las dos: con `$grub_platform` = `efi`
+  salen las entradas de UEFI (`multiboot2` y `module2`; los mismos módulos,
+  `a_module2`), y si no, las de siempre (`multiboot`), sin tocar. Por UEFI se
+  cargan solo `efi_gop` y `efi_uga` (con `all_video`, en QEMU, GRUB usaría la
+  VBE de Bochs por su cuenta). Hay además «Volver a la configuración del
+  firmware» (`fwsetup`).
+- **Sin GRUB EFI** en el equipo que hace la imagen (los paquetes
+  `grub-efi-amd64-bin` y `grub-efi-ia32-bin`), o con `SIN_UEFI=1`, la imagen sale
+  **como antes**, solo BIOS: el PC de Albinyana no los tiene, y sus pruebas siguen
+  igual.
+- **`LEEME-UEFI.TXT`** en la raíz (`nucleo32/uefi/LEEME-UEFI.TXT`): que hay que
+  **apagar el Secure Boot** (no está firmado: sin shim), cómo se suele hacer (la
+  tecla de la configuración, la pestaña Security/Boot, la contraseña de
+  supervisor que piden los Acer para dejarlo cambiar, «Other OS»), que se puede
+  **volver a encender** después, las teclas del menú de arranque y lo que cambia.
+
+**El núcleo, por multiboot2.** Castel pone ahora en el núcleo **dos cabeceras**
+(`ccastel.py` y `compilador/apoyo.cas`, `ARRANQUE_NUCLEO`, iguales): la de
+multiboot de siempre (con el sitio del modo gráfico de `modo_grafico.py`, que
+sigue en el mismo sitio) y detrás, alineada a 8, la de **multiboot2** (88
+octetos, la suma ya hecha): las mismas direcciones (etiqueta 2), la misma
+entrada (3) y la pantalla (5, optativa, sin medida: la que diga `gfxpayload`).
+La entrada guarda la magia y la información igual; `multiboot.cas` da lo mismo
+con una que con otra (`mb2()`):
+
+| Lo que da | multiboot | multiboot2 (UEFI) |
+|---|---|---|
+| la línea | campo 4 | etiqueta 1 |
+| los módulos | la lista del campo 3 | las etiquetas 3 (apuntadas la primera vez, hasta 2048) |
+| el mapa de memoria | campo 6 | etiqueta 6 (cada entrada se ve como una `Región` contada 4 octetos antes: base, largo y clase caen igual) |
+| la pantalla | campos 88-110 (la VBE) | etiqueta 8 (la del **GOP**) |
+| la RSDP de ACPI | (no la da: ACPI.BIN la busca en la EBDA y en E0000h-FFFFFh) | etiqueta 15 (ACPI 2) o 14: `rsdp()` |
+| ¿UEFI? | no | etiquetas 11/12 (la tabla del sistema de EFI): `arrancado_por_uefi()` |
+
+`marcos.cas` no da como libre **toda** la información de multiboot2
+(`largo_info()`: ahí van los nombres de los módulos, la línea y la copia de la
+RSDP). GRUB sale de los servicios de arranque del firmware antes de entrar.
+
+**Lo que usaba la BIOS, sin ella:**
+
+- **La pantalla**: la deja el firmware (GOP) o GRUB se la pide antes de arrancar
+  (`gfxpayload=auto`: la que dice la pantalla por su EDID o, si no, la que había;
+  las entradas de 1024 x 600, 1366 x 768 y 1024 x 768, `ANCHOxALTOx32,…,auto`; la
+  medida guardada en `PANTALLA.ENV`, igual que por la BIOS). No `keep`: con la
+  consola de texto de EFI, GRUB no tiene modo que guardar y no da pantalla. **El
+  cambio en marcha no se hace** (`se_cambia_en_marcha()` y `cambia_modo()` dicen
+  que no con UEFI, aunque en QEMU esté la VBE de Bochs: así QEMU se porta como un
+  PC de verdad); Configuración › Pantalla lo dice («Arrancado por UEFI: no se
+  cambia en marcha, la pone el firmware al arrancar. Se guarda para el próximo
+  arranque.») y va por «Guardar y reiniciar...». Si el GOP es **RGB** (el rojo
+  abajo; casi todos son BGR), se dibuja en un lienzo aparte y `volcar()` le da la
+  vuelta a cada punto (`pantalla_al_revés()`, `fila_al_revés`). El EDID por el
+  GMBUS de Intel sigue valiendo.
+- **El modo texto** no existe: **`textouefi.cas`** pasa la página de `0xB8000` a
+  un marco de RAM (todo lo de texto —la consola del núcleo, el intérprete del
+  arranque, INSTALAR, la llamada 60— sigue escribiendo ahí, como siempre) y una
+  tarea del núcleo, `texto-uefi`, la **pinta en la pantalla del firmware** cada 4
+  tics: 80 x 25 letras de 8 x 16 de la página 437 entera (`letra437.cas`, la de la
+  HispaBIOS: `hazletra437.py`), los 16 colores de la VGA y el cursor, al doble o
+  al triple si la pantalla da para ello, en el centro. Solo lo que cambia. Con el
+  escritorio en marcha se calla. Lo que el núcleo dice antes de la paginación
+  solo sale por el puerto serie.
+- **ACPI**: el núcleo le pasa a `ACPI.BIN` la RSDP de GRUB detrás de la línea
+  (`rsdp=XXXXXXXX`, la dirección física de la copia, dentro de la información
+  de multiboot2); `maquina.c` la usa en vez de buscarla (`mq_pon_rsdp`).
+- **Los puertos serie** del Administrador de dispositivos: sin la zona de datos
+  de la BIOS (400h es memoria cualquiera), se miran por su registro de prueba.
+- **int 13h, A20, la VBE**: el núcleo no los usa (GRUB hace lo suyo).
+- **El 8259, el 8254 y la CMOS** siguen en casi todos los equipos UEFI aunque el
+  CSM esté apagado (el bloque «legacy» del PCH). **Ojo**: en los Intel de 2015 en
+  adelante (Skylake, el Monovate de Tiger Lake) el firmware puede **parar el
+  reloj del 8254** para ahorrar (`8254CGE` del ITSS: lo que la HispaBIOS ya
+  trata, `pit_avanza`); el núcleo, sin su tic, se quedaría parado. Haría falta
+  el HPET o el reloj del APIC. Los Bay Trail lo tienen andando.
+- **El teclado**: en muchos portátiles y 2 en 1 modernos el de dentro no es
+  PS/2: por USB va (el teclado del Acer One 10 se engancha por USB); por
+  **I2C-HID** (algunas tabletas), no. El LEEME dice que se enchufe uno USB.
+- **Las zonas PCI por encima de 4 GB**: OVMF (y los PC con «Above 4G
+  decoding») ponen las zonas de memoria de 64 bits de algunos aparatos (el xHCI
+  de QEMU) por encima de los 4 GB, y el núcleo, de 32 bits, no las usa
+  (`pci_memoria` da 0): sin USB. En las pruebas, OVMF va sin su ventana de 64
+  bits (`-fw_cfg name=opt/ovmf/X-PciMmio64Mb,string=0`), como casi todos los
+  portátiles; moverlas debajo (con la ventana del puente que dice ACPI) queda
+  para más adelante.
+
+**Lo que no se ha hecho:**
+
+- **El disco instalado arranca solo por la BIOS.** INSTALAR se puede lanzar
+  arrancado por UEFI (su pantalla azul se pinta en la del firmware), pero lo
+  que pone en el disco es el GRUB de la BIOS (MBR + hueco); la entrada del menú
+  lo avisa antes. Para UEFI haría falta una partición EFI (o `\EFI\BOOT` en la
+  FAT32), el GRUB EFI que busque `\HISPA\GRUB.CFG` y un `GRUB.CFG` con las dos
+  maneras, y tocar lo que lo cambia (el asistente, PAQUETES, ACTUALIZ).
+- **ia32**: hecho igual que el de 64 bits (el mismo `grub.cfg`, `BOOTIA32.EFI`
+  con `grub-mkimage -O i386-efi`), pero en el VPS no está `grub-efi-ia32-bin`:
+  sin él no se pone ni se prueba (la parte 48 lo dice y lo salta). Con el
+  paquete puesto sale solo.
+- No firmado (sin shim): hay que apagar el Secure Boot.
+
+**Probado** (parte 48, `SOLO=uefi`, `pruebas_uefi.sh`, 77 bien): con OVMF de 64 bits
+(q35): la memoria con `BOOTX64.EFI` y su menú, el escritorio a la medida del GOP
+(1280 x 800, la del EDID de QEMU), ACPI.BIN con la RSDP de GRUB y la batería de
+la SSDT de prueba, el disco SATA (AHCI) y la memoria por el xHCI como X:, la
+consola del núcleo pintada en la pantalla del firmware (con las letras al
+doble) y su texto en el marco que dice; `PANTALLA.ENV` a 800 x 600 pedida al GOP
+y Configuración › Pantalla diciendo que no se cambia en marcha; la misma memoria por SeaBIOS (multiboot
+de siempre, 800 x 600, nada de UEFI); y el CD por UEFI al escritorio. El de 32
+bits, si están OVMF32 y GRUB ia32. Y siguen pasando, con las imágenes híbridas
+(VPS), las partes cd, pantalla, 06 y 07; y en el PC de Albinyana (sin GRUB EFI:
+imágenes solo BIOS) castel32, 06, 07, cd, caliente, paquetes, acpi y pantalla.
+
 ## 12. Instalarlo en el disco duro
 
 Desde la **0.7**, Hispa-Pentium se instala en el disco duro del PC y arranca de
@@ -2855,10 +2992,10 @@ El menú de GRUB del CD (10 s):
 En el CD van también, en `\PAQUETES`, los paquetes del sistema con su catálogo
 (con `CLAVE_PRIVADA`, firmado).
 
-**Sin UEFI**: el núcleo usa la pantalla de texto (INSTALAR) y el modo que pone
-GRUB por la VBE, que con UEFI no están, y el disco instalado arranca por la
-BIOS. En VirtualBox, «Habilitar EFI» tiene que estar quitado (lo está, para
-«Other»).
+**(UEFI)** Desde la rama pentium-uefi el CD arranca también por UEFI (sección
+11, «Arrancar por UEFI»); el disco instalado, de momento, solo por la BIOS. En
+VirtualBox, con «Habilitar EFI» quitado (lo está, para «Other») va por la BIOS,
+como siempre.
 
 **VirtualBox**, lo que trae de serie y cómo va:
 

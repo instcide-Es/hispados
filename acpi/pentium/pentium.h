@@ -25,6 +25,8 @@
 #define ES_ESCRIBE 0x100
 #define ES_ERROR(r) ((r) >= 0xFFFFFFF0u)
 
+void mq_pon_rsdp(u32 d);	/* (UEFI) la RSDP que dice el núcleo («rsdp=»): maquina.c */
+
 /* las órdenes del núcleo (SC_SERVICIO) */
 #define ORDEN_NADA 0
 #define ORDEN_APAGAR 1

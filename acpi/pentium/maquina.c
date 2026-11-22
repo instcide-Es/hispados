@@ -142,14 +142,29 @@ static u32 busca_rsdp(u32 desde, u32 hasta)
 	return 0;
 }
 
+/* (UEFI) la que dice el núcleo («rsdp=» en la línea: la copia de GRUB EFI,
+ * porque sin BIOS no está en su zona ni hay EBDA) */
+static u32 rsdp_dada;
+
+void mq_pon_rsdp(u32 d)
+{
+	rsdp_dada = d;
+}
+
 u32 mq_rsdp(void)
 {
 	static u32 hallada = 1;
-	const u16 *bda = mq_mapa(0x40E, 2);
-	u32 ebda = bda ? (u32)*bda << 4 : 0, d = 0;
+	const u16 *bda;
+	u32 ebda, d = 0;
 
 	if (hallada != 1)
 		return hallada;
+	if (rsdp_dada) {	/* (UEFI) */
+		hallada = rsdp_dada;
+		return hallada;
+	}
+	bda = mq_mapa(0x40E, 2);
+	ebda = bda ? (u32)*bda << 4 : 0;
 	if (ebda >= 0x40000 && ebda < 0xA0000)
 		d = busca_rsdp(ebda, ebda + 1024);
 	if (!d)
