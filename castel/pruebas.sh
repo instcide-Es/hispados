@@ -1966,7 +1966,8 @@ if [ "$(iconv -f CP437 -t UTF-8 $N/notas.txt 2> /dev/null)" = "Guardado en la me
 else ko "lo guardado con el Bloc de notas no está en la memoria USB"; fi
 miracap "Mi equipo enseña las unidades con su letra: C: (el disco SATA de dentro, de solo lectura) y X: (la memoria USB)" m3 negrita 20 5 60 25 "Mi equipo" \
   negrita 313 133 323 143 "(C:)" texto 313 151 323 161 "libres de" texto 264 169 274 179 "(de solo lectura)" negrita 563 133 573 143 "(X:)"
-miracap "y dos clics en X: enseñan lo que hay en la memoria (con lo recién guardado)" m4 negrita 20 5 60 25 "X:\\" texto 316 322 326 332 "LEEME.TXT" texto 316 400 326 410 "NOTAS.TXT"
+# (0.8.7) LEEME.TXT y NOTAS.TXT, en cualquier sitio de la lista: con más programas en la memoria (USUARIOS, ARGON2, PANEL, HORARED...) cambian de sitio
+miracap "y dos clics en X: enseñan lo que hay en la memoria (con lo recién guardado)" m4 negrita 20 5 60 25 "X:\\" texto 20 60 780 560 "LEEME.TXT" texto 20 60 780 560 "NOTAS.TXT"
 fi   # los discos de prueba
 
 # 11. la memoria USB con GRUB, como la arranca un PC: el núcleo la lee él (X:)
