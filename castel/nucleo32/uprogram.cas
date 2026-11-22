@@ -831,7 +831,7 @@ módulo UProgram
             caja(x + 2 * LA + 2 + ((bw - 4 - 12 * LA) * q) div 100, yy + LT + 14 * E + 2, 12 * LA, LT - 4, C_AZUL)
         fin
         ; (RÁPIDO) «Cancelar», abajo a la derecha
-        cw_ := 16 * LA
+        cw_ := 18 * LA                          ; (CORTES) que quepa «Cancelar (Esc)» (con 16 salía «Cancelar (...»)
         ch_ := LT + 6 * E
         cx_ := x + an - 2 * LA - cw_
         cy_ := yy + 2 * LT + 22 * E

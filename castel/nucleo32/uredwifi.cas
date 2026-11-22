@@ -591,7 +591,7 @@ módulo UredWifi
             sino
                 r := pide(WO_SIMCORTE, r, 0, 0, 0)
             fin
-            si r >= 0xFFFFFFE0 entonces escribir("Wi-Fi: no está en marcha.\n") sino si r <> 0 entonces escribir("REDWIFI /SIMCORTE: solo con la radio simulada (WifiSimulada=SI).\n") sino escribir("El punto de acceso simulado desaparece.\n") fin
+            si r >= 0xFFFFFFE0 entonces escribir("Wi-Fi: no está en marcha.\n") sino si r <> 0 entonces escribir("REDWIFI /SIMCORTE: solo con la radio simulada (WifiSimulada=SI).\n") sino escribir("Hecho (la radio simulada).\n") fin
         sino si iguales(p, "/USAR") entonces
             argumento(args, 1, nom, 40)
             a_mayúsculas(nom)

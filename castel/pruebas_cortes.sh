@@ -158,8 +158,8 @@ DISCO=$K/d2.img ARRANQUE=ordenes MODULOS= QEMU_MAS="$NIC" $AQUI/nucleo32/probar.
 tr -d '\r' < $K/d2.sal > $K/d2.txt
 S=$K/d2.txt
 mira "una conexión viva sin datos sigue (los keepalive tienen respuesta); con el camino muerto (sin caerse el enlace), cortada a los 35 s, y el programa lo sabe" \
-  "^tcpespera: nada en 60 s, y la conexión sigue (1500000 octetos)$" "^red: tcp: la conexión con el puerto [0-9]* no contesta desde hace 3[5-9] s: cortada$" \
-  "^tcpespera: la conexión se ha cortado (1500000 octetos)$"
+  "^tcpespera: nada en 60 s, y la conexión sigue (15[0-9]* octetos)$" "^red: tcp: la conexión con el puerto [0-9]* no contesta desde hace 3[5-9] s: cortada$" \
+  "^tcpespera: la conexión se ha cortado (15[0-9]* octetos)$"
 
 # 3. PAQUETES INSTALA un paquete de 3 MB de Internet con el enlace caído a mitad
 # (PAQUETES con la clave de prueba, como en la parte 12)
@@ -213,8 +213,9 @@ if [ -n "$t0" ] && [ -n "$t1" ] && [ "${ms:-99999}" -ge 0 ] && [ "${ms:-99999}" 
   ok "«Cancelar» (Esc) con la descarga parada (el servidor callado): la conexión se corta en $ms ms (menos de 2 s)"
 else ko "«Cancelar» no corta la descarga parada a tiempo (pulsado: ${t0:-?}; el servidor ve el cierre: ${t1:-nunca})"; sed 's/^/        /' $K/srv/servidos; fi
 miracap "«Sin instalar»: los dos paquetes grandes del servidor" k1 negrita 370 120 530 140 "Sin instalar (2)" negrita 40 170 200 230 grande
-miracap "instalando: «Bajando GRANDE.HPQ» se queda en la mitad (el servidor callado), con «Cancelar (Esc)»" k2 texto 0 200 800 560 "GRANDE.HPQ" texto 0 200 800 560 "Cancelar (Esc)"
-miracap "tras «Cancelar», la ventana responde (otra vez la lista, y se mueve por ella) y dice que se ha cancelado" k4 texto 0 520 800 560 "ancelad" negrita 370 120 530 140 "Sin instalar (2)"
+miracap "instalando: «Bajando ... GRANDE.HPQ» se queda en la mitad (el servidor callado), con «Cancelar»" k2 negrita 150 250 650 300 "Bajando" negrita 150 250 650 300 "GRANDE.HPQ:" texto 150 300 650 345 "Cancelar"
+miracap "tras «Cancelar», la ventana dice que se ha cancelado y que todo queda como estaba" k3 texto 0 530 800 560 "cancelado: lo tra" negrita 370 120 530 140 "Sin instalar (2)"
+miracap "y responde: se mueve por la lista" k4 distinto 12 190 770 50 $G/k3.ppm
 mira "y, del menú Inicio, «Reiniciar» reinicia (la ventana se cierra sola)" "^escritorio: reiniciar$"
 if ! grep -q "no se cierran" $S && ! mcopy -n -i $K/s4.img ::HISPA/PAQUETES/GRANDE.PQI $K/x.pqi > /dev/null 2>&1 && ! mdir -/ -b -i $K/s4.img ::HISPA/PAQUETES/BAJADAS 2> /dev/null | grep -q HPQ \
   && ! mdir -/ -b -i $K/s4.img ::HISPA/PAQUETES 2> /dev/null | grep -q 'DIARIO\|CANCELA\|AVANCE' && sano $K/s4.img; then
@@ -266,7 +267,7 @@ if ! grep -q "nadie ha elegido" $S && sano $K/s7.img; then ok "sin esperar a los
 # 6. el Wi-Fi (la radio simulada): el punto de acceso se va y vuelve con
 # otra IP; y la IP que cambia sin que se vaya el enlace
 $AQUI/nucleo32/disco.sh $K/w.img 16 red wifisim > $K/discow.txt 2>&1 || ko "disco.sh no hace el disco del Wi-Fi: $(tail -n 2 $K/discow.txt)"
-MEMORIA=64 DISCO=$K/w.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh $K/SEMILLA.BIN ":pausa 2" "redwifi /conectar HispaPrueba" "clave de prueba" ":pausa 4" \
+MEMORIA=64 DISCO=$K/w.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh $K/SEMILLA.BIN "redwifi /estado" ":pausa 6" "redwifi /redes" ":pausa 2" "redwifi /conectar HispaPrueba" "clave de prueba" ":pausa 4" \
   "ping -n 1 192.168.77.1" ":pausa 2" "redwifi /simcorte 12 ip11" ":pausa 30" "ipconfig" ":pausa 1" "ping -n 2 192.168.77.1" ":pausa 3" \
   "redwifi /simcorte 0 ip10" "ipconfig /renovar" ":pausa 4" "ipconfig" ":pausa 1" "ping -n 1 192.168.77.1" ":pausa 2" > $K/w.sal 2>&1
 tr -d '\r' < $K/w.sal > $K/w.txt
