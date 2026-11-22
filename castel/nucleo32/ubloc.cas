@@ -97,6 +97,7 @@ módulo UBloc
     variable tab_espacios: bool = cierto        ; el tabulador pone espacios
     variable ver_cambiado: bool                 ; hay que repintar
     variable saliendo: bool                     ; se ha dicho que sí a salir
+    variable releer_avisado: bool               ; (Leer otra vez) ya se ha dicho que se pierden los cambios
 
     ; ---- la historia: qué se hizo lo último (para juntar lo tecleado en un grupo) ----
     constante A_OTRA = 0
@@ -3271,12 +3272,12 @@ módulo UBloc
             avisa_mal("No hay archivo que leer otra vez (aún no se ha guardado).")
             devolver
         fin
-        si cambiado() y no cerrando entonces
-            cerrando := cierto
+        si cambiado() y no releer_avisado entonces
+            releer_avisado := cierto
             avisa_mal("Leer otra vez pierde los cambios sin guardar: elígelo otra vez para seguir.")
             devolver
         fin
-        cerrando := falso
+        releer_avisado := falso
         copiar(t, dirección(d.ruta[0]))
         r := BlocArc.lee(t, cp)
         si r <> 0 entonces
@@ -3988,7 +3989,10 @@ módulo UBloc
         vistos := 0
         si n_sesión > 0 entonces
         para i desde 0 hasta n_sesión - 1 hacer
-            si abre_documento(dirección(sesión[i][0]), NADA_CP) entonces
+            si abre_documento(dirección(sesión[i][0]), NADA_CP) y era_nuevo entonces
+                ; (ya no está: fuera)
+                quita_pestaña(activo)
+            sino si n_docs > 0 y iguales(dirección(d.ruta[0]), dirección(sesión[i][0])) entonces
                 si sesión_cursor[i] <= largo() entonces
                     d.cursor := sesión_cursor[i]
                     d.ancla := d.cursor
