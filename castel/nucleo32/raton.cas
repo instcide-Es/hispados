@@ -14,7 +14,7 @@
 ; =============================================================================
 módulo Raton
 
-    importar Cpu
+    importar Cpu, Pozo
 
     constante DATOS = 0x60
     constante ESTADO = 0x64
@@ -134,6 +134,7 @@ módulo Raton
         e := meter_puerto(ESTADO)
         si e yb 0x21 = 0x21 entonces
             d := meter_puerto(DATOS)
+            ruido(R_RATÓN, d)                   ; (USUARIOS) el pozo del azar
             ; el primero de los tres lleva siempre el bit 3: así no se pierde el paso
             si cuántos <> 0 o d yb 8 <> 0 entonces
                 trozo[cuántos] := d

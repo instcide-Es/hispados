@@ -39,7 +39,7 @@
 ; =============================================================================
 módulo Inicio
 
-    importar Tareas, Consola, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Fat, Unidades, Usuario, Multiboot, Ajustes, Textos32, Accesos, Iconos
+    importar Tareas, Consola, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Fat, Unidades, Usuario, Multiboot, Ajustes, Textos32, Accesos, Iconos, Cuentas
 
     ; ---- las acciones (las de escritorio.cas, con los mismos números) ----
     público constante P_SESIÓN = 15             ; Cerrar sesión
@@ -284,7 +284,9 @@ módulo Inicio
         devolver cierto
     fin
 
-    ; los documentos: los .TXT de la raíz del disco
+    ; los documentos: los .TXT de la raíz del disco; (USUARIOS) con usuarios,
+    ; los de sus documentos (\USUARIOS\CARLOS\DOCUMENT)
+    variable carpeta_docs: arreglo [48] de byte
     función lee_documentos()
         variable m, r, n, i: nat32
         variable e: Entrada
@@ -307,7 +309,12 @@ módulo Inicio
             fin
             devolver
         fin
-        m := abrir_archivo(del_sistema, "\\", PARA_LEER)
+        si documentos_de_sesión(carpeta_docs, 48) entonces
+            m := abrir_archivo(del_sistema, carpeta_docs, PARA_LEER)
+        sino
+            carpeta_docs[0] := 0
+            m := abrir_archivo(del_sistema, "\\", PARA_LEER)
+        fin
         si m >= PRIMER_ERROR entonces devolver fin
         r := leer_entrada(m, dirección(e))
         mientras r = 1 y n_documentos < MAX_DOCUMENTOS hacer
@@ -323,7 +330,9 @@ módulo Inicio
     fin
 
     ; ---- INICIO.INI ----
+    ; (USUARIOS) lo fijado y lo más usado, de cada usuario (en sus ajustes, si tiene carpeta)
     función ruta_ini()
+        si ajuste_de_sesión("INICIO.INI", ruta, 96) entonces devolver fin
         si instalado() entonces copiar(ruta, "\\HISPA\\INICIO.INI") sino copiar(ruta, "\\INICIO.INI") fin
     fin
 
@@ -863,9 +872,9 @@ módulo Inicio
         redondeado(valor(l), 1, 1, ancho - 2, CABEZA, 7, 0x4E99EE, 0x1F62C0, ARRIBA)
         rectángulo(valor(l), 8, 2, ancho - 16, 1, 0x9CCBFA)
         disquete(valor(l), 9, 7, 42)
-        si Ajustes.usuario[0] <> 0 entonces
+        si nombre_de_sesión()[0] <> 0 entonces              ; (USUARIOS) el que ha entrado
             copiar_hasta(saludo, "Hola, ", 40)
-            concatenar(saludo, Ajustes.usuario)
+            concatenar(saludo, nombre_de_sesión())
             texto_negrita(valor(l), 59, 13, saludo, 0x123F85)
             texto_negrita(valor(l), 58, 12, saludo, BLANCO)
             copiar_hasta(saludo, "Hispa-Pentium, versión ", 40)
@@ -1216,7 +1225,14 @@ módulo Inicio
         cierra_inicio()
         pedido_acción := P_RUTA
         copiar(pedido_programa, "\\BLOC.BIN")
-        copiar(pedido_argumentos, documentos[i])
+        si carpeta_docs[0] <> 0 entonces
+            ; (USUARIOS) de sus documentos
+            copiar(pedido_argumentos, carpeta_docs)
+            concatenar(pedido_argumentos, "\\")
+            concatenar(pedido_argumentos, documentos[i])
+        sino
+            copiar(pedido_argumentos, documentos[i])
+        fin
         hay_pedido := cierto
     fin
 
@@ -1634,6 +1650,11 @@ módulo Inicio
                 fin
             fin
         fin
+    fin
+
+    ; (USUARIOS) ha entrado otro usuario: lo suyo se lee otra vez al abrir el menú
+    público función olvida_inicio()
+        ini_leído := falso
     fin
 
     público función prepara_inicio()

@@ -251,9 +251,16 @@ módulo UOrdenes
             escribir("Ya está en modo administrador (ADMIN NO lo deja).\n")
             devolver
         fin
+        si hay_usuarios() > 0 y no soy_administrador() entonces
+            ; (USUARIOS) uno normal: no se le pregunta (el núcleo diría que no)
+            escribir("Modo administrador: solo para un usuario administrador (entre con el suyo).\n")
+            devolver
+        fin
         si pedir_admin() entonces
             escribir("Modo administrador: puede cambiar los archivos del sistema (\\HISPA). Con cuidado;\n")
             escribir("ADMIN NO lo deja (y se deja solo al salir).\n")
+        sino si hay_usuarios() > 0 entonces
+            escribir("Modo administrador: no se ha dado (la contraseña no se ha escrito bien, o no se ha confirmado).\n")
         sino
             escribir("Modo administrador: no se ha dado (no se ha confirmado en la pantalla del equipo).\n")
         fin

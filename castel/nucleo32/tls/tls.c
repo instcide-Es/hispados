@@ -185,13 +185,18 @@ static int cpuid_tsc(void)
 
 static void ruido(void)
 {
-	u32 v[4];
+	u32 v[8];
 
 	v[0] = tics();
 	v[1] = tsc();
 	v[2] = hay_tsc ? 0 : sc(SC_DATO, DATO_FECHA, 0, 0);
 	v[3] = (u32)&v;
+	/* (USUARIOS) y 16 octetos del pozo del azar del núcleo (la llamada 210,
+	 * pozo.cas); con un núcleo de antes, lo de arriba solo */
+	if (sc(210, (u32)&v[4], 16, 0) != 16)
+		v[4] = v[5] = v[6] = v[7] = 0;
 	br_sha256_update(&pozo, v, sizeof v);
+	memset(v, 0, sizeof v);
 }
 
 static void pozo_inicia(void)

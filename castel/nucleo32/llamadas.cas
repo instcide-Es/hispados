@@ -246,6 +246,64 @@ módulo Llamadas
         devolver llamada(157, 2, 0, 0) = 1
     fin
 
+    ; ---- (USUARIOS) los usuarios y el azar (nucleo32/cuentas.cas, pozo.cas) ----
+    ; lo que se sabe de un usuario (64 octetos: los de usuario.cas)
+    público tipo Ficha_usuario = estructura
+        id: nat32
+        admin, entra_solo, con_clave, es_yo: byte
+        imagen: nat32
+        nombre: arreglo [24] de byte
+        carpeta: arreglo [12] de byte
+        en_sesión: byte
+        reservado: arreglo [15] de byte
+    fin
+    ; lo que se pide (la 201, Configuración › Usuarios; la 202, SSHD)
+    público tipo Pedido_usuario = estructura
+        orden, id, admin, entra_solo, imagen, n_clave, n_vieja: nat32
+        nombre: arreglo [24] de byte
+        clave: arreglo [128] de byte
+        vieja: arreglo [128] de byte
+    fin
+    público constante PU_CREA = 1
+    público constante PU_QUITA = 2
+    público constante PU_CAMBIA = 3
+    público constante PU_CLAVE = 4
+
+    ; cuántos usuarios hay (0: ninguno, el sistema sin instalar: todo como antes)
+    público función hay_usuarios(): nat32
+        devolver llamada(200, 0, 0, 0)
+    fin
+
+    ; la ficha número i (desde 0): falso si no hay tantos
+    público función ficha_usuario(i: nat32, ref f: Ficha_usuario): bool
+        devolver llamada(200, 1, i, nat32(dirección(f))) = 1
+    fin
+
+    ; el número del usuario de este programa (0: el sistema)
+    público función mi_usuario(): nat32
+        devolver llamada(200, 2, 0, 0)
+    fin
+
+    ; ¿es administrador el usuario de este programa? (sin usuarios, sí)
+    público función soy_administrador(): bool
+        devolver llamada(200, 3, 0, 0) = 1
+    fin
+
+    ; su carpeta («\USUARIOS\CARLOS»), a destino: su largo (0 si no tiene)
+    público función mi_carpeta(destino: puntero a byte, cabe: nat32): nat32
+        devolver llamada(200, 4, nat32(destino), cabe)
+    fin
+
+    ; (solo USUARIOS.BIN) crear, quitar, cambiar, la contraseña
+    público función pedir_usuarios(ref p: Pedido_usuario): nat32
+        devolver llamada(201, 0, nat32(dirección(p)), 0)
+    fin
+
+    ; n octetos (hasta 256) del pozo del azar del núcleo
+    público función azar_del_sistema(destino: puntero a byte, n: nat32): nat32
+        devolver llamada(210, nat32(destino), n, 0)
+    fin
+
     ; (solo los servicios) el sello de la tarea t (con el bit 31, si es un
     ; servicio), o NO_VALE
     público función sello_de_tarea(t: nat32): nat32

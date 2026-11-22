@@ -22,6 +22,15 @@
 ;    /FORZAR                           quitar aunque lo necesite otro; poner
 ;                                      una versión más vieja o la misma
 ;
+;  (USUARIOS, la serie) El catálogo firmado lleva «serie=N» (tools/hpq.py
+;  la sube al firmar): PAQUETES apunta la más alta que ha visto
+;  (C:\HISPA\PAQUETES\SERIE.TXT) y NO usa uno de Internet con la serie más
+;  baja (o sin ella, si ya ha visto una): que nadie le sirva un catálogo
+;  viejo, firmado de verdad, con versiones que tenían fallos ya arreglados.
+;  Uno de una carpeta del equipo (el CD, una memoria) más viejo se usa, con
+;  un aviso. Y (USUARIOS) instalar, actualizar, quitar y reparar, solo un
+;  administrador (el núcleo, además, no le deja escribir en \HISPA a un
+;  PAQUETES lanzado por un usuario normal: permisos.cas).
 ;  La firma: el catálogo (que lleva el SHA-256 de cada paquete, y cada
 ;  paquete los de sus archivos) va firmado (Ed25519, firma.cas) en
 ;  CATALOGO.FIR, con la clave privada del proyecto; la pública va dentro
@@ -178,6 +187,7 @@ módulo UPaquetes
     variable hecho: arreglo [48] de byte
     variable avance: arreglo [48] de byte       ; C:\HISPA\PAQUETES\AVANCE.TXT
     variable firmado: bool                      ; el catálogo lleva firma, y es buena
+    variable cat_serie: nat32                   ; (USUARIOS) su «serie=» (0: no la trae)
     variable núcleo_nuevo: bool                 ; se ha cambiado \HISPA\NUCLEO.BIN
     variable con_avance: bool                   ; /AVANCE: lo pide la ventana
     ; (RÁPIDO) el avance dentro de un paquete grande (octetos) y «Cancelar»:
@@ -1134,6 +1144,7 @@ módulo UPaquetes
         cat_n := 0
         cat_tipos_n := 0
         cat_sis_n := 0
+        cat_serie := 0
         p := cat
         mientras p < cat + n y cat_n < MAX_PAQ hacer
             l := p
@@ -1144,6 +1155,10 @@ módulo UPaquetes
                 palabra(l + 5, 0, cat_tipo_nombre[cat_tipos_n], 12)
                 palabra(l + 5, 1, cat_tipo[cat_tipos_n], 16)
                 si cat_tipo[cat_tipos_n][0] <> 0 entonces cat_tipos_n := cat_tipos_n + 1 fin
+            fin
+            ; (USUARIOS) «serie=N»: el número de este catálogo firmado
+            si empieza_por(l, "serie=") entonces
+                si no texto_a_natural(l + 6, cat_serie) entonces cat_serie := 0 fin
             fin
             ; (SISTEMA) «sistema=nombre»
             si empieza_por(l, "sistema=") y cat_sis_n < MAX_PAQ entonces
@@ -1163,7 +1178,62 @@ módulo UPaquetes
                 si cat_nombre[cat_n][0] <> 0 y cat_archivo[cat_n][0] <> 0 entonces cat_n := cat_n + 1 fin
             fin
         fin
+        si firmado y no mira_serie() entonces
+            cat_n := 0
+            devolver falso
+        fin
         hay_catálogo := cierto
+        devolver cierto
+    fin
+
+    ; (USUARIOS) la serie más alta vista (SERIE.TXT; 0 si no hay)
+    función serie_vista(): nat32
+        variable r: arreglo [RUTA] de byte
+        variable t: arreglo [24] de byte
+        variable m, n, v: nat32
+        en_base("SERIE.TXT", r)
+        m := abrir(r)
+        si es_error(m) entonces devolver 0 fin
+        n := leer(m, t, 23)
+        cerrar(m)
+        si es_error(n) entonces devolver 0 fin
+        t[n] := 0
+        mientras n > 0 y (t[n - 1] = '\r' o t[n - 1] = '\n') hacer
+            n := n - 1
+            t[n] := 0
+        fin
+        si no texto_a_natural(t, v) entonces devolver 0 fin
+        devolver v
+    fin
+
+    ; (USUARIOS) ¿se puede usar el catálogo firmado, por su serie? (contra la
+    ; vuelta atrás: uno viejo, firmado de verdad, servido otra vez). Si es más
+    ; nueva que la vista, se apunta
+    función mira_serie(): bool
+        variable r: arreglo [RUTA] de byte
+        variable t: arreglo [24] de byte
+        variable vista, m: nat32
+        vista := serie_vista()
+        si cat_serie < vista o (cat_serie = 0 y vista > 0) entonces
+            si es_red entonces
+                imprimir2("paquetes: el catálogo de Internet es más viejo (serie %u) que el último que se ha usado (serie %u): no se usa\n", cat_serie, vista)
+                escribir("  (alguien puede estar dando uno de antes, con versiones que tenían fallos ya arreglados)\n")
+                devolver falso
+            fin
+            imprimir2("paquetes: ojo: este catálogo es más viejo (serie %u) que el último visto (serie %u); se usa porque es de una carpeta de este equipo\n", cat_serie, vista)
+            devolver cierto
+        fin
+        si cat_serie > vista entonces
+            en_base("SERIE.TXT", r)
+            natural_a_texto(cat_serie, t)
+            concatenar(t, "\r\n")
+            m := crear(r)
+            si no es_error(m) entonces
+                escribir_archivo(m, t, longitud(t))
+                cerrar(m)
+            fin
+        fin
+        si cat_serie > 0 entonces imprimir1("La serie del catálogo: %u.\n", cat_serie) fin
         devolver cierto
     fin
 
@@ -2938,8 +3008,13 @@ módulo UPaquetes
             en_base("CANCELA.TXT", cancela)             ; (RÁPIDO)
             borrar(cancela)
         fin
+        ; (USUARIOS) instalar, actualizar, quitar y reparar: solo un administrador
+        si (iguales(orden_, "instala") o iguales(orden_, "actualiza") o iguales(orden_, "quita") o iguales(orden_, "repara")) y no soy_administrador() entonces
+            escribir("paquetes: solo un administrador puede instalar, actualizar o quitar programas (entre con su usuario)\n")
+            devolver 1
+        fin
         si no existe(base) entonces crear_carpeta(base) fin
-        recupera()
+        si soy_administrador() entonces recupera() fin       ; (USUARIOS) lo de una vez que se cortó
         carga_instalados()
         bien := cierto
         si iguales(orden_, "lista") entonces

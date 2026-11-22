@@ -335,13 +335,18 @@ static void mezcla(const void *d, u32 n)
 
 void h_ruido(void)
 {
-	u32 v[4];
+	u32 v[8];
 
 	v[0] = h_tics();
 	v[1] = tsc();
 	v[2] = sc(SC_DATO, DATO_FECHA, 0, 0);
 	v[3] = (u32)&v;
+	/* (USUARIOS) y lo del pozo del núcleo (pozo.cas: las interrupciones, el
+	 * disco, RDRAND...): en un núcleo de antes no está, y queda lo de arriba */
+	if (sc(SC_AZAR, (u32)&v[4], 16, 0) != 16)
+		v[4] = v[5] = v[6] = v[7] = 0;
 	mezcla(v, sizeof v);
+	crypto_wipe(v, sizeof v);
 }
 
 void h_azar(void *d, u32 n)
