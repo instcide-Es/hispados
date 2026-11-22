@@ -5889,7 +5889,7 @@ sys.stdout.buffer.write(''.join('linea %06d con algo de texto para llenar\r\n' %
     ":tecla ctrl-f" ":escribe fin" ":tecla ret" ":pausa 1" ":captura bl2" ":tecla esc" ":tecla ctrl-h" ":pausa 1" ":captura bl3" ":tecla esc" \
     ":raton 400 300" ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 1" ":pausa 2" ":captura bl4" ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 -1" ":pausa 2" \
     ":clic 157 199" ":pausa 1" ":captura bl5" ":clic 157 199" ":pausa 1" \
-    ":tecla ctrl-o" ":pausa 2" ":captura bl6" ":escribe A1.TXT" ":tecla ret" ":pausa 2" ":escribe zz" ":pausa 1" ":captura bl7" \
+    ":tecla ctrl-o" ":pausa 2" ":captura bl6" ":escribe A1.TXT" ":tecla ret" ":pausa 2" ":escribe zz" ":raton 400 300" ":pausa 1" ":captura bl7" \
     ":tecla ctrl-o" ":pausa 1" ":escribe A2.TXT" ":tecla ret" ":pausa 2" ":clic 340 126" ":pausa 1" ":clic 400 395" ":pausa 2" ":captura bl8" ":tecla esc" ":pausa 1" \
     ":tecla ctrl-shift-f" ":pausa 1" ":escribe carta" ":tecla tab" ":tecla tab" ":tecla tab" ":tecla end" ":escribe DOCS" ":tecla ret" ":pausa 3" ":captura bl9" \
     ":doble 200 254" ":pausa 2" ":captura bl10" ":tecla f1" ":pausa 2" ":captura bl11" \
@@ -5908,6 +5908,7 @@ sys.stdout.buffer.write(''.join('linea %06d con algo de texto para llenar\r\n' %
   miracap "un clic en el [-] del margen pliega el módulo entero: se ve «...» y el número de la línea de después es el 20" bl5 negrita 166 186 178 198 "módulo" \
     texto 124 202 136 214 "20" notexto 160 200 400 300 "función"
   miracap "Ctrl+O: Abrir, con la carpeta (las carpetas primero) y la ruta abajo" bl6 negrita 122 170 134 182 'C:\' negrita 200 186 400 200 "DOCS" texto 122 426 134 438 "Abrir:"
+  # (PUNTEROS) para bl7 el ratón, abajo en el texto: la «I» en (157, 199) tapaba el pie de las pestañas
   miracap "las pestañas: MUESTRA.CAS y A1.TXT (con cambios: « *», no solo un color)" bl7 texto 126 171 138 183 "MUESTRA.CAS" negrita 266 171 278 183 "A1.TXT *"
   miracap "Ver > Comparar con la de al lado: A1 y A2 lado a lado, con «*» (cambiado), «-» (quitado) y «+» (añadido) en el margen, el hueco rayado y el resumen" bl8 \
     negrita 128 194 140 206 "*" negrita 128 242 140 254 "-" negrita 380 274 392 286 "+" texto 120 454 132 466 "3 trozos distintos" rgb 200 248 FDE2E2 rgb 450 280 DCFCE7
