@@ -10,4 +10,5 @@ double pow(double, double);
 double fmod(double, double);
 double cos(double);
 double acos(double);
+double frexp(double, int *);     /* (la pide stb_image_write; los gcc nuevos no dejan pasar la declaración implícita) */
 #endif
