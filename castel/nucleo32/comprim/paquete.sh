@@ -18,7 +18,7 @@ bash $AQUI/hacer.sh $W/c/BIN
 iconv -f UTF-8 -t CP437 $AQUI/LEEME.txt | sed 's/$/\r/' > $W/c/COMPRIM.TXT
 TIPO=()
 grep -q -- "--tipo" "$HPQ" && TIPO=(--tipo herramientas)
-python3 -I "$HPQ" crea "$SAL/COMPRIM.HPQ" --nombre comprim --version 1.0 \
+python3 -I "$HPQ" crea "$SAL/COMPRIM.HPQ" --nombre comprim --version 1.0.1 \
   --descripcion "Comprimidos: los .ZIP como una carpeta (sacar, añadir y quitar, con contraseña) y las órdenes ZIP y UNZIP" \
   --necesita "base >= 0.8.4" "${TIPO[@]}" \
   $W/c/BIN/COMPRIM.BIN='\HISPA\COMPRIM.BIN' $W/c/BIN/ZIP.BIN='\HISPA\ZIP.BIN' $W/c/BIN/UNZIP.BIN='\HISPA\UNZIP.BIN' \

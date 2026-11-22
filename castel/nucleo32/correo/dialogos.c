@@ -11,6 +11,33 @@
 
 int cancelado;
 
+/* (PARPADEO) lo de debajo de un cuadro: la primera vez, entero; luego, sin
+ * que cuente como cambiado (ya está así en la pantalla), salvo donde estaba
+ * el cuadro antes (por si ha cambiado de medida). Con el lienzo propio, nada
+ * de esto se ve a medio pintar: se vuelca de una vez */
+typedef struct {
+	int hecho, y, al, van, val;
+} Fondo;
+
+static void fondo_caja(Fondo *f, int y, int al)
+{
+	if (f->hecho && (f->van != van || f->val != val))
+		f->hecho = 0;
+	if (repinta_fondo) {
+		if (f->hecho)
+			ui_callado(1);
+		repinta_fondo();
+		ui_callado(0);
+	}
+	if (f->hecho)
+		ui_ensucia(f->y, f->al);
+	f->hecho = 1;
+	f->y = y;
+	f->al = al + 6;
+	f->van = van;
+	f->val = val;
+}
+
 /* ---- las zonas ---- */
 #define MAX_ZONAS 400
 static struct { int x, y, an, al, id; } zonas[MAX_ZONAS];
@@ -266,6 +293,7 @@ static int renglones(int x, int y, const char *t, int max, u32 c, int pinta)
 
 static int pregunta_de(const char *titulo, const char *t, const char *b1, const char *b2, const char *b3, int peligro)
 {
+	Fondo fc = { 0, 0, 0, 0, 0 };
 	const char *b[3] = { b1, b2, b3 };
 	int an = van < 520 ? van - 20 : 500, al, x, y, n, i, elegido = 0, bx;
 	Suceso s;
@@ -277,8 +305,7 @@ static int pregunta_de(const char *titulo, const char *t, const char *b1, const 
 		y = (val - al) / 2;
 		if (y < 0)
 			y = 0;
-		if (repinta_fondo)
-			repinta_fondo();
+		fondo_caja(&fc, y, al);
 		zonas_olvida();
 		caja(x, y, an, al, titulo);
 		if (peligro) {
@@ -295,7 +322,7 @@ static int pregunta_de(const char *titulo, const char *t, const char *b1, const 
 			bx -= ancho_texto(b[i]) + 20 + 8;
 			boton(100 + i, bx, y + al - ALTO_BOTON - 14, 0, b[i], i == 0 && !peligro, 0, i == elegido);
 		}
-		if (!ui_suceso(&s, 100))
+		if (!ui_espera(&s, 0))
 			continue;
 		if (s.clase == UE_CERRAR)
 			return -1;
@@ -344,6 +371,7 @@ void aviso(const char *titulo, const char *t)
 
 int pide_texto(const char *titulo, const char *preg, char *t, u32 cabe, int oculto)
 {
+	Fondo fc = { 0, 0, 0, 0, 0 };
 	static Campo c;
 	int an = van < 540 ? van - 20 : 520, al, x, y, n, i, foco = 0;
 	Suceso s;
@@ -357,8 +385,7 @@ int pide_texto(const char *titulo, const char *preg, char *t, u32 cabe, int ocul
 		y = (val - al) / 2;
 		if (y < 0)
 			y = 0;
-		if (repinta_fondo)
-			repinta_fondo();
+		fondo_caja(&fc, y, al);
 		zonas_olvida();
 		caja(x, y, an, al, titulo);
 		renglones(x + 20, y + 26 + 12, preg, (an - 40) / LA, C_TINTA, 1);
@@ -367,7 +394,7 @@ int pide_texto(const char *titulo, const char *preg, char *t, u32 cabe, int ocul
 		zona(99, x + 20, i, an - 40, 24);
 		boton(101, x + an - 16 - ancho_texto("Cancelar") - 20, y + al - ALTO_BOTON - 12, 0, "Cancelar", 0, 0, foco == 2);
 		boton(100, x + an - 24 - ancho_texto("Cancelar") - ancho_texto("Aceptar") - 40, y + al - ALTO_BOTON - 12, 0, "Aceptar", 1, 0, foco == 1);
-		if (!ui_suceso(&s, 100))
+		if (!ui_espera(&s, 0))
 			continue;
 		if (s.clase == UE_CERRAR)
 			return 0;
@@ -410,6 +437,7 @@ acepta:
 
 int elige(const char *titulo, const char *opciones, int marcada)
 {
+	Fondo fc = { 0, 0, 0, 0, 0 };
 	const char *op[64];
 	int lar[64], n = 0, an = van < 460 ? van - 20 : 440, al, x, y, i, cur = marcada < 0 ? 0 : marcada, primera = 0, filas;
 	const char *p = opciones;
@@ -444,8 +472,7 @@ int elige(const char *titulo, const char *opciones, int marcada)
 			primera = cur;
 		if (cur >= primera + filas)
 			primera = cur - filas + 1;
-		if (repinta_fondo)
-			repinta_fondo();
+		fondo_caja(&fc, y, al);
 		zonas_olvida();
 		caja(x, y, an, al, titulo);
 		marco_hundido(x + 16, y + 36, an - 32, filas * FILA + 4, C_PAPEL);
@@ -461,7 +488,7 @@ int elige(const char *titulo, const char *opciones, int marcada)
 		}
 		boton(101, x + an - 16 - ancho_texto("Cancelar") - 20, y + al - ALTO_BOTON - 12, 0, "Cancelar", 0, 0, 0);
 		boton(100, x + an - 24 - ancho_texto("Cancelar") - ancho_texto("Elegir") - 40, y + al - ALTO_BOTON - 12, 0, "Elegir", 1, 0, 0);
-		if (!ui_suceso(&s, 100))
+		if (!ui_espera(&s, 0))
 			continue;
 		if (s.clase == UE_CERRAR)
 			return -1;
@@ -559,6 +586,7 @@ static int pon_entrada(void *u, const char *nombre, u32 tam, int carpeta)
 
 int elige_archivo(const char *titulo, char *ruta, u32 cabe, int para_guardar, const char *filtro)
 {
+	Fondo fc = { 0, 0, 0, 0, 0 };
 	static Lista_ar l;
 	static Campo nom;
 	char dir[260], *p;
@@ -622,8 +650,7 @@ int elige_archivo(const char *titulo, char *ruta, u32 cabe, int para_guardar, co
 			primera = cur;
 		if (cur >= primera + filas)
 			primera = cur - filas + 1;
-		if (repinta_fondo)
-			repinta_fondo();
+		fondo_caja(&fc, y, al);
 		zonas_olvida();
 		caja(x, y, an, al, titulo);
 		texto(x + 16, y + 36, dir, (an - 32) / LA, C_SUAVE);
@@ -653,7 +680,7 @@ int elige_archivo(const char *titulo, char *ruta, u32 cabe, int para_guardar, co
 		boton(101, x + an - 16 - ancho_texto("Cancelar") - 20, y + al - ALTO_BOTON - 12, 0, "Cancelar", 0, 0, 0);
 		boton(100, x + an - 24 - ancho_texto("Cancelar") - ancho_texto(para_guardar ? "Guardar" : "Abrir") - 40,
 		      y + al - ALTO_BOTON - 12, 0, para_guardar ? "Guardar" : "Abrir", 1, 0, 0);
-		if (!ui_suceso(&s, 100))
+		if (!ui_espera(&s, 0))
 			continue;
 		if (s.clase == UE_CERRAR)
 			return 0;
@@ -868,6 +895,7 @@ static const char *nombre_modo(int m)
 
 int asistente_cuenta(int ic)
 {
+	Fondo fc = { 0, 0, 0, 0, 0 };
 	static Campo f[AC_N];
 	static const char *const rotulo[AC_N] = { "Direcci\xc3\xb3n de correo:", "Su nombre (lo ven los dem\xc3\xa1s):", "Contrase\xc3\xb1" "a:",
 		"Servidor de entrada:", "Puerto:", "Servidor de salida (SMTP):", "Puerto:", "Usuario:" };
@@ -910,8 +938,7 @@ int asistente_cuenta(int ic)
 		y = (val - al) / 2;
 		if (y < 0)
 			y = 0;
-		if (repinta_fondo)
-			repinta_fondo();
+		fondo_caja(&fc, y, al);
 		zonas_olvida();
 		caja(x, y, an, al, ic >= 0 ? "Cambiar la cuenta" : (paso == 0 ? "Cuenta de correo nueva (1 de 2)" : "Cuenta de correo nueva (2 de 2)"));
 		fy = y + 36;
@@ -995,7 +1022,7 @@ int asistente_cuenta(int ic)
 		      y + al - ALTO_BOTON - 12, 0, paso == 0 ? "Siguiente" : "Probar y guardar", 1, 0, foco == nf);
 		if (paso == 1 && ic < 0)
 			boton(102, x + 16, y + al - ALTO_BOTON - 12, 0, "Volver", 0, 0, 0);
-		if (!ui_suceso(&s, 100))
+		if (!ui_espera(&s, 0))
 			continue;
 		if (s.clase == UE_CERRAR)
 			return 0;
@@ -1218,6 +1245,7 @@ static int edita_contacto(Contacto *c)
 
 int ventana_libreta(char *elegida, u32 cabe)
 {
+	Fondo fc = { 0, 0, 0, 0, 0 };
 	int cur = 0, primera = 0, filas, an, al, x, y, i;
 	Suceso s;
 
@@ -1235,8 +1263,7 @@ int ventana_libreta(char *elegida, u32 cabe)
 			primera = cur;
 		if (cur >= primera + filas)
 			primera = cur - filas + 1;
-		if (repinta_fondo)
-			repinta_fondo();
+		fondo_caja(&fc, y, al);
 		zonas_olvida();
 		caja(x, y, an, al, "Libreta de direcciones");
 		marco_hundido(x + 12, y + 36, an - 24, filas * FILA + 4, C_PAPEL);
@@ -1265,7 +1292,7 @@ int ventana_libreta(char *elegida, u32 cabe)
 			bx += boton(115, bx, by, 0, "Exportar...", 0, !n_libreta, 0) + 6;
 			boton(116, x + an - 12 - ancho_texto("Cerrar") - 20, by, 0, "Cerrar", 0, 0, 0);
 		}
-		if (!ui_suceso(&s, 100))
+		if (!ui_espera(&s, 0))
 			continue;
 		if (s.clase == UE_CERRAR)
 			return 0;

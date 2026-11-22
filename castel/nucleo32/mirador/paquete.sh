@@ -18,7 +18,7 @@ bash $AQUI/hacer.sh $W/c/BIN
 iconv -f UTF-8 -t CP437 $AQUI/LEEME.txt | sed 's/$/\r/' > $W/c/MIRADOR.TXT
 TIPO=()
 grep -q -- "--tipo" "$HPQ" && TIPO=(--tipo multimedia)
-python3 -I "$HPQ" crea "$SAL/MIRADOR.HPQ" --nombre mirador --version 1.0 \
+python3 -I "$HPQ" crea "$SAL/MIRADOR.HPQ" --nombre mirador --version 1.0.1 \
   --descripcion "El Mirador: ver imágenes (BMP, PNG, JPG, GIF animados, ICO...), girar, diapositivas, pantalla completa y fondo de escritorio" \
   --necesita "base >= 0.8.6" "${TIPO[@]}" \
   $W/c/BIN/MIRADOR.BIN='\HISPA\MIRADOR.BIN' $W/c/MIRADOR.TXT='\HISPA\MIRADOR.TXT' \
