@@ -240,7 +240,7 @@ cuarta parte, los discos y el USB).
 | `energia.cas` (Energia) | **Apagar de verdad, reiniciar y la batería**: las llamadas del servicio de ACPI (`ACPI.BIN`, un programa del anillo 3 con ACPICA) y la 154; apagar por ACPI (S5) y reiniciar (FADT, 8042, CF9h); la pila de la bandeja y su recuadro de ayuda (sección 11). |
 | `dispositivos.cas` (Dispositivos) | **Lo que hay en el equipo y qué lo lleva** (desde la 0.8.3): las llamadas 155 (la lista, de solo lectura) y 156 (lo que apuntan los servicios del anillo 3), para el Administrador de dispositivos (sección 10). |
 | `sonido.cas` (Sonido) | (SONIDO) **El sonido**, lo que pone el núcleo (sección 14 decies): los canales de los programas (sus colas), el volumen general, el silencio, los sonidos del sistema y las órdenes para el servicio de sonido (`SONIDO.BIN`); las llamadas 190 a 199. |
-| `preferencias.cas` (Preferencias) | (PANEL) **Los ajustes del Panel de control** (sección 14 terdecies): la llamada 174, aplicarlos (el ratón, el teclado, el tema, el tapiz...) y `PANEL.INI`, que escribe solo el núcleo. |
+| `preferencias.cas` (Preferencias) | (PANEL) **Los ajustes del Panel de control** (sección 14 quattuordecies): la llamada 174, aplicarlos (el ratón, el teclado, el tema, el tapiz...) y `PANEL.INI`, que escribe solo el núcleo. |
 | `iconpanel.cas` (Iconpanel) | (PANEL) **Los iconos del Panel de control** (Configuración y PANEL.BIN), dibujados, cada uno con su forma. |
 | `win32.cas` (Win32) | [WIN32] **Lo de los programas de Windows** (sección 14 quater): las llamadas 180 a 182 (páginas en cualquier sitio de la zona del programa, el mapa de las teclas, las ventanas sin marco o a pantalla completa). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
@@ -272,8 +272,8 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `sonido/*.c` (en C: `sonido/hacer.sh`) | `SONIDO.BIN` | (SONIDO) El **servicio de sonido** (HD Audio, AC'97 y Sound Blaster 16; la mezcla; los sonidos del sistema) y la orden **SONIDO** (sección 14 decies). |
 | `uhttps.cas` (con `biblioteca32/https.cas`) | `HTTPS.BIN` | La orden **HTTPS**: pedir direcciones con la biblioteca `Https` (sección 14). |
 | `uipconf.cas`, `uping.cas`, `udescarg.cas` | `IPCONFIG.BIN`, `PING.BIN`, `DESCARGA.BIN` | **IPCONFIG**, **PING** y **DESCARGAR** (sección 14). |
-| `upanel.cas` | `PANEL.BIN` | (PANEL) **El Panel de control**: Fecha y hora, Ratón, Teclado, Red y Wi-Fi, Energía y Personalización (sección 14 terdecies). |
-| `uhorared.cas` con `ntp.cas` y `zonas.cas` | `HORARED.BIN` | (NTP) **La hora por Internet** (SNTP) y el horario de verano; la orden HORARED (sección 14 terdecies). |
+| `upanel.cas` | `PANEL.BIN` | (PANEL) **El Panel de control**: Fecha y hora, Ratón, Teclado, Red y Wi-Fi, Energía y Personalización (sección 14 quattuordecies). |
+| `uhorared.cas` con `ntp.cas` y `zonas.cas` | `HORARED.BIN` | (NTP) **La hora por Internet** (SNTP) y el horario de verano; la orden HORARED (sección 14 quattuordecies). |
 | `panelaj.cas` (Panelaj) | — | (PANEL) Las llamadas 174 (los ajustes) y 175 (la hora exacta) para los programas. |
 | `ubucle.cas` | `BUCLE.BIN` | El que no acaba nunca (da vueltas, duerme, espera teclas o escribe sin parar): para probar **Ctrl+C**. |
 
@@ -477,7 +477,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 155 | (dispositivos) **la lista de los dispositivos** y qué los lleva: hasta ECX fichas `Dispositivo` (320 octetos, `dispositivos.cas`) a EBX. Solo lee | `lista_dispositivos` | cuántos hay (aunque no quepan) |
 | 156 | (dispositivos; **solo los servicios**: `ACPI.BIN`, `RED.BIN`) apuntar la ficha de EBX (ECX = 0) u olvidar las suyas (ECX = 1) | — | 0 |
 | 157 | (PROTEGE) **el modo administrador**: EBX = 0, pedirlo (lo pregunta el núcleo en la pantalla: sección 14 sexies); 1, dejarlo; 2, ¿se tiene? | `pedir_admin`, `dejar_admin`, `es_admin` | 1 o 0 (`DENEGADO` si no hay a quién preguntar) |
-| 174 | (PANEL) **un ajuste del Panel de control**: EBX la clave, ECX el valor nuevo (0xFFFFFFFF: leerlo). Cambiarlo, el Panel de control o el modo administrador (sección 14 terdecies) | `ajuste`, `poner_ajuste` (`panelaj.cas`) | el que queda, o `DENEGADO` |
+| 174 | (PANEL) **un ajuste del Panel de control**: EBX la clave, ECX el valor nuevo (0xFFFFFFFF: leerlo). Cambiarlo, el Panel de control o el modo administrador (sección 14 quattuordecies) | `ajuste`, `poner_ajuste` (`panelaj.cas`) | el que queda, o `DENEGADO` |
 | 175 | (PANEL, NTP) **la hora exacta**: EBX = 0, el reloj del PC en segundos desde el 1/1/2000; EBX = 1, ponerlo a ECX (como la 67, y HORARED.BIN sin atrasarlo más de 2 horas) | `hora_exacta`, `poner_hora_exacta` | el reloj, o 0 / `DENEGADO` |
 | 158 | (PROTEGE; **solo los servicios**) el sello de la tarea EBX (los de `permisos.cas`; con el bit 31, es un servicio) | `sello_de_tarea` | el sello, o `NO_VALE` |
 | 100 | (WIFI) **pedir al servicio Wi-Fi** (`WIFI.BIN`), como la 90 (sección 14 octies) | — | la primera palabra de la respuesta (`SIN_WIFI` si no hay servicio) |
@@ -1092,7 +1092,7 @@ propio, con sus tildes y su eñe).
 - **Configuración**: (PANEL, la 0.8.7) **el Panel de control**: lo que hay
   (la pantalla, la memoria, las tareas) y un icono por sección (Fecha y hora,
   Pantalla, Sonido, Ratón, Teclado, Red y Wi-Fi, Energía, Programas,
-  Personalización, Dispositivos y Acerca de: sección 14 terdecies). El de
+  Personalización, Dispositivos y Acerca de: sección 14 quattuordecies). El de
   **Pantalla** es la medida de la pantalla, en el momento donde la tarjeta lo
   deja y, si no, al arrancar (más abajo, «La medida de la pantalla»). **Acerca de Hispa-Pentium**: la versión y la
   licencia.
@@ -3673,7 +3673,7 @@ demás del sistema en el catálogo firmado de `actualiza.sh`.
 Reensamblar lo que llega desordenado y la retransmisión rápida (escuchar en un
 puerto ya va: sección 14 ter); IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
 la vez (con el Wi-Fi, una u otra: sección 14 octies); TLS 1.3 (BearSSL no lo tiene), gzip en `Https` y la
-hora por NTP (hecho: la 0.8.7, sección 14 terdecies); más tarjetas (la RTL8168 del Toshiba NB250,
+hora por NTP (hecho: la 0.8.7, sección 14 quattuordecies); más tarjetas (la RTL8168 del Toshiba NB250,
 la PCnet, NE2000: Hispa-DOS ya las lleva). (El navegador, encima de esto, ya
 está: sección 14 ter.)
 (Las **actualizaciones** por la red ya van: sección 13.)
