@@ -6020,8 +6020,9 @@ de 32 bits». Se empieza por Pluma. Lo cambiado fuera de
 
 | | |
 |---|---|
-| ![Pluma 2 en QEMU: formato, una tabla y una imagen](pentium/pluma/pl1.png) | ![Exportado a PDF](pentium/pluma/pl2.png) |
-| ![Las propuestas del corrector, con el botón derecho](pentium/pluma/pl3.png) | ![El cuadro Fuentes](pentium/pluma/pl5.png) |
+| ![Pluma 2 en QEMU: formato, una tabla y una imagen](pentium/pluma/pl1.png) | ![Exportado a PDF (la barra de estado lo dice)](pentium/pluma/pl2.png) |
+| ![Ortografía (F7)](pentium/pluma/pl3.png) | ![Vuelto a abrir: PRUEBA.PLU](pentium/pluma/pl4.png) |
+| ![El menú Formato (Alt+F): lo que aún no hay, en gris](pentium/pluma/pl5.png) | ![El cuadro Fuentes](pentium/pluma/pl6.png) |
 | ![En el anfitrión (1024 x 700): estilos, tabla, imagen](pentium/pluma/h1.png) | ![El cuadro Fuentes, con su muestra](pentium/pluma/h3.png) |
 
 **Qué es.** Pluma 2 es el procesador de textos nativo de Hispa-Pentium: un
@@ -6191,8 +6192,8 @@ ASan y UBSan (`pluma/pruebas/formatos.sh`, `pdf.sh`, `rtf.sh`, `orto.sh`,
 con sus fuzz de ODT, DOCX, RTF y DICCIO.DAT), la ventana con un guion, la
 ida y vuelta de lo guardado por ODT, DOCX y RTF, la ventana en QEMU (escribir
 con formato, tabla, imagen, guardar, exportar, cerrar y abrir otra vez, el
-corrector, el cuadro Fuentes; y lo guardado, mirado desde fuera) y la medida
-en el Atom. En el VPS no está LibreOffice Writer (solo core, draw e
+corrector (F7), el menú Formato y el cuadro Fuentes; y lo guardado, mirado
+desde fuera) y la medida en el Atom; todo bien el 22/11. En el VPS no está LibreOffice Writer (solo core, draw e
 impress): las comparaciones con él se saltan, y los ODT y DOCX de prueba los
 hace `pruebas/haz_docs.py` con la forma de los de LibreOffice y Word.
 

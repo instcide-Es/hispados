@@ -133,6 +133,7 @@ fi
 # ---- 2. en QEMU ----
 python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $V/semilla.asm > /dev/null && nasm -f bin $V/semilla.asm -o $V/SEMILLA.BIN || { ko "semilla.cas no compila"; return; }
 bash $AQUI/nucleo32/disco.sh $V/v.img 32 > $V/disco.txt 2>&1 || { ko "disco.sh: $(tail -n 2 $V/disco.txt)"; return; }
+[ -f $V/q/foto.png ] || convert -size 240x160 gradient:'#3B74D6-#F2C14E' $V/q/foto.png
 mcopy -i $V/v.img $V/PLUMA.BIN $DIC :: && mcopy -i $V/v.img $V/q/foto.png ::FOTO.PNG
 CAPTURAS=$G ESCRIBE=1 DISCO=$V/v.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 3" ":doble 60 186" ":pausa 4" \
   ":escribe PLUMA" ":tecla ret" ":hasta 180 1 pluma: lista" ":pausa 2" \
@@ -146,7 +147,7 @@ CAPTURAS=$G ESCRIBE=1 DISCO=$V/v.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $A
   ":clic 531 72" ":pausa 3" ":tecla ret" ":hasta 180 1 pluma: pdf" ":pausa 2" ":captura pl2" \
   ":tecla ctrl-home" ":tecla f7" ":pausa 4" ":captura pl3" ":tecla esc" ":pausa 1" \
   ":clic 787 13" ":hasta 30 1 pluma: adiós" ":pausa 2" ":escribe PLUMA PRUEBA.PLU" ":tecla ret" ":hasta 180 1 pluma: abierto" ":pausa 3" ":captura pl4" \
-  ":tecla alt-f" ":pausa 2" ":tecla ret" ":pausa 3" ":captura pl5" ":tecla esc" ":pausa 1" > $V/qemu.sal 2>&1
+  ":tecla alt-f" ":pausa 2" ":captura pl5" ":tecla down" ":tecla ret" ":pausa 3" ":captura pl6" ":tecla esc" ":pausa 1" > $V/qemu.sal 2>&1
 S=$V/qemu.sal
 [ -n "${PLUMA_CAPTURAS:-}" ] && mkdir -p "$PLUMA_CAPTURAS" && cp $S "$PLUMA_CAPTURAS/qemu.sal"
 mira_pl() { if grep -a -q -- "$2" $S; then ok "$1"; else ko "$1: falta «$2»"; grep -a "pluma" $S | tail -6 | sed 's/^/        /'; fi; }
@@ -157,13 +158,13 @@ mira_pl "en QEMU: guardado como PRUEBA.PLU" "pluma: guardado .*PRUEBA.PLU"
 mira_pl "en QEMU: exportado a PDF" "pluma: pdf .*PRUEBA.PDF"
 mira_pl "en QEMU: cerrar y volver a abrir PRUEBA.PLU" "pluma: abierto PRUEBA.PLU"
 mira_pl "en QEMU: la ortografía (F7: la primera falta, con sus propuestas)" "cuadro «Ortografía: español»"
-mira_pl "en QEMU: el cuadro Fuentes (Alt+F y la primera)" "cuadro «Fuentes»"
+mira_pl "en QEMU: el menú Formato (Alt+F) y su primera, el cuadro Fuentes" "cuadro «Fuentes»"
 if ! grep -a -q "excepción\|\*\*\*" $S; then ok "en QEMU: ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep -a "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
 if saca $V/v.img PRUEBA.PLU $V/a/qemu.plu; then
   t=$($HPL --info $V/a/qemu.plu 2>&1)
   x=$($HPL --texto $V/a/qemu.plu 2>&1 | tr '\n' ' ')
-  case "$t$x" in *"1 tablas, 1 imágenes"*"Informe de QEMU"*Uno*Dos*Tres*ortografia*) ok "PRUEBA.PLU (hecho en QEMU), mirado desde fuera: su texto, la tabla y la imagen" ;;
+  case "$t$x" in *"1 tablas, 1 imágenes"*"Informe de QEMU"*ortografia*Uno*Dos*Tres*) ok "PRUEBA.PLU (hecho en QEMU), mirado desde fuera: su texto, la tabla y la imagen" ;;
     *) ko "PRUEBA.PLU: «$t» «$x»" ;; esac
 else ko "no está PRUEBA.PLU en el disco de QEMU"; fi
 if saca $V/v.img PRUEBA.PDF $V/a/qemu.pdf && command -v pdftotext > /dev/null; then
@@ -172,7 +173,7 @@ if saca $V/v.img PRUEBA.PDF $V/a/qemu.pdf && command -v pdftotext > /dev/null; t
 else ko "no está PRUEBA.PDF en el disco de QEMU"; fi
 if [ -n "${PLUMA_CAPTURAS:-}" ]; then
   mkdir -p "$PLUMA_CAPTURAS"
-  for c in pl1 pl2 pl3 pl4 pl5; do [ -f $G/$c.ppm ] && convert $G/$c.ppm "$PLUMA_CAPTURAS/$c.png" 2> /dev/null; done
+  for c in pl1 pl2 pl3 pl4 pl5 pl6; do [ -f $G/$c.ppm ] && convert $G/$c.ppm "$PLUMA_CAPTURAS/$c.png" 2> /dev/null; done
   for c in h1 h2 h3; do [ -f $V/cap/$c.ppm ] && convert $V/cap/$c.ppm "$PLUMA_CAPTURAS/$c.png" 2> /dev/null; done
 fi
 # ---- 3. lo que tarda en un Atom ----
