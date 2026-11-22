@@ -2398,6 +2398,7 @@ static void mira_envio(void)
 }
 
 /* SSH.INI: equipo=, puerto=, usuario= */
+static char ventana_ssh[16];	/* (SSH.INI: ventana=640x400) la medida de la ventana del terminal */
 static int graba_ssh;	/* (SSH.INI: grabar=si) lo que llega, a TERMO\SSH\GRABA.BIN (las pruebas) */
 
 static int lee_ssh_ini(char *eq, int ceq, char *us, int cus, u32 *pu)
@@ -2429,6 +2430,13 @@ static int lee_ssh_ini(char *eq, int ceq, char *us, int cus, u32 *pu)
 			snprintf(us, (size_t)cus, "%s", p + 8);
 		else if (!strncmp(p, "grabar=si", 9))
 			graba_ssh = 1;
+		else if (!strncmp(p, "ventana=", 8)) {
+			int i;
+
+			for (i = 0; i < (int)sizeof ventana_ssh - 1 && ((p[8 + i] >= '0' && p[8 + i] <= '9') || p[8 + i] == 'x'); i++)
+				ventana_ssh[i] = p[8 + i];
+			ventana_ssh[i] = 0;
+		}
 		else if (!strncmp(p, "puerto=", 7))
 			for (*pu = 0, p += 7; *p >= '0' && *p <= '9'; p++)
 				*pu = *pu * 10 + (u32)(*p - '0');
@@ -2459,10 +2467,15 @@ static void lanza_terminal(void)
 		snprintf(aviso_envio, sizeof aviso_envio, "%s", sin_red_texto);
 		return;
 	}
-	if (graba_ssh)
-		snprintf(a, sizeof a, "-k %s\\SSH -g %s\\SSH\\GRABA.BIN -p %u %s@%s", carpeta, carpeta, pu, us, eq);
-	else
-		snprintf(a, sizeof a, "-k %s\\SSH -p %u %s@%s", carpeta, pu, us, eq);
+	{
+		int n = snprintf(a, sizeof a, "-k %s\\SSH ", carpeta);
+
+		if (ventana_ssh[0])
+			n += snprintf(a + n, sizeof a - (size_t)n, "-t %s ", ventana_ssh);
+		if (graba_ssh)
+			n += snprintf(a + n, sizeof a - (size_t)n, "-g %s\\SSH\\GRABA.BIN ", carpeta);
+		snprintf(a + n, sizeof a - (size_t)n, "-p %u %s@%s", pu, us, eq);
+	}
 	x = sc(SC_LANZAR_SUELTO, (u32)"\\SSH.BIN", (u32)a, 0);
 	if (ES_ERROR(x))
 		x = sc(SC_LANZAR_SUELTO, (u32)"\\HISPA\\SSH.BIN", (u32)a, 0);

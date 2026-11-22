@@ -24,7 +24,7 @@ stty sane
 echo "teclas=$(cat "$R.teclas")" >> "$R"
 trap 'echo "winch=$(stty size)" >> "$R"' WINCH
 fase encoge
-echo "Encoja la ventana (12 s)..."
+echo "Cambie el tamaño de la ventana (12 s)..."
 for _ in $(seq 24); do sleep 0.5; done
 echo "tamano_final=$(stty size)" >> "$R"
 fase fin

@@ -84,6 +84,8 @@ static void vuelca_v(int todo)
 }
 
 /* el tamaño de la ventana: el de la pantalla (lo que deja la barra) */
+static int pide_an, pide_al;	/* (-t ANCHOxALTO) */
+
 static int abre_ventana(const char *t)
 {
 	u32 w = sc(SC_DATO, 11, 0, 0), h = sc(SC_DATO, 14, 0, 0);
@@ -95,6 +97,10 @@ static int abre_ventana(const char *t)
 		h = 560;
 	lz_an = (int)w - 16;
 	lz_al = (int)h - 44;
+	if (pide_an >= 200 && pide_an < lz_an)
+		lz_an = pide_an;
+	if (pide_al >= 120 && pide_al < lz_al)
+		lz_al = pide_al;
 	if (lz_an > MAX_AN)
 		lz_an = MAX_AN;
 	if (lz_al > MAX_AL)
@@ -1375,6 +1381,7 @@ static int sesion(void)
 				if (e.clase == EV_CERRAR)
 					goto corta;
 				if (e.clase == EV_TAMANO) {
+					h_apunta("(TERMO) la ventana mide ahora %u x %u", e.a, e.b);
 					cambia_tamano((int)e.a, (int)e.b);
 					continue;
 				}
@@ -1385,6 +1392,12 @@ static int sesion(void)
 				if (e.clase != EV_TECLA)
 					continue;
 				k = tecla_vt(&e, o);
+				{
+					static int dichas;
+
+					if (dichas++ < 40)	/* (TERMO) las primeras teclas, al puerto serie (las pruebas) */
+						h_apunta("(TERMO) tecla %x (%x, %x): %d octetos", e.a, e.b, e.c, k);
+				}
 				if (k == -2) {
 					if (pega_v() < 0)
 						goto fin;
@@ -1477,6 +1490,7 @@ static void ayuda(void)
 		  "  SSH [-p puerto] usuario@equipo [orden]\n"
 		  "  SSH /LLAVE      hace la llave propia (y enseña la pública)\n"
 		  "  SSH -k CARPETA ...   las llaves y los equipos conocidos, de esa carpeta\n"
+		  "  SSH -t 640x400 ...   la ventana, de esa medida\n"
 		  "En la sesión, «~.» al principio de una línea corta la conexión.\n");
 }
 
@@ -1515,6 +1529,16 @@ int principal(void)
 			h_carpeta(carpeta);
 		else
 			h_ruta(carpeta, sizeof carpeta, "SSH");
+	}
+	if (h_empieza(p, "-t ")) {
+		/* (TERMO) -t ANCHOxALTO: la ventana, de esa medida (si no, la de la pantalla) */
+		for (p += 3; *p >= '0' && *p <= '9'; p++)
+			pide_an = pide_an * 10 + *p - '0';
+		if (*p == 'x' || *p == 'X')
+			for (p++; *p >= '0' && *p <= '9'; p++)
+				pide_al = pide_al * 10 + *p - '0';
+		while (*p == ' ')
+			p++;
 	}
 	if (h_empieza(p, "-g ")) {
 		int i = 0;

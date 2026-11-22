@@ -33,7 +33,8 @@
 #     sshd propio de la prueba (puerto alto, 127.0.0.1, su ForceCommand:
 #     termo/pruebas/sesion_ssh.sh): xterm-256color, colores de 24 bits,
 #     htop, vim y less a pantalla completa (capturas), las teclas en crudo y
-#     el tamaño nuevo al encoger la ventana (window-change).
+#     el tamaño nuevo al cambiar la ventana (window-change: la ventana
+#     empieza de 640 x 380 y se agranda con Alt+Espacio, «Tamaño» y las flechas).
 # Necesita ser root (usb.sh), qemu-system-x86_64, socat, mtools y fsck.fat;
 # para la 0, gcc; para la 4, php y openssl; para la 5, sshd (OpenSSH).
 
@@ -122,7 +123,7 @@ termo_anfitrion() {
     cp $AQUI/../tools/termo-subida/subir.php $W/www/termo/
     TG=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
     echo "$(printf '%s' $TG | sha256sum | cut -d' ' -f1) Portatil-gamer prueba" > $W/testigos.txt
-    local PPH=$((40000 + RANDOM % 9000))
+    local PPH=$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
     TERMO_TESTIGOS=$W/testigos.txt TERMO_DATOS=$W/datos php -S 127.0.0.1:$PPH -t $W/www > $W/php.log 2>&1 &
     PPID_PHP=$!
     sleep 1
@@ -247,7 +248,7 @@ termo_enviar() {
   [ -w /dev/kvm ] && cpu="-enable-kvm -cpu host"
   rm -rf $E; mkdir -p $E/www/termo $E/datos/registro
   cp $AQUI/../tools/termo-subida/subir.php $E/www/termo/
-  PPH=$((41000 + RANDOM % 8000))
+  PPH=$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
   python3 -I $AQUI/nucleo32/termo/pruebas/tls_delante.py $E/tls $PPH > $E/tls.err 2>&1 &
   PID_TLS=$!
   for _ in $(seq 50); do [ -s $E/tls/puerto ] && break; sleep 0.2; done
@@ -286,9 +287,9 @@ termo_terminal() {
   [ -w /dev/kvm ] && cpu="-enable-kvm -cpu host"
   rm -rf $H; mkdir -p $H
   R=$H/resultado.txt
-  PS=$((32000 + RANDOM % 8000))
+  PS=$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
   ssh-keygen -q -t ed25519 -N '' -f $H/hk
-  if ! TERMO=1 USB_MB=32 TERMO_PARA=$H/para.txt TERMO_SSH_EQUIPO=10.0.2.2 TERMO_SSH_PUERTO=$PS TERMO_SSH_USUARIO=root TERMO_SSH_CONOCIDO=$H/hk.pub TERMO_SSH_GRABAR=si \
+  if ! TERMO=1 USB_MB=32 TERMO_PARA=$H/para.txt TERMO_SSH_EQUIPO=10.0.2.2 TERMO_SSH_PUERTO=$PS TERMO_SSH_USUARIO=root TERMO_SSH_CONOCIDO=$H/hk.pub TERMO_SSH_GRABAR=si TERMO_SSH_VENTANA=640x380 \
        bash $AQUI/nucleo32/usb.sh $H/termo.img > $H/usb.txt 2>&1; then
     ko "«Terminal»: no se puede hacer la memoria: $(tail -n 1 $H/usb.txt)"; return
   fi
@@ -338,7 +339,11 @@ captura vt5
 archivo $R teclas= 20
 archivo $R FASE encoge 20
 pausa 1
-encoge 15181d -240 -160
+tecla alt-spc
+pausa 1
+tecla t ret
+pausa 1
+tecla right right right right right down down down ret
 pausa 3
 captura vt6
 archivo $R FASE fin 30
@@ -364,7 +369,7 @@ EOF
     ok "las teclas, en crudo, como un xterm: arriba, abajo, Esc, Ctrl+C, Mayús+Tab (ESC [ Z), una letra e Intro"
   else ko "las teclas: $(grep '^teclas=' $R 2> /dev/null)"; fi
   if grep -q '^winch=' $R 2> /dev/null && [ "$(sed -n 's/^tamano_final=//p' $R)" != "$C0" ] && grep -q 'ssh: (TERMO) window-change: ' $S; then
-    ok "encoger la ventana: SIGWINCH al otro lado con el tamaño nuevo ($(sed -n 's/^tamano_final=//p' $R), antes $C0): window-change"
+    ok "cambiar la ventana de tamaño (Alt+Espacio, «Tamaño», flechas): SIGWINCH al otro lado con el tamaño nuevo ($(sed -n 's/^tamano_final=//p' $R), antes $C0): window-change"
   else ko "el tamaño al encoger: $(grep 'winch\|tamano_final' $R 2> /dev/null | tr '\n' ' '); $(tail -n 2 $H/conduce.txt | tr '\n' ' ')"; fi
   # las capturas: en la de colores, la franja de 24 bits (muchos colores distintos) y el naranja de las cajas
   if [ -s $H/vt1.ppm ] && python3 -I - $H/vt1.ppm <<'PY'

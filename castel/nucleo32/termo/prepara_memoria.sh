@@ -41,6 +41,7 @@ RES=$(printf '%s' "$TESTIGO" | sha256sum | cut -d' ' -f1)
   printf '; hacia este equipo. Se puede cambiar con el Bloc de notas de Windows.\r\n'
   printf 'equipo=%s\r\npuerto=%s\r\nusuario=%s\r\n' "$SE" "$SP" "$SU"
   if [ "${TERMO_SSH_GRABAR:-}" = si ]; then printf 'grabar=si\r\n'; fi
+  if [ -n "${TERMO_SSH_VENTANA:-}" ]; then printf 'ventana=%s\r\n' "$TERMO_SSH_VENTANA"; fi
 } > "$D/SSH.INI"
 head -c 32 /dev/urandom > "$D/SSH/ID_ED.SSH"
 PUB=$(python3 -I - "$D/SSH/ID_ED.SSH" <<'PY'

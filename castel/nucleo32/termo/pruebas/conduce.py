@@ -15,6 +15,8 @@ un archivo con un paso por línea:
   captura NOMBRE           la pantalla, en CARPETA/NOMBRE.ppm
   encoge RGB DX DY         busca el rectángulo de ese fondo (el terminal) y
                            arrastra su esquina de abajo a la derecha DX, DY
+  clic X Y                 un clic en ese punto (el botón de maximizar)
+  doble X Y                dos clics en ese punto
   monitor ORDEN            una orden cualquiera del monitor
 
 Lo que pasa, en CARPETA/conduce.txt; el puerto serie, en CARPETA/serie.txt.
@@ -143,6 +145,26 @@ for linea in open(guion, encoding='utf-8'):
             time.sleep(0.25)
     elif p[0] == 'captura':
         monitor('screendump %s' % os.path.join(carpeta, p[1] + '.ppm'))
+        time.sleep(0.5)
+    elif p[0] == 'clic':
+        ir(int(p[1]), int(p[2]))
+        monitor('mouse_button 1')
+        monitor('mouse_button 0')
+        time.sleep(0.5)
+    elif p[0] == 'doble':
+        ir(int(p[1]), int(p[2]))
+        # (los dos clics por la misma conexión del monitor: si no, van muy separados)
+        so = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        so.connect(mon)
+        so.settimeout(2)
+        try:
+            so.recv(4096)
+        except OSError:
+            pass
+        for o in ('mouse_button 1', 'mouse_button 0', 'mouse_button 1', 'mouse_button 0'):
+            so.sendall(o.encode() + b'\n')
+            time.sleep(0.04)
+        so.close()
         time.sleep(0.5)
     elif p[0] == 'monitor':
         monitor(' '.join(p[1:]))
