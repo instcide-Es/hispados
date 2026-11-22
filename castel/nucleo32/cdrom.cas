@@ -13,6 +13,10 @@
 ;                              CD de música
 ;    READ(10) (28)             leer sectores
 ;    PREVENT ALLOW MEDIUM REMOVAL (1E) y START STOP UNIT (1B): expulsar
+;    (REPRODUCTOR) READ TOC entera (todas las pistas, en LBA) y READ CD (BE):
+;                              el sonido de los CD de música, 2352 octetos
+;                              por sector (leer_toc y leer_sonido: la
+;                              llamada 134, para el Reproductor y para WIN32)
 ;
 ;  mira_disco() dice qué hay en el lector (CD_VACÍO, CD_DATOS, CD_MÚSICA)
 ;  y apunta si se ha cambiado el disco desde la última vez (el lector lo
@@ -283,6 +287,118 @@ módulo Cdrom
         cdb[4] := 2
         bien := orden(l, 0, nulo)
         lectores[l].bloques := 0
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+    ; =========================================================================
+    ;  (REPRODUCTOR) Los CD de música: la tabla de las pistas y el sonido
+    ; =========================================================================
+    público constante SECTOR_SONIDO = 2352
+    público tipo Pista_cd = estructura
+        lba: nat32                              ; dónde empieza (en sectores)
+        control: byte                           ; el bit 2: es de datos (si no, de sonido)
+        número: byte                            ; 1 a 99; 0xAA, el final del disco
+        r1, r2: byte
+    fin
+    público tipo Toc_cd = estructura
+        pistas, primera: nat32
+        e: arreglo [100] de Pista_cd            ; y e[pistas]: el final del disco («lead-out»)
+    fin
+    variable resp_toc: arreglo [808] de byte
+
+    ; READ TOC (formato 0, en LBA: sin el bit MSF), desde la pista 1: todas
+    ; las pistas y el final. Falso si no hay disco o no contesta.
+    público función leer_toc(l: nat32, t: puntero a Toc_cd): bool
+        variable n, i, k, p: nat32
+        variable bien: bool
+        si l >= MAX_LECTORES entonces devolver falso fin
+        si no lectores[l].hay entonces devolver falso fin
+        tomar(cerrojo)
+        llenar(resp_toc, 808, 0)
+        prepara(0x43)
+        cdb[6] := 1
+        cdb[7] := 804 >> 8
+        cdb[8] := 804 yb 0xFF
+        bien := orden(l, 804, resp_toc)
+        si no bien entonces
+            prepara(0x43)
+            cdb[6] := 1
+            cdb[7] := 804 >> 8
+            cdb[8] := 804 yb 0xFF
+            bien := orden(l, 804, resp_toc)
+        fin
+        soltar(cerrojo)
+        si no bien entonces devolver falso fin
+        llenar(puntero(t), tamaño(Toc_cd), 0)
+        n := ((nat32(resp_toc[0]) << 8) ob resp_toc[1]) + 2
+        si n > 804 entonces n := 804 fin
+        t.primera := resp_toc[2]
+        k := 0
+        p := 4
+        mientras p + 8 <= n y k < 100 hacer
+            i := (nat32(resp_toc[p + 4]) << 24) ob (nat32(resp_toc[p + 5]) << 16) ob (nat32(resp_toc[p + 6]) << 8) ob resp_toc[p + 7]
+            t.e[k].lba := i
+            t.e[k].control := resp_toc[p + 1] yb 0x0F
+            t.e[k].número := resp_toc[p + 2]
+            si resp_toc[p + 2] = 0xAA entonces
+                t.pistas := k
+                devolver k > 0
+            fin
+            k := k + 1
+            p := p + 8
+        fin
+        ; (sin el final: hasta lo que mide el disco)
+        si k > 0 y k < 100 entonces
+            t.pistas := k
+            t.e[k].lba := lectores[l].bloques
+            t.e[k].número := 0xAA
+            devolver cierto
+        fin
+        devolver falso
+    fin
+
+    ; READ CD: n sectores de sonido (2352 octetos cada uno) desde el lba, a
+    ; destino. Con «crudo», sin mirar la clase del sector (los de datos salen
+    ; enteros, con su cabecera: así se prueba en QEMU, que no tiene CD de
+    ; música); si no, solo los de sonido (CD-DA). Por IDE y SATA, 13 sectores
+    ; por orden (32 K); por USB, uno. Falso si falla (un rayón: dos intentos).
+    público función leer_sonido(l: nat32, lba: nat32, n: nat32, destino: puntero a byte, crudo: bool): bool
+        variable k, por_vez, intentos: nat32
+        variable bien: bool
+        si l >= MAX_LECTORES entonces devolver falso fin
+        si no lectores[l].hay entonces devolver falso fin
+        tomar(cerrojo)
+        por_vez := lo_más(l) div SECTOR_SONIDO
+        si por_vez = 0 entonces por_vez := 1 fin
+        bien := cierto
+        mientras bien y n > 0 hacer
+            k := n
+            si k > por_vez entonces k := por_vez fin
+            intentos := 0
+            bien := falso
+            mientras no bien y intentos < 2 hacer
+                prepara(0xBE)
+                si no crudo entonces cdb[1] := 1 << 2 fin    ; la clase esperada: CD-DA
+                cdb[2] := lba >> 24
+                cdb[3] := lba >> 16
+                cdb[4] := lba >> 8
+                cdb[5] := lba
+                cdb[6] := k >> 16
+                cdb[7] := k >> 8
+                cdb[8] := k
+                si crudo entonces cdb[9] := 0xF8 sino cdb[9] := 0x10 fin   ; todo el sector / lo de dentro (en uno de sonido, los 2352)
+                bien := orden(l, k * SECTOR_SONIDO, destino)
+                si no bien y (lectores[l].cambiado o clave = 2) entonces intentos := 2 fin
+                intentos := intentos + 1
+            fin
+            si bien entonces
+                destino := destino + k * SECTOR_SONIDO
+                lba := lba + k
+                n := n - k
+            fin
+        fin
+        si no bien entonces fallos_cd := fallos_cd + 1 fin
         soltar(cerrojo)
         devolver bien
     fin

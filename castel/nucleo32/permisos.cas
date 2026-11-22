@@ -57,6 +57,7 @@ módulo Permisos
     público constante SELLO_ESCUDO = 17         ; (pentium-escudo) el antivirus y el cortafuegos
     público constante SELLO_PROGRAMA = 18       ; (pentium-programas) «Programas instalados»
     público constante SELLO_SONIDO = 19         ; (pentium-sonido) el servicio de sonido
+    público constante SELLO_REPRODUC = 20       ; (REPRODUCTOR) el Reproductor: su carpeta (\HISPA\REPRODUC)
     ; (hasta 31)
 
     ; un bit por sello, para las listas de quién escribe
@@ -79,6 +80,7 @@ módulo Permisos
     constante B_ESCUDO = 0x20000
     constante B_PROGRAMA = 0x40000
     constante B_SONIDO = 0x80000
+    constante B_REPRODUC = 0x100000              ; (REPRODUCTOR)
     constante NADIE = 0                         ; (solo PAQUETES, INSTALAR y el administrador)
     constante TODO_EL_SISTEMA = 0xA             ; PAQUETES e INSTALAR: escriben en toda la zona (no leen secretos)
 
@@ -164,6 +166,7 @@ módulo Permisos
         programa("ESCUDO.BIN", SELLO_ESCUDO, cierto)
         programa("PROGRAMA.BIN", SELLO_PROGRAMA, falso)
         programa("SONIDO.BIN", SELLO_SONIDO, cierto)
+        programa("REPRODUC.BIN", SELLO_REPRODUC, falso)    ; (REPRODUCTOR)
         ; ---- el arranque ----
         regla("GRUB.CFG", B_ASISTE, falso)                 ; (y el escritorio, que es el núcleo: la medida de la pantalla)
         regla("GRUBENV", B_ACTUALIZ, falso)                ; (lo pone PAQUETES; ACTUALIZ da el núcleo nuevo por bueno)
@@ -234,6 +237,7 @@ módulo Permisos
         regla("CLICGEST.SES", B_CLICGEST, cierto)          ; la sesión guardada («recordarme»)
         regla("CLICGEST.ANC", B_CLICGEST, falso)
         regla("ASOCIA.TXT", B_EQUIPO, falso)               ; con qué se abre cada clase de archivo (Mi equipo)
+        regla("REPRODUC\\", B_REPRODUC, falso)             ; (REPRODUCTOR) sus ajustes, su lista, el ecualizador y el buzón
         ; ---- los programas del sistema (en la raíz de la memoria de arranque;
         ; en un sistema instalado, que nadie ponga en la raíz uno que se llame
         ; igual: ORDENES.BIN en la raíz haría pasar el disco por una memoria de arranque) ----

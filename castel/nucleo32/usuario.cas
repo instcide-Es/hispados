@@ -84,6 +84,18 @@
 ;       -> la letra de su unidad; 1, no está; 2, no es una imagen que se
 ;       pueda leer; 3, está en demasiados trozos; 4, no caben más; 5, está
 ;       en la unidad en memoria (M:)
+;   (REPRODUCTOR) El Reproductor (y los programas de Windows, por MCI):
+;  134  el CD de música del lector de la letra EBX: ECX = 0, la tabla de las
+;       pistas (una Toc_cd de cdrom.cas, 808 octetos) a EDX; 1, leer
+;       sectores de sonido (EDX: una Pide_sonido, el lba, cuántos —hasta 64—
+;       y adónde; 2352 octetos cada uno); 2, igual pero en crudo (sin mirar
+;       la clase del sector) -> 0; NO_HAY, no es un lector; MAL, no se lee
+;  135  el icono de la ventana EBX (suya) en la bandeja: ECX, 16 x 16 puntos,
+;       la ayuda (48) y las opciones de su menú (160, con «|»); 0, quitarlo.
+;       Un clic llega a la ventana como EV_BANDEJA (a = SIN_ELEGIR), y lo
+;       elegido del menú del botón secundario, con su número
+;  136  lo soltado desde Mi equipo en una ventana suya (tras EV_SOLTADO): la
+;       ruta, a EBX (caben ECX) -> su largo, o 0
 ;   150 a 154: apagar de verdad, reiniciar y la batería (energia.cas): las
 ;       150 a 153 solo para el servicio de ACPI (ACPI.BIN); la 154, la
 ;       batería, para todos
@@ -128,7 +140,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Cdrom
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -156,6 +168,7 @@ módulo Usuario
     público constante DATO_ALTO_PANTALLA = 12
     público constante DATO_ESCRITORIO = 13      ; 1 si el escritorio está en marcha
     público constante DATO_ALTO_LIBRE = 14      ; (explorador) lo alto de la pantalla sin la barra de tareas ni el dock
+    público constante DATO_TERMINAL = 15        ; (REPRODUCTOR) 1 si la tarea escribe en un terminal (la Consola, SSH)
 
     ; la función (sin argumentos; da 1 o 0) que pone en marcha el escritorio:
     ; la pone escritorio.cas, y se la llama por su dirección
@@ -624,6 +637,9 @@ módulo Usuario
                 si hay_pantalla y escritorio_en_marcha entonces devolver nat32(pantalla.alto - alto_barra - alto_dock) fin
                 si hay_pantalla entonces devolver nat32(pantalla.alto) fin
                 devolver 0
+            caso DATO_TERMINAL:
+                si actual.terminal <> 0 entonces devolver 1 fin      ; (REPRODUCTOR)
+                devolver 0
         fin
         devolver NO_VALE
     fin
@@ -809,6 +825,8 @@ módulo Usuario
                 si no ruta_de_usuario(a, ruta, u) entonces devolver NO_VALE fin
                 si no puede_leer(u, ruta) entonces devolver DENEGADO fin       ; (PROTEGE)
                 devolver montar_imagen(u, ruta)
+            caso 134..136:
+                devolver atender_reproductor(n, a, b, c)        ; (REPRODUCTOR) el CD de música, la bandeja y lo soltado
             caso 90..100:                               ; (WIFI) la 100, el servicio Wi-Fi
                 r := atender_red(n, a, b, c)
                 ; si no hay servicio de red, se pone en marcha (una vez) y se
@@ -1524,6 +1542,116 @@ módulo Usuario
 
     variable siguiente_sitio: nat32             ; para que las ventanas nuevas no nazcan una encima de otra
 
+    ; =========================================================================
+    ;  (REPRODUCTOR) El CD de música (134), el icono de un programa en la
+    ;  bandeja (135) y lo que se suelta desde Mi equipo en su ventana (136)
+    ; =========================================================================
+    ; (134, b = 1 o 2) lo que se pide leer: el sector, cuántos (hasta 64) y adónde
+    tipo Pide_sonido = estructura
+        lba, n: nat32
+        destino: nat32
+    fin
+    público constante MAX_ICONOS_PROGRAMA = 2
+    público tipo Icono_programa = estructura
+        ventana, dueño: nat32                   ; (ventana 0: libre)
+        puntos: arreglo [256] de nat32          ; 16 x 16, 0xAARRGGBB (de A = 0x80 para arriba se pinta)
+        ayuda: arreglo [48] de byte
+        opciones: arreglo [160] de byte         ; las del menú del botón secundario, separadas por «|»
+    fin
+    público variable iconos_programa: arreglo [MAX_ICONOS_PROGRAMA] de Icono_programa
+    público variable cambios_iconos: nat32      ; sube con cada cambio (el escritorio pinta otra vez la barra)
+    ; lo soltado desde el explorador en la ventana de un programa (lo apunta el
+    ; escritorio, que le manda EV_SOLTADO; el programa lo recoge con la 136)
+    público variable soltado_ventana: nat32
+    público variable soltado_ruta: arreglo [128] de byte
+    variable toc: Toc_cd
+
+    función atender_reproductor(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        variable d, l, i, k: nat32
+        variable p: puntero a Pide_sonido
+        variable q: puntero a byte
+        según n
+            caso 134:
+                ; el CD de música del lector de la letra a: b = 0, la tabla de
+                ; las pistas (una Toc_cd) a c; b = 1, leer sectores de sonido
+                ; (una Pide_sonido en c: 2352 octetos cada uno); b = 2, igual
+                ; pero sin mirar la clase del sector (en crudo)
+                d := lector_de_letra(a)
+                si d = 0xFFFFFFFF entonces devolver NO_HAY fin
+                l := discos[d].cuál
+                si b = 0 entonces
+                    si no puede(c, tamaño(Toc_cd), cierto) entonces devolver NO_VALE fin
+                    si no leer_toc(l, dirección(toc)) entonces devolver MAL fin
+                    copiar_memoria(puntero(c), puntero(nat32(dirección(toc))), tamaño(Toc_cd))
+                    devolver 0
+                fin
+                si b = 1 o b = 2 entonces
+                    si no puede(c, tamaño(Pide_sonido), falso) entonces devolver NO_VALE fin
+                    p := puntero(c)
+                    si p.n = 0 o p.n > 64 entonces devolver NO_VALE fin
+                    si no puede(p.destino, p.n * SECTOR_SONIDO, cierto) entonces devolver NO_VALE fin
+                    si no leer_sonido(l, p.lba, p.n, puntero(p.destino), b = 2) entonces devolver MAL fin
+                    devolver 0
+                fin
+                devolver NO_VALE
+            caso 135:
+                ; el icono de la ventana a (suya) en la bandeja: b, un
+                ; Icono_programa sin «ventana» ni «dueño» (los puntos, la
+                ; ayuda y las opciones); b = 0, quitarlo. Los clics llegan a
+                ; la ventana como EV_BANDEJA
+                si no es_de(a, actual.id) entonces devolver NO_VALE fin
+                k := MAX_ICONOS_PROGRAMA
+                para i desde 0 hasta MAX_ICONOS_PROGRAMA - 1 hacer
+                    si iconos_programa[i].ventana = a entonces k := i fin
+                fin
+                si b = 0 entonces
+                    si k < MAX_ICONOS_PROGRAMA entonces
+                        iconos_programa[k].ventana := 0
+                        cambios_iconos := cambios_iconos + 1
+                    fin
+                    devolver 0
+                fin
+                si no puede(b, tamaño(Icono_programa) - 8, falso) entonces devolver NO_VALE fin
+                si k = MAX_ICONOS_PROGRAMA entonces
+                    para i desde 0 hasta MAX_ICONOS_PROGRAMA - 1 hacer
+                        si iconos_programa[i].ventana = 0 y k = MAX_ICONOS_PROGRAMA entonces k := i fin
+                    fin
+                fin
+                si k = MAX_ICONOS_PROGRAMA entonces devolver EN_USO fin
+                copiar_memoria(puntero(nat32(dirección(iconos_programa[k].puntos[0]))), puntero(b), tamaño(Icono_programa) - 8)
+                iconos_programa[k].ayuda[47] := 0
+                iconos_programa[k].opciones[159] := 0
+                iconos_programa[k].dueño := actual.id
+                iconos_programa[k].ventana := a
+                cambios_iconos := cambios_iconos + 1
+                devolver 0
+            caso 136:
+                ; lo soltado en una ventana suya: la ruta, a a (caben b). Da
+                ; su largo (0: no hay nada para ella)
+                si soltado_ventana = 0 o no es_de(soltado_ventana, actual.id) entonces devolver 0 fin
+                si b = 0 o no puede(a, b, cierto) entonces devolver NO_VALE fin
+                k := longitud(soltado_ruta)
+                si k >= b entonces k := b - 1 fin
+                q := puntero(a)
+                copiar_memoria(q, soltado_ruta, k)
+                q[k] := 0
+                soltado_ventana := 0
+                devolver k
+        fin
+        devolver NO_VALE
+    fin
+
+    ; (REPRODUCTOR) quita los iconos de la bandeja de esa tarea (al acabar)
+    función quita_iconos_de(t: nat32)
+        variable i: nat32
+        para i desde 0 hasta MAX_ICONOS_PROGRAMA - 1 hacer
+            si iconos_programa[i].ventana <> 0 y iconos_programa[i].dueño = t entonces
+                iconos_programa[i].ventana := 0
+                cambios_iconos := cambios_iconos + 1
+            fin
+        fin
+    fin
+
     ; lo que deja una tarea al acabar: sus archivos, sus ventanas y su terminal
     función recoge_lo_suyo()
         cerrar_todos(actual.id)
@@ -1532,6 +1660,7 @@ módulo Usuario
         soltar_terminales_de(actual.id)
         acabó(actual)
         acabó_sonido(actual)                    ; (SONIDO)
+        quita_iconos_de(actual.id)              ; (REPRODUCTOR) su icono de la bandeja
     fin
 
     ; la interrupción 0x80: lo que se pide va en los registros que guardó

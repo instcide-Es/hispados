@@ -69,6 +69,8 @@ módulo Ventanas
     público constante EV_MENÚ_VENTANA = 11      ; (a la del fondo) el botón secundario en el título de la ventana a, en el punto (b, c) de la pantalla
     público constante EV_UNIDADES = 12          ; (a todas) ha aparecido o desaparecido una unidad (una memoria USB)
     público constante EV_RUEDA = 13             ; (NAVEGADOR) la rueda del ratón: a, b, dónde; c, los pasos (con signo, en el octeto bajo: arriba, positivos) y las teclas de cambio
+    público constante EV_SOLTADO = 14           ; (REPRODUCTOR) se ha soltado algo de Mi equipo en ella: a, b, dónde (la ruta: la llamada 136)
+    público constante EV_BANDEJA = 15           ; (REPRODUCTOR) su icono de la bandeja (la 135): a, lo elegido de su menú (0xFFFFFFFF: un clic)
     público constante SIN_ELEGIR = 0xFFFFFFFF
     ; en «c» de los sucesos del ratón: abajo, los botones; luego las teclas de
     ; cambio (c >> 8: 1, Mayús; 2, Control) y las veces seguidas (c >> 16: 1, 2 o 3)

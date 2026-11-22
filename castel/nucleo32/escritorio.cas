@@ -108,6 +108,8 @@ módulo Escritorio
     constante AC_PROGRAMAS_INST = 95            ; (PROGRAMAS) Configuración > «Programas...» (PROGRAMA.BIN)
     constante AC_SONIDO = 97                    ; (SONIDO) Configuración > «Sonido...»
     constante ME_SONIDO = 47                    ; (SONIDO) el menú del icono del altavoz de la bandeja
+    constante ME_PROGRAMA = 48                  ; (REPRODUCTOR) el del icono de un programa en la bandeja (la llamada 135)
+    constante ICONO_PROGRAMA = 22               ; (REPRODUCTOR) lo que se ensancha la bandeja con cada uno
     constante ICONO_SONIDO = 24                 ; (SONIDO) lo que se ensancha la bandeja con el altavoz
     constante AC_CERRAR_PANTALLA = 31
     constante AC_PROBAR = 32
@@ -624,7 +626,58 @@ módulo Escritorio
     fin
 
     función ancho_bandeja(): ent32
-        devolver BANDEJA_ANCHO + hueco_usb() + hueco_red() + hueco_sonido() + hueco_pila() + hueco_escudo()
+        devolver BANDEJA_ANCHO + hueco_usb() + hueco_red() + hueco_sonido() + hueco_pila() + hueco_escudo() + hueco_programas()
+    fin
+
+    ; (REPRODUCTOR) los iconos de los programas (la llamada 135: el mando del
+    ; Reproductor), justo a la izquierda del reloj
+    variable iconos_vistos: nat32
+    función hueco_programas(): ent32
+        variable i: nat32
+        variable n: ent32
+        n := 0
+        para i desde 0 hasta MAX_ICONOS_PROGRAMA - 1 hacer
+            si iconos_programa[i].ventana <> 0 entonces n := n + ICONO_PROGRAMA fin
+        fin
+        devolver n
+    fin
+
+    función pinta_iconos_programas(ref l: Lienzo, x: ent32)
+        variable i, k, f, c: nat32
+        para i desde 0 hasta MAX_ICONOS_PROGRAMA - 1 hacer
+            si iconos_programa[i].ventana <> 0 entonces
+                para f desde 0 hasta 15 hacer
+                    para k desde 0 hasta 15 hacer
+                        c := iconos_programa[i].puntos[f * 16 + k]
+                        si c >= 0x80000000 entonces rectángulo(l, x + 3 + ent32(k), 12 + ent32(f), 1, 1, c yb 0xFFFFFF) fin
+                    fin
+                fin
+                x := x + ICONO_PROGRAMA
+            fin
+        fin
+    fin
+
+    ; un clic en el icono de un programa: el principal, a su ventana
+    ; (EV_BANDEJA, SIN_ELEGIR); el secundario, su menú (lo elegido, también)
+    función clic_programa(x: ent32, botones: nat32)
+        variable i, k: nat32
+        variable x0: ent32
+        x0 := pantalla.ancho - BANDEJA_ANCHO - hueco_programas()
+        k := 0
+        para i desde 0 hasta MAX_ICONOS_PROGRAMA - 1 hacer
+            si iconos_programa[i].ventana <> 0 entonces
+                si x >= x0 y x < x0 + ICONO_PROGRAMA entonces
+                    si botones yb BOTÓN_DERECHO <> 0 y iconos_programa[i].opciones[0] <> 0 entonces
+                        menú_dato := i
+                        abrir_emergente(x, pantalla.alto - ALTO_BARRA, dirección(iconos_programa[i].opciones[0]), 0, 0, ME_PROGRAMA)
+                    sino
+                        avisar(iconos_programa[i].ventana, EV_BANDEJA, 0xFFFFFFFF, 0, 0)
+                    fin
+                    devolver
+                fin
+                x0 := x0 + ICONO_PROGRAMA
+            fin
+        fin
     fin
 
     ; (ESCUDO) el icono del antivirus (14 x 18): un escudo azul con su borde y
@@ -763,6 +816,8 @@ módulo Escritorio
         si hueco_sonido() > 0 entonces pinta_icono_sonido(valor(l), an - bandeja + hueco_usb() + hueco_red() + 6, 9) fin   ; (SONIDO)
         si hay_pila() entonces pinta_pila(valor(l), an - bandeja + hueco_usb() + hueco_red() + hueco_sonido() + 8, 0) fin
         si hay_escudo entonces icono_escudo(valor(l), an - bandeja + hueco_usb() + hueco_red() + hueco_sonido() + hueco_pila() + 4, 7) fin   ; (ESCUDO)
+        pinta_iconos_programas(valor(l), an - BANDEJA_ANCHO - hueco_programas())      ; (REPRODUCTOR)
+        iconos_vistos := cambios_iconos
         red_vista := cambios_red
         sonido_visto := cambios_sonido
         ahora(f, h)
@@ -2901,6 +2956,8 @@ módulo Escritorio
                 sino si hueco_red() > 0 y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() y ent32(e.a) < pantalla.ancho - bandeja + hueco_usb() + ICONO_RED entonces
                     ; el icono de la red (TAILSCALE: con el túnel, la ventana de Tailscale; WIFI: con el servicio Wi-Fi, la del Wi-Fi)
                     si túnel_red <> 0 entonces lanza("\\TAILSCAL.BIN", "/VENTANA") sino si estado_wifi <> WIFI_NADA entonces lanza("\\REDWIFI.BIN", nulo) sino dice_red() fin
+                sino si hueco_programas() > 0 y ent32(e.a) >= pantalla.ancho - BANDEJA_ANCHO - hueco_programas() y ent32(e.a) < pantalla.ancho - BANDEJA_ANCHO entonces
+                    clic_programa(ent32(e.a), e.c)      ; (REPRODUCTOR) el icono de un programa
                 sino si hay_escudo y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() + hueco_red() + hueco_sonido() + hueco_pila() y ent32(e.a) < pantalla.ancho - BANDEJA_ANCHO entonces
                     ; (ESCUDO) el del antivirus: su ventana
                     lanza(ruta_escudo, "/VENTANA")
@@ -3021,6 +3078,11 @@ módulo Escritorio
                 ; (SONIDO) el menú del altavoz de la bandeja
                 si opción = 0 entonces pon_silencio(no silencio) fin
                 si opción = 1 entonces lanza("\\SONIDO.BIN", "/VENTANA") fin
+            caso ME_PROGRAMA:
+                ; (REPRODUCTOR) lo elegido en el menú del icono de un programa, a su ventana
+                si menú_dato < MAX_ICONOS_PROGRAMA y iconos_programa[menú_dato].ventana <> 0 y opción <> 0xFFFFFFFF entonces
+                    avisar(iconos_programa[menú_dato].ventana, EV_BANDEJA, opción, 0, 0)
+                fin
         fin
     fin
 
@@ -3143,7 +3205,20 @@ módulo Escritorio
             fin
             devolver
         fin
-        si id <> 0 entonces devolver fin
+        si id <> 0 entonces
+            ; (REPRODUCTOR) en la ventana de otro programa (que no sea la
+            ; barra): se le dice (EV_SOLTADO, con el punto dentro de ella) y
+            ; la ruta la recoge con la llamada 136
+            si id <> v_barra entonces
+                x := 0
+                yy := 0
+                a_pantalla(id, x, yy)
+                Textos32.copiar(soltado_ruta, suelta_ruta)
+                soltado_ventana := id
+                avisar(id, EV_SOLTADO, nat32(suelta_x - x), nat32(suelta_y - yy), 0)
+            fin
+            devolver
+        fin
         x := suelta_x - CELDA_AN div 2
         yy := suelta_y - 20
         si x < 0 entonces x := 0 fin
@@ -3202,7 +3277,7 @@ módulo Escritorio
                 pide := PIDE_NADA
             fin
             si suelta_pedida entonces atiende_suelta() fin
-            si Ventanas.cambios <> cambios_vistos o cambios_red <> red_vista o cambios_energía <> energía_vista o cambios_sonido <> sonido_visto entonces pinta_barra() fin
+            si Ventanas.cambios <> cambios_vistos o cambios_red <> red_vista o cambios_energía <> energía_vista o cambios_sonido <> sonido_visto o cambios_iconos <> iconos_vistos entonces pinta_barra() fin     ; (REPRODUCTOR) y los iconos de los programas
             ; cada segundo: el reloj (si ha cambiado el minuto) y las tareas acabadas
             si tics div HZ <> segundo_visto entonces
                 segundo_visto := tics div HZ
