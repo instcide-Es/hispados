@@ -86,36 +86,37 @@ mcopy -i $Y/j.img $Y/son/SONIDO.BIN $Y/son/INICIO.WAV ::
 # ---- 3. en el escritorio ----
 # el menú Inicio: Todos los programas > Juegos; y Campo de minas abierto desde ahí
 juega menu ":clic 40 585" ":pausa 1" ":raton 100 496" ":pausa 1" ":raton 250 496" ":raton 300 453" ":pausa 1" ":captura jm1" ":clic 545 418" ":pausa 4" ":captura jm2"
-miracap "Inicio > Todos los programas > Juegos: los ocho, por orden, cada uno con su icono" jm1 \
-  texto 480 360 560 375 "Almacén" texto 480 386 560 401 "Bloques" texto 480 412 600 427 "Campo de minas" texto 480 438 560 453 "Culebra" \
-  texto 480 464 600 479 "Hispa-Pinball" texto 480 490 600 505 "Rompemuros" texto 480 516 600 531 "Solitario" texto 480 542 600 557 "Tragabolas" \
-  nrgb 471 393 F8FAFC 30 nrgb 471 471 F8FAFC 30
+miracap "Inicio > Todos los programas > Juegos: los ocho, por orden, cada uno con su icono (los de Hispa-386 y los nuevos)" jm1 \
+  texto 486 355 494 363 "Almacén" texto 486 381 494 389 "Bloques" texto 486 407 494 415 "Campo de minas" texto 486 433 494 441 "Culebra" \
+  texto 486 459 494 467 "Hispa-Pinball" texto 486 485 494 493 "Rompemuros" texto 486 511 494 519 "Solitario" texto 486 537 494 545 "Tragabolas" \
+  rgb 471 366 E8B33A 20 rgb 471 392 24364A 20 rgb 471 470 2E8C83 20 rgb 471 496 16213A 20
 mira "Campo de minas, abierto desde el menú (y sus récords, en la carpeta de ajustes)" "^minas: ventana [0-9]* x [0-9]*" "^minas: partida nueva: Pequeño" 'AJUSTES.JUEGOS.MINAS.REC'
 # Bloques: una Viga en el pozo de prueba (cuatro filas casi llenas): girar, a la derecha y soltar
 local soltar=()
 for k in $(seq 1 40); do soltar+=(":tecla spc" ":pausa 0.1"); done
-juega bloques ":escribe bloques /prueba /s=1" ":tecla ret" ":pausa 4" ":captura jb1" ":tecla ret" ":pausa 2" ":tecla up" ":tecla right" ":tecla right" ":tecla right" ":tecla right" ":tecla right" \
+juega bloques ":escribe \\juegos\\bloques /prueba /s=1" ":tecla ret" ":pausa 4" ":captura jb1" ":tecla ret" ":pausa 2" ":tecla up" ":tecla right" ":tecla right" ":tecla right" ":tecla right" ":tecla right" \
   ":pausa 1" ":captura jb2" ":tecla spc" ":pausa 0.2" ":captura jb3" ":pausa 1" ":tecla c" ":pausa 1" ":tecla f12" ":captura jb4" ":pausa 4" \
   "${soltar[@]}" ":pausa 2"
-mira "Bloques: la Viga, girada y a la derecha, quita las cuatro filas a la vez (¡Cuádruple!: 800 puntos y 24 por soltarla; el pozo queda limpio: 1.000 más)" \
-  "^bloques: 4 filas a la vez (llevo 4); 824 puntos$" "^bloques: estado=juega puntos=1824 filas=4 nivel=1 piezas=3 pieza=[A-Za-zñó]* reserva=Viga"
-miracap "Bloques: el pozo, la reserva, las tres siguientes con su nombre y los puntos (cada pieza con su dibujo)" jb2 \
-  negrita 240 110 320 130 Reserva negrita 520 110 620 130 Siguientes texto 180 200 260 220 Puntos
-miracap "Bloques: las filas hechas, en blanco antes de irse, y el aviso" jb3 texto 300 150 520 360 "¡Cuádruple!"
+mira "Bloques: la Viga, girada y a la derecha, quita las cuatro filas a la vez (¡Cuádruple!: 800 puntos y 2 por casilla al soltarla; el pozo queda limpio: 1.000 más)" \
+  "^bloques: 4 filas a la vez (llevo 4); 8[0-2][0-9] puntos$" "^bloques: estado=juega puntos=18[0-2][0-9] filas=4 nivel=1 piezas=3 pieza=[A-Za-zñó]* reserva=Viga"
+miracap "Bloques: el pozo con sus cuatro filas casi llenas (azulejos con su dibujo), la reserva, las tres siguientes con su nombre y los puntos" jb2 \
+  negrita 195 108 210 120 Reserva negrita 522 108 538 120 Siguientes texto 178 200 190 212 Puntos nrgb 310 441 111C2E 12
+miracap "Bloques: las cuatro filas se han ido (el pozo, vacío)" jb3 rgb 310 441 111C2E 12 rgb 330 461 111C2E 12 rgb 480 481 111C2E 12
 mira "Bloques: Espacio una y otra vez hasta que no cabe una pieza: se acaba la partida, y es récord" "^bloques: fin de la partida: [0-9]* puntos, 4 filas, nivel 1, [0-9]* piezas; récord 1$"
 if python3 -I - $Y/bloques.wav <<'PY'
 import sys, wave, struct
 w = wave.open(sys.argv[1]); r = w.getframerate(); c = w.getnchannels()
 d = w.readframes(w.getnframes()); s = struct.unpack('<%dh' % (len(d) // 2), d)
 v = [max(abs(x) for x in s[i:i + r * c // 10]) for i in range(0, len(s) - r * c // 10, r * c // 10)]
-# (la música empieza con la partida: desde ahí, casi todas las décimas suenan)
-ini = next((i for i, x in enumerate(v) if x > 1500), None)
-sys.exit(0 if ini is not None and len(v) - ini > 40 and sum(1 for x in v[ini:ini + 40] if x > 800) >= 34 else 1)
+# (la música empieza con la partida —tras el sonido de inicio del escritorio y
+# un silencio—: hay cuatro segundos seguidos en los que casi todas las décimas suenan)
+ok = any(sum(1 for x in v[i:i + 40] if x > 800) >= 34 for i in range(30, len(v) - 40))
+sys.exit(0 if ok else 1)
 PY
 then ok "Bloques: la música (la suya, sintetizada) sale por la tarjeta (HD Audio), seguida"
 else ko "Bloques: la música no sale por la tarjeta"; fi
 # Culebra (paso a paso): dónde está la fruta, y luego hasta ella y contra el borde
-juega culebra1 ":escribe culebra /p /s=1" ":tecla ret" ":pausa 4" ":tecla ret" ":pausa 1" ":tecla f12" ":pausa 1"
+juega culebra1 ":escribe \\juegos\\culebra /p /s=1" ":tecla ret" ":pausa 4" ":tecla ret" ":pausa 1" ":tecla f12" ":pausa 1"
 f=$(estado_de culebra fruta)
 c=()
 if [ -n "$f" ]; then
@@ -127,44 +128,44 @@ if [ -n "$f" ]; then
   else for ((k = 0; k < 13 - fx; k++)); do c+=(":tecla left"); done; fi
   [ "$fy" = 9 ] && [ "$fx" -lt 13 ] && c+=(":tecla down")
 fi
-juega culebra ":escribe culebra /p /s=1" ":tecla ret" ":pausa 4" ":tecla ret" ":pausa 1" "${c[@]}" ":pausa 1" ":tecla f12" ":captura jc1" \
+juega culebra ":escribe \\juegos\\culebra /p /s=1" ":tecla ret" ":pausa 4" ":tecla ret" ":pausa 1" "${c[@]}" ":pausa 1" ":tecla f12" ":captura jc1" \
   ":tecla up" ":tecla up" ":tecla up" ":tecla up" ":tecla up" ":tecla up" ":tecla up" ":tecla up" ":tecla up" ":tecla up" ":tecla up" ":tecla up" ":tecla up" ":tecla up" ":tecla up" ":tecla up" \
   ":tecla up" ":tecla up" ":tecla up" ":tecla up" ":pausa 1" ":captura jc2"
 mira "Culebra: hasta la fruta (en ${f:-?}, con las flechas, paso a paso): se la come (10 puntos) y crece; y contra el borde, se acaba (récord)" \
   "^culebra: estado=1 puntos=10 largo=[45] frutas=1 " "^culebra: fin de la partida: 10 puntos, 1 frutas, nivel 1; récord 1$"
-miracap "Culebra: el tablero de damero, la culebra (cabeza azul petróleo, collar ocre) y la fruta" jc1 texto 60 90 300 120 "Puntos: 10"
+miracap "Culebra: el tablero de damero, la culebra (cabeza azul petróleo, collar ocre) y los puntos" jc1 negrita 114 106 126 118 "Puntos: 10"
 # Campo de minas: el tablero de prueba (dos minas en dos esquinas): Intro en la del medio lo levanta todo
-juega minas ":escribe minas /p" ":tecla ret" ":pausa 4" ":tecla ret" ":pausa 2" ":tecla f12" ":captura jn1"
+juega minas ":escribe \\juegos\\minas /p" ":tecla ret" ":pausa 4" ":tecla ret" ":pausa 2" ":tecla f12" ":captura jn1"
 mira "Campo de minas: el tablero de prueba, ganado de un golpe (la primera nunca tiene mina; lo de alrededor se levanta solo)" \
   "^minas: ganada en [0-9]* s (Prueba); récord 1$" "^minas: estado=2 tablero=Prueba 9x9 minas=2 banderas=2 levantadas=79 "
 # Solitario: todo subido menos los reyes; S los sube y se gana
-juega solitario ":escribe solitari /casi /s=1" ":tecla ret" ":pausa 5" ":captura js1" ":escribe s" ":pausa 2" ":tecla f12" ":captura js2"
+juega solitario ":escribe \\juegos\\solitari /casi /s=1" ":tecla ret" ":pausa 5" ":captura js1" ":escribe s" ":pausa 2" ":tecla f12" ":captura js2"
 mira "Solitario: «S» sube las cartas que se pueden (los cuatro reyes) y la partida se gana" "^solitario: ¡ganada! 4 movimientos en [0-9]* s (baraja francesa)$" \
   "^solitario: estado=1 baraja=francesa movimientos=4 mazo=0 descarte=0 salidas=52 "
-miracap "Solitario: las cartas de Hispa-386 (los reyes, de dos cabezas) en las columnas y los ases arriba" js1 texto 60 70 140 90 Juego
+miracap "Solitario: la ventana con su menú, las cartas de Hispa-386 (los reyes, de dos cabezas) en las columnas y lo subido arriba" js1 texto 88 62 100 74 Juego
 # Tragabolas: a la izquierda unos segundos: bolitas
-juega tragabolas ":escribe tragabol /s=1" ":tecla ret" ":pausa 4" ":tecla left" ":pausa 3" ":tecla f12" ":captura jt1"
+juega tragabolas ":escribe \\juegos\\tragabol /s=1" ":tecla ret" ":pausa 4" ":tecla left" ":pausa 3" ":tecla f12" ":captura jt1"
 l=$(estado_de tragabolas puntos)
 if [ -n "$l" ] && [ "$l" -ge 20 ] && grep -q "^tragabolas: jardín 1 (vuelta 1): 208 bolitas$" $S; then ok "Tragabolas: el jardín 1 (el de Hispa-386: 208 bolitas y campanas), el Tragón a la izquierda: $l puntos"
 else ko "Tragabolas: «$l» puntos: $(grep "^tragabolas" $S | tail -n 2 | tr '\n' ' ')"; fi
 # Almacén: el primer nivel, en tres pasos
-juega almacen ":escribe almacen" ":tecla ret" ":pausa 4" ":tecla right" ":tecla right" ":tecla right" ":pausa 1" ":tecla f12" ":captura ja1"
+juega almacen ":escribe \\juegos\\almacen" ":tecla ret" ":pausa 4" ":tecla right" ":tecla right" ":tecla right" ":pausa 1" ":tecla f12" ":captura ja1"
 mira "Almacén: el primer nivel, resuelto en tres pasos y dos empujones (y la marca, guardada)" "^almacen: nivel 1 resuelto: 3 movimientos, 2 empujones$" \
   "^almacen: estado=1 nivel=1 movimientos=3 empujones=2 cajas=1/1"
 # Rompemuros: la pala sola, unos segundos
-juega rompemuros ":escribe rompemur /sola /s=3" ":tecla ret" ":pausa 20" ":tecla f12" ":captura jr1"
+juega rompemuros ":escribe \\juegos\\rompemur /sola /s=3" ":tecla ret" ":pausa 20" ":tecla f12" ":captura jr1"
 l=$(estado_de rompemuros quedan); n=$(estado_de rompemuros puntos)
 if [ -n "$l" ] && [ "$l" -lt 65 ] && [ "$n" -gt 0 ] && [ "$(estado_de rompemuros bolas)" -ge 1 ]; then ok "Rompemuros: la bola en juego rompe ladrillos (el nivel 1: quedan $l de 65; $n puntos)"
 else ko "Rompemuros: quedan «$l», puntos «$n»"; fi
 miracap "Rompemuros: el muro, la pala, la bola y los puntos" jr1 negrita 100 80 300 110 "Puntos:"
 # el pinball, a 1024 x 600 (la pantalla del HP Mini) y a pantalla completa: lanzado a mano y luego, en otra, jugando solo
-JARR="modo=1024x600" JMEM=256 PANTALLA=1024x600 juega pinball1 ":escribe pinball /s=2" ":tecla ret" ":pausa 12" ":captura jp1" ":tecla ret" ":pausa 2" \
+JARR="modo=1024x600" JMEM=256 PANTALLA=1024x600 juega pinball1 ":escribe \\juegos\\pinball /s=2" ":tecla ret" ":pausa 12" ":captura jp1" ":tecla ret" ":pausa 2" \
   ":monitor sendkey spc 900" ":pausa 2" ":captura jp2" ":monitor sendkey z 300" ":pausa 1" ":monitor sendkey minus 300" ":pausa 1" ":tecla f12"
 mira "Hispa-Pinball: la mesa en perspectiva a 1024 x 600, a pantalla completa; Intro y la bola al lanzador; Espacio mantenido la lanza con toda la fuerza" \
   "^juego: pantalla completa, 1024 x 600$" "^pinball: mesa de 1024 x 600" "^pinball: bola 1 al lanzador$" "^pinball: bola lanzada (fuerza 100 %)$"
-miracap "Hispa-Pinball: el cartel de la feria (izquierda), la mesa y el marcador de puntos con las misiones (derecha)" jp1 \
-  negrita 790 175 900 195 Misiones texto 790 195 1000 215 "1. Enciende F-E-R-I-A" rgb 360 470 E8E8E8 40
-JARR="modo=1024x600" JMEM=256 PANTALLA=1024x600 juega pinball2 ":escribe pinball /solo /s=3" ":tecla ret" ":pausa 40" ":tecla f12" ":captura jp3"
+miracap "Hispa-Pinball: la mesa en perspectiva (las hondas blancas), y a la derecha el marcador con las misiones" jp1 \
+  negrita 776 170 790 182 Misiones texto 792 192 804 204 "1. Enciende F-E-R-I-A" rgb 330 440 D3D1C8 30
+JARR="modo=1024x600" JMEM=256 PANTALLA=1024x600 juega pinball2 ":escribe \\juegos\\pinball /solo /s=3" ":tecla ret" ":pausa 40" ":tecla f12" ":captura jp3"
 n=$(estado_de pinball puntos)
 if grep -q "^pinball: el flipper [a-z]* golpea la bola" $S && [ -n "$n" ] && [ "$n" -gt 0 ]; then
   ok "Hispa-Pinball, jugando solo: los flippers golpean la bola, puntos ($n), $(grep -c "^pinball: montaña rusa" $S) veces la montaña rusa; $(estado_de pinball estado), bola $(estado_de pinball bola)"
@@ -179,13 +180,13 @@ done
 # sin el servicio de sonido: en silencio, y sin fallar
 cp $Y/j.img $Y/k.img
 mdel -i $Y/j.img ::SONIDO.BIN
-juega mudo ":escribe culebra /s=1" ":tecla ret" ":pausa 4" ":tecla ret" ":pausa 1" ":tecla f12"
+juega mudo ":escribe \\juegos\\culebra /s=1" ":tecla ret" ":pausa 4" ":tecla ret" ":pausa 1" ":tecla f12"
 mira "sin el servicio de sonido (SONIDO.BIN): el juego lo dice y juega en silencio" "^juego: sin sonido" "^culebra: estado=1 .* sonido=0$"
 cp $Y/k.img $Y/j.img
 # ---- 4. lo que gastan, en un Atom N270 de QEMU ----
 for g in "pinball /solo /mide /s=3:pinball:1024x600:15" "rompemur /sola /mide /s=3:rompemuros:800x600:10"; do
   IFS=: read -r o q pan tope <<< "$g"
-  JARR="modo=$pan" JMEM=256 PANTALLA=$pan JQEMU="-cpu n270 -icount shift=0" juega atom_$q ":escribe $o" ":tecla ret" ":pausa 30"
+  JARR="modo=$pan" JMEM=256 PANTALLA=$pan JQEMU="-cpu n270 -icount shift=0" juega atom_$q ":escribe \\juegos\\$o" ":tecla ret" ":pausa 30"
   l=$(grep "^juego: gasta el" $S | tail -n 2 | head -n 1)
   n=$(echo "$l" | sed -n 's/^juego: gasta el \([0-9]*\),\([0-9]\) %.*/\1.\2/p')
   if [ -n "$n" ] && awk -v n=$n -v t=$tope 'BEGIN { exit !(n < t) }' && echo "$l" | grep -q "(60 cuadros por segundo"; then

@@ -408,9 +408,9 @@ static void pinta_cara(lienzo *l, int c)
 	else
 		snprintf(t, sizeof t, "%s", letras_f[v]);
 	lz_negrita(l, 3, 3, t, tinta, e);
-	dibujo(l, 3 + (int)strlen(t) * 4 * e - ip / 2 + 1, 4 + 16 * e, peq, peq_l, peq_l, ip, ip, palo, 0);
+	dibujo(l, 3 + (int)strlen(t) * 4 * e - ip / 2 + 1, 4 + 16 * e, peq + palo * peq_l * peq_l, peq_l, peq_l, ip, ip, palo, 0);
 	texto_reves(l, w - 4 - ancho_texto(t, e) - 2, h - 4 - 16 * e - 2, t, tinta, e);
-	dibujo(l, w - 4 - (int)strlen(t) * 4 * e - ip / 2 - 1, h - 5 - 16 * e - ip, peq, peq_l, peq_l, ip, ip, palo, 1);
+	dibujo(l, w - 4 - (int)strlen(t) * 4 * e - ip / 2 - 1, h - 5 - 16 * e - ip, peq + palo * peq_l * peq_l, peq_l, peq_l, ip, ip, palo, 1);
 	if (v <= 10 && !(espanola && v == 10)) {
 		/* los números: las pintas en su sitio (las de abajo, del revés); el as, una grande */
 		int n = v, x0 = w / 6, y0 = h / 8, aw = w - 2 * x0, ah = h - 2 * y0;

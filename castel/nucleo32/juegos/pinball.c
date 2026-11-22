@@ -454,15 +454,15 @@ static void pinta_info(void)
 		y += lz_parrafo(&LZ, x, y, a, t, c, 1, 17) * 17 + 3;
 	}
 	y += 10;
-	lz_texto(&LZ, x, y, "Flippers: Z y -", 0x9FB2CC, 1);
-	lz_texto(&LZ, x, y + 17, "(o Mayús, Ctrl, flechas)", 0x7F8AA0, 1);
-	lz_texto(&LZ, x, y + 34, "Lanzar: Espacio (mantener)", 0x9FB2CC, 1);
-	lz_texto(&LZ, x, y + 51, "Empujar: X . flecha arriba", 0x9FB2CC, 1);
-	lz_texto(&LZ, x, y + 68, "Esc: menú   P: pausa", 0x9FB2CC, 1);
+	y += 17 * lz_parrafo(&LZ, x, y, a, "Flippers: Z y -", 0x9FB2CC, 1, 17);
+	y += 17 * lz_parrafo(&LZ, x, y, a, "(o Mayús, Ctrl, flechas)", 0x7F8AA0, 1, 17);
+	y += 17 * lz_parrafo(&LZ, x, y, a, "Lanzar: Espacio (mantener)", 0x9FB2CC, 1, 17);
+	y += 17 * lz_parrafo(&LZ, x, y, a, "Empujar: X . flecha arriba", 0x9FB2CC, 1, 17);
+	y += 17 * lz_parrafo(&LZ, x, y, a, "Esc: menú   P: pausa", 0x9FB2CC, 1, 17);
 	if (falta)
-		lz_negrita(&LZ, x, y + 92, "FALTA: flippers apagados", 0xFF6050, 1);
+		lz_parrafo(&LZ, x, y + 8, a, "FALTA: flippers apagados", 0xFF6050, 1, 17);
 	else if (aviso_temblor)
-		lz_negrita(&LZ, x, y + 92, "¡Cuidado! No empuje tanto", 0xFFB030, 1);
+		lz_parrafo(&LZ, x, y + 8, a, "¡Cuidado! No empuje tanto", 0xFFB030, 1, 17);
 	jg_sucio(pan_x, info_y - 4, pan_an, LZ.al - info_y + 4);
 }
 
@@ -484,7 +484,7 @@ static void construye(void)
 	P_B = (hn - hf) / (1.0f - P_wlejos);
 	P_A = hn - P_B;
 	P_S = (hn - hf) * 0.96f / MESA_AN;
-	pan_an = LIMITA(LZ.an / 4, 200, 320);
+	pan_an = LIMITA(LZ.an / 4, 224, 320);	/* (el marcador de puntos cabe entero desde 224) */
 	mesa_an_px = (int)(MESA_AN * P_S) + 20;
 	if (mesa_an_px + pan_an > LZ.an) {
 		P_S = (float)(LZ.an - pan_an - 24) / MESA_AN;
@@ -493,8 +493,11 @@ static void construye(void)
 	cart_an = LZ.an - mesa_an_px - pan_an;
 	if (cart_an > 360)
 		cart_an = 360;
-	if (cart_an < 120)
+	if (cart_an < 170) {
+		/* (no cabe el cartel: lo que sobra, para el marcador) */
+		pan_an = MIN(320, pan_an + MAX(0, cart_an));
 		cart_an = 0;
+	}
 	{
 		int libre = LZ.an - mesa_an_px - pan_an - cart_an;
 
