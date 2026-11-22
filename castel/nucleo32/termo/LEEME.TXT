@@ -7,7 +7,7 @@ hace una prueba de esfuerzo («Calentar») que se para sola si se calienta de m�
 y lo apunta todo en la propia memoria. NO toca el disco duro del portátil: no
 escribe nada en él (Windows y los datos se quedan como están).
 
-Lo que hace falta: una memoria USB de 64 MB o más (se borra entera) y un PC con
+Lo que hace falta: una memoria USB de 32 MB o más (se borra entera) y un PC con
 Windows o Linux para grabarla.
 
 

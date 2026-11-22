@@ -49,8 +49,8 @@ mkdir -p $Y
 export MTOOLS_SKIP_CHECK=1
 if [ "$(id -u)" != 0 ] || ! command -v qemu-system-x86_64 > /dev/null; then echo "  (sin ser root o sin qemu-system-x86_64: sin el Termómetro)"; return; fi
 python3 -I $AQUI/../tests/acpi/termo-qemu.py $Y/termo.aml
-if TERMO=1 USB_MB=64 bash $AQUI/nucleo32/usb.sh $Y/termo.img > $Y/usb.txt 2>&1 && mtype -i $Y/termo.img@@1M ::boot/grub/grub.cfg | grep -q "escritorio .*termo"; then
-  ok "usb.sh con TERMO=1: la memoria de 64 MB con TERMO.BIN y el menú que arranca el escritorio con «termo»"
+if TERMO=1 USB_MB=32 bash $AQUI/nucleo32/usb.sh $Y/termo.img > $Y/usb.txt 2>&1 && mtype -i $Y/termo.img@@1M ::boot/grub/grub.cfg | grep -q "escritorio .*termo"; then
+  ok "usb.sh con TERMO=1: la memoria de 32 MB con TERMO.BIN y el menú que arranca el escritorio con «termo»"
 else ko "usb.sh con TERMO=1: $(tail -n 2 $Y/usb.txt)"; return; fi
 # 1. la parada de seguridad
 termo_qemu $Y/termo.img t1 150 "-cpu Haswell" "44:sendkey 1" "46:sendkey c" "58:$C" "58:o /b 0x71 91" "70:$C" "70:o /b 0x71 50"
