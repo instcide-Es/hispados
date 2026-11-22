@@ -8,7 +8,10 @@
  *   tecla ret|tab|esc|retro|supr|arriba|abajo|izq|der|inicio|fin|repag|avpag|f1..f12
  *                            (con «mayus-» o «ctrl-» delante; «ctrl-n» es Ctrl+N)
  *   clic X Y | doble X Y | triple X Y | clicd X Y | mayusclic X Y | ctrlclic X Y
- *   arrastra X1 Y1 X2 Y2     pulsado de un sitio a otro
+ *   arrastra X1 Y1 X2 Y2 [der] [ctrl] [mayus] [pasos N]
+ *                            pulsado de un sitio a otro (el izquierdo, o el
+ *                            derecho con «der»; en 8 pasos, o en N)
+ *   traza X1 Y1 X2 Y2 ... [der]   pulsado por esos puntos (de uno a otro, en 4 pasos)
  *   mueve X Y                el ratón, sin pulsar
  *   rueda N X Y [ctrl]       N pasos (hacia arriba, positivos)
  *   elige N                  la opción N del último menú pedido (-1: ninguna)
@@ -550,13 +553,39 @@ static int lee_guion(void)
 			return 1;
 		}
 		if (sscanf(l, "arrastra %d %d %d %d", &x, &y, &x2, &y2) == 4) {
-			int i;
+			int i, b = strstr(l, " der") ? SO_BOTON_DER : SO_BOTON_IZQ, pasos = 8;
+			int m = (strstr(l, " ctrl") ? SO_CON_CONTROL : 0) | (strstr(l, " mayus") ? SO_CON_MAYUS : 0);
+			const char *ps = strstr(l, " pasos ");
 
-			mete_raton(SO_MUEVE, x, y, 0, 0, 1);
-			mete_raton(SO_BAJA, x, y, SO_BOTON_IZQ, 0, 1);
-			for (i = 1; i <= 8; i++)
-				mete_raton(SO_MUEVE, x + (x2 - x) * i / 8, y + (y2 - y) * i / 8, SO_BOTON_IZQ, 0, 1);
-			mete_raton(SO_SUBE, x2, y2, 0, 0, 1);
+			if (ps)
+				pasos = atoi(ps + 7);
+			if (pasos < 1 || pasos > 400)
+				pasos = 8;
+			mete_raton(SO_MUEVE, x, y, 0, m, 1);
+			mete_raton(SO_BAJA, x, y, b, m, 1);
+			for (i = 1; i <= pasos; i++)
+				mete_raton(SO_MUEVE, x + (x2 - x) * i / pasos, y + (y2 - y) * i / pasos, b, m, 1);
+			mete_raton(SO_SUBE, x2, y2, 0, m, 1);
+			return 1;
+		}
+		if (empieza(l, "traza ")) {
+			int px[128], k = 0, i, j, b = strstr(l, " der") ? SO_BOTON_DER : SO_BOTON_IZQ;
+			char *t = strtok(l + 6, " ");
+
+			while (t && k < 128) {
+				if ((t[0] >= '0' && t[0] <= '9') || t[0] == '-')
+					px[k++] = atoi(t);
+				t = strtok(NULL, " ");
+			}
+			k &= ~1;
+			if (k < 2)
+				continue;
+			mete_raton(SO_MUEVE, px[0], px[1], 0, 0, 1);
+			mete_raton(SO_BAJA, px[0], px[1], b, 0, 1);
+			for (i = 2; i < k; i += 2)
+				for (j = 1; j <= 4; j++)
+					mete_raton(SO_MUEVE, px[i - 2] + (px[i] - px[i - 2]) * j / 4, px[i - 1] + (px[i + 1] - px[i - 1]) * j / 4, b, 0, 1);
+			mete_raton(SO_SUBE, px[k - 2], px[k - 1], 0, 0, 1);
 			return 1;
 		}
 		if (sscanf(l, "rueda %d %d %d", &n, &x, &y) == 3) {
@@ -685,6 +714,35 @@ char *so_del_portapapeles(u32 *n)
 	if (d)
 		*n = n_papel;
 	return d;
+}
+
+void so_pantalla_entera(int *an, int *al)
+{
+	so_pantalla(an, al);
+}
+
+int so_fondo_escritorio(const u32 *px, int an, int al)
+{
+	char r[1024];
+	const char *d = getenv("OFI_CAPTURAS");
+	FILE *f;
+	int i;
+
+	if (an < 1 || al < 1 || an > 4096 || al > 4096)
+		return -1;
+	fmt(r, sizeof r, "%s/fondo.ppm", d ? d : "/tmp");
+	f = fopen(r, "wb");
+	if (!f)
+		return -1;
+	fprintf(f, "P6\n%d %d\n255\n", an, al);
+	for (i = 0; i < an * al; i++) {
+		u8 p[3] = { (u8)(px[i] >> 16), (u8)(px[i] >> 8), (u8)px[i] };
+
+		fwrite(p, 1, 3, f);
+	}
+	fclose(f);
+	fprintf(stderr, "fondo: %dx%d en %s\n", an, al, r);
+	return 0;
 }
 
 int so_lanza(const char *programa, const char *args)

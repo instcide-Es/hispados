@@ -690,7 +690,9 @@ módulo Inicio
                 sino
                     k := -1
                 fin
-            sino si existe(hvp_de_oficina(i)) entonces
+            sino si existe(hvp_de_oficina(i)) y (i <> 8 o no existe("\\PINTURA.BIN")) entonces
+                ; ((PINTURA32) con Pintura 2, el paquete del sistema «pintura» 2.0:
+                ; \HISPA\PINTURA.BIN, con su acceso en Multimedia, la de Hispa-386 no sale)
                 si i = 8 entonces k := nuevo(de_oficina(i), nulo, P_RUTA, 0, C_MULTIMEDIA, IC_DOCUMENTO, SIN_RANGO)
                 sino k := nuevo(de_oficina(i), nulo, P_RUTA, 0, C_OFICINA, IC_DOCUMENTO, SIN_RANGO) fin
                 si k >= 0 entonces

@@ -97,6 +97,10 @@ $MODULOS  module /INSTALA/LEEME.TXT LEEME.TXT
 # va con los programas, a \HISPA; lo de \OFICINA, a C:\OFICINA: lo dice
 # CARPETAS.TXT («ARCHIVO.EXT=CARPETA»), que INSTALAR lee y no instala
 bash $AQUI/hvprun/hacer.sh $W/of > /dev/null
+# (PINTURA32, 0.8.8) Pintura 2 (el paquete del sistema «pintura» 2.0,
+# nucleo32/oficina/pintura) sustituye a la Pintura de Hispa-386: el .HVP no
+# se instala
+rm -f $W/of/PINTURA.HVP
 INSTALA="$INSTALA  module /HVPRUN.BIN HVPRUN.BIN
 "
 : > $W/i/CARPETAS.TXT
@@ -138,6 +142,19 @@ for n in CALC.MNU RELOJ.MNU CARACTER.MNU CALC.ICP RELOJ.ICP CARACT.ICP; do
 "
   printf '%s=HISPA\\MENU\r\n' $n >> $W/i/CARPETAS.TXT
 done
+# (PINTURA32, 0.8.8) Pintura 2, del sistema (el paquete «pintura» 2.0): solo
+# en el sistema instalado (como la oficina): PINTURA.BIN y su PINTURA.TXT a
+# \HISPA; su acceso (tipo=Multimedia, sin icono en el escritorio) y su icono
+# a \HISPA\MENU
+bash $AQUI/oficina/pintura/hacer.sh $W/i/PINTURA.BIN > /dev/null
+iconv -f UTF-8 -t CP437 $AQUI/oficina/pintura/LEEME.txt | sed 's/$/\r/' > $W/i/PINTURA.TXT
+python3 -I $AQUI/../../tools/hpicono.py $AQUI/oficina/pintura/pintura32.png $W/i/PINTURA.ICP
+printf 'nombre=Pintura\r\nprograma=\\HISPA\\PINTURA.BIN\r\nargumentos=\r\nicono=\\HISPA\\MENU\\PINTURA.ICP\r\nescritorio=no\r\ntipo=Multimedia\r\n' > $W/i/PINTURA.MNU
+for n in PINTURA.BIN PINTURA.TXT PINTURA.MNU PINTURA.ICP; do
+  INSTALA="$INSTALA  module /INSTALA/$n $n
+"
+done
+printf 'PINTURA.MNU=HISPA\\MENU\r\nPINTURA.ICP=HISPA\\MENU\r\n' >> $W/i/CARPETAS.TXT
 iconv -f UTF-8 -t CP437 > $W/i/LEEME.TXT <<'L'
 Hispa-Pentium 0.8, instalado en el disco duro.
 

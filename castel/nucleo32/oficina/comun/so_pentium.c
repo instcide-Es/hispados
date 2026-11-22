@@ -984,6 +984,26 @@ double cos(double x) { return so_cos(x); }
 double acos(double x) { return so_acos(x); }
 
 
+void so_pantalla_entera(int *an, int *al)
+{
+	u32 a = llamada(15, 11, 0, 0), b = llamada(15, 12, 0, 0);
+
+	*an = ES_ERROR(a) || !a ? 800 : (int)a;
+	*al = ES_ERROR(b) || !b ? 600 : (int)b;
+}
+
+int so_fondo_escritorio(const u32 *px, int an, int al)
+{
+	struct { u32 ancho, alto, puntos; } it;	/* (una Imagen_tapiz de usuario.cas) */
+
+	if (an < 1 || al < 1 || an > 4096 || al > 4096)
+		return -1;
+	it.ancho = (u32)an;
+	it.alto = (u32)al;
+	it.puntos = (u32)px;
+	return ES_ERROR(llamada(172, 1, (u32)&it, 0)) ? -1 : 0;
+}
+
 int so_lanza(const char *programa, const char *args)
 {
 	char p[300], a[400];

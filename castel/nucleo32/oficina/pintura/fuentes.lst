@@ -1,0 +1,26 @@
+# Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+# Los fuentes de Pintura 2 (los leen hacer.sh y anfitrion.sh): «comun/x» es
+# de la biblioteca común de la oficina (oficina/comun); «pintura/x», de Pintura.
+# Detrás, «-w» si es de los que llevan código de otros dentro (sin avisos).
+comun/texto
+comun/ttf
+comun/letras -w
+comun/lienzo
+comun/imagen -w
+comun/ui
+comun/iconos
+comun/pdfsal
+comun/miniz_ofi -w
+pintura/lamina
+pintura/colores
+pintura/historia
+pintura/dibujo
+pintura/operaciones
+pintura/formatos -w
+pintura/iconos_p
+pintura/vista
+pintura/herramientas
+pintura/archivo
+pintura/dialogos
+pintura/ventana
+pintura/principal

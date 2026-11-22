@@ -291,10 +291,15 @@ SISTEMA = [
         ('TIPOS.DAT', r'\OFICINA\TIPOS.DAT'), ('TIPOS12.DAT', r'\OFICINA\TIPOS12.DAT'),
         ('TIPOS24.DAT', r'\OFICINA\TIPOS24.DAT'), ('TIPOS32.DAT', r'\OFICINA\TIPOS32.DAT'),
         ('DICCIO.DAT', r'\OFICINA\DICCIO.DAT')]),
-    # (OFICINA2) Pintura, aparte (tipo multimedia, como el Mirador): el
-    # programa de dibujo de Hispa-386 (BMP; abre también PCX: «Editar» en Mi equipo)
-    ('pintura', '1.0', 'Pintura: dibujar y retocar imágenes (guarda en BMP y abre también PCX)', 'hvprun >= 0.10', [
-        ('PINTURA.HVP', r'\OFICINA\PINTURA.HVP')]),
+    # (OFICINA2) Pintura, aparte (tipo multimedia, como el Mirador). (PINTURA32,
+    # 0.8.8) La 2.0 es Pintura 2, el programa de dibujo de 32 bits
+    # (castel/nucleo32/oficina/pintura): sustituye a la 1.0 (el PINTURA.HVP de
+    # Hispa-386, en HVPRUN) y sigue siendo del sistema. Pide base 0.8.6 (la
+    # llamada 172, el fondo de escritorio). Con ella, el menú (PINTURA.MNU,
+    # tipo=Multimedia) y Mi equipo («Editar con Pintura», los .PCX) la usan
+    ('pintura', '2.0', 'Pintura 2: dibujar y retocar imágenes en color verdadero (PNG, JPG, BMP, GIF, PCX, ICO, TGA; a PDF; fondo de escritorio)', 'base >= 0.8.6', [
+        ('PINTURA.BIN', r'\HISPA\PINTURA.BIN'), ('PINTURA.TXT', r'\HISPA\PINTURA.TXT'),
+        ('PINTURA.MNU', r'\HISPA\MENU\PINTURA.MNU'), ('PINTURA.ICP', r'\HISPA\MENU\PINTURA.ICP')]),
     # [WIN32] los programas de Windows de 32 bits y DirectX (docs/pentium/WIN32.md)
     # (JUEGOS, 22/11/2026) win32 1.2: lo que pide un juego (hilos de verdad, SEH,
     # el registro, MSVCRT de VC6, el ratón de los juegos, UDP, la mezcla en su
