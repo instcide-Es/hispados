@@ -12,6 +12,18 @@
 ;  lista corta de rectángulos). La flecha del ratón se pinta al final,
 ;  directamente en la pantalla.
 ;
+;  (PUNTEROS) El puntero tiene formas (cursores.cas): la flecha, la de
+;  cambiar el tamaño en los bordes (la pone el gestor solo), la espera, el
+;  texto, la mano... Un programa pide la de su ventana o la de unas zonas
+;  de ella (la llamada 177, apuntero.cas). Lo que se ve encima de la
+;  pantalla (el puntero y, si se quieren, su rastro y los anillos de
+;  localizarlo con Control) son «piezas»: cada vez que cambian, o que se
+;  recompone algo debajo, se pinta en una baldosa (de 128 x 128) lo del
+;  doble búfer con las piezas encima, y de ahí a la pantalla. Cada punto de
+;  la pantalla se escribe una sola vez y ya con lo que tiene que tener: no
+;  parpadea ni deja restos (tampoco al cambiar de forma o de tamaño, ni con
+;  el puntero enorme).
+;
 ;  El ratón y el teclado: pulso() (lo llama la tarea del escritorio cien
 ;  veces por segundo) recoge lo que ha pasado y lo reparte: mover una ventana
 ;  por su título, cambiarla de tamaño por su borde o su esquina (la flecha
@@ -29,7 +41,7 @@
 ; =============================================================================
 módulo Ventanas
 
-    importar Cpu, Tareas, Monton, Grafico, Letra, Video, Raton, Consola
+    importar Cpu, Tareas, Monton, Grafico, Letra, Video, Raton, Consola, Cursores
 
     público constante MAX_VENTANAS = 24              ; (MENÚ) eran 20: el menú Inicio abre dos más (sus submenús)
     público constante MAX_TÍTULO = 64
@@ -111,6 +123,12 @@ módulo Ventanas
     fin
 
     constante COLA_EV = 32
+    ; (PUNTEROS) una zona de lo de dentro de una ventana con su forma del puntero
+    público constante MAX_ZONAS = 8
+    público tipo Zona = estructura
+        x, ye, ancho, alto: ent32
+        forma: nat32
+    fin
     constante LEJOS = 8192                      ; ninguna medida de un dibujo pasa de aquí
     constante DEL_NÚCLEO = 14                   ; (MENÚ: eran 10) las ventanas que se guardan para el núcleo (la barra, el menú, el fondo, los cuadros, un menú emergente, el globo de los avisos)
 
@@ -127,6 +145,9 @@ módulo Ventanas
         dentro: Lienzo                          ; lo de dentro del marco
         cola: arreglo [COLA_EV] de Evento
         ent, sal: nat32
+        forma: nat32                            ; (PUNTEROS) la del puntero encima de lo de dentro (la llamada 177)
+        n_zonas: nat32                          ; (PUNTEROS) y la de unas zonas de dentro (la última que pide, la que vale)
+        zonas: arreglo [MAX_ZONAS] de Zona
     fin
 
     ; ---- los colores del marco (los propios de Hispa-Pentium) ----
@@ -168,7 +189,6 @@ módulo Ventanas
     variable sucios: nat32
     ; el ratón
     variable flecha_x, flecha_y: ent32          ; dónde está pintada la flecha
-    variable flecha_pintada: bool
     público variable flecha_escondida: nat32    ; (JUEGOS) la tarea que la esconde mientras su ventana es la activa (0: nadie)
     variable botones_antes: nat32
     variable arrastrada: ent32 = -1             ; la ventana que se está moviendo
@@ -198,18 +218,42 @@ módulo Ventanas
     variable capturada: ent32 = -1              ; la que recibió el clic (hasta que se suelte)
     variable debajo: ent32 = -1                 ; la última sobre la que estaba el ratón
     variable último_clic, última_clicada: nat32
-    ; la flecha: X, el borde oscuro; o, lo de dentro (claro). Y las de
-    ; cambiar el tamaño (de lado a lado, de arriba abajo y las dos de
-    ; esquina), que se agarran por el centro
-    constante FLECHA_ANCHO = 12
-    constante FLECHA_ALTO = 19
-    variable forma: nat32                       ; 0, la flecha; 1 a 4, las de cambiar el tamaño
-    variable fp_x, fp_y, fp_an, fp_al: ent32    ; lo que ocupa la que está pintada
-    variable flecha_h: arreglo [210] de byte = "                      XXX       XXX     XXoX       XoXX   XXooX       XooXX  XoooXXXXXXXXXoooX  XoooooooooooooooX  XoooXXXXXXXXXoooX  XXooX       XooXX   XXoX       XoXX     XXX       XXX                      "
-    variable flecha_v: arreglo [210] de byte = "              XXXXX     XXoooXX   XXoooooXX  XoooooooX  XXXXoXXXX     XoX        XoX        XoX        XoX        XoX        XoX        XoX     XXXXoXXXX  XoooooooX  XXoooooXX   XXoooXX     XXXXX              "
-    variable flecha_d1: arreglo [226] de byte = "                XXXXXXX        XoooooX        XooooXX        XoooXX         XooXoXX        XoXXXoXX       XXX XXoXX XXX       XXoXXXoX        XXoXooX         XXoooX        XXooooX        XoooooX        XXXXXXX                "
-    variable flecha_d2: arreglo [226] de byte = "                      XXXXXXX        XoooooX        XXooooX         XXoooX        XXoXooX       XXoXXXoX  XXX XXoXX XXX  XoXXXoXX       XooXoXX        XoooXX         XooooXX        XoooooX        XXXXXXX                      "
-    variable flecha: arreglo [232] de byte = "X           XX          XoX         XooX        XoooX       XooooX      XoooooX     XooooooX    XoooooooX   XooooooooX  XoooooooooX XooooooXXXXXXoooXooX    XooX XooX   XoX  XooX   XX    XooX  X     XooX         XooX        XXX  "
+    ; (PUNTEROS) el puntero: las formas (cursores.cas), los ajustes (los
+    ; pone apuntero.cas: el Panel de control > Ratón > Puntero) y las piezas
+    ; que se ven encima de la pantalla
+    público variable p_juego, p_tamaño, p_color: nat32
+    público variable p_rastro, p_localizar, p_espejo: bool
+    público variable ocupado_hasta: nat32       ; hasta entonces (en tics), la flecha con la espera (se está abriendo un programa)
+    público variable forma_vista: nat32         ; la forma que se ve ahora (la dice el escritorio por el puerto serie)
+    público variable formas_vistas: nat32       ; sube cada vez que cambia
+    público variable localizados: nat32         ; las veces que se ha localizado con Control (también lo dice el escritorio)
+    constante MAX_PIEZAS_V = 12
+    constante BALDOSA = 128
+    constante PZ_IMAGEN = 1
+    constante PZ_ANILLOS = 2
+    tipo Pieza = estructura
+        clase: nat32
+        x, ye, ancho, alto: ent32               ; lo que tapa en la pantalla
+        px, py: ent32                           ; el punto activo (o el centro de los anillos)
+        imagen: puntero a Imagen
+        clave, color, alfa: nat32
+        radio, grueso: ent32
+    fin
+    variable nuevas, viejas: arreglo [MAX_PIEZAS_V] de Pieza
+    variable n_nuevas, n_viejas: nat32
+    variable bx0, by0, bx1, by1: ent32          ; lo que tapan las nuevas, todas juntas
+    variable baldosa: Lienzo
+    variable hay_baldosa: bool
+    ; el rastro: las últimas posiciones y cuándo
+    constante MAX_RASTRO = 8
+    constante VIDA_RASTRO = 14
+    variable ras_x, ras_y: arreglo [MAX_RASTRO] de ent32
+    variable ras_t: arreglo [MAX_RASTRO] de nat32
+    variable ras_i: nat32
+    ; localizar el puntero: Control pulsado y suelto, solo
+    constante VIDA_ANILLOS = 60
+    variable loc_desde: nat32
+    variable loc_activo, ctrl_antes, ctrl_solo: bool
 
     ; -------------------------------------------------------------------------
     ;  Lo sucio y componer
@@ -343,73 +387,340 @@ módulo Ventanas
         copiar_lienzo(trasero, x1, y1, v.todo, x1 - v.px, y1 - v.py, x2 - x1, y2 - y1)
     fin
 
-    función pinta_flecha()
-        variable i, j, an, al: ent32
-        variable c: byte
-        variable p: puntero a byte
+    ; -------------------------------------------------------------------------
+    ;  (PUNTEROS) El puntero: las piezas encima de la pantalla
+    ; -------------------------------------------------------------------------
+    ; la forma del puntero en (x, yy) de la ventana i (lo de dentro)
+    función forma_en(i: ent32, x: ent32, yy: ent32): nat32
+        variable k: ent32
+        k := ent32(ventanas[i].n_zonas) - 1
+        mientras k >= 0 hacer
+            si x >= ventanas[i].zonas[k].x y yy >= ventanas[i].zonas[k].ye y x < ventanas[i].zonas[k].x + ventanas[i].zonas[k].ancho y yy < ventanas[i].zonas[k].ye + ventanas[i].zonas[k].alto entonces
+                devolver ventanas[i].zonas[k].forma
+            fin
+            k := k - 1
+        fin
+        devolver ventanas[i].forma
+    fin
+
+    ; la forma que toca ahora donde está la flecha
+    función forma_ahora(): nat32
+        variable i: ent32
+        variable lados, f: nat32
+        si estirada >= 0 entonces devolver forma_de(est_lados) fin
+        si mov_suelto entonces devolver P_MOVER fin
+        si arrastrada >= 0 entonces devolver P_FLECHA fin
+        i := capturada
+        lados := 0
+        si i < 0 entonces
+            i := ventana_o_borde(flecha_x, flecha_y, lados)
+            si i >= 0 y lados <> 0 entonces devolver forma_de(lados) fin
+        fin
+        f := P_FLECHA
+        si i >= 0 y ventanas[i].usada y está_dentro(i, flecha_x, flecha_y) entonces f := forma_en(i, dentro_x(i, flecha_x), dentro_y(i, flecha_y)) fin
+        si f >= N_FORMAS entonces f := P_FLECHA fin
+        si f = P_FLECHA y ocupado_hasta <> 0 entonces
+            si tics < ocupado_hasta entonces f := P_FLECHA_ESPERA sino ocupado_hasta := 0 fin
+        fin
+        devolver f
+    fin
+
+    función medios_de(t: nat32): ent32
+        según nat16(t)
+            caso 1: devolver 3
+            caso 2: devolver 4
+            caso 3: devolver 6
+        fin
+        devolver 2
+    fin
+
+    función pieza_imagen(im: puntero a Imagen, x: ent32, yy: ent32, alfa: nat32)
+        variable k: nat32
+        si im = nulo o n_nuevas >= MAX_PIEZAS_V entonces devolver fin
+        k := n_nuevas
+        nuevas[k].clase := PZ_IMAGEN
+        nuevas[k].px := x
+        nuevas[k].py := yy
+        nuevas[k].x := x - im.ox
+        nuevas[k].ye := yy - im.oy
+        nuevas[k].ancho := im.an
+        nuevas[k].alto := im.al
+        nuevas[k].imagen := im
+        nuevas[k].clave := im.clave
+        nuevas[k].color := p_color
+        nuevas[k].alfa := alfa
+        nuevas[k].radio := 0
+        nuevas[k].grueso := 0
+        n_nuevas := n_nuevas + 1
+    fin
+
+    ; las piezas que tocan ahora: el rastro, los anillos y el puntero
+    función construye_piezas()
+        variable f, k, edad, alfa: nat32
+        variable i: ent32
+        variable im: puntero a Imagen
+        variable r, g, m: ent32
+        n_nuevas := 0
         ; (JUEGOS) un juego que la ha escondido (ShowCursor), con su ventana delante
-        si flecha_escondida <> 0 y activa >= 0 y ventanas[activa].usada y ventanas[activa].dueño = flecha_escondida entonces
-            flecha_pintada := falso
-            devolver
+        si flecha_escondida <> 0 y activa >= 0 y ventanas[activa].usada y ventanas[activa].dueño = flecha_escondida entonces devolver fin
+        f := forma_ahora()
+        si f <> forma_vista entonces
+            forma_vista := f
+            formas_vistas := formas_vistas + 1
         fin
-        según forma
-            caso 1:
-                p := dirección(flecha_h[0])
-                an := 19
-                al := 11
-            caso 2:
-                p := dirección(flecha_v[0])
-                an := 11
-                al := 19
-            caso 3:
-                p := dirección(flecha_d1[0])
-                an := 15
-                al := 15
-            caso 4:
-                p := dirección(flecha_d2[0])
-                an := 15
-                al := 15
-            si no:
-                p := dirección(flecha[0])
-                an := FLECHA_ANCHO
-                al := FLECHA_ALTO
+        k := 0
+        si animada(f) entonces k := (tics div 12) mod 8 fin
+        im := imagen_de(f, p_juego, p_tamaño, p_espejo, k)
+        si im = nulo entonces im := imagen_de(P_FLECHA, J_CLÁSICA, 0, falso, 0) fin
+        m := medios_de(p_tamaño)
+        ; los anillos que se cierran (localizar el puntero)
+        si loc_activo entonces
+            edad := tics - loc_desde
+            si edad >= VIDA_ANILLOS entonces
+                loc_activo := falso
+            sino
+                r := 6 * m + ent32(VIDA_ANILLOS - edad) * (m + 1)
+                g := 1 + m div 2
+                k := n_nuevas
+                nuevas[k].clase := PZ_ANILLOS
+                nuevas[k].px := flecha_x
+                nuevas[k].py := flecha_y
+                nuevas[k].x := flecha_x - r - g - 3
+                nuevas[k].ye := flecha_y - r - g - 3
+                nuevas[k].ancho := 2 * (r + g + 3) + 1
+                nuevas[k].alto := 2 * (r + g + 3) + 1
+                nuevas[k].imagen := nulo
+                nuevas[k].clave := 0
+                nuevas[k].color := 0
+                nuevas[k].alfa := 256
+                nuevas[k].radio := r
+                nuevas[k].grueso := g
+                n_nuevas := n_nuevas + 1
+            fin
         fin
-        fp_x := flecha_x
-        fp_y := flecha_y
-        si forma <> 0 entonces
-            fp_x := flecha_x - an div 2
-            fp_y := flecha_y - al div 2
-        fin
-        fp_an := an
-        fp_al := al
-        para j desde 0 hasta al - 1 hacer
-            para i desde 0 hasta an - 1 hacer
-                c := p[j * an + i]
-                si c = 'X' entonces
-                    punto(pantalla, fp_x + i, fp_y + j, 0x10233F)
-                sino si c = 'o' entonces
-                    punto(pantalla, fp_x + i, fp_y + j, BLANCO)
+        ; el rastro: donde estuvo hace poco (lo más viejo, más transparente)
+        si p_rastro entonces
+            para i desde 1 hasta MAX_RASTRO - 1 hacer
+                k := (ras_i + nat32(i)) mod MAX_RASTRO
+                edad := tics - ras_t[k]
+                si ras_t[k] <> 0 y edad < VIDA_RASTRO y (ras_x[k] <> flecha_x o ras_y[k] <> flecha_y) entonces
+                    alfa := 40 + 150 * (VIDA_RASTRO - edad) div VIDA_RASTRO
+                    pieza_imagen(im, ras_x[k], ras_y[k], alfa)
                 fin
             fin
         fin
-        flecha_pintada := cierto
-        volcar(fp_x, fp_y, fp_an, fp_al)
+        pieza_imagen(im, flecha_x, flecha_y, 256)
+        ; lo que tapan todas juntas
+        bx0 := 1000000
+        by0 := 1000000
+        bx1 := -1000000
+        by1 := -1000000
+        k := 0
+        mientras k < n_nuevas hacer
+            bx0 := menor(bx0, nuevas[k].x)
+            by0 := menor(by0, nuevas[k].ye)
+            bx1 := mayor(bx1, nuevas[k].x + nuevas[k].ancho)
+            by1 := mayor(by1, nuevas[k].ye + nuevas[k].alto)
+            k := k + 1
+        fin
     fin
 
-    ; quita la flecha: lo que había debajo está en el doble búfer
-    función borra_flecha()
-        si flecha_pintada entonces
-            copiar_lienzo(pantalla, fp_x, fp_y, trasero, fp_x, fp_y, fp_an, fp_al)
-            volcar(fp_x, fp_y, fp_an, fp_al)
+    función piezas_cambiadas(): bool
+        variable k: nat32
+        si n_nuevas <> n_viejas entonces devolver cierto fin
+        k := 0
+        mientras k < n_nuevas hacer
+            si nuevas[k].clase <> viejas[k].clase o nuevas[k].x <> viejas[k].x o nuevas[k].ye <> viejas[k].ye o nuevas[k].ancho <> viejas[k].ancho o nuevas[k].alto <> viejas[k].alto entonces devolver cierto fin
+            si nuevas[k].clave <> viejas[k].clave o nuevas[k].color <> viejas[k].color o nuevas[k].alfa <> viejas[k].alfa o nuevas[k].radio <> viejas[k].radio entonces devolver cierto fin
+            k := k + 1
         fin
-        flecha_pintada := falso
+        devolver falso
+    fin
+
+    función guarda_piezas()
+        variable k: nat32
+        k := 0
+        mientras k < n_nuevas hacer
+            viejas[k].clase := nuevas[k].clase
+            viejas[k].x := nuevas[k].x
+            viejas[k].ye := nuevas[k].ye
+            viejas[k].ancho := nuevas[k].ancho
+            viejas[k].alto := nuevas[k].alto
+            viejas[k].clave := nuevas[k].clave
+            viejas[k].color := nuevas[k].color
+            viejas[k].alfa := nuevas[k].alfa
+            viejas[k].radio := nuevas[k].radio
+            k := k + 1
+        fin
+        n_viejas := n_nuevas
+    fin
+
+    ; pone en la pantalla el rectángulo (x, yy, an, al): lo del doble búfer
+    ; con las piezas encima, de baldosa en baldosa
+    función con_piezas(x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable x2, y2, tx, ty, ta, tl: ent32
+        variable k: nat32
+        x2 := menor(x + an, pantalla.ancho)
+        y2 := menor(yy + al, pantalla.alto)
+        x := mayor(x, 0)
+        yy := mayor(yy, 0)
+        si x2 <= x o y2 <= yy entonces devolver fin
+        si no hay_baldosa entonces
+            ; (sin memoria para la baldosa: como antes, encima de la pantalla)
+            copiar_lienzo(pantalla, x, yy, trasero, x, yy, x2 - x, y2 - yy)
+            k := 0
+            mientras k < n_nuevas hacer
+                si nuevas[k].clase = PZ_IMAGEN entonces pinta_imagen(pantalla, nuevas[k].px, nuevas[k].py, nuevas[k].imagen, nuevas[k].color, nuevas[k].alfa) fin
+                k := k + 1
+            fin
+            volcar(x, yy, x2 - x, y2 - yy)
+            devolver
+        fin
+        ty := yy
+        mientras ty < y2 hacer
+            tl := menor(BALDOSA, y2 - ty)
+            tx := x
+            mientras tx < x2 hacer
+                ta := menor(BALDOSA, x2 - tx)
+                copiar_lienzo(baldosa, 0, 0, trasero, tx, ty, ta, tl)
+                k := 0
+                mientras k < n_nuevas hacer
+                    si nuevas[k].x < tx + ta y nuevas[k].x + nuevas[k].ancho > tx y nuevas[k].ye < ty + tl y nuevas[k].ye + nuevas[k].alto > ty entonces
+                        si nuevas[k].clase = PZ_IMAGEN entonces
+                            pinta_imagen(baldosa, nuevas[k].px - tx, nuevas[k].py - ty, nuevas[k].imagen, nuevas[k].color, nuevas[k].alfa)
+                        sino
+                            pinta_anillos(baldosa, nuevas[k].px - tx, nuevas[k].py - ty, nuevas[k].radio, nuevas[k].grueso)
+                        fin
+                    fin
+                    k := k + 1
+                fin
+                copiar_lienzo(pantalla, tx, ty, baldosa, 0, 0, ta, tl)
+                volcar(tx, ty, ta, tl)
+                tx := tx + ta
+            fin
+            ty := ty + tl
+        fin
+    fin
+
+    ; un trozo recompuesto, a la pantalla: lo que no tapan las piezas, tal
+    ; cual; lo que sí, con ellas
+    función trozo_a_pantalla(x: ent32, yy: ent32, an: ent32, al: ent32)
+        variable ix0, iy0, ix1, iy1: ent32
+        ix0 := mayor(x, bx0)
+        iy0 := mayor(yy, by0)
+        ix1 := menor(x + an, bx1)
+        iy1 := menor(yy + al, by1)
+        si n_nuevas = 0 o ix1 <= ix0 o iy1 <= iy0 entonces
+            copiar_lienzo(pantalla, x, yy, trasero, x, yy, an, al)
+            volcar(x, yy, an, al)
+            devolver
+        fin
+        ; arriba y abajo, enteros; a los lados, en las filas de las piezas
+        si iy0 > yy entonces
+            copiar_lienzo(pantalla, x, yy, trasero, x, yy, an, iy0 - yy)
+            volcar(x, yy, an, iy0 - yy)
+        fin
+        si yy + al > iy1 entonces
+            copiar_lienzo(pantalla, x, iy1, trasero, x, iy1, an, yy + al - iy1)
+            volcar(x, iy1, an, yy + al - iy1)
+        fin
+        si ix0 > x entonces
+            copiar_lienzo(pantalla, x, iy0, trasero, x, iy0, ix0 - x, iy1 - iy0)
+            volcar(x, iy0, ix0 - x, iy1 - iy0)
+        fin
+        si x + an > ix1 entonces
+            copiar_lienzo(pantalla, ix1, iy0, trasero, ix1, iy0, x + an - ix1, iy1 - iy0)
+            volcar(ix1, iy0, x + an - ix1, iy1 - iy0)
+        fin
+        con_piezas(ix0, iy0, ix1 - ix0, iy1 - iy0)
+    fin
+
+    ; las piezas han cambiado: donde estaban y donde están, otra vez (los
+    ; rectángulos que se tocan, juntos)
+    función repone_piezas()
+        variable rx0, ry0, rx1, ry1: arreglo [24] de ent32
+        variable n, i, j: nat32
+        variable junta: bool
+        n := 0
+        i := 0
+        mientras i < n_viejas hacer
+            rx0[n] := viejas[i].x
+            ry0[n] := viejas[i].ye
+            rx1[n] := viejas[i].x + viejas[i].ancho
+            ry1[n] := viejas[i].ye + viejas[i].alto
+            n := n + 1
+            i := i + 1
+        fin
+        i := 0
+        mientras i < n_nuevas hacer
+            rx0[n] := nuevas[i].x
+            ry0[n] := nuevas[i].ye
+            rx1[n] := nuevas[i].x + nuevas[i].ancho
+            ry1[n] := nuevas[i].ye + nuevas[i].alto
+            n := n + 1
+            i := i + 1
+        fin
+        ; juntar los que se tocan, hasta que no quede ninguno
+        junta := cierto
+        mientras junta hacer
+            junta := falso
+            i := 0
+            mientras i < n hacer
+                j := i + 1
+                mientras j < n hacer
+                    si rx0[i] <= rx1[j] y rx0[j] <= rx1[i] y ry0[i] <= ry1[j] y ry0[j] <= ry1[i] entonces
+                        rx0[i] := menor(rx0[i], rx0[j])
+                        ry0[i] := menor(ry0[i], ry0[j])
+                        rx1[i] := mayor(rx1[i], rx1[j])
+                        ry1[i] := mayor(ry1[i], ry1[j])
+                        n := n - 1
+                        rx0[j] := rx0[n]
+                        ry0[j] := ry0[n]
+                        rx1[j] := rx1[n]
+                        ry1[j] := ry1[n]
+                        junta := cierto
+                    sino
+                        j := j + 1
+                    fin
+                fin
+                i := i + 1
+            fin
+        fin
+        i := 0
+        mientras i < n hacer
+            con_piezas(rx0[i], ry0[i], rx1[i] - rx0[i], ry1[i] - ry0[i])
+            i := i + 1
+        fin
+    fin
+
+    ; (PUNTEROS) Control pulsado y suelto sin nada más: los anillos
+    función mira_control(hubo_algo: bool)
+        variable c: bool
+        c := modificadores() yb MOD_CONTROL <> 0
+        si hubo_algo entonces ctrl_solo := falso fin
+        si c y no ctrl_antes entonces ctrl_solo := modificadores() = MOD_CONTROL fin
+        si no c y ctrl_antes y ctrl_solo y p_localizar entonces
+            loc_activo := cierto
+            loc_desde := tics
+            localizados := localizados + 1
+        fin
+        si no c entonces ctrl_solo := falso fin
+        ctrl_antes := c
     fin
 
     ; recompone lo sucio: al doble búfer y, de ahí, a la pantalla
     función componer()
         variable i, k: nat32
         variable x, yy, an, al: ent32
-        si sucios = 0 entonces devolver fin
+        variable cambió: bool
+        construye_piezas()                      ; (PUNTEROS)
+        cambió := piezas_cambiadas()
+        si sucios = 0 y no cambió entonces devolver fin
+        si sucios = 0 entonces
+            repone_piezas()
+            guarda_piezas()
+            devolver
+        fin
         para i desde 0 hasta sucios - 1 hacer
             x := sx[i]
             yy := sy[i]
@@ -421,12 +732,12 @@ módulo Ventanas
                 si se_ve(ventanas[orden[k]]) entonces pinta_ventana(ventanas[orden[k]], x, yy, an, al) fin
                 k := k + 1
             fin
-            copiar_lienzo(pantalla, x, yy, trasero, x, yy, an, al)
-            volcar(x, yy, an, al)
+            trozo_a_pantalla(x, yy, an, al)      ; (PUNTEROS) con las piezas encima, sin parpadear
             composiciones := composiciones + 1
         fin
         sucios := 0
-        pinta_flecha()
+        si cambió entonces repone_piezas() fin
+        guarda_piezas()
     fin
 
     ; -------------------------------------------------------------------------
@@ -776,6 +1087,9 @@ módulo Ventanas
         ventanas[i].memoria := m
         ventanas[i].ent := 0
         ventanas[i].sal := 0
+        ventanas[i].forma := P_FLECHA           ; (PUNTEROS)
+        ventanas[i].n_zonas := 0
+        si dueño <> 0 entonces ocupado_hasta := 0 fin      ; (PUNTEROS) el programa ya tiene su ventana: sin la espera
         k := 0
         mientras k < MAX_TÍTULO - 1 y nombre[k] <> 0 hacer
             ventanas[i].título[k] := nombre[k]
@@ -1294,11 +1608,11 @@ módulo Ventanas
 
     ; la forma de la flecha para esos lados
     función forma_de(lados: nat32): nat32
-        si lados = 0 entonces devolver 0 fin
-        si lados = LADO_IZQUIERDO o lados = LADO_DERECHO entonces devolver 1 fin
-        si lados = LADO_ARRIBA o lados = LADO_ABAJO entonces devolver 2 fin
-        si lados = (LADO_IZQUIERDO ob LADO_ARRIBA) o lados = (LADO_DERECHO ob LADO_ABAJO) entonces devolver 3 fin
-        devolver 4
+        si lados = 0 entonces devolver P_FLECHA fin
+        si lados = LADO_IZQUIERDO o lados = LADO_DERECHO entonces devolver P_TAMAÑO_H fin
+        si lados = LADO_ARRIBA o lados = LADO_ABAJO entonces devolver P_TAMAÑO_V fin
+        si lados = (LADO_IZQUIERDO ob LADO_ARRIBA) o lados = (LADO_DERECHO ob LADO_ABAJO) entonces devolver P_TAMAÑO_D1 fin
+        devolver P_TAMAÑO_D2
     fin
 
     ; las veces seguidas que se ha pulsado ahí (1, 2 o 3): mismo sitio, mismos
@@ -1465,7 +1779,6 @@ módulo Ventanas
         variable lados: nat32
         si estirada >= 0 entonces
             estira(x, yy)
-            forma := forma_de(est_lados)
             devolver
         fin
         si arrastrada >= 0 entonces
@@ -1482,7 +1795,6 @@ módulo Ventanas
                 ventanas[arrastrada].py := ny
                 ensuciar_ventana(ventanas[arrastrada])
             fin
-            forma := 0
             devolver
         fin
         i := capturada
@@ -1491,7 +1803,6 @@ módulo Ventanas
             i := ventana_o_borde(x, yy, lados)
             si i >= 0 y (lados <> 0 o no está_dentro(i, x, yy)) entonces i := -1 fin
         fin
-        forma := forma_de(lados)
         si i <> debajo entonces
             pon_evento(debajo, EV_SALE, 0, 0, 0)
             debajo := i
@@ -1509,6 +1820,7 @@ módulo Ventanas
         tomar(cerrojo)
         ; los botones del ratón, cada cambio donde fue
         mientras saca_clic(c) hacer
+            ctrl_solo := falso                  ; (PUNTEROS) Control con un clic: no es localizar
             si c.botones yb nob botones_antes <> 0 entonces pulsado(c.x, c.ye, c.botones, c.botones yb nob botones_antes) fin
             si botones_antes yb nob c.botones <> 0 entonces soltado(c.x, c.ye, c.botones) fin
             botones_antes := c.botones
@@ -1520,10 +1832,12 @@ módulo Ventanas
         reponer(k)
         si x <> flecha_x o yy <> flecha_y entonces
             movido(x, yy)
-            borra_flecha()
-            flecha_x := x
+            flecha_x := x                       ; (PUNTEROS) se pinta al componer (con las piezas)
             flecha_y := yy
-            pinta_flecha()
+            ras_i := (ras_i + 1) mod MAX_RASTRO
+            ras_x[ras_i] := x
+            ras_y[ras_i] := yy
+            ras_t[ras_i] := tics ob 1
         fin
         ; (NAVEGADOR) la rueda: a la ventana de debajo de la flecha
         nr := saca_rueda()
@@ -1546,6 +1860,7 @@ módulo Ventanas
         ; las teclas: la del logo, a la barra de tareas; las demás, al menú
         ; que esté abierto o a la ventana activa (en «b», si venía con Mayús)
         k := saca_tecla()
+        mira_control(k <> 0 o nr <> 0)          ; (PUNTEROS)
         mientras k <> 0 hacer
             m := 0
             si k >= TECLA_CON_MAYÚS entonces
@@ -1663,7 +1978,7 @@ módulo Ventanas
         pon_lienzo(tapiz, puntero(m2), nat32(an), an, al)
         rectángulo(tapiz, 0, 0, an, al, 0x154C9C)
         sucios := 0
-        flecha_pintada := falso
+        n_viejas := 0                           ; (PUNTEROS) la pantalla es otra: no queda nada pintado encima
         pon_medida_ratón(an, al)
         si flecha_x >= an entonces flecha_x := an - 1 fin
         si flecha_y >= al entonces flecha_y := al - 1 fin
@@ -1780,6 +2095,71 @@ módulo Ventanas
         devolver r
     fin
 
+    ; (PUNTEROS) la forma del puntero sobre lo de dentro de una ventana suya
+    ; (P_...); falso si no es suya o la forma no vale
+    público función pon_forma(id: nat32, dueño: nat32, f: nat32): bool
+        variable i: ent32
+        si f >= N_FORMAS entonces devolver falso fin
+        tomar(cerrojo)
+        i := busca(id)
+        si i < 0 o (dueño <> 0 y ventanas[i].dueño <> dueño) entonces
+            soltar(cerrojo)
+            devolver falso
+        fin
+        ventanas[i].forma := f
+        soltar(cerrojo)
+        devolver cierto
+    fin
+
+    ; (PUNTEROS) una zona de lo de dentro con su forma (la última, la que
+    ; vale); con ancho 0, se quitan todas. Falso si no es suya, la forma no
+    ; vale o ya tiene MAX_ZONAS
+    público función pon_zona_puntero(id: nat32, dueño: nat32, ref z: Zona): bool
+        variable i: ent32
+        variable k: nat32
+        si z.ancho <> 0 y (z.forma >= N_FORMAS o z.ancho < 0 o z.alto < 0 o z.ancho > LEJOS o z.alto > LEJOS) entonces devolver falso fin
+        tomar(cerrojo)
+        i := busca(id)
+        si i < 0 o (dueño <> 0 y ventanas[i].dueño <> dueño) entonces
+            soltar(cerrojo)
+            devolver falso
+        fin
+        si z.ancho = 0 entonces
+            ventanas[i].n_zonas := 0
+            soltar(cerrojo)
+            devolver cierto
+        fin
+        ; la misma zona otra vez: se cambia su forma
+        k := 0
+        mientras k < ventanas[i].n_zonas hacer
+            si ventanas[i].zonas[k].x = z.x y ventanas[i].zonas[k].ye = z.ye y ventanas[i].zonas[k].ancho = z.ancho y ventanas[i].zonas[k].alto = z.alto entonces
+                ventanas[i].zonas[k].forma := z.forma
+                soltar(cerrojo)
+                devolver cierto
+            fin
+            k := k + 1
+        fin
+        si ventanas[i].n_zonas >= MAX_ZONAS entonces
+            soltar(cerrojo)
+            devolver falso
+        fin
+        k := ventanas[i].n_zonas
+        ventanas[i].zonas[k].x := z.x
+        ventanas[i].zonas[k].ye := z.ye
+        ventanas[i].zonas[k].ancho := z.ancho
+        ventanas[i].zonas[k].alto := z.alto
+        ventanas[i].zonas[k].forma := z.forma
+        ventanas[i].n_zonas := k + 1
+        soltar(cerrojo)
+        devolver cierto
+    fin
+
+    ; (PUNTEROS) se está abriendo un programa: la flecha con la espera, hasta
+    ; que haga su ventana (o unos segundos)
+    público función pon_ocupado(centésimas: nat32)
+        ocupado_hasta := (tics + centésimas) ob 1
+    fin
+
     ; los botones del ratón que el gestor ha visto pulsados
     público función botones_vistos(): nat32
         devolver botones_antes
@@ -1802,6 +2182,11 @@ módulo Ventanas
         sucios := 0
         flecha_x := ratón_x
         flecha_y := ratón_y
+        ; (PUNTEROS) la baldosa para pintar el puntero sin parpadeo
+        prepara_cursores()
+        m := reservar(BALDOSA * BALDOSA * 4)
+        hay_baldosa := m <> nulo
+        si hay_baldosa entonces pon_lienzo(baldosa, puntero(m), BALDOSA, BALDOSA, BALDOSA) fin
         devolver cierto
     fin
 

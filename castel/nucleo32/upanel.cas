@@ -9,6 +9,9 @@
 ;                        y ponerla a mano
 ;    PANEL /RATON        la velocidad, el doble clic (con su prueba), para
 ;                        zurdos y los renglones de la rueda
+;    PANEL /PUNTERO      (PUNTEROS) Ratón > Puntero: la forma, el tamaño, el
+;                        color, el rastro, localizarlo y para zurdos
+;                        (panelpun.cas)
 ;    PANEL /TECLADO      la distribución, la repetición y Bloq Num
 ;    PANEL /RED          cómo está la red y por dónde va; el Wi-Fi y Tailscale
 ;    PANEL /ENERGIA      apagar la pantalla, la batería baja, el botón de encendido
@@ -27,7 +30,7 @@ módulo UPanel
 
     modelo usuario
 
-    importar Llamadas, Controles, Textos32, Formato, Panelaj, Zonas, Ntp, Redes, Iconpanel
+    importar Llamadas, Controles, Textos32, Formato, Panelaj, Zonas, Ntp, Redes, Iconpanel, Panelpun
 
     ; ---- las secciones ----
     constante S_FECHA = 0
@@ -37,6 +40,8 @@ módulo UPanel
     constante S_ENERGÍA = 4
     constante S_PERSONALIZA = 5
     constante N_SECCIONES = 6
+    constante S_PUNTERO = 6                     ; (PUNTEROS) Ratón > Puntero (no va en la columna: se llega desde Ratón)
+    constante ID_PUNTERO = 90                   ; (PUNTEROS) el botón «Puntero...» de Ratón
 
     ; ---- los controles ----
     constante ID_SECCIÓN = 1                    ; 1 a 6: las de la izquierda
@@ -188,11 +193,13 @@ módulo UPanel
             caso ID_TEMA: devolver TEMAS
             caso ID_ZONA: devolver zonas_texto
         fin
+        si es_de_puntero(id) entonces devolver opciones_puntero(id) fin     ; (PUNTEROS)
         devolver ""
     fin
 
     función elegida(id: nat32): nat32
         si id = ID_ZONA entonces devolver ajuste(AJ_HORA_ZONA) fin
+        si es_de_puntero(id) entonces devolver elegida_puntero(id) fin     ; (PUNTEROS)
         devolver en_lista(id, ajuste(clave_de(id)))
     fin
 
@@ -416,6 +423,7 @@ módulo UPanel
             caso S_TECLADO: devolver "Teclado"
             caso S_RED: devolver "Red y Wi-Fi"
             caso S_ENERGÍA: devolver "Energ\xA1a"
+            caso S_PUNTERO: devolver "Rat\xA2n > Puntero"
         fin
         devolver "Personalizaci\xA2n"
     fin
@@ -440,12 +448,12 @@ módulo UPanel
         caja(0, 0, sx - LA div 2, abajo, 0xDCE6F2)
         yy := 2 * LA div 2
         para k desde 0 hasta N_SECCIONES - 1 hacer
-            si k = sección entonces
+            si k = sección o (k = S_RATÓN y sección = S_PUNTERO) entonces      ; (PUNTEROS) en Puntero, Ratón elegido
                 caja(LA div 2, yy, an, al, C_AZUL)
                 caja(LA div 2 + 3 * E + 1, yy + 3 * E + 1, an - 6 * E - 2, al - 6 * E - 2, C_AZUL_CLARO)
             fin
             icono_panel(lz, LA, yy + (al - 2 * LT) div 2, 2 * LT, icono_sección(k))
-            si k = sección entonces
+            si k = sección o (k = S_RATÓN y sección = S_PUNTERO) entonces
                 negrita(LA + 2 * LT + LA div 2, yy + (al - LT) div 2, nombre_sección(k), C_TINTA)
             sino
                 Controles.texto(LA + 2 * LT + LA div 2, yy + (al - LT) div 2, nombre_sección(k), C_TINTA)
@@ -751,8 +759,12 @@ módulo UPanel
                 caso S_TECLADO: pinta_teclado(yy, abajo)
                 caso S_RED: pinta_red(yy, abajo)
                 caso S_ENERGÍA: pinta_energía(yy, abajo)
+                caso S_PUNTERO: pinta_puntero_panel(sx, yy, abajo)      ; (PUNTEROS)
                 si no: pinta_personaliza(yy, abajo)
             fin
+            ; (PUNTEROS) en Ratón, abajo: «Puntero...»; en Puntero, volver a Ratón
+            si sección = S_RATÓN y no pregunta_salto entonces botón(ID_PUNTERO, sx, abajo - alto_botón() - 2 * E, "Puntero: forma, color y tama\xA4o...", falso, falso) fin
+            si sección = S_PUNTERO y no pregunta_salto entonces botón(ID_P_VOLVER, sx, abajo - alto_botón() - 2 * E, "< Volver a Rat\xA2n", falso, falso) fin
             si pregunta_salto entonces
                 empezar_controles()
                 pinta_pregunta()
@@ -792,14 +804,32 @@ módulo UPanel
             cambia_zona(k)
             devolver
         fin
+        si es_de_puntero(id) entonces          ; (PUNTEROS)
+            elige_puntero(id, k, aviso)
+            devolver
+        fin
         pon(clave_de(id), de_lista(id, k))
     fin
 
     función hace(id: nat32)
         variable v: nat32
         variable r: nat32
+        variable volver: bool
         si id >= ID_SECCIÓN y id < ID_SECCIÓN + N_SECCIONES entonces
             a_sección(id - ID_SECCIÓN)
+            devolver
+        fin
+        ; (PUNTEROS) Ratón > Puntero
+        si id = ID_PUNTERO entonces
+            a_sección(S_PUNTERO)
+            foco := ID_P_JUEGO
+            devolver
+        fin
+        si hace_puntero(id, aviso, volver) entonces
+            si volver entonces
+                a_sección(S_RATÓN)
+                foco := ID_PUNTERO
+            fin
             devolver
         fin
         según nat16(id)
@@ -821,7 +851,9 @@ módulo UPanel
             caso ID_VEL_MÁS:
                 v := ajuste(AJ_RATÓN_VELOCIDAD)
                 si v < 10 entonces pon(AJ_RATÓN_VELOCIDAD, v + 1) fin
-            caso ID_ZURDO: pon(AJ_RATÓN_ZURDO, 1 - ajuste(AJ_RATÓN_ZURDO))
+            caso ID_ZURDO:
+                pon(AJ_RATÓN_ZURDO, 1 - ajuste(AJ_RATÓN_ZURDO))
+                zurdo_cambiado(ajuste(AJ_RATÓN_ZURDO) = 1, aviso)       ; (PUNTEROS) el puntero, en espejo también
             caso ID_BLOQ_NUM: pon(AJ_BLOQ_NUM, 1 - ajuste(AJ_BLOQ_NUM))
             caso ID_RED_AUTO, ID_RED_AUTO + 1, ID_RED_AUTO + 2: pon(AJ_RED, id - ID_RED_AUTO)
             caso ID_WIFI:
@@ -926,6 +958,7 @@ módulo UPanel
             si iguales_sin_caja(p, "/RED") entonces sección := S_RED fin
             si iguales_sin_caja(p, "/ENERGIA") entonces sección := S_ENERGÍA fin
             si iguales_sin_caja(p, "/PERSONALIZA") entonces sección := S_PERSONALIZA fin
+            si iguales_sin_caja(p, "/PUNTERO") entonces sección := S_PUNTERO fin      ; (PUNTEROS)
         fin
         zonas_texto[0] := 0
         para k desde 0 hasta N_ZONAS - 1 hacer
@@ -940,6 +973,7 @@ módulo UPanel
         a_sección(sección)
         escribir("panel: Panel de control 1.0\n")
         foco := ID_SECCIÓN + sección
+        si sección = S_PUNTERO entonces foco := ID_P_JUEGO fin     ; (PUNTEROS)
         pinta()
         mientras cierto hacer
             si suceso(v, s, falso) entonces

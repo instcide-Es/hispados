@@ -1,0 +1,214 @@
+; =============================================================================
+;  apuntero.cas - (PUNTEROS) el puntero del ratón para los programas y el
+;  Panel de control: la llamada 177 y PUNTERO.INI.
+;
+;  La llamada 177 (EBX: lo que se pide):
+;
+;    0  la forma del puntero sobre lo de dentro de la ventana ECX (suya): EDX,
+;       la forma (P_... de cursores.cas: 0 la flecha, 7 el texto, 8 la mano,
+;       10 la cruz...). Vale hasta que se pida otra.
+;    1  una zona de la ventana ECX con su forma: EDX apunta a una Zona (x, y,
+;       ancho, alto y forma; 20 octetos). La última que se pide es la que
+;       vale; con ancho 0 se quitan todas. Hasta 8 por ventana.
+;    2  los ajustes del puntero, a la Ajustes_puntero de ECX (24 octetos):
+;       el juego de formas, el tamaño, el color, el rastro, localizar con
+;       Control y el espejo para zurdos.
+;    3  cambiarlos (los de ECX): solo el Panel de control (su sello) o el
+;       modo administrador. Se ponen al momento y se guardan.
+;    4  pintar un puntero en un mapa de puntos del programa (la vista previa
+;       del Panel): EDX apunta a un Pinta_puntero (la forma, el juego, el
+;       tamaño, el color, el espejo, el cuadro de la animación, el mapa —sus
+;       puntos, su salto, su ancho y su alto— y dónde va el punto activo).
+;       Da el ancho y el alto de lo pintado (el alto en los 16 bits de arriba).
+;    5  la forma que se ve ahora (para las pruebas y los programas que lo
+;       quieran saber).
+;
+;  Los ajustes se guardan por usuario: en PUNTERO.INI de sus ajustes
+;  (\USUARIOS\CARLOS\AJUSTES\PUNTERO.INI) o, sin usuarios, en \HISPA (sin
+;  instalar, en la raíz de la memoria). Solo lo escribe el núcleo (la zona
+;  protegida). Se leen al arrancar y al entrar cada usuario.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Apuntero
+
+    importar Tareas, Fat, Unidades, Ventanas, Cursores, Cuentas, Permisos, Grafico, Textos32, Formato, Consola
+
+    público tipo Ajustes_puntero = estructura
+        juego, tamaño, color, rastro, localizar, espejo: nat32
+    fin
+
+    público tipo Pinta_puntero = estructura
+        forma, juego, tamaño, color, espejo, cuadro: nat32
+        puntos: puntero a nat32
+        salto: nat32
+        ancho, alto: ent32
+        x, ye: ent32
+    fin
+
+    constante NO_VALE = 0xFFFFFFF9
+    constante DENEGADO = 0xFFFFFFF0
+
+    variable ruta: arreglo [160] de byte
+    variable texto: arreglo [512] de byte
+    variable renglón: arreglo [120] de byte
+
+    ; -------------------------------------------------------------------------
+    ;  Los ajustes
+    ; -------------------------------------------------------------------------
+    público función lee_ajustes_puntero(ref a: Ajustes_puntero)
+        a.juego := p_juego
+        a.tamaño := p_tamaño
+        a.color := p_color
+        a.rastro := 0
+        si p_rastro entonces a.rastro := 1 fin
+        a.localizar := 0
+        si p_localizar entonces a.localizar := 1 fin
+        a.espejo := 0
+        si p_espejo entonces a.espejo := 1 fin
+    fin
+
+    función valen(ref a: Ajustes_puntero): bool
+        devolver a.juego < N_JUEGOS y a.tamaño < N_TAMAÑOS y a.color < N_COLORES y a.rastro <= 1 y a.localizar <= 1 y a.espejo <= 1
+    fin
+
+    función pon(ref a: Ajustes_puntero)
+        p_juego := a.juego
+        p_tamaño := a.tamaño
+        p_color := a.color
+        p_rastro := a.rastro = 1
+        p_localizar := a.localizar = 1
+        p_espejo := a.espejo = 1
+    fin
+
+    ; los de siempre: la flecha clásica, normal, blanca, sin nada más
+    función de_siempre(ref a: Ajustes_puntero)
+        a.juego := J_CLÁSICA
+        a.tamaño := 0
+        a.color := C_BLANCO
+        a.rastro := 0
+        a.localizar := 0
+        a.espejo := 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  PUNTERO.INI
+    ; -------------------------------------------------------------------------
+    función pon_ruta()
+        si ajuste_de_sesión("PUNTERO.INI", ruta, 160) entonces devolver fin
+        si instalado() entonces copiar(ruta, "\\HISPA\\PUNTERO.INI") sino copiar(ruta, "\\PUNTERO.INI") fin
+    fin
+
+    función número_de(t: puntero a byte): nat32
+        variable n, i: nat32
+        n := 0
+        i := 0
+        mientras t[i] >= '0' y t[i] <= '9' y i < 6 hacer
+            n := n * 10 + (t[i] - '0')
+            i := i + 1
+        fin
+        devolver n
+    fin
+
+    ; lee los del que ha entrado (o los del equipo) y los pone; sin archivo,
+    ; los de siempre
+    público función lee_puntero()
+        variable a: Ajustes_puntero
+        variable m, n, i, j: nat32
+        de_siempre(a)
+        si del_sistema <> NINGUNA entonces
+            pon_ruta()
+            m := abrir_archivo(del_sistema, ruta, PARA_LEER)
+            si m < PRIMER_ERROR entonces
+                n := leer_archivo(m, texto, 511)
+                cerrar_archivo(m)
+                si n >= PRIMER_ERROR entonces n := 0 fin
+                texto[n] := 0
+                i := 0
+                mientras texto[i] <> 0 hacer
+                    j := 0
+                    mientras texto[i] <> 0 y texto[i] <> '\n' hacer
+                        si texto[i] <> '\r' y j < 119 entonces
+                            renglón[j] := texto[i]
+                            j := j + 1
+                        fin
+                        i := i + 1
+                    fin
+                    si texto[i] = '\n' entonces i := i + 1 fin
+                    renglón[j] := 0
+                    si empieza_por(renglón, "juego=") entonces a.juego := número_de(dirección(renglón[6])) fin
+                    si empieza_por(renglón, "tamano=") entonces a.tamaño := número_de(dirección(renglón[7])) fin
+                    si empieza_por(renglón, "color=") entonces a.color := número_de(dirección(renglón[6])) fin
+                    si empieza_por(renglón, "rastro=") entonces a.rastro := número_de(dirección(renglón[7])) fin
+                    si empieza_por(renglón, "localizar=") entonces a.localizar := número_de(dirección(renglón[10])) fin
+                    si empieza_por(renglón, "zurdo=") entonces a.espejo := número_de(dirección(renglón[6])) fin
+                fin
+                si no valen(a) entonces de_siempre(a) fin
+            fin
+        fin
+        pon(a)
+        tomar_consola()
+        imprimir("puntero: juego %u, tama\xA4o %u, color %u, rastro %u, localizar %u, zurdo %u\n", dirección(a.juego))
+        soltar_consola()
+    fin
+
+    público función guarda_puntero(): bool
+        variable a: Ajustes_puntero
+        variable m, n: nat32
+        si del_sistema = NINGUNA o no escribible(del_sistema) entonces devolver falso fin
+        lee_ajustes_puntero(a)
+        formatear(texto, 512, "; el puntero del rat\xA2n (Panel de control > Rat\xA2n > Puntero; lo escribe el n\xA3cleo)\r\njuego=%u\r\ntamano=%u\r\ncolor=%u\r\nrastro=%u\r\nlocalizar=%u\r\nzurdo=%u\r\n", dirección(a.juego))
+        pon_ruta()
+        m := abrir_archivo(del_sistema, ruta, PARA_CREAR)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        n := escribir_archivo(m, texto, longitud(texto))
+        cerrar_archivo(m)
+        devolver n = longitud(texto)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La llamada 177 (la memoria del programa ya la ha mirado usuario.cas)
+    ; -------------------------------------------------------------------------
+    público función atender_puntero(qué: nat32, a: nat32, b: nat32): nat32
+        variable z: puntero a Zona
+        variable aj: puntero a Ajustes_puntero
+        variable pp: puntero a Pinta_puntero
+        variable im: puntero a Imagen
+        variable l: Lienzo
+        según nat16(qué)
+            caso 0:
+                si pon_forma(a, actual.id, b) entonces devolver 0 fin
+                devolver NO_VALE
+            caso 1:
+                z := puntero(b)
+                si pon_zona_puntero(a, actual.id, valor(z)) entonces devolver 0 fin
+                devolver NO_VALE
+            caso 2:
+                aj := puntero(a)
+                lee_ajustes_puntero(valor(aj))
+                devolver 0
+            caso 3:
+                aj := puntero(a)
+                si no actual.admin y actual.sello <> SELLO_PANEL entonces
+                    imprimir1("permisos: acceso denegado a cambiar el puntero del rat\xA2n (%s)\n", nat32(actual.nombre))
+                    devolver DENEGADO
+                fin
+                si no valen(valor(aj)) entonces devolver NO_VALE fin
+                pon(valor(aj))
+                guarda_puntero()
+                imprimir("puntero: juego %u, tama\xA4o %u, color %u, rastro %u, localizar %u, zurdo %u (del Panel)\n", dirección(aj.juego))
+                devolver 0
+            caso 4:
+                pp := puntero(b)
+                si pp.forma >= N_FORMAS o pp.juego >= N_JUEGOS o pp.tamaño >= N_TAMAÑOS o pp.color >= N_COLORES entonces devolver NO_VALE fin
+                im := imagen_de(pp.forma, pp.juego, pp.tamaño, pp.espejo = 1, pp.cuadro yb 7)
+                si im = nulo entonces devolver NO_VALE fin
+                pon_lienzo(l, pp.puntos, pp.salto, pp.ancho, pp.alto)
+                pinta_imagen(l, pp.x, pp.ye, im, pp.color, 256)
+                devolver nat32(im.an) ob (nat32(im.al) << 16)
+            caso 5:
+                devolver forma_vista
+        fin
+        devolver NO_VALE
+    fin
+
+fin Apuntero.

@@ -1,0 +1,1000 @@
+; =============================================================================
+;  cursores.cas - (PUNTEROS) las formas del puntero del ratón de
+;  Hispa-Pentium: la flecha, la espera (animada), el texto, la mano, mover,
+;  cambiar el tamaño, la cruz, prohibido, la ayuda y la flecha con espera;
+;  en seis juegos («Clásica», «Moderna», «Gruesa», «Retro», «Mano» y «Mano
+;  en diagonal»), cuatro tamaños (1x, 1,5x, 2x y 3x), en espejo para los
+;  zurdos y de los colores del Panel de control.
+;
+;  Cada forma es un dibujo vectorial propio (no se copia de nadie): unos
+;  polígonos, discos, anillos y trazos redondos, medidos en décimas de punto
+;  del tamaño normal, con el punto activo en (0, 0). Para pintarla a un
+;  tamaño se pasa a puntos de la pantalla y se mide, en cada punto, la
+;  distancia con signo a la silueta (en 64 avos de punto): de ahí sale lo que
+;  cubre (el borde, suavizado) y lo que es relleno (lo que queda a más de un
+;  borde de la orilla), y la tinta de dentro (los dedos, la arena del reloj).
+;  Así sale nítida a cualquier tamaño (no se amplía a bloques); el juego
+;  «Retro» no suaviza (los puntos, enteros, como en 1990). Lo pintado se
+;  guarda en una caché de 24 (forma, juego, tamaño, espejo y cuadro de la
+;  animación): no se vuelve a medir mientras no cambie.
+;
+;  La flecha y las cuatro de cambiar el tamaño de la «Clásica» a 1x son las
+;  de siempre, punto a punto (las de antes de la 0.8.9).
+;
+;  Una imagen es, por punto, dos octetos: lo que cubre (0 a 255) y cuánto de
+;  eso es relleno (0, todo borde; 255, todo relleno). pinta_imagen() la pone
+;  en un lienzo con los colores elegidos (o «invertido»: el contrario de lo
+;  de debajo) y con su transparencia (el rastro).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Cursores
+
+    importar Monton, Grafico
+
+    ; ---- las formas (las mismas en ppuntero.cas y en so.h de la oficina) ----
+    público constante P_FLECHA = 0
+    público constante P_TAMAÑO_H = 1            ; cambiar el tamaño: de lado a lado
+    público constante P_TAMAÑO_V = 2            ; de arriba abajo
+    público constante P_TAMAÑO_D1 = 3           ; en diagonal: «\»
+    público constante P_TAMAÑO_D2 = 4           ; en diagonal: «/»
+    público constante P_ESPERA = 5              ; (animada)
+    público constante P_FLECHA_ESPERA = 6       ; la flecha con la espera al lado (animada)
+    público constante P_TEXTO = 7               ; la «I» de escribir
+    público constante P_MANO = 8                ; un enlace
+    público constante P_MOVER = 9               ; las cuatro flechas
+    público constante P_CRUZ = 10               ; la de precisión
+    público constante P_PROHIBIDO = 11
+    público constante P_AYUDA = 12              ; la flecha con «?»
+    público constante N_FORMAS = 13
+
+    ; ---- los juegos de formas ----
+    público constante J_CLÁSICA = 0
+    público constante J_MODERNA = 1
+    público constante J_GRUESA = 2
+    público constante J_RETRO = 3
+    público constante J_MANO = 4                ; la flecha es una mano con el dedo hacia arriba
+    público constante J_MANO_DIAGONAL = 5       ; la mano, con el dedo arriba a la izquierda (como una flecha)
+    público constante N_JUEGOS = 6
+
+    ; ---- los tamaños (en medios: 2, 3, 4 y 6) ----
+    público constante N_TAMAÑOS = 4
+
+    ; ---- los colores ----
+    público constante C_BLANCO = 0              ; el de siempre: blanco con el borde negro
+    público constante C_NEGRO = 1
+    público constante C_INVERTIDO = 2           ; el contrario de lo de debajo
+    público constante N_COLORES = 11
+
+    público tipo Imagen = estructura
+        usada: bool
+        clave: nat32
+        uso: nat32                              ; la última vez que se pidió (para echar la más vieja)
+        an, al: ent32
+        ox, oy: ent32                           ; dónde cae el punto activo, desde arriba a la izquierda
+        datos: puntero a byte                   ; an x al x 2: lo que cubre y lo que es relleno
+    fin
+
+    constante N_CACHÉ = 24
+    constante MAX_LADO = 128                    ; lo más que mide una imagen (a 3x, la más grande no llega a 100)
+    variable caché: arreglo [N_CACHÉ] de Imagen
+    variable usos: nat32
+    público variable medidas: nat32             ; las veces que se ha pintado una forma (no estaba en la caché)
+
+    ; ---- lo que se dibuja: las piezas, ya en 64 avos de punto ----
+    constante F = 64                            ; un punto
+    constante MEDIO = 32
+    constante LEJOS = 1000000
+    constante MAX_PIEZAS = 48
+    constante MAX_VÉRTICES = 256
+    constante K_POLÍGONO = 1
+    constante K_DISCO = 2
+    constante K_ANILLO = 3
+    constante K_TRAZO = 4
+    variable p_clase, p_tinta: arreglo [MAX_PIEZAS] de byte
+    variable p_a, p_b, p_c, p_d, p_r: arreglo [MAX_PIEZAS] de ent32
+    variable p_x0, p_y0, p_x1, p_y1: arreglo [MAX_PIEZAS] de ent32     ; lo que ocupa (con un punto de más)
+    variable p_v0, p_nv: arreglo [MAX_PIEZAS] de ent32
+    variable vx, vy, vl: arreglo [MAX_VÉRTICES] de ent32               ; vl: lo que mide el lado que empieza ahí
+    variable n_piezas, n_vért, v_empieza: ent32
+
+    ; ---- cómo se pone lo dibujado: escala, giro, sitio y espejo ----
+    variable t_esc: ent32 = 1000                ; en milésimas
+    variable t_giro: nat32                      ; 0; 1, 45 grados a la derecha; 2, a la izquierda
+    variable t_dx, t_dy: ent32                  ; en décimas, después de escalar y girar
+    variable t_espejo: bool
+    variable t_tinta: bool                      ; lo que sigue es tinta (dentro), no silueta
+    variable medios: ent32 = 2                  ; el tamaño, en medios
+    variable rx, ry: ent32                      ; lo que da transforma()
+
+    ; ---- las formas de siempre (la «Clásica» a 1x): X, el borde; o, el relleno ----
+    variable flecha_h: arreglo [210] de byte = "                      XXX       XXX     XXoX       XoXX   XXooX       XooXX  XoooXXXXXXXXXoooX  XoooooooooooooooX  XoooXXXXXXXXXoooX  XXooX       XooXX   XXoX       XoXX     XXX       XXX                      "
+    variable flecha_v: arreglo [210] de byte = "              XXXXX     XXoooXX   XXoooooXX  XoooooooX  XXXXoXXXX     XoX        XoX        XoX        XoX        XoX        XoX        XoX     XXXXoXXXX  XoooooooX  XXoooooXX   XXoooXX     XXXXX              "
+    variable flecha_d1: arreglo [226] de byte = "                XXXXXXX        XoooooX        XooooXX        XoooXX         XooXoXX        XoXXXoXX       XXX XXoXX XXX       XXoXXXoX        XXoXooX         XXoooX        XXooooX        XoooooX        XXXXXXX                "
+    variable flecha_d2: arreglo [226] de byte = "                      XXXXXXX        XoooooX        XXooooX         XXoooX        XXoXooX       XXoXXXoX  XXX XXoXX XXX  XoXXXoXX       XooXoXX        XoooXX         XooooXX        XoooooX        XXXXXXX                      "
+    variable flecha: arreglo [232] de byte = "X           XX          XoX         XooX        XoooX       XooooX      XoooooX     XooooooX    XoooooooX   XooooooooX  XoooooooooX XooooooXXXXXXoooXooX    XooX XooX   XoX  XooX   XX    XooX  X     XooX         XooX        XXX  "
+
+    ; -------------------------------------------------------------------------
+    ;  Cuentas
+    ; -------------------------------------------------------------------------
+    función raíz_c(n: nat32): nat32
+        variable r, b: nat32
+        r := 0
+        b := nat32(1) << 30
+        mientras b > n hacer b := b >> 2 fin
+        mientras b <> 0 hacer
+            si n >= r + b entonces
+                n := n - r - b
+                r := (r >> 1) + b
+            sino
+                r := r >> 1
+            fin
+            b := b >> 2
+        fin
+        devolver r
+    fin
+
+    función absoluto(n: ent32): ent32
+        si n < 0 entonces devolver -n fin
+        devolver n
+    fin
+
+    función menor_c(a: ent32, b: ent32): ent32
+        si a < b entonces devolver a fin
+        devolver b
+    fin
+
+    función mayor_c(a: ent32, b: ent32): ent32
+        si a > b entonces devolver a fin
+        devolver b
+    fin
+
+    ; la distancia de (x, yy) al punto (a, b)
+    función dist_a(x: ent32, yy: ent32, a: ent32, b: ent32): ent32
+        variable dx, dy: ent32
+        dx := x - a
+        dy := yy - b
+        si dx > 30000 o dx < -30000 o dy > 30000 o dy < -30000 entonces devolver LEJOS fin
+        devolver ent32(raíz_c(nat32(dx * dx + dy * dy)))
+    fin
+
+    ; la distancia de (x, yy) al segmento (ax, ay)-(bx, by), que mide «l»
+    función a_segmento(x: ent32, yy: ent32, ax: ent32, ay: ent32, bx: ent32, by: ent32, l: ent32): ent32
+        variable dx, dy, px, py, t, l2, cr: ent32
+        dx := bx - ax
+        dy := by - ay
+        px := x - ax
+        py := yy - ay
+        l2 := dx * dx + dy * dy
+        t := px * dx + py * dy
+        si t <= 0 o l <= 0 entonces devolver dist_a(x, yy, ax, ay) fin
+        si t >= l2 entonces devolver dist_a(x, yy, bx, by) fin
+        cr := px * dy - py * dx
+        devolver absoluto(cr) div l
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Dibujar: las piezas
+    ; -------------------------------------------------------------------------
+    ; de décimas del dibujo (con la escala, el giro, el sitio y el espejo) a
+    ; 64 avos de punto de la pantalla (el punto activo, en el centro del 0)
+    función transforma(x: ent32, yy: ent32)
+        variable a, b, c: ent32
+        a := x * t_esc div 1000
+        b := yy * t_esc div 1000
+        si t_giro = 1 entonces
+            c := (a * 724 - b * 724) div 1024
+            b := (a * 724 + b * 724) div 1024
+            a := c
+        sino si t_giro = 2 entonces
+            c := (a * 724 + b * 724) div 1024
+            b := (b * 724 - a * 724) div 1024
+            a := c
+        fin
+        a := a + t_dx
+        b := b + t_dy
+        si t_espejo entonces a := -a fin
+        rx := a * medios * 16 div 5 + MEDIO
+        ry := b * medios * 16 div 5 + MEDIO
+    fin
+
+    función radio_de(r: ent32): ent32
+        devolver r * t_esc div 1000 * medios * 16 div 5
+    fin
+
+    función nueva_pieza(k: nat32): ent32
+        variable i: ent32
+        si n_piezas >= MAX_PIEZAS entonces devolver -1 fin
+        i := n_piezas
+        n_piezas := n_piezas + 1
+        p_clase[i] := byte(k)
+        p_tinta[i] := 0
+        si t_tinta entonces p_tinta[i] := 1 fin
+        devolver i
+    fin
+
+    función caja_pieza(i: ent32, x0: ent32, y0: ent32, x1: ent32, y1: ent32)
+        p_x0[i] := x0 - F
+        p_y0[i] := y0 - F
+        p_x1[i] := x1 + F
+        p_y1[i] := y1 + F
+    fin
+
+    función disco(x: ent32, yy: ent32, r: ent32)
+        variable i: ent32
+        i := nueva_pieza(K_DISCO)
+        si i < 0 entonces devolver fin
+        transforma(x, yy)
+        p_a[i] := rx
+        p_b[i] := ry
+        p_r[i] := radio_de(r)
+        caja_pieza(i, rx - p_r[i], ry - p_r[i], rx + p_r[i], ry + p_r[i])
+    fin
+
+    ; un anillo de radio r (por el medio) y grosor 2g
+    función anillo(x: ent32, yy: ent32, r: ent32, g: ent32)
+        variable i, q: ent32
+        i := nueva_pieza(K_ANILLO)
+        si i < 0 entonces devolver fin
+        transforma(x, yy)
+        p_a[i] := rx
+        p_b[i] := ry
+        p_c[i] := radio_de(r)
+        p_r[i] := radio_de(g)
+        q := p_c[i] + p_r[i]
+        caja_pieza(i, rx - q, ry - q, rx + q, ry + q)
+    fin
+
+    ; un trazo de (x1, y1) a (x2, y2), redondo, de radio r
+    función trazo(x1: ent32, y1: ent32, x2: ent32, y2: ent32, r: ent32)
+        variable i, q: ent32
+        i := nueva_pieza(K_TRAZO)
+        si i < 0 entonces devolver fin
+        transforma(x1, y1)
+        p_a[i] := rx
+        p_b[i] := ry
+        transforma(x2, y2)
+        p_c[i] := rx
+        p_d[i] := ry
+        p_r[i] := radio_de(r)
+        q := p_r[i]
+        caja_pieza(i, menor_c(p_a[i], p_c[i]) - q, menor_c(p_b[i], p_d[i]) - q, mayor_c(p_a[i], p_c[i]) + q, mayor_c(p_b[i], p_d[i]) + q)
+        p_v0[i] := ent32(raíz_c(nat32((p_c[i] - p_a[i]) * (p_c[i] - p_a[i]) + (p_d[i] - p_b[i]) * (p_d[i] - p_b[i]))))
+    fin
+
+    ; un polígono: polígono(), sus vértices con v() y cierra()
+    función polígono()
+        v_empieza := n_vért
+    fin
+
+    función v(x: ent32, yy: ent32)
+        si n_vért >= MAX_VÉRTICES entonces devolver fin
+        transforma(x, yy)
+        vx[n_vért] := rx
+        vy[n_vért] := ry
+        n_vért := n_vért + 1
+    fin
+
+    función cierra()
+        variable i, k, j, x0, y0, x1, y1: ent32
+        i := nueva_pieza(K_POLÍGONO)
+        si i < 0 o n_vért - v_empieza < 3 entonces
+            n_vért := v_empieza
+            si i >= 0 entonces n_piezas := n_piezas - 1 fin
+            devolver
+        fin
+        p_v0[i] := v_empieza
+        p_nv[i] := n_vért - v_empieza
+        x0 := LEJOS
+        y0 := LEJOS
+        x1 := -LEJOS
+        y1 := -LEJOS
+        para k desde v_empieza hasta n_vért - 1 hacer
+            j := k + 1
+            si j = n_vért entonces j := v_empieza fin
+            vl[k] := ent32(raíz_c(nat32((vx[j] - vx[k]) * (vx[j] - vx[k]) + (vy[j] - vy[k]) * (vy[j] - vy[k]))))
+            x0 := menor_c(x0, vx[k])
+            y0 := menor_c(y0, vy[k])
+            x1 := mayor_c(x1, vx[k])
+            y1 := mayor_c(y1, vy[k])
+        fin
+        caja_pieza(i, x0, y0, x1, y1)
+    fin
+
+    ; la distancia con signo (negativa dentro) del punto a la pieza i
+    función distancia(i: ent32, x: ent32, yy: ent32): ent32
+        variable d, k, j, n, v0, e: ent32
+        variable dentro: bool
+        si x < p_x0[i] o x > p_x1[i] o yy < p_y0[i] o yy > p_y1[i] entonces devolver LEJOS fin
+        según nat16(p_clase[i])
+            caso K_DISCO: devolver dist_a(x, yy, p_a[i], p_b[i]) - p_r[i]
+            caso K_ANILLO: devolver absoluto(dist_a(x, yy, p_a[i], p_b[i]) - p_c[i]) - p_r[i]
+            caso K_TRAZO: devolver a_segmento(x, yy, p_a[i], p_b[i], p_c[i], p_d[i], p_v0[i]) - p_r[i]
+        fin
+        ; un polígono: lo más cerca de sus lados, y dentro si se cruza un
+        ; número impar de ellos hacia la derecha
+        v0 := p_v0[i]
+        n := p_nv[i]
+        d := LEJOS
+        dentro := falso
+        para k desde v0 hasta v0 + n - 1 hacer
+            j := k + 1
+            si j = v0 + n entonces j := v0 fin
+            e := a_segmento(x, yy, vx[k], vy[k], vx[j], vy[j], vl[k])
+            si e < d entonces d := e fin
+            si (vy[k] > yy) <> (vy[j] > yy) entonces
+                si x < vx[k] + (yy - vy[k]) * (vx[j] - vx[k]) div (vy[j] - vy[k]) entonces dentro := no dentro fin
+            fin
+        fin
+        si dentro entonces devolver -d fin
+        devolver d
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Las formas, en décimas de punto (el tamaño normal), con el punto
+    ;  activo en (0, 0)
+    ; -------------------------------------------------------------------------
+    función flecha_clásica()
+        polígono()
+        v(-3, -3)
+        v(-3, 172)
+        v(42, 130)
+        v(76, 193)
+        v(108, 178)
+        v(75, 118)
+        v(124, 118)
+        cierra()
+    fin
+
+    ; una punta de flecha sin cola, con la base hacia dentro
+    función flecha_moderna()
+        polígono()
+        v(-4, -4)
+        v(-4, 178)
+        v(46, 136)
+        v(126, 130)
+        cierra()
+    fin
+
+    ; la de 1990: lados rectos, puntos enteros
+    función flecha_retro()
+        polígono()
+        v(-5, -5)
+        v(-5, 155)
+        v(35, 115)
+        v(65, 175)
+        v(95, 165)
+        v(65, 105)
+        v(115, 105)
+        cierra()
+    fin
+
+    ; la mano con el dedo índice hacia arriba (la punta, en el punto activo)
+    función mano_arriba()
+        trazo(0, 22, 0, 95, 22)                 ; el índice
+        trazo(42, 84, 42, 112, 20)              ; los otros tres, doblados
+        trazo(79, 92, 79, 116, 19)
+        trazo(112, 102, 112, 124, 17)
+        polígono()                              ; la palma
+        v(-22, 96)
+        v(129, 106)
+        v(129, 150)
+        v(106, 196)
+        v(6, 196)
+        v(-22, 160)
+        cierra()
+        trazo(-20, 152, -56, 112, 18)           ; el pulgar
+        t_tinta := cierto                       ; las rayas entre los dedos
+        trazo(21, 92, 21, 120, 4)
+        trazo(61, 100, 61, 124, 4)
+        trazo(96, 108, 96, 128, 4)
+        trazo(-14, 150, -40, 122, 4)
+        t_tinta := falso
+    fin
+
+    ; la mano de un enlace en los juegos de la mano: con su destello
+    función mano_destello()
+        mano_arriba()
+        trazo(-32, -6, -58, -28, 9)
+        trazo(32, -6, 58, -28, 9)
+        trazo(36, 20, 68, 20, 9)
+    fin
+
+    ; la flecha del juego (la mano, en los de la mano)
+    función flecha_de(j: nat32)
+        según nat16(j)
+            caso J_MODERNA: flecha_moderna()
+            caso J_RETRO: flecha_retro()
+            caso J_MANO: mano_arriba()
+            caso J_MANO_DIAGONAL:
+                t_giro := 2
+                mano_arriba()
+                t_giro := 0
+            si no: flecha_clásica()
+        fin
+    fin
+
+    ; el reloj de arena, con la arena según el cuadro (0 a 7)
+    función reloj(k: ent32)
+        variable n, hw: ent32
+        trazo(-60, -95, 60, -95, 14)
+        trazo(-60, 95, 60, 95, 14)
+        polígono()
+        v(-52, -90)
+        v(52, -90)
+        v(52, -62)
+        v(14, 0)
+        v(52, 62)
+        v(52, 90)
+        v(-52, 90)
+        v(-52, 62)
+        v(-14, 0)
+        v(-52, -62)
+        cierra()
+        t_tinta := cierto
+        si k < 7 entonces
+            n := -58 + k * 8
+            hw := 14 + 38 * (-n) div 62 - 12
+            si hw > 2 entonces
+                polígono()
+                v(-hw, n)
+                v(hw, n)
+                v(0, -8)
+                cierra()
+            fin
+            trazo(0, -6, 0, 76, 3)
+        fin
+        polígono()
+        v(-38, 82)
+        v(38, 82)
+        v(0, 74 - (k + 1) * 8)
+        cierra()
+        t_tinta := falso
+    fin
+
+    variable rueda_x: arreglo [8] de ent32 = (0, 51, 72, 51, 0, -51, -72, -51)
+    variable rueda_y: arreglo [8] de ent32 = (-72, -51, 0, 51, 72, 51, 0, -51)
+
+    ; el círculo que da vueltas: un anillo con tres puntos que corren
+    función rueda(k: ent32)
+        variable i, m, r: ent32
+        anillo(0, 0, 72, 24)
+        t_tinta := cierto
+        para i desde 0 hasta 2 hacer
+            m := (k - i + 8) mod 8
+            r := 15 - i * 3
+            disco(rueda_x[m], rueda_y[m], r)
+        fin
+        t_tinta := falso
+    fin
+
+    función espera_de(j: nat32, k: ent32)
+        si j = J_MODERNA o j = J_MANO o j = J_MANO_DIAGONAL entonces rueda(k) sino reloj(k) fin
+    fin
+
+    función interrogación()
+        trazo(-30, -35, -22, -52, 13)
+        trazo(-22, -52, -5, -60, 13)
+        trazo(-5, -60, 15, -57, 13)
+        trazo(15, -57, 29, -44, 13)
+        trazo(29, -44, 29, -27, 13)
+        trazo(29, -27, 16, -14, 13)
+        trazo(16, -14, 0, -4, 13)
+        trazo(0, -4, 0, 12, 13)
+        disco(0, 40, 15)
+    fin
+
+    ; una flecha de dos puntas de lado a lado (la de cambiar el tamaño)
+    función doble_h()
+        trazo(-75, 0, 75, 0, 15)
+        polígono()
+        v(112, 0)
+        v(60, -46)
+        v(60, 46)
+        cierra()
+        polígono()
+        v(-112, 0)
+        v(-60, 46)
+        v(-60, -46)
+        cierra()
+    fin
+
+    función doble_v()
+        trazo(0, -75, 0, 75, 15)
+        polígono()
+        v(0, 112)
+        v(46, 60)
+        v(-46, 60)
+        cierra()
+        polígono()
+        v(0, -112)
+        v(-46, -60)
+        v(46, -60)
+        cierra()
+    fin
+
+    función mover()
+        trazo(-80, 0, 80, 0, 15)
+        trazo(0, -80, 0, 80, 15)
+        polígono()
+        v(122, 0)
+        v(72, -42)
+        v(72, 42)
+        cierra()
+        polígono()
+        v(-122, 0)
+        v(-72, 42)
+        v(-72, -42)
+        cierra()
+        polígono()
+        v(0, 122)
+        v(42, 72)
+        v(-42, 72)
+        cierra()
+        polígono()
+        v(0, -122)
+        v(-42, -72)
+        v(42, -72)
+        cierra()
+    fin
+
+    función texto_i(j: nat32)
+        trazo(0, -82, 0, 82, 10)
+        si j = J_MODERNA entonces
+            trazo(-32, -98, 0, -84, 10)
+            trazo(32, -98, 0, -84, 10)
+            trazo(-32, 98, 0, 84, 10)
+            trazo(32, 98, 0, 84, 10)
+        sino
+            trazo(-30, -90, 30, -90, 10)
+            trazo(-30, 90, 30, 90, 10)
+        fin
+    fin
+
+    función cruz()
+        trazo(-96, 0, -30, 0, 9)
+        trazo(30, 0, 96, 0, 9)
+        trazo(0, -96, 0, -30, 9)
+        trazo(0, 30, 0, 96, 9)
+        disco(0, 0, 10)
+    fin
+
+    función prohibido()
+        anillo(0, 0, 74, 18)
+        trazo(-52, -52, 52, 52, 15)
+    fin
+
+    ; un añadido (la espera, el «?») al lado de la flecha, sin espejo y del
+    ; lado que toca
+    función al_lado(j: nat32, ox: ent32, oy: ent32, esc: ent32)
+        variable esp: bool
+        variable e: ent32
+        esp := t_espejo
+        e := t_esc
+        t_espejo := falso
+        t_esc := e * esc div 1000
+        t_dx := ox
+        si esp entonces t_dx := -ox fin
+        t_dy := oy
+    fin
+
+    función deja_lado(esp: bool, e: ent32)
+        t_espejo := esp
+        t_esc := e
+        t_dx := 0
+        t_dy := 0
+    fin
+
+    ; dónde va el añadido de cada juego (en décimas, desde el punto activo):
+    ; la espera (e) o el «?» (a esp = falso); x e y
+    función sitio_de(j: nat32, espera: bool, eje_x: bool): ent32
+        si j = J_MANO entonces
+            si espera entonces
+                si eje_x entonces devolver 168 fin
+                devolver 196
+            fin
+            si eje_x entonces devolver 172 fin
+            devolver 62
+        fin
+        si j = J_MANO_DIAGONAL entonces
+            si espera entonces
+                si eje_x entonces devolver 205 fin
+                devolver 185
+            fin
+            si eje_x entonces devolver 62 fin
+            devolver 232
+        fin
+        si espera entonces
+            si eje_x entonces devolver 168 fin
+            devolver 152
+        fin
+        si eje_x entonces devolver 152 fin
+        devolver 70
+    fin
+
+    ; dibuja la forma f del juego j (cuadro k de la animación)
+    función dibuja(f: nat32, j: nat32, k: ent32)
+        variable esp: bool
+        variable e: ent32
+        esp := t_espejo
+        e := t_esc
+        según nat16(f)
+            caso P_TAMAÑO_H: doble_h()
+            caso P_TAMAÑO_V: doble_v()
+            caso P_TAMAÑO_D1:
+                t_giro := 1
+                doble_h()
+            caso P_TAMAÑO_D2:
+                t_giro := 2
+                doble_h()
+            caso P_ESPERA: espera_de(j, k)
+            caso P_FLECHA_ESPERA:
+                flecha_de(j)
+                t_giro := 0
+                al_lado(j, sitio_de(j, cierto, cierto), sitio_de(j, cierto, falso), 600)
+                espera_de(j, k)
+                deja_lado(esp, e)
+            caso P_TEXTO: texto_i(j)
+            caso P_MANO:
+                si j = J_MANO o j = J_MANO_DIAGONAL entonces mano_destello() sino mano_arriba() fin
+            caso P_MOVER: mover()
+            caso P_CRUZ: cruz()
+            caso P_PROHIBIDO: prohibido()
+            caso P_AYUDA:
+                flecha_de(j)
+                t_giro := 0
+                al_lado(j, sitio_de(j, falso, cierto), sitio_de(j, falso, falso), 1000)
+                interrogación()
+                deja_lado(esp, e)
+            si no: flecha_de(j)
+        fin
+        t_giro := 0
+    fin
+
+    ; ¿se pone en espejo para los zurdos? (las que apuntan a un lado)
+    público función de_lado(f: nat32): bool
+        devolver f = P_FLECHA o f = P_FLECHA_ESPERA o f = P_AYUDA o f = P_MANO
+    fin
+
+    ; ¿se mueve sola?
+    público función animada(f: nat32): bool
+        devolver f = P_ESPERA o f = P_FLECHA_ESPERA
+    fin
+
+    ; lo que se ve como medio grosor del borde, en décimas
+    función borde_de(j: nat32): ent32
+        si j = J_GRUESA entonces devolver 21 fin
+        si j = J_MODERNA entonces devolver 11 fin
+        devolver 10
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Pintar una imagen
+    ; -------------------------------------------------------------------------
+    función cubre(d: ent32, duro: bool): ent32
+        si duro entonces
+            si d < 0 entonces devolver 255 fin
+            devolver 0
+        fin
+        d := MEDIO - d
+        si d <= 0 entonces devolver 0 fin
+        si d >= F entonces devolver 255 fin
+        devolver d * 255 div F
+    fin
+
+    ; la de siempre, del dibujo de X y o (con espejo, de derecha a izquierda)
+    función de_mapa(ref im: Imagen, p: puntero a byte, an: ent32, al: ent32, centro: bool, esp: bool): bool
+        variable i, j, q: ent32
+        variable c: byte
+        im.datos := reservar(nat32(an * al * 2))
+        si im.datos = nulo entonces devolver falso fin
+        im.an := an
+        im.al := al
+        im.ox := 0
+        im.oy := 0
+        si esp entonces im.ox := an - 1 fin
+        si centro entonces
+            im.ox := an div 2
+            im.oy := al div 2
+        fin
+        para j desde 0 hasta al - 1 hacer
+            para i desde 0 hasta an - 1 hacer
+                q := i
+                si esp entonces q := an - 1 - i fin
+                c := p[j * an + q]
+                im.datos[(j * an + i) * 2] := 0
+                im.datos[(j * an + i) * 2 + 1] := 0
+                si c = 'X' entonces im.datos[(j * an + i) * 2] := 255 fin
+                si c = 'o' entonces
+                    im.datos[(j * an + i) * 2] := 255
+                    im.datos[(j * an + i) * 2 + 1] := 255
+                fin
+            fin
+        fin
+        devolver cierto
+    fin
+
+    ; mide la forma y la pinta en la imagen
+    función mide(ref im: Imagen, f: nat32, j: nat32, t: nat32, esp: bool, k: ent32): bool
+        variable x0, y0, x1, y1, i, jj, q, an, al, x, yy, dc, dt, d, w, a_fuera, a_dentro, a_tinta, rel: ent32
+        variable duro: bool
+        medidas := medidas + 1
+        ; las de siempre, punto a punto
+        si j = J_CLÁSICA y t = 0 entonces
+            según nat16(f)
+                caso P_FLECHA: devolver de_mapa(im, dirección(flecha[0]), 12, 19, falso, esp)
+                caso P_TAMAÑO_H: devolver de_mapa(im, dirección(flecha_h[0]), 19, 11, cierto, falso)
+                caso P_TAMAÑO_V: devolver de_mapa(im, dirección(flecha_v[0]), 11, 19, cierto, falso)
+                caso P_TAMAÑO_D1: devolver de_mapa(im, dirección(flecha_d1[0]), 15, 15, cierto, falso)
+                caso P_TAMAÑO_D2: devolver de_mapa(im, dirección(flecha_d2[0]), 15, 15, cierto, falso)
+            fin
+        fin
+        según nat16(t)
+            caso 1: medios := 3
+            caso 2: medios := 4
+            caso 3: medios := 6
+            si no: medios := 2
+        fin
+        n_piezas := 0
+        n_vért := 0
+        t_esc := 1000
+        si j = J_GRUESA entonces t_esc := 1250 fin
+        t_giro := 0
+        t_dx := 0
+        t_dy := 0
+        t_espejo := esp
+        t_tinta := falso
+        dibuja(f, j, k)
+        t_espejo := falso
+        si n_piezas = 0 entonces devolver falso fin
+        duro := j = J_RETRO
+        w := borde_de(j) * medios * 16 div 5
+        si duro entonces w := (medios div 2) * F fin
+        ; lo que ocupa
+        x0 := LEJOS
+        y0 := LEJOS
+        x1 := -LEJOS
+        y1 := -LEJOS
+        para q desde 0 hasta n_piezas - 1 hacer
+            si p_tinta[q] = 0 entonces
+                x0 := menor_c(x0, p_x0[q])
+                y0 := menor_c(y0, p_y0[q])
+                x1 := mayor_c(x1, p_x1[q])
+                y1 := mayor_c(y1, p_y1[q])
+            fin
+        fin
+        ; en puntos (redondeando hacia abajo también los negativos)
+        x0 := (x0 + 64 * F) div F - 64
+        y0 := (y0 + 64 * F) div F - 64
+        x1 := (x1 + 64 * F) div F - 64
+        y1 := (y1 + 64 * F) div F - 64
+        an := x1 - x0 + 1
+        al := y1 - y0 + 1
+        si an > MAX_LADO entonces an := MAX_LADO fin
+        si al > MAX_LADO entonces al := MAX_LADO fin
+        im.datos := reservar(nat32(an * al * 2))
+        si im.datos = nulo entonces devolver falso fin
+        im.an := an
+        im.al := al
+        im.ox := -x0
+        im.oy := -y0
+        para jj desde 0 hasta al - 1 hacer
+            yy := (y0 + jj) * F + MEDIO
+            para i desde 0 hasta an - 1 hacer
+                x := (x0 + i) * F + MEDIO
+                dc := LEJOS
+                dt := LEJOS
+                para q desde 0 hasta n_piezas - 1 hacer
+                    d := distancia(q, x, yy)
+                    si p_tinta[q] = 0 entonces
+                        si d < dc entonces dc := d fin
+                    sino
+                        si d < dt entonces dt := d fin
+                    fin
+                fin
+                a_fuera := cubre(dc, duro)
+                a_dentro := cubre(dc + w, duro)
+                a_tinta := cubre(dt, duro)
+                rel := 0
+                si a_fuera > 0 entonces
+                    rel := a_dentro * (255 - a_tinta) div 255
+                    rel := rel * 255 div a_fuera
+                    si rel > 255 entonces rel := 255 fin
+                fin
+                im.datos[(jj * an + i) * 2] := byte(a_fuera)
+                im.datos[(jj * an + i) * 2 + 1] := byte(rel)
+            fin
+        fin
+        devolver cierto
+    fin
+
+    ; la imagen de esa forma (de la caché, o pintada ahora); nulo si no hay
+    ; memoria. «k» es el cuadro de la animación (0 a 7; las que no se mueven,
+    ; 0)
+    público función imagen_de(f: nat32, j: nat32, t: nat32, esp: bool, k: nat32): puntero a Imagen
+        variable clave: nat32
+        variable i, viejo: ent32
+        si f >= N_FORMAS entonces f := P_FLECHA fin
+        si j >= N_JUEGOS entonces j := J_CLÁSICA fin
+        si t >= N_TAMAÑOS entonces t := 0 fin
+        si no animada(f) entonces k := 0 fin
+        si no de_lado(f) entonces esp := falso fin
+        clave := f ob (j << 4) ob (t << 8) ob ((k yb 7) << 12)
+        si esp entonces clave := clave ob 0x10000 fin
+        usos := usos + 1
+        viejo := 0
+        para i desde 0 hasta N_CACHÉ - 1 hacer
+            si caché[i].usada y caché[i].clave = clave entonces
+                caché[i].uso := usos
+                devolver dirección(caché[i])
+            fin
+            si no caché[i].usada entonces
+                viejo := i
+            sino si caché[viejo].usada y caché[i].uso < caché[viejo].uso entonces
+                viejo := i
+            fin
+        fin
+        si caché[viejo].usada entonces
+            liberar(caché[viejo].datos)
+            caché[viejo].usada := falso
+        fin
+        si no mide(caché[viejo], f, j, t, esp, ent32(k)) entonces devolver nulo fin
+        caché[viejo].usada := cierto
+        caché[viejo].clave := clave
+        caché[viejo].uso := usos
+        devolver dirección(caché[viejo])
+    fin
+
+    público función nombre_forma(f: nat32): puntero a byte
+        según nat16(f)
+            caso P_FLECHA: devolver "la flecha"
+            caso P_TAMAÑO_H: devolver "cambiar el tama\xA4o, de lado a lado"
+            caso P_TAMAÑO_V: devolver "cambiar el tama\xA4o, de arriba abajo"
+            caso P_TAMAÑO_D1: devolver "cambiar el tama\xA4o, en diagonal \\"
+            caso P_TAMAÑO_D2: devolver "cambiar el tama\xA4o, en diagonal /"
+            caso P_ESPERA: devolver "la espera"
+            caso P_FLECHA_ESPERA: devolver "la flecha con la espera"
+            caso P_TEXTO: devolver "el texto"
+            caso P_MANO: devolver "la mano"
+            caso P_MOVER: devolver "mover"
+            caso P_CRUZ: devolver "la cruz"
+            caso P_PROHIBIDO: devolver "prohibido"
+            caso P_AYUDA: devolver "la ayuda"
+        fin
+        devolver "?"
+    fin
+
+    público función nombre_juego(j: nat32): puntero a byte
+        según nat16(j)
+            caso J_MODERNA: devolver "Moderna"
+            caso J_GRUESA: devolver "Gruesa"
+            caso J_RETRO: devolver "Retro (1990)"
+            caso J_MANO: devolver "Mano (el dedo hacia arriba)"
+            caso J_MANO_DIAGONAL: devolver "Mano (el dedo en diagonal)"
+        fin
+        devolver "Cl\xA0sica"
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los colores
+    ; -------------------------------------------------------------------------
+    público función nombre_color(c: nat32): puntero a byte
+        según nat16(c)
+            caso 0: devolver "Blanco (borde negro)"
+            caso 1: devolver "Negro (borde blanco)"
+            caso 2: devolver "Invertido (contrario al fondo)"
+            caso 3: devolver "Amarillo"
+            caso 4: devolver "Verde lima"
+            caso 5: devolver "Rojo"
+            caso 6: devolver "Azul"
+            caso 7: devolver "Naranja"
+            caso 8: devolver "Rosa"
+            caso 9: devolver "Morado"
+            caso 10: devolver "Cian"
+        fin
+        devolver "?"
+    fin
+
+    público función relleno_de(c: nat32): nat32
+        según nat16(c)
+            caso 1: devolver 0x101010
+            caso 3: devolver 0xFFE600
+            caso 4: devolver 0x7CFC00
+            caso 5: devolver 0xE01B1B
+            caso 6: devolver 0x1E5AE6
+            caso 7: devolver 0xFF8C00
+            caso 8: devolver 0xFF5FC0
+            caso 9: devolver 0x8A2BE2
+            caso 10: devolver 0x00D8FF
+        fin
+        devolver 0xFFFFFF
+    fin
+
+    ; el borde: el que más se distingue del relleno
+    público función borde_color(c: nat32): nat32
+        según nat16(c)
+            caso 1, 5, 6, 9: devolver 0xFFFFFF
+            caso 3, 4, 7, 8, 10: devolver 0x000000
+        fin
+        devolver 0x10233F                       ; el de siempre
+    fin
+
+    función luz(c: nat32): nat32
+        devolver (((c >> 16) yb 255) * 77 + ((c >> 8) yb 255) * 150 + (c yb 255) * 29) >> 8
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Poner una imagen en un lienzo
+    ; -------------------------------------------------------------------------
+    ; con su punto activo en (x, yy), del color c y con la transparencia alfa
+    ; (256: entera)
+    público función pinta_imagen(ref l: Lienzo, x: ent32, yy: ent32, im: puntero a Imagen, c: nat32, alfa: nat32)
+        variable i, j, px, py, i0, i1, j0, j1: ent32
+        variable a, f, fondo, rel, bor, col: nat32
+        variable p: puntero a nat32
+        si im = nulo entonces devolver fin
+        px := x - im.ox
+        py := yy - im.oy
+        i0 := mayor_c(0, -px)
+        j0 := mayor_c(0, -py)
+        i1 := menor_c(im.an, l.ancho - px)
+        j1 := menor_c(im.al, l.alto - py)
+        rel := relleno_de(c)
+        bor := borde_color(c)
+        si j0 >= j1 o i0 >= i1 entonces devolver fin
+        para j desde j0 hasta j1 - 1 hacer
+            p := l.puntos + ((py + j) * ent32(l.salto) + px)
+            para i desde i0 hasta i1 - 1 hacer
+                a := im.datos[(j * im.an + i) * 2]
+                si a <> 0 entonces
+                    f := im.datos[(j * im.an + i) * 2 + 1]
+                    fondo := p[i] yb 0xFFFFFF
+                    si c = C_INVERTIDO entonces
+                        rel := fondo xob 0xFFFFFF
+                        ; en un gris medio, el contrario se parece mucho: blanco o negro
+                        si luz(rel) > luz(fondo) y luz(rel) - luz(fondo) < 110 entonces rel := 0xFFFFFF fin
+                        si luz(fondo) >= luz(rel) y luz(fondo) - luz(rel) < 110 entonces rel := 0x000000 fin
+                        si luz(rel) >= 128 entonces bor := 0x000000 sino bor := 0xFFFFFF fin
+                    fin
+                    col := mezcla(bor, rel, f + (f >> 7))
+                    a := (a * alfa) >> 8
+                    p[i] := mezcla(fondo, col, a + (a >> 7))
+                fin
+            fin
+        fin
+    fin
+
+    ; (localizar el puntero) dos anillos, blanco con borde oscuro, de radio r
+    ; alrededor de (cx, cy)
+    público función pinta_anillos(ref l: Lienzo, cx: ent32, cy: ent32, r: ent32, grueso: ent32)
+        variable i, j, d, e, x0, y0, x1, y1, k: ent32
+        variable p: puntero a nat32
+        variable q: nat32
+        x0 := mayor_c(0, cx - r - grueso - 2)
+        y0 := mayor_c(0, cy - r - grueso - 2)
+        x1 := menor_c(l.ancho - 1, cx + r + grueso + 2)
+        y1 := menor_c(l.alto - 1, cy + r + grueso + 2)
+        si x1 < x0 o y1 < y0 entonces devolver fin
+        para j desde y0 hasta y1 hacer
+            p := l.puntos + (j * ent32(l.salto))
+            para i desde x0 hasta x1 hacer
+                ; en 16 avos de punto
+                d := ent32(raíz_c(nat32((i - cx) * (i - cx) * 256 + (j - cy) * (j - cy) * 256)))
+                e := absoluto(d - r * 16)
+                k := -1
+                si e <= grueso * 16 + 24 entonces
+                    q := 0x10233F
+                    si e <= grueso * 16 - 8 entonces q := 0xFFFFFF fin
+                    k := 256
+                    si e > grueso * 16 + 8 entonces k := (grueso * 16 + 24 - e) * 16 fin
+                    p[i] := mezcla(p[i] yb 0xFFFFFF, q, nat32(k))
+                fin
+            fin
+        fin
+    fin
+
+    público función prepara_cursores()
+        variable i: ent32
+        para i desde 0 hasta N_CACHÉ - 1 hacer caché[i].usada := falso fin
+    fin
+
+fin Cursores.
