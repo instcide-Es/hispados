@@ -24,7 +24,8 @@
 ;  red (hasta 2 minutos cada vez) y se sigue desde donde iba, pidiendo el
 ;  resto («Range: bytes=N-», con «If-Range» para que sea el mismo archivo);
 ;  si el servidor no lo deja (contesta 200 con todo), se empieza de nuevo.
-;  Hasta 8 intentos. Acaba con 3 si se ha cancelado.
+;  Hasta 8 intentos (3, y 20 s de espera a la red, si aún no se ha bajado
+;  nada). Acaba con 3 si se ha cancelado.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Udescarg
@@ -38,6 +39,7 @@ módulo Udescarg
     ; (CORTES)
     constante TROZO_ESPERA = 50                 ; se espera lo que llega de medio segundo en medio segundo
     constante ESPERA_RED = 12000                ; tics (2 min): lo que se espera a que vuelva la red
+    constante ESPERA_RED_ANTES = 2000           ; (20 s, si aún no se ha bajado nada: sin red desde el principio, no se espera tanto)
     constante MAX_INTENTOS = 8
     constante CORTADO = 0xFFFFFFFE              ; lo que da una(): se ha cortado, y se puede volver a probar
     constante SIN_OCTETOS = 0xFFFFFFFD          ; (el error de llena: 30 s sin que llegue nada)
@@ -619,12 +621,15 @@ módulo Udescarg
         próximo_avance := 16384
     fin
 
-    ; (CORTES) espera, tras un corte, a que haya red (hasta 2 minutos) y un
-    ; poco más cada vez (1, 2, 4, 8 y 15 s: si el servidor ha cerrado, que no
-    ; se le pida sin parar). Falso si se cancela o la red no vuelve
+    ; (CORTES) espera, tras un corte, a que haya red (hasta 2 minutos; 20 s
+    ; si aún no se ha bajado nada) y un poco más cada vez (1, 2, 4, 8 y 15 s:
+    ; si el servidor ha cerrado, que no se le pida sin parar). Falso si se
+    ; cancela o la red no vuelve
     función espera_red(intento: nat32): bool
-        variable ip, e, quieto, pausa: nat32
+        variable ip, e, quieto, pausa, tope: nat32
         variable avisado: bool
+        tope := ESPERA_RED
+        si no creado entonces tope := ESPERA_RED_ANTES fin
         pausa := 100
         mientras intento > 1 y pausa < 1500 hacer
             pausa := pausa * 2
@@ -640,12 +645,12 @@ módulo Udescarg
                 si quieto >= pausa entonces romper fin
             sino
                 si no avisado entonces
-                    escribir("DESCARGAR: sin red: se espera a que vuelva para seguir (hasta 2 minutos)...\n")
+                    si creado entonces escribir("DESCARGAR: sin red: se espera a que vuelva para seguir (hasta 2 minutos)...\n") sino escribir("DESCARGAR: sin red: se espera a que vuelva (hasta 20 s)...\n") fin
                     di_avance_texto("Sin red: esperando para seguir con")
                     avisado := cierto
                 fin
-                si quieto >= ESPERA_RED entonces
-                    escribir("DESCARGAR: la red no ha vuelto en 2 minutos.\n")
+                si quieto >= tope entonces
+                    si creado entonces escribir("DESCARGAR: la red no ha vuelto en 2 minutos.\n") sino escribir("DESCARGAR: no hay red.\n") fin
                     devolver falso
                 fin
             fin
@@ -763,7 +768,8 @@ módulo Udescarg
             ; (CORTES) cortada: cuando vuelva la red, otra vez (desde donde iba)
             si código = CORTADO entonces
                 intentos := intentos + 1
-                si intentos >= MAX_INTENTOS entonces
+                ; (sin haber bajado nada aún, tres veces: el servidor que no está no se espera tanto)
+                si intentos >= MAX_INTENTOS o (no creado y intentos >= 3) entonces
                     imprimir1("DESCARGAR: no se ha podido acabar (%u intentos).\n", intentos)
                     devolver acaba(1)
                 fin

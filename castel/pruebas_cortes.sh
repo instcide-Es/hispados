@@ -136,7 +136,7 @@ mira "el servidor no deja seguir (contesta 200 con todo): se empieza de nuevo y 
 mira "el servidor se calla sin cerrar: a los 30 s sin un octeto, cortada; y sigue desde donde iba" \
   "^DESCARGAR: se ha cortado la conexión (30 s sin que llegue nada) (a medias: 1500000 octetos)\.$" "^Se sigue desde el octeto 1500000 (de 3000000)" "^Hecho: calla\.bin, 3000000 octetos"
 mira "el enlace se cae en plena descarga (set_link off): sin enlace, se espera a la red; al volver (DHCP otra vez), sigue desde donde iba" \
-  "^red: enlace: no" "la red no tiene enlace (¿está enchufado el cable? ¿se ha desconectado el Wi-Fi?) (a medias: [0-9]* octetos)\.$" \
+  "red: enlace: no" "la red no tiene enlace (¿está enchufado el cable? ¿se ha desconectado el Wi-Fi?) (a medias: [0-9]* octetos)\.$" \
   "^DESCARGAR: sin red: se espera a que vuelva para seguir (hasta 2 minutos)\.\.\.$" "^DESCARGAR: la red ha vuelto: se sigue\.$" "^Hecho: lento\.bin, 3000000 octetos"
 if grep -q '^/rst/grande.bin bytes=[0-9]*-$' $K/srv/pedidos && grep -q '^/calla/grande.bin bytes=1500000-$' $K/srv/pedidos && grep -q '^/lento/grande.bin bytes=[0-9]*-$' $K/srv/pedidos \
   && grep -q '^/norango/grande.bin bytes=' $K/srv/pedidos && [ "$(grep -c '^/cierra/grande.bin' $K/srv/pedidos)" = 2 ]; then

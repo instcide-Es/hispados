@@ -224,8 +224,14 @@ VERSION_086 = '0.8.6'
 # PANEL.INI) y la hora por Internet (HORARED.BIN, NTP); ACPI.BIN con el botón
 # de encendido. Suben base y tls (TLS.BIN no se fía de un reloj de antes de TLS.HOR)
 VERSION_087 = '0.8.7'
+# (CORTES, 22/11/2026, rama red-cortes) los cortes de la red (docs/PENTIUM.md,
+# 14 vicies): TCP con tope y keepalive, la red que cambia (DHCP), DESCARGAR que
+# sigue donde iba (Range), «Cancelar» al momento y «Forzar el cierre» al
+# apagar. Suben base (el núcleo: el cuadro de apagar y la llamada 11 con ECX =
+# 2), red, tls (HTTPS reintenta), wifi (REDWIFI /SIMCORTE) y paquetes (1.5)
+VERSION_CORTES = '0.8.8'
 SISTEMA = [
-    ('base', VERSION_087, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
+    ('base', VERSION_CORTES, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
         ('USUARIOS.BIN', r'\HISPA\USUARIOS.BIN'), ('ARGON2.BIN', r'\HISPA\ARGON2.BIN'),
         ('PANEL.BIN', r'\HISPA\PANEL.BIN'), ('HORARED.BIN', r'\HISPA\HORARED.BIN'),
@@ -251,21 +257,21 @@ SISTEMA = [
     # (PROGRAMAS) la 1.2 (sobre la 1.1, la de la revisión de seguridad): los tipos,
     # REPARA, ARCHIVOS, SUELTOS, QUITA /DEPENDIENTES y la ventana unificada
     # «Programas y actualizaciones» (PROGRAMA.BIN, con los controles: base 0.8.2)
-    ('paquetes', '1.4', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
+    ('paquetes', '1.5', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
         ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN')]),
     # (JUEGOS) la 0.8.7: UDP sin esperar (rpila.cas: un juego lo pregunta en cada cuadro)
-    ('red', VERSION_087, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
+    ('red', VERSION_CORTES, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
-    ('tls', VERSION_087, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
+    ('tls', VERSION_CORTES, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
         ('TLS.BIN', r'\HISPA\TLS.BIN'), ('HTTPS.BIN', r'\HISPA\HTTPS.BIN')]),
     ('ssh', VERSION_087, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, con los usuarios del equipo; apagado hasta que se encienda)', 'base >= ' + VERSION_087 + ', red >= 0.8.4', [
         ('SSH.BIN', r'\HISPA\SSH.BIN'), ('SSHD.BIN', r'\HISPA\SSHD.BIN')]),
     ('tailscal', VERSION_087, 'Tailscale y WireGuard: la red privada de sus equipos, cada uno con su nombre y su IP 100.x', 'base >= 0.8.4, red >= 0.8.4, tls >= 0.8.1', [
         ('TAILSCAL.BIN', r'\HISPA\TAILSCAL.BIN'), ('WG.BIN', r'\HISPA\WG.BIN')]),
     # (WIFI) el Wi-Fi (castel/nucleo32/wifi/, docs/PENTIUM.md «El Wi-Fi»); el microcódigo, con su licencia
-    ('wifi', VERSION_087, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
+    ('wifi', VERSION_CORTES, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
      'base >= ' + VERSION_WIFI + ', red >= ' + VERSION_WIFI, [
         ('WIFI.BIN', r'\HISPA\WIFI.BIN'), ('REDWIFI.BIN', r'\HISPA\REDWIFI.BIN'), ('WIFI.TXT', r'\HISPA\WIFI.TXT'),
         ('BCM43XX.FW', r'\HISPA\BCM43XX.FW'), ('BCM43XXH.FW', r'\HISPA\BCM43XXH.FW'), ('BCM43XX.TXT', r'\HISPA\BCM43XX.TXT')]),
