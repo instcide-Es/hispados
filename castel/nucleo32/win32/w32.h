@@ -150,12 +150,15 @@ int v_hay(u32 dir, u32 n);
 
 /* cargador.c: los módulos */
 typedef struct Exp { const char *nombre; void *f; } Exp;
+/* (HL) las que se importan por número: el número y su nombre (red.c) */
+typedef struct Ord { u16 n; const char *nombre; } Ord;
 typedef struct Modulo {
 	char nombre[32];        /* «USER32.DLL» */
 	char ruta[128];
 	u32 base, tam;
 	const Exp *propias;     /* las de dentro de WIN32.BIN (KERNEL32...), o 0 */
 	u32 nprop;
+	const Ord *ords;        /* (HL) sus números (WSOCK32, WS2_32), o 0 */
 	u32 entrada;
 	int es_exe, refs, iniciada;
 	int sin_hilos;          /* (JUEGOS) DisableThreadLibraryCalls: sin DllMain de los hilos */

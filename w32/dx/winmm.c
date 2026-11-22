@@ -109,6 +109,7 @@ static void eventos_tocar(void);
 #ifdef HISPA_PENTIUM
 static void cd_rellena_si(void);    /* (JUEGOS) el CD de sonido, más abajo */
 #endif
+static u32 mez_ganancia;           /* (HL) el volumen del mezclador (0..4096), más abajo */
 
 static void mez_ini(void) {
   if (snd_tarjeta != -2) return;
@@ -186,6 +187,8 @@ static void mezclar_trozo(void) {
   HxVoz *v, *s;
   hx_cero(acum, n * 8);
   for (v = voces; v; v = s) { s = v->sig; if (v->activa) mezclar_voz(v, acum, n); }
+  if (mez_ganancia < 4096)          /* (HL) el volumen del mezclador */
+    for (k = 0; k < n * 2; k++) acum[k] = (i32)(((i64)acum[k] * mez_ganancia) >> 12);
   if (mez_fmt == 3) {
     i16 *o = (i16 *)salida;
     for (k = 0; k < n * 2; k++) { i32 x = acum[k]; o[k] = x > 32767 ? 32767 : x < -32768 ? -32768 : x; }
@@ -592,10 +595,499 @@ u32 WINAPI waveOutGetErrorTextA(u32 e, char *s, u32 n) {
   s[k] = 0;
   return 0;
 }
+/* ======================= (HL) lo que pide un juego de 1998-2000 =======================
+ * waveIn: no hay micrófono (la voz de los juegos dice «no hay dispositivo»);
+ * midiOut y aux: no hay (MIDI, aún no): MMSYSERR_NODRIVER, limpio. */
+#define MMSYSERR_BADDEVICEID 2
+#define MMSYSERR_INVALHANDLE 5
+#define MMSYSERR_NODRIVER 6
+#define MMSYSERR_NOTSUPPORTED 8
+#define MMSYSERR_INVALPARAM 11
+static u32 texto_err(u32 e, char *s, u32 n) {
+  const char *t = e == 0 ? "Correcto." : e == 2 ? "No hay ese dispositivo." : e == 5 ? "Ese manejador no vale." :
+                  e == 6 ? "No hay dispositivo (en Hispa a\xfan no hay micr\xf3fono ni MIDI)." : e == 8 ? "No se puede hacer." : "Error de sonido.";
+  u32 k = 0;
+  if (!s || !n) return MMSYSERR_INVALPARAM;
+  while (t[k] && k + 1 < n) { s[k] = t[k]; k++; }
+  s[k] = 0;
+  return 0;
+}
 u32 WINAPI waveInGetNumDevs(void) { return 0; }
+u32 WINAPI waveInGetDevCapsA(u32 id, void *c, u32 n) { (void)id; (void)c; (void)n; return MMSYSERR_NODRIVER; }
+u32 WINAPI waveInGetDevCapsW(u32 id, void *c, u32 n) { (void)id; (void)c; (void)n; return MMSYSERR_NODRIVER; }
+u32 WINAPI waveInOpen(HANDLE *h, u32 id, const void *f, u32 cb, u32 inst, u32 fl) { (void)id; (void)f; (void)cb; (void)inst; (void)fl; if (h) *h = NULL; return MMSYSERR_NODRIVER; }
+u32 WINAPI waveInClose(HANDLE h) { (void)h; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI waveInPrepareHeader(HANDLE h, void *w, u32 n) { (void)h; (void)w; (void)n; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI waveInUnprepareHeader(HANDLE h, void *w, u32 n) { (void)h; (void)w; (void)n; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI waveInAddBuffer(HANDLE h, void *w, u32 n) { (void)h; (void)w; (void)n; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI waveInStart(HANDLE h) { (void)h; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI waveInStop(HANDLE h) { (void)h; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI waveInReset(HANDLE h) { (void)h; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI waveInGetPosition(HANDLE h, void *t, u32 n) { (void)h; (void)t; (void)n; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI waveInGetID(HANDLE h, u32 *id) { (void)h; (void)id; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI waveInMessage(HANDLE h, u32 m, u32 a, u32 b) { (void)h; (void)m; (void)a; (void)b; return MMSYSERR_NODRIVER; }
+u32 WINAPI waveInGetErrorTextA(u32 e, char *s, u32 n) { return texto_err(e, s, n); }
 u32 WINAPI midiOutGetNumDevs(void) { return 0; }
+u32 WINAPI midiOutGetDevCapsA(u32 id, void *c, u32 n) { (void)id; (void)c; (void)n; return MMSYSERR_NODRIVER; }
+u32 WINAPI midiOutGetDevCapsW(u32 id, void *c, u32 n) { (void)id; (void)c; (void)n; return MMSYSERR_NODRIVER; }
+u32 WINAPI midiOutOpen(HANDLE *h, u32 id, u32 cb, u32 inst, u32 fl) { (void)id; (void)cb; (void)inst; (void)fl; if (h) *h = NULL; return MMSYSERR_NODRIVER; }
+u32 WINAPI midiOutClose(HANDLE h) { (void)h; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiOutShortMsg(HANDLE h, u32 m) { (void)h; (void)m; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiOutLongMsg(HANDLE h, void *m, u32 n) { (void)h; (void)m; (void)n; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiOutPrepareHeader(HANDLE h, void *m, u32 n) { (void)h; (void)m; (void)n; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiOutUnprepareHeader(HANDLE h, void *m, u32 n) { (void)h; (void)m; (void)n; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiOutReset(HANDLE h) { (void)h; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiOutSetVolume(HANDLE h, u32 v) { (void)h; (void)v; return MMSYSERR_NODRIVER; }
+u32 WINAPI midiOutGetVolume(HANDLE h, u32 *v) { (void)h; if (v) *v = 0; return MMSYSERR_NODRIVER; }
+u32 WINAPI midiOutGetID(HANDLE h, u32 *id) { (void)h; (void)id; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiOutMessage(HANDLE h, u32 m, u32 a, u32 b) { (void)h; (void)m; (void)a; (void)b; return MMSYSERR_NODRIVER; }
+u32 WINAPI midiOutCachePatches(HANDLE h, u32 b, void *p, u32 f) { (void)h; (void)b; (void)p; (void)f; return MMSYSERR_NOTSUPPORTED; }
+u32 WINAPI midiOutCacheDrumPatches(HANDLE h, u32 b, void *p, u32 f) { (void)h; (void)b; (void)p; (void)f; return MMSYSERR_NOTSUPPORTED; }
+u32 WINAPI midiOutGetErrorTextA(u32 e, char *s, u32 n) { return texto_err(e, s, n); }
+u32 WINAPI midiStreamOpen(HANDLE *h, u32 *id, u32 c, u32 cb, u32 inst, u32 fl) { (void)id; (void)c; (void)cb; (void)inst; (void)fl; if (h) *h = NULL; return MMSYSERR_NODRIVER; }
+u32 WINAPI midiStreamClose(HANDLE h) { (void)h; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiStreamOut(HANDLE h, void *m, u32 n) { (void)h; (void)m; (void)n; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiStreamPause(HANDLE h) { (void)h; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiStreamRestart(HANDLE h) { (void)h; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiStreamStop(HANDLE h) { (void)h; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiStreamProperty(HANDLE h, void *p, u32 f) { (void)h; (void)p; (void)f; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiStreamPosition(HANDLE h, void *t, u32 n) { (void)h; (void)t; (void)n; return MMSYSERR_INVALHANDLE; }
+u32 WINAPI midiInGetNumDevs(void) { return 0; }
+u32 WINAPI midiInGetDevCapsA(u32 id, void *c, u32 n) { (void)id; (void)c; (void)n; return MMSYSERR_NODRIVER; }
+u32 WINAPI midiInOpen(HANDLE *h, u32 id, u32 cb, u32 inst, u32 fl) { (void)id; (void)cb; (void)inst; (void)fl; if (h) *h = NULL; return MMSYSERR_NODRIVER; }
 u32 WINAPI auxGetNumDevs(void) { return 0; }
-u32 WINAPI mixerGetNumDevs(void) { return 0; }
+u32 WINAPI auxGetDevCapsA(u32 id, void *c, u32 n) { (void)id; (void)c; (void)n; return MMSYSERR_BADDEVICEID; }
+u32 WINAPI auxGetDevCapsW(u32 id, void *c, u32 n) { (void)id; (void)c; (void)n; return MMSYSERR_BADDEVICEID; }
+u32 WINAPI auxSetVolume(u32 id, u32 v) { (void)id; (void)v; return MMSYSERR_BADDEVICEID; }
+u32 WINAPI auxGetVolume(u32 id, u32 *v) { (void)id; if (v) *v = 0; return MMSYSERR_BADDEVICEID; }
+u32 WINAPI auxOutMessage(u32 id, u32 m, u32 a, u32 b) { (void)id; (void)m; (void)a; (void)b; return MMSYSERR_BADDEVICEID; }
+
+/* ---- (HL) el mezclador: uno, «Hispa», con una salida (los altavoces: su
+ * volumen y su silencio son los generales del sistema, el de SONIDO.BIN en
+ * Hispa-Pentium, HispaDXSonido 4; en Hispa-486, los de este programa) y una
+ * entrada (el sonido de onda: el volumen de lo que mezcla este programa).
+ * Los números, como los de Windows: la salida es la línea 0 (destino 0),
+ * la entrada la 0x10000 (destino 0, fuente 0); los controles 1 a 4. ---- */
+static u32 mx_general = 65535, mx_onda = 65535;
+static int mx_mudo, mx_mudo_onda;
+static u32 mez_ganancia = 4096;     /* lo que se aplica aquí al mezclar (0..4096) */
+static int mx_del_sistema(u32 *v) { /* -> 1 si el sistema lleva el volumen general (0..100) */
+  int r = HispaDXSonido(4, 0xFFFFFFFF, 0, 0);
+  if (!(r & 0x100)) return 0;
+  if (v) *v = (u32)r & 0xFF;
+  return 1;
+}
+static void mx_aplica(void) {
+  u32 g = mx_mudo_onda ? 0 : mx_onda;
+  if (!mx_del_sistema(NULL)) g = mx_mudo ? 0 : (u32)hx_div64((u64)g * mx_general, 65535);
+  mez_ganancia = g >> 4;            /* 0..4095 */
+  if (g == 65535) mez_ganancia = 4096;
+}
+static u32 mx_lee_general(void) {
+  u32 v;
+  if (mx_del_sistema(&v)) return v >= 100 ? 65535 : v * 65535 / 100;
+  return mx_general;
+}
+typedef struct { u16 wMid, wPid; u32 ver; char nombre[32]; u32 soporte, ndest; } MIXERCAPSA;
+typedef struct {
+  u32 tam, destino, fuente, linea, fl, usuario, tipo, canales, conexiones, controles;
+  char corto[16], nombre[64];
+  struct { u32 tipo, id; u16 wMid, wPid; u32 ver; char nombre[32]; } dest;
+} MIXERLINEA;
+typedef struct { u32 tam, id, tipo, fl, n; char corto[16], nombre[64]; i32 min, max; u32 r1[4]; u32 pasos; u32 r2[5]; } MIXERCONTROLA;
+typedef struct { u32 tam, linea, idtipo, n, tamc; MIXERCONTROLA *c; } MIXERLINECONTROLSA;
+typedef struct { u32 tam, id, canales, mult, tamd; void *d; } MIXERCONTROLDETAILS;
+#define MIXERR_INVALLINE 1024
+#define MIXERR_INVALCONTROL 1025
+static void cpy(char *d, const char *s, u32 n) { u32 k = 0; while (s[k] && k + 1 < n) { d[k] = s[k]; k++; } d[k] = 0; }
+static int mx_abiertos;
+u32 WINAPI mixerGetNumDevs(void) { return 1; }
+u32 WINAPI mixerOpen(HANDLE *h, u32 id, u32 cb, u32 inst, u32 fl) {
+  (void)cb; (void)inst;
+  if (!h) return MMSYSERR_INVALPARAM;
+  /* (MIXER_OBJECTF_HWAVEOUT y los demás: el de su dispositivo, que es este) */
+  if (!(fl & 0xF0000000) && id != 0) return MMSYSERR_BADDEVICEID;
+  mx_abiertos++;
+  *h = (HANDLE)0x4D580001;
+  return 0;
+}
+u32 WINAPI mixerClose(HANDLE h) { if (h != (HANDLE)0x4D580001) return MMSYSERR_INVALHANDLE; if (mx_abiertos) mx_abiertos--; return 0; }
+u32 WINAPI mixerGetID(HANDLE h, u32 *id, u32 fl) { (void)h; (void)fl; if (id) *id = 0; return 0; }
+u32 WINAPI mixerMessage(HANDLE h, u32 m, u32 a, u32 b) { (void)h; (void)m; (void)a; (void)b; return MMSYSERR_NOTSUPPORTED; }
+static int mx_vale(HANDLE h, u32 fl) {
+  u32 o = fl & 0xF0000000;
+  if (o == 0x80000000) return h == (HANDLE)0x4D580001;  /* MIXER_OBJECTF_HMIXER */
+  if (o == 0) return (u32)h == 0;                       /* MIXER_OBJECTF_MIXER: el número 0 */
+  return 1;                                             /* el de un waveOut...: este */
+}
+u32 WINAPI mixerGetDevCapsA(u32 id, MIXERCAPSA *c, u32 n) {
+  MIXERCAPSA t;
+  if (id != 0 && id != 0x4D580001) return MMSYSERR_BADDEVICEID;
+  if (!c) return MMSYSERR_INVALPARAM;
+  hx_cero(&t, sizeof t);
+  t.wMid = 0xFF; t.wPid = 1; t.ver = 0x0100;
+  cpy(t.nombre, "Mezclador de Hispa", sizeof t.nombre);
+  t.ndest = 1;
+  hx_copia(c, &t, n < sizeof t ? n : sizeof t);
+  return 0;
+}
+static void mx_linea(MIXERLINEA *l, int fuente) {
+  u32 tam = l->tam;
+  hx_cero(l, sizeof *l);
+  l->tam = tam;
+  l->destino = 0;
+  l->canales = 2;
+  if (!fuente) {
+    l->linea = 0; l->fl = 1;                       /* MIXERLINE_LINEF_ACTIVE */
+    l->tipo = 4;                                   /* MIXERLINE_COMPONENTTYPE_DST_SPEAKERS */
+    l->conexiones = 1; l->controles = 2;
+    cpy(l->corto, "Altavoces", sizeof l->corto); cpy(l->nombre, "Altavoces (el volumen general)", sizeof l->nombre);
+    l->dest.tipo = 1;                              /* MIXERLINE_TARGETTYPE_WAVEOUT */
+  } else {
+    l->fuente = 0; l->linea = 0x10000; l->fl = 0x80000001;   /* SOURCE | ACTIVE */
+    l->tipo = 0x1008;                              /* MIXERLINE_COMPONENTTYPE_SRC_WAVEOUT */
+    l->controles = 2;
+    cpy(l->corto, "Onda", sizeof l->corto); cpy(l->nombre, "Sonido de onda", sizeof l->nombre);
+    l->dest.tipo = 1;
+  }
+  l->dest.wMid = 0xFF; l->dest.wPid = 1; l->dest.ver = 0x0100;
+  cpy(l->dest.nombre, "Mezclador de Hispa", sizeof l->dest.nombre);
+}
+u32 WINAPI mixerGetLineInfoA(HANDLE h, MIXERLINEA *l, u32 fl) {
+  if (!l || l->tam < sizeof(MIXERLINEA)) return MMSYSERR_INVALPARAM;
+  if (!mx_vale(h, fl)) return MMSYSERR_INVALHANDLE;
+  switch (fl & 15) {
+  case 0: if (l->destino != 0) return MMSYSERR_INVALPARAM; mx_linea(l, 0); return 0;              /* DESTINATION */
+  case 1: if (l->destino != 0 || l->fuente != 0) return MMSYSERR_INVALPARAM; mx_linea(l, 1); return 0;   /* SOURCE */
+  case 2: if (l->linea == 0) { mx_linea(l, 0); return 0; } if (l->linea == 0x10000) { mx_linea(l, 1); return 0; } return MIXERR_INVALLINE;
+  case 3: if (l->tipo == 4) { mx_linea(l, 0); return 0; } if (l->tipo == 0x1008) { mx_linea(l, 1); return 0; } return MIXERR_INVALLINE;   /* COMPONENTTYPE */
+  case 4: if (l->dest.tipo == 1) { mx_linea(l, 0); return 0; } return MIXERR_INVALLINE;            /* TARGETTYPE: solo waveOut */
+  }
+  return MMSYSERR_INVALPARAM;
+}
+/* los controles: 1 el volumen general, 2 su silencio, 3 el de la onda, 4 su silencio */
+static void mx_control(MIXERCONTROLA *c, u32 id) {
+  hx_cero(c, sizeof *c);
+  c->tam = sizeof *c; c->id = id;
+  if (id == 1 || id == 3) {
+    c->tipo = 0x50030001;                          /* MIXERCONTROL_CONTROLTYPE_VOLUME */
+    c->min = 0; c->max = 65535; c->pasos = id == 1 ? 100 : 65535;
+    cpy(c->corto, "Volumen", sizeof c->corto);
+    cpy(c->nombre, id == 1 ? "Volumen general" : "Volumen de la onda", sizeof c->nombre);
+  } else {
+    c->tipo = 0x20010002;                          /* MIXERCONTROL_CONTROLTYPE_MUTE */
+    c->fl = 1;                                     /* MIXERCONTROL_CONTROLF_UNIFORM */
+    c->min = 0; c->max = 1;
+    cpy(c->corto, "Silencio", sizeof c->corto);
+    cpy(c->nombre, id == 2 ? "Silencio general" : "Silencio de la onda", sizeof c->nombre);
+  }
+}
+u32 WINAPI mixerGetLineControlsA(HANDLE h, MIXERLINECONTROLSA *lc, u32 fl) {
+  u32 base;
+  if (!lc || lc->tam < sizeof(MIXERLINECONTROLSA) || !lc->c) return MMSYSERR_INVALPARAM;
+  if (!mx_vale(h, fl)) return MMSYSERR_INVALHANDLE;
+  switch (fl & 15) {
+  case 0:                                          /* MIXER_GETLINECONTROLSF_ALL */
+    if (lc->linea != 0 && lc->linea != 0x10000) return MIXERR_INVALLINE;
+    if (lc->n < 2 || lc->tamc < sizeof(MIXERCONTROLA)) return MMSYSERR_INVALPARAM;
+    base = lc->linea ? 3 : 1;
+    mx_control(&lc->c[0], base);
+    mx_control((MIXERCONTROLA *)((u8 *)lc->c + lc->tamc), base + 1);
+    return 0;
+  case 1:                                          /* ONEBYID */
+    if (lc->idtipo < 1 || lc->idtipo > 4) return MIXERR_INVALCONTROL;
+    lc->linea = lc->idtipo <= 2 ? 0 : 0x10000;
+    mx_control(lc->c, lc->idtipo);
+    return 0;
+  case 2:                                          /* ONEBYTYPE */
+    if (lc->linea != 0 && lc->linea != 0x10000) return MIXERR_INVALLINE;
+    base = lc->linea ? 3 : 1;
+    if (lc->idtipo == 0x50030001) { mx_control(lc->c, base); return 0; }
+    if (lc->idtipo == 0x20010002) { mx_control(lc->c, base + 1); return 0; }
+    return MIXERR_INVALCONTROL;
+  }
+  return MMSYSERR_INVALPARAM;
+}
+u32 WINAPI mixerGetControlDetailsA(HANDLE h, MIXERCONTROLDETAILS *d, u32 fl) {
+  u32 *v, k, n, x;
+  if (!d || d->tam < sizeof(MIXERCONTROLDETAILS) || !d->d || d->tamd < 4) return MMSYSERR_INVALPARAM;
+  if (!mx_vale(h, fl)) return MMSYSERR_INVALHANDLE;
+  if ((fl & 15) != 0) return MMSYSERR_NOTSUPPORTED;   /* (LISTTEXT: no hay listas) */
+  if (d->id < 1 || d->id > 4) return MIXERR_INVALCONTROL;
+  switch (d->id) {
+  case 1: x = mx_lee_general(); break;
+  case 2: { u32 s; x = mx_del_sistema(&s) ? s == 0 : (u32)mx_mudo; break; }
+  case 3: x = mx_onda; break;
+  default: x = (u32)mx_mudo_onda;
+  }
+  n = d->canales ? d->canales : 1;
+  v = d->d;
+  for (k = 0; k < n; k++) *(u32 *)((u8 *)v + k * d->tamd) = x;
+  return 0;
+}
+u32 WINAPI mixerSetControlDetails(HANDLE h, MIXERCONTROLDETAILS *d, u32 fl) {
+  u32 x;
+  if (!d || d->tam < sizeof(MIXERCONTROLDETAILS) || !d->d || d->tamd < 4) return MMSYSERR_INVALPARAM;
+  if (!mx_vale(h, fl)) return MMSYSERR_INVALHANDLE;
+  if (d->id < 1 || d->id > 4) return MIXERR_INVALCONTROL;
+  x = *(u32 *)d->d;
+  if (d->canales == 2) { u32 y = *(u32 *)((u8 *)d->d + d->tamd); if (y > x) x = y; }   /* (los dos lados van juntos) */
+  switch (d->id) {
+  case 1:
+    if (x > 65535) x = 65535;
+    mx_general = x;
+    if (mx_del_sistema(NULL)) HispaDXSonido(4, (x * 100 + 32767) / 65535, 0, 0);
+    break;
+  case 2: mx_mudo = x != 0; if (mx_del_sistema(NULL) && x) HispaDXSonido(4, 0, 0, 0); break;
+  case 3: mx_onda = x > 65535 ? 65535 : x; break;
+  default: mx_mudo_onda = x != 0;
+  }
+  mx_aplica();
+  return 0;
+}
+u32 WINAPI mixerGetDevCapsW(u32 id, void *c, u32 n) { (void)c; (void)n; return id ? MMSYSERR_BADDEVICEID : MMSYSERR_NOTSUPPORTED; }
+
+/* ---- (HL) mmio: leer y escribir archivos RIFF (los WAV) como Windows. El
+ * archivo entero va a la memoria al abrirlo (o es la memoria del programa,
+ * con FOURCC_MEM), y se escribe al cerrarlo si ha cambiado: así valen
+ * mmioRead/Write/Seek y el acceso directo de mmioGetInfo, mmioAdvance y
+ * mmioSetInfo (pchNext, pchEndRead...) sin más. ---- */
+typedef struct {
+  u32 fl, fcc; void *proc; u32 err; HANDLE tarea; i32 cb; u8 *buf, *sig, *fin_l, *fin_e; i32 boff, doff;
+  u32 info[3], r1, r2; HANDLE h;
+} MMIOINFO;
+typedef struct { u32 id, tam, tipo, datos, fl; } MMCKINFO;
+#define FCC(a, b, c, d) ((u32)(a) | (u32)(b) << 8 | (u32)(c) << 16 | (u32)(d) << 24)
+#define MMIOERR_FILENOTFOUND 257
+#define MMIOERR_OUTOFMEMORY 258
+#define MMIOERR_CANNOTOPEN 259
+#define MMIOERR_CANNOTWRITE 262
+#define MMIOERR_CANNOTSEEK 263
+#define MMIOERR_CANNOTEXPAND 264
+#define MMIOERR_CHUNKNOTFOUND 265
+#define MMIO_DIRTY 0x10000000
+#define NMMIO 8
+typedef struct { int uso; u8 *d; u32 n, cap, pos; int escribe, sucio, ajena, crece; char ruta[260]; MMIOINFO i; } MMF;
+static MMF mmf[NMMIO];
+HANDLE WINAPI CreateFileA(const char *, u32, u32, void *, u32, u32, HANDLE);
+int WINAPI WriteFile(HANDLE, const void *, u32, u32 *, void *);
+int WINAPI DeleteFileA(const char *);
+u32 WINAPI GetFileAttributesA(const char *);
+u32 WINAPI GetFullPathNameA(const char *, u32, char *, char **);
+static MMF *mm_de(HANDLE h) { u32 k = (u32)h - 0x4D4D0001; return k < NMMIO && mmf[k].uso ? &mmf[k] : NULL; }
+static int mm_cabe(MMF *m, u32 n) {
+  u8 *nuevo; u32 c;
+  if (n <= m->cap) return 1;
+  if (!m->crece) return 0;
+  c = m->cap * 2 > n + 4096 ? m->cap * 2 : n + 4096;
+  nuevo = hx_pedir(c);
+  if (!nuevo) return 0;
+  if (m->d) { hx_copia(nuevo, m->d, m->n); if (!m->ajena) hx_soltar(m->d); }
+  m->d = nuevo; m->cap = c; m->ajena = 0;
+  return 1;
+}
+/* lo de pchNext (si el programa ha leído o escrito por su cuenta), de vuelta a la posición */
+static void mm_info_vuelve(MMF *m, const MMIOINFO *i) {
+  u32 p;
+  if (!i || !i->buf || i->buf != m->d) return;
+  p = (u32)(i->sig - m->d);
+  if (p > m->cap) return;
+  if (i->fl & MMIO_DIRTY) { if (p > m->n) m->n = p; m->sucio = 1; }
+  m->pos = p;
+}
+static void mm_info_pon(MMF *m, MMIOINFO *i) {
+  *i = m->i;
+  i->buf = m->d; i->cb = (i32)m->cap;
+  i->sig = m->d + m->pos;
+  i->fin_l = m->d + m->n;
+  i->fin_e = m->d + m->cap;
+  i->boff = 0; i->doff = (i32)m->n;
+  i->fl &= ~MMIO_DIRTY;
+}
+HANDLE WINAPI mmioOpenA(char *nombre, MMIOINFO *info, u32 fl) {
+  int k; MMF *m; u32 acc = fl & 3;
+  if (info) info->err = 0;
+  if (fl & 0x200) {                                 /* MMIO_DELETE */
+    int r = nombre && DeleteFileA(nombre);
+    if (!r && info) info->err = MMIOERR_FILENOTFOUND;
+    return (HANDLE)(r ? 1 : 0);
+  }
+  if (fl & 0x100) {                                 /* MMIO_PARSE: la ruta entera, en «nombre» */
+    char t[260];
+    if (!nombre || !GetFullPathNameA(nombre, sizeof t, t, NULL)) { if (info) info->err = MMIOERR_CANNOTOPEN; return NULL; }
+    cpy(nombre, t, 128);
+    return (HANDLE)1;
+  }
+  if (fl & 0x4000)                                  /* MMIO_EXIST */
+    return (HANDLE)(nombre && GetFileAttributesA(nombre) != 0xFFFFFFFF ? 1 : 0);
+  for (k = 0; k < NMMIO && mmf[k].uso; k++) ;
+  if (k == NMMIO) { if (info) info->err = MMIOERR_OUTOFMEMORY; return NULL; }
+  m = &mmf[k];
+  hx_cero(m, sizeof *m);
+  if (info) m->i = *info;
+  m->escribe = acc != 0 || (fl & 0x1000);
+  if (info && info->fcc == FCC('M', 'E', 'M', ' ')) {
+    /* en memoria: la del programa (no crece), o una que crece */
+    if (info->buf) { m->d = info->buf; m->cap = (u32)info->cb; m->n = (fl & 0x1000) ? 0 : m->cap; m->ajena = 1; m->crece = info->info[0] != 0; }
+    else { m->crece = 1; if (!mm_cabe(m, info->cb > 0 ? (u32)info->cb : 4096)) { info->err = MMIOERR_OUTOFMEMORY; return NULL; } }
+  } else if (info && info->proc && info->fcc != FCC('D', 'O', 'S', ' ')) {
+    info->err = MMIOERR_CANNOTOPEN;                 /* (los procedimientos propios: no) */
+    return NULL;
+  } else {
+    HANDLE f;
+    m->crece = 1;
+    if (!nombre) { if (info) info->err = MMIOERR_CANNOTOPEN; return NULL; }
+    cpy(m->ruta, nombre, sizeof m->ruta);
+    if (fl & 0x1000) {                              /* MMIO_CREATE: vacío */
+      if (!mm_cabe(m, 4096)) { if (info) info->err = MMIOERR_OUTOFMEMORY; return NULL; }
+      m->sucio = 1;
+    } else {
+      u32 n, l = 0;
+      f = CreateFileA(nombre, 0x80000000, 3, NULL, 3, 0x80, NULL);
+      if (f == (HANDLE)-1) { if (info) info->err = MMIOERR_FILENOTFOUND; return NULL; }
+      n = GetFileSize(f, NULL);
+      if (n == 0xFFFFFFFF || !mm_cabe(m, n + 1)) { CloseHandle(f); if (info) info->err = MMIOERR_OUTOFMEMORY; m->d ? hx_soltar(m->d) : (void)0; return NULL; }
+      if (n && (!ReadFile(f, m->d, n, &l, NULL) || l != n)) { CloseHandle(f); hx_soltar(m->d); if (info) info->err = MMIOERR_CANNOTOPEN; return NULL; }
+      CloseHandle(f);
+      m->n = n;
+    }
+  }
+  m->uso = 1;
+  m->i.fl = fl;
+  m->i.h = (HANDLE)(0x4D4D0001 + k);
+  if (info) info->h = m->i.h;
+  return m->i.h;
+}
+static u32 mm_guarda(MMF *m) {
+  HANDLE f; u32 l = 0;
+  if (!m->sucio || !m->ruta[0]) return 0;
+  f = CreateFileA(m->ruta, 0x40000000, 0, NULL, 2, 0x80, NULL);
+  if (f == (HANDLE)-1) return MMIOERR_CANNOTWRITE;
+  if (m->n && (!WriteFile(f, m->d, m->n, &l, NULL) || l != m->n)) { CloseHandle(f); return MMIOERR_CANNOTWRITE; }
+  CloseHandle(f);
+  m->sucio = 0;
+  return 0;
+}
+u32 WINAPI mmioClose(HANDLE h, u32 fl) {
+  MMF *m = mm_de(h); u32 e;
+  (void)fl;
+  if (!m) return MMSYSERR_INVALHANDLE;
+  e = mm_guarda(m);
+  if (!m->ajena) hx_soltar(m->d);
+  m->uso = 0;
+  return e;
+}
+u32 WINAPI mmioFlush(HANDLE h, u32 fl) { MMF *m = mm_de(h); (void)fl; return m ? mm_guarda(m) : MMSYSERR_INVALHANDLE; }
+i32 WINAPI mmioRead(HANDLE h, char *d, i32 n) {
+  MMF *m = mm_de(h); u32 t;
+  if (!m || n < 0) return -1;
+  t = m->pos < m->n ? m->n - m->pos : 0;
+  if ((u32)n < t) t = (u32)n;
+  hx_copia(d, m->d + m->pos, t);
+  m->pos += t;
+  return (i32)t;
+}
+i32 WINAPI mmioWrite(HANDLE h, const char *s, i32 n) {
+  MMF *m = mm_de(h);
+  if (!m || n < 0 || !m->escribe) return -1;
+  if (!mm_cabe(m, m->pos + (u32)n)) return -1;
+  hx_copia(m->d + m->pos, s, (u32)n);
+  m->pos += (u32)n;
+  if (m->pos > m->n) m->n = m->pos;
+  m->sucio = 1;
+  return n;
+}
+i32 WINAPI mmioSeek(HANDLE h, i32 d, i32 desde) {
+  MMF *m = mm_de(h); i32 p;
+  if (!m) return -1;
+  p = desde == 0 ? d : desde == 1 ? (i32)m->pos + d : desde == 2 ? (i32)m->n + d : -1;
+  if (p < 0) return -1;
+  if ((u32)p > m->n && (!m->escribe || !mm_cabe(m, (u32)p))) return -1;
+  m->pos = (u32)p;
+  return p;
+}
+u32 WINAPI mmioGetInfo(HANDLE h, MMIOINFO *i, u32 fl) { MMF *m = mm_de(h); (void)fl; if (!m || !i) return MMSYSERR_INVALHANDLE; mm_info_pon(m, i); return 0; }
+u32 WINAPI mmioSetInfo(HANDLE h, const MMIOINFO *i, u32 fl) { MMF *m = mm_de(h); (void)fl; if (!m || !i) return MMSYSERR_INVALHANDLE; mm_info_vuelve(m, i); return 0; }
+u32 WINAPI mmioSetBuffer(HANDLE h, char *b, i32 n, u32 fl) { (void)b; (void)n; (void)fl; return mm_de(h) ? 0 : MMSYSERR_INVALHANDLE; }
+/* el búfer, otra vez: lo escrito se queda; para leer, ya está todo; para escribir, más sitio */
+u32 WINAPI mmioAdvance(HANDLE h, MMIOINFO *i, u32 fl) {
+  MMF *m = mm_de(h);
+  if (!m) return MMSYSERR_INVALHANDLE;
+  if (i) mm_info_vuelve(m, i);
+  if ((fl & 3) == 1 || (fl & 3) == 2) {             /* MMIO_WRITE */
+    if (!m->escribe) return MMIOERR_CANNOTWRITE;
+    if (!mm_cabe(m, m->cap + 4096)) return MMIOERR_CANNOTEXPAND;
+  }
+  if (i) mm_info_pon(m, i);
+  return 0;
+}
+u32 WINAPI mmioStringToFOURCCA(const char *s, u32 fl) {
+  u8 c[4] = { ' ', ' ', ' ', ' ' }; int k;
+  for (k = 0; k < 4 && s && s[k]; k++) { c[k] = (u8)s[k]; if ((fl & 0x10) && c[k] >= 'a' && c[k] <= 'z') c[k] -= 32; }   /* MMIO_TOUPPER */
+  return FCC(c[0], c[1], c[2], c[3]);
+}
+void *WINAPI mmioInstallIOProcA(u32 fcc, void *p, u32 fl) { (void)fcc; (void)p; (void)fl; return NULL; }
+u32 WINAPI mmioRenameA(const char *a, const char *b, const MMIOINFO *i, u32 fl) { (void)a; (void)b; (void)i; (void)fl; return MMIOERR_CANNOTWRITE; }
+u32 WINAPI mmioSendMessage(HANDLE h, u32 m, u32 a, u32 b) { (void)h; (void)m; (void)a; (void)b; return 0; }
+/* bajar a un trozo: el siguiente (o el que se busca, dentro del de arriba) */
+u32 WINAPI mmioDescend(HANDLE h, MMCKINFO *ck, const MMCKINFO *padre, u32 fl) {
+  MMF *m = mm_de(h);
+  u32 fin, busca_id = 0, busca_tipo = 0;
+  if (!m || !ck) return MMSYSERR_INVALPARAM;
+  fin = padre ? padre->datos + padre->tam : m->n;
+  if (fin > m->n) fin = m->n;
+  if (fl & 0x10) busca_id = ck->id;                                   /* MMIO_FINDCHUNK */
+  else if (fl & 0x20) { busca_id = FCC('R', 'I', 'F', 'F'); busca_tipo = ck->tipo; }   /* MMIO_FINDRIFF */
+  else if (fl & 0x40) { busca_id = FCC('L', 'I', 'S', 'T'); busca_tipo = ck->tipo; }   /* MMIO_FINDLIST */
+  for (;;) {
+    u32 p = m->pos, id, tam, tipo = 0, datos;
+    if (p + 8 > fin) { m->pos = fin; return MMIOERR_CHUNKNOTFOUND; }
+    id = *(u32 *)(m->d + p); tam = *(u32 *)(m->d + p + 4);
+    datos = p + 8;
+    if ((id == FCC('R', 'I', 'F', 'F') || id == FCC('L', 'I', 'S', 'T')) && p + 12 <= fin) tipo = *(u32 *)(m->d + p + 8);
+    if ((!busca_id || id == busca_id) && (!busca_tipo || tipo == busca_tipo)) {
+      ck->id = id; ck->tam = tam; ck->tipo = tipo; ck->datos = datos; ck->fl = 0;
+      m->pos = datos + (tipo ? 4 : 0);
+      return 0;
+    }
+    if (!busca_id) { m->pos = fin; return MMIOERR_CHUNKNOTFOUND; }
+    m->pos = datos + ((tam + 1) & ~1u);
+    if (m->pos < datos) { m->pos = fin; return MMIOERR_CHUNKNOTFOUND; }   /* (un tamaño que no vale) */
+  }
+}
+/* subir: al final del trozo (con su octeto de relleno); si se ha escrito, su tamaño */
+u32 WINAPI mmioAscend(HANDLE h, MMCKINFO *ck, u32 fl) {
+  MMF *m = mm_de(h);
+  (void)fl;
+  if (!m || !ck) return MMSYSERR_INVALPARAM;
+  if (ck->fl & MMIO_DIRTY) {
+    u32 t = m->pos > ck->datos ? m->pos - ck->datos : 0;
+    if (ck->datos < 4 || ck->datos > m->n) return MMIOERR_CANNOTSEEK;
+    *(u32 *)(m->d + ck->datos - 4) = t;
+    ck->tam = t;
+    m->sucio = 1;
+    if (t & 1) { char z = 0; m->pos = ck->datos + t; if (mmioWrite(h, &z, 1) != 1) return MMIOERR_CANNOTWRITE; }
+    ck->fl &= ~MMIO_DIRTY;
+  }
+  m->pos = ck->datos + ((ck->tam + 1) & ~1u);
+  if (m->pos > m->n) { if (m->escribe && mm_cabe(m, m->pos)) m->n = m->pos; else m->pos = m->n; }
+  return 0;
+}
+/* un trozo nuevo donde se está (RIFF o LIST con su tipo): el tamaño, al subir */
+u32 WINAPI mmioCreateChunk(HANDLE h, MMCKINFO *ck, u32 fl) {
+  MMF *m = mm_de(h);
+  u32 cab[3];
+  int n = 8;
+  if (!m || !ck) return MMSYSERR_INVALPARAM;
+  if (fl & 0x20) ck->id = FCC('R', 'I', 'F', 'F');               /* MMIO_CREATERIFF */
+  else if (fl & 0x40) ck->id = FCC('L', 'I', 'S', 'T');          /* MMIO_CREATELIST */
+  cab[0] = ck->id; cab[1] = ck->tam; cab[2] = ck->tipo;
+  if (fl & 0x60) n = 12;
+  ck->datos = m->pos + 8;
+  if (mmioWrite(h, (const char *)cab, n) != n) return MMIOERR_CANNOTWRITE;
+  ck->fl = MMIO_DIRTY;
+  return 0;
+}
 
 /* ======================= mciSendString (lo mínimo) ======================= */
 #define NMCI 4
@@ -965,6 +1457,15 @@ static u32 cd_cadena(const char *o, const char *s, char *ret, u32 nret, HWND cb)
 }
 #endif
 
+/* (HL) el número de un dispositivo MCI abierto, por su nombre */
+u32 WINAPI mciGetDeviceIDA(const char *n) {
+#ifdef HISPA_PENTIUM
+  if (n && cd.abierto && cd_es(n)) return CD_ID;     /* el CD de sonido */
+#endif
+  (void)n;
+  return 0;
+}
+u32 WINAPI mciGetDeviceIDW(const u16 *n) { (void)n; return 0; }
 u32 WINAPI mciSendStringA(const char *orden, char *ret, u32 nret, HWND cb) {
   char o[16], a[128], p[128], alias[32];
   const char *s = orden;
