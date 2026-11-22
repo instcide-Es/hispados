@@ -25,13 +25,16 @@ archivo entero; luego, bien):
                    pulsar «Cancelar» mientras tanto)
   /muylento/...    siempre, a unos 30 K/s
 
-Cada pedido se apunta en CARPETA/pedidos: «camino rango» (el Range, o -),
-y en CARPETA/servidos lo que se ha mandado de cada uno. Lo pone en marcha
+Los cortes, solo en lo que pasa de 100 K (no en el catálogo). Cada pedido
+se apunta en CARPETA/pedidos: «camino rango» (el Range, o -), y en
+CARPETA/servidos lo que se ha mandado de cada uno (con la hora, si el otro
+lado ha cerrado o cortado). Lo pone en marcha
 pruebas_cortes.sh (la parte 37) y lo para por su PID.
 """
 import http.server
 import os
 import random
+import select
 import socket
 import socketserver
 import struct
@@ -120,7 +123,7 @@ class Atiende(http.server.BaseHTTPRequestHandler):
             vistos[clave] = vistos.get(clave, 0) + 1
         mandado = 0
         try:
-            if modo in ('calla', 'cierra', 'rst', 'norango') and primera and desde == 0:
+            if modo in ('calla', 'cierra', 'rst', 'norango') and primera and desde == 0 and len(cuerpo) > 100000:
                 mitad = len(cuerpo) // 2
                 for i in range(0, mitad, 16384):
                     self.wfile.write(cuerpo[i:min(i + 16384, mitad)])
@@ -128,7 +131,19 @@ class Atiende(http.server.BaseHTTPRequestHandler):
                 self.wfile.flush()
                 apunta('servidos', '%s %s %d corte' % (modo, c, mandado))
                 if modo == 'calla':
-                    time.sleep(300)
+                    # (callado, pero mirando si el otro cierra: para medir
+                    # lo que tarda «Cancelar»)
+                    fin = time.time() + 300
+                    while time.time() < fin:
+                        listos, _, _ = select.select([self.connection], [], [], 0.1)
+                        if listos:
+                            try:
+                                m = self.connection.recv(4096)
+                            except OSError:
+                                m = b''
+                            if not m:
+                                apunta('servidos', '%s %s el cliente ha cerrado %.2f' % (modo, c, time.time()))
+                                break
                 elif modo == 'rst':
                     self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
                     self.connection.close()
@@ -147,7 +162,7 @@ class Atiende(http.server.BaseHTTPRequestHandler):
                     time.sleep(pausa)
             apunta('servidos', '%s %s %d desde %d' % (modo or 'bien', c, mandado, desde))
         except OSError:
-            apunta('servidos', '%s %s %d cortada por el otro lado' % (modo or 'bien', c, mandado))
+            apunta('servidos', '%s %s %d cortada por el otro lado %.2f' % (modo or 'bien', c, mandado, time.time()))
             self.close_connection = True
 
 

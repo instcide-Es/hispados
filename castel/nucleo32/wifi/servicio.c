@@ -1078,14 +1078,19 @@ static void atiende(struct pedido *p, u8 *d)
 	}
 	case WO_SIMCORTE:
 		/* (CORTES) las pruebas: el punto de acceso de mentira desaparece unos segundos */
-		if (!simulada || p->cab[1] == 0 || p->cab[1] > 600) {
+		/* (cab[2]: 1, DHCP da desde ya 192.168.77.11; 2, otra vez la .10;
+		 * con 0 s, no desaparece: solo eso) */
+		if (!simulada || p->cab[1] > 600 || p->cab[2] > 2 || (p->cab[1] == 0 && p->cab[2] == 0)) {
 			contesta(p, 0xFFFFFFF9u, 0, NULL, 0);
 			return;
 		}
-		sim_ausente = 1;
-		sim_ip_otra = p->cab[2] == 1;
-		sim_vuelve = hl_pentium_tics() + p->cab[1] * hz;
-		hl_log(2, "SIM: el punto de acceso desaparece %u s%s\n", p->cab[1], sim_ip_otra ? " (y al volver da otra IP)" : "");
+		if (p->cab[2])
+			sim_ip_otra = p->cab[2] == 1;
+		if (p->cab[1]) {
+			sim_ausente = 1;
+			sim_vuelve = hl_pentium_tics() + p->cab[1] * hz;
+		}
+		hl_log(2, "SIM: el punto de acceso desaparece %u s; DHCP da la 192.168.77.%u\n", p->cab[1], sim_ip_otra ? 11 : 10);
 		contesta(p, 0, 0, NULL, 0);
 		return;
 	case WO_REGISTRO: {
