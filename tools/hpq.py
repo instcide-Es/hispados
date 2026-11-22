@@ -124,7 +124,8 @@ TIPO_POR_NOMBRE = {
     'base': 'sistema', 'paquetes': 'sistema', 'equipo': 'sistema', 'hvprun': 'sistema',
     'red': 'internet', 'tls': 'internet', 'navega': 'internet', 'ssh': 'internet',
     'tailscal': 'internet', 'wifi': 'internet', 'correo': 'internet',  # (CORREO)
-    'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina', 'pluma': 'oficina',   # (PLUMA32: pluma)
+    'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina', 'pluma': 'oficina', 'agenda': 'oficina',   # (PLUMA32: pluma) (AGENDA)
+    'cuentas': 'oficina',   # (CUENTAS32)
     'consola': 'herramientas', 'accesori': 'herramientas', 'comprim': 'herramientas', 'compat': 'herramientas',  # (COMPAT)
     'ejemplos': 'desarrollo',
     'win32': 'windows',
@@ -224,8 +225,19 @@ VERSION_086 = '0.8.6'
 # PANEL.INI) y la hora por Internet (HORARED.BIN, NTP); ACPI.BIN con el botón
 # de encendido. Suben base y tls (TLS.BIN no se fía de un reloj de antes de TLS.HOR)
 VERSION_087 = '0.8.7'
+# (0.8.8, 22/11/2026, pentium-088: la Agenda —el vigilante de los avisos y
+# la próxima cita en el reloj de la bandeja, de cada usuario—, Cuentas 2 y
+# Pintura 2 —la 2.0 del sistema—: en el núcleo, el escritorio, Mi equipo
+# (exoper) y el menú Inicio). Sube la base
+VERSION_088 = '0.8.8'
+# (CORTES, 22/11/2026, rama red-cortes) los cortes de la red (docs/PENTIUM.md,
+# 14 tervicies): TCP con tope y keepalive, la red que cambia (DHCP), DESCARGAR que
+# sigue donde iba (Range), «Cancelar» al momento y «Forzar el cierre» al
+# apagar. Suben base (el núcleo: el cuadro de apagar y la llamada 11 con ECX =
+# 2), red, tls (HTTPS reintenta), wifi (REDWIFI /SIMCORTE) y paquetes (1.5)
+VERSION_CORTES = '0.8.8'
 SISTEMA = [
-    ('base', VERSION_087, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
+    ('base', VERSION_088, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
         ('USUARIOS.BIN', r'\HISPA\USUARIOS.BIN'), ('ARGON2.BIN', r'\HISPA\ARGON2.BIN'),
         ('PANEL.BIN', r'\HISPA\PANEL.BIN'), ('HORARED.BIN', r'\HISPA\HORARED.BIN'),
@@ -236,7 +248,8 @@ SISTEMA = [
     ('consola', VERSION_085, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
     # (explorador, dispositivos) el explorador de archivos, sus miniaturas y el Administrador de dispositivos
     # (REPRODUCTOR) la 0.9.3: la música (.MP3, .OGG, .FLAC, .WAV, .CUE...) se abre con el Reproductor si está
-    ('equipo', '0.9.3', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
+    # (0.8.8) la 0.9.4: una sola «Editar con Pintura» (Pintura 2 o, sin ella, la de la oficina)
+    ('equipo', '0.9.4', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
         ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('MINIAT.BIN', r'\HISPA\MINIAT.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
     ('ejemplos', VERSION_085, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.4', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
@@ -244,28 +257,30 @@ SISTEMA = [
     # (ACCESORIOS, 21/11/2026) la Calculadora, el Reloj y el Mapa de caracteres,
     # con sus accesos en Accesorios (tipo herramientas: con el hpq.py de la
     # 0.8.5, «--tipo herramientas»; su .MNU dice «tipo=Accesorios»)
-    ('accesori', '1.0', 'Accesorios: la Calculadora (científica y de oficina: euros, IVA y cinta), el Reloj (calendario, alarma, cronómetro y cuenta atrás) y el Mapa de caracteres', 'base >= 0.8.4', [
+    # (AGENDA) la 1.1: el Reloj, con los festivos de festivos.cas (los de la
+    # comunidad y los locales) y dos clics en un día abren la Agenda
+    ('accesori', '1.1', 'Accesorios: la Calculadora (científica y de oficina: euros, IVA y cinta), el Reloj (calendario con festivos, alarma, cronómetro y cuenta atrás) y el Mapa de caracteres', 'base >= 0.8.4', [
         ('CALC.BIN', r'\HISPA\CALC.BIN'), ('RELOJ.BIN', r'\HISPA\RELOJ.BIN'), ('CARACTER.BIN', r'\HISPA\CARACTER.BIN'),
         ('CALC.MNU', r'\HISPA\MENU\CALC.MNU'), ('RELOJ.MNU', r'\HISPA\MENU\RELOJ.MNU'), ('CARACTER.MNU', r'\HISPA\MENU\CARACTER.MNU'),
         ('CALC.ICP', r'\HISPA\MENU\CALC.ICP'), ('RELOJ.ICP', r'\HISPA\MENU\RELOJ.ICP'), ('CARACT.ICP', r'\HISPA\MENU\CARACT.ICP')]),
     # (PROGRAMAS) la 1.2 (sobre la 1.1, la de la revisión de seguridad): los tipos,
     # REPARA, ARCHIVOS, SUELTOS, QUITA /DEPENDIENTES y la ventana unificada
     # «Programas y actualizaciones» (PROGRAMA.BIN, con los controles: base 0.8.2)
-    ('paquetes', '1.4', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
+    ('paquetes', '1.5', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
         ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN')]),
     # (JUEGOS) la 0.8.7: UDP sin esperar (rpila.cas: un juego lo pregunta en cada cuadro)
-    ('red', VERSION_087, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
+    ('red', VERSION_CORTES, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
-    ('tls', VERSION_087, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
+    ('tls', VERSION_CORTES, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
         ('TLS.BIN', r'\HISPA\TLS.BIN'), ('HTTPS.BIN', r'\HISPA\HTTPS.BIN')]),
     ('ssh', VERSION_087, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, con los usuarios del equipo; apagado hasta que se encienda)', 'base >= ' + VERSION_087 + ', red >= 0.8.4', [
         ('SSH.BIN', r'\HISPA\SSH.BIN'), ('SSHD.BIN', r'\HISPA\SSHD.BIN')]),
     ('tailscal', VERSION_087, 'Tailscale y WireGuard: la red privada de sus equipos, cada uno con su nombre y su IP 100.x', 'base >= 0.8.4, red >= 0.8.4, tls >= 0.8.1', [
         ('TAILSCAL.BIN', r'\HISPA\TAILSCAL.BIN'), ('WG.BIN', r'\HISPA\WG.BIN')]),
     # (WIFI) el Wi-Fi (castel/nucleo32/wifi/, docs/PENTIUM.md «El Wi-Fi»); el microcódigo, con su licencia
-    ('wifi', VERSION_087, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
+    ('wifi', VERSION_CORTES, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
      'base >= ' + VERSION_WIFI + ', red >= ' + VERSION_WIFI, [
         ('WIFI.BIN', r'\HISPA\WIFI.BIN'), ('REDWIFI.BIN', r'\HISPA\REDWIFI.BIN'), ('WIFI.TXT', r'\HISPA\WIFI.TXT'),
         ('BCM43XX.FW', r'\HISPA\BCM43XX.FW'), ('BCM43XXH.FW', r'\HISPA\BCM43XXH.FW'), ('BCM43XX.TXT', r'\HISPA\BCM43XX.TXT')]),
@@ -288,17 +303,25 @@ SISTEMA = [
         ('TIPOS.DAT', r'\OFICINA\TIPOS.DAT'), ('TIPOS12.DAT', r'\OFICINA\TIPOS12.DAT'),
         ('TIPOS24.DAT', r'\OFICINA\TIPOS24.DAT'), ('TIPOS32.DAT', r'\OFICINA\TIPOS32.DAT'),
         ('DICCIO.DAT', r'\OFICINA\DICCIO.DAT')]),
-    # (OFICINA2) Pintura, aparte (tipo multimedia, como el Mirador): el
-    # programa de dibujo de Hispa-386 (BMP; abre también PCX: «Editar» en Mi equipo)
-    ('pintura', '1.0', 'Pintura: dibujar y retocar imágenes (guarda en BMP y abre también PCX)', 'hvprun >= 0.10', [
-        ('PINTURA.HVP', r'\OFICINA\PINTURA.HVP')]),
+    # (OFICINA2) Pintura, aparte (tipo multimedia, como el Mirador). (PINTURA32,
+    # 0.8.8) La 2.0 es Pintura 2, el programa de dibujo de 32 bits
+    # (castel/nucleo32/oficina/pintura): sustituye a la 1.0 (el PINTURA.HVP de
+    # Hispa-386, en HVPRUN) y sigue siendo del sistema. Pide base 0.8.6 (la
+    # llamada 172, el fondo de escritorio). Con ella, el menú (PINTURA.MNU,
+    # tipo=Multimedia) y Mi equipo («Editar con Pintura», los .PCX) la usan
+    ('pintura', '2.0', 'Pintura 2: dibujar y retocar imágenes en color verdadero (PNG, JPG, BMP, GIF, PCX, ICO, TGA; a PDF; fondo de escritorio)', 'base >= 0.8.6', [
+        ('PINTURA.BIN', r'\HISPA\PINTURA.BIN'), ('PINTURA.TXT', r'\HISPA\PINTURA.TXT'),
+        ('PINTURA.MNU', r'\HISPA\MENU\PINTURA.MNU'), ('PINTURA.ICP', r'\HISPA\MENU\PINTURA.ICP')]),
     # [WIN32] los programas de Windows de 32 bits y DirectX (docs/pentium/WIN32.md)
     # (JUEGOS, 22/11/2026) win32 1.2: lo que pide un juego (hilos de verdad, SEH,
     # el registro, MSVCRT de VC6, el ratón de los juegos, UDP, la mezcla en su
     # hilo, el CD de sonido; WIN32 COMPRUEBA y WIN32.LOG). Vale con la base de
     # antes (sin las llamadas 183 a 186 hace lo de siempre); con todo, la base
     # que las lleve (la rama win32-juegos)
-    ('win32', '1.2', 'Programas de Windows de 32 bits y juegos: hilos, SEH, registro, DirectX (con sonido y CD), OpenGL; WIN32.BIN, sus DLL y los ejemplos', 'base >= ' + VERSION_084, [
+    # (HL, 22/11/2026) win32 1.3: lo que pedía Half-Life 1 (las DLL donde las
+    # busca Windows, WSOCK32 por número, mmio, el mezclador, WININET, la
+    # seguridad de ADVAPI32...; WIN32 COMPRUEBA /CON y /MAQUINA). Los mismos archivos
+    ('win32', '1.3', 'Programas de Windows de 32 bits y juegos: hilos, SEH, registro, DirectX (con sonido y CD), OpenGL, WININET; WIN32.BIN, sus DLL y los ejemplos', 'base >= ' + VERSION_084, [
         ('WIN32.BIN', r'\HISPA\WIN32.BIN'),
         ('MSVCRT.DLL', r'\WIN32\MSVCRT.DLL'), ('UCRT.DLL', r'\WIN32\UCRT.DLL'), ('COMCTL32.DLL', r'\WIN32\COMCTL32.DLL'),
         ('WINMM.DLL', r'\WIN32\WINMM.DLL'), ('DDRAW.DLL', r'\WIN32\DDRAW.DLL'), ('DSOUND.DLL', r'\WIN32\DSOUND.DLL'),
@@ -496,16 +519,31 @@ OPCIONALES = [
         ('MENU/HISPAPDF.MNU', r'\HISPA\MENU\HISPAPDF.MNU'), ('MENU/HISPAPDF.ICP', r'\HISPA\MENU\HISPAPDF.ICP')]),
     # (PLUMA32) Pluma 2, el procesador de textos de 32 bits (castel/nucleo32/oficina/pluma/paquete.sh;
     # tipo «oficina»): con él instalado, el menú y Mi equipo lo usan en lugar del Pluma de Hispa-386
-    ('pluma', '2.0', 'Pluma 2: el procesador de textos de 32 bits (.PLU, .ODT, .DOCX, .RTF y .TXT; exporta a PDF; ortografía)',
+    # (0.8.8) la 2.0.1: la misma Pluma con la biblioteca común de la oficina de
+    # Cuentas 2 y Pintura 2 (memchr, strrchr, F11 y F12, las imágenes TGA)
+    ('pluma', '2.0.1', 'Pluma 2: el procesador de textos de 32 bits (.PLU, .ODT, .DOCX, .RTF y .TXT; exporta a PDF; ortografía)',
      'base >= 0.8.3', [
         ('PLUMA.BIN', r'\HISPA\PLUMA.BIN'), ('PLUMA/LEEME.TXT', r'\HISPA\PLUMA\LEEME.TXT'),
         ('PLUMA/DICCIO.DAT', r'\HISPA\PLUMA\DICCIO.DAT'),
         ('MENU/PLUMA.MNU', r'\HISPA\MENU\PLUMA.MNU'), ('MENU/PLUMA.ICP', r'\HISPA\MENU\PLUMA.ICP')]),
+    # (CUENTAS32) Cuentas 2, la hoja de cálculo de 32 bits (castel/nucleo32/oficina/cuentas/paquete.sh;
+    # tipo «oficina»): con ella instalada, el menú y Mi equipo la usan en lugar del Cuentas de Hispa-386
+    ('cuentas', '2.0', 'Cuentas 2: la hoja de cálculo de 32 bits (.HOJ, .XLSX, .ODS y .CSV; gráficos; exporta a PDF)',
+     'base >= 0.8.3', [
+        ('CUENTAS.BIN', r'\HISPA\CUENTAS.BIN'), ('CUENTAS/LEEME.TXT', r'\HISPA\CUENTAS\LEEME.TXT'),
+        ('MENU/CUENTAS.MNU', r'\HISPA\MENU\CUENTAS.MNU'), ('MENU/CUENTAS.ICP', r'\HISPA\MENU\CUENTAS.ICP')]),
     # (ZIP) Comprimidos y las órdenes ZIP y UNZIP (castel/nucleo32/comprim/paquete.sh; tipo «herramientas»)
     ('comprim', '1.0.1', 'Comprimidos: los .ZIP como una carpeta (sacar, añadir y quitar, con contraseña) y las órdenes ZIP y UNZIP', 'base >= 0.8.4', [
         ('BIN/COMPRIM.BIN', r'\HISPA\COMPRIM.BIN'), ('BIN/ZIP.BIN', r'\HISPA\ZIP.BIN'), ('BIN/UNZIP.BIN', r'\HISPA\UNZIP.BIN'),
         ('COMPRIM.TXT', r'\HISPA\COMPRIM.TXT'), ('COMPRIM.MNU', r'\HISPA\MENU\COMPRIM.MNU'), ('COMPRIM.ICP', r'\HISPA\MENU\COMPRIM.ICP')]),
     # (MIRADOR) el Mirador, el visor de imágenes (castel/nucleo32/mirador/paquete.sh; tipo «multimedia»)
+    # (AGENDA) la Agenda (castel/nucleo32/agenda/paquete.sh; tipo «oficina»)
+    # (0.8.8) pide la base 0.8.8: el escritorio lanza su vigilante (AGENDA
+    # /VIGILAR) al entrar cada usuario y dice la próxima cita en el reloj
+    ('agenda', '1.0', 'Agenda: citas, tareas y cumpleaños con avisos (aunque esté cerrada), festivos de España y de cada comunidad, repeticiones e importar y exportar .ICS',
+     'base >= ' + VERSION_088, [
+        ('AGENDA.BIN', r'\HISPA\AGENDA.BIN'), ('AGENDA/LEEME.TXT', r'\HISPA\AGENDA\LEEME.TXT'),
+        ('MENU/AGENDA.MNU', r'\HISPA\MENU\AGENDA.MNU'), ('MENU/AGENDA.ICP', r'\HISPA\MENU\AGENDA.ICP')]),
     ('mirador', '1.0.1', 'El Mirador: ver imágenes (BMP, PNG, JPG, GIF animados, ICO...), girar, diapositivas, pantalla completa y fondo de escritorio', 'base >= 0.8.6', [
         ('BIN/MIRADOR.BIN', r'\HISPA\MIRADOR.BIN'), ('MIRADOR.TXT', r'\HISPA\MIRADOR.TXT'),
         ('MIRADOR.MNU', r'\HISPA\MENU\MIRADOR.MNU'), ('MIRADOR.ICP', r'\HISPA\MENU\MIRADOR.ICP')]),
@@ -523,7 +561,8 @@ OPCIONALES = [
     # (CORREO) Correo, el cliente de correo (castel/nucleo32/correo/paquete.sh; tipo «internet»). El
     # secreto de \HISPA\CORREO y el STARTTLS llegan con el base y el tls de la 0.8.7
     # (PARPADEO) 1.0.1: sin parpadeo (el lienzo propio, un vuelco; nada por el ratón que solo pasa); comprim y mirador 1.0.1, tampoco repintan por él
-    ('correo', '1.0.1', 'Correo: el cliente de correo (IMAP, POP3 y SMTP, siempre cifrado; HTML sin scripts, adjuntos por Escudo, sin conexión)',
+    # (CORREO) 1.0.2: dos clics (o Intro) en la lista, el mensaje a toda la ventana, con sus botones; Esc vuelve
+    ('correo', '1.0.2', 'Correo: el cliente de correo (IMAP, POP3 y SMTP, siempre cifrado; HTML sin scripts, adjuntos por Escudo, sin conexión)',
      'base >= ' + VERSION_087 + ', red >= 0.8.1, tls >= ' + VERSION_087, [
         ('CORREO.BIN', r'\HISPA\CORREO.BIN'), ('CORREO.TXT', r'\HISPA\CORREO.TXT'),
         ('CORREO.MNU', r'\HISPA\MENU\CORREO.MNU'), ('CORREO.ICP', r'\HISPA\MENU\CORREO.ICP')]),

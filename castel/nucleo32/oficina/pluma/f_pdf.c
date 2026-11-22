@@ -6,6 +6,7 @@
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include <string.h>
 #include "archivo.h"
+#include "pluma.h"		/* (0.8.8) PLUMA_VERSION */
 #include "maqueta.h"
 #include "pinta_pag.h"
 #include "pdfsal.h"
@@ -92,6 +93,7 @@ int pdf_exporta(documento *d, bufer *b)
 
 		copia(tit, d->titulo, sizeof tit);
 		pdf_datos(s, tit, d->autor, d->asunto);
+		pdf_productor(s, "Pluma " PLUMA_VERSION " (Hispa-Pentium)");
 	}
 	for (i = 0; i < d->n_pag; i++) {
 		pdf_pagina(s, PT(d->pag_an), PT(d->pag_al));

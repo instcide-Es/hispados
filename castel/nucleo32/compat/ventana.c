@@ -1305,6 +1305,60 @@ static void suceso(const so_suceso *s)
 	}
 }
 
+/* lo último que WIN32 apuntó en WIN32.LOG de ese programa: «WINMM.DLL!mixerOpen»
+ * (una función que llamó y no hay) o «NOHAY.DLL» (una DLL que no está) */
+static int lo_que_fallo(const char *exe, char *d, u32 cabe)
+{
+	char r[RUTA_MAX], m[64], *t, *p;
+	int hay = 0;
+
+	if (plat_ruta_log(r, sizeof r))
+		return 0;
+	t = lee_texto(r, NULL, 1u << 20);
+	if (!t)
+		return 0;
+	copia(m, exe, sizeof m);
+	a_mayusculas(m);
+	for (p = t; *p;) {
+		char l[400], x[400];
+		u32 j = 0;
+		const char *q;
+
+		while (*p && *p != '\n' && j + 1 < sizeof l)
+			l[j++] = *p++;
+		l[j] = 0;
+		while (*p == '\n' || *p == '\r')
+			p++;
+		copia(x, l, sizeof x);
+		a_mayusculas(x);
+		if (!busca(x, m))
+			continue;
+		if ((q = busca(l, "LLAMA A UNA QUE FALTA: ")) != NULL) {
+			u32 k = 0;
+
+			q += 23;
+			while (q[k] && q[k] != ' ' && k + 1 < cabe) {
+				d[k] = q[k];
+				k++;
+			}
+			d[k] = 0;
+			hay = k > 0;
+		} else if ((q = busca(l, "no se encuentra ")) != NULL && busca(l, ", que necesita")) {
+			u32 k = 0;
+
+			q += 16;
+			while (q[k] && q[k] != ',' && k + 1 < cabe) {
+				d[k] = q[k];
+				k++;
+			}
+			d[k] = 0;
+			hay = k > 0;
+		}
+	}
+	so_suelta(t);
+	return hay;
+}
+
 int ventana_principal(const char *ruta, const char *fallo)
 {
 	so_suceso s;
@@ -1323,8 +1377,13 @@ int ventana_principal(const char *ruta, const char *fallo)
 	so_centra(V.v);
 	lee_lista();
 	if (fallo && ruta && ruta[0]) {
-		char c[RUTA_MAX];
+		char c[RUTA_MAX], lo[120];
 
+		/* (WIN32 lanza «/FALLO ruta», sin decir qué: lo último que apuntó de
+		 * ese programa en WIN32.LOG) */
+		if (iguales(fallo, "?") && lo_que_fallo(sin_carpeta(ruta), lo, sizeof lo))
+			fallo = lo;
+		dice("compat: fallo: %s: %s", sin_carpeta(ruta), fallo);
 		V.clase_aviso = 1;
 		fmt(V.aviso, sizeof V.aviso, "WIN32 no ha podido seguir con %s%s%s.\nAbajo, lo que le falta a todo su programa (su carpeta), explicado.",
 		    sin_carpeta(ruta), iguales(fallo, "?") ? "" : ": le falta ", iguales(fallo, "?") ? "" : fallo);

@@ -142,6 +142,15 @@ int so_control(void);
 void so_al_portapapeles(const char *t, u32 n);
 char *so_del_portapapeles(u32 *n);
 
+/* (PINTURA32) el fondo del escritorio: una imagen 0x00RRGGBB de an x al
+ * (ya a la medida de la pantalla, so_pantalla). 0 si se ha puesto. En
+ * Hispa-Pentium, la llamada 172 (la del Mirador: el núcleo la guarda en
+ * FONDO.HPM); en Linux, a OFI_CAPTURAS/fondo.ppm */
+int so_fondo_escritorio(const u32 *px, int an, int al);
+/* (PINTURA32) lo que mide la pantalla entera (so_pantalla da lo libre, sin
+ * la barra de tareas: para las ventanas) */
+void so_pantalla_entera(int *an, int *al);
+
 /* lanzar otro programa sin esperarlo (una ventana nueva de Pluma, Hispa-PDF...) */
 int so_lanza(const char *programa, const char *args);
 /* la ruta del programa que corre (para lanzarse otra vez): en Hispa-Pentium,

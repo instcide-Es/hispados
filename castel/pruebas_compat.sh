@@ -69,8 +69,8 @@ grep -q "^archivo=JUEGO.EXE	1536	$e	" $S && ok "Linux: la suma SHA-256 del infor
 mira "Linux: lo comprobado queda en la carpeta del usuario (PROGRAMA.LST), con la versión de win32" "^2 programas comprobados:$" "^  JUEGOMEN  (.*)  win32 1\.2: faltan 10, 5 importantes" "^  TODOBIEN  (.*)  win32 1\.2: falta 1, 1 importantes"
 # la salida /MAQUINA (la que se ha pedido a win32-hl): lo mismo, por otro camino
 S=$W/maquina.txt
-FALSO_MAQUINA=1 cl /ORDEN comprueba $J/JUEGOMEN > $S
-mira "Linux: con la salida /MAQUINA de COMPRUEBA (la que se pide a la rama win32-hl), lo mismo" "^\[FALTA\] JUEGOMEN: faltan 5 (y 5 más en partes que no hacen falta)\.$" "^  Falta la DLL entera PRUEBAC.DLL (5 funciones)$"
+FALSO_MAQUINA=0 cl /ORDEN comprueba $J/JUEGOMEN > $S
+mira "Linux: con la salida de texto (la de un WIN32 de antes de la 1.3, que no sabe /MAQUINA: la reserva), lo mismo" "^\[FALTA\] JUEGOMEN: faltan 5 (y 5 más en partes que no hacen falta)\.$" "^  Falta la DLL entera PRUEBAC.DLL (5 funciones)$"
 # el receptor: php -S
 U=$Y/php; mkdir -p $U/www/compat $U/www/download/x $U/datos/registro
 cp $R/informe.php $U/www/compat/
@@ -217,7 +217,7 @@ ESCRIBE=1 DISCO=$Q/c.img ARRANQUE=ordenes MODULOS= MEMORIA=128 \
   "compat /orden lista" ":pausa 3" "paquetes actualiza" ":hasta 240 1 compat: aviso: TODOBIEN" ":pausa 5" "compat /orden lista" ":pausa 4" "type \\usuarios\\usuario\\compat\\avisos.txt" ":pausa 2" > $Q/consola.sal 2>&1
 tr -d '\r' < $Q/consola.sal > $Q/consola.txt
 S=$Q/consola.txt
-mira "QEMU: COMPAT /ORDEN comprueba con el WIN32.BIN de verdad (WIN32 COMPRUEBA /MAQUINA, que aún dice «no se encuentra» y sigue): el juego de mentira, agrupado" \
+mira "QEMU: COMPAT /ORDEN comprueba con el WIN32.BIN de verdad (WIN32 COMPRUEBA ... /MAQUINA, el de win32 1.3): el juego de mentira, agrupado" \
   "^\[FALTA\] JUEGOMEN: faltan 5 (y 5 más en partes que no hacen falta)\.$" "^  Falta la DLL entera PRUEBAC.DLL (5 funciones)$" "^  HLDS.EXE: es el servidor dedicado" \
   "^\[FALTA\] TODOBIEN: falta 1\.$" "^(apuntado en la lista del usuario: win32 1\.2)$"
 mira "QEMU: el informe, sin rutas; y mandado por HTTPS (TLS.BIN, la raíz de prueba de \\RAICES) al receptor de prueba" \
@@ -239,8 +239,9 @@ if grep -q "excepción\|\*\*\*" $S; then ko "el núcleo se ha quejado: $(grep -m
 local SES=(":pausa 3" ":doble 60 186" ":pausa 4" ":escribe compat C:\\JUEGOMEN" ":tecla ret" ":hasta 120 1 compat: comprobado" ":pausa 3" ":captura cp1"
   ":tecla alt-v" ":hasta 90 1 cuadro «Enviar el informe" ":pausa 2" ":captura cp2" ":tecla spc" ":pausa 1" ":tecla ret" ":hasta 120 1 compat: informe" ":pausa 2" ":captura cp3" ":tecla ret" ":pausa 1"
   ":tecla alt-p" ":hasta 30 1 cuadro «Componentes" ":pausa 2" ":captura cp4" ":tecla ret" ":hasta 120 1 cuadro «La licencia" ":pausa 2" ":captura cp5" ":tecla esc" ":pausa 2"
-  ":tecla esc" ":pausa 3" ":escribe paquetes actualiza" ":tecla ret" ":hasta 240 1 compat: aviso en la bandeja" ":pausa 3" ":captura cp6" ":pausa 2"
-  ":clic 512 300" ":pausa 1" ":doble 60 186" ":pausa 4" ":escribe compat /fallo C:\\JUEGOMEN\\JUEGO.EXE PRUEBAC.DLL!PcCuatro" ":tecla ret" ":hasta 120 1 compat: comprobado C:" ":pausa 3" ":captura cp7")
+  ":tecla esc" ":pausa 3" ":escribe C:\\JUEGOMEN\\JUEGO.EXE" ":tecla ret" ":hasta 60 1 PRUEBAC.DLL" ":pausa 3" ":captura cp8" ":tecla ret" ":pausa 3"
+  ":escribe compat /fallo C:\\JUEGOMEN\\JUEGO.EXE" ":tecla ret" ":hasta 120 2 compat: comprobado C:" ":pausa 3" ":captura cp7" ":tecla esc" ":pausa 3"
+  ":escribe paquetes actualiza" ":tecla ret" ":hasta 240 1 compat: aviso en la bandeja" ":pausa 3" ":captura cp6")
 CAPTURAS=$G PANTALLA=1024x600 ESCRIBE=1 DISCO=$Q/v.img ARRANQUE="escritorio modo=1024x600" MODULOS= MEMORIA=128 \
   QEMU_MAS="-nic user,model=e1000 -device usb-ehci,id=u -drive id=mu,file=$Q/usb.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
   $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN "${SES[@]}" > $Q/ventana.sal 2>&1
@@ -250,13 +251,14 @@ mira "la ventana (1024 x 600): comprobar el juego de mentira, el consentimiento 
   "compat: comprobado C:.JUEGOMEN: faltan 10 (5 importantes), 4 archivos, win32 1\.2" "compat: cuadro «Enviar el informe a Hispa-DOS»" "compat: informe mandado: OK " \
   "compat: cuadro «Componentes de Microsoft»" "compat: componente prueba: bajado y comprobado (SHA-256)" "compat: cuadro «La licencia de Microsoft»"
 mira "el aviso de la bandeja tras PAQUETES ACTUALIZA (el gancho, con escritorio: la ventanita abajo a la derecha)" "compat: aviso en la bandeja: JUEGOMEN: ahora faltan 7 (antes 10)"
-mira "COMPAT /FALLO (lo que lanzará WIN32 cuando un programa no pueda seguir): la ventana con el fallo arriba y la carpeta del programa comprobada" "compat: comprobado C:.JUEGOMEN: faltan 7"
+mira "un programa al que le falta una DLL: WIN32 1.3 lo dice con su botón «Comprobar compatibilidad»; COMPAT /FALLO (lo que lanza ese botón, sin decir qué) lo saca de WIN32.LOG y comprueba la carpeta" \
+  "compat: fallo: JUEGO.EXE: PRUEBAC.DLL" "compat: comprobado C:.JUEGOMEN: faltan 10 (5 importantes)"
 if grep -q "excepción\|\*\*\*" $S; then ko "el núcleo se ha quejado: $(grep -m1 'excepción\|\*\*\*' $S)"; else ok "QEMU (el escritorio): ni una excepción ni una queja del núcleo"; fi
-mal=0; for c in cp1 cp2 cp3 cp4 cp5 cp6 cp7; do [ -s $G/$c.ppm ] || mal="$mal $c"; done
-[ "$mal" = 0 ] && ok "las capturas de la ventana (cp1 a cp7)" || ko "faltan capturas:$mal"
+mal=0; for c in cp1 cp2 cp3 cp4 cp5 cp6 cp7 cp8; do [ -s $G/$c.ppm ] || mal="$mal $c"; done
+[ "$mal" = 0 ] && ok "las capturas de la ventana (cp1 a cp8)" || ko "faltan capturas:$mal"
 if [ -n "${COMPAT_CAPTURAS:-}" ]; then
   mkdir -p "$COMPAT_CAPTURAS"
-  for c in cp1:ventana cp2:consentimiento cp3:mandado cp4:componentes cp5:licencia cp6:aviso cp7:fallo; do
+  for c in cp1:ventana cp2:consentimiento cp3:mandado cp4:componentes cp5:licencia cp6:aviso cp7:fallo cp8:win32; do
     [ -f $G/${c%%:*}.ppm ] && convert $G/${c%%:*}.ppm "$COMPAT_CAPTURAS/${c#*:}.png" 2> /dev/null
   done
   [ -f $W/cap/cpl1.ppm ] && convert $W/cap/cpl1.ppm "$COMPAT_CAPTURAS/linux.png" 2> /dev/null

@@ -342,6 +342,122 @@ void ui_icono(lienzo *l, int ic, int x, int y, int t, int apagado)
 		raya(l, 8, 1, 8, 15, 1, 0x8D99AA);
 		raya(l, 1, 8, 15, 8, 1, 0x8D99AA);
 		break;
+	/* (CUENTAS32) los de la hoja de cálculo */
+	case IC_AUTOSUMA: {
+		/* la sigma, con trazos gruesos */
+		raya(l, 3, 2, 13, 2, 2, 0x101820);
+		raya(l, 3, 2, 8, 8, 2, 0x101820);
+		raya(l, 8, 8, 3, 14, 2, 0x101820);
+		raya(l, 3, 14, 13, 14, 2, 0x101820);
+		raya(l, 13, 2, 13, 4, 2, 0x101820);
+		raya(l, 13, 14, 13, 12, 2, 0x101820);
+		break;
+	}
+	case IC_FX:
+		letra(l, "fx", 0, 1, 1, 0x101820, 78);
+		break;
+	case IC_ORDEN_ASC:
+	case IC_ORDEN_DESC: {
+		/* «A» arriba y «Z» abajo (o al revés) y la flecha hacia abajo */
+		int cara = letra_cara(FAM_SANS, 1, 0, NULL), tam = T * 4 * 46 / 100;
+		int fl[6] = { 10, 11, 16, 11, 13, 15 };
+
+		lz_texto(l, cara, tam, 0, X0 + T * 1 / 16, Y0 + T * 7 / 16, ic == IC_ORDEN_ASC ? "A" : "Z", tinta(0x101820));
+		lz_texto(l, cara, tam, 0, X0 + T * 1 / 16, Y0 + T * 15 / 16, ic == IC_ORDEN_ASC ? "Z" : "A", tinta(0x101820));
+		raya(l, 13, 2, 13, 11, 2, 0x2563C9);
+		pol(l, fl, 3, 0x2563C9);
+		break;
+	}
+	case IC_GRAFICO: {
+		/* tres columnas de alturas distintas, cada una con su relleno, sobre un eje */
+		caja(l, 2, 9, 5, 14, 0x2563C9, 0x101820);
+		caja(l, 6, 4, 9, 14, 0xF2C14E, 0x101820);
+		caja(l, 10, 7, 13, 14, 0x3BB273, 0x101820);
+		raya(l, 1, 14, 15, 14, 1, 0x101820);
+		raya(l, 1, 1, 1, 14, 1, 0x101820);
+		/* (la del medio, con rayas: no solo el color) */
+		raya(l, 6, 7, 9, 5, 1, 0x101820);
+		raya(l, 6, 10, 9, 8, 1, 0x101820);
+		break;
+	}
+	case IC_MONEDA:
+		letra(l, "\xe2\x82\xac", 1, 0, 0, 0x1F6B3A, 96);
+		break;
+	case IC_PORCENTAJE:
+		letra(l, "%", 1, 0, 0, 0x101820, 92);
+		break;
+	case IC_MILES:
+		letra(l, "000", 1, 0, 0, 0x101820, 52);
+		raya(l, 2, 14, 14, 14, 1, 0x101820);
+		break;
+	case IC_DEC_MAS:
+	case IC_DEC_MENOS: {
+		/* «,0» con una flecha hacia «,00» (o al revés) */
+		int cara = letra_cara(FAM_SANS, 1, 0, NULL), tam = T * 4 * 42 / 100;
+
+		lz_texto(l, cara, tam, 0, X0, Y0 + T * 7 / 16, ic == IC_DEC_MAS ? ",0" : ",00", tinta(0x101820));
+		lz_texto(l, cara, tam, 0, X0 + T * 5 / 16, Y0 + T * 15 / 16, ic == IC_DEC_MAS ? ",00" : ",0", tinta(0x101820));
+		{
+			int fl[6] = { 1, 10, 5, 10, 3, 13 };
+
+			raya(l, 3, 7, 3, 10, 2, 0x2563C9);
+			pol(l, fl, 3, 0x2563C9);
+		}
+		break;
+	}
+	case IC_COMBINAR: {
+		/* dos celdas que se juntan: las flechas hacia el medio */
+		int a[6] = { 2, 8, 6, 5, 6, 11 }, b[6] = { 14, 8, 10, 5, 10, 11 };
+
+		caja(l, 0, 2, 16, 14, 0xFFFFFF, 0x26313F);
+		raya(l, 8, 2, 8, 4, 1, 0x8D99AA);
+		raya(l, 8, 12, 8, 14, 1, 0x8D99AA);
+		pol(l, a, 3, 0x2563C9);
+		pol(l, b, 3, 0x2563C9);
+		break;
+	}
+	case IC_RELLENO: {
+		/* el bote de pintura inclinado y la gota */
+		int bote[8] = { 3, 7, 9, 2, 14, 7, 8, 13 };
+		int dentro[8] = { 5, 7, 9, 4, 12, 7, 8, 11 };
+
+		pol(l, bote, 4, 0x26313F);
+		pol(l, dentro, 4, 0xFFFFFF);
+		lz_circulo(l, PX(14), PY(12), 2 * T, tinta(0x2563C9));
+		raya(l, 9, 2, 6, 0, 1, 0x26313F);
+		break;
+	}
+	case IC_FILTRO: {
+		int e[14] = { 1, 2, 15, 2, 10, 8, 10, 14, 6, 15, 6, 8, 1, 2 };
+
+		pol(l, e, 6, 0x26313F);
+		{
+			int d[12] = { 3, 3, 13, 3, 9, 7, 9, 12, 7, 13, 7, 7 };
+
+			pol(l, d, 6, 0xDDEBFA);
+		}
+		break;
+	}
+	case IC_COMENTARIO: {
+		int b[10] = { 1, 2, 15, 2, 15, 11, 6, 11, 3, 15 };
+
+		pol(l, b, 5, 0x26313F);
+		{
+			int c2[10] = { 2, 3, 14, 3, 14, 10, 5, 10, 4, 12 };
+
+			pol(l, c2, 5, 0xFFF4C2);
+		}
+		raya(l, 4, 5, 12, 5, 1, 0x26313F);
+		raya(l, 4, 8, 10, 8, 1, 0x26313F);
+		break;
+	}
+	case IC_INMOVILIZAR:
+		caja(l, 1, 1, 15, 15, 0xFFFFFF, 0x26313F);
+		caja(l, 1, 1, 15, 5, 0xC4D5EF, 0x26313F);
+		caja(l, 1, 1, 5, 15, 0xC4D5EF, 0x26313F);
+		raya(l, 1, 5, 15, 5, 2, 0x101820);
+		raya(l, 5, 1, 5, 15, 2, 0x101820);
+		break;
 	case IC_AYUDA:
 		lz_circulo(l, PX(8), PY(8), 7 * T, tinta(0x2563C9));
 		{

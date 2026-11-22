@@ -4,13 +4,14 @@
 
 (COMPAT) Para las pruebas del Asistente en Linux: hace de «WIN32 COMPRUEBA»
 con la misma salida que castel/nucleo32/win32/diagnostico.c (la de las
-personas, o la /MAQUINA que se ha pedido a la rama win32-hl), en la página
+personas, o la /MAQUINA de win32 1.3), en la página
 437 y con CR LF. Lo que tiene WIN32 «por dentro» (KERNEL32, USER32...) lo
 saca de sus fuentes como hazexp.py (las líneas «API(...) Nombre(»); las DLL
 de fuera, de la carpeta del programa o de CARPETA_WIN32 (sus exportaciones).
 En QEMU, la parte 49 usa el WIN32.BIN de verdad.
 """
 import glob
+import hashlib
 import os
 import re
 import struct
@@ -105,9 +106,11 @@ def main():
     args = sys.argv[3:]
     assert args and args[0].upper() == 'COMPRUEBA'
     args = args[1:]
-    maquina = bool(args) and args[0].upper() == '/MAQUINA' and os.environ.get('FALSO_MAQUINA') == '1'
+    # (/MAQUINA en cualquier sitio, como win32 1.3; con FALSO_MAQUINA=0, un WIN32
+    # de antes: «/MAQUINA» es una ruta más, que no se encuentra)
+    maquina = any(a.upper() == '/MAQUINA' for a in args) and os.environ.get('FALSO_MAQUINA', '1') == '1'
     if maquina:
-        args = args[1:]
+        args = [a for a in args if a.upper() != '/MAQUINA']
     tab = propias(fuentes)
     out = []
     di = out.append
@@ -122,10 +125,10 @@ def main():
         base = os.path.basename(ruta)
         p = lee_pe(ruta)
         if p is None:
-            di('ARCHIVO\t%s\tNOESTA\t0\t0\t0' % ruta if maquina else '%s: no se encuentra.' % ruta.replace('/', '\\'))
+            di('NOHAY\t%s' % ruta if maquina else '%s: no se encuentra.' % ruta.replace('/', '\\'))
             return
         if p is False:
-            di('ARCHIVO\t%s\tNOPE\t0\t0\t0' % ruta if maquina else '%s: no es un programa de Windows de 32 bits (PE de 386).' % base)
+            di('ARCHIVO\t%s\tno-pe\t%d\t-' % (ruta, os.path.getsize(ruta)) if maquina else '%s: no es un programa de Windows de 32 bits (PE de 386).' % base)
             return
         total['mirados'] += 1
         clase = 'DLL' if p['dll'] else 'VENTANAS' if p['sub'] == 2 else 'CONSOLA' if p['sub'] == 3 else 'PROGRAMA'
@@ -137,7 +140,9 @@ def main():
                 for f in fs:
                     if f not in tab[dll]:
                         nfal += 1
-                        lineas.append('FALTA\t%s\t%s' % (dll, f) if maquina else '  falta %s!%s' % (dll, f))
+                        lineas.append('FALTA\t%s\t%s\t%s' % (ruta, dll, f) if maquina else '  falta %s!%s' % (dll, f))
+                if maquina:
+                    lineas.insert(len(lineas) - sum(1 for f in fs if f not in tab[dll]), 'USA\t%s\t%s\tWIN32.BIN' % (ruta, dll))
                 continue
             r = None
             for c in (os.path.dirname(ruta), w32):
@@ -150,20 +155,23 @@ def main():
             q = lee_pe(r) if r else None
             if not q:
                 nfal += len(fs)
-                lineas.append('FALTADLL\t%s\t%d\t%s' % (dll, len(fs), 'NO32' if q is False else 'NOESTA') if maquina else
+                lineas.append('FALTADLL\t%s\t%s\t%d' % (ruta, dll, len(fs)) if maquina else
                               '  FALTA LA DLL %s (%d %s)%s' % (dll, len(fs), 'función' if len(fs) == 1 else 'funciones',
                                                               ': está, pero no es de 32 bits' if q is False else ''))
                 continue
             if not os.path.abspath(r).startswith(os.path.abspath(w32)) and r not in cola:
                 cola.append(r)
+            if maquina:
+                lineas.append('USA\t%s\t%s\t%s' % (ruta, dll, r))
             for f in fs:
                 if f not in q['exp']:
                     nfal += 1
-                    lineas.append('FALTA\t%s\t%s' % (dll, f) if maquina else '  falta %s!%s' % (dll, f))
+                    lineas.append('FALTA\t%s\t%s\t%s' % (ruta, dll, f) if maquina else '  falta %s!%s' % (dll, f))
         if maquina:
-            di('ARCHIVO\t%s\t%s\t%d\t%d\t%d' % (ruta, clase, p['tam'], len(p['imp']), nfun))
+            di('ARCHIVO\t%s\t%s\t%d\t%s' % (ruta, {'DLL': 'dll', 'VENTANAS': 'ventanas', 'CONSOLA': 'consola'}.get(clase, 'otro'), p['tam'],
+                                             hashlib.sha256(open(ruta, 'rb').read()).hexdigest()))
             out.extend(lineas)
-            di('FINARCHIVO\t%d' % nfal)
+            di('RESUMEN\t%s\t%d\t%d\t%d' % (ruta, len(p['imp']), nfun, nfal))
         else:
             di('%s: %s' % (base, {'DLL': 'DLL', 'VENTANAS': 'programa de ventanas', 'CONSOLA': 'programa de consola'}.get(clase, 'programa')))
             out.extend(lineas)
@@ -181,7 +189,8 @@ def main():
                 comprueba(r)
 
     if maquina:
-        di('#COMPRUEBA 1')
+        if args and os.path.isdir(args[0]):
+            di('PROGRAMA\t%s' % args[0])
     else:
         di('WIN32 COMPRUEBA: las funciones de Windows que piden, y las que aún no hay')
     for a in args:
@@ -192,7 +201,7 @@ def main():
     for r in cola:
         comprueba(r)
     if maquina:
-        di('TOTAL\t%d\t%d' % (total['mirados'], total['faltan']))
+        di('TOTAL\t%d\t%d\t%d' % (total['mirados'], total['faltan'], sum(1 for l in out if l.startswith('FALTADLL'))))
     elif total['faltan']:
         di('En total: %d %s; %s %d %s.' % (total['mirados'], 'archivo' if total['mirados'] == 1 else 'archivos',
                                            'falta' if total['faltan'] == 1 else 'faltan', total['faltan'],

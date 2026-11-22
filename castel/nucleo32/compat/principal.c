@@ -1,8 +1,9 @@
 /* principal.c - (COMPAT) COMPAT.BIN, el Asistente de compatibilidad:
  *   COMPAT                      la ventana
  *   COMPAT ruta                 la ventana, con ese programa o carpeta elegido (y comprobado)
- *   COMPAT /FALLO ruta [D!f]    lo lanza WIN32 cuando un programa no puede seguir
- *                               (la ventana, con lo que ha fallado arriba)
+ *   COMPAT /FALLO ruta [D!f]    lo lanza el botón «Comprobar compatibilidad» de WIN32
+ *                               cuando un programa no puede seguir (la ventana, con lo
+ *                               que ha fallado arriba: si no lo dice, de WIN32.LOG)
  *   COMPAT /REVISA              tras cambiar win32 (PAQUETES) y al arrancar
  *                               (ACTUALIZ /BANDEJA): vuelve a comprobar y avisa
  *   COMPAT /ORDEN ...           lo mismo en la Consola (y para las pruebas):

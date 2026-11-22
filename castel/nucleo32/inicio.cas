@@ -590,6 +590,14 @@ módulo Inicio
     ; (OFICINA2) su módulo (los cuatro primeros los lanza el escritorio por
     ; su número: AM_OFICINA; los demás, por su ruta: P_RUTA)
     constante OF_PROGRAMAS = 9
+    ; (PINTURA32, 0.8.8) ¿es el programa de Pintura 2 («...\PINTURA.BIN»)?
+    función acaba_en_pintura(p: puntero a byte): bool
+        variable n: nat32
+        n := longitud(p)
+        si n < 12 entonces devolver falso fin
+        devolver iguales(p + (n - 12), "\\PINTURA.BIN")
+    fin
+
     función hvp_de_oficina(i: nat32): puntero a byte
         según i
             caso 0: devolver "\\OFICINA\\FACTURAS.HVP"
@@ -669,7 +677,9 @@ módulo Inicio
                 ; (0.8.5) los accesorios (la Calculadora, el Reloj...) no entran de
                 ; salida entre los más usados (dejarían fuera la oficina): salen
                 ; cuando se usan, y siempre en Todos los programas > Accesorios
-                si progs[k].carpeta = C_ACCESORIOS entonces progs[k].rango := SIN_RANGO sino rango := rango + 1 fin
+                ; (PINTURA32, 0.8.8) y Pintura 2, del sistema, como la Pintura de la
+                ; oficina de antes: en Todos los programas > Multimedia
+                si progs[k].carpeta = C_ACCESORIOS o acaba_en_pintura(programa_de(i)) entonces progs[k].rango := SIN_RANGO sino rango := rango + 1 fin
             fin
             i := i + 1
         fin
@@ -683,13 +693,16 @@ módulo Inicio
             si i < 4 entonces
                 ; (PLUMA32) con Pluma 2 (el paquete «pluma»: \HISPA\PLUMA.BIN, con su
                 ; acceso en Oficina), el Pluma de Hispa-386 no sale aquí
-                si (i <> 3 o no hay_mirador_nativo()) y (i <> 1 o no existe("\\PLUMA.BIN")) entonces
+                ; (CUENTAS32) y con Cuentas 2 (el paquete «cuentas»), el Cuentas de 386
+                si (i <> 3 o no hay_mirador_nativo()) y (i <> 1 o no existe("\\PLUMA.BIN")) y (i <> 2 o no existe("\\CUENTAS.BIN")) entonces
                     k := nuevo(de_oficina(i), nulo, P_OFICINA, i, C_OFICINA, IC_DOCUMENTO, rango)
                     rango := rango + 1
                 sino
                     k := -1
                 fin
-            sino si existe(hvp_de_oficina(i)) entonces
+            sino si existe(hvp_de_oficina(i)) y (i <> 8 o no existe("\\PINTURA.BIN")) entonces
+                ; ((PINTURA32) con Pintura 2, el paquete del sistema «pintura» 2.0:
+                ; \HISPA\PINTURA.BIN, con su acceso en Multimedia, la de Hispa-386 no sale)
                 si i = 8 entonces k := nuevo(de_oficina(i), nulo, P_RUTA, 0, C_MULTIMEDIA, IC_DOCUMENTO, SIN_RANGO)
                 sino k := nuevo(de_oficina(i), nulo, P_RUTA, 0, C_OFICINA, IC_DOCUMENTO, SIN_RANGO) fin
                 si k >= 0 entonces

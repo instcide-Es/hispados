@@ -365,6 +365,11 @@ módulo Ured
             si ahora() <> tic_visto entonces
                 tic_visto := ahora()
                 pila_tic()
+                ; (CORTES) DHCP ha dado otra IP u otra puerta: lo de antes, cortado
+                si Rpila.red_cambió entonces
+                    Rpila.red_cambió := falso
+                    tcp_red_cambió(RED_CAMBIADA)
+                fin
                 tcp_tic()
                 si ahora() - enlace_visto >= 25 entonces
                     enlace_visto := ahora()

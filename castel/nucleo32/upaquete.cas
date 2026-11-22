@@ -87,7 +87,7 @@ módulo UPaquetes
     constante RUTA = 160
     constante NINGUNO = 0xFFFFFFFF
     constante URL_POR_DEFECTO = "http://actualiza.hispados.es/pentium/"
-    constante VERSIÓN_PAQUETES = "1.3"
+    constante VERSIÓN_PAQUETES = "1.5"                ; (CORTES)
 
     ; (PROGRAMAS) los tipos: el código y su nombre, en el orden en que salen
     ; (los mismos que TIPOS en tools/hpq.py; docs/PENTIUM.md, sección 13)
@@ -883,7 +883,14 @@ módulo UPaquetes
             escribir("  PAQUETES ... /DESDE=X:\\PAQUETES (o ponga la carpeta en C:\\HISPA\\PAQUETES\\ORIGEN.TXT).\n")
             devolver falso
         fin
-        r := esperar(t)
+        r := espera_descarga(t)
+        si r = 3 o cancelado entonces
+            ; (CORTES) cancelado: lo traído a medias, fuera
+            borrar(destino)
+            escribir("paquetes: cancelado: lo traído a medias se ha borrado y todo queda como estaba.\n")
+            cancelado := cierto
+            devolver falso
+        fin
         si r = 4 entonces
             ; (el servidor dice que no lo tiene: 404)
             si acaba_en(url, "CATALOGO.TXT") entonces
@@ -898,6 +905,34 @@ módulo UPaquetes
             devolver falso
         fin
         devolver cierto
+    fin
+
+    ; (CORTES) espera a DESCARGA sin quedarse parado: si se pide cancelar
+    ; (CANCELA.TXT) y en 1,5 s no ha parado él solo (está esperando a la
+    ; red, a un servidor que no contesta...), se le acaba. Da su código (3:
+    ; cancelado)
+    función espera_descarga(t: nat32): nat32
+        variable r, k, visto: nat32
+        k := 0
+        visto := 0
+        mientras cierto hacer
+            r := acabada(t)
+            si r <> SIGUE entonces devolver r fin
+            k := k + 1
+            si visto > 0 entonces
+                visto := visto + 1
+                si visto > 15 entonces
+                    escribir("paquetes: DESCARGA no para: se le acaba.\n")
+                    acabar_hija(t)
+                    esperar(t)
+                    devolver 3
+                fin
+            sino si k mod 3 = 0 y se_cancela() entonces
+                visto := 1
+            fin
+            dormir(10)
+        fin
+        devolver 1
     fin
 
     ; el archivo «nombre» del origen: da en «destino» dónde está (en la

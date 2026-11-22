@@ -32,6 +32,7 @@ módulo Redes
     público constante CORTADA_RED = 0xFFFFFFE8  ; la conexión se ha cortado
     público constante NO_CONEXIÓN = 0xFFFFFFE7  ; esa conexión no existe (o no quedan)
     público constante INALCANZABLE = 0xFFFFFFE6
+    público constante RED_CAMBIADA = 0xFFFFFFE0 ; (CORTES) la red ha cambiado (otra IP u otra puerta): la conexión, cortada
     ; (TLS) los de las conexiones cifradas (tls/tls.h)
     público constante TLS_CERTIFICADO = 0xFFFFFFE5  ; el certificado del servidor no vale
     público constante TLS_FALLO = 0xFFFFFFE4        ; no se ha podido hacer la conexión segura
@@ -165,12 +166,13 @@ módulo Redes
             caso 0xFFE2: devolver "no se sabe la fecha (el reloj del equipo no está en hora): no se pueden comprobar los certificados"
             caso 0xFFEF: devolver "no hay servicio de red (falta RED.BIN o se arrancó con «sinred»)"
             caso 0xFFEE: devolver "no hay ninguna tarjeta de red que Hispa-Pentium sepa llevar"
-            caso 0xFFED: devolver "la tarjeta de red no tiene enlace (¿está enchufado el cable?)"
+            caso 0xFFED: devolver "la red no tiene enlace (¿está enchufado el cable? ¿se ha desconectado el Wi-Fi?)"    ; (CORTES)
             caso 0xFFEC: devolver "todavía no hay IP (nadie ha contestado por DHCP)"
             caso 0xFFEB: devolver "no ha contestado a tiempo"
             caso 0xFFEA: devolver "no hay nadie en ese puerto (conexión rechazada)"
             caso 0xFFE9: devolver "ese nombre no existe"
             caso 0xFFE8: devolver "la conexión se ha cortado"
+            caso 0xFFE0: devolver "la red ha cambiado (otra IP u otra puerta de enlace): la conexión se ha cortado"    ; (CORTES)
             caso 0xFFE7: devolver "esa conexión no existe (o no quedan)"
             caso 0xFFE6: devolver "no se llega"
             caso 0xFFF9: devolver "no puede ser"

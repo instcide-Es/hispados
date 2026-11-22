@@ -294,6 +294,15 @@ API(i32) HispaDXSonido(i32 op, u32 a, u32 b, u32 c)
 {
 	u32 ahora = sys_tics() * 10;
 	(void)c;
+	if (op == 4) {
+		/* (HL) el volumen general del sistema (el de SONIDO.BIN, la 193, 1):
+		 * a = 0xFFFFFFFF lo pregunta; si no, lo pone (de 0 a 100). Da
+		 * 0x100 + el volumen (el mezclador de WINMM); 0 si no hay servicio */
+		u32 v = sc(193, 1, 0, a == 0xFFFFFFFF ? 0xFFFFFFFF : a > 100 ? 100 : a);
+		if (ES_ERROR(v) || v > 100)
+			return 0;
+		return (i32)(0x100 | v);
+	}
 	if (hay_canal()) {
 		switch (op) {
 		case 0:

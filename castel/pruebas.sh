@@ -256,10 +256,22 @@
 #  42. (CORREO, SOLO=correo) Correo, el cliente de correo (CORREO.BIN; pruebas_correo.sh): el
 #      núcleo MIME/HTML/vCard y el IMAP con ASan y fuzz, el servidor de pruebas propio
 #      (IMAP, SMTP, POP3 con TLS), las órdenes y la ventana en QEMU, y lo que tarda en un Atom.
+#  47. (ICONOS, SOLO=iconos) Los iconos del tapiz (pruebas_iconos.sh): 30 a 1024 x 600 y
+#      a 800 x 600, ninguno en la barra ni en el dock (mira_iconos.py); organizar por
+#      nombre, tipo, tamaño y fecha; arrastrar; la cuadrícula, la automática, el teclado,
+#      ICONOS.INI; cambiar la medida en marcha; 47 a 640 x 480, en dos páginas; sin dock.
 #  32. (MIRADOR, SOLO=mirador) El Mirador (MIRADOR.BIN): PNG, BMP, JPG, GIF
 #  41. (PLUMA32, SOLO=pluma) Pluma 2 (PLUMA.BIN, el procesador de textos de 32 bits en C
 #      portable: nucleo32/oficina; pruebas_pluma.sh): formatos, PDF, RTF, corrector, la
 #      ventana con un guion, en QEMU (escribir, tabla, imagen, guardar, PDF) y en un Atom.
+#  44. (CUENTAS32, SOLO=cuentas) Cuentas 2 (CUENTAS.BIN, la hoja de cálculo de 32 bits en C
+#      portable: nucleo32/oficina/cuentas; pruebas_cuentas.sh): las fórmulas (a mano, con
+#      Python y fuzz), los formatos (.HOJ, .XLSX, .ODS, .CSV), el PDF, la ventana con un
+#      guion, en QEMU (escribir, gráfico, guardar, PDF, volver a abrir) y en un Atom.
+#  45. (PINTURA32, SOLO=pintura) Pintura 2 (PINTURA.BIN, el programa de dibujo de 32 bits en C
+#      portable: nucleo32/oficina/pintura; pruebas_pintura.sh): formatos y su fuzz, cada herramienta
+#      con un guion contra su imagen esperada, en QEMU (pintar, texto, guardar PNG, fondo de
+#      escritorio, volver a abrir) y el pincel en un Atom.
 #      animado e ICO desde el explorador, las flechas, la rueda, girar,
 #      pantalla completa, diapositivas y «Usar como fondo de escritorio» (la
 #      llamada 172: FONDO.HPM), que sigue al arrancar otra vez.
@@ -317,6 +329,12 @@
 #      «Editar con Pintura» en BMP y PCX), la rueda, Alt+letra, el
 #      portapapeles, maximizar, una ruta larga, \DOCUMENT y la zona protegida.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
+#  37. (CORTES, SOLO=cortes) Los cortes de la red (pruebas_cortes.sh): DESCARGAR
+#      contra un servidor que cierra, corta, calla o no deja seguir, y con el
+#      enlace caído a mitad (sigue desde donde iba, con Range); TCP con el
+#      camino muerto (keepalive); PAQUETES con el enlace caído; «Cancelar» en
+#      menos de 2 s; «Reiniciar» en plena descarga; «Forzar el cierre» de un
+#      programa colgado; y el Wi-Fi simulado que se va y vuelve con otra IP.
 #  38. (USUARIOS, SOLO=usuarios) Los usuarios (pruebas_usuarios.sh): ARGON2
 #      con ASan en Linux, la serie de tools/hpq.py; un sistema de antes que
 #      da de alta usuarios con contraseña (Argon2id) y sus carpetas; el usuario
@@ -328,6 +346,12 @@
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
+#  43. (AGENDA, SOLO=agenda) La Agenda (AGENDA.BIN; pruebas_agenda.sh): las
+#      repeticiones frente a python-dateutil, el cambio de hora, un .ICS de
+#      Google de ida y vuelta, los cumpleaños de una vCard, los festivos (la
+#      misma tabla en el Reloj) y el fuzz del lector .ICS, con corre32; y en
+#      QEMU: importar, una cita nueva que avisa con el reloj adelantado,
+#      posponer, la repetición semanal, el Reloj y la bandeja.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
 #   SOLO=32 ./pruebas.sh          la primera, la octava y la novena (lo de 32 bits)
 #   SOLO=06 ./pruebas.sh          la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
@@ -356,6 +380,7 @@
 #   SOLO=pdf ./pruebas.sh         la primera y la 30 (Hispa-PDF: PDF.BIN y su ventana)
 #   SOLO=zip ./pruebas.sh         la primera y la 31 (Comprimidos: ZIP y UNZIP; pruebas_zipvisor.sh)
 #   SOLO=mirador ./pruebas.sh     la primera y la 32 (el Mirador y la imagen de tapiz; pruebas_zipvisor.sh)
+#   SOLO=cortes ./pruebas.sh      la primera y la 37 ((CORTES) los cortes de la red; pruebas_cortes.sh)
 #   SOLO=usuarios ./pruebas.sh    la primera y la 38 (USUARIOS: los usuarios, la serie del catálogo, el azar; pruebas_usuarios.sh)
 #   SOLO=panel ./pruebas.sh       la primera y la 34 ((PANEL) el Panel de control y la hora por Internet; pruebas_panel.sh)
 #   SOLO=bloc ./pruebas.sh        la primera y la 35 (BLOC: el Bloc de notas 1.0)
@@ -365,6 +390,10 @@
 #   SOLO=pluma ./pruebas.sh       la primera y la 41 (PLUMA32: Pluma 2; pruebas_pluma.sh)
 #   SOLO=oficina ./pruebas.sh     la primera y la 40 (OFICINA2: la oficina 1.1 en HVPRUN; pruebas_oficina.sh)
 #   SOLO=correo ./pruebas.sh      la primera y la 42 (CORREO: el cliente de correo; pruebas_correo.sh)
+#   SOLO=agenda ./pruebas.sh      la primera y la 43 (AGENDA: la Agenda; pruebas_agenda.sh)
+#   SOLO=cuentas ./pruebas.sh     la primera y la 44 (CUENTAS32: Cuentas 2; pruebas_cuentas.sh)
+#   SOLO=pintura ./pruebas.sh     la primera y la 45 (PINTURA32: Pintura 2; pruebas_pintura.sh)
+#   SOLO=iconos ./pruebas.sh      la primera y la 47 (ICONOS: los iconos del tapiz; pruebas_iconos.sh)
 #   SOLO=compat ./pruebas.sh      la primera y la 49 ((COMPAT) el Asistente de compatibilidad; pruebas_compat.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
@@ -423,6 +452,11 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_pluma.sh           # (PLUMA32) la parte 41, como parte_pluma
 . $AQUI/pruebas_oficina.sh         # (OFICINA2) la parte 40, como parte_oficina
 . $AQUI/pruebas_correo.sh          # (CORREO) la parte 42, como parte_correo
+. $AQUI/pruebas_agenda.sh          # (AGENDA) la parte 43, como parte_agenda
+. $AQUI/pruebas_cuentas.sh         # (CUENTAS32) la parte 44, como parte_cuentas
+. $AQUI/pruebas_pintura.sh         # (PINTURA32) la parte 45, como parte_pintura
+. $AQUI/pruebas_cortes.sh          # (CORTES) la parte 37, como parte_cortes
+. $AQUI/pruebas_iconos.sh          # (ICONOS) la parte 47, como parte_iconos
 . $AQUI/pruebas_compat.sh          # (COMPAT) la parte 49, como parte_compat
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
@@ -446,7 +480,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|compat) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (COMPAT) compat
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|compat) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (COMPAT) compat
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -1575,14 +1609,15 @@ if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excep
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
 # a la medida de un netbook (1024 x 600); llevar un icono a otro sitio y organizarlos; mover una ventana desde su menú
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE="escritorio modo=1024x600" PANTALLA=1024x600 MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":captura c1" ":arrastra 60 190 500 300" \
-  ":raton 700 100" ":captura c2" ":clicd 600 200" ":clic 620 265" ":captura c3" ":clicd 600 200" ":clic 620 215" ":pausa 1" ":captura c4" ":clicd 400 95" ":clic 420 131" \
+  ":raton 700 100" ":captura c2" ":clicd 600 200" ":clic 620 265" ":pausa 1" ":clic 620 313" ":captura c3" ":clicd 600 200" ":clic 620 215" ":pausa 1" ":captura c4" ":clicd 400 95" ":clic 420 131" \
   ":raton 460 233" ":clic 460 233" ":raton 700 400" ":captura c5" > $G/medida.sal 2>&1
 S=$G/medida.sal
 mira "con «modo=1024x600» en la línea del cargador, el escritorio arranca a esa medida" "^escritorio: en marcha, 1024 x 600 con 32 bits por punto"
 miracap "a 1024 x 600 (la pantalla de un netbook): la barra de tareas abajo, de lado a lado, el reloj a la derecha y los iconos" c1 tam 1024 600 negrita 30 570 46 580 Inicio \
   rgb 1019 597 3393E0 12 rgb 600 598 1D5DBA 10 texto 24 50 32 58 "Mi equipo" negrita 854 505 869 520 Hispa-Pentium
-miracap "un icono del tapiz se lleva a otro sitio arrastrándolo" c2 texto 472 312 480 320 Consola notexto 20 196 60 214 Consola texto 24 50 32 58 "Mi equipo"
-miracap "«Organizar iconos» los devuelve a su sitio" c3 texto 32 202 40 210 Consola notexto 460 300 500 330 Consola
+# (ICONOS) arrastrado, va a la celda más cercana de la rejilla; «Organizar iconos...» es un submenú: «Como al principio»
+miracap "un icono del tapiz se lleva a otro sitio arrastrándolo (a la celda de la rejilla más cercana)" c2 texto 480 278 488 286 Consola notexto 20 196 60 214 Consola texto 24 50 32 58 "Mi equipo"
+miracap "«Organizar iconos...» > «Como al principio» los devuelve a su sitio" c3 texto 32 202 40 210 Consola notexto 470 270 500 300 Consola
 miracap "Configuración dice la medida de la pantalla" c4 texto 300 135 320 145 "Pantalla:  1024 x 600, 32 bits por punto"
 miracap "«Mover», en el menú de una ventana: la flecha va a su título y la ventana la sigue hasta el clic siguiente" c5 negrita 298 185 306 193 "Configuración" \
   notexto 255 80 270 95 "Configuración"
@@ -1623,7 +1658,7 @@ SES=(":pausa 2" ":captura ex1" ":doble 60 40" ":pausa 3" ":captura ex2" ":doble 
  ":tecla f4" ":escribe C:\\" ":tecla ret" ":pausa 1" ":clicd 452 310" ":pausa 1" ":captura ex13" ":tecla esc"
  ":clic 260 260" ":ctrlclic 356 260" ":pausa 1" ":captura ex14" ":arrastra 600 455 380 290" ":pausa 1" ":captura ex15"
  ":clic 452 310" ":arrastra 452 310 120 540" ":pausa 2" ":clic 260 410" ":arrastra 260 410 400 535" ":pausa 2" ":captura ex16"
- ":tecla f3" ":escribe pir" ":tecla ret" ":pausa 3" ":captura ex17" ":doble 100 525" ":pausa 3" ":captura ex18" ":arrastra 292 530 400 530" ":pausa 1"
+ ":tecla f3" ":escribe pir" ":tecla ret" ":pausa 3" ":captura ex17" ":tecla meta_l-d" ":pausa 1" ":doble 176 420" ":pausa 3" ":captura ex18" ":arrastra 292 530 400 530" ":pausa 1"
  ":clicd 320 530" ":pausa 1" ":captura ex19" ":clic 380 513" ":pausa 1" ":captura ex20")
 CAPTURAS=$G ESCRIBE=1 DISCO=$G/ex.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" "${SES[@]}" > $G/explorador.sal 2>&1
 S=$G/explorador.sal
@@ -1651,10 +1686,12 @@ miracap "el botón secundario en un archivo: Abrir, Abrir con..., Mandar a la Pa
 miracap "Control y un clic eligen dos" ex14 texto 111 475 121 485 "2 elegidos"
 miracap "y un recuadro con el ratón, los que toca" ex15 texto 111 475 121 485 "7 elegidos"
 mira "arrastrar un archivo al tapiz deja en él un acceso" "^escritorio: un acceso nuevo en el tapiz: C:.LEEME.TXT"
-miracap "el acceso en el tapiz (con su flechita), y un programa soltado en el dock queda fijado" ex16 texto 79 541 89 551 LEEME.TXT texto 615 529 625 539 "Fijado en el dock."
+# (ICONOS) soltado debajo de la zona de los iconos (a la altura del dock), el acceso va a la celda libre más cercana (120, 392), detrás de la ventana
+mira "el acceso, en la zona de los iconos: a la celda libre más cercana (no a la altura del dock)" "escritorio: iconos (acceso nuevo): .* LEEME.TXT@120,392/1;"
+miracap "un programa soltado en el dock queda fijado" ex16 texto 615 529 625 539 "Fijado en el dock."
 miracap "buscar (F3) «pir» en la carpeta y las de dentro: lo encontrado, con su carpeta" ex17 negrita 236 172 256 192 PIRATA.TXT texto 290 172 560 192 "C:\\TEXTOS" \
   texto 103 475 113 485 "Encontrados: 2."
-miracap "dos clics en el acceso del tapiz lo abren con lo suyo (EQUIPO /ABRIR: el Bloc de notas)" ex18 negrita 149 89 159 99 "LEEME.TXT"
+miracap "dos clics en el acceso del tapiz (con Logo+D, que enseña el escritorio) lo abren con lo suyo (EQUIPO /ABRIR: el Bloc de notas)" ex18 negrita 149 89 159 99 "LEEME.TXT"
 miracap "el botón secundario en el dock: Abrir, Abrir otra ventana, Fijar, Quitar, Cerrar y Ocultar el dock" ex19 texto 329 501 339 511 "Ocultar el dock"
 miracap "«Ocultar el dock» lo quita (y lo de debajo se ve)" ex20 nrgb 400 504 0F3F8A 20
 saca $G/ex.img VACIA/NUEVO.TXT $G/nuevo.txt; saca $G/ex.img LEEME.TXT $G/leeme.txt
@@ -3365,8 +3402,8 @@ CAPTURAS=$G MODULOS=$Y/ACPI.BIN,$Y/BLOC.BIN ARRANQUE="escritorio acpicada=1" QEM
   "${PUESTA[@]}" ":monitor cont" ":pausa 5" ":captura a1" ":raton 690 585" ":pausa 1.5" ":captura a2" \
   "${ENCHUFA[@]}" ":pausa 3" ":captura a3" ":clic 690 585" ":pausa 1" ":captura a4" ":raton 400 300" \
   "${GASTADA[@]}" ":pausa 3" ":raton 690 585" ":pausa 1.5" ":captura a5" ":raton 400 300" \
-  ":clic 40 585" ":clic 80 176" ":pausa 2" ":escribe sin guardar" ":clic 40 585" ":clic 360 545" ":clic 275 327" ":pausa 3" ":captura a6" \
-  ":clic 40 585" ":clic 360 545" ":clic 275 327" ":pausa 4" > $Y/apagar.sal 2>&1
+  ":clic 40 585" ":clic 80 176" ":pausa 2" ":escribe sin guardar" ":clic 40 585" ":clic 360 545" ":clic 275 327" ":pausa 5" ":captura a6" \
+  ":tecla ret" ":pausa 4" > $Y/apagar.sal 2>&1
 S=$Y/apagar.sal
 mira "el núcleo lanza el servicio de ACPI al arrancar, y este lee las tablas de QEMU y la batería de la SSDT de prueba (_BIF, _BIX, _BST)" \
   "^acpi: el servicio de ACPI (ACPI.BIN) en marcha, la tarea [0-9]*" "^ACPI: SSDT .*HISPA  BATPRUEB" "^Batería 1: ._SB_.HBAT" \
@@ -3383,9 +3420,12 @@ miracap "al enchufar el cargador (con el recuadro abierto), se pone al día solo
 miracap "un clic en la pila quita el recuadro" a4 notexto 300 500 790 560 "Enchufado"
 miracap "con la batería gastada (la salud al 40 %), el aviso en terracota" a5 texto 300 480 790 560 "Salud: 40 % (guarda 5.000 de 12.500 mAh de cuando era nueva)" \
   texto 300 480 790 560 "La batería está gastada: dura menos de la mitad que nueva"
-miracap "«Apagar» con el Bloc de notas sin guardar: el Bloc avisa, no se apaga y el escritorio lo dice" a6 \
-  texto 100 100 700 500 "Hay un programa sin cerrar: ¿algo sin guardar?"
-mira "«Apagar» otra vez: se cierran los programas, se vacían los discos y el servicio apaga por ACPI (S5: _PTS, el modo ACPI, SLP_EN) y QEMU termina" \
+# (CORTES) ya no es «Hay un programa sin cerrar» y apagar otra vez: el cuadro
+# «Estos programas no se han cerrado», con «Forzar el cierre» (Intro)
+miracap "«Apagar» con el Bloc de notas sin guardar: el Bloc pregunta y el escritorio, «Estos programas no se han cerrado» (el Bloc espera una respuesta), con «Forzar el cierre»" a6 \
+  negrita 100 100 700 500 "Estos programas no se han cerrado:" texto 100 100 700 500 "(espera una respuesta)" negrita 100 100 700 500 "Forzar el cierre"
+mira "«Forzar el cierre»: se cierran los programas, se vacían los discos y el servicio apaga por ACPI (S5: _PTS, el modo ACPI, SLP_EN) y QEMU termina" \
+  "^escritorio: se fuerza el cierre de la tarea [0-9]* (.*Bloc de notas" \
   "^escritorio: apagar" "^energía: apagar (S5) por el servicio de ACPI" "^ACPI: preparar S5 (._S5, _PTS, _SST): AE_OK" \
   "^ACPI: modo ACPI (SMI_CMD B2h <- F1h): AE_OK" "^\[código 0\]"
 if ! grep -q "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $S; then ok "ni una excepción del núcleo ni un error de ACPICA en toda la sesión"
@@ -4267,7 +4307,11 @@ fi   # [WIN32] los programas de Windows
 # ventana a pantalla completa con el ratón de los juegos y DirectInput
 # (JUEGOV, moviendo el ratón de QEMU), UDP en red local como cliente y como
 # servidor (REDUDP, con tests/juegos/eco_udp.py) y el sonido (SONJ: la
-# mezcla en su hilo, waveOut con su evento y el CD de sonido por MCI).
+# mezcla en su hilo, waveOut con su evento y el CD de sonido por MCI). (HL)
+# Lo que pedía Half-Life 1: HLK32, HLORD (Winsock por número), HLMM (mmio y
+# el mezclador), HLNET (WININET, sin red y contra el servidor HTTP de aquí),
+# HLVEN (en el escritorio) y el juego de mentira JUEGO99 (WIN32 COMPRUEBA de
+# su carpeta, /CON y /MAQUINA: «está todo»).
 if parte08 win32juegos; then
 echo "== (JUEGOS) Hispa-Pentium: lo que pide un juego de Windows (diagnóstico, hilos, SEH, registro, MSVCRT de VC6, ventanas y ratón, UDP, sonido y CD) =="
 J=$P/jue
@@ -4282,7 +4326,11 @@ ok "nucleo32/win32/juegos.sh: $(ls $J/jp/*.EXE | wc -l) programas de prueba (gcc
 cp $J/d.img $J/c.img
 O=("cd \\JUEGOS" "FALTA" ":pausa 3" "SINDLL" ":pausa 3" "WIN32 COMPRUEBA FALTA.EXE SINDLL.EXE" ":pausa 4" "WIN32 COMPRUEBA C:\\JUEGOS" ":pausa 6"
    "HILOS" ":pausa 15" "HILOS /SALIR" ":pausa 4" "HILOS /DEJA" ":pausa 4" "SEH" ":pausa 6" "SEH /SOLO" ":pausa 3" "SEH /FILTRO" ":pausa 3"
-   "REG" ":pausa 4" "REG /LEE" ":pausa 3" "CRT uno \"dos tres\" cuatro" ":pausa 6" "cd \\PRUEBAS" "K32PRUE" ":pausa 5" "HOLAC" ":pausa 2")
+   "REG" ":pausa 4" "REG /LEE" ":pausa 3" "CRT uno \"dos tres\" cuatro" ":pausa 6"
+   "WIN32 COMPRUEBA FALTA.EXE SINDLL.EXE /MAQUINA" ":pausa 4" "HLK32" ":pausa 6" "HLK32 /FATAL" ":pausa 3" "HLORD" ":pausa 4" "HLMM" ":pausa 5"
+   "HLNET /SINRED" ":pausa 5" "cd \\JUEGOS\\JUEGO99" "WIN32 COMPRUEBA C:\\JUEGOS\\JUEGO99" ":pausa 5" "WIN32 COMPRUEBA JUEGO.EXE /CON C:\\JUEGOS\\JUEGO99" ":pausa 5"
+   "WIN32 COMPRUEBA JUEGO.EXE /MAQUINA" ":pausa 4" "JUEGO" ":pausa 5"
+   "cd \\PRUEBAS" "K32PRUE" ":pausa 5" "HOLAC" ":pausa 2")
 ESCRIBE=1 DISCO=$J/c.img ARRANQUE=ordenes MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $J/SEMILLA.BIN "${O[@]}" > $J/consola.sal 2>&1
 tr -d '\r' < $J/consola.sal | grep -v '^\[w32\]' > $J/consola.txt
 S=$J/consola.txt
@@ -4329,6 +4377,50 @@ mira "stdio en texto (\\n como \\r\\n en el disco) y en binario, sprintf con com
 mira "qsort, bsearch, setjmp y longjmp, _beginthreadex y _beginthread, _ftol y _CIpow/_CIsqrt del compilador, new de C++, _splitpath, _ecvt, Unicode; atexit al revés" \
   "^qsort: 12345789 kiwi uva 5$" "^longjmp: 5$" "^beginthreadex: 40 9 con id$" "^beginthread: 42$" "^ftol: -3 00000002540be400$" "^cipow: 1024 141421$" "^new: si 3$" \
   "^splitpath: C:|.JUEGOS.VALVE.|hl|.exe D:.OTRA.hl.dll$" "^ecvt: 12346 3 1$" "^unicode: 8 vida=100$" "^FIN CRT$" "^atexit: segundo puesto, el primero$" "^atexit: primero puesto, el ultimo$"
+# (HL) lo que pedía Half-Life 1
+TB=$'\t'
+mira "(HL) WIN32 COMPRUEBA /MAQUINA: una línea por hecho, con tabuladores (FALTA, FALTADLL, RESUMEN, TOTAL)" \
+  "^ARCHIVO${TB}C:.JUEGOS.FALTA.EXE${TB}consola${TB}[0-9]*${TB}[0-9a-f]\{64\}$" "^FALTA${TB}C:.JUEGOS.FALTA.EXE${TB}WINMM.DLL${TB}mixerNoHay$" \
+  "^FALTADLL${TB}C:.JUEGOS.SINDLL.EXE${TB}NOHAY.DLL${TB}1$" "^RESUMEN${TB}C:.JUEGOS.FALTA.EXE${TB}[0-9]*${TB}[0-9]*${TB}2$" "^TOTAL${TB}2${TB}3${TB}1$"
+mira "(HL) KERNEL32: _lcreat, _lwrite, _llseek, _lopen y _lread (solo para leer: no escribe), OpenFile (OF_EXIST con la ruta entera, el error, leer, OF_DELETE)" \
+  "^lcreat: si 14$" "^llseek: 5 14$" "^lopen: 4 \[Life\] 1$" "^lopen_nohay: -1$" "^openfile_existe: 1 ruta entera$" "^openfile_nohay: -1 2$" "^openfile_lee: 4 \[Half\]$" "^openfile_borra: 1 -1$"
+mira "(HL) KERNEL32: OpenFileMapping por su nombre (el mismo trozo; sigue al cerrar el primero; ERROR_ALREADY_EXISTS), SetEnvironmentVariableW, SetVolumeLabel, GetProcessVersion, EnumSystemLocales" \
+  "^openfilemapping: si \[visto por los dos\]$" "^mapa_sigue: \[visto por los dos\]$" "^mapa_ya_existe: 183$" "^openfilemapping_nohay: nulo 2$" "^setenvw: 1 \[valve\]$" \
+  "^setvolumelabel: 0 50$" "^getprocessversion: 00040000 00040000$" "^enumsystemlocales: 1 4 con el de Espa"
+mira "(HL) USER32: WaitForInputIdle, ExitWindowsEx (no: ERROR_PRIVILEGE_NOT_HELD), DDE que falla limpio (DMLERR_NO_CONV_ESTABLISHED) con sus cadenas y datos, los lParam de DDE" \
+  "^waitforinputidle: 0$" "^exitwindowsex: 0 1314$" "^ddeinitialize: 0 con id$" "^ddestring: 8 \[Servidor\] distintas$" "^ddeconnect: nulo 400a$" "^ddetransaction: nulo$" \
+  "^ddedata: 13 \[datos de dde\]$" "^ddeuninitialize: 1$" "^unpackddelparam: 1 1234 56789abc$" "^reuseddelparam: 7 11223344 1$" "^getlastactivepopup_nohay: nulo$"
+mira "(HL) GDI32 (ScaleWindowExtEx y ScaleViewportExtEx en MM_TEXT, Escape: no, GetBoundsRect) y WINSPOOL.DRV (DocumentProperties: no hay impresoras)" \
+  "^scalewindowextex: 1 1 1$" "^scaleviewportextex: 1 1 1$" "^escape: 0 0$" "^getboundsrect: 9 0 0$" "^documentproperties: -1 1801$"
+mira "(HL) ADVAPI32, la seguridad: descriptores sin dueño ni DACL (todo permitido), SID y ACL de verdad, la de los objetos y archivos, sin testigos, los privilegios" \
+  "^initializesd: 1 20 1$" "^sd_owner: 1 nulo 0$" "^sd_group: 1 nulo$" "^sd_dacl: 1 0 nulo$" "^sd_sacl: 1 0$" "^sd_control: 1 0 1$" "^sd_pon_dacl: 1$" "^sid: 1 1 16$" \
+  "^equalsid: 1$" "^acl: 1 1 1 1$" "^acl_mala: 0$" "^kernelobjectsecurity: 0 122 20 1 1$" "^filesecurity: 1 1$" "^openprocesstoken: 0 120$" "^privilegios: 1 19 1 0$" "^privilegio_nohay: 0 1313$" "^FIN HLK32$"
+mira "(HL) FatalAppExit: su aviso y acaba (255)" "^HLK32.EXE ha tenido que acabar:$" "(HLK32.EXE ha acabado con el código 255)"
+mira "(HL) Winsock por número (WSOCK32 y WS2_32, que tienen otros del 10 al 12) y GetProcAddress con un número" \
+  "^wsastartup: 0 101$" "^htons: 3412 1234$" "^htonl: 04030201$" "^inet_addr: 0f02000a 192.168.1.20$" "^wsalasterror: 10035$" "^gethostname: 0 con nombre$" \
+  "^getprotobynumber: nulo$" "^socket_udp: si$" "^ioctlsocket: 0$" "^wsafdisset: 1 0$" "^ws2_32: 0202000a 10.0.2.15 01020304$" \
+  "^getprocaddress_numero: inet_addr gethostbyname nulo$" "^getprocaddress_ws2: otra inet_addr$" "^wsacleanup: 0$" "^FIN HLORD$"
+mira "(HL) WINMM, mmio: un WAV hecho con mmioCreateChunk y mmioAscend (el tamaño y el relleno) y leído con mmioDescend (FINDRIFF, FINDCHUNK), mmioRead, mmioSeek, el acceso directo y en memoria" \
+  "^mmio_escribe: si 0 0 0 0 201$" "^mmio_cierra: 0$" "^mmio_riff: 0 238 8$" "^mmio_fmt: 0 16 11025 16 1$" "^mmio_data: 0 201 8 100 300$" "^mmio_seek: 8 246$" "^mmio_nohay: 265$" \
+  "^mmio_getinfo: RIFF 246$" "^mmio_setinfo: 8$" "^mmio_advance: 0$" "^mmio_nohay_archivo: nulo$" "^mmio_existe: 1 0$" "^mmio_memoria: si 0 0$" "^fourcc: 45564157$"
+mira "(HL) WINMM, el mezclador (los altavoces y la onda, sus controles, poner y leer el volumen) y lo que no hay (waveIn, midiOut y aux: limpio)" \
+  "^mixer: 1 0 0 1 Mezclador de Hispa$" "^mixer_linea: 0 0 2 1 Altavoces$" "^mixer_onda: 0 10000 80000001$" "^mixer_micro: 1024$" "^mixer_control: 0 1 0 65535 Volumen general$" \
+  "^mixer_volumen: 0 0 la mitad$" "^mixer_control_nohay: 1025$" "^mixer_cierra: 0$" "^mcigetdeviceid: 0$" "^wavein: 0 6 nulo 6$" "^wavein_texto: No hay dispositivo (en Hispa a.*n no hay micr.*fono ni MIDI)\.$" \
+  "^midiout: 0 6 nulo 6$" "^aux: 0 2 2$" "^FIN HLMM$"
+mira "(HL) WININET sin red: InternetGetConnectedState dice que no (INTERNET_CONNECTION_OFFLINE), InternetCrackUrl, y bajar algo: ERROR_INTERNET_DISCONNECTED" \
+  "^conectado: 0 20$" "^internetopen: si$" "^crackurl: 1 3 servidores.ejemplo.es 27950 /lista.txt$" "^sin_red: -12163$" "^FIN HLNET$"
+mira "(HL) el juego de mentira de 1999 (el .EXE y su VGUI.DLL en la raíz, las del mod en MOD\\CL_DLLS y MOD\\DLLS, Winsock por número): WIN32 COMPRUEBA de su carpeta, está todo" \
+  "^(las DLL, desde la carpeta del programa: C:.JUEGOS.JUEGO99.)$" "^CLIENTE.DLL: DLL$" "^SERVIDOR.DLL: DLL$" "^VGUI.DLL: DLL$" "^JUEGO.EXE: programa de consola$" "^En total: 4 archivos; está todo (no falta nada).$"
+if [ "$(grep -c '^En total: 4 archivos; está todo (no falta nada).$' $S)" = 2 ] && ! sed -n '/COMPRUEBA C:.JUEGOS.JUEGO99/,/^FIN JUEGO/p' $S | grep -q '^  falta\|FALTA'; then
+  ok "(HL) y con «JUEGO.EXE /CON C:\\JUEGOS\\JUEGO99» (la carpeta del .EXE para las de las subcarpetas): está todo; VGUI.DLL ya no sale como falta"
+else ko "(HL) WIN32 COMPRUEBA del juego de mentira: $(sed -n '/COMPRUEBA C:.JUEGOS.JUEGO99/,/^FIN JUEGO/p' $S | grep '^  falta\|FALTA\|En total' | head -5 | tr '\n' ' ')"; fi
+SH=$(sha256sum $J/jp/JUEGO99/JUEGO.EXE | cut -d' ' -f1)
+mira "(HL) /MAQUINA del juego de mentira: su SHA-256 (el de aquí: ${SH:0:16}...), de dónde sale cada DLL (VGUI.DLL de la carpeta del .EXE) y nada que falte" \
+  "^PROGRAMA${TB}C:.JUEGOS.JUEGO99.$" "^ARCHIVO${TB}C:.JUEGOS.JUEGO99.JUEGO.EXE${TB}consola${TB}$(stat -c %s $J/jp/JUEGO99/JUEGO.EXE)${TB}$SH$" \
+  "^USA${TB}C:.JUEGOS.JUEGO99.JUEGO.EXE${TB}VGUI.DLL${TB}C:.JUEGOS.JUEGO99.VGUI.DLL$" "^USA${TB}C:.JUEGOS.JUEGO99.JUEGO.EXE${TB}WSOCK32.DLL${TB}WIN32.BIN$" \
+  "^RESUMEN${TB}C:.JUEGOS.JUEGO99.JUEGO.EXE${TB}9${TB}[0-9]*${TB}0$" "^TOTAL${TB}2${TB}0${TB}0$"
+mira "(HL) y al correr: carga las del mod por su ruta (desde otra carpeta de trabajo); la del cliente encuentra VGUI.DLL junto al .EXE, la del servidor usa Winsock por número" \
+  "^juego_wsastartup: 0 6c1b 0202000a$" "^juego_vgui: 41$" "^juego_openfile: -1$" "^juego_mixer: 0$" "^juego_cliente: cargada 1011$" "^juego_servidor: cargada 1111$" "^FIN JUEGO$"
 mira "y lo de antes sigue igual (K32PRUE y HOLAC, con los hilos y el cerrojo grande)" "^tls: si 1234$" "^interlocked: 6 6 10 20$" "^FIN K32PRUE$" "^Primo 100: 541$"
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo (las de SEH las recoge el programa)"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
@@ -4336,7 +4428,8 @@ else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | se
 cp $J/d.img $J/v.img
 M=(); for _ in 1 2 3 4 5 6 7 8 9; do M+=(":monitor mouse_move 100 0"); done
 CAPTURAS=$G ESCRIBE=1 DISCO=$J/v.img ARRANQUE=escritorio MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $J/SEMILLA.BIN ":pausa 2" ":doble 60 186" ":pausa 4" \
-  ":escribe \\JUEGOS\\JUEGOV" ":tecla ret" ":pausa 5" "${M[@]}" ":pausa 3" "${M[@]}" ":pausa 6" > $J/juegov.sal 2>&1
+  ":escribe \\JUEGOS\\JUEGOV" ":tecla ret" ":pausa 5" "${M[@]}" ":pausa 3" "${M[@]}" ":pausa 6" \
+  ":escribe \\JUEGOS\\HLVEN" ":tecla ret" ":pausa 8" > $J/juegov.sal 2>&1
 mtype -i $J/v.img ::JUEGOS/JUEGOV.TXT 2>/dev/null | tr -d '\r' > $J/juegov.txt
 S=$J/juegov.txt
 mira "GetVersionEx (4.10), QueryPerformanceCounter y timeGetTime a su paso (Sleep(100): 100 ms), timeBeginPeriod" "^version: 4.10 1$" "^timebeginperiod: 0$" "^qpc: mhz sube$" "^sleep100: bien bien$"
@@ -4345,6 +4438,11 @@ mira "una ventana WS_POPUP a pantalla completa (DirectDraw a 640 x 480): GetSyst
 mira "SetCursorPos y GetCursorPos (en el modo del juego), ShowCursor, ClipCursor" "^cursor_centro: 320 240$" "^showcursor: -1 -2$" "^clipcursor: 100 100$"
 mira "mirar con el ratón como un motor de juegos (volviendo al centro en cada vuelta): más de lo que mide la pantalla" "^raton_al_centro: mas que la pantalla"
 mira "y DirectInput (el ratón relativo, lo movido de verdad, sin topar con el borde)" "^dinput_raton: 0 0 0$" "^dinput_relativo: mas que la pantalla" "^FIN JUEGOV$"
+mtype -i $J/v.img ::JUEGOS/HLVEN.TXT 2>/dev/null | tr -d '\r' > $J/hlven.txt
+S=$J/hlven.txt
+mira "(HL) GetLastActivePopup (la ventanita de encima del juego), ExcludeUpdateRgn (sin lo que está por repintar) y WSAAsyncGetHostByName (el aviso a la ventana, con su hostent)" \
+  "^ventana: si$" "^lastactivepopup_sola: ella$" "^lastactivepopup: la de encima$" "^excludeupdatergn: [23] sin lo de repintar$" "^excludeupdatergn_nada: [123]$" \
+  "^asyncgethostbyname: 0 [0-9]* 10.0.2.15 10.0.2.15$" "^FIN HLVEN$"
 S=$J/juegov.sal
 if ! grep -q "excepción\|\*\*\*" $S; then ok "JUEGOV: ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
@@ -4355,15 +4453,26 @@ python3 -I $AQUI/../tests/juegos/eco_udp.py $J/eco $FU > $J/eco.txt 2>&1 &
 EPID=$!
 for _ in $(seq 50); do [ -s $J/eco/puerto ] && break; sleep 0.1; done
 PE=$(cat $J/eco/puerto 2> /dev/null)
+mkdir -p $J/srv                     # (HL) y el servidor HTTP de aquí, para WININET
+python3 -I $AQUI/nucleo32/servidor_prueba.py $J/srv > $J/srv.txt 2>&1 &
+SPID=$!
+for _ in $(seq 50); do [ -s $J/srv/puerto ] && break; sleep 0.1; done
+PU=$(cat $J/srv/puerto 2> /dev/null)
 DISCO=$J/d.img ARRANQUE=ordenes MODULOS= MEMORIA=64 QEMU_MAS="-nic user,model=e1000,hostfwd=udp::$FU-:27015" $AQUI/nucleo32/probar.sh $J/SEMILLA.BIN \
-  "cd \\JUEGOS" ":pausa 3" "REDUDP $PE" ":pausa 15" > $J/red.sal 2>&1
-kill $EPID 2> /dev/null
+  "cd \\JUEGOS" ":pausa 3" "REDUDP $PE" ":pausa 15" "HLNET 10.0.2.2 $PU" ":pausa 25" > $J/red.sal 2>&1
+kill $EPID $SPID 2> /dev/null
 tr -d '\r' < $J/red.sal | grep -v '^\[w32\]' > $J/red.txt
 S=$J/red.txt
 mira "UDP de cliente: sendto y recvfrom con el eco, gethostbyname del propio equipo, getsockname" "^eco: 13 \[eco: hola eco\] de 10.0.2.2:$PE$" "^mi_ip: 10.0.2.15$" "^getsockname: puerto propio$"
 mira "sin bloqueo (FIONBIO): WSAEWOULDBLOCK al momento (100 veces, deprisa); select y FIONREAD con UDP; la difusión" "^sin_bloqueo: -1 10035 deprisa$" "^select: 1 13$" "^tras_select: 13 \[eco: otra vez\]$" "^difusion: 9$"
 mira "de servidor: bind al 27015 (y otro al mismo, WSAEADDRINUSE), y contesta al que llega sin haberlo pedido" "^bind: 0$" "^bind_ocupado: -1 10048$" "^servidor_recibe: 13 \[hola servidor\]$" "^servidor_contesta: 22$" "^FIN REDUDP$"
 if [ "$(cat $J/eco/respuesta 2> /dev/null)" = "respuesta del servidor" ]; then ok "y la respuesta llega al otro equipo (aquí, por el puerto de QEMU)"; else ko "la respuesta del servidor no llega: $(cat $J/eco.txt)"; fi
+SG=$(python3 -c "import sys; d=open(sys.argv[1],'rb').read(); print(len(d), sum(d))" $J/srv/grande.bin 2> /dev/null)
+ST=$(python3 -c "import sys; d=open(sys.argv[1],'rb').read(); print(len(d), sum(d))" $J/srv/trozos.bin 2> /dev/null)
+mira "(HL) WININET con red: InternetOpenUrl de 400 KB con Content-Length ($SG), en trozos ($ST), la redirección (302) y un 404" \
+  "^conectado: 1 2$" "^grande: $SG 200$" "^trozos: $ST 200$" "^redirige: 41 200$" "^no_esta: 404$"
+mira "(HL) InternetConnect, HttpOpenRequest, HttpSendRequest, HttpQueryInfo (el texto, una cabecera por su nombre); HTTPS y FTP, aún no (ERROR_INTERNET_CANNOT_CONNECT)" \
+  "^httpsendrequest: 1 \[OK\] 41 con su texto$" "^httpqueryinfo_custom: 1 41$" "^https: -12029$" "^ftp: -12029$" "^FIN HLNET$"
 # 4. el sonido: DirectSound en bucle sin que el programa haga nada, waveOut, el CD
 if bash $AQUI/nucleo32/sonido/hacer.sh $J/son > $J/son.txt 2>&1; then
   cp $J/d.img $J/s.img
@@ -5800,6 +5909,12 @@ if parte08 pluma; then parte_pluma; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Plu
 # ---------------------------------------- 40. (OFICINA2) la oficina 1.1 en HVPRUN
 if parte08 oficina; then parte_oficina; else echo "  (SOLO=${SOLO08:-$SOLO}: sin la oficina 1.1)"; fi
 if parte08 correo; then parte_correo; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Correo)"; fi   # (CORREO)
+if parte08 agenda; then parte_agenda; else echo "  (SOLO=${SOLO08:-$SOLO}: sin la Agenda)"; fi   # (AGENDA) la parte 43
+if parte08 cuentas; then parte_cuentas; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Cuentas 2)"; fi   # (CUENTAS32) la 44
+if parte08 pintura; then parte_pintura; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Pintura 2)"; fi   # (PINTURA32) la 45
+if parte08 cortes; then parte_cortes; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los cortes de la red)"; fi   # (CORTES)
+# ------------------------- 47. (ICONOS) los iconos del tapiz (pruebas_iconos.sh)
+if parte08 iconos; then parte_iconos; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los iconos del tapiz)"; fi
 if parte08 compat; then parte_compat; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Asistente de compatibilidad)"; fi   # (COMPAT) la 49
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 

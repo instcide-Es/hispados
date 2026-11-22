@@ -8,14 +8,16 @@
  *      C:\X\Y.EXE: no se encuentra.
  *      Y.DLL: no es un programa de Windows de 32 bits (PE de 386).
  *      En total: 12 archivos; faltan 142 funciones.
- *  - la de las máquinas (WIN32 COMPRUEBA /MAQUINA, docs/PENTIUM.md, «El
- *    Asistente de compatibilidad»), con tabuladores y la ruta entera:
- *      #COMPRUEBA 1
- *      ARCHIVO <ruta> <VENTANAS|CONSOLA|PROGRAMA|DLL|NOPE|NOESTA> <tamaño> <dll> <funciones>
- *      FALTADLL <dll> <funciones> <NOESTA|NO32>
- *      FALTA <dll> <función o #ordinal>
- *      FINARCHIVO <faltan>
- *      TOTAL <archivos> <faltan>
+ *  - la de las máquinas (WIN32 COMPRUEBA ... /MAQUINA, win32 1.3:
+ *    docs/pentium/WIN32.md), una línea por hecho, con tabuladores:
+ *      PROGRAMA <carpeta del programa>
+ *      ARCHIVO <ruta> <ventanas|consola|dll|otro|no-pe> <tamaño> <sha256>
+ *      NOHAY <ruta>
+ *      USA <archivo> <dll> <de dónde>
+ *      FALTA <archivo> <dll> <función o #número>
+ *      FALTADLL <archivo> <dll> <funciones>
+ *      RESUMEN <archivo> <dll> <funciones> <faltan>
+ *      TOTAL <archivos> <faltan> <dll que faltan>
  * Lo que no se entiende se salta (una versión de WIN32 con algo más no lo
  * rompe).
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
@@ -102,56 +104,106 @@ static void base_de(const char *r, char *d, u32 cabe)
 	copia(d, b, cabe);
 }
 
+/* el archivo de esa ruta (el último con ella: el que se está mirando), o -1 */
+static int archivo_de(c_informe *i, const char *ruta)
+{
+	int k;
+
+	for (k = i->n_a - 1; k >= 0; k--)
+		if (iguales_sin_caja(i->a[k].ruta, ruta))
+			return k;
+	return -1;
+}
+
+static int es_hex64(const char *s)
+{
+	int k;
+
+	for (k = 0; k < 64; k++)
+		if (!((s[k] >= '0' && s[k] <= '9') || (s[k] >= 'a' && s[k] <= 'f') || (s[k] >= 'A' && s[k] <= 'F')))
+			return 0;
+	return !s[64];
+}
+
 static void linea_maquina(c_informe *i, const char *l)
 {
-	char t[RUTA_MAX];
+	char t[RUTA_MAX], r[RUTA_MAX];
 
 	campo(l, 0, t, sizeof t);
-	if (iguales(t, "ARCHIVO")) {
+	if (iguales(t, "ARCHIVO") || iguales(t, "NOHAY")) {
 		c_archivo *a = nuevo_archivo(i);
 
 		if (!a)
 			return;
 		campo(l, 1, a->ruta, sizeof a->ruta);
 		base_de(a->ruta, a->nombre, sizeof a->nombre);
+		if (iguales(t, "NOHAY")) {
+			a->clase = A_NO_ESTA;
+			return;
+		}
 		campo(l, 2, t, sizeof t);
-		a->clase = iguales(t, "VENTANAS") ? A_VENTANAS : iguales(t, "CONSOLA") ? A_CONSOLA : iguales(t, "DLL") ? A_DLL :
-			   iguales(t, "NOPE") ? A_NO_PE : iguales(t, "NOESTA") ? A_NO_ESTA : A_PROGRAMA;
+		a->clase = iguales(t, "ventanas") ? A_VENTANAS : iguales(t, "consola") ? A_CONSOLA : iguales(t, "dll") ? A_DLL :
+			   iguales(t, "no-pe") ? A_NO_PE : A_PROGRAMA;
 		campo(l, 3, t, sizeof t);
 		a->tam = num(t, NULL);
 		campo(l, 4, t, sizeof t);
-		a->n_dll = num(t, NULL);
-		campo(l, 5, t, sizeof t);
-		a->n_fun = num(t, NULL);
-	} else if (iguales(t, "FALTADLL")) {
-		c_falta *f = nueva_falta(i);
+		if (es_hex64(t)) {
+			u32 k;
 
-		if (!f)
-			return;
-		campo(l, 1, f->dll, sizeof f->dll);
-		campo(l, 2, t, sizeof t);
-		f->n = num(t, NULL);
-		campo(l, 3, t, sizeof t);
-		f->no32 = iguales(t, "NO32");
-	} else if (iguales(t, "FALTA")) {
-		c_falta *f = nueva_falta(i);
-
-		if (!f)
-			return;
-		campo(l, 1, f->dll, sizeof f->dll);
-		campo(l, 2, f->fn, sizeof f->fn);
-		if (!f->fn[0])
-			copia(f->fn, "?", sizeof f->fn);
-	} else if (iguales(t, "FINARCHIVO")) {
-		if (i->n_a) {
-			campo(l, 1, t, sizeof t);
-			i->a[i->n_a - 1].n_faltan = num(t, NULL);
+			for (k = 0; k < 64; k++)
+				a->sha[k] = (char)minuscula((u8)t[k]);
+			a->sha[64] = 0;
 		}
+	} else if (iguales(t, "FALTA") || iguales(t, "FALTADLL")) {
+		int k;
+		c_falta *f;
+
+		campo(l, 1, r, sizeof r);
+		k = archivo_de(i, r);
+		if (k < 0)
+			return;
+		f = nueva_falta(i);
+		if (!f)
+			return;
+		f->archivo = k;
+		campo(l, 2, f->dll, sizeof f->dll);
+		a_mayusculas(f->dll);
+		campo(l, 3, t, sizeof t);
+		if (!empieza(l, "FALTADLL")) {
+			copia(f->fn, t[0] ? t : "?", sizeof f->fn);
+		} else
+			f->n = num(t, NULL);
+	} else if (iguales(t, "RESUMEN")) {
+		int k;
+
+		campo(l, 1, r, sizeof r);
+		k = archivo_de(i, r);
+		if (k < 0)
+			return;
+		campo(l, 2, t, sizeof t);
+		i->a[k].n_dll = num(t, NULL);
+		campo(l, 3, t, sizeof t);
+		i->a[k].n_fun = num(t, NULL);
+		campo(l, 4, t, sizeof t);
+		i->a[k].n_faltan = num(t, NULL);
 	} else if (iguales(t, "TOTAL")) {
 		campo(l, 2, t, sizeof t);
 		i->total_faltan = num(t, NULL);
 		i->leido_total = 1;
 	}
+	/* (PROGRAMA y USA, y lo que venga después, no hacen falta aquí) */
+}
+
+/* ¿es una línea de /MAQUINA? (una palabra suya y un tabulador) */
+static int de_maquina(const char *l)
+{
+	static const char *const P[] = { "PROGRAMA\t", "ARCHIVO\t", "NOHAY\t", "USA\t", "FALTA\t", "FALTADLL\t", "RESUMEN\t", "TOTAL\t" };
+	u32 k;
+
+	for (k = 0; k < sizeof P / sizeof P[0]; k++)
+		if (empieza(l, P[k]))
+			return 1;
+	return 0;
 }
 
 static void linea_persona(c_informe *i, const char *l)
@@ -274,10 +326,8 @@ int inf_lee(c_informe *i, const char *t, u32 n)
 			k++;
 		if (!j)
 			continue;
-		if (empieza(l, "#COMPRUEBA")) {
+		if (!i->maquina && de_maquina(l))
 			i->maquina = 1;
-			continue;
-		}
 		if (i->maquina)
 			linea_maquina(i, l);
 		else

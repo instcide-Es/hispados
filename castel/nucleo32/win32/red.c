@@ -576,7 +576,6 @@ API(char *) inet_ntoa(u32 a)
 	fmt(b, sizeof b, "%u.%u.%u.%u", a & 255, (a >> 8) & 255, (a >> 16) & 255, a >> 24);
 	return b;
 }
-API(HANDLE) WSAAsyncGetHostByName(HWND h, u32 m, const char *n, char *b, i32 l) { (void)h; (void)m; (void)n; (void)b; (void)l; ultimo = 10045; return 0; }
 API(i32) WSAAsyncSelect(u32 s, HWND h, u32 m, i32 e) { (void)s; (void)h; (void)m; (void)e; ultimo = 10045; return -1; }
 
 /* la de Hispa-486: la IP, la máscara, la puerta y el DNS (16 octetos) y la MAC (6) */
@@ -602,3 +601,102 @@ API(i32) HispaRedConfig(u8 *c, u8 *mac)
 		memcpy(mac, i.mac, 6);
 	return 1;
 }
+
+/* ---- (HL) lo que piden los juegos de 1998-2000 con Winsock 1.1 ---- */
+BOOL WINAPI PostMessageA(HWND h, u32 m, u32 wp, u32 lp);
+static u32 asinc_n = 0x100;
+/* el nombre resuelto ya (el DNS espera aquí), y el aviso a la ventana, como
+ * Windows al acabar: wParam la tarea, lParam el largo y el error */
+API(HANDLE) WSAAsyncGetHostByName(HWND h, u32 m, const char *n, char *b, i32 l)
+{
+	struct { char *nombre; char **alias; i16 tipo, largo; char **lista; } *r = gethostbyname(n);
+	u32 t = asinc_n++, err = 0, largo = 0;
+	if (!r)
+		err = ultimo ? (u32)ultimo : 11001;
+	else {
+		/* la hostent, con sus datos detrás, en el búfer del programa */
+		u32 nl = strlen(r->nombre) + 1, hace = 16 + 8 + 4 + 8 + nl;
+		if ((i32)hace > l)
+			err = 10055;            /* WSAENOBUFS */
+		else {
+			u8 *p = (u8 *)b;
+			char **alias = (char **)(p + 16), **lista = (char **)(p + 24);
+			u32 *ip = (u32 *)(p + 32);
+			char *nom = (char *)(p + 36);
+			memcpy(ip, r->lista[0], 4);
+			memcpy(nom, r->nombre, nl);
+			alias[0] = 0;
+			lista[0] = (char *)ip;
+			lista[1] = 0;
+			*(char **)p = nom;
+			*(char ***)(p + 4) = alias;
+			*(i16 *)(p + 8) = 2;
+			*(i16 *)(p + 10) = 4;
+			*(char ***)(p + 12) = lista;
+			largo = hace;
+		}
+	}
+	PostMessageA(h, m, t, (err << 16) | (largo & 0xFFFF));
+	return (HANDLE)t;
+}
+API(HANDLE) WSAAsyncGetHostByAddr(HWND h, u32 m, const char *a, i32 al, i32 tipo, char *b, i32 l)
+{
+	char t[20];
+	u32 ip;
+	(void)al; (void)tipo;
+	memcpy(&ip, a, 4);
+	fmt(t, sizeof t, "%u.%u.%u.%u", ip & 255, (ip >> 8) & 255, (ip >> 16) & 255, ip >> 24);
+	return WSAAsyncGetHostByName(h, m, t, b, l);
+}
+static HANDLE asinc_no(HWND h, u32 m)
+{
+	u32 t = asinc_n++;
+	PostMessageA(h, m, t, 11004u << 16);   /* WSANO_DATA */
+	return (HANDLE)t;
+}
+API(HANDLE) WSAAsyncGetServByName(HWND h, u32 m, const char *n, const char *p, char *b, i32 l) { (void)n; (void)p; (void)b; (void)l; return asinc_no(h, m); }
+API(HANDLE) WSAAsyncGetServByPort(HWND h, u32 m, i32 pu, const char *p, char *b, i32 l) { (void)pu; (void)p; (void)b; (void)l; return asinc_no(h, m); }
+API(HANDLE) WSAAsyncGetProtoByName(HWND h, u32 m, const char *n, char *b, i32 l) { (void)n; (void)b; (void)l; return asinc_no(h, m); }
+API(HANDLE) WSAAsyncGetProtoByNumber(HWND h, u32 m, i32 n, char *b, i32 l) { (void)n; (void)b; (void)l; return asinc_no(h, m); }
+API(i32) WSACancelAsyncRequest(HANDLE t) { (void)t; ultimo = 10037; return -1; }   /* WSAEALREADY: ya acabó */
+static void *gancho;
+API(void *) WSASetBlockingHook(void *f) { void *a = gancho; gancho = f; return a; }
+API(i32) WSAUnhookBlockingHook(void) { gancho = 0; return 0; }
+API(void *) getprotobynumber(i32 n) { (void)n; ultimo = 11004; return 0; }
+API(void *) getnetbyname(const char *n) { (void)n; ultimo = 11004; return 0; }
+API(u32) inet_network(const char *s) { u32 ip = inet_addr(s); return ip == 0xFFFFFFFF ? ip : htonl(ip); }
+API(i32) WSARecvEx(u32 s, char *p, i32 n, i32 *fl) { if (fl) *fl = 0; return recv(s, p, n, 0); }
+API(i32) EnumProtocolsA(i32 *p, void *b, u32 *n) { (void)p; (void)b; if (n) *n = 0; return 0; }
+API(i32) GetAddressByNameA(u32 ns, void *t, char *n, i32 *p, u32 r, void *a, void *b, u32 *bl, char *al, u32 *all) { (void)ns; (void)t; (void)n; (void)p; (void)r; (void)a; (void)b; (void)bl; (void)al; (void)all; ultimo = 10045; return -1; }
+API(BOOL) AcceptEx(u32 l, u32 a, void *b, u32 n, u32 la, u32 ra, u32 *r, void *o) { (void)l; (void)a; (void)b; (void)n; (void)la; (void)ra; (void)r; (void)o; ultimo = 10045; return FALSE; }
+API(void) GetAcceptExSockaddrs(void *b, u32 n, u32 la, u32 ra, void **l, i32 *ll, void **r, i32 *rl) { (void)b; (void)n; (void)la; (void)ra; *l = *r = 0; *ll = *rl = 0; }
+API(BOOL) TransmitFile(u32 s, HANDLE f, u32 n, u32 np, void *o, void *b, u32 fl) { (void)s; (void)f; (void)n; (void)np; (void)o; (void)b; (void)fl; ultimo = 10045; return FALSE; }
+API(i32) WEP(void) { return 1; }
+API(void) s_perror(const char *m, i32 e) { (void)m; (void)e; }
+API(u32) WsControl(u32 p, u32 a, void *b, u32 *bl, void *c, u32 *cl) { (void)p; (void)a; (void)b; (void)bl; (void)c; (void)cl; return 10045; }
+
+/* (HL) los números de las funciones de WSOCK32.DLL y de WS2_32.DLL, como los
+ * de Windows (los juegos de entonces importan WSOCK32 por número). Los
+ * números, comprobados con la lista de exportaciones pública de Wine
+ * (dlls/wsock32/wsock32.spec y dlls/ws2_32/ws2_32.spec), solo como
+ * referencia. Las dos son iguales salvo del 10 al 12. */
+#define ORD_COMUN \
+	{ 1, "accept" }, { 2, "bind" }, { 3, "closesocket" }, { 4, "connect" }, { 5, "getpeername" }, { 6, "getsockname" }, \
+	{ 7, "getsockopt" }, { 8, "htonl" }, { 9, "htons" }, { 13, "listen" }, { 14, "ntohl" }, { 15, "ntohs" }, { 16, "recv" }, \
+	{ 17, "recvfrom" }, { 18, "select" }, { 19, "send" }, { 20, "sendto" }, { 21, "setsockopt" }, { 22, "shutdown" }, \
+	{ 23, "socket" }, { 51, "gethostbyaddr" }, { 52, "gethostbyname" }, { 53, "getprotobyname" }, { 54, "getprotobynumber" }, \
+	{ 55, "getservbyname" }, { 56, "getservbyport" }, { 57, "gethostname" }, { 101, "WSAAsyncSelect" }, \
+	{ 102, "WSAAsyncGetHostByAddr" }, { 103, "WSAAsyncGetHostByName" }, { 104, "WSAAsyncGetProtoByNumber" }, \
+	{ 105, "WSAAsyncGetProtoByName" }, { 106, "WSAAsyncGetServByPort" }, { 107, "WSAAsyncGetServByName" }, \
+	{ 108, "WSACancelAsyncRequest" }, { 109, "WSASetBlockingHook" }, { 110, "WSAUnhookBlockingHook" }, \
+	{ 111, "WSAGetLastError" }, { 112, "WSASetLastError" }, { 113, "WSACancelBlockingCall" }, { 114, "WSAIsBlocking" }, \
+	{ 115, "WSAStartup" }, { 116, "WSACleanup" }, { 151, "__WSAFDIsSet" }, { 500, "WEP" }
+const Ord ord_wsock32[] = {
+	{ 10, "inet_addr" }, { 11, "inet_ntoa" }, { 12, "ioctlsocket" }, ORD_COMUN,
+	{ 1001, "WsControl" }, { 1100, "inet_network" }, { 1101, "getnetbyname" }, { 1107, "WSARecvEx" }, { 1108, "s_perror" },
+	{ 1109, "GetAddressByNameA" }, { 1111, "EnumProtocolsA" }, { 1140, "TransmitFile" }, { 1141, "AcceptEx" },
+	{ 1142, "GetAcceptExSockaddrs" }, { 0, 0 }
+};
+const Ord ord_ws2_32[] = {
+	{ 10, "ioctlsocket" }, { 11, "inet_addr" }, { 12, "inet_ntoa" }, ORD_COMUN, { 0, 0 }
+};

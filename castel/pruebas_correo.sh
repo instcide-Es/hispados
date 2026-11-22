@@ -203,7 +203,7 @@ tr -d '\r' < $Y/sinred.sal > $Y/sinred.txt
 S=$Y/sinred.txt
 mira "sin red: se ve lo guardado (la lista y lo bajado), en dos paneles (800 x 600)" "correo: ventana: [0-9]* x [0-9]* (dos paneles)" \
   "correo: buscar en lo bajado «Caso 02»: 1" "correo: leído: 2 «Caso 02"
-miracap "sin red: «Sin conexión: se ve lo guardado», y el mensaje con «< Volver a la lista»" co21 negrita 180 60 400 100 "< Volver a la lista"
+miracap "sin red: lo guardado se lee igual (dos clics: el mensaje a toda la ventana, con «< Volver a la lista»)" co21 negrita 0 30 400 70 "< Volver a la lista"
 # (PARPADEO) el ratón que solo pasa por encima no repinta nada (Carlos, 0.8.7:
 # «los campos desaparecen unos milisegundos y vuelven a aparecer»): el
 # asistente y la ventana principal con el buzón cargado, con capturas entre
@@ -224,6 +224,11 @@ SES+=(":clic 400 147" ":pausa 6")
 for xy in "650 250" "800 300" "900 200" "400 400"; do
   SES+=(":raton $xy" ":captura pa$k" ":raton $((${xy% *} + 9)) $((${xy#* } + 4))"); k=$((k + 1))
 done
+# (1.0.2) dos clics en un mensaje: a toda la ventana; F8 y F7, el siguiente y
+# el anterior; Esc vuelve a la lista, con el mismo elegido y la lista igual
+SES+=(":clic 400 187" ":pausa 5" ":raton 1010 565" ":captura pb0" ":doble 400 187" ":pausa 5" ":raton 1010 565" ":captura pb1"
+  ":tecla pgdn" ":pausa 1" ":tecla esc" ":pausa 2" ":raton 1010 565" ":captura pb2"
+  ":doble 400 187" ":pausa 4" ":tecla f8" ":pausa 4" ":tecla f7" ":pausa 4" ":tecla esc" ":pausa 2")
 SES+=(":tecla alt-f4" ":pausa 4")
 CAPTURAS=$G PANTALLA=1024x600 ESCRIBE=1 DISCO=$Y/p.img ARRANQUE="escritorio modo=1024x600" MODULOS= MEMORIA=128 QEMU_MAS="-nic user,model=e1000" \
   $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN "${SES[@]}" > $Y/parpadeo.sal 2>&1
@@ -232,6 +237,28 @@ S=$Y/parpadeo.txt
 mira "(PARPADEO) mover el ratón por el asistente y por la ventana (con el buzón cargado y un mensaje abierto) no repinta nada: «repintados por él: 0»" \
   "correo: ventana: el ratón se ha movido [0-9][0-9]* veces; repintados por él: 0 (vuelcos: [0-9]*)$"
 m=$(grep -o 'se ha movido [0-9]* veces' $S | grep -o '[0-9]*'); [ "${m:-0}" -ge 40 ] && ok "(PARPADEO) el ratón se ha movido de verdad por la ventana ($m movimientos)" || ko "(PARPADEO) el ratón no se ha movido (${m:-0})"
+mira "(1.0.2) dos clics en un mensaje de la lista: a toda la ventana; F8 el siguiente, F7 el anterior; Esc vuelve a la lista" \
+  "correo: mensaje a toda la ventana: [0-9]* (fila 4 de [0-9]*)$" "correo: mensaje a toda la ventana: [0-9]* (fila 5 de [0-9]*)$" \
+  "correo: vuelta a la lista: el elegido, [0-9]* (fila 4; la primera que se ve, 1)$"
+u1=$(grep -o "mensaje a toda la ventana: [0-9]* (fila 4 " $S | head -1 | grep -o "[0-9]*" | head -1)
+u2=$(grep -o "vuelta a la lista: el elegido, [0-9]*" $S | head -1 | grep -o "[0-9]*$")
+[ -n "$u1" ] && [ "$u1" = "$u2" ] && ok "(1.0.2) al volver, el elegido es el mismo mensaje (UID $u1)" || ko "(1.0.2) al volver, el elegido no es el mismo (${u1:-?} y ${u2:-?})"
+miracap "(1.0.2) a toda la ventana: «< Volver a la lista», Responder, A todos, Reenviar, Borrar, Anterior, Siguiente, y el mensaje de lado a lado" pb1 \
+  negrita 0 30 200 66 "< Volver a la lista" negrita 200 30 700 66 "Responder" negrita 500 30 1020 66 "Siguiente >" negrita 0 66 400 100 "De:"
+if python3 -I - $G/pb0.ppm $G/pb2.ppm <<'PY'
+import sys
+def lee(f):
+    d = open(f, 'rb').read()
+    p = d.split(b'\n', 3)
+    w, h = map(int, p[1].split())
+    return w, p[3]
+w, a = lee(sys.argv[1]); _, b = lee(sys.argv[2])
+# la lista (y las carpetas): de x 0 a 586, de y 66 a 540
+for y in range(66, 540):
+    if a[(y * w) * 3:(y * w + 586) * 3] != b[(y * w) * 3:(y * w + 586) * 3]:
+        sys.exit(1)
+PY
+then ok "(1.0.2) la lista, al volver, es igual punto a punto que antes de abrirlo (las carpetas, la lista y el elegido)"; else ko "(1.0.2) la lista, al volver, no es la misma"; fi
 mal=0
 for i in 0 1 2 3 4 5 6 7; do cap $G/pa$i.ppm texto 200 120 820 300 "Dirección de correo:" texto 420 150 800 190 "ana@prueba.test" || mal="$mal pa$i"; done
 [ "$mal" = 0 ] && ok "(PARPADEO) el asistente, capturado mientras se mueve el ratón: los campos y lo escrito siempre están (8 capturas)" || ko "(PARPADEO) al asistente le faltan los campos en:$mal ($(head -2 $G/cap.txt | tr '\n' ' '))"

@@ -14,22 +14,35 @@ char ruta_exe[160], carpeta_w32[128];
 u32 v_tam_zona(u32 base);
 
 /* las DLL de dentro (cada pieza, su tabla) */
-extern const Exp exp_kernel32[], exp_user32[], exp_gdi32[], exp_comdlg32[], exp_advapi32[], exp_shell32[], exp_wsock32[], exp_version[], exp_winspool[];
-extern const u32 n_kernel32, n_user32, n_gdi32, n_comdlg32, n_advapi32, n_shell32, n_wsock32, n_version, n_winspool;
-static const struct { const char *nombre; const Exp *t; const u32 *n; } propias[] = {
-	{ "KERNEL32.DLL", exp_kernel32, &n_kernel32 },
-	{ "USER32.DLL", exp_user32, &n_user32 },
-	{ "GDI32.DLL", exp_gdi32, &n_gdi32 },
-	{ "COMDLG32.DLL", exp_comdlg32, &n_comdlg32 },
-	{ "ADVAPI32.DLL", exp_advapi32, &n_advapi32 },
-	{ "SHELL32.DLL", exp_shell32, &n_shell32 },
-	{ "WSOCK32.DLL", exp_wsock32, &n_wsock32 },
-	{ "WS2_32.DLL", exp_wsock32, &n_wsock32 },
-	{ "VERSION.DLL", exp_version, &n_version },
-	{ "WINSPOOL.DRV", exp_winspool, &n_winspool },
-	{ "KERNELBASE.DLL", exp_kernel32, &n_kernel32 },
-	{ "NTDLL.DLL", exp_kernel32, &n_kernel32 },
+extern const Exp exp_kernel32[], exp_user32[], exp_gdi32[], exp_comdlg32[], exp_advapi32[], exp_shell32[], exp_wsock32[], exp_version[], exp_winspool[], exp_wininet[];
+extern const u32 n_kernel32, n_user32, n_gdi32, n_comdlg32, n_advapi32, n_shell32, n_wsock32, n_version, n_winspool, n_wininet;
+extern const Ord ord_wsock32[], ord_ws2_32[];      /* (HL) red.c: los números de Winsock */
+static const struct { const char *nombre; const Exp *t; const u32 *n; const Ord *o; } propias[] = {
+	{ "KERNEL32.DLL", exp_kernel32, &n_kernel32, 0 },
+	{ "USER32.DLL", exp_user32, &n_user32, 0 },
+	{ "GDI32.DLL", exp_gdi32, &n_gdi32, 0 },
+	{ "COMDLG32.DLL", exp_comdlg32, &n_comdlg32, 0 },
+	{ "ADVAPI32.DLL", exp_advapi32, &n_advapi32, 0 },
+	{ "SHELL32.DLL", exp_shell32, &n_shell32, 0 },
+	{ "WSOCK32.DLL", exp_wsock32, &n_wsock32, ord_wsock32 },
+	{ "WS2_32.DLL", exp_wsock32, &n_wsock32, ord_ws2_32 },
+	{ "VERSION.DLL", exp_version, &n_version, 0 },
+	{ "WINSPOOL.DRV", exp_winspool, &n_winspool, 0 },
+	{ "WININET.DLL", exp_wininet, &n_wininet, 0 },       /* (HL) */
+	{ "KERNELBASE.DLL", exp_kernel32, &n_kernel32, 0 },
+	{ "NTDLL.DLL", exp_kernel32, &n_kernel32, 0 },
 };
+
+/* (HL) el nombre de la función número «n» de una DLL de dentro (0 si no lo tiene) */
+static const char *nombre_de_ordinal(const Ord *o, u32 n)
+{
+	if (!o)
+		return 0;
+	for (; o->nombre; o++)
+		if (o->n == n)
+			return o->nombre;
+	return 0;
+}
 
 /* ---- los que faltan ---- */
 #define MAX_FALTAN 256
@@ -162,6 +175,8 @@ static void *exp_de(Modulo *m, const char *nombre, u32 ordinal)
 	if (!m)
 		return 0;
 	if (m->propias) {
+		if (!nombre)        /* (HL) por número: WSOCK32 y WS2_32 */
+			nombre = nombre_de_ordinal(m->ords, ordinal);
 		if (!nombre)
 			return 0;
 		for (k = 0; k < m->nprop; k++)
@@ -215,13 +230,29 @@ static int leer_en(u32 m, u32 pos, void *d, u32 n)
 }
 
 /* (JUEGOS) la DLL «nombre» buscada como al cargar, pero desde la carpeta
- * «carpeta» (la del programa; «» si no): para WIN32 COMPRUEBA */
+ * «carpeta» (la del programa; «» si no): para WIN32 COMPRUEBA.
+ * (HL) Como Windows: un nombre sin carpeta se busca en la carpeta del .EXE
+ * que arranca el programa (no en la de la DLL que lo importa: el
+ * «valve\cl_dlls\client.dll» de un juego pide VGUI.DLL, que está junto a
+ * HL.EXE), luego en la de trabajo, luego en la del sistema (\WIN32) y luego
+ * en cada carpeta del PATH */
+static u32 prueba_en(const char *sitio, const char *nombre, char *ruta)
+{
+	char c[160];
+	u32 l = strlen(sitio);
+	if (l && sitio[l - 1] != '\\' && sitio[l - 1] != ':')
+		fmt(ruta, 128, "%s\\%s", sitio, nombre);
+	else
+		fmt(ruta, 128, "%s%s", sitio, nombre);
+	a437(c, ruta, sizeof c);
+	return sys_abrir(c, 0);
+}
+u32 WINAPI GetEnvironmentVariableA(const char *n, char *d, u32 cabe);
 u32 abrir_dll_desde(const char *carpeta, const char *nombre, char *ruta)
 {
-	char t[160], c[160];
+	char c[160], camino[400];
 	u32 m;
-	int k;
-	const char *sitios[4];
+	const char *p;
 	if (strchr(nombre, '\\') || strchr(nombre, '/') || strchr(nombre, ':')) {
 		/* con su carpeta: tal cual (desde la de trabajo); (JUEGOS) y, si es
 		 * relativa y no está ahí, desde la del programa («valve\dlls\hl.dll») */
@@ -236,32 +267,53 @@ u32 abrir_dll_desde(const char *carpeta, const char *nombre, char *ruta)
 		a437(c, ruta, sizeof c);
 		return sys_abrir(c, 0);
 	}
-	/* la carpeta del programa, la de Win32 y la de trabajo */
-	copia_n(t, carpeta, sizeof t);
-	sitios[0] = t;
-	sitios[1] = carpeta_w32;
-	sitios[2] = "";
-	sitios[3] = 0;
-	for (k = 0; sitios[k]; k++) {
-		fmt(ruta, 128, "%s%s", sitios[k], nombre);
+	/* la carpeta del programa, la de trabajo, la del sistema y el PATH */
+	if (carpeta[0] && !ES_ERROR(m = prueba_en(carpeta, nombre, ruta)))
+		return m;
+	{
+		char t[160];
+		ruta_entera(nombre, t, sizeof t);    /* (la de trabajo) */
+		copia_n(ruta, t, 128);
 		a437(c, ruta, sizeof c);
 		m = sys_abrir(c, 0);
 		if (!ES_ERROR(m))
 			return m;
 	}
+	if (!ES_ERROR(m = prueba_en(carpeta_w32, nombre, ruta)))
+		return m;
+	camino[0] = 0;
+	GetEnvironmentVariableA("PATH", camino, sizeof camino);
+	for (p = camino; *p;) {
+		char d[160];
+		u32 k = 0;
+		while (*p && *p != ';') {
+			if (k + 1 < sizeof d)
+				d[k++] = *p;
+			p++;
+		}
+		d[k] = 0;
+		if (*p == ';')
+			p++;
+		if (k && !ES_ERROR(m = prueba_en(d, nombre, ruta)))
+			return m;
+	}
 	return E_NO_HAY;
+}
+/* (HL) la carpeta del .EXE que arranca el programa («C:\JUEGOS\HL\») */
+void carpeta_del_exe(char *t, u32 cabe)
+{
+	char *p;
+	copia_n(t, ruta_exe, cabe);
+	p = strrchr(t, '\\');
+	if (p)
+		p[1] = 0;
+	else
+		t[0] = 0;
 }
 static u32 abrir_dll(const char *nombre, char *ruta)
 {
 	char t[160];
-	copia_n(t, ruta_exe, sizeof t);
-	{
-		char *p = strrchr(t, '\\');
-		if (p)
-			p[1] = 0;
-		else
-			t[0] = 0;
-	}
+	carpeta_del_exe(t, sizeof t);
 	return abrir_dll_desde(t, nombre, ruta);
 }
 
@@ -282,6 +334,18 @@ int propia_tiene(const char *dll, const char *fn)
 				return -1;
 		}
 	return dll ? 0 : -1;
+}
+/* (HL) ¿tiene la DLL de dentro «dll» la función número «n»? 1 sí, -1 no, 0 no es de dentro */
+int propia_tiene_ord(const char *dll, u32 n)
+{
+	u32 k;
+	const char *f;
+	for (k = 0; k < sizeof propias / sizeof propias[0]; k++)
+		if (!strcmp(propias[k].nombre, dll)) {
+			f = nombre_de_ordinal(propias[k].o, n);
+			return f && propia_tiene(dll, f) > 0 ? 1 : -1;
+		}
+	return 0;
 }
 /* (JUEGOS) el nombre de una DLL como la busca el cargador (con sus alias) */
 static void alias(char *n);
@@ -490,6 +554,7 @@ Modulo *mod_cargar(const char *nombre, int *falta)
 			fmt(m->ruta, sizeof m->ruta, "%s%s", carpeta_w32, n);
 			m->propias = propias[k].t;
 			m->nprop = *propias[k].n;
+			m->ords = propias[k].o;          /* (HL) */
 			/* una cabecera de mentira, para que tenga dirección (HMODULE) */
 			m->base = (u32)m_cero(256);
 			((u8 *)m->base)[0] = 'M';

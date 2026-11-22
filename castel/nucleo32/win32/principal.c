@@ -72,9 +72,49 @@ static void busca_carpeta(void)
 	}
 }
 
+/* (HL) el aviso de lo que falta, con el botón «Comprobar compatibilidad» si
+ * está el Asistente de compatibilidad (\COMPAT.BIN de la unidad del sistema,
+ * o su \HISPA\COMPAT.BIN): lo lanza con «/FALLO <ruta del .EXE>» */
+extern const char *msg_boton_extra;
+i32 WINAPI MessageBoxA(HWND padre, const char *texto, const char *titulo, u32 tipo);
+static void aviso_con_compat(const char *t)
+{
+	char c[64], c4[64];
+	static const char *sitios[] = { "%c:\\COMPAT.BIN", "%c:\\HISPA\\COMPAT.BIN" };
+	u32 k, m;
+	c[0] = 0;
+	for (k = 0; k < 2; k++) {
+		fmt(c, sizeof c, sitios[k], letra_sistema ? letra_sistema : 'C');
+		a437(c4, c, sizeof c4);
+		m = sys_abrir(c4, 0);
+		if (!ES_ERROR(m)) {
+			sys_cerrar(m);
+			break;
+		}
+		c[0] = 0;
+	}
+	if (!c[0] || !es_ventanas || sys_dato(13) != 1) {
+		mensaje_fatal(t);
+		if (c[0])
+			aviso_serie("(para mirar qué le falta: %s /FALLO %s)", c, ruta_exe);
+		return;
+	}
+	aviso_serie("%s", t);
+	msg_boton_extra = "Comprobar compatibilidad";
+	if (MessageBoxA(0, t, "Hispa-Pentium", 0x10) == 8) {
+		char r4[200];
+		a437(r4, ruta_exe, sizeof r4);
+		traza("WIN32: lanzo %s /FALLO %s", c, ruta_exe);
+		{
+			char a[220];
+			fmt(a, sizeof a, "/FALLO %s", r4);
+			sys_lanzar(c4, a, 1);
+		}
+	}
+}
 void error_carga(const char *t)
 {
-	mensaje_fatal(t);
+	aviso_con_compat(t);
 }
 
 /* (JUEGOS) el programa llama a una función que aún no hay: se dice cuál
@@ -86,7 +126,7 @@ void falta_funcion(const char *dll, const char *f, u32 desde)
 	diag_apunta("LLAMA A UNA QUE FALTA: %s!%s (desde %s); se acaba", dll, f, d);
 	fmt(t, sizeof t, "Falta la función %s!%s\n\n%s la ha llamado (desde %s) y Hispa-Pentium aún no la tiene: el programa tiene que acabar.\n\n"
 	    "Queda apuntado en %s. Mándenos una foto de este aviso.", dll, f, mod_exe ? mod_exe->nombre : "El programa", d, diag_ruta_log());
-	mensaje_fatal(t);
+	aviso_con_compat(t);
 	w32_salir(255);
 }
 

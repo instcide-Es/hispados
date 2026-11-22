@@ -1,0 +1,45 @@
+Pintura 2.0 - el programa de dibujo de Hispa-Pentium, de 32 bits y en C
+portable (docs/PENTIUM.md, «Pintura 2»): se compila tal cual para Hispa-64.
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+Lo que pone el paquete «pintura»:
+  \HISPA\PINTURA.BIN         el programa (menú Inicio > Multimedia > Pintura;
+                             y Mi equipo: «Editar con Pintura» en las imágenes,
+                             y abre con él los .PCX)
+  \HISPA\MENU\PINTURA.MNU, PINTURA.ICP   el acceso del menú y su icono
+  \HISPA\PINTURA\LEEME.TXT   esto
+
+Qué hace: imágenes en color verdadero de 32 bits con transparencia, de
+hasta 4096 x 4096 puntos si hay memoria; zoom de 12,5 % a 3200 % (Control y
+la rueda, + y -, la lupa), rejilla con zoom grande, reglas, barras de
+desplazamiento. Herramientas: selección rectangular y a mano alzada
+(mover, copiar con Control, opaca o transparente), lápiz, pincel (cuatro
+formas, del grosor que se quiera, suavizado), aerógrafo, borrador (con el
+color 2 o a transparente), relleno con tolerancia, cuentagotas (dice el
+nombre del color y su código), texto con las letras TrueType (las DejaVu y
+las de \DOCUMENT\LETRAS; tamaño, negrita, cursiva), lupa, línea, curva,
+rectángulo, rectángulo redondeado, elipse y polígono (contorno, relleno o
+los dos). La paleta de 28 colores con su nombre (y el color 1 y el 2,
+siempre con el suyo), y el editor de colores (RGB, HSV, opacidad y el
+código #). Imagen: cambiar el tamaño (en puntos o en %), estirar e
+inclinar, girar 90, 180 o lo que se diga, voltear, recortar, el tamaño del
+lienzo (también arrastrando su esquina); invertir los colores, escala de
+grises, brillo y contraste. Deshacer y rehacer sin límite.
+
+Formatos: abre PNG, JPG, BMP, GIF, PCX, ICO y TGA; guarda en PNG, JPG (con
+su calidad), BMP, GIF y PCX; exporta a PDF; Archivo > Usar como fondo de
+escritorio. Copiar y pegar, dentro de Pintura (el portapapeles del sistema
+aún es solo de texto); y «Copiar a un archivo» y «Pegar desde un archivo».
+
+La orden, para la Consola:
+  PINTURA [imagen]
+  PINTURA --convierte ENTRADA SALIDA [CALIDAD]   (el formato, por la extensión)
+  PINTURA --info ENTRADA | --compara A B | --mide [AN AL [PASOS]]
+
+Lo de otros que lleva dentro (todo libre):
+  miniz 3.0.2 (Rich Geldreich y otros; licencia MIT): Flate.
+  stb_image 2.30, stb_image_write 1.19 y stb_truetype 1.26 (Sean Barrett y
+    otros; de dominio público o MIT, a elegir).
+  Las letras DejaVu (recortadas a Europa occidental; la licencia de
+    Bitstream Vera, con las de DejaVu).
+Sus licencias, enteras, en terceros/ del código fuente.

@@ -1,7 +1,8 @@
 /* comprueba.c - (COMPAT) comprobar un programa o una carpeta: corre «WIN32
- * COMPRUEBA /MAQUINA ruta» con la salida a un archivo (un WIN32 que aún no
- * sabe /MAQUINA dice «/MAQUINA: no se encuentra» y sigue con lo de
- * siempre: se lee igual), lo lee (informe.c) y, si se pide, mide cada
+ * COMPRUEBA "ruta" /MAQUINA» con la salida a un archivo (la de las máquinas,
+ * con las rutas, los tamaños y las sumas, desde win32 1.3; un WIN32 de antes
+ * dice «/MAQUINA: no se encuentra» y sigue con lo de las personas: se lee
+ * igual), lo lee (informe.c) y, si se pide y WIN32 no lo ha dado, mide cada
  * archivo y saca su SHA-256 (para el informe que se manda). Y las versiones
  * de lo instalado (\HISPA\PAQUETES\*.PQI).
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
@@ -126,7 +127,7 @@ int comprueba(const char *ruta, c_informe *i, int con_sumas, char *error, u32 ca
 	}
 	une_ruta(sal, sizeof sal, c, "SALIDA.TXT");
 	so_borra(sal);
-	fmt(args, sizeof args, "COMPRUEBA /MAQUINA \"%s\"", ruta);
+	fmt(args, sizeof args, "COMPRUEBA \"%s\" /MAQUINA", ruta);
 	if (plat_comprueba(args, sal, &cod, comprueba_espera, comprueba_u, error, cabe))
 		return -1;
 	t = lee_texto(sal, &n, 16u << 20);
@@ -187,7 +188,8 @@ int comprueba(const char *ruta, c_informe *i, int con_sumas, char *error, u32 ca
 				else if (iguales_sin_caja(sin_carpeta(ruta), a->nombre))
 					copia(a->ruta, ruta, sizeof a->ruta);
 			}
-			if (a->ruta[0])
+			/* (con /MAQUINA, WIN32 ya da el tamaño y la suma) */
+			if (a->ruta[0] && !a->sha[0])
 				suma(a->ruta, &a->tam, a->sha);
 		}
 	(void)cod;

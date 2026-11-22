@@ -13,4 +13,6 @@ int strncmp(const char *, const char *, size_t);
 char *strchr(const char *, int);
 char *strstr(const char *, const char *);
 char *strcpy(char *, const char *);
+void *memchr(const void *, int, size_t);	/* (CUENTAS32) */
+char *strrchr(const char *, int);	/* (CUENTAS32) */
 #endif

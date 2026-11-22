@@ -1,0 +1,45 @@
+Agenda 1.0 de Hispa-Pentium
+===========================
+
+El calendario para apuntar cosas: citas, tareas y cumpleaños, con sus
+avisos, los festivos y las repeticiones; e importar y exportar .ICS (el
+formato de Google Calendar, Outlook y los móviles).
+
+Dónde: Inicio > Oficina > Agenda; un clic en el reloj de la bandeja; dos
+clics en un día del calendario del Reloj; dos clics en un .ICS o un .VCF en
+Mi equipo. Con el ratón quieto sobre el reloj, la próxima cita.
+
+Las vistas: Día, Semana, Mes, Próximos (60 días, con los festivos) y
+Tareas. Hoy va con un recuadro grueso y la palabra HOY; cada categoría
+lleva su símbolo (círculo, cuadrado, triángulo, cruz, rombo, estrella,
+flecha, anillo) además del color.
+
+Los avisos saltan aunque la Agenda esté cerrada: los da AGENDA /VIGILAR,
+que lanza el escritorio al arrancar (desde el núcleo de la 0.8.7; con un
+núcleo de antes, solo con la Agenda abierta... y entonces, ninguno: hay que
+actualizar el sistema). Al arrancar, dice lo que se pasó con el equipo
+apagado. Posponer 5, 10 o 60 minutos, Hecho y Abrir la Agenda.
+
+Los festivos: los nacionales, los de la comunidad elegida (Opciones >
+Festivos; de serie, Cataluña) con las listas oficiales de 2026 y 2027 (BOE
+y DOGC) y, para los otros años, las reglas de siempre; y los locales de un
+municipio (de serie, Albinyana: 16 de julio y 24 de agosto, que el
+Ajuntament mueve si caen en fin de semana: los de 2027 salen en el DOGC en
+diciembre de 2026). Los de su pueblo, en FESTIVOS.TXT, en la carpeta de la
+Agenda, un renglón por festivo:
+
+    16/07|Mare de Déu del Carme       (cada año)
+    25/08/2025|Sant Bartomeu          (solo ese año)
+    P+50|Lunes de Pentecostés         (contado desde la Pascua)
+    -24/08/2025|                      (quitar uno de un año)
+
+Dónde guarda: AGENDA.ICS (iCalendar) en \DOCUMENT\AGENDA (con usuarios, en
+\USUARIOS\<su carpeta>\AGENDA); y AGENDA.INI (la comunidad, el municipio y
+los nombres de las categorías), VISTO.TXT y PROXIMA.TXT (del vigilante).
+
+En la Consola: AGENDA /PROXIMOS, /LISTA dd/mm/aaaa [dd/mm/aaaa], /TAREAS,
+/IMPORTA archivo.ics, /EXPORTA archivo.ics, /FESTIVOS aaaa (AGENDA, sin
+nada, dice todas).
+
+Rama «agenda» de Hispa-DOS; docs/PENTIUM.md, sección 14 vicies.
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

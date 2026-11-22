@@ -696,6 +696,18 @@ API(BOOL) SetEnvironmentVariableA(const char *n, const char *v)
 	entorno = nuevo;
 	return TRUE;
 }
+API(BOOL) SetEnvironmentVariableW(const WCHAR *n, const WCHAR *v)      /* (HL) */
+{
+	char a[128], b[512];
+	if (!n) {
+		pon_error(87);
+		return FALSE;
+	}
+	de_w(a, n, sizeof a);
+	if (v)
+		de_w(b, v, sizeof b);
+	return SetEnvironmentVariableA(a, v ? b : 0);
+}
 API(u32) ExpandEnvironmentStringsA(const char *s, char *d, u32 cabe)
 {
 	char t[1024];
@@ -1818,4 +1830,76 @@ API(u32) GetTempPathW(u32 n, WCHAR *d)
 		return r + 1;
 	a_w(d, b, n);
 	return r;
+}
+
+/* ---- (HL) lo que pide un juego de 1998-2000 ---- */
+/* la versión de Windows para la que se hizo el programa (la de su cabecera) */
+API(u32) GetProcessVersion(u32 pid)
+{
+	u32 pe;
+	if (pid && pid != sys_tarea()) {
+		pon_error(87);
+		return 0;
+	}
+	if (!mod_exe)
+		return 0x00040000;
+	pe = mod_exe->base + *(u32 *)(mod_exe->base + 0x3C);
+	return (u32)*(u16 *)(pe + 24 + 48) << 16 | *(u16 *)(pe + 24 + 50);
+}
+void mensaje_fatal(const char *t);
+API(void) FatalAppExitA(u32 accion, const char *m)
+{
+	char t[400];
+	(void)accion;
+	fmt(t, sizeof t, "%s ha tenido que acabar:\n\n%s", mod_exe ? mod_exe->nombre : "El programa", m ? m : "");
+	{
+		void diag_apunta(const char *f, ...);
+		diag_apunta("FatalAppExit: %s", m ? m : "");
+	}
+	mensaje_fatal(t);
+	w32_salir(255);
+}
+API(void) FatalAppExitW(u32 accion, const WCHAR *m)
+{
+	char b[300];
+	if (m)
+		de_w(b, m, sizeof b);
+	FatalAppExitA(accion, m ? b : 0);
+}
+/* las que hay: el español (moderno, el de GetUserDefaultLCID), el de España
+ * (tradicional), el catalán y el inglés de EE. UU. */
+static const char *const locales[] = { "00000C0A", "0000040A", "00000403", "00000409" };
+typedef BOOL (WINAPI *LOCALE_A)(char *);
+typedef BOOL (WINAPI *LOCALE_W)(WCHAR *);
+API(BOOL) EnumSystemLocalesA(LOCALE_A f, u32 fl)
+{
+	u32 k;
+	(void)fl;
+	if (!f) {
+		pon_error(87);
+		return FALSE;
+	}
+	for (k = 0; k < sizeof locales / sizeof locales[0]; k++) {
+		char b[12];
+		strcpy(b, locales[k]);
+		if (!f(b))
+			break;
+	}
+	return TRUE;
+}
+API(BOOL) EnumSystemLocalesW(LOCALE_W f, u32 fl)
+{
+	u32 k;
+	(void)fl;
+	if (!f) {
+		pon_error(87);
+		return FALSE;
+	}
+	for (k = 0; k < sizeof locales / sizeof locales[0]; k++) {
+		WCHAR b[12];
+		a_w(b, locales[k], 12);
+		if (!f(b))
+			break;
+	}
+	return TRUE;
 }

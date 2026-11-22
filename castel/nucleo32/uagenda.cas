@@ -1,0 +1,390 @@
+; =============================================================================
+;  uagenda.cas - (AGENDA) AGENDA.BIN, la Agenda de Hispa-Pentium: el
+;  calendario para apuntar cosas. Tres maneras de correr:
+;
+;    AGENDA [archivo.ICS | archivo.VCF] [/DIA dd/mm/aaaa]
+;        la ventana (agventa.cas): las vistas día, semana, mes, próximos y
+;        tareas, el mini calendario, las citas con su repetición, su aviso y
+;        su categoría (con su símbolo: no solo el color), los cumpleaños, los
+;        festivos; importar y exportar .ICS. Con un .ICS (dos clics en Mi
+;        equipo), pregunta si se importa.
+;    AGENDA /VIGILAR
+;        el vigilante de los avisos (agvigia.cas): lo lanza el escritorio al
+;        arrancar; duerme hasta el aviso siguiente (mira cada 30 s si se ha
+;        cambiado la agenda o el reloj), saca su ventanita con el sonido de
+;        aviso (Posponer 5, 10 o 60 minutos, Hecho, Abrir) y, al arrancar, dice
+;        lo que se pasó con el equipo apagado. Deja en PROXIMA.TXT la cita
+;        siguiente, que la bandeja enseña al pasar el ratón por el reloj.
+;    AGENDA /orden ...    (en la Consola; las pruebas)
+;        /LISTA dd/mm/aaaa [dd/mm/aaaa]    las veces de cada cita en esos días
+;        /PROXIMOS [n]                     las n siguientes desde ahora
+;        /NUEVA dd/mm/aaaa hh:mm|- minutos aviso|- REGLA|- título...
+;        /TAREA dd/mm/aaaa|- título...     /HECHA texto (la tarea que empieza así)
+;        /IMPORTA archivo.ics|.vcf         /EXPORTA archivo.ics [categoría]
+;        /CASOS archivo                    las repeticiones de cada renglón
+;                                          «dd/mm/aaaa hh:mm|RRULE|n|desde»
+;        /AVISOS dd/mm/aaaa hh:mm dd/mm/aaaa hh:mm    los avisos entre las dos
+;        /UTC dd/mm/aaaa hh:mm             la hora de Madrid en UTC (y al revés: /MADRID)
+;        /FESTIVOS aaaa [comunidad]        /BORRA texto
+;      con /CARPETA=ruta (la carpeta de la Agenda) y /AHORA=dd/mm/aaaa-hh:mm
+;      delante, si se quieren.
+;
+;  Lo guarda en AGENDA.ICS (iCalendar, agics.cas), en la carpeta de la
+;  Agenda (Festivos.carpeta_agenda: la del usuario, o \DOCUMENT\AGENDA), y
+;  pone al día AGENDA.GEN (un número que crece: así sabe el vigilante que
+;  tiene que volver a leer).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UAgenda
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Formato, Mem32, Controles, Festivos, AgNucleo, AgIcs, AgVenta, AgVigia, AgComun
+
+    variable consola_: bool
+
+    ; =========================================================================
+    ;  La línea de órdenes
+    ; =========================================================================
+    función resto_desde(args: puntero a byte, n: nat32): puntero a byte
+        variable p: puntero a byte
+        p := saltar_espacios(args)
+        mientras n > 0 hacer
+            mientras valor(p) <> 0 y no es_espacio(valor(p)) hacer p := p + 1 fin
+            p := saltar_espacios(p)
+            n := n - 1
+        fin
+        devolver p
+    fin
+
+    función escribe_vez(ref c: Cita, n: nat32)
+        variable t: arreglo [16] de byte
+        variable h: arreglo [8] de byte
+        variable x: arreglo [8] de nat32
+        texto_fecha(n, t)
+        si c.todo_día o c.clase = CLASE_TAREA entonces copiar(h, "todo") sino texto_hora(c.minuto, h) fin
+        x[0] := nat32(dirección(t[0]))
+        x[1] := nat32(dirección(h[0]))
+        x[2] := c.dura
+        x[3] := nat32(dirección(c.título[0]))
+        x[4] := nat32(dirección(c.lugar[0]))
+        x[5] := nat32(dirección(nombres_cat[c.categoría][0]))
+        x[6] := nat32(c.aviso)
+        imprimir("agenda: %s %s %u %s | %s | %s | %d\n", x)
+    fin
+
+    ; las veces de todas las citas entre dos días, por orden
+    función lista(d1: nat32, d2: nat32)
+        variable n, i, k: nat32
+        variable vu: Vuelta
+        variable x: nat32
+        para n desde d1 hasta d2 hacer
+            para i desde 1 hasta n_citas hacer
+                si citas[i - 1].usada y cae_en(dirección(citas[i - 1]), n, x) y x = n entonces
+                    escribe_vez(citas[i - 1], n)
+                fin
+            fin
+            k := 0
+        fin
+        vu.n := 0
+    fin
+
+    ; /CASOS: cada renglón «dd/mm/aaaa hh:mm|RRULE|n|dd/mm/aaaa» da sus n primeras veces
+    función casos(ruta: puntero a byte): byte
+        variable m, largo, i, j, k, n, dsd: nat32
+        variable p: puntero a byte
+        variable texto_: puntero a byte
+        variable campo_: arreglo [4] de arreglo [300] de byte
+        variable c: puntero a Cita
+        variable vu: Vuelta
+        variable x: nat32
+        variable t: arreglo [16] de byte
+        variable h: arreglo [8] de byte
+        m := abrir(ruta)
+        si m >= PRIMER_ERROR entonces
+            escribir("agenda: no se puede abrir el archivo de los casos\n")
+            devolver 1
+        fin
+        largo := largo_de(m)
+        texto_ := más_memoria(largo + 1)
+        si texto_ = nulo entonces devolver 1 fin
+        leer(m, texto_, largo)
+        cerrar(m)
+        texto_[largo] := 0
+        c := nueva(CLASE_CITA)
+        p := texto_
+        mientras valor(p) <> 0 hacer
+            para k desde 0 hasta 3 hacer campo_[k][0] := 0 fin
+            k := 0
+            j := 0
+            mientras valor(p) <> 0 y valor(p) <> 10 hacer
+                si valor(p) = '|' entonces
+                    si k < 3 entonces
+                        campo_[k][j] := 0
+                        k := k + 1
+                        j := 0
+                    fin
+                sino si valor(p) <> 13 y j < 299 entonces
+                    campo_[k][j] := valor(p)
+                    j := j + 1
+                fin
+                p := p + 1
+            fin
+            campo_[k][j] := 0
+            si valor(p) = 10 entonces p := p + 1 fin
+            si campo_[0][0] = 0 o campo_[0][0] = '#' entonces seguir fin
+            llenar(puntero(c), tamaño(Cita), 0)
+            c.usada := cierto
+            c.dura := 60
+            si no lee_fecha(campo_[0], c.día) entonces
+                escribir("agenda: caso: fecha mala\n")
+                seguir
+            fin
+            p_hora(campo_[0], c.minuto)
+            si no lee_regla(campo_[1], c.regla) entonces escribir("agenda: caso: regla mala\n") fin
+            n := 10
+            texto_a_natural(campo_[2], n)
+            dsd := 0
+            si campo_[3][0] <> 0 entonces lee_fecha(campo_[3], dsd) fin
+            escribir("agenda: caso ")
+            escribir(campo_[1])
+            escribir("\n")
+            empieza(vu, c, dsd)
+            i := 0
+            mientras i < n y siguiente(vu, x) hacer
+                texto_fecha(x, t)
+                texto_hora(c.minuto, h)
+                imprimir2("agenda: vez %s %s\n", nat32(dirección(t[0])), nat32(dirección(h[0])))
+                i := i + 1
+            fin
+            escribir("agenda: fin\n")
+        fin
+        devolver 0
+    fin
+
+    ; la hora de «dd/mm/aaaa hh:mm» (lo que va detrás del espacio)
+    función p_hora(t: puntero a byte, ref mi: nat32)
+        variable p: puntero a byte
+        mi := 0
+        p := buscar_car(t, ' ')
+        si p = nulo entonces p := buscar_car(t, '-') fin
+        si p <> nulo entonces lee_hora(p + 1, mi) fin
+    fin
+
+    función por_consola(args: puntero a byte): byte
+        variable orden_: arreglo [100] de byte
+        variable q: arreglo [100] de byte
+        variable q2: arreglo [100] de byte
+        variable q3: arreglo [100] de byte
+        variable q4: arreglo [100] de byte
+        variable d1, d2, m1, m2, i, n, k, u, vez: nat32
+        variable c: puntero a Cita
+        variable x: arreglo [6] de nat32
+        variable t: arreglo [24] de byte
+        variable h: arreglo [8] de byte
+        variable mejor: nat32
+        variable cm: puntero a Cita
+        palabra(args, 0, orden_, 100)
+        si iguales_sin_caja(orden_, "/FESTIVOS") entonces
+            n := 2026
+            si palabra(args, 1, q, 100) entonces texto_a_natural(q, n) fin
+            si palabra(args, 2, q, 100) entonces
+                texto_a_natural(q, k)
+                Festivos.elige(k, 0)
+            fin
+            para i desde número_de_día(1, 1, n) hasta número_de_día(31, 12, n) hacer
+                de_número(i, d1, m1, d2)
+                si festivo(d1, m1, d2) <> nulo entonces
+                    texto_fecha(i, t)
+                    imprimir2("agenda: festivo %s %s\n", nat32(dirección(t[0])), nat32(festivo(d1, m1, d2)))
+                fin
+            fin
+            devolver 0
+        fin
+        si iguales_sin_caja(orden_, "/UTC") o iguales_sin_caja(orden_, "/MADRID") entonces
+            palabra(args, 1, q, 100)
+            palabra(args, 2, q2, 100)
+            si no lee_fecha(q, d1) o no lee_hora(q2, m1) entonces devolver 1 fin
+            si iguales_sin_caja(orden_, "/UTC") entonces
+                u := utc_de_madrid(d1, m1)
+                d2 := u div 1440
+                m2 := u mod 1440
+            sino
+                madrid_de_utc(d1 * 1440 + m1, d2, m2)
+            fin
+            texto_fecha(d2, t)
+            texto_hora(m2, h)
+            imprimir2("agenda: %s %s\n", nat32(dirección(t[0])), nat32(dirección(h[0])))
+            devolver 0
+        fin
+        si iguales_sin_caja(orden_, "/CASOS") entonces
+            palabra(args, 1, q, 100)
+            devolver casos(q)
+        fin
+        ; lo demás, con la agenda leída
+        carga_agenda()
+        si iguales_sin_caja(orden_, "/LISTA") entonces
+            palabra(args, 1, q, 100)
+            si no lee_fecha(q, d1) entonces devolver 1 fin
+            d2 := d1
+            si palabra(args, 2, q, 100) entonces lee_fecha(q, d2) fin
+            lista(d1, d2)
+            devolver 0
+        fin
+        si iguales_sin_caja(orden_, "/IMPORTA") entonces
+            palabra(args, 1, q, 100)
+            si no lee_ics(q) entonces
+                escribir("agenda: no se puede abrir el archivo\n")
+                devolver 1
+            fin
+            imprimir4("agenda: importadas %u, cambiadas %u, saltadas %u, con repeticiones raras %u\n", leídas, cambiadas, saltadas, raras)
+            si no guarda_agenda() entonces devolver 2 fin
+            devolver 0
+        fin
+        si iguales_sin_caja(orden_, "/EXPORTA") entonces
+            palabra(args, 1, q, 100)
+            k := 0
+            si palabra(args, 2, q2, 100) entonces texto_a_natural(q2, k) fin
+            si no escribe_ics(q, k) entonces
+                escribir("agenda: no se puede escribir el archivo\n")
+                devolver 1
+            fin
+            escribir("agenda: exportado\n")
+            devolver 0
+        fin
+        si iguales_sin_caja(orden_, "/NUEVA") entonces
+            ; /NUEVA dd/mm/aaaa hh:mm|- minutos aviso|- REGLA|- título
+            palabra(args, 1, q, 100)
+            palabra(args, 2, q2, 100)
+            palabra(args, 3, q3, 100)
+            palabra(args, 4, q4, 100)
+            c := nueva(CLASE_CITA)
+            si c = nulo o no lee_fecha(q, c.día) entonces devolver 1 fin
+            si q2[0] = '-' entonces
+                c.todo_día := cierto
+                c.dura := 1440
+            sino
+                lee_hora(q2, c.minuto)
+                texto_a_natural(q3, c.dura)
+            fin
+            si q4[0] <> '-' entonces texto_a_número(q4, c.aviso) fin
+            palabra(args, 5, q, 100)
+            si q[0] <> '-' entonces lee_regla(q, c.regla) fin
+            copiar_hasta(c.título, resto_desde(args, 6), 100)
+            si no guarda_agenda() entonces devolver 2 fin
+            imprimir1("agenda: nueva %s\n", nat32(dirección(c.título[0])))
+            devolver 0
+        fin
+        si iguales_sin_caja(orden_, "/TAREA") entonces
+            palabra(args, 1, q, 100)
+            c := nueva(CLASE_TAREA)
+            si c = nulo entonces devolver 1 fin
+            c.dura := 0
+            c.todo_día := cierto
+            c.con_fecha := lee_fecha(q, c.día)
+            copiar_hasta(c.título, resto_desde(args, 2), 100)
+            si no guarda_agenda() entonces devolver 2 fin
+            devolver 0
+        fin
+        si iguales_sin_caja(orden_, "/HECHA") o iguales_sin_caja(orden_, "/BORRA") entonces
+            n := 0
+            para i desde 1 hasta n_citas hacer
+                c := dirección(citas[i - 1])
+                si c.usada y empieza_por(c.título, resto_desde(args, 1)) entonces
+                    si iguales_sin_caja(orden_, "/HECHA") entonces c.hecha := cierto sino quita(c) fin
+                    n := n + 1
+                fin
+            fin
+            imprimir1("agenda: %u\n", n)
+            si no guarda_agenda() entonces devolver 2 fin
+            devolver 0
+        fin
+        si iguales_sin_caja(orden_, "/PROXIMOS") entonces
+            n := 10
+            si palabra(args, 1, q, 100) entonces texto_a_natural(q, n) fin
+            ahora(d1, m1)
+            lista(d1, d1 + 60)
+            devolver 0
+        fin
+        si iguales_sin_caja(orden_, "/TAREAS") entonces
+            para i desde 1 hasta n_citas hacer
+                c := dirección(citas[i - 1])
+                si c.usada y c.clase = CLASE_TAREA entonces
+                    si c.con_fecha entonces texto_fecha(c.día, t) sino copiar(t, "sin fecha") fin
+                    si c.hecha entonces copiar(h, "[x]") sino copiar(h, "[ ]") fin
+                    imprimir3("agenda: tarea %s %s %s\n", nat32(dirección(h[0])), nat32(dirección(t[0])), nat32(dirección(c.título[0])))
+                fin
+            fin
+            devolver 0
+        fin
+        si iguales_sin_caja(orden_, "/AVISOS") entonces
+            ; los avisos entre dos horas de aquí, por orden (lo que haría el vigilante)
+            palabra(args, 1, q, 100)
+            palabra(args, 2, q2, 100)
+            palabra(args, 3, q3, 100)
+            palabra(args, 4, q4, 100)
+            si no lee_fecha(q, d1) o no lee_hora(q2, m1) o no lee_fecha(q3, d2) o no lee_hora(q4, m2) entonces devolver 1 fin
+            u := utc_de_madrid(d1, m1)
+            k := utc_de_madrid(d2, m2)
+            mientras cierto hacer
+                mejor := SIN_FIN
+                cm := nulo
+                para i desde 1 hasta n_citas hacer
+                    n := próximo_aviso(dirección(citas[i - 1]), u, vez)
+                    si n < mejor entonces
+                        mejor := n
+                        cm := dirección(citas[i - 1])
+                        x[5] := vez
+                    fin
+                fin
+                si cm = nulo o mejor > k entonces romper fin
+                madrid_de_utc(mejor, d1, m1)
+                texto_fecha(d1, t)
+                texto_hora(m1, h)
+                x[0] := nat32(dirección(t[0]))
+                x[1] := nat32(dirección(h[0]))
+                x[2] := nat32(dirección(cm.título[0]))
+                texto_fecha(x[5], q)
+                x[3] := nat32(dirección(q[0]))
+                imprimir("agenda: aviso %s %s %s (la del %s)\n", x)
+                u := mejor
+            fin
+            devolver 0
+        fin
+        escribir("agenda: AGENDA [/LISTA | /PROXIMOS | /NUEVA | /TAREA | /TAREAS | /HECHA | /BORRA | /IMPORTA | /EXPORTA | /CASOS | /AVISOS | /UTC | /MADRID | /FESTIVOS | /VIGILAR | /DIA dd/mm/aaaa | archivo.ics]\n")
+        devolver 0
+    fin
+
+    función principal(): byte
+        variable args: arreglo [200] de byte
+        variable p: arreglo [100] de byte
+        variable q: puntero a byte
+        variable d, mi: nat32
+        argumentos(args, 200)
+        si no prepara() entonces
+            escribir("agenda: no hay memoria\n")
+            devolver 1
+        fin
+        ; /CARPETA= y /AHORA= delante
+        mientras palabra(args, 0, p, 100) y (empieza_por(p, "/CARPETA=") o empieza_por(p, "/AHORA=")) hacer
+            si empieza_por(p, "/CARPETA=") entonces copiar_hasta(carpeta_forzada, dirección(p[9]), 96) fin
+            si empieza_por(p, "/AHORA=") y lee_fecha(dirección(p[7]), d) entonces
+                q := buscar_car(dirección(p[7]), '-')
+                mi := 0
+                si q <> nulo entonces lee_hora(q + 1, mi) fin
+                ahora_forzada := cierto
+                ahora_día_f := d
+                ahora_min_f := mi
+            fin
+            copiar(args, resto_desde(args, 1))
+        fin
+        palabra(args, 0, p, 100)
+        si iguales_sin_caja(p, "/VIGILAR") entonces devolver vigila() fin
+        si p[0] = '/' y no iguales_sin_caja(p, "/DIA") y no iguales_sin_caja(p, "/NORMAL") y no iguales_sin_caja(p, "/DOBLE") entonces
+            consola_ := cierto
+            devolver por_consola(args)
+        fin
+        devolver ventana_agenda(args)
+    fin
+
+fin UAgenda.

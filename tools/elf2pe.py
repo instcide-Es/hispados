@@ -5,7 +5,7 @@
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 #
 #   tools/elf2pe.py -o PROG.EXE [-e entrada] [--reloc] [--base 0x400000]
-#                   [--gui] [-i DLL:func,func...] obj.o ...
+#                   [--gui] [-i DLL:func,func@N...] obj.o ...   ((HL) func@N: por su número)
 #                   [-l UNA.DLL] [-t ventanas/win32.inc] [--res recursos.rc]
 #                   [--pila octetos]   (la pila que pide: 1 MB si no se dice)
 #   tools/elf2pe.py --dll -o MSVCRT.DLL [-e DllMain] obj.o ...
@@ -114,10 +114,14 @@ def main():
         a.e = 'DllMain' if a.dll else 'inicio'
     dll_de = {}
     orden_dll = []
+    por_numero = {}  # (HL) «-i WSOCK32.dll:accept@1,...»: se importa por su número
     for x in a.i:
         dll, fs = x.split(':')
         orden_dll.append(dll)
         for f in fs.split(','):
+            if '@' in f:
+                f, n = f.split('@')
+                por_numero[f] = int(n)
             dll_de[f] = dll
     for x in a.l:
         dll = x.replace('\\', '/').split('/')[-1]
@@ -207,8 +211,9 @@ def main():
     for k, x in enumerate(dlls):
         struct.pack_into('<IIIII', d, imp_off + k * 20, rd(ilt_off[x]), 0, 0, rd(nom_off[x]), rd(iat_off[x]))
         for j, f in enumerate(por_dll[x]):
-            struct.pack_into('<I', d, ilt_off[x] + 4 * j, rd(pista_off[f]))
-            struct.pack_into('<I', d, iat_off[x] + 4 * j, rd(pista_off[f]))
+            v = (0x80000000 | por_numero[f]) if f in por_numero else rd(pista_off[f])
+            struct.pack_into('<I', d, ilt_off[x] + 4 * j, v)
+            struct.pack_into('<I', d, iat_off[x] + 4 * j, v)
     imp_dir = (rd(imp_off), n_desc * 20)
     iat_dir = (rd(min(iat_off.values())), off - min(iat_off.values())) if dlls else (0, 0)
     # los saltos a las importaciones: «jmp [iat]» en el texto (para las
@@ -225,8 +230,9 @@ def main():
     for k, x in enumerate(dlls):
         struct.pack_into('<IIIII', d, imp_off + k * 20, rd(ilt_off[x]), 0, 0, rd(nom_off[x]), rd(iat_off[x]))
         for j, f in enumerate(por_dll[x]):
-            struct.pack_into('<I', d, ilt_off[x] + 4 * j, rd(pista_off[f]))
-            struct.pack_into('<I', d, iat_off[x] + 4 * j, rd(pista_off[f]))
+            v = (0x80000000 | por_numero[f]) if f in por_numero else rd(pista_off[f])
+            struct.pack_into('<I', d, ilt_off[x] + 4 * j, v)
+            struct.pack_into('<I', d, iat_off[x] + 4 * j, v)
     for x in dlls:
         for j, f in enumerate(por_dll[x]):
             struct.pack_into('<I', t, salto[f] + 2, base + rd(iat_off[x] + 4 * j))
