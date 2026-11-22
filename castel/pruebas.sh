@@ -257,6 +257,12 @@
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
+#  43. (AGENDA, SOLO=agenda) La Agenda (AGENDA.BIN; pruebas_agenda.sh): las
+#      repeticiones frente a python-dateutil, el cambio de hora, un .ICS de
+#      Google de ida y vuelta, los cumpleaños de una vCard, los festivos (la
+#      misma tabla en el Reloj) y el fuzz del lector .ICS, con corre32; y en
+#      QEMU: importar, una cita nueva que avisa con el reloj adelantado,
+#      posponer, la repetición semanal, el Reloj y la bandeja.
 #   SOLO=errores ./pruebas.sh     solo la primera parte (no arranca QEMU)
 #   SOLO=32 ./pruebas.sh          la primera, la octava y la novena (lo de 32 bits)
 #   SOLO=06 ./pruebas.sh          la primera y la novena (lo nuevo de Hispa-Pentium 0.6)
@@ -285,6 +291,7 @@
 #   SOLO=pdf ./pruebas.sh         la primera y la 30 (Hispa-PDF: PDF.BIN y su ventana)
 #   SOLO=zip ./pruebas.sh         la primera y la 31 (Comprimidos: ZIP y UNZIP; pruebas_zipvisor.sh)
 #   SOLO=mirador ./pruebas.sh     la primera y la 32 (el Mirador y la imagen de tapiz; pruebas_zipvisor.sh)
+#   SOLO=agenda ./pruebas.sh      la primera y la 43 (AGENDA: la Agenda; pruebas_agenda.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -335,6 +342,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 
 . $AQUI/pruebas32.sh               # la parte 15 (CASTEL32), como la función parte15
 . $AQUI/pruebas_zipvisor.sh        # (ZIP) (MIRADOR) las partes 31 y 32, como parte_zip y parte_mirador
+. $AQUI/pruebas_agenda.sh          # (AGENDA) la parte 43, como parte_agenda
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -357,7 +365,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|agenda) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -5552,6 +5560,7 @@ fi   # (PDF) Hispa-PDF
 # ------------------------- 31 y 32. (ZIP) Comprimidos y (MIRADOR) el Mirador
 if parte08 zip; then parte_zip; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Comprimidos)"; fi
 if parte08 mirador; then parte_mirador; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Mirador)"; fi
+if parte08 agenda; then parte_agenda; else echo "  (SOLO=${SOLO08:-$SOLO}: sin la Agenda)"; fi   # (AGENDA) la parte 43
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------------------- 15. CASTEL32 (pruebas32.sh)

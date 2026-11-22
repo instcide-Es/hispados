@@ -5350,7 +5350,9 @@ con su icono). Sin tocar el núcleo.*
   («Sábado, 21 de noviembre de 2026»); el **calendario del mes**, de lunes a
   domingo, con **hoy** en negro con «HOY» debajo y **los festivos nacionales**
   con «*» y su nombre debajo (también el Viernes Santo, que se calcula con la
-  Pascua); se pasa de mes con < y > (o Re Pág y Av Pág) y de día con las
+  Pascua; (AGENDA, 22/11) desde la Agenda, también los de la comunidad y los
+  locales elegidos en ella: la misma tabla, `festivos.cas`; y **dos clics en
+  un día abren la Agenda en ese día**); se pasa de mes con < y > (o Re Pág y Av Pág) y de día con las
   flechas; Inicio o «Hoy» vuelven a hoy. Y **poner en hora el equipo** (fecha
   y hora; «Ahora» las rellena): la llamada 67, que en la 0.8.5 no pide el modo
   administrador (si lo pidiera, está apuntado dónde: `pon_en_hora`).
@@ -5399,7 +5401,8 @@ con su icono). Sin tocar el núcleo.*
   `tipo=Accesorios`) y sus iconos (`.ICP`, dibujados en el propio script), de
   `nucleo32/accesorios.py`. `sistema.sh` los compila con los demás y los pone
   en `\HISPA` y `\HISPA\MENU` del sistema instalado (como NAVES.MNU).
-- **El paquete** `accesori` 1.0 (`tools/hpq.py`, en SISTEMA), que pide `base`
+- **El paquete** `accesori` 1.0 (`tools/hpq.py`, en SISTEMA; (AGENDA) la 1.1,
+  con el Reloj de los festivos de `festivos.cas` y los dos clics), que pide `base`
   0.8.4: `CALC.BIN`, `RELOJ.BIN` y `CARACTER.BIN` en `\HISPA`, y sus `.MNU` y
   `.ICP` en `\HISPA\MENU`. Tipo **herramientas** (con el hpq.py de la 0.8.5,
   `--tipo herramientas`; el menú de la 0.8.5 los pone en Accesorios por el
@@ -6010,6 +6013,252 @@ vueltas sin un fallo). En Hispa-Pentium: las órdenes en el intérprete (lo
 sacado, igual octeto a octeto que lo de Linux, y el ZIP hecho allí, bueno para
 el `unzip` de Linux) y la ventana desde el explorador, con capturas; y el
 Mirador con sus seis imágenes de prueba, el tapiz y otro arranque.
+
+## 14 terdecies. La Agenda (AGENDA.BIN, rama agenda)
+
+*22/11/2026. Carlos: «Mirando el reloj he visto que no tenemos calendario
+para apuntar cosas». Paquete **`agenda`** 1.0 (tipo Oficina). Lo cambiado
+fuera de sus archivos lleva la marca «(AGENDA)».*
+
+| | |
+|---|---|
+| ![El mes, con la cita semanal importada y la leyenda de las categorías](pentium/agenda/ag3.png) | ![La ficha de una cita: aviso y «Cada semana» con sus días](pentium/agenda/ag4.png) |
+| ![El aviso, con la Agenda cerrada o abierta: Posponer y Hecho](pentium/agenda/ag6.png) | ![La semana](pentium/agenda/ag7.png) |
+| ![Los próximos 60 días, con los festivos](pentium/agenda/ag8.png) | ![Las tareas](pentium/agenda/ag9.png) |
+| ![El día, abierto desde el Reloj con dos clics](pentium/agenda/ag12.png) | ![El reloj de la bandeja: la próxima cita](pentium/agenda/ag13.png) |
+| ![Al arrancar: lo que se pasó con el equipo apagado](pentium/agenda/ag14.png) | ![La Agenda, recién abierta: el mes, hoy y la leyenda](pentium/agenda/ag1.png) |
+
+### Cómo se maneja
+
+- **Dónde**: Inicio › Oficina › Agenda; **un clic en el reloj de la
+  bandeja** (y, con el ratón quieto encima, la próxima cita); **dos clics en
+  un día del calendario del Reloj** (la abre en ese día); dos clics en un
+  `.ICS` o un `.VCF` en Mi equipo (pregunta si se importa).
+- **Las vistas** (pestañas, o las teclas 1 a 5): **Día** (lo del día en una
+  rejilla: la hora, el título, el lugar, la categoría y el aviso), **Semana**
+  (siete columnas, de lunes a domingo), **Mes**, **Próximos** (60 días, con
+  los festivos en su sitio) y **Tareas** (por hacer y, si se quiere, las
+  hechas). A la izquierda, el **mini calendario** (un clic salta a ese día;
+  dos, a su vista del día; un puntito: hay algo apuntado) y la **leyenda de
+  las categorías**. «<», «Hoy», «>» e «Ir a...» (Ctrl+G, «dd/mm/aaaa»).
+- **Nada solo por el color** (Carlos es daltónico): hoy, con un **recuadro
+  negro grueso, en negrita y la palabra HOY**; el día elegido, con un borde
+  azul; los festivos, con **«*» y su nombre**; cada categoría, con su
+  **símbolo** (Personal ●, Trabajo ■, Asociación ▲, Médico ✚, Familia ◆,
+  Cumpleaños ✱, Viaje ➜, Otros ○) además del color, y su nombre en la
+  leyenda; las tareas, con «[x]» o «[ ]». Los nombres de las categorías se
+  cambian en Opciones.
+- **Una cita** (Ctrl+N, «Nueva», dos clics en un día; dos clics en una cita
+  la cambian): título, lugar, el día, **todo el día o la hora y lo que
+  dura**, el **aviso** (a la hora, 5, 10, 15 o 30 minutos, 1 o 2 horas, 1 o 2
+  días o 1 semana antes), la categoría, **la repetición** (cada día, cada N
+  semanas con sus días, cada mes el mismo día o «el segundo martes» —el
+  último, si cae en la última semana—, cada año; **hasta un día o N
+  veces**) y las notas. De una que se repite: «Quitar solo este día» (una
+  excepción, EXDATE) o borrar todas. Lo que viene de un `.ICS` con una regla
+  que la ficha no sabe hacer (BYSETPOS, varios meses...) se ve «Como viene
+  del .ICS» y se guarda tal cual.
+- **Las tareas**: con fecha límite (o sin ella), «hecha» con la casilla (o
+  Espacio en la vista de Tareas) y su aviso. **Los cumpleaños**: cada año,
+  con los años que cumple («Cumpleaños de Pepa (75)») si se sabe el año (de
+  antes de 1970 también); se importan de una libreta de direcciones en
+  vCard (`BDAY`: 19500315, 1950-03-15, --0315), la del Correo cuando lo haya.
+- **Importar y exportar** (Archivo): `.ICS` de Google Calendar, Outlook o el
+  móvil, y `.VCF`. Lo que lleva el mismo UID que una que ya está, la cambia:
+  importar dos veces no duplica. Exportar, todo o una categoría.
+- **En la Consola**: `AGENDA /PROXIMOS`, `/LISTA dd/mm/aaaa [dd/mm/aaaa]`,
+  `/TAREAS`, `/NUEVA`, `/TAREA`, `/HECHA`, `/BORRA`, `/IMPORTA`, `/EXPORTA`,
+  `/FESTIVOS aaaa [comunidad]`, `/AVISOS`, `/UTC`, `/CASOS` (la cabecera de
+  `uagenda.cas`); con `/CARPETA=` y `/AHORA=` delante, para las pruebas.
+
+### Los avisos, aunque la Agenda esté cerrada
+
+`AGENDA /VIGILAR`, **el vigilante** (`agvigia.cas`), lo lanza el escritorio
+al arrancar (`escritorio.cas`, «(AGENDA)»: tres líneas, como `ESCUDO
+/VIGILAR`; si no está `AGENDA.BIN`, nada). **Casi sin procesador**: calcula
+cuándo salta el aviso siguiente y duerme hasta entonces (la llamada de
+dormir: el procesador, para los demás), como mucho 30 segundos de cada vez;
+al despertar mira el reloj y `AGENDA.GEN` (un número que la Agenda sube cada
+vez que guarda: si ha cambiado, vuelve a leer). En el HP Mini, una vuelta
+cada 30 s que lee 8 octetos.
+
+Cuando salta: **el sonido de aviso del sistema** (`sonar(SISTEMA_AVISO)`,
+SONIDO.BIN; cada 10 s durante el primer minuto; sin tarjeta, nada) y una
+ventanita **«AVISO - Agenda»** con la franja amarilla y la palabra AVISO, la
+cita (con su símbolo), el día y las horas, el lugar y cuánto falta; y
+**Posponer 5 min, 10 min, 1 hora, Hecho y Abrir la Agenda** (Intro, Esc y
+Tab también). Si saltan varios, uno detrás de otro («y 2 más»). Lo pospuesto
+se guarda (`VISTO.TXT`): no se pierde al apagar.
+
+**Al arrancar**: lo que tenía que avisar **mientras el equipo estaba
+apagado** (desde lo último que vio, `VISTO.TXT`; hasta 31 días), en una
+lista («AVISOS: mientras el equipo estaba apagado»). Si el reloj se
+adelanta, salta lo de en medio; si se atrasa, sigue desde la hora nueva.
+
+Y deja en **`PROXIMA.TXT`** la cita siguiente: el escritorio la enseña en el
+recuadro de ayuda del reloj de la bandeja («Próxima cita: hoy Mar 24/11
+09:40 Reunión de la junta (Casal d'Avis)» y «Un clic en el reloj: la
+Agenda»), y un clic en el reloj abre la Agenda (`escritorio.cas`,
+`ayuda_agenda` y el clic, «(AGENDA)»).
+
+### Las horas y el cambio de hora
+
+Las horas de las citas son **las de aquí, las de la pared (Europe/Madrid)**:
+una cita de los lunes a las 10:00 sigue a las 10:00 después del cambio de
+hora, como en Google. Para los avisos y para escribir en UTC se pasa al
+instante de verdad (minutos desde 1970, en UTC) con las reglas de la UE (el
+último domingo de marzo y el de octubre, a la 1:00 UTC). Las horas raras,
+como dice RFC 5545: **las 2:30 del día del cambio de marzo no existen** (se
+toman con la hora de antes: son las 3:30 de verano; un aviso de una hora
+antes de las 3:00 de ese día salta a la 1:00); **las 2:30 del de octubre
+pasan dos veces** (se toma la primera, la de verano). Lo que dura una cita
+es lo que dura de verdad (la de las 2:00 a las 3:00 del día de octubre dura
+dos horas en el reloj... y una de verdad: se guarda la de verdad).
+
+Al importar, cada hora se pasa a la de Madrid: con su `TZID` (las
+`VTIMEZONE` que trae el archivo, con sus reglas: también Nueva York o
+Sídney; y, si no la trae, las de siempre por su nombre: las de Europa
+—Madrid, Londres y Lisboa, Atenas...—, los nombres de Windows de Outlook
+—«Romance Standard Time»—, UTC), en UTC («Z») o flotante (la de aquí).
+
+### Los festivos: una sola tabla para el Reloj y la Agenda
+
+`festivos.cas` (marcado «(AGENDA)»): el calendario (las fechas, la Pascua,
+la fecha larga; antes dentro del Reloj) y **la tabla de los festivos**, que
+usan los dos (el Reloj ya no lleva la suya: la de los nacionales se ha
+movido aquí). En Opciones › Festivos se elige **la comunidad autónoma** (de
+serie, **Cataluña**) y **el municipio** de las fiestas locales (de serie,
+**Albinyana**); se guarda en `AGENDA.INI` y el Reloj lo lee igual.
+
+- **Nacionales**: los diez de todos los años (con el Viernes Santo, contado
+  desde la Pascua).
+- **De cada comunidad**: para **2026 y 2027, las listas oficiales** (la
+  Resolución de la Dirección General de Trabajo, BOE-A-2025-21667 y
+  BOE-A-2026-21254; y, para Cataluña, las Ordres EMT/66/2025 y EMT/52/2026
+  del DOGC), con los traslados de cada año (el 2/11 y el 7/12 de 2026 en
+  muchas; Cataluña sin el 26/12 de 2027, que es domingo); para los demás
+  años, **las reglas de siempre** (el Jueves Santo en todas menos Cataluña y
+  la Comunitat Valenciana, el Lunes de Pascua donde toca, el día de cada
+  una). Las fiestas insulares de Canarias no van (una por isla).
+- **Locales de Albinyana**: el **16 de julio** (Mare de Déu del Carme) y el
+  **24 de agosto** (Sant Bartomeu), que el Ajuntament mueve al viernes de
+  antes o al lunes siguiente si caen en fin de semana: los de 2023 a 2026
+  van tal cual salieron (Ordre EMT/208/2025 del DOGC para 2026; los datos
+  abiertos de la Generalitat, «Calendari de festes locals a Catalunya», para
+  los de antes); **los de 2027 aún no están publicados** (salen en el DOGC
+  en diciembre de 2026): hasta entonces, el 16/7 y el 24/8.
+- **Los suyos**: `FESTIVOS.TXT` en la carpeta de la Agenda, un renglón por
+  festivo: `16/07|Mare de Déu del Carme` (cada año), `25/08/2025|Sant
+  Bartomeu` (un año), `P+50|Lunes de Pentecostés` (desde la Pascua) o
+  `-24/08/2025|` (quitar uno). Así se añaden los de otro pueblo; para que
+  salga en la lista de Opciones, una línea `L:MUNICIPIO|...` en `festivos.cas`
+  y su nombre en `MUNICIPIOS`.
+
+### El .ICS (RFC 5545)
+
+`agics.cas`. **Lee**: VEVENT y VTODO (SUMMARY, LOCATION, DESCRIPTION,
+CATEGORIES, UID, DTSTART, DTEND, DURATION, DUE, STATUS), **RRULE** (FREQ
+diaria, semanal, mensual y anual; INTERVAL, COUNT, UNTIL, BYDAY con sus
+ordinales, BYMONTHDAY, BYMONTH, BYYEARDAY, BYSETPOS, WKST), **EXDATE**,
+**RECURRENCE-ID** (la vez cambiada queda como cita suelta y su día, como
+excepción de la otra, aunque venga antes), **VALARM** (TRIGGER antes del
+principio, del final o a una hora) y **VTIMEZONE**; los renglones doblados,
+los `\,` `\;` `\n` y el UTF-8 (a la página 437 de la casa; lo que no está,
+«?»). Lo que no sabe (BYHOUR, HOURLY...), lo dice («repeticiones raras») y
+la cita se queda con lo demás. **Escribe**: VCALENDAR 2.0 con la VTIMEZONE de
+Europe/Madrid, DTSTART;TZID=Europe/Madrid (las de todo el día, VALUE=DATE),
+su RRULE, sus EXDATE, su VALARM y las categorías; las tareas, VTODO; los
+cumpleaños de antes de 1970, con su año; renglones de 75 octetos como mucho,
+sin partir una letra, en UTF-8 y con CR LF. **La Agenda guarda así lo suyo**
+(`AGENDA.ICS`): lo que guarda es lo que exporta, y se prueba cada vez.
+
+**La carpeta** (una sola función, `Festivos.carpeta_agenda`): con usuarios
+(la rama `usuarios`, la 0.8.7), `\USUARIOS\<CARPETA>\AGENDA` (la llamada 200,
+4); si no (un núcleo sin usuarios, o un sistema sin instalar),
+`\DOCUMENT\AGENDA` de la unidad del sistema. Dentro: `AGENDA.ICS`,
+`AGENDA.GEN`, `AGENDA.INI`, `FESTIVOS.TXT`, `VISTO.TXT` y `PROXIMA.TXT`. Se
+guarda por `AGENDA.NUE` (si se va la luz a medias, queda una entera). El
+escritorio lee `PROXIMA.TXT` con la misma regla (`ayuda_agenda`): al juntar
+la rama usuarios, allí hay que poner la carpeta de quien ha entrado (y lanzar
+el vigilante al entrar cada uno, que es suyo: está apuntado en el código).
+
+### Cómo está hecho
+
+```
+castel/nucleo32/
+  festivos.cas   (AGENDA) el calendario y la tabla de los festivos: Reloj y Agenda
+  agnucleo.cas   las citas, las reglas RRULE (leer, escribir, dar las veces), las zonas, los avisos
+  agics.cas      leer y escribir .ICS; los cumpleaños de las vCard
+  agcomun.cas    leer y guardar la agenda, AGENDA.GEN y AGENDA.INI; los símbolos; los textos
+  agventa.cas    la ventana (las cinco vistas, la ficha y los cuadros)
+  agvigia.cas    el vigilante de los avisos
+  uagenda.cas    AGENDA.BIN: la línea de órdenes y a cuál de las tres
+  agenda/        paquete.sh, icono.py (el icono, dibujado), LEEME.txt y pruebas/
+                 (repite.py, casos.txt, fuzz.py, google.ics, libreta.vcf, exportado.ics)
+```
+
+**En Castel** (como el Reloj): lo de la Agenda es sobre todo ventana, que
+son los controles de `controles.cas`, y las reglas y el .ICS son cuentas de
+números y textos, que en Castel se escriben igual y van tal cual a Hispa-64
+con Castel de 64 bits. Las veces de una regla se dan **de una en una** (una
+`Vuelta`: el período —el día, la semana desde WKST, el mes o el año—, sus
+días candidatos ordenados, BYSETPOS, y luego UNTIL y COUNT), como hace
+python-dateutil; la de DTSTART va siempre (RFC 5545). Sin COUNT, salta
+derecho al período de lo que se mira (el mes de 2040 no cuenta desde 2026);
+todo con tope (el año 2200, 3000 períodos seguidos sin ninguna). Del
+«Tareas» de la oficina de Hispa-386 (`programas/tareas.asm`) no se ha tomado
+nada: es el Administrador de tareas (los programas en marcha), no una lista
+de pendientes.
+
+**El núcleo y los demás** (lo mínimo, marcado «(AGENDA)»): `escritorio.cas`
+(lanzar el vigilante, el recuadro del reloj y su clic), `ureloj.cas` (los
+festivos de `festivos.cas` —sus funciones de fechas se han ido allí— y los
+dos clics), `exoper.cas` (los .ICS y .VCF, con la Agenda si está
+instalada), `tools/hpq.py` (el paquete `agenda` y `accesori` 1.1) y
+`pruebas.sh` (la parte 43).
+
+### Los paquetes
+
+- **`agenda` 1.0** (OPCIONALES de `tools/hpq.py`, tipo oficina, `base >=
+  0.8.4`): `\HISPA\AGENDA.BIN`, `\HISPA\AGENDA\LEEME.TXT` y
+  `\HISPA\MENU\AGENDA.MNU` y `.ICP` (con `tipo=Oficina`). Lo hace
+  `castel/nucleo32/agenda/paquete.sh SALIDA` (AGENDA.HPQ y CATALOGO.LIN).
+  **Los avisos con la Agenda cerrada piden el núcleo con «(AGENDA)»** (el que
+  lanza el vigilante: la 0.8.7); con uno de antes, la Agenda va, pero el
+  vigilante no arranca solo.
+- **`accesori` 1.1**: el Reloj con `festivos.cas` y los dos clics.
+
+### Probarlo
+
+`SOLO=agenda ./pruebas.sh`, la parte 43 (`pruebas_agenda.sh`): con corre32,
+**las repeticiones frente a python-dateutil** (`agenda/pruebas/repite.py`:
+1.500 reglas al azar y las de siempre, cada una desde su principio y, sin
+COUNT, también desde años más adelante: más de 2.000 casos; sin dateutil,
+`casos.txt`), **el cambio de hora** (las dos noches de 2026 y sus avisos),
+**un .ICS de Google** (`google.ics`: la cita semanal con COUNT, EXDATE y una
+vez cambiada; UTC; Nueva York; tres días; la hora que no existe; un
+cumpleaños de 1952; una tarea; VALARM; UTF-8) importado, exportado e
+importado y exportado otra vez, **igual** (y lo exportado, mirado como dice
+RFC 5545), **los cumpleaños de una vCard**, **los festivos** (Cataluña 2026 y
+2027 como el DOGC, Albinyana, Madrid) y **el fuzz del lector .ICS**
+(`fuzz.py`: 3.000 vueltas, 15.000 ejecuciones, sin un fallo, el 22/11; en
+la parte, 400). En QEMU: el vigilante arranca con el escritorio, el icono
+abre la Agenda, Archivo › Importar, **una cita nueva con su aviso y «Cada
+semana»**, **el aviso a su hora con el reloj del PC puesto justo antes**
+(RELOJ=), Posponer 5 min, la semana, los próximos, las tareas, el Reloj con
+dos clics en un día, **el reloj de la bandeja con la próxima cita** y lo que
+queda en el disco (fsck.fat). Las capturas, con `CAPTURAS_DOCS=1`, a
+`docs/pentium/agenda/`.
+
+### Lo que falta
+
+**Sincronizar con CalDAV** (Google Calendar, Nextcloud, el móvil: leer y
+escribir el calendario de un servidor, con HTTPS; apuntado en METAS),
+varios calendarios a la vez (de colores, que se encienden y se apagan), las
+horas dentro de las reglas (BYHOUR, BYMINUTE, HOURLY: hoy, una vez al día
+como mucho), arrastrar una cita a otro día, imprimir el mes, la semana con
+las horas en filas (hoy, una lista por día), y la libreta de direcciones del
+Correo (hoy, los cumpleaños se importan de un .VCF).
 
 ## 15. Las pruebas
 

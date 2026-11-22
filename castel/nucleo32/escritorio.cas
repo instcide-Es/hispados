@@ -194,6 +194,8 @@ módulo Escritorio
     constante ICONO_RED = 24                    ; lo que se ensancha la bandeja con el icono de la red
     constante ICONO_ESCUDO = 22                 ; (ESCUDO) y con el del antivirus, si está ESCUDO.BIN
     variable hay_escudo: bool                   ; (ESCUDO)
+    variable hay_agenda: bool                   ; (AGENDA) está AGENDA.BIN: el reloj de la bandeja la abre y dice la próxima cita
+    variable ayuda_reloj: bool                  ; (AGENDA) el recuadro de ayuda es el del reloj (no el de la pila)
     variable ruta_escudo: arreglo [24] de byte  ; (ESCUDO) \HISPA\ESCUDO.BIN o \ESCUDO.BIN
     variable minuto_visto: nat32 = 0xFFFFFFFF
     variable segundo_visto: nat32
@@ -2123,7 +2125,7 @@ módulo Escritorio
         variable n, i, j, k: nat32
         variable an, al, x, yy, w: ent32
         variable l: puntero a Lienzo
-        n := ayuda_pila(texto_a, colores)
+        si ayuda_reloj entonces n := ayuda_agenda(texto_a, colores) sino n := ayuda_pila(texto_a, colores) fin   ; (AGENDA)
         si n = 0 entonces devolver fin
         ; lo ancho de la línea más larga
         an := 0
@@ -2179,12 +2181,21 @@ módulo Escritorio
     ; hasta salir y entrar otra vez); mientras se ve, se pone al día
     función vigila_ayuda()
         variable x0: ent32
-        si no hay_pila() o v_barra = 0 o menú_abierto entonces
+        variable en_reloj: bool
+        ; (AGENDA) también sobre el reloj, si está la Agenda: la próxima cita
+        en_reloj := hay_agenda y v_barra <> 0 y ratón_x >= pantalla.ancho - BANDEJA_ANCHO y ratón_y >= pantalla.alto - ALTO_BARRA
+        si en_reloj <> ayuda_reloj entonces
+            quita_ayuda()
+            ayuda_reloj := en_reloj
+            ayuda_quieto := 0
+        fin
+        si (no hay_pila() y no en_reloj) o v_barra = 0 o menú_abierto entonces
             quita_ayuda()
             devolver
         fin
         x0 := pantalla.ancho - ancho_bandeja() + hueco_usb() + hueco_red() + hueco_sonido() + 4
-        si ratón_x < x0 o ratón_x >= x0 + ANCHO_PILA o ratón_y < pantalla.alto - ALTO_BARRA entonces
+        si en_reloj entonces x0 := pantalla.ancho - BANDEJA_ANCHO fin
+        si ratón_x < x0 o (ratón_x >= x0 + ANCHO_PILA y no en_reloj) o ratón_y < pantalla.alto - ALTO_BARRA entonces
             quita_ayuda()
             ayuda_tapada := falso
             ayuda_quieto := 0
@@ -2204,10 +2215,45 @@ módulo Escritorio
             fin
             ayuda_quieto := ayuda_quieto + 1
             si ayuda_quieto >= 50 entonces pon_ayuda() fin
-        sino si ayuda_vista <> cambios_energía entonces
+        sino si ayuda_vista <> cambios_energía y no ayuda_reloj entonces
             quita_ayuda()
             pon_ayuda()
         fin
+    fin
+
+    ; (AGENDA) lo del recuadro del reloj: lo que deja el vigilante de la
+    ; Agenda en PROXIMA.TXT (AGENDA /VIGILAR, uagenda.cas) y cómo abrirla.
+    ; Su carpeta, con la regla de Festivos.carpeta_agenda (festivos.cas):
+    ; \DOCUMENT\AGENDA; (USUARIOS) con usuarios, la de quien ha entrado
+    ; (\USUARIOS\<CARPETA>\AGENDA): al juntar la rama usuarios, aquí.
+    función ayuda_agenda(destino: puntero a byte, colores: puntero a nat32): nat32
+        variable m, n, i, k: nat32
+        m := abrir_archivo(del_sistema, "\\DOCUMENT\\AGENDA\\PROXIMA.TXT", PARA_LEER)
+        n := 0
+        si m < PRIMER_ERROR entonces
+            n := leer_archivo(m, destino, 200)
+            cerrar_archivo(m)
+            si n > 200 entonces n := 0 fin
+        fin
+        destino[n] := 0
+        ; sin CR; cada renglón, una línea
+        k := 0
+        i := 0
+        mientras destino[i] <> 0 hacer
+            si destino[i] <> 13 entonces
+                destino[k] := destino[i]
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        destino[k] := 0
+        si k = 0 o destino[k - 1] <> '\n' entonces Textos32.concatenar(destino, "\n") fin
+        si k = 0 entonces Textos32.copiar(destino, "Agenda\n") fin
+        Textos32.concatenar(destino, "Un clic en el reloj: la Agenda")
+        colores[0] := 0x111827
+        colores[1] := 0x404B5A
+        colores[2] := 0x404B5A
+        devolver 2
     fin
 
     función haz(acción: nat32, dato: nat32)
@@ -2988,6 +3034,10 @@ módulo Escritorio
                 sino si hueco_red() > 0 y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() y ent32(e.a) < pantalla.ancho - bandeja + hueco_usb() + ICONO_RED entonces
                     ; el icono de la red (TAILSCALE: con el túnel, la ventana de Tailscale; WIFI: con el servicio Wi-Fi, la del Wi-Fi)
                     si túnel_red <> 0 entonces lanza("\\TAILSCAL.BIN", "/VENTANA") sino si estado_wifi <> WIFI_NADA entonces lanza("\\REDWIFI.BIN", nulo) sino dice_red() fin
+                sino si hay_agenda y ent32(e.a) >= pantalla.ancho - BANDEJA_ANCHO entonces
+                    ; (AGENDA) el reloj: la Agenda, en hoy
+                    quita_ayuda()
+                    lanza("\\AGENDA.BIN", nulo)
                 sino si hay_escudo y ent32(e.a) >= pantalla.ancho - bandeja + hueco_usb() + hueco_red() + hueco_sonido() + hueco_pila() y ent32(e.a) < pantalla.ancho - BANDEJA_ANCHO entonces
                     ; (ESCUDO) el del antivirus: su ventana
                     lanza(ruta_escudo, "/VENTANA")
@@ -3453,6 +3503,13 @@ módulo Escritorio
             si t <> nulo entonces t.padre := 0 fin
         fin
         arranca_sonido()              ; (SONIDO) el servicio de sonido (y el sonido de inicio)
+        ; (AGENDA) el vigilante de los avisos de la Agenda (si está: de la raíz
+        ; o de \HISPA). (USUARIOS) con usuarios, al entrar cada uno (es suyo)
+        t := cargar_archivo("\\AGENDA.BIN", "/VIGILAR", an)
+        si t <> nulo entonces
+            t.padre := 0
+            hay_agenda := cierto
+        fin
         devolver 1
     fin
 

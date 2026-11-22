@@ -838,8 +838,9 @@ módulo Exoper
     ; «mirador» (el Mirador de Pentium), y (PDF) los .PDF con Hispa-PDF (el
     ; paquete «pdf»: \HISPA\HISPAPDF.BIN): si están instalados, sus clases se
     ; abren con ellos, también donde ASOCIA.TXT dice lo de fábrica de antes
-    ; (el Mirador de la oficina); si no lo están, con lo de siempre
-    variable de_paquetes: arreglo [400] de byte = "PDF=\\HISPAPDF.BIN|%1\r\nZIP=\\COMPRIM.BIN|%1\r\nBMP=\\MIRADOR.BIN|%1\r\nPNG=\\MIRADOR.BIN|%1\r\nJPG=\\MIRADOR.BIN|%1\r\nJPE=\\MIRADOR.BIN|%1\r\nGIF=\\MIRADOR.BIN|%1\r\nICO=\\MIRADOR.BIN|%1\r\nTGA=\\MIRADOR.BIN|%1\r\nPSD=\\MIRADOR.BIN|%1\r\nPPM=\\MIRADOR.BIN|%1\r\nPGM=\\MIRADOR.BIN|%1\r\nPNM=\\MIRADOR.BIN|%1\r\n"
+    ; (el Mirador de la oficina); si no lo están, con lo de siempre. (AGENDA)
+    ; Y los .ICS y .VCF, con la Agenda (el paquete «agenda»: \HISPA\AGENDA.BIN)
+    variable de_paquetes: arreglo [460] de byte = "ICS=\\AGENDA.BIN|%1\r\nVCF=\\AGENDA.BIN|%1\r\nPDF=\\HISPAPDF.BIN|%1\r\nZIP=\\COMPRIM.BIN|%1\r\nBMP=\\MIRADOR.BIN|%1\r\nPNG=\\MIRADOR.BIN|%1\r\nJPG=\\MIRADOR.BIN|%1\r\nJPE=\\MIRADOR.BIN|%1\r\nGIF=\\MIRADOR.BIN|%1\r\nICO=\\MIRADOR.BIN|%1\r\nTGA=\\MIRADOR.BIN|%1\r\nPSD=\\MIRADOR.BIN|%1\r\nPPM=\\MIRADOR.BIN|%1\r\nPGM=\\MIRADOR.BIN|%1\r\nPNM=\\MIRADOR.BIN|%1\r\n"
 
     ; ¿está ese programa (en la unidad del sistema o en su \HISPA)?
     función hay_programa(prog: puntero a byte): bool
