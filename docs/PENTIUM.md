@@ -6025,6 +6025,8 @@ lo nuevo lleva la marca `(JUEGOS2)`.*
 | ![Bloques: cada pieza con su color y su dibujo](pentium/juegos/bloques.png) | ![Rompemuros](pentium/juegos/rompemuros.png) |
 | ![Solitario (las cartas de Hispa-386)](pentium/juegos/solitario.png) | ![Tragabolas](pentium/juegos/tragabolas.png) |
 | ![Campo de minas](pentium/juegos/minas.png) | ![Culebra](pentium/juegos/culebra.png) |
+| ![Almacén](pentium/juegos/almacen.png) | ![Hispa-Pinball: la bola, recién lanzada, contra una taza (con su tapa encendida)](pentium/juegos/pinball-lanzador.png) |
+| ![Hispa-Pinball a 1280 x 720](pentium/juegos/pinball-1280.png) | ![Hispa-Pinball en una ventana, con su barra de menús](pentium/juegos/pinball-ventana.png) |
 
 Ocho juegos, en **Inicio › Todos los programas › Juegos**, cada uno con su
 icono (los de Hispa-386, los de su cabecera HVP; los nuevos, dibujados aquí):
@@ -6351,9 +6353,9 @@ tarda su x87, cuente hasta el doble.
 
 | Qué | Lo que gasta | Cuadros por segundo |
 |---|---|---|
-| **Hispa-Pinball** a pantalla completa a 1024 x 600, jugando (`/SOLO`) | **4 %** (la física, 0,2 %; pintar, 2,6 %; subirlo, 0,5 %) | **60** |
-| Rompemuros jugando (`/SOLA`) | MEDIDA_ROMPE | 60 |
-| Hacer la mesa del pinball (una vez, al abrirlo o cambiar el tamaño) | MEDIDA_MESA | |
+| **Hispa-Pinball** a pantalla completa a 1024 x 600, jugando (`/SOLO`) | **3,7 %** (la física, 0,2 %; pintar, 2,8 %; subirlo, 0,6 %) | **60** |
+| Rompemuros jugando (`/SOLA`) | 0,4 % | 60 |
+| Hacer la mesa del pinball a 1024 x 600 (una vez, al abrirlo o cambiar el tamaño) | 286 millones de ciclos: un tercio de segundo | |
 
 Al principio el pinball gastaba el 11 %: repintaba en cada cuadro los
 flippers y el émbolo aunque no se movieran. Ahora cada cosa que se mueve se
@@ -6379,7 +6381,7 @@ repinta solo si ha cambiado (o si toca algo que ha cambiado).
 ### Probarlo
 
 `SOLO=juegos castel/pruebas.sh` (la parte 39, en `castel/pruebas_juegos.sh`;
-DURACION): en el anfitrión, con ASan y UBSan, **la física del pinball** —4.000
+unos 16 minutos en el VPS, 14 en el PC de Albinyana; 98 comprobaciones): en el anfitrión, con ASan y UBSan, **la física del pinball** —4.000
 bolas por la mesa de verdad, desde sitios y en direcciones al azar, de 100 a
 15.000 unidades por segundo (sin el tope del juego), y ninguna sale por las
 paredes de fuera, cruza la del lanzador ni se mete en un poste o una pared;
