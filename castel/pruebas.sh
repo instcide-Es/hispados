@@ -1154,7 +1154,7 @@ S=$P/ordenes.sal
 mira "el intérprete de órdenes es un programa del anillo 3 cargado del disco, y lee el teclado por la llamada al sistema" \
   "^lanzo ORDENES.BIN del disco (la tarea [0-9]*, en el anillo 3)" "^Hispa-Pentium: intérprete de órdenes (un programa del anillo 3" \
   "^C:.>ayuda$" "^Las órdenes de Hispa-Pentium:" "^  TYPE archivo "
-mira "VER y MEM" "^Hispa-Pentium 0\.8: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
+mira "VER y MEM" "^Hispa-Pentium ${VERSION_BASE//./\\.}: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
   "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 4\.$"
 mira "DIR: la raíz y una carpeta, con sus tamaños, sus fechas y lo que queda libre" "^ Directorio de C:.$" "^LEEME    TXT  *118  [0-9/]*  [0-9:]*$" \
   "^TEXTOS  *<DIR>  " "^ *17 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
@@ -1456,7 +1456,7 @@ mira "el menú lanza la Consola" "^escritorio: lanzo .CONSOLA.BIN (la tarea [0-9
 miracap "la Consola: el intérprete de órdenes dentro de una ventana (un terminal): órdenes, un programa, Ctrl+C y la versión" e9 \
   negrita 140 90 152 98 Consola texto 120 116 132 520 "C:\\>eco hola desde la ventana" texto 120 116 132 520 "hola desde la ventana" \
   texto 120 116 132 520 "bucle: doy vueltas sin fin (Ctrl+C para acabar)" texto 120 116 132 520 "^C" \
-  texto 120 116 132 520 "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel." texto 290 572 300 580 Consola
+  texto 120 116 132 520 "Hispa-Pentium $VERSION_BASE: un núcleo de 32 bits escrito en Castel." texto 290 572 300 580 Consola
 miracap "SALIR acaba el intérprete y la Consola se cierra (su ventana y su botón)" e10 notexto 130 80 160 100 Consola notexto 280 570 310 582 Consola \
   negrita 212 164 224 172 "NOTAS.TXT - Bloc de notas"
 miracap "Configuración (PANEL): el Panel de control, con lo que hay (pantalla, memoria) y un icono por sección" e11 negrita 140 80 160 95 "Configuración" \
@@ -2399,7 +2399,7 @@ for hc in xhci ehci; do
     teclas c l s ret p a q u e t e s spc l i s t a ret p a q u e t e s spc c o m p r u e b a ret
     espera_a "^Los archivos de los\|no est.n como se instalaron" 60 $Z/b$hc.sal; sleep 0.5; textoz b2$hc
     monz quit 0.5; wait $QPID 2> /dev/null; QPID=
-    if grep -q "Hispa-Pentium 0.8: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
+    if grep -q "Hispa-Pentium $VERSION_BASE: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -n 8; fi
     if grep -q "^|  win32     1.2     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0\.8\.[0-9]   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|16 paquetes\.$" $Z/b2$hc.txt \

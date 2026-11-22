@@ -333,8 +333,14 @@ módulo UOrdenes
 
     función orden_ver()
         variable v: nat32
+        variable a: nat32
         v := dato(DATO_VERSIÓN)
-        imprimir2("Hispa-Pentium %u.%u: un núcleo de 32 bits escrito en Castel.\n", v >> 8, v yb 0xFF)
+        a := dato(DATO_ARREGLO)                 ; (0.8.7) la versión entera, la del menú Inicio
+        si a < 1000 entonces
+            imprimir3("Hispa-Pentium %u.%u.%u: un núcleo de 32 bits escrito en Castel.\n", v >> 8, v yb 0xFF, a)
+        sino
+            imprimir2("Hispa-Pentium %u.%u: un núcleo de 32 bits escrito en Castel.\n", v >> 8, v yb 0xFF)
+        fin
         escribir("Intérprete de órdenes del anillo 3 (ORDENES.BIN).\n")
     fin
 

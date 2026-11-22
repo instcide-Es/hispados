@@ -128,6 +128,7 @@ módulo Llamadas
     público constante DATO_ALTO_LIBRE = 14      ; (explorador) lo alto de la pantalla sin la barra de tareas ni el dock
     público constante DATO_TERMINAL = 15        ; (REPRODUCTOR) 1 si el programa escribe en un terminal (la Consola, SSH)
     público constante DATO_MIS_TICS = 16        ; (REPRODUCTOR) los tics en que el reloj lo ha pillado corriendo (lo que gasta)
+    público constante DATO_ARREGLO = 17         ; (0.8.7) el tercer número de la versión (el 7 de la 0.8.7; un núcleo de antes da un error)
 
     público constante SIGUE = 0xFFFFFF00        ; lo que da acabada() si la tarea no ha acabado
 

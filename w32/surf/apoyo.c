@@ -101,7 +101,9 @@ char *strsep(char **q, const char *sep) {
   if (*e) { *e = 0; *q = e + 1; } else *q = NULL;
   return s;
 }
+#ifndef HISPA_PENTIUM   /* (0.8.7) en Pentium la trae la MSVCRT de WIN32 1.2 (w32/msvcrt.c, crt.o) */
 int strcoll(const char *a, const char *b) { return strcmp(a, b); }
+#endif
 long long strtoll(const char *s, char **e, int b) { return _strtoi64(s, e, b); }
 unsigned long long strtoull(const char *s, char **e, int b) { return _strtoui64(s, e, b); }
 float strtof(const char *s, char **e) { return (float)strtod(s, e); }
@@ -297,6 +299,7 @@ float fmaxf(float a, float b) { return a > b ? a : b; }
 double hypot(double a, double b) { return sqrt(a * a + b * b); }
 double log2(double x) { return log(x) / M_LN2; }
 double copysign(double a, double b) { a = fabs(a); return signbit(b) ? -a : a; }
+#ifndef HISPA_PENTIUM   /* (0.8.7) en Pentium las trae la MSVCRT de WIN32 1.2 (w32/msvcrt.c, crt.o) */
 double asin(double x) { return atan2(x, sqrt(1 - x * x)); }
 double acos(double x) { return atan2(sqrt(1 - x * x), x); }
 double frexp(double x, int *e) {
@@ -307,6 +310,7 @@ double frexp(double x, int *e) {
   while (a < 0.5) { a *= 2; (*e)--; }
   return x < 0 ? -a : a;
 }
+#endif
 void sincos(double x, double *s, double *c) { *s = m_sin(x); *c = m_cos(x); }
 void sincosf(float x, float *s, float *c) { *s = (float)m_sin(x); *c = (float)m_cos(x); }
 

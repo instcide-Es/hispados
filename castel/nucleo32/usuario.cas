@@ -190,6 +190,7 @@ módulo Usuario
     público constante DATO_ALTO_LIBRE = 14      ; (explorador) lo alto de la pantalla sin la barra de tareas ni el dock
     público constante DATO_TERMINAL = 15        ; (REPRODUCTOR) 1 si la tarea escribe en un terminal (la Consola, SSH)
     público constante DATO_MIS_TICS = 16        ; (REPRODUCTOR) los tics en que el reloj ha pillado corriendo a la tarea (lo que gasta)
+    público constante DATO_ARREGLO = 17         ; (0.8.7) el tercer número de la versión de verdad (VERSIÓN_TEXTO: el 7 de la 0.8.7)
 
     ; la función (sin argumentos; da 1 o 0) que pone en marcha el escritorio:
     ; la pone escritorio.cas, y se la llama por su dirección
@@ -633,6 +634,27 @@ módulo Usuario
         devolver antes
     fin
 
+    ; (0.8.7) el tercer número de VERSIÓN_TEXTO («0.8.7»: 7; sin él, 0): la
+    ; orden VER dice así la versión entera, de la misma constante que el menú
+    ; Inicio, Configuración y «Acerca de»
+    función arreglo_de_la_versión(): nat32
+        variable i, puntos, n: nat32
+        variable t: puntero a byte
+        t := VERSIÓN_TEXTO
+        i := 0
+        puntos := 0
+        n := 0
+        mientras t[i] <> 0 hacer
+            si t[i] = '.' entonces
+                puntos := puntos + 1
+            sino si puntos = 2 y t[i] >= '0' y t[i] <= '9' entonces
+                n := n * 10 + nat32(t[i] - '0')
+            fin
+            i := i + 1
+        fin
+        devolver n
+    fin
+
     función dato(cuál: nat32): nat32
         variable tablas, f, h, u: nat32
         u := unidad_de(actual)
@@ -643,6 +665,7 @@ módulo Usuario
             caso DATO_MIS_PÁGINAS:
                 devolver cuenta_páginas(actual.cr3, USUARIO_INICIO >> 22, (USUARIO_FINAL >> 22) - 1, tablas)
             caso DATO_VERSIÓN: devolver VERSIÓN
+            caso DATO_ARREGLO: devolver arreglo_de_la_versión()
             caso DATO_TAREAS: devolver cuántas_tareas()
             caso DATO_FAT:
                 si u <> NINGUNA entonces devolver volúmenes[u].clase fin

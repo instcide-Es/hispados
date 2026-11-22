@@ -231,10 +231,11 @@ SISTEMA = [
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),
         ('LEEME.TXT', r'\HISPA\LEEME.TXT'), ('LEEME.TXT', r'\LEEME.TXT'), ('MANUAL.TXT', r'\HISPA\MANUAL.TXT'),
         ('BOOT.IMG', r'\HISPA\BOOT.IMG'), ('CORE.IMG', r'\HISPA\CORE.IMG')]),
-    ('bloc', '1.0', 'El Bloc de notas: pestañas, buscar y reemplazar (con expresiones), colores según el lenguaje, UTF-8 y comparar', 'base >= 0.7', [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),    # (BLOC) la 1.0: el Bloc al nivel de un editor serio
+    ('bloc', '1.0', 'El Bloc de notas: pestañas, buscar y reemplazar (con expresiones), colores según el lenguaje, UTF-8 y comparar', 'base >= ' + VERSION_087, [('BLOC.BIN', r'\HISPA\BLOC.BIN')]),    # (BLOC) la 1.0: el Bloc al nivel de un editor serio
     ('consola', VERSION_085, 'La Consola: el intérprete de órdenes en una ventana', 'base >= 0.7', [('CONSOLA.BIN', r'\HISPA\CONSOLA.BIN')]),
     # (explorador, dispositivos) el explorador de archivos, sus miniaturas y el Administrador de dispositivos
-    ('equipo', '0.9.2', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
+    # (REPRODUCTOR) la 0.9.3: la música (.MP3, .OGG, .FLAC, .WAV, .CUE...) se abre con el Reproductor si está
+    ('equipo', '0.9.3', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
         ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('MINIAT.BIN', r'\HISPA\MINIAT.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
     ('ejemplos', VERSION_085, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.4', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
@@ -252,7 +253,8 @@ SISTEMA = [
     ('paquetes', '1.4', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
         ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN')]),
-    ('red', VERSION_086, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
+    # (JUEGOS) la 0.8.7: UDP sin esperar (rpila.cas: un juego lo pregunta en cada cuadro)
+    ('red', VERSION_087, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
     ('tls', VERSION_087, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
@@ -488,7 +490,7 @@ OPCIONALES = [
         ('MIRADOR.MNU', r'\HISPA\MENU\MIRADOR.MNU'), ('MIRADOR.ICP', r'\HISPA\MENU\MIRADOR.ICP')]),
     # (REPRODUCTOR) el Reproductor de música (castel/nucleo32/reproductor/paquete.sh; tipo «multimedia»)
     ('reproduc', '1.0', 'El Reproductor: música (MP3, OGG, FLAC, WAV, MOD, XM, S3M, IT) y CD de música, con lista, ecualizador de 10 bandas y visualización',
-     'base >= 0.8.6, sonido >= 1.0', [
+     'base >= ' + VERSION_087 + ', sonido >= 1.0', [
         ('BIN/REPRODUC.BIN', r'\HISPA\REPRODUC.BIN'), ('REPRODUC.TXT', r'\HISPA\REPRODUC.TXT'),
         ('REPRODUC.MNU', r'\HISPA\MENU\REPRODUC.MNU'), ('REPRODUC.ICP', r'\HISPA\MENU\REPRODUC.ICP')]),
 ]
