@@ -212,6 +212,11 @@ módulo URaton
             sino
                 corre_hasta(base + n)
             fin
+            ; (lo grabado: «@n o HH ...», en la misma línea)
+            q := q + 1
+            mientras valor(q) >= '0' y valor(q) <= '9' hacer q := q + 1 fin
+            q := saltar_espacios(q)
+            si valor(q) = 'o' y q[1] = ' ' entonces octetos(q + 1) fin
         sino si valor(q) = '+' entonces
             n := número(q + 1)
             si inyectar entonces

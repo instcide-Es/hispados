@@ -56,10 +56,10 @@ if ! grep -q "^ratón: touchpad\|^ratón: Touchpad" $S; then ok "y no se toma po
 miracap "RATON: «Touchpad: ninguno» y cómo está puesto" tr1 texto 0 0 800 500 "Touchpad: ninguno"
 mira "RATON /TOUCHPAD 3 graba tres segundos y lo guarda (TOUCHPAD.TXT)" "^ratón: grabando lo que llega del touchpad, 3 segundos" "^ratón: grabados [1-9][0-9]* octetos del touchpad en C:.TOUCHPAD.TXT"
 miracap "y lo dice en la Consola" tr2 texto 0 0 800 500 "guardado en TOUCHPAD.TXT"
-if saca $X/r.img TOUCHPAD.TXT $X/tp.txt && grep -q "^aj xmax " $X/tp.txt && grep -q "^@[0-9]* o 0[89A-F] " $X/tp.txt; then
-  ok "TOUCHPAD.TXT: la cabecera (lo que se sabe del touchpad, como «aj») y cada paquete con su tic («@n o 08 14 0A 00»: los del IntelliMouse)"
+if saca $X/r.img TOUCHPAD.TXT $X/tp.txt && grep -q "^aj xmax " $X/tp.txt && grep -q "^@[0-9]* o [0-3][89A-F] " $X/tp.txt; then
+  ok "TOUCHPAD.TXT: la cabecera (lo que se sabe del touchpad, como «aj») y cada paquete con su tic («@n o 28 14 F6 00»: los del IntelliMouse)"
   $AQUI/corre32/corre32.sh -C $X $X/RATON.BIN /ANALIZA tp.txt > $X/tp.sal 2>&1
-  if grep -q "^fin: .*perdido=1" $X/tp.sal; then ok "RATON /ANALIZA lo lee entero (y, como no son del modo absoluto, «perdido»: lo que haría el núcleo, volver al relativo)"
+  if grep -q "^fin: .* malos=[1-9][0-9]* .*paquetes=0 " $X/tp.sal; then ok "RATON /ANALIZA lo lee (y, como son del IntelliMouse y no del modo absoluto, ni uno pasa por un paquete de Synaptics)"
   else ko "RATON /ANALIZA no lee TOUCHPAD.TXT: $(tail -2 $X/tp.sal)"; fi
 else ko "TOUCHPAD.TXT no está o no es lo que toca: $(head -12 $X/tp.txt 2> /dev/null)"; fi
 miracap "y la rueda sigue moviendo la Consola (dos pasos, seis líneas)" tr3 negrita 90 60 600 90 "Consola - historial: 6 l"
@@ -70,7 +70,7 @@ cp $X/d.img $X/s.img
 CAPTURAS=$G ESCRIBE=1 DISCO=$X/s.img ARRANQUE="escritorio tp_simulado" MODULOS= MEMORIA=128 $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 4" ":doble 62 185" ":pausa 3" \
   "raton /inyecta todo.tpd /tras 9" ":pausa 1" "bloc largo.txt" ":pausa 3" ":raton 300 300" ":pausa 5" ":captura ts1" ":pausa 6" ":captura ts2" ":raton 150 127" ":pausa 8" ":captura ts3" \
   ":tecla esc" ":pausa 1" ":tecla alt-f4" ":pausa 2" "panel /raton" ":pausa 4" ":raton 790 590" ":captura ts4" ":clic 246 335" ":pausa 1" \
-  ":clic 640 366" ":pausa 1" ":tecla esc" ":tecla down" ":tecla down" ":pausa 1" ":clic 640 432" ":pausa 1" ":tecla esc" ":tecla down" ":pausa 1" ":raton 790 590" ":captura ts5" > $X/s.sal 2>&1
+  ":clic 640 366" ":pausa 1" ":tecla esc" ":tecla down" ":pausa 1" ":clic 640 432" ":pausa 1" ":tecla esc" ":tecla down" ":pausa 1" ":raton 790 590" ":captura ts5" > $X/s.sal 2>&1
 tr -d '\r' < $X/s.sal > $X/s.txt
 S=$X/s.txt
 mira "con «tp_simulado», el núcleo dice que hay un touchpad (de mentira)" "^ratón: touchpad simulado (tp_simulado)"
@@ -80,9 +80,9 @@ miracap "un toque encima del menú Archivo: el clic lo abre" ts3 texto 0 0 800 6
 miracap "y lo cambiado se ve: la casilla sin marcar, «Rápida» y «Ancho (12 %)»" ts5 texto15 515 350 800 385 "Rápida" texto15 515 415 800 450 "Ancho (12 %)"
 miracap "Panel de control > Ratón: la sección Touchpad (Synaptics), con lo que se marca y la velocidad y el ancho del borde" ts4 \
   negrita15 230 290 600 320 "Touchpad (Synaptics)" texto15 230 320 520 350 "Tocar para hacer clic" texto15 230 345 520 375 "Borde derecho: desplazar" negrita15 515 320 800 350 "Velocidad"
-mira "tocar para hacer clic, quitado; la velocidad, Rápida; el ancho del borde, Ancho (12 %)" "^panel: el ajuste 23, a 0$" "^panel: el ajuste 27, a 7$" "^panel: el ajuste 29, a 12$"
+# (el Panel, lanzado desde la Consola, escribe en ella: lo cambiado se mira en PANEL.INI)
 if saca $X/s.img PANEL.INI $X/panel.ini && tr -d '\r' < $X/panel.ini > $X/panel.txt && grep -q "^touchpad_toque=0$" $X/panel.txt && grep -q "^touchpad_velocidad=7$" $X/panel.txt && \
-   grep -q "^touchpad_zona=12$" $X/panel.txt && grep -q "^touchpad_borde=1$" $X/panel.txt; then ok "PANEL.INI guarda lo del touchpad (y se pone al arrancar)"
+   grep -q "^touchpad_zona=12$" $X/panel.txt && grep -q "^touchpad_borde=1$" $X/panel.txt; then ok "tocar para hacer clic, quitado; la velocidad, Rápida (7); el ancho del borde, Ancho (12 %): PANEL.INI lo guarda (y se pone al arrancar)"
 else ko "PANEL.INI no guarda lo del touchpad: $(grep touchpad $X/panel.txt 2> /dev/null | tr '\n' ' ')"; fi
 if ! grep -q "excepción\|\*\*\*" $S; then ok "ni una excepción ni una queja del núcleo"; else ko "el núcleo se ha quejado: $(grep 'excepción\|\*\*\*' $S | head -2)"; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/t[rs]*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
