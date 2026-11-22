@@ -32,6 +32,7 @@ void *ec_disp(void) { return ec; }
  * escribir en la región no se escribe (se cuenta y se apunta) y se le dice
  * que ha ido bien, para que el método siga y lea */
 int ec_solo_lectura;
+unsigned int ec_espera_activa_us = 2000;
 unsigned int ec_ignoradas;
 
 /* Lo normal es que conteste en microsegundos. Si tarda más de 2 ms, se
@@ -48,8 +49,10 @@ static int espera(u32 mascara, u32 valor)
 		va = mq_ahora_us() - ini;
 		if (va > EC_ESPERA_US)
 			return -1;
-		if (va > 2000)
-			tarea_duerme(10);
+		/* (TERMO) la espera activa: 2 ms (Hispa-486); ACPI.BIN de Hispa-Pentium la
+		 * baja a 50 us (ec_espera_activa_us) y luego duerme entre miradas */
+		if (va > ec_espera_activa_us)
+			tarea_duerme(ec_espera_activa_us >= 2000 ? 10 : 1);	/* (Hispa-486: como antes) */
 		else
 			mq_espera_us(10);
 	}

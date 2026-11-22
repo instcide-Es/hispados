@@ -14,7 +14,7 @@
 
 static struct ve_sensor sen[VE_MAXS];
 static char csv[VE_MAXS][48];
-static int ns, lim_de[VE_MAXS], visto[VE_MAXS];
+static int ns, lim_de[VE_MAXS], visto[VE_MAXS], atom;
 
 static int segundos(const char *l)
 {
@@ -59,6 +59,7 @@ static void datos(char *l, int *t)
 				sen[ns].cpu = !strncmp(n, "Nucleo", 6) || !strncmp(n, "Paquete", 7) || !strncmp(n, "Procesador", 10) || !strncmp(n, "Simulado", 8);
 				sen[ns].limite = VE_NO;
 				sen[ns].no_fiable = sen[ns].solo_carga = 0;
+				sen[ns].aproximado = sen[ns].cpu && atom;
 				ns++;
 			}
 			if (k < ns)
@@ -89,6 +90,8 @@ int main(int argc, char **argv)
 		l[strcspn(l, "\r\n")] = 0;
 		if (strlen(l) < 9 || l[2] != ':')
 			continue;
+		if (strstr(l, "es aproximada"))
+			atom = 1;	/* (un Atom: su sensor, aproximado) */
 		if ((s = strstr(l, " SUCESO sensor ")) && (q = strstr(l, "(limite "))) {
 			/* «sensor Nucleo 0 del procesador: 22,0 C (limite 90,0 C)» */
 			char *dos = strchr(s + 15, ':');
@@ -132,7 +135,7 @@ int main(int argc, char **argv)
 		for (k = 0; k < ns; k++)
 			if (!sen[k].no_fiable && !visto[k] && t[k] != VE_NO) {
 				visto[k] = 1;
-				sen[k].no_fiable = !ve_creible(t[k], sen[k].limite);
+				sen[k].no_fiable = ve_creible(t[k], sen[k].limite) ? 0 : VE_NF_IMPOSIBLE;
 			}
 		ult = segundos(l);
 		if (strstr(l, "fase=carga")) {

@@ -730,13 +730,20 @@ static void ta_lee(void)
 		for (i = 0; i < ta.nzonas; i++) {
 			struct ta_zona *z = &ta.zona[i];
 
+			/* (TERMO) la que falla, otra vez solo una vez por minuto: cada
+			 * intento cuesta interpretar el AML (en el HP Mini 5103, cinco
+			 * zonas con 3007h, AE_AML_UNINITIALIZED_ELEMENT, ocupaban el
+			 * procesador más de medio segundo cada vez) */
+			if (ta.lecturas > 0 && z->tmp == TA_NO && z->estado != 0 && ta.lecturas % 30 != 0)
+				continue;
 			z->tmp = ta_kelvin_de(ta_zh[i], "_TMP", &z->estado, &z->crudo);
 			if (z->tmp == TA_NO && (z->estado != antes[i] || ta.lecturas == 0))
 				reg("ACPI: (TERMO) %s._TMP sin dato: %s, devuelve %d\n", z->nombre, AcpiFormatException(z->estado), z->crudo);
 			antes[i] = z->tmp == TA_NO ? z->estado : 0xFFFFFFFFu;
 		}
 		for (i = 0; i < ta.nvent; i++)
-			ta_lee_vent(i);
+			if (ta.lecturas == 0 || ta.lecturas % 30 == 0 || (ta.vent[i].estado_fst == 0 || ta.vent[i].estado_psc == 0))
+				ta_lee_vent(i);		/* (los que no dan nada: una vez por minuto) */
 		ta_lee_asus();			/* (TERMO) los ASUS, por WMI (DSTS) */
 		ec_solo_lectura = 0;
 		ta.ec_hay = estado.ec_hay;
@@ -759,7 +766,8 @@ static void ta_vuelta(void)
 	if (sc(SC_TERMO, (u32)&ta, 0, 1) != 1)
 		return;
 	ahora = mq_ahora_us();
-	if (ultima && ahora - ultima < 1900000)
+	/* cada 2 s; si leer cuesta mucho (más de 0,2 s), cada 10 s */
+	if (ultima && ahora - ultima < (ta.ms_lectura > 200 ? 9900000u : 1900000u))
 		return;
 	if (!tarea_quieta())
 		return;
@@ -789,6 +797,7 @@ int servicio_principal(void)
 	u32 vistas = 0xFFFFFFFFu, fase = 0xFFFFFFFFu;
 
 	sc(SC_CORTE, 1, 0, 0);		/* Ctrl+C no acaba con el servicio */
+	ec_espera_activa_us = 50;	/* (TERMO) esperar al EC durmiendo, no dando vueltas */
 	/* el núcleo apunta qué tarea es el servicio justo después de lanzarlo:
 	 * hasta entonces (y para cualquier otro que lo lance), la 153 no vale */
 	for (n = 0; n < 100 && ES_ERROR(sc(SC_SERVICIO, 0, 0, 0)); n++)

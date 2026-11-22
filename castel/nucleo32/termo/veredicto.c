@@ -193,21 +193,28 @@ void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int
 		d[0] = 0, m = 0;
 		for (k = 0; k < p->ns; k++)
 			nf += p->s[k].no_fiable;
-		if (nf)
-			PON("No se puede juzgar: ningún sensor da una temperatura creíble (%s marca %s, fuera de lo posible o por encima de su límite estando en reposo, y no se mueve). No es que se caliente: es que este equipo no deja leer bien su temperatura así.",
+		if (nf && p->s[0].no_fiable == VE_NF_IMPOSIBLE)
+			PON("No se puede juzgar: ningún sensor da una temperatura creíble (%s marca %s, fuera de lo posible o por encima de su límite estando en reposo). No es que se caliente: es que este equipo no deja leer bien su temperatura así.",
+			    p->s[0].nombre, ve_grados(a, p->ini[0] != VE_NO ? p->ini[0] : p->lo[0]));
+		else if (nf)
+			PON("No se puede juzgar: ningún sensor se ha movido con la carga (%s se queda en %s): este equipo no da la temperatura del procesador.",
 			    p->s[0].nombre, ve_grados(a, p->ini[0] != VE_NO ? p->ini[0] : p->lo[0]));
 		else
 			PON("Ningún sensor ha dado temperaturas durante la prueba: no se puede decir nada.");
 		return;
 	}
-	if (ve_fija(p, r) && p->s[r].cpu) {
+	if (ve_fija(p, r) && p->s[r].cpu && !p->s[r].aproximado) {
 		PON("El sensor del procesador («%s») no ha cambiado en toda la prueba (siempre %s): este equipo no da la temperatura del procesador, y no se puede juzgar cómo se calienta.",
 		    p->s[r].nombre, ve_grados(a, p->lo[r]));
 		return;
 	}
 	sube = p->pico_ref - p->t_ini;
 	lim = p->s[r].limite;
-	PON("Medido con «%s»: subió de %s a %s (%s%d °C). ", p->s[r].nombre, ve_grados(a, p->t_ini), ve_grados(b, p->pico_ref), sube >= 0 ? "+" : "", sube / 10);
+	if (p->s[r].aproximado)
+		PON("Medido con «%s» (medida aproximada: la cifra no es de fiar, la subida sí): subió unos %d °C (de %s a %s). ", p->s[r].nombre, (sube + 5) / 10,
+		    ve_grados(a, p->t_ini), ve_grados(b, p->pico_ref));
+	else
+		PON("Medido con «%s»: subió de %s a %s (%s%d °C). ", p->s[r].nombre, ve_grados(a, p->t_ini), ve_grados(b, p->pico_ref), sube >= 0 ? "+" : "", sube / 10);
 	/* el enfriamiento */
 	b60 = p->baja60 != VE_NO ? p->baja60 : p->baja30;
 	if (p->ultimo == VE_NO)
@@ -257,6 +264,8 @@ void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int
 	/* el veredicto */
 	if (seguridad)
 		PON("PELIGRO: se ha parado por seguridad, cerca de su límite. Los datos indican que no saca bien el calor: conviene que un técnico revise el ventilador, el polvo de las rejillas y la pasta térmica. ");
+	else if (p->s[r].aproximado && sube >= 50)
+		PON("La subida en carga es normal. ");
 	else if (lim != VE_NO && p->pico_ref >= lim - 200)
 		PON("Se calienta bastante: en carga es normal en un portátil, pero queda cerca del límite (%s); conviene revisar la limpieza del ventilador y de las rejillas. ", ve_grados(a, lim));
 	else if (sube < 50 && !simula)
@@ -267,6 +276,11 @@ void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int
 		PON("La temperatura en carga es buena (%s). ", ve_grados(a, p->pico_ref));
 	/* (el MacBook Air 2012: si algo no deja al procesador en reposo, no baja
 	 * aunque el ventilador vaya bien: no se juzga) */
+	if (p->ocup_n && p->ocup_max >= 50 && ocupado(p) < 30)
+		PON(" (Al enfriar hubo picos de ocupación de hasta el %d %%, cada pocos segundos: son de leer las zonas de la BIOS, del propio Termómetro, no del equipo; de media, el %d %%.)",
+		    p->ocup_max, ocupado(p));
+	if (sube >= 50 && sube < 100 && !seguridad && p->vuelve_s >= 0)
+		PON("Al parar se enfría bien.");
 	if (sube >= 100 && !seguridad && p->ultimo != VE_NO && ocupado(p) >= 30)
 		PON("No se puede juzgar el enfriamiento: el procesador no ha quedado en reposo después de la prueba (ocupado al %d %% de media, como mucho al %d %%), y así no baja aunque el ventilador vaya bien.",
 		    ocupado(p), p->ocup_max);

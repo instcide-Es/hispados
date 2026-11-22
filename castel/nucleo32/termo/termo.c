@@ -702,7 +702,7 @@ static void csv_linea(void)
  */
 static void log_escribe(const char *clase, const char *texto)
 {
-	char b[600], l[560];
+	char b[1700], l[1650];	/* (el RESULTADO entero: salía cortado) */
 	u32 a, me, d, h, mi, se;
 	int n;
 
@@ -720,7 +720,7 @@ static void log_escribe(const char *clase, const char *texto)
 static void suceso_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void suceso_log(const char *fmt, ...)
 {
-	char t[400];
+	char t[1600];
 	va_list v;
 
 	va_start(v, fmt);
@@ -769,6 +769,8 @@ static const char *texto_acpi(u32 e, char *d)
 		{ 0x3001, "AE_AML_BAD_OPCODE" },
 		{ 0x3003, "AE_AML_OPERAND_TYPE" },
 		{ 0x3005, "AE_AML_UNINITIALIZED_LOCAL" },
+		{ 0x3006, "AE_AML_UNINITIALIZED_ARG" },
+		{ 0x3007, "AE_AML_UNINITIALIZED_ELEMENT: usa un dato sin valor (lo suele poner un _INI o un aviso de la BIOS que en el modo mínimo no corre; el método, en \\ACPI.TXT)" },
 		{ 0x3009, "AE_AML_REGION_LIMIT" },
 		{ 0x300E, "AE_AML_NAME_NOT_FOUND: llama a algo que no está" },
 		{ 0x3010, "AE_AML_INVALID_SPACE_ID: una región de un tipo que no se sabe leer" },
@@ -866,7 +868,7 @@ static void mira_cambios(void)
 		if (S[k].t != NO && !vistos_antes[k]) {
 			suceso_log("sensor «%s»: %s (límite %s)", S[k].nombre, grados(g, S[k].t), S[k].limite == NO ? "no dice" : grados(g2, S[k].limite));
 			if (en_reposo() && !ve_creible(S[k].t, S[k].limite) && !S[k].no_fiable) {
-				S[k].no_fiable = 1;
+				S[k].no_fiable = VE_NF_IMPOSIBLE;
 				suceso_log("AVISO: «%s» da %s estando en reposo (fuera de lo posible o por encima de su límite): lectura no fiable; no cuenta para la parada ni para el veredicto",
 					   S[k].nombre, grados(g, S[k].t));
 			}
@@ -1096,6 +1098,28 @@ static void mira_anterior(void)
 
 /* la pantalla (F12), en .BMP de 24 bits */
 static void captura_en(const char *nombre);
+static u8 *bmp_pend;		/* (PARPADEO/TERMO) la pantalla que se está guardando */
+static u32 bmp_total, bmp_hecho, bmp_m;
+
+/* cada pulso: otro trozo de la pantalla que se está guardando */
+static void bmp_trozo(void)
+{
+	u32 k;
+
+	if (!bmp_pend)
+		return;
+	k = bmp_total - bmp_hecho > 32768 ? 32768 : bmp_total - bmp_hecho;
+	if (sc(SC_ESCRIBIR_ARCHIVO, bmp_m, (u32)(bmp_pend + bmp_hecho), k) != k)
+		bmp_hecho = bmp_total;
+	else
+		bmp_hecho += k;
+	if (bmp_hecho >= bmp_total) {
+		sc(SC_CERRAR, bmp_m, 0, 0);
+		free(bmp_pend);
+		bmp_pend = 0;
+		snprintf(aviso_archivo, sizeof aviso_archivo, "Pantalla guardada.");
+	}
+}
 
 static void captura(void)
 {
@@ -1129,24 +1153,40 @@ static void captura_en(const char *nombre)
 	memcpy(cab + 22, &LZ.al, 4);
 	cab[26] = 1;
 	cab[28] = 24;
+	if (bmp_pend)
+		return;		/* (ya se está escribiendo otra) */
 	m = sc(SC_ABRIR, (u32)ruta, PARA_CREAR, 0);
 	if (ES_ERROR(m))
 		return;
-	fila = (u8 *)malloc(tf);
+	/* (TERMO) entero en la memoria y de una vez (a trozos de 256 K): fila a
+	 * fila, en el Toshiba NB250, INFORME.BMP tardaba 9 s y paraba las lecturas */
+	fila = (u8 *)malloc(total);
 	if (fila) {
-		sc(SC_ESCRIBIR_ARCHIVO, m, (u32)cab, 54);
+		u32 hecho = 0;
+
+		memcpy(fila, cab, 54);
+		memset(fila + 54, 0, total - 54);
 		for (y = LZ.al - 1; y >= 0; y--) {
 			const u32 *p = LZ.p + y * LZ.paso;
+			u8 *f = fila + 54 + (u32)(LZ.al - 1 - y) * tf;
 
-			memset(fila, 0, tf);
 			for (x = 0; x < LZ.an; x++) {
-				fila[x * 3] = (u8)p[x];
-				fila[x * 3 + 1] = (u8)(p[x] >> 8);
-				fila[x * 3 + 2] = (u8)(p[x] >> 16);
+				f[x * 3] = (u8)p[x];
+				f[x * 3 + 1] = (u8)(p[x] >> 8);
+				f[x * 3 + 2] = (u8)(p[x] >> 16);
 			}
-			sc(SC_ESCRIBIR_ARCHIVO, m, (u32)fila, tf);
 		}
-		free(fila);
+		/* se escribe poco a poco, 32 K en cada pulso (bmp_trozo): la
+		 * memoria USB va a 150 K/s y escribirla de una vez paraba 10 s las
+		 * lecturas (el HP Mini y el Toshiba) */
+		(void)hecho;
+		bmp_pend = fila;
+		bmp_total = total;
+		bmp_hecho = 0;
+		bmp_m = m;
+		snprintf(aviso_archivo, sizeof aviso_archivo, "Guardando la pantalla en %s...", ruta);
+		serie("termo: captura en %s (poco a poco)\n", ruta);
+		return;
 	}
 	sc(SC_CERRAR, m, 0, 0);
 	snprintf(aviso_archivo, sizeof aviso_archivo, "Pantalla guardada en %s.", ruta);
@@ -1310,6 +1350,7 @@ static void empieza(void)
 			snprintf(vs[k].nombre, sizeof vs[k].nombre, "%s", S[k].nombre);
 			vs[k].cpu = S[k].clase != CL_ACPI && S[k].clase != CL_GPU;
 			vs[k].solo_carga = 0;
+			vs[k].aproximado = S[k].clase == CL_CPU && cpu.aproximada;
 			vs[k].limite = S[k].limite;
 			vs[k].no_fiable = S[k].no_fiable;
 			S[k].fija = 0;
@@ -1333,6 +1374,7 @@ static void empieza(void)
 			vs[k].limite = S[k].limite;
 			vs[k].no_fiable = S[k].no_fiable;
 			vs[k].solo_carga = S[k].clase == CL_CPU && (S[k].zona & 0x10000);
+			vs[k].aproximado = S[k].clase == CL_CPU && cpu.aproximada;
 		}
 		temperaturas(t);
 		ve_empieza(&VP, ns, vs, t);
@@ -1525,13 +1567,23 @@ static void prueba_segundo(void)
 		}
 		/* (TERMO) un sensor del procesador que en 30 s de carga no se mueve
 		 * ni un grado no está midiendo: «sin lectura fiable» */
-		if (seg == 30)
-			for (k = 0; k < ns && k < VE_MAXS; k++)
-				if (S[k].clase == CL_CPU && VP.n[k] >= 10 && VP.hi[k] - VP.lo[k] < 10 && !S[k].no_fiable) {
-					S[k].no_fiable = 1;
-					VP.s[k].no_fiable = 1;
-					suceso_log("AVISO: «%s» no se ha movido en 30 s de carga (%d,%d °C): no da una lectura fiable de la temperatura", S[k].nombre, VP.lo[k] / 10, VP.lo[k] % 10);
-				}
+		/* (en un Atom, «aproximado», el sensor es lento: el Toshiba NB250
+		 * se quedó en 16 °C los primeros 150 s; entonces se mira a los 3 min) */
+		for (k = 0; k < ns && k < VE_MAXS; k++)
+			if (S[k].clase == CL_CPU && !(S[k].zona & 0x10000) && seg == (cpu.aproximada ? 180 : 30) && VP.n[k] >= 10 && VP.hi[k] - VP.lo[k] < 10 && !S[k].no_fiable) {
+				S[k].no_fiable = VE_NF_QUIETO;
+				VP.s[k].no_fiable = VE_NF_QUIETO;
+				suceso_log("AVISO: «%s» no se ha movido en %d s de carga (%d,%d °C): de momento, sin lectura fiable", S[k].nombre, seg, VP.lo[k] / 10, VP.lo[k] % 10);
+			}
+		/* el que no se movía y ahora sube con la carga (3 °C o más): vuelve a contar */
+		for (k = 0; k < ns && k < VE_MAXS; k++)
+			if (S[k].no_fiable == VE_NF_QUIETO && VP.hi[k] - VP.lo[k] >= 30) {
+				S[k].no_fiable = 0;
+				VP.s[k].no_fiable = 0;
+				VP.s[k].aproximado = 1;
+				suceso_log("«%s» ya se mueve con la carga (de %d,%d a %d,%d °C): vuelve a contar, como medida aproximada", S[k].nombre, VP.lo[k] / 10, VP.lo[k] % 10,
+					   VP.hi[k] / 10, VP.hi[k] % 10);
+			}
 		if (seg >= dura_s)
 			para_carga(0, 0);
 	} else if (fase == F_ENFRIA) {
@@ -1842,6 +1894,7 @@ static void pulso(void)
 		proximo = ahora + jg_hz;
 	t0 = ahora;
 	cuenta_s++;
+	bmp_trozo();		/* (la pantalla que se está guardando: 32 K por segundo) */
 	lee_todo();
 	if (cuenta_s % 2 == 0) {
 		lee_zonas();

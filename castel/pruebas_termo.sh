@@ -86,6 +86,11 @@ termo_anfitrion() {
   if grep -q 'este equipo no da la temperatura del procesador' $B/toshiba.txt; then
     ok "el registro del Toshiba NB250 (el sensor clavado en 6 °C, también en carga): «este equipo no da la temperatura del procesador»"
   else ko "el veredicto del Toshiba NB250: $(head -c 300 $B/toshiba.txt)"; fi
+  $B/lee_log $T/pruebas/toshiba-nb250-lento.log > $B/toshiba2.txt
+  if grep -q 'medida aproximada: la cifra no es de fiar, la subida sí): subió unos 7 °C (de 16,0 °C' $B/toshiba2.txt && grep -q 'Al parar se enfría bien' $B/toshiba2.txt \
+     && ! grep -q 'No se puede juzgar\|fuera de lo posible' $B/toshiba2.txt; then
+    ok "el Toshiba NB250 con el sensor lento (16 °C fijos 150 s y luego a 23): «subió unos 7 °C (medida aproximada); se enfría bien», no «no se puede juzgar»"
+  else ko "el veredicto del Toshiba con el sensor lento: $(head -c 300 $B/toshiba2.txt)"; fi
   if $B/tjmax > $B/tjmax.txt; then ok "la TjMax de los Intel que no la dicen: $(grep -c '^bien' $B/tjmax.txt) procesadores bien (el Atom N455 del HP Mini y del Toshiba, 100 °C; los N270, 90)"
   else ko "la TjMax: $(grep '^mal' $B/tjmax.txt | head -n 2)"; fi
   # el terminal de SSH.BIN

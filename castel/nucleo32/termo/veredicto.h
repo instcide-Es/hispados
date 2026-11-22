@@ -10,12 +10,15 @@
 
 #define VE_NO ((int)0x80000000)
 #define VE_MAXS 14
+#define VE_NF_QUIETO 1		/* no se mueve con la carga */
+#define VE_NF_IMPOSIBLE 2	/* fuera de lo posible, o por encima de su límite en reposo */
 
 struct ve_sensor {
 	char nombre[48];	/* (UTF-8) */
 	int cpu;		/* 1: del procesador (o simulado) */
 	int limite;		/* el suyo, o VE_NO */
-	int no_fiable;		/* lo que da no es creíble: ni para la parada ni para el veredicto */
+	int no_fiable;		/* no cuenta (ni para la parada ni para el veredicto): VE_NF_* */
+	int aproximado;		/* (los Atom) la cifra no es de fiar, la subida sí */
 	int solo_carga;		/* solo da algo mientras se carga (los demás núcleos): no mide el enfriamiento */
 };
 
